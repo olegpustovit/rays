@@ -40,11 +40,11 @@ RAYS_MAX_FRAMES=30 dune exec examples/basic/lisp.exe
 
 The application is built around Rays Lisp. `Sketch`, `Frame` and `Scene` are internal OCaml layers, rather than the first-time user's sketch API. The [language reference](specification/flow.md) explains workspace graphs and references.
 
-## Verification and remaining capture
+## Verification
 
-A native screenshot or runtime capture is still missing from this cleanup. The review host is Linux ARM64, while this editor's native target is Apple Silicon with Metal. Design-kit images and the HTML behavioral prototype are not presented as a running editor demo.
+Native rendering was not tested on the Linux ARM64 review host. This editor targets Apple Silicon with Metal. Design-kit images and the HTML behavioral prototype are not presented as a running editor demo.
 
-The required follow-through is concrete: build on the supported host, run the basic Lisp workspace, capture the real window and record its revision, commands and limits. Do not treat the setup text or a package-metadata check as a native runtime pass.
+To verify native behavior, build on a supported host and run the basic Lisp workspace. The setup text and package-metadata check do not establish a native runtime pass.
 
 ```sh
 dune runtest
