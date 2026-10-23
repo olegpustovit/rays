@@ -17,8 +17,8 @@
 
 (package
  (name rays)
- (synopsis "A modern, functional graphics framework for OCaml")
- (description "A clean, type-safe API for creating interactive graphics applications, games, and generative art in OCaml")
+ (synopsis "Native creative coding with Rays Lisp and a Metal editor")
+ (description "A Lisp workspace language and native Apple-Silicon creative-coding editor using Metal and SDL3, implemented in OCaml")
  (depends
   (ocaml (>= 5.3))
   (dune (>= 3.21))
