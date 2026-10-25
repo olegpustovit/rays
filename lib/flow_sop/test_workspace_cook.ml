@@ -80,8 +80,10 @@ let cook ~domains (graph : Lower.graph) =
         | Ok output -> Some (Result.get_ok (Sop.Payload.geometry output.payload))
         | Error error -> fail (Sop.Diagnostic.error_to_string error))
 
+let slow = Sys.getenv_opt "RAYS_SLOW" = Some "1"
 let fixtures = ["bloom"; "facade"; "garland"; "kit"; "orrery"; "rosette";
   "sunflower"; "tiles"; "tree"; "tunnel"; "variations"; "wave"]
+let fixtures () = if slow then fixtures else ["kit"]
 
 let nodes (graph : Lower.graph) =
   List.length (Sop.Edit_graph.inspect graph.network.geometry)
@@ -293,12 +295,13 @@ let blend_shapes () =
       "(sop/blend_shapes a nil b nil nil c a :weight2 0.5 :weights \"0.2\\n0.3\" :shape_masks \"5\\tother_mask\\tshape\")";
       "(sop/blend_shapes a :shape2 b :shapes (list c a) :weight2 0.5 :weights \"0.2\\n0.3\" :shape_masks \"5\\tother_mask\\tshape\")"]
 
+(* Lowering costs 0.5-1 s per sphere-like node (12 petals: 8 s), so the default loop keeps the
+   checks of the mechanism (switch, skips, the kit fixture at 1 and 3 domains) and RAYS_SLOW=1 adds
+   the per-node parity sections and the other eleven fixtures with their provenance checks. *)
 let run () =
-  blend_shapes ();
-  attribute_composite ();
   switch ();
-  optional_rest ();
   skips ();
+  if slow then (blend_shapes (); attribute_composite (); optional_rest ());
   let cooked = ref 0 in
   List.iter (fun name ->
     let lowered = lower name in
@@ -359,7 +362,8 @@ let run () =
            | Some c -> check (geometry_bytes a = geometry_bytes c)
                (name ^ "/" ^ graph.name ^ " is not deterministic")
            | None -> fail "second lowering lost its root")
-      | _ -> fail "root differs") lowered.graphs) fixtures;
+      | _ -> fail "root differs") lowered.graphs) (fixtures ());
+  if slow then begin
   check (!cooked >= 10) (Printf.sprintf "only %d graphs cooked" !cooked);
   (* Bloom: flower is 12 petals of (uv_sphere, transform, set_color,
      transform), a merge, the heart (uv_sphere, set_color) and the result
@@ -421,5 +425,6 @@ let run () =
   (match Lower.workspace ~extra:Editor_document.Contexts.descriptors ~factories
      (Flow.Syntax.parse "(workspace w (graph g :context sop (sop/nope)))" |> Result.get_ok) with
    | Error _ -> ()
-   | Ok _ -> fail "lowering accepted an unchecked workspace");
+   | Ok _ -> fail "lowering accepted an unchecked workspace")
+  end;
   print_endline "workspace cook tests passed"

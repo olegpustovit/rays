@@ -185,7 +185,7 @@
 
 (rule
  (alias test_workspace_cook)
- (deps (glob_files ../../specification/workspace/cases/*.lisp))
+ (deps (glob_files ../../specification/workspace/cases/*.lisp) (env_var RAYS_SLOW))
  (action (chdir ../../test (run %{exe:test_main.exe} test_workspace_cook))))
 
 (rule

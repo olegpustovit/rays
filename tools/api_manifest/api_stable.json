@@ -2369,6 +2369,7 @@
         "val scope : Pxui_shell.Layout.panel -> Pxui_shell.Layout.panel",
         "val keymap : command list",
         "val keymap3 : command list",
+        "val text_keys : command list",
         "end",
         "module Document : sig",
         "type t",
@@ -2562,7 +2563,7 @@
         "val main : ? imports : ( string * string ) list -> path : string -> digest : string -> catalog : string -> string -> unit",
         "end"
       ],
-      "api_sha256": "3e57f68571cc41b7a34d5b7853e127f2060c1105cc128c00b7a6f910e7c49f14",
+      "api_sha256": "1af1f8c9562e1afa3528f76514dd7be5c6a97093739f8a6aae5da89253323fed",
       "excluded_legacy_symbols": [],
       "library": "rays_editor",
       "module": "Rays_editor",

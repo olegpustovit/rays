@@ -123,6 +123,9 @@ module Private : sig
     val keymap3 : command list
     (** [keymap] plus the 3D view commands ([w] fly, [v] look through). *)
 
+    val text_keys : command list
+    (** The chords the text area handles itself, listed on the key sheet and never in the keymap. *)
+
   end
 
   (** [timeline_frames] (default 240) is the scrub range of the timeline bar,

@@ -175,7 +175,34 @@ let new_graphs () =
     | Ok removed -> check (not (List.mem "draw" (names removed))) "an unread graph stayed"
     | Error m -> failwith ("an unread graph was refused: " ^ m))
 
+(* Every chord the key sheet lists as the text area's own must change the text, selection or caret of a
+   real [Ui.text_area_submit] with the editor's Lisp language: the sheet cannot list a key nothing handles. *)
+let text_keys_are_handled () =
+  let module L = Rays_editor.Private.Leader in
+  let language = Rays_editor.Private.Lisp_text.language Pxui.Theme.default in
+  check (L.text_keys <> []) "no text keys";
+  List.iter (fun (c : _ Editor_core.Command.t) ->
+    let key, mods = match c.trigger with
+      | Some (Editor_core.Keymap.Chord (k, m)) -> k, m | _ -> failwith "text key without a chord" in
+    let ui = Pxui.Ui.create ~font_size:11 () in
+    Fun.protect ~finally:(fun () -> Pxui.Ui.destroy ui) (fun () ->
+      let text = ref "(a (b c))\n(d (e))" and sel = ref (0, 0) and caret = ref 0 and time = ref 0. in
+      let step ?(keys = []) events =
+        time := !time +. 0.5;
+        ignore (Pxui.Ui.frame ui { (Test_editor_input.frame (0., 0.) events 0) with keys } (fun ui ->
+          let t, _ = Pxui.Ui.text_area_submit ui ~at:(0., 0.) ~w:300. ~h:96. ~language
+            ~on_select:(fun r -> sel := r) ~on_caret:(fun c -> caret := c) "area" !text in
+          text := t)) in
+      step [];
+      step [Rays.Event.MousePressed (Rays.Input.LeftButton, (60., 31.));
+        Rays.Event.MouseReleased (Rays.Input.LeftButton, (60., 31.))];
+      let before = !text, !sel, !caret in
+      step ~keys:mods [Rays.Event.KeyPressed key];
+      check (before <> (!text, !sel, !caret))
+        (Printf.sprintf "key sheet lists %s but the text area ignores it" c.id))) L.text_keys
+
 let run () =
+  text_keys_are_handled ();
   let open Editor_core.Guide_context in
   let module L = Rays_editor.Private.Leader in
   List.iter (fun focus ->
