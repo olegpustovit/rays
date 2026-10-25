@@ -3,7 +3,7 @@
  (public_name rays.flow_sop)
  (modules diagnostic_bridge port instance_path curve network value_lane catalog manifest operators attribute_kernel attribute_metadata topology_kernel graph_kernel group_kernel context_kernel function_kernel image_kernel lisp_node encoded_parameters node_sources lower)
  (private_modules diagnostic_bridge function_kernel lisp_node encoded_parameters node_sources attribute_metadata topology_kernel graph_kernel group_kernel context_kernel)
- (libraries flow flow_ir param sop unix))
+ (libraries flow flow_ir lru param sop unix))
 
 (rule
  (targets node_sources.ml)

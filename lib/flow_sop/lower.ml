@@ -156,6 +156,11 @@ let cached_digest (checked : Workspace.t) extra compute =
       let d = compute () in
       Atomic.set digest_cache (List.filteri (fun i _ -> i < 8) ((key, d) :: Atomic.get digest_cache)); d
 
+module Build_cache = Lru.Make (String)
+(* 512 Lisp node body builds (the 16 lowerings of a 30-node workspace fit); every access under the lock. *)
+let build_cache = Build_cache.create 512
+let build_lock = Mutex.create ()
+
 let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) ?(strict_body = false) ?(defer_body_errors = false) ?(kernel_bindings = []) ?(compiled_ids = Instance_path.Map.empty)
     ?(sites = []) ?inputs checked =
   Phase_timer.measure Lower (fun () ->
@@ -620,7 +625,7 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
         | _ -> Some (slot.name,E.List (Array.of_list values))) definition.slots in
       let key = String.sub definition.kind.qualified 4
         (String.length definition.kind.qualified - 4) in
-      let build bindings ~label ~context inputs parameters =
+      let build_body bindings ~label ~context inputs parameters =
         Phase_timer.without (fun () ->
         let make_capture_factories aliases = List.mapi (fun index input ->
           let key = "lisp_capture_" ^ string_of_int index in
@@ -817,6 +822,26 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
           let facts=Sop.Node.{cook_mode;
             elementwise=None;reads=["*"];writes=["*"];topology=Changed;exact} in
           (fun _ -> Error(Diagnostic_bridge.to_sop diagnostic)), dependencies, facts) in
+      (* A top-level body build is a pure function of the declaration, its parameters, inputs and context, so an
+         edit elsewhere in the workspace reuses it. Callable slots, nested lowerings and recorded profiles bypass. *)
+      let build bindings ~label ~context inputs parameters =
+        let uncached () = build_body bindings ~label ~context inputs parameters in
+        if functions<>[] || strict_body || kernel_bindings<>[] || !Private.record then uncached () else
+        match String.concat "\000" [Lazy.force declaration_source; label; string_of_bool reference;
+            Marshal.to_string (Workspace.Paths.elements checked.approx, provenance, bindings, Sop.Context.seed context,
+              Sop.Context.frame context, Int64.bits_of_float (Sop.Context.time context),
+              List.map Sop.Node.id inputs) [];
+            String.concat "\001" (List.map (fun (name, value) ->
+              name ^ "=" ^ Flow.Value.key_of ~residual:(fun _ -> raise Exit) value) parameters)] with
+        | exception Exit -> uncached ()
+        | key ->
+            let cached = Mutex.protect build_lock (fun () -> Build_cache.find_opt build_cache key) in
+            (match cached with
+             | Some (owner, gpu, result) when owner == factories && (match gpu, Flow_ir.Gpu.available () with
+                 | None, None -> true | Some a, Some b -> a == b | _ -> false) -> result
+             | _ -> let result = uncached () in
+                 Mutex.protect build_lock (fun () ->
+                   Build_cache.add build_cache key (factories, Flow_ir.Gpu.available (), result)); result) in
       let category = if definition.category=[] then ["Custom"] else definition.category in
       let construct inputs =
           let next = ref 0 in
