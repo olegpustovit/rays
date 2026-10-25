@@ -814,8 +814,11 @@ let run_frame_key () =
 
 let panes_graph e = let _, _, w, _ = (E3.panes e (frame (0., 0.) [] 0)).graph in w
 
+(* the layout sections need the panels of variations, not its sphere lowerings *)
+let cheap_variations = replace (replace (case "variations") "(sop/uv_sphere :radius 0.06 :segments 8 :rings 4)" "(sop/box)") "(range 4)" "(range 1)"
+
 let run_ops () =
-  let e = editor (case "variations") in
+  let e = editor cheap_variations in
   let ok label op =
     match E3.edit e op with
     | Ok e' -> check (E3.undo_label e' = Some label) ("label " ^ label ^ ": " ^ Option.value ~default:"-" (E3.undo_label e')); e'
@@ -834,20 +837,20 @@ let run_ops () =
    | Error m -> fail m);
   (* split, close, retype *)
   let s = ok "Split panel" (E.Split_panel { node = [ "editor"; "network" ]; axis = `V; ratio = 0.5; kind = None }) in
-  check (Panels.to_string (tree s) = "(h outline (h (v (v graph lisp) lisp) (tile view view view view)))") ("split: " ^ Panels.to_string (tree s));
+  check (Panels.to_string (tree s) = "(h outline (h (v (v graph lisp) lisp) (tile view)))") ("split: " ^ Panels.to_string (tree s));
   check (has (source s) "(ui/split-at \"vertical\" 0.5 network_a network_b)") "the new split";
   let c = ok "Close panel" (E.Close_panel { node = [ "editor"; "network" ] }) in
-  check (Panels.to_string (tree c) = "(h outline (h lisp (tile view view view view)))") ("close: " ^ Panels.to_string (tree c));
+  check (Panels.to_string (tree c) = "(h outline (h lisp (tile view)))") ("close: " ^ Panels.to_string (tree c));
   let t = ok "Retype panel" (E.Set_panel_kind { node = [ "editor"; "network" ]; kind = "list" }) in
-  check (Panels.to_string (tree t) = "(h outline (h (v list lisp) (tile view view view view)))") ("retype: " ^ Panels.to_string (tree t));
+  check (Panels.to_string (tree t) = "(h outline (h (v list lisp) (tile view)))") ("retype: " ^ Panels.to_string (tree t));
   let sheet = ok "Retype panel" (E.Set_panel_kind { node = [ "editor"; "network" ]; kind = "spreadsheet" }) in
-  check (Panels.to_string (tree sheet) = "(h outline (h (v spreadsheet lisp) (tile view view view view)))") "retype spreadsheet";
+  check (Panels.to_string (tree sheet) = "(h outline (h (v spreadsheet lisp) (tile view)))") "retype spreadsheet";
   let saved = Doc.to_text (E3.workspace sheet) in
   check (Doc.to_text (of_text saved) = saved) "retyped spreadsheet did not round trip";
   let v = ok "Retype panel" (E.Set_panel_kind { node = [ "editor"; "outline" ]; kind = "viewport" }) in
   check (has (source v) "outline (ui/viewport (ref scene))") "a viewport is over the first scene graph";
   let docked = ok "Dock panel" (E.Dock_panel {node = ["editor"; "network"]; target = ["editor"; "outline"]; side = `Right}) in
-  check (Panels.to_string (tree docked) = "(h (h outline graph) (h lisp (tile view view view view)))")
+  check (Panels.to_string (tree docked) = "(h (h outline graph) (h lisp (tile view)))")
     ("docking duplicated a panel or left a gap: " ^ Panels.to_string (tree docked));
   check (has (source docked) "(ui/split-at \"horizontal\" 0.5 outline network)")
     "docking was not reflected in the editor Lisp";
@@ -896,7 +899,7 @@ let run_ops () =
 
 (* an editor graph that hides everything is valid; Restore layout brings the default back *)
 let run_restore () =
-  let e = ref (editor (case "variations")) and count = ref 0 in
+  let e = ref (editor cheap_variations) and count = ref 0 in
   let step ?(mouse = (450., 300.)) events = incr count; e := E3.update !e (frame mouse events !count) in
   step []; step [];
   check (panes_graph !e > 0) "the shell starts with a graph panel";
@@ -2003,7 +2006,7 @@ let run_panels () =
   click (550., 60.);
   step (550., 60.) [ Event.KeyPressed (Input.KeyChar 's') ]; step (550., 60.) [ Event.TextInput "g" ]; step (550., 60.) [];
   (* the focused row is a node id, which depends on how many nodes were allocated before it *)
-  let any_id line = List.exists (fun id -> has (panels ()) (line (string_of_int id))) (List.init 65536 Fun.id) in
+  let any_id line = let text = panels () in List.exists (fun id -> has text (line (string_of_int id))) (List.init 65536 Fun.id) in
   check (any_id (fun id -> "list la*: focus " ^ id ^ ", 0 folded, filter \"g\"; list lb: focus -, 0 folded, filter -"))
     ("the first list's focus row and filter: " ^ panels ());
   step (550., 60.) [ Event.KeyPressed Input.Enter ]; step (550., 60.) [];
@@ -2520,10 +2523,11 @@ let run () =
   let budget = if Sys.getenv_opt "RAYS_SLOW" = Some "1" then infinity
     else Option.value ~default:45. (Option.bind (Sys.getenv_opt "RAYS_SUITE_BUDGET") float_of_string_opt) in
   let start = Unix.gettimeofday () and skipped = ref 0 in
-  List.iter (fun section -> if Unix.gettimeofday () -. start > budget then incr skipped else section ())
-    [ run_wire_gestures; run_ops;
-      run_array_capacity_menu; run_lisp_inspector; run_context_menus; run_expression_chip; run_nested_inspector; run_op_inspector; run_spreadsheet; run_panels; run_studio; run_copy_lisp; run_hide_and_order; run_root_section; run_layouts; run_compose; run_ref_picker; run_result_view; run_loop_view; run_geometry_view; run_panel_states; run_camera_zoom; run_cameras; run_lowering; run_panel_keys; run_unbound_panels; run_values; run_duplicate_and_view; run_movers; run_frame_key; run_loop_copies; run_loop_expression; run_editor; run_restore; run_views; run_instances; run_host_scene_edit; run_panel_chain;
-      run_undo_under_pane; run_atomic_frame; run_undo_and_input; run_carry_reaches_no_history
+  let only = Sys.getenv_opt "RAYS_SECTION" in
+  List.iter (fun (name, section) -> if only <> None && only <> Some name then () else if Unix.gettimeofday () -. start > budget then incr skipped else (let t = Unix.gettimeofday () in section (); Printf.printf "section %s %.1f s\n%!" name (Unix.gettimeofday () -. t)))
+    [ "run_wire_gestures", run_wire_gestures; "run_ops", run_ops;
+      "run_array_capacity_menu", run_array_capacity_menu; "run_lisp_inspector", run_lisp_inspector; "run_context_menus", run_context_menus; "run_expression_chip", run_expression_chip; "run_nested_inspector", run_nested_inspector; "run_op_inspector", run_op_inspector; "run_spreadsheet", run_spreadsheet; "run_panels", run_panels; "run_studio", run_studio; "run_copy_lisp", run_copy_lisp; "run_hide_and_order", run_hide_and_order; "run_root_section", run_root_section; "run_layouts", run_layouts; "run_compose", run_compose; "run_ref_picker", run_ref_picker; "run_result_view", run_result_view; "run_loop_view", run_loop_view; "run_geometry_view", run_geometry_view; "run_panel_states", run_panel_states; "run_camera_zoom", run_camera_zoom; "run_cameras", run_cameras; "run_lowering", run_lowering; "run_panel_keys", run_panel_keys; "run_unbound_panels", run_unbound_panels; "run_values", run_values; "run_duplicate_and_view", run_duplicate_and_view; "run_movers", run_movers; "run_frame_key", run_frame_key; "run_loop_copies", run_loop_copies; "run_loop_expression", run_loop_expression; "run_editor", run_editor; "run_restore", run_restore; "run_views", run_views; "run_instances", run_instances; "run_host_scene_edit", run_host_scene_edit; "run_panel_chain", run_panel_chain;
+      "run_undo_under_pane", run_undo_under_pane; "run_atomic_frame", run_atomic_frame; "run_undo_and_input", run_undo_and_input; "run_carry_reaches_no_history", run_carry_reaches_no_history
     ];
   if !skipped > 0 then Printf.printf "workspace shell: %d sections skipped after %.0f s (RAYS_SLOW=1 runs all)\n" !skipped budget
 

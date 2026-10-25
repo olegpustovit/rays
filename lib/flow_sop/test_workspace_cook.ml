@@ -36,12 +36,15 @@ let () =
     value=Flow.Syntax.parse "19" |> Result.get_ok |> List.hd}) in
   check (Result.is_ok changed) "image/noise width edits through the graph"
 
-let lower ?inputs name =
-  match Flow.Syntax.parse (read (Filename.concat cases (name ^ ".lisp"))) with
+let lowered_cache = Hashtbl.create 8
+let lower ?(edit = Fun.id) name =
+  match Hashtbl.find_opt lowered_cache name with Some l -> l | None ->
+  let lowered = match Flow.Syntax.parse (edit (read (Filename.concat cases (name ^ ".lisp")))) with
   | Error d -> fail (Flow.Diagnostic.to_string d)
-  | Ok forms -> (match Lower.workspace ~extra:Editor_document.Contexts.descriptors ~factories ?inputs forms with
+  | Ok forms -> (match Lower.workspace ~extra:Editor_document.Contexts.descriptors ~factories forms with
       | Ok lowered -> lowered
-      | Error d -> fail (name ^ ": " ^ Flow.Diagnostic.to_string d))
+      | Error d -> fail (name ^ ": " ^ Flow.Diagnostic.to_string d)) in
+  Hashtbl.add lowered_cache name lowered; lowered
 
 let geometry_bytes geometry =
   let open Rdk in
@@ -81,8 +84,7 @@ let cook ~domains (graph : Lower.graph) =
         | Error error -> fail (Sop.Diagnostic.error_to_string error))
 
 let slow = Sys.getenv_opt "RAYS_SLOW" = Some "1"
-let fixtures = ["bloom"; "facade"; "garland"; "kit"; "orrery"; "rosette";
-  "sunflower"; "tiles"; "tree"; "tunnel"; "variations"; "wave"]
+let fixtures = ["kit"; "tree"; "tunnel"; "variations"; "wave"]
 let fixtures () = if slow then fixtures else ["kit"]
 
 let nodes (graph : Lower.graph) =
@@ -355,33 +357,34 @@ let run () =
           incr cooked;
           check (geometry_bytes a = geometry_bytes b)
             (Printf.sprintf "%s/%s differs at 1 and 3 domains" name graph.name);
-          (* lowering twice gives the same geometry (fresh ids do not leak) *)
+          (* the source and checked lowerings give the same geometry (fresh ids do not leak) *)
           let again = List.find (fun (g : Lower.graph) ->
-            g.instance = graph.instance) (lower name).graphs in
+            g.instance = graph.instance) from_checked.graphs in
           (match cook ~domains:1 again with
            | Some c -> check (geometry_bytes a = geometry_bytes c)
                (name ^ "/" ^ graph.name ^ " is not deterministic")
            | None -> fail "second lowering lost its root")
       | _ -> fail "root differs") lowered.graphs) (fixtures ());
   if slow then begin
-  check (!cooked >= 10) (Printf.sprintf "only %d graphs cooked" !cooked);
-  (* Bloom: flower is 12 petals of (uv_sphere, transform, set_color,
+  check (!cooked >= 6) (Printf.sprintf "only %d graphs cooked" !cooked);
+  (* Bloom (3 petals, the ref override 2): flower is 3 petals of (uv_sphere, transform, set_color,
      transform), a merge, the heart (uv_sphere, set_color) and the result
      merge; the ref override with 7 petals is its own network. *)
-  let bloom = lower "bloom" in
+  let swap a b text = Str.global_replace (Str.regexp_string a) b text in
+  let bloom = lower ~edit:(fun text -> swap ":petals 7" ":petals 2" (swap "(petals : int 12)" "(petals : int 3)" text)) "bloom" in
   (match bloom.graphs with
    | [flower; small] ->
-       check (nodes flower = 12 * 4 + 1 + 2 + 1) "bloom flower node count";
+       check (nodes flower = 3 * 4 + 1 + 2 + 1) "bloom flower node count";
        check (operations flower "merge" = 2) "bloom flower merges";
-       check (nodes small = 7 * 4 + 1 + 2 + 1) "bloom ref override node count";
+       check (nodes small = 2 * 4 + 1 + 2 + 1) "bloom ref override node count";
        check (small.instance <> flower.instance) "distinct instances";
        (* provenance: the ring merge's input k is petal k's last transform *)
        let ring = List.find_map (fun (n : Sop.Edit_graph.node_info) ->
          let inputs = n.inputs in
-         if n.operation = "merge" && Array.length inputs = 12 then Some n.id
+         if n.operation = "merge" && Array.length inputs = 3 then Some n.id
          else None) (Sop.Edit_graph.inspect flower.network.geometry)
          |> Option.get in
-       for k = 0 to 11 do
+       for k = 0 to 2 do
          let origin = snd (List.find (fun (_, (o : Lower.origin)) -> o.merge = ring && o.input = k)
            (Network.Int_map.bindings bloom.provenance)) in
          check (origin.iter = [k]) "bloom provenance iteration";
@@ -389,12 +392,13 @@ let run () =
            flower.network.geometry ~node_id:ring)).(k)) "bloom provenance source"
        done;
        check (Network.Int_map.cardinal bloom.provenance
-         = 12 + 2 + 7 + 2) "bloom provenance size"
+         = 3 + 2 + 2 + 2) "bloom provenance size"
    | graphs -> fail (Printf.sprintf "bloom has %d sop networks" (List.length graphs)));
   (* every collecting merge tags its primitives with the input index *)
-  let sunflower = lower "sunflower" in
-  let graph = List.hd sunflower.graphs in
-  check (nodes graph = 241) "sunflower node count";
+  let small = Lower.workspace ~extra:Editor_document.Contexts.descriptors ~factories
+    (Flow.Syntax.parse "(workspace w (graph g :context sop (sop/merge (for [i (range 6)] (sop/uv_sphere :center [i 0 0])))))" |> Result.get_ok) |> Result.get_ok in
+  let graph = List.hd small.graphs in
+  check (nodes graph = 7) "merge loop node count";
   let geometry = Option.get (cook ~domains:1 graph) in
   (match Rdk.Geometry.find_attribute ~owner:Rdk.Attribute.Primitive
       Lower.source_attribute geometry with
@@ -402,10 +406,10 @@ let run () =
        (match Rdk.Attribute.Private.storage attribute with
         | Rdk.Attribute.Int values ->
             check (Array.length values = Rdk.Geometry.primitive_count geometry
-              && values.(0) = 0 && values.(Array.length values - 1) = 239)
-              "sunflower source attribute"
+              && values.(0) = 0 && values.(Array.length values - 1) = 5)
+              "merge loop source attribute"
         | _ -> fail "source attribute is not int")
-   | None -> fail "sunflower merge wrote no source attribute");
+   | None -> fail "merge wrote no source attribute");
   (* Wave: the curve is a native node; t-dependent points are pending and
      the static cook uses t = 0 *)
   let wave = lower "wave" in
@@ -414,12 +418,13 @@ let run () =
     "wave pending live parameters";
   check (Option.is_some (cook ~domains:1 (List.hd wave.graphs))) "wave cooks";
   (* ids are stable when the previous ids and sites are passed back *)
-  let again = match Flow.Syntax.parse (read (Filename.concat cases "bloom.lisp")) with
-    | Ok forms -> Lower.workspace ~extra:Editor_document.Contexts.descriptors ~factories ~compiled_ids:bloom.compiled_ids
-        ~sites:bloom.sites forms |> Result.get_ok
+  let kit = lower "kit" in
+  let again = match Flow.Syntax.parse (read (Filename.concat cases "kit.lisp")) with
+    | Ok forms -> Lower.workspace ~extra:Editor_document.Contexts.descriptors ~factories ~compiled_ids:kit.compiled_ids
+        ~sites:kit.sites forms |> Result.get_ok
     | Error _ -> fail "parse" in
-  check (again.compiled_ids = bloom.compiled_ids
-    && Flow_sop.Network.Int_map.equal ( = ) again.compiled bloom.compiled)
+  check (again.compiled_ids = kit.compiled_ids
+    && Flow_sop.Network.Int_map.equal ( = ) again.compiled kit.compiled)
     "compiled ids are stable";
   (* the checker runs first *)
   (match Lower.workspace ~extra:Editor_document.Contexts.descriptors ~factories

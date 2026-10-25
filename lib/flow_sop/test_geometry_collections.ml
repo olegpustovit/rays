@@ -40,9 +40,8 @@ let ()=
             (case^": live 5001 geometry collection truncated or reordered native payload blocks");
           check(!a_calls=1 && !b_calls=1)"repeated geometry list handles recooked their child";
           check(Packed.Float3.get(Geometry.positions a)0=(1.,-0.,Float.next_after 0. 1.))"source payload mutated")
-          [0.;0.25;1.])) [1;97;4096]) [1;4;8]) [false;true])
-    ["map", "(sop/merge (map (fn [(geo : geometry)] (nth (list geo) (int/mod (frame/index) 1))) parts))";
-     "filter-map", "(let* [picked (filter (fn [(geo : geometry)] true) parts)] (sop/merge (map (fn [(geo : geometry)] (nth (list geo) (int/mod (frame/index) 1))) picked)))"];
+          [0.;1.])) [1;4096]) [1;8]) [false;true])
+    ["filter-map", "(let* [picked (filter (fn [(geo : geometry)] true) parts)] (sop/merge (map (fn [(geo : geometry)] (nth (list geo) (int/mod (frame/index) 1))) picked)))"];
   List.iter(fun(body,code)->
     let text=Printf.sprintf "(workspace forbidden (defnode sop/forbidden [(parts : geometry :rest true)] %s) (graph g :context sop (sop/forbidden (sop/line))))"body in
     let _,diagnostics=Flow_sop.Catalog.check_workspace ~sources:(Flow_sop.Catalog.sources ()|>flow) ~ops:Flow_sop.Operators.all

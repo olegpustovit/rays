@@ -171,7 +171,7 @@
 (executable
  (name test_main)
  (modules test_main test_projection test_workspace_edit test_workspace_cook test_workspace_zone)
- (libraries flow flow_sop flow_graph editor_document sop_catalog sop rdk unix lisp_sop))
+ (libraries flow flow_sop flow_graph editor_document sop_catalog sop rdk unix str lisp_sop))
 
 (rule
  (alias test_projection)

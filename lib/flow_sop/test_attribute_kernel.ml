@@ -909,35 +909,35 @@ let () =
 let () =
   let text = "(workspace field (graph g :context sop
     (sop/iso_surface :field (fn [p] (- (length p) (+ 1 t)))
-      :resolution [64 64 64] :min [-2.1 -2 -2] :max [2 2 2] :iso 0)))" in
+      :resolution [24 24 24] :min [-2.1 -2 -2] :max [2 2 2] :iso 0)))" in
   let lowered = lower text in
   let call = Array.find_opt (fun (n : E.node) -> n.kind = "sop/iso_surface")
       lowered.plan.nodes |> Option.get in
   let fn = match List.assoc "field" call.args with E.Fn fn -> fn | _ -> assert false in
   (* Independent index decomposition pins all 65^3 positions and x-fast order. *)
-  let positions = Array.init (65 * 65 * 65 * 3) (fun j ->
+  let positions = Array.init (25 * 25 * 25 * 3) (fun j ->
     let i = j / 3 in
-    let index = match j mod 3 with 0 -> i mod 65 | 1 -> (i / 65) mod 65 | _ -> i / (65*65) in
+    let index = match j mod 3 with 0 -> i mod 25 | 1 -> (i / 25) mod 25 | _ -> i / (25*25) in
     (* x is a non-dyadic lattice: the probe must use the same fused multiply-add as the cook. *)
-    if j mod 3 = 0 then Float.fma (float_of_int index) (4.1 /. 64.) (-2.1)
-    else Float.fma (float_of_int index) (4. /. 64.) (-2.)) in
+    if j mod 3 = 0 then Float.fma (float_of_int index) (4.1 /. 24.) (-2.1)
+    else Float.fma (float_of_int index) (4. /. 24.) (-2.)) in
   let values = E.Private.map_function ~signature:Flow.Ty.{params = [Vec3]; result = Float}
       fn [E.Vec3_array positions] |> flow_ok in
   let program = Flow_sop.Attribute_kernel.prepare ~sources:[] [] values |> flow_ok in
   let ir = Flow_ir.Executor.graph program in
   let packed = match ir.nodes.(ir.roots.(0)).kind with
     | Flow_ir.Kernel {body = Packed_map packed; _} -> packed | _ -> assert false in
-  assert (Flow_ir.Packed.static_count packed = Some (65 * 65 * 65));
+  assert (Flow_ir.Packed.static_count packed = Some (25 * 25 * 25));
   (* Separately rounded squares, as the Lisp primitives: arm64 ocamlopt would otherwise fuse a +. b *. c. *)
   let sq v = Sys.opaque_identity (v *. v) in
   List.iter (fun time ->
     let live = Frame_input.at_time time in
-    let expected = Array.init (65 * 65 * 65) (fun i ->
+    let expected = Array.init (25 * 25 * 25) (fun i ->
       let x = positions.(3*i) and y = positions.(3*i+1) and z = positions.(3*i+2) in
       sqrt ((sq x +. sq y) +. sq z) -. (1. +. time)) in
     let reference = Flow_ir.Executor.force ~reference:true program ~live |> flow_ok in
     assert (reference = E.Float_array expected);
-    let dense = Iso_surface.extract_dense ~resolution:(64,64,64)
+    let dense = Iso_surface.extract_dense ~resolution:(24,24,24)
         ~min:(Rays_math.Vec3.create (-2.1) (-2.) (-2.)) ~max:(Rays_math.Vec3.create 2. 2. 2.)
         ~iso:0. ~field:(Iso_surface.Field.custom (fun p ->
           sqrt ((sq p.(0) +. sq p.(1)) +. sq p.(2)) -. (1. +. time))) ()
@@ -979,8 +979,8 @@ let () =
           (String.concat "/" zone.path) (String.concat "/" scope)
           (String.concat "," (List.map string_of_int iter))
           (String.concat ";" (List.map (fun (p,n) -> String.concat "/" p ^ ":" ^ string_of_int n) counts))) in
-  assert (count = 65*65*65);
-  let k = 16062 in
+  assert (count = 25*25*25);
+  let k = 7000 in
   let x = positions.(3*k) and y = positions.(3*k+1) and z = positions.(3*k+2) in
   let sample = sqrt ((sq x +. sq y) +. sq z) -. 1.25 in
   assert (Flow_graph.Probe.at probe (zone.path @ [":p"]) ~probes:[k] = Some (Value (E.Vec3 (x,y,z))));

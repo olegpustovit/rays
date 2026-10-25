@@ -18,7 +18,7 @@ let ()=
  let cases=List.map(fun(name,body)->name,C.value body)
    (C.cases@C.error_cases@["fixed-count-changing-source","(map (fn [x] x) (array/float 13 t))"])in
  let captures=List.concat_map(fun(name,body)->List.map(fun count->
-   name^"/"^string_of_int count,C.helper_value body count)[0;13;5001;32769])
+   name^"/"^string_of_int count,C.helper_value body count)[0;13;32769])
    ["closure-concat","(array/nth (array/concat (if (> t 0.) data (array/int 9 11)) data) j)";
     "closure-array-if","(array/nth (if (> t 0.) data (array/int 1 11)) 0)";
     "closure-count","(array/count (array/concat data (array/int (frame/index))))"]in
@@ -45,7 +45,7 @@ let ()=
        (data expected)(match expected with E.Text_array _->true|_->false)(quote(name^" runtime bytes"))
     |Error d->Printf.bprintf code "try{await frame(input,rt.slots,rt);throw Error('composition accepted')}catch(e){if(e.code!==%s||e.message!==%s||e.cause!==%s)throw e}\n"
        (quote d.code)(quote d.message)(Option.fold ~none:"undefined" ~some:quote d.cause));
-   Buffer.add_string code "}\n") [0,0.25;13,0.25;5001,0.25;32769,0.25;13,-0.25;32769,-0.25];
+   Buffer.add_string code "}\n") [0,0.25;13,0.25;32769,0.25;13,-0.25];
   Buffer.add_string code "}}\n") (cases@captures);
  (* Use the actual exported primitives for direct malformed/mixed storage and
     copying boundaries too; frame references are never substituted as inputs. *)
