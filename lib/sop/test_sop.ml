@@ -1178,6 +1178,18 @@ let test_local_subdivide_contract () =
   let after_curve_hit = Session.stats evaluator in
   check (after_curve_hit.hits > before_curve_hit.hits)
     "procedural polygon-curve Subdivide did not cache";
+  let missing_hole = Lisp_sop.node ~with_:["base", (Lisp_sop.snapshot (base))] {|(sop/subdivide
+   (sop/ext_base)
+   :crease_weight_mode "Auto"
+   :face_varying_interpolation "All"
+   :boundary_interpolation "Edge only"
+   :remove_holes true
+   :generate_resulting_creases true
+   :hole_group "missing")|} in
+  (match Session.cook evaluator ~context:current missing_hole with
+   | Error error -> check (error.code = "missing_group")
+       "procedural Subdivide missing hole-group diagnostic"
+   | Ok _ -> fail "procedural Subdivide accepted a missing hole group");
   Session.close evaluator
 
 let test_edge_divide_contract () =
