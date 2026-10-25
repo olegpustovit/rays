@@ -152,8 +152,8 @@ and fix it in the same change that made it worse.
   per-action times with `dune trace cat | jq` (or the `test_workspace_shell` section lines) and find the
   slowest ones before you finish.
 - Budgets: a focused alias finishes in under 30 s warm; one test section under 10 s. The
-  `test_workspace_shell` runner skips sections after `RAYS_SUITE_BUDGET` (45 s default) and prints the
-  skipped count; run it with `RAYS_SUITE_BUDGET=900` only for the final check, in the background.
+  `test_workspace_shell` runner leaves its listed slow sections (`slow` in the file) to `RAYS_SLOW=1`; run them
+  only for the final check, in the background.
 - A test over budget gets reworked in this order: shrink the fixture (fewer frames, a smaller graph, no
   footer probes); share one setup between its checks; replace a UI-driven path with a direct call to the
   function under test; split the slow exhaustive part into `qualification-scale` or `RAYS_SLOW=1`

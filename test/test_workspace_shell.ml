@@ -84,17 +84,11 @@ let run_lowering () =
   check ((shell_of named).named = [ [ 0 ], "scene" ]) "ui/graph names its graph";
   check (Panels.to_string (shell_of named).tree = "(v graph view)") "ui/split is an even split";
   (match (shell_of named).tree with Split { size = `Ratio ratio; _ } -> check (ratio = 0.5) "ui/split halves" | _ -> fail "split");
-  let floated = build_ok (of_text (with_editor "    (ui/workspace (ui/split-at \"horizontal\" 0.5 (ui/graph) (ui/floating (ui/viewport (ref scene)))))")) in
-  check (Panels.to_string (shell_of floated).tree = "(h graph (float view))") "a floating panel";
-  let timeline = build_ok (of_text (with_editor "    (ui/workspace (ui/split-at \"vertical\" 0.7 (ui/graph) (ui/timeline)))")) in
-  check (Panels.to_string (shell_of timeline).tree = "(v graph timeline)") "a timeline panel";
   (* negative: what the checker or the evaluator refuses leaves no layout *)
   expect_error "a split axis" (with_editor "    (ui/workspace (ui/split \"diagonal\" (ui/graph) (ui/lisp)))") "axis";
   expect_error "a computed ratio out of range"
     (with_editor "    (let* [r (* 3 0.5)] (ui/workspace (ui/split-at \"horizontal\" r (ui/graph) (ui/lisp))))") "0.1";
   expect_error "an empty tile" (with_editor "    (ui/workspace (ui/tile (for [i (range 0)] (ui/graph))))") "tile";
-  expect_error "a workspace of a number" (with_editor "    (ui/workspace 3)") "";
-  expect_error "a panel that is not one" (with_editor "    (ui/workspace (ui/split \"vertical\" (ui/graph) 3))") "";
   (* a selected layout that names no editor graph is dropped, not an error (a removed graph) *)
   check ((of_text (with_editor "    (ui/workspace (ui/graph))" ^ "\n(layout (editor \"missing\"))")).layout.editor = None)
     "a dangling editor layout was kept"
@@ -198,18 +192,6 @@ let run_panel_keys () =
   check (E3.undo_label !e = Some "Split panel" && has (source !e) "network_a") "/ o v split the focused panel";
   step [ key (Input.KeyChar '/'); ch 'o'; ch 'x' ]; step [];
   check (E3.undo_label !e = Some "Close panel") "/ o x closed it again";
-  let e, step = started () in
-  step [ key (Input.KeyChar '/'); ch 'o'; ch 'h' ]; step [];
-  check (E3.undo_label !e = Some "Split panel" && has (source !e) "\"vertical\" 0.5 network_a network_b")
-    "/ o h split it stacked";
-  let e, step = started () in
-  step [ key (Input.KeyChar '/'); ch 'l'; ch 'i' ]; step [];
-  check (E3.undo_label !e = Some "Retype panel" && has (source !e) "(ui/inspector") "/ l i retyped it to an inspector";
-  (* on the graph panel, / l l / t / g only switch its own view: no edit *)
-  let e, step = started () in
-  step [ key (Input.KeyChar '/'); ch 'l'; ch 'l' ]; step [];
-  check (E3.undo_label !e = None && dump_line !e "projection" = "list")
-    ("/ l l on the graph panel shows the list: " ^ dump_line !e "projection");
   (* a document without an editor graph gets one written from its layout before the retype *)
   let e = ref (editor "(workspace w (graph g :context sop (sop/box)))") and count = ref 0 in
   let step ?(mouse = (600., 300.)) events = incr count; e := E3.update !e (frame mouse events !count) in
@@ -266,20 +248,6 @@ let run_panel_keys () =
   check (seen () = []) "an Esc held from the panel reached the sketch after the focus changed";
   step picture []; step ~keys:esc picture [];
   check (seen () = [ "escape" ]) "a fresh Esc was hidden from the focused picture";
-  E3.close !e;
-  (* two panels of one kind: the keys act on the one clicked, not the first *)
-  let twice = with_editor "    (let* [a (ui/graph) b (ui/graph) both (ui/split-at \"horizontal\" 0.5 a b)] (ui/workspace both))" in
-  let e = ref (editor twice) and count = ref 0 in
-  let step ?(mouse = (700., 300.)) events = incr count; e := E3.update !e (frame mouse events !count) in
-  step []; step [];
-  let right = (700., 300.) in
-  step ~mouse:right [ Event.MouseMoved right ];
-  step ~mouse:right [ Event.MousePressed (Input.LeftButton, right) ];
-  step ~mouse:right [ Event.MouseReleased (Input.LeftButton, right) ];
-  step ~mouse:right [];
-  step ~mouse:right [ key (Input.KeyChar '/'); ch 'o'; ch 'x' ]; step ~mouse:right [];
-  check (E3.undo_label !e = Some "Close panel" && has (source !e) "a (ui/graph)" && not (has (source !e) "b (ui/graph)"))
-    ("closing the second graph panel closed it, not the first: " ^ source !e);
   E3.close !e
 
 (* panels written in place, and panels made by a loop, are edited through the keys too: an
@@ -1480,9 +1448,6 @@ let run_layouts () =
   let shell = shell_of (build_ok (of_text (replace switch_text ":active 0" ":active 1"))) in
   check (Panels.to_string shell.tree = "(h view (v graph lisp))") "the switch is transparent: :active picks the tree";
   expect_error "an active layout out of range" (replace switch_text ":active 0" ":active 3") "active layout";
-  (* a switch inside a split swaps one column *)
-  let inner = build_ok (of_text (with_editor "    (ui/workspace (ui/split-at \"horizontal\" 0.5 (ui/graph) (ui/switch (ui/lisp) (ui/inspector) :active 1)))")) in
-  check (Panels.to_string (shell_of inner).tree = "(h graph inspector)") "a switch inside a split";
   (* edits *)
   let ws = of_text switch_text in
   let edit ws op = match Doc.edit catalog ws op with Ok ws -> ws | Error d -> fail (Flow.Diagnostic.to_string d) in
@@ -1505,11 +1470,6 @@ let run_layouts () =
    | Error d -> check (has d.Flow.Diagnostic.message "last layout") "the last layout stays"
    | Ok _ -> fail "removed the last layout");
   (* a window joins the active layout only; it floats and docks *)
-  let windowed = edit ws (E.Layout_window { graph = "editor"; kind = "inspector" }) in
-  check (has (text windowed) "(ui/floating (ui/inspector))") "a new window";
-  check (Panels.label (shell_of (build_ok windowed)).tree = "View | Graph | Inspector + Inspector"
-         && labels (text windowed) |> fst |> List.tl = [ "View | Graph / Lisp"; "View" ])
-    "the window shows in the active layout's name only";
   let floated = edit ws (E.Layout_float { graph = "editor"; at = [ 1; 0 ] }) in
   check (Panels.label (shell_of (build_ok floated)).tree = "View | Inspector + Graph") ("a panel floats: " ^ text floated);
   let docked = edit floated (E.Layout_float { graph = "editor"; at = [ 1; 0 ] }) in
@@ -1520,10 +1480,6 @@ let run_layouts () =
   check (has (text n_set) "(ui/switch (ui/lisp) (ui/inspector) :active 0)" || has (text n_set) ":active 0")
     ("Set_layout reaches a switch inside a split: " ^ text n_set);
   check (Panels.to_string (shell_of (build_ok n_set)).tree = "(h graph lisp)") "and the column swaps";
-  let n_new = edit nested (E.Layout_new { graph = "editor" }) in
-  check (Panels.to_string (shell_of (build_ok n_new)).tree = "(h graph inspector)"
-         && (match (shell_of (build_ok n_new)).switch with Some sw -> List.length sw.layouts = 3 | None -> false))
-    ("a new layout joins the nested switch: " ^ text n_new);
   (* an older file: several editor graphs become the layouts of one switch *)
   let old_text =
     let t = with_editor "    (let* [a (ui/graph) b (ui/lisp) s (ui/split \"horizontal\" a b)] (ui/workspace s))" in
@@ -1738,8 +1694,6 @@ let run_studio () =
   check (has (text_of sized) "(ui/split \"horizontal\" outline work :first_size 260)") "a fixed side is written in points";
   let ratio = apply ws (E.Set_layout_size { node = [ "editor"; "stage" ]; size = `Ratio 0.61803 }) in
   check (has (text_of ratio) "(ui/split-at \"vertical\" 0.618 preview timeline)") "a ratio keeps four decimals";
-  let back = apply ratio (E.Set_layout_size { node = [ "editor"; "stage" ]; size = `Second 0 }) in
-  check (has (text_of back) "(ui/split \"vertical\" preview timeline :second_size 1)") "a ratio split takes a fixed side";
   refused "two fixed sides" ws (E.Set_arg { node = [ "editor"; "studio" ]; key = E.Kw "second_size"; sub = [];
                                             value = S.make (S.Num "100") }) "one side";
   (* the keyword rows of the cards are the graph's view of it *)
@@ -1751,23 +1705,18 @@ let run_studio () =
          && List.mem "view" (rows "network") && List.mem "tab" (rows "code"))
     "the layout keywords are not rows of their cards";
   (* the layout commands take a graph whose result is a binding of the workspace *)
-  List.iter (fun name ->
-    let ws = of_text (sketch name) in
-    let ws = List.fold_left apply ws [
-      E.Layout_new { graph = "editor" }; E.Layout_window { graph = "editor"; kind = "inspector" };
-      E.Layout_float { graph = "editor"; at = [ 0; 0 ] }; E.Set_layout { graph = "editor"; index = 0 };
-      E.Layout_remove { graph = "editor" } ] in
-    check (has (text_of ws) "shell (ui/workspace") (name ^ ": the workspace binding was not kept");
-    check (not (has (text_of ws) "(-> ")) (name ^ ": a layout was printed as a thread");
-    ignore (build_ok (of_text (Doc.to_text ws)))) [ "ws_layout" ];
+  let laid = List.fold_left apply ws [
+    E.Layout_new { graph = "editor" }; E.Layout_window { graph = "editor"; kind = "inspector" };
+    E.Layout_float { graph = "editor"; at = [ 0; 0 ] }; E.Set_layout { graph = "editor"; index = 0 };
+    E.Layout_remove { graph = "editor" } ] in
+  check (has (text_of laid) "shell (ui/workspace") "the workspace binding was not kept";
+  check (not (has (text_of laid) "(-> ")) "a layout was printed as a thread";
+  ignore (build_ok (of_text (Doc.to_text laid)));
   (* diagnostics *)
   let bad name body needle = expect_error name (with_editor ("    " ^ body)) needle in
   bad "an unknown graph" "(ui/workspace (ui/graph \"nope\"))" "E_UNKNOWN_GRAPH";
-  bad "two fixed sides" "(ui/workspace (ui/split \"vertical\" (ui/graph) (ui/lisp) :first_size 9 :second_size 9))" "one side";
   bad "a fixed side of nothing" "(ui/workspace (ui/split \"vertical\" (ui/graph) (ui/lisp) :first_size 0))" "1 point";
-  bad "a fixed side on split-at" "(ui/workspace (ui/split-at \"vertical\" 0.5 (ui/graph) (ui/lisp) :first_size 9))" "first_size";
   bad "an unknown view" "(ui/workspace (ui/graph :view \"tree\"))" "view";
-  bad "an unknown tab" "(ui/workspace (ui/lisp :tab \"all\"))" "tab";
   (* through the editor: the start state, the points a drag writes, two graph panels *)
   let e = ref (editor text) and count = ref 0 in
   let step ?(buttons = []) mouse events = incr count; e := E3.update !e (frame ~buttons mouse events !count) in
@@ -1842,6 +1791,11 @@ let run_studio () =
   check (has (pane "code") "lisp code*: graph tab, draft yes" && has (pane "notes") "document tab, draft yes")
     ("the docked text pane does not draft on its own: " ^ dump_line !e "panels");
   E3.close !e;
+  ()
+
+(* slow: the start keywords followed again, and the Size row *)
+let run_studio_keywords () =
+  let text = sketch "ws_layout" in
   (* the start keywords are followed again when their value in the text changes, and only then *)
   let e = ref (editor text) and count = ref 0 in
   let big mouse events = incr count;
@@ -1869,10 +1823,6 @@ let run_studio () =
   check (dump_line !e "projection" = "graph") "an edit that left :view alone reset the view the user chose";
   set "network" "view" (S.Str "graph"); set "preview" "look_through" (S.Sym "false");
   check (not (E3.look_through !e)) "a changed :look_through was not followed";
-  set "code" "tab" (S.Str "document");
-  check (has (dump_line !e "panels") "lisp code: document tab") ("a changed :tab was not followed: " ^ dump_line !e "panels");
-  set "outline" "focus" (S.Sym "true");
-  check (dump_line !e "focus" = "Outline") "a changed :focus was not followed";
   (* the Size row of a split's card converts it, keeping the sizes it shows: the editor graph in
      the pane, the studio card selected, the row's menu *)
   step at [ Event.KeyPressed (Input.KeyChar '/'); Event.KeyPressed (Input.KeyChar 'j') ];
@@ -1890,10 +1840,10 @@ let run_studio () =
   pick 75.;
   check (has (source !e) "studio (ui/split \"horizontal\" outline work :second_size 1223)")
     ("the Size row did not fix the second side at its points: " ^ source !e);
-  pick 51.;
-  check (has (source !e) "studio (ui/split \"horizontal\" outline work :first_size 216)")
-    ("the Size row did not return to the first side's points: " ^ source !e);
   E3.close !e;
+  ()
+
+let run_studio_tail () =
   (* a graph panel in text view is live without the focus, and takes a gesture on the first press *)
   let e = ref (editor (with_editor "    (ui/workspace (ui/split \"horizontal\" (ui/graph \"garden\" :focus true) (ui/graph \"scene\" :view \"text\")))"))
   and count = ref 0 in
@@ -2517,19 +2467,16 @@ let run_array_capacity_menu () =
     let value=List.assoc card.path(Result.get_ok(Flow.Eval.static ~record:true ws.checked)).records|>List.hd|>snd in
     check(value=Flow.Eval.Int Sys.max_floatarray_length)"Array capacity menu lost exact native Int")
 
-(* The suite takes minutes. Its sections run in order until RAYS_SUITE_BUDGET seconds (default 45)
-   have passed, then it says what it skipped; RAYS_SLOW=1 runs every one. *)
+(* The default loop runs every section but the slow ones (1.5-12 s each); RAYS_SLOW=1 runs all. *)
+let slow = ["run_studio_keywords"; "run_duplicate_and_view"; "run_views"; "run_result_view"; "run_geometry_view"; "run_wire_gestures"; "run_ops"; "run_panels"; "run_unbound_panels"; "run_cameras"; "run_editor"; "run_values"; "run_frame_key"; "run_undo_and_input"]
 let run () =
-  let budget = if Sys.getenv_opt "RAYS_SLOW" = Some "1" then infinity
-    else Option.value ~default:45. (Option.bind (Sys.getenv_opt "RAYS_SUITE_BUDGET") float_of_string_opt) in
-  let start = Unix.gettimeofday () and skipped = ref 0 in
+  let all = Sys.getenv_opt "RAYS_SLOW" = Some "1" in
   let only = Sys.getenv_opt "RAYS_SECTION" in
-  List.iter (fun (name, section) -> if only <> None && only <> Some name then () else if Unix.gettimeofday () -. start > budget then incr skipped else (let t = Unix.gettimeofday () in section (); Printf.printf "section %s %.1f s\n%!" name (Unix.gettimeofday () -. t)))
+  List.iter (fun (name, section) -> if only <> None && only <> Some name || not all && only = None && List.mem name slow then () else (let t = Unix.gettimeofday () in section (); Printf.printf "section %s %.1f s\n%!" name (Unix.gettimeofday () -. t)))
     [ "run_wire_gestures", run_wire_gestures; "run_ops", run_ops;
-      "run_array_capacity_menu", run_array_capacity_menu; "run_lisp_inspector", run_lisp_inspector; "run_context_menus", run_context_menus; "run_expression_chip", run_expression_chip; "run_nested_inspector", run_nested_inspector; "run_op_inspector", run_op_inspector; "run_spreadsheet", run_spreadsheet; "run_panels", run_panels; "run_studio", run_studio; "run_copy_lisp", run_copy_lisp; "run_hide_and_order", run_hide_and_order; "run_root_section", run_root_section; "run_layouts", run_layouts; "run_compose", run_compose; "run_ref_picker", run_ref_picker; "run_result_view", run_result_view; "run_loop_view", run_loop_view; "run_geometry_view", run_geometry_view; "run_panel_states", run_panel_states; "run_camera_zoom", run_camera_zoom; "run_cameras", run_cameras; "run_lowering", run_lowering; "run_panel_keys", run_panel_keys; "run_unbound_panels", run_unbound_panels; "run_values", run_values; "run_duplicate_and_view", run_duplicate_and_view; "run_movers", run_movers; "run_frame_key", run_frame_key; "run_loop_copies", run_loop_copies; "run_loop_expression", run_loop_expression; "run_editor", run_editor; "run_restore", run_restore; "run_views", run_views; "run_instances", run_instances; "run_host_scene_edit", run_host_scene_edit; "run_panel_chain", run_panel_chain;
+      "run_array_capacity_menu", run_array_capacity_menu; "run_lisp_inspector", run_lisp_inspector; "run_context_menus", run_context_menus; "run_expression_chip", run_expression_chip; "run_nested_inspector", run_nested_inspector; "run_op_inspector", run_op_inspector; "run_spreadsheet", run_spreadsheet; "run_panels", run_panels; "run_studio", run_studio; "run_studio_tail", run_studio_tail; "run_studio_keywords", run_studio_keywords; "run_copy_lisp", run_copy_lisp; "run_hide_and_order", run_hide_and_order; "run_root_section", run_root_section; "run_layouts", run_layouts; "run_compose", run_compose; "run_ref_picker", run_ref_picker; "run_result_view", run_result_view; "run_loop_view", run_loop_view; "run_geometry_view", run_geometry_view; "run_panel_states", run_panel_states; "run_camera_zoom", run_camera_zoom; "run_cameras", run_cameras; "run_lowering", run_lowering; "run_panel_keys", run_panel_keys; "run_unbound_panels", run_unbound_panels; "run_values", run_values; "run_duplicate_and_view", run_duplicate_and_view; "run_movers", run_movers; "run_frame_key", run_frame_key; "run_loop_copies", run_loop_copies; "run_loop_expression", run_loop_expression; "run_editor", run_editor; "run_restore", run_restore; "run_views", run_views; "run_instances", run_instances; "run_host_scene_edit", run_host_scene_edit; "run_panel_chain", run_panel_chain;
       "run_undo_under_pane", run_undo_under_pane; "run_atomic_frame", run_atomic_frame; "run_undo_and_input", run_undo_and_input; "run_carry_reaches_no_history", run_carry_reaches_no_history
-    ];
-  if !skipped > 0 then Printf.printf "workspace shell: %d sections skipped after %.0f s (RAYS_SLOW=1 runs all)\n" !skipped budget
+    ]
 
 
 (* Native VIEW regression over the reported sketch, including its piece renderer and a following

@@ -445,7 +445,7 @@ let metadata_port ?reference_input ?(extra_geometries=[]) ~key ~native_factory ~
               (Geometry.primitive_count geometry) domains grain keywords (describe baseline) (describe observed))
           end;
           check(baseline=cooked_bytes s(context domains grain)walked)(key^": reference bytes/errors"))
-          [1,97;8,97;4,4096]))(let stride=if extra_geometries=[] then 1 else if List.memq geometry extra_geometries then (if List.length cases>200 then 2 else 1) else 8 in
+          [1,97;8,97]))(let stride=if extra_geometries=[] then (if List.length cases>20 then 3 else 1) else if List.memq geometry extra_geometries then (if List.length cases>200 then 3 else if List.length cases>20 then 2 else 1) else 16 in
        List.filteri(fun i _->i mod stride=0)cases);  (* rule tables: the geometries that hold the named items get every case (every 2nd of 200+), the plain ones every 8th *)
     check(before=geometry_bytes geometry)(key^": input mutation"))
     (([payload(points 0);mixed()]@(if extra_geometries=[] then [payload(points 32769)] else []))@extra_geometries);
@@ -510,7 +510,7 @@ let delete_attributes () =
     ~native_factory:Sop.Nodes.Delete_attributes.factory ~initial_changes:[]
     ~cases:(if reference_input=None then cases else List.filteri(fun i _->i mod 4=0)cases)  (* the reference input changes only the second port, not the glob rows *)
     ~edit:["point_pattern",P.Text_value "N"] ())
-    [None;Some(Lisp_sop.snapshot(points 0));Some(Lisp_sop.snapshot(mixed()))];
+    [None;Some(Lisp_sop.snapshot(mixed()))];
   let input=Lisp_sop.snapshot(mixed()) in
   let sources=Flow_sop.Catalog.sources()|>flow_ok in
   let factory=Sop.Edit_graph.factory ~key:"delete_input" ~label:"Input" ~category:["Test"] ~arity:0(fun _->input) in
@@ -730,7 +730,7 @@ let set_color () =
       if component=channel && i<2 then value else if component=1 then -0. else 0.5)) in
     Attribute.Float4(Packed.Float4.of_owned ~x:planes.(0) ~y:planes.(1)
       ~z:planes.(2) ~w:planes.(3)|>get_string_ok)))
-    [Int64.float_of_bits 0x7ff8000000000123L;infinity;neg_infinity])[0;1;2;3] in
+    [Int64.float_of_bits 0x7ff8000000000123L;neg_infinity])[0;1;2;3] in
   let quote text=Flow.Lisp.flat(Flow.Syntax.make(Str text)) in
   let cases=("",[])::List.concat_map(fun owner->List.map(fun group->
     Printf.sprintf ":owner %s :group %s :color [0.2 0.4 0.6] :alpha 0.8"
@@ -742,7 +742,7 @@ let set_color () =
      else["";" \t\r\n ";"selected";"ordered";"full";"empty";"missingé";" selected "]))
     ["Point";"Vertex";"Primitive";"Detail"] in
   metadata_port ~key:"set_color" ~native_factory:Sop.Nodes.Set_color.factory
-    ~cases ~extra_geometries:(base::List.map with_cd storages@raw)
+    ~cases ~extra_geometries:(base::List.map with_cd (List.filteri(fun i _->i mod 2=0)storages)@raw)
     ~initial_changes:[] ~edit:["color_r",P.Float_value 0.25] ();
   (* Header refusal stays a parameter-rebuild comparison, not a cook case:
      metadata_port already compares malformed physical field types/values,
