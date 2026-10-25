@@ -815,10 +815,10 @@ let run_frame_key () =
 let panes_graph e = let _, _, w, _ = (E3.panes e (frame (0., 0.) [] 0)).graph in w
 
 (* the layout sections need the panels of variations, not its sphere lowerings *)
-let cheap_variations = replace (replace (case "variations") "(sop/uv_sphere :radius 0.06 :segments 8 :rings 4)" "(sop/box)") "(range 4)" "(range 1)"
+let cheap_variations = lazy (replace (replace (case "variations") "(sop/uv_sphere :radius 0.06 :segments 8 :rings 4)" "(sop/box)") "(range 4)" "(range 1)")
 
 let run_ops () =
-  let e = editor cheap_variations in
+  let e = editor (Lazy.force cheap_variations) in
   let ok label op =
     match E3.edit e op with
     | Ok e' -> check (E3.undo_label e' = Some label) ("label " ^ label ^ ": " ^ Option.value ~default:"-" (E3.undo_label e')); e'
@@ -899,7 +899,7 @@ let run_ops () =
 
 (* an editor graph that hides everything is valid; Restore layout brings the default back *)
 let run_restore () =
-  let e = ref (editor cheap_variations) and count = ref 0 in
+  let e = ref (editor (Lazy.force cheap_variations)) and count = ref 0 in
   let step ?(mouse = (450., 300.)) events = incr count; e := E3.update !e (frame mouse events !count) in
   step []; step [];
   check (panes_graph !e > 0) "the shell starts with a graph panel";
