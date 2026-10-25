@@ -619,6 +619,10 @@ let part_files () =
     if Sys.is_directory path then rays path
     else if Filename.check_suffix name ".rays" then [path] else []) in
   let files = List.sort compare (rays "../sketches" @ rays "../examples") @ ["../specification/pxui-kit/kit.rays"] in
+  (* the seven files that cost 6-30 s each (a lowering of each, three per literal) run under RAYS_SLOW=1 only *)
+  let heavy = ["flow_particles_gpu/"; "ws_sunflower/"; "ws_tiles/"; "sop_gallery/"; "flow_field/"; "ws_bloom/"; "ws_garland/"] in
+  let files = if Sys.getenv_opt "RAYS_SLOW" = Some "1" then files
+    else List.filter (fun f -> not (List.exists (fun h -> has f h) heavy)) files in
   let literal (form : S.t) = match form.node with
     | Num text -> (match int_of_string_opt text with
         | Some n -> Some (S.make (S.Num (string_of_int (n + 1))))
@@ -653,6 +657,9 @@ let part_files () =
       @ List.map (fun (g : Flow.Workspace.graph) -> Projection.of_graph catalog doc.checked ("def:" ^ g.name)) doc.checked.defs in
     let fast = ref 0 and patched = ref 0 and refused = ref 0 and slow = ref [] in
     let edits = List.concat_map sites scopes |> List.filter (fun (path, _, _, _, _) -> Doc.imported_file doc path = None) in
+    (* each literal costs a full lowering of the file: two per file, spread over it (RAYS_SLOW=1: all) *)
+    let edits = if Sys.getenv_opt "RAYS_SLOW" = Some "1" then edits else
+      let stride = max 1 ((List.length edits + 1) / 2) in List.filteri (fun i _ -> i mod stride = 0) edits in
     List.iter (fun (path, key, sub, _, value) ->
       let op = E.Set_arg { node = path; key; sub; value } in
       let where = Printf.sprintf "%s %s" file (String.concat "/" path) in

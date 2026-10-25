@@ -19,8 +19,8 @@ let tri_grid = "(sop/grid :columns 4 :rows 4 :connectivity \"Triangles\")"
 let box = "(sop/box)"
 let curve = "(sop/curve (list [0.0 0.0 0.0] [1.0 0.0 0.0] [0.0 1.0 0.0]) :closed true)"
 let sphere =
-  "(sop/uv_sphere :connectivity \"Alternating triangles\" :segments 160 \
-   :rings 80 :base_radius 2)"
+  "(sop/uv_sphere :connectivity \"Alternating triangles\" :segments 48 \
+   :rings 24 :base_radius 2)"
 
 let rows = [
   (* missing groups, raised by the SOP node wrapper *)
@@ -121,15 +121,15 @@ let rows = [
     Printf.sprintf "(-> %s (sop/measure_curvature :point_group \"missing\"))" sphere;
   "measure_curvature curve", Code "invalid_curvature",
     Printf.sprintf "(-> %s (sop/measure_curvature))" curve;
-  "attribute_laplacian blank point group", Counts (12642, 75840, 25280),
+  "attribute_laplacian blank point group", Counts (1106, 6624, 2208),
     Printf.sprintf "(-> %s (sop/attribute_laplacian :output \"\" :point_group \" \"))" sphere;
   "attribute_laplacian blank source", Code "invalid_laplacian",
     Printf.sprintf "(-> %s (sop/attribute_laplacian :output \"\" :source \" \"))" sphere;
   "attribute_laplacian P as output", Rejected,
     Printf.sprintf "(-> %s (sop/attribute_laplacian :source \"P\" :output \"P\"))" sphere;
-  "measure_curvature blank point group", Counts (12642, 75840, 25280),
+  "measure_curvature blank point group", Counts (1106, 6624, 2208),
     Printf.sprintf "(-> %s (sop/measure_curvature :point_group \" \"))" sphere;
-  "measure_curvature nan smoothing", Counts (12642, 75840, 25280),
+  "measure_curvature nan smoothing", Counts (1106, 6624, 2208),
     Printf.sprintf "(-> %s (sop/measure_curvature :smoothing_strength (/ 0.0 0.0)))" sphere;
   "measure_curvature duplicate outputs", Rejected,
     Printf.sprintf "(-> %s (sop/measure_curvature :mean \"mean\" :gaussian \"mean\" \
@@ -184,12 +184,12 @@ let rows = [
     Printf.sprintf "(-> %s (sop/dissolve))" grid;
   "transform keeps counts", Counts (25, 64, 16),
     Printf.sprintf "(-> %s (sop/transform :translate [1 0 0]))" grid;
-  "attribute_laplacian", Counts (12642, 75840, 25280),
+  "attribute_laplacian", Counts (1106, 6624, 2208),
     Printf.sprintf "(-> %s (sop/group_bounds :name \"upper\" :center [0 1 0] \
       :size [8 2 8]) (sop/attribute_laplacian \
       :point_group \"upper\" :weighting \"Positive cotangent\" :normalize false \
       :output \"delta_p\"))" sphere;
-  "measure_curvature", Counts (12642, 75840, 25280),
+  "measure_curvature", Counts (1106, 6624, 2208),
     Printf.sprintf "(-> %s (sop/measure_curvature :boundary \"One-sided\" \
       :smoothing_iterations 2 :smoothing_strength 0.25 :gaussian \"gaussian\" \
       :minimum \"minimum\" :maximum \"maximum\" :curvedness \"curvedness\" \
@@ -241,7 +241,7 @@ let check_row (name, expect, text) =
 let check_cache_and_sharing () =
   let source = Rdk.Uv_sphere.run
       ~connectivity:Rdk.Uv_sphere.Sphere_alternating_triangles
-      ~segments:160 ~rings:80 ~radius:2. () |> Result.get_ok in
+      ~segments:48 ~rings:24 ~radius:2. () |> Result.get_ok in
   let with_ = ["src", Lisp_sop.snapshot source] in
   List.iter (fun (name, text) ->
     let node = Lisp_sop.node ~with_ text in

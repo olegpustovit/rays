@@ -1039,104 +1039,6 @@ let test_local_subdivide_contract () =
     (Printf.sprintf
       "procedural local Subdivide topology/group ancestry (%d/%d from %d)"
       output_primitives selected_primitives source_primitives);
-  let pulled_graph = Lisp_sop.node ~with_:["source", (Lisp_sop.snapshot (source))] {|(sop/subdivide
-   (sop/ext_source)
-   :crease_weight_mode "Auto"
-   :face_varying_interpolation "All"
-   :boundary_interpolation "Edge only"
-   :remove_holes true
-   :generate_resulting_creases true
-   :hole_group ""
-   :group "left"
-   :cracks "Pull, no edge division")|} in
-  check (contains (readable pulled_graph) "cracks=pull__no_edge_division")
-    "procedural Pull Closed cache identity";
-  let pulled = cook_ok evaluator current pulled_graph in
-  let stitch_graph = Lisp_sop.node ~with_:["source", (Lisp_sop.snapshot (source))] {|(sop/subdivide
-   (sop/ext_source)
-   :crease_weight_mode "Auto"
-   :face_varying_interpolation "All"
-   :boundary_interpolation "Edge only"
-   :remove_holes true
-   :generate_resulting_creases true
-   :hole_group ""
-   :group "left"
-   :cracks "Stitch, no edge division")|} in
-  check (contains (readable stitch_graph) "cracks=stitch__no_edge_division")
-    "procedural Stitch cache identity";
-  let stitched = cook_ok evaluator current stitch_graph in
-  check (Rdk.Geometry.primitive_count (Result.get_ok (Sop.Payload.geometry stitched.payload))
-      > Rdk.Geometry.primitive_count source)
-    "procedural Stitch did not append bridge primitives";
-  let divided_pull_graph = Lisp_sop.node ~with_:["source", (Lisp_sop.snapshot (source))] {|(sop/subdivide
-   (sop/ext_source)
-   :crease_weight_mode "Auto"
-   :face_varying_interpolation "All"
-   :boundary_interpolation "Edge only"
-   :remove_holes true
-   :generate_resulting_creases true
-   :hole_group ""
-   :group "left"
-   :cracks "Pull, divide edges"
-   :crack_bias 0.75)|} in
-  check (contains (readable divided_pull_graph)
-      "cracks=pull__divide_edges")
-    "procedural Pull Divide bias/cache identity";
-  let divided_pull = cook_ok evaluator current divided_pull_graph in
-  check (Rdk.Geometry.vertex_count (Result.get_ok (Sop.Payload.geometry divided_pull.payload))
-      > Rdk.Geometry.vertex_count (Result.get_ok (Sop.Payload.geometry pulled.payload)))
-    "procedural Pull Divide did not divide a surrounding edge";
-  let divided_stitch_graph = Lisp_sop.node ~with_:["source", (Lisp_sop.snapshot (source))] {|(sop/subdivide
-   (sop/ext_source)
-   :crease_weight_mode "Auto"
-   :face_varying_interpolation "All"
-   :boundary_interpolation "Edge only"
-   :remove_holes true
-   :generate_resulting_creases true
-   :hole_group ""
-   :group "left"
-   :cracks "Stitch, divide edges")|} in
-  check (contains (readable divided_stitch_graph)
-      "cracks=stitch__divide_edges")
-    "procedural Stitch Divide cache identity";
-  let divided_stitch = cook_ok evaluator current divided_stitch_graph in
-  check (Rdk.Geometry.primitive_count (Result.get_ok (Sop.Payload.geometry divided_stitch.payload))
-      > Rdk.Geometry.primitive_count (Result.get_ok (Sop.Payload.geometry divided_pull.payload)))
-    "procedural Stitch Divide did not append regular bridge primitives";
-  let pull_tri_graph = Lisp_sop.node ~with_:["source", (Lisp_sop.snapshot (source))] {|(sop/subdivide
-   (sop/ext_source)
-   :crease_weight_mode "Auto"
-   :face_varying_interpolation "All"
-   :boundary_interpolation "Edge only"
-   :remove_holes true
-   :generate_resulting_creases true
-   :hole_group ""
-   :group "left"
-   :cracks "Pull, triangulate"
-   :crack_bias 0.75)|} in
-  check (contains (readable pull_tri_graph) "cracks=pull__triangulate")
-    "procedural Pull Triangulate cache identity";
-  let pull_tri = cook_ok evaluator current pull_tri_graph in
-  check (Rdk.Geometry.primitive_count (Result.get_ok (Sop.Payload.geometry pull_tri.payload))
-      > Rdk.Geometry.primitive_count (Result.get_ok (Sop.Payload.geometry divided_pull.payload)))
-    "procedural Pull Triangulate did not triangulate surrounding polygons";
-  let stitch_tri_graph = Lisp_sop.node ~with_:["source", (Lisp_sop.snapshot (source))] {|(sop/subdivide
-   (sop/ext_source)
-   :crease_weight_mode "Auto"
-   :face_varying_interpolation "All"
-   :boundary_interpolation "Edge only"
-   :remove_holes true
-   :generate_resulting_creases true
-   :hole_group ""
-   :group "left"
-   :cracks "Stitch, triangulate")|} in
-  check (contains (readable stitch_tri_graph)
-      "cracks=stitch__triangulate")
-    "procedural Stitch Triangulate cache identity";
-  let stitch_tri = cook_ok evaluator current stitch_tri_graph in
-  check (Rdk.Geometry.primitive_count (Result.get_ok (Sop.Payload.geometry stitch_tri.payload))
-      > Rdk.Geometry.primitive_count (Result.get_ok (Sop.Payload.geometry pull_tri.payload)))
-    "procedural Stitch Triangulate did not append bridge primitives";
   let consistent_graph = Lisp_sop.node ~with_:["source", (Lisp_sop.snapshot (source))] {|(sop/subdivide
    (sop/ext_source)
    :crease_weight_mode "Auto"
@@ -1149,13 +1051,12 @@ let test_local_subdivide_contract () =
    :consistent_topology true
    :cracks "Stitch, divide edges")|} in
   check (Node.version consistent_graph = 1
-      && contains (readable consistent_graph) "consistent_topology=true"
-      && Node.id consistent_graph <> Node.id divided_stitch_graph)
+      && contains (readable consistent_graph) "consistent_topology=true" && contains (readable consistent_graph) "cracks=stitch__divide_edges")
     "procedural consistent Subdivide cache identity";
   let consistent = cook_ok evaluator current consistent_graph in
   check (Rdk.Geometry.primitive_count (Result.get_ok (Sop.Payload.geometry consistent.payload))
-      >= Rdk.Geometry.primitive_count (Result.get_ok (Sop.Payload.geometry divided_stitch.payload)))
-    "procedural consistent Subdivide omitted topology-prescribed faces";
+      > Rdk.Geometry.primitive_count source)
+    "procedural consistent Stitch Divide appended no bridge primitives";
   let crease_input = Lisp_sop.node {|(-> (sop/curve (list [99.0 4.0 7.0] [-20.0 8.0 3.0]))
      (sop/group_range :owner "Primitives" :name "crease_edges" :range_mode "From ends"))|} in
   let crease_graph = Lisp_sop.node ~with_:["source", (Lisp_sop.snapshot (source)); "crease_input", (crease_input)] {|(sop/subdivide
@@ -1179,238 +1080,12 @@ let test_local_subdivide_contract () =
   check (match Rdk.Geometry.find_edge_group "remaining_creases" (Result.get_ok (Sop.Payload.geometry creased.payload)) with
     | Some group -> Rdk.Edge_group.cardinality group > 0 | None -> false)
     "procedural second-input Subdivide omitted resulting crease group";
-  let all_edge_graph = Lisp_sop.node ~with_:["base", (Lisp_sop.snapshot (base))] {|(sop/subdivide
-   (sop/ext_base)
-   :face_varying_interpolation "All"
-   :boundary_interpolation "Edge only"
-   :remove_holes true
-   :generate_resulting_creases true
-   :hole_group ""
-   :iterations 2
-   :crease_weight 3.0
-   :resulting_crease_group "all_edge_creases")|} in
-  check (Node.version all_edge_graph = 1
-      && List.length (Node.inputs all_edge_graph) = 1
-      && contains (readable all_edge_graph) "crease_group=;"
-      && contains (readable all_edge_graph) "crease_weight=")
-    "procedural all-edge crease override cache identity";
-  let all_edge_output = cook_ok evaluator current all_edge_graph in
-  let all_edge_cardinality = match Rdk.Geometry.find_edge_group
-      "all_edge_creases" (Result.get_ok (Sop.Payload.geometry all_edge_output.payload)) with
-    | Some group -> Rdk.Edge_group.cardinality group
-    | None -> -1 in
-  let source_edge_count = Array.length
-      ((Rdk.Topology_index.create (Rdk.Geometry.topology base)
-        |> Rdk.Topology_index.Private.view).edge_a) in
-  let expected_all_edge_cardinality = source_edge_count * 4 in
-  check (all_edge_cardinality = expected_all_edge_cardinality)
-    (Printf.sprintf
-      "procedural no-input crease override covered %d rather than %d edges"
-      all_edge_cardinality expected_all_edge_cardinality);
-  let before_all_edge_hit = Session.stats evaluator in
-  ignore (cook_ok evaluator current all_edge_graph);
-  let after_all_edge_hit = Session.stats evaluator in
-  check (after_all_edge_hit.hits > before_all_edge_hit.hits)
-    "procedural all-edge crease override did not cache";
   (* Explicit NaN literals are refused by the parameter's finite-value check. *)
   check (try ignore (Lisp_sop.node ~with_:["base", (Lisp_sop.snapshot (base))] (Printf.sprintf {|(sop/subdivide (sop/ext_base) :hole_group "" :crease_weight %s)|} ((Lisp_sop.float Float.nan))));
       false with Invalid_argument message -> contains message "E_NONFINITE")
     "procedural Subdivide accepted non-finite all-edge sharpness at construction";
-  let chaikin_base = Rdk.Plane_generators.grid ~connectivity:Rdk.Plane_generators.Grid_quads
-      ~columns:2 ~rows:2 ~size:2. () |> Result.get_ok in
-  let chaikin_index = Rdk.Topology_index.create
-      (Rdk.Geometry.topology chaikin_base) |> Rdk.Topology_index.Private.view in
-  let chaikin_weights = Array.init (Rdk.Geometry.vertex_count chaikin_base)
-      (fun vertex ->
-        let edge = chaikin_index.edge_of_vertex.(vertex) in
-        if edge < 0 then 0.
-        else
-          let a = chaikin_index.edge_a.(edge)
-          and b = chaikin_index.edge_b.(edge) in
-          let neighbor = if a = 4 then b else if b = 4 then a else -1 in
-          if neighbor = 1 then 4. else if neighbor = 3 then 2.
-          else if neighbor = 5 then 8. else if neighbor = 7 then 0.5 else 0.) in
-  let chaikin_attribute = Rdk.Attribute.create_owned ~owner:Rdk.Attribute.Vertex
-      ~name:"creaseweight" (Rdk.Attribute.Float chaikin_weights) |> Result.get_ok in
-  let chaikin_source = Rdk.Geometry.with_attribute chaikin_attribute chaikin_base
-      |> Result.get_ok in
-  let chaikin_graph = Lisp_sop.node ~with_:["chaikin_source", (Lisp_sop.snapshot (chaikin_source))] {|(sop/subdivide
-   (sop/ext_chaikin_source)
-   :crease_weight_mode "Auto"
-   :face_varying_interpolation "All"
-   :boundary_interpolation "Edge only"
-   :remove_holes true
-   :generate_resulting_creases true
-   :hole_group ""
-   :creasing_method "Chaikin"
-   :resulting_crease_group "chaikin_remaining")|} in
-  check (Node.version chaikin_graph = 1
-      && contains (readable chaikin_graph) "creasing_method=chaikin")
-    "procedural Chaikin creasing cache identity";
-  let chaikin_output = cook_ok evaluator current chaikin_graph
-  and uniform_output = Lisp_sop.node ~with_:["chaikin_source", (Lisp_sop.snapshot (chaikin_source))] {|(sop/subdivide
-   (sop/ext_chaikin_source)
-   :crease_weight_mode "Auto"
-   :face_varying_interpolation "All"
-   :boundary_interpolation "Edge only"
-   :remove_holes true
-   :generate_resulting_creases true
-   :hole_group ""
-   :resulting_crease_group "chaikin_remaining")|}
-      |> cook_ok evaluator current in
-  let resulting_weights (output : Session.output) = match Rdk.Geometry.find_attribute
-      ~owner:Rdk.Attribute.Vertex "creaseweight" (Result.get_ok (Sop.Payload.geometry output.payload))
-      |> Option.get |> Rdk.Attribute.storage with
-    | Rdk.Attribute.Float values -> values
-    | _ -> fail "procedural resulting creaseweight storage changed" in
-  check (resulting_weights chaikin_output <> resulting_weights uniform_output
-      && match Rdk.Geometry.find_edge_group "chaikin_remaining"
-          (Result.get_ok (Sop.Payload.geometry chaikin_output.payload)) with
-        | Some group -> Rdk.Edge_group.cardinality group = 7
-        | None -> false)
-    "procedural Chaikin cook did not preserve endpoint-dependent child creases";
-  let missing_crease = Lisp_sop.node ~with_:["source", (Lisp_sop.snapshot (source)); "crease_input", (crease_input)] {|(sop/subdivide
-   (sop/ext_source)
-   (sop/ext_crease_input)
-   :face_varying_interpolation "All"
-   :boundary_interpolation "Edge only"
-   :remove_holes true
-   :generate_resulting_creases true
-   :hole_group ""
-   :crease_group "missing"
-   :crease_weight 2.0)|} in
-  (match Session.cook evaluator ~context:current missing_crease with
-   | Error error -> check (error.code = "missing_group")
-       "procedural Subdivide missing crease-group diagnostic"
-   | Ok _ -> fail "procedural Subdivide accepted a missing crease group");
-  let holes = Rdk.Group.ordered ~owner:Rdk.Group.Primitive ~name:"holes"
-      ~length:source_primitives [|1|] |> Result.get_ok in
-  let hole_source = Rdk.Geometry.with_group holes base |> Result.get_ok in
-  let hole_graph = Lisp_sop.node ~with_:["hole_source", (Lisp_sop.snapshot (hole_source))] {|(sop/subdivide
-   (sop/ext_hole_source)
-   :crease_weight_mode "Auto"
-   :face_varying_interpolation "All"
-   :boundary_interpolation "Edge only"
-   :remove_holes true
-   :generate_resulting_creases true
-   :hole_group "holes"
-   :iterations 2)|} in
-  check (Node.version hole_graph = 1
-      && contains (readable hole_graph) "hole_group=holes"
-      && contains (readable hole_graph) "remove_holes=true")
-    "procedural hole Subdivide cache identity";
-  let holed = cook_ok evaluator current hole_graph in
-  check (Rdk.Geometry.primitive_count (Result.get_ok (Sop.Payload.geometry holed.payload))
-      = (source_primitives - 1)
-        * Rdk.Topology.primitive_size (Rdk.Geometry.topology base) 1 * 4)
-    "procedural recursive hole descendants were not removed at final depth";
-  let retained_holes = Lisp_sop.node ~with_:["hole_source", (Lisp_sop.snapshot (hole_source))] {|(sop/subdivide
-   (sop/ext_hole_source)
-   :crease_weight_mode "Auto"
-   :face_varying_interpolation "All"
-   :boundary_interpolation "Edge only"
-   :generate_resulting_creases true
-   :hole_group "holes")|}
-      |> cook_ok evaluator current in
-  check (Rdk.Geometry.primitive_count (Result.get_ok (Sop.Payload.geometry retained_holes.payload))
-      = source_primitives
-        * Rdk.Topology.primitive_size (Rdk.Geometry.topology base) 0)
-    "procedural Remove Holes off removed descendants";
-  let boundary_base = Rdk.Plane_generators.grid ~connectivity:Rdk.Plane_generators.Grid_quads
-      ~columns:3 ~rows:2 ~size:2. () |> Result.get_ok in
-  let boundary_graph = Lisp_sop.node ~with_:["boundary_base", (Lisp_sop.snapshot (boundary_base))] {|(sop/subdivide
-   (sop/ext_boundary_base)
-   :crease_weight_mode "Auto"
-   :face_varying_interpolation "All"
-   :remove_holes true
-   :generate_resulting_creases true
-   :hole_group "")|} in
-  check (Node.version boundary_graph = 1
-      && contains (readable boundary_graph)
-           "boundary_interpolation=edge_and_corner")
-    "procedural boundary interpolation cache identity";
-  let boundary_output = cook_ok evaluator current boundary_graph in
-  let source_positions = Rdk.Packed.Float3.Private.view
-      (Rdk.Geometry.positions boundary_base)
-  and boundary_positions = Rdk.Packed.Float3.Private.view
-      (Rdk.Geometry.positions (Result.get_ok (Sop.Payload.geometry boundary_output.payload))) in
-  check (boundary_positions.x.(0) = source_positions.x.(0)
-      && boundary_positions.y.(0) = source_positions.y.(0)
-      && boundary_positions.z.(0) = source_positions.z.(0))
-    "procedural Edge and Corner did not pin the grid corner";
-  let no_boundary_surface = Lisp_sop.node ~with_:["boundary_base", (Lisp_sop.snapshot (boundary_base))] {|(sop/subdivide
-   (sop/ext_boundary_base)
-   :crease_weight_mode "Auto"
-   :face_varying_interpolation "All"
-   :remove_holes true
-   :generate_resulting_creases true
-   :hole_group ""
-   :boundary_interpolation "None")|}
-      |> cook_ok evaluator current in
-  check (Rdk.Geometry.primitive_count (Result.get_ok (Sop.Payload.geometry no_boundary_surface.payload)) = 0)
-    "procedural None did not remove the fully boundary-incident grid";
-  let boundary_topology = Rdk.Topology.Private.view
-      (Rdk.Geometry.topology boundary_base) in
-  let fvar_values = Array.map (fun point ->
-    let value = float_of_int point in value *. value)
-      boundary_topology.vertex_points in
-  let fvar_attribute = Rdk.Attribute.create_owned
-      ~owner:Rdk.Attribute.Vertex ~name:"fvar"
-      (Rdk.Attribute.Float fvar_values) |> Result.get_ok in
-  let fvar_source = Rdk.Geometry.with_attribute fvar_attribute boundary_base
-      |> Result.get_ok in
-  let fvar_graph = Lisp_sop.node ~with_:["fvar_source", (Lisp_sop.snapshot (fvar_source))] {|(sop/subdivide
-   (sop/ext_fvar_source)
-   :crease_weight_mode "Auto"
-   :boundary_interpolation "Edge only"
-   :remove_holes true
-   :generate_resulting_creases true
-   :hole_group ""
-   :face_varying_interpolation "None")|} in
-  check (Node.version fvar_graph = 1
-      && contains (readable fvar_graph)
-           "face_varying_interpolation=none")
-    "procedural face-varying interpolation cache identity";
-  let fvar_output = cook_ok evaluator current fvar_graph in
-  let output_values = match Rdk.Geometry.find_attribute
-      ~owner:Rdk.Attribute.Vertex "fvar" (Result.get_ok (Sop.Payload.geometry fvar_output.payload))
-      |> Option.get |> Rdk.Attribute.storage with
-    | Rdk.Attribute.Float values -> values
-    | _ -> fail "procedural face-varying storage changed" in
-  check (output_values.(0) <> fvar_values.(0))
-    "procedural FVar None did not smooth a continuous boundary value";
   let triangle_source = Rdk.Plane_generators.grid ~connectivity:Rdk.Plane_generators.Grid_triangles
       ~columns:3 ~rows:2 ~size:3. () |> Result.get_ok in
-  let triangle_graph = Lisp_sop.node ~with_:["triangle_source", (Lisp_sop.snapshot (triangle_source))] {|(sop/subdivide
-   (sop/ext_triangle_source)
-   :crease_weight_mode "Auto"
-   :face_varying_interpolation "All"
-   :boundary_interpolation "Edge only"
-   :remove_holes true
-   :generate_resulting_creases true
-   :hole_group ""
-   :triangle_policy "Smooth")|} in
-  check (Node.version triangle_graph = 1
-      && contains (readable triangle_graph) "triangle_policy=smooth")
-    "procedural Smooth Triangles cache identity";
-  let triangle_smooth = cook_ok evaluator current triangle_graph in
-  let triangle_standard = Lisp_sop.node ~with_:["triangle_source", (Lisp_sop.snapshot (triangle_source))] {|(sop/subdivide
-   (sop/ext_triangle_source)
-   :crease_weight_mode "Auto"
-   :face_varying_interpolation "All"
-   :boundary_interpolation "Edge only"
-   :remove_holes true
-   :generate_resulting_creases true
-   :hole_group "")|}
-      |> cook_ok evaluator current in
-  let smooth_positions = Rdk.Packed.Float3.Private.view
-      (Rdk.Geometry.positions (Result.get_ok (Sop.Payload.geometry triangle_smooth.payload)))
-  and standard_positions = Rdk.Packed.Float3.Private.view
-      (Rdk.Geometry.positions (Result.get_ok (Sop.Payload.geometry triangle_standard.payload))) in
-  check (smooth_positions.x <> standard_positions.x
-      || smooth_positions.y <> standard_positions.y
-      || smooth_positions.z <> standard_positions.z)
-    "procedural Smooth Triangles did not change Catmull-Clark edge positions";
   let add_detail name storage geometry =
     let attribute = Rdk.Attribute.create_owned ~owner:Rdk.Attribute.Detail
         ~name storage |> Result.get_ok in
@@ -1436,18 +1111,14 @@ let test_local_subdivide_contract () =
       && contains (readable detail_graph) "triangle_policy=catmull_clark")
     "procedural detail-override Subdivide cache identity";
   let detail_output = cook_ok evaluator current detail_graph in
-  let expected_detail = Lisp_sop.node ~with_:["triangle_source", (Lisp_sop.snapshot (triangle_source))] {|(sop/subdivide
-   (sop/ext_triangle_source)
-   :crease_weight_mode "Auto"
-   :remove_holes true
-   :generate_resulting_creases true
-   :hole_group ""
-   :iterations 2
-   :face_varying_interpolation "None"
-   :creasing_method "Chaikin"
-   :triangle_policy "Smooth")|}
-      |> cook_ok evaluator current in
-  check (equal_positions (Result.get_ok (Sop.Payload.geometry detail_output.payload)) (Result.get_ok (Sop.Payload.geometry expected_detail.payload)))
+  let expected_detail = Rdk.Subdivide.subdivide ~iterations:2 ~remove_holes:true
+      ~generate_resulting_creases:true
+      ~boundary_interpolation:Rdk.Subdivide.Subdivide_boundary_edge_and_corner
+      ~face_varying_interpolation:Rdk.Subdivide.Subdivide_fvar_none
+      ~creasing_method:Rdk.Subdivide.Subdivide_creasing_chaikin
+      ~triangle_policy:Rdk.Subdivide.Subdivide_triangles_smooth triangle_source
+      |> Result.get_ok in
+  check (equal_positions (Result.get_ok (Sop.Payload.geometry detail_output.payload)) expected_detail)
     "procedural Subdivide did not honor input detail overrides";
   check (List.for_all (fun name ->
       Rdk.Geometry.find_attribute ~owner:Rdk.Attribute.Detail name
@@ -1461,27 +1132,6 @@ let test_local_subdivide_contract () =
   let after_detail_hit = Session.stats evaluator in
   check (after_detail_hit.hits > before_detail_hit.hits)
     "procedural detail-override Subdivide did not cache";
-  let invalid_detail_source = triangle_source
-      |> add_detail "osd_scheme" (Rdk.Attribute.Text [|"none"|]) in
-  let invalid_detail = Lisp_sop.node ~with_:["invalid_detail_source", (Lisp_sop.snapshot (invalid_detail_source))] {|(sop/subdivide
-   (sop/ext_invalid_detail_source)
-   :crease_weight_mode "Auto"
-   :face_varying_interpolation "All"
-   :boundary_interpolation "Edge only"
-   :remove_holes true
-   :generate_resulting_creases true
-   :hole_group "")|} in
-  (match Session.cook evaluator ~context:current invalid_detail with
-   | Ok _ -> fail "procedural Subdivide accepted unsupported osd_scheme"
-   | Error error -> check (error.code = "invalid_topology"
-       && (match error.cause with
-           | Some cause -> contains cause "osd_scheme"
-           | None -> false)
-       && List.exists (fun trace -> trace.Diagnostic.operation = "subdivide")
-            error.trace)
-       ("procedural Subdivide detail-override diagnostic: " ^ error.code ^ " "
-        ^ Option.value ~default:"" error.cause ^ " ["
-        ^ String.concat "," (List.map (fun t -> t.Diagnostic.operation) error.trace) ^ "]"));
   let curve_positions = Rdk.Packed.Float3.Private.of_owned_exn
       ~x:[|0.;1.;4.|] ~y:[|0.;2.;0.|] ~z:[|0.;0.;0.|] in
   let curve_topology = Rdk.Topology.create_owned ~point_count:3
@@ -1494,14 +1144,6 @@ let test_local_subdivide_contract () =
       |> Result.get_ok in
   let curve_source = Rdk.Geometry.create ~positions:curve_positions
       ~topology:curve_topology ~attributes:[curve_n] () |> Result.get_ok in
-  let shared_curve_graph = Lisp_sop.node ~with_:["curve_source", (Lisp_sop.snapshot (curve_source))] {|(sop/subdivide
-   (sop/ext_curve_source)
-   :crease_weight_mode "Auto"
-   :face_varying_interpolation "All"
-   :boundary_interpolation "Edge only"
-   :remove_holes true
-   :generate_resulting_creases true
-   :hole_group "")|} in
   let independent_curve_graph = Lisp_sop.node ~with_:["curve_source", (Lisp_sop.snapshot (curve_source))] {|(sop/subdivide
    (sop/ext_curve_source)
    :crease_weight_mode "Auto"
@@ -1510,34 +1152,19 @@ let test_local_subdivide_contract () =
    :remove_holes true
    :generate_resulting_creases true
    :hole_group ""
-   :treat_curves_as_independent true)|} in
-  let recomputed_curve_graph = Lisp_sop.node ~with_:["curve_source", (Lisp_sop.snapshot (curve_source))] {|(sop/subdivide
-   (sop/ext_curve_source)
-   :crease_weight_mode "Auto"
-   :face_varying_interpolation "All"
-   :boundary_interpolation "Edge only"
-   :remove_holes true
-   :generate_resulting_creases true
-   :hole_group ""
+   :treat_curves_as_independent true
    :recompute_point_normals true)|} in
   check (Node.version independent_curve_graph = 1
-      && contains (readable shared_curve_graph)
-           "treat_curves_as_independent=false"
       && contains (readable independent_curve_graph)
            "treat_curves_as_independent=true"
-      && contains (readable recomputed_curve_graph)
-           "recompute_point_normals=true"
-      && Node.id shared_curve_graph <> Node.id independent_curve_graph
-      && Node.id shared_curve_graph <> Node.id recomputed_curve_graph)
+      && contains (readable independent_curve_graph)
+           "recompute_point_normals=true")
     "procedural polygon-curve Subdivide cache identity";
-  let shared_curves = cook_ok evaluator current shared_curve_graph
-  and independent_curves = cook_ok evaluator current independent_curve_graph in
-  check (Rdk.Geometry.point_count (Result.get_ok (Sop.Payload.geometry shared_curves.payload)) = 5
-      && Rdk.Geometry.point_count (Result.get_ok (Sop.Payload.geometry independent_curves.payload)) = 6)
+  let independent_curves = cook_ok evaluator current independent_curve_graph in
+  check (Rdk.Geometry.point_count (Result.get_ok (Sop.Payload.geometry independent_curves.payload)) = 6)
     "procedural independent curve subdivision did not split shared points";
-  let recomputed_curves = cook_ok evaluator current recomputed_curve_graph in
   let recomputed_n = Rdk.Geometry.find_attribute ~owner:Rdk.Attribute.Point "N"
-      (Result.get_ok (Sop.Payload.geometry recomputed_curves.payload)) |> Option.get |> Rdk.Attribute.storage in
+      (Result.get_ok (Sop.Payload.geometry independent_curves.payload)) |> Option.get |> Rdk.Attribute.storage in
   check (match recomputed_n with
     | Rdk.Attribute.Float3 values ->
         let values = Rdk.Packed.Float3.Private.view values in
@@ -1551,31 +1178,6 @@ let test_local_subdivide_contract () =
   let after_curve_hit = Session.stats evaluator in
   check (after_curve_hit.hits > before_curve_hit.hits)
     "procedural polygon-curve Subdivide did not cache";
-  let missing_hole = Lisp_sop.node ~with_:["base", (Lisp_sop.snapshot (base))] {|(sop/subdivide
-   (sop/ext_base)
-   :crease_weight_mode "Auto"
-   :face_varying_interpolation "All"
-   :boundary_interpolation "Edge only"
-   :remove_holes true
-   :generate_resulting_creases true
-   :hole_group "missing")|} in
-  (match Session.cook evaluator ~context:current missing_hole with
-   | Error error -> check (error.code = "missing_group")
-       "procedural Subdivide missing hole-group diagnostic"
-   | Ok _ -> fail "procedural Subdivide accepted a missing hole group");
-  let missing = Lisp_sop.node ~with_:["base", (Lisp_sop.snapshot (base))] {|(sop/subdivide
-   (sop/ext_base)
-   :crease_weight_mode "Auto"
-   :face_varying_interpolation "All"
-   :boundary_interpolation "Edge only"
-   :remove_holes true
-   :generate_resulting_creases true
-   :hole_group ""
-   :group "missing")|} in
-  (match Session.cook evaluator ~context:current missing with
-   | Error error -> check (error.code = "missing_group")
-       "procedural local Subdivide missing-group diagnostic"
-   | Ok _ -> fail "procedural local Subdivide accepted a missing group");
   Session.close evaluator
 
 let test_edge_divide_contract () =

@@ -13,7 +13,11 @@ let fail message = failwith ("test_bloom_studio: " ^ message)
 let check condition message = if not condition then fail message
 open Test_text
 
-let bloom () = In_channel.with_open_bin "../sketches/ws_bloom/sketch.rays" In_channel.input_all
+(* 3 and 2 petals instead of 12 and 7: each edit re-cooks the flower, and the checks are about rows and clicks *)
+let bloom () =
+  let replace a b s = Str.global_replace (Str.regexp_string a) b s in
+  In_channel.with_open_bin "../sketches/ws_bloom/sketch.rays" In_channel.input_all
+  |> replace "(petals : int 12)" "(petals : int 3)" |> replace ":petals 7 :seed 2" ":petals 2 :seed 2"
 let factories = Sop_catalog.Editor.factories
 let catalog = Editor_document.Contexts.catalog ~version:1 factories |> Result.get_ok
 
@@ -66,7 +70,7 @@ let run () =
   let scope = Some (Flow_graph.Projection.of_graph catalog ws.checked "flower") in
   let lines = Array.to_list (Array.map N.describe (N.rows (N.open_graph "flower" N.initial) (params scope))) in
   let listed text = List.exists (fun l -> has l text) lines in
-  check (listed "input petals = 12" && listed "input seed = 7") ("the inputs of flower: " ^ String.concat " | " lines);
+  check (listed "input petals = 3" && listed "input seed = 7") ("the inputs of flower: " ^ String.concat " | " lines);
   check (listed "> flower · " && listed "1 loop" && listed "R root (scene)") "the composition lists every graph, the open one marked";
   check (listed "for ring") "the open graph's loop is a tree row";
   check (listed "half · defn" && listed "×2" && listed "petal · defn" && listed "×1" && listed "λ twice · 1 use")
@@ -129,7 +133,7 @@ let run () =
   step ~buttons:[ Input.LeftButton ] ~mouse:to_ [ Event.MouseMoved to_ ];
   step ~mouse:to_ [ Event.MouseReleased (Input.LeftButton, to_) ];
   step [];
-  check (not (has (source !e) "(petals : int 12)") && has (source !e) "(petals : int ")
+  check (not (has (source !e) "(petals : int 3)") && has (source !e) "(petals : int ")
     ("the slider changed the input's default: " ^ source !e);
   check (E3.undo_label !e = Some "Input default") ("named in history: " ^ Option.value ~default:"-" (E3.undo_label !e));
   check (dump_line !e "edit error" = "-") "and checks";

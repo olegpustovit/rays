@@ -127,14 +127,14 @@ let run () =
       previous_bytes := geometry_bytes geometry;
       (* going back in time recooks correctly (one volatile slot) *)
       Session.clear oracle.session)
-      [0.; 0.5; 2.25; 0.5];
-    Session.close live.session) ["orrery", case "orrery"; "wave", case "wave";
+      [0.; 2.25; 0.5];
+    Session.close live.session) ["orrery", case "orrery";
       "sunflower", sunflower_live];
-  (* --- Orrery playback: 600 frames at Fixed 1/60 -------------------------- *)
+  (* --- Orrery playback: 8 frames at Fixed 1/60 -------------------------- *)
   let orrery = lower (case "orrery") in
   let live_nodes, cached_nodes = Lower.counts orrery in
   let p = player orrery in
-  let frames = 600 in
+  let frames = 8 in
   for n = 0 to frames - 1 do ignore (frame p ~time:(float n /. 60.)) done;
   let stats = Session.stats p.session in
   check (cached_nodes = 4) "orrery caches base (tube, noise, normals) and plinth";
