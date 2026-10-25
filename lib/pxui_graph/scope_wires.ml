@@ -252,6 +252,32 @@ let route ?(inside = false) grid ~excl ((ax, ay) as a) ((bx, by) as b) =
     | clear -> List.fold_left (fun best c -> if length c < length best then c else best) (List.hd clear) clear
   end
 
+(* Trunk and branch: a source read by [bundle_min] or more inputs (two of them straight segments)
+   leaves the port as one shared trunk to a junction [trunk] points out, then a branch to each sink.
+   Every such wire keeps its own polyline ([a], junction, [b]), so each is still hovered and
+   selected alone (the trunk answers as the topmost of them).  A wire that is bent, dashed, level
+   with its source or long enough to be drawn as a tag does not bundle. *)
+let trunk = 36.
+let bundle_min = 3
+let tag_span = 3. *. 288.
+let bundle grid (wires : wire array) =
+  let all = Hashtbl.create 16 and groups = Hashtbl.create 16 in
+  Array.iteri (fun i (w : wire) ->
+    let (ax, ay), (bx, by) = w.a, w.b in
+    if not w.dashed then Hashtbl.replace all w.a (1 + Option.value ~default:0 (Hashtbl.find_opt all w.a));
+    if not w.dashed && w.pts = [ w.a; w.b ] && bx -. ax > 2. *. trunk
+       && bx -. ax <= tag_span && Float.abs (by -. ay) > 1. then
+      Hashtbl.replace groups w.a (i :: Option.value ~default:[] (Hashtbl.find_opt groups w.a))) wires;
+  Hashtbl.iter (fun (ax, ay) members ->
+    if Hashtbl.find all (ax, ay) >= bundle_min && List.length members >= 2 then begin
+      let j = ax +. trunk, ay in
+      List.iter (fun i ->
+        let w = wires.(i) in
+        let excl = Option.to_list w.from @ Option.to_list w.into in
+        if route grid ~excl j w.b = [ j; w.b ] && not (is_blocked grid ~excl w.a j) then
+          wires.(i) <- { w with pts = [ w.a; j; w.b ] }) members
+    end) groups
+
 (* the old orthogonal style, kept for [:wires "rect"] *)
 let rect_points (ax, ay) (bx, by) =
   let mx = if bx >= ax +. 24. then (ax +. bx) /. 2. else ax +. 12. in
@@ -465,6 +491,7 @@ let compute ?(style = `Straight) ?(previous = empty_geo) ~name_w ~shown (scope :
             wire source target ~into:[ scope.path @ [ "@return" ] ]
         | None -> ()));
   let wires = Array.of_list (List.rev !wires) in
+  if style = `Straight then bundle grid wires;
   let inside = Hashtbl.create 16 in
   Array.iteri (fun i w -> match w.target with
     | Some (_ :: _ :: _ :: _ as path, _, _) ->

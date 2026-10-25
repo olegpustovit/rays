@@ -7,6 +7,11 @@ let binding_name path =
   let last = List.hd (List.rev path) in
   if last = "" || last.[0] = ':' || last.[0] = '@' || String.contains last '#' then None else Some last
 
+(* does [expr] read the name *)
+let rec reads name (e : Flow.Syntax.t) = match e.node with
+  | Flow.Syntax.Sym n -> n = name
+  | _ -> List.exists (reads name) (Flow.Syntax.children e)
+
 (* Where a node is added from the list or the pane: the graph the level shows, else the scene
    or World graph that adding an object or a layer creates. *)
 let add_target value =
@@ -156,6 +161,19 @@ let scope_add value key =
         | Some d -> List.length d.slots - List.length d.keyword_inputs
         | None -> if material_of then 1 else 0 in
       let selected = Pxui_graph.Scope.selected value.scope_view in
+      (* a nested node (a call written in another's input) has no name to read: it gets one first
+         ([Rename] binds it), in the same undo step as the node added after it *)
+      let hoisted = match selected, value.scope_key with
+        | [ path ], Some { scope; _ } when List.length path >= 2 && String.contains (List.hd (List.rev path)) '#' ->
+            Option.map (fun (n : Flow_graph.Projection.node) ->
+              path, Flow_graph.Flow_edit.fresh_name ws.source ~root:graph
+                (match String.rindex_opt n.head '/' with
+                 | Some i -> String.sub n.head (i + 1) (String.length n.head - i - 1) | None -> n.head))
+              (Flow_graph.Projection.find scope path)
+        | _ -> None in
+      let binding_name path = match hoisted with
+        | Some (p, name) when p = path -> Some name
+        | _ -> binding_name path in
       let scope, input = match selected with
         | _ when (context = Flow.Context.scene || context = Flow.Context.world) && not is_value ->
             (* an object joins the scene's merge and a layer goes on top of the stack: the
@@ -211,5 +229,23 @@ let scope_add value key =
           (if material_of then "material" else key)
         end in
       let name = Flow_graph.Flow_edit.fresh_name ws.source ~root:graph base in
-      [ Syntax_edit (Flow_graph.Flow_edit.Add_node { scope; name; expr }) ]
+      let name = match hoisted with
+        | Some (_, h) when h = name -> Flow_graph.Flow_edit.fresh_name ws.source ~root:graph (name ^ "_2")
+        | _ -> name in
+      let add = Flow_graph.Flow_edit.Add_node { scope; name; expr } in
+      let rename = match hoisted with
+        | Some (node, to_) -> [ Flow_graph.Flow_edit.Rename { node; to_ } ]
+        | None -> [] in
+      (* a wire pulled off an existing wire: the new node goes between its source and its sink *)
+      let insert = match selected, input, Pxui_graph.Scope.selected_wire value.scope_view, value.scope_key with
+        | [ path ], Some from, Some (target, key), Some { scope = pane; _ }
+          when reads from expr && (match Flow_graph.Projection.find pane target with
+            | Some n -> List.exists (fun (r : Flow_graph.Projection.row) ->
+                r.key = key && r.chip = Flow_graph.Projection.Name (List.hd (List.rev path))) n.rows
+            | None -> false) ->
+            [ Flow_graph.Flow_edit.Connect { node = target; key; src = name; iter = false } ]
+        | _ -> [] in
+      (match rename, insert with
+       | [], [] -> [ Syntax_edit add ]
+       | _ -> [ Syntax_batch ((if insert = [] then "Add node" else "Insert node"), rename @ [ add ] @ insert) ])
   | None -> [ Declined "Open a graph to add a node to it" ]

@@ -95,6 +95,11 @@ let context_command = function
   | 11 -> Wrap_if | 12 -> Add_arm | 13 -> Delete_arm | 14 -> Wrap_map | 15 -> Wrap_filter | 16 -> Inline_fn
   | 17 -> Item_up | 18 -> Item_down | _ -> Delete
 
+(* the footer of a card at the iterations pinned in its zones: its value is the ghost beside the out-port *)
+let footer_of t records (n : P.node) =
+  let chain = Option.value ~default:[] (Hashtbl.find_opt t.chains n.path) in
+  Flow_graph.Probe.footer records n ~probes:(List.map t.probe chain)
+
 let update t ui (frame : Frame.t) =
   (* the first view shows the whole graph, at zoom 1 when it fits (Home frames everything) *)
   let t = if t.framed then t else { (frame_all t) with framed = true } in
@@ -195,8 +200,7 @@ let update t ui (frame : Frame.t) =
    | Some records when z >= 0.4 ->
        List.iter (fun ((p : P.placed), _, _) -> match p.item with
          | P.Item n when (match n.zone with Some _ -> p.collapsed | None -> true) ->
-             let chain = Option.value ~default:[] (Hashtbl.find_opt t.chains n.path) in
-             Hashtbl.replace footers n.path (Flow_graph.Probe.footer records n ~probes:(List.map t.probe chain))
+             Hashtbl.replace footers n.path (footer_of t records n)
          | _ -> ()) visible
    | _ -> ());
   let finished = ref false and opened = ref None in
@@ -654,6 +658,84 @@ let update t ui (frame : Frame.t) =
         { t with selected; drag = (if canvas_signal.released then None else t.drag) }
     | _ -> t in
   let lens_next = ref t.lens in
+  (* a wire let go: on an input row it connects; on empty canvas it opens the add menu after its
+     source (pulled off an existing wire, the host inserts the new node on the selected wire) *)
+  let finish_wire t (w : wiring) ~src_path ~release_point =
+       let target = List.find_map (fun ((tp : P.placed), tax, tay, ttile, _, _, _) ->
+         if not (Ui.hovered_within ui ttile) then None else
+         let mx, my = mouse in
+         let gx = (mx -. sx t 0.) /. z and gy = (my -. sy t 0.) /. z in
+         let lx = gx -. tax and ly = gy -. tay in
+         match tp.item with
+         | P.Return ->
+             Option.map (fun (s : P.scope) -> s.path @ [ "@result" ], E.Whole) t.scope
+         | Input _ -> None
+         | Item n ->
+             (match n.zone with
+              | None ->
+                  (* anywhere on the header is the in-port of the first geometry slot *)
+                  (match row_at ~header:infinity tp n ~shown:(tp.shown) ~px:lx ~py:ly with
+                   | Some i when i < List.length n.rows ->
+                       let r = List.nth n.rows i in
+                       if r.socket then Some (n.path, r.key) else None
+                   | _ -> None)
+              | Some zn when tp.collapsed ->
+                  let i = int_of_float ((ly -. P.head_height) /. P.row_height) in
+                  (match List.nth_opt zn.rail i with
+                   | Some { key = Some key; _ } when ly >= P.head_height -> Some (n.path, key)
+                   | _ -> None)
+              | Some zn ->
+                  let extras = P.extra_rails zn in
+                  if ly < P.head_height then
+                    (match P.label_row zn with
+                     | Some { key = Some key; _ } when lx < 24. -> Some (n.path, key)
+                     | _ -> None)
+                  else if ly < P.rail_top n -. 28. then
+                    (match List.nth_opt extras (int_of_float ((ly -. P.head_height) /. P.row_height)) with
+                     | Some { key = Some key; _ } when lx < 24. -> Some (n.path, key)
+                     | _ -> None)
+                  else if lx > tp.w -. 24. && ly >= P.rail_top n then
+                    Some (zn.scope.path @ [ "@result" ], E.Whole)
+                  else None)) tiles in
+       (* a wire let go on empty canvas: the add menu there, after the node it came from *)
+       let on_canvas = target = None && List.nth_opt (List.rev src_path) 0 = Some w.src
+         && not (List.exists (fun (_, _, _, ttile, _, _, _) -> Ui.hovered_within ui ttile) tiles) in
+       (match target with
+        | Some (node, key) -> emit (Syntax_edit (E.Connect { node; key; src = w.src; iter = w.iter }))
+        | None when on_canvas -> emit (Selected [ src_path ]); (let x, y = release_point in emit (Menu_requested (x, y)))
+        | None -> emit (Notice "Drop the wire on an input row"));
+       { t with drag = None; selected = if on_canvas then Path_set.singleton src_path else t.selected } in
+
+  (* a wire pulled past 6 points is a new wire from its source: the same drag as from the out-port *)
+  let t = if Option.is_some t.drag || t.context <> None then t else
+    List.find_map (fun i ->
+      let w = t.geo.wires.(i) in
+      match w.target, w.from with
+      | Some _, Some from ->
+          List.find_map (fun b ->
+            let s = Ui.signal ui b in
+            let px, py = s.pointer and qx, qy = s.press_point in
+            if s.held && left s && Float.hypot (px -. qx) (py -. qy) > 6. then Some (w, from) else None) (hits i)
+      | _ -> None) wires_in_view
+    |> (function
+      | Some (w, from) ->
+          (match Option.map (fun ((p : P.placed), _, _) -> p.item) (item_at t from) with
+           | Some (P.Item ({ zone = None; _ } as n)) when n.binds = [ n.name ] ->
+               { t with drag = Some (Wiring { src = n.name; ty = w.ty; iter = false; from = (sx t (fst w.a), sy t (snd w.a)) }) }
+           | Some (P.Input i) -> { t with drag = Some (Wiring { src = i.name; ty = w.ty; iter = false; from = (sx t (fst w.a), sy t (snd w.a)) }) }
+           | _ -> t)
+      | None -> t) in
+  (* ...and let go, it finishes like an out-port's wire *)
+  let t = match t.drag, t.selected_wire with
+    | Some (Wiring w), Some _ when List.exists (fun i -> List.exists (fun b ->
+          let s = Ui.signal ui b in s.released && left s) (hits i)) wires_in_view ->
+        let from_wire = List.find_map (fun i -> List.find_map (fun b ->
+          let s = Ui.signal ui b in if s.released && left s then Some (t.geo.wires.(i), s.release_point) else None) (hits i)) wires_in_view in
+        (match from_wire with
+         | Some (wire, release_point) ->
+             finish_wire t w ~src_path:(Option.value ~default:[] wire.from) ~release_point
+         | None -> t)
+    | _ -> t in
   (* tile presses select and start a move; sockets start a wire *)
   let t = List.fold_left (fun t ((p : P.placed), _, _, tile, (s : Ui.signal), (sub : _), fields) ->
     let outs, dels, taps, _ = sub in
@@ -737,51 +819,7 @@ let update t ui (frame : Frame.t) =
         else t in
       if bs.released && left bs then begin
         match t.drag with
-         | Some (Wiring w) ->
-             let target = List.find_map (fun ((tp : P.placed), tax, tay, ttile, _, _, _) ->
-               if not (Ui.hovered_within ui ttile) then None else
-               let mx, my = mouse in
-               let gx = (mx -. sx t 0.) /. z and gy = (my -. sy t 0.) /. z in
-               let lx = gx -. tax and ly = gy -. tay in
-               match tp.item with
-               | P.Return ->
-                   Option.map (fun (s : P.scope) -> s.path @ [ "@result" ], E.Whole) t.scope
-               | Input _ -> None
-               | Item n ->
-                   (match n.zone with
-                    | None ->
-                        (* anywhere on the header is the in-port of the first geometry slot *)
-                        (match row_at ~header:infinity tp n ~shown:(tp.shown) ~px:lx ~py:ly with
-                         | Some i when i < List.length n.rows ->
-                             let r = List.nth n.rows i in
-                             if r.socket then Some (n.path, r.key) else None
-                         | _ -> None)
-                    | Some zn when tp.collapsed ->
-                        let i = int_of_float ((ly -. P.head_height) /. P.row_height) in
-                        (match List.nth_opt zn.rail i with
-                         | Some { key = Some key; _ } when ly >= P.head_height -> Some (n.path, key)
-                         | _ -> None)
-                    | Some zn ->
-                        let extras = P.extra_rails zn in
-                        if ly < P.head_height then
-                          (match P.label_row zn with
-                           | Some { key = Some key; _ } when lx < 24. -> Some (n.path, key)
-                           | _ -> None)
-                        else if ly < P.rail_top n -. 28. then
-                          (match List.nth_opt extras (int_of_float ((ly -. P.head_height) /. P.row_height)) with
-                           | Some { key = Some key; _ } when lx < 24. -> Some (n.path, key)
-                           | _ -> None)
-                        else if lx > tp.w -. 24. && ly >= P.rail_top n then
-                          Some (zn.scope.path @ [ "@result" ], E.Whole)
-                        else None)) tiles in
-             (* a wire let go on empty canvas: the add menu there, after the node it came from *)
-             let on_canvas = target = None && List.nth_opt (List.rev p.path) 0 = Some w.src
-               && not (List.exists (fun (_, _, _, ttile, _, _, _) -> Ui.hovered_within ui ttile) tiles) in
-             (match target with
-              | Some (node, key) -> emit (Syntax_edit (E.Connect { node; key; src = w.src; iter = w.iter }))
-              | None when on_canvas -> emit (Selected [ p.path ]); (let x, y = bs.release_point in emit (Menu_requested (x, y)))
-              | None -> emit (Notice "Drop the wire on an input row"));
-             { t with drag = None; selected = if on_canvas then Path_set.singleton p.path else t.selected }
+         | Some (Wiring w) -> finish_wire t w ~src_path:p.path ~release_point:bs.release_point
          | _ -> { t with drag = None }
       end else t) t outs in
     t) t tiles in
@@ -973,10 +1011,15 @@ let update t ui (frame : Frame.t) =
 
 (* ------------------------------------------------------------- test hooks *)
 
+let selected_wire t = Option.map (fun (path, key, _) -> path, key) t.selected_wire
+
 module Private = struct
+  let ghost t path = match t.records, node_of t path, item_at t path with
+    | Some records, Some ({ zone = None; _ } as n), Some (p, _, _) when p.shown <> P.Full ->
+        Some (footer_of t records n).value
+    | _ -> None
   let grabbed t = t.panning_grab
   let macro_step = lens_of
-  let selected_wire t = Option.map (fun (path, key, _) -> path, key) t.selected_wire
   let highlighted_connections t = List.map (fun w ->
     (sx t (fst w.a), sy t (snd w.a)), (sx t (fst w.b), sy t (snd w.b))) t.highlighted
   let box_of t path = box_at t path

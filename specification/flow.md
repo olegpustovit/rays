@@ -362,8 +362,12 @@ Bypass on `if` selects its then arm; `cond` and `case` cannot be bypassed.
 - **Tags.** A wire whose ends are more than three columns (864 points) apart is not drawn:
   a 14-point stub at each end and the source's title in ink-2 left of the input (a
   *tag*). Selecting either end lights the chain and draws the real wire. A tagged wire has no
-  hit boxes. `⇧Y` (`scope.tags`) turns tags off and on (view state). A trunk with branches
-  for one source and many sinks is not drawn.
+  hit boxes. `⇧Y` (`scope.tags`) turns tags off and on (view state).
+- **Trunk and branch.** A source read by three or more inputs (two of them plain straight
+  segments) leaves its port as one trunk 36 points long to a junction (a 5-point square, drawn
+  as a bend), then one branch to each sink (`Scope_wires.bundle`). Every wire keeps its own
+  polyline `[port; junction; sink]`, so hover and selection address one wire by its branch (the
+  trunk answers as the topmost of them). A bent, dashed, level or tagged wire does not bundle.
 - An unfolded call lands one column left of its owner (§6.1); when it falls outside the view
   the pane pans to it, nothing else moves.
 - Hovering a connected port highlights its wires; hovering a wire highlights that
@@ -464,7 +468,7 @@ selection, row keys on the row under the pointer.
 | `⌥↑` / `⌥↓` | `scope.item-up` / `scope.item-down` | move the hovered item of a `list`, a `str` or a `scene/merge`; off an item, move the selected binding in the text (`Move_binding`: text order only, sticky layout keeps every card; refused past a neighbour it reads or is read by) |
 | `Esc` / `u` | `scene.back` / `scene.up` | back along the route taken (`Leader.Back`); a click on an earlier crumb of the graph header (`Chrome.Crumb`) goes that far |
 
-Dragging a wire from an out-port and letting go on empty canvas selects its node and opens the add menu there (`Menu_requested`); the kind picked is wired to it when one of its inputs takes the node's type (an anonymous nested node cannot be wired: name it first). With records, a card below Full shows its value at the pinned iteration beside its out-port. A function frame's own variable reads back into the body below its rail row and inside the frame; a `fn` frame whose result is a vector literal shows it as a `result` card.
+Dragging a wire from an out-port and letting go on empty canvas selects its node and opens the add menu there (`Menu_requested`); the kind picked is wired to it when one of its inputs takes the node's type. Pulling a *wire* itself (past 6 points) is the same drag from its source, and the wire stays selected (`Scope.selected_wire`): the kind picked is inserted on it, source -> new node -> the wire's input, one `Syntax_batch` "Insert node" (`Core_add.scope_add`); dropped on an input row it connects the source there too. An anonymous nested node (`holder#input`) as the source is named first (`Rename` binds it as `Unfold` does, with the kind's name made fresh) in the same one undo step as the `Add_node`. With records, a card below Full shows its value at the pinned iteration beside its out-port (`Scope.Private.ghost`, tested). A function frame's own variable reads back into the body below its rail row and inside the frame; a `fn` frame whose result is a vector literal shows it as a `result` card.
 | `⌘D` | `scope.duplicate` | copy the selected bindings of one scope with fresh names |
 | `⌘C` / `⌘X` / `⌘V` | `scope.copy` / `scope.cut` / `scope.paste` | bindings as text on the clipboard |
 | `i` / `⇧I` / `u` | `scene.enter` / `scene.peek` / `scene.up` | follow a reference / peek it in a floating graph / back |

@@ -187,4 +187,4 @@ that one model.
 
 ## G3 gestures
 
-Wire dropped on empty canvas: `Selected [source]` then `Menu_requested`; the host opens the add menu after that node. `Alt Up/Down` off a list item is `Move_binding`; `Shift-M`, `Shift-L`, `Alt-Shift-I` are `Wrap` Map / Filter and `Inline_defn`. `[` `]` with nothing selected step every zone. A zone's own variable wire (`Scope_wires.route ~inside`) stays in the frame and runs below the rail row.
+Wire dropped on empty canvas: `Selected [source]` then `Menu_requested`; the host opens the add menu after that node. A wire pulled past 6 points is the same drag (`finish_wire`) and stays `selected_wire`; the host inserts the picked node on it. `Scope_wires.bundle` joins a source's 3+ wires in a trunk and junction. `Alt Up/Down` off a list item is `Move_binding`; `Shift-M`, `Shift-L`, `Alt-Shift-I` are `Wrap` Map / Filter and `Inline_defn`. `[` `]` with nothing selected step every zone. A zone's own variable wire (`Scope_wires.route ~inside`) stays in the frame and runs below the rail row.

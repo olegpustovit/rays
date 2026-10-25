@@ -166,14 +166,19 @@ val update : t -> Pxui.Ui.t -> Rays.Frame.t -> t * change list
 (** Build the pane inside [Pxui.Ui.frame].  Hidden iterations are never
     built: a zone draws its body once, whatever its iteration count. *)
 
+val selected_wire : t -> (path * Flow_graph.Flow_edit.arg_key) option
+(** The wire a click selected: the node and input it ends at.  A wire pulled into empty canvas keeps it
+    while the add menu is open, and the node picked is inserted on it. *)
+
 module Private : sig
+  val ghost : t -> path -> string option
+  (* the value drawn beside a card's out-port where it has no footer (below Full), at the pinned iterations *)
   val grabbed : t -> bool
   (* a pan holds the pointer (relative mouse) *)
   val macro_step : t -> path -> int option
   (* the step shown by the open expansion panel of a macro call ([0] is the call as written, one
      past the expansions the template); [None] while the panel is closed.  View state: the toggle
      at the right of the card's title opens it and its step buttons choose the step *)
-  val selected_wire : t -> (path * Flow_graph.Flow_edit.arg_key) option
   val highlighted_connections : t -> ((float * float) * (float * float)) list
   val box_of : t -> path -> (float * float * float * float) option
   (* previous button, track, next button, in screen points *)

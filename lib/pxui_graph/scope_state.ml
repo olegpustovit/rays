@@ -175,7 +175,6 @@ let wire_lit (up, down) (w : wire) = match w.from, w.into with
 let node_lit (up, down) p = Path_set.mem p up || Path_set.mem p down
 
 (* a wire longer than three columns reads as a name tag at its use site unless its chain is lit (flow.md 6.4) *)
-let tag_span = 3. *. 288.
 let tagged t (w : wire) =
   t.tags && w.target <> None && abs_float (fst w.b -. fst w.a) > tag_span
   && not (match chains_of t with Some c -> wire_lit c w | None -> false)

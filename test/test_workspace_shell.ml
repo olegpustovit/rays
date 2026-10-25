@@ -319,6 +319,57 @@ let run_unbound_panels () =
     ("retyping a looped panel edits its template: " ^ Option.value ~default:"-" (E3.undo_label !e));
   E3.close !e
 
+(* Wires from anything, in one step: a node added after a nested node (a call written in another's
+   input) names it first, and a node added on a wire pulled into empty canvas sits between the
+   wire's source and its sink *)
+let run_wire_gestures () =
+  let count = ref 0 in
+  let started text =
+    let e = ref (editor text) in
+    let step ?(buttons = []) mouse events = incr count; e := E3.update !e (frame ~buttons mouse events !count) in
+    step (450., 300.) []; step (450., 300.) [];
+    e, step in
+  let key k = Event.KeyPressed k and ch c = Event.KeyPressed (Input.KeyChar c) in
+  let pick step text = step (450., 300.) [ key (Input.KeyChar '/'); ch 'a' ]; step (450., 300.) [ Event.TextInput text ];
+    step (450., 300.) [ key Input.Enter ]; step (450., 300.) [] in
+  let nested = "(workspace w (graph g :context sop (let* [m (sop/transform (sop/box))] m)))" in
+  let e, step = started nested in
+  e := Rays_editor.Reduce.select_path !e [ "g"; "m#0" ];
+  pick step "transform";
+  check (E3.undo_label !e = Some "Add node" && not (has (source !e) "(sop/transform (sop/box))")
+    && has (source !e) "(sop/box)" && has (source !e) "(sop/transform box)")
+    ("a node after a nested node: " ^ source !e);
+  incr count;
+  e := E3.update !e { (frame (450., 300.) [ ch 'z' ] !count) with keys = [ Input.Meta ] };
+  check (has (source !e) "(sop/transform (sop/box))" && E3.undo_label !e = None)
+    ("one undo took the name and the node back: " ^ source !e);
+  E3.close !e;
+  let e, step = started "(workspace w (graph g :context sop (let* [a (sop/box) m (sop/transform a)] m)))" in
+  let gx, gy, gw, gh = (E3.panes !e (frame (0., 0.) [] 0)).graph in
+  let p = float (gx + 40), float (gy + 40) in
+  step p [ Event.MouseMoved p ]; step ~buttons:[ Input.LeftButton ] p [ Event.MousePressed (Input.LeftButton, p) ];
+  step p [ Event.MouseReleased (Input.LeftButton, p) ];
+  step p [ Event.KeyPressed Input.Home ]; step p [ ch 'i' ]; step p [];
+  check (E3.level !e = Some "g") "the graph is open";
+  let box path = Option.get (E3.node_box !e path) in
+  let ax, ay, aw, _ = box [ "g"; "a" ] and mx, my, _, _ = box [ "g"; "m" ] in
+  (* the wire runs from a's out-port to m's header in-port *)
+  let z = float (mx - ax) /. 288. in
+  let from = float (ax + aw), float ay +. 11.75 *. z and into = float mx, float my +. 11.75 *. z in
+  let mid = (fst from +. fst into) /. 2., (snd from +. snd into) /. 2. in
+  let empty = float (gx + gw - 30), float (gy + gh - 30) in
+  let held = [ Input.LeftButton ] in
+  step mid [ Event.MouseMoved mid ];
+  step ~buttons:held mid [ Event.MousePressed (Input.LeftButton, mid) ];
+  step ~buttons:held empty [ Event.MouseMoved empty ];
+  step empty [ Event.MouseReleased (Input.LeftButton, empty) ];
+  step empty [];
+  step empty [ Event.TextInput "transform" ]; step empty [ key Input.Enter ]; step empty [];
+  check (E3.undo_label !e = Some "Insert node" && has (source !e) "(sop/transform a)"
+    && has (source !e) "(sop/transform transform)")
+    ("a node inserted on a pulled wire: " ^ source !e);
+  E3.close !e
+
 (* Value nodes are bindings: the add menu offers a number, the time, a vector and every operator, and
    each becomes one [Add_node] with the expression written *)
 let run_values () =
@@ -2470,7 +2521,7 @@ let run () =
     else Option.value ~default:45. (Option.bind (Sys.getenv_opt "RAYS_SUITE_BUDGET") float_of_string_opt) in
   let start = Unix.gettimeofday () and skipped = ref 0 in
   List.iter (fun section -> if Unix.gettimeofday () -. start > budget then incr skipped else section ())
-    [ run_ops;
+    [ run_wire_gestures; run_ops;
       run_array_capacity_menu; run_lisp_inspector; run_context_menus; run_expression_chip; run_nested_inspector; run_op_inspector; run_spreadsheet; run_panels; run_studio; run_copy_lisp; run_hide_and_order; run_root_section; run_layouts; run_compose; run_ref_picker; run_result_view; run_loop_view; run_geometry_view; run_panel_states; run_camera_zoom; run_cameras; run_lowering; run_panel_keys; run_unbound_panels; run_values; run_duplicate_and_view; run_movers; run_frame_key; run_loop_copies; run_loop_expression; run_editor; run_restore; run_views; run_instances; run_host_scene_edit; run_panel_chain;
       run_undo_under_pane; run_atomic_frame; run_undo_and_input; run_carry_reaches_no_history
     ];

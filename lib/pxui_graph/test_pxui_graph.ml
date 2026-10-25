@@ -237,6 +237,23 @@ let scope_levels () =
   let v, changes = scope_step v (frame ~mouse:empty ~events:[ mouse_release (Input.LeftButton, empty) ] ()) in
   check (List.mem (Scope.Selected [ b ]) changes && List.exists (function Scope.Menu_requested _ -> true | _ -> false) changes
     && Scope.selected v = [ b ]) "a wire let go on empty canvas did not ask for the node menu after its source";
+  (* a wire itself pulled into empty canvas does the same, and stays selected: the host inserts on it *)
+  (match List.find_opt (fun i -> match Scope.Private.wire_target view i with Some (n, _) -> n = c | None -> false)
+           (List.init (Scope.Private.wire_count view) Fun.id) with
+   | None -> fail "no wire into c"
+   | Some i ->
+       let mx, my = Option.get (Scope.Private.wire_midpoint view i) in
+       let mid = int_of_float mx, int_of_float my in
+       let v, _ = scope_step view (frame ~mouse:mid ~events:[ mouse_move mid; mouse_press (Input.LeftButton, mid) ] ()) in
+       let v, _ = scope_step v (frame ~mouse:empty ~events:[ mouse_move empty ] ()) in
+       let v, changes = scope_step v (frame ~mouse:empty ~events:[ mouse_release (Input.LeftButton, empty) ] ()) in
+       check (List.mem (Scope.Selected [ a ]) changes && List.exists (function Scope.Menu_requested _ -> true | _ -> false) changes
+         && Scope.selected v = [ a ] && Option.map fst (Scope.selected_wire v) = Some c)
+         "a wire pulled into empty canvas did not ask for the node menu with the wire selected";
+       (* a short press-release on the wire is still just a click *)
+       let v, _ = scope_step view (frame ~mouse:mid ~events:[ mouse_move mid; mouse_press (Input.LeftButton, mid) ] ()) in
+       let _, changes = scope_step v (frame ~mouse:mid ~events:[ mouse_release (Input.LeftButton, mid) ] ()) in
+       check (not (List.exists (function Scope.Menu_requested _ -> true | _ -> false) changes)) "a click on a wire opened the menu");
   (* a frame's own variable reads back into its body: the wire stays inside the frame, below the label row *)
   let mw = Editor_document.Workspace_doc.of_text scope_catalog
     "(workspace m (graph g :context value (let* [boxes (array/vec3 8) ys (map (fn [i] (let* [p (array/nth boxes (int i))] [p.x p.y 0])) (array/range 4))] (array/count ys))))"
@@ -485,6 +502,47 @@ let scope_carry () =
   (* the marks of a carry paint without changing what the pane reports *)
   let marked = Scope.with_carry ~lit:[ heart, "a" ] ~hot:(Some (heart, true)) view in
   ignore (scope_step marked (frame ()))
+
+(* A card below Full has no footer; the value of its out-port at the pinned iteration is drawn beside it
+   (a ghost value): [Private.ghost] reads it at the pinned iteration. *)
+let scope_ghost_values () =
+  let w = (Editor_document.Workspace_doc.of_text scope_catalog
+    "(workspace w (graph g :context value (let* [k 6.0 ys (for [i (range 4)] (let* [a (* k (float i)) b (+ a 1.0)] b)) n (reduce (fn [acc x] (+ acc x)) 0.0 ys)] n)))"
+    |> function Ok d -> d | Error m -> fail (String.concat "; " (List.map Flow.Diagnostic.to_string m))).checked in
+  let scope = P.of_graph scope_catalog w "g" in
+  let view index = Scope.create ~width:1000 ~height:700 ()
+    |> Scope.with_scope ~probe:(fun _ -> index) ~key:"g" scope |> Scope.with_records (recorded w) in
+  let ghost index path = Scope.Private.ghost (fst (scope_step (view index) (frame ()))) path in
+  check (ghost 0 [ "g"; "k" ] = Some "6") "a card below Full showed no value beside its out-port";
+  check (ghost 0 [ "g"; "ys"; "b" ] = Some "1" && ghost 3 [ "g"; "ys"; "b" ] = Some "19")
+    "the ghost value did not follow the pinned iteration";
+  check (Scope.Private.ghost (fst (scope_step (Scope.create ~width:1000 ~height:700 () |> Scope.with_scope ~key:"g" scope) (frame ()))) [ "g"; "k" ] = None)
+    "a ghost value without records"
+
+(* A source read by three inputs leaves as one trunk to a junction, then a branch to each; every wire
+   is still its own polyline and is selected alone *)
+let scope_trunk () =
+  let w = (Editor_document.Workspace_doc.of_text scope_catalog
+    "(workspace w (graph g :context sop (let* [a (sop/box) b (sop/transform a) c (sop/transform a) d (sop/transform a)] (sop/merge (list b c d)))))"
+    |> function Ok d -> d | Error m -> fail (String.concat "; " (List.map Flow.Diagnostic.to_string m))).checked in
+  let view, _ = scope_view w "g" in
+  let view = fst (scope_step view (frame ())) in
+  let from_a = List.filter (fun i -> match Scope.Private.wire_target view i with
+    | Some (n, _) -> List.mem n [ [ "g"; "b" ]; [ "g"; "c" ]; [ "g"; "d" ] ] | None -> false)
+    (List.init (Scope.Private.wire_count view) Fun.id) in
+  check (List.length from_a = 3) "three wires leave a";
+  let pts = List.map (Scope.Private.wire_points view) from_a in
+  (* the one level with a (a straight line is its own trunk) stays a segment; the others branch off the junction *)
+  let bent = List.filter (fun p -> List.length p = 3) pts in
+  check (List.length bent = 2 && List.length (List.filter (fun p -> List.length p = 2) pts) = 1)
+    "a source read three times did not draw a junction";
+  check (List.length (List.sort_uniq compare (List.map (fun p -> List.nth p 1) bent)) = 1)
+    "the branches do not share one junction";
+  List.iter (fun i ->
+    let mx, my = Option.get (Scope.Private.wire_midpoint view i) in
+    let v, _ = scope_click view (int_of_float mx, int_of_float my) in
+    check (Scope.selected_wire v = Scope.Private.wire_target view i) "a branch did not select its own wire")
+    (List.filter (fun i -> List.length (Scope.Private.wire_points view i) = 3) from_a)
 
 let scope_gestures () =
   let module E = Flow_graph.Flow_edit in
@@ -1039,11 +1097,11 @@ let run_scope () =
   check (Scope.selected view0 = [ heart ]) "heart is selected";
   (* some wire of the graph (not under a card) is hit at its longest segment's middle *)
   let view = List.fold_left (fun found i ->
-    if Scope.Private.selected_wire found <> None || Scope.Private.wire_target view0 i = None then found else
+    if Scope.selected_wire found <> None || Scope.Private.wire_target view0 i = None then found else
     let wpt = Option.get (Scope.Private.wire_midpoint view0 i) in
     fst (scope_click view0 (int_of_float (fst wpt), int_of_float (snd wpt))))
     view0 (List.init (Scope.Private.wire_count view0) Fun.id) in
-  check (Scope.Private.selected_wire view <> None) "clicking wire selected it";
+  check (Scope.selected_wire view <> None) "clicking wire selected it";
   check (Scope.selected view = []) "clicking wire cleared node selection";
   let _, changes = Scope.run_command view Scope.Delete in
   check (match changes with [ Scope.Syntax_edit (Flow_graph.Flow_edit.Disconnect _) ] -> true | _ -> false)
@@ -1134,6 +1192,8 @@ let run_scope () =
   let _, changes = Scope.run_command (Scope.select [] view) Scope.Make_macro in
   check (match changes with [ Scope.Notice _ ] -> true | _ -> false) "m with nothing selected";
   scope_gestures ();
+  scope_ghost_values ();
+  scope_trunk ();
   scope_carry ();
   scope_connection_hover ();
   scope_levels ();
