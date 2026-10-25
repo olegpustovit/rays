@@ -716,15 +716,19 @@ let editor_w9 () =
   let catalog = Editor_document.Contexts.catalog ~version:Flow_sop.Manifest.version
       Sop_catalog.Editor.factories |> Result.get_ok in
   let soft = [ "rosette"; "soft" ] and petals = [ "rosette"; ":petals" ] in
-  let scenario script =
-    let workspace = Rays_editor.Workspace_doc.of_text catalog (small_rosette ()) |> Result.get_ok in
-    let presets = Filename.temp_dir "rays-text-presets" "" in
-  let env = ref (E.create ~presets ~await:true ~workspace
+  let workspace = Rays_editor.Workspace_doc.of_text catalog (small_rosette ()) |> Result.get_ok in
+  let presets = Filename.temp_dir "rays-text-presets" "" in
+  let start () = E.create ~presets ~await:true ~workspace
         ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
           |> Result.map_error Rdk.Error.to_string)
-        ~scene3:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) () |> Result.get_ok) in
-    let mouse = ref (640., 360.) in
-    for n = 1 to 40 do
+        ~scene3:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) () |> Result.get_ok in
+  let mouse = ref (640., 360.) in
+  (* Every scenario's first edit is at frame 22 or later and an edit costs a workspace lowering (1.3 s), so the
+     frames before it (the zoom, the selection) run once and each scenario continues from their result (the UI handle is
+     shared, so the scenarios run in an order that leaves no dialog or scroll behind). *)
+  let frames env0 first last script =
+    let env = ref env0 in
+    for n = first to last do
       (* a card's header, where the graph pane put it (kit rev 3 cards: 24-point header) *)
       let head path (dx, dy) = match E.node_box !env path with
         | Some (x, y, w, _) -> float x +. (if dx < 0. then float w +. dx else dx), float y +. dy
@@ -745,9 +749,12 @@ let editor_w9 () =
         mouse_delta = 0., 0.; keys = []; mouse_buttons = []; events } in
       env := E.update !env f
     done;
-    let ws = E.workspace !env in
-    Flow.Lisp.print ws.source |> fst, E.undo_label !env in
-  let untouched, _ = scenario [] in
+    !env in
+  let prefix = frames (start ()) 1 21 [] in
+  let scenario ?(prefix = prefix) script =
+    let env = frames prefix 22 40 script in
+    Flow.Lisp.print (E.workspace env).source |> fst, E.undo_label env in
+  let untouched = Flow.Lisp.print (E.workspace prefix).source |> fst in
   check (contains untouched "^:bypass (sop/subdivide inner") "soft starts bypassed";
   (* the flag *)
   let text, label = scenario [ 22, (fun click head -> click (head soft (60., 12.))); 24, (fun _ _ -> [ Event.KeyPressed (Input.KeyChar 'b') ]) ] in
@@ -775,6 +782,17 @@ let editor_w9 () =
     32, (fun _ _ -> [ Event.KeyPressed Input.Enter ]) ] in
   check (contains text "(petals : int 3)" && label = Some "Input default")
     ("the inspector's input default: " ^ Option.value label ~default:"-");
+  (* the dialog: m over the selection, then Create macro *)
+  let text, label = scenario [ 22, (fun click head -> click (head soft (60., 12.)));
+    26, (fun _ _ -> [ Event.KeyPressed (Input.KeyChar 'm') ]); 30, (fun click _ -> click (500., 461.)) ] in
+  check (contains text "(defmacro soft_tpl [p1 inner]" && label = Some "Make macro")
+    ("the make-macro dialog: " ^ Option.value label ~default:"-");
+  (* Enter in the name field creates the macro too; the dialog keeps its state in the UI handle the frames share, so it starts from a handle of its own *)
+  let text, label = scenario ~prefix:(frames (start ()) 1 21 []) [ 22, (fun click head -> click (head soft (60., 12.)));
+    26, (fun _ _ -> [ Event.KeyPressed (Input.KeyChar 'm') ]); 30, (fun click _ -> click (700., 437.));
+    34, (fun _ _ -> [ Event.KeyPressed Input.Enter ]) ] in
+  check (contains text "(defmacro soft_tpl [p1 inner]" && label = Some "Make macro")
+    ("Enter in the make-macro dialog: " ^ Option.value label ~default:"-");
   (* the inspector note: click the field, type, Enter *)
   (* the note is the last section, closed, and below the fold of a node with this many rows: the
      wheel over a value field scrolls the inspector to its end, where the 24-point Note header sits
@@ -788,18 +806,7 @@ let editor_w9 () =
     28, wheel; 29, wheel; 30, (fun click _ -> click (1290., 763.));
     32, (fun _ _ -> [ Event.KeyPressed (Input.KeyChar 'a') ]); 34, (fun _ _ -> [ Event.TextInput "a fresh note" ]);
     36, (fun _ _ -> [ Event.KeyPressed Input.Enter ]) ] in
-  check (contains text "; a fresh note" && label = Some "Note") ("the note edit: " ^ Option.value label ~default:"-");
-  (* the dialog: m over the selection, then Create macro *)
-  let text, label = scenario [ 22, (fun click head -> click (head soft (60., 12.)));
-    26, (fun _ _ -> [ Event.KeyPressed (Input.KeyChar 'm') ]); 30, (fun click _ -> click (500., 461.)) ] in
-  check (contains text "(defmacro soft_tpl [p1 inner]" && label = Some "Make macro")
-    ("the make-macro dialog: " ^ Option.value label ~default:"-");
-  (* Enter in the name field creates the macro too *)
-  let text, label = scenario [ 22, (fun click head -> click (head soft (60., 12.)));
-    26, (fun _ _ -> [ Event.KeyPressed (Input.KeyChar 'm') ]); 30, (fun click _ -> click (700., 437.));
-    34, (fun _ _ -> [ Event.KeyPressed Input.Enter ]) ] in
-  check (contains text "(defmacro soft_tpl [p1 inner]" && label = Some "Make macro")
-    ("Enter in the make-macro dialog: " ^ Option.value label ~default:"-")
+  check (contains text "; a fresh note" && label = Some "Note") ("the note edit: " ^ Option.value label ~default:"-")
 
 (* Scrubbing :active in the Document text: dragging the number after [:active] sideways switches
    the layout on every frame of the drag and the whole drag is one "Edit text" entry. *)
@@ -942,6 +949,8 @@ let editor_literal_scrub () =
 (* A graph held by [y] and put on the text pane: [(ref a)] is inserted at the byte under the pointer
    and the text must check (Graph tab: one Set_graph; Document tab: the whole text), else refused
    with the checker's words; an unapplied draft refuses it too. *)
+(* [~carry_budget:infinity]: a carry shows its preview only when applying and the cook took under the budget (0.5 s of
+   the real clock); on a loaded machine the cook of this workspace exceeded it and the preview was only described. *)
 let editor_text_drop () =
   let open Rays in
   let catalog = Editor_document.Contexts.catalog ~version:Flow_sop.Manifest.version
@@ -954,7 +963,7 @@ let editor_text_drop () =
     (ui/workspace (ui/split-at "vertical" 0.12 (ui/graph) (ui/lisp)))))|} in
   let workspace = Rays_editor.Workspace_doc.of_text catalog text |> Result.get_ok in
   let presets = Filename.temp_dir "rays-text-presets" "" in
-  let env = ref (E.create ~presets ~await:true ~workspace
+  let env = ref (E.create ~presets ~await:true ~carry_budget:Float.infinity ~workspace
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
       ~scene3:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) () |> Result.get_ok) in
