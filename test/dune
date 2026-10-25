@@ -235,7 +235,7 @@
 
 (rule
  (alias test_workspace_shell)
- (deps (glob_files ../specification/workspace/cases/*.lisp) (glob_files_rec ../sketches/*.rays))
+ (deps (env_var RAYS_SLOW) (glob_files ../specification/workspace/cases/*.lisp) (glob_files_rec ../sketches/*.rays))
  (action (run %{exe:test_main.exe} test_workspace_shell)))
 
 (rule
