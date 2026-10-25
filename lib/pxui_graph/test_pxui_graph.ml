@@ -556,6 +556,41 @@ let scope_trunk () =
          && changes = [ Scope.Selected (Scope.selected v) ])
     "pressing the trunk did not select the source node"
 
+(* A source read by near sinks and by far ones behind a chain: the wires that bend round the chain
+   leave the same junction as the straight ones, keep their own route to their sink, are still
+   selected alone, and the trunk selects the source *)
+let scope_trunk_bent () =
+  let w = (Editor_document.Workspace_doc.of_text scope_catalog
+    "(workspace w (graph g :context sop (let* [a (sop/box) b (sop/transform a) c (sop/transform b) h (sop/merge (list a b c)) i (sop/transform a) j (sop/transform a)] (sop/merge (list h i j)))))"
+    |> function Ok d -> d | Error m -> fail (String.concat "; " (List.map Flow.Diagnostic.to_string m))).checked in
+  let view, _ = scope_view w "g" in
+  let view = fst (scope_step view (frame ())) in
+  let all = List.init (Scope.Private.wire_count view) Fun.id in
+  let src i = List.hd (Scope.Private.wire_points view i) in
+  let a_src = src (List.hd all) in
+  let from_a = List.filter (fun i -> src i = a_src) all in
+  let joined = List.filter (fun i -> List.length (Scope.Private.wire_points view i) > 2
+                                     && (List.nth (Scope.Private.wire_points view i) 1) |> snd = snd a_src) from_a in
+  check (List.length from_a = 4 && List.length joined = 3) "a's wires did not bundle (one level stays straight)";
+  check (List.exists (fun i -> List.length (Scope.Private.wire_points view i) > 3) joined)
+    "no bent wire joined the trunk";
+  check (List.length (List.sort_uniq compare (List.map (fun i -> List.nth (Scope.Private.wire_points view i) 1) joined)) = 1)
+    "the bent and the straight branches do not share one junction";
+  (* each branch is still its own wire *)
+  List.iter (fun i ->
+    let mx, my = Option.get (Scope.Private.wire_midpoint view i) in
+    let v, _ = scope_click view (int_of_float mx, int_of_float my) in
+    check (Scope.selected_wire v = Scope.Private.wire_target view i) "a branch did not select its own wire")
+    joined;
+  (* the trunk selects the source and lights every wire of the group, bent ones included *)
+  let (ax, ay), (jx, _) = (match Scope.Private.wire_points view (List.hd joined) with a :: j :: _ -> a, j | _ -> fail "no junction") in
+  let mid = int_of_float ((ax +. jx) /. 2.), int_of_float ay in
+  let hov = fst (scope_step view (frame ~mouse:mid ~events:[ mouse_move mid ] ())) in
+  let lit = List.filter (fun (s, _) -> s = (ax, ay)) (Scope.Private.highlighted_connections hov) in
+  check (List.length lit = 4) (Printf.sprintf "hovering the trunk lit %d wires, not 4" (List.length lit));
+  let v, _ = scope_click view mid in
+  check (Scope.selected_wire v = None && List.length (Scope.selected v) = 1) "pressing the trunk did not select the source"
+
 let scope_gestures () =
   let module E = Flow_graph.Flow_edit in
   let module S = Flow.Syntax in
@@ -1206,6 +1241,7 @@ let run_scope () =
   scope_gestures ();
   scope_ghost_values ();
   scope_trunk ();
+  scope_trunk_bent ();
   scope_carry ();
   scope_connection_hover ();
   scope_levels ();

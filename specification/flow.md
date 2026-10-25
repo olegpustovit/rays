@@ -367,7 +367,10 @@ Bypass on `if` selects its then arm; `cond` and `case` cannot be bypassed.
   segments) leaves its port as one trunk 36 points long to a junction (a 5-point square, drawn
   as a bend), then one branch to each sink (`Scope_wires.bundle`). Every wire keeps its own
   polyline `[port; junction; sink]`, so hover and selection address one wire by its branch (the
-  trunk answers as the topmost of them). A bent, dashed, level or tagged wire does not bundle.
+  trunk answers as the topmost of them). A bent wire joins too: it keeps its routed polyline
+  after the junction (the junction is inserted into its first leg, or a 24-point stub is stretched
+  to it), so one fan-out is one trunk and its branches. A dashed, level or tagged wire does not
+  bundle.
 - An unfolded call lands one column left of its owner (§6.1); when it falls outside the view
   the pane pans to it, nothing else moves.
 - Hovering a connected port highlights its wires; hovering a wire highlights that

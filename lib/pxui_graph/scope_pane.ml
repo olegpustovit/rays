@@ -599,8 +599,8 @@ let update t ui (frame : Frame.t) =
         && abs_float (sy t (snd point) -. y) <= 1.5 *. z +. 0.5 in
   (* the shared trunk of a bundled fan-out: the pointer on the segment from the port to the junction.
      It belongs to every wire of the group, so it lights all of them and a press selects their source *)
-  let on_trunk (w : wire) = match w.pts with
-    | [ (ax, ay); (jx, _); _ ] ->
+  let on_trunk (w : wire) = match w.junction, w.pts with
+    | Some jx, (ax, ay) :: _ ->
         let mx, my = mouse in
         abs_float (my -. sy t ay) <= 4. && mx >= sx t ax && mx <= sx t jx
     | _ -> false in

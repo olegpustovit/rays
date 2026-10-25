@@ -74,6 +74,7 @@ type wire = {
   target : (path * E.arg_key * S.t option) option;
   pts : (float * float) list;  (* the drawn polyline, [a] .. [b]: straight, or bent clear of the cards *)
   dashed : bool;  (* a loop's feedback *)
+  junction : float option;  (* x of the shared trunk's end, when the wire is bundled with its siblings *)
   from : path option;  (* the node (or zone) it reads from, and the one it ends at: the dataflow chains *)
   into : path option;
 }
@@ -252,10 +253,12 @@ let route ?(inside = false) grid ~excl ((ax, ay) as a) ((bx, by) as b) =
     | clear -> List.fold_left (fun best c -> if length c < length best then c else best) (List.hd clear) clear
   end
 
-(* Trunk and branch: a source read by [bundle_min] or more inputs (two of them straight segments)
+(* Trunk and branch: a source read by [bundle_min] or more inputs (two of them able to join)
    leaves the port as one shared trunk to a junction [trunk] points out, then a branch to each sink.
-   Every such wire keeps its own polyline ([a], junction, [b]), so each is still hovered and
-   selected alone (the trunk answers as the topmost of them).  A wire that is bent, dashed, level
+   A straight wire becomes [a; junction; b].  A bent wire whose first leg runs level out of the
+   port keeps its own route after the junction: a longer leg gains the junction as a point, a
+   24-point stub is stretched to it.  Each wire keeps its own polyline, so each is still hovered
+   and selected alone (the trunk answers as the topmost of them).  A wire that is dashed, level
    with its source or long enough to be drawn as a tag does not bundle. *)
 let trunk = 36.
 let bundle_min = 3
@@ -265,17 +268,36 @@ let bundle grid (wires : wire array) =
   Array.iteri (fun i (w : wire) ->
     let (ax, ay), (bx, by) = w.a, w.b in
     if not w.dashed then Hashtbl.replace all w.a (1 + Option.value ~default:0 (Hashtbl.find_opt all w.a));
-    if not w.dashed && w.pts = [ w.a; w.b ] && bx -. ax > 2. *. trunk
-       && bx -. ax <= tag_span && Float.abs (by -. ay) > 1. then
+    let straight = w.pts = [ w.a; w.b ] && bx -. ax > 2. *. trunk && Float.abs (by -. ay) > 1.
+    and bent = match w.pts with
+      | _ :: (x1, _) :: _ :: _ -> x1 > ax +. 1.
+      | _ -> false in
+    if not w.dashed && bx -. ax <= tag_span && (straight || bent) then
       Hashtbl.replace groups w.a (i :: Option.value ~default:[] (Hashtbl.find_opt groups w.a))) wires;
   Hashtbl.iter (fun (ax, ay) members ->
     if Hashtbl.find all (ax, ay) >= bundle_min && List.length members >= 2 then begin
-      let j = ax +. trunk, ay in
-      List.iter (fun i ->
+      let jx = ax +. trunk in
+      let j = jx, ay in
+      let joined = List.filter_map (fun i ->
         let w = wires.(i) in
         let excl = Option.to_list w.from @ Option.to_list w.into in
-        if route grid ~excl j w.b = [ j; w.b ] && not (is_blocked grid ~excl w.a j) then
-          wires.(i) <- { w with pts = [ w.a; j; w.b ] }) members
+        let rec free = function
+          | p :: (q :: _ as rest) -> not (is_blocked grid ~excl p q) && free rest
+          | _ -> true in
+        let pts = match w.pts with
+          | [ a; b ] -> if route grid ~excl j b = [ j; b ] then Some [ a; j; b ] else None
+          | a :: ((x1, _) :: _ as rest) when x1 > jx +. 1. -> Some (a :: j :: rest)
+          | a :: (x1, y1) :: (x2, y2) :: ((x3, _) :: _ as rest) when y1 = ay && x2 = x1 && x3 > jx +. 1. ->
+              Some (a :: j :: (jx, y2) :: rest)
+          (* a stub up or down to a level run: rise from the junction instead *)
+          | a :: (_, y1) :: (x2, y2) :: rest when y2 = y1 && y1 <> ay && x2 > jx +. 1. ->
+              Some (a :: j :: (jx, y1) :: (x2, y2) :: rest)
+          | _ -> None in
+        match pts with
+        | Some pts when free pts -> Some (i, pts)
+        | _ -> None) members in
+      if List.length joined >= 2 then
+        List.iter (fun (i, pts) -> wires.(i) <- { wires.(i) with pts; junction = Some jx }) joined
     end) groups
 
 (* the old orthogonal style, kept for [:wires "rect"] *)
@@ -355,7 +377,7 @@ let compute ?(style = `Straight) ?(previous = empty_geo) ~name_w ~shown (scope :
               let pts = match Routes.find_opt reuse key with Some pts -> pts | None -> route ~inside grid ~excl s.pos b in
               Routes.replace routes key pts; pts
           | `Rect -> rect_points s.pos b in
-        wires := { a = s.pos; b; ty = s.ty; target; pts; dashed; from = s.owner; into = (match into with i :: _ -> Some i | [] -> None) } :: !wires
+        wires := { a = s.pos; b; ty = s.ty; target; pts; dashed; junction = None; from = s.owner; into = (match into with i :: _ -> Some i | [] -> None) } :: !wires
     | None -> () in
   let resolve chain name =
     List.find_map (fun tbl -> match Hashtbl.find_opt tbl name with
