@@ -1132,6 +1132,23 @@ let test_local_subdivide_contract () =
   let after_detail_hit = Session.stats evaluator in
   check (after_detail_hit.hits > before_detail_hit.hits)
     "procedural detail-override Subdivide did not cache";
+  let invalid_detail_source = triangle_source
+      |> add_detail "osd_scheme" (Rdk.Attribute.Text [|"none"|]) in
+  let invalid_detail = Lisp_sop.node ~with_:["invalid_detail_source", (Lisp_sop.snapshot (invalid_detail_source))] {|(sop/subdivide
+   (sop/ext_invalid_detail_source)
+   :crease_weight_mode "Auto"
+   :face_varying_interpolation "All"
+   :boundary_interpolation "Edge only"
+   :remove_holes true
+   :generate_resulting_creases true
+   :hole_group "")|} in
+  (match Session.cook evaluator ~context:current invalid_detail with
+   | Ok _ -> fail "procedural Subdivide accepted unsupported osd_scheme"
+   | Error error -> check (error.code = "invalid_topology"
+       && (match error.cause with
+           | Some cause -> contains cause "osd_scheme"
+           | None -> false))
+       "procedural Subdivide osd_scheme diagnostic");
   let curve_positions = Rdk.Packed.Float3.Private.of_owned_exn
       ~x:[|0.;1.;4.|] ~y:[|0.;2.;0.|] ~z:[|0.;0.;0.|] in
   let curve_topology = Rdk.Topology.create_owned ~point_count:3
