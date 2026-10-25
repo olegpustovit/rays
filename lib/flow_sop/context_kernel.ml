@@ -365,3 +365,26 @@ let fuse (x:W.node_definition) (u:W.node_definition) ~(baked:(string*Flow.Eval.v
         Some {x with body={x.body with body={x.body.body with node=W.Let (prefix @ xbs, xtail)};form}}
       end
   | _ -> None
+
+(* The helpers [roots] reach through [Call_fn], [Fn_ref] and, through the node kinds they call, other Lisp nodes' bodies:
+   what a nested lowering must carry (qualifying a library of 1000 helpers per node body was the cost). *)
+let reachable_defs (workspace : W.t) roots =
+  let seen = Hashtbl.create 16 in
+  let rec visit graph =
+    let found = ref [] in
+    ignore (map (fun (t : W.term) ->
+      (match t.node with
+       | W.Call_fn c -> found := c.fn :: !found | Call c -> found := c.kind :: !found
+       | Fn_ref name -> found := name :: !found
+       | Graph_ref {graph; _} when String.starts_with ~prefix:"def:" graph ->
+           found := String.sub graph 4 (String.length graph - 4) :: !found
+       | _ -> ()); t) graph);
+    List.iter (fun name -> if not (Hashtbl.mem seen name) then begin
+      Hashtbl.add seen name ();
+      List.iter (fun (d : W.graph) -> if d.name = name then visit d) workspace.defs;
+      List.iter (fun (n : W.node_definition) -> if n.kind.qualified = name then
+        List.iter visit (n.body :: List.map (fun term -> {n.body with W.body = term; inputs = []})
+          (List.map (fun (t, _, _) -> t) n.validations @ List.map snd n.normalizers))) workspace.nodes
+    end) !found in
+  List.iter visit roots;
+  List.filter (fun (d : W.graph) -> Hashtbl.mem seen d.name) workspace.defs

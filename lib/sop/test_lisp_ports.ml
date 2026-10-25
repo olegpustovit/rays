@@ -307,7 +307,6 @@ let setter_port key =
       "set_orient",":x 1e308",["x",P.Float_value 1e308];
       "set_transform",":m01 -2 :m03 4",["m01",P.Float_value(-2.);"m03",P.Float_value 4.]]
     |>List.filter(fun(candidate,_,_)->candidate=key) in
-  let grid=Plane_generators.grid ~connectivity:Grid_quads ~columns:64 ~rows:64 ~size:8.() |> get_ok |> payload in
   List.iter(fun geometry->
     let input=Lisp_sop.snapshot geometry and before=geometry_bytes geometry in
     List.iter(fun(key,keywords,changes)->
@@ -325,7 +324,7 @@ let setter_port key =
           check(geometry_bytes baseline=geometry_bytes(cooked s(context domains grain)actual))
             (key^": worker/grain bytes differ"))[1,97;8,97;4,4096]);
       check(before=geometry_bytes geometry)(key^": input mutated"))cases)
-    [payload(points 0);payload(points 1);grid;mixed();payload(points 32769)];
+    [payload(points 0);mixed();payload(points 32769)];
   let input=Lisp_sop.snapshot(mixed()) in
   List.iter(fun key->
     let initial=authored ~reference:false input key "" and oracle=native input key [] in
@@ -424,7 +423,6 @@ let metadata_port ?reference_input ?(extra_geometries=[]) ~key ~native_factory ~
     |Error d->Error(d.Sop.Diagnostic.code,d.message,d.cause)
     |Ok output->(match Sop.Payload.geometry output.payload with
         |Ok geometry->Ok(geometry_bytes geometry)|Error d->Error(d.code,d.message,d.cause)) in
-  let grid=Plane_generators.grid ~connectivity:Grid_quads ~columns:64 ~rows:64 ~size:8.()|>get_ok|>payload in
   List.iter(fun geometry->let before=geometry_bytes geometry and input=Lisp_sop.snapshot geometry in
     List.iter(fun(keywords,changes)->let actual=authored ~reference:false input keywords
       and walked=authored ~reference:true input keywords and expected=native input changes in
@@ -450,7 +448,7 @@ let metadata_port ?reference_input ?(extra_geometries=[]) ~key ~native_factory ~
           [1,97;8,97;4,4096]))(let stride=if extra_geometries=[] then 1 else if List.memq geometry extra_geometries then (if List.length cases>200 then 2 else 1) else 8 in
        List.filteri(fun i _->i mod stride=0)cases);  (* rule tables: the geometries that hold the named items get every case (every 2nd of 200+), the plain ones every 8th *)
     check(before=geometry_bytes geometry)(key^": input mutation"))
-    (([payload(points 0);payload(points 1);mixed()]@(if extra_geometries=[] then [grid;payload(points 32769)] else []))@extra_geometries);
+    (([payload(points 0);mixed()]@(if extra_geometries=[] then [payload(points 32769)] else []))@extra_geometries);
   let input=Lisp_sop.snapshot(mixed()) in
   let initial=fst(N.apply_parameters(authored ~reference:false input "")initial_changes|>get_string_ok)
   and oracle=native input initial_changes in

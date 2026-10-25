@@ -690,9 +690,11 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
         let validations = List.mapi (fun index (predicate, _, _) ->
           {body with name="lisp_validate_" ^ string_of_int index;
             context=Context.value;body=predicate}) definition.validations in
+        let reached = Context_kernel.reachable_defs checked (body::validations) in
         let nested = {checked with graphs=body::validations;
-          defs=List.map (fun (def, uses) ->
-            if uses then Context_kernel.specialize ~label ~context def else def)
+          defs=List.filter_map (fun (def, uses) ->
+            if not (List.memq def reached) then None
+            else Some (if uses then Context_kernel.specialize ~label ~context def else def))
             (def_context_use ());
           nodes=List.filter (fun (d : Workspace.node_definition) ->
             d.kind.qualified <> definition.kind.qualified) checked.nodes} in

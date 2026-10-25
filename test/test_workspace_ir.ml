@@ -20,8 +20,15 @@ let () =
   let small = ["ws_layout/"; "ws_kit/"; "voxel_wall/"; "flow_kernel/"] in
   let has s sub = let n = String.length sub in
     let rec go i = i + n <= String.length s && (String.sub s i n = sub || go (i + 1)) in go 0 in
-  let paths = if Sys.getenv_opt "RAYS_SLOW" = Some "1" then paths
-    else List.filter (fun p -> not (has p "sketches/") || List.exists (has p) small) paths in
+  (* the eleven that cost 3-41 s each (gallery, wave, sunflower, bloom, tiles, orrery, garland, rosette, tree, tunnel, procedural_modeling) wait for RAYS_SLOW=1: the other files
+     and fixtures take the same compiled-vs-reference path *)
+  let heavy = ["sop_gallery/"; "wave.lisp"; "sunflower.lisp"; "bloom.lisp"; "tiles.lisp"; "orrery.lisp";
+    "garland.lisp"; "rosette.lisp"; "tree.lisp"; "tunnel.lisp"; "procedural_modeling/"] in
+  let slow = Sys.getenv_opt "RAYS_SLOW" = Some "1" in
+  let paths = if slow then paths
+    else List.filter (fun p -> (not (has p "sketches/") || List.exists (has p) small)
+      && not (List.exists (has p) heavy)) paths in
+  let fixtures = if slow then fixtures else List.filter (fun p -> not (List.exists (has p) heavy)) fixtures in
   let custom = List.filter selected custom in
   let count = ref 0 in
   List.iter (fun path ->

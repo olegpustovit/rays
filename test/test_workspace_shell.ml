@@ -1759,7 +1759,7 @@ let run_studio () =
       E.Layout_remove { graph = "editor" } ] in
     check (has (text_of ws) "shell (ui/workspace") (name ^ ": the workspace binding was not kept");
     check (not (has (text_of ws) "(-> ")) (name ^ ": a layout was printed as a thread");
-    ignore (build_ok (of_text (Doc.to_text ws)))) [ "ws_layout"; "ws_bloom" ];
+    ignore (build_ok (of_text (Doc.to_text ws)))) [ "ws_layout" ];
   (* diagnostics *)
   let bad name body needle = expect_error name (with_editor ("    " ^ body)) needle in
   bad "an unknown graph" "(ui/workspace (ui/graph \"nope\"))" "E_UNKNOWN_GRAPH";

@@ -16,9 +16,8 @@ let registered_factories = lazy (
   let lowered = Flow_sop.Lower.of_checked ~factories:native workspace |> Result.get_ok in
   native @ lowered.factories)
 
-let check_metadata factory node =
+let check_metadata factory fields =
   let key = Edit_graph.factory_key factory in
-  let fields = Node.parameter_fields node in
   let names = Edit_graph.factory_slot_names factory in
   check (List.length names = Edit_graph.factory_arity factory
       && List.length (List.sort_uniq String.compare names) = List.length names)
@@ -630,13 +629,16 @@ let run ?(exhaustive = false) () =
               ("Flow manifest omitted SOP " ^ key)) factory_keys
         | _ -> fail "Malformed Flow manifest body")
    | _ -> fail "Flow manifest needs one top-level form");
+  (* The schema sweep reads the factory's fields; building all 165 default nodes (a body lowering each, about 25 s)
+     is the exhaustive run's, and the default one builds Box. *)
   List.iter (fun factory ->
+    vector_groups := !vector_groups + check_metadata factory (Edit_graph.factory_fields factory);
     let slots = List.init (Edit_graph.factory_arity factory) (fun _ -> None) in
+    if exhaustive || Edit_graph.factory_key factory = "box" then
     match Edit_graph.instantiate_optional factory slots with
     | Ok node ->
         check (Edit_graph.factory_facts factory = Node.facts node)
           ("default factory facts differ from the instantiated node: " ^ Edit_graph.factory_key factory);
-        vector_groups := !vector_groups + check_metadata factory node;
         if Edit_graph.factory_key factory = "box" then
           check (List.filter_map (fun (field : Parameter.field_view) ->
               if field.primary then Some field.name else None) (Node.parameter_fields node)
