@@ -24,11 +24,11 @@ type find = { query : string; replace : string; case : bool; replacing : bool; a
     open, the byte the current match is the first at or after, and whether the query field takes
     the keyboard this frame. *)
 
-type command = Find | Find_replace | Find_selection | Find_next | Find_previous | Definition
+type command = Find | Find_replace | Find_selection | Find_next | Find_previous | Definition | References
   | Select of int * int
 (** What the keys ask of the pane: the find bar (seeded from the selection for [Find] and
     [Find_selection], the latter without taking the keyboard; [Find_replace] opens the replace row),
-    the next or previous match, the definition under the caret, or a selection of the text. *)
+    the next or previous match, the definition or the references of the symbol under the caret, or a selection of the text. *)
 
 type request = { select : int * int; splice : (int * int * string) list }
 (** What the text area is asked once: replace the ranges (one undo step), then select. *)
@@ -173,6 +173,7 @@ type intent =
       (** a payload is held over the text at this byte of the shown text; [true] on the frame it is released *)
   | Find_set of find option * bool  (** the bar's new state, and whether the view goes to its current match *)
   | Request of request option  (** a request given to the area, or taken *)
+  | References_of of string  (** Shift-F12: the symbol under the caret, whose uses the editor lists *)
   | Resolved  (** the pending commands were resolved *)
 
 val find_all : case:bool -> string -> string -> (int * int) list
@@ -191,6 +192,12 @@ val find_replace : find -> (int * int) list -> all:bool -> (request * find) opti
 val symbols : string -> (string * string * int) list
 (** The bindings of a text as (name, kind, byte of the name): graphs, functions, macros and
     [let*] names, in order; empty for text that does not read. *)
+
+val symbol_at : string -> int -> string option
+(** The symbol the byte [at] touches; [None] for anything else or text that does not read. *)
+
+val references : string -> string -> (int * string) list
+(** [references text name]: the byte and the line's text of every use of the symbol [name], in order. *)
 
 val line_target : string -> string -> int option
 (** [line_target text "12:5"]: the byte of that 1-based line and character column ([":5"] is

@@ -66,8 +66,9 @@ returns the first rejected event as an error and still delivers the rest;
 - Native callbacks only queue (`specification/sdl3.md`, "Callback policy"): the
   file-dialog callback copies into a bounded native slot and the event poll on
   the initial domain turns it into `Dialog_closed`. No OCaml runs in a native
-  callback; live resize redraw would need an exception and is an open decision
-  there.
+  callback, with one shipped exception: live resize redraw (`specification/sdl3.md`,
+  "Live resize"). An `SDL_AddEventWatch` callback inside our own `SDL_PollEvent` calls the
+  sketch's registered closure, which draws the last scene only; keep it so.
 - Do not manually scale mouse events for Retina displays. SDL3 logical event
   coordinates keep drawing and hit testing aligned.
 - Query Metal drawable size for physical backing pixels. Preserve

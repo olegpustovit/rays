@@ -217,6 +217,10 @@ module Private : sig
     (** The (start, stop) of every non-overlapping match of a query. *)
     val symbols : string -> (string * string * int) list
     (** The bindings of a text: (name, kind, byte of the name). *)
+    val symbol_at : string -> int -> string option
+    (** The symbol a byte touches. *)
+    val references : string -> string -> (int * string) list
+    (** The byte and line text of every use of a symbol. *)
     val line_target : string -> string -> int option
     (** The byte of ["line"] or ["line:column"] (1-based). *)
     val binding : Flow.Syntax.t list -> string list -> (Flow.Syntax.t option * Flow.Syntax.t) option

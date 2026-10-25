@@ -1066,7 +1066,7 @@ let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_
     | None -> None, None
     | Some Keys ->
         let commands = List.filter (fun (command : Leader.command) -> match command.action with
-          | List_command _ | Frame_tile -> false | _ -> true) value.keymap in
+          | List_command _ | Frame_tile -> false | _ -> true) value.keymap @ Leader.text_keys in
         let context = String.lowercase_ascii (Leader.pane_name focus) ^ " focused" in
         (if Pxui_shell.Which_key.sheet ui ~context ~category:Leader.sheet_group commands then Some Keys else None), None
     | Some (Saving name) ->
@@ -1128,6 +1128,15 @@ let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_
           | None -> [] in
         search_prompt ~key:"symbol-jump" ~title:"Go to symbol" ~label:"Search bindings" ~query all
           ~again:(fun q -> Symbols q)
+          ~pick:(fun byte -> Run_action (Text_command (Text_pane.Select (byte, byte))))
+    | Some (Referencing (name, query)) ->
+        let all = match text_shown with
+          | Some shown -> List.map (fun (byte, line) ->
+              line, Printf.sprintf "line %d" (Flow.Diagnostic.position_of_offset (Text_pane.current_text text shown) byte).line, byte)
+              (Text_pane.references (Text_pane.current_text text shown) name)
+          | None -> [] in
+        search_prompt ~key:"references" ~title:("References to " ^ name) ~label:"Search uses" ~query all
+          ~again:(fun q -> Referencing (name, q))
           ~pick:(fun byte -> Run_action (Text_command (Text_pane.Select (byte, byte))))
     | Some (Going query) ->
         (match Pxui_shell.Prompt.name ui ~key:"goto-line" ~title:"Go to line"

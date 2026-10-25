@@ -147,6 +147,8 @@ let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~lead
              notice
          | Error d -> prompt, Some (Refusal, d.Flow.Diagnostic.message))
     | None -> prompt, notice in
+  let prompt = match List.find_map (function Text_pane.References_of name -> Some name | _ -> None) result.text_intents with
+    | Some name -> Some (Referencing (name, "")) | None -> prompt in
   (* Shared undo stack: every document change (a parameter, a workspace gesture, an
      inspector commit) becomes one history entry; Command/Ctrl-Z undoes,
      Shift-Command/Ctrl-Z or Ctrl-Y redoes. *)
@@ -331,8 +333,12 @@ let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~lead
   let next, result, probes = if Option.is_some loaded then next, result, value.probes else
     List.fold_left (fun (next, result, probes) -> function
       | Pxui_graph.Scope.Zone_collapsed { zone; collapsed } ->
+          (* opening a frame that starts collapsed is stored, so it stays open *)
+          let default = match value.scope_key with
+            | Some k -> Core_scope.default_collapsed (k.scope) zone | None -> false in
           Doc.layout_edit next (fun l -> { l with collapsed =
-            if collapsed then M.add zone true l.collapsed else M.remove zone l.collapsed }),
+            if collapsed then M.add zone true l.collapsed
+            else if default then M.add zone false l.collapsed else M.remove zone l.collapsed }),
           { (result : _ frame_result) with label = if collapsed then "Collapse zone" else "Expand zone" }, probes
       | Moved placed ->
           Doc.layout_edit next (fun l -> { l with at = List.fold_left (fun at (path, x, y) ->

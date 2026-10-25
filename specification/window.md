@@ -90,7 +90,7 @@ updates logical window facts on the next frame, refreshes drawable size, resizes
 the Metal surface, and emits one `WindowResized` event. While the window is
 minimized or covered the sketch loop skips drawing and idles; SDL announces the
 start of occlusion but not its end, so the loop reads the window state once a
-frame to see it end. Live-resize redraw is an open decision (`specification/sdl3.md`). Fullscreen, show/hide, minimize,
+frame to see it end. While an edge is dragged the last scene is redrawn at the new size (`specification/sdl3.md`, "Live resize"). Fullscreen, show/hide, minimize,
 maximize, restore, title, and position operations delegate to the owned native
 window.
 

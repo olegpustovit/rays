@@ -30,7 +30,7 @@ type find = { query : string; replace : string; case : bool; replacing : bool; a
 
 (* What the keys ask of the pane: resolved by [view], which knows the text, the caret and the
    selection; [Select] needs none of them. *)
-type command = Find | Find_replace | Find_selection | Find_next | Find_previous | Definition
+type command = Find | Find_replace | Find_selection | Find_next | Find_previous | Definition | References
   | Select of int * int
 
 (* What the text area is asked to do once: replace ranges (one undo step), then select. *)
@@ -731,6 +731,23 @@ let real_errors = List.filter (fun (d : Flow.Diagnostic.t) -> d.severity = Flow.
 (* the byte where 1-based [line] of [text] ends *)
 let line_stop text line = line_end text (line_start text line)
 
+(* every symbol of the text with its span, in order; empty for text that does not read *)
+let symbol_spans text = match S.parse text with
+  | Error _ -> []
+  | Ok forms ->
+      let rec walk acc (f : S.t) = List.fold_left walk
+        (match f.node with S.Sym name -> (name, f.span) :: acc | _ -> acc) (S.children f) in
+      List.rev (List.fold_left walk [] forms)
+
+let symbol_at text byte = List.find_map (fun (name, (span : Flow.Diagnostic.span)) ->
+  if span.start <= byte && byte <= span.finish then Some name else None) (symbol_spans text)
+
+let references text name = List.filter_map (fun (n, (span : Flow.Diagnostic.span)) ->
+  if n <> name then None else
+  let line = (Flow.Diagnostic.position_of_offset text span.start).line in
+  Some (span.start, String.trim (String.sub text (line_start text line) (line_stop text line - line_start text line)))) (symbol_spans text)
+
+
 (* the diagnostics of [c] that still hold for [text]: those whose line, and span, lie within the
    bytes [text] still shares with the text they were found in *)
 let visible (c : checked) text =
@@ -828,6 +845,7 @@ type intent =
   | Carry_over of int * bool
   | Find_set of find option * bool
   | Request of request option
+  | References_of of string
   | Resolved
 
 (* seconds a draft rests before it is parsed *)
@@ -1039,6 +1057,8 @@ let view ui ~bounds:(x, y, width, height) ~tabs_right ~vocab ~names ~time state 
           Option.iter (fun f -> emit (Find_set (Some (find_step f matches
             (if cmd = Find_next then `Next else `Previous)), true))) state.find
       | Definition -> Option.iter follow !caret
+      | References -> Option.iter (fun name -> emit (References_of name))
+          (Option.bind !caret (symbol_at text'))
       | Select _ -> ()) state.pending;
     if state.pending <> [] then emit Resolved;
     Option.iter (fun (f : find) ->

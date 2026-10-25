@@ -146,9 +146,9 @@ file dialogs are callback-only and fit that shape:
 The event stubs convert the union while SDL still owns its pointer payloads;
 every string is copied before the next call.
 
-### Live resize: finding and open decision
+### Live resize: finding and decision
 
-The first part is a finding about the polling design; the decision is open.
+The first part is a finding about the polling design; the decision follows the measurements.
 
 On macOS the event loop blocks inside AppKit's tracking loop while the user
 drags a window edge: the call that pumps events does not return until the drag
@@ -173,12 +173,18 @@ real window and is the evidence to collect before deciding:
   the tracking loop, so it cannot run headless or unattended. It has not been
   run for this revision.
 
-Proposed exception, not implemented: allow exactly one callback into OCaml,
-on the main thread, inside a pump that OCaml itself called, that renders the
-current frame only. That changes this contract (no OCaml in a native
-callback), so it needs the owner's decision: what is gained is a window that
-redraws while it is resized; what is risked is re-entering the frame code from
-inside `SDL_PollEvent`.
+Shipped (the exception was accepted): `caml_sdl3_poll_event` installs one
+`SDL_AddEventWatch` callback (`live_resize_watch`, `sdl3_stubs.c`). It acts only
+when all hold: the call came from inside our own `SDL_PollEvent` (`in_poll`),
+no live redraw is already running (`in_live_redraw`), it is the main thread, and
+the event is `PIXEL_SIZE_CHANGED`. It then calls the closure registered as
+`rays_sdl3_live_redraw` with `caml_callback_exn`, so the callback never raises.
+`Sketch` registers that closure for the life of the loop: it tells the
+coordinator the window changed and renders the last scene, nothing else (no
+poll, update, effects, autosave, reload or clock tick). A failure is written as
+a crash report, kept, and re-raised on the next loop turn. Between size events
+the old picture stretches during the drag. No window-free test drives it; the
+`--drag` run above is the manual check.
 
 ## Events and translations
 

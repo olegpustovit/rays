@@ -151,6 +151,7 @@ let keymap = [
     ~trigger:(Chord (Input.KeyChar 'i', [Input.Shift])) Peek;
   command ~id:"scene.jump" ~label:"jump to graph" ~trigger:(Leader "j") Jump;
   command ~id:"text.definition" ~label:"go to definition" ~trigger:(Chord (Input.F12, [])) (Text_command Definition);
+  command ~id:"text.references" ~label:"find references" ~trigger:(Chord (Input.F12, [Input.Shift])) (Text_command References);
   (* carry: y picks up; the target letters, Enter and Escape are read by [Core] while it lasts *)
   command ~guide:Editor_core.Guide_context.[Canvas; Node; Multi; List] ~id:"carry.pick-up"
     ~label:"pick up (carry it onto a place)" ~trigger:(Chord (Input.KeyChar 'y', [])) Pick_up;
@@ -208,6 +209,17 @@ let keymap3 = keymap @ [
   command ~guide:Editor_core.Guide_context.[Canvas; Node; Multi] ~id:"view.orbit" ~label:"orbit only (hide handles)"
     ~trigger:(Chord (Input.Escape, [])) ~scope:view (Tool 0);
 ]
+
+(* The keys the text area handles itself (Command-/, Option-Up/Down, Command-Option-Up, Command-Shift-\\):
+   listed on the key sheet only.  They are not in [keymap], so the router never takes them from the
+   field.  The actions are placeholders the sheet never runs. *)
+let text_keys = let key id label (k, m) = command ~id ~label ~trigger:(Chord (k, m)) (Text_command Find) in
+  Input.[
+  key "text.comment" "toggle comment on lines" (KeyChar '/', [ Meta ]);
+  key "text.move-line" "move lines up or down" (ArrowUp, [ Alt ]);
+  key "text.duplicate-line" "duplicate lines up or down" (ArrowUp, [ Alt; Shift ]);
+  key "text.select-form" "select the enclosing form" (ArrowUp, [ Meta; Alt ]);
+  key "text.bracket" "jump to the matching bracket" (KeyChar '\\', [ Meta; Shift ])]
 
 (* The leader sheet's sections ([Pxui_shell.Which_key.panel]): what a command is for, from its id. *)
 let group (c : command) =

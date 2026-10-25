@@ -62,6 +62,7 @@ type prompt =
   | Palette of string  (* command search query *)
   | Jumping of string  (* / j: graph search query *)
   | Symbols of string  (* Command-P: binding search query *)
+  | Referencing of string * string  (* Shift-F12: the symbol, and the line search query *)
   | Going of string  (* Command-L: line[:column] *)
   | Browsing of { query : string; presets : (string * float) list; last_state : float option }
   | Picking of { split : bool; at : float * float }  (* x or n: the menu of panel kinds at the pointer *)

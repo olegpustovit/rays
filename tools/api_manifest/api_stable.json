@@ -2411,6 +2411,8 @@
         "val find_replace : find -> ( int * int ) list -> all : bool -> ( request * find ) option",
         "val find_all : case : bool -> string -> string -> ( int * int ) list",
         "val symbols : string -> ( string * string * int ) list",
+        "val symbol_at : string -> int -> string option",
+        "val references : string -> string -> ( int * string ) list",
         "val line_target : string -> string -> int option",
         "val binding : Flow.Syntax.t list -> string list -> ( Flow.Syntax.t option * Flow.Syntax.t ) option",
         "val paste_ops : Flow.Syntax.t list -> graph : string -> scope : string list -> string -> ( Flow_graph.Flow_edit.op list , string ) result",
@@ -2559,7 +2561,7 @@
         "val main : ? imports : ( string * string ) list -> path : string -> digest : string -> catalog : string -> string -> unit",
         "end"
       ],
-      "api_sha256": "8331c5f3c89a8ea4c927e10d4f5ed311dede931b55efa668c4713bb320e8b3c9",
+      "api_sha256": "3e57f68571cc41b7a34d5b7853e127f2060c1105cc128c00b7a6f910e7c49f14",
       "excluded_legacy_symbols": [],
       "library": "rays_editor",
       "module": "Rays_editor",

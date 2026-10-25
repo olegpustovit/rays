@@ -11,6 +11,14 @@ let line_pitch = 17.
 let check condition message = if not condition then fail message
 open Test_text
 
+(* Every edit re-lowers the workspace and the cost follows the number of sphere calls (240 seeds: 16 s a
+   cook, 8: 0.5 s); the text pane does not care how many shapes there are. *)
+let small_sunflower () = Str.global_replace (Str.regexp_string "(seeds : int 240)") "(seeds : int 8)" (case "sunflower")
+
+let small_rosette () = List.fold_left (fun text (from, by) -> Str.global_replace (Str.regexp_string from) by text) (case "rosette")
+  [ "(petals : int 12)", "(petals : int 2)"; ":segments 12", ":segments 4"; ":rings 6", ":rings 3";
+    ":segments 8", ":segments 4"; ":rings 4", ":rings 2"; "(radial j\n                         6", "(radial j\n                         1" ]
+
 let source name = match Flow.Syntax.parse (case name) with
   | Ok forms -> forms | Error d -> fail (Flow.Diagnostic.to_string d)
 
@@ -276,7 +284,7 @@ let editor_text () =
   let open Rays in
   let catalog = Editor_document.Contexts.catalog ~version:Flow_sop.Manifest.version
       Sop_catalog.Editor.factories |> Result.get_ok in
-  let workspace = Rays_editor.Workspace_doc.of_text catalog (case "sunflower") |> Result.get_ok in
+  let workspace = Rays_editor.Workspace_doc.of_text catalog (small_sunflower ()) |> Result.get_ok in
   let presets = Filename.temp_dir "rays-text-presets" "" in
   let env = ref (E.create ~presets ~await:true ~workspace
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
@@ -320,7 +328,7 @@ let editor_text () =
     click area;
     step ~keys:[ Input.Meta ] [ char 'a' ];
     step [ Event.TextInput text ] in
-  type_text (replace applied ~from:"(seeds : int 240)" ~by:"(seeds : int 100)");
+  type_text (replace applied ~from:"(seeds : int 8)" ~by:"(seeds : int 7)");
   check (contains (dump ()) "draft yes") ("a draft was not kept\n" ^ dump ());
   check (ws () == original && E.undo_label !env = base) "a draft changed the document";
   (* Discard reverts the draft *)
@@ -362,10 +370,10 @@ let editor_text () =
   check (not (contains (dump ()) ", error")) ("a balanced draft was reported\n" ^ dump ());
   click discard;
   (* a valid edit applies atomically, as one history entry *)
-  type_text (replace applied ~from:"(seeds : int 240)" ~by:"(seeds : int 100)");
+  type_text (replace applied ~from:"(seeds : int 8)" ~by:"(seeds : int 7)");
   click apply;
   check (contains (dump ()) "draft no") ("Check & apply kept the draft\n" ^ dump ());
-  check (ws () != original && contains (Flow.Lisp.print (ws ()).source |> fst) "(seeds : int 100)")
+  check (ws () != original && contains (Flow.Lisp.print (ws ()).source |> fst) "(seeds : int 7)")
     "Check & apply did not change the document";
   check (E.undo_label !env = Some "Edit text") "the history label is not Edit text";
   step ~keys:[ Input.Meta ] [ char 'z' ];
@@ -380,24 +388,24 @@ let editor_text () =
   check (contains graph_text "(graph sunflower") "the Graph tab does not show the graph";
   click area;
   step ~keys:[ Input.Meta ] [ char 'a' ];
-  step [ Event.TextInput (replace graph_text ~from:"(seeds : int 240)" ~by:"(seeds : int 77)") ];
+  step [ Event.TextInput (replace graph_text ~from:"(seeds : int 8)" ~by:"(seeds : int 6)") ];
   check (contains (dump ()) "graph tab, draft yes") ("the Graph tab kept no draft\n" ^ dump ());
   check (ws () == original) "a Graph draft changed the document";
   step ~keys:[ Input.Meta ] [ key Input.Enter ];
   check (contains (dump ()) "graph tab, draft no") ("Command-Enter did not apply\n" ^ dump ());
-  check (contains (Flow.Lisp.print (ws ()).source |> fst) "(seeds : int 77)"
+  check (contains (Flow.Lisp.print (ws ()).source |> fst) "(seeds : int 6)"
          && E.undo_label !env = Some "Edit text") "the Graph tab's apply is not one Edit text entry";
   (* Command-Z past a draft's own undo steps does not undo the document under it *)
   let labelled = E.undo_label !env in
   click area;
   step ~keys:[ Input.Meta ] [ char 'a' ];
-  step [ Event.TextInput (replace graph_text ~from:"(seeds : int 240)" ~by:"(seeds : int 66)") ];
+  step [ Event.TextInput (replace graph_text ~from:"(seeds : int 8)" ~by:"(seeds : int 5)") ];
   check (contains (dump ()) "graph tab, draft yes") "the draft was not made";
   step ~keys:[ Input.Meta ] [ char 'z' ];
   step ~keys:[ Input.Meta ] [ char 'z' ];
   step ~keys:[ Input.Meta ] [ char 'z' ];
   step [];
-  check (E.undo_label !env = labelled && contains (Flow.Lisp.print (ws ()).source |> fst) "(seeds : int 77)")
+  check (E.undo_label !env = labelled && contains (Flow.Lisp.print (ws ()).source |> fst) "(seeds : int 6)")
     ("an extra Command-Z undid the document under a draft: " ^ dump ());
   click discard;
   (* a graph that does not check stays in the pane, the document does not change *)
@@ -410,7 +418,7 @@ let editor_text () =
   check (ws () == applied_graph) "a refused Graph apply changed the document";
   click discard;
   let current_graph = (T.make_shown (ws ()).source "sunflower" None Graph).text in
-  type_text (replace current_graph ~from:"(seeds : int 77)" ~by:"(seeds : int 88)");
+  type_text (replace current_graph ~from:"(seeds : int 6)" ~by:"(seeds : int 3)");
   step [key Input.Escape]; step ~keys:[Input.Meta] [char 'z'];
   let undone = ws () and undo_label = E.undo_label !env in
   click apply;
@@ -421,9 +429,9 @@ let editor_text () =
   click discard;
   click tab_document;
   type_text (replace (Rays_editor.Workspace_doc.to_text (ws ()))
-    ~from:"(seeds : int 240)" ~by:"(seeds : int 99)");
+    ~from:"(seeds : int 8)" ~by:"(seeds : int 2)");
   env := E.edit !env (Flow_graph.Flow_edit.Set_input_default {form = "sunflower";
-    input = "seeds"; value = Flow.Syntax.make (Flow.Syntax.Num "125")}) |> Result.get_ok;
+    input = "seeds"; value = Flow.Syntax.make (Flow.Syntax.Num "4")}) |> Result.get_ok;
   let host_edited = ws () and host_label = E.undo_label !env in
   click apply;
   check (ws () == host_edited && E.undo_label !env = host_label)
@@ -435,10 +443,10 @@ let editor_text () =
   type_text (replace (Rays_editor.Workspace_doc.to_text (ws ()))
     ~from:"(spread : float 0.062)" ~by:"(spread : float 0.07)");
   env := E.edit !env (Flow_graph.Flow_edit.Set_input_default {form = "sunflower";
-    input = "seeds"; value = Flow.Syntax.make (Flow.Syntax.Num "300")}) |> Result.get_ok;
+    input = "seeds"; value = Flow.Syntax.make (Flow.Syntax.Num "9")}) |> Result.get_ok;
   click apply;
   let merged = Rays_editor.Workspace_doc.to_text (ws ()) in
-  check (contains merged "(seeds : int 300)" && contains merged "(spread : float 0.07)"
+  check (contains merged "(seeds : int 9)" && contains merged "(spread : float 0.07)"
          && contains (dump ()) "draft no")
     ("a draft and a host edit of different values did not merge: " ^ dump () ^ merged);
   (* the host adds a keyword argument to a call the draft edits: arguments pair by name *)
@@ -464,7 +472,7 @@ let editor_binding () =
   let open Rays in
   let catalog = Editor_document.Contexts.catalog ~version:Flow_sop.Manifest.version
       Sop_catalog.Editor.factories |> Result.get_ok in
-  let workspace = Rays_editor.Workspace_doc.of_text catalog (case "sunflower") |> Result.get_ok in
+  let workspace = Rays_editor.Workspace_doc.of_text catalog (small_sunflower ()) |> Result.get_ok in
   let presets = Filename.temp_dir "rays-text-presets" "" in
   let env = ref (E.create ~presets ~await:true ~workspace
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
@@ -709,7 +717,7 @@ let editor_w9 () =
       Sop_catalog.Editor.factories |> Result.get_ok in
   let soft = [ "rosette"; "soft" ] and petals = [ "rosette"; ":petals" ] in
   let scenario script =
-    let workspace = Rays_editor.Workspace_doc.of_text catalog (case "rosette") |> Result.get_ok in
+    let workspace = Rays_editor.Workspace_doc.of_text catalog (small_rosette ()) |> Result.get_ok in
     let presets = Filename.temp_dir "rays-text-presets" "" in
   let env = ref (E.create ~presets ~await:true ~workspace
         ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
@@ -763,9 +771,9 @@ let editor_w9 () =
      typing is the kit's Option-click *)
   let text, label = scenario [ 22, (fun click head -> click (head petals (60., 12.)));
     26, (fun click _ -> Event.KeyPressed Input.Alt :: click (1290., 165.) @ [ Event.KeyReleased Input.Alt ]);
-    28, (fun _ _ -> [ Event.KeyPressed (Input.KeyChar 'a') ]); 30, (fun _ _ -> [ Event.TextInput "7" ]);
+    28, (fun _ _ -> [ Event.KeyPressed (Input.KeyChar 'a') ]); 30, (fun _ _ -> [ Event.TextInput "3" ]);
     32, (fun _ _ -> [ Event.KeyPressed Input.Enter ]) ] in
-  check (contains text "(petals : int 7)" && label = Some "Input default")
+  check (contains text "(petals : int 3)" && label = Some "Input default")
     ("the inspector's input default: " ^ Option.value label ~default:"-");
   (* the inspector note: click the field, type, Enter *)
   (* the note is the last section, closed, and below the fold of a node with this many rows: the
@@ -1151,6 +1159,19 @@ let editor_text_find () =
   command 'f';
   check (bar_at () = target) ("the symbol pick did not place the caret: " ^ dump_line "text");
   step [ key Input.Escape ]; step [];
+  (* Shift-F12 on the name lists its uses; Enter on the second goes there *)
+  check (T.symbol_at (document ()) target = Some "target" && T.symbol_at (document ()) 0 = None)
+    "symbol_at reads the name under a byte";
+  check (List.map fst (T.references (document ()) "target") <> [] && List.length (T.references (document ()) "target") = 2)
+    "references finds both uses of target";
+  step ~keys:[ Input.Shift ] [ key Input.F12 ]; step [];
+  check (contains (dump_line "prompt") "references") ("Shift-F12 did not open the references: " ^ dump_line "prompt");
+  step [ key Input.ArrowDown ]; step [ key Input.Enter ]; step []; step [];
+  check (not (contains (dump_line "prompt") "references")) "picking a use did not close the references";
+  command 'f';
+  check (bar_at () = fst (List.nth (T.references (document ()) "target") 1))
+    ("the pick did not place the caret on the second use: " ^ dump_line "text");
+  step [ key Input.Escape ]; step [];
   (* Command-L: line and column; F12 on the (ref h) goes to its graph *)
   let lines = String.split_on_char '\n' (document ()) in
   let line = Option.get (List.find_index (fun l -> contains l "(ref h)") lines) in
@@ -1205,6 +1226,29 @@ let editor_graph_drafts () =
   check (contains (summary ()) "graph drafts: a b") ("leaving a graph dropped its draft: " ^ summary ());
   E.close !env
 
+(* With more than one fn frame in a graph they start collapsed to a line; a lone one stays open. *)
+let editor_fn_frames () =
+  let open Rays in
+  let height maps =
+    let text = Printf.sprintf {|(workspace fz
+  (graph g :context value (let* [%s] 1.0))
+  (graph editor :context editor
+    (ui/workspace (ui/split-at "vertical" 0.12 (ui/graph) (ui/lisp)))))|} maps in
+    let env = start_env text in
+    let count = ref 0 in
+    let step events = incr count; env := E.update !env (frame ~mouse:(450., 320.) !count events) in
+    for _ = 1 to 4 do step [] done;
+    step [ Event.KeyPressed Input.Escape ];
+    step [ Event.KeyPressed (Input.KeyChar '/'); Event.KeyPressed (Input.KeyChar 'j') ];
+    step [ Event.TextInput "g" ]; step [ Event.KeyPressed Input.Enter ];
+    for _ = 1 to 4 do step [] done;
+    let box = E.node_box !env [ "g"; "a" ] in
+    E.close !env;
+    match box with Some (_, _, _, h) -> h | None -> fail "the fn frame has no box" in
+  let one = height "a (fn [k] (* k 2.0))" in
+  let two = height "a (fn [k] (* k 2.0)) b (fn [k] (+ k 1.0))" in
+  check (two < one) (Printf.sprintf "a second fn frame did not start collapsed (%d, %d)" one two)
+
 let run () =
   selection_text ();
   paste ();
@@ -1220,4 +1264,5 @@ let run () =
   editor_text_drop ();
   editor_graph_drafts ();
   editor_text_find ();
+  editor_fn_frames ();
   print_endline "text pane tests passed"

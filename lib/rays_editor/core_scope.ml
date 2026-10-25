@@ -30,6 +30,17 @@ let probe_force () : Flow_graph.Probe.force =
    comparing them re-ran every probe of an open graph on each frame of a drag or a scroll
    (measured at about 100 ms a frame on recursive_rectangles).  ponytail: a graph that reads
    frame/tick or frame/dt shows a stale probe while the timeline is paused; its canvas still animates. *)
+(* The fn frames of a scope (map and filter bodies): with more than one, they start collapsed to a
+   line until the user opens one, because three stacked copies of a 380-point frame hide the graph. *)
+let default_collapsed (scope : Flow_graph.Projection.scope) =
+  let rec frames acc (s : Flow_graph.Projection.scope) = List.fold_left (fun acc (n : Flow_graph.Projection.node) ->
+    match n.zone with
+    | Some z -> frames (if z.kind = Flow_graph.Projection.Fn then n.path :: acc else acc) z.scope
+    | None -> acc) acc s.nodes in
+  match frames [] scope with
+  | _ :: _ :: _ as fns -> fun path -> List.mem path fns
+  | _ -> fun _ -> false
+
 let steady_equal (a : Frame_input.t) (b : Frame_input.t) =
   let steady (f : Frame_input.t) = { f with tick = 0; dt = 0.; keys = []; events = [] } in
   Frame_input.equal (steady a) (steady b)
@@ -169,7 +180,8 @@ let sync_scope value =
               | level, pinned -> Some (Option.value ~default:Flow_graph.Projection.Card level,
                                        Option.value ~default:false pinned))
             ~pin:(fun path label -> Option.bind (M.find_opt path layout.rows) (Layout_by_path.String_map.find_opt label))
-            ~collapsed:(fun path -> Option.value ~default:false (M.find_opt path layout.collapsed))
+            ~collapsed:(let default = default_collapsed scope in
+              fun path -> match M.find_opt path layout.collapsed with Some stored -> stored | None -> default path)
             ~probe:(fun path -> Option.value ~default:0 (M.find_opt path value.probes))
             ~frames:(fun path -> List.map (fun (f : Layout_by_path.frame) -> f.title, f.at, f.size)
               (Option.value ~default:[] (M.find_opt path layout.frames)))

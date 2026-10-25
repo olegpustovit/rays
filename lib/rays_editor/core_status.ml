@@ -5,7 +5,7 @@ include Core_setup
 
 (* the open dialog, for the crash report *)
 let prompt_name value = match value.prompt with
-  | None -> "-" | Some Keys -> "keys" | Some (Saving _) -> "save preset" | Some (Palette _) -> "commands" | Some (Jumping _) -> "jump" | Some (Symbols _) -> "go to symbol" | Some (Going _) -> "go to line" | Some (Picking _) -> "panel kind" | Some (Splitting _) -> "split"
+  | None -> "-" | Some Keys -> "keys" | Some (Saving _) -> "save preset" | Some (Palette _) -> "commands" | Some (Jumping _) -> "jump" | Some (Symbols _) -> "go to symbol" | Some (Referencing _) -> "references" | Some (Going _) -> "go to line" | Some (Picking _) -> "panel kind" | Some (Splitting _) -> "split"
   | Some (Browsing _) -> "presets" | Some (Making_macro _) -> "make macro"
 
 let level_name value = match value.level with

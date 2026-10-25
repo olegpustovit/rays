@@ -145,6 +145,7 @@ let apply_text value intents =
     | Jump_definition path ->
         let next = select_source value path in
         {next with text = {text with target = Some path; nonce = text.nonce + 1}}
+    | References_of _ -> value  (* opens the references prompt, see [Core_reduce] *)
     | Carry_over _ -> value  (* read by the carry's report, not an edit *)
     | Find_set (find, reveal) -> with_text { text with find; nonce = text.nonce + (if reveal then 1 else 0) }
     | Request request -> with_text { text with request }
