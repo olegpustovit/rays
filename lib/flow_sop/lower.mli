@@ -192,5 +192,7 @@ val status : t -> seconds:float -> string option
 module Private : sig
   val record : bool ref
   val profiles : Flow_ir.Profile.t list ref
+  val cache_hits : int Atomic.t
+  val clear_cache : unit -> unit
   (** Test hook: with [record] set, the profile of every Lisp node body built is appended. *)
 end

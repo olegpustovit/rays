@@ -119,7 +119,13 @@ let at_zero value =
   if E.is_live value then ok (E.force value ~live:(Frame_input.at_time (0.))) else value
 
 let is_zone kind = kind = "zone/points" || kind = "zone/pieces"
-module Private = struct let record = ref false let profiles : Flow_ir.Profile.t list ref = ref [] end
+module Build_cache = Lru.Make (String)
+(* 512 Lisp node body builds (the 16 lowerings of a 30-node workspace fit); every access under the lock. *)
+let build_cache = Build_cache.create 512
+let build_lock = Mutex.create ()
+module Private = struct let record = ref false let profiles : Flow_ir.Profile.t list ref = ref []
+  let cache_hits = Atomic.make 0
+  let clear_cache () = Mutex.protect build_lock (fun () -> Build_cache.clear build_cache) end
 let geo_of args =
   let rec sources = function
     | E.Deferred (ty, j) when Ty.is_cooked ty -> [j]
@@ -156,10 +162,6 @@ let cached_digest (checked : Workspace.t) extra compute =
       let d = compute () in
       Atomic.set digest_cache (List.filteri (fun i _ -> i < 8) ((key, d) :: Atomic.get digest_cache)); d
 
-module Build_cache = Lru.Make (String)
-(* 512 Lisp node body builds (the 16 lowerings of a 30-node workspace fit); every access under the lock. *)
-let build_cache = Build_cache.create 512
-let build_lock = Mutex.create ()
 
 let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) ?(strict_body = false) ?(defer_body_errors = false) ?(kernel_bindings = []) ?(compiled_ids = Instance_path.Map.empty)
     ?(sites = []) ?inputs checked =
@@ -822,8 +824,10 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
           let facts=Sop.Node.{cook_mode;
             elementwise=None;reads=["*"];writes=["*"];topology=Changed;exact} in
           (fun _ -> Error(Diagnostic_bridge.to_sop diagnostic)), dependencies, facts) in
-      (* A top-level body build is a pure function of the declaration, its parameters, inputs and context, so an
-         edit elsewhere in the workspace reuses it. Callable slots, nested lowerings and recorded profiles bypass. *)
+      (* A top-level body build is a pure function of the key below, so an edit elsewhere reuses it. Key: declaration,
+         label, reference flag, approx, provenance, bindings, context seed/frame/time, input ids, parameters; an
+         entry is valid only for the same factories and GPU backend+policy. Bypassed: callable slots, strict nested
+         lowerings, kernel bindings, recorded profiles, non-data parameters (key_of raises). *)
       let build bindings ~label ~context inputs parameters =
         let uncached () = build_body bindings ~label ~context inputs parameters in
         if functions<>[] || strict_body || kernel_bindings<>[] || !Private.record then uncached () else
@@ -837,11 +841,11 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
         | key ->
             let cached = Mutex.protect build_lock (fun () -> Build_cache.find_opt build_cache key) in
             (match cached with
-             | Some (owner, gpu, result) when owner == factories && (match gpu, Flow_ir.Gpu.available () with
-                 | None, None -> true | Some a, Some b -> a == b | _ -> false) -> result
+             | Some (owner, gpu, policy, result) when owner == factories && policy = Flow_ir.Gpu.policy () && (match gpu, Flow_ir.Gpu.available () with
+                 | None, None -> true | Some a, Some b -> a == b | _ -> false) -> Atomic.incr Private.cache_hits; result
              | _ -> let result = uncached () in
                  Mutex.protect build_lock (fun () ->
-                   Build_cache.add build_cache key (factories, Flow_ir.Gpu.available (), result)); result) in
+                   Build_cache.add build_cache key (factories, Flow_ir.Gpu.available (), Flow_ir.Gpu.policy (), result)); result) in
       let category = if definition.category=[] then ["Custom"] else definition.category in
       let construct inputs =
           let next = ref 0 in

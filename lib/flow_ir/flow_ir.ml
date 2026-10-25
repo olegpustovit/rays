@@ -20,6 +20,7 @@ module Gpu = struct
   type policy=Measured | Qualification
   let current : backend option Domain.DLS.key=Domain.DLS.new_key(fun()->None)
   let current_policy : policy Domain.DLS.key=Domain.DLS.new_key(fun()->Measured)
+  let policy()=Domain.DLS.get current_policy
   let with_backend ?(policy=Measured) backend run = let previous=Domain.DLS.get current
     and previous_policy=Domain.DLS.get current_policy in
     Domain.DLS.set current(Some backend);

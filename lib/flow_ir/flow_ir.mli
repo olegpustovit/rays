@@ -63,6 +63,7 @@ module Gpu : sig
   type backend={cost:Packed.t -> count:int -> float option;
     prepare:Packed.t -> (kernel,Flow.Diagnostic.t)result}
   type policy=Measured | Qualification
+  val policy : unit -> policy
   val with_backend : ?policy:policy -> backend -> (unit -> 'a) -> 'a
   (** Initial-domain host scope. [None] cost means unmeasured and keeps CPU placement.
       Qualification explicitly forces the native test path; it is not production calibration. *)
