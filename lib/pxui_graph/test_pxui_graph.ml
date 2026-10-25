@@ -566,15 +566,15 @@ let scope_trunk_bent () =
   let view, _ = scope_view w "g" in
   let view = fst (scope_step view (frame ())) in
   let all = List.init (Scope.Private.wire_count view) Fun.id in
-  let src i = List.hd (Scope.Private.wire_points view i) in
+  let pts = Scope.Private.wire_points view in
+  let src i = List.hd (pts i) in
   let a_src = src (List.hd all) in
   let from_a = List.filter (fun i -> src i = a_src) all in
-  let joined = List.filter (fun i -> List.length (Scope.Private.wire_points view i) > 2
-                                     && (List.nth (Scope.Private.wire_points view i) 1) |> snd = snd a_src) from_a in
+  let joined = List.filter (fun i -> List.length (pts i) > 2 && snd (List.nth (pts i) 1) = snd a_src) from_a in
   check (List.length from_a = 4 && List.length joined = 3) "a's wires did not bundle (one level stays straight)";
-  check (List.exists (fun i -> List.length (Scope.Private.wire_points view i) > 3) joined)
+  check (List.exists (fun i -> List.length (pts i) > 3) joined)
     "no bent wire joined the trunk";
-  check (List.length (List.sort_uniq compare (List.map (fun i -> List.nth (Scope.Private.wire_points view i) 1) joined)) = 1)
+  check (List.length (List.sort_uniq compare (List.map (fun i -> List.nth (pts i) 1) joined)) = 1)
     "the bent and the straight branches do not share one junction";
   (* each branch is still its own wire *)
   List.iter (fun i ->
@@ -583,7 +583,7 @@ let scope_trunk_bent () =
     check (Scope.selected_wire v = Scope.Private.wire_target view i) "a branch did not select its own wire")
     joined;
   (* the trunk selects the source and lights every wire of the group, bent ones included *)
-  let (ax, ay), (jx, _) = (match Scope.Private.wire_points view (List.hd joined) with a :: j :: _ -> a, j | _ -> fail "no junction") in
+  let (ax, ay), (jx, _) = (match pts (List.hd joined) with a :: j :: _ -> a, j | _ -> fail "no junction") in
   let mid = int_of_float ((ax +. jx) /. 2.), int_of_float ay in
   let hov = fst (scope_step view (frame ~mouse:mid ~events:[ mouse_move mid ] ())) in
   let lit = List.filter (fun (s, _) -> s = (ax, ay)) (Scope.Private.highlighted_connections hov) in

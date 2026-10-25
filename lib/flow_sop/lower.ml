@@ -142,9 +142,8 @@ let objects lowered = List.filter_map (fun (graph : graph) ->
   lowered.graphs
 
 (* One host call lowers a synthetic workspace that shares the caller's source lists; the digest of those
-   lists is memoised on their physical identity (one entry, atomically swapped, so domain-safe). *)
+   lists is memoised on their physical identity: 8 entries (each pins a workspace's lists), swapped atomically. *)
 let digest_cache : (Obj.t list * string) list Atomic.t = Atomic.make []
-let digest_cache_capacity = 64
 let cached_digest (checked : Workspace.t) extra compute =
   (* elementwise: a nested lowering rebuilds the lists (graphs = [body]) but shares their forms *)
   let part tag l = Obj.repr tag :: List.map Obj.repr l in
@@ -155,8 +154,7 @@ let cached_digest (checked : Workspace.t) extra compute =
   | Some (_, d) -> d
   | None ->
       let d = compute () in
-      Atomic.set digest_cache (List.filteri (fun i _ -> i < digest_cache_capacity) ((key, d) :: Atomic.get digest_cache)); d
-let kernel_digest checked = cached_digest checked [] (fun () -> Context_kernel.kernel_source checked)
+      Atomic.set digest_cache (List.filteri (fun i _ -> i < 8) ((key, d) :: Atomic.get digest_cache)); d
 
 let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) ?(strict_body = false) ?(defer_body_errors = false) ?(kernel_bindings = []) ?(compiled_ids = Instance_path.Map.empty)
     ?(sites = []) ?inputs checked =
@@ -180,7 +178,7 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
        lazy so ordinary catalog edits retain their existing pipeline counts.
        ponytail: the whole source invalidates kernels; narrow to body/defn cones
        if unrelated structural edits measurably recook them. *)
-    let kernel_source = lazy (kernel_digest checked) in
+    let kernel_source = lazy (cached_digest checked [] (fun () -> Context_kernel.kernel_source checked)) in
     let attribute_options args =
       let text key default code=match List.assoc_opt key args with
         |None->default|Some(E.Text text)->text|_->fail code ("Attribute "^key^" must be static text") in

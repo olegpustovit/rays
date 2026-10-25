@@ -227,21 +227,20 @@ let scoped_forms (checked:W.t) ~leading ~skip ~start =
       | _ -> false)checked.macros in
   forms @ List.rev !expanded
 
-(* A cache key for forms: a compact, length-prefixed serialisation of everything the printer shows
-   (spelling, comments, flags) without ids or spans. Pretty-printing them cost a third of a workspace
-   lowering; the key only has to change when the authored content changes. *)
+(* cache key: length-prefixed dump of spelling, comments and flags, no ids or spans *)
 let forms_digest forms =
   let buffer = Buffer.create 4096 in
   let str s = Buffer.add_string buffer (string_of_int (String.length s)); Buffer.add_char buffer ':'; Buffer.add_string buffer s in
   let strs l = Buffer.add_char buffer '['; List.iter str l; Buffer.add_char buffer ']' in
+  let atom c s = Buffer.add_char buffer c; str s in
   let rec form (x : Flow.Syntax.t) =
     if x.notes <> [] then strs x.notes;
     if x.meta <> [] then strs x.meta;
     (match x.node with
-     | Sym s -> Buffer.add_char buffer 's'; str s
-     | Kw s -> Buffer.add_char buffer 'k'; str s
-     | Num s -> Buffer.add_char buffer 'n'; str s
-     | Str s -> Buffer.add_char buffer 't'; str s
+     | Sym s -> atom 's' s
+     | Kw s -> atom 'k' s
+     | Num s -> atom 'n' s
+     | Str s -> atom 't' s
      | List l -> Buffer.add_char buffer '('; List.iter form l
      | Vec l -> Buffer.add_char buffer '<'; List.iter form l
      | Map l -> Buffer.add_char buffer '{'; List.iter form l
