@@ -58,7 +58,7 @@
  (action (run %{exe:run_edit_graph.exe})))
 
 (rule
- (aliases runtest test_nodes)
+ (aliases qualification-scale test_nodes)
  (action (run %{exe:run_nodes.exe})))
 
 (rule

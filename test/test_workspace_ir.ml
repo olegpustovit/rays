@@ -16,6 +16,12 @@ let () =
     | None -> true
     | Some suffix -> Filename.check_suffix path suffix in
   let paths = List.filter selected paths and fixtures = List.filter selected fixtures in
+  (* by default the examples, the kit, the fixtures and four small sketches; every sketch under RAYS_SLOW=1 *)
+  let small = ["ws_layout/"; "ws_kit/"; "voxel_wall/"; "flow_kernel/"] in
+  let has s sub = let n = String.length sub in
+    let rec go i = i + n <= String.length s && (String.sub s i n = sub || go (i + 1)) in go 0 in
+  let paths = if Sys.getenv_opt "RAYS_SLOW" = Some "1" then paths
+    else List.filter (fun p -> not (has p "sketches/") || List.exists (has p) small) paths in
   let custom = List.filter selected custom in
   let count = ref 0 in
   List.iter (fun path ->

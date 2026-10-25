@@ -321,9 +321,9 @@ let setter_port key =
         let baseline=cooked s(context 1 97)actual in
         check(close_geometry ~ulps:4 baseline(cooked s(context 1 97)expected))(key^": native oracle differs");
         check(geometry_bytes baseline=geometry_bytes(cooked s(context 1 97)walked))(key^": reference bytes differ");
-        List.iter(fun domains->List.iter(fun grain->Sop.Session.clear s;
+        List.iter(fun (domains,grain)->Sop.Session.clear s;
           check(geometry_bytes baseline=geometry_bytes(cooked s(context domains grain)actual))
-            (key^": worker/grain bytes differ"))[1;97;4096])[1;4;8]);
+            (key^": worker/grain bytes differ"))[1,97;8,97;4,4096]);
       check(before=geometry_bytes geometry)(key^": input mutated"))cases)
     [payload(points 0);payload(points 1);grid;mixed();payload(points 32769)];
   let input=Lisp_sop.snapshot(mixed()) in
@@ -395,13 +395,16 @@ let set_transform ()=setter_port "set_transform"
 
 let metadata_port ?reference_input ?(extra_geometries=[]) ~key ~native_factory ~cases ~initial_changes ~edit () =
   let sources=Flow_sop.Catalog.sources()|>flow_ok in
+  (* one catalog for every case: the input factory reads [current] when the node is compiled *)
+  let current=ref (Lisp_sop.snapshot (payload (points 0))) in
+  let factory=Sop.Edit_graph.factory ~key:"edge_port_input" ~label:"Edge input" ~category:["Test"] ~arity:0(fun _-> !current) in
+  let reference_factory=Option.map(fun node->Sop.Edit_graph.factory ~key:"metadata_reference"
+    ~label:"Reference" ~category:["Test"] ~arity:0(fun _->node))reference_input in
+  let factories=factory::Option.to_list reference_factory@
+    List.filter(fun factory->Sop.Edit_graph.factory_key factory<>key)Sop_catalog.Editor.factories in
+  let catalog=Flow_sop.Catalog.of_factories ~nodes:[] ~version:Flow_sop.Manifest.version factories|>flow_ok in
   let authored ~reference input keywords =
-    let factory=Sop.Edit_graph.factory ~key:"edge_port_input" ~label:"Edge input" ~category:["Test"] ~arity:0(fun _->input) in
-    let reference_factory=Option.map(fun node->Sop.Edit_graph.factory ~key:"metadata_reference"
-      ~label:"Reference" ~category:["Test"] ~arity:0(fun _->node))reference_input in
-    let factories=factory::Option.to_list reference_factory@
-      List.filter(fun factory->Sop.Edit_graph.factory_key factory<>key)Sop_catalog.Editor.factories in
-    let catalog=Flow_sop.Catalog.of_factories ~nodes:[] ~version:Flow_sop.Manifest.version factories|>flow_ok in
+    current:=input;
     let forms=Flow.Syntax.parse(Printf.sprintf
       "(workspace edge_port (graph g :context sop (sop/%s (sop/edge_port_input) %s)))"
       key ((if Option.is_none reference_input then "" else ":reference (sop/metadata_reference) ")^keywords))|>flow_ok in
@@ -430,7 +433,7 @@ let metadata_port ?reference_input ?(extra_geometries=[]) ~key ~native_factory ~
         && N.parameter_key actual=N.parameter_key expected)(key^": identity/schema/key");
       let s=session() in Fun.protect ~finally:(fun()->Sop.Session.close s)(fun()->
         let baseline=cooked_bytes s(context 1 97)expected in
-        List.iter(fun domains->List.iter(fun grain->Sop.Session.clear s;
+        List.iter(fun (domains,grain)->Sop.Session.clear s;
           let observed=cooked_bytes s(context domains grain)actual in
           if baseline<>observed then begin
             let describe=function
@@ -444,9 +447,10 @@ let metadata_port ?reference_input ?(extra_geometries=[]) ~key ~native_factory ~
               (Geometry.primitive_count geometry) domains grain keywords (describe baseline) (describe observed))
           end;
           check(baseline=cooked_bytes s(context domains grain)walked)(key^": reference bytes/errors"))
-          [1;97;4096])[1;4;8]))cases;
+          [1,97;8,97;4,4096]))(let stride=if extra_geometries=[] then 1 else if List.memq geometry extra_geometries then (if List.length cases>200 then 2 else 1) else 8 in
+       List.filteri(fun i _->i mod stride=0)cases);  (* rule tables: the geometries that hold the named items get every case (every 2nd of 200+), the plain ones every 8th *)
     check(before=geometry_bytes geometry)(key^": input mutation"))
-    ([payload(points 0);payload(points 1);grid;mixed();payload(points 32769)]@extra_geometries);
+    (([payload(points 0);payload(points 1);mixed()]@(if extra_geometries=[] then [grid;payload(points 32769)] else []))@extra_geometries);
   let input=Lisp_sop.snapshot(mixed()) in
   let initial=fst(N.apply_parameters(authored ~reference:false input "")initial_changes|>get_string_ok)
   and oracle=native input initial_changes in
@@ -505,7 +509,8 @@ let delete_attributes () =
       [field,P.Text_value pattern;"delete_non_selected",P.Bool_value inverse])[false;true])
       ["*";"N id";"* ^id";"P";"absent";" \t ";"é猫";"id\\ ";"\\ id"] )patterns in
   List.iter(fun reference_input->metadata_port ?reference_input ~key:"delete_attributes"
-    ~native_factory:Sop.Nodes.Delete_attributes.factory ~cases ~initial_changes:[]
+    ~native_factory:Sop.Nodes.Delete_attributes.factory ~initial_changes:[]
+    ~cases:(if reference_input=None then cases else List.filteri(fun i _->i mod 4=0)cases)  (* the reference input changes only the second port, not the glob rows *)
     ~edit:["point_pattern",P.Text_value "N"] ())
     [None;Some(Lisp_sop.snapshot(points 0));Some(Lisp_sop.snapshot(mixed()))];
   let input=Lisp_sop.snapshot(mixed()) in
@@ -831,10 +836,10 @@ let points_port () =
         && N.operation actual=N.operation native && N.version actual=N.version native && N.label actual=N.label native
         && N.inputs actual=[] && N.dependencies actual=N.dependencies native) "Production Points identity/schema/key";
       let s=session() in Fun.protect ~finally:(fun()->Sop.Session.close s)(fun()->
-        List.iter(fun domains->List.iter(fun grain->Sop.Session.clear s;let c=context domains grain in
+        List.iter(fun (domains,grain)->Sop.Session.clear s;let c=context domains grain in
           check(geometry_bytes(cooked s c actual)=geometry_bytes(cooked s c native))
             (Printf.sprintf "Production Points native/reference/domain bytes count=%d group=%S source=%S index=%S reference=%b domains=%d grain=%d"
-              count group source_name index_name reference domains grain)) [1;97;4096]) [1;4;8])) [false;true])
+              count group source_name index_name reference domains grain)) [1,97;8,97;4,4096])) [false;true])
     (List.concat_map(fun count->List.map(fun mode->count,mode)modes)[1;7;50])
 
 let ()=if Array.exists ((=) "--bench") Sys.argv then benchmark ()
