@@ -410,9 +410,12 @@ let part13 () = (* G3: move a binding, wrap in map / filter, inline a function *
   refused "move past a reader" order (E.Move_binding { node = node [ "c" ]; by = -1 });
   refused "move off the end" order (E.Move_binding { node = node [ "a" ]; by = -1 });
   same "wrap in map" (v "(let* [a (+ n 1) r (* 0.5 (count a))] r)") (E.Wrap { nodes = [ node [ "a" ] ]; loop = Map })
-    (v "(let* [a (map (fn [i] (+ n 1)) (range 6)) r (* 0.5 (count a))] r)");
+    (v "(let* [items (range 6) a (map (fn [i] (+ n 1)) items) r (* 0.5 (count a))] r)");
   same "wrap in filter" (v "(let* [a (< n 1) r (* 0.5 (count a))] r)") (E.Wrap { nodes = [ node [ "a" ] ]; loop = Filter })
-    (v "(let* [a (filter (fn [i] (< n 1)) (range 6)) r (* 0.5 (count a))] r)");
+    (v "(let* [items (range 6) a (filter (fn [i] (< n 1)) items) r (* 0.5 (count a))] r)");
+  same "wrap in map over a selected source" (v "(let* [xs (range 3) a (+ xs 1) r (count a)] r)")
+    (E.Wrap { nodes = [ node [ "xs" ]; node [ "a" ] ]; loop = Map })
+    (v "(let* [xs (range 3) a (map (fn [i] (+ i 1)) xs) r (count a)] r)");
   let twice = "(workspace w\n  (defn twice :context value [(x : int) (y : int)] (- x (* y 2)))\n  (graph g :context value [(n : int 4)] (let* [y 3 a (twice y n)] a)))" in
   same "inline defn" twice (E.Inline_defn { node = node [ "a" ] })
     "(workspace w\n  (defn twice :context value [(x : int) (y : int)] (- x (* y 2)))\n  (graph g :context value [(n : int 4)] (let* [y 3 a (- y (* n 2))] a)))";

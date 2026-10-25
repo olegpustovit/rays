@@ -456,7 +456,7 @@ selection, row keys on the row under the pointer.
 | `⇧Y` | `scope.tags` | long wires as name tags, or all drawn (§6.3) |
 | `⇧H` | `scope.hoist` | move a loop-invariant binding out of its loop |
 | `r` / `⇧R` | `scope.repeat` / `scope.iterate` | wrap the selection in a `for` / a `fold` |
-| `⇧M` / `⇧L` | `scope.map` / `scope.filter` | wrap the selection as the body of a `map` / the test of a `filter` over `(range 6)` |
+| `⇧M` / `⇧L` | `scope.map` / `scope.filter` | wrap the selection as the body of a `map` / the test of a `filter`. Two selected nodes: one is the collection (the checker picks which; the body reads its items as `i`); else a binding `items (range 6)` is added beside the wrapped node, one literal to edit. One undo step |
 | `⌥⇧I` | `scope.inline-fn` | replace a call of a `defn` by its body (`Inline_defn`) |
 | `l` | `scope.function` | make a local `fn` of the selection |
 | `d` | `scope.defn` | make a `defn` (the host's dialog types its parameters) |

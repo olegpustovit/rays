@@ -13,6 +13,7 @@ or deleted. Newest first. Times are wall seconds on the author's machine, warm c
 | 2026-10-25 | `run_sop`, `run_diagnostics` (`lib/sop`) | minutes | 0 in the default loop | moved to `qualification-scale` |
 | 2026-10-25 | whole `@runtest` | about 20 min | not run for an edit | focused aliases through `tools/check.exe`, 180 s hard timeout |
 | 2026-10-25 | graph drag in `ui_shot` (recursive_rectangles) | 27 s for 30 frames | 3.3 s | probes are no longer forced on every frame (`core_scope.ml`) |
+| 2026-10-25 | `@lib/flow_sop/test_workspace_cook` | over 180 s (stopped by `check.exe`) | not fixed | found while checking the Wrap change; not caused by it. `@test/test_text_pane` is 25 s: `Context_kernel.map` memo is not the cost (1000+ big-graph calls, chains up to 160 from identical unrolled subtrees, about 6% of main-thread samples); polymorphic `List.mem`/`List.assoc_opt` compares are about 30% |
 
 Open: find why a `test_workspace_shell` section costs 25-30 s (a per-section evaluation of the footers is the
 suspect); `core_census.t` fails on crosses and hatch since before these changes.

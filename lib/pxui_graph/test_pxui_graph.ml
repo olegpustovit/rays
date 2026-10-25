@@ -542,7 +542,19 @@ let scope_trunk () =
     let mx, my = Option.get (Scope.Private.wire_midpoint view i) in
     let v, _ = scope_click view (int_of_float mx, int_of_float my) in
     check (Scope.selected_wire v = Scope.Private.wire_target view i) "a branch did not select its own wire")
-    (List.filter (fun i -> List.length (Scope.Private.wire_points view i) = 3) from_a)
+    (List.filter (fun i -> List.length (Scope.Private.wire_points view i) = 3) from_a);
+  (* the shared trunk answers for the whole group: hovering it lights all three wires, pressing it
+     selects their source node rather than one wire *)
+  let (ax, ay), (jx, _) = (match List.find (fun p -> List.length p = 3) pts with
+    | a :: j :: _ -> a, j | _ -> fail "no bent wire") in
+  let mid = int_of_float ((ax +. jx) /. 2.), int_of_float ay in
+  let hov = fst (scope_step view (frame ~mouse:mid ~events:[ mouse_move mid ] ())) in
+  let lit = List.filter (fun (s, _) -> s = (ax, ay)) (Scope.Private.highlighted_connections hov) in
+  check (List.length lit = 3) (Printf.sprintf "hovering the trunk lit %d wires, not 3" (List.length lit));
+  let v, changes = scope_click view mid in
+  check (Scope.selected_wire v = None && List.length (Scope.selected v) = 1
+         && changes = [ Scope.Selected (Scope.selected v) ])
+    "pressing the trunk did not select the source node"
 
 let scope_gestures () =
   let module E = Flow_graph.Flow_edit in

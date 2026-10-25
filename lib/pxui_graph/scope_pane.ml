@@ -597,11 +597,21 @@ let update t ui (frame : Frame.t) =
     | None -> false
     | Some (x, y) -> abs_float (sx t (fst point) -. x) <= 1.5 *. z +. 0.5
         && abs_float (sy t (snd point) -. y) <= 1.5 *. z +. 0.5 in
+  (* the shared trunk of a bundled fan-out: the pointer on the segment from the port to the junction.
+     It belongs to every wire of the group, so it lights all of them and a press selects their source *)
+  let on_trunk (w : wire) = match w.pts with
+    | [ (ax, ay); (jx, _); _ ] ->
+        let mx, my = mouse in
+        abs_float (my -. sy t ay) <= 4. && mx >= sx t ax && mx <= sx t jx
+    | _ -> false in
+  let trunk_wire = if t.context <> None then None
+    else List.find_map (fun i -> let w = t.geo.wires.(i) in if on_trunk w then Some w else None) wires_in_view in
   let highlighted = ref [] in
   List.iter (fun i ->
     let w = t.geo.wires.(i) in
     if t.context = None &&
-      (List.exists (Ui.hovered_within ui) (hits i) || same_port w.a || same_port w.b)
+      (List.exists (Ui.hovered_within ui) (hits i) || same_port w.a || same_port w.b
+       || (match trunk_wire with Some tw -> tw.a = w.a | None -> false))
     then highlighted := w :: !highlighted) wires_in_view;
   let t = { t with hovered_row; highlighted = !highlighted } in
   (* interactions *)
@@ -634,6 +644,10 @@ let update t ui (frame : Frame.t) =
       if List.exists (fun b -> let s = Ui.signal ui b in s.pressed && left s) (hits i)
       then Some i else None) wires_in_view in
   let t = match wire_pressed with
+    | Some _ when (match trunk_wire with Some { from = Some _; _ } -> true | _ -> false) ->
+        let src = Option.get (Option.get trunk_wire).from in
+        emit (Selected [ src ]);
+        { t with selected = Path_set.singleton src; selected_wire = None }
     | Some i ->
         if not (Path_set.is_empty t.selected) then emit (Selected []);
         { t with selected = Path_set.empty; selected_wire = t.geo.wires.(i).target }

@@ -207,7 +207,7 @@ let rewrite ?fallback src op : (unit -> S.t list) list =
       let sp = scope_path_of nodes in
       let root = List.hd sp in
       let rootf = root_form src root in
-      let attempt build = fun () ->
+      let attempt ?(nodes = nodes) build = fun () ->
         let used = root_used src root in
         edit_scope src sp (fun s ->
           let x = select s nodes "Repeat" in
@@ -225,9 +225,21 @@ let rewrite ?fallback src op : (unit -> S.t list) list =
            (match fallback with Some fallback -> [fallback] | None ->
              [sym "nil"; num 0; sym "false"; vec [num 0; num 0; num 0]; mk (S.Str ""); call "list" []])
        | Map | Filter ->
-           [ attempt (fun x iv _ ->
-               [ fst x.out, call (if loop = Map then "map" else "filter")
-                   [ call "fn" [ vec [ sym iv ]; body_of x ]; call "range" [ num 6 ] ] ]) ]
+           let h = if loop = Map then "map" else "filter" in
+           let over x iv coll = call h [ call "fn" [ vec [ sym iv ]; body_of x ]; coll ] in
+           (* two nodes: one is the collection, the other the body, read per item.  The checker
+              picks the order; the source stays a binding of its own. *)
+           let from_source = match nodes with
+             | [ n1; n2 ] ->
+                 List.map (fun (w, c) -> let c = snd (split_node c) in
+                   attempt ~nodes:[ w ] (fun x iv _ ->
+                     [ fst x.out, over { x with sel = [ fst x.out, replace_ref c (sym iv) (body_of x) ] } iv (sym c) ]))
+                   [ n1, n2; n2, n1 ]
+             | _ -> [] in
+           (* otherwise a named placeholder [items] beside the wrapped node, one literal to edit *)
+           from_source @ [ attempt (fun x iv used ->
+               let items = fresh used "items" in
+               [ sym items, call "range" [ num 6 ]; fst x.out, over x iv (sym items) ]) ]
        | For ->
            (* ponytail: the checker is the type oracle, so try the geometry
               shape (collect and merge) and then the number shape (sum) *)
