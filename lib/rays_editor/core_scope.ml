@@ -25,6 +25,15 @@ let probe_force () : Flow_graph.Probe.force =
     | Ok program -> Flow_ir.Executor.force ?state ?elems ?resolve program ~live
     | Error _ -> Flow.Eval.Private.force_reference ?state ?elems ?resolve value ~live
 
+(* The probes of a live graph are forced again only when what a frame can change in them did: its
+   time, size, pointer and buttons.  [tick], [dt] and the key and event lists change every frame, so
+   comparing them re-ran every probe of an open graph on each frame of a drag or a scroll
+   (measured at about 100 ms a frame on recursive_rectangles).  ponytail: a graph that reads
+   frame/tick or frame/dt shows a stale probe while the timeline is paused; its canvas still animates. *)
+let steady_equal (a : Frame_input.t) (b : Frame_input.t) =
+  let steady (f : Frame_input.t) = { f with tick = 0; dt = 0.; keys = []; events = [] } in
+  Frame_input.equal (steady a) (steady b)
+
 let sync_views value =
   let lowered = snd value.doc.Document.workspace in
   match value.view_key with
@@ -110,13 +119,33 @@ let sync_scope value =
       let time = if not (Flow.Workspace.Paths.is_empty ws.checked.live)
         then Some {value.live_frame with Frame_input.t = Timeline.time value.timeline;
           frame = Int64.to_int (Timeline.frame value.timeline)} else None in
+      let now = Unix.gettimeofday () in
       let summaries = value.cook.Cook.summaries in
       let executions = Flow_ir.Profile.executions lowered.profile in
+      (* a moving clock alone re-forces the probes at most five times a second: a forced frame sets the quiet time to four
+         times its own length, so forcing never takes more than a fifth of the time *)
+      (* the executions are a list forcing a probe rewrites, so it is never physically the same twice:
+         comparing it by identity made every frame fresh, and each fresh frame forced the probes
+         again.  Their count changes when a probe first runs, which is when a footer needs them. *)
+      let quiet (k : scope_key) = Float.min 2. (Float.max 0.2 (4. *. (now -. k.stamp))) in
       let fresh = match previous with
-        | Some k -> not (k.evaluated == evaluated && k.summaries == summaries && k.executions == executions
-            && Option.equal Frame_input.equal k.time time)
+        | Some k -> not (k.evaluated == evaluated && k.summaries == summaries
+            && List.compare_lengths k.executions executions = 0
+            && (Option.equal steady_equal k.time time
+              || (now -. k.stamp < k.gap && Option.equal (fun (a : Frame_input.t) b -> steady_equal { a with t = b.t; frame = b.frame } b) k.time time)))
         | None -> true in
-      if not moved && not fresh then value else begin
+      if not moved && not fresh then
+        (* the first call after a forced frame learns what that frame cost *)
+        { value with scope_key = Option.map (fun k ->
+            { k with fresh_last = false;
+                     gap = if k.fresh_last then quiet k else k.gap })
+            value.scope_key }
+      else begin
+        let stamp = match previous with Some k when not fresh -> k.stamp | _ -> now in
+        let gap = match previous with
+          | Some k when k.fresh_last && fresh -> quiet k
+          | Some k -> k.gap
+          | None -> 0.2 in
         let scope = match previous with
           | Some k when Option.is_some arguments ->
               if edits = [] then k.scope else Flow_graph.Projection.with_arguments edits k.scope
@@ -183,7 +212,10 @@ let sync_scope value =
         let force = match previous with
           | Some k when k.evaluated == evaluated -> k.force
           | _ -> probe_force () in
-        let records = Option.map (Flow_graph.Probe.make ~force ~state:value.cook.state ?live:time ~geometry ~resolve ~execution
+        (* a moved node or a dragged pane changes the layout, not the values: the records keep their
+           memo of footers and probes (a rebuild each frame of a drag cost about 0.8 s here) *)
+        let reuse = match previous with Some k when not fresh -> k.records | _ -> None in
+        let records = if reuse <> None then reuse else Option.map (Flow_graph.Probe.make ~force ~state:value.cook.state ?live:time ~geometry ~resolve ~execution
           ~bulk_calls:(Flow_sop.Lower.field_calls ~state:value.cook.state
             ~live:(Option.value ~default:(Frame_input.at_time 0.) time) ~resolve lowered)
           ~image:(Flow_sop.Lower.image_metadata lowered.plan)
@@ -202,6 +234,6 @@ let sync_scope value =
                    ~probe:(fun path -> Option.value ~default:0 (M.find_opt path value.probes)))
           | None, _ -> [] in
         { value with scope_view; select_later; scope_key = Some { ws; probe_map = value.probes; graph = name;
-            evaluated; summaries; executions; time; records; force; scope; targets } }
+            evaluated; summaries; executions; time; records; force; scope; targets; stamp; gap; fresh_last = fresh } }
       end
   | _ -> value

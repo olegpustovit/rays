@@ -84,12 +84,16 @@ let context_items t path =
         "Toggle bypass", true; "Repeat (loop)", true; "Iterate (feed back)", true;
         "Make function", true; "Make macro", true; "Make defn", true; "Delete", true;
         "Wrap conditional", true; "Add arm", conditional;
-        (if parent = n.path then "Delete first arm" else "Delete arm"), conditional && (parent = n.path || arm >= 0) ]
+        (if parent = n.path then "Delete first arm" else "Delete arm"), conditional && (parent = n.path || arm >= 0);
+        "Wrap in map", true; "Wrap in filter", true;
+        "Inline function", n.zone = None && n.macro = None && not (String.contains n.head '/');
+        "Move up in text", true; "Move down in text", true ]
 
 let context_command = function
   | 0 -> Fold_into | 1 -> Unfold | 2 -> Hoist | 3 -> Collapse | 4 -> Bypass
   | 5 -> Wrap_repeat | 6 -> Wrap_iterate | 7 -> Make_fn | 8 -> Make_macro | 9 -> Make_defn
-  | 11 -> Wrap_if | 12 -> Add_arm | 13 -> Delete_arm | _ -> Delete
+  | 11 -> Wrap_if | 12 -> Add_arm | 13 -> Delete_arm | 14 -> Wrap_map | 15 -> Wrap_filter | 16 -> Inline_fn
+  | 17 -> Item_up | 18 -> Item_down | _ -> Delete
 
 let update t ui (frame : Frame.t) =
   (* the first view shows the whole graph, at zoom 1 when it fits (Home frames everything) *)
@@ -155,6 +159,7 @@ let update t ui (frame : Frame.t) =
   (* Segment rectangles live in the shared hit tree, behind the cards; ports built below take
      hover precedence.  A segment is cut to [clip] (pane points) first, so what is out of view
      costs one clip; a diagonal is then a run of 16-point boxes. *)
+  let chain = chains_of t in
   let wire_hits = Cells.create 16 in
   let hits i = Option.value ~default:[] (Cells.find_opt wire_hits i) in
   let wire_boxes ?(origin = (0., 0.)) name (cx, cy, cw, ch) i =
@@ -181,7 +186,7 @@ let update t ui (frame : Frame.t) =
                done);
           segments (j + 1) rest
       | _ -> () in
-    if w.target <> None then segments 0 w.pts in
+    if w.target <> None && not (tagged t w) then segments 0 w.pts in
   Ui.within ui canvas (fun () ->
     List.iter (wire_boxes "wire" (0., 0., float t.width, float t.height)) wires_in_view);
   (* footers: only for what is in view, and not when too small to read *)
@@ -385,7 +390,10 @@ let update t ui (frame : Frame.t) =
                   | P.Inline _ ->
                       let cb = Ui.box ui ~flags:Ui.clickable ~w:(Ui.Px ((field_w -. 24.) *. z)) ~h:(Ui.Px (16. *. z))
                           ~at:((value_x p.w +. 24.) *. z, (top +. float k *. P.row_height +. 4.) *. z) ("ex" ^ string_of_int i) in
-                      if (Ui.signal ui cb).clicked then [ Selected [ n.path; n.path @ [ ":" ^ r.label ] ] ] else []
+                      let s = Ui.signal ui cb in
+                      (* a double click expands the call in place, as the glyph does *)
+                      if s.double_clicked then [ Syntax_edit (E.Unfold { node = n.path; key = r.key; sub = [] }) ]
+                      else if s.clicked then [ Selected [ n.path; n.path @ [ ":" ^ r.label ] ] ] else []
                   | _ -> [] in
                 subject @ if not (Ui.signal ui b).clicked then [] else
                 (match r.kind, r.chip with
@@ -728,7 +736,7 @@ let update t ui (frame : Frame.t) =
           { t with drag = Some (Wiring { src; ty; iter; from = (let x, y, w, h = Ui.rect ui b in x +. w /. 2., y +. h /. 2.) }) }
         else t in
       if bs.released && left bs then begin
-        (match t.drag with
+        match t.drag with
          | Some (Wiring w) ->
              let target = List.find_map (fun ((tp : P.placed), tax, tay, ttile, _, _, _) ->
                if not (Ui.hovered_within ui ttile) then None else
@@ -766,11 +774,15 @@ let update t ui (frame : Frame.t) =
                         else if lx > tp.w -. 24. && ly >= P.rail_top n then
                           Some (zn.scope.path @ [ "@result" ], E.Whole)
                         else None)) tiles in
+             (* a wire let go on empty canvas: the add menu there, after the node it came from *)
+             let on_canvas = target = None && List.nth_opt (List.rev p.path) 0 = Some w.src
+               && not (List.exists (fun (_, _, _, ttile, _, _, _) -> Ui.hovered_within ui ttile) tiles) in
              (match target with
               | Some (node, key) -> emit (Syntax_edit (E.Connect { node; key; src = w.src; iter = w.iter }))
-              | None -> emit (Notice "Drop the wire on an input row"))
-         | _ -> ());
-        { t with drag = None }
+              | None when on_canvas -> emit (Selected [ p.path ]); (let x, y = bs.release_point in emit (Menu_requested (x, y)))
+              | None -> emit (Notice "Drop the wire on an input row"));
+             { t with drag = None; selected = if on_canvas then Path_set.singleton p.path else t.selected }
+         | _ -> { t with drag = None }
       end else t) t outs in
     t) t tiles in
   (* the context menu *)
@@ -832,7 +844,13 @@ let update t ui (frame : Frame.t) =
                  ~carry:(match snapshot.carry_hot with Some (hp, _) -> hp = n.path | None -> false)
                  ~out_wired:(Hashtbl.mem read (out_anchor p ax ay)) ~shown:(p.shown)
                  ?failed:(List.assoc_opt n.path snapshot.failed) p n ~selected:isel ~row_hover:rh (x, y, w, h);
-               if dimmed n then Ui.Paint.fill paint ~x ~y ~w ~h (Color.with_alpha snapshot.theme.panel 150)));
+               if dimmed n then Ui.Paint.fill paint ~x ~y ~w ~h (Color.with_alpha snapshot.theme.panel 150));
+      (* the chain of the selection stays; the rest of the cards recede *)
+      (match chain with
+       | Some c when not (node_lit c path) &&
+           (match p.item with P.Item { zone = Some _; _ } -> p.collapsed | _ -> true) ->
+           Ui.Paint.fill paint ~x ~y ~w ~h (Color.with_alpha snapshot.theme.panel 170)
+       | _ -> ()));
     ) tiles;
   let drawn_items = List.length tiles in
   let drawn_zones = List.length zones in
@@ -858,6 +876,15 @@ let update t ui (frame : Frame.t) =
              Some (sx t ax +. 116. *. z, sy t ay +. 32. *. z), over && Ui.hover_delay ui ~key:"scope-flag"
          | _ -> None, false)
     | None -> None, false in
+  (* the red [t] of a header: a tip after the pointer rests on it, saying what it is *)
+  let live_tip = List.find_map (fun ((p : P.placed), ax, ay, tile, _, _, _) -> match p.item with
+    | P.Item { live = true; _ } when p.shown <> P.Point && Ui.hovered_within ui tile ->
+        let right = sx t ax +. (p.w -. head_pad) *. z in
+        let mx, my = mouse in
+        let top = sy t ay in
+        if mx >= right -. 14. *. z && mx <= right +. 2. *. z && my >= top && my < top +. P.head_height *. z
+           && Ui.hover_delay ui ~key:"scope-live" then Some (right -. 150., top +. P.head_height *. z +. 2.) else None
+    | _ -> None) tiles in
   let hint_chip paint ~bg (x, y) letter =
     let letter = String.uppercase_ascii letter in
     let size = max 8 (Ui.font_size ui - 2) in
@@ -887,6 +914,12 @@ let update t ui (frame : Frame.t) =
           let rest = String.sub tg.label (String.length h.typed) (String.length tg.label - String.length h.typed) in
           hint_chip paint ~bg:(Pxui.Theme.ports snapshot.theme).hint (sx snapshot (fst tg.pos), sy snapshot (snd tg.pos)) rest
         end) h.targets) snapshot.hinting;
+    Option.iter (fun (fx, fy) ->
+      let size = max 4 (Ui.font_size ui - 2) in
+      let label = "t  live: reads time or input, re-cooked every frame" in
+      let tw = Ui.Paint.text_width paint ~size label +. 14. in
+      frame_in paint ~x:fx ~y:fy ~w:tw ~h:20. ~fill:snapshot.theme.input (Pxui.Theme.edge snapshot.theme);
+      Ui.Paint.text paint ~at:(fx +. 7., Ui.text_top ui ~size fy 20.) ~size ~color:snapshot.theme.foreground label) live_tip;
     (* the displayed node's tip, once the pointer has rested on its flag *)
     if tip_open then Option.iter (fun (fx, fy) ->
       let size = max 4 (Ui.font_size ui - 2) in
@@ -1036,6 +1069,9 @@ module Private = struct
           | _ -> [] in
         s (in_anchor p ax ay) :: s (out_anchor p ax ay) :: rows
     | None -> []
+  let chain t = Option.map (fun (up, down) -> Path_set.elements up, Path_set.elements down) (chains_of t)
+  let tagged_wires t = Array.fold_left (fun n w ->
+    if tagged t w then n + 1 else n) 0 t.geo.wires
   let wire_count t = Array.length t.geo.wires
   let wire_points t i =
     if i < 0 || i >= Array.length t.geo.wires then [] else List.map (fun (x, y) -> sx t x, sy t y) t.geo.wires.(i).pts

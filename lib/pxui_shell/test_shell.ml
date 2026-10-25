@@ -361,6 +361,24 @@ let () =
    | [ (x, _) ] -> failwith (Printf.sprintf "a window saved past the edge did not follow the pointer: x %d" x)
    | _ -> failwith "a header drag did not move its window");
   Pxui.Ui.destroy window_ui;
+  (* the parts of a docked header's breadcrumb before its last are buttons *)
+  let crumb_ui = Pxui.Ui.create ~font_size:11 () in
+  let crumbed ?(mouse = 0., 0.) events =
+    let f = { wide_frame with events; mouse; height = 600; size = 1000, 600 } in
+    Pxui.Ui.frame crumb_ui f (fun ui ->
+      Pxui_shell.Chrome.update ~title:(fun _ -> "Graph\tfirst / second / third / sop") (L.Leaf L.Graph) ui f) in
+  ignore (crumbed []);
+  let hit = ref [] in
+  List.iter (fun x ->
+    let p = (float x, 10.) in
+    ignore (crumbed ~mouse:p [ Event.MouseMoved p ]);
+    ignore (crumbed ~mouse:p [ Event.MousePressed (Input.LeftButton, p) ]);
+    List.iter (function Pxui_shell.Chrome.Crumb (_, i) -> if not (List.mem i !hit) then hit := i :: !hit | _ -> ())
+      (crumbed ~mouse:p [ Event.MouseReleased (Input.LeftButton, p) ])) (List.init 40 (fun i -> 20 + (i * 6)));
+  if List.sort compare !hit <> [ 0; 1; 2 ] then
+    failwith (Printf.sprintf "breadcrumb clicks reported %s, not the first three parts"
+      (String.concat "," (List.map string_of_int (List.sort compare !hit))));
+  Pxui.Ui.destroy crumb_ui;
   let hidden = Pxui.Ui.create ~font_size:11 () in
   ignore (Pxui_shell.Shell.frame hidden frame ~visible:false
     ~body:(fun _ -> ())

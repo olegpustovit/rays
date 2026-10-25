@@ -226,3 +226,13 @@ let () =
    | _ -> failwith "a circle set is one Shapes command");
   if per_mark > 72. then failwith (Printf.sprintf "a static circle set allocates %.0f bytes a mark, over its 64-byte instance" per_mark);
   Printf.printf "Marks_scene: a static set of %d circles allocates %.1f bytes a mark\n" n per_mark
+
+(* The cache is bounded: a frame with more mark sets than it holds keeps the most recent. *)
+let () =
+  let sets = Array.init 3000 (fun i ->
+    M.Mark_set {count = 1; kind = Point {position = Constant (float i, 0.); fill = 0l}}) in
+  let cache = Marks_scene.cache () in
+  ignore (ok (Marks_scene.scene ~buffers:(Buffers.create ()) ~cache sets));
+  let size = Marks_scene.cache_size cache in
+  if size > 1024 then failwith (Printf.sprintf "the node cache grew to %d entries" size);
+  Printf.printf "Marks_scene: 3000 mark sets leave %d cached nodes\n" size

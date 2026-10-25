@@ -447,7 +447,9 @@ let yield_label = function
   | For | Scan -> "collect" | Fold | State -> "next" | Sum -> "add" | Let -> "result" | Fn -> "return"
   | Branch -> "then"
 
-let rec scope_of c ~visible ~inputs (path : path) (body : S.t) : scope =
+let is_vec (e : S.t) = match e.node with S.Vec _ -> true | _ -> false
+
+let rec scope_of ?(card_result = false) c ~visible ~inputs (path : path) (body : S.t) : scope =
   let binds, res = match scope_form body with
     | Some (bs, res) -> bs, res
     | None -> [], body in
@@ -455,7 +457,7 @@ let rec scope_of c ~visible ~inputs (path : path) (body : S.t) : scope =
   let nodes = List.concat_map (fun (pat, e) -> node_of c ~visible path (Some pat) e) binds in
   let result, extra = match res.node with
     | S.Sym s when List.mem (root_of s) visible -> Link s, []
-    | S.List _ | S.Map _ ->
+    | S.List _ | S.Map _ | S.Vec _ when card_result || not (is_vec res) ->
         let ns = node_of c ~visible path None res in
         Node (path @ [ "@result" ]), ns
     | _ -> Literal res, [] in
@@ -495,7 +497,7 @@ and node_of c ~visible ?nested (scope_path : path) (pat : S.t option) (e : S.t) 
           | [] -> None in
         Option.value ~default:"by index" (key (S.children e))) call) rail in
     { kind = k; rail; yield_label = yield_label k; order;
-      scope = scope_of c ~visible:inner_visible ~inputs:[] p body }) kind in
+      scope = scope_of ~card_result:(k = Fn) c ~visible:inner_visible ~inputs:[] p body }) kind in
   let macro = match head_sym e with Some h when List.mem_assoc h c.macros -> Some h | _ -> None in
   let lens = Option.map (fun _ -> macro_lens c.w e) macro in
   (* a node call written in an input is a node of its own, wired to the row by its leaf *)
@@ -749,7 +751,7 @@ let rec size ~foot ~at ~collapsed ~lens ~level ~pin (it : item) :
                      +. (match open_lens with Some (l, step) -> lens_height l ~step | None -> 0.)),
            false, None, lvl, ln)
 
-and layout ?(foot = false) ?(at = fun _ -> None) ?(collapsed = fun _ -> false) ?(lens = fun _ -> None)
+and layout ?(foot = false) ?(at = fun _ -> None) ?(prev = fun _ -> None) ?(collapsed = fun _ -> false) ?(lens = fun _ -> None)
     ?(level = fun _ -> Card) ?(pin = fun _ _ -> None) ?(inner = false) (s : scope) : layout =
   (* the return card only when the result is a literal: otherwise the displayed node is the result *)
   let with_return = s.inputs <> [] && (match s.result with Literal _ -> true | _ -> false) in
@@ -790,9 +792,9 @@ and layout ?(foot = false) ?(at = fun _ -> None) ?(collapsed = fun _ -> false) ?
       | Some k when k <> j && j < consumer.(k) -> consumer.(k) <- j
       | _ -> ()) deps) arr;
   (* the graph's inputs stack in the order they are written, each no earlier than the one before *)
-  let prev = ref 0 in
+  let last = ref 0 in
   Array.iteri (fun k (it, _, _, _, _) -> match it with
-    | Input _ -> prev := max !prev consumer.(k); consumer.(k) <- !prev
+    | Input _ -> last := max !last consumer.(k); consumer.(k) <- !last
     | _ -> ()) arr;
   let order k = (consumer.(k), match arr.(k) with (Input _, _, _, _, _) -> 1 | _ -> 0) in
   (* the items of each column, in item order *)
@@ -808,6 +810,12 @@ and layout ?(foot = false) ?(at = fun _ -> None) ?(collapsed = fun _ -> false) ?
   let row_start = origin_y +. 0. in
   let row_start = if inner then row_start
     else floor_lattice (origin_y +. Array.fold_left (fun m (it, _, _, _, _) -> Float.max m (lead_of it)) 0. arr) in
+  (* an edit that adds or removes a few nodes keeps every other node where it was: the nodes it adds are
+     placed beside their consumer below.  Many new nodes, or none known, is a first layout. *)
+  let sticky = not inner && Array.length arr <= 600 && (let known = ref 0 and fresh = ref 0 in
+    Array.iter (fun (_, p, _, _, _) -> if at p <> None || prev p <> None then incr known else incr fresh) arr;
+    !known > 0 && !fresh <= 3) in
+  let fresh_items = ref [] in
   let placed = ref [] and x = ref origin_x and w = ref 0. and h = ref 0. in
   let pos_of = Hashtbl.create 16 in
   for l = 0 to cols - 1 do
@@ -843,7 +851,10 @@ and layout ?(foot = false) ?(at = fun _ -> None) ?(collapsed = fun _ -> false) ?
       let row = match aligned with Some sr when sr > row_min -> sr | _ -> row_min in
       let px, py = match at path with
         | Some (ax, ay) -> ax, ay
-        | None -> !x, row -. lead in
+        | None ->
+            (match (if sticky then prev path else None) with
+             | Some (ax, ay, _, _) -> ax, ay
+             | None -> if sticky then fresh_items := k :: !fresh_items; !x, row -. lead) in
       let row = py +. lead in
       first := false;
       placed := { item = it; path; x = px; y = py; w = iw; h = ih; collapsed = coll; inner = inner_l;
@@ -854,5 +865,45 @@ and layout ?(foot = false) ?(at = fun _ -> None) ?(collapsed = fun _ -> false) ?
       w := Float.max !w (px +. iw); h := Float.max !h (py +. ih)) members;
     if !cw > 0. then x := ceil_lattice (!x +. !cw +. column_gap)
   done;
+  let placed = List.rev !placed in
+  let placed = if not sticky then placed else begin
+    let boxes = Array.of_list placed in
+    let n = Array.length boxes in
+    let index = Hashtbl.create n in
+    Array.iteri (fun i (b : placed) -> Hashtbl.replace index b.path i) boxes;
+    let hit a b = a.x < b.x +. b.w -. 1e-6 && b.x < a.x +. a.w -. 1e-6
+                  && a.y < b.y +. b.h -. 1e-6 && b.y < a.y +. a.h -. 1e-6 in
+    (* ponytail: quadratic scan, fine for the hundreds of cards of a scope; use the int grid beyond that *)
+    let clear ?(solid = fun _ -> true) i = let rec go j y = if j >= n then y else
+        if j <> i && solid j && hit { boxes.(i) with y } boxes.(j) then go 0 (ceil_lattice (boxes.(j).y +. boxes.(j).h +. row_gap))
+        else go (j + 1) y in
+      boxes.(i) <- { (boxes.(i)) with y = go 0 boxes.(i).y } in
+    (* a new node goes one column left of the first node that reads it, on that node's row *)
+    List.iter (fun k ->
+      let _, p, _, _, _ = arr.(k) in
+      match Hashtbl.find_opt index p with
+      | Some i ->
+          (match (if consumer.(k) = max_int then None else
+                    let _, cp, _, _, _ = arr.(consumer.(k)) in Hashtbl.find_opt index cp) with
+           | Some o -> boxes.(i) <- { (boxes.(i)) with x = boxes.(o).x -. boxes.(i).w -. column_gap; y = boxes.(o).y }
+           | None -> ());
+          clear i
+      | _ -> ()) (List.rev !fresh_items);
+    (* a card that grew (a footer, a level) pushes the one it now covers down, and that one the next; never a dragged one *)
+    begin
+      let order = List.sort (fun i j -> compare (boxes.(i).y, boxes.(i).x) (boxes.(j).y, boxes.(j).x))
+          (List.init n Fun.id) in
+      let grew = Array.map (fun (b : placed) -> match prev b.path with
+        | Some (_, _, pw, ph) -> pw <> b.w || ph <> b.h | None -> false) boxes in
+      let seen = Array.make n false in
+      List.iter (fun i ->
+        if at boxes.(i).path = None then begin
+          let y = boxes.(i).y in
+          clear ~solid:(fun j -> seen.(j) && grew.(j)) i;
+          if boxes.(i).y <> y then grew.(i) <- true end;
+        seen.(i) <- true) order end;
+    Array.to_list boxes end in
+  let w = List.fold_left (fun m (b : placed) -> Float.max m (b.x +. b.w)) 0. placed
+  and h = List.fold_left (fun m (b : placed) -> Float.max m (b.y +. b.h)) 0. placed in
   let margin = if inner then 0. else lattice in
-  { placed = List.rev !placed; w = !w +. margin; h = !h +. margin }
+  { placed; w = w +. margin; h = h +. margin }

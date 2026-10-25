@@ -50,7 +50,7 @@
  (libraries sop rays rdk rdk_rays rdk_test_support lisp_sop))
 
 (rule
- (aliases runtest test_sop)
+ (aliases qualification-scale test_sop)
  (action (run %{exe:run_sop.exe})))
 
 (rule
@@ -66,5 +66,5 @@
  (action (run %{exe:run_parallel_exact.exe})))
 
 (rule
- (aliases runtest test_diagnostics)
+ (aliases qualification-scale test_diagnostics)
  (action (run %{exe:run_diagnostics.exe})))

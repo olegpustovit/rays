@@ -35,7 +35,8 @@ type arg_key =
   | Arm of int  (** Conditional arm: zero-based then arm, [-1] for else. *)
 (** The input a row of the graph edits. *)
 
-type loop = For | Fold | If  (** Repeat, Iterate, or a conditional. *)
+type loop = For | Fold | If | Map | Filter
+(** Repeat, Iterate, a conditional, or the selection as the body of a [map] / [filter] over [range]. *)
 
 type op =
   | Set_arg of { node : path; key : arg_key; sub : int list; value : Flow.Syntax.t }
@@ -70,6 +71,11 @@ type op =
       (** [holes] are child paths into the template (the binding expression, or
           [let*] over several bindings, see [literals]) *)
   | Inline_macro of { node : path }
+  | Inline_defn of { node : path }
+      (** a call of a [defn] is replaced by the function's body, its parameters by the call's arguments *)
+  | Move_binding of { node : path; by : int }
+      (** the binding swaps with its neighbour [by] places away ([-1] up, [1] down): text order only,
+          refused when it reads or is read by the neighbour *)
   | Toggle_bypass of { node : path }
   | Set_note of { node : path; text : string }
       (** a root path (a graph name) notes the form; [""] removes the note *)
@@ -84,9 +90,10 @@ type op =
       (** the binding [node] of an editor graph is a [ui/split] or [ui/split-at]; it becomes
           [ui/split-at] with this ratio (clamped to 0.1-0.9, four decimals), or a [ui/split] with
           [:first_size] or [:second_size] in whole points (1 or more) *)
-  | Split_panel of { node : path; axis : [ `H | `V ] }
-      (** the panel [node] becomes a half of a new [ui/split-at] (a fresh lisp panel beside
-          it, a graph panel beside a lisp one) *)
+  | Split_panel of { node : path; axis : [ `H | `V ]; ratio : float; kind : string option }
+      (** the panel [node] becomes the first half, [ratio] of the extent (clamped to 0.1-0.9), of a new
+          [ui/split-at]; the second is a panel of [kind] (as {!Set_panel_kind}), by default a fresh lisp
+          panel beside it, a graph panel beside a lisp one *)
   | Close_panel of { node : path }
       (** the split holding panel [node] becomes the other half; a panel outside a split
           does not close *)

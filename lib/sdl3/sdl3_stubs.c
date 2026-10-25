@@ -1,4 +1,5 @@
 #include <caml/alloc.h>
+#include <caml/callback.h>
 #include <caml/fail.h>
 #include <caml/memory.h>
 #include <caml/mlvalues.h>
@@ -169,6 +170,7 @@ CAMLprim value caml_sdl3_show_window(value raw)
 
 CAMLprim value caml_sdl3_raise_window(value raw)
 {
+  rays_app_activate();
   return Val_bool(SDL_RaiseWindow(window_of_value(raw)));
 }
 
@@ -775,6 +777,34 @@ static bool take_scroll(value *out)
   CAMLreturnT(bool, true);
 }
 
+/* Live resize. While a window edge is dragged, Cocoa runs its own event loop
+   inside SDL_PollEvent and the sketch loop gets no turn. SDL calls this watch
+   from that loop, on the main thread, with the OCaml runtime lock still held
+   (poll is not a blocking section), so it may call the one closure the sketch
+   registered as "rays_sdl3_live_redraw". It only acts inside our own poll, once
+   at a time; OCaml keeps the exception, the callback never raises. */
+static bool in_poll, in_live_redraw, live_watch_installed;
+
+static bool live_resize_watch(void *userdata, SDL_Event *event)
+{
+  const value *redraw;
+  (void)userdata;
+  if (!in_poll || in_live_redraw || !SDL_IsMainThread()) return true;
+  if (event->type != SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) return true;
+  redraw = caml_named_value("rays_sdl3_live_redraw");
+  if (redraw == NULL) return true;
+  in_live_redraw = true;
+  (void)caml_callback_exn(*redraw, Val_unit);
+  in_live_redraw = false;
+  return true;
+}
+
+static void live_resize_install(void)
+{
+  if (live_watch_installed) return;
+  live_watch_installed = SDL_AddEventWatch(live_resize_watch, NULL);
+}
+
 /* Event operations are safe-module main-domain-only, so one reusable native
    union is sufficient. SDL-owned pointer fields are copied before reuse. */
 static SDL_Event rays_sdl3_event;
@@ -805,13 +835,17 @@ CAMLprim value caml_sdl3_poll_event(value unit)
     Store_field(some, 0, translated);
     CAMLreturn(some);
   }
+  live_resize_install();
+  in_poll = true;
   while (SDL_PollEvent(&rays_sdl3_event)) {
     if (translate_event(&rays_sdl3_event, &translated)) {
       some = caml_alloc(1, 0);
       Store_field(some, 0, translated);
+      in_poll = false;
       CAMLreturn(some);
     }
   }
+  in_poll = false;
   if (take_scroll(&translated)) {
     some = caml_alloc(1, 0);
     Store_field(some, 0, translated);

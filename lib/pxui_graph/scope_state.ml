@@ -40,8 +40,8 @@ type change =
 
 type direction = Left | Down | Up | Right
 type command =
-  | Delete | Fold_into | Unfold | Hoist | Bypass | Wrap_repeat | Wrap_iterate | Wrap_if | Add_arm | Delete_arm | Make_fn | Make_macro | Make_defn
-  | Collapse | Probe_step of int | Frame_all | Walk of direction
+  | Delete | Fold_into | Unfold | Unfold_all | Hoist | Bypass | Wrap_repeat | Wrap_iterate | Wrap_if | Wrap_map | Wrap_filter | Inline_fn | Add_arm | Delete_arm | Make_fn | Make_macro | Make_defn
+  | Collapse | Probe_step of int | Frame_all | Tidy | Toggle_tags | Walk of direction
   | Edit_name  (** rename the selected node, or edit the default of a selected graph input *)
   | Item_up | Item_down  (** move the hovered list item *)
   | Make_frame  (** a titled frame around the selected nodes *)
@@ -122,6 +122,9 @@ type t = {
   held : Input.key list * bool;  (* keys and any button held last frame: a press is a change *)
   back : (path * P.level) list;  (* the level a node had before [p] pointed it *)
   measure : int -> string -> float;  (* text width in points, from the last built frame *)
+  tags : bool;  (* a long wire is a named tag at its use site, unless its chain is lit (flow.md 6.4) *)
+  chain : (Path_set.t * Scope_wires.wire array * (Path_set.t * Path_set.t)) option ref;
+      (* one slot: the chains of the last selection over the last wires *)
 }
 
 (* the geometry of the scope *)
@@ -141,7 +144,41 @@ let create ?(width = 640) ?(height = 360) () = {
   wires = `Straight; selected = Path_set.empty; selected_wire = None; panning_grab = false;
   hovered_row = None; highlighted = []; drag = None; editing = None; context = None; stats = no_stats; switches = [];
   carry_lit = []; carry_hot = None; failed = []; hinting = None; held = [], false; back = [];
-  measure = (fun size s -> 0.6 *. float (size * String.length s)) }
+  measure = (fun size s -> 0.6 *. float (size * String.length s)); tags = true; chain = ref None }
+
+(* the nodes upstream and downstream of the selection (it included), along the wires; [None] with
+   nothing selected.  A wire is lit when both its ends are in the same side.
+   ponytail: one pass over the wires per selection or geometry change; index them if a 10k-wire graph drags. *)
+let chains_of t =
+  if Path_set.is_empty t.selected then None else
+  match !(t.chain) with
+  | Some (sel, wires, r) when sel == t.selected && wires == t.geo.wires -> Some r
+  | _ ->
+      let reach next =
+        let seen = ref t.selected and todo = ref (Path_set.elements t.selected) in
+        while !todo <> [] do
+          let batch = !todo in
+          todo := [];
+          List.iter (fun p -> Array.iter (fun w -> match next w with
+            | Some (from, into) when path_equal from p && not (Path_set.mem into !seen) ->
+                seen := Path_set.add into !seen; todo := into :: !todo
+            | _ -> ()) t.geo.wires) batch
+        done;
+        !seen in
+      let up = reach (fun w -> match w.into, w.from with Some i, Some f -> Some (i, f) | _ -> None)
+      and down = reach (fun w -> match w.into, w.from with Some i, Some f -> Some (f, i) | _ -> None) in
+      t.chain := Some (t.selected, t.geo.wires, (up, down));
+      Some (up, down)
+let wire_lit (up, down) (w : wire) = match w.from, w.into with
+  | Some f, Some i -> (Path_set.mem f up && Path_set.mem i up) || (Path_set.mem f down && Path_set.mem i down)
+  | _ -> false
+let node_lit (up, down) p = Path_set.mem p up || Path_set.mem p down
+
+(* a wire longer than three columns reads as a name tag at its use site unless its chain is lit (flow.md 6.4) *)
+let tag_span = 3. *. 288.
+let tagged t (w : wire) =
+  t.tags && w.target <> None && abs_float (fst w.b -. fst w.a) > tag_span
+  && not (match chains_of t with Some c -> wire_lit c w | None -> false)
 
 let with_bounds ~x ~y ~width ~height t =
   if t.x = x && t.y = y && t.width = width && t.height = height then t
@@ -206,8 +243,15 @@ let no_shift _ = 0., 0.
 let lens_of t path = List.assoc_opt path t.lens
 
 (* the cards reserve a footer row once the host has probe records to show *)
-let lay t scope ~at ~collapsed =
-  P.layout ~foot:(t.records <> None) ~at ~collapsed ~lens:(lens_of t)
+let lay ?(sticky = true) t scope ~at ~collapsed =
+  (* the cards stay where they were (flow.md 6.1): an edit places only the nodes it adds *)
+  (* a card whose saved position was dropped (an undone drag) is a full layout again *)
+  let sticky = sticky && not (List.exists (fun (b : P.placed) -> t.at b.path <> None && at b.path = None) t.layout.P.placed) in
+  let prev = if not sticky || t.layout.P.placed = [] then (fun _ -> None) else begin
+    let h = Hashtbl.create 64 in
+    List.iter (fun (b : P.placed) -> Hashtbl.replace h b.path (b.x, b.y, b.w, b.h)) t.layout.P.placed;
+    Hashtbl.find_opt h end in
+  P.layout ~foot:(t.records <> None) ~at ~prev ~collapsed ~lens:(lens_of t)
     ~level:(fun p -> match t.level_at p with Some (l, _) -> l | None -> P.Card) ~pin:t.pin_at scope
 
 (* the rows a fold button is drawn on (flow.md 7.7): a row wired from one named node of its scope
@@ -262,12 +306,26 @@ let with_scope ?(at = fun _ -> None) ?(level = fun _ -> None) ?(pin = fun _ _ ->
   let t = match t.scope with
     | Some previous when previous == scope -> t
     | _ -> { t with hinting = None; context = None; highlighted = [] } in
-  let layout = lay t scope ~at ~collapsed in
+  let layout = lay ~sticky:(key = t.key) t scope ~at ~collapsed in
+  let earlier = if key = t.key then t.layout.P.placed else [] in
   let n, z, r = count_scope scope in
   let t = { t with scope = Some scope; imported; at; collapsed; probe; frames; display; layout; switches = switch_nodes scope;
     chains = Flow_graph.Probe.chains scope; folds = fold_sources scope; wires;
     stats = { t.stats with nodes = n; zones = z; rows = r } } in
   let t = regeo t scope layout ~shift:no_shift in
+  (* a card an edit added (an unfolded call lands a column left of its owner) that falls outside the view
+     brings the pane to it, nothing else moves *)
+  let t = if earlier = [] || List.length layout.P.placed <= List.length earlier || t.width = 0 then t else begin
+    let known = Hashtbl.create 64 in
+    List.iter (fun (b : P.placed) -> Hashtbl.replace known b.path ()) earlier;
+    match List.find_opt (fun (b : P.placed) -> not (Hashtbl.mem known b.path)) layout.P.placed with
+    | None -> t
+    | Some b ->
+        let fit pan size lo hi = (* the pan that puts [lo, hi] (graph units) inside [0, size] with a 24-point margin *)
+          if pan +. lo *. t.zoom < 8. then 24. -. lo *. t.zoom
+          else if pan +. hi *. t.zoom > size -. 8. then size -. 24. -. hi *. t.zoom else pan in
+        { t with pan_x = fit t.pan_x (float t.width) b.x (b.x +. b.w); pan_y = fit t.pan_y (float t.height) b.y (b.y +. b.h) }
+  end in
   (* an edit that removed or moved a node drops it from the selection *)
   let t = { (refresh t) with selected = Path_set.filter (fun p ->
     Paths.mem t.geo.slot p
@@ -287,12 +345,15 @@ let with_scope ?(at = fun _ -> None) ?(level = fun _ -> None) ?(pin = fun _ _ ->
     { (suspend t) with key; framed = false; selected = Path_set.empty; selected_wire = None }
   end else t
 
-(* the panel of a macro call opened or stepped: its card changes size *)
-let relayout t = match t.scope with
+(* the panel of a macro call opened or stepped: its card changes size; [~sticky:false] (Tidy)
+   puts every card back to the computed layout, dragged ones too *)
+let relayout ?sticky t = match t.scope with
   | None -> t
   | Some scope ->
-      let layout = lay t scope ~at:t.at ~collapsed:t.collapsed in
+      let layout = lay ?sticky t scope ~at:t.at ~collapsed:t.collapsed in
       regeo { t with layout } scope layout ~shift:no_shift
+
+let tidy t = relayout ~sticky:false t
 
 let with_display display t = if display = t.display then t else { t with display }
 

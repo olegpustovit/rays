@@ -110,8 +110,12 @@ module Chrome : sig
     | Dragging of Layout.path * bool  (** a panel drag; [true] on release *)
     | Dock_panel of Layout.path * Layout.path * [ `Left | `Right | `Top | `Bottom ]
     | Split_panel of Layout.path * Layout.axis  (** the header menu *)
+    | Split_panel_at of Layout.path * Layout.axis * float * Layout.panel
+        (** split a panel where the pointer is: the first half keeps this share of the extent, the second is a panel of the kind *)
     | Close_panel of Layout.path
     | Retype_panel of Layout.path * Layout.panel  (** [View ""] means a viewport *)
+    | Crumb of Layout.path * int
+        (** a click on part [i] of a docked header's breadcrumb, not its last: the host decides what it means *)
 
   val header_slots : Layout.leaf -> float list -> float option list * float
   (** The one layout of a header's right end.  The groups of tabs a host stands there, outermost

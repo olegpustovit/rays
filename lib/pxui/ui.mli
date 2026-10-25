@@ -212,6 +212,9 @@ val tooltip : t -> key:string -> text:string -> unit
 (** Delayed, noninteractive overlay using {!hover_delay}. Call only for the
     current hovered target. It does not change focus or pointer ownership. *)
 
+val root_at : t -> float * float -> int list -> int option
+(** The root key whose box or child is topmost under the point in PXUI's previous hit tree. *)
+
 val last_press_within : t -> Rays.Frame.t -> int list -> int option
 (** Last root key pressed in [frame], using PXUI's previous hit tree.
     The keys come from [key] on pane roots; a press on any child counts. *)
@@ -529,13 +532,21 @@ type language = {
   complete : string -> int -> completion list;
       (** [complete text caret]: the ranked suggestions for the token ending at [caret], best
           first; [[]] shows nothing.  Typing opens the popup under the caret; Up/Down choose,
-          Tab, Enter or a click accept, Escape closes it *)
+          Tab, a click, or Enter once Up or Down has chosen a row, accept; Enter otherwise
+          breaks the line, and Escape closes it *)
   describe : string -> int -> (int * int * string) option;
       (** [describe text byte]: the token at [byte] and its description, shown as a tooltip
           after the pointer rests on it *)
   number_at : string -> int -> (int * int) option;
       (** [number_at text byte]: the numeric literal at [byte]; dragging it sideways changes
           the value in place (see [on_scrub] of {!text_area_submit}) *)
+  context_at : string -> int -> [ `Code | `String | `Comment ];
+      (** [context_at text caret]: what a character typed at [caret] lands in.  Brackets pair
+          and step over only in [`Code], a quote steps over its closing twin in a [`String],
+          and a [`Comment] takes every character as typed *)
+  comment : string;
+      (** what starts a line comment: Command-/ comments or uncomments the lines the selection
+          touches *)
   rewrite : (string -> int -> string * int) option;
       (** [rewrite text caret], run after every frame that edited the text: the text as the
           language keeps it (parinfer infers the closing brackets from indentation) and where
@@ -546,10 +557,12 @@ type language = {
 
 val text_area_submit :
   t -> at:float * float -> w:float -> h:float -> ?wrap:bool ->
-  ?errors:int list -> ?messages:(int * (int * int) option * string) list -> ?spans:(int * int) list -> ?reveal:int -> ?language:language ->
+  ?errors:int list -> ?messages:(int * (int * int) option * string) list -> ?spans:(int * int) list -> ?reveal:int -> ?reveal_nonce:int ->
+  ?select:(int * int) -> ?splice:(int * int * string) list -> ?language:language ->
   ?on_context:(float * float -> unit) -> ?on_scrub:([ `Live | `Done ] -> unit) ->
   ?on_scrub_edit:(int * int -> string -> unit) ->
-  ?on_click:(int -> bool -> unit) -> ?on_caret:(int -> unit) -> ?on_caret_move:(int -> unit) -> ?on_drop:(int -> drop -> unit) ->
+  ?on_click:(int -> bool -> unit) -> ?on_caret:(int -> unit) -> ?on_caret_move:(int -> unit) ->
+  ?on_select:(int * int -> unit) -> ?on_drop:(int -> drop -> unit) ->
   ?chips:(int * int * Rays.Color.t) list ->
   string -> string -> string * bool
 (** A text area that also reports Command- or Ctrl-Enter pressed in it this frame (the host's
@@ -572,7 +585,23 @@ val text_area_submit :
     [on_caret_move] reports movement caused by pointer or keyboard input;
     [on_drop byte drop] is called while a payload ({!val-carry}) is held over the area, with the byte
     offset under the pointer and whether it is hovering or was released there; [chips] are byte
-    ranges underlined with a colour bar (a colour literal shows its colour). *)
+    ranges underlined with a colour bar (a colour literal shows its colour).
+
+    Editing follows the language.  With a selection Tab and Shift-Tab indent and dedent every
+    line it touches.  Up and Down keep their column across shorter rows.  A number is dragged by
+    its underline, the lowest 9 points of its row: a drag that starts higher selects text.
+    [reveal] scrolls the offset into view once per (offset, text length, [reveal_nonce]); a host
+    raises the nonce to ask again, and an absent [reveal] forgets the last one.  [select]
+    (anchor, caret) takes the keyboard for the area and places the selection; [splice] is a list
+    of (start, stop, replacement) byte ranges of the given text applied together as one undo
+    step before [select] (whose offsets are in the new text); a host passes both for one frame.
+    [on_select] receives the (start, stop) selection each frame the area has focus. *)
+
+val line_field : t -> at:float * float -> w:float -> h:float -> ?grab:bool -> ?placeholder:string ->
+  string -> string -> string * [ `None | `Next | `Previous | `Close ]
+(** A one-line search field at [at] (the first string is its key, the second its value) with a
+    hairline: the new value and what its keys asked, Enter or Down [`Next], Shift-Enter or Up
+    [`Previous], Escape [`Close].  [grab] takes the keyboard for it. *)
 
 val value_field : t -> at:float * float -> w:float -> h:float ->
   ?size:int -> ?display:string -> ?fraction:float ->

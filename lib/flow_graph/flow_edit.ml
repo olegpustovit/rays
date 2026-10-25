@@ -1,6 +1,12 @@
 include Edit_base
 include Edit_layout
 
+(* a split ratio clamped to [0.1, 0.9] with four decimals, trailing zeros trimmed *)
+let ratio_text r =
+  let rec trim t = if String.ends_with ~suffix:"0" t && not (String.ends_with ~suffix:".0" t)
+    then trim (String.sub t 0 (String.length t - 1)) else t in
+  trim (Printf.sprintf "%.4f" (Float.max 0.1 (Float.min 0.9 r)))
+
 let rewrite ?fallback src op : (unit -> S.t list) list =
   let one f = [ f ] in
   match op with
@@ -218,6 +224,10 @@ let rewrite ?fallback src op : (unit -> S.t list) list =
            [fst x.out, call "if" [sym "true"; body_of x; fallback]]))
            (match fallback with Some fallback -> [fallback] | None ->
              [sym "nil"; num 0; sym "false"; vec [num 0; num 0; num 0]; mk (S.Str ""); call "list" []])
+       | Map | Filter ->
+           [ attempt (fun x iv _ ->
+               [ fst x.out, call (if loop = Map then "map" else "filter")
+                   [ call "fn" [ vec [ sym iv ]; body_of x ]; call "range" [ num 6 ] ] ]) ]
        | For ->
            (* ponytail: the checker is the type oracle, so try the geometry
               shape (collect and merge) and then the number shape (sum) *)
@@ -313,6 +323,45 @@ let rewrite ?fallback src op : (unit -> S.t list) list =
         match Flow.Macro.expand macros e with
         | Ok x -> reorder (set_node s leaf x)
         | Error d -> raise (Fail d)))
+  | Inline_defn { node } -> one (fun () ->
+      let sp, leaf = split_node node in
+      let _, items = workspace_parts src in
+      edit_scope src sp (fun s ->
+        let e = get_node s leaf in
+        let name, args = match e.node with
+          | S.List ({ S.node = S.Sym n; _ } :: args) -> n, args
+          | _ -> fail "Only a call of a function can be inlined." in
+        let defn = match List.find_opt (fun i -> head_sym i = Some "defn"
+            && (match S.children i with _ :: { S.node = S.Sym n; _ } :: _ -> n = name | _ -> false)) items with
+          | Some d -> d | None -> fail "%s is not a function of this workspace." name in
+        let parts = List.tl (List.tl (S.children defn)) in
+        let params, body = match List.filter (fun (x : S.t) -> match x.node with S.Vec _ -> true | _ -> false) parts,
+            List.rev parts with
+          | { S.node = S.Vec ps; _ } :: _, body :: _ -> ps, body
+          | _ -> fail "%s has no body to inline." name in
+        let names = List.map (fun (p : S.t) -> match p.node with
+          | S.List ({ S.node = S.Sym n; _ } :: _) | S.Sym n -> n | _ -> fail "%s has a parameter that is not a name." name) params in
+        if List.length names <> List.length args then fail "%s is called with a different number of inputs." name;
+        (* two passes, so an argument that is a name of another parameter is not substituted again *)
+        let tmp i = "inl#" ^ string_of_int i in
+        let body = List.fold_left (fun b (i, n) -> replace_ref n (sym (tmp i)) b) body (List.mapi (fun i n -> i, n) names) in
+        let body = List.fold_left (fun b (i, a) -> replace_ref (tmp i) a b) body (List.mapi (fun i a -> i, a) args) in
+        reorder (set_node s leaf body)))
+  | Move_binding { node; by } -> one (fun () ->
+      let sp, leaf = split_node node in
+      edit_scope src sp (fun s ->
+        let sc = match scope_of s with Some sc when not (nested leaf) && leaf <> "@result" -> sc
+          | _ -> fail "Only a named binding can move." in
+        let j = first_pair_index sc leaf in
+        let k = j + by in
+        if k < 0 || k >= List.length sc.ps then fail "%s cannot move further." leaf;
+        let a = Array.of_list sc.ps in
+        let t = a.(j) in a.(j) <- a.(k); a.(k) <- t;
+        let moved = rebuild sc (Array.to_list a) sc.res in
+        let keys x = match scope_of x with Some sc -> List.map (fun (p, _) -> pat_key p) sc.ps | None -> [] in
+        let r = reorder moved in
+        if keys r <> keys moved then fail "%s is read by or reads its neighbour; it cannot pass it." leaf;
+        r))
   | Toggle_bypass { node } -> one (fun () ->
       let sp, leaf = split_node node in
       edit_scope src sp (fun s ->
@@ -412,11 +461,8 @@ let rewrite ?fallback src op : (unit -> S.t list) list =
           | `First n -> fixed "first_size" n
           | `Second n -> fixed "second_size" n
           | `Ratio r ->
-              let text = Printf.sprintf "%.4f" (Float.max 0.1 (Float.min 0.9 r)) in
-              let rec trim t = if String.ends_with ~suffix:"0" t && not (String.ends_with ~suffix:".0" t)
-                then trim (String.sub t 0 (String.length t - 1)) else t in
-              call "ui/split-at" [ axis; mk (S.Num (trim text)); a; b ]))))
-  | Split_panel { node; axis } -> one (fun () ->
+              call "ui/split-at" [ axis; mk (S.Num (ratio_text r)); a; b ]))))
+  | Split_panel { node; axis; ratio; kind } -> one (fun () ->
       let sp, leaf = split_node node in
       let used = root_used src (List.hd sp) in
       edit_scope src sp (fun s ->
@@ -428,12 +474,13 @@ let rewrite ?fallback src op : (unit -> S.t list) list =
         let b = fresh used (leaf ^ "_b") in
         let p, orig = List.nth sc.ps j in
         let other = if head_sym orig = Some "ui/lisp" then "ui/graph" else "ui/lisp" in
+        let ratio = ratio_text ratio in
         let split = call "ui/split-at"
-          [ mk (S.Str (if axis = `H then "horizontal" else "vertical")); mk (S.Num "0.5");
+          [ mk (S.Str (if axis = `H then "horizontal" else "vertical")); mk (S.Num ratio);
             sym a; sym b ] in
         let before = List.filteri (fun k _ -> k < j) sc.ps
         and after = List.filteri (fun k _ -> k > j) sc.ps in
-        reorder (rebuild sc (before @ [ sym a, orig; sym b, call other []; p, split ] @ after) sc.res)))
+        reorder (rebuild sc (before @ [ sym a, orig; sym b, (match kind with Some kind -> panel_expr src kind | None -> call other []); p, split ] @ after) sc.res)))
   | Close_panel { node } -> one (fun () ->
       let sp, leaf = split_node node in
       edit_scope src sp (fun s ->
@@ -636,6 +683,8 @@ let label = function
   | Set_arg _ -> "Edit value" | Connect _ -> "Connect" | Disconnect _ -> "Disconnect"
   | Set_input_default _ -> "Input default" | Unfold _ -> "Unfold" | Fold_into _ -> "Fold"
   | Wrap { loop = For; _ } -> "Repeat" | Wrap { loop = Fold; _ } -> "Iterate"
+  | Wrap { loop = Map; _ } -> "Wrap in map" | Wrap { loop = Filter; _ } -> "Wrap in filter"
+  | Inline_defn _ -> "Inline function" | Move_binding _ -> "Move binding"
   | Wrap {loop = If; _} -> "Wrap conditional" | Add_arm _ -> "Add arm" | Delete_arm _ -> "Delete arm"
   | Hoist _ -> "Move out" | Rename _ -> "Rename" | Make_local_fn _ -> "Make function"
   | Make_defn _ -> "Make reusable function"

@@ -3,13 +3,30 @@ open Sop
 open Editor_document
 include Core_host
 
+(* a viewer or a canvas: the panels a sketch's picture is drawn in *)
+let is_picture : Pxui_shell.Layout.panel -> bool = function
+  | View _ | Canvas _ -> true
+  | _ -> false
+
 let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_focus ~camera_panel ~view_handles
     ~render_status ~error_status ~view_state (frame : Frame.t) =
   let carrying = value.carry <> None in
-  let live_frame=Live_frame.of_frame frame in
+  let live_frame, sketch_blocked =
+    let pane_is_picture = match Pxui.Ui.root_at value.ui frame.mouse (List.map fst value.pane_keys) with
+      | None -> true
+      | Some key -> (match List.assoc_opt key value.pane_keys with
+          | Some (panel, _) -> is_picture panel
+          | None -> false) in
+    Gate.gate { prompt = value.prompt <> None; menu = value.menu <> None; leader = value.leader <> Leader.Idle;
+      text_focus;
+      focus_on_picture = is_picture value.focus;
+      pointer_on_picture = pane_is_picture;
+      pressed = List.exists (function Event.MousePressed _ -> true | _ -> false) frame.events;
+      previous = value.live_frame; blocked = value.sketch_blocked }
+      (Live_frame.of_frame frame) in
   let live_frame=if host_events=[]then live_frame else
     {live_frame with events=host_events @ live_frame.events} in
-  let value = {value with live_frame} in
+  let value = {value with live_frame; sketch_blocked} in
   let value = { value with workspace = { value.workspace with hidden = shell_hidden value value.workspace } } in
   let value = follow_start value in
   let focus, focus_path = if all_ui_visible then
@@ -51,8 +68,10 @@ let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_
   let guide = List.fold_left (fun guide -> function Leader.Guide_toggle -> not guide
     | _ -> guide) value.guide actions in
   (* Command-Z in a text whose own undo stack is empty (a dragged number applies as it goes)
-     reaches the document history, unless a prompt, menu or rename owns the keys *)
-  let passed = if text_focus && not modal then
+     reaches the document history, unless a prompt, menu or rename owns the keys, or a text pane
+     holds an unapplied draft: an extra Command-Z after the draft is undone must not change the
+     document under it *)
+  let passed = if text_focus && not modal && not (has_draft value) then
       match Pxui.Ui.passed_undo value.ui with
       | Some `Undo -> [ Leader.Undo ] | Some `Redo -> [ Leader.Redo ] | None -> []
     else [] in
@@ -123,6 +142,10 @@ let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_
   let text, text_shown = match Option.bind text_host (text_of value.text) with
     | Some (text, shown) -> text, Some shown
     | None -> value.text, None in
+  (* the keys of the text (find, go to) wait in the pane's state for its view; nothing without one *)
+  let text = if text_shown = None then text else List.fold_left (fun text -> function
+    | Leader.Text_command command -> Text_pane.command text command
+    | _ -> text) text actions in
   let other_texts = List.filter_map (fun ((key, path, _, _) as host) ->
     if Some key = value.text_at then None
     else Option.map (fun (state, shown) -> key, path, state, shown) (text_of (local_of value key).code host))
@@ -254,6 +277,9 @@ let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_
           | Panel_retype (Graph | List | Lisp) when leaf.panel = Graph -> None  (* a view switch, below *)
           | Panel_retype panel -> Some (Pxui_shell.Chrome.Retype_panel (leaf.path, panel))
           | _ -> None) actions) in
+    let intents = intents @ List.filter_map (function
+      | Leader.Panel_split_at (path, axis, ratio, panel) -> Some (Pxui_shell.Chrome.Split_panel_at (path, axis, ratio, panel))
+      | _ -> None) actions in
     let layout_leaf = focused_leaf (geometry value workspace frame) focus focus_path in
     let workspace, layout_changes = layout_intents vw workspace intents in
     let layout_changes = layout_changes @ layout_actions value workspace ~leaf:layout_leaf actions in
@@ -519,7 +545,7 @@ let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_
     let menu = match menu, List.find_map (function
         | Pxui_graph.Scope.Menu_requested (x, y) -> Some (int_of_float x, int_of_float y)
         | _ -> None) scope_frame_changes with
-      | None, Some at -> open_menu value at
+      | None, Some at -> open_menu ~scope_view value at
       | menu, _ -> menu in
     let menu, menu_pick = match menu with
       | Some menu -> Pxui.Ui.within ui graph_root (fun () ->
@@ -552,7 +578,7 @@ let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_
             Text_pane.view ui ~bounds:leaf.body
               (* a graph panel in text view keeps its Graph / List / Text at the header's end *)
               ~tabs_right:(Option.join (List.nth_opt (List.rev (header_slots leaf)) 0))
-              ~vocab:(Lazy.force value.lisp_vocab) ~names:(Lazy.force names) state shown)
+              ~vocab:(Lazy.force value.lisp_vocab) ~names:(Lazy.force names) ~time:frame.time state shown)
       | None -> [] in
     let text_intents = match text_shown, text_host with
       | Some shown, Some (_, path, _, _) -> view_text path text shown
@@ -626,9 +652,15 @@ let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_
       | Navigator.Layout index -> Some (Leader.Layout_switch index)
       | Add -> Some Leader.Add_node
       | _ -> action) None outline_intents in
-    (* the latest of the three is the command, as when each overwrote the one before *)
+    (* a click on an earlier part of the graph header's route goes back that far *)
+    let crumb_action = List.find_map (function
+      | Pxui_shell.Chrome.Crumb (path, index) when value.back <> [] && List.mem (path, Pxui_shell.Layout.Graph) leaves ->
+          let steps = min 3 (List.length value.back + 1) - 1 - index in
+          if steps > 0 then Some (Leader.Back steps) else None
+      | _ -> None) intents in
+    (* the latest of the four is the command, as when each overwrote the one before *)
     let bar_action = List.fold_left (fun latest action -> if action = None then latest else action) None
-        [ tool_action; view_action; outline_action ] in
+        [ tool_action; view_action; outline_action; crumb_action ] in
     (* Selection is view state; inspection intents retain the selected stable
        id. Topology and parameter application wait until Ui.frame finishes. *)
     let selection = List.fold_left (fun selection -> function
@@ -1014,9 +1046,22 @@ let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_
     | Guide_keys -> Some Keys
     | Command_palette -> Some (Palette "")
     | Jump -> Some (Jumping "")
+    | Goto_symbol when text_shown <> None -> Some (Symbols "")
+    | Goto_line when text_shown <> None -> Some (Going "")
+    | Panel_pick -> Some (Picking { split = true; at = frame.mouse })
+    | Window_pick -> Some (Picking { split = false; at = frame.mouse })
     | _ -> prompt) value.prompt actions in
   let prompt_panel ui prompt =
     let module Ui = Pxui.Ui in
+    (* a search prompt over [all] rows of (name, detail, payload): fuzzy-filtered, a pick is
+       [pick payload], any other query change keeps the prompt open as [again query] *)
+    let search_prompt ~key ~title ~label ~query all ~again ~pick =
+      let matches query = List.filter (fun (name, _, _) -> Ui.fuzzy_match ~query name) all in
+      let rows query = Array.of_list (List.map (fun (name, detail, _) -> name, detail) (matches query)) in
+      match Pxui_shell.Prompt.search ui ~key ~title ~label ~query ~rows with
+      | None | Some (_, `Cancel) -> None, None
+      | Some (query, `Pick index) -> let _, _, payload = List.nth (matches query) index in None, Some (pick payload)
+      | Some (query, _) -> Some (again query), None in
     let next = match prompt with
     | None -> None, None
     | Some Keys ->
@@ -1063,30 +1108,123 @@ let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_
          | Some (query, _) -> Some (Browsing { query; presets; last_state }), None)
     | Some (Jumping query) ->
         (* every graph, grouped like the outline *)
-        let all = Navigator.jump_rows (fst value.doc.Document.workspace).checked in
-        let matches query = List.filter (fun (name, _) -> Ui.fuzzy_match ~query name) all in
-        let rows query = Array.of_list (matches query) in
-        (match Pxui_shell.Prompt.search ui ~key:"graph-jump"
-            ~title:"Jump to graph" ~label:"Search graphs" ~query ~rows with
+        let graphs = List.map (fun (name, group) -> name, group, Go name)
+          (Navigator.jump_rows (fst value.doc.Document.workspace).checked) in
+        (* and every node of the graph the pane shows: picking one selects it and frames it *)
+        let rec nodes (s : Flow_graph.Projection.scope) = List.concat_map (fun (n : Flow_graph.Projection.node) ->
+          (if n.synthetic then [] else [ Flow_graph.Projection.title n, "node · " ^ n.head, Find_node n.path ])
+          @ (match n.zone with Some z -> nodes z.scope | None -> [])) s.nodes in
+        let all = graphs @ (match value.scope_key with Some k -> nodes k.scope | None -> []) in
+        search_prompt ~key:"graph-jump" ~title:"Jump to graph or node" ~label:"Search graphs and nodes"
+          ~query all ~again:(fun q -> Jumping q) ~pick:Fun.id
+    | Some (Symbols query) ->
+        (* every graph, function, macro and [let*] name of the text, by position *)
+        let current = Option.map (fun shown -> let source = Text_pane.current_text text shown in source, shown) text_shown in
+        let all = match current with
+          | Some (source, _) ->
+              List.map (fun (name, kind, byte) ->
+                name, Printf.sprintf "%s · line %d" kind (Flow.Diagnostic.position_of_offset source byte).line, byte)
+                (Text_pane.symbols source)
+          | None -> [] in
+        search_prompt ~key:"symbol-jump" ~title:"Go to symbol" ~label:"Search bindings" ~query all
+          ~again:(fun q -> Symbols q)
+          ~pick:(fun byte -> Run_action (Text_command (Text_pane.Select (byte, byte))))
+    | Some (Going query) ->
+        (match Pxui_shell.Prompt.name ui ~key:"goto-line" ~title:"Go to line"
+            ~description:"A line, or line:column" ~label:"Line" ~query with
          | None | Some (_, `Cancel) -> None, None
-         | Some (query, `Pick index) -> None, Some (Go (fst (List.nth (matches query) index)))
-         | Some (query, _) -> Some (Jumping query), None)
+         | Some (query, `Submit) ->
+             (match Option.bind text_shown (fun shown ->
+                 Text_pane.line_target (Text_pane.current_text text shown) query) with
+              | Some byte -> None, Some (Run_action (Text_command (Text_pane.Select (byte, byte))))
+              | None -> Some (Going query), None)
+         | Some (query, _) -> Some (Going query), None)
+    | Some (Picking { split; at } as open_prompt) ->
+        let kinds = Pxui_shell.Layout.[ Graph; List; Lisp; Inspector; Outline; Timeline; View ""; Canvas "" ] in
+        let digit = List.find_map (function
+          | Event.KeyPressed (Input.KeyChar c) when c >= '1' && c < Char.chr (Char.code '1' + List.length kinds) ->
+              Some (Char.code c - Char.code '1')
+          | _ -> None) frame.events in
+        let pick i =
+          let panel = List.nth kinds i in
+          if split then Some (Splitting { panel; axis = `H }), None
+          else None, Some (Run_action (Window_new panel)) in
+        (match digit with
+         | Some i -> pick i
+         | None ->
+             (match Ui.context_menu ui ~at ~width:200. ~keys:(List.mapi (fun i _ -> string_of_int (i + 1)) kinds)
+                      (if split then "split-kind" else "window-kind")
+                      (List.map (fun p -> Editor_core.Panels.name p, true) kinds) with
+              | `Open -> Some open_prompt, None
+              | `Dismiss -> None, None
+              | `Pick i -> pick i))
+    | Some (Splitting { panel; axis }) ->
+        (* the split follows the pointer over the panel under it; Tab turns it, a click places it *)
+        let pressed key = List.exists (function Event.KeyPressed k -> k = key | _ -> false) frame.events in
+        let axis = if pressed Input.Tab then (if axis = `H then `V else `H) else axis in
+        let mx, my = frame.mouse in
+        let leaf = List.find_opt (fun (l : Pxui_shell.Layout.leaf) ->
+          let x, y, w, h = l.frame in
+          not l.floating && mx >= float x && mx < float (x + w) && my >= float y && my < float (y + h))
+          (geometry value workspace frame).leaves in
+        let ratio = match leaf with
+          | Some l ->
+              let x, y, w, h = l.frame in
+              let r = if axis = `H then (mx -. float x) /. float (max 1 w) else (my -. float y) /. float (max 1 h) in
+              Float.max 0.1 (Float.min 0.9 r)
+          | None -> 0.5 in
+        let box = Ui.box ui ~flags:Ui.clickable ~w:(Ui.Px (float frame.width)) ~h:(Ui.Px (float frame.height))
+          ~at:(0., 0.) "split-pending" in
+        Ui.to_front ui ~order:900 box;
+        Ui.draw_over ui box (fun paint _ ->
+          let theme = Ui.theme ui in
+          Option.iter (fun (l : Pxui_shell.Layout.leaf) ->
+            let x, y, w, h = l.frame in
+            let x, y, w, h = float x, float y, float w, float h in
+            let cut = if axis = `H then x +. (w *. ratio) else y +. (h *. ratio) in
+            let nx, ny, nw, nh = if axis = `H then cut, y, x +. w -. cut, h else x, cut, w, y +. h -. cut in
+            (* the panel being split is tinted, the room of the new one more *)
+            let tint alpha = Color.with_alpha theme.accent alpha in
+            Ui.Paint.fill paint ~x ~y ~w ~h (tint 22);
+            Ui.Paint.fill paint ~x:nx ~y:ny ~w:nw ~h:nh (tint 56);
+            (* the new panel's room: accent brackets 6 inside its corners; the panel kept stays as it is *)
+            Ui.Paint.brackets paint ~x:(nx +. 6.) ~y:(ny +. 6.) ~w:(nw -. 12.) ~h:(nh -. 12.) ~offset:0. ~length:12.
+              ~width:1. theme.accent;
+            (* the cut: a hairline through the panel with a short accent cap at each end *)
+            let a, b, (ux, uy) = if axis = `H then (cut, y), (cut, y +. h), (0., 1.) else (x, cut), (x +. w, cut), (1., 0.) in
+            Ui.Paint.line paint ~from_:a ~to_:b ~width:1. theme.accent;
+            (* a short accent cap across the cut at each end *)
+            List.iter (fun (px, py, s) ->
+              let px = px +. s *. ux and py = py +. s *. uy in
+              Ui.Paint.line paint ~from_:(px -. 5. *. uy, py -. 5. *. ux) ~to_:(px +. 5. *. uy, py +. 5. *. ux)
+                ~width:3. theme.accent) [ fst a, snd a, 1.; fst b, snd b, -1. ];
+            (* what is being made, in the new panel's room, and the keys that steer it *)
+            let name = String.uppercase_ascii (Editor_core.Panels.name panel) in
+            let cx = nx +. (nw /. 2.) and cy = ny +. (nh /. 2.) in
+            if nw > 90. && nh > 40. then begin
+              Ui.Paint.cap paint ~at:(cx -. (Ui.Paint.cap_width paint name /. 2.), cy -. 14.) ~color:theme.accent name;
+              let hint = "TAB  TURN   ESC  CANCEL" in
+              Ui.Paint.cap paint ~at:(cx -. (Ui.Paint.cap_width paint hint /. 2.), cy +. 4.)
+                ~color:(Pxui.Theme.ink_3 theme) hint
+            end;
+            Ui.Paint.ratio paint ~at:(mx +. 12., my +. 12.) (int_of_float (ratio *. 100.))
+              (100 - int_of_float (ratio *. 100.))) leaf);
+        let signal = Ui.signal ui box in
+        let cancel = pressed Input.Escape
+          || List.exists (function Event.MousePressed (Input.RightButton, _) -> true | _ -> false) frame.events in
+        if cancel then None, None
+        else (match signal.clicked, leaf with
+          | true, Some l -> None, Some (Run_action (Panel_split_at (l.path, axis, ratio, panel)))
+          | _ -> Some (Splitting { panel; axis }), None)
     | Some (Palette query) ->
         (* Every keymap command once per id (undo has several chords). *)
         let commands = List.fold_left (fun seen (command : Leader.command) ->
             if command.scope <> None && command.scope <> Some (Leader.scope focus) then seen else
             if List.exists (fun (c : Leader.command) -> c.id = command.id) seen then seen
             else command :: seen) [] keymap |> List.rev in
-        let matches query = List.filter (fun (c : Leader.command) ->
-            Ui.fuzzy_match ~query c.label) commands in
-        let rows query = Array.of_list (List.map (fun (c : Leader.command) -> c.label, "")
-            (matches query)) in
-        (match Pxui_shell.Prompt.search ui ~key:"command-palette"
-            ~title:"Commands" ~label:"Search commands" ~query ~rows with
-         | None | Some (_, `Cancel) -> None, None
-         | Some (query, `Pick index) ->
-             None, Some (Run_action (List.nth (matches query) index).action)
-         | Some (query, _) -> Some (Palette query), None) in
+        search_prompt ~key:"command-palette" ~title:"Commands" ~label:"Search commands" ~query
+          (List.map (fun (c : Leader.command) -> c.label, "", c.action) commands)
+          ~again:(fun q -> Palette q) ~pick:(fun action -> Run_action action) in
     (* A closed prompt must not keep keyboard focus into the next frame. *)
     if fst next = None && prompt <> None then Ui.dismiss_popup ui;
     next in

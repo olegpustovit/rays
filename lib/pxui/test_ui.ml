@@ -733,10 +733,12 @@ let run () =
   and submitted = ref false and language = ref None and context = ref None and scrubs = ref []
   and scrub_edits = ref [] in
   let ui = Ui.create ~font_size:11 () and time = ref 0. in
-  let area_step ?(keys = []) events =
+  let selected = ref (0, 0) in
+  let area_step ?(keys = []) ?reveal ?reveal_nonce ?select ?splice events =
     time := !time +. 0.5;
     ignore (Ui.frame ui { (frame ~scale:1. ~time:!time events) with keys } (fun ui ->
       let text, submit = Ui.text_area_submit ui ~at:(0., 0.) ~w:300. ~h:96.
+        ?reveal ?reveal_nonce ?select ?splice ~on_select:(fun range -> selected := range)
         ~wrap:!wrapped ~errors:!errors ?language:!language ~on_context:(fun at -> context := Some at)
         ~on_scrub:(fun p -> scrubs := p :: !scrubs)
         ~on_scrub_edit:(fun range value -> scrub_edits := (range, value) :: !scrub_edits) "area" !area in
@@ -844,7 +846,12 @@ let run () =
   language := Some { Ui.colorize = (fun _ -> []); brackets = (fun _ -> []);
     indent = (fun text caret -> if String.contains (String.sub text 0 caret) '(' then "  " else "");
     pairs = [ '(', ')'; '"', '"' ]; complete = (fun _ _ -> []); describe = (fun _ _ -> None);
-    number_at = (fun _ _ -> None); rewrite = None };
+    number_at = (fun _ _ -> None);
+    context_at = (fun text caret -> (* an odd number of quotes before the caret: inside a string *)
+      let quotes = ref 0 in
+      String.iteri (fun i c -> if i < caret && c = '"' then incr quotes) text;
+      if !quotes mod 2 = 1 then `String else `Code);
+    comment = ";"; rewrite = None };
   area := "";
   area_step [press (150, 12); release (150, 12); Event.TextInput "("];
   expect "an opener inserts its pair" "()";
@@ -891,6 +898,161 @@ let run () =
   if not (Ui.text_input_focused ui) then fail "Escape closed the editor instead of the popup";
   area_step [Event.KeyPressed Input.Escape];
   if Ui.text_input_focused ui then fail "a second Escape did not leave the editor";
+  (* Enter breaks the line unless Up or Down chose a row; Tab always accepts *)
+  let saved = !language in
+  area := "";
+  area_step [press (150, 12); release (150, 12); Event.TextInput "z"; Event.TextInput "e"];
+  area_step [Event.KeyPressed Input.Enter];
+  expect "Enter after a typed word breaks the line, it does not take the popup" "ze\n";
+  area_step [Event.TextInput " "; Event.TextInput "z"; Event.TextInput "e"];
+  area_step [Event.KeyPressed Input.ArrowDown];
+  area_step [Event.KeyPressed Input.Enter];
+  expect "Enter takes the row an arrow chose" "ze\n zephyr";
+  area_step [Event.KeyPressed Input.Escape; Event.KeyPressed Input.Escape];
+  (* Tab and Shift-Tab with a selection indent and dedent every line it touches *)
+  language := Some { (Option.get !language) with complete = (fun _ _ -> []) };
+  area := "a\n\nb\nc";
+  area_step [press (150, 12); release (150, 12)];
+  area_step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar 'a')];
+  area_step [Event.KeyPressed Input.Tab];
+  expect "Tab with a selection indents every line and keeps the selection" "  a\n\n  b\n  c";
+  if fst !selected <> 0 || snd !selected <> String.length !area then fail "the indented lines lost their selection";
+  area_step ~keys:[Input.Shift] [Event.KeyPressed Input.Tab];
+  expect "Shift-Tab with a selection dedents every line" "a\n\nb\nc";
+  area_step [Event.KeyPressed Input.ArrowDown];
+  area_step [Event.KeyPressed Input.Tab];
+  expect "Tab without a selection still inserts two spaces" "a\n\nb\nc  ";
+  (* brackets and quotes pair and step over only in code *)
+  area := "";
+  area_step [press (150, 12); release (150, 12); Event.TextInput "\""; Event.TextInput "("];
+  expect "a bracket inside a string is typed as it is" "\"(\"";
+  area_step [Event.TextInput "\""];
+  expect "a quote before the closing quote steps over it" "\"(\"";
+  area := "\"x\"";
+  area_step [];
+  area_step ~keys:[Input.Meta] [Event.KeyPressed Input.ArrowUp];
+  area_step [Event.TextInput "\""];
+  expect "a quote before a string's opening quote does not step over it" "\"\"\"x\"";
+  (* Up and Down keep their column across a short line *)
+  area := "abcdef\nab\nabcdef";
+  area_step [];
+  area_step ~keys:[Input.Meta] [Event.KeyPressed Input.ArrowUp];
+  area_step (List.init 5 (fun _ -> Event.KeyPressed Input.ArrowRight));
+  area_step [Event.KeyPressed Input.ArrowDown];
+  area_step [Event.KeyPressed Input.ArrowDown];
+  area_step [Event.TextInput "X"];
+  expect "Down across a short line returns to the column it left" "abcdef\nab\nabcdeXf";
+  (* [select] takes the keyboard and places the selection; [splice] is one undo step *)
+  language := None;
+  area := "one two one";
+  Ui.unfocus ui;
+  area_step ~select:(4, 7) [];
+  if not (Ui.text_input_focused ui) then fail "a select request did not focus the area";
+  area_step [Event.TextInput "2"];
+  expect "typing replaces the requested selection" "one 2 one";
+  area := "one two one";
+  area_step ~splice:[ 0, 3, "1"; 8, 11, "111" ] ~select:(1, 1) [];
+  expect "a splice replaces every range" "1 two 111";
+  area_step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar 'z')];
+  expect "Command-Z takes the whole splice back" "one two one";
+  (* [reveal] fires again for a new nonce, not for the same one after the user scrolled away *)
+  area := String.concat "\n" (List.init 40 string_of_int);
+  let visible () = let y, _ = region () in y >= 0 && y < 96 in
+  let back_to_end ?reveal ?reveal_nonce () =
+    area_step ?reveal ?reveal_nonce ~keys:[Input.Meta] [Event.KeyPressed Input.ArrowUp];
+    area_step ?reveal ?reveal_nonce ~keys:[Input.Meta] [Event.KeyPressed Input.ArrowDown] in
+  area_step [press (150, 12); release (150, 12)];
+  back_to_end ();
+  let off = String.length (String.concat "\n" (List.init 30 string_of_int)) in
+  if not (visible ()) then fail "the caret at the end was not in view";
+  area_step ~reveal:off [];
+  if visible () then fail "reveal did not scroll the offset into view";
+  back_to_end ~reveal:off ();
+  area_step ~reveal:off [];
+  if not (visible ()) then fail "reveal fired twice for one request";
+  area_step ~reveal:off ~reveal_nonce:1 [];
+  if visible () then fail "reveal did not fire again for a new nonce";
+  back_to_end ~reveal:off ~reveal_nonce:1 ();
+  area_step [];
+  if not (visible ()) then fail "the caret did not return";
+  area_step ~reveal:off ~reveal_nonce:1 [];
+  if visible () then fail "reveal did not fire again after an absent reveal";
+  (* line and form edits: comment toggle, move and duplicate lines, enclosing form, bracket jump *)
+  let pairs_of text =
+    let stack = ref [] and out = ref [] in
+    String.iteri (fun i c -> if c = '(' then stack := i :: !stack
+      else if c = ')' then match !stack with o :: r -> out := (o, i) :: !out; stack := r | [] -> ()) text;
+    List.rev !out in
+  language := Some { (Option.get saved) with brackets = pairs_of; complete = (fun _ _ -> []) };
+  let alt = [Input.Alt] and alt_shift = [Input.Alt; Input.Shift] in
+  area := "a\n\n  b\nc";
+  area_step [press (150, 12); release (150, 12)];
+  area_step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar 'a')];
+  area_step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar '/')];
+  expect "Command-/ comments every non-blank line at the smallest indent" "; a\n\n;   b\n; c";
+  area_step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar '/')];
+  expect "Command-/ again takes the comments off" "a\n\n  b\nc";
+  area := "x\n y";
+  area_step [];
+  area_step ~keys:[Input.Meta] [Event.KeyPressed Input.ArrowUp];
+  area_step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar '/')];
+  area_step [Event.TextInput "Q"];
+  expect "the caret keeps its place in a commented line" "; Qx\n y";
+  area := "one\ntwo\nthree";
+  area_step [];
+  area_step ~keys:[Input.Meta] [Event.KeyPressed Input.ArrowUp];
+  area_step ~keys:[Input.Meta] [Event.KeyPressed Input.ArrowDown];
+  area_step ~keys:[Input.Meta] [Event.KeyPressed Input.ArrowUp];
+  area_step [Event.KeyPressed Input.End];
+  area_step ~keys:alt [Event.KeyPressed Input.ArrowUp];
+  expect "Option-Up on the first line does nothing" "one\ntwo\nthree";
+  area_step ~keys:alt [Event.KeyPressed Input.ArrowDown];
+  expect "Option-Down moves the line down" "two\none\nthree";
+  area_step [Event.TextInput "X"];
+  expect "the caret travels with the moved line" "two\noneX\nthree";
+  area_step ~keys:alt [Event.KeyPressed Input.ArrowDown];
+  area_step ~keys:alt [Event.KeyPressed Input.ArrowDown];
+  expect "Option-Down on the last line does nothing" "two\nthree\noneX";
+  area_step ~keys:alt [Event.KeyPressed Input.ArrowUp];
+  expect "Option-Up moves the line up" "two\noneX\nthree";
+  area := "ab";
+  area_step [];
+  area_step ~keys:[Input.Meta] [Event.KeyPressed Input.ArrowDown];
+  area_step ~keys:alt_shift [Event.KeyPressed Input.ArrowDown];
+  area_step [Event.TextInput "Z"];
+  expect "Shift-Option-Down copies the line and keeps the caret on the copy" "ab\nabZ";
+  area := "ab";
+  area_step [];
+  area_step ~keys:[Input.Meta] [Event.KeyPressed Input.ArrowDown];
+  area_step ~keys:alt_shift [Event.KeyPressed Input.ArrowUp];
+  area_step [Event.TextInput "Z"];
+  expect "Shift-Option-Up copies the line above and keeps the caret on the original" "abZ\nab";
+  area := "(a (b c) d)";
+  area_step [];
+  area_step [Event.KeyPressed Input.Home];
+  area_step (List.init 5 (fun _ -> Event.KeyPressed Input.ArrowRight));
+  area_step ~keys:[Input.Meta; Input.Alt] [Event.KeyPressed Input.ArrowUp];
+  if !selected <> (3, 8) then fail "Command-Option-Up did not select the innermost form";
+  area_step ~keys:[Input.Meta; Input.Alt] [Event.KeyPressed Input.ArrowUp];
+  if !selected <> (0, 11) then fail "a second Command-Option-Up did not widen to the next form";
+  area_step [Event.KeyPressed Input.Home];
+  area_step (List.init 5 (fun _ -> Event.KeyPressed Input.ArrowRight));
+  area_step ~keys:[Input.Meta; Input.Shift] [Event.KeyPressed (Input.KeyChar '\\')];
+  if !selected <> (3, 3) then fail (Printf.sprintf "the bracket jump did not go to the opener of the pair around the caret %d %d" (fst !selected) (snd !selected));
+  area_step ~keys:[Input.Meta; Input.Shift] [Event.KeyPressed (Input.KeyChar '\\')];
+  if !selected <> (8, 8) then fail "the bracket jump did not cross to the far side of the pair";
+  (* a text that comes back unchanged takes its own undo steps back *)
+  area := "foo";
+  area_step [press (150, 12); release (150, 12)];
+  area_step [Event.TextInput "x"];
+  expect "typing" "foox";
+  area := "other";
+  area_step [];
+  area := "foox";
+  area_step [];
+  area_step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar 'z')];
+  expect "Command-Z after the text returned undoes the typing" "foo";
+  language := saved;
   (* a number dragged sideways follows the pointer: an integer one per five points, a float a
      tenth of its last place per point; the host hears Live frames and one Done *)
   area := "";
@@ -902,27 +1064,33 @@ let run () =
   if char_w <= 0 then fail "no glyph width to aim a drag with";
   let nx = origin + (char_w / 2) in
   scrubs := [];
-  area_step [press (nx, 12)];
-  area_step [move (nx + 10, 12)];
-  area_step [move (nx + 20, 12)];
+  area_step [press (nx, 18)];
+  area_step [move (nx + 10, 18)];
+  area_step [move (nx + 20, 18)];
   expect "a dragged integer moves one per five points" "14 x";
   if List.hd !scrub_edits <> ((0, 2), "14") then fail "a numeric drag lost its pre-edit token span";
   if not (List.mem `Live !scrubs) then fail "a drag did not report on_scrub `Live";
-  area_step [release (nx + 20, 12)];
+  area_step [release (nx + 20, 18)];
   if List.hd !scrubs <> `Done then fail "a drag's end did not report on_scrub `Done";
   expect "the release keeps the value" "14 x";
   area_step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar 'z')];
   expect "Command-Z takes the whole drag back" "10 x";
   area := "0.5 y";
   area_step [];
-  area_step [press (nx, 12)];
-  area_step [move (nx + 10, 12)];
+  area_step [press (nx, 18)];
+  area_step [move (nx + 10, 18)];
   expect "a dragged float moves a tenth of its last place per point" "0.6 y";
-  area_step [release (nx + 10, 12)];
-  area_step [press (nx, 12)];
-  area_step [move (nx, 20)];
-  area_step [release (nx, 20)];
+  area_step [release (nx + 10, 18)];
+  area_step [press (nx, 18)];
+  area_step [move (nx, 32)];
+  area_step [release (nx, 32)];
   expect "a vertical drag is a selection, not a scrub" "0.6 y";
+  (* only the number's underline (the low part of its row) is a handle: a sideways drag that
+     starts higher selects *)
+  area_step [press (nx, 8)];
+  area_step [move (nx + 20, 8)];
+  area_step [release (nx + 20, 8)];
+  expect "a sideways drag from above the underline selects, it does not scrub" "0.6 y";
   (* the language's rewrite runs after each edited frame and maps the caret *)
   language := Some { (Option.get !language) with rewrite = Some (fun text caret -> text ^ "!", caret) };
   area := "";

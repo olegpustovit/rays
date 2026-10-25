@@ -234,8 +234,13 @@ and ui = {
   mutable edit_undo : (string * int * int) list;
   mutable edit_redo : (string * int * int) list;
   mutable edit_group : int;
+  (* the undo and redo stacks of texts left behind (key, value, undo, redo), newest first: a text
+     that comes back unchanged takes its own back *)
+  mutable edit_shelf : (int * string * (string * int * int) list * (string * int * int) list) list;
   (* a double or triple click's selection unit, extended by the drag that follows it *)
   mutable edit_unit : (int * int * int) option;
+  (* the x an Up or Down keeps across short lines (a point offset in the row; negative: none) *)
+  mutable edit_column : float;
   mutable scrub_origin : (int * string) option;
   (* the carry: the payload in flight, and the one released this frame with the box that was
      hot at the release *)
@@ -544,7 +549,7 @@ let create ?(font_size = Theme.font_size) () =
     edit_focus = 0; edit_value = ""; edit_caret = 0; edit_anchor = 0;
     edit_scroll_x = 0.;
     window_ground = None; gesture_key = 0; gesture_time = Float.nan; gesture_velocity = 0.;
-    edit_undo = []; edit_redo = []; edit_group = -1; edit_unit = None;
+    edit_undo = []; edit_redo = []; edit_group = -1; edit_shelf = []; edit_unit = None; edit_column = -1.;
     scrub_origin = None; payload = None; dropped = None; carry_latch = None;
     passed_undo = None;
     requested_cursor = None;
@@ -708,13 +713,16 @@ let topmost ui point =
     else search (index - 1) in
   search (ui.hit_count - 1)
 
+let root_at ui point roots =
+  let found = ref None in
+  hit_ancestors ui (topmost ui point) (fun key ->
+    if !found = None && List.mem key roots then found := Some key);
+  !found
+
 let last_press_within ui (frame : Frame.t) roots =
   List.fold_left (fun last -> function
     | Event.MousePressed (_, point) ->
-        let found = ref None in
-        hit_ancestors ui (topmost ui point) (fun key ->
-          if !found = None && List.mem key roots then found := Some key);
-        (match !found with Some _ as root -> root | None -> last)
+        (match root_at ui point roots with Some _ as root -> root | None -> last)
     | _ -> last) None frame.events
 
 let flags_of_key ui key =
@@ -2444,11 +2452,19 @@ let reset_edit ui key text ~anchor =
   ui.edit_focus <- key; ui.edit_value <- text;
   ui.edit_caret <- String.length text; ui.edit_anchor <- anchor;
   ui.edit_scroll_x <- 0.;
-  ui.edit_undo <- []; ui.edit_redo <- []; ui.edit_group <- -1; ui.edit_unit <- None
+  ui.edit_undo <- []; ui.edit_redo <- []; ui.edit_group <- -1; ui.edit_unit <- None;
+  ui.edit_column <- -1.
 
 let load_text_edit ui key text =
-  if ui.edit_focus <> key || ui.edit_value <> text then
+  if ui.edit_focus <> key || ui.edit_value <> text then begin
+    let left = ui.edit_focus, ui.edit_value, ui.edit_undo, ui.edit_redo in
+    let back = List.find_opt (fun (k, v, _, _) -> k = key && v = text) ui.edit_shelf in
+    let shelf = List.filter (fun entry -> Some entry <> back) ui.edit_shelf in
+    ui.edit_shelf <- List.filteri (fun i _ -> i < 4)
+      (if ui.edit_undo = [] && ui.edit_redo = [] then shelf else left :: shelf);
     reset_edit ui key text ~anchor:(String.length text);
+    Option.iter (fun (_, _, undo, redo) -> ui.edit_undo <- undo; ui.edit_redo <- redo) back
+  end;
   { text; caret = ui.edit_caret; anchor = ui.edit_anchor }
 
 let save_text_edit ui edit =
@@ -2496,6 +2512,53 @@ let line_end text i =
   let i = ref i in
   while !i < n && text.[!i] <> '\n' do incr i done;
   !i
+
+(* ---- line and form edits of the text area ---- *)
+
+(* the lines a selection touches, as the byte range [first, stop) without the last break *)
+let line_block text a b =
+  line_start text a, line_end text (if b > a && text.[b - 1] = '\n' then b - 1 else b)
+
+(* the bytes [first, stop) of the edit's text replaced by [replacement]; a selection over the
+   replacement afterwards keeps its direction *)
+let replace_block edit first stop replacement =
+  edit.text <- String.sub edit.text 0 first ^ replacement ^ String.sub edit.text stop (String.length edit.text - stop)
+let keep_selection edit first last =
+  if edit.caret >= edit.anchor then (edit.anchor <- first; edit.caret <- last)
+  else (edit.anchor <- last; edit.caret <- first)
+
+(* [block] with every line commented by [prefix], or with it taken off when each non-blank line
+   has it (and the space after it); a comment goes in at the block's smallest indent *)
+let toggle_comment prefix block =
+  let lines = String.split_on_char '\n' block in
+  let blank l = String.trim l = "" in
+  let indent l = let i = ref 0 in while l.[!i] = ' ' || l.[!i] = '\t' do incr i done; !i in
+  let body = List.filter (fun l -> not (blank l)) lines in
+  let n = String.length prefix in
+  let commented l = String.starts_with ~prefix (String.sub l (indent l) (String.length l - indent l)) in
+  String.concat "\n" (List.map (fun l ->
+    if blank l then l else
+    let i = indent l in
+    if body <> [] && List.for_all commented body then
+      let n = if i + n < String.length l && l.[i + n] = ' ' then n + 1 else n in
+      String.sub l 0 i ^ String.sub l (i + n) (String.length l - i - n)
+    else
+      let col = List.fold_left (fun m l -> min m (indent l)) max_int body in
+      String.sub l 0 col ^ prefix ^ " " ^ String.sub l col (String.length l - col)) lines)
+
+(* the innermost bracket pair that holds [a, b) and is larger than it, as (open, past the close) *)
+let enclosing_pair pairs a b =
+  List.fold_left (fun best (o, c) ->
+    if o <= a && b <= c + 1 && (o, c + 1) <> (a, b) then
+      match best with Some (bo, bc) when bc - bo <= c + 1 - o -> best | _ -> Some (o, c + 1)
+    else best) None pairs
+
+(* the caret across the bracket beside it, else out to the opener of the pair around it *)
+let bracket_jump pairs caret =
+  match List.find_map (fun (o, c) ->
+      if o = caret then Some (c + 1) else if c + 1 = caret then Some o else None) pairs with
+  | Some _ as jump -> jump
+  | None -> Option.map fst (enclosing_pair pairs caret caret)
 
 (* what a double click selects at [i]: the word there, else the run of blanks, else the one
    punctuation character; nothing on a line break *)
@@ -2994,6 +3057,39 @@ let text_field ui text value =
     end);
   value
 
+(* A search field at a place: [text_field]'s editing, a hairline for the control and its
+   [placeholder] while empty; Enter, Shift-Enter, Down and Up answer a step, Escape a close. *)
+let line_field ui ~at ~w ~h ?(grab = false) ?(placeholder = "") label value =
+  let field = box ui ~flags:(clickable lor focusable lor blocking lor focus_mark) ~at ~w:(Px w) ~h:(Px h) label in
+  if grab then focus ui field;
+  let signal = signal ui field in
+  let focused = focused ui field in
+  let edit = if focused then load_text_edit ui field.box_key value else
+    { text = value; caret = String.length value; anchor = String.length value } in
+  let step = ref `None in
+  if focused then begin
+    let (fx, _, fw, _) = ints (rect ui field) in
+    point_text_caret ui edit signal ~shift:(press_shift ui field) ~x:(float (fx + 2)) ~right:(float (fx + fw - 2));
+    List.iter (fun ((event : Event.t), modifiers) -> match event with
+      | Event.KeyPressed Input.Enter when not (command_modifiers modifiers) ->
+          step := if List.mem Input.Shift modifiers then `Previous else `Next
+      | Event.KeyPressed Input.ArrowDown -> step := `Next
+      | Event.KeyPressed Input.ArrowUp -> step := `Previous
+      | Event.KeyPressed Input.Escape -> step := `Close
+      | event -> ignore (edit_text_event ui edit ~modifiers ~accept:(fun _ -> true) event)) (key_events ui field);
+    save_text_edit ui edit
+  end;
+  if signal.hovered then request_cursor ui `Text;
+  let theme = ui.theme and composition = ui.composition in
+  draw ui field (fun paint rect ->
+    let (x, y, w, h) = ints rect in
+    let control = x, y, w, h in
+    underline paint control (if focused then theme.accent else Theme.edge theme);
+    if focused then paint_text_edit paint ~control ~y:(label_y ui y h) ~composition edit
+    else kit_text paint ~color:(if edit.text = "" then Theme.ink_3 theme else theme.foreground)
+      (x + 2) (label_y ui y h) (if edit.text = "" then placeholder else edit.text));
+  edit.text, !step
+
 (* Multiline text: the same focus, IME composition, clipboard and edit
    events as [text_field] ([edit_text_event], the [ui.edit_*] retained
    state); added are Enter, Tab (two spaces), the vertical keys and row-scoped Home/End,
@@ -3063,6 +3159,8 @@ type language = {
   complete : string -> int -> completion list;  (* ranked, for the token ending at the caret *)
   describe : string -> int -> (int * int * string) option;  (* the token at a byte and its doc *)
   number_at : string -> int -> (int * int) option;  (* the numeric literal at a byte *)
+  context_at : string -> int -> [ `Code | `String | `Comment ];  (* what a caret at a byte is in *)
+  comment : string;  (* what starts a line comment *)
   rewrite : (string -> int -> string * int) option;
   (* [rewrite text caret] after an edit: the text as the language keeps it (parinfer), and
      where [caret] lands in it *)
@@ -3093,7 +3191,8 @@ let scrubbed literal dx ~coarse =
   | None, None -> literal
 
 let text_area_submit ui ~at ~w ~h ?(wrap = false) ?(errors = []) ?(messages = []) ?(spans = [])
-    ?reveal ?language ?on_context ?on_scrub ?on_scrub_edit ?on_click ?on_caret ?on_caret_move ?on_drop ?(chips = []) label text =
+    ?reveal ?(reveal_nonce = 0) ?select ?(splice = []) ?language ?on_context ?on_scrub ?on_scrub_edit ?on_click ?on_caret
+    ?on_caret_move ?on_select ?on_drop ?(chips = []) label text =
   (* a line of code is one and a half times its text, as code editors set it (17 points at 11,
      20 at 13): the 24-point row is a control's, twice the text *)
   let row = float (text_line_height ui) in
@@ -3101,6 +3200,8 @@ let text_area_submit ui ~at ~w ~h ?(wrap = false) ?(errors = []) ?(messages = []
       ~flags:(clickable lor focusable lor blocking lor scroll lor clip
               lor keep_tab)
       ~at ~w:(Px w) ~h:(Px h) ~scroll_step:row label in
+  (* a [select] request takes the keyboard for the area *)
+  if select <> None then focus ui body;
   let char_w = text_width ui "0" in
   (* the sheet's code area: a 36-point gutter (wider only past 999 lines), the text at its edge,
      6 points of padding above the first row *)
@@ -3164,6 +3265,11 @@ let text_area_submit ui ~at ~w ~h ?(wrap = false) ?(errors = []) ?(messages = []
     if strict && (x < 0. || x > text_width ui line_text || py < by || py > by +. bh) then None
     else Some (start_of rows line + text_caret_at ui line_text (Float.max 0. x)) in
   let point_at point = Option.get (point_in text rows point) in
+  (* a number is dragged by its underline: the lowest 9 points of its row, so a drag that selects
+     text from a number does not rewrite it *)
+  let on_handle (_, py) =
+    let y = py -. by +. scroll_position ui body -. pad in
+    y -. (row *. Float.floor (y /. row)) >= row -. 9. in
   let edit = if focused then load_text_edit ui body.box_key text
     else { text; caret = String.length text; anchor = String.length text } in
   let moved = ref false and submitted = ref false in
@@ -3176,7 +3282,7 @@ let text_area_submit ui ~at ~w ~h ?(wrap = false) ?(errors = []) ?(messages = []
   let scrubbing = ref None in
   (match language with
    | Some l when signal.pressed && signal.button = Some Input.LeftButton ->
-       (match l.number_at text (point_at signal.press_point) with
+       (match (if on_handle signal.press_point then l.number_at text (point_at signal.press_point) else None) with
         | Some (a, b) -> set_state ui scrub (a + 1); set_text_state ui scrub (Some (String.sub text a (b - a)))
         | None -> set_state ui scrub 0)
    | Some _ when scrub_state <> 0 && signal.held ->
@@ -3191,14 +3297,17 @@ let text_area_submit ui ~at ~w ~h ?(wrap = false) ?(errors = []) ?(messages = []
        set_state ui scrub 0;
        if scrub_state < 0 then Option.iter (fun f -> f `Done) on_scrub
    | _ -> ());
-  (* the completion popup: its state is (token start + 1) * 256 + the selected row; the rows are
-     built before the keys so a click on one is seen this frame *)
+  (* the completion popup: its state is (token start + 1) * 512 + 256 once an arrow has moved
+     the selection + the selected row; the rows are built before the keys so a click on one is
+     seen this frame *)
   let open_ = if focused then state ui suggest ~default:0 else (set_state ui suggest 0; 0) in
   let items = match language with
     | Some l when open_ <> 0 -> Array.of_list (l.complete edit.text edit.caret)
     | _ -> [||] in
   let shown = min 8 (Array.length items) in
   let selected = ref (min (open_ land 255) (max 0 (Array.length items - 1))) in
+  (* Enter takes the row only after Up or Down chose it; Tab takes it always *)
+  let chosen = ref (open_ land 256 <> 0) in
   let first = max 0 (!selected - shown + 1) in
   let closed = ref false in
   let accept (c : completion) =
@@ -3229,6 +3338,7 @@ let text_area_submit ui ~at ~w ~h ?(wrap = false) ?(errors = []) ?(messages = []
       s, (if e < String.length edit.text then e + 1 else e) in
     if signal.pressed && signal.button = Some Input.LeftButton then
       begin
+        ui.edit_column <- -1.;
         press_select ui edit ~shift:(press_shift ui body) ~clicks:signal.clicks ~line_of
           (point_at signal.press_point);
         (* a double click on true / false flips it, as dragging flips a number *)
@@ -3245,6 +3355,18 @@ let text_area_submit ui ~at ~w ~h ?(wrap = false) ?(errors = []) ?(messages = []
         && (signal.dragging || (signal.held && signal.pointer <> signal.press_point)) then
       drag_select ui edit ~line_of (point_at signal.pointer);
     let typed = ref false and changed = ref false in
+    (* the host's replacements (one undo step, last first so the offsets hold), then its selection *)
+    if splice <> [] then begin
+      remember ui edit ~typing:false;
+      List.iter (fun (a, b, by) ->
+        if 0 <= a && a <= b && b <= String.length edit.text then
+          edit.text <- String.sub edit.text 0 a ^ by ^ String.sub edit.text b (String.length edit.text - b))
+        (List.sort (fun (a, _, _) (b, _, _) -> Int.compare b a) splice);
+      changed := true
+    end;
+    Option.iter (fun (a, b) ->
+      let n = String.length edit.text in
+      edit.anchor <- max 0 (min n a); edit.caret <- max 0 (min n b)) select;
     let page = max 1 (int_of_float (bh /. row) - 1) in
     List.iter (fun ((event : Event.t), modifiers) ->
       let command = command_modifiers modifiers and shift = List.mem Input.Shift modifiers in
@@ -3254,12 +3376,18 @@ let text_area_submit ui ~at ~w ~h ?(wrap = false) ?(errors = []) ?(messages = []
         (String.sub edit.text (start_of rows line) (index - start_of rows line)) in
       let line = row_at rows edit.caret in
       let move target = edit.caret <- target; if not shift then edit.anchor <- target in
+      (* Up and Down keep the column they started from across shorter rows *)
       let vertical step =
         let target = line + step in
+        let x = if ui.edit_column >= 0. then ui.edit_column else x_of line edit.caret in
+        ui.edit_column <- x;
         if target < 0 then move 0
         else if target >= count then move (String.length edit.text)
-        else move (start_of rows target
-          + text_caret_at ui (row_text edit.text rows target) (x_of line edit.caret)) in
+        else move (start_of rows target + text_caret_at ui (row_text edit.text rows target) x) in
+      (match event with
+       | Event.KeyPressed (Input.ArrowUp | ArrowDown) when not command -> ()
+       | Event.KeyPressed (Input.PageUp | PageDown | Shift | Ctrl | Alt | Meta) -> ()
+       | _ -> ui.edit_column <- -1.);
       let listing = shown > 0 && not !closed in
       let change () = changed := true; remember ui edit ~typing:false in
       (match event with
@@ -3267,15 +3395,18 @@ let text_area_submit ui ~at ~w ~h ?(wrap = false) ?(errors = []) ?(messages = []
       (* the completion popup takes Up, Down, Tab, Enter and Escape while it is open *)
       | Event.KeyPressed ((Input.ArrowUp | Input.ArrowDown) as key) when listing ->
           let n = Array.length items in
+          chosen := true;
           selected := (!selected + (if key = Input.ArrowUp then n - 1 else 1)) mod n
-      | Event.KeyPressed (Input.Tab | Input.Enter) when listing -> accept items.(!selected)
+      | Event.KeyPressed Input.Tab when listing && not command -> accept items.(!selected)
+      | Event.KeyPressed Input.Enter when listing && !chosen -> accept items.(!selected)
       | Event.KeyPressed Input.Escape when open_ <> 0 && not !closed -> set_state ui suggest 0; closed := true
       | Event.KeyPressed Input.Escape -> unfocus ui
       | Event.KeyPressed Input.Enter ->
           begin
             let indent = match language with
               | Some l -> l.indent edit.text (fst (text_selection edit)) | None -> "" in
-            change (); replace_text edit ("\n" ^ indent)
+            change (); replace_text edit ("\n" ^ indent);
+            if open_ <> 0 then (set_state ui suggest 0; closed := true)
           end
       (* brackets come in pairs: an opener wraps the selection or inserts both, a closer typed
          before itself steps over it, Backspace between an empty pair takes both *)
@@ -3283,18 +3414,27 @@ let text_area_submit ui ~at ~w ~h ?(wrap = false) ?(errors = []) ?(messages = []
           let c = s.[0] and pairs = (Option.get language).pairs in
           let start, stop = text_selection edit in
           let next = if edit.caret < String.length edit.text then Some edit.text.[edit.caret] else None in
-          (match List.assoc_opt c pairs with
-           | Some close when start <> stop ->
+          (* a bracket is a bracket only in code: in a string only a quote steps over its closing
+             quote, and a comment takes every character as typed; in code a quote before a quote
+             is the next string's opening one *)
+          let context = (Option.get language).context_at edit.text edit.caret in
+          let quote = List.mem (c, c) pairs in
+          let step_over = next = Some c && (match context with
+            | `Code -> List.exists (fun (_, close) -> close = c) pairs && not quote
+            | `String -> quote
+            | `Comment -> false) in
+          (match context, List.assoc_opt c pairs with
+           | `Code, Some close when start <> stop ->
                change ();
                replace_text edit (String.make 1 c ^ String.sub edit.text start (stop - start) ^ String.make 1 close);
                edit.anchor <- start + 1; edit.caret <- stop + 1
-           | _ when List.exists (fun (_, close) -> close = c) pairs && next = Some c ->
+           | _ when step_over ->
                edit.caret <- edit.caret + 1; edit.anchor <- edit.caret
-           | Some close ->
+           | `Code, Some close ->
                change ();
                replace_text edit (String.make 1 c ^ String.make 1 close);
                edit.caret <- edit.caret - 1; edit.anchor <- edit.caret
-           | None -> changed := edit_text_event ~multiline:true ui edit ~accept:(fun _ -> true) ~modifiers event || !changed);
+           | _ -> changed := edit_text_event ~multiline:true ui edit ~accept:(fun _ -> true) ~modifiers event || !changed);
           typed := true
       | Event.KeyPressed Input.Backspace when language <> None && not command
           && edit.caret = edit.anchor && edit.caret > 0 && edit.caret < String.length edit.text
@@ -3307,6 +3447,20 @@ let text_area_submit ui ~at ~w ~h ?(wrap = false) ?(errors = []) ?(messages = []
           if Clipboard.set_text (String.sub edit.text s (e - s)) = Ok ()
              && (key = 'x' || key = 'X') then begin
             change (); edit.anchor <- s; edit.caret <- e; replace_text edit ""; typed := true
+          end
+      | Event.KeyPressed Input.Tab when not command && edit.caret <> edit.anchor ->
+          (* Tab and Shift-Tab with a selection indent and dedent every line it touches *)
+          let a, b = text_selection edit in
+          let first, stop = line_block edit.text a b in
+          let block = String.sub edit.text first (stop - first) in
+          let shifted = String.concat "\n" (List.map (fun l ->
+            if not shift then (if l = "" then l else "  " ^ l)
+            else if String.starts_with ~prefix:"  " l then String.sub l 2 (String.length l - 2)
+            else if String.starts_with ~prefix:" " l then String.sub l 1 (String.length l - 1) else l)
+            (String.split_on_char '\n' block)) in
+          if shifted <> block then begin
+            change (); replace_block edit first stop shifted;
+            keep_selection edit first (first + String.length shifted)
           end
       | Event.KeyPressed Input.Tab when not command ->
           if not shift then (change (); replace_text edit "  ")
@@ -3323,6 +3477,52 @@ let text_area_submit ui ~at ~w ~h ?(wrap = false) ?(errors = []) ?(messages = []
               edit.caret <- max line_start (edit.caret - spaces); edit.anchor <- edit.caret
             end
           end
+      (* line and form edits: Command-/ toggles comments, Option-Up and Down move the lines, with
+         Shift duplicate them, Command-Option-Up selects the enclosing form, Command-Shift-\\ jumps
+         to the matching bracket *)
+      | Event.KeyPressed (Input.KeyChar '/') when command && language <> None ->
+          let a, b = text_selection edit in
+          let first, stop = line_block edit.text a b in
+          let block = String.sub edit.text first (stop - first) in
+          let toggled = toggle_comment (Option.get language).comment block in
+          if toggled <> block then begin
+            change (); replace_block edit first stop toggled;
+            let last = first + String.length toggled in
+            if a = b then (edit.caret <- max first (a + last - stop); edit.anchor <- edit.caret)
+            else keep_selection edit first last
+          end
+      | Event.KeyPressed (Input.ArrowUp | Input.ArrowDown as key) when List.mem Input.Alt modifiers && not command ->
+          let a, b = text_selection edit in
+          let first, stop = line_block edit.text a b in
+          let n = String.length edit.text in
+          let block = String.sub edit.text first (stop - first) in
+          let up = key = Input.ArrowUp in
+          let shift_by d = edit.anchor <- edit.anchor + d; edit.caret <- edit.caret + d in
+          if shift then begin
+            (* a copy below keeps the selection on the copy, a copy above on the original *)
+            change ();
+            replace_block edit stop stop ("\n" ^ block);
+            if not up then shift_by (String.length block + 1)
+          end else if up && first > 0 then begin
+            let before = line_start edit.text (first - 1) in
+            change ();
+            replace_block edit before stop (block ^ "\n" ^ String.sub edit.text before (first - 1 - before));
+            shift_by (before - first)
+          end else if not up && stop < n then begin
+            let after = line_end edit.text (stop + 1) in
+            change ();
+            replace_block edit first after (String.sub edit.text (stop + 1) (after - stop - 1) ^ "\n" ^ block);
+            shift_by (after - stop)
+          end
+      | Event.KeyPressed Input.ArrowUp when command && List.mem Input.Alt modifiers ->
+          let a, b = text_selection edit in
+          (match language with
+           | Some l ->
+               Option.iter (fun (o, c) -> edit.anchor <- o; edit.caret <- c) (enclosing_pair (l.brackets edit.text) a b)
+           | None -> ())
+      | Event.KeyPressed (Input.KeyChar '\\') when command && shift && language <> None ->
+          Option.iter (fun at -> edit.caret <- at; edit.anchor <- at)
+            (bracket_jump ((Option.get language).brackets edit.text) edit.caret)
       | Event.KeyPressed Input.ArrowUp when command -> move 0
       | Event.KeyPressed Input.ArrowDown when command -> move (String.length edit.text)
       | Event.KeyPressed Input.ArrowUp -> vertical (-1)
@@ -3363,9 +3563,9 @@ let text_area_submit ui ~at ~w ~h ?(wrap = false) ?(errors = []) ?(messages = []
     (match language with
      | Some l when (!typed || (open_ <> 0 && not !closed)) ->
          (match l.complete edit.text edit.caret with
-          | c :: _ when !typed -> set_state ui suggest ((fst c.replace + 1) * 256)
-          | c :: _ when fst c.replace = (open_ lsr 8) - 1 ->
-              set_state ui suggest ((open_ lsr 8) * 256 + !selected)
+          | c :: _ when !typed -> set_state ui suggest ((fst c.replace + 1) * 512)
+          | c :: _ when fst c.replace = (open_ lsr 9) - 1 ->
+              set_state ui suggest ((open_ lsr 9) * 512 + (if !chosen then 256 else 0) + !selected)
           | _ -> set_state ui suggest 0)
      | _ -> ());
     (* the language's rewrite (parinfer) after this frame's edits; the anchor maps like the caret *)
@@ -3381,6 +3581,7 @@ let text_area_submit ui ~at ~w ~h ?(wrap = false) ?(errors = []) ?(messages = []
   (* scrolling: the wheel, then whatever keeps the caret (or [reveal]) in view *)
   let final = edit.text in
   if focused then Option.iter (fun f -> f edit.caret) on_caret;
+  if focused then Option.iter (fun f -> f (text_selection edit)) on_select;
   if focused && !moved && (signal.pressed || signal.dragging || key_events ui body <> []) then
     Option.iter (fun f -> f edit.caret) on_caret_move;
   (match on_click with
@@ -3397,11 +3598,13 @@ let text_area_submit ui ~at ~w ~h ?(wrap = false) ?(errors = []) ?(messages = []
   let rows = if final == text then rows else rows_of final in
   let count = Array.length rows in
   let notes = note_rows rows in
-  (* [reveal] scrolls once per (offset, length): the content box remembers it *)
+  (* [reveal] scrolls once per (offset, length, nonce): the content box remembers it, and forgets
+     it while there is nothing to reveal *)
   let revealed = match reveal with
     | Some index when bw > 0.
-        && state ui content ~default:0 <> (index * 1_000_003) + String.length final + 1 ->
-        set_state ui content ((index * 1_000_003) + String.length final + 1); Some index
+        && state ui content ~default:0 <> (index * 1_000_003) + String.length final + 1 + (reveal_nonce * 1_000_000_007) ->
+        set_state ui content ((index * 1_000_003) + String.length final + 1 + (reveal_nonce * 1_000_000_007)); Some index
+    | None -> set_state ui content 0; None
     | _ -> None in
   let target = if !moved then Some edit.caret
     else Option.map (fun index -> min (String.length final) index) revealed in
@@ -3442,7 +3645,7 @@ let text_area_submit ui ~at ~w ~h ?(wrap = false) ?(errors = []) ?(messages = []
         let stop = ref start in
         while !stop < String.length final && numeric_character final.[!stop] do incr stop done;
         Some (start, !stop)
-    | Some l, Some byte, None -> l.number_at final byte
+    | Some l, Some byte, None when on_handle signal.pointer -> l.number_at final byte
     | _ -> None in
   if hovered_number <> None then request_cursor ui `Horizontal_resize;
   (match language, under_pointer with

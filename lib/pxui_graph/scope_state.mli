@@ -32,11 +32,15 @@ type command =
     Delete
   | Fold_into
   | Unfold
+  | Unfold_all  (** [⌥⇧U]: every call written in a row of the selected card becomes its own card *)
   | Hoist
   | Bypass
   | Wrap_repeat
   | Wrap_iterate
   | Wrap_if
+  | Wrap_map  (** [⇧M]: the selection becomes the body of a [map] over a [range] *)
+  | Wrap_filter  (** [⇧L]: the same as the test of a [filter] *)
+  | Inline_fn  (** [⌥⇧I]: a call of a [defn] becomes its body *)
   | Add_arm
   | Delete_arm
   | Make_fn
@@ -45,6 +49,8 @@ type command =
   | Collapse
   | Probe_step of int
   | Frame_all
+  | Tidy  (** [⇧T]: every card back to the computed layout (the dragged ones stay) *)
+  | Toggle_tags  (** [⇧Y]: long wires read as name tags at their use site, or all of them drawn *)
   | Walk of direction
   | Edit_name
   | Item_up
@@ -149,7 +155,13 @@ type t = {
   held : Rays.Input.key list * bool;
   back : (path * P.level) list;
   measure : int -> string -> float;
+  tags : bool;
+  chain : (Path_set.t * Scope_wires.wire array * (Path_set.t * Path_set.t)) option ref;
 }
+val chains_of : t -> (Path_set.t * Path_set.t) option
+val wire_lit : Path_set.t * Path_set.t -> Scope_wires.wire -> bool
+val tagged : t -> Scope_wires.wire -> bool
+val node_lit : Path_set.t * Path_set.t -> path -> bool
 val font_of : float -> int
 val regeo : t -> P.scope -> P.layout -> shift:(path -> float * float) -> t
 val no_stats : stats
@@ -176,7 +188,7 @@ val refresh : t -> t
 val no_shift : 'a -> float * float
 val lens_of : t -> path -> int option
 val lay :
-  t ->
+  ?sticky:bool -> t ->
   P.scope ->
   at:(path -> (float * float) option) -> collapsed:(path -> bool) -> P.layout
 val fold_sources : P.scope -> (path * int, string list) Hashtbl.t
@@ -192,7 +204,11 @@ val with_scope :
   ?display:path ->
   ?wires:[ `Rect | `Straight ] ->
   ?layouts:string list -> key:string -> P.scope -> t -> t
-val relayout : t -> t
+val relayout : ?sticky:bool -> t -> t
+
+val tidy : t -> t
+(** every card back to the computed layout; [with_scope] otherwise keeps each card where it was *)
+
 val with_display : path option -> t -> t
 val with_arguments : (path * E.arg_key * S.t) list -> t -> t
 val with_records : Flow_graph.Probe.t -> t -> t

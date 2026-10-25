@@ -23,7 +23,7 @@ let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~lead
       | Text_pane.Carry_over (byte, dropped) ->
           let drafted = match text.tab with
             | Text_pane.Document -> text.draft <> None
-            | Graph -> (match text.graph_draft with Some (g, _) -> g = shown.graph | None -> false)
+            | Graph -> Text_pane.graph_slot text shown.graph <> None
             | Selection -> (match text.binding_draft with Some (p, _) -> p = shown.key | None -> false) in
           let target = if drafted then Carry.Drafted else match text.tab with
             | Document -> Carry.Whole | Graph -> Graph_text shown.graph | Selection -> Selection_text shown.key in
@@ -109,7 +109,7 @@ let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~lead
         | Notice message -> Some (Info, message) | Declined message -> Some (Refusal, message)
         | _ -> None) result.changes with
         | Some _ as notice -> notice | None -> value.notice), None
-    | Some (Run_action _ | Edit_source _ | Go _) -> result.prompt, value.notice, None
+    | Some (Run_action _ | Edit_source _ | Go _ | Find_node _) -> result.prompt, value.notice, None
     | Some (Save_preset_file name) ->
         let notice = match Preset.save ~directory:value.presets ~name
             ~doc:value.doc ~view:(view_state result.panel) with
@@ -503,8 +503,9 @@ let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~lead
     | Some level -> open_level value' level
     | None -> value' in
   (* u goes back along the route taken *)
-  let value' = match value'.back with
-    | (back_level, pane_graph) :: rest when List.mem Leader.Up actions && target = None && followed = None ->
+  let pops = List.fold_left (fun n -> function Leader.Up -> max n 1 | Back k -> max n k | _ -> n) 0 actions in
+  let value' = match List.filteri (fun i _ -> i >= pops - 1) value'.back with
+    | (back_level, pane_graph) :: rest when pops > 0 && target = None && followed = None ->
         let back_level = Document.resolve_level doc back_level in
         { (open_level { value' with back = rest } back_level) with pane_graph }
     | _ -> value' in
@@ -541,6 +542,7 @@ let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~lead
             Pxui_graph.Scope.Frame_selection) }
     | _ -> value' in
   let value' = match outlined with Some (graph, _) -> go value' graph | None -> value' in
+  let value' = match result.prompt_intent with Some (Find_node path) -> select_source value' path | _ -> value' in
   (* the graph panel's own projection: list and text views are panels of their own now (/ l
      retypes), so opening a graph is the only thing that changes it *)
   let projections = if result.open_graph <> None || outlined <> None then

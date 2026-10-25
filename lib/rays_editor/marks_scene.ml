@@ -46,12 +46,13 @@ let host bytes stride = { source = Bytes bytes; stride }
 (* The bytes of a host array are kept while the array is physically the same: a static attribute
    of a device set is converted once, and the unchanged bytes are not uploaded again. Keyed by the
    set's slot and the attribute's place in it. *)
-type converted = (int * int, float array * bytes) Hashtbl.t
+module Kept = Lru.Make (struct type t = int * int let equal = ( = ) let hash = Hashtbl.hash end)
+type converted = (float array * bytes) Kept.t
 let kept (converted : converted option) key (d : float array) build = match converted with
   | None -> build ()
-  | Some table -> (match Hashtbl.find_opt table key with
+  | Some table -> (match Kept.find_opt table key with
       | Some (old, bytes) when old == d -> bytes
-      | _ -> let bytes = build () in Hashtbl.replace table key (d, bytes); bytes)
+      | _ -> let bytes = build () in Kept.add table key (d, bytes); bytes)
 
 (* Floats of [width] per instance: constant pairs and scalars take stride 0. *)
 let vectors buffers ~device ~kept count (a : (float * float) M.attr) = match a with
@@ -160,8 +161,11 @@ let points buffers count position fill =
 
 (* The scene node of a mark set, kept while its description and the physical attribute arrays are the
    same as the previous frame's: a batch whose data did not change is not built again. *)
-type cache = { nodes : (int, M.entry * float array list * Scene.node) Hashtbl.t; converted : converted }
-let cache () : cache = { nodes = Hashtbl.create 8; converted = Hashtbl.create 8 }
+module Nodes = Lru.Make (struct type t = int let equal = Int.equal let hash = Hashtbl.hash end)
+type cache = { nodes : (M.entry * float array list * Scene.node) Nodes.t; converted : converted }
+(* a frame's mark sets and device attributes are the working set: more than this and the oldest go *)
+let cache () : cache = { nodes = Nodes.create 1024; converted = Kept.create 4096 }
+let cache_size cache = Nodes.length cache.nodes
 let arrays buffers (kind : M.kind) =
   let one : type a. a M.attr -> float array list = function
     | M.Buffer b -> [data buffers b] | _ -> [] in
@@ -175,10 +179,10 @@ let cached cache buffers ordinal (entry : M.entry) kind build =
   | None -> build ()
   | Some { nodes = table; _ } ->
       let data = arrays buffers kind in
-      match Hashtbl.find_opt table ordinal with
+      match Nodes.find_opt table ordinal with
       | Some (previous, old, node) when previous = entry && List.length old = List.length data
                                          && List.for_all2 (==) old data -> node
-      | _ -> let node = build () in Hashtbl.replace table ordinal (entry, data, node); node
+      | _ -> let node = build () in Nodes.add table ordinal (entry, data, node); node
 
 let scene ~buffers ?image ?gpu ?cache ?(device = fun _ -> no_device ()) marks =
   let fail code message = Error (Flow.Diagnostic.error ~code message) in

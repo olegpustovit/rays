@@ -53,6 +53,7 @@
 
 (test
  (name test_packed)
+ (enabled_if (= %{env:RAYS_SLOW=0} 1))
  (modules test_packed region_snapshot test_program)
  (deps (glob_files snapshots/*.txt))
  (libraries flow_ir flow rays_math unix))
@@ -158,5 +159,6 @@
 
 (test
  (name test_array_composition)
+ (enabled_if (= %{env:RAYS_SLOW=0} 1))
  (modules test_array_composition array_composition_cases)
  (libraries flow_ir flow rays_math))

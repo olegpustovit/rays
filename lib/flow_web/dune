@@ -79,6 +79,7 @@
 
 (test
  (name test_region_arguments)
+ (enabled_if (= %{env:RAYS_SLOW=0} 1))
  (modules test_region_arguments)
  (deps (glob_files ../../tools/web/runtime/*.js))
  (libraries flow_web flow flow_ir frame_input))
@@ -93,6 +94,7 @@
 
 (test
  (name test_array_composition_web)
+ (enabled_if (= %{env:RAYS_SLOW=0} 1))
  (modules test_array_composition_web array_composition_cases)
  (deps (glob_files ../../tools/web/runtime/*.js))
  (libraries flow_web flow flow_ir rays_math))

@@ -23,29 +23,60 @@ type shown = {
   applied_spans : Flow.Lisp.spans Lazy.t;
 }
 
+(* The find bar: the query, the replacement, whether case counts, whether the replace row is
+   open, the byte the current match is looked for from, and whether the query field takes the
+   keyboard this frame. *)
+type find = { query : string; replace : string; case : bool; replacing : bool; at : int; grab : bool }
+
+(* What the keys ask of the pane: resolved by [view], which knows the text, the caret and the
+   selection; [Select] needs none of them. *)
+type command = Find | Find_replace | Find_selection | Find_next | Find_previous | Definition
+  | Select of int * int
+
+(* What the text area is asked to do once: replace ranges (one undo step), then select. *)
+type request = { select : int * int; splice : (int * int * string) list }
+
+(* The diagnostics found in the text [at]; a later text shows one only while the text up to the end
+   of its line still reads the same ({!visible}), so no mark names a line it has drifted from. *)
+type checked = { at : string; found : Flow.Diagnostic.t list }
+
+(* One Graph tab's unapplied text, the document it began from and the errors of its last apply:
+   every graph keeps its own. *)
+type slot = { gtext : string; gbase : Editor_document.Workspace_doc.t option; gerrors : checked }
+
+(* The parse of a draft: [found] is [None] until [seen] has rested for the debounce, and
+   belongs to [seen] alone. *)
+type live = { seen : string; since : float; found : Flow.Diagnostic.t list option }
+
 type state = {
   tab : tab;
   draft : string option;  (* the Document tab's unapplied text *)
   binding_draft : (path * string) option;  (* the Selection tab's unapplied text, and its key *)
-  graph_draft : (string * string) option;  (* the Graph tab's unapplied text, and its graph *)
+  graphs : (string * slot) list;  (* the Graph tab's unapplied texts, by graph *)
   doc_base : Editor_document.Workspace_doc.t option;
   binding_base : Editor_document.Workspace_doc.t option;
-  graph_base : Editor_document.Workspace_doc.t option;
-  doc_errors : Flow.Diagnostic.t list;  (* of the last refused apply *)
-  binding_errors : Flow.Diagnostic.t list;
-  graph_errors : Flow.Diagnostic.t list;
+  doc_errors : checked;  (* of the last refused apply *)
+  binding_errors : checked;
+  live : live option;
   wrap : bool;  (* long lines continue on the next row *)
   parinfer : bool;  (* closing brackets follow indentation (Lisp_text.parinfer_text) *)
   menu : (float * float) option;  (* the right-click menu, while open *)
   picker : (int * int * bool) option;  (* the colour literal (byte range with its quotes) being edited, and whether it changed *)
   scrubbing : bool;
   target : path option;  (* a definition revealed in Document, including macros *)
+  find : find option;
+  pending : command list;
+  request : request option;
+  nonce : int;  (* raised to scroll the same offset into view again *)
   cache : ((S.t list * Editor_document.Workspace_doc.t option * string * path option * tab) * shown) option;
 }
 
-let initial = { tab = Selection; draft = None; binding_draft = None; graph_draft = None;
-  doc_base = None; binding_base = None; graph_base = None;
-  doc_errors = []; binding_errors = []; graph_errors = []; wrap = false; parinfer = true; menu = None; picker = None; scrubbing = false; target = None; cache = None }
+let no_errors = { at = ""; found = [] }
+
+let initial = { tab = Selection; draft = None; binding_draft = None; graphs = [];
+  doc_base = None; binding_base = None;
+  doc_errors = no_errors; binding_errors = no_errors; live = None; wrap = false; parinfer = true; menu = None; picker = None; scrubbing = false; target = None;
+  find = None; pending = []; request = None; nonce = 0; cache = None }
 
 (* ---- reading the source ---- *)
 
@@ -588,32 +619,166 @@ let merge3 ~base ~mine ~theirs =
   | Ok b, Ok m, Ok t -> Option.map (fun forms -> fst (Flow.Lisp.print forms)) (keyed (entries b) (entries m) (entries t))
   | _ -> None
 
+(* ---- find, symbols, lines ---- *)
+
+(* the (start, stop) of every non-overlapping match of [query], in order; ASCII letters fold
+   together unless [case] *)
+let find_all ~case query text =
+  let n = String.length query in
+  if n = 0 then [] else begin
+    let fold = if case then Fun.id else String.lowercase_ascii in
+    let hay = fold text and needle = fold query in
+    let rec same i j = j = n || (hay.[i + j] = needle.[j] && same i (j + 1)) in
+    let rec go from acc = match
+        (let rec at i = if i + n > String.length hay then None else if same i 0 then Some i else at (i + 1) in at from) with
+      | Some i -> go (i + n) ((i, i + n) :: acc)
+      | None -> List.rev acc in
+    go 0 []
+  end
+
+(* the match the bar is on: the first one at or after [at], else the first *)
+let find_current (f : find) matches =
+  match List.find_opt (fun (a, _) -> a >= f.at) matches with
+  | None -> List.nth_opt matches 0
+  | m -> m
+
+(* the bar after Next or Previous: [at] moves just past the current match, or onto the one before *)
+let find_step (f : find) matches direction =
+  match find_current f matches with
+  | None -> f
+  | Some (a, _) ->
+      (match direction with
+       | `Next -> { f with at = a + 1 }
+       | `Previous ->
+           (* the last match before [a], else (wrapping) the last one *)
+           let last = List.fold_left (fun _ (b, _) -> b) a matches in
+           { f with at = List.fold_left (fun t (b, _) -> if b < a then b else t) last matches })
+
+(* Replace the current match, or all of them: the text area's request and the bar after it *)
+let find_replace (f : find) matches ~all =
+  let n = String.length f.replace in
+  match (if all then matches else Option.to_list (find_current f matches)) with
+  | [] -> None
+  | (a, _) :: _ as chosen ->
+      let splice = List.map (fun (a, b) -> a, b, f.replace) chosen in
+      if all then Some ({ select = (a, a + n); splice }, { f with at = a })
+      else Some ({ select = (a + n, a + n); splice }, { f with at = a + n })
+
+(* the bindings of a text: graphs, functions, macros and the names of a [let*], by the byte
+   their name starts at; empty for text that does not read.  ponytail: the text is parsed per
+   request, not cached *)
+let symbols text =
+  match S.parse text with
+  | Error _ -> []
+  | Ok forms ->
+      let rec walk acc (f : S.t) =
+        let acc = match f.node with
+          | S.List ({ S.node = S.Sym ("graph" | "defn" | "defmacro" as kind); _ }
+                    :: { S.node = S.Sym name; span; _ } :: _) -> (name, kind, span.start) :: acc
+          | S.List [ { S.node = S.Sym "let*"; _ }; { S.node = S.Vec bs; _ }; _ ] ->
+              List.fold_left (fun acc ((p : S.t), _) -> match p.node with
+                | S.Sym name -> (name, "let*", p.span.start) :: acc | _ -> acc) acc (pairs bs)
+          | _ -> acc in
+        List.fold_left walk acc (S.children f) in
+      List.rev (List.fold_left walk [] forms)
+
+(* the byte where 1-based [line] of [text] starts (the last line's for a line past the end), and
+   where the line starting at [from] ends *)
+let line_start text line =
+  let rec go k from = if k <= 1 then from else
+      match String.index_from_opt text from '\n' with Some j -> go (k - 1) (j + 1) | None -> from in
+  go line 0
+let line_end text from = match String.index_from_opt text from '\n' with Some j -> j | None -> String.length text
+
+(* "12" or "12:5": the byte of that 1-based line (and character column), past the end clamped *)
+let line_target text input =
+  let number s = match int_of_string_opt (String.trim s) with Some n when n >= 1 -> Some n | _ -> None in
+  let line, column = match String.index_opt input ':' with
+    | Some i -> number (String.sub input 0 i), number (String.sub input (i + 1) (String.length input - i - 1))
+    | None -> number input, Some 1 in
+  match line, column with
+  | Some line, Some column ->
+      let from = line_start text line in
+      let stop = line_end text from in
+      let rec advance i k = if k <= 1 || i >= stop then i
+        else advance (i + Uchar.utf_decode_length (String.get_utf_8_uchar text i)) (k - 1) in
+      Some (advance from column)
+  | _ -> None
+
+(* the Graph tab's slot for a graph *)
+let graph_slot state graph = List.assoc_opt graph state.graphs
+
+(* the text the pane shows for its tab: the draft when there is one *)
+let current_text state (shown : shown) = match state.tab with
+  | Document -> Option.value ~default:(Lazy.force shown.applied) state.draft
+  | Graph -> (match graph_slot state shown.graph with Some s -> s.gtext | None -> shown.text)
+  | Selection -> (match state.binding_draft with Some (k, t) when k = shown.key -> t | _ -> shown.text)
+
+(* The state after a command: [Select] is a request at once, the rest wait for [view]. *)
+let command state = function
+  | Select (a, b) -> { state with request = Some { select = (a, b); splice = [] }; nonce = state.nonce + 1 }
+  | c -> { state with pending = state.pending @ [ c ] }
+
 (* ---- errors ---- *)
 
 let line_of text (d : Flow.Diagnostic.t) = match d.position, d.span with
   | Some p, _ -> Some p.line
-  | None, Some s ->
-      let lines = ref 1 in
-      String.iteri (fun i c -> if i < s.start && c = '\n' then incr lines) text;
-      Some !lines
+  | None, Some s -> Some (Flow.Diagnostic.position_of_offset text s.start).line
   | None, None -> None
 
 let real_errors = List.filter (fun (d : Flow.Diagnostic.t) -> d.severity = Flow.Diagnostic.Error)
 
-let first_error state =
-  match real_errors state.doc_errors, real_errors state.binding_errors, real_errors state.graph_errors with
-  | d :: _, _, _ | [], d :: _, _ | [], [], d :: _ -> Some d
-  | [], [], [] -> None
+(* the byte where 1-based [line] of [text] ends *)
+let line_stop text line = line_end text (line_start text line)
 
-(* one line for the crash report and tests: the tab, the draft, the first error *)
+(* the diagnostics of [c] that still hold for [text]: those whose line, and span, lie within the
+   bytes [text] still shares with the text they were found in *)
+let visible (c : checked) text =
+  if c.at = text then c.found else
+  let n = min (String.length c.at) (String.length text) in
+  let shared = ref 0 in
+  while !shared < n && c.at.[!shared] = text.[!shared] do incr shared done;
+  List.filter (fun (d : Flow.Diagnostic.t) -> match line_of c.at d with
+    | Some line -> !shared >= max (line_stop c.at line) (match d.span with Some s -> s.finish | None -> 0)
+    | None -> false) c.found
+
+(* what the area marks for [text]: the apply errors that still hold and the rested draft's parse *)
+let errors_of state (c : checked) text =
+  let held = real_errors (visible c text) in
+  held @ (match state.live with
+    | Some { seen; found = Some found; _ } when seen = text ->
+        List.filter (fun d -> not (List.mem d held)) (real_errors found)
+    | _ -> [])
+
+(* the parse errors of a draft some tab holds, once it has rested *)
+let live_errors state = match state.live with
+  | Some { seen; found = Some found; _ }
+    when state.draft = Some seen || (match state.binding_draft with Some (_, t) -> t = seen | None -> false)
+         || List.exists (fun (_, s) -> s.gtext = seen) state.graphs -> real_errors found
+  | _ -> []
+
+let graph_errors state = List.concat_map (fun (_, s) -> real_errors (visible s.gerrors s.gtext)) state.graphs
+
+(* the apply errors that still hold for the document draft and for the selection's draft *)
+let held_errors state =
+  real_errors (visible state.doc_errors (Option.value ~default:"" state.draft)),
+  real_errors (visible state.binding_errors (match state.binding_draft with Some (_, t) -> t | None -> ""))
+
+let first_error state =
+  let doc, binding = held_errors state in
+  match doc @ binding @ graph_errors state @ live_errors state with d :: _ -> Some d | [] -> None
+
+(* one line for the crash report and tests: the tab, the draft, the first error, the graph drafts
+   and the find bar *)
 let summary state =
+  let doc, binding = held_errors state in
   Printf.sprintf "%s tab, draft %s%s"
     (match state.tab with Selection -> "selection" | Graph -> "graph" | Document -> "document")
     (if (match state.tab with
          | Document -> state.draft <> None
-         | Graph -> state.graph_draft <> None
+         | Graph -> state.graphs <> []
          | Selection -> state.binding_draft <> None) then "yes" else "no")
-    (match real_errors state.doc_errors, state.draft, real_errors state.binding_errors with
+    (match doc, state.draft, binding with
      | d :: _, Some draft, _ ->
          Printf.sprintf ", error%s: %s"
            (match line_of draft d with Some l -> Printf.sprintf " at line %d" l | None -> "")
@@ -625,9 +790,14 @@ let summary state =
            (Flow.Diagnostic.to_string d)
      | d :: _, None, _ -> ", error: " ^ Flow.Diagnostic.to_string d
      | [], _, [] ->
-         (match real_errors state.graph_errors with
+         (match graph_errors state @ live_errors state with
           | d :: _ -> ", error: " ^ Flow.Diagnostic.to_string d
           | [] -> ""))
+  ^ (match List.sort compare (List.map fst state.graphs) with
+     | [] -> "" | names -> ", graph drafts: " ^ String.concat " " names)
+  ^ (match state.find with
+     | Some f -> Printf.sprintf ", find %S at %d%s" f.query f.at (if f.replacing then " replacing" else "")
+     | None -> "")
 
 (* ---- the pane ---- *)
 
@@ -641,7 +811,8 @@ type intent =
   | Binding_discard
   | Graph_draft of string * string
   | Graph_apply of string * string
-  | Graph_discard
+  | Graph_discard of string
+  | Live of live
   | Menu of (float * float) option
   | Toggle_wrap
   | Doc_scrub of string * bool
@@ -655,6 +826,12 @@ type intent =
   | Select_binding of path
   | Jump_definition of path
   | Carry_over of int * bool
+  | Find_set of find option * bool
+  | Request of request option
+  | Resolved
+
+(* seconds a draft rests before it is parsed *)
+let live_delay = 0.3
 
 let dirty state (shown : shown) = match state.draft with
   | Some d -> d <> Lazy.force shown.applied | None -> false
@@ -711,14 +888,22 @@ let tabs_width ui ~width state shown =
   List.fold_left (fun w (_, label) -> w +. 12. +. Pxui.Ui.text_width ui label) (-12.)
     (tab_labels ~width ~dirty:(dirty state shown))
 
-let view ui ~bounds:(x, y, width, height) ~tabs_right ~vocab ~names state (shown : shown) =
+(* a find-bar button right-aligned in a row: it takes its width off [right] and leaves a gap *)
+let find_button ui key right ?active name label at_y =
+  let w = Pxui_shell.Kit.button_width ui label in
+  right := !right -. w;
+  let hit = Pxui_shell.Kit.button ui ~key:(key ^ name) ~at:(!right, at_y +. 4.) ~w ?active label in
+  right := !right -. 4.; hit
+
+let view ui ~bounds:(x, y, width, height) ~tabs_right ~vocab ~names ~time state (shown : shown) =
   let module Ui = Pxui.Ui in
   let row = float (Ui.row_height ui) in
   let x = float x and y = float y and width = float width and height = float height in
   let theme = Ui.theme ui in
   let intents = ref [] in
   let emit i = intents := i :: !intents in
-  let applied = Lazy.force shown.applied in
+  (* the printed document is made here, once a frame, never inside a token scrub *)
+  ignore (Lazy.force shown.applied);
   let dirty = dirty state shown in
   (* the tabs sit in the panel's header, at its right: the body is all text *)
   (* the workspace sheet's narrow Lisp panel (under 400 points): "Doc", the two buttons alone in
@@ -734,6 +919,7 @@ let view ui ~bounds:(x, y, width, height) ~tabs_right ~vocab ~names state (shown
     | Some index -> emit (Tab (fst (List.nth tabs index)))
     | None -> ()) tabs_right;
   let bar = 32. in
+  let find_row = 28. in
   (* a hairline, the 32-point button bar, a hairline and the 24-point status row *)
   let footer = if narrow then bar +. 1. else bar +. row +. 2. in
   let body_y = y in
@@ -750,28 +936,44 @@ let view ui ~bounds:(x, y, width, height) ~tabs_right ~vocab ~names state (shown
   let editor key ~at:(ey, eh) ~text ~errors ~spans ?reveal ?(caret_select = fun _ -> None)
       ~apply ~discard ~can_apply ~message ~draft ~scrub () =
     let chips = Lisp_text.color_chips text in
+    (* the find bar sits between the text and the footer: one row, two with the replace row *)
+    let find_h = match state.find with
+      | Some f -> if f.replacing then 2. *. find_row else find_row | None -> 0. in
+    let area_h = Float.max row (eh -. footer -. find_h) in
+    let matches = match state.find with
+      | Some f -> find_all ~case:f.case f.query text | None -> [] in
+    let current = Option.bind state.find (fun f -> find_current f matches) in
+    (* every match is a band, the current one also a bar under it; the view goes to the current one *)
+    let spans = spans @ List.filteri (fun i _ -> i < 2000) matches in
+    let shown_chips = chips @ (match current with
+      | Some (a, b) -> [ a, b, theme.accent ] | None -> []) in
+    let reveal = match current with Some (a, _) -> Some a | None -> reveal in
     (* a dragged number applies live ([scrub], merged into one history entry); typing is a draft *)
-    let phase = ref None and caret = ref None and token = ref None in
-    let text', submitted = Ui.text_area_submit ui ~at:(x, ey) ~w:width ~h:(Float.max row (eh -. footer))
+    let phase = ref None and caret = ref None and token = ref None and selection = ref None in
+    (* Command-click and F12 follow a (ref name) or a definition *)
+    let follow byte =
+      let target = match Lisp_text.ref_at text byte with
+        | Some name when List.mem name names.Lisp_text.graphs -> Some [name]
+        | _ -> if text = shown.text then definition_at shown byte else None in
+      Option.iter (fun path ->
+        if path_mark shown.source shown.spans path = None then emit (Tab Document);
+        emit (Jump_definition path)) target in
+    let text', submitted = Ui.text_area_submit ui ~at:(x, ey) ~w:width ~h:area_h
         ~wrap:state.wrap ~errors:(List.filter_map (line_of text) errors)
         ~messages:(List.filter_map (fun (d : Flow.Diagnostic.t) ->
           Option.map (fun line ->
             line, Option.map (fun (s : Flow.Diagnostic.span) -> s.start, s.finish) d.span,
             d.code ^ "  " ^ String.map (function '\n' -> ' ' | c -> c) d.message) (line_of text d)) errors)
-        ~spans ?reveal ~language
+        ~spans ?reveal ~reveal_nonce:state.nonce ?select:(Option.map (fun r -> r.select) state.request)
+        ?splice:(Option.map (fun r -> r.splice) state.request) ~language
         ~on_context:(fun at -> emit (Menu (Some at))) ~on_scrub:(fun p -> phase := Some p)
         ~on_scrub_edit:(fun range replacement -> token := Some (range, replacement))
-        ~chips
+        ~on_select:(fun range -> selection := Some range)
+        ~chips:shown_chips
         ~on_drop:(fun byte drop -> emit (Carry_over (byte, (match drop with Ui.Dropped _ -> true | Hover _ -> false))))
         (* Command-click follows a (ref name); a click on a colour literal opens the colour control *)
         ~on_click:(fun byte command ->
-          if command then
-            (let target = match Lisp_text.ref_at text byte with
-              | Some name when List.mem name names.Lisp_text.graphs -> Some [name]
-              | _ -> if text = shown.text then definition_at shown byte else None in
-             Option.iter (fun path ->
-               if path_mark shown.source shown.spans path = None then emit (Tab Document);
-               emit (Jump_definition path)) target)
+          if command then follow byte
           else match List.find_opt (fun (a, b, _) -> a <= byte && byte < b) chips with
             | Some (a, b, _) -> emit (Picker (Some (a, b, false)))
             | None -> Option.iter (fun path -> emit (Select_binding path)) (caret_select byte))
@@ -804,11 +1006,91 @@ let view ui ~bounds:(x, y, width, height) ~tabs_right ~vocab ~names state (shown
                emit (Picker None); if changed then emit (scrub text' true); text')
       | Some _ -> emit (Picker None); text'
       | None -> text' in
+    (* a draft that rests is parsed once: the debounce is the time the text has been the same *)
+    (if can_apply then match state.live with
+       | Some l when l.seen = text ->
+           if l.found = None && time -. l.since >= live_delay then
+             emit (Live { l with found = Some (match S.parse text with Error d -> [ d ] | Ok _ -> []) })
+       | _ -> emit (Live { seen = text; since = time; found = None }));
     let can_apply = can_apply || text' <> text in
-    let ty = ey +. Float.max row (eh -. footer) in
+    let ay = ey +. area_h in
+    let ty = ay +. find_h in
     let rule name at = Ui.draw ui (Ui.box ui ~w:(Ui.Px width) ~h:(Ui.Px 1.) ~at:(x, at) (key ^ name))
       (fun paint (x, y, w, h) -> Ui.Paint.fill paint ~x ~y ~w ~h (Pxui.Theme.edge theme)) in
     rule "-rule" ty;
+    (* what the keys asked this frame, now that the caret and the selection are known *)
+    if state.request <> None then emit (Request None);
+    List.iter (function
+      | (Find | Find_replace | Find_selection) as cmd ->
+          let base = Option.value state.find
+              ~default:{ query = ""; replace = ""; case = false; replacing = false; at = 0; grab = true } in
+          let picked = match !selection with
+            | Some (a, b) when a < b && b <= String.length text'
+                               && not (String.contains (String.sub text' a (b - a)) '\n') -> Some (a, b)
+            | _ -> None in
+          emit (Find_set (Some { base with
+            query = (match picked with Some (a, b) -> String.sub text' a (b - a) | None -> base.query);
+            replacing = base.replacing || cmd = Find_replace;
+            at = (match picked, !caret with
+                  | Some (a, b), _ -> if cmd = Find_selection then b else a
+                  | None, Some c -> c | None, None -> base.at);
+            grab = cmd <> Find_selection }, true))
+      | (Find_next | Find_previous) as cmd ->
+          Option.iter (fun f -> emit (Find_set (Some (find_step f matches
+            (if cmd = Find_next then `Next else `Previous)), true))) state.find
+      | Definition -> Option.iter follow !caret
+      | Select _ -> ()) state.pending;
+    if state.pending <> [] then emit Resolved;
+    Option.iter (fun (f : find) ->
+      let ry = ay +. 1. in
+      rule "-find-rule" ay;
+      let f' = ref { f with grab = false } and reveal = ref false and closed = ref false in
+      let total = List.length matches in
+      let index = match current with
+        | Some m -> 1 + Option.value ~default:0 (List.find_index (( = ) m) matches) | None -> 0 in
+      let count = if f.query = "" then "" else if total = 0 then "No matches"
+        else Printf.sprintf "%d / %d" index total in
+      let right = ref (x +. width -. 12.) in
+      let button = find_button ui key right in
+      if button "-find-close" "Close" ry then closed := true;
+      if button ~active:f.replacing "-find-replace" "Replace" ry then f' := { !f' with replacing = not f.replacing };
+      if button ~active:f.case "-find-case" "Aa" ry then (f' := { !f' with case = not f.case }; reveal := true);
+      if button "-find-next" "Next" ry then (f' := find_step !f' matches `Next; reveal := true);
+      if button "-find-prev" "Prev" ry then (f' := find_step !f' matches `Previous; reveal := true);
+      let count_w = 76. in
+      Ui.draw ui (Ui.box ui ~w:(Ui.Px count_w) ~h:(Ui.Px find_row) ~at:(!right -. count_w, ry) (key ^ "-find-count"))
+        (fun paint (x, y, w, h) ->
+          Ui.Paint.text paint ~at:(x +. w -. Ui.Paint.text_width paint count, Pxui_shell.Kit.text_y ui y h)
+            ~color:(if total = 0 && f.query <> "" then Pxui.Theme.invalid else Pxui.Theme.ink_2 theme) count);
+      let query, step = Ui.line_field ui ~at:(x +. 12., ry +. 4.) ~w:(Float.max 60. (!right -. count_w -. 8. -. x -. 12.))
+          ~h:20. ~grab:f.grab ~placeholder:"Find" (key ^ "-find") f.query in
+      if query <> f.query then (f' := { !f' with query }; reveal := true);
+      (match step with
+       | `Next -> f' := find_step !f' matches `Next; reveal := true
+       | `Previous -> f' := find_step !f' matches `Previous; reveal := true
+       | `Close -> closed := true
+       | `None -> ());
+      if f.replacing then begin
+        let ry2 = ry +. find_row in
+        let right2 = ref (x +. width -. 12.) in
+        let button2 name label = find_button ui key right2 name label ry2 in
+        let replace_with ~all = match find_replace !f' matches ~all with
+          | Some (r, f2) -> emit (Request (Some r)); f' := f2; reveal := true
+          | None -> () in
+        if button2 "-replace-all" "All" then replace_with ~all:true;
+        if button2 "-replace-one" "Replace" then replace_with ~all:false;
+        let by, step = Ui.line_field ui ~at:(x +. 12., ry2 +. 4.) ~w:(Float.max 60. (!right2 -. 8. -. x -. 12.))
+            ~h:20. ~placeholder:"Replace with" (key ^ "-with") f.replace in
+        if by <> f.replace then f' := { !f' with replace = by };
+        (match step with
+         | `Next -> replace_with ~all:false
+         | `Close -> closed := true
+         | `Previous | `None -> ())
+      end;
+      if !closed then begin
+        emit (Find_set (None, false));
+        emit (Request (Some { select = (match current with Some m -> m | None -> (f.at, f.at)); splice = [] }))
+      end else if !f' <> f then emit (Find_set (Some !f', !reveal))) state.find;
     (* Command-Enter in the area is the button: the one outlined button of the panel *)
     let hint = "\xe2\x8c\x98\xe2\x86\xb5" in
     (* the caret's line and column, 1-based, in the status row's label *)
@@ -900,35 +1182,37 @@ let view ui ~bounds:(x, y, width, height) ~tabs_right ~vocab ~names state (shown
     fun byte -> Option.bind (Lazy.force mapped) (fun mapped -> binding_at mapped byte) in
   (match state.tab with
    | Document ->
-       let text = Option.value ~default:applied state.draft in
-       editor "text-document" ~at:(body_y, body_h) ~text ~errors:(real_errors state.doc_errors)
+       let text = current_text state shown in
+       let errors = errors_of state state.doc_errors text in
+       editor "text-document" ~at:(body_y, body_h) ~text ~errors
          ~spans:(if dirty then [] else Option.to_list shown.mark) ?reveal:(if dirty then None else Option.map fst shown.mark)
          ~caret_select:(caret_select text) ~apply:(fun t -> Doc_apply t) ~discard:Doc_discard ~can_apply:dirty
-         ~message:(message state.doc_errors ~dirty ~clean:"Source matches the applied document.")
+         ~message:(message errors ~dirty ~clean:"Source matches the applied document.")
          ~draft:(fun t -> Doc_draft t) ~scrub:(fun t done_ -> Doc_scrub (t, done_)) ()
    | Graph ->
-       let text = match state.graph_draft with
-         | Some (g, t) when g = shown.graph -> t | _ -> shown.text in
+       let slot = graph_slot state shown.graph in
+       let text = current_text state shown in
+       let errors = errors_of state (match slot with Some s -> s.gerrors | None -> no_errors) text in
        let dirty = text <> shown.text in
        let spans = if dirty then [] else Option.to_list shown.mark in
-       editor "text-graph" ~at:(body_y, body_h) ~text ~errors:(real_errors state.graph_errors)
+       editor "text-graph" ~at:(body_y, body_h) ~text ~errors
          ~spans ?reveal:(if dirty then None else Option.map fst shown.mark)
-         ~caret_select:(caret_select text) ~apply:(fun t -> Graph_apply (shown.graph, t)) ~discard:Graph_discard ~can_apply:dirty
-         ~message:(message state.graph_errors ~dirty
+         ~caret_select:(caret_select text) ~apply:(fun t -> Graph_apply (shown.graph, t)) ~discard:(Graph_discard shown.graph) ~can_apply:dirty
+         ~message:(message errors ~dirty
            ~clean:(Printf.sprintf "Edit %s as text; Check and apply checks the whole workspace." shown.graph))
          ~draft:(fun t -> Graph_draft (shown.graph, t))
          ~scrub:(fun t done_ -> Graph_scrub (shown.graph, t, done_)) ()
    | Selection ->
        (* the closure of the selection, editable: its bindings are the graph's root bindings *)
-       let text = match state.binding_draft with
-         | Some (k, t) when k = shown.key -> t | _ -> shown.text in
+       let text = current_text state shown in
        let dirty = text <> shown.text in
        let spans = if dirty then [] else Option.to_list shown.mark in
-       editor "text-selection" ~at:(body_y, body_h) ~text ~errors:(real_errors state.binding_errors)
+       let errors = errors_of state state.binding_errors text in
+       editor "text-selection" ~at:(body_y, body_h) ~text ~errors
          ~spans ?reveal:(Option.map fst shown.mark)
          ~caret_select:(caret_select text)
          ~apply:(fun t -> Binding_apply (shown.key, t)) ~discard:Binding_discard ~can_apply:dirty
-         ~message:(message state.binding_errors ~dirty
+         ~message:(message errors ~dirty
            ~clean:"The selection with what it reads; Check and apply writes the bindings shown.")
          ~draft:(fun t -> Binding_draft (shown.key, t))
          ~scrub:(fun t done_ -> Binding_scrub (shown.key, t, done_)) ());

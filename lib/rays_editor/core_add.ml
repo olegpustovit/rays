@@ -2,6 +2,11 @@ open Sop
 open Editor_document
 include Core_scope
 
+(* the binding a selected path ends in, none for a keyword input, a result or a nested call *)
+let binding_name path =
+  let last = List.hd (List.rev path) in
+  if last = "" || last.[0] = ':' || last.[0] = '@' || String.contains last '#' then None else Some last
+
 (* Where a node is added from the list or the pane: the graph the level shows, else the scene
    or World graph that adding an object or a layer creates. *)
 let add_target value =
@@ -59,7 +64,7 @@ let value_entries =
       else Some (entry ?output:(if op="array/max_length" then Some Flow.Ty.Int else None) (categorize op) ("=" ^ op) op)) Flow.Workspace.value_ops
 
 (* the expression and the name a "Value" entry makes *)
-let value_expression ~ops context key =
+let value_expression ~ops ?wire context key =
   let module S = Flow.Syntax in
   let mk node = S.make node in
   let num n = mk (S.Num n) in
@@ -92,9 +97,13 @@ let value_expression ~ops context key =
       List.hd (Result.get_ok (S.parse text)), name
   | op ->
       let signature = Flow.Workspace.op_signature ~ops context op in
-      let argument (label, ty) = match Flow_graph.Flow_edit.default_for ty label with
-        | Some d -> d
-        | None -> (match ty with
+      (* the selected node feeds the first input of its type *)
+      let wired = ref false in
+      let argument (label, ty) = match wire, Flow_graph.Flow_edit.default_for ty label with
+        | Some (name, wty), _ when not !wired && Flow.Ty.fits wty ty -> wired := true; mk (S.Sym name)
+        | _, Some d -> d
+        | _, None ->
+            (match ty with
             | Flow.Ty.List _ -> mk (S.List [ mk (S.Sym "range"); num "4" ])
             | _ -> num "0.5") in
       let args = match signature with
@@ -153,9 +162,8 @@ let scope_add value key =
                edit itself does that *)
             [ graph ], None
         | [ path ] when List.length path >= 2 ->
-            let last = List.nth path (List.length path - 1) in
             List.filteri (fun i _ -> i < List.length path - 1) path,
-            (if arity > 0 && last.[0] <> ':' && last.[0] <> '@' then Some last else None)
+            (if arity > 0 then binding_name path else None)
         | _ ->
             (* nothing selected: a kind with an input reads the graph's result, so the text
                still checks (a required input is never left open) *)
@@ -164,7 +172,14 @@ let scope_add value key =
               | _ -> None in
             [ graph ], (if arity > 0 then result else None) in
       let expr, base =
-        if is_value then value_expression ~ops:ws.checked.ops context key
+        if is_value then begin
+          let wire = match selected, value.scope_key with
+            | [ path ], Some { scope; _ } when List.length path >= 2 ->
+                Option.bind (binding_name path) (fun name ->
+                  Option.map (fun (n : Flow_graph.Projection.node) -> name, n.ty) (Flow_graph.Projection.find scope path))
+            | _ -> None in
+          value_expression ~ops:ws.checked.ops ?wire context key
+        end
         else begin
           let head = Flow.Syntax.make (Flow.Syntax.Sym (Flow.Workspace.context_name context ^ "/"
             ^ (if material_of then "material" else key))) in

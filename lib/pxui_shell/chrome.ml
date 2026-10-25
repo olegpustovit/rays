@@ -10,8 +10,10 @@ open Rays
     | Dragging of path * bool
     | Dock_panel of path * path * [ `Left | `Right | `Top | `Bottom ]
     | Split_panel of path * axis
+    | Split_panel_at of path * axis * float * panel
     | Close_panel of path
     | Retype_panel of path * panel
+    | Crumb of path * int
 
   let floating ui ?(flags = Pxui.Ui.none) (x, y, width, height) label =
     Pxui.Ui.box ui ~flags ~w:(Pxui.Ui.Px (float_of_int width))
@@ -32,6 +34,24 @@ open Rays
       else if String.sub sub i 3 = " / " then go (i + 3) (i + 3) (String.sub sub from (i - from) :: acc)
       else go from (i + 1) acc in
     List.map String.trim (go 0 0 [])
+  (* a path too long for its room loses its head, not its subject: "… / sop".  Each part keeps its
+     index in the title; the dropped head is (-1, "…") *)
+  let fit_crumbs width ~room parts =
+    let dots = (-1, "\xe2\x80\xa6") in
+    let rec fitted parts =
+      let row = List.fold_left (fun w (_, part) -> w +. width part +. 8.)
+          (float (List.length parts - 1) *. (width "/" +. 8.) -. 8.) parts in
+      let over = row > room in
+      match parts with
+      | [ head; last ] when over && head = dots -> [ last ]
+      | head :: _ :: (_ :: _ as rest) when over && head = dots -> fitted (dots :: rest)
+      | _ :: (_ :: _ as rest) when over -> fitted (dots :: rest)
+      | parts -> parts in
+    fitted (List.mapi (fun i part -> i, part) parts)
+  (* "Title<TAB>a / b": the kind and its breadcrumb *)
+  let split_title text = match String.index_opt text '\t' with
+    | Some i -> String.sub text 0 i, String.sub text (i + 1) (String.length text - i - 1)
+    | None -> text, ""
   let has_crumbs sub = List.length (split_crumbs sub) > 1
   let retypes = [ "Graph", Graph; "List", List; "Lisp", Lisp; "Inspector", Inspector; "Spreadsheet", Spreadsheet;
                   "Outline", Outline; "Timeline", Timeline; "Viewport", View ""; "Canvas", Canvas "" ]
@@ -215,6 +235,25 @@ open Rays
       let at = if Ui.context_clicked drag then Some drag.release_point
         else if drag.clicked && still then Some (float x, float (y + h)) else None in
       List.iter emit (panel_menu ~state ~key_of ui l box ~at);
+      (* the parts of a docked breadcrumb before its last are buttons: a click is [Crumb] of its index *)
+      let main, sub = split_title (title l) in
+      if sub <> "" && not l.floating && not (state l.path).collapsed && float w >= 60. then begin
+        let width part = Ui.text_width ui part in
+        let focused = focus = Some l.path in
+        let limit = snd (header_slots l (groups l)) in
+        let tx = float x +. 12. +. (if focused then 12. else 0.) +. Kit.cap_width ui main +. 8. in
+        let tx = ref tx in
+        let parts = fit_crumbs width ~room:(limit -. !tx) (split_crumbs sub) in
+        List.iteri (fun n (index, part) ->
+          let pw = width part in
+          if index >= 0 && n < List.length parts - 1 && !tx +. pw <= limit then begin
+            let b = floating ui ~flags:Ui.clickable (int_of_float !tx, y, int_of_float (Float.ceil pw), h)
+                ("workspace-crumb-" ^ label ^ "-" ^ string_of_int index) in
+            if l.floating then Ui.to_front ui ~order b;
+            if (Ui.signal ui b).clicked then emit (Crumb (l.path, index))
+          end;
+          tx := !tx +. pw +. 8. +. (width "/" +. 8.)) parts
+      end;
       l, title l, box, button, grip) headed in
     (* the tip of a panel being moved: a 20-point sheet with a line-2 edge, the label size in ink *)
     Option.iter (fun (wx, wy, ww) ->
@@ -252,9 +291,7 @@ open Rays
         Ui.Paint.fill paint ~x ~y ~w ~h (if l.floating then theme.input else theme.panel);
         let ink_2 = Pxui.Theme.ink_2 theme and ink_3 = Pxui.Theme.ink_3 theme in
         (* "Title<TAB>a / b": the kind as a label, then the breadcrumb, its last part in ink *)
-        let main, sub = match String.index_opt text '\t' with
-          | Some i -> String.sub text 0 i, String.sub text (i + 1) (String.length text - i - 1)
-          | None -> text, "" in
+        let main, sub = split_title text in
         if w >= 60. then begin
           let tx = ref (x +. 12.) in
           (* the accent square marks the focused pane, docked or floating *)
@@ -278,19 +315,9 @@ open Rays
             tx := !tx +. Ui.Paint.text_width paint part +. 8. in
           let rec crumbs = function
             | [] -> ()
-            | [ last ] -> put (if has_crumbs sub then theme.foreground else ink_2) last
-            | part :: rest -> put ink_2 part; put ink_3 "/"; crumbs rest in
-          (* a path too long for its room loses its head, not its subject: "… / sop" *)
-          let rec fitted parts =
-            let row = List.fold_left (fun w part -> w +. Ui.Paint.text_width paint part +. 8.)
-                (float (List.length parts - 1) *. (Ui.Paint.text_width paint "/" +. 8.) -. 8.) parts in
-            let over = row > limit -. !tx and dots = "\xe2\x80\xa6" in
-            match parts with
-            | [ head; last ] when over && head = dots -> [ last ]
-            | head :: _ :: (_ :: _ as rest) when over && head = dots -> fitted (dots :: rest)
-            | _ :: (_ :: _ as rest) when over -> fitted (dots :: rest)
-            | parts -> parts in
-          let crumbs parts = crumbs (fitted parts) in
+            | [ (_, last) ] -> put (if has_crumbs sub then theme.foreground else ink_2) last
+            | (_, part) :: rest -> put ink_2 part; put ink_3 "/"; crumbs rest in
+          let crumbs parts = crumbs (fit_crumbs (fun part -> Ui.Paint.text_width paint part) ~room:(limit -. !tx) parts) in
           (* a window's title row: the path is one string in ink-2 at the label size *)
           if sub <> "" && l.floating && not collapsed then begin
             (* the subject follows the kind, 8 points on (windows.html's title row) *)
@@ -316,9 +343,7 @@ open Rays
   (* where a header's tools begin: after its title, the 8-point gap, the 1 x 12 rule between
      two 4-point margins and the next 8-point gap (the title is laid out as [update] draws it) *)
   let tools_start ui ~focused ~floating ~collapsed text =
-    let main, sub = match String.index_opt text '\t' with
-      | Some i -> String.sub text 0 i, String.sub text (i + 1) (String.length text - i - 1)
-      | None -> text, "" in
+    let main, sub = split_title text in
     let x = 12. +. (if focused then 12. else 0.) +. Kit.cap_width ui main in
     let x = if sub = "" then x
       else if floating then x +. 8. +. Pxui.Ui.text_width ui ~size:(Kit.cap_size ui) sub

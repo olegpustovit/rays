@@ -196,13 +196,14 @@ module Router = struct
     let global = List.filter (fun command -> command.scope = None) keymap in
     let owned = function
       | Input.KeyChar c -> List.mem (Char.lowercase_ascii c) [ 'a'; 'c'; 'v'; 'x'; 'z'; 'y' ]
+      | Input.F12 -> false
       | _ -> true in
     let modifiers = ref (Event.Private.keys_before ~previous:previous_keys ~held:frame.keys frame.events) in
     let actions, passed = List.fold_left (fun (actions, passed) event ->
       modifiers := Event.Private.keys_after !modifiers event;
       match event with
       | Event.KeyPressed key when not (owned key)
-          && (List.mem Input.Meta !modifiers || List.mem Input.Ctrl !modifiers) ->
+          && (List.mem Input.Meta !modifiers || List.mem Input.Ctrl !modifiers || key = Input.F12) ->
           (match chord global focus !modifiers key with
            | Some command -> command :: actions, passed
            | None -> actions, event :: passed)

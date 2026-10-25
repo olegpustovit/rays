@@ -403,5 +403,20 @@ let part12 () = (* the 12 fixtures: notes survive, edits round trip *)
        | Ok back -> check (canon back = canon bloom) "bloom rename round trip"
        | Error d -> fail (Flow.Diagnostic.to_string d))
 
+let part13 () = (* G3: move a binding, wrap in map / filter, inline a function *)
+  let order = v "(let* [a 1 b 2 c (+ a b)] c)" in
+  same "move down" order (E.Move_binding { node = node [ "a" ]; by = 1 }) (v "(let* [b 2 a 1 c (+ a b)] c)");
+  same "move up" order (E.Move_binding { node = node [ "b" ]; by = -1 }) (v "(let* [b 2 a 1 c (+ a b)] c)");
+  refused "move past a reader" order (E.Move_binding { node = node [ "c" ]; by = -1 });
+  refused "move off the end" order (E.Move_binding { node = node [ "a" ]; by = -1 });
+  same "wrap in map" (v "(let* [a (+ n 1) r (* 0.5 (count a))] r)") (E.Wrap { nodes = [ node [ "a" ] ]; loop = Map })
+    (v "(let* [a (map (fn [i] (+ n 1)) (range 6)) r (* 0.5 (count a))] r)");
+  same "wrap in filter" (v "(let* [a (< n 1) r (* 0.5 (count a))] r)") (E.Wrap { nodes = [ node [ "a" ] ]; loop = Filter })
+    (v "(let* [a (filter (fn [i] (< n 1)) (range 6)) r (* 0.5 (count a))] r)");
+  let twice = "(workspace w\n  (defn twice :context value [(x : int) (y : int)] (- x (* y 2)))\n  (graph g :context value [(n : int 4)] (let* [y 3 a (twice y n)] a)))" in
+  same "inline defn" twice (E.Inline_defn { node = node [ "a" ] })
+    "(workspace w\n  (defn twice :context value [(x : int) (y : int)] (- x (* y 2)))\n  (graph g :context value [(n : int 4)] (let* [y 3 a (- y (* n 2))] a)))";
+  refused "inline a non-function" twice (E.Inline_defn { node = node [ "y" ] })
+
 let run () =
-  List.iter (fun f -> f ()) [ part1; part2; part3; nested_nodes; part4; part5; part6; part7; dialog; part8; part9; part10; part10b; part11; part12 ]
+  List.iter (fun f -> f ()) [ part1; part2; part3; nested_nodes; part4; part5; part6; part7; dialog; part8; part9; part10; part10b; part11; part12; part13 ]

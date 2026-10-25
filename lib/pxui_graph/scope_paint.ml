@@ -381,8 +381,15 @@ let paint_rail paint ui t ~z ~fs ~x ~y ~w ~expanded (rail : P.rail_row list) =
       paint_socket paint theme r.ty ~connected:true ~z (x +. w -. 12. *. z, ry +. 12. *. z)) rail
 
 (* the zone's label row (kit [.zone] label): [FOR] in accent, the binder in ink, "in ..." in ink-2 *)
-let zone_binder (n : P.node) (zn : P.zone) =
+let zone_binder t (n : P.node) (zn : P.zone) =
   match P.label_row zn with
+  | None when zn.kind = P.Fn && String.contains (List.hd (List.rev n.path)) '#' ->
+      (* a function written in a row names its owner: [map -> positions], not [fn] *)
+      let leaf = List.hd (List.rev n.path) in
+      let holder = List.rev (List.tl (List.rev n.path)) @ [ String.sub leaf 0 (String.index leaf '#') ] in
+      (match node_of t holder with
+       | Some h -> h.head ^ " -> " ^ P.title h, None
+       | None -> P.title n, None)
   | Some { name; expr = Some e; _ } -> name, Some (strip_parens (Flow.Lisp.flat e))
   | Some { name; _ } -> name, None
   | None -> P.title n, None
@@ -394,7 +401,7 @@ let paint_zone_label paint ui t ~z ~fs ~x ~y ~w ?execution (n : P.node) (zn : P.
   let gap = 8. *. z in
   let label = kind_label zn.kind ^ Option.fold ~none:"" ~some:(fun (e : Flow_graph.Probe.execution) -> " · " ^ e.tier) execution in
   let cw = cap_in paint ui ~size:ls ~color:theme.accent ~x ~y ~h:hh label in
-  let name, in_ = zone_binder n zn in
+  let name, in_ = zone_binder t n zn in
   let nx = x +. cw +. gap in
   let room = Float.max 0. (x +. w -. 9. *. z -. nx) in
   let name = fitted paint fs room name in
@@ -652,6 +659,13 @@ let paint_node paint ui t ~z ~fs ?footer ?lens_step ?(hovered = false) ?(carry =
   (* the displayed result at the end of its chain has no out-port: the view flag takes the place *)
   if out_wired || t.display <> Some n.path then
     paint_socket paint theme (Some n.ty) ~connected:out_wired ~z (x +. w -. 1. *. z, y +. port_y *. z);
+  (* a ghost value: where the footer is not drawn, the value at the pinned iteration beside the out-port *)
+  (match footer with
+   | Some f when shown <> P.Full && z_ = None && out_wired ->
+       let ink_3 = Pxui.Theme.ink_3 theme in
+       text_in paint ui ~size:ls ~color:ink_3 ~x:(x +. w +. 8. *. z) ~y:(y +. (port_y -. 8.) *. z) ~h:(16. *. z)
+         (fitted paint ls (72. *. z) f.value)
+   | _ -> ());
   (* a literal binding is the header alone: its value in the field at the right *)
   (match n.rows with
    | [ r ] when P.value_card n -> paint_value paint ui t ~z ~fs ~size:fs ~x ~y ~w ~live:(live_numbers ~z r) r
@@ -812,6 +826,12 @@ let paint_bends paint ~z color pts =
       go rest
   | _ -> ()
 
+let tag_name t (w : wire) = match w.from with
+  | Some p ->
+      let n = match node_of t p with Some n -> P.title n | None -> List.hd (List.rev p) in
+      if String.length n > 14 then String.sub n 0 13 ^ "~" else n
+  | None -> ""
+
 let paint_background paint t ~viewport ~wires (zones : (P.node * P.zone * P.placed * float * float) list) =
   let theme = t.theme in
   let vx, vy, vw, vh = viewport in
@@ -872,6 +892,8 @@ let paint_background paint t ~viewport ~wires (zones : (P.node * P.zone * P.plac
       let ink = Pxui.Theme.ink_3 theme in
       Ui.Paint.fill paint ~x:(x +. fw *. z -. 4.) ~y:(y +. fh *. z -. 11.) ~w:1. ~h:8. ink;
       Ui.Paint.fill paint ~x:(x +. fw *. z -. 11.) ~y:(y +. fh *. z -. 4.) ~w:8. ~h:1. ink) (frame_list t scope_path)) t.geo.origins;
+  let chain = chains_of t in
+  let tag_size = max 5 (int_of_float (Float.round (11. *. z))) in
   List.iter (fun i ->
     let w = t.geo.wires.(i) in
     let pts = List.map (fun (x, y) -> sx t x, sy t y) w.pts in
@@ -879,15 +901,29 @@ let paint_background paint t ~viewport ~wires (zones : (P.node * P.zone * P.plac
       | Some (sp, sk, _), Some (tp, tk, _) -> sp = tp && sk = tk
       | _ -> false in
     let is_highlighted = List.mem w t.highlighted in
-    let width = if is_highlighted then Float.max 2. (2.4 *. z) else Float.max 1. (1.5 *. z) in
+    let lit = Option.map (fun c -> wire_lit c w) chain in
+    let width = if is_highlighted || lit = Some true then Float.max 2. (2.4 *. z) else Float.max 1. (1.5 *. z) in
     (* a switch's active wire is solid and accented, the others dashed grey *)
     let layout = match w.target with
       | Some (p, E.Pos i, _) -> Option.map (fun a -> i = a) (List.assoc_opt p t.switches)
       | _ -> None in
     let color = if is_selected then theme.foreground else if layout = Some true then theme.accent
       else if layout = Some false then Pxui.Theme.muted theme else ty_color t w.ty in
-    if layout = Some false || w.dashed then paint_dashed_polyline paint ~width color pts
-    else paint_polyline ~clip:viewport paint ~width color pts;
-    if t.wires = `Straight then paint_bends paint ~z color pts) wires
+    let color = if lit = Some false then Color.with_alpha color 40 else color in
+    if tagged t w && not is_selected then begin
+      (* a long wire reads as a stub and the source's name at the use site *)
+      let (ax, ay) = sx t (fst w.a), sy t (snd w.a) and (bx, by) = sx t (fst w.b), sy t (snd w.b) in
+      let stub = 14. *. z in
+      Ui.Paint.line paint ~from_:(ax, ay) ~to_:(ax +. stub, ay) ~width color;
+      Ui.Paint.line paint ~from_:(bx -. stub, by) ~to_:(bx, by) ~width color;
+      let name = tag_name t w in
+      let tw = Ui.Paint.text_width paint ~size:tag_size name in
+      Ui.Paint.text paint ~at:(bx -. stub -. 4. -. tw, by -. float tag_size /. 2. -. 1.) ~size:tag_size
+        ~color:(if lit = Some false then Color.with_alpha (Pxui.Theme.ink_2 theme) 60 else Pxui.Theme.ink_2 theme) name
+    end else begin
+      if layout = Some false || w.dashed then paint_dashed_polyline paint ~width color pts
+      else paint_polyline ~clip:viewport paint ~width color pts;
+      if t.wires = `Straight then paint_bends paint ~z color pts
+    end) wires
 
 (* ---------------------------------------------------------------- update *)

@@ -22,6 +22,7 @@
 | `Carry`, `Core_carry` | What a payload does at a place (`Carry.put`), and the carry's turn of a frame |
 | `Cook`, `Schedule`, `Pick` | The cook worker boundary, when to cook, viewport provenance |
 | `Text_pane`, `Lisp_text` | The text pane and the Lisp as `Pxui.Ui.language` |
+| `Gate` | What the hosted sketch sees of a frame: the pointer only on its picture, the keyboard only with a viewer or canvas in focus and no prompt, menu, leader or text field open; a held key stays hidden until released. Pure, table-tested in `gate_test` |
 | `Navigator`, `Bars`, `Leader`, `Echo` | The Outline panel, header tools, the one keymap, a gesture in the words of the text |
 
 The chain order is `Core_model`, `Core_shell`, `Core_inspect`, `Core_panes`, `Core_scope`, `Core_add`,
@@ -104,7 +105,10 @@ fly mode end through `Viewport.release` on every path that stops navigating.
 
 **Text.** The printed text and its span map (`Flow.Lisp.print`) are the only readers of the text:
 never match strings. `Lisp_text` offers the checker's forms (`Flow.Workspace.special_forms`).
-Text entry is `Ui.text_area` with `Lisp_text.language`.
+Text entry is `Ui.text_area` with `Lisp_text.language`. A Graph tab keeps one draft per graph. A draft is parsed once it has rested
+(`Text_pane.live_delay`); diagnostics are tied to the text they were found in and shown on a later text
+only while the text up to their line is unchanged. Command-Z past a draft's own undo steps never reaches
+the document history.
 Number drags use PXUI's pre-edit token range and the printed span map to emit
 the card's `Set_arg`; an unapplied draft or stale source uses the existing
 whole-text merge. Active token scrubs patch cached text and spans without

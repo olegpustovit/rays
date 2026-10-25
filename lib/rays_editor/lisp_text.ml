@@ -19,7 +19,7 @@ let number = Flow.Syntax.number
 
 (* the tokens in order, the matched (open, close) pairs, and the brackets still open at the end
    (innermost first) *)
-let lex text =
+let lex_raw text =
   let n = String.length text in
   let tokens = ref [] and count = ref 0 and pairs = ref [] and stack = ref [] in
   let tok kind start stop = tokens := { kind; start; stop } :: !tokens; incr count in
@@ -66,7 +66,21 @@ let lex text =
   List.iter (fun (_, _, index) -> tokens.(index) <- { (tokens.(index)) with kind = Unmatched }) !stack;
   tokens, List.rev !pairs, List.map (fun (c, at, _) -> c, at) !stack
 
-let colorize (theme : Pxui.Theme.t) text =
+(* The lexing of the last four texts asked for, most recent first: a frame asks for the same text
+   several times (colours, pairs, chips, context, hover) and the next frame asks again, so a text is
+   lexed once per version.  A hit moves to the front so the long text outlives the caret prefixes
+   the completions lex.  ponytail: the result is shared, never mutated by readers. *)
+let lexed : (string * (token array * (int * int) list * (char * int) list)) list ref = ref []
+
+let lex text =
+  match List.find_opt (fun (t, _) -> String.equal t text) !lexed with
+  | Some ((_, tokens) as entry) ->
+      lexed := entry :: List.filter (fun e -> e != entry) !lexed; tokens
+  | None ->
+      let tokens = lex_raw text in
+      lexed := (text, tokens) :: List.filteri (fun i _ -> i < 3) !lexed; tokens
+
+let colorize_now (theme : Pxui.Theme.t) text =
   (* kit rev 3: forms in the float blue, a kind's namespace in the vector purple, keywords in the
      bool red, numbers green, strings in the record green; brackets and comments recede to ink-3 *)
   let ports = Pxui.Theme.ports theme and quiet = Pxui.Theme.ink_3 theme in
@@ -90,6 +104,14 @@ let colorize (theme : Pxui.Theme.t) text =
     | Open _ | Close _ -> span quiet
     | Unmatched -> span Pxui.Theme.invalid) tokens) |> List.concat
 
+(* the colours of the last text, for the theme it was made with *)
+let coloured : (Pxui.Theme.t * string * (int * int * Rays.Color.t) list) option ref = ref None
+
+let colorize theme text =
+  match !coloured with
+  | Some (t, s, spans) when t == theme && String.equal s text -> spans
+  | _ -> let spans = colorize_now theme text in coloured := Some (theme, text, spans); spans
+
 let brackets text = let _, pairs, _ = lex text in pairs
 
 (* forms whose body is indented two in from the paren rather than under the first argument *)
@@ -100,7 +122,12 @@ let body_forms = List.filter (fun form -> List.mem form Flow.Workspace.special_f
 let indent text caret =
   let text = String.sub text 0 (max 0 (min caret (String.length text))) in
   let tokens, _, open_stack = lex text in
-  let column at = at - (match String.rindex_from_opt text (at - 1) '\n' with Some i -> i + 1 | None -> 0) in
+  (* characters, not bytes: a multi-byte letter earlier on the line is one column *)
+  let column at =
+    let start = match String.rindex_from_opt text (at - 1) '\n' with Some i -> i + 1 | None -> 0 in
+    let n = ref 0 in
+    for i = start to at - 1 do if Char.code text.[i] land 0xC0 <> 0x80 then incr n done;
+    !n in
   let width = match open_stack with
     | [] -> 0
     | (c, at) :: _ when c <> '(' -> column at + 1
@@ -736,6 +763,16 @@ let ref_at text byte =
 (* the plain name under [byte] (not a head, keyword or literal) *)
 
 (* the "#rrggbb" literals of the text with their colour *)
+(* what a character typed at [caret] lands in: inside a string (the quotes' insides, an open one to
+   the end) or after the semicolon of a comment, else code *)
+let context_at text caret =
+  let tokens, _, _ = lex text in
+  match Array.find_opt (fun t -> t.start < caret && caret <= t.stop
+      && (t.kind = Comment || (t.kind = Str && (caret < t.stop || t.stop - t.start < 2 || text.[t.stop - 1] <> '"')))) tokens with
+  | Some { kind = Comment; _ } -> `Comment
+  | Some _ -> `String
+  | None -> `Code
+
 let color_chips text =
   let tokens, _, _ = lex text in
   Array.fold_right (fun t acc ->
@@ -748,5 +785,5 @@ let language ?(vocab = empty_vocab) ?(names = no_names) ?(imports = []) ?(parinf
   let infer = parinfer in
   { colorize = colorize theme; brackets; indent;
     pairs = [ '(', ')'; '[', ']'; '{', '}'; '"', '"' ];
-    complete = complete ~names ~imports vocab; describe = describe vocab; number_at;
+    complete = complete ~names ~imports vocab; describe = describe vocab; number_at; context_at; comment = ";";
     rewrite = (if infer then Some parinfer_text else None) }

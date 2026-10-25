@@ -74,6 +74,8 @@ type wire = {
   target : (path * E.arg_key * S.t option) option;
   pts : (float * float) list;  (* the drawn polyline, [a] .. [b]: straight, or bent clear of the cards *)
   dashed : bool;  (* a loop's feedback *)
+  from : path option;  (* the node (or zone) it reads from, and the one it ends at: the dataflow chains *)
+  into : path option;
 }
 
 type obstacle = { path : path; rx : float; ry : float; rw : float; rh : float }
@@ -207,7 +209,7 @@ let length pts =
    then one diagonal into the port, the bend 72 points before the target; or, when that is not
    clear, the diagonal first and the horizontal into the port.  A backward wire goes round above or
    below. *)
-let route grid ~excl ((ax, ay) as a) ((bx, by) as b) =
+let route ?(inside = false) grid ~excl ((ax, ay) as a) ((bx, by) as b) =
   let free ?margin pts =
     let rec go = function
       | p :: (q :: _ as rest) -> (not (is_blocked ?margin grid ~excl p q)) && go rest
@@ -239,10 +241,13 @@ let route grid ~excl ((ax, ay) as a) ((bx, by) as b) =
     let hit = blockers grid ~excl (Float.min ax bx, Float.min ay by) (Float.max ax bx, Float.max ay by) in
     let top = List.fold_left (fun m o -> Float.min m o.ry) (Float.min ay by) hit -. 24.
     and bottom = List.fold_left (fun m o -> Float.max m (o.ry +. o.rh)) (Float.max ay by) hit +. 24. in
-    let candidates =
-      [ [ a; (ax +. 24., ay); (ax +. 24., top); (bx -. 24., top); (bx -. 24., by); b ];
-        [ a; (ax +. 24., ay); (ax +. 24., bottom); (bx -. 24., bottom); (bx -. 24., by); b ] ] in
-    match List.filter free candidates with
+    (* a zone's own variable reads backward into its body: its stub stays inside the frame (the
+       edge is 12 points on) and it runs one row below its rail row, not through the label row above *)
+    let stub = if inside then 6. else 24. in
+    let via y = [ a; (ax +. stub, ay); (ax +. stub, y); (bx -. 24., y); (bx -. 24., by); b ] in
+    let candidates = if inside then [ via (ay +. 24.); via bottom ] else [ via top; via bottom ] in
+    let clear = List.filter free candidates in
+    match (if inside then List.take 1 clear else clear) with
     | [] -> List.hd (List.rev candidates)
     | clear -> List.fold_left (fun best c -> if length c < length best then c else best) (List.hd clear) clear
   end
@@ -319,10 +324,12 @@ let compute ?(style = `Straight) ?(previous = empty_geo) ~name_w ~shown (scope :
         let pts = match style with
           | `Straight ->
               let key = (s.pos, b, excl) in
-              let pts = match Routes.find_opt reuse key with Some pts -> pts | None -> route grid ~excl s.pos b in
+              let inside = match s.owner with
+                | Some o -> List.exists (fun i -> List.length i > List.length o && List.filteri (fun k _ -> k < List.length o) i = o) into | None -> false in
+              let pts = match Routes.find_opt reuse key with Some pts -> pts | None -> route ~inside grid ~excl s.pos b in
               Routes.replace routes key pts; pts
           | `Rect -> rect_points s.pos b in
-        wires := { a = s.pos; b; ty = s.ty; target; pts; dashed } :: !wires
+        wires := { a = s.pos; b; ty = s.ty; target; pts; dashed; from = s.owner; into = (match into with i :: _ -> Some i | [] -> None) } :: !wires
     | None -> () in
   let resolve chain name =
     List.find_map (fun tbl -> match Hashtbl.find_opt tbl name with

@@ -140,6 +140,31 @@ A fatal exception in a running sketch writes a report folder under
 `/tmp/rays-crash` (exception, backtrace, recent input, and the editor's
 document as text, plus a loadable `.rays` for a workspace); read it first when asked to investigate a crash.
 
+## Test time is a budget
+
+Slow tests cost every agent every edit. Treat test time like a performance bug: measure it, record it,
+and fix it in the same change that made it worse.
+
+- Never run the whole `@runtest` to check an edit. Run the focused alias (`@lib/<x>/runtest`,
+  `@test/<name>`) through `tools/check.exe`, which kills a run at 180 s (`RAYS_CHECK_TIMEOUT`, `0` = none).
+  A run that hits the timeout is a defect to fix, not a limit to raise.
+- Time every focused run you do and note the wall time in your report. After a change, read the
+  per-action times with `dune trace cat | jq` (or the `test_workspace_shell` section lines) and find the
+  slowest ones before you finish.
+- Budgets: a focused alias finishes in under 30 s warm; one test section under 10 s. The
+  `test_workspace_shell` runner skips sections after `RAYS_SUITE_BUDGET` (45 s default) and prints the
+  skipped count; run it with `RAYS_SUITE_BUDGET=900` only for the final check, in the background.
+- A test over budget gets reworked in this order: shrink the fixture (fewer frames, a smaller graph, no
+  footer probes); share one setup between its checks; replace a UI-driven path with a direct call to the
+  function under test; split the slow exhaustive part into `qualification-scale` or `RAYS_SLOW=1`
+  (`enabled_if (= %{env:RAYS_SLOW=0} 1)`). Delete a test that no longer guards a behavior anyone relies on,
+  and one that repeats another's check. Never leave a slow test in the default loop "for later".
+- Record it. When you find or fix a slow test, add one row to `specification/test-times.md` (date, test,
+  before, after, what changed); when you add a test that takes over 5 s, add the row with the reason. Check
+  the file before you add a slow one: a similar test may already exist to extend.
+- Tests that open a window stay in `@runtest-native` (see Loops); an unbounded wait, a sleep or a real clock
+  in a test is a bug.
+
 Default `runtest` is green on a clean checkout. Display-dependent tests live in
 `@runtest-native`; long, SDK-, driver-, or machine-specific checks in
 `@qualification`. Large algorithm fixtures (studio fracture and high-density

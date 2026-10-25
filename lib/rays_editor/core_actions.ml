@@ -32,9 +32,10 @@ let apply_action value (workspace, selection, tree, timeline, changes) action =
   | Reload_source | Open_source
   | List_command _ | Frame_camera | Undo | Redo | Command_palette
   | Guide_toggle | Guide_keys | Copy_lisp
-  | Scope_command _ | Toggle_map | Ui_scale _ | Enter | Up | Go_world
-  | Panel_split _ | Panel_close | Panel_retype _ | Tool _
+  | Scope_command _ | Toggle_map | Ui_scale _ | Enter | Up | Back _ | Go_world
+  | Panel_split _ | Panel_close | Panel_retype _ | Panel_pick | Window_pick | Panel_split_at _ | Tool _
   | Layout_switch _ | Layout_new | Layout_remove | Window_new _ | Float_toggle | Peek | Pick_up | Jump
+  | Text_command _ | Goto_symbol | Goto_line
   | World_emit | World_reseed | World_time _ | World_play | World_preset _ ->
       workspace, selection, tree, timeline, changes
 

@@ -55,8 +55,8 @@ type command =
   | Delete
       (** the hovered wired row's wire or the hovered item of a variadic input (a list's, a merge's: the
           item goes), else the selected wire, else the selected nodes *)
-  | Fold_into | Unfold | Hoist | Bypass | Wrap_repeat | Wrap_iterate | Wrap_if | Add_arm | Delete_arm | Make_fn | Make_macro | Make_defn
-  | Collapse | Probe_step of int | Frame_all | Walk of direction
+  | Fold_into | Unfold | Unfold_all | Hoist | Bypass | Wrap_repeat | Wrap_iterate | Wrap_if | Wrap_map | Wrap_filter | Inline_fn | Add_arm | Delete_arm | Make_fn | Make_macro | Make_defn
+  | Collapse | Probe_step of int | Frame_all | Tidy | Toggle_tags | Walk of direction
   | Edit_name
       (** F2, or a double-click on a title: a text field over the selected node's name
           ([Rename]) or, on a graph input, over its default ([Set_input_default]) *)
@@ -191,6 +191,10 @@ module Private : sig
   val lens_replace : t -> path -> (float * float) option
   (* the in end, the out end, the row sockets and named outputs of a plain node at its shown level *)
   val ports : t -> path -> (float * float) list
+  val chain : t -> (path list * path list) option
+  (* the nodes upstream and downstream of the selection (it included); [None] with nothing selected *)
+  val tagged_wires : t -> int
+  (* the wires drawn as a name tag at the use site: longer than three columns and not in a lit chain *)
   val wire_count : t -> int
   val wire_points : t -> int -> (float * float) list
   val wire_target : t -> int -> (path * Flow_graph.Flow_edit.arg_key) option

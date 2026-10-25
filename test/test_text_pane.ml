@@ -198,6 +198,42 @@ let selection_text () =
   let d = Flow.Diagnostic.error ~span:{ start = 4; finish = 5 } ~code:"E_X" "x" in
   check (T.line_of "a\nb\nc\nd" d = Some 3) "line from span"
 
+(* the pure parts of find and go to: matches, stepping, replacing, symbols, lines *)
+let find_pure () =
+  let find = { T.query = "ab"; replace = "X"; case = false; replacing = true; at = 0; grab = false } in
+  let text = "ab AB xab\nab" in
+  let matches = T.find_all ~case:false "ab" text in
+  check (matches = [ 0, 2; 3, 5; 7, 9; 10, 12 ]) "matches fold ASCII case";
+  check (T.find_all ~case:true "ab" text = [ 0, 2; 7, 9; 10, 12 ]) "matches can count case";
+  check (T.find_all ~case:false "" text = [] && T.find_all ~case:false "aa" "aaaa" = [ 0, 2; 2, 4 ])
+    "an empty query finds nothing and matches do not overlap";
+  check (T.find_current find matches = Some (0, 2)) "the current match is the first from the byte";
+  check (T.find_current { find with at = 5 } matches = Some (7, 9)) "the current match skips those before";
+  check (T.find_current { find with at = 11 } matches = Some (0, 2)) "the current match wraps";
+  let next = T.find_step find matches `Next in
+  check (T.find_current next matches = Some (3, 5)) "Next goes to the following match";
+  check (T.find_current (T.find_step { find with at = 10 } matches `Next) matches = Some (0, 2)) "Next wraps";
+  check (T.find_current (T.find_step next matches `Previous) matches = Some (0, 2)) "Previous goes back";
+  check (T.find_current (T.find_step find matches `Previous) matches = Some (10, 12)) "Previous wraps";
+  (match T.find_replace { find with at = 3 } matches ~all:false with
+   | Some (r, bar) ->
+       check (r.splice = [ 3, 5, "X" ] && r.select = (4, 4) && bar.at = 4) "replace one takes the current match"
+   | None -> fail "replace one found nothing");
+  (match T.find_replace find matches ~all:true with
+   | Some (r, _) -> check (List.length r.splice = 4) "replace all takes every match"
+   | None -> fail "replace all found nothing");
+  check (T.find_replace { find with query = "zz" } [] ~all:true = None) "nothing to replace";
+  let symbols = T.symbols "(workspace w (graph g :context value (let* [a 1 (b : int) 2 c (+ a 1)] c)) (defn f [x] x))" in
+  check (List.map (fun (n, k, _) -> n, k) symbols = [ "g", "graph"; "a", "let*"; "c", "let*"; "f", "defn" ])
+    "symbols are graphs, let* names and functions";
+  check (T.symbols "(graph g" = []) "text that does not read has no symbols";
+  let lines = "one\n\xc3\xa9 two\nthree" in
+  check (T.line_target lines "2" = Some 4 && T.line_target lines "3:2" = Some 12) "a line and a column";
+  check (T.line_target lines "2:3" = Some 7) "a column counts characters";
+  check (T.line_target lines "99" = Some 11 && T.line_target lines "1:99" = Some 3) "past the end is clamped";
+  check (T.line_target lines "x" = None && T.line_target lines "0" = None && T.line_target lines "2:y" = None)
+    "anything else is refused"
+
 let frame ?(mouse = (450., 320.)) ?(keys = []) count events : Rays.Frame.t = {
   width = 900; height = 640; size = 900, 640;
 
@@ -213,6 +249,28 @@ module E = Rays_editor.Editor
 (* a panel under 400 points wide labels the third tab "Doc": 5 glyphs shorter, so the row starts 35 later *)
 let tab_at ?(narrow = false) ~right ~top index =
   float (right - 178 + List.nth (if narrow then [ 66; 127; 168 ] else [ 31; 92; 150 ]) index), float (top - 12)
+
+(* an editor over the workspace [text], and the line the crash dump's editor.txt has for [name] *)
+let start_env text =
+  let open Rays in
+  let catalog = Editor_document.Contexts.catalog ~version:Flow_sop.Manifest.version
+      Sop_catalog.Editor.factories |> Result.get_ok in
+  let workspace = Rays_editor.Workspace_doc.of_text catalog text |> Result.get_ok in
+  let presets = Filename.temp_dir "rays-text-presets" "" in
+  ref (E.create ~presets ~await:true ~workspace
+      ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
+        |> Result.map_error Rdk.Error.to_string)
+      ~scene3:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) () |> Result.get_ok)
+
+let dump_line env name =
+  let directory = Filename.temp_dir "rays-text-pane" "" in
+  Fun.protect ~finally:(fun () ->
+    Array.iter (fun f -> Sys.remove (Filename.concat directory f)) (Sys.readdir directory);
+    Unix.rmdir directory) (fun () ->
+    E.crash_dump !env directory;
+    let dump = In_channel.with_open_bin (Filename.concat directory "editor.txt") In_channel.input_all in
+    match List.find_opt (fun l -> String.starts_with ~prefix:(name ^ ": ") l) (String.split_on_char '\n' dump) with
+    | Some l -> l | None -> fail ("no " ^ name ^ " in the dump"))
 
 let editor_text () =
   let open Rays in
@@ -280,11 +338,29 @@ let editor_text () =
   check (contains text "draft yes") ("an invalid draft left the pane\n" ^ text);
   check (contains text (Printf.sprintf "error at line %d:" line)) (Printf.sprintf "error not at line %d\n%s" line text);
   check (ws () == original && E.undo_label !env = base) "an invalid apply changed the document";
-  (* typing clears the marks: they cannot drift away from the line they named *)
+  (* typing above the mark drops it (it cannot drift away from the line it named); typing below
+     it keeps it, on its line *)
   click area; step [ Event.TextInput "\n" ];
   check (not (contains (dump ()) ", error")) ("an edit left its stale error mark\n" ^ dump ());
   click apply;
   check (contains (dump ()) "error at line") "the next apply marks its line again";
+  let marked () = List.find (String.starts_with ~prefix:"text: ") (String.split_on_char '\n' (dump ())) in
+  let before = marked () in
+  click area; step ~keys:[ Input.Meta ] [ key Input.ArrowDown ]; step [ Event.TextInput "\n" ];
+  check (contains (marked ()) "error at line" && marked () = before)
+    ("typing below the error cleared it or moved it\n" ^ dump ());
+  (* a draft that rests is parsed: an unterminated string is reported without an apply, and
+     typing again drops the parse of the old text *)
+  click discard;
+  type_text (applied ^ " \"open");
+  check (not (contains (dump ()) ", error")) "a draft was parsed before it rested";
+  for _ = 1 to 30 do step [] done;
+  check (contains (dump ()) ", error") ("a rested draft was not parsed\n" ^ dump ());
+  step [ Event.TextInput "\"" ];
+  check (not (contains (dump ()) ", error")) ("the parse of an older text outlived an edit\n" ^ dump ());
+  for _ = 1 to 30 do step [] done;
+  check (not (contains (dump ()) ", error")) ("a balanced draft was reported\n" ^ dump ());
+  click discard;
   (* a valid edit applies atomically, as one history entry *)
   type_text (replace applied ~from:"(seeds : int 240)" ~by:"(seeds : int 100)");
   click apply;
@@ -311,6 +387,19 @@ let editor_text () =
   check (contains (dump ()) "graph tab, draft no") ("Command-Enter did not apply\n" ^ dump ());
   check (contains (Flow.Lisp.print (ws ()).source |> fst) "(seeds : int 77)"
          && E.undo_label !env = Some "Edit text") "the Graph tab's apply is not one Edit text entry";
+  (* Command-Z past a draft's own undo steps does not undo the document under it *)
+  let labelled = E.undo_label !env in
+  click area;
+  step ~keys:[ Input.Meta ] [ char 'a' ];
+  step [ Event.TextInput (replace graph_text ~from:"(seeds : int 240)" ~by:"(seeds : int 66)") ];
+  check (contains (dump ()) "graph tab, draft yes") "the draft was not made";
+  step ~keys:[ Input.Meta ] [ char 'z' ];
+  step ~keys:[ Input.Meta ] [ char 'z' ];
+  step ~keys:[ Input.Meta ] [ char 'z' ];
+  step [];
+  check (E.undo_label !env = labelled && contains (Flow.Lisp.print (ws ()).source |> fst) "(seeds : int 77)")
+    ("an extra Command-Z undid the document under a draft: " ^ dump ());
+  click discard;
   (* a graph that does not check stays in the pane, the document does not change *)
   let applied_graph = ws () in
   click area;
@@ -497,8 +586,25 @@ let lisp_text () =
   check (indent "(let* [a 1] (+ 1 2)) " = 0) "a closed form indents nothing";
   check (indent "(+ 1 ; comment (\n" = 3) "an open bracket in a comment does not count";
   check (indent "(str \"(\" " = 5) "an open bracket in a string does not count";
+  check (indent "(str \"\xc3\xa9\" (+ 1" = 12) "indentation counts characters, not bytes";
+  let in_ text marker =
+    let at = String.index text marker in L.context_at (String.sub text 0 at ^ String.sub text (at + 1) (String.length text - at - 1)) at in
+  check (in_ "(f |x)" '|' = `Code) "the code between brackets is code";
+  check (in_ "(f \"a|b\")" '|' = `String) "inside a string";
+  check (in_ "(f \"ab|\")" '|' = `String) "before the closing quote is still inside the string";
+  check (in_ "(f \"ab\"|)" '|' = `Code) "after the closing quote is code";
+  check (in_ "(f 1) ; a|b" '|' = `Comment) "inside a comment";
+  check (in_ "(f 1) ; ab|" '|' = `Comment) "the end of a comment's line is inside it";
+  check (in_ "(f 1) ;| ab\n(g)" '|' = `Comment) "right after the semicolon is inside the comment";
+  check (in_ "(f 1) ; ab\n|(g)" '|' = `Code) "the next line is code";
   check (L.brackets "(a [b] c)" = [ (0, 8); (3, 5) ] || L.brackets "(a [b] c)" = [ (3, 5); (0, 8) ]) "matched pairs";
   check (L.brackets "(a ]" = []) "a mismatched closer pairs with nothing";
+  (* the lexing is kept per text version: a changed text, and the same text again, read right *)
+  let lang = L.language Pxui.Theme.default in
+  check (lang.comment = ";") "the Lisp comments with a semicolon";
+  let a_ = lang.colorize "(a b)" in
+  check (lang.colorize "(a b c d)" <> a_ && lang.colorize "(a b)" = a_ && L.brackets "(a b c d)" = [ (0, 8) ]
+         && L.brackets "(a b)" = [ (0, 4) ]) "a cached lexing answered for another text";
   let colors = (L.language Pxui.Theme.default).colorize "(sop/box :size 1.5 \"s\" ; c" in
   check (List.length colors = 6) (Printf.sprintf "head, keyword, number, string, comment and the paren: %d runs" (List.length colors));
   (* completions over the catalog: ranked, for the token at the caret *)
@@ -729,7 +835,8 @@ let editor_active_scrub () =
   (* the digit sits [col] glyphs into its line: the 36-point gutter, the 6 points above the first row,
      the line's indentation; a press within half a glyph of its left edge is on it *)
   let char_w = 6.95 in
-  let number = float gx +. 36. +. float col *. char_w, float gy +. 6. +. 2. +. float line *. line_pitch in
+  (* a number is dragged by its underline, the low part of its row *)
+  let number = float gx +. 36. +. float col *. char_w, float gy +. 6. +. 8. +. float line *. line_pitch in
   let before = E.workspace !env and history = E.undo_label !env in
   let nx, ny = number in
   at number [ Event.MouseMoved number ];
@@ -776,7 +883,7 @@ let editor_literal_scrub () =
       let span = List.assoc value.id shown.spans in
       let position = Flow.Diagnostic.position_of_offset shown.text span.start in
       let number = float gx +. 36. +. float (position.col - 1) *. 6.95 +. 1.,
-        float top +. 8. +. float (position.line - 1) *. line_pitch in
+        float top +. 14. +. float (position.line - 1) *. line_pitch in
       let nx,ny = number in
       let before = E.workspace !env and label = E.undo_label !env in
       at number [Event.MouseMoved number];
@@ -927,33 +1034,18 @@ let editor_text_drop () =
    inspector's subject) is the path of the binding, not the node under the caret *)
 let editor_command_click () =
   let open Rays in
-  let catalog = Editor_document.Contexts.catalog ~version:Flow_sop.Manifest.version
-      Sop_catalog.Editor.factories |> Result.get_ok in
   let text = {|(workspace cc
   (graph g :context value (let* [a 1.0 b (+ 2.0 (* 3.0 a)) c (ref h)] (+ a b)))
   (graph h :context value (let* [target 7.0] target))
   (graph editor :context editor
     (ui/workspace (ui/split-at "vertical" 0.12 (ui/graph) (ui/lisp)))))|} in
-  let workspace = Rays_editor.Workspace_doc.of_text catalog text |> Result.get_ok in
-  let presets = Filename.temp_dir "rays-text-presets" "" in
-  let env = ref (E.create ~presets ~await:true ~workspace
-      ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
-        |> Result.map_error Rdk.Error.to_string)
-      ~scene3:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) () |> Result.get_ok) in
+  let env = start_env text in
   let count = ref 0 and mouse = ref (450., 320.) in
   let step ?(buttons = []) ?(keys = []) events =
     incr count;
     env := E.update !env { (frame ~mouse:!mouse ~keys !count events) with mouse_buttons = buttons } in
   let at ?buttons ?keys point events = mouse := point; step ?buttons ?keys events in
-  let dump_line key =
-    let directory = Filename.temp_dir "rays-text-pane" "" in
-    Fun.protect ~finally:(fun () ->
-      Array.iter (fun f -> Sys.remove (Filename.concat directory f)) (Sys.readdir directory);
-      Unix.rmdir directory) (fun () ->
-      E.crash_dump !env directory;
-      let text = In_channel.with_open_bin (Filename.concat directory "editor.txt") In_channel.input_all in
-      match List.find_opt (fun l -> String.starts_with ~prefix:(key ^ ": ") l) (String.split_on_char '\n' text) with
-      | Some l -> l | None -> fail ("no " ^ key ^ " in the dump")) in
+  let dump_line = dump_line env in
   for _ = 1 to 4 do step [] done;
   let gx, gy, gw, gh = (E.panes !env (frame 0 [])).graph in
   let gy = gy + gh + 1 + 28 in
@@ -994,10 +1086,130 @@ let editor_command_click () =
   check (contains (dump_line "text") "document tab") "an out-of-Graph definition did not switch to Document";
   E.close !env
 
+(* Find, go to symbol, go to line and go to definition through the editor: the bar's state is read
+   from the crash dump's text line, the caret from where the next Command-F starts *)
+let editor_text_find () =
+  let open Rays in
+  let text = {|(workspace ff
+  (graph g :context value (let* [a 1.0 b (+ 2.0 (* 3.0 a)) c (ref h)] (+ a b)))
+  (graph h :context value (let* [target 7.0] target))
+  (graph editor :context editor
+    (ui/workspace (ui/split-at "vertical" 0.12 (ui/graph) (ui/lisp)))))|} in
+  let env = start_env text in
+  let count = ref 0 and mouse = ref (450., 320.) in
+  let step ?(keys = []) events = incr count; env := E.update !env (frame ~mouse:!mouse ~keys !count events) in
+  let at point events = mouse := point; step events in
+  let key k = Event.KeyPressed k and char c = Event.KeyPressed (Input.KeyChar c) in
+  let command c = step ~keys:[ Input.Meta ] [ char c ]; step [] in
+  let dump_line = dump_line env in
+  (* the byte the bar looks from, as the dump says it *)
+  let bar_at () =
+    let line = dump_line "text" in
+    let rec after = function
+      | "at" :: n :: rest -> (match int_of_string_opt n with Some _ as v -> v | None -> after rest)
+      | _ :: rest -> after rest | [] -> None in
+    match after (String.split_on_char ' ' line) with
+    | Some byte -> byte
+    | None -> fail ("the bar is not open: " ^ line) in
+  for _ = 1 to 4 do step [] done;
+  let gx, gy, gw, gh = (E.panes !env (frame 0 [])).graph in
+  let gy = gy + gh + 1 + 28 in
+  let tab = tab_at ~narrow:(gw < 400) ~right:(gx + gw - 36) ~top:gy 2 in
+  at tab [ Event.MouseMoved tab ];
+  at tab [ Event.MousePressed (Input.LeftButton, tab); Event.MouseReleased (Input.LeftButton, tab) ]; step [];
+  let document () = Lazy.force (T.make_shown (E.workspace !env).source "g" None T.Document).applied in
+  let click point = at point [ Event.MouseMoved point ];
+    at point [ Event.MousePressed (Input.LeftButton, point); Event.MouseReleased (Input.LeftButton, point) ]; step [] in
+  click (float (gx + 200), float (gy + 8));
+  (* Command-F opens the bar on the query field; typing finds, Enter and Shift-Enter step *)
+  command 'f';
+  check (contains (dump_line "text") "find \"\"") ("Command-F did not open the bar: " ^ dump_line "text");
+  step [ Event.TextInput "(graph" ]; step [];
+  check (contains (dump_line "text") "find \"(graph\"") ("typing did not set the query: " ^ dump_line "text");
+  let matches = T.find_all ~case:false "(graph" (document ()) in
+  check (List.length matches = 3) "the workspace has three graphs";
+  let first_from at = match List.find_opt (fun (a, _) -> a >= at) matches with Some m -> m | None -> List.hd matches in
+  let start = bar_at () in
+  let m0 = first_from start in
+  step [ key Input.Enter ]; step [];
+  check (bar_at () = fst m0 + 1) ("Enter did not step past the current match: " ^ dump_line "text");
+  let m1 = first_from (fst m0 + 1) in
+  check (m1 <> m0) "the next match is another one";
+  step ~keys:[ Input.Shift ] [ key Input.Enter ]; step [];
+  check (bar_at () = fst m0) ("Shift-Enter did not go back: " ^ dump_line "text");
+  step [ key Input.Escape ]; step [];
+  check (not (contains (dump_line "text") "find")) ("Escape did not close the bar: " ^ dump_line "text");
+  (* Command-P lists the bindings; the pick puts the caret on the name (Command-F reads the caret) *)
+  let symbols = T.symbols (document ()) in
+  check (List.map (fun (name, kind, _) -> name, kind) symbols
+         = [ "g", "graph"; "a", "let*"; "b", "let*"; "c", "let*"; "h", "graph"; "target", "let*"; "editor", "graph" ])
+    "the symbols are the graphs and the let* names, in order";
+  command 'p';
+  check (contains (dump_line "prompt") "go to symbol") ("Command-P did not open the symbols: " ^ dump_line "prompt");
+  step [ Event.TextInput "target" ]; step [ key Input.Enter ]; step []; step [];
+  let target = let _, _, byte = List.find (fun (n, _, _) -> n = "target") symbols in byte in
+  command 'f';
+  check (bar_at () = target) ("the symbol pick did not place the caret: " ^ dump_line "text");
+  step [ key Input.Escape ]; step [];
+  (* Command-L: line and column; F12 on the (ref h) goes to its graph *)
+  let lines = String.split_on_char '\n' (document ()) in
+  let line = Option.get (List.find_index (fun l -> contains l "(ref h)") lines) in
+  let col = let l = List.nth lines line in
+    let rec find i = if String.sub l i 7 = "(ref h)" then i + 5 else find (i + 1) in find 0 in
+  command 'l';
+  check (contains (dump_line "prompt") "go to line") ("Command-L did not open the line prompt: " ^ dump_line "prompt");
+  step [ Event.TextInput (Printf.sprintf "%d:%d" (line + 1) (col + 1)) ]; step [ key Input.Enter ]; step []; step [];
+  check (T.line_target (document ()) (Printf.sprintf "%d:%d" (line + 1) (col + 1))
+         = Some (List.fold_left (fun n l -> n + String.length l + 1) 0 (List.filteri (fun i _ -> i < line) lines) + col))
+    "line_target counts the line and column";
+  step [ key Input.F12 ]; step []; step [];
+  check (dump_line "pane graph" = "pane graph: h") ("F12 did not follow the reference: " ^ dump_line "pane graph");
+  E.close !env
+
+(* Each graph's Graph tab keeps its own unapplied text: typing in a second graph does not replace
+   the first graph's draft, and discarding one leaves the other. *)
+let editor_graph_drafts () =
+  let open Rays in
+  let text = {|(workspace drafts
+  (graph a :context sop (sop/box))
+  (graph b :context sop (sop/merge (sop/box)))
+  (graph scene :context scene (scene/merge (scene/geometry (ref b))))
+  (graph editor :context editor
+    (ui/workspace (ui/split-at "vertical" 0.12 (ui/graph) (ui/lisp)))))|} in
+  let env = start_env text in
+  let count = ref 0 and mouse = ref (450., 320.) in
+  let step ?(keys = []) events = incr count; env := E.update !env (frame ~mouse:!mouse ~keys !count events) in
+  let at point events = mouse := point; step events in
+  let key k = Event.KeyPressed k and char c = Event.KeyPressed (Input.KeyChar c) in
+  let jump name =
+    step [ key Input.Escape ];
+    step [ key (Input.KeyChar '/'); char 'j' ]; step [ Event.TextInput name ]; step [ key Input.Enter ]; step [] in
+  let summary () = dump_line env "text" in
+  for _ = 1 to 4 do step [] done;
+  let gx, gy, gw, gh = (E.panes !env (frame 0 [])).graph in
+  let top = gy + gh + 1 + 28 in
+  let click point = at point [ Event.MouseMoved point ];
+    at point [ Event.MousePressed (Input.LeftButton, point); Event.MouseReleased (Input.LeftButton, point) ];
+    step [] in
+  let area = float gx +. 120., float top +. 40. in
+  let draft_in name =
+    jump name;
+    click (tab_at ~narrow:(gw < 400) ~right:(gx + gw - 36) ~top 1);
+    click area; step ~keys:[ Input.Meta ] [ char 'a' ]; step [ Event.TextInput ("(sop/box) ; " ^ name) ] in
+  draft_in "a";
+  check (contains (summary ()) "graph drafts: a") ("a draft was not kept: " ^ summary ());
+  draft_in "b";
+  check (contains (summary ()) "graph drafts: a b")
+    ("the second graph's draft replaced the first's: " ^ summary ());
+  jump "a";
+  check (contains (summary ()) "graph drafts: a b") ("leaving a graph dropped its draft: " ^ summary ());
+  E.close !env
+
 let run () =
   selection_text ();
   paste ();
   lisp_text ();
+  find_pure ();
   editor_text ();
   editor_binding ();
   editor_w9 ();
@@ -1006,4 +1218,6 @@ let run () =
   token_scrubs ();
   editor_literal_scrub ();
   editor_text_drop ();
+  editor_graph_drafts ();
+  editor_text_find ();
   print_endline "text pane tests passed"

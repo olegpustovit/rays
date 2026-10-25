@@ -35,6 +35,10 @@ bool rays_scroll_take(rays_scroll *out);
    window's background colour. */
 void rays_window_plain_titlebar(SDL_Window *window);
 
+/* Make the process the active app: one started from a terminal is not, so
+   its raised window would stay behind the shell. */
+void rays_app_activate(void);
+
 /* The window background, which a plain title bar shows (sRGB, 0..1). */
 void rays_window_set_background(SDL_Window *window,
     double red, double green, double blue);

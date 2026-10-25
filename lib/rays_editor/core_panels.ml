@@ -285,7 +285,7 @@ let layout_intents value (workspace : shell) intents =
         if released then { w with window_live = None },
           changes @ save_state path { (panel_state value path) with window = Some window }
         else { w with window_live = Some (path, window) }, changes
-    | Dragging _ -> w, changes
+    | Dragging _ | Crumb _ -> w, changes
     | Dock_panel (source, target, side) -> w, changes @ [Dock_panels (source, target, side)]
     | Resize { node; size } -> { w with live = Some (node, size) }, changes
     | Settled ->
@@ -295,7 +295,10 @@ let layout_intents value (workspace : shell) intents =
              let w = { w with live = None } in
              w, changes @ edit node (fun node -> Flow_graph.Flow_edit.Set_layout_size { node; size }))
     | Split_panel (path, axis) ->
-        w, changes @ edit path (fun node -> Flow_graph.Flow_edit.Split_panel { node; axis })
+        w, changes @ edit path (fun node -> Flow_graph.Flow_edit.Split_panel { node; axis; ratio = 0.5; kind = None })
+    | Split_panel_at (path, axis, ratio, panel) ->
+        w, changes @ edit path (fun node ->
+          Flow_graph.Flow_edit.Split_panel { node; axis; ratio; kind = Some (kind panel) })
     | Close_panel path ->
         w, changes @ edit path (fun node -> Flow_graph.Flow_edit.Close_panel { node })
     | Retype_panel (path, panel) ->

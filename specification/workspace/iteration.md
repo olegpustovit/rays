@@ -209,6 +209,12 @@ viewport and a drawing sized with them fills each pane exactly, whatever the win
 layout. Probes, value lanes and geometry keep the window snapshot, and pointer
 coordinates remain window points. Export uses the configured window size.
 
+In the editor the pointer is the sketch's only on a picture, a canvas or viewport pane. Over
+another pane, a menu or a prompt, `pointer/x` and `pointer/y` keep the last position the picture
+had, no button is down, and pointer, scroll and pinch events are left out of `(frame/input)`.
+A press that began on a picture stays the sketch's until its release, wherever the pointer goes;
+a press that began elsewhere never becomes the sketch's drag. Keys are not affected.
+
 `(state [previous init] step)` folds over frames. The seed is static data;
 the step reads the previous value and current frame, and returns the next
 value. Int/float results use the wider type. A cell is identified by source,

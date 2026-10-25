@@ -224,8 +224,8 @@ let reload ?imports value ~name text =
   Result.map (fun value ->
     Cook.reset_state value.cook;
     let clean (text : Text_pane.state) =
-      { text with draft = None; doc_base = None; binding_base = None; graph_base = None; doc_errors = []; binding_draft = None; binding_errors = [];
-        graph_draft = None; graph_errors = [] } in
+      { text with draft = None; doc_base = None; binding_base = None; doc_errors = Text_pane.no_errors; binding_draft = None;
+        binding_errors = Text_pane.no_errors; graphs = [] } in
     { value with notice = Some (Info, "Reloaded " ^ name); text = clean value.text; filed = value.doc;
       locals = List.map (fun (key, l) -> key, { l with code = clean l.code }) value.locals })
     (text_edit ?imports ~label:("Reload " ^ name) value text)
@@ -237,7 +237,7 @@ let reload_failed value ~name text diagnostics =
         | Some line -> Printf.sprintf ": line %d, %s" line d.Flow.Diagnostic.message
         | None -> ": " ^ d.Flow.Diagnostic.message) in
   { value with notice = Some (Refusal, Printf.sprintf "%s not reloaded%s" name first);
-    text = { value.text with tab = Text_pane.Document; draft = Some text; doc_base = Some (fst value.doc.workspace); doc_errors = diagnostics } }
+    text = { value.text with tab = Text_pane.Document; draft = Some text; doc_base = Some (fst value.doc.workspace); doc_errors = { at = text; found = diagnostics } } }
 
 (* The carry's hovered viewport has been looked at by the host: the surface under the pointer
    (the object it belongs to and the material graph its primitive reads) is where a material goes,

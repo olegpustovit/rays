@@ -230,6 +230,27 @@ let scope_levels () =
   check (List.exists (function
     | Scope.Syntax_edit (Flow_graph.Flow_edit.Connect { node; key = Flow_graph.Flow_edit.Pos 0; src = "b"; _ }) -> node = c
     | _ -> false) changes) "a wire dropped on the header did not connect the first slot";
+  (* a wire let go on empty canvas selects its source and asks for the add menu there *)
+  let empty = 2900, 1900 in
+  let v, _ = scope_step view (frame ~mouse:start ~events:[ mouse_move start; mouse_press (Input.LeftButton, start) ] ()) in
+  let v, _ = scope_step v (frame ~mouse:empty ~events:[ mouse_move empty ] ()) in
+  let v, changes = scope_step v (frame ~mouse:empty ~events:[ mouse_release (Input.LeftButton, empty) ] ()) in
+  check (List.mem (Scope.Selected [ b ]) changes && List.exists (function Scope.Menu_requested _ -> true | _ -> false) changes
+    && Scope.selected v = [ b ]) "a wire let go on empty canvas did not ask for the node menu after its source";
+  (* a frame's own variable reads back into its body: the wire stays inside the frame, below the label row *)
+  let mw = Editor_document.Workspace_doc.of_text scope_catalog
+    "(workspace m (graph g :context value (let* [boxes (array/vec3 8) ys (map (fn [i] (let* [p (array/nth boxes (int i))] [p.x p.y 0])) (array/range 4))] (array/count ys))))"
+    |> Result.get_ok in
+  let mview, _ = scope_view mw.checked "g" in
+  let mview, _ = scope_step mview (frame ()) in
+  let zx, zy, zw, _ = Option.get (Scope.Private.box_of mview [ "g"; "ys#0" ]) in
+  let z = Scope.zoom mview in
+  let from_i = List.filter (fun i -> match Scope.Private.wire_points mview i with
+    | (x, _) :: _ -> x > zx +. zw -. 20. *. z && x < zx +. zw | [] -> false) (List.init (Scope.Private.wire_count mview) Fun.id) in
+  check (from_i <> []) "the frame's variable has no wire";
+  List.iter (fun i -> List.iter (fun (x, y) ->
+    check (x <= zx +. zw -. 3. *. z && (y > zy +. P.head_height *. z || x > zx +. zw -. 20. *. z))
+      "a frame's variable wire left the frame or crossed its label row") (Scope.Private.wire_points mview i)) from_i;
   (* f: letter hints; a letter connects the selected output *)
   let hint_view, notices = Scope.run_command (Scope.select [ b ] view) Scope.Show_hints in
   check (notices = [] && Scope.editing hint_view) "f did not start the hints";
@@ -594,6 +615,11 @@ let scope_gestures () =
   check (only Scope.Hoist = [ syntax (E.Hoist { node = heart }) ]) "h: Hoist";
   check (only Scope.Wrap_repeat = [ syntax (E.Wrap { nodes = [ heart ]; loop = E.For }) ]) "r: Wrap For";
   check (only Scope.Wrap_iterate = [ syntax (E.Wrap { nodes = [ heart ]; loop = E.Fold }) ]) "Shift-r: Wrap Fold";
+  check (only Scope.Wrap_map = [ syntax (E.Wrap { nodes = [ heart ]; loop = E.Map }) ]) "Shift-m: Wrap Map";
+  check (only Scope.Wrap_filter = [ syntax (E.Wrap { nodes = [ heart ]; loop = E.Filter }) ]) "Shift-l: Wrap Filter";
+  check (only Scope.Inline_fn = [ syntax (E.Inline_defn { node = heart }) ]) "Alt-Shift-i: Inline_defn";
+  check (only Scope.Item_up = [ syntax (E.Move_binding { node = heart; by = -1 }) ]) "Alt-Up off a list: Move_binding";
+  check (only Scope.Item_down = [ syntax (E.Move_binding { node = heart; by = 1 }) ]) "Alt-Down off a list: Move_binding";
   check (only Scope.Make_fn = [ syntax (E.Make_local_fn { nodes = [ heart ] }) ]) "l: Make_local_fn";
   check (only Scope.Duplicate = [ syntax (E.Duplicate { nodes = [ heart ] }) ]) "Command-D: Duplicate";
   check (only Scope.Copy = [ Scope.Copy_requested [ heart ] ]) "Command-C: Copy_requested";
@@ -905,6 +931,9 @@ let run_scope () =
   check (List.mem (Scope.Probe_set { zone; index = 6 }) changes) "the next button did not step the probe";
   let _, changes = scope_click view (rect_center prev) in
   check (List.mem (Scope.Probe_set { zone; index = 4 }) changes) "the previous button did not step the probe";
+  (* one stepper pins the iteration of every zone when nothing is selected *)
+  let _, pinned = Scope.run_command view (Scope.Probe_step 1) in
+  check (List.mem (Scope.Probe_set { zone; index = 6 }) pinned) "[ ] with nothing selected did not step every zone";
   let inline = (Editor_document.Workspace_doc.of_text scope_catalog
     "(workspace w (graph g :context value (let* [ys (map (fn [(x : float)] (+ x 2.0)) (array/float 10003 1.0))] (array/count ys))))"
     |> Result.get_ok).checked in
@@ -1115,9 +1144,84 @@ let run_scope () =
   print_endline "pxui graph scope pane tests passed"
 
 (* the node menu and the pane (its gestures are [scope_gestures]), with the number of checks made *)
+(* a node an edit adds goes beside its consumer; every other card stays exactly where it was *)
+let run_sticky () =
+  let scope_of text =
+    let ws = Editor_document.Workspace_doc.of_text scope_catalog text |> Result.get_ok in
+    P.of_graph scope_catalog ws.checked "g" in
+  let before = scope_of "(workspace w (graph g :context sop (let* [a (sop/box) b (sop/transform a :translate [1 0 0]) c (sop/transform b :translate [2 0 0]) d (sop/transform c :translate [3 0 0])] d)))" in
+  let after = scope_of "(workspace w (graph g :context sop (let* [z (sop/box) a (sop/transform z :translate [0 0 0]) b (sop/transform a :translate [1 0 0]) c (sop/transform b :translate [2 0 0]) d (sop/transform c :translate [3 0 0])] d)))" in
+  let first = P.layout before in
+  let table (l : P.layout) = List.map (fun (b : P.placed) -> b.path, b) l.placed in
+  let prev path = Option.map (fun (b : P.placed) -> b.x, b.y, b.w, b.h) (List.assoc_opt path (table first)) in
+  let sticky = table (P.layout ~prev after) and relaid = table (P.layout after) in
+  List.iter (fun (path, (b : P.placed)) ->
+    let s = List.assoc path sticky in
+    check (s.x = b.x && s.y = b.y) "an edit that added a node moved a card that was there") (table first);
+  let pos path l = List.assoc [ "g"; path ] l in
+  let z = pos "z" sticky and a = pos "a" sticky in
+  check (z.x < a.x && z.y = a.y) "the new node is not on the row of its consumer, one column left";
+  check ((pos "a" relaid).x <> a.x) "the fixture does not shift the columns when laid out afresh";
+  List.iter (fun (p, (b : P.placed)) -> List.iter (fun (q, (c : P.placed)) ->
+    check (p = q || b.x >= c.x +. c.w || c.x >= b.x +. b.w || b.y >= c.y +. c.h || c.y >= b.y +. b.h)
+      "two cards overlap") sticky) sticky;
+  (* moving a binding in the text moves no card *)
+  let text = "(workspace w (graph g :context sop (let* [a (sop/box) b (sop/box) c (sop/merge a b)] c)))" in
+  let ws = Editor_document.Workspace_doc.of_text scope_catalog text |> Result.get_ok in
+  let source, ws' = Flow_graph.Flow_edit.apply_checked scope_catalog (Flow.Syntax.parse text |> Result.get_ok)
+    (Flow_graph.Flow_edit.Move_binding { node = [ "g"; "b" ]; by = -1 }) |> Result.get_ok in
+  check (fst (Flow.Lisp.print source) <> text ) "Move_binding changed no text";
+  let first = P.layout (P.of_graph scope_catalog ws.checked "g") in
+  let table (l : P.layout) = List.map (fun (b : P.placed) -> b.path, (b.x, b.y)) l.placed in
+  let prev path = Option.map (fun (b : P.placed) -> b.x, b.y, b.w, b.h) (List.find_opt (fun (b : P.placed) -> b.path = path) first.placed) in
+  let moved = P.layout ~prev (P.of_graph scope_catalog ws' "g") in
+  check (List.sort compare (table first) = List.sort compare (table moved)) "reordering bindings moved a card"
+
+(* G2: selecting a node lights its chain; a long wire is a tag until its chain is lit *)
+let run_readable () =
+  let ws = Editor_document.Workspace_doc.of_text scope_catalog
+    "(workspace r (graph g :context sop (let* [a (sop/box) b (sop/transform a) c (sop/transform b) d (sop/transform a) e (sop/merge c d a)] e)))"
+    |> Result.get_ok in
+  let view, _ = scope_view ~at:(function
+    | ["g"; "a"] -> Some (0., 0.) | ["g"; "b"] -> Some (288., 0.) | ["g"; "c"] -> Some (576., 0.)
+    | ["g"; "d"] -> Some (288., 240.) | ["g"; "@result"] -> Some (4000., 0.) | ["g"; "e"] -> Some (864., 0.)
+    | _ -> None) ws.checked "g" in
+  let view, _ = scope_step view (frame ()) in
+  check (Scope.Private.chain view = None) "a chain was lit with nothing selected";
+  check (Scope.Private.tagged_wires view = 0) "a short graph drew a tag";
+  let view = Scope.select [ [ "g"; "b" ] ] view in
+  (match Scope.Private.chain view with
+   | Some (up, down) ->
+       let has l p = List.mem [ "g"; p ] l in
+       check (has up "a" && has up "b" && not (has up "c") && not (has up "d")) "upstream of b is not a and b";
+       check (has down "b" && has down "c" && has down "e" && not (has down "a") && not (has down "d"))
+         "downstream of b is not b, c and e"
+   | None -> fail "selecting a node lit no chain");
+  (* a node 4,000 points to the right reads [a] through a tag, until a or e is selected *)
+  let far, _ = scope_view ~at:(function
+    | ["g"; "e"] -> Some (4000., 0.) | ["g"; "a"] -> Some (0., 0.) | ["g"; "b"] -> Some (288., 0.)
+    | ["g"; "c"] -> Some (576., 0.) | ["g"; "d"] -> Some (288., 240.) | _ -> None) ws.checked "g" in
+  let far, _ = scope_step far (frame ()) in
+  check (Scope.Private.tagged_wires far >= 1) "a wire four thousand points long was not a tag";
+  let lit = Scope.select [ [ "g"; "a" ] ] far in
+  check (Scope.Private.tagged_wires lit = 0) "selecting the source did not show the real wire";
+  let off, _ = Scope.run_command far Scope.Toggle_tags in
+  check (Scope.Private.tagged_wires off = 0) "the tags toggle left a tag";
+  (* Unfold all: one Unfold per call written in a row of the card *)
+  let ws = Editor_document.Workspace_doc.of_text scope_catalog
+    "(workspace u (graph g :context sop (let* [a (sop/merge (sop/box) (sop/box))] a)))" |> Result.get_ok in
+  let view, _ = scope_view ws.checked "g" in
+  let view, _ = scope_step view (frame ()) in
+  let _, changes = Scope.run_command (Scope.select [ [ "g"; "a" ] ] view) Scope.Unfold_all in
+  let unfolds = List.filter (function Scope.Syntax_edit (Flow_graph.Flow_edit.Unfold _) -> true | _ -> false) changes in
+  check (List.length unfolds >= 2) "Unfold all did not unfold every call of the card";
+  print_endline "pxui graph readable tests passed"
+
 let run () =
   run_menu ();
+  run_readable ();
   run_scope ();
+  run_sticky ();
   Printf.printf "test_pxui_graph: %d checks\n" !checks
 
 (* 2,001 nodes in one scope: laying it out and painting a frame.  Command:
@@ -1150,3 +1254,4 @@ let bench_scope_big () =
   time "2001 nodes: Set_arg edit" 5 (fun () ->
     Flow_graph.Flow_edit.apply_checked scope_catalog forms (Flow_graph.Flow_edit.Set_arg { node = [ "g"; "n5" ];
       key = Kw "translate"; sub = [ 0 ]; value = Flow.Syntax.make (Flow.Syntax.Num "3") }))
+

@@ -161,6 +161,14 @@ selection, the letter hints) look paths up in tables or sets, never in lists. `s
 `dune exec test/test_main.exe -- bench_scope_big` prints the frame, the 16 x 16 pane, `Point_all` and one
 `Set_arg` edit.
 
+## Readable graph (G2)
+
+`Scope_state.chains_of` (one-slot cache over the selection and the wires) gives the nodes upstream and
+downstream of the selection; `wire` carries `from`/`into` paths for it. Cards outside it get a panel-coloured
+veil, wires outside it 40/255 alpha. `Scope_state.tagged` is the one test for a long wire drawn as a tag
+(`tag_span`, three columns); hit boxes skip tagged wires, so there is no phantom hover. Both read only the
+geometry, never the document.
+
 ## Rows and items
 
 A port's colour is `Node_menu.port_color`, for the menu's squares and the pane's ports, type squares and wires.
@@ -176,3 +184,7 @@ the kind is the row's type (`kind_of`; a vector's cells are floats), the soft ra
 line, the text written is `Flow.Lisp.float`, a drag shorter than a step returns the text it began with. The pane
 cannot call `Kit.number` itself (the gate keeps `pxui_graph` off `pxui_shell`), so both are the same few lines over
 that one model.
+
+## G3 gestures
+
+Wire dropped on empty canvas: `Selected [source]` then `Menu_requested`; the host opens the add menu after that node. `Alt Up/Down` off a list item is `Move_binding`; `Shift-M`, `Shift-L`, `Alt-Shift-I` are `Wrap` Map / Filter and `Inline_defn`. `[` `]` with nothing selected step every zone. A zone's own variable wire (`Scope_wires.route ~inside`) stays in the frame and runs below the rail row.

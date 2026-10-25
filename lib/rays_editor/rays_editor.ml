@@ -32,6 +32,7 @@ module Editor = struct
     let image_stats value = let resources=value.Environment.host.resources in
       resources.images_created,resources.images_destroyed
     let status_text value=Core.status_text value.Environment.core
+    let live_frame value=value.Environment.core.live_frame
     let inspector_subject value=Core.inspector_subject value.Environment.core
     let new_graph value context=snd (Core.new_graph value.Environment.core context)
     let menu_forms = List.map (fun (_, form, text, _) -> form, text) Core.forms

@@ -87,6 +87,13 @@ let apply_text value intents =
     let with_text text = { value with text } in
     let workspace = fst value.doc.Document.workspace in
     let base old = Some (Option.value ~default:workspace old) in
+    (* a Graph tab's slot: each graph keeps its own draft, base and errors *)
+    let slot graph = Text_pane.graph_slot text graph in
+    let put graph = function
+      | Some s -> { text with Text_pane.graphs = (graph, s) :: List.remove_assoc graph text.Text_pane.graphs }
+      | None -> { text with graphs = List.remove_assoc graph text.graphs } in
+    let failed graph draft errors = Some { Text_pane.gtext = draft;
+      gbase = base (Option.bind (slot graph) (fun s -> s.Text_pane.gbase)); gerrors = { at = draft; found = errors } } in
     (* a draft begun on an older document: merged with what changed since on the syntax tree
        ({!Text_pane.merge3}); only a value both changed keeps the draft as a conflict *)
     let checked ?(metadata = false) ~shown ~draft old apply =
@@ -137,47 +144,56 @@ let apply_text value intents =
         select_source {value with text = {text with target = None}} path
     | Jump_definition path ->
         let next = select_source value path in
-        {next with text = {text with target = Some path}}
+        {next with text = {text with target = Some path; nonce = text.nonce + 1}}
     | Carry_over _ -> value  (* read by the carry's report, not an edit *)
-    | Doc_draft draft -> with_text { text with draft = Some draft; doc_base = base text.doc_base; doc_errors = []; scrubbing = false }
-    | Doc_discard -> with_text { text with draft = None; doc_base = None; doc_errors = [] }
+    | Find_set (find, reveal) -> with_text { text with find; nonce = text.nonce + (if reveal then 1 else 0) }
+    | Request request -> with_text { text with request }
+    | Resolved -> with_text { text with pending = [] }
+    | Doc_draft draft -> with_text { text with draft = Some draft; doc_base = base text.doc_base; scrubbing = false }
+    | Doc_discard -> with_text { text with draft = None; doc_base = None; doc_errors = Text_pane.no_errors }
     | Doc_apply draft ->
         (match checked ~metadata:true ~shown:whole ~draft text.doc_base (text_edit value) with
-         | Ok value -> { value with text = { text with draft = None; doc_base = None; doc_errors = [] } }
-         | Error doc_errors -> with_text { text with draft = Some draft; doc_base = base text.doc_base; doc_errors })
+         | Ok value -> { value with text = { text with draft = None; doc_base = None; doc_errors = Text_pane.no_errors } }
+         | Error found -> with_text { text with draft = Some draft; doc_base = base text.doc_base; doc_errors = { at = draft; found } })
     | Binding_draft (path, draft) ->
-        with_text { text with binding_draft = Some (path, draft); binding_base = base (match text.binding_draft with Some (old, _) when old = path -> text.binding_base | _ -> None); binding_errors = [] }
-    | Binding_discard -> with_text { text with binding_draft = None; binding_base = None; binding_errors = [] }
+        with_text { text with binding_draft = Some (path, draft); binding_base = base (match text.binding_draft with Some (old, _) when old = path -> text.binding_base | _ -> None) }
+    | Binding_discard -> with_text { text with binding_draft = None; binding_base = None; binding_errors = Text_pane.no_errors }
     | Graph_draft (graph, draft) ->
-        with_text { text with graph_draft = Some (graph, draft); graph_base = base (match text.graph_draft with Some (old, _) when old = graph -> text.graph_base | _ -> None); graph_errors = [] }
-    | Graph_discard -> with_text { text with graph_draft = None; graph_base = None; graph_errors = [] }
+        let old = slot graph in
+        with_text (put graph (Some { Text_pane.gtext = draft; gbase = base (Option.bind old (fun s -> s.Text_pane.gbase));
+          gerrors = (match old with Some s -> s.gerrors | None -> Text_pane.no_errors) }))
+    | Graph_discard graph -> with_text (put graph None)
+    | Live live -> with_text { text with live = Some live }
     | Graph_apply (graph, draft) ->
-        (match checked ~shown:(of_graph graph) ~draft text.graph_base (graph_edit value graph) with
-         | Ok value -> { value with text = { text with graph_draft = None; graph_base = None; graph_errors = [] } }
-         | Error graph_errors -> with_text { text with graph_draft = Some (graph, draft); graph_base = base text.graph_base; graph_errors })
+        (match checked ~shown:(of_graph graph) ~draft (Option.bind (slot graph) (fun s -> s.gbase)) (graph_edit value graph) with
+         | Ok value -> { value with text = put graph None }
+         | Error found -> with_text (put graph (failed graph draft found)))
     | Binding_apply (path, draft) ->
         (match checked_binding path ~draft text.binding_base (binding_edit value path) with
-         | Ok value -> { value with text = { text with binding_draft = None; binding_base = None; binding_errors = [] } }
-         | Error binding_errors ->
-             with_text { text with binding_draft = Some (path, draft); binding_base = base text.binding_base; binding_errors })
+         | Ok value -> { value with text = { text with binding_draft = None; binding_base = None; binding_errors = Text_pane.no_errors } }
+         | Error found ->
+             with_text { text with binding_draft = Some (path, draft); binding_base = base text.binding_base; binding_errors = { at = draft; found } })
     (* a dragged number: the text applies on every frame of the drag as one "Edit text" entry
        (the gesture seals on release); the draft stays until the drag ends so the editor keeps
        the text it is dragging in *)
     | Doc_scrub (draft, done_) ->
         (match (if finished done_ draft text.doc_base text.draft then Ok value else
           checked ~metadata:true ~shown:whole ~draft text.doc_base (scrub (text_edit ~merge:scrub_merge value))) with
-         | Ok value -> { value with text = { text with draft = (if done_ then None else Some draft); doc_base = (if done_ then None else Some (fst value.doc.workspace)); doc_errors = []; scrubbing = not done_ && Option.is_some literal; cache = (if done_ then None else text.cache) } }
-         | Error doc_errors -> with_text { text with draft = Some draft; doc_base = base text.doc_base; doc_errors; scrubbing = false })
+         | Ok value -> { value with text = { text with draft = (if done_ then None else Some draft); doc_base = (if done_ then None else Some (fst value.doc.workspace)); doc_errors = Text_pane.no_errors; scrubbing = not done_ && Option.is_some literal; cache = (if done_ then None else text.cache) } }
+         | Error found -> with_text { text with draft = Some draft; doc_base = base text.doc_base; doc_errors = { at = draft; found }; scrubbing = false })
     | Graph_scrub (graph, draft, done_) ->
-        (match (if finished done_ draft text.graph_base (Option.bind text.graph_draft (fun (g,d) -> if g = graph then Some d else None)) then Ok value else
-          checked ~shown:(of_graph graph) ~draft text.graph_base (scrub (graph_edit ~merge:scrub_merge value graph))) with
-         | Ok value -> { value with text = { text with graph_draft = (if done_ then None else Some (graph, draft)); graph_base = (if done_ then None else Some (fst value.doc.workspace)); graph_errors = []; scrubbing = not done_ && Option.is_some literal; cache = (if done_ then None else text.cache) } }
-         | Error graph_errors -> with_text { text with graph_draft = Some (graph, draft); graph_base = base text.graph_base; graph_errors; scrubbing = false })
+        let gbase = Option.bind (slot graph) (fun s -> s.Text_pane.gbase) in
+        (match (if finished done_ draft gbase (Option.map (fun s -> s.Text_pane.gtext) (slot graph)) then Ok value else
+          checked ~shown:(of_graph graph) ~draft gbase (scrub (graph_edit ~merge:scrub_merge value graph))) with
+         | Ok value ->
+             let kept = if done_ then None else Some { Text_pane.gtext = draft; gbase = Some (fst value.doc.workspace); gerrors = Text_pane.no_errors } in
+             { value with text = { (put graph kept) with scrubbing = not done_ && Option.is_some literal; cache = (if done_ then None else text.cache) } }
+         | Error found -> with_text { (put graph (failed graph draft found)) with scrubbing = false })
     | Binding_scrub (path, draft, done_) ->
         (match (if finished done_ draft text.binding_base (Option.bind text.binding_draft (fun (p,d) -> if p = path then Some d else None)) then Ok value else
           checked_binding ~merge:scrub_merge path ~draft text.binding_base (scrub (binding_edit ~merge:scrub_merge value path))) with
-         | Ok value -> { value with text = { text with binding_draft = (if done_ then None else Some (path, draft)); binding_base = (if done_ then None else Some (fst value.doc.workspace)); binding_errors = []; scrubbing = not done_ && Option.is_some literal; cache = (if done_ then None else text.cache) } }
-         | Error binding_errors -> with_text { text with binding_draft = Some (path, draft); binding_base = base text.binding_base; binding_errors; scrubbing = false })
+         | Ok value -> { value with text = { text with binding_draft = (if done_ then None else Some (path, draft)); binding_base = (if done_ then None else Some (fst value.doc.workspace)); binding_errors = Text_pane.no_errors; scrubbing = not done_ && Option.is_some literal; cache = (if done_ then None else text.cache) } }
+         | Error found -> with_text { text with binding_draft = Some (path, draft); binding_base = base text.binding_base; binding_errors = { at = draft; found }; scrubbing = false })
     | Literal_scrub _ -> value) value intents
 
 (* The intents of a text pane that is not the one in use fold into its own state. *)
@@ -192,7 +208,7 @@ let apply_text_at value key intents =
 (* The unapplied drafts of a text pane, as the applies its Check & apply would make. *)
 let draft_applies ?except (text : Text_pane.state) =
   (match text.draft with Some d when Some d <> except -> [ Text_pane.Doc_apply d ] | _ -> [])
-  @ (match text.graph_draft with Some (g, d) -> [ Text_pane.Graph_apply (g, d) ] | None -> [])
+  @ List.map (fun (g, (s : Text_pane.slot)) -> Text_pane.Graph_apply (g, s.gtext)) text.graphs
   @ (match text.binding_draft with Some (p, d) -> [ Text_pane.Binding_apply (p, d) ] | None -> [])
 
 (* Some text pane holds text that is not in the document ([except]: the text of a refused

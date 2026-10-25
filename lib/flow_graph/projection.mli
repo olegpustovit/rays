@@ -211,7 +211,7 @@ type placed = {
 and layout = { placed : placed list; w : float; h : float }
 
 val layout :
-  ?foot:bool -> ?at:(path -> (float * float) option) -> ?collapsed:(path -> bool) ->
+  ?foot:bool -> ?at:(path -> (float * float) option) -> ?prev:(path -> (float * float * float * float) option) -> ?collapsed:(path -> bool) ->
   ?lens:(path -> int option) -> ?level:(path -> level) -> ?pin:(path -> string -> bool option) ->
   ?inner:bool -> scope -> layout
 (** Columns by dependency depth, inputs first and the return last; a node

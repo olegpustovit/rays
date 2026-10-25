@@ -10,7 +10,7 @@ let carry_rest = 0.6  (* seconds the pointer rests on a node before the carry en
 (* While a payload is carried the document only navigates: the keys that walk, follow, go back and
    jump work; every edit waits for the put. *)
 let carry_allowed : Leader.action -> bool = function
-  | Enter | Up | Jump | Guide_toggle | Guide_keys | Frame_tile | Pick_up
+  | Enter | Up | Back _ | Jump | Guide_toggle | Guide_keys | Frame_tile | Pick_up
   | Scope_command (Pxui_graph.Scope.Walk _ | Frame_all | Frame_selection) -> true
   | _ -> false
 

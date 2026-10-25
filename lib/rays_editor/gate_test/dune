@@ -1,0 +1,8 @@
+; Gate is private to rays_editor; the test compiles its own copy.
+(copy_files ../gate.ml)
+(copy_files ../gate.mli)
+
+(test
+ (name test_gate)
+ (modules test_gate gate)
+ (libraries frame_input))

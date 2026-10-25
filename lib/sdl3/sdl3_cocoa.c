@@ -121,6 +121,19 @@ void rays_window_plain_titlebar(SDL_Window *window)
   objc_autoreleasePoolPop(pool);
 }
 
+void rays_app_activate(void)
+{
+  Class app_class = objc_getClass("NSApplication");
+  id app;
+  void *pool;
+  if (app_class == Nil || !cocoa_driver()) return;
+  pool = objc_autoreleasePoolPush();
+  app = ((id (*)(id, SEL))objc_msgSend)((id)app_class, sel_getUid("sharedApplication"));
+  ((void (*)(id, SEL, signed char))objc_msgSend)(
+      app, sel_getUid("activateIgnoringOtherApps:"), 1);
+  objc_autoreleasePoolPop(pool);
+}
+
 void rays_window_set_background(SDL_Window *window,
     double red, double green, double blue)
 {
@@ -143,6 +156,7 @@ void rays_window_set_background(SDL_Window *window,
 void rays_scroll_monitor_install(void) {}
 bool rays_scroll_take(rays_scroll *out) { (void)out; return false; }
 void rays_window_plain_titlebar(SDL_Window *window) { (void)window; }
+void rays_app_activate(void) {}
 void rays_window_set_background(SDL_Window *window,
     double red, double green, double blue)
 {

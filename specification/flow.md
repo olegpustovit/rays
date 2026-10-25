@@ -355,6 +355,17 @@ Bypass on `if` selects its then arm; `cond` and `case` cannot be bypassed.
   and bottom edge are obstacles. Bends are computed, never authored or saved.
 - `:wires "rect"` on a `ui/graph` panel keeps the older orthogonal routing.
 - A fold's feedback is a dashed wire.
+- **Chains.** With nodes selected, the nodes upstream and downstream of them (along the wires,
+  the selection included) and the wires between them stay at full ink and thicker; every
+  other card and wire recedes. A wire is lit when both its ends are on the same side
+  (`Scope_state.chains_of`); sibling branches stay dim. Open zone frames are not dimmed.
+- **Tags.** A wire whose ends are more than three columns (864 points) apart is not drawn:
+  a 14-point stub at each end and the source's title in ink-2 left of the input (a
+  *tag*). Selecting either end lights the chain and draws the real wire. A tagged wire has no
+  hit boxes. `⇧Y` (`scope.tags`) turns tags off and on (view state). A trunk with branches
+  for one source and many sinks is not drawn.
+- An unfolded call lands one column left of its owner (§6.1); when it falls outside the view
+  the pane pans to it, nothing else moves.
 - Hovering a connected port highlights its wires; hovering a wire highlights that
   connection. Wire hit boxes join the shared PXUI hit tree behind the cards.
 
@@ -437,16 +448,23 @@ selection, row keys on the row under the pointer.
 | `f` | `scope.frame-selection` | pan and zoom to the selection (all with none) |
 | Home | `scope.frame-all` | frame everything |
 | `⇧F` / `⇧U` | `scope.fold` / `scope.unfold` | fold a binding into its one use / unfold a call into its own binding |
+| `⌥⇧U` | `scope.unfold-all` | unfold every call written in a row of the selected card |
+| `⇧Y` | `scope.tags` | long wires as name tags, or all drawn (§6.3) |
 | `⇧H` | `scope.hoist` | move a loop-invariant binding out of its loop |
 | `r` / `⇧R` | `scope.repeat` / `scope.iterate` | wrap the selection in a `for` / a `fold` |
+| `⇧M` / `⇧L` | `scope.map` / `scope.filter` | wrap the selection as the body of a `map` / the test of a `filter` over `(range 6)` |
+| `⌥⇧I` | `scope.inline-fn` | replace a call of a `defn` by its body (`Inline_defn`) |
 | `l` | `scope.function` | make a local `fn` of the selection |
 | `d` | `scope.defn` | make a `defn` (the host's dialog types its parameters) |
 | `m` | `scope.macro` | make a macro (the host's dialog picks its holes) |
 | `c` | `scope.collapse` | collapse or expand a zone |
-| `[` / `]` | `scope.probe-prev` / `scope.probe-next` | step the selected zone's probe |
+| `[` / `]` | `scope.probe-prev` / `scope.probe-next` | step the selected zone's probe; with nothing selected, every zone of the graph (one pinned iteration) |
 | `F2` | `scope.rename` | rename the selected node, or edit the default of a selected graph input |
 | `⇧G` | `scope.frame` | a titled frame around the selection (its corner resizes, its cross deletes) |
-| `⌥↑` / `⌥↓` | `scope.item-up` / `scope.item-down` | move the hovered item of a `list`, a `str` or a `scene/merge` |
+| `⌥↑` / `⌥↓` | `scope.item-up` / `scope.item-down` | move the hovered item of a `list`, a `str` or a `scene/merge`; off an item, move the selected binding in the text (`Move_binding`: text order only, sticky layout keeps every card; refused past a neighbour it reads or is read by) |
+| `Esc` / `u` | `scene.back` / `scene.up` | back along the route taken (`Leader.Back`); a click on an earlier crumb of the graph header (`Chrome.Crumb`) goes that far |
+
+Dragging a wire from an out-port and letting go on empty canvas selects its node and opens the add menu there (`Menu_requested`); the kind picked is wired to it when one of its inputs takes the node's type (an anonymous nested node cannot be wired: name it first). With records, a card below Full shows its value at the pinned iteration beside its out-port. A function frame's own variable reads back into the body below its rail row and inside the frame; a `fn` frame whose result is a vector literal shows it as a `result` card.
 | `⌘D` | `scope.duplicate` | copy the selected bindings of one scope with fresh names |
 | `⌘C` / `⌘X` / `⌘V` | `scope.copy` / `scope.cut` / `scope.paste` | bindings as text on the clipboard |
 | `i` / `⇧I` / `u` | `scene.enter` / `scene.peek` / `scene.up` | follow a reference / peek it in a floating graph / back |
@@ -530,6 +548,11 @@ selection it selects the first node.
 - **Fold** (`ƒ` on a wired row, `⇧F`): a binding used once is inlined into its use
   (`Fold_into`). A row wired from a node that something else also reads has no `ƒ`; the edit
   would be refused.
+- A double click on an expression row's text unfolds it like its `ƒ`; the hover tip shows the
+  whole text when the row is cut.
+- `/ j` lists the nodes of the shown graph beside the graphs; picking one selects it and frames it.
+- A function written in a row is a frame headed `map -> positions` (the holder's kind and name).
+- The red `t` of a header says on hover what it is: live, re-cooked every frame.
 - An expression row reads `ƒ (expr)`; a row wired from a named node that nothing else reads
   reads `ƒ ← name`.
 

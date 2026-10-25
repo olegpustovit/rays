@@ -36,6 +36,9 @@ type scope_key = {
   force : Flow_graph.Probe.force;
   scope : Flow_graph.Projection.scope;
   targets : (int * int) list;  (* (object, compiled node) the cook is asked to count *)
+  stamp : float;  (* when the probes were last forced *)
+  gap : float;  (* the quiet time a moving clock alone must leave after that: a few frames of the cost *)
+  fresh_last : bool;  (* the last frame forced them, so the time since [stamp] was that frame *)
 }
 
 (* What a graph panel keeps of its own while another one has the focus. *)
@@ -58,7 +61,12 @@ type prompt =
   | Saving of string
   | Palette of string  (* command search query *)
   | Jumping of string  (* / j: graph search query *)
+  | Symbols of string  (* Command-P: binding search query *)
+  | Going of string  (* Command-L: line[:column] *)
   | Browsing of { query : string; presets : (string * float) list; last_state : float option }
+  | Picking of { split : bool; at : float * float }  (* x or n: the menu of panel kinds at the pointer *)
+  | Splitting of { panel : Pxui_shell.Layout.panel; axis : Pxui_shell.Layout.axis }
+      (* x after a kind: the split follows the pointer until a click places it; Tab turns it *)
   | Making_macro of { nodes : Flow.Workspace.path list; draft : Flow_graph.Flow_edit.macro_draft;
                       state : Pxui_shell.Prompt.macro }  (* the make-macro dialog *)
 
@@ -68,6 +76,7 @@ type prompt_intent = Save_preset_file of string | Load_preset_file of string | L
   | Delete_last_state of string
   | Run_action of Leader.action
   | Go of string  (* / j picked a graph *)
+  | Find_node of Flow.Workspace.path  (* / j picked a node of the graph shown: select it and frame it *)
 
 type timeline_intent = Pxui_shell.Timeline_bar.intent =
   Pause_toggle | Stop_playback | Reset_playback | Seek_playback of int64 | Set_end of int
@@ -249,6 +258,7 @@ type 'prepared t = {
   pane_keys : (int * (Pxui_shell.Layout.panel * Pxui_shell.Layout.path option)) list;
   leader : Leader.state;
   held_keys : Input.key list;
+  sketch_blocked : string list;  (* keys held while the sketch had no keyboard: unseen by it until released *)
   keymap : Leader.command list;
   timeline_frames : int;
   queued : Leader.action list;  (* picked in the palette, run next frame *)

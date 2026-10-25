@@ -15,12 +15,21 @@ type action =
   | Undo | Redo
   | Panel_split of Pxui_shell.Layout.axis | Panel_close | Panel_retype of Pxui_shell.Layout.panel
       (* / o ...: the focused panel, as the header menu does *)
+  | Panel_pick | Window_pick
+      (* x, n: a menu of panel kinds at the pointer; 1-8 or a click picks, then x places a split, n opens a window *)
+  | Panel_split_at of Pxui_shell.Layout.path * Pxui_shell.Layout.axis * float * Pxui_shell.Layout.panel
+      (* the pending split, committed where the pointer clicked *)
   | Toggle_map  (* / m: in the World, the view pane flips to the lat-long map *)
   | Ui_scale of int  (* Command +/-/0: the kit text of every panel but the graph and viewports *)
   | Restore_layout | Enter | Up | Go_world
+  | Back of int  (* Esc, or a click on an earlier part of the graph header's route: that many steps back, only along the route *)
   | Peek  (* I: the followed graph in a floating window *)
   | Pick_up  (* y: carry the open material or SOP graph, or the selected object's graph (see carry.ml) *)
   | Jump  (* / j: a filter over every graph *)
+  | Text_command of Text_pane.command
+      (* Command-F, -Option-F, -G, -Shift-G, -E and F12: the find bar, its matches, the definition under the caret *)
+  | Goto_symbol  (* Command-P: a filter over the bindings of the text *)
+  | Goto_line  (* Command-L: a line and column of the text *)
   | Layout_switch of int | Layout_new | Layout_remove
       (* / [ 0..9, n, x: the layouts of the editor graph's switch *)
   | Window_new of Pxui_shell.Layout.panel | Float_toggle
@@ -71,7 +80,7 @@ let keymap = [
   command ~id:"timeline.reset" ~label:"reset" ~trigger:(Leader "r") Reset;
   command ~id:"timeline.reset" ~label:"reset"
     ~trigger:(Chord (Input.KeyChar 'p', [Input.Shift])) Reset;
-  command ~id:"sketch.stop" ~label:"stop" ~trigger:(Leader "x") Stop;
+  command ~id:"sketch.stop" ~label:"stop" ~trigger:(Leader "q") Stop;
   command ~id:"workspace.command-palette" ~label:"command palette" ~trigger:(Leader "/")
     Command_palette;
   command ~id:"file.copy-lisp" ~label:"Copy workspace as Lisp" Copy_lisp;
@@ -84,6 +93,9 @@ let keymap = [
   command ~id:"panel.split-below" ~label:"split panel, stacked" ~trigger:(Leader "oh")
     (Panel_split `V);
   command ~id:"panel.close" ~label:"close panel" ~trigger:(Leader "ox") Panel_close;
+  command ~id:"panel.pick-split" ~label:"split panel at the pointer (pick a kind)"
+    ~trigger:(Leader "x") Panel_pick;
+  command ~id:"window.pick" ~label:"new window (pick a kind)" ~trigger:(Leader "n") Window_pick;
   command ~id:"panel.float" ~label:"float / dock panel" ~trigger:(Leader "of") Float_toggle;
   (* / [: the first nine rows are the layouts, named from their panels when which-key draws *)
 ]
@@ -93,15 +105,6 @@ let keymap = [
 @ [
   command ~id:"layout.new" ~label:"layout: new, from this one" ~trigger:(Leader "[n") Layout_new;
   command ~id:"layout.remove" ~label:"layout: remove this one" ~trigger:(Leader "[x") Layout_remove;
-  (* / n: a floating window of the kind / l would make *)
-  command ~id:"window.graph" ~label:"window: graph" ~trigger:(Leader "ng") (Window_new Graph);
-  command ~id:"window.list" ~label:"window: list" ~trigger:(Leader "nl") (Window_new List);
-  command ~id:"window.lisp" ~label:"window: lisp text" ~trigger:(Leader "nt") (Window_new Lisp);
-  command ~id:"window.inspector" ~label:"window: inspector" ~trigger:(Leader "ni") (Window_new Inspector);
-  command ~id:"window.outline" ~label:"window: outline" ~trigger:(Leader "nu") (Window_new Outline);
-  command ~id:"window.timeline" ~label:"window: timeline" ~trigger:(Leader "nm") (Window_new Timeline);
-  command ~id:"window.viewport" ~label:"window: viewport" ~trigger:(Leader "nw") (Window_new (View ""));
-  command ~id:"window.canvas" ~label:"window: canvas" ~trigger:(Leader "nc") (Window_new (Canvas ""));
   (* / l: the focused panel becomes one of the kinds (a document without an editor graph
      gets one written from its layout first) *)
   command ~id:"panel.graph" ~label:"panel: graph" ~trigger:(Leader "lg") (Panel_retype Graph);
@@ -147,11 +150,14 @@ let keymap = [
   command ~guide:Editor_core.Guide_context.[Node; List] ~id:"scene.peek" ~label:"peek (floating graph)"
     ~trigger:(Chord (Input.KeyChar 'i', [Input.Shift])) Peek;
   command ~id:"scene.jump" ~label:"jump to graph" ~trigger:(Leader "j") Jump;
+  command ~id:"text.definition" ~label:"go to definition" ~trigger:(Chord (Input.F12, [])) (Text_command Definition);
   (* carry: y picks up; the target letters, Enter and Escape are read by [Core] while it lasts *)
   command ~guide:Editor_core.Guide_context.[Canvas; Node; Multi; List] ~id:"carry.pick-up"
     ~label:"pick up (carry it onto a place)" ~trigger:(Chord (Input.KeyChar 'y', [])) Pick_up;
   command ~guide:Editor_core.Guide_context.[Canvas; Node; Multi; List] ~id:"scene.up" ~label:"back (up a level)"
     ~trigger:(Chord (Input.KeyChar 'u', [])) Up;
+  command ~guide:Editor_core.Guide_context.[Canvas; Node; Multi] ~id:"scene.back" ~label:"back along the route"
+    ~scope:graph ~trigger:(Chord (Input.Escape, [])) (Back 1);
   (* Rare: the graph context menu and the palette, no leader key. *)
   command ~id:"graph.frame-tile" ~label:"frame displayed tile" ~trigger:(Leader "f")
     ~scope:graph Frame_tile;
@@ -167,6 +173,16 @@ let keymap = [
   command ~id:"edit.redo" ~label:"redo"
     ~trigger:(Chord (Input.KeyChar 'z', [modifier; Input.Shift])) Redo;
   command ~id:"edit.redo" ~label:"redo" ~trigger:(Chord (Input.KeyChar 'y', [modifier])) Redo;
+  command ~id:"text.find" ~label:"find in text" ~trigger:(Chord (Input.KeyChar 'f', [modifier])) (Text_command Find);
+  command ~id:"text.replace" ~label:"find and replace"
+    ~trigger:(Chord (Input.KeyChar 'f', [modifier; Input.Alt])) (Text_command Find_replace);
+  command ~id:"text.next" ~label:"next match" ~trigger:(Chord (Input.KeyChar 'g', [modifier])) (Text_command Find_next);
+  command ~id:"text.previous" ~label:"previous match"
+    ~trigger:(Chord (Input.KeyChar 'g', [modifier; Input.Shift])) (Text_command Find_previous);
+  command ~id:"text.find-selection" ~label:"find the selection"
+    ~trigger:(Chord (Input.KeyChar 'e', [modifier])) (Text_command Find_selection);
+  command ~id:"text.symbol" ~label:"go to symbol" ~trigger:(Chord (Input.KeyChar 'p', [modifier])) Goto_symbol;
+  command ~id:"text.line" ~label:"go to line" ~trigger:(Chord (Input.KeyChar 'l', [modifier])) Goto_line;
   command ~id:"ui.larger" ~label:"larger panel text" ~trigger:(Chord (Input.KeyChar '=', [modifier])) (Ui_scale 1);
   command ~id:"ui.larger" ~label:"larger panel text" ~trigger:(Chord (Input.KeyChar '+', [modifier])) (Ui_scale 1);
   command ~id:"ui.smaller" ~label:"smaller panel text" ~trigger:(Chord (Input.KeyChar '-', [modifier])) (Ui_scale (-1));
@@ -199,6 +215,7 @@ let group (c : command) =
   let starts prefix = String.starts_with ~prefix id in
   if id = "graph.add-node" || starts "window." then "Add"
   else if starts "panel." || starts "workspace.toggle-" || id = "workspace.hide-ui" then "Panel"
+  else if starts "text." then "Text"
   else if starts "layout." || id = "workspace.restore-layout" then "Layout"
   else if starts "timeline." || id = "sketch.stop" then "Time"
   else if starts "preset." || starts "file." || id = "guide.keys" || id = "workspace.command-palette" then "File"

@@ -3,7 +3,7 @@ module E=Flow.Eval
 module V=Flow.Value
 module I=Flow_ir.Executor
 type prepared={plan:E.plan;effects:I.program;args:I.program option array;edges:bool array}
-type t={resources:Workspace_resources.t;images:Workspace_images.t;gpu:Workspace_gpu.t;mutable prepared:prepared option;mutable pending_saves:string list;
+type t={resources:Workspace_resources.t;images:Workspace_images.t;gpu:Workspace_gpu.t;mutable prepared:prepared option;mutable pending_saves:string list;(* newest first *)
   mutable quit_requested:bool;mutable fired:int;mutable deterministic:bool;
   mutable pending_events:Frame_input.event list}
 let create ?seed ?grain ?domains ()=let resources=Workspace_resources.create()in
@@ -78,7 +78,7 @@ let perform host ~state ~live requests =
       Error(Flow.Diagnostic.error ~code:"E_EFFECT_EXPORT" "Quit and file dialogs are unavailable in fixed-step runs.")else
     match kind with
     |"host/quit"->host.quit_requested<-true;Sketch.quit();Ok()
-    |"host/save_png"->host.pending_saves<-host.pending_saves@[text(arg "path")];Ok()
+    |"host/save_png"->host.pending_saves<-text(arg "path")::host.pending_saves;Ok()
     |"host/play"when host.deterministic->Ok()
     |"host/play"->
         let* sample=sample host (Option.get host.prepared) ~state ~live (arg "sample")in
@@ -104,7 +104,7 @@ let update host ~state ~live workspace plan =
   try Result.bind(requests host ~state ~live workspace plan)(perform host ~state ~live)
   with V.Fail(code,message,span)->Error(Flow.Diagnostic.error ?span ~code message)
 let save_pending host save =
-  let paths=host.pending_saves in host.pending_saves<-[];
+  let paths=List.rev host.pending_saves in host.pending_saves<-[];
   List.fold_left(fun result path->Result.bind result(fun()->
     Result.map_error(fun message->Flow.Diagnostic.error ~code:"E_EFFECT" message)(save path)))(Ok())paths
 let close host=Workspace_resources.close host.resources;Workspace_images.close host.images;Workspace_gpu.close host.gpu
@@ -129,7 +129,7 @@ let export_update host ~state ~live workspace plan =
       Error(Flow.Diagnostic.error ~code:"E_EFFECT_EXPORT" "Quit and file dialogs are unavailable during export.")
     else begin
       List.iter(fun(_,_,kind,args)->if kind="host/save_png"then
-        match List.assoc "path" args with E.Text path->host.pending_saves<-host.pending_saves@[path]
+        match List.assoc "path" args with E.Text path->host.pending_saves<-path::host.pending_saves
         |_->V.fail "E_TYPE" "A PNG path is text.")requests;
       Ok()
     end)

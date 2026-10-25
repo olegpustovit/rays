@@ -301,7 +301,7 @@ let edit catalog t op =
   let paths = match op with
     | Set_arg {node; _} | Connect {node; _} | Disconnect {node; _} | Unfold {node; _}
     | Add_arm {node; _} | Delete_arm {node; _}
-    | Fold_into {node} | Hoist {node} | Rename {node; _} | Inline_macro {node}
+    | Fold_into {node} | Hoist {node} | Rename {node; _} | Inline_macro {node} | Inline_defn {node} | Move_binding {node; _}
     | Toggle_bypass {node} | Set_note {node; _} | Add_item {node} | Move_item {node; _}
     | Add_field {node; _} | Set_layout_size {node; _} | Split_panel {node; _}
     | Close_panel {node} | Set_panel_kind {node; _} -> [node]

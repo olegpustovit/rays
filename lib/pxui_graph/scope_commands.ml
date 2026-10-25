@@ -83,6 +83,8 @@ let action_changes t command =
   let paths = List.map (fun (n : P.node) -> n.path) (List.filter (fun (n : P.node) -> not n.synthetic) nodes) in
   let one f = match nodes with [ n ] -> f n | _ -> [ Notice "Select one node" ] in
   let edit op = [ Syntax_edit op ] in
+  let wrap loop what =
+    if paths = [] then [ Notice ("Select nodes to " ^ what) ] else edit (E.Wrap { nodes = paths; loop }) in
   match command with
   | Delete ->
       (match t.hovered_row with
@@ -109,6 +111,12 @@ let action_changes t command =
       | _ -> (match inline_rail n with
           | Some { key = Some key; _ } -> edit (E.Unfold { node = n.path; key; sub = [] })
           | _ -> [ Notice "Nothing to unfold here" ]))
+  | Unfold_all -> one (fun n ->
+      match List.filter_map (fun (r : P.row) ->
+        if (match r.chip with P.Inline _ -> true | P.Name leaf -> E.nested leaf | _ -> false)
+        then Some (E.Unfold { node = n.path; key = r.key; sub = [] }) else None) n.rows with
+      | [] -> [ Notice "Nothing to unfold here" ]
+      | ops -> List.concat_map edit ops)
   | Hoist -> one (fun n -> edit (E.Hoist { node = n.path }))
   | Bypass -> one (fun n ->
       (* a node that cannot pass an input through but has a boolean :visible (a scene object)
@@ -118,9 +126,12 @@ let action_changes t command =
           edit (E.Set_arg { node = n.path; key = E.Kw "visible"; sub = []
                           ; value = S.make (S.Sym (if hidden then "true" else "false")) })
       | None -> edit (E.Toggle_bypass { node = n.path }))
-  | Wrap_repeat -> if paths = [] then [ Notice "Select nodes to repeat" ] else edit (E.Wrap { nodes = paths; loop = E.For })
-  | Wrap_iterate -> if paths = [] then [ Notice "Select nodes to iterate" ] else edit (E.Wrap { nodes = paths; loop = E.Fold })
-  | Wrap_if -> if paths = [] then [Notice "Select nodes to wrap"] else edit (E.Wrap {nodes = paths; loop = E.If})
+  | Wrap_repeat -> wrap E.For "repeat"
+  | Wrap_iterate -> wrap E.Fold "iterate"
+  | Wrap_if -> wrap E.If "wrap"
+  | Wrap_map -> wrap E.Map "map"
+  | Wrap_filter -> wrap E.Filter "filter"
+  | Inline_fn -> one (fun n -> edit (E.Inline_defn { node = n.path }))
   | Add_arm -> one (fun n -> let node, after = conditional_target n in edit (E.Add_arm {node; after}))
   | Delete_arm -> one (fun n -> let node, index = conditional_target n in
       edit (E.Delete_arm {node; index = if node = n.path then 0 else index}))
@@ -132,6 +143,10 @@ let action_changes t command =
         | Some { kind = P.Let; _ } | None -> None
         | Some _ -> Some (Zone_collapsed { zone = n.path; collapsed = not (t.collapsed n.path) })) nodes
   | Probe_step delta ->
+      (* with nothing selected, one stepper pins the iteration of every zone of the graph *)
+      let nodes = if nodes <> [] then nodes else
+        List.filter_map (fun ((p : P.placed), _, _) -> match p.item with P.Item n -> Some n | _ -> None)
+          (Array.to_list t.geo.items) in
       List.filter_map (fun (n : P.node) -> match n.zone with
         | Some { kind = P.Let; _ } | None -> None
         | Some _ ->
@@ -139,7 +154,7 @@ let action_changes t command =
             if count <= 0 then None else
             let index = max 0 (min (count - 1) (t.probe n.path + delta)) in
             if index = t.probe n.path then None else Some (Probe_set { zone = n.path; index })) nodes
-  | Frame_all | Frame_selection | Walk _ | Edit_name | Make_frame
+  | Frame_all | Tidy | Toggle_tags | Frame_selection | Walk _ | Edit_name | Make_frame
   | Open_level | Point_level | Open_all | Point_all | Show_hints -> []
   | Duplicate -> if paths = [] then [ Notice "Select nodes to duplicate" ] else edit (E.Duplicate { nodes = paths })
   | Copy -> if paths = [] then [ Notice "Select nodes to copy" ] else [ Copy_requested paths ]
@@ -155,7 +170,9 @@ let action_changes t command =
        | Some (path, E.Pos i) when (match node_of t path with
            | Some n -> P.reorderable n | None -> false) ->
            edit (E.Move_item { node = path; pos = if command = Item_up then i else i + 1 })
-       | _ -> [ Notice "Hover a list item to move it" ])
+       | _ ->
+           (* off a list item, the same keys move the selected binding in the text (cards stay put) *)
+           one (fun n -> edit (E.Move_binding { node = n.path; by = if command = Item_up then -1 else 1 })))
 
 let frame_selection t =
   match List.filter_map (box_at t) (selected t) with
@@ -314,6 +331,8 @@ let step_hints t (frame : Frame.t) =
 
 let run_command t = function
   | Frame_all -> frame_all t, []
+  | Tidy -> tidy t, []
+  | Toggle_tags -> { t with tags = not t.tags }, [ Notice (if t.tags then "wire tags off" else "wire tags on") ]
   | (Open_level | Point_level | Open_all | Point_all) as command -> level_command t command
   | Show_hints -> start_hints t
   | Frame_selection -> frame_selection t, []
@@ -367,20 +386,26 @@ let bindings =
     make ~guide:some "delete" "delete" Delete (ch 'x') [];
     make ~guide:one "fold" "fold into use" Fold_into (ch 'f') [ Input.Shift ];
     make ~guide:one "unfold" "unfold a call" Unfold (ch 'u') [ Input.Shift ];
+    make ~guide:one "unfold-all" "unfold every call of the card" Unfold_all (ch 'u') [ Input.Shift; Input.Alt ];
     make ~guide:one "hoist" "hoist out" Hoist (ch 'h') [ Input.Shift ];
     make ~guide:one "bypass" "toggle bypass" Bypass (ch 'b') [];
     make ~guide:some "macro" "make macro" Make_macro (ch 'm') [];
     make ~guide:some "repeat" "repeat (loop)" Wrap_repeat (ch 'r') [];
     make ~guide:some "iterate" "iterate (feed back)" Wrap_iterate (ch 'r') [ Input.Shift ];
     make ~guide:some "conditional" "wrap conditional" Wrap_if (ch 'i') [Input.Shift];
+    make ~guide:some "map" "wrap in map" Wrap_map (ch 'm') [Input.Shift];
+    make ~guide:some "filter" "wrap in filter" Wrap_filter (ch 'l') [Input.Shift];
+    make ~guide:one "inline-fn" "inline a function call" Inline_fn (ch 'i') [Input.Shift; Input.Alt];
     make ~guide:one "add-arm" "add conditional arm" Add_arm (ch 'a') [Input.Alt];
     make ~guide:one "delete-arm" "delete first arm" Delete_arm Input.Delete [Input.Alt];
     make ~guide:some "function" "make function" Make_fn (ch 'l') [];
     make ~guide:some "defn" "make reusable function (defn)" Make_defn (ch 'd') [];
     make ~guide:some "collapse" "collapse or expand zone" Collapse (ch 'c') [];
-    make ~guide:one "probe-prev" "previous iteration" (Probe_step (-1)) (ch '[') [];
-    make ~guide:one "probe-next" "next iteration" (Probe_step 1) (ch ']') [];
+    make ~guide:any "probe-prev" "previous iteration (every zone with nothing selected)" (Probe_step (-1)) (ch '[') [];
+    make ~guide:any "probe-next" "next iteration (every zone with nothing selected)" (Probe_step 1) (ch ']') [];
     make ~guide:any "frame-all" "frame all" Frame_all Input.Home [];
+    make ~guide:any "tidy" "tidy: recompute every card position" Tidy (ch 't') [ Input.Shift ];
+    make ~guide:any "tags" "toggle name tags on long wires" Toggle_tags (ch 'y') [ Input.Shift ];
     make ~guide:any "frame-selection" "frame the selection" Frame_selection (ch 'f') [];
     make ~guide:one "hints" "letter hints: connect the selected output" Show_hints (ch 'w') [];
     make ~guide:some "open" "open one level" Open_level (ch 'o') [];
@@ -398,8 +423,8 @@ let bindings =
     make ~guide:any "paste" "paste bindings" Paste (ch 'v') [ Input.Meta ];
     make ~guide:any "paste" "paste bindings" Paste (ch 'v') [ Input.Ctrl ];
     make ~guide:one "display" "view in the viewport" Display (ch 'v') [];
-    make ~guide:one "item-up" "move list item up" Item_up Input.ArrowUp [ Input.Alt ];
-    make ~guide:one "item-down" "move list item down" Item_down Input.ArrowDown [ Input.Alt ] ]
+    make ~guide:one "item-up" "move list item up, or the binding in the text" Item_up Input.ArrowUp [ Input.Alt ];
+    make ~guide:one "item-down" "move list item down, or the binding in the text" Item_down Input.ArrowDown [ Input.Alt ] ]
   @ List.map (fun (direction, arrow, name) ->
       make ~guide:any ("walk." ^ name) ("walk " ^ name) (Walk direction) arrow [])
     [ Left, Input.ArrowLeft, "left"; Down, Input.ArrowDown, "down";

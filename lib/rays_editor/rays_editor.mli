@@ -97,7 +97,10 @@ module Private : sig
       | Render_mode of int
       | Undo | Redo
       | Panel_split of Pxui_shell.Layout.axis | Panel_close | Panel_retype of Pxui_shell.Layout.panel
-      | Toggle_map | Ui_scale of int | Restore_layout | Enter | Up | Go_world | Peek | Pick_up | Jump
+      | Panel_pick | Window_pick
+      | Panel_split_at of Pxui_shell.Layout.path * Pxui_shell.Layout.axis * float * Pxui_shell.Layout.panel
+      | Toggle_map | Ui_scale of int | Restore_layout | Enter | Up | Go_world | Back of int | Peek | Pick_up | Jump
+      | Text_command of Text_pane.command | Goto_symbol | Goto_line
       | Layout_switch of int | Layout_new | Layout_remove | Window_new of Editor_core.Panels.panel | Float_toggle
       | World_emit | World_reseed | World_time of float | World_play | World_preset of int
       | Scope_command of Pxui_graph.Scope.command
@@ -205,6 +208,17 @@ module Private : sig
     val make_shown : Flow.Syntax.t list -> string -> string list option -> tab -> shown
     val scrub_op : shown -> int * int -> string -> Flow_graph.Flow_edit.op option
     val line_of : string -> Flow.Diagnostic.t -> int option
+    type find = Text_pane.find = { query : string; replace : string; case : bool; replacing : bool; at : int; grab : bool }
+    type request = Text_pane.request = { select : int * int; splice : (int * int * string) list }
+    val find_current : find -> (int * int) list -> (int * int) option
+    val find_step : find -> (int * int) list -> [ `Next | `Previous ] -> find
+    val find_replace : find -> (int * int) list -> all:bool -> (request * find) option
+    val find_all : case:bool -> string -> string -> (int * int) list
+    (** The (start, stop) of every non-overlapping match of a query. *)
+    val symbols : string -> (string * string * int) list
+    (** The bindings of a text: (name, kind, byte of the name). *)
+    val line_target : string -> string -> int option
+    (** The byte of ["line"] or ["line:column"] (1-based). *)
     val binding : Flow.Syntax.t list -> string list -> (Flow.Syntax.t option * Flow.Syntax.t) option
     val paste_ops : Flow.Syntax.t list -> graph:string -> scope:string list -> string ->
       (Flow_graph.Flow_edit.op list, string) result
@@ -216,6 +230,8 @@ module Private : sig
     type vocab
     val vocab : ?ops:Flow.Op.t list -> Flow_sop.Catalog.descriptor list -> vocab
     val indent : string -> int -> string
+    val context_at : string -> int -> [ `Code | `String | `Comment ]
+    (** What a character typed at a byte lands in. *)
     val brackets : string -> (int * int) list
     type names = { graphs : string list; materials : string list; cameras : string list; layouts : string list }
     (** What the document knows beyond the text shown: every graph, the material graphs, the
@@ -347,6 +363,8 @@ module Editor : sig
     (** Explicit native benchmark selection. Production requires measured GPU costs. *)
     val status_text : 'prepared t -> string
     (** The status strip's text: a cook or edit error reads "Cook rejected: ..." in it. *)
+    val live_frame : 'prepared t -> Frame_input.t
+    (** The frame facts the sketch read last frame: the pointer only while it is the picture's. *)
     val inspector_subject : 'prepared t -> Flow.Workspace.path option
     (** The node the inspector shows for the selection, when it is exactly one. *)
     val new_graph : 'prepared t -> string -> Flow_graph.Flow_edit.op

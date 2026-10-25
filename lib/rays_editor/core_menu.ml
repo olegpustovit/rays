@@ -29,7 +29,8 @@ let context_name = Flow.Workspace.context_name
 (* The kinds the node menu offers where the pane shows [graph], at a screen point; the kinds of the
    other graphs follow in the search, in ink-3, saying that they are not placed here.  The title says
    which node the new one goes after. *)
-let open_menu value (x, y) =
+let open_menu ?scope_view value (x, y) =
+  let scope_view = Option.value scope_view ~default:value.scope_view in
   match add_target value with
   | Some (_, context) ->
       let module M = Pxui_graph.Node_menu in
@@ -44,10 +45,8 @@ let open_menu value (x, y) =
         (if context = Flow.Context.scene then [] else not_here (scene_entries value))
         @ List.concat_map (fun other -> if other = context then [] else not_here (factories other))
             [ Flow.Context.scene; Flow.Context.world; Flow.Context.sop ] in
-      let after = match Pxui_graph.Scope.selected value.scope_view with
-        | [ path ] when List.length path >= 2 ->
-            let last = List.nth path (List.length path - 1) in
-            if last = "" || last.[0] = ':' || last.[0] = '@' then None else Some last
+      let after = match Pxui_graph.Scope.selected scope_view with
+        | [ path ] when List.length path >= 2 -> binding_name path
         | _ -> None in
       Some (M.create ?after ~x ~y
         (factories context

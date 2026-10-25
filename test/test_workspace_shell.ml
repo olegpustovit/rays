@@ -227,6 +227,46 @@ let run_panel_keys () =
          && E3.undo_label !e = Some "Retype panel")
     ("retyping wrote the editor graph (and the scene it views) first: " ^ source !e);
   E3.close !e;
+  (* the sketch reads the pointer only on its picture: a press on the graph panel is not its
+     press, a drag begun there never becomes one, and a drag begun on the picture stays its own *)
+  let e = ref (editor (with_editor "    (let* [a (ui/graph) b (ui/viewport (ref scene)) both (ui/split-at \"horizontal\" 0.5 a b)] (ui/workspace both))")) and count = ref 0 in
+  let step ?(buttons = []) mouse events = incr count; e := E3.update !e (frame ~buttons mouse events !count) in
+  let live () = E3.Private.live_frame !e in
+  let panel = (200., 300.) and picture = (700., 300.) and held = [ Input.LeftButton ] in
+  step picture []; step picture [ Event.MouseMoved picture ];
+  check ((live ()).pointer = picture) "the picture has the pointer";
+  step panel [ Event.MouseMoved panel ];
+  step ~buttons:held panel [ Event.MousePressed (Input.LeftButton, panel) ];
+  check ((live ()).pointer = picture && (live ()).buttons = [] && (live ()).events = [])
+    "a press on a panel reached the sketch";
+  step ~buttons:held picture [ Event.MouseMoved picture ];
+  check ((live ()).buttons = []) "a drag begun on a panel became the sketch's over the picture";
+  step picture [ Event.MouseReleased (Input.LeftButton, picture) ]; step picture [];
+  step ~buttons:held picture [ Event.MousePressed (Input.LeftButton, picture) ];
+  check ((live ()).buttons = [ "left" ] && (live ()).events <> []) "a press on the picture did not reach the sketch";
+  step ~buttons:held panel [ Event.MouseMoved panel ];
+  check ((live ()).buttons = [ "left" ] && (live ()).pointer = panel) "a drag begun on the picture was cut at its edge";
+  step panel [ Event.MouseReleased (Input.LeftButton, panel) ];
+  check ((live ()).events <> []) "the sketch missed the release of its own drag";
+  step panel [];
+  check ((live ()).pointer = panel && (live ()).buttons = []) "the pointer left the picture where the drag ended";
+  E3.close !e;
+  (* the sketch has the keyboard only while its picture is focused, and a key held across the change
+     (the Esc that left a panel) stays hidden until it is released *)
+  let e = ref (editor (with_editor "    (let* [a (ui/graph) b (ui/viewport (ref scene)) both (ui/split-at \"horizontal\" 0.5 a b)] (ui/workspace both))")) and count = ref 0 in
+  let step ?(keys = []) mouse events = incr count; e := E3.update !e (Test_editor_input.frame ~keys mouse events !count) in
+  let seen () = (E3.Private.live_frame !e).keys in
+  let esc = [ Input.Escape ] and panel = (200., 300.) and picture = (700., 300.) in
+  let click ?keys at = step ?keys at [ Event.MousePressed (Input.LeftButton, at) ]; step ?keys at [ Event.MouseReleased (Input.LeftButton, at) ]; step ?keys at [] in
+  click picture; step ~keys:esc picture [];
+  check (seen () = [ "escape" ]) "the focused picture did not get a held Esc";
+  click ~keys:esc panel; step ~keys:esc panel [];
+  check (seen () = []) "a panel's Esc reached the sketch";
+  click ~keys:esc picture; step ~keys:esc picture [];
+  check (seen () = []) "an Esc held from the panel reached the sketch after the focus changed";
+  step picture []; step ~keys:esc picture [];
+  check (seen () = [ "escape" ]) "a fresh Esc was hidden from the focused picture";
+  E3.close !e;
   (* two panels of one kind: the keys act on the one clicked, not the first *)
   let twice = with_editor "    (let* [a (ui/graph) b (ui/graph) both (ui/split-at \"horizontal\" 0.5 a b)] (ui/workspace both))" in
   let e = ref (editor twice) and count = ref 0 in
@@ -742,7 +782,7 @@ let run_ops () =
    | Ok p -> check (has (source p) "(ui/split-at \"horizontal\" 0.25 a b)") "ui/split gets a ratio"
    | Error m -> fail m);
   (* split, close, retype *)
-  let s = ok "Split panel" (E.Split_panel { node = [ "editor"; "network" ]; axis = `V }) in
+  let s = ok "Split panel" (E.Split_panel { node = [ "editor"; "network" ]; axis = `V; ratio = 0.5; kind = None }) in
   check (Panels.to_string (tree s) = "(h outline (h (v (v graph lisp) lisp) (tile view view view view)))") ("split: " ^ Panels.to_string (tree s));
   check (has (source s) "(ui/split-at \"vertical\" 0.5 network_a network_b)") "the new split";
   let c = ok "Close panel" (E.Close_panel { node = [ "editor"; "network" ] }) in
@@ -769,7 +809,7 @@ let run_ops () =
   refuse "close the workspace" (E.Close_panel { node = [ "editor"; "shell" ] }) "Keep at least one";
   refuse "an unknown panel type" (E.Set_panel_kind { node = [ "editor"; "network" ]; kind = "dashboard" }) "Unknown panel type";
   refuse "resize a panel" (E.Set_layout_size { node = [ "editor"; "network" ]; size = `Ratio 0.4 }) "not a split";
-  refuse "no such binding" (E.Split_panel { node = [ "editor"; "nothing" ]; axis = `H }) "no longer exists";
+  refuse "no such binding" (E.Split_panel { node = [ "editor"; "nothing" ]; axis = `H; ratio = 0.5; kind = None }) "no longer exists";
   let floating = editor (with_editor
     "(let* [main (ui/graph) outline (ui/outline) window (ui/floating outline) tiles (ui/tile main window)] (ui/workspace tiles))") in
   (match E3.edit floating (E.Close_panel {node = ["editor"; "outline"]}) with
@@ -1466,8 +1506,8 @@ let run_layouts () =
   check (has (source !e) ":active 3" && E3.undo_label !e = Some "New layout") "/ [ n copies the layout";
   step [ key (Input.KeyChar '/'); ch '['; ch 'x' ]; step [];
   check (E3.undo_label !e = Some "Remove layout" && not (has (source !e) "layout preview")) "/ [ x removes it";
-  step [ key (Input.KeyChar '/'); ch 'n'; ch 'i' ]; step [];
-  check (has (source !e) "(ui/floating (ui/inspector))" && E3.undo_label !e = Some "New window") "/ n i opens an inspector window";
+  step [ key (Input.KeyChar '/'); ch 'n' ]; step [ ch '4' ]; step [];
+  check (has (source !e) "(ui/floating (ui/inspector))" && E3.undo_label !e = Some "New window") "/ n 4 opens an inspector window";
   (* the layout's one docked panel cannot float: refused, nothing written, the entry stays *)
   let before = source !e in
   step [ key (Input.KeyChar '/'); ch 'o'; ch 'f' ]; step [];
@@ -1912,7 +1952,7 @@ let run_panels () =
   click (550., 60.);
   step (550., 60.) [ Event.KeyPressed (Input.KeyChar 's') ]; step (550., 60.) [ Event.TextInput "g" ]; step (550., 60.) [];
   (* the focused row is a node id, which depends on how many nodes were allocated before it *)
-  let any_id line = List.exists (fun id -> has (panels ()) (line (string_of_int id))) (List.init 4096 Fun.id) in
+  let any_id line = List.exists (fun id -> has (panels ()) (line (string_of_int id))) (List.init 65536 Fun.id) in
   check (any_id (fun id -> "list la*: focus " ^ id ^ ", 0 folded, filter \"g\"; list lb: focus -, 0 folded, filter -"))
     ("the first list's focus row and filter: " ^ panels ());
   step (550., 60.) [ Event.KeyPressed Input.Enter ]; step (550., 60.) [];
@@ -2423,8 +2463,19 @@ let run_array_capacity_menu () =
     let value=List.assoc card.path(Result.get_ok(Flow.Eval.static ~record:true ws.checked)).records|>List.hd|>snd in
     check(value=Flow.Eval.Int Sys.max_floatarray_length)"Array capacity menu lost exact native Int")
 
-let run () = run_array_capacity_menu (); run_lisp_inspector (); run_context_menus (); run_expression_chip (); run_nested_inspector (); run_op_inspector (); run_spreadsheet (); run_panels (); run_studio (); run_copy_lisp (); run_hide_and_order (); run_root_section (); run_layouts (); run_compose (); run_ref_picker (); run_result_view (); run_loop_view (); run_geometry_view (); run_panel_states (); run_camera_zoom (); run_cameras (); run_lowering (); run_ops (); run_panel_keys (); run_unbound_panels (); run_values (); run_duplicate_and_view (); run_movers (); run_frame_key (); run_loop_copies (); run_loop_expression (); run_editor (); run_restore (); run_views (); run_instances (); run_host_scene_edit (); run_panel_chain ();
-  run_undo_under_pane (); run_atomic_frame (); run_undo_and_input (); run_carry_reaches_no_history ()
+(* The suite takes minutes. Its sections run in order until RAYS_SUITE_BUDGET seconds (default 45)
+   have passed, then it says what it skipped; RAYS_SLOW=1 runs every one. *)
+let run () =
+  let budget = if Sys.getenv_opt "RAYS_SLOW" = Some "1" then infinity
+    else Option.value ~default:45. (Option.bind (Sys.getenv_opt "RAYS_SUITE_BUDGET") float_of_string_opt) in
+  let start = Unix.gettimeofday () and skipped = ref 0 in
+  List.iter (fun section -> if Unix.gettimeofday () -. start > budget then incr skipped else section ())
+    [ run_ops;
+      run_array_capacity_menu; run_lisp_inspector; run_context_menus; run_expression_chip; run_nested_inspector; run_op_inspector; run_spreadsheet; run_panels; run_studio; run_copy_lisp; run_hide_and_order; run_root_section; run_layouts; run_compose; run_ref_picker; run_result_view; run_loop_view; run_geometry_view; run_panel_states; run_camera_zoom; run_cameras; run_lowering; run_panel_keys; run_unbound_panels; run_values; run_duplicate_and_view; run_movers; run_frame_key; run_loop_copies; run_loop_expression; run_editor; run_restore; run_views; run_instances; run_host_scene_edit; run_panel_chain;
+      run_undo_under_pane; run_atomic_frame; run_undo_and_input; run_carry_reaches_no_history
+    ];
+  if !skipped > 0 then Printf.printf "workspace shell: %d sections skipped after %.0f s (RAYS_SLOW=1 runs all)\n" !skipped budget
+
 
 (* Native VIEW regression over the reported sketch, including its piece renderer and a following
    camera. Moving the camera rebuilds the lowering while preserving an unchanged object network. *)

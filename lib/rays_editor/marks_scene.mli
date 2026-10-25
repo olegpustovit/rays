@@ -15,7 +15,11 @@ type gpu = slot:int -> kind:int -> count:int -> attribute array ->
 
 type cache
 val cache : unit -> cache
-(** The nodes built for the mark sets of the last frame, by position in the table. *)
+(** The nodes built for the mark sets of the last frame, by position in the table: at most 1024
+    nodes and 4096 converted attribute arrays are kept, the least recently used going first. *)
+
+val cache_size : cache -> int
+(** The nodes held. *)
 
 val scene : buffers:Flow_ir.Core_exec.Buffers.t -> ?image:(int -> Rays.Image.t) -> ?gpu:gpu -> ?cache:cache ->
   ?device:(int -> Flow_ir.Gpu.value) -> Scene_command.Marks.t ->

@@ -194,7 +194,9 @@ let run_state_internal ?(config=default_config)?max_frames ?(high_density=true)?
       Canvas_runtime.clear();ignore(Rays_execution.destroy coordinator))(fun()->on_stop!model)in
   Fun.protect~finally:cleanup(fun()->
     let profile=Sys.getenv_opt"RAYS_PROFILE"<>None in
-    let limit=max_frames in let count=ref 0 in while not !stopped&&Option.fold~none:true~some:(fun limit-> !count<limit)limit do
+    let limit=max_frames in let count=ref 0 in
+    let last_scene=ref None in
+    let one_frame()=
       Time.update();
       let polled=match Input_state.poll()with
         |Ok polled->polled
@@ -226,6 +228,7 @@ let run_state_internal ?(config=default_config)?max_frames ?(high_density=true)?
       (try
         model:=update !model facts;
         let scene=view !model facts in
+        last_scene:=Some scene;
         (* An interactive window that is minimized or covered is not drawn and
            the loop idles. A finite run (max_frames, RAYS_MAX_FRAMES, export)
            is a test or a capture: it always renders. *)
@@ -240,7 +243,23 @@ let run_state_internal ?(config=default_config)?max_frames ?(high_density=true)?
         let exn,backtrace,frames=crashed exn in
         write_crash~title:config.title~dump:(crash_dump !model)~recent:frames exn backtrace;
         Printexc.raise_with_backtrace exn backtrace);
-      Time.limit_frame_rate()done;!model)
+    in
+    (* A window edge is being dragged: the native pump is blocked and calls this.  It only draws
+       the last picture at the new size (no poll, update, effects, autosave, reload or clock tick),
+       and a failure is kept for the loop to raise.  Needs a Metal window and the SDL pump, so no
+       window-free test drives it. *)
+    let live_failure=ref None in
+    Callback.register"rays_sdl3_live_redraw"(fun()->
+      if limit=None&&Option.is_none !live_failure then
+        try Rays_execution.window_changed coordinator;Option.iter Scene.render !last_scene
+        with exn->
+          let exn,backtrace,frames=crashed exn in
+          write_crash~title:config.title~dump:(crash_dump !model)~recent:frames exn backtrace;
+          live_failure:=Some exn);
+    Fun.protect~finally:(fun()->Callback.register"rays_sdl3_live_redraw"(fun()->()))(fun()->
+      while not !stopped&&Option.fold~none:true~some:(fun limit-> !count<limit)limit do
+        Option.iter raise !live_failure;
+        one_frame();Time.limit_frame_rate()done;!model))
 let run_state ?config ?max_frames ~init~update~view ?after_present ?crash_dump ?on_stop()=
   Parallel.run ?domains:(Option.bind config(fun value->value.domains))(fun()->run_state_internal?config?max_frames?after_present?crash_dump~init~update~view?on_stop())
 let export_state ?(config=default_config)?(fps=60)?(prefix="frame")~directory~frames~init~update~view ?(after_present=fun model _->model) ?(on_stop=fun _->())()=

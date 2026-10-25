@@ -3,7 +3,7 @@ module W = Flow.Workspace
 
 type path = W.path
 type arg_key = Whole | Pos of int | Kw of string | Field of string | Bv of int * int | Arm of int
-type loop = For | Fold | If
+type loop = For | Fold | If | Map | Filter
 
 type op =
   | Set_arg of { node : path; key : arg_key; sub : int list; value : S.t }
@@ -21,6 +21,8 @@ type op =
   | Make_defn of { nodes : path list; name : string; context : string; params : (string * string) list }
   | Make_macro of { nodes : path list; name : string; holes : (int list * string) list }
   | Inline_macro of { node : path }
+  | Inline_defn of { node : path }
+  | Move_binding of { node : path; by : int }
   | Toggle_bypass of { node : path }
   | Set_note of { node : path; text : string }
   | Add_item of { node : path }
@@ -29,7 +31,7 @@ type op =
   | Add_node of { scope : path; name : string; expr : S.t }
   | Delete_nodes of { nodes : path list }
   | Set_layout_size of { node : path; size : [ `Ratio of float | `First of int | `Second of int ] }
-  | Split_panel of { node : path; axis : [ `H | `V ] }
+  | Split_panel of { node : path; axis : [ `H | `V ]; ratio : float; kind : string option }
   | Close_panel of { node : path }
   | Dock_panel of { node : path; target : path; side : [ `Left | `Right | `Top | `Bottom ] }
   | Set_panel_kind of { node : path; kind : string }
