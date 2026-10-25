@@ -227,16 +227,43 @@ let scoped_forms (checked:W.t) ~leading ~skip ~start =
       | _ -> false)checked.macros in
   forms @ List.rev !expanded
 
+(* A cache key for forms: a compact, length-prefixed serialisation of everything the printer shows
+   (spelling, comments, flags) without ids or spans. Pretty-printing them cost a third of a workspace
+   lowering; the key only has to change when the authored content changes. *)
+let forms_digest forms =
+  let buffer = Buffer.create 4096 in
+  let str s = Buffer.add_string buffer (string_of_int (String.length s)); Buffer.add_char buffer ':'; Buffer.add_string buffer s in
+  let strs l = Buffer.add_char buffer '['; List.iter str l; Buffer.add_char buffer ']' in
+  let rec form (x : Flow.Syntax.t) =
+    if x.notes <> [] then strs x.notes;
+    if x.meta <> [] then strs x.meta;
+    (match x.node with
+     | Sym s -> Buffer.add_char buffer 's'; str s
+     | Kw s -> Buffer.add_char buffer 'k'; str s
+     | Num s -> Buffer.add_char buffer 'n'; str s
+     | Str s -> Buffer.add_char buffer 't'; str s
+     | List l -> Buffer.add_char buffer '('; List.iter form l
+     | Vec l -> Buffer.add_char buffer '<'; List.iter form l
+     | Map l -> Buffer.add_char buffer '{'; List.iter form l
+     | Quote (kind, x) ->
+         Buffer.add_char buffer 'q';
+         Buffer.add_char buffer (match kind with Plain -> 'p' | Quasi -> 'q' | Unquote -> 'u' | Splice -> 's');
+         form x);
+    if x.tail <> [] then strs x.tail;
+    Buffer.add_char buffer ')' in
+  List.iter form forms;
+  Digest.string (Buffer.contents buffer)
+
 let declaration_source (checked:W.t) (root:W.node_definition) =
-  Digest.string(fst(Flow.Lisp.print
+  forms_digest
     (scoped_forms checked ~leading:[root.body.form] ~skip:root.kind.qualified
-       ~start:(fun ~node ~graph:_ -> node root))))
+       ~start:(fun ~node ~graph:_ -> node root))
 
 (* The kernel cache key: the authored source plus what the graphs being lowered reach, not the whole library. *)
 let kernel_source (checked:W.t) =
-  Digest.string(fst(Flow.Lisp.print (checked.source @
+  forms_digest (checked.source @
     scoped_forms checked ~leading:(List.map (fun (g:W.graph)->g.form) checked.graphs) ~skip:""
-      ~start:(fun ~node:_ ~graph -> List.iter graph checked.graphs))))
+      ~start:(fun ~node:_ ~graph -> List.iter graph checked.graphs))
 
 let uses_context graph =
   let found = ref false in
