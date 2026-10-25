@@ -143,13 +143,20 @@ let objects lowered = List.filter_map (fun (graph : graph) ->
 
 (* One host call lowers a synthetic workspace that shares the caller's source lists; the digest of those
    lists is memoised on their physical identity (one entry, atomically swapped, so domain-safe). *)
-let kernel_digest_cache : (Obj.t list * string) Atomic.t = Atomic.make ([], "")
-let kernel_digest (checked : Workspace.t) =
-  let key = [Obj.repr checked.source; Obj.repr checked.macros; Obj.repr checked.defs; Obj.repr checked.nodes; Obj.repr checked.graphs] in
-  let (k, d) = Atomic.get kernel_digest_cache in
-  if k <> [] && List.for_all2 (==) k key then d else begin
-    let d = Context_kernel.kernel_source checked in
-    Atomic.set kernel_digest_cache (key, d); d end
+let digest_cache : (Obj.t list * string) list Atomic.t = Atomic.make []
+let digest_cache_capacity = 64
+let cached_digest (checked : Workspace.t) extra compute =
+  (* elementwise: a nested lowering rebuilds the lists (graphs = [body]) but shares their forms *)
+  let part tag l = Obj.repr tag :: List.map Obj.repr l in
+  let key = List.concat [part 0 checked.source; part 1 checked.macros; part 2 checked.defs; part 3 checked.nodes;
+    part 4 checked.graphs; part 5 extra] in
+  let same (k, _) = List.compare_lengths k key = 0 && List.for_all2 (==) k key in
+  match List.find_opt same (Atomic.get digest_cache) with
+  | Some (_, d) -> d
+  | None ->
+      let d = compute () in
+      Atomic.set digest_cache (List.filteri (fun i _ -> i < digest_cache_capacity) ((key, d) :: Atomic.get digest_cache)); d
+let kernel_digest checked = cached_digest checked [] (fun () -> Context_kernel.kernel_source checked)
 
 let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) ?(strict_body = false) ?(defer_body_errors = false) ?(kernel_bindings = []) ?(compiled_ids = Instance_path.Map.empty)
     ?(sites = []) ?inputs checked =
@@ -601,7 +608,7 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
       and lock = Mutex.create () in
       fun () -> Mutex.protect lock (fun () -> Lazy.force use) in
     let lisp_factory ?(functions = []) ?provenance (definition : Workspace.node_definition) =
-      let declaration_source=lazy(Context_kernel.declaration_source checked definition) in
+      let declaration_source=lazy(cached_digest checked [definition] (fun () -> Context_kernel.declaration_source checked definition)) in
       let rec function_elements = function
         | E.Fn fn -> [fn]
         | E.List values -> Array.to_list values |> List.concat_map function_elements
