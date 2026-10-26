@@ -122,8 +122,9 @@ let sync_scope value =
       let now = Unix.gettimeofday () in
       let summaries = value.cook.Cook.summaries in
       let executions = Flow_ir.Profile.executions lowered.profile in
-      (* a moving clock alone re-forces the probes at most five times a second: a forced frame sets the quiet time to four
-         times its own length, so forcing never takes more than a fifth of the time *)
+      (* a moving clock or pointer re-forces the probes at most five times a second: a forced frame sets the quiet time to four
+         times its own length, so forcing never takes more than a fifth of the time (a pointer read by
+         a deep fold re-forced 0.1 s of probes every frame of a move) *)
       (* the executions are a list forcing a probe rewrites, so it is never physically the same twice:
          comparing it by identity made every frame fresh, and each fresh frame forced the probes
          again.  Their count changes when a probe first runs, which is when a footer needs them. *)
@@ -132,7 +133,7 @@ let sync_scope value =
         | Some k -> not (k.evaluated == evaluated && k.summaries == summaries
             && List.compare_lengths k.executions executions = 0
             && (Option.equal steady_equal k.time time
-              || (now -. k.stamp < k.gap && Option.equal (fun (a : Frame_input.t) b -> steady_equal { a with t = b.t; frame = b.frame } b) k.time time)))
+              || (now -. k.stamp < k.gap && Option.is_some k.time = Option.is_some time)))
         | None -> true in
       if not moved && not fresh then
         (* the first call after a forced frame learns what that frame cost *)

@@ -271,6 +271,7 @@ let update t ui (frame : Frame.t) =
       let sub = Ui.within ui tile (fun () ->
         let box ?(flags = Ui.clickable) name (dx, dy) (bw, bh) =
           Ui.box ui ~flags ~w:(Ui.Px (bw *. z)) ~h:(Ui.Px (bh *. z)) ~at:(dx *. z, dy *. z) name in
+        (* dels hold thunks: unwire probes the last value, only worth it on a click *)
         let outs = ref [] and dels = ref [] and taps = ref [] and inputs = ref [] in
         let input name pos =
           let b = box name (fst pos -. 7., snd pos -. 7.) (14., 14.) in
@@ -290,7 +291,7 @@ let update t ui (frame : Frame.t) =
              (match List.find_opt (fun (r : P.row) -> r.head) n.rows with
               | Some r when n.zone = None ->
                   let sink = input "d:head" (if shown = P.Point then (0., P.point_size /. 2.) else (1., port_y)) in
-                  if wired r then dels := (sink, unwire t n r) :: !dels
+                  if wired r then dels := (sink, fun () -> unwire t n r) :: !dels
               | _ -> ());
              (match n.zone with
               | Some zn when not p.collapsed ->
@@ -301,7 +302,7 @@ let update t ui (frame : Frame.t) =
                       let sink = input "rd:label" (1., port_y) in
                       (match r.key, r.expr with
                        | Some key, Some e when E.free_names e <> [] ->
-                           dels := (sink, [ E.Disconnect { node = n.path; key; fallback = None } ]) :: !dels
+                           dels := (sink, fun () -> [ E.Disconnect { node = n.path; key; fallback = None } ]) :: !dels
                        | _ -> ())
                     end;
                     if zone_uses zn r.names then out "rail:label" (List.hd r.names) r.ty (begin_port n zn r)) (P.label_row zn);
@@ -312,7 +313,7 @@ let update t ui (frame : Frame.t) =
                     let sink = if r.key <> None then Some (input ("rd:" ^ string_of_int i) (0., cy)) else None in
                     (match r.key, r.expr, sink with
                      | Some key, Some e, Some sink when E.free_names e <> [] ->
-                         dels := (sink,
+                         dels := (sink, fun () ->
                                   [ E.Disconnect { node = n.path; key; fallback = None } ]) :: !dels
                      | _ -> ())) (P.extra_rails zn);
                   if zn.kind <> P.Let && zn.kind <> P.State && zn.kind <> P.Branch then begin
@@ -360,7 +361,7 @@ let update t ui (frame : Frame.t) =
                           let ry = top +. float k *. P.row_height in
                           if r.socket then begin
                             let sink = input ("d:" ^ string_of_int i) (0., ry +. 12.) in
-                            if wired r then dels := (sink, unwire t n r) :: !dels
+                            if wired r then dels := (sink, fun () -> unwire t n r) :: !dels
                           end
                       | P.Folder _ -> ()) p.lines
                   end));
@@ -834,7 +835,7 @@ let update t ui (frame : Frame.t) =
            end
        | _ -> ());
       t) t taps in
-    List.iter (fun (b, ops) -> if (Ui.signal ui b).clicked then List.iter (fun op -> emit (Syntax_edit op)) ops) dels;
+    List.iter (fun (b, ops) -> if (Ui.signal ui b).clicked then List.iter (fun op -> emit (Syntax_edit op)) (ops ())) dels;
     (* wires *)
     let t = List.fold_left (fun t (b, src, ty) ->
       let bs = Ui.signal ui b in
