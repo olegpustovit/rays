@@ -11,6 +11,12 @@ let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~lead
   let result = match result.prompt_intent with
     | Some (Edit_source op) -> { result with changes = result.changes @ [ Syntax_edit op ] }
     | _ -> result in
+  (* i on a collapsed function or loop opens it in place, as a double click does *)
+  let result, actions = match Pxui_graph.Scope.selected value.scope_view with
+    | [ zone ] when List.mem Leader.Enter actions && Pxui_graph.Scope.collapsed_zone value.scope_view zone ->
+        { result with scope_changes = result.scope_changes @ [ Pxui_graph.Scope.Zone_collapsed { zone; collapsed = false } ] },
+        List.filter (( <> ) Leader.Enter) actions
+    | _ -> result, actions in
   (* A payload in flight: what the panes saw under the pointer becomes the carry's report, and
      nothing else edits the document until the put (navigation and selection only). *)
   let carry_report = if not carrying then None else begin
@@ -242,6 +248,18 @@ let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~lead
       | Syntax_edit op ->
           (match Doc.syntax_edit ~factories:value.factories next op with
            | Ok doc ->
+               (* a math node a wire folded into its reader opens as a card, where it was *)
+               let doc = match op with
+                 | Flow_graph.Flow_edit.Connect { node; key; src; _ } when node <> [] ->
+                     let sp = List.rev (List.tl (List.rev node)) in
+                     let leaf = Flow_graph.Flow_edit.nested_leaf (List.nth node (List.length node - 1)) key in
+                     (match Flow_graph.Flow_edit.arg_text (fst doc.workspace).source node key with
+                      | Some e when Flow_graph.Flow_edit.value_call e ->
+                          let at = Layout_by_path.Path_map.find_opt (sp @ [ src ]) (fst next.workspace).layout.at in
+                          Doc.layout_edit doc (fun l -> { l with collapsed = Layout_by_path.Path_map.add (sp @ [ leaf ]) false l.collapsed;
+                            at = (match at with Some p -> Layout_by_path.Path_map.add (sp @ [ leaf ]) p l.at | None -> l.at) })
+                      | _ -> doc)
+                 | _ -> doc in
                (match op with
                 | Flow_graph.Flow_edit.Add_node { scope; name; _ } -> added := [ scope @ [ name ] ]
                 | Rename_graph { name; to_ } -> renamed := Some (name, to_)
@@ -334,8 +352,8 @@ let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~lead
     List.fold_left (fun (next, result, probes) -> function
       | Pxui_graph.Scope.Zone_collapsed { zone; collapsed } ->
           (* opening a frame that starts collapsed is stored, so it stays open *)
-          let default = match value.scope_key with
-            | Some k -> Core_scope.default_collapsed (k.scope) zone | None -> false in
+          (* an expression starts folded: opening it is stored too *)
+          let default = Flow_graph.Flow_edit.nested (List.nth zone (List.length zone - 1)) in
           Doc.layout_edit next (fun l -> { l with collapsed =
             if collapsed then M.add zone true l.collapsed
             else if default then M.add zone false l.collapsed else M.remove zone l.collapsed }),

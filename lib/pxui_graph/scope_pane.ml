@@ -95,6 +95,13 @@ let context_command = function
   | 11 -> Wrap_if | 12 -> Add_arm | 13 -> Delete_arm | 14 -> Wrap_map | 15 -> Wrap_filter | 16 -> Inline_fn
   | 17 -> Item_up | 18 -> Item_down | _ -> Delete
 
+(* the glyph of an expression row opens it as cards; any other inline call unfolds into a binding *)
+let unfold_row (n : P.node) (r : P.row) = match r.expr with
+  | Some e when E.value_call e ->
+      [ Zone_collapsed { zone = List.mapi (fun i s -> if i = List.length n.path - 1 then E.nested_leaf n.name r.key else s) n.path;
+                         collapsed = false } ]
+  | _ -> [ Syntax_edit (E.Unfold { node = n.path; key = r.key; sub = [] }) ]
+
 (* the footer of a card at the iterations pinned in its zones: its value is the ghost beside the out-port *)
 let footer_of t records (n : P.node) =
   let chain = Option.value ~default:[] (Hashtbl.find_opt t.chains n.path) in
@@ -283,7 +290,7 @@ let update t ui (frame : Frame.t) =
              (match List.find_opt (fun (r : P.row) -> r.head) n.rows with
               | Some r when n.zone = None ->
                   let sink = input "d:head" (if shown = P.Point then (0., P.point_size /. 2.) else (1., port_y)) in
-                  if wired r then dels := (sink, unwire n r) :: !dels
+                  if wired r then dels := (sink, unwire t n r) :: !dels
               | _ -> ());
              (match n.zone with
               | Some zn when not p.collapsed ->
@@ -297,10 +304,10 @@ let update t ui (frame : Frame.t) =
                            dels := (sink, [ E.Disconnect { node = n.path; key; fallback = None } ]) :: !dels
                        | _ -> ())
                     end;
-                    if zone_uses zn r.names then out "rail:label" (List.hd r.names) r.ty (12., 36.)) (P.label_row zn);
+                    if zone_uses zn r.names then out "rail:label" (List.hd r.names) r.ty (begin_port n zn r)) (P.label_row zn);
                   List.iteri (fun i (r : P.rail_row) ->
                     let cy = P.head_height +. float i *. P.row_height +. 12. in
-                    out ("rail:" ^ string_of_int i) (List.hd r.names) r.ty (p.w -. 12., cy);
+                    if r.role <> P.Capture then out ("rail:" ^ string_of_int i) (List.hd r.names) r.ty (begin_port n zn r);
                     (* wired rail rows can be disconnected from their socket *)
                     let sink = if r.key <> None then Some (input ("rd:" ^ string_of_int i) (0., cy)) else None in
                     (match r.key, r.expr, sink with
@@ -353,7 +360,7 @@ let update t ui (frame : Frame.t) =
                           let ry = top +. float k *. P.row_height in
                           if r.socket then begin
                             let sink = input ("d:" ^ string_of_int i) (0., ry +. 12.) in
-                            if wired r then dels := (sink, unwire n r) :: !dels
+                            if wired r then dels := (sink, unwire t n r) :: !dels
                           end
                       | P.Folder _ -> ()) p.lines
                   end));
@@ -396,7 +403,7 @@ let update t ui (frame : Frame.t) =
                           ~at:((value_x p.w +. 24.) *. z, (top +. float k *. P.row_height +. 4.) *. z) ("ex" ^ string_of_int i) in
                       let s = Ui.signal ui cb in
                       (* a double click expands the call in place, as the glyph does *)
-                      if s.double_clicked then [ Syntax_edit (E.Unfold { node = n.path; key = r.key; sub = [] }) ]
+                      if s.double_clicked then unfold_row n r
                       else if s.clicked then [ Selected [ n.path; n.path @ [ ":" ^ r.label ] ] ] else []
                   | _ -> [] in
                 subject @ if not (Ui.signal ui b).clicked then [] else
@@ -421,7 +428,7 @@ let update t ui (frame : Frame.t) =
                                 | Some value -> [ Syntax_edit (E.Set_arg { node = n.path; key; sub = []; value }) ]
                                 | None -> [ Notice "Wire a node onto this row" ])
                            | None -> [ Syntax_edit (E.Set_arg { node = n.path; key; sub = []; value = S.make (S.Num "0") }) ]))
-                 | _, P.Inline _ -> [ Syntax_edit (E.Unfold { node = n.path; key = r.key; sub = [] }) ]
+                 | _, P.Inline _ -> unfold_row n r
                  | _ -> [])
                 | P.Row (i, (({ chip = P.Name s; _ } : P.row) as r)) when Hashtbl.mem t.folds (n.path, i) ->
                     (* the fold button of a wired row, where [paint_value] draws its glyph *)
@@ -714,8 +721,12 @@ let update t ui (frame : Frame.t) =
        (* a wire let go on empty canvas: the add menu there, after the node it came from *)
        let on_canvas = target = None && List.nth_opt (List.rev src_path) 0 = Some w.src
          && not (List.exists (fun (_, _, _, ttile, _, _, _) -> Ui.hovered_within ui ttile) tiles) in
+       (* an Alt-drag moves the wire: it comes off the inputs it was lifted from *)
+       let off = unwire_at t (List.filter (fun i -> Some i <> target) w.lift) in
        (match target with
-        | Some (node, key) -> emit (Syntax_edit (E.Connect { node; key; src = w.src; iter = w.iter }))
+        | Some (node, key) -> emit (Syntax_edit (E.Connect { node; key; src = w.src; iter = w.iter })); List.iter (fun op -> emit (Syntax_edit op)) off
+        | None when w.lift <> [] && not (List.exists (fun (_, _, _, ttile, _, _, _) -> Ui.hovered_within ui ttile) tiles) ->
+            List.iter (fun op -> emit (Syntax_edit op)) off
         | None when on_canvas -> emit (Selected [ src_path ]); (let x, y = release_point in emit (Menu_requested (x, y)))
         | None -> emit (Notice "Drop the wire on an input row"));
        { t with drag = None; selected = if on_canvas then Path_set.singleton src_path else t.selected } in
@@ -729,14 +740,16 @@ let update t ui (frame : Frame.t) =
           List.find_map (fun b ->
             let s = Ui.signal ui b in
             let px, py = s.pointer and qx, qy = s.press_point in
-            if s.held && left s && Float.hypot (px -. qx) (py -. qy) > 6. then Some (w, from) else None) (hits i)
+            if s.held && left s && Float.hypot (px -. qx) (py -. qy) > 6. then
+              Some (w, from, if List.mem Input.Alt (Ui.press_keys ui b) then Option.to_list (Option.map (fun (p, k, _) -> p, k) w.target) else [])
+            else None) (hits i)
       | _ -> None) wires_in_view
     |> (function
-      | Some (w, from) ->
+      | Some (w, from, lift) ->
           (match Option.map (fun ((p : P.placed), _, _) -> p.item) (item_at t from) with
            | Some (P.Item ({ zone = None; _ } as n)) when n.binds = [ n.name ] ->
-               { t with drag = Some (Wiring { src = n.name; ty = w.ty; iter = false; from = (sx t (fst w.a), sy t (snd w.a)) }) }
-           | Some (P.Input i) -> { t with drag = Some (Wiring { src = i.name; ty = w.ty; iter = false; from = (sx t (fst w.a), sy t (snd w.a)) }) }
+               { t with drag = Some (Wiring { src = n.name; ty = w.ty; iter = false; from = (sx t (fst w.a), sy t (snd w.a)); lift }) }
+           | Some (P.Input i) -> { t with drag = Some (Wiring { src = i.name; ty = w.ty; iter = false; from = (sx t (fst w.a), sy t (snd w.a)); lift }) }
            | _ -> t)
       | None -> t) in
   (* ...and let go, it finishes like an out-port's wire *)
@@ -775,6 +788,8 @@ let update t ui (frame : Frame.t) =
         match p.item with
         | P.Item n when (not n.synthetic) && snd s.press_point < top +. P.head_height *. z ->
             { t with editing = Some (Name p.path) }
+        (* a folded function or loop opens in place; anything else follows what it references *)
+        | P.Item n when n.zone <> None && t.collapsed p.path -> emit (Zone_collapsed { zone = p.path; collapsed = false }); t
         | P.Item n when not n.synthetic -> emit (Activated p.path); t
         | P.Input _ -> { t with editing = Some (Default p.path) }
         | _ -> t
@@ -829,7 +844,11 @@ let update t ui (frame : Frame.t) =
                 | Some zn -> List.exists (fun (r : P.rail_row) -> r.role = P.Var && List.mem src r.names) zn.rail
                 | None -> false) (P.zones scope)
             | None -> false) in
-          { t with drag = Some (Wiring { src; ty; iter; from = (let x, y, w, h = Ui.rect ui b in x +. w /. 2., y +. h /. 2.) }) }
+          (* Alt on an out-port lifts every wire it feeds *)
+          let lift = if not (List.mem Input.Alt (Ui.press_keys ui b)) then [] else
+            Array.fold_left (fun acc (w : wire) -> match w.from, w.target with
+              | Some f, Some (path, key, _) when f = p.path -> (path, key) :: acc | _ -> acc) [] t.geo.wires in
+          { t with drag = Some (Wiring { src; ty; iter; from = (let x, y, w, h = Ui.rect ui b in x +. w /. 2., y +. h /. 2.); lift }) }
         else t in
       if bs.released && left bs then begin
         match t.drag with

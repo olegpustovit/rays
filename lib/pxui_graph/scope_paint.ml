@@ -116,6 +116,7 @@ let marks ?execution (n : P.node) =
   @ Option.fold ~none:[] ~some:(fun (e : Flow_graph.Probe.execution) -> [e.tier]) execution
   @ (if n.macro <> None then [ "◊" ] else [])
   @ (match n.zone with Some { order = Some o; _ } -> [ o ] | _ -> [])
+  @ (if n.expr then [ "expr" ] else [])
 
 let marks_width paint ~size ~gap marks =
   List.fold_left (fun a m -> a +. Ui.Paint.text_width paint ~size m +. gap) 0. marks
@@ -376,9 +377,7 @@ let paint_rail paint ui t ~z ~fs ~x ~y ~w ~expanded (rail : P.rail_row list) =
            text_in paint ui ~size:ls ~color:(Pxui.Theme.ink_2 theme) ~x:ex ~y:ry ~h:rh (fitted paint ls room shown)
      | None -> ());
     if r.key <> None || r.role = P.Capture then
-      paint_socket paint theme r.ty ~connected:(r.role = P.Capture || r.expr <> None) ~z (x, ry +. 12. *. z);
-    if expanded then
-      paint_socket paint theme r.ty ~connected:true ~z (x +. w -. 12. *. z, ry +. 12. *. z)) rail
+      paint_socket paint theme r.ty ~connected:(r.role = P.Capture || r.expr <> None) ~z (x, ry +. 12. *. z)) rail
 
 (* the zone's label row (kit [.zone] label): [FOR] in accent, the binder in ink, "in ..." in ink-2 *)
 let zone_binder t (n : P.node) (zn : P.zone) =
@@ -645,7 +644,11 @@ let paint_node paint ui t ~z ~fs ?footer ?lens_step ?(hovered = false) ?(carry =
   let edge = match failed with
     | Some _ -> Pxui.Theme.invalid
     | None -> card_edge t ~fill ~selected in
-  paint_card paint ~x ~y ~w ~h ~fill ~edge;
+  if n.expr then begin
+    (* an expression written in its reader's input: a dashed card, its [expr] mark in the header *)
+    Ui.Paint.fill paint ~x ~y ~w ~h fill;
+    dashed_frame_in paint ~x ~y ~w ~h edge
+  end else paint_card paint ~x ~y ~w ~h ~fill ~edge;
   let lens = match n.lens, lens_step with Some l, Some step -> Some (l, step) | _ -> None in
   let lh = match lens with Some (l, step) -> P.lens_height l ~step | None -> 0. in
   let head = List.find_opt (fun (r : P.row) -> r.head) n.rows in
@@ -742,8 +745,25 @@ let paint_zone_frame paint ui t ~z ~fs ?footer (n : P.node) (zn : P.zone) ~selec
             paint_socket paint theme r.ty ~connected:true ~z (x +. 1. *. z, y +. port_y *. z)
         | _ -> ());
        if zone_uses zn r.names then
-         paint_socket paint theme r.ty ~connected:true ~z (x +. 12. *. z, y +. 36. *. z)
+         let bx, by = begin_port n zn r in paint_socket paint theme r.ty ~connected:true ~z (x +. bx *. z, y +. by *. z)
    | None -> ());
+  List.iter (fun (r : P.rail_row) -> if r.role <> P.Capture then
+    let bx, by = begin_port n zn r in paint_socket paint theme r.ty ~connected:true ~z (x +. bx *. z, y +. by *. z)) (P.extra_rails zn);
+  (* the begin and end bars: a hairline inside each edge under the rails, named in the air above *)
+  if not plain then begin
+    let top = y +. P.rail_top n *. z in
+    let bh = y +. h -. top -. 4. *. z in
+    if bh > 0. then begin
+      let edge = (zone_style theme zn.kind).edge and ls = max 4 (fs - 2) and ink = Pxui.Theme.ink_3 theme in
+      Ui.Paint.fill paint ~x:(x +. 20. *. z) ~y:top ~w:1. ~h:bh edge;
+      Ui.Paint.fill paint ~x:(x +. w -. 21. *. z) ~y:top ~w:1. ~h:bh edge;
+      text_in paint ui ~size:ls ~color:ink ~x:(x +. 6. *. z) ~y:(top -. 20. *. z) ~h:(16. *. z) "begin";
+      let yl = if zn.kind = P.Fold || zn.kind = P.Scan then zn.yield_label ^ " \xe2\x86\xba" else zn.yield_label in
+      text_in paint ui ~size:ls ~color:ink ~x:(x +. w -. 6. *. z -. Ui.Paint.text_width paint ~size:ls yl) ~y:(top -. 20. *. z) ~h:(16. *. z) yl;
+      let ex, ey = end_port n ~w:(w /. z) in
+      paint_socket paint theme (Some n.ty) ~connected:true ~z (x +. ex *. z, y +. ey *. z)
+    end
+  end;
   if zn.kind <> P.Let && zn.kind <> P.State && zn.kind <> P.Branch then paint_selector paint ui t ~z ~fs ~count ~probe (x, y, w);
   paint_rail paint ui t ~z ~fs ~x ~y:(y +. P.head_height *. z) ~w ~expanded:true (P.extra_rails zn);
   if selected then Ui.Paint.brackets paint ~x ~y ~w ~h ~offset:3. theme.accent
@@ -910,7 +930,9 @@ let paint_background paint t ~viewport ~wires (zones : (P.node * P.zone * P.plac
     let color = if is_selected then theme.foreground else if layout = Some true then theme.accent
       else if layout = Some false then Pxui.Theme.muted theme else ty_color t w.ty in
     let color = if lit = Some false then Color.with_alpha color 40 else color in
-    if tagged t w && not is_selected then begin
+    (* a formula's reads stay out of the resting picture; selecting either end draws them *)
+    if w.refers && not (is_selected || is_highlighted || lit = Some true) then ()
+    else if tagged t w && not is_selected then begin
       (* a long wire reads as a stub and the source's name at the use site *)
       let (ax, ay) = sx t (fst w.a), sy t (snd w.a) and (bx, by) = sx t (fst w.b), sy t (snd w.b) in
       let stub = 14. *. z in
@@ -921,7 +943,7 @@ let paint_background paint t ~viewport ~wires (zones : (P.node * P.zone * P.plac
       Ui.Paint.text paint ~at:(bx -. stub -. 4. -. tw, by -. float tag_size /. 2. -. 1.) ~size:tag_size
         ~color:(if lit = Some false then Color.with_alpha (Pxui.Theme.ink_2 theme) 60 else Pxui.Theme.ink_2 theme) name
     end else begin
-      if layout = Some false || w.dashed then paint_dashed_polyline paint ~width color pts
+      if layout = Some false then paint_dashed_polyline paint ~width color pts
       else paint_polyline ~clip:viewport paint ~width color pts;
       if t.wires = `Straight then paint_bends paint ~z color pts
     end) wires

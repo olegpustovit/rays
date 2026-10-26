@@ -137,9 +137,13 @@ The pane's structure is `graph.html`'s, not only its card internals:
   edge, are on it. `Moved` and `scope_point` snap to it.
 - **Zones.** A plain `for` is the tint, a 1-point edge, the label row (`FOR`, binder, `in <source>`) and the selector at
   top + 3; cards inside are wired across the edge. What a loop needs beyond that is drawn only when used: the
-  collection's in-port at the label row when a name feeds it, the loop variable's out-port at (12, 36) when something
-  reads it, accumulators and further variables as rows under the label row (`Projection.extra_rails`, out-port at the
-  row's right end), the zone's own out-port at the right of the label row, and a fold's feedback as a dashed wire.
+  collection's in-port at the label row when a name feeds it, accumulators and further variables as rows under the
+  label row (`Projection.extra_rails`), and the zone's own out-port at the right of the label row. A zone other than
+  a plain `for` has begin and end bars (`Scope_wires.begin_port`, `end_port`): every variable's out-port stacks in the
+  strip inside the left edge under the rails, the body's result wires into the strip inside the right edge, and no
+  feedback wire crosses the body (the end bar's label says `next ↺`). A plain `for` keeps its label port at (12, 36).
+- **Chains.** `Projection.layout` stacks a card's chain input (its first positional nested node call) right above
+  it in its column; `compute` draws that link as a spine between the two cards' left strips (`spine`), not a routed wire.
 - **Failed node.** `Scope.with_failed` paths with codes; the host (`Core.failed_nodes`) maps a failed cook's node id to
   paths through the probe plan. **Letter hints.** `w` (`Show_hints`) labels every node the selected output can connect
   to; `f` frames the selection (all with none selected).
@@ -187,4 +191,4 @@ that one model.
 
 ## G3 gestures
 
-Wire dropped on empty canvas: `Selected [source]` then `Menu_requested`; the host opens the add menu after that node. A wire pulled past 6 points is the same drag (`finish_wire`) and stays `selected_wire`; the host inserts the picked node on it. `Scope_wires.bundle` joins a source's 3+ wires in a trunk and junction. `Alt Up/Down` off a list item is `Move_binding`; `Shift-M`, `Shift-L`, `Alt-Shift-I` are `Wrap` Map / Filter and `Inline_defn`. `[` `]` with nothing selected step every zone. A zone's own variable wire (`Scope_wires.route ~inside`) stays in the frame and runs below the rail row.
+Wire dropped on empty canvas: `Selected [source]` then `Menu_requested`; the host opens the add menu after that node. A wire pulled past 6 points is the same drag (`finish_wire`) and stays `selected_wire`; the host inserts the picked node on it. `Scope_wires.bundle` joins a source's 3+ wires in a trunk and junction. `Alt Up/Down` off a list item is `Move_binding`; `Shift-M`, `Shift-L`, `Alt-Shift-I` are `Wrap` Map / Filter and `Inline_defn`. `[` `]` with nothing selected step every zone. Alt held when a wire or an out-port is pressed lifts it (`wiring.lift`): `finish_wire` connects the drop row and takes the lifted rows off (`unwire_at`), or only takes them off on empty canvas. A double click on a collapsed zone opens it (`Zone_collapsed`) instead of `Activated`. `Alt Up/Down` on a selected nested node (a chain step) is `Move_step`. A zone's own variable wire (`Scope_wires.route ~inside`) stays in the frame and runs below the rail row.

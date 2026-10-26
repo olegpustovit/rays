@@ -23,6 +23,7 @@ type op =
   | Inline_macro of { node : path }
   | Inline_defn of { node : path }
   | Move_binding of { node : path; by : int }
+  | Move_step of { node : path; earlier : bool }
   | Toggle_bypass of { node : path }
   | Set_note of { node : path; text : string }
   | Add_item of { node : path }
@@ -308,6 +309,15 @@ let node_call (e : S.t) = match head_sym e with
   | Some h -> String.length h > 1 && String.contains h '/'
   | None -> false
 let nested leaf = String.contains leaf '#'
+
+(* the input a chain runs through: the first input written as a node call ([draw/translate]'s
+   drawing, the value of a [->] step), else the first *)
+let chain_in (e : S.t) =
+  let rec go i = match arg_get e (Pos i) with
+    | Some a when node_call a -> Pos i
+    | Some _ -> go (i + 1)
+    | None -> Pos 0 in
+  go 0
 let key_segment = function
   | Pos i -> string_of_int i
   | Kw k -> ":" ^ k
@@ -492,6 +502,20 @@ let root_used src seg = ref (List.concat_map (fun (i : S.t) ->
 
 let fresh_name src ~root base = fresh (root_used src root) base
 let fresh_among = fresh
+
+(* the name a value operator's binding starts with *)
+let value_base = function
+  | "+" -> "sum" | "-" -> "difference" | "*" -> "product" | "/" -> "quotient"
+  | "<" | ">" | "<=" | ">=" | "=" -> "test" | op -> op
+(* a plain operator call: a card of its own only while it is written inside its reader *)
+let value_call (e : S.t) = not (node_call e) && not (is_zone e)
+  && (match head_sym e with Some h -> h <> "list" && h <> "let*" && List.mem h W.value_ops | None -> false)
+(* still called what [fresh] would call it: the base, then maybe [_n] *)
+let auto_named name (e : S.t) =
+  let b = sanitize (value_base (Option.get (head_sym e))) in
+  let n = String.length b in
+  name = b || (String.starts_with ~prefix:(b ^ "_") name && String.length name > n + 1
+    && String.for_all (fun c -> c >= '0' && c <= '9') (String.sub name (n + 1) (String.length name - n - 1)))
 
 let valid_name n = Flow.Symbol.valid_name n
 

@@ -2,7 +2,8 @@
 include module type of struct include Scope_state end
 val parents_removed : path list -> path list
 val wired : P.row -> bool
-val unwire : P.node -> P.row -> E.op list
+val unwire : t -> P.node -> P.row -> E.op list
+val unwire_at : t -> (path * E.arg_key) list -> E.op list
 val scope_of_path : 'a list -> 'a list
 val frame_list : t -> path -> fr list
 val input_of : t -> path -> P.input option

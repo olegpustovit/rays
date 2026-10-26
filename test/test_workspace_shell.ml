@@ -2314,7 +2314,7 @@ let run_nested_inspector () =
   click (at 154 0);
   step [];
   let unfolded = source !e in
-  check (has unfolded "node (* " && has unfolded "b (+ 2.0 node)")
+  check (has unfolded "product (* " && has unfolded "b (+ 2.0 product)")
     ("Unfold did not make the nested call its own binding: " ^ unfolded);
   E3.close !e
 
@@ -2467,6 +2467,32 @@ let run_array_capacity_menu () =
     let value=List.assoc card.path(Result.get_ok(Flow.Eval.static ~record:true ws.checked)).records|>List.hd|>snd in
     check(value=Flow.Eval.Int Sys.max_floatarray_length)"Array capacity menu lost exact native Int")
 
+(* i on a call of a defn opens the definition in the graph panel *)
+let run_open_defn () =
+  let text = {|(workspace d
+  (defn twice :context value [(x : float)] (* x 2.0))
+  (graph g :context value (let* [a 1.0 b (twice a)] b))
+  (graph editor :context editor (ui/workspace (ui/graph :focus true))))|} in
+  let e = ref (editor text) and count = ref 0 in
+  let step ?(keys = []) mouse events = incr count;
+    e := E3.update !e (Test_editor_input.frame ~keys mouse events !count) in
+  for _ = 1 to 4 do step (200., 300.) [] done;
+  e := Rays_editor.Reduce.select_path !e [ "g"; "b" ];
+  let p = 200., 300. in
+  step p []; step p [ Event.KeyPressed (Input.KeyChar 'i') ]; step p [];
+  check (has (dump_line !e "graph panels") "def:twice") ("i on a defn call did not open it: " ^ dump_line !e "graph panels");
+  (* i on a collapsed function opens it in place (functions start open: the layout folds this one) *)
+  let e = ref (editor {|(workspace z
+  (graph g :context value (let* [a (map (fn [i] (* i 2.0)) (array/range 3)) b (map (fn [x] (+ x 1.0)) a)] (array/nth b 0)))
+  (graph editor :context editor (ui/workspace (ui/graph :focus true))))
+(layout (node ["g" "a#0"] :collapsed true))|}) in
+  let step mouse events = incr count; e := E3.update !e (Test_editor_input.frame mouse events !count) in
+  for _ = 1 to 4 do step (200., 300.) [] done;
+  e := Rays_editor.Reduce.select_path !e [ "g"; "a#0" ];
+  step (200., 300.) []; step (200., 300.) [ Event.KeyPressed (Input.KeyChar 'i') ]; step (200., 300.) [];
+  check (Editor_document.Layout_by_path.Path_map.find_opt [ "g"; "a#0" ] (E3.workspace !e).Doc.layout.collapsed = Some false)
+    "i on a collapsed function did not open it"
+
 (* The default loop runs every section but the slow ones (1.5-12 s each); RAYS_SLOW=1 runs all. *)
 let slow = ["run_studio_keywords"; "run_duplicate_and_view"; "run_views"; "run_result_view"; "run_geometry_view"; "run_wire_gestures"; "run_ops"; "run_panels"; "run_unbound_panels"; "run_cameras"; "run_editor"; "run_values"; "run_frame_key"; "run_undo_and_input"]
 let run () =
@@ -2475,7 +2501,7 @@ let run () =
   List.iter (fun (name, section) -> if only <> None && only <> Some name || not all && only = None && List.mem name slow then () else (let t = Unix.gettimeofday () in section (); Printf.printf "section %s %.1f s\n%!" name (Unix.gettimeofday () -. t)))
     [ "run_wire_gestures", run_wire_gestures; "run_ops", run_ops;
       "run_array_capacity_menu", run_array_capacity_menu; "run_lisp_inspector", run_lisp_inspector; "run_context_menus", run_context_menus; "run_expression_chip", run_expression_chip; "run_nested_inspector", run_nested_inspector; "run_op_inspector", run_op_inspector; "run_spreadsheet", run_spreadsheet; "run_panels", run_panels; "run_studio", run_studio; "run_studio_tail", run_studio_tail; "run_studio_keywords", run_studio_keywords; "run_copy_lisp", run_copy_lisp; "run_hide_and_order", run_hide_and_order; "run_root_section", run_root_section; "run_layouts", run_layouts; "run_compose", run_compose; "run_ref_picker", run_ref_picker; "run_result_view", run_result_view; "run_loop_view", run_loop_view; "run_geometry_view", run_geometry_view; "run_panel_states", run_panel_states; "run_camera_zoom", run_camera_zoom; "run_cameras", run_cameras; "run_lowering", run_lowering; "run_panel_keys", run_panel_keys; "run_unbound_panels", run_unbound_panels; "run_values", run_values; "run_duplicate_and_view", run_duplicate_and_view; "run_movers", run_movers; "run_frame_key", run_frame_key; "run_loop_copies", run_loop_copies; "run_loop_expression", run_loop_expression; "run_editor", run_editor; "run_restore", run_restore; "run_views", run_views; "run_instances", run_instances; "run_host_scene_edit", run_host_scene_edit; "run_panel_chain", run_panel_chain;
-      "run_undo_under_pane", run_undo_under_pane; "run_atomic_frame", run_atomic_frame; "run_undo_and_input", run_undo_and_input; "run_carry_reaches_no_history", run_carry_reaches_no_history
+      "run_undo_under_pane", run_undo_under_pane; "run_atomic_frame", run_atomic_frame; "run_undo_and_input", run_undo_and_input; "run_carry_reaches_no_history", run_carry_reaches_no_history; "run_open_defn", run_open_defn
     ]
 
 

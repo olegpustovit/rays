@@ -62,7 +62,8 @@ type stats = {
 
 (* ---------------------------------------------------------------- state *)
 
-type wiring = { src : string; ty : Ty.t option; iter : bool; from : float * float }
+(* [lift]: the inputs an Alt-drag picked the wire up from; letting go takes it off them *)
+type wiring = { src : string; ty : Ty.t option; iter : bool; from : float * float; lift : (path * E.arg_key) list }
 type drag =
   | Moving of { paths : path list; dx : float; dy : float; moved : bool }
   | Wiring of wiring
@@ -401,6 +402,7 @@ let with_records records t =
 (* ------------------------------------------------------------- lookups *)
 
 let node_of t path = Option.bind t.scope (fun s -> P.find s path)
+let collapsed_zone t path = t.collapsed path && (match node_of t path with Some n -> n.zone <> None | None -> false)
 let item_at t path = Option.map (fun i -> t.geo.items.(i)) (Paths.find_opt t.geo.slot path)
 (* an item's box in graph units, and where it sits inside its scope *)
 let box_at t path = Option.map (fun ((p : P.placed), ax, ay) -> ax, ay, p.w, p.h) (item_at t path)

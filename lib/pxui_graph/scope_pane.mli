@@ -137,6 +137,10 @@ val editing : t -> bool
     host keeps its keys out. *)
 
 val selected : t -> path list
+
+val collapsed_zone : t -> path -> bool
+(** The node at [path] is a zone drawn collapsed: [i] and a double click open it in place. *)
+
 val select : path list -> t -> t
 val clear_selection : t -> t
 val stats : t -> stats

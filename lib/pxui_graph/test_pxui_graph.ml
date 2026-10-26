@@ -253,8 +253,22 @@ let scope_levels () =
        (* a short press-release on the wire is still just a click *)
        let v, _ = scope_step view (frame ~mouse:mid ~events:[ mouse_move mid; mouse_press (Input.LeftButton, mid) ] ()) in
        let _, changes = scope_step v (frame ~mouse:mid ~events:[ mouse_release (Input.LeftButton, mid) ] ()) in
-       check (not (List.exists (function Scope.Menu_requested _ -> true | _ -> false) changes)) "a click on a wire opened the menu");
-  (* a frame's own variable reads back into its body: the wire stays inside the frame, below the label row *)
+       check (not (List.exists (function Scope.Menu_requested _ -> true | _ -> false) changes)) "a click on a wire opened the menu";
+       (* Alt: the wire is lifted off its input; empty canvas disconnects it, no menu *)
+       let v, _ = scope_step view (frame ~mouse:mid ~keys:[ Input.Alt ] ~events:[ mouse_move mid; mouse_press (Input.LeftButton, mid) ] ()) in
+       let v, _ = scope_step v (frame ~mouse:empty ~keys:[ Input.Alt ] ~events:[ mouse_move empty ] ()) in
+       let _, changes = scope_step v (frame ~mouse:empty ~events:[ mouse_release (Input.LeftButton, empty) ] ()) in
+       check (List.exists (function Scope.Syntax_edit (Flow_graph.Flow_edit.Disconnect { node; _ }) -> node = c | _ -> false) changes
+         && not (List.exists (function Scope.Menu_requested _ -> true | _ -> false) changes))
+         "an Alt-drag of a wire into empty canvas did not disconnect it";
+       (* Alt on b's out-port lifts its wire too, and dropped on c's first row moves it there *)
+       let v, _ = scope_step view (frame ~mouse:start ~keys:[ Input.Alt ] ~events:[ mouse_move start; mouse_press (Input.LeftButton, start) ] ()) in
+       let v, _ = scope_step v (frame ~mouse:empty ~keys:[ Input.Alt ] ~events:[ mouse_move empty ] ()) in
+       let _, changes = scope_step v (frame ~mouse:empty ~events:[ mouse_release (Input.LeftButton, empty) ] ()) in
+       check (List.exists (function Scope.Syntax_edit (Flow_graph.Flow_edit.Disconnect _) -> true | _ -> false) changes)
+         "an Alt-drag of an out-port into empty canvas did not take its wires off");
+  (* a frame's own variable leaves its begin bar (the strip inside the left edge, under the rails)
+     straight into its body: the wire stays inside the frame, below the label row *)
   let mw = Editor_document.Workspace_doc.of_text scope_catalog
     "(workspace m (graph g :context value (let* [boxes (array/vec3 8) ys (map (fn [i] (let* [p (array/nth boxes (int i))] [p.x p.y 0])) (array/range 4))] (array/count ys))))"
     |> Result.get_ok in
@@ -263,10 +277,10 @@ let scope_levels () =
   let zx, zy, zw, _ = Option.get (Scope.Private.box_of mview [ "g"; "ys#0" ]) in
   let z = Scope.zoom mview in
   let from_i = List.filter (fun i -> match Scope.Private.wire_points mview i with
-    | (x, _) :: _ -> x > zx +. zw -. 20. *. z && x < zx +. zw | [] -> false) (List.init (Scope.Private.wire_count mview) Fun.id) in
-  check (from_i <> []) "the frame's variable has no wire";
+    | (x, _) :: _ -> x > zx && x < zx +. 20. *. z | [] -> false) (List.init (Scope.Private.wire_count mview) Fun.id) in
+  check (from_i <> []) "the frame's variable has no wire from its begin bar";
   List.iter (fun i -> List.iter (fun (x, y) ->
-    check (x <= zx +. zw -. 3. *. z && (y > zy +. P.head_height *. z || x > zx +. zw -. 20. *. z))
+    check (x >= zx && x <= zx +. zw -. 3. *. z && y > zy +. P.head_height *. z)
       "a frame's variable wire left the frame or crossed its label row") (Scope.Private.wire_points mview i)) from_i;
   (* f: letter hints; a letter connects the selected output *)
   let hint_view, notices = Scope.run_command (Scope.select [ b ] view) Scope.Show_hints in
@@ -322,15 +336,14 @@ let scope_levels () =
   let _, changes = scope_click lview (int_of_float fx, int_of_float fy) in
   check (List.mem (Scope.Syntax_edit (Flow_graph.Flow_edit.Fold_into { node = [ "g"; "k" ] })) changes)
     "a click on the fold button did not fold the source into the row";
-  (* taking the wire off a named argument writes its schema default: the row stays on the card *)
+  (* taking the wire off a named argument writes the value it carried (k is 0.4): the row stays on the card *)
   let rx, ry = Option.get (Scope.Private.row_center lview sphere (row "radius")) in
   let at = int_of_float rx, int_of_float ry in
   let hovered, _ = scope_step lview (frame ~mouse:at ~events:[ mouse_move at ] ()) in
-  let default = Option.get (List.nth rows (row "radius")).default in
   (match snd (Scope.run_command hovered Scope.Delete) with
    | [ Scope.Syntax_edit (Flow_graph.Flow_edit.Disconnect { node; key = Flow_graph.Flow_edit.Kw "radius"; fallback = Some f }) ] ->
-       check (node = sphere && Flow.Lisp.flat f = default) "the wire taken off radius did not fall back to its default"
-   | _ -> fail "Delete over a wired row is not a Disconnect with the default")
+       check (node = sphere && Flow.Lisp.flat f = "0.4") ("the wire taken off radius did not keep its last value: " ^ Flow.Lisp.flat f)
+   | _ -> fail "Delete over a wired row is not a Disconnect with the last value")
 
 let scope_connection_hover () =
   let ws = Editor_document.Workspace_doc.of_text scope_catalog

@@ -44,7 +44,7 @@ let graph_tools ui ~header ~from ~enabled =
   let rects = tool_rects ui ~header ~from in
   if rects <> [] then rule ui ~key:"workspace-tool-rule" ~header ~from;
   List.fold_left (fun clicked (tool, label, hint, (x, y, w, h)) ->
-    if Pxui_shell.Kit.button ui ~key:("workspace-tool-" ^ label) ~at:(x, y) ~w ~h ~enabled ~hint label
+    if Pxui_shell.Kit.button ui ~key:("workspace-tool-" ^ label) ~at:(x, y) ~w ~h ~enabled:(enabled tool) ~hint label
     then Some tool else clicked) None rects
 
 (* A panel tree as an editor graph: leaves and splits are bindings, so every panel edit finds

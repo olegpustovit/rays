@@ -114,9 +114,7 @@ let value_expression ~ops ?wire context key =
       let args = match signature with
         | Some s -> List.map argument s.Flow.Workspace.pos | None -> [] in
       mk (S.List (mk (S.Sym op) :: args)),
-      (match op with
-       | "+" -> "sum" | "-" -> "difference" | "*" -> "product" | "/" -> "quotient"
-       | "<" | ">" | "<=" | ">=" | "=" -> "test" | op -> op)
+      Flow_graph.Flow_edit.value_base op
 
 (* A kind picked in the node menu, as one [Add_node] at the selected zone (else the graph
    body), wired to the selected node when the kind takes a geometry input. *)

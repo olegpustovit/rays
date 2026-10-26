@@ -1235,7 +1235,7 @@ let editor_graph_drafts () =
   check (contains (summary ()) "graph drafts: a b") ("leaving a graph dropped its draft: " ^ summary ());
   E.close !env
 
-(* With more than one fn frame in a graph they start collapsed to a line; a lone one stays open. *)
+(* Every fn frame starts open, its body in view, however many the graph has (c folds one). *)
 let editor_fn_frames () =
   let open Rays in
   let height maps =
@@ -1256,7 +1256,7 @@ let editor_fn_frames () =
     match box with Some (_, _, _, h) -> h | None -> fail "the fn frame has no box" in
   let one = height "a (fn [k] (* k 2.0))" in
   let two = height "a (fn [k] (* k 2.0)) b (fn [k] (+ k 1.0))" in
-  check (two < one) (Printf.sprintf "a second fn frame did not start collapsed (%d, %d)" one two)
+  check (two = one) (Printf.sprintf "a second fn frame folded the first (%d, %d)" one two)
 
 let run () =
   selection_text ();

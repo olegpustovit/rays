@@ -76,6 +76,9 @@ let part_text () =
   let again = of_text ~settings:(settings (0., "a")) out in
   check (Doc.to_text again = out) "to_text is a fixed point";
   check (again.layout = doc.layout) "layout round trip";
+  (* an open expression is keyed by the leaf of a call that is only a card while open *)
+  let opened = of_text "(workspace w (graph g :context value (let* [a (max 1.0 (+ 2.0 3.0))] a)))\n(layout (node [\"g\" \"a#1\"] :collapsed false))" in
+  check (Layout.Path_map.find_opt [ "g"; "a#1" ] opened.layout.collapsed = Some false) "an open expression survives loading";
   (* a default setting is not written *)
   let plain = of_text ~settings:(settings (0., "a")) still in
   check (not (has (Doc.to_text plain) "settings") && not (has (Doc.to_text plain) "layout")) "empty layout and defaults are omitted";

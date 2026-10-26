@@ -212,16 +212,16 @@ let unfold_in ~used ?name s leaf key sub =
         fresh used
           (if is_zone inner then
              (if base = "@result" then "each" else base ^ "_" ^ (if h = "sum" then "total" else "each"))
-           else if h = "let*" then "block" else h) in
+           else if h = "let*" then "block" else value_base h) in
   let e' = arg_set e key (Some (set_sub whole sub (sym name))) in
   let sc = ensure (set_node s leaf e') in
   let at = if base = "@result" then List.length sc.ps else first_pair_index sc leaf in
   rebuild sc (insert_at sc.ps at [ sym name, inner ]) sc.res, name
 
 (* a wire never deletes a node: the nested node an input held stays, as a binding nothing reads *)
-let keep_nested ~used s leaf key = match key with
+let keep_nested ?(pick = fun a -> node_call a || value_call a) ~used s leaf key = match key with
   | Pos _ | Kw _ | Arm _ ->
       (match arg_get (get_node s leaf) key with
-       | Some a when node_call a -> fst (unfold_in ~used s leaf key [])
+       | Some a when pick a -> fst (unfold_in ~used s leaf key [])
        | _ -> s)
   | _ -> s

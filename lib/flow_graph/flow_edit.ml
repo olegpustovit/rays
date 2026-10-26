@@ -7,6 +7,36 @@ let ratio_text r =
     then trim (String.sub t 0 (String.length t - 1)) else t in
   trim (Printf.sprintf "%.4f" (Float.max 0.1 (Float.min 0.9 r)))
 
+(* a binding used once is inlined into its use *)
+let fold_into src node =
+  let sp, leaf = split_node node in
+  edit_scope src sp (fun s ->
+    let sc = match scope_of s with Some sc -> sc | None -> fail "Fold needs a named node." in
+    if leaf = "@result" then fail "A result cannot be folded.";
+    if nested leaf then fail "That node is already written in its use.";
+    let j = first_pair_index sc leaf in
+    let p, e = List.nth sc.ps j in
+    let name = match p.node with S.Sym n -> n | _ -> fail "Only a plain name can be folded." in
+    let others = List.filteri (fun k _ -> k <> j) sc.ps in
+    let uses = List.fold_left (fun n (_, x) -> n + count_refs name x) (count_refs name sc.res) others in
+    if uses <> 1 then fail "Fold needs exactly one use of %s inside its scope." name;
+    (* the binding's note goes with it *)
+    let rep = replace_ref name { e with notes = p.notes @ e.notes } in
+    let ps = List.map (fun (q, x) -> q, rep x) others and res = rep sc.res in
+    if List.exists (fun (_, x) -> count_refs name x > 0) ps || count_refs name res > 0 then
+      fail "%s is read by field; it cannot be folded." name;
+    collapse sc ps res)
+
+(* the rule of the expression cards: an unnamed math node with one reader (not the result) is written in it *)
+let inline_autos src sp names = List.fold_left (fun src n ->
+  let ok = ref false in
+  (try ignore (edit_scope src sp (fun s ->
+    (match scope_of s with
+     | Some sc when not (nested n) && sc.res.node <> S.Sym n ->
+         Option.iter (fun j -> let e = snd (List.nth sc.ps j) in ok := value_call e && auto_named n e) (find_pair sc n)
+     | _ -> ()); s)) with Fail _ -> ());
+  if !ok then (try fold_into src (sp @ [ n ]) with Fail _ -> src) else src) src names
+
 let rewrite ?fallback src op : (unit -> S.t list) list =
   let one f = [ f ] in
   match op with
@@ -52,7 +82,8 @@ let rewrite ?fallback src op : (unit -> S.t list) list =
   | Connect { node; key; src = name; iter } -> one (fun () ->
       let sp, leaf = split_node node in
       let used = root_used src (List.hd sp) in
-      edit_scope src sp (fun s ->
+      let prev = ref [] in
+      let out = edit_scope src sp (fun s ->
         (* the output of a nested node feeds a second input: it needs a name *)
         let s, name = if nested name then
             (if fst (split_leaf name) <> "@result" && find_pair (ensure s) name = None then
@@ -73,20 +104,26 @@ let rewrite ?fallback src op : (unit -> S.t list) list =
         else
           let s = keep_nested ~used s leaf key in
           let e = get_node s leaf in
+          (match arg_get e key with Some { S.node = S.Sym n; _ } -> prev := [ n ] | _ -> ());
           let step = match iter, arg_get e key with
             | true, Some ({ S.node = S.Num n; _ } as cur) when n <> "0" && n <> "1" && float_of_string_opt n <> Some 0.
                 && float_of_string_opt n <> Some 1. -> call "*" [ sym name; cur ]
             | _ -> sym name in
-          reorder (set_node s leaf (arg_set e key (Some step)))))
+          reorder (set_node s leaf (arg_set e key (Some step)))) in
+      inline_autos out sp (name :: !prev))
   | Disconnect { node; key; fallback } -> one (fun () ->
       let sp, leaf = split_node node in
-      edit_scope src sp (fun s ->
+      let prev = ref [] in
+      let out = edit_scope src sp (fun s ->
+        let s = keep_nested ~pick:value_call ~used:(root_used src (List.hd sp)) s leaf key in
         let e = get_node s leaf in
+        (match arg_get e key with Some { S.node = S.Sym n; _ } -> prev := [ n ] | _ -> ());
         let v = match key, fallback with
           | _, Some d -> Some d
           | (Kw _ | Field _ | Pos _), None -> None
           | _, None -> fail "Nothing to fall back to. Drag another output onto it instead." in
-        reorder (set_node s leaf (arg_set e key v))))
+        reorder (set_node s leaf (arg_set e key v))) in
+      inline_autos out sp !prev)
   | Set_input_default { form; input; value } -> one (fun () ->
       with_root src form (fun r ->
         let hit = ref false in
@@ -102,28 +139,12 @@ let rewrite ?fallback src op : (unit -> S.t list) list =
       let sp, leaf = split_node node in
       let used = root_used src (List.hd sp) in
       edit_scope src sp (fun s -> reorder (fst (unfold_in ~used s leaf key sub))))
-  | Fold_into { node } -> one (fun () ->
-      let sp, leaf = split_node node in
-      edit_scope src sp (fun s ->
-        let sc = match scope_of s with Some sc -> sc | None -> fail "Fold needs a named node." in
-        if leaf = "@result" then fail "A result cannot be folded.";
-        if nested leaf then fail "That node is already written in its use.";
-        let j = first_pair_index sc leaf in
-        let p, e = List.nth sc.ps j in
-        let name = match p.node with S.Sym n -> n | _ -> fail "Only a plain name can be folded." in
-        let others = List.filteri (fun k _ -> k <> j) sc.ps in
-        let uses = List.fold_left (fun n (_, x) -> n + count_refs name x) (count_refs name sc.res) others in
-        if uses <> 1 then fail "Fold needs exactly one use of %s inside its scope." name;
-        (* the binding's note goes with it *)
-        let rep = replace_ref name { e with notes = p.notes @ e.notes } in
-        let ps = List.map (fun (q, x) -> q, rep x) others and res = rep sc.res in
-        if List.exists (fun (_, x) -> count_refs name x > 0) ps || count_refs name res > 0 then
-          fail "%s is read by field; it cannot be folded." name;
-        collapse sc ps res))
+  | Fold_into { node } -> one (fun () -> fold_into src node)
   | Delete_nodes { nodes } -> one (fun () ->
       (* inner first: deeper scopes, then nodes nested deeper in one binding *)
       let depth n = List.length n, List.length (String.split_on_char '#' (snd (split_node n))) in
       let by_depth = List.sort (fun a b -> compare (depth b) (depth a)) nodes in
+      let touched = ref [] in
       let out = List.fold_left (fun src node ->
         let sp, leaf = split_node node in
         let gone = ref None in
@@ -132,7 +153,7 @@ let rewrite ?fallback src op : (unit -> S.t list) list =
             (* a nested node leaves its chain: what it read first takes its place *)
             let held, key = holder leaf in
             let h = get_node s held in
-            let below = match Option.bind (arg_get h key) (fun e -> arg_get e (Pos 0)), key with
+            let below = match Option.bind (arg_get h key) (fun e -> arg_get e (chain_in e)), key with
               | Some b, _ -> Some b
               | None, Pos _ -> Some (sym "nil")
               | None, _ -> None in
@@ -140,8 +161,15 @@ let rewrite ?fallback src op : (unit -> S.t list) list =
           else match scope_of s with
           | Some sc when leaf <> "@result" ->
               let j = first_pair_index sc leaf in
-              gone := Some (snd (List.nth sc.ps j));
-              collapse sc (List.filteri (fun k _ -> k <> j) sc.ps) sc.res
+              let p, e = List.nth sc.ps j in
+              gone := Some e;
+              touched := (sp, dedup (sym_list e)) :: !touched;
+              let others = List.filteri (fun k _ -> k <> j) sc.ps in
+              (* a deleted value dissolves: its readers get its expression; a scene object leaves
+                 the result that held it instead, and so does a loop the result reads (below) *)
+              let obj = starts_with "scene/" (head_sym e) || starts_with "world/" (head_sym e) in
+              let rep = match p.node with S.Sym n when not obj -> replace_ref n e | _ -> Fun.id in
+              collapse sc (List.map (fun (q, x) -> q, rep x) others) (if is_zone e then sc.res else rep sc.res)
           | _ -> fail "Only a named node can be deleted.") in
         (* a scene object, World layer or loop of scene objects also leaves the result that held it *)
         match !gone with
@@ -157,14 +185,14 @@ let rewrite ?fallback src op : (unit -> S.t list) list =
         let used = ref false in
         (try ignore (edit_scope out sp (fun s -> used := List.mem name (sym_list s); s)) with Fail _ -> ());
         if not (nested name) && !used then
-          fail "%s still feeds another node. Disconnect it first." name) nodes;
-      out)
+          fail "%s is still read (a field read such as %s.x, or a scene object). Disconnect those first." name name) nodes;
+      List.fold_left (fun out (sp, names) -> inline_autos out sp names) out !touched)
   | Rename { node; to_ } -> one (fun () ->
       let sp, leaf = split_node node in
       let used = sym_list (root_form src (List.hd sp)) in
       if not (valid_name to_) || List.mem to_ used || W.name_taken to_ then
         fail "Pick a new lowercase name that is not used anywhere in this graph.";
-      edit_scope src sp (fun s ->
+      let out = edit_scope src sp (fun s ->
         (* naming a nested node binds it *)
         if nested leaf then
           let held, key = holder leaf in
@@ -176,7 +204,8 @@ let rewrite ?fallback src op : (unit -> S.t list) list =
         let ps = List.mapi (fun k (p, v) ->
           if k = j then { p with S.node = S.Sym to_ }, v
           else if k > j then p, rename_ref old to_ v else p, v) sc.ps in
-        rebuild sc ps (rename_ref old to_ sc.res)))
+        rebuild sc ps (rename_ref old to_ sc.res)) in
+      if nested leaf then out else inline_autos out sp [ to_ ])
   | Hoist { node } -> one (fun () ->
       let sp, leaf = split_node node in
       let pp, owner = match sp with
@@ -241,12 +270,12 @@ let rewrite ?fallback src op : (unit -> S.t list) list =
                let items = fresh used "items" in
                [ sym items, call "range" [ num 6 ]; fst x.out, over x iv (sym items) ]) ]
        | For ->
-           (* ponytail: the checker is the type oracle, so try the geometry
-              shape (collect and merge) and then the number shape (sum) *)
-           [ attempt (fun x iv used ->
+           (* ponytail: the checker is the type oracle, so try the geometry and
+              drawing shapes (collect and merge) and then the number shape (sum) *)
+           List.map (fun merge -> attempt (fun x iv used ->
                let each = fresh used (x.out_name ^ "_each") in
-               [ sym each, zone "for" iv 6 (body_of x); fst x.out, call "sop/merge" [ sym each ] ]);
-             attempt (fun x iv _ -> [ fst x.out, zone "sum" iv 6 (body_of x) ]) ]
+               [ sym each, zone "for" iv 6 (body_of x); fst x.out, call merge [ sym each ] ])) [ "sop/merge"; "draw/merge" ]
+           @ [ attempt (fun x iv _ -> [ fst x.out, zone "sum" iv 6 (body_of x) ]) ]
        | Fold ->
            (* every outside name the selection reads is a candidate to feed back *)
            let free = ref [] in
@@ -267,6 +296,8 @@ let rewrite ?fallback src op : (unit -> S.t list) list =
         let x = select s nodes "A function" in
         let fns = fn_names rootf in
         let outer = outside_names ~root:rootf x |> List.filter (fun n -> not (List.mem n fns)) in
+        if List.mem (Option.value ~default:"" (head_sym (body_of x))) fns then fail "That already calls a local function; open it with i.";
+        if outer = [] then fail "A function needs an input: this reads no other node. Wire one in first.";
         let fname = fresh used (x.out_name ^ "_fn") in
         let params = List.map (fun n -> fresh used ("in_" ^ n)) outer in
         let body = List.fold_left2 (fun b n p -> replace_ref n (sym p) b) (body_of x) outer params in
@@ -374,6 +405,20 @@ let rewrite ?fallback src op : (unit -> S.t list) list =
         let r = reorder moved in
         if keys r <> keys moved then fail "%s is read by or reads its neighbour; it cannot pass it." leaf;
         r))
+  | Move_step { node; earlier } -> one (fun () ->
+      let sp, leaf = split_node node in
+      edit_scope src sp (fun s ->
+        (* the later call of the two trades places with the call in its chain input *)
+        let outer = if earlier then leaf
+          else if nested leaf && snd (holder leaf) = chain_in (get_node s (fst (holder leaf))) then fst (holder leaf)
+          else fail "That is the last step of its chain." in
+        let o = get_node s outer in
+        let ko = chain_in o in
+        let i = match arg_get o ko with Some i when node_call i -> i | _ -> fail "That is the first step of its chain." in
+        let ki = chain_in i in
+        if arg_get i ki = None then fail "That is the first step of its chain.";
+        (* (o .. (i .. x ..) ..) becomes (i .. (o .. x ..) ..) *)
+        set_node s outer (arg_set i ki (Some (arg_set o ko (arg_get i ki))))))
   | Toggle_bypass { node } -> one (fun () ->
       let sp, leaf = split_node node in
       edit_scope src sp (fun s ->
@@ -696,7 +741,7 @@ let label = function
   | Set_input_default _ -> "Input default" | Unfold _ -> "Unfold" | Fold_into _ -> "Fold"
   | Wrap { loop = For; _ } -> "Repeat" | Wrap { loop = Fold; _ } -> "Iterate"
   | Wrap { loop = Map; _ } -> "Wrap in map" | Wrap { loop = Filter; _ } -> "Wrap in filter"
-  | Inline_defn _ -> "Inline function" | Move_binding _ -> "Move binding"
+  | Inline_defn _ -> "Inline function" | Move_binding _ -> "Move binding" | Move_step _ -> "Move step"
   | Wrap {loop = If; _} -> "Wrap conditional" | Add_arm _ -> "Add arm" | Delete_arm _ -> "Delete arm"
   | Hoist _ -> "Move out" | Rename _ -> "Rename" | Make_local_fn _ -> "Make function"
   | Make_defn _ -> "Make reusable function"

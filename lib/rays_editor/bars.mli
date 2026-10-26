@@ -10,7 +10,7 @@ val tool_rect : Pxui.Ui.t -> header:int * int * int * int -> from:float -> tool 
 val rule : Pxui.Ui.t -> key:string -> header:int * int * int * int -> from:float -> unit
 (** The 1 x 12 rule that parts a header's title from the tools that start at [from]. *)
 
-val graph_tools : Pxui.Ui.t -> header:int * int * int * int -> from:float -> enabled:bool -> tool option
+val graph_tools : Pxui.Ui.t -> header:int * int * int * int -> from:float -> enabled:(tool -> bool) -> tool option
 (** The toolbar in a panel header, [from] points after the header's left edge; the tool
     clicked this frame. *)
 

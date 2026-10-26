@@ -105,7 +105,7 @@ let part3 () = (* unfold and fold round trip *)
     (g "(let* [m_each (for [i (range 3)] (sop/uv_sphere)) m (sop/merge m_each)] m)");
   same "unfold part of a vector" (g "(let* [b (sop/transform nil :translate [(+ 1 2) 0 0])] b)")
     (E.Unfold { node = node [ "b" ]; key = Kw "translate"; sub = [ 0 ] })
-    (g "(let* [node (+ 1 2) b (sop/transform nil :translate [node 0 0])] b)");
+    (g "(let* [sum_2 (+ 1 2) b (sop/transform nil :translate [sum_2 0 0])] b)");
   same "fold into the result" (g "(let* [a (sop/uv_sphere) b (sop/transform a)] b)") (E.Fold_into { node = node [ "b" ] })
     (g "(let* [a (sop/uv_sphere)] (sop/transform a))");
   check (has (apply (g "(let* [a (sop/uv_sphere)\n ; keep me\n b (sop/transform a)] (sop/subdivide b))") (E.Fold_into { node = node [ "b" ] })) "keep me")
@@ -290,12 +290,16 @@ let part10 () = (* add and delete *)
   refused "add a used name" base (E.Add_node { scope = [ "g" ]; name = "a"; expr = num "1" });
   same "delete an unused node" (g "(let* [a (sop/uv_sphere) u (sop/uv_sphere :radius 2) b (sop/transform a)] b)")
     (E.Delete_nodes { nodes = [ node [ "u" ] ] }) (g "(let* [a (sop/uv_sphere) b (sop/transform a)] b)");
-  refused "delete a used node" base (E.Delete_nodes { nodes = [ node [ "a" ] ] });
+  same "delete a used node dissolves it into its reader" base (E.Delete_nodes { nodes = [ node [ "a" ] ] })
+    (g "(let* [b (sop/transform (sop/uv_sphere :radius 0.5) :translate [1 2 3]) c (sop/subdivide b :iterations 1)] c)");
   (* a duplicated loop: its inner names are bound in both copies, and each copy's unused node can go *)
   let twins = g "(let* [r1 (for [i (range 2)] (let* [u (sop/uv_sphere) v (sop/uv_sphere)] v)) r2 (for [i (range 2)] (let* [u (sop/uv_sphere) v (sop/uv_sphere)] v)) m (sop/merge r1 r2)] m)" in
   check (not (has (apply twins (E.Delete_nodes { nodes = [ [ "g"; "r1"; "u" ] ] })) "r1 (for [i (range 2)] (let* [u"))
     "an unused node of a duplicated loop was not deleted";
-  refused "delete a node its own scope reads" twins (E.Delete_nodes { nodes = [ [ "g"; "r2"; "v" ] ] });
+  (* a node its own scope reads dissolves into that scope only; the twin keeps its own *)
+  let gone = apply twins (E.Delete_nodes { nodes = [ [ "g"; "r2"; "v" ] ] }) in
+  check (has gone "r2 (for [i (range 2)] (let* [u (sop/uv_sphere)] (sop/uv_sphere)))" && has gone "v (sop/uv_sphere)] v)")
+    ("a node its own scope reads did not dissolve into that scope only: " ^ gone);
   same "delete a chain" (g "(let* [a (sop/uv_sphere) u (sop/transform a) v (sop/transform u) b (sop/transform a)] b)")
     (E.Delete_nodes { nodes = [ node [ "u" ]; node [ "v" ] ] }) (g "(let* [a (sop/uv_sphere) b (sop/transform a)] b)")
 

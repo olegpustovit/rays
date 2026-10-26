@@ -290,7 +290,8 @@ let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_
     let tool_action = match graph_host with
      | Some leaf when projection vw = Graph_view && has_panel vw Pxui_shell.Layout.Graph ->
          (match Bars.graph_tools ui ~header:leaf.header ~from:(tools_from leaf)
-                  ~enabled:(scope_name vw <> None) with
+                  (* the wrapping tools act on the selection: without one they are dimmed, never silent *)
+                  ~enabled:(fun tool -> scope_name vw <> None && (tool = Bars.Add || Pxui_graph.Scope.selected vw.scope_view <> [])) with
           | Some Add -> Some Leader.Add_node
           | Some Repeat -> Some (Leader.Scope_command Pxui_graph.Scope.Wrap_repeat)
           | Some Iterate -> Some (Leader.Scope_command Pxui_graph.Scope.Wrap_iterate)

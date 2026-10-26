@@ -18,7 +18,7 @@
     Inline higher-order calls are cards and their [fn] inputs are zones with
     parameter rails, call selectors and editable body cards. Inline loops and
     [let*] scopes remain chips until unfolded ({!Flow_edit.Unfold}), as do
-    expressions, [ref]s and calls of functions and macros. *)
+    folded expressions, [ref]s and calls of functions and macros. *)
 
 type path = Flow.Workspace.path
 
@@ -97,6 +97,7 @@ type node = {
   invariant : bool;  (** the same each iteration of its loop (↥) *)
   synthetic : bool;
   zone : zone option;
+  expr : bool;  (** an operator call written in an input, drawn as a card while its leaf is not folded *)
 }
 
 and zone = {
@@ -121,9 +122,11 @@ and result =
   | Node of path  (** the synthetic [@result] node *)
   | Literal of Flow.Syntax.t
 
-val of_graph : Flow.Check.catalog -> Flow.Workspace.t -> string -> scope
+val of_graph : ?folded:(path -> bool) -> Flow.Check.catalog -> Flow.Workspace.t -> string -> scope
 (** The root scope of a graph or, for ["def:name"] or a [defn] name, of a
-    definition.  Raises [Invalid_argument] when there is none. *)
+    definition.  Raises [Invalid_argument] when there is none.  An operator call written in an input
+    ({!Flow_edit.value_call}) is a card ([expr]) unless [folded] its leaf (default: all are), and
+    its whole call tree with it. *)
 
 val same_graph : Flow.Workspace.t -> Flow.Workspace.t -> string -> bool
 (** Whether the graph's authored content, checked types, live/invariant paths

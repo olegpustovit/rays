@@ -23,7 +23,7 @@ Section numbers are stable because code comments cite them (§5.1, §6.4, §7.5,
 Two HTML studies are behavioural references and never product code or a web fallback:
 `specification/flow/prototype/` (the first canvas study, older than the workspace: its value
 nodes and grouped definitions were never kept) and `specification/workspace/prototype/` (the language
-and zones). When a study and this file disagree, the code and this file win.
+and zones). When a study and this file disagree, the code and this file win. `specification/flow/tutorial.md` walks the gestures on a real sketch.
 
 If an implementation shows that this file is wrong, change it in the same change as the code
 and record a decision in §18.
@@ -418,13 +418,14 @@ work follows what is in view, never the size of the graph.
 | Click a node | select; Shift toggles |
 | Drag a node | move the selection, snapped to the lattice, one `Moved` on release |
 | Double-click a node's title | rename it in place (`F2` does the same) |
-| Double-click a node's body | follow what it references (`Activated`) |
+| Double-click a node's body | open a collapsed zone in place (`Zone_collapsed`), else follow what it references (`Activated`): a graph's `(ref ...)`, or the `defn` a call names (`def:NAME`) |
 | Double-click a graph input | edit its default |
 | Drag from an output | a wire; released on a row it is `Connect` |
 | Drag a number field sideways | scrub: a float by 0.05 a point (0.005 with Shift), an integer by one every 6 points |
 | Option-click a number field | type the value |
 | Click a wire | select it; Delete takes it off |
-| Click `ƒ` on a row | `Unfold` an expression row into its own binding, or `Fold_into` on a row wired from a node nothing else reads |
+| Alt-drag a wire, or an out-port | lift it (every wire of the out-port): let go on an input row and it moves there (`Connect`, then the lifted rows' `Disconnect`), on empty canvas and it comes off; one undo step |
+| Click `ƒ` on a row | open a math expression as cards, else `Unfold` an expression row into its own binding, or `Fold_into` on a row wired from a node nothing else reads |
 | Right-click a node | the node becomes the selection and the pane's context menu opens |
 | Right-click empty canvas | the host's add menu at that point (`Menu_requested`) |
 | Drag a frame by its title | the frame and the nodes whose centres lie inside it move together |
@@ -434,7 +435,22 @@ nodes and nodes shown as chips or points. A card need not be fully enclosed. Exp
 selected when fully enclosed, so crossing their body can select the nodes inside their scope.
 
 Taking a wire off a nested node's row unfolds the node first (`Unfold`, then `Disconnect`),
-so a wire never deletes a node.
+so a wire never deletes a node. The row keeps the value the wire carried at no probe when it is a
+number, a boolean, text or a vector (`Scope_commands.last_value`), so the picture does not jump;
+anything else, or a source inside a loop, falls back to the row's default.
+
+A loop zone other than a plain `for` has a begin and an end bar (Houdini's block begin and end): its
+variables' out-ports stack in the strip inside its left edge under the rails, the label's first, and
+its body's result comes in at the strip inside its right edge, named by its yield label (`next ↺` for
+a fold, which feeds it back). No wire runs back across the body. A call of a local `fn` names its input
+rows after the `fn`'s parameters. Every function and loop zone starts open, its body in view (`c` folds
+one, and the fold is saved in the layout); `i` or a double click on a collapsed zone opens it in place.
+
+A chain is a column: the first node call a card reads in a positional input (its chain input) stacks
+right above it in the same column, the source on top (`Projection.layout`), and the two are joined by a
+short spine down their left strips instead of a wire back across the card (`Scope_wires.compute`).
+A `map`'s inline function zone stacks above the `map` card the same way. A name read inside a formula
+(not the value a row takes) is wired only while either end is selected or the wire is hovered.
 
 ### 7.2 Keys
 
@@ -451,30 +467,30 @@ selection, row keys on the row under the pointer.
 | `⇧O` / `⇧K` | `scope.open-all` / `scope.point-all` | every node to a card / every node to a point, or back |
 | `v` | `scope.display` | preview the selected geometry node at the iteration selectors (below) |
 | `b` | `scope.bypass` | toggle `^:bypass`; on a node with a boolean `:visible` and no bypass, toggle that instead |
-| `x`, Delete, Backspace | `scope.delete` | the hovered wired row's wire or list item, else the selected wire, else the selected nodes |
+| `x`, Delete, Backspace | `scope.delete` | the hovered wired row's wire or list item, else the selected wire, else the selected nodes; a node something reads dissolves: its readers get its expression (`Delete_nodes`, never refused for having readers; a scene object leaves the result instead) |
 | `f` | `scope.frame-selection` | pan and zoom to the selection (all with none) |
 | Home | `scope.frame-all` | frame everything |
 | `⇧F` / `⇧U` | `scope.fold` / `scope.unfold` | fold a binding into its one use / unfold a call into its own binding |
 | `⌥⇧U` | `scope.unfold-all` | unfold every call written in a row of the selected card |
 | `⇧Y` | `scope.tags` | long wires as name tags, or all drawn (§6.3) |
 | `⇧H` | `scope.hoist` | move a loop-invariant binding out of its loop |
-| `r` / `⇧R` | `scope.repeat` / `scope.iterate` | wrap the selection in a `for` / a `fold` |
+| `r` / `⇧R` | `scope.repeat` / `scope.iterate` | wrap the selection in a `for` (merged by `sop/merge` or `draw/merge`, or summed: the checker picks) / a `fold` |
 | `⇧M` / `⇧L` | `scope.map` / `scope.filter` | wrap the selection as the body of a `map` / the test of a `filter`. Two selected nodes: one is the collection (the checker picks which; the body reads its items as `i`); else a binding `items (range 6)` is added beside the wrapped node, one literal to edit. One undo step |
 | `⌥⇧I` | `scope.inline-fn` | replace a call of a `defn` by its body (`Inline_defn`) |
-| `l` | `scope.function` | make a local `fn` of the selection |
+| `l` | `scope.function` | make a local `fn` of the selection; its call card is wired from the `fn` (a `fn` row). Refused when the selection reads no other node or already calls a local `fn` |
 | `d` | `scope.defn` | make a `defn` (the host's dialog types its parameters) |
 | `m` | `scope.macro` | make a macro (the host's dialog picks its holes) |
 | `c` | `scope.collapse` | collapse or expand a zone |
 | `[` / `]` | `scope.probe-prev` / `scope.probe-next` | step the selected zone's probe; with nothing selected, every zone of the graph (one pinned iteration) |
 | `F2` | `scope.rename` | rename the selected node, or edit the default of a selected graph input |
 | `⇧G` | `scope.frame` | a titled frame around the selection (its corner resizes, its cross deletes) |
-| `⌥↑` / `⌥↓` | `scope.item-up` / `scope.item-down` | move the hovered item of a `list`, a `str` or a `scene/merge`; off an item, move the selected binding in the text (`Move_binding`: text order only, sticky layout keeps every card; refused past a neighbour it reads or is read by) |
+| `⌥↑` / `⌥↓` | `scope.item-up` / `scope.item-down` | move the hovered item of a `list`, a `str` or a `scene/merge`; off an item, a selected chain step trades places with the step before or after it (`Move_step`, along `chain_in`), and a selected binding moves in the text (`Move_binding`: text order only, sticky layout keeps every card; refused past a neighbour it reads or is read by) |
 | `Esc` / `u` | `scene.back` / `scene.up` | back along the route taken (`Leader.Back`); a click on an earlier crumb of the graph header (`Chrome.Crumb`) goes that far |
 
 Dragging a wire from an out-port and letting go on empty canvas selects its node and opens the add menu there (`Menu_requested`); the kind picked is wired to it when one of its inputs takes the node's type. Pulling a *wire* itself (past 6 points) is the same drag from its source, and the wire stays selected (`Scope.selected_wire`): the kind picked is inserted on it, source -> new node -> the wire's input, one `Syntax_batch` "Insert node" (`Core_add.scope_add`); dropped on an input row it connects the source there too. An anonymous nested node (`holder#input`) as the source is named first (`Rename` binds it as `Unfold` does, with the kind's name made fresh) in the same one undo step as the `Add_node`. With records, a card below Full shows its value at the pinned iteration beside its out-port (`Scope.Private.ghost`, tested). A function frame's own variable reads back into the body below its rail row and inside the frame; a `fn` frame whose result is a vector literal shows it as a `result` card.
 | `⌘D` | `scope.duplicate` | copy the selected bindings of one scope with fresh names |
 | `⌘C` / `⌘X` / `⌘V` | `scope.copy` / `scope.cut` / `scope.paste` | bindings as text on the clipboard |
-| `i` / `⇧I` / `u` | `scene.enter` / `scene.peek` / `scene.up` | follow a reference / peek it in a floating graph / back |
+| `i` / `⇧I` / `u` | `scene.enter` / `scene.peek` / `scene.up` | follow a reference or open the `defn` a call names / peek it in a floating graph / back |
 | `y` | `carry.pick-up` | pick up a graph or object (§7.12) |
 | `?` | `guide.toggle` | guide strip on or off |
 
@@ -550,12 +566,23 @@ selection it selects the first node.
 
 ### 7.7 Fold and unfold
 
+- **Math nodes** (`Flow_edit.value_call`: a plain operator call such as `+`, `max`) follow one rule: one
+  you have not named (its binding name is still the generated one, `value_base` then maybe `_n`:
+  `sum_2`, `max_3`) with exactly one reader in its scope is written inline in that reader's input;
+  with none, two or more readers, or a name you chose, it stays a `let*` binding. `Connect`,
+  `Disconnect`, `Delete_nodes` and `Rename` apply the rule to the names they touch (`Fold_into`'s
+  semantics; the scope's result is not a reader). A wire never deletes a math node: it is unfolded to
+  a binding first. Written inline it is a dashed `expr` card nested in the input like a node call, open
+  or folded by its leaf's `collapsed` entry (folded by default; a `Connect` that inlines one opens it),
+  and opening a call opens its whole tree.
 - **Unfold** (`ƒ` on an expression row, `⇧U`): the nested call, loop or scope becomes its
   own binding in the same scope, named by `Flow_edit.fresh_name`.
 - **Fold** (`ƒ` on a wired row, `⇧F`): a binding used once is inlined into its use
   (`Fold_into`). A row wired from a node that something else also reads has no `ƒ`; the edit
   would be refused.
-- A double click on an expression row's text unfolds it like its `ƒ`; the hover tip shows the
+- `ƒ` on a math expression row (or a double click on its text) opens it as cards (`Zone_collapsed`,
+  not `Unfold`); `Collapse` on one of its cards folds the outermost call back to the row.
+- A double click on any other expression row's text unfolds it like its `ƒ`; the hover tip shows the
   whole text when the row is cut.
 - `/ j` lists the nodes of the shown graph beside the graphs; picking one selects it and frames it.
 - A function written in a row is a frame headed `map -> positions` (the holder's kind and name).
@@ -775,7 +802,7 @@ Every step of a `->`, and every call of a node kind written inside another call,
 graph (`Flow_graph.Projection`): a card before the card that holds it, wired to the row it is written
 in. It has no binding, so its path leaf is the holder's leaf, `#`, and the input (§3.4). Its rows
 edit in place (`Set_arg`, `Connect`, `Disconnect`, `Toggle_bypass` take the path); naming it
-(`Rename`, the name field) binds it under that name; deleting it hands its place to its first input;
+(`Rename`, the name field) binds it under that name; deleting it hands its place to its chain input (`Flow_edit.chain_in`: the first input written as a node call, such as `draw/translate`'s drawing, else the first input);
 dragging its output to a second input, viewing it, or dropping a wire where it is written binds it
 first, so a wire never deletes a node. The caret in its text selects it and selecting it marks its
 text. Inline `map`, `filter`, `reduce` and `sort-by` are cards too; their `fn` inputs

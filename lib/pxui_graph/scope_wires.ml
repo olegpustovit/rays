@@ -73,7 +73,7 @@ type wire = {
   a : float * float; b : float * float; ty : Ty.t option;
   target : (path * E.arg_key * S.t option) option;
   pts : (float * float) list;  (* the drawn polyline, [a] .. [b]: straight, or bent clear of the cards *)
-  dashed : bool;  (* a loop's feedback *)
+  refers : bool;  (* a name read inside a formula, not the value a row takes: drawn only when lit *)
   junction : float option;  (* x of the shared trunk's end, when the wire is bundled with its siblings *)
   from : path option;  (* the node (or zone) it reads from, and the one it ends at: the dataflow chains *)
   into : path option;
@@ -113,6 +113,16 @@ let fallback (r : P.row) = match r.key with
    row's centre line (kit [.wire], measured on graph@2x.png) *)
 let wire_head_y = 11.75
 let wire_row_y = 12.75
+
+(* a loop's begin and end bars (Houdini's block begin/end): its variables' out-ports stack in the
+   strip inside its left edge under the rails, the label's first, 24 apart; the body's result comes
+   in at the strip inside its right edge.  A plain [for] keeps the sheet's label port.  Tile-relative. *)
+let begin_port (n : P.node) (z : P.zone) (r : P.rail_row) =
+  let label = P.label_row z in
+  if z.kind = P.For && (match label with Some l -> l == r | None -> false) then 12., 36. else
+  let vars = Option.to_list label @ List.filter (fun (r : P.rail_row) -> r.role <> P.Capture) (P.extra_rails z) in
+  12., P.rail_top n +. 12. +. 24. *. float (Option.value ~default:0 (List.find_index (fun x -> x == r) vars))
+let end_port (n : P.node) ~w = w -. 12., P.rail_top n +. 12.
 
 let note_rows (n : P.node) = if n.note <> None then 1. else 0.
 let rows_top (n : P.node) ay = ay +. P.body_top +. note_rows n *. P.row_height
@@ -267,12 +277,12 @@ let bundle grid (wires : wire array) =
   let all = Hashtbl.create 16 and groups = Hashtbl.create 16 in
   Array.iteri (fun i (w : wire) ->
     let (ax, ay), (bx, by) = w.a, w.b in
-    if not w.dashed then Hashtbl.replace all w.a (1 + Option.value ~default:0 (Hashtbl.find_opt all w.a));
+    Hashtbl.replace all w.a (1 + Option.value ~default:0 (Hashtbl.find_opt all w.a));
     let straight = w.pts = [ w.a; w.b ] && bx -. ax > 2. *. trunk && Float.abs (by -. ay) > 1.
     and bent = match w.pts with
       | _ :: (x1, _) :: _ :: _ -> x1 > ax +. 1.
       | _ -> false in
-    if not w.dashed && bx -. ax <= tag_span && (straight || bent) then
+    if bx -. ax <= tag_span && (straight || bent) then
       Hashtbl.replace groups w.a (i :: Option.value ~default:[] (Hashtbl.find_opt groups w.a))) wires;
   Hashtbl.iter (fun (ax, ay) members ->
     if Hashtbl.find all (ax, ay) >= bundle_min && List.length members >= 2 then begin
@@ -365,9 +375,23 @@ let compute ?(style = `Straight) ?(previous = empty_geo) ~name_w ~shown (scope :
   let reuse = if List.equal same previous.obstacles obstacles then previous.routes else Routes.create 1 in
   let routes = Routes.create (max 16 (Routes.length reuse)) in
   let wires = ref [] in
-  let wire ?target ?(dashed = false) (s : src option) b ~into =
-    match s with
-    | Some s ->
+  let items = Array.of_list items_list in
+  let at path : (P.placed * float * float) option = Option.map (fun i -> items.(i)) (Paths.find_opt slot path) in
+    (* a chain step stacked right above the card it feeds (Projection.layout) is joined to it by a
+     short spine down their left strips, not a wire back across the card *)
+  let spine (s : src) into = match s.owner, into with
+    | Some o, [ i ] ->
+        (match at o, at i with
+         | Some ((op : P.placed), ox, oy), Some (_, ix, iy)
+           when Float.abs (ox -. ix) < 1. && iy >= oy +. op.h && iy -. (oy +. op.h) <= 3. *. P.lattice ->
+             Some ((ox +. 12., oy +. op.h), (ix +. 12., iy))
+         | _ -> None)
+    | _ -> None in
+  let wire ?target ?(refers = false) (s : src option) b ~into =
+    match s, Option.bind s (fun s -> spine s into) with
+    | Some s, Some (a, b) ->
+        wires := { a; b; ty = s.ty; target; pts = [ a; b ]; refers; junction = None; from = s.owner; into = (match into with i :: _ -> Some i | [] -> None) } :: !wires
+    | Some s, None ->
         let excl = (match s.owner with Some o -> [ o ] | None -> []) @ into in
         let pts = match style with
           | `Straight ->
@@ -377,14 +401,12 @@ let compute ?(style = `Straight) ?(previous = empty_geo) ~name_w ~shown (scope :
               let pts = match Routes.find_opt reuse key with Some pts -> pts | None -> route ~inside grid ~excl s.pos b in
               Routes.replace routes key pts; pts
           | `Rect -> rect_points s.pos b in
-        wires := { a = s.pos; b; ty = s.ty; target; pts; dashed; junction = None; from = s.owner; into = (match into with i :: _ -> Some i | [] -> None) } :: !wires
-    | None -> () in
+        wires := { a = s.pos; b; ty = s.ty; target; pts; refers; junction = None; from = s.owner; into = (match into with i :: _ -> Some i | [] -> None) } :: !wires
+    | None, _ -> () in
   let resolve chain name =
     List.find_map (fun tbl -> match Hashtbl.find_opt tbl name with
       | Some s -> Some s | None -> Hashtbl.find_opt tbl (root_name name)) chain in
   let names_of (e : S.t option) = match e with Some e -> E.free_names e | None -> [] in
-  let items = Array.of_list items_list in
-  let at path : (P.placed * float * float) option = Option.map (fun i -> items.(i)) (Paths.find_opt slot path) in
   (* a plain [for] has no out-port of its own: what it yields wires from the yielded card *)
   let inner_out (n : P.node) = match n.zone with
     | Some ({ kind = P.For; _ } as z) when (match at n.path with Some (p, _, _) -> not p.collapsed | None -> true) ->
@@ -445,7 +467,7 @@ let compute ?(style = `Straight) ?(previous = empty_geo) ~name_w ~shown (scope :
                       let target = Some (n.path, r.key, fallback r) in
                       List.iter (fun name -> match resolve chain name with
                         | Some { owner = Some o; _ } when o = n.path -> ()
-                        | src -> wire ?target src target_pos ~into:[ n.path ]) names)) n.rows
+                        | src -> wire ?target ~refers:(match r.chip with P.Inline _ -> true | _ -> false) src target_pos ~into:[ n.path ]) names)) n.rows
            | Some z ->
                let collapsed = p.collapsed in
                let label = P.label_row z in
@@ -472,11 +494,7 @@ let compute ?(style = `Straight) ?(previous = empty_geo) ~name_w ~shown (scope :
                  let rail = Hashtbl.create 8 in
                  List.iter (fun (r : P.rail_row) ->
                    if r.role <> P.Capture then begin
-                     let pos = match label with
-                       | Some l when l == r -> ax +. 12., ay +. 36.
-                       | _ ->
-                           let i = Option.value ~default:0 (List.find_index (fun x -> x == r) extras) in
-                           ax +. w -. 12., ay +. P.head_height +. float i *. P.row_height +. wire_row_y in
+                     let pos = let bx, by = begin_port n z r in ax +. bx, ay +. by in
                      let s = { pos; ty = r.ty; owner = Some n.path } in
                      List.iter (fun name -> Hashtbl.replace rail name s) r.names
                    end) z.rail;
@@ -487,15 +505,9 @@ let compute ?(style = `Straight) ?(previous = empty_geo) ~name_w ~shown (scope :
                    | P.Link l -> resolve inner_chain l
                    | P.Node _ -> resolve inner_chain "@result"
                    | P.Literal _ -> None in
-                 (* the collected result ends at the zone's own out-port; a fold or scan feeds it
-                    back to its accumulator, dashed *)
-                 if z.kind <> P.For then wire source (ax +. w, ay +. wire_head_y) ~into:[ n.path ];
-                 (match List.find_opt (fun (r : P.rail_row) -> r.role = P.Acc) z.rail with
-                  | Some acc ->
-                      (match Hashtbl.find_opt rail acc.name, source with
-                       | Some target, Some src -> wire ~dashed:true (Some src) target.pos ~into:[ n.path ]
-                       | _ -> ())
-                  | None -> ())
+                 (* the body's result ends at the end bar; a fold's goes round to its accumulator
+                    from there, which the bar says, so no wire runs back across the body *)
+                 if z.kind <> P.For then wire source (let ex, ey = end_port n ~w in ax +. ex, ay +. ey) ~into:[ n.path ]
                end)
       | _ -> ()) s.nodes in
   scope_wires [] scope;

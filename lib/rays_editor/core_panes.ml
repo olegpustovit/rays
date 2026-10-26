@@ -202,6 +202,8 @@ let follow_target ?path value =
        | Some _ as found -> found
        | None ->
            (match Flow_graph.Flow_edit.arg_text ws.source path Whole with
+            | Some { node = S.List ({ node = S.Sym h; _ } :: _); _ }
+              when List.exists (fun (d : Flow.Workspace.graph) -> d.name = h) ws.checked.defs -> Some ("def:" ^ h)
             | Some { node = S.List (_ :: args); _ } -> List.find_map reference args
             | _ -> None))
   | _ -> None

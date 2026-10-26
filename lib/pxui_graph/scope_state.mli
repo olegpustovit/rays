@@ -79,6 +79,7 @@ type wiring = {
   ty : Ty.t option;
   iter : bool;
   from : float * float;
+  lift : (path * E.arg_key) list;  (** the inputs an Alt-drag lifted it from *)
 }
 type drag =
     Moving of { paths : path list; dx : float; dy : float; moved : bool; }
@@ -213,6 +214,7 @@ val with_display : path option -> t -> t
 val with_arguments : (path * E.arg_key * S.t) list -> t -> t
 val with_records : Flow_graph.Probe.t -> t -> t
 val node_of : t -> path -> P.node option
+val collapsed_zone : t -> path -> bool
 val item_at : t -> path -> (P.placed * float * float) option
 val box_at : t -> path -> (float * float * float * float) option
 val rel_at : t -> path -> (float * float) option

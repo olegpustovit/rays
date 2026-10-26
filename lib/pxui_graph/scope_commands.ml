@@ -19,14 +19,49 @@ let inline_rail (n : P.node) = match n.zone with
   | Some z -> List.find_opt (fun (r : P.rail_row) -> match r.expr with
       | Some { S.node = S.List _; _ } -> r.key <> None | _ -> false) z.rail
 
+(* an open expression folds from its outermost call *)
+let outer_expr t path =
+  let up q = match List.rev q with
+    | l :: r -> List.rev ((match String.rindex_opt l '#' with Some i -> String.sub l 0 i | None -> l) :: r) | [] -> [] in
+  let rec go q = let u = up q in
+    if u <> q && (match Option.bind t.scope (fun s -> P.find s u) with Some (n : P.node) -> n.expr | None -> false)
+    then go u else q in
+  go path
+
 let wired (r : P.row) = P.sources r <> []
 
 (* taking a wire off a row: the nested node written there stays, as a binding of its own *)
-let unwire (n : P.node) (r : P.row) =
+(* the value the wire carried, as the literal a disconnected row keeps (scalars, vectors and
+   text; anything else falls back to the default).  ponytail: read at no probe, so a source inside
+   a loop keeps the default *)
+let last_value t (n : P.node) (r : P.row) =
+  let num f = S.make (S.Num (Flow.Lisp.float f)) in
+  let vec l = S.make (S.Vec (List.map num l)) in
+  match t.records, P.sources r with
+  | Some records, [ src ] ->
+      (match Flow_graph.Probe.at records (List.rev (List.tl (List.rev n.path)) @ [ src ]) ~probes:[] with
+       | Some (Value (Int i)) -> Some (S.make (S.Num (string_of_int i)))
+       | Some (Value (Float f)) when Float.is_finite f -> Some (num f)
+       | Some (Value (Bool b)) -> Some (S.make (S.Sym (string_of_bool b)))
+       | Some (Value (Text s)) -> Some (S.make (S.Str s))
+       | Some (Value (Vec2 (a, b))) -> Some (vec [ a; b ])
+       | Some (Value (Vec3 (a, b, c))) -> Some (vec [ a; b; c ])
+       | Some (Value (Vec4 (a, b, c, d))) -> Some (vec [ a; b; c; d ])
+       | _ -> None)
+  | _ -> None
+
+let unwire t (n : P.node) (r : P.row) =
+  let fallback = match last_value t n r with Some _ as v when r.kind <> P.Rest -> v | _ -> fallback r in
   (match r.chip with
    | P.Name leaf when E.nested leaf -> [ E.Unfold { node = n.path; key = r.key; sub = [] } ]
    | _ -> [])
-  @ [ E.Disconnect { node = n.path; key = r.key; fallback = fallback r } ]
+  @ [ E.Disconnect { node = n.path; key = r.key; fallback } ]
+
+(* the edits that take the wires off these inputs *)
+let unwire_at t inputs = List.concat_map (fun (path, key) ->
+  match Option.bind (node_of t path) (fun n -> Option.map (fun r -> n, r) (List.find_opt (fun (r : P.row) -> r.key = key) n.rows)) with
+  | Some (n, r) -> unwire t n r
+  | None -> []) inputs
 
 (* ---------------------------------------------------------------- frames *)
 
@@ -93,12 +128,12 @@ let action_changes t command =
            (* a wire comes off; an item of a variadic input (a list's, a merge's) goes with what it holds *)
            let n = Option.get (node_of t path) in
            let r = List.find (fun (r : P.row) -> r.key = key) n.rows in
-           List.map (fun op -> Syntax_edit op) (unwire n r)
+           List.map (fun op -> Syntax_edit op) (unwire t n r)
        | _ -> (match t.selected_wire with
            | Some (path, key, fb) ->
                (match Option.bind (node_of t path) (fun n ->
                   Option.map (fun r -> n, r) (List.find_opt (fun (r : P.row) -> r.key = key) n.rows)) with
-                | Some (n, r) -> List.map (fun op -> Syntax_edit op) (unwire n r)
+                | Some (n, r) -> List.map (fun op -> Syntax_edit op) (unwire t n r)
                 | None -> edit (E.Disconnect { node = path; key; fallback = fb }))
            | None -> if paths = [] then [] else edit (E.Delete_nodes { nodes = paths })))
   | Fold_into -> one (fun n -> edit (E.Fold_into { node = n.path }))
@@ -140,6 +175,7 @@ let action_changes t command =
   | Make_defn -> if paths = [] then [ Notice "Select nodes to make a reusable function" ] else [ Defn_requested paths ]
   | Collapse ->
       List.filter_map (fun (n : P.node) -> match n.zone with
+        | None when n.expr -> Some (Zone_collapsed { zone = outer_expr t n.path; collapsed = true })
         | Some { kind = P.Let; _ } | None -> None
         | Some _ -> Some (Zone_collapsed { zone = n.path; collapsed = not (t.collapsed n.path) })) nodes
   | Probe_step delta ->
@@ -171,8 +207,10 @@ let action_changes t command =
            | Some n -> P.reorderable n | None -> false) ->
            edit (E.Move_item { node = path; pos = if command = Item_up then i else i + 1 })
        | _ ->
-           (* off a list item, the same keys move the selected binding in the text (cards stay put) *)
-           one (fun n -> edit (E.Move_binding { node = n.path; by = if command = Item_up then -1 else 1 })))
+           (* off a list item: a step of a chain moves along it; a binding moves in the text (cards stay put) *)
+           one (fun n -> if E.nested (List.nth n.path (List.length n.path - 1))
+             then edit (E.Move_step { node = n.path; earlier = command = Item_up })
+             else edit (E.Move_binding { node = n.path; by = if command = Item_up then -1 else 1 })))
 
 let frame_selection t =
   match List.filter_map (box_at t) (selected t) with
@@ -423,8 +461,8 @@ let bindings =
     make ~guide:any "paste" "paste bindings" Paste (ch 'v') [ Input.Meta ];
     make ~guide:any "paste" "paste bindings" Paste (ch 'v') [ Input.Ctrl ];
     make ~guide:one "display" "view in the viewport" Display (ch 'v') [];
-    make ~guide:one "item-up" "move list item up, or the binding in the text" Item_up Input.ArrowUp [ Input.Alt ];
-    make ~guide:one "item-down" "move list item down, or the binding in the text" Item_down Input.ArrowDown [ Input.Alt ] ]
+    make ~guide:one "item-up" "move list item or chain step up, or the binding in the text" Item_up Input.ArrowUp [ Input.Alt ];
+    make ~guide:one "item-down" "move list item or chain step down, or the binding in the text" Item_down Input.ArrowDown [ Input.Alt ] ]
   @ List.map (fun (direction, arrow, name) ->
       make ~guide:any ("walk." ^ name) ("walk " ^ name) (Walk direction) arrow [])
     [ Left, Input.ArrowLeft, "left"; Down, Input.ArrowDown, "down";

@@ -76,6 +76,9 @@ type op =
   | Move_binding of { node : path; by : int }
       (** the binding swaps with its neighbour [by] places away ([-1] up, [1] down): text order only,
           refused when it reads or is read by the neighbour *)
+  | Move_step of { node : path; earlier : bool }
+      (** a step of a chain swaps with the step before it ([earlier]) or after it: the two calls trade
+          places along their {!chain_in} inputs, each keeping its other arguments *)
   | Toggle_bypass of { node : path }
   | Set_note of { node : path; text : string }
       (** a root path (a graph name) notes the form; [""] removes the note *)
@@ -148,6 +151,12 @@ val keywords : Flow.Syntax.t list -> (string * Flow.Syntax.t) list
 
 val node_call : Flow.Syntax.t -> bool
 (** A call of a node kind (a head with a [/]): written in an argument, it is a nested node. *)
+
+val value_call : Flow.Syntax.t -> bool
+(** A plain operator call ([(+ a b)]): a card of its own only while written in its reader, see {!Connect}. *)
+
+val value_base : string -> string
+(** The name a binding of this operator starts with: [+] is [sum], a comparison [test]. *)
 
 val nested : string -> bool
 (** The leaf names a nested node. *)

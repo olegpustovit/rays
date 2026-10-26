@@ -31,7 +31,7 @@ type node = {
   path : path; name : string; binds : string list; head : string; rows : row list;
   outputs : (string * Ty.t) list; ty : Ty.t; note : string option; bypass : bool;
   macro : string option; lens : lens option; live : bool; invariant : bool; synthetic : bool;
-  zone : zone option;
+  zone : zone option; expr : bool;
 }
 and zone = { kind : zone_kind; rail : rail_row list; scope : scope; yield_label : string;
              order : string option }
@@ -64,6 +64,7 @@ type cx = {
   ctx : W.context;
   macros : (string * S.t) list;
   terms : (path, W.term) Hashtbl.t;  (* every bound term of the graph, by path *)
+  folded : path -> bool;  (* an operator call written in an input stays text while its leaf is folded *)
   forms : (S.id, W.term) Hashtbl.t;  (* every term, by the form it checks: a nested node has no path *)
 }
 
@@ -330,7 +331,21 @@ let call_rows c (e : S.t) h args =
                | None ->
                    match Flow.Check.resolve_kind c.catalog c.ctx h with
                    | Ok k -> kind_rows c k pos kws
-                   | Error _ -> ignore e; List.mapi (fun i a -> row c (Printf.sprintf "arg%d" (i + 1)) (E.Pos i) (Some a)) pos)
+                   | Error _ ->
+                       (* a call of a local fn reads the fn: a wire, so a used fn never looks unused *)
+                       let callee, names = match Hashtbl.find_opt c.forms e.id, S.children e with
+                         | Some { W.node = Call_fn { fn; _ }; _ }, f :: _ ->
+                             (* its inputs are named by the fn's parameters.  ponytail: the first fn of
+                                that name in the graph, so a shadowed name in a sibling scope reads the other *)
+                             let params = Hashtbl.fold (fun (p : path) (t : W.term) found -> match found, t.node with
+                               | None, Fn { params; _ } when p <> [] && List.nth p (List.length p - 1) = fn ->
+                                   Some (List.map (function (W.Name n, _) -> n | _ -> "") params)
+                               | _ -> found) c.terms None in
+                             [ row c ~ty:(Ty.Fn None) ~socket:false "fn" (E.Pos (-1)) (Some f) ], Option.value ~default:[] params
+                         | _ -> [], [] in
+                       callee @ List.mapi (fun i a ->
+                         let label = match List.nth_opt names i with Some n when n <> "" -> n | _ -> Printf.sprintf "arg%d" (i + 1) in
+                         row c label (E.Pos i) (Some a)) pos)
 
 let rows_of c (e : S.t) = match e.node, head_sym e with
   | S.Map l, _ ->
@@ -464,7 +479,7 @@ let rec scope_of ?(card_result = false) c ~visible ~inputs (path : path) (body :
   { path; inputs; nodes = nodes @ extra; result }
 
 (* the node of a binding (or of the result), after the nodes of the calls nested in its inputs *)
-and node_of c ~visible ?nested (scope_path : path) (pat : S.t option) (e : S.t) : node list =
+and node_of c ~visible ?(expr = false) ?nested (scope_path : path) (pat : S.t option) (e : S.t) : node list =
   let name = match nested, pat with
     | Some leaf, _ -> leaf | None, Some p -> E.pat_key p | None, None -> "@result" in
   let p = scope_path @ [ name ] in
@@ -515,12 +530,13 @@ and node_of c ~visible ?nested (scope_path : path) (pat : S.t option) (e : S.t) 
             note = None; bypass = false; macro = None; lens = None;
             live = W.Paths.mem path c.w.live; invariant = W.Paths.mem path c.w.invariant; synthetic = false;
             zone = Some {kind = Branch; rail; order = None; yield_label = "then";
-              scope = scope_of c ~visible ~inputs:[] path body}} in
+              scope = scope_of c ~visible ~inputs:[] path body}; expr = false} in
           {r with chip = Name leaf} :: rows, inner @ [branch]
       (* not a macro's argument: that is a piece of its template, which may read the macro's names *)
-      | Some a, (E.Pos _ | E.Kw _) when (r.kind = Arg || r.kind = Rest) && macro = None && E.node_call a ->
+      | Some a, (E.Pos _ | E.Kw _) when (r.kind = Arg || r.kind = Rest) && macro = None
+          && (E.node_call a || (E.value_call a && (expr || not (c.folded (scope_path @ [ E.nested_leaf name r.key ]))))) ->
           let leaf = E.nested_leaf name r.key in
-          { r with chip = Name leaf } :: rows, inner @ node_of c ~visible ~nested:leaf scope_path None a
+          { r with chip = Name leaf } :: rows, inner @ node_of c ~visible ~expr:(E.value_call a) ~nested:leaf scope_path None a
       | _ -> r :: rows, inner) ([], []) (rows_of c e) |> fun (rows, inner) -> List.rev rows, inner in
   inner @ [
   { path = p; name; binds = (match nested, pat with None, Some pt -> E.pat_names pt | _ -> [ name ]);
@@ -530,7 +546,7 @@ and node_of c ~visible ?nested (scope_path : path) (pat : S.t option) (e : S.t) 
     note = (match pat with Some { S.notes = (_ :: _ as l); _ } -> Some (String.concat "\n" l) | _ -> None);
     bypass = List.mem "bypass" e.meta; macro; lens;
     live = W.Paths.mem p c.w.live; invariant = W.Paths.mem p c.w.invariant;
-    synthetic = pat = None && nested = None; zone } ]
+    synthetic = pat = None && nested = None; zone; expr } ]
 
 let anonymous (n : node) = E.nested n.name
 let title (n : node) =
@@ -575,7 +591,7 @@ let bypassable (n : node) =
 let reorderable (n : node) =
   n.zone = None && List.mem n.head [ "list"; "str"; "scene/merge" ]
 
-let of_graph (catalog : Flow.Check.catalog) (w : W.t) name =
+let of_graph ?(folded = fun _ -> true) (catalog : Flow.Check.catalog) (w : W.t) name =
   Flow.Phase_timer.measure Project (fun () ->
   let catalog = {catalog with Flow.Check.kinds =
     List.map (fun (node : W.node_definition) -> node.kind) w.nodes @ catalog.kinds} in
@@ -590,7 +606,7 @@ let of_graph (catalog : Flow.Check.catalog) (w : W.t) name =
   collect terms forms g.body;
   let macros = List.filter_map (fun (m : S.t) -> match S.children m with
     | _ :: { S.node = S.Sym n; _ } :: _ -> Some (n, m) | _ -> None) w.macros in
-  let c = { w; catalog; ctx = g.context; macros; terms; forms } in
+  let c = { w; catalog; ctx = g.context; macros; terms; forms; folded } in
   let inputs = List.map (fun (n, ty, d) ->
     { path = root @ [ ":" ^ n ]; name = n; ty; default = Option.map (fun (t : W.term) -> t.form) d }) g.inputs in
   scope_of c ~visible:(List.map (fun (i : input) -> i.name) inputs) ~inputs root (last g.form))
@@ -783,6 +799,22 @@ and layout ?(foot = false) ?(at = fun _ -> None) ?(prev = fun _ -> None) ?(colla
       lvl.(k)
     end in
   Array.iteri (fun k _ -> ignore (lv k)) arr;
+  (* a chain is a column: the first node call a card reads in a positional input (its chain input,
+     as Flow_edit.chain_in, or a [map]'s function) is written in it, so it stacks right above it, the source on top.  The
+     nested steps come before their holder in [arr], so walking back settles every holder first *)
+  for k = Array.length arr - 1 downto 0 do
+    (match arr.(k) with
+     | Item n, _, _, _, _ ->
+         (match List.find_map (fun (r : row) -> match r.chip, r.key with
+            | Name leaf, E.Pos _ when E.nested leaf && r.kind = Arg -> Some leaf | _ -> None) n.rows with
+          | Some leaf ->
+              (match Hashtbl.find_opt by_name leaf with
+               | Some j when j < k && (match arr.(j) with Item s, _, _, _, _ -> not s.expr | _ -> false) ->
+                   lvl.(j) <- lvl.(k)
+               | _ -> ())
+          | None -> ())
+     | _ -> ())
+  done;
   let cols = Array.fold_left max 0 lvl + 1 in
   (* column 0 is ordered by the first item that reads each of its items (a node before an input on a
      tie, then as written), so what feeds one consumer stacks together and the chains stay level *)
