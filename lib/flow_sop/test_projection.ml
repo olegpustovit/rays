@@ -55,11 +55,11 @@ let snapshot = [
              "editor", (10, 0, 30); "half", (1, 0, 2); "petal", (2, 0, 53) ];
   "facade", [ "facade", (14, 2, 89) ];
   "garland", [ "garland", (19, 5, 90); "ring", (6, 1, 45) ]; (* inline functions and nested maps *)
-  "kit", [ "kit", (22, 8, 112); "window", (3, 0, 30) ];
-  "orrery", [ "orrery", (22, 3, 117) ]; (* conditional branch scopes *)
+  "kit", [ "kit", (16, 2, 112); "window", (3, 0, 30) ];
+  "orrery", [ "orrery", (20, 1, 117) ]; (* conditional arms are inputs, not scopes *)
   "rosette", [ "rosette", (4, 0, 32) ];
   "sunflower", [ "sunflower", (9, 1, 36) ];
-  "tiles", [ "tiles", (14, 5, 70) ];
+  "tiles", [ "tiles", (10, 1, 70) ];
   "tree", [ "tree", (9, 1, 184) ];
   "tunnel", [ "rings", (4, 1, 61) ];
   "variations", [ "garden", (6, 0, 70); "scene", (1, 0, 9); "editor", (8, 0, 23) ];
@@ -150,10 +150,11 @@ let rows () =
          && List.exists (fun (r : P.row) -> r.key = E.Field "shape") result.rows) "record rows are fields plus an add row";
   let part = node k "kit" [ "tower"; "part" ] in
   check (part.head = "cond" && List.mem ("else", P.Arg) (kinds part)) "cond rows";
-  List.iter (fun leaf ->
-    let arm = zone (node k "kit" ["tower"; leaf]) in
-    check (arm.kind = P.Branch && arm.scope.path = ["kit"; "tower"; leaf] && arm.rail <> []) "kit cond arm projection")
-    ["part#then"; "part#then~2"; "part#else"];
+  (* an arm is an input of its conditional: a name there is a wired row, not a zone *)
+  check (List.map (fun (r : P.row) -> P.sources r) (List.filter (fun (r : P.row) ->
+      match r.key with E.Arm _ -> true | _ -> false) part.rows)
+    = [ [ "big" ]; [ "small" ]; [ "small" ] ]
+    && P.find (scope k "kit") [ "kit"; "tower"; "part#then" ] = None) "kit cond arms are rows of the cond card";
   let style = zone (node k "kit" [ "style" ]) in
   check (style.kind = P.Fn && style.yield_label = "return"
          && (List.hd style.rail).role = P.Param) "a bound fn is a zone with a param rail";

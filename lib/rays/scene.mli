@@ -21,6 +21,9 @@ val scale : float -> float -> t -> node
 val clip : at:(int*int) -> w:int -> h:int -> t -> node
 val render : t -> unit
 module Private : sig
+  (** The same picture: what the nodes draw, ignoring render caches; resources and images
+      compare by identity.  A sketch window presents only a picture that is not the same. *)
+  val same : t -> t -> bool
   val shapes : Scene_command.Shape_batch.t -> node
   (* Packed primitives share the enclosing Scene transform, clip and blend. *)
   val geometry : Scene_command.Render_ir.geometry -> node

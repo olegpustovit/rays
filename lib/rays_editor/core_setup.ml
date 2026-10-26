@@ -83,7 +83,7 @@ let create ?settings ?(keymap = Leader.keymap)
         flow_catalog = lazy (Result.to_option (Editor_document.Contexts.catalog
           ~version:Flow_sop.Manifest.version factories));
         lisp_vocab = vocabulary factories doc;
-        tree = Pxui_shell.Tree.create (); outline = Navigator.initial; held_keys = []; sketch_blocked = [];
+        tree = Pxui_shell.Tree.create (); outline = Navigator.initial; held_keys = []; sketch_blocked = []; window_focus = 2;
         ui = (let ui = Pxui.Ui.create () in Pxui.Ui.set_font_size ui (default_text_size ()); ui); workspace;
         timeline = Timeline.create (); live_frame = Frame_input.at_time 0.; cook;
         edit_error = None; status_fps = None;

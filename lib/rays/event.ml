@@ -5,7 +5,7 @@ type t = KeyPressed of Input.key | KeyReleased of Input.key | MouseMoved of (flo
   | TextEditing of {text:string;start:int;length:int} | FileDropped of string
   | FileDragMoved of (float*float) | FileDragEnded | MousePinched of float
   | FileDialog of {id:int;result:(string list,string) result}
-  | WindowResized of (int*int) | WindowFocusLost | WindowClosed
+  | WindowResized of (int*int) | WindowFocusLost | WindowFocusGained | WindowClosed
   | TrackpadScrolled of {delta:float*float;phase:scroll_phase;time:float}
 module Private = struct
   (* The binding names a key once, from SDL's keycode; this is only the move

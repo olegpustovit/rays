@@ -2,7 +2,7 @@
    click: [Core] maps it to the one command or edit it means. *)
 module Ui = Pxui.Ui
 
-type tool = Add | Repeat | Iterate | Fn | Macro | Defn
+type tool = Add | Repeat | Iterate | Fn | Macro | Defn | Outline
 
 let tools = [ Add, "Add", "A"; Repeat, "Repeat", "R"; Iterate, "Iterate", "\xe2\x87\xa7R";
               Fn, "fn", "L"; Macro, "macro", "M"; Defn, "defn", "D" ]
@@ -13,7 +13,7 @@ let tools = [ Add, "Add", "A"; Repeat, "Repeat", "R"; Iterate, "Iterate", "\xe2\
    is left out. *)
 let views = [ "Graph"; "List"; "Text" ]
 
-let tool_rects ui ~header:(hx, hy, hw, hh) ~from =
+let tool_rects ?(outline = false) ui ~header:(hx, hy, hw, hh) ~from =
   let hx = float hx and hy = float hy and hw = float hw and hh = float hh in
   let x = ref (hx +. from) in
   (* the views are 12 apart and end 36 points from the edge (8, the 20-point button, 8) *)
@@ -27,12 +27,16 @@ let tool_rects ui ~header:(hx, hy, hw, hh) ~from =
       x := !x +. w +. 8.;
       if at +. w <= limit then Some (tool, label, hint, (at, hy +. ((hh -. 20.) /. 2.), w, 20.)) else None) tools in
   (* macro goes first when the tools do not all fit *)
-  match place tools with
-  | all when List.length all = List.length tools -> all
-  | _ -> place (List.filter (fun (tool, _, _) -> tool <> Macro) tools)
+  let placed = match place tools with
+    | all when List.length all = List.length tools -> all
+    | _ -> place (List.filter (fun (tool, _, _) -> tool <> Macro) tools) in
+  (* Outline, after the edit tools while the window has none: it splits one in at the right *)
+  let w = Pxui_shell.Kit.button_width ui "Outline" in
+  if outline && !x +. w <= limit then placed @ [ Outline, "Outline", "", (!x, hy +. ((hh -. 20.) /. 2.), w, 20.) ]
+  else placed
 
-let tool_rect ui ~header ~from tool =
-  List.find_map (fun (t, _, _, r) -> if t = tool then Some r else None) (tool_rects ui ~header ~from)
+let tool_rect ?outline ui ~header ~from tool =
+  List.find_map (fun (t, _, _, r) -> if t = tool then Some r else None) (tool_rects ?outline ui ~header ~from)
 
 (* the 1 x 12 rule that parts a header's title from its tools, [from] being where they start *)
 let rule ui ~key ~header:(hx, hy, _, hh) ~from =
@@ -40,11 +44,11 @@ let rule ui ~key ~header:(hx, hy, _, hh) ~from =
                 ~at:(float hx +. from -. 13., float hy +. float (hh - 12) /. 2.) key)
     (fun paint (x, y, w, h) -> Ui.Paint.fill paint ~x ~y ~w ~h (Pxui.Theme.border (Ui.theme ui)))
 
-let graph_tools ui ~header ~from ~enabled =
-  let rects = tool_rects ui ~header ~from in
+let graph_tools ?outline ui ~header ~from ~enabled =
+  let rects = tool_rects ?outline ui ~header ~from in
   if rects <> [] then rule ui ~key:"workspace-tool-rule" ~header ~from;
   List.fold_left (fun clicked (tool, label, hint, (x, y, w, h)) ->
-    if Pxui_shell.Kit.button ui ~key:("workspace-tool-" ^ label) ~at:(x, y) ~w ~h ~enabled:(enabled tool) ~hint label
+    if Pxui_shell.Kit.button ui ~key:("workspace-tool-" ^ label) ~at:(x, y) ~w ~h ~enabled:(enabled tool) ?hint:(if hint = "" then None else Some hint) label
     then Some tool else clicked) None rects
 
 (* A panel tree as an editor graph: leaves and splits are bindings, so every panel edit finds

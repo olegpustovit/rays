@@ -68,3 +68,5 @@ let pump value =
   match Sdl3.Event.poll_coalesced () with
   | Error error -> Error (Format.asprintf "%a" Sdl3.pp_error error)
   | Ok events -> push_all value events
+
+let wait ~timeout_ms = Result.map_error (Format.asprintf "%a" Sdl3.pp_error) (Sdl3.Event.wait ~timeout_ms)

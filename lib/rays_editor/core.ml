@@ -11,6 +11,9 @@ let is_picture : Pxui_shell.Layout.panel -> bool = function
 let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_focus ~camera_panel ~view_handles
     ~render_status ~error_status ~view_state (frame : Frame.t) =
   let carrying = value.carry <> None in
+  let window_focus = List.fold_left (fun f -> function
+    | Event.WindowFocusLost -> -1 | Event.WindowFocusGained -> 0 | _ -> f) value.window_focus frame.events in
+  let window_focus = if window_focus >= 0 then min 2 (window_focus + 1) else -1 in
   let live_frame, sketch_blocked =
     let pane_is_picture = match Pxui.Ui.root_at value.ui frame.mouse (List.map fst value.pane_keys) with
       | None -> true
@@ -21,12 +24,13 @@ let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_
       text_focus;
       focus_on_picture = is_picture value.focus;
       pointer_on_picture = pane_is_picture;
+      window_key = window_focus >= 2;
       pressed = List.exists (function Event.MousePressed _ -> true | _ -> false) frame.events;
       previous = value.live_frame; blocked = value.sketch_blocked }
       (Live_frame.of_frame frame) in
   let live_frame=if host_events=[]then live_frame else
     {live_frame with events=host_events @ live_frame.events} in
-  let value = {value with live_frame; sketch_blocked} in
+  let value = {value with live_frame; sketch_blocked; window_focus} in
   let value = { value with workspace = { value.workspace with hidden = shell_hidden value value.workspace } } in
   let value = follow_start value in
   let focus, focus_path = if all_ui_visible then
@@ -289,15 +293,16 @@ let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_
     let graph_host = graph_leaf vw g in
     let tool_action = match graph_host with
      | Some leaf when projection vw = Graph_view && has_panel vw Pxui_shell.Layout.Graph ->
-         (match Bars.graph_tools ui ~header:leaf.header ~from:(tools_from leaf)
+         (match Bars.graph_tools ~outline:(not (has_panel vw Pxui_shell.Layout.Outline)) ui ~header:leaf.header ~from:(tools_from leaf)
                   (* the wrapping tools act on the selection: without one they are dimmed, never silent *)
-                  ~enabled:(fun tool -> scope_name vw <> None && (tool = Bars.Add || Pxui_graph.Scope.selected vw.scope_view <> [])) with
+                  ~enabled:(fun tool -> tool = Bars.Outline || scope_name vw <> None && (tool = Bars.Add || Pxui_graph.Scope.selected vw.scope_view <> [])) with
           | Some Add -> Some Leader.Add_node
           | Some Repeat -> Some (Leader.Scope_command Pxui_graph.Scope.Wrap_repeat)
           | Some Iterate -> Some (Leader.Scope_command Pxui_graph.Scope.Wrap_iterate)
           | Some Fn -> Some (Leader.Scope_command Pxui_graph.Scope.Make_fn)
           | Some Macro -> Some (Leader.Scope_command Pxui_graph.Scope.Make_macro)
           | Some Defn -> Some (Leader.Scope_command Pxui_graph.Scope.Make_defn)
+          | Some Outline -> Some (Leader.Panel_split_at (leaf.path, `H, 0.7, Pxui_shell.Layout.Outline))
           | None -> None)
      | _ -> None in
     let view_pick = match graph_host with

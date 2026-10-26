@@ -105,7 +105,7 @@ type t = {
   geo : geo;
   geo_fs : int;  (* the font size point names were measured at *)
   pan_x : float; pan_y : float; zoom : float;
-  wires : [ `Rect | `Straight ];
+  wires : [ `Rect | `Straight | `Curve ];
   selected : Path_set.t;
   selected_wire : (path * E.arg_key * S.t option) option;
   panning_grab : bool;
@@ -142,7 +142,7 @@ let create ?(width = 640) ?(height = 360) () = {
   chains = Hashtbl.create 1; folds = Hashtbl.create 1; counts = Hashtbl.create 1;
   frames = (fun _ -> []); display = None; framed = true;
   layout = { P.placed = []; w = 0.; h = 0. }; geo = empty_geo; geo_fs = 13; pan_x = 12.; pan_y = 12.; zoom = 1.;
-  wires = `Straight; selected = Path_set.empty; selected_wire = None; panning_grab = false;
+  wires = `Curve; selected = Path_set.empty; selected_wire = None; panning_grab = false;
   hovered_row = None; highlighted = []; drag = None; editing = None; context = None; stats = no_stats; switches = [];
   carry_lit = []; carry_hot = None; failed = []; hinting = None; held = [], false; back = [];
   measure = (fun size s -> 0.6 *. float (size * String.length s)); tags = true; chain = ref None }

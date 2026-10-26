@@ -809,6 +809,19 @@ static void live_resize_install(void)
    union is sufficient. SDL-owned pointer fields are copied before reuse. */
 static SDL_Event rays_sdl3_event;
 
+/* An idle sketch blocks here instead of ticking: until SDL has an event or [ms]
+   pass. The event stays queued for the next poll. Not inside our poll, the
+   live-resize watch returns at once, so no OCaml runs while the lock is free. */
+CAMLprim value caml_sdl3_wait_event_timeout(value ms)
+{
+  bool any;
+  int timeout = Int_val(ms);
+  caml_release_runtime_system();
+  any = SDL_WaitEventTimeout(NULL, timeout);
+  caml_acquire_runtime_system();
+  return Val_bool(any);
+}
+
 CAMLprim value caml_sdl3_poll_event(value unit)
 {
   CAMLparam1(unit);

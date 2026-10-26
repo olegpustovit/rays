@@ -30,7 +30,14 @@ let measure calls make =
    ((gc_after.promoted_words -. gc_before.promoted_words) *. bytes_per_word)
      /. float calls)
 
+(* a window presents only a picture that is not the same as the last one *)
+let same_picture () =
+  let picture label = Scene.[ clear Color.black; translate 4 8 [ text label ~at:(1, 2) ] ] in
+  require (Scene.Private.same (picture "a") (picture "a")) "an equal picture rebuilt counts as changed";
+  require (not (Scene.Private.same (picture "a") (picture "b"))) "a changed label counts as the same picture"
+
 let run () =
+  same_picture ();
   let make x y =
     Scene.[rounded_rect ~at:(x, y) ~w:84 ~h:31 ~radius:7
       ~fill:(Color.rgba 12 34 56 220) ~stroke:(Color.rgb 90 80 70) ()]

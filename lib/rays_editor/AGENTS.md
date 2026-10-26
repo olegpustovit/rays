@@ -22,7 +22,7 @@
 | `Carry`, `Core_carry` | What a payload does at a place (`Carry.put`), and the carry's turn of a frame |
 | `Cook`, `Schedule`, `Pick` | The cook worker boundary, when to cook, viewport provenance |
 | `Text_pane`, `Lisp_text` | The text pane and the Lisp as `Pxui.Ui.language` |
-| `Gate` | What the hosted sketch sees of a frame: the pointer only on its picture, the keyboard only with a viewer or canvas in focus and no prompt, menu, leader or text field open; a held key stays hidden until released. Pure, table-tested in `gate_test` |
+| `Gate` | What the hosted sketch sees of a frame: the pointer only on its picture and only while the window is key (not hovered from another app, not the click that raised it), the keyboard only with a viewer or canvas in focus and no prompt, menu, leader or text field open; a held key stays hidden until released. Pure, table-tested in `gate_test` |
 | `Navigator`, `Bars`, `Leader`, `Echo` | The Outline panel, header tools, the one keymap, a gesture in the words of the text |
 
 The chain order is `Core_model`, `Core_shell`, `Core_inspect`, `Core_panes`, `Core_scope`, `Core_add`,

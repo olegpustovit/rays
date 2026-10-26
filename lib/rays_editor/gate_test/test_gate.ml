@@ -8,7 +8,7 @@ let input ?(keys = []) ?(buttons = []) ?(pointer = (10., 10.)) events : Frame_in
 (* a viewer has the focus, the pointer is on it, and nothing else is open *)
 let open_ : Gate.t = {
   prompt = false; menu = false; leader = false; text_focus = false; focus_on_picture = true;
-  pointer_on_picture = true; pressed = false; previous = input []; blocked = [] }
+  pointer_on_picture = true; window_key = true; pressed = false; previous = input []; blocked = [] }
 
 let presses key = input ~keys:[ key ] [ Key_pressed key; Text_input key ]
 let sees (frame : Frame_input.t) key =
@@ -52,6 +52,9 @@ let () =
   if seen.pointer <> (5., 5.) || seen.events <> [] then fail "the pointer left the picture and the sketch followed";
   let seen, _ = Gate.gate { away with pointer_on_picture = true } moved in
   if seen.pointer <> (50., 50.) || seen.events = [] then fail "the pointer over the picture was hidden";
+  (* behind another app the pointer over the picture is not the sketch's, nor is the click that raises the window *)
+  let seen, _ = Gate.gate { away with window_key = false; pointer_on_picture = true } moved in
+  if seen.pointer <> (5., 5.) || seen.events <> [] then fail "a pointer over an unfocused window reached the sketch";
   let seen, _ = Gate.gate { away with prompt = true; pointer_on_picture = true } moved in
   if seen.pointer <> (5., 5.) then fail "a prompt did not hold the pointer";
   let drag = input ~pointer:(50., 50.) ~buttons:[ "left" ] [ Pointer_moved (50., 50.) ] in

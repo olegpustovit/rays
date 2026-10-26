@@ -73,7 +73,7 @@ type wire = {
   a : float * float; b : float * float; ty : Ty.t option;
   target : (path * E.arg_key * S.t option) option;
   pts : (float * float) list;  (* the drawn polyline, [a] .. [b]: straight, or bent clear of the cards *)
-  refers : bool;  (* a name read inside a formula, not the value a row takes: drawn only when lit *)
+  refers : bool;  (* a name read inside a formula, not the value a row takes: drawn faint until lit *)
   junction : float option;  (* x of the shared trunk's end, when the wire is bundled with its siblings *)
   from : path option;  (* the node (or zone) it reads from, and the one it ends at: the dataflow chains *)
   into : path option;
@@ -114,15 +114,18 @@ let fallback (r : P.row) = match r.key with
 let wire_head_y = 11.75
 let wire_row_y = 12.75
 
-(* a loop's begin and end bars (Houdini's block begin/end): its variables' out-ports stack in the
-   strip inside its left edge under the rails, the label's first, 24 apart; the body's result comes
-   in at the strip inside its right edge.  A plain [for] keeps the sheet's label port.  Tile-relative. *)
+(* a loop's begin and end bars (Houdini's block begin/end): hairlines 20 points inside its edges.
+   Each variable's out-port sits on the begin bar, level with its name: a rail row's on that row,
+   the label's own variable in the air under the rails, named beside it.  The body's result comes in
+   on the end bar at the first card row.  A plain [for] keeps the sheet's label port.  Tile-relative. *)
+let bar_x = 20.5
 let begin_port (n : P.node) (z : P.zone) (r : P.rail_row) =
   let label = P.label_row z in
   if z.kind = P.For && (match label with Some l -> l == r | None -> false) then 12., 36. else
-  let vars = Option.to_list label @ List.filter (fun (r : P.rail_row) -> r.role <> P.Capture) (P.extra_rails z) in
-  12., P.rail_top n +. 12. +. 24. *. float (Option.value ~default:0 (List.find_index (fun x -> x == r) vars))
-let end_port (n : P.node) ~w = w -. 12., P.rail_top n +. 12.
+  match List.find_index (fun x -> x == r) (P.extra_rails z) with
+  | Some k -> bar_x, P.head_height +. 24. *. float k +. 12.
+  | None -> bar_x, P.rail_top n -. 14.
+let end_port (n : P.node) ~w = w -. bar_x, P.rail_top n +. 12.
 
 let note_rows (n : P.node) = if n.note <> None then 1. else 0.
 let rows_top (n : P.node) ay = ay +. P.body_top +. note_rows n *. P.row_height
@@ -316,6 +319,33 @@ let rect_points (ax, ay) (bx, by) =
   if bx >= ax +. 24. then [ (ax, ay); (mx, ay); (mx, by); (bx, by) ]
   else [ (ax, ay); (mx, ay); (mx, (ay +. by) /. 2.); (bx -. 12., (ay +. by) /. 2.); (bx -. 12., by); (bx, by) ]
 
+(* the default style: a 12-point lead out of and into each port, as the kit's port stubs, and a
+   cubic between them whose pull is capped, so a long wire stays taut.  With no room for the leads
+   (a begin bar's wire to the card beside it) it is a gentle S; a wire running back swings out by
+   its height.  Sampled as the polyline the pane paints and picks. *)
+let curve_points ?(drop = false) (ax, ay) (bx, by) =
+  (* from a begin bar's port: down along the bar, then level into the row, clear of the port's name *)
+  if drop && by > ay +. 12. && bx > ax then
+    let k = Float.min (by -. ay) (bx -. ax) in
+    List.init 17 (fun i ->
+      let t = float i /. 16. in
+      let u = 1. -. t in
+      let b0 = u *. u *. u and b1 = 3. *. u *. u *. t and b2 = 3. *. u *. t *. t and b3 = t *. t *. t in
+      (b0 +. b1) *. ax +. b2 *. (bx -. k) +. b3 *. bx, b0 *. ay +. b1 *. (ay +. k) +. (b2 +. b3) *. by)
+  else
+  let dx = bx -. ax in
+  let lead = if Float.abs dx < 24. then 0. else 12. in
+  let x0 = ax +. lead and x1 = bx -. lead in
+  let k = if dx >= 24. then Float.min 96. (Float.max 12. ((x1 -. x0) /. 2.))
+    else if dx > -24. then 12.
+    else Float.min 160. (Float.max 48. (Float.abs (by -. ay) /. 2.)) in
+  let cubic = List.init 17 (fun i ->
+    let t = float i /. 16. in
+    let u = 1. -. t in
+    let b0 = u *. u *. u and b1 = 3. *. u *. u *. t and b2 = 3. *. u *. t *. t and b3 = t *. t *. t in
+    b0 *. x0 +. b1 *. (x0 +. k) +. b2 *. (x1 -. k) +. b3 *. x1, (b0 +. b1) *. ay +. (b2 +. b3) *. by) in
+  if lead = 0. then cubic else (ax, ay) :: cubic @ [ (bx, by) ]
+
 (* where a card's out-port wire starts, a node's rows are read and a zone's rail rows end *)
 let out_anchor (p : P.placed) ax ay =
   if p.shown = P.Point then ax +. p.w, ay +. P.point_size /. 2. else ax +. p.w, ay +. wire_head_y
@@ -337,7 +367,7 @@ let point_box_w ~name_w name = P.point_size +. 8. +. name_w name
 
 (* [shift] moves a placed item by its path (a drag in progress); a zone's
    children follow through the origin they are laid out from. *)
-let compute ?(style = `Straight) ?(previous = empty_geo) ~name_w ~shown (scope : P.scope) (layout : P.layout) ~shift =
+let compute ?(style = `Curve) ?(previous = empty_geo) ~name_w ~shown (scope : P.scope) (layout : P.layout) ~shift =
   let items = ref [] and count = ref 0 and slot = Paths.create 64 in
   let origins = ref [ (scope.path, (0., 0.)) ] in
   let rec walk ox oy (l : P.layout) =
@@ -375,22 +405,31 @@ let compute ?(style = `Straight) ?(previous = empty_geo) ~name_w ~shown (scope :
   let reuse = if List.equal same previous.obstacles obstacles then previous.routes else Routes.create 1 in
   let routes = Routes.create (max 16 (Routes.length reuse)) in
   let wires = ref [] in
+  (* the begin bars' ports: their wires leave down the bar *)
+  let bars = Hashtbl.create 8 in
   let items = Array.of_list items_list in
   let at path : (P.placed * float * float) option = Option.map (fun i -> items.(i)) (Paths.find_opt slot path) in
-    (* a chain step stacked right above the card it feeds (Projection.layout) is joined to it by a
-     short spine down their left strips, not a wire back across the card *)
-  let spine (s : src) into = match s.owner, into with
+  (* a card or function stacked above the card it feeds (Projection.layout's chain column) is
+     joined to it by a spine: straight down from its bottom, along the card's left edge, into the
+     input's socket, not a wire out of its right side and back across it *)
+  let spine (s : src) into (bx, by) = match s.owner, into with
     | Some o, [ i ] ->
         (match at o, at i with
-         | Some ((op : P.placed), ox, oy), Some (_, ix, iy)
-           when Float.abs (ox -. ix) < 1. && iy >= oy +. op.h && iy -. (oy +. op.h) <= 3. *. P.lattice ->
-             Some ((ox +. 12., oy +. op.h), (ix +. 12., iy))
+         | Some ((op : P.placed), ox, oy), Some (_, _, iy)
+           when bx >= ox -. 1. && bx <= ox +. op.w -. 24. && iy >= oy +. op.h
+                && iy -. (oy +. op.h) <= 3. *. P.lattice ->
+             (* into the first row along the edge; lower, 12 points out, clear of the sockets above,
+                and round into the row *)
+             if by <= iy +. P.body_top +. P.row_height then Some [ (bx, oy +. op.h); (bx, by) ]
+             else let x = bx -. 12. in
+               Some [ (x, oy +. op.h); (x, by -. 6.); (x +. 1.8, by -. 1.8); (x +. 6., by); (bx, by) ]
          | _ -> None)
     | _ -> None in
   let wire ?target ?(refers = false) (s : src option) b ~into =
-    match s, Option.bind s (fun s -> spine s into) with
-    | Some s, Some (a, b) ->
-        wires := { a; b; ty = s.ty; target; pts = [ a; b ]; refers; junction = None; from = s.owner; into = (match into with i :: _ -> Some i | [] -> None) } :: !wires
+    match s, Option.bind s (fun s -> spine s into b) with
+    | Some s, Some pts ->
+        let a = List.hd pts and b = List.nth pts (List.length pts - 1) in
+        wires := { a; b; ty = s.ty; target; pts; refers; junction = None; from = s.owner; into = (match into with i :: _ -> Some i | [] -> None) } :: !wires
     | Some s, None ->
         let excl = (match s.owner with Some o -> [ o ] | None -> []) @ into in
         let pts = match style with
@@ -400,7 +439,8 @@ let compute ?(style = `Straight) ?(previous = empty_geo) ~name_w ~shown (scope :
                 | Some o -> List.exists (fun i -> List.length i > List.length o && List.filteri (fun k _ -> k < List.length o) i = o) into | None -> false in
               let pts = match Routes.find_opt reuse key with Some pts -> pts | None -> route ~inside grid ~excl s.pos b in
               Routes.replace routes key pts; pts
-          | `Rect -> rect_points s.pos b in
+          | `Rect -> rect_points s.pos b
+          | `Curve -> curve_points ~drop:(Hashtbl.mem bars s.pos) s.pos b in
         wires := { a = s.pos; b; ty = s.ty; target; pts; refers; junction = None; from = s.owner; into = (match into with i :: _ -> Some i | [] -> None) } :: !wires
     | None, _ -> () in
   let resolve chain name =
@@ -496,6 +536,7 @@ let compute ?(style = `Straight) ?(previous = empty_geo) ~name_w ~shown (scope :
                    if r.role <> P.Capture then begin
                      let pos = let bx, by = begin_port n z r in ax +. bx, ay +. by in
                      let s = { pos; ty = r.ty; owner = Some n.path } in
+                     Hashtbl.replace bars pos ();
                      List.iter (fun name -> Hashtbl.replace rail name s) r.names
                    end) z.rail;
                  let inner = rail :: chain in

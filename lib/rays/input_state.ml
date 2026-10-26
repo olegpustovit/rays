@@ -52,8 +52,9 @@ let convert : Runtime_input.event -> Event.t option = function
   | Dialog_closed { id; result } -> Some (FileDialog { id; result })
   | Resized (w, h) -> Some (WindowResized (w, h))
   | Focus_lost -> Some WindowFocusLost
+  | Focus_gained -> Some WindowFocusGained
   | Quit -> Some WindowClosed
-  | Pixel_size_changed _ | Focus_gained | Visibility_changed _ -> None
+  | Pixel_size_changed _ | Visibility_changed _ -> None
 
 let configure ~logical_width ~logical_height =
   match Runtime_input.set_extent source ~logical_width ~logical_height with
@@ -77,6 +78,9 @@ type polled = {
 (* In relative mode the frame's [mouse_delta] is the summed device motion
    rather than absolute differences, which stop at the window edge. The first
    error of the native pump is returned, never dropped. *)
+(* an idle loop blocks here: until the next event or [timeout_ms] *)
+let wait ~timeout_ms = ignore (Runtime_input_sdl3.wait ~timeout_ms)
+
 let poll () =
   delta := (0., 0.);
   Runtime_input.begin_frame source;

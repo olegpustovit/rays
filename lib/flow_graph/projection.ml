@@ -518,22 +518,8 @@ and node_of c ~visible ?(expr = false) ?nested (scope_path : path) (pat : S.t op
   (* a node call written in an input is a node of its own, wired to the row by its leaf *)
   let rows, inner = if kind <> None then [], [] else
     List.fold_left (fun (rows, inner) (r : row) -> match r.expr, r.key with
-      | Some body, E.Arm index ->
-          let leaf = E.nested_leaf name r.key in
-          let path = scope_path @ [leaf] in
-          let ty = match Hashtbl.find_opt c.terms path with Some term -> term.ty | None -> ty in
-          let test = if index < 0 then None else E.arg_of e
-              (E.Pos (match head_sym e with Some "case" -> 2 * index + 1 | Some "cond" -> 2 * index | _ -> 0)) in
-          let label = if index < 0 then "else" else if head_sym e = Some "case" then "is" else "when" in
-          let rail = [{name = label; names = []; role = Capture; ty = None; expr = test; key = None}] in
-          let branch = {path; name = leaf; binds = [leaf]; head = label; rows = []; outputs = []; ty;
-            note = None; bypass = false; macro = None; lens = None;
-            live = W.Paths.mem path c.w.live; invariant = W.Paths.mem path c.w.invariant; synthetic = false;
-            zone = Some {kind = Branch; rail; order = None; yield_label = "then";
-              scope = scope_of c ~visible ~inputs:[] path body}; expr = false} in
-          {r with chip = Name leaf} :: rows, inner @ [branch]
       (* not a macro's argument: that is a piece of its template, which may read the macro's names *)
-      | Some a, (E.Pos _ | E.Kw _) when (r.kind = Arg || r.kind = Rest) && macro = None
+      | Some a, (E.Pos _ | E.Kw _ | E.Arm _) when (r.kind = Arg || r.kind = Rest) && macro = None
           && (E.node_call a || (E.value_call a && (expr || not (c.folded (scope_path @ [ E.nested_leaf name r.key ]))))) ->
           let leaf = E.nested_leaf name r.key in
           { r with chip = Name leaf } :: rows, inner @ node_of c ~visible ~expr:(E.value_call a) ~nested:leaf scope_path None a
@@ -692,7 +678,7 @@ let card_pad = 5.  (* 4 points of padding and the bottom border under the last r
 let node_width = 196.
 let lattice = 24.  (* the dot grid: cards sit on it, columns and rows of cards share its pitch *)
 let point_size = 14.
-let zone_pad_x = 24.  (* a zone's cards start this far inside its edge *)
+let zone_pad_x = 48.  (* a zone's cards start this far inside its edge: the begin and end bars at 20, then a channel for their wires *)
 let zone_pad_top = 52.  (* and this far below its top (the label row and 28 points of air) *)
 let zone_pad_bottom = 8.
 let column_gap = 92.  (* the room between columns before the lattice rounds the pitch up: 196 + 92 gives 288 *)

@@ -121,7 +121,38 @@ let text_input_region ~at:(x,y)~w~h ?(focused=false) ?(cursor=0)()=
   Region(x,y,w,h,focused,cursor)
 let translate x y nodes=Translate(x,y,nodes)let rotate a nodes=Rotate(a,nodes)let scale x y nodes=Scale(x,y,nodes)
 let clip ~at:(x,y)~w~h nodes=Clip(x,y,w,h,nodes)
+(* The same picture: what a node draws, not its render caches; resources and images by identity.
+   A value structural equality cannot read (a closure, an opaque handle) counts as different. *)
+let rec same (a:t) (b:t) = a==b || (List.compare_lengths a b=0 && List.for_all2 same_node a b)
+and same_node a b =
+  let eq x y = x==y || (try x=y with Invalid_argument _ -> false) in
+  (* a resource is wrapped afresh each frame: its handle is what stays *)
+  let handle (x:Rays_execution.resource) (y:Rays_execution.resource) = match x,y with
+    | Image a,Image b -> a==b | Text a,Text b -> a==b | Canvas a,Canvas b -> a==b | _ -> false in
+  let res r r' = List.compare_lengths r r'=0 && List.for_all2 (fun (i,x) (j,y) -> i=j && handle x y) r r' in
+  match a,b with
+  | Group x,Group y -> same x y
+  | Clear x,Clear y -> x=y
+  | Geometry x,Geometry y -> eq x y
+  | Text x,Text y -> x.x=y.x && x.y=y.y && x.value=y.value && x.color=y.color && x.size=y.size
+      && x.wrap=y.wrap && x.align=y.align && x.provided_font==y.provided_font
+  | Image x,Image y -> x.image==y.image && x.x=y.x && x.y=y.y && x.scale=y.scale && x.angle=y.angle
+  | Display_list x,Display_list y -> eq x.segment y.segment && res x.resources y.resources
+  | Ui x,Ui y -> eq x.ui y.ui && res x.ui_resources y.ui_resources
+  | Shapes x,Shapes y -> eq x y
+  | View3d x,View3d y -> x.viewport=y.viewport && eq x.camera y.camera && eq x.scene y.scene
+  | Region (a,b,c,d,e,f),Region (a',b',c',d',e',f') -> a=a'&&b=b'&&c=c'&&d=d'&&e=e'&&f=f'
+  | Layer_break,Layer_break -> true
+  | Translate (x,y,t),Translate (x',y',t') -> x=x' && y=y' && same t t'
+  | Rotate (r,t),Rotate (r',t') -> r=r' && same t t'
+  | Scale (x,y,t),Scale (x',y',t') -> x=x' && y=y' && same t t'
+  | Affine (m,t),Affine (m',t') -> eq m m' && same t t'
+  | Clip (a,b,c,d,t),Clip (a',b',c',d',t') -> a=a'&&b=b'&&c=c'&&d=d' && same t t'
+  | Blend (m,t),Blend (m',t') -> m=m' && same t t'
+  | _ -> false
+
 module Private=struct
+  let same=same
  let display_list=display_list
  let shapes batch=Shapes batch
  let geometry geometry=Geometry geometry

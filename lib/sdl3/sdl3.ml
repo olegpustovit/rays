@@ -598,6 +598,9 @@ module Event = struct
 
   let poll_coalesced () =
     on_main "SDL3.Event.poll_coalesced" (fun () -> Ok (collect None [] [] (poll ())))
+
+  let wait ~timeout_ms =
+    on_main "SDL3.Event.wait" (fun () -> Ok (Private_raw.wait_event_timeout (max 0 timeout_ms)))
 end
 
 (* Decoded pixels: tightly packed RGBA8 rows, ownership with the caller. *)

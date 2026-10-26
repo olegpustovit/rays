@@ -90,7 +90,12 @@ updates logical window facts on the next frame, refreshes drawable size, resizes
 the Metal surface, and emits one `WindowResized` event. While the window is
 minimized or covered the sketch loop skips drawing and idles; SDL announces the
 start of occlusion but not its end, so the loop reads the window state once a
-frame to see it end. While an edge is dragged the last scene is redrawn at the new size (`specification/sdl3.md`, "Live resize"). Fullscreen, show/hide, minimize,
+frame to see it end. A visible window whose scene is the same as the last one presented
+(`Scene.Private.same`: what the nodes draw, resources by handle) is not drawn or presented,
+as a native view keeps its last picture; without vsync to pace it the loop blocks on SDL's
+event queue for a frame, and after half a second of the same picture for up to 100 ms
+(`Sdl3.Event.wait`). A still editor on recursive_rectangles went from 60 presents and about
+45% CPU a second to three presents in ten seconds and 3% CPU. While an edge is dragged the last scene is redrawn at the new size (`specification/sdl3.md`, "Live resize"). Fullscreen, show/hide, minimize,
 maximize, restore, title, and position operations delegate to the owned native
 window.
 

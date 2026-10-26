@@ -153,7 +153,8 @@ let sync_scope value =
           | _ -> Flow_graph.Projection.of_graph ~folded:(fun p -> M.find_opt p ws.layout.collapsed <> Some false) catalog ws.checked name in
         let wires = match Option.bind value.doc.Document.shell (fun s -> s.Document.wires) with
           | Some "rect" -> `Rect
-          | _ -> `Straight in
+          | Some "straight" -> `Straight
+          | _ -> `Curve in
         let scope_view = if not moved then
           Pxui_graph.Scope.with_arguments edits value.scope_view |> Pxui_graph.Scope.with_wires wires else begin
           let layout = ws.layout in

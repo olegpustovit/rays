@@ -28,7 +28,7 @@ let event = function
   | MousePinched x -> Pinched x
   | FileDialog {id; result} -> File_dialog {id; result}
   | WindowResized (w, h) -> Resized (w, h)
-  | WindowFocusLost -> Focus_lost | WindowClosed -> Closed
+  | WindowFocusLost | WindowFocusGained -> Focus_lost | WindowClosed -> Closed  (* gained never reaches here: [of_frame] drops it *)
   | TrackpadScrolled {delta; phase; time} -> Trackpad_scrolled {delta; time;
       phase = (match phase with Touched -> "touched" | Moved -> "moved" | Lifted -> "lifted" | Momentum -> "momentum")}
 
@@ -36,5 +36,6 @@ let of_frame (f : Frame.t) : Frame_input.t = {
   t = f.time; dt = f.dt;
   frame = f.count; tick = f.count; size = f.size; pointer = f.mouse;
   buttons = List.map button f.mouse_buttons; keys = List.map key f.keys;
-  events = List.map event f.events;
+  (* the window's focus is the editor's: a sketch reads only its loss *)
+  events = List.map event (List.filter (( <> ) Event.WindowFocusGained) f.events);
 }

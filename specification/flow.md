@@ -353,7 +353,7 @@ Bypass on `if` selects its then arm; `cond` and `case` cannot be bypassed.
   source, then a diagonal into the port, the bend 72 points before it. Only when no one-bend
   way is clear does the wire go round above or below, 24 points clear. A zone's label row
   and bottom edge are obstacles. Bends are computed, never authored or saved.
-- `:wires "rect"` on a `ui/graph` panel keeps the older orthogonal routing.
+- Wires are cubic curves that leave and enter level by default; `:wires "straight"` on a `ui/graph` panel gives the routed straight segments above, `:wires "rect"` the older orthogonal routing.
 - A fold's feedback is a dashed wire.
 - **Chains.** With nodes selected, the nodes upstream and downstream of them (along the wires,
   the selection included) and the wires between them stay at full ink and thicker; every
@@ -448,9 +448,12 @@ one, and the fold is saved in the layout); `i` or a double click on a collapsed 
 
 A chain is a column: the first node call a card reads in a positional input (its chain input) stacks
 right above it in the same column, the source on top (`Projection.layout`), and the two are joined by a
-short spine down their left strips instead of a wire back across the card (`Scope_wires.compute`).
+spine instead of a wire back across the card (`Scope_wires.compute`): straight down from the source's
+bottom along the card's left edge into the input's socket when that is the first row, else 12 points
+out from the edge, clear of the sockets above, rounding into the row. It holds while the card sits
+anywhere under the source with at most three lattice rows between them.
 A `map`'s inline function zone stacks above the `map` card the same way. A name read inside a formula
-(not the value a row takes) is wired only while either end is selected or the wire is hovered.
+(not the value a row takes) is wired thin and faint, and in full while either end is selected or the wire is hovered.
 
 ### 7.2 Keys
 
@@ -1062,7 +1065,7 @@ places it. All sizes are logical points.
 | `(ui/switch panel... :active n)` | the layouts of the graph; the active one is the tree |
 | `(ui/viewport scene :look_through b)` | a viewport of a scene |
 | `(ui/canvas drawing :focus b)` | a native 2D Canvas over a Drawing value; an image input is wrapped in `draw/image` at the origin |
-| `(ui/graph ["name"] :wires w :view v)` | the graph pane; `name` pins a graph of the workspace (`def:name` a function), `:wires` is `"rect"` or `"straight"`, `:view` is `"graph"`, `"list"` or `"text"` |
+| `(ui/graph ["name"] :wires w :view v)` | the graph pane; `name` pins a graph of the workspace (`def:name` a function), `:wires` is `"curve"` (default), `"straight"` or `"rect"`, `:view` is `"graph"`, `"list"` or `"text"` |
 | `(ui/list :of g)` `(ui/inspector :of g)` | a list view, an inspector; `:of` names the graph panel it shows |
 | `(ui/lisp :tab t :of g)` | a text pane; `:tab` is `"selection"`, `"graph"` or `"document"` |
 | `(ui/outline)` | the Navigator |

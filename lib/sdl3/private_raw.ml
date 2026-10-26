@@ -69,3 +69,4 @@ external invalidate_metal_layer_token : Native_layer_token.t -> unit
 type 'event poll = 'event option
 
 external poll_event : unit -> 'event option = "caml_sdl3_poll_event"
+external wait_event_timeout : int -> bool = "caml_sdl3_wait_event_timeout"

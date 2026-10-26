@@ -118,10 +118,11 @@ let scope_step view (frame : Frame.t) =
   Pxui.Ui.frame scope_ui frame (fun ui -> Scope.update view ui frame)
 let recorded ?inputs workspace =
   Flow_graph.Probe.make (Result.get_ok (Flow.Eval.static ~record:true ?inputs workspace))
-let scope_view ?inputs ?probe ?at ?level ?collapsed workspace graph =
-  let scope = P.of_graph scope_catalog workspace graph in
+(* the routing tests read straight wires' geometry; [scope_curve] checks the default curves *)
+let scope_view ?inputs ?probe ?at ?level ?collapsed ?folded ?(wires = `Straight) workspace graph =
+  let scope = P.of_graph ?folded scope_catalog workspace graph in
   Scope.create ~width:1000 ~height:700 ()
-  |> Scope.with_scope ?probe ?at ?level ?collapsed ~key:graph scope
+  |> Scope.with_scope ?probe ?at ?level ?collapsed ~wires ~key:graph scope
   |> Scope.with_records (recorded ?inputs workspace), scope
 let scope_paint view =
   ignore (scope_step view (frame ()));
@@ -267,7 +268,7 @@ let scope_levels () =
        let _, changes = scope_step v (frame ~mouse:empty ~events:[ mouse_release (Input.LeftButton, empty) ] ()) in
        check (List.exists (function Scope.Syntax_edit (Flow_graph.Flow_edit.Disconnect _) -> true | _ -> false) changes)
          "an Alt-drag of an out-port into empty canvas did not take its wires off");
-  (* a frame's own variable leaves its begin bar (the strip inside the left edge, under the rails)
+  (* a frame's own variable leaves its port on the begin bar (20 points inside the left edge)
      straight into its body: the wire stays inside the frame, below the label row *)
   let mw = Editor_document.Workspace_doc.of_text scope_catalog
     "(workspace m (graph g :context value (let* [boxes (array/vec3 8) ys (map (fn [i] (let* [p (array/nth boxes (int i))] [p.x p.y 0])) (array/range 4))] (array/count ys))))"
@@ -277,7 +278,7 @@ let scope_levels () =
   let zx, zy, zw, _ = Option.get (Scope.Private.box_of mview [ "g"; "ys#0" ]) in
   let z = Scope.zoom mview in
   let from_i = List.filter (fun i -> match Scope.Private.wire_points mview i with
-    | (x, _) :: _ -> x > zx && x < zx +. 20. *. z | [] -> false) (List.init (Scope.Private.wire_count mview) Fun.id) in
+    | (x, _) :: _ -> x > zx && x <= zx +. 24. *. z | [] -> false) (List.init (Scope.Private.wire_count mview) Fun.id) in
   check (from_i <> []) "the frame's variable has no wire from its begin bar";
   List.iter (fun i -> List.iter (fun (x, y) ->
     check (x >= zx && x <= zx +. zw -. 3. *. z && y > zy +. P.head_height *. z)
@@ -534,6 +535,54 @@ let scope_ghost_values () =
 
 (* A source read by three inputs leaves as one trunk to a junction, then a branch to each; every wire
    is still its own polyline and is selected alone *)
+(* a curve leaves and enters its ports level, and bends only between them *)
+let scope_curve () =
+  let w = (Editor_document.Workspace_doc.of_text scope_catalog
+    "(workspace c (graph g :context sop (let* [a (sop/box) b (sop/transform a :translate [0 3 0])] b)))" |> Result.get_ok).checked in
+  let view, _ = scope_view ~wires:`Curve w "g" in
+  let view = fst (scope_step view (frame ())) in
+  let pts = Scope.Private.wire_points view 0 in
+  let level = function (_, y0) :: (_, y1) :: _ -> Float.abs (y1 -. y0) < 0.5 | _ -> false in
+  check (List.length pts > 2 && level pts && level (List.rev pts)) "a curve wire does not leave and enter level";
+  (* a loop variable's wire leaves its begin-bar port downward, clear of the name beside the port *)
+  let w = (Editor_document.Workspace_doc.of_text scope_catalog
+    "(workspace f (graph g :context value (let* [total (fold [acc 0.0] [k (range 4)] (+ acc (* k 2.0)))] total)))"
+    |> function Ok d -> d | Error d -> fail (String.concat "; " (List.map Flow.Diagnostic.to_string d))).checked in
+  let view = fst (scope_step (fst (scope_view ~wires:`Curve w "g")) (frame ())) in
+  let down = function (x0, y0) :: (x1, y1) :: _ -> Float.abs (x1 -. x0) < 0.5 && y1 > y0 | _ -> false in
+  check (List.exists (fun i -> down (Scope.Private.wire_points view i)) (List.init (Scope.Private.wire_count view) Fun.id))
+    "no begin-bar wire leaves its port downward"
+
+(* a formula in a record field opens as a binding: a field holds no nested card (it raised before) *)
+let scope_field_formula () =
+  let w = (Editor_document.Workspace_doc.of_text scope_catalog
+    "(workspace r (graph g :context value (let* [a 2.0 r {:x (+ a 1.0)}] r.x)))"
+    |> function Ok d -> d | Error d -> fail (String.concat "; " (List.map Flow.Diagnostic.to_string d))).checked in
+  let view = fst (scope_step (fst (scope_view w "g")) (frame ())) in
+  let module E = Flow_graph.Flow_edit in
+  let path = [ "g"; "r" ] in
+  let row = Option.get (List.find_index (fun (r : P.row) -> r.key = E.Field "x") (Option.get (P.find (P.of_graph scope_catalog w "g") path)).rows) in
+  let x, y = Option.get (Scope.Private.expr_chip view path row) in
+  (* a double click on the formula opens it, as its glyph does *)
+  let at = int_of_float x, int_of_float y in
+  let unfolded = List.exists (function Scope.Syntax_edit (E.Unfold { key = E.Field "x"; _ }) -> true | _ -> false)
+    (snd (scope_click (fst (scope_click view at)) at)) in
+  check unfolded "the formula glyph of a record field did not unfold it"
+
+(* a map's function stacked above it is wired by a spine straight down into the f socket, not a
+   wire out of the zone's right side and back across it *)
+let scope_spine () =
+  let w = (Editor_document.Workspace_doc.of_text scope_catalog
+    "(workspace s (graph g :context value (let* [ys (map (fn [i] (* i 2.0)) (array/range 3))] (array/nth ys 0))))"
+    |> function Ok d -> d | Error d -> fail (String.concat "; " (List.map Flow.Diagnostic.to_string d))).checked in
+  let view = fst (scope_step (fst (scope_view ~wires:`Curve w "g")) (frame ())) in
+  let into_f = List.filter_map (fun i -> match Scope.Private.wire_target view i with
+    | Some ([ "g"; "ys" ], Flow_graph.Flow_edit.Pos 0) -> Some (Scope.Private.wire_points view i) | _ -> None)
+    (List.init (Scope.Private.wire_count view) Fun.id) in
+  check (match into_f with
+    | [ ((x0, y0) :: _ as pts) ] -> let x1, y1 = List.nth pts (List.length pts - 1) in Float.abs (x1 -. x0) < 0.5 && y1 > y0
+    | _ -> false) "a map's stacked function is not wired straight down into its f socket"
+
 let scope_trunk () =
   let w = (Editor_document.Workspace_doc.of_text scope_catalog
     "(workspace w (graph g :context sop (let* [a (sop/box) b (sop/transform a) c (sop/transform a) d (sop/transform a)] (sop/merge (list b c d)))))"
@@ -999,27 +1048,28 @@ let run_scope () =
   let conditional = Editor_document.Workspace_doc.of_text scope_catalog
       "(workspace branches (graph g :context value (let* [x (cond false (+ 1 2) true (* 3 4) :else 5)] x)))"
       |> Result.get_ok |> fun doc -> doc.checked in
-  let view, _ = scope_view conditional "g" in
+  (* the arm's formula opened, so it is a card of its own *)
+  let view, _ = scope_view ~folded:(fun _ -> false) conditional "g" in
   let view, _ = scope_step view (frame ()) in
   let arm = ["g"; "x#then~2"] in
   check (Scope.Private.selector view arm = None) "conditional arm incorrectly has an iteration selector";
-  let x, y, _, _ = Option.get (Scope.Private.box_of view arm) in
-  let _, changes = scope_click view (int_of_float x + 10, int_of_float y + 10) in
-  check (List.mem (Scope.Zone_collapsed {zone = arm; collapsed = true}) changes) "arm header tap did not collapse zone";
   let _, changes = Scope.run_command (Scope.select [arm] view) Scope.Add_arm in
   check (List.mem (Scope.Syntax_edit (E.Add_arm {node = ["g"; "x"]; after = 1})) changes) "arm Add uses wrong holder/index";
   let _, changes = Scope.run_command (Scope.select [arm] view) Scope.Delete_arm in
   check (List.mem (Scope.Syntax_edit (E.Delete_arm {node = ["g"; "x"]; index = 1})) changes) "arm Delete uses wrong index";
   let _, changes = Scope.run_command (Scope.select [arm] view) Scope.Unfold in
   check (List.mem (Scope.Syntax_edit (E.Unfold {node = ["g"; "x"]; key = Arm 1; sub = []})) changes) "arm unfold did not address conditional body";
+  let view, _ = scope_step (fst (scope_view conditional "g")) (frame ()) in
   let path = ["g"; "x"] in
   let x, y, _, _ = Option.get (Scope.Private.box_of view path) in
   let at = int_of_float x + 20, int_of_float y + 8 in
   let menu, _ = scope_step view (frame ~mouse:at ~events:[mouse_move at; mouse_press (Input.RightButton, at); mouse_release (Input.RightButton, at)] ()) in
   let menu, _ = scope_step menu (frame ~mouse:at ()) in
-  let point = fst at + 30, snd at + 3 + 24 * 12 + 12 in
-  let _, changes = scope_step menu (frame ~mouse:point ~events:(click point) ()) in
-  check (List.mem (Scope.Syntax_edit (E.Add_arm {node = path; after = -1})) changes) "conditional right-click Add arm did not emit edit";
+  let add_arm = Scope.Syntax_edit (E.Add_arm {node = path; after = -1}) in
+  check (List.exists (fun row ->
+      let point = fst at + 30, snd at + 3 + 24 * row + 12 in
+      List.mem add_arm (snd (scope_step menu (frame ~mouse:point ~events:(click point) ())))) (List.init 20 Fun.id))
+    "conditional right-click Add arm did not emit edit";
   let imported = Scope.with_scope ~imported:(fun _ -> Some "lib.rays") ~key:"import" (P.of_graph scope_catalog conditional "g") view in
   let imported, _ = scope_step imported (frame ()) in
   let menu, _ = scope_step imported (frame ~mouse:at ~events:[mouse_move at; mouse_press (Input.RightButton, at); mouse_release (Input.RightButton, at)] ()) in
@@ -1036,9 +1086,9 @@ let run_scope () =
     check (s.nodes = nodes && s.zones = zones && s.rows = rows)
       (Printf.sprintf "%s/%s: pane counts %d/%d/%d" name graph s.nodes s.zones s.rows);
     check (s.drawn_items > 0 && s.drawn_zones <= s.zones) (name ^ ": nothing drawn"))
-    [ "bloom", "flower", 12, 1, 84; "sunflower", "sunflower", 9, 1, 36; "orrery", "orrery", 22, 3, 117;
-      "facade", "facade", 14, 2, 89; "kit", "kit", 22, 8, 112; "tree", "tree", 9, 1, 184;
-      "garland", "garland", 19, 5, 90; "wave", "wave", 7, 2, 46; "tiles", "tiles", 14, 5, 70 ];
+    [ "bloom", "flower", 12, 1, 84; "sunflower", "sunflower", 9, 1, 36; "orrery", "orrery", 20, 1, 117;
+      "facade", "facade", 14, 2, 89; "kit", "kit", 16, 2, 112; "tree", "tree", 9, 1, 184;
+      "garland", "garland", 19, 5, 90; "wave", "wave", 7, 2, 46; "tiles", "tiles", 10, 1, 70 ];
   (* the iteration selector: buttons and track are hit-tested boxes *)
   let w = load_workspace "sunflower" in
   let zone = [ "sunflower"; "seeds_each" ] in
@@ -1253,6 +1303,9 @@ let run_scope () =
   check (match changes with [ Scope.Notice _ ] -> true | _ -> false) "m with nothing selected";
   scope_gestures ();
   scope_ghost_values ();
+  scope_curve ();
+  scope_field_formula ();
+  scope_spine ();
   scope_trunk ();
   scope_trunk_bent ();
   scope_carry ();

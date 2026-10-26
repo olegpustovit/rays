@@ -1,4 +1,6 @@
-(* What the sketch sees of a frame.  The sketch gets the pointer only on its picture: elsewhere
+(* What the sketch sees of a frame.  The sketch gets the pointer only on its picture, and only while
+   the window is the key window (a pointer passing over it from another app, or the click that
+   brings it forward, is not the sketch's): elsewhere
    (or under a menu or prompt) the pointer stays where the picture last had it, no button is down
    and its events are dropped; a press that began on the picture is the sketch's until its release,
    and one that began elsewhere never becomes its drag.  It gets the keyboard only while a viewer
@@ -9,6 +11,7 @@ type t = {
   prompt : bool; menu : bool; leader : bool; text_focus : bool;
   focus_on_picture : bool;  (* a viewer or canvas has the focus *)
   pointer_on_picture : bool;  (* the pane under the pointer is a viewer or canvas, or none *)
+  window_key : bool;  (* the window has been the key window for a frame: not hovered from behind, not the click that raised it *)
   pressed : bool;  (* a button went down this frame *)
   previous : Frame_input.t;  (* what the sketch saw last frame *)
   blocked : string list;  (* the keys hidden last frame *)
@@ -25,7 +28,7 @@ let key_event = function
 
 (* the frame the sketch sees, and the keys now hidden from it *)
 let gate g (live : Frame_input.t) =
-  let on_picture = not g.prompt && not g.menu && g.pointer_on_picture in
+  let on_picture = not g.prompt && not g.menu && g.pointer_on_picture && g.window_key in
   let live =
     if g.previous.buttons <> [] || ((live.buttons = [] || g.pressed) && on_picture) then live
     else { live with pointer = g.previous.pointer; buttons = [];

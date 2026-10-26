@@ -2493,6 +2493,30 @@ let run_open_defn () =
   check (Editor_document.Layout_by_path.Path_map.find_opt [ "g"; "a#0" ] (E3.workspace !e).Doc.layout.collapsed = Some false)
     "i on a collapsed function did not open it"
 
+(* the graph header's Outline button splits an Outline in to the right, and is gone once there is one *)
+let run_outline_button () =
+  let e = ref (editor {|(workspace o
+  (graph g :context value (let* [a 1.0] a))
+  (graph editor :context editor (ui/workspace (ui/graph "g" :focus true))))|}) and count = ref 0 in
+  let step mouse events = incr count; e := E3.update !e (frame mouse events !count) in
+  for _ = 1 to 4 do step (200., 300.) [] done;
+  let leaf () = match Contexts.of_workspace ~factories (E3.workspace !e) with
+    | Ok d -> Layout.find (Layout.geometry (Option.get d.Document.shell).tree (frame (0., 0.) [] 0)) Layout.Graph
+    | Error d -> fail (Flow.Diagnostic.to_string d) in
+  let header = (Option.get (leaf ())).header in
+  let ui = Pxui.Ui.create ~font_size:11 () in
+  let from = Pxui_shell.Chrome.tools_start ui ~focused:true ~floating:false ~collapsed:false
+    ("Graph\t" ^ dump_line !e "pane graph" ^ " / value") in
+  let x, y = match Rays_editor.Private.Bars.tool_rect ~outline:true ui ~header ~from Outline with
+    | Some (x, y, w, h) -> x +. w /. 2., y +. h /. 2. | None -> fail "the Outline button is cut off" in
+  Pxui.Ui.destroy ui;
+  step (x, y) [ Event.MouseMoved (x, y) ];
+  step (x, y) [ Event.MousePressed (Input.LeftButton, (x, y)); Event.MouseReleased (Input.LeftButton, (x, y)) ];
+  step (x, y) []; step (x, y) [];
+  check (has (source !e) "(ui/outline)")
+    "the Outline button did not split an Outline in";
+  E3.close !e
+
 (* The default loop runs every section but the slow ones (1.5-12 s each); RAYS_SLOW=1 runs all. *)
 let slow = ["run_studio_keywords"; "run_duplicate_and_view"; "run_views"; "run_result_view"; "run_geometry_view"; "run_wire_gestures"; "run_ops"; "run_panels"; "run_unbound_panels"; "run_cameras"; "run_editor"; "run_values"; "run_frame_key"; "run_undo_and_input"]
 let run () =
@@ -2501,7 +2525,7 @@ let run () =
   List.iter (fun (name, section) -> if only <> None && only <> Some name || not all && only = None && List.mem name slow then () else (let t = Unix.gettimeofday () in section (); Printf.printf "section %s %.1f s\n%!" name (Unix.gettimeofday () -. t)))
     [ "run_wire_gestures", run_wire_gestures; "run_ops", run_ops;
       "run_array_capacity_menu", run_array_capacity_menu; "run_lisp_inspector", run_lisp_inspector; "run_context_menus", run_context_menus; "run_expression_chip", run_expression_chip; "run_nested_inspector", run_nested_inspector; "run_op_inspector", run_op_inspector; "run_spreadsheet", run_spreadsheet; "run_panels", run_panels; "run_studio", run_studio; "run_studio_tail", run_studio_tail; "run_studio_keywords", run_studio_keywords; "run_copy_lisp", run_copy_lisp; "run_hide_and_order", run_hide_and_order; "run_root_section", run_root_section; "run_layouts", run_layouts; "run_compose", run_compose; "run_ref_picker", run_ref_picker; "run_result_view", run_result_view; "run_loop_view", run_loop_view; "run_geometry_view", run_geometry_view; "run_panel_states", run_panel_states; "run_camera_zoom", run_camera_zoom; "run_cameras", run_cameras; "run_lowering", run_lowering; "run_panel_keys", run_panel_keys; "run_unbound_panels", run_unbound_panels; "run_values", run_values; "run_duplicate_and_view", run_duplicate_and_view; "run_movers", run_movers; "run_frame_key", run_frame_key; "run_loop_copies", run_loop_copies; "run_loop_expression", run_loop_expression; "run_editor", run_editor; "run_restore", run_restore; "run_views", run_views; "run_instances", run_instances; "run_host_scene_edit", run_host_scene_edit; "run_panel_chain", run_panel_chain;
-      "run_undo_under_pane", run_undo_under_pane; "run_atomic_frame", run_atomic_frame; "run_undo_and_input", run_undo_and_input; "run_carry_reaches_no_history", run_carry_reaches_no_history; "run_open_defn", run_open_defn
+      "run_undo_under_pane", run_undo_under_pane; "run_atomic_frame", run_atomic_frame; "run_undo_and_input", run_undo_and_input; "run_carry_reaches_no_history", run_carry_reaches_no_history; "run_open_defn", run_open_defn; "run_outline_button", run_outline_button
     ]
 
 

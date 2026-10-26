@@ -138,7 +138,7 @@ type t = {
   pan_x : float;
   pan_y : float;
   zoom : float;
-  wires : [ `Rect | `Straight ];
+  wires : [ `Rect | `Straight | `Curve ];
   selected : Path_set.t;
   selected_wire : (path * E.arg_key * S.t option) option;
   panning_grab : bool;
@@ -180,7 +180,7 @@ val select : path list -> t -> t
 val clear_selection : t -> t
 val stats : t -> stats
 val zoom : t -> float
-val with_wires : [ `Rect | `Straight ] -> t -> t
+val with_wires : [ `Rect | `Straight | `Curve ] -> t -> t
 val scope_point : t -> scope:path -> float * float -> (float * float) option
 val count_scope : P.scope -> int * int * int
 val frame_all : t -> t
@@ -203,7 +203,7 @@ val with_scope :
   ?frames:(path -> (string * (float * float) * (float * float)) list) ->
   ?imported:(path -> string option) ->
   ?display:path ->
-  ?wires:[ `Rect | `Straight ] ->
+  ?wires:[ `Rect | `Straight | `Curve ] ->
   ?layouts:string list -> key:string -> P.scope -> t -> t
 val relayout : ?sticky:bool -> t -> t
 

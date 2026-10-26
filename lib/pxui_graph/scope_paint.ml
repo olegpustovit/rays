@@ -359,14 +359,16 @@ let paint_rail paint ui t ~z ~fs ~x ~y ~w ~expanded (rail : P.rail_row list) =
     let ry = y +. float i *. rh in
     let color = match r.role with
       | P.Var -> theme.accent | Acc -> palette.vec3 | Param -> palette.fn | Capture -> Pxui.Theme.muted theme in
-    text_in paint ui ~size:fs ~color ~x:(x +. 13. *. z) ~y:ry ~h:rh (fitted paint fs (56. *. z) r.name);
+    (* in an open zone the names stand right of the begin bar, whose ports are level with them *)
+    let nx = x +. (if expanded then 32. else 13.) *. z in
+    text_in paint ui ~size:fs ~color ~x:nx ~y:ry ~h:rh (fitted paint fs (56. *. z) r.name);
     let role = match r.role with P.Var -> "in" | Acc -> "acc" | Param -> "param" | Capture -> "from" in
-    text_in paint ui ~size:ls ~color:(Pxui.Theme.ink_3 theme) ~x:(x +. 13. *. z +. 58. *. z) ~y:ry ~h:rh role;
+    text_in paint ui ~size:ls ~color:(Pxui.Theme.ink_3 theme) ~x:(nx +. 58. *. z) ~y:ry ~h:rh role;
     (match r.expr with
      | Some e ->
          let sym = (match e.node with S.Sym _ -> true | _ -> false) in
          let shown = match e.node with S.Sym s -> s | _ -> Flow.Lisp.flat e in
-         let ex = x +. 92. *. z in
+         let ex = nx +. 79. *. z in
          let room = Float.max 0. (x +. w -. (if expanded then 24. else 8.) *. z -. ex) in
          if sym then begin
            text_in paint ui ~size:ls ~color:theme.accent ~x:ex ~y:ry ~h:rh "\xe2\x86\x90";
@@ -664,7 +666,12 @@ let paint_node paint ui t ~z ~fs ?footer ?lens_step ?(hovered = false) ?(carry =
     paint_socket paint theme (Some n.ty) ~connected:out_wired ~z (x +. w -. 1. *. z, y +. port_y *. z);
   (* a ghost value: where the footer is not drawn, the value at the pinned iteration beside the out-port *)
   (match footer with
-   | Some f when shown <> P.Full && z_ = None && out_wired ->
+   | Some f when shown <> P.Full && z_ = None && out_wired
+                 && not (Array.exists (fun (w : wire) -> w.from = Some n.path && (match w.into with
+                     | Some zone -> List.length zone < List.length n.path
+                         && List.filteri (fun i _ -> i < List.length zone) n.path = zone
+                     | None -> false)) t.geo.wires) ->
+       (* not beside a card that yields to its zone's end bar: the bar's port is there *)
        let ink_3 = Pxui.Theme.ink_3 theme in
        text_in paint ui ~size:ls ~color:ink_3 ~x:(x +. w +. 8. *. z) ~y:(y +. (port_y -. 8.) *. z) ~h:(16. *. z)
          (fitted paint ls (72. *. z) f.value)
@@ -749,17 +756,22 @@ let paint_zone_frame paint ui t ~z ~fs ?footer (n : P.node) (zn : P.zone) ~selec
    | None -> ());
   List.iter (fun (r : P.rail_row) -> if r.role <> P.Capture then
     let bx, by = begin_port n zn r in paint_socket paint theme r.ty ~connected:true ~z (x +. bx *. z, y +. by *. z)) (P.extra_rails zn);
-  (* the begin and end bars: a hairline inside each edge under the rails, named in the air above *)
+  (* the begin and end bars: a hairline inside each edge from the first variable down; the label's
+     variable is named beside its port in the air under the rails, the yield beside the end port *)
   if not plain then begin
-    let top = y +. P.rail_top n *. z in
+    let top = y +. (P.head_height +. 12.) *. z in
     let bh = y +. h -. top -. 4. *. z in
     if bh > 0. then begin
       let edge = (zone_style theme zn.kind).edge and ls = max 4 (fs - 2) and ink = Pxui.Theme.ink_3 theme in
       Ui.Paint.fill paint ~x:(x +. 20. *. z) ~y:top ~w:1. ~h:bh edge;
       Ui.Paint.fill paint ~x:(x +. w -. 21. *. z) ~y:top ~w:1. ~h:bh edge;
-      text_in paint ui ~size:ls ~color:ink ~x:(x +. 6. *. z) ~y:(top -. 20. *. z) ~h:(16. *. z) "begin";
+      let air = y +. (P.rail_top n -. 22.) *. z in
+      (match P.label_row zn with
+       | Some r when zone_uses zn r.names ->
+           text_in paint ui ~size:ls ~color:theme.accent ~x:(x +. 32. *. z) ~y:air ~h:(16. *. z) (List.hd r.names)
+       | _ -> ());
       let yl = if zn.kind = P.Fold || zn.kind = P.Scan then zn.yield_label ^ " \xe2\x86\xba" else zn.yield_label in
-      text_in paint ui ~size:ls ~color:ink ~x:(x +. w -. 6. *. z -. Ui.Paint.text_width paint ~size:ls yl) ~y:(top -. 20. *. z) ~h:(16. *. z) yl;
+      text_in paint ui ~size:ls ~color:ink ~x:(x +. w -. 32. *. z -. Ui.Paint.text_width paint ~size:ls yl) ~y:air ~h:(16. *. z) yl;
       let ex, ey = end_port n ~w:(w /. z) in
       paint_socket paint theme (Some n.ty) ~connected:true ~z (x +. ex *. z, y +. ey *. z)
     end
@@ -929,10 +941,11 @@ let paint_background paint t ~viewport ~wires (zones : (P.node * P.zone * P.plac
       | _ -> None in
     let color = if is_selected then theme.foreground else if layout = Some true then theme.accent
       else if layout = Some false then Pxui.Theme.muted theme else ty_color t w.ty in
-    let color = if lit = Some false then Color.with_alpha color 40 else color in
-    (* a formula's reads stay out of the resting picture; selecting either end draws them *)
-    if w.refers && not (is_selected || is_highlighted || lit = Some true) then ()
-    else if tagged t w && not is_selected then begin
+    (* a formula's reads rest thin and faint; selecting either end draws them in full *)
+    let faint = w.refers && not (is_selected || is_highlighted || lit = Some true) in
+    let color = if lit = Some false || faint then Color.with_alpha color (if faint then 90 else 40) else color in
+    let width = if faint then Float.max 1. z else width in
+    if tagged t w && not is_selected then begin
       (* a long wire reads as a stub and the source's name at the use site *)
       let (ax, ay) = sx t (fst w.a), sy t (snd w.a) and (bx, by) = sx t (fst w.b), sy t (snd w.b) in
       let stub = 14. *. z in

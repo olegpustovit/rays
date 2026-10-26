@@ -23,6 +23,7 @@ type t =
           chosen paths (empty when the user cancelled) or what went wrong *)
   | WindowResized of (int * int)                             (* new width and height *)
   | WindowFocusLost
+  | WindowFocusGained                                        (* the window is the key window again *)
   | WindowClosed                                             (* user attempted to close *)
   | TrackpadScrolled of { delta : float * float; phase : scroll_phase; time : float }
       (** macOS: a trackpad (or Magic Mouse) scroll as the system phases it.

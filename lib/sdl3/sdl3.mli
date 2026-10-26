@@ -224,6 +224,10 @@ module Event : sig
       (motion sums the dropped samples' relative [dx]/[dy]); clicks, keys,
       text, focus, and quit stay ordered. *)
   val poll_coalesced : unit -> (t list, error) result
+
+  (** Block until an event is queued or [timeout_ms] pass, leaving it for the next poll;
+      [true] when one is. An idle window waits here instead of drawing the same frame. *)
+  val wait : timeout_ms:int -> (bool, error) result
 end
 
 module Metal_view : sig

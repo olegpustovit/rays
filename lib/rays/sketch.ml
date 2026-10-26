@@ -51,7 +51,7 @@ let event_text=function
   |MousePinched scale->Printf.sprintf"pinch %.3f"scale
   |TrackpadScrolled{delta=(x,y);phase;_}->Printf.sprintf"trackpad %s %.1f,%.1f"
     (match phase with Touched->"touch"|Moved->"move"|Lifted->"lift"|Momentum->"momentum")x y
-  |WindowFocusLost->"focus-lost"|WindowClosed->"close"
+  |WindowFocusLost->"focus-lost"|WindowFocusGained->"focus-gained"|WindowClosed->"close"
 let write_crash ~title ~dump ~recent exn backtrace=
   let tm=Unix.localtime(Unix.gettimeofday())in
   let name=Printf.sprintf"%s-%04d%02d%02d-%02d%02d%02d-%d"
@@ -196,6 +196,7 @@ let run_state_internal ?(config=default_config)?max_frames ?(high_density=true)?
     let profile=Sys.getenv_opt"RAYS_PROFILE"<>None in
     let limit=max_frames in let count=ref 0 in
     let last_scene=ref None in
+    let shown=ref None and quiet=ref 0 in
     let one_frame()=
       Time.update();
       let polled=match Input_state.poll()with
@@ -231,8 +232,15 @@ let run_state_internal ?(config=default_config)?max_frames ?(high_density=true)?
         last_scene:=Some scene;
         (* An interactive window that is minimized or covered is not drawn and
            the loop idles. A finite run (max_frames, RAYS_MAX_FRAMES, export)
-           is a test or a capture: it always renders. *)
-        if visible||limit<>None then Scene.render scene else Unix.sleepf 0.033;
+           is a test or a capture: it always renders. A window whose picture did
+           not change keeps the last one on screen, as a native view does: no
+           draw, no present, and the loop waits for input instead of vsync. *)
+        if limit<>None then Scene.render scene
+        else if not visible then(shown:=None;Unix.sleepf 0.033)
+        else if polled.window_changed||(match !shown with
+            |Some last->not(Scene.Private.same last scene)|None->true)
+        then(Scene.render scene;shown:=Some scene;quiet:=0)
+        else incr quiet;
         model:=after_present !model facts;
         if profile&& !count mod 30=0 then(match Rays_execution.stats coordinator with
           |Ok s->Printf.eprintf"profile frame %d: gpu %.2f ms, draws %Ld, passes %Ld, uploaded %Ld B, sun passes %Ld, plan hits %Ld misses %Ld\n%!"
@@ -259,7 +267,11 @@ let run_state_internal ?(config=default_config)?max_frames ?(high_density=true)?
     Fun.protect~finally:(fun()->Callback.register"rays_sdl3_live_redraw"(fun()->()))(fun()->
       while not !stopped&&Option.fold~none:true~some:(fun limit-> !count<limit)limit do
         Option.iter raise !live_failure;
-        one_frame();Time.limit_frame_rate()done;!model))
+        one_frame();
+        (* an unchanged frame skipped vsync: wait a frame for input, and after half a second of
+           the same picture up to 100 ms, so a still window costs a few ticks a second *)
+        if !quiet>0 then Input_state.wait~timeout_ms:(if !quiet>30 then 100 else 16)
+        else Time.limit_frame_rate()done;!model))
 let run_state ?config ?max_frames ~init~update~view ?after_present ?crash_dump ?on_stop()=
   Parallel.run ?domains:(Option.bind config(fun value->value.domains))(fun()->run_state_internal?config?max_frames?after_present?crash_dump~init~update~view?on_stop())
 let export_state ?(config=default_config)?(fps=60)?(prefix="frame")~directory~frames~init~update~view ?(after_present=fun model _->model) ?(on_stop=fun _->())()=

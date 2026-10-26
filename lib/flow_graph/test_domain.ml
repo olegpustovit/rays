@@ -137,16 +137,16 @@ let () =
 let () =
   let source = ok (Syntax.parse "(workspace branches (graph g :context value (let* [x (if true (+ 1 2) (* 3 4)) y (cond false 1 true 2 :else 3) z (case 1 0 4 1 5 :else 6)] (+ x (+ y z)))))") in
   let workspace = match Workspace.check catalog source with Some w, [] -> w | _ -> assert false in
-  let scope = Projection.of_graph catalog workspace "g" in
+  let scope = Projection.of_graph ~folded:(fun _ -> false) catalog workspace "g" in
   List.iter (fun path ->
-    let zone = Option.get (Projection.find scope path) |> fun node -> Option.get node.zone in
-    assert (zone.kind = Projection.Branch && zone.rail <> []))
-    [["g"; "x#then"]; ["g"; "x#else"]; ["g"; "y#then~2"]; ["g"; "z#else"]];
+    (* an arm is an input of its conditional: a call written there is a card, not a zone *)
+    assert ((Option.get (Projection.find scope path)).zone = None))
+    [["g"; "x#then"]; ["g"; "x#else"]];
   let source, workspace = ok (Flow_edit.apply_checked catalog source (Set_arg {
-    node = ["g"; "x#then"; "@result"]; key = Pos 0; sub = []; value = Syntax.make (Num "8")})) in
+    node = ["g"; "x#then"]; key = Pos 0; sub = []; value = Syntax.make (Num "8")})) in
   let probe = Probe.make (ok (Eval.static ~record:true workspace)) in
-  let scope = Projection.of_graph catalog workspace "g" in
-  let node = Option.get (Projection.find scope ["g"; "x#then"; "@result"]) in
+  let scope = Projection.of_graph ~folded:(fun _ -> false) catalog workspace "g" in
+  let node = Option.get (Projection.find scope ["g"; "x#then"]) in
   assert ((Probe.footer probe node ~probes:[]).value = "10");
   let source, _ = ok (Flow_edit.apply_checked catalog source (Add_arm {node = ["g"; "y"]; after = 0})) in
   assert (Flow_edit.remap (Add_arm {node = ["g"; "y"]; after = 0}) ["g"; "y#then~2"; "@result"] = Some ["g"; "y#then~3"; "@result"]);

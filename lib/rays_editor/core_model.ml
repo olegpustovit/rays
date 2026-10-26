@@ -260,6 +260,7 @@ type 'prepared t = {
   leader : Leader.state;
   held_keys : Input.key list;
   sketch_blocked : string list;  (* keys held while the sketch had no keyboard: unseen by it until released *)
+  window_focus : int;  (* frames since the window became key again (capped), -1 while it is not *)
   keymap : Leader.command list;
   timeline_frames : int;
   queued : Leader.action list;  (* picked in the palette, run next frame *)

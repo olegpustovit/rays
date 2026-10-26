@@ -96,8 +96,9 @@ let context_command = function
   | 17 -> Item_up | 18 -> Item_down | _ -> Delete
 
 (* the glyph of an expression row opens it as cards; any other inline call unfolds into a binding *)
-let unfold_row (n : P.node) (r : P.row) = match r.expr with
-  | Some e when E.value_call e ->
+let unfold_row (n : P.node) (r : P.row) = match r.expr, r.key with
+  (* only an input of a call holds a nested card: a record field or a binding unfolds into a binding *)
+  | Some e, (E.Pos _ | E.Kw _ | E.Arm _) when E.value_call e ->
       [ Zone_collapsed { zone = List.mapi (fun i s -> if i = List.length n.path - 1 then E.nested_leaf n.name r.key else s) n.path;
                          collapsed = false } ]
   | _ -> [ Syntax_edit (E.Unfold { node = n.path; key = r.key; sub = [] }) ]
@@ -1158,13 +1159,20 @@ module Private = struct
   let wire_midpoint t i =
     if i < 0 || i >= Array.length t.geo.wires then None else
     let w = t.geo.wires.(i) in
-    let rec longest best = function
-      | ((x0, y0) as p) :: ((x1, y1) :: _ as rest) ->
-          let len = Float.hypot (x1 -. x0) (y1 -. y0) in
-          longest (match best with Some (l, _, _) when l >= len -> best | _ -> Some (len, p, List.hd rest)) rest
-      | _ -> best in
-    (match longest None w.pts with
-     | Some (_, (x0, y0), (x1, y1)) -> Some (sx t ((x0 +. x1) /. 2.), sy t ((y0 +. y1) /. 2.))
-     | None -> None)
+    let seg ((x0, y0), (x1, y1)) = Float.hypot (x1 -. x0) (y1 -. y0) in
+    let rec pairs = function a :: (b :: _ as rest) -> (a, b) :: pairs rest | _ -> [] in
+    let ps = pairs w.pts in
+    let at ((x0, y0), (x1, y1)) k = Some (sx t (x0 +. (x1 -. x0) *. k), sy t (y0 +. (y1 -. y0) *. k)) in
+    (* a curve's samples: halfway along it, so it is picked on its body; a routed wire: the middle
+       of its longest segment, clear of a junction's trunk *)
+    if List.length ps > 5 then
+      let rec walk left = function
+        | p :: rest when left > seg p && rest <> [] -> walk (left -. seg p) rest
+        | p :: _ -> at p (if seg p > 0. then Float.min 1. (left /. seg p) else 0.)
+        | [] -> None in
+      walk (List.fold_left (fun a p -> a +. seg p) 0. ps /. 2.) ps
+    else match List.fold_left (fun best p -> match best with Some b when seg b >= seg p -> best | _ -> Some p) None ps with
+      | Some p -> at p 0.5
+      | None -> None
   let _ = contains
 end

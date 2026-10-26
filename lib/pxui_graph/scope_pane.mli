@@ -109,7 +109,7 @@ val with_scope :
   ?probe:(path -> int) ->
   ?frames:(path -> (string * (float * float) * (float * float)) list) ->
   ?imported:(path -> string option) -> ?display:path ->
-  ?wires:[ `Rect | `Straight ] -> ?layouts:string list ->
+  ?wires:[ `Rect | `Straight | `Curve ] -> ?layouts:string list ->
   key:string ->
   Flow_graph.Projection.scope -> t -> t
 (** Lay a scope out.  A new [key] (the graph's name) frames it and clears the
@@ -145,9 +145,10 @@ val select : path list -> t -> t
 val clear_selection : t -> t
 val stats : t -> stats
 val zoom : t -> float
-val with_wires : [ `Rect | `Straight ] -> t -> t
-(** [`Straight] (the default, the sheet's wires): one segment port to port, bent clear of any
-    card it would cross; [`Rect] is the old orthogonal routing, for [:wires "rect"]. *)
+val with_wires : [ `Rect | `Straight | `Curve ] -> t -> t
+(** [`Curve] (the default): a cubic leaving and entering level; [`Straight] ([:wires "straight"]): one
+    segment port to port, bent clear of any card it would cross; [`Rect] is the old orthogonal
+    routing, for [:wires "rect"]. *)
 
 val scope_point : t -> scope:path -> float * float -> (float * float) option
 (** A screen point as a position inside [scope] (a scope path of the shown graph), snapped to the
