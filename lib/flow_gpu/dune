@@ -102,3 +102,15 @@
  (enabled_if (= %{system} macosx))
  (alias runtest-native)
  (action (run %{exe:test_film.exe})))
+
+(executable
+ (enabled_if (= %{system} macosx))
+ (name test_sampling)
+ (modules test_sampling)
+ (libraries flow_gpu flow flow_ir flow_ir_test_support renderer ogpu ogpu_metal input unix parallel))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias runtest-native)
+ (deps ../rays_pathtracer/pathtrace_helpers.rays)
+ (action (chdir ../rays_pathtracer (run %{exe:../flow_gpu/test_sampling.exe}))))
