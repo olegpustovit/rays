@@ -91,9 +91,9 @@ module Editor = struct
 
   type render_settings = Objects.Root.render = { width : int; height : int; max_spp : int }
   let render_camera value = (extra value).Viewport.document_camera
-  let view_camera value = view_camera value
+  let view_camera = view_camera
   let render_settings value = Objects.Root.render (extra value).Viewport.root
-  let film value frame = film value frame
+  let film = film
 
   type slot = { film : int * int; step : int; samples : int; max_spp : int; viewports : int }
   let slot value key =
