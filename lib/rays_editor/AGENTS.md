@@ -15,10 +15,10 @@
 | `Environment` | Frame coordination, presentation, crash reports, resource shutdown and `run` |
 | `Viewport`, `Renderer` | Camera objects and follow-viewport, guides and handles, raster / wireframe / traced slots |
 | `Core_model` | Every type: the model `t`, `frame_result`, `change`, `carry` |
-| `Core_shell` … `Core_host` | The model's functions, one module per concern, each `include`s the one before, so `Core` is the whole |
+| `Core_shell` … `Core_host` | The model's functions, one module per concern; a module `open`s the ones it uses, nothing is included |
 | `Core_reduce` | `reduce`: the one reduction of a frame (no UI) |
 | `Core` | `update_frame`: routes keys, builds the panes inside `Ui.frame`, calls `reduce` |
-| `Doc` | The document reducers: `syntax_edit`, `syntax_batch`, `text_edit`, `layout_edit`, `reconcile` |
+| `Editor_document.Document_edit` | The document reducers: `syntax_edit`, `syntax_batch`, `text_edit`, `layout_edit`, `reconcile` |
 | `Carry`, `Core_carry` | What a payload does at a place (`Carry.put`), and the carry's turn of a frame |
 | `Cook`, `Schedule`, `Pick` | The cook worker boundary, when to cook, viewport provenance |
 | `Text_pane`, `Lisp_text` | The text pane and the Lisp as `Pxui.Ui.language` |
@@ -31,7 +31,7 @@ The chain order is `Core_model`, `Core_shell`, `Core_inspect`, `Core_panes`, `Co
 it needs; a new module joins the chain and `private_modules` in `dune`.
 
 The private environment chain is `Environment_view`, `Environment_model`,
-`Environment_source`, `Environment`. It uses the same include pattern; all
+`Environment_source`, `Environment`; each opens what it uses. All
 frame effects and resource shutdown stay in the final coordinator.
 
 ## What must stay true
@@ -58,7 +58,7 @@ turns the result and the frame's actions into the next model. Never set a ref or
 
 **Edits.**
 - A gesture on the text is a `Flow_graph.Flow_edit.op`: `Syntax_edit` (one op) or `Syntax_batch`
-  (several, all or none). `Doc.syntax_edit` rewrites, checks and lowers atomically. Add syntax
+  (several, all or none). `Document_edit.syntax_edit` rewrites, checks and lowers atomically. Add syntax
   edits to `Flow_edit`, never to `Core`.
 - A frame's gestures land together: the first one refused leaves none applied.
 - The fields of a scene object or World layer the text declares are written text first
@@ -66,7 +66,7 @@ turns the result and the frame's actions into the next model. Never set a ref or
   gestures (flags, rename, reparent, delete, restack), World keys and presets, the render camera,
   the root and the settings (`Scene_sync.write` with an `edit`; `Core_list.tree_edit` maps a list
   intent to one). Only an object the host made is edited as a derived node and adopted by
-  `Doc.reconcile`, and only a camera following the viewport reconciles an object of the text.
+  `Document_edit.reconcile`, and only a camera following the viewport reconciles an object of the text.
 - Every history entry has a label. One pointer gesture is one entry: a scrub merges by a
   `Gesture` key, a burst of keys by `Burst`. Viewport navigation with a camera that follows the
   viewport is view state: it amends the present (`Repair`) and leaves no entry.

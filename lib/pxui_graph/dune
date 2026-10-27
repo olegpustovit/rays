@@ -2,7 +2,7 @@
  (name pxui_graph)
  (public_name rays.pxui_graph)
  (modules :standard \ test_main test_pxui_graph)
- (private_modules scope_wires scope_state scope_commands scope_paint)
+ (private_modules scope_wires scope_state scope_commands scope_paint scope_frame)
  (libraries rays rays_math flow flow_graph pxui editor_core))
 
 ; The pane's own tests: no rays_editor. Fixtures are read relative to test/,

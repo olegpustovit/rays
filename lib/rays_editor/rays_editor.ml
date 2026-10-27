@@ -18,7 +18,13 @@ module Editor = struct
   open Environment_view
   open Environment_model
   open Environment_source
-  include Environment
+  let update_with = Environment.update_with
+  let update = Environment.update
+  let after_present = Environment.after_present
+  let scene = Environment.scene
+  let crash_dump = Environment.crash_dump
+  let close = Environment.close
+  let run = Environment.run
   type 'prepared t = 'prepared Environment_model.t
   let camera = Environment_model.camera
   let can_redo = Environment_model.can_redo

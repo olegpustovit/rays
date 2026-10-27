@@ -295,11 +295,8 @@ the title bar of a PXUI host is the ground its chrome is painted on.
 
 ## Hosts
 
-- `Pxui.Camera_control` builds Camera and Render sections
-  into the current panel (`widgets`), exposes `toggle_ui`/`open_camera` for
-  host key bindings, and navigates in a control area (`navigate`); `panel`
-  combines them for standalone sketches. Its controls use the shared
-  inspector rows and read the camera each frame.
+- The camera panel (Camera and Render sections, `toggle_ui`/`open_camera`, `navigate`) is the editor's, in
+  `rays_editor/viewport.ml`; it uses the shared inspector rows and reads the camera each frame.
 - `Editor_core.Store.Settings` persists model values as one
   `(settings :sketch "name" :key value ...)` s-expression, written atomically.
 - `Pxui_shell.Inspector.fields` builds standalone parameter rows from a

@@ -1,6 +1,6 @@
 lib/flow/op.ml	all#1	312
 lib/flow/workspace.ml	check#1	1796
-lib/flow_graph/flow_edit.ml	rewrite#1	696
+lib/flow_graph/edit_ops.ml	rewrite#1	696
 lib/flow_ir/core_lower.ml	lower_with#1	1249
 lib/flow_ir/core_region.ml	lower#1	428
 lib/flow_ir/packed.ml	run_all#1	630
@@ -11,11 +11,8 @@ lib/ogpu_metal/backend.ml	create#1	1018
 lib/pxui/test_ui.ml	run#1	811
 lib/pxui/test_ui.ml	with_scale#1	476
 lib/pxui/ui.ml	text_area_submit#1	607
-lib/pxui_graph/scope_pane.ml	update#1	921
 lib/pxui_graph/test_pxui_graph.ml	scope_gestures#1	389
-lib/rays_editor/core.ml	update_frame#1	744
 lib/rays_editor/core_inspect.ml	workspace_inspector#1	518
-lib/rays_editor/core_reduce.ml	reduce#1	669
 lib/rays_editor/environment.ml	update_with#1	303
 lib/rays_editor/navigator.ml	view#1	353
 lib/rays_editor/text_pane.ml	view#1	324
