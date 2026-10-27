@@ -8,7 +8,7 @@ Completion is **not proved**. No phase is closed. Unlisted requirements and
 finding IDs remain open. Size estimates do not substitute for behavior,
 performance, parity, and shipping evidence.
 
-Finding coverage: **132 / 248 accepted (53.2%)**. This counts individual
+Finding coverage: **138 / 248 accepted (55.6%)**. This counts individual
 findings, not weighted effort or completed phases.
 
 Individual finding checkboxes record implementation/focused evidence;
@@ -258,6 +258,11 @@ size estimate, not the phase's behavioral or shipping gates.
   deleted the superseded study documents and workspace prototype.
 
 ## In progress and remaining proof
+
+- P8 (db7c7e47, d969774b, 03b2fa63): scene/trace is instanced as a static kernel variant (TLAS from pack_instance_records; 192/256 rays hit, prim and instance exact, Metal within 1.4e-6 of CPU). Film accumulation is a bound in-place kernel plus resolve and Image_sink, bit-exact on Metal. basis, eval-brdf, power-weight, rect-hit, world-uv and world-dir are Lisp defns (GPU relative error 8e-5 or better). trace_pixel (bounce loop, NEE/MIS, panels, world CDF, thin lens, bevel probes) is unported; motion and curves are missing from scene/trace.
+- P3 scalar gate (0cda0bc1): zero-size call counters and pooled scalar locals cut 360 → 304 B per evaluation. CPU time could not be measured: load average was 100–130 during the run. Re-measure on an idle host.
+- P5.G4: every product function in rays_editor, pxui and pxui_graph is under 300 lines. Over budget: tests test_ui run (811) and with_scale (476), and test_pxui_graph scope_gestures (389).
+- WN10: Ray_tracing_motion cap added; without it, motion meshes rebuild at the shutter midpoint (no test yet). Strands still need Ray_tracing_curves.
 
 - P5 (ffcc4a24..dfe228a9): `Core.update_frame` (744), `Core_reduce.reduce` (669) and `Scope_frame.update` (921, was scope_pane) are each under 300 lines, with their budget rows removed. The Environment and Scope_commands includes are opens now, and Flow_edit and Scope_pane are re-export-only facades. ui_parity is exact, and editor logic, the editor/PXUI/graph/shell suites, workspace_shell and the guards pass. Still over 300: ui.ml text_area_submit (607), core_inspect workspace_inspector (518), navigator view (353), text_pane view (324), environment update_with (303). Remaining includes are metal_raw (generator facade), test support in sop/rdk and sop/node Private_types.
 
