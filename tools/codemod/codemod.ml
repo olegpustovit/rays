@@ -2415,8 +2415,6 @@ let () =
   | "function-lengths" :: budget :: paths -> check_lengths budget paths
   | [ "history-comments"; "--self-test" ] -> history_comments_self_test ()
   | "history-comments" :: dirs when dirs <> [] -> check_history_comments dirs
-  | [ "result-bind"; "--self-test" ] -> Result_bind.self_test ()
-  | [ "result-bind"; "--verify"; before; after; ppx ] -> Result_bind.verify before after ppx
   | [ "metal-registry"; "--self-test" ] -> Metal_registry.self_test ()
   | [ "metal-registry"; "--audit" ] -> Metal_registry.audit ()
   | [ "metal-registry"; "--drop-unused-macros" ] ->
@@ -2481,7 +2479,6 @@ let () =
         \       codemod (dead-optionals | drop-optionals) [--users-exclude S] DIR...\n\
         \       codemod drop-vals FILE.mli NAME... | drop-unused < log\n\
         \       codemod dead-stubs [--report] BRIDGE.mm ROOT... | drop-c-unused DIR\n\
-        \       codemod result-bind --verify BEFORE.ml AFTER.ml PPX.exe\n\
         \       codemod metal-registry [--audit | --drop-unused-macros]\n\
         \       codemod history-comments PATH... | history-comments --self-test\n\
         \       codemod function-lengths [--prune] BUDGET PATH...\n\

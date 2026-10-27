@@ -46,7 +46,7 @@ The editor uses the same `Promote Attributes` node for one or many attributes.
 An unmatched pattern leaves geometry unchanged.
 Use `sop/group_rename` with `:rules` for owner-scoped or multiple group renames;
 the editor exposes the same rule-based `Group Rename` node.
-Tests write their graphs as Lisp text through `test/lisp_sop` (`Lisp_sop.node`);
+Tests write their graphs as Lisp text through `lib/flow_sop/lisp_sop` (`Lisp_sop.node`);
 there is no typed OCaml constructor per node.
 
 ## Ownership and dependency boundary

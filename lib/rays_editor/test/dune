@@ -1,0 +1,465 @@
+(executable
+ (enabled_if (= %{system} macosx))
+ (name test_workspace_ir)
+ (modules test_workspace_ir)
+ (libraries workspace_parity rays_editor sop_catalog ogpu_metal unix parallel))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_workspace_ir)
+ (deps (source_tree ../../../sketches) ../../../specification/pxui-kit/kit.rays
+  (glob_files ../../../specification/workspace/cases/*.lisp) (glob_files ../../../specification/workspace/cases/*.rays))
+ (action (run %{exe:test_workspace_ir.exe} ../../..)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_workspace_pixels)
+ (locks smoke_window)
+ (deps (source_tree ../../../sketches) ../../../specification/pxui-kit/kit.rays
+  (glob_files ../../../specification/workspace/cases/*.lisp) (glob_files ../../../specification/workspace/cases/*.rays))
+ (action (setenv RAYS_WORKSPACE_PIXELS /tmp/rays-workspace-pixels
+  (run %{exe:test_workspace_ir.exe} ../../..))))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_scene3_float32_gallery)
+ (locks smoke_window)
+ (deps (source_tree ../../../sketches) ../../../specification/pxui-kit/kit.rays
+  (glob_files ../../../specification/workspace/cases/*.lisp) (glob_files ../../../specification/workspace/cases/*.rays))
+ (action (setenv RAYS_SCENE3_FLOAT32_COMPARE 1
+  (setenv RAYS_WORKSPACE_PIXELS /tmp/rays-scene3-float32
+   (run %{exe:test_workspace_ir.exe} ../../..)))))
+
+(alias
+ (name runtest)
+ (deps (alias test_workspace_ir)))
+
+(alias
+ (name qualification)
+ (deps (alias test_workspace_pixels)))
+
+(executable
+ (enabled_if (= %{system} macosx))
+ (name test_main)
+ (modules test_main test_support test_text sop_params_fixture test_rays test_sop_ui test_custom_sop test_rays_editor test_editor_document test_editor_input test_editor_commands ws_fixture test_editor_cook test_editor_transactions test_editor_consistency test_scene_tree test_scene_sync test_sop_catalog test_packed_pieces test_terminal_boolean_normals test_workspace_live test_workspace_doc test_probe test_viewport_pick test_text_pane test_workspace_shell test_workspace_source test_bloom_studio sop_render_parity)
+ (libraries rays rays_math pxui pxui_shell runtime_input sop rdk rdk_rays flow_native flow_ir flow_sop pxui_graph
+  sop_catalog scene_command rays_editor editor_document flow_graph unix str compiler-libs.common rays.sdl3 lisp_sop parallel ogpu_metal)
+ (preprocess (pps rays.ppx))
+ (link_flags -linkall))
+
+(test
+ (name test_host_effects)
+ (enabled_if (= %{system} macosx))
+ (modules test_host_effects)
+ (libraries rays rays_math rays_editor editor_document flow ogpu_metal parallel)
+ (action (setenv SDL_AUDIODRIVER dummy (run %{test}))))
+
+(executable
+ (enabled_if (= %{system} macosx))
+ (name test_gallery_shapes)
+ (modules test_gallery_shapes)
+ (libraries rays rays_math rdk rdk_rays sop lisp_sop flow ogpu_metal parallel))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_gallery_shapes)
+ (deps ../../../sketches/sop_gallery.rays)
+ (action (run %{exe:test_gallery_shapes.exe})))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_gallery_shapes_native)
+ (locks %{workspace_root}/smoke_window)
+ (deps ../../../sketches/sop_gallery.rays)
+ (action (run %{exe:test_gallery_shapes.exe} native)))
+
+(alias (name runtest) (deps (alias test_gallery_shapes)))
+(alias (name runtest-native) (deps (alias test_gallery_shapes_native)))
+
+(test
+ (name test_workspace_images)
+ (modules test_workspace_images)
+ (deps ../../sdl3_image/fixtures/sample.png)
+ (libraries rays rays_math rays_editor flow_native editor_document flow flow_sop scene_command sop sop_catalog pxui workspace_parity lisp_sop ogpu_mock parallel))
+
+(rule
+ (alias test_workspace_images)
+ (deps ../../sdl3_image/fixtures/sample.png)
+ (action (run %{exe:test_workspace_images.exe})))
+
+(executable
+ (enabled_if (= %{system} macosx))
+ (name test_workspace_images_native)
+ (modules test_workspace_images_native)
+ (libraries rays rays_math rays_editor editor_document flow flow_sop sop ogpu ogpu_metal runtime_resources unix parallel))
+
+(executable
+ (name test_flow_shader)
+ (modules test_flow_shader)
+ (libraries rays_editor editor_document flow flow_graph flow_sop sop sop_catalog ogpu_mock parallel))
+
+(rule
+ (alias test_flow_shader)
+ (deps ../../../sketches/flow_shader.rays)
+ (action (run %{exe:test_flow_shader.exe} %{dep:../../../sketches/flow_shader.rays})))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias runtest-native)
+ (locks smoke_window)
+ (action (run %{exe:test_workspace_images_native.exe})))
+
+(test
+ (name test_open_domain)
+ (modules test_open_domain)
+ (libraries rays rays_math flow flow_graph pxui pxui_graph rays_editor editor_document scene_command ogpu_mock parallel))
+
+(rule
+ (alias test_open_domain)
+ (action (run %{exe:test_open_domain.exe})))
+
+(test
+ (name test_materials)
+ (modules test_materials)
+ (libraries rays rays_math sop rdk rdk_rays rays_editor sop_catalog flow
+  flow_sop editor_document pxui_shell editor_core unix lisp_sop ogpu_mock parallel))
+
+(executable
+ (name test_shattered_studio)
+ (modules test_shattered_studio)
+ (libraries rays rays_math sop rdk rdk_rays rays_editor flow ogpu_mock parallel))
+
+(rule
+ (alias test_shattered_studio)
+ (deps ../../../sketches/shattered_studio.rays)
+ (action (run %{exe:test_shattered_studio.exe} %{dep:../../../sketches/shattered_studio.rays})))
+
+(test
+ (name test_threading)
+ (modules test_threading)
+ (libraries flow parallel)
+ (deps (source_tree ../../../sketches) (source_tree ../../../specification/workspace/cases))
+ (action (run %{test} ../../../sketches ../../../specification/workspace/cases)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_rays)
+ (action (run %{exe:test_main.exe} test_rays)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_text_pane)
+ ; pointer positions assume the golden face's advance
+ (action (setenv RAYS_UI_FONT %{dep:../../../assets/fonts/DepartureMono-Regular.otf}
+  (run %{exe:test_main.exe} test_text_pane))))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_editor_consistency)
+ (action (run %{exe:test_main.exe} test_editor_consistency)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_editor_consistency_native)
+ (locks smoke_window)
+ (action (run %{exe:test_main.exe} test_editor_consistency_native)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias sop_render_parity)
+ (locks smoke_window)
+ (action (run %{exe:test_main.exe} sop_render_parity)))
+
+(alias (name runtest-native) (deps (alias sop_render_parity)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_sop_ui)
+ (action (run %{exe:test_main.exe} test_sop_ui)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_custom_sop)
+ (action (run %{exe:test_main.exe} test_custom_sop)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_rays_editor)
+ (locks smoke_window)
+ (action (run %{exe:test_main.exe} test_rays_editor)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_rays_editor_logic)
+ (action (run %{exe:test_main.exe} test_rays_editor_logic)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_editor_document)
+ (action (run %{exe:test_main.exe} test_editor_document)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_editor_input)
+ (action (run %{exe:test_main.exe} test_editor_input)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_editor_commands)
+ (action (run %{exe:test_main.exe} test_editor_commands)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_editor_canvas_native)
+ (locks %{workspace_root}/smoke_window)
+ (action (run %{exe:test_main.exe} test_editor_canvas_native)))
+
+(alias (name runtest-native) (deps (alias test_editor_canvas_native)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_world_command)
+ (action (run %{exe:test_main.exe} test_world_command)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_editor_cook)
+ (action (run %{exe:test_main.exe} test_editor_cook)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_editor_transactions)
+ (action (run %{exe:test_main.exe} test_editor_transactions)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_scene_tree)
+ (action (setenv SDL_VIDEODRIVER dummy (run %{exe:test_main.exe} test_scene_tree))))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_scene_sync)
+ (deps (glob_files_rec ../../../sketches/*.rays))
+ (action (run %{exe:test_main.exe} test_scene_sync)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_sop_catalog)
+ (deps ../../../sketches/ws_morph.rays ../../../sketches/sop_gallery.rays)
+ (action (run %{exe:test_main.exe} test_sop_catalog)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_sop_catalog_exhaustive)
+ (deps ../../../sketches/ws_morph.rays ../../../sketches/sop_gallery.rays)
+ (action (run %{exe:test_main.exe} test_sop_catalog_exhaustive)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_packed_pieces)
+ (action (run %{exe:test_main.exe} test_packed_pieces)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_terminal_boolean_normals)
+ (action (run %{exe:test_main.exe} test_terminal_boolean_normals)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_workspace_live)
+ (deps (glob_files ../../../specification/workspace/cases/*.lisp))
+ (action (run %{exe:test_main.exe} test_workspace_live)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_workspace_shell)
+ (deps (env_var RAYS_SLOW) (glob_files ../../../specification/workspace/cases/*.lisp) (glob_files_rec ../../../sketches/*.rays))
+ (action (run %{exe:test_main.exe} test_workspace_shell)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_workspace_shell_slow)
+ (deps (glob_files ../../../specification/workspace/cases/*.lisp) (glob_files_rec ../../../sketches/*.rays))
+ (action (setenv RAYS_SLOW 1 (run %{exe:test_main.exe} test_workspace_shell))))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_workspace_shell_native)
+ (locks smoke_window)
+ (deps (glob_files ../../../specification/workspace/cases/*.lisp))
+ (action (run %{exe:test_main.exe} test_workspace_shell_native)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_workspace_roots_native)
+ (locks smoke_window)
+ (action (run %{exe:test_main.exe} test_workspace_roots_native)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_workspace_view_native)
+ (locks smoke_window)
+ (deps ../../../sketches/shattered_cube.rays)
+ (action (run %{exe:test_main.exe} test_workspace_view_native)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_workspace_doc)
+ (deps (glob_files ../../../specification/workspace/cases/*.lisp) (glob_files_rec ../../../sketches/*.rays) ../../../specification/pxui-kit/kit.rays)
+ (action (run %{exe:test_main.exe} test_workspace_doc)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_probe)
+ (deps (glob_files ../../../specification/workspace/cases/*.lisp))
+ (action (run %{exe:test_main.exe} test_probe)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_viewport_pick)
+ (deps (glob_files ../../../specification/workspace/cases/*.lisp))
+ (action (run %{exe:test_main.exe} test_viewport_pick)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_workspace_source)
+ (action (run %{exe:test_main.exe} test_workspace_source)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_workspace_vocabulary)
+ (action (run %{exe:test_main.exe} test_workspace_vocabulary)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_bloom_studio)
+ (deps ../../../sketches/ws_bloom.rays (glob_files ../../../specification/workspace/cases/*.lisp))
+ (action (run %{exe:test_main.exe} test_bloom_studio)))
+
+; Each test has its own alias, so `dune build @test_rays` runs that test only
+; (a rule on two aliases runs with every other rule of runtest).
+(alias
+ (name runtest)
+ (deps
+  (alias test_rays)
+  (alias test_flow_shader)
+  (alias test_text_pane)
+  (alias test_editor_consistency)
+  (alias test_sop_ui)
+  (alias test_custom_sop)
+  (alias test_rays_editor_logic)
+  (alias test_editor_document)
+  (alias test_editor_input)
+  (alias test_editor_commands)
+  (alias test_world_command)
+  (alias test_editor_cook)
+  (alias test_editor_transactions)
+  (alias test_scene_tree)
+  (alias test_scene_sync)
+  (alias test_sop_catalog)
+  (alias test_packed_pieces)
+  (alias test_terminal_boolean_normals)
+  (alias test_workspace_live)
+  (alias test_workspace_shell)
+  (alias test_workspace_doc)
+  (alias test_probe)
+  (alias test_viewport_pick)
+  (alias test_workspace_source)
+  (alias test_workspace_vocabulary)
+  (alias test_bloom_studio)))
+(test
+ (name test_image_sop)
+ (modules test_image_sop)
+ (libraries sop rdk flow_graph flow_sop editor_document sop_catalog ogpu_mock parallel))
+
+(executable (enabled_if (= %{system} macosx)) (name test_2d_ports)
+ (modules test_2d_ports)
+ (libraries rays rays_math pxui rays_editor flow_native flow editor_document scene_command ogpu_metal unix parallel))
+
+(rule (enabled_if (= %{system} macosx)) (alias test_2d_ports) (deps)
+ (action (setenv SDL_AUDIODRIVER dummy (run %{exe:test_2d_ports.exe}))))
+(alias (name runtest) (deps (alias test_2d_ports)))
+
+(rule (enabled_if (= %{system} macosx)) (alias runtest-native) (locks smoke_window) (deps)
+ (action (setenv SDL_AUDIODRIVER dummy (run %{exe:test_2d_ports.exe} /tmp/rays-2d-ports))))
+
+(rule (enabled_if (= %{system} macosx)) (alias runtest-native) (locks smoke_window)
+ (action (setenv SDL_AUDIODRIVER dummy
+  (run %{exe:test_host_effects.exe} /tmp/rays-host-effects-export))))
+
+(executable
+ (enabled_if (= %{system} macosx))
+ (name test_drawing)
+ (modules test_drawing)
+ (libraries rays rays_math flow flow_ir flow_graph editor_document rays_editor flow_native sop_catalog scene_command input editor_core unix ogpu_metal parallel))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias runtest)
+ (action (run %{exe:test_drawing.exe} %{dep:../../../sketches/particles.rays})))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_drawing)
+ (action (run %{exe:test_drawing.exe} %{dep:../../../sketches/particles.rays})))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias runtest-native)
+ (locks %{workspace_root}/smoke_window)
+ (action (run %{exe:test_drawing.exe} %{dep:../../../sketches/particles.rays} /tmp/rays-drawing-export)))
+
+; One evaluation a start, the first frame of a million static marks, and a reload after a
+; shared start: each opens the sketch's window through Workspace.run.
+(executable
+ (enabled_if (= %{system} macosx))
+ (name test_workspace_start)
+ (modules test_workspace_start)
+ (libraries rays_editor editor_document sop_catalog flow ogpu_metal unix parallel))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_workspace_start_error)
+ (action (run %{exe:test_workspace_start.exe} errors)))
+
+(alias
+ (name runtest)
+ (deps (alias test_workspace_start_error)))
+
+(rule
+ (enabled_if (= %{system} macosx))
+ (alias test_workspace_start)
+ (locks %{workspace_root}/smoke_window)
+ (action
+  (progn
+   (run %{exe:test_workspace_start.exe} start %{dep:../../../sketches/million_marks.rays})
+   (run %{exe:test_workspace_start.exe} reload))))
+
+(alias
+ (name qualification)
+ (deps
+  (alias test_scene3_float32_gallery)
+  (alias test_shattered_studio)
+  (alias test_sop_catalog_exhaustive)
+  (alias test_workspace_shell_slow)))
+
+(alias
+ (name qualification-scale)
+ (deps
+  (alias test_shattered_studio)
+  (alias test_sop_catalog_exhaustive)))
+
+(alias
+ (name runtest-native)
+ (deps
+  (alias test_editor_consistency_native)
+  (alias test_rays_editor)
+  (alias test_workspace_shell_native)
+  (alias test_workspace_roots_native)
+  (alias test_workspace_view_native)
+  (alias test_workspace_start)))
+
+(library
+ (name workspace_parity)
+ (modules workspace_parity)
+ (libraries rays rays_math rays_editor flow_native renderer runtime ogpu flow_ir flow_gpu flow_sop editor_document rdk_rays rdk_test_support unix parallel))

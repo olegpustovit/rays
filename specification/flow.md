@@ -845,7 +845,7 @@ value `x` keeps its own. A step that is not a call, or a `->` with no value, is 
 The printer threads a chain of three or more calls of node kinds (a head with a `/`, except the
 `ui/` layout forms, which nest) whose first operand is the next call down. A step that carries a
 comment or `^:bypass` is still threaded and keeps them on its own line. Shorter chains and every
-`let*`-named value stay nested, so print and re-read keep the same forms (`test/test_threading.ml`
+`let*`-named value stay nested, so print and re-read keep the same forms (`lib/rays_editor/test/test_threading.ml`
 prints and re-reads every checked-in workspace).
 
 Every step of a `->`, and every call of a node kind written inside another call, is a node of the
@@ -1241,7 +1241,7 @@ folder, kind with soft and hard range, default, primary, vec3 group, unit) and o
 file is checked in; `dune build @lib/sop_catalog/runtest` regenerates it and diffs, and an
 intended change is accepted with `dune promote`. `Flow.Check.catalog_of_manifest` reads it:
 `lib/flow`'s own tests check against it (the library cannot link the catalog), and
-`test/test_sop_catalog.ml` proves it equals the live catalog. The editor and `rays`
+`lib/rays_editor/test/test_sop_catalog.ml` proves it equals the live catalog. The editor and `rays`
 check against the live catalog (`Editor_document.Contexts.catalog`): `rays` interprets a `.rays` file,
 so nothing is generated and nothing can be stale.
 
@@ -2096,13 +2096,13 @@ Benchmarks: `tools/bench_rays_editor.exe` and `dune exec test/test_main.exe -- b
 
 Window-free logic tests in `runtest`: the reader, printer, macros, checker and evaluator
 (`lib/flow/test_*.ml`), threading round trips over every checked-in workspace
-(`test/test_threading.ml`), edits (`lib/flow_sop/test_workspace_edit.ml`), projection and probes
-(`lib/flow_sop/test_projection.ml`, `test/test_probe.ml`), the pane's gestures
-(`lib/pxui_graph/test_pxui_graph.ml`), the document and its layout (`test/test_workspace_doc.ml`),
+(`lib/rays_editor/test/test_threading.ml`), edits (`lib/flow_sop/test_workspace_edit.ml`), projection and probes
+(`lib/flow_sop/test_projection.ml`, `lib/rays_editor/test/test_probe.ml`), the pane's gestures
+(`lib/pxui_graph/test_pxui_graph.ml`), the document and its layout (`lib/rays_editor/test/test_workspace_doc.ml`),
 lowering, zones and live values (`lib/flow_sop/test_workspace_cook.ml`, `lib/flow_sop/test_workspace_zone.ml`,
-`lib/flow_sop/test_workspace_live.ml`), the shell and its layout forms (`test/test_workspace_shell.ml`),
-the text pane (`test/test_text_pane.ml`), the carry (`lib/pxui/test_ui.ml`,
-`test/test_pxui_graph.ml`, `test/test_materials.ml`), and the gate. Visual checks are in
+`lib/flow_sop/test_workspace_live.ml`), the shell and its layout forms (`lib/rays_editor/test/test_workspace_shell.ml`),
+the text pane (`lib/rays_editor/test/test_text_pane.ml`), the carry (`lib/pxui/test_ui.ml`,
+`test/test_pxui_graph.ml`, `lib/rays_editor/test/test_materials.ml`), and the gate. Visual checks are in
 `@runtest-native`.
 
 ## 17. Deferred

@@ -411,7 +411,7 @@ feature availability, and conservative-probe notes travel as one value.
 uses `Caps.require` for typed unsupported-feature results.
 The old Metal `Adapter` module is removed; it no longer duplicates feature
 decisions or wraps capability probes.
-The shared `test/ogpu_conformance` runner exercises capabilities, encoded
+The shared `lib/ogpu/conformance` runner exercises capabilities, encoded
 buffer and texture round trips (padded rows, mip levels, inset origins),
 libraries and compute, ray tracing, the render path, lifetime rejection, and
 teardown on both the mock and Metal drivers. Two executables select
@@ -453,7 +453,7 @@ when their source mesh changes; the tracer consumes `Rays.Mesh.t` planes.
 The Metal token scan covers the same source roots;
 outside the backend it admits
 only the binding tooling (`tools/codemod/metal_registry.ml`), the
-Metal conformance driver (`test/ogpu_conformance/test_metal.ml`) and the gate
+Metal conformance driver (`lib/ogpu/conformance/test_metal.ml`) and the gate
 itself. `lib/metal` takes its source preprocessor from
 `ppx/result_bind`, so no foundational library is built by something under
 `tools/`; the gate rejects a `tools/` path in `lib/metal/dune`. Each rule has

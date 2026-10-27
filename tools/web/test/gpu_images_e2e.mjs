@@ -27,7 +27,7 @@ const cases = [
   { name: 'flow_image', dir: 'sketches/flow_image.rays', sizes: [[640, 480]], frames: 3, perFrame: 0, static: 0 },
   { name: 'loaded', source: `(workspace w (graph picture :context draw
       (draw/merge (draw/background "#142030") ${['sample.png', 'sample.jpg', 'sample.bmp', 'palette.gif', 'sample.qoi', 'sample.webp', 'sample.tga', 'orientation-6.jpg']
-        .map((f, i) => `(draw/image (image/load ${JSON.stringify(join(root, 'test/sdl3_image_fixtures', f))}) :at [${(i % 4) * 60 + 3} ${Math.floor(i / 4) * 60 + 4} 0] :scale 5 :angle 0.1)`).join('\n')})))`,
+        .map((f, i) => `(draw/image (image/load ${JSON.stringify(join(root, 'lib/sdl3_image/fixtures', f))}) :at [${(i % 4) * 60 + 3} ${Math.floor(i / 4) * 60 + 4} 0] :scale 5 :angle 0.1)`).join('\n')})))`,
     sizes: [[256, 160]], frames: 3, perFrame: 0, static: 0 },
   { name: 'noise_live', source: `(workspace w (graph picture :context draw
       (draw/merge (draw/background "#142030")

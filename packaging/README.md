@@ -92,7 +92,7 @@ is:
 opam exec -- dune build @tools/packaging/sdl3-memory-tests
 opam exec -- dune exec tools/packaging/check_sdl3_memory.exe -- \
   --mode leaks --artifacts _build/default \
-  --fixtures test/sdl3_image_fixtures
+  --fixtures lib/sdl3_image/fixtures
 ```
 
 Use an OCaml compiler built with opam's

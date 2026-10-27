@@ -7,6 +7,7 @@ lib/flow_ir/packed.ml	run_all#1	630
 lib/flow_ir/packed.ml	run_typed#1	503
 lib/flow_sop/lower.ml	lower_checked#1	989
 lib/metal/gen/registry.ml	entries#1	428
+lib/ogpu/conformance/conformance.ml	run#1	952
 lib/ogpu_metal/backend.ml	create#1	1018
 lib/pxui/test_ui.ml	run#1	811
 lib/pxui/test_ui.ml	with_scale#1	476
@@ -15,6 +16,10 @@ lib/pxui_graph/test_pxui_graph.ml	scope_gestures#1	389
 lib/rays_editor/core_inspect.ml	workspace_inspector#1	518
 lib/rays_editor/environment.ml	update_with#1	303
 lib/rays_editor/navigator.ml	view#1	353
+lib/rays_editor/test/test_rays_editor.ml	run#1	650
+lib/rays_editor/test/test_scene_sync.ml	run#1	311
+lib/rays_editor/test/test_scene_tree.ml	run#1	322
+lib/rays_editor/test/test_sop_catalog.ml	run#1	482
 lib/rays_editor/text_pane.ml	view#1	324
 lib/rdk/boolean/boolean_complex.ml	build#1	309
 lib/rdk/boolean/boolean_extract.ml	build_internal#1	410

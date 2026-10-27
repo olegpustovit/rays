@@ -1,7 +1,5 @@
 (* The helpers the rdk and sop tests share. A test file opens this module and keeps
-   only the helpers that are its own. tools/dedupe removes a local copy when the compiler
-   resolves it to the same definition as the one here, so change a definition only together
-   with every file that relies on it. *)
+   only the helpers that are its own. *)
 open Rdk
 
 let fail message = raise (Failure message)

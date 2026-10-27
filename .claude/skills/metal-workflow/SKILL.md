@@ -79,9 +79,9 @@ Follow the `add-ogpu-feature` skill: capability gate in
 `lib/ogpu_core/caps.ml`, the operation in `ogpu_core` (`backend.mli` driver
 field + typed wrapper module), the Metal implementation in `lib/ogpu_metal`
 calling the step-2 function, the mock in `lib/ogpu_mock`, conformance cases in
-`test/ogpu_conformance`. If the feature's Metal types changed, update
+`lib/ogpu/conformance`. If the feature's Metal types changed, update
 `feature_map` in `registry.ml`. `dune build @lib/ogpu/runtest
-@lib/ogpu_metal/runtest @test/ogpu_conformance/runtest`.
+@lib/ogpu_metal/runtest @lib/ogpu/conformance/runtest`.
 
 ## 4. Use it
 

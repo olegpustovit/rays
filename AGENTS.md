@@ -11,7 +11,7 @@ separate compiler target, not a fallback: the native program never selects it.
 
 Nested `AGENTS.md` files hold subsystem rules: `lib/metal`, `lib/ogpu`
 (also for `lib/ogpu_core`),
-`lib/runtime`, `lib/rdk`, `lib/rays_editor`, `lib/pxui_graph`, `lib/sop_catalog`.
+`lib/runtime`, `lib/rdk`, `lib/rays_editor`, `lib/editor_document`, `lib/pxui_graph`, `lib/sop_catalog`.
 Read the one for the directory you change. Design notes live in `specification/`;
 the shared frame/region compiler contract is [specification/core.md](specification/core.md).
 Update them when behavior or architecture changes materially.
@@ -93,6 +93,7 @@ task plan are `specification/web-export/plan.md`.
 | `pxui` | The one immediate-mode UI engine (`Pxui.Ui`), over `rays` and `rays_math` |
 | `pxui_shell` | Editor chrome over PXUI: layout, headers, keys, status, timeline, prompts, frame, `Inspector`; uses `rays_math` values directly |
 | `pxui_graph` | SOP-network presentation; emits typed requests, never edits |
+| `lisp_sop`, `workspace_parity`, `ogpu_conformance`, `rdk_test_support`, `flow_ir_test_support`, `golden_fixtures`, `scene_execution_fixtures` | Test-only helper libraries beside their owners (`lib/flow_sop/lisp_sop`, `lib/rays_editor/test`, `lib/ogpu/conformance`); product libraries never reach them |
 | `rays_editor` | Rays Editor: the Houdini-like SOP shell (`Editor`), composed from the document, native Flow and UI libraries, plus editor views and `Timeline` |
 
 A sketch is one file, `sketches/<name>.rays`: no `dune`, no `main.ml`, no folder. Its header comment
@@ -105,6 +106,7 @@ deterministic seeds.
 
 ## Dependency rules
 
+Tests live beside their library (editor tests in `lib/rays_editor/test`); `test/` keeps the gate and the draw-graph snapshots. The gate also rejects a cross-library `X.Private.` reference missing from `test/private_allowlist.ml`, a list that only shrinks, and a backend module named outside its backend.
 `test/dependency_gate.ml` reads Dune files in `lib`, `ppx`, `tools`, `test`
 and `bin` when present, builds the transitive graph, and enforces "may never
 reach" rules plus a token scan. Executables and tests that reach virtual

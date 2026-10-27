@@ -3057,8 +3057,8 @@ storage.
 
 | Area | Command |
 |---|---|
-| Attribute Laplacian | `dune build --profile release tools/bench_laplacian.exe`, then `RAYS_BENCH_DOMAINS=1 RAYS_LAPLACIAN_POINTS=1000000 RAYS_LAPLACIAN_REPEATS=3 _build/default/tools/bench_laplacian.exe`; repeat with `RAYS_BENCH_DOMAINS=4` |
-| Triangulate 2D | `RAYS_DELAUNAY_POINTS=100000 RAYS_DELAUNAY_REPEATS=3 RAYS_REFINEMENT_POINTS=100000 RAYS_REGULARIZATION_POINTS=10000 RAYS_DELAUNAY_DOMAINS=1 dune exec -j 1 tools/bench_delaunay2.exe` |
+| Attribute Laplacian | `dune build --profile release tools/bench_rdk/bench_rdk.exe`, then `RAYS_BENCH_DOMAINS=1 RAYS_LAPLACIAN_POINTS=1000000 RAYS_LAPLACIAN_REPEATS=3 _build/default/tools/bench_rdk/bench_rdk.exe laplacian`; repeat with `RAYS_BENCH_DOMAINS=4` |
+| Triangulate 2D | `RAYS_DELAUNAY_POINTS=100000 RAYS_DELAUNAY_REPEATS=3 RAYS_REFINEMENT_POINTS=100000 RAYS_REGULARIZATION_POINTS=10000 RAYS_DELAUNAY_DOMAINS=1 dune exec -j 1 tools/bench_rdk/bench_rdk.exe -- delaunay2` |
 
 ### Kernel and generator contracts
 

@@ -87,7 +87,7 @@ are `flow.md` §7.12; the PXUI payload is in `pxui.md`.
 
 `sketches/shattered_studio.rays` uses 12 noisy sheet cutters for a
 Boolean fracture, with piece-seeded groups and four referenced surfaces.
-`test/test_materials.ml` covers references, group preservation, render batches,
+`lib/rays_editor/test/test_materials.ml` covers references, group preservation, render batches,
 invalid input, cancellation, and exact domain-count equality, then the editor: outline groups,
 chips and use counts, `Space j`, follow and back, double-click, `I`, Alt-click, rename with its
 refs, refusal to delete a read material, and `Space a` Material / Material of..., then the carry:
@@ -96,7 +96,7 @@ Escape, a release over nothing and a lost focus leave the document physically eq
 refuses a material with the checker's words, a SOP graph on an object re-points it, a surface in
 the viewport names its node (or adds the material node), resting on a node enters its graph,
 and a preview's apply and restore frames are timed against the 500 ms budget.
-`test/test_shattered_studio.ml` checks this particular fracture's closed
+`lib/rays_editor/test/test_shattered_studio.ml` checks this particular fracture's closed
 manifold pieces, volume conservation, material batches, and domain equality.
 
 An authored scene can be exported on the native Metal host with:

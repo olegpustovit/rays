@@ -182,11 +182,6 @@
  (modules test_planes)
  (libraries flow_sop flow flow_ir flow_graph sop sop_catalog rdk rdk_test_support lisp_sop parallel))
 
-(executable
- (name bench_planar_attribute)
- (modules bench_planar_attribute)
- (libraries flow flow_sop rdk rdk_test_support rays_math unix parallel))
-
 (test
  (name test_iterate)
  (modules test_iterate)

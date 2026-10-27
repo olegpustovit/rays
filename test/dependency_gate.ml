@@ -31,7 +31,7 @@ let parse text =
   let rec all acc = skip (); if !i >= n then List.rev acc else all (item () :: acc) in
   all []
 
-open Test_text
+let read path = In_channel.with_open_bin path In_channel.input_all
 open Parsetree
 
 let contains text needle =
@@ -164,14 +164,12 @@ let only =
                        "runtime_resources"; "rays_math"; "unix"];
     "lisp_sop", ["flow"; "flow_sop"; "sop_catalog"; "sop"; "rdk"; "rays_math"] ]
 
-(* Files outside the Metal backend that name Metal on purpose: the binding
-   tooling and the Metal conformance driver. *)
-let metal_allowed path =
-  String.starts_with ~prefix:"lib/metal/" path
-  || String.starts_with ~prefix:"lib/ogpu_metal/" path
-  || List.mem path
-       [ "tools/codemod/metal_registry.ml"; "test/ogpu_conformance/test_metal.ml";
-         "test/dependency_gate.ml" ]
+(* A backend's modules stay within that backend: its modules, the directories
+   that own them, and the files that name it on purpose (binding tooling,
+   the conformance driver). A new backend adds one row. *)
+let backends =
+  [ ["Metal"; "Ogpu_metal"; "Ogpu_metal_native"], ["lib/metal/"; "lib/ogpu_metal/"],
+    ["tools/codemod/metal_registry.ml"; "lib/ogpu/conformance/test_metal.ml"; "test/dependency_gate.ml"] ]
 
 (* identifiers outside comments and string literals *)
 let code_tokens text =
@@ -208,7 +206,7 @@ let module_initialization_refs source =
   iterator.structure iterator structure;
   List.rev !refs
 
-let uses_metal text =
+let uses_backend modules text =
   let code = code_tokens text in
   let rec find i = match String.index_from_opt code i 'M', String.index_from_opt code i 'O' with
     | None, None -> false
@@ -217,8 +215,8 @@ let uses_metal text =
         let starts word = String.length code >= j + String.length word
           && String.sub code j (String.length word) = word
           && (j = 0 || not (match code.[j-1] with 'a'..'z'|'A'..'Z'|'0'..'9'|'_'|'.' -> true | _ -> false)) in
-        (starts "Metal." || starts "Ogpu_metal." || starts "Ogpu_metal_native.") || find (j + 1) in
-  find 0 || List.exists (fun w -> List.mem w ["Metal"; "Ogpu_metal"; "Ogpu_metal_native"])
+        List.exists (fun m -> starts (m ^ ".")) modules || find (j + 1) in
+  find 0 || List.exists (fun w -> List.mem w modules)
     (let words = String.split_on_char ' ' (String.map (function '\n'|'\t'|';' -> ' ' | c -> c) code) in
      let rec opens = function "open" :: w :: rest -> w :: opens rest | _ :: rest -> opens rest | [] -> [] in
      opens words)
@@ -474,7 +472,7 @@ let violations graph ~scan =
       else Some (Printf.sprintf "%s depends on %s (it may depend only on: %s)" lib dep
                    (String.concat ", " allowed)))
       (Option.value ~default:[] (List.assoc_opt lib graph))) only in
-  let product path = not (String.starts_with ~prefix:"tools/" path || String.starts_with ~prefix:"test/" path) in
+  let product path = not (String.starts_with ~prefix:"tools/" path || String.starts_with ~prefix:"test/" path || contains path "/test/") in
   let native_errors = List.concat_map (fun (path, text) ->
     if not (product path) then [] else
     List.filter_map (fun needle ->
@@ -487,8 +485,13 @@ let violations graph ~scan =
   let ocaml path = Filename.check_suffix path ".ml" || Filename.check_suffix path ".mli" in
   let token_errors = List.filter_map (fun (path, text) ->
     if not (ocaml path) then None else
-    if not (metal_allowed path) && uses_metal text then Some (path ^ " uses Metal outside lib/metal and lib/ogpu_metal")
-    else if String.starts_with ~prefix:"lib/pxui_graph/" path
+    match List.find_opt (fun (modules, dirs, files) ->
+        not (List.exists (fun d -> String.starts_with ~prefix:d path) dirs || List.mem path files)
+        && uses_backend modules text) backends with
+    | Some (modules, dirs, _) ->
+        Some (Printf.sprintf "%s uses %s outside %s" path (List.hd modules) (String.concat " and " dirs))
+    | None ->
+    if String.starts_with ~prefix:"lib/pxui_graph/" path
         (* its tests build key events to feed the pane *)
         && not (String.starts_with ~prefix:"lib/pxui_graph/test_" path)
         && uses_key_pressed text then
@@ -497,7 +500,7 @@ let violations graph ~scan =
   (* the executable parses the environment once; library code takes explicit arguments *)
   let env_errors = List.filter_map (fun (path, text) ->
     if not (String.starts_with ~prefix:"lib/" path && Filename.check_suffix path ".ml")
-       || String.starts_with ~prefix:"test_" (Filename.basename path) then None else
+       || String.starts_with ~prefix:"test_" (Filename.basename path) || contains path "/test/" then None else
     if List.exists (fun line -> contains line "getenv" && contains line "\"RAYS_")
          (String.split_on_char '\n' text)
     then Some (path ^ " reads a RAYS_ environment variable; bin/rays.ml parses it and passes it down")
@@ -509,6 +512,38 @@ let violations graph ~scan =
       Printf.sprintf "%s:%d allocates a module-level ref; put mutable state in its run or renderer owner"
         path line) (module_initialization_refs text)) scan in
   direct_errors @ edge_errors @ only_errors @ token_errors @ native_errors @ env_errors @ module_ref_errors
+
+(* [X.Private] across libraries is an API in disguise. A reference whose first module is not
+   defined in the referencing library must be in Private_allowlist, and the list may not keep
+   rows for references that are gone. *)
+let private_errors scan =
+  let owner path = match String.split_on_char '/' path with
+    | "lib" :: dir :: _ :: _ -> Some dir
+    | ("tools" | "bin" | "ppx" as top) :: _ -> Some top
+    | _ -> None in
+  let product path = (Filename.check_suffix path ".ml" || Filename.check_suffix path ".mli")
+    && owner path <> None && not (contains path "/test/" || contains path "/conformance/")
+    && not (List.exists (fun p -> String.starts_with ~prefix:p (Filename.basename path)) ["test_"; "bench_"]) in
+  let defined = Hashtbl.create 512 in
+  List.iter (fun (path, _) -> if product path && Filename.check_suffix path ".ml" then
+    Hashtbl.replace defined (String.capitalize_ascii (Filename.remove_extension (Filename.basename path)), owner path) ()) scan;
+  let re = Str.regexp "\\b\\([A-Z][A-Za-z_0-9]*\\)\\(\\.[A-Z][A-Za-z_0-9]*\\)*\\.Private\\b" in
+  let found = Hashtbl.create 128 in
+  List.iter (fun (path, text) -> if product path then begin
+    let rec go i = match Str.search_forward re text i with
+      | exception Not_found -> ()
+      | _ ->
+          let m = Str.matched_string text and first = Str.matched_group 1 text in
+          if not (Hashtbl.mem defined (first, owner path)) then
+            Hashtbl.replace found (Option.get (owner path), m) ();
+          go (Str.match_end ()) in
+    go 0 end) scan;
+  let allowed = Private_allowlist.entries in
+  List.filter_map (fun (d, m) -> if List.mem (d, m) allowed then None
+    else Some (Printf.sprintf "%s: new cross-library %s (give it a public name; the allowlist only shrinks)" d m))
+    (Hashtbl.fold (fun k () acc -> k :: acc) found [])
+  @ List.filter_map (fun (d, m) -> if Hashtbl.mem found (d, m) then None
+    else Some (Printf.sprintf "%s: %s is gone; delete its row from test/private_allowlist.ml" d m)) allowed
 
 let run () =
   if module_initialization_refs
@@ -672,7 +707,7 @@ let run () =
   if comment_and_string <> [] then
     failwith ("gate flagged Metal inside a comment or string: " ^ String.concat "; " comment_and_string);
   if violations graph ~scan:["tools/codemod/metal_registry.ml", "let x = Metal.Device.system_default";
-                              "test/ogpu_conformance/test_metal.ml", "let x = Metal.pp_error"] <> [] then
+                              "lib/ogpu/conformance/test_metal.ml", "let x = Metal.pp_error"] <> [] then
     failwith "gate flagged a listed Metal tooling file";
   if violations graph ~scan:["lib/pxui_graph/injected.ml", "Input.Key_pressed key"] = [] then
     failwith "gate accepted adapter key handling";
@@ -700,7 +735,7 @@ let run () =
     [ "lib/sdl3/sdl3_stubs.c", "SDL_Metal_CreateView";
       "lib/renderer/renderer.ml", "Ogpu.Impl.create_driver";
       "lib/renderer/renderer.ml", "Runtime.create" ];
-  match violations graph ~scan @ test_errors with
+  match violations graph ~scan @ test_errors @ private_errors scan with
   | [] -> Printf.printf "dependency gate: %d libraries, %d rules, %d whitelists\n"
             (List.length graph) (List.length rules) (List.length only)
   | errors -> List.iter prerr_endline errors; exit 1
