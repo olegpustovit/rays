@@ -4,8 +4,8 @@
  (modules packed core core_region core_fuse core_lower core_exec flow_ir core_draw core_marks kernel_layout)
  (libraries flow param rays_math scene_command lru parallel))
 
-(test
- (name test_core)
+(tests
+ (names test_core test_core_lower test_core_control test_core_lists test_core_state test_core_regions test_core_operators test_core_errors test_core_draw test_core_marks test_core_parity)
  (modules test_core test_core_lower test_core_control test_core_lists test_core_state
   test_core_regions test_core_operators test_core_errors test_core_draw test_core_marks test_core_parity)
  (deps core_lower.expected core_control.expected core_draw.expected core_marks.expected
@@ -19,21 +19,21 @@
  (deps core_records.expected)
  (libraries flow_ir flow unix parallel))
 
-(test
- (name test_ir)
+(tests
+ (names test_ir test_noise test_uniforms test_frame_kernel test_static_map)
  (modules test_ir test_noise test_uniforms test_frame_kernel test_static_map)
  (deps ../sop_catalog/flow_manifest.sexp
   (glob_files ../../specification/workspace/cases/*.lisp)
   ../../sketches/particles.rays)
  (libraries flow_ir flow rays_math parallel))
 
-(test
- (name test_gather)
+(tests
+ (names test_gather test_reductions test_scatter test_compact_scan test_grade_index test_array_max_length)
  (modules test_gather test_reductions test_scatter test_compact_scan test_grade_index test_array_max_length)
  (libraries flow_ir flow rays_math unix parallel))
 
-(test
- (name test_with_error)
+(tests
+ (names test_with_error test_error_rows)
  (modules test_with_error test_error_rows)
  (libraries flow_ir flow flow_graph parallel))
 
