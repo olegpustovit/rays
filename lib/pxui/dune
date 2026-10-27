@@ -1,7 +1,7 @@
 (library
  (name pxui)
  (public_name rays.pxui)
- (modules pxui theme ui camera_controls)
+ (modules pxui theme ui)
  (libraries rays rays_math))
 
 (executable

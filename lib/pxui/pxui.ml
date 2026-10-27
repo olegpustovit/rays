@@ -12,4 +12,3 @@ let default_theme = Theme.default
 
 module Theme = Theme
 module Ui = Ui
-module Camera_control = Camera_controls.Camera_control
