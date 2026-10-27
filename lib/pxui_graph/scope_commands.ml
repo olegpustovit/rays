@@ -1,6 +1,6 @@
 open Rays
 open Scope_wires
-include Scope_state
+open Scope_state
 
 let parents_removed paths =
   let set = Path_set.of_list paths in

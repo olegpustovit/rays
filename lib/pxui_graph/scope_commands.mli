@@ -1,5 +1,5 @@
 (* Private graph-pane interface; only the pane's shared operations. *)
-include module type of struct include Scope_state end
+open Scope_state
 val parents_removed : path list -> path list
 val wired : P.row -> bool
 val unwire : t -> P.node -> P.row -> E.op list

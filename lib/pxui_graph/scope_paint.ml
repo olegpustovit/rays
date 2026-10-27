@@ -1,5 +1,6 @@
 open Rays
 open Scope_wires
+open Scope_state
 open Scope_commands
 
 (* -------------------------------------------------------------- painting *)
