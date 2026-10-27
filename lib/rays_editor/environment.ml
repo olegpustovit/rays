@@ -7,6 +7,69 @@ open Environment_source
 open Environment_model
 open Environment_view
 
+(* each canvas panel's picture: reused while its plan, size and preview stand, else rendered *)
+let canvas_pictures ~context_error ~value ~input ~(raw_frame : Frame.t) ~(core : _ Core_model.t) ~control () =
+  let canvases, context_error = List.fold_left (fun (pictures, error) (leaf : Pxui_shell.Layout.leaf) ->
+    match leaf.panel with
+    | Canvas key ->
+        let _, _, w, h = if not (V.ui_visible control) && core.focus = Canvas key
+          then (0, 0, (fst raw_frame.input.size), (snd raw_frame.input.size)) else leaf.body in
+        (* a picture's frame is its pane: frame/width and frame/height read the canvas, not the window *)
+        let input = {input with Input.size = (w, h)} in
+        let drawing = Option.bind core.doc.Document.shell (fun shell -> List.assoc_opt key shell.canvases) in
+        let _, lowered = core.doc.workspace in
+        let preview = core.Core_model.canvas_viewed in
+        let drawing = match preview with
+          | Some (ty, id) when ty = Flow.Ty.drawing -> Some (Flow.Eval.Deferred (ty, id))
+          | _ -> drawing in
+        Flow_native.Workspace_images.bind value.host.images lowered;
+        let previous = List.assoc_opt key value.canvases in
+        let same_plan = Option.fold ~none:false ~some:(fun picture -> picture.plan == lowered.plan) previous in
+        let dynamic = match previous with
+          | _ when preview <> None -> true
+          | Some picture when same_plan && picture.preview = preview -> picture.dynamic
+          | _ -> lowered.states <> [] || Array.exists (fun (n : Flow.Eval.node) ->
+              List.exists (fun (_, v) -> Flow.Eval.is_live v || Flow.Eval.frame_dependent v) n.args) lowered.plan.nodes in
+        (match drawing with
+         | None when preview = None -> pictures, error
+         | _ when (match preview with Some (ty, _) -> ty = Flow.Ty.image | None -> false) ->
+             let id = snd (Option.get preview) in
+             (match Flow_native.Workspace_images.image value.host.images ~state:core.cook.state ~live:input lowered.plan
+                (Flow.Eval.Deferred (Flow.Ty.image, id)) with
+              | Ok img ->
+                  let iw, ih = Rays.Image.Private.dimensions img in
+                  let scale = Float.min (float w /. float iw) (float h /. float ih) in
+                  (key, {size = (w, h); dynamic; plan = lowered.plan; scene = [Rays.Scene.rect ~at:(0, 0) ~w ~h ~fill:Rays_math.Color.black (); Rays.Scene.image img ~at:(0, 0) ~scale ()]; prepared = None; preview}) :: pictures, error
+              | Error d -> (key, Option.value ~default:{size = (w, h); dynamic; plan = lowered.plan; scene = []; prepared = None; preview} previous) :: pictures,
+                  Some (Diagnostic.to_string d))
+         | None -> pictures, error
+         | Some _ when same_plan && not dynamic && Option.fold ~none:false
+             ~some:(fun picture -> picture.size = (w, h) && picture.preview = preview) previous ->
+             (key, Option.get previous) :: pictures, error
+         | Some drawing ->
+             let gpu=Flow_native.Workspace_gpu.config ~fast:(Editor_document.Contexts.fast core.doc) value.host.gpu in
+             let prepared = match previous with
+               | Some {prepared = Some p; preview = held; _} when same_plan && held = preview -> Ok p
+               | _ -> Flow_native.Drawing.prepare ~gpu ~profile:lowered.profile
+                   ~approx:(fst core.doc.workspace).checked.approx ~states:lowered.states lowered.plan drawing in
+             (match Result.bind prepared (fun p -> Result.map (fun scene -> p, scene)
+                 (Flow_native.Workspace_gpu.with_backend ~fast:(Editor_document.Contexts.fast core.doc) value.host.gpu(fun gpu->Flow_native.Drawing.render_prepared ~state:core.cook.state
+                   ~gpu:(Flow_native.Workspace_gpu.marks value.host.gpu) ?resident:(Flow_native.Workspace_gpu.resident gpu value.host.gpu)
+                   ~image:(Flow_native.Workspace_images.image ~gpu value.host.images ~state:core.cook.state ~live:input lowered.plan)
+                   p ~live:input ~size:(w, h)))) with
+              | Ok (prepared, scene) -> (key, {size = (w, h); dynamic; plan = lowered.plan; scene;
+                  prepared = Some prepared; preview}) :: pictures, error
+              | Error d ->
+                  (* the last picture stays up, unless its mark sets bind GPU outputs this failed
+                     render may already have replaced *)
+                  let previous = Option.map (fun p -> match p.prepared with
+                    | Some prepared when Flow_native.Drawing.borrows_gpu prepared -> {p with scene = []}
+                    | _ -> p) previous in
+                  (key, Option.value ~default:{size = (w, h); dynamic; plan = lowered.plan; scene = []; prepared = None; preview} previous) :: pictures,
+                  Some (Diagnostic.to_string d)))
+    | _ -> pictures, error) ([], context_error) (Core_shell.geometry core core.workspace raw_frame).leaves in
+  canvases, context_error
+
 let update_with value frame ~inspector =
   let value = follow_focus value frame in
   let ui = value.core.Core_model.ui in
@@ -195,65 +258,7 @@ let update_with value frame ~inspector =
         scene, (if errors = [] then None else Some (String.concat "; "
           (List.map Diagnostic.to_string errors))) in
   let context_error=if !image_errors=[] then context_error else Some(String.concat "; "(List.rev !image_errors)) in
-  let canvases, context_error = List.fold_left (fun (pictures, error) (leaf : Pxui_shell.Layout.leaf) ->
-    match leaf.panel with
-    | Canvas key ->
-        let _, _, w, h = if not (V.ui_visible control) && core.focus = Canvas key
-          then (0, 0, (fst raw_frame.input.size), (snd raw_frame.input.size)) else leaf.body in
-        (* a picture's frame is its pane: frame/width and frame/height read the canvas, not the window *)
-        let input = {input with Input.size = (w, h)} in
-        let drawing = Option.bind core.doc.Document.shell (fun shell -> List.assoc_opt key shell.canvases) in
-        let _, lowered = core.doc.workspace in
-        let preview = core.Core_model.canvas_viewed in
-        let drawing = match preview with
-          | Some (ty, id) when ty = Flow.Ty.drawing -> Some (Flow.Eval.Deferred (ty, id))
-          | _ -> drawing in
-        Flow_native.Workspace_images.bind value.host.images lowered;
-        let previous = List.assoc_opt key value.canvases in
-        let same_plan = Option.fold ~none:false ~some:(fun picture -> picture.plan == lowered.plan) previous in
-        let dynamic = match previous with
-          | _ when preview <> None -> true
-          | Some picture when same_plan && picture.preview = preview -> picture.dynamic
-          | _ -> lowered.states <> [] || Array.exists (fun (n : Flow.Eval.node) ->
-              List.exists (fun (_, v) -> Flow.Eval.is_live v || Flow.Eval.frame_dependent v) n.args) lowered.plan.nodes in
-        (match drawing with
-         | None when preview = None -> pictures, error
-         | _ when (match preview with Some (ty, _) -> ty = Flow.Ty.image | None -> false) ->
-             let id = snd (Option.get preview) in
-             (match Flow_native.Workspace_images.image value.host.images ~state:core.cook.state ~live:input lowered.plan
-                (Flow.Eval.Deferred (Flow.Ty.image, id)) with
-              | Ok img ->
-                  let iw, ih = Rays.Image.Private.dimensions img in
-                  let scale = Float.min (float w /. float iw) (float h /. float ih) in
-                  (key, {size = (w, h); dynamic; plan = lowered.plan; scene = [Rays.Scene.rect ~at:(0, 0) ~w ~h ~fill:Rays_math.Color.black (); Rays.Scene.image img ~at:(0, 0) ~scale ()]; prepared = None; preview}) :: pictures, error
-              | Error d -> (key, Option.value ~default:{size = (w, h); dynamic; plan = lowered.plan; scene = []; prepared = None; preview} previous) :: pictures,
-                  Some (Diagnostic.to_string d))
-         | None -> pictures, error
-         | Some _ when same_plan && not dynamic && Option.fold ~none:false
-             ~some:(fun picture -> picture.size = (w, h) && picture.preview = preview) previous ->
-             (key, Option.get previous) :: pictures, error
-         | Some drawing ->
-             let gpu=Flow_native.Workspace_gpu.config ~fast:(Editor_document.Contexts.fast core.doc) value.host.gpu in
-             let prepared = match previous with
-               | Some {prepared = Some p; preview = held; _} when same_plan && held = preview -> Ok p
-               | _ -> Flow_native.Drawing.prepare ~gpu ~profile:lowered.profile
-                   ~approx:(fst core.doc.workspace).checked.approx ~states:lowered.states lowered.plan drawing in
-             (match Result.bind prepared (fun p -> Result.map (fun scene -> p, scene)
-                 (Flow_native.Workspace_gpu.with_backend ~fast:(Editor_document.Contexts.fast core.doc) value.host.gpu(fun gpu->Flow_native.Drawing.render_prepared ~state:core.cook.state
-                   ~gpu:(Flow_native.Workspace_gpu.marks value.host.gpu) ?resident:(Flow_native.Workspace_gpu.resident gpu value.host.gpu)
-                   ~image:(Flow_native.Workspace_images.image ~gpu value.host.images ~state:core.cook.state ~live:input lowered.plan)
-                   p ~live:input ~size:(w, h)))) with
-              | Ok (prepared, scene) -> (key, {size = (w, h); dynamic; plan = lowered.plan; scene;
-                  prepared = Some prepared; preview}) :: pictures, error
-              | Error d ->
-                  (* the last picture stays up, unless its mark sets bind GPU outputs this failed
-                     render may already have replaced *)
-                  let previous = Option.map (fun p -> match p.prepared with
-                    | Some prepared when Flow_native.Drawing.borrows_gpu prepared -> {p with scene = []}
-                    | _ -> p) previous in
-                  (key, Option.value ~default:{size = (w, h); dynamic; plan = lowered.plan; scene = []; prepared = None; preview} previous) :: pictures,
-                  Some (Diagnostic.to_string d)))
-    | _ -> pictures, error) ([], context_error) (Core_shell.geometry core core.workspace raw_frame).leaves in
+  let canvases, context_error = canvas_pictures ~control ~core ~raw_frame ~input ~value ~context_error () in
   let rendered, views, drawn,texture_errors = compose { value with core } { update with core } ~baked ~baked_views ~scene in
   let context_error=if texture_errors=[] then context_error else Some(String.concat "; " texture_errors)in
   let rendering = {focused with core; extra; camera; rendered; views} in
