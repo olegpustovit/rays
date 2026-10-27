@@ -26,10 +26,10 @@ let furnace () =
   let radiance = 0.5 in
   let baked = World.bake ~domains:1 ~width:64 ~height:32 (uniform radiance) in
   let camera = Camera.perspective ~at:(Rays_math.Vec3.create 0. 0. 4.) ~target:Rays_math.Vec3.zero () in
-  let sphere = Scene3.mesh ~material:(Material.matte Rays_math.Color.white)
+  let sphere = Scene.D3.mesh ~material:(Material.matte Rays_math.Color.white)
       (Test_meshes.sphere ~radius:1. ()) in
   let scene baked = [ Scene.clear Rays_math.Color.black;
-    Scene.view3d ~camera (Scene3.with_world baked (Scene3.create [ sphere ])) ] in
+    Scene.view3d ~camera (Scene.D3.with_world baked (Scene.D3.create [ sphere ])) ] in
   let canvas = Canvas.create_exn ~width:64 ~height:64 in
   let uploaded () = (stats canvas).uploaded_bytes in
   let pixel x y = Option.get(Result.get_ok(Canvas.pixel canvas ~x ~y)) in
@@ -65,7 +65,7 @@ let furnace () =
   let canvas = Canvas.create_exn ~width:32 ~height:32 in
   Fun.protect ~finally:(fun () -> ignore(Canvas.destroy canvas)) (fun () ->
     let empty = Result.get_ok (Mesh.Private.create_owned ~mode:Mesh.Triangles ~indices:[||] [||]) in
-    render canvas [Scene.view3d ~camera (Scene3.create [Scene3.mesh empty; sphere])];
+    render canvas [Scene.view3d ~camera (Scene.D3.create [Scene.D3.mesh empty; sphere])];
     render canvas [Scene.line ~from_:(4, 4) ~to_:(4, 4) ~color:Rays_math.Color.white ~width:1 ();
       Scene.circle ~at:(8, 8) ~radius:0 ~fill:Rays_math.Color.white ()]);
   let after = live_handles () in
@@ -83,12 +83,12 @@ let sun_shadow () =
               angular_radius = 0.02 } in
   let camera = Camera.perspective ~at:(Rays_math.Vec3.create 0. (-4.) 5.) ~target:Rays_math.Vec3.zero () in
   let matte = Material.matte Rays_math.Color.white in
-  let plane = Scene3.mesh ~material:matte (Mesh.plane ~width:8. ~height:8. ())
-  and box = Scene3.mesh ~material:matte (Test_meshes.box ~width:1. ~height:1. ~depth:1. ()) in
+  let plane = Scene.D3.mesh ~material:matte (Mesh.plane ~width:8. ~height:8. ())
+  and box = Scene.D3.mesh ~material:matte (Test_meshes.box ~width:1. ~height:1. ~depth:1. ()) in
   (* Rebuilt around the same meshes, a scene keeps its sun map. *)
   let scene baked = [ Scene.clear Rays_math.Color.black;
-    Scene.view3d ~camera (Scene3.with_world baked (Scene3.create [
-      plane; Scene3.translate (Rays_math.Vec3.create 0. 0. 1.5) [ box ] ])) ] in
+    Scene.view3d ~camera (Scene.D3.with_world baked (Scene.D3.create [
+      plane; Scene.D3.translate (Rays_math.Vec3.create 0. 0. 1.5) [ box ] ])) ] in
   let canvas = Canvas.create_exn ~width:128 ~height:128 in
   let luminance p =
     let x, y = match Camera.world_to_screen ~viewport:(0, 0, 128, 128) camera p with

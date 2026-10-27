@@ -2,7 +2,7 @@ open Rays
 
 let camera=Camera.orthographic ~height:2. ~at:(Rays_math.Vec3.create 0. 0. 2.) ~target:Rays_math.Vec3.zero ()
 let stage mesh=
-  let scene=Scene3.create [Scene3.mesh ~material:(Material.unlit Rays_math.Color.white) mesh]in
+  let scene=Scene.D3.create [Scene.D3.mesh ~material:(Material.unlit Rays_math.Color.white) mesh]in
   let staged=Result.get_ok(Scene.Private.stage_native ~width:128 ~height:128 [Scene.view3d ~camera scene])in
   (List.hd staged.scene3).entries.(0)
 let attributes (entry:Renderer.Scene_execution.scene3_entry)=Option.get entry.vertex_attributes|>snd
@@ -105,10 +105,10 @@ let run ()=with_caches(fun()->
   let repeated=stage source in
   assert(repeated.draw.mesh.vertices==packed&&attributes repeated==attrs);
   assert(repeated.draw.mesh.indices==first.draw.mesh.indices);
-  assert(Scene3.Private.depth_clear Scene3.empty=1.);
+  assert(Scene.D3.Private.depth_clear Scene.D3.empty=1.);
   List.iter(fun samples->
-    let scene=Scene3.create~samples[Scene3.mesh source]in
-    assert(Scene3.Private.depth_clear scene=1.);
+    let scene=Scene.D3.create~samples[Scene.D3.mesh source]in
+    assert(Scene.D3.Private.depth_clear scene=1.);
     let staged=Result.get_ok(Scene.Private.stage_native~width:128~height:128[Scene.view3d~camera scene])in
     Array.iter(fun(entry:Renderer.Scene_execution.scene3_entry)->
       assert(entry.samples=samples&&entry.draw.state.depth_clear=1.))
@@ -117,7 +117,7 @@ let run ()=with_caches(fun()->
   vertices.x.(0)<-1e100;
   let oversized=mesh(vertices,normals,indices,colors)in
   (match Scene.Private.stage_native~width:128~height:128
-      [Scene.view3d~camera(Scene3.create[Scene3.mesh oversized])]with
+      [Scene.view3d~camera(Scene.D3.create[Scene.D3.mesh oversized])]with
    |Error error->assert(error="native View3d lowering failed: mesh")
    |Ok _->failwith"non-finite float32 narrowing was accepted");
   print_endline "Scene3 float32: 36-byte split mirror, immutable component reuse, color invalidation, finite narrowing")

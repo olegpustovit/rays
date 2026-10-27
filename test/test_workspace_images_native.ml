@@ -10,7 +10,7 @@ let ()=
         (draw/image (image/map (fn [uv] [bias uv.y 0 1]) :width 64 :height 64))))
     (graph editor :context editor (ui/workspace (ui/canvas (ref picture)))))|}in
   let owner=ref(Result.get_ok(Editor.create ~ui_text_size:11 ~workspace:doc ~await:true ~domains:1
-    ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)()))in
+    ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene.D3.empty)()))in
   let canvas=Rays.Canvas.create_exn ~width:900 ~height:640 in
   Fun.protect ~finally:(fun()->Editor.close !owner;ignore(Rays.Canvas.destroy canvas))(fun()->
     let sample count=
@@ -43,7 +43,7 @@ let ()=
     (graph backdrop :context draw (draw/background "#102030"))
     (graph fixed :context image (image/render (ref backdrop) :width 65 :height 17)))|}in
   let owner domains=Result.get_ok(Editor.create ~ui_text_size:11 ~workspace:doc ~await:true ~domains
-    ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)())in
+    ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene.D3.empty)())in
   let display=owner 8 and cpu1=owner 1 and cpu8=owner 8 in
   Fun.protect ~finally:(fun()->List.iter Editor.close[display;cpu1;cpu8])(fun()->
     Editor.Private.gpu_qualification display;
@@ -106,7 +106,7 @@ let () =
       (graph drawing :context draw (draw/image (ref img)"^scale^"))
       (graph rendered :context image (image/render (ref drawing) :width 65 :height 3)))")in
     let owner=Result.get_ok(Rays_editor.Editor.create ~ui_text_size:11 ~workspace:doc ~await:true ~domains:1
-      ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)())in
+      ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene.D3.empty)())in
     Fun.protect ~finally:(fun()->Rays_editor.Editor.close owner)(fun()->
       let evaluated=ok(E.static doc.checked)in
       let image_value=List.assoc "rendered" evaluated.results in
@@ -137,7 +137,7 @@ let ()=
     (graph rendered :context image (image/render (ref drawing) :width 8 :height 8)) \
     (graph picture :context draw (draw/image (ref rendered))))"in
   let owner=Result.get_ok(Rays_editor.Editor.create ~ui_text_size:11 ~workspace:doc ~await:true ~domains:1
-    ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)())in
+    ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene.D3.empty)())in
   Fun.protect ~finally:(fun()->Rays_editor.Editor.close owner)(fun()->
     let evaluated=ok(E.static doc.checked)in
     let image=ok(Rays_editor.Editor.Private.image owner(List.assoc "rendered" evaluated.results))in
@@ -147,7 +147,7 @@ let ()=
     assert(Rays_editor.Editor.Private.image_stats owner=(1,0));
     List.iter(fun domains->Parallel.run ~domains(fun()->
       let fresh=Result.get_ok(Rays_editor.Editor.create ~ui_text_size:11 ~workspace:doc ~await:true ~domains
-        ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)())in
+        ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene.D3.empty)())in
       Fun.protect ~finally:(fun()->Rays_editor.Editor.close fresh)(fun()->
         let actual=ok(Rays_editor.Editor.Private.image fresh(List.assoc "rendered" evaluated.results))in
         assert(Result.get_ok(Rays.Image.Private.pixels actual)=expected))))[1;8]);
@@ -177,7 +177,7 @@ let ()=
   let doc=load initial in
   let owner=ref(Result.get_ok(Editor.create ~ui_text_size:11 ~workspace:doc ~await:true ~domains:1
     ~source:(Rays_editor.Source.at ~file:source ~digest:(Editor_document.Contexts.sha256 initial))
-    ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)()))in
+    ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene.D3.empty)()))in
   Fun.protect ~finally:(fun()->Editor.close !owner;Sys.remove source)(fun()->
     Editor.Private.gpu_qualification !owner;
     let value()=let plan=Editor.Private.image_plan !owner in
@@ -205,9 +205,9 @@ let ()=
       let camera=Rays.Camera.orthographic ~height:2. ~at:(Rays_math.Vec3.create 0. 0. 2.) ~target:Rays_math.Vec3.zero()in
       let scene source_image texture=Rays.Scene.[clear Rays_math.Color.black;
         image source_image ~at:(0,0)();Private.layer_break;
-        view3d ~viewport:(33,0,32,17) ~camera(Rays.Scene3.create ~ambient:Rays_math.Color.white
-          [Rays.Scene3.mesh ~material:(Rays.Material.matte Rays_math.Color.white) ~cull:Cull_none
-            ~texture:(Rays.Scene3.textured ~filter:Nearest texture) mesh])]in
+        view3d ~viewport:(33,0,32,17) ~camera(Rays.Scene.D3.create ~ambient:Rays_math.Color.white
+          [Rays.Scene.D3.mesh ~material:(Rays.Material.matte Rays_math.Color.white) ~cull:Cull_none
+            ~texture:(Rays.Scene.D3.textured ~filter:Nearest texture) mesh])]in
       let snapshot()=let image=Rays.Canvas.to_image canvas |> Result.get_ok in
         Fun.protect ~finally:(fun()->ignore(Rays.Image.destroy image))(fun()->Rays.Image.Private.pixels image |> Result.get_ok)in
       let verify time=
@@ -295,7 +295,7 @@ let ()=
     (graph picture :context draw (draw/image (ref rendered)))
     (graph settings :context settings (settings/config :width 320 :height 240)))"in
   let owner domains=Result.get_ok(Editor.create ~ui_text_size:11 ~workspace:doc ~await:true ~domains
-    ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)())in
+    ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene.D3.empty)())in
   let display=owner 1 in
   let expected=Fun.protect ~finally:(fun()->Editor.close display)(fun()->
     Editor.Private.gpu_qualification display;
@@ -335,7 +335,7 @@ let ()=
   let doc=load "(workspace stamp (graph img :context image
     (image/noise :width 4 :height 4 :frequency (+ 0.1 (* t 0.01)) :seed 31)))"in
   let owner=Result.get_ok(Editor.create ~ui_text_size:11 ~workspace:doc ~await:true ~domains:1
-    ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)())in
+    ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene.D3.empty)())in
   Fun.protect ~finally:(fun()->Editor.close owner)(fun()->
     let node=(Editor.Private.image_plan owner).nodes.(0)in
     let value=E.Deferred(Flow.Ty.image,node.id)in
@@ -360,7 +360,7 @@ let ()=
     (graph width_only :context image (image/render (ref drawing) :width 9))
     (graph height_only :context image (image/render (ref drawing) :height 11)))"in
   let owner=Result.get_ok(Editor.create ~ui_text_size:11 ~workspace:doc ~await:true ~domains:1
-    ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)())in
+    ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene.D3.empty)())in
   Fun.protect ~finally:(fun()->Editor.close owner)(fun()->
     let plan=Editor.Private.image_plan owner in
     let value name=(Array.find_opt(fun(instance:E.instance)->instance.graph=name && instance.default)
@@ -413,7 +413,7 @@ let ()=
   Out_channel.with_open_bin source(fun ch->output_string ch initial);
   let owner=ref(Result.get_ok(Editor.create ~ui_text_size:11 ~workspace:(load initial) ~await:true ~domains:1
     ~source:(Rays_editor.Source.at ~file:source ~digest:(Editor_document.Contexts.sha256 initial))
-    ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)()))in
+    ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene.D3.empty)()))in
   let destination=Rays.Canvas.create_exn ~width:65 ~height:17 in
   Fun.protect ~finally:(fun()->ignore(Rays.Canvas.destroy destination);Editor.close !owner;Sys.remove source)(fun()->
     let value()=(Array.find_opt(fun(instance:E.instance)->instance.graph="rendered")
@@ -441,9 +441,9 @@ let ()=
     let mesh=Rays.Mesh.plane ~width:(2.*.65./.17.) ~height:2.()in
     let camera=Rays.Camera.orthographic ~height:2. ~at:(Rays_math.Vec3.create 0. 0. 2.) ~target:Rays_math.Vec3.zero()in
     let scene source_image texture=Rays.Scene.[clear Rays_math.Color.black;image source_image ~at:(0,0)();Private.layer_break;
-      view3d ~viewport:(33,0,32,17) ~camera(Rays.Scene3.create ~ambient:Rays_math.Color.white
-        [Rays.Scene3.mesh ~material:(Rays.Material.matte Rays_math.Color.white) ~cull:Cull_none
-          ~texture:(Rays.Scene3.textured ~filter:Nearest texture) mesh])]in
+      view3d ~viewport:(33,0,32,17) ~camera(Rays.Scene.D3.create ~ambient:Rays_math.Color.white
+        [Rays.Scene.D3.mesh ~material:(Rays.Material.matte Rays_math.Color.white) ~cull:Cull_none
+          ~texture:(Rays.Scene.D3.textured ~filter:Nearest texture) mesh])]in
     let snapshot()=let image=Result.get_ok(Rays.Canvas.to_image destination)in
       Fun.protect ~finally:(fun()->ignore(Rays.Image.destroy image))(fun()->Result.get_ok(Rays.Image.Private.pixels image))in
     let verify time=
@@ -511,7 +511,7 @@ let ()=
     (graph drawing :context draw (draw/background \"#102030\"))
     (graph rendered :context image (image/render (ref drawing) :width %d :height 8)))" width)in
   let owner=Result.get_ok(Editor.create ~ui_text_size:11 ~workspace:(doc 8) ~await:true ~domains:1
-    ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)())in
+    ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene.D3.empty)())in
   Fun.protect ~finally:(fun()->Editor.close owner)(fun()->
     let request width=let evaluated=ok(E.static(doc width).checked)in
       Editor.Private.with_images ~plan:evaluated.plan owner(fun ~image ~texture:_->

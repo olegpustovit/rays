@@ -99,11 +99,11 @@ let picture ?compare ?texture (output : S.output) =
   let camera = Rays.Camera.perspective ~far:(radius *. 100.)
     ~at:(Rays_math.Vec3.add center (Rays_math.Vec3.create (radius *. 1.4) (radius *. 1.1) (radius *. 1.8))) ~target:center () in
   let material = Rays.Material.unlit Rays_math.Color.white in
-  let node = match output.instances with None -> Rays.Scene3.mesh ~material ~cull:Rays.Scene3.Cull_none mesh
-    | Some transforms -> Rays.Scene3.instances_array ~material ~cull:Rays.Scene3.Cull_none mesh transforms in
-  let rendered = Rays.Scene3.create [node] in
+  let node = match output.instances with None -> Rays.Scene.D3.mesh ~material ~cull:Rays.Scene.D3.Cull_none mesh
+    | Some transforms -> Rays.Scene.D3.instances_array ~material ~cull:Rays.Scene.D3.Cull_none mesh transforms in
+  let rendered = Rays.Scene.D3.create [node] in
   let rendered = Option.fold ~none:rendered
-    ~some:(fun texture -> Rays.Scene3.Private.with_texture (Rays.Scene3.textured texture) rendered) texture in
+    ~some:(fun texture -> Rays.Scene.D3.Private.with_texture (Rays.Scene.D3.textured texture) rendered) texture in
   let scene = [Rays.Scene.clear Rays_math.Color.black; Rays.Scene.view3d ~camera rendered] in
   Option.iter (fun compare -> compare mesh scene) compare;
   scene
@@ -206,7 +206,7 @@ let check ?directory ?(commands = false) ~factories ~name (workspace : Editor_do
       S.set_volatile session (L.is_volatile lowered);
       let owner = if Array.exists (fun (n : E.node) -> n.ty = Flow.Ty.image) evaluated.plan.nodes then
         Some (Rays_editor.Editor.create ~workspace ~factories ~domains ~await:true
-          ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ () -> Rays.Scene3.empty) () |> string_ok)
+          ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ () -> Rays.Scene.D3.empty) () |> string_ok)
         else None in
       reference, lowered, state, lanes, session, owner) in
     Fun.protect ~finally:(fun () -> List.iter (fun (_,_,_,_,s,owner) ->

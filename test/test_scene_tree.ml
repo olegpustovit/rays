@@ -53,7 +53,7 @@ let run () =
       ~prepare:(fun _ output -> Atomic.incr cooks;
         Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
-      ~draw:(fun _ mesh -> Scene3.create [Scene3.mesh mesh]) () |> Result.get_ok in
+      ~draw:(fun _ mesh -> Scene.D3.create [Scene.D3.mesh mesh]) () |> Result.get_ok in
   let count = ref 0 in
   let step ?mouse ?keys ?buttons env events =
     incr count; E.update env (frame ?mouse ?keys ?buttons ~events !count) in
@@ -330,7 +330,7 @@ let run () =
   let reopened = E.create ~ui_text_size:11 ~await:true ~workspace:(Ws_fixture.of_text (source env))
     ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
       |> Result.map_error Rdk.Error.to_string)
-    ~draw:(fun _ mesh -> Scene3.create [Scene3.mesh mesh]) () |> Result.get_ok in
+    ~draw:(fun _ mesh -> Scene.D3.create [Scene.D3.mesh mesh]) () |> Result.get_ok in
   check (labelled reopened = labelled env) "the saved text does not open as the edited scene";
   E.close reopened;
   (* The list's right-click menu enters the row under the pointer. *)
@@ -361,7 +361,7 @@ let run () =
           Ok (Digest.string (String.concat "," (List.init (Rdk.Packed.Float3.length points)
             (fun index -> let x, y, z = Rdk.Packed.Float3.get points index in
               Printf.sprintf "%h %h %h" x y z)))))
-        ~draw:(fun _ _ -> Scene3.create []) () |> Result.get_ok in
+        ~draw:(fun _ _ -> Scene.D3.create []) () |> Result.get_ok in
     let env = E.update env (frame 0) in
     match E.prepared env with
     | Some digest -> E.close env; digest
@@ -376,7 +376,7 @@ let run_host () =
     E.create ~ui_text_size:11 ~await:true ~workspace:(Ws_fixture.of_text text)
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
-      ~draw:(fun _ mesh -> Scene3.create [Scene3.mesh mesh]) () |> Result.get_ok in
+      ~draw:(fun _ mesh -> Scene.D3.create [Scene.D3.mesh mesh]) () |> Result.get_ok in
   let count = ref 0 in
   let step ?keys env events = incr count; E.update env (frame ?keys ~events !count) in
   let key k = Input.Key_pressed k in

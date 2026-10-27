@@ -46,13 +46,13 @@ type setting = { mode : t; bounces : int; round_samples : int }
 
 (* A viewport as one frame asks to draw it: [film] is the tracer's film in drawable pixels, [step]
    the divisor of the root's resolution it came from, [cap] the root's samples per pixel. *)
-type view = { key : string; film : int * int; step : int; camera : Camera.t; scene : Scene3.t;
+type view = { key : string; film : int * int; step : int; camera : Camera.t; scene : Scene.D3.t;
               setting : setting; cap : int }
 
 (* One tracer, shared by every viewport that asks for the same picture.  [scene], [camera] and
    [film] are what the tracer was last given: a slot differing from the frame's request is stale. *)
-type slot = { keys : string list; film : int * int; step : int; scene : Scene3.t; camera : Camera.t option;
-              wire : Scene3.t option; tracer : P.t option; setting : setting; cap : int;
+type slot = { keys : string list; film : int * int; step : int; scene : Scene.D3.t; camera : Camera.t option;
+              wire : Scene.D3.t option; tracer : P.t option; setting : setting; cap : int;
               failure : string option  (* why the last render of the slot failed, until one succeeds *) }
 (* [mode] is the document's; [raster_only]: every viewport draws as raster, so there are no slots;
    [turn]: the viewport whose slot last took a turn of the sample budget *)
@@ -84,21 +84,21 @@ let traced_material (material : Material.t) =
 
 let wire_scene scene =
   let nodes = ref [] in
-  Scene3.Private.iter_batches (fun (drawing : Scene3.Private.drawing) transforms ->
-    let material = Material.unlit (wire_color (Scene3.Private.ambient scene)) in
+  Scene.D3.Private.iter_batches (fun (drawing : Scene.D3.Private.drawing) transforms ->
+    let material = Material.unlit (wire_color (Scene.D3.Private.ambient scene)) in
     let drawing_node = match transforms with
-      | None -> Scene3.mesh ~material ~mode:Scene3.Wireframe ~cull:Scene3.Cull_none drawing.mesh
-      | Some transforms -> Scene3.instances_array ~material ~mode:Scene3.Wireframe
-          ~cull:Scene3.Cull_none drawing.mesh transforms in
-    nodes := Scene3.transform drawing.transform [drawing_node] :: !nodes) scene;
-  Scene3.create ~samples:1 (List.rev !nodes)
+      | None -> Scene.D3.mesh ~material ~mode:Scene.D3.Wireframe ~cull:Scene.D3.Cull_none drawing.mesh
+      | Some transforms -> Scene.D3.instances_array ~material ~mode:Scene.D3.Wireframe
+          ~cull:Scene.D3.Cull_none drawing.mesh transforms in
+    nodes := Scene.D3.transform drawing.transform [drawing_node] :: !nodes) scene;
+  Scene.D3.create ~samples:1 (List.rev !nodes)
 
 (* The cache keeps at most 64 converted source meshes. Placement remains in the
    tracer's instance structure, so an orbit does not convert or upload geometry. *)
 let traced_scene meshes scene =
   let ( let* ) = Result.bind in
   let cache = Mesh_cache.copy ~release:(fun _ _ -> ()) meshes and result = ref (Ok []) in
-  Scene3.Private.iter_batches (fun (drawing : Scene3.Private.drawing) transforms ->
+  Scene.D3.Private.iter_batches (fun (drawing : Scene.D3.Private.drawing) transforms ->
     result := let* placed = !result in
       let* () = if drawing.texture = None then Ok ()
         else Error "Path tracing textured meshes is not supported." in
@@ -143,7 +143,7 @@ type plan = { view : view; names : string list; limit : int; previous : slot opt
 
 let no_batches scene =
   let found = ref false in
-  Scene3.Private.iter_batches (fun _ _ -> found := true) scene; not !found
+  Scene.D3.Private.iter_batches (fun _ _ -> found := true) scene; not !found
 
 (* Of the viewports that want a turn, the one after [last] in [order], cyclically: each takes its
    turn before any takes a second one. *)
@@ -192,7 +192,7 @@ let update state ~mode ~custom ~focus views =
     let settle plan =
       let ({ view; names = keys; limit = cap; previous; _ } : plan) = plan in
       let ({ film; step; scene; camera; setting; _ } : view) = view in
-      let blank = {keys; film; step; scene = Scene3.empty; camera = None; wire = None; tracer = None;
+      let blank = {keys; film; step; scene = Scene.D3.empty; camera = None; wire = None; tracer = None;
                    setting; cap; failure = None} in
       match setting.mode with
       | Raster -> {blank with scene}
@@ -230,9 +230,9 @@ let update state ~mode ~custom ~focus views =
               let submitted = match mesh with None -> Ok () | Some mesh -> P.queue_mesh tracer mesh in
               let* () = submitted in
               let* () = P.resize tracer ~width ~height in
-              let* () = if prior.tracer = None || Scene3.Private.lights prior.scene <> Scene3.Private.lights scene
-                then P.set_lights tracer (List.map P.light_of (Scene3.Private.lights scene)) else Ok () in
-              let* () = P.set_world tracer (Scene3.Private.world scene) in
+              let* () = if prior.tracer = None || Scene.D3.Private.lights prior.scene <> Scene.D3.Private.lights scene
+                then P.set_lights tracer (List.map P.light_of (Scene.D3.Private.lights scene)) else Ok () in
+              let* () = P.set_world tracer (Scene.D3.Private.world scene) in
               let* () = P.render tracer camera in
               Ok {blank with scene; camera = Some camera; tracer = Some tracer} in
             match render () with

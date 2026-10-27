@@ -274,9 +274,9 @@ let ()=
         let camera=Rays.Camera.orthographic ~height:2.
           ~at:(Rays_math.Vec3.create 0. 0. 2.) ~target:Rays_math.Vec3.zero()in
         let mesh_scene ?viewport texture=Rays.Scene.[clear Rays_math.Color.black;
-          view3d ?viewport ~camera(Rays.Scene3.create ~ambient:Rays_math.Color.white
-            [Rays.Scene3.mesh ~material:(Rays.Material.matte Rays_math.Color.white)
-              ~cull:Cull_none ~texture:(Rays.Scene3.textured ~filter:Nearest texture)mesh])]in
+          view3d ?viewport ~camera(Rays.Scene.D3.create ~ambient:Rays_math.Color.white
+            [Rays.Scene.D3.mesh ~material:(Rays.Material.matte Rays_math.Color.white)
+              ~cull:Cull_none ~texture:(Rays.Scene.D3.textured ~filter:Nearest texture)mesh])]in
         let image_scene source_image=Rays.Scene.[clear Rays_math.Color.black;image source_image ~at:(0,0)()]in
         let displayed=image_scene(Rays.Image.Private.of_resource current|>Result.get_ok)
         and meshed=mesh_scene view in

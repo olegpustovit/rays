@@ -108,7 +108,7 @@ end
 
 type camera = Easy_camera.t
 type control = CC.t
-type rendered = Scene3.t
+type rendered = Scene.D3.t
 type request = CC.render_request
 type view = Camera.t
 
@@ -540,19 +540,19 @@ let paint extra ~key viewport camera rendered = Renderer.paint extra.renderer ~k
    there are any; otherwise the first object's own lights do. *)
 let compose ~scene ~world pieces =
   let lights = Objects.lights scene in
-  let base = match pieces with (_, _, first) :: _ -> first | [] -> Scene3.empty in
-  let module P = Scene3.Private in
-  (match world with Some baked -> Scene3.with_world baked | None -> Fun.id) @@
-  Scene3.create ~lights:(if lights <> [] || Objects.ids "light" scene <> [] then lights
+  let base = match pieces with (_, _, first) :: _ -> first | [] -> Scene.D3.empty in
+  let module P = Scene.D3.Private in
+  (match world with Some baked -> Scene.D3.with_world baked | None -> Fun.id) @@
+  Scene.D3.create ~lights:(if lights <> [] || Objects.ids "light" scene <> [] then lights
       else P.lights base)
     ~ambient:(P.ambient base)
     ~separate_specular:(P.separate_specular base) ~samples:(P.samples base)
     (List.map (fun (matrix, ghost, scene3) ->
-      let placed = Scene3.transform matrix (Scene3.nodes scene3) in
+      let placed = Scene.D3.transform matrix (Scene.D3.nodes scene3) in
       (* ponytail: ghosts screen-blend without writing depth; a real
          override material would need a Scene3 material-override node. *)
-      if ghost then Scene3.with_depth (Scene3.depth_state ~write:false ())
-          [Scene3.with_blend Scene3.Screen [placed]]
+      if ghost then Scene.D3.with_depth (Scene.D3.depth_state ~write:false ())
+          [Scene.D3.with_blend Scene.D3.Screen [placed]]
       else placed) pieces)
 
 (* ---- guides and handles, in screen points over the view. *)

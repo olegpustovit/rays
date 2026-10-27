@@ -68,9 +68,9 @@ per domain; changing only background or exposure is a hit.
 The raster renderer and the path tracer read the same bake products and use
 the same ACES tone map. `background` is consulted at bounce 0 only.
 
-## Raster renderer (`Scene3.with_world`)
+## Raster renderer (`Scene.D3.with_world`)
 
-`Scene3.with_world baked scene` switches that Scene3 to the environment-lit
+`Scene.D3.with_world baked scene` switches that Scene3 to the environment-lit
 path; a Scene3 without a World renders exactly as before (Blinn-Phong over
 `Light.t`, no tone map). Lowering (`scene3_native_lowering.ml`) routes every
 non-point drawing to the `Scene3_world` pipeline (`source_scene3_world` in

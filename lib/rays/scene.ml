@@ -1,3 +1,4 @@
+module D3=Scene3
 type blend=Replace|Alpha|Add|Multiply
 type text_node={x:int;y:int;value:string;color:Rays_math.Color.t;size:int;wrap:int option;align:Font.alignment;provided_font:Font.t option;mutable automatic:Font.Private.automatic option;mutable rendered:Image.t option}
 and view3d_node={viewport:(int*int*int*int)option;camera:Camera.t;scene:Scene3.t;mutable rendered3d:Image.t option}

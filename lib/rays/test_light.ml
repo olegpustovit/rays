@@ -13,7 +13,7 @@ let lights samples=
    Light.spot~diffuse~intensity:5.~attenuation~at~direction~cutoff:0.5~concentration:3.();
    Light.area~diffuse~intensity:6.~attenuation~at~direction~width:4.~height:5.~samples()]
 let stage lights=
-  let scene=Scene3.create~lights[Scene3.mesh triangle]in
+  let scene=Scene.D3.create~lights[Scene.D3.mesh triangle]in
   let staged=Result.get_ok(Scene.Private.stage_native~width:320~height:240
     [Scene.view3d~camera scene])in
   Option.get (List.hd staged.scene3).entries.(0).draw.state.transform_uniforms

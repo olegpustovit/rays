@@ -6,7 +6,7 @@
   canvas canvas_runtime font audio mesh camera easy_camera
   scene3 scene3_native_lowering
   scene native_scene_lowering sketch world)
- (private_modules input_state time canvas_runtime scene3_native_lowering native_scene_lowering)
+ (private_modules scene3 input_state time canvas_runtime scene3_native_lowering native_scene_lowering)
  (libraries input rays_math lru runtime_resources runtime_input runtime scene_command unix
   renderer parallel))
 
