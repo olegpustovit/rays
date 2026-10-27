@@ -34,13 +34,13 @@ let bake_world ?view ~previous core ~live =
     | Some (last, baked) when last = world && (baked : World.baked).camera.width = width ->
         world, baked
     | Some _ | None -> world, World.bake_cached ~width ~height world)
-    (Core.world ?view core ~time:(Timeline.time (Core.timeline core)))
+    (Core_host.world ?view core ~time:(Timeline.time (Core_list.timeline core)))
 
 (* the viewports over another scene instance: those that draw objects of their own and those that
    show another World *)
-let view_keys (core : _ Core.t) =
-  let own = match core.Core.doc.Document.shell with Some shell -> List.map fst shell.views | None -> [] in
-  own @ List.filter (fun key -> not (List.mem key own)) (List.map fst core.Core.doc.Document.view_worlds)
+let view_keys (core : _ Core_model.t) =
+  let own = match core.Core_model.doc.Document.shell with Some shell -> List.map fst shell.views | None -> [] in
+  own @ List.filter (fun key -> not (List.mem key own)) (List.map fst core.Core_model.doc.Document.view_worlds)
 
 let save_status ~save ~filename pending rendered =
   match pending, rendered with
@@ -63,13 +63,13 @@ let worlds ~paint_view ~camera ~rendered ~views ~view_visible bodies =
       bounds) bodies
 
 let hidden_only ~ui_visible core =
-  not ui_visible && core.Core.leader = Leader.Idle
+  not ui_visible && core.Core_model.leader = Leader.Idle
 
 (* The fully hidden scene, reused while its inputs are physically unchanged
    so the renderer sees the same [Scene.t]. *)
 let hidden_entry ~background ~rendered ~camera ~paint_view ~cache core
     (frame : Frame.t) =
-  let view_visible = Core.view_visible core in
+  let view_visible = Core_shell.view_visible core in
   match cache with
   | Some cached when cached.width = (fst frame.input.size)
       && cached.height = (snd frame.input.size) && cached.rendered == rendered
@@ -84,56 +84,56 @@ let hidden_entry ~background ~rendered ~camera ~paint_view ~cache core
 
 let compose_view ?map ~canvases ~ui_visible ~background ~rendered ~focused ~views ~camera ~camera_of ~paint_view
     ~guides ~cache core (frame : Frame.t) =
-  let view_visible = Core.view_visible core in
+  let view_visible = Core_shell.view_visible core in
   let paint_world = match map with
-    | Some image when view_visible && core.Core.map_view -> (fun viewport ->
+    | Some image when view_visible && core.Core_model.map_view -> (fun viewport ->
         let x, y, w, _ = map_rect viewport in
         [Scene.image image ~at:(x, y)
            ~scale:(float w /. float (max 1 (fst(Image.Private.dimensions image)))) ()])
-    | _ -> world ~paint_view ~key:(match core.Core.focus with View key -> key | _ -> "main")
+    | _ -> world ~paint_view ~key:(match core.Core_model.focus with View key -> key | _ -> "main")
         ~camera ~rendered:focused ~view_visible in
   (* each viewport is drawn from its own orbit *)
-  if not ui_visible && (match core.Core.focus with Canvas _ -> true | _ -> false) then
-    let key = match core.Core.focus with Canvas key -> key | _ -> assert false in
+  if not ui_visible && (match core.Core_model.focus with Canvas _ -> true | _ -> false) then
+    let key = match core.Core_model.focus with Canvas key -> key | _ -> assert false in
     Scene.clear background :: Option.fold ~none:[] ~some:(fun picture -> picture.scene) (List.assoc_opt key canvases)
-    @ Core.machinery core ~all_ui_visible:false
+    @ Core_host.machinery core ~all_ui_visible:false
   else if hidden_only ~ui_visible core then
     (hidden_entry ~background ~rendered:focused ~camera ~paint_view ~cache core frame).scene
   else if not ui_visible then
     Scene.clear background :: (world ~paint_view ~key:"@hidden" ~camera ~rendered:focused ~view_visible
       (0, 0, (fst frame.input.size), (snd frame.input.size)))
-    @ Core.machinery core ~all_ui_visible:false
+    @ Core_host.machinery core ~all_ui_visible:false
   else
-    let viewport = (Core.panes core frame).view in
+    let viewport = (Core_shell.panes core frame).view in
     let guides = if view_visible then guides viewport else [] in
     (* every viewport shows its own scene instance's image; the map replaces the focused one *)
     let floating = List.filter_map (fun (leaf : Pxui_shell.Layout.leaf) ->
       match leaf.panel with
       | View key when leaf.floating ->
           Some (key, leaf.path, leaf.body)
-      | _ -> None) (Core.geometry core core.Core.workspace frame).leaves in
+      | _ -> None) (Core_shell.geometry core core.Core_model.workspace frame).leaves in
     let painted, windows = List.fold_left (fun (painted, windows) (key, bounds) ->
-      let image = if bounds = viewport && core.Core.map_view then paint_world viewport
+      let image = if bounds = viewport && core.Core_model.map_view then paint_world viewport
         else worlds ~paint_view ~camera:camera_of ~rendered ~views ~view_visible [key, bounds] in
       match List.find_opt (fun (k, _, _) -> k = key) floating with
       | None -> image :: painted, windows
       | Some (_, path, (x, y, w, h)) ->
           let root = List.find_map (fun (root, (panel, p)) ->
-            if panel = Pxui_shell.Layout.View key && p = Some path then Some root else None) core.Core.pane_keys in
+            if panel = Pxui_shell.Layout.View key && p = Some path then Some root else None) core.Core_model.pane_keys in
           (* inside the window's line-2 frame, which Chrome paints on the body's edge *)
           let image = Scene.rect ~at:(x + 1, y + 1) ~w:(w - 2) ~h:(h - 2) ~fill:Rays_math.Color.white () :: image in
-          painted, (root, image) :: windows) ([], []) (Core.view_bodies core frame) in
+          painted, (root, image) :: windows) ([], []) (Core_shell.view_bodies core frame) in
     let canvas_painted, canvas_windows = List.fold_left (fun (painted, windows) (leaf : Pxui_shell.Layout.leaf) -> match leaf.panel with
       | Canvas key ->
           let x, y, w, h = leaf.body in
           let scene = Option.fold ~none:[] ~some:(fun picture -> picture.scene) (List.assoc_opt key canvases) in
           let root = List.find_map (fun (root, (panel, p)) ->
-            if panel = Pxui_shell.Layout.Canvas key && p = Some leaf.path then Some root else None) core.Core.pane_keys in
+            if panel = Pxui_shell.Layout.Canvas key && p = Some leaf.path then Some root else None) core.Core_model.pane_keys in
           let picture = [Scene.clip ~at:(x, y) ~w ~h [Scene.translate x y scene]] in
           if leaf.floating then painted, (root, picture) :: windows
           else picture :: painted, windows
-      | _ -> painted, windows) ([], []) (Core.geometry core core.Core.workspace frame).leaves in
+      | _ -> painted, windows) ([], []) (Core_shell.geometry core core.Core_model.workspace frame).leaves in
     let under key = Option.value ~default:[] (List.assoc_opt (Some key) (canvas_windows @ windows)) in
     Scene.clear background :: List.concat (List.rev (canvas_painted @ painted))
     @ guides
-    @ Core.machinery ~under core ~all_ui_visible:true
+    @ Core_host.machinery ~under core ~all_ui_visible:true

@@ -2,7 +2,11 @@ open Core_model
 open Rays
 open Sop
 open Editor_document
+open Core_text
 open Core_reduce
+open Core_inspect
+open Core_list
+open Core_panes
 
 (* Environment-owned scene edits (camera bookkeeping, a camera following the viewport): view
    state, never an undo entry.  [`Reset] starts the history, [`Amend] folds into the present

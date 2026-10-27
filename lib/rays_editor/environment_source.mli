@@ -1,5 +1,5 @@
 (* Private editor environment interface. *)
-include module type of struct include Environment_model end
+open Environment_model
 
 val open_import :
   'a t -> ('b, 'c) Core_model.update -> 'a t * ('b, 'c) Core_model.update

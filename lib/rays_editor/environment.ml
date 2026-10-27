@@ -4,21 +4,23 @@ open Editor_document
 open Sop
 open World_map
 open Environment_source
+open Environment_model
+open Environment_view
 
 let update_with value frame ~inspector =
   let value = follow_focus value frame in
-  let ui = value.core.Core.ui in
+  let ui = value.core.Core_model.ui in
   let raw_frame = frame and extra, frame = V.begin_frame value.extra frame in
   let visible = V.ui_visible value.control in
   let camera_panel () = V.panel ui ~control:value.control ~camera:value.camera
       ~extra ~inspector in
   let view_handles ui ~selected ~space ~bounds =
     (* a handle is where the picture shows its point: in the view's film, not its pane *)
-    V.handles ui ~selected ~scene:(Core.scene value.core) ~space (view_camera value)
+    V.handles ui ~selected ~scene:(Core_inspect.scene value.core) ~space (view_camera value)
       extra ~bounds:(V.film extra ~key:(focus_key value) bounds) in
   let _,lowered=value.core.doc.workspace in
   Flow_native.Workspace_images.bind value.host.images lowered;
-  let image_gpu=Flow_native.Workspace_gpu.config ~fast:(Editor_document.Contexts.fast value.core.doc) value.host.gpu and live={(Flow_native.Live_frame.of_frame frame) with t=Timeline.time(Core.timeline value.core)}in
+  let image_gpu=Flow_native.Workspace_gpu.config ~fast:(Editor_document.Contexts.fast value.core.doc) value.host.gpu and live={(Flow_native.Live_frame.of_frame frame) with t=Timeline.time(Core_list.timeline value.core)}in
   let image_errors=ref [] in
   let preview image=match Flow_native.Workspace_images.image ~gpu:image_gpu value.host.images ~state:value.core.cook.state ~live lowered.plan image with
     |Ok _->()|Error diagnostic->image_errors:=Diagnostic.to_string diagnostic:: !image_errors in
@@ -54,7 +56,7 @@ let update_with value frame ~inspector =
   let value, update = open_import value update in
   let value, update = reload_source value update ~now:frame.input.t in
   let focused = follow_focus { value with core = update.core } frame in
-  let core = update.core and panes = Core.panes update.core frame in
+  let core = update.core and panes = Core_shell.panes update.core frame in
   let control, camera, requests, extra, inspected = match update.panel with
     | Some (control, camera, requests, extra, inspected) ->
         control, (if focused.viewing <> value.viewing then focused.camera else camera), requests, extra, Some inspected
@@ -75,23 +77,23 @@ let update_with value frame ~inspector =
   (* Command-S with a draft in a text pane applies it first; one that does not check keeps the
      save waiting, since the file would not have what the pane shows *)
   let core, source = if not (List.mem Leader.Save_source update.actions) then core, value.source else
-    match Core.apply_drafts ?except:value.refused core with
+    match Core_text.apply_drafts ?except:value.refused core with
     | Ok core -> save_source core value.source (V.section camera extra)
     | Error core ->
-        { core with Core.notice = Some (Core.Refusal,
+        { core with Core_model.notice = Some (Core_model.Refusal,
             "Not saved: the text pane's draft does not check · fix or discard it, then save") }, value.source in
   let value = if source != value.source then { value with held = None } else value in
   let area = if visible then panes.view
     else 0, 0, (fst frame.input.size), (snd frame.input.size) in
   (* Latch the World operation and target at the owned press. Movement and
      the final release position are reduced before sealing its history. *)
-  let seal core = { core with Core.history = Editor_core.History.seal core.Core.history } in
+  let seal core = { core with Core_model.history = Editor_core.History.seal core.Core_model.history } in
   let world_drag = if update.loaded_view <> None
-      || core.Core.level <> value.core.Core.level
-      || core.Core.map_view <> value.core.Core.map_view
+      || core.Core_model.level <> value.core.Core_model.level
+      || core.Core_model.map_view <> value.core.Core_model.map_view
       || List.exists (function Leader.Undo | Redo | Hide_ui -> true | _ -> false) update.actions
     then None else value.world_drag in
-  let modifiers = ref (Input.keys_before ~previous:value.core.Core.held_keys
+  let modifiers = ref (Input.keys_before ~previous:value.core.Core_model.held_keys
     ~held:update.input.input.keys update.input.input.events) in
   let core, world_drag, events, consumed = List.fold_left
       (fun (core, drag, events, consumed) event ->
@@ -125,30 +127,30 @@ let update_with value frame ~inspector =
          | _ -> None, clicks)
     | Pointer_cancelled Input.LeftButton | Focus_lost -> None, clicks
     | _ -> press, clicks) (value.pick_press, []) input.input.events in
-  let core = if core.Core.map_view then core else
+  let core = if core.Core_model.map_view then core else
     List.fold_left (fun core at ->
       let film = V.film extra ~key:(focus_key focused) area in
       let _, _, w, h = film in
       if w <= 0 || h <= 0 then core else
       let picking = { focused with core; camera; extra } in
       match V.pick_ray ~viewport:film (view_camera picking) at with
-      | Some (origin, direction) -> Core.pick ?view:focused.viewing ~alt:(List.mem Input.Alt !modifiers) core ~origin ~direction
+      | Some (origin, direction) -> Core_host.pick ?view:focused.viewing ~alt:(List.mem Input.Alt !modifiers) core ~origin ~direction
       | None -> core) core (List.rev clicks) in
   (* a payload carried over a viewport: the surface under the pointer is the place *)
-  let core = match Core.carry_viewport core with
-    | Some key when not core.Core.map_view ->
-        (match List.assoc_opt key (Core.view_bodies core raw_frame) with
+  let core = match Core_host.carry_viewport core with
+    | Some key when not core.Core_model.map_view ->
+        (match List.assoc_opt key (Core_shell.view_bodies core raw_frame) with
          | Some bounds ->
              let picking = { focused with core; camera; extra } in
              let film = V.film extra ~key:(look_key picking key) bounds in
              let _, _, w, h = film in
              if w <= 0 || h <= 0 then core else
              (match V.pick_ray ~viewport:film (camera_of picking key) raw_frame.input.pointer with
-              | Some (origin, direction) -> Core.carry_over_surface ~view:key core ~origin ~direction
+              | Some (origin, direction) -> Core_host.carry_over_surface ~view:key core ~origin ~direction
               | None -> core)
          | None -> core)
     | _ -> core in
-  let camera, extra = if core.Core.map_view then camera, V.release extra
+  let camera, extra = if core.Core_model.map_view then camera, V.release extra
     else V.navigate ~area control camera extra core ~raw_frame ~input in
   let camera, render_status = match update.framed with
     | Some (Some (min, max)) ->
@@ -165,10 +167,10 @@ let update_with value frame ~inspector =
       | Focus_lost -> true | _ -> false in
   let core = if not (Frame.mouse_down Input.LeftButton raw_frame)
       || Frame.has_event ends_pointer raw_frame || Frame.has_event ends_pointer update.input
-    then { core with Core.history = Editor_core.History.seal ~gesture_only:true core.Core.history }
+    then { core with Core_model.history = Editor_core.History.seal ~gesture_only:true core.Core_model.history }
     else core in
   let live = world_drag <> None
-    || Timeline.mode (Core.timeline core) = Timeline.Playing in
+    || Timeline.mode (Core_list.timeline core) = Timeline.Playing in
   let baked_from = bake_world ~previous:value.baked_from core ~live in
   let baked = Option.map snd baked_from in
   let baked_views = List.filter_map (fun key ->
@@ -179,11 +181,11 @@ let update_with value frame ~inspector =
   let baked_views = if List.length baked_views = List.length value.baked_views
       && List.for_all2 (fun (k, (_, b)) (k', (_, b')) -> k = k' && b == b') baked_views value.baked_views
     then value.baked_views else baked_views in
-  let time = Timeline.time (Core.timeline core) in
+  let time = Timeline.time (Core_list.timeline core) in
   let input = {core.live_frame with Input.t = time;
-    frame = Int64.to_int (Timeline.frame (Core.timeline core))} in
+    frame = Int64.to_int (Timeline.frame (Core_list.timeline core))} in
   let scene, context_error = match value.resolved with
-    | Some (doc, at, scene) when same_context doc core.Core.doc && Input.equal at input -> scene, value.context_error
+    | Some (doc, at, scene) when same_context doc core.Core_model.doc && Input.equal at input -> scene, value.context_error
     | _ ->
         let previous = match value.resolved with
           | Some (doc, _, scene) when same_context doc core.doc -> Some scene
@@ -202,7 +204,7 @@ let update_with value frame ~inspector =
         let input = {input with Input.size = (w, h)} in
         let drawing = Option.bind core.doc.Document.shell (fun shell -> List.assoc_opt key shell.canvases) in
         let _, lowered = core.doc.workspace in
-        let preview = core.Core.canvas_viewed in
+        let preview = core.Core_model.canvas_viewed in
         let drawing = match preview with
           | Some (ty, id) when ty = Flow.Ty.drawing -> Some (Flow.Eval.Deferred (ty, id))
           | _ -> drawing in
@@ -251,11 +253,11 @@ let update_with value frame ~inspector =
                     | _ -> p) previous in
                   (key, Option.value ~default:{size = (w, h); dynamic; plan = lowered.plan; scene = []; prepared = None; preview} previous) :: pictures,
                   Some (Diagnostic.to_string d)))
-    | _ -> pictures, error) ([], context_error) (Core.geometry core core.workspace raw_frame).leaves in
+    | _ -> pictures, error) ([], context_error) (Core_shell.geometry core core.workspace raw_frame).leaves in
   let rendered, views, drawn,texture_errors = compose { value with core } { update with core } ~baked ~baked_views ~scene in
   let context_error=if texture_errors=[] then context_error else Some(String.concat "; " texture_errors)in
   let rendering = {focused with core; extra; camera; rendered; views} in
-  let bodies = if V.ui_visible control then Core.view_bodies core raw_frame
+  let bodies = if V.ui_visible control then Core_shell.view_bodies core raw_frame
     else ["@hidden", (0, 0, (fst raw_frame.input.size), (snd raw_frame.input.size))] in
   let extra = V.render extra ~pixel_scale:raw_frame.pixel_scale ~focus:(Some (focus_key rendering))
     (List.filter_map (fun (key, bounds) ->
@@ -263,32 +265,32 @@ let update_with value frame ~inspector =
         match List.assoc_opt key views with Some scene -> Some scene | None -> rendered in
       Option.map (fun scene ->
         key, V.film extra ~key:(look_key rendering key) bounds, camera_of rendering key, scene) scene) bodies) in
-  let core = { core with Core.view_tools = V.header_tools extra } in
+  let core = { core with Core_model.view_tools = V.header_tools extra } in
   (* what the panes draw over a view: the gate where it is not the whole pane, and the
      selected object's box in the focused view *)
   let core = { core with
-    Core.gates = List.filter_map (fun (key, bounds) ->
+    Core_model.gates = List.filter_map (fun (key, bounds) ->
       let film = V.film extra ~key:(look_key rendering key) bounds in
       if film = bounds || key = "@hidden" then None else Some (key, film)) bodies;
-    selected_box = Option.bind (Core.selected_bounds core) (fun (world, box, name) ->
+    selected_box = Option.bind (Core_list.selected_bounds core) (fun (world, box, name) ->
       let key = focus_key rendering in
       Option.bind (List.assoc_opt key bodies) (fun bounds ->
         Option.map (fun rect -> key, rect, name)
           (V.screen_box (camera_of rendering key) ~bounds:(V.film extra ~key:(look_key rendering key) bounds) ~world box))) } in
   (* the render clock: a restart of the samples starts it, reaching the cap stops it *)
-  let core = { core with Core.traces = List.filter_map (fun (key, _) ->
+  let core = { core with Core_model.traces = List.filter_map (fun (key, _) ->
     Option.map (fun (film, samples, cap, bounces) ->
       let now = frame.input.t in
-      let seconds, since = match List.assoc_opt key value.core.Core.traces with
-        | Some (t : Core.trace) when samples >= t.samples && t.film = film ->
+      let seconds, since = match List.assoc_opt key value.core.Core_model.traces with
+        | Some (t : Core_model.trace) when samples >= t.samples && t.film = film ->
             (if t.samples >= cap then t.seconds else now -. t.since), t.since
         | _ -> 0., now in
-      key, { Core.film; samples; cap; bounces; seconds; since })
+      key, { Core_model.film; samples; cap; bounces; seconds; since })
       (V.trace extra ~key:(look_key rendering key))) bodies } in
   let map = match baked, value.map with
-    | Some baked, Some (source, image) when baked == source || not core.Core.map_view ->
+    | Some baked, Some (source, image) when baked == source || not core.Core_model.map_view ->
         ignore baked; Some (source, image)
-    | Some baked, previous when core.Core.map_view ->
+    | Some baked, previous when core.Core_model.map_view ->
         let width, height, rgba = map_rgba baked in
         (match Image.upload_rgba ?into:(Option.map snd previous) ~width ~height ~rgba () with
          | Ok image -> Some (baked, image)
@@ -326,9 +328,9 @@ let scene value frame =
     ~background:value.background ~rendered:value.rendered ~views:value.views
     ~focused:(focused_image value)
     ~camera:(view_camera value) ~camera_of:(camera_of value) ~paint_view:(paint_view value)
-    ~guides:(fun bounds -> if value.core.Core.map_view then [] else
-      V.guides ~scene:(Core.scene value.core)
-      ~selected:(Core.selected_node value.core) ~space:(Core.space value.core)
+    ~guides:(fun bounds -> if value.core.Core_model.map_view then [] else
+      V.guides ~scene:(Core_inspect.scene value.core)
+      ~selected:(Core_list.selected_node value.core) ~space:(Core_list.space value.core)
       (view_camera value) value.extra ~pane:bounds
       ~bounds:(V.film value.extra ~key:(focus_key value) bounds))
     ~cache:value.hidden_scene_cache value.core frame
@@ -351,24 +353,24 @@ let crash_dump value directory =
       "level: %s\nprojection: %s\npane graph: %s\ngraph panels: %s\nwindows: %s\npanels: %s\nroute: %s\ntext: %s\nmap view: %b\ngraph pan: %b\nguide: %b\nkey hud: %s\nselected: %s\nscope selected: %s\nfocus: %s\nprompt: %s\n\
        undo: %s (%d entries)\nredo: %s\ncook: %s\nedit error: %s\nrenderer: %s\nlive scene: %s\nautosave: %s\n\
        load document.rays with / b (workspace documents only) after copying it to %s\n"
-      (Core.level_name core)
-      (match Core.projection core with Core.List_view -> "list"
+      (Core_status.level_name core)
+      (match Core_panes.projection core with Core_model.List_view -> "list"
         | Graph_view -> "graph" | Text_view -> "text")
-      (Option.value ~default:"-" (Core.graph_name core))
-      (Core.graph_panels core) (Core.windows core) (Core.panels_line core)
-      (Core.route core)
+      (Option.value ~default:"-" (Core_panes.graph_name core))
+      (Core_panes.graph_panels core) (Core_panes.windows core) (Core_panes.panels_line core)
+      (Core_panes.route core)
       (Text_pane.summary core.text)
       core.map_view (Pxui_graph.Scope.Private.grabbed core.scope_view) core.guide (Option.fold ~none:"-" ~some:fst core.hud)
       (Option.fold ~none:"none" ~some:(fun node ->
         Printf.sprintf "%s (#%d, %s)" (Node.label node) (Node.id node) (Node.operation node))
-        (Core.selected_node core))
+        (Core_list.selected_node core))
       (match Pxui_graph.Scope.selected core.scope_view with
        | [] -> "-"
        | paths -> String.concat ", " (List.map (String.concat "/") paths))
-      (Leader.pane_name core.focus) (Core.prompt_name core)
+      (Leader.pane_name core.focus) (Core_status.prompt_name core)
       (Editor_core.History.label history) (Editor_core.History.depth history)
       (Option.value ~default:"-" (Editor_core.History.redo_label history))
-      (Core.status_text core)
+      (Core_status.status_text core)
       (Option.value ~default:"-" core.edit_error)
       (Option.value ~default:"-" (V.render_status value.extra))
       (Option.value ~default:"-" value.context_error)
@@ -383,7 +385,7 @@ let close value =
   Option.iter (fun (_, image) -> ignore(Image.destroy image)) value.map;
   Flow_native.Workspace_host.close value.host;
   V.close value.extra;
-  Core.close value.core
+  Core_host.close value.core
 
 let run ?inputs ?name ?presets ?factories ?gpu_owner ?settings ?lights
     ?camera ?background ?seed ?grain ?domains ?max_entries ?max_payload_bytes

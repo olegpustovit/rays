@@ -9,7 +9,7 @@ module V = Viewport
 type layout = Pxui_shell.Layout.t
 
 type 'prepared t = {
-  core : 'prepared Core.t;
+  core : 'prepared Core_model.t;
   camera : V.camera;  (* the orbit of the focused viewport *)
   cameras : (string * V.camera) list;  (* the orbits of the other viewports, by key *)
   viewing : string option;  (* the viewport [camera] belongs to *)
@@ -79,7 +79,7 @@ let create ?inputs ?name ?presets ?factories ?gpu_owner
         "file:" ^ file in
   let host=Flow_native.Workspace_host.create ?seed ?grain ?domains ?gpu:gpu_owner () in
   let gpu=Flow_native.Workspace_gpu.config host.gpu in
-  let created=Core.create ~gpu ?settings
+  let created=Core_setup.create ~gpu ?settings
       ~seed_scene:(fun factories scene ->
         V.seed_scene camera factories (seed_lights lights scene))
       ~name ~state_key ?presets ?factories ?seed ?grain ?domains
@@ -89,7 +89,7 @@ let create ?inputs ?name ?presets ?factories ?gpu_owner
   | Ok core -> Ok (
     let core, extra = V.init core camera in
     let core = match source with
-      | Some source -> { core with Core.file = Filename.basename (Source_file.file source) }
+      | Some source -> { core with Core_model.file = Filename.basename (Source_file.file source) }
       | None -> core in
     { core; camera; control = V.create_control (); draw;
       rendered = None; views = []; drawn = Document.Int_map.empty; composed = None;
@@ -98,50 +98,50 @@ let create ?inputs ?name ?presets ?factories ?gpu_owner
       background; extra; hidden_scene_cache = None; world_drag = None; pick_press = None; source; held = None; open_dialog = None; refused = None; opened = core.doc; state_owned = false; cameras = []; viewing = None;
       state_checked = neg_infinity; saved_doc = core.doc; saved_view = V.section camera extra; state_error = None })
 
-let document value = Core.document value.core
-let prepared value = Core.prepared value.core
+let document value = Core_inspect.document value.core
+let prepared value = Core_list.prepared value.core
 let camera value = value.camera
 let extra value = value.extra
-let timeline value = Core.timeline value.core
-let selected_node value = Core.selected_node value.core
-let displayed_node value = Core.displayed_node value.core
-let panes value frame = Core.panes value.core frame
-let can_undo value = Editor_core.History.can_undo value.core.Core.history
-let can_redo value = Editor_core.History.can_redo value.core.Core.history
+let timeline value = Core_list.timeline value.core
+let selected_node value = Core_list.selected_node value.core
+let displayed_node value = Core_list.displayed_node value.core
+let panes value frame = Core_shell.panes value.core frame
+let can_undo value = Editor_core.History.can_undo value.core.Core_model.history
+let can_redo value = Editor_core.History.can_redo value.core.Core_model.history
 let undo_label value = if can_undo value
-  then Some (Editor_core.History.label value.core.Core.history) else None
-let redo_label value = Editor_core.History.redo_label value.core.Core.history
-let workspace value = fst value.core.Core.doc.workspace
-let probe value zone = Layout_by_path.Path_map.find_opt zone value.core.Core.probes
+  then Some (Editor_core.History.label value.core.Core_model.history) else None
+let redo_label value = Editor_core.History.redo_label value.core.Core_model.history
+let workspace value = fst value.core.Core_model.doc.workspace
+let probe value zone = Layout_by_path.Path_map.find_opt zone value.core.Core_model.probes
 let set_probe value zone index =
-  { value with core = { value.core with Core.probes = Layout_by_path.Path_map.add zone index value.core.Core.probes } }
+  { value with core = { value.core with Core_model.probes = Layout_by_path.Path_map.add zone index value.core.Core_model.probes } }
 let node_box value path =
   Option.map (fun (x, y, w, h) -> int_of_float x, int_of_float y, int_of_float w, int_of_float h)
-    (Pxui_graph.Scope.Private.box_of value.core.Core.scope_view path)
-let edit value op = Result.map (fun core -> { value with core }) (Core.syntax_edit value.core op)
+    (Pxui_graph.Scope.Private.box_of value.core.Core_model.scope_view path)
+let edit value op = Result.map (fun core -> { value with core }) (Core_host.syntax_edit value.core op)
 
-let edit_phases value = value.core.Core.edit_phases
-let carrying value = Option.map (fun (c : _ Core.carry) -> c.payload.Carry.kind, c.payload.value) value.core.Core.carry
-let carry_line value = Option.map Core.carry_line value.core.Core.carry
-let level value = match value.core.Core.level with
+let edit_phases value = value.core.Core_model.edit_phases
+let carrying value = Option.map (fun (c : _ Core_model.carry) -> c.payload.Carry.kind, c.payload.value) value.core.Core_model.carry
+let carry_line value = Option.map Core_status.carry_line value.core.Core_model.carry
+let level value = match value.core.Core_model.level with
   | Document.Scene -> None
   | Inside id -> Some (Option.fold ~none:"" ~some:Node.label
-      (Edit_graph.find (Core.scene value.core) ~node_id:id))
-let scene_document value = Core.scene value.core
+      (Edit_graph.find (Core_inspect.scene value.core) ~node_id:id))
+let scene_document value = Core_inspect.scene value.core
 let same_context (a : Document.t) (b : Document.t) =
   a.scene.graph.geometry == b.scene.graph.geometry && a.scene_drives == b.scene_drives
     && a.scene_textures == b.scene_textures
 let resolved_scene value = match value.resolved with
-  | Some (doc, _, scene) when same_context doc value.core.Core.doc -> scene
-  | _ -> Core.scene value.core
+  | Some (doc, _, scene) when same_context doc value.core.Core_model.doc -> scene
+  | _ -> Core_inspect.scene value.core
 let lights value = Objects.lights ~render:true (resolved_scene value)
 let world value = value.baked
 let objects value = List.map (fun (matrix, (piece : _ Cook.piece)) ->
-    matrix, piece.prepared) (Core.placed_pieces ~render:true value.core)
+    matrix, piece.prepared) (Core_host.placed_pieces ~render:true value.core)
 
-let settings value = Core.settings value.core
+let settings value = Core_list.settings value.core
 let set_settings value settings =
-  { value with core = Core.set_settings value.core settings }
+  { value with core = Core_host.set_settings value.core settings }
 
 (* the viewport the focus is in; the default layout's one before any focus *)
 let focus_key value = Option.value value.viewing ~default:"main"
@@ -163,11 +163,11 @@ let view_camera value = camera_of value (focus_key value)
    the orbit it last had, else from a copy of the one in use. *)
 let follow_focus value frame =
   let core = value.core in
-  let g = Core.geometry core core.Core.workspace frame in
+  let g = Core_shell.geometry core core.Core_model.workspace frame in
   let keys = List.filter_map (fun (leaf : Pxui_shell.Layout.leaf) -> match leaf.panel with
     | View key -> Some key | _ -> None) g.leaves in
   let value = { value with cameras = List.filter (fun (key, _) -> List.mem key keys) value.cameras } in
-  match Core.active_view core g with
+  match Core_shell.active_view core g with
   | Some { panel = View key; _ } when Some key <> value.viewing ->
       (match value.viewing with
        | None ->
@@ -194,7 +194,7 @@ let focused_image value = match value.viewing with
   | None -> value.rendered
 
 let film value frame =
-  let (x, y, _, _) as pane = (Core.panes value.core frame).view in
+  let (x, y, _, _) as pane = (Core_shell.panes value.core frame).view in
   let fx, fy, w, h = V.film value.extra ~key:(focus_key value) pane in
   fx - x, fy - y, w, h
 
@@ -211,12 +211,12 @@ let refresh_hidden value frame =
 (* Recompose when a cook, the scene, or the World changed. Each object's
    drawing is reused while its graph and prepared value are physically the same, so
    moving an object only re-places it. *)
-let composition_key core scene = scene, core.Core.level,
-  (match core.Core.doc.Document.shell with Some shell -> shell.views | None -> [])
+let composition_key core scene = scene, core.Core_model.level,
+  (match core.Core_model.doc.Document.shell with Some shell -> shell.views | None -> [])
 
-let compose value (update : (_, _) Core.update) ~baked ~baked_views ~scene =
-  let live={update.core.live_frame with t=Timeline.time(Core.timeline update.core);
-    frame=Int64.to_int(Timeline.frame(Core.timeline update.core))}in
+let compose value (update : (_, _) Core_model.update) ~baked ~baked_views ~scene =
+  let live={update.core.live_frame with t=Timeline.time(Core_list.timeline update.core);
+    frame=Int64.to_int(Timeline.frame(Core_list.timeline update.core))}in
   let lowered=snd update.core.doc.workspace in
   Flow_native.Workspace_images.bind value.host.images lowered;
   let plan=lowered.plan in
@@ -236,7 +236,7 @@ let compose value (update : (_, _) Core.update) ~baked ~baked_views ~scene =
       || value.rendered = None)
   then value.rendered, value.views, value.drawn,errors
   else
-    let placed = Core.placed_pieces ~view:`All update.core in
+    let placed = Core_host.placed_pieces ~view:`All update.core in
     let drawn = List.fold_left (fun drawn (_, (piece : _ Cook.piece)) ->
         let texture=Document.Int_map.find_opt piece.id textures in
         match Document.Int_map.find_opt piece.id value.drawn with
@@ -248,13 +248,13 @@ let compose value (update : (_, _) Core.update) ~baked ~baked_views ~scene =
             let scene=Option.fold ~none:scene ~some:(fun texture->Scene3.Private.with_texture(Scene3.textured texture)scene)texture in
             Document.Int_map.add piece.id (piece.graph, piece.prepared, scene,texture) drawn)
         Document.Int_map.empty placed in
-    let waiting = placed = [] && Core.geometry_objects update.core <> []
-        && Core.pieces update.core = [] in
-    let ghost id = match update.core.Core.level with
-      | Document.Inside open_id -> Core.kind update.core open_id = Some "geometry"
+    let waiting = placed = [] && Core_list.geometry_objects update.core <> []
+        && Core_list.pieces update.core = [] in
+    let ghost id = match update.core.Core_model.level with
+      | Document.Inside open_id -> Core_inspect.kind update.core open_id = Some "geometry"
           && id <> open_id
       | Scene -> false in
-    let compose_pieces ?(world = baked) view pieces = V.compose ~scene:(Core.scene_for_view ~scene ~view update.core)
+    let compose_pieces ?(world = baked) view pieces = V.compose ~scene:(Core_host.scene_for_view ~scene ~view update.core)
       ~world
       (List.map (fun (matrix, (piece : _ Cook.piece)) ->
          let _, _, rendered,_ = Document.Int_map.find piece.id drawn in
@@ -262,7 +262,7 @@ let compose value (update : (_, _) Core.update) ~baked ~baked_views ~scene =
     (* a viewport over another scene instance: its own objects, its own World.  Viewports over
        the very same instance with the same World show one picture: it is composed once, so
        the renderer sees one scene and can give them one tracer *)
-    let instance_of key = Option.bind update.core.Core.doc.Document.shell (fun shell ->
+    let instance_of key = Option.bind update.core.Core_model.doc.Document.shell (fun shell ->
       Option.map (fun (source : Document.preview_source) -> source.instance)
         (List.assoc_opt key shell.preview_sources)) in
     let views = if waiting then [] else List.rev_map (fun (key, scene, _, _) -> key, scene)
@@ -277,10 +277,10 @@ let compose value (update : (_, _) Core.update) ~baked ~baked_views ~scene =
         let scene = match twin with
           | Some scene -> scene
           | None ->
-              let own = match update.core.Core.doc.Document.shell with
+              let own = match update.core.Core_model.doc.Document.shell with
                 | Some shell -> List.mem_assoc key shell.views | None -> false in
               let view = if own then `Only key else `Primary in
-              compose_pieces ~world:world view (Core.placed_pieces ~view update.core) in
+              compose_pieces ~world:world view (Core_host.placed_pieces ~view update.core) in
         (key, scene, instance, world) :: composed) [] (view_keys update.core)) in
-    (if waiting then None else Some (compose_pieces `Primary (Core.placed_pieces update.core))),
+    (if waiting then None else Some (compose_pieces `Primary (Core_host.placed_pieces update.core))),
     views, drawn,errors

@@ -3,6 +3,10 @@ open Rays
 open Sop
 open Editor_document
 open Core_host
+open Core_inspect
+open Core_panes
+open Core_shell
+open Core_status
 
 let inspect_panel ~image ~camera_panel ~inspector_visible ~unchanged ~resized
     ~geometry:(g : Pxui_shell.Layout.geometry) ~ui

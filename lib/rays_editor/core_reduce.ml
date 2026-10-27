@@ -9,6 +9,7 @@ open Core_list
 open Core_inspect
 open Core_actions
 open Core_shell
+open Core_scope
 open Core_text
 open Core_carry
 

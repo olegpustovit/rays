@@ -1,5 +1,5 @@
 (* Private editor environment interface. *)
-include module type of struct include Environment_view end
+open Environment_view
 
 module V = Viewport
 type layout = Pxui_shell.Layout.t
