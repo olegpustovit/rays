@@ -1059,3 +1059,10 @@ row-major, three spare); the normal is the transpose of that matrix applied to t
 registers. The record's ninth field `instance` is the TLAS instance index (0 for a flat scene's triangles, -1 for a
 sphere or a miss), and `prim` is the primitive within its prototype. `Flow_sop.Trace_scene.register_instances` is the
 CPU host. Motion and curves are not yet part of the op.
+
+## Film accumulation (P8.S2)
+
+A read-modify-write float film needs no new sink: a one-output kernel whose input 0 is `~bound` to the film buffer and
+whose output goes `~into` that same buffer reads and writes only its own pixel. A second kernel divides by the sample
+count and `Image_sink.convert` makes RGBA8 (ties to even). `lib/flow_gpu/test_film.ml` runs four accumulations and the
+resolve on Metal and checks every pixel exactly.
