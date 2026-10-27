@@ -591,11 +591,29 @@ let cached_digest (checked : Workspace.t) extra compute =
       Mutex.protect digest_lock (fun () -> Lru.Identity_list.add digest_cache key digest);
       digest
 
-let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) ?(gpu=Flow_ir.Gpu.default) ?(strict_body = false) ?(defer_body_errors = false) ?(kernel_bindings = []) ?(compiled_ids = Instance_path.Map.empty)
-    ?(sites = []) ?inputs checked =
-  Phase_timer.measure "lower" (fun () ->
-  try
-    let image_origins = Hashtbl.create 16 in
+(* One lowering of a checked workspace: the qualified plan, the per-kind node builders and the
+   zone, kernel and preview machinery over it. [lower_checked] recurses for cooked calls and nested
+   bodies, so it arrives as a parameter. *)
+module Lowerer (P : sig
+  val factories : Edit.factory list
+  val provenance_tags : bool
+  val reference : bool
+  val gpu : Flow_ir.Gpu.config
+  val strict_body : bool
+  val defer_body_errors : bool
+  val kernel_bindings : (E.fn * int) list
+  val compiled_ids : int Instance_path.Map.t
+  val sites : Workspace.path list
+  val inputs : (string * (string * Eval.value) list) list option
+  val checked : Workspace.t
+  val lower_checked :
+    factories:Edit.factory list -> ?provenance_tags:bool -> ?reference:bool -> ?gpu:Flow_ir.Gpu.config ->
+    ?strict_body:bool -> ?defer_body_errors:bool -> ?kernel_bindings:(E.fn * int) list ->
+    ?compiled_ids:int Instance_path.Map.t -> ?sites:Workspace.path list ->
+    ?inputs:(string * (string * Eval.value) list) list -> Workspace.t -> (t, Diagnostic.t) result
+end) = struct
+  open P
+    let image_origins = Hashtbl.create 16
     let observe producer residual =
       let view = E.Residual.residual_view residual in
       let key = view.instance, view.site, view.iter in
@@ -603,25 +621,25 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
         | None -> producer
         | Some (Some previous) when producer = Some previous -> producer
         | _ -> None in
-      Hashtbl.replace image_origins key origin in
+      Hashtbl.replace image_origins key origin
     let checked, evaluated = match Flow_ir.qualify_workspace ~record:true ?inputs ~observe ~gpu checked with
       | Ok evaluated -> evaluated
       | Error diagnostic when defer_body_errors -> raise (Diagnostic.Error diagnostic)
-      | Error diagnostic -> raise (Diagnostic.Error diagnostic) in
-    let profile = Flow_ir.Profile.create ~clock:Unix.gettimeofday in
+      | Error diagnostic -> raise (Diagnostic.Error diagnostic)
+    let profile = Flow_ir.Profile.create ~clock:Unix.gettimeofday
     (* Kernel bodies are cache inputs as well as their captures. The digest is
        lazy so ordinary catalog edits retain their existing pipeline counts.
        ponytail: the whole source invalidates kernels; narrow to body/defn cones
        if unrelated structural edits measurably recook them. *)
-    let kernel_source = lazy (cached_digest checked [] (fun () -> Context_kernel.kernel_source checked)) in
+    let kernel_source = lazy (cached_digest checked [] (fun () -> Context_kernel.kernel_source checked))
     let attribute_options = attribute_options
     and is_geometry_arrays = is_geometry_arrays
     and geometry_arrays_key = geometry_arrays_key
     and geometry_arrays_label = geometry_arrays_label
-    and geometry_arrays_data = geometry_arrays_data in
+    and geometry_arrays_data = geometry_arrays_data
     let geometry_arrays_node ?(strict_body=strict_body) ?host ?state ?elems ~operation ~args ~sources inputs =
       geometry_arrays_node ~profile ~strict_body ~reference ~approx:checked.approx ~kernel_source
-        ?host ?state ?elems ~operation ~args ~sources inputs in
+        ?host ?state ?elems ~operation ~args ~sources inputs
     let structural_node residual captures =
       let program=match Flow_ir.Core_lower.lower ~strict:true ~budget:32768 residual with
         |Ok program->program|Error name->fail "E_PACKED_FORM" ("Cooked selection cannot compile "^name^".") in
@@ -845,30 +863,30 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
             |_->error "E_DATA_SOURCE" "Cooked selection must return a geometry handle.") in
           (Result.map(fun(output:Sop.Session.output)->Sop.Node.Private.{payload=output.payload;
               instances=output.instances})result))) in
-      Sop.Node.Private.with_facts {(Sop.Node.facts node) with reads=["*"];writes=["*"]} node in
+      Sop.Node.Private.with_facts {(Sop.Node.facts node) with reads=["*"];writes=["*"]} node
     let attribute_node ?state ?elems ?selection ?default ?(owner=Rdk.Attribute.Point)
         ?(kind="vec3") ~name ~values ~sources inputs =
       attribute_node ~strict_body ~reference ~profile ~approx:checked.approx ~gpu ~kernel_source
-        ?state ?elems ?selection ?default ~owner ~kind ~name ~values ~sources inputs in
-    let group_data = group_data and attribute_data = attribute_data in
+        ?state ?elems ?selection ?default ~owner ~kind ~name ~values ~sources inputs
+    let group_data = group_data and attribute_data = attribute_data
     let group_node ?state ?elems ~args ~sources inputs =
       group_node ~strict_body ~reference ~profile ~approx:checked.approx ~kernel_source
-        ?state ?elems ~args ~sources inputs in
-    let plan = evaluated.plan in
+        ?state ?elems ~args ~sources inputs
+    let plan = evaluated.plan
     let external_kernel fn = List.find_map (fun (candidate,source) ->
-      if same_function candidate fn then Some source else None) kernel_bindings in
+      if same_function candidate fn then Some source else None) kernel_bindings
     let image_sites = Array.map (fun (node : E.node) ->
       if node.kind = "image/map" then Option.join
-        (Hashtbl.find_opt image_origins (node.inst, node.site, node.iter)) else None) plan.nodes in
+        (Hashtbl.find_opt image_origins (node.inst, node.site, node.iter)) else None) plan.nodes
     let ids = ref compiled_ids and site_table = Hashtbl.create 64
-    and site_list = ref (List.rev sites) and site_count = ref (List.length sites) in
-    List.iteri (fun i path -> Hashtbl.replace site_table path i) sites;
+    and site_list = ref (List.rev sites) and site_count = ref (List.length sites)
+    let () = List.iteri (fun i path -> Hashtbl.replace site_table path i) sites
     let site_index path = match Hashtbl.find_opt site_table path with
       | Some i -> i
       | None ->
           let i = !site_count in
           incr site_count; Hashtbl.add site_table path i;
-          site_list := path :: !site_list; i in
+          site_list := path :: !site_list; i
     let compiled_id (node : E.node) =
       let key = node.inst :: site_index node.site
         :: List.map (fun k -> -(k + 1)) node.iter in
@@ -876,17 +894,17 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
       | Some id -> id
       | None ->
           let id = Sop.Node.Private.fresh_id () in
-          ids := Instance_path.Map.add key id !ids; id in
-    let compiled = Array.make (Array.length plan.nodes) 0 in
+          ids := Instance_path.Map.add key id !ids; id
+    let compiled = Array.make (Array.length plan.nodes) 0
     let int_arg (n : E.node) k = match List.assoc_opt k n.args with
-      | Some (E.Int i) -> i | _ -> fail "E_LOWER" ("Zone node without " ^ k) in
+      | Some (E.Int i) -> i | _ -> fail "E_LOWER" ("Zone node without " ^ k)
     (* does an argument of a template node read [t] (not only its element)? *)
-    let reads_t = E.frame_dependent in
-    let templ = Array.make (Array.length plan.nodes) false in
-    Array.iter (fun (n : E.node) -> if is_zone n.kind then
-      for id = int_arg n "lo" to int_arg n "hi" - 1 do templ.(id) <- true done) plan.nodes;
+    let reads_t = E.frame_dependent
+    let templ = Array.make (Array.length plan.nodes) false
+    let () = Array.iter (fun (n : E.node) -> if is_zone n.kind then
+      for id = int_arg n "lo" to int_arg n "hi" - 1 do templ.(id) <- true done) plan.nodes
     (* what a zone reads: its collection and the outside geometry of its template *)
-    let zinfos = Hashtbl.create 8 in
+    let zinfos = Hashtbl.create 8
     let rec deps (n : E.node) =
       if is_zone n.kind then (match n.args with (_, E.Deferred ((Flow.Ty.Named "geometry"), src)) :: _ -> src | _ -> fail "E_LOWER" "Zone without geometry")
         :: (zinfo n).captures
@@ -930,20 +948,20 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
             kind = if n.kind = "zone/points" then Zone.Points else Zone.Pieces;
             key = (match List.assoc_opt "key" n.args with Some (E.Text k) -> Some k | _ -> None);
             base = 0; count = Atomic.make (-1); positions = Atomic.make [||] } in
-          Hashtbl.add zinfos n.id z; z in
-    let params_cache = Hashtbl.create 32 in
+          Hashtbl.add zinfos n.id z; z
+    let params_cache = Hashtbl.create 32
     let parameters factory =
       let key = Edit.factory_key factory in
       match Hashtbl.find_opt params_cache key with
       | Some parameters -> parameters
       | None ->
           let parameters = ok (Port.parameters (Edit.factory_fields factory)) in
-          Hashtbl.add params_cache key parameters; parameters in
+          Hashtbl.add params_cache key parameters; parameters
     (* a helper that names no context operator is its own specialization: shared across instances *)
     let def_context_use =
       let use = lazy (List.map (fun def -> def, Context_kernel.uses_context def) checked.defs)
       and lock = Mutex.create () in
-      fun () -> Mutex.protect lock (fun () -> Lazy.force use) in
+      fun () -> Mutex.protect lock (fun () -> Lazy.force use)
     let lisp_factory ?(functions = []) ?provenance (definition : Workspace.node_definition) =
       let declaration_source=lazy(cached_digest checked [definition] (fun () -> Context_kernel.declaration_source checked definition)) in
       let rec function_elements = function
@@ -1024,22 +1042,22 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
         ~inputs:(List.map (fun (s : Check.slot) -> match s.required,s.rest with
           |true,false->Edit.Required|false,false->Optional|true,true->Rest|false,true->Optional_rest)
           definition.slots)
-        construct in
-    let lisp_factories = List.map (fun definition -> lisp_factory definition) checked.nodes in
+        construct
+    let lisp_factories = List.map (fun definition -> lisp_factory definition) checked.nodes
     let find_factory key = match List.find_opt (fun factory ->
         Edit.factory_key factory = key) factories with
       | Some factory -> factory
       | None -> match List.find_opt (fun factory -> Edit.factory_key factory=key) lisp_factories with
           | Some factory -> factory
-          | None -> fail "E_LOWER" ("Linked catalog has no " ^ key) in
+          | None -> fail "E_LOWER" ("Linked catalog has no " ^ key)
     let pending = ref [] and provenance = ref Network.Int_map.empty and tags = ref 0
-    and zones = ref [] in
-    let prepared = Hashtbl.create 256 in
+    and zones = ref []
+    let prepared = Hashtbl.create 256
     let curve_points args = match List.assoc_opt "points" args with
       | Some (E.List values) -> Array.map (function
           | E.Vec3 (x, y, z) -> x, y, z
           | _ -> fail "E_LOWER" "sop/curve points must be vec3") values
-      | _ -> fail "E_LOWER" "sop/curve needs :points" in
+      | _ -> fail "E_LOWER" "sop/curve needs :points"
     (* B.F: a Lisp point deformer whose only input is another such deformer's single-consumer output
        reads that deformer's P values directly; the producer's own cook is skipped. *)
     let consumers = lazy (let counts = Array.make (Array.length plan.nodes) 0 in
@@ -1050,8 +1068,8 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
         | E.Record fields -> List.iter (fun (_, value) -> mark value) fields
         | _ -> () in
       Array.iter (fun (i : E.instance) -> mark i.result; List.iter (fun (_, value) -> mark value) i.inputs) plan.instances;
-      counts) in
-    let lisp_definition kind = List.find_opt (fun (d : Workspace.node_definition) -> d.kind.qualified = kind) checked.nodes in
+      counts)
+    let lisp_definition kind = List.find_opt (fun (d : Workspace.node_definition) -> d.kind.qualified = kind) checked.nodes
     let rec fused_view (n : E.node) = match lisp_definition n.kind with
       | Some d when not templ.(n.id) && Context_kernel.fusable d ->
           let slot = (List.hd d.slots).name in
@@ -1071,7 +1089,7 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
                      | None -> own)
                 | None -> own)
            | _ -> own)
-      | _ -> None in
+      | _ -> None
     let rec prepare (node : E.node) =
       match Hashtbl.find_opt prepared node.id with
       | Some p -> p
@@ -1370,23 +1388,23 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
             if plan.nodes.(id).kind = "zone/element" then
               Hashtbl.replace bound id (Zone.element_node element)
             else build ~outer bound id) z.order;
-        Hashtbl.find bound z.root in
+        Hashtbl.find bound z.root
     let contexts = List.map (fun (g : Workspace.graph) -> g.name, g.context)
-      checked.graphs in
+      checked.graphs
     let sop_instance (i : E.instance) =
       Option.fold ~none:false ~some:(fun context -> Ty.is_cooked (Flow.Context.result context))
-        (List.assoc_opt i.graph contexts) in
+        (List.assoc_opt i.graph contexts)
     (* every plan node gets its id up front, in plan order, so ids do not
        depend on which network asks first *)
-    Array.iter (fun (node : E.node) ->
+    let () = Array.iter (fun (node : E.node) ->
       if sop_instance plan.instances.(node.inst) && Ty.is_cooked node.ty then
-        compiled.(node.id) <- compiled_id node) plan.nodes;
+        compiled.(node.id) <- compiled_id node) plan.nodes
     (* volatile: live, or fed by a volatile node (plan order: inputs first).  A loop over geometry
        whose body reads [t] is live, and so are the template nodes its elements are copies of (a copy
        keeps the template's id, so the elements share one volatile slot per node) *)
-    let volatile_nodes = ref Network.Int_map.empty in
-    let volatile = Array.make (Array.length plan.nodes) false in
-    Array.iter (fun (node : E.node) ->
+    let volatile_nodes = ref Network.Int_map.empty
+    let volatile = Array.make (Array.length plan.nodes) false
+    let () = Array.iter (fun (node : E.node) ->
       if compiled.(node.id) <> 0
          && (List.exists (fun j -> volatile.(j)) (deps node)
               || (is_zone node.kind && (zinfo node).live)
@@ -1396,11 +1414,11 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
                         (match v with E.Fn _ -> reads_t v || E.state_dependent v | _ -> false)) node.args)) then begin
         volatile.(node.id) <- true;
         volatile_nodes := Network.Int_map.add compiled.(node.id) () !volatile_nodes
-      end) plan.nodes;
+      end) plan.nodes
     let compiled_context = Array.to_list compiled
       |> List.mapi (fun i id -> i, id)
       |> List.filter (fun (i, id) -> id <> 0 && not templ.(i))
-      |> List.fold_left (fun m (i, id) -> Network.Int_map.add i id m) Network.Int_map.empty in
+      |> List.fold_left (fun m (i, id) -> Network.Int_map.add i id m) Network.Int_map.empty
     let live_network network graph =
       let network = Network.with_states evaluated.states network |> Network.with_profile profile
         |> Network.with_reference reference |> Network.with_approx checked.approx in
@@ -1472,7 +1490,7 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
         if Edit.find graph ~node_id:p.node = None then drives
         else Port.Map.add Port.{node = p.node; path = p.field}
           p.value drives) Port.Map.empty (List.rev !pending) in
-      if Port.Map.is_empty drives then network else ok (Network.with_drives drives network) in
+      if Port.Map.is_empty drives then network else ok (Network.with_drives drives network)
     let build index (instance : E.instance) =
       let seen = Hashtbl.create 64 in
       let rec reach id =
@@ -1535,18 +1553,18 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
       let graph = match root with
         | Some id -> edit (Edit.set_root id graph) | None -> graph in
       {name = instance.graph; instance = index; default = instance.default;
-       network = live_network (Network.of_geometry graph) graph; root} in
+       network = live_network (Network.of_geometry graph) graph; root}
     let graphs = List.concat (List.mapi (fun index instance ->
       if sop_instance instance then [build index instance] else [])
-      (Array.to_list plan.instances)) in
-    Hashtbl.iter (fun _ (p : prepared) -> List.iter (fun (k : kernel_input) ->
+      (Array.to_list plan.instances))
+    let () = Hashtbl.iter (fun _ (p : prepared) -> List.iter (fun (k : kernel_input) ->
       if E.frame_dependent (E.Fn k.fn) || E.state_dependent (E.Fn k.fn)
           || List.exists (fun id -> volatile.(id)) k.sources then
-        volatile_nodes := Network.Int_map.add k.cid () !volatile_nodes) p.kernels) prepared;
+        volatile_nodes := Network.Int_map.add k.cid () !volatile_nodes) p.kernels) prepared
     (* Previewing an unused template must not allocate provenance or zones after
        this immutable lowering has been handed to the document. *)
-    Array.iter (fun (node : E.node) -> if compiled.(node.id) <> 0 && node.kind <> "zone/element"
-      && Ty.is_cooked node.ty then ignore (prepare node)) plan.nodes;
+    let () = Array.iter (fun (node : E.node) -> if compiled.(node.id) <> 0 && node.kind <> "zone/element"
+      && Ty.is_cooked node.ty then ignore (prepare node)) plan.nodes
     let preview ~node:target ~probes network =
       if target < 0 || target >= Array.length compiled || compiled.(target) = 0
         || List.compare_lengths probes plan.nodes.(target).iter <> 0 then None
@@ -1573,12 +1591,25 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
               Ok(Sop.Node.Private.adopt_identity ~source:node
                 (make_zone ~state:(E.fork_state state) ~outer:[] z (Sop.Node.Private.input_array node))))
               network.frame_nodes in
-          Network.with_frame_nodes frames network, root) outer in
-    Ok {gpu; graphs; factories=lisp_factories; compiled_ids = !ids; sites = List.rev !site_list;
+          Network.with_frame_nodes frames network, root) outer
+    let result = {gpu; graphs; factories=lisp_factories; compiled_ids = !ids; sites = List.rev !site_list;
         compiled = compiled_context;
         pending = List.rev !pending; provenance = !provenance; zones = List.rev !zones;
         volatile = !volatile_nodes; plan; image_sites; states = evaluated.states; evaluated;
         approx = checked.approx; approx_reasons = checked.approx_reasons; profile; preview}
+end
+
+let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) ?(gpu=Flow_ir.Gpu.default) ?(strict_body = false) ?(defer_body_errors = false) ?(kernel_bindings = []) ?(compiled_ids = Instance_path.Map.empty)
+    ?(sites = []) ?inputs checked =
+  Phase_timer.measure "lower" (fun () ->
+  try
+    let module L = Lowerer (struct
+      let factories = factories let provenance_tags = provenance_tags let reference = reference let gpu = gpu
+      let strict_body = strict_body let defer_body_errors = defer_body_errors let kernel_bindings = kernel_bindings
+      let compiled_ids = compiled_ids let sites = sites let inputs = inputs let checked = checked
+      let lower_checked = lower_checked
+    end) in
+    Ok L.result
   with Diagnostic.Error diagnostic -> Error diagnostic)
 
 let of_checked ~factories ?provenance_tags ?reference ?gpu ?compiled_ids ?sites ?inputs checked =
