@@ -10,7 +10,6 @@ lib/metal/gen/registry.ml	entries#1	428
 lib/ogpu_metal/backend.ml	create#1	1018
 lib/pxui/test_ui.ml	run#1	811
 lib/pxui/test_ui.ml	with_scale#1	476
-lib/pxui/ui.ml	text_area_submit#1	607
 lib/pxui_graph/test_pxui_graph.ml	scope_gestures#1	389
 lib/rays_editor/core_inspect.ml	workspace_inspector#1	518
 lib/rays_editor/environment.ml	update_with#1	303
