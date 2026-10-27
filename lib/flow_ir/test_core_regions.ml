@@ -117,6 +117,18 @@ let carried_loops () =
     "(let* [f (fn [a] (+ a t))] (map (fn [x] (fold [a x] [i (range 3)] (f a))) (array/range 7)))");
   verify "iterate-helper" (Test_program.compile
     "(let* [f (fn [a] (+ a t))] (map (fn [x] (iterate 3 x f)) (array/range 7)))");
+  let pcg = Test_program.compile
+    ~declarations:"(defn pcg :context value [(s : int)]
+        (let* [state (int/and (int/add (int/mul s 747796405) 2891336453) 4294967295)
+               word (int/and (int/mul (int/xor (int/shr state (int/add (int/shr state 28) 4)) state) 277803737) 4294967295)]
+          {:state state :word (int/xor (int/shr word 22) word)}))
+      (defn tint :context value [(c : vec3) (k : float)] [(* c.x k) (* c.y k) (+ c.z k)])"
+    "(map (fn [x] (let* [r (fold [r {:state (int/and (int x) 4294967295) :acc [t 1. 0.]}]
+        [i (range 3)] (let* [p (pcg r.state)]
+          {:state p.state :acc (tint r.acc (/ (float (int/and p.word 65535)) 65536.))}))]
+        (+ r.acc.x (+ r.acc.y r.acc.z)))) (array/range 65))" in
+  verify "defn-pcg-vec3" pcg;
+  assert (I.Packed.gpu_refusals ~fast:true ~fused:true pcg = []);
   verify "iterate-named-helper" (Test_program.compile
     ~declarations:"(defn step :context value [(a : float)] (+ a t))"
     "(map (fn [x] (iterate 3 x step)) (array/range 7))");
