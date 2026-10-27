@@ -435,6 +435,20 @@ let needs_integer (layout : Flow_ir.Kernel_layout.t) =
     layout.view.code;
   !needed
 
+let round_float e op value =
+  match op with
+  | Flow.Packed_ops.Floor -> ext e 8 [ value ]
+  | Ceil -> ext e 9 [ value ]
+  | _ ->
+      floating e 133 [ unary e Sign value; ext e 8 [ floating e 129 [ ext e 4 [ value ]; f e 0.5 ] ] ]
+
+let int_compare_opcode = function
+  | Flow.Packed_ops.Ilt -> 177
+  | Ile -> 179
+  | Igt -> 173
+  | Ige -> 175
+  | Ieq -> 170
+
 let emit_program e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers index =
   let words = e.words and float = e.float and boolean = e.boolean in
   let registers = Array.make (Array.length layout.view.code) 0 in
@@ -456,6 +470,19 @@ let emit_program e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers ind
   let int_of slot =
     if integer slot then registers.(slot)
     else match whole.(slot) with Some value -> value | None -> to_int (float_of slot)
+  in
+  let guard_condition guards =
+    List.map
+      (fun (slot, selected) ->
+        let value = truth e (float_of slot) in
+        if selected then value else result e boolean 168 [ value ])
+      guards
+    |> List.fold_left
+         (fun combined value ->
+           match combined with
+           | None -> Some value
+           | Some left -> Some (result e boolean 167 [ left; value ]))
+         None
   in
   let element prepared at width component =
     let k = Option.get (List.find_index (fun (slot, _) -> slot = prepared) layout.gathers) in
@@ -519,15 +546,7 @@ let emit_program e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers ind
          | _ -> ());
         wrap_integer e (integer_binary e op a b)
     | Int_compare (op, a, b) ->
-        let opcode =
-          match op with
-          | Flow.Packed_ops.Ilt -> 177
-          | Ile -> 179
-          | Igt -> 173
-          | Ige -> 175
-          | Ieq -> 170
-        in
-        numeric_truth e (compare e opcode (int_of a) (int_of b))
+        numeric_truth e (compare e (int_compare_opcode op) (int_of a) (int_of b))
     | Int_abs a ->
         let value = int_of a in
         wrap_integer e (select e (long e) (compare e 177 value (l e 0L)) (result e (long e) 126 [ value ]) value)
@@ -542,15 +561,7 @@ let emit_program e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers ind
     | Convert ((Truncate | Coerce_int | Integer_result _), a) -> to_int (float_of a)
     | Convert (((Floor | Ceil | Round) as op), a) ->
         let value = float_of a in
-        let rounded =
-          match op with
-          | Floor -> ext e 8 [ value ]
-          | Ceil -> ext e 9 [ value ]
-          | _ ->
-              floating e 133
-                [ unary e Sign value; ext e 8 [ floating e 129 [ ext e 4 [ value ]; f e 0.5 ] ] ]
-        in
-        to_int rounded
+        to_int (round_float e op value)
     | Guarded _ -> assert false
     | _ -> fail "This instruction is not supported by the SPIR-V kernel target."
   in
@@ -573,20 +584,7 @@ let emit_program e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers ind
         end
         else begin
           let before = e.block and before_invalid = !invalid in
-          let condition =
-            List.map
-              (fun (slot, selected) ->
-                let value = truth e (float_of slot) in
-                if selected then value else result e boolean 168 [ value ])
-              guards
-            |> List.fold_left
-                 (fun combined value ->
-                   match combined with
-                   | None -> Some value
-                   | Some left -> Some (result e boolean 167 [ left; value ]))
-                 None
-            |> Option.get
-          in
+          let condition = Option.get (guard_condition guards) in
           let yes = Words.id words and after = Words.id words in
           Words.instruction words.body 247 [ after; 0 ];
           Words.instruction words.body 250 [ condition; yes; after ];
@@ -623,18 +621,9 @@ let emit_program e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers ind
       and finished = Words.id words
       and after_guard = Words.id words in
       let guard_condition =
-        List.map
-          (fun (slot, selected) ->
-            let value = truth e (float_of slot) in
-            if selected then value else result e boolean 168 [ value ])
-          guards
-        |> List.fold_left
-             (fun combined value ->
-               match combined with
-               | None -> Some value
-               | Some left -> Some (result e boolean 167 [ left; value ]))
-             None
-        |> Option.value ~default:(compare e 171 (u e 0) (u e 0))
+        let found = guard_condition guards in
+        let default = compare e 171 (u e 0) (u e 0) in
+        Option.value found ~default
       in
       if guarded then begin
         Words.instruction words.body 247 [ after_guard; 0 ];
