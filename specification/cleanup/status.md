@@ -259,6 +259,8 @@ size estimate, not the phase's behavioral or shipping gates.
 
 ## In progress and remaining proof
 
+- P8.S2 partial (eb85bbff, e8cf42d9, 3f49c6cb, 63fcf242): `(scene/trace scene origin dir tmin tmax time)` returns `{:t :prim :u :v :normal :hit}`. It runs on CPU through a host closure (`Flow.Ray_host`; `Flow_sop.Trace_scene` over `Surface_index`), in MSL (`intersector<triangle_data>` over a Kernel_layout scene binding) and in SPIR-V 1.4 (`SPV_KHR_ray_query`, spirv-val golden `fast_trace`); JS and WGSL refuse it. 169/256 rays hit the test quad, Packed is byte-identical to the walker at 1 and 8 domains, and Metal matches the CPU within 4.8e-7. Open: instancing, motion, curves, procedural spheres, one CPU query per ray instead of one per field, the film accumulation sink, and a typed scene value instead of the process-wide id registry. `resolve_preview.rays` stays unwired until `trace_pixel` moves.
+
 - P3.S8 (2026-10-27 audit, 3d6a0d41): Region already inlines `defn` helpers, lowers vectors and records to scalar registers, and runs structured loops with carried registers (Loop_begin/carry/end/result) in Packed, Kernel_layout, the JS/WGSL printers and SPIR-V, including a uint32 PCG state. A new `defn-pcg-vec3` region case is bit-exact against the reference at 1 and 8 domains and is device-eligible. Still refused: state-dependent kernels (`E_PACKED_STATE`), `previous` reads, correlated product sources and loops without a carried scalar leaf. The same commit restores about 24 flow_ir test modules that the runner merge in ec2d7266 had silently stopped running.
 
 - P3.S7: Core_draw owns native/web device-attribute eligibility and sibling
