@@ -24,11 +24,13 @@ type t = {
   scene_binding : int option;
       (** [scene/trace]: the acceleration structure's buffer index; the triangle vertices follow. *)
   scene_spheres : int option;  (** uniform word holding the procedural sphere count *)
+  scene_instances : int option;
+      (** an instanced scene (a static fact): the instance table's buffer index, after the spheres *)
 }
 
 (** [fast] includes gather lengths and the count record; [image] reserves the two
     dimensions used by WGSL image kernels and has no input bindings. *)
-val plan : ?fast:bool -> ?image:bool -> Packed.t -> t
+val plan : ?fast:bool -> ?image:bool -> ?instanced:bool -> Packed.t -> t
 val uniform_words : t -> int
 
 val iter : t -> instruction:(int -> Packed.instruction -> unit) ->

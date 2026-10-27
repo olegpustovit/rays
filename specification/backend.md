@@ -1052,4 +1052,10 @@ the query per argument tuple and block. Metal emits `intersector<triangle_data>`
 issues an opaque-flag ray query against the same two bindings. Exact precision keeps the op on the CPU; the web
 targets refuse it (`E_WEB_SOURCE` for JS, `E_GPU_FORM` for WGSL). Procedural spheres are an in-loop analytic test after the ray query on every target: a `float4` (centre, radius)
 buffer bound after the vertices and a sphere-count uniform; a sphere hit reports `prim = -2 - k`, `u = v = 0`, and the
-nearer of triangle and sphere wins. Instancing, motion and curves are not yet part of the op.
+nearer of triangle and sphere wins. Instancing is a static scene fact: `Emit.kernel`/`Spirv.kernel ~instanced:true` (and `Kernel_layout.plan ~instanced`)
+bind a TLAS (`intersector<triangle_data, instancing>` / `OpRayQueryGetIntersectionInstanceIdKHR`) plus a table of 16
+floats per instance (first primitive of its prototype in the concatenated vertex buffer, the world-to-object 3x4
+row-major, three spare); the normal is the transpose of that matrix applied to the object normal, all in scalar
+registers. The record's ninth field `instance` is the TLAS instance index (0 for a flat scene's triangles, -1 for a
+sphere or a miss), and `prim` is the primitive within its prototype. `Flow_sop.Trace_scene.register_instances` is the
+CPU host. Motion and curves are not yet part of the op.

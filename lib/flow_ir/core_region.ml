@@ -287,7 +287,8 @@ let operation ~emit ~as_float ~as_int ~literal ~is_table ~component ~guards
     let field k={registers=[|emit(Trace(k,registers))|];constant=None;fields=[]} in
     {registers=[||];constant=None;fields=["t",field 0;"prim",{registers=[|emit(Convert(Truncate,(field 1).registers.(0)))|];constant=None;fields=[]};
       "u",field 2;"v",field 3;"normal",{registers=[|emit(Trace(4,registers));emit(Trace(5,registers));emit(Trace(6,registers))|];constant=None;fields=[]};
-      "hit",field 7]}
+      "hit",field 7;
+      "instance",{registers=[|emit(Convert(Truncate,(field 8).registers.(0)))|];constant=None;fields=[]}]}
   end
   else if kind=Flow.Op.Checked_mul || kind=Flow.Op.Checked_fma then begin
     (* ponytail: one destination per instruction computes both projections

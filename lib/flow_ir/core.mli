@@ -114,7 +114,7 @@ module Region : sig
     | Noise3 of int * int * int * int * int * float * float | Fma of int * int * int | Rand_at of int * int | Select of int * int * int
     | Checked_mul of projection * int * int | Checked_fma of projection * int * int * int
     | Trace of int * int array
-      (** One field (0 t, 1 prim, 2 u, 3 v, 4-6 normal, 7 hit) of a host ray query: registers
+      (** One field (0 t, 1 prim, 2 u, 3 v, 4-6 normal, 7 hit, 8 instance) of a host ray query: registers
           scene id, origin, direction, tmin, tmax, time. *)
     | Array_prepare of int * Flow.Ty.t
       (** Execution-local immutable table capture, resolved before its index.

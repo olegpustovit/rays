@@ -22,13 +22,14 @@ type t = {
   counts : int option;
   scene_binding : int option;
   scene_spheres : int option;
+  scene_instances : int option;
 }
 
 let rec guarded = function
   | Packed.Guarded (_, instruction) -> guarded instruction
   | instruction -> instruction
 
-let plan ?(fast = false) ?(image = false) program =
+let plan ?(fast = false) ?(image = false) ?(instanced = false) program =
   let view = Packed.Private.view program in
   let offset = ref 4 and uniform_layout = ref [] in
   let uniform name width =
@@ -111,7 +112,8 @@ let plan ?(fast = false) ?(image = false) program =
     input_used; uniform_layout = List.rev !uniform_layout; uniform_bytes = !offset;
     uniform_binding; status_binding; table_binding;
     gather_base; count_base; counts;
-    scene_spheres; scene_binding = (if traced then Some (count_base + (if counts = None then 0 else 2)) else None) }
+    scene_spheres; scene_instances = (if traced && instanced then Some (count_base + (if counts = None then 0 else 2) + 3) else None);
+    scene_binding = (if traced then Some (count_base + (if counts = None then 0 else 2)) else None) }
 
 let uniform_words plan = (plan.uniform_bytes + 15) / 16
 

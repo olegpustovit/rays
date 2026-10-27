@@ -97,7 +97,7 @@ type emitter = {
   status : int;
   table : int option;
   noise : (int * int) option;
-  scene : (int * int * int * int * int * int * int) option;  (* acceleration structure variable and type, vertices, spheres, ray query, vec3, vec2 *)
+  scene : (int * int * int * int * int option * int * int * int) option;  (* acceleration structure variable and type, vertices, spheres, ray query, vec3, vec2 *)
   mutable block : int;
   mutable trace_cache : (int list * int * int array) list;
   mutable loop_depth : int;
@@ -490,7 +490,7 @@ let spheres_loop e (layout : Flow_ir.Kernel_layout.t) float_of r spheres values 
     both [ compare e 188 t (argument 8); nearer ] ] in
   let radius_inverse k = floating e 136 [ add oc.(k) (mul t dn.(k)); radius ] in
   let next = [| t; sub (f e (-2.)) (result e float 112 [ index_phi ]); f e 0.; f e 0.;
-    radius_inverse 0; radius_inverse 1; radius_inverse 2; f e 1. |] in
+    radius_inverse 0; radius_inverse 1; radius_inverse 2; f e 1.; f e (-1.) |] in
   let chosen = Array.mapi (fun k value -> select e float take value phis.(k)) next in
   jump e continuing;
   label e continuing;
@@ -512,7 +512,7 @@ let trace_values e (layout : Flow_ir.Kernel_layout.t) float_of r =
     match List.find_opt (fun (k, b, _) -> k = key && b = block) e.trace_cache with
     | Some (_, _, values) -> values
     | None ->
-        let accel, accel_type, vertices, spheres, query, vec3, vec2 = Option.get e.scene in
+        let accel, accel_type, vertices, spheres, instances, query, vec3, vec2 = Option.get e.scene in
         let v3 a b c = result e vec3 80 [ a; b; c ] and one = u e 1 in
         let argument k = float_of r.(k) in
         let direction = result e vec3 12 [ e.glsl; 69; v3 (argument 4) (argument 5) (argument 6) ] in
@@ -522,7 +522,12 @@ let trace_values e (layout : Flow_ir.Kernel_layout.t) float_of r =
         let hit = compare e 170 (result e e.uint 4479 [ query; one ]) one in
         let t = result e float 6018 [ query; one ] and primitive = result e e.uint 6023 [ query; one ]
         and barycentrics = result e vec2 6024 [ query; one ] in
-        let base = result e e.uint 132 [ select e e.uint hit primitive (u e 0); u e 9 ] in
+        let primitive = select e e.uint hit primitive (u e 0) in
+        let instance = Option.map (fun _ -> select e e.uint hit (result e e.uint 6020 [ query; one ]) (u e 0)) instances in
+        let row k = load e (Option.get instances) (result e e.uint 128 [ result e e.uint 132 [ Option.get instance; u e 16 ]; u e k ]) in
+        let base = result e e.uint 132 [ (match instances with
+          | None -> primitive
+          | Some _ -> result e e.uint 128 [ result e e.uint 109 [ row 0 ]; primitive ]); u e 9 ] in
         let vertex corner = v3 (load e vertices (result e e.uint 128 [ base; u e (3 * corner) ]))
             (load e vertices (result e e.uint 128 [ base; u e (3 * corner + 1) ]))
             (load e vertices (result e e.uint 128 [ base; u e (3 * corner + 2) ])) in
@@ -531,9 +536,19 @@ let trace_values e (layout : Flow_ir.Kernel_layout.t) float_of r =
         let normal = result e vec3 12 [ e.glsl; 69; result e vec3 12 [ e.glsl; 68; edge 1; edge 2 ] ] in
         let pick value miss = select e float hit value (f e miss) in
         let component vector k = result e float 81 [ vector; k ] in
+        let world_normal k = (* the transpose of the world-to-object matrix applied to the object normal, normalised *)
+          match instances with
+          | None -> component normal k
+          | Some _ ->
+              let sum j = List.fold_left (fun acc i -> floating e 129 [ acc; floating e 133 [ row (1 + (4 * i) + j); component normal i ] ])
+                (f e 0.) [ 0; 1; 2 ] in
+              let x = sum 0 and y = sum 1 and z = sum 2 in
+              let length = ext e 31 [ floating e 129 [ floating e 133 [ x; x ]; floating e 129 [ floating e 133 [ y; y ]; floating e 133 [ z; z ] ] ] ] in
+              floating e 136 [ (match k with 0 -> x | 1 -> y | _ -> z); length ] in
         let values = [| pick t 0.; pick (result e float 112 [ primitive ]) (-1.);
           pick (component barycentrics 0) 0.; pick (component barycentrics 1) 0.;
-          pick (component normal 0) 0.; pick (component normal 1) 0.; pick (component normal 2) 0.; pick (f e 1.) 0. |] in
+          pick (world_normal 0) 0.; pick (world_normal 1) 0.; pick (world_normal 2) 0.; pick (f e 1.) 0.;
+          pick (match instance with None -> f e 0. | Some i -> result e float 112 [ i ]) (-1.) |] in
         let values = spheres_loop e layout float_of r spheres values in
         e.trace_cache <- (key, e.block, values) :: e.trace_cache;
         values
@@ -865,12 +880,12 @@ let resident_count e (layout : Flow_ir.Kernel_layout.t) index buffers =
   | None, None -> n
   | _ -> assert false
 
-let kernel ?(fast = false) program =
+let kernel ?(fast = false) ?(instanced = false) program =
   try
     (match P.gpu_refusals ~fused:true ~fast program with
     | [] -> ()
     | diagnostic :: _ -> raise (Diagnostic.Error diagnostic));
-    let layout = Flow_ir.Kernel_layout.plan ~fast program in
+    let layout = Flow_ir.Kernel_layout.plan ~fast ~instanced program in
     let words = Words.create () in
     let void = Words.declare words 19 []
     and boolean = Words.declare words 20 []
@@ -950,8 +965,9 @@ let kernel ?(fast = false) program =
           let accel = bind (Words.declare words 32 [ 0; accel_type ]) 0 binding Ogpu.Shader.Acceleration_structure in
           let vertices = bind storage 12 (binding + 1) Ogpu.Shader.Storage_buffer in
           let spheres = bind storage 12 (binding + 2) Ogpu.Shader.Storage_buffer in
+          let instances = Option.map (fun _ -> bind storage 12 (binding + 3) Ogpu.Shader.Storage_buffer) layout.scene_instances in
           let query = variable (Words.declare words 32 [ 6; Words.declare words 4472 [] ]) 6 in
-          (accel, accel_type, vertices, spheres, query, Words.declare words 23 [ float; 3 ], Words.declare words 23 [ float; 2 ]))
+          (accel, accel_type, vertices, spheres, instances, query, Words.declare words 23 [ float; 3 ], Words.declare words 23 [ float; 2 ]))
         layout.scene_binding
     in
     let noise = Option.map (fun _ -> (Words.id words, Words.id words)) table in

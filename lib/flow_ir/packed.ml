@@ -301,7 +301,7 @@ let rec typed_total ranges inputs = function
   | Guarded(_,body) -> typed_total ranges inputs body
   | _ -> false
 
-let trace_field field (h:Flow.Ray_host.hit)=match field with 0->h.t|1->float h.prim|2->h.u|3->h.v|4->h.nx|5->h.ny|6->h.nz|_->if h.hit then 1. else 0.
+let trace_field field (h:Flow.Ray_host.hit)=match field with 0->h.t|1->float h.prim|2->h.u|3->h.v|4->h.nx|5->h.ny|6->h.nz|7->if h.hit then 1. else 0.|_->float h.instance
 (* one host query per ray: the eight fields of a lane share its last (scene, query) *)
 let trace_hit traced j id q=match traced.(j) with Some(i,k,h) when i=id&&k=q->h|_->let h=Flow.Ray_host.query id q in traced.(j)<-Some(id,q,h);h
 let run_typed ?column_source ?plane_outputs ?expected_count ~evaluate ~uniform ~seed (t : t) ~live =
