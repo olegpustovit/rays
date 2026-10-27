@@ -30,6 +30,14 @@ let () =
     | None -> assert (values.(4 * i + 3) = 0. && values.(4 * i + 1) = -1.)
   done;
   assert (!hits > 0 && !hits < count);
+  (* one host query per ray, not one per field *)
+  let calls = Atomic.make 0 in
+  Flow.Ray_host.register 8 (fun q -> Atomic.incr calls; Flow.Ray_host.query id q);
+  let counted = Test_program.compile (Printf.sprintf
+    "(map (fn [(i : int)] (let* [h (scene/trace 8 [(* 0.01 (float i)) 0. 5.] [0. 0. -1.] 0. 100. t)] [h.t (float h.prim) h.u h.normal.z])) (array/range %d :type int))" count) in
+  ignore (ok (P.force ~strict:true counted ~live));
+  assert (Atomic.get calls = count);
+  Flow.Ray_host.unregister 8;
   (* flow_web refuses it with a typed diagnostic (P8.S2 d) *)
   (match Flow_web.Js.region program with
    | _ -> assert false
