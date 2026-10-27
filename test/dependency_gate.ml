@@ -122,7 +122,7 @@ let rules =
       "sop_catalog", "rays" :: "renderer" :: "pxui" :: "pxui_shell" :: "pxui_graph"
                      :: "rays_editor" :: gpu;
       "rays_pathtracer", ["metal"; "ogpu_metal_native"; "ogpu_metal"; "ogpu_mock"; "rdk_core"; "sop";
-                          "sop_catalog"; "flow"; "editor_core"; "editor_document"; "pxui"; "pxui_shell";
+                          "sop_catalog"; "flow_sop"; "editor_core"; "editor_document"; "pxui"; "pxui_shell";
                           "pxui_graph"; "rays_editor"];
       "rdk_rays", ["metal"; "ogpu_metal_native"; "ogpu_metal"; "rdk_boolean"; "rdk"; "sop"; "sop_catalog";
                    "flow"; "editor_core"; "editor_document"; "pxui"; "pxui_shell"; "pxui_graph";
@@ -160,7 +160,7 @@ let only =
     "flow_web", ["flow"; "flow_ir"; "param"; "rays_math"; "scene_command"; "parallel"];
     "web_export", ["flow"; "flow_ir"; "flow_web"; "flow_sop"; "editor_document";
                    "sop_catalog"; "input"; "param"; "scene_command"; "sdl3_image"];
-    "rays_pathtracer", ["rays"; "ogpu"; "renderer";
+    "rays_pathtracer", ["rays"; "ogpu"; "renderer"; "flow"; "flow_ir"; "flow_gpu";
                        "runtime_resources"; "rays_math"; "unix"];
     "lisp_sop", ["flow"; "flow_sop"; "sop_catalog"; "sop"; "rdk"; "rays_math"] ]
 
