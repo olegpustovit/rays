@@ -149,7 +149,7 @@ let prompt_panel ~(value : _ t) ~focus ~keymap ~(frame : Frame.t) ~workspace ~te
       let mx, my = frame.input.pointer in
       let leaf = List.find_opt (fun (l : Pxui_shell.Layout.leaf) ->
         let x, y, w, h = l.frame in
-        not l.floating && mx >= float x && mx < float (x + w) && my >= float y && my < float (y + h))
+        not l.floating && Pxui.Ui.contains (float x, float y, float w, float h) (mx, my))
         (geometry value workspace frame).leaves in
       let ratio = match leaf with
         | Some l ->
@@ -420,7 +420,7 @@ let menu, command_changes =
     let gx, gy, gw, gh = match graph_leaf value (geometry value workspace frame) with
       | Some leaf -> leaf.body | None -> 0, 0, 0, 0 in
     let mx, my = frame.input.pointer in
-    let at = if mx >= float gx && my >= float gy && mx < float (gx + gw) && my < float (gy + gh)
+    let at = if Pxui.Ui.contains (float gx, float gy, float gw, float gh) (mx, my)
       then int_of_float mx, int_of_float my else gx + (gw / 3), gy + (gh / 3) in
     match open_menu value at with
     | Some menu -> Some menu, []

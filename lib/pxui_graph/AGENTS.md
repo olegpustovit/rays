@@ -11,7 +11,7 @@ cull tiles and resolve wire hits; there is no second hit-test, capture or text-e
 The pane has four private parts: `Scope_state` owns the immutable view state,
 layout and culling queries; `Scope_commands` maps keys and menus to typed
 requests; `Scope_paint` draws the kit's cards, wires, zones and footers;
-`Scope_pane` builds the frame's boxes and interprets their signals. They share
+`Scope_frame` builds the frame's boxes and interprets their signals (`Scope_pane` is the facade over the state, commands and frame). They share
 one PXUI handle. `Scope_wires` owns geometry, curve sampling and bucket indices.
 
 ## Current contract

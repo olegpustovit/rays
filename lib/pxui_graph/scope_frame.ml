@@ -174,8 +174,7 @@ let paint_frame (t : t) ui ~z ~fs ~layer ~canvas ~(canvas_signal : Ui.signal) ~t
         (match item_at t path with
          | Some (({ item = P.Item _; _ } as p), ax, ay) when p.shown <> P.Point ->
              let fx = sx t ax +. (p.w -. head_pad -. 12.) *. z and fy = sy t ay +. 6. *. z in
-             let mx, my = mouse in
-             let over = mx >= fx && mx < fx +. 12. *. z && my >= fy && my < fy +. 12. *. z in
+             let over = Ui.contains (fx, fy, 12. *. z, 12. *. z) mouse in
              Some (sx t ax +. 116. *. z, sy t ay +. 32. *. z), over && Ui.hover_delay ui ~key:"scope-flag"
          | _ -> None, false)
     | None -> None, false in
