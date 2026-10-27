@@ -23,8 +23,9 @@
            ; the tracer's rect lights of the OCaml demo (26 on 4 x 4, 2 on 3 x 6): intensity = tracer * w * h / pi
            key (scene/light :name "key" :translate [-6 12 6] :target [0 3.5 0] :intensity 132.4 :width 4 :height 4)
            rim (scene/light :name "rim" :translate [9 4 -3] :target [0 3.5 0] :intensity 11.46 :width 3 :height 6)
-           sky (scene/world (ref world) :name "studio")]
-      (scene/root (scene/merge table camera key rim sky) :camera camera :renderer "Path traced" :bounces 5)))
+           ; the demo's exposure 0.9, in stops
+           sky (scene/world (ref world) :name "studio" :exposure -0.152)]
+      (scene/root (scene/merge table camera key rim sky) :camera camera :renderer "Path traced" :bounces 5 :width 480 :height 840)))
 
   ; a dark dome with one soft panel behind the camera (the OCaml demo's 0.9 x 0.6 rad half-size panel toward +z)
   (graph world :context world
