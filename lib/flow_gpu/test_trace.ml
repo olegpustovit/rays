@@ -6,10 +6,11 @@ module B = Ogpu.Backend
 let ok = function Ok v -> v | Error d -> failwith (Diagnostic.to_string d)
 let gpu r = match r with Ok v -> v | Error e -> failwith (Ogpu.Error.to_string e)
 let id = 9 and count = 256
+let spheres = [| (0.3, 0.2, 1.0, 0.4); (-0.5, -0.4, 0.5, 0.3) |]
 let () =
   let grid = match Plane_generators.grid ~counts:Grid_point_counts ~connectivity:Grid_triangles
       ~orientation:Grid_xy ~columns:2 ~rows:2 ~size:2. () with Ok g -> g | Error e -> failwith (Error.to_string e) in
-  (match Flow_sop.Trace_scene.register id grid with Ok () -> () | Error e -> failwith e);
+  (match Flow_sop.Trace_scene.register ~spheres id grid with Ok () -> () | Error e -> failwith e);
   let index = match Surface_index.create grid with Ok i -> i | Error e -> failwith (Error.to_string e) in
   assert (Surface_index.triangle_count index = 2);
   let positions = Geometry.positions grid in
@@ -36,6 +37,10 @@ let () =
         let buffer ?(memory = Ogpu.Types.Shared) size = gpu (B.create_buffer ~memory device
           { label = Some "trace test"; size = Int64.of_int size; usage = [ Ogpu.Types.Storage ] }) in
         let vertex_buffer = buffer 72 in
+        let sphere_buffer = buffer 32 in
+        let sphere_bytes = Bytes.create 32 in
+        Array.iteri (fun k (x, y, z, r) -> List.iteri (fun c v -> Bytes.set_int32_le sphere_bytes ((k * 4 + c) * 4) (Int32.bits_of_float v)) [x; y; z; r]) spheres;
+        gpu (B.write_buffer sphere_buffer ~offset:0L sphere_bytes);
         gpu (B.write_buffer vertex_buffer ~offset:0L vertices);
         let blas = gpu (B.create_accel device (B.Blas { geometries = [ B.Triangles
           { vertices = vertex_buffer; offset = 0L; length = 72L; vertex_stride = 12; vertex_count = 6 } ] })) in
@@ -51,7 +56,7 @@ let () =
         assert (msl.scene <> None);
         let runner = Flow_gpu.Run.create lease pipelines msl in
         let values = ok (Flow_ir.Packed.Private.prepare ~fast:true program ~live) in
-        let actual = match ok (Flow_gpu.Run.readback (ok (Flow_gpu.Run.dispatch runner ~scene:(blas, vertex_buffer) values))) with
+        let actual = match ok (Flow_gpu.Run.readback (ok (Flow_gpu.Run.dispatch runner ~scene:(blas, vertex_buffer, sphere_buffer, Array.length spheres) values))) with
           | Flow.Eval.Vec4_array v -> v | _ -> assert false in
         let worst = ref 0. and hits = ref 0 in
         for i = 0 to count - 1 do
@@ -60,9 +65,9 @@ let () =
           assert (actual.(4 * i + 1) = expected.(4 * i + 1) && (actual.(4 * i + 3) <> 0.) = (expected.(4 * i + 3) <> 0.));
           for k = 0 to 3 do worst := Float.max !worst (Float.abs (actual.(4 * i + k) -. expected.(4 * i + k))) done
         done;
-        Printf.printf "scene/trace Metal: %d of %d rays hit, prim exact, max abs difference %.3g\n" !hits count !worst;
+        Printf.printf "scene/trace Metal (triangles + spheres): %d of %d rays hit, prim exact, max abs difference %.3g\n" !hits count !worst;
         assert (!hits > 0 && !worst <= 1e-5);
         Flow_gpu.Run.close runner; Flow_gpu.Pipelines.close pipelines;
-        ignore (B.destroy_accel blas); ignore (B.destroy_buffer scratch); ignore (B.destroy_buffer vertex_buffer)
+        ignore (B.destroy_accel blas); ignore (B.destroy_buffer scratch); ignore (B.destroy_buffer vertex_buffer); ignore (B.destroy_buffer sphere_buffer)
       end);
   Flow_sop.Trace_scene.unregister id

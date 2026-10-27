@@ -15,7 +15,7 @@
 (fast_arithmetic 5248 32bc467d9d1bea6dc030d31c701d0456)
 (fast_bits 5332 e6b89a7600f3f10fd8ede4a83b21c226)
 (fast_convert 4348 2c3ab9c63722a677218d23dc0c0438cd)
-(fast_trace 5696 08b8440bdebdbeba32d2c35ef9a0accc)
+(fast_trace 8332 61083f17839abb041cbc160fa491d33d)
 (fast_gather 3556 0b437f65da5cc29b6c1d3b1684ac6fc5)
 (fast_vec_gather 4740 fbef317232a1ab52302ead1cc5305820)
 (fast_int_gather 3708 b40abf04d569c9c0686baa26e5e1e403)

@@ -4,7 +4,7 @@ val create : Renderer.gpu -> Pipelines.t -> Emit.msl -> t
 val dispatch : ?wait:bool -> ?reset_status:bool -> ?commands:Ogpu.Backend.commands ->
   ?count:(Ogpu.Backend.buffer * int * int) -> ?into:(Ogpu.Backend.buffer * Ogpu.Backend.buffer) -> ?bound:(int -> Ogpu.Backend.buffer option) ->
   ?bound_table:(int -> Ogpu.Backend.buffer option) ->
-  ?scene:(Ogpu.Backend.accel * Ogpu.Backend.buffer) -> t -> Flow_ir.Packed.Private.inputs ->
+  ?scene:(Ogpu.Backend.accel * Ogpu.Backend.buffer * Ogpu.Backend.buffer * int) -> t -> Flow_ir.Packed.Private.inputs ->
   (output, Diagnostic.t) result
 (** [~wait:false] leaves the dispatch in flight, without its status read; [~commands] only encodes it
     into the caller's command buffer (epoch 0 until the caller commits it); [~reset_status:false]

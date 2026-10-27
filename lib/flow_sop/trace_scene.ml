@@ -1,10 +1,11 @@
 module S = Rdk.Surface_index
-let register id geometry =
+let sphere_prim k = -2 - k
+let register ?(spheres = [||]) id geometry =
   match S.create geometry with
   | Error e -> Error (Rdk.Error.to_string e)
   | Ok index ->
       let positions = Rdk.Geometry.positions geometry in
-      let query q =
+      let triangles q =
         let direction = Rdk.Surface_index.Private.Constant_direction { x = q.(3); y = q.(4); z = q.(5) } in
         let origin = Rdk.Packed.Float3.Private.of_owned_exn ~x:[| q.(0) |] ~y:[| q.(1) |] ~z:[| q.(2) |] in
         let primitives = [| -1 |] and triangles = [| -1 |] and a = [| 0. |] and b = [| 0. |] and c = [| 0. |]
@@ -22,6 +23,23 @@ let register id geometry =
           let n = Float.sqrt ((nx *. nx) +. (ny *. ny) +. (nz *. nz)) in
           { Flow.Ray_host.t = distances.(0); prim = primitives.(0); u = b.(0); v = c.(0);
             nx = nx /. n; ny = ny /. n; nz = nz /. n; hit = true } in
+      let query q =
+        let nearest = ref (triangles q) in
+        let norm = Float.sqrt ((q.(3) *. q.(3)) +. (q.(4) *. q.(4)) +. (q.(5) *. q.(5))) in
+        let dx = q.(3) /. norm and dy = q.(4) /. norm and dz = q.(5) /. norm in
+        Array.iteri (fun k (cx, cy, cz, r) ->
+          let ox = q.(0) -. cx and oy = q.(1) -. cy and oz = q.(2) -. cz in
+          let b = (ox *. dx) +. (oy *. dy) +. (oz *. dz) in
+          let disc = (b *. b) -. ((ox *. ox) +. (oy *. oy) +. (oz *. oz) -. (r *. r)) in
+          if disc >= 0. then begin
+            let root = Float.sqrt disc in
+            let t = if -.b -. root >= q.(6) then -.b -. root else -.b +. root in
+            if t >= q.(6) && t <= q.(7) && ((not !nearest.Flow.Ray_host.hit) || t < !nearest.Flow.Ray_host.t) then begin
+              let px = ox +. (t *. dx) and py = oy +. (t *. dy) and pz = oz +. (t *. dz) in
+              nearest := { Flow.Ray_host.t; prim = sphere_prim k; u = 0.; v = 0.; nx = px /. r; ny = py /. r; nz = pz /. r; hit = true }
+            end
+          end) spheres;
+        !nearest in
       Flow.Ray_host.register id query;
       Ok ()
 let unregister = Flow.Ray_host.unregister
