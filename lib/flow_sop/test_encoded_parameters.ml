@@ -81,10 +81,8 @@ let ()=
     assert(tag(cook session 1 changed)=[|"detail";"detail";"detail"|]));
   (* Direct checked-workspace integrations use the same trust boundary. *)
   let raw=match W.check ~ops:Flow_sop.Operators.all catalog forms with Some w,_->w|_->assert false in
-  (* The raw checker has descriptors, without loading embedded Lisp bodies.
-     Supply the explicit native source factory at this integration boundary. *)
   let direct=flow_ok(Flow_sop.Lower.of_checked
-    ~factories:(Sop.Nodes.Line.factory::Sop_catalog.Editor.factories) raw) |>root in
+    ~factories:Sop_catalog.Editor.factories raw) |>root in
   assert((field direct).default=Param.Text_value "point");
   let pane=Flow_graph.Projection.of_graph catalog checked "g" in
   let card=Option.get(Flow_graph.Projection.find pane["g";"card"]) in

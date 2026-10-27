@@ -25,16 +25,6 @@
  (name test_parallel_branches)
  (modules test_parallel_branches)
  (libraries sop rdk rays_math lisp_sop rdk_test_support ogpu_mock unix parallel))
-(test
- (name test_attr_from_image)
- (modules test_attr_from_image)
- (libraries sop rdk lisp_sop unix parallel))
-
-(test
- (name test_subdivide_cracks)
- (modules test_subdivide_cracks)
- (libraries sop rdk rays_math lisp_sop ogpu_mock parallel))
-
 ; One executable per suite: each links only its own module, so a suite builds and runs
 ; while another is being edited.
 (executables

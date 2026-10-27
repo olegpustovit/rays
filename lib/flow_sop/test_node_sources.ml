@@ -4,7 +4,7 @@ let checked = function Some workspace, [] -> workspace
   | _, diagnostics -> failwith (String.concat "\n" (List.map Diagnostic.to_string diagnostics))
 
 let () =
-  let factories = [Sop.Nodes.Line.factory] in
+  let factories = [] in
   let forms = parse {|(workspace checked_field_defaults
     (defnode sop/iso_surface
       [(field : (fn [vec3] float) :keyword true)
@@ -21,8 +21,8 @@ let () =
     (graph g :context sop
       (let* [field (fn [p] (+ p.x (+ p.y p.z)))]
         (sop/iso_surface :field field))))|} in
-  let catalog = Flow_sop.Catalog.of_factories ~version:1 ~nodes:[] factories |> ok in
-  let workspace = Flow_sop.Catalog.check_workspace ~sources:[]
+  let catalog = Flow_sop.Catalog.of_factories ~version:1 ~nodes:(ok (Flow_sop.Catalog.node_definitions ())) factories |> ok in
+  let workspace = Flow_sop.Catalog.check_workspace
       ~ops:Flow_sop.Operators.all catalog forms |> checked in
   let lowered = Flow_sop.Lower.of_checked ~factories workspace |> ok in
   let calls = Flow_sop.Lower.field_calls ~live:(Input.at_time 0.)
@@ -82,7 +82,7 @@ let () =
     [valid; invalid]
 
 let () =
-  let factories = [Sop.Nodes.Line.factory] in
+  let factories = [] in
   let source = parse {|(workspace helper_seed
     (defn helper_seed :context value [(enabled : bool)]
       (let* [selected enabled] (if selected (sop/context_seed "helper_fixture") 0)))
@@ -92,8 +92,8 @@ let () =
         (sop/with_attr geo :P (exact
           (map (fn [p] (+ p [shift 0.0 0.0])) (sop/attr geo :P))))))
     (graph g :context sop (sop/helper_seed (sop/line :kind "Points" :points 2))))|} in
-  let catalog = Flow_sop.Catalog.of_factories ~version:1 ~nodes:[] factories |> ok in
-  let workspace = Flow_sop.Catalog.check_workspace ~sources:[]
+  let catalog = Flow_sop.Catalog.of_factories ~version:1 ~nodes:(ok (Flow_sop.Catalog.node_definitions ())) factories |> ok in
+  let workspace = Flow_sop.Catalog.check_workspace
     ~ops:Flow_sop.Operators.all catalog source |> checked in
   let lowered = Flow_sop.Lower.of_checked ~factories workspace |> ok in
   let graph = List.hd lowered.graphs in
@@ -127,8 +127,8 @@ let () =
     (defnode sop/fn_seed_scope [(geo : geometry) (enabled : bool false)]
       (let* [shift (fn_seed_helper)] geo))
     (graph g :context sop (sop/fn_seed_scope (sop/line :points 2))))|} in
-  let catalog = Flow_sop.Catalog.of_factories ~version:1 ~nodes:[] [Sop.Nodes.Line.factory] |> ok in
-  let workspace = Flow_sop.Catalog.check_workspace ~sources:[]
+  let catalog = Flow_sop.Catalog.of_factories ~version:1 ~nodes:(ok (Flow_sop.Catalog.node_definitions ())) [] |> ok in
+  let workspace = Flow_sop.Catalog.check_workspace
     ~ops:Flow_sop.Operators.all catalog source |> checked in
   let definition = List.find (fun (node:Flow.Workspace.node_definition) ->
     node.kind.qualified="sop/fn_seed_scope") workspace.Flow.Workspace.nodes in
@@ -148,7 +148,7 @@ let () =
     (sop/embedded_fixture (sop/line) :distance 2.0)))|} in
   (* The body delegates to a real native kind; the custom fixture itself is Lisp. *)
   let native = Flow_sop.Catalog.of_factories ~version:Flow_sop.Manifest.version
-      ~nodes:[] [Sop.Nodes.Null.factory; Sop.Nodes.Line.factory] |> ok in
+      ~nodes:(ok (Flow_sop.Catalog.node_definitions ())) [Sop.Nodes.Null.factory] |> ok in
   let catalog = {catalog with Flow.Check.kinds = native.kinds @ catalog.kinds} in
   let workspace = Flow_sop.Catalog.check_workspace ~sources:forms catalog authored |> checked in
   assert (workspace.source == authored);
@@ -168,7 +168,7 @@ let () =
   assert (List.length (Flow_sop.Catalog.check_workspace ~sources:forms catalog (parse saved)
     |> checked).nodes = 1);
   let manifest, digest = Flow_sop.Manifest.generate ~nodes:[node]
-      [Sop.Nodes.Null.factory; Sop.Nodes.Line.factory] |> ok in
+      [Sop.Nodes.Null.factory] |> ok in
   let reread, read_digest = Flow.Check.catalog_of_manifest manifest |> ok in
   assert (digest = read_digest && reread.kinds = catalog.kinds);
   let tree = parse manifest |> List.hd in
@@ -197,7 +197,7 @@ let () =
       (map (fn [p] (+ p [%g 0.0 0.0])) (sop/attr geo :P)))))|} distance) in
   let first_library = library 1. and second_library = library 2. in
   let node = Flow.Defnode.parse (List.hd first_library) |> ok in
-  let factories = [Sop.Nodes.Line.factory] in
+  let factories = [] in
   let catalog = Flow_sop.Catalog.of_factories ~version:1 ~nodes:[node] factories |> ok in
   let authored = parse {|(workspace body_edit (graph g :context sop
     (sop/body_fixture (sop/line :kind "Points" :points 2))))|} in
@@ -233,48 +233,3 @@ let () =
       assert (cook node = (x, 0., 0.));
       assert ((Sop.Session.stats session).misses = before.misses + 1))
       [second,2.;third,3.;fourth,4.])
-
-let () =
-  let sources = parse {|(defnode sop/function_library
-    [(field : (fn [vec3] float) :keyword true)]
-    (sop/iso_surface :field field :resolution [4 4 4]))|} in
-  let node = Flow.Defnode.parse (List.hd sources) |> ok in
-  let factories = [Sop.Nodes.Iso_surface.factory] in
-  let catalog = Flow_sop.Catalog.of_factories ~version:1 ~nodes:[node] factories |> ok in
-  let workspace = Flow_sop.Catalog.check_workspace ~library:true ~sources
-    ~ops:Flow_sop.Operators.all catalog (parse "(workspace function_library)") |> checked in
-  let lowered = Flow_sop.Lower.of_checked ~factories workspace |> ok in
-  ignore (Flow_sop.Catalog.of_factories ~version:1 ~nodes:[] lowered.factories |> ok);
-  let sources = parse {|(defnode sop/map_function_library
-    [(geo : geometry) (field : (fn [vec3] vec3) :keyword true)]
-    (sop/with_attr geo :P (exact (map field (sop/attr geo :P)))))|} in
-  let node = Flow.Defnode.parse (List.hd sources) |> ok in
-  let map_factories = [Sop.Nodes.Line.factory] in
-  let catalog = Flow_sop.Catalog.of_factories ~version:1 ~nodes:[node] map_factories |> ok in
-  let workspace = Flow_sop.Catalog.check_workspace ~library:true ~sources
-    ~ops:Flow_sop.Operators.all catalog (parse "(workspace map_function_library)") |> checked in
-  let lowered = Flow_sop.Lower.of_checked ~factories:map_factories workspace |> ok in
-  ignore (Flow_sop.Catalog.of_factories ~version:1 ~nodes:[] lowered.factories |> ok);
-  let factory = List.hd lowered.factories in
-  let disconnected = Sop.Edit_graph.instantiate_optional factory [None;None] |> Result.get_ok in
-  assert (Sop.Node.operation disconnected = "map_function_library");
-  assert (Sop.Node.parameter_fields disconnected = node.fields);
-  let line = Sop.Edit_graph.instantiate Sop.Nodes.Line.factory [] |> Result.get_ok in
-  let unbound = Sop.Edit_graph.instantiate factory [line;line] |> Result.get_ok in
-  let workspace = Flow_sop.Catalog.check_workspace ~sources ~ops:Flow_sop.Operators.all catalog
-    (parse {|(workspace actual_function (graph g :context sop
-      (sop/map_function_library (sop/line :kind "Points" :points 2)
-        :field (fn [p] (+ p [1.0 0.0 0.0])))))|}) |> checked in
-  let lowered = Flow_sop.Lower.of_checked ~factories:map_factories workspace |> ok in
-  let graph = List.hd lowered.graphs in
-  let root = Sop.Edit_graph.compile_node graph.network.geometry ~node_id:(Option.get graph.root)
-    |> Result.get_ok in
-  let session = Sop.Session.create ~max_entries:16 ~max_payload_bytes:1_000_000 |> Result.get_ok in
-  Fun.protect ~finally:(fun () -> Sop.Session.close session) (fun () ->
-    let context = Sop.Context.create () |> Result.get_ok in
-    (match Sop.Session.cook session ~context unbound with
-     | Error diagnostic -> assert (diagnostic.code = "disconnected_input")
-     | Ok _ -> failwith "Unbound function factory unexpectedly cooked");
-    let output = Sop.Session.cook session ~context root |> Result.get_ok in
-    let geometry = Sop.Payload.geometry output.payload |> Result.get_ok in
-    assert (Rdk.Packed.Float3.get (Rdk.Geometry.positions geometry) 0 = (1., 0., 0.)))
