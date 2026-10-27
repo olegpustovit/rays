@@ -550,7 +550,9 @@ The initial domain owns every window, event, layer, drawable, and resource
 operation. Pure geometry and scene preparation may use the shared parallel
 pool, but all results join before crossing the native boundary.
 
-`rays_pathtracer` is an ordinary sibling library on the virtual `ogpu`
+`rays_pathtracer` may depend on `flow`, `flow_ir` and `flow_gpu` (never `flow_sop`, geometry or UI): its
+kernels are `.rays` programs (P8) compiled by the shared Flow pipeline to the same emitters as every other kernel.
+It is an ordinary sibling library on the virtual `ogpu`
 API: it leases the presenting window's OGPU device through
 `Renderer.acquire_gpu` (or a lazily created headless device when
 no window exists), owns one queue on it, and builds its acceleration
