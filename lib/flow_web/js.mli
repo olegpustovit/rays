@@ -1,7 +1,7 @@
 (** JavaScript for packed regions placed on the CPU. The frame-level printer
     joins this module in a later task. *)
 
-val region : Flow_ir.Packed.t -> string
+val region : ?fast:bool -> Flow_ir.Packed.t -> string
 (** The source of [function region(inputs, uniforms, outputs, start, stop)],
     which runs iteration indices [start, stop) of one region over typed arrays
     and returns a status: [0] for success, [1] when a value is not finite
@@ -36,9 +36,15 @@ val region : Flow_ir.Packed.t -> string
     ranges of one region must be run in ascending order with the same state
     array, never concurrently; only [Collect] ranges may run in parallel.
     Skipped indices are not evaluated and do not occupy an output slot. Noise
-    permutation tables are embedded in the source. *)
+    permutation tables are embedded in the source.
 
-val frame : ?store:(float array -> string) -> ?gpu:(int -> bool) -> ?state_slot:(int -> int) -> Flow_ir.Core.program -> (string, Flow.Diagnostic.t) result
+    [~fast:true] (a workspace's [:precision "fast"], the default): a collecting region's integer
+    registers are plain numbers, exact to 2^53 (native fast precision carries integers as floats
+    too); division and [mod] truncate, bitwise operations split into 32-bit halves, integer tables
+    are read as numbers, integer outputs are still written as [BigInt]. Sums, accumulators and
+    [rand_at] keep the exact form. *)
+
+val frame : ?store:(float array -> string) -> ?fast:bool -> ?kernel:(int -> string option) -> ?gpu:(int -> bool) -> ?state_slot:(int -> int) -> Flow_ir.Core.program -> (string, Flow.Diagnostic.t) result
 (** [store], when given, prints every packed-array constant: it receives the elements and returns a JavaScript
     expression for a [Float64Array] of them (the export keeps them in [data.bin]); without it the elements
     are written inline.
@@ -95,6 +101,10 @@ val frame : ?store:(float array -> string) -> ?gpu:(int -> bool) -> ?state_slot:
     [rt] tessellation); [{type: "image", resource, x, y, scale, angle}];
     [{type: "text", x, y, size, color, text}]; [{type: "push_transform", xx, xy, yx, yy, tx, ty}];
     [{type: "pop_transform"}]. [Marks.validate] is not run by the module. *)
+
+val bindable : Flow_ir.Packed.t -> bool
+(** A region with arguments or frame-dependent inputs can be bound per call (its inputs, captures
+    and count prepared by emitted code): a draw lowering may keep it a region on the web. *)
 
 val frame_map : Flow_ir.Core.program -> string
 (** The side table for [program.map]: one line [<statement id> <start> <finish>] per statement

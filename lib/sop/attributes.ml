@@ -468,6 +468,8 @@ module Material = struct
       [@sop.min 0.] [@sop.max 1.] [@sop.hard_min 0.] [@sop.hard_max 1.];
     roughness : float [@sop.default 0.4] [@sop.label "Roughness"]
       [@sop.min 0.] [@sop.max 1.] [@sop.hard_min 0.] [@sop.hard_max 1.];
+    round : float [@sop.default 0.] [@sop.label "Round corners"]
+      [@sop.min 0.] [@sop.max 0.5] [@sop.hard_min 0.];
     emission_r : float [@sop.default 0.] [@sop.label "Emission red"] [@sop.vec3 "emission"]
       [@sop.min 0.] [@sop.max 1.] [@sop.hard_min 0.] [@sop.hard_max 1.];
     emission_g : float [@sop.default 0.] [@sop.label "Emission green"] [@sop.vec3 "emission"]
@@ -491,7 +493,7 @@ module Material = struct
       ~cook_mode:(Node.Duplicate_input 0) ~dependencies:Context.Dependencies.static
       ~inputs:[|input|] (fun ~node_id:_ context inputs ->
         Rdk.Material_assign.run ~cancel:(Context.cancel_token context) ?group ~name
-          ~color:(color.Vec3.x, color.y, color.z) ~roughness
+          ~color:(color.Vec3.x, color.y, color.z) ~roughness ~round:parameters.round
           ~emission:(emission.Vec3.x, emission.y, emission.z) inputs.(0)
         |> function Ok geometry -> cooked geometry | Error error -> structured_rdk_error error)
   )

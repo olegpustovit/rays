@@ -1,6 +1,6 @@
 # Rays
 
-A creative-coding system for Apple-Silicon Macs. A `sketch.rays` Lisp workspace describes drawings, geometry, scenes and editor layout. The native editor renders through Metal and uses SDL3 for its window, input and media services.
+A creative-coding system for Apple-Silicon Macs. A `.rays` Lisp workspace describes drawings, geometry, scenes and editor layout. The native editor renders through Metal and uses SDL3 for its window, input and media services.
 
 This is an active-development project. Native rendering requires an Apple-Silicon Mac with Metal; there is no native CPU, OpenGL or SDL2 fallback. A separate 2D web-export target is described in the [project guide](AGENTS.md), rather than a substitute native renderer.
 
@@ -26,16 +26,16 @@ These are the repository's native setup instructions. They were source-checked, 
 
 ## Run a workspace
 
-The small [basic workspace](examples/basic/sketch.rays) defines a draw graph, an editor graph and window settings. In the native environment:
+The small [basic workspace](sketches/basic.rays) defines a draw graph, an editor graph and window settings. In the native environment:
 
 ```sh
-dune exec examples/basic/lisp.exe
+dune exec rays -- sketches/basic.rays
 ```
 
 A finite run uses the existing frame limit:
 
 ```sh
-RAYS_MAX_FRAMES=30 dune exec examples/basic/lisp.exe
+RAYS_MAX_FRAMES=30 dune exec rays -- sketches/basic.rays
 ```
 
 The application is built around Rays Lisp. `Sketch`, `Frame` and `Scene` are internal OCaml layers, rather than the first-time user's sketch API. The [language reference](specification/flow.md) explains workspace graphs and references.

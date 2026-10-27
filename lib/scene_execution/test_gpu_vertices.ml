@@ -20,6 +20,7 @@ let ()=
     set_stencil_reference=(fun~front:_~back:_->Ok());
     draw=(fun~primitive:_~first:_~count:_~instances:_->Ok());
     draw_indexed=(fun~primitive:_~index_type:_ _~offset:_~count:_~instances:_->Ok());
+    draw_indexed_indirect=(fun~primitive:_~index_type:_ _~offset:_ _~arguments_offset:_->Ok());
     draw_batch=(fun draws->Array.iter(fun(draw:Ogpu.Backend.driver_batch_draw)->
       Array.iter(fun(stage,index,buffer,_)->
         if stage=Ogpu.Backend.Vertex then indices_seen:=index:: !indices_seen;

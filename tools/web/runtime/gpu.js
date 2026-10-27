@@ -14,9 +14,12 @@
 //       "table_seeds": [31],           // noise seeds, ascending
 //       "tables": [[...512 ints]],     // one permutation per seed, Rays_math.Noise.Private.permutation
 //       "input_widths": [1],           // per input; an input no reachable instruction reads has no binding
-//       "output_widths": [1]
-//   } ] }
-// Binding order is fixed by the printer: inputs (bound ones), outputs, uniforms, status, then the table.
+//       "output_widths": [1],
+//       "gathers": [[2, 3]],           // fast kernels: per gather table, its uniform and element width
+//       "counts": 24                   // fast kernels: byte offset of the count words (mul, div, use), else null
+//   } ], "compaction": "<WGSL>" }   // Wgsl.compaction: a resident fold's array/compact
+// Binding order is fixed by the printer: inputs (bound ones), outputs, uniforms, status, the table, then (fast
+// kernels) one per gather table and count_in, count_out.
 //
 // Surface: requestDevice(win) -> GPUDevice | null (the one device a page shares between this file and present.js; one
 // plain message when WebGPU is missing), createGpu(table, {onError, win, device}) -> gpu | null (a device is requested
@@ -71,7 +74,6 @@ export async function createGpu(table, { onError = e => console.error(e), win = 
 
   // Compile every kernel now, so a WGSL error is a load-time error naming the kernel.
   const kernels = new Map();
-  const keyOf = k => JSON.stringify([k.source, k.entry, k.interface, k.table_seeds]);   // what a pipeline is built from
   const build = async k => {
     const module = device.createShaderModule({ code: k.source, label: k.id });
     const errors = (await module.getCompilationInfo()).messages.filter(m => m.type === 'error');
@@ -85,7 +87,7 @@ export async function createGpu(table, { onError = e => console.error(e), win = 
       tableBuffer = device.createBuffer({ size: k.table_seeds.length * 512 * 4, usage: U.STORAGE | U.COPY_DST });
       device.queue.writeBuffer(tableBuffer, 0, Int32Array.from(k.tables.flat()));
     }
-    return { ...k, key: keyOf(k), layout, pipeline, tableBuffer };
+    return { ...k, layout, pipeline, tableBuffer };
   };
   const compileStart = performance.now();   // gpu.compileMs: shader modules and pipelines (P7.3)
   for (const k of await Promise.all(table.kernels.map(build))) kernels.set(k.id, k);
@@ -105,6 +107,10 @@ export async function createGpu(table, { onError = e => console.error(e), win = 
     return o;
   };
   const pending = [];   // {staging, done, kernel}
+  const spare = new Map();   // resident buffers by byte size
+  let compactPipeline = null, compactions = 0, blank = null;
+  // an unread count_in: WebGPU refuses one buffer both read-only and writable in a dispatch
+  const unused = () => blank ??= device.createBuffer({ size: 32, usage: U.STORAGE, label: 'unused count' });
   const maxBinding = device.limits.maxStorageBufferBindingSize;
   const images = new Map();   // one texture per exported image (export caps these at 64)
   let imagePipeline = null;
@@ -112,21 +118,6 @@ export async function createGpu(table, { onError = e => console.error(e), win = 
 
   const gpu = {
     device, kernels, compileMs,
-    // Reload (plan P6.7): a new kernel table. A kernel whose WGSL, entry, bindings and noise seeds are unchanged
-    // keeps its pipeline; only the others are compiled; a table the new one no longer uses is released.
-    async update(next) {
-      const built = await Promise.all(next.kernels.map(k => {
-        const old = kernels.get(k.id);
-        return old && old.key === keyOf(k) ? { ...old, ...k } : build(k);
-      }));
-      const keep = new Set(built.map(k => k.tableBuffer));
-      for (const k of kernels.values()) if (!keep.has(k.tableBuffer)) k.tableBuffer?.destroy();
-      kernels.clear();
-      for (const k of built) kernels.set(k.id, k);
-      for (const o of owned.values()) o.buffer.destroy();
-      owned.clear();
-      releaseImages();
-    },
     // An input that stays on the device between dispatches: the elements as f32 (finite), in a buffer the caller destroys.
     upload(array) {
       const f32 = Float32Array.from(array);
@@ -135,15 +126,19 @@ export async function createGpu(table, { onError = e => console.error(e), win = 
       device.queue.writeBuffer(buffer, 0, f32);
       return buffer;
     },
-    dispatch(kernelId, { count, inputs = [], uniforms = {}, id = kernelId }) {
+    // Fast kernels also take `tables` (uniform index -> host array or {buffer, length}, length in floats),
+    // `countIn` ({buffer, mul, div}: the count is at most buffer[0] * mul / div), `into` ({output, cell}: the
+    // caller's output buffer and 24-byte count record) and `encoder` (record the pass there, submit nothing,
+    // check no status: a resident fold's level). Returns {count, outputs, cell}.
+    dispatch(kernelId, { count, inputs = [], uniforms = {}, id = kernelId, tables = [], countIn = null, into = null, encoder = null }) {
       const k = kernels.get(kernelId);
       if (!k) fail(`Unknown GPU kernel ${kernelId}.`);
-      gpu.poll();
+      if (!encoder) gpu.poll();
       if (!Number.isInteger(count) || count < 0 || count >= 2 ** 32) fail('GPU count is not a 32-bit count.');
       const groups = Math.ceil(count / WORKGROUP);
       if (groups > device.limits.maxComputeWorkgroupsPerDimension) fail('GPU count exceeds the dispatch limit.');
       const outputs = k.output_widths.map((w, n) => ({ id: `${id}:out${n}`, width: w }));
-      if (count === 0) return { count, outputs: outputs.map(o => ({ ...o, buffer: null })) };
+      if (count === 0) return { count, outputs: outputs.map(o => ({ ...o, buffer: null })), cell: null };
       for (const w of [...k.output_widths, ...k.input_widths]) if (count * w * 4 > maxBinding) fail('GPU count exceeds native storage bounds.');
       // Uniform words (run.ml:78-91): count, then f32 bit patterns by layout name.
       const words = new DataView(new ArrayBuffer(k.uniform_bytes));
@@ -153,7 +148,14 @@ export async function createGpu(table, { onError = e => console.error(e), win = 
         if (typeof v !== 'number' || !Number.isFinite(f)) fail('GPU inputs must remain finite when represented as float32.');
         words.setFloat32(offset, f, true);
       };
+      const tableLength = u => { const t = tables[u]; return t === undefined ? fail('GPU gather table missing.') : isBuffer(t.buffer) ? t.length : t.length; };
+      if (k.counts != null) {
+        words.setUint32(k.counts, countIn?.mul ?? 1, true); words.setUint32(k.counts + 4, countIn?.div ?? 1, true);
+        words.setUint32(k.counts + 8, countIn ? 1 : 0, true);
+      }
       for (const [name, offset, width] of k.uniform_layout) {
+        const gather = /^gather:(\d+):(\d+)$/.exec(name);
+        if (gather) { const [u, w] = k.gathers[+gather[1]]; words.setUint32(offset, Math.floor(tableLength(u) / w), true); continue; }
         const v = uniforms[name];
         if (v === undefined) fail(`GPU uniform ${name} missing.`);
         if (width === 1 && !Array.isArray(v) && !ArrayBuffer.isView(v)) put(offset, v);
@@ -164,15 +166,34 @@ export async function createGpu(table, { onError = e => console.error(e), win = 
       device.queue.writeBuffer(uniformBuffer.buffer, 0, words.buffer);
       const status = own(`${id}:status`, 4, U.STORAGE | U.COPY_SRC | U.COPY_DST);
       device.queue.writeBuffer(status.buffer, 0, new Uint32Array(1));
-      const entries = [];
+      const entries = [], ins = k.input_widths.length, outs = k.output_widths.length;
+      const gatherBase = ins + outs + 2 + (k.table_seeds.length ? 1 : 0), gathers = k.gathers ?? [];
+      const countBase = gatherBase + gathers.length;
+      const cell = k.counts == null ? null : (into?.cell ?? own(`${id}:count`, 40, U.STORAGE | U.COPY_SRC | U.INDIRECT).buffer);
       for (const b of k.interface) {
-        const n = b.binding, ins = k.input_widths.length, outs = k.output_widths.length;
+        const n = b.binding;
+        if (k.counts != null && n >= gatherBase) {
+          if (n < countBase) {   // a gather table: a device buffer, or a host array uploaded as f32
+            const [u] = gathers[n - gatherBase], t = tables[u];
+            if (isBuffer(t?.buffer)) entries.push({ binding: n, resource: { buffer: t.buffer } });
+            else {
+              const f32 = !t.length ? Float32Array.of(0) : ArrayBuffer.isView(t) && !(t instanceof BigInt64Array) ? Float32Array.from(t) : Float32Array.from(t, Number);
+              const o = own(`${id}:g${n - gatherBase}`, f32.byteLength, U.STORAGE | U.COPY_DST);
+              device.queue.writeBuffer(o.buffer, 0, f32);
+              entries.push({ binding: n, resource: { buffer: o.buffer, size: f32.byteLength } });
+            }
+          } else if (n === countBase) entries.push({ binding: n, resource: { buffer: countIn?.buffer ?? unused() } });
+          else entries.push({ binding: n, resource: { buffer: cell, size: 40 } });
+          continue;
+        }
         if (n < ins) {   // a bound input
           const source = inputs[n], bytes = count * k.input_widths[n] * 4;
-          if (isBuffer(source)) entries.push({ binding: n, resource: { buffer: source, size: bytes } });
+          if (isBuffer(source)) entries.push({ binding: n, resource: { buffer: source } });
           else {
             if (!source || source.length < count * k.input_widths[n]) fail('GPU input count changed.');
-            const f32 = Float32Array.from({ length: bytes / 4 }, (_, i) => source[i]);
+            // a typed array converts natively; a plain array element by element
+            const f32 = new Float32Array(bytes / 4);
+            if (ArrayBuffer.isView(source)) f32.set(source.subarray(0, bytes / 4)); else for (let i = 0; i < f32.length; i++) f32[i] = source[i];
             for (let i = 0; i < f32.length; i++) if (!Number.isFinite(f32[i])) fail('GPU inputs must remain finite when represented as float32.');
             const o = own(`${id}:in${n}`, bytes, U.STORAGE | U.COPY_DST);
             device.queue.writeBuffer(o.buffer, 0, f32);
@@ -180,15 +201,23 @@ export async function createGpu(table, { onError = e => console.error(e), win = 
           }
         } else if (n < ins + outs) {
           const bytes = count * k.output_widths[n - ins] * 4;
-          const o = own(outputs[n - ins].id, bytes, U.STORAGE | U.COPY_SRC | U.COPY_DST);
-          outputs[n - ins].buffer = o.buffer;
-          entries.push({ binding: n, resource: { buffer: o.buffer, size: bytes } });
+          const buffer = into && n === ins ? into.output : own(outputs[n - ins].id, bytes, U.STORAGE | U.COPY_SRC | U.COPY_DST | U.VERTEX).buffer;
+          outputs[n - ins].buffer = buffer;
+          entries.push({ binding: n, resource: { buffer, size: bytes } });
         } else if (b.kind === 'uniform') entries.push({ binding: n, resource: { buffer: uniformBuffer.buffer, size: k.uniform_bytes } });
         else if (b.kind === 'read_write') entries.push({ binding: n, resource: { buffer: status.buffer, size: 4 } });
         else entries.push({ binding: n, resource: { buffer: k.tableBuffer } });
       }
+      if (encoder) {
+        const pass = encoder.beginComputePass();
+        pass.setPipeline(k.pipeline);
+        pass.setBindGroup(0, device.createBindGroup({ layout: k.layout, entries }));
+        pass.dispatchWorkgroups(groups);
+        pass.end();
+        return { count, outputs, cell };
+      }
       const staging = device.createBuffer({ size: 4, usage: U.MAP_READ | U.COPY_DST });
-      const encoder = device.createCommandEncoder();
+      encoder = device.createCommandEncoder();
       const pass = encoder.beginComputePass();
       pass.setPipeline(k.pipeline);
       pass.setBindGroup(0, device.createBindGroup({ layout: k.layout, entries }));
@@ -199,7 +228,51 @@ export async function createGpu(table, { onError = e => console.error(e), win = 
       const entry = { staging, kernel: kernelId, done: false };
       entry.promise = staging.mapAsync(GPUMapMode.READ).then(() => { entry.done = true; }, () => { entry.done = true; entry.lost = true; });
       pending.push(entry);
-      return { count, outputs };
+      return { count, outputs, cell };
+    },
+    // A resident fold's pieces. Buffers it owns come from a pool by byte size (a draw's sizes repeat).
+    allocate(bytes, usage = U.STORAGE | U.COPY_SRC | U.COPY_DST | U.VERTEX | U.INDIRECT) {
+      const size = Math.max(32, Math.ceil(bytes / 4) * 4), free = spare.get(size);
+      if (free?.length) return free.pop();
+      return device.createBuffer({ size, usage, label: 'resident' });
+    },
+    release(buffer) {
+      const free = spare.get(buffer.size) ?? [];
+      if (free.length < 4) { free.push(buffer); spare.set(buffer.size, free); } else buffer.destroy();
+    },
+    // array/compact on the device: the indices of mask's nonzero elements (of count, or at most countIn[0]).
+    compact(encoder, { mask, count, countIn = null, kept, total }) {
+      compactPipeline ??= device.createComputePipeline({ layout: 'auto',
+        compute: { module: device.createShaderModule({ code: table.compaction ?? fail('The kernel table has no compaction.'), label: 'compaction' }), entryPoint: 'flow_compact_mask' } });
+      const bound = own(`compact:${compactions++ % 64}`, 16, U.UNIFORM | U.COPY_DST);
+      device.queue.writeBuffer(bound.buffer, 0, Uint32Array.of(count, countIn ? 1 : 0, 0, 0));
+      const pass = encoder.beginComputePass();
+      pass.setPipeline(compactPipeline);
+      pass.setBindGroup(0, device.createBindGroup({ layout: compactPipeline.getBindGroupLayout(0), entries: [
+        { binding: 0, resource: { buffer: mask } }, { binding: 1, resource: { buffer: kept } },
+        { binding: 2, resource: { buffer: total } }, { binding: 3, resource: { buffer: bound.buffer, size: 16 } },
+        { binding: 4, resource: { buffer: countIn ?? unused() } }] }));
+      pass.dispatchWorkgroups(1);
+      pass.end();
+    },
+    // Reads [count cell, then that many elements] of each {buffer, cell, width, capacity}: one copy, one map.
+    async read(items) {
+      const encoder = device.createCommandEncoder(), stage = [];
+      for (const it of items) {
+        const bytes = it.capacity * it.width * 4;
+        const staging = device.createBuffer({ size: 8 + Math.max(4, bytes), usage: U.MAP_READ | U.COPY_DST });
+        if (it.cell) encoder.copyBufferToBuffer(it.cell, 0, staging, 0, 4);
+        if (bytes) encoder.copyBufferToBuffer(it.buffer, 0, staging, 8, bytes);
+        stage.push(staging);
+      }
+      device.queue.submit([encoder.finish()]);
+      await Promise.all(stage.map(s => s.mapAsync(GPUMapMode.READ)));
+      return items.map((it, i) => {
+        const range = stage[i].getMappedRange(), n = it.cell ? Math.min(it.capacity, new Uint32Array(range, 0, 1)[0]) : it.capacity;
+        const values = new Float32Array(range, 8, n * it.width).slice();
+        stage[i].destroy();
+        return values;
+      });
     },
     // Reads the status words of dispatches whose work has finished; the rest wait for the next call.
     poll() {
@@ -283,7 +356,7 @@ export async function createGpu(table, { onError = e => console.error(e), win = 
       staging.destroy();
       return out;
     },
-    dispose() { releaseImages(); for (const o of owned.values()) o.buffer.destroy(); for (const k of kernels.values()) k.tableBuffer?.destroy(); owned.clear(); device.destroy(); },
+    dispose() { releaseImages(); blank?.destroy(); for (const free of spare.values()) for (const b of free) b.destroy(); spare.clear(); for (const o of owned.values()) o.buffer.destroy(); for (const k of kernels.values()) k.tableBuffer?.destroy(); owned.clear(); device.destroy(); },
   };
   return gpu;
 }

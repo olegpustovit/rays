@@ -292,7 +292,13 @@ position or extent array as float32 with stride `width`; a colour buffer convert
 for `Shape_batch`, to `0xRRGGBBAA` words, fill and stroke mode 0; a device colour bound with stride
 3 and mode 1). The bytes of a host array are kept while the array is physically the previous
 frame's, so a static attribute beside a device one is converted and uploaded once, not per
-frame. The set rides in the scene
+frame. When the positions are a fast-precision kernel's output, the set is drawn indirect: the
+kernel wrote its count record `{n, 6n, 1, 0, 0, 0}` (`Flow_gpu.Run.count_record`), and from byte 4
+that is the indexed indirect draw of `n` quads (`gpu_marks ?indirect`,
+`Scene_execution.Private.register_gpu_vertices ?indirect`, `Ogpu.Backend.draw_indexed_indirect`),
+so the instance count the draw uses is the one the device wrote, never batched into an ICB.
+`lib/rays_execution/test_marks_native.ml` draws a set registered for 100 rects whose record says
+63 and matches the 63-rect `Shape_batch` pixel for pixel. The set rides in the scene
 as a `Shape_batch` GPU token, so transform, clip, blend and painter order are the ordinary
 ones. A rect's stroke width is the constant 1, as `Shape_batch.rect`'s; a line's fill is unused.
 Every other mark set, including every set when there is no GPU host, stays a `Shape_batch`

@@ -1,0 +1,36 @@
+; Voxel wall: a grid of points, each given a depth by the Wall Depth defn
+; (fBm noise), a packed concrete cube copied onto every point, path traced.
+^:allow-warnings (workspace voxel_wall
+
+  ; per point scale = (1, 1, depth): depth = base + amplitude * h^2, h = fBm at the point
+  (defn wall_depth :context sop [(grid : geometry) (frequency : float 0.055) (amplitude : float 5.0)
+                                 (base : float 0.15) (octaves : int 3) (seed : int 7)]
+    (let* [depth (fn [(p : vec3)]
+                   (let* [h (min 1.0 (max 0.0 (noise3 [(* p.x frequency) (* p.y frequency) 0]
+                                                      :octaves octaves :seed seed)))]
+                     [1.0 1.0 (+ base (* amplitude (* h h)))]))]
+      (sop/with_attr grid "scale" (map depth (sop/attr grid :P)) :owner "point" :type vec3)))
+
+  (graph wall :context sop
+    (let* [grid (sop/grid :orientation "XY" :connectivity "Triangles"
+                          :columns 35 :rows 59 :width 35 :height 59 :size 35)
+           cube (sop/material (sop/box :size [0.86 0.86 1] :center [0 0 0.5])
+                             :material "concrete" :color [0.42 0.42 0.44] :roughness 0.6 :round 0.07)]
+      (sop/copy_to_points cube (wall_depth grid) :pack true)))
+
+  (graph scene :context scene
+    (let* [wall (scene/geometry (ref wall) :name "wall")
+           camera (scene/camera :eye [-4.133102 1.518379 19.482749] :target [0 0 1]
+                                :fov 40.107046 :follow_viewport true)
+           key (scene/light :name "key" :translate [-34 40 30] :intensity 1650.1184 :width 24 :height 24)
+           fill (scene/light :name "fill" :translate [30 -10 26] :intensity 343.7747 :width 30 :height 30)
+           sky (scene/world (ref world) :name "studio")]
+      (scene/root (scene/merge wall camera key fill sky) :camera camera :renderer "Path traced")))
+
+  ; A near-black studio.
+  (graph world :context world
+    (world/gradient :name "studio"
+                    :zenith [0.006 0.007 0.009]
+                    :horizon [0.006 0.007 0.009]
+                    :nadir [0.002 0.002 0.003]
+                    :sharpness 1)))

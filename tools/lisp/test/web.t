@@ -1,6 +1,6 @@
 The web export: a draw graph becomes a standalone browser application. A second run is byte-identical.
 
-  $ rays-lisp web ../../../sketches/flow_vectors/sketch.rays -o out
+  $ rays web ../../../sketches/flow_vectors.rays -o out
   $ find out -type f | sort
   out/data.bin
   out/index.html
@@ -13,10 +13,12 @@ The web export: a draw graph becomes a standalone browser application. A second 
   out/runtime/present.js
   out/runtime/prims.js
   out/runtime/region_bindings.js
+  out/runtime/resident.js
   out/runtime/runtime.js
   out/runtime/shape2.js
   out/runtime/workers.js
-  $ rays-lisp web ../../../sketches/flow_vectors/sketch.rays -o again
+  out/serve.json
+  $ rays web ../../../sketches/flow_vectors.rays -o again
   $ diff -r out again && echo identical
   identical
   $ head -1 out/program.js
@@ -28,7 +30,7 @@ The web export: a draw graph becomes a standalone browser application. A second 
 
 A packed-array program keeps its constants in data.bin, and the region table names them.
 
-  $ rays-lisp web ../../../examples/particles/sketch.rays -o particles
+  $ rays web ../../../sketches/particles.rays -o particles
   $ test -s particles/data.bin && grep -c "rt.data" particles/program.js
   1
 
@@ -42,7 +44,7 @@ A draw graph that reaches a sop graph is refused, with the span of the reference
   >       (draw/merge (draw/background "#080a10")
   >                   (draw/circle [10 10 0] 5)))))
   > X
-  $ rays-lisp web sop.rays -o refused
+  $ rays web sop.rays -o refused
   File "sop.rays", line 4, characters 13-27:
   Error [E_WEB_GRAPH]: The web export draws 2D canvas graphs only; this reaches the sop geometry.
   [1]
@@ -64,29 +66,29 @@ C1 topology and mesh operators retain the production 2D export boundary.
   >   (graph picture :context draw
   >     (let* [g (ref geometry)] (draw/background "#080a10"))))
   > X
-  $ rays-lisp web mesh.rays -o mesh_out 2>&1 | sed -n '/^Error/p'
+  $ rays web mesh.rays -o mesh_out 2>&1 | sed -n '/^Error/p'
   Error [E_WEB_GRAPH]: The web export draws 2D canvas graphs only; this reaches the sop geometry.
   $ test -e mesh_out && echo written || echo nothing written
   nothing written
 
 The built-in noise image exports with native seeded scalar arguments.
 
-  $ rays-lisp web ../../../sketches/flow_image/sketch.rays -o image
+  $ rays web ../../../sketches/flow_image.rays -o image
   $ grep -c "kind: 'noise'" image/program.js
   1
 
 Generated images export deterministically, with kernels and compiled live arguments, without UV data.
 
-  $ rays-lisp web ../../../sketches/flow_contours/sketch.rays -o contours
-  $ rays-lisp web ../../../sketches/flow_contours/sketch.rays -o contours_again
+  $ rays web ../../../sketches/flow_contours.rays -o contours
+  $ rays web ../../../sketches/flow_contours.rays -o contours_again
   $ diff -r contours contours_again && echo identical
   identical
   $ grep -c '"id":"image[0-9]*"' contours/kernels.json
   6
   $ test ! -s contours/data.bin && echo 'UVs are computed on the GPU'
   UVs are computed on the GPU
-  $ rays-lisp web ../../../sketches/flow_image_kernel/sketch.rays -o image_kernel
-  $ rays-lisp web ../../../sketches/flow_shader/sketch.rays -o shader
+  $ rays web ../../../sketches/flow_image_kernel.rays -o image_kernel
+  $ rays web ../../../sketches/flow_shader.rays -o shader
 
 File images are decoded into the standalone bundle; nested render targets export deterministically.
 
@@ -95,8 +97,8 @@ File images are decoded into the standalone bundle; nested render targets export
   > (workspace w (graph picture :context draw
   >   (draw/image (image/render (draw/image (image/load "pixels.ppm")) :width 3 :height 5))))
   > X
-  $ rays-lisp web loaded.rays -o loaded
-  $ rays-lisp web loaded.rays -o loaded_again
+  $ rays web loaded.rays -o loaded
+  $ rays web loaded.rays -o loaded_again
   $ diff -r loaded loaded_again && echo identical
   identical
   $ test -s loaded/data.bin && grep -c "kind: 'load'" loaded/program.js
@@ -107,12 +109,12 @@ File images are decoded into the standalone bundle; nested render targets export
 Missing or invalid assets fail before writing any export.
 
   $ printf 'bad image\n' > pixels.ppm
-  $ rays-lisp web loaded.rays -o bad 2>&1 | sed -n 's/^Error \[\([^]]*\)\].*/\1/p'
+  $ rays web loaded.rays -o bad 2>&1 | sed -n 's/^Error \[\([^]]*\)\].*/\1/p'
   E_WEB_IMAGE
   $ test -e bad && echo written || echo nothing written
   nothing written
   $ rm pixels.ppm
-  $ rays-lisp web loaded.rays -o missing 2>&1 | sed -n 's/^Error \[\([^]]*\)\].*/\1/p'
+  $ rays web loaded.rays -o missing 2>&1 | sed -n 's/^Error \[\([^]]*\)\].*/\1/p'
   E_WEB_IMAGE
   $ test -e missing && echo written || echo nothing written
   nothing written
@@ -123,13 +125,13 @@ A standalone application's file assets must be known at export time.
   > (workspace w (graph picture :context draw
   >   (draw/image (image/load (str "image-" (frame/index) ".png")))))
   > X
-  $ rays-lisp web dynamic_path.rays -o bad 2>&1 | sed -n 2p
+  $ rays web dynamic_path.rays -o bad 2>&1 | sed -n 2p
   Error [E_WEB_IMAGE]: A standalone export needs image/load paths known at export time.
 
 A mark set whose attributes are GPU regions never invokes them on the CPU: the frame names a device array, and two
 attributes of equal count and rate share one kernel with an output each.
 
-  $ rays-lisp web ../../../sketches/flow_particles_gpu/sketch.rays -o gpu
+  $ rays web ../../../sketches/flow_particles_gpu.rays -o gpu
   $ grep -c "rt.gpuArray(0)" gpu/program.js
   1
   $ grep -c "rt.invoke" gpu/program.js
@@ -146,7 +148,7 @@ attributes of equal count and rate share one kernel with an output each.
   >            r (map (fn [i] (+ 1 (* 0.001 (+ i t)))) (array/range 2048))]
   >       (draw/circles p :radius r))))
   > X
-  $ rays-lisp web fused.rays -o fused
+  $ rays web fused.rays -o fused
   $ grep -o '"gpu": {[^}]*}' fused/program.js
   "gpu": {"output": 0}
   "gpu": {"output": 1}
@@ -164,7 +166,7 @@ a readback in the frame, which the web cannot do.
   >     (let* [p (map (fn [i] [(+ i t) i 0]) (array/range 2048))]
   >       (draw/merge (draw/circles p :radius 2) (draw/circle (array/nth p 0) 3)))))
   > X
-  $ rays-lisp web read.rays -o read
+  $ rays web read.rays -o read
   $ grep -c "rt.gpuArray" read/program.js
   0
   [1]
@@ -183,17 +185,19 @@ The production exporter never probes deferred argument sources or leaves unresol
   >          shift (fn [x] (+ x sample.nested.bias))]
   >     (draw/text [0 0 0] (str (array/sum (map shift sample.nested.column)) ":" sample.nested.exact)))))
   > X
-  $ rays-lisp web captures.rays -o captures
+  $ rays web captures.rays -o captures
   $ printf '{"type":"module"}\n' > captures/package.json
   $ grep -c '\$core/argument' captures/program.js
   0
   [1]
   $ cat > captures.mjs <<'X'
-  > import {frame} from './captures/program.js';
+  > import {readFileSync} from 'node:fs';
+  > import * as program from './captures/program.js';
   > import * as p from './captures/runtime/prims.js';
-  > import {makeRt} from '../../web/test/rt_shim.mjs';
-  > const rt = makeRt();
-  > await frame({t: 0.25, dt: 0, frame: 2, tick: 2, size: [640,360], pointer: [0,0], keys: [], buttons: [], events: []}, [], rt);
+  > import {createRuntime} from './captures/runtime/runtime.js';
+  > const file = readFileSync('captures/data.bin'), data = file.buffer.slice(file.byteOffset, file.byteOffset + file.byteLength);
+  > const rt = createRuntime(program, {data});
+  > await rt.stepFrame({t: 0.25, dt: 0, frame: 2, tick: 2, size: [640,360], pointer: [0,0], keys: [], buttons: [], events: []});
   > const text = rt.marks.find(mark => mark.type === 'text')?.text;
   > if (text !== '8:9007199254740995') throw new Error(`computed captures: ${text}`);
   > console.log(text);

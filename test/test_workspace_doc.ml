@@ -371,11 +371,17 @@ let part_contexts () =
    | None -> fail "the World does not read");
   (* settings: the window the host opens *)
   let window = match Contexts.window bloom with Ok w -> w | Error d -> fail (Flow.Diagnostic.to_string d) in
-  check (window = { Contexts.title = "Bloom study"; width = 1400; height = 800; fps = 60; seed = 42 })
+  check (window = { Contexts.title = "Bloom study"; width = 1400; height = 800; fps = 60; seed = 42; fast = true })
     "settings graph: window title, size, fps (a macro call) and seed";
   (match Contexts.window (of_text (case "tree")) with
-   | Ok w -> check (w.title = "Rays" && w.fps = 60) "no settings graph: defaults"
+   | Ok w -> check (w.title = "Rays" && w.fps = 60 && w.fast) "no settings graph: defaults, fast precision"
    | Error d -> fail (Flow.Diagnostic.to_string d));
+  (* :precision "exact" keeps the CPU; Contexts.fast reads it from a document every frame *)
+  let exact = of_text "(workspace e (graph g :context value 1.0) (graph s :context settings (settings/config :precision \"exact\")))" in
+  (match Contexts.window exact with
+   | Ok w -> check (not w.fast) "settings :precision \"exact\" is not fast"
+   | Error d -> fail (Flow.Diagnostic.to_string d));
+  check (Contexts.fast doc) "a document without :precision is fast";
   check (List.exists (fun (f : Editor_core.Param.field_view) -> f.name = "title" && f.current = Text_value "Bloom study")
     (Editor_document.Settings.fields doc.settings)) "the settings graph is the document's settings";
   (* determinism, print/parse and preset round trips *)
@@ -606,7 +612,7 @@ let part_files () =
     let path = Filename.concat dir name in
     if Sys.is_directory path then rays path
     else if Filename.check_suffix name ".rays" then [path] else []) in
-  let files = List.sort compare (rays "../sketches" @ rays "../examples") @ ["../specification/pxui-kit/kit.rays"] in
+  let files = List.sort compare (rays "../sketches") @ ["../specification/pxui-kit/kit.rays"] in
   (* the seven files that cost 6-30 s each (a lowering of each, three per literal) run under RAYS_SLOW=1 only *)
   let heavy = ["flow_particles_gpu/"; "ws_sunflower/"; "ws_tiles/"; "sop_gallery/"; "flow_field/"; "ws_bloom/"; "ws_garland/"] in
   let files = if Sys.getenv_opt "RAYS_SLOW" = Some "1" then files

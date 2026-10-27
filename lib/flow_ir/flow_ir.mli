@@ -64,6 +64,9 @@ module Gpu : sig
     prepare:Packed.t -> (kernel,Flow.Diagnostic.t)result}
   type policy=Measured | Qualification
   val policy : unit -> policy
+  val fast : bool Domain.DLS.key
+  (* The workspace's fast precision in this domain's scope (false outside one): a display producer
+     may use gathers and int32 on the device. The editor sets it from [settings/config :precision]. *)
   val with_backend : ?policy:policy -> backend -> (unit -> 'a) -> 'a
   (** Initial-domain host scope. [None] cost means unmeasured and keeps CPU placement.
       Qualification explicitly forces the native test path; it is not production calibration. *)
@@ -216,6 +219,11 @@ module Executor : sig
       GPU refusal, the static or run-time count is at least 1,024 and the cost model or
       [Qualification] says so), else [None] for the CPU. It keeps the kernels of the last 64
       regions it saw. *)
+
+  val region_readback : unit -> Packed.t -> live:Frame_input.t -> (Flow.Eval.value option,Flow.Diagnostic.t)result
+  (** In fast precision ({!Gpu.fast}) a region of 4,096 elements or more that a drawing computes with
+      (not a mark attribute) runs on the current backend and is read back as a 32-bit array; [None]
+      leaves it to the CPU. Kernels are kept by the region's form, at most 16. *)
 
   val force_display : ?state:Flow.Eval.state -> ?reference:bool -> ?policy:Gpu.policy -> program -> live:Frame_input.t ->
     (displayed,Flow.Diagnostic.t)result

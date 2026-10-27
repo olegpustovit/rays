@@ -34,8 +34,8 @@ let rendered_digest scene =
   | Error _ -> failwith "Render_ir.create rejected a scene that Drawing built"
   | Ok ir -> Editor_document.Contexts.sha256 (Bytes.to_string (Scene_command.Render_ir.serialize ir))
 
-let lines (directory, name) =
-  let file = Printf.sprintf "../%s/%s/sketch.rays" directory name in
+let lines (_, name) =
+  let file = Printf.sprintf "../sketches/%s.rays" name in
   let text = In_channel.with_open_bin file In_channel.input_all in
   let imports = match Rays_editor.Source.read_imports ~file text with
     | Ok imports -> imports

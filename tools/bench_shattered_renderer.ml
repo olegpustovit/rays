@@ -180,7 +180,7 @@ let percentile values length fraction =
 
 (* The shattered-cube sketch's document, run from the repository root. *)
 let workspace () =
-  let path = "sketches/shattered_cube/sketch.rays" in
+  let path = "sketches/shattered_cube.rays" in
   match Rays_editor.Workspace.load (In_channel.with_open_bin path In_channel.input_all) with
   | Ok workspace -> workspace
   | Error diagnostics -> failwith (String.concat "; " (List.map Flow.Diagnostic.to_string diagnostics))

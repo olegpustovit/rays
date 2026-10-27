@@ -1,6 +1,6 @@
 # Rays Flow: building with the graph
 
-Four lessons on `examples/recursive_rectangles` (`dune exec examples/recursive_rectangles/lisp.exe`
+Four lessons on `examples/recursive_rectangles` (`dune exec rays -- sketches/recursive_rectangles.rays`
 runs it; `/ l g` makes a graph panel, `/ j` picks `picture`). Every gesture edits the Lisp; the
 Lisp panel shows the text it wrote. Keys are `flow.md` §7.2.
 

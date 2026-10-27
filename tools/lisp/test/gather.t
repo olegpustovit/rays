@@ -7,7 +7,7 @@ transports numeric captures through data.bin and executes the actual runtime and
   >          positions (map (fn [(i : int)] (+ (array/nth table (int/mod i 7)) [t 0.0 0.0])) (array/range 32769 :type int))]
   >     (draw/points positions :color "#ffffff"))))
   > X
-  $ rays-lisp web gather.rays -o gather
+  $ rays web gather.rays -o gather
   $ printf '{"type":"module"}\n' > gather/package.json
   $ cat > gather.mjs <<'X'
   > import {readFileSync} from 'node:fs';
@@ -28,15 +28,17 @@ transports numeric captures through data.bin and executes the actual runtime and
   $ node gather.mjs
   lookup export: data.bin, actual frames, one/eight workers and CPU placement pass
 
-Integer lookup captures keep their low bits through the actual exported data writer.
+Integer lookup captures keep their low bits through the actual exported data writer, in exact
+precision (fast precision carries region integers as numbers, exact to 2^53).
 
   $ cat > integer.rays <<'X'
   > (workspace gather (graph picture :context draw
   >   (let* [table (array/int 3 9007199254740993)
   >          samples (map (fn [(i : int)] (int/add (array/nth table (int/mod i 3)) (frame/index))) (array/range 32769 :type int))]
-  >     (draw/text [0 0 0] (str (array/nth samples 0))))))
+  >     (draw/text [0 0 0] (str (array/nth samples 0)))))
+  >   (graph settings :context settings (settings/config :precision "exact")))
   > X
-  $ rays-lisp web integer.rays -o integer
+  $ rays web integer.rays -o integer
   $ printf '{"type":"module"}\n' > integer/package.json
   $ cat > integer.mjs <<'X'
   > import {readFileSync} from 'node:fs';import * as program from './integer/program.js';
@@ -62,7 +64,7 @@ Text leaves keep their native bytes through exported captures and worker results
   >          selected (map (fn [(i : int)] (if (> t 0.) (array/nth names (int/mod i 7)) "safe")) (array/range 32769 :type int))]
   >     (draw/text [0 0 0] (array/nth selected 0)))))
   > X
-  $ rays-lisp web text.rays -o text
+  $ rays web text.rays -o text
   $ printf '{"type":"module"}\n' > text/package.json
   $ cat > text.mjs <<'X'
   > import {readFileSync} from 'node:fs';import * as program from './text/program.js';
@@ -97,7 +99,7 @@ skips compact worker outputs without changing either source count.
   >            (if (> t 0.) (if (int/eq i 0) old (array/nth names i)) "safe"))]
   >     (draw/text [0 0 0] (array/nth selected 0)))))
   > X
-  $ rays-lisp web product.rays -o product
+  $ rays web product.rays -o product
   $ printf '{"type":"module"}\n' > product/package.json
   $ cat > product.mjs <<'X'
   > import {readFileSync} from 'node:fs';import * as program from './product/program.js';

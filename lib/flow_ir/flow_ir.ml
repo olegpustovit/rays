@@ -20,6 +20,7 @@ module Gpu = struct
   type policy=Measured | Qualification
   let current : backend option Domain.DLS.key=Domain.DLS.new_key(fun()->None)
   let current_policy : policy Domain.DLS.key=Domain.DLS.new_key(fun()->Measured)
+  let fast : bool Domain.DLS.key=Domain.DLS.new_key(fun()->false)
   let policy()=Domain.DLS.get current_policy
   let with_backend ?(policy=Measured) backend run = let previous=Domain.DLS.get current
     and previous_policy=Domain.DLS.get current_policy in
@@ -185,7 +186,7 @@ let qualify_workspace ?record ?inputs ?observe (workspace : W.t) =
       let reasons = match adapted with
         | Error reasons -> reasons
         | Ok residual -> (match Packed.compile_result residual (E.Private.residual_view residual).term with
-            | Error reasons -> reasons | Ok packed -> Packed.gpu_refusals ~fused:true packed) in
+            | Error reasons -> reasons | Ok packed -> Packed.gpu_refusals ~fused:true ~fast:(Domain.DLS.get Gpu.fast) packed) in
       let reasons = List.map (fun (d : Flow.Diagnostic.t) ->
         {d with span = (match d.span with Some _ -> d.span | None -> Some view.term.form.span);
           message = Printf.sprintf "%s (producer %s, instance %d, tuple [%s])" d.message
@@ -501,7 +502,7 @@ type target = { legal : node -> tier -> bool; cost : tier -> count:int -> float 
 let native = {
   legal = (fun node tier -> match tier, node.kind, node.count with
     | Gpu, Kernel {body = Packed_map packed; _}, Count.Static count ->
-        count >= 1024 && Packed.gpu_refusals ~fused:true packed = []
+        count >= 1024 && Packed.gpu_refusals ~fused:true ~fast:(Domain.DLS.get Gpu.fast) packed = []
     | Gpu, Marks _, _ -> true
     | Gpu, _, _ -> false
     | _ -> true);
@@ -879,7 +880,14 @@ module Executor = struct
       let execute r live =
         let core = try
           let cached = Atomic.get program.core in
-          let rec find = function [] -> None | (key,mode,p)::rest -> if key == r && mode=strict then Some p else find rest in
+          (* the evaluator makes a fresh residual each force: the same term over the same captured
+             values (physically) lowers to the same program *)
+          let view = E.Private.residual_view r in
+          let same (key : E.residual) = key == r ||
+            (let k = E.Private.residual_view key in
+             k.term == view.term && List.compare_lengths k.bindings view.bindings = 0
+             && List.for_all2 (fun (n, a) (m, b) -> String.equal n m && a == b) k.bindings view.bindings) in
+          let rec find = function [] -> None | (key,mode,p)::rest -> if mode=strict && same key then Some p else find rest in
           let prepared = match find cached with
             | Some p -> p
             | None ->
@@ -948,7 +956,9 @@ module Executor = struct
   let display_packed ?state ?resolve ~backend ~policy ~approx ~display ~profile ~cached ~store ~readback packed ~live =
     let cpu()=Ok None in
     let _,site,_=Packed.site packed in
-    if not(W.Paths.mem site approx) || Packed.gpu_refusals ~fused:true packed <> []
+    let fast=Domain.DLS.get Gpu.fast in
+    (* fast precision: a displayed region needs no qualified path, its only use is the screen *)
+    if not((fast && display) || W.Paths.mem site approx) || Packed.gpu_refusals ~fused:true ~fast packed <> []
       then cpu()else
     let cheaper count= count>=1024 && (policy=Gpu.Qualification ||
       Option.fold ~none:false ~some:(fun seconds->Float.is_finite seconds && seconds>=0.
@@ -960,7 +970,7 @@ module Executor = struct
     if Option.fold ~none:false ~some:(fun count->not(cheaper count))(Packed.static_count packed)
       then cpu()else
     let (let*)=Result.bind in
-    let* inputs=Packed.Private.prepare ?state ?resolve packed ~live in
+    let* inputs=Packed.Private.prepare ~fast ?state ?resolve packed ~live in
     if not(cheaper inputs.count) then cpu()else
     let* ()=if display||readback then Ok()else
       Error(Flow.Diagnostic.error ~code:"E_APPROX_SINK"
@@ -997,11 +1007,39 @@ module Executor = struct
     fun ?state ?resolve packed ~live->
       let policy=Option.value ~default:(Domain.DLS.get Gpu.current_policy) policy in
       match Domain.DLS.get Gpu.current with None->Ok None|Some backend->
-      let find()=List.find_map(fun((_,p,_)as k)->if p==packed then Some k else None) !kernels in
+      (* a draw binds a fresh [packed] each frame over its site's code: kernels are kept by the code *)
+      let code p=(Packed.Private.view p).code in
+      let find()=List.find_map(fun(b,p,kernel)->if code p==code packed then Some(b,packed,kernel)else None) !kernels in
       let result=display_packed ?state ?resolve ~backend ~policy ~approx ~display:true ~profile
-        ~cached:find ~store:(fun((_,p,_)as k)->kernels:=k::take 63(List.filter(fun(_,q,_)->q!=p) !kernels))
+        ~cached:find ~store:(fun((_,p,_)as k)->kernels:=k::take 63(List.filter(fun(_,q,_)->code q!=code p) !kernels))
         ~readback:false packed ~live in
       Result.map(Option.map(function Gpu v->v|Cpu _->assert false))result
+  (* In fast precision a region a drawing computes with (a fold's maps, not a mark attribute) may run
+     on the device and come back as a 32-bit array. Kernels are kept by the region's form, not its
+     identity: a fold binds a new program each pass with the same code. At most 16 forms.
+     ponytail: a fixed 4,096-element threshold, not the measured cost; use [backend.cost] if small
+     regions are misplaced. *)
+  let region_readback () =
+    let kernels=ref[] in
+    let rec take n=function []->[]|_ when n=0->[]|x::xs->x::take(n-1)xs in
+    fun packed ~live->
+      let (let*)=Result.bind in
+      if not(Domain.DLS.get Gpu.fast)then Ok None else
+      match Domain.DLS.get Gpu.current with None->Ok None|Some backend->
+      if Packed.gpu_refusals ~fused:true ~fast:true packed<>[] then Ok None else
+      let* inputs=Packed.Private.prepare ~fast:true packed ~live in
+      if inputs.count<4096 then Ok None else
+      let view=Packed.Private.view packed in
+      let key=view.code,view.widths,view.outputs in
+      let* kernel=match List.find_opt(fun(k,b,_)->b==backend && k=key) !kernels with
+        |Some(_,_,kernel)->Ok kernel
+        |None->let* kernel=backend.prepare packed in
+          kernels:=(key,backend,kernel)::take 15 !kernels;Ok kernel in
+      let* output=kernel.run inputs in
+      (* the device carries integers as floats: an Int map comes back as the Int array it is *)
+      Result.map(fun value->Some(match value,(Packed.to_region packed).term.ty with
+        |E.Float_array xs,Ty.Array Ty.Int->E.Int_array(Array.map int_of_float xs)
+        |value,_->value))(kernel.readback output)
   (* A Sop_input write in a cook may take its region from the device: pack the inputs here, dispatch
      and read back through the service, then copy the planes the writer asked for. The CPU region
      answers when the device declines, is unmeasured, or fails. *)

@@ -11,4 +11,5 @@ val entry : ?cpu:string -> id:string -> Wgsl.wgsl -> string
     given, is the region's {!Js.region} source (golden fixtures carry one for the browser check). *)
 
 val table : string list -> string
-(** [{"kernels":[...]}] over {!entry} objects, one per line, newline-terminated. *)
+(** [{"kernels":[...], "compaction": ...}] over {!entry} objects, one per line, and the resident
+    fold's compaction ({!Wgsl.compaction}); newline-terminated. *)

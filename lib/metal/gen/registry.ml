@@ -407,6 +407,12 @@ let entries : entry list =
                     ; Scalar Nsuint ]
            ; ret = None; error = false; ocaml = "render_draw_indexed_instances"; since = None
            ; feature = C.Render_pipeline ; pool = true }
+  ; Method { recv = "Render_encoder"; objc = "id<MTLRenderCommandEncoder>"
+           ; sel = "drawIndexedPrimitives:indexType:indexBuffer:indexBufferOffset:indirectBuffer:indirectBufferOffset:"
+           ; args = [ Enum_of "MTLPrimitiveType"; Enum_of "MTLIndexType"; Obj "Buffer"; Scalar Nsuint
+                    ; Obj "Buffer"; Scalar Nsuint ]
+           ; ret = None; error = false; ocaml = "render_draw_indexed_indirect"; since = None
+           ; feature = C.Render_pipeline ; pool = true }
 
   (* MTLResidencySet *)
 

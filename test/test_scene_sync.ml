@@ -731,8 +731,8 @@ let run_root () =
   (* every small sketch of the repository still loads (the large ones load in test_workspace_ir and the RAYS_SLOW sweeps); shattered_studio carries a root, written by the editor *)
   let sketches = "../sketches" in
   let loaded = List.fold_left (fun n name ->
-    let file = Filename.concat (Filename.concat sketches name) "sketch.rays" in
-    if not (Sys.file_exists file) || (Unix.stat file).st_size > 1500 then n else begin
+    let file = Filename.concat sketches name in
+    if not (Filename.check_suffix file ".rays") || (Unix.stat file).st_size > 1500 then n else begin
       let text = In_channel.with_open_bin file In_channel.input_all in
       (* a sketch that brings its own SOPs is not loaded here *)
       match Result.bind (Rays_editor.Source.read_imports ~file text)
@@ -745,7 +745,7 @@ let run_root () =
     end) 0 (Sys.readdir sketches |> Array.to_list |> List.sort compare |> List.filteri (fun i _ -> i mod 2 = 0)) in
   check (loaded >= 4) (Printf.sprintf "only %d sketches were found to load" loaded);
   let studio = lower (Result.get_ok (Rays_editor.Workspace.load
-    (In_channel.with_open_bin "../sketches/shattered_studio/sketch.rays" In_channel.input_all))) in
+    (In_channel.with_open_bin "../sketches/shattered_studio.rays" In_channel.input_all))) in
   check (studio.root.width = 1600 && studio.root.height = 1600 && studio.root.max_spp = 512 && studio.homes.root <> None)
     "shattered_studio (saved once by the editor) does not carry its render size on a scene/root";
   (* a root and a World member *)

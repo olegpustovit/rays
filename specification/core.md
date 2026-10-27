@@ -1008,6 +1008,7 @@ operation. A user function/macro row is not a new runtime primitive.
 | `core` | compiler rule | Expand the macro; numeric leaves `let*`, `pow`, `mod`, `abs`, `+`, `-`, `*`, `/`, `max`. |
 | `cos` | primitive | `cos` |
 | `count` | compiler rule | `sequence/length` |
+| `crosses` | compiler rule | Expand the image macro of `flow_survey`: `noise3`, `mod`, `abs`, `min`, `max`, `*`, `+`, `-`, `/`, comparisons, `and`, a branch and the draw image entry. |
 | `double` | compiler rule | Inline the checked definition: `*` and argument `coerce`. |
 | `draw/background` | compiler rule | `color/parse`, frame size, rectangle drawing entry. |
 | `draw/circle` | compiler rule | Radius/position locals, `color/parse`, circle entry, defaults. |
@@ -1043,6 +1044,7 @@ operation. A user function/macro row is not a new runtime primitive.
 | `grad` | compiler rule | Expand gradient macro: `+`, `-`, `*`, component reads. |
 | `half` | compiler rule | Inline definition: `/` and argument `coerce`. |
 | `hash` | compiler rule | Expand the workspace macro of `million_marks`: `abs`, `mod`, `*`, `+`, `sin`. |
+| `hatch` | compiler rule | Expand the image macro of `flow_survey`: `noise3`, `mod`, `abs`, `*`, `+`, `-`, `/`, comparisons, `and`, a branch and the draw image entry. |
 | `haze` | compiler rule | Expand image-body macro: `pow`, `mod`, `max`, `+`, `-`, `*`, `/`. |
 | `host/dialog` | refused on web | Native conditional dialog intrinsic and result-event boundary. |
 | `host/play` | refused on web | Native conditional sample-playback intrinsic. |

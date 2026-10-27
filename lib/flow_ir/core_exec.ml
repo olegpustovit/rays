@@ -2,6 +2,16 @@ module C = Core
 module V = Flow.Value
 module E = Flow.Eval
 
+(* A resident fold's device: inside a qualifying top-level loop of a drawing, a region's array may stay
+   on the GPU, standing in the locals as a placeholder (zeros of its capacity) the device knows. *)
+type resident = {
+  invoke : Packed.t -> live:Frame_input.t -> E.value option;  (* run on the device; None leaves it to the CPU *)
+  compact : E.value -> E.value option;  (* array/compact of a placeholder mask, on the device *)
+  coerce : Flow.Ty.t -> E.value -> E.value option;  (* a placeholder retyped, on the device *)
+  finish : E.value -> E.value;  (* the host array a placeholder stands for; any other value as it is *)
+  close : unit -> unit;  (* the loop is over: forget its placeholders *)
+}
+
 type state = {
   values : E.value array; mutable builders : bool ref option array;  (* allocated by the first builder, so a call that builds nothing pays nothing *) calls : int array;
   live : Frame_input.t; root : E.residual option;
@@ -9,6 +19,7 @@ type state = {
   resolve : (E.value -> (E.value, Flow.Diagnostic.t) result) option;
   marks : Core_marks.sink option;  (* the table the draw statements of a draw program fill *)
   device : (Packed.t -> ((int * int * int) option, Flow.Diagnostic.t) result) option;
+  resident : resident option; mutable resident_on : bool;
 }
 (* The top-level Invoke statements of a draw program whose result cannot change between frames:
    the region does not depend on the frame, its arguments are locals written once from constants
@@ -600,7 +611,166 @@ let counted_kernel (program : C.program) loop_id index item body =
       Atomic.set pool (Some saved);result)
   with Exit -> None
 
-let prepare ?(fused=true) (program : C.program) =
+(* A top-level loop of a live program keeps its last results keyed by what it reads from outside
+   itself, so a drawing whose loop inputs did not change skips it (the folds of recursive_rectangles
+   while the pointer rests). [footprint] is those reads and every local the loop assigns, or [None]
+   for a loop that reads the frame, state, a host or a random stream, or draws. Call counters are
+   per execution and reset inside the loop. ponytail: a later statement reading the same call slot
+   would see the counter as it was before the hit; no lowering shares a slot across statements today. *)
+(* what a region reads besides its Core arguments: a host source, or a residual over the frame or
+   state, is an input the loop's key does not see *)
+let rec hidden = function
+  | E.Source (name, _, _) -> name <> "$core/argument"
+  | E.Residual r as v -> E.frame_dependent v || E.state_dependent v
+      || List.exists (fun (_, v) -> hidden v) (E.Private.residual_view r).bindings
+  | E.Deferred _ -> true
+  | E.List xs -> Array.exists hidden xs
+  | E.Record fs | E.Struct (_, _, fs) -> List.exists (fun (_, v) -> hidden v) fs
+  | _ -> false
+
+let footprint (program : C.program) (s : C.statement) =
+  let reads = ref [] and writes = ref [] in
+  let read n = reads := n :: !reads and write n = writes := n :: !writes in
+  let rec frame_free = function
+    | C.Region.Frame _ | Int_frame _ | Rand_at _ -> false
+    | Guarded (_, i) -> frame_free i
+    | _ -> true in
+  let expr = function
+    | C.Constant _ -> () | Local n | Field (n, _) -> read n
+    | Prim ((Rand | Rand_at), _) -> raise Exit
+    | Prim (_, args) -> List.iter (fun (_, n) -> read n) args
+    | Vec ns | Items ns -> List.iter read ns
+    | Fields xs -> List.iter (fun (_, n) -> read n) xs
+    | Call_index _ -> ()  (* a per-execution call counter the loop resets itself *)
+    | Frame _ | Source _ | Host_source _ | Source_descriptor _ -> raise Exit in
+  let rec go (s : C.statement) = match s.node with
+    | Assign (n, e) -> expr e; write n
+    | If {condition; yes; no} -> read condition; List.iter go yes; List.iter go no
+    | Iterate {sequence; index; item; body; _} -> read sequence; write index; write item; List.iter go body
+    | Counted {first; last; count; index; item; init; body; _} ->
+        read first; read last; write count; write index; write item; List.iter go init; List.iter go body
+    (* the array a loop fills is its output: a hit hands back the filled one *)
+    | Store {sequence; index; value} -> write sequence; read index; read value
+    | Invoke {region; args; result} ->
+        let r = program.regions.(region) in
+        if not (Array.for_all frame_free r.code) || Array.exists hidden r.uniforms
+           || Array.exists (fun (residual, _) -> hidden (E.Residual residual)) r.sources then raise Exit;
+        List.iter read args; write result
+    | Protect {body; value; failure; handler; mapped; result} ->
+        List.iter go body; List.iter go handler; read value; read mapped; write failure; write result
+    | Diagnose_rows {rows; index; handler; diagnostic; result; _} ->
+        read rows; write index; List.iter go handler; read diagnostic; write result
+    | Reset_call _ -> ()
+    | Draw _ | State_read _ | State_peek _ | State_write _ -> raise Exit in
+  match go s with
+  | () ->
+      let writes = List.sort_uniq compare !writes in
+      Some (Array.of_list (List.filter (fun n -> not (List.mem n writes)) (List.sort_uniq compare !reads)),
+            Array.of_list writes)
+  | exception Exit -> None
+
+(* Every local a statement mentions, its nested statements' included. *)
+let rec mentions acc (s : C.statement) =
+  let expr acc = function
+    | C.Constant _ | Call_index _ | Frame _ | Source _ -> acc
+    | Local n | Field (n, _) -> n :: acc
+    | Prim (_, args) | Host_source {args; _} | Source_descriptor {args; _} -> List.map snd args @ acc
+    | Vec ns | Items ns -> ns @ acc
+    | Fields xs -> List.map snd xs @ acc in
+  let block acc = List.fold_left mentions acc in
+  match s.node with
+  | Assign (n, e) -> expr (n :: acc) e
+  | Reset_call n -> n :: acc
+  | Draw d -> (match d with
+      | Background n | Push (_, n) -> n :: acc
+      | Point {at; ink} -> at :: ink :: acc
+      | Mark {args; _} | Batch {args; _} | Path {args; _} -> List.map snd args @ acc
+      | Points {positions; ink} -> positions :: ink :: acc
+      | Text_run {at; text; ink; size} -> at :: text :: ink :: size :: acc
+      | Image {source = (_, n); at; scale; angle} -> n :: at :: scale :: angle :: acc
+      | Pop -> acc)
+  | Protect {body; value; failure; handler; mapped; result} ->
+      block (block (value :: failure :: mapped :: result :: acc) body) handler
+  | Diagnose_rows {rows; index; handler; diagnostic; result; _} ->
+      block (rows :: index :: diagnostic :: result :: acc) handler
+  | If {condition; yes; no} -> block (block (condition :: acc) yes) no
+  | Iterate {sequence; index; item; body; _} -> block (sequence :: index :: item :: acc) body
+  | Counted {first; last; count; index; item; init; body; _} ->
+      block (block (first :: last :: count :: index :: item :: acc) init) body
+  | Store {sequence; index; value} -> sequence :: index :: value :: acc
+  | State_read {result; init; initial; _} -> block (result :: initial :: acc) init
+  | State_peek {found; value; _} -> found :: value :: acc
+  | State_write {value; _} -> value :: acc
+  | Invoke {args; result; _} -> result :: args @ acc
+
+(* A loop whose arrays can stay on the device between its statements: its body holds regions, scalar
+   statements, ifs, array/compact, retyping and array/count, and no statement reads an array's contents
+   on the host. *)
+let resident_loop (program : C.program) (s : C.statement) =
+  let array n = match program.locals.(n) with Flow.Ty.Array _ -> true | _ -> false in
+  let scalars = List.for_all (fun n -> not (array n)) in
+  let expr = function
+    | C.Constant _ | Local _ | Field _ | Frame _ | Call_index _ -> true
+    | Prim ((Array_compact | Coerce _ | Array_count), _) -> true
+    | Prim (_, args) -> scalars (List.map snd args)
+    | Vec ns | Items ns -> scalars ns
+    | Fields xs -> scalars (List.map snd xs)
+    | Source _ | Host_source _ | Source_descriptor _ -> false in
+  let rec ok (s : C.statement) = match s.node with
+    | Assign (_, e) -> expr e
+    | If {yes; no; _} -> List.for_all ok yes && List.for_all ok no
+    | Invoke _ -> true
+    | _ -> false in
+  match s.node with
+  | Iterate {body; _} -> List.for_all ok body && List.exists (fun (s : C.statement) ->
+      match s.node with Invoke _ -> true | _ -> false) body
+  | _ -> false
+
+(* A resident loop's writes that later statements read: the ones its end reads back. *)
+let resident_live (program : C.program) (s : C.statement) =
+  match footprint program s with
+  | Some (_, writes) when resident_loop program s ->
+      let outside = List.fold_left mentions [] (List.filter (fun t -> t != s) program.body) in
+      Some (Array.of_list (List.filter (fun n -> List.mem n outside) (Array.to_list writes)))
+  | _ -> None
+
+(* the same input: a scalar by its bits (NaN and -0 stay distinct), a packed array up to 1M
+   numbers by its bits (an array rebuilt each frame with the same contents), a list up to 4,096 items
+   item by item (a range, a frame's event list), a record field by field, anything else by identity *)
+let same_floats x y =
+  x == y || (Array.length x = Array.length y && Array.length x <= 1_048_576 &&
+             let rec go i = i < 0 || (Int64.equal (Int64.bits_of_float x.(i)) (Int64.bits_of_float y.(i)) && go (i - 1)) in
+             go (Array.length x - 1))
+let rec same_input a b = a == b || match a, b with
+  | V.List x, V.List y -> Array.length x = Array.length y && Array.length x <= 4096 && Array.for_all2 same_input x y
+  | V.Record x, V.Record y ->
+      List.compare_lengths x y = 0 && List.for_all2 (fun (n, a) (m, b) -> String.equal n m && same_input a b) x y
+  | V.Float_array x, V.Float_array y | V.Vec2_array x, V.Vec2_array y
+  | V.Vec3_array x, V.Vec3_array y | V.Vec4_array x, V.Vec4_array y -> same_floats x y
+  | V.Int x, V.Int y -> x = y | V.Bool x, V.Bool y -> x = y
+  | V.Float x, V.Float y -> Int64.equal (Int64.bits_of_float x) (Int64.bits_of_float y)
+  | V.Vec2 (a, b), V.Vec2 (c, d) -> Int64.(equal (bits_of_float a) (bits_of_float c) && equal (bits_of_float b) (bits_of_float d))
+  | V.Vec3 (a, b, c), V.Vec3 (d, e, f) ->
+      Int64.(equal (bits_of_float a) (bits_of_float d) && equal (bits_of_float b) (bits_of_float e)
+             && equal (bits_of_float c) (bits_of_float f))
+  | _ -> false
+
+(* ponytail: 4 entries per loop and no byte cap: the results are references to arrays the loop made
+   anyway, at most 4 of them kept alive; add a byte cap if a loop's results grow past tens of MB *)
+let remember (reads, writes) run =
+  let table = ref [] in
+  fun st ->
+    let key = Array.map (fun n -> st.values.(n)) reads in
+    match List.find_opt (fun (k, _) -> Array.for_all2 same_input k key) !table with
+    | Some (_, values) -> Array.iteri (fun i n -> st.values.(n) <- values.(i)) writes
+    | None ->
+        run st;
+        let values = Array.map (fun n -> st.values.(n)) writes in
+        (* a region left on the GPU names a buffer of this draw's mark table, cleared by the next *)
+        if not (Array.exists Core_marks.is_device values) then
+        table := (key, values) :: List.filteri (fun i _ -> i < 3) !table
+
+let prepare ?(fused=true) ?(remember_loops=false) (program : C.program) =
   let track = builds program.body in
   let device_ok = device_regions program in
   let static_ok = static_invokes program in
@@ -697,7 +867,24 @@ let prepare ?(fused=true) (program : C.program) =
     | _ -> []) statements in
   let rec block statements =
     let statements = if !in_loop then List.filter (fun s -> not (hoisted s)) statements else statements in
-    let run = Array.of_list (List.map statement statements)
+    let top = not !in_loop in
+    let run = Array.of_list (List.map (fun (s : C.statement) -> match s.node with
+      | (Iterate _ | Counted _ | Invoke _) when top && remember_loops ->
+          let run = statement s in
+          let run = match footprint program s with
+            | Some (_, _) when resident_loop program s ->
+                let live = Option.get (resident_live program s) in
+                fun st -> (match st.resident with
+                | None -> run st
+                | Some r ->
+                    st.resident_on <- true;
+                    Fun.protect ~finally:(fun () -> st.resident_on <- false; r.close ()) (fun () ->
+                      run st;
+                      (* the loop's arrays that later statements read come back once, as it ends *)
+                      Array.iter (fun n -> st.values.(n) <- r.finish st.values.(n)) live))
+            | _ -> run in
+          (match footprint program s with Some f -> remember f run | None -> run)
+      | _ -> statement s) statements)
     and spans = Array.of_list (List.map (fun (s : C.statement) -> s.source.span) statements) in
     (* The innermost block that sees an unlocated failure gives it its statement's span. *)
     fun st -> let i=ref 0 in
@@ -714,6 +901,24 @@ let prepare ?(fused=true) (program : C.program) =
     let run = block statements in in_loop := inner; run
   and statement (s : C.statement) =
     (match s.node with
+    | Assign (n,(Prim ((Array_compact | Coerce _ as op),[_,arg]) as e)) when (match op with
+        | C.Coerce (Flow.Ty.Array _) | Array_compact -> true | _ -> false) ->
+        (* in a resident fold the device compacts and retypes its own arrays; the host otherwise *)
+        let value=expression e in
+        fun st -> st.values.(n) <- (match st.resident with
+          | Some r when st.resident_on ->
+              (match (match op with C.Array_compact -> r.compact st.values.(arg)
+                      | C.Coerce ty -> r.coerce ty st.values.(arg) | _ -> None) with
+               | Some v -> v
+               | None -> st.values.(arg) <- r.finish st.values.(arg); value st)
+          | _ -> value st)
+    | Assign (n,(Prim (Array_count,[_,arg]) as e)) ->
+        (* a resident array's length is a capacity: its count is the host array's *)
+        let value=expression e in
+        fun st -> (match st.resident with
+          | Some r when st.resident_on -> st.values.(arg) <- r.finish st.values.(arg)
+          | _ -> ());
+          st.values.(n) <- value st
     | Assign (n,e) ->
         let value=expression e in
         let ownership = match e with Prim (Sequence_build,_) -> `Fresh | Local old -> `Alias old | _ -> `None in
@@ -832,8 +1037,16 @@ let prepare ?(fused=true) (program : C.program) =
           | _ ->
           let fail (d : Flow.Diagnostic.t) = V.raise_diagnostic d in
           let packed=match packed with Ok p -> p | Error (d :: _) -> fail d | Error [] -> assert false in
-          let packed=if args=[] then packed else match Packed.Private.bind_arguments packed
+          let bind ?validate packed = if args=[] then packed else match Packed.Private.bind_arguments ?validate packed
             (Array.of_list(List.map(fun n->st.values.(n))args)) with Ok p->p | Error d->fail d in
+          let unbound=packed in
+          let resident=match st.resident with
+            | Some r when st.resident_on -> (match r.invoke (bind ~validate:false unbound) ~live:st.live with
+                | Some v -> st.values.(result)<-v; true
+                | None -> List.iter (fun n -> st.values.(n) <- r.finish st.values.(n)) args; false)
+            | _ -> false in
+          if not resident then
+          let packed=bind unbound in
           let device=match st.device,st.marks with
             | Some device,Some sink when on_device ->
                 (match device packed with
@@ -863,7 +1076,7 @@ let general root force resolve prepared live =
         let release () = if pooled then Atomic.set prepared.pool (Some values) in
         let st = {values;
           builders=[||]; calls=Array.make program.call_slots 0;
-          live; root; force; resolve; marks=None; device=None} in
+          live; root; force; resolve; marks=None; device=None; resident=None; resident_on=false} in
         let result = try prepared.body st;
           if Array.length program.results<>1 then V.fail "E_CORE" "Expected one core result.";
           Ok st.values.(program.results.(0))
@@ -900,7 +1113,7 @@ module Buffers = Core_marks.Buffers
 
 (* A draw program (Core_draw.lower) fills a mark table. A failure is the core's own
    diagnostic: there is no walker for a drawing, so nothing is rerun. *)
-let draw ?root ?force ?resolve ?device ?image prepared ~live ~size ~buffers =
+let draw ?root ?force ?resolve ?device ?resident ?image prepared ~live ~size ~buffers =
   match Frame_input.validate live with
   | Error message -> Error (Flow.Diagnostic.error ~code:"E_FRAME" message)
   | Ok () ->
@@ -910,7 +1123,8 @@ let draw ?root ?force ?resolve ?device ?image prepared ~live ~size ~buffers =
         | Ok resource -> resource
         | Error (d : Flow.Diagnostic.t) -> V.raise_diagnostic d) image) ~size buffers in
       let st = {values=Array.make (Array.length program.locals) E.No_geo;
-        builders=[||]; calls=Array.make program.call_slots 0; live; root; force; resolve; marks=Some sink; device} in
+        builders=[||]; calls=Array.make program.call_slots 0; live; root; force; resolve; marks=Some sink; device;
+        resident; resident_on=false} in
       (try prepared.body st; Ok (Core_marks.finish sink)
        with V.Fail (code,message,span) -> Error (Flow.Diagnostic.error ?span ~code message)
          | V.Diagnostic_fail d -> Error d

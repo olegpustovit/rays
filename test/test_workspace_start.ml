@@ -14,10 +14,8 @@
 let fail message = prerr_endline message; exit 1
 let clock = Unix.gettimeofday
 
-(* The entry point of a generated program: its text, where its file would be, the catalog it runs with. *)
-let main ~path text =
-  Rays_editor.Workspace.main ~path ~digest:(Editor_document.Contexts.sha256 text)
-    ~catalog:(Editor_document.Contexts.catalog_digest Sop_catalog.Editor.factories) text
+(* [rays]'s entry point, with a built text where its file is *)
+let main ~path text = Rays_editor.Workspace.main ~text path
 
 let replace ~sub ~by text =
   let n = String.length sub in

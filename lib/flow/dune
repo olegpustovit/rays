@@ -49,7 +49,7 @@
  (modules test_lisp)
  (deps
   (glob_files ../../specification/workspace/cases/*.lisp)
-  (glob_files ../../sketches/*/sketch.rays))
+  (glob_files ../../sketches/*.rays))
  (libraries flow))
 
 (test

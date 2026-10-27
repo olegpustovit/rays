@@ -1067,6 +1067,11 @@ module Render_encoder : sig
   val set_depth_stencil_state : t -> Depth_stencil.t option -> (unit,error) result
   val draw_indexed_basic : t -> primitive:primitive -> index_type:index_type -> index_buffer:Buffer.t -> index_offset:int64 -> index_count:int64 -> (unit,error) result
   val draw_indexed_instances : t -> primitive:primitive -> index_type:index_type -> index_buffer:Buffer.t -> index_offset:int64 -> index_count:int64 -> instances:int64 -> (unit,error) result
+  val draw_indexed_indirect : t -> primitive:primitive -> index_type:index_type -> index_buffer:Buffer.t ->
+    index_offset:int64 -> arguments:Buffer.t -> arguments_offset:int64 -> (unit,error) result
+  (** Index count, instance count, first index, base vertex and base instance are five uints the
+      device wrote at [arguments_offset] of [arguments]; both buffers stay retained with the
+      command buffer. *)
   val execute_indirect_commands : t -> Indirect_command_buffer.t -> location:int -> length:int -> (unit,error) result
 
   val draw_triangles :

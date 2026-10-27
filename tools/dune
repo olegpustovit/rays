@@ -28,11 +28,6 @@
  (libraries ogpu rays_execution rays_math unix))
 
 (executable
- (name new_example)
- (modules new_example)
- (libraries unix str))
-
-(executable
  (name bench_source_poll)
  (modules bench_source_poll)
  (libraries rays_editor editor_document unix))
@@ -56,16 +51,6 @@
  (name bench_sdl3)
  (modules bench_sdl3)
  (libraries rays.sdl3 rays.sdl3_image rays.sdl3_ttf rays.sdl3_mixer unix yojson))
-
-; Finite native path-tracer benchmark. Override the three variables as needed.
-(rule
- (alias bench-pathtracer)
- (action
-  (chdir %{workspace_root}
-   (setenv RAYS_PATHTRACER_FRAMES %{env:RAYS_PATHTRACER_FRAMES=240}
-    (setenv RAYS_PATHTRACER_SCALE %{env:RAYS_PATHTRACER_SCALE=1}
-     (setenv RAYS_PATHTRACER_SPP %{env:RAYS_PATHTRACER_SPP=1}
-      (run %{exe:../examples/pathtracer/main.exe})))))))
 
 (executable
  (name bench_world)
@@ -205,22 +190,42 @@
  (action
   (system "if command -v node >/dev/null 2>&1; then mkdir -p kt && ../lib/flow_web/test_wgsl.exe --write-kernel-table kt && node web/test/gpu_check.mjs kt/kernels.json web/runtime/gpu.js ../lib/flow_web/goldens; else echo 'gpu_check: skipped (node not found)'; fi")))
 
-; End-to-end reload (plan P6.7): the watch server and a page in headless Chrome. Not part of runtest.
+; Fast precision on the web (native parity): the fast WGSL kernels (64-bit integer pairs, gathers, count records,
+; compaction) against native outputs in real Chrome, and recursive_rectangles' resident fold and GPU display
+; regions at a deep, moving pointer against native fast precision (the Metal resident fold). Not part of runtest.
 (rule
  (alias qualification-web)
- (deps web/test/reload_check.mjs web/test/chrome.mjs %{bin:rays-lisp} ../sketches/flow_vectors/sketch.rays)
+ (deps web/test/gpu_fast_check.mjs web/test/chrome.mjs web/runtime/gpu.js ../lib/flow_web/test_wgsl.exe)
  (action
-  (system "if command -v node >/dev/null 2>&1; then node web/test/reload_check.mjs %{bin:rays-lisp} ../sketches/flow_vectors/sketch.rays; else echo 'reload_check: skipped (node not found)'; fi")))
+  (system "if command -v node >/dev/null 2>&1; then mkdir -p fkt && ../lib/flow_web/test_wgsl.exe --write-fast-table fkt && node web/test/gpu_fast_check.mjs fkt web/runtime/gpu.js; else echo 'gpu_fast_check: skipped (node not found)'; fi")))
+
+(rule
+ (alias qualification-web)
+ (deps web/test/present_e2e.mjs web/test/chrome.mjs web/test/png.mjs
+  (glob_files web/runtime/*.js) web/runtime/marks.wgsl lisp/rays.exe marks_shot.exe
+  ../sketches/recursive_rectangles.rays)
+ (action
+  (system "if command -v node >/dev/null 2>&1; then FRAMES=12 FAST=1 POINTER='320,405;320,410;320,415;320,420;320,425;320,430;320,435;320,440;320,445;320,450;320,455;320,460' node web/test/present_e2e.mjs lisp/rays.exe marks_shot.exe .. sketches/recursive_rectangles.rays; else echo 'fast present_e2e: skipped (node not found)'; fi")))
+
+; The live page as a person uses it: index.html's rAF loop driven by real mouse events must animate, and once the
+; pointer rests its picture matches native at the same pointer. Not part of runtest.
+(rule
+ (alias qualification-web)
+ (deps web/test/live_check.mjs web/test/chrome.mjs web/test/png.mjs
+  (glob_files web/runtime/*.js) web/runtime/marks.wgsl lisp/rays.exe marks_shot.exe
+  ../sketches/recursive_rectangles.rays)
+ (action
+  (system "if command -v node >/dev/null 2>&1; then node web/test/live_check.mjs lisp/rays.exe marks_shot.exe .. sketches/recursive_rectangles.rays 400 520; else echo 'live_check: skipped (node not found)'; fi")))
 
 ; Real-Chrome check of the presenter (plan P6.4, P6.5): hand-built mark tables with pixel probes, then
-; flow_vectors and examples/basic exported, stepped in the browser and compared with the native picture.
+; flow_vectors and sketches/basic.rays exported, stepped in the browser and compared with the native picture.
 (rule
  (alias qualification-web)
  (deps web/test/present_check.mjs web/test/present_e2e.mjs web/test/chrome.mjs web/test/png.mjs
-  (glob_files web/runtime/*.js) web/runtime/marks.wgsl lisp/lisp.exe marks_shot.exe
-  (source_tree ../sketches/flow_vectors) (source_tree ../examples/basic))
+  (glob_files web/runtime/*.js) web/runtime/marks.wgsl lisp/rays.exe marks_shot.exe
+  ../sketches/flow_vectors.rays ../sketches/basic.rays ../sketches/particles.rays)
  (action
-  (system "if command -v node >/dev/null 2>&1; then node web/test/present_check.mjs web/runtime && node web/test/present_e2e.mjs lisp/lisp.exe marks_shot.exe .. sketches/flow_vectors examples/basic; else echo 'present_check: skipped (node not found)'; fi")))
+  (system "if command -v node >/dev/null 2>&1; then node web/test/present_check.mjs web/runtime && node web/test/present_e2e.mjs lisp/rays.exe marks_shot.exe .. sketches/flow_vectors.rays sketches/basic.rays sketches/particles.rays; else echo 'present_check: skipped (node not found)'; fi")))
 
 (executable
  (name shape2_fixtures)
@@ -246,47 +251,31 @@
 (rule
  (alias qualification-web)
  (deps web/test/gpu_marks_e2e.mjs web/test/png.mjs web/test/chrome.mjs
-  (glob_files web/runtime/*.js) web/runtime/marks.wgsl lisp/lisp.exe marks_shot.exe
-  (source_tree ../sketches/flow_particles_gpu))
+  (glob_files web/runtime/*.js) web/runtime/marks.wgsl lisp/rays.exe marks_shot.exe
+  ../sketches/flow_particles_gpu.rays)
  (action
-  (system "if command -v node >/dev/null 2>&1; then node web/test/gpu_marks_e2e.mjs lisp/lisp.exe marks_shot.exe ..; else echo 'gpu_marks_e2e: skipped (node not found)'; fi")))
+  (system "if command -v node >/dev/null 2>&1; then node web/test/gpu_marks_e2e.mjs lisp/rays.exe marks_shot.exe ..; else echo 'gpu_marks_e2e: skipped (node not found)'; fi")))
 
-; Generated-image pixel parity, animation, sharing, static reuse, resize and reload (P6.4b).
+; Generated-image pixel parity, animation, sharing, static reuse and resize (P6.4b).
 (rule
  (alias qualification-web)
  (deps web/test/gpu_images_e2e.mjs web/test/png.mjs web/test/chrome.mjs
-  (glob_files web/runtime/*.js) web/runtime/marks.wgsl lisp/lisp.exe marks_shot.exe
-  (source_tree ../sketches/flow_contours) (source_tree ../sketches/flow_image_kernel)
-  (source_tree ../sketches/flow_shader) (source_tree ../sketches/flow_image)
+  (glob_files web/runtime/*.js) web/runtime/marks.wgsl lisp/rays.exe marks_shot.exe
+  ../sketches/flow_contours.rays ../sketches/flow_image_kernel.rays
+  ../sketches/flow_shader.rays ../sketches/flow_image.rays
   (source_tree ../test/sdl3_image_fixtures))
  (action
-  (system "if command -v node >/dev/null 2>&1; then node web/test/gpu_images_e2e.mjs lisp/lisp.exe marks_shot.exe ..; else echo 'gpu_images_e2e: skipped (node not found)'; fi")))
-
-(executable
- (name web_shot)
- (modules web_shot)
- (libraries unix))
-
-; Pixel parity of the served web export in a real browser (plan P6.8): examples/particles at fixed-step frames 1, 30 and 120
-; against the native render (marks_shot), through `rays-lisp web --watch` and headless Chrome with WebGPU. Exit 3 means
-; WebGPU is unavailable in that Chrome; a missing node or Chrome is a printed skip.
-(rule
- (alias qualification-web)
- (deps web/test/web_shot.mjs web/test/png.mjs web/test/chrome.mjs
-  (glob_files web/runtime/*.js) web/runtime/marks.wgsl lisp/lisp.exe marks_shot.exe
-  (source_tree ../examples/particles))
- (action
-  (run ./web_shot.exe lisp/lisp.exe ./marks_shot.exe web/test/web_shot.mjs ../examples/particles 800 600 1 30 120)))
+  (system "if command -v node >/dev/null 2>&1; then node web/test/gpu_images_e2e.mjs lisp/rays.exe marks_shot.exe ..; else echo 'gpu_images_e2e: skipped (node not found)'; fi")))
 
 ; Plan P6.R: each of the 15 workspaces with a draw graph either opens in headless Chrome (the frame loop runs, no error, a
 ; non-empty mark table) or is refused at export with its code and span. Printed per workspace.
 (rule
  (alias qualification-web)
- (deps web/test/open_all.mjs web/test/chrome.mjs lisp/lisp.exe
+ (deps web/test/open_all.mjs web/test/chrome.mjs lisp/rays.exe
   (glob_files web/runtime/*.js) web/runtime/marks.wgsl
-  (source_tree ../examples) (source_tree ../sketches))
+  (source_tree ../sketches))
  (action
-  (system "if command -v node >/dev/null 2>&1; then node web/test/open_all.mjs lisp/lisp.exe .. examples/audio examples/basic examples/drawing examples/file_dialog examples/generative examples/noise examples/particles examples/pxui examples/recursive_rectangles sketches/flow_contours sketches/flow_image sketches/flow_image_kernel sketches/flow_particles_gpu sketches/flow_shader sketches/flow_vectors; else echo 'open_all: skipped (node not found)'; fi")))
+  (system "if command -v node >/dev/null 2>&1; then node web/test/open_all.mjs lisp/rays.exe .. sketches/audio.rays sketches/basic.rays sketches/drawing.rays sketches/file_dialog.rays sketches/generative.rays sketches/noise.rays sketches/particles.rays sketches/pxui.rays sketches/recursive_rectangles.rays sketches/flow_contours.rays sketches/flow_image.rays sketches/flow_image_kernel.rays sketches/flow_particles_gpu.rays sketches/flow_shader.rays sketches/flow_vectors.rays; else echo 'open_all: skipped (node not found)'; fi")))
 
 ; Before/after public Rewire payload/edge ancestry baseline; execution is explicit.
 (executable

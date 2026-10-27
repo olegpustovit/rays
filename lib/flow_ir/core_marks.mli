@@ -20,6 +20,9 @@ val sink : ?image:(Flow.Eval.value -> int) -> size:int * int -> Buffers.t -> sin
 (** [size] is the canvas (for [draw/background]); [image] resolves an image node to a
     host resource id (positive) or raises [Flow.Value.Fail]. *)
 
+val is_device : Flow.Eval.value -> bool
+(** A [device_value]: it names an entry of one draw's buffers. *)
+
 val device_value : sink -> token:int -> count:int -> width:int -> Flow.Eval.value
 (** The placeholder for a region the host ran on the GPU. [token] is the host's own handle,
     returned by [Buffers.device]. Only a positions, sizes, radius, from or to attribute of a

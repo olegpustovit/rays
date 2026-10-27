@@ -10,6 +10,8 @@ let cases =
    "color", [f "color_r" 0.25; f "color_g" 0.5; f "color_b" 0.75];
    "roughness", [f "roughness" 0.9; t "material" "m"];
    "roughness0", [f "roughness" 0.];
+   "round", [f "round" 0.07; t "material" "r"];
+   "round_group", [t "group" " a "; f "round" 0.25];
    "emission", [f "emission_r" 1.; f "emission_g" 0.5; f "emission_b" 0.125];
    "group", [t "group" " a "; t "material" "g"; f "color_r" 0.];
    "group_missing", [t "group" "zzz"];

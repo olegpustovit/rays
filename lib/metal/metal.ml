@@ -5782,6 +5782,36 @@ module Render_encoder = struct
             retain_command_buffer_buffer value.command_buffer index_buffer;
             Ok ())
 
+  (* An indexed draw whose index count and instance count the device wrote: [arguments] holds
+     five uints at [arguments_offset] (index count, instance count, first index, base vertex,
+     base instance), read when the draw runs. *)
+  let draw_indexed_indirect (value : t) ~primitive ~index_type ~(index_buffer : Buffer.t)
+      ~index_offset ~(arguments : Buffer.t) ~arguments_offset =
+    let operation = "Metal.Render_encoder.draw_indexed_indirect" in
+    on_main operation (fun () ->
+        let* () = ensure_live operation value.lifetime in
+        if Option.is_none value.pipeline then
+          error operation Invalid_state "no render pipeline is bound"
+        else
+          let width = index_width index_type in
+          if index_offset < 0L || Int64.rem index_offset width <> 0L then
+            error operation Invalid_argument "index offset is misaligned"
+          else if arguments_offset < 0L || Int64.rem arguments_offset 4L <> 0L then
+            error operation Invalid_argument "indirect arguments offset is misaligned"
+          else
+            let* () = validate_draw_buffer operation value index_buffer ~offset:index_offset ~required:width in
+            let* () = validate_draw_buffer operation value arguments ~offset:arguments_offset ~required:20L in
+            let* () =
+              native_result operation
+                (Metal_raw.Registry.render_draw_indexed_indirect value.raw
+                   (Int64.of_int (primitive_code primitive))
+                   (Int64.of_int (index_type_code index_type))
+                   index_buffer.raw index_offset arguments.raw arguments_offset)
+            in
+            retain_command_buffer_buffer value.command_buffer index_buffer;
+            retain_command_buffer_buffer value.command_buffer arguments;
+            Ok ())
+
   let pipeline_supports_icb operation (value : t) =
     match value.pipeline with
     | None -> error operation Invalid_state "no render pipeline is bound"

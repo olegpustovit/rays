@@ -1151,7 +1151,7 @@ module Private=struct
         marks_device=[];marks_registration=None}in
       Hashtbl.add gpu_marks_registry value.marks_id value;Ok value
     end
-  let gpu_marks value ~kind ~count attributes=
+  let gpu_marks ?indirect value ~kind ~count attributes=
     let operation="Rays_execution.gpu_marks"in
     if value.marks_closed||value.marks_gpu.gpu_released then
       fail operation Destroyed"GPU marks or lease is closed"
@@ -1189,6 +1189,13 @@ module Private=struct
                |Some b->device:=(source,b):: !device;Ok b
                |None->stale:=true;fail operation Resource"GPU display output is stale or closed")in
         Result.bind buffer(fun b->Result.map(fun rest->b::rest)(bind(index+1)))end in
+      (* the device's index count, read by the draw, joins the inputs whose identity the token keeps *)
+      let indirect=match indirect with
+        |None->Ok None
+        |Some(source,offset)->(match source()with
+          |Some b->device:=(source,b):: !device;Ok(Some(b,offset))
+          |None->stale:=true;fail operation Resource"GPU display count is stale or closed")in
+      Result.bind indirect(fun indirect->
       Result.bind(bind 0)(fun buffers->
         let params=Bytes.create 32 in
         (* A device colour is a region's float r, g, b (mode 1); a host one is packed words. *)
@@ -1205,14 +1212,14 @@ module Private=struct
             unregister_marks value;
             value.marks_stamp<-Int64.succ value.marks_stamp;value.marks_count<-count;
             value.marks_device<-device;
-            match Scene_execution.Private.register_gpu_vertices ~extra:(List.tl buffers@[params_buffer])
+            match Scene_execution.Private.register_gpu_vertices ~extra:(List.tl buffers@[params_buffer])?indirect
               ~key:(gpu_marks_key value)~device:value.marks_gpu.gpu_device~buffer:(List.hd buffers)
               ~vertex_count:(4*count)~valid:(fun()->valid_gpu_marks value)()with
             |Error e->value.marks_device<-[];backend operation e
             |Ok registration->value.marks_registration<-Some registration;
                 Ok(Scene_command.Shape_batch.Private.gpu_token~identity:value.marks_id~count
                   ~stamp:value.marks_stamp)
-          end))
+          end)))
     end
   let close_gpu_marks=close_gpu_marks
   let encoded_draws_for_test (batch:batch)=Scene_execution.Private.coalesced_draws_for_test(List.map(fun x->

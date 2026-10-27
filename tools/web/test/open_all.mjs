@@ -1,10 +1,10 @@
-// node open_all.mjs LISP_EXE ROOT DIR...
+// node open_all.mjs RAYS_EXE ROOT FILE.rays...
 //
-// Plan P6.R: every eligible workspace either opens in the browser or is refused at export. For each DIR (holding
-// sketch.rays) run `rays-lisp web`; a refusal must print its code and span (recorded, nothing is loaded). Otherwise
+// Plan P6.R: every eligible workspace either opens in the browser or is refused at export. For each FILE.rays run
+// `rays web`; a refusal must print its code and span (recorded, nothing is loaded). Otherwise
 // serve the export with cross-origin isolation, open index.html in headless Chrome (`start`: one device, worker pool,
 // presenter) and require that the frame loop runs: at least FRAMES frames within 20 s, still advancing half a second
-// later, no failed frame (`__rays.failure`), no presenter error and a non-empty mark table. Prints one line per DIR.
+// later, no failed frame (`__rays.failure`), no presenter error and a non-empty mark table. Prints one line per file.
 // Exit: 0 all opened or refused, 1 a workspace failed in the browser, 3 WebGPU unavailable.
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync, statSync } from 'node:fs';
@@ -14,7 +14,7 @@ import { chromeAvailable, ISOLATION, launch, serve } from './chrome.mjs';
 
 const [lispArg, rootArg, ...dirs] = process.argv.slice(2);
 const [lisp, root] = [lispArg, rootArg].map(p => p && resolve(p));
-if (!dirs.length) { console.error('usage: node open_all.mjs LISP_EXE ROOT DIR...'); process.exit(2); }
+if (!dirs.length) { console.error('usage: node open_all.mjs RAYS_EXE ROOT FILE.rays...'); process.exit(2); }
 if (!chromeAvailable()) { console.log('open_all: skipped (Google Chrome not found)'); process.exit(0); }
 const FRAMES = 5;
 const read = dir => Object.fromEntries(readdirSync(dir, { recursive: true }).filter(f => statSync(join(dir, f)).isFile()).map(f => ['/' + f, readFileSync(join(dir, f))]));
@@ -23,7 +23,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 let bad = 0;
 for (const dir of dirs) {
   const tmp = mkdtempSync(join(tmpdir(), 'open-all-'));
-  const exported = spawnSync(lisp, ['web', join(dir, 'sketch.rays'), '-o', join(tmp, 'out')], { cwd: root, encoding: 'utf8' });
+  const exported = spawnSync(lisp, ['web', dir, '-o', join(tmp, 'out')], { cwd: root, encoding: 'utf8' });
   if (exported.status !== 0) {
     const refusal = /line (\d+), characters (\d+)-\d+:\s*\n?Error \[(\w+)\]/.exec(exported.stderr);
     console.log(`refused ${dir}: ${refusal ? `${refusal[3]} at ${refusal[1]}:${Number(refusal[2]) + 1}` : exported.stderr.trim().split('\n').pop()}`);

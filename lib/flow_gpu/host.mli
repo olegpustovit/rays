@@ -7,6 +7,10 @@ val backend : t -> Flow_ir.Gpu.backend
 val output : t -> Flow_ir.Gpu.value -> Run.output option
 (** Borrow the current output; closed, evicted or superseded generations return [None]. *)
 
+val resident : t -> Flow_ir.Core_exec.resident
+(** A drawing's resident fold on this host, in fast precision only ({!Flow_ir.Gpu.fast}): keeps a
+    loop's region arrays on the device and reads them back as the loop ends. One per drawing. *)
+
 val close : t -> unit
 (** Close before releasing the caller's GPU lease. *)
 

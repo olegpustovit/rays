@@ -13,8 +13,8 @@
  (libraries flow flow_ir flow_web flow_sop editor_document sop_catalog frame_input scene_command sdl3_image))
 
 (executable
- (name lisp)
- (modules lisp delimiter web_server)
- (public_name rays-lisp)
+ (name rays)
+ (modules rays)
+ (public_name rays)
  (package rays)
- (libraries unix flow flow_sop editor_document sop_catalog web_export))
+ (libraries flow flow_sop editor_document sop_catalog web_export rays_editor))

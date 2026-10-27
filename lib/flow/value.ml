@@ -122,6 +122,7 @@ let rec coerce_to want v =
   | Ty.Vec2, (Int _ | Float _) -> let f = num v in Vec2 (f, f)
   | Ty.Vec4, (Int _ | Float _) -> let f = num v in Vec4 (f, f, f, f)
   | Ty.List e, List xs -> List (Array.map (coerce_to e) xs)
+  | Ty.Array Ty.Float, Int_array xs -> Float_array (Array.map float_of_int xs)
   | Ty.Record wf, Record fs ->
       Record (List.map (fun (n, x) -> match List.assoc_opt n wf with
         | Some w -> (n, coerce_to w x) | None -> (n, x)) fs)

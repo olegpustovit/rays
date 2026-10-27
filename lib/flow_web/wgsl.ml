@@ -3,7 +3,8 @@ type kind = Uniform_buffer | Storage_read | Storage_read_write
 type binding = {group : int; binding : int; kind : kind}
 type wgsl = {source : string; entry : string; interface : binding list;
   uniform_layout : (string * int * int) list; uniform_bytes : int;
-  table_seeds : int array; output_widths : int array; input_widths : int array}
+  table_seeds : int array; output_widths : int array; input_widths : int array;
+  gathers : (int * int) array; counts : int option}
 let finite = {|fn wfinite(x: f32) -> bool { return (bitcast<u32>(x) & 0x7f800000u) != 0x7f800000u; }
 |}
 (* Refine the hardware division to match native's double UV grid rounded to f32. A one-ULP
@@ -190,5 +191,259 @@ let kernel ?(image = false) program = try
   let source = prefix ^ "@compute @workgroup_size(64)\nfn " ^ entry ^ signature ^ " {\n" ^ body ^ "}\n" in
   Ok {source;entry;interface=List.rev !interface;uniform_layout=List.rev !uniform_layout;
     uniform_bytes=uniform_words*16;table_seeds;
-    output_widths=Array.map Array.length view.outputs;input_widths=(if image then [||] else view.widths)}
+    output_widths=Array.map Array.length view.outputs;input_widths=(if image then [||] else view.widths);
+    gathers=[||];counts=None}
 with Unsupported message -> Error (Flow.Diagnostic.error ~code:"E_GPU_FORM" message)
+
+(* Fast precision's 64-bit integer registers as [vec2<u32>] (low, high), as the Metal kernel's
+   [long]s: wrapping add, sub and mul, truncating division ([0] for a zero divisor), logical right
+   shift, shifts by [n & 63]. *)
+let int64 = {|fn i64_add(a: vec2<u32>, b: vec2<u32>) -> vec2<u32> { let lo = a.x + b.x; return vec2<u32>(lo, a.y + b.y + select(0u, 1u, lo < a.x)); }
+fn i64_sub(a: vec2<u32>, b: vec2<u32>) -> vec2<u32> { return vec2<u32>(a.x - b.x, a.y - b.y - select(0u, 1u, a.x < b.x)); }
+fn mulhi32(a: u32, b: u32) -> u32 {
+  let a0 = a & 0xffffu; let a1 = a >> 16u; let b0 = b & 0xffffu; let b1 = b >> 16u;
+  let m1 = a1 * b0 + ((a0 * b0) >> 16u);
+  let m2 = a0 * b1 + (m1 & 0xffffu);
+  return a1 * b1 + (m1 >> 16u) + (m2 >> 16u);
+}
+fn i64_mul(a: vec2<u32>, b: vec2<u32>) -> vec2<u32> { return vec2<u32>(a.x * b.x, mulhi32(a.x, b.x) + a.x * b.y + a.y * b.x); }
+fn i64_neg(a: vec2<u32>) -> bool { return bitcast<i32>(a.y) < 0; }
+fn i64_lt(a: vec2<u32>, b: vec2<u32>) -> bool { let x = bitcast<i32>(a.y); let y = bitcast<i32>(b.y); return x < y || (x == y && a.x < b.x); }
+fn i64_abs(a: vec2<u32>) -> vec2<u32> { return select(a, i64_sub(vec2<u32>(0u, 0u), a), i64_neg(a)); }
+fn i64_to_f(a: vec2<u32>) -> f32 {
+  if ((a.y == 0u && a.x < 0x80000000u) || (a.y == 0xffffffffu && a.x >= 0x80000000u)) { return f32(bitcast<i32>(a.x)); }
+  let m = select(a, vec2<u32>(0u - a.x, 0u - a.y - select(0u, 1u, a.x != 0u)), bitcast<i32>(a.y) < 0);
+  return select(1.0, -1.0, bitcast<i32>(a.y) < 0) * (f32(m.y) * 4294967296.0 + f32(m.x));
+}
+fn i64_from_f(x: f32) -> vec2<u32> {
+  if (abs(x) < 2147483648.0) { let n = i32(x); return vec2<u32>(bitcast<u32>(n), select(0u, 0xffffffffu, n < 0)); }
+  let h = floor(x / 4294967296.0);
+  return vec2<u32>(u32(x - h * 4294967296.0), bitcast<u32>(i32(h)));
+}
+fn i64_shl(a: vec2<u32>, b: vec2<u32>) -> vec2<u32> {
+  let n = b.x & 63u;
+  if (n == 0u) { return a; }
+  if (n >= 32u) { return vec2<u32>(0u, a.x << (n - 32u)); }
+  return vec2<u32>(a.x << n, (a.y << n) | (a.x >> (32u - n)));
+}
+fn i64_shr(a: vec2<u32>, b: vec2<u32>) -> vec2<u32> {
+  let n = b.x & 63u;
+  if (n == 0u) { return a; }
+  if (n >= 32u) { return vec2<u32>(a.y >> (n - 32u), 0u); }
+  return vec2<u32>((a.x >> n) | (a.y << (32u - n)), a.y >> n);
+}
+fn i64_fmod(a: vec2<u32>, b: vec2<u32>) -> vec2<u32> {
+  let r = i64_divmod(a, b, true);
+  if ((r.x != 0u || r.y != 0u) && (i64_neg(r) != i64_neg(b))) { return i64_add(r, b); }
+  return r;
+}
+fn i64_small(a: vec2<u32>) -> bool { return (a.y == 0u && a.x < 0x80000000u) || (a.y == 0xffffffffu && a.x >= 0x80000000u); }
+fn i64_divmod(a: vec2<u32>, b: vec2<u32>, rem: bool) -> vec2<u32> {
+  if (b.x == 0u && b.y == 0u) { return vec2<u32>(0u, 0u); }
+  if (i64_small(a) && i64_small(b) && !(a.x == 0x80000000u && b.x == 0xffffffffu)) {
+    let x = bitcast<i32>(a.x); let y = bitcast<i32>(b.x);
+    let q = select(x / y, x % y, rem);
+    return vec2<u32>(bitcast<u32>(q), select(0u, 0xffffffffu, q < 0));
+  }
+  let ua = i64_abs(a); let ub = i64_abs(b);
+  var q = vec2<u32>(0u, 0u); var r = vec2<u32>(0u, 0u);
+  for (var k = 63; k >= 0; k--) {
+    r = vec2<u32>(r.x << 1u, (r.y << 1u) | (r.x >> 31u));
+    let bit = select((ua.x >> u32(k)) & 1u, (ua.y >> u32(k - 32)) & 1u, k >= 32);
+    r.x = r.x | bit;
+    if (!i64_lt(r, ub) || bitcast<i32>(r.y) < 0) {
+      r = i64_sub(r, ub);
+      if (k >= 32) { q.y = q.y | (1u << u32(k - 32)); } else { q.x = q.x | (1u << u32(k)); }
+    }
+  }
+  if (rem) { return select(r, i64_sub(vec2<u32>(0u, 0u), r), i64_neg(a)); }
+  return select(q, i64_sub(vec2<u32>(0u, 0u), q), i64_neg(a) != i64_neg(b));
+}
+|}
+
+(* The web counterpart of [Flow_gpu.Emit.kernel ~fast]: the same refusals, bindings and uniform
+   layout, gathers from bound tables (f32, clamped, their length a uniform word), 64-bit integer
+   registers ([int64]), and the count words: the element count is the dispatch count, or its minimum
+   with [count_in[0] * mul / div] when use is set, and is written to the 40-byte count record
+   [count_out] {n, 6n, 1, 0, 0, 0, 6, n, 0, 0}: native's six words, then from byte 24 WebGPU's
+   [drawIndirect] of n six-vertex instances, which a mark set reads. *)
+let kernel_fast program = try
+  let view = P.Private.view program in
+  (match P.gpu_refusals ~fused:true ~fast:true program with [] -> () | reason :: _ -> fail reason.message);
+  let offset = ref 4 and uniform_layout = ref [] in
+  let uniform name width =
+    let first = !offset in offset := first+width*4;
+    uniform_layout := (name,first,width) :: !uniform_layout; first/4 in
+  let tabled = Array.to_list view.code |> List.filter_map (fun instruction ->
+    match snd (guarded [] instruction) with P.Array_prepare (u, _) -> Some u | _ -> None) in
+  let uniforms = Array.mapi (fun index width ->
+    if List.mem index tabled then 0 else uniform ("uniform:" ^ string_of_int index) width) view.uniform_widths in
+  let frames = Array.mapi (fun index instruction -> match snd (guarded [] instruction) with
+    | P.Frame name -> uniform (Printf.sprintf "frame:%d:%s" index name) 1 | _ -> 0) view.code in
+  let used = P.Private.output_reachable program in
+  let finite_checks = P.Private.finite_checks program in
+  let word index = Printf.sprintf "uniforms[%d].%c" (index/4) "xyzw".[index mod 4] in
+  let has operation = Array.exists Fun.id (Array.mapi (fun slot instruction -> used.(slot) && operation (snd(guarded [] instruction))) view.code) in
+  let table_seeds = Array.to_list(Array.mapi(fun index instruction->index,snd(guarded [] instruction))view.code)
+    |> List.filter_map (function
+      | index,P.Noise3 (_,_,_,seed,_,_,_) when used.(index) -> Some seed | _ -> None)
+    |> List.sort_uniq Int.compare |> Array.of_list in
+  let table seed = match Array.find_index ((=) seed) table_seeds with Some index -> index*512 | None -> assert false in
+  let gathers = Array.to_list (Array.mapi (fun slot instruction -> slot, snd (guarded [] instruction)) view.code)
+    |> List.filter_map (function slot, P.Array_prepare (u, ty) when used.(slot) ->
+        Some (slot, (u, match ty with Flow.Ty.Array Vec2 -> 2 | Array Vec3 -> 3 | Array Vec4 -> 4 | _ -> 1)) | _ -> None) in
+  let gather_index slot = match List.find_index (fun (s, _) -> s = slot) gathers with Some k -> k | None -> fail "Gather without its table." in
+  let gather_lengths = List.mapi (fun k (_, (u, _)) -> uniform (Printf.sprintf "gather:%d:%d" k u) 1) gathers |> Array.of_list in
+  let integer slot = Flow_ir.Core.Region.integer_register view.code.(slot) in
+  let int_of r = if integer r then register r else "i64_from_f(" ^ register r ^ ")" in
+  let float_of r = if integer r then "i64_to_f(" ^ register r ^ ")" else register r in
+  (* an integer-valued register as a 64-bit expression (as [Flow_gpu.Emit]'s) *)
+  let rec whole r = if integer r then Some (register r) else match snd (guarded [] view.code.(r)) with
+    | P.Convert (To_float, x) when integer x -> Some (register x)
+    | P.Const c when Float.is_integer c && Float.abs c < 9007199254740992. ->
+        let n = Int64.of_float c in
+        Some (Printf.sprintf "vec2<u32>(%Luu, %Luu)" (Int64.logand n 0xffffffffL) (Int64.logand (Int64.shift_right_logical n 32) 0xffffffffL))
+    | P.Binary ((Add|Sub|Mul|Mod|Min|Max) as op, a, b) ->
+        (match whole a, whole b with
+         | Some a, Some b -> Some (match op with P.Add -> "i64_add(" ^ a ^ ", " ^ b ^ ")" | Sub -> "i64_sub(" ^ a ^ ", " ^ b ^ ")"
+             | Mul -> "i64_mul(" ^ a ^ ", " ^ b ^ ")" | Mod -> "i64_fmod(" ^ a ^ ", " ^ b ^ ")"
+             | Min -> "select(" ^ b ^ ", " ^ a ^ ", i64_lt(" ^ a ^ ", " ^ b ^ "))"
+             | _ -> "select(" ^ a ^ ", " ^ b ^ ", i64_lt(" ^ a ^ ", " ^ b ^ "))")
+         | _ -> None)
+    | _ -> None in
+  let element prepared index width component =
+    let k = gather_index prepared in
+    Printf.sprintf "gather%d[u32(clamp(i32(%s), 0, max(i32(%s) - 1, 0))) * %du + %du]"
+      k (float_of index) (word gather_lengths.(k)) width component in
+  let body = Buffer.create 4096 in
+  Array.iteri (fun slot instruction ->
+    if used.(slot) && (match snd (guarded [] instruction) with P.Array_prepare _ -> false | _ -> true) then begin
+    let guards,instruction=guarded [] instruction in
+    let expression = match instruction with
+      | P.Const value -> Printf.sprintf "bitcast<f32>(0x%lxu)" (Int32.bits_of_float value)
+      | Input (input,width,component) -> Printf.sprintf "input%d[i * %du + %du]" input width component
+      | Uniform (index,component) -> Printf.sprintf "bitcast<f32>(%s)" (word (uniforms.(index)+component))
+      | Frame _ -> Printf.sprintf "bitcast<f32>(%s)" (word frames.(slot))
+      | Accumulator _ -> assert false
+      (* arithmetic on two integers stays in 64 bits: a float register would round them first *)
+      | Binary ((Add|Sub|Mul|Mod|Min|Max),_,_) when whole slot <> None -> "i64_to_f(" ^ Option.get (whole slot) ^ ")"
+      | Convert ((Truncate|Coerce_int|Integer_result _|Floor|Ceil|Round),a) when whole a <> None -> Option.get (whole a)
+      | Binary (op,a,b) -> binary op (float_of a) (float_of b)
+      | Unary (op,a) -> unary op (float_of a)
+      | Fma (a,b,c) -> Printf.sprintf "fma(%s, %s, %s)" (register a) (register b) (register c)
+      | Checked_mul _ | Checked_fma _ -> fail "Checked arithmetic requires binary64 overflow status."
+      | Gather (prepared,index,width,component) -> element prepared index width component
+      | Int_gather (prepared,index) -> "i64_from_f(" ^ element prepared index 1 0 ^ ")"
+      | Array_prepare _ -> assert false
+      | Int_const n -> let n = Int64.of_int n in
+          Printf.sprintf "vec2<u32>(%Luu, %Luu)" (Int64.logand n 0xffffffffL) (Int64.logand (Int64.shift_right_logical n 32) 0xffffffffL)
+      | Int_input input -> Printf.sprintf "i64_from_f(input%d[i])" input
+      | Int_uniform index -> Printf.sprintf "i64_from_f(bitcast<f32>(%s))" (word uniforms.(index))
+      | Int_frame _ -> Printf.sprintf "i64_from_f(bitcast<f32>(%s))" (word frames.(slot))
+      | Int_binary (op,a,b) -> let a=int_of a and b=int_of b in
+          (match op with Flow.Packed_ops.Iadd -> "i64_add(" ^ a ^ ", " ^ b ^ ")" | Isub -> "i64_sub(" ^ a ^ ", " ^ b ^ ")"
+           | Imul -> "i64_mul(" ^ a ^ ", " ^ b ^ ")"
+           | Idiv -> "i64_divmod(" ^ a ^ ", " ^ b ^ ", false)" | Imod -> "i64_divmod(" ^ a ^ ", " ^ b ^ ", true)"
+           | Iand -> "(" ^ a ^ " & " ^ b ^ ")" | Ior -> "(" ^ a ^ " | " ^ b ^ ")" | Ixor -> "(" ^ a ^ " ^ " ^ b ^ ")"
+           | Ishl -> "i64_shl(" ^ a ^ ", " ^ b ^ ")" | Ishr -> "i64_shr(" ^ a ^ ", " ^ b ^ ")")
+      | Int_compare (op,a,b) -> let a=int_of a and b=int_of b in
+          truth (match op with Flow.Packed_ops.Ilt -> "i64_lt(" ^ a ^ ", " ^ b ^ ")" | Igt -> "i64_lt(" ^ b ^ ", " ^ a ^ ")"
+            | Ile -> "!i64_lt(" ^ b ^ ", " ^ a ^ ")" | Ige -> "!i64_lt(" ^ a ^ ", " ^ b ^ ")"
+            | Ieq -> "all(" ^ a ^ " == " ^ b ^ ")")
+      | Int_abs a -> "i64_abs(" ^ int_of a ^ ")"
+      | Int_select (condition,yes,no) -> Printf.sprintf "select(%s, %s, %s != 0.0)" (int_of no) (int_of yes) (float_of condition)
+      | Convert (To_float,a) -> float_of a
+      | Convert ((Truncate|Coerce_int|Integer_result _),a) -> int_of a
+      | Convert (Floor,a) -> "i64_from_f(floor(" ^ float_of a ^ "))"
+      | Convert (Ceil,a) -> "i64_from_f(ceil(" ^ float_of a ^ "))"
+      | Convert (Round,a) -> "i64_from_f(sign(" ^ float_of a ^ ") * floor(abs(" ^ float_of a ^ ") + 0.5))"
+      | Text_const _ | Text_input _ | Text_uniform _ | Text_gather _ | Text_select _ -> fail "Text kernels stay on the CPU."
+      | Select (condition,yes,no) -> Printf.sprintf "select(%s, %s, %s != 0.0)" (register no) (register yes) (register condition)
+      | Noise3 (x,y,z,seed,octaves,_,_) -> Printf.sprintf "wfbm(vec3<f32>(%s, %s, %s), %d, %d)"
+          (register x) (register y) (register z) octaves (table seed)
+      | _ -> fail "This instruction is not supported by the WGSL fast kernel target." in
+    let ty, zero = if integer slot then "vec2<u32>", "vec2<u32>(0u, 0u)" else "f32", "0.0" in
+    let indentation=if guards=[] then "  " else "    " in
+    if guards=[] then Printf.bprintf body "  let r%d: %s = %s;\n" slot ty expression else begin
+      Printf.bprintf body "  var r%d: %s = %s;\n" slot ty zero;
+      Printf.bprintf body "  if (%s) {\n" (String.concat " && " (List.map(fun(condition,selected)->
+        Printf.sprintf "%s %s 0.0" (float_of condition) (if selected then "!=" else "=="))guards));
+      Printf.bprintf body "    r%d = %s;\n" slot expression
+    end;
+    if finite_checks.(slot) && not (integer slot) then
+      Printf.bprintf body "%sif (!wfinite(r%d)) { atomicStore(&status, 1u); }\n" indentation slot;
+    if guards<>[] then Buffer.add_string body "  }\n"
+    end) view.code;
+  let outputs = Array.length view.outputs in
+  let output_name k = if outputs = 1 then "outbuf" else "outbuf" ^ string_of_int k in
+  Array.iteri (fun k registers -> Array.iteri (fun component slot ->
+    Printf.bprintf body "  %s[i * %du + %du] = %s;\n"
+      (output_name k) (Array.length registers) component (float_of slot)) registers) view.outputs;
+  let count = Array.length view.widths in
+  let gather_base = count+outputs+2+(if table_seeds=[||] then 0 else 1) in
+  let counts = let o = !offset in offset := o+12; o in
+  let count_base = gather_base+List.length gathers in
+  let input_used=Array.make count false in
+  Array.iteri(fun slot instruction->match snd(guarded [] instruction)with P.Input(input,_,_)when used.(slot)->input_used.(input)<-true|_->())view.code;
+  let uniform_words = (!offset + 15) / 16 in
+  let declarations = Buffer.create 512 in
+  let interface = ref [] in
+  let bind binding kind decl = interface := {group=0;binding;kind} :: !interface;
+    Printf.bprintf declarations "@group(0) @binding(%d) var%s %s;\n" binding
+      (match kind with Uniform_buffer -> "<uniform>" | Storage_read -> "<storage, read>"
+       | Storage_read_write -> "<storage, read_write>") decl in
+  Array.iteri (fun index used -> if used then bind index Storage_read (Printf.sprintf "input%d: array<f32>" index)) input_used;
+  for k = 0 to outputs-1 do bind (count+k) Storage_read_write (output_name k ^ ": array<f32>") done;
+  bind (count+outputs) Uniform_buffer (Printf.sprintf "uniforms: array<vec4<u32>, %d>" uniform_words);
+  bind (count+outputs+1) Storage_read_write "status: atomic<u32>";
+  if table_seeds <> [||] then bind (count+outputs+2) Storage_read "table: array<i32>";
+  List.iteri (fun k _ -> bind (gather_base+k) Storage_read (Printf.sprintf "gather%d: array<f32>" k)) gathers;
+  bind count_base Storage_read "count_in: array<u32>";
+  bind (count_base+1) Storage_read_write "count_out: array<u32>";
+  let prefix = Buffer.contents declarations ^ finite ^ int64
+    ^ (if has (function P.Binary (P.Pow,_,_) -> true | _ -> false) then power else "")
+    ^ (if table_seeds=[||] then "" else perlin) in
+  let signature = "(@builtin(global_invocation_id) gid: vec3<u32>)" in
+  let w = counts/4 in
+  let body = Printf.sprintf
+    "  let i = gid.x;\n  var n = uniforms[0].x;\n  if (%s != 0u) { n = min(n, count_in[0] * %s / %s); }\n  if (i == 0u) { count_out[0] = n; count_out[1] = 6u * n; count_out[2] = 1u; count_out[3] = 0u; count_out[4] = 0u; count_out[5] = 0u; count_out[6] = 6u; count_out[7] = n; count_out[8] = 0u; count_out[9] = 0u; }\n  if (i >= n) { return; }\n"
+    (word (w+2)) (word w) (word (w+1)) ^ Buffer.contents body in
+  let entry = "kernel_" ^ Digest.to_hex (Digest.string (prefix ^ signature ^ body)) in
+  let source = prefix ^ "@compute @workgroup_size(64)\nfn " ^ entry ^ signature ^ " {\n" ^ body ^ "}\n" in
+  Ok {source;entry;interface=List.rev !interface;uniform_layout=List.rev !uniform_layout;
+    uniform_bytes=uniform_words*16;table_seeds;
+    output_widths=Array.map Array.length view.outputs;input_widths=view.widths;
+    gathers=Array.of_list (List.map snd gathers);counts=Some counts}
+with Unsupported message -> Error (Flow.Diagnostic.error ~code:"E_GPU_FORM" message)
+
+(* A resident fold's [array/compact] on the web: one workgroup of 256 (the WebGPU default limit),
+   each thread counts a contiguous chunk of the mask, thread 0 turns the counts into offsets, each
+   writes its chunk's indices as floats; the total is the count cell. The mask's count is [bound.x],
+   or at most [count_in[0]] when [bound.y] is set. *)
+let compaction = {|@group(0) @binding(0) var<storage, read> mask: array<f32>;
+@group(0) @binding(1) var<storage, read_write> kept: array<f32>;
+@group(0) @binding(2) var<storage, read_write> total: array<u32>;
+@group(0) @binding(3) var<uniform> bound: vec4<u32>;
+@group(0) @binding(4) var<storage, read> count_in: array<u32>;
+var<workgroup> offsets: array<u32, 256>;
+@compute @workgroup_size(256)
+fn flow_compact_mask(@builtin(local_invocation_index) t: u32) {
+  var n = bound.x;
+  if (bound.y != 0u) { n = min(n, count_in[0]); }
+  let chunk = (n + 255u) / 256u;
+  let first = min(n, t * chunk);
+  let last = min(n, first + chunk);
+  var count = 0u;
+  for (var i = first; i < last; i++) { if (mask[i] != 0.0) { count++; } }
+  offsets[t] = count;
+  workgroupBarrier();
+  if (t == 0u) {
+    var sum = 0u;
+    for (var k = 0u; k < 256u; k++) { let v = offsets[k]; offsets[k] = sum; sum += v; }
+    total[0] = sum;
+  }
+  workgroupBarrier();
+  var at = offsets[t];
+  for (var i = first; i < last; i++) { if (mask[i] != 0.0) { kept[at] = f32(i); at++; } }
+}
+|}

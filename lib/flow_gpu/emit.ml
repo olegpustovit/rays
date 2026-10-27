@@ -2,7 +2,8 @@ module P = Flow_ir.Packed
 module S = Ogpu.Shader
 type msl = {source : string; entry : string; interface : S.binding list;
   uniform_layout : (string * int * int) list; uniform_bytes : int;
-  table_seeds : int array; output_widths : int array; input_widths : int array}
+  table_seeds : int array; output_widths : int array; input_widths : int array;
+  gathers : (int * int) array; counts : int option}
 let names = Flow.Packed_ops.names
 let perlin = {|float fade(float t) { return t*t*t*(t*(t*6.0f-15.0f)+10.0f); }
 float blend(float a, float b, float t) { return a+t*(b-a); }
@@ -64,14 +65,28 @@ let unary operation a = match operation with
 let checked projection expression = match projection with
   | P.Value -> Printf.sprintf "(isfinite(%s)?%s:0.0f)" expression expression
   | Valid -> Printf.sprintf "(isfinite(%s)?1.0f:0.0f)" expression
-let kernel program = try
+(* integer arithmetic in 64 bits (the CPU's 63 agree in every bit a mask below 2^62 keeps):
+   wrapping, truncating division, logical right shift *)
+let integer operation a b = match operation with
+  | Flow.Packed_ops.Iadd -> "(" ^ a ^ "+" ^ b ^ ")" | Isub -> "(" ^ a ^ "-" ^ b ^ ")" | Imul -> "(" ^ a ^ "*" ^ b ^ ")"
+  | Idiv -> "(" ^ b ^ "==0?0:" ^ a ^ "/" ^ b ^ ")" | Imod -> "(" ^ b ^ "==0?0:" ^ a ^ "%" ^ b ^ ")"
+  | Iand -> "(" ^ a ^ "&" ^ b ^ ")" | Ior -> "(" ^ a ^ "|" ^ b ^ ")" | Ixor -> "(" ^ a ^ "^" ^ b ^ ")"
+  | Ishl -> "(" ^ a ^ "<<(" ^ b ^ "&63))" | Ishr -> "long(ulong(" ^ a ^ ")>>(" ^ b ^ "&63))"
+let comparison operation a b =
+  let op = match operation with Flow.Packed_ops.Ilt -> "<" | Ile -> "<=" | Igt -> ">" | Ige -> ">=" | Ieq -> "==" in
+  "(" ^ a ^ op ^ b ^ "?1.0f:0.0f)"
+let kernel ?(fast=false) program = try
   let view = P.Private.view program in
-  (match P.gpu_refusals ~fused:true program with [] -> () | reason :: _ -> fail reason.message);
+  (match P.gpu_refusals ~fused:true ~fast program with [] -> () | reason :: _ -> fail reason.message);
   let offset = ref 4 and uniform_layout = ref [] in
   let uniform name width =
     let first = !offset in offset := first+width*4;
     uniform_layout := (name,first,width) :: !uniform_layout; first/4 in
-  let uniforms = Array.mapi (fun index width -> uniform ("uniform:" ^ string_of_int index) width) view.uniform_widths in
+  (* an array-valued uniform reaches the kernel only as a gather table, not a scalar slot *)
+  let tabled = Array.to_list view.code |> List.filter_map (fun instruction ->
+    match snd (guarded [] instruction) with P.Array_prepare (u, _) -> Some u | _ -> None) in
+  let uniforms = Array.mapi (fun index width ->
+    if List.mem index tabled then 0 else uniform ("uniform:" ^ string_of_int index) width) view.uniform_widths in
   let frames = Array.mapi (fun index instruction -> match snd (guarded [] instruction) with
     | P.Frame name -> uniform (Printf.sprintf "frame:%d:%s" index name) 1 | _ -> 0) view.code in
   let used = P.Private.output_reachable program in
@@ -81,9 +96,34 @@ let kernel program = try
       | index,P.Noise3 (_,_,_,seed,_,_,_) when used.(index) ->
           Some seed | _ -> None) |> List.sort_uniq Int.compare |> Array.of_list in
   let table seed = match Array.find_index ((=) seed) table_seeds with Some index -> index*512 | None -> assert false in
+  (* the arrays gathers read: one bound table each, its element count a uniform *)
+  let gathers = Array.to_list (Array.mapi (fun slot instruction -> slot, snd (guarded [] instruction)) view.code)
+    |> List.filter_map (function slot, P.Array_prepare (u, ty) when used.(slot) ->
+        Some (slot, (u, match ty with Flow.Ty.Array Vec2 -> 2 | Array Vec3 -> 3 | Array Vec4 -> 4 | _ -> 1)) | _ -> None) in
+  let gather_index slot = match List.find_index (fun (s, _) -> s = slot) gathers with Some k -> k | None -> fail "Gather without its table." in
+  let gather_lengths = List.mapi (fun k (_, (u, _)) -> uniform (Printf.sprintf "gather:%d:%d" k u) 1) gathers |> Array.of_list in
+  let integer_register slot = Flow_ir.Core.Region.integer_register view.code.(slot) in
+  let int_of r = if integer_register r then register r else "long(" ^ register r ^ ")" in
+  (* the integer register a float operand converts, if it is one *)
+  (* an integer-valued register as a 64-bit expression: an integer register, its conversion to float,
+     an integral constant, or +, -, *, mod, min, max of two such; [None] for any other *)
+  let rec whole r = if integer_register r then Some (register r) else match snd (guarded [] view.code.(r)) with
+    | P.Convert (To_float, x) when integer_register x -> Some (register x)
+    | P.Const c when Float.is_integer c && Float.abs c < 9007199254740992. -> Some (Printf.sprintf "%.0fL" c)
+    | P.Binary ((Add|Sub|Mul|Mod|Min|Max) as op, a, b) when fast ->
+        (match whole a, whole b with
+         | Some a, Some b -> Some ("(" ^ (match op with P.Add -> a ^ "+" ^ b | Sub -> a ^ "-" ^ b | Mul -> a ^ "*" ^ b
+             | Mod -> "fmod64(" ^ a ^ "," ^ b ^ ")" | Min -> "min(" ^ a ^ "," ^ b ^ ")" | _ -> "max(" ^ a ^ "," ^ b ^ ")") ^ ")")
+         | _ -> None)
+    | _ -> None in
+  let float_of r = if integer_register r then "float(" ^ register r ^ ")" else register r in
+  let element prepared index width component =
+    let k = gather_index prepared in
+    Printf.sprintf "as_type<float>(gather%d[clamp(int(%s),0,max(int(uniforms[%d])-1,0))*%d+%d])"
+      k (int_of index) gather_lengths.(k) width component in
   let body = Buffer.create 4096 in
   Array.iteri (fun slot instruction ->
-    if used.(slot) then begin
+    if used.(slot) && (match snd (guarded [] instruction) with P.Array_prepare _ -> false | _ -> true) then begin
     let guards,instruction=guarded [] instruction in
     let expression = match instruction with
       | P.Const value ->
@@ -92,53 +132,116 @@ let kernel program = try
       | Uniform (index,component) -> Printf.sprintf "as_type<float>(uniforms[%d])" (uniforms.(index)+component)
       | Frame _ -> Printf.sprintf "as_type<float>(uniforms[%d])" frames.(slot)
       | Accumulator _ -> assert false
-      | Binary (op,a,b) -> binary op (register a) (register b)
-      | Unary (op,a) -> unary op (register a)
+      (* arithmetic on two integers stays in 64 bits (fast): a float register would round them first *)
+      | Binary ((Add|Sub|Mul|Mod|Min|Max),_,_) when fast && whole slot <> None -> "float(" ^ Option.get (whole slot) ^ ")"
+      | Convert ((Truncate|Coerce_int|Integer_result _|Floor|Ceil|Round),a) when fast && whole a <> None -> Option.get (whole a)
+      | Binary (op,a,b) -> binary op (float_of a) (float_of b)
+      | Unary (op,a) -> unary op (float_of a)
       | Fma (a,b,c) -> Printf.sprintf "fma(%s,%s,%s)" (register a) (register b) (register c)
       | Checked_mul (projection,a,b) -> checked projection (Printf.sprintf "(%s*%s)" (register a) (register b))
       | Checked_fma (projection,a,b,c) -> checked projection (Printf.sprintf "fma(%s,%s,%s)" (register a) (register b) (register c))
-      | Array_prepare _ | Gather _ | Int_gather _ -> fail "Indexed array reads stay on the CPU."
+      | Gather (prepared,index,width,component) -> element prepared index width component
+      | Int_gather (prepared,index) -> "long(" ^ element prepared index 1 0 ^ ")"
+      | Array_prepare _ -> assert false
+      | Int_const n -> Printf.sprintf "long(%dL)" n
+      | Int_input input -> Printf.sprintf "long(input%d[i])" input
+      | Int_uniform index -> Printf.sprintf "long(as_type<float>(uniforms[%d]))" uniforms.(index)
+      | Int_frame _ -> Printf.sprintf "long(as_type<float>(uniforms[%d]))" frames.(slot)
+      | Int_binary (op,a,b) -> integer op (int_of a) (int_of b)
+      | Int_compare (op,a,b) -> comparison op (int_of a) (int_of b)
+      | Int_abs a -> "abs(" ^ int_of a ^ ")"
+      | Int_select (condition,yes,no) -> Printf.sprintf "(%s!=0.0f?%s:%s)" (float_of condition) (int_of yes) (int_of no)
+      | Convert (To_float,a) -> float_of a
+      | Convert ((Truncate|Coerce_int|Integer_result _),a) -> int_of a
+      | Convert (Floor,a) -> "long(floor(" ^ float_of a ^ "))"
+      | Convert (Ceil,a) -> "long(ceil(" ^ float_of a ^ "))"
+      | Convert (Round,a) -> "long(round(" ^ float_of a ^ "))"
       | Text_const _ | Text_input _ | Text_uniform _ | Text_gather _ | Text_select _ -> fail "Text kernels stay on the CPU."
       | Select (condition,yes,no) -> Printf.sprintf "(%s!=0.0f?%s:%s)" (register condition) (register yes) (register no)
       | Noise3 (x,y,z,seed,octaves,_,_) -> Printf.sprintf "fbm(float3(%s,%s,%s),%d,table+%d)"
           (register x) (register y) (register z) octaves (table seed)
       | _ -> fail "Integer instructions and conversions are not supported by the Metal kernel target." in
     let indentation=if guards=[] then "  " else "    " in
-    if guards=[] then Printf.bprintf body "  float r%d=%s;\n" slot expression else begin
-      Printf.bprintf body "  float r%d=0.0f;\n" slot;
+    let ty, zero = if integer_register slot then "long", "0" else "float", "0.0f" in
+    if guards=[] then Printf.bprintf body "  %s r%d=%s;\n" ty slot expression else begin
+      Printf.bprintf body "  %s r%d=%s;\n" ty slot zero;
       Printf.bprintf body "  if(%s) {\n" (String.concat "&&" (List.map(fun(condition,selected)->
         Printf.sprintf "r%d%s0.0f" condition (if selected then "!=" else "=="))guards));
       Printf.bprintf body "    r%d=%s;\n" slot expression
     end;
-    if finite_checks.(slot) then
+    if finite_checks.(slot) && not (integer_register slot) then
       Printf.bprintf body "%sif(!isfinite(r%d)) atomic_store_explicit(status,1u,memory_order_relaxed);\n" indentation slot;
     if guards<>[] then Buffer.add_string body "  }\n"
     end) view.code;
   let outputs = Array.length view.outputs in
   let output_name k = if outputs = 1 then "output" else "output" ^ string_of_int k in
   Array.iteri (fun k registers -> Array.iteri (fun component slot ->
-    Printf.bprintf body "  %s[i*%d+%d]=r%d;\n"
-      (output_name k) (Array.length registers) component slot) registers) view.outputs;
+    Printf.bprintf body "  %s[i*%d+%d]=%s;\n"
+      (output_name k) (Array.length registers) component (float_of slot)) registers) view.outputs;
   let count = Array.length view.widths in
+  let gather_base = count+outputs+2+(if table_seeds=[||] then 0 else 1) in
+  (* fast: the element count may come from a device cell (another kernel's, times mul over div,
+     when use is set) and is written to this kernel's own count record {n, 6n, 1, 0, 0, 0}: a
+     resident fold never reads it, and its last five words are the indexed indirect draw of n
+     quads a mark set reads *)
+  let counts = if fast then (let o = !offset in offset := o+12; Some o) else None in
+  let count_base = gather_base+List.length gathers in
   let arguments = Array.to_list (Array.mapi (fun index _ -> Printf.sprintf
     "device const float* input%d [[buffer(%d)]]" index index) view.widths)
     @ List.init outputs (fun k -> Printf.sprintf "device float* %s [[buffer(%d)]]" (output_name k) (count+k))
     @ [Printf.sprintf "constant uint* uniforms [[buffer(%d)]]" (count+outputs);
        Printf.sprintf "device atomic_uint* status [[buffer(%d)]]" (count+outputs+1)]
     @ (if table_seeds=[||] then [] else [Printf.sprintf "device const int* table [[buffer(%d)]]" (count+outputs+2)])
+    @ List.mapi (fun k _ -> Printf.sprintf "device const uint* gather%d [[buffer(%d)]]" k (gather_base+k)) gathers
+    @ (if counts=None then [] else [Printf.sprintf "device const uint* count_in [[buffer(%d)]]" count_base;
+        Printf.sprintf "device uint* count_out [[buffer(%d)]]" (count_base+1)])
     @ ["uint i [[thread_position_in_grid]]"] in
   let prefix = "#include <metal_stdlib>\nusing namespace metal;\n" ^
+    (if fast then "long fmod64(long a,long b){if(b==0)return 0;long r=a%b;return (r!=0&&((r<0)!=(b<0)))?r+b:r;}\n" else "") ^
     (if table_seeds=[||] then "" else perlin) in
   let signature = String.concat ",\n  " arguments in
-  let body = "  if(i>=uniforms[0]) return;\n  if(i==0) atomic_fetch_or_explicit(status,0u,memory_order_relaxed);\n" ^ Buffer.contents body in
+  let guard = match counts with
+    | None -> "  if(i>=uniforms[0]) return;\n"
+    | Some o -> let w = o/4 in Printf.sprintf
+        "  uint n=uniforms[0];\n  if(uniforms[%d]!=0u) n=min(n,count_in[0]*uniforms[%d]/uniforms[%d]);\n  if(i==0){count_out[0]=n;count_out[1]=6u*n;count_out[2]=1u;count_out[3]=0u;count_out[4]=0u;count_out[5]=0u;}\n  if(i>=n) return;\n"
+        (w+2) w (w+1) in
+  let body = guard ^ "  if(i==0) atomic_fetch_or_explicit(status,0u,memory_order_relaxed);\n" ^ Buffer.contents body in
   let digest = Digest.to_hex (Digest.string (prefix ^ signature ^ body)) in
   let entry = "kernel_" ^ digest in
   let source = prefix ^ "kernel void " ^ entry ^ "(\n  " ^ signature ^ ") {\n" ^ body ^ "}\n" in
   let input_used=Array.make count false in
   Array.iteri(fun slot instruction->match snd(guarded [] instruction)with P.Input(input,_,_)when used.(slot)->input_used.(input)<-true|_->())view.code;
-  let interface = List.init (count+outputs+2+(if table_seeds=[||] then 0 else 1)) Fun.id
+  let interface = List.init (count_base+(if counts=None then 0 else 2)) Fun.id
     |>List.filter(fun binding->binding>=count || input_used.(binding))
     |>List.map(fun binding->S.{group=0;binding;kind=(if binding=count+outputs then Uniform_buffer else Storage_buffer);visibility=[Compute]})in
   Ok {source;entry;interface;uniform_layout=List.rev !uniform_layout;uniform_bytes= !offset;
-    table_seeds;output_widths=Array.map Array.length view.outputs;input_widths=view.widths}
+    table_seeds;output_widths=Array.map Array.length view.outputs;input_widths=view.widths;
+    gathers=Array.of_list (List.map snd gathers);counts}
 with Unsupported message -> Error (Flow.Diagnostic.error ~code:"E_GPU_FORM" message)
+
+(* Stream compaction for a resident fold: the indices of a mask's nonzero elements, in order, as
+   floats, and their count.  One threadgroup of up to 1,024 threads: each counts a contiguous chunk,
+   thread 0 turns the counts into offsets, each writes its chunk's indices. *)
+let compaction =
+  let entry = "flow_compact_mask" in
+  let source = {|#include <metal_stdlib>
+using namespace metal;
+kernel void flow_compact_mask(device const float* mask [[buffer(0)]], device float* kept [[buffer(1)]],
+  device uint* total [[buffer(2)]], constant uint2& bound [[buffer(3)]], device const uint* count_in [[buffer(4)]],
+  uint t [[thread_position_in_threadgroup]], uint size [[threads_per_threadgroup]]) {
+  threadgroup uint offsets[1024];
+  uint n = bound.y != 0u ? min(bound.x, count_in[0]) : bound.x;
+  uint chunk = (n + size - 1) / size, first = min(n, t * chunk), last = min(n, first + chunk), count = 0;
+  for (uint i = first; i < last; i++) if (mask[i] != 0.0f) count++;
+  offsets[t] = count;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  if (t == 0) { uint sum = 0; for (uint k = 0; k < size; k++) { uint v = offsets[k]; offsets[k] = sum; sum += v; } total[0] = sum; }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  uint at = offsets[t];
+  for (uint i = first; i < last; i++) if (mask[i] != 0.0f) kept[at++] = float(i);
+}
+|} in
+  {source; entry; uniform_layout = []; uniform_bytes = 8; table_seeds = [||];
+   output_widths = [|1|]; input_widths = [|1|]; gathers = [||]; counts = None;
+   interface = List.map (fun binding -> S.{group = 0; binding;
+     kind = (if binding = 3 then Uniform_buffer else Storage_buffer); visibility = [Compute]}) [0; 1; 2; 3; 4]}

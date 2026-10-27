@@ -150,8 +150,22 @@ let run () =
         get (Render_encoder.set_vertex_buffer encoder ~index:0 ~offset:0L offset);
         get (Render_encoder.set_fragment_buffer encoder ~index:1 ~offset:0L tint);
         get (Render_encoder.draw_triangles encoder ~first:0 ~count:3 ());
+        (* The same triangle again, its counts read from a buffer when the draw runs (index
+           count 3, one instance); a misaligned argument offset is refused before encoding. *)
+        let int_bytes values = let b = Bytes.create (4 * Array.length values) in
+          Array.iteri (fun i v -> Bytes.set_int32_le b (4 * i) (Int32.of_int v)) values; b in
+        let indices = get (Buffer.create ~device ~length:12L ~storage:Buffer.Shared ()) in
+        get (Buffer.write_bytes indices ~dst_offset:0L (int_bytes [| 0; 1; 2 |]));
+        let arguments = get (Buffer.create ~device ~length:24L ~storage:Buffer.Shared ()) in
+        get (Buffer.write_bytes arguments ~dst_offset:0L (int_bytes [| 0; 3; 1; 0; 0; 0 |]));
+        reject Invalid_argument (Render_encoder.draw_indexed_indirect encoder ~primitive:Render_encoder.Triangle
+          ~index_type:Uint32 ~index_buffer:indices ~index_offset:0L ~arguments ~arguments_offset:2L);
+        get (Render_encoder.draw_indexed_indirect encoder ~primitive:Render_encoder.Triangle
+          ~index_type:Uint32 ~index_buffer:indices ~index_offset:0L ~arguments ~arguments_offset:4L);
         get (Render_encoder.end_encoding encoder);
         complete commands;
+        get (Buffer.destroy arguments);
+        get (Buffer.destroy indices);
         let pixels =
           get
             (Texture.read_bytes target ~region:(full_region 2 2) ~mip_level:0 ~slice:0

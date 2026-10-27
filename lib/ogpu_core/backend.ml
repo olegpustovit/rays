@@ -74,6 +74,7 @@ type driver_render_encoder={
   set_stencil_reference:front:int32->back:int32->(unit,Error.t)result;
   draw:primitive:Render_pass.primitive->first:int->count:int->instances:int->(unit,Error.t)result;
   draw_indexed:primitive:Render_pass.primitive->index_type:Render_pass.index_type->token->offset:int64->count:int64->instances:int->(unit,Error.t)result;
+  draw_indexed_indirect:primitive:Render_pass.primitive->index_type:Render_pass.index_type->token->offset:int64->token->arguments_offset:int64->(unit,Error.t)result;
   draw_batch:driver_batch_draw array->(unit,Error.t)result;
   use_resources:token list->(unit,Error.t)result;
   execute_icb:token->location:int->length:int->(unit,Error.t)result;
@@ -778,6 +779,25 @@ let draw_indexed (encoder:render_encoder) ~primitive ~index_type (buffer:buffer)
   else match valid_indexed op (render_device encoder) primitive index_type buffer ~offset ~count ~instances with Error _ as e->e|Ok()->
   match encoder.render_raw.draw_indexed ~primitive ~index_type buffer.resource.raw.token ~offset ~count ~instances with Error _ as e->e|Ok()->
   mark_submitted encoder.render_commands.commands_queue buffer.resource;Ok()
+(* The index and instance counts are five uints the device wrote at [arguments_offset] (index
+   count, instance count, first index, base vertex, base instance), read when the draw runs. *)
+let draw_indexed_indirect (encoder:render_encoder) ~primitive ~index_type (buffer:buffer) ~offset (arguments:buffer) ~arguments_offset=
+  let op="Backend.draw_indexed_indirect"in
+  match open_render op encoder with Error _ as e->e|Ok()->
+  if not encoder.render_pipeline_set then error op Error.Invalid_state"no render pipeline is set"
+  else let device=render_device encoder in
+  match check_resource op device buffer.resource with Error _ as e->e|Ok()->
+  match check_resource op device arguments.resource with Error _ as e->e|Ok()->
+  let stride=match index_type with Render_pass.Uint16->2L|Uint32->4L in
+  if offset<0L||Int64.rem offset stride<>0L||offset>=buffer.buffer_descriptor.size then
+    error op Error.Invalid_argument"index offset is invalid"
+  else if arguments_offset<0L||Int64.rem arguments_offset 4L<>0L
+       ||Int64.add arguments_offset 20L>arguments.buffer_descriptor.size then
+    error op Error.Invalid_argument"indirect arguments range is invalid"
+  else match encoder.render_raw.draw_indexed_indirect ~primitive ~index_type buffer.resource.raw.token ~offset
+      arguments.resource.raw.token ~arguments_offset with Error _ as e->e|Ok()->
+  mark_submitted encoder.render_commands.commands_queue buffer.resource;
+  mark_submitted encoder.render_commands.commands_queue arguments.resource;Ok()
 let draw_batch (encoder:render_encoder) (draws:batch_draw array)=
   let op="Backend.draw_batch"in
   match open_render op encoder with Error _ as e->e|Ok()->

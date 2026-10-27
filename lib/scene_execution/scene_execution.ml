@@ -2,24 +2,26 @@
    Registration owns only a bounded name and the producer's lifetime check. *)
 type gpu_vertices={gpu_key:string;gpu_device:Ogpu.Backend.device;
   gpu_buffer:Ogpu.Backend.buffer;gpu_extra:Ogpu.Backend.buffer list;gpu_vertex_count:int;gpu_domain:Domain.id;
+  gpu_indirect:(Ogpu.Backend.buffer*int64)option;  (* device-written index count: an indirect draw *)
   gpu_valid:unit->bool;mutable gpu_active:bool}
 let gpu_vertex_capacity=128
 let gpu_vertex_registry:(string,gpu_vertices)Hashtbl.t=Hashtbl.create 16
 let gpu_vertex_key key=String.starts_with~prefix:"gpu:vertices:" key
 (* The ids that identify a source's buffers in signatures and fingerprints. *)
 let gpu_identity source=source.gpu_key,Ogpu.Backend.buffer_id source.gpu_buffer,
-  List.map Ogpu.Backend.buffer_id source.gpu_extra
+  List.map Ogpu.Backend.buffer_id(source.gpu_extra@Option.to_list(Option.map fst source.gpu_indirect))
 let gpu_vertices_valid value=value.gpu_active&&value.gpu_domain=Domain.self()&&value.gpu_valid()
-let register_gpu_vertices ?(extra=[]) ~key ~device ~buffer ~vertex_count ~valid () =
+let register_gpu_vertices ?(extra=[]) ?indirect ~key ~device ~buffer ~vertex_count ~valid () =
   let operation="Scene_execution.register_gpu_vertices" in
   if not(gpu_vertex_key key)||vertex_count<=0||vertex_count>4_000_000||
     (extra=[]&&Ogpu.Backend.buffer_size buffer<Int64.of_int(vertex_count*16))||
     List.exists(fun b->Ogpu.Backend.buffer_size b<=0L)(buffer::extra)||
+    (match indirect with Some(b,offset)->offset<0L||Int64.add offset 20L>Ogpu.Backend.buffer_size b|None->false)||
     Hashtbl.mem gpu_vertex_registry key then
     Error(Ogpu.Error.make operation Invalid_argument "invalid or duplicate borrowed vertex registration")
   else if Hashtbl.length gpu_vertex_registry>=gpu_vertex_capacity then
     Error(Ogpu.Error.make operation Capacity "borrowed vertex registration capacity reached")
-  else let value={gpu_key=key;gpu_device=device;gpu_buffer=buffer;gpu_extra=extra;gpu_vertex_count=vertex_count;
+  else let value={gpu_key=key;gpu_device=device;gpu_buffer=buffer;gpu_extra=extra;gpu_vertex_count=vertex_count;gpu_indirect=indirect;
     gpu_domain=Domain.self();gpu_valid=valid;gpu_active=true}in
     Hashtbl.add gpu_vertex_registry key value;Ok value
 let unregister_gpu_vertices value=
@@ -78,7 +80,9 @@ type plan_draw={plan_draw:Ogpu.Backend.batch_draw;
   plan_samplers:(Ogpu.Backend.shader_stage*int*Ogpu.Backend.sampler)list;
   (* Textures reached only through an argument buffer: Metal needs them made
      resident with [use_resources] before any draw of the pass. *)
-  plan_resident:Ogpu.Backend.texture list}
+  plan_resident:Ogpu.Backend.texture list;
+  (* A borrowed shape whose index count the device wrote: drawn indirect, never batched or recorded *)
+  plan_indirect:(Ogpu.Backend.buffer*int64)option}
 (* One render pass of a frame: its attachment state and draws. A retained
    batch replays an indirect command buffer instead of re-encoding. *)
 type batch_plan={batch_family:pipeline_family;batch_samples:int;batch_state:state;
@@ -1005,7 +1009,7 @@ let acquire value=match settle value with Error _ as error->error|Ok()->
     |Ok(`Timeout|`Occluded)->Ok`Skipped
     |Ok`Device_lost->error"Scene_execution.render"Ogpu.Error.Device_lost"device lost"
     |Ok(`Acquired frame)->Ok(`Acquired(Presented frame))
-let plain_draws draws=Array.for_all(fun draw->draw.plan_textures=[]&&draw.plan_samplers=[])draws
+let plain_draws draws=Array.for_all(fun draw->draw.plan_textures=[]&&draw.plan_samplers=[]&&draw.plan_indirect=None)draws
 let encode_batch value commands ~clear (batch:batch_plan)=
   let ( let* )=Result.bind in
   let* target,_=render_target value batch.batch_family batch.batch_samples batch.batch_state
@@ -1055,9 +1059,11 @@ let encode_batch value commands ~clear (batch:batch_plan)=
               Ogpu.Backend.set_stage_texture encoder stage~index texture)(Ok())draw.plan_textures in
             let* ()=List.fold_left(fun result(stage,index,sampler)->let* ()=result in
               Ogpu.Backend.set_stage_sampler encoder stage~index sampler)(Ok())draw.plan_samplers in
-            match bd.index with
-            |None->Ogpu.Backend.draw encoder~primitive:bd.primitive~first:bd.vertex_start~count:bd.vertex_count~instances:bd.instances()
-            |Some(index_type,buffer,offset,count)->Ogpu.Backend.draw_indexed encoder~primitive:bd.primitive~index_type buffer~offset~count~instances:bd.instances())
+            match bd.index,draw.plan_indirect with
+            |Some(index_type,buffer,offset,_),Some(arguments,arguments_offset)->
+                Ogpu.Backend.draw_indexed_indirect encoder~primitive:bd.primitive~index_type buffer~offset arguments~arguments_offset
+            |None,_->Ogpu.Backend.draw encoder~primitive:bd.primitive~first:bd.vertex_start~count:bd.vertex_count~instances:bd.instances()
+            |Some(index_type,buffer,offset,count),None->Ogpu.Backend.draw_indexed encoder~primitive:bd.primitive~index_type buffer~offset~count~instances:bd.instances())
             (Ok())batch.batch_draws in
   Ogpu.Backend.end_render encoder
 let build_icb value (batch:batch_plan)=
@@ -1417,7 +1423,8 @@ let render_sampled_resources_common ?prepared ?(after_prepare=Fun.id) ?(clear=(0
         |_->1 in
       Ok{plan_draw={Ogpu.Backend.pipeline=variant.pipeline;buffers=Array.of_list buffers;primitive=item.primitive;index;
           vertex_start=0;vertex_count=item.vertex_count;instances};
-         plan_textures=textures;plan_samplers=samplers;plan_resident=resident} in
+         plan_textures=textures;plan_samplers=samplers;plan_resident=resident;
+         plan_indirect=Option.bind slot.slot_gpu_vertices(fun source->source.gpu_indirect)} in
     let batch_resources draws=
       let seen_buffers=Hashtbl.create 32 and seen_textures=Hashtbl.create 16 in
       let resources=ref[]in
@@ -1425,6 +1432,7 @@ let render_sampled_resources_common ?prepared ?(after_prepare=Fun.id) ?(clear=(0
       and texture t=let id=Ogpu.Backend.texture_id t in if not(Hashtbl.mem seen_textures id)then(Hashtbl.add seen_textures id();resources:=`Texture t::!resources)in
       Array.iter(fun draw->Array.iter(fun(_,_,b,_)->buffer b)draw.plan_draw.buffers;
         Option.iter(fun(_,b,_,_)->buffer b)draw.plan_draw.index;
+        Option.iter(fun(b,_)->buffer b)draw.plan_indirect;
         List.iter(fun(_,_,t)->texture t)draw.plan_textures;
         List.iter texture draw.plan_resident)draws;
       (match value.arguments with Some pool->buffer pool.argument_buffer|None->());

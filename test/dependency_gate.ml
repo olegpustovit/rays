@@ -1,7 +1,7 @@
 (* One dependency gate over the real library graph, read from every
    lib/**/dune. Rules are "may never reach" constraints on the transitive
    closure, "depends only on" whitelists of direct dependencies, and token
-   scans for Metal outside its backends (lib, examples, sketches, tools and
+   scans for Metal outside its backends (lib, tools and
    test) and for any alternate renderer or backend selector. A known
    violation would be listed with the plan item that removes it; there is
    none. Run from the repo root. *)
@@ -366,7 +366,7 @@ let run () =
   if violations graph ~scan:["lib/sdl3/injected.c", "SDL_CreateRenderer(window, 0)"] = []
      || violations graph ~scan:["lib/rays/injected.ml", "Sys.getenv \"RAYS_BACKEND\""] = [] then
     failwith "gate accepted an injected alternate renderer or backend selector";
-  let scan = List.concat_map files ["lib"; "examples"; "sketches"; "tools"; "test"]
+  let scan = List.concat_map files ["lib"; "tools"; "test"]
     |> List.filter (fun p -> not (Filename.check_suffix p ".pp.ml"))
     |> List.filter (fun p -> List.exists (Filename.check_suffix p)
       [".ml"; ".mli"; ".c"; ".h"; ".m"])

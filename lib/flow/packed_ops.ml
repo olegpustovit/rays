@@ -5,7 +5,7 @@ type integer = Iadd | Isub | Imul | Idiv | Imod | Iand | Ior | Ixor | Ishl | Ish
 type comparison = Ilt | Ile | Igt | Ige | Ieq
 type conversion = To_float | Truncate | Floor | Ceil | Round | Coerce_int | Integer_result of string
 
-let register_limit = 64
+let register_limit = 1024
 let supported_noise_octaves n = n >= 1 && n <= 64
 let supported_gpu_noise_octaves n = n >= 1 && n <= 32
 let finite_float32 x = Float.is_finite (Int32.float_of_bits (Int32.bits_of_float x))

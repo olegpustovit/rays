@@ -1254,6 +1254,20 @@ let create () =
                                                                        ~index_type:(metal_index index_type) ~index_buffer
                                                                        ~index_offset:offset ~index_count:count
                                                                        ~instances:(Int64.of_int instances))));
+                                                    draw_indexed_indirect =
+                                                      (fun ~primitive ~index_type token ~offset arguments_token ~arguments_offset ->
+                                                        match find_buffer token, find_buffer arguments_token with
+                                                        | (Error _ as failure), _ | _, (Error _ as failure) -> failure
+                                                        | Ok buffer, Ok arguments -> (
+                                                            match keep_buffer buffer, keep_buffer arguments with
+                                                            | (Error _ as failure), _ | _, (Error _ as failure) -> failure
+                                                            | Ok (), Ok () ->
+                                                                native_of
+                                                                  (Metal.Render_encoder.draw_indexed_indirect encoder
+                                                                     ~primitive:(metal_primitive primitive)
+                                                                     ~index_type:(metal_index index_type)
+                                                                     ~index_buffer:(Buffer.Private.metal buffer) ~index_offset:offset
+                                                                     ~arguments:(Buffer.Private.metal arguments) ~arguments_offset)));
                                                     draw_batch =
                                                       (fun draws ->
                                                         (* Indexed single-instance draws run through the native

@@ -1,7 +1,7 @@
 Every authored head counted for the core has exactly one lowering rule.
 The check reads the live corpus and specification, without a pinned snapshot.
 
-  $ ../../core_census.exe ../../../examples ../../../sketches ../../../specification > census.txt
+  $ ../../core_census.exe ../../../sketches ../../../specification > census.txt
   $ cp ../../../specification/core.md core.md
   $ cat > rules.ml <<'EOF'
   > let lines path = In_channel.with_open_text path (fun channel ->

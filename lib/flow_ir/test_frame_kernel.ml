@@ -36,7 +36,7 @@ let compare_prepared value frames =
     assert (E.state_stamp state=E.state_stamp general)) frames
 
 let () =
-  let source = ok (Flow.Syntax.parse (read "../../examples/particles/sketch.rays")) in
+  let source = ok (Flow.Syntax.parse (read "../../sketches/particles.rays")) in
   let source = match source with
     | [{node = Flow.Syntax.List (head :: name :: graphs); _} as workspace] ->
         let picture = List.find (fun (graph : Flow.Syntax.t) -> match graph.node with

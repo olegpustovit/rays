@@ -311,10 +311,17 @@ let lower_with ?budget ~strict ~region_allowed ~draw (root : E.residual Lazy.t) 
       | Loop {kind=`For;clauses;_} -> x.ty=Flow.Ty.Array Flow.Ty.Text || text_input(List.map snd clauses)
       | _ -> false in
     let candidate=numeric_candidate || text_candidate in
-    let packed=if not strict || not candidate then None else Option.bind !current (fun parent ->
+    (* a drawing also offers its nested maps to Packed: a refusal falls back to the structured loop below *)
+    let packed=if not (strict || draw <> None) || not candidate then None else Option.bind !current (fun parent ->
       let names=E.Private.free_names x in
       let arguments=ref [] in
       let rec capture = function
+        (* in a drawing a captured residual is lowered first and passed as an argument: the map then
+           reads no state itself, even when the value it was handed did *)
+        | Known (V.Residual r) when draw <> None -> capture (residual statements cache r)
+        (* a record local is passed field by field: Packed takes scalars, not a record argument *)
+        | Computed (id, Flow.Ty.Record fields) when draw <> None ->
+            capture (Record_fields (List.map (fun (name, ty) -> name, emit statements source ty (Field (id, name))) fields))
         | Known value -> value
         | Computed(id,ty) ->
             let index=match List.find_index((=) id) !arguments with
@@ -533,6 +540,20 @@ let lower_with ?budget ~strict ~region_allowed ~draw (root : E.residual Lazy.t) 
         (match W.bypass_input inner with Some input -> coerce statements cache source inner.ty
             (term ~borrow statements cache source env input)
           | None -> refuse "bypass")
+    (* A drawing's filter of a range: its predicate as an Int mask map (its free names read from the
+       lowering's scope, as the inline fn reads them), which packs like any map (all cores, or the
+       device in fast precision), then array/compact keeps the indices.  Any other filter, or a mask
+       that does not pack, keeps the element loop below. *)
+    | Hof (`Filter,[({node=Fn ({body;_} as f);_} as fn);
+        ({node=Op {op="array/range";_};ty=Flow.Ty.Array (Flow.Ty.Int|Flow.Ty.Float as elem);_} as items)])
+      when draw <> None && x.ty = Flow.Ty.Array elem ->
+        let lit n = {body with node=Lit (Param.Int_value n); ty=Flow.Ty.Int; path=None} in
+        let mask_fn = {fn with ty=Flow.Ty.Fn (Some {params=[elem]; result=Flow.Ty.Int});
+          node=Fn {f with capture=None; body={body with node=If (body,lit 1,lit 0); ty=Flow.Ty.Int; path=None}}} in
+        let mask = term statements cache source env
+          {x with node=Hof (`Map,[mask_fn;items]); ty=Flow.Ty.Array Flow.Ty.Int; path=None} in
+        let kept = primitive statements cache source (Flow.Ty.Array Flow.Ty.Int) Array_compact ["mask",mask] in
+        if elem = Flow.Ty.Int then kept else primitive statements cache source x.ty (Coerce x.ty) ["value",kept]
     | Hof (kind,fn::rest) ->
         let fn=as_callable source (compile fn) in
         hof statements cache source env x.ty kind fn rest
@@ -1343,15 +1364,12 @@ let lower_with ?budget ~strict ~region_allowed ~draw (root : E.residual Lazy.t) 
           let c ty op args = primitive statements cache source ty op args in
           let calc2 op a b = c Flow.Ty.Float (Numeric op) ["a",a;"b",b] in
           let unit v = calc2 Max (f 0.) (calc2 Min (f 1.) v) in
-          let remainder = c Flow.Ty.Float Remainder ["a",h;"b",f 360.] in
-          let wrapped=branch statements cache source Flow.Ty.Float (c Flow.Ty.Bool (Numeric Lt) ["a",remainder;"b",f 0.])
-            (fun body cache -> primitive body cache source Flow.Ty.Float (Numeric Add) ["a",remainder;"b",f 360.])
-            (fun _ _ -> remainder) in
-          let hue=calc2 Div wrapped (f 60.) in
+          (* Operators.hsl_channels, step for step *)
+          let hue=calc2 Div (calc2 Mod h (f 360.)) (f 60.) in
           let sat=unit s in let light=unit l in
           let abs v = c Flow.Ty.Float (Math Abs) ["x",v] in
           let chroma=calc2 Mul (calc2 Sub (f 1.) (abs (calc2 Sub (calc2 Mul (f 2.) light) (f 1.)))) sat in
-          let x=calc2 Mul chroma (calc2 Sub (f 1.) (abs (calc2 Sub (c Flow.Ty.Float Remainder ["a",hue;"b",f 2.]) (f 1.)))) in
+          let x=calc2 Mul chroma (calc2 Sub (f 1.) (abs (calc2 Sub (calc2 Mod hue (f 2.)) (f 1.)))) in
           let rgb body cache r g b = emit body source Flow.Ty.Vec3 (Vec (List.map (ensure body cache source) [r;g;b])) in
           let zero=f 0. in
           let arm limit yes no = branch statements cache source Flow.Ty.Vec3 (c Flow.Ty.Bool (Numeric Lt) ["a",hue;"b",f limit]) yes no in

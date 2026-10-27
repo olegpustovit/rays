@@ -17,7 +17,7 @@ let close a b = a = b || Float.abs (a -. b) <= 1e-12 *. Float.max (Float.abs a) 
 
 (* Runs the region in two ranges (to exercise the carried state) and returns
    the status and one array per output line. *)
-let run_node_raw program =
+let run_node_raw ?(fast=false) program =
   let live = {(Frame_input.at_time 1.) with frame=3} in
   let region = P.to_region program and view = P.Private.view program in
   let inputs = Test_program.ok (P.Private.prepare_values program ~live) in
@@ -30,7 +30,7 @@ let run_node_raw program =
   let outputs = (if collecting then Array.to_list (Array.map (fun o -> kept * Array.length o) view.outputs) else [])
     @ (if region.result = R.Collect then [] else [width + 1]) in
   let script = Buffer.create 65536 in
-  Buffer.add_string script (Flow_web.Js.region program);
+  Buffer.add_string script (Flow_web.Js.region ~fast program);
   let array values = "Float64Array.from([" ^ numbers values ^ "])" in
   let value = function Flow.Eval.Int n -> string_of_int n ^ "n"
     | Float f -> Printf.sprintf "%.17g" f | _ -> failwith "scalar frame fact expected" in
@@ -40,7 +40,8 @@ let run_node_raw program =
   let uniform index v =
     let rec integer = function P.Int_uniform n -> n=index | Guarded (_,body) -> integer body | _ -> false in
     if Array.exists integer view.code then "[" ^ value v ^ "]"
-    else array (match v with Flow.Eval.Int n -> [|float n|] | _ -> flatten v) in
+    else match v with Flow.Eval.Int_array _ -> packed v
+      | _ -> array (match v with Flow.Eval.Int n -> [|float n|] | _ -> flatten v) in
   Printf.bprintf script "const inputs = [%s];\n" (String.concat "," (List.map packed (Array.to_list inputs.arrays)));
   Printf.bprintf script "const uniforms = [%s];\n"
     (String.concat "," (Array.to_list (Array.mapi uniform inputs.uniforms)
@@ -79,10 +80,10 @@ let run_node_raw program =
 let run_node program = let status,outputs=run_node_raw program in
   status,List.map (Array.map float_of_string) outputs
 
-let compare_integer source =
+let compare_integer ?fast source =
   let program=try Test_program.compile source with Failure message -> failwith (source ^ ": " ^ message) in
   let live={(Frame_input.at_time 1.) with frame=3} in
-  let status,produced=run_node_raw program in
+  let status,produced=run_node_raw ?fast program in
   assert (status=0);
   let expected=Test_program.ok (P.force_all ~strict:true program ~live) in
   let output=match produced with output::_ -> output | _ -> assert false in
@@ -170,6 +171,19 @@ catch (e) { if (e.code !== 'E_CAUSE' || e.message !== 'selected' || e.cause !== 
       "(array/sum (map (fn [x] (int/add x (frame/index))) (array/int 1025 9007199254740993)))";
       "(scan [a (frame/index)] [x (array/range 1025 :type int)] (int/add a x))";
       "(fold [a (frame/index)] [x (array/range 1025 :type int)] (int/add a x))"];
+    (* Fast precision's 64-bit register pairs agree with native wherever native's 63 bits do not wrap,
+       far past 2^53 where plain numbers would not *)
+    List.iter (compare_integer ~fast:true) [
+      "(map (fn [(x : int)] (int/and (int/xor (int/mul x 73856093) (int/mul (int/mul x x) 19349663)) 4611686018427387903)) (array/range (int/add 70000 (frame/index)) :type int))";
+      "(map (fn [(x : int)] (int/mod (int/mul (int/add x 1103515245) 2654435761) 1000003)) (array/range (int/add 4097 (frame/index)) :type int))";
+      "(map (fn [(x : int)] (int/div (int/mul (int/add x (frame/index)) 3037000493) 7)) (array/range (int/add 4097 (frame/index)) :type int))";
+      "(map (fn [(x : int)] (int/mod (int/sub 0 (int/mul x 2654435761)) 1000)) (array/range (int/add 4097 (frame/index)) :type int))";
+      "(map (fn [(x : int)] (int/div (int/sub 0 (int/mul x 2654435761)) 1000)) (array/range (int/add 4097 (frame/index)) :type int))";
+      "(map (fn [(x : int)] (int/shr (int/mul x 2654435761) 7)) (array/range (int/add 4097 (frame/index)) :type int))";
+      "(map (fn [(x : int)] (int/shl x 40)) (array/range (int/add 4097 (frame/index)) :type int))";
+      "(map (fn [(x : int)] (if (int/lt (int/mul x 2654435761) 5000000000000) (int/mul x 3) (int/sub 0 x))) (array/range (int/add 4097 (frame/index)) :type int))";
+      "(map (fn [x] (int (* x 1.5))) (array/range (int/add 4097 (frame/index))))";
+      "(map (fn [(x : int)] (int/add (array/nth (array/int 4 9007199254740993) (int/mod x 4)) x)) (array/range (int/add 4097 (frame/index)) :type int))"];
     (* A non-finite value is a status, not an exception, and native refuses it too. *)
     let overflow = Test_program.compile "(map (fn [x] (pow (+ x t) 1000000)) (array/range 1024))" in
     assert (fst (run_node overflow) = 1);

@@ -1,0 +1,151 @@
+; # flow_shader
+;
+; Rays Lisp as a shader language: one per-pixel kernel, written in Lisp, runs on the GPU
+; and is shown live next to the graph editor's view of the very same kernel.
+;
+; A panel is four kernels (`grad`, `haze`, `ring`, `core`) composited by alpha in that order, and the white-core panel adds a fifth, `rim`, a thin red-orange bump outside the ring. A `warp` parameter bends the band coordinate so bands can widen to the right. Each is
+; a stepped echo: x is quantized into bands, and every band to the right is a smaller or taller,
+; fainter copy whose centre has moved right and whose ring colour drifts. Six `panel` calls give
+; different bands, radii and palettes; `t` animates drift, breathing and hue as GPU uniforms. One
+; kernel holding all four zones would exceed the 64-register packed program, so the zones are layers.
+; The graph overview is `motion` → six named panels → `result`, with a separate background.
+; The panels start as compact cards: select one to edit its named macro inputs in the inspector,
+; press `o` to reveal its rows, and `v` to preview it. Open `motion` to inspect drift, breathing,
+; sway and hue and their per-panel uniforms. Open `ember` to inspect its extra rim layer.
+; The shader arithmetic includes `pow` and `sin`; the display kernels run through the GPU lane.
+; Run: `dune exec sketches/flow_shader/main.exe`. Edit a card in the graph and the picture follows.
+
+(workspace flow_shader
+  ;; One shader, many looks.  A panel is four per-pixel kernels composited by alpha, in the
+  ;; order of the picture: background gradient, haze, bright ring, dark core.  Each kernel
+  ;; is the same stepped echo: x is quantized into bands (no floor: q = x - mod x step), and
+  ;; every band to the right is a smaller or taller, fainter copy whose centre has moved right.
+  ;; (A single kernel with all four zones does not fit the 64-register packed program.)
+  (defmacro grad [uv bg0 bg1]
+    `(let* [u# ~uv
+            c# (+ ~bg0 (* (- ~bg1 ~bg0) u#.y))]
+       [c#.x c#.y c#.z 1]))
+
+  ;; squared distance s from the band's own centre, in units of the band's radii
+  (defmacro haze [uv bands wp cx cy rx ry shrink stretch fade drift col]
+    `(let* [u# ~uv one# 1
+            w# (pow u#.x ~wp)
+            q# (pow (- w# (mod w# (/ one# ~bands))) (/ one# ~wp))
+            dx# (/ (- u#.x (+ ~cx (* q# ~drift))) (* ~rx (- one# (* q# ~shrink))))
+            dy# (/ (- u#.y ~cy) (* ~ry (+ one# (* q# ~stretch))))
+            h# (max 0 (- one# (* 0.35 (+ (* dx# dx#) (* dy# dy#)))))
+            c# ~col]
+       [c#.x c#.y c#.z (* (* h# h#) (- one# (* q# ~fade)))]))
+
+  ;; ring: a bump around d = 0.8; its colour drifts by dcol with the band index
+  (defmacro ring [uv bands wp cx cy rx ry shrink stretch fade drift col dcol]
+    `(let* [u# ~uv one# 1
+            w# (pow u#.x ~wp)
+            q# (pow (- w# (mod w# (/ one# ~bands))) (/ one# ~wp))
+            dx# (/ (- u#.x (+ ~cx (* q# ~drift))) (* ~rx (- one# (* q# ~shrink))))
+            dy# (/ (- u#.y ~cy) (* ~ry (+ one# (* q# ~stretch))))
+            r# (max 0 (- one# (* 1.8 (abs (- (+ (* dx# dx#) (* dy# dy#)) 0.64)))))
+            c# (+ ~col (* ~dcol q#))]
+       [c#.x c#.y c#.z (* (* r# r#) (- one# (* q# ~fade)))]))
+
+  ;; core: a tight dark centre, d < 0.55
+  (defmacro core [uv bands wp cx cy rx ry shrink stretch fade drift col]
+    `(let* [u# ~uv one# 1
+            w# (pow u#.x ~wp)
+            q# (pow (- w# (mod w# (/ one# ~bands))) (/ one# ~wp))
+            dx# (/ (- u#.x (+ ~cx (* q# ~drift))) (* ~rx (- one# (* q# ~shrink))))
+            dy# (/ (- u#.y ~cy) (* ~ry (+ one# (* q# ~stretch))))
+            k# (max 0 (- one# (* 3.3 (+ (* dx# dx#) (* dy# dy#)))))
+            c# ~col]
+       [c#.x c#.y c#.z (* (* k# k#) (- one# (* q# ~fade)))]))
+
+  ;; rim: a thin hot band just outside the ring (d about 1.05), red-orange, fading fast
+  (defmacro rim [uv bands wp cx cy rx ry shrink stretch fade drift col]
+    `(let* [u# ~uv one# 1
+            w# (pow u#.x ~wp)
+            q# (pow (- w# (mod w# (/ one# ~bands))) (/ one# ~wp))
+            dx# (/ (- u#.x (+ ~cx (* q# ~drift))) (* ~rx (- one# (* q# ~shrink))))
+            dy# (/ (- u#.y ~cy) (* ~ry (+ one# (* q# ~stretch))))
+            r# (max 0 (- one# (* 7 (abs (- (+ (* dx# dx#) (* dy# dy#)) 1.1)))))
+            c# ~col]
+       [c#.x c#.y c#.z (* (* r# r#) (- one# (* q# ~fade)))]))
+
+  ;; a panel at (x, y): bands, centre, radii, shrink, stretch, fade, drift, then the palette
+  (defmacro panel [x y bands wp cx cy rx ry shrink stretch fade drift bg0 bg1 hz rg drg cr]
+    `(draw/merge
+       (draw/image (image/map (fn [uv#] (grad uv# ~bg0 ~bg1)) :width 360 :height 240) :at [~x ~y 0])
+       (draw/image (image/map (fn [uv#] (haze uv# ~bands ~wp ~cx ~cy ~rx ~ry ~shrink ~stretch ~fade ~drift ~hz))
+                     :width 360 :height 240) :at [~x ~y 0])
+       (draw/image (image/map (fn [uv#] (ring uv# ~bands ~wp ~cx ~cy ~rx ~ry ~shrink ~stretch ~fade ~drift ~rg ~drg))
+                     :width 360 :height 240) :at [~x ~y 0])
+       (draw/image (image/map (fn [uv#] (core uv# ~bands ~wp ~cx ~cy ~rx ~ry ~shrink ~stretch ~fade ~drift ~cr))
+                     :width 360 :height 240) :at [~x ~y 0])))
+
+  (graph picture :context draw
+    (let* [;; Open motion to see the four oscillators and their per-panel uniforms.
+           motion (let* [drift (+ 0.55 (* 0.2 (sin (* t 0.9))))
+                         breathe (+ 1 (* 0.12 (sin (* t 1.3))))
+                         sway (* 0.06 (sin (* t 0.7)))
+                         hue (* 0.5 (+ 1 (sin (* t 0.5))))
+                         drift1 (* 0.55 drift)
+                         drift2 (* 1.2 drift)
+                         drift3 (* 0.5 drift)
+                         driftb (+ 1.0 (* 0.12 (sin (* t 0.9))))
+                         rx1 (* 0.26 breathe) ry1 (* 0.3 breathe)
+                         rx2 (* 0.1 breathe) ry2 (* 0.14 breathe)
+                         rx3 (* 0.22 breathe) ry3 (* 0.2 breathe)
+                         rx4 (* 0.19 breathe) ry4 (* 0.27 breathe)
+                         rx5 (* 0.22 breathe) ry5 (* 0.2 breathe)
+                         rx6 (* 0.26 breathe) ry6 (* 0.38 breathe)
+                         cy2 (+ 0.5 sway) cy6 (- 0.5 sway)
+                         ring1 [1.0 (+ 0.35 (* 0.3 hue)) 0.1]
+                         ring5 [0.15 (+ 0.7 (* 0.2 hue)) 0.8]]
+                    {:drift drift :drift1 drift1 :drift2 drift2 :drift3 drift3 :driftb driftb
+                     :rx1 rx1 :ry1 ry1 :rx2 rx2 :ry2 ry2 :rx3 rx3 :ry3 ry3
+                     :rx4 rx4 :ry4 ry4 :rx5 rx5 :ry5 ry5 :rx6 rx6 :ry6 ry6
+                     :cy2 cy2 :cy6 cy6 :ring1 ring1 :ring5 ring5})
+           background (draw/background "#0b0b0e")
+        ;; 1 one full blob left of centre, ~12 thin echoes, orange to magenta to violet
+           amber (panel 8 8 12 1 0.2 0.5 motion.rx1 motion.ry1 0.3 0.1 0.35 motion.drift1
+             [0.45 0.75 0.7] [0.6 0.4 0.85] [0.9 0.8 0.7]
+             motion.ring1 [-0.2 -0.3 0.9] [0.1 0.15 0.6])
+        ;; 2 comet: small blob far left, 14 thin echoes shrinking to nothing
+           comet (panel 372 8 14 1 0.15 motion.cy2 motion.rx2 motion.ry2 0.85 0.3 0.6 motion.drift2
+             [0.45 0.75 0.7] [0.6 0.4 0.85] [0.85 0.75 0.7] [1.0 0.45 0.1] [-0.1 -0.3 0.7] [0.05 0.1 0.45])
+        ;; 3 crimson ground, lime ring, navy core
+           lime (panel 8 256 9 1 0.3 0.5 motion.rx3 motion.ry3 0.7 0.0 0.4 motion.drift3
+             [0.45 0.05 0.1] [0.75 0.1 0.12] [0.9 0.5 0.3] [0.7 1.0 0.1] [0.3 -0.1 0.7] [0.1 0.5 0.8])
+        ;; 4 dark olive, pink ring fading to blue, bands widening to the right (warp 0.6)
+           velvet (panel 372 256 7 0.6 0.1 motion.cy2 motion.rx4 motion.ry4 0.45 0.0 0.9 motion.driftb
+             [0.12 0.12 0.02] [0.14 0.12 0.04] [0.3 0.2 0.9] [1.0 0.35 0.7] [-0.7 0.0 0.3] [0.15 0.2 0.7])
+        ;; 5 near black, white core, teal ring, hot red-orange rim, 5 wide bands
+           ember (let* [base (panel 8 504 5 1 0.1 0.5 motion.rx5 motion.ry5 0.6 1.2 0.6 motion.driftb
+                          [0.08 0.05 0.12] [0.1 0.05 0.12] [0.5 0.1 0.35]
+                          motion.ring5 [0.85 -0.6 -0.6] [0.95 0.98 0.95])
+                        edge (draw/image (image/map (fn [uv] (rim uv 5 1 0.1 0.5 motion.rx5 motion.ry5 0.6 1.2 0.6 motion.driftb [1.0 0.3 0.15]))
+                                 :width 360 :height 240) :at [8 504 0])]
+                   (draw/merge base edge))
+        ;; 6 crimson and lime echo, 4 bands
+           echoes (panel 372 504 5 1 0.2 motion.cy6 motion.rx6 motion.ry6 0.45 0.8 0.7 motion.drift
+             [0.45 0.05 0.1] [0.75 0.1 0.12] [0.9 0.5 0.3] [0.7 1.0 0.1] [0.2 -0.2 0.5] [0.1 0.5 0.8])]
+      (draw/merge background amber comet lime velvet ember echoes)))
+
+  (graph settings :context settings
+    (settings/config :title "Rays Lisp as a shader language" :width 1600 :height 900))
+
+  (graph editor :context editor
+    (let* [preview (ui/canvas (ref picture))
+           network (ui/graph "picture" :focus true)
+           inspector (ui/inspector :of network)]
+      (ui/workspace (ui/split "horizontal" preview
+        (ui/split "horizontal" network inspector :second_size 260)
+        :second_size 860)))))
+
+(layout
+  (node ["picture" "motion"] :collapsed true)
+  (node ["picture" "amber"] :level "chip")
+  (node ["picture" "comet"] :level "chip")
+  (node ["picture" "lime"] :level "chip")
+  (node ["picture" "velvet"] :level "chip")
+  (node ["picture" "ember"] :collapsed true)
+  (node ["picture" "echoes"] :level "chip"))

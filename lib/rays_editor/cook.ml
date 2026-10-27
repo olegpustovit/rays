@@ -319,10 +319,15 @@ let update ?input ?live ?(probes = []) ?(lit = Pick.Set.empty) value ~settings ~
     | Ok _ -> None, None
     | Error message -> Some message, None
     else error, framing in
-  (* A fixed-step run waits for the cook it just submitted. *)
+  (* A fixed-step run waits for the cook it just submitted, serving the device meanwhile: a cook
+     whose regions run on the GPU queues them for this (the initial) domain, so a blocking await
+     would deadlock. ponytail: a 0.5 ms poll, a condition both sides signal if this ever shows up *)
   let pieces, error, seconds, prepared_changed =
     if submit && Option.is_none error && value.await then
-      let awaited = Async_cook.await value.worker in
+      let rec settle () = match Async_cook.poll value.worker with
+        | Some completion -> completion
+        | None -> Flow_ir.Gpu.pump (); Unix.sleepf 0.0005; settle () in
+      let awaited = settle () in
       match awaited.result with
       | Ok (Displayed (pieces, found, data)) ->
           summaries := found;

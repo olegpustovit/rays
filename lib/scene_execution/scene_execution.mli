@@ -150,8 +150,12 @@ module Private : sig
       buffers (a Marks mark set: [buffer] at binding 0, [extra] at 1, 2, ...; exactly five
       for [Marks], none for [Ui]) is not size-checked against the 64-byte layout. The
       producer must close registrations before destroying/reusing buffers;
-      [valid] also guards every retained replay. At most 128 are live. *)
-  val register_gpu_vertices : ?extra:Ogpu.Backend.buffer list -> key:string -> device:Ogpu.Backend.device ->
+      [valid] also guards every retained replay. At most 128 are live. With [indirect]
+      [(buffer, offset)] the shape is drawn by [draw_indexed_indirect] from the five uints the
+      producer's device wrote there, an index count of at most the registration's; such a draw
+      is never batched or recorded. *)
+  val register_gpu_vertices : ?extra:Ogpu.Backend.buffer list -> ?indirect:(Ogpu.Backend.buffer * int64) ->
+    key:string -> device:Ogpu.Backend.device ->
     buffer:Ogpu.Backend.buffer -> vertex_count:int -> valid:(unit -> bool) -> unit ->
     (gpu_vertices,Ogpu.Error.t) result
   val unregister_gpu_vertices : gpu_vertices -> unit

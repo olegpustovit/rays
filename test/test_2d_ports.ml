@@ -23,14 +23,14 @@ let frame ?(synthetic=true) name count =
    pixel_scale=1.,1.;time=float count/.60.;dt=1./.60.;fps=60.;count;
    mouse;mouse_delta=0.,0.;mouse_buttons=[];keys=[];events}
 let load name=
-  let source=read("../examples/"^name^"/sketch.rays")in
+  let source=read("../sketches/"^name^".rays")in
   let workspace=match Rays_editor.Workspace.load source with Ok w->w|Error ds->
     failwith(String.concat"\n"(List.map Flow.Diagnostic.to_string ds))in
   assert(Editor_document.Workspace_doc.to_text workspace=source);
   workspace
 let save_roundtrip name workspace =
   let module Editor=Rays_editor.Editor in
-  let source=read("../examples/"^name^"/sketch.rays")in
+  let source=read("../sketches/"^name^".rays")in
   let directory=Filename.temp_dir "rays-port-save-" ""in
   let rec remove directory=Array.iter(fun entry->let path=Filename.concat directory entry in
     if Sys.is_directory path then remove path else Sys.remove path)(Sys.readdir directory);

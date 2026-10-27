@@ -630,10 +630,10 @@ the release profile and are repeated with `RAYS_BENCH_DOMAINS=4`.
 | Material assignment | `dune exec tools/bench_material_assign.exe -- 100000 1` |
 | Editor held drag and undo | `dune exec tools/bench_rays_editor.exe -- 200 1000 2000` |
 | SOP graph scale smoke | `dune build test/test_main.exe`, then `_build/default/test/test_main.exe test_pxui_graph_smoke` |
-| Source digest polling | `dune exec tools/bench_source_poll.exe -- examples/sop_gallery/gallery.rays` |
+| Source digest polling | `dune exec tools/bench_source_poll.exe -- sketches/sop_gallery.rays` |
 | Named-pane owner lookup | `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy dune exec tools/bench_named_owner.exe` |
 | Live light contexts | `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy dune exec tools/bench_live_lights.exe` |
-| Shattered-cube native workflow | `RAYS_SHATTER_FRAMES=1001 /usr/bin/time -p dune exec sketches/shattered_cube/main.exe` |
+| Shattered-cube native workflow | `RAYS_SHATTER_FRAMES=1001 /usr/bin/time -p dune exec rays -- sketches/shattered_cube.rays` |
 | Test selection timing | `/usr/bin/time -p env SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy _build/default/tools/check.exe` |
 
 The branch tools accept `auto` (fresh session), `learned` (first cook excluded,

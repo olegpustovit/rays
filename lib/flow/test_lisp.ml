@@ -394,8 +394,8 @@ let () =
       name (List.length want) (List.length got)) in
   let dir = "../../sketches" in
   Array.iter (fun sketch ->
-    let path = Filename.concat (Filename.concat dir sketch) "sketch.rays" in
-    if Sys.file_exists path then check path (read path)) (Sys.readdir dir);
+    let path = Filename.concat dir sketch in
+    if Filename.check_suffix path ".rays" then check path (read path)) (Sys.readdir dir);
   (* comments in every position the printer lays out specially *)
   List.iter (fun source -> check source source) [
     "(graph g [a ; first\n b] -> geometry (sop/box))";

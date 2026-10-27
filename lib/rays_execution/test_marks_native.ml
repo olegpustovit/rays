@@ -81,7 +81,7 @@ let quad_indices n =
 
 let counter = ref 0
 
-let marks_draw device a n =
+let marks_draw ?drawn device a n =
   let upload label bytes =
     let buffer = native_get (B.create_buffer device
       {label = Some label; size = Int64.of_int (Bytes.length bytes); usage = [Vertex; Storage; Copy_dst]}) in
@@ -90,7 +90,11 @@ let marks_draw device a n =
     [floats a.position; floats a.extent; a.fill; a.stroke; floats a.width; words (Array.map Int32.of_int a.params)] in
   incr counter;
   let key = Printf.sprintf "gpu:vertices:marks-native-%d" !counter in
-  let source = native_get (Scene_execution.Private.register_gpu_vertices ~extra:(List.tl buffers)
+  (* [drawn]: a count record as a fast kernel writes it, {n, 6n, 1, 0, 0, 0}, the draw's from byte 4 *)
+  let record = Option.map (fun drawn -> upload "count" (words (Array.map Int32.of_int [| drawn; 6 * drawn; 1; 0; 0; 0 |]))) drawn in
+  let buffers = buffers @ Option.to_list record in
+  let source = native_get (Scene_execution.Private.register_gpu_vertices ~extra:(List.filteri (fun i _ -> i > 0 && i < 6) buffers)
+    ?indirect:(Option.map (fun b -> b, 4L) record)
     ~key ~device ~buffer:(List.hd buffers) ~vertex_count:(4 * n) ~valid:(fun () -> true) ()) in
   let affine = floats [| 2. /. float width; 0.; -1.; 0.; -2. /. float height; 1. |] in
   let state : Scene_execution.state = { viewport = (0, 0, width, height); scissor = (0, 0, width, height);
@@ -133,8 +137,20 @@ let run () =
           Bytes.iteri (fun i v -> if !first < 0 && v <> Bytes.get marks i then first := i) reference;
           failwith (Printf.sprintf "Marks differs from Shape_batch: %s styled=%b rgb=%b n=%d density=%d at pixel (%d,%d) channel %d"
             (name kind) styled rgb n density (!first / 4 mod (width * density)) (!first / 4 / (width * density)) (!first mod 4))
-        end) [63; 64; 65; 100_000]) [false; true]) [false; true]) [Rect; Circle; Line]);
+        end) [63; 64; 65; 100_000]) [false; true]) [false; true]) [Rect; Circle; Line];
+      (* An indirect set registered for 100 rects whose device record says 63 draws the first 63,
+         as the host batch of 63 does. *)
+      let a = attributes Rect ~styled:true ~rgb:false 100 in
+      let reference = Test_ui_pipeline.capture ~clear execution (fun submission ->
+        Rays_execution.Private.lower_scene2 submission ~density ~resource:(fun _ -> None)
+          (Result.get_ok (Scene_command.Render_ir.create
+             [| Scene_command.Render_ir.Set_blend Alpha; Shapes (batch Rect a 63) |]))) in
+      let draw, release = marks_draw ~drawn:63 (Rays_execution.gpu_device gpu) a 100 in
+      let marks = Fun.protect ~finally:release (fun () ->
+        Test_ui_pipeline.capture ~clear execution (fun submission ->
+          Rays_execution.Private.adopt_draws submission [draw])) in
+      if reference <> marks then failwith (Printf.sprintf "indirect marks differ from the 63-rect batch at density %d" density));
     ) [1; 2];
   assert (Scene_execution.Private.gpu_vertex_count_for_test () = 0);
   if live_handles () <> baseline then failwith "marks native handle delta";
-  print_endline "Marks family: pixel parity with Shape_batch for rect, circle and line, with and without stroke, 63/64/65/100000 instances, 1x/2x, zero handles"
+  print_endline "Marks family: pixel parity with Shape_batch for rect, circle and line, with and without stroke, 63/64/65/100000 instances, 1x/2x, a device-count indirect draw, zero handles"

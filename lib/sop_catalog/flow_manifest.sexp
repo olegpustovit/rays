@@ -1,6 +1,6 @@
 (flow_manifest
   (version 202609)
-  (digest "d5599765eb99d1bb4b33a15c9e065081")
+  (digest "cb3fd40a6fe9d7dfec7ae23ccb6e73e3")
   (kinds
     (kind "sop/switch"
       (key "switch")
@@ -2378,6 +2378,7 @@
         (field "color_g" "Green" (folder) (float (soft 0 1) (hard 0 1)) (float 1) (primary false) (vec3 "color" 1))
         (field "color_b" "Blue" (folder) (float (soft 0 1) (hard 0 1)) (float 1) (primary false) (vec3 "color" 2))
         (field "roughness" "Roughness" (folder) (float (soft 0 1) (hard 0 1)) (float 0.4) (primary false) (vec3))
+        (field "round" "Round corners" (folder) (float (soft 0 0.5) (hard 0 nil)) (float 0) (primary false) (vec3))
         (field "emission_r" "Emission red" (folder) (float (soft 0 1) (hard 0 1)) (float 0) (primary false) (vec3 "emission" 0))
         (field "emission_g" "Emission green" (folder) (float (soft 0 1) (hard 0 1)) (float 0) (primary false) (vec3 "emission" 1))
         (field "emission_b" "Emission blue" (folder) (float (soft 0 1) (hard 0 1)) (float 0) (primary false) (vec3 "emission" 2)))
@@ -3935,5 +3936,6 @@
         (field "width" "Width (on restart)" (folder) (int (soft 320 3840) (hard 64 nil)) (int 1280) (primary false) (vec3))
         (field "height" "Height (on restart)" (folder) (int (soft 240 2160) (hard 64 nil)) (int 800) (primary false) (vec3))
         (field "fps" "Frames per second (on restart)" (folder) (int (soft 1 120) (hard 1 240)) (int 60) (primary false) (vec3))
-        (field "seed" "Seed (on restart)" (folder) (int (soft 0 9999) (hard 0 nil)) (int 1) (primary false) (vec3)))
+        (field "seed" "Seed (on restart)" (folder) (int (soft 0 9999) (hard 0 nil)) (int 1) (primary false) (vec3))
+        (field "precision" "Precision (live)" (folder) (choice "fast" "exact") (choice "fast") (primary false) (vec3)))
       (outputs))))

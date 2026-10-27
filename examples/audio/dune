@@ -1,8 +1,0 @@
-(rule
- (target lisp.ml)
- (deps sketch.rays)
- (action (chdir %{workspace_root}
-  (with-stdout-to %{target} (run %{bin:rays-lisp} ml %{dep:sketch.rays})))))
-(executable (name lisp) (modules lisp) (libraries rays_editor))
-(rule (alias smoke-all) (locks ../../smoke_window)
- (action (setenv RAYS_MAX_FRAMES 30 (run %{exe:lisp.exe}))))

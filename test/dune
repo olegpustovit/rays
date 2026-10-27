@@ -5,14 +5,14 @@
 
 (rule
  (alias test_workspace_ir)
- (deps (source_tree ../examples) (source_tree ../sketches) ../specification/pxui-kit/kit.rays
+ (deps (source_tree ../sketches) ../specification/pxui-kit/kit.rays
   (glob_files ../specification/workspace/cases/*.lisp) (glob_files ../specification/workspace/cases/*.rays))
  (action (run %{exe:test_workspace_ir.exe} ..)))
 
 (rule
  (alias test_workspace_pixels)
  (locks smoke_window)
- (deps (source_tree ../examples) (source_tree ../sketches) ../specification/pxui-kit/kit.rays
+ (deps (source_tree ../sketches) ../specification/pxui-kit/kit.rays
   (glob_files ../specification/workspace/cases/*.lisp) (glob_files ../specification/workspace/cases/*.rays))
  (action (setenv RAYS_WORKSPACE_PIXELS /tmp/rays-workspace-pixels
   (run %{exe:test_workspace_ir.exe} ..))))
@@ -20,7 +20,7 @@
 (rule
  (aliases qualification test_scene3_float32_gallery)
  (locks smoke_window)
- (deps (source_tree ../examples) (source_tree ../sketches) ../specification/pxui-kit/kit.rays
+ (deps (source_tree ../sketches) ../specification/pxui-kit/kit.rays
   (glob_files ../specification/workspace/cases/*.lisp) (glob_files ../specification/workspace/cases/*.rays))
  (action (setenv RAYS_SCENE3_FLOAT32_COMPARE 1
   (setenv RAYS_WORKSPACE_PIXELS /tmp/rays-scene3-float32
@@ -55,13 +55,13 @@
 
 (rule
  (alias test_gallery_shapes)
- (deps ../examples/sop_gallery/gallery.rays)
+ (deps ../sketches/sop_gallery.rays)
  (action (run %{exe:test_gallery_shapes.exe})))
 
 (rule
  (alias test_gallery_shapes_native)
  (locks %{workspace_root}/smoke_window)
- (deps ../examples/sop_gallery/gallery.rays)
+ (deps ../sketches/sop_gallery.rays)
  (action (run %{exe:test_gallery_shapes.exe} native)))
 
 (alias (name runtest) (deps (alias test_gallery_shapes)))
@@ -85,8 +85,8 @@
 
 (rule
  (alias test_flow_shader)
- (deps ../sketches/flow_shader/sketch.rays)
- (action (run %{exe:test_flow_shader.exe} %{dep:../sketches/flow_shader/sketch.rays})))
+ (deps ../sketches/flow_shader.rays)
+ (action (run %{exe:test_flow_shader.exe} %{dep:../sketches/flow_shader.rays})))
 
 (rule
  (alias runtest-native)
@@ -117,15 +117,15 @@
 
 (rule
  (aliases qualification qualification-scale test_shattered_studio)
- (deps ../sketches/shattered_studio/sketch.rays)
- (action (run %{exe:test_shattered_studio.exe} %{dep:../sketches/shattered_studio/sketch.rays})))
+ (deps ../sketches/shattered_studio.rays)
+ (action (run %{exe:test_shattered_studio.exe} %{dep:../sketches/shattered_studio.rays})))
 
 (test
  (name test_threading)
  (modules test_threading)
  (libraries flow)
- (deps (source_tree ../sketches) (source_tree ../examples) (source_tree ../specification/workspace/cases))
- (action (run %{test} ../sketches ../examples ../specification/workspace/cases)))
+ (deps (source_tree ../sketches) (source_tree ../specification/workspace/cases))
+ (action (run %{test} ../sketches ../specification/workspace/cases)))
 
 (rule
  (alias test_rays)
@@ -212,12 +212,12 @@
 
 (rule
  (alias test_sop_catalog)
- (deps ../sketches/ws_morph/sketch.rays ../examples/sop_gallery/gallery.rays)
+ (deps ../sketches/ws_morph.rays ../sketches/sop_gallery.rays)
  (action (run %{exe:test_main.exe} test_sop_catalog)))
 
 (rule
  (aliases qualification qualification-scale test_sop_catalog_exhaustive)
- (deps ../sketches/ws_morph/sketch.rays ../examples/sop_gallery/gallery.rays)
+ (deps ../sketches/ws_morph.rays ../sketches/sop_gallery.rays)
  (action (run %{exe:test_main.exe} test_sop_catalog_exhaustive)))
 
 (rule
@@ -252,18 +252,17 @@
 (rule
  (aliases runtest-native test_workspace_view_native)
  (locks smoke_window)
- (deps ../sketches/shattered_cube/sketch.rays)
+ (deps ../sketches/shattered_cube.rays)
  (action (run %{exe:test_main.exe} test_workspace_view_native)))
 
 (rule
  (alias test_workspace_doc)
- (deps (glob_files ../specification/workspace/cases/*.lisp) (glob_files_rec ../sketches/*.rays)
-  (glob_files_rec ../examples/*.rays) ../specification/pxui-kit/kit.rays)
+ (deps (glob_files ../specification/workspace/cases/*.lisp) (glob_files_rec ../sketches/*.rays) ../specification/pxui-kit/kit.rays)
  (action (run %{exe:test_main.exe} test_workspace_doc)))
 
 (rule
  (alias dependency_gate)
- (deps (source_tree ../lib) (source_tree ../ppx) (source_tree ../examples)
+ (deps (source_tree ../lib) (source_tree ../ppx)
   (source_tree ../sketches) (source_tree ../tools) (source_tree .))
  (action
   (chdir %{workspace_root} (run %{exe:test_main.exe} dependency_gate))))
@@ -296,10 +295,6 @@
  (deps (glob_files ../specification/workspace/cases/*.lisp))
  (action (run %{exe:test_main.exe} test_viewport_pick)))
 
-(cram
- (applies_to lisp_build)
- (deps %{bin:rays-lisp}))
-
 (rule
  (alias test_workspace_source)
  (action (run %{exe:test_main.exe} test_workspace_source)))
@@ -310,7 +305,7 @@
 
 (rule
  (alias test_bloom_studio)
- (deps ../sketches/ws_bloom/sketch.rays (glob_files ../specification/workspace/cases/*.lisp))
+ (deps ../sketches/ws_bloom.rays (glob_files ../specification/workspace/cases/*.lisp))
  (action (run %{exe:test_main.exe} test_bloom_studio)))
 
 ; Each test has its own alias, so `dune build @test_rays` runs that test only
@@ -355,11 +350,11 @@
   drawing_oracle audio_oracle file_dialog_oracle pxui_oracle)
  (libraries rays pxui rays_editor flow editor_document scene_command unix))
 
-(rule (alias test_2d_ports) (deps (source_tree ../examples))
+(rule (alias test_2d_ports) (deps)
  (action (setenv SDL_AUDIODRIVER dummy (run %{exe:test_2d_ports.exe}))))
 (alias (name runtest) (deps (alias test_2d_ports)))
 
-(rule (alias runtest-native) (locks smoke_window) (deps (source_tree ../examples))
+(rule (alias runtest-native) (locks smoke_window) (deps)
  (action (setenv SDL_AUDIODRIVER dummy (run %{exe:test_2d_ports.exe} /tmp/rays-2d-ports))))
 
 (rule (alias runtest-native) (locks smoke_window)
@@ -375,7 +370,7 @@
 
 (rule
  (alias runtest)
- (deps (source_tree ../examples) (source_tree ../sketches) (source_tree draw_snapshots))
+ (deps (source_tree ../sketches) (source_tree draw_snapshots))
  (action
   (setenv SDL_VIDEODRIVER dummy
    (setenv SDL_AUDIODRIVER dummy
@@ -418,16 +413,16 @@
 
 (rule
  (alias runtest)
- (action (run %{exe:test_drawing.exe} %{dep:../examples/particles/sketch.rays})))
+ (action (run %{exe:test_drawing.exe} %{dep:../sketches/particles.rays})))
 
 (rule
  (alias test_drawing)
- (action (run %{exe:test_drawing.exe} %{dep:../examples/particles/sketch.rays})))
+ (action (run %{exe:test_drawing.exe} %{dep:../sketches/particles.rays})))
 
 (rule
  (alias runtest-native)
  (locks %{workspace_root}/smoke_window)
- (action (run %{exe:test_drawing.exe} %{dep:../examples/particles/sketch.rays} /tmp/rays-drawing-export)))
+ (action (run %{exe:test_drawing.exe} %{dep:../sketches/particles.rays} /tmp/rays-drawing-export)))
 
 ; One evaluation a start, the first frame of a million static marks, and a reload after a
 ; shared start: each opens the sketch's window through Workspace.run.
@@ -441,5 +436,5 @@
  (locks %{workspace_root}/smoke_window)
  (action
   (progn
-   (run %{exe:test_workspace_start.exe} start %{dep:../sketches/million_marks/sketch.rays})
+   (run %{exe:test_workspace_start.exe} start %{dep:../sketches/million_marks.rays})
    (run %{exe:test_workspace_start.exe} reload))))

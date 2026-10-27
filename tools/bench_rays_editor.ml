@@ -267,7 +267,7 @@ let measure_world () =
 let measure_particles ?(window=false) ?(toggle=false) samples_count =
   let module E = Rays_editor.Editor in
   let module S = Flow.Syntax in
-  let source = In_channel.with_open_bin "examples/particles/sketch.rays" In_channel.input_all
+  let source = In_channel.with_open_bin "sketches/particles.rays" In_channel.input_all
       |> S.parse |> Result.get_ok in
   let layouts = [
     "canvas", "(ui/canvas (ref picture) :focus true)";

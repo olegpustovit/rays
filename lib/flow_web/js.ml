@@ -89,8 +89,40 @@ let fused = {|  const fmaBytes = new DataView(new ArrayBuffer(8));
     return sign ? -value : value;
   };
 |}
-let region program =
+(* Fast precision's 64-bit integer registers, as the Metal kernel's [long]s: a register is a signed
+   high and an unsigned low 32-bit half, both plain numbers; an operation returns the low half and
+   leaves the high one in [RH], so nothing is allocated per element. Division and [mod] of values
+   past 2^53 fall back to BigInt. *)
+let fast64 = {|  let RH = 0;
+  const P32 = 4294967296;
+  const split = x => { const h = Math.floor(x / P32); RH = h | 0; return x - h * P32; };
+  const unbig = v => { v = BigInt.asIntN(64, v); RH = Number(v >> 32n); return Number(BigInt.asUintN(32, v)); };
+  const big = (h, l) => (BigInt(h) << 32n) + BigInt(l);
+  const add64 = (ah, al, bh, bl) => { const s = al + bl; RH = (ah + bh + (s >= P32 ? 1 : 0)) | 0; return s >= P32 ? s - P32 : s; };
+  const sub64 = (ah, al, bh, bl) => { const d = al - bl; RH = (ah - bh - (d < 0 ? 1 : 0)) | 0; return d < 0 ? d + P32 : d; };
+  const mulhi = (a, b) => { const a0 = a & 0xffff, a1 = a >>> 16, b0 = b & 0xffff, b1 = b >>> 16;
+    const m1 = a1 * b0 + Math.floor(a0 * b0 / 65536), m2 = a0 * b1 + (m1 & 0xffff);
+    return (a1 * b1 + Math.floor(m1 / 65536) + Math.floor(m2 / 65536)) >>> 0; };
+  const mul64 = (ah, al, bh, bl) => { RH = (mulhi(al, bl) + Math.imul(ah, bl) + Math.imul(al, bh)) | 0; return Math.imul(al, bl) >>> 0; };
+  const div64 = (ah, al, bh, bl, mod) => {
+    if (bh === 0 && bl === 0) fail('E_RANGE', 'Integer division by zero.');
+    const a = ah * P32 + al, b = bh * P32 + bl;
+    if (Math.abs(a) <= 9007199254740991 && Math.abs(b) <= 9007199254740991) return split(mod ? a % b : Math.trunc(a / b));
+    return unbig(mod ? big(ah, al) % big(bh, bl) : big(ah, al) / big(bh, bl)); };
+  const shift64 = (ah, al, b, right) => {
+    if (b < 0 || b > 62) fail('E_RANGE', 'Integer shift count must be within [0, 62].');
+    if (b === 0) { RH = ah; return al; }
+    if (right) { if (b >= 32) { RH = 0; return ah >>> (b - 32); } RH = (ah >>> b) | 0; return ((al >>> b) | (ah << (32 - b))) >>> 0; }
+    if (b >= 32) { RH = (al << (b - 32)) | 0; return 0; }
+    RH = ((ah << b) | (al >>> (32 - b))) | 0; return (al << b) >>> 0; };
+|}
+
+(* [fast] (the workspace's fast precision, a collecting region): integer registers are exact 64-bit
+   pairs ([fast64]), as native fast precision's kernels hold them. *)
+let region ?(fast=false) program =
   let view = P.Private.view program and region = P.to_region program in
+  let fast = fast && region.result = R.Collect
+    && not (Array.exists (fun i -> match i with P.Rand_at _ -> true | P.Guarded (_, P.Rand_at _) -> true | _ -> false) view.code) in
   let line = Buffer.create 4096 in
   let add format = Printf.bprintf line format in
   let rec unguarded = function P.Guarded (_,body) -> unguarded body | instruction -> instruction in
@@ -113,18 +145,27 @@ let region program =
   if Array.exists(fun instruction->match unguarded instruction with P.Raise(_,_,_,Some _)->true|_->false)view.code then
     add "  const fail = (code, message, cause) => { const e = new Error(message); e.code = code; if (cause !== undefined) e.cause = cause; throw e; };\n"
   else add "  const fail = (code, message) => { const e = new Error(message); e.code = code; throw e; };\n";
+  if fast then add "%s" fast64 else
   add "  const wrap = x => BigInt.asIntN(63, x);\n";
   if Array.exists(fun instruction->match unguarded instruction with P.Array_prepare _->true|_->false)view.code then begin
     add "  const tables = new Map();\n";
-    add "  const table = (slot, integer, width) => { if (tables.has(slot)) return tables.get(slot); const data = uniforms[slot];\n";
+    add "  const table = (slot, integer, width) => { if (tables.has(slot)) return tables.get(slot); let data = uniforms[slot];\n";
     add "    const text = integer === 'text';\n";
     add "    if (text ? !Array.isArray(data) : !(data instanceof (integer ? BigInt64Array : Float64Array))) fail('E_ARRAY_TYPE', 'Kernel lookup table changed its packed element type.');\n";
     add "    if (text && !data.every(x => typeof x === 'string')) fail('E_ARRAY_TYPE', 'Text arrays contain text values.');\n";
     add "    if (data.length %% width !== 0) fail('E_ARRAY_TYPE', `Packed vec${width} storage has ${['','','two','three','four'][width]} coordinates per element.`);\n";
+    (* fast: a table is read as the device would read it, unchecked *)
+    if not fast then
     add "    if (!integer) for (const x of data) if (!Number.isFinite(x)) fail('E_NONFINITE', 'array input produced a nonfinite value.');\n";
+    if fast then begin
+      (* an integer table is read as numbers: converted once a call, not per gather *)
+      add "    tables.set(slot, data); return data; };\n";
+      add "  const row = (array, index, width) => { if (index < 0 || index >= array.length / width) fail('E_ARRAY_RANGE', 'Array index is outside its length.'); return index; };\n"
+    end else begin
     add "    tables.set(slot, data); return data; };\n";
     add "  const row = (array, index, width) => { if (index < 0n || index > %sn) fail('E_ARRAY_RANGE', 'array/nth needs a non-negative whole length.');\n" (string_of_int Sys.max_array_length);
     add "    if (index >= BigInt(array.length / width)) fail('E_ARRAY_RANGE', 'Array index is outside its length.'); return Number(index); };\n"
+    end
   end;
   if textual then add "  const text = value => typeof value === 'string' ? value : fail('E_ARRAY_TYPE', 'Kernel input changed its packed element type.');\n";
   if Array.exists (fun instruction -> match unguarded instruction with P.Fma _ | Checked_fma _ -> true | _ -> false) view.code then
@@ -133,9 +174,13 @@ let region program =
     add "  const checked = (valid, value) => Number.isFinite(value) ? (valid ? 1 : value) : 0;\n";
   if Array.exists(fun instruction->match unguarded instruction with P.Rand_at _->true|_->false)view.code then
     add "  const randAt = (seed, index) => { let x = wrap(seed ^ wrap(wrap(index + 0x11b54a32d192ed03n) * 0x1e3779b97f4a7c15n)); x = wrap(x ^ (BigInt.asUintN(63, x) >> 30n)); x = wrap(x * 0x3f58476d1ce4e5b9n); x = wrap(x ^ (BigInt.asUintN(63, x) >> 27n)); x = wrap(x * 0x14d049bb133111ebn); x = wrap(x ^ (BigInt.asUintN(63, x) >> 31n)); return Number(BigInt.asUintN(63, x) >> 10n) / 9007199254740992; };\n";
+  if fast then
+    add "  const convert = (name, x) => Number.isFinite(x) && Math.abs(x) < 4e18 ? Math.trunc(x) : fail('E_NONFINITE', name + ' produced a nonfinite value.');\n"
+  else begin
   add "  const convert = (name, x) => Number.isFinite(x) && Math.abs(x) < 4e18 ? BigInt(Math.trunc(x)) : fail('E_NONFINITE', name + ' produced a nonfinite value.');\n";
   add "  const divide = (a, b, mod) => b === 0n ? fail('E_RANGE', 'Integer division by zero.') : wrap(mod ? a %% b : a / b);\n";
-  add "  const shift = (a, b, right) => b < 0n || b > 62n ? fail('E_RANGE', 'Integer shift count must be within [0, 62].') : wrap(right ? BigInt.asUintN(63, a) >> b : a << b);\n";
+  add "  const shift = (a, b, right) => b < 0n || b > 62n ? fail('E_RANGE', 'Integer shift count must be within [0, 62].') : wrap(right ? BigInt.asUintN(63, a) >> b : a << b);\n"
+  end;
   if seeds <> [] then begin
     add "%s" perlin;
     List.iter (fun seed ->
@@ -161,7 +206,9 @@ let region program =
   else add "    const o = i;\n";
   if product then Array.iteri (fun k _ -> add "    const j%d = Math.floor(i / s%d) %% n%d;\n" k k k) view.widths
   else Array.iteri (fun k _ -> add "    const j%d = i;\n" k) view.widths;
-  let numeric r=if R.integer_register view.code.(r) then "Number("^register r^")" else register r in
+  let numeric r=if R.integer_register view.code.(r) then
+      (if fast then Printf.sprintf "(r%dh * 4294967296 + r%dl)" r r else "Number("^register r^")") else register r in
+  let index r=if fast && R.integer_register view.code.(r) then numeric r else register r in
   let rec expression slot instruction = match instruction with
       | P.Const value -> number value
       | Input (input, w, component) -> Printf.sprintf "Number(in%d[j%d * %d + %d])" input input w component
@@ -179,15 +226,19 @@ let region program =
       | Array_prepare(i,ty) -> if ty=Flow.Ty.Array Flow.Ty.Text then Printf.sprintf "table(%d, 'text', 1)" i
           else Printf.sprintf "table(%d, %b, %d)" i (ty=Flow.Ty.Array Flow.Ty.Int)
             (Option.get(Flow.Packed_ops.array_width ty))
-      | Gather(array,index,width,component) -> Printf.sprintf "%s[row(%s, %s, %d) * %d + %d]"
-          (register array)(register array)(register index)width width component
-      | Int_gather(array,index) -> Printf.sprintf "%s[row(%s, %s, 1)]" (register array)(register array)(register index)
+      | Gather(array,i,width,component) -> Printf.sprintf "%s[row(%s, %s, %d) * %d + %d]"
+          (register array)(register array)(index i)width width component
+      | Int_gather(array,i) -> Printf.sprintf "%s[row(%s, %s, 1)]" (register array)(register array)(index i)
       | Text_const value -> Text_literal.quote value
       | Text_input input -> Printf.sprintf "text(in%d[j%d])" input input
       | Text_uniform input -> Printf.sprintf "text(uniforms[%d])" input
-      | Text_gather(array,index) -> Printf.sprintf "%s[row(%s, %s, 1)]" (register array)(register array)(register index)
+      | Text_gather(array,i) -> Printf.sprintf "%s[row(%s, %s, 1)]" (register array)(register array)(index i)
       | Text_select(condition,yes,no) -> Printf.sprintf "(%s !== 0 ? %s : %s)" (numeric condition)(register yes)(register no)
       | Rand_at(seed,index) -> Printf.sprintf "randAt(%s, %s)" (register seed) (register index)
+      | Int_compare(op,a,b) when fast->let h r=Printf.sprintf "r%dh" r and l r=Printf.sprintf "r%dl" r in
+          let lt a b=Printf.sprintf "(%s < %s || (%s === %s && %s < %s))" (h a)(h b)(h a)(h b)(l a)(l b) in
+          let eq=Printf.sprintf "(%s === %s && %s === %s)" (h a)(h b)(l a)(l b) in
+          flag(match op with Ilt->lt a b|Igt->lt b a|Ile->"!"^lt b a|Ige->"!"^lt a b|Ieq->eq)
       | Int_const n->string_of_int n^"n" | Int_input i->Printf.sprintf "in%d[j%d]" i i
       | Int_uniform i->Printf.sprintf "uniforms[%d][0]" i | Int_accumulator->"st[0]"
       | Int_frame _->Printf.sprintf "uniforms[%d][%d]"(Array.length view.uniform_widths)slot
@@ -211,9 +262,42 @@ let region program =
           (Text_literal.quote code)(Text_literal.quote message)
           (Option.fold ~none:"" ~some:(fun cause->", "^Text_literal.quote cause)cause)
       | Guarded(_,body)->expression slot body in
+  (* a fast integer register's statement: both halves of [r<slot>] *)
+  let pair slot body =
+    let h r=Printf.sprintf "r%dh" r and l r=Printf.sprintf "r%dl" r in
+    let lo e=Printf.sprintf "r%dl = %s; r%dh = RH;" slot e slot in
+    let read v=lo (Printf.sprintf "(typeof (%s) === 'bigint' ? unbig(%s) : split(%s))" v v v) in
+    match body with
+    | P.Int_const n -> let n=Int64.of_int n in
+        Printf.sprintf "r%dh = %ld; r%dl = %Ld;" slot (Int64.to_int32 (Int64.shift_right n 32)) slot (Int64.logand n 0xffffffffL)
+    | Int_input i -> read (Printf.sprintf "in%d[j%d]" i i)
+    | Int_uniform i -> read (Printf.sprintf "uniforms[%d][0]" i)
+    | Int_frame _ -> read (Printf.sprintf "uniforms[%d][%d]" (Array.length view.uniform_widths) slot)
+    | Int_gather _ -> read (expression slot body)
+    | Int_binary(op,a,b) ->
+        let call f=lo (Printf.sprintf "%s(%s, %s, %s, %s)" f (h a)(l a)(h b)(l b)) in
+        let bits o=Printf.sprintf "r%dh = %s %s %s; r%dl = (%s %s %s) >>> 0;" slot (h a) o (h b) slot (l a) o (l b) in
+        (match op with Iadd->call "add64"|Isub->call "sub64"|Imul->call "mul64"
+         |Idiv->lo (Printf.sprintf "div64(%s, %s, %s, %s, false)" (h a)(l a)(h b)(l b))
+         |Imod->lo (Printf.sprintf "div64(%s, %s, %s, %s, true)" (h a)(l a)(h b)(l b))
+         |Iand->bits "&"|Ior->bits "|"|Ixor->bits "^"
+         |Ishl->lo (Printf.sprintf "shift64(%s, %s, %s, false)" (h a)(l a)(numeric b))
+         |Ishr->lo (Printf.sprintf "shift64(%s, %s, %s, true)" (h a)(l a)(numeric b)))
+    | Int_abs a -> Printf.sprintf "if (%s < 0) { r%dl = sub64(0, 0, %s, %s); r%dh = RH; } else { r%dh = %s; r%dl = %s; }"
+        (h a) slot (h a)(l a) slot slot (h a) slot (l a)
+    | Int_select(c,a,b) -> Printf.sprintf "if (%s !== 0) { r%dh = %s; r%dl = %s; } else { r%dh = %s; r%dl = %s; }"
+        (numeric c) slot (h a) slot (l a) slot (h b) slot (l b)
+    | Convert(_,_) -> lo (Printf.sprintf "split(%s)" (expression slot body))
+    | _ -> invalid_arg "fast integer register" in
   Array.iteri (fun slot instruction ->
     let guards,body=match instruction with P.Guarded(g,b)->g,b|b->[],b in
     let guard=String.concat " && "(List.map(fun(r,yes)->numeric r^(if yes then " !== 0" else " === 0"))guards)in
+    if fast && R.integer_register body then begin
+      add "    let r%dh = 0, r%dl = 0;\n" slot slot;
+      if guards<>[] then add "    if (%s) {\n" guard;
+      add "    %s\n" (pair slot body);
+      if guards<>[] then add "    }\n"
+    end else begin
     add "    let r%d;\n" slot;
     if guards<>[] then add "    if (%s) {\n" guard;
     (match body with
@@ -222,7 +306,7 @@ let region program =
      | _ -> ());
     add "    r%d = %s;\n" slot (expression slot body);
     if not(R.integer_register body) && checks.(slot) then add "    if (!Number.isFinite(r%d)) %s\n" slot nonfinite;
-    if guards<>[] then add "    }\n") view.code;
+    if guards<>[] then add "    }\n" end) view.code;
   Array.iteri (fun k registers -> Array.iteri (fun component slot ->
     if not(R.integer_register view.code.(slot) || R.text_register view.code.(slot)) then add "    if (!Number.isFinite(r%d)) %s\n" slot nonfinite;
     (match region.result with
@@ -236,7 +320,8 @@ let region program =
     if collecting then
       if R.text_register view.code.(slot) then add "    out%d[o - outputBase] = r%d;\n" k slot
       else add "    out%d[o * %d + %d] = %s;\n" k (Array.length registers) component
-        (if Array.length registers=1 && R.integer_register view.code.(slot) then register slot else numeric slot)) registers)
+        (if Array.length registers=1 && R.integer_register view.code.(slot) then
+           (if fast then Printf.sprintf "big(r%dh, r%dl)" slot slot else register slot) else numeric slot)) registers)
     view.outputs;
   (match region.result with
    | R.Accumulate _ -> Array.iteri (fun component slot -> add "    st[%d] = r%d;\n" component slot) view.outputs.(0)
@@ -470,7 +555,8 @@ const transform = (rt, kind, v) => {
 
 type context = { program : C.program; body : Buffer.t; used : (string, unit) Hashtbl.t;
   mutable map : (int * Flow.Diagnostic.span) list; mutable async : bool; gpu : int -> bool; state_slot : int -> int;
-  bindings : bool; templated : bool; plans : (int, string) Hashtbl.t }
+  bindings : bool; templated : bool; plans : (int, string) Hashtbl.t; fast : bool;
+  mutable remembered : bool; mutable resident : bool; kernel : int -> string option }
 
 let local n = "l" ^ string_of_int n
 let use ctx name = Hashtbl.replace ctx.used name ()
@@ -540,6 +626,20 @@ let draw ctx : C.draw -> string = fun d ->
   | Push (t, n) -> Printf.sprintf "transform(rt, %s, %s);" (escape (match t with C.Translate -> "translate" | Rotate -> "rotate" | Scale -> "scale")) (local n)
   | Pop -> "emit(rt, {type: \"pop_transform\"});"
 
+(* What each source and uniform of a region reads, by argument index ([Packed.Private.shape] of its
+   template, whose arguments are [$core/argument] markers): a resident fold takes a count on the
+   device from ["arg", i] and ["range", i, mul, div], and declines a placeholder read any other way. *)
+let shapes_json packed =
+  let arg = function
+    | Flow.Eval.Source ("$core/argument", _, ["index", Flow.Eval.Int i]) -> Some i | _ -> None in
+  let shape = function
+    | P.Private.Value v -> (match arg v with Some i -> Printf.sprintf "['arg',%d]" i | None -> "['host']")
+    | Range (v, mul, div) -> (match arg v with Some i -> Printf.sprintf "['range',%d,%d,%d]" i mul div | None -> "['host']")
+    | Opaque None -> "['opaque',null]"
+    | Opaque (Some vs) -> Printf.sprintf "['opaque',[%s]]" (String.concat "," (List.filter_map (fun v -> Option.map string_of_int (arg v)) vs)) in
+  let list a = "[" ^ String.concat "," (Array.to_list (Array.map shape a)) ^ "]" in
+  Printf.sprintf "{sources:%s,uniforms:%s}" (list (P.Private.source_shapes packed)) (list (P.Private.uniform_shapes packed))
+
 let rec statements ctx depth (list : C.statement list) =
   List.iter (statement ctx depth) list
 and statement ctx depth (s : C.statement) =
@@ -559,6 +659,14 @@ and statement ctx depth (s : C.statement) =
   | Assign (n, Items ns) when ctx.program.locals.(n)=Flow.Ty.List Flow.Ty.geometry ->
       line "%s%s = rt.sequence_cooked(%s);" at(local n)
         ("[" ^ String.concat "," (List.map local ns) ^ "]")
+  (* a resident loop's array is on the device: its count is the one read back *)
+  | Assign (n, Prim (Array_compact, [_, a])) when ctx.resident ->
+      ctx.async <- true; line "%s%s = await rt.resident.prim('compact', null, %s);" at (local n) (local a)
+  | Assign (n, Prim (Coerce (Flow.Ty.Array _ as ty), [_, a])) when ctx.resident ->
+      ctx.async <- true; line "%s%s = await rt.resident.prim('coerce', %s, %s);" at (local n) (ty_json ty) (local a)
+  | Assign (n, Prim (Array_count, [_, a])) when ctx.resident ->
+      ctx.async <- true;
+      line "%s%s = await rt.resident.settle(%s); %s = rt.array_count(%s);" at (local a) (local a) (local n) (local a)
   | Assign (n, e) -> line "%s%s = %s;" at (local n) (expression ctx e)
   | Reset_call slot -> line "%scalls[%d] = 0;" at slot
   | Draw d -> line "%s%s" at (draw ctx d)
@@ -622,7 +730,7 @@ and statement ctx depth (s : C.statement) =
   | State_write {slot; value} -> line "%s%s.pending = %s;" at (slot_key slot) (local value)
   | Invoke {region; args; result} ->
       ctx.async <- true;
-      if ctx.gpu region then line "%s%s = await rt.gpuArray(%d);" at (local result) region
+      if ctx.gpu region && ctx.kernel region = None then line "%s%s = await rt.gpuArray(%d);" at (local result) region
       else begin
         let p = match P.of_region ctx.program.regions.(region) with
           | Ok p -> p | Error (d :: _) -> raise (Refused (d.code,d.message,d.span))
@@ -634,12 +742,16 @@ and statement ctx depth (s : C.statement) =
           || Array.exists Flow.Eval.frame_dependent r.uniforms in
         let plan = if dynamic then ", B" ^ string_of_int region else "" in
         if dynamic && not (Hashtbl.mem ctx.plans region) then
-          Hashtbl.add ctx.plans region (binding_plan p);
+          Hashtbl.add ctx.plans region (binding_plan ~fast:ctx.fast ?kernel:(ctx.kernel region) p);
+        (* a display region bound per call runs on the device (fast precision) *)
+        if ctx.gpu region && dynamic then
+          line "%s%s = await rt.gpuInvoke(%d, [%s]%s);" at (local result) region (String.concat ", " (List.map local args)) plan
+        else
         line "%s%s = await rt.invoke(%d, [%s]%s);" at (local result) region
           (String.concat ", " (List.map local args)) plan
       end
 
-and binding_plan packed =
+and binding_plan ?(fast=false) ?kernel packed =
   let r=P.to_region packed in
   let refuse message = raise (Refused ("E_WEB_SOURCE",message,None)) in
   if r.result<>R.Collect || Array.length r.outputs<>1 then
@@ -669,7 +781,7 @@ and binding_plan packed =
     if uniform && frame_input program.body then needs_frame_value:=true;
     if uniform && asynchronous program.body then
       refuse "Asynchronous region captures require a compiled synchronous preparation path.";
-    fst(frame_result ~bindings:true ~internal:true program) in
+    fst(frame_result ~fast ~bindings:true ~internal:true program) in
   let source (residual,term) =
     let view=Flow.Eval.Private.residual_view residual in
     let residual=Flow.Eval.Private.with_bindings residual ~term view.bindings in
@@ -696,8 +808,8 @@ and binding_plan packed =
   let integer=Array.length terminal=1 && R.integer_register r.code.(terminal.(0))
   and text=Array.length terminal=1 && R.text_register r.code.(terminal.(0)) in
   Printf.sprintf
-    "{source:%s,argumentTypes:[%s],sources:[%s],captures:[%s],product:%b,skip:[%s],frame:[%s],length:%d,width:%d,integer:%b,text:%b,frameValue:%b,arrayLimit:%sn,countLimit:%sn}"
-    (escape(region packed))
+    "{source:%s,argumentTypes:[%s],sources:[%s],captures:[%s],product:%b,skip:[%s],frame:[%s],length:%d,width:%d,integer:%b,text:%b,frameValue:%b,arrayLimit:%sn,countLimit:%sn,kernel:%s,shapes:%s}"
+    (escape(region ~fast packed))
     (String.concat ","(Array.to_list(Array.map ty_json(P.Private.argument_types packed))))
     (String.concat ","(Array.to_list sources))
     (String.concat ","(Array.to_list captures))
@@ -707,20 +819,42 @@ and binding_plan packed =
     integer text !needs_frame_value
     (string_of_int(if integer || text then Sys.max_array_length else Sys.max_floatarray_length))
     (string_of_int max_int)
-and frame_result ?store ?(gpu = fun _ -> false) ?(state_slot = Fun.id)
+    (match kernel with Some id -> escape id | None -> "null") (shapes_json packed)
+and frame_result ?store ?(fast=false) ?(kernel = fun _ -> None) ?(gpu = fun _ -> false) ?(state_slot = Fun.id)
     ?(bindings=false) ?(internal=false) (program : C.program) =
   let body = Buffer.create 4096 in
   (* Once one region consumes computed locals, its producer Invokes need real
      source preparation too. Argument-free fixed exports keep data.bin calls. *)
   let templated=bindings || Array.exists(fun r->match P.of_region r with
     |Ok p->P.Private.argument_types p<>[||]|Error _->false)program.regions in
-  let ctx = { program; body; used = Hashtbl.create 8; map = []; async = false; gpu; state_slot; bindings; templated; plans=Hashtbl.create 4 } in
-  statements ctx 2 program.body;
+  let ctx = { program; body; used = Hashtbl.create 8; map = []; async = false; gpu; state_slot; bindings; templated; plans=Hashtbl.create 4; fast;
+    remembered=false; resident=false; kernel } in
+  (* A drawing's loop memory, as native [Core_exec.prepare ~remember_loops]: a top-level loop or
+     region call whose reads repeat one of its last 4 keys hands back that run's writes. *)
+  List.iter (fun (s : C.statement) -> match s.node, Flow_ir.Core_exec.footprint program s with
+    | (Iterate _ | Counted _ | Invoke _), Some (reads, writes) when not bindings && not internal && writes <> [||] ->
+        ctx.remembered <- true;
+        let names a = String.concat ", " (List.map local (Array.to_list a)) in
+        Printf.bprintf body "    { const k%d = [%s], h%d = rt.recall(M, %d, k%d);\n" s.id (names reads) s.id s.id s.id;
+        Printf.bprintf body "    if (h%d) [%s] = h%d; else {\n" s.id (names writes) s.id;
+        (* a resident fold (native Core_exec.resident_live): in fast precision its regions stay on
+           the device and its live writes come back once, as it ends *)
+        (match Flow_ir.Core_exec.resident_live program s with
+         | Some live when fast ->
+             ctx.async <- true;
+             Printf.bprintf body "    rt.resident.begin();\n    try {\n";
+             ctx.resident <- true; statement ctx 3 s; ctx.resident <- false;
+             Printf.bprintf body "      [%s] = await rt.resident.finish([%s]);\n    } finally { rt.resident.end(); }\n"
+               (names live) (names live)
+         | _ -> statement ctx 3 s);
+        Printf.bprintf body "    rt.keep(M, %d, k%d, [%s]); } }\n" s.id s.id (names writes)
+    | _ -> statement ctx 2 s) program.body;
   let code = Buffer.contents body in
   let mentions name = Hashtbl.mem ctx.used name in
   let out = Buffer.create 8192 in
   Buffer.add_string out "// Rays web export: frame program. frame(input, state, rt); see lib/flow_web/js.mli.\n";
   if Array.length program.constants > 0 then Buffer.add_string out "let K;\n";
+  if ctx.remembered then Buffer.add_string out "const M = new Map();\n";
   List.iter (fun (name, text) ->
     if mentions name then Buffer.add_string out text) helpers;
   Hashtbl.to_seq ctx.plans |> List.of_seq |> List.sort (fun (a,_) (b,_)->Int.compare a b)
@@ -748,10 +882,14 @@ and frame_result ?store ?(gpu = fun _ -> false) ?(state_slot = Fun.id)
   Buffer.add_string out "}\n";
   Buffer.contents out, List.rev ctx.map
 
-let frame ?store ?gpu ?state_slot program =
-  match frame_result ?store ?gpu ?state_slot program with
+let frame ?store ?fast ?kernel ?gpu ?state_slot program =
+  match frame_result ?store ?fast ?kernel ?gpu ?state_slot program with
   | result -> Ok (fst result)
   | exception Refused (code, message, span) -> Error (Flow.Diagnostic.error ?span ~code message)
+
+(* A region with arguments or frame-dependent inputs runs from a binding plan; this is whether one
+   can be made for it, so a draw lowering may keep it a region on the web. *)
+let bindable packed = match binding_plan ~fast:true packed with _ -> true | exception (Refused _ | Not_found | Invalid_argument _ | Failure _) -> false
 
 let frame_map program =
   match frame_result program with

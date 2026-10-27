@@ -1,48 +1,29 @@
-; Pre-commit smoke opens two representative native examples. The explicit
-; @smoke-all alias runs every example and sketch. The shared lock keeps
-; windows sequential in either target.
+; Every sketch is a .rays file under sketches/, run by the one rays binary: runtest checks them all
+; (in parallel), smoke opens two, smoke-all opens every one. The shared lock keeps windows sequential.
+
+(rule
+ (alias runtest)
+ (deps (glob_files sketches/*.rays))
+ (action
+  (system "ls sketches/*.rays | xargs -P 8 -n 1 sh -c 'out=$(%{bin:rays} check \"$0\" 2>&1) || { echo \"$out\"; exit 255; }'")))
 
 (rule
  (alias smoke)
  (locks smoke_window)
+ (deps sketches/basic.rays sketches/sop_gallery.rays)
  (action
   (setenv RAYS_MAX_FRAMES 30
-   (run %{exe:examples/basic/lisp.exe}))))
-
-(rule
- (alias smoke)
- (locks smoke_window)
- (action
-  (setenv RAYS_MAX_FRAMES 30
-   (run %{exe:examples/sop_gallery/lisp.exe}))))
+   (progn
+    (run %{bin:rays} sketches/basic.rays)
+    (run %{bin:rays} sketches/sop_gallery.rays)))))
 
 (rule
  (alias smoke-all)
  (locks smoke_window)
+ (deps (glob_files sketches/*.rays))
  (action
   (setenv RAYS_MAX_FRAMES 30
-   (run %{exe:examples/pathtracer/main.exe}))))
-
-(rule
- (alias smoke-all)
- (locks smoke_window)
- (action
-  (setenv RAYS_MAX_FRAMES 30
-   (run %{exe:sketches/voxel_wall/main.exe}))))
-
-(rule
- (alias smoke-all)
- (locks smoke_window)
- (action
-  (setenv RAYS_MAX_FRAMES 30
-   (run %{exe:sketches/cube_cage/main.exe}))))
-
-(rule
- (alias smoke-all)
- (locks smoke_window)
- (action
-  (setenv RAYS_MAX_FRAMES 30
-   (run %{exe:sketches/shattered_cube/main.exe}))))
+   (system "for f in sketches/*.rays; do case $f in *_lib.rays) continue;; esac; %{bin:rays} $f || exit 1; done"))))
 
 ; tools/codemod builds with --profile codemod: the dev warnings plus unused
 ; modules (60). Warnings stay fatal: dune never replays a cached success.

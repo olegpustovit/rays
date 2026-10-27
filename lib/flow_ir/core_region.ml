@@ -458,6 +458,24 @@ let lower ?(fusion = true) ?(dynamic = false)
           let code=text(List.assoc "code" args) and message=text(List.assoc "message" args) in
           let cause=Option.map text (List.assoc_opt "cause" args) in
           {registers=[|emit(Raise(t.ty,code,message,cause))|];constant=None;fields=[]}
+      | Op {op="color/hsl"; args; _} when List.map fst args = ["h";"s";"l"] ->
+          (* Operators.hsl_channels, step for step, with a select per hue sector *)
+          let arg name = (as_float (expression env (List.assoc name args))).registers.(0) in
+          let h = arg "h" and s = arg "s" and l = arg "l" in
+          let k x = emit (Const x) and bin op a b = emit (Binary (op, a, b)) in
+          let unit v = bin Max (k 0.) (bin Min (k 1.) v) and abs v = emit (Unary (Abs, v)) in
+          let hue = bin Div (bin Mod h (k 360.)) (k 60.) in
+          let s = unit s and l = unit l in
+          let chroma = bin Mul (bin Sub (k 1.) (abs (bin Sub (bin Mul (k 2.) l) (k 1.)))) s in
+          let x = bin Mul chroma (bin Sub (k 1.) (abs (bin Sub (bin Mod hue (k 2.)) (k 1.)))) and zero = k 0. in
+          let sector c0 c1 c2 c3 c4 c5 =
+            let pick limit yes no = emit (Select (bin Lt hue (k limit), yes, no)) in
+            pick 1. c0 (pick 2. c1 (pick 3. c2 (pick 4. c3 (pick 5. c4 c5)))) in
+          let m = bin Sub l (bin Div chroma (k 2.)) in
+          let byte v = bin Div (emit (Convert (To_float, emit (Convert (Truncate,
+            bin Add (bin Mul (unit (bin Add v m)) (k 255.)) (k 0.5)))))) (k 255.) in
+          {registers = [| byte (sector chroma x zero zero x chroma); byte (sector x chroma chroma x zero zero);
+                          byte (sector zero zero x chroma chroma x) |]; constant = None; fields = []}
       | Op {op; args; _} ->
           let declaration, kind = match Flow.Op.find ~extra:(E.Private.residual_ops residual) op Flow.Context.value with
             | Some o -> (match Flow.Op.packed_kind o with

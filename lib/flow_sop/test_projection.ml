@@ -51,7 +51,7 @@ let rec counts (s : P.scope) =
     (0, 0, 0) s.nodes
 
 let snapshot = [
-  "bloom", [ "flower", (12, 1, 84); "scene", (6, 0, 60); "world", (2, 0, 11); "settings", (2, 0, 6);
+  "bloom", [ "flower", (12, 1, 84); "scene", (6, 0, 60); "world", (2, 0, 11); "settings", (2, 0, 7);
              "editor", (10, 0, 30); "half", (1, 0, 2); "petal", (2, 0, 53) ];
   "facade", [ "facade", (14, 2, 89) ];
   "garland", [ "garland", (19, 5, 90); "ring", (6, 1, 45) ]; (* inline functions and nested maps *)

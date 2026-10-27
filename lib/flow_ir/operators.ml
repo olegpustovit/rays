@@ -52,12 +52,26 @@ let color_value color =
   let r,g,b,a=Rays_math.Color.to_floats color in
   if color.Rays_math.Color.a=255 then Flow.Value.Vec3(r,g,b)
   else Flow.Value.List [|Float r;Float g;Float b;Float a|]
+(* HSL to bytes with the Lisp [mod] (floored, as Core and packed kernels compute it), so the walker,
+   Core and a packed kernel give the same bits; each channel is a byte over 255, as a color holds it *)
+let hsl_channels h s l =
+  let modulo x y = Float.rem (Float.rem x y +. y) y and unit v = Float.max 0. (Float.min 1. v) in
+  let hue = modulo h 360. /. 60. and s = unit s and l = unit l in
+  let chroma = (1. -. Float.abs (2. *. l -. 1.)) *. s in
+  let x = chroma *. (1. -. Float.abs (modulo hue 2. -. 1.)) in
+  let r, g, b =
+    if hue < 1. then chroma, x, 0. else if hue < 2. then x, chroma, 0.
+    else if hue < 3. then 0., chroma, x else if hue < 4. then 0., x, chroma
+    else if hue < 5. then x, 0., chroma else chroma, 0., x in
+  let m = l -. chroma /. 2. in
+  let byte v = float_of_int (int_of_float (unit (v +. m) *. 255. +. 0.5)) /. 255. in
+  byte r, byte g, byte b
 let hsl : Flow.Op.t = {noise3 with name="color/hsl"; category="Color"; packed_extension=None;
   signature={pos=["h",Flow.Ty.Float;"s",Flow.Ty.Float;"l",Flow.Ty.Float];opt=[];rest=None;kw=[]};
   out=(fun _->Flow.Ty.Vec3);check=(fun _->());
   body=(fun ~live:_ ~node:_ args->
     let number key=Flow.Value.fin key (Flow.Value.num(List.assoc key args))in
-    color_value(Rays_math.Color.hsl (number "h") (number "s") (number "l")))}
+    let r,g,b=hsl_channels (number "h") (number "s") (number "l") in Flow.Value.Vec3(r,g,b))}
 let hsla : Flow.Op.t = {hsl with name="color/hsla";
   signature={hsl.signature with pos=hsl.signature.pos@["a",Flow.Ty.Float]};
   out=(fun _->Flow.Ty.List Flow.Ty.Float);

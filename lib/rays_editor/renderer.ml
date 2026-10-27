@@ -82,7 +82,7 @@ let film ~through ~resolution:(width, height) ~gate:(gate_width, gate_height) =
 let linear (color : Color.t) = P.Linear_color.rgb
   (float color.r /. 255.) (float color.g /. 255.) (float color.b /. 255.)
 let traced_material (material : Material.t) =
-  P.material ~roughness:(sqrt (2. /. (max 0. material.shininess +. 2.)))
+  P.material ~roughness:(sqrt (2. /. (max 0. material.shininess +. 2.))) ~round:material.round
     ~emission:(linear material.emissive) (linear material.diffuse)
 
 let wire_scene scene =

@@ -34,8 +34,6 @@ val of_factories :
 val sources : unit -> (Flow.Syntax.t list, Flow.Diagnostic.t) result
 (** Embedded node-library definitions, sorted by source filename. *)
 
-val source_digest : unit -> string
-(** Hex digest of the embedded library's file names and text, without parsing or checking it. *)
 
 val node_definitions : unit -> (Flow.Defnode.t list, Flow.Diagnostic.t) result
 

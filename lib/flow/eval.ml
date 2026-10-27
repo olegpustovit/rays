@@ -1366,8 +1366,9 @@ module Private = struct
   let free_name_walks () = Atomic.get free_walks
   let with_bindings r ~term bindings =
     let env=List.fold_left (fun env (name,value) -> Smap.add name value env) r.renv bindings in
+    (* a new term over new bindings: the parent's memo of its own dependencies does not carry over *)
     {r with rid=Atomic.fetch_and_add bulk_ids (-1); rterm=term; renv=capture term env;
-      previous=false;live=None;core=None}
+      previous=false;live=None;core=None;dep_frame=0;dep_state=0}
   let force_with_executor ?state ?elems ?resolve ?owner ?compiled ?strict ~execute v ~live =
     force_with ?state ?elems ?resolve ?owner ?compiled ?strict ~execute v ~live
   let function_bindings = function Closure cl -> Smap.bindings cl.env | Named _ -> []

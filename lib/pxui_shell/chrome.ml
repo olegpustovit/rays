@@ -149,7 +149,14 @@ open Rays
             Ui.Paint.fill paint ~x ~y ~w ~h:1. line;
             Ui.Paint.fill paint ~x ~y ~w:1. ~h line; Ui.Paint.fill paint ~x:(x +. w -. 1.) ~y ~w:1. ~h line;
             Ui.Paint.fill paint ~x ~y:(y +. h -. 1.) ~w ~h:1. line)
-      | View _ | Canvas _ | Timeline -> ()
+      (* docked, its picture is only its body: the margin over its header is the ground every other
+         pane stands on, not whatever the picture under the chrome shows (a traced scene's black) *)
+      | View _ | Canvas _ | Timeline ->
+          let _, fy, _, _ = l.frame and _, hy, _, _ = l.header in
+          if hy > fy then begin
+            let box = floating ui l.frame ("workspace-margin" ^ key l.path) in
+            Ui.draw ui box (fun paint (x, y, w, _) -> Ui.Paint.fill paint ~x ~y ~w ~h:(float (hy - fy)) theme.panel)
+          end
       | p ->
           let box = floating ui l.frame ("workspace-" ^ String.lowercase_ascii (Editor_core.Panels.name p)
                                         ^ key l.path) in

@@ -77,8 +77,8 @@ let settings_graph_writeback () =
 let startup_settings () =
   with_editor (workspace "(workspace startup (graph config :context settings (settings/config)))") (fun e ->
     let fields = D.Settings.fields (build (E.workspace !e)).settings in
-    check (List.length fields = 5 && List.for_all (fun (f : Editor_core.Param.field_view) ->
-      String.ends_with ~suffix:"(on restart)" f.label) fields)
+    check (List.length fields = 6 && List.for_all (fun (f : Editor_core.Param.field_view) ->
+      String.ends_with ~suffix:"(on restart)" f.label || String.ends_with ~suffix:"(live)" f.label) fields)
       "workspace startup fields do not explain when edits apply";
     List.iteri (fun i (name, literal) ->
       let before = E.workspace !e in
@@ -839,6 +839,7 @@ let no_viewport_click () =
     let f = { (frame 2) with events = click; mouse = (15., 15.) } in
     e := E.update !e f)
 
+(* exact precision: the canvas's rect positions stay host instances the check reads *)
 let compiled_probe_panels () =
   let text = {|(workspace probes
     (graph picture :context draw
@@ -847,6 +848,7 @@ let compiled_probe_panels () =
                          (map (fn [p] (+ p [1 0 0])) previous))
              shifted (map (fn [p] (+ p [1 0 0])) positions)]
         (draw/rects shifted [1 1 0])))
+    (graph config :context settings (settings/config :precision "exact"))
     (graph editor :context editor
       (ui/workspace (ui/split "horizontal" (ui/canvas (ref picture))
         (ui/split "vertical" (ui/graph "picture") (ui/lisp :tab "graph"))))))|} in

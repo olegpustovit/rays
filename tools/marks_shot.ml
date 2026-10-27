@@ -3,29 +3,41 @@
    web_parity.exe and tools/web/test/frames.mjs), adapts the last frame's mark table with Marks_scene and renders it
    offscreen at density 1. Image maps use native Image_kernel snapshots; --gpu-images uses the native
    Run/Image_sink display path as the oracle for discontinuous f32 pixel functions.
-   usage: marks_shot DIR OUT.png WIDTH HEIGHT FRAME [--gpu-images]   (DIR holds sketch.rays) *)
+   usage: marks_shot FILE.rays OUT.png WIDTH HEIGHT FRAME [--gpu-images] *)
 module E = Flow.Eval
 module C = Flow_ir.Core_exec
 
 let () =
   if Array.length Sys.argv < 6 || Array.length Sys.argv > 7
     || (Array.length Sys.argv = 7 && Sys.argv.(6) <> "--gpu-images") then
-    (prerr_endline "usage: marks_shot DIR OUT.png WIDTH HEIGHT FRAME [--gpu-images]"; exit 2);
+    (prerr_endline "usage: marks_shot FILE.rays OUT.png WIDTH HEIGHT FRAME [--gpu-images]"; exit 2);
+  (* RAYS_SHOT_POINTER=X,Y moves the pointer, or X,Y;X,Y;... one per frame, the last held (the browser
+     parity check passes the same) *)
+  let path = match Sys.getenv_opt "RAYS_SHOT_POINTER" with
+    | Some text -> Array.of_list (List.map (fun p -> Scanf.sscanf p "%f,%f" (fun x y -> x, y)) (String.split_on_char ';' text))
+    | None -> [|100., 100.|] in
+  let pointer_at i = path.(min (i - 1) (Array.length path - 1)) in
   let gpu_images = Array.length Sys.argv = 7 && Sys.argv.(6) = "--gpu-images" in
-  let dir = Sys.argv.(1) and output = Sys.argv.(2) in
+  let file = Sys.argv.(1) and output = Sys.argv.(2) in
   let width = int_of_string Sys.argv.(3) and height = int_of_string Sys.argv.(4) and frames = int_of_string Sys.argv.(5) in
   let size = width, height and dt = 1. /. 60. in
   let fail text = prerr_endline text; exit 1 in
-  let _, doc = Web_export.load (Filename.concat dir "sketch.rays") in
+  let _, doc = Web_export.load file in
   let lowered = match doc with
     | Error (d :: _) -> fail (Flow.Diagnostic.to_string d) | Error [] -> fail "does not check"
     | Ok doc -> (match Web_export.lower doc with Ok l -> l | Error d -> fail (Flow.Diagnostic.to_string d)) in
-  let prepared = C.prepare lowered.program and state = E.create_state () and buffers = C.Buffers.create () in
+  (* RAYS_SHOT_FAST=1: fast precision's native path, a drawing's resident folds on the Metal host, the
+     oracle of the browser's resident folds (both f32 on the device; exact CPU elsewhere) *)
+  let fast = Sys.getenv_opt "RAYS_SHOT_FAST" = Some "1" in
+  let prepared = C.prepare ~remember_loops:fast lowered.program and state = E.create_state () and buffers = C.Buffers.create () in
   let images = Hashtbl.create 8 in
   let get = function Ok v -> v | Error d -> fail (Flow.Diagnostic.to_string d) in
-  let gpu = if gpu_images then Some (match Rays_execution.acquire_gpu () with Ok g -> g
+  let gpu = if gpu_images || fast then Some (match Rays_execution.acquire_gpu () with Ok g -> g
     | Error e -> fail (Format.asprintf "%a" Rays_execution.pp_error e)) else None in
   let pipelines = Option.map (fun g -> Flow_gpu.Pipelines.create ~clock:Unix.gettimeofday (Rays_execution.gpu_device g)) gpu in
+  let host = if fast then Option.map (fun g -> Flow_gpu.Host.create ~clock:Unix.gettimeofday g) gpu else None in
+  if fast then Domain.DLS.set Flow_ir.Gpu.fast true;
+  let resident () = Option.map Flow_gpu.Host.resident host in
   let current = ref (Frame_input.at_time 0.) in
   let rec resolve id = match Hashtbl.find_opt images id with Some image -> image | None ->
     let live = !current in
@@ -96,13 +108,13 @@ let () =
   let last = ref None in
   for i = 1 to frames do
     Hashtbl.iter (fun _ image -> Rays.Image.destroy image) images; Hashtbl.clear images;
-    let live = { (Frame_input.at_time (float i *. dt)) with dt; frame = i; tick = i; size; pointer = (100., 100.) } in
+    let live = { (Frame_input.at_time (float i *. dt)) with dt; frame = i; tick = i; size; pointer = pointer_at i } in
     current := live; C.Buffers.clear buffers;
     let drawn = ref (Error (Flow.Diagnostic.error ~code:"E_CORE" "The draw program did not run.")) in
     (match lowered.root with
-     | None -> drawn := C.draw ~image prepared ~live ~size ~buffers
+     | None -> drawn := C.draw ?resident:(resident ()) ~image prepared ~live ~size ~buffers
      | Some root ->
-         let execute r live = drawn := C.draw ~root:r ~image prepared ~live ~size ~buffers; Some (Ok (E.Int 0)) in
+         let execute r live = drawn := C.draw ~root:r ?resident:(resident ()) ~image prepared ~live ~size ~buffers; Some (Ok (E.Int 0)) in
          ignore (E.Private.force_with_executor ~state ~execute (E.Residual root) ~live));
     last := Some !drawn
   done;
@@ -114,4 +126,5 @@ let () =
   Rays.Canvas.destroy canvas;
   Hashtbl.iter (fun _ image -> Rays.Image.destroy image) images;
   Option.iter Flow_gpu.Pipelines.close pipelines;
+  Option.iter Flow_gpu.Host.close host;
   Option.iter Rays_execution.release_gpu gpu

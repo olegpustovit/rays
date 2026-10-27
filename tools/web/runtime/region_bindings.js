@@ -42,8 +42,11 @@ function sameType(type, value) {
   if (type?.startsWith?.('vec')) return value instanceof Float64Array && value.length === WIDTH[type];
   return false;
 }
+// Packed arrays are immutable by contract: one whose data was checked once is not scanned again.
+const checked = new WeakSet();
 function validate(type, value) {
   if (value instanceof p.PArray && !sameType(type, value)) storageError();
+  if (type?.array && checked.has(value.data)) return;
   if (type === 'int' && !integer(value)) storageError();
   if (type?.array) {
     if (type.array === 'text') {
@@ -53,6 +56,7 @@ function validate(type, value) {
       if (!value.data.every(integer)) storageError();
     } else { p.array_count(value); for (const x of value.data) if (!Number.isFinite(x))
       p.fail('E_NONFINITE', 'array input produced a nonfinite value.'); }
+    checked.add(value.data);
   } else if (type?.record) for (const [name, t] of type.record) validate(t, value.get(name));
   else if (type?.list) for (const v of value) validate(typeOf(v), v);
   else if (type === 'float' || type?.startsWith?.('vec')) {
@@ -86,6 +90,11 @@ function arrayPayload(type, value, message) {
   if (!sameType(type, value)) p.fail('E_ARRAY_TYPE', message);
   validate(type, value);
   return value.data;
+}
+// One source of a bound region, evaluated on the host (a resident fold prepares the others itself).
+export async function sourceValue(plan, index, args, input, rt) {
+  const spec = plan.sources[index], value = await compile(spec.source)(input, [], scope(rt, args));
+  return arrayPayload(spec.type, value, 'Kernel input changed its packed element type.');
 }
 export async function sourceInputs(plan, args, input, rt) {
   validateArguments(plan.argumentTypes, args);

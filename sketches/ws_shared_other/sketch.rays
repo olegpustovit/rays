@@ -1,4 +1,0 @@
-(workspace shared_other
-  (graph shape :context sop
-    (sop/transform (shared_box [0.2 0.8 0.2]) :translate [0.5 0 0])))
-(import "../ws_shared/lib.rays")

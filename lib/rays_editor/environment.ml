@@ -239,13 +239,19 @@ let update_with value frame ~inspector =
                | _ -> Drawing.prepare ~profile:lowered.profile
                    ~approx:(fst core.doc.workspace).checked.approx ~states:lowered.states lowered.plan drawing in
              (match Result.bind prepared (fun p -> Result.map (fun scene -> p, scene)
-                 (Workspace_gpu.with_backend value.host.gpu(fun()->Drawing.render_prepared ~state:core.cook.state
-                   ~gpu:(Workspace_gpu.marks value.host.gpu)
+                 (Workspace_gpu.with_backend ~fast:(Editor_document.Contexts.fast core.doc) value.host.gpu(fun()->Drawing.render_prepared ~state:core.cook.state
+                   ~gpu:(Workspace_gpu.marks value.host.gpu) ?resident:(Workspace_gpu.resident value.host.gpu)
                    ~image:(Workspace_images.image value.host.images ~state:core.cook.state ~live:frame_input lowered.plan)
                    p ~live:frame_input ~size:(w, h)))) with
               | Ok (prepared, scene) -> (key, {size = (w, h); dynamic; plan = lowered.plan; scene;
                   prepared = Some prepared; preview}) :: pictures, error
-              | Error d -> (key, Option.value ~default:{size = (w, h); dynamic; plan = lowered.plan; scene = []; prepared = None; preview} previous) :: pictures,
+              | Error d ->
+                  (* the last picture stays up, unless its mark sets bind GPU outputs this failed
+                     render may already have replaced *)
+                  let previous = Option.map (fun p -> match p.prepared with
+                    | Some prepared when Drawing.borrows_gpu prepared -> {p with scene = []}
+                    | _ -> p) previous in
+                  (key, Option.value ~default:{size = (w, h); dynamic; plan = lowered.plan; scene = []; prepared = None; preview} previous) :: pictures,
                   Some (Flow.Diagnostic.to_string d)))
     | _ -> pictures, error) ([], context_error) (Core.geometry core core.workspace raw_frame).leaves in
   let rendered, views, drawn,texture_errors = compose { value with core } { update with core } ~baked ~baked_views ~scene in

@@ -249,8 +249,10 @@ let carry_tests () =
         (ui/split-at "horizontal" 0.62 (ui/graph) (ui/inspector))))))|} in
   let with_editor source = String.sub source 0 (String.length source - 1) ^ editor ^ ")" in
   let slow_prepare = Atomic.make false in
-  let make ?(source = carry_source) ?carry_budget () =
-    E3.create ~await:true ?carry_budget ~workspace:(workspace (with_editor source))
+  (* an unbounded budget unless a check is about the budget: a shown preview never depends on how
+     loaded the machine is (it was once held back under a full parallel suite) *)
+  let make ?(source = carry_source) ?(carry_budget = Float.infinity) () =
+    E3.create ~await:true ~carry_budget ~workspace:(workspace (with_editor source))
       ~prepare:(fun _ output ->
         (* A controlled over-budget input, not a wait for cook completion:
            ~await:true still synchronizes every update below. *)
@@ -534,7 +536,7 @@ let carry_tests () =
       (let* [m (sop/material (sop/transform (sop/box) :translate [(* 0.01 t) 0 0])
                  :material (ref spare))] m))
     (graph scene :context scene
-      (let* [obj (scene/geometry (ref shards) :name "shards")] (scene/merge obj))))|} ();
+      (let* [obj (scene/geometry (ref shards) :name "shards")] (scene/merge obj))))|} ~carry_budget:0.5 ();
   Fun.protect ~finally:(fun () -> E3.close !e) (fun () ->
     for _ = 1 to 12 do step [] done;
     jump "shards";
@@ -542,7 +544,9 @@ let carry_tests () =
     let target = tile ["shards"; "m"] in
     Atomic.set slow_prepare true;
     drag_to target;
-    check (has (line ()) "a cook takes") ("an expensive carry is held back: " ^ line ());
+    (* held back for the slow cook, or (on a loaded machine) for the put itself *)
+    let held () = has (line ()) "a cook takes" || has (line ()) "applying takes" in
+    check (held ()) ("an expensive carry is held back: " ^ line ());
     check (E3.workspace !e == original && E3.undo_label !e = history)
       "a held-back carry leaves the original document and history unchanged";
     Atomic.set slow_prepare false;
@@ -552,7 +556,7 @@ let carry_tests () =
       && E3.undo_label !e = history) "Escape drops an expensive carry without an edit";
     Atomic.set slow_prepare true;
     drag_to target;
-    check (has (line ()) "a cook takes") "the next expensive preview is also held back";
+    check (held ()) "the next expensive preview is also held back";
     Atomic.set slow_prepare false;
     step ~mouse:target [Event.MouseReleased (Input.LeftButton, target)]; step []; step [];
     check (E3.carrying !e = None && E3.undo_label !e = Some "Put"

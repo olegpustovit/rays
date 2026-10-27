@@ -1,4 +1,4 @@
-# Workspace, examples and development reference
+# Workspace, sketches and development reference
 
 This preserves the prior detailed guide and historical port notes. The [README](../README.md) gives the current entry point and capture status. Commands below require the documented native Mac environment; they were not run successfully on the Linux review host.
 
@@ -8,7 +8,7 @@ This preserves the prior detailed guide and historical port notes. The [README](
 > the qualification tooling may change.
 
 Rays is a creative-coding system for native Apple-Silicon Macs. A sketch is a
-Lisp workspace file, `sketch.rays`. Its drawings, geometry, scenes, settings and
+Lisp workspace file, `<name>.rays`. Its drawings, geometry, scenes, settings and
 UI are graphs that the Rays Editor draws from the text, and edits back into the
 text. Rendering goes through Metal, with OGPU as the renderer interface and SDL3
 for window, input and media. Metal unavailability is a typed startup error;
@@ -66,7 +66,7 @@ renderer.
 
 ## A sketch
 
-This is `examples/basic/sketch.rays`:
+This is `sketches/basic.rays`:
 
 ```lisp
 (workspace basic
@@ -100,75 +100,30 @@ points at another graph. The language reference is
 Run an example or a sketch natively:
 
 ```sh
-dune exec examples/basic/lisp.exe
-dune exec sketches/flow_contours/main.exe
+dune exec rays -- sketches/basic.rays
+dune exec rays -- sketches/flow_contours.rays
 ```
 
 Command-S in the window rewrites the file with its comments kept. An edit of
 the file on disk reloads the window. A finite run sets `RAYS_MAX_FRAMES` to a
 frame count and exits when it is reached; the `smoke` rules use this.
 
-## Examples and sketches
+## Sketches
 
-`examples/<name>/` holds a short teaching program. Each Lisp example has a
-`sketch.rays` and a `dune` file that generates `lisp.exe`:
-
-```sh
-dune exec examples/audio/lisp.exe
-dune exec examples/basic/lisp.exe
-dune exec examples/drawing/lisp.exe
-dune exec examples/file_dialog/lisp.exe
-dune exec examples/generative/lisp.exe
-dune exec examples/noise/lisp.exe
-dune exec examples/particles/lisp.exe
-dune exec examples/procedural_modeling/lisp.exe
-dune exec examples/pxui/lisp.exe
-dune exec examples/recursive_rectangles/lisp.exe
-dune exec examples/sop_gallery/lisp.exe
-```
-
-`examples/sop_gallery` is a `gallery.rays` catalogue of SOP graphs; its scene shows
-`(ref boolean)` and the outline opens the others. One example is still an OCaml
-executable:
+A sketch is one file, `sketches/<name>.rays`, interpreted by the one `rays` binary:
 
 ```sh
-dune exec examples/pathtracer/main.exe
+dune exec rays                                   # an empty editor; Command-S writes ./untitled.rays
+dune exec rays -- sketches/basic.rays            # open a sketch
+dune exec rays -- sketches/sop_gallery.rays      # the catalogue of SOP graphs
+dune exec rays -- sketches/voxel_wall.rays       # path traced
+dune exec rays -- check sketches/basic.rays      # check (fmt FILE formats)
+dune exec rays -- web sketches/basic.rays -o out # static web files; npx serve out
 ```
 
-`sketches/<name>/sketch.rays` is a sketch that is only a workspace, with no
-`dune` or `main.ml` of its own. `sketches/dune` generates its executable as
-`sketches/<name>/main.exe`. Every sketch except the three below is of this
-kind, for example `sketches/flow_contours`, `sketches/flow_terrain` and
-`sketches/ws_tunnel`. `sketches/cube_cage`, `sketches/shattered_cube` and
-`sketches/voxel_wall` still have their own `main.ml`:
-
-```sh
-dune exec sketches/voxel_wall/main.exe
-```
-
-Examples and sketches that automation runs must finish on their own under
-`RAYS_MAX_FRAMES`.
-
-## Scaffolding
-
-Create an example (`examples/<name>/sketch.rays` and its `dune`):
-
-```sh
-dune exec tools/new_example.exe -- my_example
-dune exec examples/my_example/lisp.exe
-```
-
-Create a sketch (`sketches/<name>/sketch.rays` only). Then add it to the
-generated build file, which is checked in as `sketches/dune.rays.inc`:
-
-```sh
-dune exec tools/new_example.exe -- --sketch my_sketch
-dune build @runtest; dune promote
-dune exec sketches/my_sketch/main.exe
-```
-
-Both copy `specification/workspace/cases/bloom.lisp` as the starting file. The
-name may use only lowercase letters, digits, `_` and `-`.
+There is no `dune` file per sketch and no folder: add one by adding the file (copy any sketch, or
+save from `rays`). Its header comment says what it shows. `@runtest` checks every sketch and
+`@smoke-all` opens each one; sketches that automation runs finish on their own under `RAYS_MAX_FRAMES`.
 
 For the conventions of writing a `.rays` file (names, macros, pixel kernels),
 see `.claude/skills/write-rays-lisp/SKILL.md`.
@@ -182,8 +137,8 @@ dune build @all && dune runtest && dune build @smoke && git diff --check
 dune build @doc
 ```
 
-- `dune build @smoke` runs two finite native examples. `dune build @smoke-all`
-  runs every example and sketch, and opens a window for each one in turn.
+- `dune build @smoke` opens two sketches for 30 frames. `dune build @smoke-all`
+  opens every sketch, a window for each one in turn.
 - `dune runtest` is the window-free suite. Display-dependent tests run under
   `@runtest-native`, and long or machine-specific checks run under
   `@qualification`.
@@ -192,7 +147,7 @@ dune build @doc
 
   ```sh
   dune build tools/ui_shot.exe
-  _build/default/tools/ui_shot.exe sketches/flow_contours/sketch.rays OUT.png
+  _build/default/tools/ui_shot.exe sketches/flow_contours.rays OUT.png
   ```
 
 - A fatal exception in a running sketch writes a report under `/tmp/rays-crash`.
@@ -200,8 +155,8 @@ dune build @doc
 ## Layout
 
 ```text
-examples/      short teaching programs (sketch.rays or main.ml)
-sketches/      experiments; sketches/dune generates the workspace-only ones
+sketches/      every sketch, one <name>.rays file each
+tools/lisp/    the rays binary (rays.ml) and the web export
 lib/rays/      public creative-coding API (Sketch, Frame, Scene)
 lib/flow*/     the Lisp language, its IR and GPU emitter, graph and SOP layers
 lib/rdk/       packed geometry and topology core
@@ -236,7 +191,7 @@ platform frameworks retain their own licenses and terms; see
 
 Three OCaml sketches were removed from the tree. Their last OCaml source is
 still in git history (`git show <commit>:sketches/<name>/main.ml`). Each one
-needs the following before it can be written as a `sketch.rays`:
+needs the following before it can be written as a `.rays` sketch:
 
 | Sketch | What it did | What Rays Lisp is missing |
 |---|---|---|

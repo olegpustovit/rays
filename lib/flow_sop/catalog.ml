@@ -46,9 +46,6 @@ let embedded_sources = lazy (
 
 let sources () = Lazy.force embedded_sources
 
-let source_digest = lazy (Digest.to_hex (Digest.string
-  (String.concat "\000" (List.concat_map (fun (file, text) -> [file; text]) Node_sources.files))))
-let source_digest () = Lazy.force source_digest
 
 let definitions_of_sources forms =
   List.fold_left (fun result form -> Result.bind result (fun nodes ->

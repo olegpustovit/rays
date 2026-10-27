@@ -59,7 +59,7 @@ let cook session node = match Session.cook session
 
 let gallery_grid_warning () =
   let catalog = Rays_editor.workspace_catalog () |> Result.get_ok in
-  let text = In_channel.with_open_bin "../examples/sop_gallery/gallery.rays" In_channel.input_all in
+  let text = In_channel.with_open_bin "../sketches/sop_gallery.rays" In_channel.input_all in
   let _, warnings = Editor_document.Workspace_doc.check_text catalog text |> Result.get_ok in
   check (List.map (fun (d : Flow.Diagnostic.t) -> d.code, d.severity) warnings
     = ["W_SOFT_RANGE", Flow.Diagnostic.Warning; "W_SOFT_RANGE", Flow.Diagnostic.Warning])
@@ -96,7 +96,7 @@ let float3 name geometry =
    sketches/ws_morph workspace lowers and each graph cooks to the geometry its
    node promises, the same at one and four domains. *)
 let test_morph_sketch () =
-  let text = In_channel.with_open_bin "../sketches/ws_morph/sketch.rays"
+  let text = In_channel.with_open_bin "../sketches/ws_morph.rays"
       In_channel.input_all in
   let lowered = match Flow.Syntax.parse text with
     | Error d -> fail (Flow.Diagnostic.to_string d)

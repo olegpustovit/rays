@@ -50,6 +50,7 @@ let geometry sink (geometries : Scene_command.Render_ir.geometry array) =
 let device_type = Flow.Ty.Named "device_array"
 let device_value sink ~token ~count ~width =
   E.Deferred (device_type, Buffers.add_device sink.buffers ~token ~count ~width)
+let is_device = function E.Deferred (ty, _) -> ty = device_type | _ -> false
 let device sink = function
   | E.Deferred (ty, id) when ty = device_type ->
       let _, count, width = Buffers.device sink.buffers id in Some (id, count, width)

@@ -5,7 +5,8 @@ module Counts = Map.Make (String)
 
 type declaration = {
   name : string;
-  context : string option;
+  context : string option;   (* a graph's; None for a defn or a macro, which are called *)
+  written : string option;   (* the context a graph or defn declares *)
   expressions : S.t list;
 }
 
@@ -32,9 +33,9 @@ let declarations forms =
                 | _ -> None) params in
               defaults @ [body]
           | _ -> [] in
-        Some { name; context = (if kind = "graph" then Some context else None); expressions }
+        Some { name; context = (if kind = "graph" then Some context else None); written = Some context; expressions }
     | S.List ({ node = S.Sym "defmacro"; _ } :: { node = S.Sym name; _ } :: rest) ->
-        Some { name; context = None; expressions = (match List.rev rest with body :: _ -> [body] | [] -> []) }
+        Some { name; context = None; written = None; expressions = (match List.rev rest with body :: _ -> [body] | [] -> []) }
     | _ -> None) children
 
 let rec heads counts (form : S.t) =
@@ -66,6 +67,9 @@ let blockers declarations root =
     List.fold_left walk state (S.children form) in
   snd (visit Names.empty Names.empty root) |> Names.elements
 
+(* what the core counts: a draw, host, image or value graph or defn, and macros; never sop or scene code *)
+let core d = Option.fold ~none:true ~some:(fun c -> List.mem c ["draw"; "host"; "image"; "value"]) d.written
+
 let census path forms counts =
   let declarations = declarations forms in
   let graphs = List.filter (fun d -> d.context <> None) declarations
@@ -81,7 +85,7 @@ let census path forms counts =
     eligible && blocked = []) true draws in
   if draws <> [] && eligible then Printf.printf "eligible %s\n" path;
   List.fold_left (fun counts d ->
-    if d.context = None || List.mem (Option.get d.context) ["draw"; "host"; "image"; "value"] then
+    if core d then
       List.fold_left heads counts d.expressions
     else counts) counts declarations
 
@@ -102,6 +106,7 @@ let self_check () =
       (graph macro :context draw (view))
       (defmacro view [] `(ref geometry))
       (defn twice :context value [(x : float)] (* x 2))
+      (defn lift :context sop [(g : geometry)] (sop/with_attr g "y" (sop/attr g :P)))
       (graph default :context value [(n : int (+ 1 2))] n))
   |}) in
   let graph name = List.find (fun d -> d.name = name) declarations in
@@ -115,12 +120,13 @@ let self_check () =
   assert (Counts.find "*" counts = 1);
   assert (Counts.find "+" counts = 1);
   assert (not (Counts.mem "x" counts));
+  assert (core (graph "twice") && not (core (graph "lift")) && not (core (graph "geometry")));
   print_endline "core census self-check passed"
 
 let () = match Array.to_list Sys.argv with
   | [_; "--self-check"] -> self_check ()
   | _ :: paths ->
-      let paths = if paths = [] then ["examples"; "sketches"; "specification"] else paths in
+      let paths = if paths = [] then ["sketches"; "specification"] else paths in
       let paths = List.concat_map files paths |> List.sort_uniq String.compare in
       let counts = List.fold_left (fun counts path ->
         let source = In_channel.with_open_bin path In_channel.input_all in

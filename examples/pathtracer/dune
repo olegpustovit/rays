@@ -1,3 +1,0 @@
-(executable
- (name main)
- (libraries rays rays_pathtracer rdk unix))

@@ -169,74 +169,6 @@ same([value.get('t'), value.get('dt'), value.get('index'), value.get('width'), v
   same(code, 'E_IMAGE', 'generated image needs the GPU');
 }
 
-// ---- reload: watch() against a fake server, rt.load, and gpu.update (plan P6.7) ----
-{
-  globalThis.compiles = [];
-  const region = name => `globalThis.compiles.push(${JSON.stringify(name)});\nfunction region(i, u, o, s, e) { return ${JSON.stringify(name)}; }`;
-  const make = (tag, sources) => ({ tag, regions: sources.map(source => ({ source })), frame() { return tag; } });
-  const programs = { 1: make('A', [region('r0'), region('r1')]), 2: make('B', [region('r0'), region('r1b')]), 3: make('C', [region('r0'), region('r1b')]) };
-  const state = { version: '1', requests: [], status: 200 };
-  const fetchFake = async url => {
-    const u = new URL(url); state.requests.push(u.pathname + u.search);
-    if (u.pathname === '/version') return { ok: state.status === 200, text: async () => `${state.version}\n` };
-    const v = u.searchParams.get('v');
-    if (u.pathname === '/data.bin') return { ok: true, arrayBuffer: async () => new Float64Array([+v]).buffer };
-    if (u.pathname === '/kernels.json') return { ok: true, json: async () => ({ kernels: [], v }) };
-    throw new Error(`unexpected ${url}`);
-  };
-  const imports = [];
-  const load = async url => { imports.push(url); return programs[new URL(url).searchParams.get('v')]; };
-  const tables = [];
-  const rt = R.createRuntime(programs[1], { fixedDt: 0.5 });
-  rt.gpu = { poll() {}, update: async t => { tables.push(t.v); } };
-  const w = R.watch(rt, { fetch: fetchFake, load, base: 'http://localhost:9/', interval: 0 });
-  same([rt.region(0)(), rt.region(1)()], ['r0', 'r1'], 'reload: first program regions');
-  rt.slots[0] = 'old';
-  same(await w.poll(), false, 'reload: the first poll takes the baseline');
-  same(await w.poll(), false, 'reload: an unchanged version does nothing');
-  same(imports, [], 'reload: nothing imported yet');
-  state.version = '2';
-  same(await w.poll(), true, 'reload: a new version reloads');
-  same([rt.program.tag, rt.slots, rt.reloads, new Float64Array(rt.data)[0], tables, imports],
-    ['B', [], 1, 2, ['2'], ['http://localhost:9/program.js?v=2']], 'reload: program swapped, slots reset, data and kernels refetched');
-  same([rt.region(0)(), rt.region(1)()], ['r0', 'r1b'], 'reload: regions come from the new program');
-  same(globalThis.compiles, ['r0', 'r1', 'r1b'], 'reload: only the region whose text changed is compiled again');
-  state.version = '3';
-  await w.poll();
-  same([rt.region(0)(), rt.region(1)(), globalThis.compiles.length, rt.reloads], ['r0', 'r1b', 3, 2], 'reload: identical regions are not recompiled');
-  // a frame still runs the new program
-  same(await rt.stepFrame(), 'C', 'reload: the frame is the new one');
-  // not served by the watch server: stop silently
-  const quiet = [];
-  const origError = console.error; console.error = (...a) => quiet.push(a);
-  state.status = 404; state.requests.length = 0;
-  const ticking = R.watch(rt, { fetch: fetchFake, load, base: 'http://localhost:9/', interval: 5 });
-  await new Promise(r => setTimeout(r, 120));
-  same([state.requests.length, quiet], [1, []], 'reload: /version 404 stops polling, silently');
-  const broken = R.watch(rt, { fetch: async () => { throw new TypeError('fetch failed'); }, load, interval: 5 });
-  await new Promise(r => setTimeout(r, 60));
-  same(quiet, [], 'reload: a fetch error stops polling, silently');
-  console.error = origError; ticking.stop(); broken.stop();
-}
-{
-  // gpu.update compiles only the kernels whose text changed
-  let modules = 0, released = 0;
-  globalThis.GPUBufferUsage = { STORAGE: 128, COPY_DST: 8 }; globalThis.GPUShaderStage = { COMPUTE: 4 };
-  const device = { lost: new Promise(() => {}), addEventListener() {}, limits: {}, queue: { writeBuffer() {} },
-    createShaderModule: () => { modules++; return { getCompilationInfo: async () => ({ messages: [] }) }; },
-    createBindGroupLayout: () => ({}), createPipelineLayout: () => ({}), createComputePipelineAsync: async () => ({}),
-    createBuffer: () => ({ destroy() { released++; } }), destroy() {} };
-  const win = { navigator: { gpu: { requestAdapter: async () => ({ requestDevice: async () => device }) } } };
-  const { createGpu } = await import(new URL('./gpu.js', pathToFileURL(resolve(path))).href);
-  const kernel = (id, source, seeds = []) => ({ id, entry: `e_${id}`, source, interface: [], table_seeds: seeds, tables: seeds.map(() => [0]), uniform_layout: [], uniform_bytes: 16, input_widths: [], output_widths: [] });
-  const gpu = await createGpu({ kernels: [kernel('k0', 'a'), kernel('k1', 'b', [31])] }, { win });
-  same(modules, 2, 'gpu.update: every kernel compiled at load');
-  const k0 = gpu.kernels.get('k0').pipeline;
-  await gpu.update({ kernels: [kernel('k0', 'a'), kernel('k1', 'b2', [31]), kernel('k2', 'c')] });
-  same([modules, gpu.kernels.get('k0').pipeline === k0, [...gpu.kernels.keys()], released], [4, true, ['k0', 'k1', 'k2'], 1], 'gpu.update: only changed and new kernels compile; the old table is released');
-  await gpu.update({ kernels: [kernel('k0', 'a')] });
-  same([modules, [...gpu.kernels.keys()]], [4, ['k0']], 'gpu.update: an unchanged table compiles nothing, dropped kernels go');
-}
 
 {
   // GPU attribute regions (P6.4a): a kernel group runs once per frame, or once per load without a frame fact; its inputs
@@ -268,28 +200,6 @@ same([value.get('t'), value.get('dt'), value.get('index'), value.get('width'), v
   same(none, 'E_KERNEL', 'gpu: a GPU region without a device is an error, never a silent CPU run');
 }
 
-// Reload cannot destroy a texture while an asynchronous image drawing still uses it, or let
-// the next frame start with a partly replaced program/device table.
-{
-  let releaseFrame, releaseUpdate, updates = 0, version = '1';
-  const drawing = new Promise(resolve => { releaseFrame = resolve; });
-  const updating = new Promise(resolve => { releaseUpdate = resolve; });
-  const before = { regions: [], async frame() { await drawing; return 'old'; } };
-  const after = { regions: [], frame() { return 'new'; } };
-  const rt = R.createRuntime(before, { fixedDt: 0.5, gpu: { poll() {}, async update() { updates++; await updating; } } });
-  const w = R.watch(rt, { interval: 0, load: async () => after,
-    fetch: async () => ({ ok: true, text: async () => version, arrayBuffer: async () => new ArrayBuffer(0), json: async () => ({ kernels: [] }) }) });
-  await w.poll();
-  const first = rt.stepFrame(); version = '2'; const reload = w.poll();
-  await new Promise(resolve => setTimeout(resolve, 0));
-  same(updates, 0, 'reload waits for the image drawing to finish');
-  releaseFrame(); await first;
-  await new Promise(resolve => setTimeout(resolve, 0));
-  const second = rt.stepFrame();
-  same([updates, rt.current.frame], [1, 1], 'the next frame waits for resource replacement');
-  releaseUpdate(); await reload;
-  same(await second, 'new', 'the next frame uses the complete replacement program');
-}
 
 if (failures.length) { console.error(failures.join('\n')); process.exit(1); }
 console.log('runtime: ok');

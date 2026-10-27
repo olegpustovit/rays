@@ -6,6 +6,9 @@ type t = {
   specular : Color.t;
   emissive : Color.t;
   shininess : float;
+  round : float;
+      (** Round-corners radius in scene units for the path tracer (0 = off): edges shade as a
+          bevel of this radius without changing geometry. Raster ignores it. *)
 }
 
 val create :
@@ -14,6 +17,7 @@ val create :
   ?specular:Color.t ->
   ?emissive:Color.t ->
   ?shininess:float ->
+  ?round:float ->
   unit ->
   t
 

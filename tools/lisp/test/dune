@@ -1,13 +1,13 @@
 (cram
- (deps %{bin:rays-lisp}
+ (deps %{bin:rays}
   %{exe:../../core_census.exe}
   %{exe:../../core_fixtures.exe}
   %{exe:../../shape2_fixtures.exe}
-  %{exe:http_get.exe}
   ../../web/test/shape2.mjs
   ../../web/runtime/shape2.js
   ../../web/test/prims.mjs
   ../../web/test/rt_shim.mjs
+  ../../web/test/resident.mjs
   ../../web/runtime/prims.js
   (glob_files ../../web/runtime/*.js)
   ../../web/test/runtime.mjs
@@ -16,17 +16,5 @@
   ../../web/runtime/workers.js
   (glob_files ../../../lib/flow_web/goldens/*.js)
   ../../../specification/core.md
-  (glob_files_rec ../../../examples/*.rays)
   (glob_files_rec ../../../sketches/*.rays)
   (glob_files_rec ../../../specification/*.rays)))
-
-(copy_files ../delimiter.ml)
-
-(test
- (name test_delimiter)
- (modules test_delimiter delimiter))
-
-(executable
- (name http_get)
- (modules http_get)
- (libraries unix))

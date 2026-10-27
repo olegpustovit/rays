@@ -1183,7 +1183,7 @@ geometry as probes; only visible values are formatted. Owner choice and
 scroll belong to the panel instance. Row picking in the viewport is deferred;
 the table remains read-only.
 
-## 12. Catalog manifest and `rays-lisp`
+## 12. Catalog manifest and `rays`
 
 `tools/flow_manifest.exe` writes `lib/sop_catalog/flow_manifest.sexp`
 (`Flow_sop.Manifest.generate`): the catalog version, a digest, and for every kind its
@@ -1192,21 +1192,19 @@ folder, kind with soft and hard range, default, primary, vec3 group, unit) and o
 file is checked in; `dune build @lib/sop_catalog/runtest` regenerates it and diffs, and an
 intended change is accepted with `dune promote`. `Flow.Check.catalog_of_manifest` reads it:
 `lib/flow`'s own tests check against it (the library cannot link the catalog), and
-`test/test_sop_catalog.ml` proves it equals the live catalog. The editor and `rays-lisp`
-check against the live catalog (`Editor_document.Contexts.catalog`), and a `.rays` binary
-compares the catalog digest it was generated with (`Contexts.catalog_digest`).
+`test/test_sop_catalog.ml` proves it equals the live catalog. The editor and `rays`
+check against the live catalog (`Editor_document.Contexts.catalog`): `rays` interprets a `.rays` file,
+so nothing is generated and nothing can be stale.
 
-`tools/lisp` is `rays-lisp`:
+`tools/lisp/rays.ml` is `rays`:
 
 | Command | Does |
 |---|---|
 | `check FILE...` | parses, checks, then evaluates and lowers the document as a window opens it (`Contexts.of_workspace`), so a file that passes opens. Diagnostics print in the compiler's format. A warning fails the file unless the workspace form carries `^:allow-warnings` |
+| (none) | an empty editor; Command-S writes `./untitled.rays`, which a later bare `rays` reopens |
+| `FILE.rays` | opens the workspace in the native editor (`Rays_editor.Workspace.main`); an edit of the file reloads it |
 | `fmt FILE` | prints the canonical text; a file with warnings still formats |
-| `ml FILE` | the generated `main.ml` of a `sketch.rays` (the verbatim source, its digest and the catalog digest, passed to `Rays_editor.Workspace.main`) |
-| `source FILE` | the text as an OCaml module, for a sketch with its own `main.ml` |
-| `dune DIR` | the `sketches/dune.rays.inc` include |
-| `web FILE -o DIR` | checks the file, runs the static stage with graph inputs at their defaults, lowers the first `draw` graph to the core and writes a standalone browser application into DIR. Output is byte-deterministic. A refusal prints its diagnostic with the span and exits 1, writing nothing |
-| `web --watch FILE [-o DIR] [--port N]` | previews on localhost (default port 8000), re-exports on save and reloads the browser; a refused edit keeps the last successful export |
+| `web FILE -o DIR` | checks the file, runs the static stage with graph inputs at their defaults, lowers the first `draw` graph to the core and writes a standalone browser application into DIR. Output is byte-deterministic. A refusal prints its diagnostic with the span and exits 1, writing nothing. It serves nothing: `npx serve DIR` previews it, with the cross-origin isolation headers from the emitted `serve.json` |
 
 The web export covers the 2D canvas only: a `:context draw` graph and the values that feed it. Files:
 `program.js` (the frame program, `frame(input, state, rt)`, from `Flow_web.Js.frame`, then `export const regions`, one
@@ -1425,6 +1423,52 @@ explicit rule. CPU evaluation
 remains exact. A host GPU backend may place a
 covered approximable packed producer at a display sink after measured costs
 justify it; `(exact x)` explicitly materializes a selected GPU producer.
+
+**Workspace precision.** `(settings/config :precision "fast")`, the default, lets what only reaches
+the screen run on the GPU in float32 and 64-bit integer registers: a drawing's mark attributes need
+no qualified path, the device takes gathers from bound tables and integer arithmetic (wrapping,
+truncating division, logical right shift; integers travel between kernels as floats, exact to
+2^24), and a region of 4,096 elements or more that a drawing computes with runs on the device and
+is read back (`Executor.region_readback`, kernels kept by form, at most 16). A drawing's `filter` of
+an `array/range` lowers to an Int mask region and `array/compact`, so a fold's filter packs too.
+Inside a top-level loop whose body holds only regions, scalars, ifs, compaction, retyping and
+counts, the **resident fold** (`Host.resident`, `Core_exec.draw ?resident`) keeps the arrays on
+the device from the first region of 256 elements. A region runs into buffers the fold owns and
+stands in the locals as a placeholder (zeros of its *capacity*, an upper bound); its kernel writes
+its true count to a 4-byte cell. A region whose source is `array/range` of an array's count times
+a constant or `int/div` by one, or the array itself, takes its count from that cell on the
+device (`Packed.Private.source_shapes`; the fast kernel's `count_in`, mul, div and `count_out`),
+and a range source binds a shared index buffer instead of an upload; compaction reads its count
+from the mask's cell and writes its own. A level is committed when its compaction is encoded,
+without a wait (at most two in flight), so nothing is read until the loop ends; then the writes
+later statements read come back (count cell, then that many elements). A region whose source or
+uniform reads a placeholder in any other form, or that two cells would bound, is declined: its
+arguments are read back and it runs on the CPU, as does an `array/count` the host evaluates
+inside the loop. Capacities double with each level; past 4M elements a region is declined, which
+settles the counts. Placeholders and device buffers are pooled by size on the host, since a draw's
+sizes repeat. A mark-attribute region does not wait in fast precision: its output is waited for
+when the marks first borrow it, at most two in flight; its kernel is kept by its site's code, as
+a draw binds a fresh region each frame. Every fast kernel writes a count record `{n, 6n, 1, 0, 0,
+0}`; a mark set whose positions it wrote is drawn indirect from it (`specification/marks.md`). In a
+fast kernel, arithmetic on integer values (an integer register, its float conversion, an integral
+constant, `+ - * mod min max` of two such) stays in 64-bit integers instead of rounding through
+f32, and a conversion of such a value back to an integer takes it directly. The web export follows
+the same paths with the same setting (`specification/web-export/plan.md`, "Native parity of the
+fast paths"). State, exports,
+cache keys and catalog parameters stay exact (kept for now, 2026-10-26). `:precision "exact"`
+keeps every value bit-identical on the CPU. The editor sets `Gpu.fast` from the setting
+(`Contexts.fast`). recursive_rectangles while its picture changes, median per draw at 600x560
+(M-series, 2026-10-26, interleaved A/B, 5 rounds): 242 ms before, 82 ms exact, 6.8-7.4 ms with
+the resident fold and 6.7-7.0 ms with per-region readback (equal on this sketch). A display
+region's kernel entry is kept by its site's code (`Workspace_gpu.measure`), a range source is not
+built on the host (`prepare_values ?lengths`), and a resident bind skips the finite-value scan.
+
+**Drawing loop memory.** A drawing's top-level loops (`Core_exec.prepare ~remember_loops`) keep their
+last 4 results keyed by the values they read from outside themselves (scalars and packed arrays by
+bits, lists and records item by item, anything else by identity) and skip when they repeat; a loop
+that reads the frame, state, a host or a random stream, or draws, always runs; a result holding a
+region left on the GPU for a mark set is not kept (it names one draw's buffers). recursive_rectangles
+with a still picture: 242 ms a frame before, 0.5 ms after.
 
 The checker records immutable `Workspace.packed` candidates/refusals and
 candidate-to-producer links, including aliases and kernel body paths. Its
@@ -1800,7 +1844,7 @@ untouched attributes are preserved, including existing normals. Authors use
 The operator becomes one cook node, whose packed map program is prepared
 once. Live inputs read the cook's frame, and fold inputs receive a snapshot
 from the environment-owned value lane. Inline and locally bound `fn` map
-bodies can use the CPU tier. See `sketches/flow_kernel/sketch.rays`.
+bodies can use the CPU tier. See `sketches/flow_kernel.rays`.
 
 Full vector writes also accept Float-plane records: exactly `{:x xs :y ys}`
 for `:type vec2`, `{:x xs :y ys :z zs}` for vec3 (the default), and an additional
@@ -1889,7 +1933,7 @@ There is no second drawing path for it.
 
 `Rays_editor.Workspace.export` uses the same evaluator and Drawing lowering
 with a fresh fold and a fixed clock. It pins logical size, step, frame index,
-pointer, held keys/buttons and events; `examples/particles/sketch.rays` is
+pointer, held keys/buttons and events; `sketches/particles.rays` is
 the 10,000-particle reference and its native fixed exports are byte-identical
 to the original OCaml example.
 

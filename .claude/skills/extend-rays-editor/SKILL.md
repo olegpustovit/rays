@@ -9,7 +9,7 @@ Read `lib/rays_editor/AGENTS.md` first. Pick the lowest level that works:
 
 | Level | Blocks | Example |
 |---|---|---|
-| 0 sketch | a `.rays` workspace | `examples/basic` |
+| 0 sketch | a `.rays` workspace | `sketches/basic.rays` |
 | 1 sketch + panel | `pxui`, `Editor_core.Param/History/Store`, `Pxui_shell.Inspector` | none yet |
 | 2 custom shell | `Pxui_shell` (Layout, Chrome, Which_key, Prompt, Timeline_bar, Status_bar, Shell), `Pxui_graph`, `Editor_core.Command/Keymap/Router` | none yet |
 | 3 Rays Editor | `Rays_editor.Editor` with a SOP graph | `sketches/voxel_wall`, `sketches/shattered_cube` |

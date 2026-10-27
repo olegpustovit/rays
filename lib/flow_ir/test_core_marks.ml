@@ -140,7 +140,68 @@ let devices () =
            ~buffers:(Buffers.create ()) with
    | Error d -> assert (d.code = "E_DRAW_LENGTH")
    | Ok _ -> failwith "a device colour of the wrong length is refused")
+(* A fold whose body maps over the previous level with gathers, integer arithmetic and noise (the
+   shape of recursive_rectangles' split-level): a drawing runs its nested maps as packed kernels,
+   and the points it draws equal the reference walker's at one, four and eight domains, past the
+   4,096 elements where a kernel splits across domains. *)
+let nested_maps () =
+  (* each level keeps the rows a filter of a range picks, then maps them *)
+  let boxes = "(fold [b (map (fn [i] [i (* i 2) 0]) (array/range 600))] [d (range 4)] \
+    (let* [kept (filter (fn [i] (>= (int/mod (int/mul (int i) 3) 7) 1)) (array/range (array/count b)))] \
+      (map (fn [i] (let* [p (array/nth b (int/div (int (array/nth kept (int/div (int i) 2))) 1)) k (int/mod (int/mul (int i) 7) 5)] \
+        [(+ p.x (sin (* (* p.y 0.01) (+ d t)))) (+ p.y k) 0])) (array/range (* (array/count kept) 2)))))" in
+  let live = {(Frame_input.at_time 0.25) with size = (200, 100)} in
+  (* the walker's points, summed in order as x + 1000 y: the same sum of the drawn buffer must match it *)
+  let expected = match E.Private.force_reference (List.assoc "g" (ok (E.static (match
+      Flow.Workspace.check {Flow.Check.version=1;kinds=[]} (ok (Flow.Syntax.parse
+        ("(workspace w (graph g :context value (array/sum (map (fn [v] (+ v.x (* v.y 1000))) " ^ boxes ^ "))))"))) with
+       | Some ws, [] -> ws
+       | _, ds -> failwith (String.concat "; " (List.map Flow.Diagnostic.to_string ds))))).results) ~live with
+    | Ok (E.Float f) -> f
+    | Ok _ -> failwith "nested maps: the reference sum is not a float"
+    | Error d -> failwith (Flow.Diagnostic.to_string d) in
+  let evaluation = ok (E.static (checked ("(let* [p " ^ boxes ^ "] (draw/points p))"))) in
+  let program, root = Result.get_ok (Flow_ir.Core_draw.lower evaluation.plan (List.assoc "g" evaluation.results)) in
+  let text = Format.asprintf "%a" Flow_ir.Core.pp program in
+  let rec regions i = match String.index_from_opt text i '[' with
+    | Some j when j >= 6 && String.sub text (j - 6) 6 = "region" -> 1 + regions (j + 1)
+    | Some j -> regions (j + 1) | None -> 0 in
+  if regions 0 < 2 then failwith "nested maps: the fold's maps are not packed regions";
+  List.iter (fun domains -> Rays_math.Parallel.run ~domains (fun () ->
+    let buffers = Buffers.create () in
+    match ok (Flow_ir.Core_exec.draw ?root (Flow_ir.Core_exec.prepare program) ~live ~size:(200, 100) ~buffers) with
+    | [| M.Mark_set {kind = Point {position = Buffer {id; width; _}; _}; count} |] ->
+        let xs = Buffers.find buffers id in
+        let sum = ref 0. in
+        for k = 0 to count - 1 do sum := !sum +. (xs.(k * width) +. xs.(k * width + 1) *. 1000.) done;
+        assert (count > 4096);
+        if Int64.bits_of_float !sum <> Int64.bits_of_float expected then
+          failwith (Printf.sprintf "nested maps: points differ from the walker at %d domains (%h vs %h)" domains !sum expected)
+    | _ -> failwith "nested maps: one point set expected")) [ 1; 4; 8 ]
+
+(* A drawing's loops keep their last results by their inputs: the same inputs at another time give
+   the fresh program's points, and changed inputs are never answered from the cache. [k] is drawn
+   once before the fold, so its frame read is a statement of its own, outside the loop. *)
+let remembered_loops () =
+  let body = "(let* [k (int (/ t 2)) p (fold [b (map (fn [i] [i 0 0]) (array/range 3))] [d (range 3)] \
+    (map (fn [i] (let* [q (array/nth b i)] [(+ q.x (* k 10)) (+ q.y d) 0])) (array/range 3)))] \
+    (draw/merge (draw/point [k 0 0]) (draw/points p)))" in
+  let evaluation = ok (E.static (checked body)) in
+  let program, root = Result.get_ok (Flow_ir.Core_draw.lower evaluation.plan (List.assoc "g" evaluation.results)) in
+  let remembered = Flow_ir.Core_exec.prepare ~remember_loops:true program in
+  let points prepared t =
+    let buffers = Buffers.create () and live = {(Frame_input.at_time t) with size = (200, 100)} in
+    match ok (Flow_ir.Core_exec.draw ?root prepared ~live ~size:(200, 100) ~buffers) with
+    | [| _; M.Mark_set {kind = Point {position = Buffer {id; _}; _}; _} |] -> Array.copy (Buffers.find buffers id)
+    | _ -> failwith "remembered loops: a point and a point set expected" in
+  List.iter (fun t ->
+    if points remembered t <> points (Flow_ir.Core_exec.prepare program) t then
+      failwith (Printf.sprintf "remembered loops: a cached frame at t=%g differs from a fresh one" t))
+    [ 0.25; 0.5; 3.0; 0.25; 5.0 ]
+
 let () =
+  remembered_loops ();
+  nested_maps ();
   devices ();
   let actual = dump () in
   if Array.length Sys.argv = 2 && Sys.argv.(1) = "--print" then print_string actual

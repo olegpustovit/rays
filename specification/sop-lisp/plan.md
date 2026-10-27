@@ -91,7 +91,7 @@ A node kind can only be declared in OCaml today. Catalog kinds come from PPX-ann
 
 A packed `map` result is tainted approximate, and every `sop/` argument is an exact sink, so a kernel result must be wrapped in `(exact ...)` before it re-enters the SOP graph (`E_APPROX_SINK`). A kernel that reads cooked attributes is never placed on the GPU today; it runs on the CPU kernel tier on the cook worker (`lib/flow_sop/lower.ml:553-554`).
 
-One existing sketch does exactly what tier 1 needs: `sketches/flow_kernel/sketch.rays` displaces a grid along its normals with `noise3`, and `lib/flow_sop/test_attribute_kernel.ml:497-510` proves it byte-identical to the OCaml `Deform.noise_displace`.
+One existing sketch does exactly what tier 1 needs: `sketches/flow_kernel.rays` displaces a grid along its normals with `noise3`, and `lib/flow_sop/test_attribute_kernel.ml:497-510` proves it byte-identical to the OCaml `Deform.noise_displace`.
 
 ## Language additions
 
@@ -607,7 +607,7 @@ Everything in this plan was read from the repository at `dev` commit `df43b92c` 
 | Node kernels | `lib/rdk/gen/`, `lib/rdk/mesh/`, `lib/rdk/attrib/`, `lib/rdk/curve/`, at the lines given in the inventory |
 | Determinism | `lib/rays_math/rand.ml`, `noise.ml`, `parallel.mli` |
 | Tests used as oracles | `lib/sop/test_nodes.ml`, `test_parallel_exact.ml`, `test/test_sop_catalog.ml`, `test/sop_render_parity.ml`, `test/lisp_sop/lisp_sop.ml`, `lib/rdk/test_support/rdk_test_support.ml`, `lib/flow_sop/test_attribute_kernel.ml`, `test/test_custom_sop.ml` |
-| Working precedent | `sketches/flow_kernel/sketch.rays` |
+| Working precedent | `sketches/flow_kernel.rays` |
 
 Items searched for and not found: a `defnode` or `defsop` form; any catalog node with a Lisp body; integer array values; a kernel gather instruction; a named min or max reduction; a `loop` or `iterate` form; a module or namespace system; a public `Analysis.bounds` function; a function returning point neighbours as an array.
 

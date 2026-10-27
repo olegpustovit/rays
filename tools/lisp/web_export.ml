@@ -68,11 +68,14 @@ let lower (doc : Doc.t) =
         Error (D.error ~span:t.form.span ~code:"E_WEB_GRAPH"
           (Printf.sprintf "The web export draws 2D canvas graphs only; this reaches the %s %s." (Flow.Context.name ctx) name))
     | None -> Ok () in
-  let* lowered = Flow_sop.Lower.of_checked ~reference:true ~factories:Sop_catalog.Editor.factories
+  let* lowered = Flow_sop.Lower.of_checked ~factories:Sop_catalog.Editor.factories
       ~inputs:doc.inputs doc.checked in
   let evaluated = lowered.evaluated in
   let value = List.assoc draw.name evaluated.results in
-  match Flow_ir.Core_draw.lower ~region_allowed:fixed_region evaluated.plan value with
+  (* as native: a region stays a region when the web can run it, fixed (export data) or bound per call *)
+  let runnable r = fixed_region r || (match Flow_ir.Packed.of_region r with
+    | Ok packed -> Flow_web.Js.bindable packed | Error _ -> false) in
+  match Flow_ir.Core_draw.lower ~region_allowed:runnable evaluated.plan value with
   | Ok (program, root) -> Ok {program; span = draw.form.span; root; plan = evaluated.plan}
   | Error message ->
       Error (D.error ~span:draw.form.span ~code:"E_WEB_LOWER" ("This draw graph does not lower to the core: " ^ message))
@@ -171,7 +174,18 @@ let web_kernel (f : fixed) =
 
 type region_entry = { prefix : string; fixed : fixed; kernel : Flow_web.Wgsl.wgsl option; width : int; region : C.Region.t }
 
-let region_entry ~data (r : C.Region.t) =
+let region_entry ~fast ~data (r : C.Region.t) =
+  if not (fixed_region r) then
+    (* bound per call: the frame's binding plan carries its sources; the table holds the template *)
+    match Flow_ir.Packed.of_region r with
+    | Error (d :: _) -> Error d
+    | Error [] -> Error (D.error ~span:(span_of_region r) ~code:"E_WEB_REGION" "This region does not compile.")
+    | Ok packed ->
+        let view = Flow_ir.Packed.Private.view packed in
+        let f = {packed; view; arrays = [||]; uniforms = [||]; count = 0; frame = []} in
+        Ok {prefix = Printf.sprintf "{\"source\": %s" (Flow_web.Kernel_table.json_string (Flow_web.Js.region ~fast packed));
+          fixed = f; kernel = None; width = Array.length view.outputs.(0); region = r}
+  else
   let* f = fixed_inputs r in
   if r.result <> C.Region.Collect || Array.length f.view.outputs <> 1 then
     Error (D.error ~span:(span_of_region r) ~code:"E_WEB_REGION"
@@ -181,7 +195,7 @@ let region_entry ~data (r : C.Region.t) =
     let skipped = List.length skip in
     let textual = Array.exists C.Region.text_register f.view.code in
     let prefix = Printf.sprintf "{\"source\": %s, %s, \"length\": %d, \"width\": %d, \"integer\": %b"
-      (Flow_web.Kernel_table.json_string (Flow_web.Js.region f.packed)) (fixed_members ~kept:(f.count - skipped) ~data f)
+      (Flow_web.Kernel_table.json_string (Flow_web.Js.region ~fast f.packed)) (fixed_members ~kept:(f.count - skipped) ~data f)
       (Array.length f.view.code) (Array.length f.view.outputs.(0))
       (Array.length f.view.outputs.(0)=1 && C.Region.integer_register f.view.code.(f.view.outputs.(0).(0))) ^
       (if textual then ",\"text\":true,\"skip\":" ^ list string_of_int skip else "") in
@@ -298,7 +312,7 @@ let index_html name = Printf.sprintf {|<!doctype html>
 <title>%s</title>
 <style>html, body { margin: 0; height: 100%%; background: #080a10; } canvas { display: block; width: 100%%; height: 100%%; }</style>
 <!-- This page needs cross-origin isolation (Cross-Origin-Opener-Policy: same-origin and
-     Cross-Origin-Embedder-Policy: require-corp) for its worker pool; serve it with those headers. -->
+     Cross-Origin-Embedder-Policy: require-corp) for its worker pool; `npx serve DIR` sends them from serve.json. -->
 <canvas id="canvas"></canvas>
 <script type="module">
 import { start } from "./runtime/runtime.js";
@@ -363,6 +377,8 @@ let map_entry (lowered : lowered) id =
   | _ -> refuse "Image map needs a pixel function."
 
 let files (doc : Doc.t) (lowered : lowered) : (files, D.t) result =
+  (* the workspace's precision, as the editor reads it: fast unless (settings/config :precision "exact") *)
+  let fast = match Editor_document.Contexts.plan_window doc lowered.plan with Ok w -> w.fast | Error _ -> true in
   let data = Buffer.create 4096 in
   let stored = Hashtbl.create 16 in
   let store values =
@@ -386,13 +402,26 @@ let files (doc : Doc.t) (lowered : lowered) : (files, D.t) result =
     match Hashtbl.find_opt states key with Some id -> id | None ->
       let id = Hashtbl.length states in Hashtbl.add states key id; id) program.state_slots in
   let* entries = Array.to_list program.regions
-    |> List.fold_left (fun acc r -> let* acc = acc in let* entry = region_entry ~data:store r in Ok (entry :: acc)) (Ok [])
+    |> List.fold_left (fun acc r -> let* acc = acc in let* entry = region_entry ~fast ~data:store r in Ok (entry :: acc)) (Ok [])
     |> Result.map (fun l -> Array.of_list (List.rev l)) in
-  let good, per_batch = gpu_regions program ~width:(fun k -> Option.map (fun _ -> entries.(k).width) entries.(k).kernel) in
-  let groups = groups entries per_batch |> List.map (fun g -> {g with id=prefix ^ g.id}) in
+  (* fast precision: a region bound per call may run on the device (a resident fold's levels), from
+     its fast kernel *)
+  let fast_kernels = Array.mapi (fun k (r : C.Region.t) ->
+    if not fast || fixed_region r then None else
+    match Flow_ir.Packed.of_region r with
+    | Error _ -> None
+    | Ok packed -> Result.to_option (Result.map (fun w -> let id = Printf.sprintf "%sf%d" prefix k in kernel id w; id)
+        (Flow_web.Wgsl.kernel_fast packed))) program.regions in
+  (* a mark set's attributes go to the device from a fixed kernel (its inputs export data) or, in fast
+     precision, a region bound per call (native fast precision's display regions) *)
+  let good, per_batch = gpu_regions program ~width:(fun k ->
+    if entries.(k).kernel <> None || fast_kernels.(k) <> None then Some entries.(k).width else None) in
+  let fixed_gpu k = entries.(k).kernel <> None in
+  let groups = groups entries (List.map (List.filter fixed_gpu) per_batch |> List.filter ((<>) []))
+    |> List.map (fun g -> {g with id=prefix ^ g.id}) in
   let group_of = Hashtbl.create 8 in
   List.iter (fun g -> List.iteri (fun output k -> Hashtbl.replace group_of k (g, output)) g.members) groups;
-  let* js = Flow_web.Js.frame ~state_slot:(Array.get slots) ~gpu:(fun k -> Ints.mem k good) ~store:(fun values ->
+  let* js = Flow_web.Js.frame ~fast ~kernel:(Array.get fast_kernels) ~state_slot:(Array.get slots) ~gpu:(fun k -> Ints.mem k good) ~store:(fun values ->
     let offset, length = store (E.Float_array values) in Printf.sprintf "new Float64Array(rt.data, %d, %d)" offset length) program in
   let region_text k (e : region_entry) = match Hashtbl.find_opt group_of k with
     | Some (g, output) -> Printf.sprintf "%s, \"kernel\": \"%s\", \"gpu\": {\"output\": %d}}" e.prefix g.id output
@@ -482,7 +511,12 @@ let files (doc : Doc.t) (lowered : lowered) : (files, D.t) result =
         "kernels.json", Flow_web.Kernel_table.table (List.map fst !kernels);
         "kernels.wgsl", String.concat "\n" (List.map snd !kernels);
         "data.bin", Buffer.contents data;
-        "index.html", index_html name ]
+        "index.html", index_html name;
+        (* npx serve reads its headers from here: the worker pool's cross-origin isolation *)
+        "serve.json", {|{"headers": [{"source": "**/*", "headers": [
+  {"key": "Cross-Origin-Opener-Policy", "value": "same-origin"},
+  {"key": "Cross-Origin-Embedder-Policy", "value": "require-corp"}]}]}
+|} ]
       @ List.rev !modules
       @ List.map (fun (file, text) -> "runtime/" ^ file, text) Web_runtime.files)
 
@@ -499,9 +533,3 @@ let load path =
         match Editor_document.Contexts.catalog ~version:Flow_sop.Manifest.version Sop_catalog.Editor.factories with
         | Error d -> Error [d]
         | Ok catalog -> Result.map fst (Doc.check_text ~imports catalog text))
-
-let dependencies (lowered : lowered) =
-  Array.to_list lowered.plan.nodes |> List.filter_map (fun (node : Flow.Eval.node) ->
-    if node.kind = "image/load" then match List.assoc_opt "path" node.args with
-      | Some (Flow.Eval.Text path) -> Some path | _ -> None
-    else None) |> List.sort_uniq String.compare

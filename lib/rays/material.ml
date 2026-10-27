@@ -4,14 +4,17 @@ type t = {
   specular : Color.t;
   emissive : Color.t;
   shininess : float;
+  round : float;
 }
 
 let create ?(diffuse = Color.white) ?(ambient = Color.white)
     ?(specular = Color.white) ?(emissive = Color.black)
-    ?(shininess = 32.) () =
+    ?(shininess = 32.) ?(round = 0.) () =
   if not (Float.is_finite shininess) || shininess < 0. then
     invalid_arg "Material.create: shininess must be finite and non-negative";
-  { diffuse; ambient; specular; emissive; shininess }
+  if not (Float.is_finite round) || round < 0. then
+    invalid_arg "Material.create: round must be finite and non-negative";
+  { diffuse; ambient; specular; emissive; shininess; round }
 
 let default = create ()
 

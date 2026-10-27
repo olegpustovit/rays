@@ -54,6 +54,3 @@ val files : Editor_document.Workspace_doc.t -> lowered -> (files, Flow.Diagnosti
 
 val load : string -> string * (Editor_document.Workspace_doc.t, Flow.Diagnostic.t list) result
 (** The text of a [.rays] file and its checked document (imports read beside it). *)
-
-val dependencies : lowered -> string list
-(** Static file image paths, relative to the process working directory as on native. *)

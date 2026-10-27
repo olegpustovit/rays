@@ -432,7 +432,11 @@ Rays responsibilities. The Metal binding does not contain Rays vertex
 layouts, fixed Scene binding slots, or scene-cache keys. Its private prepared
 submission surface snapshots only generic Metal pass state, typed resource
 sets, indexed draws or indirect-command ranges, and completion-owned resource
-roots. OGPU-Metal is the only layer that maps checked OGPU render values onto
+roots. `Backend.draw_indexed_indirect` (render pipelines; Metal
+`drawIndexedPrimitives:indexType:indexBuffer:indexBufferOffset:indirectBuffer:indirectBufferOffset:`)
+reads an indexed draw's index and instance counts from five uints the device wrote; the mock has
+no render encoder and refuses it with the rest of rendering; conformance draws a triangle from
+device arguments and refuses a misaligned argument range. OGPU-Metal is the only layer that maps checked OGPU render values onto
 that generic surface.
 
 `Scene3.instances_array` lowers each instance batch to one indexed Metal draw.

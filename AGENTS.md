@@ -30,15 +30,18 @@ in a browser, never product code and never a web fallback.
 ## Direction
 
 Lisp is the first-class surface of Rays: a sketch is a `.rays` workspace. `Sketch`, `Frame` and
-`Scene` are the internal layer the editor is built on; there are no typed SOP constructors, and the
-only OCaml programs are `examples/pathtracer` and the sketches `cube_cage`, `shattered_cube` and
-`voxel_wall`. The OCaml API is second-class, used by tests and integrations. When the two could
+`Scene` are the internal layer the editor is built on; there are no typed SOP constructors and no
+OCaml sketch programs. The OCaml API is second-class, used by tests and integrations. When the two could
 differ, Lisp decides: its names, defaults, ranges and errors are the contract, and the OCaml function is derived to match (`specification/sop.md`,
 "one declaration", for SOPs). A new capability ships in Lisp first; do not add an OCaml-only
 parameter or behaviour.
 
-Web export: `dune exec rays-lisp -- web FILE.rays -o DIR` emits a standalone browser
-application; `web --watch FILE.rays [-o DIR] [--port 8000]` previews and reloads it.
+One binary, `rays` (`tools/lisp/rays.ml`), interprets `.rays` files; nothing generates OCaml from Lisp.
+`dune exec rays` opens an empty editor (Command-S writes `./untitled.rays`), `dune exec rays -- FILE.rays`
+opens a workspace natively, and `rays check FILE...` / `rays fmt FILE` check and format.
+
+Web export: `dune exec rays -- web FILE.rays -o DIR` writes static files, nothing more: preview them with
+`npx serve DIR`, which reads the worker pool's cross-origin isolation headers from the emitted `serve.json`.
 Its scope is the 2D canvas only (`:context draw` graphs
 and the values that feed them). PXUI and the editor are never exported; they are editor chrome and
 stay native. `scene` and `sop` graphs are a later phase. 128 of the 162 SOP nodes now have Rays Lisp bodies
@@ -46,7 +49,11 @@ stay native. `scene` and `sop` graphs are a later phase. 128 of the 162 SOP node
 31 nodes on exact predicates, spatial indexes and solvers, 3 wiring nodes and 3 native carriers stay
 OCaml and have nothing to export. Generated `image/map`
 images run as WebGPU kernels; `image/noise` preserves native double arithmetic, `image/render` uses
-offscreen WebGPU textures, and static `image/load` files are bundled using the native decoder. The design summary and the
+offscreen WebGPU textures, and static `image/load` files are bundled using the native decoder. The web follows
+the native optimization paths, not a parallel set: regions bound per call (arguments, frame inputs), loop
+memory, the workspace's `:precision` (fast: exact 64-bit integer register pairs in JS and WGSL), the resident
+fold on WebGPU (count records, compaction, one readback) and display regions drawn indirect; a change to one
+target's path lands in the other with a parity check (`@tools/qualification-web`). The design summary and the
 task plan are `specification/web-export/plan.md`.
 
 ## Libraries
@@ -79,13 +86,10 @@ task plan are `specification/web-export/plan.md`.
 | `pxui_graph` | SOP-network presentation; emits typed requests, never edits |
 | `rays_editor` | Rays Editor: the Houdini-like SOP shell (`Editor`), composed only from public blocks; also the Sop-to-Scene glue (`Surface`, `Packed_pieces`), canvas `Drawing`, `Live_frame` and `Timeline` |
 
-`examples/<name>/` are short teaching programs; `sketches/<name>/` are
-experiments. Each has its own `dune`, depends only on what it shows, keeps
-framework code out, and runs finitely under `RAYS_MAX_FRAMES`. Scaffold a Lisp
-example (`sketch.rays` plus its `dune`) with `dune exec tools/new_example.exe -- <name>`. A sketch that is only a Flow workspace is
-`sketches/<name>/sketch.rays` with no `dune` or `main.ml` (`--sketch <name>` scaffolds it): `sketches/dune`
-generates its executable with `rays-lisp`, and after adding or removing one you run
-`dune build @runtest; dune promote` to update the checked-in `sketches/dune.rays.inc`. Command-S in
+A sketch is one file, `sketches/<name>.rays`: no `dune`, no `main.ml`, no folder. Its header comment
+says what it shows; a library two sketches import sits beside them (`ws_shared_lib.rays`). A folder,
+`sketches/<name>/<name>.rays`, only for a sketch with assets of its own. Add one by adding the file:
+`@runtest` checks every sketch, `@smoke-all` opens each under `RAYS_MAX_FRAMES`. Command-S in
 its window rewrites the file (comments kept) and an edit of the file reloads the window. Prefer
 `Rays_editor.Editor` for SOP sketches, SOP graphs for geometry, and
 deterministic seeds.
@@ -132,8 +136,8 @@ dune build @all && dune runtest && dune build @smoke && git diff --check  # pre-
 dune build @doc
 ```
 
-`@smoke` launches two finite native examples; use `@smoke-all` for the full
-example/sketch sweep. Both open windows sequentially. For a window-free broad
+`@smoke` opens two sketches (`basic`, `sop_gallery`) for 30 frames; use `@smoke-all` for every
+sketch. Both open windows sequentially. For a window-free broad
 test run, set `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy` on `dune runtest`.
 
 A fatal exception in a running sketch writes a report folder under

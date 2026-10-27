@@ -1,9 +1,0 @@
-(rule
- (target sketch_source.ml)
- (deps sketch.rays)
- (action (chdir %{workspace_root}
-  (with-stdout-to %{target} (run %{bin:rays-lisp} source %{dep:sketch.rays})))))
-
-(executable
- (name main)
- (libraries rays rays_pathtracer rdk sop sop_catalog rays_editor unix))

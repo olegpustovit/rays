@@ -101,11 +101,15 @@ module Private : sig
       [Shape_batch] kind word (rect 0, circle 4, line 5). Host bytes are borrowed and must not
       change. The token stays valid while every device [source] returns the buffer it returned
       here, and the same token comes back while nothing changed; any change gives a new stamp
-      that invalidates the previous token. Close the source before releasing its GPU lease. *)
+      that invalidates the previous token. Close the source before releasing its GPU lease.
+      With [indirect (source, offset)] the set is drawn by an indexed indirect draw from the
+      five uints the producer's device wrote at [offset] of [source]'s buffer (index count
+      six per drawn instance, at most [6 * count]); [source] joins the device inputs the
+      token's validity follows. *)
   type gpu_marks
   type marks_source=Host of bytes*int|Device of (unit->Ogpu.Backend.buffer option)*int
   val create_gpu_marks : gpu -> (gpu_marks,error) result
-  val gpu_marks : gpu_marks -> kind:int -> count:int -> marks_source array ->
+  val gpu_marks : ?indirect:((unit->Ogpu.Backend.buffer option)*int64) -> gpu_marks -> kind:int -> count:int -> marks_source array ->
     (Scene_command.Shape_batch.gpu_token,error) result
   val close_gpu_marks : gpu_marks -> unit
   val snapshot_count_for_test : t -> int

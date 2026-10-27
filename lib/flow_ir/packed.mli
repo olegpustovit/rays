@@ -51,7 +51,7 @@ val count_origin : t -> origin option
 val elementwise : t -> bool
 (** False for sums and accumulator steps; they must not fuse as independent elements. *)
 
-val gpu_refusals : ?fused:bool -> t -> Flow.Diagnostic.t list
+val gpu_refusals : ?fused:bool -> ?fast:bool -> t -> Flow.Diagnostic.t list
 (** Pure form restrictions shared by placement, display execution and emission.
     [fused] admits fused and checked multiply-add, which the native device runs in 32 bits within
     the owner's device tolerance; the default keeps the binary64 forms (the web export).
@@ -90,10 +90,11 @@ module Private : sig
   val argument_types : t -> Flow.Ty.t array
   (** Declared types of the structured Core arguments captured by this region. *)
 
-  val bind_arguments : t -> Flow.Eval.value array -> (t,Flow.Diagnostic.t) result
+  val bind_arguments : ?validate:bool -> t -> Flow.Eval.value array -> (t,Flow.Diagnostic.t) result
   (** Borrow checked immutable Core arguments in place of typed source markers.
       Refuses wrong arity/storage; rewrites closure and residual captures without
-      re-evaluating their checked bodies. *)
+      re-evaluating their checked bodies. [~validate:false] skips the finite-value scan, for a
+      device that checks what it uploads (a resident fold's placeholders are zeros). *)
 
   val trace : ((t, Flow.Diagnostic.t list) Stdlib.result -> unit) ref
   (** Called with every public compilation result; tests record snapshots through it. *)
@@ -114,15 +115,28 @@ module Private : sig
   val view : t -> view
   (* Borrowed immutable arrays for downstream compilation. *)
   type inputs = {arrays : float array array; uniforms : float array array;
-    frame : float array; count : int}
+    tables : float array array; frame : float array; count : int}
+  (* [tables.(u)] is array-valued uniform [u] flattened (empty for a scalar uniform), the table a
+     gather reads; integer arrays and scalars are floats. *)
   type value_inputs = {arrays : Flow.Eval.value array; uniforms : Flow.Eval.value array;
     frame : Flow.Eval.value array; count : int}
-  (* Materialize CPU inputs while preserving exact integer storage. *)
+  (* Materialize CPU inputs while preserving exact integer storage. [lengths i] gives source [i]'s
+     length instead of building it (an Int or Float range the caller binds on the device); its
+     array is then empty. *)
   val prepare_values : ?state:Flow.Eval.state ->
     ?resolve:(Flow.Eval.value -> (Flow.Eval.value,Flow.Diagnostic.t) result) ->
     ?measure:((unit -> float) * (t -> seconds:float -> reference:bool -> unit)) ->
-    t -> live:Flow.Eval.live -> (value_inputs,Flow.Diagnostic.t) result
-  val prepare : ?state:Flow.Eval.state -> ?resolve:(Flow.Eval.value -> (Flow.Eval.value, Flow.Diagnostic.t) result) ->
+    ?lengths:(int -> int option) -> t -> live:Flow.Eval.live -> (value_inputs,Flow.Diagnostic.t) result
+  type shape = Value of Flow.Eval.value | Range of Flow.Eval.value * int * int
+    | Opaque of Flow.Eval.value list option
+  (* What a source or uniform reads: a value itself; [array/range] of an array's count times [mul]
+     over [div]; or a term over the listed values ([None]: a form not traversed). A resident fold
+     keeps an array's count on the device when every read of it is one of the first two. *)
+  val source_shapes : t -> shape array
+  val uniform_shapes : t -> shape array
+  val device_inputs : value_inputs -> inputs
+  (* [prepare]'s conversion of materialized inputs. *)
+  val prepare : ?fast:bool -> ?state:Flow.Eval.state -> ?resolve:(Flow.Eval.value -> (Flow.Eval.value, Flow.Diagnostic.t) result) ->
     ?measure:((unit -> float) * (t -> seconds:float -> reference:bool -> unit)) ->
     t -> live:Flow.Eval.live -> (inputs, Flow.Diagnostic.t) result
 end

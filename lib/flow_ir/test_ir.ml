@@ -568,10 +568,11 @@ let () =
   let counterfeit = {(Option.get (Flow.Op.find "sin" Flow.Context.value)) with name = "noise3"} in
   ignore (expect ~ops:[counterfeit] (mapped "(map (fn [x] (noise3 (+ x t))) (array/float 4))")
     false "E_PACKED_OPERATOR");
-  let sins n = String.concat "" (List.init n (fun _ -> "(sin ")) ^ "x" ^ String.make n ')' in
+  (* a chain of n sines, flat in a let* so it stays within the reader's nesting limit *)
+  let sins n = "(let* [s0 x " ^ String.concat " " (List.init n (fun i -> Printf.sprintf "s%d (sin s%d)" (i + 1) i)) ^ Printf.sprintf "] s%d)" n in
   List.iter (fun (n,accepted) -> ignore (expect (mapped
     ("(map (fn [x] (+ t " ^ sins n ^ ")) (array/range 3))")) accepted "E_PACKED_LIMIT"))
-    [61,true;62,false];
+    (let l = Flow.Packed_ops.register_limit in [l - 3,true;l - 2,false]);
   let ws = check "(workspace qualification (graph g :context value [(offset : float 2.0)]
     (let* [mapped (map (fn [x] (+ x (+ offset t))) (array/range 4))] 0.0)))" in
   List.iter (fun (offset,accepted) ->
@@ -762,7 +763,7 @@ let () =
    | _ -> assert false);
   (* The register limit declines and never fails. *)
   let sum salt = List.fold_left (fun acc k -> Printf.sprintf "(+ %s (sin (* i %d.%d)))" acc (k + 1) salt)
-    "(sin t)" (List.init 11 Fun.id) in
+    "(sin t)" (List.init (Flow.Packed_ops.register_limit / 5) Fun.id) in
   let ws, evaluated, _, _ = circles_graph ~positions:("[" ^ sum 1 ^ " 0 0]") ~fills:("[" ^ sum 7 ^ " 0 0]") () in
   let graph = ok (optimize (of_evaluation ws catalog0 evaluated)) in
   (match attribute_edges graph (marks_node graph) with

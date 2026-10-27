@@ -70,7 +70,40 @@ let () =
    | Ok _ -> failwith "WGSL must refuse unsupported native-safe hypot");
   let writing = Array.to_list Sys.argv = [Sys.argv.(0); "--write-goldens"] in
   let programs = Test_program.fixtures 1024 @ ["two_outputs", Test_program.two_outputs ()] in
+  (* Fast kernels ([Wgsl.kernel_fast]) with their native inputs and exact native outputs, for
+     tools/web/test/gpu_fast_check.mjs: 64-bit integer registers past 2^53, gathers, count words. *)
+  let fast_cases = [
+    "hash", "(map (fn [x] (int/mod (int/and (int/xor (int/mul (int x) 73856093) (int/mul (int/mul (int x) (int x)) 19349663)) 4611686018427387903) 8)) (array/range (int/add 70000 (frame/index))))";
+    "hash_div", "(map (fn [x] (int/div (int/and (int/xor (int/mul (int x) 73856093) (int/mul (int/mul (int x) (int x)) 19349663)) 4611686018427387903) 360000000000)) (array/range (int/add 70000 (frame/index))))";
+    "mod_negative", "(map (fn [x] (int/mod (int/sub 0 (int/mul (int x) 2654435761)) 1000)) (array/range (int/add 4097 (frame/index))))";
+    "div_negative", "(map (fn [x] (int/div (int/sub 0 (int/mul (int x) 2654435761)) 1000)) (array/range (int/add 4097 (frame/index))))";
+    "shifts", "(map (fn [x] (int/add (int/shr (int/mul (int x) 2654435761) 37) (int/shr (int/shl (int x) 40) 38))) (array/range (int/add 4097 (frame/index))))";
+    "compare", "(map (fn [x] (if (int/lt (int/mul (int x) 2654435761) 5000000000000) (int/mul (int x) 3) (int/sub 0 (int x)))) (array/range (int/add 4097 (frame/index))))";
+    "gather", "(let* [table (map (fn [i] [i (* i 2.) (- 0. i)]) (array/range (int/add 64 (frame/index))))] (map (fn [x] (let* [p (array/nth table (int/mod (int x) 64))] (+ (+ p.x (* p.y 0.5)) (+ p.z t)))) (array/range (int/add 4097 (frame/index)))))";
+    "seed_mod", "(map (fn [x] (/ (mod (int/and (+ (int/mul (+ (int x) 1) 1103515245) 12345) 4611686018427387903) 360000) 1000)) (array/range (int/add 4097 (frame/index))))";
+    "noise_hash", "(map (fn [x] (+ (noise3 [(* x 0.37) t 0.0] :seed 451) (float (int/and (int/add (int/mul (int x) 1103515245) 12345) 65535)))) (array/range (int/add 4097 (frame/index))))"] in
   (match Array.to_list Sys.argv with
+   | [_; "--write-fast-table"; dir] ->
+       let live = {(Frame_input.at_time 1.) with frame = 3} in
+       let floats a = "[" ^ String.concat "," (List.map (Printf.sprintf "%.9g") (Array.to_list a)) ^ "]" in
+       let cases = List.map (fun (name, source) ->
+         let program = Test_program.compile source in
+         let w = Test_program.ok (Flow_web.Wgsl.kernel_fast program) in
+         let inputs = Test_program.ok (Flow_ir.Packed.Private.prepare ~fast:true program ~live) in
+         let expected = match Test_program.ok (Flow_ir.Packed.force_all program ~live) with
+           | [Flow.Eval.Int_array a] -> Array.map float a
+           | [Flow.Eval.Float_array a | Vec2_array a | Vec3_array a | Vec4_array a] -> a
+           | _ -> failwith (name ^ ": one packed output expected") in
+         Flow_web.Kernel_table.entry ~id:name w,
+         Printf.sprintf "%s:{\"count\":%d,\"inputs\":[%s],\"uniforms\":[%s],\"tables\":[%s],\"frame\":%s,\"expected\":%s}"
+           (json_string name) inputs.count (String.concat "," (Array.to_list (Array.map floats inputs.arrays)))
+           (String.concat "," (Array.to_list (Array.map floats inputs.uniforms)))
+           (String.concat "," (Array.to_list (Array.map floats inputs.tables))) (floats inputs.frame) (floats expected)) fast_cases in
+       Out_channel.with_open_bin (Filename.concat dir "kernels.json") (fun c ->
+         output_string c (Flow_web.Kernel_table.table (List.map fst cases)));
+       Out_channel.with_open_bin (Filename.concat dir "expected.json") (fun c ->
+         output_string c ("{" ^ String.concat ",\n" (List.map snd cases) ^ "}\n"));
+       exit 0
    | [_; "--write-kernel-table"; dir] ->
        (* "ops" is not a golden: it only gives the browser check the operators the four fixtures never reach
           (mod, pow, division and sqrt guards, comparisons, and/or/not, min/max, sin/cos); "cpu" is its region. *)

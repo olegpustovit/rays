@@ -21,7 +21,7 @@ let run checked =
 
 let workspace path =
   Region_snapshot.start ();
-  let source = In_channel.with_open_text ("../../" ^ path ^ "/sketch.rays") In_channel.input_all in
+  let source = In_channel.with_open_text ("../../" ^ path ^ ".rays") In_channel.input_all in
   (* The file's layout form is editor chrome, not part of the checked workspace. *)
   (match Flow.Workspace.check ~ops:Flow_ir.Operators.all catalog [List.hd (Test_program.ok (Flow.Syntax.parse source))] with
    | Some workspace, ds when not (List.exists (fun (d : Flow.Diagnostic.t) -> d.severity = Error) ds) -> run workspace
@@ -35,5 +35,5 @@ let () =
   ignore (Test_program.fixtures 1024);
   ignore (Test_program.vector_fixtures 1024);
   Region_snapshot.finish "test_program";
-  List.iter workspace ["examples/particles"; "sketches/flow_shader"; "sketches/flow_particles_gpu";
+  List.iter workspace ["sketches/particles"; "sketches/flow_shader"; "sketches/flow_particles_gpu";
     "sketches/flow_image_kernel"]

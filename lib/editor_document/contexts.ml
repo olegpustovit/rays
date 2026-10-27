@@ -69,14 +69,14 @@ let world_kinds = List.map (fun f -> "world/" ^ Edit.factory_key f, f)
     Layers.catalog
 
 (* Workspace settings: what the host needs to open the window. *)
-type window = { title : string; width : int; height : int; fps : int; seed : int }
+type window = { title : string; width : int; height : int; fps : int; seed : int; fast : bool }
 
 let window_schema =
   let integer min max hard_min = Param.integer ~hard_min ~min ~max () in
   let int_field name label kind default get set =
     Param.field ~name ~label:(label ^ " (on restart)") ~kind ~default ~get ~set () in
   Param.schema ~name:"workspace" ~default:{ title = "Rays"; width = 1280; height = 800;
-                                            fps = 60; seed = 1 } [
+                                            fps = 60; seed = 1; fast = true } [
     Param.field ~name:"title" ~label:"Title (on restart)" ~kind:Param.Text ~default:"Rays"
       ~get:(fun w -> w.title) ~set:(fun title w -> { w with title }) ();
     int_field "width" "Width" (integer 320 3840 64) 1280 (fun w -> w.width)
@@ -86,7 +86,10 @@ let window_schema =
     int_field "fps" "Frames per second" (Param.integer ~hard_min:1 ~hard_max:240 ~min:1 ~max:120 ())
       60 (fun w -> w.fps) (fun fps w -> { w with fps });
     int_field "seed" "Seed" (Param.integer ~hard_min:0 ~min:0 ~max:9999 ()) 1
-      (fun w -> w.seed) (fun seed w -> { w with seed }) ]
+      (fun w -> w.seed) (fun seed w -> { w with seed });
+    (* fast: what only reaches the screen may run on the GPU in float32 and int32 *)
+    Param.field ~name:"precision" ~label:"Precision (live)" ~kind:(Param.choice ~equal:Bool.equal [ "fast", true; "exact", false ])
+      ~default:true ~get:(fun w -> w.fast) ~set:(fun fast w -> { w with fast }) () ]
 
 let window_fields = Param.view window_schema (Param.default window_schema)
 
@@ -215,6 +218,17 @@ let window (workspace : Workspace_doc.t) =
 let document_window (doc : Document.t) =
   let workspace, (lowered : Flow_sop.Lower.t) = doc.workspace in
   plan_window workspace lowered.plan
+
+(* The precision of a document's workspace, asked every frame: the last answer is kept, by the
+   identity of the lowering it was read from.  Capacity 1. *)
+let last_fast = Atomic.make None
+let fast (doc : Document.t) =
+  let lowered = snd doc.workspace in
+  match Atomic.get last_fast with
+  | Some (l, fast) when l == lowered -> fast
+  | _ ->
+      let fast = match document_window doc with Ok w -> w.fast | Error _ -> true in
+      Atomic.set last_fast (Some (lowered, fast)); fast
 
 (* ---- where things are written ---- *)
 
@@ -1113,10 +1127,3 @@ let resolve_scene ?previous ?state ?live (document : Document.t) ~time =
   graph, List.rev errors
 
 let sha256 s = Digestif.SHA256.(to_hex (digest_string s))
-
-(* The library's source text, not its checked manifest: generating that checks every library
-   body (3 s and 3.9 GB at 128 nodes), and a binary pays this at every start. *)
-let catalog_digest factories =
-  sha256 ((match Flow_sop.Manifest.generate ~extra:descriptors ~nodes:[] factories with
-    | Ok (text, _) -> text
-    | Error d -> Flow.Diagnostic.to_string d) ^ Flow_sop.Catalog.source_digest ())

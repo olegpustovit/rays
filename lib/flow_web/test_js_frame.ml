@@ -86,8 +86,8 @@ let workspace_picture name path =
         List.find_map (function E.Residual r -> Some r | _ -> None) evaluation.states in
       name, program, root
   | _, ds -> failwith (path ^ ": " ^ String.concat "; " (List.map Flow.Diagnostic.to_string ds))
-let workspaces = [workspace_picture "workspace_flow_vectors" "../../sketches/flow_vectors/sketch.rays";
-                  workspace_picture "workspace_basic" "../../examples/basic/sketch.rays"]
+let workspaces = [workspace_picture "workspace_flow_vectors" "../../sketches/flow_vectors.rays";
+                  workspace_picture "workspace_basic" "../../sketches/basic.rays"]
 
 (* ---- goldens ---- *)
 let emitted name program = match Flow_web.Js.frame program with

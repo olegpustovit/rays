@@ -1,4 +1,4 @@
-let run ?cancel ?group ~name ~color:(r, g, b) ~roughness
+let run ?cancel ?group ~name ~color:(r, g, b) ~roughness ?(round = 0.)
     ~emission:(er, eg, eb) geometry =
   (* ponytail: sequential assignment costs ~10 ms at 100k primitives on the
      measured arm64 host; parallelize the disjoint fill if larger cooks need it. *)
@@ -6,6 +6,8 @@ let run ?cancel ?group ~name ~color:(r, g, b) ~roughness
   let channel x = Float.is_finite x && x >= 0. && x <= 1. in
   if not (List.for_all channel [r; g; b; roughness; er; eg; eb]) then
     error "invalid_material" "material channels and roughness must be finite and in [0,1]"
+  else if not (Float.is_finite round && round >= 0.) then
+    error "invalid_material" "round must be finite and non-negative"
   else try
     Cancel.check_opt cancel;
     let count = Geometry.primitive_count geometry in
@@ -38,12 +40,14 @@ let run ?cancel ?group ~name ~color:(r, g, b) ~roughness
           let* rough = scalar "material_roughness" (sqrt (2. /. 34.)) in
           let* red,green,blue,alpha = tuple "material_color" (1.,1.,1.,1.) in
           let* emiss_r,emiss_g,emiss_b,emiss_a = tuple "material_emission" (0.,0.,0.,1.) in
+          let* rounds = scalar "material_round" 0. in
           for i = 0 to count - 1 do
             if i land 4095 = 0 then Cancel.check_opt cancel;
             if Option.fold ~none:true ~some:(Group.mem i) selected then begin
               names.(i) <- name; rough.(i) <- roughness;
               red.(i) <- r; green.(i) <- g; blue.(i) <- b; alpha.(i) <- 1.;
-              emiss_r.(i) <- er; emiss_g.(i) <- eg; emiss_b.(i) <- eb
+              emiss_r.(i) <- er; emiss_g.(i) <- eg; emiss_b.(i) <- eb;
+              rounds.(i) <- round
             end
           done;
           let* cd = Packed.Float4.of_owned ~x:red ~y:green ~z:blue ~w:alpha in
@@ -53,6 +57,7 @@ let run ?cancel ?group ~name ~color:(r, g, b) ~roughness
           let* roughness = attribute "material_roughness" (Attribute.Float rough) in
           let* cd = attribute "material_color" (Attribute.Float4 cd) in
           let* emission = attribute "material_emission" (Attribute.Float4 emission) in
-          Geometry.Private.with_merged_attributes_owned [|path; roughness; cd; emission|] geometry in
+          let* rounds = attribute "material_round" (Attribute.Float rounds) in
+          Geometry.Private.with_merged_attributes_owned [|path; roughness; cd; emission; rounds|] geometry in
         Result.map_error (fun message -> Error.make ~operation:"material" ~code:"invalid_attribute" message) result
   with Cancel.Cancelled -> error "cancelled" "material assignment cancelled"

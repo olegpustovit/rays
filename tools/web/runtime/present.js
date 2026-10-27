@@ -203,7 +203,10 @@ export async function createPresenter(canvas, { dpr, images = () => null, clear 
           geometry(vertices, indices, e.fill);
         } else if (e.count > 0 && live()) {
           const resources = markResources(e);
-          add('marks', new Float32Array(16), resources.map((resource, binding) => [binding, resource]), clips.at(-1), pass => pass.draw(6, e.count));
+          // positions a fast kernel wrote carry its count record: the instance count is the one the device wrote
+          const record = e.position?.buffer?.record, indirect = record ? gpu?.buffer(`${record}:count`) : null;
+          add('marks', new Float32Array(16), resources.map((resource, binding) => [binding, resource]), clips.at(-1),
+            indirect ? pass => pass.drawIndirect(indirect, 24) : pass => pass.draw(6, e.count));
         }
         break;
       case 'geometry': geometry(e.vertices, e.indices, e.color); break;

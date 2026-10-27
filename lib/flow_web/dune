@@ -25,7 +25,7 @@
  (name test_js_frame)
  (modules test_js_frame core_fixtures)
  (deps (glob_files goldens/frame_*.js)
-  ../../sketches/flow_vectors/sketch.rays ../../examples/basic/sketch.rays
+  ../../sketches/flow_vectors.rays ../../sketches/basic.rays
   ../../tools/web/test/frame_semantics.mjs ../../tools/web/test/rt_shim.mjs
   ../../tools/web/runtime/prims.js ../../tools/web/runtime/shape2.js ../../tools/web/runtime/runtime.js ../../tools/web/runtime/workers.js ../../tools/web/runtime/region_bindings.js)
  (libraries flow_web flow flow_ir frame_input scene_command str))

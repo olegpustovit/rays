@@ -85,6 +85,5 @@ Value operators (`+`, `range`, `value/rand`, ...) are built into `lib/flow`, nev
 embedded Lisp declarations (with `(body lisp)` and checked `(calls ...)`),
 and the scene, World and settings kinds of `Editor_document.Contexts`. Its runtest rule diffs the live catalog; accept an
 intended metadata change with `dune promote`, as for the API manifest.
-`lib/flow`'s tests read this snapshot (`Flow.Check.catalog_of_manifest`); `rays-lisp` checks a
-`.rays` sketch against the live catalog at build time, and the generated binary compares the
-catalog digest it was built with.
+`lib/flow`'s tests read this snapshot (`Flow.Check.catalog_of_manifest`); `rays` checks and opens a
+`.rays` sketch against the live catalog it runs with; nothing is generated, so nothing is stale.

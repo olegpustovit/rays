@@ -22,6 +22,7 @@ import {sourceInputs, lazyUniforms} from './region_bindings.js';
 import * as shapes from './shape2.js';
 import { createPresenter } from './present.js';
 import { createGpu, requestDevice } from './gpu.js';
+import { createResident } from './resident.js';
 
 // ---- event records: op.ml:104-107 event_fields, defaults at op.ml:131-134 ----
 const ZERO = { text: () => '', int: () => 0n, float: () => 0, vec3: () => new Float64Array(3), list: () => [] };
@@ -153,6 +154,12 @@ export function createRuntime(program, { now = () => performance.now() / 1000, f
     // value is the packed array Packed.force returns. Native falls back to the tree walker on a non-finite value;
     // there is none here, so it is E_KERNEL.
     async invoke(k, args, binding) {
+      // a resident fold's region may stay on the device; one it declines reads its arguments back
+      if (binding && rt.resident.on) {
+        const placed = await rt.resident.invoke(k, args, binding, rt.current);
+        if (placed) return placed;
+        args = await Promise.all(args.map(a => rt.resident.settle(a)));
+      }
       rt.counts.invoke++;
       if (!binding && args.length !== 0) prims.fail('E_CORE_ARGUMENT', 'Compiled region argument count differs from its declaration.');
       const r = binding ?? this.program.regions[k] ?? prims.fail('E_CORE', 'Unknown region.'), input = rt.current;
@@ -195,6 +202,21 @@ export function createRuntime(program, { now = () => performance.now() / 1000, f
       stamps.set(id, stamp);
       rt.counts.gpu++;
       return g;
+    },
+    // A display region bound per call, on the device in fast precision (native's display placement): its inputs
+    // are prepared as the workers' are and it dispatches without a wait (the render pass follows on the same
+    // queue); the value is a device reference with the kernel's count record, which the presenter draws from.
+    async gpuInvoke(k, args, binding) {
+      if (!rt.gpu || !binding.kernel || !rt.gpu.kernels.has(binding.kernel)) return rt.invoke(k, args, binding);
+      args = await Promise.all(args.map(a => rt.resident.settle(a)));
+      const input = rt.current, { inputs, count } = await sourceInputs(binding, args, input, this);
+      const placed = rt.resident.uniforms(binding, args, input);
+      const id = `${binding.kernel}:display`;
+      try { rt.gpu.dispatch(binding.kernel, { count, inputs: inputs.map(a => a instanceof BigInt64Array ? Float64Array.from(a, Number) : a),
+        uniforms: placed.uniforms, tables: placed.tables, id }); }
+      catch (e) { prims.fail(e.code ?? 'E_KERNEL', e.message); }
+      rt.counts.gpu++;
+      return new prims.PArray(binding.width, { gpu: id, output: 0, length: count * binding.width, record: id });
     },
     gpuArray(k) {
       const r = this.program.regions[k] ?? prims.fail('E_CORE', 'Unknown region.'), g = this.gpuRun(r.kernel);
@@ -245,9 +267,6 @@ export function createRuntime(program, { now = () => performance.now() / 1000, f
     // eventRecord Maps); the live events are drained either way. Resolves to program.frame's result. A frame that
     // throws leaves no pending state write behind, as native `Eval.transaction` rolls them back.
     async stepFrame(override) {
-      while (rt.reloadReady) await rt.reloadReady;
-      let finish;
-      rt.frameDone = new Promise(resolve => { finish = resolve; });
       let input;
       try {
         const t = now(), delta = Math.min(t - last, 0.1);
@@ -263,50 +282,12 @@ export function createRuntime(program, { now = () => performance.now() / 1000, f
         for (const cells of rt.slots) for (const c of cells?.values() ?? [])
           if (c.pending !== undefined && (c.stamp === input?.frame || c.stamp === input?.tick)) c.pending = undefined;
         throw error;
-      } finally { finish(); }
+      }
     },
   };
+  rt.resident = createResident(rt);   // fast precision's resident folds; never on without a GPU
   load();
   return rt;
-}
-
-// ---- reload (plan P6.6/P6.7): `rays-lisp web --watch` serves /version, the digest of the export ----
-// Polls it; when it changes, imports program.js again (cache-busting query), refetches data.bin and kernels.json,
-// hands the kernel table to gpu.update (which recompiles only the kernels whose text changed) and swaps the program
-// with rt.load (fresh state slots, the canvas and counters kept). Not served by the watch server (/version is
-// missing or the fetch fails): stops polling, silently. `poll()` runs one check and resolves true after a reload.
-export function watch(rt, { fetch = globalThis.fetch?.bind(globalThis), load = url => import(url), base = new URL('..', import.meta.url), interval = 500 } = {}) {
-  let version = null, timer = null, busy = false;
-  const url = (name, v) => new URL(v === undefined ? name : `${name}?v=${v}`, base).href;
-  const stop = () => { clearInterval(timer); timer = null; };
-  async function poll() {
-    if (busy || !fetch) return false;
-    busy = true;
-    try {
-      let text;
-      try { const r = await fetch(url('version'), { cache: 'no-store' }); if (!r.ok) return stop(); text = (await r.text()).trim(); }
-      catch { return stop(); }
-      if (version === null) { version = text; return false; }
-      if (text === version) return false;
-      version = text;   // a failed reload is retried at the next change, not every interval
-      const [program, data, table] = await Promise.all([load(url('program.js', text)),
-        fetch(url('data.bin', text)).then(r => r.arrayBuffer()), fetch(url('kernels.json', text)).then(r => r.json())]);
-      rt.reloadReady = (async () => {
-        await rt.frameDone;   // an offscreen drawing must finish before its textures are destroyed
-        await rt.gpu?.update(table);
-        rt.data = data;
-        if (rt.presenter) rt.presenter.constants = data;
-        rt.load(program);
-        rt.reloads = (rt.reloads ?? 0) + 1;
-      })();
-      try { await rt.reloadReady; } finally { rt.reloadReady = null; }
-      rt.resume?.();
-      return true;
-    } catch (error) { console.error(error); return false; }
-    finally { busy = false; }
-  }
-  if (interval) { poll(); timer = setInterval(poll, interval); }   // the first poll takes the baseline version
-  return { poll, stop, version: () => version };
 }
 
 // ---- the DOM wiring: the only place that touches the page ----
@@ -329,19 +310,17 @@ export async function start(canvas, program, { fixedDt, pool, data = null, win =
   canvas.addEventListener('wheel', e => { e.preventDefault(); push(e); }, { passive: false });
   for (const type of ['keydown', 'keyup', 'blur']) win.addEventListener(type, push);
   new win.ResizeObserver(() => push({ type: 'resize' })).observe(canvas);
-  let stopped = false, failed = false;
+  let stopped = false;
   const loop = async () => {
     if (stopped) return;
-    try { await rt.stepFrame(); presenter.present(rt.marks, rt.input.size); rt.firstPresentMs ??= performance.now(); } catch (error) { console.error(error); rt.failure = error; failed = true; return; }
+    try { await rt.stepFrame(); presenter.present(rt.marks, rt.input.size); rt.firstPresentMs ??= performance.now(); } catch (error) { console.error(error); rt.failure = error; return; }
     win.requestAnimationFrame(loop);
   };
   rt.presenter = presenter;
   presenter.constants = rt.data;   // attribute arrays that are views of data.bin are uploaded once (present.js)
   rt.halt = () => { stopped = true; };   // the rAF loop ends after its current frame; the page and device stay (tests step frames by hand)
   rt.stop = () => { stopped = true; rt.pool?.close(); gpu.dispose(); presenter.dispose(); };
-  rt.resume = () => { if (failed && !stopped) { failed = false; win.requestAnimationFrame(loop); } };   // a reload revives a failed frame loop
   win.requestAnimationFrame(loop);
   win.__rays = rt;   // for tests and the console
-  watch(rt);
   return rt;
 }

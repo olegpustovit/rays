@@ -1,6 +1,6 @@
-// node present_e2e.mjs LISP_EXE MARKS_SHOT_EXE ROOT DIR...
+// node present_e2e.mjs RAYS_EXE MARKS_SHOT_EXE ROOT FILE.rays...
 //
-// End to end (plan P6.4/P6.5): for each workspace DIR (holding sketch.rays) export it with `rays-lisp web`, serve
+// End to end (plan P6.4/P6.5): for each workspace FILE.rays export it with `rays web`, serve
 // the export with cross-origin isolation, step FRAMES fixed frames in real Chrome (runtime.js with the worker pool,
 // then present.js at 640x480, dpr 1), read the canvas back, and compare with the native picture of the same frames
 // (tools/marks_shot.exe: core executor, Marks_scene, Canvas at density 1). The real index.html (`start`) is also
@@ -19,9 +19,14 @@ import { decodePng } from './png.mjs';
 
 const [lispArg, shotArg, rootArg, ...dirs] = process.argv.slice(2);
 const [lisp, shot, root] = [lispArg, shotArg, rootArg].map(p => p && resolve(p));
-if (!dirs.length) { console.error('usage: node present_e2e.mjs LISP_EXE MARKS_SHOT_EXE ROOT DIR...'); process.exit(2); }
+if (!dirs.length) { console.error('usage: node present_e2e.mjs RAYS_EXE MARKS_SHOT_EXE ROOT FILE.rays...'); process.exit(2); }
 if (!chromeAvailable()) { console.log('present_e2e: skipped (Google Chrome not found)'); process.exit(0); }
-const W = 640, H = 480, FRAMES = 5;
+const W = 640, H = 480, FRAMES = Number(process.env.FRAMES ?? 5);   // FRAMES=N: more frames (pooled resident arrays repeat)
+// POINTER=X,Y moves the pointer of both sides, or X,Y;X,Y;... one per frame (marks_shot reads RAYS_SHOT_POINTER)
+const POINTER = process.env.POINTER ?? '100,100';
+process.env.RAYS_SHOT_POINTER = POINTER;
+// FAST=1: the native side is fast precision's (resident folds on the Metal host), as the web export's default
+if (process.env.FAST === '1') process.env.RAYS_SHOT_FAST = '1';
 
 const read = dir => Object.fromEntries(readdirSync(dir, { recursive: true }).filter(f => statSync(join(dir, f)).isFile()).map(f => ['/' + f, readFileSync(join(dir, f))]));
 const e2e = `<!doctype html><meta charset="utf-8"><body style="margin:0"><canvas id="c" style="width:${W}px;height:${H}px"></canvas>
@@ -29,19 +34,25 @@ const e2e = `<!doctype html><meta charset="utf-8"><body style="margin:0"><canvas
 import { createRuntime } from './runtime/runtime.js';
 import { createPool } from './runtime/workers.js';
 import { createPresenter } from './runtime/present.js';
+import { createGpu, requestDevice } from './runtime/gpu.js';
 import * as program from './program.js';
 window.__result = (async () => {
   if (!crossOriginIsolated) return { failure: 'not cross-origin isolated' };
   const data = await (await fetch('data.bin')).arrayBuffer();
-  const canvas = document.getElementById('c'), presenter = await createPresenter(canvas, { dpr: 1 });
+  // as start() wires it: one device for the kernels (fast precision's resident folds) and the presenter
+  const device = await requestDevice();
+  if (!device) return { unavailable: true };
+  const gpu = await createGpu(await (await fetch('kernels.json')).json(), { device });
+  const canvas = document.getElementById('c'), presenter = await createPresenter(canvas, { dpr: 1, device, gpu });
   if (!presenter) return { unavailable: true };
-  const rt = createRuntime(program, { fixedDt: 1 / 60, data, pool: await createPool(), size: [${W}, ${H}] });
-  for (let i = 0; i < ${FRAMES}; i++) await rt.stepFrame({ pointer: [100, 100], size: [${W}, ${H}] });
+  const rt = createRuntime(program, { fixedDt: 1 / 60, data, gpu, pool: await createPool(), size: [${W}, ${H}] });
+  const path = ${JSON.stringify(POINTER.split(';').map(p => p.split(',').map(Number)))};
+  for (let i = 0; i < ${FRAMES}; i++) await rt.stepFrame({ pointer: path[Math.min(i, path.length - 1)], size: [${W}, ${H}] });
   presenter.present(rt.marks, [${W}, ${H}]);
   const g = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
   g.canvas.width = canvas.width; g.canvas.height = canvas.height; g.drawImage(canvas, 0, 0);
   const px = g.getImageData(0, 0, canvas.width, canvas.height);
-  return { width: px.width, height: px.height, entries: rt.marks.length, texts: rt.marks.filter(e => e.type === 'text').map(e => ({ x: e.x, y: e.y, size: e.size, length: [...e.text].length })), errors: presenter.errors, raw: Array.from(px.data) };
+  return { gpu: rt.counts.gpu, width: px.width, height: px.height, entries: rt.marks.length, texts: rt.marks.filter(e => e.type === 'text').map(e => ({ x: e.x, y: e.y, size: e.size, length: [...e.text].length })), errors: presenter.errors, raw: Array.from(px.data) };
 })().catch(e => ({ failure: String(e && e.stack || e) }));
 </script>`;
 
@@ -49,7 +60,7 @@ const wait = '(async () => { while (!window.__result) await new Promise(r => set
 let bad = 0;
 for (const dir of dirs) {
   const tmp = mkdtempSync(join(tmpdir(), 'present-e2e-'));
-  execFileSync(lisp, ['web', join(dir, 'sketch.rays'), '-o', join(tmp, 'out')], { cwd: root, stdio: 'inherit' });
+  execFileSync(lisp, ['web', dir, '-o', join(tmp, 'out')], { cwd: root, stdio: 'inherit' });
   execFileSync(shot, [dir, join(tmp, 'native.png'), String(W), String(H), String(FRAMES)], { cwd: root, stdio: 'inherit' });
   const native = decodePng(join(tmp, 'native.png'));
   const files = read(join(tmp, 'out'));
@@ -92,6 +103,6 @@ for (const dir of dirs) {
   const fraction = over / counted;
   const ok = fraction <= 0.005 && worst <= 64 && ratios.every(([a, n]) => n > 0 && a / n > 0.5 && a / n < 2) && !r.errors.length && boot.marks > 0 && boot.isolated;
   if (!ok) bad++;
-  console.log(`${ok ? 'ok  ' : 'FAIL'} ${dir}: ${r.entries} entries, ${over} of ${counted} pixels outside text differ by more than 8 (${(100 * fraction).toFixed(3)}%), worst ${worst}, mean ${(sum / counted).toFixed(4)}; text boxes ${JSON.stringify(ratios.map(([a, n]) => (a / n).toFixed(3)))} (web/native brightness), ink bounding boxes web/native ${JSON.stringify(placed)}; index.html: ${boot.marks} marks, screenshot ${boot.screenshotBytes} bytes${r.errors.length ? '; errors ' + r.errors : ''}`);
+  console.log(`${ok ? 'ok  ' : 'FAIL'} ${dir}: ${r.entries} entries, ${r.gpu} device dispatches, ${over} of ${counted} pixels outside text differ by more than 8 (${(100 * fraction).toFixed(3)}%), worst ${worst}, mean ${(sum / counted).toFixed(4)}; text boxes ${JSON.stringify(ratios.map(([a, n]) => (a / n).toFixed(3)))} (web/native brightness), ink bounding boxes web/native ${JSON.stringify(placed)}; index.html: ${boot.marks} marks, screenshot ${boot.screenshotBytes} bytes${r.errors.length ? '; errors ' + r.errors : ''}`);
 }
 process.exit(bad ? 1 : 0);

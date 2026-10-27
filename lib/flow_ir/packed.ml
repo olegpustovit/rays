@@ -210,15 +210,19 @@ let finite_checks t =
     | body when Core.Region.text_register body -> false
     | _ -> true) t.code
 
-let gpu_refusals ?(fused=false) t =
+let gpu_refusals ?(fused=false) ?(fast=false) t =
   let reasons = ref [] in
   let refuse message = reasons := Flow.Diagnostic.error ~code:"E_GPU_FORM" message :: !reasons in
   if Array.exists Core.Region.text_register t.code then refuse "Text kernels stay on the CPU.";
-  if Array.exists(fun instruction->match unguarded instruction with
+  (* fast precision (the workspace default) takes gathers and int32 on the device *)
+  if not fast && Array.exists(fun instruction->match unguarded instruction with
     |Array_prepare _|Gather _|Int_gather _->true|_->false)t.code then
     refuse "Indexed array reads stay on the CPU.";
-  if integer_program t && not(Array.exists Core.Region.text_register t.code) then
+  if not fast && integer_program t && not(Array.exists Core.Region.text_register t.code) then
     refuse "Integer sources, uniforms and instructions stay on the CPU.";
+  if fast && Array.exists (fun instruction -> match unguarded instruction with
+      Rand_at _ | Int_accumulator -> true | _ -> false) t.code then
+    refuse "Random streams and integer accumulators stay on the CPU.";
   if Array.exists (fun instruction -> match unguarded instruction with Binary (Hypot,_,_) -> true | _ -> false) t.code then
     refuse "Hypot requires the CPU binary64 implementation.";
   if not fused then begin
@@ -404,7 +408,9 @@ let run_typed ?column_source ?plane_outputs ?expected_count ~evaluate ~uniform ~
     index in
   let accumulator=ref (Option.value ~default:(if integer_outputs.(0) then E.Int 0 else E.Float 0.) seed) in
   let initialized=ref(match t.result with Sum zero->zero|_->true) in
-  let block_size=1024 and blocks_per_chunk=16 in
+  (* a block's scratch holds every register for each of its lanes: a large kernel takes fewer lanes,
+     so scratch stays near 64K slots (512 KiB a bank) *)
+  let block_size=max 64 (min 1024 (65536/max 1 (Array.length t.code))) and blocks_per_chunk=16 in
   let blocks=if count=0 then 0 else (count-1)/block_size+1 in
   let chunks=if blocks=0 then 0 else (blocks-1)/blocks_per_chunk+1 in
   let chunk chunk =
@@ -1568,7 +1574,7 @@ module Private = struct
     List.iter(fun(r,_)->residual r)t.stages;
     Array.init(Hashtbl.length types)(fun index -> match Hashtbl.find_opt types index with
       |Some ty->ty |None->V.fail "E_CORE_ARGUMENT" "Compiled argument indices must be contiguous.")
-  let bind_arguments (t:t) arguments =
+  let bind_arguments ?(validate=true) (t:t) arguments =
     try
       let types=argument_types t in
       if Array.length types<>Array.length arguments then
@@ -1576,7 +1582,7 @@ module Private = struct
       Array.iteri(fun index value ->
         if V.ty_of value<>types.(index) then
           V.fail "E_CORE_ARGUMENT" "Compiled region argument storage differs from its declared type.";
-        V.validate value) arguments;
+        if validate then V.validate value) arguments;
       if types=[||] then Ok t else
       let rec value = function
         | E.Source("$core/argument",_,["index",E.Int index]) -> arguments.(index)
@@ -1610,11 +1616,49 @@ module Private = struct
     {code=t.code; widths=t.widths; outputs=t.outputs; uniform_widths;
       collecting=(match t.result with Collect -> true | _ -> false);
       }
+  type shape = Value of E.value | Range of E.value * int * int | Opaque of E.value list option
+  (* What a source or uniform reads: a value itself; [array/range] of an array's count times [mul]
+     over [div]; or a term over the listed values ([None]: a form not traversed here). *)
+  let shape (residual : E.residual) (term : W.term) =
+    let binding r n = List.assoc_opt n (E.Private.residual_view r).bindings in
+    let rec refs r (term : W.term) acc = match term.node, acc with
+      | _, None -> None
+      | (Lit _ | Text _ | Nil | Time | Fn_ref _), _ -> acc
+      | Ref_binding (n, _), Some vs -> (match binding r n with
+          | Some (E.Residual r') -> refs r' (E.Private.residual_view r').term acc
+          | Some v -> Some (v :: vs) | None -> None)
+      | (Op {args; _} | Call {args; _}), _ -> List.fold_left (fun acc (_, a) -> refs r a acc) acc args
+      | Vec ts, _ -> List.fold_left (fun acc a -> refs r a acc) acc ts
+      | If (a, b, c), _ -> refs r a (refs r b (refs r c acc))
+      | _ -> None in
+    let value r (term : W.term) = match term.node with
+      | Ref_binding (n, []) -> (match binding r n with Some (E.Residual _) | None -> None | Some v -> Some v)
+      | _ -> None in
+    let int (term : W.term) = match term.node with Lit (Param.Int_value k) when k > 0 -> Some k | _ -> None in
+    let count (term : W.term) = match term.node with
+      | Op {op = "array/count"; args = [_, x]; _} -> value residual x
+      | _ -> None in
+    let scaled (term : W.term) = match term.node with
+      | Op {op = "array/count"; _} -> Option.map (fun v -> v, 1, 1) (count term)
+      | Op {op = ("*" | "int/mul"); args = [_, a; _, b]; _} ->
+          (match count a, int b, count b, int a with
+           | Some v, Some k, _, _ | _, _, Some v, Some k -> Some (v, k, 1) | _ -> None)
+      | Op {op = "int/div"; args = [_, a; _, b]; _} ->
+          (match count a, int b with Some v, Some k -> Some (v, 1, k) | _ -> None)
+      | _ -> None in
+    match value residual term, term.node with
+    | Some v, _ -> Value v
+    | None, Op {op = "array/range"; args = [_, n]; _} when scaled n <> None ->
+        let v, mul, div = Option.get (scaled n) in Range (v, mul, div)
+    | None, _ -> Opaque (refs residual term (Some []))
+  let source_shapes (t : t) = Array.map (fun (r, term) -> shape r term) t.sources
+  let uniform_shapes (t : t) = Array.map (function
+    | E.Residual r -> shape r (E.Private.residual_view r).term | v -> Value v) t.uniforms
   type inputs = {arrays : float array array; uniforms : float array array;
-    frame : float array; count : int}
+    tables : float array array; frame : float array; count : int}
   type value_inputs = {arrays : E.value array; uniforms : E.value array;
     frame : E.value array; count : int}
-  let prepare_values ?state ?resolve ?measure (t : t) ~live =
+  let prepare_values ?state ?resolve ?measure ?(lengths=fun _ -> None) (t : t) ~live =
     let state = match state with Some state -> state | None -> E.create_state () in
     E.transaction state (fun () -> try
       let rec evaluate residual term =
@@ -1629,22 +1673,27 @@ module Private = struct
         | Ok program -> get (force ~state ?resolve ?measure program ~live)
         | Error _ -> get (E.Private.eval_term ~state ?resolve residual term ~live) in
       let empty_product=ref false in
-      let arrays = Array.map (fun (residual,term) ->
-        let value=if !empty_product then (match term.W.ty with
+      (* a source whose length the caller knows (a range it binds on the device) is not built *)
+      let known = Array.mapi (fun i _ -> lengths i) t.sources in
+      let arrays = Array.mapi (fun i (residual,term) ->
+        let value=if known.(i)<>None then (match term.W.ty with
+          |Ty.Array Ty.Int->E.Int_array[||]|Array Float->Float_array[||]|_->raise Unsupported)
+          else if !empty_product then (match term.W.ty with
           |Ty.Array Ty.Int->E.Int_array[||]|Array Text->Text_array[||]
           |Array Float->Float_array[||]|Array Vec2->Vec2_array[||]
           |Array Vec3->Vec3_array[||]|Array Vec4->Vec4_array[||]|_->raise Unsupported)
           else evaluate residual term in
-        if t.iteration=Product && V.array_length value=0 then empty_product:=true;
+        if t.iteration=Product && V.array_length value=0 && known.(i)=None then empty_product:=true;
         value) t.sources in
+      let length i value = match known.(i) with Some n -> n | None -> V.array_length value in
       Array.iteri (fun index value ->
         if V.ty_of value<>(snd t.sources.(index)).W.ty then
           V.fail "E_ARRAY_TYPE" "Kernel input changed its packed element type.") arrays;
       let count = if arrays=[||] || !empty_product then 0 else
-        Array.fold_left(fun count value->let length=V.array_length value in
-          match t.iteration with Zip->min count length|Product->
+        snd(Array.fold_left(fun(i,count) value->let length=length i value in
+          i+1,match t.iteration with Zip->min count length|Product->
             if length<>0 && count>max_int/length then V.fail "E_ARRAY_RANGE" "Kernel iteration count exceeds native bounds.";
-            count*length)(if t.iteration=Zip then max_int else 1)arrays in
+            count*length)(0,if t.iteration=Zip then max_int else 1)arrays) in
       let execute residual _live = Some (Ok (evaluate residual (E.Private.residual_view residual).term)) in
       let uniforms = match get (E.Private.force_with_executor ~state ?resolve ~compiled:false ~execute
           (E.List t.uniforms) ~live) with E.List values -> values | _ -> assert false in
@@ -1661,14 +1710,20 @@ module Private = struct
       | V.Diagnostic_fail d -> Error d
       | Invalid_argument message -> Error (Flow.Diagnostic.error ~code:"E_KERNEL" ("Kernel inputs need reference evaluation: " ^ message))
       | Out_of_memory -> Error (Flow.Diagnostic.error ~code:"E_ARRAY_MEMORY" "Frame data exceeds available memory."))
-  let prepare ?state ?resolve ?measure (t : t) ~live =
-    if integer_program t then Error (Flow.Diagnostic.error ~code:"E_GPU_FORM"
+  let device_inputs (values : value_inputs) =
+    let floats = function E.Float_array values | Vec2_array values
+        | Vec3_array values | Vec4_array values -> Some values
+      | E.Int_array values -> Some (Array.map float_of_int values) | _ -> None in
+    ({arrays=Array.map (fun v -> Option.get (floats v)) values.arrays;
+      uniforms=Array.map (fun v -> if floats v = None then components v else [||]) values.uniforms;
+      tables=Array.map (fun v -> Option.value ~default:[||] (floats v)) values.uniforms;
+      frame=Array.map V.num values.frame;count=values.count} : inputs)
+  (* A device kernel's inputs as 32-bit floats: integer arrays and scalars travel as floats (exact to
+     2^24, the fast precision's contract), an array-valued uniform as the table a gather reads. *)
+  let prepare ?(fast=false) ?state ?resolve ?measure (t : t) ~live =
+    if Array.exists Core.Region.text_register t.code || (integer_program t && not fast)
+    then Error (Flow.Diagnostic.error ~code:"E_GPU_FORM"
       (if Array.exists Core.Region.text_register t.code then "Text kernels stay on the CPU."
        else "Integer sources, uniforms and instructions stay on the CPU.")) else
-    Result.map (fun (values : value_inputs) ->
-      let arrays=Array.map (function E.Float_array values | Vec2_array values
-          | Vec3_array values | Vec4_array values -> values | _ -> assert false) values.arrays in
-      ({arrays;uniforms=Array.map components values.uniforms;
-        frame=Array.map V.num values.frame;count=values.count} : inputs))
-      (prepare_values ?state ?resolve ?measure t ~live)
+    Result.map device_inputs (prepare_values ?state ?resolve ?measure t ~live)
 end

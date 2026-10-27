@@ -16,7 +16,7 @@ open Test_text
 (* 3 and 2 petals instead of 12 and 7: each edit re-cooks the flower, and the checks are about rows and clicks *)
 let bloom () =
   let replace a b s = Str.global_replace (Str.regexp_string a) b s in
-  In_channel.with_open_bin "../sketches/ws_bloom/sketch.rays" In_channel.input_all
+  In_channel.with_open_bin "../sketches/ws_bloom.rays" In_channel.input_all
   |> replace "(petals : int 12)" "(petals : int 3)" |> replace ":petals 7 :seed 2" ":petals 2 :seed 2"
 let factories = Sop_catalog.Editor.factories
 let catalog = Editor_document.Contexts.catalog ~version:1 factories |> Result.get_ok

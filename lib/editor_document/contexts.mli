@@ -19,7 +19,7 @@ val catalog : version:int -> Sop.Edit_graph.factory list ->
 (** {!Flow_sop.Catalog.of_factories} with {!descriptors}: what a workspace text
     is checked against. *)
 
-type window = { title : string; width : int; height : int; fps : int; seed : int }
+type window = { title : string; width : int; height : int; fps : int; seed : int; fast : bool }
 (** What [(settings/config :title :width :height :fps :seed)] asks of the host
     when it starts. These fields apply on restart; editing saved settings does
     not reconfigure the running window, frame scheduler or cook seed. *)
@@ -27,6 +27,14 @@ type window = { title : string; width : int; height : int; fps : int; seed : int
 val window : Workspace_doc.t -> (window, Flow.Diagnostic.t) result
 (** The window of a checked workspace: its settings graph evaluated, defaults
     without one. *)
+
+val plan_window : Workspace_doc.t -> Flow.Eval.plan -> (window, Flow.Diagnostic.t) result
+(** {!window} read from a plan the caller already evaluated: no second evaluation of the workspace. *)
+
+val fast : Document.t -> bool
+(** [(settings/config :precision "fast")], the default: what only reaches the screen may run on the
+    GPU in float32 with 64-bit integer registers, and on the web its regions' integers are numbers.
+    [:precision "exact"] keeps every value bit-identical on the CPU. *)
 
 val document_window : Document.t -> (window, Flow.Diagnostic.t) result
 (** {!window} of the workspace a document was made from, read from the document's own
@@ -74,9 +82,3 @@ val world_kinds : (string * Sop.Edit_graph.factory) list
 
 val sha256 : string -> string
 (** Lower-case hex SHA-256: the digest of a sketch source. *)
-
-val catalog_digest : Sop.Edit_graph.factory list -> string
-(** {!sha256} of the native manifest text the catalog generates (with {!descriptors}),
-    or of its error, and of the embedded node library's source text
-    ({!Flow_sop.Catalog.source_digest}): what a [.rays] binary compares against the
-    catalog it runs with. *)

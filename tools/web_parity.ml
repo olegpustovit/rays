@@ -79,7 +79,7 @@ let span_text text (d : Flow.Diagnostic.t) = match d.span with
 
 (* One workspace: [`Ok], [`Refused text] or [`Failed text]. *)
 let check ~frames_mjs ~keep directory =
-  let path = Filename.concat directory "sketch.rays" in
+  let path = directory in
   let text, doc = Web_export.load path in
   match doc with
   | Error (d :: _) -> `Failed ("does not check: " ^ Flow.Diagnostic.to_string d)
@@ -105,7 +105,7 @@ let () =
     | dir :: rest -> parse frames_mjs keep (dir :: dirs) rest
     | [] -> frames_mjs, keep, List.rev dirs in
   let frames_mjs, keep, dirs = parse "tools/web/test/frames.mjs" false [] (List.tl (Array.to_list Sys.argv)) in
-  if dirs = [] then (prerr_endline "usage: web_parity.exe [--frames FILE] [--keep] DIR..."; exit 2);
+  if dirs = [] then (prerr_endline "usage: web_parity.exe [--frames FILE] [--keep] FILE.rays..."; exit 2);
   if not (node_available ()) then (print_endline "web_parity: skipped (node not found)"; exit 0);
   let failed = List.fold_left (fun failed dir ->
     match check ~frames_mjs ~keep dir with

@@ -93,6 +93,7 @@ type driver_render_encoder =
   ; set_stencil_reference:front:int32 -> back:int32 -> (unit,Error.t) result
   ; draw:primitive:Render_pass.primitive -> first:int -> count:int -> instances:int -> (unit,Error.t) result
   ; draw_indexed:primitive:Render_pass.primitive -> index_type:Render_pass.index_type -> token -> offset:int64 -> count:int64 -> instances:int -> (unit,Error.t) result
+  ; draw_indexed_indirect:primitive:Render_pass.primitive -> index_type:Render_pass.index_type -> token -> offset:int64 -> token -> arguments_offset:int64 -> (unit,Error.t) result
   ; draw_batch:driver_batch_draw array -> (unit,Error.t) result
   ; use_resources:token list -> (unit,Error.t) result
   ; execute_icb:token -> location:int -> length:int -> (unit,Error.t) result
@@ -343,6 +344,10 @@ val set_depth_state : render_encoder -> depth_state option -> (unit,Error.t) res
 val set_stencil_reference : render_encoder -> front:int32 -> back:int32 -> (unit,Error.t) result
 val draw : render_encoder -> primitive:Render_pass.primitive -> first:int -> count:int -> ?instances:int -> unit -> (unit,Error.t) result
 val draw_indexed : render_encoder -> primitive:Render_pass.primitive -> index_type:Render_pass.index_type -> buffer -> offset:int64 -> count:int64 -> ?instances:int -> unit -> (unit,Error.t) result
+val draw_indexed_indirect : render_encoder -> primitive:Render_pass.primitive -> index_type:Render_pass.index_type ->
+  buffer -> offset:int64 -> buffer -> arguments_offset:int64 -> (unit,Error.t) result
+(** An indexed draw whose counts the device wrote: five uints at [arguments_offset] of the
+    second buffer (index count, instance count, first index, base vertex, base instance). *)
 
 (** Validates every draw once and hands the whole batch to the driver, which
     may execute it in one native call. *)

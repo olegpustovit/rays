@@ -76,7 +76,7 @@
 (test
  (name test_frame_kernel)
  (modules test_frame_kernel)
- (deps ../../examples/particles/sketch.rays)
+ (deps ../../sketches/particles.rays)
  (libraries flow_ir flow rays_math))
 
 (test
@@ -109,16 +109,16 @@
  (name test_core_marks)
  (modules test_core_marks)
  (deps core_marks.expected)
- (libraries flow_ir flow scene_command))
+ (libraries flow_ir flow scene_command rays_math))
 
 (test
  (name test_region_snapshot)
  (modules test_region_snapshot region_snapshot test_program)
  (deps (glob_files snapshots/*.txt) ../sop_catalog/flow_manifest.sexp
-  ../../examples/particles/sketch.rays
-  ../../sketches/flow_shader/sketch.rays
-  ../../sketches/flow_particles_gpu/sketch.rays
-  ../../sketches/flow_image_kernel/sketch.rays)
+  ../../sketches/particles.rays
+  ../../sketches/flow_shader.rays
+  ../../sketches/flow_particles_gpu.rays
+  ../../sketches/flow_image_kernel.rays)
  (libraries flow_ir flow rays_math))
 
 

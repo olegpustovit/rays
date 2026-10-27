@@ -422,6 +422,8 @@ export function coerce(ty, v) {
     case 'vec2': case 'vec3': case 'vec4':
       return isNum(v) ? new Float64Array(+ty[3]).fill(num(v)) : v;
   }
+  // an Int array widened to Float, as native Value.coerce_to (a drawing's filter: compacted indices)
+  if (ty.array === 'float' && v instanceof PArray && v.data instanceof BigInt64Array) return new PArray(1, Float64Array.from(v.data, Number));
   if (ty.list && Array.isArray(v)) return v.map(x => coerce(ty.list, x));
   if (ty.record && v instanceof Map) {
     return new Map([...v].map(([n, x]) => { const w = ty.record.find(([m]) => m === n);
@@ -2196,4 +2198,40 @@ export function remapHost({check = () => {}} = {}) {
 }
 export function sop_remap(source,target,points,vertices,primitives,positions='target',edges) {
   return remapGeometry(source,target,points,vertices,primitives,positions,edges);
+}
+
+// ---- loop memory (native Core_exec.prepare ~remember_loops) ----
+// The same input: a number by its bits (NaN and -0 stay distinct), a packed array up to 1M numbers
+// by its contents, a list up to 4,096 items item by item, a record field by field, anything else
+// (a text array, a GPU-resident array) by identity.
+export function sameInput(a, b) {
+  if (typeof a === 'number' || typeof b === 'number') return Object.is(a, b);
+  if (a === b) return true;
+  if (a instanceof PArray && b instanceof PArray) {
+    const x = a.data, y = b.data;
+    if (a.width !== b.width || !ArrayBuffer.isView(x) || !ArrayBuffer.isView(y) || x.constructor !== y.constructor
+      || x.length !== y.length || x.length > 1048576) return false;
+    for (let i = 0; i < x.length; i++) if (!Object.is(x[i], y[i])) return false;
+    return true;
+  }
+  if (a instanceof Float64Array && b instanceof Float64Array)
+    return a.length === b.length && a.every((v, i) => Object.is(v, b[i]));
+  if (Array.isArray(a) && Array.isArray(b))
+    return a.length === b.length && a.length <= 4096 && a.every((v, i) => sameInput(v, b[i]));
+  if (a instanceof Map && b instanceof Map) {
+    if (a.size !== b.size) return false;
+    const bs = [...b];
+    return [...a].every(([n, v], i) => bs[i][0] === n && sameInput(v, bs[i][1]));
+  }
+  return false;
+}
+export function recall(memo, id, key) {
+  const hit = memo.get(id)?.find(([k]) => k.length === key.length && k.every((v, i) => sameInput(v, key[i])));
+  return hit ? hit[1] : null;
+}
+// A result naming a GPU-resident array is never kept: its buffer is one frame's.
+const resident = v => v instanceof PArray && !ArrayBuffer.isView(v.data) && !Array.isArray(v.data);
+export function keep(memo, id, key, values) {
+  if (values.some(resident)) return;
+  memo.set(id, [[key, values], ...(memo.get(id) ?? [])].slice(0, 4));
 }

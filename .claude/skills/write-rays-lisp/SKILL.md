@@ -1,13 +1,13 @@
 ---
 name: write-rays-lisp
-description: Write or refactor Rays Lisp (a .rays workspace, a sketch.rays, macros, GPU pixel kernels) so it reads well as text and as a graph. Use when creating or editing any .rays file, writing a defmacro, or when a graph has many parallel wires or unnamed inputs.
+description: Write or refactor Rays Lisp (a .rays workspace or sketch, macros, GPU pixel kernels) so it reads well as text and as a graph. Use when creating or editing any .rays file, writing a defmacro, or when a graph has many parallel wires or unnamed inputs.
 ---
 
 # Write Rays Lisp
 
 A `.rays` file is read two ways: as text, and as the graph and inspector drawn from
 it (`specification/flow.md`). Every binding is a card, every macro parameter is a row
-a person scrubs. Write for both readers. `sketches/flow_contours/sketch.rays` is the
+a person scrubs. Write for both readers. `sketches/flow_contours.rays` is the
 worked example.
 
 ## Names
@@ -78,7 +78,7 @@ worked example.
 
 ```sh
 dune build tools/ui_shot.exe
-_build/default/tools/ui_shot.exe sketches/<name>/sketch.rays /tmp/out.png 1500 900
+_build/default/tools/ui_shot.exe sketches/<name>.rays /tmp/out.png 1500 900
 UI_SHOT_DO="select:picture/<card>" _build/default/tools/ui_shot.exe ...   # its inspector rows
 ```
 

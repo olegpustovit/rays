@@ -22,7 +22,7 @@ val workspace_catalog : ?factories:Sop.Edit_graph.factory list -> unit ->
     world and settings kinds generated from the editor's schemas. *)
 
 type window = Editor_document.Contexts.window =
-  { title : string; width : int; height : int; fps : int; seed : int }
+  { title : string; width : int; height : int; fps : int; seed : int; fast : bool }
 
 (** Sketch-owned settings in the editor document. *)
 (** The [.rays] file a running sketch came from: polled for edits, saved over. *)
@@ -681,13 +681,6 @@ module Workspace : sig
   (** Export a draw graph (the first by default) through [Sketch.export_state].
       Each invocation starts a fresh fold and pins every frame fact. *)
 
-  val open_text : ?factories:Sop.Edit_graph.factory list -> path:string -> digest:string ->
-    string -> Workspace_doc.t * Source.t option
-  (** For a sketch that has its own [main.ml] (custom renderer, settings, SOPs): [load] the text
-      of [path] (its SHA-256 [digest], both from the generated [Sketch_source] module) and find
-      the file, so [Editor.run ~workspace ?source] saves and reloads it like {!main}. On a
-      failure it prints the diagnostics and exits 1. *)
-
   val sop_graphs : ?factories:Sop.Edit_graph.factory list -> Workspace_doc.t ->
     ((string * Sop.Graph.t) list, string) result
   (** Every [sop] graph of the document with its result compiled, by name, for cooking without
@@ -697,9 +690,8 @@ module Workspace : sig
     Rays.Easy_camera.t -> Rays.Easy_camera.t
   (** The camera of the scene's first camera node, or the default base camera. *)
 
-  val main : ?imports:(string * string) list -> path:string -> digest:string -> catalog:string -> string -> unit
-  (** Entry point of a generated [main.ml]: load and open the document; on failure prints
-      the diagnostics in the OCaml format and exits 1. [catalog] is
-      {!Editor_document.Contexts.catalog_digest} at build time; a different
-      running catalog is reported and the source checked again. *)
+  val main : ?text:string -> string -> unit
+  (** [main path] opens the [.rays] file at [path] and its imports beside it in the editor
+      ([rays FILE.rays]); [text] opens that text instead, saved to [path] (the empty editor). On a
+      failure it prints the diagnostics and exits 1. *)
 end

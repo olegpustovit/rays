@@ -15,7 +15,7 @@
 (executable
  (name test_run)
  (modules test_run test_program)
- (libraries flow_gpu flow flow_ir rays_execution ogpu unix))
+ (libraries flow_gpu flow flow_ir rays_execution ogpu scene_command frame_input unix))
 
 (rule
  (alias runtest-native)

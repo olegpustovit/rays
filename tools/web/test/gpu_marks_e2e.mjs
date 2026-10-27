@@ -1,4 +1,4 @@
-// node gpu_marks_e2e.mjs LISP_EXE MARKS_SHOT_EXE ROOT
+// node gpu_marks_e2e.mjs RAYS_EXE MARKS_SHOT_EXE ROOT
 //
 // GPU attribute regions in a real browser (plan P6.4a). Two workspaces whose draw/circles attributes the export
 // places on the GPU: sketches/flow_particles_gpu (one million positions, frame rate) and a synthetic one in a temporary
@@ -9,7 +9,7 @@
 // dispatched on the GPU (counts.gpu) and no region ran on the CPU (counts.invoke 0). Exit: 0 pass/skipped, 1 mismatch,
 // 3 WebGPU unavailable.
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { chromeAvailable, ISOLATION, launch, serve } from './chrome.mjs';
@@ -33,7 +33,7 @@ const synthetic = `(workspace gpu_marks
 `;
 const cases = [
   { name: 'synthetic', dir: null, size: [640, 480], dispatches: FRAMES, fused: true },
-  { name: 'flow_particles_gpu', dir: 'sketches/flow_particles_gpu', size: [800, 600], dispatches: FRAMES, fused: false },
+  { name: 'flow_particles_gpu', dir: 'sketches/flow_particles_gpu.rays', size: [800, 600], dispatches: FRAMES, fused: false },
 ];
 
 const read = dir => Object.fromEntries(readdirSync(dir, { recursive: true }).filter(f => statSync(join(dir, f)).isFile()).map(f => ['/' + f, readFileSync(join(dir, f))]));
@@ -69,9 +69,9 @@ let bad = 0;
 for (const c of cases) {
   const tmp = mkdtempSync(join(tmpdir(), 'gpu-marks-'));
   let dir = c.dir;
-  if (!dir) { dir = join(tmp, 'src'); mkdirSync(dir); writeFileSync(join(dir, 'sketch.rays'), synthetic); }
+  if (!dir) { dir = join(tmp, 'synthetic.rays'); writeFileSync(dir, synthetic); }
   const [W, H] = c.size;
-  execFileSync(lisp, ['web', join(dir, 'sketch.rays'), '-o', join(tmp, 'out')], { cwd: root, stdio: 'inherit' });
+  execFileSync(lisp, ['web', dir, '-o', join(tmp, 'out')], { cwd: root, stdio: 'inherit' });
   execFileSync(shot, [dir, join(tmp, 'native.png'), String(W), String(H), String(FRAMES)], { cwd: root, stdio: 'inherit' });
   const native = decodePng(join(tmp, 'native.png'));
   const files = read(join(tmp, 'out'));

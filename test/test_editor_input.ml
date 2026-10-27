@@ -181,8 +181,10 @@ let run () =
     check (camera !current = before) (name ^ ": graph-owned pan began viewport navigation");
     (* a press in the graph pane that drags out over the view is the pane's, never navigation
        (the pane's own gestures, moving a node included, are tested through [Scope]) *)
-    let gx, gy, gw, gh = (panes !current (frame (0., 0.) [] 0)).Pxui_shell.Layout.graph in
-    let point = float (gx + gw / 2), float (gy + gh / 2) in
+    let gx, gy, _, gh = (panes !current (frame (0., 0.) [] 0)).Pxui_shell.Layout.graph in
+    (* the framed graph leaves its corner empty: a press there is the canvas's, not a card's (a card
+       dragged out over the view would start a carry, which the next click puts) *)
+    let point = float (gx + 12), float (gy + gh - 12) in
     step ~mouse:point [key Input.Home];
     step [];
     step ~buttons:[Input.LeftButton] ~mouse:point [Event.MousePressed (Input.LeftButton, point)];

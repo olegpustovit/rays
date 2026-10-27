@@ -13,7 +13,7 @@ let workspace_catalog ?(factories = Sop_catalog.Editor.factories) () =
   Contexts.catalog ~version:Flow_sop.Manifest.version factories
 
 type window = Contexts.window =
-  { title : string; width : int; height : int; fps : int; seed : int }
+  { title : string; width : int; height : int; fps : int; seed : int; fast : bool }
 let workspace_window = Contexts.window
 
 module Renderer = Renderer
@@ -133,17 +133,6 @@ module Workspace = struct
     | Ok catalog -> Workspace_doc.of_text ?ops ?imports catalog text
 
   (* A hand-written host: the checked document and its file, or the diagnostics and exit 1. *)
-  let open_text ?factories ~path ~digest text =
-    let source = Source.find ~path ~digest in
-    let imports = match source with
-      | Some source -> Source_file.read_imports ~file:(Source.file source) text
-      | None -> Ok [] in
-    match Result.bind imports (fun imports -> load ?factories ~imports text) with
-    | Error ds ->
-        List.iter (fun d -> prerr_endline (Flow.Diagnostic.report ~file:path ~source:text d)) ds;
-        exit 1
-    | Ok doc -> doc, Option.map (fun source -> Source_file.with_imports source (Workspace_doc.import_texts doc)) source
-
   (* The viewport starts where the scene's first camera is (else the default orbit); the host's
      light below is a default of a workspace with no scene graph (Contexts.of_workspace).
      Piece preparation is shared with the hand-written shattered-cube host. *)
@@ -239,16 +228,15 @@ module Workspace = struct
          with Flow.Value.Fail (code, message, span) -> Error (Flow.Diagnostic.error ?span ~code message)
            | Flow.Value.Diagnostic_fail diagnostic -> Error diagnostic)
 
-  let main ?imports ~path ~digest ~catalog text =
-    let expected = Contexts.catalog_digest Sop_catalog.Editor.factories in
-    if catalog <> expected then
-      prerr_endline (path ^ ": built against another catalog; checking the source again");
-    match load ?imports text with
-    | Error ds ->
-        List.iter (fun d -> prerr_endline (Flow.Diagnostic.report ~file:path ~source:text d)) ds;
-        exit 1
+  let main ?text path =
+    let text = match text with Some text -> text | None ->
+      try In_channel.with_open_bin path In_channel.input_all
+      with Sys_error message -> prerr_endline message; exit 1 in
+    let fail ds = List.iter (fun d -> prerr_endline (Flow.Diagnostic.report ~file:path ~source:text d)) ds; exit 1 in
+    match Result.bind (Source_file.read_imports ~file:path text) (fun imports -> load ~imports text) with
+    | Error ds -> fail ds
     | Ok doc ->
-        (match run ~source:{ path; digest } doc with
+        (match run ~source:{ path; digest = Contexts.sha256 text } doc with
          | Ok () -> ()
-         | Error d -> prerr_endline (Flow.Diagnostic.report ~file:path ~source:text d); exit 1)
+         | Error d -> fail [d])
 end

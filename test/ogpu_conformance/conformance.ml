@@ -748,6 +748,30 @@ let run driver =
     get (Backend.end_render encoder);
     poll_epoch (get (Backend.commit commands)) 1000;
     expect_pixels "\x00\xff\x00\xff" "batched indexed triangle pixels differ";
+    (* The same indexed triangle, its counts read from a buffer when the draw runs (index count
+       3, one instance, at offset 4); a misaligned argument range is refused. *)
+    let arguments=get (Backend.create_buffer device {label=Some"draw arguments";size=24L;usage=[Storage]}) in
+    let argument_bytes=Bytes.create 24 in
+    List.iteri (fun i v->Bytes.set_int32_le argument_bytes (i*4) v) [0l;3l;1l;0l;0l;0l];
+    get (Backend.write_buffer arguments ~offset:0L argument_bytes);
+    get (Backend.write_buffer color ~offset:0L (color_bytes 1. 1. 0. 1.));
+    clear_target 0. 0. 0. 1.;
+    let commands=get (Backend.begin_commands queue) in
+    let encoder=get (Backend.render_encoder commands
+      {colors=[{texture=target;resolve=None;load=Load;store=Store;clear=(0.,0.,0.,0.)}];depth=None;stencil=None}) in
+    get (Backend.set_viewport encoder {x=0;y=0;width=4;height=4});
+    get (Backend.set_render_pipeline encoder flat);
+    get (Backend.set_stage_buffer encoder Vertex ~index:0 offsets);
+    get (Backend.set_stage_buffer encoder Fragment ~index:1 color);
+    (match Backend.draw_indexed_indirect encoder ~primitive:Triangle_list ~index_type:Uint32 indices ~offset:0L
+        arguments ~arguments_offset:6L with
+     | Error { Error.kind = Invalid_argument; _ } -> ()
+     | _ -> failwith "misaligned indirect arguments were accepted");
+    get (Backend.draw_indexed_indirect encoder ~primitive:Triangle_list ~index_type:Uint32 indices ~offset:0L
+      arguments ~arguments_offset:4L);
+    get (Backend.end_render encoder);
+    poll_epoch (get (Backend.commit commands)) 1000;
+    expect_pixels "\xff\xff\x00\xff" "indirect indexed triangle pixels differ";
     (* Indirect command buffer: one recorded draw, executed twice. *)
     let indirect=get (Backend.create_render_pipeline ~indirect:true device (render_descriptor fragment_flat "flat_fragment")) in
     let icb=get (Backend.create_icb device ~max_commands:2) in
@@ -884,6 +908,7 @@ let run driver =
     get (Backend.destroy_pipeline indirect);
     get (Backend.destroy_buffer color);
     get (Backend.destroy_buffer indices);
+    get (Backend.destroy_buffer arguments);
     get (Backend.destroy_pipeline flat)
   end else begin
     (match Backend.create_render_pipeline device (render_descriptor fragment_flat "flat_fragment") with

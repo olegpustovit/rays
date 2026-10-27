@@ -1,6 +1,8 @@
 type t
 val create : unit -> t
-val with_backend : t -> (unit -> 'a) -> 'a
+val with_backend : ?fast:bool -> t -> (unit -> 'a) -> 'a
+val resident : t -> Flow_ir.Core_exec.resident option
+(* Inside [with_backend ~fast:true], a resident fold for one drawing on this workspace's host. *)
 val qualification : t -> unit
 val image : t -> key:string -> width:int -> height:int ->
   publish:(Flow_gpu.Image_sink.output -> ('a,Flow.Diagnostic.t) result) ->

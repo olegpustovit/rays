@@ -14,7 +14,7 @@
 import { diagnosticError } from './prims.js';
 import {transportArguments} from './region_bindings.js';
 
-export const CHUNK = 16 * 1024;
+export const CHUNK = 4096;
 
 // Plain message, no fallback: the page needs cross-origin isolation for SharedArrayBuffer.
 export function checkIsolation(g = globalThis) {

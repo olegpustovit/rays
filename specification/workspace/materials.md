@@ -85,7 +85,7 @@ one entry named `Put`; `Esc`, a release over nothing or a lost window focus rest
 previous document. A refusal prints the checker's reason in the strip. The design and the table
 are `flow.md` §7.12; the PXUI payload is in `pxui.md`.
 
-`sketches/shattered_studio/sketch.rays` uses 12 noisy sheet cutters for a
+`sketches/shattered_studio.rays` uses 12 noisy sheet cutters for a
 Boolean fracture, with piece-seeded groups and four referenced surfaces.
 `test/test_materials.ml` covers references, group preservation, render batches,
 invalid input, cancellation, and exact domain-count equality, then the editor: outline groups,
@@ -102,7 +102,7 @@ manifold pieces, volume conservation, material batches, and domain equality.
 An authored scene can be exported on the native Metal host with:
 
 ```sh
-dune exec tools/render_workspace.exe -- sketches/shattered_studio/sketch.rays /tmp/shattered-studio.png
+dune exec tools/render_workspace.exe -- sketches/shattered_studio.rays /tmp/shattered-studio.png
 ```
 
 Optional trailing arguments override sample count and square pixel size.
