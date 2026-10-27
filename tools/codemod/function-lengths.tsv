@@ -3,7 +3,6 @@ lib/flow/workspace.ml	check#1	1796
 lib/flow_graph/edit_ops.ml	rewrite#1	696
 lib/flow_ir/core_lower.ml	lower_with#1	1249
 lib/flow_ir/core_region.ml	lower#1	428
-lib/flow_ir/packed.ml	run_all#1	630
 lib/flow_ir/packed.ml	run_typed#1	503
 lib/flow_sop/lower.ml	lower_checked#1	989
 lib/metal/gen/registry.ml	entries#1	428
