@@ -265,7 +265,7 @@ let validate_feature_map mappings =
           | _ -> fail "empty Metal SDK type in feature map")
         symbols)
     mappings;
-  if List.length mappings <> 10 then fail "OGPU feature map is incomplete"
+  if List.length mappings <> 11 then fail "OGPU feature map is incomplete"
 
 let validate entries =
   validate_feature_map feature_map;

@@ -160,8 +160,11 @@ let next_turn ~order ~last wanting =
    the slots that want the GPU (their picture differs from the frame's, or they are short of their
    cap) one takes a turn per frame, in rotation.  A slot at its cap costs nothing. *)
 let update state ~mode ~custom ~focus views =
+  let unavailable = ref None in
   if custom || List.for_all (fun (v : view) -> v.setting.mode = Raster) views then begin
     close state; { empty with mode; custom }
+  end else if (unavailable := P.available (); !unavailable <> None) then begin
+    close state; { empty with mode; custom; error = !unavailable }
   end else if List.length views > 16 then begin
     close state; { empty with mode; raster_only = false;
                    error = Some "At most 16 viewports can render together." }

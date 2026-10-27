@@ -121,6 +121,12 @@ val scene_mesh : (Rays_math.Mat4.t * mesh) list -> (mesh, string) result
     triangle meshes without motion (spheres, strands, or motion are an
     [Error]); a [scene_mesh] result may itself be an input. *)
 
+(** [Some reason] when [caps] cannot path-trace (no hardware ray tracing). *)
+val unavailable : Ogpu.Caps.t -> string option
+
+(** {!unavailable} for the shared GPU: the editor asks before it creates a tracer. *)
+val available : unit -> string option
+
 (** Builds the primitive acceleration structure, compiles the kernels, and
     allocates accumulation and output storage. Fails with a typed message
     when no ray-tracing Metal device is available. *)
