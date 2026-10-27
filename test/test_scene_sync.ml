@@ -419,7 +419,7 @@ let run () =
   check (Result.is_ok (Workspace_doc.edit catalog (fst layered.workspace) (Flow_graph.Flow_edit.Delete_nodes { nodes = [ [ "world"; "haze" ] ] })))
     "a World layer could not be deleted by its binding";
   (* through the editor: a workspace with no scene graph gets one when an object is added *)
-  let env = Rays_editor.Editor.create ~workspace:(Ws_fixture.of_text "(workspace bare (graph g :context sop (sop/box)))")
+  let env = Rays_editor.Editor.create ~ui_text_size:11 ~workspace:(Ws_fixture.of_text "(workspace bare (graph g :context sop (sop/box)))")
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
       ~draw:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) () |> Result.get_ok in

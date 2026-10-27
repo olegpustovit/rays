@@ -154,7 +154,7 @@ let pure workspace =
   let bad = {workspace with inputs = ["g", ["radius", E.Text "wrong"]]} in
   assert (Result.is_error (Editor_document.Contexts.of_workspace ~factories:Sop_catalog.Editor.factories bad));
   let module Editor = Rays_editor.Editor in
-  let editor = Result.get_ok (Editor.create ~workspace ~await:true
+  let editor = Result.get_ok (Editor.create ~ui_text_size:11 ~workspace ~await:true
     ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ () -> Rays.Scene3.create []) ()) in
   Fun.protect ~finally:(fun () -> Editor.close editor) (fun () ->
     let frame : Rays.Frame.t = { input = { (Input.at_time 0.) with
@@ -168,7 +168,7 @@ let pure workspace =
           let workspace = doc (Printf.sprintf "(workspace static (graph g :context draw \
             (draw/points (array/vec3 %d [20 40 0]))) \
             (graph editor :context editor (ui/workspace (ui/canvas (ref g)))))" count) in
-          let editor = ref (Result.get_ok (Editor.create ~workspace ~await:true
+          let editor = ref (Result.get_ok (Editor.create ~ui_text_size:11 ~workspace ~await:true
             ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ () -> Rays.Scene3.create []) ())) in
           Fun.protect ~finally:(fun () -> Editor.close !editor) (fun () ->
             let step i = editor := Editor.update !editor { frame with input = { frame.input with
@@ -224,7 +224,7 @@ let native workspace directory =
 
 let benchmark workspace =
   let module Editor = Rays_editor.Editor in
-  let editor = ref (Result.get_ok (Editor.create ~workspace ~await:true ~domains:1
+  let editor = ref (Result.get_ok (Editor.create ~ui_text_size:11 ~workspace ~await:true ~domains:1
     ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ () -> Rays.Scene3.empty) ())) in
   Fun.protect ~finally:(fun () -> Editor.close !editor) (fun () ->
     let frame count : Rays.Frame.t = { input = { (Input.at_time (float count /. 60.)) with

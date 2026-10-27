@@ -264,7 +264,7 @@ let start_env text =
       Sop_catalog.Editor.factories |> Result.get_ok in
   let workspace = Rays_editor.Workspace_doc.of_text catalog text |> Result.get_ok in
   let presets = Filename.temp_dir "rays-text-presets" "" in
-  ref (E.create ~presets ~await:true ~workspace
+  ref (E.create ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true ~workspace
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
       ~draw:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) () |> Result.get_ok)
@@ -285,7 +285,7 @@ let editor_text () =
       Sop_catalog.Editor.factories |> Result.get_ok in
   let workspace = Rays_editor.Workspace_doc.of_text catalog (small_sunflower ()) |> Result.get_ok in
   let presets = Filename.temp_dir "rays-text-presets" "" in
-  let env = ref (E.create ~presets ~await:true ~workspace
+  let env = ref (E.create ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true ~workspace
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
       ~draw:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) () |> Result.get_ok) in
@@ -473,7 +473,7 @@ let editor_binding () =
       Sop_catalog.Editor.factories |> Result.get_ok in
   let workspace = Rays_editor.Workspace_doc.of_text catalog (small_sunflower ()) |> Result.get_ok in
   let presets = Filename.temp_dir "rays-text-presets" "" in
-  let env = ref (E.create ~presets ~await:true ~workspace
+  let env = ref (E.create ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true ~workspace
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
       ~draw:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) () |> Result.get_ok) in
@@ -721,7 +721,7 @@ let editor_w9 () =
   let soft = [ "rosette"; "soft" ] and petals = [ "rosette"; ":petals" ] in
   let workspace = Rays_editor.Workspace_doc.of_text catalog (small_rosette ()) |> Result.get_ok in
   let presets = Filename.temp_dir "rays-text-presets" "" in
-  let start () = E.create ~presets ~await:true ~workspace
+  let start () = E.create ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true ~workspace
         ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
           |> Result.map_error Rdk.Error.to_string)
         ~draw:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) () |> Result.get_ok in
@@ -827,7 +827,7 @@ let editor_active_scrub () =
       (ui/workspace (ui/switch wide split three :active 0)))))|} in
   let workspace = Rays_editor.Workspace_doc.of_text catalog text |> Result.get_ok in
   let presets = Filename.temp_dir "rays-text-presets" "" in
-  let env = ref (E.create ~presets ~await:true ~workspace
+  let env = ref (E.create ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true ~workspace
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
       ~draw:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) () |> Result.get_ok) in
@@ -880,7 +880,7 @@ let editor_literal_scrub () =
   List.iter (fun (tab_index, tab) ->
     let workspace = Rays_editor.Workspace_doc.of_text catalog text |> Result.get_ok in
     let presets = Filename.temp_dir "rays-token-presets" "" in
-    let env = ref (E.create ~presets ~await:true ~domains:1 ~workspace ~prepare:(fun _ _ -> Ok ())
+    let env = ref (E.create ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true ~domains:1 ~workspace ~prepare:(fun _ _ -> Ok ())
       ~draw:(fun _ () -> Scene3.empty) () |> Result.get_ok) in
     Fun.protect ~finally:(fun () -> E.close !env) (fun () ->
       let count = ref 0 and mouse = ref (450.,320.) in
@@ -968,7 +968,7 @@ let editor_text_drop () =
     (ui/workspace (ui/split-at "vertical" 0.12 (ui/graph) (ui/lisp)))))|} in
   let workspace = Rays_editor.Workspace_doc.of_text catalog text |> Result.get_ok in
   let presets = Filename.temp_dir "rays-text-presets" "" in
-  let env = ref (E.create ~presets ~await:true ~carry_budget:Float.infinity ~workspace
+  let env = ref (E.create ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true ~carry_budget:Float.infinity ~workspace
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
       ~draw:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) () |> Result.get_ok) in

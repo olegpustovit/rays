@@ -108,9 +108,9 @@ module Editor = struct
     {value with extra = {value.extra with Viewport.renderer_request = Some mode}}
 
   let create ?name ?presets ?factories ?settings ?camera ?seed ?grain ?domains
-      ?max_entries ?max_payload_bytes ?await ?carry_budget ~workspace ?source ~prepare ~draw () =
+      ?max_entries ?max_payload_bytes ?await ?carry_budget ?preferences ?ui_text_size ?ui_font ~workspace ?source ~prepare ~draw () =
     Environment_model.create ?name ?presets ?factories ?settings ?camera ?seed ?grain ?domains
-      ?max_entries ?max_payload_bytes ?await ?carry_budget ~workspace ?source ~prepare ~draw ()
+      ?max_entries ?max_payload_bytes ?await ?carry_budget ?preferences ?ui_text_size ?ui_font ~workspace ?source ~prepare ~draw ()
 
   let run ?inputs ?name ?factories ?camera ?seed ?grain ?max_entries
       ?max_payload_bytes ~config ~workspace ?source ~prepare ~draw () =
@@ -150,6 +150,9 @@ end
 
 module Workspace = struct
   type source = { path : string; digest : string }
+  type process = { max_frames : int option; crash_dir : string option; profile : bool;
+    preferences : string option; ui_font : string option }
+  let no_process = { max_frames = None; crash_dir = None; profile = false; preferences = None; ui_font = None }
 
   let load ?ops ?imports ?factories text =
     match workspace_catalog ?factories () with
@@ -191,7 +194,7 @@ module Workspace = struct
      answer it had alone (the window's own evaluation, the base camera, the editor's error). An
      explicit empty factory list is the one case where the camera and the editor never read the
      same document, so it shares nothing. *)
-  let run ?inputs ?factories ?source doc =
+  let run ?inputs ?factories ?source ?(process = no_process) doc =
     let doc = match inputs with None -> doc | Some inputs -> {doc with Workspace_doc.inputs} in
     let gpu_owner = Flow_native.Workspace_gpu.create () in
     Fun.protect ~finally:(fun () -> Flow_native.Workspace_gpu.close gpu_owner) (fun () ->
@@ -223,7 +226,7 @@ module Workspace = struct
           | Some document, _ -> document_camera document base
           | None, Some [] -> declared_camera ~factories:[] doc base
           | None, _ -> base in
-        Environment.run ?inputs ~gpu_owner ~config ~lights ~camera ?factories ~seed:(Int64.of_int window.seed) ?opened
+        Environment.run ?inputs ~gpu_owner ?max_frames:process.max_frames ?crash_dir:process.crash_dir ~profile:process.profile ?preferences:process.preferences ?ui_font:process.ui_font ~config ~lights ~camera ?factories ~seed:(Int64.of_int window.seed) ?opened
           ~workspace:doc ?source ~prepare ~draw:scene3 ()
           |> Result.map_error (fun error -> Diagnostic.error ~code:"E_RUNTIME"
             (Rays.Sketch.error_to_string error))))
@@ -267,7 +270,7 @@ module Workspace = struct
            |Error error->Error(Diagnostic.error~code:"E_EXPORT"(Rays.Sketch.error_to_string error))
          with Diagnostic.Error d -> Error d)
 
-  let main ?text path =
+  let main ?text ?process path =
     let ( let* ) = Result.bind in
     let* text = match text with Some text -> Ok text | None ->
       try Ok (In_channel.with_open_bin path In_channel.input_all)
@@ -275,5 +278,5 @@ module Workspace = struct
     let* imports = Source_file.read_imports ~file:path text in
     let* doc = load ~imports text in
     Result.map_error(fun diagnostic->[diagnostic])
-      (run ~source:{ path; digest = Contexts.sha256 text } doc)
+      (run ?process ~source:{ path; digest = Contexts.sha256 text } doc)
 end

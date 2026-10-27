@@ -126,9 +126,11 @@ val scene_mesh : (Rays_math.Mat4.t * mesh) list -> (mesh, string) result
     when no ray-tracing Metal device is available. *)
 val create :
   ?spp:int -> ?bounces:int -> ?exposure:float -> ?round_samples:int ->
+  ?bsdf_only:bool -> ?profile:bool ->
   width:int -> height:int -> scene -> (t, string) result
 (** [round_samples] (default 4) is the number of probe rays per camera-visible
-    shading point for round-corner materials; secondary bounces use a quarter. *)
+    shading point for round-corner materials; secondary bounces use a quarter.
+    [bsdf_only] (default false) disables all light sampling; [profile] logs each GPU band. *)
 
 (** Accepts a perspective camera with no lens offset, forced aspect, or
     vertical flip. Other projections return an error. The camera's

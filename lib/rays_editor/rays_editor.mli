@@ -310,7 +310,7 @@ module Private : sig
     val create : prepare:(Settings.t -> Sop.Session.output -> ('a, string) result) ->
       seed:int64 -> grain:int -> ?domains:int -> ?await:bool -> max_entries:int ->
       max_payload_bytes:int -> unit -> ('a t, string) result
-    (** [await] (default: [RAYS_MAX_FRAMES] is set) makes [update] block on
+    (** [await] (default: false) makes [update] block on
         the cook it submits, so a fixed-step run shows exactly frame n. *)
     val status : 'a t -> Sop.Async_cook.status
     val set_volatile : 'a t -> (int -> bool) -> unit
@@ -407,6 +407,9 @@ module Editor : sig
     ?max_payload_bytes:int ->
     ?await:bool ->
     ?carry_budget:float ->
+    ?preferences:string ->
+    ?ui_text_size:int ->
+    ?ui_font:string ->
     workspace:Workspace_doc.t ->
     ?source:Source.t ->
     prepare:(Settings.t -> Sop.Session.output -> ('prepared, string) result) ->
@@ -415,7 +418,7 @@ module Editor : sig
   (** [factories] is the SOP catalog (default [Sop_catalog.Editor.factories]);
       passing a non-empty list replaces it (prepend custom SOPs to
       [Sop_catalog.Editor.factories] to extend).
-      [await] (default: [RAYS_MAX_FRAMES] is set) makes each
+      [await] (default: false) makes each
       [update] block on the cook it submits, so a fixed-step run or a test sees the
       settled result of every frame instead of racing the worker. [carry_budget] (default 0.5)
       is the seconds a carry's preview may take, to apply or to cook, before it is only described
@@ -635,6 +638,12 @@ end
     entry, "Reload <file>", and a file that does not check leaves the last good
     document with the diagnostics in the status bar and the text pane. *)
 module Workspace : sig
+  type process = { max_frames : int option; crash_dir : string option; profile : bool;
+    preferences : string option; ui_font : string option }
+  (** What the process environment says, parsed once by the executable (bin/rays.ml); the
+      libraries never read it. [no_process] is all defaults. *)
+  val no_process : process
+
   type source = { path : string; digest : string }
   (** Where a workspace came from: [path] relative to the project root, [digest]
       the SHA-256 of its text. *)
@@ -657,7 +666,7 @@ module Workspace : sig
     Rays.Easy_camera.t -> Rays.Easy_camera.t
   (** The camera of the scene's first camera node, or the default base camera. *)
 
-  val main : ?text:string -> string -> (unit, Diagnostic.t list) result
+  val main : ?text:string -> ?process:process -> string -> (unit, Diagnostic.t list) result
   (** [main path] opens the [.rays] file at [path] and its imports beside it in the editor
       ([rays FILE.rays]); [text] opens that text instead, saved to [path] (the empty editor). On a
       failure it returns diagnostics without printing or exiting. *)

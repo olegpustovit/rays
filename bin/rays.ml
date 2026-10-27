@@ -74,10 +74,19 @@ let empty = {|(workspace untitled
       (ui/workspace (ui/split "vertical" canvas edit :second_size 280)))))
 |}
 
+(* The only place the process environment is read: libraries take these as arguments. *)
+let process () =
+  let var name = match Sys.getenv_opt name with Some "" | None -> None | some -> some in
+  let max_frames = Option.map (fun text -> match int_of_string_opt text with
+    | Some n -> n | None -> die "rays: RAYS_MAX_FRAMES must be an integer") (var "RAYS_MAX_FRAMES") in
+  { Rays_editor.Workspace.max_frames; crash_dir = var "RAYS_CRASH_DIR";
+    profile = Sys.getenv_opt "RAYS_PROFILE" <> None;
+    preferences = var "RAYS_EDITOR_PREFERENCES"; ui_font = var "RAYS_UI_FONT" }
+
 let native ?text path =
   let text = match text with Some text -> text | None ->
     try read path with Sys_error message -> die "rays: %s" message in
-  match Rays_editor.Workspace.main ~text path with
+  match Rays_editor.Workspace.main ~text ~process:(process ()) path with
   | Ok () -> ()
   | Error diagnostics ->
       List.iter (fun diagnostic -> prerr_endline (D.report ~file:path ~source:text diagnostic)) diagnostics;

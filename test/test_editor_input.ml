@@ -206,7 +206,7 @@ let run () =
       (scene/merge (scene/geometry (ref g)) (scene/world (ref sky)))))|} in
   let module E3 = Rays_editor.Editor in
   exercise ~name:"Editor"
-    ~create:(fun () -> E3.create ~workspace ~camera:(Easy_camera.create ~inertia:false ())
+    ~create:(fun () -> E3.create ~ui_text_size:11 ~workspace ~camera:(Easy_camera.create ~inertia:false ())
       ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ _ -> Scene3.empty) () |> Result.get_ok)
     ~update:E3.update ~close:E3.close ~dump:E3.crash_dump ~panes:E3.panes
     ~camera:(fun env -> let camera = E3.camera env in

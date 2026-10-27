@@ -23,6 +23,8 @@ val default_config : config
 val run_state :
   ?config:config ->
   ?max_frames:int ->
+  ?crash_dir:string ->
+  ?profile:bool ->
   init:(Frame.t -> 'model) ->
   update:('model -> Frame.t -> 'model) ->
   view:('model -> Frame.t -> Scene.t) ->
@@ -36,13 +38,13 @@ val run_state :
     a crash report and propagate.
     A fatal exception in [init], [update], [view], or [after_present] writes
     a crash report folder under the platform temporary directory's [rays-crash] (or
-    [RAYS_CRASH_DIR]) before it propagates: [crash.txt] holds the
+    [crash_dir]) before it propagates: [crash.txt] holds the
     exception, backtrace, the last 120 frames' input, GC and environment
     facts; [crash_dump model directory] adds the sketch's own files there
     (e.g. its document). The folder path is printed to stderr.
     [max_frames] keeps one runtime alive for exactly that many frames unless
-    [quit] is requested first; it defaults to [RAYS_MAX_FRAMES] when that
-    environment variable is set, for finite smoke runs. [after_present] runs after
+    [quit] is requested first (the process environment is never read; bin/rays.ml
+    passes RAYS_MAX_FRAMES, RAYS_CRASH_DIR and RAYS_PROFILE). [after_present] runs after
     the native frame is rendered, can capture that frame, and returns the model
     for the next frame and [on_stop]. *)
 

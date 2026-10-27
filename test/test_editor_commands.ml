@@ -26,7 +26,7 @@ let canvas_preview () =
   let workspace = match Rays_editor.Workspace.load text with
     | Ok workspace -> workspace
     | Error ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds)) in
-  let editor = Result.get_ok (E3.create ~workspace ~await:true ~domains:1 ~prepare:(fun _ _ -> Ok ())
+  let editor = Result.get_ok (E3.create ~ui_text_size:11 ~workspace ~await:true ~domains:1 ~prepare:(fun _ _ -> Ok ())
     ~draw:(fun _ () -> Rays.Scene3.empty) ()) in
   Fun.protect ~finally:(fun () -> E3.close editor) (fun () ->
     let count = ref 0 in
@@ -69,7 +69,7 @@ let canvas_frame_size () =
   let workspace = match Rays_editor.Workspace.load text with
     | Ok workspace -> workspace
     | Error ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds)) in
-  let editor = Result.get_ok (E3.create ~workspace ~await:true ~domains:1 ~prepare:(fun _ _ -> Ok ())
+  let editor = Result.get_ok (E3.create ~ui_text_size:11 ~workspace ~await:true ~domains:1 ~prepare:(fun _ _ -> Ok ())
     ~draw:(fun _ () -> Rays.Scene3.empty) ()) in
   Fun.protect ~finally:(fun () -> E3.close editor) (fun () ->
     let step e count = E3.update e (Test_editor_input.frame (450., 300.) [] count) in
@@ -104,7 +104,7 @@ let with_editor text f =
   let workspace = match Rays_editor.Workspace.load text with
     | Ok workspace -> workspace
     | Error ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds)) in
-  let editor = Result.get_ok (E3.create ~workspace ~await:true ~domains:1 ~prepare:(fun _ _ -> Ok ())
+  let editor = Result.get_ok (E3.create ~ui_text_size:11 ~workspace ~await:true ~domains:1 ~prepare:(fun _ _ -> Ok ())
     ~draw:(fun _ () -> Rays.Scene3.empty) ()) in
   Fun.protect ~finally:(fun () -> E3.close editor) (fun () -> f editor)
 
@@ -292,14 +292,11 @@ let run () =
   let module E3 = Rays_editor.Editor in
   let directory = Filename.temp_dir "rays-guide" "" in
   let filename = Filename.concat directory "preferences.rays" in
-  let previous = Sys.getenv_opt "RAYS_EDITOR_PREFERENCES" in
-  Unix.putenv "RAYS_EDITOR_PREFERENCES" filename;
-  let create () = E3.create ~workspace ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ _ -> Scene3.empty) ()
+  let create () = E3.create ~ui_text_size:11 ~preferences:filename ~workspace ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ _ -> Scene3.empty) ()
     |> Result.get_ok in
   let current = ref (create ()) in
   Fun.protect ~finally:(fun () ->
     E3.close !current;
-    Unix.putenv "RAYS_EDITOR_PREFERENCES" (Option.value ~default:"" previous);
     Array.iter (fun file -> Sys.remove (Filename.concat directory file)) (Sys.readdir directory);
     Unix.rmdir directory) (fun () ->
     let step events count = current := E3.update !current

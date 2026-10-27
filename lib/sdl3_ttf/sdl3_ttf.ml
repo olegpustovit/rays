@@ -198,12 +198,12 @@ module Font = struct
     ; "/System/Library/Fonts/LucidaGrande.ttc"
     ]
 
-  let system_path () =
-    match Sys.getenv_opt "RAYS_UI_FONT" with
+  let system_path ?font () =
+    match font with
     | Some path when path <> "" ->
         if Sys.file_exists path then Ok path
         else error "SDL3_ttf.Font.system_path" Font_not_found
-          ("RAYS_UI_FONT does not name a readable font: " ^ path)
+          ("font override does not name a readable font: " ^ path)
     | _ ->
         (match List.find_opt Sys.file_exists system_font_candidates with
          | Some path -> Ok path

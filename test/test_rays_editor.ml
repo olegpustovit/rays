@@ -124,7 +124,7 @@ let run () =
   check (width collapsed_panes.inspector = 0)
     "inspector toggle did not collapse the third column";
 
-  let environment = Rays_editor.Editor.create ~await:true ~workspace:(fixture ())
+  let environment = Rays_editor.Editor.create ~ui_text_size:11 ~await:true ~workspace:(fixture ())
       ~factories:Sop_catalog.Editor.factories
       ~max_entries:4 ~max_payload_bytes:(16 * 1024 * 1024)
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
@@ -439,7 +439,7 @@ let run () =
     | [ _; "-" ] -> []
     | [ _; id ] -> [ int_of_string id ]
     | _ -> fail "unreadable camera line" in
-  let environment = Rays_editor.Editor.create ~await:true ~workspace:(fixture ())
+  let environment = Rays_editor.Editor.create ~ui_text_size:11 ~await:true ~workspace:(fixture ())
       ~camera:(Easy_camera.create ~distance:6. ~inertia:false ())
       ~factories:Sop_catalog.Editor.factories
       ~max_entries:4 ~max_payload_bytes:(16 * 1024 * 1024)
@@ -581,7 +581,7 @@ let run () =
     [ field ~name:"mode" ~label:"Mode" ~kind:(integer ~min:0 ~max:3 ())
         ~default:0 ~get:Fun.id ~set:(fun mode _ -> mode) () ]) in
   let module Settings = Rays_editor.Settings in
-  let environment = Rays_editor.Editor.create ~await:true ~workspace:(fixture ())
+  let environment = Rays_editor.Editor.create ~ui_text_size:11 ~await:true ~workspace:(fixture ())
       ~settings:(Settings.make mode_schema 0)
       ~max_entries:4 ~max_payload_bytes:(16 * 1024 * 1024)
       ~prepare:(fun settings _ -> Ok (Settings.get mode_schema settings))
@@ -609,7 +609,7 @@ let run () =
   let module Preset = Rays_editor.Private.Preset in
   let presets = Filename.temp_dir "sketch-ui-workspace-presets" "" in
   let mesh_scene mesh = Scene3.create [Scene3.mesh mesh] in
-  let environment = Rays_editor.Editor.create ~await:true ~workspace:(fixture ()) ~presets
+  let environment = Rays_editor.Editor.create ~ui_text_size:11 ~await:true ~workspace:(fixture ()) ~presets
       ~camera:(Easy_camera.create ~distance:6. ~inertia:false ())
       ~factories:Sop_catalog.Editor.factories
       ~max_entries:4 ~max_payload_bytes:(16 * 1024 * 1024)

@@ -302,8 +302,8 @@ let words text =
 
 (* The headers [accept] probes: the explicit directory when given, else
    pkg-config's. *)
-let include_flags () =
-  match Sys.getenv_opt "RAYS_SDL3_INCLUDE_DIR" with
+let include_flags include_dir =
+  match include_dir with
   | Some directory when String.trim directory <> "" ->
       [ "-I" ^ Unix.realpath directory ]
   | Some _ | None -> words (command_text "pkg-config" [ "--cflags"; "sdl3" ])
@@ -330,10 +330,10 @@ let probe_source structures =
   Buffer.add_string output "  return 0;\n}\n";
   Buffer.contents output
 
-let accept ~root ~abi_path =
+let accept ~root ~abi_path ~include_dir ~clang =
   let used = all_reads root in
   let compiler =
-    match Sys.getenv_opt "RAYS_SDL3_CLANG" with
+    match clang with
     | Some value when String.trim value <> "" -> value
     | Some _ | None -> "clang"
   in
@@ -347,7 +347,7 @@ let accept ~root ~abi_path =
         write_file source (probe_source used);
         ignore
           (command_text compiler
-             (include_flags () @ [ source; "-o"; executable ]));
+             (include_flags include_dir @ [ source; "-o"; executable ]));
         command_text executable [])
   in
   let layouts =
@@ -377,7 +377,7 @@ let usage () =
   fail
     "usage: generate.exe emit --root R --component <sdl3|sdl3_image|sdl3_ttf|\
      sdl3_mixer> --lock FILE --abi FILE --output FILE\n\
-    \       generate.exe accept [--root R] [--abi FILE]"
+    \       generate.exe accept [--root R] [--abi FILE] [--include-dir D] [--clang C]"
 
 let () =
   let arguments = List.tl (Array.to_list Sys.argv) in
@@ -405,7 +405,7 @@ let () =
           Option.value (List.assoc_opt "--abi" given)
             ~default:(Filename.concat root "lib/sdl3/abi.sexp")
         in
-        accept ~root ~abi_path
+        accept ~root ~abi_path ~include_dir:(List.assoc_opt "--include-dir" given) ~clang:(List.assoc_opt "--clang" given)
     | _ -> usage ()
   with
   | Failure message | Sys_error message ->

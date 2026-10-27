@@ -416,7 +416,7 @@ let pipeline_for library pipelines shape =
       Ok (pipeline, table)
 
 (* Size-dependent storage: accumulation, two history frames, three output films. *)
-let create ?(spp = 1) ?(bounces = 6) ?(exposure = 1.) ?(round_samples = 4) ~width ~height (scene : scene) =
+let create ?(spp = 1) ?(bounces = 6) ?(exposure = 1.) ?(round_samples = 4) ?(bsdf_only = false) ?(profile = false) ~width ~height (scene : scene) =
   if width <= 0 || height <= 0 then Error "path tracer size must be positive"
   else if spp <= 0 || bounces <= 0 then Error "path tracer spp and bounces must be positive"
   else
@@ -482,7 +482,7 @@ let create ?(spp = 1) ?(bounces = 6) ?(exposure = 1.) ?(round_samples = 4) ~widt
           scene_lights = scene.lights;
           world = None;
           world_buffer;
-          bsdf_only = Sys.getenv_opt "RAYS_PATHTRACER_BSDF_ONLY" = Some "1";
+          bsdf_only;
           accum = film.accum;
           outputs = film.outputs;
           shared_film = Renderer.gpu_shared lease;
@@ -505,7 +505,7 @@ let create ?(spp = 1) ?(bounces = 6) ?(exposure = 1.) ?(round_samples = 4) ~widt
           bounces;
           exposure;
           round_samples;
-          profile = Sys.getenv_opt "RAYS_PATHTRACER_PROFILE" = Some "1";
+          profile;
           panel_count = List.length scene.environment.panels;
           sky = scene.environment.sky;
           ground = scene.environment.ground;

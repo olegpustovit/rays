@@ -48,7 +48,7 @@ let labelled env =
 
 let run () =
   let cooks = Atomic.make 0 in
-  let env = E.create ~await:true ~workspace:(Ws_fixture.of_text text)
+  let env = E.create ~ui_text_size:11 ~await:true ~workspace:(Ws_fixture.of_text text)
       ~max_entries:4 ~max_payload_bytes:(16 * 1024 * 1024)
       ~prepare:(fun _ output -> Atomic.incr cooks;
         Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
@@ -327,7 +327,7 @@ let run () =
   check (E.level env = None) "the scene broke after deleting its display object";
   check (not (contains (source env) "(scene/geometry")) "deleting geo1 left it in the text";
   (* what was written opens as the same scene *)
-  let reopened = E.create ~await:true ~workspace:(Ws_fixture.of_text (source env))
+  let reopened = E.create ~ui_text_size:11 ~await:true ~workspace:(Ws_fixture.of_text (source env))
     ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
       |> Result.map_error Rdk.Error.to_string)
     ~draw:(fun _ mesh -> Scene3.create [Scene3.mesh mesh]) () |> Result.get_ok in
@@ -354,7 +354,7 @@ let run () =
         (sop/mountain (sop/grid :columns 40 :rows 40 :size 4 :width 4 :height 4)
                       :seed 3 :height 0.4 :frequency [1 1 1] :octaves 3 :lacunarity 2
                       :roughness 0.5 :recompute_normals true)))|} in
-    let env = E.create ~await:true ~workspace ~domains ~grain:16 ~max_entries:4
+    let env = E.create ~ui_text_size:11 ~await:true ~workspace ~domains ~grain:16 ~max_entries:4
         ~max_payload_bytes:(16 * 1024 * 1024)
         ~prepare:(fun _ output ->
           let points = Rdk.Geometry.positions (Result.get_ok (Sop.Payload.geometry output.Session.payload)) in
@@ -373,7 +373,7 @@ let run () =
    a scene graph is authoritative, so a reload does not seed it again. *)
 let run_host () =
   let open_text text =
-    E.create ~await:true ~workspace:(Ws_fixture.of_text text)
+    E.create ~ui_text_size:11 ~await:true ~workspace:(Ws_fixture.of_text text)
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
       ~draw:(fun _ mesh -> Scene3.create [Scene3.mesh mesh]) () |> Result.get_ok in

@@ -163,7 +163,7 @@ let () =
   let host_ops = Flow_sop.Operators.all @ ops @ [host_op] in
   let workspace = doc (Rays_editor.Workspace.load ~ops:host_ops host_text) in
   let presets = Filename.temp_dir "rays-domain-test" "" in
-  let host = ref (match E.create ~workspace ~await:true ~domains:1 ~presets
+  let host = ref (match E.create ~ui_text_size:11 ~workspace ~await:true ~domains:1 ~presets
     ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ () -> Scene3.create []) () with
     | Ok host -> host | Error message -> failwith message) in
   Fun.protect ~finally:(fun () -> E.close !host) (fun () ->

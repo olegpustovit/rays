@@ -11,7 +11,7 @@ let frame ?(keys = []) events : Frame.t = {
 type model = { clicks : int; enabled : bool; text : string }
 
 let run () =
-  let ui = Ui.create ~font_size:11 () in
+  let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   Fun.protect ~finally:(fun () -> Ui.destroy ui) (fun () ->
     let model = ref { clicks = 0; enabled = false; text = "old" } in
     let build ui = Ui.panel ui ~width:400. "controls" (fun () ->

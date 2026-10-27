@@ -47,7 +47,7 @@ let frame config input_state count time dt events =
 (* ---- crash reports: every fatal error in a sketch leaves a folder under
    /tmp/rays-crash (or RAYS_CRASH_DIR) with the exception, backtrace,
    recent input, GC and environment facts, and whatever the sketch dumps. *)
-let crash_root()=Option.value(Sys.getenv_opt"RAYS_CRASH_DIR")
+let crash_root dir=Option.value dir
   ~default:(Filename.concat (Filename.get_temp_dir_name ()) "rays-crash")
 let key_name=function
   |Input.KeyChar c->Printf.sprintf"%C"c|ArrowUp->"Up"|ArrowDown->"Down"|ArrowLeft->"Left"
@@ -77,12 +77,12 @@ let event_text=function
   |Pixel_size_changed(w,h)->Printf.sprintf"pixel-size %dx%d"w h
   |Visibility_changed visible->Printf.sprintf"visible %b"visible
   |Focus_lost->"focus-lost"|Focus_gained->"focus-gained"|Closed->"close"
-let write_crash ~title ~dump ~recent exn backtrace=
+let write_crash ?crash_dir ~title ~dump ~recent exn backtrace=
   let tm=Unix.localtime(Unix.gettimeofday())in
   let name=Printf.sprintf"%s-%04d%02d%02d-%02d%02d%02d-%d"
     (String.map (function 'a'..'z' | 'A'..'Z' | '0'..'9' as c -> c | _ -> '_') title)
     (tm.tm_year+1900)(tm.tm_mon+1)tm.tm_mday tm.tm_hour tm.tm_min tm.tm_sec(Unix.getpid())in
-  let directory=Filename.concat(crash_root())name in
+  let directory=Filename.concat(crash_root crash_dir)name in
   let write name text = match Runtime_resources.write_text ~filename:(Filename.concat directory name) text with
     | Ok () -> () | Error message -> failwith message in
   (try
@@ -124,11 +124,8 @@ let write_crash ~title ~dump ~recent exn backtrace=
     Printf.eprintf"Rays crash report: %s\n%!"directory
   with error->Printf.eprintf"Rays crash report could not be written: %s\n%!"
     (Printexc.to_string error))
-let run_state_internal ?(config=default_config)?max_frames ?(high_density=true)?(after_present=fun model _->model)?(crash_dump=fun _ _->())~init~update~view ?(on_stop=fun _->())()=
+let run_state_internal ?(config=default_config)?max_frames ?crash_dir ?(profile=false) ?(high_density=true)?(after_present=fun model _->model)?(crash_dump=fun _ _->())~init~update~view ?(on_stop=fun _->())()=
   if config.width<=0||config.height<=0 then startup_error"Sketch.run_state"Ogpu.Error.Invalid_argument"dimensions must be positive";
-  let max_frames=match max_frames,Sys.getenv_opt"RAYS_MAX_FRAMES"with
-    |Some _,_|None,(None|Some"")->max_frames
-    |None,Some text->(match int_of_string_opt text with Some _ as n->n|None->startup_error"Sketch.run_state"Ogpu.Error.Invalid_argument"RAYS_MAX_FRAMES must be an integer")in
   Option.iter(fun frames->if frames<=0 then startup_error"Sketch.run_state"Ogpu.Error.Invalid_argument"max_frames must be positive")max_frames;
   Option.iter(fun fps->if fps<=0 then startup_error"Sketch.run_state"Ogpu.Error.Invalid_argument"fps must be positive")config.fps;
   Option.iter(fun domains->if domains<=0 then startup_error"Sketch.run_state"Ogpu.Error.Invalid_argument"domains must be positive")config.domains;
@@ -228,7 +225,7 @@ let run_state_internal ?(config=default_config)?max_frames ?(high_density=true)?
     |Startup_error _ as error->release_after_failed_init();raise error
     |exn->
     let exn,backtrace,frames=crashed exn in
-    write_crash~title:config.title~dump:(fun _->())~recent:frames exn backtrace;
+    write_crash?crash_dir~title:config.title~dump:(fun _->())~recent:frames exn backtrace;
     release_after_failed_init();
     Printexc.raise_with_backtrace exn backtrace)in
   let last_scene=ref None in
@@ -242,7 +239,6 @@ let run_state_internal ?(config=default_config)?max_frames ?(high_density=true)?
   let previous=current_run()in
   Scene.Private.with_renderer render_scene(fun()->Canvas_runtime.with_save save (fun()->Fun.protect~finally:(fun()->Domain.DLS.set active_run previous;cleanup())(fun()->
     Domain.DLS.set active_run(Some state);
-    let profile=Sys.getenv_opt"RAYS_PROFILE"<>None in
     let limit=max_frames in let count=ref 0 in
     let shown=ref None and quiet=ref 0 in
     let one_frame()=
@@ -298,7 +294,7 @@ let run_state_internal ?(config=default_config)?max_frames ?(high_density=true)?
       |Startup_error _ as error->raise error
       |exn->
         let exn,backtrace,frames=crashed exn in
-        write_crash~title:config.title~dump:(crash_dump !model)~recent:frames exn backtrace;
+        write_crash?crash_dir~title:config.title~dump:(crash_dump !model)~recent:frames exn backtrace;
         Printexc.raise_with_backtrace exn backtrace);
     in
     (* A window edge is being dragged: the native pump is blocked and calls this.  It only draws
@@ -313,7 +309,7 @@ let run_state_internal ?(config=default_config)?max_frames ?(high_density=true)?
           match exn with
           |Startup_error _->live_failure:=Some exn
           |_->let exn,backtrace,frames=crashed exn in
-            write_crash~title:config.title~dump:(crash_dump !model)~recent:frames exn backtrace;
+            write_crash?crash_dir~title:config.title~dump:(crash_dump !model)~recent:frames exn backtrace;
             live_failure:=Some exn);
     Fun.protect~finally:(fun()->Callback.register"rays_sdl3_live_redraw"(fun()->()))(fun()->
       while not !(state.stopped)&&Option.fold~none:true~some:(fun limit-> !count<limit)limit do
@@ -323,9 +319,9 @@ let run_state_internal ?(config=default_config)?max_frames ?(high_density=true)?
            the same picture up to 100 ms, so a still window costs a few ticks a second *)
         if !quiet>0 then Input_state.wait input~timeout_ms:(if !quiet>30 then 100 else 16)
         else Time.limit_frame_rate time done;!model))))
-let run_state ?config ?max_frames ~init~update~view ?after_present ?crash_dump ?on_stop()=
+let run_state ?config ?max_frames ?crash_dir ?profile ~init~update~view ?after_present ?crash_dump ?on_stop()=
   try Ok(Parallel.run ?domains:(Option.bind config(fun value->value.domains))(fun()->
-    run_state_internal?config?max_frames?after_present?crash_dump~init~update~view?on_stop()))
+    run_state_internal?config?max_frames?crash_dir?profile?after_present?crash_dump~init~update~view?on_stop()))
   with Startup_error error->Error error
 let export_state ?(config=default_config)?(fps=60)?(prefix="frame")~directory~frames~init~update~view ?(after_present=fun model _->model) ?(on_stop=fun _->())()=
   try

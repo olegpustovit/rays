@@ -26,7 +26,7 @@ let workspace_doc ?gpu ?opened ~factories ~seed_scene workspace =
     active_camera = if has_scene then doc.active_camera else List.nth_opt (Objects.ids "camera" scene) 0 } in
   Ok doc
 
-let preferences_file () = match Sys.getenv_opt "RAYS_EDITOR_PREFERENCES" with
+let preferences_file = function
   | Some path when path <> "" -> path
   | Some _ | None -> Filename.concat (Filename.concat
       (Option.value ~default:"." (Sys.getenv_opt "HOME")) ".rays") "preferences.rays"
@@ -54,7 +54,7 @@ let create ?gpu ?settings
     ?(seed = 0L) ?(grain = 16_384)
     ?domains ?(max_entries = 512)
     ?(max_payload_bytes = 256 * 1024 * 1024) ?await ?(carry_budget = 0.5)
-    ?opened ~workspace ~prepare () =
+    ?preferences ?(ui_text_size = default_text_size) ?ui_font ?opened ~workspace ~prepare () =
   let factories = if factories = [] then Sop_catalog.Editor.factories else factories in
   let settings = Option.value settings ~default:workspace.Workspace_doc.settings in
   let gpu = Option.value ~default:Flow_ir.Gpu.default gpu in
@@ -70,12 +70,12 @@ let create ?gpu ?settings
             (Option.value ~default:"." (Sys.getenv_opt "HOME")) ".rays")
             (Preset.sanitize name) in
       let level = Document.Scene in
-      let preferences = preferences_file () in
+      let preferences = preferences_file preferences in
       let guide = match read_preferences preferences with
         | Ok values -> Option.value ~default:true (Editor_core.Store.Settings.bool values "guide")
         | Error _ -> true in
       let state_name = Contexts.sha256 state_key in
-      let value = { preferences; guide; hud = None; presets; state_name; name; prompt = None; notice = None; notice_at = 0.;
+      let value = { preferences; text_size = ui_text_size; guide; hud = None; presets; state_name; name; prompt = None; notice = None; notice_at = 0.;
         doc; gpu; filed = doc; level;
         projections = Level_map.empty; text = Text_pane.initial; map_view = false;
         rows = []; live_cook = true;
@@ -88,7 +88,7 @@ let create ?gpu ?settings
           ~version:Flow_sop.Manifest.version factories));
         lisp_vocab = vocabulary factories doc;
         tree = Pxui_shell.Tree.create (); outline = Navigator.initial; held_keys = []; sketch_blocked = []; window_focus = 2;
-        ui = (let ui = Pxui.Ui.create () in Pxui.Ui.set_font_size ui (default_text_size ()); ui); workspace;
+        ui = (let ui = Pxui.Ui.create ?font_path:ui_font () in Pxui.Ui.set_font_size ui ui_text_size; ui); workspace;
         timeline = Timeline.create (); live_frame = Input.at_time 0.; cook;
         edit_error = None; status_fps = None;
         status_fps_at = Float.neg_infinity; last_dt = 0.; steady = 0;
