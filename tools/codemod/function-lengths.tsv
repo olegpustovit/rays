@@ -11,9 +11,6 @@ lib/ogpu_metal/backend.ml	create#1	1018
 lib/pxui/test_ui.ml	run#1	811
 lib/pxui/test_ui.ml	with_scale#1	476
 lib/pxui_graph/test_pxui_graph.ml	scope_gestures#1	389
-lib/rays_editor/environment.ml	update_with#1	303
-lib/rays_editor/navigator.ml	view#1	353
-lib/rays_editor/text_pane.ml	view#1	324
 lib/rdk/boolean/boolean_complex.ml	build#1	309
 lib/rdk/boolean/boolean_extract.ml	build_internal#1	410
 lib/rdk/boolean/boolean_face_arrangement.ml	build#3	446
