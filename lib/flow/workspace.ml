@@ -1567,7 +1567,7 @@ end) = struct
             Option.map snd (List.nth_opt (o.signature.pos @ o.signature.opt) i) in
       match ty with Some (Ty.Fn (Some signature)) -> instantiate_fn cx a signature
       | _ -> a) args in
-    if List.exists (fun prefix -> String.starts_with ~prefix o.name) ["sop/"; "settings/"; "scene/"] then begin
+    if o.name <> "scene/trace" && List.exists (fun prefix -> String.starts_with ~prefix o.name) ["sop/"; "settings/"; "scene/"] then begin
       (* The values of an attribute write enter the geometry through the SOP input sink, an
          implicit readback: the executor reads a GPU producer back once, so no (exact x). *)
       let values_slot = List.length o.signature.pos - 1 in
