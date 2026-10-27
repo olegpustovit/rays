@@ -15,7 +15,7 @@ let fail message = prerr_endline message; exit 1
 let clock = Unix.gettimeofday
 
 (* [rays]'s entry point, with a built text where its file is *)
-let main ~path text = match Rays_editor.Workspace.main ~text path with
+let main ~frames ~path text = match Rays_editor.Workspace.main ~text ~process:{ Rays_editor.Workspace.no_process with max_frames = Some frames } path with
   | Ok () -> ()
   | Error diagnostics -> fail (String.concat "\n" (List.map Diagnostic.to_string diagnostics))
 
@@ -44,10 +44,9 @@ let start sketch =
   let marks = 1_000_000 in
   if not (String.length (replace ~sub:(Printf.sprintf "count %d" marks) ~by:"" text) < String.length text) then
     fail "the sketch no longer draws 1,000,000 marks";
-  Unix.putenv "RAYS_MAX_FRAMES" "1";
   let before = Gc.allocated_bytes () in
   (* no file at this path: the program has no source to poll *)
-  let (), phases = Flow.Phase_timer.sample ~clock (fun () -> main ~path:"test/static_million_marks.rays" text) in
+  let (), phases = Flow.Phase_timer.sample ~clock (fun () -> main ~frames:1 ~path:"test/static_million_marks.rays" text) in
   let per_mark = (Gc.allocated_bytes () -. before) /. float marks in
   let evaluations = Flow.Phase_timer.calls phases "evaluate" in
   if evaluations <> 1 then fail (Printf.sprintf "a start evaluated the workspace %d times" evaluations);
@@ -77,7 +76,6 @@ let reload () =
   let home = Filename.concat directory "home" in
   Unix.mkdir home 0o755;
   Unix.putenv "HOME" home;
-  Unix.putenv "RAYS_MAX_FRAMES" "600";
   let previous = Sys.getcwd () in
   Sys.chdir directory;
   let rec remove path =
@@ -85,7 +83,7 @@ let reload () =
       Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path); Unix.rmdir path
     end else Sys.remove path in
   Fun.protect ~finally:(fun () -> Sys.chdir previous; remove directory) (fun () ->
-    let (), phases = Flow.Phase_timer.sample ~clock (fun () -> main ~path:"sketch.rays" built) in
+    let (), phases = Flow.Phase_timer.sample ~clock (fun () -> main ~frames:600 ~path:"sketch.rays" built) in
     let seen name = Sys.file_exists (Filename.concat directory name) in
     if seen "seen-9998.png" then fail "the built text saved a picture: its effect is off";
     if not (seen "seen-14997.png") then

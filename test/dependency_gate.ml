@@ -494,13 +494,21 @@ let violations graph ~scan =
         && uses_key_pressed text then
       Some (path ^ " matches Key_pressed inside a presentation adapter")
     else None) scan in
+  (* the executable parses the environment once; library code takes explicit arguments *)
+  let env_errors = List.filter_map (fun (path, text) ->
+    if not (String.starts_with ~prefix:"lib/" path && Filename.check_suffix path ".ml")
+       || String.starts_with ~prefix:"test_" (Filename.basename path) then None else
+    if List.exists (fun line -> contains line "getenv" && contains line "\"RAYS_")
+         (String.split_on_char '\n' text)
+    then Some (path ^ " reads a RAYS_ environment variable; bin/rays.ml parses it and passes it down")
+    else None) scan in
   let module_ref_errors = List.concat_map (fun (path, text) ->
     if not (String.starts_with ~prefix:"lib/rays/" path)
        || not (Filename.check_suffix path ".ml") then []
     else List.map (fun line ->
       Printf.sprintf "%s:%d allocates a module-level ref; put mutable state in its run or renderer owner"
         path line) (module_initialization_refs text)) scan in
-  direct_errors @ edge_errors @ only_errors @ token_errors @ native_errors @ module_ref_errors
+  direct_errors @ edge_errors @ only_errors @ token_errors @ native_errors @ env_errors @ module_ref_errors
 
 let run () =
   if module_initialization_refs
@@ -673,6 +681,9 @@ let run () =
   if violations graph ~scan:["lib/sdl3/injected.c", "SDL_CreateRenderer(window, 0)"] = []
      || violations graph ~scan:["lib/rays/injected.ml", "Sys.getenv \"RAYS_BACKEND\""] = [] then
     failwith "gate accepted an injected alternate renderer or backend selector";
+  if violations graph ~scan:["lib/rays/injected.ml", "let d = Sys.getenv_opt \"RAYS_CRASH_DIR\""] = []
+     || violations graph ~scan:["lib/rays/test_ok.ml", "let d = Sys.getenv_opt \"RAYS_SLOW\""] <> [] then
+    failwith "gate env check: library RAYS_ read accepted or test read rejected";
   let scan = List.concat_map files roots
     |> List.filter (fun p -> not (Filename.check_suffix p ".pp.ml"))
     |> List.filter (fun p -> List.exists (Filename.check_suffix p)

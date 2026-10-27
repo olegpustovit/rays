@@ -99,7 +99,7 @@ let frame ?(buttons = []) mouse events count = Test_editor_input.frame ~buttons 
 (* every editor here awaits the cook its frame submits: what a frame shows is settled, never racing
    the worker *)
 let editor ?camera ?presets text =
-  E3.create ?camera ?presets ~await:true ~workspace:(of_text text)
+  E3.create ~ui_text_size:11 ?camera ?presets ~await:true ~workspace:(of_text text)
     ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
       |> Result.map_error Rdk.Error.to_string)
     ~draw:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) ()
@@ -2158,7 +2158,7 @@ let run_carry_reaches_no_history () =
    leaves the document as it was. *)
 let run_atomic_frame () =
   let at = 200., 300. in
-  let e = ref (E3.create ~await:true
+  let e = ref (E3.create ~ui_text_size:11 ~await:true
       ~workspace:(of_text "(workspace solo (graph g :context sop (sop/box)) (graph editor :context editor (ui/workspace (ui/graph))))")
       ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ () -> Scene3.empty) () |> Result.get_ok) and count = ref 0 in
   let step events = incr count; e := E3.update !e (frame at events !count) in
@@ -2546,7 +2546,7 @@ let run_view_native () =
   ignore (Result.get_ok (Sketch.run_state ~max_frames:37
     ~config:{Sketch.default_config with width = 1200; height = 760;
       title = "Shattered Cube · VIEW regression"; domains = Some 1}
-    ~init:(fun _ -> E3.create ~await:true ~workspace:(of_text text)
+    ~init:(fun _ -> E3.create ~ui_text_size:11 ~await:true ~workspace:(of_text text)
       ~presets:(Filename.concat directory "presets") ~seed:7349L ~grain:2
       ~camera:(Easy_camera.create ~target:Rays_math.Vec3.zero ~distance:6.8 ~azimuth:0.72 ~elevation:0.42 ())
       ~prepare:(fun _ output ->
@@ -2655,7 +2655,7 @@ let run_renderers_native ?(authored = false) () =
   let samples = ref [] in
   ignore (Result.get_ok (Sketch.run_state ~max_frames:46
     ~config:{Sketch.default_config with width = 900; height = 640; title = "shared renderer"}
-    ~init:(fun _ -> E3.create ~await:true ~workspace ~presets:(Filename.concat directory "presets")
+    ~init:(fun _ -> E3.create ~ui_text_size:11 ~await:true ~workspace ~presets:(Filename.concat directory "presets")
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
       ~draw:(fun _ mesh -> Scene3.create [Scene3.mesh
@@ -2874,7 +2874,7 @@ let run_roots_native () =
     | Ok e -> e | Error message -> fail message in
   ignore (Result.get_ok (Sketch.run_state ~max_frames:200
     ~config:{ Sketch.default_config with width; height = 640; title = "two roots" }
-    ~init:(fun _ -> E3.create ~await:true ~workspace:(of_text text)
+    ~init:(fun _ -> E3.create ~ui_text_size:11 ~await:true ~workspace:(of_text text)
       ~presets:(Filename.concat directory "presets")
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
@@ -3004,7 +3004,7 @@ let run_budget_native () =
   let final = ref None in
   ignore (Result.get_ok (Sketch.run_state ~max_frames:120
     ~config:{ Sketch.default_config with width = 900; height = 640; title = "budget" }
-    ~init:(fun _ -> E3.create ~await:true ~workspace:(of_text text)
+    ~init:(fun _ -> E3.create ~ui_text_size:11 ~await:true ~workspace:(of_text text)
       ~presets:(Filename.concat directory "presets")
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
         |> Result.map_error Rdk.Error.to_string)

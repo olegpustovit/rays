@@ -6,7 +6,7 @@ let frame count events =
   { frame with input = { frame.input with size = 360, 240 } }
 
 let run () =
-  let ui = Ui.create () in
+  let ui = Ui.create ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   Fun.protect ~finally:(fun () -> Ui.destroy ui) (fun () ->
     let cells = ref 0 and first = ref max_int in
     let build ui = Ui.table ui ~at:(0., 0.) ~w:300. ~h:168. ~headers:[|"index"; "value"|]

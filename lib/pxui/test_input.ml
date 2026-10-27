@@ -9,7 +9,7 @@ let frame ?(buttons = []) ?(keys = []) events : Frame.t = {
   pixel_scale = 1., 1.; fps = 60.; mouse_delta = 0., 0. }
 
 let run () =
-  let ui = Ui.create ~font_size:11 () in
+  let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   Fun.protect ~finally:(fun () -> Ui.destroy ui) (fun () ->
   let body ui =
     let view = Ui.box ui ~flags:Ui.clickable ~at:(0., 0.)

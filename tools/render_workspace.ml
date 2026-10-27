@@ -73,7 +73,7 @@ let init _ =
           placed := (Rays_math.Mat4.mul (Objects.world scene id) d.transform, mesh) :: !placed) drawing
       end) (Objects.ids "geometry" scene));
   let mesh = P.scene_mesh (List.rev !placed) |> get in
-  let tracer = P.create ~spp:4
+  let tracer = P.create ~spp:4 ~profile:(Sys.getenv_opt "RAYS_PATHTRACER_PROFILE" = Some "1")
       ~bounces:(if benchmark then document.root.bounces else 6)
       ~round_samples:(if benchmark then document.root.round_samples else 4) ~width ~height
       {P.objects = [Option.get !first]; spheres = []; strands = [];

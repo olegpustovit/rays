@@ -389,7 +389,7 @@ let close value =
 
 let run ?inputs ?name ?presets ?factories ?gpu_owner ?settings ?lights
     ?camera ?background ?seed ?grain ?domains ?max_entries ?max_payload_bytes
-    ?opened ~config ~workspace ?source ~prepare ~draw () =
+    ?max_frames ?crash_dir ?profile ?preferences ?ui_font ?opened ~config ~workspace ?source ~prepare ~draw () =
   let name = Option.value name ~default:(Workspace_doc.name workspace) in
   (* [opened], the caller's document of this workspace, is handed to the editor once and not
      kept by the loop: after an edit or a reload only the history decides how long it lives. *)
@@ -400,7 +400,7 @@ let run ?inputs ?name ?presets ?factories ?gpu_owner ?settings ?lights
     let value=create ?inputs ~name ?presets ?factories ?gpu_owner ?settings
       ?lights
       ?camera ?background ?seed ?grain ?domains ?max_entries ?max_payload_bytes
-      ?opened ~workspace ?source ~prepare ~draw () |> Result.get_ok in
+      ?preferences ?ui_font ?await:(Option.map (fun _ -> true) max_frames) ?opened ~workspace ?source ~prepare ~draw () |> Result.get_ok in
     value.host.deterministic<-(match config.Sketch.clock with Fixed _->true|Realtime->false);value in
   let update value frame =
     let value = update value frame in
@@ -408,6 +408,6 @@ let run ?inputs ?name ?presets ?factories ?gpu_owner ?settings ?lights
     match set_ui_cursor value.core.ui (V.ui_visible value.control) with
     | Ok () -> value
     | Error message -> { value with render_status = Some ("Cursor: " ^ message) } in
-  Sketch.run_state ~config ~init ~update ~view:scene
+  Sketch.run_state ~config ?max_frames ?crash_dir ?profile ~init ~update ~view:scene
     ~after_present ~crash_dump ~on_stop:close ()
   |>Result.map(fun _->())

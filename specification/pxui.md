@@ -171,7 +171,7 @@ The kit face is Pragmasevka (or `RAYS_UI_FONT`). Each `Ui.t` loads it once per l
 size, found from the working directory or the executable upward, caches a
 failed load (falling back to the system face), and frees its faces in
 `Ui.destroy`. Kit text defaults to 13 points and rows are `max 24 (size + 11)`, so 24 up to that
-size; `RAYS_UI_FONT_SIZE` overrides the editor's size (the tests set 11, the size their pointer
+size; `Editor.create ~ui_text_size` overrides the editor's size (the tests set 11, the size their pointer
 positions were written for); chrome and inspector text take the kit size, never a literal one.
 A line of `Ui.text_area` is `Ui.text_line_height`, one and a half times the text (17 points at 11,
 20 at 13), not a 24-point control row; its gutter holds label-size line numbers in `ink_3` behind

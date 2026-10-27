@@ -229,7 +229,7 @@ value changes (physical equality) and restarts accumulation.
   is clamped at luminance 8; direct light is MIS-sampled and unclamped.
 - Exposure: the effective exposure is `2 ** baked.exposure` times `create`'s
   `exposure`.
-- `RAYS_PATHTRACER_BSDF_ONLY=1` at `create` disables all light sampling
+- `~bsdf_only:true` at `create` disables all light sampling
   on the World path (debugging and the unbiasedness test).
 
 Historical native checks: a uniform-radiance

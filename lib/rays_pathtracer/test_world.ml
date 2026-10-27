@@ -50,14 +50,7 @@ let run () =
     spheres = [{ P.center = v3 0. 0. 0.; radius = 1.; sphere_material = material }];
     environment = black_dome; lights } in
   let matte = scene (P.material ~roughness:1. (rgb 0.8 0.8 0.8)) [] in
-  (* The flag is read only by create. Restore its previous effective value
-     even if device acquisition or shader compilation fails. *)
-  let create bsdf_only scene =
-    let previous = Sys.getenv_opt "RAYS_PATHTRACER_BSDF_ONLY" in
-    Fun.protect ~finally:(fun () -> Unix.putenv "RAYS_PATHTRACER_BSDF_ONLY"
-      (Option.value ~default:"" previous)) (fun () ->
-        Unix.putenv "RAYS_PATHTRACER_BSDF_ONLY" (if bsdf_only then "1" else "0");
-        P.create ~spp:1 ~width:32 ~height:32 scene) in
+  let create bsdf_only scene = P.create ~spp:1 ~bsdf_only ~width:32 ~height:32 scene in
   match create false matte with
   | Error message when Sys.getenv_opt "RAYS_REQUIRE_RAYTRACING" = None ->
       Printf.printf "pathtracer World: skipped (%s)\n" message

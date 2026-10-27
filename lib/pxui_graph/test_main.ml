@@ -5,7 +5,6 @@ let tests = [
 
 let () =
   (* pointer positions are the 11-point kit's, not its 13-point default *)
-  Unix.putenv "RAYS_UI_FONT_SIZE" "11";
   match Array.to_list Sys.argv with
   | _ :: name :: _ ->
       (match List.assoc_opt name tests with

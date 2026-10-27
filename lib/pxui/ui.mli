@@ -37,9 +37,10 @@
 
 type t
 
-val create : ?font_size:int -> unit -> t
-(** [font] (borrowed) overrides the kit face; [font_size] is the logical size
-    of kit text. *)
+val create : ?font_size:int -> ?font_path:string -> unit -> t
+(** [font_path] names the kit face's file (default: Pragmasevka found from the
+    working directory or the executable upward; the environment is never read);
+    [font_size] is the logical size of kit text. *)
 
 val destroy : t -> unit
 (** Release the glyph atlas and the kit faces this UI loaded. The handle must

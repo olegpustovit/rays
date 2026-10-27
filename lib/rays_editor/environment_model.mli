@@ -63,6 +63,9 @@ val create :
   ?max_payload_bytes:int ->
   ?await:bool ->
   ?carry_budget:float ->
+  ?preferences:string ->
+  ?ui_text_size:int ->
+  ?ui_font:string ->
   ?opened:Editor_document.Document.t ->
   workspace:Editor_document.Workspace_doc.t ->
   ?source:Source_file.t ->

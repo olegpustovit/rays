@@ -9,7 +9,7 @@ let ()=
       (let* [bias (* t 0.2)]
         (draw/image (image/map (fn [uv] [bias uv.y 0 1]) :width 64 :height 64))))
     (graph editor :context editor (ui/workspace (ui/canvas (ref picture)))))|}in
-  let owner=ref(Result.get_ok(Editor.create ~workspace:doc ~await:true ~domains:1
+  let owner=ref(Result.get_ok(Editor.create ~ui_text_size:11 ~workspace:doc ~await:true ~domains:1
     ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)()))in
   let canvas=Rays.Canvas.create_exn ~width:900 ~height:640 in
   Fun.protect ~finally:(fun()->Editor.close !owner;ignore(Rays.Canvas.destroy canvas))(fun()->
@@ -42,7 +42,7 @@ let ()=
     (graph other :context sop (ref mesh :offset 0.03125))
     (graph backdrop :context draw (draw/background "#102030"))
     (graph fixed :context image (image/render (ref backdrop) :width 65 :height 17)))|}in
-  let owner domains=Result.get_ok(Editor.create ~workspace:doc ~await:true ~domains
+  let owner domains=Result.get_ok(Editor.create ~ui_text_size:11 ~workspace:doc ~await:true ~domains
     ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)())in
   let display=owner 8 and cpu1=owner 1 and cpu8=owner 8 in
   Fun.protect ~finally:(fun()->List.iter Editor.close[display;cpu1;cpu8])(fun()->
@@ -105,7 +105,7 @@ let () =
         (image/map (fn [uv] [uv.x uv.y "^channel^" 1]) :width 65 :height 3)))
       (graph drawing :context draw (draw/image (ref img)"^scale^"))
       (graph rendered :context image (image/render (ref drawing) :width 65 :height 3)))")in
-    let owner=Result.get_ok(Rays_editor.Editor.create ~workspace:doc ~await:true ~domains:1
+    let owner=Result.get_ok(Rays_editor.Editor.create ~ui_text_size:11 ~workspace:doc ~await:true ~domains:1
       ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)())in
     Fun.protect ~finally:(fun()->Rays_editor.Editor.close owner)(fun()->
       let evaluated=ok(E.static doc.checked)in
@@ -136,7 +136,7 @@ let ()=
     (draw/merge (draw/background \"#102030\") (draw/circle [4 4 0] 2 :fill \"#a0b0c0\"))) \
     (graph rendered :context image (image/render (ref drawing) :width 8 :height 8)) \
     (graph picture :context draw (draw/image (ref rendered))))"in
-  let owner=Result.get_ok(Rays_editor.Editor.create ~workspace:doc ~await:true ~domains:1
+  let owner=Result.get_ok(Rays_editor.Editor.create ~ui_text_size:11 ~workspace:doc ~await:true ~domains:1
     ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)())in
   Fun.protect ~finally:(fun()->Rays_editor.Editor.close owner)(fun()->
     let evaluated=ok(E.static doc.checked)in
@@ -146,7 +146,7 @@ let ()=
     assert(ok(Rays_editor.Editor.Private.image owner(List.assoc "rendered" evaluated.results))==image);
     assert(Rays_editor.Editor.Private.image_stats owner=(1,0));
     List.iter(fun domains->Parallel.run ~domains(fun()->
-      let fresh=Result.get_ok(Rays_editor.Editor.create ~workspace:doc ~await:true ~domains
+      let fresh=Result.get_ok(Rays_editor.Editor.create ~ui_text_size:11 ~workspace:doc ~await:true ~domains
         ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)())in
       Fun.protect ~finally:(fun()->Rays_editor.Editor.close fresh)(fun()->
         let actual=ok(Rays_editor.Editor.Private.image fresh(List.assoc "rendered" evaluated.results))in
@@ -175,7 +175,7 @@ let ()=
   let initial=text 65 17 "[uv.x uv.y bias 1]"in
   Out_channel.with_open_bin source(fun ch->output_string ch initial);
   let doc=load initial in
-  let owner=ref(Result.get_ok(Editor.create ~workspace:doc ~await:true ~domains:1
+  let owner=ref(Result.get_ok(Editor.create ~ui_text_size:11 ~workspace:doc ~await:true ~domains:1
     ~source:(Rays_editor.Source.at ~file:source ~digest:(Editor_document.Contexts.sha256 initial))
     ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)()))in
   Fun.protect ~finally:(fun()->Editor.close !owner;Sys.remove source)(fun()->
@@ -294,7 +294,7 @@ let ()=
     (graph rendered :context image (image/render (ref drawing) :width 320 :height 240))
     (graph picture :context draw (draw/image (ref rendered)))
     (graph settings :context settings (settings/config :width 320 :height 240)))"in
-  let owner domains=Result.get_ok(Editor.create ~workspace:doc ~await:true ~domains
+  let owner domains=Result.get_ok(Editor.create ~ui_text_size:11 ~workspace:doc ~await:true ~domains
     ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)())in
   let display=owner 1 in
   let expected=Fun.protect ~finally:(fun()->Editor.close display)(fun()->
@@ -334,7 +334,7 @@ let ()=
   let module Editor=Rays_editor.Editor in
   let doc=load "(workspace stamp (graph img :context image
     (image/noise :width 4 :height 4 :frequency (+ 0.1 (* t 0.01)) :seed 31)))"in
-  let owner=Result.get_ok(Editor.create ~workspace:doc ~await:true ~domains:1
+  let owner=Result.get_ok(Editor.create ~ui_text_size:11 ~workspace:doc ~await:true ~domains:1
     ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)())in
   Fun.protect ~finally:(fun()->Editor.close owner)(fun()->
     let node=(Editor.Private.image_plan owner).nodes.(0)in
@@ -359,7 +359,7 @@ let ()=
     (graph fixed :context image (image/render (ref drawing) :width 7 :height 5))
     (graph width_only :context image (image/render (ref drawing) :width 9))
     (graph height_only :context image (image/render (ref drawing) :height 11)))"in
-  let owner=Result.get_ok(Editor.create ~workspace:doc ~await:true ~domains:1
+  let owner=Result.get_ok(Editor.create ~ui_text_size:11 ~workspace:doc ~await:true ~domains:1
     ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)())in
   Fun.protect ~finally:(fun()->Editor.close owner)(fun()->
     let plan=Editor.Private.image_plan owner in
@@ -411,7 +411,7 @@ let ()=
     position (Option.value ~default:(string_of_int width)width_expression) height in
   let initial=text 65 17 "(* t 16)"in
   Out_channel.with_open_bin source(fun ch->output_string ch initial);
-  let owner=ref(Result.get_ok(Editor.create ~workspace:(load initial) ~await:true ~domains:1
+  let owner=ref(Result.get_ok(Editor.create ~ui_text_size:11 ~workspace:(load initial) ~await:true ~domains:1
     ~source:(Rays_editor.Source.at ~file:source ~digest:(Editor_document.Contexts.sha256 initial))
     ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)()))in
   let destination=Rays.Canvas.create_exn ~width:65 ~height:17 in
@@ -510,7 +510,7 @@ let ()=
   let doc width=load(Printf.sprintf "(workspace failed_publication
     (graph drawing :context draw (draw/background \"#102030\"))
     (graph rendered :context image (image/render (ref drawing) :width %d :height 8)))" width)in
-  let owner=Result.get_ok(Editor.create ~workspace:(doc 8) ~await:true ~domains:1
+  let owner=Result.get_ok(Editor.create ~ui_text_size:11 ~workspace:(doc 8) ~await:true ~domains:1
     ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)())in
   Fun.protect ~finally:(fun()->Editor.close owner)(fun()->
     let request width=let evaluated=ok(E.static(doc width).checked)in

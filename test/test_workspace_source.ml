@@ -119,7 +119,7 @@ let run_find () =
 (* ---- through the editor ---- *)
 
 let editor ?presets ?(imports = []) ~source text =
-  E3.create ~await:true ~workspace:(Result.get_ok (Doc.of_text ~imports catalog text)) ?presets ~source
+  E3.create ~ui_text_size:11 ~await:true ~workspace:(Result.get_ok (Doc.of_text ~imports catalog text)) ?presets ~source
     ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
       |> Result.map_error Rdk.Error.to_string)
     ~draw:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) ()

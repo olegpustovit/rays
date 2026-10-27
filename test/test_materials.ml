@@ -3,7 +3,6 @@ open Sop
 
 let get = Result.get_ok
 (* pointer positions are the 11-point kit's *)
-let () = Unix.putenv "RAYS_UI_FONT_SIZE" "11"
 let source = {|(workspace materials
   (graph blue :context material
     (material/standard :name "blue" :color "#2670f5" :roughness 0.3))
@@ -105,7 +104,7 @@ let frame ?(buttons = []) ?(keys = []) mouse events count : Frame.t = {
   pixel_scale = 1., 1.; fps = 60.; mouse_delta = 0., 0. }
 
 let editor () =
-  E3.create ~await:true ~workspace:(workspace follow_source)
+  E3.create ~ui_text_size:11 ~await:true ~workspace:(workspace follow_source)
     ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
       |> Result.map_error Rdk.Error.to_string)
     ~draw:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) ()
@@ -260,7 +259,7 @@ let carry_tests () =
   (* an unbounded budget unless a check is about the budget: a shown preview never depends on how
      loaded the machine is (it was once held back under a full parallel suite) *)
   let make ?(source = carry_source) ?(carry_budget = Float.infinity) () =
-    E3.create ~await:true ~carry_budget ~workspace:(workspace (with_editor source))
+    E3.create ~ui_text_size:11 ~await:true ~carry_budget ~workspace:(workspace (with_editor source))
       ~prepare:(fun _ _ -> Ok (Scene3.create []))
       ~draw:(fun _ scene -> scene) ()
     |> function Ok e -> e | Error m -> fail m in
@@ -549,7 +548,7 @@ let viewport_source = {|(workspace views
       (ui/workspace (ui/split-at "horizontal" 0.6 (ui/split-at "horizontal" 0.5 left right) (ui/graph))))))|}
 
 let viewport_carry_tests () =
-  let e = ref (E3.create ~await:true ~workspace:(workspace viewport_source)
+  let e = ref (E3.create ~ui_text_size:11 ~await:true ~workspace:(workspace viewport_source)
     ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
       |> Result.map_error Rdk.Error.to_string)
     ~draw:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) ()

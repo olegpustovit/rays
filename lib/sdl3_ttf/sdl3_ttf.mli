@@ -48,9 +48,9 @@ module Font : sig
 
   val open_file : path:string -> size:float -> (t, error) result
 
-  (** Locate an installed UI font. [RAYS_UI_FONT] is authoritative when
+  (** Locate an installed UI font. [font] is authoritative when
       non-empty; otherwise the macOS system fonts are tried in stable order. *)
-  val system_path : unit -> (string, error) result
+  val system_path : ?font:string -> unit -> (string, error) result
   val metrics : t -> (metrics, error) result
   val set_size_dpi :
     t -> size:float -> horizontal:int -> vertical:int -> (unit, error) result

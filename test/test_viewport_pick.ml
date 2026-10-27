@@ -153,7 +153,7 @@ let flat text clicks =
   let module E3 = Rays_editor.Editor in
   let workspace = Ws_fixture.of_text text in
   (* the cook is awaited, not waited for: the editor blocks on the job each frame submits *)
-  let env = ref (E3.create ~await:true ~workspace ~camera:(Easy_camera.create ~inertia:false ())
+  let env = ref (E3.create ~ui_text_size:11 ~await:true ~workspace ~camera:(Easy_camera.create ~inertia:false ())
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
       ~draw:(fun _ _ -> Scene3.empty) () |> Result.get_ok) in

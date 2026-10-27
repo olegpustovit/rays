@@ -38,7 +38,7 @@ let save_roundtrip name workspace =
   Fun.protect ~finally:(fun()->remove directory)(fun()->
     let file=Filename.concat directory "sketch.rays"in
     Out_channel.with_open_bin file(fun channel->output_string channel source);
-    let editor=ref(Result.get_ok(Editor.create ~workspace ~await:true ~domains:1
+    let editor=ref(Result.get_ok(Editor.create ~ui_text_size:11 ~workspace ~await:true ~domains:1
       ~presets:(Filename.concat directory "presets")
       ~source:(Rays_editor.Source.at ~file ~digest:(Editor_document.Contexts.sha256 source))
       ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Scene3.empty)()))in

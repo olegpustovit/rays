@@ -102,7 +102,7 @@ let update_frame ?gpu ?pump ~image ~host_events ~carry_changed value ~all_ui_vis
   List.iter (function
     | Leader.Ui_scale delta ->
         let sizes = [ 8; 9; 10; 11; 12; 13; 14; 16; 18 ] in
-        let default = Option.value ~default:5 (List.find_index (( = ) (default_text_size ())) sizes) in
+        let default = Option.value ~default:5 (List.find_index (( = ) value.text_size) sizes) in
         let here = Option.value ~default (List.find_index (( = ) (Pxui.Ui.font_size value.ui)) sizes) in
         let index = if delta = 0 then default else max 0 (min (List.length sizes - 1) (here + delta)) in
         Pxui.Ui.set_font_size value.ui (List.nth sizes index)

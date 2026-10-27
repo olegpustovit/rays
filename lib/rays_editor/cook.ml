@@ -110,14 +110,14 @@ let output_bounds (output : Session.output) =
   | Some box, Some transforms -> Some (transformed_all transforms box))
     (Payload.geometry output.payload)
 
-(* [await]: a fixed-step run (export, RAYS_MAX_FRAMES, tests) must show the
+(* [await]: a fixed-step run (export, a finite --max-frames run, tests) must show the
    geometry of exactly frame n, so [update] waits for the cook it submitted;
-   interactive play never blocks (latest request wins). ponytail: the default
-   reads RAYS_MAX_FRAMES because [Frame.t] does not say the clock is fixed;
+   interactive play never blocks (latest request wins). The default is false;
+   [Frame.t] does not say the clock is fixed, so
    an export host passes [~await:true]. *)
 let create ~prepare ~seed ~grain ?domains ?await ~max_entries ~max_payload_bytes () =
   let await = match await with Some flag -> flag
-    | None -> Sys.getenv_opt "RAYS_MAX_FRAMES" <> None in
+    | None -> false in
   if grain <= 0 then invalid_arg "Rays_editor: grain must be positive";
   let domains = Option.value ~default:
       (max 1 (Parallel.recommended_domains () - 1)) domains in

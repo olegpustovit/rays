@@ -5,12 +5,9 @@ open Editor_document
 type bounds = Cook.bounds
 
 (* The panels' text: 13 points, the size of macOS control text (11 is its small size, and the kit
-   face is narrow).  [RAYS_UI_FONT_SIZE] overrides it: the tests click the 11-point geometry the
-   kit was drawn with.  Command +/-/0 step from it and return to it. *)
-let default_text_size () =
-  match Option.bind (Sys.getenv_opt "RAYS_UI_FONT_SIZE") int_of_string_opt with
-  | Some size when size > 0 -> size
-  | _ -> 13
+   face is narrow).  A core's [text_size] is its default (tests pass 11, the geometry the kit was
+   drawn with).  Command +/-/0 step from it and return to it. *)
+let default_text_size = 13
 module Level_map = Map.Make (struct
   type t = Document.level
   let compare = Stdlib.compare
@@ -204,6 +201,7 @@ type 'prepared carry = {
 
 type 'prepared t = {
   preferences : string;
+  text_size : int;  (* the panels' default text size, Command-0 returns to it *)
   guide : bool;
   hud : (string * float) option;
   presets : string;  (* preset directory *)

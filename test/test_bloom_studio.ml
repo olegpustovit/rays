@@ -31,7 +31,7 @@ let frame ?(buttons = []) ?(keys = []) mouse events count =
 let editor () =
   let workspace = match Doc.of_text catalog (bloom ()) with
     | Ok d -> d | Error ds -> fail (String.concat "; " (List.map Diagnostic.to_string ds)) in
-  E3.create ~await:true ~workspace
+  E3.create ~ui_text_size:11 ~await:true ~workspace
     ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
       |> Result.map_error Rdk.Error.to_string)
     ~draw:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) ()

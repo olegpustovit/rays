@@ -13,7 +13,7 @@ let workspace ?settings text = D.Workspace_doc.of_text ?settings catalog text |>
 let build ?previous ws = D.Contexts.of_workspace ~factories ?previous ws |> Result.get_ok
 let frame n = Test_editor_input.frame (450., 300.) [] n
 let step e n = E.update e (frame n)
-let create ?camera ?settings ?presets ?source ws = E.create ?camera ?settings ?presets ?source ~await:true ~workspace:ws
+let create ?camera ?settings ?presets ?source ws = E.create ~ui_text_size:11 ?camera ?settings ?presets ?source ~await:true ~workspace:ws
   ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
     |> Result.map_error Rdk.Error.to_string)
   ~draw:(fun _ mesh -> Scene3.create [Scene3.mesh mesh]) () |> Result.get_ok
@@ -426,7 +426,7 @@ let live_light_determinism () =
       (scene/light :intensity (+ 1 t) :color [(+ 0.1 (* 0.1 t)) 0.2 0.3]))))|} in
   let replay domains = with_dir (fun presets ->
     let prepares = ref 0 and drawings = ref 0 in
-    let e = ref (E.create ~workspace:ws ~presets ~await:true ~domains ~seed:42L
+    let e = ref (E.create ~ui_text_size:11 ~workspace:ws ~presets ~await:true ~domains ~seed:42L
       ~prepare:(fun _ output -> incr prepares;
         Ok (Test_support.Workspace_cook.geometry_bytes (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))))
       ~draw:(fun _ _ -> incr drawings; Scene3.empty) () |> Result.get_ok) in
@@ -551,7 +551,7 @@ let named_inspector () = with_dir (fun presets ->
     (graph g :context sop (let* [a (sop/test_source :value 1)] a))
     (graph editor :context editor
       (ui/workspace (ui/split-at "horizontal" 0.6 (ui/graph "g") (ui/inspector)))))|} in
-  let e = ref (E.create ~presets ~await:true ~workspace:ws ~factories ~prepare:(fun _ _ -> Ok ())
+  let e = ref (E.create ~ui_text_size:11 ~presets ~await:true ~workspace:ws ~factories ~prepare:(fun _ _ -> Ok ())
     ~draw:(fun _ _ -> Scene3.empty) () |> Result.get_ok) in
   Fun.protect ~finally:(fun () -> E.close !e) (fun () ->
     e := step !e 1;
@@ -660,7 +660,7 @@ let stale_inspector_draft () = with_dir (fun presets ->
     (graph editor :context editor (ui/workspace
       (ui/split-at "horizontal" 0.6
         (ui/split-at "vertical" 0.5 (ui/graph "g") (ui/lisp)) (ui/inspector)))))|} in
-  let e = ref (E.create ~presets ~await:true ~workspace:ws ~factories ~prepare:(fun _ _ -> Ok ())
+  let e = ref (E.create ~ui_text_size:11 ~presets ~await:true ~workspace:ws ~factories ~prepare:(fun _ _ -> Ok ())
     ~draw:(fun _ _ -> Scene3.empty) () |> Result.get_ok) in
   let count = ref 0 in
   let update ?(keys = []) ?(buttons = []) p events =
@@ -701,7 +701,7 @@ let failed_renderer_modes () = with_dir (fun presets ->
     (graph scene :context scene [(size : float 1)] (scene/geometry (ref g :size size)))
     (graph editor :context editor (ui/workspace
       (ui/tile (ui/viewport (ref scene)) (ui/viewport (ref scene :size 2))))))|} in
-  let e = ref (E.create ~await:true ~presets ~workspace:ws
+  let e = ref (E.create ~ui_text_size:11 ~await:true ~presets ~workspace:ws
     ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
       |> Result.map_error Rdk.Error.to_string)
     ~draw:(fun _ mesh -> Scene3.create [Scene3.mesh (Mesh.with_mode Mesh.Lines mesh)]) () |> Result.get_ok) in
@@ -741,7 +741,7 @@ let run_native () = with_dir (fun directory ->
   ignore (Result.get_ok (Sketch.run_state ~max_frames:16
     ~config:{Sketch.default_config with width = 900; height = 640; domains = Some 1;
       title = "Preview failure isolation"}
-    ~init:(fun _ -> E.create ~await:true ~workspace:ws
+    ~init:(fun _ -> E.create ~ui_text_size:11 ~await:true ~workspace:ws
       ~presets:(Filename.concat directory "presets")
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
         |> Result.map_error Rdk.Error.to_string)

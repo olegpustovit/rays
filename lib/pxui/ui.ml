@@ -149,6 +149,8 @@ and ui = {
   mutable font_size : int;
   (* owned kit faces by size; [None] caches a failed load *)
   faces : Font.t option Int_table.t;
+  kit_font : string option Lazy.t;  (* the kit face's file, found on first use *)
+  ascent_ratio : float Lazy.t;
   (* retained, by slot *)
   table : Table.t;
   mutable slot_key : int array;
@@ -423,10 +425,10 @@ let publish_atlas atlas =
     | Error _ -> ()
   end
 
-(* The kit face: [RAYS_UI_FONT], else Pragmasevka found from the working
+(* The kit face: the caller's [font_path], else Pragmasevka found from the working
    directory or the executable upward. *)
-let kit_font_path = lazy (
-  match Sys.getenv_opt "RAYS_UI_FONT" with
+let kit_font_path font_path = lazy (
+  match font_path with
   | Some path -> Some path
   | None ->
       let relative = Filename.concat "assets"
@@ -445,7 +447,7 @@ let face ui size =
   match Int_table.find_opt ui.faces size with
   | Some face -> face
   | None ->
-      let loaded = match Lazy.force kit_font_path with
+      let loaded = match Lazy.force ui.kit_font with
         | Some path -> Font.load path size
           (* the sheets' renderer does not hint: unhinted glyphs have its weight and x-height *)
           |> Result.map (fun font -> ignore (Font.set_hinting font Font.None_hinting); font)
@@ -460,7 +462,7 @@ let face ui size =
    a font's ascent up to a whole pixel; the sheets' renderer rounds it to the nearest.  Where the two
    differ (13 points at two pixels a point: 23.4 pixels, so 24 against 23) every glyph of the string
    sits a device pixel lower than the reference, see [ascent_shift]. *)
-let ascent_ratio = lazy (match Lazy.force kit_font_path with
+let ascent_ratio_of kit_font = lazy (match Lazy.force kit_font with
   | Some path ->
       (match Font.load path 4096 with
        | Ok font -> let ratio = float (Font.get_ascent font) /. 4096. in Font.destroy font; ratio
@@ -469,8 +471,8 @@ let ascent_ratio = lazy (match Lazy.force kit_font_path with
 
 (* the move, in points, that puts a glyph raster's baseline on the nearest pixel row of its
    ascent instead of the one above: 0 or one device pixel up *)
-let ascent_shift ~size ~density =
-  let ratio = Lazy.force ascent_ratio in
+let ascent_shift ui ~size ~density =
+  let ratio = Lazy.force ui.ascent_ratio in
   if ratio = 0. then 0. else
   let exact = ratio *. float size *. float density in
   (Float.round exact -. Float.ceil (exact -. 0.02)) /. float density
@@ -502,10 +504,12 @@ let text_width ui ?size text = float (text_width_px ui ?size text) /. float ui.d
 
 (* ----------------------------------------------------------- create *)
 
-let create ?(font_size = Theme.font_size) () =
+let create ?(font_size = Theme.font_size) ?font_path () =
   if font_size <= 0 then invalid_arg "Ui.create: font_size must be positive";
   let capacity = 64 in
-  { theme = Theme.default; font_size; faces = Int_table.create 4; table = Table.create ();
+  let kit_font = kit_font_path font_path in
+  { theme = Theme.default; font_size; faces = Int_table.create 4;
+    kit_font; ascent_ratio = ascent_ratio_of kit_font; table = Table.create ();
     slot_key = Array.make capacity 0; free = []; next_slot = 0;
     touched = Array.make capacity (-1);
     rx = Array.make capacity 0.; ry = Array.make capacity 0.;
@@ -1616,7 +1620,7 @@ module Paint = struct
           let snap value = Float.round (value *. density) /. density in
           let screen_x = snap x
           and screen_y = snap (y
-                               +. ascent_shift ~size:(Option.value size ~default:ui.font_size) ~density:ui.density) in
+                               +. ascent_shift ui ~size:(Option.value size ~default:ui.font_size) ~density:ui.density) in
           (* the pen runs in fractional physical pixels (0.88 points of tracking is 1.76 at 2x);
              each glyph is placed on a whole pixel *)
           let pen = ref 0. and tracking = tracking *. density in
