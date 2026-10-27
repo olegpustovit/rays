@@ -18,7 +18,14 @@
  (alias runtest)
  (action (run %{exe:replay.exe} --self-test)))
 
+; Lisp-node goldens (data/ is gzip, see replay.ml). runtest replays the first case of every
+; node/fixture pair; the full corpus is qualification-scale.
 (rule
- (alias lisp-goldens)
- (deps ports.sexp coverage.sexp (glob_files inputs/*.sexp))
- (action (run %{exe:replay.exe})))
+ (alias runtest)
+ (deps data/ports.sexp.gz data/coverage.sexp.gz (glob_files data/inputs/*.gz))
+ (action (setenv REPLAY_JOBS 4 (run %{exe:replay.exe} --sample 1 data))))
+
+(rule
+ (alias qualification-scale)
+ (deps data/ports.sexp.gz data/coverage.sexp.gz (glob_files data/inputs/*.gz))
+ (action (setenv REPLAY_JOBS 4 (run %{exe:replay.exe} --corpus data))))
