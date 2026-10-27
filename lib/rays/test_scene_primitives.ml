@@ -46,10 +46,10 @@ let pure ()=
   require(Int32.float_of_bits(Bytes.get_int32_le bytes 0)=1.25)"fractional coordinates";
   let ir=Result.get_ok(Scene_command.Render_ir.create [|Shapes b|])in
   let original=Scene_command.Render_ir.serialize ir in
-  (* A batch is validated once and remembered, so each corruption is tried on
-     a batch nothing has validated yet. *)
+  (* A published batch carries its builder's validation, so each corruption is
+     tried on a copy nothing has validated yet. *)
   let tampered offset=
-    let fresh=line ()in
+    let fresh=B.Private.copy(line ())in
     Bytes.set_int32_le(B.instances fresh)offset(Int32.bits_of_float nan);fresh in
   require(not(B.Private.valid_shapes(tampered 52)))"nonfinite anti-alias boundary";
   require(not(B.Private.valid_shapes(tampered 0)))"nonfinite boundary";
