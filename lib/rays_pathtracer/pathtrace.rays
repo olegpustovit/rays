@@ -36,6 +36,7 @@
          bs (basis n)
          ax (* (- (* 2. r1) 1.) (+ e.x e.z)) ay (* (- (* 2. r2) 1.) (+ e.y e.z))]
     (normalize (+ (* bs.tan (tan ax)) (+ (* bs.b (tan ay)) n)))))
+(defn no-hit :context value [] {:t 0. :prim -1 :u 0. :v 0. :normal [0. 0. 0.] :hit false :instance -1})
 (defn bounce-step :context value [(st : {:rng int :o vec3 :d vec3 :thr vec3 :rad vec3 :last-pdf float :b int :alive bool}) (u : {:eye vec3 :lens float :fwd vec3 :rgt vec3 :up vec3 :tan-half float :aspect float :focus float :width int :height int :spp int :bounces int :frame int :sky vec3 :ground vec3 :panels int}) (light : {:lo vec3 :lu vec3 :lv vec3 :one-sided float :rad vec3 :area float}) (mat : {:albedo vec3 :rough float :emit vec3 :metal float}) (pos : (array vec3)) (nrm : (array vec3)) (pan : (array vec3))]
   (let* [o st.o d st.d
          hit (scene/trace 1 o d 0.0001 1000000000000. 0.)
@@ -70,8 +71,9 @@
              n1d (draw st.rng) n2d (draw n1d.next) n3d (draw n2d.next)
              ls (light-sample light.lo light.lu light.lv light.one-sided hitp n2d.v n3d.v)
              cos-s (dot ns ls.wi)
-             sr (scene/trace 1 (+ hitp (* ng 0.001)) ls.wi 0. (- ls.dist 0.002) 0.)
-             lit (and (and (> cos-s 0.) (> (dot ng ls.wi) 0.)) (and (> ls.cosl 0.0001) (not sr.hit)))
+             ready (and (and (> cos-s 0.) (> (dot ng ls.wi) 0.)) (> ls.cosl 0.0001))
+             sr (if ready (scene/trace 1 (+ hitp (* ng 0.001)) ls.wi 0. (- ls.dist 0.002) 0.) (no-hit))
+             lit (and ready (not sr.hit))
              pdf-l (/ ls.dist2 (* ls.cosl (* light.area 1.)))
              nee (if lit
                    (* (* (* (* st.thr light.rad) (eval-brdf ns v ls.wi diffuse f0 a2)) cos-s)
@@ -82,8 +84,9 @@
              q0 (draw n3d.next) q1 (draw q0.next) q2 (draw q1.next)
              wp (sample-panel pan u.panels q0.v q1.v q2.v)
              pl (panel-pdf pan u.panels wp) cos-p (dot ns wp)
-             sp (scene/trace 1 (+ hitp (* ng 0.001)) wp 0. 1000000000000. 0.)
-             lit-p (and (> u.panels 0) (and (and (> pl 0.) (> cos-p 0.)) (and (> (dot ng wp) 0.) (not sp.hit))))
+             ready-p (and (> u.panels 0) (and (and (> pl 0.) (> cos-p 0.)) (> (dot ng wp) 0.)))
+             sp (if ready-p (scene/trace 1 (+ hitp (* ng 0.001)) wp 0. 1000000000000. 0.) (no-hit))
+             lit-p (and ready-p (not sp.hit))
              pan-nee (if lit-p
                        (* (* (* (* st.thr (environment u.sky u.ground pan u.panels wp)) (eval-brdf ns v wp diffuse f0 a2)) cos-p)
                           (/ (/ pl (+ pl (bsdf-pdf ns v wp a2 ps))) pl))

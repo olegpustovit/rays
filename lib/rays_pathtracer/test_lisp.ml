@@ -32,7 +32,7 @@ let () =
   let scene = { P.objects = [ (mesh, material) ]; spheres = []; strands = []; environment; lights = [ light ] } in
   let eye = Rays_math.Vec3.create 0.3 (-3.) 2.5 and target = Rays_math.Vec3.create 0. 0. 0. in
   let camera = Rays.Camera.perspective ~fov_y:0.9 ~at:eye ~target () in
-  let tracer = get (P.create ~spp ~bounces ~exposure ~width ~height scene) in
+  let tracer = get (P.create ~spp ~bounces ~exposure ~profile:(Sys.getenv_opt "PT_BENCH" <> None) ~width ~height scene) in
   for _ = 1 to frames do get (P.render tracer camera); get (P.flush tracer) done;
   let msl = Bytes.copy (get (Rays.Image.Private.pixels (P.image tracer))) in
   P.destroy tracer;
@@ -112,10 +112,18 @@ let () =
     gpu (Ogpu.Backend.complete_through queue (gpu (Ogpu.Backend.commit commands)).epoch);
     let pipelines = Flow_gpu.Pipelines.create ~clock:Unix.gettimeofday device in
     fun program ->
-      let runner = Flow_gpu.Run.create lease pipelines (ok (Flow_gpu.Emit.kernel ~fast:true program)) in
+      let msl = ok (Flow_gpu.Emit.kernel ~fast:true program) in
+      Option.iter (fun path -> Out_channel.with_open_bin path (fun o -> output_string o msl.Flow_gpu.Emit.source)) (Sys.getenv_opt "PT_DUMP");
+      let runner = Flow_gpu.Run.create lease pipelines msl in
       let values = ok (Flow_ir.Packed.Private.prepare ~fast:true program ~live) in
       let scene = { Flow_gpu.Run.accel = blas; vertices; spheres; sphere_count = 0; instances = None } in
-      let result = vec4 (ok (Flow_gpu.Run.readback (ok (Flow_gpu.Run.dispatch runner ~scene values)))) in
+      let dispatched = ok (Flow_gpu.Run.dispatch runner ~scene values) in
+      (match Sys.getenv_opt "PT_BENCH" with
+       | Some _ -> for _ = 1 to 5 do
+           let again = ok (Flow_gpu.Run.dispatch runner ~scene values) in
+           Printf.printf "lisp kernel GPU ms: %s\n%!" (match Flow_gpu.Run.gpu_seconds again with Some s -> Printf.sprintf "%.2f" (s *. 1000.) | None -> "n/a") done
+       | None -> ());
+      let result = vec4 (ok (Flow_gpu.Run.readback dispatched)) in
       Flow_gpu.Run.close runner; result in
   let compare name run =
     let total = Array.make (width * height * 3) 0. in
