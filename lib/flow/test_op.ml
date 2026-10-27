@@ -47,7 +47,8 @@ let check (o : Op.t) args =
   with Diagnostic.Error d -> failwith (o.name ^ ": " ^ d.code ^ ": " ^ d.message)
 
 let () =
-  assert (List.length Op.all = 170);
+  assert (List.length Op.all = 171);
+  for id = 0 to 9 do Ray_host.register id (fun _ -> Ray_host.miss) done;
   let repr=Option.get(Op.find "text/repr" Context.value) in
   List.iter(fun text -> assert(check repr ["text",Text text]=Text(Printf.sprintf "%S" text)))
     [String.init 256 Char.chr;"";"é日本😀\000\b\t\n\r\\\""];
