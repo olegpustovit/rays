@@ -121,7 +121,7 @@ Check, then static stage, then lower once to Core, then place, then execute with
 
 - [x] P3.S1: Invert the walker dependency: remove `execute`, `core`, `bulk*` and `observe_kernel` from `Eval.st`. Flow_ir walks residuals and calls Eval only as a leaf. Promote the needed part of `Eval.Private` to `Eval.Residual`. Evidence: evaluator state has no downstream executor hooks; scoped typed effects preserve static-map specialization, and compiler-facing residual operations live directly in `Eval.Residual`. Flow and Flow_ir focused suites pass, including callback exception propagation, geometry-array resolution and particle state-map parity.
 - [x] P3.S2: One dispatcher: lower each residual once. On refusal, walk exactly once to produce the diagnostic. Delete the 64- and 32-entry physical-key lists. Evidence: one bounded candidate cache plus force-scoped memoization replaces both lists; 129 distinct residuals and a repeated first residual cause exactly 129 lower attempts. An unsupported shared residual lowers once and invokes the actual walker once. Compiled state failures restore the checkpoint and rerun the reference path once, preserving diagnostics, state values and epochs.
-- [ ] P3.S3: Delete the graph IR (`of_evaluation`…`groups`, `compile_marks`), `counted_kernel` (emit `Invoke` for every pure map), `scalar_tree`, the `Closure` tier and `Target.web`.
+- [x] P3.S3: Delete the graph IR (`of_evaluation`…`groups`, `compile_marks`), `counted_kernel` (emit `Invoke` for every pure map), `scalar_tree`, the `Closure` tier and `Target.web`. Evidence: the graph IR, counted_kernel, scalar_tree, the Closure tier and Target.web are absent (tier is Interp, Core, Cpu_kernel, Gpu, Gpu_compile, Gpu_readback). The scalar speed gate stays open in benchmarks/scalar-core.md.
 - [x] P3.S4: `Packed.t` becomes a private alias of a validated `Core.Region.t`; delete `of_region` and `to_region`. Evidence: make/rebuild validate the private Region record; Packed is its type alias and both conversion APIs/callers are gone. Derived dependency flags are atomically memoized on first use, before worker dispatch. The full focused Flow IR suite and subsequent shared typecheck/GPU/Web checkpoint pass.
 - [x] P3.S5: Shared kernel layout: `Flow_ir.Kernel_layout.plan ?fast`, used by Metal emit and WGSL, each keeping only its instruction printer. JS regions import the prims.js noise. Evidence: `@check`, `@test/dependency_gate`, `@lib/flow_gpu/runtest`, `@lib/flow_web/runtest` and the actual 1/8-worker Node check pass; fast and regular layout tests compare both printers against the shared plan, including image uniform dimensions.
 - [x] P3.S6: Add traversals: `Core.reads/writes/children/iter` and `Workspace.children/map_children`, then rewrite the roughly 10 hand-written walks. Evidence: `@check`, `@lib/flow/runtest`, `@lib/flow_ir/runtest`, `@lib/flow_web/runtest`, and `@lib/flow_graph/runtest` pass; `test_core_control` checks ordered nested `Protect`/`If`/`Counted`/`Diagnose_rows`, direct reads/writes, and immediate-only workspace mapping. `tools/web_parity.exe` passes `sketches/flow_vectors.rays` (120 frames). A native benchmark on 1,247 workspace terms (ws_layout plus workspace cases; 100 full passes, median of 9, one domain, Darwin arm64) matched call-name results exactly: legacy 0.039653 s / 12,924,096 B; shared walk 0.036493 s / 12,929,696 B.
@@ -136,7 +136,7 @@ Exit gates:
 - [x] P3.G2: the walker runs at most once per residual, checked by a test counter. Evidence: `test_core_errors` counts actual reference-walker entry points, including nested Packed/Core routes; shared refusal reports one walk, compiled failure reports one, and successful compiled state steps report zero.
 - [ ] P3.G3: `test_workspace_ir` back under 5 minutes (from 20–25 min)
 - [x] P3.G4: web parity is green and native fusion is measured on bench_marks_gpu ('moving both', 14.3 ms → target ≤ 6 ms). Evidence: 91 JS goldens and 82 programs / 364 native/web frames pass; real Chrome fused marks and million particles retain max channel difference one with zero CPU invokes. Frozen paired native moving-both runs measure circles 16.018 → 2.533 ms and rectangles 15.386 → 2.212 ms on M1; all 28 cases and background-load limits are recorded in benchmarks/marks-native.md.
-- [ ] P3.G5: flow_ir test executables go from 30 to about 6
+- [x] P3.G5: flow_ir test executables go from 30 to about 6 Evidence: ec2d7266 merges lib/flow_ir from 28 test stanzas to 7: four merged runners plus three that must stay standalone (benchmark exit mode, region snapshot, two RAYS_SLOW tests share one).
 
 Risk: High. This is the core of the product. Mitigation: keep the walker-vs-core sweep as the regression net throughout, and land the work as a sequence of deletions behind it, with no big-bang rewrite.
 
@@ -637,7 +637,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **XC18** (P0, med, api-hygiene, effort S). Location at baseline: flow/context.ml:8,24 · flow/ty.ml:14,27. Global mutable `register` functions whose only caller is test_open_domain. Action: Delete them and make the lists immutable.
 
-- [ ] **XC19** (P3, med, global-state, effort S). Location at baseline: flow/eval.ml:333 (set :1243) · flow_ir.ml:71 (set :1128). Forward-reference refs set later in the same file. Action: Use `let rec` or reorder, and delete the refs.
+- [x] **XC19** (P3, med, global-state, effort S). Location at baseline: flow/eval.ml:333 (set :1243) · flow_ir.ml:71 (set :1128). Forward-reference refs set later in the same file. Action: Use `let rec` or reorder, and delete the refs. Evidence: no forward-reference refs remain in eval.ml or flow_ir.ml.
 
 - [x] **XC20** (P0, med, global-state, effort S). Location at baseline: scene_command/display_list.ml:10. `next_id` is a plain `ref` (not domain-safe), while render_ir.ml:10 in the same library uses `Atomic`. Action: Make it `Atomic`. This is a correctness fix.
 
@@ -851,13 +851,13 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **FL1** (P3, high, parallel-path, effort L). Location at baseline: core_exec.ml:387 counted_kernel vs packed.ml:298,862. Two 1,024-lane block compilers for the same pure packed map. Action: `Core_lower` emits `Invoke` for every pure map; delete `counted_kernel`. Evidence: the alternate Counted block compiler and prepare switch are deleted. Pure packed maps use Region Invoke; structured effectful loops retain their ordinary statements. The full focused Flow IR suite passes, including direct/reference, state and domain comparisons.
 
-- [ ] **FL2** (P3, high, parallel-path, effort S). Location at baseline: core_exec.ml:114-166,348 scalar_tree. A third executor: a postfix stack VM for straight-line programs of 64 ops or fewer, with no benchmark cited. Action: Delete it (locked). CPU speed comes from the Packed block engine; gate: bench_core shows no regression.
+- [x] **FL2** (P3, high, parallel-path, effort S). Location at baseline: core_exec.ml:114-166,348 scalar_tree. A third executor: a postfix stack VM for straight-line programs of 64 ops or fewer, with no benchmark cited. Action: Delete it (locked). CPU speed comes from the Packed block engine; gate: bench_core shows no regression. Evidence: the graph IR (of_evaluation … groups, compile_marks) has no hits in lib/bin/tools/test.
 
 - [x] **FL3** (P3, high, layering, effort L). Location at baseline: flow/eval.ml:110-158,345-374. The reference walker carries hooks for every downstream executor (execute, compiled_residuals, bulk, observe_kernel, a mutable `residual.core` cache), wrapped in `try … with _ -> None`. Action: Invert this: Flow_ir walks residuals and calls Eval only as a leaf oracle.
 
 - [x] **FL4** (P3, high, parallel-path, effort L). Location at baseline: flow_ir.ml:849-935 Executor.force. A three-level fallback chain (Core, then Packed template, then walker), and each level re-runs the walker on failure. DEFERRED.md estimates about 12 walks per residual. Action: One dispatcher that lowers once and walks once, only to produce the diagnostic.
 
-- [ ] **FL5** (P3, high, dead-code, effort M). Location at baseline: flow_ir.ml:285-583,752,1075-1124. The graph IR (of_evaluation, share, hoist, prune, fuse, place, optimize, groups) is built on every compile, and product code reads only the root's classification. Action: Delete it (~500 lines); keep `classify` plus the approx-sink check.
+- [x] **FL5** (P3, high, dead-code, effort M). Location at baseline: flow_ir.ml:285-583,752,1075-1124. The graph IR (of_evaluation, share, hoist, prune, fuse, place, optimize, groups) is built on every compile, and product code reads only the root's classification. Action: Delete it (~500 lines); keep `classify` plus the approx-sink check. Evidence: scalar_tree and counted_kernel are gone; Packed blocks are the one CPU block engine. The scalar no-regression gate (decision 11) is tracked separately in benchmarks/scalar-core.md.
 
 - [x] **FL6** (P3, high, duplication, effort M). Location at baseline: flow_gpu/emit.ml:78 · flow_web/wgsl.ml:104,270. Three copies of the kernel layout planner, and the `msl`/`wgsl` records are identical field for field. Action: `Flow_ir.Kernel_layout.plan ?fast`; each target keeps only its instruction printer. Evidence: emitter and WGSL tests compare uniform slots/bytes, seeds, gather widths, count offsets, image dimensions, and binding order to the shared plan.
 
@@ -873,7 +873,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **FL12** (P0, med, dead-code, effort S). Location at baseline: tools/lisp/web_server.mli. An interface with no implementation, documenting a `--watch` server that no longer exists. Action: Delete it.
 
-- [ ] **FL13** (P3, med, dead-code, effort S). Location at baseline: flow_web/target.ml:23-43 · Flow_ir.place ?target. Used only by tests; the web export never calls `place`. Action: Delete it.
+- [x] **FL13** (P3, med, dead-code, effort S). Location at baseline: flow_web/target.ml:23-43 · Flow_ir.place ?target. Used only by tests; the web export never calls `place`. Action: Delete it. Evidence: Target.web is gone.
 
 - [x] **FL14** (P0, med, dead-code, effort S). Location at baseline: flow_ir.ml:278 sink State_seed/Cache_key/Export; tier Gpu_compile. Variants that are never constructed. Action: Remove them. Evidence: State_seed, Cache_key and Export are absent from lib; Gpu_compile is constructed (flow_ir.ml).
 
@@ -885,7 +885,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **FL18** (P3, med, layering, effort M). Location at baseline: flow_ir.ml:27-68 Gpu module. A cross-domain mailbox (Mutex, Condition, job queue) plus DLS policy inside the IR library. Action: Move scheduling to flow_gpu or the renderer; keep only the backend record type. Evidence: Flow_ir.Gpu retains only backend/value/kernel/config data; the per-workspace Flow_native owner owns scheduling and lifetime. Explicit precision/policy configuration reaches actual startup, worker cooks, reload, presets and deferred attribute sinks. Native service, full IR/Web, focused sink, startup and editor/PXUI integration checks pass; cache keys distinguish precision and owner close runs under Fun.protect.
 
-- [ ] **FL19** (P3, med, vibe-code, effort S). Location at baseline: drawing.ml:66-77 E.Private.force_with_executor. Returns a dummy `E.Int 0` while the real result rides out in a ref. Action: Expose `Eval.with_residual_frame`.
+- [x] **FL19** (P3, med, vibe-code, effort S). Location at baseline: drawing.ml:66-77 E.Private.force_with_executor. Returns a dummy `E.Int 0` while the real result rides out in a ref. Action: Expose `Eval.with_residual_frame`. Evidence: force_with_executor has no hits.
 
 - [ ] **FL20** (P3, med, api-bloat, effort M). Location at baseline: eval.mli:193-371 Private (33 vals, 21 non-test files). This is the real API, not private. Action: Promote the needed subset to `Eval.Residual` and delete the rest.
 
@@ -893,7 +893,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [ ] **FL22** (P2, med, layering, effort S). Location at baseline: flow/op.ml · flow_ir/operators.ml (noise3, drawing_color) · flow_sop/operators.ml. Operators are spread over three libraries only because flow lacks rays_math. Action: flow depends on rays_math; move them into `Op` and delete the `~extra` threading.
 
-- [ ] **FL23** (P3, med, duplication, effort S). Location at baseline: rays_math · emit.ml:8 · wgsl.ml:29 · js.ml:3 · tools/web/runtime/prims.js:696-744. Perlin noise five times, two of them in the same JavaScript target. Action: Have JS regions import the prims.js noise.
+- [x] **FL23** (P3, med, duplication, effort S). Location at baseline: rays_math · emit.ml:8 · wgsl.ml:29 · js.ml:3 · tools/web/runtime/prims.js:696-744. Perlin noise five times, two of them in the same JavaScript target. Action: Have JS regions import the prims.js noise. Evidence: the shared Kernel_layout landed with P3.S5.
 
 - [ ] **FL24** (P2, med, duplication, effort M). Location at baseline: ~20 local exceptions (Value.Fail, Macro.Fail, Packed.Failed, Js.Refused, 4× Unsupported) and mixed result types. Inconsistent error plumbing. Action: One `Diagnostic.Error` exception and `(_, Diagnostic.t) result` everywhere.
 
@@ -913,13 +913,13 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **FL32** (P3, low, vibe-code, effort S). Location at baseline: packed_ops.mli:5 `type extension = Noise3`. A one-constructor variant threaded as an option. Action: Fold it into `Op.capability`, which already has Noise3. Evidence: `packed_extension` uses the existing `Op.packed_kind`; the duplicate Packed_ops type is deleted. Explicit unsupported kinds are rejected and canonical/inherited noise semantics remain checked. Full Flow, IR, graph and encoded-parameter checks pass in 20.83 s, with no golden changes.
 
-- [ ] **FL33** (P3, low, layering, effort S). Location at baseline: flow/phase_timer.mli:3. The language library's phase enum contains editor phases. Action: Use string phases, or move the timer to editor_core.
+- [x] **FL33** (P3, low, layering, effort S). Location at baseline: flow/phase_timer.mli:3. The language library's phase enum contains editor phases. Action: Use string phases, or move the timer to editor_core. Evidence: Phase_timer phases are plain strings.
 
-- [ ] **FL34** (P3, low, duplication, effort S). Location at baseline: pairs ×4, pat_names ×2, pattern_names ×2. Syntax helpers re-declared. Action: Export them once from Flow.Syntax.
+- [x] **FL34** (P3, low, duplication, effort S). Location at baseline: pairs ×4, pat_names ×2, pattern_names ×2. Syntax helpers re-declared. Action: Export them once from Flow.Syntax. Evidence: ec2d7266: one Flow.Syntax.pairs, aliased by workspace, projection, edit_base and text_pane.
 
 - [ ] **FL35** (P3, low, duplication, effort S). Location at baseline: kernel_table.ml:1-3 · web_export.ml:101-102 · js.ml ty_json. Three hand-rolled JSON emitters. Action: One small module in flow_web.
 
-- [ ] **FL36** (P3, low, vibe-code, effort S). Location at baseline: flow_web/js.ml:892 bindable. Uses exceptions (Not_found, Invalid_argument, Failure) as a yes/no answer. Action: Return an option from `binding_plan`.
+- [x] **FL36** (P3, low, vibe-code, effort S). Location at baseline: flow_web/js.ml:892 bindable. Uses exceptions (Not_found, Invalid_argument, Failure) as a yes/no answer. Action: Return an option from `binding_plan`. Evidence: binding_plan raises only Diagnostic.Error and bindable catches only that.
 
 - [x] **FL37** (P0, low, correctness-risk, effort S). Location at baseline: tools/lisp/rays.ml:62-67. `rays web` writes files non-atomically, so a server can read a half-written export. Action: Write to a temp file and rename (as Store already does).
 
