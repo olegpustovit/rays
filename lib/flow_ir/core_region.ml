@@ -88,7 +88,7 @@ let carried_loop ~emit ~scope ~finishes ty (control:loop) step =
 let rec integer_work = function
   | Int_const _ -> false
   | Int_input _ | Int_uniform _ | Int_frame _ | Int_accumulator | Int_binary _ | Int_compare _
-  | Int_abs _ | Convert _ | Int_select _ | Rand_at _ | Raise _
+  | Int_abs _ | Convert _ | Int_select _ | Rand_at _ | Trace _ | Raise _
   | Array_prepare _ | Gather _ | Int_gather _
   | Text_const _ | Text_input _ | Text_uniform _ | Text_gather _ | Text_select _
   | Loop_begin _ | Loop_carry _ | Loop_end _ | Loop_result _ -> true
@@ -279,6 +279,15 @@ let operation ~emit ~as_float ~as_int ~literal ~is_table ~component ~guards
           else let width=width_of t.ty in Array.init width(fun component->emit(Gather(prepared,index,width,component))) in
         {registers;constant=None;fields=[]}
     | _ -> refuse ~at:t "E_PACKED_CAPTURE" "Array lookup requires an invariant numeric table."
+  end
+  else if kind=Flow.Op.Trace then begin
+    let registers=Array.of_list(List.concat_map(fun e->Array.to_list e.registers)
+      (List.mapi(fun i e->if i=0 then as_int e else as_float e) expressions))in
+    if Array.length registers<>10 then refuse ~at:t "E_PACKED_TYPE" "scene/trace needs an integer scene and scalar or vec3 arguments.";
+    let field k={registers=[|emit(Trace(k,registers))|];constant=None;fields=[]} in
+    {registers=[||];constant=None;fields=["t",field 0;"prim",{registers=[|emit(Convert(Truncate,(field 1).registers.(0)))|];constant=None;fields=[]};
+      "u",field 2;"v",field 3;"normal",{registers=[|emit(Trace(4,registers));emit(Trace(5,registers));emit(Trace(6,registers))|];constant=None;fields=[]};
+      "hit",field 7]}
   end
   else if kind=Flow.Op.Checked_mul || kind=Flow.Op.Checked_fma then begin
     (* ponytail: one destination per instruction computes both projections

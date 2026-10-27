@@ -146,6 +146,7 @@ let kernel ?(fast=false) program = try
       | Convert (Ceil,a) -> "long(ceil(" ^ float_of a ^ "))"
       | Convert (Round,a) -> "long(round(" ^ float_of a ^ "))"
       | Text_const _ | Text_input _ | Text_uniform _ | Text_gather _ | Text_select _ -> fail "Text kernels stay on the CPU."
+      | Trace _ -> fail "scene/trace has no MSL ray-query binding yet."
       | Select (condition,yes,no) -> Printf.sprintf "(%s!=0.0f?%s:%s)" (register condition) (register yes) (register no)
       | Noise3 (x,y,z,seed,octaves,_,_) -> Printf.sprintf "fbm(float3(%s,%s,%s),%d,table+%d)"
           (register x) (register y) (register z) octaves (table seed)

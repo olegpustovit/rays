@@ -74,6 +74,7 @@ let builder () =
         | Rand_at(seed,index) -> Rand_at(at seed,at index)
         | Fma(a,b,c) -> Fma(at a,at b,at c)
         | Checked_mul(p,a,b) -> Checked_mul(p,at a,at b)
+        | Trace(field,r) -> Trace(field,Array.map at r)
         | Checked_fma(p,a,b,c) -> Checked_fma(p,at a,at b,at c)
         | Select (a, b, c) -> Select (at a, at b, at c)
         | Int_select (a,b,c) -> Int_select(at a,at b,at c)

@@ -42,7 +42,7 @@ type arithmetic = { apply : 'f 'r. ('f, 'r) Value.t -> ('f, 'r) Value.t -> ('f, 
 type packed_kind = Binary of Packed_ops.binary | Unary of Packed_ops.unary
   | Integer of Packed_ops.integer | Integer_compare of Packed_ops.comparison
   | Convert of Packed_ops.conversion
-  | Noise3 | Fma | Checked_mul | Checked_fma | Rand_at | Length | Dot | Cross | Normalize | Exact | Gather | Frame | Constant_only
+  | Noise3 | Fma | Checked_mul | Checked_fma | Rand_at | Trace | Length | Dot | Cross | Normalize | Exact | Gather | Frame | Constant_only
 type t = {
   name : string; ctx : Context.t; signature : signature;
   out : Ty.t list -> Ty.t;
@@ -861,6 +861,15 @@ let all = frame @ arrays @ reductions @ draw @ host @ integers @ images @ [
       let value=Float.fma a b c in
       let valid=Float.is_finite value in
       Record ["value",Float(if valid then value else 0.);"valid",Bool valid]};
+  (let hit = Ty.Record ["t",Ty.Float;"prim",Ty.Int;"u",Ty.Float;"v",Ty.Float;"normal",Ty.Vec3;"hit",Ty.Bool] in
+   { (mk ~category:"Scene" "scene/trace" ["scene",Ty.Int;"origin",Ty.Vec3;"dir",Ty.Vec3;"tmin",Ty.Float;"tmax",Ty.Float;"time",Ty.Float]
+    (fun _ -> hit)
+    {run=fun ~name ~node:_ args ->
+      let f key=fin name(num(List.assoc key args)) in
+      let ox,oy,oz=Value.comps(List.assoc "origin" args) and dx,dy,dz=Value.comps(List.assoc "dir" args) in
+      let h=Ray_host.query(Value.int_of(List.assoc "scene" args)) [|ox;oy;oz;dx;dy;dz;f "tmin";f "tmax";f "time"|] in
+      Record ["t",Float h.t;"prim",Int h.prim;"u",Float h.u;"v",Float h.v;"normal",Vec3(h.nx,h.ny,h.nz);"hit",Bool h.hit]})
+     with live = true });
   mk ~category:"Random" "rand/at" ["seed",Ty.Int;"index",Ty.Int] (fun _->Ty.Float)
     {run=fun ~name:_ ~node:_ args -> match List.assoc "seed" args,List.assoc "index" args with
       | Int seed,Int index -> Float(Packed_ops.rand_at seed index)
@@ -1186,6 +1195,7 @@ let packed_kind op =
     | _ when op.name = "float/mul_checked" -> Some Checked_mul
     | _ when op.name = "float/fma_checked" -> Some Checked_fma
     | _ when op.name = "rand/at" -> Some Rand_at
+    | _ when op.name = "scene/trace" -> Some Trace
     | _ when op.name = "noise3" -> Some Noise3
     | _ when op.name = "exact" -> Some Exact
     | _ when op.name = "array/nth" -> Some Gather

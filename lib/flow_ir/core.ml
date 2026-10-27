@@ -96,6 +96,9 @@ module Region = struct
     | Binary of Flow.Packed_ops.binary * int * int | Unary of Flow.Packed_ops.unary * int
     | Noise3 of int * int * int * int * int * float * float | Fma of int * int * int | Rand_at of int * int | Select of int * int * int
     | Checked_mul of projection * int * int | Checked_fma of projection * int * int * int
+    | Trace of int * int array
+      (** One field (0 t, 1 prim, 2 u, 3 v, 4-6 normal, 7 hit) of a host ray query: registers
+          scene id, origin, direction, tmin, tmax, time. *)
     | Array_prepare of int * Flow.Ty.t
     | Gather of int * int * int * int | Int_gather of int * int
     | Text_const of string | Text_input of int | Text_uniform of int
@@ -126,6 +129,7 @@ module Region = struct
   let rec operands = function
     | Binary (_,a,b) | Int_binary (_,a,b) | Int_compare (_,a,b) | Rand_at(a,b) | Checked_mul(_,a,b)
     | Gather(a,b,_,_) | Int_gather(a,b) | Text_gather(a,b) -> [a;b]
+    | Trace (_,registers) -> Array.to_list registers
     | Unary (_,a) | Int_abs a | Convert (_,a) -> [a]
     | Noise3 (a,b,c,_,_,_,_) | Fma(a,b,c) | Select (a,b,c) | Int_select (a,b,c) | Text_select(a,b,c) | Checked_fma(_,a,b,c) -> [a;b;c]
     | Guarded (guards,instruction) -> List.map fst guards @ operands instruction
@@ -636,6 +640,7 @@ let pp fmt p =
        | Text_uniform i -> out "text_uniform u%d" i
        | Text_gather(a,i) -> out "text_gather(r%d r%d)" a i
        | Text_select(c,a,b) -> out "text_select(r%d r%d r%d)" c a b
+       | Trace (field,r) -> out "trace.%d(%s)" field (String.concat " " (List.map (Printf.sprintf "r%d") (Array.to_list r)))
        | Checked_fma(p,a,b,c) -> out "fma_checked.%s(r%d r%d r%d)" (match p with Value->"value"|Valid->"valid") a b c
        | Select (c, a, b) | Int_select (c,a,b) -> out "select(r%d r%d r%d)" c a b
        | Int_const n -> out "int:%d" n | Int_input i -> out "input:int[%d]" i

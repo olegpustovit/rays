@@ -1,7 +1,7 @@
 (library
  (name flow_sop)
  (public_name rays.flow_sop)
- (modules port instance_path curve network value_lane catalog manifest operators attribute_kernel attribute_metadata topology_kernel topology_kernel_impl graph_kernel group_kernel context_kernel function_kernel image_kernel lisp_node encoded_parameters node_sources lower)
+ (modules port instance_path curve network value_lane catalog manifest operators attribute_kernel attribute_metadata topology_kernel topology_kernel_impl graph_kernel group_kernel context_kernel function_kernel image_kernel lisp_node encoded_parameters node_sources lower trace_scene)
  (private_modules function_kernel lisp_node encoded_parameters node_sources attribute_metadata topology_kernel_impl graph_kernel group_kernel context_kernel)
  (libraries flow flow_ir lru param sop rays_diagnostic rays_math unix parallel))
 
@@ -300,3 +300,8 @@
  (deps
   (alias line_port)
   (alias points_port)))
+
+(test
+ (name test_trace)
+ (modules test_trace)
+ (libraries flow flow_ir flow_ir_test_support flow_web flow_sop rdk rdk_test_support rays_math input parallel))

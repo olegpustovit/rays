@@ -16,6 +16,7 @@ type instruction = Core.Region.instruction = Const of float | Input of int * int
   | Rand_at of int * int
   | Select of int * int * int
   | Checked_mul of projection * int * int | Checked_fma of projection * int * int * int
+  | Trace of int * int array
   | Array_prepare of int * Ty.t
   | Gather of int * int * int * int | Int_gather of int * int
   | Text_const of string | Text_input of int | Text_uniform of int
@@ -38,7 +39,7 @@ let operands = Core.Region.operands
 let rec typed_instruction = function
   | Int_const _ -> false (* compile-time configuration literals may be unused *)
   | Int_input _ | Int_uniform _ | Int_frame _ | Int_accumulator | Int_binary _ | Int_compare _
-  | Int_abs _ | Convert _ | Int_select _ | Raise _ | Rand_at _
+  | Int_abs _ | Convert _ | Int_select _ | Raise _ | Rand_at _ | Trace _
   | Array_prepare _ | Gather _ | Int_gather _
   | Text_const _ | Text_input _ | Text_uniform _ | Text_gather _ | Text_select _ -> true
   | Loop_begin _ | Loop_carry _ | Loop_end _ | Loop_result _ -> true
@@ -105,6 +106,8 @@ let gpu_refusals ?(fused=false) ?(fast=false) (t : t) =
   let reasons = ref [] in
   let refuse message = reasons := Diagnostic.error ~code:"E_GPU_FORM" message :: !reasons in
   if Array.exists Core.Region.text_register t.code then refuse "Text kernels stay on the CPU.";
+  if Array.exists (fun instruction -> match unguarded instruction with Trace _ -> true | _ -> false) t.code then
+    refuse "scene/trace stays on the CPU until the device ray-query binding lands.";
   (* fast precision (the workspace default) takes gathers and int32 on the device *)
   if not fast && Array.exists(fun instruction->match unguarded instruction with
     |Array_prepare _|Gather _|Int_gather _->true|_->false)t.code then
@@ -623,6 +626,10 @@ let run_typed ?column_source ?plane_outputs ?expected_count ~evaluate ~uniform ~
         | Checked_fma(p,a,b,c)->for j=first to last-1 do
             let a=finite(numeric a j) and b=finite(numeric b j) and c=finite(numeric c j) in
             floats.(at+j)<-checked_projection p (Float.fma a b c) done
+        | Trace(field,r)->for j=first to last-1 do
+            let q=Array.init 9(fun k->numeric r.(k+1) j) in
+            let h=Flow.Ray_host.query(int_of_float(numeric r.(0) j)) q in
+            floats.(at+j)<-finite(match field with 0->h.t|1->float h.prim|2->h.u|3->h.v|4->h.nx|5->h.ny|6->h.nz|_->if h.hit then 1. else 0.) done
         | Rand_at(seed,index)->let seed=seed*block_size and index=index*block_size in
             for j=first to last-1 do floats.(at+j)<-Flow.Packed_ops.rand_at
               integer.(seed+j) integer.(index+j) done
@@ -1343,7 +1350,7 @@ let rec run_all ?dispatch ?column_source ?plane_outputs ?expected_count ?state ?
                  if not(Float.is_finite x)then nonfinite ();scratch.(at+j)<-x done
              | Not -> for j = first to last - 1 do scratch.(at+j) <- if scratch.(a+j) = 0. then 1. else 0. done)
         | Int_input _ | Int_uniform _ | Int_frame _ | Int_accumulator | Int_binary _ | Int_compare _
-        | Int_abs _ | Convert _ | Int_select _ | Raise _ | Rand_at _ -> raise Unsupported in
+        | Int_abs _ | Convert _ | Int_select _ | Raise _ | Rand_at _ | Trace _ -> raise Unsupported in
       let execute dependent first last =
       for slot = 0 to Array.length t.code - 1 do
         if dependent_flags.(slot) = dependent && not omitted.(slot) then

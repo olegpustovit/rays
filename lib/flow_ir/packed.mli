@@ -13,6 +13,7 @@ type instruction = Core.Region.instruction = Const of float | Input of int * int
   | Noise3 of int * int * int * int * int * float * float | Fma of int * int * int | Rand_at of int * int
   | Select of int * int * int
   | Checked_mul of projection * int * int | Checked_fma of projection * int * int * int
+  | Trace of int * int array
   | Array_prepare of int * Flow.Ty.t
   | Gather of int * int * int * int | Int_gather of int * int
   | Text_const of string | Text_input of int | Text_uniform of int

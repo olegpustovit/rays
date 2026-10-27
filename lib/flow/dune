@@ -1,7 +1,7 @@
 (library
  (name flow)
  (public_name rays.flow)
- (modules phase_timer context symbol port_type check syntax text_lexer ty value op packed_ops lisp macro defnode workspace eval)
+ (modules phase_timer context symbol port_type check syntax text_lexer ty value ray_host op packed_ops lisp macro defnode workspace eval)
  (private_modules text_lexer)
  (libraries param input rays_diagnostic rays_math))
 

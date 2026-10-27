@@ -1,0 +1,38 @@
+(* P8.S2(a): scene/trace on the CPU. A .rays kernel traces a lattice of rays at a two-triangle quad; the
+   Packed kernel is bit-identical to the reference walker at 1 and 8 domains, and its t and prim match a
+   direct Surface_index.raycast. *)
+open Rdk
+open Rdk_test_support
+module P = Flow_ir.Packed
+let ok = function Ok v -> v | Error d -> failwith (Diagnostic.to_string d)
+let id = 7
+let count = 256
+let x i = (0.15 *. float (i mod 16)) -. 1.2 and y i = (0.15 *. float (i / 16)) -. 1.2
+let () =
+  let quad = Plane_generators.grid ~counts:Grid_point_counts ~connectivity:Grid_quads ~orientation:Grid_xy ~columns:2 ~rows:2 ~size:2. () |> get_ok in
+  (match Flow_sop.Trace_scene.register id quad with Ok () -> () | Error e -> failwith e);
+  let program = Test_program.compile (Printf.sprintf
+    "(map (fn [(i : int)] (let* [x (- (* 0.15 (float (int/mod i 16))) 1.2) y (- (* 0.15 (float (int/div i 16))) 1.2)
+        h (scene/trace %d [x y 5.] [0. 0. -1.] 0. 100. t)]
+      [h.t (float h.prim) (+ h.u h.v) (if h.hit (+ 1. (* h.normal.z h.normal.z)) 0.)])) (array/range %d :type int))" id count) in
+  let live = Input.at_time 1. in
+  let bytes v = Marshal.to_string v [Marshal.No_sharing] in
+  let reference = ok (P.reference program ~live) in
+  List.iter (fun domains -> Parallel.run ~domains (fun () ->
+    assert (bytes (ok (P.force ~strict:true program ~live)) = bytes reference))) [1; 8];
+  let values = match reference with Flow.Eval.Vec4_array v -> v | _ -> assert false in
+  let index = Result.get_ok (Surface_index.create quad) and hits = ref 0 in
+  for i = 0 to count - 1 do
+    let direct = Surface_index.raycast index ~origin:(Rays_math.Vec3.create (x i) (y i) 5.)
+        ~direction:(Rays_math.Vec3.create 0. 0. (-1.)) |> get_ok in
+    match direct with
+    | Some hit -> incr hits; assert (values.(4 * i) = hit.distance && values.(4 * i + 1) = float hit.primitive && values.(4 * i + 3) > 0.)
+    | None -> assert (values.(4 * i + 3) = 0. && values.(4 * i + 1) = -1.)
+  done;
+  assert (!hits > 0 && !hits < count);
+  (* flow_web refuses it with a typed diagnostic (P8.S2 d) *)
+  (match Flow_web.Js.region program with
+   | _ -> assert false
+   | exception Diagnostic.Error d -> assert (d.code = "E_WEB_SOURCE"));
+  Flow_sop.Trace_scene.unregister id;
+  Printf.printf "scene/trace CPU: %d of %d rays hit; Packed = walker at 1 and 8 domains; t and prim = Surface_index.raycast\n" !hits count
