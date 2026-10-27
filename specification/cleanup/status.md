@@ -259,6 +259,8 @@ size estimate, not the phase's behavioral or shipping gates.
 
 ## In progress and remaining proof
 
+- P8.S3 (2c809a35..423c6a7a): lib/rays_pathtracer/pathtrace.rays `trace-pixel` covers the camera (pinhole, thin lens), NEE+MIS, GGX/diffuse sampling, Russian roulette, the firefly clamp, accumulation and dome panels, through the normal Flow pipeline. Film A/B against pathtrace.metal (same PCG order): 16x12 byte-identical on CPU and Metal; 96x72x16 frames, 1/20,736 channels, RMSE 2.7e-5; 480x840 CPU, RMSE 1.0e-5. GPU is about 7x slower (93–105 ms vs 13.7 ms per frame, indicative only at load 60–78). Packed_ops.register_limit was raised to 16,384 for the per-pixel kernel. Open: the speed gap, the world map and CDF, motion, curves, bevel probes, then P8.S4.
+
 - P8 (db7c7e47, d969774b, 03b2fa63): scene/trace is instanced as a static kernel variant (TLAS from pack_instance_records; 192/256 rays hit, prim and instance exact, Metal within 1.4e-6 of CPU). Film accumulation is a bound in-place kernel plus resolve and Image_sink, bit-exact on Metal. basis, eval-brdf, power-weight, rect-hit, world-uv and world-dir are Lisp defns (GPU relative error 8e-5 or better). trace_pixel (bounce loop, NEE/MIS, panels, world CDF, thin lens, bevel probes) is unported; motion and curves are missing from scene/trace.
 - P3 scalar gate (0cda0bc1): zero-size call counters and pooled scalar locals cut 360 → 304 B per evaluation. CPU time could not be measured: load average was 100–130 during the run. Re-measure on an idle host.
 - P5.G4: every product function in rays_editor, pxui and pxui_graph is under 300 lines. Over budget: tests test_ui run (811) and with_scale (476), and test_pxui_graph scope_gestures (389).
