@@ -20,6 +20,7 @@ type t = {
   gather_base : int;
   count_base : int;
   counts : int option;
+  scene_binding : int option;
 }
 
 let rec guarded = function
@@ -106,7 +107,9 @@ let plan ?(fast = false) ?(image = false) program =
     input_count = count; output_count = outputs;
     input_used; uniform_layout = List.rev !uniform_layout; uniform_bytes = !offset;
     uniform_binding; status_binding; table_binding;
-    gather_base; count_base; counts }
+    gather_base; count_base; counts;
+    scene_binding = (if Array.exists (fun i -> match guarded i with Packed.Trace _ -> true | _ -> false) view.code
+      then Some (count_base + (if counts = None then 0 else 2)) else None) }
 
 let uniform_words plan = (plan.uniform_bytes + 15) / 16
 

@@ -106,8 +106,8 @@ let gpu_refusals ?(fused=false) ?(fast=false) (t : t) =
   let reasons = ref [] in
   let refuse message = reasons := Diagnostic.error ~code:"E_GPU_FORM" message :: !reasons in
   if Array.exists Core.Region.text_register t.code then refuse "Text kernels stay on the CPU.";
-  if Array.exists (fun instruction -> match unguarded instruction with Trace _ -> true | _ -> false) t.code then
-    refuse "scene/trace stays on the CPU until the device ray-query binding lands.";
+  if not fast && Array.exists (fun instruction -> match unguarded instruction with Trace _ -> true | _ -> false) t.code then
+    refuse "scene/trace needs fast precision and a bound acceleration structure.";
   (* fast precision (the workspace default) takes gathers and int32 on the device *)
   if not fast && Array.exists(fun instruction->match unguarded instruction with
     |Array_prepare _|Gather _|Int_gather _->true|_->false)t.code then
@@ -301,6 +301,7 @@ let rec typed_total ranges inputs = function
   | Guarded(_,body) -> typed_total ranges inputs body
   | _ -> false
 
+let trace_field field (h:Flow.Ray_host.hit)=match field with 0->h.t|1->float h.prim|2->h.u|3->h.v|4->h.nx|5->h.ny|6->h.nz|_->if h.hit then 1. else 0.
 let run_typed ?column_source ?plane_outputs ?expected_count ~evaluate ~uniform ~seed (t : t) ~live =
   let carried=Array.fold_left(fun count instruction->match unguarded instruction with
     |Loop_begin loop->max count(Array.length loop.initial)|_->count)0 t.code in
@@ -626,13 +627,9 @@ let run_typed ?column_source ?plane_outputs ?expected_count ~evaluate ~uniform ~
         | Checked_fma(p,a,b,c)->for j=first to last-1 do
             let a=finite(numeric a j) and b=finite(numeric b j) and c=finite(numeric c j) in
             floats.(at+j)<-checked_projection p (Float.fma a b c) done
-        | Trace(field,r)->for j=first to last-1 do
-            let q=Array.init 9(fun k->numeric r.(k+1) j) in
-            let h=Flow.Ray_host.query(int_of_float(numeric r.(0) j)) q in
-            floats.(at+j)<-finite(match field with 0->h.t|1->float h.prim|2->h.u|3->h.v|4->h.nx|5->h.ny|6->h.nz|_->if h.hit then 1. else 0.) done
+        | Trace(field,r)->for j=first to last-1 do floats.(at+j)<-finite(trace_field field (Flow.Ray_host.query(int_of_float(numeric r.(0) j)) (Array.init 9(fun k->numeric r.(k+1) j)))) done
         | Rand_at(seed,index)->let seed=seed*block_size and index=index*block_size in
-            for j=first to last-1 do floats.(at+j)<-Flow.Packed_ops.rand_at
-              integer.(seed+j) integer.(index+j) done
+            for j=first to last-1 do floats.(at+j)<-Flow.Packed_ops.rand_at integer.(seed+j) integer.(index+j) done
         | Unary(op,a)->for j=first to last-1 do floats.(at+j)<-finite(unary_apply op (numeric a j)) done
         | Noise3(x,y,z,seed,octaves,lacunarity,gain)->for j=first to last-1 do
             floats.(at+j)<-finite(Rays_math.Noise.Private.fbm3_with_scratch scratch (noise seed)

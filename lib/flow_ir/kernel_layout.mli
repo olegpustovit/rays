@@ -21,6 +21,8 @@ type t = {
   gather_base : int;
   count_base : int;
   counts : int option;
+  scene_binding : int option;
+      (** [scene/trace]: the acceleration structure's buffer index; the triangle vertices follow. *)
 }
 
 (** [fast] includes gather lengths and the count record; [image] reserves the two

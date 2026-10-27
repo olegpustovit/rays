@@ -803,7 +803,17 @@ let text_float = mk ~category:"Text" "text/float" ["value", Ty.Float] (fun _ -> 
     | Float value -> Text (Param.float_text value)
     | _ -> fail "E_METADATA_TEXT" "text/float takes a float."}
 
-let all = frame @ arrays @ reductions @ draw @ host @ integers @ images @ [
+let scene_trace =
+  let hit = Ty.Record ["t",Ty.Float;"prim",Ty.Int;"u",Ty.Float;"v",Ty.Float;"normal",Ty.Vec3;"hit",Ty.Bool] in
+  { (mk ~category:"Scene" "scene/trace" ["scene",Ty.Int;"origin",Ty.Vec3;"dir",Ty.Vec3;"tmin",Ty.Float;"tmax",Ty.Float;"time",Ty.Float]
+    (fun _ -> hit)
+    {run=fun ~name ~node:_ args ->
+      let f key=fin name(num(List.assoc key args)) in
+      let ox,oy,oz=Value.comps(List.assoc "origin" args) and dx,dy,dz=Value.comps(List.assoc "dir" args) in
+      let h=Ray_host.query(Value.int_of(List.assoc "scene" args)) [|ox;oy;oz;dx;dy;dz;f "tmin";f "tmax";f "time"|] in
+      Record ["t",Float h.t;"prim",Int h.prim;"u",Float h.u;"v",Float h.v;"normal",Vec3(h.nx,h.ny,h.nz);"hit",Bool h.hit]})
+     with live = true }
+let all = scene_trace :: frame @ arrays @ reductions @ draw @ host @ integers @ images @ [
   float_unary "tan" tan;
   float_unary "asin" asin;
   float_unary "acos" acos;
@@ -861,15 +871,6 @@ let all = frame @ arrays @ reductions @ draw @ host @ integers @ images @ [
       let value=Float.fma a b c in
       let valid=Float.is_finite value in
       Record ["value",Float(if valid then value else 0.);"valid",Bool valid]};
-  (let hit = Ty.Record ["t",Ty.Float;"prim",Ty.Int;"u",Ty.Float;"v",Ty.Float;"normal",Ty.Vec3;"hit",Ty.Bool] in
-   { (mk ~category:"Scene" "scene/trace" ["scene",Ty.Int;"origin",Ty.Vec3;"dir",Ty.Vec3;"tmin",Ty.Float;"tmax",Ty.Float;"time",Ty.Float]
-    (fun _ -> hit)
-    {run=fun ~name ~node:_ args ->
-      let f key=fin name(num(List.assoc key args)) in
-      let ox,oy,oz=Value.comps(List.assoc "origin" args) and dx,dy,dz=Value.comps(List.assoc "dir" args) in
-      let h=Ray_host.query(Value.int_of(List.assoc "scene" args)) [|ox;oy;oz;dx;dy;dz;f "tmin";f "tmax";f "time"|] in
-      Record ["t",Float h.t;"prim",Int h.prim;"u",Float h.u;"v",Float h.v;"normal",Vec3(h.nx,h.ny,h.nz);"hit",Bool h.hit]})
-     with live = true });
   mk ~category:"Random" "rand/at" ["seed",Ty.Int;"index",Ty.Int] (fun _->Ty.Float)
     {run=fun ~name:_ ~node:_ args -> match List.assoc "seed" args,List.assoc "index" args with
       | Int seed,Int index -> Float(Packed_ops.rand_at seed index)

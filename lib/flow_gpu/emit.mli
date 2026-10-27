@@ -1,7 +1,7 @@
 type msl = private {source : string; entry : string; interface : Ogpu.Shader.binding list;
   uniform_layout : (string * int * int) list; uniform_bytes : int;
   table_seeds : int array; output_widths : int array; input_widths : int array;
-  gathers : (int * int) array; counts : int option}
+  gathers : (int * int) array; counts : int option; scene : int option}
 (* [gathers.(k)] is the uniform whose array the kernel's [gather<k>] buffer holds, and its element width.
    [counts] (fast kernels): the byte offset of three uniform words mul, div and use; the kernel's
    count is the dispatch count, or its minimum with [count_in[0] * mul / div] when use is set,

@@ -69,11 +69,13 @@ let ensure t slot length =
 (* [wait] false leaves the dispatch in flight (no completion wait, no status read): a resident fold
    chains its regions and waits once.  [bound i] / [bound_table u] name a device buffer that already
    holds input [i] / the table of uniform [u], which is then not uploaded. *)
-let dispatch ?(wait=true) ?(reset_status=true) ?commands ?count ?into ?(bound=fun _ -> None) ?(bound_table=fun _ -> None) t (values : P.Private.inputs) =
+let msl_scene t = t.msl.Emit.scene
+let dispatch ?(wait=true) ?(reset_status=true) ?commands ?count ?into ?(bound=fun _ -> None) ?(bound_table=fun _ -> None) ?scene t (values : P.Private.inputs) =
   let error message = Error (Diagnostic.error ~code:"E_KERNEL" message) in
   if t.closed || Domain.self ()<>t.domain then error "GPU program owner is closed or called from another domain."
   else if values.count<0 || values.count>Int32.to_int Int32.max_int ||
     values.count>Sys.max_string_length/4/Array.fold_left max 1 t.msl.output_widths then error "GPU count exceeds native storage bounds."
+  else if (msl_scene t<>None) <> (scene<>None) then error "GPU scene binding changed."
   else if Array.length values.arrays<>Array.length t.inputs then error "GPU input arity changed."
   else if Array.exists (fun index -> Array.length values.arrays.(index)<values.count*t.msl.input_widths.(index))
       (Array.init (Array.length t.inputs) Fun.id) then error "GPU input count changed."
@@ -183,6 +185,11 @@ let dispatch ?(wait=true) ?(reset_status=true) ?commands ?count ?into ?(bound=fu
         let index=index+Array.length gathers in
         Option.iter (fun (cell,out) -> get (B.set_buffer encoder ~index cell);
           get (B.set_buffer encoder ~index:(index+1) out)) counted;
+        Option.iter (fun (accel,vertices) ->
+          let index=Option.get msl.scene in
+          get (B.set_accel encoder ~index accel);
+          get (B.set_buffer encoder ~index:(index+1) vertices);
+          get (B.compute_use_accels encoder [accel])) scene;
         get (B.dispatch_threads encoder ~threads:(values.count,1,1) ~threadgroup:(256,1,1))) in
     match commands with
     | Some commands -> encode commands;

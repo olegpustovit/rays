@@ -3,7 +3,7 @@ module S = Ogpu.Shader
 type msl = {source : string; entry : string; interface : S.binding list;
   uniform_layout : (string * int * int) list; uniform_bytes : int;
   table_seeds : int array; output_widths : int array; input_widths : int array;
-  gathers : (int * int) array; counts : int option}
+  gathers : (int * int) array; counts : int option; scene : int option}
 let names = Flow.Packed_ops.names
 let perlin = {|float fade(float t) { return t*t*t*(t*(t*6.0f-15.0f)+10.0f); }
 float blend(float a, float b, float t) { return a+t*(b-a); }
@@ -31,6 +31,24 @@ float fbm(float3 p, int octaves, device const int* table) {
     frequency*=2.0f; amplitude*=0.5f;
   }
   return weights==0.0f?0.0f:sum/weights;
+}
+|}
+let trace_prelude = {|#include <metal_raytracing>
+using namespace metal::raytracing;
+struct TraceHit { float t; float prim; float u; float v; float3 n; float hit; };
+TraceHit trace_scene(primitive_acceleration_structure scene, device const packed_float3* vertices,
+    float3 o, float3 d, float tmin, float tmax) {
+  intersector<triangle_data> query;
+  query.assume_geometry_type(geometry_type::triangle);
+  intersection_result<triangle_data> hit = query.intersect(ray(o, normalize(d), tmin, tmax), scene);
+  TraceHit h = {0.0f, -1.0f, 0.0f, 0.0f, float3(0.0f), 0.0f};
+  if (hit.type == intersection_type::triangle) {
+    uint p = hit.primitive_id;
+    float3 a = vertices[p*3], b = vertices[p*3+1], c = vertices[p*3+2];
+    h.t = hit.distance; h.prim = float(p); h.u = hit.triangle_barycentric_coord.x; h.v = hit.triangle_barycentric_coord.y;
+    h.n = normalize(cross(b - a, c - a)); h.hit = 1.0f;
+  }
+  return h;
 }
 |}
 let fail message = raise (Diagnostic.Error (Diagnostic.error ~code:"E_GPU_FORM" message))
@@ -88,7 +106,7 @@ let kernel ?(fast=false) program = try
   let layout = Flow_ir.Kernel_layout.plan ~fast program in
   let {Flow_ir.Kernel_layout.view; used; finite_checks; uniforms; frames; table_seeds;
        gathers; gather_lengths; input_used; uniform_layout; uniform_bytes; gather_base;
-       uniform_binding; status_binding; table_binding; count_base; counts} = layout in
+       uniform_binding; status_binding; table_binding; count_base; counts; scene_binding} = layout in
   let table seed = match Array.find_index ((=) seed) table_seeds with Some index -> index*512 | None -> assert false in
   let gather_index slot = match List.find_index (fun (s, _) -> s = slot) gathers with Some k -> k | None -> fail "Gather without its table." in
   let integer_register slot = Flow_ir.Core.Region.integer_register view.code.(slot) in
@@ -110,6 +128,7 @@ let kernel ?(fast=false) program = try
     let k = gather_index prepared in
     Printf.sprintf "as_type<float>(gather%d[clamp(int(%s),0,max(int(uniforms[%d])-1,0))*%d+%d])"
       k (int_of index) gather_lengths.(k) width component in
+  let hits = Hashtbl.create 4 in
   let body = Buffer.create 4096 in
   Flow_ir.Kernel_layout.iter layout ~instruction:(fun slot instruction ->
     if used.(slot) && (match snd (guarded [] instruction) with P.Array_prepare _ -> false | _ -> true) then begin
@@ -146,7 +165,14 @@ let kernel ?(fast=false) program = try
       | Convert (Ceil,a) -> "long(ceil(" ^ float_of a ^ "))"
       | Convert (Round,a) -> "long(round(" ^ float_of a ^ "))"
       | Text_const _ | Text_input _ | Text_uniform _ | Text_gather _ | Text_select _ -> fail "Text kernels stay on the CPU."
-      | Trace _ -> fail "scene/trace has no MSL ray-query binding yet."
+      | Trace (field, r) ->
+          let key = Array.to_list r in
+          let hit = match Hashtbl.find_opt hits key with Some name -> name | None ->
+            let name = Printf.sprintf "hit%d" slot and a k = float_of r.(k) in
+            Printf.bprintf body "  TraceHit %s=trace_scene(scene,scene_vertices,float3(%s,%s,%s),float3(%s,%s,%s),%s,%s);\n"
+              name (a 1) (a 2) (a 3) (a 4) (a 5) (a 6) (a 7) (a 8);
+            Hashtbl.add hits key name; name in
+          hit ^ [| ".t"; ".prim"; ".u"; ".v"; ".n.x"; ".n.y"; ".n.z"; ".hit" |].(field)
       | Select (condition,yes,no) -> Printf.sprintf "(%s!=0.0f?%s:%s)" (register condition) (register yes) (register no)
       | Noise3 (x,y,z,seed,octaves,_,_) -> Printf.sprintf "fbm(float3(%s,%s,%s),%d,table+%d)"
           (register x) (register y) (register z) octaves (table seed)
@@ -209,10 +235,13 @@ let kernel ?(fast=false) program = try
     @ List.mapi (fun k _ -> Printf.sprintf "device const uint* gather%d [[buffer(%d)]]" k (gather_base+k)) gathers
     @ (if counts=None then [] else [Printf.sprintf "device const uint* count_in [[buffer(%d)]]" count_base;
         Printf.sprintf "device uint* count_out [[buffer(%d)]]" (count_base+1)])
+    @ (match scene_binding with None -> [] | Some b ->
+        [Printf.sprintf "primitive_acceleration_structure scene [[buffer(%d)]]" b;
+         Printf.sprintf "device const packed_float3* scene_vertices [[buffer(%d)]]" (b+1)])
     @ ["uint i [[thread_position_in_grid]]"] in
   let prefix = "#include <metal_stdlib>\nusing namespace metal;\n" ^
     (if fast then "long fmod64(long a,long b){if(b==0)return 0;long r=a%b;return (r!=0&&((r<0)!=(b<0)))?r+b:r;}\n" else "") ^
-    (if table_seeds=[||] then "" else perlin) in
+    (if scene_binding=None then "" else trace_prelude) ^ (if table_seeds=[||] then "" else perlin) in
   let signature = String.concat ",\n  " arguments in
   let guard = match counts with
     | None -> "  if(i>=uniforms[0]) return;\n"
@@ -226,7 +255,10 @@ let kernel ?(fast=false) program = try
   let interface = List.init (count_base+(if counts=None then 0 else 2)) Fun.id
     |>List.filter(fun binding->binding>=count || input_used.(binding))
     |>List.map(fun binding->S.{group=0;binding;kind=(if binding=uniform_binding then Uniform_buffer else Storage_buffer);visibility=[Compute]})in
-  Ok {source;entry;interface;uniform_layout;uniform_bytes;
+  let interface = interface @ (match scene_binding with None -> [] | Some b ->
+    [S.{group=0;binding=b;kind=Acceleration_structure;visibility=[Compute]};
+     S.{group=0;binding=b+1;kind=Storage_buffer;visibility=[Compute]}]) in
+  Ok {source;entry;interface;uniform_layout;uniform_bytes;scene=scene_binding;
     table_seeds;output_widths=Array.map Array.length view.outputs;input_widths=view.widths;
     gathers=Array.of_list (List.map snd gathers);counts}
 with Diagnostic.Error diagnostic -> Error diagnostic
@@ -254,6 +286,6 @@ kernel void flow_compact_mask(device const float* mask [[buffer(0)]], device flo
 }
 |} in
   {source; entry; uniform_layout = []; uniform_bytes = 8; table_seeds = [||];
-   output_widths = [|1|]; input_widths = [|1|]; gathers = [||]; counts = None;
+   output_widths = [|1|]; input_widths = [|1|]; gathers = [||]; counts = None; scene = None;
    interface = List.map (fun binding -> S.{group = 0; binding;
      kind = (if binding = 3 then Uniform_buffer else Storage_buffer); visibility = [Compute]}) [0; 1; 2; 3; 4]}
