@@ -1,0 +1,26 @@
+; Path tracer helpers of pathtrace.metal as Rays Lisp defns (P8.S3): PCG, the GGX terms, Fresnel and the BSDF
+; mixture pdf. Inlined at lowering; the CPU walker is the oracle and the Metal kernel matches it
+; (lib/flow_gpu/test_helpers.ml). Integers are the fast tier's 63-bit ints with explicit 32-bit masks.
+(defn pcg-next :context value [(s : int)]
+  (let* [next (int/and (int/add (int/mul s 747796405) 2891336453) 4294967295)
+         word (int/and (int/mul (int/xor (int/shr s (int/add (int/shr s 28) 4)) s) 277803737) 4294967295)]
+    {:next next :value (int/xor (int/shr word 22) word)}))
+(defn unit-float :context value [(word : int)]
+  (/ (float (int/and word 16777215)) 16777216.))
+(defn d-ggx :context value [(noh : float) (a2 : float)]
+  (let* [d (+ (* (* noh noh) (- a2 1.)) 1.)]
+    (/ a2 (* (* 3.14159265358979 d) d))))
+(defn v-smith :context value [(nov : float) (nol : float) (a2 : float)]
+  (let* [gv (* nol (sqrt (+ (* (* nov nov) (- 1. a2)) a2)))
+         gl (* nov (sqrt (+ (* (* nol nol) (- 1. a2)) a2)))]
+    (/ 0.5 (max (+ gv gl) 0.000001))))
+(defn fresnel :context value [(f0 : vec3) (voh : float)]
+  (let* [f (pow (- 1. voh) 5.)]
+    (+ f0 (* (- [1. 1. 1.] f0) f))))
+(defn bsdf-pdf :context value [(ns : vec3) (v : vec3) (l : vec3) (a2 : float) (ps : float)]
+  (let* [h (normalize (+ l v))
+         nol (max (dot ns l) 0.)
+         noh (max (dot ns h) 0.)
+         voh (max (dot v h) 0.0001)]
+    (+ (* ps (/ (* (d-ggx noh a2) noh) (* 4. voh)))
+       (* (- 1. ps) (/ nol 3.14159265358979)))))
