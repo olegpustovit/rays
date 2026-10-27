@@ -947,7 +947,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [ ] **UI11** (P5, high, god-module, effort M). Location at baseline: pxui/ui.ml 4,072 (text_area_submit 612 lines at :3193). The engine is mixed with the widget kit and text editing. Action: Split into ui.ml (engine), ui_text.ml and ui_kit.ml, re-exported through `Ui`.
 
-- [ ] **UI12** (P5, med, layering, effort S). Location at baseline: pxui/camera_controls.ml. An editor camera panel inside the UI engine. Its only user is viewport.ml, and `navigate (_ : t)` ignores its argument. Action: Move it into viewport.ml.
+- [x] **UI12** (P5, med, layering, effort S). Location at baseline: pxui/camera_controls.ml. An editor camera panel inside the UI engine. Its only user is viewport.ml, and `navigate (_ : t)` ignores its argument. Action: Move it into viewport.ml. Evidence: fa632ca6 moves Camera_controls from pxui into rays_editor/viewport.ml, deleting the Pxui export and the ignored navigate argument; specification/pxui.md is updated.
 
 - [ ] **UI13** (P5, high, duplication, effort M). Location at baseline: environment.ml:97-128 · viewport.ml:269-276 · scope_commands.ml:322-325. A second capture and hit path: raw mouse folds, a hand-rolled 4-point threshold, raw rect grabs, and key edges detected by hand. This breaks the 'one engine' rule. Action: Use `Ui.box` drags with `signal`/`capture`, and take key edges from the Router.
 
@@ -955,7 +955,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [ ] **UI15** (P5, med, correctness-risk, effort S). Location at baseline: contexts.ml:125 last_catalog, :224 last_fast · drawing.ml:8. Hidden global Atomic caches in a library that is supposed to be pure. Action: Pass the caches explicitly.
 
-- [ ] **UI16** (P5, med, layering, effort S). Location at baseline: rays_editor/doc.ml. Document reducers with no UI dependency. Action: Move it into editor_document as `Document_edit`.
+- [x] **UI16** (P5, med, layering, effort S). Location at baseline: rays_editor/doc.ml. Document reducers with no UI dependency. Action: Move it into editor_document as `Document_edit`. Evidence: rays_editor/doc.ml is gone; editor_document/document_edit.ml owns document edits.
 
 - [ ] **UI17** (P5, med, api-bloat, effort M). Location at baseline: editor_document/document.ml:112 `workspace : Workspace_doc.t * Lower.t`. A tuple read through fst/snd about 98 times. Action: Make it a record.
 
@@ -985,7 +985,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **UI30** (P0, low, dead-code, effort S). Location at baseline: pxui_shell/shell.ml (4 lines) · rays_editor/common.ml · selection.ml:9-13. A wrapper module, a module with one function, and ignored arguments. Action: Inline and delete them.
 
-- [ ] **UI31** (P5, low, duplication, effort S). Location at baseline: pxui_shell/layout.ml:3-10. Re-declares the `Panels` types. Action: Alias them instead.
+- [x] **UI31** (P5, low, duplication, effort S). Location at baseline: pxui_shell/layout.ml:3-10. Re-declares the `Panels` types. Action: Alias them instead. Evidence: pxui_shell/layout.ml re-exports panels as type manifests over Editor_core.Panels.
 
 - [x] **UI32** (P0, low, doc-rot, effort S). Location at baseline: navigator.ml:2, text_pane.ml:5 (prototype e4.js) · 'v4', 'V4', 'G13' · 'DepartureMono' comments. Dead prototype references, version tags, and a font that is no longer shipped. Action: Remove them; drop the glyph substitutions if Pragmasevka has those glyphs.
 

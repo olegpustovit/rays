@@ -8,7 +8,7 @@ Completion is **not proved**. No phase is closed. Unlisted requirements and
 finding IDs remain open. Size estimates do not substitute for behavior,
 performance, parity, and shipping evidence.
 
-Finding coverage: **129 / 248 accepted (52.0%)**. This counts individual
+Finding coverage: **132 / 248 accepted (53.2%)**. This counts individual
 findings, not weighted effort or completed phases.
 
 Individual finding checkboxes record implementation/focused evidence;
@@ -258,6 +258,8 @@ size estimate, not the phase's behavioral or shipping gates.
   deleted the superseded study documents and workspace prototype.
 
 ## In progress and remaining proof
+
+- P5 (ffcc4a24..dfe228a9): `Core.update_frame` (744), `Core_reduce.reduce` (669) and `Scope_frame.update` (921, was scope_pane) are each under 300 lines, with their budget rows removed. The Environment and Scope_commands includes are opens now, and Flow_edit and Scope_pane are re-export-only facades. ui_parity is exact, and editor logic, the editor/PXUI/graph/shell suites, workspace_shell and the guards pass. Still over 300: ui.ml text_area_submit (607), core_inspect workspace_inspector (518), navigator view (353), text_pane view (324), environment update_with (303). Remaining includes are metal_raw (generator facade), test support in sop/rdk and sop/node Private_types.
 
 - P8.S2 partial (eb85bbff, e8cf42d9, 3f49c6cb, 63fcf242): `(scene/trace scene origin dir tmin tmax time)` returns `{:t :prim :u :v :normal :hit}`. It runs on CPU through a host closure (`Flow.Ray_host`; `Flow_sop.Trace_scene` over `Surface_index`), in MSL (`intersector<triangle_data>` over a Kernel_layout scene binding) and in SPIR-V 1.4 (`SPV_KHR_ray_query`, spirv-val golden `fast_trace`); JS and WGSL refuse it. 169/256 rays hit the test quad, Packed is byte-identical to the walker at 1 and 8 domains, and Metal matches the CPU within 4.8e-7. Open: instancing, motion, curves, procedural spheres, one CPU query per ray instead of one per field, the film accumulation sink, and a typed scene value instead of the process-wide id registry. `resolve_preview.rays` stays unwired until `trace_pixel` moves.
 
