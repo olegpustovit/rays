@@ -1,10 +1,15 @@
 type t
 type output
+type scene = {accel:Ogpu.Backend.accel; vertices:Ogpu.Backend.buffer; spheres:Ogpu.Backend.buffer; sphere_count:int;
+  instances:Ogpu.Backend.buffer option}
+(** [scene/trace] bindings: the structure, its triangle vertices (instanced: all prototypes' concatenated), the
+    procedural (centre, radius) float4s, and for an instanced scene the 16-float-per-instance table
+    [base primitive; world-to-object 3x4 row-major; 3 spare]. *)
 val create : Renderer.gpu -> Pipelines.t -> Emit.msl -> t
 val dispatch : ?wait:bool -> ?reset_status:bool -> ?commands:Ogpu.Backend.commands ->
   ?count:(Ogpu.Backend.buffer * int * int) -> ?into:(Ogpu.Backend.buffer * Ogpu.Backend.buffer) -> ?bound:(int -> Ogpu.Backend.buffer option) ->
   ?bound_table:(int -> Ogpu.Backend.buffer option) ->
-  ?scene:(Ogpu.Backend.accel * Ogpu.Backend.buffer * Ogpu.Backend.buffer * int) -> t -> Flow_ir.Packed.Private.inputs ->
+  ?scene:scene -> t -> Flow_ir.Packed.Private.inputs ->
   (output, Diagnostic.t) result
 (** [~wait:false] leaves the dispatch in flight, without its status read; [~commands] only encodes it
     into the caller's command buffer (epoch 0 until the caller commits it); [~reset_status:false]

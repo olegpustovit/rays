@@ -1,5 +1,5 @@
-type hit = { t : float; prim : int; u : float; v : float; nx : float; ny : float; nz : float; hit : bool }
-let miss = { t = 0.; prim = -1; u = 0.; v = 0.; nx = 0.; ny = 0.; nz = 0.; hit = false }
+type hit = { t : float; prim : int; u : float; v : float; nx : float; ny : float; nz : float; hit : bool; instance : int }
+let miss = { t = 0.; prim = -1; u = 0.; v = 0.; nx = 0.; ny = 0.; nz = 0.; hit = false; instance = -1 }
 (* ponytail: one process-wide id registry; replace with a typed scene value carried by the evaluation
    when two hosts in one process need overlapping ids. *)
 module M = Map.Make (Int)
