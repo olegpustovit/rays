@@ -7,13 +7,12 @@ val clipboard_get_text : unit -> (string, Ogpu.Error.t) result
 type frame_facts = { logical_width:int; logical_height:int;
   drawable_width:int; drawable_height:int; pixel_scale_x:float; pixel_scale_y:float }
 
-(** An offscreen target has no [position] or [refresh_rate], never vsyncs,
-    and reports its drawable/logical ratio as both density and display scale. *)
+(** An offscreen target never vsyncs and reports its drawable/logical ratio as
+    its density. *)
 type presentation_facts = {
-   logical_width : int; logical_height : int;
+  logical_width : int; logical_height : int;
   drawable_width : int; drawable_height : int;
   pixel_density : float;
-
 }
 val create : ?vsync:bool -> ?hidden:bool -> ?high_density:bool -> ?title:string ->
   width:int -> height:int -> unit -> (t, Ogpu.Error.t) result

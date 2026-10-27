@@ -8,14 +8,11 @@ type frame_facts = {
 }
 
 type presentation_facts = {
-
   logical_width : int;
   logical_height : int;
   drawable_width : int;
   drawable_height : int;
-
   pixel_density : float;
-
 }
 
 (* SDL announces a change of size or density with an event instead of making
@@ -51,7 +48,6 @@ type window = {
    offscreen texture. *)
 type t = {
   window : window option;
-
   mutable facts : frame_facts;
   mutable presentation : presentation_facts option;
   mutable dead : bool;

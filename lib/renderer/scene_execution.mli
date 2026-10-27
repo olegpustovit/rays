@@ -139,10 +139,8 @@ module Private : sig
 end
 
 (** Indirect-command replay plans: one automatic plan admitted after two
-    identical frames and one identity-keyed prepared plan. [plan_entries]
-    counts the live indirect command buffers across both. *)
-type retained_stats = {  plan_hits:int64; plan_misses:int64;
-      }
+    identical frames and one identity-keyed prepared plan. *)
+type retained_stats = { plan_hits : int64; plan_misses : int64 }
 val retained_stats : t -> retained_stats
 val pipeline_count : t -> int
 val read_pixels : t -> bytes_per_row:int -> (bytes, Ogpu.Error.t) result

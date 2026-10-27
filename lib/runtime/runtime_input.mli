@@ -5,9 +5,7 @@ type event = Input.event
 type snapshot = {
   pointer : float * float;
   mouse_delta : float * float;
-
   visible : bool;
-
 }
 
 type t
