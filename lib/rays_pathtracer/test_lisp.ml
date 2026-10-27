@@ -27,7 +27,8 @@ let () =
   let color r g b = Rays_math.Color.Linear.rgb r g b in
   let material = P.material ~roughness:0.5 ~metallic:0.2 (color 0.7 0.5 0.3) in
   let light = { P.at = Rays_math.Vec3.create 0.5 0.8 2.; target = Rays_math.Vec3.create 0.5 0.8 0.; size = (1.5, 1.); color = color 1. 1. 1.; intensity = 6. } in
-  let environment = { P.sky = color 0.5 0.6 0.8; ground = color 0.2 0.2 0.2; panels = [] } in
+  let panel = { P.direction = Rays_math.Vec3.create 0.3 0.6 0.74; width = 0.5; height = 0.35; softness = 0.2; color = color 1. 0.9 0.8; intensity = 3. } in
+  let environment = { P.sky = color 0.5 0.6 0.8; ground = color 0.2 0.2 0.2; panels = [ panel ] } in
   let scene = { P.objects = [ (mesh, material) ]; spheres = []; strands = []; environment; lights = [ light ] } in
   let eye = Rays_math.Vec3.create 0.3 (-3.) 2.5 and target = Rays_math.Vec3.create 0. 0. 0. in
   let camera = Rays.Camera.perspective ~fov_y:0.9 ~at:eye ~target () in
@@ -49,6 +50,9 @@ let () =
   let lu = scale lw lright and lv = scale lh lup in
   let origin = (l.at.x -. (let x, _, _ = lu and a, _, _ = lv in (x +. a) /. 2.), l.at.y -. (let _, y, _ = lu and _, a, _ = lv in (y +. a) /. 2.),
     l.at.z -. (let _, _, z = lu and _, _, a = lv in (z +. a) /. 2.)) in
+  let panel_rows = List.concat_map (fun (p : P.panel) ->
+    let (dx, dy, dz) = normalize (p.direction.x, p.direction.y, p.direction.z) in
+    [ (dx, dy, dz); (p.color.r *. p.intensity, p.color.g *. p.intensity, p.color.b *. p.intensity); (p.width, p.height, p.softness) ]) environment.panels in
   let rgb (c : P.Linear_color.t) = (c.r, c.g, c.b) in
   let declarations = read "pathtrace_helpers.rays" ^ read "pathtrace.rays" in
   let scale3 (r, g, b) k = (r *. k, g *. k, b *. k) in
@@ -80,11 +84,11 @@ let () =
     !best);
   let live = Input.at_time 0. in
   let program_of frame =
-    let u = Printf.sprintf "{:eye %s :lens 0. :fwd %s :rgt %s :up %s :tan-half %s :aspect %s :focus 1. :width %d :height %d :spp %d :bounces %d :frame %d :sky %s :ground %s}"
+    let u = Printf.sprintf "{:eye %s :lens 0. :fwd %s :rgt %s :up %s :tan-half %s :aspect %s :focus 1. :width %d :height %d :spp %d :bounces %d :frame %d :sky %s :ground %s :panels %d}"
       (vec e) (vec forward) (vec right) (vec up) (num (tan (0.9 /. 2.))) (num (float width /. float height)) width height spp bounces frame
-      (vec (rgb environment.sky)) (vec (rgb environment.ground)) in
-    let source = Printf.sprintf "(let* [%s %s] (map (fn [(pixel : int)] (let* [s (trace-pixel %s %s %s pos nrm pixel)] [s.x s.y s.z (+ 0. (* 0. t))])) (array/range %d :type int)))"
-      (table "pos" positions) (table "nrm" normals) u light_lit mat_lit (width * height) in
+      (vec (rgb environment.sky)) (vec (rgb environment.ground)) (List.length environment.panels) in
+    let source = Printf.sprintf "(let* [%s] (map (fn [(pixel : int)] (let* [s (trace-pixel %s %s %s pos nrm pan pixel)] [s.x s.y s.z (+ 0. (* 0. t))])) (array/range %d :type int)))"
+      (table "pos" positions ^ " " ^ table "nrm" normals ^ " " ^ table "pan" panel_rows) u light_lit mat_lit (width * height) in
     Test_program.compile ~declarations source in
   let vec4 = function Flow.Eval.Vec4_array v -> v | _ -> assert false in
   let cpu program = vec4 (ok (Flow_ir.Packed.force program ~live)) in
