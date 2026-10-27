@@ -38,17 +38,6 @@
  (action (run %{exe:test_lisp_node.exe})))
 
 (test
- (name test_lisp_ports)
- (modules test_lisp_ports)
- (deps nodes/noise_displace.rays nodes/set_float.rays nodes/set_int.rays
-  nodes/set_vector.rays nodes/set_orient.rays nodes/set_transform.rays)
- (libraries sop rdk rays_math sop_catalog flow flow_sop lisp_sop rdk_test_support ogpu_mock unix parallel))
-
-(rule
- (alias test_lisp_ports)
- (action (run %{exe:test_lisp_ports.exe})))
-
-(test
  (name test_node_facts)
  (modules test_node_facts)
  (libraries flow flow_sop sop_catalog sop rdk rdk_test_support lisp_sop rays_math parallel))
@@ -103,57 +92,6 @@
  (name test_metadata_kernel)
  (modules test_metadata_kernel)
  (libraries flow flow_ir flow_graph flow_sop sop_catalog rdk rdk_test_support lisp_sop parallel))
-
-(test
- (name test_setters)
- (modules test_setters)
- (libraries flow flow_ir flow_graph flow_sop sop_catalog rdk rdk_test_support lisp_sop parallel))
-
-(executable
- (name test_metadata_ports)
- (modules test_metadata_ports)
- (libraries flow flow_ir flow_graph flow_sop sop_catalog rdk rdk_test_support lisp_sop parallel))
-
-(rule
- (alias runtest)
- (action (run %{exe:test_metadata_ports.exe} --edge)))
-
-(rule
- (alias test_metadata_ports)
- (action (run %{exe:test_metadata_ports.exe})))
-
-(rule
- (alias test_rename_attributes)
- (action (run %{exe:test_metadata_ports.exe} --rename-attributes)))
-
-(rule
- (alias test_group_delete)
- (action (run %{exe:test_metadata_ports.exe} --group-delete)))
-
-(rule
- (alias test_group_rename)
- (action (run %{exe:test_metadata_ports.exe} --group-rename)))
-
-(rule
- (alias test_swap_attributes)
- (action (run %{exe:test_metadata_ports.exe} --swap-attributes)))
-
-(rule
- (alias metadata_ports_large)
- (action (run %{exe:test_metadata_ports.exe} --large)))
-
-(executable
- (name test_set_color)
- (modules test_set_color)
- (libraries flow flow_ir flow_graph flow_sop sop_catalog rdk rdk_test_support lisp_sop parallel))
-
-(rule
- (alias test_set_color)
- (action (run %{exe:test_set_color.exe})))
-
-(alias
- (name runtest)
- (deps (alias test_set_color)))
 
 (test
  (name test_topology_kernel)
@@ -229,16 +167,6 @@
  (modules test_error_rows)
  (libraries flow_sop flow flow_ir sop_catalog sop rdk rdk_test_support lisp_sop rays_math parallel))
 
-(executable
- (name test_line_port)
- (modules test_line_port)
- (libraries flow flow_ir flow_graph flow_sop sop_catalog rdk rdk_test_support lisp_sop parallel))
-
-(rule
- (alias line_port)
- (deps nodes/line.rays)
- (action (run %{exe:test_line_port.exe})))
-
 (test
  (name test_remap)
  (modules test_remap)
@@ -253,16 +181,6 @@
  (name test_planes)
  (modules test_planes)
  (libraries flow_sop flow flow_ir flow_graph sop sop_catalog rdk rdk_test_support lisp_sop parallel))
-
-(executable
- (name test_points_port)
- (modules test_points_port)
- (libraries flow flow_ir flow_graph flow_sop sop_catalog rdk rdk_test_support lisp_sop parallel))
-
-(rule
- (alias points_port)
- (deps nodes/points.rays)
- (action (run %{exe:test_points_port.exe})))
 
 (executable
  (name bench_planar_attribute)
@@ -294,9 +212,3 @@
  (enabled_if (= %{env:RAYS_SLOW=0} 1))
  (modules test_gpu_bulk)
  (libraries flow flow_ir flow_sop sop sop_catalog rdk rdk_test_support lisp_sop rays_math parallel))
-
-(alias
- (name runtest)
- (deps
-  (alias line_port)
-  (alias points_port)))

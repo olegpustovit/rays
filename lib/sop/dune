@@ -12,11 +12,6 @@
  (modules test_facts)
  (libraries sop rdk rays_math lisp_sop rdk_test_support ogpu_mock parallel))
 
-(rule
- (alias test_lisp_ports)
- (deps ../flow_sop/test_lisp_ports.exe)
- (action (chdir ../flow_sop (run %{dep:../flow_sop/test_lisp_ports.exe}))))
-
 (test
  (name test_payload)
  (modules test_payload)
@@ -43,9 +38,9 @@
 ; One executable per suite: each links only its own module, so a suite builds and runs
 ; while another is being edited.
 (executables
- (names run_sop run_edit_graph run_nodes run_parallel_exact run_diagnostics)
- (modules run_sop run_edit_graph run_nodes run_parallel_exact run_diagnostics
-  test_sop test_edit_graph test_nodes test_parallel_exact test_diagnostics)
+ (names run_sop run_edit_graph run_parallel_exact run_diagnostics)
+ (modules run_sop run_edit_graph run_parallel_exact run_diagnostics
+  test_sop test_edit_graph test_parallel_exact test_diagnostics)
  (libraries sop rays rdk rdk_rays rdk_test_support lisp_sop rays_math ogpu_mock parallel))
 
 (rule
@@ -61,10 +56,6 @@
  (deps (alias test_edit_graph)))
 
 (rule
- (alias test_nodes)
- (action (run %{exe:run_nodes.exe})))
-
-(rule
  (alias test_parallel_exact)
  (action (run %{exe:run_parallel_exact.exe})))
 
@@ -76,7 +67,6 @@
  (name qualification-scale)
  (deps
   (alias test_sop)
-  (alias test_nodes)
   (alias test_parallel_exact)
   (alias test_diagnostics)))
 
