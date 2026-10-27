@@ -14,7 +14,6 @@ lib/pxui/ui.ml	text_area_submit#1	607
 lib/pxui_graph/scope_frame.ml	update#1	921
 lib/pxui_graph/test_pxui_graph.ml	scope_gestures#1	389
 lib/rays_editor/core_inspect.ml	workspace_inspector#1	518
-lib/rays_editor/core_reduce.ml	reduce#1	669
 lib/rays_editor/environment.ml	update_with#1	303
 lib/rays_editor/navigator.ml	view#1	353
 lib/rays_editor/text_pane.ml	view#1	324
