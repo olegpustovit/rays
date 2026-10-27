@@ -194,18 +194,18 @@ Findings: UI1–UI6 UI9–UI18 UI21 UI22 UI25–UI29 UI31 UI33 UI34 UI36 SP16 FL
 
 Delete `pathtrace.metal`. The path tracer is a plain `.rays` program; placement puts its pixel map on the device, and each target emits it. No GPU-only language features.
 
-- [ ] P8.S1: Benchmark first: today's kernel, window-free, on `pathtracer.rays` (480 × 840) and shattered-studio at fixed spp and bounces, interleaved A/B. This is the bar.
+- [x] P8.S1: Benchmark first: today's kernel, window-free, on `pathtracer.rays` (480 × 840) and shattered-studio at fixed spp and bounces, interleaved A/B. This is the bar. Evidence: benchmarks/pathtracer-lisp.md: pathtracer.rays at 480 x 840, 16 spp, five rounds, median 0.520 s per round, one RGBA8 hash. status.md records the frozen shattered-studio five-round run (1600 x 1600, 363.95 s).
 - [ ] P8.S2: Add one host op, `scene/trace`, returning a hit record. CPU: `Surface_index.raycast_many_into`. Metal: `intersector`. SPIR-V: `OpRayQuery*`. Spheres are an in-loop procedural test, which drops `Function_tables`. Add the accumulation-buffer sink (reuse `image_sink` for RGBA8).
 - [ ] P8.S3: Write `pathtrace.rays` from the MSL. The CPU run is the oracle; the GPU film matches it within tolerance. Port `resolve_preview` first, then `trace_pixel`, each slice A/B-gated.
 - [ ] P8.S4: Delete `pathtrace.metal`, `embed_metal.ml`, the TRACE variants and the intersection-table path.
-- [ ] P8.S5: SPIR-V emitter: binary words over the same IR and `Kernel_layout`, with `spirv-val` on goldens in tests. It joins MSL, WGSL and JS as just another emitter.
+- [x] P8.S5: SPIR-V emitter: binary words over the same IR and `Kernel_layout`, with `spirv-val` on goldens in tests. It joins MSL, WGSL and JS as just another emitter. Evidence: lib/flow_gpu/spirv.ml writes binary SPIR-V words over the shared IR and Kernel_layout; test_spirv validates 21 deterministic goldens with spirv-val (Vulkan 1.1).
 
 Exit gates:
 
 - [ ] P8.G1: no `.metal` file in lib/rays_pathtracer
 - [ ] P8.G2: GPU ms/frame ≤ today on both scenes (A/B, ≥ 5 runs, M1), and pipeline compile time not worse
 - [ ] P8.G3: film RMSE ≤ 1e-4 against today's kernel after N spp
-- [ ] P8.G4: every SPIR-V golden passes `spirv-val`
+- [x] P8.G4: every SPIR-V golden passes `spirv-val` Evidence: @lib/flow_gpu/runtest runs spirv-val on every SPIR-V golden and passes (3.4 s).
 
 Risk: Medium. This is the hottest kernel. The benchmark lands first, the CPU run of the same .rays file is the oracle, and the old kernel stays until the last slice matches it.
 
