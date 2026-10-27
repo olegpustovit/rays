@@ -358,7 +358,7 @@ let validate_parameter ?ty report (p : Check.parameter) (term : term) =
       | _ -> Check.validate_parameter report p (to_check term)
   end
 
-let rec pairs = function a :: b :: rest -> (a, b) :: pairs rest | _ -> []
+let pairs = S.pairs
 let is_kw (x : S.t) = match x.node with S.Kw _ -> true | _ -> false
 let tm (x : S.t) ty node = { path = None; ty; node; form = x }
 let rec pat_ir (p : S.t) = match p.node with

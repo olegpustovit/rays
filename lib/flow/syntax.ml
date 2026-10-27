@@ -210,3 +210,5 @@ let attribute_args head args =
         key::{value with node=Str name}::enums rest
     | first::rest->first::enums rest|[]->[] in
   enums args
+
+let rec pairs = function a :: b :: rest -> (a, b) :: pairs rest | _ -> []

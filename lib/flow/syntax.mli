@@ -78,3 +78,6 @@ val attribute_args : string -> t list -> t list
 val renumber : int -> t -> t * int
 (** [renumber first form] copies [form] numbering every form from [first] in
     reading order (spans, notes and meta kept); returns the next free id. *)
+
+val pairs : 'a list -> ('a * 'a) list
+(** Consecutive pairs of a flat list; a trailing odd element is dropped. *)

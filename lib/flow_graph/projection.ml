@@ -68,7 +68,7 @@ type cx = {
   forms : (S.id, W.term) Hashtbl.t;  (* every term, by the form it checks: a nested node has no path *)
 }
 
-let rec pairs = function a :: b :: r -> (a, b) :: pairs r | _ -> []
+let pairs = S.pairs
 let head_sym = S.head
 let last (e : S.t) = List.nth (S.children e) (List.length (S.children e) - 1)
 let root_of s = match String.index_opt s '.' with Some i -> String.sub s 0 i | None -> s

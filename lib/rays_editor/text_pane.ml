@@ -90,7 +90,7 @@ let root_form (source : S.t list) name =
 
 let last (f : S.t) = List.nth_opt (List.rev (S.children f)) 0
 
-let rec pairs = function a :: b :: rest -> (a, b) :: pairs rest | _ -> []
+let pairs = S.pairs
 
 let scope (e : S.t) = match e.node with
   | S.List [ { S.node = S.Sym "let*"; _ }; { S.node = S.Vec bs; _ }; res ]

@@ -6,27 +6,12 @@
 
 (test
  (name test_core)
- (modules test_core)
- (libraries flow_ir flow flow_ir_test_support parallel))
-
-(test
- (name test_core_lower)
- (modules test_core_lower)
- (deps core_lower.expected)
- (libraries flow_ir flow flow_ir_test_support parallel))
-
-(test
- (name test_core_parity)
- (modules test_core_parity)
- (deps ../sop_catalog/flow_manifest.sexp
+ (modules test_core test_core_lower test_core_control test_core_lists test_core_state
+  test_core_regions test_core_operators test_core_errors test_core_draw test_core_marks test_core_parity)
+ (deps core_lower.expected core_control.expected core_draw.expected core_marks.expected
+  ../sop_catalog/flow_manifest.sexp
   (glob_files ../../specification/workspace/cases/*.lisp))
- (libraries flow_ir flow parallel))
-
-(test
- (name test_core_control)
- (modules test_core_control)
- (deps core_control.expected)
- (libraries flow_ir flow flow_ir_test_support parallel))
+ (libraries flow_ir flow flow_ir_test_support scene_command rays_math parallel))
 
 (test
  (name test_core_records)
@@ -35,21 +20,22 @@
  (libraries flow_ir flow unix parallel))
 
 (test
- (name test_core_lists)
- (modules test_core_lists)
- (libraries flow_ir flow flow_ir_test_support parallel))
-
-(test
  (name test_ir)
- (modules test_ir)
+ (modules test_ir test_noise test_uniforms test_frame_kernel test_static_map)
  (deps ../sop_catalog/flow_manifest.sexp
-  (glob_files ../../specification/workspace/cases/*.lisp))
+  (glob_files ../../specification/workspace/cases/*.lisp)
+  ../../sketches/particles.rays)
  (libraries flow_ir flow rays_math parallel))
 
 (test
- (name test_noise)
- (modules test_noise)
- (libraries flow_ir flow rays_math parallel))
+ (name test_gather)
+ (modules test_gather test_reductions test_scatter test_compact_scan test_grade_index test_array_max_length)
+ (libraries flow_ir flow rays_math unix parallel))
+
+(test
+ (name test_with_error)
+ (modules test_with_error test_error_rows)
+ (libraries flow_ir flow flow_graph parallel))
 
 (test
  (name test_packed)
@@ -57,59 +43,6 @@
  (modules test_packed region_snapshot)
  (deps (glob_files snapshots/*.txt))
  (libraries flow_ir flow flow_ir_test_support rays_math unix parallel))
-
-(test
- (name test_uniforms)
- (modules test_uniforms)
- (libraries flow_ir flow rays_math parallel))
-
-(test
- (name test_gather)
- (modules test_gather)
- (libraries flow_ir flow rays_math unix parallel))
-
-(test
- (name test_reductions)
- (modules test_reductions)
- (libraries flow_ir flow rays_math unix parallel))
-
-(test
- (name test_frame_kernel)
- (modules test_frame_kernel)
- (deps ../../sketches/particles.rays)
- (libraries flow_ir flow rays_math parallel))
-
-(test
- (name test_core_state)
- (modules test_core_state)
- (libraries flow_ir flow flow_ir_test_support parallel))
-
-(test
- (name test_core_regions)
- (modules test_core_regions)
- (libraries flow_ir flow flow_ir_test_support parallel))
-
-(test
- (name test_core_operators)
- (modules test_core_operators)
- (libraries flow_ir flow parallel))
-
-(test
- (name test_core_errors)
- (modules test_core_errors)
- (libraries flow_ir flow parallel))
-
-(test
- (name test_core_draw)
- (modules test_core_draw)
- (deps core_draw.expected)
- (libraries flow_ir flow flow_ir_test_support parallel))
-
-(test
- (name test_core_marks)
- (modules test_core_marks)
- (deps core_marks.expected)
- (libraries flow_ir flow scene_command rays_math parallel))
 
 (test
  (name test_region_snapshot)
@@ -120,42 +53,6 @@
   ../../sketches/flow_particles_gpu.rays
   ../../sketches/flow_image_kernel.rays)
  (libraries flow_ir flow flow_ir_test_support rays_math parallel))
-
-
-(test
- (name test_static_map)
- (modules test_static_map)
- (libraries flow_ir flow rays_math parallel))
-
-(test
- (name test_with_error)
- (modules test_with_error)
- (libraries flow_ir flow flow_graph parallel))
-
-(test
- (name test_error_rows)
- (modules test_error_rows)
- (libraries flow_ir flow flow_graph parallel))
-
-(test
- (name test_scatter)
- (modules test_scatter)
- (libraries flow_ir flow rays_math unix parallel))
-
-(test
- (name test_compact_scan)
- (modules test_compact_scan)
- (libraries flow flow_ir rays_math parallel))
-
-(test
- (name test_grade_index)
- (modules test_grade_index)
- (libraries flow flow_ir rays_math parallel))
-
-(test
- (name test_array_max_length)
- (modules test_array_max_length)
- (libraries flow flow_ir rays_math parallel))
 
 (test
  (name test_array_composition)
