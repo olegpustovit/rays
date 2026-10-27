@@ -302,3 +302,19 @@ kernel void flow_compact_mask(device const float* mask [[buffer(0)]], device flo
    output_widths = [|1|]; input_widths = [|1|]; gathers = [||]; counts = None; scene = None;
    interface = List.map (fun binding -> S.{group = 0; binding;
      kind = (if binding = 3 then Uniform_buffer else Storage_buffer); visibility = [Compute]}) [0; 1; 2; 3; 4]}
+
+(* The image sink's RGBA8 packing kernel: all flow_gpu MSL lives in this printer. *)
+let image_rgba8_source = {|#include <metal_stdlib>
+using namespace metal;
+struct ImageSize { uint count; uint width; uint row_words; };
+uint rgba8_channel(float c) { return uint(rint(clamp(c,0.0f,1.0f)*255.0f)); }
+kernel void rays_flow_image_rgba8(device const float4 *colors [[buffer(0)]],
+    device uint *pixels [[buffer(1)]], constant ImageSize &size [[buffer(2)]],
+    uint i [[thread_position_in_grid]]) {
+  if (i>=size.count) return;
+  float4 c=colors[i];
+  uint rgba=rgba8_channel(c.x)|(rgba8_channel(c.y)<<8)
+    |(rgba8_channel(c.z)<<16)|(rgba8_channel(c.w)<<24);
+  pixels[(i/size.width)*size.row_words+i%size.width]=rgba;
+}
+|}

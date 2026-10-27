@@ -4,20 +4,6 @@ type t = {device:B.device; queue:B.queue; library:B.library; pipeline:B.pipeline
   uniforms:bytes; domain:Domain.id; mutable storage:storage option;
   mutable generation:int; mutable closed:bool; mutable buffers:int; mutable textures:int}
 type output = {owner:t; texture:B.texture; generation:int}
-let source = {|#include <metal_stdlib>
-using namespace metal;
-struct ImageSize { uint count; uint width; uint row_words; };
-uint rgba8_channel(float c) { return uint(rint(clamp(c,0.0f,1.0f)*255.0f)); }
-kernel void rays_flow_image_rgba8(device const float4 *colors [[buffer(0)]],
-    device uint *pixels [[buffer(1)]], constant ImageSize &size [[buffer(2)]],
-    uint i [[thread_position_in_grid]]) {
-  if (i>=size.count) return;
-  float4 c=colors[i];
-  uint rgba=rgba8_channel(c.x)|(rgba8_channel(c.y)<<8)
-    |(rgba8_channel(c.z)<<16)|(rgba8_channel(c.w)<<24);
-  pixels[(i/size.width)*size.row_words+i%size.width]=rgba;
-}
-|}
 let interface = List.init 3 (fun binding -> Ogpu.Shader.{group=0;binding;
   kind=(if binding=2 then Uniform_buffer else Storage_buffer);visibility=[Compute]})
 let diagnostic e = Diagnostic.error ~code:"E_GPU" (Ogpu.Error.to_string e)
@@ -29,7 +15,7 @@ let create_owned device queue =
     let (let*) = Result.bind in
     let* () = gpu (Ogpu.Caps.require ~operation:"Image_sink.create" (B.capabilities device) Compute_pipeline) in
     let* shader = gpu (Ogpu.Shader.of_source {backend="metal";label=Some"Flow image RGBA8";
-      bytes=Bytes.of_string source;entry_points=[{name="rays_flow_image_rgba8";stage=Compute}];bindings=interface}) in
+      bytes=Bytes.of_string Emit.image_rgba8_source;entry_points=[{name="rays_flow_image_rgba8";stage=Compute}];bindings=interface}) in
     let* library = gpu (B.create_library device shader) in
     match B.create_compute_pipeline_from library ~entry:"rays_flow_image_rgba8" ~interface () with
     | Error e -> ignore(B.destroy_library library); Error(diagnostic e)

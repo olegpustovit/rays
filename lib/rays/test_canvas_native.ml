@@ -32,18 +32,18 @@ let camera_depth ()=
     let cameras=[Camera.orthographic ~height:2. ~at:(Rays_math.Vec3.create 0. 0. 2.) ~target:Rays_math.Vec3.zero();
       Camera.perspective ~at:(Rays_math.Vec3.create 0. 0. 0.15) ~target:Rays_math.Vec3.zero()]in
     List.iter(fun camera->
-      let far=Scene3.translate(Rays_math.Vec3.create 0. 0.(-0.02))
-        [Scene3.mesh ~material:(Material.unlit Rays_math.Color.red) ~cull:Cull_none mesh]in
-      let near=Scene3.mesh ~material:(Material.unlit green) ~cull:Cull_none mesh in
-      let scene=Scene.[clear Rays_math.Color.black;view3d ~camera(Scene3.create[near;far])]in
+      let far=Scene.D3.translate(Rays_math.Vec3.create 0. 0.(-0.02))
+        [Scene.D3.mesh ~material:(Material.unlit Rays_math.Color.red) ~cull:Cull_none mesh]in
+      let near=Scene.D3.mesh ~material:(Material.unlit green) ~cull:Cull_none mesh in
+      let scene=Scene.[clear Rays_math.Color.black;view3d ~camera(Scene.D3.create[near;far])]in
       render_canvas canvas scene;
       require(channel canvas ~x:16 ~y:16=(0,255,0,255)) "camera native near/far clipping or depth order";
       let first=snapshot canvas in render_canvas canvas scene;
       require(snapshot canvas=first) "camera depth retained replay pixels";
       let transforms=[|Rays_math.Mat4.identity;Rays_math.Mat4.translation(Rays_math.Vec3.create 0. 0.(-0.02))|]in
-      let instances=Scene3.instances_array ~material:(Material.unlit blue)
+      let instances=Scene.D3.instances_array ~material:(Material.unlit blue)
         ~cull:Cull_none mesh transforms in
-      let scene=Scene.[clear Rays_math.Color.black;view3d ~camera(Scene3.create[instances])]in
+      let scene=Scene.[clear Rays_math.Color.black;view3d ~camera(Scene.D3.create[instances])]in
       render_canvas canvas scene;
       require(channel canvas ~x:16 ~y:16=(0,0,255,255)) "camera native instance clipping";
       let first=snapshot canvas in render_canvas canvas scene;
@@ -201,7 +201,7 @@ let run () =
       ~target:Rays_math.Vec3.zero()in
     let mesh=Result.get_ok(Mesh.Private.create_owned~indices:[|0;1;2|]
       [|Rays_math.Vec3.create(-0.8)(-0.8)0.;Rays_math.Vec3.create 0.8(-0.8)0.;Rays_math.Vec3.create 0. 0.8 0.|])in
-    let scene3=Scene3.create[Scene3.mesh~material:(Material.unlit Rays_math.Color.red)mesh]in
+    let scene3=Scene.D3.create[Scene.D3.mesh~material:(Material.unlit Rays_math.Color.red)mesh]in
     let reusable=Scene.[clear(Rays_math.Color.rgba 9 17 31 255);
       image borrowed~at:(3,3)();text~at:(12,2)~size:12"reusable";
       view3d~viewport:(32,32,32,32)~camera scene3;

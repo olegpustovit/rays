@@ -53,7 +53,7 @@ let () = with_cook 1 (fun cook ->
   let prepared = Rdk_rays.Surface.of_geometry ?instances:colored.instances geometry |> get in
   let explosion = Rdk_rays.Packed_pieces.explosion
       ~operation:(Node.operation graph) ~fields:(Node.parameter_fields graph) in
-  let drawings = Rdk_rays.Surface.scene3 ?explosion prepared |> Scene3.Private.drawings in
+  let drawings = Rdk_rays.Surface.scene3 ?explosion prepared |> Scene.D3.Private.drawings in
   assert (List.length drawings = 4);
   Printf.printf "studio fracture: %d closed manifold shards, %d faces, volume %.9g; exact across 1/4 domains; four material batches\n%!"
     !count (Rdk.Geometry.primitive_count g) fractured_volume)

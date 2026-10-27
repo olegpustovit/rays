@@ -27,7 +27,7 @@ let feature_name : Ogpu_core.Caps.feature -> string =
   | Buffer -> "buffer" | Texture -> "texture" | Sampler -> "sampler"
   | Compute_pipeline -> "compute_pipeline" | Render_pipeline -> "render_pipeline"
   | Queue -> "queue" | Surface -> "surface"
-  | Ray_tracing -> "ray_tracing" | Ray_tracing_curves -> "ray_tracing_curves"
+  | Ray_tracing -> "ray_tracing" | Ray_tracing_curves -> "ray_tracing_curves" | Ray_tracing_motion -> "ray_tracing_motion"
   | Function_tables -> "function_tables"
   | Unknown name -> name
 
@@ -42,6 +42,7 @@ let feature_map : (Ogpu_core.Caps.feature * sdk_type list) list =
   ; Surface, [ Class "CAMetalLayer" ]
   ; Ray_tracing, [ Protocol "MTLAccelerationStructure" ]
   ; Ray_tracing_curves, [ Class "MTLAccelerationStructureCurveGeometryDescriptor" ]
+  ; Ray_tracing_motion, [ Class "MTLMotionKeyframeData" ]
   ; Function_tables, [ Protocol "MTLIntersectionFunctionTable" ]
   ]
 

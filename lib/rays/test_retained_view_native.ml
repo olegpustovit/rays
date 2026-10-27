@@ -8,9 +8,9 @@ let run () =
                  fps = None; clock = Sketch.Fixed (1. /. 60.) } in
   let camera distance = Camera.perspective ~at:(Rays_math.Vec3.create 0. 0. distance) ~target:Rays_math.Vec3.zero () in
   let far_camera = camera 6. and near_camera = camera 2.5 in
-  let sphere = Scene3.mesh ~material:(Material.matte Rays_math.Color.white)
+  let sphere = Scene.D3.mesh ~material:(Material.matte Rays_math.Color.white)
       (Test_meshes.sphere ~radius:1. ()) in
-  let scene3 = Scene3.create [ sphere ] in
+  let scene3 = Scene.D3.create [ sphere ] in
   let view (_ : unit) (frame : Frame.t) =
     let camera = if frame.input.frame > 8 then near_camera else far_camera in
     (* the corner square changes every frame: only the UI layer differs between frames *)

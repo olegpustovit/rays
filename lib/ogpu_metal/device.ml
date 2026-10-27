@@ -51,7 +51,8 @@ let system_default () =
              ; render_pipeline = true
              ; ray_tracing = info.raytracing
              ; function_tables = info.raytracing
-             ; ray_tracing_curves = info.raytracing && curves }
+             ; ray_tracing_curves = info.raytracing && curves
+             ; ray_tracing_motion = info.raytracing }
            in
            match Ogpu_core.Caps.validate capabilities with
            | Error _ as failure -> ignore (Metal.Device.destroy metal); failure

@@ -327,6 +327,8 @@ let create_accel device descriptor=
   let uses_curves=match descriptor with
     |Blas{geometries;_}|Motion_blas{geometries;_}->List.exists(function Curves _->true|_->false)geometries
     |_->false in
+  let uses_motion=match descriptor with Motion_blas _->true|Tlas_of{kind=Motion_instances;_}->true|_->false in
+  match(if uses_motion then Caps.require ~operation:op device.raw.capabilities Caps.Ray_tracing_motion else Ok())with Error _ as e->e|Ok()->
   match(if uses_curves then Caps.require ~operation:op device.raw.capabilities Caps.Ray_tracing_curves else Ok())with Error _ as e->e|Ok()->
   match check_all op device(descriptor_buffers descriptor)with Error _ as e->e|Ok()->
   let structures=descriptor_structures descriptor in

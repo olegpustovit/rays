@@ -192,7 +192,7 @@ onto an older result. Settings changes invalidate every object, including
 settings whose schema only declares draw effects. Empty object sets submit
 an empty request to supersede previous work. The sketch's `scene3` draws
 each object, cached per prepared value, and the editor places the drawings
-at their world transforms (`Scene3.nodes` under `Scene3.transform`), so
+at their world transforms (`Scene.D3.nodes` under `Scene.D3.transform`), so
 moving, parenting, hiding, or re-lighting objects never re-cooks SOPs. Light
 objects light the scene when it has any; otherwise the first object's own
 Scene3 lights do. While inside an object the others draw ghosted

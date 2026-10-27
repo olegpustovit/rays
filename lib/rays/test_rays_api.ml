@@ -164,7 +164,7 @@ let frame_and_scene () =
 let scene_parity () =
   Scene.Private.with_cache_context (Scene.Private.create_cache_context ()) (fun () ->
   let camera = Camera.perspective ~at:(Rays_math.Vec3.create 0. 0. 3.) ~target:Rays_math.Vec3.zero () in
-  let scene3 = Scene3.create [] in
+  let scene3 = Scene.D3.create [] in
   let scene =
     [ Scene.clear Rays_math.Color.black;
       Scene.clip ~at:(0, 0) ~w:32 ~h:24

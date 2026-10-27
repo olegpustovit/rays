@@ -121,6 +121,6 @@ let run () =
   let module E3 = Rays_editor.Editor in
   exercise
     ~create:(fun () -> E3.create ~ui_text_size:11 ~await:true ~workspace ~presets:directory ~factories ~prepare
-      ~draw:(fun _ _ -> Scene3.create []) () |> Result.get_ok)
+      ~draw:(fun _ _ -> Scene.D3.create []) () |> Result.get_ok)
     ~update:E3.update ~close:E3.close ~document:E3.document ~prepared:E3.prepared ~panes:E3.panes;
   print_endline "editor document: validation, dump, preset round trip, delete-all passed")

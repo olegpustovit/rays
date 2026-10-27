@@ -505,7 +505,7 @@ no render encoder and refuses it with the rest of rendering; conformance draws a
 device arguments and refuses a misaligned argument range. OGPU-Metal is the only layer that maps checked OGPU render values onto
 that generic surface.
 
-`Scene3.instances_array` lowers each instance batch to one indexed Metal draw.
+`Scene.D3.instances_array` lowers each instance batch to one indexed Metal draw.
 Rays keeps one mesh and one material/light uniform block, then appends 48
 float32 values per instance (model-view-projection, world, and normal matrices).
 The vertex shader indexes that table with Metal's instance ID. OGPU carries a
@@ -526,7 +526,7 @@ capped at 256 MiB. Small uniforms use these pages rather than inline
 Scene3 raster accepts indexed triangles, lines, and points. Lines use native
 Metal line draws; points use a point-topology pipeline with an explicit
 one-pixel point size. Line strips and loops become indexed line pairs once
-per immutable mesh. `Scene3.Wireframe` extracts unique edges from triangle
+per immutable mesh. `Scene.D3.Wireframe` extracts unique edges from triangle
 meshes, while callers with polygon topology can pass RDK's unique topology
 edges as `Mesh.Lines` to avoid triangulation diagonals. Scene3 packs the immutable
 float64 CPU mesh directly from its coordinate planes into two GPU streams:
@@ -652,7 +652,7 @@ rendered once into an offscreen execution the size of the window and later frame
 texture as a Canvas image, so a frame that only changes the UI does not shade the 3D view again.
 The window's drawable size is checked on every use; a different layer, a resize or any failure
 falls back to drawing the layer directly, and `destroy` releases the views before the device-lease
-check.  Scenes the engine does not cache (textured, `Scene3.Private.cacheable` false) never repeat
+check.  Scenes the engine does not cache (textured, `Scene.D3.Private.cacheable` false) never repeat
 an identity, so they are never retained.  `Scene` stays pure data; this is invisible to it.
 `test_retained_view_native` checks that direct, retained and camera-change frames agree.
 

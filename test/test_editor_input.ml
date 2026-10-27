@@ -207,7 +207,7 @@ let run () =
   let module E3 = Rays_editor.Editor in
   exercise ~name:"Editor"
     ~create:(fun () -> E3.create ~ui_text_size:11 ~workspace ~camera:(Easy_camera.create ~inertia:false ())
-      ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ _ -> Scene3.empty) () |> Result.get_ok)
+      ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ _ -> Scene.D3.empty) () |> Result.get_ok)
     ~update:E3.update ~close:E3.close ~dump:E3.crash_dump ~panes:E3.panes
     ~camera:(fun env -> let camera = E3.camera env in
       Camera.position (Easy_camera.camera camera), Camera.target (Easy_camera.camera camera),

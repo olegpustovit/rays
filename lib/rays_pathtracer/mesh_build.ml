@@ -143,6 +143,9 @@ let upload_mesh_async ?reuse ~material_data device queue mesh =
     structures := value :: !structures;
     Ok value
   in
+  let* mesh =
+    if mesh_shape mesh |> fun s -> s.motion && not (Ogpu.Caps.has (B.capabilities device) Ray_tracing_motion)
+    then Mesh_data.shutter_midpoint mesh else Ok mesh in
   let shape = mesh_shape mesh in
   let extras = mesh.extras in
   let capabilities = B.capabilities device in

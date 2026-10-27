@@ -156,7 +156,7 @@ let flat text clicks =
   let env = ref (E3.create ~ui_text_size:11 ~await:true ~workspace ~camera:(Easy_camera.create ~inertia:false ())
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
-      ~draw:(fun _ _ -> Scene3.empty) () |> Result.get_ok) in
+      ~draw:(fun _ _ -> Scene.D3.empty) () |> Result.get_ok) in
   let count = ref 0 in
   let step ?(buttons = []) mouse events =
     incr count; env := E3.update !env (Test_editor_input.frame ~buttons mouse events !count) in

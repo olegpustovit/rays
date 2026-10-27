@@ -83,7 +83,7 @@ let run () =
         Fun.protect ~finally:(fun () -> ignore(Canvas.destroy canvas)) (fun () ->
           let nodes = Array.to_list (Array.mapi (fun i geometry ->
             let mesh = rdk (Rdk_rays.Rays_mesh.to_mesh geometry) in
-            Scene3.mesh ~material:(Material.create ~diffuse:(Rays_math.Color.gray gray)
+            Scene.D3.mesh ~material:(Material.create ~diffuse:(Rays_math.Color.gray gray)
               ~shininess:shininess.(i) ()) mesh) geometry) in
           let discs = Array.init 2 disc in
           Array.iter (fun pixels -> assert (pixels <> [])) discs;
@@ -95,7 +95,7 @@ let run () =
             assert (P.samples tracer = 1024);
             let traced = Test_pathtracer.pixels tracer in
             get(Canvas.render canvas [Scene.view3d ~camera
-              (Scene3.with_world baked (Scene3.create nodes))]);
+              (Scene.D3.with_world baked (Scene.D3.create nodes))]);
             let image = get (Canvas.to_image canvas) in
             let raster = Fun.protect ~finally:(fun () -> ignore(Image.destroy image))
               (fun () -> Bytes.copy (get (Image.Private.pixels image))) in

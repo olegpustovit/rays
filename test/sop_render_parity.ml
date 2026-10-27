@@ -215,8 +215,8 @@ let scene geometry =
   let camera = Camera.perspective ~at:(Rays_math.Vec3.create 3.5 3. 5.)
       ~target:Rays_math.Vec3.zero () in
   Scene.[clear (Rays_math.Color.hex_exn "#020617");
-    view3d ~camera (Scene3.create ~samples:1 [
-      Scene3.mesh ~cull:Scene3.Cull_none
+    view3d ~camera (Scene.D3.create ~samples:1 [
+      Scene.D3.mesh ~cull:Scene.D3.Cull_none
         ~material:(Material.unlit Rays_math.Color.white) mesh])]
 
 (* One window per domain count: every graph is one frame of the same export. *)

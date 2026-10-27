@@ -12,6 +12,7 @@ type instances = {
   shader_bytes : bytes;
   motion_transforms : float array array option;
   matrices : Rays_math.Mat4.t array;
+  motion_end : Rays_math.Mat4.t array option;
 }
 
 (* A scene is a TLAS over several BLASes, one per part and one geometry kind
@@ -176,7 +177,7 @@ let layout_mesh ?(objects = [||]) ?(placed = [||]) ?(locals = [||]) base parts p
   let* () = pack 0 in
   Ok
     { base with
-      instances = Some { records; shader_bytes; motion_transforms = None; matrices = Array.map (fun (m, _, _) -> m) placements }
+      instances = Some { records; shader_bytes; motion_transforms = None; motion_end = None; matrices = Array.map (fun (m, _, _) -> m) placements }
     ; scene = Some { parts; placements; table; objects; placed; locals } }
 
 let mesh ~extras ~materials source_meshes =
@@ -191,6 +192,30 @@ let mesh ~extras ~materials source_meshes =
      identity instances; a single kind keeps the flat fast path. *)
   if List.length parts < 2 then Ok flat
   else layout_mesh flat (Array.of_list parts) (Array.of_list (List.mapi (fun i _ -> (Rays_math.Mat4.identity, i, -1)) parts))
+
+let pack_instances ~materials ~motion transforms =
+    let count = Array.length transforms in
+    let stride = if motion = None then 84 else 168 in
+    let records = Array.make count { B.instance = { transform = [||]; mask = 0; structure_index = 0 }; user_id = 0; table_offset = 0 }
+    and shader_bytes = Bytes.create (count * stride)
+    and motion_transforms = Array.make (2 * count) [||] in
+    let rec pack instance =
+      if instance = count then Ok ()
+      else
+        let* start = transform_columns transforms.(instance) in
+        let* finish = match motion with None -> Ok start | Some ends -> transform_columns ends.(instance) in
+        records.(instance) <-
+          { B.instance = { transform = fst start; mask = 0xFFFF_FFFF; structure_index = 0 }
+          ; user_id = (if materials = 0 then 0 else 1 + instance); table_offset = 0 };
+        put_transform_record shader_bytes (instance * stride) start;
+        if motion <> None then put_transform_record shader_bytes ((instance * stride) + 84) finish;
+        motion_transforms.(2 * instance) <- fst start;
+        motion_transforms.((2 * instance) + 1) <- fst finish;
+        pack (instance + 1)
+    in
+    let* () = pack 0 in
+    Ok { records; shader_bytes; matrices = transforms; motion_end = motion
+       ; motion_transforms = (if motion = None then None else Some motion_transforms) }
 
 let mesh_instanced ~(prototype : 'material t) ?(materials = [||]) ?motion transforms =
   if prototype.scene <> None || prototype.instances <> None
@@ -207,35 +232,29 @@ let mesh_instanced ~(prototype : 'material t) ?(materials = [||]) ?motion transf
   else if match motion with Some ends -> Array.length ends <> count | None -> false then
     Error "path tracer motion transforms must match the transform count"
   else
-    let stride = if motion = None then 84 else 168 in
-    let records = Array.make count { B.instance = { transform = [||]; mask = 0; structure_index = 0 }; user_id = 0; table_offset = 0 }
-    and shader_bytes = Bytes.create (count * stride)
-    and motion_transforms = Array.make (2 * count) [||] in
-    let rec pack instance =
-      if instance = count then Ok ()
-      else
-        let* start = transform_columns transforms.(instance) in
-        let* finish = match motion with None -> Ok start | Some ends -> transform_columns ends.(instance) in
-        records.(instance) <-
-          { B.instance = { transform = fst start; mask = 0xFFFF_FFFF; structure_index = 0 }
-          ; user_id = (if Array.length materials = 0 then 0 else 1 + instance); table_offset = 0 };
-        put_transform_record shader_bytes (instance * stride) start;
-        if motion <> None then put_transform_record shader_bytes ((instance * stride) + 84) finish;
-        motion_transforms.(2 * instance) <- fst start;
-        motion_transforms.((2 * instance) + 1) <- fst finish;
-        pack (instance + 1)
-    in
-    let* () = pack 0 in
+    let* instances = pack_instances ~materials:(Array.length materials) ~motion transforms in
     Ok
       {
         prototype with
         triangles = prototype.triangles * count;
         mesh_materials = prototype.mesh_materials @ Array.to_list materials;
-        instances =
-          Some
-            { records; shader_bytes; matrices = transforms
-            ; motion_transforms = (if motion = None then None else Some motion_transforms) };
+        instances = Some instances;
       }
+
+(* Without [Ray_tracing_motion] a motion mesh is built at the shutter midpoint:
+   the mean of its start and end transforms, as an ordinary instanced mesh. *)
+let shutter_midpoint (m : 'material t) =
+  match m.instances with
+  | Some ({ motion_end = Some ends; _ } as instances) ->
+      let mid a b =
+        let m r c = (Rays_math.Mat4.get a ~row:r ~column:c +. Rays_math.Mat4.get b ~row:r ~column:c) /. 2. in
+        let row r = (m r 0, m r 1, m r 2, m r 3) in
+        Rays_math.Mat4.of_rows (row 0) (row 1) (row 2) (row 3) in
+      let used = Array.exists (fun (r : B.instance_record) -> r.user_id <> 0) instances.records in
+      let* packed = pack_instances ~materials:(if used then 1 else 0) ~motion:None
+        (Array.mapi (fun i a -> mid a ends.(i)) instances.matrices) in
+      Ok { m with instances = Some packed }
+  | _ -> Ok m
 
 let scene_mesh (objects : (Rays_math.Mat4.t * 'material t) list) =
   (* Each input as its parts and placements in its own index spaces. *)

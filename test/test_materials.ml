@@ -65,11 +65,11 @@ let face_materials_preserve_explosion () =
        :emission [0.0 0.0 0.0])
      (sop/exploded_view :amount 1.0))|} in
   let surface = cook 1 node |> surface in
-  let drawings = surface_scene node surface |> Scene3.Private.drawings in
+  let drawings = surface_scene node surface |> Scene.D3.Private.drawings in
   assert (List.length drawings = 2);
   (* Centers ±2 move to ±4. Painting just one face must leave every face of
      each cube at exactly the same rigid displacement. *)
-  List.iter (fun (d : Scene3.Private.drawing) ->
+  List.iter (fun (d : Scene.D3.Private.drawing) ->
     let v = Mesh.Private.packed_view d.mesh in
     Array.iter (fun index ->
       let x = abs_float v.vertices.x.(index) in
@@ -107,7 +107,7 @@ let editor () =
   E3.create ~ui_text_size:11 ~await:true ~workspace:(workspace follow_source)
     ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
       |> Result.map_error Rdk.Error.to_string)
-    ~draw:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) ()
+    ~draw:(fun _ mesh -> Scene.D3.create [ Scene.D3.mesh mesh ]) ()
   |> function Ok e -> e | Error m -> fail m
 
 let dump_line e key =
@@ -260,7 +260,7 @@ let carry_tests () =
      loaded the machine is (it was once held back under a full parallel suite) *)
   let make ?(source = carry_source) ?(carry_budget = Float.infinity) () =
     E3.create ~ui_text_size:11 ~await:true ~carry_budget ~workspace:(workspace (with_editor source))
-      ~prepare:(fun _ _ -> Ok (Scene3.create []))
+      ~prepare:(fun _ _ -> Ok (Scene.D3.create []))
       ~draw:(fun _ scene -> scene) ()
     |> function Ok e -> e | Error m -> fail m in
   let e = ref (make ()) and count = ref 0 in
@@ -551,7 +551,7 @@ let viewport_carry_tests () =
   let e = ref (E3.create ~ui_text_size:11 ~await:true ~workspace:(workspace viewport_source)
     ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
       |> Result.map_error Rdk.Error.to_string)
-    ~draw:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) ()
+    ~draw:(fun _ mesh -> Scene.D3.create [ Scene.D3.mesh mesh ]) ()
     |> function Ok e -> e | Error m -> fail m) and count = ref 0 in
   let step ?(keys = []) ?(mouse = (450., 300.)) events =
     incr count; e := E3.update !e (frame ~keys mouse events !count) in
@@ -634,10 +634,10 @@ let () =
        assert (Array.sub rough 1 5 = Array.make 5 0.3)
    | _ -> assert false);
   let surface = surface one in
-  let drawings = surface_scene node surface |> Scene3.Private.drawings in
+  let drawings = surface_scene node surface |> Scene.D3.Private.drawings in
   assert (List.length drawings = 2);
-  assert (List.fold_left (fun n (d : Scene3.Private.drawing) -> n + Mesh.index_count d.mesh) 0 drawings = 36);
-  assert (List.exists (fun (d : Scene3.Private.drawing) -> d.material.diffuse = Rays_math.Color.hex_exn "#2670f5") drawings);
+  assert (List.fold_left (fun n (d : Scene.D3.Private.drawing) -> n + Mesh.index_count d.mesh) 0 drawings = 36);
+  assert (List.exists (fun (d : Scene.D3.Private.drawing) -> d.material.diffuse = Rays_math.Color.hex_exn "#2670f5") drawings);
   let assign ?cancel ?group ?(roughness = 0.2) geometry =
     Rdk.Material_assign.run ?cancel ?group ~name:"red" ~color:(1.,0.,0.)
       ~roughness ~emission:(0.,0.,0.) geometry in

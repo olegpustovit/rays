@@ -416,7 +416,7 @@ cook is O(prototype + targets): the prototype polygons followed by one loose
 point per copy carrying `scale`; there are no fake packed primitives inside
 `Rdk.Geometry.t`, and `prepare` splits referenced points (prototype) from
 loose points (instance transforms) on the cook worker. The rasterizer draws
-that with one indexed Metal instance batch through `Scene3.instances_array`;
+that with one indexed Metal instance batch through `Scene.D3.instances_array`;
 the tracer uses `mesh_instanced` to keep a single prototype BLAS and build a
 top-level instance structure. Materialized, the node calls
 `Rdk.Instance_copy.copy_to_points`. A "Renderer" choice in the inspector's camera panel
@@ -424,7 +424,7 @@ top-level instance structure. Materialized, the node calls
 and a Scene3 wireframe made from indexed Metal lines along unique RDK topology
 edges. The Box catalog defaults to six quads, so the wireframe follows the
 modeled faces without triangulation diagonals. The wireframe uses the Metal
-scene path and preserves packed instancing. Native `Scene3.Wireframe` also
+scene path and preserves packed instancing. Native `Scene.D3.Wireframe` also
 supports triangle meshes, where it follows the mesh's triangle edges.
 The renderer is a sketch `Settings` choice: switching it is one undo step and
 recooks, since `prepare` receives the settings. All

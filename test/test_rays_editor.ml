@@ -129,7 +129,7 @@ let run () =
       ~max_entries:4 ~max_payload_bytes:(16 * 1024 * 1024)
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
-      ~draw:(fun _graph mesh -> Scene3.create [Scene3.mesh mesh]) ()
+      ~draw:(fun _graph mesh -> Scene.D3.create [Scene.D3.mesh mesh]) ()
     |> Result.get_ok in
   let deadline = Unix.gettimeofday () +. 60. in
   let rec wait count environment =
@@ -445,7 +445,7 @@ let run () =
       ~max_entries:4 ~max_payload_bytes:(16 * 1024 * 1024)
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
-      ~draw:(fun _graph mesh -> Scene3.create [Scene3.mesh mesh]) ()
+      ~draw:(fun _graph mesh -> Scene.D3.create [Scene.D3.mesh mesh]) ()
     |> Result.get_ok in
   let near a b = Rays_math.Vec3.nearly_equal a b ~eps:1e-6 in
   let eye environment = Camera.position (Rays_editor.Editor.render_camera environment) in
@@ -585,7 +585,7 @@ let run () =
       ~settings:(Settings.make mode_schema 0)
       ~max_entries:4 ~max_payload_bytes:(16 * 1024 * 1024)
       ~prepare:(fun settings _ -> Ok (Settings.get mode_schema settings))
-      ~draw:(fun _ _ -> Scene3.create []) () |> Result.get_ok in
+      ~draw:(fun _ _ -> Scene.D3.create []) () |> Result.get_ok in
   let deadline = Unix.gettimeofday () +. 60. in
   let rec wait_mode expected count environment =
     let environment = Rays_editor.Editor.update environment (frame count) in
@@ -608,7 +608,7 @@ let run () =
      while it is open, Enter writes the workspace text, and / b loads it back. *)
   let module Preset = Rays_editor.Private.Preset in
   let presets = Filename.temp_dir "sketch-ui-workspace-presets" "" in
-  let mesh_scene mesh = Scene3.create [Scene3.mesh mesh] in
+  let mesh_scene mesh = Scene.D3.create [Scene.D3.mesh mesh] in
   let environment = Rays_editor.Editor.create ~ui_text_size:11 ~await:true ~workspace:(fixture ()) ~presets
       ~camera:(Easy_camera.create ~distance:6. ~inertia:false ())
       ~factories:Sop_catalog.Editor.factories
