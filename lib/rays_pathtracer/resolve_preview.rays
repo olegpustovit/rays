@@ -1,0 +1,24 @@
+; resolve_preview of pathtrace.metal in Rays Lisp: a 3x3 depth/normal-aware
+; blur of the colour film, ACES tone map, gamma 2.2; result in [0,1] RGBA.
+(defn aces-gamma :context value [(c : float)]
+  (pow (min 1. (max 0. (/ (* c (+ (* 2.51 c) 0.03)) (+ (* c (+ (* 2.43 c) 0.59)) 0.14)))) (/ 1. 2.2)))
+(defn resolve-pixel :context value
+  [(color : (array vec4)) (geom : (array vec4)) (i : int) (w : int) (h : int) (exposure : float) (clear : bool)]
+  (let* [x (int/mod i w) y (int/div i w)
+         center (array/nth geom i)
+         base (array/nth color i)
+         acc (fold [s {:r base.x :g base.y :b base.z :w 1.}] [k (range 9)]
+               (let* [dx (int/sub (int/mod k 3) 1) dy (int/sub (int/div k 3) 1)
+                      nx (int/add x dx) ny (int/add y dy)
+                      inside (and (and (>= nx 0) (>= ny 0)) (and (< nx w) (< ny h)))
+                      j (if inside (int/add (int/mul ny w) nx) i)
+                      n (array/nth geom j)
+                      near (and (and (> center.w 0.) (and inside (not (and (int/eq dx 0) (int/eq dy 0)))))
+                             (and (and (> n.w 0.) (< (abs (- n.w center.w)) (max 0.03 (* center.w 0.01))))
+                               (> (+ (+ (* n.x center.x) (* n.y center.y)) (* n.z center.z)) 0.95)))
+                      c (array/nth color j)
+                      wt (if (or (int/eq dx 0) (int/eq dy 0)) 0.5 0.25)]
+                 (if near {:r (+ s.r (* c.x wt)) :g (+ s.g (* c.y wt)) :b (+ s.b (* c.z wt)) :w (+ s.w wt)} s)))]
+    [(aces-gamma (* (/ acc.r acc.w) exposure)) (aces-gamma (* (/ acc.g acc.w) exposure))
+     (aces-gamma (* (/ acc.b acc.w) exposure)) (if (and clear (<= center.w 0.)) 0. 1.)]))
+; GPU vs MSL-semantics parity: lib/flow_gpu/test_resolve.ml
