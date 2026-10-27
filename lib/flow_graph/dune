@@ -1,8 +1,8 @@
 (library
  (name flow_graph)
  (public_name rays.flow_graph)
- (modules exposure flow_edit edit_base edit_layout projection probe)
- (private_modules edit_base edit_layout)
+ (modules exposure flow_edit edit_base edit_layout edit_ops projection probe)
+ (private_modules edit_base edit_layout edit_ops)
  (libraries flow param))
 
 (test
