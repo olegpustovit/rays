@@ -46,17 +46,17 @@ Remove what is plainly dead or wrong before touching structure, and make sure ev
 - [x] P0.S1: Remove the 900 MB worktree. Delete `sop-lisp/`, `web-export/results.md`, `docs/`, `workflow.md` and `project.md`, the README review boilerplate, and the finished DEFERRED items. Rewrite `api.md`. Evidence: the named tree is absent from both disk and `git worktree list --porcelain`, and `.claude/worktrees/` is ignored; all named obsolete documents are absent. The README describes current native/Lisp usage, `api.md` is a 163-line internal-layer reference, and `DEFERRED.md` retains open issues only.
 - [x] P0.S2: Make every test reachable: fix the `rdk_parts` group and the mislabeled groups, wire up `test_world_command` and `test_workspace_vocabulary`, add one `RAYS_SLOW=1` qualification rule, and delete the `*_draft` aliases and the `.pending` glob. Evidence: current dependency-gate census passes, including grouped dispatch and aggregate-lane regression checks; the shell qualification rule explicitly sets `RAYS_SLOW=1`.
 - [x] P0.S3: Fix the correctness bugs found in passing: the lossy `encode_numeric`, the non-atomic `Display_list` id, and the iso_surface and image/noise defaults read from oracles. Make `rays web` write atomically, narrow the catch-all handlers to named exceptions, and replace the Marshal state keys. Evidence: XC3, XC20, SP6/SP7, FL37, FL16 and FL25 have focused regressions recorded in status.md; field probes additionally verify different defaults from an actual checked Lisp declaration.
-- [ ] P0.S4: Delete dead features: the Shadow3 chain, stencil (12 → 8 pipeline families), Edit_graph `bypass`, warning diagnostics, the extra wire styles, `keymap3`, dead editor hooks and identity wrappers, `capture_callback`, unused counters, `web_server.mli`, the context and type registries, and `Check.kind.aliases`.
+- [x] P0.S4: Delete dead features: the Shadow3 chain, stencil (12 → 8 pipeline families), Edit_graph `bypass`, warning diagnostics, the extra wire styles, `keymap3`, dead editor hooks and identity wrappers, `capture_callback`, unused counters, `web_server.mli`, the context and type registries, and `Check.kind.aliases`. Evidence: Shadow3, stencil, Edit_graph bypass, keymap3, capture_callback, web_server.mli, Rect/Straight wire styles, the context/type registries and Check.kind.aliases are absent. Warning diagnostics (W_UNKNOWN_GROUP, W_UNKNOWN_META, W_SOFT_RANGE) are produced today, so they stay.
 - [ ] P0.S5: Clean up history and noise: the M3 markers in the bridge, the plan-id comments and test names in metal, codemod residue in records, and the stale `AGENTS.md` and skill text. Fix `dune-project`, `.gitignore` and the gate's redundant blacklists.
 - [ ] P0.S6: Add `.ocamlformat` and format the golfed files in one mechanical commit per library, so later diffs are readable.
-- [ ] P0.S7: Add the guardrails that cost nothing: the alias-reachability check and the plan-id/date comment check (§07).
+- [x] P0.S7: Add the guardrails that cost nothing: the alias-reachability check and the plan-id/date comment check (§07). Evidence: alias reachability is lane_aliases in test/dependency_gate.ml; plan-id/date comments are rejected by @tools/codemod/history-comments.
 
 Exit gates:
 
 - [ ] P0.G1: `check.exe --ship` is green
 - [x] P0.G2: every test executable and group is reachable from a lane (gate check). Evidence: `@test/dependency_gate` passes after the alias split, with negative fixtures for orphan executables, unselected/duplicate groups and coupled aliases.
 - [x] P0.G3: markdown down by about 13k lines
-- [ ] P0.G4: no `Shadow3`, `stencil`, `bypass` or `.pending` remain in lib/
+- [x] P0.G4: no `Shadow3`, `stencil`, `bypass` or `.pending` remain in lib/ Evidence: no Shadow3, stencil or .pending file/glob in lib. The remaining 'bypass' is the live Lisp bypass meta in flow_graph, not Edit_graph's dead flag.
 
 Risk: Low. The only behaviour changes are the bug fixes, and each of those gets its own test.
 
@@ -695,7 +695,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **PL18** (P4, med, correctness-risk, effort M). Location at baseline: rays/canvas.ml (9 failwith), image.ml (4), sketch.ml (4). Public resource APIs raise exceptions while the layers below return results. Action: Return `result`, or drop the duplicates that are not `_exn`. Evidence: Canvas/Image fallible operations, including destruction, return results. Sketch run_state/export/export_state return typed Ogpu.Error.t; workspace startup/export translates those to diagnostics. Callback exceptions keep their crash-report/backtrace behavior, with renderer cleanup if init fails. Wrong-domain lifetime and invalid-startup regressions, focused Rays/editor tests and @check pass; callers/docs use the new boundaries.
 
-- [ ] **PL19** (P0, med, doc-rot, effort S). Location at baseline: runtime.ml:1-16 · scene_execution.mli:32-35,85-88,166-172 · runtime_input.mli:17. Codemod residue: records full of blank lines, docs for deleted fields (`plan_entries`, `position`), and a one-field record. Action: Clean them up.
+- [x] **PL19** (P0, med, doc-rot, effort S). Location at baseline: runtime.ml:1-16 · scene_execution.mli:32-35,85-88,166-172 · runtime_input.mli:17. Codemod residue: records full of blank lines, docs for deleted fields (`plan_entries`, `position`), and a one-field record. Action: Clean them up. Evidence: fab51f23 removes blank-line record residue in runtime/runtime_input and the doc text for nonexistent fields.
 
 - [x] **PL20** (P0, med, dead-code, effort S). Location at baseline: runtime.ml:40-56. The `frames`, `presented` and `logical_submissions` counters are written and never read. Action: Delete them.
 
@@ -731,7 +731,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [ ] **RK1** (P1, high, oracle-only, effort L). Location at baseline: lib/rdk/{attrib,gen,curve,mesh}: 52 whole modules (24.5k .ml + 1.7k .mli) + ~10.4k inside 12 live modules. About 39% of rdk is reached only by tests, benches and port gates (inventory in appendix C). Action: Delete it (decided 2026-10-27: no oracle library). After the SOP twins go, run prune-dead-code to a fixpoint. Only kernels reached by the 37 native SOPs, flow_sop host primitives, the editor and the path tracer survive.
 
-- [ ] **RK2** (P0, high, correctness-risk, effort S). Location at baseline: lib/rdk/test_main.ml:3-4. `test_rdk_sources` and `test_copy_to_points` are in group 'rdk_parts', which no dune rule selects. 751 lines never run, including a GC-stress regression. Action: Move them into 'core' and 'mesh'. The guardrail (§07) stops this from happening again.
+- [x] **RK2** (P0, high, correctness-risk, effort S). Location at baseline: lib/rdk/test_main.ml:3-4. `test_rdk_sources` and `test_copy_to_points` are in group 'rdk_parts', which no dune rule selects. 751 lines never run, including a GC-stress regression. Action: Move them into 'core' and 'mesh'. The guardrail (§07) stops this from happening again. Evidence: rdk_parts is gone; test_rdk_sources runs under core and test_copy_to_points under mesh in lib/rdk/test_main.ml.
 
 - [ ] **RK3** (P6, high, vibe-code, effort L). Location at baseline: core/error.ml:13-21 + 54 local exceptions, 114 string-result + 209 Error.t signatures, ~30 `unguard`. Each error passes through three forms (local exception, string result, Error.t), with 36 `_raw`/guarded twin functions. Action: Use one internal `Rdk_error of Error.t` and convert to `result` once at the rdk boundary. Delete unguard, of_string, the twins and the local exceptions.
 
@@ -789,7 +789,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [ ] **RK30** (P6, low, naming, effort S). Location at baseline: 13 identifiers of 35+ chars (`promote_include_all_primitives_sharing_boundary_points`). Names that are whole sentences. Action: Shorten them during the RK16 record migration.
 
-- [ ] **RK31** (P0, low, test-sprawl, effort S). Location at baseline: test_main.ml group labels (test_motion under core, test_triangulate2d under exact …). `@lib/rdk/test_core` runs mesh tests. Action: Fix the labels.
+- [x] **RK31** (P0, low, test-sprawl, effort S). Location at baseline: test_main.ml group labels (test_motion under core, test_triangulate2d under exact …). `@lib/rdk/test_core` runs mesh tests. Action: Fix the labels. Evidence: group labels in lib/rdk/test_main.ml match their modules (test_motion under mesh).
 
 - [ ] **RK32** (P6, low, doc-rot, effort S). Location at baseline: uv_parameterize.ml:41 · group.mli:35 · attribute_ops.mli:523. 'legacy' names and two legacy driver-name arguments. Action: Drop them.
 
@@ -875,7 +875,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [ ] **FL13** (P3, med, dead-code, effort S). Location at baseline: flow_web/target.ml:23-43 · Flow_ir.place ?target. Used only by tests; the web export never calls `place`. Action: Delete it.
 
-- [ ] **FL14** (P0, med, dead-code, effort S). Location at baseline: flow_ir.ml:278 sink State_seed/Cache_key/Export; tier Gpu_compile. Variants that are never constructed. Action: Remove them.
+- [x] **FL14** (P0, med, dead-code, effort S). Location at baseline: flow_ir.ml:278 sink State_seed/Cache_key/Export; tier Gpu_compile. Variants that are never constructed. Action: Remove them. Evidence: State_seed, Cache_key and Export are absent from lib; Gpu_compile is constructed (flow_ir.ml).
 
 - [x] **FL15** (P0, med, naming, effort S). Location at baseline: flow_ir.ml:231,241,570 · core_scope.ml:210. Tier `Closure` survives the deleted closure tier and is shown to users. plan.md:198 cites a function that no longer exists. Action: Rename it to `Core` and fix plan.md.
 
@@ -971,7 +971,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **UI23** (P0, med, dead-code, effort S). Location at baseline: Editor.take_export, set_render_status, ?status, ?overlay, ?lights, ?background · Renderer.of_env. No callers, or leftovers from the OCaml-sketch API. Action: Delete them.
 
-- [ ] **UI24** (P0, med, vibe-code, effort S). Location at baseline: rays_editor.ml:65-96. Identity wrappers, and ~20 optional arguments re-listed only to rename `~scene3` to `~draw`. Action: Use one name and alias directly.
+- [x] **UI24** (P0, med, vibe-code, effort S). Location at baseline: rays_editor.ml:65-96. Identity wrappers, and ~20 optional arguments re-listed only to rename `~scene3` to `~draw`. Action: Use one name and alias directly. Evidence: the scene3/draw rename wrappers are gone; d5acc6a2 removes the view_camera/film identity wrappers. create/run keep their optional lists because they narrow Environment to rays_editor.mli.
 
 - [ ] **UI25** (P5, med, api-bloat, effort L). Location at baseline: `'prepared` type parameter through Core.t, Cook.t, carry, update. The only production instantiation is Surface; everything else passes unit. Action: Make it concrete after UI6.
 
