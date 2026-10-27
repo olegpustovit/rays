@@ -115,3 +115,28 @@ The allocation reduction is 224 B versus baseline and 48 B versus the previous
 current engine. These capture-loaded pairs still show a substantial regression,
 so neither S3 nor FL2 is accepted. A direct-destination closure experiment
 measured no material gain and was discarded; its code is absent from this build.
+
+### Per-evaluation overhead cuts (P3.S9 pass)
+
+Two costs that every `Core_exec` call paid regardless of the program were removed, both
+measured in isolation (`ocamlfind ocamlopt -O3`, loaded host, ns per operation): `Array.make n x`
+is a C call (16.3 ns for six slots, 8.4 ns even for zero slots) while a pooled `Atomic.exchange` plus
+`Atomic.set` is 7.7 ns.
+
+- `calls` is the empty array when the program has no call slots (the scalar body has none).
+- Programs whose locals are all plain scalars (`Float Int Bool Vec2-4 Text`, nothing that can hold a
+  large or builder-owned array) now reuse their locals array across calls the way programs over 256
+  locals did; the pool holds `[||]` while taken, so no `Some` is allocated per call, and the
+  release closure is gone.
+
+Allocation falls from 360 to 304 B per evaluation for the Executor row (344 to about 288 for
+`Core_exec.execute`). No second VM and no new register bank were added.
+
+Timing is not recorded: during this pass the host load average was 100-115 on 8 cores (other
+agents' builds and replays), and alternating pairs of the frozen baseline, the previous head and
+this build gave baseline 88-92 ns, previous 137-139 ns, current 146-167 ns CPU, i.e. the same
+order of noise as the effect (the frozen binary itself reads 88-92 where it read 64-66 on an idle
+host). The no-regression gate (decision 11) therefore stays open; what remains structural is five
+`E.Float` boxes (two allocations each) and one closure call per statement and per primitive, which
+only a typed float path in Packed (not a Core-side bank) can remove. Re-run
+`tools/bench_core.exe` against the frozen binary on an idle host before accepting S3.
