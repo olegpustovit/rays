@@ -260,7 +260,7 @@ The tree says what is product and what is tooling, and the public API is small o
 - [ ] P7.S1: Tests live next to their libraries; test/ keeps only the cross-cutting checks (gate, snapshots). Move lisp_sop, workspace_parity and ogpu_conformance to their owners. One generated rule for the snapshot pairs and the test_main sections.
 - [ ] P7.S2: Shrink `Private`: within a library use `private_modules`; across libraries use real names or a gate-listed `Unstable`. The allowlist must shrink every PR.
 - [x] P7.S3: Scope `api_stable.json` to Rays and Flow, or delete it. Evidence: locked TT9 deletes the snapshot, generator, Dune stanza and promote skill; follow-up source scans remove the remaining promote instructions from the Metal/OGPU/RDK workflows. Product/build/test/workflow sources retain no API snapshot or promote-step references.
-- [ ] P7.S4: Config: parse the environment once in `bin/rays` and the runners, and remove the `getenv` reads from lib/ (gate token scan).
+- [x] P7.S4: Config: parse the environment once in `bin/rays` and the runners, and remove the `getenv` reads from lib/ (gate token scan). Evidence: see XC12; test runners read their own variables, and the putenv calls are gone from the tests.
 - [ ] P7.S5: Tools: one `bench_rdk` with `bench_util`. Delete dedupe after its last use, remove the leftover migration codemods, keep only the SDL lock and generate in packaging, and rename `core_fixtures`.
 - [ ] P7.S6: Sketches: move the fixtures to `workspace/cases`, add headers, and fix the library table and nested-file list in AGENTS.md.
 
@@ -268,7 +268,7 @@ Exit gates:
 
 - [ ] P7.G1: test/ under about 3k lines
 - [ ] P7.G2: `Private` cross-library allowlist under 20 entries (from 2,100 references)
-- [ ] P7.G3: zero `RAYS_*` reads in lib/
+- [x] P7.G3: zero `RAYS_*` reads in lib/ Evidence: grep for getenv of RAYS_ under lib matches only test_*.ml runners; the gate enforces it. Focused gate, PXUI, rays, editor-logic and smoke checks pass.
 - [ ] P7.G4: AGENTS.md matches the tree (link check green)
 
 Risk: Low.
@@ -623,7 +623,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **XC11** (P2, med, duplication, effort M). Location at baseline: rays/scene.ml (8×), rays_execution.ml:757, 7 rdk files, pxui/ui.ml, flow/value.ml. Ad-hoc hash mixing with the constants 65599 and 1000003. FNV is written twice (sop/support.ml:145, flow_sop/operators.ml:346). Action: Add `Rays_math.Hash.{mix,string}` and use it at every site. Evidence: distinct 65599, salted multiplier, 63-bit/64-bit FNV and Flow float-sequence helpers preserve each algorithm; matching old/new microbench outputs are exact.
 
-- [ ] **XC12** (P7, med, config-sprawl, effort M). Location at baseline: 92 `RAYS_*` env vars; RAYS_MAX_FRAMES read at sketch.ml:105 and cook.ml:120; RAYS_UI_FONT at sdl3_ttf.ml:217 and ui.ml:432. No registry. The SDL binding reads an app-level variable. Action: `bin/rays` and the test runners parse the environment once into a config record that is passed down. Add a gate token-scan for `getenv` in lib/.
+- [x] **XC12** (P7, med, config-sprawl, effort M). Location at baseline: 92 `RAYS_*` env vars; RAYS_MAX_FRAMES read at sketch.ml:105 and cook.ml:120; RAYS_UI_FONT at sdl3_ttf.ml:217 and ui.ml:432. No registry. The SDL binding reads an app-level variable. Action: `bin/rays` and the test runners parse the environment once into a config record that is passed down. Add a gate token-scan for `getenv` in lib/. Evidence: 5baa9de0: bin/rays.ml parses RAYS_MAX_FRAMES, RAYS_CRASH_DIR, RAYS_PROFILE, RAYS_EDITOR_PREFERENCES and RAYS_UI_FONT once into Workspace.process. Sketch, Ui, Sdl3_ttf, the path tracer and the editor take explicit arguments, and generate.exe takes flags. dependency_gate's env_errors rejects RAYS_ getenv in non-test lib sources, with a negative self-check.
 
 - [x] **XC13** (P0, med, duplication, effort S). Location at baseline: ~35 `List.filteri` prefix idioms and 6 `take` definitions (flow_ir.ml:868, queue.ml:25, carry.ml:304 …). OCaml 5.3 has `List.take`/`List.drop`, used only 3 times. Action: Replace them with the standard library.
 
@@ -717,7 +717,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **PL29** (P2, low, duplication, effort M). Location at baseline: Rays.Frame.t vs Frame_input.t (core_model.ml:248 keeps both); Frame.size is redundant. Two frame records. Action: `Frame` embeds `Input`, and `size` is dropped.
 
-- [ ] **PL30** (P7, low, layering, effort S). Location at baseline: rays_pathtracer.ml:1251,1274,1455 · sketch.ml:196,246. Debug environment knobs and `eprintf` in libraries. Action: Pass them in as config (XC12).
+- [x] **PL30** (P7, low, layering, effort S). Location at baseline: rays_pathtracer.ml:1251,1274,1455 · sketch.ml:196,246. Debug environment knobs and `eprintf` in libraries. Action: Pass them in as config (XC12). Evidence: the path tracer's bsdf_only/profile and Sketch's crash_dir/profile are arguments now; their eprintf runs only when the caller asks for profiling or a crash report.
 
 - [ ] **PL31** (P4, low, vibe-code, effort S). Location at baseline: ogpu_metal/impl.ml. A diagnostics-only `live_handles` closure that can `failwith`, returned as a tuple element, so every caller writes `driver, _`. Action: Expose it as `Ogpu_metal.live_handles`.
 

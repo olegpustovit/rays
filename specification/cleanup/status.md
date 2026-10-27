@@ -8,7 +8,7 @@ Completion is **not proved**. No phase is closed. Unlisted requirements and
 finding IDs remain open. Size estimates do not substitute for behavior,
 performance, parity, and shipping evidence.
 
-Finding coverage: **127 / 248 accepted (51.2%)**. This counts individual
+Finding coverage: **129 / 248 accepted (52.0%)**. This counts individual
 findings, not weighted effort or completed phases.
 
 Individual finding checkboxes record implementation/focused evidence;
@@ -258,6 +258,8 @@ size estimate, not the phase's behavioral or shipping gates.
   deleted the superseded study documents and workspace prototype.
 
 ## In progress and remaining proof
+
+- P3.S8 (2026-10-27 audit, 3d6a0d41): Region already inlines `defn` helpers, lowers vectors and records to scalar registers, and runs structured loops with carried registers (Loop_begin/carry/end/result) in Packed, Kernel_layout, the JS/WGSL printers and SPIR-V, including a uint32 PCG state. A new `defn-pcg-vec3` region case is bit-exact against the reference at 1 and 8 domains and is device-eligible. Still refused: state-dependent kernels (`E_PACKED_STATE`), `previous` reads, correlated product sources and loops without a carried scalar leaf. The same commit restores about 24 flow_ir test modules that the runner merge in ec2d7266 had silently stopped running.
 
 - P3.S7: Core_draw owns native/web device-attribute eligibility and sibling
   grouping, including statement scope, rate, precision, input rebinding and
