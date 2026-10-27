@@ -1,166 +1,28 @@
-# Deferred after the lean restructure
+# Deferred work
 
-What is still open after the restructure of 2026-10-10 (commit `923dcecf`). A finished item is
-deleted, not ticked.
+Open product issues beyond routine implementation. Completed items are deleted.
+The approved architecture cleanup is tracked in
+[specification/cleanup/status.md](specification/cleanup/status.md).
 
-## Tests that got weaker
-
-- 2026-10-11: every test file was compared with its version before `923dcecf` and the tests
-  whose subject survived are back. One thing was not restored and is the owner's call:
-  - The Metal safe suites lost most of their statements to the binding prunes of 2026-09-26
-    and 2026-10-06, before this restructure. They now cover the calls that are left; nobody
-    compared them statement by statement with the versions before `0d136464`.
-    2026-10-12: compared (five ranges of `test_metal.ml` and the XPC executables by identifier
-    scan only); device, texture, sampler, function-constant and render-pipeline statements are
-    back, while render encoder, render ICB pixel loops, ICB ownership, acceleration build, M1
-    ray query, argument reflection and encoder, presentation and the two stress lanes are
-    identified and still missing.
-- `runtime_live_resize` is wall-clock based: it failed once under machine load ("a programmatic
-  resize stalled the frame loop for 1016 ms") and has passed since. Rerun it once before
-  reading a failure as a regression. Looked at 2026-10-12, not changed: `Runtime` has no
-  injected clock, and the gap spans the pump and `Runtime.render`, whose presented flag the
-  test ignores, so a failure does not say which of the two stalled.
-
-## Lisp gaps
-
-- Porting `chromatic_drift`, `pastel_flow` and `code_quadtree` to Lisp: dropped by owner
-  (2026-10-11). The README lists what each would need.
-
-## Known costs and behaviour changes to confirm
-
-- Native particles reportedly decay from 60 to 10 FPS with Graph and Lisp panes.
-  The graph probe overhead was repaired 2026-10-12, but the 10 FPS decay remains
-  unreproduced: one 800×600 editor switching layouts for 600 frames each retained
-  about 60 FPS with both panes after the repair. Exact launch/window conditions
-  are still needed. Paired timings and a runnable toggle benchmark are in
-  `specification/web-export/results.md`.
-- Fixed and verified 2026-10-11: a `sop/merge` with `:source_attribute` merges
-  geometry once and builds only the additional primitive tag array. Existing
-  tags, attribute order, schema refusals and cancellation are preserved;
-  `@lib/flow_sop/runtest` passes, including byte comparisons with the original
-  two-merge implementation at one and eight domains. For 20 cooks of eight
-  inputs / 98,304 output primitives, median time falls from 0.138822 to
-  0.071613 seconds and allocation from 266,731,296 to 149,511,776 bytes at one
-  domain. Command and both domain measurements are in
-  `specification/web-export/results.md`.
-- Confirmed 2026-10-11: `/ e` writes a `scene/world` member and a `sky` graph
-  containing a sky and sun as one `Add World` history entry. Reopening the
-  existing World preserves document identity; one undo restores the World-free
-  document. `_build/default/tools/check.exe @test/test_world_command` passes.
-- Confirmed 2026-10-11: World deletion follows the documented graph ownership
-  rule: an unreferenced world graph is removed, while a graph another reference
-  still uses stays unchanged. No `(world/none)` is written. This corrects the
-  earlier note that every world graph remains. The creation, both deletion
-  cases and reload parity pass under `@test/test_scene_sync`.
-- Confirmed 2026-10-11: the gallery's two `W_SOFT_RANGE` warnings are advisory
-  bounds of 64 for columns/rows, not hard limits. The authored values remain
-  100 and cook to 10,201 points / 20,000 triangles. `@test/test_sop_catalog`
-  checks the actual gallery's warning codes and this resolution without
-  changing the example or its declared ranges.
-
-## Deferred optimization (web export)
-
-Benchmark gates in `specification/web-export/plan.md` were waived by the owner on
-2026-10-11: correctness gates block, speed thresholds are recorded here and looked at
-later. Numbers and commands are in `specification/web-export/results.md`.
-
-- Remaining executor performance follow-up: region programs are not cached directly on
-  residuals because their force closure captures per-call state. Pure packed `Counted`
-  maps now compile to native blocks; filters and ordered/tag-sensitive loops retain
-  general execution. The historical whole-frame comparison reported `examples/drawing`
-  about 1.07 times the deleted closure tier; this case has not been remeasured against
-  checkout `3c1314b3`. Scalar and particles regressions were repaired 2026-10-12; current
-  before/after measurements and commands are in `specification/web-export/results.md`.
-- The corpus sweep `@test/test_workspace_ir` takes 20 to 25 minutes since P1.11, because
-  every comparison now runs with the core path off and on. After P1.16 there is one
-  path; check the second pass is gone and the time is back down.
-  - 2026-10-11, partly checked. The sweep executable over the 43 examples and sketches
-    took 633 s real, 673 s user (M1, load 3 to 6, run by hand from `_build/default/test`,
-    so the kit and the fixtures were not timed; no baseline was taken the same day). A
-    `sample` taken while it was on `sketches/million_marks` shows the tree walker
-    (`Eval.ev`, `apply_op`, `Op.find`): the reference forces of the 1,000,000-element map
-    at four times and two domain counts, about 22 s each before the lookup change of the
-    same day. That workspace, added in P7.2, is the likely bulk of the time now, not a
-    second core pass. Next step: time the sweep with and without `million_marks`.
-  - 2026-10-12, one partial run: `sketches/flow_particles_gpu` alone took 386 s; every file before
-    it totalled 18 s. The walker costs 3.7 to 7.9 microseconds per element and each big map looks
-    to be walked about 12 times per time and domain count (inferred, not counted): the same
-    residual is reached through several recorded paths. Next step: walk each residual once.
-- Packed `map`/`filter` forms that `Packed.compile` refuses (dynamic `int`/`floor`, state,
-  array captures; 40 residuals in the corpus) run as a counted frame-level loop over
-  `Array_nth`, single-threaded, not as a region. Correct, not fast; widening
-  `Packed.compile` would move them to parallel blocks or the GPU. The particles
-  measurement and next step above are this bullet's too.
-- Compiling a packed kernel through `Core_region.lower` and `of_region` (P2.4 to P2.6) costs
-  more than walking the term: `tools/bench_core.exe kernels`, compile of one map over 1,024
-  elements 1.46 to 2.19 microseconds (+50 percent), 1,000,000-element map 2.18 to 2.38 (+9),
-  sum 1.11 to 1.28 (+15); fused pair unchanged. Likely cause: building the region record
-  and then `of_region` (validation pass, `dependent` recomputation, a second record copy).
-  Force time is unaffected. Once per kernel, not per frame, so left alone. Measured again
-  2026-10-11 (one run, load 3.4 with the sweep beside it, no code change): 1.52, 2.27,
-  4.39 (fused) and 1.37 (sum) microseconds, so the two maps are within 4 percent of the
-  old numbers and the sum is 0.26 microseconds above.
-- Native mark attributes are one kernel dispatch each (found closing P4.13, whose gate is met:
-  `results.md`, 2026-10-11 addendum). A mark set whose radius and fill both read `t` beside GPU positions is
-  three dispatches, 14.3 ms at 1,000,000 against 4.6 for one (`bench_marks_gpu.exe`, "moving both"). Two things
-  are left. The draw program invokes its regions one by one, where the web export fuses the attributes of one
-  set into one kernel (`Core_fuse.merge` in `tools/lisp/web_export.ml`, `groups`); the native counterpart is to
-  merge the device-eligible `Invoke`s of one `Batch` in `Core_exec.prepare`. And a kernel whose source is an
-  inline static expression (`(map f (array/range n))`) evaluates, packs and uploads that source on every
-  dispatch (8 MB and most of the 4.7 ms): `Packed.Private.prepare` asks the walker for the source term each
-  frame, and `Run.dispatch` only skips an upload when the array is physically the same. Keeping the value of a
-  source the static stage could have finished (no frame fact, state, element or host source) per `Packed.t`
-  would remove it; a source bound in a `let*` is already a shared constant.
-- A static set of 1,000,000 marks starts with 288 MB allocated and 375 MB of peak RSS, against 93 and 206 for the
-  animated variant (`results.md`, P7.2 addendum of 2026-10-12; the asked 250 and 260 are not reached). What is left
-  is the 64-byte `Shape_batch` instance, held once by the scene and once on the GPU (128 MB), the 24 MB static
-  array and one evaluation. The step that removes the instances: draw a large static set with the `Marks` family
-  from host buffers. It does not keep the pixels as the family is (the shader adds a circle's radius and a rect's
-  size in binary32; 85 to 1,676 of 630,000 pixels differ by one step, `marks.md`, "Routing"), so it needs three
-  things. A layout of the family that takes the two corners, added in binary64 by `Marks_scene` exactly as
-  `Shape_batch.Builder` adds them (16 bytes an instance; lines already pass their ends through unchanged). A rule
-  for the scenes a static drawing keeps (`Drawing.prepared.kept`, the picture `Environment` reuses while nothing is
-  dynamic): their token is only valid while its GPU source lives (64 sources, least recently used closed first), so
-  either such a drawing runs every frame or the source is pinned for as long as the scene is kept. And every
-  refusal must stay `Shape_batch.Builder`'s, which a fallback to the CPU batch on any failure gives. Smaller, in
-  the same start: `Packed.force_all` allocates its register scratch once a chunk of 16 blocks (24 MB at 1,000,000,
-  about 20 MB of the peak); one array a domain would do.
-- A static attribute array of the web export is still a constant of `data.bin` in binary64: 24 MB for the
-  1,000,000 static marks of P7.3 (the presenter now uploads it once, `results.md`, 2026-10-11 addendum). Shipping
-  it as binary32 was tried on paper and not done, for two reasons found in the code. The node parity
-  (`tools/web_parity.ml`, `tools/web/test/frames.mjs`) compares every attribute buffer with the native binary64
-  one within 1e-6, and a binary32 constant near 300 is off by up to 2e-5; and a kernel input cannot be binary32
-  either, because under node the shim runs a GPU-placed region on the CPU from the same stored input
-  (`frames.mjs`, `rt.gpuArray = k => rt.invoke(k, [])`). The step that removes the payload instead of halving
-  it: let the export keep a large static `map` that only feeds mark attributes as a region (the static stage
-  folds it to a constant today), so `gpuRun` dispatches it once per load and nothing is stored or uploaded but
-  its inputs. That needs `Web_export.lower` to evaluate with such maps deferred (the `Needs_t` route in
-  `Flow.Eval.hof`, for this caller only), to fall back to the folded program when a deferred region is not
-  GPU-placed (a static CPU region would run every frame: `rt.invoke` keeps nothing), and `marks_shot` and
-  `web_parity` to run the same lowered program.
-
-## Known native test instability
-
-2026-10-11: `runtime_native_qualification` failed with "physical footprint did not plateau beyond the SDL
-window baseline" (growth about 21 MB over a 9 MB baseline, at every commit back to `d88c46b`). Attributed and
-fixed at its cause; the test and its 4,096 KiB bound are unchanged and it now passes (growth 0 to 48 KiB,
-measured baseline 0 to 64). Evidence, method and numbers: `specification/web-export/results.md`, "native
-teardown footprint" addendum.
-
-- What was retained: every `NSWindow` ever closed with its view tree (385 KiB per lifecycle), and every frame's
-  Metal command buffer, encoder, pass descriptor, drawable and written buffers (4.0 KiB per frame). One owner for
-  all of them (`leaks --trace`): the initial thread's root autorelease page. An OCaml program has no Cocoa run
-  loop, so an object autoreleased outside a pool of the stub's own is never released.
-- Which part of the cycle: window creation, not teardown. `rays_window_plain_titlebar` (`lib/sdl3/sdl3_cocoa.c`,
-  called by `Sdl3.Window.create`) messaged AppKit with no pool and autoreleased the window about 95 times. The
-  test's "SDL window baseline" loop goes through the same function, so the baseline was Rays too. The 21 MB the
-  test saw on top was the scenario's 600 frames: buffers kept alive by the same page (the `IOAccelerator` rise
-  from 13 to 29 MB between cycles 16 and 48).
-- Fixed in `lib/sdl3/sdl3_cocoa.c` and `lib/metal/metal_bridge.mm` (a pool in every stub that messages
-  Objective-C, handle lookups return retained, `presentDrawable:` pooled), and `lib/metal/metal.ml`
-  (`Gc.finalise_last` for child handles: the OCaml heap grew 0.35 KiB per frame without it).
-  `lib/runtime/native_qualification/runtime_autorelease` (`@runtest-native`) fails on any object the initial
-  thread autoreleases with no pool in place.
-- Next step, left to the owner because it changes the test: the baseline loop (`sdl_window_floor_growth`) now
-  measures nothing, so it can go, and the bound can come down from 4,096 KiB (1,024 held with eight times the
-  margin in six runs).
+- Restore missing Metal coverage for render encoders, render ICB pixels and
+  ownership, acceleration build, M1 ray queries, argument reflection/encoding,
+  presentation and the stress lanes; compare against the earlier suites.
+- Replace the real-clock live-resize assertion with a deterministic boundary
+  that distinguishes event-pump stalls from presentation stalls.
+- Reproduce the reported particle decay to 10 FPS with Graph and Lisp panes;
+  exact window/launch conditions remain unknown. The recorded toggle benchmark
+  did not reproduce it.
+- Share one compiled/evaluated residual across recorded paths and state reads;
+  count walker executions directly. Keep unsupported loops in the performance
+  inventory until the widened shared region IR handles them.
+- Reduce packed compilation's region validation/copy overhead; rerun
+  `tools/bench_core.exe kernels` before changing it.
+- Retain other static inline map inputs beyond literal Float `array/range`.
+- Reduce static million-mark startup allocation (historically 288 MB, 375 MB
+  peak RSS). Host-buffer Marks need exact corner arithmetic, pinned retained
+  source lifetime and unchanged refusal behavior before replacing Shape_batch.
+- Keep large static web maps as device regions when eligible instead of
+  shipping their materialized binary64 arrays; preserve CPU parity and fallback
+  semantics. Halving constants to binary32 does not meet the numeric contract.
+- Revisit the native lifecycle footprint test's obsolete window-floor baseline
+  and tighten its bound using current repeated-run measurements.

@@ -3,7 +3,7 @@
 exception Unsupported
 
 val lower : ?fusion:bool -> ?dynamic:bool -> ?count_source:Core.Region.count_source ->
-  Flow.Eval.residual -> Flow.Workspace.term -> (Core.Region.t, Flow.Diagnostic.t list) result
+  Flow.Eval.residual -> Flow.Workspace.term -> (Core.Region.t, Diagnostic.t list) result
 (** The unfused region of one form; [fusion] and [dynamic] are recorded on it. *)
 
 val rebind : Core.Region.t -> Flow.Eval.residual -> Core.Region.t option
@@ -15,6 +15,9 @@ val instruction_key : Core.Region.instruction ->
   [ `Constant of int64 | `Guarded_constant of (int * bool) list * int64
   | `Instruction of Core.Region.instruction ]
 (** Sharing preserves the binary64 bits of constants, including signed zero. *)
+
+val finish_loops : (int, int) Hashtbl.t -> Core.Region.instruction array -> Core.Region.instruction array
+(** Fill each loop header's closing register after its body has been emitted. *)
 
 val width_of : Flow.Ty.t -> int
 val components : Flow.Eval.value -> float array

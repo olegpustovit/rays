@@ -3,7 +3,7 @@
 open Flow_graph
 open Flow_sop
 module P = Projection
-module T = Test_projection
+module T = Test_support.Projection
 module E = Flow_edit
 module Scope = Pxui_graph.Scope
 
@@ -109,7 +109,7 @@ let live () =
   (* the viewport header *)
   let lowered = match Lower.workspace ~extra:Editor_document.Contexts.descriptors ~factories:Sop_catalog.Editor.factories
       (Result.get_ok (Flow.Syntax.parse (T.read (Filename.concat T.cases "orrery.lisp")))) with
-    | Ok l -> l | Error d -> fail (Flow.Diagnostic.to_string d) in
+    | Ok l -> l | Error d -> fail (Diagnostic.to_string d) in
   let live_count, cached = Lower.counts lowered in
   check (live_count > 0 && cached > 0) "orrery has live and cached nodes";
   check (Lower.status lowered ~seconds:0.0013 = Some (Printf.sprintf "t %d live · %d cached · cook 1.3 ms" live_count cached))
@@ -135,24 +135,24 @@ let nested () =
 (* the hoist button of an invariant footer is one request *)
 let hoist () =
   let w = T.load "sunflower" in
-  let view, _ = Test_pxui_graph.scope_view ~probe:(fun _ -> 5) w "sunflower" in
-  let view, _ = Test_pxui_graph.scope_step view (Test_pxui_graph.frame ()) in
+  let view, _ = Test_support.Graph_pane.scope_view ~probe:(fun _ -> 5) w "sunflower" in
+  let view, _ = Test_support.Graph_pane.step view (Test_support.Graph_pane.frame ()) in
   let turn = [ "sunflower"; "seeds_each"; "turn" ] in
   let x, y, tw, th = Option.get (Scope.Private.box_of view turn) in
   let z = Scope.zoom view in
   let point = int_of_float (x +. tw -. 30. *. z), int_of_float (y +. th -. 10. *. z) in
-  let _, changes = Test_pxui_graph.scope_click view point in
+  let _, changes = Test_support.Graph_pane.click view point in
   ignore changes;  (* the footer's hoist button moved to the context menu *)
   (* a node that varies has none *)
   let r = [ "sunflower"; "seeds_each"; "r" ] in
   let x, y, tw, th = Option.get (Scope.Private.box_of view r) in
-  let _, changes = Test_pxui_graph.scope_click view (int_of_float (x +. tw -. 30. *. z), int_of_float (y +. th -. 10. *. z)) in
+  let _, changes = Test_support.Graph_pane.click view (int_of_float (x +. tw -. 30. *. z), int_of_float (y +. th -. 10. *. z)) in
   check (not (List.exists (function Scope.Syntax_edit (E.Hoist _) -> true | _ -> false) changes)) "r offered a hoist"
 
 (* a selection that an edit removed does not survive the next layout *)
 let selection () =
   let w = T.load "sunflower" in
-  let view, scope = Test_pxui_graph.scope_view w "sunflower" in
+  let view, scope = Test_support.Graph_pane.scope_view w "sunflower" in
   let turn = [ "sunflower"; "seeds_each"; "turn" ] in
   let view = Scope.select [ turn; [ "sunflower"; "gone" ] ] view in
   let view = Scope.with_scope ~key:"sunflower" scope view in
@@ -194,9 +194,9 @@ let geometry_zone () =
 let off_display () =
   let module Cook = Rays_editor.Private.Cook in
   let text = "(workspace w (graph g :context sop (let* [a (sop/box) orphan (sop/uv_sphere) r (sop/transform a)] r)))" in
-  let forms = match Flow.Syntax.parse text with Ok f -> f | Error d -> fail (Flow.Diagnostic.to_string d) in
+  let forms = match Flow.Syntax.parse text with Ok f -> f | Error d -> fail (Diagnostic.to_string d) in
   let lowered = match Lower.workspace ~extra:Editor_document.Contexts.descriptors
-      ~factories:Sop_catalog.Editor.factories forms with Ok l -> l | Error d -> fail (Flow.Diagnostic.to_string d) in
+      ~factories:Sop_catalog.Editor.factories forms with Ok l -> l | Error d -> fail (Diagnostic.to_string d) in
   let compiled site = List.find_map (fun (n : Flow.Eval.node) ->
     if n.site = site then Network.Int_map.find_opt n.id lowered.compiled else None)
     (Array.to_list lowered.plan.nodes) in
@@ -204,9 +204,10 @@ let off_display () =
   let cook = Result.get_ok (Cook.create ~await:true ~prepare:(fun _ output -> Ok (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload)))
     ~seed:1L ~grain:97 ~domains:1 ~max_entries:512 ~max_payload_bytes:(256 * 1024 * 1024) ()) in
   let update probes = Cook.update ~live:false ~probes cook ~settings:Rays_editor.Settings.none
-    ~objects:(Lower.objects lowered) ~edit_error:None ~effects:Sop.Parameter.no_effects
+    ~objects:(Lower.objects lowered) ~edit_error:None ~effects:Param.no_effects
     ~timeline_changes:[] ~timeline:(Rays_editor.Timeline.create ())
-    ~frame:{ (Test_editor_input.frame (0., 0.) [] 0) with dt = 0. } ~frame_request:None in
+    ~frame:(let frame = Test_editor_input.frame (0., 0.) [] 0 in
+      { frame with input = { frame.input with dt = 0. } }) ~frame_request:None in
   let object_id = let id, _, _ = List.hd (Lower.objects lowered) in id in
   let updated = update [ object_id, shown; object_id, orphan ] in
   check (updated.edit_error = None) "the probed nodes failed the display";
@@ -263,7 +264,7 @@ let compiled_inputs () =
     Result.bind (Flow_ir.Executor.compile value) (fun program ->
       Flow_ir.Executor.force ?state ?elems ?resolve program ~live) in
   List.iter (fun frame ->
-    let live = {(Frame_input.at_time (float frame /. 60.)) with frame; dt=0.125; size=321,123} in
+    let live = {(Input.at_time (float frame /. 60.)) with frame; dt=0.125; size=321,123} in
     let stamp = Flow.Eval.state_stamp state in
     let old = Probe.make ~state ~live evaluated and compiled = Probe.make ~force ~state ~live evaluated in
     let count records = Probe.counts records scope ~probe:(fun _ -> 4999) in
@@ -294,11 +295,11 @@ let run () =
   let w = T.workspace_of "(workspace w (graph g :context value (let* [tick (state [n 0] (+ n 1))] tick)))" in
   let evaluated = Result.get_ok (Flow.Eval.static ~record:true w) in
   let state = Flow.Eval.create_state () in
-  let preview = Probe.make ~state ~live:(Frame_input.at_time 0.) evaluated in
+  let preview = Probe.make ~state ~live:(Input.at_time 0.) evaluated in
   check (Array.exists (fun (_, v) -> v = Probe.Value (Flow.Eval.Int 1))
       (Probe.records preview ["g"; "tick"]))
     "the probe reads a fold snapshot";
-  let result = Result.get_ok (Flow.Eval.run ~state ~live:{(Frame_input.at_time 1.) with frame = 1} ~time:1. w) in
+  let result = Result.get_ok (Flow.Eval.run ~state ~live:{(Input.at_time 1.) with frame = 1} ~time:1. w) in
   check (List.assoc "g" result.results = Flow.Eval.Int 1) "a probe never advances the environment fold";
   compiled_inputs (); skips (); off_display (); geometry_zone (); bounds (); sunflower (); tree (); branches (); live (); nested (); hoist (); selection ();
   print_endline "probe tests passed"

@@ -171,31 +171,6 @@ CAMLprim value caml_sdl3_ttf_font_metrics(value raw)
   CAMLreturn(result);
 }
 
-static value copy_nullable_name(const char *name)
-{
-  CAMLparam0();
-  CAMLlocal2(copy, some);
-  if (name == NULL) {
-    CAMLreturn(Val_none);
-  }
-  copy = caml_copy_string(name);
-  some = caml_alloc(1, 0);
-  Store_field(some, 0, copy);
-  CAMLreturn(some);
-}
-
-CAMLprim value caml_sdl3_ttf_font_family_name(value raw)
-{
-  CAMLparam1(raw);
-  CAMLreturn(copy_nullable_name(TTF_GetFontFamilyName(font_of_value(raw))));
-}
-
-CAMLprim value caml_sdl3_ttf_font_style_name(value raw)
-{
-  CAMLparam1(raw);
-  CAMLreturn(copy_nullable_name(TTF_GetFontStyleName(font_of_value(raw))));
-}
-
 CAMLprim value caml_sdl3_ttf_set_font_size_dpi(
     value raw, value size, value horizontal, value vertical)
 {
@@ -207,30 +182,9 @@ CAMLprim value caml_sdl3_ttf_set_font_size_dpi(
   CAMLreturn(unit_success());
 }
 
-CAMLprim value caml_sdl3_ttf_set_font_style(value raw, value style)
-{
-  TTF_SetFontStyle(font_of_value(raw), (TTF_FontStyleFlags)Int_val(style));
-  return Val_unit;
-}
-
-CAMLprim value caml_sdl3_ttf_set_font_outline(value raw, value outline)
-{
-  CAMLparam2(raw, outline);
-  if (!TTF_SetFontOutline(font_of_value(raw), Int_val(outline))) {
-    CAMLreturn(string_error());
-  }
-  CAMLreturn(unit_success());
-}
-
 CAMLprim value caml_sdl3_ttf_set_font_hinting(value raw, value hinting)
 {
   TTF_SetFontHinting(font_of_value(raw), (TTF_HintingFlags)Int_val(hinting));
-  return Val_unit;
-}
-
-CAMLprim value caml_sdl3_ttf_set_font_kerning(value raw, value enabled)
-{
-  TTF_SetFontKerning(font_of_value(raw), Bool_val(enabled));
   return Val_unit;
 }
 
@@ -260,45 +214,6 @@ CAMLprim value caml_sdl3_ttf_glyph_metrics(value raw, value codepoint)
   Store_field(metrics, 4, Val_int(advance));
   result = caml_alloc(1, 0);
   Store_field(result, 0, metrics);
-  CAMLreturn(result);
-}
-
-CAMLprim value caml_sdl3_ttf_size_text(value raw, value text)
-{
-  int width = 0;
-  int height = 0;
-  CAMLparam2(raw, text);
-  CAMLlocal3(pair, result, failure);
-  if (!TTF_GetStringSize(font_of_value(raw), String_val(text),
-      caml_string_length(text), &width, &height)) {
-    failure = string_error();
-    CAMLreturn(failure);
-  }
-  pair = caml_alloc_tuple(2);
-  Store_field(pair, 0, Val_int(width));
-  Store_field(pair, 1, Val_int(height));
-  result = caml_alloc(1, 0);
-  Store_field(result, 0, pair);
-  CAMLreturn(result);
-}
-
-CAMLprim value caml_sdl3_ttf_size_text_wrapped(
-    value raw, value text, value wrap_width)
-{
-  int width = 0;
-  int height = 0;
-  CAMLparam3(raw, text, wrap_width);
-  CAMLlocal3(pair, result, failure);
-  if (!TTF_GetStringSizeWrapped(font_of_value(raw), String_val(text),
-      caml_string_length(text), Int_val(wrap_width), &width, &height)) {
-    failure = string_error();
-    CAMLreturn(failure);
-  }
-  pair = caml_alloc_tuple(2);
-  Store_field(pair, 0, Val_int(width));
-  Store_field(pair, 1, Val_int(height));
-  result = caml_alloc(1, 0);
-  Store_field(result, 0, pair);
   CAMLreturn(result);
 }
 

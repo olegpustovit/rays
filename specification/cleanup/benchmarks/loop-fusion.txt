@@ -1,0 +1,6 @@
+producer fusion=false rows=4096 domains=1 cpu_seconds=0.001793 allocated_bytes=407232
+producer fusion=true rows=4096 domains=1 cpu_seconds=0.001759 allocated_bytes=355112
+consumer fusion=false rows=4096 domains=1 cpu_seconds=0.001794 allocated_bytes=379656
+consumer fusion=true rows=4096 domains=1 cpu_seconds=0.001788 allocated_bytes=338648
+both fusion=false rows=4096 domains=1 cpu_seconds=0.000619 allocated_bytes=599768
+both fusion=true rows=4096 domains=1 cpu_seconds=0.000606 allocated_bytes=486504

@@ -114,13 +114,13 @@ open Rays
   (* The key sheet's sections: every command a key reaches, once per id with all its keys (the
      Ctrl twins of the Command chords left out), under the section [category] gives it, the
      leader sheet's sections first. *)
-  let sheet_sections ?(category = fun _ -> "Keys") keymap =
+  let sheet_sections ?(category = fun _ -> "Keys") ?(text_keys = []) keymap =
     let commands = List.fold_left (fun seen command ->
       if command.trigger = None || List.exists (fun previous -> previous.id = command.id) seen then seen
       else command :: seen) [] keymap |> List.rev in
     let titles = List.fold_left (fun acc command ->
       let title = category command in if List.mem title acc then acc else acc @ [ title ]) [] commands in
-    List.map (fun title -> title, List.filter_map (fun command ->
+    let sections = List.map (fun title -> title, List.filter_map (fun command ->
       if category command <> title then None else
       let keys = List.filter_map (fun alias -> if alias.id <> command.id then None
         else match alias.trigger with
@@ -129,11 +129,15 @@ open Rays
         |> List.sort_uniq String.compare |> String.concat " / " in
       Some (keys, command.label)) commands)
       (List.filter (fun t -> List.mem t titles) category_order
-       @ List.filter (fun t -> not (List.mem t category_order)) titles)
+       @ List.filter (fun t -> not (List.mem t category_order)) titles) in
+    match text_keys with
+    | [] -> sections
+    | keys -> sections @ ["Text", List.map (fun (label, trigger) ->
+        Editor_core.Keymap.label trigger, label) keys]
 
-  let sheet ui ?(context = "") ?category keymap =
+  let sheet ui ?(context = "") ?category ?text_keys keymap =
     let module Ui = Pxui.Ui in
-    let sections = sheet_sections ?category keymap in
+    let sections = sheet_sections ?category ?text_keys keymap in
     match Ui.modal ui ~width:572. "guide-keys" (fun () ->
       let theme = Ui.theme ui in
       let closed = ref false in
@@ -144,7 +148,7 @@ open Rays
         Ui.Paint.cap paint ~at:(x +. 12., Kit.cap_y ui (y +. 4.) 24.) ~color:(Pxui.Theme.ink_2 theme) "Keys";
         if context <> "" then
           Ui.Paint.text paint ~size:(Kit.cap_size ui)
-            ~color:(Rays.Color.with_alpha (Pxui.Theme.ink_2 theme) 179)
+            ~color:(Rays_math.Color.with_alpha (Pxui.Theme.ink_2 theme) 179)
             ~at:(x +. w -. 36. -. Ui.Paint.text_width paint ~size:(Kit.cap_size ui) context,
                  Kit.cap_y ui (y +. 4.) 24.) context);
       Ui.within ui title (fun () ->

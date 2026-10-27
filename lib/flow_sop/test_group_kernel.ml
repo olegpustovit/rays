@@ -3,7 +3,7 @@ module G = Rdk.Geometry
 module Group = Rdk.Group
 module Edge = Rdk.Edge_group
 let ok = function Ok x -> x | Error message -> failwith message
-let flow_ok = function Ok x -> x | Error d -> failwith (Flow.Diagnostic.to_string d)
+let flow_ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let bytes = Rdk_test_support.geometry_bytes
 let owners = ["point",Some Group.Point;"vertex",Some Vertex;"primitive",Some Primitive;"edge",None]
 let count geometry = function
@@ -33,7 +33,7 @@ let query geometry owner name component =
 let checked body =
   let forms=Flow.Syntax.parse("(workspace groups (graph g :context sop [(geo : geometry nil)] (let* [tested "^body^"] geo)))") |>flow_ok in
   match Flow.Workspace.check ~ops:Flow_sop.Operators.all {Flow.Check.version=1;kinds=[]} forms with
-  | Some checked,[]->checked |_,ds->failwith(String.concat "; " (List.map Flow.Diagnostic.to_string ds))
+  | Some checked,[]->checked |_,ds->failwith(String.concat "; " (List.map Diagnostic.to_string ds))
 let evaluated geometry body =
   let evaluated=E.static ~record:true ~inputs:["g",["geo",E.Deferred(Flow.Ty.geometry,7)]](checked body) |>flow_ok in
   let value=List.assoc["g";"tested"]evaluated.records |>List.hd |>snd in
@@ -41,15 +41,15 @@ let evaluated geometry body =
 let exact geometry body expected =
   let value,resolve=evaluated geometry body in
   let program=Flow_ir.Executor.compile ~strict:true value |>flow_ok in
-  List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
-    let live=Frame_input.at_time 0.25 in
+  List.iter(fun domains->Parallel.run ~domains(fun()->
+    let live=Input.at_time 0.25 in
     assert(flow_ok(E.Private.force_reference ~resolve value ~live)=expected);
     assert(flow_ok(Flow_ir.Executor.force ~strict:true ~resolve program ~live)=expected))) [1;8]
 let create_session ()=Sop.Session.create ~max_entries:32 ~max_payload_bytes:1_000_000 |>ok
 let cook session ?(time=0.) domains node =
   match Sop.Session.cook session ~context:(Sop.Context.create ~domains ~time () |>ok)node with
   | Ok output->Sop.Payload.geometry output.payload |>Result.get_ok
-  | Error d->failwith(Sop.Diagnostic.error_to_string d)
+  | Error d->failwith(Diagnostic.error_to_string d)
 let int_array data=Array.fold_left(fun array value->
   "(array/concat "^array^" (array/int 1 "^string_of_int value^"))") "(array/int 0 0)" data
 let write_node geometry owner mask ?order () =
@@ -125,7 +125,7 @@ let () =
           (write_node geometry owner (Array.make n 1)~order:(int_array order)())) [[|n|];[|0;0|];[||]])) owners);
   let missing geometry=Flow_sop.Attribute_kernel.resolve ~geometry in
   let source name args=E.Source(name,Flow.Ty.Any,("geometry",E.Deferred(Flow.Ty.geometry,7))::args) in
-  let refused code=function Error(d:Flow.Diagnostic.t)->assert(d.code=code)|Ok _->assert false in
+  let refused code=function Error(d:Diagnostic.t)->assert(d.code=code)|Ok _->assert false in
   refused "E_DATA_SOURCE"(missing(fun _->None)(source "sop/group"["name",E.Text "missing"]));
   refused "E_GROUP_MISSING"(missing(fun _->Some geometry)(source "sop/group"["name",E.Text "missing"]));
   refused "E_GROUP_OWNER"(missing(fun _->Some geometry)(source "sop/group"["name",E.Text "missing";"owner",E.Text "detail"]));
@@ -141,7 +141,7 @@ let () =
       names (sop/group_names geo "wall*" :owner vertex)
       order (sop/group_order geo :name "selected" :owner primitive)
       result (sop/with_group geo mask :name "copy" :owner point)] result)))|} |>flow_ok in
-  let checked=match checker catalog forms with Some checked,[]->checked|_,ds->failwith(String.concat "; "(List.map Flow.Diagnostic.to_string ds)) in
+  let checked=match checker catalog forms with Some checked,[]->checked|_,ds->failwith(String.concat "; "(List.map Diagnostic.to_string ds)) in
   let pane=Flow_graph.Projection.of_graph catalog checked "g" in
   List.iter(fun(binding,ty)->let node=Flow_graph.Projection.find pane["g";binding] |>Option.get in
     assert(node.ty=ty);assert(List.exists(fun(row:Flow_graph.Projection.row)->row.label="owner")node.rows))
@@ -159,7 +159,7 @@ let () =
   ignore(Flow_graph.Flow_edit.apply_checked ~checker catalog forms
     (Set_arg{node=["g";"result"];key=Pos 1;sub=[];value=Flow.Syntax.make(Sym "mask")}) |>flow_ok);
   List.iter(fun text->let _,diagnostics=checker catalog(Flow.Syntax.parse text |>flow_ok) in
-    assert(List.exists(fun(d:Flow.Diagnostic.t)->d.severity=Error)diagnostics))
+    assert(List.exists(fun(d:Diagnostic.t)->d.severity=Diagnostic.Error_severity)diagnostics))
     ["(workspace bad (graph g :context sop (sop/with_group nil (array/int 0 0) :name \"x\" :order 2)))";
      "(workspace bad (graph g :context sop (sop/group nil :name \"\")))";
      "(workspace bad (graph g :context sop (sop/group nil :name \"x\" :owner detail)))"];
@@ -228,13 +228,13 @@ let () =
     let session=create_session() in
     Fun.protect ~finally:(fun()->Sop.Session.close session)(fun()->
       List.iter(fun frame->let time=float frame*.0.25 in
-        let live={(Frame_input.at_time time)with frame} in
+        let live={(Input.at_time time)with frame} in
         let resolved=Flow_sop.Value_lane.resolve ~live lane ~time graph.network |>flow_ok in
         let node=Sop.Edit_graph.compile_node resolved.geometry ~node_id:(Option.get graph.root) |>ok in
         let context=Sop.Context.create ~input:live ~time ~frame:(Int64.of_int frame) ~domains() |>ok in
         let get node=match Sop.Session.cook session ~context node with
           |Ok output->Sop.Payload.geometry output.payload |>Result.get_ok
-          |Error d->failwith(Sop.Diagnostic.error_to_string d) in
+          |Error d->failwith(Diagnostic.error_to_string d) in
         let original=get(List.hd(Sop.Node.inputs node)) in
         let expected=native_write ~owner:(Some Group.Point) ~name:"selected"
           (Array.make(G.point_count original)((frame+1)mod 2))original in
@@ -244,9 +244,9 @@ let () =
 module Prerequisites = struct
 (* Proposed focused regression after the source freeze. No registration. *)
 module E=Flow.Eval
-let checked=function Ok value->value|Error d->failwith(Flow.Diagnostic.to_string d)
+let checked=function Ok value->value|Error d->failwith(Diagnostic.to_string d)
 let op name args=(Option.get(Flow.Op.find ~extra:Flow_sop.Operators.all name Flow.Context.value)).body
-  ~live:(Frame_input.at_time 0.) ~node:(fun _ _->assert false)args
+  ~live:(Input.at_time 0.) ~node:(fun _ _->assert false)args
 let ()=
   List.iter(fun name->let quoted=match op "text/glob_literal"["text",E.Text name] with
     |E.Text text->text|_->assert false in
@@ -337,7 +337,7 @@ let () =
     (let* [literal (text/glob_literal "a*") rewritten (text/glob_rewrite "a*" "b*" "abc")
       entries (sop/group_entries geo "*" :owner "any")] geo)))|} |>flow_ok in
   let checked=match checker catalog forms with Some checked,[]->checked
-    |_,ds->failwith(String.concat "; "(List.map Flow.Diagnostic.to_string ds)) in
+    |_,ds->failwith(String.concat "; "(List.map Diagnostic.to_string ds)) in
   let pane=Flow_graph.Projection.of_graph catalog checked "g" in
   List.iter(fun(binding,ty)->assert((Flow_graph.Projection.find pane["g";binding] |>Option.get).ty=ty))
     ["literal",Flow.Ty.Text;"rewritten",Text;"entries",Record["owners",Array Text;"names",Array Text]];
@@ -357,7 +357,7 @@ let () =
   let refuses body =
     let forms=Flow.Syntax.parse body |>flow_ok in
     let _,ds=Flow.Workspace.check ~ops:Flow_sop.Operators.all catalog forms in
-    assert(List.exists(fun(d:Flow.Diagnostic.t)->d.code="E_ARRAY_TYPE")ds) in
+    assert(List.exists(fun(d:Diagnostic.t)->d.code="E_ARRAY_TYPE")ds) in
   refuses {|(workspace public_fold (graph g :context sop [(geo : geometry nil)]
     (fold [previous geo] [i (array/int 3)] (sop/delete_group previous ""))))|};
   refuses {|(workspace public_any_fold (graph g :context sop [(geo : geometry nil)]
@@ -428,7 +428,7 @@ let ()=
         let bits=Bytes.copy(Group.Private.bits_view group)
         and order=Group.ordered_elements group and identity=Group.data_id group in
         let expected=Array.init length(fun i->if Group.mem i group then 1 else 0) in
-        List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+        List.iter(fun domains->Parallel.run ~domains(fun()->
           match query geometry owner "bytes" None with
           |E.Int_array actual->assert(actual=expected);
               if length>0 then actual.(0)<-1-actual.(0)
@@ -470,7 +470,7 @@ let () =
           let geometry=native_write ?order ~owner:native_owner ~name:"promoted" mask geometry in
           let before=bytes geometry and original=query geometry owner "promoted" None in
           let expected=native_promoted geometry owner "promoted" 97 in
-          List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+          List.iter(fun domains->Parallel.run ~domains(fun()->
             List.iter(fun grain->assert(native_promoted geometry owner "promoted" grain=expected)) [1;97;4096];
             assert(promoted_query geometry owner "promoted"=expected);
             (match promoted_query geometry owner "promoted" with E.Int_array values when n>0->values.(0)<-1-values.(0)|_->());
@@ -529,7 +529,7 @@ let () =
   let checker=Flow.Workspace.check ~ops:Flow_sop.Operators.all in
   let forms=Flow.Syntax.parse {|(workspace promotion_cards (graph g :context sop [(geo : geometry nil)]
     (let* [mask (sop/group geo :name "selected" :owner vertex)] geo)))|}|>flow_ok in
-  let workspace=function Some checked,[]->checked|_,ds->failwith(String.concat "; "(List.map Flow.Diagnostic.to_string ds)) in
+  let workspace=function Some checked,[]->checked|_,ds->failwith(String.concat "; "(List.map Diagnostic.to_string ds)) in
   let initial=workspace(checker catalog forms) in
   let card workspace=Flow_graph.Projection.find(Flow_graph.Projection.of_graph catalog workspace "g")["g";"mask"]|>Option.get in
   let row workspace=List.find(fun(row:Flow_graph.Projection.row)->row.key=Flow_graph.Flow_edit.Kw"as_owner")(card workspace).rows in
@@ -546,9 +546,8 @@ let () =
   print_endline "Group promotion output count origins and optional-target graph set/disconnect gestures preserve source owner"
 
 let () =
-  let stages program=Array.fold_left(fun count(node:Flow_ir.node)->match node.kind with
-    |Kernel{body=Packed_map program;_}->max count(Flow_ir.Packed.stage_count program)|_->count)
-    0(Flow_ir.Executor.graph program).nodes in
+  let stages program=Option.fold ~none:0 ~some:Flow_ir.Packed.stage_count
+    (Flow_ir.Executor.packed_root program)in
   let geometry=promotion_fixture 7 and catalog=Flow.Check.{version=1;kinds=[]} in
   let forms=Flow.Syntax.parse {|(workspace origins (graph g :context value
     [(p : (array vec3) (array/vec3 0)) (mask : (array int) (array/int 0 0))]
@@ -556,7 +555,7 @@ let () =
            b (map (fn [(m : int)] [(float m) t 0]) mask)
            tested (exact (map (fn [(left : vec3) (right : vec3)] (+ left right)) a b))] 0.0)))|}|>flow_ok in
   let checked=match Flow.Workspace.check catalog forms with Some workspace,[]->workspace
-    |_,ds->failwith(String.concat "; "(List.map Flow.Diagnostic.to_string ds)) in
+    |_,ds->failwith(String.concat "; "(List.map Diagnostic.to_string ds)) in
   List.iter(fun(owner,native_owner)->let geometry=native_write ~owner:native_owner ~name:"promoted"
     (Array.init(count geometry native_owner)(fun i->i mod 2))geometry in
     List.iter(fun promoted->
@@ -571,7 +570,7 @@ let () =
         [Lisp_sop.snapshot geometry]values|>flow_ok in
       assert(stages program=(if promoted || owner="point" then 3 else 1));
       let resolve=Flow_sop.Attribute_kernel.resolve ~geometry:(fun _->Some geometry) in
-      List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->let live=Frame_input.at_time 0.25 in
+      List.iter(fun domains->Parallel.run ~domains(fun()->let live=Input.at_time 0.25 in
         let expected=E.Private.force_reference ~resolve values ~live|>flow_ok in
         let actual=Flow_ir.Executor.force ~strict:true ~resolve program ~live|>flow_ok in
         assert(actual=expected))) [1;4;8]) [false;true])owners;
@@ -601,7 +600,7 @@ let () = if Array.mem "--bench-promotion" Sys.argv then begin
     let geometry=native_write ~owner:native_owner ~name:"promoted"
       (Array.init(count geometry native_owner)(fun i->i mod 2))geometry in
     let expected=native_promoted geometry owner "promoted" 4096 in
-    List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+    List.iter(fun domains->Parallel.run ~domains(fun()->
       assert(promoted_query geometry owner "promoted"=expected);
       let native,native_bytes=measure(fun()->native_promoted geometry owner "promoted" 4096) in
       let query,query_bytes=measure(fun()->promoted_query geometry owner "promoted") in

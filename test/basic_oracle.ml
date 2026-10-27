@@ -14,15 +14,15 @@ let init _frame =
   }
 
 let update model (frame : Frame.t) =
-  { phase = model.phase +. frame.dt }
+  { phase = model.phase +. frame.input.dt }
 
 let view model (frame : Frame.t) =
   let radius = 42 + int_of_float (10. *. sin (model.phase *. 2.)) in
   Scene.[
-    clear (Color.rgb 20 22 28);
-    circle ~at:(frame.width / 2, frame.height / 2) ~radius
-      ~fill:(Color.rgb 90 170 240) ();
+    clear (Rays_math.Color.rgb 20 22 28);
+    circle ~at:((fst frame.input.size) / 2, (snd frame.input.size) / 2) ~radius
+      ~fill:(Rays_math.Color.rgb 90 170 240) ();
     text ~at:(12, 12)
       (Printf.sprintf "%d × %d  frame %d"
-        frame.width frame.height frame.count);
+        (fst frame.input.size) (snd frame.input.size) frame.input.frame);
   ]

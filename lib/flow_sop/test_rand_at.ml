@@ -1,6 +1,6 @@
 module E = Flow.Eval
 module P = Flow_ir.Packed
-let ok = function Ok x -> x | Error d -> failwith (Flow.Diagnostic.to_string d)
+let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let sources =
   let text = In_channel.with_open_text "nodes/prelude.rays" In_channel.input_all in
   let workspace = ok (Flow.Syntax.parse text) |> List.hd in
@@ -16,7 +16,7 @@ let checked ?seed body =
   match Flow_sop.Catalog.check_workspace ~ops:Flow_sop.Operators.all ~library:false ~sources
     Flow.Check.{version=1;kinds=[]} source with
   | Some workspace, [] -> workspace
-  | _, ds -> failwith (String.concat "\n" (List.map Flow.Diagnostic.to_string ds))
+  | _, ds -> failwith (String.concat "\n" (List.map Diagnostic.to_string ds))
 let value ?seed body = snd (List.hd (List.assoc ["g";"tested"]
   (ok (E.static ~record:true (checked ?seed body))).records))
 let same expected actual = match actual with
@@ -28,9 +28,9 @@ let same expected actual = match actual with
   | _ -> failwith "rand_at map must return a float array"
 let compile = function
   | E.Residual residual ->
-      (match P.compile_result residual (E.Private.residual_view residual).term with
+      (match P.compile_result residual (E.Residual.residual_view residual).term with
        | Ok program -> program
-       | Error ds -> failwith (String.concat "\n" (List.map Flow.Diagnostic.to_string ds)))
+       | Error ds -> failwith (String.concat "\n" (List.map Diagnostic.to_string ds)))
   | _ -> failwith "mapped live value must be residual"
 let map ?seed ty input body =
   let source = "(fn [(i : " ^ Flow.Ty.to_string ty ^ ")] " ^ body ^ ")" in
@@ -69,17 +69,17 @@ let benchmark operator =
   let count=1_000_000 and grain=4096 in
   let mapped=value (Printf.sprintf
     "(map (fn [i] (%s (frame/index) i)) (array/range %d :type int))" operator count) in
-  let program=compile mapped and live={(Frame_input.at_time 0.) with frame=42} in
+  let program=compile mapped and live={(Input.at_time 0.) with frame=42} in
   let expected=Array.init count (fun index -> Rays_math.Rand.float_at (Rays_math.Rand.seed 42) ~index) in
   let native () =
     let data=Array.make count 0. and seed=Rays_math.Rand.seed 42 in
-    Rays_math.Parallel.for_ ~chunk_size:1 ~start:0 ~finish:((count-1)/grain) (fun block ->
+    Parallel.for_ ~chunk_size:1 ~start:0 ~finish:((count-1)/grain) (fun block ->
       for index=block*grain to min count ((block+1)*grain)-1 do
         data.(index)<-Rays_math.Rand.float_at seed ~index
       done);
     E.Float_array data in
   let packed ()=ok (P.force ~strict:true program ~live) in
-  let measure label domains run = Rays_math.Parallel.run ~domains (fun () ->
+  let measure label domains run = Parallel.run ~domains (fun () ->
     same expected (run ());
     let measurements=Array.init 3 (fun _ ->
       Gc.full_major ();
@@ -102,10 +102,10 @@ let () =
     "(map (fn [i] (rand_at (frame/index) i)) (array/range %d :type int))" count) in
   let packed=compile mapped in
   List.iter (fun seed ->
-    let live={(Frame_input.at_time 0.) with frame=seed} in
+    let live={(Input.at_time 0.) with frame=seed} in
     let expected=Array.init count (fun index -> Rays_math.Rand.float_at (Rays_math.Rand.seed seed) ~index) in
     same expected (ok (E.Private.force_reference mapped ~live));
-    List.iter (fun domains -> Rays_math.Parallel.run ~domains (fun () ->
+    List.iter (fun domains -> Parallel.run ~domains (fun () ->
       same expected (ok (P.force ~strict:true packed ~live)))) [1;8]) [0;1;42;max_int];
   List.iter (fun seed -> List.iter (fun index ->
     let actual=value (Printf.sprintf "(rand_at %d %d)" seed index) in
@@ -122,11 +122,11 @@ let () =
        uniforms rather than invalid frame facts. *)
     let mapped,program,live = if seed<0 then
         let mapped,program=map ~seed Flow.Ty.Int (E.Int_array indices) "(rand_at seed i)" in
-        mapped,program,Frame_input.at_time 0.
-      else mapped,program,{(Frame_input.at_time 0.) with frame=seed} in
+        mapped,program,Input.at_time 0.
+      else mapped,program,{(Input.at_time 0.) with frame=seed} in
     let expected=Array.map (fun index -> Rays_math.Rand.float_at (Rays_math.Rand.seed seed) ~index) indices in
     same expected (ok (E.Private.force_reference mapped ~live));
-    List.iter (fun domains -> Rays_math.Parallel.run ~domains (fun () ->
+    List.iter (fun domains -> Parallel.run ~domains (fun () ->
       same expected (ok (P.force ~strict:true program ~live)))) [1;8];
     compare_js program ~live expected) [min_int;0;42;max_int];
   print_endline "rand_at: 100,000 native/reference/packed/JavaScript exact integer keys agree at one/eight domains; signed boundaries and indices beyond 2^53 agree"
@@ -141,10 +141,10 @@ let () =
     assert(Array.length instructions<=6);
     assert(Array.exists(function P.Rand_at _->true|_->false)instructions);
     assert(P.gpu_refusals program<>[]);
-    let live=Frame_input.at_time 0. in
+    let live=Input.at_time 0. in
     let expected=Array.map(fun index->Rays_math.Rand.float_at(Rays_math.Rand.seed seed)~index)indices in
     same expected(ok(E.Private.force_reference mapped ~live));
-    List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+    List.iter(fun domains->Parallel.run ~domains(fun()->
       same expected(ok(P.force ~strict:true program ~live)))) [1;8];
     compare_js program ~live expected;
     List.iter(fun index->match value(Printf.sprintf "(rand/at %d %d)" seed index) with
@@ -152,10 +152,10 @@ let () =
         (Rays_math.Rand.float_at(Rays_math.Rand.seed seed)~index))
       |_->assert false)(Array.to_list bases)) [min_int;0;42;max_int];
   let mapped=value "(map (fn [(i : int)] [(rand/at (int/add 42 (frame/index)) i) (rand/at (int/add 43 (frame/index)) i) (rand/at (int/add 44 (frame/index)) i)]) (array/range 100000 :type int))" in
-  let program=compile mapped and live=Frame_input.at_time 0. in
+  let program=compile mapped and live=Input.at_time 0. in
   assert(Array.length(P.Private.view program).code<16);
   let expected=Array.init(count*3)(fun i->Rays_math.Rand.float_at(Rays_math.Rand.seed(42+i mod 3))~index:(i/3)) in
-  List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+  List.iter(fun domains->Parallel.run ~domains(fun()->
     match ok(P.force ~strict:true program ~live) with
     |E.Vec3_array actual->same expected(E.Float_array actual)|_->assert false)) [1;8];
   compare_js program ~live expected;
@@ -167,7 +167,7 @@ let () =
   let program=compile mapped in
   let expected=Array.mapi(fun i seed->Rays_math.Rand.float_at(Rays_math.Rand.seed seed)~index:indices.(i))seeds in
   same expected(ok(E.Private.force_reference mapped ~live));
-  List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+  List.iter(fun domains->Parallel.run ~domains(fun()->
     same expected(ok(P.force ~strict:true program ~live)))) [1;8];
   compare_js program ~live expected;
   print_endline "rand/at primitive: 100,000 exact signed63 keys/native/reference/CPU/JS agree; three-axis field fits registers; GPU refuses"
@@ -185,10 +185,10 @@ let () =
       let x,y,z=points.(i/3) in match i mod 3 with 0->x|1->y|_->z)) in
     let mapped,program = map Flow.Ty.Vec3 input
       (Printf.sprintf "(noise3 (+ i [t 0.0 0.0]) :seed %d :octaves %d :lacunarity %.17g :gain %.17g)" seed octaves lacunarity gain) in
-    let live=Frame_input.at_time 0. in
+    let live=Input.at_time 0. in
     let expected=match ok (E.Private.force_reference mapped ~live) with
       | E.Float_array values->values | _->assert false in
-    List.iter (fun domains -> Rays_math.Parallel.run ~domains (fun () ->
+    List.iter (fun domains -> Parallel.run ~domains (fun () ->
       same expected (ok (P.force ~strict:true program ~live)))) [1;8];
     let noise=Rays_math.Noise.create seed in
     Array.iteri (fun i (x,y,z) ->

@@ -23,7 +23,6 @@ type stats = {
 
 type output = {
   payload : Payload.t;
-  diagnostics : Diagnostic.t list;
   instances : Rays_math.Mat4.t array option;
 }
 
@@ -35,7 +34,6 @@ type delta = {
 type entry = {
   output : output;
   components : (int * int) list;
-  local_diagnostics : Diagnostic.t list;
   delta : delta option;
 }
 
@@ -263,7 +261,7 @@ let delta node inputs (cooked : Node.Private.cooked) =
   end in
   Some {source = G.data_id source; positions; attributes = List.rev !attributes}
 
-let refresh inputs input_diagnostics entry =
+let refresh inputs entry =
   let payload, delta = match entry.delta with
     | Some delta when delta.source <> Payload.data_id inputs.(0) ->
         let source = Result.get_ok (Payload.geometry inputs.(0)) in
@@ -285,9 +283,8 @@ let refresh inputs input_diagnostics entry =
               refuse_facts ("cannot refresh cached components: " ^ error) in
         Payload.Geometry geometry, Some {delta with source = G.data_id source}
     | _ -> entry.output.payload, entry.delta in
-  let diagnostics = List.concat (List.rev (entry.local_diagnostics :: input_diagnostics)) in
-  if payload == entry.output.payload && diagnostics = entry.output.diagnostics then entry
-  else {entry with output = {entry.output with payload; diagnostics}; delta}
+  if payload == entry.output.payload then entry
+  else {entry with output = {entry.output with payload}; delta}
 
 let timing node ~geometries ~points ~seconds ~cache_hit = {
   node_id = Node.id node;
@@ -520,7 +517,7 @@ and evaluate_many memo session context roots =
         session.fanouts<-session.fanouts+1;
         let transactions=Array.make count None in
         let workers=Array.map(fun _ -> snapshot session,Hashtbl.copy memo) indices in
-        Rays_math.Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(Array.length indices-1)
+        Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(Array.length indices-1)
           (fun worker_index ->
             let i=indices.(worker_index) in
             let local,local_memo=workers.(worker_index) in
@@ -576,11 +573,7 @@ and cook_node memo session context node geometries =
       | Ok roots ->
           (match evaluate_many memo session context roots with
            | Error error -> Error (Diagnostic.prepend_trace (Node.trace node) error)
-           | Ok outputs -> Result.map (fun (cooked : Node.Private.cooked) ->
-               let diagnostics=Array.fold_left(fun values (output,_) ->
-                 output.diagnostics::values) [] outputs in
-               {cooked with diagnostics=List.concat(List.rev(cooked.diagnostics::diagnostics))})
-               (Node.Private.cook node context (Array.map snd outputs)))
+           | Ok outputs -> Node.Private.cook node context (Array.map snd outputs))
 
 and evaluate_uncached memo session context node =
   if Context.cancelled context then Error (cancellation_error node)
@@ -589,8 +582,6 @@ and evaluate_uncached memo session context node =
     | Error error -> Error (Diagnostic.prepend_trace (Node.trace node) error)
     | Ok outputs ->
         let geometries = Array.map snd outputs in
-        let input_diagnostics = Array.fold_left (fun diagnostics (output,_) ->
-          output.diagnostics::diagnostics) [] outputs in
         (* Zero-entry sessions need only the per-cook memo. Speculative worker
            journals still need semantic keys for ordered parent replay. *)
         let cache_active = session.max_entries > 0 || Option.is_some session.journal in
@@ -598,7 +589,7 @@ and evaluate_uncached memo session context node =
         let volatile = session.volatile (Node.id node) in
         match (if cache_active then lookup session ~volatile node key else None) with
         | Some entry ->
-            (match node_result (fun () -> Ok (refresh geometries input_diagnostics entry)) with
+            (match node_result (fun () -> Ok (refresh geometries entry)) with
             | Error error -> Error (Diagnostic.prepend_trace (Node.trace node) error)
             | Ok refreshed ->
             if refreshed != entry then
@@ -628,25 +619,12 @@ and evaluate_uncached memo session context node =
             | Error error -> Error (Diagnostic.prepend_trace (Node.trace node) error)
             | Ok _ when Context.cancelled context -> Error (cancellation_error node)
             | Ok (cooked, delta) ->
-                let diagnostics =
-                  List.concat (List.rev (cooked.diagnostics :: input_diagnostics))
-                in
-                let output = { payload = cooked.payload; diagnostics;
-                  instances = cooked.instances } in
-                let entry = {output; components = []; local_diagnostics = cooked.diagnostics;
-                  delta} in
+                let output = { payload = cooked.payload; instances = cooked.instances } in
+                let entry = {output; components = []; delta} in
                 if cache_active then
                   (if volatile then store_volatile session node key entry
                    else insert session key entry);
                 Ok output
-
-let deduplicate diagnostics =
-  let seen = Hashtbl.create (List.length diagnostics) in
-  List.filter (fun diagnostic ->
-    let key = diagnostic.Diagnostic.severity, diagnostic.node.node_id,
-      diagnostic.code, diagnostic.message in
-    if Hashtbl.mem seen key then false
-    else (Hashtbl.add seen key (); true)) diagnostics
 
 let cook session ~context node =
   if session.closed then
@@ -654,10 +632,10 @@ let cook session ~context node =
       "cannot cook with a closed procedural session"
       |> Diagnostic.prepend_trace (Node.trace node))
   else
-    Rays_math.Parallel.run ~domains:(Context.domains context) (fun () ->
+    Parallel.run ~domains:(Context.domains context) (fun () ->
       match evaluate (Hashtbl.create 64) session context node with
       | Error _ as error -> error
-      | Ok output -> Ok { output with diagnostics = deduplicate output.diagnostics })
+      | Ok output -> Ok output)
 
 let stats session = {
   cooks = session.cooks;

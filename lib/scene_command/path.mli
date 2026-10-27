@@ -9,7 +9,7 @@ type command =
   | Cubic_to of point * point * point
   | Close
 
-type t
+type t = private command array
 type fill_rule = Even_odd | Non_zero
 type mesh = { vertices : point array; indices : int array }
 type cap = Butt | Square | Round

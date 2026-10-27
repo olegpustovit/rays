@@ -1,9 +1,9 @@
 module E=Flow.Eval
 module I=Flow_ir
-let ok=function Ok x->x|Error d->failwith(Flow.Diagnostic.to_string d)
+let ok=function Ok x->x|Error d->failwith(Diagnostic.to_string d)
 let quote=Flow_web.Kernel_table.json_string
 let literal text=fst(Flow.Lisp.print[Flow.Syntax.make(Flow.Syntax.Str text)])
-let number x=if Int64.bits_of_float x=Int64.min_int then "-0" else Printf.sprintf "%.17g" x
+let number x=Param.float_text x
 let data=function
  |E.Int_array a->"BigInt64Array.from(["^String.concat ","(Array.to_list(Array.map(fun n->string_of_int n^"n")a))^"])"
  |E.Text_array a when Array.length a>0 && Array.for_all((=)a.(0))a->
@@ -14,7 +14,7 @@ let data=function
 let compiled ?(require_arguments=true) body=
  let text="(workspace bindings (graph g :context host (if (> t -1000.) "^body^" "^body^")))"in
  let checked=match Flow.Workspace.check Flow.Check.{version=1;kinds=[]}(ok(Flow.Syntax.parse text))with
-  |Some w,[]->w|_,ds->failwith(String.concat ";"(List.map Flow.Diagnostic.to_string ds))in
+  |Some w,[]->w|_,ds->failwith(String.concat ";"(List.map Diagnostic.to_string ds))in
  let value=List.assoc "g"(ok(E.static checked)).results in
  let residual=match value with E.Residual r->r|_->failwith "Expected live region frame"in
  let refused=ref [] and previous= !(I.Packed.Private.trace) in
@@ -23,13 +23,12 @@ let compiled ?(require_arguments=true) body=
   I.Core_lower.lower ~strict:true residual)in
  let program=match lowered with Ok p->p|Error reason->
   failwith("Core argument case "^body^": "^reason^"; "^
-   String.concat "; "(List.map Flow.Diagnostic.to_string(List.rev !refused)))in
- if require_arguments then assert(Array.exists(fun r->match I.Packed.of_region r with
-  |Ok p->I.Packed.Private.argument_types p<>[||]|Error _->false)program.regions);
+   String.concat "; "(List.map Diagnostic.to_string(List.rev !refused)))in
+ if require_arguments then assert(Array.exists(fun r->I.Packed.Private.argument_types r<>[||])program.regions);
  value,program
 let ()=
  let code=Buffer.create 1000000 in
- let path n="file://"^Filename.concat(Sys.getcwd())("../../tools/web/runtime/"^n)in
+ let path n="file://"^Filename.concat(Sys.getcwd())("../web_export/runtime/"^n)in
  Printf.bprintf code "import {createRuntime} from %s;import {createPool} from %s;import * as p from %s;const bytes=a=>Buffer.from(a.buffer,a.byteOffset,a.byteLength);const snapshot=v=>v instanceof p.PArray||v instanceof p.TextArray?snapshot(v.data):ArrayBuffer.isView(v)?bytes(v).toString('hex'):v instanceof Map?[...v].map(([n,x])=>[n,snapshot(x)]):Array.isArray(v)?v.map(snapshot):typeof v==='bigint'?v.toString():v;const pools=[null,await createPool({size:1}),await createPool({size:8})];try{\n"
   (quote(path"runtime.js"))(quote(path"workers.js"))(quote(path"prims.js"));
  let cases=[
@@ -54,10 +53,9 @@ let ()=
   let frame=ok(Flow_web.Js.frame program)in
   (* These are templates. Actual arrays/counts/captures are bound by emitted
      Core.Invoke, never by reference results or unbound prepare_values. *)
-  let regions=Array.to_list(Array.map(fun r->let p=match I.Packed.of_region r with
-   |Ok p->p|Error _->assert false in "{source:"^quote(Flow_web.Js.region p)^"}")program.regions)in
+  let regions=Array.to_list(Array.map(fun r->"{source:"^quote(Flow_web.Js.region r)^"}")program.regions)in
   Printf.bprintf code "{const {frame}=await import('data:text/javascript;base64,'+Buffer.from(%s).toString('base64'));const program={regions:[%s]};for(const pool of pools){const rt=createRuntime(program,{pool});const invoke=rt.invoke;rt.invoke=async function(k,args,plan){if(!plan)throw Error('Computed dependency has no region plan');const before=JSON.stringify(snapshot(args));try{return await invoke.call(this,k,args,plan)}finally{if(JSON.stringify(snapshot(args))!==before)throw Error('dynamic arguments mutated')}};\n"(quote frame)(String.concat ","regions);
-  List.iter(fun(index,time)->let live={(Frame_input.at_time time)with frame=index;tick=index}in
+  List.iter(fun(index,time)->let live={(Input.at_time time)with frame=index;tick=index}in
    Printf.bprintf code "{const input={t:%s,dt:0,frame:%d,tick:%d,size:[1,1]};rt.current=input;\n"(number time)index index;
    (match E.Private.force_reference value ~live with
    |Ok expected->Printf.bprintf code "const result=await frame(input,rt.slots,rt),expected=%s;if(%b?JSON.stringify(result.data)!==JSON.stringify(expected):!bytes(result.data).equals(bytes(expected)))throw Error('argument frame bytes');\n"
@@ -95,16 +93,14 @@ let ()=
   let local=Array.length program.locals and constant=Array.length program.constants in
   let ty=Flow.Value.ty_of value in
   let regions=Array.map(fun (r:I.Core.Region.t)->
-   let p=match I.Packed.of_region r with Ok p->p|Error _->assert false in
-   let index=Array.length(I.Packed.Private.argument_types p) in
+   let index=Array.length(I.Packed.Private.argument_types r) in
    let marker=E.Source("$core/argument",ty,["index",E.Int index]) in
    (* with_bindings captures only names read by its term, so an unused binding
       cannot declare this argument. Uniforms are canonical region declarations,
       including slots never read by an instruction; bind_arguments scans them. *)
-   let r={r with uniforms=Array.append r.uniforms[|marker|];
-     uniform_names=Array.append r.uniform_names[|"",[]|]}in
-   let p=match I.Packed.of_region r with Ok p->p|Error _->assert false in
-   let declared=I.Packed.Private.argument_types p in
+   let r=Result.get_ok(I.Core.Region.rebuild r ~uniforms:(Array.append r.uniforms[|marker|])
+     ~uniform_names:(Array.append r.uniform_names[|"",[]|]) ())in
+   let declared=I.Packed.Private.argument_types r in
    assert(Array.length declared=index+1 && declared.(index)=ty);
    r)program.regions in
   let rec rewrite (s:I.Core.statement)=
@@ -131,7 +127,7 @@ let ()=
     |I.Core.Region.Input _|Const _|Uniform _|Frame _|Binary _|Unary _->true|_->false)r.I.Core.Region.code))float_regions;
   let frame=ok(Flow_web.Js.frame(unused(E.List[|E.Int 1|])program))in
   Printf.bprintf code "{const {frame}=await import('data:text/javascript;base64,'+Buffer.from(%s).toString('base64'));for(const pool of pools){const rt=createRuntime({regions:[]},{pool});\n"(quote frame);
-  List.iter(fun(index,time)->let live={(Frame_input.at_time time)with frame=index;tick=index}in
+  List.iter(fun(index,time)->let live={(Input.at_time time)with frame=index;tick=index}in
    Printf.bprintf code "{const input={t:%s,dt:0,frame:%d,tick:%d,size:[1,1]};rt.current=input;\n"(number time)index index;
    (match E.Private.force_reference value ~live with
     |Ok expected->Printf.bprintf code "const result=await frame(input,rt.slots,rt),expected=%s;if(!bytes(result.data).equals(bytes(expected)))throw Error('Float Product bytes');\n"(data expected)
@@ -153,7 +149,7 @@ let ()=
  List.iter(fun value->let program=unused value original in
   let frame=ok(Flow_web.Js.frame program)in
   Printf.bprintf code "{const {frame}=await import('data:text/javascript;base64,'+Buffer.from(%s).toString('base64'));for(const pool of pools){const rt=createRuntime({regions:[]},{pool});\n"(quote frame);
-  List.iter(fun index->let live={(Frame_input.at_time 0.25)with frame=index;tick=index}in
+  List.iter(fun index->let live={(Input.at_time 0.25)with frame=index;tick=index}in
    let native=I.Core_exec.run ~strict:true ~force:(fun p->I.Packed.force ~strict:true p ~live)program ~live in
    Printf.bprintf code "{const input={t:.25,dt:0,frame:%d,tick:%d,size:[1,1]};rt.current=input;\n"index index;
    (match native with
@@ -182,7 +178,7 @@ let ()=
   let regions=Array.map(fun (r:I.Core.Region.t)->
    match Array.find_map table_slot r.code with
    |None->r|Some i->let uniforms=Array.copy r.uniforms in
-     uniforms.(i)<-value;replaced:=true;{r with uniforms})table_program.regions in
+     uniforms.(i)<-value;replaced:=true;Result.get_ok(I.Core.Region.rebuild r ~uniforms ()))table_program.regions in
   assert(!replaced);{table_program with regions} in
  let refused message program=match Flow_web.Js.frame program with
   |Error d->assert(d.code="E_WEB_SOURCE");
@@ -194,12 +190,12 @@ let ()=
     Its Invoke is asynchronous, with no structured-call slots or state plane. *)
  let forms=ok(Flow.Syntax.parse "(workspace capture (graph g :context host [(source : (array float) (array/float 0))] (map (fn [x] (+ x t)) source)))")in
  let checked=match Flow.Workspace.check Flow.Check.{version=1;kinds=[]}forms with
-  |Some ws,[]->ws|_,ds->failwith(String.concat ";"(List.map Flow.Diagnostic.to_string ds))in
+  |Some ws,[]->ws|_,ds->failwith(String.concat ";"(List.map Diagnostic.to_string ds))in
  let value=List.assoc "g"(ok(E.static ~inputs:["g",["source",E.Float_array(Array.init 32769 float_of_int)]]checked)).results in
  let r=match value with E.Residual r->r|_->failwith "Async capture needs a live residual"in
- let view=E.Private.residual_view r in
+ let view=E.Residual.residual_view r in
  (match I.Packed.compile_result r view.term with Ok _->()|Error ds->
-  failwith("Async capture packed qualification: "^String.concat ";"(List.map Flow.Diagnostic.to_string ds)));
+  failwith("Async capture packed qualification: "^String.concat ";"(List.map Diagnostic.to_string ds)));
  let packed_core=match I.Core_lower.lower r with Ok p->p|Error form->failwith("Async capture Core: "^form)in
  if packed_core.call_slots<>0 || Array.length packed_core.state_slots<>0 || Array.length packed_core.regions=0 then
   failwith(Printf.sprintf "Async capture is not state-free packed Core: calls=%d states=%d regions=%d"

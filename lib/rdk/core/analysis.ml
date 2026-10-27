@@ -1,10 +1,10 @@
 open Rays_math
 
 type bounds = {
-  min : Vec3.t;
-  max : Vec3.t;
-  center : Vec3.t;
-  size : Vec3.t;
+  min : Rays_math.Vec3.t;
+  max : Rays_math.Vec3.t;
+  center : Rays_math.Vec3.t;
+  size : Rays_math.Vec3.t;
 }
 
 let bounds ?cancel geometry =
@@ -24,13 +24,13 @@ let bounds ?cancel geometry =
       if y < !min_y then min_y := y; if y > !max_y then max_y := y;
       if z < !min_z then min_z := z; if z > !max_z then max_z := z
     done;
-    let min = Vec3.create !min_x !min_y !min_z
-    and max = Vec3.create !max_x !max_y !max_z in
+    let min = Rays_math.Vec3.create !min_x !min_y !min_z
+    and max = Rays_math.Vec3.create !max_x !max_y !max_z in
     Some {
       min; max;
-      center = Vec3.create ((!min_x +. !max_x) *. 0.5)
+      center = Rays_math.Vec3.create ((!min_x +. !max_x) *. 0.5)
           ((!min_y +. !max_y) *. 0.5) ((!min_z +. !max_z) *. 0.5);
-      size = Vec3.create (!max_x -. !min_x) (!max_y -. !min_y)
+      size = Rays_math.Vec3.create (!max_x -. !min_x) (!max_y -. !min_y)
           (!max_z -. !min_z);
     }
   end

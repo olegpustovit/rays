@@ -19,7 +19,7 @@
   ../sdl3_ttf/sdl3_ttf_stubs.c
   ../sdl3_mixer/sdl3_mixer_stubs.c)
  (action
-  (run %{exe:../../tools/sdl3/generate.exe} emit --root ../..
+  (run %{exe:../sdl3/generate.exe} emit --root ../..
    --component sdl3_image --lock ../../packaging/sdl3.lock
    --abi ../sdl3/abi.sexp --output generated_abi.h)))
 

@@ -1,7 +1,11 @@
+open Core_model
 open Rays
 open Sop
 open Editor_document
-include Core_status
+open Core_panes
+open Core_inspect
+open Core_shell
+open Core_status
 
 (* Leader actions owned by the workspace; the environment handles the rest
    from [update.actions]. *)
@@ -19,7 +23,7 @@ let apply_action value (workspace, selection, tree, timeline, changes) action =
               restored = true }), selection, tree, timeline, changes
   | Open_camera ->
       expand Pxui_shell.Layout.Inspector workspace,
-      Selection.clear selection, tree, timeline, changes
+      Selection.clear, tree, timeline, changes
   | Play_pause -> timeline_step T.toggle_pause
   | Reset -> timeline_step T.reset
   | Stop -> timeline_step T.stop
@@ -89,23 +93,23 @@ let world_keys value (doc : Document.t) selection actions =
          | Inside id -> with_fields (Document.with_network doc level network) Document.Scene [ id, values ]
          | Scene -> doc)
     | Rename _ | Delete _ | Restack _ | Camera _ | Root _ | Settings _ | Reparent _ | Outdent _ -> doc in
-  let field name node = List.find_map (fun (field : Parameter.field_view) ->
+  let field name node = List.find_map (fun (field : Param.field_view) ->
       if field.name = name then Some field.current else None) (Node.parameter_fields node) in
   List.filter_map (function
     | Leader.World_emit -> edit_layer (fun node -> match field "emit" node with
-        | Some (Parameter.Choice_value "Light") -> Some ["emit", Parameter.Choice_value "Dome"]
-        | Some (Parameter.Choice_value _) -> Some ["emit", Parameter.Choice_value "Light"]
+        | Some (Param.Choice_value "Light") -> Some ["emit", Param.Choice_value "Dome"]
+        | Some (Param.Choice_value _) -> Some ["emit", Param.Choice_value "Light"]
         | _ -> None) "Dome / light"
     | World_reseed -> edit_layer (fun node -> match field "seed" node with
-        | Some (Parameter.Int_value seed) -> Some ["seed", Parameter.Int_value (seed + 1)]
+        | Some (Param.Int_value seed) -> Some ["seed", Param.Int_value (seed + 1)]
         | _ -> None) "Reseed"
     | World_time delta -> edit_world (fun node -> match field "time_of_day" node with
-        | Some (Parameter.Float_value hours) ->
-            Some ["time_of_day", Parameter.Float_value
+        | Some (Param.Float_value hours) ->
+            Some ["time_of_day", Param.Float_value
               (Float.max 0. (Float.min 24. (hours +. delta)))]
         | _ -> None) "Time of day"
     | World_play -> edit_world (fun node -> match field "day_cycle" node with
-        | Some (Parameter.Float_value 0.) -> Some ["day_cycle", Parameter.Float_value 1.]
+        | Some (Param.Float_value 0.) -> Some ["day_cycle", Param.Float_value 1.]
         | _ -> None) "Day cycle"
     | World_preset index ->
         (match world_id, List.nth_opt World.presets index with
@@ -145,5 +149,4 @@ let routed value =
         (Editor_core.Panels.leaves (shell_tree value value.workspace))
     | World_emit | World_reseed | World_time _ | World_play | World_preset _ ->
         in_world value
-    | _ -> true) value.keymap |> layout_labels value
-
+    | _ -> true) Leader.keymap |> layout_labels value

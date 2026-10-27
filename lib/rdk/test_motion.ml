@@ -95,7 +95,7 @@ let test_group_and_initializers () =
       (fun point -> point = 0) in
   let output = Motion.point_velocity ~points:group
       ~initialization:(Motion.From_attribute { name = "wind"; scale = 2. })
-      ~add_velocity:(Vec3.create 1. 1. 1.) source |> get_rdk in
+      ~add_velocity:(Rays_math.Vec3.create 1. 1. 1.) source |> get_rdk in
   let v = float3 "v" output in
   check_array [|3.;9.|] v.x "restricted initialized velocity x";
   check_array [|5.;8.|] v.y "restricted initialized velocity y";
@@ -110,7 +110,7 @@ let test_group_and_initializers () =
   check (wind.x == copied.x && wind.y == copied.y && wind.z == copied.z)
     "unscaled attribute initialization did not share its packed plane";
   let zeroed = Motion.point_velocity ~dt:Float.nan
-      ~initialization:(Motion.Set_value Vec3.zero) source |> get_rdk in
+      ~initialization:(Motion.Set_value Rays_math.Vec3.zero) source |> get_rdk in
   let v = float3 "v" zeroed in
   check_array [|0.;0.|] v.x "Set Value ignores dt: x";
   check_array [|0.;0.|] v.y "Set Value ignores dt: y";

@@ -36,7 +36,13 @@ differ, Lisp decides: its names, defaults, ranges and errors are the contract, a
 "one declaration", for SOPs). A new capability ships in Lisp first; do not add an OCaml-only
 parameter or behaviour.
 
-One binary, `rays` (`tools/lisp/rays.ml`), interprets `.rays` files; nothing generates OCaml from Lisp.
+The accepted architecture cleanup is tracked in
+[`specification/cleanup/status.md`](specification/cleanup/status.md), with the
+full approved requirements beside it. Accepted Lisp nodes replace their OCaml
+twins and parity code after Lisp-output goldens cover their cases; no oracle
+library is retained. The internal OCaml API has no frozen manifest.
+
+One binary, `rays` (`bin/rays.ml`), interprets `.rays` files; nothing generates OCaml from Lisp.
 `dune exec rays` opens an empty editor (Command-S writes `./untitled.rays`), `dune exec rays -- FILE.rays`
 opens a workspace natively, and `rays check FILE...` / `rays fmt FILE` check and format.
 
@@ -44,10 +50,10 @@ Web export: `dune exec rays -- web FILE.rays -o DIR` writes static files, nothin
 `npx serve DIR`, which reads the worker pool's cross-origin isolation headers from the emitted `serve.json`.
 Its scope is the 2D canvas only (`:context draw` graphs
 and the values that feed them). PXUI and the editor are never exported; they are editor chrome and
-stay native. `scene` and `sop` graphs are a later phase. 128 of the 162 SOP nodes now have Rays Lisp bodies
-(`lib/flow_sop/nodes/*.rays`; the replaced OCaml kernels stay in `lib/rdk` as test oracles); the
-31 nodes on exact predicates, spatial indexes and solvers, 3 wiring nodes and 3 native carriers stay
-OCaml and have nothing to export. Generated `image/map`
+stay native. `scene` and `sop` graphs are a later phase. Lisp SOP bodies live in
+`lib/flow_sop/nodes/*.rays`; their OCaml twins and parity-only kernels are being
+retired after Lisp-output golden capture. Exact predicates, spatial indexes,
+solvers, wiring and native carriers stay OCaml. Generated `image/map`
 images run as WebGPU kernels; `image/noise` preserves native double arithmetic, `image/render` uses
 offscreen WebGPU textures, and static `image/load` files are bundled using the native decoder. The web follows
 the native optimization paths, not a parallel set: regions bound per call (arguments, frame inputs), loop
@@ -60,31 +66,34 @@ task plan are `specification/web-export/plan.md`.
 
 | Library | Owns |
 |---|---|
-| `native_layer_token`, `lru`, `param`, `frame_input`, `rays_math` | Leaves with no dependencies: the opaque presentation-layer handle, a bounded LRU, typed parameter schemas (`Sop.Parameter`, `Editor_core.Param`), immutable logical frame facts, and the pure `Vec2`/`Vec3`/`Mat4`/`Quat`/`Color` math that `rays` re-exports |
+| `diagnostic`, `native_layer_token`, `lru`, `param`, `input`, `rays_math` | Leaves with no dependencies: shared diagnostics, the opaque presentation-layer handle, a bounded LRU, typed parameter schemas, immutable logical frame facts, and pure math |
+| `parallel` | Shared Domainslib pool and deterministic coarse-grained work helpers |
 | `sdl3`, `sdl3_image/ttf/mixer` | SDL3 bindings (foundational) |
 | `metal` | Metal bindings: safe layer over a handwritten bridge (foundational) |
 | `ogpu_core`, `ogpu` | Portable GPU core and virtual public API |
 | `ogpu_metal_native`, `ogpu_metal`, `ogpu_mock` | Native Metal detail and the two OGPU implementations |
-| `runtime`, `runtime_input`, `runtime_resources` | SDL3 lifecycle, Metal presentation, frame stats, typed event translation, SDL image/ttf/mixer services |
-| `rays_execution` | Private frame coordinator: Scene lowering caches over one window or offscreen `Runtime` |
-| `scene_command`, `scene_execution` | Renderer-neutral commands, and prepared GPU execution; neither depends on the other, `rays_execution` joins them |
-| `rays` | `Sketch`, `Frame`, pure `Scene`, `Event`/`Input`, resources, renderer behavior |
+| `runtime`, `runtime_input`, `runtime_resources` | SDL3/window lifecycle and frame facts, typed event translation, SDL image/ttf/mixer services, atomic file writes |
+| `renderer` | GPU execution, pipelines, Scene lowering caches, render stats and leases over one window or offscreen `Runtime`; contains `Scene_execution` |
+| `scene_command` | Pure renderer-neutral commands |
+| `rays` | `Sketch`, `Frame`, pure `Scene`, shared `Input`, resources, renderer behavior |
 | `rays_pathtracer` | Hardware ray-traced path tracer |
 | `rdk` | The single packed geometry/topology compute core, built from `rdk_core` → `rdk_exact` → `rdk_spatial` → `rdk_attrib` → `rdk_gen`/`rdk_curve` → `rdk_mesh` → `rdk_boolean`; `rdk_rays` is its glue to `rays` meshes |
 | `sop` | Immutable SOP graphs over `rdk` operations |
 | `sop_catalog` | Inspectable SOP node factories registered by PPX |
-| `flow` | UI-free workspace language over `param` and `frame_input`: reader, printer, macros, checker, evaluator, frame folds, packed arrays and typed deferred nodes |
-| `flow_ir` | Typed dataflow IR over `flow` evaluations with sharing, hoisting, pruning, fusion and precision passes, and the block-at-a-time CPU kernel tier over `Parallel`; uses the `scene_command` marks contract as pure data; `flow` never depends on it |
-| `flow_gpu` | Metal emitter from `flow_ir` packed programs, a pipeline cache of 64 and owned runners; depends on `flow`, `flow_ir`, `ogpu`, `rays_execution`, `lru`; never reaches geometry or UI |
-| `flow_web` | WGSL and JavaScript printers from `flow_ir` core programs for the web export; depends on `flow`, `flow_ir`, `param`, `rays_math`, `scene_command`; never reaches `rays`, geometry, GPU or UI libraries |
+| `flow` | UI-free workspace language over `diagnostic`, `param`, `input` and pure `rays_math`: reader, printer, macros, checker, evaluator, frame folds, packed arrays and typed deferred nodes |
+| `flow_ir` | Typed dataflow IR over `flow` evaluations with sharing, hoisting, pruning, fusion and precision passes, block-at-a-time CPU kernels, and bounded caches; uses `parallel`, `lru` and the `scene_command` marks contract as pure data; `flow` never depends on it |
+| `flow_gpu` | Metal and binary SPIR-V emission from `flow_ir` packed programs, a pipeline cache of 64 and owned native runners; depends on `flow`, `flow_ir`, `ogpu`, `renderer`, `rays_math`, `lru` and `parallel`; never reaches geometry or UI |
+| `flow_web` | WGSL and JavaScript printers from `flow_ir` core programs for the web export; depends on `flow`, `flow_ir`, `param`, `rays_math`, `scene_command` and `parallel`; never reaches `rays`, geometry, GPU or UI libraries |
+| `web_export` | Static 2D workspace export and embedded web runtime assets; consumes the checked document and shared compiler, bundles loaded images through SDL3_image, and never reaches UI libraries |
 | `flow_graph` | Domain-neutral graph projection, checked text gestures, exposure and probes over `flow` and `param` |
-| `flow_sop` | Typed SOP/value overlay, drives, exposure and environment-owned value lane |
-| `editor_core` | Editor state and routing: labelled `History`, `Command`, `Keymap`, `Router`, the shell's panel tree (`Panels`), plus atomic file writes and s-expression user preferences (`Store`, printed by `Flow.Lisp`) |
-| `editor_document` | Package-private scene/network/settings model, workspace document (`Workspace_doc`, `Layout_by_path`), validation, object/layer schemas and s-expression presets; no presentation dependencies |
-| `pxui` | The one immediate-mode UI engine (`Pxui.Ui`) |
-| `pxui_shell` | Editor chrome over PXUI: layout, headers, keys, status, timeline, prompts, frame, `Inspector` |
+| `flow_sop` | Typed SOP/value overlay, drives, exposure and environment-owned value lane over `flow`, `flow_ir`, `sop`, `rays_math` and `parallel` |
+| `flow_native` | Native Flow drawing, marks, workspace execution and live-frame glue; uses the UI-free document model and renderer, never PXUI or the editor |
+| `editor_core` | Editor state and routing: labelled `History`, `Command`, `Keymap`, `Router`, the shell's panel tree (`Panels`), and s-expression user preferences (`Store`, printed by `Flow.Lisp`) |
+| `editor_document` | Package-private scene/network/settings model, document edits (`Document_edit`), workspace document (`Workspace_doc`, `Layout_by_path`), validation, object/layer schemas and s-expression presets; no presentation dependencies |
+| `pxui` | The one immediate-mode UI engine (`Pxui.Ui`), over `rays` and `rays_math` |
+| `pxui_shell` | Editor chrome over PXUI: layout, headers, keys, status, timeline, prompts, frame, `Inspector`; uses `rays_math` values directly |
 | `pxui_graph` | SOP-network presentation; emits typed requests, never edits |
-| `rays_editor` | Rays Editor: the Houdini-like SOP shell (`Editor`), composed only from public blocks; also the Sop-to-Scene glue (`Surface`, `Packed_pieces`), canvas `Drawing`, `Live_frame` and `Timeline` |
+| `rays_editor` | Rays Editor: the Houdini-like SOP shell (`Editor`), composed from the document, native Flow and UI libraries, plus editor views and `Timeline` |
 
 A sketch is one file, `sketches/<name>.rays`: no `dune`, no `main.ml`, no folder. Its header comment
 says what it shows; a library two sketches import sits beside them (`ws_shared_lib.rays`). A folder,
@@ -96,9 +105,16 @@ deterministic seeds.
 
 ## Dependency rules
 
-`test/dependency_gate.ml` reads every `lib/**/dune`, builds the transitive
-graph, and enforces "may never reach" rules plus a token scan. It lists no
-exception.
+`test/dependency_gate.ml` reads Dune files in `lib`, `ppx`, `tools`, `test`
+and `bin` when present, builds the transitive graph, and enforces "may never
+reach" rules plus a token scan. Executables and tests that reach virtual
+OGPU select exactly one implementation explicitly; the library has no default.
+There are no
+reachability exceptions; tooling and backend conformance have explicit
+source-token allowances.
+Library sources are never duplicated with Dune `copy_files`. The existing
+shared Flow IR fixtures are packaged in a test-only library that product
+libraries cannot reach.
 
 - Foundational libraries (`sdl3*`, `metal`, `ogpu_core`, `ogpu`, `native_layer_token`,
   `scene_command`) never reach `runtime`, `rays`, or anything above.
@@ -110,17 +126,18 @@ exception.
   path tracer, and their tests use the virtual `ogpu` only, and the gate lists
   no Metal exception.
 - `rays` never depends on `pxui`, geometry, sketch libraries, or examples.
-- `pxui_shell` depends only on `rays`, `editor_core`, and `pxui`; it never imports
+- `pxui_shell` depends only on `rays`, `rays_math`, `editor_core`, and `pxui`; it never imports
   SOP, graph, geometry, or sketch libraries.
+- `pxui` depends only on `rays` and `rays_math`.
 - `rdk` never reaches `sop`; `sop` never reaches UI
   libraries; `pxui` never reaches `sop`; `param` depends on nothing;
   `pxui_graph` never reaches `sop` or `rdk`;
   `flow_graph` depends only on `flow` and `param`; `flow_ir` depends only on `flow`, `param`,
-  `rays_math` and `scene_command` and never reaches `rays`, `pxui*`, `sop`, `rdk` or `rays_editor`;
+  `rays_math`, `scene_command`, `lru` and `parallel` and never reaches `rays`, `pxui*`, `sop`, `rdk` or `rays_editor`;
   `flow_gpu` depends only on `flow`, `flow_ir`, `param`, `rays_math`,
-  `ogpu_core`, `ogpu`, `rays_execution` and `lru` and never reaches
+  `ogpu_core`, `ogpu`, `renderer`, `lru` and `parallel` and never reaches
   `sop`, `rdk`, `flow_sop` or any UI library; `flow_web` depends only on `flow`, `flow_ir`,
-  `param`, `rays_math` and `scene_command` and never reaches `rays`, `sop`, `rdk`, `flow_sop`,
+  `param`, `rays_math`, `scene_command` and `parallel` and never reaches `rays`, `sop`, `rdk`, `flow_sop`,
   `flow_gpu`, any UI library or the GPU libraries;
   nothing below imports `rays_editor`.
 - A boundary change updates the gate, adds focused tests at each affected
@@ -140,8 +157,8 @@ dune build @doc
 sketch. Both open windows sequentially. For a window-free broad
 test run, set `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy` on `dune runtest`.
 
-A fatal exception in a running sketch writes a report folder under
-`/tmp/rays-crash` (exception, backtrace, recent input, and the editor's
+A fatal exception in a running sketch writes a report folder under the
+platform temporary directory's `rays-crash` (exception, backtrace, recent input, and the editor's
 document as text, plus a loadable `.rays` for a workspace); read it first when asked to investigate a crash.
 
 ## Test time is a budget
@@ -184,9 +201,7 @@ Keep Dune's cache: do not use `--force` or clean between ordinary validations.
 Agents run the focused alias for their change; reserve `--ship` for the final
 shipping check. GPU rendering integration and presentation timeouts live in
 `@runtest-native`; pure prepared-command validation stays in `@runtest`.
-A public `.mli` change shows as a diff of
-`tools/api_manifest/api_stable.json`; accept an intended change with
-`dune promote`. Warnings are errors. Automated application loops arrange
+Warnings are errors. Automated application loops arrange
 their own termination. Build, generation, and validation glue is OCaml under
 Dune, never Python; external-tool comparisons belong in `../rays-support`.
 The generated `lib/sop_catalog/flow_manifest.sexp` is also checked by
@@ -210,7 +225,8 @@ Bootstrap: `opam switch create . 5.3.0 --no-install`, then `opam pin add
   threads an immutable model through `Sketch.run_state`; no global user-state refs.
 - A `view` returns `Scene.t`. Scene constructors are pure data;
   `Scene.render` is the effect boundary.
-- `Frame.t` carries canvas, time, input, and ordered events.
+- `Frame.t` carries canonical logical facts in `Frame.input`, with backing-pixel
+  scale, FPS, and per-frame pointer delta alongside it.
   `Frame.mouse_delta` sums one frame's pointer motion and resets each frame.
 - Conventions: `at:(x, y)` positions, radians, radius for circles, `Color.t`
   colors, short constructor names, sensible defaults with explicit config.
@@ -224,8 +240,8 @@ Bootstrap: `opam switch create . 5.3.0 --no-install`, then `opam pin add
 
 ## Coordinates and native runtime
 
-Sketch sizes, `Frame` sizes, Scene coordinates, mouse positions, and PXUI
-layout are logical points. `Frame.drawable_*`/`pixel_scale` are the explicit
+Sketch sizes, `Frame.input.size`, Scene coordinates, pointer positions, and PXUI
+layout are logical points. `Frame.pixel_scale` is the explicit
 native-pixel boundary; conversion to drawable pixels happens once, inside the
 GPU backend. Details: `lib/runtime/AGENTS.md`.
 

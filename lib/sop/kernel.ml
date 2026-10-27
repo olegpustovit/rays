@@ -1,6 +1,6 @@
 type column = Floats of float array | Vec3s of float array
-type runner = Context.t -> (column, Diagnostic.error) result
-type t = {id : int; bytes : int; prepare : column list -> (runner, Diagnostic.error) result;
+type runner = Context.t -> (column, Diagnostic.t) result
+type t = {id : int; bytes : int; prepare : column list -> (runner, Diagnostic.t) result;
   geometry_capture : int -> Rdk.Geometry.t option}
 let create ?(geometry_capture = fun _ -> None) ~payload_bytes prepare =
   if payload_bytes < 0 then invalid_arg "Kernel.create: negative payload size";

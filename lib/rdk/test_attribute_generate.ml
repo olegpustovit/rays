@@ -48,7 +48,7 @@ let randomize ?selection ?element_selection ?seed_attribute ?fraction_attribute
     ?(operation = Attribute_ops.Random_set)
     ?(scale = 1.) ~owner ~name distribution geometry =
   Attribute_ops.randomize ~grain:1 ?selection ?element_selection ?seed_attribute
-    ?fraction_attribute ?minimum ?maximum ~seed:(Rand.seed 0x5eed)
+    ?fraction_attribute ?minimum ?maximum ~seed:(Rays_math.Rand.seed 0x5eed)
     ~owner ~name ~direction_bias ~operation ~scale
     distribution geometry
   |> get_ok
@@ -106,8 +106,8 @@ let run () =
 
   let paired = randomize ~owner:Attribute.Point ~name:"paired"
       (Attribute_ops.Random_two_values {
-        a = Attribute_ops.Vec2 (Vec2.create 1. 10.);
-        b = Attribute_ops.Vec2 (Vec2.create 2. 20.);
+        a = Attribute_ops.Vec2 (Rays_math.Vec2.create 1. 10.);
+        b = Attribute_ops.Vec2 (Rays_math.Vec2.create 2. 20.);
         probability_b = 0.5;
       }) geometry |> float2_values ~owner:Attribute.Point "paired" in
   for point = 0 to 3 do
@@ -121,8 +121,8 @@ let run () =
          [|11; 11; 29; 29|]) in
   let seeded = randomize ~seed_attribute:"seed_id" ~owner:Attribute.Point
       ~name:"uv" (Attribute_ops.Random_uniform {
-        min = Attribute_ops.Vec2 Vec2.zero;
-        max = Attribute_ops.Vec2 (Vec2.create 1. 1.);
+        min = Attribute_ops.Vec2 Rays_math.Vec2.zero;
+        max = Attribute_ops.Vec2 (Rays_math.Vec2.create 1. 1.);
       }) seeded in
   let uv = float2_values ~owner:Attribute.Point "uv" seeded in
   if uv.x.(0) <> uv.x.(1) || uv.y.(0) <> uv.y.(1)
@@ -156,8 +156,8 @@ let run () =
   let cauchy_fraction = randomize ~fraction_attribute:"cauchy_fraction"
       ~owner:Attribute.Point ~name:"cauchy2"
       (Attribute_ops.Random_cauchy {
-        median = Attribute_ops.Vec2 Vec2.zero;
-        scale = Attribute_ops.Vec2 (Vec2.create 1. 1.);
+        median = Attribute_ops.Vec2 Rays_math.Vec2.zero;
+        scale = Attribute_ops.Vec2 (Rays_math.Vec2.create 1. 1.);
       }) cauchy_fraction_source
       |> float2_values ~owner:Attribute.Point "cauchy2" in
   if abs_float cauchy_fraction.x.(0) > 1e-12
@@ -168,7 +168,7 @@ let run () =
   let cloud = Line_geometry.points (Array.make cloud_count (0., 0., 0.)) in
   let directions = randomize ~owner:Attribute.Point ~name:"direction"
       (Attribute_ops.Random_direction {
-        direction = Attribute_ops.Vec3 Vec3.unit_y;
+        direction = Attribute_ops.Vec3 Rays_math.Vec3.unit_y;
         cone_angle = Float.pi /. 3.;
       }) cloud |> float3_values ~owner:Attribute.Point "direction" in
   let minimum_dot = cos (Float.pi /. 3.) -. 1e-12 in
@@ -201,8 +201,8 @@ let run () =
 
   let cauchy_cloud = randomize ~owner:Attribute.Point ~name:"isotropic_cauchy"
       (Attribute_ops.Random_cauchy {
-        median = Attribute_ops.Vec2 Vec2.zero;
-        scale = Attribute_ops.Vec2 (Vec2.create 1. 1.);
+        median = Attribute_ops.Vec2 Rays_math.Vec2.zero;
+        scale = Attribute_ops.Vec2 (Rays_math.Vec2.create 1. 1.);
       }) cloud |> float2_values ~owner:Attribute.Point "isotropic_cauchy" in
   let x_dominant = ref 0 and positive_x = ref 0 and positive_y = ref 0 in
   for point = 0 to cloud_count - 1 do
@@ -221,7 +221,7 @@ let run () =
 
   let cone_spheres = randomize ~direction_bias:3. ~owner:Attribute.Point
       ~name:"cone_sphere" (Attribute_ops.Random_inside_sphere_cone {
-        direction = Attribute_ops.Vec3 Vec3.unit_y;
+        direction = Attribute_ops.Vec3 Rays_math.Vec3.unit_y;
         cone_angle = Float.pi /. 2.;
       }) cloud |> float3_values ~owner:Attribute.Point "cone_sphere" in
   let sum_direction_y = ref 0. and sum_cone_radius2 = ref 0. in
@@ -243,7 +243,7 @@ let run () =
       (scalar_attribute ~owner:Attribute.Point ~name:"fraction"
         [|0.; 0.25; 0.5; 0.75; 1.|]) in
   let quantiles seed = Attribute_ops.randomize ~grain:2
-      ~fraction_attribute:"fraction" ~seed:(Rand.seed seed)
+      ~fraction_attribute:"fraction" ~seed:(Rays_math.Rand.seed seed)
       ~owner:Attribute.Point ~name:"quantile"
       (Attribute_ops.Random_custom_ramp {
         ramp = [0., 0.; 0.5, 0.2; 1., 1.];
@@ -264,10 +264,10 @@ let run () =
       || abs_float (abs_float limited_tails.(1) -. 1.3489795) > 1e-6 then
     fail "Attribute Randomize tail limits or pre-scale ordering are incorrect";
   let discrete = Attribute_ops.randomize ~grain:2 ~fraction_attribute:"fraction"
-      ~seed:(Rand.seed 1) ~owner:Attribute.Point ~name:"choice"
+      ~seed:(Rays_math.Rand.seed 1) ~owner:Attribute.Point ~name:"choice"
       (Attribute_ops.Random_custom_discrete [
-        Attribute_ops.Vec2 (Vec2.create 1. 10.), 1.;
-        Attribute_ops.Vec2 (Vec2.create 2. 20.), 3.;
+        Attribute_ops.Vec2 (Rays_math.Vec2.create 1. 10.), 1.;
+        Attribute_ops.Vec2 (Rays_math.Vec2.create 2. 20.), 3.;
       ]) quantile_source |> get_ok
       |> float2_values ~owner:Attribute.Point "choice" in
   if discrete.x <> [|1.; 2.; 2.; 2.; 2.|]
@@ -340,7 +340,7 @@ let run () =
   if abs_float (second_fraction -. 0.75) > 0.01 then
     fail "Attribute Randomize weighted discrete frequencies are biased";
   let median_quantile = Attribute_ops.randomize ~grain:2
-      ~fraction_attribute:"fraction" ~seed:(Rand.seed 1)
+      ~fraction_attribute:"fraction" ~seed:(Rays_math.Rand.seed 1)
       ~owner:Attribute.Point ~name:"normal_quantile"
       (Attribute_ops.Random_normal { middle = numeric 7.; scale = numeric 2. })
       quantile_source in
@@ -372,7 +372,7 @@ let run () =
   let fraction_directions = randomize ~fraction_attribute:"direction_uv"
       ~owner:Attribute.Point ~name:"fraction_direction"
       (Attribute_ops.Random_direction {
-        direction = Attribute_ops.Vec3 Vec3.unit_z;
+        direction = Attribute_ops.Vec3 Rays_math.Vec3.unit_z;
         cone_angle = Float.pi /. 2.;
       }) direction_fractions |> float3_values ~owner:Attribute.Point
         "fraction_direction" in
@@ -383,7 +383,7 @@ let run () =
   let with_normals = Normal_ops.run geometry |> get_ok in
   let moved = randomize ~owner:Attribute.Point ~name:"P"
       (Attribute_ops.Random_constant
-        (Attribute_ops.Vec3 (Vec3.create 1. 2. 3.))) with_normals in
+        (Attribute_ops.Vec3 (Rays_math.Vec3.create 1. 2. 3.))) with_normals in
   let positions = Packed.Float3.Private.view (Geometry.positions moved) in
   if positions.x <> [|1.; 1.; 1.; 1.|]
       || positions.y <> [|2.; 2.; 2.; 2.|]
@@ -393,72 +393,72 @@ let run () =
     fail "Attribute Randomize P did not invalidate stale normals";
 
   expect_error "invalid_randomize"
-    (Attribute_ops.randomize ~seed:(Rand.seed 0) ~owner:Attribute.Point
+    (Attribute_ops.randomize ~seed:(Rays_math.Rand.seed 0) ~owner:Attribute.Point
       ~name:"bad" (Attribute_ops.Random_uniform {
         min = numeric 2.; max = numeric 1. }) geometry);
   expect_error "invalid_randomize"
-    (Attribute_ops.randomize ~seed:(Rand.seed 0) ~owner:Attribute.Point
+    (Attribute_ops.randomize ~seed:(Rays_math.Rand.seed 0) ~owner:Attribute.Point
       ~name:"source" (Attribute_ops.Random_constant
-        (Attribute_ops.Vec2 Vec2.zero)) with_source);
+        (Attribute_ops.Vec2 Rays_math.Vec2.zero)) with_source);
   expect_error "invalid_randomize"
-    (Attribute_ops.randomize ~seed:(Rand.seed 0) ~seed_attribute:"source"
+    (Attribute_ops.randomize ~seed:(Rays_math.Rand.seed 0) ~seed_attribute:"source"
       ~owner:Attribute.Point ~name:"bad"
       (Attribute_ops.Random_constant (numeric 1.)) with_source);
   expect_error "invalid_randomize"
-    (Attribute_ops.randomize ~seed:(Rand.seed 0) ~selection:selected
+    (Attribute_ops.randomize ~seed:(Rays_math.Rand.seed 0) ~selection:selected
       ~owner:Attribute.Vertex ~name:"bad"
       (Attribute_ops.Random_constant (numeric 1.)) geometry);
   List.iter (expect_error "invalid_randomize") [
-    Attribute_ops.randomize ~seed:(Rand.seed 0) ~owner:Attribute.Point
+    Attribute_ops.randomize ~seed:(Rays_math.Rand.seed 0) ~owner:Attribute.Point
       ~name:"bad" (Attribute_ops.Random_direction {
         direction = numeric 1.; cone_angle = 0. }) geometry;
-    Attribute_ops.randomize ~seed:(Rand.seed 0) ~owner:Attribute.Point
+    Attribute_ops.randomize ~seed:(Rays_math.Rand.seed 0) ~owner:Attribute.Point
       ~name:"bad" (Attribute_ops.Random_direction {
-        direction = Attribute_ops.Vec3 Vec3.zero; cone_angle = 0. }) geometry;
-    Attribute_ops.randomize ~seed:(Rand.seed 0) ~owner:Attribute.Point
+        direction = Attribute_ops.Vec3 Rays_math.Vec3.zero; cone_angle = 0. }) geometry;
+    Attribute_ops.randomize ~seed:(Rays_math.Rand.seed 0) ~owner:Attribute.Point
       ~name:"bad" (Attribute_ops.Random_inside_sphere { dimensions = 5 }) geometry;
-    Attribute_ops.randomize ~seed:(Rand.seed 0) ~owner:Attribute.Point
+    Attribute_ops.randomize ~seed:(Rays_math.Rand.seed 0) ~owner:Attribute.Point
       ~name:"bad" (Attribute_ops.Random_cauchy {
-        median = Attribute_ops.Vec2 Vec2.zero;
-        scale = Attribute_ops.Vec2 (Vec2.create 1. 2.);
+        median = Attribute_ops.Vec2 Rays_math.Vec2.zero;
+        scale = Attribute_ops.Vec2 (Rays_math.Vec2.create 1. 2.);
       }) geometry;
-    Attribute_ops.randomize ~seed:(Rand.seed 0) ~minimum:(numeric 2.)
+    Attribute_ops.randomize ~seed:(Rays_math.Rand.seed 0) ~minimum:(numeric 2.)
       ~maximum:(numeric 1.) ~owner:Attribute.Point ~name:"bad"
       (Attribute_ops.Random_normal { middle = numeric 0.; scale = numeric 1. })
       geometry;
-    Attribute_ops.randomize ~seed:(Rand.seed 0)
+    Attribute_ops.randomize ~seed:(Rays_math.Rand.seed 0)
       ~operation:Attribute_ops.Random_add ~owner:Attribute.Point ~name:"bad"
       (Attribute_ops.Random_custom_discrete_text ["x", 1.]) geometry;
-    Attribute_ops.randomize ~seed:(Rand.seed 0) ~direction_bias:(-1.)
+    Attribute_ops.randomize ~seed:(Rays_math.Rand.seed 0) ~direction_bias:(-1.)
       ~owner:Attribute.Point ~name:"bad" (Attribute_ops.Random_direction {
-        direction = Attribute_ops.Vec3 Vec3.unit_y; cone_angle = 1. }) geometry;
-    Attribute_ops.randomize ~seed:(Rand.seed 0) ~direction_bias:1.
+        direction = Attribute_ops.Vec3 Rays_math.Vec3.unit_y; cone_angle = 1. }) geometry;
+    Attribute_ops.randomize ~seed:(Rays_math.Rand.seed 0) ~direction_bias:1.
       ~owner:Attribute.Point ~name:"bad" (Attribute_ops.Random_uniform {
         min = numeric 0.; max = numeric 1. }) geometry;
-    Attribute_ops.randomize ~seed:(Rand.seed 0) ~owner:Attribute.Point
+    Attribute_ops.randomize ~seed:(Rays_math.Rand.seed 0) ~owner:Attribute.Point
       ~name:"bad" (Attribute_ops.Random_inside_sphere_cone {
-        direction = Attribute_ops.Vec3 Vec3.zero; cone_angle = 1. }) geometry;
-    Attribute_ops.randomize ~seed:(Rand.seed 0) ~owner:Attribute.Point
+        direction = Attribute_ops.Vec3 Rays_math.Vec3.zero; cone_angle = 1. }) geometry;
+    Attribute_ops.randomize ~seed:(Rays_math.Rand.seed 0) ~owner:Attribute.Point
       ~name:"bad" (Attribute_ops.Random_custom_ramp {
         ramp = [0., 0.; 0.5, 1.]; fit_min = numeric 0.; fit_max = numeric 1.;
       }) geometry;
-    Attribute_ops.randomize ~seed:(Rand.seed 0) ~owner:Attribute.Point
+    Attribute_ops.randomize ~seed:(Rays_math.Rand.seed 0) ~owner:Attribute.Point
       ~name:"bad" (Attribute_ops.Random_custom_discrete []) geometry;
-    Attribute_ops.randomize ~seed:(Rand.seed 0) ~owner:Attribute.Point
+    Attribute_ops.randomize ~seed:(Rays_math.Rand.seed 0) ~owner:Attribute.Point
       ~name:"bad" (Attribute_ops.Random_custom_discrete [numeric 1., -1.])
       geometry;
-    Attribute_ops.randomize ~seed:(Rand.seed 0) ~seed_attribute:"seed_id"
+    Attribute_ops.randomize ~seed:(Rays_math.Rand.seed 0) ~seed_attribute:"seed_id"
       ~fraction_attribute:"fraction" ~owner:Attribute.Point ~name:"bad"
       (Attribute_ops.Random_uniform { min = numeric 0.; max = numeric 1. })
       quantile_source;
-    Attribute_ops.randomize ~seed:(Rand.seed 0) ~fraction_attribute:"fraction"
+    Attribute_ops.randomize ~seed:(Rays_math.Rand.seed 0) ~fraction_attribute:"fraction"
       ~owner:Attribute.Point ~name:"bad"
       (Attribute_ops.Random_inside_sphere { dimensions = 3 }) quantile_source;
   ];
   let cancelled = Cancel.create () in
   Cancel.cancel cancelled;
   expect_error "cancelled"
-    (Attribute_ops.randomize ~cancel:cancelled ~seed:(Rand.seed 0)
+    (Attribute_ops.randomize ~cancel:cancelled ~seed:(Rays_math.Rand.seed 0)
       ~owner:Attribute.Point ~name:"bad"
       (Attribute_ops.Random_constant (numeric 1.)) geometry);
 
@@ -508,13 +508,13 @@ let run () =
 
   let tuple = randomize ~owner:Attribute.Point ~name:"tuple"
       (Attribute_ops.Random_constant
-        (Attribute_ops.Vec3 (Vec3.create 0. 5. 10.))) geometry in
+        (Attribute_ops.Vec3 (Rays_math.Vec3.create 0. 5. 10.))) geometry in
   let tuple = Attribute_ops.remap ~owner:Attribute.Point ~name:"tuple"
       ~input:(Attribute_ops.Remap_explicit {
-        min = Attribute_ops.Vec3 Vec3.zero;
-        max = Attribute_ops.Vec3 (Vec3.create 1. 10. 20.); })
-      ~output_min:(Attribute_ops.Vec3 Vec3.zero)
-      ~output_max:(Attribute_ops.Vec3 (Vec3.create 2. 2. 2.)) tuple |> get_ok
+        min = Attribute_ops.Vec3 Rays_math.Vec3.zero;
+        max = Attribute_ops.Vec3 (Rays_math.Vec3.create 1. 10. 20.); })
+      ~output_min:(Attribute_ops.Vec3 Rays_math.Vec3.zero)
+      ~output_max:(Attribute_ops.Vec3 (Rays_math.Vec3.create 2. 2. 2.)) tuple |> get_ok
       |> float3_values ~owner:Attribute.Point "tuple" in
   if tuple.x <> [|0.; 0.; 0.; 0.|] || tuple.y <> [|1.; 1.; 1.; 1.|]
       || tuple.z <> [|1.; 1.; 1.; 1.|] then
@@ -550,7 +550,7 @@ let run () =
   let large = Plane_generators.grid ~columns:500 ~rows:200 ~size:10. () |> get_ok in
   let large_bytes = geometry_bytes large in
   let generated domains = Parallel.run ~domains (fun () ->
-    Attribute_ops.randomize ~grain:2_048 ~seed:(Rand.seed 77)
+    Attribute_ops.randomize ~grain:2_048 ~seed:(Rays_math.Rand.seed 77)
       ~owner:Attribute.Point ~name:"sample"
       (Attribute_ops.Random_uniform {
         min = Attribute_ops.Vec4 (-2., -1., 0., 1.);
@@ -560,35 +560,35 @@ let run () =
   check (geometry_bytes one = geometry_bytes many)
     "Uniform attribute randomization differs across domains";
   let advanced domains = Parallel.run ~domains (fun () ->
-    let geometry = Attribute_ops.randomize ~grain:2_048 ~seed:(Rand.seed 81)
+    let geometry = Attribute_ops.randomize ~grain:2_048 ~seed:(Rays_math.Rand.seed 81)
         ~owner:Attribute.Point ~name:"random_direction"
         (Attribute_ops.Random_direction {
           direction = Attribute_ops.Vec4 (0., 0., 0., 1.);
           cone_angle = Float.pi;
         }) large |> get_ok in
-    let geometry = Attribute_ops.randomize ~grain:2_048 ~seed:(Rand.seed 82)
+    let geometry = Attribute_ops.randomize ~grain:2_048 ~seed:(Rays_math.Rand.seed 82)
         ~owner:Attribute.Point ~name:"random_sphere"
         (Attribute_ops.Random_inside_sphere { dimensions = 3 }) geometry
         |> get_ok in
-    let geometry = Attribute_ops.randomize ~grain:2_048 ~seed:(Rand.seed 821)
+    let geometry = Attribute_ops.randomize ~grain:2_048 ~seed:(Rays_math.Rand.seed 821)
         ~direction_bias:2. ~owner:Attribute.Point ~name:"random_cone_sphere"
         (Attribute_ops.Random_inside_sphere_cone {
-          direction = Attribute_ops.Vec3 Vec3.unit_z;
+          direction = Attribute_ops.Vec3 Rays_math.Vec3.unit_z;
           cone_angle = Float.pi /. 2.;
         }) geometry |> get_ok in
-    let geometry = Attribute_ops.randomize ~grain:2_048 ~seed:(Rand.seed 83)
+    let geometry = Attribute_ops.randomize ~grain:2_048 ~seed:(Rays_math.Rand.seed 83)
         ~owner:Attribute.Point ~name:"random_ramp"
         (Attribute_ops.Random_custom_ramp {
           ramp = [0., 0.; 0.25, 0.05; 0.7, 0.9; 1., 1.];
-          fit_min = Attribute_ops.Vec2 (Vec2.create (-2.) 10.);
-          fit_max = Attribute_ops.Vec2 (Vec2.create 3. 20.);
+          fit_min = Attribute_ops.Vec2 (Rays_math.Vec2.create (-2.) 10.);
+          fit_max = Attribute_ops.Vec2 (Rays_math.Vec2.create 3. 20.);
         }) geometry |> get_ok in
-    Attribute_ops.randomize ~grain:2_048 ~seed:(Rand.seed 84)
+    Attribute_ops.randomize ~grain:2_048 ~seed:(Rays_math.Rand.seed 84)
       ~owner:Attribute.Point ~name:"random_choice"
       (Attribute_ops.Random_custom_discrete [
-        Attribute_ops.Vec3 (Vec3.create 1. 2. 3.), 1.;
-        Attribute_ops.Vec3 (Vec3.create 4. 5. 6.), 4.;
-        Attribute_ops.Vec3 (Vec3.create 7. 8. 9.), 2.;
+        Attribute_ops.Vec3 (Rays_math.Vec3.create 1. 2. 3.), 1.;
+        Attribute_ops.Vec3 (Rays_math.Vec3.create 4. 5. 6.), 4.;
+        Attribute_ops.Vec3 (Rays_math.Vec3.create 7. 8. 9.), 2.;
       ]) geometry |> get_ok) in
   let advanced_one = advanced 1 and advanced_many = advanced 4 in
   check (geometry_bytes advanced_one = geometry_bytes advanced_many)
@@ -604,22 +604,22 @@ let run () =
   let extended domains = Parallel.run ~domains (fun () ->
     let geometry = Attribute_ops.randomize ~grain:2_048
         ~element_selection:(Attribute_ops.Random_points expanded_group)
-        ~seed:(Rand.seed 91) ~owner:Attribute.Vertex ~name:"expanded_parallel"
+        ~seed:(Rays_math.Rand.seed 91) ~owner:Attribute.Vertex ~name:"expanded_parallel"
         (Attribute_ops.Random_constant (numeric 2.)) large |> get_ok in
     let geometry = Attribute_ops.randomize ~grain:2_048
-        ~minimum:(Attribute_ops.Vec2 (Vec2.create (-20.) (-20.)))
-        ~maximum:(Attribute_ops.Vec2 (Vec2.create 20. 20.))
-        ~seed:(Rand.seed 92) ~owner:Attribute.Point ~name:"cauchy_parallel"
+        ~minimum:(Attribute_ops.Vec2 (Rays_math.Vec2.create (-20.) (-20.)))
+        ~maximum:(Attribute_ops.Vec2 (Rays_math.Vec2.create 20. 20.))
+        ~seed:(Rays_math.Rand.seed 92) ~owner:Attribute.Point ~name:"cauchy_parallel"
         (Attribute_ops.Random_cauchy {
-          median = Attribute_ops.Vec2 Vec2.zero;
-          scale = Attribute_ops.Vec2 (Vec2.create 1. 1.);
+          median = Attribute_ops.Vec2 Rays_math.Vec2.zero;
+          scale = Attribute_ops.Vec2 (Rays_math.Vec2.create 1. 1.);
         }) geometry |> get_ok in
     let geometry = Attribute_ops.randomize ~grain:2_048
         ~element_selection:(Attribute_ops.Random_edges expanded_edges)
-        ~seed:(Rand.seed 921) ~owner:Attribute.Primitive
+        ~seed:(Rays_math.Rand.seed 921) ~owner:Attribute.Primitive
         ~name:"edge_expanded_parallel"
         (Attribute_ops.Random_constant (numeric 3.)) geometry |> get_ok in
-    Attribute_ops.randomize ~grain:2_048 ~seed:(Rand.seed 93)
+    Attribute_ops.randomize ~grain:2_048 ~seed:(Rays_math.Rand.seed 93)
       ~owner:Attribute.Primitive ~name:"text_parallel"
       (Attribute_ops.Random_custom_discrete_text ["a", 1.; "b", 2.])
       geometry |> get_ok) in
@@ -633,7 +633,7 @@ let run () =
       ~name:"orient" ~kind:Attribute_ops.Noise_quaternion
       ~location:Attribute_ops.Noise_element_number
       ~range:Attribute_ops.Noise_zero_centered
-      ~frequency:(Vec3.create 0.071 0.071 0.071)
+      ~frequency:(Rays_math.Vec3.create 0.071 0.071 0.071)
       ~octaves:3 ~lacunarity:2. ~roughness:0.55 noise_input |> get_ok) in
   let noise_one = noisy 1 and noise_many = noisy 4 in
   check (geometry_bytes noise_one = geometry_bytes noise_many)

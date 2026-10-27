@@ -96,7 +96,7 @@ let test_t_junction_and_overlap () =
 let test_embedded_source_points () =
   let x = [|0.;1.;2.;3.;4.;2.|]
   and y = [|0.;0.;0.;0.;0.;1.|] in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       Planar_constraints.build ~grain:1 ~split_crossings:true ~x ~y
         ~segment_points:[|0;4|] ~embedded_points:[|0;1;2;3;4;5|] ()
       |> get_string) in
@@ -141,7 +141,7 @@ let test_embedded_source_points () =
 let test_many_way_dedup_and_domains () =
   let x = [|0.;2.; 0.;2.; 1.;1.|]
   and y = [|0.;2.; 2.;0.; 0.;2.|] in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       Planar_constraints.build ~split_crossings:true ~x ~y
         ~segment_points:[|0;1; 2;3; 4;5|] () |> get_string) in
   let one = run 1 and four = run 4 in

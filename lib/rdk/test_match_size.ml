@@ -64,32 +64,32 @@ let equal_geometry left right =
        (Geometry.edge_groups right)
 
 let check_numeric_targets () =
-  let source = Box_generator.box ~size:(Vec3.create 2. 4. 8.) () |> get_ok in
+  let source = Box_generator.box ~size:(Rays_math.Vec3.create 2. 4. 8.) () |> get_ok in
   let unit = Match_size.run source |> get_ok |> bounds in
   check (near unit.center.x 0. && near unit.center.y 0. && near unit.center.z 0.
       && near unit.size.x 0.25 && near unit.size.y 0.5 && near unit.size.z 1.)
     "default unit reference contain fit";
   let explicit = Match_size.run ~fit:Match_size.Stretch
-      ~target_center:(Vec3.create 10. 20. 30.)
-      ~target_size:(Vec3.create 4. 8. 12.) source |> get_ok |> bounds in
+      ~target_center:(Rays_math.Vec3.create 10. 20. 30.)
+      ~target_size:(Rays_math.Vec3.create 4. 8. 12.) source |> get_ok |> bounds in
   check (near explicit.center.x 10. && near explicit.center.y 20.
       && near explicit.center.z 30. && near explicit.size.x 4.
       && near explicit.size.y 8. && near explicit.size.z 12.)
     "explicit numeric stretch reference";
   let axes = Match_size.run ~fit:Match_size.Stretch ~scale_axes:(true, false, true)
-      ~target_center:(Vec3.create 10. 20. 30.)
-      ~target_size:(Vec3.create 4. 8. 12.) source |> get_ok |> bounds in
+      ~target_center:(Rays_math.Vec3.create 10. 20. 30.)
+      ~target_size:(Rays_math.Vec3.create 4. 8. 12.) source |> get_ok |> bounds in
   check (near axes.size.x 4. && near axes.size.y 4. && near axes.size.z 12.
       && near axes.center.x 10. && near axes.center.y 20.
       && near axes.center.z 30.)
     "per-axis scale enable";
   let aligned = Match_size.run ~fit:Match_size.Translate_only
-      ~justify:(Vec3.create 1. 0. 0.)
-      ~target_justify:(Vec3.create (-1.) 0. 0.)
-      ~offset:(Vec3.create 0.5 2. 3.)
+      ~justify:(Rays_math.Vec3.create 1. 0. 0.)
+      ~target_justify:(Rays_math.Vec3.create (-1.) 0. 0.)
+      ~offset:(Rays_math.Vec3.create 0.5 2. 3.)
       ~translate_axes:(true, false, false)
-      ~target_center:(Vec3.create 10. 20. 30.)
-      ~target_size:(Vec3.create 4. 8. 12.) source |> get_ok |> bounds in
+      ~target_center:(Rays_math.Vec3.create 10. 20. 30.)
+      ~target_size:(Rays_math.Vec3.create 4. 8. 12.) source |> get_ok |> bounds in
   check (near aligned.max.x 8.5 && near aligned.center.y 0.
       && near aligned.center.z 0.)
     "cross-anchor, offset, and translation-axis controls"
@@ -106,10 +106,10 @@ let check_selections () =
   let output = Match_size.run ~fit:Match_size.Translate_only
       ~selection:(Transform_ops.Selected_points move)
       ~source_selection:(Transform_ops.Selected_points source_bounds)
-      ~justify:(Vec3.create 1. 0. 0.)
-      ~target_justify:(Vec3.create (-1.) 0. 0.)
-      ~target_center:(Vec3.create 20. 0. 0.)
-      ~target_size:(Vec3.create 1. 1. 1.) source |> get_ok in
+      ~justify:(Rays_math.Vec3.create 1. 0. 0.)
+      ~target_justify:(Rays_math.Vec3.create (-1.) 0. 0.)
+      ~target_center:(Rays_math.Vec3.create 20. 0. 0.)
+      ~target_size:(Rays_math.Vec3.create 1. 1. 1.) source |> get_ok in
   let output = positions output in
   check (near output.x.(0) 17.5 && near output.x.(1) 2.
       && near output.x.(2) 10. && near output.x.(3) 11.)
@@ -124,14 +124,14 @@ let check_selections () =
       |> get_ok |> bounds in
   check (near output.center.x 104.5)
     "target selection controls reference bounds";
-  let component_source = Box_generator.box ~size:(Vec3.create 1. 2. 3.) () |> get_ok
+  let component_source = Box_generator.box ~size:(Rays_math.Vec3.create 1. 2. 3.) () |> get_ok
       |> Group_mesh.group_edges ~name:"all_edges" |> get_ok in
   let primitives = Group.init ~owner:Group.Primitive ~name:"all_primitives"
       (Geometry.primitive_count component_source) (fun _ -> true) in
   let edges = Geometry.find_edge_group "all_edges" component_source
       |> Option.get in
-  let component_target = Box_generator.box ~size:(Vec3.create 4. 5. 6.) () |> get_ok
-      |> Transform_ops.transform (Mat4.translation (Vec3.create 7. 8. 9.)) in
+  let component_target = Box_generator.box ~size:(Rays_math.Vec3.create 4. 5. 6.) () |> get_ok
+      |> Transform_ops.transform (Rays_math.Mat4.translation (Rays_math.Vec3.create 7. 8. 9.)) in
   let vertices = Group.init ~owner:Group.Vertex ~name:"all_vertices"
       (Geometry.vertex_count component_target) (fun _ -> true) in
   let component_output = Match_size.run ~fit:Match_size.Stretch
@@ -151,8 +151,8 @@ let check_selections () =
     "empty move selection is a structural identity"
 
 let check_fit_modes () =
-  let source = Box_generator.box ~size:(Vec3.create 1. 2. 4.) () |> get_ok
-  and target = Box_generator.box ~size:(Vec3.create 4. 6. 8.) () |> get_ok in
+  let source = Box_generator.box ~size:(Rays_math.Vec3.create 1. 2. 4.) () |> get_ok
+  and target = Box_generator.box ~size:(Rays_math.Vec3.create 4. 6. 8.) () |> get_ok in
   let size fit = Match_size.run ~fit ~target source |> get_ok |> bounds
       |> fun bounds -> bounds.size in
   let x = size Match_size.Match_x and y = size Match_size.Match_y and z = size Match_size.Match_z
@@ -164,15 +164,15 @@ let check_fit_modes () =
     "uniform contain fit";
   check (near cover.x 4. && near cover.y 8. && near cover.z 16.)
     "uniform cover fit";
-  let doubled = Box_generator.box ~size:(Vec3.create 2. 4. 6.) () |> get_ok in
+  let doubled = Box_generator.box ~size:(Rays_math.Vec3.create 2. 4. 6.) () |> get_ok in
   List.iter (fun fit ->
     let measured = Match_size.run ~fit ~translate_axes:(false, false, false)
-        ~target:doubled (Box_generator.box ~size:(Vec3.create 1. 2. 3.) () |> get_ok)
+        ~target:doubled (Box_generator.box ~size:(Rays_math.Vec3.create 1. 2. 3.) () |> get_ok)
         |> get_ok |> bounds in
     check (near measured.size.x 2. && near measured.size.y 4.
         && near measured.size.z 6.) "metric fit linear scale")
     [Match_size.Match_perimeter; Match_size.Match_area; Match_size.Match_volume];
-  let source = Box_generator.box ~size:(Vec3.create 1. 2. 3.) () |> get_ok in
+  let source = Box_generator.box ~size:(Rays_math.Vec3.create 1. 2. 3.) () |> get_ok in
   let source_faces = Group.init ~owner:Group.Primitive ~name:"source_faces"
       (Geometry.primitive_count source) (fun _ -> true)
   and target_faces = Group.init ~owner:Group.Primitive ~name:"target_faces"
@@ -199,7 +199,7 @@ let check_normals () =
   let output = Match_size.run ~fit:Match_size.Stretch
       ~selection:(Transform_ops.Selected_points selected)
       ~translate_axes:(false, false, false)
-      ~target_center:Vec3.zero ~target_size:(Vec3.create 2. 1. 1.) source
+      ~target_center:Rays_math.Vec3.zero ~target_size:(Rays_math.Vec3.create 2. 1. 1.) source
       |> get_ok in
   let expected_x = 1. /. sqrt 5. and expected_y = 2. /. sqrt 5. in
   List.iter (fun owner ->
@@ -210,18 +210,18 @@ let check_normals () =
     [Attribute.Point; Attribute.Vertex]
 
 let check_validation () =
-  let source = Box_generator.box ~size:(Vec3.create 1. 1. 1.) () |> get_ok
-  and target = Box_generator.box ~size:(Vec3.create 2. 2. 2.) () |> get_ok in
+  let source = Box_generator.box ~size:(Rays_math.Vec3.create 1. 1. 1.) () |> get_ok
+  and target = Box_generator.box ~size:(Rays_math.Vec3.create 2. 2. 2.) () |> get_ok in
   expect_code "invalid_geometry" (Match_size.run ~grain:0 ~target source);
   expect_code "invalid_geometry" (Match_size.run
-      ~justify:(Vec3.create 2. 0. 0.) ~target source);
+      ~justify:(Rays_math.Vec3.create 2. 0. 0.) ~target source);
   expect_code "invalid_geometry" (Match_size.run
-      ~offset:(Vec3.create Float.nan 0. 0.) ~target source);
+      ~offset:(Rays_math.Vec3.create Float.nan 0. 0.) ~target source);
   expect_code "invalid_geometry" (Match_size.run ~scale:(-1.) ~target source);
   expect_code "invalid_geometry" (Match_size.run
-      ~target_size:(Vec3.create 1. (-1.) 1.) source);
+      ~target_size:(Rays_math.Vec3.create 1. (-1.) 1.) source);
   expect_code "invalid_geometry" (Match_size.run ~target
-      ~target_center:Vec3.zero source);
+      ~target_center:Rays_math.Vec3.zero source);
   let target_points = Group.init ~owner:Group.Point ~name:"target" 24
       (fun point -> point = 0) in
   expect_code "invalid_geometry" (Match_size.run
@@ -246,14 +246,14 @@ let check_parallel_exact () =
   let source = Plane_generators.grid ~columns:800 ~rows:600 ~size:30. () |> get_ok
       |> Deform.noise_displace ~seed:934 ~amplitude:1.75 ~frequency:0.21 |> get_ok
       |> Normal_ops.run |> get_ok in
-  let target = Box_generator.box ~size:(Vec3.create 8. 5. 12.) () |> get_ok
-      |> Transform_ops.transform (Mat4.translation (Vec3.create 3. 7. (-2.))) in
+  let target = Box_generator.box ~size:(Rays_math.Vec3.create 8. 5. 12.) () |> get_ok
+      |> Transform_ops.transform (Rays_math.Mat4.translation (Rays_math.Vec3.create 3. 7. (-2.))) in
   let run domains = Parallel.run ~domains (fun () ->
     Match_size.run ~grain:1024 ~fit:Match_size.Stretch
       ~scale_axes:(true, false, true)
-      ~justify:(Vec3.create (-1.) 0. 1.)
-      ~target_justify:(Vec3.create 1. (-1.) 0.)
-      ~offset:(Vec3.create 0.25 0.5 (-0.75)) ~target source |> get_ok) in
+      ~justify:(Rays_math.Vec3.create (-1.) 0. 1.)
+      ~target_justify:(Rays_math.Vec3.create 1. (-1.) 0.)
+      ~offset:(Rays_math.Vec3.create 0.25 0.5 (-0.75)) ~target source |> get_ok) in
   let one = run 1 and many = run 4 in
   check (equal_geometry one many)
     "one-domain and four-domain Match Size geometry differ";

@@ -11,7 +11,7 @@ and editor = Named "editor" and material = Named "material"
 let is_geometry ty = ty = geometry
 let is_cooked ty = ty = geometry || ty = image
 let nominal name ?(shape = true) ?(color = `Output) ?default () = {name; shape; color; default}
-let registry = ref [
+let descriptors = [
   nominal "geometry" ~color:`Geometry ~default:(Syntax.make (Sym "nil")) ();
   nominal "image" ~default:(Syntax.make (List [Syntax.make (Sym "image/noise");
     Syntax.make (Kw "width");Syntax.make (Num "1");
@@ -20,19 +20,10 @@ let registry = ref [
   nominal "scene" (); nominal "world" (); nominal "settings" ~shape:false ();
   nominal "panel" (); nominal "editor" (); nominal "material" ~shape:false ();
   nominal "effect" (); nominal "sample" ~shape:false ()]
-let descriptor name = List.find_opt (fun entry -> entry.name = name) !registry
+let descriptor name = List.find_opt (fun entry -> entry.name = name) descriptors
 let structural = ["float", Float; "int", Int; "bool", Bool; "vec2", Vec2; "vec3", Vec3; "vec4", Vec4;
   "text", Text; "color", Color; "fn", Fn None; "any", Any]
-let names () = structural @ List.map (fun entry -> entry.name, Named entry.name) !registry
-let register ?(color = `Output) ?default name =
-  let entry = {name; shape = true; color; default} in
-  if not (Symbol.valid_name name) || Symbol.reserved name || List.mem_assoc name structural then
-    Error (Diagnostic.error ~code:"E_TYPE_NAME" ("Invalid nominal type name " ^ name))
-  else match descriptor name with
-    | Some old when old.shape = entry.shape && old.color = entry.color
-        && Option.equal Syntax.equal old.default entry.default -> Ok (Named name)
-    | Some _ -> Error (Diagnostic.error ~code:"E_TYPE_DUPLICATE" ("Conflicting nominal type " ^ name))
-    | None -> registry := !registry @ [entry]; Ok (Named name)
+let names () = structural @ List.map (fun entry -> entry.name, Named entry.name) descriptors
 let shape = function Named name -> Option.fold ~none:true ~some:(fun entry -> entry.shape) (descriptor name) | _ -> false
 let color = function Named name -> Option.fold ~none:`Output ~some:(fun entry -> entry.color) (descriptor name) | _ -> `Output
 let default = function Named name -> Option.bind (descriptor name) (fun entry -> entry.default) | _ -> None

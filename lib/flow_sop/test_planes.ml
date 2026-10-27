@@ -4,7 +4,7 @@ open Rdk
 open Rdk_test_support
 module L = Flow_sop.Lower
 module Edit = Sop.Edit_graph
-let flow = function Ok x->x|Error d->failwith(Flow.Diagnostic.to_string d)
+let flow = function Ok x->x|Error d->failwith(Diagnostic.to_string d)
 let raw = [|0.;-0.;1.5;Float.min_float /. 4.;-3.25e300;7.|]
 let plane k n = Array.init n (fun i->raw.((i+k) mod Array.length raw))
 let make () =
@@ -47,14 +47,14 @@ let () =
     let body = Printf.sprintf "(sop/with_planes src \"copy\" (sop/attr_planes src %S :owner %S) :owner %S)" name oname oname in
     List.iter (fun reference -> List.iter (fun (domains,grain) ->
       match cook ~reference ~domains ~grain body with
-      | Error d -> fail (Sop.Diagnostic.error_to_string d)
+      | Error d -> fail (Diagnostic.error_to_string d)
       | Ok out -> check (planes_of (storage owner "copy" out) = planes_of (storage owner name (Lazy.force src)) && planes_of (storage owner "copy" out) <> [])
           (Printf.sprintf "%s %s planes round trip changed storage" oname name))
       [1,97;4,1;4,4096]) [false;true]) ["f";"v2";"v3";"v4"]) owners;
   (* The cook-time width reaches the checker as a plain Int and a cooked branch can use it. *)
   (match cook "(sop/with_planes src \"w\" (sop/attr_planes src \"v3\") :owner \"point\")" with
    | Ok out -> check (planes_of (storage Attribute.Point "w" out) = planes_of (storage Attribute.Point "v3" (Lazy.force src))) "width 3 lost"
-   | Error d -> fail (Sop.Diagnostic.error_to_string d));
+   | Error d -> fail (Diagnostic.error_to_string d));
   (* Computed planes, a literal width, and canonical P. *)
   (match cook {|(let* [p (sop/attr_planes src "P" :owner "point")
       doubled {:width p.width :x (exact (map (fn [(v : float)] (* v 2.)) p.x)) :y p.y :z p.z :w p.w}]
@@ -62,11 +62,11 @@ let () =
    | Ok out -> let a = Geometry.positions out and b = Geometry.positions (Lazy.force src) in
        let a = Packed.Float3.Private.view a and b = Packed.Float3.Private.view b in
        check (Array.for_all2 (fun x y->x = 2. *. y) a.x b.x && a.y = b.y && a.z = b.z) "computed P planes"
-   | Error d -> fail (Sop.Diagnostic.error_to_string d));
+   | Error d -> fail (Diagnostic.error_to_string d));
   (* Refusals keep typed codes. *)
   let zeros = "(array/float 7)" in
   List.iter (fun (what, body, code) -> match cook body with
-    | Error (d:Sop.Diagnostic.error) -> check (d.code = code) (what ^ ": code " ^ d.code ^ ", expected " ^ code)
+    | Error (d:Diagnostic.t) -> check (d.code = code) (what ^ ": code " ^ d.code ^ ", expected " ^ code)
     | Ok _ -> fail (what ^ " was accepted"))
     ["int", {|(sop/with_planes src "x" (sop/attr_planes src "i" :owner "point") :owner "point")|}, "E_ATTR_TYPE";
      "missing", {|(sop/with_planes src "x" (sop/attr_planes src "nope" :owner "point") :owner "point")|}, "E_ATTR_TYPE";

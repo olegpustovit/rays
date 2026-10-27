@@ -31,13 +31,20 @@ let finish sink =
   | Error message -> V.fail "E_DRAW_RANGE" message
 
 (* The conversions below are drawing.ml's, rule for rule. *)
-let color = Operators.drawing_color
+let color = Flow.Op.drawing_color
 let rgba (c : Rays_math.Color.t) = Int32.of_int ((c.r lsl 24) lor (c.g lsl 16) lor (c.b lsl 8) lor c.a)
 let white = 0xffffffffl
 let ink v = match v with E.Vec3_array _ -> white | v -> rgba (color v)
+let valid_coordinate x = Float.is_finite x && x < float max_int && x >= float min_int
+let float_point v =
+  let x, y, _ = V.comps v in
+  if not (Float.is_finite x && Float.is_finite y)
+     || Float.abs x > 3.4028234663852886e38 || Float.abs y > 3.4028234663852886e38 then
+    V.fail "E_DRAW_RANGE" "A drawing coordinate must be finite and fit a 32-bit float.";
+  x, y
 let point v =
   let x, y, _ = V.comps v in
-  let int x = if not (Float.is_finite x) || x >= float max_int || x < float min_int
+  let int x = if not (valid_coordinate x)
     then V.fail "E_DRAW_RANGE" "A drawing coordinate must fit an integer." else int_of_float x in
   int x, int y
 let pair v = let x, y, _ = V.comps v in x, y
@@ -149,27 +156,30 @@ let path sink path args (values : E.value array) =
   let args = List.map (fun (k, i) -> k, values.(i)) args in
   let arg key = List.assoc key args in
   let opt key = Option.map (fun v -> rgba (color v)) (List.assoc_opt key args) in
-  let points () = let xs = arg "points" in List.init (V.array_length xs) (fun i -> point (V.array_get xs i)) in
+  let points () = let xs = arg "points" in List.init (V.array_length xs) (fun i ->
+    float_point (V.array_get xs i)) in
   match path with
   | C.Polygon -> let points = points () in
       geometry sink (Scene_command.Shape2.polygon points ~fill:(opt "fill") ~stroke:(opt "stroke"))
   | Polyline -> let points = points () in
       geometry sink [|Scene_command.Shape2.polyline points ~color:(ink (arg "color"))|]
   | Rounded_rect ->
-      let width, height = point (arg "size") in
-      let x, y = point (arg "at") in
-      let radius = max 0 (min (V.int_of (arg "radius")) (min (abs width) (abs height) / 2)) in
-      push sink (M.Push_transform {xx = 1.; xy = 0.; yx = 0.; yy = 1.; tx = float x; ty = float y});
+      let width, height = float_point (arg "size") in
+      let x, y = float_point (arg "at") in
+      let radius = V.num (arg "radius") in
+      push sink (M.Push_transform {xx = 1.; xy = 0.; yx = 0.; yy = 1.; tx = x; ty = y});
       geometry sink (Scene_command.Shape2.rounded_rect ~width ~height ~radius ~fill:(opt "fill") ~stroke:(opt "stroke"));
       push sink M.Pop_transform
 
 let compile : C.draw -> E.value array -> sink -> unit = function
   | C.Background c -> fun v sink ->
       let w, h = sink.size in
-      geometry sink (Scene_command.Shape2.polygon [0, 0; w, 0; w, h; 0, h] ~fill:(Some (rgba (color v.(c)))) ~stroke:None)
+      geometry sink (Scene_command.Shape2.polygon [0., 0.; float w, 0.; float w, float h; 0., float h] ~fill:(Some (rgba (color v.(c)))) ~stroke:None)
   | Point {at; ink = i} -> fun v sink ->
-      let x, y = point v.(at) in
-      geometry sink (Scene_command.Shape2.polygon [x, y; x+1, y; x+1, y+1; x, y+1] ~fill:(Some (ink v.(i))) ~stroke:None)
+      let x, y = float_point v.(at) in
+      geometry sink (Scene_command.Shape2.polygon
+        [x, y; x +. 1., y; x +. 1., y +. 1.; x, y +. 1.]
+        ~fill:(Some (ink v.(i))) ~stroke:None)
   | Mark {mark = kind; args} -> fun v sink -> mark sink ~batch:false kind args v
   | Batch {mark = kind; args} -> fun v sink -> mark sink ~batch:true kind args v
   | Points {positions; ink = i} -> fun v sink ->

@@ -145,7 +145,7 @@ let on_viewport ~factories ~catalog (doc : Document.t) payload expr name key =
   let* path = match List.assoc_opt key (viewports doc) with
     | Some path -> Ok path
     | None -> Error "That viewport is not part of the editor graph's layout" in
-  let* bound, node = Doc.panel_node ~factories doc path in
+  let* bound, node = Editor_document.Document_edit.panel_node ~factories doc path in
   let source = (fst bound.workspace).source in
   let shown = Option.bind (E.arg_text source node (E.Pos 0)) name_of in
   if payload.kind = "scene" then
@@ -217,7 +217,7 @@ let plan ~factories ~catalog (doc : Document.t) payload place =
       let what = Printf.sprintf "%s at line %d of the text" payload.value line in
       let inserted = insert_at text byte payload.value in
       let source = (fst doc.workspace).source in
-      let message (d : Flow.Diagnostic.t) = d.message in
+      let message (d : Diagnostic.t) = d.message in
       (match target with
        | Drafted -> Error "The text has an unapplied draft: apply or discard it first"
        | Whole -> Ok (Rewrite (inserted, what))
@@ -277,12 +277,12 @@ let put ~factories ~catalog doc payload place =
   let* edit = plan ~factories ~catalog doc payload place in
   match edit with
   | Edits (on, ops, what) ->
-      let* edited = Doc.syntax_batch ~factories on ops in
+      let* edited = Editor_document.Document_edit.syntax_batch ~factories on ops in
       Ok (edited, what)
   | Rewrite (text, what) ->
       let* edited = Result.map_error (function
-        | (d : Flow.Diagnostic.t) :: _ -> d.message | [] -> "The text does not check")
-        (Doc.text_edit ~factories doc text) in
+        | (d : Diagnostic.t) :: _ -> d.message | [] -> "The text does not check")
+        (Editor_document.Document_edit.text_edit ~factories doc text) in
       Ok (edited, what)
 
 (* The places a payload can be put, for the key route: the open graph, the scene, then each

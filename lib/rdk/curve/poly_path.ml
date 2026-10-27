@@ -22,7 +22,7 @@ let next_power_of_two value =
   !result
 
 let[@inline always] hash_pair a b =
-  let value = (a * 65_599) lxor (b * 31_337) in
+  let value = Hash.mix a (b * 31_337) in
   (value lxor (value lsr 16)) land max_int
 
 let remap_attribute ?cancel ?grain mapping attribute =

@@ -1,11 +1,11 @@
 module E = Flow.Eval
 module M = Scene_command.Marks
 module Buffers = Flow_ir.Core_exec.Buffers
-let ok = function Ok x -> x | Error d -> failwith (Flow.Diagnostic.to_string d)
+let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let checked body =
   let forms = ok (Flow.Syntax.parse ("(workspace w (graph g :context draw " ^ body ^ "))")) in
   match Flow.Workspace.check {Flow.Check.version=1;kinds=[]} forms with
-  | Some ws,[] -> ws | _,ds -> failwith (String.concat "; " (List.map Flow.Diagnostic.to_string ds))
+  | Some ws,[] -> ws | _,ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
 let pictures = [
   "(draw/background \"#14161c\")";
   "(draw/merge (draw/rect [1 2 0] [30 40 0]) (draw/rect [1 2 0] [3 4 0] :stroke \"#fff\") (draw/rect [0 0 0] [5 5 0] :fill \"#f00\" :stroke \"#00f\"))";
@@ -35,7 +35,7 @@ let errors = [
   "(let* [p (map (fn [i] [i 0 0]) (array/range 3)) c (map (fn [i] [0.5 0 0]) (array/range 2))] (draw/rects p [1 1 0] :fill c))", "E_DRAW_LENGTH";
   "(let* [p (map (fn [i] [i 0 0]) (array/range 3)) q (map (fn [i] [i 0 0]) (array/range 2))] (draw/lines p q))", "E_DRAW_LENGTH";
   "(draw/rect [0 0 0] [-1 1 0])", "E_DRAW_RANGE";
-  "(draw/point [1e30 0 0])", "E_DRAW_RANGE";
+  "(draw/point [1e40 0 0])", "E_DRAW_RANGE";
   "(draw/image (image/noise))", "E_IMAGE";
 ]
 let float x = Printf.sprintf "%h" x
@@ -49,7 +49,7 @@ let dump () =
     let program, root = Result.get_ok (Flow_ir.Core_draw.lower evaluation.plan (List.assoc "g" evaluation.results)) in
     let prepared = Flow_ir.Core_exec.prepare program in
     let buffers = Buffers.create () in
-    let live = {(Frame_input.at_time 0.25) with size = (200, 100)} in
+    let live = {(Input.at_time 0.25) with size = (200, 100)} in
     let marks = ok (Flow_ir.Core_exec.draw ?root prepared ~live ~size:(200, 100) ~buffers) in
     let attr show = function
       | M.Constant v -> "const " ^ show v
@@ -84,7 +84,7 @@ let dump () =
   List.iter (fun (body, code) ->
     let evaluation = ok (E.static (checked body)) in
     let program, root = Result.get_ok (Flow_ir.Core_draw.lower evaluation.plan (List.assoc "g" evaluation.results)) in
-    match Flow_ir.Core_exec.draw ?root (Flow_ir.Core_exec.prepare program) ~live:(Frame_input.at_time 0.)
+    match Flow_ir.Core_exec.draw ?root (Flow_ir.Core_exec.prepare program) ~live:(Input.at_time 0.)
             ~size:(10, 10) ~buffers:(Buffers.create ()) with
     | Error d -> assert (d.code = code); out "error %s: %s\n" d.code d.message
     | Ok _ -> failwith ("expected " ^ code ^ " for " ^ body)) errors;
@@ -96,13 +96,15 @@ let dump () =
 let device_marks body =
   let evaluation = ok (E.static (checked body)) in
   let program, root = Result.get_ok (Flow_ir.Core_draw.lower evaluation.plan (List.assoc "g" evaluation.results)) in
-  let live = Frame_input.at_time 0.25 in
+  let live = Input.at_time 0.25 in
   let offered = ref 0 in
   let device packed =
-    let count, width = match ok (Flow_ir.Packed.force packed ~live) with
+    let values=ok (Flow_ir.Packed.force_all packed ~live) |> Array.of_list in
+    incr offered;
+    Ok (Some (Array.map (fun value -> let count, width = match value with
       | E.Float_array xs -> Array.length xs, 1 | Vec2_array xs -> Array.length xs / 2, 2
       | Vec3_array xs -> Array.length xs / 3, 3 | _ -> failwith "a region is a packed array" in
-    incr offered; Ok (Some (!offered, count, width)) in
+      !offered, count, width) values)) in
   let marks = ok (Flow_ir.Core_exec.draw ?root ~device (Flow_ir.Core_exec.prepare program) ~live
     ~size:(200, 100) ~buffers:(Buffers.create ())) in
   !offered, marks
@@ -112,15 +114,15 @@ let devices () =
   let device : type a. int -> a M.attr -> bool = fun width -> function
     | M.Device {count = 3; width = w; _} -> w = width | _ -> false in
   (match device_marks (Printf.sprintf "(let* [%s %s] (draw/rects p [10 10 0] :fill c :stroke c))" p c) with
-   | 2, [|M.Mark_set {count = 3; kind = Rect {position; size = Constant _; fill; stroke; _}}|] ->
+   | 1, [|M.Mark_set {count = 3; kind = Rect {position; size = Constant _; fill; stroke; _}}|] ->
        assert (device 3 position && device 3 fill && device 3 stroke)
    | _ -> failwith "rect positions, fill and stroke are device buffers");
   (match device_marks (Printf.sprintf "(let* [%s %s r (map (fn [i] (+ i t)) (array/range 3))] (draw/circles p :radius r :fill c))" p c) with
-   | 3, [|M.Mark_set {kind = Circle {position; radius; fill; stroke = Constant 0l; _}; _}|] ->
+   | 1, [|M.Mark_set {kind = Circle {position; radius; fill; stroke = Constant 0l; _}; _}|] ->
        assert (device 3 position && device 1 radius && device 3 fill)
    | _ -> failwith "circle positions, radii and fill are device buffers");
   (match device_marks (Printf.sprintf "(let* [%s %s] (draw/lines p p :color c))" p c) with
-   | 2, [|M.Mark_set {kind = Line {position; end_; stroke; _}; _}|] ->
+   | 1, [|M.Mark_set {kind = Line {position; end_; stroke; _}; _}|] ->
        assert (device 3 position && device 3 end_ && device 3 stroke)
    | _ -> failwith "line ends and colour are device buffers");
   (* The frame reads the colours too (their count), so they stay a host buffer. *)
@@ -133,9 +135,9 @@ let devices () =
   let evaluation = ok (E.static (checked (Printf.sprintf
     "(let* [%s c (map (fn [i] [(/ i 4) t 0]) (array/range 2))] (draw/rects p [10 10 0] :fill c))" p))) in
   let program, root = Result.get_ok (Flow_ir.Core_draw.lower evaluation.plan (List.assoc "g" evaluation.results)) in
-  let live = Frame_input.at_time 0.25 in
+  let live = Input.at_time 0.25 in
   let device packed = match ok (Flow_ir.Packed.force packed ~live) with
-    | E.Vec3_array xs -> Ok (Some (1, Array.length xs / 3, 3)) | _ -> Ok None in
+    | E.Vec3_array xs -> Ok (Some [|(1, Array.length xs / 3, 3)|]) | _ -> Ok None in
   (match Flow_ir.Core_exec.draw ?root ~device (Flow_ir.Core_exec.prepare program) ~live ~size:(200, 100)
            ~buffers:(Buffers.create ()) with
    | Error d -> assert (d.code = "E_DRAW_LENGTH")
@@ -150,16 +152,16 @@ let nested_maps () =
     (let* [kept (filter (fn [i] (>= (int/mod (int/mul (int i) 3) 7) 1)) (array/range (array/count b)))] \
       (map (fn [i] (let* [p (array/nth b (int/div (int (array/nth kept (int/div (int i) 2))) 1)) k (int/mod (int/mul (int i) 7) 5)] \
         [(+ p.x (sin (* (* p.y 0.01) (+ d t)))) (+ p.y k) 0])) (array/range (* (array/count kept) 2)))))" in
-  let live = {(Frame_input.at_time 0.25) with size = (200, 100)} in
+  let live = {(Input.at_time 0.25) with size = (200, 100)} in
   (* the walker's points, summed in order as x + 1000 y: the same sum of the drawn buffer must match it *)
   let expected = match E.Private.force_reference (List.assoc "g" (ok (E.static (match
       Flow.Workspace.check {Flow.Check.version=1;kinds=[]} (ok (Flow.Syntax.parse
         ("(workspace w (graph g :context value (array/sum (map (fn [v] (+ v.x (* v.y 1000))) " ^ boxes ^ "))))"))) with
        | Some ws, [] -> ws
-       | _, ds -> failwith (String.concat "; " (List.map Flow.Diagnostic.to_string ds))))).results) ~live with
+       | _, ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))))).results) ~live with
     | Ok (E.Float f) -> f
     | Ok _ -> failwith "nested maps: the reference sum is not a float"
-    | Error d -> failwith (Flow.Diagnostic.to_string d) in
+    | Error d -> failwith (Diagnostic.to_string d) in
   let evaluation = ok (E.static (checked ("(let* [p " ^ boxes ^ "] (draw/points p))"))) in
   let program, root = Result.get_ok (Flow_ir.Core_draw.lower evaluation.plan (List.assoc "g" evaluation.results)) in
   let text = Format.asprintf "%a" Flow_ir.Core.pp program in
@@ -167,7 +169,7 @@ let nested_maps () =
     | Some j when j >= 6 && String.sub text (j - 6) 6 = "region" -> 1 + regions (j + 1)
     | Some j -> regions (j + 1) | None -> 0 in
   if regions 0 < 2 then failwith "nested maps: the fold's maps are not packed regions";
-  List.iter (fun domains -> Rays_math.Parallel.run ~domains (fun () ->
+  List.iter (fun domains -> Parallel.run ~domains (fun () ->
     let buffers = Buffers.create () in
     match ok (Flow_ir.Core_exec.draw ?root (Flow_ir.Core_exec.prepare program) ~live ~size:(200, 100) ~buffers) with
     | [| M.Mark_set {kind = Point {position = Buffer {id; width; _}; _}; count} |] ->
@@ -190,7 +192,7 @@ let remembered_loops () =
   let program, root = Result.get_ok (Flow_ir.Core_draw.lower evaluation.plan (List.assoc "g" evaluation.results)) in
   let remembered = Flow_ir.Core_exec.prepare ~remember_loops:true program in
   let points prepared t =
-    let buffers = Buffers.create () and live = {(Frame_input.at_time t) with size = (200, 100)} in
+    let buffers = Buffers.create () and live = {(Input.at_time t) with size = (200, 100)} in
     match ok (Flow_ir.Core_exec.draw ?root prepared ~live ~size:(200, 100) ~buffers) with
     | [| _; M.Mark_set {kind = Point {position = Buffer {id; _}; _}; _} |] -> Array.copy (Buffers.find buffers id)
     | _ -> failwith "remembered loops: a point and a point set expected" in
@@ -199,11 +201,111 @@ let remembered_loops () =
       failwith (Printf.sprintf "remembered loops: a cached frame at t=%g differs from a fresh one" t))
     [ 0.25; 0.5; 3.0; 0.25; 5.0 ]
 
+let grouping () =
+  let module C=Flow_ir.Core in
+  let lower body =
+    let e=ok(E.static(checked body))in
+    Result.get_ok(Flow_ir.Core_draw.lower e.plan(List.assoc "g" e.results))in
+  let body="(let* [a (+ t 2) b (+ t 4) \
+    p (map (fn [i] [(+ i a) i 0]) (array/range 4)) \
+    r (map (fn [i] (+ i b)) (array/range 4))] (draw/circles p :radius r))"in
+  let program,root=lower body in
+  let groups ?(approx=Flow.Workspace.Paths.empty) ?(legal=fun _->true) program =
+    snd(Flow_ir.Core_draw.device_groups ~approx program ~legal
+      ~width:(fun k->Some(Array.length program.C.regions.(k).outputs.(0))))in
+  assert(List.map(fun(g:Flow_ir.Core_draw.group)->List.length g.members)(groups program)=[2]);
+  let first=List.hd(groups program)in
+  let _,site,_=Flow_ir.Packed.site program.regions.(List.hd first.members)in
+  assert(List.length(groups ~approx:(Flow.Workspace.Paths.singleton site) program)=2);
+  assert(List.length(groups ~legal:(fun _->false) program)=2);
+  let count=ref 0 in
+  let barrier=List.concat_map(fun(s:C.statement)->match s.node with
+    |Invoke _->incr count;if !count=2 then [{s with node=Draw Pop};s]else[s]|_->[s])program.body in
+  assert(List.length(groups {program with body=barrier})=2);
+  let static,_=lower "(let* [p (map (fn [i] [(+ i t) i 0]) (array/range 4)) \
+    r (map (fn [i] (+ i 4)) (array/range 4))] (draw/circles p :radius r))"in
+  (* The static radius was already staged; it stays outside the live group. *)
+  assert(List.map(fun(g:Flow_ir.Core_draw.group)->List.length g.members)(groups static)=[1]);
+  let different,_=lower "(let* [p (map (fn [i] [(+ i t) i 0]) (array/range 4)) \
+    r (map (fn [i] (+ i t)) (array/range 3))] (draw/circles p :radius r))"in
+  assert(List.length(groups different)=2);
+  let live=Input.at_time 0.25 and offers=ref []in
+  let prepared=Flow_ir.Core_exec.prepare ~remember_loops:true program in
+  let draw ?device ()=Flow_ir.Core_exec.draw ?root ?device prepared ~live
+    ~size:(200,100)~buffers:(Buffers.create())in
+  let expected=ok(draw())in
+  List.iter(fun refuse->
+    offers:=[];
+    let device packed=
+      let outputs=List.length(ok(Flow_ir.Packed.force_all packed ~live))in
+      offers:=outputs:: !offers;
+      if refuse && outputs>1 then Error(Diagnostic.error ~code:"E_GPU" "injected fused refusal")else Ok None in
+    assert(ok(draw ~device())=expected);
+    assert(List.rev !offers=[2;1;1]))[false;true];
+  let device packed=match ok(Flow_ir.Packed.force_all packed ~live)with
+    |[E.Vec3_array positions;Float_array radii]->
+        assert(positions=[|2.25;0.;0.;3.25;1.;0.;4.25;2.;0.;5.25;3.;0.|]);
+        assert(radii=[|4.25;5.25;6.25;7.25|]);
+        Ok(Some[|(0,4,3);(1,4,1)|])
+    |_->failwith "two fused outputs in authored order"in
+  ignore(ok(draw ~device()));
+  let bad,root=lower "(let* [p (map (fn [i] [(pow (+ i t) 1000) i 0]) (array/range 4)) \
+    r (map (fn [i] (pow (+ i t) 1001)) (array/range 4))] (draw/circles p :radius r))"in
+  let prepared=Flow_ir.Core_exec.prepare bad in
+  let fail ?device()=Flow_ir.Core_exec.draw ?root ?device prepared ~live:(Input.at_time 0.)
+    ~size:(200,100)~buffers:(Buffers.create())in
+  let cpu=fail()in
+  assert(Result.is_error cpu);
+  assert(fail ~device:(fun _->Ok None)()=cpu)
+
+let device_inputs () =
+  let module G=Flow_ir.Gpu in
+  let seen=ref [] and serial=ref 0 in
+  let backend:G.backend={cost=(fun ~fast:_ _ ~count:_->Some 0.);prepare=(fun ~fast:_ packed->
+    let width=Array.length(Flow_ir.Packed.Private.view packed).outputs.(0)in
+    Ok{run=(fun inputs->
+      seen:=inputs.arrays:: !seen;incr serial;
+      Ok{identity=1;output=0;count=inputs.count;width;stamp=Int64.of_int !serial;gpu_seconds=None});
+      readback=(fun _->assert false)})}in
+  let gpu={G.backend=Some backend;fast=true;policy=G.Qualification}in
+  let display=Flow_ir.Executor.region_display ~gpu ()in
+  let prepared count=
+    let body=Printf.sprintf "(draw/circles (map (fn [i] [(+ i t) i 0]) (array/range %s)) \
+      :radius (map (fn [i] (+ i t)) (array/range %s)))"count count in
+    let e=ok(E.static(checked body))in
+    let program,root=Result.get_ok(Flow_ir.Core_draw.lower e.plan(List.assoc "g" e.results))in
+    Flow_ir.Core_exec.prepare ~fast:true program,root in
+  let draw (program,root) time=
+    let live=Input.at_time time in
+    let device packed=Result.map(Option.map(fun(v:G.value)->
+      Array.map(fun output->v.identity,v.count,Array.length output)
+        (Flow_ir.Packed.Private.view packed).outputs))(display packed ~live)in
+    ignore(ok(Flow_ir.Core_exec.draw ?root ~device program ~live
+      ~size:(200,100)~buffers:(Buffers.create())))in
+      let fixed=prepared "1024"in
+      draw fixed 0.25;draw fixed 0.5;
+      (match !seen with
+       |second::first::[]->
+           assert(Array.length first>0 && Array.length second>0);
+           assert(Array.for_all(fun values->values==first.(0))first);
+           assert(Array.for_all(fun values->values==first.(0))second)
+       |_->failwith "one fused dispatch each frame");
+      seen:=[];
+      let dynamic=prepared "(+ 1024 (int t))"in
+      draw dynamic 1.;draw dynamic 2.;
+      let counts=List.map(fun arrays->Array.length arrays.(0))!seen in
+      assert(List.sort_uniq Int.compare counts=[1025;1026]);
+      assert(List.hd counts=1026 && List.hd(List.rev counts)=1025)
+
 let () =
-  remembered_loops ();
-  nested_maps ();
-  devices ();
   let actual = dump () in
   if Array.length Sys.argv = 2 && Sys.argv.(1) = "--print" then print_string actual
-  else if actual <> In_channel.with_open_bin "core_marks.expected" In_channel.input_all
-  then failwith ("Core marks changed:\n" ^ actual)
+  else begin
+    remembered_loops ();
+    nested_maps ();
+    devices ();
+    grouping ();
+    device_inputs ();
+    if actual <> In_channel.with_open_bin "core_marks.expected" In_channel.input_all
+    then failwith ("Core marks changed:\n" ^ actual)
+  end

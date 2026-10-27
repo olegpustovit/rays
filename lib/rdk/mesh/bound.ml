@@ -9,7 +9,7 @@ type deform_selection = Deform.selection =
 let transform = Transform_ops.transform
 let uv_sphere = Uv_sphere.run
 
-let finite_vec3 value = Float.is_finite value.Vec3.x && Float.is_finite value.y && Float.is_finite value.z
+let finite_vec3 value = Float.is_finite value.Rays_math.Vec3.x && Float.is_finite value.y && Float.is_finite value.z
 
 type bound_shape =
   | Bound_box of { divisions : int * int * int }
@@ -104,16 +104,16 @@ let selected_bounds ?cancel ~grain ~operation selection geometry =
               && Float.is_finite cz) then Error
               ("Rdk.Bound." ^ operation ^ ": selected bounds overflow")
           else Ok Analysis.{
-            min = Vec3.create !xmin !ymin !zmin;
-            max = Vec3.create !xmax !ymax !zmax;
-            center = Vec3.create cx cy cz;
-            size = Vec3.create sx sy sz;
+            min = Rays_math.Vec3.create !xmin !ymin !zmin;
+            max = Rays_math.Vec3.create !xmax !ymax !zmax;
+            center = Rays_math.Vec3.create cx cy cz;
+            size = Rays_math.Vec3.create sx sy sz;
           }
       end
 
 let divided_box ?cancel ~minimum ~maximum ~divisions () =
   let dx, dy, dz = divisions in
-  let sx = maximum.Vec3.x -. minimum.Vec3.x
+  let sx = maximum.Rays_math.Vec3.x -. minimum.Rays_math.Vec3.x
   and sy = maximum.y -. minimum.y and sz = maximum.z -. minimum.z in
   let faces = [|
     { u_divisions = dy; v_divisions = dz;
@@ -224,11 +224,11 @@ let divided_box ?cancel ~minimum ~maximum ~divisions () =
 
 let bound ?cancel ?(grain = 16_384) ?selection
     ?(shape = Bound_box { divisions = 1, 1, 1 })
-    ?(lower_padding = Vec3.zero) ?(upper_padding = Vec3.zero) ?bounds_group
+    ?(lower_padding = Rays_math.Vec3.zero) ?(upper_padding = Rays_math.Vec3.zero) ?bounds_group
     ?center_attribute ?radii_attribute geometry =
   Error.guard ~operation:"bound" ~code:"invalid_geometry" @@ fun () ->
   if grain <= 0 then invalid_arg "Rdk.Bound.bound: grain must be positive";
-  let valid_padding value = finite_vec3 value && value.Vec3.x >= 0.
+  let valid_padding value = finite_vec3 value && value.Rays_math.Vec3.x >= 0.
       && value.y >= 0. && value.z >= 0. in
   let output_names = List.filter_map Fun.id [center_attribute; radii_attribute] in
   if not (valid_padding lower_padding && valid_padding upper_padding) then
@@ -252,17 +252,17 @@ let bound ?cancel ?(grain = 16_384) ?selection
       (fun source_bounds ->
         let create, center, radii = match shape with
           | Bound_box { divisions } ->
-              let minimum = Vec3.create
+              let minimum = Rays_math.Vec3.create
                   (source_bounds.min.x -. lower_padding.x)
                   (source_bounds.min.y -. lower_padding.y)
                   (source_bounds.min.z -. lower_padding.z)
-              and maximum = Vec3.create
+              and maximum = Rays_math.Vec3.create
                   (source_bounds.max.x +. upper_padding.x)
                   (source_bounds.max.y +. upper_padding.y)
                   (source_bounds.max.z +. upper_padding.z) in
-              let size = Vec3.sub maximum minimum in
-              let center = Vec3.add minimum (Vec3.scale size 0.5)
-              and radii = Vec3.scale size 0.5 in
+              let size = Rays_math.Vec3.sub maximum minimum in
+              let center = Rays_math.Vec3.add minimum (Rays_math.Vec3.scale size 0.5)
+              and radii = Rays_math.Vec3.scale size 0.5 in
               (fun () -> if not (finite_vec3 size && finite_vec3 center)
                     || size.x <= 0. || size.y <= 0. || size.z <= 0. then
                     Error "Rdk.Bound.bound: box output must have finite positive extent on every axis"
@@ -272,7 +272,7 @@ let bound ?cancel ?(grain = 16_384) ?selection
               let base_radius = Float.hypot (source_bounds.size.x *. 0.5)
                   (Float.hypot (source_bounds.size.y *. 0.5)
                     (source_bounds.size.z *. 0.5)) in
-              let center = Vec3.create
+              let center = Rays_math.Vec3.create
                   (source_bounds.center.x
                     +. ((upper_padding.x -. lower_padding.x) *. 0.5))
                   (source_bounds.center.y
@@ -281,7 +281,7 @@ let bound ?cancel ?(grain = 16_384) ?selection
                     +. ((upper_padding.z -. lower_padding.z) *. 0.5)) in
               let radius lower upper = Float.max minimum_radius
                   (base_radius +. ((lower +. upper) *. 0.5)) in
-              let radii = Vec3.create
+              let radii = Rays_math.Vec3.create
                   (radius lower_padding.x upper_padding.x)
                   (radius lower_padding.y upper_padding.y)
                   (radius lower_padding.z upper_padding.z) in
@@ -290,12 +290,12 @@ let bound ?cancel ?(grain = 16_384) ?selection
                     || radii.z <= 0. then
                     Error "Rdk.Bound.bound: sphere output radii must be finite and positive"
                   else Result.map (transform ~grain
-                      (Mat4.mul (Mat4.translation center) (Mat4.scaling radii)))
+                      (Rays_math.Mat4.mul (Rays_math.Mat4.translation center) (Rays_math.Mat4.scaling radii)))
                       (Error.unguard (uv_sphere ?cancel ~grain ~segments ~rings ~radius:1. ()))),
               center, radii in
         Result.bind (create ()) (fun output ->
           let detail_float3 name value output =
-            let values = Packed.Float3.Private.of_owned_exn ~x:[|value.Vec3.x|]
+            let values = Packed.Float3.Private.of_owned_exn ~x:[|value.Rays_math.Vec3.x|]
                 ~y:[|value.y|] ~z:[|value.z|] in
             let attribute = Attribute.create_owned ~name ~owner:Attribute.Detail
                 (Attribute.Float3 values) |> Support.get_ok in

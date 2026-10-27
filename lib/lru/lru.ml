@@ -129,3 +129,58 @@ module Make (K : Hashtbl.HashedType) = struct
   let rec clear t =
     if Array.length t.oldest > 0 then begin drop t t.oldest.(0); clear t end
 end
+
+module Identity_list = struct
+  type ('key, 'value) t = {
+    capacity : int;
+    equal : 'key -> 'key -> bool;
+    release : 'key -> 'value -> unit;
+    mutable entries : ('key * 'value) list;
+  }
+
+  let create ?(release = fun _ _ -> ()) ~equal capacity =
+    {capacity = max 0 capacity; equal; release; entries = []}
+
+  let split equal key entries =
+    let rec go before = function
+      | [] -> None
+      | (candidate, _ as entry) :: rest ->
+          if equal key candidate then Some (entry, List.rev_append before rest)
+          else go (entry :: before) rest in
+    go [] entries
+
+  let rec peek_entries equal key = function
+    | [] -> None
+    | (candidate, value) :: rest ->
+        if equal key candidate then Some value else peek_entries equal key rest
+
+  let peek t key = peek_entries t.equal key t.entries
+
+  let find t key = match split t.equal key t.entries with
+    | None -> None
+    | Some ((_, value as entry), rest) -> t.entries <- entry :: rest; Some value
+
+  let remove t key = match split t.equal key t.entries with
+    | None -> ()
+    | Some ((old_key, value), rest) -> t.entries <- rest; t.release old_key value
+
+  let add t key value =
+    remove t key;
+    let entries = (key, value) :: t.entries in
+    t.entries <- List.take t.capacity entries;
+    List.iter (fun (old_key, old_value) -> t.release old_key old_value)
+      (List.drop t.capacity entries)
+
+  let head t = match t.entries with [] -> None | entry :: _ -> Some entry
+  let copy ~release t = {t with release}
+  let iter t f = List.iter (fun (key, value) -> f key value) (List.rev t.entries)
+  let filter t keep =
+    let rec loop kept = function
+      | [] -> t.entries <- List.rev kept
+      | (key, value as entry) :: rest ->
+          if keep key value then loop (entry :: kept) rest
+          else (t.release key value; loop kept rest) in
+    loop [] t.entries
+  let length t = List.length t.entries
+  let clear t = List.iter (fun (key, value) -> t.release key value) t.entries; t.entries <- []
+end

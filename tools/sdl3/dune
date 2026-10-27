@@ -1,9 +1,4 @@
 (executable
- (name generate)
- (modules generate generator_spec)
- (libraries sdl3_lock unix))
-
-(executable
  (name bump)
  (modules bump)
  (libraries sdl3_lock unix))

@@ -20,8 +20,8 @@ let line ?cancel ?(grain = 16_384) ?(kind = Line_curve) ?(points = 2)
   else if points < minimum then Error (Printf.sprintf
       "Rdk.Line_geometry.line: %s output requires at least %d points"
       (match kind with Line_curve -> "curve" | Line_points -> "point") minimum)
-  else if not (Float.is_finite origin.Vec3.x && Float.is_finite origin.y && Float.is_finite origin.z
-      && Float.is_finite direction.Vec3.x && Float.is_finite direction.y && Float.is_finite direction.z
+  else if not (Float.is_finite origin.Rays_math.Vec3.x && Float.is_finite origin.y && Float.is_finite origin.z
+      && Float.is_finite direction.Rays_math.Vec3.x && Float.is_finite direction.y && Float.is_finite direction.z
       && Float.is_finite length && length >= 0.) then
     Error "Rdk.Line_geometry.line: origin/direction must be finite and length finite and non-negative"
   else

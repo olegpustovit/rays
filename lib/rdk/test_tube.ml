@@ -226,36 +226,36 @@ let check_frustum_orientation_and_rotation () =
       |> Analysis.bounds |> Option.get in
   let x = bounds Parametric_generators.Tube_x and y = bounds Parametric_generators.Tube_y
   and z = bounds Parametric_generators.Tube_z
-  and custom = bounds (Parametric_generators.Tube_axis (Vec3.create 0. max_float 0.)) in
+  and custom = bounds (Parametric_generators.Tube_axis (Rays_math.Vec3.create 0. max_float 0.)) in
   check (near x.size.x 6. && near x.size.y 4. && near x.size.z 4.
       && near y.size.x 4. && near y.size.y 6. && near y.size.z 4.
       && near z.size.x 4. && near z.size.y 4. && near z.size.z 6.
       && near custom.size.x y.size.x && near custom.size.y y.size.y
       && near custom.size.z y.size.z)
     "Tube orientation bounds";
-  let rotation = Vec3.create 0.3 0.5 0.7 in
+  let rotation = Rays_math.Vec3.create 0.3 0.5 0.7 in
   let first order = make ~connectivity:Parametric_generators.Tube_points ~rotation
-      ~rotation_order:order ~center:(Vec3.create 3. (-2.) 5.)
+      ~rotation_order:order ~center:(Rays_math.Vec3.create 3. (-2.) 5.)
       ~radius_scale:2. ~top_radius:1. ~bottom_radius:1. ~height:6.
       ~rows:2 ~columns:8 () |> positions
-      |> fun values -> Vec3.create values.x.(0) values.y.(0) values.z.(0) in
-  let source = Vec3.create 2. (-3.) 0. in
+      |> fun values -> Rays_math.Vec3.create values.x.(0) values.y.(0) values.z.(0) in
+  let source = Rays_math.Vec3.create 2. (-3.) 0. in
   let cases = [
-    Parametric_generators.Tube_xyz, Mat4.mul (Mat4.rotation_z rotation.z)
-      (Mat4.mul (Mat4.rotation_y rotation.y) (Mat4.rotation_x rotation.x));
-    Parametric_generators.Tube_xzy, Mat4.mul (Mat4.rotation_y rotation.y)
-      (Mat4.mul (Mat4.rotation_z rotation.z) (Mat4.rotation_x rotation.x));
-    Parametric_generators.Tube_yxz, Mat4.mul (Mat4.rotation_z rotation.z)
-      (Mat4.mul (Mat4.rotation_x rotation.x) (Mat4.rotation_y rotation.y));
-    Parametric_generators.Tube_yzx, Mat4.mul (Mat4.rotation_x rotation.x)
-      (Mat4.mul (Mat4.rotation_z rotation.z) (Mat4.rotation_y rotation.y));
-    Parametric_generators.Tube_zxy, Mat4.mul (Mat4.rotation_y rotation.y)
-      (Mat4.mul (Mat4.rotation_x rotation.x) (Mat4.rotation_z rotation.z));
-    Parametric_generators.Tube_zyx, Mat4.mul (Mat4.rotation_x rotation.x)
-      (Mat4.mul (Mat4.rotation_y rotation.y) (Mat4.rotation_z rotation.z)) ] in
+    Parametric_generators.Tube_xyz, Rays_math.Mat4.mul (Rays_math.Mat4.rotation_z rotation.z)
+      (Rays_math.Mat4.mul (Rays_math.Mat4.rotation_y rotation.y) (Rays_math.Mat4.rotation_x rotation.x));
+    Parametric_generators.Tube_xzy, Rays_math.Mat4.mul (Rays_math.Mat4.rotation_y rotation.y)
+      (Rays_math.Mat4.mul (Rays_math.Mat4.rotation_z rotation.z) (Rays_math.Mat4.rotation_x rotation.x));
+    Parametric_generators.Tube_yxz, Rays_math.Mat4.mul (Rays_math.Mat4.rotation_z rotation.z)
+      (Rays_math.Mat4.mul (Rays_math.Mat4.rotation_x rotation.x) (Rays_math.Mat4.rotation_y rotation.y));
+    Parametric_generators.Tube_yzx, Rays_math.Mat4.mul (Rays_math.Mat4.rotation_x rotation.x)
+      (Rays_math.Mat4.mul (Rays_math.Mat4.rotation_z rotation.z) (Rays_math.Mat4.rotation_y rotation.y));
+    Parametric_generators.Tube_zxy, Rays_math.Mat4.mul (Rays_math.Mat4.rotation_y rotation.y)
+      (Rays_math.Mat4.mul (Rays_math.Mat4.rotation_x rotation.x) (Rays_math.Mat4.rotation_z rotation.z));
+    Parametric_generators.Tube_zyx, Rays_math.Mat4.mul (Rays_math.Mat4.rotation_x rotation.x)
+      (Rays_math.Mat4.mul (Rays_math.Mat4.rotation_y rotation.y) (Rays_math.Mat4.rotation_z rotation.z)) ] in
   List.iter (fun (order, matrix) ->
-    let expected = Mat4.transform_point matrix source
-        |> fun value -> Vec3.add value (Vec3.create 3. (-2.) 5.) in
+    let expected = Rays_math.Mat4.transform_point matrix source
+        |> fun value -> Rays_math.Vec3.add value (Rays_math.Vec3.create 3. (-2.) 5.) in
     let actual = first order in
     check (near actual.x expected.x && near actual.y expected.y
         && near actual.z expected.z) "Tube Euler rotation order") cases
@@ -275,11 +275,11 @@ let check_validation () =
   expect_code "invalid_parameter" (run ~radius_scale:0. ());
   expect_code "invalid_parameter" (run ~height:Float.nan ());
   expect_code "invalid_parameter"
-    (run ~center:(Vec3.create max_float 0. 0.) ~bottom_radius:max_float ());
+    (run ~center:(Rays_math.Vec3.create max_float 0. 0.) ~bottom_radius:max_float ());
   expect_code "invalid_parameter"
-    (run ~rotation:(Vec3.create Float.infinity 0. 0.) ());
+    (run ~rotation:(Rays_math.Vec3.create Float.infinity 0. 0.) ());
   expect_code "invalid_parameter"
-    (run ~orientation:(Parametric_generators.Tube_axis Vec3.zero) ());
+    (run ~orientation:(Parametric_generators.Tube_axis Rays_math.Vec3.zero) ());
   expect_code "invalid_parameter" (run ~uv_attribute:"N" ());
   expect_code "invalid_parameter" (run ~cap_group:"" ~end_caps:true ());
   expect_code "invalid_parameter" (run ~cap_group:"caps" ());
@@ -302,9 +302,9 @@ let check_parallel_exact () =
     (fun () -> Parametric_generators.tube ~grain:1024
       ~connectivity:Parametric_generators.Tube_alternating_triangles ~end_caps:true
       ~consolidate_cap_points:false ~normals:Parametric_generators.Tube_vertex_normals
-      ~orientation:(Parametric_generators.Tube_axis (Vec3.create 1. 2. 3.))
-      ~center:(Vec3.create 3. (-2.) 5.)
-      ~rotation:(Vec3.create 0.3 0.5 0.7) ~rotation_order:Parametric_generators.Tube_yzx
+      ~orientation:(Parametric_generators.Tube_axis (Rays_math.Vec3.create 1. 2. 3.))
+      ~center:(Rays_math.Vec3.create 3. (-2.) 5.)
+      ~rotation:(Rays_math.Vec3.create 0.3 0.5 0.7) ~rotation_order:Parametric_generators.Tube_yzx
       ~radius_scale:1.2 ~uv_attribute:"uv" ~cap_group:"caps"
       ~rows:256 ~columns:128 ~top_radius:0. ~bottom_radius:3. ~height:5. ());
     (fun () -> Parametric_generators.tube ~grain:1024

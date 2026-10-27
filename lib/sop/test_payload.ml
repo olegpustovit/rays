@@ -15,7 +15,7 @@ let () =
     let node = Node.Private.make ~operation:"image/conversion-test" ~version:1
       ~parameters:"" ~cook_mode:Node.Generator ~dependencies:Context.Dependencies.static ~inputs:[||]
       (fun ~node_id:_ context _ -> Result.map (fun image -> Node.Private.{
-        payload=Payload.Image image;diagnostics=[];instances=None})
+        payload=Payload.Image image;instances=None})
         (Image.Private.of_vec4 ~context ~width:257 ~height:131 rgba)) in
     let session = session 0 in
     Fun.protect ~finally:(fun () -> Session.close session) (fun () ->
@@ -40,7 +40,13 @@ let () =
    | Error d -> assert (d.code="E_CANCELLED") | Ok _ -> assert false);
   List.iter (fun (width,height,rgba) -> assert (Result.is_error (Image.create ~width ~height ~rgba)))
     [0,1,[||];max_int,2,[||];1,1,[|nan;0.;0.;1.|];1,1,[|0.;0.;0.;2.|];1,1,[||]];
-  let node = Image_nodes.noise ~width:32 ~height:24 ~frequency:0.12 ~seed:31 () in
+  let noise values =
+    let node = Edit_graph.instantiate Image_nodes.noise_factory [] |> Result.get_ok in
+    Node.apply_parameters node values |> Result.get_ok |> fst in
+  assert ((List.find (fun (field : Param.field_view) -> field.name = "width")
+    (Node.parameter_fields (noise ["width", Param.Int_value 0]))).current = Param.Int_value 1);
+  let node = noise ["width", Param.Int_value 32; "height", Param.Int_value 24;
+      "frequency", Param.Float_value 0.12; "seed", Param.Int_value 31] in
   let one = session 65536 and eight = session 65536 in
   Fun.protect ~finally:(fun () -> Session.close one; Session.close eight) (fun () ->
     let first = ok (Session.cook one ~context:(context 1) node) in
@@ -51,11 +57,13 @@ let () =
     let second = ok (Session.cook one ~context:(context 1) node) in
     assert (second.payload == first.payload);
     assert ((Session.stats one).hits = 1 && (Session.stats one).cooks = 1);
-    ignore (ok (Session.cook one ~context:(context 1) (Image_nodes.noise ~width:8 ~height:4 ())));
+    ignore (ok (Session.cook one ~context:(context 1)
+      (noise ["width", Param.Int_value 8; "height", Param.Int_value 4])));
     assert ((Session.stats one).retained_entries = 1 && (Session.stats one).evictions = 1);
     (* CLOCK protects the just-hit image once, dropping the newest entry. *)
     assert ((Session.stats one).retained_payload_bytes = Image.payload_bytes image);
-    ignore (ok (Session.cook one ~context:(context 1) (Image_nodes.noise ~width:4 ~height:4 ())));
+    ignore (ok (Session.cook one ~context:(context 1)
+      (noise ["width", Param.Int_value 4; "height", Param.Int_value 4])));
     assert ((Session.stats one).retained_payload_bytes = 4*4*4*8);
     (match Session.cook one ~context:(context 1) (Lisp_sop.node ~with_:["node", (node)] {|(sop/transform (sop/ext_node))|}) with
      | Error error -> assert (error.code = "E_PAYLOAD") | Ok _ -> assert false));
@@ -65,11 +73,10 @@ let () =
     assert ((Session.stats tiny).retained_entries = 0 && (Session.stats tiny).retained_payload_bytes = 0));
   let image_input = Node.Private.make ~operation:"image/instances-test" ~version:1
     ~parameters:"" ~cook_mode:Node.Generator ~dependencies:Context.Dependencies.static ~inputs:[||]
-    (fun ~node_id:_ _ _ -> Ok Node.Private.{payload=Payload.Image image; diagnostics=[];
-      instances=Some [|Rays_math.Mat4.identity|]}) in
+    (fun ~node_id:_ _ _ -> Ok Node.Private.{payload=Payload.Image image;       instances=Some [|Rays_math.Mat4.identity|]}) in
   let passthrough = Node.Private.make ~operation:"image/pass-test" ~version:1
     ~parameters:"" ~cook_mode:Node.Generic ~dependencies:Context.Dependencies.static ~inputs:[|image_input|]
-    (fun ~node_id:_ _ inputs -> Ok Node.Private.{payload=inputs.(0); diagnostics=[]; instances=None}) in
+    (fun ~node_id:_ _ inputs -> Ok Node.Private.{payload=inputs.(0); instances=None}) in
   let passing = session 65536 in
   Fun.protect ~finally:(fun () -> Session.close passing) (fun () ->
     let output = ok (Session.cook passing ~context:(context 1) passthrough) in

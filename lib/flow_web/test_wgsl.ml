@@ -1,7 +1,7 @@
 (* Goldens for the WGSL printer. Regenerate with [test_wgsl.exe --write-goldens]
    from lib/flow_web. [test_wgsl.exe --write-kernel-table DIR] writes DIR/kernels.json, the kernel table
-   tools/web/runtime/gpu.js loads (format: its header); tools/web/test/gpu_check.mjs compiles the goldens for
-   real in Chrome (plan P6.3, alias qualification-web). *)
+   lib/web_export/runtime/gpu.js loads (format: its header); tools/web/test/gpu_check.mjs compiles the goldens for
+   real in Chrome (alias qualification-web). *)
 let json_string s =
   let b = Buffer.create (String.length s + 2) in
   Buffer.add_char b '"';
@@ -40,7 +40,7 @@ let () =
         let assignment=Printf.sprintf "    r%d ="slot in
         let rec check=function
           |line::next::_ when String.starts_with ~prefix:assignment line->
-              assert(next=Printf.sprintf "    if (!wfinite(r%d)) { atomicStore(&status, 1u); }"slot)
+              assert(next=Printf.sprintf "    if (!wfinite(r%d)) { atomicOr(&status, 1u); }"slot)
           |_::rest->check rest|[]->assert false in check lines
     |_->())view.code;
   assert !guarded;
@@ -82,27 +82,63 @@ let () =
     "gather", "(let* [table (map (fn [i] [i (* i 2.) (- 0. i)]) (array/range (int/add 64 (frame/index))))] (map (fn [x] (let* [p (array/nth table (int/mod (int x) 64))] (+ (+ p.x (* p.y 0.5)) (+ p.z t)))) (array/range (int/add 4097 (frame/index)))))";
     "seed_mod", "(map (fn [x] (/ (mod (int/and (+ (int/mul (+ (int x) 1) 1103515245) 12345) 4611686018427387903) 360000) 1000)) (array/range (int/add 4097 (frame/index))))";
     "noise_hash", "(map (fn [x] (+ (noise3 [(* x 0.37) t 0.0] :seed 451) (float (int/and (int/add (int/mul (int x) 1103515245) 12345) 65535)))) (array/range (int/add 4097 (frame/index))))"] in
+  let error_cases = List.map(fun(name,source)->name,Test_program.compile source)[
+    "error_shift_selected", "(map (fn [(x : int)] (if (> (+ (float x) t) 0.) (float (int/shr x (int/add 63 (int/mod (frame/index) 1)))) (float x))) (array/range 16 :type int))";
+    "error_shift_untaken", "(map (fn [(x : int)] (if (< (+ (float x) t) 0.) (float (int/shr x (int/add 63 (int/mod (frame/index) 1)))) (float x))) (array/range 16 :type int))";
+    "error_negative_shift_selected", "(map (fn [(x : int)] (if (> (+ (float x) t) 0.) (float (int/shr x (int/sub (frame/index) (int/add (frame/index) 1)))) (float x))) (array/range 16 :type int))";
+    "error_negative_shift_untaken", "(map (fn [(x : int)] (if (< (+ (float x) t) 0.) (float (int/shr x (int/sub (frame/index) (int/add (frame/index) 1)))) (float x))) (array/range 16 :type int))";
+    "error_div_selected", "(map (fn [(x : int)] (if (> (+ (float x) t) 0.) (float (int/div x (int/sub (frame/index) (frame/index)))) (float x))) (array/range 16 :type int))";
+    "error_div_untaken", "(map (fn [(x : int)] (if (< (+ (float x) t) 0.) (float (int/div x (int/sub (frame/index) (frame/index)))) (float x))) (array/range 16 :type int))";
+    "error_mod_selected", "(map (fn [(x : int)] (if (> (+ (float x) t) 0.) (float (int/mod x (int/sub (frame/index) (frame/index)))) (float x))) (array/range 16 :type int))";
+    "error_mod_untaken", "(map (fn [(x : int)] (if (< (+ (float x) t) 0.) (float (int/mod x (int/sub (frame/index) (frame/index)))) (float x))) (array/range 16 :type int))"] in
   (match Array.to_list Sys.argv with
    | [_; "--write-fast-table"; dir] ->
-       let live = {(Frame_input.at_time 1.) with frame = 3} in
+       let live = {(Input.at_time 1.) with frame = 3} in
        let floats a = "[" ^ String.concat "," (List.map (Printf.sprintf "%.9g") (Array.to_list a)) ^ "]" in
-       let cases = List.map (fun (name, source) ->
-         let program = Test_program.compile source in
+       let programs=List.map(fun(name,source)->name,Test_program.compile source)fast_cases
+         @ Test_program.carried_fixtures 4096 in
+       let encode_input (name,program)=
          let w = Test_program.ok (Flow_web.Wgsl.kernel_fast program) in
-         let inputs = Test_program.ok (Flow_ir.Packed.Private.prepare ~fast:true program ~live) in
+         let inputs : Flow_ir.Packed.Private.inputs =
+           Test_program.ok (Flow_ir.Packed.Private.prepare ~fast:true program ~live) in
+         name, w, inputs in
+       let cases = List.map (fun (name,w,(inputs : Flow_ir.Packed.Private.inputs)) ->
+         let count=inputs.Flow_ir.Packed.Private.count
+         and arrays=inputs.Flow_ir.Packed.Private.arrays
+         and uniforms=inputs.Flow_ir.Packed.Private.uniforms
+         and tables=inputs.Flow_ir.Packed.Private.tables
+         and frame=inputs.Flow_ir.Packed.Private.frame in
+         let program=List.assoc name programs in
          let expected = match Test_program.ok (Flow_ir.Packed.force_all program ~live) with
            | [Flow.Eval.Int_array a] -> Array.map float a
            | [Flow.Eval.Float_array a | Vec2_array a | Vec3_array a | Vec4_array a] -> a
            | _ -> failwith (name ^ ": one packed output expected") in
          Flow_web.Kernel_table.entry ~id:name w,
          Printf.sprintf "%s:{\"count\":%d,\"inputs\":[%s],\"uniforms\":[%s],\"tables\":[%s],\"frame\":%s,\"expected\":%s}"
-           (json_string name) inputs.count (String.concat "," (Array.to_list (Array.map floats inputs.arrays)))
-           (String.concat "," (Array.to_list (Array.map floats inputs.uniforms)))
-           (String.concat "," (Array.to_list (Array.map floats inputs.tables))) (floats inputs.frame) (floats expected)) fast_cases in
+           (json_string name) count (String.concat "," (Array.to_list (Array.map floats arrays)))
+           (String.concat "," (Array.to_list (Array.map floats uniforms)))
+           (String.concat "," (Array.to_list (Array.map floats tables))) (floats frame) (floats expected))
+         (List.map encode_input programs) in
+       let errors=List.map(fun(name,program)->
+         let w=Test_program.ok(Flow_web.Wgsl.kernel_fast program)in
+         let inputs : Flow_ir.Packed.Private.inputs =
+           Test_program.ok(Flow_ir.Packed.Private.prepare ~fast:true program ~live)in
+         let count=inputs.Flow_ir.Packed.Private.count
+         and arrays=inputs.Flow_ir.Packed.Private.arrays
+         and uniforms=inputs.Flow_ir.Packed.Private.uniforms
+         and tables=inputs.Flow_ir.Packed.Private.tables
+         and frame=inputs.Flow_ir.Packed.Private.frame in
+         Flow_web.Kernel_table.entry ~id:name w,
+         Printf.sprintf "%s:{\"count\":%d,\"inputs\":[%s],\"uniforms\":[%s],\"tables\":[%s],\"frame\":%s}"
+           (json_string name) count (String.concat "," (Array.to_list (Array.map floats arrays)))
+           (String.concat "," (Array.to_list (Array.map floats uniforms)))
+           (String.concat "," (Array.to_list (Array.map floats tables))) (floats frame)) error_cases in
        Out_channel.with_open_bin (Filename.concat dir "kernels.json") (fun c ->
-         output_string c (Flow_web.Kernel_table.table (List.map fst cases)));
+         output_string c (Flow_web.Kernel_table.table (List.map fst cases @ List.map fst errors)));
        Out_channel.with_open_bin (Filename.concat dir "expected.json") (fun c ->
          output_string c ("{" ^ String.concat ",\n" (List.map snd cases) ^ "}\n"));
+       Out_channel.with_open_bin (Filename.concat dir "errors.json") (fun c ->
+         output_string c ("{" ^ String.concat ",\n" (List.map snd errors) ^ "}\n"));
        exit 0
    | [_; "--write-kernel-table"; dir] ->
        (* "ops" is not a golden: it only gives the browser check the operators the four fixtures never reach
@@ -136,13 +172,16 @@ let () =
   List.iter (fun source ->
     let program = Test_program.compile source in
     match Flow_ir.Packed.gpu_refusals program, Flow_web.Wgsl.kernel program with
-    | reason :: _, Error emitted -> assert (reason.code = emitted.code && reason.message = emitted.message)
+    | reason :: _, Error emitted -> assert (emitted = reason)
     | _ -> assert false)
     ["(sum [x (array/range 1024)] (+ x t))";
      "(map (fn [x] (cross [x t 0] [1 2 3])) (array/range 1024))";
      "(for [x (array/range 1024)] :skip [0] (+ x t))"];
   let pixels = List.assoc "vec4" (Test_program.vector_fixtures 1) in
   let image = Test_program.ok (Flow_web.Wgsl.kernel ~image:true pixels) in
+  let image_layout = Flow_ir.Kernel_layout.plan ~image:true pixels in
+  assert (image.uniform_layout = image_layout.uniform_layout);
+  assert (image.uniform_bytes = Flow_ir.Kernel_layout.uniform_words image_layout * 16);
   assert (image.input_widths = [||] && image.output_widths = [|4|]);
   assert (List.map (fun (b : Flow_web.Wgsl.binding) -> b.binding) image.interface = [0; 1; 2]);
   assert (List.exists (fun (name, _, _) -> name = "image:width") image.uniform_layout);
@@ -155,6 +194,6 @@ let () =
   let checks = Flow_ir.Packed.Private.finite_checks hidden in
   List.iteri (fun index line -> if String.starts_with ~prefix:"  let r" line then
     let slot = Scanf.sscanf line "  let r%d:" Fun.id in
-    let guard = Printf.sprintf "  if (!wfinite(r%d)) { atomicStore(&status, 1u); }" slot in
+    let guard = Printf.sprintf "  if (!wfinite(r%d)) { atomicOr(&status, 1u); }" slot in
     assert ((List.nth lines (index + 1) = guard) = checks.(slot))) lines;
   print_endline "WGSL printer: goldens and shared refusals passed"

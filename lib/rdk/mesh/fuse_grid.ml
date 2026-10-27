@@ -311,7 +311,7 @@ let fuse ?cancel ?(grain = 16_384) ?selection ?target_selection
   end)
 
 let snap_to_grid ?cancel ?(grain = 16_384) ?selection
-    ?(spacing = Vec3.create 1. 1. 1.) ?(offset = Vec3.zero)
+    ?(spacing = Rays_math.Vec3.create 1. 1. 1.) ?(offset = Rays_math.Vec3.zero)
     ?(rounding = Grid_nearest) ?max_distance ?(fuse_points = false)
     ?(position = Average_position) ?weight_attribute
     ?(attributes = Keep_first) ?(attribute_rules = []) ?(group_rules = [])
@@ -319,7 +319,7 @@ let snap_to_grid ?cancel ?(grain = 16_384) ?selection
   Error.guard ~operation:"snap_to_grid" ~code:"invalid_geometry" @@ fun () ->
   if grain <= 0 then invalid_arg "Rdk.Fuse_grid.snap_to_grid: grain must be positive";
   let count = Geometry.point_count geometry in
-  let finite3 value = finite value.Vec3.x && finite value.y && finite value.z in
+  let finite3 value = finite value.Rays_math.Vec3.x && finite value.y && finite value.z in
   if not (finite3 spacing) || spacing.x <= 0. || spacing.y <= 0.
       || spacing.z <= 0. then
     Error "Rdk.Fuse_grid.snap_to_grid: spacing must be finite and positive on every axis"

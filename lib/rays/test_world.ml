@@ -43,8 +43,8 @@ let seeds () =
 
 (* Red irradiance at unit normal [n] from the baked coefficients, on the real
    basis World.baked documents for [sh9]. *)
-let irradiance (baked : World.baked) (n : Vec3.t) =
-  let { Vec3.x; y; z } = n in
+let irradiance (baked : World.baked) (n : Rays_math.Vec3.t) =
+  let { Rays_math.Vec3.x; y; z } = n in
   let basis = [| 0.282095; 0.488603 *. y; 0.488603 *. z; 0.488603 *. x;
     1.092548 *. x *. y; 1.092548 *. y *. z; 0.315392 *. ((3. *. z *. z) -. 1.);
     1.092548 *. x *. z; 0.546274 *. ((x *. x) -. (y *. y)) |] in
@@ -69,13 +69,13 @@ let sh9 () =
                *. sin (v *. Float.pi) in
       for i = 0 to m.width - 1 do
         let d = World.direction_of_uv ((float i +. 0.5) /. float m.width) v in
-        let c = Float.max 0. (Vec3.dot d n) in
+        let c = Float.max 0. (Rays_math.Vec3.dot d n) in
         sum := !sum +. (Float.Array.get m.pixels (((j * m.width) + i) * 3) *. c *. dw)
       done
     done;
     !sum in
-  let dirs = [ Vec3.unit_y; Vec3.neg Vec3.unit_y; Vec3.unit_x; Vec3.unit_z;
-               Vec3.normalize (Vec3.create 1. 0.5 (-1.)) ] in
+  let dirs = [ Rays_math.Vec3.unit_y; Rays_math.Vec3.neg Rays_math.Vec3.unit_y; Rays_math.Vec3.unit_x; Rays_math.Vec3.unit_z;
+               Rays_math.Vec3.normalize (Rays_math.Vec3.create 1. 0.5 (-1.)) ] in
   let reference = List.map brute dirs in
   let scale = List.fold_left Float.max 0. reference in
   List.iter2 (fun n e ->
@@ -140,14 +140,14 @@ let cdf () =
       if Float.Array.get a (o + mid + 1) > x then hi := mid else lo := mid + 1
     done;
     !lo in
-  let centre = Vec3.create (cos 0.3 *. sin 1.) (sin 0.3) (-. cos 0.3 *. cos 1.) in
+  let centre = Rays_math.Vec3.create (cos 0.3 *. sin 1.) (sin 0.3) (-. cos 0.3 *. cos 1.) in
   let hits = ref 0 and n = 1000 in
   for s = 0 to n - 1 do
     let x1 = (float s +. 0.5) /. float n and x2 = Float.rem (float s *. 0.618034) 1. in
     let j = invert c.marginal 0 h x1 in
     let i = invert c.conditional (j * (w + 1)) w x2 in
     let d = World.direction_of_uv ((float i +. 0.5) /. float w) ((float j +. 0.5) /. float h) in
-    if Vec3.dot d centre > cos 0.2 then incr hits
+    if Rays_math.Vec3.dot d centre > cos 0.2 then incr hits
   done;
   Printf.printf "world cdf: %d/%d samples inside the peak\n" !hits n;
   check "cdf concentrates" (!hits > 9 * n / 10)
@@ -173,7 +173,7 @@ let solar () =
 
 (* The equirectangular coordinates of a unit direction, as World documents
    them: u = atan2 x (-z) / 2pi + 0.5 in [0, 1), v = acos y / pi. *)
-let uv_of_direction (d : Vec3.t) =
+let uv_of_direction (d : Rays_math.Vec3.t) =
   let u = (Float.atan2 d.x (-. d.z) /. (2. *. Float.pi)) +. 0.5 in
   (if u >= 1. then u -. 1. else u), Float.acos (Float.max (-1.) (Float.min 1. d.y)) /. Float.pi
 
@@ -181,7 +181,7 @@ let round_trip () =
   for k = 0 to 99 do
     let u = (float k +. 0.5) /. 100. and v = 0.02 +. (0.96 *. Float.rem (float k *. 0.618) 1.) in
     let d = World.direction_of_uv u v in
-    check "unit direction" (Float.abs (Vec3.length d -. 1.) < 1e-12);
+    check "unit direction" (Float.abs (Rays_math.Vec3.length d -. 1.) < 1e-12);
     let u', v' = uv_of_direction d in
     check "uv round trip" (Float.abs (u -. u') < 1e-12 && Float.abs (v -. v') < 1e-12)
   done;
@@ -192,9 +192,10 @@ let round_trip () =
   check "azimuth grows toward +X" ((World.direction_of_uv 0.75 0.5).x > 0.999999)
 
 let cached () =
+  World.Private.with_cache_context (World.Private.create_cache_context ()) (fun () ->
   let a = World.bake_cached ~width:32 ~height:16 World.default in
   let b = World.bake_cached ~width:32 ~height:16 { World.default with exposure = 2. } in
-  check "exposure-only change hits the cache" (a.camera == b.camera && b.exposure = 2.)
+  check "exposure-only change hits the cache" (a.camera == b.camera && b.exposure = 2.))
 
 let run () =
   domains (); seeds (); sh9 (); promoted (); cdf (); solar (); round_trip (); cached ()

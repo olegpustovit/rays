@@ -30,8 +30,6 @@ external raw_create_memory : int -> int -> (nativeint, string) result
 external raw_destroy_mixer : nativeint -> unit = "caml_sdl3_mixer_destroy_mixer"
 external raw_mixer_format : nativeint -> ((int * int), string) result
   = "caml_sdl3_mixer_format"
-external raw_set_mixer_gain : nativeint -> float -> (unit, string) result
-  = "caml_sdl3_mixer_set_gain"
 external raw_generate : nativeint -> bytes -> (int, string) result
   = "caml_sdl3_mixer_generate"
 
@@ -50,10 +48,6 @@ external raw_play_track : nativeint -> int -> int -> (unit, string) result
   = "caml_sdl3_mixer_play_track"
 external raw_stop_track : nativeint -> int -> (unit, string) result
   = "caml_sdl3_mixer_stop_track"
-external raw_pause_track : nativeint -> (unit, string) result
-  = "caml_sdl3_mixer_pause_track"
-external raw_resume_track : nativeint -> (unit, string) result
-  = "caml_sdl3_mixer_resume_track"
 external raw_track_playing : nativeint -> bool = "caml_sdl3_mixer_track_playing"
 
 let linked_version () : Sdl3.version =
@@ -238,15 +232,6 @@ module Mixer = struct
       | Ok () -> finish_create operation Memory
           (raw_create_memory sample_rate channels))
 
-  let valid_gain gain = Float.is_finite gain && gain >= 0.
-
-  let set_gain (value : t) gain =
-    let operation = "SDL3_mixer.Mixer.set_gain" in
-    if not (valid_gain gain) then
-      error operation Invalid_argument "mixer gain must be finite and non-negative"
-    else live operation value (fun raw ->
-      mixer_result operation (raw_set_mixer_gain raw gain))
-
   let generate (value : t) ~frames =
     let operation = "SDL3_mixer.Mixer.generate" in
     if value.mode <> Memory then
@@ -316,12 +301,6 @@ module Audio = struct
     if Bytes.length bytes = 0 then
       error operation Invalid_argument "encoded audio buffer must be non-empty"
     else with_mixer operation mixer (fun raw -> raw_load_bytes raw bytes)
-
-  let reload_bytes (value : t) bytes =
-    let operation = "SDL3_mixer.Audio.reload_bytes" in
-    match live operation value (fun _ -> Ok ()) with
-    | Error _ as failure -> failure
-    | Ok () -> load_bytes value.mixer (Bytes.copy bytes)
 
   let destroy (value : t) = on_main "SDL3_mixer.Audio.destroy" (fun () ->
     if value.destroyed then Ok ()
@@ -400,9 +379,6 @@ module Track = struct
       error operation Invalid_argument "fade duration must be non-negative"
     else mutate operation value (fun raw -> raw_stop_track raw fade_out_ms)
 
-  let pause (value : t) = mutate "SDL3_mixer.Track.pause" value raw_pause_track
-  let resume (value : t) = mutate "SDL3_mixer.Track.resume" value raw_resume_track
-
   let playing (value : t) = live "SDL3_mixer.Track.playing" value (fun raw ->
     Ok (raw_track_playing raw))
 
@@ -455,8 +431,6 @@ module Channels = struct
       in
       build count)
 
-  let count value = Array.length value.slots
-
   let allocate value = live "allocate" value (fun () ->
     let rec find index =
       if index = Array.length value.slots then
@@ -491,16 +465,6 @@ module Channels = struct
       | Error _ as failure -> failure
       | Ok () -> selected.volume <- volume; Ok ())
 
-  let pause value channel = slot "pause" value channel (fun selected ->
-    Track.pause selected.track)
-  let resume value channel = slot "resume" value channel (fun selected ->
-    Track.resume selected.track)
-  let stop value channel ?(fade_out_ms = 0) () =
-    slot "stop" value channel (fun selected ->
-      Track.stop selected.track ~fade_out_ms ())
-  let playing value channel = slot "playing" value channel (fun selected ->
-    Track.playing selected.track)
-
   let destroy value = on_main (operation "destroy") (fun () ->
     if value.destroyed then Ok ()
     else begin
@@ -519,10 +483,7 @@ module Music = struct
   type status = Track.status = Stopped | Playing | Paused
   let create = Track.create
   let set_audio = Track.set_audio
-  let set_volume = Track.set_gain
   let play = Track.play
-  let pause = Track.pause
-  let resume = Track.resume
   let stop = Track.stop
   let destroy = Track.destroy
 end

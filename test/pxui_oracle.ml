@@ -7,7 +7,7 @@ open Rays
 let dot_field = Scene.group
   (List.init (54 * 30) (fun index ->
      Scene.rect ~at:((index mod 54) * 12, (index / 54) * 12)
-       ~w:1 ~h:1 ~fill:(Color.rgb 30 30 30) ()))
+       ~w:1 ~h:1 ~fill:(Rays_math.Color.rgb 30 30 30) ()))
 
 let palettes = ["ocean"; "sunset"; "mono"]
 
@@ -41,16 +41,16 @@ let update model (frame : Frame.t) =
       { model with animate } in
     if Pxui.Ui.button ui "Quit" then Sketch.quit ();
     model in
-  { model with angle = if model.animate then model.angle +. frame.dt else model.angle }
+  { model with angle = if model.animate then model.angle +. frame.input.dt else model.angle }
 
 let view model _frame =
   let pulse = int_of_float (40. *. (0.5 +. (0.5 *. sin model.angle))) in
   let x, y = model.center in
   let color = match List.nth palettes model.palette with
-    | "sunset" -> Color.rgb 240 (100 + pulse) 90
-    | "mono" -> Color.gray (140 + pulse)
-    | _ -> Color.rgb (80 + pulse) 150 225 in
-  Scene.clear (Color.rgb 228 139 161)
+    | "sunset" -> Rays_math.Color.rgb 240 (100 + pulse) 90
+    | "mono" -> Rays_math.Color.gray (140 + pulse)
+    | _ -> Rays_math.Color.rgb (80 + pulse) 150 225 in
+  Scene.clear (Rays_math.Color.rgb 228 139 161)
   :: dot_field
   :: Scene.circle ~at:(int_of_float x, int_of_float y)
        ~radius:(int_of_float model.radius) ~fill:color ()

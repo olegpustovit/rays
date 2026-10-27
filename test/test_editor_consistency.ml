@@ -16,7 +16,7 @@ let step e n = E.update e (frame n)
 let create ?camera ?settings ?presets ?source ws = E.create ?camera ?settings ?presets ?source ~await:true ~workspace:ws
   ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
     |> Result.map_error Rdk.Error.to_string)
-  ~scene3:(fun _ mesh -> Scene3.create [Scene3.mesh mesh]) () |> Result.get_ok
+  ~draw:(fun _ mesh -> Scene3.create [Scene3.mesh mesh]) () |> Result.get_ok
 
 let with_dir f =
   let dir = Filename.temp_dir "rays-consistency" "" in
@@ -25,7 +25,7 @@ let with_editor ?camera ws f = with_dir (fun presets ->
   let e = ref (create ?camera ~presets ws) in
   Fun.protect ~finally:(fun () -> E.close !e) (fun () -> e := step !e 1; f e))
 
-let settings_schema = Editor_core.Param.(schema ~name:"consistency" ~default:(0., "default")
+let settings_schema = Param.(schema ~name:"consistency" ~default:(0., "default")
   [field ~name:"amount" ~label:"Amount" ~kind:(floating ~min:0. ~max:10. ()) ~default:0.
      ~get:fst ~set:(fun x (_, s) -> x, s) ();
    field ~name:"mode" ~label:"Mode" ~kind:Text ~default:"default"
@@ -58,26 +58,26 @@ let settings_rebuild () =
 let settings_presets () = with_dir (fun dir ->
   let doc = build (workspace ~settings:(settings (0., "default")) plain) in
   let path = D.Preset.save ~directory:dir ~name:"defaults" ~doc ~view:(parse "{}") |> Result.get_ok in
-  let loaded = D.Preset.load ~path ~factories ~settings:(settings (8., "running")) |> Result.get_ok in
+  let loaded = D.Preset.load ~path ~factories ~settings:(settings (8., "running")) () |> Result.get_ok in
   check (D.Settings.get settings_schema loaded.doc.settings = (0., "default"))
     "loading a preset inherited current values for omitted default settings")
 
 let settings_graph_writeback () =
   let ws = workspace "(workspace settings (graph config :context settings (settings/config :fps 60)))" in
   with_editor ws (fun e ->
-    let schema = Editor_core.Param.(schema ~name:"fps" ~default:60
+    let schema = Param.(schema ~name:"fps" ~default:60
       [field ~name:"fps" ~label:"FPS" ~kind:(integer ~min:1 ~max:120 ()) ~default:60
         ~get:Fun.id ~set:(fun x _ -> x) ()]) in
     e := E.set_settings !e (Rays_editor.Settings.make schema 90);
     let loaded = build (workspace (D.Workspace_doc.to_text (E.workspace !e))) in
-    check (List.exists (fun (f : Editor_core.Param.field_view) ->
+    check (List.exists (fun (f : Param.field_view) ->
       f.name = "fps" && f.current = Int_value 90) (D.Settings.fields loaded.settings))
       "set_settings changed a graph-owned value without writing the settings graph")
 
 let startup_settings () =
   with_editor (workspace "(workspace startup (graph config :context settings (settings/config)))") (fun e ->
     let fields = D.Settings.fields (build (E.workspace !e)).settings in
-    check (List.length fields = 6 && List.for_all (fun (f : Editor_core.Param.field_view) ->
+    check (List.length fields = 6 && List.for_all (fun (f : Param.field_view) ->
       String.ends_with ~suffix:"(on restart)" f.label || String.ends_with ~suffix:"(live)" f.label) fields)
       "workspace startup fields do not explain when edits apply";
     List.iteri (fun i (name, literal) ->
@@ -91,7 +91,7 @@ let startup_settings () =
       check (D.Contexts.window after <> D.Contexts.window before)
         ("startup setting did not update saved configuration: " ^ name);
       e := E.update !e (Test_editor_input.frame ~keys:[Input.Meta] (450., 300.)
-        [Event.KeyPressed (Input.KeyChar 'z')] (i + 2));
+        [Input.Key_pressed (Input.KeyChar 'z')] (i + 2));
       check (E.workspace !e == before) ("startup setting undo did not restore its source: " ^ name))
       ["title", "\"Changed title\""; "width", "900"; "height", "640"; "fps", "90"; "seed", "42"])
 
@@ -126,7 +126,7 @@ let frozen_context_time () =
     let diagnostic = match D.Contexts.of_workspace ~factories ws with
       | Error d -> d | Ok _ -> failwith ("frozen field was accepted: " ^ field) in
     check (diagnostic.code = "E_CONTEXT_TIME" && Test_text_pane.contains diagnostic.message field)
-      ("frozen-time refusal did not identify the field: " ^ Flow.Diagnostic.to_string diagnostic);
+      ("frozen-time refusal did not identify the field: " ^ Diagnostic.to_string diagnostic);
     check (Result.is_error (D.Contexts.window ws)) "startup window checking ignored a frozen context";
     let reloaded = workspace (D.Workspace_doc.to_text ws) in
     check (Result.is_error (D.Contexts.of_workspace ~factories reloaded))
@@ -152,7 +152,7 @@ let frozen_context_time () =
       (workspace (D.Workspace_doc.to_text (E.workspace !e)))))
       "literal replacement did not survive reload";
     e := E.update !e (Test_editor_input.frame ~keys:[Input.Meta] (450., 300.)
-      [Event.KeyPressed (Input.KeyChar 'z')] 2);
+      [Input.Key_pressed (Input.KeyChar 'z')] 2);
     check (E.workspace !e == before) "literal replacement did not undo in one entry")
 
 let scene_picture () = with_editor (workspace scene_text) (fun e ->
@@ -230,7 +230,7 @@ let preview_identity () =
     "closed preview left orphan membership/provenance";
   let id = List.hd (List.assoc comparison (shell doc).views) in
   let graph, _ = Sop.Edit_graph.apply_parameters doc.scene.graph.geometry ~node_id:id
-    ["translate_x", Sop.Parameter.Float_value 3.] |> Result.get_ok in
+    ["translate_x", Param.Float_value 3.] |> Result.get_ok in
   let after = {doc with scene = {doc.scene with graph = Flow_sop.Network.with_geometry graph doc.scene.graph |> Result.get_ok}} in
   check (match D.Scene_sync.reconcile ~factories doc after with
     | Error message -> Test_text_pane.contains message "viewport scene reference"
@@ -256,23 +256,23 @@ let preview_orbits () =
       let x, y, w, h = (Pxui_shell.Layout.find g (View key) |> Option.get).body in
       float (x + w / 2), float (y + h / 2) in
     let focus key = let point = center key in
-      update point [Event.MouseMoved point];
-      update point [Event.MousePressed (Input.LeftButton, point); Event.MouseReleased (Input.LeftButton, point)] in
+      update point [Input.Pointer_moved point];
+      update point [Input.Pointer_pressed (Input.LeftButton, point); Input.Pointer_released (Input.LeftButton, point)] in
     let position key = Camera.position (E.viewport_camera !e key) in
     let main = "v:\"editor\"/\"main\"" and comparison = "v:\"editor\"/\"comparison\"" in
     focus comparison;
     let initial = position main in
     let x, y = center comparison in
     let point = x, y +. 40. in
-    update ~buttons:[Input.LeftButton] point [Event.MousePressed (Input.LeftButton, point)];
+    update ~buttons:[Input.LeftButton] point [Input.Pointer_pressed (Input.LeftButton, point)];
     for k = 1 to 6 do
       let point = x +. float k *. 15., y +. 40. +. float k *. 2. in
-      update ~buttons:[Input.LeftButton] ~delta:(15., 2.) point [Event.MouseMoved point]
+      update ~buttons:[Input.LeftButton] ~delta:(15., 2.) point [Input.Pointer_moved point]
     done;
     let point = x +. 90., y +. 52. in
-    update point [Event.MouseReleased (Input.LeftButton, point)];
+    update point [Input.Pointer_released (Input.LeftButton, point)];
     let orbited = position comparison in
-    let same a b = Vec3.nearly_equal a b ~eps:1e-9 in
+    let same a b = Rays_math.Vec3.nearly_equal a b ~eps:1e-9 in
     check (not (same initial orbited) && same (position main) initial)
       "viewport orbit fixture did not produce isolated cameras";
     let edit op = e := E.edit !e op |> Result.get_ok; update (0., 0.) [] in
@@ -308,7 +308,7 @@ let preview_camera_world () =
         (ui/workspace (ui/tile main comparison)))))|} in
   with_editor ws (fun e ->
     let before = Camera.position (E.render_camera !e) and world = E.world !e |> Option.get in
-    check (Vec3.nearly_equal before (Vec3.create 0. 0. 6.) ~eps:1e-6)
+    check (Rays_math.Vec3.nearly_equal before (Rays_math.Vec3.create 0. 0. 6.) ~eps:1e-6)
       "primary camera/World policy did not resolve authored values";
     let key = "v:\"editor\"/\"comparison\"" in
     let doc = build (E.workspace !e) in
@@ -316,21 +316,21 @@ let preview_camera_world () =
     let comparison = List.find_map (fun id ->
       Option.bind (Sop.Edit_graph.find doc.scene.graph.geometry ~node_id:id)
         (fun node -> Option.map fst (D.Objects.Camera.of_node node))) ids |> Option.get in
-    check (Vec3.nearly_equal (Camera.position comparison) (Vec3.create 6. 0. 0.) ~eps:1e-6)
+    check (Rays_math.Vec3.nearly_equal (Camera.position comparison) (Rays_math.Vec3.create 6. 0. 0.) ~eps:1e-6)
       "the comparison instance lost its independently authored camera";
     let geometry = Pxui_shell.Layout.geometry ~hidden:[Timeline]
       (Option.get doc.shell).tree (frame 2) in
     let x, y, w, h = (Pxui_shell.Layout.find geometry (View key) |> Option.get).body in
     let point = float (x + w / 2), float (y + h / 2) in
     e := E.update !e (Test_editor_input.frame point
-      [Event.MousePressed (Input.LeftButton, point); Event.MouseReleased (Input.LeftButton, point)] 2);
+      [Input.Pointer_pressed (Input.LeftButton, point); Input.Pointer_released (Input.LeftButton, point)] 2);
     e := E.edit !e (F.Set_arg {node = ["editor"; "comparison"]; key = Pos 0; sub = [];
       value = parse "(ref scene :eye [8 0 0])"}) |> Result.get_ok;
     e := step !e 3;
     check (Camera.position (E.render_camera !e) = before && Option.get (E.world !e) == world)
       "focusing/editing a comparison camera changed the global primary camera or World";
     e := E.update !e (Test_editor_input.frame ~keys:[Input.Meta] point
-      [Event.KeyPressed (Input.KeyChar 'z')] 4);
+      [Input.Key_pressed (Input.KeyChar 'z')] 4);
     check (Camera.position (E.render_camera !e) = before && Option.get (E.world !e) == world)
       "undoing a comparison camera edit changed the primary camera or World")
 
@@ -371,7 +371,8 @@ let live_lights () =
     let scene = E.scene_document !e in
     let before = layers !e and lights = E.lights !e in
     let before_time = Rays_editor.Timeline.time (E.timeline !e) in
-    e := E.update !e { (frame 2) with dt = 2. };
+    let live = frame 2 in
+    e := E.update !e { live with input = { live.input with dt = 2. } };
     check (E.workspace !e == source && E.undo_label !e = None)
       "timeline lighting changed authored state or history";
     check (Option.get (E.prepared !e) == Option.get prepared)
@@ -382,7 +383,7 @@ let live_lights () =
       "timeline lighting did not reach staged rendering";
     check (Rays_editor.Timeline.time (E.timeline !e) = before_time +. 2.)
       "live lighting used runtime time instead of the editor timeline";
-    let frozen_frame n = { (frame n) with dt = 0. } in
+    let frozen_frame n = let frame = frame n in { frame with input = { frame.input with dt = 0. } } in
     let before = layers !e in
     e := E.edit !e (F.Set_arg {node = ["editor"; "comparison"]; key = Pos 0; sub = [];
       value = parse "(ref scene :lamp 5)"}) |> Result.get_ok;
@@ -390,8 +391,9 @@ let live_lights () =
     let after = layers !e in
     check (List.hd after = List.hd before && List.nth after 1 <> List.nth before 1)
       "a live comparison override changed primary lighting";
-    e := E.update !e { (frozen_frame 4) with keys = [Input.Meta];
-      events = [Event.KeyPressed (Input.KeyChar 'z')] };
+    let frozen = frozen_frame 4 in
+    e := E.update !e { frozen with input = { frozen.input with keys = [Input.Meta];
+      events = [Input.Key_pressed (Input.KeyChar 'z')] } };
     check (layers !e = before) "one undo did not restore live comparison lighting")
 
 let live_light_failure () = with_editor
@@ -400,7 +402,7 @@ let live_light_failure () = with_editor
     (graph scene :context scene (scene/merge (scene/geometry (ref g))
       (scene/light :intensity (pow 10 (* 400 (sin t)))))))|}) (fun e ->
     let source = E.workspace !e and good = layers !e in
-    e := E.update !e { (frame 2) with dt = 1. };
+    let live_frame = frame 2 in e := E.update !e { live_frame with input = { live_frame.input with dt = 1. } };
     check (E.workspace !e == source && E.undo_label !e = None)
       "a failed live light expression changed authored state";
     check (layers !e = good)
@@ -411,7 +413,8 @@ let live_light_failure () = with_editor
       check (Test_text_pane.contains (report ()) "E_CONTEXT_LIVE"
         && Test_text_pane.contains (report ()) "intensity")
         "a live light failure lacked a field diagnostic";
-      e := E.update !e { (frame 3) with dt = 4. };
+      let recovered_frame = frame 3 in
+      e := E.update !e { recovered_frame with input = { recovered_frame.input with dt = 4. } };
       check (layers !e <> good && not (Test_text_pane.contains (report ()) "E_CONTEXT_LIVE"))
         "a recovered live light expression retained stale output or its diagnostic"))
 
@@ -425,11 +428,12 @@ let live_light_determinism () =
     let prepares = ref 0 and drawings = ref 0 in
     let e = ref (E.create ~workspace:ws ~presets ~await:true ~domains ~seed:42L
       ~prepare:(fun _ output -> incr prepares;
-        Ok (Test_workspace_cook.geometry_bytes (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))))
-      ~scene3:(fun _ _ -> incr drawings; Scene3.empty) () |> Result.get_ok) in
+        Ok (Test_support.Workspace_cook.geometry_bytes (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))))
+      ~draw:(fun _ _ -> incr drawings; Scene3.empty) () |> Result.get_ok) in
     Fun.protect ~finally:(fun () -> E.close !e) (fun () ->
       let samples = List.mapi (fun i dt ->
-        e := E.update !e { (frame (i + 1)) with dt };
+        let frame = frame (i + 1) in
+        e := E.update !e { frame with input = { frame.input with dt } };
         Option.get (E.prepared !e), Marshal.to_string (E.lights !e) [Marshal.No_sharing])
         [0.; 1. /. 60.; 0.5; 2.] in
       check (!prepares = 1) "live lighting recooked or re-prepared unchanged seeded geometry";
@@ -452,7 +456,7 @@ let live_light_failure_isolation () = with_editor
              comparison (ui/viewport (ref scene :bad true))]
         (ui/workspace (ui/tile main comparison)))))|}) (fun e ->
     let before = layers !e in
-    e := E.update !e { (frame 2) with dt = 1. };
+    let live_frame = frame 2 in e := E.update !e { live_frame with input = { live_frame.input with dt = 1. } };
     let failed = layers !e in
     check (List.hd failed <> List.hd before && List.nth failed 1 = List.nth before 1)
       "one failed preview light froze a healthy sibling or discarded its own last output";
@@ -462,7 +466,8 @@ let live_light_failure_isolation () = with_editor
       check (Test_text_pane.contains report "E_CONTEXT_LIVE"
         && Test_text_pane.contains report "comparison")
         "a failed preview light lacked viewport attribution");
-    e := E.update !e { (frame 3) with dt = 4. };
+    let recovered_frame = frame 3 in
+    e := E.update !e { recovered_frame with input = { recovered_frame.input with dt = 4. } };
     check (List.nth (layers !e) 1 <> List.nth failed 1)
       "a recovered preview light retained stale output")
 
@@ -489,13 +494,13 @@ let lisp_apply () =
     let x, y, w, h = leaf.body and count = ref 1 in
     let run ?(mouse = (450., 300.)) ?(keys = []) events =
       incr count; e := E.update !e (Test_editor_input.frame ~keys mouse events !count) in
-    let click p = run ~mouse:p [Event.MouseMoved p];
-      run ~mouse:p [Event.MousePressed (Input.LeftButton, p); Event.MouseReleased (Input.LeftButton, p)] in
+    let click p = run ~mouse:p [Input.Pointer_moved p];
+      run ~mouse:p [Input.Pointer_pressed (Input.LeftButton, p); Input.Pointer_released (Input.LeftButton, p)] in
     click (Test_text_pane.tab_at ~right:(x + w - 32) ~top:y 2); (* Document tab *)
     click (float (x + 180), float (y + 80));
     (* Applying the text already shown keeps metadata; a subsequent source reload sees it too. *)
-    run ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar 'a')];
-    run [Event.TextInput (Test_text_pane.replace (D.Workspace_doc.to_text ws)
+    run ~keys:[Input.Meta] [Input.Key_pressed (Input.KeyChar 'a')];
+    run [Input.Text_input (Test_text_pane.replace (D.Workspace_doc.to_text ws)
       ~from:"(sop/box)" ~by:"(sop/box :size [2 2 2])")];
     let before = E.prepared !e and picture = layers !e in
     click (float (x + 32), float (y + h - 40));
@@ -515,9 +520,9 @@ let hidden_preview () = with_editor (workspace preview_text) (fun e ->
   let x, y, w, h = leaf.body in
   let p = float (x + w / 2), float (y + h / 2) in
   e := E.update !e (Test_editor_input.frame p
-    [Event.MousePressed (Input.LeftButton, p); Event.MouseReleased (Input.LeftButton, p)] 2);
+    [Input.Pointer_pressed (Input.LeftButton, p); Input.Pointer_released (Input.LeftButton, p)] 2);
   e := E.update !e (Test_editor_input.frame p
-    [Event.KeyPressed (Input.KeyChar '/'); Event.KeyPressed (Input.KeyChar 'h')] 3);
+    [Input.Key_pressed (Input.KeyChar '/'); Input.Key_pressed (Input.KeyChar 'h')] 3);
   check (List.map List.length (layers !e) = [0])
     "hiding the UI switched the focused preview to the primary scene")
 
@@ -529,15 +534,15 @@ let focused_framing () = with_editor (workspace preview_text) (fun e ->
     let x, y, w, h = (Pxui_shell.Layout.find g (View key) |> Option.get).body in
     let p = float (x + w / 2), float (y + h / 2) in
     incr count; e := E.update !e (Test_editor_input.frame p
-      [Event.MousePressed (Input.LeftButton, p); Event.MouseReleased (Input.LeftButton, p)] !count);
+      [Input.Pointer_pressed (Input.LeftButton, p); Input.Pointer_released (Input.LeftButton, p)] !count);
     let before = Camera.position (E.viewport_camera !e key) in
-    incr count; e := E.update !e (Test_editor_input.frame p [Event.KeyPressed (Input.KeyChar 'f')] !count);
+    incr count; e := E.update !e (Test_editor_input.frame p [Input.Key_pressed (Input.KeyChar 'f')] !count);
     before, Camera.position (E.viewport_camera !e key) in
   let before, after = frame_view "v:\"editor\"/\"main\"" in
-  check (not (Vec3.nearly_equal before after ~eps:1e-9))
+  check (not (Rays_math.Vec3.nearly_equal before after ~eps:1e-9))
     "viewport-only layout could not frame its populated scene";
   let before, after = frame_view "v:\"editor\"/\"blank\"" in
-  check (Vec3.nearly_equal before after ~eps:1e-9)
+  check (Rays_math.Vec3.nearly_equal before after ~eps:1e-9)
     "framing an empty focused viewport used another scene's bounds")
 
 let named_inspector () = with_dir (fun presets ->
@@ -547,13 +552,13 @@ let named_inspector () = with_dir (fun presets ->
     (graph editor :context editor
       (ui/workspace (ui/split-at "horizontal" 0.6 (ui/graph "g") (ui/inspector)))))|} in
   let e = ref (E.create ~presets ~await:true ~workspace:ws ~factories ~prepare:(fun _ _ -> Ok ())
-    ~scene3:(fun _ _ -> Scene3.empty) () |> Result.get_ok) in
+    ~draw:(fun _ _ -> Scene3.empty) () |> Result.get_ok) in
   Fun.protect ~finally:(fun () -> E.close !e) (fun () ->
     e := step !e 1;
     let x, y, w, _ = E.node_box !e ["g"; "a"] |> Option.get in
     let p = float (x + w / 2), float (y + 10) in
     e := E.update !e (Test_editor_input.frame p
-      [Event.MousePressed (Input.LeftButton, p); Event.MouseReleased (Input.LeftButton, p)] 2);
+      [Input.Pointer_pressed (Input.LeftButton, p); Input.Pointer_released (Input.LeftButton, p)] 2);
     e := step !e 3;
     check (E.level !e = None) "fixture left the scene level";
     let doc = D.Contexts.of_workspace ~factories (E.workspace !e) |> Result.get_ok in
@@ -564,10 +569,10 @@ let named_inspector () = with_dir (fun presets ->
     let from = float ix +. max 96. (min 150. (float iw *. 0.34)) +. 10., float (iy + 190) in
     let to_ = fst from +. 50., snd from in
     e := E.update !e (Test_editor_input.frame ~buttons:[Input.LeftButton] from
-      [Event.MousePressed (Input.LeftButton, from)] 4);
+      [Input.Pointer_pressed (Input.LeftButton, from)] 4);
     e := E.update !e (Test_editor_input.frame ~buttons:[Input.LeftButton] to_
-      [Event.MouseMoved to_] 5);
-    e := E.update !e (Test_editor_input.frame to_ [Event.MouseReleased (Input.LeftButton, to_)] 6);
+      [Input.Pointer_moved to_] 5);
+    e := E.update !e (Test_editor_input.frame to_ [Input.Pointer_released (Input.LeftButton, to_)] 6);
     check (E.undo_label !e = Some "Edit value")
       "a named SOP pane at the scene level had no editable inspector fields"))
 
@@ -583,23 +588,23 @@ let named_handles () =
       incr count; e := E.update !e (Test_editor_input.frame ~buttons ~delta p events !count) in
     let x, y, width, _ = E.node_box !e ["g"; "a"] |> Option.get in
     let p = float (x + width / 2), float (y + 10) in
-    update p [Event.MousePressed (Input.LeftButton, p); Event.MouseReleased (Input.LeftButton, p)];
+    update p [Input.Pointer_pressed (Input.LeftButton, p); Input.Pointer_released (Input.LeftButton, p)];
     update p [];
     check (E.level !e = None && E.selected_node !e <> None)
       "named handle selection did not resolve a SOP node independently of scene navigation";
     let bounds = (E.panes !e (frame !count)).view in
     let camera = E.viewport_camera !e "v0" in
-    let screen x = Camera.world_to_screen ~viewport:bounds camera (Vec3.create x 0. 0.) |> Option.get in
+    let screen x = Camera.world_to_screen ~viewport:bounds camera (Rays_math.Vec3.create x 0. 0.) |> Option.get in
     let base = screen 1. and unit = screen 2. in
     let dx = unit.x -. base.x and dy = unit.y -. base.y in
     let length = Float.hypot dx dy in
     let tip = base.x +. dx /. length *. 60., base.y +. dy /. length *. 60. in
     let target = fst tip +. dx /. length *. 30., snd tip +. dy /. length *. 30. in
     let before = E.workspace !e in
-    update ~buttons:[Input.LeftButton] tip [Event.MousePressed (Input.LeftButton, tip)];
+    update ~buttons:[Input.LeftButton] tip [Input.Pointer_pressed (Input.LeftButton, tip)];
     update ~buttons:[Input.LeftButton] ~delta:(fst target -. fst tip, snd target -. snd tip)
-      target [Event.MouseMoved target];
-    update target [Event.MouseReleased (Input.LeftButton, target)];
+      target [Input.Pointer_moved target];
+    update target [Input.Pointer_released (Input.LeftButton, target)];
     let after = E.workspace !e in
     let binding ws = Option.map (fun (_, v) -> Flow.Lisp.flat v)
       (Rays_editor.Private.Text_pane.binding ws.D.Workspace_doc.source ["g"; "a"]) in
@@ -656,11 +661,11 @@ let stale_inspector_draft () = with_dir (fun presets ->
       (ui/split-at "horizontal" 0.6
         (ui/split-at "vertical" 0.5 (ui/graph "g") (ui/lisp)) (ui/inspector)))))|} in
   let e = ref (E.create ~presets ~await:true ~workspace:ws ~factories ~prepare:(fun _ _ -> Ok ())
-    ~scene3:(fun _ _ -> Scene3.empty) () |> Result.get_ok) in
+    ~draw:(fun _ _ -> Scene3.empty) () |> Result.get_ok) in
   let count = ref 0 in
   let update ?(keys = []) ?(buttons = []) p events =
     incr count; e := E.update !e (Test_editor_input.frame ~keys ~buttons p events !count) in
-  let click p = update p [Event.MousePressed (Input.LeftButton, p); Event.MouseReleased (Input.LeftButton, p)] in
+  let click p = update p [Input.Pointer_pressed (Input.LeftButton, p); Input.Pointer_released (Input.LeftButton, p)] in
   Fun.protect ~finally:(fun () -> E.close !e) (fun () ->
     e := step !e 1;
     let x, y, w, _ = E.node_box !e ["g"; "a"] |> Option.get in
@@ -671,15 +676,15 @@ let stale_inspector_draft () = with_dir (fun presets ->
     let lx, ly, _, lh = (Pxui_shell.Layout.find panes Lisp |> Option.get).body in
     let area = float (lx + 150), float (ly + 70) in
     click area;
-    update ~keys:[Input.Meta] area [Event.KeyPressed (Input.KeyChar 'a')];
-    update area [Event.TextInput "(let* [a (sop/test_source :value 2)] a)"];
+    update ~keys:[Input.Meta] area [Input.Key_pressed (Input.KeyChar 'a')];
+    update area [Input.Text_input "(let* [a (sop/test_source :value 2)] a)"];
     let ix, iy, iw, _ = (Pxui_shell.Layout.find panes Inspector |> Option.get).body in
     let from = float ix +. max 96. (min 150. (float iw *. 0.34)) +. 10., float (iy + 190) in
     let to_ = fst from +. 50., snd from in
     let before = E.workspace !e in
-    update ~buttons:[Input.LeftButton] from [Event.MousePressed (Input.LeftButton, from)];
-    update ~buttons:[Input.LeftButton] to_ [Event.MouseMoved to_];
-    update to_ [Event.MouseReleased (Input.LeftButton, to_)];
+    update ~buttons:[Input.LeftButton] from [Input.Pointer_pressed (Input.LeftButton, from)];
+    update ~buttons:[Input.LeftButton] to_ [Input.Pointer_moved to_];
+    update to_ [Input.Pointer_released (Input.LeftButton, to_)];
     let edited = E.workspace !e and label = E.undo_label !e in
     check (edited != before && label = Some "Edit value") "fixture inspector did not change the source";
     click (float (lx + 60), float (ly + lh - 36));
@@ -699,7 +704,7 @@ let failed_renderer_modes () = with_dir (fun presets ->
   let e = ref (E.create ~await:true ~presets ~workspace:ws
     ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
       |> Result.map_error Rdk.Error.to_string)
-    ~scene3:(fun _ mesh -> Scene3.create [Scene3.mesh (Mesh.with_mode Mesh.Lines mesh)]) () |> Result.get_ok) in
+    ~draw:(fun _ mesh -> Scene3.create [Scene3.mesh (Mesh.with_mode Mesh.Lines mesh)]) () |> Result.get_ok) in
   let report () = E.crash_dump !e presets;
     In_channel.with_open_bin (Filename.concat presets "editor.txt") In_channel.input_all in
   Fun.protect ~finally:(fun () -> E.close !e) (fun () ->
@@ -733,49 +738,51 @@ let run_native () = with_dir (fun directory ->
   let report e =
     E.crash_dump e directory;
     In_channel.with_open_bin (Filename.concat directory "editor.txt") In_channel.input_all in
-  ignore (Sketch.run_state ~max_frames:16
+  ignore (Result.get_ok (Sketch.run_state ~max_frames:16
     ~config:{Sketch.default_config with width = 900; height = 640; domains = Some 1;
       title = "Preview failure isolation"}
     ~init:(fun _ -> E.create ~await:true ~workspace:ws
       ~presets:(Filename.concat directory "presets")
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
-      ~scene3:(fun _ mesh ->
-        let size = abs_float (Option.get (Mesh.vertex 0 mesh)).Vec3.x *. 2. in
+      ~draw:(fun _ mesh ->
+        let size = abs_float (Option.get (Mesh.vertex 0 mesh)).Rays_math.Vec3.x *. 2. in
         if size > 2.5 then Scene3.create [Scene3.group []]
-        else Scene3.create [Scene3.mesh ~material:(Material.unlit (Color.rgb 200 30 20))
+        else Scene3.create [Scene3.mesh ~material:(Material.unlit (Rays_math.Color.rgb 200 30 20))
           (if size > 1.5 then Mesh.with_mode Mesh.Lines mesh else mesh)]) () |> Result.get_ok)
     ~update:(fun e frame ->
-      let e = if List.mem frame.Frame.count [3; 10; 13] then
+      let e = if List.mem frame.input.frame [3; 10; 13] then
         E.edit e (F.Set_arg {node = ["editor"; "comparison"]; key = Pos 0; sub = [];
-          value = parse (if frame.count = 10 then "(ref scene :size 1.5)" else "(ref scene :size 2)")})
+          value = parse (if frame.input.frame = 10 then "(ref scene :size 1.5)" else "(ref scene :size 2)")})
         |> Result.get_ok else e in
-      let mode = if frame.count >= 15 then Rays_editor.Renderer.Wireframe else Path_traced in
+      let mode = if frame.input.frame >= 15 then Rays_editor.Renderer.Wireframe else Path_traced in
       E.update (E.set_renderer e mode) frame)
     ~view:E.scene
     ~after_present:(fun e frame ->
-      if frame.Frame.count = 8 then begin
+      if frame.input.frame = 8 then begin
         primary_bounds := (E.panes e frame).view;
         check (Canvas.save_screen_png path = Ok ()) "failure capture failed";
         let text = report e in
         check (Test_text_pane.contains text "Renderer [" && Test_text_pane.contains text "stale output retained")
           "failed renderer did not identify the viewport and retained stale output"
       end;
-      if List.mem frame.count [12; 16] then
+      if List.mem frame.input.frame [12; 16] then
         check (Test_text_pane.contains (report e) "renderer: -")
           "renderer failure persisted after recovery or mode switching";
       E.after_present e frame)
-    ~on_stop:E.close ());
+    ~on_stop:E.close ()));
   let image = Image.load_exn path in
-  Fun.protect ~finally:(fun () -> Image.destroy image) (fun () ->
+  Fun.protect ~finally:(fun () -> ignore(Image.destroy image)) (fun () ->
     let pixels = Image.Private.pixels image |> Result.get_ok in
     let red = ref 0 in
     let x, y, width, height = !primary_bounds in
-    let scale_x = float (Image.get_width image) /. 900.
-    and scale_y = float (Image.get_height image) /. 640. in
+    let image_width = Result.get_ok (Image.get_width image)
+    and image_height = Result.get_ok (Image.get_height image) in
+    let scale_x = float image_width /. 900.
+    and scale_y = float image_height /. 640. in
     for py = int_of_float (float y *. scale_y) to int_of_float (float (y + height) *. scale_y) - 1 do
     for px = int_of_float (float x *. scale_x) to int_of_float (float (x + width) *. scale_x) - 1 do
-      let offset = py * Image.get_width image + px in
+      let offset = py * image_width + px in
       let r = Char.code (Bytes.get pixels (offset * 4))
       and g = Char.code (Bytes.get pixels (offset * 4 + 1)) in
       if r > 110 && r > g + 40 then incr red
@@ -793,12 +800,12 @@ let enter_camera () =
     let count = ref 1 in
     let step ?(mouse = (450., 300.)) events =
       incr count; e := E.update !e (Test_editor_input.frame mouse events !count) in
-    let click button (x, y) = [Event.MousePressed (button, (x, y));
-      Event.MouseReleased (button, (x, y))] in
+    let click button (x, y) = [Input.Pointer_pressed (button, (x, y));
+      Input.Pointer_released (button, (x, y))] in
     let gx, gy, _, _ = (E.panes !e (frame 0)).graph in
     let in_list = float (gx + 60), float (gy + 350) in
     step ~mouse:in_list (click Input.LeftButton in_list);
-    let key k = Event.KeyPressed k in
+    let key k = Input.Key_pressed k in
     step [key Input.Home];
     let rec select name index =
       if Option.map Sop.Node.label (E.selected_node !e) = Some name then index
@@ -807,7 +814,7 @@ let enter_camera () =
     let row = select "telephoto" 0 in
     step [key (Input.KeyChar 'i')];
     check (E.look_through !e && E.view_camera !e = E.render_camera !e
-      && Camera.position (E.render_camera !e) = Vec3.create 13. 8.8 14.8)
+      && Camera.position (E.render_camera !e) = Rays_math.Vec3.create 13. 8.8 14.8)
       "camera Enter did not choose and look through the selected camera";
     step [key (Input.KeyChar 'i')];
     check (E.look_through !e) "repeated camera Enter disabled look-through";
@@ -834,9 +841,10 @@ let no_viewport_click () =
       (ui/workspace (ui/tile o g i)))))
 |} in
   with_editor ws (fun e ->
-    let click = [Event.MousePressed (Input.LeftButton, (15., 15.));
-                 Event.MouseReleased (Input.LeftButton, (15., 15.))] in
-    let f = { (frame 2) with events = click; mouse = (15., 15.) } in
+    let click = [Input.Pointer_pressed (Input.LeftButton, (15., 15.));
+                 Input.Pointer_released (Input.LeftButton, (15., 15.))] in
+    let frame = frame 2 in
+    let f = { frame with input = { frame.input with events = click; pointer = (15., 15.) } } in
     e := E.update !e f)
 
 (* exact precision: the canvas's rect positions stay host instances the check reads *)
@@ -855,9 +863,9 @@ let compiled_probe_panels () =
   with_editor (workspace text) (fun e ->
     let first_x () = E.Private.canvas_scenes !e |> List.hd |> Scene.Private.commands
       |> Array.to_list |> List.find_map (function
-        | Scene_command.Render_ir.Shapes shapes when Scene_command.Shape_batch.count shapes > 1 ->
-            Some (Scene_command.Shape_batch.count shapes,
-              Int32.float_of_bits (Bytes.get_int32_le (Scene_command.Shape_batch.instances shapes) 0))
+        | Scene_command.Render_ir.Shapes shapes when Scene_command.Ui_batch.count shapes > 1 ->
+            Some (Scene_command.Ui_batch.count shapes,
+              Int32.float_of_bits (Bytes.get_int32_le (Scene_command.Ui_batch.instances shapes) 0))
         | _ -> None) |> Option.get in
     let previous = ref (snd (first_x ())) in
     for count = 2 to 13 do
@@ -882,7 +890,8 @@ let compiled_probe_panels () =
     let n, x = first_x () in
     check ((n, x) = (7000, 5.))
       (Printf.sprintf "source edits reused a stale probe program or advanced the new fold (%d, %.1f)" n x);
-    e := E.update !e {(frame 23) with keys=[Input.Shift]; events=[Event.KeyPressed (Input.KeyChar 'p')]};
+    let frame = frame 23 in
+    e := E.update !e { frame with input = { frame.input with keys=[Input.Shift]; events=[Input.Key_pressed (Input.KeyChar 'p')] } };
     let n, x = first_x () in
     check ((n, x) = (7000, 5.)) (Printf.sprintf "timeline reset retained old probe state (%d, %.1f)" n x);
     e := step !e 24;

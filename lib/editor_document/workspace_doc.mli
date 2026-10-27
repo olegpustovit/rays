@@ -1,4 +1,4 @@
-(** The v4 document: a checked workspace, its layout keyed by path and the
+(** The workspace document: a checked workspace, its layout keyed by path and the
     sketch settings.  UI-free.  The source text is the authored
     truth; [checked] is derived from it and every edit validates atomically.
     Same-type catalog literals reuse the term's check and validate its schema;
@@ -33,7 +33,7 @@ type t = {
       (** A library of bare graph, definition or macro forms, printed without a workspace wrapper. *)
 }
 
-val import_paths : string -> (string list, Flow.Diagnostic.t list) result
+val import_paths : string -> (string list, Diagnostic.t list) result
 val import_texts : t -> (string * string) list
 val imported_file : t -> Flow.Workspace.path -> string option
 
@@ -50,7 +50,7 @@ val of_text :
   ?ops:Flow.Op.t list ->
   ?imports:(string * string) list ->
   ?inputs:(string * (string * Flow.Eval.value) list) list ->
-  ?settings:Settings.t -> ?layout:Layout_by_path.t -> Flow.Check.catalog -> string -> (t, Flow.Diagnostic.t list) result
+  ?settings:Settings.t -> ?layout:Layout_by_path.t -> Flow.Check.catalog -> string -> (t, Diagnostic.t list) result
 (** Parse and check. [ops] defaults to [Flow_sop.Operators.all]; an explicit
     list replaces those extensions. Absent settings and layout forms retain the supplied values.
     Bare graph, definition and macro forms load as a library fragment; its
@@ -66,7 +66,7 @@ val check_text :
   ?imports:(string * string) list ->
   ?inputs:(string * (string * Flow.Eval.value) list) list ->
   ?settings:Settings.t -> ?layout:Layout_by_path.t -> Flow.Check.catalog -> string ->
-  (t * Flow.Diagnostic.t list, Flow.Diagnostic.t list) result
+  (t * Diagnostic.t list, Diagnostic.t list) result
 (** {!of_text} with the checker's warnings. *)
 
 val to_text : t -> string
@@ -77,7 +77,7 @@ val to_text : t -> string
 val print : t -> string * Flow.Lisp.spans
 (** {!to_text} with the printer's authored form spans, for text gestures. *)
 
-val edit : Flow.Check.catalog -> t -> Flow_graph.Flow_edit.op -> (t, Flow.Diagnostic.t) result
+val edit : Flow.Check.catalog -> t -> Flow_graph.Flow_edit.op -> (t, Diagnostic.t) result
 (** One gesture, atomically: the source is rewritten and re-checked, layout
     keys follow {!Flow_graph.Flow_edit.remap} and are pruned as in {!of_text}, and on an error
     nothing changes. *)

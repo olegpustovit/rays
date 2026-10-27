@@ -12,7 +12,7 @@ type shown = {
   key : path;  (** what the Selection tab shows and its apply writes: the selected binding's
                    path, else [[graph]] *)
   applied : string Lazy.t;  (** the whole document's text (the draft's dirty mark) *)
-  body : (Flow.Syntax.t * (int * Flow.Diagnostic.span) list) option;
+  body : (Flow.Syntax.t * (int * Diagnostic.span) list) option;
       (** the Graph tab's graph body and the spans of [text]: what the caret is looked up in *)
   source : Flow.Syntax.t list;
   spans : Flow.Lisp.spans;
@@ -33,7 +33,7 @@ type command = Find | Find_replace | Find_selection | Find_next | Find_previous 
 type request = { select : int * int; splice : (int * int * string) list }
 (** What the text area is asked once: replace the ranges (one undo step), then select. *)
 
-type checked = { at : string; found : Flow.Diagnostic.t list }
+type checked = { at : string; found : Diagnostic.t list }
 (** The diagnostics found in the text [at]. A later text shows one only while the text up to the end
     of its line (and its span) still reads the same, see {!visible}: no mark names a line it has
     drifted from. *)
@@ -41,7 +41,7 @@ type checked = { at : string; found : Flow.Diagnostic.t list }
 type slot = { gtext : string; gbase : Editor_document.Workspace_doc.t option; gerrors : checked }
 (** One graph's Graph tab draft, the document it began from and the errors of its last apply. *)
 
-type live = { seen : string; since : float; found : Flow.Diagnostic.t list option }
+type live = { seen : string; since : float; found : Diagnostic.t list option }
 (** The parse of a draft: [found] is [None] until [seen] has rested for the debounce, and belongs
     to [seen] alone (another text drops it). *)
 
@@ -75,7 +75,7 @@ val no_errors : checked
 
 val graph_slot : state -> string -> slot option
 
-val visible : checked -> string -> Flow.Diagnostic.t list
+val visible : checked -> string -> Diagnostic.t list
 (** The diagnostics of [checked] that still hold for a text. *)
 
 val live_delay : float
@@ -85,7 +85,7 @@ val binding : Flow.Syntax.t list -> path -> (Flow.Syntax.t option * Flow.Syntax.
 (** The binding a path names in the source: its pattern (none for a [@result]) and expression. *)
 
 val graph_op : Flow.Syntax.t list -> graph:string -> ?selection:path -> string ->
-  (Flow_graph.Flow_edit.op, Flow.Diagnostic.t) result
+  (Flow_graph.Flow_edit.op, Diagnostic.t) result
 (** The [Set_graph] of the graph form a Graph tab holds, or (with [selection], the shown binding's
     path) of the Selection closure patched into the graph; the error of text that is neither. *)
 
@@ -115,7 +115,7 @@ val shown : ?workspace:Editor_document.Workspace_doc.t -> state -> source:Flow.S
 (** {!make_shown} for the state's tab, cached by source, optional workspace, graph,
     selection and tab. A workspace includes saved layout and settings in the Document tab. *)
 
-val line_of : string -> Flow.Diagnostic.t -> int option
+val line_of : string -> Diagnostic.t -> int option
 (** The 1-based line of a diagnostic in the text it was checked from: its
     position, else its span. *)
 
@@ -131,7 +131,7 @@ val definition_at : shown -> int -> path option
 val cameras : Flow.Syntax.t list -> string -> string list
 (** The bindings of a scene graph that are [scene/camera] calls. *)
 
-val first_error : state -> Flow.Diagnostic.t option
+val first_error : state -> Diagnostic.t option
 
 val summary : state -> string
 (** One line for crash reports: tab, draft, first error and its line. *)
@@ -160,7 +160,7 @@ type intent =
   | Graph_scrub of string * string * bool
   | Binding_scrub of path * string * bool
   | Literal_scrub of { source : Flow.Syntax.t list; op : Flow_graph.Flow_edit.op;
-      position : Flow.Diagnostic.position; fallback : intent }
+      position : Diagnostic.position; fallback : intent }
       (** A token edit against the source shown by the pane. A stale source or
           unapplied draft takes the ordinary scrub/merge path. *)
   | Toggle_parinfer

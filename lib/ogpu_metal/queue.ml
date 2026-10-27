@@ -22,8 +22,7 @@ let error op kind message=Error(Ogpu_core.Error.make op kind message)
 (* The last few completed epochs' GPU durations, for profiling callers. *)
 let duration_capacity=16
 let remember_duration value epoch duration=
-  let rec take n=function[]->[]|x::rest->if n=0 then[]else x::take(n-1)rest in
-  value.durations<-take duration_capacity((epoch,duration)::value.durations)
+  value.durations<-List.take duration_capacity((epoch,duration)::value.durations)
 let gpu_duration value epoch=List.assoc_opt epoch value.durations
 let admit value=
   let operation="Ogpu_metal.Queue.submit_native"in

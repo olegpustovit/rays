@@ -46,11 +46,11 @@ let () =
     let codes = ref [] in
     Check.validate_parameter (fun severity code _ -> codes := (severity, code) :: !codes)
       parameter Check.{node = Literal (Param.Float_value expected); ty = Some Port_type.Float};
-    assert (!codes = [Diagnostic.Error, "E_NONFINITE"]);
+    assert (!codes = [Diagnostic.Error_severity, "E_NONFINITE"]);
     (try Value.validate (Value.Float_array [|expected|]); assert false
-     with Value.Fail (code, _, _) -> assert (code = "E_NONFINITE"));
+     with Diagnostic.Error d -> assert (d.code = "E_NONFINITE"));
     (try ignore (Value.coerce_to Ty.Int (Value.Float expected)); assert false
-     with Value.Fail (code, _, _) -> assert (code = "E_NONFINITE")))
+     with Diagnostic.Error d -> assert (d.code = "E_NONFINITE")))
     ["NaN", nan; "Infinity", infinity; "-Infinity", neg_infinity];
   List.iter (fun text -> assert (Syntax.number_value text = None)) ["nan"; "inf"; "1e999"];
   List.iter (fun text -> assert (not (Syntax.number text))) ["nan"; "inf"];

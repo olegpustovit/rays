@@ -6,7 +6,7 @@ type geometry = { vertices:float array; indices:int array; color:int32 }
 type image = { resource_id:int; source:rect; destination:rect }
 type glyph = { glyph_id:int; x:float; y:float }
 type glyphs = { resource_id:int; color:int32; glyphs:glyph array }
-type command = Clear of int32 | Set_blend of blend | Push_clip of rect | Pop_clip | Push_transform of transform | Pop_transform | Geometry of geometry | Shapes of Shape_batch.t | Image of image | Glyphs of glyphs
+type command = Clear of int32 | Set_blend of blend | Push_clip of rect | Pop_clip | Push_transform of transform | Pop_transform | Geometry of geometry | Shapes of Ui_batch.t | Image of image | Glyphs of glyphs
 type t
 type error = Non_finite | Invalid_extent | Invalid_cardinality | Invalid_index of int | Invalid_resource_id of int | Invalid_glyph_id of int | Unbalanced_clip | Unbalanced_transform | Complexity_limit
 val create : command array -> (t,error) result

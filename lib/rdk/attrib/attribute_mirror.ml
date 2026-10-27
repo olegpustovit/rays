@@ -7,8 +7,8 @@ type group_use = Mirror_group_as_source | Mirror_group_as_destination
 
 type method_ =
   | Mirror_by_plane of {
-      origin : Vec3.t;
-      normal : Vec3.t;
+      origin : Rays_math.Vec3.t;
+      normal : Rays_math.Vec3.t;
       distance : float;
       tolerance : float;
     }
@@ -82,8 +82,8 @@ let validate_name label = function
   | Some _ -> ()
 
 let resolve_plane origin normal distance tolerance =
-  let ox = origin.Vec3.x and oy = origin.y and oz = origin.z
-  and nx = normal.Vec3.x and ny = normal.y and nz = normal.z in
+  let ox = origin.Rays_math.Vec3.x and oy = origin.y and oz = origin.z
+  and nx = normal.Rays_math.Vec3.x and ny = normal.y and nz = normal.z in
   if not (Float.is_finite ox && Float.is_finite oy && Float.is_finite oz
       && Float.is_finite nx && Float.is_finite ny && Float.is_finite nz
       && Float.is_finite distance && Float.is_finite tolerance)

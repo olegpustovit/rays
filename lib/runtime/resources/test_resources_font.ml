@@ -1,4 +1,5 @@
 open Runtime_resources
+open Ogpu.Error
 let get=function Ok x->x|Error e->failwith(Format.asprintf"%a"pp_error e)
 let run () =
   let font=get(Font.open_system~size:14.)in

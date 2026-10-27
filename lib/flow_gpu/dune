@@ -1,46 +1,58 @@
-(copy_files ../flow_ir/test_program.ml)
-
 (library
  (name flow_gpu)
  (public_name rays.flow_gpu)
- (modules emit pipelines run host image_sink)
- (libraries flow flow_ir ogpu rays_execution rays_math lru))
+ (modules emit spirv pipelines run host image_sink)
+ (libraries flow flow_ir ogpu renderer rays_math lru parallel))
+
+(test
+ (name test_spirv)
+ (modules test_spirv)
+ (deps goldens/spirv.sexp)
+ (libraries flow_gpu flow_ir flow_ir_test_support ogpu_mock))
 
 (test
  (name test_emit)
- (modules test_emit test_program)
+ (modules test_emit)
  (deps (glob_files goldens/*.metal))
- (libraries flow_gpu flow flow_ir rays_math))
+ (libraries flow_gpu flow flow_ir flow_ir_test_support flow_web rays_math ogpu_mock parallel))
 
 (executable
+ (enabled_if (= %{system} macosx))
  (name test_run)
- (modules test_run test_program)
- (libraries flow_gpu flow flow_ir rays_execution ogpu scene_command frame_input unix))
+ (modules test_run)
+ (libraries flow_gpu flow flow_ir flow_ir_test_support renderer ogpu ogpu_metal scene_command input unix parallel))
 
 (rule
- (alias runtest-native)
+ (enabled_if (= %{system} macosx))
+ (alias test_run)
  (action (run %{exe:test_run.exe})))
 
+(alias
+ (name runtest-native)
+ (deps (alias test_run)))
+
 (executable
+ (enabled_if (= %{system} macosx))
  (name test_image_sink_native)
- (modules test_image_sink_native test_program)
- (libraries flow_gpu flow flow_ir flow_sop sop rays rays_execution ogpu unix))
+ (modules test_image_sink_native)
+ (libraries flow_gpu flow flow_ir flow_ir_test_support flow_sop sop rays rays_math renderer ogpu ogpu_metal unix parallel))
 
 (rule
+ (enabled_if (= %{system} macosx))
  (alias runtest-native)
  (action (run %{exe:test_image_sink_native.exe})))
 
 (test
  (name test_pipelines)
- (modules test_pipelines test_program)
- (libraries flow_gpu flow flow_ir ogpu_mock unix))
+ (modules test_pipelines)
+ (libraries flow_gpu flow flow_ir flow_ir_test_support ogpu_mock unix parallel))
 
 (test
  (name test_run_lifetime)
- (modules test_run_lifetime test_program)
- (libraries flow_gpu flow flow_ir ogpu_mock unix))
+ (modules test_run_lifetime)
+ (libraries flow_gpu flow flow_ir flow_ir_test_support ogpu_mock unix parallel))
 
 (test
  (name test_image_sink)
- (modules test_image_sink test_program)
- (libraries flow_gpu flow flow_ir ogpu_mock unix))
+ (modules test_image_sink)
+ (libraries flow_gpu flow flow_ir flow_ir_test_support ogpu_mock unix parallel))

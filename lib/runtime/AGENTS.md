@@ -3,12 +3,16 @@
 ## Library ownership boundaries
 
 - `rays` owns target-independent application semantics: `Sketch`, immutable
-  `Frame` facts, pure `Scene` data, public `Event`/`Input`, resource APIs, and
-  renderer behavior. It may call the narrow `runtime` lifecycle/presentation
-  boundary, but it must not implement HTTP, WebSocket, DOM, or browser policy.
+  `Frame` facts, pure `Scene` data, shared `Input`, resource APIs, and
+  renderer behavior. It uses Renderer for GPU execution and Runtime for the
+  window and input boundary.
 - `runtime` owns SDL3 subsystem lifetime, native environment setup/restoration,
-  Metal surface presentation scheduling, and typed event translation. It must
-  not own widgets, scene constructors, or application models.
+  windows/views, logical/drawable frame facts and presentation facts.
+  `runtime_input` owns typed event translation. Runtime never owns GPU
+  pipelines, targets, render statistics, readback, widgets or application models.
+- `renderer` owns the merged prepared execution core (`Scene_execution`),
+  pipelines, GPU submission/presentation, targets and bounded lowering caches.
+  It destroys GPU resources before Runtime destroys the window/view/SDL.
 - Sibling libraries such as `pxui` depend only on public `rays` semantics.
   PXUI represents text-entry intent as pure `Scene` metadata; it must never
   call native runtime modules or inspect platform internals.
@@ -19,16 +23,16 @@
 
 ## Native runtime contract
 
-- Runtime has one native Metal lifecycle: initialize SDL3 on the initial
-  domain, create the high-DPI Metal view and `ogpu_metal_native` surface, translate
-  events, acquire/present drawables, drain completion/deferred release, then
-  destroy GPU resources before the view/window/SDL.
+- Runtime initializes SDL3 on the initial domain and creates the high-DPI view
+  and layer token. Renderer creates the OGPU driver and presentation surface,
+  acquires/presents drawables and drains completion/deferred release, then
+  destroys GPU resources before Runtime releases the view/window/SDL.
 - Native fixed-pipeline `Scene3` meshes render through Metal with hardware
-  transforms, depth/stencil, lighting, culling, blending, and window MSAA.
+  transforms, depth, lighting, culling, blending, and window MSAA.
   Functional shaders require typed MSL/IR support or return a typed
   unsupported-feature error.
-- Native GPU access and packed mesh caches belong to `rays`, stay on the
-  initial domain, submit through `ogpu_metal_native`, and remain strictly bounded
+- Native GPU access and packed mesh caches belong to `renderer`, stay on the
+  initial domain, submit through the virtual `ogpu` API, and remain strictly bounded
   under changing procedural meshes. Verify more than the first presented frame.
 - A compatible native Metal device and surface are required. Their absence must
   return a typed startup error.
@@ -38,20 +42,23 @@
 
 ## Input translation
 
-`Runtime_input` events come from `Sdl3.Event.t` in `Runtime_input_sdl3.translate`:
-keys are the binding's `Sdl3.Key.t` (the keycode is mapped once, in the stubs),
-zero or negative sizes a minimizing window reports are dropped, `Occluded`,
+`Runtime_input` queues the shared `Input.event` type. `Runtime_input_sdl3.translate`
+maps `Sdl3.Event.t` and the binding's keys, buttons and phases into it once;
+Rays and the editor consume those variants directly. Lisp serialization alone
+turns keys, buttons and phases into their canonical string names.
+Zero or negative sizes a minimizing window reports are dropped, `Occluded`,
 `Hidden` and `Minimized` are `Visibility_changed false`, only a pinch update
-carries a zoom factor, a phased trackpad scroll is `Scroll` beside the `Wheel` SDL makes of it
-(only `Wheel` feeds `wheel_delta`), and a drag over the window, a dropped file and a finished
-file dialog are `File_dragged`, `File_dropped` and `Dialog_closed`. The pump
+carries a zoom factor, a phased trackpad scroll is `Trackpad_scrolled` beside
+the `Scrolled` event SDL makes of it, and a drag over the window, a dropped
+file and a finished file dialog are `File_drag_moved`, `File_dropped` and
+`File_dialog`. The pump
 returns the first rejected event as an error and still delivers the rest;
 `Sketch` fails loudly on it.
 
 ## High-DPI and coordinate contract
 
-- Treat `Sketch` configuration sizes, `Frame.width`/`height`, `Scene`
-  coordinates, `Frame.mouse`, mouse event positions, and PXUI layout as
+- Treat `Sketch` configuration sizes, `Frame.input.size`, `Scene`
+  coordinates, `Frame.input.pointer`, mouse event positions, and PXUI layout as
   logical points in one shared coordinate system.
 - Keep SDL3 logical size synchronized with the actual window size.
   `SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED` is authoritative: the input pump reports

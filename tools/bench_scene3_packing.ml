@@ -9,7 +9,7 @@ let () =
   let normals : Mesh.Private.vec3_view = {
     x = Array.make count 0.; y = Array.make count 0.; z = Array.make count 1. } in
   let indices = Array.init count Fun.id in
-  let camera = Camera.orthographic ~height:2. ~at:(Vec3.create 0. 0. 2.) ~target:Vec3.zero () in
+  let camera = Camera.orthographic ~height:2. ~at:(Rays_math.Vec3.create 0. 0. 2.) ~target:Rays_math.Vec3.zero () in
   let vertex_bytes = ref 0 and index_bytes = ref 0 in
   let samples = Array.init repeats (fun _ ->
     let vertices : Mesh.Private.vec3_view = {
@@ -22,9 +22,9 @@ let () =
     let seconds = Unix.gettimeofday () -. started in
     let allocated = Gc.allocated_bytes () -. allocated in
     let prepared = List.hd staged.scene3 in
-    vertex_bytes := Array.fold_left (fun n entry -> n + Bytes.length entry.Scene_execution.draw.mesh.vertices+
+    vertex_bytes := Array.fold_left (fun n entry -> n + Bytes.length entry.Renderer.Scene_execution.draw.mesh.vertices+
       Option.fold ~none:0 ~some:(fun(_,bytes)->Bytes.length bytes)entry.vertex_attributes) 0 prepared.entries;
-    index_bytes := Array.fold_left (fun n entry -> n + Bytes.length entry.Scene_execution.draw.mesh.indices) 0 prepared.entries;
+    index_bytes := Array.fold_left (fun n entry -> n + Bytes.length entry.Renderer.Scene_execution.draw.mesh.indices) 0 prepared.entries;
     seconds, allocated) in
   let times = Array.map fst samples and allocations = Array.map snd samples in
   Array.sort Float.compare times; Array.sort Float.compare allocations;

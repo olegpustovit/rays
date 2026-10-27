@@ -3,7 +3,7 @@ against the region goldens at 1 and 8 workers, and the resident fold's bookkeepi
 Without node the checks are skipped, and the message goes to stderr.
 
   $ if command -v node >/dev/null 2>&1; then
-  >   { node ../../web/test/runtime.mjs ../../web/runtime/runtime.js && node ../../web/test/workers.mjs ../../web/runtime/workers.js ../../../lib/flow_web/goldens && node ../../web/test/resident.mjs "$PWD/../../web/runtime/resident.js" "$PWD/../../web/runtime/prims.js"; } > out.txt 2>&1 || { cat out.txt; exit 1; }
+  >   { node ../../web/test/runtime.mjs ../../../lib/web_export/runtime/runtime.js && node ../../web/test/workers.mjs ../../../lib/web_export/runtime/workers.js ../../../lib/flow_web/goldens && node ../../web/test/resident.mjs "$PWD/../../../lib/web_export/runtime/resident.js" "$PWD/../../../lib/web_export/runtime/prims.js"; } > out.txt 2>&1 || { cat out.txt; exit 1; }
   > else
   >   echo "node not found: skipping web runtime tests" >&2
   > fi 2>/dev/null
@@ -14,7 +14,7 @@ The path tessellation of the web runtime (shape2.js) against the native Scene_co
 colours exactly, vertices within 1e-12.
 
   $ if command -v node >/dev/null 2>&1; then
-  >   ../../shape2_fixtures.exe shape2.json > out.txt 2>&1 && node ../../web/test/shape2.mjs shape2.json ../../web/runtime/shape2.js >> out.txt 2>&1 || { cat out.txt; exit 1; }
+  >   ../../shape2_fixtures.exe shape2.json > out.txt 2>&1 && node ../../web/test/shape2.mjs shape2.json ../../../lib/web_export/runtime/shape2.js >> out.txt 2>&1 || { cat out.txt; exit 1; }
   > else
   >   echo "node not found: skipping web shape tessellation" >&2
   > fi 2>/dev/null

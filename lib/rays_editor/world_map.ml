@@ -11,8 +11,7 @@ let map_rgba (baked : World.baked) =
   let rgba = Bytes.create (width * height * 4) in
   let exposure = 2. ** baked.exposure in
   let channel value =
-    let c = value *. exposure in
-    let c = c *. (2.51 *. c +. 0.03) /. (c *. (2.43 *. c +. 0.59) +. 0.14) in
+    let c = Rays_math.Color.aces (value *. exposure) in
     Char.chr (int_of_float (Float.pow (Float.max 0. (Float.min 1. c)) (1. /. 2.2)
       *. 255. +. 0.5)) in
   for y = 0 to height - 1 do
@@ -48,7 +47,7 @@ let world_operation core area point ~shift =
   match Core.world_id core with
   | Some world when core.Core.map_view && map_uv area point <> None ->
       (match Core.selected_node core with
-       | Some node when List.exists (fun (field : Parameter.field_view) ->
+       | Some node when List.exists (fun (field : Param.field_view) ->
            field.name = "azimuth") (Node.parameter_fields node) ->
            Some (Move_layer (world, Node.id node))
        | Some node when Node.operation node = "sun" -> Some (Move_sun world)
@@ -61,14 +60,14 @@ let move_world core drag point =
   match drag.operation with
   | Rotate_world world ->
       (match Option.bind (Edit_graph.find (Core.scene core) ~node_id:world)
-          (fun node -> List.find_map (fun (field : Parameter.field_view) ->
+          (fun node -> List.find_map (fun (field : Param.field_view) ->
             match field.name, field.current with
-            | "rotation", Parameter.Float_value value -> Some value | _ -> None)
+            | "rotation", Param.Float_value value -> Some value | _ -> None)
             (Node.parameter_fields node)) with
        | Some rotation ->
            let rotation = wrap_degrees (rotation +. 0.5 *. (fst point -. fst drag.point)) in
            Core.edit_node core Document.Scene world ~label:"Rotate World"
-             ["rotation", Parameter.Float_value rotation]
+             ["rotation", Param.Float_value rotation]
        | None -> core)
   | Move_layer (world, _) | Move_sun world ->
       let x, y, w, h = map_rect drag.area in
@@ -78,17 +77,17 @@ let move_world core drag point =
       let rotation = match Core.world core ~time:0. with
         | Some world -> world.World.rotation | None -> 0. in
       let degrees radians = radians *. 180. /. Float.pi in
-      let azimuth = wrap_degrees (degrees (Float.atan2 direction.Vec3.x (-. direction.z)
+      let azimuth = wrap_degrees (degrees (Float.atan2 direction.Rays_math.Vec3.x (-. direction.z)
         -. rotation))
       and elevation = degrees (Float.asin direction.y) in
       (match drag.operation with
        | Move_layer (_, id) ->
            Core.edit_node core (Document.Inside world) id ~label:"Move layer"
-             ["azimuth", Parameter.Float_value azimuth;
-              "elevation", Parameter.Float_value elevation]
+             ["azimuth", Param.Float_value azimuth;
+              "elevation", Param.Float_value elevation]
        | Move_sun _ ->
            Core.edit_node core Document.Scene world ~label:"Move sun"
-             ["sun_linked", Parameter.Bool_value false;
-              "sun_azimuth", Parameter.Float_value azimuth;
-              "sun_elevation", Parameter.Float_value (Float.max (-10.) elevation)]
+             ["sun_linked", Param.Bool_value false;
+              "sun_azimuth", Param.Float_value azimuth;
+              "sun_elevation", Param.Float_value (Float.max (-10.) elevation)]
        | Rotate_world _ -> assert false)

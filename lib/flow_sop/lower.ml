@@ -19,6 +19,7 @@ type graph = {
   network : Network.t; root : int option;
 }
 type t = {
+  gpu : Flow_ir.Gpu.config;
   graphs : graph list;
   factories : Edit.factory list;
   compiled_ids : int Instance_path.Map.t;
@@ -38,21 +39,21 @@ type t = {
   preview : node:int -> probes:int list -> Network.t -> (Network.t * int) option;
 }
 
-exception Fail of Diagnostic.t
-exception Body_error of Diagnostic.t
-let fail code message = raise (Fail (Diagnostic.error ~code message))
-let ok = function Ok value -> value | Error diagnostic -> raise (Fail diagnostic)
+let fail code message = raise (Diagnostic.Error (Diagnostic.error ~code message))
+let ok = function Ok value -> value | Error diagnostic -> raise (Diagnostic.Error diagnostic)
 let edit = function Ok value -> value | Error message -> fail "E_LOWER" message
 
 type image_context = {compiled:int Network.Int_map.t; network:Network.t}
 
-type image_resolver = ?context:image_context -> E.plan -> state:E.state -> live:Frame_input.t -> E.value ->
+type image_resolver = ?gpu:Flow_ir.Gpu.config -> ?context:image_context -> E.plan -> state:E.state -> live:Input.t -> E.value ->
   (Sop.Image.t, Diagnostic.t) result
 type images = {resolve:image_resolver; metadata:E.plan -> int -> (int * int) option}
 let image_provider = Domain.DLS.new_key (fun () -> None)
-let with_images ?(metadata=fun _ _->None) resolver run =
+let with_images ?gpu ?(metadata=fun _ _->None) resolver run =
   let previous=Domain.DLS.get image_provider in
-  Domain.DLS.set image_provider (Some {resolve=resolver;metadata});
+  Domain.DLS.set image_provider (Some {resolve=(fun ?gpu:requested ?context plan ~state ~live value->
+    let gpu=match requested with Some _->requested|None->gpu in
+    resolver ?gpu ?context plan ~state ~live value);metadata});
   Fun.protect ~finally:(fun()->Domain.DLS.set image_provider previous) run
 let image_metadata plan = match Domain.DLS.get image_provider with
   |None->(fun _->None)|Some images->images.metadata plan
@@ -61,8 +62,8 @@ let resource_image operation result =
     ~parameters:(match result with Ok image->string_of_int(Sop.Image.data_id image)|Error _->"unbound")
     ~cook_mode:Sop.Node.Generator ~dependencies:Sop.Context.Dependencies.static ~inputs:[||]
     (fun ~node_id:_ _ _->match result with
-      |Ok image->Ok Sop.Node.Private.{payload=Sop.Payload.Image image;instances=None;diagnostics=[]}
-      |Error diagnostic->Error(Diagnostic_bridge.to_sop diagnostic))
+      |Ok image->Ok Sop.Node.Private.{payload=Sop.Payload.Image image;instances=None}
+      |Error diagnostic->Error diagnostic)
 
 type kernel_input = {index : int; cid : int; identity : int;
   signature : Ty.fn_signature; fn : E.fn; sources : int list}
@@ -113,16 +114,428 @@ let changes_of (parameter : Port.parameter) value =
       if not finite then fail "E_LOWER" ("Port " ^ parameter.path ^ " takes a finite number");
       snd (ok (Port.normalize parameter (typed value)))
 
-let changes parameter value = try Ok (changes_of parameter value) with Fail d -> Error d
+let changes parameter value = try Ok (changes_of parameter value) with Diagnostic.Error d -> Error d
 
 let at_zero value =
-  if E.is_live value then ok (E.force value ~live:(Frame_input.at_time (0.))) else value
+  if E.is_live value then ok (E.force value ~live:(Input.at_time (0.))) else value
 
 let is_zone kind = kind = "zone/points" || kind = "zone/pieces"
+let metadata_lowering_operations =
+  Operators.all
+  |> List.map (fun (operation : Op.t) -> operation.name)
+  |> List.filter (fun name ->
+    List.mem name ["sop/rename_attr"; "sop/swap_attr"; "sop/delete_attrs";
+      "sop/rename_group"; "sop/delete_group"; "sop/rename_edge"; "sop/delete_edge"])
+
+let metadata_factory ~operation ~args sources =
+  let text name default = match List.assoc_opt name args with
+    | None -> default | Some (E.Text text) -> text
+    | _ -> fail "E_METADATA_TEXT" "Metadata names and patterns must be static text" in
+  let bool name = match List.assoc_opt name args with
+    | None -> false | Some (E.Bool value) -> value
+    | _ -> fail "E_METADATA_BOOL" "Metadata flags must be static booleans" in
+  let build = function
+    | input :: rest -> (match operation with
+      | "sop/rename_attr" -> Attribute_metadata.rename ~owner:(text "owner" "any")
+          ~pattern:(text "pattern" "") ~replacement:(text "replacement" "")
+          ~conflict:(text "conflict" "error") input
+      | "sop/swap_attr" -> Attribute_metadata.swap ~owner:(text "owner" "point")
+          ~source:(text "source" "") ~destination:(text "destination" "")
+          ~method_:(text "method" "swap") input
+      | "sop/delete_attrs" -> Attribute_metadata.delete_attributes
+          ?reference:(List.nth_opt rest 0) ~inverse:(bool "inverse")
+          ~point:(text "point" "") ~vertex:(text "vertex" "")
+          ~primitive:(text "primitive" "") ~detail:(text "detail" "") input
+      | "sop/rename_group" -> Attribute_metadata.rename_group ~owner:(text "owner" "any")
+          ~pattern:(text "pattern" "") ~replacement:(text "replacement" "")
+          ~conflict:(text "conflict" "error") input
+      | "sop/delete_group" -> Attribute_metadata.delete_group ~owner:(text "owner" "any")
+          ~pattern:(text "pattern" "") ~unused:(bool "unused") input
+      | "sop/rename_edge" -> Attribute_metadata.rename_edge
+          ~from:(text "pattern" "") ~into:(text "replacement" "") input
+      | "sop/delete_edge" -> Attribute_metadata.delete_edge ~name:(text "name" "") input
+      | _ -> fail "E_LOWER" ("No metadata lowering for " ^ operation))
+    | [] -> invalid_arg "Metadata operations require geometry" in
+  Edit.factory ~key:operation ~label:operation ~category:["Flow"; "Metadata"]
+    ~arity:(List.length sources) build
+
+let geometry_array_operations =
+  let native = ["sop/mesh"; "sop/mesh_planes"; "sop/remap"; "sop/concat"; "sop/with_planes"] in
+  Operators.all |> List.filter_map (fun (operation : Op.t) ->
+    if List.mem operation.name native then Some operation.name else None)
+let is_geometry_arrays kind = List.mem kind geometry_array_operations
+let geometry_arrays_key = function
+  | "sop/remap" -> "flow.remap" | "sop/concat" -> "flow.concat"
+  | "sop/with_planes" -> "flow.with_planes" | _ -> "flow.mesh"
+let geometry_arrays_label = function
+  | "sop/remap" -> "Remap" | "sop/concat" -> "Concat"
+  | "sop/with_planes" -> "With planes" | _ -> "Mesh"
+let geometry_arrays_data args =
+  E.Record (List.filter (fun (name, _) ->
+    not (List.mem name ["source"; "target"; "sources"; "geometry"])) args)
+
+let geometry_arrays_node ~profile ~strict_body ~reference ~approx ~kernel_source
+    ?(host = false) ?state ?elems ~operation ~args ~sources inputs =
+  let data = geometry_arrays_data args in
+  let program = Attribute_kernel.prepare ~profile ~strict:strict_body ~approx
+    ~sink:Flow_ir.Sop_input ~sources inputs data in
+  if strict_body then ignore (ok program);
+  let parameters = Lazy.force kernel_source ^
+    (match operation with
+     | "sop/remap" -> ";remap;" | "sop/concat" -> ";concat;"
+     | "sop/with_planes" -> ";planes;" | _ -> ";mesh;") ^
+    (if host then "host" ^ string_of_int (Atomic.fetch_and_add host_serial 1)
+     else Flow.Value.key_of ~residual:E.Residual.residual_id data) ^
+    Option.fold ~none:"" ~some:E.state_stamp state ^
+    Option.fold ~none:"" ~some:(fun fields ->
+      Flow.Value.key_of ~residual:E.Residual.residual_id (E.Record fields)) elems in
+  let node = Sop.Node.Private.make_geometry ~label:(geometry_arrays_label operation)
+    ~operation:(geometry_arrays_key operation) ~version:1 ~parameters
+    ~cook_mode:(if List.mem operation ["sop/remap"; "sop/concat"; "sop/with_planes"]
+      then Sop.Node.Generic else Sop.Node.Generator)
+    ~dependencies:(if E.frame_dependent data then Sop.Context.Dependencies.one Input
+      else Sop.Context.Dependencies.static) ~inputs:(Array.of_list inputs)
+    (fun ~node_id:_ context geometries ->
+      let cancelled () = Sop.Context.cancelled context in
+      let error () = Error (Diagnostic.error ~code:"E_CANCELLED" "Mesh kernel cancelled.") in
+      let geometry id = Option.map (fun index -> geometries.(index))
+        (List.find_index ((=) id) sources) in
+      let result = if cancelled () then error () else Result.bind program (fun program ->
+        Result.bind (Flow_ir.Executor.force ?state ?elems ~reference ~strict:strict_body
+          ~resolve:(Attribute_kernel.resolve ~geometry) program ~live:(Sop.Context.input context))
+          (function
+            | E.Record fields ->
+                if cancelled () then error () else
+                let result = if operation = "sop/with_planes" then
+                    (match List.assoc_opt "geometry" args with
+                     | Some (E.Deferred (ty, id)) when ty = Ty.geometry && geometry id <> None ->
+                         Attribute_kernel.with_planes ~grain:(Sop.Context.grain context)
+                           (Option.get (geometry id)) fields
+                     | _ -> Error (Diagnostic.error ~code:"E_DATA_SOURCE"
+                         "With planes needs a cooked geometry."))
+                  else if operation = "sop/concat" then
+                    let rec collect result = function
+                      | [] -> Ok (List.rev result)
+                      | E.No_geo :: rest -> collect result rest
+                      | E.Deferred (ty, id) :: rest when ty = Ty.geometry ->
+                          (match geometry id with
+                           | Some value -> collect (value :: result) rest
+                           | None -> Error (Diagnostic.error ~code:"E_DATA_SOURCE"
+                               "Concat needs cooked source geometries."))
+                      | _ -> Error (Diagnostic.error ~code:"E_CONCAT_TYPE"
+                          "Concat sources must be a geometry list.") in
+                    Result.bind (match List.assoc_opt "sources" args with
+                      | Some (E.List values) -> collect [] (Array.to_list values)
+                      | _ -> Error (Diagnostic.error ~code:"E_CONCAT_TYPE"
+                          "Concat sources must be a geometry list.")) (fun sources ->
+                      Topology_kernel_impl.concat ~cancel:(Sop.Context.cancel_token context)
+                        ~grain:(Sop.Context.grain context) ~sources fields)
+                  else if operation <> "sop/remap" then Topology_kernel.mesh fields
+                  else
+                    let cooked name = match List.assoc_opt name args with
+                      | Some (E.Deferred (ty, id)) when ty = Ty.geometry ->
+                          (match geometry id with
+                           | Some geometry -> Ok geometry
+                           | None -> Error (Diagnostic.error ~code:"E_DATA_SOURCE"
+                               "Remap needs two cooked geometries."))
+                      | _ -> Error (Diagnostic.error ~code:"E_DATA_SOURCE"
+                          "Remap needs two cooked geometries.") in
+                    Result.bind (cooked "source") (fun source ->
+                      Result.bind (cooked "target") (fun target ->
+                        Topology_kernel_impl.remap ~cancel:(Sop.Context.cancel_token context)
+                          ~grain:(Sop.Context.grain context) ~source ~target fields)) in
+                Result.bind result (fun geometry ->
+                  if cancelled () then error () else Ok geometry)
+            | _ -> Error (Diagnostic.error ~code:"E_TOPOLOGY_TYPE" "Mesh data must be a record."))) in
+      Result.map (fun geometry -> Sop.Node.Private.{geometry; instances=None}) result) in
+  Sop.Node.Private.with_facts {(Sop.Node.facts node) with
+    reads=(if List.mem operation ["sop/remap"; "sop/concat"; "sop/with_planes"]
+      then ["*"] else Attribute_kernel.reads data);
+    writes=["*"]; topology=Changed; elementwise=None} node
+
+let attribute_options args =
+  let text key default code = match List.assoc_opt key args with
+    | None -> default | Some (E.Text text) -> text
+    | _ -> fail code ("Attribute " ^ key ^ " must be static text") in
+  let owner = ok (Attribute_kernel.owner (text "owner" "point" "E_ATTR_OWNER"))
+  and kind = text "type" "vec3" "E_ATTR_TYPE" in
+  ignore (ok (Attribute_kernel.value_type kind)); owner, kind
+let group_data args = E.Record (List.filter (fun (name, _) -> name="values" || name="order") args)
+let attribute_data args =
+  if not (List.mem_assoc "selection" args || List.mem_assoc "default" args) then
+    List.assoc "values" args
+  else E.Record (List.filter (fun (name, _) ->
+    List.mem name ["values"; "selection"; "default"]) args)
+
+let attribute_node ~strict_body ~reference ~profile ~approx ~gpu ~kernel_source
+    ?state ?elems ?selection ?default ?(owner=Rdk.Attribute.Point) ?(kind="vec3")
+    ~name ~values ~sources inputs =
+  if strict_body then ignore (ok (Attribute_kernel.prepare ~strict:true ~sources inputs values));
+  Attribute_kernel.node ?state ?elems ?selection ?default ~gpu ~strict:strict_body ~reference
+    ~profile ~approx ~owner ~kind ~source:(Lazy.force kernel_source)
+    ~name ~values ~sources inputs
+
+let group_node ~strict_body ~reference ~profile ~approx ~kernel_source
+    ?state ?elems ~args ~sources inputs =
+  let text key default = match List.assoc_opt key args with
+    | None -> default | Some (E.Text text) -> text
+    | _ -> fail "E_GROUP_TYPE" ("Group " ^ key ^ " must be static text") in
+  let owner_name = text "owner" "point" and name = text "name" "" in
+  let owner = ok (Group_kernel.owner owner_name) and values = group_data args in
+  let program = Attribute_kernel.prepare ~profile ~strict:strict_body ~sources inputs values in
+  if strict_body then ignore (ok program);
+  let node = Sop.Node.Private.make_geometry ~label:("Write group " ^ name)
+    ~operation:"flow.with_group" ~version:1
+    ~parameters:(Lazy.force kernel_source ^ owner_name ^ ":" ^ name ^
+      Flow.Value.key_of ~residual:E.Residual.residual_id values ^
+      Option.fold ~none:"" ~some:E.state_stamp state)
+    ~cook_mode:Sop.Node.Generic
+    ~dependencies:(if E.frame_dependent values then Sop.Context.Dependencies.one Input
+      else Sop.Context.Dependencies.static)
+    ~inputs:(Array.of_list inputs)
+    (fun ~node_id:_ context geometries ->
+      let result = if geometries=[||] || List.assoc "geometry" args=E.No_geo then
+          Error (Diagnostic.error ~code:"E_DATA_SOURCE" "Group write needs geometry.")
+        else if Sop.Context.cancelled context then
+          Error (Diagnostic.error ~code:"E_CANCELLED" "Group kernel cancelled.")
+        else Result.bind program (fun program ->
+          let geometry id = Option.map (fun index -> geometries.(index))
+            (List.find_index ((=) id) sources) in
+          Result.bind (Flow_ir.Executor.force ?state ?elems ~reference ~strict:strict_body
+            ~resolve:(Attribute_kernel.resolve ~geometry) program ~live:(Sop.Context.input context))
+            (function
+              | E.Record fields ->
+                  let order = match List.assoc_opt "order" fields with
+                    | None -> Ok None
+                    | Some (E.Int_array order) -> Ok (Some order)
+                    | Some (E.Record fields) ->
+                        (match List.assoc_opt "ordered" fields,List.assoc_opt "indices" fields with
+                         | Some (E.Bool ordered),Some (E.Int_array indices) ->
+                             Ok (if ordered then Some indices else None)
+                         | _ -> Error (Diagnostic.error ~code:"E_GROUP_ORDER"
+                             "Group order requires an integer array or an ordered/indices record."))
+                    | _ -> Error (Diagnostic.error ~code:"E_GROUP_ORDER"
+                        "Group order requires an integer array or an ordered/indices record.") in
+                  Result.bind order (fun order -> match List.assoc_opt "values" fields with
+                    | Some (E.Int_array mask) -> Group_kernel.write ?order ~owner ~name mask geometries.(0)
+                    | _ -> Error (Diagnostic.error ~code:"E_GROUP_MASK"
+                        "Group mask requires an integer array."))
+              | _ -> assert false)) in
+      Result.map (fun geometry -> Sop.Node.Private.{geometry; instances=None}) result) in
+  Sop.Node.Private.with_facts {(Sop.Node.facts node) with
+    topology=Preserved; reads=["*"]; writes=["*"]} node
+
+let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
+    ~(definition : Workspace.node_definition) ~provenance
+    ~label ~context ~inputs ~parameters ~bindings ~functions ~factories ~def_context_use =
+  Phase_timer.without (fun () ->
+    let rec function_elements = function
+      | E.Fn fn -> [fn]
+      | E.List values -> Array.to_list values |> List.concat_map function_elements
+      | _ -> [] in
+    let make_capture_factories aliases = List.mapi (fun index input ->
+      let key = "lisp_capture_" ^ string_of_int index in
+      let factory = Edit.factory ~key ~label:key ~category:["Flow"] ~arity:0
+        (fun _ -> Sop.Node.Private.make ~operation:key ~version:1
+          ~parameters:(string_of_int (Sop.Node.id input)) ~cook_mode:Sop.Node.Generator
+          ~dependencies:Sop.Context.Dependencies.static ~inputs:[||]
+          (fun ~node_id:_ _ _ -> Result.map (fun payload ->
+            let payload = match payload, List.assoc_opt index aliases with
+              | Sop.Payload.Kernel kernel, Some sources ->
+                  Sop.Payload.Kernel (Sop.Kernel.Private.remap_geometry_captures ~sources kernel)
+              | _ -> payload in
+            Sop.Node.Private.{payload;instances=None}) (Lisp_node.input index))) in
+      key, factory) inputs in
+    let capture_factories = make_capture_factories [] in
+    let body = Context_kernel.specialize ?provenance ~label ~context definition.body in
+    let body = {body with inputs=List.map (fun (name, ty, default) ->
+      let default = match List.assoc_opt name bindings with
+        | None -> default
+        | Some indices ->
+            let element_ty = match ty with Ty.List element -> element | _ -> ty in
+            let capture index = let key,_=List.nth capture_factories index in
+              Workspace.{path=None;ty=element_ty;form=Syntax.make (List []);
+                node=Call {kind="sop/" ^ key;
+                  ctx=(if element_ty=Ty.image then Context.image else Context.sop);args=[]}} in
+            let node = match ty,indices with
+              | Ty.List _, _ -> Workspace.List_lit (List.map capture indices)
+              | _, [index] -> (capture index).node
+              | _, [] -> Workspace.Nil
+              | _ -> fail "E_LOWER" "A fixed Lisp slot has several inputs" in
+            Some Workspace.{path=None;ty;form=Syntax.make (List []);node} in
+      name, ty, default) body.inputs} in
+    let forwarded = List.concat_map (fun (name,value) ->
+      let fns = function_elements value and indices = Option.value ~default:[] (List.assoc_opt name bindings) in
+      if List.compare_lengths fns indices <> 0 then fail "E_LOWER" "Callable slots do not match their cooked inputs";
+      List.mapi (fun offset (fn,index) ->
+        Printf.sprintf "lisp_kernel_%s_%d" name offset,fn,index) (List.combine fns indices)) functions in
+    let geometry_captures = List.concat_map (fun (_,fn,index) ->
+      Attribute_kernel.sources (E.Fn fn) |> List.map (fun source ->
+        let key = Printf.sprintf "lisp_capture_geometry_%d_%d" index source in
+        let factory = Edit.factory ~key ~label:key ~category:["Flow"] ~arity:0
+          (fun _ -> Sop.Node.Private.make_geometry ~operation:key ~version:1
+            ~parameters:(string_of_int (Sop.Node.id (List.nth inputs index)))
+            ~cook_mode:Sop.Node.Generator ~dependencies:Sop.Context.Dependencies.static
+            ~inputs:[||] (fun ~node_id:_ _ _ ->
+              Result.bind (Lisp_node.input index) (fun payload ->
+              Result.bind (Sop.Payload.kernel payload) (fun kernel ->
+                match Sop.Kernel.Private.geometry_capture kernel source with
+                | Some geometry -> Ok Sop.Node.Private.{geometry;instances=None}
+                | None -> Error (Diagnostic.error ~code:"E_DATA_SOURCE"
+                    "A forwarded function geometry capture is unavailable"))))) in
+        key, source, index, factory)) forwarded in
+    let body = {body with inputs=List.map (fun (name,_,index) ->
+      let key,_=List.nth capture_factories index in
+      name,Ty.geometry,Some Workspace.{path=None;ty=Ty.geometry;form=Syntax.make (List []);
+        node=Call {kind="sop/" ^ key;ctx=Context.sop;args=[]}}) forwarded @
+      List.map (fun (name,_,_,_) -> name,Ty.geometry,
+        Some Workspace.{path=None;ty=Ty.geometry;form=Syntax.make (List []);
+          node=Call {kind="sop/" ^ name;ctx=Context.sop;args=[]}}) geometry_captures @ body.inputs} in
+    let validations = List.mapi (fun index (predicate, _, _) ->
+      {body with name="lisp_validate_" ^ string_of_int index;
+        context=Context.value;body=predicate}) definition.validations in
+    let reached = Context_kernel.reachable_defs checked (body::validations) in
+    let nested = {checked with graphs=body::validations;
+      defs=List.filter_map (fun (def, uses) ->
+        if not (List.memq def reached) then None
+        else Some (if uses then Context_kernel.specialize ~label ~context def else def))
+        (def_context_use ());
+      nodes=List.filter (fun (d : Workspace.node_definition) ->
+        d.kind.qualified <> definition.kind.qualified) checked.nodes} in
+    let overrides = List.map (fun (g : Workspace.graph) -> g.name,
+      List.filter (fun (name, _) -> List.exists (fun (input,_,_) -> input=name) g.inputs)
+        (parameters @ functions))
+      nested.graphs in
+    let invalid_parameter code message=invalid_arg
+      (if code="E_PARAM" then message else code^": "^message) in
+    let validated = match E.static ~inputs:(List.tl overrides) {nested with graphs=validations} with
+      |Ok validated->validated
+      |Error d->invalid_parameter d.code d.message in
+    List.iteri (fun index (_, code, message) ->
+      match List.assoc ("lisp_validate_" ^ string_of_int index) validated.results with
+      | E.Bool true -> ()
+      | E.Bool false -> invalid_parameter code message
+      | _ -> invalid_arg "A Lisp node validation must return bool") definition.validations;
+    (* Header validation is a constructor contract; evaluated body errors
+       belong to cooking. Strict compiler refusals remain construction errors. *)
+    try
+      let body_overrides, kernel_bindings, aliases = if forwarded=[] then List.hd overrides, [], [] else
+        let forwarded_evaluation = match E.static ~inputs:[List.hd overrides] {nested with graphs=[body]} with
+          |Ok evaluated->evaluated|Error diagnostic->raise(Diagnostic.Error diagnostic) in
+        let marker name = match List.assoc name forwarded_evaluation.plan.instances.(0).inputs with
+          | E.Deferred (_,source) -> source
+          | _ -> fail "E_LOWER" "A forwarded kernel needs a cooked source" in
+        let remapped = List.map (fun (name,fn,index) ->
+          let sources = List.filter_map (fun (name,source,slot,_) ->
+            if slot=index then Some (source, marker name) else None) geometry_captures in
+          name, E.Private.remap_function_geometry ~sources fn, marker name, index, sources) forwarded in
+        let functions = List.map (fun (name,value) -> name,
+          let remap offset fn = match List.find_opt (fun (marker,_,_,_,_) ->
+            marker=Printf.sprintf "lisp_kernel_%s_%d" name offset) remapped with
+            | Some (_,fn,_,_,_) -> E.Fn fn | None -> E.Fn fn in
+          match value with
+          | E.Fn fn -> remap 0 fn
+          | E.List _ -> E.List (Array.of_list (List.mapi remap (function_elements value)))
+          | _ -> value) functions in
+        (body.name, List.filter (fun (name,_) ->
+           List.exists (fun (input,_,_) -> name=input) body.inputs) (parameters @ functions)),
+        List.map (fun (_,fn,source,_,_) -> fn,source) remapped,
+        List.map (fun (_,_,_,index,sources) -> index,sources) remapped in
+      let capture_factories = make_capture_factories aliases in
+      let nested = ok (lower_nested ~gpu
+        ~kernel_bindings ~factories:(List.map snd capture_factories @
+          List.map (fun (_,_,_,factory) -> factory) geometry_captures @ factories)
+        ~inputs:[body_overrides] {nested with graphs=[body]}) in
+      record_profile nested.profile;
+      let graph = match nested.graphs with
+        | [graph] -> graph | _ -> fail "E_LOWER" "A Lisp node body needs one SOP graph" in
+      let root = match graph.root with Some root -> root
+        | None -> fail "E_LOWER" "A Lisp node body must return geometry" in
+      let compiled = edit (Edit.compile_node graph.network.geometry ~node_id:root) in
+      let dependencies = Sop.Graph.dependencies compiled in
+      let driven = graph.network.states<>[] || not(Port.Map.is_empty graph.network.drives)
+          || not(Network.Int_map.is_empty graph.network.frame_nodes) in
+      let dependencies = if driven then
+        Sop.Context.Dependencies.union dependencies (Sop.Context.Dependencies.one Input)
+        else dependencies in
+      let dependencies = if Context_kernel.depends ~inputs:parameters ~defs:checked.defs definition.body then
+        Sop.Context.Dependencies.union dependencies (Sop.Context.Dependencies.one Seed)
+        else dependencies in
+      let dependencies = if Context_kernel.depends ~op:"sop/context_frame" ~inputs:parameters ~defs:checked.defs definition.body then
+        Sop.Context.Dependencies.union dependencies (Sop.Context.Dependencies.one Frame)
+        else dependencies in
+      let dependencies = if Context_kernel.depends ~op:"sop/context_time" ~inputs:parameters ~defs:checked.defs definition.body then
+        Sop.Context.Dependencies.union dependencies (Sop.Context.Dependencies.one Time)
+        else dependencies in
+      let owned = Sop.Graph.inspect compiled |> List.filter (fun (node : Sop.Graph.info) ->
+        not (String.starts_with ~prefix:"lisp_capture_" node.operation)) in
+      let declared = definition.kind.facts in
+      (* A declared [:facts] is the node's contract, as the native factory's was: the body's
+         selection root reads "*" and replaces topology on paper, which would otherwise defeat
+         component caching for every node that declares it. Session still refuses an
+         undeclared write or a replaced topology at cook time. *)
+      let preserved = match declared with
+        | Some facts -> facts.preserves_topology
+        | None -> List.for_all (fun (node : Sop.Graph.info) ->
+            node.facts.topology=Sop.Node.Preserved) owned in
+      let input_count = List.length inputs in
+      let resolve names = Check.resolve_component_names (fun name ->
+        match List.assoc_opt name parameters with Some (E.Text text) -> Some text | _ -> None) names in
+      (* Declared names (parameter-named ones resolved), then what the body's attribute kernels
+         name themselves. Behind a wildcard (a selection root) only the declaration speaks;
+         otherwise only what the body reads counts. *)
+      let components declared names =
+        let inferred = List.sort_uniq String.compare
+          (List.concat_map (fun (node : Sop.Graph.info) -> names node.facts) owned) in
+        match declared with
+        | None -> inferred
+        | Some declared ->
+            let declared = resolve declared in
+            if List.mem "*" inferred then
+              declared @ List.filter (fun name -> name <> "*" && not (List.mem name declared)) inferred
+            else
+              List.filter (fun name -> List.mem name inferred) declared
+              @ List.filter (fun name -> not (List.mem name declared)) inferred in
+      let facts = Sop.Node.{
+        cook_mode=(if input_count=0 then Generator else if preserved && input_count=1
+          then Duplicate_input 0 else Generic);
+        elementwise=(match declared with
+          | Some f when preserved -> (match f.elementwise with
+              | Check.Points -> Points | Primitives -> Primitives | Irregular -> None)
+          | _ -> if preserved then (Sop.Node.facts compiled).elementwise else None);
+        reads=components (Option.map (fun (f : Check.kernel_facts) -> f.reads) declared) (fun f -> f.reads);
+        writes=components (Option.map (fun (f : Check.kernel_facts) -> f.writes) declared) (fun f -> f.writes);
+        topology=(if preserved then Preserved else Changed);
+        exact=Option.fold ~none:true ~some:(fun (facts : Check.kernel_facts) -> facts.exact)
+          definition.kind.facts && List.for_all (fun (node : Sop.Graph.info) -> node.facts.exact) owned} in
+      let body context =
+        if not driven then Ok compiled else
+        let lane = Value_lane.create () in
+        (Result.bind (Value_lane.resolve ~gpu ~live:(Sop.Context.input context)
+            lane ~time:(Sop.Context.time context) graph.network) (fun resolved ->
+            if resolved.geometry==graph.network.geometry then Ok compiled else
+            Result.map_error (Diagnostic.error ~code:"E_LOWER")
+              (Edit.compile_node resolved.geometry ~node_id:root))) in
+      body, dependencies, facts
+    with Diagnostic.Error diagnostic ->
+      let dependencies = List.fold_left (fun dependencies (op, fact) ->
+        if Context_kernel.depends ~op ~inputs:parameters ~defs:checked.defs definition.body
+        then Sop.Context.Dependencies.union dependencies (Sop.Context.Dependencies.one fact)
+        else dependencies) Sop.Context.Dependencies.static
+        ["sop/context_seed", Sop.Context.Dependencies.Seed; "sop/context_frame", Frame;
+         "sop/context_time", Time] in
+      let cook_mode=if inputs=[] then Sop.Node.Generator else Generic in
+      let exact=Option.fold ~none:true ~some:(fun (facts:Check.kernel_facts)->facts.exact)
+        definition.kind.facts in
+      let facts=Sop.Node.{cook_mode;elementwise=None;reads=["*"];writes=["*"];topology=Changed;exact} in
+      (fun _ -> Error diagnostic), dependencies, facts)
 module Build_cache = Lru.Make (String)
 (* 512 Lisp node body builds (the 16 lowerings of a 30-node workspace fit); every access under the lock. *)
 let build_cache = Build_cache.create 512
 let build_lock = Mutex.create ()
+let same_gpu (a : Flow_ir.Gpu.config) (b : Flow_ir.Gpu.config) =
+  a.fast = b.fast && a.policy = b.policy &&
+  match a.backend, b.backend with None, None -> true | Some a, Some b -> a == b | _ -> false
 module Private = struct let record = ref false let profiles : Flow_ir.Profile.t list ref = ref []
   let cache_hits = Atomic.make 0
   let clear_cache () = Mutex.protect build_lock (fun () -> Build_cache.clear build_cache) end
@@ -136,119 +549,79 @@ let geo_of args =
 let is_volatile lowered id = Network.Int_map.mem id lowered.volatile
 
 let same_function a b = a == b ||
-  (E.Private.function_id a = E.Private.function_id b
-   && E.Private.function_origin a = E.Private.function_origin b
+  (E.Residual.function_id a = E.Residual.function_id b
+   && E.Residual.function_origin a = E.Residual.function_origin b
    && E.Private.function_scope a = E.Private.function_scope b
-   && E.Private.function_name a = E.Private.function_name b
+   && E.Residual.function_name a = E.Residual.function_name b
    && List.equal (fun (an,av) (bn,bv) -> an=bn && av==bv)
-     (E.Private.function_bindings a) (E.Private.function_bindings b))
+     (E.Residual.function_bindings a) (E.Residual.function_bindings b))
 
 let objects lowered = List.filter_map (fun (graph : graph) ->
   Option.map (fun root -> graph.instance, graph.network, root) graph.root)
   lowered.graphs
 
-(* One host call lowers a synthetic workspace that shares the caller's source lists; the digest of those
-   lists is memoised on their physical identity: 8 entries (each pins a workspace's lists), swapped atomically. *)
-let digest_cache : (Obj.t list * string) list Atomic.t = Atomic.make []
+(* One host call lowers a synthetic workspace. Memoize the source digest by the checked
+   workspace content: 8 entries (each pins a workspace's forms). *)
+type digest_key = {
+  source_forms : Syntax.t list;
+  macro_forms : Syntax.t list;
+  definitions : Workspace.graph list;
+  node_definitions : Workspace.node_definition list;
+  graph_forms : Workspace.graph list;
+  extra_definitions : Workspace.node_definition list;
+}
+let same_content_list left right = List.equal ( = ) left right
+let same_digest_key a b =
+  same_content_list a.source_forms b.source_forms
+  && same_content_list a.macro_forms b.macro_forms
+  && same_content_list a.definitions b.definitions
+  && same_content_list a.node_definitions b.node_definitions
+  && same_content_list a.graph_forms b.graph_forms
+  && same_content_list a.extra_definitions b.extra_definitions
+let digest_cache = Lru.Identity_list.create ~equal:same_digest_key 8
+let digest_lock = Mutex.create ()
 let cached_digest (checked : Workspace.t) extra compute =
   (* elementwise: a nested lowering rebuilds the lists (graphs = [body]) but shares their forms *)
-  let part tag l = Obj.repr tag :: List.map Obj.repr l in
-  let key = List.concat [part 0 checked.source; part 1 checked.macros; part 2 checked.defs; part 3 checked.nodes;
-    part 4 checked.graphs; part 5 extra] in
-  let same (k, _) = List.compare_lengths k key = 0 && List.for_all2 (==) k key in
-  match List.find_opt same (Atomic.get digest_cache) with
-  | Some (_, d) -> d
+  let key = {source_forms=checked.source;macro_forms=checked.macros;definitions=checked.defs;
+    node_definitions=checked.nodes;graph_forms=checked.graphs;extra_definitions=extra} in
+  match Mutex.protect digest_lock (fun () -> Lru.Identity_list.peek digest_cache key) with
+  | Some digest -> digest
   | None ->
-      let d = compute () in
-      Atomic.set digest_cache (List.filteri (fun i _ -> i < 8) ((key, d) :: Atomic.get digest_cache)); d
+      let digest = compute () in
+      Mutex.protect digest_lock (fun () -> Lru.Identity_list.add digest_cache key digest);
+      digest
 
-
-let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) ?(strict_body = false) ?(defer_body_errors = false) ?(kernel_bindings = []) ?(compiled_ids = Instance_path.Map.empty)
+let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) ?(gpu=Flow_ir.Gpu.default) ?(strict_body = false) ?(defer_body_errors = false) ?(kernel_bindings = []) ?(compiled_ids = Instance_path.Map.empty)
     ?(sites = []) ?inputs checked =
-  Phase_timer.measure Lower (fun () ->
+  Phase_timer.measure "lower" (fun () ->
   try
     let image_origins = Hashtbl.create 16 in
     let observe producer residual =
-      let view = E.Private.residual_view residual in
+      let view = E.Residual.residual_view residual in
       let key = view.instance, view.site, view.iter in
       let origin = match Hashtbl.find_opt image_origins key with
         | None -> producer
         | Some (Some previous) when producer = Some previous -> producer
         | _ -> None in
       Hashtbl.replace image_origins key origin in
-    let checked, evaluated = match Flow_ir.qualify_workspace ~record:true ?inputs ~observe checked with
+    let checked, evaluated = match Flow_ir.qualify_workspace ~record:true ?inputs ~observe ~gpu checked with
       | Ok evaluated -> evaluated
-      | Error diagnostic when defer_body_errors -> raise (Body_error diagnostic)
-      | Error diagnostic -> raise (Fail diagnostic) in
+      | Error diagnostic when defer_body_errors -> raise (Diagnostic.Error diagnostic)
+      | Error diagnostic -> raise (Diagnostic.Error diagnostic) in
     let profile = Flow_ir.Profile.create ~clock:Unix.gettimeofday in
     (* Kernel bodies are cache inputs as well as their captures. The digest is
        lazy so ordinary catalog edits retain their existing pipeline counts.
        ponytail: the whole source invalidates kernels; narrow to body/defn cones
        if unrelated structural edits measurably recook them. *)
     let kernel_source = lazy (cached_digest checked [] (fun () -> Context_kernel.kernel_source checked)) in
-    let attribute_options args =
-      let text key default code=match List.assoc_opt key args with
-        |None->default|Some(E.Text text)->text|_->fail code ("Attribute "^key^" must be static text") in
-      let owner=ok(Attribute_kernel.owner(text "owner" "point" "E_ATTR_OWNER"))
-      and kind=text "type" "vec3" "E_ATTR_TYPE" in
-      ignore(ok(Attribute_kernel.value_type kind));owner,kind in
-    let is_geometry_arrays kind=kind="sop/mesh" || kind="sop/mesh_planes" || kind="sop/remap" || kind="sop/concat" || kind="sop/with_planes" in
-    let geometry_arrays_key=function "sop/remap"->"flow.remap"|"sop/concat"->"flow.concat"|"sop/with_planes"->"flow.with_planes"|_->"flow.mesh" in
-    let geometry_arrays_label=function "sop/remap"->"Remap"|"sop/concat"->"Concat"|"sop/with_planes"->"With planes"|_->"Mesh" in
-    let geometry_arrays_data args=E.Record(List.filter(fun(name,_)->name<>"source" && name<>"target" && name<>"sources" && name<>"geometry")args) in
-    let geometry_arrays_node ?(strict_body=strict_body) ?(host=false) ?state ?elems ~operation ~args ~sources inputs =
-      let data=geometry_arrays_data args in
-      let program=Attribute_kernel.prepare ~profile ~strict:strict_body ~approx:checked.approx
-        ~sink:Flow_ir.Sop_input ~sources inputs data in
-      if strict_body then ignore(ok program);
-      let parameters=Lazy.force kernel_source ^ (match operation with "sop/remap"->";remap;"|"sop/concat"->";concat;"|"sop/with_planes"->";planes;"|_->";mesh;") ^ (if host then "host" ^ string_of_int (Atomic.fetch_and_add host_serial 1) else Flow.Value.key_of ~residual:E.Private.residual_id data)
-        ^Option.fold ~none:"" ~some:E.state_stamp state
-        ^Option.fold ~none:"" ~some:(fun fields->Flow.Value.key_of ~residual:E.Private.residual_id(E.Record fields))elems in
-      let node=Sop.Node.Private.make_geometry ~label:(geometry_arrays_label operation) ~operation:(geometry_arrays_key operation) ~version:1
-        ~parameters ~cook_mode:(if operation="sop/remap" || operation="sop/concat" || operation="sop/with_planes" then Sop.Node.Generic else Sop.Node.Generator)
-        ~dependencies:(if E.frame_dependent data then Sop.Context.Dependencies.one Input
-          else Sop.Context.Dependencies.static) ~inputs:(Array.of_list inputs)
-        (fun ~node_id:_ context geometries->
-          let cancelled ()=Sop.Context.cancelled context in
-          let error ()=Error(Diagnostic.error ~code:"E_CANCELLED" "Mesh kernel cancelled.")in
-          let geometry id=Option.map(fun index->geometries.(index))(List.find_index((=)id)sources)in
-          let result=if cancelled()then error()else Result.bind program(fun program->
-            Result.bind(Flow_ir.Executor.force ?state ?elems ~reference ~strict:strict_body
-              ~resolve:(Attribute_kernel.resolve ~geometry) program ~live:(Sop.Context.input context))
-              (function E.Record fields->if cancelled()then error()else
-                  let result=if operation="sop/with_planes" then
-                      (match List.assoc_opt "geometry" args with
-                       |Some(E.Deferred(ty,id)) when ty=Ty.geometry && geometry id<>None->
-                           Attribute_kernel.with_planes ~grain:(Sop.Context.grain context)(Option.get(geometry id))fields
-                       |_->Error(Diagnostic.error ~code:"E_DATA_SOURCE" "With planes needs a cooked geometry."))
-                    else if operation="sop/concat" then
-                      let rec collect result = function
-                        |[]->Ok(List.rev result)
-                        |E.No_geo::rest->collect result rest
-                        |E.Deferred(ty,id)::rest when ty=Ty.geometry->
-                            (match geometry id with Some value->collect(value::result)rest
-                             |None->Error(Diagnostic.error ~code:"E_DATA_SOURCE" "Concat needs cooked source geometries."))
-                        |_->Error(Diagnostic.error ~code:"E_CONCAT_TYPE" "Concat sources must be a geometry list.") in
-                      Result.bind(match List.assoc_opt "sources" args with
-                        |Some(E.List values)->collect [] (Array.to_list values)
-                        |_->Error(Diagnostic.error ~code:"E_CONCAT_TYPE" "Concat sources must be a geometry list."))(fun sources->
-                        Topology_kernel.concat ~cancel:(Sop.Context.cancel_token context)
-                          ~grain:(Sop.Context.grain context) ~sources fields)
-                    else if operation<>"sop/remap" then Topology_kernel.mesh fields else
-                    let cooked name=match List.assoc_opt name args with
-                      |Some(E.Deferred(ty,id)) when ty=Ty.geometry->
-                          (match geometry id with Some geometry->Ok geometry|None->
-                            Error(Diagnostic.error ~code:"E_DATA_SOURCE" "Remap needs two cooked geometries."))
-                      |_->Error(Diagnostic.error ~code:"E_DATA_SOURCE" "Remap needs two cooked geometries.") in
-                    Result.bind(cooked "source")(fun source->Result.bind(cooked "target")(fun target->
-                      Topology_kernel.remap ~cancel:(Sop.Context.cancel_token context)
-                        ~grain:(Sop.Context.grain context) ~source ~target fields)) in
-                  Result.bind result(fun geometry->if cancelled()then error()else Ok geometry)
-                |_->Error(Diagnostic.error ~code:"E_TOPOLOGY_TYPE" "Mesh data must be a record.")))in
-          Result.map_error(Diagnostic_bridge.to_sop)
-            (Result.map(fun geometry->Sop.Node.Private.{geometry;diagnostics=[];instances=None})result))in
-      Sop.Node.Private.with_facts {(Sop.Node.facts node) with reads=(if operation="sop/remap" || operation="sop/concat" || operation="sop/with_planes" then ["*"] else Attribute_kernel.reads data);
-        writes=["*"];topology=Changed;elementwise=None}node in
+    let attribute_options = attribute_options
+    and is_geometry_arrays = is_geometry_arrays
+    and geometry_arrays_key = geometry_arrays_key
+    and geometry_arrays_label = geometry_arrays_label
+    and geometry_arrays_data = geometry_arrays_data in
+    let geometry_arrays_node ?(strict_body=strict_body) ?host ?state ?elems ~operation ~args ~sources inputs =
+      geometry_arrays_node ~profile ~strict_body ~reference ~approx:checked.approx ~kernel_source
+        ?host ?state ?elems ~operation ~args ~sources inputs in
     let structural_node residual captures =
       let program=match Flow_ir.Core_lower.lower ~strict:true ~budget:32768 residual with
         |Ok program->program|Error name->fail "E_PACKED_FORM" ("Cooked selection cannot compile "^name^".") in
@@ -265,7 +638,7 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
           Fun.protect ~finally:(fun()->if Lazy.is_val session then Sop.Session.close(Lazy.force session))(fun()->
           let handles=Hashtbl.create 16 and geometries=Hashtbl.create 16 and next=ref(-1) in
           List.iteri(fun index(id,ty,_)->
-            Hashtbl.add handles id (ty,None,ref(Some Sop.Session.{payload=payloads.(index);diagnostics=[];instances=None})))captures;
+            Hashtbl.add handles id (ty,None,ref(Some Sop.Session.{payload=payloads.(index);instances=None})))captures;
           let error code message=Error(Diagnostic.error ~code message) in
           let handle ty id=match Hashtbl.find_opt handles id with
             |Some(actual,node,output) when actual=ty->Ok(node,output)
@@ -280,8 +653,7 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
               error "E_DATA_SOURCE" "A cooked handle has no result or prepared node."
             |None,Some node->
               Result.bind
-                (Result.map_error(Diagnostic_bridge.of_sop)
-                  (Sop.Session.cook (Lazy.force session) ~context node))
+                ((Sop.Session.cook (Lazy.force session) ~context node))
                 (fun value->Result.map(fun value->output:=Some value;value)(validate value))) in
           let geometry id=match Hashtbl.find_opt geometries id with
             |Some geometry->Some geometry
@@ -309,9 +681,8 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
                   Sop.Node.Private.make ~operation:key ~version:1 ~parameters:(string_of_int id)
                     ~cook_mode:Sop.Node.Generator ~inputs:[||] ~dependencies:Sop.Context.Dependencies.static
                     (fun ~node_id:_ _context _inputs->
-                      Result.map_error(Diagnostic_bridge.to_sop)
-                        (Result.map(fun(output:Sop.Session.output)->Sop.Node.Private.{payload=output.payload;
-                          diagnostics=output.diagnostics;instances=output.instances})(snapshot actual id)))) in
+                      (Result.map(fun(output:Sop.Session.output)->Sop.Node.Private.{payload=output.payload;
+                          instances=output.instances})(snapshot actual id)))) in
                 factories:=factory::!factories;
                 Some Workspace.{path=None;ty;form=Syntax.make(List[]);
                   node=Call{kind="sop/"^key;ctx=(if actual=Ty.image then Flow.Context.image else Context.sop);args=[]}}
@@ -341,8 +712,7 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
               let scalar=function E.Int n->Some(Param.Int_value n)|Float n->Some(Param.Float_value n)
                 |Bool b->Some(Param.Bool_value b)|Text t->Some(Param.Text_value t)|_->None in
               ignore(Flow.Op.result_type op (List.map(fun(n,v)->n,Flow.Value.ty_of v,scalar v)args))
-             with Flow.Value.Fail(code,message,span)->raise(Fail(Diagnostic.error ?span ~code message))
-               |Flow.Value.Diagnostic_fail d->raise(Fail d));
+             with Diagnostic.Error d -> raise (Diagnostic.Error d));
             let sources=let direct=geo_of args in
               direct @ List.filter(fun id->not(List.mem id direct))(Attribute_kernel.sources(geometry_arrays_data args)) in
             let inputs=List.map(fun id->
@@ -352,9 +722,8 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
               Sop.Node.Private.make ~operation:"lisp_host_capture" ~version:1 ~parameters:(string_of_int id)
                 ~cook_mode:Sop.Node.Generator ~inputs:[||] ~dependencies:Sop.Context.Dependencies.static
                 (fun ~node_id:_ _context _inputs->
-                  Result.map_error(Diagnostic_bridge.to_sop)
-                    (Result.map(fun(output:Sop.Session.output)->Sop.Node.Private.{payload=output.payload;
-                      diagnostics=output.diagnostics;instances=output.instances})(snapshot actual id))))sources in
+                  (Result.map(fun(output:Sop.Session.output)->Sop.Node.Private.{payload=output.payload;
+                          instances=output.instances})(snapshot actual id))))sources in
             let node=geometry_arrays_node ~strict_body:true ~host:true ~operation:name ~args ~sources inputs in
             let id= !next in decr next;
             Hashtbl.add handles id(ty,Some node,ref None);Ok(E.Deferred(ty,id)) in
@@ -414,8 +783,8 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
                   Result.bind result(fun result->if Sop.Context.cancelled context then
                       error "E_CANCELLED" "Attribute kernel cancelled." else
                   Ok(Option.map(fun geometry->
-                    let output=ok(snapshot Ty.geometry id) in
-                    register_output Ty.geometry {output with payload=Sop.Payload.Geometry geometry;instances=None})result)))
+                    ignore(ok(snapshot Ty.geometry id));
+                    register_output Ty.geometry {payload=Sop.Payload.Geometry geometry;instances=None})result)))
               |_->Ok None in
             Result.bind borrowed(function Some result->Ok result|None->
             let args=force_args args in
@@ -432,7 +801,7 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
             let body=Workspace.{path=None;ty;form;node=(if catalog then
                 Call{kind=name;ctx=call_context;args} else Op{op=name;args;skip=[]})} in
             let graph=Workspace.{name="lisp_host_call";context=Context.sop;inputs;body;form} in
-            Result.bind(lower_checked ~reference ~strict_body:true
+            Result.bind(lower_checked ~reference ~gpu ~strict_body:true
               ~factories:(!capture_factories@factories) ~inputs:[graph.name,!overrides]
               {checked with graphs=[graph]})(fun lowered->
               match lowered.graphs with
@@ -450,8 +819,7 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
                     let check()=if Sop.Context.cancelled context then
                       Flow.Value.fail "cancelled" "geometry operation was cancelled" in
                     Ok(Flow.Value.Private.error_row_index ?grain ~check rows)
-                   with Flow.Value.Fail(code,message,span)->Error(Diagnostic.error ?span ~code message)
-                     |Flow.Value.Diagnostic_fail diagnostic->Error diagnostic in
+                   with Diagnostic.Error d -> Error d in
                    Result.bind selected(function Some index->Ok(E.Int index)
                      |None->error "E_DIAGNOSTIC_CONTEXT" "Host diagnosis needs a failing row."))
             |E.Source("$core/diagnostic_index",_,_)->error "E_DIAGNOSTIC_CONTEXT" "Host diagnosis needs typed rows and policy."
@@ -467,7 +835,7 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
                      (List.filter(fun(name,_)->name<>"$name" && name<>"$context")args)
                  |_->error "E_DATA_SOURCE" "A host call needs its checked kind.")
             |value->Attribute_kernel.resolve ~geometry value
-            with Fail d->Error d in
+            with Diagnostic.Error d->Error d in
           let result=Flow_ir.Core_exec.execute ~resolve
             ~force:(fun program->Flow_ir.Packed.force ~strict:true ~resolve program ~live:(Sop.Context.input context))
             prepared ~live:(Sop.Context.input context) in
@@ -475,53 +843,17 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
             |E.Deferred(ty,id) when ty=Ty.geometry->snapshot ty id
             |E.No_geo->error "E_LOWER" "Cooked selection returned empty geometry."
             |_->error "E_DATA_SOURCE" "Cooked selection must return a geometry handle.") in
-          Result.map_error(Diagnostic_bridge.to_sop)
-            (Result.map(fun(output:Sop.Session.output)->Sop.Node.Private.{payload=output.payload;
-              diagnostics=output.diagnostics;instances=output.instances})result))) in
+          (Result.map(fun(output:Sop.Session.output)->Sop.Node.Private.{payload=output.payload;
+              instances=output.instances})result))) in
       Sop.Node.Private.with_facts {(Sop.Node.facts node) with reads=["*"];writes=["*"]} node in
-    let attribute_node ?state ?elems ?selection ?default ?(owner=Rdk.Attribute.Point) ?(kind="vec3") ~name ~values ~sources inputs =
-      if strict_body then ignore (ok (Attribute_kernel.prepare ~strict:true ~sources inputs values));
-      Attribute_kernel.node ?state ?elems ?selection ?default ~strict:strict_body ~reference ~profile ~approx:checked.approx ~owner ~kind
-        ~source:(Lazy.force kernel_source) ~name ~values ~sources inputs in
-    let group_data args = E.Record(List.filter(fun(name,_)->name="values"||name="order")args) in
-    let attribute_data args=if not(List.mem_assoc "selection" args || List.mem_assoc "default" args) then List.assoc "values" args
-      else E.Record(List.filter(fun(name,_)->name="values"||name="selection"||name="default")args) in
+    let attribute_node ?state ?elems ?selection ?default ?(owner=Rdk.Attribute.Point)
+        ?(kind="vec3") ~name ~values ~sources inputs =
+      attribute_node ~strict_body ~reference ~profile ~approx:checked.approx ~gpu ~kernel_source
+        ?state ?elems ?selection ?default ~owner ~kind ~name ~values ~sources inputs in
+    let group_data = group_data and attribute_data = attribute_data in
     let group_node ?state ?elems ~args ~sources inputs =
-      let text key default = match List.assoc_opt key args with
-        | None -> default | Some(E.Text text) -> text | _ -> fail "E_GROUP_TYPE" ("Group "^key^" must be static text") in
-      let owner_name=text "owner" "point" and name=text "name" "" in
-      let owner=ok(Group_kernel.owner owner_name) in
-      let values=group_data args in
-      let program=Attribute_kernel.prepare ~profile ~strict:strict_body ~sources inputs values in
-      if strict_body then ignore(ok program);
-      Sop.Node.Private.make_geometry ~label:("Write group "^name) ~operation:"flow.with_group" ~version:1
-        ~parameters:(Lazy.force kernel_source^owner_name^":"^name^Flow.Value.key_of ~residual:E.Private.residual_id values
-          ^Option.fold ~none:"" ~some:E.state_stamp state)
-        ~cook_mode:Sop.Node.Generic
-        ~dependencies:(if E.frame_dependent values then Sop.Context.Dependencies.one Input else Sop.Context.Dependencies.static)
-        ~inputs:(Array.of_list inputs)
-        (fun ~node_id:_ context geometries ->
-          let result = if geometries=[||] || List.assoc "geometry" args=E.No_geo then
-              Error(Diagnostic.error ~code:"E_DATA_SOURCE" "Group write needs geometry.")
-            else if Sop.Context.cancelled context then Error(Diagnostic.error ~code:"E_CANCELLED" "Group kernel cancelled.")
-            else Result.bind program(fun program->
-              let geometry id=Option.map(fun index->geometries.(index))(List.find_index((=)id)sources) in
-              Result.bind(Flow_ir.Executor.force ?state ?elems ~reference ~strict:strict_body
-                ~resolve:(Attribute_kernel.resolve ~geometry) program ~live:(Sop.Context.input context))(function
-                | E.Record fields ->
-                    let order=match List.assoc_opt "order" fields with
-                      | None -> Ok None | Some(E.Int_array order) -> Ok(Some order)
-                      | Some(E.Record fields) -> (match List.assoc_opt "ordered" fields,List.assoc_opt "indices" fields with
-                          | Some(E.Bool ordered),Some(E.Int_array indices) -> Ok(if ordered then Some indices else None)
-                          | _ -> Error(Diagnostic.error ~code:"E_GROUP_ORDER" "Group order requires an integer array or an ordered/indices record."))
-                      | _ -> Error(Diagnostic.error ~code:"E_GROUP_ORDER" "Group order requires an integer array or an ordered/indices record.") in
-                    Result.bind order(fun order->match List.assoc_opt "values" fields with
-                      | Some(E.Int_array mask)->Group_kernel.write ?order ~owner ~name mask geometries.(0)
-                      | _->Error(Diagnostic.error ~code:"E_GROUP_MASK" "Group mask requires an integer array."))
-                | _ -> assert false)) in
-          Result.map_error(Diagnostic_bridge.to_sop)
-            (Result.map(fun geometry->Sop.Node.Private.{geometry;diagnostics=[];instances=None})result))
-      |>fun node->Sop.Node.Private.with_facts {(Sop.Node.facts node) with topology=Preserved;reads=["*"];writes=["*"]} node in
+      group_node ~strict_body ~reference ~profile ~approx:checked.approx ~kernel_source
+        ?state ?elems ~args ~sources inputs in
     let plan = evaluated.plan in
     let external_kernel fn = List.find_map (fun (candidate,source) ->
       if same_function candidate fn then Some source else None) kernel_bindings in
@@ -627,205 +959,14 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
         | _ -> Some (slot.name,E.List (Array.of_list values))) definition.slots in
       let key = String.sub definition.kind.qualified 4
         (String.length definition.kind.qualified - 4) in
+      let record_profile profile =
+        if !Private.record then Private.profiles := profile :: !Private.profiles in
+      let lower_nested ~gpu ~kernel_bindings ~factories ~inputs checked =
+        lower_checked ~reference ~gpu ~strict_body:true ~defer_body_errors:true ~kernel_bindings
+          ~factories ~inputs checked in
       let build_body bindings ~label ~context inputs parameters =
-        Phase_timer.without (fun () ->
-        let make_capture_factories aliases = List.mapi (fun index input ->
-          let key = "lisp_capture_" ^ string_of_int index in
-          let factory = Edit.factory ~key ~label:key ~category:["Flow"] ~arity:0
-            (fun _ -> Sop.Node.Private.make ~operation:key ~version:1
-              ~parameters:(string_of_int (Sop.Node.id input)) ~cook_mode:Sop.Node.Generator
-              ~dependencies:Sop.Context.Dependencies.static ~inputs:[||]
-              (fun ~node_id:_ _ _ -> Result.map (fun payload ->
-                let payload = match payload, List.assoc_opt index aliases with
-                  | Sop.Payload.Kernel kernel, Some sources ->
-                      Sop.Payload.Kernel (Sop.Kernel.Private.remap_geometry_captures ~sources kernel)
-                  | _ -> payload in
-                Sop.Node.Private.{payload;diagnostics=[];instances=None}) (Lisp_node.input index))) in
-          key, factory) inputs in
-        let capture_factories = make_capture_factories [] in
-        let body = Context_kernel.specialize ?provenance ~label ~context definition.body in
-        let body = {body with inputs=List.map (fun (name, ty, default) ->
-          let default = match List.assoc_opt name bindings with
-            | None -> default
-            | Some indices ->
-                let element_ty = match ty with Ty.List element -> element | _ -> ty in
-                let capture index = let key,_=List.nth capture_factories index in
-                  Workspace.{path=None;ty=element_ty;form=Syntax.make (List []);
-                    node=Call {kind="sop/" ^ key;
-                      ctx=(if element_ty=Ty.image then Context.image else Context.sop);args=[]}} in
-                let node = match ty,indices with
-                  | Ty.List _, _ -> Workspace.List_lit (List.map capture indices)
-                  | _, [index] -> (capture index).node
-                  | _, [] -> Workspace.Nil
-                  | _ -> fail "E_LOWER" "A fixed Lisp slot has several inputs" in
-                Some Workspace.{path=None;ty;form=Syntax.make (List []);node} in
-          name, ty, default) body.inputs} in
-        let forwarded = List.concat_map (fun (name,value) ->
-          let fns = function_elements value and indices = Option.value ~default:[] (List.assoc_opt name bindings) in
-          if List.compare_lengths fns indices <> 0 then fail "E_LOWER" "Callable slots do not match their cooked inputs";
-          List.mapi (fun offset (fn,index) ->
-            Printf.sprintf "lisp_kernel_%s_%d" name offset,fn,index) (List.combine fns indices)) functions in
-        let geometry_captures = List.concat_map (fun (_,fn,index) ->
-          Attribute_kernel.sources (E.Fn fn) |> List.map (fun source ->
-            let key = Printf.sprintf "lisp_capture_geometry_%d_%d" index source in
-            let factory = Edit.factory ~key ~label:key ~category:["Flow"] ~arity:0
-              (fun _ -> Sop.Node.Private.make_geometry ~operation:key ~version:1
-                ~parameters:(string_of_int (Sop.Node.id (List.nth inputs index)))
-                ~cook_mode:Sop.Node.Generator ~dependencies:Sop.Context.Dependencies.static
-                ~inputs:[||] (fun ~node_id:_ _ _ ->
-                  Result.bind (Lisp_node.input index) (fun payload ->
-                  Result.bind (Sop.Payload.kernel payload) (fun kernel ->
-                    match Sop.Kernel.Private.geometry_capture kernel source with
-                    | Some geometry -> Ok Sop.Node.Private.{geometry;diagnostics=[];instances=None}
-                    | None -> Error (Sop.Diagnostic.error ~code:"E_DATA_SOURCE"
-                        "A forwarded function geometry capture is unavailable"))))) in
-            key, source, index, factory)) forwarded in
-        let body = {body with inputs=List.map (fun (name,_,index) ->
-          let key,_=List.nth capture_factories index in
-          name,Ty.geometry,Some Workspace.{path=None;ty=Ty.geometry;form=Syntax.make (List []);
-            node=Call {kind="sop/" ^ key;ctx=Context.sop;args=[]}}) forwarded @
-          List.map (fun (name,_,_,_) -> name,Ty.geometry,
-            Some Workspace.{path=None;ty=Ty.geometry;form=Syntax.make (List []);
-              node=Call {kind="sop/" ^ name;ctx=Context.sop;args=[]}}) geometry_captures @ body.inputs} in
-        let validations = List.mapi (fun index (predicate, _, _) ->
-          {body with name="lisp_validate_" ^ string_of_int index;
-            context=Context.value;body=predicate}) definition.validations in
-        let reached = Context_kernel.reachable_defs checked (body::validations) in
-        let nested = {checked with graphs=body::validations;
-          defs=List.filter_map (fun (def, uses) ->
-            if not (List.memq def reached) then None
-            else Some (if uses then Context_kernel.specialize ~label ~context def else def))
-            (def_context_use ());
-          nodes=List.filter (fun (d : Workspace.node_definition) ->
-            d.kind.qualified <> definition.kind.qualified) checked.nodes} in
-        let overrides = List.map (fun (g : Workspace.graph) -> g.name,
-          List.filter (fun (name, _) -> List.exists (fun (input,_,_) -> input=name) g.inputs)
-            (parameters @ functions))
-          nested.graphs in
-        let invalid_parameter code message=invalid_arg
-          (if code="E_PARAM" then message else code^": "^message) in
-        let validated = match E.static ~inputs:(List.tl overrides)
-          {nested with graphs=validations} with
-          |Ok validated->validated
-          |Error d->invalid_parameter d.code d.message in
-        List.iteri (fun index (_, code, message) ->
-          match List.assoc ("lisp_validate_" ^ string_of_int index) validated.results with
-          | E.Bool true -> ()
-          | E.Bool false -> invalid_parameter code message
-          | _ -> invalid_arg "A Lisp node validation must return bool") definition.validations;
-        (* Header validation is a constructor contract; evaluated body errors
-           belong to cooking. Strict compiler refusals remain construction errors. *)
-        try
-        let body_overrides, kernel_bindings, aliases = if forwarded=[] then List.hd overrides, [], [] else
-          let forwarded_evaluation = match E.static ~inputs:[List.hd overrides] {nested with graphs=[body]} with
-            |Ok evaluated->evaluated|Error diagnostic->raise(Body_error diagnostic) in
-          let marker name = match List.assoc name forwarded_evaluation.plan.instances.(0).inputs with
-            | E.Deferred (_,source) -> source
-            | _ -> fail "E_LOWER" "A forwarded kernel needs a cooked source" in
-          let remapped = List.map (fun (name,fn,index) ->
-            let sources = List.filter_map (fun (name,source,slot,_) ->
-              if slot=index then Some (source, marker name) else None) geometry_captures in
-            name, E.Private.remap_function_geometry ~sources fn, marker name, index, sources) forwarded in
-          let functions = List.map (fun (name,value) -> name,
-            let remap offset fn = match List.find_opt (fun (marker,_,_,_,_) ->
-              marker=Printf.sprintf "lisp_kernel_%s_%d" name offset) remapped with
-              | Some (_,fn,_,_,_) -> E.Fn fn | None -> E.Fn fn in
-            match value with
-            | E.Fn fn -> remap 0 fn
-            | E.List _ -> E.List (Array.of_list (List.mapi remap (function_elements value)))
-            | _ -> value) functions in
-          (body.name, List.filter (fun (name,_) ->
-             List.exists (fun (input,_,_) -> name=input) body.inputs) (parameters @ functions)),
-          List.map (fun (_,fn,source,_,_) -> fn,source) remapped,
-          List.map (fun (_,_,_,index,sources) -> index,sources) remapped in
-        let capture_factories = make_capture_factories aliases in
-        let nested = ok (lower_checked ~reference ~strict_body:true ~defer_body_errors:true ~kernel_bindings
-          ~factories:(List.map snd capture_factories @ List.map (fun (_,_,_,factory) -> factory) geometry_captures @ factories)
-          ~inputs:[body_overrides] {nested with graphs=[body]}) in
-        if !Private.record then Private.profiles := nested.profile :: !Private.profiles;
-        let graph = match nested.graphs with
-          | [graph] -> graph | _ -> fail "E_LOWER" "A Lisp node body needs one SOP graph" in
-        let root = match graph.root with Some root -> root
-          | None -> fail "E_LOWER" "A Lisp node body must return geometry" in
-        let compiled = edit (Edit.compile_node graph.network.geometry ~node_id:root) in
-        let dependencies = Sop.Graph.dependencies compiled in
-        let driven = graph.network.states<>[] || not(Port.Map.is_empty graph.network.drives)
-            || not(Network.Int_map.is_empty graph.network.frame_nodes) in
-        let dependencies = if driven then
-          Sop.Context.Dependencies.union dependencies (Sop.Context.Dependencies.one Input)
-          else dependencies in
-        let dependencies = if Context_kernel.depends ~inputs:parameters ~defs:checked.defs definition.body then
-          Sop.Context.Dependencies.union dependencies (Sop.Context.Dependencies.one Seed)
-          else dependencies in
-        let dependencies = if Context_kernel.depends ~op:"sop/context_frame" ~inputs:parameters ~defs:checked.defs definition.body then
-          Sop.Context.Dependencies.union dependencies (Sop.Context.Dependencies.one Frame)
-          else dependencies in
-        let dependencies = if Context_kernel.depends ~op:"sop/context_time" ~inputs:parameters ~defs:checked.defs definition.body then
-          Sop.Context.Dependencies.union dependencies (Sop.Context.Dependencies.one Time)
-          else dependencies in
-        let owned = Sop.Graph.inspect compiled |> List.filter (fun (node : Sop.Graph.info) ->
-          not (String.starts_with ~prefix:"lisp_capture_" node.operation)) in
-        let declared = definition.kind.facts in
-        (* A declared [:facts] is the node's contract, as the native factory's was: the body's
-           selection root reads "*" and replaces topology on paper, which would otherwise defeat
-           component caching for every node that declares it. Session still refuses an
-           undeclared write or a replaced topology at cook time. *)
-        let preserved = match declared with
-          | Some facts -> facts.preserves_topology
-          | None -> List.for_all (fun (node : Sop.Graph.info) ->
-              node.facts.topology=Sop.Node.Preserved) owned in
-        let input_count = List.length inputs in
-        let resolve names = Check.resolve_component_names (fun name ->
-          match List.assoc_opt name parameters with Some (E.Text text) -> Some text | _ -> None) names in
-        (* Declared names (parameter-named ones resolved), then what the body's attribute kernels
-           name themselves. Behind a wildcard (a selection root) only the declaration speaks;
-           otherwise only what the body reads counts. *)
-        let components declared names =
-          let inferred = List.sort_uniq String.compare
-            (List.concat_map (fun (node : Sop.Graph.info) -> names node.facts) owned) in
-          match declared with
-          | None -> inferred
-          | Some declared ->
-              let declared = resolve declared in
-              if List.mem "*" inferred then
-                declared @ List.filter (fun name -> name <> "*" && not (List.mem name declared)) inferred
-              else
-                List.filter (fun name -> List.mem name inferred) declared
-                @ List.filter (fun name -> not (List.mem name declared)) inferred in
-        let facts = Sop.Node.{
-          cook_mode=(if input_count=0 then Generator else if preserved && input_count=1
-            then Duplicate_input 0 else Generic);
-          elementwise=(match declared with
-            | Some f when preserved -> (match f.elementwise with
-                | Check.Points -> Points | Primitives -> Primitives | Irregular -> None)
-            | _ -> if preserved then (Sop.Node.facts compiled).elementwise else None);
-          reads=components (Option.map (fun (f : Check.kernel_facts) -> f.reads) declared) (fun f -> f.reads);
-          writes=components (Option.map (fun (f : Check.kernel_facts) -> f.writes) declared) (fun f -> f.writes);
-          topology=(if preserved then Preserved else Changed);
-          exact=Option.fold ~none:true ~some:(fun (facts : Check.kernel_facts) -> facts.exact)
-            definition.kind.facts && List.for_all (fun (node : Sop.Graph.info) -> node.facts.exact) owned} in
-        let body context =
-          if not driven then Ok compiled else
-          let lane = Value_lane.create () in
-          Result.map_error (Diagnostic_bridge.to_sop)
-            (Result.bind (Value_lane.resolve ~live:(Sop.Context.input context) lane
-              ~time:(Sop.Context.time context) graph.network) (fun resolved ->
-              if resolved.geometry==graph.network.geometry then Ok compiled else
-              Result.map_error (Diagnostic.error ~code:"E_LOWER")
-                (Edit.compile_node resolved.geometry ~node_id:root))) in
-        body, dependencies, facts
-        with Body_error diagnostic ->
-          let dependencies = List.fold_left (fun dependencies (op, fact) ->
-            if Context_kernel.depends ~op ~inputs:parameters ~defs:checked.defs definition.body
-            then Sop.Context.Dependencies.union dependencies (Sop.Context.Dependencies.one fact)
-            else dependencies) Sop.Context.Dependencies.static
-            ["sop/context_seed", Sop.Context.Dependencies.Seed; "sop/context_frame", Frame; "sop/context_time", Time] in
-          let cook_mode=if inputs=[] then Sop.Node.Generator else Generic in
-          let exact=Option.fold ~none:true ~some:(fun (facts:Check.kernel_facts)->facts.exact)
-            definition.kind.facts in
-          let facts=Sop.Node.{cook_mode;
-            elementwise=None;reads=["*"];writes=["*"];topology=Changed;exact} in
-          (fun _ -> Error(Diagnostic_bridge.to_sop diagnostic)), dependencies, facts) in
+        build_lisp_body ~gpu ~lower_nested ~record_profile ~checked ~definition ~provenance ~label
+          ~context ~inputs ~parameters ~bindings ~functions ~factories ~def_context_use in
       (* A top-level body build is a pure function of the key below, so an edit elsewhere reuses it. Key: declaration,
          label, reference flag, approx, provenance, bindings, context seed/frame/time, input ids, parameters; an
          entry is valid only for the same factories and GPU backend+policy. Bypassed: callable slots, strict nested
@@ -843,11 +984,10 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
         | key ->
             let cached = Mutex.protect build_lock (fun () -> Build_cache.find_opt build_cache key) in
             (match cached with
-             | Some (owner, gpu, policy, result) when owner == factories && policy = Flow_ir.Gpu.policy () && (match gpu, Flow_ir.Gpu.available () with
-                 | None, None -> true | Some a, Some b -> a == b | _ -> false) -> Atomic.incr Private.cache_hits; result
+             | Some (owner, old_gpu, result) when owner == factories && same_gpu old_gpu gpu -> Atomic.incr Private.cache_hits; result
              | _ -> let result = uncached () in
                  Mutex.protect build_lock (fun () ->
-                   Build_cache.add build_cache key (factories, Flow_ir.Gpu.available (), Flow_ir.Gpu.policy (), result)); result) in
+                   Build_cache.add build_cache key (factories, gpu, result)); result) in
       let category = if definition.category=[] then ["Custom"] else definition.category in
       let construct inputs =
           let next = ref 0 in
@@ -955,37 +1095,15 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
               | arg -> [arg]) args in
           let dynamic = ref [] in
           let p = match node.kind with
-            | "sop/mesh" | "sop/mesh_planes" | "sop/remap" | "sop/concat" | "sop/with_planes" ->
+            | operation when is_geometry_arrays operation ->
                 let sources=deps node in
-                let factory=Edit.factory ~key:(geometry_arrays_key node.kind) ~label:(geometry_arrays_label node.kind) ~category:["Flow";"Topology"]
-                  ~arity:(List.length sources)(geometry_arrays_node ~operation:node.kind ~args ~sources)in
+                let factory=Edit.factory ~key:(geometry_arrays_key operation) ~label:(geometry_arrays_label operation) ~category:["Flow";"Topology"]
+                  ~arity:(List.length sources)(geometry_arrays_node ~operation ~args ~sources)in
                 {cid;factory;arity=List.length sources;changes=[];dynamic=[];zone=None;kernels=[];
                   slots=List.mapi(fun index source->index,source)sources}
-            | ("sop/rename_attr"|"sop/swap_attr"|"sop/delete_attrs"|"sop/rename_group"|"sop/delete_group"|"sop/rename_edge"|"sop/delete_edge") as operation ->
-                let text name default=match List.assoc_opt name args with
-                  |None->default|Some(E.Text text)->text
-                  |_->fail "E_METADATA_TEXT" "Metadata names and patterns must be static text" in
-                let bool name=match List.assoc_opt name args with
-                  |None->false|Some(E.Bool value)->value
-                  |_->fail "E_METADATA_BOOL" "Metadata flags must be static booleans" in
+            | operation when List.mem operation metadata_lowering_operations ->
                 let sources=geo_of args in
-                let build=function
-                  |input::rest -> (match operation with
-                    |"sop/rename_attr"->Attribute_metadata.rename ~owner:(text "owner" "any")
-                        ~pattern:(text "pattern" "") ~replacement:(text "replacement" "") ~conflict:(text "conflict" "error") input
-                    |"sop/swap_attr"->Attribute_metadata.swap ~owner:(text "owner" "point")
-                        ~source:(text "source" "") ~destination:(text "destination" "") ~method_:(text "method" "swap") input
-                    |"sop/delete_attrs"->Attribute_metadata.delete_attributes ?reference:(List.nth_opt rest 0)
-                        ~inverse:(bool "inverse") ~point:(text "point" "") ~vertex:(text "vertex" "")
-                        ~primitive:(text "primitive" "") ~detail:(text "detail" "") input
-                    |"sop/rename_group"->Attribute_metadata.rename_group ~owner:(text "owner" "any")
-                        ~pattern:(text "pattern" "") ~replacement:(text "replacement" "") ~conflict:(text "conflict" "error") input
-                    |"sop/delete_group"->Attribute_metadata.delete_group ~owner:(text "owner" "any") ~pattern:(text "pattern" "") ~unused:(bool "unused") input
-                    |"sop/rename_edge"->Attribute_metadata.rename_edge ~from:(text "pattern" "") ~into:(text "replacement" "") input
-                    |_->Attribute_metadata.delete_edge ~name:(text "name" "") input)
-                  |[]->invalid_arg "Metadata operations require geometry" in
-                let factory=Edit.factory ~key:operation ~label:operation ~category:["Flow";"Metadata"]
-                  ~arity:(List.length sources) build in
+                let factory=metadata_factory ~operation ~args sources in
                 {cid;factory;arity=List.length sources;changes=[];dynamic=[];zone=None;kernels=[];
                   slots=List.mapi(fun i source->i,source)sources}
             | "sop/with_group" ->
@@ -1319,16 +1437,14 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
         else let values=Option.get values in
           let program=ok(Flow_ir.Executor.compile ~profile ~approx:checked.approx
             ~sink:Flow_ir.Sop_input values) in
-          let ir=Flow_ir.Executor.graph program in
           let eligible = Attribute_kernel.sources values=[] &&
-            (match ir.nodes.(ir.roots.(0)).kind with
-             |Flow_ir.Kernel {body=(Packed_map _ | Readback);_}->true |_->false) in
+            Flow_ir.Executor.root_is_packed_or_readback program in
           if not eligible && not(E.state_dependent(attribute_data n.args)) then nodes else
           Network.Int_map.add compiled.(n.id) (fun ~network:_ state live node ->
           let name = match List.assoc "attribute" n.args with E.Text name -> name | _ -> assert false in
           (* Only input-independent producers can materialize before SOP cooking.
              Attribute-reading cones keep their existing cooked-input CPU path. *)
-          Result.bind (if eligible then Flow_ir.Executor.try_display ~reference ~state program ~live
+          Result.bind (if eligible then Flow_ir.Executor.try_display ~reference ~gpu ~state program ~live
             else Ok None) (fun selected ->
           let values=match selected with
             |Some(Flow_ir.Executor.Cpu value)->value
@@ -1349,7 +1465,7 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
             |Some images->Result.map(fun image->
                 if Sop.Node.parameters node=string_of_int(Sop.Image.data_id image) then node else
                 Sop.Node.Private.adopt_identity ~source:node (resource_image n.kind (Ok image)))
-              (images.resolve ~context:{compiled=compiled_context;network} plan ~state ~live (E.Deferred(Ty.image,n.id))))nodes)
+              (images.resolve ~gpu ~context:{compiled=compiled_context;network} plan ~state ~live (E.Deferred(Ty.image,n.id))))nodes)
         frame_nodes plan.nodes in
       let network = Network.with_frame_nodes frame_nodes network in
       let drives = List.fold_left (fun drives (p : pending) ->
@@ -1395,16 +1511,16 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
         | E.Deferred (ty, id) when Ty.is_cooked ty -> Some compiled.(id)
             |>fun root->graph,root
         | No_geo -> graph,None
-        | E.Residual residual when (E.Private.residual_view residual).term.ty=Ty.geometry ->
+        | E.Residual residual when (E.Residual.residual_view residual).term.ty=Ty.geometry ->
             let residuals=Hashtbl.create 16 and functions=Hashtbl.create 16 and ids=ref [] in
             let rec sources=function
               |E.Deferred(ty,id) when Ty.is_cooked ty->ids:=id::!ids
-              |E.Residual r when not(List.exists((==)r)(Hashtbl.find_all residuals(E.Private.residual_id r)))->
-                  Hashtbl.add residuals(E.Private.residual_id r)r;
-                  List.iter(fun(_,v)->sources v)(E.Private.residual_view r).bindings
-              |E.Fn fn when not(List.exists((==)fn)(Hashtbl.find_all functions(E.Private.function_id fn)))->
-                  Hashtbl.add functions(E.Private.function_id fn)fn;
-                  List.iter(fun(_,v)->sources v)(E.Private.function_bindings fn)
+              |E.Residual r when not(List.exists((==)r)(Hashtbl.find_all residuals(E.Residual.residual_id r)))->
+                  Hashtbl.add residuals(E.Residual.residual_id r)r;
+                  List.iter(fun(_,v)->sources v)(E.Residual.residual_view r).bindings
+              |E.Fn fn when not(List.exists((==)fn)(Hashtbl.find_all functions(E.Residual.function_id fn)))->
+                  Hashtbl.add functions(E.Residual.function_id fn)fn;
+                  List.iter(fun(_,v)->sources v)(E.Residual.function_bindings fn)
               |E.Record fields|Struct(_,_,fields)|Source(_,_,fields)->List.iter(fun(_,v)->sources v)fields
               |E.List values->Array.iter sources values
               |_->() in
@@ -1458,23 +1574,23 @@ let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) 
                 (make_zone ~state:(E.fork_state state) ~outer:[] z (Sop.Node.Private.input_array node))))
               network.frame_nodes in
           Network.with_frame_nodes frames network, root) outer in
-    Ok {graphs; factories=lisp_factories; compiled_ids = !ids; sites = List.rev !site_list;
+    Ok {gpu; graphs; factories=lisp_factories; compiled_ids = !ids; sites = List.rev !site_list;
         compiled = compiled_context;
         pending = List.rev !pending; provenance = !provenance; zones = List.rev !zones;
         volatile = !volatile_nodes; plan; image_sites; states = evaluated.states; evaluated;
         approx = checked.approx; approx_reasons = checked.approx_reasons; profile; preview}
-  with Fail diagnostic -> Error diagnostic)
+  with Diagnostic.Error diagnostic -> Error diagnostic)
 
-let of_checked ~factories ?provenance_tags ?reference ?compiled_ids ?sites ?inputs checked =
+let of_checked ~factories ?provenance_tags ?reference ?gpu ?compiled_ids ?sites ?inputs checked =
   Result.bind (Encoded_parameters.checked checked)
-    (lower_checked ~factories ?provenance_tags ?reference ?compiled_ids ?sites ?inputs)
+    (lower_checked ~factories ?provenance_tags ?reference ?gpu ?compiled_ids ?sites ?inputs)
 
-let workspace ~factories ?extra ?reference ?compiled_ids ?sites ?inputs source =
+let workspace ~factories ?extra ?reference ?gpu ?compiled_ids ?sites ?inputs source =
   Result.bind (Catalog.of_factories ~version:Manifest.version ?extra factories) (fun catalog ->
     match Catalog.check_workspace ~ops:Operators.all catalog source with
-    | Some checked, _ -> of_checked ~factories ?reference ?compiled_ids ?sites ?inputs checked
+    | Some checked, _ -> of_checked ~factories ?reference ?gpu ?compiled_ids ?sites ?inputs checked
     | None, diagnostics -> Error (match List.find_opt (fun (d : Diagnostic.t) ->
-        d.severity = Diagnostic.Error) diagnostics with
+        d.severity = Diagnostic.Error_severity) diagnostics with
       | Some d -> d
       | None -> Diagnostic.error ~code:"E_LOWER" "Workspace did not check"))
 
@@ -1535,7 +1651,7 @@ let tags lowered ~site ~iter =
     if z.site = site && z.iter = iter then
       List.init (max 0 (Atomic.get z.count)) (fun i -> z.base + i) @ tags
     else if z.body_site = site && List.compare_length_with z.iter (n - 1) = 0
-       && List.for_all2 ( = ) z.iter (List.filteri (fun i _ -> i < n - 1) iter)
+       && List.for_all2 ( = ) z.iter (List.take (max 0 (n - 1)) iter)
     then z.base + List.nth iter (n - 1) :: tags else tags) plain lowered.zones
 
 let zone_count lowered site =
@@ -1555,13 +1671,15 @@ let zone_element lowered site k =
 
 let field_calls ?state ~live ~resolve lowered =
   let state = Option.map E.fork_state state in
-  let defaults = Sop.Edit_graph.factory_fields Sop.Nodes.Iso_surface.factory in
+  let defaults = List.find_map (fun factory ->
+    if Edit.factory_key factory = "iso_surface" then Some (Edit.factory_fields factory)
+    else None) lowered.factories |> Option.value ~default:[] in
   let vector (node : E.node) name =
     match List.assoc_opt name node.args with
     | Some value -> (match E.Private.force_reference ?state ~resolve value ~live with
         | Ok (E.Vec3 (x,y,z)) -> Some (x,y,z) | _ -> None)
     | None ->
-        let component suffix = List.find_map (fun (f : Sop.Parameter.field_view) ->
+        let component suffix = List.find_map (fun (f : Param.field_view) ->
           if f.name = name ^ suffix then match f.current with
             | Float_value value -> Some value | _ -> None else None) defaults in
         Option.bind (component "_x") (fun x -> Option.bind (component "_y")
@@ -1584,7 +1702,7 @@ let field_calls ?state ~live ~resolve lowered =
                if count > max_int - start then None else begin
                  offset := start + count;
                  let at k =
-                   if k < 0 || k >= count then Error (Flow.Diagnostic.error ~code:"E_LIST_RANGE"
+                   if k < 0 || k >= count then Error (Diagnostic.error ~code:"E_LIST_RANGE"
                      "Probe index is outside the field grid.") else
                    let p = [|Float.fma (float (k mod nx)) ((hx -. lx) /. rx) lx;
                      Float.fma (float ((k / nx) mod ny)) ((hy -. ly) /. ry) ly;

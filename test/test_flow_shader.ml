@@ -1,12 +1,12 @@
 module E = Flow.Eval
 module P = Flow_graph.Projection
 module L = Editor_document.Layout_by_path
-let ok = function Ok value -> value | Error d -> failwith (Flow.Diagnostic.to_string d)
+let ok = function Ok value -> value | Error d -> failwith (Diagnostic.to_string d)
 let () =
   let text = In_channel.with_open_bin Sys.argv.(1) In_channel.input_all in
   let doc = match Rays_editor.Workspace.load text with
     | Ok doc -> doc
-    | Error ds -> failwith (String.concat "; " (List.map Flow.Diagnostic.to_string ds)) in
+    | Error ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds)) in
   let catalog = Result.get_ok (Editor_document.Contexts.catalog ~version:1 Sop_catalog.Editor.factories) in
   let module N = Rays_editor.Private.Navigator in
   let outline = N.rows N.initial {N.workspace = doc.checked; active = Some "picture"; scope = None;

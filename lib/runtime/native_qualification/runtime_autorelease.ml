@@ -13,7 +13,12 @@ external thread_tag : unit -> int64 = "rays_test_thread_tag"
 
 let get = function
   | Ok value -> value
-  | Error error -> failwith (Ogpu.Error.to_string error)
+  | Error error -> failwith (Format.asprintf "%a" Renderer.pp_error error)
+
+let create width height =
+  Renderer.create {Renderer.default_configuration with logical_width=width;logical_height=height;
+    drawable_width=width;drawable_height=height}
+let adopt_draws draws=List.map(Renderer.prepared_draw ~family:Renderer.Scene2)draws
 
 let draws extent =
   let vertices = Bytes.make 48 '\000' and indices = Bytes.make 12 '\000' in
@@ -32,35 +37,35 @@ let draws extent =
         { viewport = (0, 0, extent, extent); scissor = (0, 0, extent, extent);
           cull = Ogpu.Render_pass.Cull_none; depth_compare = Ogpu.Render_pass.Always;
           depth_write = false; depth_load = Ogpu.Render_pass.Clear; depth_clear = 1.;
-          transform_uniforms = None; stencil_state = None;
-          stencil_load = Ogpu.Render_pass.Clear; stencil_clear = 0 } } ]
+          transform_uniforms = None} } ]
 
 let lifecycle () =
-  let runtime = get (Runtime.create ~width:4 ~height:4 ()) in
+  let runtime = get (create 4 4) in
   let clear = (0., 0., 0., 0.) in
-  get (Runtime.set_window_background runtime (0.1, 0.2, 0.3));
-  get (Runtime.set_cursor runtime `Text);
-  get (Runtime.set_text_input runtime (Some ((0, 0, 4, 4), 0)));
+  get (Runtime.set_window_background (Renderer.Private.runtime runtime) (0.1, 0.2, 0.3));
+  get (Runtime.set_cursor (Renderer.Private.runtime runtime) `Text);
+  get (Runtime.set_text_input (Renderer.Private.runtime runtime) (Some ((0, 0, 4, 4), 0)));
   for _ = 1 to 8 do
     ignore (Sdl3.Event.poll_coalesced ());
-    ignore (get (Runtime.render ~clear runtime (draws 4)))
+    ignore (get (Renderer.draw ~clear runtime (adopt_draws(draws 4))))
   done;
-  let facts = Runtime.frame_facts runtime in
-  ignore (get (Runtime.read_pixels runtime ~bytes_per_row:(facts.drawable_width * 4)));
-  get (Runtime.resize runtime ~width:8 ~height:8);
-  ignore (get (Runtime.render ~clear runtime (draws 8)));
-  ignore (get (Runtime.presentation_facts runtime));
-  get (Runtime.set_text_input runtime None);
-  get (Runtime.destroy runtime)
+  let facts = get (Runtime.presentation_facts (Renderer.Private.runtime runtime)) in
+  ignore (get (Renderer.read_pixels runtime ~bytes_per_row:(facts.drawable_width * 4)));
+  get (Runtime.resize (Renderer.Private.runtime runtime) ~width:8 ~height:8);
+  ignore (get (Renderer.draw ~clear runtime (adopt_draws(draws 8))));
+  ignore (get (Runtime.presentation_facts (Renderer.Private.runtime runtime)));
+  get (Runtime.set_text_input (Renderer.Private.runtime runtime) None);
+  get (Renderer.destroy runtime)
 
 let offscreen () =
   let runtime =
-    get (Runtime.create_offscreen ~logical_width:4 ~logical_height:4 ~width:8 ~height:8 ()) in
+    get (Renderer.create_offscreen {Renderer.default_configuration with logical_width=4;
+      logical_height=4;drawable_width=8;drawable_height=8}) in
   for _ = 1 to 4 do
-    ignore (get (Runtime.render ~clear:(0., 0., 0., 0.) runtime (draws 8)))
+    ignore (get (Renderer.draw ~clear:(0., 0., 0., 0.) runtime (adopt_draws(draws 8))))
   done;
-  ignore (get (Runtime.read_pixels runtime ~bytes_per_row:32));
-  get (Runtime.destroy runtime)
+  ignore (get (Renderer.read_pixels runtime ~bytes_per_row:32));
+  get (Renderer.destroy runtime)
 
 let child () =
   Printf.eprintf "initial thread 0x%Lx\n%!" (thread_tag ());

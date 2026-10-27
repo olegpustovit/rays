@@ -1,50 +1,38 @@
 (library
  (name runtime)
  (public_name rays.runtime)
- (modules runtime runtime_shaders)
- (private_modules runtime_shaders)
- (libraries sdl3 ogpu scene_execution))
+ (modules runtime)
+ (libraries sdl3 ogpu))
 
 (library
  (name runtime_input)
  (public_name rays.runtime_input)
  (wrapped false)
  (modules runtime_input runtime_input_sdl3)
- (libraries sdl3))
+ (libraries sdl3 input))
 
 (executable
+ (enabled_if (= %{system} macosx))
  (name test_main)
- (modules test_main test_runtime test_runtime_visibility test_runtime_scaling test_runtime_scene3_lighting test_runtime_scene3_instances test_runtime_scene2_argument test_runtime_input)
- (libraries runtime runtime_input scene_execution ogpu sdl3))
+ (modules test_main test_runtime_visibility test_runtime_input)
+ (libraries runtime runtime_input ogpu ogpu_metal sdl3))
 
 (rule
- (aliases runtest-native test_runtime)
- (locks smoke_window)
- (action (run %{exe:test_main.exe} test_runtime)))
-
-(rule
- (aliases runtest-native test_runtime_visibility)
+ (enabled_if (= %{system} macosx))
+ (alias test_runtime_visibility)
  (locks smoke_window)
  (action (run %{exe:test_main.exe} test_runtime_visibility)))
 
 (rule
- (aliases runtest test_runtime_scaling)
- (action (run %{exe:test_main.exe} test_runtime_scaling)))
-
-(rule
- (aliases runtest-native test_runtime_scene3_lighting)
- (locks smoke_window)
- (action (run %{exe:test_main.exe} test_runtime_scene3_lighting)))
-
-(rule
- (aliases runtest-native test_runtime_scene3_instances)
- (action (run %{exe:test_main.exe} test_runtime_scene3_instances)))
-
-(rule
- (aliases runtest-native test_runtime_scene2_argument)
- (locks smoke_window)
- (action (run %{exe:test_main.exe} test_runtime_scene2_argument)))
-
-(rule
- (aliases runtest test_runtime_input)
+ (enabled_if (= %{system} macosx))
+ (alias test_runtime_input)
  (action (run %{exe:test_main.exe} test_runtime_input)))
+
+(alias
+ (name runtest-native)
+ (deps (alias test_runtime_visibility)))
+
+(alias
+ (name runtest)
+ (deps
+  (alias test_runtime_input)))

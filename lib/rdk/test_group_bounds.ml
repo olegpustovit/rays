@@ -46,13 +46,13 @@ let sphere center radius = Group_ops.Bounds_sphere { center; radius }
 let test_point_box_and_sphere () =
   let source = Line_geometry.points
       [|(-1., 0., 0.); (0., 0., 0.); (1., 0., 0.); (2., 0., 0.)|] in
-  let bounds = box (Vec3.create (-1.) (-0.1) (-0.1))
-      (Vec3.create 1. 0.1 0.1) in
+  let bounds = box (Rays_math.Vec3.create (-1.) (-0.1) (-0.1))
+      (Rays_math.Vec3.create 1. 0.1 0.1) in
   let boxed = Group_ops.group_bounds bounds ~owner:Group_ops.Group_points ~name:"boxed"
       source |> get_ok in
   expect_members [0; 1; 2] (group Group.Point "boxed" boxed)
     "Group Bounds inclusive point box";
-  let spherical = Group_ops.group_bounds (sphere Vec3.zero 1.)
+  let spherical = Group_ops.group_bounds (sphere Rays_math.Vec3.zero 1.)
       ~owner:Group_ops.Group_points ~name:"spherical" source |> get_ok in
   expect_members [0; 1; 2] (group Group.Point "spherical" spherical)
     "Group Bounds inclusive point sphere"
@@ -62,8 +62,8 @@ let test_vertex_and_primitive_containment () =
       [|(-2., 0., 0.); (0., 0., 0.); (2., 0., 0.);
         (-0.25, 0., 0.); (0.25, 0., 0.); (0., 0.25, 0.)|]
       [|`Polygon, [|0; 1; 2|]; `Polygon, [|3; 4; 5|]|] in
-  let bounds = box (Vec3.create (-0.5) (-0.5) (-0.5))
-      (Vec3.create 0.5 0.5 0.5) in
+  let bounds = box (Rays_math.Vec3.create (-0.5) (-0.5) (-0.5))
+      (Rays_math.Vec3.create 0.5 0.5 0.5) in
   let vertices = Group_ops.group_bounds bounds ~owner:Group_ops.Group_vertices
       ~name:"vertices" source |> get_ok in
   expect_members [1; 3; 4; 5] (group Group.Vertex "vertices" vertices)
@@ -80,8 +80,8 @@ let test_vertex_and_primitive_containment () =
 let test_edge_intersection_and_extremes () =
   let source = geometry [|(-2., 0., 0.); (2., 0., 0.)|]
       [|`Open, [|0; 1|]|] in
-  let bounds = box (Vec3.create (-0.25) (-0.25) (-0.25))
-      (Vec3.create 0.25 0.25 0.25) in
+  let bounds = box (Rays_math.Vec3.create (-0.25) (-0.25) (-0.25))
+      (Rays_math.Vec3.create 0.25 0.25 0.25) in
   let full = Group_ops.group_bounds bounds ~containment:Group_ops.Fully_contained
       ~owner:Group_ops.Group_edges ~name:"full" source |> get_ok in
   check (edge_members (edge_group "full" full) = [])
@@ -90,7 +90,7 @@ let test_edge_intersection_and_extremes () =
       ~owner:Group_ops.Group_edges ~name:"partial" source |> get_ok in
   check (edge_members (edge_group "partial" partial) = [0])
     "Group Bounds segment-box intersection with outside endpoints";
-  let spherical = Group_ops.group_bounds (sphere Vec3.zero 0.25)
+  let spherical = Group_ops.group_bounds (sphere Rays_math.Vec3.zero 0.25)
       ~containment:Group_ops.Partially_contained ~owner:Group_ops.Group_edges
       ~name:"sphere" source |> get_ok in
   check (edge_members (edge_group "sphere" spherical) = [0])
@@ -102,7 +102,7 @@ let test_edge_intersection_and_extremes () =
       ~name:"extreme" extreme |> get_ok in
   check (edge_members (edge_group "extreme" extreme_box) = [0])
     "Group Bounds overflow-safe extreme segment-box intersection";
-  let extreme_sphere = Group_ops.group_bounds (sphere Vec3.zero 1.)
+  let extreme_sphere = Group_ops.group_bounds (sphere Rays_math.Vec3.zero 1.)
       ~containment:Group_ops.Partially_contained ~owner:Group_ops.Group_edges
       ~name:"extreme" extreme |> get_ok in
   check (edge_members (edge_group "extreme" extreme_sphere) = [0])
@@ -122,7 +122,7 @@ let reference_box minimum maximum (ax, ay, az) (bx, by, bz) =
       if leave < !last then last := leave;
       if !first > !last then hit := false
     end in
-  axis ax bx minimum.Vec3.x maximum.Vec3.x;
+  axis ax bx minimum.Rays_math.Vec3.x maximum.Rays_math.Vec3.x;
   axis ay by minimum.y maximum.y;
   axis az bz minimum.z maximum.z;
   !hit
@@ -131,7 +131,7 @@ let reference_sphere center radius (ax, ay, az) (bx, by, bz) =
   let dx = bx -. ax and dy = by -. ay and dz = bz -. az in
   let denominator = (dx *. dx) +. (dy *. dy) +. (dz *. dz) in
   let parameter = if denominator = 0. then 0. else
-      max 0. (min 1. ((((center.Vec3.x -. ax) *. dx)
+      max 0. (min 1. ((((center.Rays_math.Vec3.x -. ax) *. dx)
         +. ((center.y -. ay) *. dy) +. ((center.z -. az) *. dz))
         /. denominator)) in
   let x = ax +. (parameter *. dx) -. center.x
@@ -144,7 +144,7 @@ let test_randomized_segment_reference () =
   let positions = Packed.Float3.Builder.create point_count
   and topology = Rdk_test_support.Tb.create ~point_count () in
   let random coordinate =
-    (Rand.float_at (Rand.seed 0x6b17) ~index:coordinate *. 20.) -. 10. in
+    (Rays_math.Rand.float_at (Rays_math.Rand.seed 0x6b17) ~index:coordinate *. 20.) -. 10. in
   for segment = 0 to segment_count - 1 do
     let point = segment * 2 in
     Packed.Float3.Builder.set positions point (random (point * 3))
@@ -155,9 +155,9 @@ let test_randomized_segment_reference () =
   done;
   let source = Geometry.create ~positions:(Packed.Float3.Builder.freeze positions)
       ~topology:(Rdk_test_support.Tb.freeze topology) () |> Result.get_ok in
-  let minimum = Vec3.create (-2.75) (-1.5) (-3.25)
-  and maximum = Vec3.create 3.5 4.25 2.125
-  and center = Vec3.create 1.25 (-0.75) 2.5 and radius = 3.125 in
+  let minimum = Rays_math.Vec3.create (-2.75) (-1.5) (-3.25)
+  and maximum = Rays_math.Vec3.create 3.5 4.25 2.125
+  and center = Rays_math.Vec3.create 1.25 (-0.75) 2.5 and radius = 3.125 in
   let boxed = Group_ops.group_bounds (box minimum maximum)
       ~containment:Group_ops.Partially_contained ~owner:Group_ops.Group_edges
       ~name:"boxed" source |> get_ok |> edge_group "boxed"
@@ -185,8 +185,8 @@ let test_base_merge_and_failures () =
   let existing = Group.init ~grain:1 ~owner:Group.Point ~name:"selection" 8
       (fun point -> point = 7) in
   let source = source |> with_group even |> with_group existing in
-  let all_box = box (Vec3.create (-1.) (-1.) (-1.))
-      (Vec3.create 10. 1. 1.) in
+  let all_box = box (Rays_math.Vec3.create (-1.) (-1.) (-1.))
+      (Rays_math.Vec3.create 10. 1. 1.) in
   let based = Group_ops.group_bounds all_box ~base:"even" ~owner:Group_ops.Group_points
       ~name:"based" source |> get_ok in
   expect_members [0; 2; 4; 6] (group Group.Point "based" based)
@@ -207,14 +207,14 @@ let test_base_merge_and_failures () =
       (group Group.Point "absent_subtract" absent_subtract) = 0)
     "Group Bounds absent destination subtraction identity";
   expect_invalid (fun () -> Group_ops.group_bounds
-      (box (Vec3.create 1. 0. 0.) Vec3.zero)
+      (box (Rays_math.Vec3.create 1. 0. 0.) Rays_math.Vec3.zero)
       ~owner:Group_ops.Group_points ~name:"bad" source)
     "Group Bounds rejects reversed box";
-  expect_invalid (fun () -> Group_ops.group_bounds (sphere Vec3.zero (-1.))
+  expect_invalid (fun () -> Group_ops.group_bounds (sphere Rays_math.Vec3.zero (-1.))
       ~owner:Group_ops.Group_points ~name:"bad" source)
     "Group Bounds rejects negative radius";
   expect_invalid (fun () -> Group_ops.group_bounds
-      (sphere (Vec3.create Float.nan 0. 0.) 1.)
+      (sphere (Rays_math.Vec3.create Float.nan 0. 0.) 1.)
       ~owner:Group_ops.Group_points ~name:"bad" source)
     "Group Bounds rejects non-finite center";
   expect_invalid (fun () -> Group_ops.group_bounds all_box ~base:"missing"
@@ -234,7 +234,7 @@ let same_group left right =
 
 let test_scale_parallel_exactness () =
   let source = Plane_generators.grid ~columns:500 ~rows:300 ~size:20. () |> get_ok in
-  let region = sphere (Vec3.create 1. 0. (-2.)) 7.5 in
+  let region = sphere (Rays_math.Vec3.create 1. 0. (-2.)) 7.5 in
   let run domains = Parallel.run ~domains (fun () ->
     source
     |> Group_ops.group_bounds ~grain:1_009 region ~owner:Group_ops.Group_points
@@ -264,8 +264,8 @@ let test_scale_parallel_exactness () =
 
 let test_checked_boundary () =
   let source = Line_geometry.points [|(0., 0., 0.); (1., 0., 0.)|] in
-  let region = box (Vec3.create (-0.5) (-0.5) (-0.5))
-      (Vec3.create 0.5 0.5 0.5) in
+  let region = box (Rays_math.Vec3.create (-0.5) (-0.5) (-0.5))
+      (Rays_math.Vec3.create 0.5 0.5 0.5) in
   let selected = Group_ops.group_bounds region
       ~owner:Group_ops.Group_points ~name:"selected" source |> get_ok in
   expect_members [0] (group Group.Point "selected" selected)
@@ -278,7 +278,7 @@ let test_checked_boundary () =
           "Group Bounds checked boundary typed error"
     | Ok _ -> fail "Group Bounds checked boundary accepted invalid input" in
   expect_error
-    (Group_ops.group_bounds (box (Vec3.create 1. 0. 0.) Vec3.zero)
+    (Group_ops.group_bounds (box (Rays_math.Vec3.create 1. 0. 0.) Rays_math.Vec3.zero)
        ~owner:Group_ops.Group_points ~name:"bad" source)
     "invalid_group";
   let cancel = Cancel.create () in

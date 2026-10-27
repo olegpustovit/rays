@@ -24,7 +24,7 @@
       :else (error "E_PARAM" (str "expected boolean, got " (text/repr token))))))
 (defn gp_float_text :context value [(raw : text)]
   (let* [parsed (text/to_float raw)]
-    (if parsed.valid (if (= parsed.value 0.0) "0" (str parsed.value))
+    (if parsed.valid (text/float parsed.value)
       (error "E_PARAM" (str "invalid boundary tolerance " (text/repr raw))))))
 (defn gp_attributes :context value [(raw : text)]
   (text/table_encode (map (fn [(row : (list text))]

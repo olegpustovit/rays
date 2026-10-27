@@ -1,7 +1,7 @@
 (library
  (name scene_command)
  (public_name rays.scene_command)
- (modules path render_ir shape2 display_list ui_batch shape_batch marks))
+ (modules path render_ir shape2 display_list marks ui_batch))
 
 (test
  (name test_display_list)
@@ -19,6 +19,6 @@
  (libraries scene_command))
 
 (test
- (name test_shape_batch)
- (modules test_shape_batch)
+ (name test_ui_primitives)
+ (modules test_ui_primitives)
  (libraries scene_command))

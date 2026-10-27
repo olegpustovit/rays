@@ -15,7 +15,21 @@ let fail message = prerr_endline message; exit 1
 let clock = Unix.gettimeofday
 
 (* [rays]'s entry point, with a built text where its file is *)
-let main ~path text = Rays_editor.Workspace.main ~text path
+let main ~path text = match Rays_editor.Workspace.main ~text path with
+  | Ok () -> ()
+  | Error diagnostics -> fail (String.concat "\n" (List.map Diagnostic.to_string diagnostics))
+
+let errors () =
+  let path = Filename.temp_file "rays-missing-workspace" ".rays" in
+  Sys.remove path;
+  let refuses code = function
+    | Error diagnostics ->
+        if not (List.exists (fun (diagnostic : Diagnostic.t) -> diagnostic.code = code) diagnostics)
+        then fail ("workspace start did not return " ^ code)
+    | Ok () -> fail "workspace start accepted invalid input" in
+  refuses "E_IO" (Rays_editor.Workspace.main path);
+  refuses "E_UNCLOSED" (Rays_editor.Workspace.main ~text:"(workspace" path);
+  print_endline "workspace start: I/O and syntax errors return without exiting"
 
 let replace ~sub ~by text =
   let n = String.length sub in
@@ -35,7 +49,7 @@ let start sketch =
   (* no file at this path: the program has no source to poll *)
   let (), phases = Flow.Phase_timer.sample ~clock (fun () -> main ~path:"test/static_million_marks.rays" text) in
   let per_mark = (Gc.allocated_bytes () -. before) /. float marks in
-  let evaluations = Flow.Phase_timer.calls phases Evaluate in
+  let evaluations = Flow.Phase_timer.calls phases "evaluate" in
   if evaluations <> 1 then fail (Printf.sprintf "a start evaluated the workspace %d times" evaluations);
   (* 398 before the node library; its 128 definitions add a fixed ~75 MB (75 a mark) *)
   if per_mark > 500. then fail (Printf.sprintf "a static start allocated %.0f bytes a mark" per_mark);
@@ -78,12 +92,13 @@ let reload () =
       fail "the reloaded file's static value was not seen: no picture named by it";
     if not (String.equal (In_channel.with_open_bin "sketch.rays" In_channel.input_all) filed) then
       fail "the run rewrote the source file";
-    let evaluations = Flow.Phase_timer.calls phases Evaluate in
+    let evaluations = Flow.Phase_timer.calls phases "evaluate" in
     if evaluations <> 2 then
       fail (Printf.sprintf "a start and one reload evaluated the workspace %d times" evaluations);
     print_endline "workspace start: a file that differs from the built text reloads and its static values are the ones seen (2 evaluations)")
 
 let () = match Array.to_list Sys.argv with
+  | [_; "errors"] -> errors ()
   | [_; "start"; sketch] -> start sketch
   | [_; "reload"] -> reload ()
-  | _ -> fail "usage: test_workspace_start (start SKETCH | reload)"
+  | _ -> fail "usage: test_workspace_start (errors | start SKETCH | reload)"

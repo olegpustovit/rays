@@ -12,12 +12,9 @@ open Sop
 let pointer (x, y) = float x, float y
 
 let frame ?(mouse = 0, 0) ?(buttons = []) ?(events = []) count : Rays.Frame.t = {
-  width = 1_200; height = 760; size = 1_200, 760;
-
-   pixel_scale = 1., 1.;
-  time = float_of_int count /. 60.; dt = 1. /. 60.; fps = 60.; count;
-  mouse = pointer mouse; mouse_delta = 0., 0.; keys = [];
-  mouse_buttons = buttons; events;
+  input = { (Input.at_time (float_of_int count /. 60.)) with dt = 1. /. 60.;
+    frame = count; tick = count; size = 1_200, 760; pointer = pointer mouse; buttons; events };
+  pixel_scale = 1., 1.; fps = 60.; mouse_delta = 0., 0.;
 }
 
 let percentile values fraction =
@@ -56,7 +53,7 @@ let workspace_text count =
 
 let load text = match Rays_editor.Workspace.load text with
   | Ok workspace -> workspace
-  | Error diagnostics -> failwith (String.concat "; " (List.map Flow.Diagnostic.to_string diagnostics))
+  | Error diagnostics -> failwith (String.concat "; " (List.map Diagnostic.to_string diagnostics))
 
 let workspace count = let text, names = workspace_text count in load text, names
 
@@ -72,7 +69,7 @@ let measure nodes =
       ~domains:1 ~presets:(Filename.temp_dir "rays-editor-bench" "")
       ~max_entries:4 ~max_payload_bytes:(1024 * 1024)
       ~prepare:(fun _ _ -> Ok ())
-      ~scene3:(fun _ () -> Rays.Scene3.create []) () |> Result.get_ok in
+      ~draw:(fun _ () -> Rays.Scene3.create []) () |> Result.get_ok in
   let environment = ref (E.update environment (frame 0)) and count = ref 1 in
   let step ?mouse ?buttons ?events () =
     environment := E.update !environment (frame ?mouse ?buttons ?events !count);
@@ -81,13 +78,13 @@ let measure nodes =
   (* The scene opens as a list: focus it, arrow to the object, and enter it. *)
   let inside = gx + 20, gy + gh - 20 in
   step ~mouse:inside ();
-  step ~mouse:inside ~events:[Rays.Event.MousePressed (Rays.Input.LeftButton, pointer inside);
-    Rays.Event.MouseReleased (Rays.Input.LeftButton, pointer inside)] ();
-  let key k = Rays.Event.KeyPressed k in
+  step ~mouse:inside ~events:[Input.Pointer_pressed (Input.LeftButton, pointer inside);
+    Input.Pointer_released (Input.LeftButton, pointer inside)] ();
+  let key k = Input.Key_pressed k in
   while Option.map Node.label (E.selected_node !environment) <> Some "g" do
-    step ~events:[key Rays.Input.ArrowDown] ()
+    step ~events:[key Input.ArrowDown] ()
   done;
-  step ~events:[key (Rays.Input.KeyChar 'i')] ();
+  step ~events:[key (Input.KeyChar 'i')] ();
   step ();
   (* a large graph opens with its cards outside the pane: frame all of it, then take one inside *)
   let x, y, width, height = match List.find_map (fun name ->
@@ -97,7 +94,7 @@ let measure nodes =
       | _ -> None) ("output" :: names) with
     | Some box -> box
     | None ->
-        step ~mouse:inside ~events:[key Rays.Input.Home] (); step ~mouse:inside ();
+        step ~mouse:inside ~events:[key Input.Home] (); step ~mouse:inside ();
         List.find_map (fun name ->
       match E.node_box !environment [ "g"; name ] with
       | Some (x, y, width, height) when x >= gx && y >= gy && x + width < gx + gw
@@ -105,28 +102,27 @@ let measure nodes =
       | _ -> None) ("output" :: names) |> Option.get in
   let start = x + (width / 2), y + min 12 (height / 2) in
   step ~mouse:start ();  (* hover: hit testing uses the last frame *)
-  step ~mouse:start ~buttons:[Rays.Input.LeftButton]
-    ~events:[Rays.Event.MousePressed (Rays.Input.LeftButton, pointer start)] ();
+  step ~mouse:start ~buttons:[Input.LeftButton]
+    ~events:[Input.Pointer_pressed (Input.LeftButton, pointer start)] ();
   let samples = Array.make 200 0. in
   Gc.full_major ();
   let before = Gc.allocated_bytes () in
   Array.iteri (fun index _ ->
     let point = fst start + 10 + (index mod 2), snd start in
     let started = Unix.gettimeofday () in
-    step ~mouse:point ~buttons:[Rays.Input.LeftButton]
-      ~events:[Rays.Event.MouseMoved (pointer point)] ();
+    step ~mouse:point ~buttons:[Input.LeftButton]
+      ~events:[Input.Pointer_moved (pointer point)] ();
     samples.(index) <- Unix.gettimeofday () -. started) samples;
   report "rays_editor_drag_frame" nodes samples (Gc.allocated_bytes () -. before);
   let finish = fst start + 11, snd start in
   step ~mouse:finish
-    ~events:[Rays.Event.MouseReleased (Rays.Input.LeftButton, pointer finish)] ();
+    ~events:[Input.Pointer_released (Input.LeftButton, pointer finish)] ();
   let undo = [|0.|] in
   Gc.full_major ();
   let before = Gc.allocated_bytes () in
   let started = Unix.gettimeofday () in
-  environment := E.update !environment
-      { (frame ~events:[Rays.Event.KeyPressed (Rays.Input.KeyChar 'z')] !count)
-        with keys = [Rays.Input.Meta] };
+  let frame = frame ~events:[Input.Key_pressed (Input.KeyChar 'z')] !count in
+  environment := E.update !environment { frame with input = { frame.input with keys = [Input.Meta] } };
   undo.(0) <- Unix.gettimeofday () -. started;
   report "rays_editor_undo_frame" nodes undo (Gc.allocated_bytes () -. before);
   if E.can_redo !environment |> not then failwith "undo did not step the history";
@@ -134,7 +130,8 @@ let measure nodes =
      then run the entire next editor frame, with the pointer still held.  The edit row is the
      frame without its cook phase: the recook the changed value requires is work a drag
      never does, so it is the row compared with the drag. *)
-  let phases = List.map (fun phase -> phase, Array.make 200 0.) Flow.Phase_timer.phases in
+  let phases = List.map (fun phase -> phase, Array.make 200 0.)
+    ["print"; "parse"; "check"; "evaluate"; "lower"; "project"; "layout"; "reduce"; "cook"] in
   let samples = Array.make 200 0. in
   Gc.full_major ();
   let before = Gc.allocated_bytes () in
@@ -144,15 +141,15 @@ let measure nodes =
     environment := E.edit !environment (Flow_graph.Flow_edit.Set_arg {
       node = ["g"; "s0"]; key = Flow_graph.Flow_edit.Kw "points"; sub = [];
       value = Flow.Syntax.make (Flow.Syntax.Num (string_of_int (1 + index mod 2))) }) |> Result.get_ok;
-    step ~mouse:finish ~buttons:[Rays.Input.LeftButton] ()) in
+    step ~mouse:finish ~buttons:[Input.LeftButton] ()) in
     samples.(index) <- Unix.gettimeofday () -. started;
     List.iter (fun (phase, column) -> column.(index) <- Flow.Phase_timer.seconds edited phase) phases) samples;
   let bytes = Gc.allocated_bytes () -. before in
   report "rays_editor_scrub_frame" nodes samples bytes;
   report "rays_editor_scrub_edit_frame" nodes
-    (Array.map2 (fun frame cook -> frame -. cook) samples (List.assoc Flow.Phase_timer.Cook phases)) bytes;
+    (Array.map2 (fun frame cook -> frame -. cook) samples (List.assoc "cook" phases)) bytes;
   List.iter (fun (phase, samples) ->
-    Printf.printf "scrub_phase,%d,%s,%.9f\n%!" nodes (Flow.Phase_timer.name phase) (percentile samples 0.5)) phases;
+    Printf.printf "scrub_phase,%d,%s,%.9f\n%!" nodes phase (percentile samples 0.5)) phases;
   E.close !environment
 
 (* Idle frames of one graph under layouts that differ only in how many graph panels and
@@ -173,10 +170,10 @@ let measure_panels nodes =
         ~domains:1 ~presets:(Filename.temp_dir "rays-editor-bench" "")
         ~max_entries:4 ~max_payload_bytes:(1024 * 1024)
         ~prepare:(fun _ _ -> Ok ())
-        ~scene3:(fun _ () -> Rays.Scene3.create []) () |> Result.get_ok) in
+        ~draw:(fun _ () -> Rays.Scene3.create []) () |> Result.get_ok) in
     let count = ref 0 in
     let step mouse =
-      environment := E.update !environment (frame ~mouse ~events:[Rays.Event.MouseMoved (pointer mouse)] !count);
+      environment := E.update !environment (frame ~mouse ~events:[Input.Pointer_moved (pointer mouse)] !count);
       incr count in
     for _ = 1 to 20 do step (100, 300) done;
     let samples = Array.make 300 0. in
@@ -199,7 +196,7 @@ let measure_spreadsheet () =
       (ui/workspace (ui/split "horizontal" gpanel (ui/spreadsheet :of gpanel))))))|} in
   let environment = ref (E.create ~workspace ~await:true ~domains:1
     ~presets:(Filename.temp_dir "rays-sheet-bench" "")
-    ~prepare:(fun _ _ -> Ok ()) ~scene3:(fun _ () -> Rays.Scene3.empty) () |> Result.get_ok) in
+    ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ () -> Rays.Scene3.empty) () |> Result.get_ok) in
   Fun.protect ~finally:(fun () -> E.close !environment) (fun () ->
     environment := Rays_editor.Reduce.select_path !environment ["g"; "@result"];
     let step ?(events = []) count = environment := E.update !environment (frame ~mouse:(900,300) ~events count) in
@@ -211,7 +208,7 @@ let measure_spreadsheet () =
     Array.iteri (fun index _ -> let started = Unix.gettimeofday () in step (index+20);
       samples.(index) <- Unix.gettimeofday () -. started) samples;
     report "panels_spreadsheet" 1_000_000 samples (Gc.allocated_bytes () -. before);
-    let events = [Rays.Event.MouseMoved (900., 300.); Rays.Event.MouseScrolled (0., -3.)] in
+    let events = [Input.Pointer_moved (900., 300.); Input.Scrolled (0., -3.)] in
     for i = 320 to 339 do step ~events i done;
     Gc.full_major ();
     let before = Gc.allocated_bytes () in
@@ -230,12 +227,12 @@ let measure_world () =
       | Ok workspace -> workspace | Error _ -> failwith "the World fixture does not check" in
     let environment = ref (E.create ~domains:1 ~workspace
       ~camera:(Easy_camera.create ~inertia:false ())
-      ~prepare:(fun _ _ -> Ok ()) ~scene3:(fun _ () -> Scene3.empty) () |> Result.get_ok) in
+      ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ () -> Scene3.empty) () |> Result.get_ok) in
     Fun.protect ~finally:(fun () -> E.close !environment) (fun () ->
-      let input count x events = { (frame ~mouse:(100, 300) ~buttons:[Input.LeftButton]
-          ~events count) with width = 900; height = 640; size = 900, 640;
-
-          mouse = x, 300.; mouse_delta = 0.02, 0.; keys = [Input.Shift] } in
+      let input count x events =
+        let frame = frame ~mouse:(100, 300) ~buttons:[Input.LeftButton] ~events count in
+        { frame with input = { frame.input with size = 900, 640; pointer = x, 300.; keys = [Input.Shift] };
+          mouse_delta = 0.02, 0. } in
       let deadline = Unix.gettimeofday () +. 2. in
       while E.prepared !environment = None do
         if Unix.gettimeofday () >= deadline then failwith "initial cook did not settle";
@@ -243,13 +240,13 @@ let measure_world () =
         Unix.sleepf 0.001
       done;
       environment := E.update !environment { (input 1 100.
-        [Event.MousePressed (Input.LeftButton, (100., 300.))]) with mouse_delta = 0., 0. };
+        [Input.Pointer_pressed (Input.LeftButton, (100., 300.))]) with mouse_delta = 0., 0. };
       let samples = Array.make 16 0. in
       Gc.full_major ();
       let allocated = Gc.allocated_bytes () in
       Array.iteri (fun index _ ->
         let x = 100. +. float (index + 1) *. 0.02 in
-        let input = input (index + 2) x [Event.MouseMoved (x, 300.)] in
+        let input = input (index + 2) x [Input.Pointer_moved (x, 300.)] in
         let started = Unix.gettimeofday () in
         environment := E.update !environment input;
         samples.(index) <- Unix.gettimeofday () -. started) samples;
@@ -257,8 +254,8 @@ let measure_world () =
       let rotation = E.scene_document !environment |> Edit_graph.inspect
         |> List.find_map (fun (info : Edit_graph.node_info) ->
           if info.operation <> "world" then None else Node.parameter_fields info.node
-          |> List.find_map (fun (field : Parameter.field_view) -> match field.name, field.current with
-            | "rotation", Parameter.Float_value value -> Some value | _ -> None)) |> Option.get in
+          |> List.find_map (fun (field : Param.field_view) -> match field.name, field.current with
+            | "rotation", Param.Float_value value -> Some value | _ -> None)) |> Option.get in
       if abs_float (rotation -. 0.16) > 1e-9 then failwith "World input benchmark did not rotate 0.16 degrees";
       report "rays_editor_world_frame" 1 samples bytes))
 
@@ -287,16 +284,16 @@ let measure_particles ?(window=false) ?(toggle=false) samples_count =
       | _ -> form) source |> Flow.Lisp.print |> fst in
     let create () = E.create ~workspace:(load source) ~await:true ~domains:1
       ~presets:(Filename.temp_dir "rays-particles-panel-bench" "")
-      ~prepare:(fun _ _ -> Ok ()) ~scene3:(fun _ () -> Rays.Scene3.empty) () |> Result.get_ok in
+      ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ () -> Rays.Scene3.empty) () |> Result.get_ok in
     if window then begin
       let phases = if toggle then List.length layouts else 1 in
       let periods = Array.make (samples_count * phases) 0. and updates = Array.make (samples_count * phases) 0.
       and scenes = Array.make (samples_count * phases) 0. in
       let bytes = Array.make phases 0. in
-      let phase frame = (frame.Rays.Frame.count - 1) / (samples_count + 20)
-      and local frame = (frame.Rays.Frame.count - 1) mod (samples_count + 20) in
+      let phase frame = (frame.Rays.Frame.input.frame - 1) / (samples_count + 20)
+      and local frame = (frame.Rays.Frame.input.frame - 1) mod (samples_count + 20) in
       let sample_index frame = phase frame * samples_count + local frame - 20 in
-      ignore (Rays.Sketch.run_state ~max_frames:((samples_count + 20) * phases)
+      ignore (Result.get_ok (Rays.Sketch.run_state ~max_frames:((samples_count + 20) * phases)
         ~config:{Rays.Sketch.default_config with width=800; height=600; fps=Some 60;
           domains=Some 1; title="Particle panels: " ^ name}
         ~init:(fun _ -> create ())
@@ -308,7 +305,7 @@ let measure_particles ?(window=false) ?(toggle=false) samples_count =
           let editor = E.update editor frame in
           let index = sample_index frame in
           if local frame >= 20 then begin
-            periods.(index) <- frame.dt;
+            periods.(index) <- frame.input.dt;
             updates.(index) <- Unix.gettimeofday () -. started;
             bytes.(phase frame) <- bytes.(phase frame) +. Gc.allocated_bytes () -. before
           end;
@@ -319,7 +316,7 @@ let measure_particles ?(window=false) ?(toggle=false) samples_count =
           let index = sample_index frame in
           if local frame >= 20 then scenes.(index) <- Unix.gettimeofday () -. started;
           scene)
-        ~on_stop:E.close ());
+        ~on_stop:E.close ()));
       for phase = 0 to phases - 1 do
         let name = if toggle then "toggle_" ^ fst (List.nth layouts phase) else name in
         let prefix = "particles_window_" ^ name in
@@ -335,9 +332,9 @@ let measure_particles ?(window=false) ?(toggle=false) samples_count =
     end else begin
     let environment = ref (create ()) in
     let canvas = Rays.Canvas.create_exn ~width:1600 ~height:1200 in
-    Fun.protect ~finally:(fun () -> E.close !environment; Rays.Canvas.destroy canvas) (fun () ->
-      let frame count = {(frame ~mouse:(100,100) count) with width=800; height=600;
-        size=800,600; pixel_scale=2.,2.} in
+    Fun.protect ~finally:(fun () -> E.close !environment; ignore(Rays.Canvas.destroy canvas)) (fun () ->
+      let frame count = let frame = frame ~mouse:(100,100) count in
+        { frame with input = { frame.input with size = 800, 600 }; pixel_scale = 2., 2. } in
       let count = ref 0 in
       let step () =
         let input = frame !count in incr count;
@@ -346,7 +343,8 @@ let measure_particles ?(window=false) ?(toggle=false) samples_count =
         let updated = Unix.gettimeofday () in
         let scene = E.scene !environment input in
         let drawn = Unix.gettimeofday () in
-        Rays.Canvas.render ~density:2 canvas scene;
+        (match Rays.Canvas.render ~density:2 canvas scene with
+         | Ok () -> () | Error message -> failwith message);
         let finished = Unix.gettimeofday () in
         updated -. started, drawn -. updated, finished -. drawn, finished -. started in
       for _ = 1 to 20 do ignore (step ()) done;

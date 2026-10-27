@@ -92,7 +92,7 @@ let census path forms counts =
 let parse path source = match S.parse source with
   | Ok forms -> forms
   | Error diagnostic ->
-      prerr_endline (Flow.Diagnostic.report ~file:path ~source diagnostic);
+      prerr_endline (Diagnostic.report ~file:path ~source diagnostic);
       exit 1
 
 let self_check () =

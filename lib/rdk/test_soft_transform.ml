@@ -36,7 +36,7 @@ let with_float name values geometry =
 let test_radius_and_edge () =
   let source = line_with_free_point () in
   let seed = point_group "seed" 5 (fun point -> point = 0) in
-  let matrix = Mat4.translation (Vec3.create 0. 2. 0.) in
+  let matrix = Rays_math.Mat4.translation (Rays_math.Vec3.create 0. 2. 0.) in
   let radius = Transform_ops.soft_transform ~grain:1
       ~selection:(Transform_ops.Selected_points seed) ~metric:Transform_ops.Soft_radius
       ~falloff:Transform_ops.Soft_linear ~radius:2. ~falloff_attribute:"falloff"
@@ -73,7 +73,7 @@ let test_attribute () =
       |> with_float "weight" [|1.;0.5;2.;-0.5;0.|]
       |> with_float "distance" [|0.;1.;2.;3.;4.|] in
   let affected = point_group "affected" 5 (fun point -> point = 1 || point = 2) in
-  let matrix = Mat4.translation (Vec3.create 0. 2. 0.) in
+  let matrix = Rays_math.Mat4.translation (Rays_math.Vec3.create 0. 2. 0.) in
   let direct = Transform_ops.soft_transform ~grain:1
       ~selection:(Transform_ops.Selected_points affected)
       ~metric:(Transform_ops.Soft_attribute { attribute = "weight";
@@ -113,13 +113,13 @@ let test_errors_and_parallel () =
   let source = line_with_free_point () in
   let seed = point_group "seed" 5 (fun point -> point = 0) in
   (match Transform_ops.soft_transform ~radius:0. ~selection:(Transform_ops.Selected_points seed)
-      Mat4.identity source with
+      Rays_math.Mat4.identity source with
    | Error error -> check (Error.code error = "invalid_transform")
        "Soft Transform zero radius code"
    | Ok _ -> fail "Soft Transform accepted zero rolloff radius");
   (match Transform_ops.soft_transform
       ~metric:(Transform_ops.Soft_attribute { attribute = "missing";
-        apply_rolloff = false }) Mat4.identity source with
+        apply_rolloff = false }) Rays_math.Mat4.identity source with
    | Error error -> check (Error.code error = "invalid_transform")
        "Soft Transform missing attribute code"
    | Ok _ -> fail "Soft Transform accepted missing attribute");
@@ -128,21 +128,21 @@ let test_errors_and_parallel () =
   let wrong = Geometry.with_attribute wrong source |> Result.get_ok in
   (match Transform_ops.soft_transform
       ~metric:(Transform_ops.Soft_attribute { attribute = "wrong";
-        apply_rolloff = false }) Mat4.identity wrong with
+        apply_rolloff = false }) Rays_math.Mat4.identity wrong with
    | Error error -> check (Error.code error = "invalid_transform")
        "Soft Transform wrong attribute storage code"
    | Ok _ -> fail "Soft Transform accepted integer distance attribute");
   let nonfinite = source |> with_float "bad" [|0.;1.;Float.nan;3.;4.|] in
   (match Transform_ops.soft_transform
       ~metric:(Transform_ops.Soft_attribute { attribute = "bad";
-        apply_rolloff = false }) Mat4.identity nonfinite with
+        apply_rolloff = false }) Rays_math.Mat4.identity nonfinite with
    | Error error -> check (Error.code error = "invalid_transform")
        "Soft Transform non-finite attribute code"
    | Ok _ -> fail "Soft Transform accepted non-finite distance attribute");
   let cancelled = Cancel.create () in
   Cancel.cancel cancelled;
   (match Transform_ops.soft_transform ~cancel:cancelled
-      ~selection:(Transform_ops.Selected_points seed) (Mat4.translation Vec3.unit_y)
+      ~selection:(Transform_ops.Selected_points seed) (Rays_math.Mat4.translation Rays_math.Vec3.unit_y)
       source with
    | Error error -> check (Error.code error = "cancelled")
        "Soft Transform cancellation code"
@@ -154,7 +154,7 @@ let test_errors_and_parallel () =
   let run metric domains = Parallel.run ~domains (fun () ->
       Transform_ops.soft_transform ~grain:257 ~selection:(Transform_ops.Selected_points seed)
         ~metric ~falloff:Transform_ops.Soft_cubic ~radius:4.
-        ~falloff_attribute:"falloff" (Mat4.translation (Vec3.create 0. 1. 0.))
+        ~falloff_attribute:"falloff" (Rays_math.Mat4.translation (Rays_math.Vec3.create 0. 1. 0.))
         dense |> get_ok) in
   List.iter (fun metric ->
     let one = run metric 1 and four = run metric 4 in

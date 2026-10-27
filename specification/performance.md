@@ -208,7 +208,7 @@ caches have explicit capacities and release resources through completion-owned
 queues rather than relying on GC timing.
 
 SDL3 owns the window and Metal view, while OGPU/Metal owns command encoding,
-depth/stencil attachments, sampled resources, MSAA, and presentation. Resize
+depth attachments, sampled resources, MSAA, and presentation. Resize
 replaces drawable-sized resources instead of accumulating extents. The initial
 domain records and submits GPU work; pure mesh/scene preparation may run in the
 shared pool and joins before upload.
@@ -643,3 +643,39 @@ count with the timings: a completely cold session cannot use historical costs.
 `caller_allocated_bytes` retains the old calling-domain measurement for
 comparison; `program_allocated_bytes` samples whole-program GC counters after a
 minor collection outside the timed region, including allocations on workers.
++
+## Historical baselines retained from the export migration
+
+These measurements were recorded on Apple M1 at the baseline available in Git
+at `62582188`; they are comparison data, not verification of the current
+architecture cleanup. Detailed migration logs remain in that commit.
+
+Prepared, warm, one-domain Core evaluation; median of three runs. Scalar
+timing covers 200,000 forces. Particle timing covers 600 frames at 800×600,
+excluding native events, editor panels and rendering.
+
+| Workload | Before | After | Allocation before | Allocation after |
+| --- | ---: | ---: | ---: | ---: |
+| Scalar residual | 146.2 ns/evaluation | 54.9 ns/evaluation | 1,912 B | 568 B |
+| Particles | 3.192 ms/frame | 0.925 ms/frame | 12,893,656 B/frame | 499,624 B/frame |
+
+Native editor, one domain, 10,000 particles, 800×600 logical points:
+20 warm frames and 600 measured frames per layout. Both builds included
+the Core repair; the changed variable was the probe compiler callback.
+
+| Layout | Update before | Update after | Allocation before | Allocation after |
+| --- | ---: | ---: | ---: | ---: |
+| Canvas | 2.058 ms | 2.032 ms | 8.01 MB | 8.01 MB |
+| Graph | 9.639 ms | 2.842 ms | 42.65 MB | 8.57 MB |
+| Lisp | 3.277 ms | 3.151 ms | 9.15 MB | 9.15 MB |
+| Graph and Lisp | 10.589 ms | 3.893 ms | 44.10 MB | 10.03 MB |
+
+Both-panel median frame period was 18.605 → 16.687 ms; p95 was
+25.189 → 17.822 ms. This setup did not reproduce the reported decay to
+10 FPS. Reproduction commands are `tools/bench_rays_editor.exe --particles-toggle 600`
+and `tools/bench_core.exe frames sketches/particles.rays` (optionally `--boxed`).
+
+Native autorelease repairs reduced recorded per-frame footprint retention
+from 4.0 KiB to zero; `runtime_autorelease` in `@runtest-native`
+guards missing pools. These historical numbers do not replace current
+lifecycle or shader performance qualification.

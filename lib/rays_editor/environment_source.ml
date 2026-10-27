@@ -1,6 +1,6 @@
 open Rays
 open Editor_document
-include Environment_model
+open Environment_model
 
 (* The source file, at most every half second: a changed text reloads the document.  Unsaved work
    is never replaced: while the document differs from the file's last text or a text pane holds a
@@ -41,7 +41,7 @@ let open_dialog value (update : (_, _) Core.update) events =
          | Ok id -> { value with open_dialog = Some id }, update
          | Error message -> value, notice Core.Refusal ("Open: " ^ message)) in
   List.fold_left (fun (value, (update : (_, _) Core.update)) -> function
-    | Event.FileDialog { id; result } when value.open_dialog = Some id ->
+    | Input.File_dialog { id; result } when value.open_dialog = Some id ->
         { value with open_dialog = None },
         (match result with
          | Ok (path :: _) -> { update with core = { update.core with Core.open_import = Some path } }

@@ -304,10 +304,6 @@ let entries : entry list =
   ; Method { recv = "Device"; objc = "id<MTLDevice>"; sel = "supportsTextureSampleCount:"; args = [ Scalar Nsuint ]
            ; ret = Some (Scalar Bool); error = false; ocaml = "device_supports_texture_sample_count"; since = None
            ; feature = C.Texture ; pool = true }
-  ; Property { recv = "Device"; objc = "id<MTLDevice>"; name = "depth24Stencil8PixelFormatSupported"; ty = Scalar Bool
-             ; access = Get; ocaml = "device_supports_depth24_stencil8"; since = None; feature = C.Texture }
-  ; Property { recv = "Device"; objc = "id<MTLDevice>"; name = "supportsBCTextureCompression"; ty = Scalar Bool
-             ; access = Get; ocaml = "device_supports_bc_texture_compression"; since = None; feature = C.Texture }
   ; Method { recv = "Device"; objc = "id<MTLDevice>"; sel = "newCommandQueue"; args = []
            ; ret = Some (Obj "Command_queue"); error = false; ocaml = "command_queue_create"; since = None
            ; feature = C.Queue ; pool = true }
@@ -387,10 +383,6 @@ let entries : entry list =
   ; Method { recv = "Render_encoder"; objc = "id<MTLRenderCommandEncoder>"; sel = "setFrontFacingWinding:"
            ; args = [ Enum_of "MTLWinding" ]; ret = None; error = false; ocaml = "render_encoder_set_winding"
            ; since = None; feature = C.Render_pipeline ; pool = true }
-  ; Method { recv = "Render_encoder"; objc = "id<MTLRenderCommandEncoder>"
-           ; sel = "setStencilFrontReferenceValue:backReferenceValue:"; args = [ Scalar Nsuint; Scalar Nsuint ]
-           ; ret = None; error = false; ocaml = "render_encoder_set_stencil_reference"; since = None
-           ; feature = C.Render_pipeline ; pool = true }
 
   ; Method { recv = "Render_encoder"; objc = "id<MTLRenderCommandEncoder>"
            ; sel = "drawPrimitives:vertexStart:vertexCount:instanceCount:"
@@ -430,7 +422,6 @@ let entries : entry list =
   ; Native { ocaml = "default_device"; signature = "unit -> (handle, string) result"; primitives = [ "caml_rays_metal_default_device" ]; reason = "platform/handle lifecycle; not an Objective-C instance call" }
 
   ; Native { ocaml = "device_supports_sampler_reduction"; signature = "handle -> bool"; primitives = [ "caml_rays_metal_device_supports_sampler_reduction" ]; reason = "SDK availability and hardware capability policy" }
-  ; Native { ocaml = "device_supports_lossy_texture_compression"; signature = "handle -> bool"; primitives = [ "caml_rays_metal_device_supports_lossy_texture_compression" ]; reason = "SDK availability and hardware capability policy" }
 
   ; Method { recv = "Device"; objc = "id<MTLDevice>"; sel = "newBufferWithLength:options:"; args = [ Scalar Nsuint; Enum_of "MTLResourceOptions" ]; ret = Some (Obj "Buffer"); error = false; ocaml = "buffer_create"; since = None; feature = C.Buffer ; pool = true }
   ; Property { recv = "Buffer"; objc = "id<MTLBuffer>"; name = "length"; ty = Scalar Nsuint; access = Get; ocaml = "buffer_info_length"; since = None; feature = C.Buffer }

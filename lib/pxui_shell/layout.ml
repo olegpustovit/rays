@@ -137,12 +137,12 @@ open Rays
 
   let geometry ?(state = fun _ -> Editor_core.Panels.default_state) ?(hidden = [ Timeline ]) tree (frame : Frame.t) =
     let all = Editor_core.Panels.leaves tree in
-    let header = min header_height (max 0 (frame.height - 1)) in
+    let header = min header_height (max 0 ((snd frame.input.size) - 1)) in
     let timeline = if List.mem Timeline hidden || List.exists (fun (_, p) -> p = Timeline) all
-      then 0 else min timeline_strip (max 0 (frame.height - header - 1)) in
+      then 0 else min timeline_strip (max 0 ((snd frame.input.size) - header - 1)) in
     (* the status strip spans the window below the tree and the timeline strip *)
-    let status = min status_height (max 0 (frame.height - header - timeline - 1)) in
-    let bottom = frame.height - status - timeline in
+    let status = min status_height (max 0 ((snd frame.input.size) - header - timeline - 1)) in
+    let bottom = (snd frame.input.size) - status - timeline in
     let leaves = ref [] and splitters = ref [] and floats = ref [] in
     let leaf ?(floating = false) path panel outer =
       let collapsed = (state path).Editor_core.Panels.collapsed in
@@ -258,7 +258,7 @@ open Rays
               bounds = (x, cy - splitter_width, w, splitter_width); start = 0; span = 1 } :: !splitters;
             place ~floating (cx, cy, widths.(r).(c), heights.(r)) (path @ [ original ]) cell) cells
           end in
-    place (0, 0, frame.width, max 1 bottom) [] tree;
+    place (0, 0, (fst frame.input.size), max 1 bottom) [] tree;
     let rec drain () = match List.rev !floats with
       | [] -> ()
       | queue -> floats := [];
@@ -267,12 +267,12 @@ open Rays
     List.iter (fun (path, panel) -> match (state path).Editor_core.Panels.window with
       | None -> ()
       | Some (x, y, w, h) ->
-          let w = min frame.width w and h = min frame.height h in
-          let x = max 0 (min x (frame.width - w)) and y = max 0 (min y (frame.height - header_height)) in
-          leaf ~floating:true path panel (x, y, w, min h (frame.height - y))) all;
+          let w = min (fst frame.input.size) w and h = min (snd frame.input.size) h in
+          let x = max 0 (min x ((fst frame.input.size) - w)) and y = max 0 (min y ((snd frame.input.size) - header_height)) in
+          leaf ~floating:true path panel (x, y, w, min h ((snd frame.input.size) - y))) all;
     { leaves = List.rev !leaves; splitters = List.rev !splitters;
-      status_at = (0, frame.height - status, frame.width, status);
-      timeline_at = (0, bottom, frame.width, timeline) }
+      status_at = (0, (snd frame.input.size) - status, (fst frame.input.size), status);
+      timeline_at = (0, bottom, (fst frame.input.size), timeline) }
 
   let find geometry panel = List.find_opt (fun l -> l.panel = panel && (let _, _, _, h = l.body in h > 0)) geometry.leaves
   let first_view geometry = List.find_opt (fun l -> (let _, _, _, h = l.body in h > 0)

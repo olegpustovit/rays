@@ -324,7 +324,7 @@ let run () =
       && twisted.z = [|0.; 1.; 2.|]) then
     fail "Bend axial twist distribution";
   let arbitrary = Line_geometry.points [|(1., 1., 0.)|]
-      |> Deform.bend ~origin:Vec3.zero ~direction:Vec3.unit_x ~up:Vec3.unit_z
+      |> Deform.bend ~origin:Rays_math.Vec3.zero ~direction:Rays_math.Vec3.unit_x ~up:Rays_math.Vec3.unit_z
            ~length:1. ~twist_angle:(Float.pi /. 2.) |> get_ok |> positions in
   if not (near arbitrary.x.(0) 1. && near arbitrary.y.(0) 0.
       && near arbitrary.z.(0) 1.) then
@@ -384,10 +384,10 @@ let run () =
     Deform.bend ~length:0. ~bend_angle:1. bend_source;
     Deform.bend ~length:Float.nan ~bend_angle:1. bend_source;
     Deform.bend ~length:1. ~bend_angle:Float.infinity bend_source;
-    Deform.bend ~direction:Vec3.zero ~length:1. ~bend_angle:1. bend_source;
-    Deform.bend ~direction:Vec3.unit_z ~up:Vec3.unit_z ~length:1.
+    Deform.bend ~direction:Rays_math.Vec3.zero ~length:1. ~bend_angle:1. bend_source;
+    Deform.bend ~direction:Rays_math.Vec3.unit_z ~up:Rays_math.Vec3.unit_z ~length:1.
       ~bend_angle:1. bend_source;
-    Deform.bend ~origin:(Vec3.create Float.nan 0. 0.) ~length:1.
+    Deform.bend ~origin:(Rays_math.Vec3.create Float.nan 0. 0.) ~length:1.
       ~bend_angle:1. bend_source;
     Deform.bend ~mask_attribute:"missing" ~length:1. ~bend_angle:1. bend_source;
     Deform.bend ~capture_attribute:"" ~length:1. ~bend_angle:1. bend_source;
@@ -403,8 +403,8 @@ let run () =
   let bend_scale_source = Plane_generators.grid ~columns:320 ~rows:220 ~size:12. ()
       |> get_ok in
   let bend_scale domains = Parallel.run ~domains (fun () ->
-      Deform.bend ~grain:1_009 ~origin:(Vec3.create 0. 0. (-6.))
-        ~direction:Vec3.unit_z ~up:Vec3.unit_y ~length:12.
+      Deform.bend ~grain:1_009 ~origin:(Rays_math.Vec3.create 0. 0. (-6.))
+        ~direction:Rays_math.Vec3.unit_z ~up:Rays_math.Vec3.unit_y ~length:12.
         ~bend_angle:1.3 ~twist_angle:2.1 ~capture_attribute:"bend_capture"
         bend_scale_source |> get_ok) in
   let bend_one = bend_scale 1 and bend_many = bend_scale 4 in
@@ -429,8 +429,8 @@ let run () =
       (fun point -> point mod 3 <> 0) in
   let mountain domains seed = Parallel.run ~domains (fun () ->
     Deform.mountain ~grain:2_048 ~selection:(Transform_ops.Selected_points middle) ~seed
-      ~height:1.25 ~frequency:(Vec3.create 0.35 0.7 0.55)
-      ~offset:(Vec3.create 1. 2. 3.) ~octaves:6 ~lacunarity:2.1
+      ~height:1.25 ~frequency:(Rays_math.Vec3.create 0.35 0.7 0.55)
+      ~offset:(Rays_math.Vec3.create 1. 2. 3.) ~octaves:6 ~lacunarity:2.1
       ~roughness:0.47 ~height_attribute:"height" mountain_source |> get_ok) in
   let one = mountain 1 73 and many = mountain 4 73 in
   if not (equal_positions one many)

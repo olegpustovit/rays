@@ -14,6 +14,25 @@
  (modules check_sdl3_conf)
  (libraries dune-configurator sdl3_lock unix))
 
+(rule
+ (alias check_sdl3_conf)
+ (deps
+  ../../packaging/sdl3.lock
+  ../../packaging/conf-sdl3/conf-sdl3.opam
+  ../../packaging/conf-sdl3-image/conf-sdl3-image.opam
+  ../../packaging/conf-sdl3-ttf/conf-sdl3-ttf.opam
+  ../../packaging/conf-sdl3-mixer/conf-sdl3-mixer.opam)
+ (action
+  (progn
+   (run %{exe:check_sdl3_conf.exe} --lock %{dep:../../packaging/sdl3.lock} sdl3)
+   (run %{exe:check_sdl3_conf.exe} --lock %{dep:../../packaging/sdl3.lock} sdl3-image)
+   (run %{exe:check_sdl3_conf.exe} --lock %{dep:../../packaging/sdl3.lock} sdl3-ttf)
+   (run %{exe:check_sdl3_conf.exe} --lock %{dep:../../packaging/sdl3.lock} sdl3-mixer))))
+
+(alias
+ (name runtest)
+ (deps (alias check_sdl3_conf)))
+
 (executable
  (name installed_consumer)
  (modules installed_consumer)

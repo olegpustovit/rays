@@ -1,8 +1,50 @@
 let () =
+  let contains source fragment =
+    let n=String.length fragment in
+    let rec at i=i+n<=String.length source &&
+      (String.sub source i n=fragment || at(i+1))in at 0 in
+  List.iter(fun(source,flag)->
+    let program=Test_program.compile source in
+    let msl=Test_program.ok(Flow_gpu.Emit.kernel ~fast:true program)
+    and wgsl=Test_program.ok(Flow_web.Wgsl.kernel_fast program)in
+    assert(contains msl.source ("atomic_fetch_or_explicit(status,"^flag^"u"));
+    assert(contains wgsl.source ("atomicOr(&status, "^flag^"u)")))[
+      ("(map (fn [(x : int)] (float (int/div x (int/sub (frame/index) (frame/index))))) (array/range 8 :type int))","2");
+      ("(map (fn [(x : int)] (float (int/shr x (int/add 63 (int/mod (frame/index) 1))))) (array/range 8 :type int))","4")]
+
+let () =
+  List.iter(fun(_,program)->
+    let layout=Flow_ir.Kernel_layout.plan ~fast:true program in
+    let metal=Test_program.ok(Flow_gpu.Emit.kernel ~fast:true program)
+    and wgsl=Test_program.ok(Flow_web.Wgsl.kernel_fast program)in
+    assert(metal.uniform_layout=layout.uniform_layout && wgsl.uniform_layout=layout.uniform_layout);
+    let loops=ref 0 in
+    Flow_ir.Kernel_layout.iter layout ~instruction:(fun _ _->())
+      ~loop:(fun _ _ ~next:_ ~stop:_ ~body->incr loops;body());
+    assert(!loops>0)) (Test_program.carried_fixtures 65)
+
+let () =
+  List.iter (fun source ->
+    let program = Test_program.compile source in
+    let layout = Flow_ir.Kernel_layout.plan ~fast:true program in
+    assert (layout.input_used = [|true|]);
+    Array.iteri (fun slot -> function
+      | Flow_ir.Packed.Int_frame _ -> assert (layout.frames.(slot) > 0)
+      | _ -> ()) layout.view.code;
+    let metal = Test_program.ok (Flow_gpu.Emit.kernel ~fast:true program)
+    and wgsl = Test_program.ok (Flow_web.Wgsl.kernel_fast program) in
+    assert (metal.uniform_layout = layout.uniform_layout);
+    assert (wgsl.uniform_layout = layout.uniform_layout);
+    assert (List.exists (fun (binding : Flow_web.Wgsl.binding) ->
+      binding.binding = 0 && binding.kind = Storage_read) wgsl.interface))
+    ["(map (fn [x] (+ (float x) t)) (array/range 16 :type \"int\"))";
+     "(map (fn [x] (+ x (float (frame/index)))) (array/range 16))"]
+
+let () =
   let program=Test_program.compile
     "(let* [table (array/float 7 0.25)] (map (fn [i] (+ t (array/nth table (int/mod (int i) 7)))) (array/range 32769)))" in
   (match Flow_ir.Packed.gpu_refusals program,Flow_gpu.Emit.kernel program with
-   |d::_,Error emitted->assert(d.code="E_GPU_FORM" && emitted.message=d.message);
+   |d::_,Error emitted->assert(d.code="E_GPU_FORM" && emitted=d);
      assert(d.message="Indexed array reads stay on the CPU.")
    |_->assert false)
 
@@ -11,10 +53,10 @@ let () =
     let checked=match Flow.Workspace.check Flow.Check.{version=1;kinds=[]}
         (Flow.Syntax.parse source |> Test_program.ok)with
       |Some workspace,[]->workspace
-      |_,ds->failwith(String.concat "\n"(List.map Flow.Diagnostic.to_string ds))in
+      |_,ds->failwith(String.concat "\n"(List.map Diagnostic.to_string ds))in
     let audited=ref Flow.Workspace.Paths.empty in
     let qualified,_=Flow_ir.qualify_workspace ~observe:(fun producer residual->
-      let view=Flow.Eval.Private.residual_view residual in
+      let view=Flow.Eval.Residual.residual_view residual in
       Option.iter(fun path->
         List.iter(fun fusion->
           let packed=Flow_ir.Packed.compile_result ~fusion residual view.term |> Result.get_ok in
@@ -41,7 +83,7 @@ let () =
         let assignment=Printf.sprintf "    r%d="slot in
         let rec check=function
           |line::next::_ when String.starts_with ~prefix:assignment line->
-              assert(next=Printf.sprintf "    if(!isfinite(r%d)) atomic_store_explicit(status,1u,memory_order_relaxed);"slot)
+              assert(next=Printf.sprintf "    if(!isfinite(r%d)) atomic_fetch_or_explicit(status,1u,memory_order_relaxed);"slot)
           |_::rest->check rest|[]->assert false in check lines
     |_->())view.code;
   assert !guarded;
@@ -73,31 +115,30 @@ let () =
       "(map (fn [x] (+ x (+ t 1e39))) (array/range 1024))" in
   (match Flow_ir.Packed.gpu_refusals overflowing, Flow_gpu.Emit.kernel overflowing with
    | reason :: _, Error emitted ->
-       assert (reason.code = "E_GPU_FORM" && reason.code = emitted.code
-         && reason.message = emitted.message)
+       assert (reason.code = "E_GPU_FORM" && emitted = reason)
    | _ -> assert false);
   List.iter (fun (width, body) ->
     let program = Test_program.compile ~fusion:false body in
     let msl = Test_program.ok (Flow_gpu.Emit.kernel program) in
     assert (msl.output_widths = [|width|]);
-    let prepared = Test_program.ok (Flow_ir.Packed.Private.prepare program ~live:(Frame_input.at_time 1.)) in
+    let prepared = Test_program.ok (Flow_ir.Packed.Private.prepare program ~live:(Input.at_time 1.)) in
     assert (prepared.count = 1024);
-    assert (Marshal.to_string (Flow_ir.Packed.force program ~live:(Frame_input.at_time 1.)) [Marshal.No_sharing]
-      = Marshal.to_string (Flow_ir.Packed.reference program ~live:(Frame_input.at_time 1.)) [Marshal.No_sharing]))
+    assert (Marshal.to_string (Flow_ir.Packed.force program ~live:(Input.at_time 1.)) [Marshal.No_sharing]
+      = Marshal.to_string (Flow_ir.Packed.reference program ~live:(Input.at_time 1.)) [Marshal.No_sharing]))
     [2, "(map (fn [x] [x t]) (array/range 1024))";
      4, "(map (fn [x] [x t (+ x t) 1]) (array/range 1024))";
      4, "(map (fn [(uv : vec2)] [uv.x uv.y t 1]) (map (fn [x] [x 1]) (array/range 1024)))";
      2, "(let* [offset [1 2 3 4]] (map (fn [(p : vec4)] [(+ p.x offset.w) (+ p.w t)])
        (map (fn [x] [x 1 2 3]) (array/range 1024))))"];
   List.iter (fun name ->
-    assert (Flow.Op.find ~extra:Flow_ir.Operators.all name Flow.Context.value<>None)) Flow_gpu.Emit.names;
+    assert (Flow.Op.find name Flow.Context.value<>None)) Flow_gpu.Emit.names;
   assert (Flow_gpu.Emit.names=Flow.Packed_ops.names);
   List.iter (fun body ->
     let program = Test_program.compile ("(map (fn [x] " ^ body ^ ") (array/range 1024))") in
     ignore (Test_program.ok (Flow_gpu.Emit.kernel program));
-    List.iter (fun domains -> Rays_math.Parallel.run ~domains (fun () ->
+    List.iter (fun domains -> Parallel.run ~domains (fun () ->
       List.iter (fun time ->
-        let live = Frame_input.at_time time in
+        let live = Input.at_time time in
         assert (Marshal.to_string (Flow_ir.Packed.force program ~live) [Marshal.No_sharing]
           = Marshal.to_string (Flow_ir.Packed.reference program ~live) [Marshal.No_sharing]))
         [0.; 0.125; 1.25; 7.])) [1;8])
@@ -143,7 +184,7 @@ let () =
     assert (List.length msl.interface=Array.length msl.input_widths+Array.length msl.output_widths+2+
       (if msl.table_seeds=[||] then 0 else 1));
     assert (Ogpu.Shader.validate_bindings msl.interface=Ok ());
-    let inputs=Test_program.ok (Flow_ir.Packed.Private.prepare program ~live:(Frame_input.at_time 1.)) in
+    let inputs=Test_program.ok (Flow_ir.Packed.Private.prepare program ~live:(Input.at_time 1.)) in
     assert (inputs.count=1024);
     assert (Array.length inputs.frame=Array.length (Flow_ir.Packed.Private.view program).code))
     (Test_program.fixtures 1024 @ ["two_outputs",Test_program.two_outputs ()]);
@@ -175,7 +216,32 @@ let () =
   List.iteri(fun index line->if String.starts_with ~prefix:"  float r" line then
     let slot=Scanf.sscanf line "  float r%d=" Fun.id in
     let guard=Printf.sprintf
-      "  if(!isfinite(r%d)) atomic_store_explicit(status,1u,memory_order_relaxed);" slot in
+      "  if(!isfinite(r%d)) atomic_fetch_or_explicit(status,1u,memory_order_relaxed);" slot in
     if not (match (Flow_ir.Packed.Private.view program).code.(slot)with Guarded _->true|_->false)then
       assert((List.nth lines(index+1)=guard)=checks.(slot)))lines;
   print_endline "GPU emitter: shared operations, golden arithmetic/select/seeded fBm and typed ordered-loop refusals passed"
+
+let () =
+  let program = Test_program.compile
+    "(let* [table (map (fn [i] [i (* i 2.) (- 0. i)]) (array/range 64))] (map (fn [x] (let* [p (array/nth table (int/mod (int x) 64))] (+ (+ p.x (* p.y 0.5)) p.z))) (array/range (int/add 4097 (frame/index)))))" in
+  let layout = Flow_ir.Kernel_layout.plan ~fast:true program in
+  let msl = Test_program.ok (Flow_gpu.Emit.kernel ~fast:true program) in
+  let wgsl = Test_program.ok (Flow_web.Wgsl.kernel_fast program) in
+  assert (msl.uniform_layout = layout.uniform_layout && wgsl.uniform_layout = layout.uniform_layout);
+  assert (msl.table_seeds = layout.table_seeds && wgsl.table_seeds = layout.table_seeds);
+  assert (msl.gathers = Array.of_list (List.map snd layout.gathers));
+  assert (wgsl.gathers = Array.of_list (List.map snd layout.gathers));
+  assert (msl.counts = layout.counts && wgsl.counts = layout.counts);
+  assert (msl.uniform_bytes = layout.uniform_bytes);
+  assert (wgsl.uniform_bytes = Flow_ir.Kernel_layout.uniform_words layout * 16);
+  let msl_bindings = List.map (fun (binding : Ogpu.Shader.binding) -> binding.binding) msl.interface in
+  let wgsl_bindings = List.map (fun (binding : Flow_web.Wgsl.binding) -> binding.binding) wgsl.interface in
+  assert (msl_bindings = wgsl_bindings);
+  let program = Test_program.compile "(map (fn [x] (+ x t)) (array/range 16))" in
+  let layout = Flow_ir.Kernel_layout.plan program in
+  let msl = Test_program.ok (Flow_gpu.Emit.kernel program) in
+  let wgsl = Test_program.ok (Flow_web.Wgsl.kernel program) in
+  assert (msl.uniform_layout = layout.uniform_layout && wgsl.uniform_layout = layout.uniform_layout);
+  assert (msl.table_seeds = layout.table_seeds && wgsl.table_seeds = layout.table_seeds);
+  assert (msl.uniform_bytes = layout.uniform_bytes);
+  assert (wgsl.uniform_bytes = Flow_ir.Kernel_layout.uniform_words layout * 16)

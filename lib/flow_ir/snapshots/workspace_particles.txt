@@ -20,8 +20,6 @@ refused E_PACKED_STATE 574..682 "State-dependent kernels require reference evalu
 
 refused E_PACKED_STATE 720..1026 "State-dependent kernels require reference evaluation."
 
-refused E_PACKED_STATE 420..1092 "State-dependent kernels require reference evaluation."
-
 program
   r0 = Input 0 3 0
   r1 = Input 0 3 1

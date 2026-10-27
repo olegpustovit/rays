@@ -3,8 +3,8 @@
     Rows use 256-byte alignment. No pixels are read back by the converter. *)
 type t
 type output
-val create : Rays_execution.gpu -> (t, Flow.Diagnostic.t) result
-val convert : t -> width:int -> height:int -> Run.output -> (output, Flow.Diagnostic.t) result
+val create : Renderer.gpu -> (t, Diagnostic.t) result
+val convert : t -> width:int -> height:int -> Run.output -> (output, Diagnostic.t) result
 (** Completes conversion and buffer-to-texture copy before publication. The
     producer must be current and contain exactly width*height vec4 pixels.
     Unchanged dimensions reuse one buffer and texture. Resize allocates a
@@ -19,7 +19,7 @@ val close : t -> unit
 (** Idempotent on the creating initial domain. Close before releasing its GPU. *)
 
 module Private : sig
-  val create_owned : Ogpu.Backend.device -> Ogpu.Backend.queue -> (t, Flow.Diagnostic.t) result
+  val create_owned : Ogpu.Backend.device -> Ogpu.Backend.queue -> (t, Diagnostic.t) result
   val buffer_creations : t -> int
   val texture_creations : t -> int
 end

@@ -18,9 +18,11 @@ even-odd/non-zero fill rules survive native command lowering.
 
 ## Coordinates and density
 
-Coordinates are integer logical points with `(0, 0)` at the top-left, positive X
-to the right, and positive Y downward. `Frame.width`, `Frame.height`, scene
-geometry, input positions, and PXUI layout share that coordinate system.
+Coordinates are logical points with `(0, 0)` at the top-left, positive X to
+the right, and positive Y downward. The convenience `Scene` constructors use
+integer coordinates; `Path` commands retain floating-point coordinates and
+curves are adaptively tessellated without rounding to integers. `Frame.input.size`,
+scene geometry, input positions, and PXUI layout share that coordinate system.
 
 `Frame.drawable_size` exposes native Metal drawable pixels and
 `Frame.pixel_scale` gives backing pixels per logical point. Application code

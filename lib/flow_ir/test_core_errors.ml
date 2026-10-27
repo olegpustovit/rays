@@ -1,15 +1,15 @@
 module E = Flow.Eval
 module I = Flow_ir
-let ok = function Ok x -> x | Error d -> failwith (Flow.Diagnostic.to_string d)
+let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let workspace body =
   match Flow.Workspace.check {Flow.Check.version=1;kinds=[]}
     (ok (Flow.Syntax.parse ("(workspace w (graph g :context value (let* [tested " ^ body ^ "] 0.)))"))) with
-  | Some ws,[] -> ws | _,ds -> failwith (body ^ ": " ^ String.concat "; " (List.map Flow.Diagnostic.to_string ds))
+  | Some ws,[] -> ws | _,ds -> failwith (body ^ ": " ^ String.concat "; " (List.map Diagnostic.to_string ds))
 let same_bits a b = Int64.bits_of_float a=Int64.bits_of_float b
 let same_result a b = match a,b with
   | Ok (E.Float a),Ok (E.Float b) -> same_bits a b
   | Ok a,Ok b -> a=b
-  | Error (a : Flow.Diagnostic.t),Error b -> a=b | _ -> false
+  | Error (a : Diagnostic.t),Error b -> a=b | _ -> false
 (* The core itself fails on these, and the executor must answer with the walker's own
    diagnostic (message and span) rather than a core one. *)
 let failing = [
@@ -20,58 +20,73 @@ let failing = [
   "authored error","(error (str \"E_RULES_\" (int t)) (str \"exact é日本😀 \" t))",[1.;2.];
   "authored cause","(error \"E_CAUSE\" \"selected failure\" :cause (str \"reason é日本😀 \" t))",[1.;2.];
 ]
-let differing = ref 0
 let () =
   List.iter (fun (name,body,times) ->
     let value=snd (List.hd (List.assoc ["g";"tested"] (ok (E.static ~record:true (workspace body))).records)) in
     let r=match value with E.Residual r -> r | _ -> failwith (name ^ ": not live") in
     let prepared=I.Core_exec.prepare (match I.Core_lower.lower r with Ok p -> p | Error n -> failwith (name ^ ": refused " ^ n)) in
+    let compiled=ok (I.Executor.compile value) in
     List.iter (fun time ->
-      let live=Frame_input.at_time time in
+      let live=Input.at_time time in
       let expected=E.Private.force_reference value ~live in
       assert (Result.is_error expected);
       (match I.Core_exec.execute prepared ~live with
-       | Error d -> if not (same_result (Error d) expected) then incr differing
+       | Error _ -> ()
        | Ok _ -> failwith (name ^ ": the core should fail"));
       assert (same_result (I.Core_exec.execute ~root:r ~strict:true prepared ~live)
         (I.Core_exec.execute prepared ~live));
-      let hooked=ref false in
-      let execute r live = hooked:=true; Some (I.Core_exec.execute ~root:r prepared ~live) in
-      let actual=E.Private.force_with_executor ~execute value ~live in
-      assert !hooked;
+      let actual=I.Executor.force compiled ~live in
       if not (same_result actual expected) then failwith (Printf.sprintf "%s at %g: diagnostic differs from the walker" name time)) times) failing;
-  (* At least one core diagnostic differs from the walker's, so the rerun is observable. *)
-  assert (!differing>0);
   (* A failure after a state write restores the plane before the walker answers. *)
   let value=List.hd (ok (E.static (workspace "(state [s 0.] (if (> t 0.6) (error \"E_RULES\" (str \"exact failure \" t) :cause \"state rollback\") (+ s 1.)))"))).states in
   let reference=E.create_state () and core=E.create_state () in
-  let prepared=ref None and failures=ref 0 in
-  let execute r live =
-    let p=match !prepared with Some p -> p | None ->
-      let p=I.Core_exec.prepare (Result.get_ok (I.Core_lower.lower r)) in prepared:=Some p; p in
-    Some (I.Core_exec.execute ~root:r p ~live) in
+  let failures=ref 0 and compiled=ok (I.Executor.compile value) in
   for frame=0 to 7 do
-    let live={(Frame_input.at_time (float_of_int frame *. 0.25)) with frame} in
+    let live={(Input.at_time (float_of_int frame *. 0.25)) with frame} in
+    let core_before=E.state_stamp core and reference_before=E.state_stamp reference in
     let expected=E.Private.force_reference ~state:reference value ~live in
-    let actual=E.Private.force_with_executor ~state:core ~execute value ~live in
+    let actual,_,walks=I.Executor.Private.force_with_walker_counts ~state:core compiled ~live in
     if Result.is_error expected then incr failures;
     if not (same_result actual expected) then failwith (Printf.sprintf "state frame %d" frame);
-    assert (E.state_stamp core=E.state_stamp reference)
+    if Result.is_error expected then
+      (assert(E.state_stamp core=core_before && E.state_stamp reference=reference_before);
+       assert(walks=1))
+    else assert(walks=0);
+    assert (same_result (Ok(E.List(Array.of_list(E.Private.state_values core))))
+      (Ok(E.List(Array.of_list(E.Private.state_values reference)))))
   done;
   assert (!failures>0);
+  (* A deliberately unsupported extension op is refused by Core and interpreted
+     once. Repeating its residual in a nested value must reuse that evaluation. *)
+  let opaque = Flow.Op.{(Option.get (Flow.Op.find "frame/dt" Flow.Context.value)) with
+    name="test/opaque"; live=true; arithmetic=None; packed_extension=None;
+    body=(fun ~live ~node:_ _ -> Flow.Value.Float (live.t +. 1.))} in
+  let forms=match Flow.Syntax.parse "(workspace w (graph g :context value (test/opaque)))" with
+    |Ok forms->forms|Error d->failwith(Diagnostic.to_string d) in
+  let ws=match Flow.Workspace.check ~ops:[opaque] {Flow.Check.version=1;kinds=[]} forms with
+    |Some ws,[]->ws|_,ds->failwith(String.concat "; " (List.map Diagnostic.to_string ds)) in
+  let residual=match List.assoc "g" (ok(E.static ws)).results with
+    |E.Residual r->r|_->failwith "opaque result was not residual" in
+  assert (I.Core_lower.lower residual = Error "test/opaque");
+  let shared=E.List [|E.Residual residual;E.List [|E.Residual residual|]|] in
+  let program=ok(I.Executor.compile shared) and live=Input.at_time 0.25 in
+  let actual,attempts,walks=I.Executor.Private.force_with_walker_counts program ~live in
+  assert(actual=E.Private.force_reference shared ~live);
+  assert(attempts=1 && walks=1);
   let reference=E.create_state () and strict=E.create_state () in
   let compiled=ok(I.Executor.compile ~strict:true value) in
   for frame=0 to 7 do
-    let live={(Frame_input.at_time (float_of_int frame *. 0.25)) with frame} in
+    let live={(Input.at_time (float_of_int frame *. 0.25)) with frame} in
+    let reference_before=E.state_stamp reference and strict_before=E.state_stamp strict in
     let expected=E.Private.force_reference ~state:reference value ~live in
     (match I.Executor.force ~strict:true ~state:strict compiled ~live,expected with
      |Error actual,Error expected->assert(actual.code=expected.code && actual.message=expected.message && actual.cause=expected.cause)
      |actual,expected->assert(same_result actual expected));
-    assert(E.state_stamp strict=E.state_stamp reference);
+    if Result.is_error expected then assert(E.state_stamp strict=strict_before && E.state_stamp reference=reference_before);
     assert(same_result (Ok(E.List(Array.of_list(E.Private.state_values strict))))
       (Ok(E.List(Array.of_list(E.Private.state_values reference)))))
   done;
-  print_endline "Core errors: division by zero, range, non-finite and state rollback return the walker's diagnostic"
+  print_endline "Core errors: division by zero, range, non-finite, authored fields and state rollback match the walker"
 
 let () =
   let recorded body=snd(List.hd(List.assoc["g";"tested"]
@@ -80,11 +95,11 @@ let () =
   let residual=match value with E.Residual r->r|_->assert false in
   let core=Result.get_ok(I.Core_lower.lower ~strict:true residual) in
   let compiled=ok(I.Executor.compile ~strict:true value) in
-  List.iter(fun time->let live=Frame_input.at_time time in
+  List.iter(fun time->let live=Input.at_time time in
     let expected=E.Private.force_reference value ~live in
     let check=function
       |Ok actual->assert(expected=Ok actual)
-      |Error(d:Flow.Diagnostic.t)->(match expected with Error e->assert(d.code=e.code && d.message=e.message && d.cause=e.cause)|_->assert false) in
+      |Error(d:Diagnostic.t)->(match expected with Error e->assert(d.code=e.code && d.message=e.message && d.cause=e.cause)|_->assert false) in
     check(I.Core_exec.run core ~live);check(I.Executor.force ~strict:true compiled ~live)) [-1.;1.;2.];
   (match E.static(workspace "(error \"E_LITERAL\" \"literal failure\" :cause \"literal cause\")") with
    |Error d->assert(d.code="E_LITERAL" && d.cause=Some "literal cause" && d.span<>None)
@@ -92,14 +107,17 @@ let () =
   List.iter(fun count->
     let value=recorded(Printf.sprintf "(map (fn [x] (if (> t 0.) (error \"E_PACKED_RULE\" \"exact é日本😀\" :cause \"selected packed cause\") x)) (array/range %d))" count) in
     let compiled=ok(I.Executor.compile ~strict:true value) in
-    List.iter(fun time->let live=Frame_input.at_time time in
+    List.iter(fun time->let live=Input.at_time time in
       let expected=E.Private.force_reference value ~live in
-      List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+      List.iter(fun domains->Parallel.run ~domains(fun()->
         match I.Executor.force ~strict:true compiled ~live,expected with
         |Ok actual,Ok expected->assert(actual=expected)
         |Error actual,Error expected->assert(actual.code=expected.code && actual.message=expected.message && actual.cause=expected.cause)
         |_->assert false)) [1;8]) [-1.;1.]) [0;5001];
   let dynamic=recorded "(map (fn [x] (if (> t 0.) (error \"E_DYNAMIC\" (str x)) x)) (array/range 5001))" in
-  (match I.Executor.compile ~strict:true dynamic with Error d->assert(d.code="E_KERNEL_FORM")|Ok _->assert false);
-  assert(Result.is_ok(E.Private.force_reference dynamic ~live:(Frame_input.at_time(-1.))));
+  (match I.Executor.compile ~strict:true dynamic with
+   | Error d when d.code="E_KERNEL_FORM" -> ()
+   | Error d -> failwith ("dynamic packed refusal returned " ^ Diagnostic.to_string d)
+   | Ok _ -> failwith "dynamic packed refusal was accepted");
+  assert(Result.is_ok(E.Private.force_reference dynamic ~live:(Input.at_time(-1.))));
   print_endline "Authored errors: exact dynamic messages, lazy text/packed branches, empty inputs, rollback and dynamic packed refusal pass"

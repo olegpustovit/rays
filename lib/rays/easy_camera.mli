@@ -4,7 +4,7 @@
 type t
 
 val create :
-  ?target:Vec3.t ->
+  ?target:Rays_math.Vec3.t ->
   ?distance:float ->
   ?azimuth:float ->
   ?elevation:float ->
@@ -21,7 +21,7 @@ val update : t -> Frame.t -> t
     and middle/right drags pan. *)
 
 val camera : t -> Camera.t
-val target : t -> Vec3.t
+val target : t -> Rays_math.Vec3.t
 val distance : t -> float
 val fov_y : t -> float
 val near : t -> float
@@ -29,12 +29,12 @@ val far : t -> float
 val control_area : t -> (int * int * int * int) option
 val inertia : t -> bool
 
-val of_view : eye:Vec3.t -> target:Vec3.t -> t -> t
+val of_view : eye:Rays_math.Vec3.t -> target:Rays_math.Vec3.t -> t -> t
 (** Orbit to look from [eye] at [target] about the current up axis (elevation
     clamps just short of the poles). Lens, clipping, and input settings are
     kept; inertia stops. *)
 
-val frame_bounds : min:Vec3.t -> max:Vec3.t -> t -> t
+val frame_bounds : min:Rays_math.Vec3.t -> max:Rays_math.Vec3.t -> t -> t
 (** Target the box center at [radius / tan (fov_y / 2) * 1.2] (radius: half
     the box diagonal), keeping the viewing direction. *)
 

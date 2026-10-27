@@ -1,10 +1,9 @@
 (flow_manifest
   (version 202609)
-  (digest "cb3fd40a6fe9d7dfec7ae23ccb6e73e3")
+  (digest "08a77dfa083cb7711056c0b7619d727c")
   (kinds
     (kind "sop/switch"
       (key "switch")
-      (aliases)
       (operation "switch")
       (label "Switch")
       (category "Utility")
@@ -15,7 +14,6 @@
       (facts (cook-mode passthrough 0) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/image_texels"
       (key "image_texels")
-      (aliases)
       (operation "image_texels")
       (label "Image Texels")
       (category "Attribute" "Image")
@@ -25,7 +23,6 @@
       (facts (cook-mode generator) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/clip"
       (key "clip")
-      (aliases)
       (operation "clip")
       (label "Clip")
       (category "Modify")
@@ -55,7 +52,6 @@
       (facts (cook-mode duplicate-input 0) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/edge_collapse"
       (key "edge_collapse")
-      (aliases)
       (operation "edge_collapse")
       (label "Edge Collapse")
       (category "Topology" "Edge")
@@ -70,7 +66,6 @@
       (facts (cook-mode duplicate-input 0) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/dissolve"
       (key "dissolve")
-      (aliases)
       (operation "dissolve")
       (label "Dissolve")
       (category "Topology")
@@ -88,7 +83,6 @@
       (facts (cook-mode duplicate-input 0) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/poly_bevel"
       (key "poly_bevel")
-      (aliases)
       (operation "poly_bevel")
       (label "Poly Bevel")
       (category "Topology" "Polygon")
@@ -110,7 +104,6 @@
       (facts (cook-mode duplicate-input 0) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/triangulate"
       (key "triangulate")
-      (aliases)
       (operation "triangulate")
       (label "Triangulate")
       (category "Topology")
@@ -121,7 +114,6 @@
       (facts (cook-mode duplicate-input 0) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/pack_instances"
       (key "pack_instances")
-      (aliases)
       (operation "pack_instances")
       (label "Pack Instances")
       (category "Copy")
@@ -131,7 +123,6 @@
       (facts (cook-mode generic) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/subdivide_cracks"
       (key "subdivide_cracks")
-      (aliases)
       (operation "subdivide_cracks")
       (label "Subdivide Cracks")
       (category "Topology")
@@ -160,7 +151,6 @@
       (facts (cook-mode duplicate-input 0) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/clean"
       (key "clean")
-      (aliases)
       (operation "clean")
       (label "Clean")
       (category "Topology" "Cleanup")
@@ -188,7 +178,6 @@
       (facts (cook-mode duplicate-input 0) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/facet"
       (key "facet")
-      (aliases)
       (operation "facet")
       (label "Facet")
       (category "Topology" "Cleanup")
@@ -215,7 +204,6 @@
       (facts (cook-mode duplicate-input 0) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/remesh"
       (key "remesh")
-      (aliases)
       (operation "remesh")
       (label "Remesh")
       (category "Topology" "Remesh")
@@ -239,7 +227,6 @@
       (facts (cook-mode duplicate-input 0) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/poly_extrude"
       (key "poly_extrude")
-      (aliases)
       (operation "poly_extrude")
       (label "Poly Extrude")
       (category "Topology" "Polygon")
@@ -262,7 +249,6 @@
       (facts (cook-mode duplicate-input 0) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/poly_fill"
       (key "poly_fill")
-      (aliases)
       (operation "poly_fill")
       (label "Poly Fill")
       (category "Topology" "Polygon")
@@ -278,7 +264,6 @@
       (facts (cook-mode duplicate-input 0) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/join_curves"
       (key "join_curves")
-      (aliases)
       (operation "join_curves")
       (label "Join Curves")
       (category "Topology" "Curve")
@@ -298,7 +283,6 @@
       (facts (cook-mode duplicate-input 0) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/boolean_fracture"
       (key "boolean_fracture")
-      (aliases)
       (operation "boolean")
       (label "Boolean Fracture")
       (category "Boolean")
@@ -318,7 +302,6 @@
       (facts (cook-mode generic) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/boolean"
       (key "boolean")
-      (aliases)
       (operation "boolean")
       (label "Boolean")
       (category "Boolean")
@@ -346,7 +329,6 @@
       (facts (cook-mode generic) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/boolean_seam"
       (key "boolean_seam")
-      (aliases)
       (operation "boolean_seam")
       (label "Boolean Seam")
       (category "Boolean" "Analysis")
@@ -365,7 +347,6 @@
       (facts (cook-mode generic) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/boolean_detect"
       (key "boolean_detect")
-      (aliases)
       (operation "boolean_detect")
       (label "Boolean Detect")
       (category "Boolean" "Analysis")
@@ -385,7 +366,6 @@
       (facts (cook-mode duplicate-input 0) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/intersection_analysis"
       (key "intersection_analysis")
-      (aliases)
       (operation "intersection_analysis")
       (label "Intersection Analysis")
       (category "Boolean" "Analysis")
@@ -403,7 +383,6 @@
       (facts (cook-mode generic) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/poly_reduce"
       (key "poly_reduce")
-      (aliases)
       (operation "poly_reduce")
       (label "PolyReduce")
       (category "Topology" "Remesh")
@@ -426,7 +405,6 @@
       (facts (cook-mode duplicate-input 0) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/convex_hull"
       (key "convex_hull")
-      (aliases)
       (operation "convex_hull")
       (label "Convex Hull")
       (category "Topology")
@@ -441,7 +419,6 @@
       (facts (cook-mode generic) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/fuse"
       (key "fuse")
-      (aliases)
       (operation "fuse")
       (label "Fuse")
       (category "Topology" "Cleanup")
@@ -477,7 +454,6 @@
       (facts (cook-mode duplicate-input 0) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/ray"
       (key "ray")
-      (aliases)
       (operation "ray")
       (label "Ray")
       (category "Modify" "Project")
@@ -519,7 +495,6 @@
       (facts (cook-mode duplicate-input 0) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/distance_from_geometry"
       (key "distance_from_geometry")
-      (aliases)
       (operation "distance_from_geometry")
       (label "Distance from Geometry")
       (category "Attribute" "Distance")
@@ -539,7 +514,6 @@
       (facts (cook-mode duplicate-input 0) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/uv_flatten"
       (key "uv_flatten")
-      (aliases)
       (operation "uv_flatten")
       (label "UV Flatten")
       (category "UV" "Layout")
@@ -553,7 +527,6 @@
       (facts (cook-mode duplicate-input 0) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/uv_relax"
       (key "uv_relax")
-      (aliases)
       (operation "uv_relax")
       (label "UV Relax")
       (category "UV" "Layout")
@@ -568,7 +541,6 @@
       (facts (cook-mode duplicate-input 0) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/group_transfer"
       (key "group_transfer")
-      (aliases)
       (operation "group_transfer")
       (label "Group Transfer")
       (category "Group" "Transfer")
@@ -583,7 +555,6 @@
       (facts (cook-mode generic) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/poly_cut"
       (key "poly_cut")
-      (aliases)
       (operation "poly_cut")
       (label "Poly Cut")
       (category "Topology" "Curve")
@@ -602,7 +573,6 @@
       (facts (cook-mode duplicate-input 0) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/attribute_mirror"
       (key "attribute_mirror")
-      (aliases)
       (operation "attribute_mirror")
       (label "Attribute Mirror")
       (category "Attribute" "Transform")
@@ -638,7 +608,6 @@
       (facts (cook-mode duplicate-input 0) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/triangulate_2d"
       (key "triangulate_2d")
-      (aliases)
       (operation "triangulate_2d")
       (label "Triangulate 2D")
       (category "Topology" "Triangulate")
@@ -687,7 +656,6 @@
       (facts (cook-mode duplicate-input 0) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/soft_transform"
       (key "soft_transform")
-      (aliases)
       (operation "soft_transform")
       (label "Soft Transform")
       (category "Deform")
@@ -728,7 +696,6 @@
       (facts (cook-mode duplicate-input 0) (elementwise points) (reads "P" "N" "mask") (writes "P" "N") (topology preserved) (exact false)))
     (kind "sop/attribute_transfer"
       (key "attribute_transfer")
-      (aliases)
       (operation "attribute_transfer")
       (label "Attribute Transfer")
       (category "Attribute" "Transfer")
@@ -759,7 +726,6 @@
       (facts (cook-mode generic) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/attribute_transfer_surface"
       (key "attribute_transfer_surface")
-      (aliases)
       (operation "attribute_transfer_surface")
       (label "Attribute Transfer Surface")
       (category "Attribute" "Transfer")
@@ -785,7 +751,6 @@
       (facts (cook-mode generic) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/attribute_transfer_all"
       (key "attribute_transfer_all")
-      (aliases)
       (operation "attribute_transfer_all")
       (label "Attribute Transfer All")
       (category "Attribute" "Transfer")
@@ -809,7 +774,6 @@
       (facts (cook-mode generic) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/null"
       (key "null")
-      (aliases)
       (operation "null")
       (label "Null")
       (category "Utility")
@@ -819,7 +783,6 @@
       (facts (cook-mode passthrough 0) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/exploded_view"
       (key "exploded_view")
-      (aliases)
       (operation "exploded_view")
       (label "Exploded View")
       (category "Visualize")
@@ -837,7 +800,6 @@
       (facts (cook-mode passthrough 0) (elementwise none) (reads "*") (writes "*") (topology changed) (exact true)))
     (kind "sop/attr_from_image"
       (key "attr_from_image")
-      (aliases)
       (operation "attr_from_image")
       (label "Attribute from Image")
       (category "Attribute" "Image")
@@ -852,7 +814,6 @@
       (calls "sop/image_texels"))
     (kind "sop/attribute_blur"
       (key "attribute_blur")
-      (aliases)
       (operation "attribute_blur")
       (label "Attribute Blur")
       (category "Attribute" "Filter")
@@ -876,7 +837,6 @@
       (calls))
     (kind "sop/attribute_composite"
       (key "attribute_composite")
-      (aliases)
       (operation "attribute_composite")
       (label "Attribute Composite")
       (category "Attribute" "Transfer")
@@ -900,7 +860,6 @@
       (calls))
     (kind "sop/attribute_copy"
       (key "attribute_copy")
-      (aliases)
       (operation "attribute_copy")
       (label "Attribute Copy")
       (category "Attribute" "Transfer")
@@ -922,7 +881,6 @@
       (calls))
     (kind "sop/attribute_fade"
       (key "attribute_fade")
-      (aliases)
       (operation "attribute_fade")
       (label "Attribute Fade")
       (category "Attribute" "Motion")
@@ -946,7 +904,6 @@
       (calls))
     (kind "sop/attribute_interpolate"
       (key "attribute_interpolate")
-      (aliases)
       (operation "attribute_interpolate")
       (label "Attribute Interpolate")
       (category "Attribute" "Transfer")
@@ -980,7 +937,6 @@
       (calls "sop/group_combine"))
     (kind "sop/attribute_laplacian"
       (key "attribute_laplacian")
-      (aliases)
       (operation "attribute_laplacian")
       (label "Attribute Laplacian")
       (category "Attribute" "Filter")
@@ -996,7 +952,6 @@
       (calls))
     (kind "sop/attribute_noise"
       (key "attribute_noise")
-      (aliases)
       (operation "attribute_noise")
       (label "Attribute Noise")
       (category "Attribute" "Noise")
@@ -1036,7 +991,6 @@
       (calls))
     (kind "sop/attribute_noise_quaternion"
       (key "attribute_noise_quaternion")
-      (aliases)
       (operation "attribute_noise")
       (label "Attribute Noise (Quaternion)")
       (category "Attribute" "Noise")
@@ -1058,7 +1012,6 @@
       (calls))
     (kind "sop/attribute_randomize"
       (key "attribute_randomize")
-      (aliases)
       (operation "attribute_randomize")
       (label "Attribute Randomize")
       (category "Attribute" "Random")
@@ -1114,7 +1067,6 @@
       (calls))
     (kind "sop/attribute_remap"
       (key "attribute_remap")
-      (aliases)
       (operation "attribute_remap")
       (label "Attribute Remap")
       (category "Attribute" "Modify")
@@ -1149,7 +1101,6 @@
       (calls))
     (kind "sop/bend"
       (key "bend")
-      (aliases)
       (operation "bend")
       (label "Bend")
       (category "Deform")
@@ -1181,7 +1132,6 @@
       (calls "sop/normals"))
     (kind "sop/blast"
       (key "blast")
-      (aliases)
       (operation "blast")
       (label "Blast")
       (category "Topology" "Delete")
@@ -1197,7 +1147,6 @@
       (calls))
     (kind "sop/blast_by_attribute"
       (key "blast_by_attribute")
-      (aliases)
       (operation "blast_by_attribute")
       (label "Blast by Attribute")
       (category "Topology" "Delete")
@@ -1221,7 +1170,6 @@
       (calls))
     (kind "sop/blend_shapes"
       (key "blend_shapes")
-      (aliases)
       (operation "blend_shapes")
       (label "Blend Shapes")
       (category "Attribute" "Transfer")
@@ -1245,7 +1193,6 @@
       (calls))
     (kind "sop/bound"
       (key "bound")
-      (aliases)
       (operation "bound")
       (label "Bound")
       (category "Create" "Primitive")
@@ -1274,7 +1221,6 @@
       (calls "sop/transform" "sop/uv_sphere"))
     (kind "sop/box"
       (key "box")
-      (aliases)
       (operation "box")
       (label "Box")
       (category "Create" "Primitive")
@@ -1304,7 +1250,6 @@
       (calls))
     (kind "sop/carve"
       (key "carve")
-      (aliases)
       (operation "carve")
       (label "Carve")
       (category "Topology" "Curve")
@@ -1328,7 +1273,6 @@
       (calls "sop/group_invert"))
     (kind "sop/circle"
       (key "circle")
-      (aliases)
       (operation "circle")
       (label "Circle")
       (category "Create" "Curve")
@@ -1361,7 +1305,6 @@
       (calls))
     (kind "sop/circle_from_edges"
       (key "circle_from_edges")
-      (aliases)
       (operation "circle_from_edges")
       (label "Circle from Edges")
       (category "Topology" "Edge")
@@ -1379,7 +1322,6 @@
       (calls))
     (kind "sop/color_by_height"
       (key "color_by_height")
-      (aliases)
       (operation "color_by_height")
       (label "Color by Height")
       (category "Attribute" "Color")
@@ -1399,7 +1341,6 @@
       (calls))
     (kind "sop/compact_points"
       (key "compact_points")
-      (aliases)
       (operation "compact_points")
       (label "Compact Points")
       (category "Topology" "Cleanup")
@@ -1410,7 +1351,6 @@
       (calls))
     (kind "sop/connectivity"
       (key "connectivity")
-      (aliases)
       (operation "connectivity")
       (label "Connectivity")
       (category "Attribute" "Analysis")
@@ -1429,7 +1369,6 @@
       (calls))
     (kind "sop/convert_line"
       (key "convert_line")
-      (aliases)
       (operation "convert_line")
       (label "Convert Line")
       (category "Topology" "Curve")
@@ -1447,7 +1386,6 @@
       (calls "sop/compact_points" "sop/poly_path"))
     (kind "sop/copy_to_points"
       (key "copy_to_points")
-      (aliases)
       (operation "copy_to_points")
       (label "Copy to Points")
       (category "Copy")
@@ -1463,7 +1401,6 @@
       (calls "sop/pack_instances"))
     (kind "sop/crease"
       (key "crease")
-      (aliases)
       (operation "crease")
       (label "Crease")
       (category "Topology" "Edge")
@@ -1478,7 +1415,6 @@
       (calls))
     (kind "sop/delete_attributes"
       (key "delete_attributes")
-      (aliases)
       (operation "attribute_delete_pattern")
       (label "Delete Attributes")
       (category "Attribute" "Manage")
@@ -1494,7 +1430,6 @@
       (calls))
     (kind "sop/delete_edge_group"
       (key "delete_edge_group")
-      (aliases)
       (operation "delete_edge_group")
       (label "Delete Edge Group")
       (category "Group" "Manage")
@@ -1506,7 +1441,6 @@
       (calls))
     (kind "sop/distance_along_geometry"
       (key "distance_along_geometry")
-      (aliases)
       (operation "distance_along_geometry")
       (label "Distance Along Geometry")
       (category "Attribute" "Distance")
@@ -1526,7 +1460,6 @@
       (calls))
     (kind "sop/distance_from_target"
       (key "distance_from_target")
-      (aliases)
       (operation "distance_from_target")
       (label "Distance from Target")
       (category "Attribute" "Distance")
@@ -1552,7 +1485,6 @@
       (calls))
     (kind "sop/duplicate"
       (key "duplicate")
-      (aliases)
       (operation "duplicate")
       (label "Duplicate")
       (category "Copy")
@@ -1584,7 +1516,6 @@
       (calls))
     (kind "sop/edge_cusp"
       (key "edge_cusp")
-      (aliases)
       (operation "edge_cusp")
       (label "Edge Cusp")
       (category "Topology" "Edge")
@@ -1597,7 +1528,6 @@
       (calls "sop/normals"))
     (kind "sop/edge_divide"
       (key "edge_divide")
-      (aliases)
       (operation "edge_divide")
       (label "Edge Divide")
       (category "Topology" "Edge")
@@ -1611,7 +1541,6 @@
       (calls))
     (kind "sop/edge_equalize"
       (key "edge_equalize")
-      (aliases)
       (operation "edge_equalize")
       (label "Edge Equalize")
       (category "Topology" "Edge")
@@ -1627,7 +1556,6 @@
       (calls))
     (kind "sop/edge_flip"
       (key "edge_flip")
-      (aliases)
       (operation "edge_flip")
       (label "Edge Flip")
       (category "Topology" "Edge")
@@ -1642,7 +1570,6 @@
       (calls "sop/normals"))
     (kind "sop/edge_relax"
       (key "edge_relax")
-      (aliases)
       (operation "edge_relax")
       (label "Edge Relax")
       (category "Topology" "Edge")
@@ -1661,7 +1588,6 @@
       (calls))
     (kind "sop/edge_straighten"
       (key "edge_straighten")
-      (aliases)
       (operation "edge_straighten")
       (label "Edge Straighten")
       (category "Topology" "Edge")
@@ -1674,7 +1600,6 @@
       (calls))
     (kind "sop/edge_transport"
       (key "edge_transport")
-      (aliases)
       (operation "edge_transport")
       (label "Edge Transport")
       (category "Attribute" "Transport")
@@ -1697,7 +1622,6 @@
       (calls))
     (kind "sop/edge_transport_curves"
       (key "edge_transport_curves")
-      (aliases)
       (operation "edge_transport_curves")
       (label "Edge Transport Curves")
       (category "Attribute" "Transport")
@@ -1717,7 +1641,6 @@
       (calls))
     (kind "sop/edge_transport_parent"
       (key "edge_transport_parent")
-      (aliases)
       (operation "edge_transport_parent")
       (label "Edge Transport Parent")
       (category "Attribute" "Transport")
@@ -1739,7 +1662,6 @@
       (calls))
     (kind "sop/ends"
       (key "ends")
-      (aliases)
       (operation "ends")
       (label "Ends")
       (category "Topology" "Curve")
@@ -1752,7 +1674,6 @@
       (calls))
     (kind "sop/enumerate"
       (key "enumerate")
-      (aliases)
       (operation "enumerate")
       (label "Enumerate")
       (category "Attribute" "Generate")
@@ -1772,7 +1693,6 @@
       (calls))
     (kind "sop/extract_centroid"
       (key "extract_centroid")
-      (aliases)
       (operation "extract_centroid")
       (label "Extract Centroid")
       (category "Create" "Point")
@@ -1788,7 +1708,6 @@
       (calls "sop/convex_hull"))
     (kind "sop/extract_point_from_curve"
       (key "extract_point_from_curve")
-      (aliases)
       (operation "extract_point_from_curve")
       (label "Extract Point from Curve")
       (category "Create" "Points")
@@ -1810,7 +1729,6 @@
       (calls))
     (kind "sop/graph_color"
       (key "graph_color")
-      (aliases)
       (operation "graph_color")
       (label "Graph Color")
       (category "Attribute")
@@ -1829,7 +1747,6 @@
       (calls))
     (kind "sop/grid"
       (key "grid")
-      (aliases)
       (operation "grid")
       (label "Grid")
       (category "Create" "Primitive")
@@ -1861,7 +1778,6 @@
       (calls))
     (kind "sop/group_backface"
       (key "group_backface")
-      (aliases)
       (operation "group_backface")
       (label "Group Backfaces")
       (category "Group" "Create")
@@ -1878,7 +1794,6 @@
       (calls))
     (kind "sop/group_boundary_components"
       (key "group_boundary_components")
-      (aliases)
       (operation "group_boundary_components")
       (label "Group Boundary Components")
       (category "Group" "Create")
@@ -1893,7 +1808,6 @@
       (calls))
     (kind "sop/group_bounds"
       (key "group_bounds")
-      (aliases)
       (operation "group_bounds")
       (label "Group by Bounds")
       (category "Group" "Create")
@@ -1917,7 +1831,6 @@
       (calls))
     (kind "sop/group_combine"
       (key "group_combine")
-      (aliases)
       (operation "group_combine")
       (label "Group Combine")
       (category "Group" "Edit")
@@ -1933,7 +1846,6 @@
       (calls))
     (kind "sop/group_copy"
       (key "group_copy")
-      (aliases)
       (operation "group_copy")
       (label "Group Copy")
       (category "Group" "Transfer")
@@ -1948,7 +1860,6 @@
       (calls))
     (kind "sop/group_delete"
       (key "group_delete")
-      (aliases)
       (operation "group_delete")
       (label "Group Delete")
       (category "Group" "Edit")
@@ -1961,7 +1872,6 @@
       (calls))
     (kind "sop/group_edge_depth"
       (key "group_edge_depth")
-      (aliases)
       (operation "group_edge_depth")
       (label "Group Edge Depth")
       (category "Group" "Expand")
@@ -1976,7 +1886,6 @@
       (calls))
     (kind "sop/group_edges"
       (key "group_edges")
-      (aliases)
       (operation "group_edges")
       (label "Group Edges")
       (category "Group" "Create")
@@ -1999,7 +1908,6 @@
       (calls))
     (kind "sop/group_expand"
       (key "group_expand")
-      (aliases)
       (operation "group_expand")
       (label "Group Expand")
       (category "Group" "Expand")
@@ -2028,7 +1936,6 @@
       (calls "sop/group_from_attribute_boundary" "sop/normals"))
     (kind "sop/group_find_path"
       (key "group_find_path")
-      (aliases)
       (operation "group_find_path")
       (label "Group Find Path")
       (category "Group" "Path")
@@ -2047,7 +1954,6 @@
       (calls))
     (kind "sop/group_from_attribute_boundary"
       (key "group_from_attribute_boundary")
-      (aliases)
       (operation "group_from_attribute_boundary")
       (label "Group from Attribute Boundary")
       (category "Group" "Create")
@@ -2065,7 +1971,6 @@
       (calls))
     (kind "sop/group_invert"
       (key "group_invert")
-      (aliases)
       (operation "group_invert")
       (label "Group Invert")
       (category "Group" "Edit")
@@ -2080,7 +1985,6 @@
       (calls))
     (kind "sop/group_non_planar"
       (key "group_non_planar")
-      (aliases)
       (operation "group_non_planar")
       (label "Group Non-Planar")
       (category "Group" "Create")
@@ -2095,7 +1999,6 @@
       (calls))
     (kind "sop/group_normal"
       (key "group_normal")
-      (aliases)
       (operation "group_normal")
       (label "Group by Normal")
       (category "Group" "Create")
@@ -2117,7 +2020,6 @@
       (calls))
     (kind "sop/group_promote_boundary"
       (key "group_promote_boundary")
-      (aliases)
       (operation "group_promote_boundary")
       (label "Group Promote Boundary")
       (category "Group" "Convert")
@@ -2139,7 +2041,6 @@
       (calls "sop/group_from_attribute_boundary"))
     (kind "sop/group_promotions"
       (key "group_promotions")
-      (aliases)
       (operation "group_promotions")
       (label "Group Promotions")
       (category "Group" "Convert")
@@ -2153,7 +2054,6 @@
       (calls "sop/group_promote_boundary"))
     (kind "sop/group_random"
       (key "group_random")
-      (aliases)
       (operation "group_random")
       (label "Group Random")
       (category "Group" "Create")
@@ -2172,7 +2072,6 @@
       (calls))
     (kind "sop/group_range"
       (key "group_range")
-      (aliases)
       (operation "group_range")
       (label "Group Range")
       (category "Group" "Create")
@@ -2209,7 +2108,6 @@
       (calls "sop/group_combine" "sop/group_from_attribute_boundary"))
     (kind "sop/group_ranges"
       (key "group_ranges")
-      (aliases)
       (operation "group_ranges")
       (label "Group Ranges")
       (category "Group" "Create")
@@ -2221,7 +2119,6 @@
       (calls "sop/group_range"))
     (kind "sop/group_rename"
       (key "group_rename")
-      (aliases)
       (operation "group_rename")
       (label "Group Rename")
       (category "Group" "Edit")
@@ -2233,7 +2130,6 @@
       (calls))
     (kind "sop/group_unshared"
       (key "group_unshared")
-      (aliases)
       (operation "group_unshared")
       (label "Group Unshared")
       (category "Group" "Create")
@@ -2247,7 +2143,6 @@
       (calls))
     (kind "sop/groups_from_name"
       (key "groups_from_name")
-      (aliases)
       (operation "groups_from_name")
       (label "Groups from Name")
       (category "Group" "Convert")
@@ -2265,7 +2160,6 @@
       (calls))
     (kind "sop/iso_surface"
       (key "iso_surface")
-      (aliases)
       (operation "iso_surface")
       (label "Iso surface")
       (category "Create" "Field")
@@ -2288,7 +2182,6 @@
       (calls))
     (kind "sop/line"
       (key "line")
-      (aliases)
       (operation "line")
       (label "Line")
       (category "Create" "Curve")
@@ -2308,7 +2201,6 @@
       (calls))
     (kind "sop/match_axis"
       (key "match_axis")
-      (aliases)
       (operation "match_axis")
       (label "Match Axis")
       (category "Modify" "Align")
@@ -2325,7 +2217,6 @@
       (calls))
     (kind "sop/match_size"
       (key "match_size")
-      (aliases)
       (operation "match_size")
       (label "Match Size")
       (category "Modify")
@@ -2366,7 +2257,6 @@
       (calls "sop/measure"))
     (kind "sop/material"
       (key "material")
-      (aliases)
       (operation "material")
       (label "Material")
       (category "Attribute" "Material")
@@ -2387,7 +2277,6 @@
       (calls))
     (kind "sop/measure"
       (key "measure")
-      (aliases)
       (operation "measure")
       (label "Measure")
       (category "Attribute" "Analysis")
@@ -2403,7 +2292,6 @@
       (calls))
     (kind "sop/measure_curvature"
       (key "measure_curvature")
-      (aliases)
       (operation "measure_curvature")
       (label "Measure Curvature")
       (category "Measure")
@@ -2424,7 +2312,6 @@
       (calls))
     (kind "sop/merge"
       (key "merge")
-      (aliases)
       (operation "merge")
       (label "Merge")
       (category "Copy")
@@ -2437,7 +2324,6 @@
       (calls))
     (kind "sop/mirror"
       (key "mirror")
-      (aliases)
       (operation "mirror")
       (label "Mirror")
       (category "Modify")
@@ -2455,7 +2341,6 @@
       (calls))
     (kind "sop/mountain"
       (key "mountain")
-      (aliases)
       (operation "mountain")
       (label "Mountain")
       (category "Deform")
@@ -2485,7 +2370,6 @@
       (calls "sop/normals"))
     (kind "sop/name_from_groups"
       (key "name_from_groups")
-      (aliases)
       (operation "name_from_groups")
       (label "Name from Groups")
       (category "Group" "Convert")
@@ -2502,7 +2386,6 @@
       (calls))
     (kind "sop/noise_displace"
       (key "noise_displace")
-      (aliases)
       (operation "noise_displace")
       (label "Noise Displace")
       (category "Deform" "Noise")
@@ -2519,7 +2402,6 @@
       (calls))
     (kind "sop/normals"
       (key "normals")
-      (aliases)
       (operation "normals")
       (label "Normal")
       (category "Attribute")
@@ -2539,7 +2421,6 @@
       (calls))
     (kind "sop/ordered_group"
       (key "ordered_group")
-      (aliases)
       (operation "ordered_group")
       (label "Group Ordered")
       (category "Group" "Create")
@@ -2553,7 +2434,6 @@
       (calls))
     (kind "sop/peak"
       (key "peak")
-      (aliases)
       (operation "peak")
       (label "Peak")
       (category "Deform")
@@ -2572,7 +2452,6 @@
       (calls "sop/normals"))
     (kind "sop/platonic"
       (key "platonic")
-      (aliases)
       (operation "platonic")
       (label "Platonic Solid")
       (category "Create" "Primitive")
@@ -2598,7 +2477,6 @@
       (calls))
     (kind "sop/point_generate"
       (key "point_generate")
-      (aliases)
       (operation "point_generate")
       (label "Point Generate")
       (category "Create" "Points")
@@ -2623,7 +2501,6 @@
       (calls))
     (kind "sop/point_jitter"
       (key "point_jitter")
-      (aliases)
       (operation "point_jitter")
       (label "Point Jitter")
       (category "Point")
@@ -2644,7 +2521,6 @@
       (calls))
     (kind "sop/point_replicate"
       (key "point_replicate")
-      (aliases)
       (operation "point_replicate")
       (label "Point Replicate")
       (category "Create" "Points")
@@ -2699,7 +2575,6 @@
       (calls "sop/point_generate"))
     (kind "sop/point_split"
       (key "point_split")
-      (aliases)
       (operation "point_split")
       (label "Point Split")
       (category "Topology" "Point")
@@ -2715,7 +2590,6 @@
       (calls))
     (kind "sop/point_velocity"
       (key "point_velocity")
-      (aliases)
       (operation "point_velocity")
       (label "Point Velocity")
       (category "Attribute" "Motion")
@@ -2743,7 +2617,6 @@
       (calls))
     (kind "sop/points"
       (key "points")
-      (aliases)
       (operation "point_generate")
       (label "Point Generate")
       (category "Create" "Point")
@@ -2758,7 +2631,6 @@
       (calls))
     (kind "sop/poly_bridge"
       (key "poly_bridge")
-      (aliases)
       (operation "poly_bridge")
       (label "PolyBridge")
       (category "Topology" "Polygon")
@@ -2782,7 +2654,6 @@
       (calls "sop/normals"))
     (kind "sop/poly_loft"
       (key "poly_loft")
-      (aliases)
       (operation "poly_loft")
       (label "PolyLoft")
       (category "Topology" "Polygon")
@@ -2802,7 +2673,6 @@
       (calls "sop/normals"))
     (kind "sop/poly_path"
       (key "poly_path")
-      (aliases)
       (operation "poly_path")
       (label "PolyPath")
       (category "Topology" "Curve")
@@ -2817,7 +2687,6 @@
       (calls))
     (kind "sop/polyframe"
       (key "polyframe")
-      (aliases)
       (operation "polyframe")
       (label "PolyFrame")
       (category "Attribute")
@@ -2837,7 +2706,6 @@
       (calls))
     (kind "sop/polywire"
       (key "polywire")
-      (aliases)
       (operation "polywire")
       (label "PolyWire")
       (category "Topology" "Surface")
@@ -2882,7 +2750,6 @@
       (calls))
     (kind "sop/promote_attributes"
       (key "promote_attributes")
-      (aliases)
       (operation "attribute_promote_pattern")
       (label "Promote Attributes")
       (category "Attribute" "Promote")
@@ -2901,7 +2768,6 @@
       (calls))
     (kind "sop/rename_attributes"
       (key "rename_attributes")
-      (aliases)
       (operation "attribute_rename_pattern")
       (label "Rename Attributes")
       (category "Attribute" "Manage")
@@ -2913,7 +2779,6 @@
       (calls))
     (kind "sop/rename_edge_group"
       (key "rename_edge_group")
-      (aliases)
       (operation "rename_edge_group")
       (label "Rename Edge Group")
       (category "Group" "Manage")
@@ -2926,7 +2791,6 @@
       (calls))
     (kind "sop/resample"
       (key "resample")
-      (aliases)
       (operation "resample")
       (label "Resample")
       (category "Topology" "Curve")
@@ -2949,7 +2813,6 @@
       (calls))
     (kind "sop/rest_position"
       (key "rest_position")
-      (aliases)
       (operation "rest_position")
       (label "Rest Position")
       (category "Attribute" "Motion")
@@ -2965,7 +2828,6 @@
       (calls "sop/normals"))
     (kind "sop/reverse"
       (key "reverse")
-      (aliases)
       (operation "reverse")
       (label "Reverse")
       (category "Topology")
@@ -2979,7 +2841,6 @@
       (calls))
     (kind "sop/revolve"
       (key "revolve")
-      (aliases)
       (operation "revolve")
       (label "Revolve")
       (category "Topology" "Surface")
@@ -3006,7 +2867,6 @@
       (calls))
     (kind "sop/rewire_vertices"
       (key "rewire_vertices")
-      (aliases)
       (operation "rewire_vertices")
       (label "Rewire Vertices")
       (category "Topology" "Edit")
@@ -3025,7 +2885,6 @@
       (calls))
     (kind "sop/scatter"
       (key "scatter")
-      (aliases)
       (operation "scatter")
       (label "Scatter")
       (category "Create" "Points")
@@ -3051,7 +2910,6 @@
       (calls "sop/attribute_interpolate"))
     (kind "sop/separate_pieces"
       (key "separate_pieces")
-      (aliases)
       (operation "separate_pieces")
       (label "Separate Pieces")
       (category "Modify" "Pieces")
@@ -3070,7 +2928,6 @@
       (calls))
     (kind "sop/set_color"
       (key "set_color")
-      (aliases)
       (operation "set_color")
       (label "Set Color")
       (category "Attribute" "Set")
@@ -3087,7 +2944,6 @@
       (calls))
     (kind "sop/set_float"
       (key "set_float")
-      (aliases)
       (operation "set_float")
       (label "Set Float")
       (category "Attribute" "Set")
@@ -3101,7 +2957,6 @@
       (calls))
     (kind "sop/set_int"
       (key "set_int")
-      (aliases)
       (operation "set_int")
       (label "Set Integer")
       (category "Attribute" "Set")
@@ -3115,7 +2970,6 @@
       (calls))
     (kind "sop/set_orient"
       (key "set_orient")
-      (aliases)
       (operation "set_orient")
       (label "Set Orient")
       (category "Attribute" "Set")
@@ -3130,7 +2984,6 @@
       (calls))
     (kind "sop/set_transform"
       (key "set_transform")
-      (aliases)
       (operation "set_transform")
       (label "Set Transform")
       (category "Attribute" "Set")
@@ -3157,7 +3010,6 @@
       (calls))
     (kind "sop/set_vector"
       (key "set_vector")
-      (aliases)
       (operation "set_vector")
       (label "Set Vector")
       (category "Attribute" "Set")
@@ -3173,7 +3025,6 @@
       (calls))
     (kind "sop/skin"
       (key "skin")
-      (aliases)
       (operation "skin")
       (label "Skin")
       (category "Topology" "Polygon")
@@ -3193,7 +3044,6 @@
       (calls "sop/normals"))
     (kind "sop/smooth"
       (key "smooth")
-      (aliases)
       (operation "smooth")
       (label "Smooth")
       (category "Deform")
@@ -3219,7 +3069,6 @@
       (calls "sop/attribute_blur" "sop/normals"))
     (kind "sop/snap_to_grid"
       (key "snap_to_grid")
-      (aliases)
       (operation "snap_to_grid")
       (label "Snap to Grid")
       (category "Point")
@@ -3247,7 +3096,6 @@
       (calls "sop/fuse"))
     (kind "sop/sort"
       (key "sort")
-      (aliases)
       (operation "sort")
       (label "Sort")
       (category "Utility")
@@ -3271,7 +3119,6 @@
       (calls))
     (kind "sop/spiral"
       (key "spiral")
-      (aliases)
       (operation "spiral")
       (label "Spiral")
       (category "Create" "Curve")
@@ -3318,7 +3165,6 @@
       (calls))
     (kind "sop/subdivide"
       (key "subdivide")
-      (aliases)
       (operation "subdivide")
       (label "Subdivide")
       (category "Topology")
@@ -3348,7 +3194,6 @@
       (calls "sop/normals" "sop/subdivide_cracks"))
     (kind "sop/swap_attributes"
       (key "swap_attributes")
-      (aliases)
       (operation "attribute_swap")
       (label "Swap Attributes")
       (category "Attribute" "Manage")
@@ -3360,7 +3205,6 @@
       (calls))
     (kind "sop/sweep"
       (key "sweep")
-      (aliases)
       (operation "sweep")
       (label "Sweep")
       (category "Topology" "Surface")
@@ -3385,7 +3229,6 @@
       (calls "sop/group_combine"))
     (kind "sop/sweep_circle"
       (key "sweep_circle")
-      (aliases)
       (operation "sweep_circle")
       (label "Sweep Circle")
       (category "Topology" "Surface")
@@ -3430,7 +3273,6 @@
       (calls))
     (kind "sop/torus"
       (key "torus")
-      (aliases)
       (operation "torus")
       (label "Torus")
       (category "Create" "Primitive")
@@ -3469,7 +3311,6 @@
       (calls))
     (kind "sop/transform"
       (key "transform")
-      (aliases)
       (operation "transform")
       (label "Transform")
       (category "Modify")
@@ -3524,7 +3365,6 @@
       (calls "sop/normals"))
     (kind "sop/tube"
       (key "tube")
-      (aliases)
       (operation "tube")
       (label "Tube")
       (category "Create" "Primitive")
@@ -3559,7 +3399,6 @@
       (calls))
     (kind "sop/uv_auto_seam"
       (key "uv_auto_seam")
-      (aliases)
       (operation "uv_auto_seam")
       (label "UV Auto Seam")
       (category "UV" "Seams")
@@ -3579,7 +3418,6 @@
       (calls))
     (kind "sop/uv_project"
       (key "uv_project")
-      (aliases)
       (operation "uv_project")
       (label "UV Project")
       (category "UV" "Create")
@@ -3615,7 +3453,6 @@
       (calls))
     (kind "sop/uv_sphere"
       (key "uv_sphere")
-      (aliases)
       (operation "uv_sphere")
       (label "UV Sphere")
       (category "Create" "Primitive")
@@ -3653,7 +3490,6 @@
       (calls))
     (kind "sop/uv_transform"
       (key "uv_transform")
-      (aliases)
       (operation "uv_transform")
       (label "UV Transform")
       (category "UV" "Modify")
@@ -3674,7 +3510,6 @@
       (calls))
     (kind "sop/uv_unitize"
       (key "uv_unitize")
-      (aliases)
       (operation "uv_unitize")
       (label "UV Unitize")
       (category "UV" "Layout")
@@ -3691,7 +3526,6 @@
       (calls))
     (kind "scene/geometry"
       (key "geometry")
-      (aliases)
       (operation "geometry")
       (label "Geometry")
       (category "Object")
@@ -3713,7 +3547,6 @@
       (outputs))
     (kind "scene/light"
       (key "light")
-      (aliases)
       (operation "light")
       (label "Light")
       (category "Object")
@@ -3740,7 +3573,6 @@
       (outputs))
     (kind "scene/camera"
       (key "camera")
-      (aliases)
       (operation "camera")
       (label "Camera")
       (category "Object")
@@ -3766,7 +3598,6 @@
       (outputs))
     (kind "scene/world"
       (key "world")
-      (aliases)
       (operation "world")
       (label "World")
       (category "Object")
@@ -3789,7 +3620,6 @@
       (outputs))
     (kind "scene/root"
       (key "root")
-      (aliases)
       (operation "root")
       (label "Root")
       (category "Render")
@@ -3805,7 +3635,6 @@
       (outputs))
     (kind "world/gradient"
       (key "gradient")
-      (aliases)
       (operation "gradient")
       (label "Gradient")
       (category "Layer")
@@ -3826,7 +3655,6 @@
       (outputs))
     (kind "world/sky"
       (key "sky")
-      (aliases)
       (operation "sky")
       (label "Sky")
       (category "Layer")
@@ -3839,7 +3667,6 @@
       (outputs))
     (kind "world/sun"
       (key "sun")
-      (aliases)
       (operation "sun")
       (label "Sun")
       (category "Layer")
@@ -3855,7 +3682,6 @@
       (outputs))
     (kind "world/shape"
       (key "shape")
-      (aliases)
       (operation "shape")
       (label "Shape")
       (category "Layer")
@@ -3877,7 +3703,6 @@
       (outputs))
     (kind "world/scatter"
       (key "scatter")
-      (aliases)
       (operation "scatter")
       (label "Scatter")
       (category "Layer")
@@ -3903,7 +3728,6 @@
       (outputs))
     (kind "world/room"
       (key "room")
-      (aliases)
       (operation "room")
       (label "Room")
       (category "Layer")
@@ -3926,7 +3750,6 @@
       (outputs))
     (kind "settings/config"
       (key "config")
-      (aliases)
       (operation "config")
       (label "Settings")
       (category "Workspace")

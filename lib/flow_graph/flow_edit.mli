@@ -180,14 +180,14 @@ type macro_draft = {
   name : string;  (** a suggested macro name *)
 }
 
-val macro_draft : Flow.Syntax.t list -> path list -> (macro_draft, Flow.Diagnostic.t) result
+val macro_draft : Flow.Syntax.t list -> path list -> (macro_draft, Diagnostic.t) result
 (** What [Make_macro] over these nodes would template, for the dialog that picks its
     holes.  The errors are [Make_macro]'s (one scope, one result leaving). *)
 
 type defn_draft = { free : string list;  (** the names the selection reads from outside *)
                     name : string  (** a suggested function name *) }
 
-val defn_draft : Flow.Syntax.t list -> path list -> (defn_draft, Flow.Diagnostic.t) result
+val defn_draft : Flow.Syntax.t list -> path list -> (defn_draft, Diagnostic.t) result
 (** What [Make_defn] over these nodes needs typed: the outside names.  The errors are [Make_defn]'s. *)
 
 val macro_op : macro_draft -> nodes:path list -> name:string -> (bool * string) array -> op
@@ -202,9 +202,9 @@ val apply_checked :
   ?ops:Flow.Op.t list ->
   ?library:bool ->
   ?checker:(Flow.Check.catalog -> Flow.Syntax.t list ->
-    Flow.Workspace.t option * Flow.Diagnostic.t list) ->
+    Flow.Workspace.t option * Diagnostic.t list) ->
   Flow.Check.catalog -> Flow.Syntax.t list -> op ->
-  (Flow.Syntax.t list * Flow.Workspace.t, Flow.Diagnostic.t) result
+  (Flow.Syntax.t list * Flow.Workspace.t, Diagnostic.t) result
 (** The rewritten source (printed and parsed again) and its check.  An op that
     has alternatives ([Wrap]) tries them in order and reports the first
     diagnostic when none checks. [checker] supplies a host's library-aware
@@ -212,7 +212,7 @@ val apply_checked :
 
 val apply :
   Flow.Check.catalog -> Flow.Syntax.t list -> op ->
-  (Flow.Syntax.t list, Flow.Diagnostic.t) result
+  (Flow.Syntax.t list, Diagnostic.t) result
 
 val remap : op -> path -> path option
 (** Where a layout key goes after the op: [Rename] rewrites the prefix,

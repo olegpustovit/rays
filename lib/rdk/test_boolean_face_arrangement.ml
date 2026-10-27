@@ -188,7 +188,7 @@ let arrangement_signature arrangement =
 let test_sparse_sweep_and_point_candidates () =
   let count = 64 in
   let run domains point_contact =
-    Rays.Parallel.run ~domains (fun () ->
+    Parallel.run ~domains (fun () ->
       let left,right = many_parallel_plan ~count ~point_contact in
       let constraints = Constraints.build ~grain:7 ~left ~right () |> get in
       Arrangement.build constraints
@@ -224,7 +224,7 @@ let multiway_plan count =
 let test_dense_multiway_sweep () =
   let count = 96 in
   let run domains =
-    Rays.Parallel.run ~domains (fun () ->
+    Parallel.run ~domains (fun () ->
       Arrangement.build (multiway_plan count)
         ~side:Arrangement.Left ~triangle:0 |> get) in
   let arrangement = run 1 in

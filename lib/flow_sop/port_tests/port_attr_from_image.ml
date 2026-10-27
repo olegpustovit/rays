@@ -11,7 +11,7 @@ let image width height =
   let rgba = Array.init (width * height * 4) (fun i ->
     let k = float ((i * 7919 + i / 4 * 104729) mod 1000) /. 999. in
     if i mod 4 = 3 && i mod 8 = 3 then 1. else k) in
-  (match Sop.Image.create ~width ~height ~rgba with Ok i -> i | Error e -> failwith (Sop.Diagnostic.error_to_string e))
+  (match Sop.Image.create ~width ~height ~rgba with Ok i -> i | Error e -> failwith (Diagnostic.error_to_string e))
 let () = register_images "attr_from_image" (function
   | "uv3" -> [image 4 1] | "bench" -> [image 256 256] | _ -> [image 5 3])
 let with_uv ~dims ?(bad = false) count =

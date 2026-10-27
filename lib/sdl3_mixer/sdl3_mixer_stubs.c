@@ -140,15 +140,6 @@ CAMLprim value caml_sdl3_mixer_format(value raw)
   CAMLreturn(result);
 }
 
-CAMLprim value caml_sdl3_mixer_set_gain(value raw, value gain)
-{
-  CAMLparam2(raw, gain);
-  if (!MIX_SetMixerGain(mixer_of_value(raw), Double_val(gain))) {
-    CAMLreturn(string_error());
-  }
-  CAMLreturn(unit_success());
-}
-
 CAMLprim value caml_sdl3_mixer_generate(value raw, value bytes)
 {
   mlsize_t length;
@@ -261,24 +252,6 @@ CAMLprim value caml_sdl3_mixer_stop_track(value raw, value fade_out_ms)
     CAMLreturn(string_error());
   }
   if (!MIX_StopTrack(track_of_value(raw), frames)) {
-    CAMLreturn(string_error());
-  }
-  CAMLreturn(unit_success());
-}
-
-CAMLprim value caml_sdl3_mixer_pause_track(value raw)
-{
-  CAMLparam1(raw);
-  if (!MIX_PauseTrack(track_of_value(raw))) {
-    CAMLreturn(string_error());
-  }
-  CAMLreturn(unit_success());
-}
-
-CAMLprim value caml_sdl3_mixer_resume_track(value raw)
-{
-  CAMLparam1(raw);
-  if (!MIX_ResumeTrack(track_of_value(raw))) {
     CAMLreturn(string_error());
   }
   CAMLreturn(unit_success());

@@ -45,7 +45,7 @@ active renderer output size, allocates exactly that many RGBA pixels, and reads
 the complete framebuffer. `Canvas.save_screen_png` preserves those dimensions.
 Consequently, a logical `800 × 600` window with a `(2., 2.)` pixel scale saves
 a `1600 × 1200` PNG. Code that needs the current relationship can compare
-`Frame.size` with `Frame.drawable_size`.
+`Frame.input.size` with the drawable size supplied by the renderer.
 
 An alpha mask is explicit and composable:
 
@@ -64,8 +64,8 @@ Canvas and image resources are explicitly owned. `Sketch.run_state` provides
 
 ```ocaml
 let stop model =
-  Image.destroy model.texture;
-  Canvas.destroy model.canvas
+  List.iter (function Ok () -> () | Error message -> prerr_endline message)
+    [Image.destroy model.texture; Canvas.destroy model.canvas]
 ```
 
 ## Effect boundaries

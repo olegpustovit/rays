@@ -340,7 +340,7 @@ let build ?cancel
     let constraints = Boolean_complex.Private.constraints complex
     and shells = Boolean_weiler.shell_count weiler
     and facets = Boolean_complex.facet_count complex in
-    let left_components, right_components = Rays_math.Parallel.both
+    let left_components, right_components = Parallel.both
         (fun () -> if track_left then
           Some (build_components ?cancel constraints Boolean_complex.Left) else None)
         (fun () -> if track_right then

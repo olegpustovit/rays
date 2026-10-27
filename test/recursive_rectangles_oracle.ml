@@ -4,15 +4,15 @@
    to follow the port. *)
 open Rays
 
-(* [Noise.sample2] is gone from the public surface. The packed sampler is the same
+(* [Rays_math.Noise.sample2] is gone from the public surface. The packed sampler is the same
    arithmetic at frequency one: clamp01 ((raw2 x y + 1) * 0.5). *)
 let sample2 noise ~x ~y =
   let output = [|0.|] in
-  Noise.Private.sample2_into noise ~first:0 ~last:1 ~frequency:1. ~x:[|x|] ~y:[|y|] ~output;
+  Rays_math.Noise.Private.sample2_into noise ~first:0 ~last:1 ~frequency:1. ~x:[|x|] ~y:[|y|] ~output;
   output.(0)
 
 type model = {
-  noise : Noise.t;
+  noise : Rays_math.Noise.t;
   color_scheme : int;
   x_control : float;
 }
@@ -50,15 +50,15 @@ let palette_color scheme tile_id =
   let jitter = float ((tile_hash / 97) mod 900) /. 100. -. 4.5 in
   let saturation = 0.56 +. (float ((seed / 31 + slot * 47) mod 260) /. 1_000.) in
   let lightness = 0.34 +. (float ((seed / 73 + slot * 83) mod 330) /. 1_000.) in
-  Color.hsl (base_hue +. offset +. jitter) saturation lightness
+  Rays_math.Color.hsl (base_hue +. offset +. jitter) saturation lightness
 
 let background scheme =
   let hue = float (scheme_hash scheme mod 360_000) /. 1_000. in
-  Color.hsl hue 0.16 0.93
+  Rays_math.Color.hsl hue 0.16 0.93
 
 let init _frame =
   {
-    noise = Noise.create 451;
+    noise = Rays_math.Noise.create 451;
     color_scheme = 0;
     x_control = 0.5;
   }
@@ -66,33 +66,33 @@ let init _frame =
 let update model (frame : Frame.t) =
   if Frame.has_event
       (function
-        | Event.KeyPressed Input.Escape
-        | Event.KeyPressed (Input.KeyChar 'q') -> true
+        | Input.Key_pressed Input.Escape
+        | Input.Key_pressed (Input.KeyChar 'q') -> true
         | _ -> false)
       frame
   then Sketch.quit ();
   let color_scheme =
     if Frame.has_event
-        (function Event.MousePressed (Input.LeftButton, _) -> true | _ -> false)
+        (function Input.Pointer_pressed (Input.LeftButton, _) -> true | _ -> false)
         frame
     then model.color_scheme + 1
     else model.color_scheme
   in
-  let mouse_x, _ = frame.mouse in
+  let mouse_x, _ = frame.input.pointer in
   let target_x =
-    Float.max 0. (Float.min (float frame.width) mouse_x)
-    /. float (max 1 frame.width)
+    Float.max 0. (Float.min (float (fst frame.input.size)) mouse_x)
+    /. float (max 1 (fst frame.input.size))
   in
-  let damping = 1. -. exp (-.10. *. max 0. frame.dt) in
+  let damping = 1. -. exp (-.10. *. max 0. frame.input.dt) in
   let x_control = model.x_control +. ((target_x -. model.x_control) *. damping) in
   { model with color_scheme; x_control }
 
 let view model (frame : Frame.t) =
-  let _, mouse_y = frame.mouse in
+  let _, mouse_y = frame.input.pointer in
   let x_control = model.x_control
   and y_control =
-    Float.max 0. (Float.min (float frame.height) mouse_y)
-    /. float (max 1 frame.height)
+    Float.max 0. (Float.min (float (snd frame.input.size)) mouse_y)
+    /. float (max 1 (snd frame.input.size))
   in
   let iterations = 4 + int_of_float (y_control *. 12.) in
   let field_offset = x_control *. 8. in
@@ -133,7 +133,7 @@ let view model (frame : Frame.t) =
   in
   let side =
     int_of_float
-      (float (max 80 (min frame.width frame.height - 96)) /. sqrt 2.)
+      (float (max 80 (min (fst frame.input.size) (snd frame.input.size) - 96)) /. sqrt 2.)
   in
   let leaves = split 0 1 { x = 0; y = 0; w = side; h = side } in
   let tiles =
@@ -146,7 +146,7 @@ let view model (frame : Frame.t) =
           ~fill:color ())
       leaves
   in
-  let center_x = frame.width / 2 and center_y = frame.height / 2 in
+  let center_x = (fst frame.input.size) / 2 and center_y = (snd frame.input.size) / 2 in
   Scene.[
     clear (background model.color_scheme);
     translate center_x center_y [

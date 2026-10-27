@@ -237,7 +237,7 @@ let test_fused_split_matches_composed_reference () =
    split/collapse/flip kernels before the local-edit structure replaced them;
    the structure must reproduce their output byte for byte. *)
 let component_hashes geometry =
-  let mix hash value = (hash * 1_000_003) lxor value land max_int in
+  let mix hash value = Rays_math.Hash.mix_with 1_000_003 hash value land max_int in
   let mix_float hash value = mix hash (Hashtbl.hash (Int64.bits_of_float value)) in
   let floats values = Array.fold_left mix_float 17 values
   and ints values = Array.fold_left mix 17 values in
@@ -277,7 +277,7 @@ let component_hashes geometry =
       (Geometry.edge_groups geometry)
 
 let fixture_hash geometry =
-  let mix hash value = (hash * 1_000_003) lxor value land max_int in
+  let mix hash value = Rays_math.Hash.mix_with 1_000_003 hash value land max_int in
   List.fold_left (fun hash (_, value) -> mix hash value) 17 (component_hashes geometry)
 
 let dump label geometry =

@@ -29,14 +29,6 @@ let create ?label ?(version = 1) ?(cook_mode = Node.Generic)
     inputs cook =
   node ?label ~operation ~schema ~values inputs
     (fun ~label ~inputs ~parameters ->
-      plain ~label ~version ~parameters:(Parameter.key schema parameters)
+      plain ~label ~version ~parameters:(Param.key schema parameters)
         ~cook_mode ~dependencies ~operation inputs
         (fun ~context geometries -> cook ~parameters ~context geometries))
-
-let map ?label ?version ?dependencies
-    ~operation ~schema ~values input cook =
-  create ?label ?version ~cook_mode:(Node.Duplicate_input 0) ?dependencies ~operation ~schema ~values
-    [input] (fun ~parameters ~context inputs ->
-      if Array.length inputs <> 1 then Error
-          (operation ^ ": custom map expected exactly one input")
-      else cook ~parameters ~context inputs.(0))

@@ -1,4 +1,4 @@
-(* Drawing.render_prepared with GPU mark attributes (P4.13): circles and rects whose positions are a
+(* Flow_native.Drawing.render_prepared with GPU mark attributes: circles and rects whose positions are a
    GPU region output, with uniform style (constant radius or size and fill: what the removed gpu_circles
    arm served) and per-instance style. A per-instance radius, size or fill that does not read the frame
    is a static region: it runs once on the CPU and its bytes are kept. The "moving" styles read [t], so
@@ -7,7 +7,7 @@
    with their completion and status read, not the render pass.
    Run: _build/default/lib/rays_editor/native_qualification/bench_marks_gpu.exe *)
 module L = Flow_sop.Lower
-let ok = function Ok x -> x | Error d -> failwith (Flow.Diagnostic.to_string d)
+let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let size = (800, 600)
 
 let points n = Printf.sprintf "(map (fn [i] [(* (mod i 800) 1.0) (+ (/ i 1250) (* 5 (sin t))) 0]) (array/range %d))" n
@@ -27,22 +27,22 @@ let median a = let a = Array.copy a in Array.sort Float.compare a; a.(Array.leng
 let measure kind (radius, fill, moving) n =
   let lowered = Flow.Syntax.parse (Printf.sprintf "(workspace w (graph g :context draw %s))" (picture kind ~radius ~fill ~moving n))
     |> ok |> L.workspace ~factories:Sop_catalog.Editor.factories |> ok in
-  let prepared = Drawing.prepare ~approx:lowered.approx ~states:lowered.states lowered.plan
+  let prepared = Flow_native.Drawing.prepare ~approx:lowered.approx ~states:lowered.states lowered.plan
     (List.assoc "g" lowered.evaluated.results) |> ok in
-  let gpu = Workspace_gpu.create () in
-  Workspace_gpu.qualification gpu;
-  Fun.protect ~finally:(fun () -> Workspace_gpu.close gpu) (fun () ->
+  let gpu = Flow_native.Workspace_gpu.create () in
+  Flow_native.Workspace_gpu.qualification gpu;
+  Fun.protect ~finally:(fun () -> Flow_native.Workspace_gpu.close gpu) (fun () ->
     let frames = if n >= 1_000_000 then 5 else 11 in
     let state = Flow.Eval.create_state () in
-    let frame i = Workspace_gpu.with_backend gpu (fun () -> ok (Drawing.render_prepared ~state ~gpu:(Workspace_gpu.marks gpu) prepared
-      ~live:{(Frame_input.at_time (float i /. 60.)) with frame = i; tick = i; size} ~size)) in
+    let frame i = Flow_native.Workspace_gpu.with_backend gpu (fun _gpu -> ok (Flow_native.Drawing.render_prepared ~state ~gpu:(Flow_native.Workspace_gpu.marks gpu) prepared
+      ~live:{(Input.at_time (float i /. 60.)) with frame = i; tick = i; size} ~size)) in
     ignore (frame 0);
     let samples = Array.init frames (fun i ->
       Gc.full_major ();
       let bytes = Gc.allocated_bytes () and start = Unix.gettimeofday () in
       ignore (frame (i + 1));
       Unix.gettimeofday () -. start, Gc.allocated_bytes () -. bytes) in
-    let host, _, _, _, _ = Workspace_gpu.image_stats gpu in
+    let host, _, _, _, _ = Flow_native.Workspace_gpu.image_stats gpu in
     if host.runners_created = 0 then failwith "the region did not run on the GPU";
     median (Array.map fst samples), median (Array.map snd samples), host.runners_created)
 

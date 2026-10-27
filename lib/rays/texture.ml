@@ -1,13 +1,13 @@
 type level = {
   width : int;
   height : int;
-  pixels : Color.t array;
+  pixels : Rays_math.Color.t array;
 }
 
 type cpu = {
   width : int;
   height : int;
-  pixels : Color.t array;
+  pixels : Rays_math.Color.t array;
   mipmaps : level array;
 }
 type backing = Cpu of cpu | Borrowed of Runtime_resources.Image.t
@@ -74,7 +74,7 @@ let next_level (source : level) : level =
               let color =
                 source.pixels.((source_y * source.width) + source_x)
               in
-              red := !red + color.Color.r;
+              red := !red + color.Rays_math.Color.r;
               green := !green + color.g;
               blue := !blue + color.b;
               alpha := !alpha + color.a;
@@ -83,7 +83,7 @@ let next_level (source : level) : level =
           done
         done;
         let rounded value = (value + (!count / 2)) / !count in
-        Color.rgba (rounded !red) (rounded !green)
+        Rays_math.Color.rgba (rounded !red) (rounded !green)
           (rounded !blue) (rounded !alpha));
   }
 
@@ -135,11 +135,11 @@ let[@inline always] wrap_coordinate mode value =
       if value <= 1. then value else 2. -. value
 
 let pack color =
-  (color.Color.r lsl 24) lor (color.g lsl 16)
+  (color.Rays_math.Color.r lsl 24) lor (color.g lsl 16)
   lor (color.b lsl 8) lor color.a
 
 let unpack value =
-  Color.rgba ((value lsr 24) land 0xff) ((value lsr 16) land 0xff)
+  Rays_math.Color.rgba ((value lsr 24) land 0xff) ((value lsr 16) land 0xff)
     ((value lsr 8) land 0xff) (value land 0xff)
 
 let packed_channel value shift = (value lsr shift) land 0xff

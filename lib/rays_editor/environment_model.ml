@@ -2,7 +2,7 @@ open Rays
 open Editor_document
 open Sop
 open World_map
-include Environment_view
+open Environment_view
 
 (* The one environment: [Core] plus the 3D viewport. *)
 module V = Viewport
@@ -15,13 +15,11 @@ type 'prepared t = {
   viewing : string option;  (* the viewport [camera] belongs to *)
   control : V.control;
   draw : Graph.t -> 'prepared -> V.rendered;
-  overlay : Graph.t -> 'prepared option -> Frame.t -> Scene.t;
-  status : 'prepared option -> string option;  (* sketch text in the status bar *)
   rendered : V.rendered option;
   views : (string * V.rendered) list;  (* viewports over another scene instance *)
   drawn : (Graph.t * 'prepared * V.rendered * Texture.t option) Document.Int_map.t;  (* per object *)
   composed : (Edit_graph.t * Document.level * (string * int list) list) option;
-  resolved : (Document.t * Frame_input.t * Edit_graph.t) option;
+  resolved : (Document.t * Input.t * Edit_graph.t) option;
   context_error : string option;
   (* The scene, open level (ghosts), and viewport membership used by the picture. *)
   baked : World.baked option;
@@ -30,7 +28,7 @@ type 'prepared t = {
   map : (World.baked * Image.t) option;  (* the lat-long view's upload *)
   render_status : string option;
   pending_render : V.request option;
-  background : Color.t;
+  background : Rays_math.Color.t;
   extra : V.extra;
   hidden_scene_cache : (V.rendered, V.view) hidden_scene_cache option;
   world_drag : world_drag option;
@@ -46,7 +44,7 @@ type 'prepared t = {
   saved_view : Flow.Syntax.t;
   state_error : string option;
   canvases : (string * canvas_picture) list;
-  host : Workspace_host.t;
+  host : Flow_native.Workspace_host.t;
 }
 
 (* Scene objects a sketch starts with: its lights as light objects. *)
@@ -62,11 +60,11 @@ let seed_lights lights scene =
     (match added with Ok scene -> scene | Error _ -> scene), index + 1)
     (scene, 1) lights |> fst
 
-let create ?inputs ?name ?presets ?factories
+let create ?inputs ?name ?presets ?factories ?gpu_owner
     ?settings ?(lights = [])
-    ?(camera = V.default_camera ()) ?(background = Color.hex_exn "#f4f5f0")
+    ?(camera = V.default_camera ()) ?(background = Rays_math.Color.hex_exn "#f4f5f0")
     ?seed ?grain ?domains ?max_entries ?max_payload_bytes ?await ?carry_budget ?opened ~workspace ?source ~prepare ~draw
-    ?(overlay = fun _ _ _ -> Scene.empty) ?(status = fun _ -> None) () =
+    () =
   let workspace = match inputs with None -> workspace
     | Some inputs -> {workspace with Workspace_doc.inputs} in
   let source = Option.map (fun source -> Source_file.with_imports source
@@ -79,24 +77,26 @@ let create ?inputs ?name ?presets ?factories
         let file = try Unix.realpath file with Unix.Unix_error _ ->
           if Filename.is_relative file then Filename.concat (Sys.getcwd ()) file else file in
         "file:" ^ file in
-  Result.map (fun core ->
+  let host=Flow_native.Workspace_host.create ?seed ?grain ?domains ?gpu:gpu_owner () in
+  let gpu=Flow_native.Workspace_gpu.config host.gpu in
+  let created=Core.create ~gpu ?settings
+      ~seed_scene:(fun factories scene ->
+        V.seed_scene camera factories (seed_lights lights scene))
+      ~name ~state_key ?presets ?factories ?seed ?grain ?domains
+      ?max_entries ?max_payload_bytes ?await ?carry_budget ?opened ~workspace ~prepare () in
+  match created with
+  | Error error -> Flow_native.Workspace_host.close host; Error error
+  | Ok core -> Ok (
     let core, extra = V.init core camera in
     let core = match source with
       | Some source -> { core with Core.file = Filename.basename (Source_file.file source) }
       | None -> core in
-    { core; camera; control = V.create_control (); draw; overlay; status;
+    { core; camera; control = V.create_control (); draw;
       rendered = None; views = []; drawn = Document.Int_map.empty; composed = None;
-      resolved = None; context_error = None; canvases = []; host=Workspace_host.create
-        ~seed:core.cook.seed ~grain:core.cook.grain ~domains:core.cook.domains (); baked = None; baked_from = None; baked_views = []; map = None;
+      resolved = None; context_error = None; canvases = []; host; baked = None; baked_from = None; baked_views = []; map = None;
       render_status = None; pending_render = None;
       background; extra; hidden_scene_cache = None; world_drag = None; pick_press = None; source; held = None; open_dialog = None; refused = None; opened = core.doc; state_owned = false; cameras = []; viewing = None;
       state_checked = neg_infinity; saved_doc = core.doc; saved_view = V.section camera extra; state_error = None })
-    (Core.create ?settings
-      ~keymap:V.keymap
-      ~seed_scene:(fun factories scene ->
-        V.seed_scene camera factories (seed_lights lights scene))
-      ~name ~state_key ?presets ?factories ?seed ?grain ?domains
-      ?max_entries ?max_payload_bytes ?await ?carry_budget ?opened ~workspace ~prepare ())
 
 let document value = Core.document value.core
 let prepared value = Core.prepared value.core
@@ -198,12 +198,6 @@ let film value frame =
   let fx, fy, w, h = V.film value.extra ~key:(focus_key value) pane in
   fx - x, fy - y, w, h
 
-let take_export value = match value.pending_render with
-  | Some request -> { value with pending_render = None }, Some (V.filename request)
-  | None -> value, None
-
-let set_render_status value render_status = { value with render_status }
-
 (* The hidden-scene cache is model state: refreshed here, read by [scene]. *)
 let refresh_hidden value frame =
   let hidden_scene_cache =
@@ -224,12 +218,12 @@ let compose value (update : (_, _) Core.update) ~baked ~baked_views ~scene =
   let live={update.core.live_frame with t=Timeline.time(Core.timeline update.core);
     frame=Int64.to_int(Timeline.frame(Core.timeline update.core))}in
   let lowered=snd update.core.doc.workspace in
-  Workspace_images.bind value.host.images lowered;
+  Flow_native.Workspace_images.bind value.host.images lowered;
   let plan=lowered.plan in
   let textures,errors=Document.Int_map.fold(fun id source (textures,errors)->
-    match Workspace_images.texture value.host.images ~state:update.core.cook.state ~live plan source with
+    match Flow_native.Workspace_images.texture value.host.images ~state:update.core.cook.state ~live plan source with
     |Ok texture->Document.Int_map.add id texture textures,errors
-    |Error diagnostic->textures,Flow.Diagnostic.to_string diagnostic::errors)
+    |Error diagnostic->textures,Diagnostic.to_string diagnostic::errors)
     update.core.doc.scene_textures (Document.Int_map.empty,[])in
   let texture_changed=Document.Int_map.exists(fun id(_,_,_,previous)->
     not(Option.equal (==) previous (Document.Int_map.find_opt id textures)))value.drawn in

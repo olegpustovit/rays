@@ -187,7 +187,7 @@ let test_build_once_query_many () =
 let test_domain_exactness () =
   let left = tetra ~origin:(0.,0.,0.) 2.
   and right = tetra ~origin:(0.5,0.2,0.2) 2. in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       Solid.prepare ~grain:1 ~left ~right () |> get
       |> Solid.extract ~expression:Extract.xor |> get |> signature) in
   check (run 1 = run 4) "build-once Boolean differs between domain counts"
@@ -195,7 +195,7 @@ let test_domain_exactness () =
 let test_shatter_products () =
   let left = tetra ~origin:(0.,0.,0.) 2.
   and right = tetra ~origin:(0.5,0.2,0.2) 2. in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       let solid = Solid.prepare ~grain:1 ~left ~right () |> get in
       let products = Solid.shatter_with_ancestry solid |> get in
       Array.map (fun ancestry -> signature (Extract.geometry ancestry)) products) in
@@ -269,7 +269,7 @@ let tiny_edge_signature group =
 let test_tiny_seam_candidate_policy () =
   let left = tetra ~origin:(0.,0.,0.) 2.
   and right = tetra ~origin:(0.5,0.2,0.2) 2. in
-  let build domains = Rays.Parallel.run ~domains (fun () ->
+  let build domains = Parallel.run ~domains (fun () ->
       let solid = Solid.prepare ~grain:1 ~left ~right () |> get in
       let ancestry = Solid.extract_with_ancestry ~expression:Extract.union solid
           |> get
@@ -406,7 +406,7 @@ let test_tiny_seam_candidate_policy () =
   check (Edge_group.cardinality copied_seam
       = Edge_group.cardinality (Materialization.cleanup_seam_edges enriched_cleanup))
     "seam split native edge-group membership diverged from exact seam ancestry";
-  let split_signature domains = Rays.Parallel.run ~domains (fun () ->
+  let split_signature domains = Parallel.run ~domains (fun () ->
       let solid = Solid.prepare ~grain:1 ~left ~right () |> get in
       let ancestry = Solid.extract_with_ancestry ~expression:Extract.union solid
           |> get
@@ -519,7 +519,7 @@ let test_tiny_seam_candidate_policy () =
       = Topology.data_id (Geometry.topology cleaned_geometry)
       && Edge_group.cardinality cleaned_seams > 0)
     "cleanup lost its topology-affine exact seam edge product";
-  let cleanup_signature domains = Rays.Parallel.run ~domains (fun () ->
+  let cleanup_signature domains = Parallel.run ~domains (fun () ->
       let solid = Solid.prepare ~grain:1 ~left:cleanup_left
           ~right:(cube ~origin:(0.60000000000000009,
             0.60000000000000009,0.60000000000000009) 2.) () |> get in
@@ -596,7 +596,7 @@ let test_rounded_surface_verifier () =
       [|-1.,0.,0.; 1.,0.,0.; 0.,1.,0.;
         0.,0.,-1.; 0.,0.,1.; 0.,-1.,0.|]
       [|0;1;2; 3;4;5|] in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       Materialization.verify_surface ~grain:1 ~require_closed:false crossing
       |> Result.map_error Error.to_string) in
   check (run 1 = run 4)
@@ -655,7 +655,7 @@ let test_rounded_surface_verifier () =
 let test_detriangulation_policy () =
   let left = cube_quads ~origin:(0.,0.,0.) 2.
   and right = tetra ~origin:(10.,0.,0.) 1. in
-  let build domains = Rays.Parallel.run ~domains (fun () ->
+  let build domains = Parallel.run ~domains (fun () ->
       let solid = Solid.prepare ~grain:1 ~left ~right () |> get in
       let ancestry = Solid.extract_with_ancestry ~expression:Extract.union solid
           |> get
@@ -787,7 +787,7 @@ let test_open_sheet_preparation () =
     check (Extract.primitive_side ancestry primitive = Complex.Right)
       "solid/surface product selected payload ancestry from the solid"
   done;
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       let prepared = Solid.prepare ~grain:1 ~left:solid ~right:sheet
           ~right_treatment:Solid.Surface () |> get in
       [|Solid.Union; Solid.Intersection; Solid.Difference;
@@ -802,7 +802,7 @@ let test_surface_surface_products () =
       [|x0,0.,0.; x1,0.,0.; x1,2.,0.; x0,2.,0.|]
       [|0;1;2; 0;2;3|] in
   let left = sheet 0. 2. and right = sheet 1. 3. in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       let prepared = Solid.prepare ~grain:1 ~left ~right
           ~left_treatment:Solid.Surface ~right_treatment:Solid.Surface () |> get in
       [|Solid.Union; Solid.Intersection; Solid.Difference;
@@ -830,16 +830,16 @@ let test_surface_surface_products () =
     "transverse surface/surface intersection lost its curve product"
 
 let test_certified_rounding_repair () =
-  let host = Box_generator.box ~grain:128 ~center:(Rays.Vec3.create 0. 0. 0.)
-      ~rotation:(Rays.Vec3.create 0.08 (-0.13) 0.04)
-      ~size:(Rays.Vec3.create 5.2 3.3 2.7)
+  let host = Box_generator.box ~grain:128 ~center:(Rays_math.Vec3.create 0. 0. 0.)
+      ~rotation:(Rays_math.Vec3.create 0.08 (-0.13) 0.04)
+      ~size:(Rays_math.Vec3.create 5.2 3.3 2.7)
       ~x_divisions:6 ~y_divisions:6 ~z_divisions:6
       ~connectivity:Box_generator.Box_quads ~consolidate_points:true () |> get in
   let cutters = merge_geometry (Array.init 7 (fun index ->
       let x = -2.2 +. (4.4 *. float_of_int index /. 6.) in
       torus ~major_segments:24 ~minor_segments:10 ~center_x:x
         ~major:0.42 ~minor:0.16)) in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       let prepared = Solid.prepare ~grain:128 ~left:host ~right:cutters
           ~resolve_right_self_intersections:true () |> get in
       let ancestry = Solid.extract_product_with_ancestry

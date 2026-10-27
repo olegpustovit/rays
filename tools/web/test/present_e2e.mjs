@@ -29,6 +29,7 @@ process.env.RAYS_SHOT_POINTER = POINTER;
 if (process.env.FAST === '1') process.env.RAYS_SHOT_FAST = '1';
 
 const read = dir => Object.fromEntries(readdirSync(dir, { recursive: true }).filter(f => statSync(join(dir, f)).isFile()).map(f => ['/' + f, readFileSync(join(dir, f))]));
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 const e2e = `<!doctype html><meta charset="utf-8"><body style="margin:0"><canvas id="c" style="width:${W}px;height:${H}px"></canvas>
 <script type="module">
 import { createRuntime } from './runtime/runtime.js';
@@ -75,8 +76,14 @@ for (const dir of dirs) {
   // the real page: index.html runs `start` (rAF loop, real clock)
   const chrome2 = await launch(server.url);
   try {
-    await new Promise(res => setTimeout(res, 2500));
-    boot = await chrome2.evaluate('({ marks: window.__rays?.marks.length ?? -1, isolated: crossOriginIsolated, text: document.body.innerText })');
+    for (let i = 0; i < 200; i++) {
+      boot = await chrome2.evaluate(`({ marks: window.__rays?.marks?.length ?? -1,
+        presented: window.__rays?.firstPresentMs !== undefined,
+        failure: window.__rays?.failure ? String(window.__rays.failure.stack ?? window.__rays.failure) : null,
+        isolated: crossOriginIsolated, text: document.body?.innerText ?? '', ready: document.readyState })`);
+      if ((boot.presented && boot.marks > 0) || boot.failure || /WebGPU/i.test(boot.text)) break;
+      await sleep(100);
+    }
     const shotPng = (await chrome2.call('Page.captureScreenshot', { format: 'png' })).result.data;
     boot.screenshotBytes = Buffer.from(shotPng, 'base64').length;
   } finally { chrome2.close(); server.close(); }
@@ -101,8 +108,8 @@ for (const dir of dirs) {
     worst = Math.max(worst, d); sum += d;
   }
   const fraction = over / counted;
-  const ok = fraction <= 0.005 && worst <= 64 && ratios.every(([a, n]) => n > 0 && a / n > 0.5 && a / n < 2) && !r.errors.length && boot.marks > 0 && boot.isolated;
+  const ok = fraction <= 0.005 && worst <= 64 && ratios.every(([a, n]) => n > 0 && a / n > 0.5 && a / n < 2) && !r.errors.length && boot.marks > 0 && boot.presented && !boot.failure && boot.isolated;
   if (!ok) bad++;
-  console.log(`${ok ? 'ok  ' : 'FAIL'} ${dir}: ${r.entries} entries, ${r.gpu} device dispatches, ${over} of ${counted} pixels outside text differ by more than 8 (${(100 * fraction).toFixed(3)}%), worst ${worst}, mean ${(sum / counted).toFixed(4)}; text boxes ${JSON.stringify(ratios.map(([a, n]) => (a / n).toFixed(3)))} (web/native brightness), ink bounding boxes web/native ${JSON.stringify(placed)}; index.html: ${boot.marks} marks, screenshot ${boot.screenshotBytes} bytes${r.errors.length ? '; errors ' + r.errors : ''}`);
+  console.log(`${ok ? 'ok  ' : 'FAIL'} ${dir}: ${r.entries} entries, ${r.gpu} device dispatches, ${over} of ${counted} pixels outside text differ by more than 8 (${(100 * fraction).toFixed(3)}%), worst ${worst}, mean ${(sum / counted).toFixed(4)}; text boxes ${JSON.stringify(ratios.map(([a, n]) => (a / n).toFixed(3)))} (web/native brightness), ink bounding boxes web/native ${JSON.stringify(placed)}; index.html: ${boot.marks} marks, screenshot ${boot.screenshotBytes} bytes${boot.failure ? `; failure ${boot.failure}` : ''}${boot.text ? `; page text ${JSON.stringify(boot.text)}` : ''}${r.errors.length ? '; errors ' + r.errors : ''}`);
 }
 process.exit(bad ? 1 : 0);

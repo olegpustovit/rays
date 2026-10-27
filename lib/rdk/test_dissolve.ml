@@ -262,7 +262,7 @@ let test_parallel () =
   let source = Plane_generators.grid ~grain:127 ~connectivity:Plane_generators.Grid_quads
       ~columns:300 ~rows:220 ~size:20. () |> get_rdk |> add_payload in
   let edges = manifold_edges source in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       Dissolve.run ~grain:257 ~edges ~remove_inline_points:true
         ~collinearity_tolerance:1e-10 source |> get_rdk) in
   let one = run 1 and four = run 4 in

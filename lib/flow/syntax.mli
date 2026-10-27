@@ -29,6 +29,17 @@ and node =
   | Map of t list  (** [{}]: the children alternate key and value *)
   | Quote of quote_kind * t
 
+module Text_lexer : sig
+  type word = Symbol of string | Keyword of string | Number of string
+  type kind = Open of char | Close of char | Prefix of char | Meta of string
+    | Comment of string | Word of word | String of string | End
+  type issue = { start : int; finish : int; code : string; message : string }
+  type token = { kind : kind; start : int; stop : int; issue : issue option }
+  val separator : char -> bool
+  val number : string -> bool
+  val lex : string -> token array
+end
+
 val number : string -> bool
 (** Whether a word is a number literal: [-?digits(.digits)?] with an optional
     exponent ([1e-14], [2.5E+6]), or [NaN], [Infinity], [-Infinity]. *)

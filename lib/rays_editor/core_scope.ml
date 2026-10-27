@@ -1,5 +1,8 @@
+open Core_model
 open Editor_document
-include Core_panes
+open Core_shell
+open Core_panes
+open Core_inspect
 
 (* the plan node of a drawing or image at [path], with its type *)
 let picture_node records path ~probes =
@@ -9,16 +12,15 @@ let picture_node records path ~probes =
 (* Probe inputs use the same exact frame/region compiler as the canvas. Prepared programs
    survive live frames, while values and state remain local to each probe snapshot. *)
 let probe_force () : Flow_graph.Probe.force =
-  (* ponytail: identity lookup is bounded to 64 programs; use an identity map if this scan becomes measurable. *)
-  let programs = ref [] in
+  let programs = Lru.Identity_list.create ~equal:( == ) 64 in
   fun ?state ?elems ?resolve value ~live ->
     let prepared = match value with
       | Flow.Eval.Residual residual ->
-          (match List.find_opt (fun (key, _) -> key == residual) !programs with
-           | Some (_, program) -> program
+          (match Lru.Identity_list.peek programs residual with
+           | Some program -> program
            | None ->
                let program = Flow_ir.Executor.compile value in
-               programs := (residual, program) :: List.filteri (fun i _ -> i < 63) !programs;
+               Lru.Identity_list.add programs residual program;
                program)
       | _ -> Flow_ir.Executor.compile value in
     match prepared with
@@ -30,9 +32,9 @@ let probe_force () : Flow_graph.Probe.force =
    comparing them re-ran every probe of an open graph on each frame of a drag or a scroll
    (measured at about 100 ms a frame on recursive_rectangles).  ponytail: a graph that reads
    frame/tick or frame/dt shows a stale probe while the timeline is paused; its canvas still animates. *)
-let steady_equal (a : Frame_input.t) (b : Frame_input.t) =
-  let steady (f : Frame_input.t) = { f with tick = 0; dt = 0.; keys = []; events = [] } in
-  Frame_input.equal (steady a) (steady b)
+let steady_equal (a : Input.t) (b : Input.t) =
+  let steady (f : Input.t) = { f with tick = 0; dt = 0.; keys = []; events = [] } in
+  Input.equal (steady a) (steady b)
 
 let sync_views value =
   let lowered = snd value.doc.Document.workspace in
@@ -117,7 +119,7 @@ let sync_scope value =
         | Some k when Option.fold ~none:false ~some:(( == ) lowered.evaluated) k.evaluated -> k.evaluated
         | _ -> Some lowered.evaluated in
       let time = if not (Flow.Workspace.Paths.is_empty ws.checked.live)
-        then Some {value.live_frame with Frame_input.t = Timeline.time value.timeline;
+        then Some {value.live_frame with Input.t = Timeline.time value.timeline;
           frame = Int64.to_int (Timeline.frame value.timeline)} else None in
       let now = Unix.gettimeofday () in
       let summaries = value.cook.Cook.summaries in
@@ -151,19 +153,15 @@ let sync_scope value =
           | Some k when Option.is_some arguments ->
               if edits = [] then k.scope else Flow_graph.Projection.with_arguments edits k.scope
           | _ -> Flow_graph.Projection.of_graph ~folded:(fun p -> M.find_opt p ws.layout.collapsed <> Some false) catalog ws.checked name in
-        let wires = match Option.bind value.doc.Document.shell (fun s -> s.Document.wires) with
-          | Some "rect" -> `Rect
-          | Some "straight" -> `Straight
-          | _ -> `Curve in
         let scope_view = if not moved then
-          Pxui_graph.Scope.with_arguments edits value.scope_view |> Pxui_graph.Scope.with_wires wires else begin
+          Pxui_graph.Scope.with_arguments edits value.scope_view else begin
           let layout = ws.layout in
           let display = viewed_path value scope in
           let layouts = match value.doc.Document.shell with
             | Some { switch = Some _; _ } when Option.map (fun (g : Flow.Workspace.graph) -> g.name)
                 (Workspace_doc.editor_graph (fst value.doc.Document.workspace)) = Some name -> List.map fst (layouts value)
             | _ -> [] in
-          Flow.Phase_timer.measure Layout (fun () -> Pxui_graph.Scope.with_scope ~wires ~layouts ~key:name scope value.scope_view
+          Flow.Phase_timer.measure "layout" (fun () -> Pxui_graph.Scope.with_scope ~layouts ~key:name scope value.scope_view
             ~imported:(Workspace_doc.imported_file ws)
             ~at:(fun path -> M.find_opt path layout.at)
             ~level:(fun path -> match M.find_opt path layout.level, M.find_opt path layout.pinned with
@@ -207,8 +205,8 @@ let sync_scope value =
                 | _ -> Some (score, report)) best report.sites) None executions in
           match found with
           | Some (_, report) -> Some Flow_graph.Probe.{
-              tier = (match report.tier with Interp -> "Interp" | Closure -> "Closure" | Cpu_kernel -> "CPU"
-                |Gpu->"GPU"|Gpu_compile->"Gpu_compile"|Gpu_readback->"Readback"|Cooked -> "Cooked");
+              tier = (match report.tier with Interp -> "Interp" | Core -> "Core" | Cpu_kernel -> "CPU"
+                |Gpu->"GPU"|Gpu_compile->"Gpu_compile"|Gpu_readback->"Readback");
               group = fst report.owner;
               seconds = if fst report.owner = path then Some report.seconds else None}
           | None -> None in
@@ -220,7 +218,7 @@ let sync_scope value =
         let reuse = match previous with Some k when not fresh -> k.records | _ -> None in
         let records = if reuse <> None then reuse else Option.map (Flow_graph.Probe.make ~force ~state:value.cook.state ?live:time ~geometry ~resolve ~execution
           ~bulk_calls:(Flow_sop.Lower.field_calls ~state:value.cook.state
-            ~live:(Option.value ~default:(Frame_input.at_time 0.) time) ~resolve lowered)
+            ~live:(Option.value ~default:(Input.at_time 0.) time) ~resolve lowered)
           ~image:(Flow_sop.Lower.image_metadata lowered.plan)
           ~dynamic:(Flow_sop.Lower.zone_count lowered) ~element) evaluated in
         let scope_view = match records with

@@ -7,7 +7,7 @@
     polling. *)
 
 type error =
-  | Cook_error of Diagnostic.error
+  | Cook_error of Diagnostic.t
   | Prepare_error of string
   | Uncaught_exception of string
 

@@ -12,14 +12,14 @@ open Test_text
 
 let cases = "../specification/workspace/cases"
 let factories = Sop_catalog.Editor.factories
-let geometry_bytes = Test_workspace_cook.geometry_bytes
+let geometry_bytes = Test_support.Workspace_cook.geometry_bytes
 
 let lower ?compiled_ids ?sites source =
   match Flow.Syntax.parse source with
-  | Error d -> fail (Flow.Diagnostic.to_string d)
+  | Error d -> fail (Diagnostic.to_string d)
   | Ok forms -> (match Lower.workspace ~extra:Editor_document.Contexts.descriptors ~factories ?compiled_ids ?sites forms with
       | Ok lowered -> lowered
-      | Error d -> fail (Flow.Diagnostic.to_string d))
+      | Error d -> fail (Diagnostic.to_string d))
 
 let case name = read (Filename.concat cases (name ^ ".lisp"))
 
@@ -49,7 +49,7 @@ let player ?(domains = 1) lowered =
 
 let frame p ~time =
   let resolved = match Value_lane.resolve p.lane ~time p.graph.network with
-    | Ok r -> r | Error d -> fail (Flow.Diagnostic.to_string d) in
+    | Ok r -> r | Error d -> fail (Diagnostic.to_string d) in
   let compiled = Edit.compile_all ?previous:p.previous resolved.geometry in
   p.previous <- Some compiled;
   let node = Result.get_ok (Edit.compiled_node compiled ~node_id:p.root) in
@@ -57,7 +57,7 @@ let frame p ~time =
     |> Result.get_ok in
   match Session.cook p.session ~context node with
   | Ok output -> resolved, (Result.get_ok (Sop.Payload.geometry output.payload))
-  | Error e -> fail (Sop.Diagnostic.error_to_string e)
+  | Error e -> fail (Diagnostic.error_to_string e)
 
 let small = {|(workspace w
   (graph g :context sop []
@@ -84,7 +84,7 @@ let run () =
   check (Lower.counts lowered = (3, 1)) "counts: 3 live, 1 cached";
   let lane = Value_lane.create () in
   let resolve time = match Value_lane.resolve lane ~time graph.network with
-    | Ok r -> r | Error d -> fail (Flow.Diagnostic.to_string d) in
+    | Ok r -> r | Error d -> fail (Diagnostic.to_string d) in
   let r2 = resolve 2. in
   check r2.time_dependent "a live network is time dependent";
   check (resolve 2. == r2) "same time reuses the resolution";
@@ -205,9 +205,10 @@ let run () =
     let next, changes = Timeline.seek !timeline ~frame:(Int64.of_int n) in
     timeline := next;
     let update = Cook.update ~live:false !cook ~settings:Rays_editor.Settings.none ~objects
-      ~edit_error:None ~effects:Sop.Parameter.no_effects
+      ~edit_error:None ~effects:Param.no_effects
       ~timeline_changes:changes ~timeline:next
-      ~frame:{ (Test_editor_input.frame (0., 0.) [] 0) with dt = 0. }
+      ~frame:(let frame = Test_editor_input.frame (0., 0.) [] 0 in
+        { frame with input = { frame.input with dt = 0. } })
       ~frame_request:None in
     cook := update.cook;
     check (update.edit_error = None) "editor cook: edit error";

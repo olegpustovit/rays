@@ -14,7 +14,7 @@ type velocity_stretch =
   | Replicate_velocity_only
 
 let error message = Error ("Rdk_gen.Point_replicate.point_replicate: " ^ message)
-let finite3 value = Float.is_finite value.Vec3.x
+let finite3 value = Float.is_finite value.Rays_math.Vec3.x
   && Float.is_finite value.y && Float.is_finite value.z
 let[@inline always] fract value = value -. Float.floor value
 
@@ -62,9 +62,9 @@ let[@inline always] sample_coordinates_into scratch ~quasi ~seed ~identity ~sour
   let key = (identity * 0x1e3779b9) lxor (local * 0x165667b1) in
   match quasi with
   | None ->
-    scratch.(0) <- Rand.float_at seed ~index:(key lxor 0x27d4eb2d);
-    scratch.(1) <- Rand.float_at seed ~index:(key lxor 0x6c8e9cf5);
-    scratch.(2) <- Rand.float_at seed ~index:(key lxor 0x5bd1e995)
+    scratch.(0) <- Rays_math.Rand.float_at seed ~index:(key lxor 0x27d4eb2d);
+    scratch.(1) <- Rays_math.Rand.float_at seed ~index:(key lxor 0x6c8e9cf5);
+    scratch.(2) <- Rays_math.Rand.float_at seed ~index:(key lxor 0x5bd1e995)
   | Some quasi ->
     scratch.(0) <- fract (((float_of_int local +. 0.5)
       /. float_of_int (max 1 count)) +. quasi.offset_u.(source));
@@ -247,25 +247,25 @@ let transform_inherited_attributes ?cancel ~grain ~pattern ~prefix ~source_map
       with Invalid_argument message -> error message
 
 let run ?cancel ?(grain = 16_384) ?points ?(keep_input = false)
-    ?(seed = Rand.seed 0) ?(id_attribute = "id") ?generated_group
+    ?(seed = Rays_math.Rand.seed 0) ?(id_attribute = "id") ?generated_group
     ?(copy_point_attributes = "*") ?(keep_source_attributes = false)
     ?(transform_attributes = "P")
     ?(source_point_attribute = "sourcepoint")
     ?(source_index_attribute = "sourceindex")
-    ?(shape = Replicate_sphere) ?custom_shape ?(center = Vec3.zero)
-    ?(size = Vec3.create 1. 1. 1.) ?(orientation = Vec3.zero)
+    ?(shape = Replicate_sphere) ?custom_shape ?(center = Rays_math.Vec3.zero)
+    ?(size = Rays_math.Vec3.create 1. 1. 1.) ?(orientation = Rays_math.Vec3.zero)
     ?(uniform_scale = 1.) ?(quasi_stratified = false)
     ?(velocity_stretch = Replicate_no_velocity_stretch) ?(velocity_scale = 1.)
     ?(inherit_velocity = 1.) ?(radial_velocity = 0.)
-    ?noise_amplitude ?(noise_frequency = Vec3.create 1. 1. 1.)
-    ?(noise_offset = Vec3.zero) ?(noise_roughness = 0.5)
+    ?noise_amplitude ?(noise_frequency = Rays_math.Vec3.create 1. 1. 1.)
+    ?(noise_offset = Rays_math.Vec3.zero) ?(noise_roughness = 0.5)
     ?(noise_attenuation = 1.) ?(noise_turbulence = 3) ?(noise_seed = 0)
     ~copy_basis ~points_per_point ?scale_attribute geometry =
   if grain <= 0 then invalid_arg "Rdk_gen.Point_replicate.point_replicate: grain must be positive";
   if String.trim id_attribute = "" then error "id attribute name must not be empty"
   else if not (finite3 center && finite3 size && finite3 orientation
       && Float.is_finite uniform_scale && uniform_scale >= 0.
-      && size.Vec3.x >= 0. && size.y >= 0. && size.z >= 0.
+      && size.Rays_math.Vec3.x >= 0. && size.y >= 0. && size.z >= 0.
       && Float.is_finite velocity_scale && Float.is_finite inherit_velocity
       && Float.is_finite radial_velocity && finite3 noise_frequency
       && finite3 noise_offset
@@ -339,11 +339,11 @@ let run ?cancel ?(grain = 16_384) ?points ?(keep_input = false)
       if source land 4095 = 0 then Cancel.check_opt cancel;
       let identity = match ids with None -> source | Some values -> values.(source) in
       let key = identity * 0x9e3779b in
-      offset_u.(source) <- Rand.float_at seed ~index:(key lxor 0x27d4eb2d);
-      offset_v.(source) <- Rand.float_at seed ~index:(key lxor 0x6c8e9cf5);
-      offset_w.(source) <- Rand.float_at seed ~index:(key lxor 0x5bd1e995));
+      offset_u.(source) <- Rays_math.Rand.float_at seed ~index:(key lxor 0x27d4eb2d);
+      offset_v.(source) <- Rays_math.Rand.float_at seed ~index:(key lxor 0x6c8e9cf5);
+      offset_w.(source) <- Rays_math.Rand.float_at seed ~index:(key lxor 0x5bd1e995));
     Some { offset_u; offset_v; offset_w; sequence_v; sequence_w } in
-  let noise = Option.map (fun _ -> Noise.create noise_seed) noise_amplitude in
+  let noise = Option.map (fun _ -> Rays_math.Noise.create noise_seed) noise_amplitude in
   let source_positions = Packed.Float3.Private.view (Geometry.positions geometry)
   and frame_positions = Packed.Float3.Private.view (Geometry.positions frames)
   and generated_positions = Packed.Float3.Private.view (Geometry.positions generated) in
@@ -351,17 +351,17 @@ let run ?cancel ?(grain = 16_384) ?points ?(keep_input = false)
   and z = Array.copy generated_positions.z in
   let shape_points = if shape = Replicate_custom then Some (Array.make total (-1))
     else None in
-  let rx = Mat4.mul (Mat4.rotation_z orientation.z)
-      (Mat4.mul (Mat4.rotation_y orientation.y)
-        (Mat4.rotation_x orientation.x)) in
-  let (l00,l01,l02,_), (l10,l11,l12,_), (l20,l21,l22,_), _ = Mat4.to_rows rx in
+  let rx = Rays_math.Mat4.mul (Rays_math.Mat4.rotation_z orientation.z)
+      (Rays_math.Mat4.mul (Rays_math.Mat4.rotation_y orientation.y)
+        (Rays_math.Mat4.rotation_x orientation.x)) in
+  let (l00,l01,l02,_), (l10,l11,l12,_), (l20,l21,l22,_), _ = Rays_math.Mat4.to_rows rx in
   let range_count = if generated_count = 0 then 0
     else (generated_count + grain - 1) / grain in
   let failures = Array.make range_count (-1) in
   if range_count > 0 then Parallel.for_ ~chunk_size:1 ~start:0
       ~finish:(range_count - 1) (fun range ->
     let scratch = create_sample_scratch () in
-    let noise_scratch = Noise.Private.create_fbm3_scratch () in
+    let noise_scratch = Rays_math.Noise.Private.create_fbm3_scratch () in
     let first = prefix + (range * grain)
     and last = min total (prefix + ((range + 1) * grain)) in
     for output = first to last - 1 do
@@ -387,13 +387,13 @@ let run ?cancel ?(grain = 16_384) ?points ?(keep_input = false)
            let nx = ((rest_x +. qx) *. noise_frequency.x) +. noise_offset.x
            and ny = ((rest_y +. qy) *. noise_frequency.y) +. noise_offset.y
            and nz = ((rest_z +. qz) *. noise_frequency.z) +. noise_offset.z in
-           let sx = (2. *. Noise.Private.fbm3_with_scratch noise_scratch noise
+           let sx = (2. *. Rays_math.Noise.Private.fbm3_with_scratch noise_scratch noise
                ~octaves:noise_turbulence ~lacunarity:2. ~gain:noise_roughness
                ~x:nx ~y:ny ~z:nz) -. 1.
-           and sy = (2. *. Noise.Private.fbm3_with_scratch noise_scratch noise
+           and sy = (2. *. Rays_math.Noise.Private.fbm3_with_scratch noise_scratch noise
                ~octaves:noise_turbulence ~lacunarity:2. ~gain:noise_roughness
                ~x:(nz +. 31.416) ~y:nx ~z:ny) -. 1.
-           and sz = (2. *. Noise.Private.fbm3_with_scratch noise_scratch noise
+           and sz = (2. *. Rays_math.Noise.Private.fbm3_with_scratch noise_scratch noise
                ~octaves:noise_turbulence ~lacunarity:2. ~gain:noise_roughness
                ~x:ny ~y:(nz +. 73.205) ~z:nx) -. 1. in
            let shaped_x = Float.copy_sign

@@ -12,7 +12,7 @@ The pane has four private parts: `Scope_state` owns the immutable view state,
 layout and culling queries; `Scope_commands` maps keys and menus to typed
 requests; `Scope_paint` draws the kit's cards, wires, zones and footers;
 `Scope_pane` builds the frame's boxes and interprets their signals. They share
-one PXUI handle. `Scope_wires` owns geometry, routing and bucket indices.
+one PXUI handle. `Scope_wires` owns geometry, curve sampling and bucket indices.
 
 ## Current contract
 
@@ -31,18 +31,15 @@ with a dot every 24 points and a register cross every 480 by 192.
 Card rule (kit rev 3): a Card is the header plus its wired or written rows, with no `+ N more` row; the footer
 (value, spark, `1 204 pts · 0.003 s` cook time) is drawn on Full only. Geometry is computed once per node at the
 level it was given (`shown`; the zoom never reduces a card to a chip or a point): a point's box is as wide as its name at the zoom's font (re-measured when the font
-changes), a chip is the header, and ports, wire ends, obstacles and hit boxes all read that box. Columns sit on a
-288-point pitch (196 + 92 gap on the 24-point lattice). A wire is one straight segment, or one bend (5-point square,
-72 points before the port) when a card is in the way, round above or below only as a last resort; zone label rows
-and bottom edges are obstacles. The obstacle grid is int-keyed and `crosses` rejects by box first: routing is on the
+changes), a chip is the header, and ports, wire ends and hit boxes all read that box. Columns sit on a
+288-point pitch (196 + 92 gap on the 24-point lattice). Wires are sampled cubic curves, derived from their ports;
+loop-variable wires leave downward along the begin bar. Curve samples and hit boxes are built on the
 `with_scope` hot path (`dune exec test/test_main.exe -- bench_scope_big`).
 
 Rules that hold throughout:
 
-- Wires are straight segments, port to port, 1.5 points in the source port's colour, drawn with `Ui.line`; a wire
-  that would pass under a card is a two-or-more segment polyline bent clear of it (a 5-point square marks each
-  bend, `route` in `scope_wires.ml`). `:wires "rect"` keeps the old orthogonal routing. No curves; bends are
-  computed, never authored or saved.
+- Wires are sampled cubic curves, port to port, 1.5 points in the source port's colour. They leave and enter level;
+  loop-variable wires leave downward along the begin bar. They are derived from the graph and never authored or saved.
 - New interactions return new `change` cases; the host (`Rays_editor.Core`, through `Doc.syntax_edit` and
   `Doc.layout_edit`) is the only reducer, and each gesture is one history entry (`flow.md` §4.3).
 - Layout (positions, levels, pins, collapsed zones, frames) is document data the host stores
@@ -191,4 +188,4 @@ that one model.
 
 ## G3 gestures
 
-Wire dropped on empty canvas: `Selected [source]` then `Menu_requested`; the host opens the add menu after that node. A wire pulled past 6 points is the same drag (`finish_wire`) and stays `selected_wire`; the host inserts the picked node on it. `Scope_wires.bundle` joins a source's 3+ wires in a trunk and junction. `Alt Up/Down` off a list item is `Move_binding`; `Shift-M`, `Shift-L`, `Alt-Shift-I` are `Wrap` Map / Filter and `Inline_defn`. `[` `]` with nothing selected step every zone. Alt held when a wire or an out-port is pressed lifts it (`wiring.lift`): `finish_wire` connects the drop row and takes the lifted rows off (`unwire_at`), or only takes them off on empty canvas. A double click on a collapsed zone opens it (`Zone_collapsed`) instead of `Activated`. `Alt Up/Down` on a selected nested node (a chain step) is `Move_step`. A zone's own variable wire (`Scope_wires.route ~inside`) stays in the frame and runs below the rail row.
+Wire dropped on empty canvas: `Selected [source]` then `Menu_requested`; the host opens the add menu after that node. A wire pulled past 6 points is the same drag (`finish_wire`) and stays `selected_wire`; the host inserts the picked node on it. `Alt Up/Down` off a list item is `Move_binding`; `Shift-M`, `Shift-L`, `Alt-Shift-I` are `Wrap` Map / Filter and `Inline_defn`. `[` `]` with nothing selected step every zone. Alt held when a wire or an out-port is pressed lifts it (`wiring.lift`): `finish_wire` connects the drop row and takes the lifted rows off (`unwire_at`), or only takes them off on empty canvas. A double click on a collapsed zone opens it (`Zone_collapsed`) instead of `Activated`. `Alt Up/Down` on a selected nested node (a chain step) is `Move_step`.

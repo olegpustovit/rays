@@ -34,8 +34,7 @@ let run () =
         ~flags:[Window.Hidden; Window.High_pixel_density; Window.Metal] ()) in
     let logical_width, logical_height = get (Window.size window) in
     let pixel_width, pixel_height = get (Window.size_in_pixels window) in
-    let facts = get (Window.presentation_facts window ~vsync:true) in
-    let density = facts.pixel_density in
+    let density = get (Window.pixel_density window) in
     if abs_float ((float_of_int pixel_width /. float_of_int logical_width)
         -. density) > 0.01
         || abs_float ((float_of_int pixel_height /. float_of_int logical_height)
@@ -52,12 +51,7 @@ let run () =
         || abs_float ((float_of_int resized_pixel_height /. 60.) -. density)
           > 0.01 then
       fail "native resize double-scaled logical dimensions";
-    let facts = get (Window.presentation_facts window ~vsync:true) in
-    if facts.logical_width <> 80 || facts.logical_height <> 60
-        || facts.drawable_width <> resized_pixel_width
-        || facts.drawable_height <> resized_pixel_height
-        || facts.refresh_rate = None || not facts.vsync then
-      fail "native presentation facts are incomplete";
+    if density <= 0. then fail "native window pixel density is invalid";
     get (Window.set_resizable window false);
     get (Window.set_resizable window true);
     get (Window.center window);
@@ -91,7 +85,9 @@ let run () =
     get (Window.sync window);
     await_hidden ~label:"hide" true;
     let view = get (Metal_view.create window) in
-    ignore (get (Metal_view.layer view));
+    let token = get (Metal_view.layer view) in
+    if not (Native_layer_token.alive token) || get (Metal_view.layer view) != token then
+      fail "presentation token was not live and stable";
     (match Domain.spawn (fun () -> Metal_view.layer view) |> Domain.join with
      | Error { kind = Wrong_domain; _ } -> ()
      | Ok _ | Error _ -> fail "wrong-domain Metal view access was not rejected");
@@ -100,6 +96,8 @@ let run () =
      | Ok () | Error _ -> fail "parent teardown ignored a live Metal view");
     get (Metal_view.destroy view);
     get (Metal_view.destroy view);
+    if Native_layer_token.alive token then
+      fail "destroyed Metal view left a live presentation token";
     (match Metal_view.layer view with
      | Error { kind = Destroyed; _ } -> ()
      | Ok _ | Error _ -> fail "destroyed Metal view remained usable");

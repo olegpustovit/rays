@@ -1,5 +1,8 @@
+open Core_model
 open Editor_document
-include Core_list
+open Core_shell
+open Core_panes
+open Core_list
 
 (* ---- creation ---- *)
 
@@ -7,12 +10,12 @@ include Core_list
    beside the sketch's own scene objects ([seed_scene]). [opened] is the caller's
    [Contexts.of_workspace ~factories workspace], when it already built it to read the window
    and the camera (Workspace.run): the workspace is evaluated once a start. *)
-let workspace_doc ?opened ~factories ~seed_scene workspace =
+let workspace_doc ?gpu ?opened ~factories ~seed_scene workspace =
   let ( let* ) = Result.bind in
-  let flow r = Result.map_error Flow.Diagnostic.to_string r in
+  let flow r = Result.map_error Diagnostic.to_string r in
   let* doc = match opened with
     | Some doc -> Ok doc
-    | None -> flow (Editor_document.Contexts.of_workspace ~factories workspace) in
+    | None -> flow (Editor_document.Contexts.of_workspace ~factories ?gpu workspace) in
   let declared = doc.scene.graph.geometry in
   (* the host's camera and lights are defaults of a workspace with no scene graph; a scene
      graph is authoritative (it may say there are none) *)
@@ -45,7 +48,7 @@ let browse value query =
     | _ | exception Unix.Unix_error _ -> None in
   Some (Browsing { query; presets = Preset.list ~directory:value.presets; last_state })
 
-let create ?settings ?(keymap = Leader.keymap)
+let create ?gpu ?settings
     ?(seed_scene = fun _ scene -> scene)
     ?(name = "sketch") ?presets ?(state_key = name) ?(factories = [])
     ?(seed = 0L) ?(grain = 16_384)
@@ -54,7 +57,8 @@ let create ?settings ?(keymap = Leader.keymap)
     ?opened ~workspace ~prepare () =
   let factories = if factories = [] then Sop_catalog.Editor.factories else factories in
   let settings = Option.value settings ~default:workspace.Workspace_doc.settings in
-  let opened = workspace_doc ?opened ~factories ~seed_scene:(seed_scene factories)
+  let gpu = Option.value ~default:Flow_ir.Gpu.default gpu in
+  let opened = workspace_doc ~gpu ?opened ~factories ~seed_scene:(seed_scene factories)
       { workspace with Workspace_doc.settings } in
   Result.bind opened (fun doc ->
   Result.map (fun cook ->
@@ -72,7 +76,7 @@ let create ?settings ?(keymap = Leader.keymap)
         | Error _ -> true in
       let state_name = Contexts.sha256 state_key in
       let value = { preferences; guide; hud = None; presets; state_name; name; prompt = None; notice = None; notice_at = 0.;
-        doc; filed = doc; level;
+        doc; gpu; filed = doc; level;
         projections = Level_map.empty; text = Text_pane.initial; map_view = false;
         rows = []; live_cook = true;
         factories;
@@ -85,12 +89,12 @@ let create ?settings ?(keymap = Leader.keymap)
         lisp_vocab = vocabulary factories doc;
         tree = Pxui_shell.Tree.create (); outline = Navigator.initial; held_keys = []; sketch_blocked = []; window_focus = 2;
         ui = (let ui = Pxui.Ui.create () in Pxui.Ui.set_font_size ui (default_text_size ()); ui); workspace;
-        timeline = Timeline.create (); live_frame = Frame_input.at_time 0.; cook;
+        timeline = Timeline.create (); live_frame = Input.at_time 0.; cook;
         edit_error = None; status_fps = None;
         status_fps_at = Float.neg_infinity; last_dt = 0.; steady = 0;
         history = Editor_core.History.create doc;
         focus = Editor_core.Panels.main; focus_path = None; pane_keys = []; leader = Leader.Idle;
-        keymap; timeline_frames = 240; queued = [];
+        timeline_frames = 240; queued = [];
         graph_at = None; graph_pane = None; graph_panes = [];
         list_at = None; text_at = None; outline_at = None; locals = [];
         started = { on = None; views = []; tabs = [] };

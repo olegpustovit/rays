@@ -6,9 +6,9 @@ description: Run a rays example or sketch for a bounded number of frames and cap
 1. `eval "$(opam env --switch=. --set-switch)"`.
 2. One program: `RAYS_MAX_FRAMES=30 dune exec rays -- sketches/<name>.rays`.
    `Sketch` stops after that many frames.
-3. Screenshot: most programs save on `s`; otherwise add a temporary
-   `~after_present` that calls `Canvas.save_screen_png` into the scratch
-   directory, never the repo root.
-4. Everything: `dune build @smoke` runs every example and sketch at 30
-   frames. Any `Fatal error` line names the failing program in the `dune`
-   rule just above it.
+3. Window-free editor screenshot: `dune build tools/ui_shot.exe`, then
+   `_build/default/tools/ui_shot.exe sketches/<name>.rays /tmp/rays-shot.png`.
+4. Build `tools/check.exe` once, then time
+   `_build/default/tools/check.exe @smoke` for the basic and SOP gallery windows.
+   `@smoke-all` opens every sketch sequentially for 30 frames. Preserve the
+   full output so a failure can be attributed to its program.

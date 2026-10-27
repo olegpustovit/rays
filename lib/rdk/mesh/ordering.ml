@@ -4,8 +4,8 @@ type owner = Points | Primitives
 
 type key =
   | X | Y | Z
-  | Distance_to of Vec3.t
-  | Along_vector of Vec3.t
+  | Distance_to of Rays_math.Vec3.t
+  | Along_vector of Rays_math.Vec3.t
   | Attribute_component of { name : string; component : int }
   | By_vertex_order
   | By_primitive_index
@@ -148,7 +148,7 @@ let primitive_centers ?cancel ~grain geometry =
         z.(primitive) <- !sz *. scale);
   x, y, z
 
-let finite_vec3 value = Float.is_finite value.Vec3.x
+let finite_vec3 value = Float.is_finite value.Rays_math.Vec3.x
   && Float.is_finite value.y && Float.is_finite value.z
 
 let point_vertex_order ?cancel geometry =
@@ -235,13 +235,13 @@ let component_values ?cancel ~grain owner key geometry =
       if not (finite_vec3 point) then fail "sort reference point must be finite";
       let x, y, z = coordinates () in
       `Float (Array.init (Array.length x) (fun index ->
-        let dx = x.(index) -. point.Vec3.x and dy = y.(index) -. point.y
+        let dx = x.(index) -. point.Rays_math.Vec3.x and dy = y.(index) -. point.y
         and dz = z.(index) -. point.z in
         (dx *. dx) +. (dy *. dy) +. (dz *. dz)))
   | Along_vector vector ->
-      if not (finite_vec3 vector) || Vec3.length_sq vector <= 1e-30 then
+      if not (finite_vec3 vector) || Rays_math.Vec3.length_sq vector <= 1e-30 then
         fail "sort vector must be finite and non-zero";
-      let vector = Vec3.normalize vector in
+      let vector = Rays_math.Vec3.normalize vector in
       let x, y, z = coordinates () in
       `Float (Array.init (Array.length x) (fun index -> (x.(index) *. vector.x)
         +. (y.(index) *. vector.y) +. (z.(index) *. vector.z)))
@@ -320,10 +320,10 @@ let install_order target source =
   Array.blit source 0 target 0 (Array.length source)
 
 let randomize_in_place ?cancel seed values =
-  let random = Rand.seed64 seed in
+  let random = Rays_math.Rand.seed64 seed in
   for index = Array.length values - 1 downto 1 do
     if index land 4095 = 0 then Cancel.check_opt cancel;
-    let unit = Rand.float_at random ~index:(index lxor 0x6c8e9cf5) in
+    let unit = Rays_math.Rand.float_at random ~index:(index lxor 0x6c8e9cf5) in
     let other = int_of_float (unit *. float_of_int (index + 1)) in
     let value = values.(index) in
     values.(index) <- values.(other);

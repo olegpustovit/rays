@@ -293,9 +293,9 @@ let delete_overlaps_general ?cancel ~grain ~delete_pairs geometry =
           end;
           hashes.(primitive) <- 17 lxor size;
           for offset = 0 to size - 1 do
-            hashes.(primitive) <- ((hashes.(primitive) * 65_599) lxor
-              clean_cycle_point topology first size starts.(primitive)
-                directions.(primitive) offset) land max_int
+            hashes.(primitive) <- (Hash.mix hashes.(primitive)
+              (clean_cycle_point topology first size starts.(primitive)
+                 directions.(primitive) offset)) land max_int
           done;
           sizes.(primitive) <- size;
         end);
@@ -377,8 +377,8 @@ let delete_triangle_overlaps ?cancel ~grain ~delete_pairs geometry =
         first_points.(primitive) <- a;
         second_points.(primitive) <- b;
         third_points.(primitive) <- c;
-        hashes.(primitive) <- (((((17 lxor 3) * 65_599) lxor a) * 65_599
-          lxor b) * 65_599 lxor c) land max_int);
+        hashes.(primitive) <- Hash.mix (Hash.mix (Hash.mix (17 lxor 3) a) b) c
+          land max_int);
     let capacity = ref 8 in
     while !capacity < primitive_count * 2 do capacity := !capacity lsl 1 done;
     let table = Array.make !capacity (-1) and mask = !capacity - 1

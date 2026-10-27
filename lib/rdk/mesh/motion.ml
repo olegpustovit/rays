@@ -7,7 +7,7 @@ type velocity_approximation = Backward_difference | Central_difference | Forward
 type velocity_initialization =
   | Compute_from_deformation
   | Keep_incoming
-  | Set_value of Vec3.t
+  | Set_value of Rays_math.Vec3.t
   | From_attribute of { name : string; scale : float }
 type velocity_unmatched = Velocity_unmatched_error | Velocity_unmatched_zero
 
@@ -272,7 +272,7 @@ let point_velocity_raw ?cancel ~grain ?points ?previous ?next ~approximation ~dt
   (match initialization with
    | Set_value value ->
        check_finite3 "Rdk.Motion.point_velocity set value"
-         value.Vec3.x value.y value.z
+         value.Rays_math.Vec3.x value.y value.z
    | From_attribute { name; scale } ->
        if not (valid_name name) then
          invalid_arg "Rdk.Motion.point_velocity: empty source attribute";
@@ -280,7 +280,7 @@ let point_velocity_raw ?cancel ~grain ?points ?previous ?next ~approximation ~dt
          invalid_arg "Rdk.Motion.point_velocity: non-finite attribute scale"
    | Compute_from_deformation | Keep_incoming -> ());
   check_finite3 "Rdk.Motion.point_velocity add_velocity"
-    add_velocity.Vec3.x add_velocity.y add_velocity.z;
+    add_velocity.Rays_math.Vec3.x add_velocity.y add_velocity.z;
   Cancel.check_opt cancel;
   let count = Geometry.point_count geometry in
   Result.bind (check_point_group count points) (fun () ->
@@ -289,7 +289,7 @@ let point_velocity_raw ?cancel ~grain ?points ?previous ?next ~approximation ~dt
         Result.bind (if compute_acceleration then
             point_float3 "point_velocity" acceleration_attribute geometry
           else Ok None) (fun existing_acceleration ->
-          let zero_add = add_velocity.Vec3.x = 0. && add_velocity.y = 0.
+          let zero_add = add_velocity.Rays_math.Vec3.x = 0. && add_velocity.y = 0.
               && add_velocity.z = 0. in
           let fast_path = match initialization with
             | Keep_incoming when zero_add && not compute_acceleration ->
@@ -332,7 +332,7 @@ let point_velocity_raw ?cancel ~grain ?points ?previous ?next ~approximation ~dt
               if selected points point then begin
                 let vx, vy, vz = match initialization, source with
                   | Keep_incoming, _ -> x.(point), y.(point), z.(point)
-                  | Set_value value, _ -> value.Vec3.x, value.y, value.z
+                  | Set_value value, _ -> value.Rays_math.Vec3.x, value.y, value.z
                   | From_attribute { scale; _ }, Some source ->
                       source.x.(point) *. scale, source.y.(point) *. scale,
                       source.z.(point) *. scale
@@ -484,7 +484,7 @@ let point_velocity ?cancel ?(grain = 16_384) ?points ?previous ?next
     ?(approximation = Backward_difference) ?(dt = 1. /. 60.)
     ?(initialization = Compute_from_deformation) ?match_attribute
     ?(unmatched = Velocity_unmatched_error) ?(velocity_attribute = "v")
-    ?(add_velocity = Vec3.zero) ?(compute_acceleration = false)
+    ?(add_velocity = Rays_math.Vec3.zero) ?(compute_acceleration = false)
     ?(acceleration_attribute = "accel") geometry =
   try point_velocity_raw ?cancel ~grain ?points ?previous ?next ~approximation
       ~dt ~initialization ?match_attribute ~unmatched ~velocity_attribute

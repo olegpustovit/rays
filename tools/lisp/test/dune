@@ -1,19 +1,15 @@
 (cram
  (deps %{bin:rays}
   %{exe:../../core_census.exe}
-  %{exe:../../core_fixtures.exe}
+  %{exe:../../prims_fixtures.exe}
   %{exe:../../shape2_fixtures.exe}
   ../../web/test/shape2.mjs
-  ../../web/runtime/shape2.js
   ../../web/test/prims.mjs
   ../../web/test/rt_shim.mjs
   ../../web/test/resident.mjs
-  ../../web/runtime/prims.js
-  (glob_files ../../web/runtime/*.js)
+  (glob_files ../../../lib/web_export/runtime/*.js)
   ../../web/test/runtime.mjs
   ../../web/test/workers.mjs
-  ../../web/runtime/runtime.js
-  ../../web/runtime/workers.js
   (glob_files ../../../lib/flow_web/goldens/*.js)
   ../../../specification/core.md
   (glob_files_rec ../../../sketches/*.rays)

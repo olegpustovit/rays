@@ -16,9 +16,9 @@ let () =
   List.iter (fun path ->
     begin
       let text = In_channel.with_open_bin path In_channel.input_all in
-      let forms = match Flow.Syntax.parse text with Ok f -> f | Error d -> fail (path ^ ": " ^ Flow.Diagnostic.to_string d) in
+      let forms = match Flow.Syntax.parse text with Ok f -> f | Error d -> fail (path ^ ": " ^ Diagnostic.to_string d) in
       let printed, _ = Flow.Lisp.print forms in
-      let again = match Flow.Syntax.parse printed with Ok f -> f | Error d -> fail (path ^ " reprint: " ^ Flow.Diagnostic.to_string d) in
+      let again = match Flow.Syntax.parse printed with Ok f -> f | Error d -> fail (path ^ " reprint: " ^ Diagnostic.to_string d) in
       if List.map Flow.Lisp.flat forms <> List.map Flow.Lisp.flat again then fail (path ^ ": the print reads differently");
       if fst (Flow.Lisp.print again) <> printed then fail (path ^ ": the print is not stable");
       let n = String.length printed in

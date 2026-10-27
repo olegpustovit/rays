@@ -330,7 +330,7 @@ CAMLprim value caml_sdl3_test_dialog_finish_huge(value id)
 }
 
 /* A phased trackpad scroll as AppKit delivers one, posted to this process's own queue: the
-   native test checks that the NSEvent monitor of sdl3_cocoa.c turns it into Sdl3.Event.Scroll.
+   native test checks that the NSEvent monitor of sdl3_platform_macos.c turns it into Sdl3.Event.Scroll.
    [phase] is a CGScrollPhase (1 began, 2 changed, 4 ended). */
 #ifdef __APPLE__
 #include <ApplicationServices/ApplicationServices.h>

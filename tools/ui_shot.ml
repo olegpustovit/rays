@@ -9,12 +9,9 @@ let width = arg 3 1440 and height = arg 4 900 and frames = arg 5 8
 let scale = Option.value ~default:1 (Option.bind (Sys.getenv_opt "UI_SHOT_SCALE") int_of_string_opt)
 
 let frame count : Rays.Frame.t = {
-  width; height; size = width, height;
-
-   pixel_scale = float scale, float scale;
-  time = float_of_int count /. 60.; dt = 1. /. 60.; fps = 60.; count;
-  mouse = -100., -100.; mouse_delta = 0., 0.; keys = [];
-  mouse_buttons = []; events = [];
+  input = { (Input.at_time (float_of_int count /. 60.)) with dt = 1. /. 60.;
+    frame = count; tick = count; size = width, height; pointer = -100., -100. };
+  pixel_scale = float scale, float scale; fps = 60.; mouse_delta = 0., 0.;
 }
 
 let () =
@@ -23,11 +20,19 @@ let () =
   let workspace = match Result.bind (Rays_editor.Source.read_imports ~file:Sys.argv.(1) text)
       (fun imports -> Rays_editor.Workspace.load ~imports text) with
     | Ok workspace -> workspace
-    | Error diagnostics -> failwith (String.concat "\n" (List.map Flow.Diagnostic.to_string diagnostics)) in
+    | Error diagnostics -> failwith (String.concat "\n" (List.map Diagnostic.to_string diagnostics)) in
   let canvas = Rays.Canvas.create_exn ~width:(width * scale) ~height:(height * scale) in
   let editor = E.create ~workspace ~await:true ~presets:(Filename.temp_dir "ui-shot" "")
       (* as rays prepares (Workspace.run): instances, pieces and materials *)
-      ~prepare:(fun _ -> Rays_editor.Surface.of_output) ~scene3:Rays_editor.Surface.scene3 () |> Result.get_ok in
+      ~prepare:(fun _ (output : Sop.Session.output) ->
+        let ( let* ) = Result.bind in
+        let* geometry = Sop.Payload.geometry output.payload
+          |> Result.map_error Diagnostic.error_to_string in
+        Rdk_rays.Surface.of_geometry ?instances:output.instances geometry)
+      ~draw:(fun node surface ->
+        let explosion = Rdk_rays.Packed_pieces.explosion
+            ~operation:(Sop.Node.operation node) ~fields:(Sop.Node.parameter_fields node) in
+        Rdk_rays.Surface.scene3 ?explosion surface) () |> Result.get_ok in
   let editor = ref editor in
   for count = 0 to frames - 1 do editor := E.update !editor (frame count) done;
   (* UI_SHOT_DO is a script run after the settle frames, one step a frame, in order:
@@ -45,11 +50,13 @@ let () =
        release:X,Y     let the held button go there (the end of a hold)
      e.g. UI_SHOT_DO="key:space key:[ key:1 click:490,95" *)
   let key = function
-    | "space" -> Rays.Input.Space | "tab" -> Tab | "enter" -> Enter | "esc" -> Escape
+    | "space" -> Input.Space | "tab" -> Tab | "enter" -> Enter | "esc" -> Escape
     | name -> KeyChar name.[0] in
   let count = ref frames and mouse = ref (-100., -100.) and buttons = ref [] in
   let step ?(keys = []) events =
-    editor := E.update !editor { (frame !count) with mouse = !mouse; mouse_buttons = !buttons; events; keys };
+    let frame = frame !count in
+    editor := E.update !editor { frame with input = { frame.input with pointer = !mouse;
+      buttons = !buttons; events; keys } };
     incr count in
   let point text = Scanf.sscanf text "%f,%f" (fun x y -> x, y) in
   List.iter (fun word -> match String.index_opt word ':' with
@@ -64,43 +71,45 @@ let () =
              let parts = String.split_on_char '+' argument in
              let name = List.nth parts (List.length parts - 1) in
              let modifier = function
-               | "shift" -> Some Rays.Input.Shift | "ctrl" -> Some Rays.Input.Ctrl
-               | "alt" -> Some Rays.Input.Alt | "meta" -> Some Rays.Input.Meta | _ -> None in
+               | "shift" -> Some Input.Shift | "ctrl" -> Some Input.Ctrl
+               | "alt" -> Some Input.Alt | "meta" -> Some Input.Meta | _ -> None in
              let keys = List.filter_map modifier (List.filteri (fun i _ -> i < List.length parts - 1) parts) in
-             step ~keys [ Rays.Event.KeyPressed (key name) ]
-         | "type" -> step [ Rays.Event.TextInput (String.map (fun c -> if c = '_' then ' ' else c) argument) ]
+             step ~keys [ Input.Key_pressed (key name) ]
+         | "type" -> step [ Input.Text_input (String.map (fun c -> if c = '_' then ' ' else c) argument) ]
          | "rclick" ->
              mouse := point argument;
-             step [ Rays.Event.MouseMoved !mouse ];
-             step [ Rays.Event.MousePressed (Rays.Input.RightButton, !mouse) ];
-             step [ Rays.Event.MouseReleased (Rays.Input.RightButton, !mouse) ]
+             step [ Input.Pointer_moved !mouse ];
+             step [ Input.Pointer_pressed (Input.RightButton, !mouse) ];
+             step [ Input.Pointer_released (Input.RightButton, !mouse) ]
          | "click" ->
              mouse := point argument;
-             step [ Rays.Event.MouseMoved !mouse ];
-             step [ Rays.Event.MousePressed (Rays.Input.LeftButton, !mouse); Rays.Event.MouseReleased (Rays.Input.LeftButton, !mouse) ]
-         | "move" -> mouse := point argument; step [ Rays.Event.MouseMoved !mouse ]
+             step [ Input.Pointer_moved !mouse ];
+             step [ Input.Pointer_pressed (Input.LeftButton, !mouse); Input.Pointer_released (Input.LeftButton, !mouse) ]
+         | "move" -> mouse := point argument; step [ Input.Pointer_moved !mouse ]
          | "pinch" ->
              let (x, y), factor = Scanf.sscanf argument "%f,%f,%f" (fun x y f -> (x, y), f) in
-             mouse := (x, y); step [ Rays.Event.MouseMoved !mouse ];
-             step [ Rays.Event.MousePinched factor ]
+             mouse := (x, y); step [ Input.Pointer_moved !mouse ];
+             step [ Input.Pinched factor ]
          | "scroll" ->
              let (x, y), dy = Scanf.sscanf argument "%f,%f,%f" (fun x y d -> (x, y), d) in
-             mouse := (x, y); step [ Rays.Event.MouseMoved !mouse; Rays.Event.MouseScrolled (0., dy) ]
+             mouse := (x, y); step [ Input.Pointer_moved !mouse; Input.Scrolled (0., dy) ]
          | "hold" ->
              let from, to_ = Scanf.sscanf argument "%f,%f,%f,%f" (fun a b c d -> (a, b), (c, d)) in
-             mouse := from; step [ Rays.Event.MouseMoved from ];
-             buttons := [ Rays.Input.LeftButton ];
-             step [ Rays.Event.MousePressed (Rays.Input.LeftButton, from) ];
+             mouse := from; step [ Input.Pointer_moved from ];
+             buttons := [ Input.LeftButton ];
+             step [ Input.Pointer_pressed (Input.LeftButton, from) ];
              mouse := to_;
-             for _ = 1 to 4 do step [ Rays.Event.MouseMoved to_ ] done
+             for _ = 1 to 4 do step [ Input.Pointer_moved to_ ] done
          | "release" ->
              mouse := point argument; buttons := [];
-             step [ Rays.Event.MouseReleased (Rays.Input.LeftButton, !mouse) ]
+             step [ Input.Pointer_released (Input.LeftButton, !mouse) ]
          | other -> failwith ("ui_shot: unknown step " ^ other)))
     (String.split_on_char ' ' (Option.value ~default:"" (Sys.getenv_opt "UI_SHOT_DO")));
   (* let hover delays and cooks settle; a held button stays down *)
   for _ = 1 to 30 do step [] done;
-  let scene = E.scene !editor { (frame !count) with mouse = !mouse; mouse_buttons = !buttons } in
-  Rays.Canvas.render ~density:scale canvas scene;
+  let frame = frame !count in
+  let scene = E.scene !editor { frame with input = { frame.input with pointer = !mouse; buttons = !buttons } } in
+  (match Rays.Canvas.render ~density:scale canvas scene with
+   | Ok () -> () | Error message -> failwith message);
   (match Rays.Canvas.save_png canvas Sys.argv.(2) with Ok () -> () | Error message -> failwith message);
-  E.close !editor; Rays.Canvas.destroy canvas
+  E.close !editor; ignore(Rays.Canvas.destroy canvas)

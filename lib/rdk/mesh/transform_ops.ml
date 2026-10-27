@@ -43,7 +43,7 @@ let normalized_direction ?(grain = 16_384) matrix values =
   let count = Array.length source.x in
   let x = Array.make count 0. and y = Array.make count 0. and z = Array.make count 0. in
   let (m00,m01,m02,_), (m10,m11,m12,_), (m20,m21,m22,_), _ =
-    Mat4.to_rows matrix in
+    Rays_math.Mat4.to_rows matrix in
   if count > 0 then Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(count - 1)
       (fun index ->
         let vx = source.x.(index) and vy = source.y.(index)
@@ -60,38 +60,38 @@ let normalized_direction ?(grain = 16_384) matrix values =
   Packed.Float3.Private.of_owned_exn ~x ~y ~z
 
 let transform_rotation_matrix order angles =
-  let x = Mat4.rotation_x angles.Vec3.x
-  and y = Mat4.rotation_y angles.y
-  and z = Mat4.rotation_z angles.z in
+  let x = Rays_math.Mat4.rotation_x angles.Rays_math.Vec3.x
+  and y = Rays_math.Mat4.rotation_y angles.y
+  and z = Rays_math.Mat4.rotation_z angles.z in
   let first, second, third = match order with
     | Transform_xyz -> x, y, z | Transform_xzy -> x, z, y
     | Transform_yxz -> y, x, z | Transform_yzx -> y, z, x
     | Transform_zxy -> z, x, y | Transform_zyx -> z, y, x in
-  Mat4.mul third (Mat4.mul second first)
+  Rays_math.Mat4.mul third (Rays_math.Mat4.mul second first)
 
 let compose_transform_raw ?(order = Transform_srt)
-    ?(rotation_order = Transform_xyz) ?(translate = Vec3.zero)
-    ?(rotate = Vec3.zero) ?(scale = Vec3.create 1. 1. 1.) ?(shear = Vec3.zero)
-    ?(uniform_scale = 1.) ?(pivot = Vec3.zero)
-    ?(pivot_rotation = Vec3.zero) ?(invert = false) () =
+    ?(rotation_order = Transform_xyz) ?(translate = Rays_math.Vec3.zero)
+    ?(rotate = Rays_math.Vec3.zero) ?(scale = Rays_math.Vec3.create 1. 1. 1.) ?(shear = Rays_math.Vec3.zero)
+    ?(uniform_scale = 1.) ?(pivot = Rays_math.Vec3.zero)
+    ?(pivot_rotation = Rays_math.Vec3.zero) ?(invert = false) () =
   let vectors = ["translate", translate; "rotate", rotate; "scale", scale;
     "shear", shear; "pivot", pivot; "pivot_rotation", pivot_rotation] in
-  match List.find_opt (fun (_, value) -> not (Float.is_finite value.Vec3.x
+  match List.find_opt (fun (_, value) -> not (Float.is_finite value.Rays_math.Vec3.x
       && Float.is_finite value.y && Float.is_finite value.z)) vectors with
   | Some (name, _) -> Error ("Rdk.Transform_ops.compose_transform: non-finite " ^ name)
   | None when not (Float.is_finite uniform_scale) ->
       Error "Rdk.Transform_ops.compose_transform: non-finite uniform scale"
   | None ->
-      let scale = Vec3.scale scale uniform_scale in
-      let scale_shear = Mat4.mul
-          (Mat4.of_rows
+      let scale = Rays_math.Vec3.scale scale uniform_scale in
+      let scale_shear = Rays_math.Mat4.mul
+          (Rays_math.Mat4.of_rows
             (1., shear.x, shear.y, 0.)
             (0., 1., shear.z, 0.)
             (0., 0., 1., 0.)
             (0., 0., 0., 1.))
-          (Mat4.scaling scale)
+          (Rays_math.Mat4.scaling scale)
       and rotation = transform_rotation_matrix rotation_order rotate
-      and translation = Mat4.translation translate in
+      and translation = Rays_math.Mat4.translation translate in
       let first, second, third = match order with
         | Transform_srt -> scale_shear, rotation, translation
         | Transform_str -> scale_shear, translation, rotation
@@ -99,21 +99,21 @@ let compose_transform_raw ?(order = Transform_srt)
         | Transform_rts -> rotation, translation, scale_shear
         | Transform_tsr -> translation, scale_shear, rotation
         | Transform_trs -> translation, rotation, scale_shear in
-      let core = Mat4.mul third (Mat4.mul second first) in
+      let core = Rays_math.Mat4.mul third (Rays_math.Mat4.mul second first) in
       let pivot_rotation = transform_rotation_matrix rotation_order pivot_rotation in
-      let pivot_inverse = Mat4.transpose pivot_rotation in
-      let matrix = Mat4.mul (Mat4.translation pivot)
-          (Mat4.mul pivot_rotation
-            (Mat4.mul core
-              (Mat4.mul pivot_inverse
-                (Mat4.translation (Vec3.scale pivot (-1.)))))) in
+      let pivot_inverse = Rays_math.Mat4.transpose pivot_rotation in
+      let matrix = Rays_math.Mat4.mul (Rays_math.Mat4.translation pivot)
+          (Rays_math.Mat4.mul pivot_rotation
+            (Rays_math.Mat4.mul core
+              (Rays_math.Mat4.mul pivot_inverse
+                (Rays_math.Mat4.translation (Rays_math.Vec3.scale pivot (-1.)))))) in
       if not invert then Ok matrix
-      else match Mat4.inverse matrix with
+      else match Rays_math.Mat4.inverse matrix with
         | Some inverse -> Ok inverse
         | None -> Error "Rdk.Transform_ops.compose_transform: cannot invert a singular transform"
 
 let transform_matrix_finite matrix =
-  let rows = Mat4.to_rows matrix in
+  let rows = Rays_math.Mat4.to_rows matrix in
   let finite_row (x, y, z, w) = Float.is_finite x && Float.is_finite y
       && Float.is_finite z && Float.is_finite w in
   let a, b, c, d = rows in
@@ -125,7 +125,7 @@ let transform_selected_positions ?cancel ~grain matrix selected geometry =
   let x = Array.copy source.x and y = Array.copy source.y
   and z = Array.copy source.z in
   let (m00,m01,m02,m03), (m10,m11,m12,m13),
-      (m20,m21,m22,m23), (m30,m31,m32,m33) = Mat4.to_rows matrix in
+      (m20,m21,m22,m23), (m30,m31,m32,m33) = Rays_math.Mat4.to_rows matrix in
   if count > 0 then Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(count - 1)
       (fun point ->
         if point land 4095 = 0 then Cancel.check_opt cancel;
@@ -159,7 +159,7 @@ let transform_selected_normals ?cancel ~grain ~preserve_length matrix selected
            let x = Array.copy source.x and y = Array.copy source.y
            and z = Array.copy source.z in
            let (m00,m01,m02,_), (m10,m11,m12,_), (m20,m21,m22,_), _ =
-             Mat4.to_rows matrix in
+             Rays_math.Mat4.to_rows matrix in
            let topology = Topology.Private.view (Geometry.topology geometry) in
            let selected_element element = match selected with
              | None -> true
@@ -209,7 +209,7 @@ let transform_selected_raw ?cancel ?(grain = 16_384) ?selection
     Result.bind selected_result (fun selected ->
       let selected_count = match selected with
         | None -> point_count | Some group -> Group.cardinality group in
-      if selected_count = 0 || Mat4.nearly_equal matrix Mat4.identity ~eps:0.
+      if selected_count = 0 || Rays_math.Mat4.nearly_equal matrix Rays_math.Mat4.identity ~eps:0.
       then Ok geometry
       else begin
         Cancel.check_opt cancel;
@@ -223,12 +223,12 @@ let transform_selected_raw ?cancel ?(grain = 16_384) ?selection
             List.fold_left (fun result owner -> Result.bind result (fun output ->
                 Error.unguard (Normal_ops.run ?cancel ~grain ~owner output)))
               (Ok positioned) existing_normal_owners
-          else match Mat4.inverse matrix with
+          else match Rays_math.Mat4.inverse matrix with
             | None -> Ok (positioned
                 |> Geometry.without_attribute ~owner:Attribute.Point "N"
                 |> Geometry.without_attribute ~owner:Attribute.Vertex "N")
             | Some inverse ->
-                let normal_matrix = Mat4.transpose inverse in
+                let normal_matrix = Rays_math.Mat4.transpose inverse in
                 List.fold_left (fun result owner -> Result.bind result
                     (transform_selected_normals ?cancel ~grain
                       ~preserve_length:preserve_normal_length normal_matrix
@@ -564,8 +564,8 @@ let distance_from_geometry_raw ?cancel ?(grain = 16_384) ?affected
         ))))))))
 
 let distance_from_target_raw ?cancel ?(grain = 16_384) ?affected
-    ?(projection = Distance_target_spherical) ?(origin = Vec3.zero)
-    ?(direction = Vec3.unit_y) ?(metric = Distance_target_absolute)
+    ?(projection = Distance_target_spherical) ?(origin = Rays_math.Vec3.zero)
+    ?(direction = Rays_math.Vec3.unit_y) ?(metric = Distance_target_absolute)
     ?(falloff = Soft_linear) ?(radius = Distance_maximum)
     ?(distance_attribute = Some "distance") ?mask_attribute geometry =
   let operation = "Rdk.Transform_ops.distance_from_target" in
@@ -584,14 +584,14 @@ let distance_from_target_raw ?cancel ?(grain = 16_384) ?affected
       | Distance_fixed value -> not (Float.is_finite value) || value <= 0.
       | Distance_maximum -> false then Error
       (operation ^ ": fixed radius must be finite and positive")
-  else if not (Float.is_finite origin.Vec3.x && Float.is_finite origin.y && Float.is_finite origin.z) then
+  else if not (Float.is_finite origin.Rays_math.Vec3.x && Float.is_finite origin.y && Float.is_finite origin.z) then
     Error (operation ^ ": origin must be finite")
   else if metric = Distance_target_signed
       && projection <> Distance_target_planar then Error
     (operation ^ ": signed distance is only defined for planar projection")
   else
     let needs_direction = projection <> Distance_target_spherical in
-    let direction_squared = direction.Vec3.x *. direction.x
+    let direction_squared = direction.Rays_math.Vec3.x *. direction.x
         +. direction.y *. direction.y +. direction.z *. direction.z in
     if needs_direction && (not (Float.is_finite direction.x && Float.is_finite direction.y
         && Float.is_finite direction.z) || not (Float.is_finite direction_squared)
@@ -786,11 +786,11 @@ let soft_transform_raw ?cancel ?(grain = 16_384) ?selection
                 ~apply_rolloff selected attribute geometry in
         Result.bind weights_result (fun weights ->
           let count = Array.length weights and changed = Atomic.make false in
-          let moves_positions = not (Mat4.nearly_equal matrix Mat4.identity ~eps:0.) in
+          let moves_positions = not (Rays_math.Mat4.nearly_equal matrix Rays_math.Mat4.identity ~eps:0.) in
           let x = Array.copy positions.x and y = Array.copy positions.y
           and z = Array.copy positions.z in
           let (m00,m01,m02,m03), (m10,m11,m12,m13),
-              (m20,m21,m22,m23), (m30,m31,m32,m33) = Mat4.to_rows matrix in
+              (m20,m21,m22,m23), (m30,m31,m32,m33) = Rays_math.Mat4.to_rows matrix in
           if count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
               ~finish:(count - 1) (fun point ->
                 if point land 4095 = 0 then Cancel.check_opt cancel;
@@ -833,12 +833,12 @@ let soft_transform_raw ?cancel ?(grain = 16_384) ?selection
 
 let transform ?grain matrix geometry =
   let transformed = Kernel.transform ?grain matrix geometry in
-  match Mat4.inverse matrix with
+  match Rays_math.Mat4.inverse matrix with
   | None -> transformed
       |> Geometry.without_attribute ~owner:Attribute.Point "N"
       |> Geometry.without_attribute ~owner:Attribute.Vertex "N"
   | Some inverse ->
-      let normal_matrix = Mat4.transpose inverse in
+      let normal_matrix = Rays_math.Mat4.transpose inverse in
       List.fold_left (fun output owner ->
         match Geometry.find_attribute ~owner "N" geometry with
         | None -> output

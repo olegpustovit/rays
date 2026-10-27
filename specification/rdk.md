@@ -22,7 +22,7 @@ RDK must not import Sop, Runtime, SDL3, Metal, or platform code.
 The renderer boundary is `Rdk_rays.Rays_mesh`, which converts to and
 from `Rays.Mesh.t`. `rdk` and `rdk_core` do not link Rays or the GPU
 stack. `Rdk.Color_by_height` accepts normalized RGBA float tuples;
-the procedural SOP converts public `Rays.Color.t` inputs at its boundary.
+the procedural SOP converts public `Rays_math.Color.t` inputs at its boundary.
 `rdk_core` owns packed storage, topology, groups, and geometry; `rdk_exact`
 owns exact planar algorithms; `rdk_spatial` owns indices and intersection
 queries; `rdk_attrib` owns attribute and group operations. Generators and
@@ -514,7 +514,7 @@ schema concurrently.
 
 `Rdk.Kernel` is the expert VEX-like surface. Bindings are validated once, then
 the same native OCaml loop runs through stable chunks using the process-wide
-`Rays.Parallel` pool. It never creates a pool per operation, task, or frame.
+`Parallel` pool. It never creates a pool per operation, task, or frame.
 Topology mutation is not permitted inside an element kernel. Reductions use a
 deterministic two-phase design and combine partial values in stable chunk order.
 

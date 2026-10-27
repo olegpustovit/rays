@@ -1,15 +1,15 @@
-(* Drawing.render_prepared through the core path: draw/circles with per-instance radius and fill,
+(* Flow_native.Drawing.render_prepared through the core path: draw/circles with per-instance radius and fill,
    draw/rects with per-instance size and fill (static and animated positions), and a static batch
    under a changing draw/translate. Wall time and allocated bytes per frame (median of the frames run). *)
 module E = Flow.Eval
 
-let ok = function Ok x -> x | Error d -> failwith (Flow.Diagnostic.to_string d)
+let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let catalog = { Flow.Check.version = 0; kinds = [] }
 let size = (800, 600)
 
 let check source = match Flow.Workspace.check catalog (ok (Flow.Syntax.parse source)) with
-  | Some ws, ds when not (List.exists (fun (d : Flow.Diagnostic.t) -> d.severity = Error) ds) -> ws
-  | _, ds -> failwith (String.concat "; " (List.map Flow.Diagnostic.to_string ds))
+  | Some ws, ds when not (List.exists (fun (d : Diagnostic.t) -> d.severity = Diagnostic.Error_severity) ds) -> ws
+  | _, ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
 
 let points n animated =
   Printf.sprintf "(map (fn [i] [(* (mod i 800) 1.0) (+ (/ i 1250) %s) 0]) (array/range %d))"
@@ -29,12 +29,12 @@ let median a = let a = Array.copy a in Array.sort Float.compare a; a.(Array.leng
 let measure kind n animated =
   let source = Printf.sprintf "(workspace w (graph g :context draw %s))" (picture kind n animated) in
   let evaluation = ok (E.static (check source)) in
-  let prepared = ok (Rays_editor.Drawing.prepare ~states:evaluation.states evaluation.plan
+  let prepared = ok (Flow_native.Drawing.prepare ~states:evaluation.states evaluation.plan
     (List.assoc "g" evaluation.results)) in
   let frames = if n >= 1_000_000 then 3 else 8 in
   let state = E.create_state () in
-  let frame i = ok (Rays_editor.Drawing.render_prepared ~state prepared
-    ~live:{(Frame_input.at_time (float i /. 60.)) with frame = i; tick = i; size} ~size) in
+  let frame i = ok (Flow_native.Drawing.render_prepared ~state prepared
+    ~live:{(Input.at_time (float i /. 60.)) with frame = i; tick = i; size} ~size) in
   ignore (frame 0);
   let samples = Array.init frames (fun i ->
     Gc.full_major ();

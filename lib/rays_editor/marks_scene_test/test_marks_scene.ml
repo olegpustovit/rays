@@ -1,14 +1,14 @@
-(* Marks_scene against the scenes the per-kind drawing arms built (P3.13 removed them): the SHA-256
+(* Marks_scene against the scenes the per-kind drawing arms built: the SHA-256
    of each draw graph's serialized command stream is the checked-in digest those arms produced. *)
 open Rays
 module E = Flow.Eval
 module M = Scene_command.Marks
 module Buffers = Flow_ir.Core_exec.Buffers
-let ok = function Ok x -> x | Error d -> failwith (Flow.Diagnostic.to_string d)
+let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let checked body =
   let forms = ok (Flow.Syntax.parse ("(workspace w (graph g :context draw " ^ body ^ "))")) in
   match Flow.Workspace.check {Flow.Check.version=1;kinds=[]} forms with
-  | Some ws,[] -> ws | _,ds -> failwith (String.concat "; " (List.map Flow.Diagnostic.to_string ds))
+  | Some ws,[] -> ws | _,ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
 let serialize scene = Scene_command.Render_ir.serialize (Result.get_ok (Scene.Private.to_ir scene))
 let array3 = "(map (fn [i] [(* i 7.5) (+ 3 (* (* i t) 9)) 0]) (array/range 5))"
 let pictures = [
@@ -40,7 +40,7 @@ let pictures = [
   "(draw/merge (draw/text [1 2 0] \"\") (draw/circle [5 5 0] 2 :fill \"#fff\"))";
 ]
 let size = 200, 100
-let live = {(Frame_input.at_time 0.25) with size}
+let live = {(Input.at_time 0.25) with size}
 let digests = [
   "f4ff989c22afb8f52ab260b54d17bb7891e07ab75f29b2de12f487f832f3d92a";
   "38167b07c39a01579645ef0d43fd6ec8c1b524edc07e49436d9754eecbb11d2c";
@@ -48,7 +48,7 @@ let digests = [
   "c3ffa1398d4a79818e0afa089e1131a048b20881dbf0858482fa7f0c28bfcffd";
   "23a418fc491c5d3a95aa3029d2113bf002423a4a78e65dfc8a71c79818b8c89b";
   "3b93ccef6bb7daa17148022b6a0fdac1b409ce7c2ad6a370c4797151e146a5d1";
-  "ad94fa12ef2f1c84f45eca8b1b932f87465f51fe25c48b8aaa6bb34d8a9e5cc3";
+  "988dd6e539be91ba2f51ced75a01ac4deeaa2480a60aaa3a9c3039e06cf369eb";
   "1113c42cc2148b7eff360ec11fbdf7cd1735930475d0ccef8429d6a75d0118a5";
   "68ecc6c3903328f5dad628fb39ab2fdcbbd03b55ce2caac17cfd4f3b52693483";
   "71f685a283353a1f6081e6fa92ec9ad61674563f3ef8cf8d9e8309814bbef0f6";
@@ -59,7 +59,7 @@ let digests = [
   "34a94c9916d7321808a516723e5d5b0d51ddaedbf6671ee96293b6e58b9fcd4a";
   "e560c7f427e139fcaf098f3993ff6ba3b3ac536391b2b8e504f56da2d52b4654";
   "53eee607276c67a0280cb9fcbb59e5ebc81e0f6502a82077c0c2bdc7d7323c8b";
-  "be5ae462a1a643c5d900d9d932f21ea4369cd8b32e693d4a8dec9f9049a6b53f";
+  "4622e6a3ff25f8cc3c389f231513adc2a69e0bf11f4db96d6b072e8db860beb8";
   "6b3831072362e57f0f8b90919a3f922911b46d54d87b1eaed1d45b82d3033a33";
   "27bae8d4612c790aac0527df20a81bc4f0f3d21d22f51e0e03834b948f5f89a9";
   "447a8178eb85cb3be6245c4d0ba5e559ef876fb7495596970eaa09f8b9b5fadb";
@@ -74,12 +74,26 @@ let new_scene body =
   let program, root = Result.get_ok (Flow_ir.Core_draw.lower evaluation.plan (List.assoc "g" evaluation.results)) in
   let buffers = Buffers.create () in
   let marks = ok (Flow_ir.Core_exec.draw ?root (Flow_ir.Core_exec.prepare program) ~live ~size ~buffers) in
-  ok (Marks_scene.scene ~buffers marks)
+  ok (Flow_native.Marks_scene.scene ~buffers marks)
+let () =
+  let point = new_scene "(draw/point [3.25 -4.75 0] :color \"#abc\")" in
+  let point_geometry = Scene_command.Shape2.polygon
+      [3.25, -4.75; 4.25, -4.75; 4.25, -3.75; 3.25, -3.75]
+      ~fill:(Some 0xaabbccffl) ~stroke:None
+    |> Array.to_list |> List.map Scene.Private.geometry in
+  assert (Bytes.equal (serialize point) (serialize point_geometry));
+  let points = new_scene
+      "(draw/points (map (fn [i] [(+ 1.25 (* i 2.25)) (+ -2.75 (* i 3.5)) 0]) (array/range 2)) :color \"#def\")" in
+  let batch = Scene_command.Ui_batch.Builder.(let b = create ~capacity:2 () in
+    shape_rect b ~x:1.25 ~y:(-2.75) ~width:1. ~height:1. ~fill:0xddeeffffl ~stroke:0l ();
+    shape_rect b ~x:3.5 ~y:0.75 ~width:1. ~height:1. ~fill:0xddeeffffl ~stroke:0l ();
+    publish b) in
+  assert (Bytes.equal (serialize points) (serialize [Scene.Private.shapes batch]))
 let () =
   assert (List.length digests = List.length pictures);
   List.iteri (fun i body ->
     let digest = Editor_document.Contexts.sha256 (Bytes.to_string (serialize (new_scene body))) in
-    if digest <> List.nth digests i then failwith (Printf.sprintf "picture %d differs: %s" i body))
+    if digest <> List.nth digests i then failwith (Printf.sprintf "picture %d differs: %s (expected %s, got %s)" i body (List.nth digests i) digest))
     pictures;
   (* Hand-built marks against the Scene API. *)
   let none = Buffers.create () in
@@ -92,14 +106,14 @@ let () =
     Mark_set {count = 0; kind = Rect {position = Constant (0., 0.); size = Constant (1., 1.);
       fill = Constant 0l; stroke = Constant 0l; stroke_width = Constant 1.}};
     Pop_transform |] in
-  let batch = Scene_command.Shape_batch.Builder.(let b = create () in
+  let batch = Scene_command.Ui_batch.Builder.(let b = create () in
     circle b ~x:1.5 ~y:2. ~radius:3. ~fill:0xff0000ffl ~stroke:0l (); publish b) in
-  let empty = Scene_command.Shape_batch.Builder.(publish (create ())) in
+  let empty = Scene_command.Ui_batch.Builder.(publish (create ())) in
   let expected = [Scene.Private.shapes batch; Scene.rotate angle [Scene.Private.shapes empty]] in
-  assert (Bytes.equal (serialize expected) (serialize (ok (Marks_scene.scene ~buffers:none marks))));
+  assert (Bytes.equal (serialize expected) (serialize (ok (Flow_native.Marks_scene.scene ~buffers:none marks))));
   (* A mark the contract rejects is an error, and so is an image without a resolver. *)
-  assert (Result.is_error (Marks_scene.scene ~buffers:none [|M.Pop_transform|]));
-  (match Marks_scene.scene ~buffers:none [|M.Image {resource = 1; x = 0; y = 0; scale = 1.; angle = 0.}|] with
+  assert (Result.is_error (Flow_native.Marks_scene.scene ~buffers:none [|M.Pop_transform|]));
+  (match Flow_native.Marks_scene.scene ~buffers:none [|M.Image {resource = 1; x = 0; y = 0; scale = 1.; angle = 0.}|] with
    | Error d -> assert (d.code = "E_IMAGE") | Ok _ -> assert false);
   Printf.printf "Marks_scene: %d draw graphs serialize to the digests of the removed arms; hand-built marks match\n"
     (List.length pictures)
@@ -111,10 +125,10 @@ let () =
   let prepare n =
     let source = Printf.sprintf "(workspace w (graph g :context draw (draw/translate [(* 10 (sin t)) 0 0] (draw/rects (map (fn [i] [(* (mod i 800) 1.0) (/ i 1250) 0]) (array/range %d)) [3 3 0] :fill \"#5aaaf0\"))))" n in
     let evaluation = ok (E.static (match Flow.Workspace.check {Flow.Check.version=0;kinds=[]} (ok (Flow.Syntax.parse source)) with
-      | Some ws,[] -> ws | _,ds -> failwith (String.concat "; " (List.map Flow.Diagnostic.to_string ds)))) in
-    ok (Rays_editor.Drawing.prepare ~states:evaluation.states evaluation.plan (List.assoc "g" evaluation.results)) in
-  let frame prepared state i = ok (Rays_editor.Drawing.render_prepared ~state prepared
-    ~live:{(Frame_input.at_time (float i /. 60.)) with frame = i; tick = i; size} ~size) in
+      | Some ws,[] -> ws | _,ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds)))) in
+    ok (Flow_native.Drawing.prepare ~states:evaluation.states evaluation.plan (List.assoc "g" evaluation.results)) in
+  let frame prepared state i = ok (Flow_native.Drawing.render_prepared ~state prepared
+    ~live:{(Input.at_time (float i /. 60.)) with frame = i; tick = i; size} ~size) in
   let allocated n =
     let prepared = prepare n and state = E.create_state () in
     ignore (frame prepared state 0); ignore (frame prepared state 1);
@@ -130,25 +144,25 @@ let () =
   Printf.printf "Retention: a moving translate over a static batch allocates %.0f bytes at 10,000 instances and %.0f at 100,000\n" small large
 
 (* A mark set with a device attribute is registered with the GPU host, and a nonfinite or over-large host
-   coordinate in it is refused before it is (the GPU route's counterpart of Shape_batch.Builder). *)
+   coordinate in it is refused before it is (the GPU route's counterpart of Ui_batch.Builder). *)
 let () =
-  let device = {Flow_ir.Gpu.identity = 1; count = 2; width = 1; stamp = 1L; gpu_seconds = None} in
+  let device = {Flow_ir.Gpu.identity = 1; count = 2; width = 1; output = 0; stamp = 1L; gpu_seconds = None} in
   let registered = ref 0 in
   let gpu ~slot:_ ~kind:_ ~count:_ _ =
-    incr registered; Ok (Scene_command.Shape_batch.Private.gpu_token ~identity:1 ~count:2 ~stamp:1L) in
+    incr registered; Ok (Scene_command.Marks.Private.gpu_token ~identity:1 ~count:2 ~stamp:1L) in
   let scene x =
     let evaluation = ok (E.static (checked (Printf.sprintf
       "(draw/circles (map (fn [i] [(+ %s i) 0 0]) (array/range 2)) :radius (map (fn [i] 1.0) (array/range 2)))" x))) in
     let program, _ = Result.get_ok (Flow_ir.Core_draw.lower evaluation.plan (List.assoc "g" evaluation.results)) in
     let buffers = Buffers.create () in
-    let marks = ok (Flow_ir.Core_exec.draw (Flow_ir.Core_exec.prepare program) ~live:(Frame_input.at_time 0.)
+    let marks = ok (Flow_ir.Core_exec.draw (Flow_ir.Core_exec.prepare program) ~live:(Input.at_time 0.)
       ~size:(64, 64) ~buffers) in
     (* The radius array stands for a GPU region's output. *)
     let marks = Array.map (function
       | M.Mark_set {count; kind = Circle ({radius = Buffer b; _} as c)} ->
           M.Mark_set {count; kind = Circle {c with radius = Device b}}
       | entry -> entry) marks in
-    Marks_scene.scene ~buffers ~gpu ~device:(fun _ -> device) marks in
+    Flow_native.Marks_scene.scene ~buffers ~gpu ~device:(fun _ -> device) marks in
   ignore (ok (scene "1.0"));
   assert (!registered = 1);
   List.iter (fun bad -> match scene bad with
@@ -167,7 +181,7 @@ let () =
     let buffers = Buffers.create () in
     match Flow_ir.Core_exec.draw ?root (Flow_ir.Core_exec.prepare program) ~live ~size ~buffers with
     | Error d -> Error (d.code, d.message)
-    | Ok marks -> (match Marks_scene.scene ~buffers marks with
+    | Ok marks -> (match Flow_native.Marks_scene.scene ~buffers marks with
         | Ok scene -> Ok (serialize scene) | Error d -> Error (d.code, d.message)) in
   let n = 9 in
   let range = Printf.sprintf "(array/range %d)" n in
@@ -200,7 +214,7 @@ let () =
          incr refused;
          if a <> b then failwith (Printf.sprintf "%s: refused with %s %s, mark by mark with %s %s" name (fst a) (snd a) (fst b) (snd b));
          (* the builder's own refusal, so the set did reach it *)
-         if fst a <> "E_DRAW_RANGE" || not (String.starts_with ~prefix:"Shape_batch" (snd a)) then
+         if fst a <> "E_DRAW_RANGE" || not (String.starts_with ~prefix:"Ui_batch" (snd a)) then
            failwith (Printf.sprintf "%s: refused with %s %s" name (fst a) (snd a))
      | Ok _, Error (code, _) -> failwith (name ^ ": accepted a set that mark by mark is " ^ code)
      | Error (code, _), Ok _ -> failwith (name ^ ": refused (" ^ code ^ ") a set that mark by mark is drawn"))) cases;
@@ -219,10 +233,10 @@ let () =
   let buffers = Buffers.create () in
   let marks = ok (Flow_ir.Core_exec.draw ?root (Flow_ir.Core_exec.prepare program) ~live ~size ~buffers) in
   let before = Gc.allocated_bytes () in
-  let scene = ok (Marks_scene.scene ~buffers marks) in
+  let scene = ok (Flow_native.Marks_scene.scene ~buffers marks) in
   let per_mark = (Gc.allocated_bytes () -. before) /. float n in
   (match Rays.Scene.Private.commands scene with
-   | [| Scene_command.Render_ir.Shapes batch |] -> assert (Scene_command.Shape_batch.count batch = n)
+   | [| Scene_command.Render_ir.Shapes batch |] -> assert (Scene_command.Ui_batch.count batch = n)
    | _ -> failwith "a circle set is one Shapes command");
   if per_mark > 72. then failwith (Printf.sprintf "a static circle set allocates %.0f bytes a mark, over its 64-byte instance" per_mark);
   Printf.printf "Marks_scene: a static set of %d circles allocates %.1f bytes a mark\n" n per_mark
@@ -231,8 +245,8 @@ let () =
 let () =
   let sets = Array.init 3000 (fun i ->
     M.Mark_set {count = 1; kind = Point {position = Constant (float i, 0.); fill = 0l}}) in
-  let cache = Marks_scene.cache () in
-  ignore (ok (Marks_scene.scene ~buffers:(Buffers.create ()) ~cache sets));
-  let size = Marks_scene.cache_size cache in
+  let cache = Flow_native.Marks_scene.cache () in
+  ignore (ok (Flow_native.Marks_scene.scene ~buffers:(Buffers.create ()) ~cache sets));
+  let size = Flow_native.Marks_scene.cache_size cache in
   if size > 1024 then failwith (Printf.sprintf "the node cache grew to %d entries" size);
   Printf.printf "Marks_scene: 3000 mark sets leave %d cached nodes\n" size

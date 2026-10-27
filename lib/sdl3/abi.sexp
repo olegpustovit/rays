@@ -1,11 +1,10 @@
 ; The reviewed ABI of every SDL struct the stubs read: size, alignment
-; and the offset of each field in use. tools/sdl3/generate.exe turns it
+; and the offset of each field in use. lib/sdl3/generate.exe turns it
 ; into static asserts at build time; a newer SDL that moves one fails the
 ; build and names it. Rewrite with
-;   dune exec tools/sdl3/generate.exe -- accept
+;   dune exec lib/sdl3/generate.exe -- accept
 ; and review the diff. Never edit by hand.
 ((SDL_DialogFileFilter 16 8 ((name 0) (pattern 8)))
- (SDL_DisplayMode 40 8 ((refresh_rate 20)))
  (SDL_DropEvent 48 8 ((type 0) (data 40) (x 20) (y 24)))
  (SDL_Event 128 8 ())
  (SDL_KeyboardEvent 40 8 ((type 0) (key 28) (scancode 24) (mod 32) (down 36) (repeat 37)))

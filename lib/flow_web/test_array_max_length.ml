@@ -1,10 +1,10 @@
 module E=Flow.Eval
 module I=Flow_ir
 module P=I.Packed
-let ok=function Ok v->v|Error d->failwith(Flow.Diagnostic.to_string d)
-let packed=function Ok v->v|Error ds->failwith(String.concat ";"(List.map Flow.Diagnostic.to_string ds))
+let ok=function Ok v->v|Error d->failwith(Diagnostic.to_string d)
+let packed=function Ok v->v|Error ds->failwith(String.concat ";"(List.map Diagnostic.to_string ds))
 let quote=Flow_web.Kernel_table.json_string
-let number x=if Int64.bits_of_float x=Int64.min_int then "-0" else Printf.sprintf "%.17g" x
+let number x=Param.float_text x
 let numeric=function
   |E.Int_array a->"BigInt64Array.from(["^String.concat ","(Array.to_list(Array.map(fun i->string_of_int i^"n")a))^"])"
   |E.Float_array a|Vec2_array a|Vec3_array a|Vec4_array a->
@@ -13,20 +13,20 @@ let numeric=function
 let root body=
   let text="(workspace array_max_length (graph g :context host (if (> t -1000.) "^body^" "^body^")))" in
   let ws=match Flow.Workspace.check Flow.Check.{version=1;kinds=[]}(ok(Flow.Syntax.parse text))with
-    |Some w,[]->w|_,ds->failwith(String.concat ";"(List.map Flow.Diagnostic.to_string ds))in
+    |Some w,[]->w|_,ds->failwith(String.concat ";"(List.map Diagnostic.to_string ds))in
   let value=List.assoc "g"(ok(E.static ws)).results in
   let r=match value with E.Residual r->r|_->failwith "Live array_max_length expected"in
   let program=match I.Core_lower.lower ~strict:true r with Ok p->p|Error form->failwith form in
   value,program
 let ()=
   let js=Buffer.create 1000000 in
-  let path name="file://"^Filename.concat(Sys.getcwd())("../../tools/web/runtime/"^name)in
+  let path name="file://"^Filename.concat(Sys.getcwd())("../web_export/runtime/"^name)in
   Printf.bprintf js "import {createRuntime} from %s;import {createPool} from %s;import * as p from %s;const bytes=a=>Buffer.from(a.buffer,a.byteOffset,a.byteLength);const pools=[null,await createPool({size:1}),await createPool({size:8})];try{\n"
     (quote(path "runtime.js"))(quote(path "workers.js"))(quote(path "prims.js"));
-  let live={(Frame_input.at_time 0.25)with frame=3} in
+  let live={(Input.at_time 0.25)with frame=3} in
   List.iter(fun body->let value,program=root body in
     let result=E.Private.force_reference value ~live in
-    let prepared=Array.map(fun region->let packed=packed(P.of_region region)in
+    let prepared=Array.map(fun region->let packed=region in
       assert(P.gpu_refusals packed<>[] && Result.is_error(Flow_web.Wgsl.kernel packed));
       packed,ok(P.Private.prepare_values packed ~live))program.regions in
     let frame=ok(Flow_web.Js.frame program)in
@@ -35,7 +35,7 @@ let ()=
         "["^String.concat ","(Array.to_list(Array.map numeric v.P.Private.arrays))^"]")prepared)));
     (* The runtime's actual worker transport uses private copies of inputs. *)
     Buffer.add_string js "const data=new ArrayBuffer(arrays.flat().reduce((n,a)=>n+a.byteLength,0));let offset=0;const store=a=>{const spec=[offset,a.length,a instanceof BigInt64Array];new a.constructor(data,offset,a.length).set(a);offset+=a.byteLength;return spec};const inputs=arrays.map(xs=>xs.map(store));const inputBytes=bytes(new Uint8Array(data)).toString('hex');\n";
-    let entries=Array.to_list(Array.mapi(fun i(p,v)->let r=P.to_region p in
+    let entries=Array.to_list(Array.mapi(fun i((p:P.t),v)->let r=p in
       let rec facts slot=function
         |I.Core.Region.Frame name->[Printf.sprintf "[%d,%s,false]"slot(quote name)]
         |Int_frame name->[Printf.sprintf "[%d,%s,true]"slot(quote name)]

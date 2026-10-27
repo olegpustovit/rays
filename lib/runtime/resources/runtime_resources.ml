@@ -1,7 +1,48 @@
-type error_kind = Wrong_domain | Destroyed | Invalid_argument | Decode | Io
-type error={operation:string;kind:error_kind;message:string}
-let pp_error f e=Format.fprintf f "%s: %s" e.operation e.message
-let error operation kind message=Error{operation;kind;message}
+open Ogpu.Error
+
+type error = Ogpu.Error.t
+let pp_error=Ogpu.Error.pp
+let error operation kind message=Error(Ogpu.Error.make operation kind message)
+let rec ensure_directory path =
+  if path = "" || path = "." then Ok ()
+  else
+    match Unix.stat path with
+    | { Unix.st_kind = Unix.S_DIR; _ } -> Ok ()
+    | _ -> Error (path ^ ": not a directory")
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+        let parent = Filename.dirname path in
+        if parent = path then Error (path ^ ": no parent directory")
+        else
+          Result.bind (ensure_directory parent) (fun () ->
+            try Unix.mkdir path 0o755; Ok () with
+            | Unix.Unix_error (Unix.EEXIST, _, _) -> ensure_directory path
+            | Unix.Unix_error (error, _, _) -> Error (path ^ ": " ^ Unix.error_message error))
+    | exception Unix.Unix_error (error, _, _) -> Error (path ^ ": " ^ Unix.error_message error)
+
+let write_atomic ~filename write =
+  try
+    let filename = try Unix.realpath filename with Unix.Unix_error _ -> filename in
+    let directory = Filename.dirname filename in
+    Result.bind (ensure_directory directory) (fun () ->
+      let temporary, channel = Filename.open_temp_file ~temp_dir:directory ".rays-" ".tmp" in
+      close_out channel;
+      Fun.protect ~finally:(fun () ->
+        try Sys.remove temporary with Sys_error _ -> ()) (fun () ->
+        Result.bind (write temporary) (fun () ->
+          let fd = Unix.openfile temporary [Unix.O_RDONLY] 0 in
+          Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd);
+          Unix.rename temporary filename;
+          Ok ())))
+  with Sys_error message -> Error message
+     | Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)
+
+let write_text ~filename text =
+  write_atomic ~filename (fun temporary ->
+    try
+      Out_channel.with_open_bin temporary (fun channel -> output_string channel text);
+      Ok ()
+    with Sys_error message -> Error message)
+
 let main operation callback=
   if not(Sdl3.Thread.is_initial_domain())||not(Sdl3.Thread.is_sdl_main_thread())then
     error operation Wrong_domain "resource operation requires the initial SDL domain"
@@ -60,7 +101,7 @@ module Image=struct
     |Some source->Result.bind(gpu_texture operation x source)(fun texture->
         match Ogpu.Backend.read_texture texture ~bytes_per_row:(x.width*4) with
         |Ok bytes->x.readbacks<-x.readbacks+1;Ok bytes
-        |Error e->error operation Io(Ogpu.Error.to_string e))
+        |Error e->Error e)
   let pixels x=live"Image.pixels"x(fun()->gpu_pixels"Image.pixels"x)
   let leased x bytes=List.memq bytes(List.map fst x.leases)
   let return_canvas_storage x bytes=match List.assq_opt bytes x.canvas_returns with
@@ -188,6 +229,11 @@ module Canvas=struct
       error operation Invalid_argument"invalid canvas extent"
     else Ok(Bytes.make(width*height*4)'\000')
   let create ~width ~height=main"Canvas.create"(fun()->Result.map(fun rgba->{identity=fresh_identity();generation=1;width;height;rgba;spare=None;mirror=None;blocked=None;gpu=None;cpu_stale=false;captures=0;readbacks=0;dead=false})(storage"Canvas.create"width height))
+  let of_rgba_bytes ~width ~height ~rgba=main"Canvas.of_rgba_bytes"(fun()->
+    if not(valid_storage width height rgba)then
+      error"Canvas.of_rgba_bytes"Invalid_argument"invalid RGBA extent or storage"
+    else Ok{identity=fresh_identity();generation=1;width;height;rgba;spare=None;
+      mirror=None;blocked=None;gpu=None;cpu_stale=false;captures=0;readbacks=0;dead=false})
   let size x=live"Canvas.size"x(fun()->Ok(x.width,x.height))
   let valid_mirror x image=not image.Image.dead&&image.canvas_owner=Some x.identity&&
     image.rgba==x.rgba
@@ -227,7 +273,7 @@ module Canvas=struct
         detach_for_overwrite x;
         (match Ogpu.Backend.read_texture_into texture~bytes_per_row:(x.width*4)~destination:x.rgba with
          |Ok()->x.cpu_stale<-false;x.readbacks<-x.readbacks+1;Ok()
-         |Error e->error op Io(Ogpu.Error.to_string e))
+         |Error e->Error e)
   let cpu_mutates op x=match sync_cpu op x with Error _ as e->e|Ok()->x.gpu<-None;Ok()
   let set_pixel x ~x:px ~y:py color=live"Canvas.set_pixel"x(fun()->if px<0||py<0||px>=x.width||py>=x.height then error"Canvas.set_pixel"Invalid_argument"pixel is out of bounds"else match cpu_mutates"Canvas.set_pixel"x with Error _ as e->e|Ok()->(detach_for_mutation x;write_color x.rgba((py*x.width+px)*4)color;x.generation<-x.generation+1;Ok()))
   let snapshot x=live"Canvas.snapshot"x(fun()->match sync_cpu"Canvas.snapshot"x with Error _ as e->e|Ok()->

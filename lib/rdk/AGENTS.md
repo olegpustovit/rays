@@ -37,7 +37,7 @@ sop ──> rdk ──> rdk_core ──> rays_math
 `sop` uses `rdk` for packed SOPs and `rays_math` for mathematical
 values. `rdk` must never depend on `sop`.
 `sop` and `pxui` must never depend on each other; typed parameter
-schemas live in the dependency-free `param` library (`Sop.Parameter`)
+schemas live in the dependency-free `param` library (`Param`)
 and `Pxui_shell.Inspector` renders them.
 `pxui_graph` and `Pxui_shell.Inspector` are presentation adapters, not graph authorities:
 selection lives in returned immutable UI state, network topology lives in

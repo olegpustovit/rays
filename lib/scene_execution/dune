@@ -1,43 +1,60 @@
-(library
- (name scene_execution)
- (public_name rays.scene_execution)
- (modules scene_execution scene_attachment_pool)
- (private_modules scene_attachment_pool)
- (libraries ogpu lru))
-
 (executable
+ (enabled_if (= %{system} macosx))
  (name test_main)
  (modules test_main test_prepared_scene3 test_automatic_scratch test_retained_eviction test_offscreen_metal test_scene_execution_metal)
- (libraries scene_execution scene_execution_fixtures ogpu unix))
+ (libraries renderer scene_execution_fixtures ogpu ogpu_metal unix))
 
 ; Minimal per-family MSL pipelines for tests and benchmarks that drive the
 ; renderer on a real device.
 (library
  (name scene_execution_fixtures)
  (modules scene_execution_fixtures)
- (libraries scene_execution ogpu))
+ (libraries renderer ogpu))
 
 (test
  (name test_gpu_vertices)
  (modules test_gpu_vertices)
- (libraries scene_execution scene_execution_fixtures ogpu_mock))
+ (libraries renderer scene_execution_fixtures ogpu_mock))
 
 (rule
- (aliases runtest test_prepared_scene3)
+ (enabled_if (= %{system} macosx))
+ (alias test_prepared_scene3)
  (action (run %{exe:test_main.exe} test_prepared_scene3)))
 
 (rule
- (aliases runtest-native test_automatic_scratch)
+ (enabled_if (= %{system} macosx))
+ (alias test_automatic_scratch)
  (action (run %{exe:test_main.exe} test_automatic_scratch)))
 
 (rule
- (aliases qualification runtest-native test_retained_eviction)
+ (enabled_if (= %{system} macosx))
+ (alias test_retained_eviction)
  (action (run %{exe:test_main.exe} test_retained_eviction)))
 
 (rule
- (aliases runtest-native test_offscreen_metal)
+ (enabled_if (= %{system} macosx))
+ (alias test_offscreen_metal)
  (action (run %{exe:test_main.exe} test_offscreen_metal)))
 
 (rule
- (aliases runtest-native test_scene_execution_metal)
+ (enabled_if (= %{system} macosx))
+ (alias test_scene_execution_metal)
  (action (run %{exe:test_main.exe} test_scene_execution_metal)))
+
+(alias
+ (name runtest)
+ (deps
+  (alias test_prepared_scene3)))
+
+(alias
+ (name runtest-native)
+ (deps
+  (alias test_automatic_scratch)
+  (alias test_retained_eviction)
+  (alias test_offscreen_metal)
+  (alias test_scene_execution_metal)))
+
+(alias
+ (name qualification)
+ (deps
+  (alias test_retained_eviction)))

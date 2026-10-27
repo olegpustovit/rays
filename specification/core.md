@@ -1,7 +1,6 @@
 # The shared Flow core
 
-This is the compiler contract for the native and web targets of
-[the web-export plan](web-export/plan.md). It introduces no Lisp syntax. The
+This is the compiler contract for the native and web targets. It introduces no Lisp syntax. The
 checked workspace and the tree walker remain the language contract and the
 native exactness oracle. A target prints or executes this core; it does not
 walk `Workspace.term`, expand macros, or interpret Lisp operator names.
@@ -9,7 +8,6 @@ walk `Workspace.term`, expand macros, or interpret Lisp operator names.
 The frame primitive inventory below has **96 entries**. Region instruction
 constructors, structured control, drawing statements and host intrinsics are
 listed separately: none is a hidden primitive in a target's numeric runtime.
-The P0.R review must confirm this inventory before product implementation.
 
 ## Two execution levels
 
@@ -47,11 +45,26 @@ scalar and bounded structured data, advances state slots, invokes regions, and
 produces ordered drawing statements and host effects. A static subexpression
 is retained; a changed view transform must not recompute unchanged attributes.
 
+`Core_draw.device_groups` owns mark-attribute placement and sibling grouping
+for both targets. Compatible single-output regions of one batch fuse only
+within one statement block, with equal rate, precision and count/origin. The
+group crosses only infallible scalar setup; outputs retain invocation order.
+Native execution offers the merged region at its last invocation. A refusal
+reruns the original regions in authored order, preserving their diagnostics;
+CPU-only execution retains the original invocations. Multiple mark sets can
+share a borrowed output without another dispatch overwriting it.
+
+Each native drawing's display closure retains at most 16 literal Float
+`array/range` inputs, bounded to 64 MiB. Equal lengths share immutable storage;
+dynamic counts and other source forms follow ordinary input evaluation.
+Uniforms and frame facts are prepared every frame.
+
 A **region** is a pure data loop over packed arrays. It has explicit input
 buffers, captured uniforms, an iteration domain, a checked body and output
 slots. Independent elements run in disjoint 1,024-element CPU blocks, through
 the shared native pool or required web workers. GPU placement emits that body
-as Metal or WGSL. Ordered reductions and accumulator loops preserve iteration
+as Metal or WGSL. The SPIR-V printer also consumes the shared region layout;
+its binary compute output is validated independently in tests. Ordered reductions and accumulator loops preserve iteration
 order; they are not parallel tree reductions. Collect regions may copy immutable
 Text leaves in a separate bank. Lists of records, host effects and frame state
 are not region values, and shaders accept numeric registers only.
@@ -63,7 +76,21 @@ targets use double precision; they need not be bit-identical to native, but
 integers, booleans, text and table structure are exact. Target-specific
 rounding does not permit a different branch, list length or state identity.
 
+The SPIR-V printer emits binary words directly, with the same bindings,
+uniforms, table captures and resident-count protocol as the Metal printer.
+Its current subset includes floating arithmetic, guarded registers, checked
+arithmetic, seeded noise with structured octave loops, vectors, fast integer
+operations and numeric gathers. Fast kernels that need integer carriers declare
+the SPIR-V `Int64` capability; floating-only kernels do not. Structural
+validation does not establish device execution parity. Ray queries and the
+widened region control flow remain separate compiler work.
+
 ## Program data and ownership
+
+`Flow.Phase_timer` takes its clock and phase names from callers. Names are
+strings, including phases unknown to Flow; snapshots sort entries by name.
+Nested scopes record exclusive duration and restore the enclosing sample on
+exceptions. Editor and benchmark code own their phase vocabulary.
 
 A frame program contains numbered locals, a typed constant table, structured
 statements, result locals, a state-slot table and regions. Local and statement
@@ -85,16 +112,20 @@ locals, state reads or uniforms. Native compilation to closures is permitted
 as an execution optimization after the core has been built; those closures
 never become the representation consumed by another target.
 
-The native executor may compile eligible pure packed `Counted` map bodies into
-1,024-lane numeric blocks during preparation. The structured frame program, its
-numbering and other targets' printers stay unchanged. A prepared loop owns one
-reusable scratch allocation. Branches retain their selected lanes; captures,
-array ownership and integer range are checked before using this tier. Effects,
-escaping locals, accumulators, filters, aliasing input/output buffers and
-unsupported layouts use the general statements. A block failure reruns those
-statements in element order, preserving diagnostics and partial state. Stateless
-prepared residuals may bypass creation of evaluator memo/call tables under the
-executor's owner token; frame validation and diagnostic fallback remain mandatory.
+Every eligible pure numeric map is lowered once to a validated `Core.Region`;
+the frame program invokes it with the current inputs. `Packed.t` is an alias of
+that private validated representation, so CPU and device consumers share one
+region layout and validation boundary. The region's instruction-dependency flags
+are derived on first execution and cached atomically; each executor forces them
+before dispatching work to the shared domain pool. CPU scratch blocks are capped
+by the actual element count, up to the existing block limit. Branches retain
+their selected lanes; captures, array ownership and integer range are checked
+before execution. Effects, escaping locals, accumulators, filters, aliasing
+input/output buffers and unsupported layouts use the general statements. A block
+failure reruns those statements in element order, preserving diagnostics and
+partial state. Stateless prepared residuals may bypass creation of evaluator
+memo/call tables under the executor's owner token; frame validation and
+diagnostic fallback remain mandatory.
 
 Values are immutable when published. Sequence-building stores write only a
 fresh, locally owned allocation. A published sequence, constant or previous
@@ -317,8 +348,7 @@ Total: 8 + 1 + 12 + 5 + 8 + 10 + 5 + 3 + 1 + 2 + 1 + 2 + 5 + 10 + 5 + 4 + 1 + 1 
 `array/sum` remains an ordered typed reduction in structured Core, using exact
 wrapping integer addition for integer arrays; its JavaScript twin is checked
 alongside the intrinsic inventory without adding a Core primitive.
-The numeric, list and text models below fix the behavior of these leaves;
-P0.R reviews them with the inventory.
+The numeric, list and text models below fix the behavior of these leaves.
 
 Convenience operators lower to these leaves. For example `value/polar` is a
 vector built from `*`, `cos`, `sin` and its optional height, `length` is an
@@ -799,6 +829,10 @@ new collection of shader operations:
 | `Text_const(text)`, `Text_input(source)`, `Text_uniform(capture)`, `Text_gather(table,index)`, `Text_select(condition,yes,no)` | Immutable Text leaves in Collect regions: constants, source/capture reads, exact indexed lookup and selected copying. Text has a separate register bank, not a numeric width. Outputs allocate a fresh string array while sharing immutable strings. Text arithmetic, transformations and reductions remain unsupported in regions and use structured Core where eligible. GPU targets refuse all Text registers. |
 | `Select(condition,yes,no)` | Selects by condition unequal to zero; branch instructions carry their execution guards. |
 | `Guarded(conditions,instruction)` | Executes the instruction and its finite checks only when every condition selects this branch. Metal and WGSL declare the result outside the conditional and assign it inside, so later selections retain the same lazy behavior. An unselected overflow is unevaluated; `min` and `max` still evaluate both arguments. |
+| `Loop_begin(first,last,finish,initial,limit,span)` | Starts an end-exclusive counted scope. Its register is the Int index. Bounds and initial values precede the scope; an empty or reversed range returns those initial values. The optional bound is checked before the body, with the authored source span. |
+| `Loop_carry(header,component,type)` | One scalar carried register, contiguous after its header. Records and vectors flatten to Int, Float, Bool or Text leaves. |
+| `Loop_end(header,next,stop)` | Ends the scope and reads all next values and the optional Bool stop register before updating every carried register simultaneously. A true stop commits the next state and exits immediately. Nested loops finish before the enclosing update. |
+| `Loop_result(header,component,type)` | Projects a completed carried value into the enclosing lexical scope. Other body registers cannot escape. |
 
 The binary set is `Add Sub Mul Div Mod Pow Min Max Lt Le Gt Ge Eq And Or`;
 the unary set is `Sin Cos Sqrt Abs Not`. Booleans occupy numeric slots, vectors
@@ -810,6 +844,52 @@ and output slots. Zip uses the shortest input; product uses source-order
 strides. No inputs means no iterations. Outputs become an ordered list of
 slot groups when several attributes are fused, with an explicit width for
 each group. A single-output region keeps the existing instruction spelling.
+
+Single-clause numeric `fold` bodies over canonical `range`, and `iterate`
+with optional `:until`, lower to these controls inside packed maps and ordered
+reductions. `iterate` retains its uncapped Int count: a nonpositive count
+returns the seed, and early exit skips the remaining passes entirely. Its
+predicate reads the previous and next state before the update. Checked
+anonymous and captured functions and named definitions inline at the call
+site; captured closures retain their own lexical bindings. Instruction and capture
+sharing respect loop scope. Validation checks matching boundaries, contiguous
+typed carried registers, lexical reads, guards and result projections.
+The shared typed CPU block engine runs them with its existing chunk pool and
+reference lane-error ordering; an untaken or empty body is unevaluated.
+JavaScript supports the same controls, including exact Int bounds above 2^53.
+Metal and fast WGSL visit their scopes through `Kernel_layout.iter`, keeping
+their existing 64-bit integer representations and finite-status checks.
+Int operations and abs normalize those representations to signed63 results;
+logical right shifts first retain the native 63-bit input representation.
+This applies to the Metal, fast WGSL/JavaScript and SPIR-V printers. Their
+separate whole-Float arithmetic helpers retain 64-bit intermediate storage.
+Device kernels atomically OR one shared status word: bit 0 records nonfinite
+output, bit 1 a zero integer divisor, and bit 2 an integer shift count outside
+`[0,62]`. Guards and empty loops retain lazy errors. Native readback and buffer
+borrowing check completion and status before publishing a result; a resident
+transaction retains all participating runners' flags until its final read.
+An empty dispatch publishes a typed empty output without reading a status
+buffer or inheriting a previous generation's failure. The browser checks its
+queued status copies at poll/flush boundaries. The aggregate word reports a
+stable class priority (invalid shift, zero divisor, nonfinite); it does not
+identify the CPU's earliest failing row. Integer failures retain `E_RANGE`,
+while nonfinite device output retains `E_KERNEL`.
+Existing `int/*` operations and explicit masks express uint32 wraparound;
+the shared fixture exercises a carried uint32 permutation without another
+integer language or executor. Text-carried loops stay on the CPU/JavaScript.
+Carried Int/Float widening stays in structured Core: converting the seed to
+the later Float type before its first step can lose exact Int bits. Regions
+refuse that case, including nested record leaves, until their representation
+can retain the initial numeric kind separately. Strict high-Int regressions
+cover both fold and iterate without a walker fallback.
+Region fusion remaps loop headers, carried registers, boundaries and results.
+Instruction sharing stays inside the matching lexical loop scope; control
+markers remain distinct and carried registers stay contiguous. A consumer
+aliases an eager producer's result instead of copying its instruction across
+a guard or loop boundary. The existing count/origin proofs and 64-register
+limit still apply, including sibling outputs and ordered reductions. Other
+nested collecting/reducing loop forms remain incomplete; this does not make
+every authored loop a device kernel.
 
 Numeric `array/nth` inside a kernel uses the same declaration, coercion and
 `E_ARRAY_RANGE` messages as scalar indexing. A table can be a checked capture,
@@ -857,7 +937,7 @@ The existing `E_PACKED_*` refusals and their spans survive lowering. GPU
 qualification also excludes ordered accumulators, unsupported noise settings,
 non-finite/unrepresentable constants and disallowed forms. The web target adds
 its device-limit and in-frame-readback checks; their limits are established
-from the WebGPU specification in P5.4, not guessed here. An exact consumer
+from the WebGPU specification, not guessed here. An exact consumer
 cannot secretly read a GPU buffer back during a browser frame.
 
 An exported CPU region's input data and uniform captures must be proven
@@ -898,7 +978,7 @@ drawings, layouts or other deferred nodes. Core lowering keeps call and loop
 identity, including skipped iterations, instead of keying state by a transient
 statement index alone.
 
-Frame input is an intrinsic read of one immutable `Frame_input.t` snapshot:
+Frame input is an intrinsic read of one immutable `Input.t` snapshot:
 `t`, `dt`, `frame`, `tick`, logical `size`, logical `pointer`, held `buttons`,
 held `keys`, and ordered `events`. The Lisp `frame/input` view has `t`, `dt`,
 `index`, `width`, `height`, `pointer`, `buttons`, `keys`, `events`; it does not
@@ -906,6 +986,11 @@ rename the host's internal `tick` into a Lisp field. Event records have the
 fixed field layout from `Flow.Op.event_fields`, with empty/zero defaults for
 fields absent in an event. Coordinates remain logical points. Device-pixel
 conversion belongs only to the presenter.
+
+Native keys, pointer buttons and trackpad phases are the variants in the
+dependency-free `Input` module. The SDL adapter translates once; runtime,
+Frame and the editor share those types. Lisp event records and held lists
+serialize the same documented string names through `Input`'s name functions.
 
 ## Drawing statements and intrinsics
 
@@ -919,30 +1004,39 @@ radius and color are present from the first contract, not only uniform styles.
 The core preserves all existing draw operators. `draw/background` is a filled
 canvas rectangle; `draw/merge` appends its inputs in order. `draw/translate`
 uses the existing integer coordinate conversion, while rotation is radians
-and scale is scalar or two components of a Vec3. Point/text/image positions
-also use their existing integer conversion; packed rect/circle/line positions
-remain floating point. Default ink is white, default circle radius is 1,
+and scale is scalar or two components of a Vec3. Text/image positions also
+use their existing integer conversion. Point geometry and packed
+rect/circle/line positions retain fractional coordinates. Default ink is white, default circle radius is 1,
 default line width is 1, and a rect/circle with neither fill nor stroke gets
 white fill. A text run defaults to size 16; empty text emits no entry. An image
 defaults to origin, scale 1 and angle 0; its scale is positive and finite.
 
-Rounded rectangles and polygon/polyline paths retain their existing integer
-coordinate, tessellation and stroke behavior. Their lowering must reuse pure
+Rounded rectangles and polygon/polyline paths retain fractional coordinates
+through their shared tessellation and stroke rules. Their lowering reuses pure
 `Scene_command.Shape2` geometry (including indexed fill triangles and stroke
 geometry) and carry it through the drawing contract; replacing a path with
-overlapping analytic primitives would change translucent pixels. P3.2 must
-include the geometry entry needed by P3.6 and its native serialization oracle.
+overlapping analytic primitives would change translucent pixels. The geometry
+entry and its native serialization oracle preserve this ordering.
 The web runtime's `shape2.js` is the single port of `Shape2` (geometry for the mark contract, not a listed
-primitive; the P6.R review keeps it, and a node test pins it to the native output); no other target tessellates
+primitive; a node test pins it to the native output); no other target tessellates
 or rasterizes these paths on a CPU.
 
 `E_DRAW_LENGTH` guards all per-instance attribute cardinalities; missing
 inputs are `E_DRAW_INPUT`, unknown draw kinds are `E_DRAW_KIND`, invalid
-integer coordinates are `E_DRAW_RANGE`, and a non-finite rotate angle or scale
+coordinates are `E_DRAW_RANGE`, and a non-finite rotate angle or scale
 factor is `E_NONFINITE` (as `drawing.ml` raises it). Color decoding keeps
 `E_DRAW_COLOR` and its type errors. A count is an element count in every
 attribute buffer. Resource entries resolve through an owned host resource
 table; they never silently disappear when a resolver is absent.
+
+`Core_draw.device_regions` owns mark-attribute placement for native execution
+and web export. It counts direct local reads/writes through the Core traversals
+and admits a region only when its single output is read exclusively as
+compatible batch attributes. Each target supplies its eligible output widths.
+An attribute read by the frame stays on the CPU; other attributes in the same
+batch can stay on the device. The pass also returns eligible regions per batch
+in argument order, which the web exporter uses for attribute fusion. Native
+attribute fusion remains a separate incomplete part of the cleanup.
 
 | Intrinsic | Native target | Web target |
 | --- | --- | --- |
@@ -967,7 +1061,7 @@ partially exported to make a coverage count pass.
 
 ## Census rule table
 
-P0.1 at `de565589` parses 45 files and identifies 15 structurally eligible draw
+The source census parses 45 files and identifies 15 structurally eligible draw
 workspaces. It counts 114 distinct authored heads in draw/host/image/value
 graphs and all definition/macro bodies. This includes function parameter
 calls, macro templates and SOP definitions unused by a draw graph; it is not
@@ -1016,11 +1110,11 @@ operation. A user function/macro row is not a new runtime primitive.
 | `draw/image` | intrinsic | Image-resource entry with checked transform; source image producer is lowered separately. |
 | `draw/lines` | compiler rule | Packed endpoint/width/color edges, `array/count`, checks, line mark set. |
 | `draw/merge` | compiler rule | Ordered drawing-entry concatenation, flattening drawing lists. |
-| `draw/points` | compiler rule | Packed positions, `array/count`, integer point conversion, color, point entries. |
+| `draw/points` | compiler rule | Packed fractional positions, `array/count`, color, point entries with rect antialiasing. |
 | `draw/rect` | compiler rule | Position/size locals, `color/parse`, rectangle entry, defaults. |
 | `draw/rects` | compiler rule | Constant or packed size/color edges, `array/count`, checks, rectangle mark set. |
 | `draw/rotate` | compiler rule | `fail` on non-finite angle, view-transform push/body/pop. |
-| `draw/rounded_rect` | compiler rule | Integer position/size/radius, shared pure path geometry, drawing entry. |
+| `draw/rounded_rect` | compiler rule | Fractional position/size/radius, shared pure path geometry, drawing entry. |
 | `draw/scale` | compiler rule | Scalar/component locals, `fail` on non-finite factors, view push/body/pop. |
 | `draw/text` | intrinsic | `color/parse`, integer position/size, whole-string text entry. |
 | `draw/translate` | compiler rule | Checked integer coordinate conversion, view push/body/pop. |
@@ -1031,7 +1125,7 @@ operation. A user function/macro row is not a new runtime primitive.
 | `finish` | compiler rule | Inline checked definition: ordered field updates, `array/concat`, `array/vec3`, list access/build, `coerce`, branches. |
 | `floor` | primitive | `floor` |
 | `fn` | compiler rule | Specialize and inline the checked body at each call site; retain capture and call identity. |
-| `iterate` | compiler rule | One `Counted` loop over `max(0, n)` passes with a held accumulator: the function is inlined once per site (a packed `map` inside it is one region, lowered once and invoked per pass), results widen like `reduce`, and `:until` holds a finished flag so later passes only skip a branch. No 4,096 bound. |
+| `iterate` | compiler rule | One `Counted` loop over `max(0, n)` passes with a held accumulator: the function is inlined once per site (a packed `map` inside it is one region, lowered once and invoked per pass), results widen like `reduce`, and `:until` supplies the loop's stop local so remaining passes are not visited. Native and emitted JavaScript commit the next value before stopping. No 4,096 bound. Numeric forms inside a region use its carried controls. |
 | `fold` | region | Numeric packed seeded accumulator; otherwise bounded sequential frame loop with `coerce` and accumulator widening. |
 | `for` | region | Numeric packed product/collect; otherwise bounded frame product loop with sequence build and access. |
 | `frame/dt` | intrinsic | Snapshot Float `dt`. |
@@ -1114,7 +1208,7 @@ operation. A user function/macro row is not a new runtime primitive.
 | `sop/group_names` | intrinsic | Owner-filtered names in native insertion order using the shared Houdini-style wildcard, class, escape and exclusion rules. Invalid patterns report `E_GROUP_PATTERN`; names remain exact text arrays. |
 | `sop/group_entries` | intrinsic | `(sop/group_entries geometry pattern :owner "any")` returns ordered parallel text arrays in `{:owners ... :names ...}`. Ordinary groups retain global insertion order across owners, followed by edge groups. Owner filtering and patterns use the same rules as `sop/group_names`; invalid owner/type/pattern or unavailable geometry retain the existing group-source diagnostics. Arrays have no 4,096-entry bound. The native and JavaScript host protocols agree; reached cooked sources remain outside 2D web export. |
 | `sop/attr_entries` | intrinsic | `(sop/attr_entries geometry :owner point)` returns the record `{:name :type :owner}` of parallel text arrays over the stored attributes of one owner (`point`, `vertex`, `primitive`, `detail`; `any` lists every owner) in native attribute order, `type` spelled as `sop/attr_type` does and `owner` as lower-case owner text. Canonical `P` is not a stored attribute and is absent, as in `sop/attr_names`. Dynamic native sources use `Host_source`; 2D web export refuses those sources with `E_WEB_SOURCE`. |
-| `text/float_g17` | intrinsic | Pure Float-to-Text `Printf "%.17g"`, the spelling native encoded tables print floats with (used by the `group_ranges` normalizer). No JavaScript twin; dynamic native source. |
+| `text/float` | intrinsic | Pure Float-to-Text using `Param.float_text`: the shortest round-trip digits, preserving signed zero. Encoded `group_ranges` and `group_promotions` tables use the same formatter as native parameters. No JavaScript twin; dynamic native source. |
 | `text/glob_literal` | intrinsic | Pure nonempty Text-to-Text quoting for the native attribute/group pattern parser. Escapes wildcard/class/escape/exclusion syntax and its ASCII separators (space, TAB, LF, CR, FF); hyphens, VT and other bytes retain their literal spelling. Empty input is `E_METADATA_PATTERN`; wrong input type is `E_METADATA_TEXT`. Native bytes remain exact, including invalid UTF-8, through the shared reversible JavaScript Text codec. Dynamic native sources use `Host_source`; 2D web export refuses those sources with `E_WEB_SOURCE`. |
 | `text/group_name_valid`, `text/group_name_forced` | intrinsic | Pure Text predicates over the native Groups-from-Name spelling (`Rdk.Group_ops.valid_group_name` / `force_valid_group_name`): valid means nonempty ASCII letters, digits and underscore without a leading digit; forced turns every other byte into `_` and prefixes `_` when the first byte is a digit (a UTF-8 character becomes one `_` per byte; empty stays empty). Wrong input type is `E_METADATA_TEXT`. Dynamic native sources use `Host_source`; 2D web export refuses those sources with `E_WEB_SOURCE`. |
 | `text/glob_rewrite` | intrinsic | Pure `(text/glob_rewrite pattern replacement text)` uses the same compiled wildcard captures and replacement rules as native metadata renaming, returning the original text when no term matches. Invalid pattern/replacement pairs are `E_METADATA_PATTERN` with the native parser message; wrong arguments are `E_METADATA_TEXT`. Native/JavaScript fixtures preserve classes, exclusions, escaped literals and UTF-8. Dynamic native sources use `Host_source`; 2D web export refuses those sources with `E_WEB_SOURCE`. |
@@ -1135,8 +1229,8 @@ operation. A user function/macro row is not a new runtime primitive.
 
 ## Verification and sources
 
-P0.6 checks this table against the live census. P0.R checks the primitive count
-and semantics. The migration then proves native execution against the tree
+The live census checks this table and its primitive count and semantics. Native
+execution is checked against the tree
 walker, region instruction snapshots and unchanged Metal goldens, native draw
 serialization snapshots, and native pixels. Web primitives have native-output
 fixtures; CPU frames compare exact structure and attributes within 1e-6 over

@@ -2,7 +2,7 @@
     (the scene with its objects and their visible and render flags, geometry and materials with
     how many graphs use each, the World, the layouts), the active graph unfolded into its loops
     and bindings, the reusable functions and macros, the active graph's inputs as sliders and
-    the data flow around it.  The behavioural reference is [specification/workspace/prototype] (navigator).
+    the data flow around it. Its behavior is specified in [specification/flow.md].
 
     Pure state and rows; {!view} draws inside [Pxui.Ui.frame] and returns intents that
     [Core] applies after the frame. *)
@@ -53,7 +53,7 @@ type params = {
   records : Flow_graph.Probe.t option;
   probes : path -> int;  (** the iteration each zone shows *)
   selected : path list;
-  chips : (string * Rays.Color.t) list;  (** the evaluated colour of each material graph *)
+  chips : (string * Rays_math.Color.t) list;  (** the evaluated colour of each material graph *)
   objects : obj list;  (** the scene's objects, in tree order *)
   root_detail : string;  (** what the scene's root row says beside its name *)
   layouts : (string list * int) option;  (** the layouts of the editor graph, and the one shown *)
@@ -84,5 +84,5 @@ val jump_rows : Flow.Workspace.t -> (string * string) list
 val notes : Flow.Eval.t -> (string * string) list
 (** The roughness of each evaluated material graph, as its row's detail. *)
 
-val chips : Flow.Eval.t -> (string * Rays.Color.t) list
+val chips : Flow.Eval.t -> (string * Rays_math.Color.t) list
 (** The evaluated colour of each material graph (a vector or hex text; white when unset). *)

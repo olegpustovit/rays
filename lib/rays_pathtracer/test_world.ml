@@ -6,7 +6,9 @@ module W = Rays.World
 
 let rgb = P.Linear_color.rgb
 let get = function Ok v -> v | Error e -> failwith e
-let v3 = Rays.Vec3.create
+let rays_mesh geometry = get (Result.map_error Rdk.Error.to_string
+  (Rdk_rays.Rays_mesh.to_trace_mesh geometry))
+let v3 = Rays_math.Vec3.create
 let white = W.rgb 1. 1. 1.
 let gradient c = W.Gradient { zenith = c; horizon = c; nadir = c; sharpness = 1. }
 
@@ -38,7 +40,7 @@ let rmse a b =
 
 (* The resolve's ACES fit and 2.2 gamma, for an exact background check. *)
 let resolved x =
-  let c = (x *. ((2.51 *. x) +. 0.03)) /. ((x *. ((2.43 *. x) +. 0.59)) +. 0.14) in
+  let c = Rays_math.Color.aces x in
   int_of_float ((Float.pow (Float.min 1. (Float.max 0. c)) (1. /. 2.2) *. 255.) +. 0.5)
 
 let run () =
@@ -140,8 +142,8 @@ let bench () =
     (Rdk.Box_generator.box ~center:(v3 0. (-1.05) 0.) ~size:(v3 6. 0.1 6.) ())) in
   let ball = get (Result.map_error Rdk.Error.to_string
     (Rdk.Uv_sphere.run ~center:(v3 0. 0. 0.) ~segments:48 ~rings:24 ~radius:1. ())) in
-  let scene = { P.objects = [ (floor, P.material ~roughness:0.7 (rgb 0.7 0.7 0.7))
-                            ; (ball, P.material ~roughness:0.3 (rgb 0.8 0.5 0.3)) ]
+  let scene = { P.objects = [ (rays_mesh floor, P.material ~roughness:0.7 (rgb 0.7 0.7 0.7))
+                            ; (rays_mesh ball, P.material ~roughness:0.3 (rgb 0.8 0.5 0.3)) ]
               ; spheres = []
               ; strands = []
               ; environment = { sky = rgb 0.8 0.8 0.8; ground = rgb 0.3 0.3 0.3

@@ -1,7 +1,7 @@
 // node gpu_fast_check.mjs DIR GPU_JS
 //
 // Fast-precision WGSL kernels (lib/flow_web/wgsl.ml `kernel_fast`) compiled and run in real Chrome through
-// tools/web/runtime/gpu.js, against native: DIR holds `test_wgsl.exe --write-fast-table DIR`'s kernels.json
+// lib/web_export/runtime/gpu.js, against native: DIR holds `test_wgsl.exe --write-fast-table DIR`'s kernels.json
 // and expected.json (each case's native fast inputs and native exact outputs). The kernels' integer
 // registers are 64-bit pairs; their inputs and outputs travel as f32, so an integer output is compared
 // exactly below 2^24 and to f32 rounding above, a float output to 1e-5 relative (noise 1e-4 absolute).
@@ -17,12 +17,15 @@ if (!chromeAvailable()) { console.log('gpu_fast_check: skipped (Google Chrome no
 
 const page = `<!doctype html><script type="module">
 import { createGpu } from './gpu.js';
+window.__activeCase = 'startup';
 window.__result = (async () => {
   if (!navigator.gpu || !(await navigator.gpu.requestAdapter())) return { unavailable: true };
   const table = await (await fetch('kernels.json')).json(), cases = await (await fetch('expected.json')).json();
+  const errorCases = await (await fetch('errors.json')).json();
   const errors = [], gpu = await createGpu(table, { onError: e => errors.push(e) });
   const report = {};
   for (const [name, c] of Object.entries(cases)) {
+    window.__activeCase = name;
     const k = gpu.kernels.get(name), uniforms = {};
     for (const [u] of k.uniform_layout) {
       let m = /^uniform:(\\d+)$/.exec(u); if (m) { const v = c.uniforms[+m[1]]; uniforms[u] = v.length === 1 ? v[0] : v; continue; }
@@ -38,6 +41,17 @@ window.__result = (async () => {
       if (!(e <= limit)) { bad++; if (first < 0) first = i; }
     }
     report[name] = { bad, worst, first, sample: first >= 0 ? [got[first], c.expected[first]] : null };
+  }
+  report.integerErrors = {};
+  for (const [name, c] of Object.entries(errorCases)) {
+    window.__activeCase = name;
+    const k = gpu.kernels.get(name), uniforms = {};
+    for (const [u] of k.uniform_layout) {
+      const m = /^frame:(\\d+):/.exec(u); if (m) uniforms[u] = c.frame[+m[1]];
+    }
+    gpu.dispatch(name, { count: c.count, inputs: c.inputs, uniforms, tables: c.tables });
+    await gpu.flush();
+    report.integerErrors[name] = errors.splice(0).map(({ code, message }) => ({ code, message }));
   }
   // count words: 'compare' bounded by 'hash's count record at mul 1 div 2, record {n, 6n, 1, 0, 0, 0}
   const enc = gpu.device.createCommandEncoder();
@@ -61,11 +75,12 @@ window.__result = (async () => {
   await gpu.flush();
   report.errors = errors.map(e => e.message);
   return report;
-})();
+})().catch(error => ({ fatal: String(error?.stack || error), active: window.__activeCase }));
 </script>`;
 
 const files = { '/': page, '/index.html': page, '/gpu.js': readFileSync(gpuPath),
-  '/kernels.json': readFileSync(join(dir, 'kernels.json')), '/expected.json': readFileSync(join(dir, 'expected.json')) };
+  '/kernels.json': readFileSync(join(dir, 'kernels.json')), '/expected.json': readFileSync(join(dir, 'expected.json')),
+  '/errors.json': readFileSync(join(dir, 'errors.json')) };
 const server = await serve(files);
 const browser = await launch(server.url);
 let failed = false;
@@ -76,14 +91,23 @@ try {
     if (!result) await new Promise(r => setTimeout(r, 100));
   }
   if (result?.unavailable) { console.error('gpu_fast_check: WebGPU unavailable'); process.exit(3); }
-  for (const [name, r] of Object.entries(result)) {
-    if (name === 'errors' || name === 'counts') continue;
+  if (result?.fatal) { console.error(`gpu_fast_check: browser failed in ${result.active}\n${result.fatal}`); failed = true; }
+  for (const [name, r] of Object.entries(result?.fatal ? {} : result)) {
+    if (name === 'errors' || name === 'counts' || name === 'integerErrors') continue;
     const ok = r.bad === 0; failed ||= !ok;
     console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}: ${r.bad} bad, worst ${r.worst}${r.sample ? `, first gpu ${r.sample[0]} native ${r.sample[1]}` : ''}`);
   }
-  const c = result.counts, ok = c.recordOk && c.valuesOk && c.compactOk && c.length === 500;
-  failed ||= !ok || result.errors.length > 0;
+  const c = result?.fatal ? {} : result.counts;
+  const ok = !result?.fatal && c.recordOk && c.valuesOk && c.compactOk && c.length === 500;
+  const integerErrorsOk = !result?.fatal && Object.entries(result.integerErrors).every(([name, errors]) => {
+    const selected = name.endsWith('_selected'), shift = name.includes('shift');
+    return selected ? errors.length === 1 && errors[0].code === 'E_RANGE'
+      && errors[0].message === (shift ? 'Integer shift count must be within [0, 62].' : 'Integer division by zero.')
+      : errors.length === 0;
+  });
+  failed ||= !ok || !integerErrorsOk || (result.errors?.length ?? 0) > 0;
   console.log(`${ok ? 'ok  ' : 'FAIL'} counts: record ${JSON.stringify(c.record)}, ${c.length} values bounded, values ${c.valuesOk}, compaction ${c.compactOk}`);
-  if (result.errors.length) console.log(`FAIL errors: ${result.errors.join('; ')}`);
+  console.log(`${integerErrorsOk ? 'ok  ' : 'FAIL'} integer status errors: ${JSON.stringify(result.integerErrors)}`);
+  if (result.errors?.length) console.log(`FAIL errors: ${result.errors.join('; ')}`);
 } finally { browser.close(); server.close(); }
 setTimeout(() => process.exit(failed ? 1 : 0), 300);

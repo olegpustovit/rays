@@ -15,9 +15,9 @@ open Test_text
 
 let lower name =
   match Flow.Syntax.parse (case name) with
-  | Error d -> fail (Flow.Diagnostic.to_string d)
+  | Error d -> fail (Diagnostic.to_string d)
   | Ok forms -> (match Lower.workspace ~extra:Editor_document.Contexts.descriptors ~factories:Sop_catalog.Editor.factories forms with
-      | Ok lowered -> lowered | Error d -> fail (Flow.Diagnostic.to_string d))
+      | Ok lowered -> lowered | Error d -> fail (Diagnostic.to_string d))
 
 
 (* the cooked piece of a lowered fixture *)
@@ -34,8 +34,9 @@ let cooked ?(lit = Pick.Set.empty) ?cook lowered ~prepared =
   let update = Cook.update ~live:false ~lit
       cook ~settings:Rays_editor.Settings.none
       ~objects:(Lower.objects lowered) ~edit_error:None
-      ~effects:Sop.Parameter.no_effects ~timeline_changes:[] ~timeline
-      ~frame:{ (Test_editor_input.frame (0., 0.) [] 0) with dt = 0. }
+      ~effects:Param.no_effects ~timeline_changes:[] ~timeline
+      ~frame:(let frame = Test_editor_input.frame (0., 0.) [] 0 in
+        { frame with input = { frame.input with dt = 0. } })
       ~frame_request:None in
   check (update.edit_error = None) "cook error";
   update.cook
@@ -60,11 +61,11 @@ let above geometry tag =
     match best with Some (_, (_, by, _)) when by >= y -> best | _ -> Some (p, c))
     None (primitives_of tags tag) in
   let x, y, z = snd (Option.get best) in
-  Rays.Vec3.create x (y +. 1e-3) z
+  Rays_math.Vec3.create x (y +. 1e-3) z
 
 let present geometry tag = Array.exists (( = ) tag) (Option.get (Pick.tags geometry))
 
-let down = Rays.Vec3.create 0. (-1.) 0.
+let down = Rays_math.Vec3.create 0. (-1.) 0.
 
 let pick_run () =
   (* --- sunflower: one merge, tag = the seed --- *)
@@ -83,10 +84,10 @@ let pick_run () =
   (match Cook.pick piece ~origin:(above (Result.get_ok (Sop.Payload.geometry piece.output.payload)) tag83) ~direction:down with
    | Some (_, tag) -> check (tag = tag83) "the ray finds seed 83"
    | None -> fail "the ray missed seed 83");
-  check (Cook.pick piece ~origin:(Rays.Vec3.create 0. 9. 9.) ~direction:down = None) "a miss";
+  check (Cook.pick piece ~origin:(Rays_math.Vec3.create 0. 9. 9.) ~direction:down = None) "a miss";
   (* instanced pieces: the prototype is picked at every instance, hits compare in world units *)
-  let module M = Rays.Mat4 in
-  let module V = Rays.Vec3 in
+  let module M = Rays_math.Mat4 in
+  let module V = Rays_math.Vec3 in
   let over = above (Result.get_ok (Sop.Payload.geometry piece.output.payload)) tag83 in
   let instanced transforms = { piece with output = { piece.output with instances = Some transforms } } in
   let hit p origin = Cook.pick p ~origin ~direction:down in
@@ -155,7 +156,7 @@ let flat text clicks =
   let env = ref (E3.create ~await:true ~workspace ~camera:(Easy_camera.create ~inertia:false ())
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
-      ~scene3:(fun _ _ -> Scene3.empty) () |> Result.get_ok) in
+      ~draw:(fun _ _ -> Scene3.empty) () |> Result.get_ok) in
   let count = ref 0 in
   let step ?(buttons = []) mouse events =
     incr count; env := E3.update !env (Test_editor_input.frame ~buttons mouse events !count) in
@@ -175,18 +176,18 @@ let flat text clicks =
   let gx, gy, _, _ = panes.graph in
   let row = float (gx + 60), float (gy + 24 + 12) in
   step row [];
-  step row [ Event.MousePressed (Input.LeftButton, row); Event.MouseReleased (Input.LeftButton, row) ];
-  step row [ Event.KeyPressed (Input.KeyChar 'i') ];
+  step row [ Input.Pointer_pressed (Input.LeftButton, row); Input.Pointer_released (Input.LeftButton, row) ];
+  step row [ Input.Key_pressed (Input.KeyChar 'i') ];
   count := !count + 30;  (* past the double-click interval *)
   for _ = 1 to 4 do step (450., 300.) [] done;
   let at (x, y) =
-    match Camera.world_to_screen ~viewport:panes.view (E3.view_camera !env) (Vec3.create x y 0.) with
-    | Some p -> p.Vec3.x, p.y | None -> failwith "the point is behind the camera" in
+    match Camera.world_to_screen ~viewport:panes.view (E3.view_camera !env) (Rays_math.Vec3.create x y 0.) with
+    | Some p -> p.Rays_math.Vec3.x, p.y | None -> failwith "the point is behind the camera" in
   let click world =
     let p = at world in
-    step p [ Event.MouseMoved p ];
-    step ~buttons:[ Input.LeftButton ] p [ Event.MousePressed (Input.LeftButton, p) ];
-    step p [ Event.MouseReleased (Input.LeftButton, p) ]; step p [] in
+    step p [ Input.Pointer_moved p ];
+    step ~buttons:[ Input.LeftButton ] p [ Input.Pointer_pressed (Input.LeftButton, p) ];
+    step p [ Input.Pointer_released (Input.LeftButton, p) ]; step p [] in
   List.iter (fun (world, expected, message) ->
     click world;
     if selected () <> expected then failwith (message ^ ": " ^ selected ())) clicks;

@@ -1,11 +1,13 @@
 (library
+ (enabled_if (= %{system} macosx))
  (name ogpu_metal_native)
  (public_name rays.ogpu_metal_native)
- (modules Device Buffer Texture Sampler Library Pipeline Queue Presentation Surface Acceleration Backend)
- (private_modules Presentation)
+ (modules Device Buffer Texture Sampler Library Pipeline Queue Presentation Surface Acceleration Command_control Compute_encoder Blit_encoder Render_encoder Backend)
+ (private_modules Presentation Command_control Compute_encoder Blit_encoder Render_encoder)
  (libraries ogpu_core metal lru))
 
 (library
+ (enabled_if (= %{system} macosx))
  (name ogpu_metal)
  (public_name rays.ogpu_metal)
  (implements ogpu)
@@ -13,39 +15,60 @@
  (libraries ogpu_metal_native metal))
 
 (executable
+ (enabled_if (= %{system} macosx))
  (name test_main)
  (modules test_main test_ogpu_metal_foundation test_ogpu_metal_texture test_ogpu_metal_pipeline test_ogpu_metal_acceleration test_ogpu_metal_capabilities test_ogpu_metal_sampler_pixels test_pipeline_argument_buffer)
- (libraries ogpu ogpu_metal_native metal unix))
+ (libraries ogpu ogpu_metal ogpu_metal_native metal unix))
 
 (test
+ (enabled_if (= %{system} macosx))
  (name test_device_error)
  (modules test_device_error)
  (libraries ogpu_metal_native metal))
 
 (rule
- (aliases runtest-native test_ogpu_metal_foundation)
+ (enabled_if (= %{system} macosx))
+ (alias test_ogpu_metal_foundation)
  (action (run %{exe:test_main.exe} test_ogpu_metal_foundation)))
 
 (rule
- (aliases runtest-native test_ogpu_metal_texture)
+ (enabled_if (= %{system} macosx))
+ (alias test_ogpu_metal_texture)
  (action (run %{exe:test_main.exe} test_ogpu_metal_texture)))
 
 (rule
- (aliases runtest-native test_ogpu_metal_pipeline)
+ (enabled_if (= %{system} macosx))
+ (alias test_ogpu_metal_pipeline)
  (action (run %{exe:test_main.exe} test_ogpu_metal_pipeline)))
 
 (rule
- (aliases runtest-native test_ogpu_metal_acceleration)
+ (enabled_if (= %{system} macosx))
+ (alias test_ogpu_metal_acceleration)
  (action (run %{exe:test_main.exe} test_ogpu_metal_acceleration)))
 
 (rule
- (aliases runtest-native test_ogpu_metal_capabilities)
+ (enabled_if (= %{system} macosx))
+ (alias test_ogpu_metal_capabilities)
  (action (run %{exe:test_main.exe} test_ogpu_metal_capabilities)))
 
 (rule
- (aliases runtest-native test_ogpu_metal_sampler_pixels)
+ (enabled_if (= %{system} macosx))
+ (alias test_ogpu_metal_sampler_pixels)
  (action (run %{exe:test_main.exe} test_ogpu_metal_sampler_pixels)))
 
 (rule
- (aliases runtest-native test_pipeline_argument_buffer)
+ (enabled_if (= %{system} macosx))
+ (alias test_pipeline_argument_buffer)
  (action (run %{exe:test_main.exe} test_pipeline_argument_buffer)))
+
+(alias
+ (enabled_if (= %{system} macosx))
+ (name runtest-native)
+ (deps
+  (alias test_ogpu_metal_foundation)
+  (alias test_ogpu_metal_texture)
+  (alias test_ogpu_metal_pipeline)
+  (alias test_ogpu_metal_acceleration)
+  (alias test_ogpu_metal_capabilities)
+  (alias test_ogpu_metal_sampler_pixels)
+  (alias test_pipeline_argument_buffer)))

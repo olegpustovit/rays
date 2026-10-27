@@ -21,7 +21,7 @@ let custom ?label ?(version = 1) ?(parameters = "")
         Error (Diagnostic.error ~code:"cancelled"
           "custom procedural node was cancelled before cooking")
       else match cook ~context (Array.copy geometries) with
-        | Ok geometry -> Ok Node.Private.{ geometry; diagnostics = []; instances = None }
+        | Ok geometry -> Ok Node.Private.{ geometry; instances = None }
         | Error message ->
           Error (Diagnostic.error ~code:(operation ^ "_failed") ~cause:message ~hints:[]
             (operation ^ " could not produce valid geometry")))
@@ -37,8 +37,7 @@ let readable node =
       if f.impact <> Param.Cook then None else Some (f.name ^ "=" ^ (match f.current with
         | Param.Bool_value b -> string_of_bool b
         | Int_value i -> string_of_int i
-        | Float_value x -> let short = Printf.sprintf "%.15g" x in
-            if float_of_string short = x then short else Printf.sprintf "%.17g" x
+        | Float_value x -> Param.float_text x
         | Text_value text -> (match f.kind with Param.Choice_view _ -> token text | _ -> text)
         | Choice_value label -> token label))) fields
       |> String.concat ";"
@@ -102,7 +101,7 @@ type inspectable_parameters = {
 
 type encoded_parameters = { rules : int list }
 
-let encoded_rules = Parameter.encoded ~equal:( = )
+let encoded_rules = Param.encoded ~equal:( = )
     ~encode:(fun values -> String.concat "," (List.map string_of_int values))
     ~decode:(fun text ->
       let text = String.trim text in
@@ -115,31 +114,31 @@ let encoded_rules = Parameter.encoded ~equal:( = )
           | None -> Error (Printf.sprintf "invalid integer %S" token))) (Ok [])
         |> Result.map List.rev)
 
-let encoded_schema = Parameter.schema ~name:"encoded_rules"
+let encoded_schema = Param.schema ~name:"encoded_rules"
     ~default:{ rules = [1; 2] } [
-  Parameter.field ~name:"rules" ~kind:encoded_rules ~default:[1; 2]
+  Param.field ~name:"rules" ~kind:encoded_rules ~default:[1; 2]
     ~get:(fun value -> value.rules)
     ~set:(fun rules _value -> { rules }) ();
 ]
 
 let inspectable_default = { translate_x = 0.; display_gain = 1. }
 
-let inspectable_schema = Parameter.schema ~name:"inspectable_transform"
+let inspectable_schema = Param.schema ~name:"inspectable_transform"
     ~default:inspectable_default [
-  Parameter.field ~name:"translate_x" ~label:"Translate X"
-    ~folder:["Transform"] ~kind:(Parameter.floating ~min:(-2.) ~max:2. ())
+  Param.field ~name:"translate_x" ~label:"Translate X"
+    ~folder:["Transform"] ~kind:(Param.floating ~min:(-2.) ~max:2. ())
     ~default:0. ~get:(fun value -> value.translate_x)
     ~set:(fun translate_x value -> { value with translate_x }) ();
-  Parameter.field ~name:"display_gain" ~label:"Display gain"
-    ~folder:["Viewport"] ~impact:Parameter.View
-    ~kind:(Parameter.floating ~min:0. ~max:2. ()) ~default:1.
+  Param.field ~name:"display_gain" ~label:"Display gain"
+    ~folder:["Viewport"] ~impact:Param.View
+    ~kind:(Param.floating ~min:0. ~max:2. ()) ~default:1.
     ~get:(fun value -> value.display_gain)
     ~set:(fun display_gain value -> { value with display_gain }) ();
 ]
 
 let rec inspectable_transform ~label input parameters =
-  (let migration_translation = Vec3.create parameters.translate_x 0. 0. in
-Lisp_sop.node ~with_:["input", (input)] (Printf.sprintf {|(sop/transform (sop/ext_input) :mode "Matrix" :m03 %s :m13 %s :m23 %s)|} ((Lisp_sop.float migration_translation.Vec3.x)) ((Lisp_sop.float migration_translation.Vec3.y)) ((Lisp_sop.float migration_translation.Vec3.z))))
+  (let migration_translation = Rays_math.Vec3.create parameters.translate_x 0. 0. in
+Lisp_sop.node ~with_:["input", (input)] (Printf.sprintf {|(sop/transform (sop/ext_input) :mode "Matrix" :m03 %s :m13 %s :m23 %s)|} ((Lisp_sop.float migration_translation.Rays_math.Vec3.x)) ((Lisp_sop.float migration_translation.Rays_math.Vec3.y)) ((Lisp_sop.float migration_translation.Rays_math.Vec3.z))))
   |> Node.relabel label
   |> Node.parameterize ~schema:inspectable_schema ~values:parameters
        ~rebuild:(fun ~label ~inputs parameters -> match inputs with
@@ -158,7 +157,7 @@ let test_node_owned_parameters_and_graph_edit () =
   let original_infos = Graph.inspect graph in
   let translated, effects = edit_parameters graph
       ~node_id:(Node.id editable)
-      ["translate_x", Parameter.Float_value 1.5] |> get_ok in
+      ["translate_x", Param.Float_value 1.5] |> get_ok in
   check (effects.cook && not effects.view && not effects.export)
     "graph edit lost cook impact";
   let edited = Option.get (Graph.find translated ~node_id:(Node.id editable)) in
@@ -183,7 +182,7 @@ let test_node_owned_parameters_and_graph_edit () =
     "stable graph edit did not reuse an unaffected cached input";
   let view_only, view_effects = edit_parameters translated
       ~node_id:(Node.id editable)
-      ["display_gain", Parameter.Float_value 1.75] |> get_ok in
+      ["display_gain", Param.Float_value 1.75] |> get_ok in
   check (not view_effects.cook && view_effects.view && not view_effects.export)
     "view-only node edit requested a cook";
   let before_view = Session.stats evaluator in
@@ -191,27 +190,27 @@ let test_node_owned_parameters_and_graph_edit () =
   check ((Session.stats evaluator).cooks = before_view.cooks)
     "view-only metadata invalidated cooked geometry";
   let view_node = Option.get (Graph.find view_only ~node_id:(Node.id editable)) in
-  let display = List.find (fun field -> field.Parameter.name = "display_gain")
+  let display = List.find (fun field -> field.Param.name = "display_gain")
       (Node.parameter_fields view_node) in
-  check (display.current = Parameter.Float_value 1.75)
+  check (display.current = Param.Float_value 1.75)
     "view-only node value was not retained for the inspector";
   Session.close evaluator
 
 let test_encoded_parameter () =
   let initial = { rules = [1; 2] } in
-  let field = Parameter.view encoded_schema initial |> List.hd in
-  check (field.kind = Parameter.Text_view
-      && field.current = Parameter.Text_value "1,2")
+  let field = Param.view encoded_schema initial |> List.hd in
+  check (field.kind = Param.Text_view
+      && field.current = Param.Text_value "1,2")
     "encoded parameter did not expose its deterministic text form";
-  let edited, effects = Parameter.apply_all encoded_schema initial
-      ["rules", Parameter.Text_value "3, 5, 8"] |> get_ok in
+  let edited, effects = Param.apply_all encoded_schema initial
+      ["rules", Param.Text_value "3, 5, 8"] |> get_ok in
   check (edited.rules = [3; 5; 8] && effects.cook)
     "encoded parameter did not decode an inspector edit";
-  check (Parameter.key encoded_schema initial
-      <> Parameter.key encoded_schema edited)
+  check (Param.key encoded_schema initial
+      <> Param.key encoded_schema edited)
     "encoded parameter did not participate in cache identity";
-  check (Result.is_error (Parameter.apply_all encoded_schema initial
-      ["rules", Parameter.Text_value "3,nope"]))
+  check (Result.is_error (Param.apply_all encoded_schema initial
+      ["rules", Param.Text_value "3,nope"]))
     "encoded parameter accepted an invalid structured edit"
 
 let test_async_cook_latest_request () =
@@ -285,14 +284,14 @@ let test_shared_input_memo () =
 let test_static_context_cache () =
   let graph =
     Lisp_sop.node {|(sop/grid :width_mode "Auto" :height_mode "Auto" :columns 4 :rows 3 :size 5.0)|}
-    |> (let migration_translation = Vec3.create 1. 2. 3. in
+    |> (let migration_translation = Rays_math.Vec3.create 1. 2. 3. in
 fun migration_input ->
   Lisp_sop.node ~with_:["migration_input", (migration_input)] (Printf.sprintf {|(sop/transform
    (sop/ext_migration_input)
    :mode "Matrix"
    :m03 %s
    :m13 %s
-   :m23 %s)|} ((Lisp_sop.float migration_translation.Vec3.x)) ((Lisp_sop.float migration_translation.Vec3.y)) ((Lisp_sop.float migration_translation.Vec3.z))))
+   :m23 %s)|} ((Lisp_sop.float migration_translation.Rays_math.Vec3.x)) ((Lisp_sop.float migration_translation.Rays_math.Vec3.y)) ((Lisp_sop.float migration_translation.Rays_math.Vec3.z))))
   in
   let evaluator = session () in
   let first = cook_ok evaluator (context ~frame:0L ~time:0. ~seed:1L
@@ -350,7 +349,7 @@ let test_grid_generator_contract () =
    :horizontal %s
    :vertical %s
    :columns 2
-   :rows 2)|} ((Lisp_sop.vec3 (Vec3.unit_x))) ((Lisp_sop.vec3 (Vec3.unit_x))))); false with Invalid_argument _ -> true)
+   :rows 2)|} ((Lisp_sop.vec3 (Rays_math.Vec3.unit_x))) ((Lisp_sop.vec3 (Rays_math.Vec3.unit_x))))); false with Invalid_argument _ -> true)
     "procedural Grid refuses collinear custom axes at construction";
   Session.close evaluator
 
@@ -396,7 +395,7 @@ let test_circle_generator_contract () =
    :orientation "Custom axes"
    :horizontal %s
    :vertical %s
-   :segments 8)|} ((Lisp_sop.vec3 Vec3.unit_x)) ((Lisp_sop.vec3 Vec3.unit_x)))); false with Invalid_argument _ -> true)
+   :segments 8)|} ((Lisp_sop.vec3 Rays_math.Vec3.unit_x)) ((Lisp_sop.vec3 Rays_math.Vec3.unit_x)))); false with Invalid_argument _ -> true)
     "procedural Circle refuses collinear custom axes at construction";
   Session.close evaluator
 
@@ -481,7 +480,7 @@ let test_uv_sphere_generator_contract () =
       && Rdk.Geometry.find_attribute ~owner:Rdk.Attribute.Point "uv"
          (Result.get_ok (Sop.Payload.geometry points.payload)) <> None)
     "procedural UV Sphere point lattice";
-  check (try ignore (Lisp_sop.node (Printf.sprintf {|(sop/uv_sphere :orientation "Custom axis" :axis %s)|} ((Lisp_sop.vec3 Vec3.zero))));
+  check (try ignore (Lisp_sop.node (Printf.sprintf {|(sop/uv_sphere :orientation "Custom axis" :axis %s)|} ((Lisp_sop.vec3 Rays_math.Vec3.zero))));
       false with Invalid_argument _ -> true) "procedural UV Sphere refuses zero axis at construction";
   Session.close evaluator
 
@@ -534,7 +533,7 @@ let test_torus_generator_contract () =
       && Rdk.Geometry.find_attribute ~owner:Rdk.Attribute.Point "uv"
          (Result.get_ok (Sop.Payload.geometry points.payload)) <> None)
     "procedural Torus point lattice";
-  check (try ignore (Lisp_sop.node (Printf.sprintf {|(sop/torus :orientation "Custom axis" :axis %s)|} ((Lisp_sop.vec3 Vec3.zero))));
+  check (try ignore (Lisp_sop.node (Printf.sprintf {|(sop/torus :orientation "Custom axis" :axis %s)|} ((Lisp_sop.vec3 Rays_math.Vec3.zero))));
       false with Invalid_argument _ -> true) "procedural Torus refuses zero axis at construction";
   Session.close evaluator
 
@@ -587,7 +586,7 @@ let test_tube_generator_contract () =
       && Rdk.Geometry.find_attribute ~owner:Rdk.Attribute.Point "uv"
          (Result.get_ok (Sop.Payload.geometry points.payload)) <> None)
     "procedural Tube point lattice";
-  check (try ignore (Lisp_sop.node (Printf.sprintf {|(sop/tube :orientation "Custom axis" :axis %s)|} ((Lisp_sop.vec3 Vec3.zero))));
+  check (try ignore (Lisp_sop.node (Printf.sprintf {|(sop/tube :orientation "Custom axis" :axis %s)|} ((Lisp_sop.vec3 Rays_math.Vec3.zero))));
       false with Invalid_argument _ -> true) "procedural Tube refuses zero axis at construction";
   Session.close evaluator
 
@@ -622,7 +621,7 @@ let test_platonic_generator_contract () =
    :normals "Point"
    :kind "Tetrahedron"
    :orientation "Custom axis"
-   :axis %s)|} ((Lisp_sop.vec3 Vec3.zero)))); false
+   :axis %s)|} ((Lisp_sop.vec3 Rays_math.Vec3.zero)))); false
       with Invalid_argument _ -> true)
     "procedural Platonic refuses a zero axis at construction";
   Session.close evaluator
@@ -681,7 +680,7 @@ let test_spiral_generator_contract () =
       && Rdk.Geometry.find_attribute ~owner:Rdk.Attribute.Point "distance"
          (Result.get_ok (Sop.Payload.geometry output.payload)) <> None)
     "procedural Spiral output contract";
-  check (try ignore (Lisp_sop.node (Printf.sprintf {|(sop/spiral :orientation "Custom axis" :axis %s)|} ((Lisp_sop.vec3 Vec3.zero)))); false
+  check (try ignore (Lisp_sop.node (Printf.sprintf {|(sop/spiral :orientation "Custom axis" :axis %s)|} ((Lisp_sop.vec3 Rays_math.Vec3.zero)))); false
       with Invalid_argument _ -> true)
     "procedural Spiral refuses a zero central axis at construction";
   Session.close evaluator
@@ -734,8 +733,8 @@ let test_switch_is_lazy () =
 
 let test_shared_payload_accounting () =
   let source = Lisp_sop.node {|(sop/grid :width_mode "Auto" :height_mode "Auto" :columns 30 :rows 20 :size 3.0)|} in
-  let moved = (let migration_translation = Vec3.create 1. 0. 0. in
-Lisp_sop.node ~with_:["source", (source)] (Printf.sprintf {|(sop/transform (sop/ext_source) :mode "Matrix" :m03 %s :m13 %s :m23 %s)|} ((Lisp_sop.float migration_translation.Vec3.x)) ((Lisp_sop.float migration_translation.Vec3.y)) ((Lisp_sop.float migration_translation.Vec3.z)))) in
+  let moved = (let migration_translation = Rays_math.Vec3.create 1. 0. 0. in
+Lisp_sop.node ~with_:["source", (source)] (Printf.sprintf {|(sop/transform (sop/ext_source) :mode "Matrix" :m03 %s :m13 %s :m23 %s)|} ((Lisp_sop.float migration_translation.Rays_math.Vec3.x)) ((Lisp_sop.float migration_translation.Rays_math.Vec3.y)) ((Lisp_sop.float migration_translation.Rays_math.Vec3.z)))) in
   let evaluator = session () and current = context () in
   let source_output = cook_ok evaluator current source in
   let moved_output = cook_ok evaluator current moved in
@@ -801,7 +800,7 @@ let test_snapshot_feedback_boundary () =
       (fun ~context:_ inputs ->
         match inputs with
         | [|geometry|] -> Ok (Rdk.Transform_ops.transform
-            (Mat4.translation (Vec3.create 0.25 0. 0.)) geometry)
+            (Rays_math.Mat4.translation (Rays_math.Vec3.create 0.25 0. 0.)) geometry)
         | _ -> Error "solver step requires one snapshot") in
   let output = cook_ok evaluator current step in
   let x, _, _ = Rdk.Packed.Float3.get
@@ -921,7 +920,7 @@ let test_revolve_contract () =
    :uv_attribute "st"
    :divisions 16
    :origin %s
-   :axis %s)|} ((Lisp_sop.vec3 Vec3.zero)) ((Lisp_sop.vec3 Vec3.unit_y))) in
+   :axis %s)|} ((Lisp_sop.vec3 Rays_math.Vec3.zero)) ((Lisp_sop.vec3 Rays_math.Vec3.unit_y))) in
   let graph = make () in
   check (Node.operation graph = "revolve"
       && contains (readable graph) "type=closed"
@@ -949,7 +948,7 @@ let test_revolve_contract () =
    :group "missing"
    :divisions 8
    :origin %s
-   :axis %s)|} ((Lisp_sop.vec3 Vec3.zero)) ((Lisp_sop.vec3 Vec3.unit_y))) in
+   :axis %s)|} ((Lisp_sop.vec3 Rays_math.Vec3.zero)) ((Lisp_sop.vec3 Rays_math.Vec3.unit_y))) in
   (match Session.cook evaluator ~context:current missing with
    | Error error -> check (error.code = "missing_group")
        "procedural Revolve missing-group diagnostic"
@@ -1903,8 +1902,8 @@ let test_packed_copy_contract () =
   let box_points = Rdk.Geometry.point_count (Result.get_ok (Sop.Payload.geometry output.payload)) in
   assert (match output.instances with
     | Some transforms -> Array.length transforms = 3
-      && Vec3.nearly_equal (Mat4.transform_point transforms.(2) Vec3.zero)
-           (Vec3.create 4. 0. 0.) ~eps:1e-12
+      && Rays_math.Vec3.nearly_equal (Rays_math.Mat4.transform_point transforms.(2) Rays_math.Vec3.zero)
+           (Rays_math.Vec3.create 4. 0. 0.) ~eps:1e-12
     | None -> false);
   let consumer = Lisp_sop.node ~with_:["packed", (packed)] {|(sop/null (sop/ext_packed))|} in
   let materialized = Session.cook session ~context consumer |> Result.get_ok in

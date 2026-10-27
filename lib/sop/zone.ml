@@ -72,7 +72,7 @@ let element_node element =
     ~parameters:("content=" ^ Digest.to_hex element.digest)
     ~cook_mode:Node.Generator ~dependencies:Context.Dependencies.static
     ~inputs:[||] (fun ~node_id:_ _ _ ->
-      Ok Node.Private.{ geometry; diagnostics = []; instances = None })
+      Ok Node.Private.{ geometry; instances = None })
 
 let node ?(report : element array -> unit = ignore) ?(live = false) ?(stamp = "") ~kind ?key ?select ~source_attribute ~source_base ~body
     ~inputs () =
@@ -102,6 +102,6 @@ let node ?(report : element array -> unit = ignore) ?(live = false) ?(stamp = ""
           ~grain:(Context.grain context) ~source_attribute
           ~source_base:(source_base + Option.value ~default:0 select)
           (Array.to_list parts) with
-      | Ok geometry -> Ok Node.Private.{ geometry; diagnostics = []; instances = None }
+      | Ok geometry -> Ok Node.Private.{ geometry; instances = None }
       | Error e -> Error (Diagnostic.error ~code:(Rdk.Error.code e)
           ~cause:(Rdk.Error.to_string e) "zone could not merge its elements"))

@@ -6,11 +6,12 @@ description: Run only the tests for the code you touched in rays. Use after edit
 1. `eval "$(opam env --switch=. --set-switch)"`.
 2. Map the edited path to its directory: `lib/<name>/…` → `lib/<name>`; a
    file under `test/` → `test`.
-3. `dune build @check 2>&1 | head -40`: fix type errors first. `@check` also
-   reports pre-existing `tools/` .cmi noise; ignore lines outside your paths.
-4. `dune build @<dir>/runtest 2>&1 | grep -E '^File|Fatal|rror' -A4 | head -40`.
+3. Build `tools/check.exe` once with `dune build tools/check.exe`.
+4. Time `_build/default/tools/check.exe @check @<dir>/runtest`.
+   Keep the full output and fix every reported failure. Focused runs have a
+   180-second timeout; a timeout is a defect to fix, not a limit to raise.
 5. A green default `runtest` is the baseline, so any failure here is yours.
-   Tests under `@runtest-native` / `@qualification` are known-red on some
-   machines; run them only when your change touches them.
-6. If a public `.mli` changed, also run `dune build @tools/api_manifest/runtest`
-   and use the promote-manifests skill.
+   Tests under `@runtest-native` / `@qualification` require the supported
+   display, device or SDK; run the lanes affected by your change.
+6. Review intended `.mli` changes directly; Lisp is the contract. Finish with
+   `git diff --check`. Reserve `check.exe --ship` for the shipping check.

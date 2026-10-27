@@ -37,7 +37,7 @@ let text = {|(workspace sync
 
 let lower ?previous workspace =
   match Contexts.of_workspace ~factories ?previous workspace with
-  | Ok doc -> doc | Error d -> failwith (Flow.Diagnostic.to_string d)
+  | Ok doc -> doc | Error d -> failwith (Diagnostic.to_string d)
 
 let open_text text = lower (Ws_fixture.of_text text)
 let scene (doc : Document.t) = Document.scene_graph doc
@@ -47,7 +47,7 @@ let node_id doc label = (List.find (fun (i : Edit_graph.node_info) -> i.label = 
 (* a document as labels say it: ids are allowed to differ *)
 let snapshot (doc : Document.t) =
   let graph = scene doc in
-  let fields node = List.map (fun (f : Parameter.field_view) -> f.name, f.current) (Node.parameter_fields node) in
+  let fields node = List.map (fun (f : Param.field_view) -> f.name, f.current) (Node.parameter_fields node) in
   let label g id = Option.map Node.label (Edit_graph.find g ~node_id:id) in
   let objects = List.sort compare (List.map (fun (i : Edit_graph.node_info) ->
     i.label, i.operation, Option.bind (Objects.parent graph i.id) (label graph), fields i.node)
@@ -64,7 +64,7 @@ let snapshot (doc : Document.t) =
                   | Some [| Some below |] -> down below | _ -> []) in
         Option.fold ~none:[] ~some:down n.displayed) (Objects.ids "world" graph) in
   objects, layers, Option.bind doc.active_camera (label graph),
-  List.map (fun (f : Parameter.field_view) -> f.name, f.current) (Editor_document.Settings.fields doc.settings)
+  List.map (fun (f : Param.field_view) -> f.name, f.current) (Editor_document.Settings.fields doc.settings)
   |> List.sort compare
 
 let source (doc : Document.t) = Workspace_doc.to_text (fst doc.workspace)
@@ -84,7 +84,7 @@ let reconcile ?adopt before after =
 
 let calls = ref 0
 let ok = function Ok doc -> incr calls; doc | Error message -> failwith (Printf.sprintf "reconcile #%d: %s" !calls message)
-let float name x = name, Parameter.Float_value x
+let float name x = name, Param.Float_value x
 
 let world_network (doc : Document.t) =
   let wid = List.hd (Objects.ids "world" (scene doc)) in
@@ -139,7 +139,7 @@ let run () =
     check (qualified.checked.approx == lowered.approx) "document did not publish lowering qualification";
     check (qualified.source == workspace.source && qualified.checked.source == workspace.checked.source)
       "qualification replaced the authored source";
-    if not accepted then check (List.exists (fun (d : Flow.Diagnostic.t) -> d.code = "E_GPU_FORM")
+    if not accepted then check (List.exists (fun (d : Diagnostic.t) -> d.code = "E_GPU_FORM")
       (List.assoc path qualified.checked.approx_reasons)) "capture overflow has no reason";
     current := doc) [2.,true;1e39,false;7.,true];
   let previous = !current in
@@ -213,7 +213,7 @@ let run () =
     check (node_id written label = node_id doc label) ("fields written text first changed the id of " ^ label))
     [ "arm", [ float "translate_x" 4.; float "translate_y" 2. ]; "fill", [ float "intensity" 99. ];
       "cam", [ float "fov" 500. ] ];
-  let hidden = [ "visible", Parameter.Bool_value false ] in
+  let hidden = [ "visible", Param.Bool_value false ] in
   text_first "flags" doc Document.Scene (Sync.Fields [ arm, hidden; fill, hidden ])
     (set (set doc "arm" hidden) "fill" hidden);
   (* an inline object is unfolded into a binding first *)
@@ -324,7 +324,7 @@ let run () =
   same_after_reload edited "world delete";
   check (Objects.ids "world" (scene (open_text (source edited))) = []) "a deleted World came back on reload";
   (* settings graph *)
-  let settings = fst (Result.get_ok (Editor_document.Settings.apply doc.settings [ "width", Parameter.Int_value 800 ])) in
+  let settings = fst (Result.get_ok (Editor_document.Settings.apply doc.settings [ "width", Param.Int_value 800 ])) in
   let edited = wrote "settings" doc (Sync.Settings settings) { doc with settings } in
   (* a workspace with no settings graph keeps them itself *)
   (let plain = open_text "(workspace plain (graph g :context sop (sop/box)))" in
@@ -422,7 +422,7 @@ let run () =
   let env = Rays_editor.Editor.create ~workspace:(Ws_fixture.of_text "(workspace bare (graph g :context sop (sop/box)))")
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
-      ~scene3:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) () |> Result.get_ok in
+      ~draw:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) () |> Result.get_ok in
   let env = match Rays_editor.Editor.edit env (Flow_graph.Flow_edit.Add_node { scope = [ "scene" ]; name = "lamp";
     expr = call "scene/light" [] }) with Ok env -> env | Error m -> failwith m in
   let saved = Workspace_doc.to_text (Rays_editor.Editor.workspace env) in
@@ -432,14 +432,14 @@ let run () =
   Rays_editor.Editor.close env;
   print_endline "scene sync: fields, inline, rename, reparent, delete, camera, World, settings, host objects, add by key ok"
 
-(* ---- the copies of a loop are one template (register V4) ---- *)
+(* ---- the copies of a loop are one template ---- *)
 
 let lamps (doc : Document.t) =
   List.filter_map (fun (i : Edit_graph.node_info) -> if i.operation = "light" then Some i else None)
     (Edit_graph.inspect (scene doc))
 
 let field (i : Edit_graph.node_info) name =
-  List.find_map (fun (f : Parameter.field_view) -> if f.name = name then Some f.current else None)
+  List.find_map (fun (f : Param.field_view) -> if f.name = name then Some f.current else None)
     (Node.parameter_fields i.node)
 
 let set_id (doc : Document.t) id values =
@@ -466,7 +466,7 @@ let run_loops () =
     let third = (List.nth (lamps doc) 2).id in
     (* a literal field: the template is edited, every copy changes, the text says it once *)
     let edited = ok (reconcile doc (set_id doc third [ float "intensity" 77. ])) in
-    check (List.for_all (fun i -> field i "intensity" = Some (Parameter.Float_value 77.)) (lamps edited))
+    check (List.for_all (fun i -> field i "intensity" = Some (Param.Float_value 77.)) (lamps edited))
       (what ^ ": an edit of one copy did not change them all");
     check (List.length (lamps edited) = 4 && contains (source edited) ":intensity 77.0"
            && not (contains (source edited) ":intensity 30"))
@@ -486,7 +486,7 @@ let run_loops () =
     (* a component the loop does not compute is the template's: every copy follows *)
     let lifted = ok (reconcile doc (set_id doc third [ float "translate_y" 5. ])) in
     check (contains (source lifted) ":translate [i 5.0 0]"
-           && List.for_all (fun i -> field i "translate_y" = Some (Parameter.Float_value 5.)) (lamps lifted)
+           && List.for_all (fun i -> field i "translate_y" = Some (Param.Float_value 5.)) (lamps lifted)
            && List.map (fun i -> field i "translate_x") (lamps lifted) = List.map (fun i -> field i "translate_x") (lamps doc))
       (what ^ ": a literal component of a computed vector was not edited in the template: " ^ source lifted);
     (* rename: the template's :name *)
@@ -498,7 +498,7 @@ let run_loops () =
       (what ^ ": a rename did not reach the template :name: " ^ source renamed ^ String.concat "," (List.map (fun (i : Edit_graph.node_info) -> i.label) (lamps renamed)));
     (* delete one copy: the loop skips that iteration, the others keep their iteration, id and place *)
     let x doc = List.map (fun i -> field i "translate_x") (lamps doc) in
-    let xs = List.map (fun v -> Some (Parameter.Float_value v)) in
+    let xs = List.map (fun v -> Some (Param.Float_value v)) in
     let ids doc = List.sort compare (List.map (fun (i : Edit_graph.node_info) -> i.id) (lamps doc)) in
     let gone = ok (write doc (Sync.Delete ([ third ]))) in
     check (contains (source gone) ":skip [2]" && not (contains (source gone) "take") && not (contains (source gone) "drop"))
@@ -512,7 +512,7 @@ let run_loops () =
       (what ^ ": a second delete did not accumulate: " ^ source again);
     let edited_after = ok (reconcile again (set_id again (List.hd (lamps again)).id [ float "intensity" 5. ])) in
     check (List.length (lamps edited_after) = 2 && contains (source edited_after) ":skip [1 2]"
-           && List.for_all (fun i -> field i "intensity" = Some (Parameter.Float_value 5.)) (lamps edited_after))
+           && List.for_all (fun i -> field i "intensity" = Some (Param.Float_value 5.)) (lamps edited_after))
       (what ^ ": an edit after a delete lost the skip or a copy");
     same_after_reload again (what ^ " delete twice");
     let first = (List.hd (lamps doc)).id in
@@ -535,7 +535,7 @@ let run_loops () =
   check (List.length (lamps grid) = 6) "the two-clause loop did not make six lamps";
   let ids doc = List.sort compare (List.map (fun (i : Edit_graph.node_info) -> i.id) (lamps doc)) in
   let xy doc = List.map (fun i -> field i "translate_x", field i "translate_y") (lamps doc) in
-  let cell i j = Some (Parameter.Float_value i), Some (Parameter.Float_value j) in
+  let cell i j = Some (Param.Float_value i), Some (Param.Float_value j) in
   let victim = (List.nth (lamps grid) 4).id in
   let gone = ok (write grid (Sync.Delete ([ victim ]))) in
   check (contains (source gone) ":skip [4]") ("a product iteration was not skipped: " ^ source gone);
@@ -563,7 +563,7 @@ let run_loops () =
                      (scene/merge (scene/light :name "a" :translate [i 0 0]) (scene/light :name "b" :translate [i 1 0]))))))|} in
   check (List.length (lamps pairs) = 6) "the loop of pairs did not make six lamps";
   let at doc label i = List.find_opt (fun (l : Edit_graph.node_info) -> l.label = label
-    && field l "translate_x" = Some (Parameter.Float_value i)) (lamps doc) in
+    && field l "translate_x" = Some (Param.Float_value i)) (lamps doc) in
   let id_at doc label i = (Option.get (at doc label i)).id in
   let half = ok (write pairs (Sync.Delete ([ id_at pairs "a" 0. ]))) in
   check (contains (source half) ":skip [[0 0]]" && not (contains (source half) "for [i (range 3)] :skip"))
@@ -620,7 +620,7 @@ let run_nested_loops () =
   check (List.length (lamps doc) = 6) "the nested loop did not make six lamps";
   let pick n = (List.nth (lamps doc) n).id in
   let edited = ok (reconcile doc (set_id doc (pick 3) [ float "intensity" 77. ])) in
-  check (List.for_all (fun i -> field i "intensity" = Some (Parameter.Float_value 77.)) (lamps edited)
+  check (List.for_all (fun i -> field i "intensity" = Some (Param.Float_value 77.)) (lamps edited)
          && contains (source edited) ":intensity 77.0" && not (contains (source edited) ":intensity 30"))
     "a literal edit did not reach the inner template";
   same_after_reload edited "nested edit";
@@ -635,7 +635,7 @@ let run_nested_loops () =
   same_after_reload renamed "nested rename";
   let ids doc = List.sort compare (List.map (fun (i : Edit_graph.node_info) -> i.id) (lamps doc)) in
   let ij doc = List.map (fun i -> field i "translate_x", field i "translate_y") (lamps doc) in
-  let cell i j = Some (Parameter.Float_value i), Some (Parameter.Float_value j) in
+  let cell i j = Some (Param.Float_value i), Some (Param.Float_value j) in
   let all = [ 0, 0; 0, 1; 1, 0; 1, 1; 2, 0; 2, 1 ] in
   let cells without = List.filter_map (fun (i, j) -> if List.mem (i, j) without then None
     else Some (cell (float_of_int i) (float_of_int j))) all in
@@ -695,7 +695,7 @@ let run_nested_loops () =
 (* ---- the root and the World as a merge member ---- *)
 
 let diagnostic text = match Contexts.of_workspace ~factories (Ws_fixture.of_text text) with
-  | Error d -> Some (d.Flow.Diagnostic.code, d.message)
+  | Error d -> Some (d.Diagnostic.code, d.message)
   | Ok _ -> None
 
 let refused code text =
@@ -737,11 +737,11 @@ let run_root () =
       (* a sketch that brings its own SOPs is not loaded here *)
       match Result.bind (Rays_editor.Source.read_imports ~file text)
         (fun imports -> Rays_editor.Workspace.load ~imports text) with
-      | Error ds when List.exists (fun (d : Flow.Diagnostic.t) -> d.code = "E_UNKNOWN_KIND") ds -> n
-      | Error ds -> failwith (file ^ ": " ^ String.concat "; " (List.map Flow.Diagnostic.to_string ds))
+      | Error ds when List.exists (fun (d : Diagnostic.t) -> d.code = "E_UNKNOWN_KIND") ds -> n
+      | Error ds -> failwith (file ^ ": " ^ String.concat "; " (List.map Diagnostic.to_string ds))
       | Ok workspace ->
           (match Contexts.of_workspace ~factories workspace with
-           | Ok _ -> n + 1 | Error d -> failwith (file ^ ": " ^ Flow.Diagnostic.to_string d))
+           | Ok _ -> n + 1 | Error d -> failwith (file ^ ": " ^ Diagnostic.to_string d))
     end) 0 (Sys.readdir sketches |> Array.to_list |> List.sort compare |> List.filteri (fun i _ -> i mod 2 = 0)) in
   check (loaded >= 4) (Printf.sprintf "only %d sketches were found to load" loaded);
   let studio = lower (Result.get_ok (Rays_editor.Workspace.load
@@ -851,9 +851,9 @@ let apply_ops (doc : Document.t) ops =
   List.fold_left (fun doc op ->
     Result.bind doc (fun (doc : Document.t) ->
       match Workspace_doc.edit catalog (fst doc.workspace) op with
-      | Error d -> Error (Flow.Diagnostic.to_string d)
+      | Error d -> Error (Diagnostic.to_string d)
       | Ok workspace -> Contexts.of_workspace ~factories ~previous:doc workspace
-          |> Result.map_error Flow.Diagnostic.to_string)) (Ok doc) ops
+          |> Result.map_error Diagnostic.to_string)) (Ok doc) ops
 
 let okx = function Ok d -> d | Error m -> failwith m
 
@@ -1043,8 +1043,8 @@ let run_instances () =
               && (night.params.width, night.params.height) = (1600, 900)) "each root's own resolution";
        (match day.camera, night.camera with
         | Some d, Some n ->
-            check (Rays.Camera.position d = Rays.Vec3.create 0. 1. 8.) "day looks from its own camera";
-            check (Rays.Camera.position n = Rays.Vec3.create 4. 2. 6.) "night looks from its own camera";
+            check (Rays.Camera.position d = Rays_math.Vec3.create 0. 1. 8.) "day looks from its own camera";
+            check (Rays.Camera.position n = Rays_math.Vec3.create 4. 2. 6.) "night looks from its own camera";
             check (Rays.Camera.projection n <> Rays.Camera.projection d) "and with its own lens"
         | _ -> failwith "each root names its camera")
    | _ -> failwith "each viewport's scene instance names its root");

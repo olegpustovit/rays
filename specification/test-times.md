@@ -1,10 +1,43 @@
 # Test times
 
 The log behind "Test time is a budget" in `AGENTS.md`: one row each time a slow test is found, reworked, gated
-or deleted. Newest first. Times are wall seconds on the author's machine, warm cache, dune dev profile.
+or deleted. Newest first. Test aliases use wall seconds on the author's machine, warm cache, dune dev profile;
+microbenchmarks name their clock and report allocation separately.
 
 | Date | Test | Before | After | What changed |
 |---|---|---|---|---|
+| 2026-10-27 | caller-owned phase names and shared packed capability metadata | fixed editor-phase enum in Flow; duplicate Noise3 extension type | Flow/graph/encoded checks 9.09 s; full affected Flow/IR/graph/encoded checks 20.83 s | Arbitrary phase names retain exclusive nesting, exception restoration, backward-clock clamping and domain isolation; metadata uses the existing packed kind with unsupported explicit capabilities refused. No fixture size or golden changes. Slowest existing actions under capture/parallel compile load: uniforms 15.47 s, IR 11.31 s, regions 10.36 s; unchanged uniforms had passed alone in 5.65 s at the preceding checkpoint. Editor caller integration is pending the module refactor's coherent checkpoint. |
+| 2026-10-27 | `@tools/qualification-web`, real Chrome/native qualification | 180.50 s timeout; missing primitive module, fixed-delay boot race and orphan Chrome stderr pipe | 55.55 s, all eight actions pass; 12.23 s strengthened presenter follow-up | Serve the imported primitive module; bound DevTools startup/commands; reuse one Chrome process with a fresh origin per workspace; wait for completed presentation and destroy inherited stderr on close. No timeout or pixel tolerance raised. All 15 exports advance; 83 probes, 15 image cases, marks/live checks and selected error diagnostics pass. Slowest concurrent actions are GPU marks 54.40 s, open_all 46.45 s and images 41.70 s under reference capture. This optional SDK/GPU qualification is outside default runtest. Standalone ordinary GPU check takes 1.29 s; presenter 1.46 s; recursive FAST parity 5.79 s. The stronger poll first exposed an early DOM-body read (9.51 s failed attempt); optional loading-DOM access fixed it, and both affected actions pass with six unchanged cached results. |
+| 2026-10-27 | Core image-source local-read regression, full focused IR/Web checks | synthetic export/native shot indexed local 7 outside a four-local Core frame | focused aliases and guards 25.99 s; image E2E about 20.2 s | `Core.reads` excludes deferred image-source node IDs and retains the three materialized transform locals; no bounds guard or fallback added. Existing golden/parity tests and all image pixel cases pass. Under concurrent load uniforms took 17.33 s; its unchanged executable alone passes in 5.65 s. |
+| 2026-10-27 | GPU ownership and integer status integration | ambient GPU service/policy; native borrowed outputs skipped status errors | coherent editor/native/source check116.63 s including queue; focused attribute/bulk18.07 s; reload/preset1.2 s; final native GPU1.3 s warm | Explicit data-only config, per-workspace owner, precision-aware caches, typed error checks on read/borrow/resident finish and inline protected close. Real Chrome8 integer selected/untaken cases plus24 numeric/carried kernels pass in about10 s. A template regex escape was corrected; empty generations read no status, error classes accumulate by atomic OR. Broad qualification separately failed present/image repros and timed out180 s; it remains open and is not counted as passing status evidence. |
+| 2026-10-27 | million-mark startup and first published shape validation | startup 803 B/mark; readiness guard alone 717 B/mark; redundant packed-shape scan about 248 MB | 469 B/mark, 4.9 s focused startup; shape checks about 0.7 s | Reuse the checked builder's validation proof on immutable publication; Private.copy clears it. Malformed copied tags/coordinates/widths/extents and f32 overflow remain refused. Startup stays one evaluation, reload two, ceiling unchanged at500 B/mark. Core editor update was only1.29 MB; staging scan was the measured source of excess. |
+| 2026-10-27 | Core/Region syntax-helper extraction | Core_lower.lower_with1371; Core_region.lower573 | 1249/428; focused IR13.05 s, source/dependency guards7.98 s | Same-file color/sequence and Region function/operator helpers preserve emission order and all existing goldens. Slowest IR action was existing uniforms11.32 s under concurrent capture/check load (previous standalone6.34 s); no new test or fixture added. Frozen kernel compile timing pairs are noisy and support no speed claim; raw values/hashes and excluded overlapping pair in cleanup/benchmarks/region-helpers.txt. |
+| 2026-10-27 | scoped frame sharing, focused IR and JS frame parity | repeated time reads; current Executor about 111 ns / 408 B | focused IR 5.99 s; full focused Web 11.37 s; JS generation/parity 2.81 s; Executor 90.7–91.0 ns / 360 B | Existing scope cache shares immutable frame facts while preserving branch/empty-loop dominance. Full IR's slowest executed test is `test_ir` 3.56 s; Web's is existing grade/index 9.88 s. 92 JS goldens / 83 programs / 369 frames agree. Alternating frozen baseline is 63.6–63.8 ns / 584 B, so scalar remains about 43% slower and the performance gate stays open. Reference capture stayed active; four benchmark commands took 0.76/1.10/0.75/0.88 s. Raw evidence: `cleanup/benchmarks/scalar-core.md`. |
+| 2026-10-27 | loop-aware fusion and signed63 target checks | loop regions declined fusion; new fast overflow fixture failed against native | focused CPU/JS/Metal/SPIR-V request 7.22 s; Chrome 2.54 s | Scoped control remapping, producer-result aliases, sibling outputs and ordered reduction preserve strict parity, including 32,769-row 1/8 domains and shortened producer-tail errors. All 15 real Metal/Chrome loop fixtures match exactly; ordinary/fast JS agrees. Fast Int arithmetic/abs now normalize to signed63 and logical shifts use 63 input bits. 22 deterministic SPIR-V binaries validate; original eleven hashes unchanged. Trace: JS 5.96 s, CPU 3.51 s, Metal 1.12 s. |
+| 2026-10-27 | `bench_core.exe loop-fusion` | same program with fusion disabled | fusion enabled; exact output checked before timing | One domain, 4,096 rows, three CPU-clock samples; allocation falls 41–113 KB. Producer 1.793→1.759 ms, consumer 1.794→1.788 ms, both 0.619→0.606 ms under live reference capture. These small loaded timing differences do not establish a speedup. Full command 0.39 s; raw output and frozen executable/source hashes in `cleanup/benchmarks/region-loops.md`. |
+| 2026-10-27 | per-pane editor extraction and Lower per-kind helpers | Core.update_frame 1,256 lines; Lower.lower_checked 1,078 lines | 744 and 989 AST lines; budgets pruned | Editor typecheck/logic and exact PXUI overlays/zones/table/kit groups pass in 23.36 s wall. Focused Lisp recipes pass about 6.2 s and golden self-tests 5.4 s including queue. New points-key replay passes 27/27 in 0.615 s from a consistent 22,002-row/56-key running snapshot. Subsequent explicit GPU config plumbing requires another integration checkpoint. |
+| 2026-10-27 | `@lib/flow_sop/test_workspace_zone` | 31.01 s executable alone (27.70 s user) under active frozen capture; 50.28 s in combined trace | 18.20 s focused alias, passed | The independent garden zone now uses four elements instead of twelve. It still checks 1/3-domain byte parity, deterministic recook, primitive counts, all iteration origins, and per-element plus final-merge tags. Temporary section timers showed the new typed-curve checks cost 0.008 s; no production code or timing instrumentation remains. The before/after runs had different harness/load conditions, so this records current runtime rather than a controlled speedup. |
+| 2026-10-27 | bounded promote_attributes/empty golden replay, 270 rows | newly completed frozen reference key | 33.244 s, all exact rows pass | Partial-key fixture from a consistent 11,972-row checkpoint; capture remains live. Source/check 1.401 s, Lower 21.176 s, cook/encode 0.047 s. This manual parity slice still exposes the compiler reuse/performance gate; full-corpus acceptance remains open. Latest consistent capture checkpoint advances to 13,178 rows / 28 keys against 50,011 declared generic cases. |
+| 2026-10-27 | combined compiler/GPU/Flow_sop/resource integration | two isolated SOP failures during concurrent changes | all requested aliases pass in 82.39 s | Fixed exact-root provenance accessor and typed per-zone Vec3 runtime-leaf validation; strict unsupported nested reduction checks still pass. Source/dependency guards and typecheck pass. Trace under broad test/capture load: workspace zone 50.28 s, Lisp ports 30.87 s, web grade/index 32.06 s, uniforms 22.18 s. Uniforms alone passes in 6.34 s; workspace zone alone took 31.01 s before the fixture reduction recorded above (18.20 s now). Followup resource/OGPU/typecheck/gate check passes in 9.58 s with exact injected-error records. |
+| 2026-10-27 | Region and ordinary Core `iterate :until` | inner iterate declined packed lowering; ordinary Core visited all remaining passes after stopping | IR/Web/GPU/native request passes in 28.20 s; Chrome fast WGSL 1.93 s | Ten 4,096-row Metal/WGSL fixtures match exactly; CPU/ordinary/fast JS cover negative counts, previous/next state, Int wrap, lazy errors, captured/named helpers and 32,769-row domain parity. Production image qualification passes (4.55 s request, 3.68 s test action). Ordinary Counted now stops before its next pass; a max_int-count fixture throws immediately if a pass runs after stop, avoiding an unbounded regression test. 92 JS frame goldens / 83 programs / 369 frames pass, regenerated in 1.79 s. Source budgets shrink to 1371/573/503 for Core_lower/Region/Packed. |
+| 2026-10-27 | `bench_core.exe loops`, early exit and prior fold fixtures | prior scalar/record packed 0.470/0.507 ms CPU in first frozen run | 0.460/0.462 ms; allocation exactly unchanged | Two alternating frozen pairs, live reference capture continuing; these small loaded results do not define a precise performance bound. New max_int-count record fixture exits in three passes: walker 9.746–9.852 ms / 27,439,088 B, packed 0.347–0.367 ms / 370,272 B for 1,024 rows. Exact bytes checked before timing; one-chunk fixture is not parallel scaling evidence. Commands 0.54/1.45/0.69/0.96 s wall. Hashes/raw outputs: `cleanup/benchmarks/region-loops.md`. |
+| 2026-10-27 | carried Region CPU/native/web checks | no packed inner-fold path | CPU parity executable 3.0 s; real Chrome fast WGSL 7.08 s | Dynamic/empty/nested folds, simultaneous scalarized record/vector/Text state, lexical rejection, exact Int bounds, lazy errors and 1/8-domain parity. Six 4,096-row Metal/WGSL fixtures match the reference exactly. Final coherent compiler/native/replay/guard request passes in 4.99 s warm, reusing completed functional actions from the preceding 21.07 s request. That request only failed a stale Lower length budget, reduced 1,290 to 1,289. An earlier trace's slowest action was existing web grade/index at 13.18 s under concurrent test/capture load; a standalone rerun took 9.02 s (source scanner also ran briefly). Source lengths shrink to 580/504 for Region.lower/Packed.run_typed, with no increased budget. |
+| 2026-10-27 | carried-loop microbenchmark (`bench_core.exe loops`) | scalar/record walker 14.008/18.935 ms CPU; 64,974,560/57,224,928 B | strict packed 0.463/0.490 ms CPU; 222,072/255,024 B | 1,024 rows × 16 steps, one domain, median of three samples; exact output checked before timing. The eight-domain selection fits one chunk and is not scaling evidence. Frozen reference capture continued; full command 1.26 s. Before/after ordinary-map scratch retains Float allocation and adds 120 B per Int force. Raw outputs, binary/source hashes and limits: `cleanup/benchmarks/region-loops.md`. |
+| 2026-10-27 | SOP golden replay (`polywire` 564 rows, `sweep_circle` 564 rows, `sweep/small` 69 rows) | 180 s, 157 s, 165 s wall respectively under active full-capture load | - | All selected rows matched compiled replay and exact subset coverage, but these timings exceed the focused budget and do not satisfy the full-corpus two-minute gate. Added an explicit fixture-slice selector that reports partial-key status; default full-key/full-128 checks remain strict. Per-row profiles identify workspace check/lowering and, for sweep, cooking as the cost; decode is cached. Whole-catalog improvement remains open. |
+| 2026-10-27 | `@lib/sop/test_lisp_ports` (compatibility alias after moving owner to `flow_sop`) | 27.2 s historical (2026-10-25) | 7.78 s wall, warm | Same parity recipes and fixture/case rows; only the test owner and source/dependency paths moved. The machine/load differs, so this is a current timing record, not a speedup claim. |
+| 2026-10-27 | `test_materials` | 18.83 s wall / 11.18 s CPU; `carry_tests` 12.5 s | 6.1 s executable wall; carry section 1.56 s | The carry editor fixture now uses an empty prepared scene because this section checks carry gestures and document edits; face-material rendering remains covered by its separate geometry test. Removed the duplicate positive-budget test that used two real 0.6 s sleeps to simulate a slow cook. The zero-budget holdback/release test and explicit apply/restore `<500 ms` assertion remain. Also removed redundant carry warmup frames after the one-frame setup passed all gesture checks. |
+| 2026-10-27 | path-tracer migration baseline, existing render_workspace tool | no reproducible full-scene benchmark mode | 6.56 s pathtracer; 363.95 s shattered studio, including setup | Finite manual runner, outside default test lanes: five rounds of 16 samples, four samples/frame, authored 480x840 and 1600x1600. GPU medians 126.58 and 9985.93 ms/frame; exact hashes repeat across rounds. Native GPU checks held; CPU captures/builds continued. Source hashes, band logs, commands and limitations are in `cleanup/benchmarks/pathtracer.md`; interleaved A/B is pending. |
+| 2026-10-27 | focused editor/native aliases | `@test/test_rays_editor` pulled the full native lane into a roughly three-minute request | focused native editor plus PXUI/gate/source guards: 18.97 s including compilation | Split 91 multi-alias rules into one focused alias plus aggregate lane dependencies; no test actions or locks removed. Added a gate regression against reintroducing coupled rule aliases. The function guard requested only two stale budget reductions after the reused Frame fixture builder; the functional/native checks passed. |
+| 2026-10-27 | Rays_math hash/random hot loops (temporary benchmark, dev `-opaque`) | Scatter inline RNG: 0.005713 CPU s / 24,000,104 B; clean inline hash: 0.004989 s / 96 B; Flow float-sequence hash: 0.061238 s / 128,000,192 B | Shared helpers: 0.005787 CPU s / 24,000,104 B; clean `Hash.mix`: 0.004025 s / 96 B; Flow `Hash.float_sequence32`: 0.064510 s / 128,000,192 B | Apple M1, OCaml 5.3.0, 1,000,000 iterations, median of 5 CPU-time runs. Old/new checksums matched exactly. This isolated loop benchmark is not a full Scatter or Flow workload; the Flow helper measured 3.27 ms slower per million calls, an observed cost rather than a broad performance claim. Temporary benchmark source and alias removed. |
+| 2026-10-27 | canonical float printing, 100,000 spellings | old 15/17-digit printer: 0.166 CPU s / 69.9 MB | shortest-significant-digit printer: 0.235 CPU s / 131.1 MB | Correctness consolidation, not a speedup: includes exact 16-digit spellings and chooses compact/plain output by length (10 stays 10, 1000 becomes 1e3); optimized the first 0.492 s / 267.4 MB implementation. Apple M1, dev build, one domain, stable 10,000-value sample repeated ten times (half exact eighths, half deterministic binary64 patterns), one measurement per revision under concurrent capture load. Command: `lib/param/test_param.exe --benchmark-floats`; default 2,048-pattern regression stays small. |
+| 2026-10-27 | golden replay input decoding, 35 fixtures × 3 rounds | 2.900 s, 2,189.1 MB allocated | 1.045 s, 729.8 MB allocated | Reuse immutable decoded inputs in the existing LRU, capacity 256 per run; recheck file identity/size/timestamps on hits, and retain digest validation on loads. Self-checks reject tampered/deleted cached fixtures and incomplete capture checkpoints. Apple M1, one decoding domain, dev profile, concurrent captures; this measures decoding, not whole-corpus replay. Command: `replay.exe --benchmark-inputs DIR 3`. |
+| 2026-10-27 | golden replay, `polywire/empty` (94 rows) | 29.382 s ordinary checking | 21.731 s prepared-library checking | The immutable reachable Lisp library is checked once per exact source/ops/catalog/ID-base key; each graph call and encoded parameter check still runs per row. Timed phases: ordinary/prepared source-check-lower-compile 28.921/21.275 s; cook/geometry encode 0.193/0.179 s; fixture input decode 0.006/0.007 s. Both paths matched every frozen digest/error. About 26% faster under concurrent reference capture PID 88011; whole-catalog replay and the two-minute gate remain open. Commands: `replay.exe --fixture-ordinary-profile DIR polywire empty`, `replay.exe --fixture-profile DIR polywire empty`. |
+| 2026-10-27 | full supplemental SOP golden capture, 15 nodes | representative slice only; not comparable | about 113 s for 8,762 unique cases and 47 input fixtures | Restored the authored fixture/case matrices, gave parameter variants distinct stable identities, and stream rows with complete coverage predeclared. Outside the default loop; the whole-catalog capture/replay and its two-minute gate remain open. |
+| 2026-10-27 | source comment/function guards (`@tools/codemod/runtest @tools/codemod/history-comments @tools/codemod/function-lengths`) | absent | 6.19 s including tool/launcher build | Added to shipping validation; default runtest runs only the small lexer/budget/link self-checks. The full scans use compiler-libs over library source files, excluding generated preprocessed binaries. |
+| 2026-10-27 | supplemental golden capture, early 267-row subset | 25.64 s at one domain | 7.40 s at four domains | Reused the validated lowered node, hoisted fixture serialization out of case loops and cached immutable fixtures within one capture (capacity 256). Rows/coverage were byte-identical. This subset omitted original authored cases and is not full-corpus timing or coverage evidence. |
+| 2026-10-27 | `@test/test_workspace_shell` | historical 31.9 s warm | 51.95 s during full capture | Passing run after dead host-hook removal; slowest sections were studio 8.7 s, lowering 7.6 s and panel keys 6.6 s. Remeasure the warm alias without concurrent capture before claiming a time regression or cutting coverage. |
+| 2026-10-27 | `@lib/sop/test_edit_graph` | 45.8 s | 5.51 s | The focused alias was also attached to `runtest`, so it ran the whole default SOP test set. Split the alias and made `runtest` depend on it explicitly; the Edit_graph coverage is unchanged. |
+| 2026-10-27 | `@lib/renderer/test_scene3_lighting` (native) | 78 s under concurrent load | 23.4 s under concurrent load | The 600-frame lighting pixel/cache checks now sample frames 1, 2, 60 and 600; the 65-light reject-before-upload check remains. This is native-only, outside the default `@runtest` budget. The Dune trace recorded 1.15 s as its slowest compile action (`port_tests/main.ml`), with no test action timing in that trace. |
 | 2026-10-25 | `test_workspace_doc` | 53 s (56 s measured at load 9-30) | 27.6 s through `check.exe` at load 5 | `part_files` opens and sweeps one file in six (it had opened all 37 for the window check, 19 s -> 2 s); `part_literals` lost its repeated edits (17 twice, 17.5, -9, second size), two of the invalid-literal cases, the child-note and point_list table rows, and cooks only the colour step and the `for` case (9.5 s -> 6 s); `part_contexts` lost the manifest regeneration (4 s; `@lib/sop_catalog/runtest` checks the manifest) and a third document build |
 | 2026-10-25 | `test_workspace_ir` | 31.6 s | 15.7 s | `examples/drawing` (8.5 s), `examples/particles` (3.6 s) and the `variations` fixture (3.6 s) join the RAYS_SLOW list |
 | 2026-10-25 | `test_lisp_ports` | 45 s | 27.2 s | Metadata recipes drop the 4096-grain cook, cook plain geometries every third case (every 16th with rule tables), extra geometries every second case (was all up to 200 cases), half the storage variants, one raw non-finite value, and one reference-input variant of `delete_attributes` |
@@ -36,181 +69,5 @@ or deleted. Newest first. Times are wall seconds on the author's machine, warm c
 | 2026-10-25 | graph drag in `ui_shot` (recursive_rectangles) | 27 s for 30 frames | 3.3 s | probes are no longer forced on every frame (`core_scope.ml`) |
 | 2026-10-25 | `@lib/flow_sop/test_workspace_cook` (first note) | over 180 s (stopped by `check.exe`) | fixed, see the row above | found while checking the Wrap change; not caused by it. `@test/test_text_pane` is 25 s: `Context_kernel.map` memo is not the cost (1000+ big-graph calls, chains up to 160 from identical unrolled subtrees, about 6% of main-thread samples); polymorphic `List.mem`/`List.assoc_opt` compares are about 30% |
 
-Open: the default loop still has eight aliases over 30 s (listed at the end of the inventory below); the cause is
-the product lowering, not the fixtures. `core_census.t` fails on crosses and hatch since before these changes.
-
-## Inventory, 2026-10-25
-
-Every test executable behind `dune build @runtest` (the default loop), `RAYS_SLOW=1` and `@qualification-scale`,
-measured on this tree. "Trace wall" is the cold `@runtest` (`DUNE_CACHE=disabled`, `-j 3`, machine load 11-17,
-per-action time from `--trace-file` + `dune trace cat`), so it overstates by 2-3x; "solo before" and "solo after"
-are the executable run alone (load 3-5) from `_build/default/<dir>` before and after this change. A dash means the
-trace time is already under budget and the executable was not run again. Budgets: focused alias 30 s, one section
-10 s. A `test_main` row is a section alias (`@test/<section>`, or the library's own `test_main`). Slowest first.
-Only rows of 1 s and over are listed; the 116 below 1 s are named after the table.
-
-### Default loop (`@runtest`)
-
-| Alias / executable | Loop | Trace wall (s) | Solo before (s) | Solo after (s) | Under budget |
-|---|---|---|---|---|---|
-| `run_nodes` | default | 2246.9 | >300 (41 CPU-min when killed) | moved to qualification-scale | NO |
-| `test_workspace_ir ..` | default | 2175.7 | >590 | 146 (examples, kit, fixtures, 4 small sketches; every sketch under RAYS_SLOW=1) | NO |
-| `test_workspace_doc` | default | 1408.1 | >300 (1408 in the trace) | 84 (heavy literal sweep under RAYS_SLOW=1) | NO |
-| `test_workspace_live` | default | 1221.6 | >300 (1222 in the trace) | 32-59 (8 orrery frames, 2 fixtures) | NO |
-| `test_lisp_ports` | default | 469.1 | 151.5 | 34 (35 at load 5) | NO |
-| `test_bloom_studio` | default | 211 | 72.5 | 42 (3 and 2 petals) | NO |
-| `test_sop_catalog` | default | 102.5 | 44.0 | 44.0 (not changed) | NO |
-| `test_scene_sync` | default | 99.7 | 40.9 | 40.9 (not changed) | NO |
-| `test_workspace_shell` | default | 65.5 | 51.2 (sections past RAYS_SUITE_BUDGET skipped) | 51.2 (not changed) | NO |
-| `test_set_color` | default | 34.1 | 10.4 | 10.4 | yes |
-| `test_viewport_pick` | default | 29.6 | 7.4 | 7.4 | yes |
-| `test_workspace_zone` | default | 28.3 | 12.1 | 12.1 | yes |
-| `test_text_pane` | default | 27 | 11.6 | 11.6 | yes |
-| `test_grade_index` | default | 24.8 | 2.2 (flow_ir), 8.4 (flow_web) | 8.4 | yes |
-| `test_probe` | default | 20.5 | 5.2 | 5.2 | yes |
-| `test_lisp_node` | default | 18.1 | 6.1 | 6.1 | yes |
-| `test_ir` | default | 16.5 | 5.3 | 5.3 | yes |
-| `test_materials` | default | 16 | 13.8 (exits 2, fails before and after) | 13.8 | yes |
-| `test_uniforms` | default | 15.5 | 7.0 | 7.0 | yes |
-| `test_metadata_ports --edge` | default | 13.7 | - | - | yes |
-| `mesh` | default | 12.5 | - | - | yes |
-| `test_gather` | default | 11.8 | - | - | yes |
-| `test_remap` | default | 11.4 | - | - | yes |
-| `test_points_port` | default | 11.3 | - | - | yes |
-| `test_image_sop` | default | 9.9 | - | - | yes |
-| `attrib` | default | 9.8 | - | - | yes |
-| `test_workspace_source` | default | 9.7 | - | - | yes |
-| `test_keyword_ports` | default | 9.4 | - | - | yes |
-| `test_iterate` | default | 8.7 | - | - | yes |
-| `test_setters` | default | 8.6 | - | - | yes |
-| `test_rays_editor_logic` | default | 8.4 | - | - | yes |
-| `test_geometry_arrays` | default | 8.2 | - | - | yes |
-| `test_math_kernel` | default | 8.1 | - | - | yes |
-| `test_pxui_graph` | default | 7.5 | - | - | yes |
-| `test_editor_consistency` | default | 7.5 | - | - | yes |
-| `test_js` | default | 7.1 | - | - | yes |
-| `test_gather` | default | 6.9 | - | - | yes |
-| `boolean` | default | 6.8 | - | - | yes |
-| `core` | default | 6.4 | - | - | yes |
-| `test_group_kernel` | default | 6.3 | - | - | yes |
-| `test_line_port` | default | 6.1 | - | - | yes |
-| `spatial` | default | 5.9 | - | - | yes |
-| `test_2d_ports` | default | 5.6 | - | - | yes |
-| `test_workspace_cook` | default | 5.2 | - | - | yes |
-| `test_facts` | default | 5.2 | - | - | yes |
-| `test_core_lists` | default | 5.1 | - | - | yes |
-| `test_concat` | default | 5 | - | - | yes |
-| `test_core_regions` | default | 4.9 | - | - | yes |
-| `test_gallery_shapes` | default | 4.8 | - | - | yes |
-| `gen` | default | 4.8 | - | - | yes |
-| `test_ui_parity` | default | 4.6 | - | - | yes |
-| `test_js_frame` | default | 4.6 | - | - | yes |
-| `curve` | default | 4.3 | - | - | yes |
-| `test_grade_index` | default | 4.2 | 2.2 (flow_ir), 8.4 (flow_web) | 8.4 | yes |
-| `main --check-workspace` | default | 4.2 | - | - | yes |
-| `test_planes` | default | 3.8 | - | - | yes |
-| `test_scene_tree` | default | 3.7 | - | - | yes |
-| `test_lisp_fusion` | default | 3.6 | - | - | yes |
-| `test_error_rows` | default | 3.6 | - | - | yes |
-| `test_encoded_parameters` | default | 3.6 | - | - | yes |
-| `test_attr_from_image` | default | 3.4 | - | - | yes |
-| `test_workspace_images` | default | 3.3 | - | - | yes |
-| `test_static_map` | default | 3.1 | - | - | yes |
-| `test_compact_scan` | default | 2.9 | - | - | yes |
-| `test_metal` | default | 2.8 | - | - | yes |
-| `test_sdl3_image ../../test/sdl3_image_fixtures` | default | 2.7 | - | - | yes |
-| `test_frame_kernel` | default | 2.7 | - | - | yes |
-| `test_drawing ../examples/particles/sketch.rays` | default | 2.7 | - | - | yes |
-| `test_parallel_branches` | default | 2.6 | - | - | yes |
-| `run_edit_graph` | default | 2.5 | - | - | yes |
-| `test_scatter` | default | 2.3 | - | - | yes |
-| `test_workspace_eval` | default | 2.2 | - | - | yes |
-| `test_fma` | default | 2.2 | - | - | yes |
-| `test_sop_ui` | default | 2.1 | - | - | yes |
-| `test_topology_kernel` | default | 2 | - | - | yes |
-| `test_sdl3_ttf` | default | 2 | - | - | yes |
-| `test_payload` | default | 2 | - | - | yes |
-| `test_editor_input` | default | 2 | - | - | yes |
-| `exact` | default | 2 | - | - | yes |
-| `test_array` | default | 1.9 | - | - | yes |
-| `test_noise_kernel` | default | 1.8 | - | - | yes |
-| `test_editor_commands` | default | 1.8 | - | - | yes |
-| `test_merge_source` | default | 1.7 | - | - | yes |
-| `test_workspace_node` | default | 1.6 | - | - | yes |
-| `test_projection` | default | 1.6 | - | - | yes |
-| `test_open_domain` | default | 1.6 | - | - | yes |
-| `test_lisp_projection` | default | 1.6 | - | - | yes |
-| `test_metadata_kernel` | default | 1.5 | - | - | yes |
-| `test_marks_scene` | default | 1.5 | - | - | yes |
-| `test_host_effects` | default | 1.5 | - | - | yes |
-| `codemod result-bind,--self-test,../../ppx/result_bind/result_bind_ppx.ex` | default | 1.5 | - | - | yes |
-| `test_core_parity` | default | 1.4 | - | - | yes |
-| `test_compact_scan` | default | 1.4 | - | - | yes |
-| `test_rays` | default | 1.3 | - | - | yes |
-| `test_node_sources` | default | 1.2 | - | - | yes |
-| `test_flow_shader ../sketches/flow_shader/sketch.rays` | default | 1.2 | - | - | yes |
-| `test_packed_pieces` | default | 1.1 | - | - | yes |
-| `dependency_gate` | default | 1.1 | - | - | yes |
-| `test_reductions` | default | 1 | - | - | yes |
-| `test_image_kernel` | default | 1 | - | - | yes |
-| `test_editor_cook` | default | 1 | - | - | yes |
-
-Under 1 s each in the trace (116, all under budget): test_adjacency, test_array_composition_graph,
-test_array_max_length (2), test_automatic_text_cache, test_check, test_core, test_core_control, test_core_draw,
-test_core_errors, test_core_lower, test_core_marks, test_core_operators, test_core_records, test_core_state,
-test_custom_sop, test_defnode, test_delimiter, test_device_error, test_display_list, test_domain, test_easy_camera,
-test_editor_document, test_editor_transactions, test_emit, test_error_rows, test_frame, test_gate,
-test_geometry_comparison, test_gpu_image, test_gpu_vertices, test_graph, test_history, test_image_sink, test_input,
-test_iterate_graph, test_js_gpu, test_keyboard, test_light, test_lru, test_macro, test_marks, test_math_helpers,
-test_metal_argument_reflection_snapshot, test_metal_build_config, test_mock, test_noise, test_nonfinite,
-test_ogpu_acceleration/binding/foundation/pipeline/shader/surface/validation, test_op, test_panels, test_param,
-test_phase_timer, test_pipelines, test_png_rows, test_prepared_scene3, test_rays_api, test_region_snapshot,
-test_resources_audio, test_resources_font, test_run_lifetime, test_runtime_input, test_runtime_resources,
-test_runtime_scaling, test_scatter, test_scene_display_list, test_scene_rounded_cache, test_scene3_float32,
-test_scene3_native_lowering, test_sdl3, test_sdl3_events, test_sdl3_failure, test_sdl3_mixer,
-test_sdl3_mixer_device_failure, test_sdl3_no_dynamic_ffi, test_sdl3_stress, test_sdl3_ttf_discovery_failure,
-test_shape_batch (2), test_shell, test_sop_metadata, test_state, test_store, test_string_bytes,
-test_subdivide_cracks, test_syntax, test_table, test_target, test_terminal_boolean_normals, test_text_bytes,
-test_threading, test_ty, test_ui, test_ui_batch, test_ui_commands, test_value_core, test_wgsl, test_with_error,
-test_workspace, test_workspace_edit, test_world, plus the `codemod`/`generate`/`core_census`/`check_runtime_licenses`
-self-tests and the SDL3 config checks.
-
-Red in the cold run, both before this change: `test_materials` (the carry-preview budget is the real clock: 572 ms
-against 500 ms under load 11-17; 13.8 s alone and it passes then) and `dependency_gate` (its rule chdirs to the
-workspace root and the test reads `../specification/workspace/cases/variations.lisp`, which is not in the rule's
-`source_tree` deps).
-
-### `RAYS_SLOW=1` (extra executables; solo, load 3-6)
-
-| Alias / executable | Loop | Solo (s) | Under budget |
-|---|---|---|---|
-| `test_attribute_kernel` | RAYS_SLOW | 25.9 | yes |
-| `test_array_composition_web` | RAYS_SLOW | 22.5 | yes |
-| `test_rand_at` | RAYS_SLOW | 20.1 | yes |
-| `test_array_composition` (flow_ir) | RAYS_SLOW | 19.3 | yes |
-| `test_geometry_collections` | RAYS_SLOW | 14.0 | yes |
-| `test_region_arguments` | RAYS_SLOW | 12.5 | yes |
-| `test_packed` (flow_ir) | RAYS_SLOW | 12.2 | yes |
-| `test_gpu_bulk` | RAYS_SLOW | 1.8 | yes |
-| `test_workspace_cook` with `RAYS_SLOW=1` | RAYS_SLOW | 25.4 | yes |
-| `test_workspace_doc` heavy files, `test_workspace_ir` sketches | RAYS_SLOW | not re-measured; they are the part removed from the default rows above | - |
-
-### `@qualification-scale`
-
-| Alias / executable | Loop | Solo before (s) | Solo after (s) | Under budget |
-|---|---|---|---|---|
-| `test_parallel_exact` (`run_parallel_exact`; also `qualification`) | qualification-scale | over 300 | not changed | NO |
-| `test_nodes` (`run_nodes`, moved here from `runtest`) | qualification-scale | over 300 (41 CPU-min) | not changed | NO |
-| `test_sop_catalog_exhaustive` | qualification-scale | 281.8 | not changed | NO |
-| `test_shattered_studio` (also `qualification`) | qualification-scale | 84.4 | not changed | NO |
-| `test_sop` (`run_sop`) | qualification-scale | 44.6 | 14.9 | yes |
-| `test_diagnostics` (`run_diagnostics`) | qualification-scale | 48.4 | 8.6 | yes |
-| `test_workspace_shell` with `RAYS_SUITE_BUDGET=900` (default loop runs it with the 45 s budget: 51 s) | default | 150.5 | not changed | NO |
-
-Left over budget in the default loop: `test_workspace_doc` 84 s (parts `contexts` 25 s, `editor_contexts` 7 s, `editor` 9 s,
-`literals` 11 s, `files` about 25 s, the rest under 4 s each), `test_workspace_ir` 146 s (fixtures dominate: each is a
-multi-time, multi-domain cook of the whole workspace), `test_workspace_live` 32-59 s, `test_bloom_studio` 42 s,
-`test_workspace_shell` 51 s, `test_sop_catalog` 44 s, `test_scene_sync` 41 s, `test_lisp_ports` 34 s. Every one of
-them is bounded by the same thing: one workspace or one `Lisp_sop.node` lowering costs 0.4-1.4 s
-(`Lower.workspace` / `of_checked`; `sop/subdivide` is the worst at 1.1-1.4 s) and the tests lower per edit, per
-case or per file. Pruning further deletes coverage; the next step is the lowering cache per (definition, arguments).
+Open: the last inventory found eight default aliases over 30 s. Re-measure the
+current focused aliases before treating these historical timings as current.

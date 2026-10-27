@@ -1,11 +1,11 @@
 module Int_map = Map.Make (Int)
 module Int_set = Set.Make (Int)
 type t = { geometry : Sop.Edit_graph.t; drives : Flow.Eval.value Port.Map.t; states : Flow.Eval.value list;
-  frame_nodes : (network:t -> Flow.Eval.state -> Frame_input.t -> Sop.Node.t ->
-    (Sop.Node.t, Flow.Diagnostic.t) result) Int_map.t;
+  frame_nodes : (network:t -> Flow.Eval.state -> Input.t -> Sop.Node.t ->
+    (Sop.Node.t, Diagnostic.t) result) Int_map.t;
   profile : Flow_ir.Profile.t option; reference : bool; approx:Flow.Workspace.Paths.t }
-let error code message = Error (Flow.Diagnostic.error ~code message)
-let geometry_error result = Result.map_error (Flow.Diagnostic.error ~code:"E_GEOMETRY") result
+let error code message = Error (Diagnostic.error ~code message)
+let geometry_error result = Result.map_error (Diagnostic.error ~code:"E_GEOMETRY") result
 let of_geometry geometry = {geometry; drives = Port.Map.empty; states = []; frame_nodes = Int_map.empty; profile = None; reference = false; approx=Flow.Workspace.Paths.empty}
 let with_approx approx network = {network with approx}
 let with_profile profile network = {network with profile = Some profile}
@@ -44,7 +44,7 @@ let with_geometry geometry network =
     let next = {network with geometry} in
     Result.map (fun () -> next) (validate next)
 let apply_parameters ~node_id changes network =
-  Result.bind (Result.map_error (Flow.Diagnostic.error ~code:"E_TYPE")
+  Result.bind (Result.map_error (Diagnostic.error ~code:"E_TYPE")
       (Sop.Edit_graph.apply_parameters network.geometry ~node_id changes)) (fun (geometry, _) ->
     if geometry == network.geometry then Ok network else
     let next = {network with geometry} in

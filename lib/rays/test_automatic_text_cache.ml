@@ -4,14 +4,15 @@ let require condition message=if not condition then failwith message
 let stage scene=
   let _,resources=Result.get_ok(Scene.Private.stage~width:64~height:32 scene)in
   match resources with
-  |[identity,Rays_execution.Image image]->identity,image
+  |[identity,Renderer.Image image]->identity,image
   |_->failwith"automatic text resource shape"
 
 let run () =
+  Font.Private.with_cache_context (Font.Private.create_cache_context ()) (fun () ->
   let first_identity=ref None and first_pixels=ref None in
   Gc.full_major();let before=Gc.allocated_bytes()in
   for frame=1 to 600 do
-    let scene=Scene.[text~at:(3,4)~size:16~color:(Color.rgb 12 34 56)"stable automatic text"]in
+    let scene=Scene.[text~at:(3,4)~size:16~color:(Rays_math.Color.rgb 12 34 56)"stable automatic text"]in
     let identity,image=stage scene in
     let pixels=Result.get_ok(Runtime_resources.Image.pixels image)in
     (match!first_identity,!first_pixels with
@@ -26,10 +27,10 @@ let run () =
   let entries,fonts,references=Font.Private.automatic_counts()in
   require(entries=1&&fonts=1&&references=0)"stable automatic cache ownership";
   require(per_frame<20_000.)"automatic text allocation regression";
-  let retina=Scene.[text~at:(0,0)~size:16~color:(Color.rgb 12 34 56)"density"]in
+  let retina=Scene.[text~at:(0,0)~size:16~color:(Rays_math.Color.rgb 12 34 56)"density"]in
   let staged density=
     match Scene.Private.stage_native_render_checked~density~width:64~height:32 retina with
-    |Ok{layers=[Scene.Private.Scene2_layer(ir,[_,Rays_execution.Image image])];_}->
+    |Ok{layers=[Scene.Private.Scene2_layer(ir,[_,Renderer.Image image])];_}->
         ir,Result.get_ok(Runtime_resources.Image.size image)
     |_->failwith"density text resource"in
   let one,(w1,h1)=staged 1 in
@@ -68,7 +69,7 @@ let run () =
      and destroying the font destroys it. *)
   let font=Result.get_ok(Font.system~size:15())in
   let image=Image.Private.resource(Result.get_ok
-    (Font.cached_text font"explicit lifetime"(Font.Blended Color.white)))in
+    (Font.cached_text font"explicit lifetime"(Font.Blended Rays_math.Color.white)))in
   let other=Scene.[text~at:(0,0)~size:15"explicit lifetime"]in
   ignore(stage other);Scene.Private.release other;
   require(Result.is_ok(Runtime_resources.Image.pixels image))"explicit cached text shortened";
@@ -76,4 +77,4 @@ let run () =
   require(Result.is_error(Runtime_resources.Image.pixels image))"explicit font cache not destroyed";
   let _,_,references=Font.Private.automatic_counts()in
   require(references=0)"automatic references outlived their scenes";
-  print_endline"bounded automatic Font/text cache passed"
+  print_endline"bounded automatic Font/text cache passed")

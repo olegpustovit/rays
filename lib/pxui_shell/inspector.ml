@@ -1,6 +1,5 @@
 open Rays
 
-  module Param = Editor_core.Param
   module Ui = Pxui.Ui
 
   type 'a item = Field of 'a | Folder of string * 'a item list
@@ -55,7 +54,7 @@ open Rays
     (* a click on the dot, or the s key over the row, asks to flip the row's pin *)
     let pin_change box path shown clicked edits =
       let key = pinnable && Ui.hovered_within ui box && not (Ui.text_input_focused ui)
-        && Ui.key_pressed ui (Rays.Input.KeyChar 's') in
+        && Ui.key_pressed ui (Input.KeyChar 's') in
       (if clicked || key then [ Pinned (path, not shown) ] else []) @ edits in
     let action ui key label ~x ~y ~enabled ?(visible = true) () =
       let pin = label = "pin" in
@@ -209,7 +208,7 @@ open Rays
       match field.kind, field.current with
       | Param.Text_view, Param.Text_value text ->
           (String.starts_with ~prefix:"#" text || has_substr "color" field.name)
-          && Result.is_ok (Color.hex text)
+          && Result.is_ok (Rays_math.Color.hex text)
       | _ -> false in
     let swatch_and_hex ~path ~control_x ~control_y ~control_w ~swatch_color ~hex_str =
       Kit.colour ui ~key:path ~at:(control_x, control_y) ~w:control_w ~swatch:swatch_color ~hex:hex_str in
@@ -222,18 +221,17 @@ open Rays
       let r, g, b = match fields with
         | [ f0; f1; f2 ] -> to_f f0.Param.current, to_f f1.current, to_f f2.current
         | _ -> 0., 0., 0. in
-      let clamp x = max 0 (min 255 (int_of_float (Float.round (x *. 255.)))) in
-      let hex_str = Printf.sprintf "#%02x%02x%02x" (clamp r) (clamp g) (clamp b) in
-      let swatch_color = Color.rgb (clamp r) (clamp g) (clamp b) in
+      let swatch_color = Rays_math.Color.of_unit_floats r g b in
+      let hex_str = Rays_math.Color.to_hex_string swatch_color in
       let box, control_x, control_y, control_w = Ui.inspector_row ui
           ~width ?pin:(pin_of shown) ~key:("flow-row-" ^ path) ~label:title () in
       Ui.within ui box (fun () ->
         let text = swatch_and_hex ~path ~control_x ~control_y ~control_w ~swatch_color ~hex_str in
         let hex_edits =
           if text = hex_str then [] else
-          match Color.hex text with
+          match Rays_math.Color.hex text with
           | Ok c ->
-              let nr, ng, nb, _ = Color.to_floats c in
+              let nr, ng, nb, _ = Rays_math.Color.to_floats c in
               (match fields with
                | [ f0; f1; f2 ] ->
                    [ Edited (f0.Param.name, Param.Float_value nr);
@@ -246,18 +244,17 @@ open Rays
         hex_edits @ pin_change box path shown pin []) in
     let color_row_1 path title field shown =
       let text_val = match field.Param.current with Param.Text_value t -> t | _ -> "#ffffff" in
-      let c = Result.value (Color.hex text_val) ~default:Color.white in
-      let r, g, b, _ = Color.to_floats c in
-      let clamp x = max 0 (min 255 (int_of_float (Float.round (x *. 255.)))) in
-      let hex_str = Printf.sprintf "#%02x%02x%02x" (clamp r) (clamp g) (clamp b) in
-      let swatch_color = Color.rgb (clamp r) (clamp g) (clamp b) in
+      let c = Result.value (Rays_math.Color.hex text_val) ~default:Rays_math.Color.white in
+      let r, g, b, _ = Rays_math.Color.to_floats c in
+      let swatch_color = Rays_math.Color.of_unit_floats r g b in
+      let hex_str = Rays_math.Color.to_hex_string swatch_color in
       let box, control_x, control_y, control_w = Ui.inspector_row ui
           ~width ?pin:(pin_of shown) ~key:("flow-row-" ^ path) ~label:title () in
       Ui.within ui box (fun () ->
         let text = swatch_and_hex ~path ~control_x ~control_y ~control_w ~swatch_color ~hex_str in
         let hex_edits =
           if text = hex_str then [] else
-          match Color.hex text with
+          match Rays_math.Color.hex text with
           | Ok _ -> [ Edited (field.Param.name, Param.Text_value text) ]
           | Error _ -> [] in
         let pin = pinnable && action ui ("pin-" ^ path) "pin" ~x:0. ~y:control_y ~enabled:true () in

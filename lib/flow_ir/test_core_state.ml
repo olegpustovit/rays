@@ -1,10 +1,10 @@
 module E = Flow.Eval
 module I = Flow_ir
-let ok = function Ok x -> x | Error d -> failwith (Flow.Diagnostic.to_string d)
+let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let check ?(extra="") body =
   let forms = ok (Flow.Syntax.parse ("(workspace w " ^ extra ^ " (graph g :context value " ^ body ^ "))")) in
   match Flow.Workspace.check {Flow.Check.version=1;kinds=[]} forms with
-  | Some ws,[] -> ws | _,ds -> failwith (String.concat "; " (List.map Flow.Diagnostic.to_string ds))
+  | Some ws,[] -> ws | _,ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
 let bits x y = Int64.bits_of_float x = Int64.bits_of_float y
 let rec same_bits (a : E.value) (b : E.value) = match a,b with
   | Float x,Float y -> bits x y
@@ -13,34 +13,37 @@ let rec same_bits (a : E.value) (b : E.value) = match a,b with
   | a,b -> a=b
 let same a b = match a,b with
   | Ok a,Ok b -> same_bits a b
-  | Error (a : Flow.Diagnostic.t),Error (b : Flow.Diagnostic.t) -> a.code=b.code && a.span=b.span | _ -> false
+  | Error (a : Diagnostic.t),Error (b : Diagnostic.t) -> a.code=b.code && a.span=b.span | _ -> false
 let cases = Core_fixtures.state_cases
 (* A [ref] re-runs the referenced graph in its own instance: the state it reads is shared. *)
 let refs = Core_fixtures.state_refs
 let live frame =
-  {(Frame_input.at_time (float_of_int frame *. 0.25)) with frame; tick=frame;
-   events=if frame mod 2=1 then [Key_pressed "a"; Key_pressed "b"] else []}
+  {(Input.at_time (float_of_int frame *. 0.25)) with frame; tick=frame;
+   events=if frame mod 2=1 then [Key_pressed (Input.KeyChar 'a'); Key_pressed (Input.KeyChar 'b')] else []}
 let () =
   let used=ref 0 and refused=ref [] and failed=ref [] in
   List.iter (fun (name,extra,body) ->
     let evaluation=ok (E.static (check ~extra ("(let* [v " ^ body ^ "] 0.)"))) in
     let values=List.map snd evaluation.results @ evaluation.states in
     let reference=E.create_state () and core=E.create_state () in
-    let execute r live = match I.Core_lower.lower r with
-      | Ok program ->
-          let result=I.Core_exec.run ~root:r program ~live in
-          (match result with
-           | Ok _ -> incr used
-           | Error d -> if name<>"error" then failed := (name ^ ": " ^ d.code ^ " " ^ d.message) :: !failed);
-          Some result
-      | Error n -> refused := (name ^ ": " ^ n) :: !refused; None in
+    let programs = List.map (fun value -> value, I.Executor.compile value) values in
+    List.iter (function _, Ok _ -> incr used | _, Error (d : Diagnostic.t) ->
+      refused := (name ^ ": " ^ d.code ^ " " ^ d.message) :: !refused) programs;
     for frame=0 to 7 do
       let live=live frame in
-      List.iter (fun v ->
+      List.iter (fun (v, program) ->
+        let core_before=E.state_stamp core and reference_before=E.state_stamp reference in
         let expected=E.Private.force_reference ~state:reference v ~live in
-        let actual=E.Private.force_with_executor ~state:core ~execute v ~live in
+        let actual=match program with
+          | Ok program -> I.Executor.force ~state:core program ~live
+          | Error _ -> expected in
         if not (same actual expected) then failwith (Printf.sprintf "%s frame %d" name frame);
-        if E.state_stamp core<>E.state_stamp reference then failwith (Printf.sprintf "%s frame %d: state stamp\n%s\n%s" name frame (String.concat ";" (List.map (fun v -> Flow.Value.show_with Fun.id v) (E.Private.state_values core))) (String.concat ";" (List.map (fun v -> Flow.Value.show_with Fun.id v) (E.Private.state_values reference))))) values
+        if Result.is_error expected then begin
+          if E.state_stamp core<>core_before || E.state_stamp reference<>reference_before then
+            failwith (Printf.sprintf "%s frame %d: failed evaluation changed a state epoch" name frame)
+        end else if Marshal.to_string (E.Private.state_values core) [Marshal.No_sharing]
+          <> Marshal.to_string (E.Private.state_values reference) [Marshal.No_sharing] then
+          failwith (Printf.sprintf "%s frame %d: state values differ" name frame)) programs
     done) (List.map (fun (name,body) -> name,"",body) cases @ refs);
   if !refused<>[] || !failed<>[] then failwith (String.concat "; " (!refused @ !failed));
   assert (!used>0);

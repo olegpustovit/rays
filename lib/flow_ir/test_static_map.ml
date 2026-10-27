@@ -2,12 +2,12 @@
    made by its CPU kernel after the walker's first 4,096 elements, and the evaluation is the same
    value bit for bit, the same records and the same failure. *)
 module E = Flow.Eval
-let ok = function Ok x -> x | Error d -> failwith (Flow.Diagnostic.to_string d)
+let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let checked body =
   let forms = ok (Flow.Syntax.parse ("(workspace w (graph g :context host " ^ body ^ "))")) in
   match Flow.Workspace.check {Flow.Check.version = 1; kinds = []} forms with
   | Some ws, [] -> ws
-  | _, ds -> failwith (body ^ ": " ^ String.concat "; " (List.map Flow.Diagnostic.to_string ds))
+  | _, ds -> failwith (body ^ ": " ^ String.concat "; " (List.map Diagnostic.to_string ds))
 
 let bits (v : E.value) = match v with
   | E.Float_array d | Vec2_array d | Vec3_array d | Vec4_array d -> Array.map Int64.bits_of_float d
@@ -84,7 +84,7 @@ let () =
      Packed.force_all once allocated about 112 of them (155 bytes in all, now 43). *)
   let allocated n =
     let ws = checked (Printf.sprintf "(map (fn [i] [(sin i) (cos i) 0]) (array/range %d))" n) in
-    Rays_math.Parallel.run ~domains:1 (fun () ->
+    Parallel.run ~domains:1 (fun () ->
       let before = Gc.allocated_bytes () in
       ignore (ok (Flow_ir.static ws));
       Gc.allocated_bytes () -. before) in

@@ -15,7 +15,7 @@ let source = {|(workspace sample
       result)))|}
 let load text = match Editor_document.Workspace_doc.of_text catalog text with
   | Ok document -> document
-  | Error diagnostics -> failwith (String.concat "\n" (List.map Flow.Diagnostic.to_string diagnostics))
+  | Error diagnostics -> failwith (String.concat "\n" (List.map Diagnostic.to_string diagnostics))
 let diagnostics text = snd (W.check catalog (ok (S.parse text)))
 let () =
   let kind = List.find (fun (d : Flow_sop.Catalog.descriptor) -> d.key = "attr_from_image")
@@ -44,8 +44,8 @@ let () =
   let wrong = {|(workspace wrong
     (graph img :context image (image/noise :width 1 :height 1))
     (graph g :context sop (sop/attr_from_image (ref img) (sop/grid))))|} in
-  assert (List.exists (fun (d : Flow.Diagnostic.t) -> d.code = "E_TYPE") (diagnostics wrong));
-  assert (List.exists (fun (d : Flow.Diagnostic.t) -> d.code = "E_MISSING_INPUT")
+  assert (List.exists (fun (d : Diagnostic.t) -> d.code = "E_TYPE") (diagnostics wrong));
+  assert (List.exists (fun (d : Diagnostic.t) -> d.code = "E_MISSING_INPUT")
     (diagnostics "(workspace missing (graph g :context sop (sop/attr_from_image (sop/grid))))"));
   List.iter (fun gesture -> ignore (ok (Editor_document.Workspace_doc.edit catalog document gesture)))
     [E.Connect {node=["g";"result"]; key=Pos 1; src="picture"; iter=false};

@@ -6,7 +6,7 @@ type deform_selection = Deform.selection =
   | Selected_primitives of Group.t
   | Selected_edges of Edge_group.t
 
-let finite_vec3 value = Float.is_finite value.Vec3.x && Float.is_finite value.y && Float.is_finite value.z
+let finite_vec3 value = Float.is_finite value.Rays_math.Vec3.x && Float.is_finite value.y && Float.is_finite value.z
 let selected_bounds = Bound.Private.selected_bounds
 let transform = Transform_ops.transform
 
@@ -25,23 +25,23 @@ type match_size_fit =
 let match_axis ?grain ~from ~into geometry =
   Error.guard ~operation:"match_axis" ~code:"invalid_axis" @@ fun () ->
   if not (finite_vec3 from && finite_vec3 into)
-     || Vec3.length_sq from <= 1e-30 || Vec3.length_sq into <= 1e-30 then
+     || Rays_math.Vec3.length_sq from <= 1e-30 || Rays_math.Vec3.length_sq into <= 1e-30 then
     Error "Rdk.Match_size.match_axis: vectors must be finite and non-zero"
   else
-    let from = Vec3.normalize from and into = Vec3.normalize into in
-    let dot = max (-1.) (min 1. (Vec3.dot from into)) in
-    let cross = Vec3.cross from into in
-    let cross_length = Vec3.length cross in
+    let from = Rays_math.Vec3.normalize from and into = Rays_math.Vec3.normalize into in
+    let dot = max (-1.) (min 1. (Rays_math.Vec3.dot from into)) in
+    let cross = Rays_math.Vec3.cross from into in
+    let cross_length = Rays_math.Vec3.length cross in
     let matrix = if cross_length > 1e-15 then
-        Mat4.rotation ~axis:(Vec3.scale cross (1. /. cross_length))
+        Rays_math.Mat4.rotation ~axis:(Rays_math.Vec3.scale cross (1. /. cross_length))
           (atan2 cross_length dot)
-      else if dot >= 0. then Mat4.identity
+      else if dot >= 0. then Rays_math.Mat4.identity
       else
         let basis = if abs_float from.x <= abs_float from.y
-            && abs_float from.x <= abs_float from.z then Vec3.unit_x
-          else if abs_float from.y <= abs_float from.z then Vec3.unit_y
-          else Vec3.unit_z in
-        Mat4.rotation ~axis:(Vec3.normalize (Vec3.cross from basis)) Float.pi in
+            && abs_float from.x <= abs_float from.z then Rays_math.Vec3.unit_x
+          else if abs_float from.y <= abs_float from.z then Rays_math.Vec3.unit_y
+          else Rays_math.Vec3.unit_z in
+        Rays_math.Mat4.rotation ~axis:(Rays_math.Vec3.normalize (Rays_math.Vec3.cross from basis)) Float.pi in
     Ok (transform ?grain matrix geometry)
 
 let match_size_metric_primitives operation selection = match selection with
@@ -74,8 +74,8 @@ let match_size_bounds ~center ~size =
     Error "Rdk.Match_size.match_size: target center must be finite and target size finite and non-negative"
   else
     let hx = size.x *. 0.5 and hy = size.y *. 0.5 and hz = size.z *. 0.5 in
-    let minimum = Vec3.create (center.x -. hx) (center.y -. hy) (center.z -. hz)
-    and maximum = Vec3.create (center.x +. hx) (center.y +. hy) (center.z +. hz) in
+    let minimum = Rays_math.Vec3.create (center.x -. hx) (center.y -. hy) (center.z -. hz)
+    and maximum = Rays_math.Vec3.create (center.x +. hx) (center.y +. hy) (center.z +. hz) in
     if not (finite_vec3 minimum && finite_vec3 maximum) then Error
         "Rdk.Match_size.match_size: numeric target bounds overflow"
     else Ok Analysis.{ min = minimum; max = maximum; center; size }
@@ -89,8 +89,8 @@ let match_size_transform ?cancel ~grain ?selection ~scale ~translation geometry 
     | Some (Selected_points group | Selected_vertices group
         | Selected_primitives group) -> Group.cardinality group = 0
     | Some (Selected_edges group) -> Edge_group.cardinality group = 0 in
-  if scale.Vec3.x = 1. && scale.y = 1. && scale.z = 1.
-     && translation.Vec3.x = 0. && translation.y = 0. && translation.z = 0.
+  if scale.Rays_math.Vec3.x = 1. && scale.y = 1. && scale.z = 1.
+     && translation.Rays_math.Vec3.x = 0. && translation.y = 0. && translation.z = 0.
      || selection_empty then Ok geometry
   else begin
     let topology_view = Topology.Private.view topology in
@@ -206,8 +206,8 @@ let match_size_transform ?cancel ~grain ?selection ~scale ~translation geometry 
 
 let match_size ?cancel ?(grain = 16_384) ?selection ?source_selection
     ?target_selection ?(fit = Contain) ?(translate_axes = true, true, true)
-    ?(scale_axes = true, true, true) ?(justify = Vec3.zero) ?target_justify
-    ?(offset = Vec3.zero) ?(scale = 1.) ?target_center ?target_size ?target
+    ?(scale_axes = true, true, true) ?(justify = Rays_math.Vec3.zero) ?target_justify
+    ?(offset = Rays_math.Vec3.zero) ?(scale = 1.) ?target_center ?target_size ?target
     geometry =
   Error.guard ~operation:"match_size" ~code:"invalid_geometry" @@ fun () ->
   let target_justify = Option.value ~default:justify target_justify in
@@ -233,8 +233,8 @@ let match_size ?cancel ?(grain = 16_384) ?selection ?source_selection
       | Some target -> selected_bounds ?cancel ~grain
           ~operation:"match_size target" target_selection target
       | None -> match_size_bounds
-          ~center:(Option.value ~default:Vec3.zero target_center)
-          ~size:(Option.value ~default:(Vec3.create 1. 1. 1.) target_size) in
+          ~center:(Option.value ~default:Rays_math.Vec3.zero target_center)
+          ~size:(Option.value ~default:(Rays_math.Vec3.create 1. 1. 1.) target_size) in
     Result.bind target_bounds_result (fun target_bounds ->
     let ratio source target = if source <= 1e-20 then 1. else target /. source in
     let rx = ratio source_bounds.size.x target_bounds.size.x
@@ -250,10 +250,10 @@ let match_size ?cancel ?(grain = 16_384) ?selection ?source_selection
       consider source_bounds.size.z rz;
       Option.value ~default:1. !value in
     let uniform_scale value =
-      let value = value *. scale in Vec3.create value value value in
+      let value = value *. scale in Rays_math.Vec3.create value value value in
     let computed_scale = match fit with
-      | Translate_only -> Ok (Vec3.create 1. 1. 1.)
-      | Stretch -> Ok (Vec3.create
+      | Translate_only -> Ok (Rays_math.Vec3.create 1. 1. 1.)
+      | Stretch -> Ok (Rays_math.Vec3.create
           (if sx_enabled then rx *. scale else 1.)
           (if sy_enabled then ry *. scale else 1.)
           (if sz_enabled then rz *. scale else 1.))
@@ -288,13 +288,13 @@ let match_size ?cancel ?(grain = 16_384) ?selection ?source_selection
     if not (finite_vec3 computed_scale) then Error
         "Rdk.Match_size.match_size: computed scale is not finite"
     else
-      let anchor (bounds : Analysis.bounds) justification = Vec3.create
-          (bounds.center.x +. (justification.Vec3.x *. bounds.size.x *. 0.5))
+      let anchor (bounds : Analysis.bounds) justification = Rays_math.Vec3.create
+          (bounds.center.x +. (justification.Rays_math.Vec3.x *. bounds.size.x *. 0.5))
           (bounds.center.y +. (justification.y *. bounds.size.y *. 0.5))
           (bounds.center.z +. (justification.z *. bounds.size.z *. 0.5)) in
       let source_anchor = anchor source_bounds justify
       and target_anchor = anchor target_bounds target_justify in
-      let translation = Vec3.create
+      let translation = Rays_math.Vec3.create
           (if tx_enabled then target_anchor.x +. offset.x
              -. (source_anchor.x *. computed_scale.x) else 0.)
           (if ty_enabled then target_anchor.y +. offset.y

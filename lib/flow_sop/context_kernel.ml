@@ -82,8 +82,8 @@ let depends ?(op="sop/context_seed") ?(inputs=[]) ?(defs=[]) (graph:W.graph) =
           |[]->Some []
           |(key,value)::rest->Option.bind (known bindings value) (fun value->Option.map (fun rest->(key,value)::rest) (values rest)) in
         Option.bind (values args) (fun args->Option.bind (Flow.Op.find ~extra:Operators.all op Flow.Context.value) (fun op->
-          try op.check args; Some (op.body ~live:(Frame_input.at_time 0.) ~node:(fun _ _->raise Exit) args)
-          with Flow.Value.Fail _ | Flow.Value.Diagnostic_fail _ | Exit -> None))
+          try op.check args; Some (op.body ~live:(Input.at_time 0.) ~node:(fun _ _->raise Exit) args)
+          with Diagnostic.Error _ | Exit -> None))
     |_->None
   and scan bindings (body:W.term) =
     let select (t:W.term)=match t.node with
@@ -186,7 +186,7 @@ let scoped_forms (checked:W.t) ~leading ~skip ~start =
     Option.iter (definition defs)
       (List.find_opt(fun(g:W.graph)->g.name=name)checked.defs);
     Option.iter node (List.find_opt(fun(d:W.node_definition)->
-      d.kind.qualified=name || List.mem name d.kind.aliases)checked.nodes)
+      d.kind.qualified=name)checked.nodes)
   and macro name =
     if not(Hashtbl.mem macros name) then
       Option.iter(fun form->Hashtbl.add macros name ();syntax form)
@@ -349,7 +349,7 @@ let fuse (x:W.node_definition) (u:W.node_definition) ~(baked:(string*Flow.Eval.v
         let ref_ ty name = term ty (W.Ref_binding (name,[])) in
         let retag tag term = (map (fun (t:W.term) -> {t with path=Option.map (fun path -> tag :: path) t.path})
           {u.body with body=term;inputs=[]}).body in
-        let prefix_bindings = List.filteri (fun i _ -> i < k) ubs in
+        let prefix_bindings = List.take k ubs in
         let moved = List.mapi (fun i (pattern, rhs) -> if i = k then pattern, ref_ geometry "in0" else pattern, rhs) ubs in
         let region_g = retag "lisp_fuse_u" (term geometry (W.Let (constants @ moved, utail))) in
         (* [exact] on the producer's values would materialize them; the consumer's own [exact] remains. *)

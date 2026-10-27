@@ -1,7 +1,11 @@
+open Core_model
 open Rays
 open Sop
 open Editor_document
-include Core_add
+open Core_inspect
+open Core_scope
+open Core_panes
+open Core_add
 
 let enterable value id = match kind value id with
   | Some ("geometry" | "world") ->
@@ -22,15 +26,14 @@ let open_level value level =
 let geometry_objects value =
   (* a workspace without a scene graph shows each graph the lowering made a network of; an image
      graph is one (the canvas previews its nodes) but its payload is not geometry, so the geometry
-     cook never takes it (Workspace_images cooks images) *)
+     cook never takes it (Flow_native.Workspace_images cooks images) *)
   let ws, _ = value.doc.Document.workspace in
   let image_graph node = List.exists (fun (g : Flow.Workspace.graph) ->
     g.name = Node.label node && Flow.Context.result g.context = Flow.Ty.image) ws.checked.graphs in
   List.filter_map (fun id ->
     match Edit_graph.find (scene value) ~node_id:id,
         Document.Int_map.find_opt id value.doc.Document.networks with
-    | Some node, Some network when Objects.visible node && not (image_graph node)
-        && not (Edit_graph.is_bypassed (scene value) ~node_id:id) ->
+    | Some node, Some network when Objects.visible node && not (image_graph node) ->
         (match Document.Int_map.find_opt id value.viewed with
          | Some (graph, displayed) -> Some (id, graph, displayed)
          | None -> Option.map (fun displayed -> id, network.Document.graph, displayed) network.displayed)
@@ -76,16 +79,16 @@ let space value = match Option.bind (scope_node value) (fun (_, node) -> node_ow
   | Some owner -> Objects.world (scene value) owner
   | None -> match value.level with
   | Inside id when kind value id = Some "geometry" -> Objects.world (scene value) id
-  | Inside _ -> Mat4.identity
+  | Inside _ -> Rays_math.Mat4.identity
   | Scene -> (match Selection.selected value.selection with
     | Some id -> Objects.parent_world (scene value) id
-    | None -> Mat4.identity)
+    | None -> Rays_math.Mat4.identity)
 
 (* ---- the graph as a list ---- *)
 
 (* A row's kind letter and colour (the prototype's palette). *)
 let badge operation =
-  let hex = Color.hex_exn in
+  let hex = Rays_math.Color.hex_exn in
   match operation with
   | "geometry" -> "G", hex "#3f7a52" | "light" -> "L", hex "#b07a1c"
   | "camera" -> "C", hex "#5a4f86" | "world" -> "W", hex "#285f77"
@@ -154,9 +157,7 @@ let trunk_rows (network : Flow_sop.Network.t) ~viewed ~flags =
     let node = Edit_graph.find network.Flow_sop.Network.geometry ~node_id:id in
     let label = match node with Some node -> Node.label node | None -> "" in
     let operation = match node with Some node -> Node.operation node | None -> "" in
-    let details = [operation] @
-      (if viewed = Some id then ["VIEW"] else []) @
-      (if Edit_graph.is_bypassed network.geometry ~node_id:id then ["M"] else []) in
+    let details = [operation] @ (if viewed = Some id then ["VIEW"] else []) in
     { Pxui_shell.Tree.id; depth; link; ghost = false;
       label; detail = String.concat " · " details;
       badge = badge operation; flags = flags id node })
@@ -261,15 +262,15 @@ let apply_tree value (overlay, selection, tree, opened, label, rows) intent =
   let document, selection, tree, opened, label, rows = match intent with
   | T.Select ids ->
       document, (match ids with
-        | [] -> Selection.clear selection
-        | ids -> Selection.select_nodes ids selection), tree, opened, label, rows
+        | [] -> Selection.clear
+        | ids -> Selection.select_nodes ids), tree, opened, label, rows
   | Flag _ when geometry ->
       (* the display node of a workspace graph is its result *)
       document, selection, tree, opened, label, rows
   | Flag { ids; column; value = on } ->
       let name = List.nth (if world then ["visible"] else ["visible"; "render"]) column in
       let document = List.fold_left (fun document id ->
-          apply_parameter document id name (Parameter.Bool_value on)) document (hosted ids) in
+          apply_parameter document id name (Param.Bool_value on)) document (hosted ids) in
       document, selection, tree, opened, Some (if on then "Show" else "Hide"), rows
   | (Move _ | Reorder _) when world ->
       (match restacked rows intent with
@@ -294,11 +295,11 @@ let apply_tree value (overlay, selection, tree, opened, label, rows) intent =
   | Activate id -> document, selection, tree, Some id, label, rows
   | Delete ids when not geometry ->
       let document = Edit_graph.remove_nodes (hosted ids) document in
-      document, Selection.clear selection, tree, opened, Some "Delete", rows
+      document, Selection.clear, tree, opened, Some "Delete", rows
   | Rename _ | Delete _ | Move _ | Indent _ | Outdent _ | Reorder _ ->
       document, selection, tree, opened, label, rows
 
-  in Result.get_ok (Doc.update_geometry (fun _ -> Ok document) overlay),
+  in Result.get_ok (Editor_document.Document_edit.update_geometry (fun _ -> Ok document) overlay),
     selection, tree, opened, label, rows
 
 
@@ -316,7 +317,7 @@ let tree_edit value rows intent : Editor_document.Scene_sync.edit option =
         let name = List.nth (if world then [ "visible" ] else [ "visible"; "render" ]) column in
         some (List.filter (fun id -> match Edit_graph.find graph ~node_id:id with
           | Some node -> Objects.has_flag name node | None -> false) ids)
-          (fun ids -> Fields (List.map (fun id -> id, [ name, Parameter.Bool_value on ]) ids))
+          (fun ids -> Fields (List.map (fun id -> id, [ name, Param.Bool_value on ]) ids))
     | Rename (id, name) -> some [ id ] (fun _ -> Rename (id, name))
     | Delete ids -> some ids (fun ids -> Delete ids)
     | Move _ | Reorder _ when world ->

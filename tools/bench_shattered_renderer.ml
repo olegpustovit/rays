@@ -2,7 +2,12 @@ open Rays
 open Sop
 
 type ui_mode = Visible | Hidden
-type preview = Pieces of Rays_editor.Packed_pieces.t | Mesh of Mesh.t
+type preview = Pieces of Rdk_rays.Packed_pieces.t | Mesh of Mesh.t
+
+let explosion node = Rdk_rays.Packed_pieces.explosion
+    ~operation:(Sop.Node.operation node) ~fields:(Sop.Node.parameter_fields node)
+let mesh_for_node node pieces =
+  Rdk_rays.Packed_pieces.mesh_for_explosion (explosion node) pieces
 
 type gc_snapshot = {
   allocated_bytes : float;
@@ -183,16 +188,16 @@ let workspace () =
   let path = "sketches/shattered_cube.rays" in
   match Rays_editor.Workspace.load (In_channel.with_open_bin path In_channel.input_all) with
   | Ok workspace -> workspace
-  | Error diagnostics -> failwith (String.concat "; " (List.map Flow.Diagnostic.to_string diagnostics))
+  | Error diagnostics -> failwith (String.concat "; " (List.map Diagnostic.to_string diagnostics))
 
-let material = Material.create ~diffuse:(Color.hex_exn "#f2b36d")
-    ~ambient:(Color.hex_exn "#422006") ~specular:Color.white ~shininess:48. ()
+let material = Material.create ~diffuse:(Rays_math.Color.hex_exn "#f2b36d")
+    ~ambient:(Rays_math.Color.hex_exn "#422006") ~specular:Rays_math.Color.white ~shininess:48. ()
 
 let lights = [
-  Light.directional ~direction:(Vec3.create (-1.) (-1.5) (-2.))
-    ~diffuse:(Color.hex_exn "#fff7ed") ();
-  Light.directional ~direction:(Vec3.create 1.2 0.4 (-0.8))
-    ~diffuse:(Color.hex_exn "#7dd3fc") ~intensity:0.55 ();
+  Light.directional ~direction:(Rays_math.Vec3.create (-1.) (-1.5) (-2.))
+    ~diffuse:(Rays_math.Color.hex_exn "#fff7ed") ();
+  Light.directional ~direction:(Rays_math.Vec3.create 1.2 0.4 (-0.8))
+    ~diffuse:(Rays_math.Color.hex_exn "#7dd3fc") ~intensity:0.55 ();
 ]
 
 let prepare output =
@@ -201,7 +206,7 @@ let prepare output =
   | Some attribute ->
       (match Rdk.Attribute.Private.storage attribute with
        | Rdk.Attribute.Int _ | Text _ ->
-           Rays_editor.Packed_pieces.of_geometry ~piece_attribute:"piece"
+           Rdk_rays.Packed_pieces.of_geometry ~piece_attribute:"piece"
              (Result.get_ok (Sop.Payload.geometry output.payload))
            |> Result.map (fun pieces -> Pieces pieces)
        | _ -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.payload))
@@ -213,7 +218,7 @@ let prepare output =
 
 let scene3 node preview =
   let mesh = match preview with
-    | Pieces pieces -> Rays_editor.Packed_pieces.mesh_for_node node pieces
+    | Pieces pieces -> mesh_for_node node pieces
     | Mesh mesh -> mesh in
   let primitive_mode = Mesh.mode mesh in
   let shading = match Node.operation node with
@@ -221,7 +226,7 @@ let scene3 node preview =
     | _ -> Scene3.Smooth in
   let preview_material = match primitive_mode with
     | Mesh.Points | Lines | Line_strip | Line_loop ->
-        Material.unlit (Color.hex_exn "#fbbf74")
+        Material.unlit (Rays_math.Color.hex_exn "#fbbf74")
     | Triangles | Triangle_strip | Triangle_fan -> material in
   let cull = match preview, primitive_mode with
     | Pieces _, (Mesh.Triangles | Triangle_strip | Triangle_fan) ->
@@ -231,18 +236,18 @@ let scene3 node preview =
       ~material:preview_material mesh in
   Scene3.create ~samples:1 ~lights [drawing]
 
-let overlay graph preview frame =
+let overlay graph preview (frame : Frame.t) =
   let pieces = match preview with
     | None -> "waiting for first cook"
     | Some (Pieces pieces) -> Printf.sprintf "%d closed pieces"
-        (Rays_editor.Packed_pieces.piece_count pieces)
+        (Rdk_rays.Packed_pieces.piece_count pieces)
     | Some (Mesh mesh) -> Printf.sprintf "%d preview vertices"
         (Mesh.vertex_count mesh) in
   Scene.[
     text ~at:(20, 18) "SOP Shattered Cube";
     text ~at:(20, 43) (Printf.sprintf "%d nodes · %s"
       (List.length (Graph.inspect graph)) pieces);
-    text ~at:(20, frame.Frame.height - 82)
+    text ~at:(20, (snd frame.input.size) - 82)
       "Select source-switch for Cube / Dodecahedron · VIEW displays any SOP";
   ]
 
@@ -251,9 +256,9 @@ let cardinality environment =
   | None -> None
   | Some (Mesh _) -> failwith "shattered-cube fixture lost its piece attribute"
   | Some (Pieces pieces) ->
-      let mesh = Rays_editor.Packed_pieces.mesh_for_node
+      let mesh = mesh_for_node
           (Rays_editor.Editor.displayed_node environment) pieces in
-      let piece_count = Rays_editor.Packed_pieces.piece_count pieces
+      let piece_count = Rdk_rays.Packed_pieces.piece_count pieces
       and triangles = Mesh.Private.triangle_count mesh
       and render_vertices = Mesh.vertex_count mesh in
       if piece_count <> 18_278 || triangles <> 278_368
@@ -263,14 +268,14 @@ let cardinality environment =
           piece_count triangles render_vertices);
       Some (piece_count, triangles, render_vertices)
 
-let init frame =
+let init (frame : Frame.t) =
   let environment = Rays_editor.Editor.create
-      ~camera:(Easy_camera.create ~target:Vec3.zero ~distance:6.8
+      ~camera:(Easy_camera.create ~target:Rays_math.Vec3.zero ~distance:6.8
         ~azimuth:0.72 ~elevation:0.42 ())
       ~seed:7349L ~grain ~domains ~max_entries:24
       ~max_payload_bytes:(256 * 1024 * 1024)
       ~workspace:(workspace ()) ~prepare:(fun _ -> prepare)
-      ~scene3 ~overlay () |> result_exn in
+      ~draw:scene3 () |> result_exn in
   let now = Unix.gettimeofday () in
   {
     environment;
@@ -291,8 +296,8 @@ let init frame =
     pieces = None;
     triangles = None;
     render_vertices = None;
-    drawable_width = int_of_float (float frame.Frame.width *. fst frame.pixel_scale);
-    drawable_height = int_of_float (float frame.height *. snd frame.pixel_scale);
+    drawable_width = int_of_float (float (fst frame.input.size) *. fst frame.pixel_scale);
+    drawable_height = int_of_float (float (snd frame.input.size) *. snd frame.pixel_scale);
     pixel_scale_x = fst frame.pixel_scale;
     pixel_scale_y = snd frame.pixel_scale;
   }
@@ -327,20 +332,20 @@ let finish model now =
   Sketch.quit ();
   { model with result = Some result }
 
-let update model frame =
+let update model (frame : Frame.t) =
   let now = Unix.gettimeofday () in
   if Option.is_none model.ready_at
       && now -. model.launched_at > cook_timeout_seconds then
     failwith "shattered-cube benchmark cook timed out";
   let frame, hidden_toggled = match ui_mode, model.hidden_toggled with
     | Hidden, false ->
-        { frame with Frame.events = Event.KeyPressed (Input.KeyChar 'h')
-            :: frame.Frame.events }, true
+        { frame with input = { frame.input with events = Input.Key_pressed (Input.KeyChar 'h')
+            :: frame.input.events } }, true
     | (Visible, _ | Hidden, true) -> frame, model.hidden_toggled in
   let environment = Rays_editor.Editor.update model.environment frame in
   let model = { model with environment; hidden_toggled;
-      drawable_width = int_of_float (float frame.Frame.width *. fst frame.pixel_scale);
-      drawable_height = int_of_float (float frame.height *. snd frame.pixel_scale);
+      drawable_width = int_of_float (float (fst frame.input.size) *. fst frame.pixel_scale);
+      drawable_height = int_of_float (float (snd frame.input.size) *. snd frame.pixel_scale);
       pixel_scale_x = fst frame.pixel_scale; pixel_scale_y = snd frame.pixel_scale } in
   let model = match model.ready_at with
     | Some _ -> model
@@ -401,13 +406,13 @@ let print_result model result =
     (option_int_json result.peak_sampled_rss_kib)
 
 let () =
-  let final = Sketch.run_state
+  let final = Result.get_ok(Sketch.run_state
       ~config:{ Sketch.default_config with width = 1200; height = 760;
         title = "Rays shattered-cube renderer benchmark"; domains = Some domains }
       ~init ~update
       ~view:(fun model frame ->
         Rays_editor.Editor.scene model.environment frame)
-      ~on_stop:(fun model -> Rays_editor.Editor.close model.environment) () in
+      ~on_stop:(fun model -> Rays_editor.Editor.close model.environment) ()) in
   match final.result with
   | None -> failwith "shattered renderer stopped before producing a result"
   | Some result -> print_result final result

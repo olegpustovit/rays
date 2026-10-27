@@ -5,7 +5,7 @@ type projection =
   | Plane_xy
   | Plane_yz
   | Plane_zx
-  | Plane of { origin : Vec3.t; normal : Vec3.t }
+  | Plane of { origin : Rays_math.Vec3.t; normal : Rays_math.Vec3.t }
   | Point_attribute of string
 
 let operation = "Rdk_mesh.Triangulate2d.triangulate_2d"
@@ -21,7 +21,7 @@ let normalize3 (x,y,z) =
   x /. length,y /. length,z /. length
 
 let frame_of_normal normal =
-  let nx,ny,nz = normalize3 (Vec3.to_triple normal) in
+  let nx,ny,nz = normalize3 (Rays_math.Vec3.to_triple normal) in
   let ax,ay,az =
     if abs_float nx <= abs_float ny && abs_float nx <= abs_float nz then 1.,0.,0.
     else if abs_float ny <= abs_float nz then 0.,1.,0. else 0.,0.,1. in
@@ -77,7 +77,7 @@ let smallest_eigenvector xx xy xz yy yz zz =
   done;
   let column = if matrix.(0) <= matrix.(4) && matrix.(0) <= matrix.(8) then 0
     else if matrix.(4) <= matrix.(8) then 1 else 2 in
-  Vec3.create vectors.(column) vectors.(3 + column) vectors.(6 + column)
+  Rays_math.Vec3.create vectors.(column) vectors.(3 + column) vectors.(6 + column)
 
 let selected_points ?cancel ~grain selection geometry =
   let topology = Geometry.topology geometry in
@@ -396,7 +396,7 @@ let project ?cancel ~grain projection geometry points =
   | Best_fit -> planes_from_positions ?cancel ~grain
       (Geometry.positions geometry) points
   | Plane { origin; normal } ->
-      let ox,oy,oz = Vec3.to_triple origin in
+      let ox,oy,oz = Rays_math.Vec3.to_triple origin in
       if not (finite3 ox oy oz) then
         invalid_arg (operation ^ ": plane origin must be finite");
       let (ux,uy,uz),(vx,vy,vz) = frame_of_normal normal in

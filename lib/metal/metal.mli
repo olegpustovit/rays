@@ -147,7 +147,7 @@ module Acceleration_structure : sig
 
   type structure = t
 
-  (** Generic build descriptors (plan G5). A geometry lists one keyframe for a
+  (** Generic build descriptors. A geometry lists one keyframe for a
       static structure or exactly [motion.keyframe_count] keyframes; ranges are
       validated against their buffers, and the descriptor keeps every buffer and
       instanced structure alive until it is destroyed. *)
@@ -222,137 +222,13 @@ module Texture : sig
     | Texture_buffer
 
   type format =
-    | A8_unorm
     | R8_unorm
-    | R8_unorm_srgb
-    | R8_snorm
-    | R8_uint
-    | R8_sint
-    | R16_unorm
-    | R16_snorm
-    | R16_uint
-    | R16_sint
-    | R16_float
-    | Rg8_unorm
-    | Rg8_unorm_srgb
-    | Rg8_snorm
-    | Rg8_uint
-    | Rg8_sint
-    | B5g6r5_unorm
-    | A1bgr5_unorm
-    | Abgr4_unorm
-    | Bgr5a1_unorm
-    | R32_uint
-    | R32_sint
-    | R32_float
-    | Rg16_unorm
-    | Rg16_snorm
-    | Rg16_uint
-    | Rg16_sint
-    | Rg16_float
     | Rgba8_unorm
-    | Rgba8_unorm_srgb
-    | Rgba8_snorm
-    | Rgba8_uint
-    | Rgba8_sint
     | Bgra8_unorm
     | Bgra8_unorm_srgb
-    | Rgb10a2_unorm
-    | Rgb10a2_uint
-    | Rg11b10_float
-    | Rgb9e5_float
-    | Bgr10a2_unorm
-    | Bgr10_xr
-    | Bgr10_xr_srgb
-    | Rg32_uint
-    | Rg32_sint
-    | Rg32_float
-    | Rgba16_unorm
-    | Rgba16_snorm
-    | Rgba16_uint
-    | Rgba16_sint
     | Rgba16_float
-    | Bgra10_xr
-    | Bgra10_xr_srgb
-    | Rgba32_uint
-    | Rgba32_sint
     | Rgba32_float
-    | Bc1_rgba
-    | Bc1_rgba_srgb
-    | Bc2_rgba
-    | Bc2_rgba_srgb
-    | Bc3_rgba
-    | Bc3_rgba_srgb
-    | Bc4_r_unorm
-    | Bc4_r_snorm
-    | Bc5_rg_unorm
-    | Bc5_rg_snorm
-    | Bc6h_rgb_float
-    | Bc6h_rgb_ufloat
-    | Bc7_rgba_unorm
-    | Bc7_rgba_unorm_srgb
-    | Eac_r11_unorm
-    | Eac_r11_snorm
-    | Eac_rg11_unorm
-    | Eac_rg11_snorm
-    | Eac_rgba8
-    | Eac_rgba8_srgb
-    | Etc2_rgb8
-    | Etc2_rgb8_srgb
-    | Etc2_rgb8a1
-    | Etc2_rgb8a1_srgb
-    | Astc_4x4_srgb
-    | Astc_5x4_srgb
-    | Astc_5x5_srgb
-    | Astc_6x5_srgb
-    | Astc_6x6_srgb
-    | Astc_8x5_srgb
-    | Astc_8x6_srgb
-    | Astc_8x8_srgb
-    | Astc_10x5_srgb
-    | Astc_10x6_srgb
-    | Astc_10x8_srgb
-    | Astc_10x10_srgb
-    | Astc_12x10_srgb
-    | Astc_12x12_srgb
-    | Astc_4x4_ldr
-    | Astc_5x4_ldr
-    | Astc_5x5_ldr
-    | Astc_6x5_ldr
-    | Astc_6x6_ldr
-    | Astc_8x5_ldr
-    | Astc_8x6_ldr
-    | Astc_8x8_ldr
-    | Astc_10x5_ldr
-    | Astc_10x6_ldr
-    | Astc_10x8_ldr
-    | Astc_10x10_ldr
-    | Astc_12x10_ldr
-    | Astc_12x12_ldr
-    | Astc_4x4_hdr
-    | Astc_5x4_hdr
-    | Astc_5x5_hdr
-    | Astc_6x5_hdr
-    | Astc_6x6_hdr
-    | Astc_8x5_hdr
-    | Astc_8x6_hdr
-    | Astc_8x8_hdr
-    | Astc_10x5_hdr
-    | Astc_10x6_hdr
-    | Astc_10x8_hdr
-    | Astc_10x10_hdr
-    | Astc_12x10_hdr
-    | Astc_12x12_hdr
-    | Gbgr422
-    | Bgrg422
-    | Depth16_unorm
     | Depth32_float
-    | Stencil8
-    | Depth24_unorm_stencil8
-    | Depth32_float_stencil8
-    | X32_stencil8
-    | X24_stencil8
-
   type format_layout =
     { block_width : int
     ; block_height : int
@@ -577,13 +453,6 @@ module Depth_stencil : sig
     ; read_mask : int32
     ; write_mask : int32
     }
-
-  (** Builds one immutable stencil-face policy. Masks are unsigned 32-bit bit
-      patterns; defaults are always/keep with all mask bits set. *)
-  val face :
-    ?compare:compare_function -> ?stencil_fail:operation ->
-    ?depth_fail:operation -> ?pass:operation -> ?read_mask:int32 ->
-    ?write_mask:int32 -> unit -> face
 
   (** Creates immutable depth-test state. The default is always-pass with depth
       writes disabled and with stencil testing disabled for both faces. *)
@@ -1061,8 +930,6 @@ module Render_encoder : sig
   val set_scissor : t -> scissor -> (unit, error) result
   val set_cull_mode : t -> cull_mode -> (unit, error) result
   val set_front_facing_winding : t -> winding -> (unit, error) result
-  val set_stencil_reference_values :
-    t -> front:int32 -> back:int32 -> (unit, error) result
   val use_resources : t -> resource list -> usage:resource_usage list -> stages:stage list -> (unit,error) result
   val set_depth_stencil_state : t -> Depth_stencil.t option -> (unit,error) result
   val draw_indexed_basic : t -> primitive:primitive -> index_type:index_type -> index_buffer:Buffer.t -> index_offset:int64 -> index_count:int64 -> (unit,error) result

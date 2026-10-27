@@ -11,12 +11,12 @@ let marker operation ~label _ below =
   Custom.plain ~label ~operation (Option.to_list below) (fun ~context:_ _ ->
     Ok Objects.empty)
 
-let emit_parameter = Parameter.choice ~equal:( = ) ["Dome", World.Dome; "Light", World.Light]
+let emit_parameter = Param.choice ~equal:( = ) ["Dome", World.Dome; "Light", World.Light]
 
 module Settings = struct
   type background = Environment | Color | Transparent
 
-  let background_parameter = Parameter.choice ~equal:( = )
+  let background_parameter = Param.choice ~equal:( = )
       ["Environment", Environment; "Color", Color; "Transparent", Transparent]
 
   type parameters = {
@@ -123,7 +123,7 @@ module Sun = struct
 end
 
 module Shape = struct
-  let shape_parameter = Parameter.choice ~equal:( = )
+  let shape_parameter = Param.choice ~equal:( = )
       ["Rect", World.Rect; "Strip", World.Strip; "Circle", World.Circle; "Ring", World.Ring]
 
   type parameters = {
@@ -284,7 +284,6 @@ let stack (network : Document.network) =
              down (Option.get inputs.(0)) acc
          | _ -> acc) in
   Option.fold ~none:[] ~some:(fun id -> down id []) network.displayed
-  |> List.filter (fun node -> not (Edit_graph.is_bypassed network.graph.geometry ~node_id:(Node.id node)))
 
 (* The World a scene-level world node and its layer network describe;
    [time] (seconds) advances the time of day by the node's day cycle. *)
@@ -306,10 +305,10 @@ let to_world ?(time = 0.) node network =
 (* Nodes (bottom first) and world-node values for a [World.t], e.g. a
    preset: the inverse of [to_world]. *)
 let of_world (world : World.t) =
-  let float name value = name, Parameter.Float_value value in
+  let float name value = name, Param.Float_value value in
   let rgb prefix (c : World.rgb) =
     [float (prefix ^ "_r") c.r; float (prefix ^ "_g") c.g; float (prefix ^ "_b") c.b] in
-  let choice name value = name, Parameter.Choice_value value in
+  let choice name value = name, Param.Choice_value value in
   let emit = function World.Dome -> "Dome" | Light -> "Light" in
   let layer (entry : World.entry) =
     let key, values = match entry.layer with
@@ -327,11 +326,11 @@ let of_world (world : World.t) =
            float "softness" (degrees s.softness); float "intensity" s.intensity;
            choice "emit" (emit s.emit)] @ rgb "color" s.color
       | Scatter s -> Scatter.factory,
-          ["seed", Parameter.Int_value s.seed; "count", Parameter.Int_value s.count;
+          ["seed", Param.Int_value s.seed; "count", Param.Int_value s.count;
            float "elevation_min" (degrees s.elevation_min);
            float "elevation_max" (degrees s.elevation_max);
            float "size_min" (degrees s.size_min); float "size_max" (degrees s.size_max);
-           float "intensity" s.intensity; "mirror", Parameter.Bool_value s.mirror;
+           float "intensity" s.intensity; "mirror", Param.Bool_value s.mirror;
            choice "emit" (emit s.emit)]
           @ (match s.palette with
             | first :: second :: _ -> rgb "first" first @ rgb "second" second
@@ -339,17 +338,17 @@ let of_world (world : World.t) =
             | [] -> [])
       | Room r -> Room.factory,
           [float "width" r.width; float "depth" r.depth; float "height" r.height;
-           "rows", Parameter.Int_value r.rows; "columns", Parameter.Int_value r.columns;
+           "rows", Param.Int_value r.rows; "columns", Param.Int_value r.columns;
            float "panel" r.panel; float "intensity" r.intensity; float "cove" r.cove;
            choice "emit" (emit r.emit)] @ rgb "wall" r.wall in
-    key, entry.name, ("visible", Parameter.Bool_value entry.visible) :: values in
+    key, entry.name, ("visible", Param.Bool_value entry.visible) :: values in
   let settings =
     [choice "background" (match world.background with
       | Environment -> "Environment" | Color _ -> "Color" | Transparent -> "Transparent");
      float "rotation" (degrees world.rotation); float "exposure" world.exposure;
      float "time_of_day" world.time_of_day; float "latitude" (degrees world.latitude);
-     "day_of_year", Parameter.Int_value world.day_of_year;
-     "sun_linked", Parameter.Bool_value (world.sun = `Linked)]
+     "day_of_year", Param.Int_value world.day_of_year;
+     "sun_linked", Param.Bool_value (world.sun = `Linked)]
     @ (match world.background with
       | Color c -> rgb "background" c | Environment | Transparent -> [])
     @ (match world.sun with

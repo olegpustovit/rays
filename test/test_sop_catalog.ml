@@ -12,7 +12,7 @@ let registered_factories = lazy (
       ~sources:(Flow_sop.Catalog.sources () |> Result.get_ok)
       ~ops:Flow_sop.Operators.all catalog source with
     | Some workspace, [] -> workspace
-    | _, diagnostics -> fail (String.concat "\n" (List.map Flow.Diagnostic.to_string diagnostics)) in
+    | _, diagnostics -> fail (String.concat "\n" (List.map Diagnostic.to_string diagnostics)) in
   let lowered = Flow_sop.Lower.of_checked ~factories:native workspace |> Result.get_ok in
   native @ lowered.factories)
 
@@ -23,26 +23,26 @@ let check_metadata factory fields =
       && List.length (List.sort_uniq String.compare names) = List.length names)
     (key ^ " has invalid geometry port names");
   List.iter (fun name -> check
-      (not (List.exists (fun (field : Parameter.field_view) ->
+      (not (List.exists (fun (field : Param.field_view) ->
          field.name = name || Option.fold ~none:false
            ~some:(fun (group, _) -> group = name) field.vec3) fields))
       (key ^ " has a geometry port shadowing a parameter port")) names;
   if List.length names > 1 then
     check (names <> List.mapi (fun index _ -> "in" ^ string_of_int index) names)
       (key ^ " still has unnamed multiple inputs");
-  let floating (field : Parameter.field_view) = match field.kind with
-    | Parameter.Floating_view _ -> true | _ -> false in
-  List.fold_left (fun count (x : Parameter.field_view) ->
+  let floating (field : Param.field_view) = match field.kind with
+    | Param.Floating_view _ -> true | _ -> false in
+  List.fold_left (fun count (x : Param.field_view) ->
     if not (floating x) || not (Filename.check_suffix x.name "_x") then count
     else
       let prefix = String.sub x.name 0 (String.length x.name - 2) in
-      let find suffix = List.find_opt (fun (field : Parameter.field_view) ->
+      let find suffix = List.find_opt (fun (field : Param.field_view) ->
         field.name = prefix ^ suffix && floating field) fields in
       match find "_y", find "_z" with
       | Some y, Some z ->
-          let group = if List.exists (fun (field : Parameter.field_view) ->
+          let group = if List.exists (fun (field : Param.field_view) ->
               field.name = prefix) fields then prefix ^ "_vector" else prefix in
-          List.iteri (fun component (field : Parameter.field_view) ->
+          List.iteri (fun component (field : Param.field_view) ->
             check (field.vec3 = Some (group, component) && field.folder = x.folder)
               (key ^ "." ^ field.name ^ " lost its vector port metadata")) [x; y; z];
           count + 1
@@ -61,14 +61,14 @@ let gallery_grid_warning () =
   let catalog = Rays_editor.workspace_catalog () |> Result.get_ok in
   let text = In_channel.with_open_bin "../sketches/sop_gallery.rays" In_channel.input_all in
   let _, warnings = Editor_document.Workspace_doc.check_text catalog text |> Result.get_ok in
-  check (List.map (fun (d : Flow.Diagnostic.t) -> d.code, d.severity) warnings
-    = ["W_SOFT_RANGE", Flow.Diagnostic.Warning; "W_SOFT_RANGE", Flow.Diagnostic.Warning])
+  check (List.map (fun (d : Diagnostic.t) -> d.code, d.severity) warnings
+    = ["W_SOFT_RANGE", Diagnostic.Warning; "W_SOFT_RANGE", Diagnostic.Warning])
     "gallery soft-range warnings changed or became errors";
   let node = Lisp_sop.node "(sop/grid :columns 100 :rows 100 :size 10 :width 10 :height 10)" in
   List.iter (fun name ->
-    let field = List.find (fun (field : Parameter.field_view) -> field.name = name)
+    let field = List.find (fun (field : Param.field_view) -> field.name = name)
         (Node.parameter_fields node) in
-    check (field.current = Parameter.Int_value 100) "a soft grid range clamped the gallery")
+    check (field.current = Param.Int_value 100) "a soft grid range clamped the gallery")
     ["columns"; "rows"];
   let session = Session.create ~max_entries:8 ~max_payload_bytes:16_777_216 |> Result.get_ok in
   Fun.protect ~finally:(fun () -> Session.close session) (fun () ->
@@ -99,13 +99,13 @@ let test_morph_sketch () =
   let text = In_channel.with_open_bin "../sketches/ws_morph.rays"
       In_channel.input_all in
   let lowered = match Flow.Syntax.parse text with
-    | Error d -> fail (Flow.Diagnostic.to_string d)
+    | Error d -> fail (Diagnostic.to_string d)
     | Ok forms ->
         match Flow_sop.Lower.workspace
             ~extra:Editor_document.Contexts.descriptors
             ~factories:Sop_catalog.Editor.factories forms with
         | Ok lowered -> lowered
-        | Error d -> fail (Flow.Diagnostic.to_string d) in
+        | Error d -> fail (Diagnostic.to_string d) in
   let cook_graph ~domains name =
     let graph = List.find (fun (g : Flow_sop.Lower.graph) -> g.name = name)
         lowered.graphs in
@@ -147,7 +147,7 @@ let test_morph_sketch () =
       tinted |> Option.map Rdk.Attribute.Private.storage with
     | Some (Rdk.Attribute.Float4 values) -> Rdk.Packed.Float4.Private.view values
     | _ -> fail "Attribute Composite dropped or retyped Cd" in
-  let cool = Color.hex_exn "#2f6fb5" and warm = Color.hex_exn "#f2a03d" in
+  let cool = Rays_math.Color.hex_exn "#2f6fb5" and warm = Rays_math.Color.hex_exn "#f2a03d" in
   let mean a b = ((float a +. (0.35 *. float b)) /. 255.) /. 1.35 in
   check (Array.length cd.x = 29 * 29
       && Array.for_all (fun r -> Float.abs (r -. mean cool.r warm.r) < 1e-6) cd.x
@@ -226,16 +226,16 @@ let test_node_inputs () =
                          None; None; None]) changes =
     catalog_node "blend_shapes" inputs changes in
   let scaled source_name = both "masked Blend Shapes" (blend [
-      "weight1", Parameter.Float_value 0.5;
-      "masking", Parameter.Choice_value "Scale from attribute";
-      "mask_source", Parameter.Choice_value source_name]) in
+      "weight1", Param.Float_value 0.5;
+      "masking", Param.Choice_value "Scale from attribute";
+      "mask_source", Param.Choice_value source_name]) in
   check (near (xs (scaled "First input")) [|0.; 3.5; 7.|])
     "Blend Shapes did not scale by the first input's mask";
   check (near (xs (scaled "Shape")) [|5.; 3.5; 2.|])
     "Blend Shapes did not scale by the shape's mask";
   let set = both "set-mask Blend Shapes" (blend [
-      "weight1", Parameter.Float_value 0.125;
-      "masking", Parameter.Choice_value "Set from attribute"]) in
+      "weight1", Param.Float_value 0.125;
+      "masking", Param.Choice_value "Set from attribute"]) in
   check (near (xs set) [|0.; 6.; 12.|])
     "Blend Shapes did not take its weight from the mask";
   (* Blend Shapes point IDs: the shape lists the same points in another order *)
@@ -245,10 +245,10 @@ let test_node_inputs () =
   let inputs = [Some (Lisp_sop.snapshot (ordered)); Some (Lisp_sop.snapshot (shuffled));
                 None; None; None] in
   let by_id = both "ID-matched Blend Shapes" (blend ~inputs [
-      "point_id_attribute", Parameter.Text_value "id";
-      "attributes", Parameter.Text_value "P"])
+      "point_id_attribute", Param.Text_value "id";
+      "attributes", Param.Text_value "P"])
   and by_index = both "index-matched Blend Shapes" (blend ~inputs [
-      "attributes", Parameter.Text_value "P"]) in
+      "attributes", Param.Text_value "P"]) in
   check (near (xs by_id) [|10.; 11.; 12.|] && near (xs by_index) [|12.; 10.; 11.|])
     "Blend Shapes point ID attribute did not match points by ID";
   (* Attribute Composite alpha: each input's alpha weighs its values *)
@@ -259,9 +259,9 @@ let test_node_inputs () =
       [Some (Lisp_sop.snapshot ((layer [|0.; 1.; 2.|] [|2.; 4.; 6.|] [|1.; 1.; 0.|])));
        Some (Lisp_sop.snapshot ((layer [|10.; 11.; 12.|] [|10.; 20.; 30.|] [|1.; 0.; 1.|])));
        None; None; None] [
-      "point_attributes", Parameter.Text_value "P value";
-      "allow_position", Parameter.Bool_value true;
-      "alpha_attribute", Parameter.Text_value "alpha"]) in
+      "point_attributes", Param.Text_value "P value";
+      "allow_position", Param.Bool_value true;
+      "alpha_attribute", Param.Text_value "alpha"]) in
   let values = match Rdk.Geometry.find_attribute ~owner:point "value" composite
       |> Option.map Rdk.Attribute.storage with
     | Some (Rdk.Attribute.Float values) -> values
@@ -304,7 +304,7 @@ let test_motion () =
   and current = Lisp_sop.snapshot (Rdk.Line_geometry.points [|(1.,2.,3.); (3.,5.,7.)|]) in
   let rested = catalog_node "rest_position" [Some current; None] [] in
   let graph = catalog_node "point_velocity" [Some rested; Some previous; None]
-      Parameter.["dt", Float_value 0.5; "add_x", Float_value 1.;
+      Param.["dt", Float_value 0.5; "add_x", Float_value 1.;
                  "add_z", Float_value (-1.)] in
   let output = cook session graph in
   let rest = float3 "rest" output and velocity = float3 "v" output in
@@ -313,7 +313,7 @@ let test_motion () =
   check (velocity.x = [|3.;5.|] && velocity.y = [|4.;8.|]
       && velocity.z = [|5.;11.|]) "Point Velocity SOP output";
   let invalid = catalog_node "point_velocity" [Some current; Some previous; None]
-      Parameter.["group", Text_value "missing"] in
+      Param.["group", Text_value "missing"] in
   (match Session.cook session ~context:(Context.create () |> Result.get_ok)
       invalid with
    | Error error -> check (error.Diagnostic.code = "missing_group")
@@ -337,7 +337,7 @@ let set_color_test () =
     "set_color defaults are not opaque white";
   let grouped = Lisp_sop.node ~with_:["box", (box)] {|(sop/group_range (sop/ext_box) :name "g" :end_ 0)|} in
   let tinted = colors (catalog_node "set_color" [Some grouped]
-    Parameter.["group", Text_value "g"; "color_r", Float_value 0.25;
+    Param.["group", Text_value "g"; "color_r", Float_value 0.25;
       "alpha", Float_value 0.5]) in
   check (tinted.x.(0) = 0.25 && tinted.w.(0) = 0.5 && tinted.x.(1) = 1.
       && tinted.w.(1) = 1.) "set_color group did not restrict the write";
@@ -372,7 +372,7 @@ let run ?(exhaustive = false) () =
   let orient = List.hd (Node.inputs targets) in
   let custom_noise = Lisp_sop.node ~with_:["origin", List.hd (Node.inputs orient)]
     {|(sop/attribute_noise_quaternion (sop/ext_origin) :owner "Point" :name "orient" :seed 4 :frequency [0.2 0.2 0.2] :octaves 2 :location "attribute:rest position" :range "min-max;vec4,0.0,0.1,0.2,0.3;vec4,0.7,0.8,0.9,1.0")|} in
-  let field node name = List.find (fun value -> value.Parameter.name = name)
+  let field node name = List.find (fun value -> value.Param.name = name)
       (Node.parameter_fields node) in
   List.iter (fun (node, names) -> List.iter (fun name ->
     let value = field node name in
@@ -385,7 +385,7 @@ let run ?(exhaustive = false) () =
                "axis_x"; "axis_y"; "axis_z"];
      fracture, ["resolve_cutter_self_intersections";
                 "detriangulation"; "require_closed"; "piece_attribute"];
-     (let box = Lisp_sop.node {|(sop/box)|} in box, List.map (fun value -> value.Parameter.name)
+     (let box = Lisp_sop.node {|(sop/box)|} in box, List.map (fun value -> value.Param.name)
        (Node.parameter_fields box))];
   let changed_graph, effects = edit_parameters targets
       ~node_id:(Node.id orient)
@@ -400,16 +400,16 @@ let run ?(exhaustive = false) () =
          = (field custom_noise "range").current)
     "quaternion noise location/range were not editable schema fields";
   List.iter (fun (node, field, expected) ->
-    let before = List.find (fun value -> value.Parameter.name = field)
+    let before = List.find (fun value -> value.Param.name = field)
         (Node.parameter_fields node) in
-    check (before.current = Parameter.Text_value expected)
+    check (before.current = Param.Text_value expected)
       ("catalog hidden parameter has wrong default: " ^ field);
     let edited, effects = Node.apply_parameters node
-        [field, Parameter.Text_value "edited"] |> Result.get_ok in
-    let after = List.find (fun value -> value.Parameter.name = field)
+        [field, Param.Text_value "edited"] |> Result.get_ok in
+    let after = List.find (fun value -> value.Param.name = field)
         (Node.parameter_fields edited) in
     check (effects.cook && Node.id edited = Node.id node
-        && after.current = Parameter.Text_value "edited")
+        && after.current = Param.Text_value "edited")
       ("catalog field did not rebuild: " ^ field))
     [plane, "height_attribute", ""; targets, "id_attribute", "";
      orient, "name", "orient"; fracture, "piece_attribute", "piece"];
@@ -423,11 +423,11 @@ let run ?(exhaustive = false) () =
   let point_node = Graph.inspect graph
       |> List.find (fun info -> info.Graph.label = "points") in
   let edited, effects = edit_parameters graph ~node_id:point_node.id
-      ["points", Parameter.Int_value 999] |> Result.get_ok in
+      ["points", Param.Int_value 999] |> Result.get_ok in
   let edited_points = Graph.find edited ~node_id:point_node.id |> Option.get in
   let value = Node.parameter_fields edited_points
-      |> List.find (fun field -> field.Parameter.name = "points") in
-  check (effects.cook && value.current = Parameter.Int_value 50)
+      |> List.find (fun field -> field.Param.name = "points") in
+  check (effects.cook && value.current = Param.Int_value 50)
     "catalog point count did not enforce its PPX hard maximum";
   let cube = labelled "cube" {|(sop/box)|}
   and dodecahedron = labelled "dodecahedron"
@@ -438,13 +438,13 @@ let run ?(exhaustive = false) () =
     "catalog Switch is not the standard parameterized SOP switch";
   let switched, switch_effects = edit_parameters switched
       ~node_id:(Node.id switched)
-      ["input", Parameter.Int_value 1]
+      ["input", Param.Int_value 1]
       |> Result.get_ok in
   let switch_value = Node.parameter_fields switched
-      |> List.find (fun field -> field.Parameter.name = "input") in
+      |> List.find (fun field -> field.Param.name = "input") in
   check (switch_effects.cook
       && switch_value.current
-         = Parameter.Int_value 1)
+         = Param.Int_value 1)
     "catalog Switch did not retain its selected labeled input";
   let session = Session.create ~max_entries:8 ~max_payload_bytes:1_000_000
       |> Result.get_ok in
@@ -463,13 +463,13 @@ let run ?(exhaustive = false) () =
            ~consumer:(Node.id switched) ~input_index:1 |> Result.get_ok in
   let rebuilt_switch = Edit_graph.compile document |> Result.get_ok in
   let switch_field = Node.parameter_fields rebuilt_switch
-      |> List.find (fun field -> field.Parameter.name = "input") in
+      |> List.find (fun field -> field.Param.name = "input") in
   check (match switch_field.kind with
-    | Parameter.Choice_view options -> Array.exists
+    | Param.Choice_view options -> Array.exists
         (String.equal "1 · replacement-grid") options
     | _ -> false)
     "rewiring a Switch did not rebuild its input-dependent parameter labels";
-  check (switch_field.current = Parameter.Int_value 1
+  check (switch_field.current = Param.Int_value 1
       && Node.parameter_key switched = Node.parameter_key rebuilt_switch)
     "rewiring Switch labels must retain its integer selection and parameter key";
   Session.close session;
@@ -581,7 +581,7 @@ let run ?(exhaustive = false) () =
   let flow_catalog = match Flow_sop.Catalog.of_factories ~version:1
       Sop_catalog.Editor.factories with
     | Ok catalog -> catalog
-    | Error diagnostic -> fail (Flow.Diagnostic.to_string diagnostic) in
+    | Error diagnostic -> fail (Diagnostic.to_string diagnostic) in
   let manifest, digest = Flow_sop.Manifest.generate Sop_catalog.Editor.factories
     |> Result.get_ok in
   let catalog_from_manifest, read_digest = Flow.Check.catalog_of_manifest manifest
@@ -640,7 +640,7 @@ let run ?(exhaustive = false) () =
         check (Edit_graph.factory_facts factory = Node.facts node)
           ("default factory facts differ from the instantiated node: " ^ Edit_graph.factory_key factory);
         if Edit_graph.factory_key factory = "box" then
-          check (List.filter_map (fun (field : Parameter.field_view) ->
+          check (List.filter_map (fun (field : Param.field_view) ->
               if field.primary then Some field.name else None) (Node.parameter_fields node)
               = ["size_x"; "size_y"; "size_z"])
             "Box primary rows still expose topology instead of size";
@@ -659,40 +659,40 @@ let run ?(exhaustive = false) () =
      parameter key, so a field forgotten by an operator's own key string can
      never produce a stale cache hit. *)
   if exhaustive then begin
-  let perturbed (view : Parameter.field_view) =
-    let within_int (range : Parameter.int_range) value =
+  let perturbed (view : Param.field_view) =
+    let within_int (range : Param.int_range) value =
       Option.fold ~none:true ~some:(fun low -> value >= low) range.hard_min
       && Option.fold ~none:true ~some:(fun high -> value <= high) range.hard_max
-    and within_float (range : Parameter.float_range) value =
+    and within_float (range : Param.float_range) value =
       Option.fold ~none:true ~some:(fun low -> value >= low) range.hard_min
       && Option.fold ~none:true ~some:(fun high -> value <= high) range.hard_max
     in
     match view.kind, view.current with
-    | Parameter.Toggle_view, Parameter.Bool_value value ->
-        Some (Parameter.Bool_value (not value))
-    | Parameter.Integer_view range, Parameter.Int_value value ->
+    | Param.Toggle_view, Param.Bool_value value ->
+        Some (Param.Bool_value (not value))
+    | Param.Integer_view range, Param.Int_value value ->
         List.find_opt (fun candidate -> candidate <> value
             && within_int range candidate)
           [value + 1; value - 1; range.soft_min; range.soft_max]
-        |> Option.map (fun value -> Parameter.Int_value value)
-    | Parameter.Floating_view range, Parameter.Float_value value ->
+        |> Option.map (fun value -> Param.Int_value value)
+    | Param.Floating_view range, Param.Float_value value ->
         List.find_opt (fun candidate -> candidate <> value
             && within_float range candidate)
           [value +. 0.25; value -. 0.25;
            (range.soft_min +. range.soft_max) /. 2.;
            range.soft_min; range.soft_max]
-        |> Option.map (fun value -> Parameter.Float_value value)
-    | Parameter.Text_view, Parameter.Text_value value ->
-        Some (Parameter.Text_value (if value = "" then "p" else value ^ "p"))
-    | Parameter.Choice_view options, Parameter.Choice_value value ->
+        |> Option.map (fun value -> Param.Float_value value)
+    | Param.Text_view, Param.Text_value value ->
+        Some (Param.Text_value (if value = "" then "p" else value ^ "p"))
+    | Param.Choice_view options, Param.Choice_value value ->
         Array.to_list options |> List.find_opt (fun option -> option <> value)
-        |> Option.map (fun option -> Parameter.Choice_value option)
-    | Parameter.Choice_view options, Parameter.Int_value value ->
+        |> Option.map (fun option -> Param.Choice_value option)
+    | Param.Choice_view options, Param.Int_value value ->
         (* An index choice (sop/switch :input) names its options by position. *)
         List.find_opt (fun candidate -> candidate <> value
             && candidate >= 0 && candidate < Array.length options)
           [value + 1; value - 1; 0]
-        |> Option.map (fun value -> Parameter.Int_value value)
+        |> Option.map (fun value -> Param.Int_value value)
     | _ -> None in
   let perturbed_fields = ref 0 and rejected_fields = ref 0 in
   List.iter (fun factory ->
@@ -701,8 +701,8 @@ let run ?(exhaustive = false) () =
     let node = Edit_graph.instantiate_optional factory slots |> Result.get_ok in
     check (not (Node.has_parameters node) || Node.parameter_key node <> "")
       (key ^ " has no schema-derived cache identity");
-    List.iter (fun (view : Parameter.field_view) ->
-      if view.impact = Parameter.Cook then
+    List.iter (fun (view : Param.field_view) ->
+      if view.impact = Param.Cook then
         match perturbed view with
         | None -> fail (Printf.sprintf "%s.%s has no perturbable value" key
             view.name)
@@ -733,7 +733,7 @@ let run ?(exhaustive = false) () =
   ignore (cook key_session exploded);
   let misses = (Session.stats key_session).misses in
   let exploded, _ = Node.apply_parameters exploded
-      ["piece_attribute", Parameter.Text_value "shard"] |> Result.get_ok in
+      ["piece_attribute", Param.Text_value "shard"] |> Result.get_ok in
   ignore (cook key_session exploded);
   check ((Session.stats key_session).misses = misses + 1)
     "a schema field ignored by the operator key did not miss the session cache";
@@ -784,7 +784,7 @@ let run ?(exhaustive = false) () =
   let fade = Edit_graph.instantiate_optional attribute_fade_factory
       [Some fade_source; None; Some fade_hold] |> Result.get_ok in
   let fade, _ = Node.apply_parameters fade
-      ["fade_in", Parameter.Float_value 3.] |> Result.get_ok in
+      ["fade_in", Param.Float_value 3.] |> Result.get_ok in
   check (List.map Node.id (Node.inputs fade)
       = [Node.id fade_source; Node.id fade_hold])
     "Attribute Fade parameter edit reassigned its sparse hold-source port";
@@ -799,7 +799,7 @@ let run ?(exhaustive = false) () =
   let velocity = Edit_graph.instantiate_optional point_velocity_factory
       [Some fade_source; None; Some fade_hold] |> Result.get_ok in
   let velocity, _ = Node.apply_parameters velocity
-      ["dt", Parameter.Float_value 0.1] |> Result.get_ok in
+      ["dt", Param.Float_value 0.1] |> Result.get_ok in
   check (List.map Node.id (Node.inputs velocity)
       = [Node.id fade_source; Node.id fade_hold])
     "Point Velocity parameter edit reassigned its sparse next-sample port";
@@ -816,7 +816,8 @@ let run ?(exhaustive = false) () =
   check (Mesh.mode point_mesh = Mesh.Points && Mesh.vertex_count point_mesh = 50)
     "point-only SOP output did not retain point rendering mode";
   Session.close point_session;
-  let explosion = Rays_editor.Packed_pieces.explosion graph |> Option.get in
+  let explosion = Rdk_rays.Packed_pieces.explosion
+      ~operation:(Node.operation graph) ~fields:(Node.parameter_fields graph) |> Option.get in
   check (Node.operation graph = "exploded_view" && explosion.amount = 0.32
       && explosion.piece_attribute = "piece")
     "standard Exploded View node lost its operation or PPX defaults";

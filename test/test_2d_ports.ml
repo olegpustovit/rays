@@ -1,6 +1,6 @@
 open Rays
 module E=Flow.Eval
-let ok=function Ok x->x|Error d->failwith(Flow.Diagnostic.to_string d)
+let ok=function Ok x->x|Error d->failwith(Diagnostic.to_string d)
 let read path=In_channel.with_open_bin path In_channel.input_all
 let names=["basic";"generative";"noise";"recursive_rectangles";"drawing";"audio";"file_dialog";"pxui"]
 let dimensions=function "generative"->500,500|"noise"->800,450|"recursive_rectangles"->720,720
@@ -8,24 +8,24 @@ let dimensions=function "generative"->500,500|"noise"->800,450|"recursive_rectan
 let frame ?(synthetic=true) name count =
   let width,height=dimensions name in
   let events=if not synthetic then []else match name,count with
-    |"drawing",1->[Event.MousePressed(Input.LeftButton,(100.,140.));MouseMoved(120.,160.)]
-    |"drawing",2->[Event.MouseMoved(140.,180.)]
-    |"drawing",3->[Event.MouseReleased(Input.LeftButton,(160.,190.))]
-    |"recursive_rectangles",1->[Event.MousePressed(Input.LeftButton,(100.,140.))]
-    |"audio",1->[Event.KeyPressed(Input.KeyChar '3')]
-    |"audio",3->[Event.MousePressed(Input.LeftButton,(400.,180.))]
-    |"file_dialog",1->[Event.FileDropped "sample.png";FileDialog{id=1;result=Ok["a.png";"b.png"]}]
-    |"file_dialog",2->[Event.FileDragMoved(90.,140.);MousePinched 1.25]
-    |"file_dialog",3->[Event.FileDragEnded;FileDialog{id=2;result=Ok[]}]
+    |"drawing",1->[Input.Pointer_pressed(Input.LeftButton,(100.,140.));Pointer_moved(120.,160.)]
+    |"drawing",2->[Input.Pointer_moved(140.,180.)]
+    |"drawing",3->[Input.Pointer_released(Input.LeftButton,(160.,190.))]
+    |"recursive_rectangles",1->[Input.Pointer_pressed(Input.LeftButton,(100.,140.))]
+    |"audio",1->[Input.Key_pressed(Input.KeyChar '3')]
+    |"audio",3->[Input.Pointer_pressed(Input.LeftButton,(400.,180.))]
+    |"file_dialog",1->[Input.File_dropped "sample.png";File_dialog{id=1;result=Ok["a.png";"b.png"]}]
+    |"file_dialog",2->[Input.File_drag_moved(90.,140.);Pinched 1.25]
+    |"file_dialog",3->[Input.File_drag_ended;File_dialog{id=2;result=Ok[]}]
     |_->[]in
   let mouse=if not synthetic then 0.,0. else if name="recursive_rectangles"then 100.,140. else -100.,-100. in
-  {Frame.width;height;size=width,height;
-   pixel_scale=1.,1.;time=float count/.60.;dt=1./.60.;fps=60.;count;
-   mouse;mouse_delta=0.,0.;mouse_buttons=[];keys=[];events}
+  { Frame.input = { (Input.at_time (float count /. 60.)) with dt = 1. /. 60.;
+      frame = count; tick = count; size = width, height; pointer = mouse; events };
+    pixel_scale = 1., 1.; fps = 60.; mouse_delta = 0., 0. }
 let load name=
   let source=read("../sketches/"^name^".rays")in
   let workspace=match Rays_editor.Workspace.load source with Ok w->w|Error ds->
-    failwith(String.concat"\n"(List.map Flow.Diagnostic.to_string ds))in
+    failwith(String.concat"\n"(List.map Diagnostic.to_string ds))in
   assert(Editor_document.Workspace_doc.to_text workspace=source);
   workspace
 let save_roundtrip name workspace =
@@ -41,12 +41,13 @@ let save_roundtrip name workspace =
     let editor=ref(Result.get_ok(Editor.create ~workspace ~await:true ~domains:1
       ~presets:(Filename.concat directory "presets")
       ~source:(Rays_editor.Source.at ~file ~digest:(Editor_document.Contexts.sha256 source))
-      ~prepare:(fun _ _->Ok()) ~scene3:(fun _ ()->Scene3.empty)()))in
+      ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Scene3.empty)()))in
     Fun.protect ~finally:(fun()->Editor.close !editor)(fun()->
       editor:=Editor.update !editor(frame ~synthetic:false name 0);
       let inode=(Unix.stat file).st_ino in
-      let save_frame={(frame ~synthetic:false name 1)with
-        keys=[Input.Meta];events=[Event.KeyPressed(Input.KeyChar 's')]}in
+      let input_frame = frame ~synthetic:false name 1 in
+      let save_frame = { input_frame with input = { input_frame.input with keys = [Input.Meta];
+        events = [Input.Key_pressed (Input.KeyChar 's')] } } in
       editor:=Editor.update !editor save_frame;
       editor:=Editor.update !editor(frame ~synthetic:false name 2);
       assert((Unix.stat file).st_ino<>inode);
@@ -56,12 +57,12 @@ let save_roundtrip name workspace =
 let modes=["lisp-a",1;"lisp-b",1;"cpu-1",1;"cpu-8",8]
 let pictures ?(synthetic=true) ?(first=0) name workspace domains = Parallel.run ~domains(fun()->
   let evaluated=ok(E.static ~inputs:workspace.Editor_document.Workspace_doc.inputs workspace.checked)in
-  let prepared=ok(Rays_editor.Drawing.prepare ~states:evaluated.states evaluated.plan
+  let prepared=ok(Flow_native.Drawing.prepare ~states:evaluated.states evaluated.plan
     (List.assoc "picture" evaluated.results))in
   let state=E.create_state()in
   Array.init 4(fun count->let frame=frame ~synthetic name (first+count) in
-    let live=Rays_editor.Live_frame.of_frame frame in
-    ok(Rays_editor.Drawing.render_prepared ~state prepared ~live ~size:frame.size)))
+    let live=Flow_native.Live_frame.of_frame frame in
+    ok(Flow_native.Drawing.render_prepared ~state prepared ~live ~size:frame.input.size)))
 let serialize scene=Scene.Private.commands scene |> Scene_command.Render_ir.create |> Result.get_ok
   |> Scene_command.Render_ir.serialize
 let mode_parity ()=List.iter(fun name->
@@ -96,14 +97,14 @@ let oracles=[
 let parameters ~size scene =
   let module R=Scene_command.Render_ir in
   let color bits=let byte shift=Int32.(to_int(logand(shift_right_logical bits shift)255l))in
-    Color.rgba(byte 24)(byte 16)(byte 8)(byte 0)in
+    Rays_math.Color.rgba(byte 24)(byte 16)(byte 8)(byte 0)in
   let optional bits=if Int32.logand bits 255l=0l then None else Some(color bits)in
   let rec command = function
     |R.Clear bits->let width,height=size in
         commands(Scene.Private.commands[Scene.rect ~at:(0,0) ~w:width ~h:height ~fill:(color bits)()])
     |R.Shapes batch->
-        let bytes=Scene_command.Shape_batch.instances batch in
-        List.init(Scene_command.Shape_batch.count batch)(fun index->
+        let bytes=Scene_command.Ui_batch.instances batch in
+        List.init(Scene_command.Ui_batch.count batch)(fun index->
           let word n=Bytes.get_int32_le bytes(index*64+n*4)in
           let f n=Int32.float_of_bits(word n)in
           let x0=f 0 and y0=f 1 and x1=f 2 and y1=f 3 in
@@ -142,8 +143,8 @@ let pure ()=
       Array.iteri(fun count scene->
         let frame=frame port.name count in
         model:=port.update !model frame;
-        let expected=parameters ~size:frame.size(port.view !model frame)in
-        let actual=parameters ~size:frame.size scene in
+        let expected=parameters ~size:frame.input.size(port.view !model frame)in
+        let actual=parameters ~size:frame.input.size scene in
         if expected<>actual then begin
           let describe=function
             |`Geometry(color,points)->Printf.sprintf "geometry %lx %s" color
@@ -162,17 +163,18 @@ let pure ()=
 let recursive_extremes ()=
   let workspace=load "recursive_rectangles"in
   let evaluated=ok(E.static ~inputs:workspace.Editor_document.Workspace_doc.inputs workspace.checked)in
-  let prepared=ok(Rays_editor.Drawing.prepare ~states:evaluated.states evaluated.plan
+  let prepared=ok(Flow_native.Drawing.prepare ~states:evaluated.states evaluated.plan
     (List.assoc "picture" evaluated.results))in
   begin
     let state=E.create_state()and model=ref(Recursive_rectangles_oracle.init(frame "recursive_rectangles" 0))in
     List.iteri(fun count mouse->
-      let frame={(frame "recursive_rectangles" count)with mouse;dt=0.125}in
+      let frame = frame "recursive_rectangles" count in
+      let frame = { frame with input = { frame.input with pointer = mouse; dt = 0.125 } } in
       model:=Recursive_rectangles_oracle.update !model frame;
-      let scene=ok(Rays_editor.Drawing.render_prepared ~state prepared
-        ~live:(Rays_editor.Live_frame.of_frame frame) ~size:frame.size)in
-      assert(parameters ~size:frame.size scene=
-        parameters ~size:frame.size(Recursive_rectangles_oracle.view !model frame)))
+      let scene=ok(Flow_native.Drawing.render_prepared ~state prepared
+        ~live:(Flow_native.Live_frame.of_frame frame) ~size:frame.input.size)in
+      assert(parameters ~size:frame.input.size scene=
+        parameters ~size:frame.input.size(Recursive_rectangles_oracle.view !model frame)))
       [0.,0.;720.,720.;720.,360.] end;
   print_endline "recursive rectangles: minimum/maximum depth, damping and large exact palette hashes"
 let moving_circles ()=match Rays_editor.Workspace.load {|(workspace moving
@@ -180,7 +182,7 @@ let moving_circles ()=match Rays_editor.Workspace.load {|(workspace moving
   positions (map (fn [i] [(+ (mod i 640) (* 5 (sin phase))) (mod (int/div i 640) 360) 0]) (array/range 10000))]
   (draw/merge (draw/background "#111827") (draw/circles positions :radius 2.0 :fill "#22d3ee"))))
  (graph window :context settings (settings/config :width 640 :height 360)))|}with
- |Ok workspace->workspace|Error ds->failwith(String.concat"\n"(List.map Flow.Diagnostic.to_string ds))
+ |Ok workspace->workspace|Error ds->failwith(String.concat"\n"(List.map Diagnostic.to_string ds))
 let native_modes directory name workspace =
   let width,height=dimensions name in
   let config={Sketch.default_config with width;height;clock=Sketch.Fixed(1./.60.);fps=None}in
@@ -191,8 +193,8 @@ let native_modes directory name workspace =
     if mode="lisp-a" || mode="lisp-b" then
       ignore(ok(Rays_editor.Workspace.export ~directory ~frames:4 workspace))else
     Parallel.run ~domains:(if String.ends_with ~suffix:"8" mode then 8 else 1)(fun()->
-      ignore(Sketch.export_state ~config ~directory ~frames:4 ~init:(fun _->())
-        ~update:(fun () _->()) ~view:(fun () frame->scenes.(frame.Frame.count-1))())))all;
+      Result.get_ok(Sketch.export_state ~config ~directory ~frames:4 ~init:(fun _->())
+        ~update:(fun () _->()) ~view:(fun () frame->scenes.(frame.input.frame-1))())))all;
   for count=0 to 3 do
     let path mode=Printf.sprintf "%s/%s/%s/frame-%06d.png" directory name mode count in
     let expected=read(path"lisp-a")in
@@ -207,15 +209,15 @@ let native directory=
   native_modes directory name workspace;
   let model=ref(port.init(frame name 0))in
   let canvas=Canvas.create_exn ~width ~height in
-  Fun.protect ~finally:(fun()->port.stop !model;Canvas.destroy canvas)(fun()->
+  Fun.protect ~finally:(fun()->port.stop !model;ignore(Canvas.destroy canvas))(fun()->
     let scenes=pictures name workspace 1 in
     for count=0 to 3 do
       let frame=frame name count in
       model:=port.update !model frame;
-      Canvas.render canvas(port.view !model frame);
-      let expected=Canvas.pixels canvas in
-      Canvas.render canvas scenes.(count);
-      let actual=Canvas.pixels canvas in
+      Result.get_ok (Canvas.render canvas (port.view !model frame));
+      let expected=Result.get_ok (Canvas.pixels canvas) in
+      Result.get_ok (Canvas.render canvas scenes.(count));
+      let actual=Result.get_ok (Canvas.pixels canvas) in
       (* Noise uses only opaque, integer axis-aligned filled rectangles, whose
          pixel-center coverage is identical in both renderers. Other ports use
          circles, rotated rectangles or strokes and retain the rim gate. *)
@@ -243,7 +245,7 @@ let native directory=
           if x>=0 && y>=0 && x<width && y<height && edge image(y*width+x) then found:=true done done;
         !found in
       let bad=ref 0 and changed=ref 0 and first=ref(-1) and worst=ref 0 in
-      Array.iteri(fun i (value:Color.t)->let (other:Color.t)=actual.(i) in if value<>other then begin incr changed;
+      Array.iteri(fun i (value:Rays_math.Color.t)->let (other:Rays_math.Color.t)=actual.(i) in if value<>other then begin incr changed;
         if not(edge expected i && edge actual i) then begin incr bad; if !first<0 then first:=i;
           worst:=List.fold_left max !worst [abs(value.r-other.r);abs(value.g-other.g);abs(value.b-other.b);abs(value.a-other.a)] end end)expected;
       Printf.printf "%s frame %d: %d changed pixels, %d off-edge (first at %d,%d, worst channel %d)\n%!" name count !changed !bad

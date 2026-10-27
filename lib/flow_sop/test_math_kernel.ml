@@ -1,11 +1,11 @@
 module E = Flow.Eval
 module P = Flow_ir.Packed
-let ok = function Ok x -> x | Error d -> failwith (Flow.Diagnostic.to_string d)
+let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let function_value ?(sources=[]) input_ty body =
   let source = Flow.Syntax.parse ("(workspace math (graph result :context value (let* [tested (fn [(x : "
     ^ Flow.Ty.to_string input_ty ^ ")] " ^ body ^ ")] 0.0)))" ) |> ok in
   let workspace = match Flow_sop.Catalog.check_workspace ~ops:Flow_sop.Operators.all ~library:false ~sources Flow.Check.{version=1;kinds=[]} source with
-    | Some w,[] -> w | _,ds -> failwith (String.concat "\n" (List.map Flow.Diagnostic.to_string ds)) in
+    | Some w,[] -> w | _,ds -> failwith (String.concat "\n" (List.map Diagnostic.to_string ds)) in
   let evaluation = ok (E.static ~record:true workspace) in
   match snd (List.hd (List.assoc ["result";"tested"] evaluation.records)) with
   | E.Fn f -> f | _ -> assert false
@@ -14,9 +14,9 @@ let compile ?sources input_ty output_ty input body =
   let value = ok (E.Private.map_function ~signature:Flow.Ty.{params=[input_ty];result=output_ty} fn [input]) in
   match value with
   | E.Residual residual ->
-      let term = (E.Private.residual_view residual).term in
+      let term = (E.Residual.residual_view residual).term in
       let program = match P.compile_result residual term with Ok p -> p
-        | Error ds -> failwith (body ^ "\n" ^ String.concat "\n" (List.map Flow.Diagnostic.to_string ds)) in
+        | Error ds -> failwith (body ^ "\n" ^ String.concat "\n" (List.map Diagnostic.to_string ds)) in
       value,program
   | _ -> failwith (body ^ ": live packed value expected")
 let bytes = fun value -> Marshal.to_string value [Marshal.No_sharing]
@@ -37,25 +37,25 @@ let () =
   List.iter (fun (input_ty,output_ty,input,body) ->
     let value,program = compile input_ty output_ty input body in
     List.iter (fun time ->
-      let live = Frame_input.at_time time in
+      let live = Input.at_time time in
       let expected = ok (E.Private.force_reference value ~live) |> bytes in
-      List.iter (fun domains -> Rays_math.Parallel.run ~domains (fun () ->
+      List.iter (fun domains -> Parallel.run ~domains (fun () ->
         let actual = ok (P.force ~strict:true program ~live) |> bytes in
         if actual<>expected then failwith (Printf.sprintf "%s differs at %g on %d domains" body time domains))) [1;8])
       [-0.;0.;0.37;1.]) cases;
   List.iter (fun (input,body) ->
     let value,program = compile Flow.Ty.Float Flow.Ty.Float input body in
-    let live = Frame_input.at_time 0. in
+    let live = Input.at_time 0. in
     let expected = ok (E.Private.force_reference value ~live) |> bytes in
-    List.iter (fun domains -> Rays_math.Parallel.run ~domains (fun () ->
+    List.iter (fun domains -> Parallel.run ~domains (fun () ->
       assert (bytes (ok (P.force ~strict:true program ~live))=expected))) [1;8])
     [E.Float_array [|1e308;1e-300;Int64.float_of_bits 1L;-0.|],"(hypot x (+ x t))"];
   List.iter (fun body ->
     let value,program = compile Flow.Ty.Float Flow.Ty.Float (E.Float_array [|2.;-2.|]) body in
-    let live = Frame_input.at_time 0. in
+    let live = Input.at_time 0. in
     let nonfinite = function Error d ->
-        if d.Flow.Diagnostic.code<>"E_NONFINITE" then
-          failwith (body ^ ": " ^ Flow.Diagnostic.to_string d)
+        if d.Diagnostic.code<>"E_NONFINITE" then
+          failwith (body ^ ": " ^ Diagnostic.to_string d)
       | Ok _ -> failwith (body ^ ": expected nonfinite error") in
     nonfinite (E.Private.force_reference value ~live);
     nonfinite (P.force ~strict:true program ~live))
@@ -81,9 +81,9 @@ let () =
     match index mod 4 with 0->x|1->y|2->z|_->w)) in
   let value,program=compile ~sources Flow.Ty.Vec4 Flow.Ty.Vec4 input
     "(quat_normalize [x.x x.y x.z (+ x.w t)])" in
-  let live=Frame_input.at_time 0. in
+  let live=Input.at_time 0. in
   let expected=bytes(ok(E.Private.force_reference value ~live)) in
-  List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+  List.iter(fun domains->Parallel.run ~domains(fun()->
     assert(bytes(ok(P.force ~strict:true program ~live))=expected))) [1;8];
   print_endline "Quaternion finite-overflow guards match strict reference bytes at one/eight domains on 32769 elements"
 
@@ -95,7 +95,7 @@ let () =
     && (match Flow.Syntax.children form with
         | _ :: _ :: { node = Kw "context"; _ } :: { node = Sym "sop"; _ } :: _ -> false
         | _ -> true)) in
-  let count=5001 and live=Frame_input.at_time 0. in
+  let count=5001 and live=Input.at_time 0. in
   let cases=[|Rays_math.Vec3.zero;Rays_math.Vec3.create (-0.) 0. (-0.);
     Rays_math.Vec3.create 0.3 (-0.7) 1.2;
     Rays_math.Vec3.create 1e-150 (-2e-150) 3e-150|] in
@@ -121,7 +121,7 @@ let () =
             failwith(Printf.sprintf "Native FMA helper %s component%d: %h <> %h" body i x expected.(i)))values
       |_->failwith"FMA helper vector array expected" in
     check(ok(E.Private.force_reference value ~live));
-    List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+    List.iter(fun domains->Parallel.run ~domains(fun()->
       check(ok(P.force ~strict:true program ~live));
       check(ok(Flow_ir.Executor.force ~strict:true compiled ~live))))[1;4;8];
     assert(P.gpu_refusals program<>[]);
@@ -155,7 +155,7 @@ let () =
     assert(Sys.command("node "^Filename.quote path)=0));
   List.iter(fun body->
     let value,program=compile Flow.Ty.Vec3 Flow.Ty.Vec3(E.Vec3_array[|0.;Float.max_float;0.|])body in
-    List.iter(fun result->match result with Error d->assert(d.Flow.Diagnostic.code="E_NONFINITE")
+    List.iter(fun result->match result with Error d->assert(d.Diagnostic.code="E_NONFINITE")
       |Ok _->failwith"Cross overflow accepted")
       [E.Private.force_reference value ~live;P.force ~strict:true program ~live])
     ["(cross x [0.0 0.0 2.0])"];

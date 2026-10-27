@@ -3,7 +3,7 @@ open Rdk
 open Rdk_test_support
 
 let translated y geometry =
-  Transform_ops.transform (Mat4.translation (Vec3.create 0. y 0.)) geometry
+  Transform_ops.transform (Rays_math.Mat4.translation (Rays_math.Vec3.create 0. y 0.)) geometry
 
 let add_attribute attribute geometry =
   Geometry.with_attribute attribute geometry |> get_string_ok
@@ -101,7 +101,7 @@ let equal_geometry left right =
 let check_basic_projection () =
   let source = source_points [|(-1., 2., -1.); (0.5, 3., 0.25); (4., 2., 0.)|]
   and collision = plane 0. in
-  let projected = Ray.run ~direction:(Ray.Ray_vector (Vec3.create 0. (-5.) 0.))
+  let projected = Ray.run ~direction:(Ray.Ray_vector (Rays_math.Vec3.create 0. (-5.) 0.))
       ~distance_attribute:"dist" ~primitive_attribute:"hit_prim"
       ~source_vertex_numbers_attribute:"hit_vertices"
       ~source_vertex_weights_attribute:"hit_weights" ~hit_group:"hits"
@@ -153,7 +153,7 @@ let check_direction_policies () =
   let source = source_points [|(0., 0., 0.)|] in
   let collision = Mesh_merge.run [plane 1.; plane 3.; plane (-2.)] |> get_ok in
   let project ?(mode = Ray.Ray_forward) ?(surface = Ray.Ray_first_surface) () =
-    Ray.run ~direction:(Ray.Ray_vector Vec3.unit_y) ~direction_mode:mode
+    Ray.run ~direction:(Ray.Ray_vector Rays_math.Vec3.unit_y) ~direction_mode:mode
       ~surface_hit:surface ~source ~collision () |> get_ok |> positions in
   check (near (project ()).y.(0) 1.) "Ray first forward surface";
   check (near (project ~surface:Ray.Ray_last_surface ()).y.(0) 3.)
@@ -164,13 +164,13 @@ let check_direction_policies () =
     "Ray bidirectional closest";
   check (near (project ~mode:Ray.Ray_bidirectional_farthest ()).y.(0) (-2.))
     "Ray bidirectional farthest";
-  let limited = Ray.run ~direction:(Ray.Ray_vector Vec3.unit_y)
+  let limited = Ray.run ~direction:(Ray.Ray_vector Rays_math.Vec3.unit_y)
       ~min_distance:1.5 ~max_distance:2.5 ~source ~collision () |> get_ok in
   check ((positions limited).y.(0) = 0.) "Ray distance bounds did not reject hits";
   let near_edge = source_points [|(2.0001, 1., 0.)|] in
-  let missed = Ray.run ~direction:(Ray.Ray_vector (Vec3.neg Vec3.unit_y))
+  let missed = Ray.run ~direction:(Ray.Ray_vector (Rays_math.Vec3.neg Rays_math.Vec3.unit_y))
       ~source:near_edge ~collision:(plane 0.) () |> get_ok in
-  let tolerated = Ray.run ~direction:(Ray.Ray_vector (Vec3.neg Vec3.unit_y))
+  let tolerated = Ray.run ~direction:(Ray.Ray_vector (Rays_math.Vec3.neg Rays_math.Vec3.unit_y))
       ~tolerance:0.001 ~source:near_edge ~collision:(plane 0.) () |> get_ok in
   check ((positions missed).y.(0) = 1. && near (positions tolerated).y.(0) 0.)
     "Ray world-space edge tolerance";
@@ -178,11 +178,11 @@ let check_direction_policies () =
       (Geometry.primitive_count collision) (fun primitive -> primitive >= 2
         && primitive < 4) in
   let restricted = Ray.run ~collision_primitives:upper
-      ~direction:(Ray.Ray_vector Vec3.unit_y) ~source ~collision () |> get_ok in
+      ~direction:(Ray.Ray_vector Rays_math.Vec3.unit_y) ~source ~collision () |> get_ok in
   check (near (positions restricted).y.(0) 3.) "Ray collision restriction";
   let public_surface = Surface_index.create collision |> get_ok in
   (match Surface_index.raycast
-      public_surface ~origin:Vec3.zero ~direction:Vec3.unit_y with
+      public_surface ~origin:Rays_math.Vec3.zero ~direction:Rays_math.Vec3.unit_y with
    | Ok (Some hit) -> check (near hit.distance 1.) "Surface_index.raycast distance"
    | Ok None -> fail "Surface_index.raycast missed"
    | Error error -> fail (Error.to_string error))
@@ -191,7 +191,7 @@ let check_multi_samples () =
   let source = source_points [|(0.,2.,0.)|] and collision = plane ~size:20. 0. in
   let project combine jitter_scale seed =
     Ray.run ~samples:7 ~jitter_scale ~seed ~combine
-      ~direction:(Ray.Ray_vector (Vec3.neg Vec3.unit_y))
+      ~direction:(Ray.Ray_vector (Rays_math.Vec3.neg Rays_math.Vec3.unit_y))
       ~distance_attribute:"dist" ~normal_attribute:"hit_N"
       ~source ~collision () |> get_ok in
   let shortest = project Ray.Ray_shortest 0.35 71
@@ -219,7 +219,7 @@ let check_multi_samples () =
   let collision_with_signal = add_attribute signal collision in
   let drivers = Ray.run ~samples:4 ~jitter_scale:0. ~seed:9
       ~combine:Ray.Ray_average
-      ~direction:(Ray.Ray_vector (Vec3.neg Vec3.unit_y))
+      ~direction:(Ray.Ray_vector (Rays_math.Vec3.neg Rays_math.Vec3.unit_y))
       ~source_vertex_numbers_attribute:"vertices"
       ~source_vertex_weights_attribute:"weights" ~point_pattern:"signal"
       ~source ~collision:collision_with_signal () |> get_ok in
@@ -241,7 +241,7 @@ let check_multi_samples () =
     "Ray average attribute import ignored contributing sample drivers";
   let selected_driver = Ray.run ~samples:4 ~jitter_scale:0. ~seed:9
       ~combine:Ray.Ray_median
-      ~direction:(Ray.Ray_vector (Vec3.neg Vec3.unit_y))
+      ~direction:(Ray.Ray_vector (Rays_math.Vec3.neg Rays_math.Vec3.unit_y))
       ~source_vertex_numbers_attribute:"vertices"
       ~source_vertex_weights_attribute:"weights" ~source ~collision () |> get_ok
       |> fun geometry -> point_int_array geometry "vertices" in
@@ -258,7 +258,7 @@ let check_selection_and_directions () =
   let selection = Group.init ~owner:Group.Point ~name:"middle" 3
       (fun point -> point = 1) in
   let selected = Ray.run ~selection:(Transform_ops.Selected_points selection)
-      ~direction:(Ray.Ray_vector (Vec3.neg Vec3.unit_y))
+      ~direction:(Ray.Ray_vector (Rays_math.Vec3.neg Rays_math.Vec3.unit_y))
       ~source ~collision:(plane 0.) () |> get_ok |> positions in
   check (selected.y = [|2.; 0.; 2.|]) "Ray point restriction";
   let directions = Packed.Float3.Private.of_owned_exn
@@ -299,7 +299,7 @@ let check_imports () =
       |> add_group (Group.init ~owner:Group.Primitive ~name:"marked"
            primitive_count (fun _ -> true)) in
   let source = source_points [|(0.5,2.,0.25); (5.,2.,0.)|] in
-  let output = Ray.run ~direction:(Ray.Ray_vector (Vec3.neg Vec3.unit_y))
+  let output = Ray.run ~direction:(Ray.Ray_vector (Rays_math.Vec3.neg Rays_math.Vec3.unit_y))
       ~point_pattern:"temperature" ~vertex_pattern:"corner"
       ~primitive_pattern:"material marked" ~detail_pattern:"revision"
       ~match_groups:true ~source ~collision () |> get_ok in
@@ -329,7 +329,7 @@ let check_imports () =
       (Attribute.Float3 imported_normals) |> get_string_ok in
   let collision = add_attribute imported_normals collision in
   let imported_normal = Ray.run
-      ~direction:(Ray.Ray_vector (Vec3.neg Vec3.unit_y))
+      ~direction:(Ray.Ray_vector (Rays_math.Vec3.neg Rays_math.Vec3.unit_y))
       ~normal_attribute:"N" ~point_pattern:"N" ~source ~collision () |> get_ok
       |> fun geometry -> point_float3 geometry "N" in
   check (near imported_normal.x.(0) 1. && near imported_normal.y.(0) 0.)
@@ -340,7 +340,7 @@ let check_validation () =
   expect_code "invalid_parameter" (Ray.run ~grain:0 ~source ~collision ());
   expect_code "invalid_distance" (Ray.run ~max_distance:(-1.) ~source ~collision ());
   expect_code "invalid_direction" (Ray.run
-      ~direction:(Ray.Ray_vector Vec3.zero) ~source ~collision ());
+      ~direction:(Ray.Ray_vector Rays_math.Vec3.zero) ~source ~collision ());
   expect_code "invalid_direction" (Ray.run
       ~direction:(Ray.Ray_attribute "missing") ~source ~collision ());
   expect_code "invalid_name" (Ray.run ~distance_attribute:"P" ~source ~collision ());
@@ -353,7 +353,7 @@ let check_validation () =
   expect_code "invalid_parameter" (Ray.run ~samples:1025 ~source ~collision ());
   expect_code "invalid_parameter" (Ray.run ~jitter_scale:(-1.) ~source ~collision ());
   let extreme_jitter = Ray.run ~samples:2 ~jitter_scale:max_float
-      ~direction:(Ray.Ray_vector (Vec3.neg Vec3.unit_y)) ~source ~collision ()
+      ~direction:(Ray.Ray_vector (Rays_math.Vec3.neg Rays_math.Vec3.unit_y)) ~source ~collision ()
       |> get_ok |> positions in
   check (Array.for_all Float.is_finite extreme_jitter.x
       && Array.for_all Float.is_finite extreme_jitter.y
@@ -381,12 +381,12 @@ let check_validation () =
 let check_parallel_exact () =
   let collision = Plane_generators.grid ~columns:400 ~rows:250 ~size:20. () |> get_ok
       |> Deform.noise_displace ~amplitude:0.8 ~frequency:0.31 ~seed:709 |> get_ok
-      |> Color_by_height.run ~low:(Color.to_floats (Color.hex_exn "#0ea5e9"))
-           ~high:(Color.to_floats (Color.hex_exn "#f97316")) |> get_ok in
+      |> Color_by_height.run ~low:(Rays_math.Color.to_floats (Rays_math.Color.hex_exn "#0ea5e9"))
+           ~high:(Rays_math.Color.to_floats (Rays_math.Color.hex_exn "#f97316")) |> get_ok in
   let source = Plane_generators.grid ~columns:400 ~rows:250 ~size:20. () |> get_ok
       |> translated 3. in
   let run domains = Parallel.run ~domains (fun () ->
-    Ray.run ~grain:1024 ~direction:(Ray.Ray_vector (Vec3.neg Vec3.unit_y))
+    Ray.run ~grain:1024 ~direction:(Ray.Ray_vector (Rays_math.Vec3.neg Rays_math.Vec3.unit_y))
       ~tolerance:1e-9
       ~distance_attribute:"dist" ~primitive_attribute:"source_primitive"
       ~source_vertex_numbers_attribute:"source_vertices"
@@ -406,14 +406,14 @@ let check_parallel_exact () =
 let check_parallel_multi_exact () =
   let collision = Plane_generators.grid ~columns:160 ~rows:100 ~size:12. () |> get_ok
       |> Deform.noise_displace ~amplitude:0.35 ~frequency:0.27 ~seed:801 |> get_ok
-      |> Color_by_height.run ~low:(Color.to_floats (Color.hex_exn "#10b981"))
-           ~high:(Color.to_floats (Color.hex_exn "#f59e0b")) |> get_ok in
+      |> Color_by_height.run ~low:(Rays_math.Color.to_floats (Rays_math.Color.hex_exn "#10b981"))
+           ~high:(Rays_math.Color.to_floats (Rays_math.Color.hex_exn "#f59e0b")) |> get_ok in
   let source = Plane_generators.grid ~columns:160 ~rows:100 ~size:11.5 () |> get_ok
       |> translated 2. in
   let run domains = Parallel.run ~domains (fun () ->
     Ray.run ~grain:512 ~samples:7 ~jitter_scale:0.12 ~seed:997
       ~combine:Ray.Ray_average
-      ~direction:(Ray.Ray_vector (Vec3.neg Vec3.unit_y))
+      ~direction:(Ray.Ray_vector (Rays_math.Vec3.neg Rays_math.Vec3.unit_y))
       ~distance_attribute:"dist" ~primitive_attribute:"source_primitive"
       ~source_vertex_numbers_attribute:"source_vertices"
       ~source_vertex_weights_attribute:"source_weights"

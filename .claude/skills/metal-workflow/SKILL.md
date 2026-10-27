@@ -88,8 +88,7 @@ calling the step-2 function, the mock in `lib/ogpu_mock`, conformance cases in
 Call `Ogpu.*` from `runtime`/`scene_execution`/`rays_pathtracer` — never
 `Metal.` (the dependency gate rejects it). Then `dune build @all`, window-free
 `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy dune runtest`, `dune build
-@smoke`, and `git diff --check`. A public `.mli` change needs the
-`promote-manifests` skill. Record the capability in `specification/backend.md`
+@smoke`, and `git diff --check`. Record the capability in `specification/backend.md`
 and anything user-visible in `specification/metal.md`.
 
 ## Removing a capability

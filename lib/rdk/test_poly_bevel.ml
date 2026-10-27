@@ -73,7 +73,7 @@ let equal_geometry left right =
 
 let box () =
   Box_generator.box ~connectivity:Box_generator.Box_quads ~consolidate_points:true
-    ~normals:Box_generator.Box_no_normals ~size:(Vec3.create 2. 2. 2.) () |> get_rdk
+    ~normals:Box_generator.Box_no_normals ~size:(Rays_math.Vec3.create 2. 2. 2.) () |> get_rdk
 
 let all_edges geometry name =
   let topology = Geometry.topology geometry in
@@ -245,7 +245,7 @@ let test_connected_network_flat_filter_and_normals () =
     "PolyBevel connected edge-run corner planning";
   let divided = Box_generator.box ~connectivity:Box_generator.Box_quads ~consolidate_points:true
       ~normals:Box_generator.Box_point_normals ~x_divisions:3 ~y_divisions:2 ~z_divisions:2
-      ~size:(Vec3.create 2. 2. 2.) () |> get_rdk in
+      ~size:(Rays_math.Vec3.create 2. 2. 2.) () |> get_rdk in
   let all = all_edges divided "all" in
   let output = Poly_bevel.run ~grain:7 ~edges:all ~ignore_flat_angle:0.
       ~distance:0.12 divided |> get_rdk in

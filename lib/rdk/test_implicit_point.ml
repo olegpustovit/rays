@@ -414,8 +414,8 @@ let test_randomized_constructions () =
 
 let construction_signature domains =
   let count = 2_048 and output = Array.make 2_048 min_int in
-  Rays.Parallel.run ~domains (fun () ->
-    Rays.Parallel.for_ ~chunk_size:37 ~start:0 ~finish:(count - 1)
+  Parallel.run ~domains (fun () ->
+    Parallel.for_ ~chunk_size:37 ~start:0 ~finish:(count - 1)
       (fun index -> output.(index) <- evaluate_line_plane_case index));
   output
 
@@ -790,8 +790,8 @@ let ray_radial_signature domains source lpi tpi =
     tpi;
   |] in
   let output = Array.make 2_048 0 in
-  Rays.Parallel.run ~domains (fun () ->
-    Rays.Parallel.for_ ~chunk_size:31 ~start:0
+  Parallel.run ~domains (fun () ->
+    Parallel.for_ ~chunk_size:31 ~start:0
       ~finish:(Array.length output - 1) (fun index ->
         let a = points.(index mod Array.length points)
         and b = points.((index * 3 + 1) mod Array.length points)

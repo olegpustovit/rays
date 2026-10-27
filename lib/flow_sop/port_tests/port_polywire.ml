@@ -184,7 +184,7 @@ let debug () =
   let expected = ok (Port_gate.native ctx changes) in
   let actual = match Port_gate.lisp ctx changes with Ok b -> fst (ok (b false)) | Error m -> failwith m in
   let cook n = Port_gate.with_session (fun s -> match Port_gate.cook s 1 97 n with
-    | Ok g -> Ok g | Error e -> Error (Sop.Diagnostic.error_to_string e)) in
+    | Ok g -> Ok g | Error e -> Error (Diagnostic.error_to_string e)) in
   match cook expected, cook actual with
   | Error a, Error b -> Printf.printf "both errors:\n native %s\n lisp %s\n" a b
   | Error a, Ok _ -> Printf.printf "native error: %s\n" a
@@ -209,7 +209,7 @@ let debug () =
     for i = 0 to n - 1 do
       if pe.x.(i) <> pg.x.(i) || pe.y.(i) <> pg.y.(i) || pe.z.(i) <> pg.z.(i) then ds := i :: !ds done;
     Printf.printf "positions differing at %d points; first: %s\n" (List.length !ds)
-      (String.concat " " (List.filteri (fun k _ -> k < 12) (List.rev_map string_of_int !ds)));
+      (String.concat " " (List.take 12 (List.rev_map string_of_int !ds)));
     (match List.rev !ds with
      | i :: _ -> Printf.printf "  native (%.17g %.17g %.17g)\n  lisp   (%.17g %.17g %.17g)\n" pe.x.(i) pe.y.(i) pe.z.(i) pg.x.(i) pg.y.(i) pg.z.(i)
      | [] -> ());

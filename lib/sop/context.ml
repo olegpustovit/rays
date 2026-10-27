@@ -34,7 +34,7 @@ end
 type t = {
   frame : int64;
   time : float;
-  input : Frame_input.t;
+  input : Input.t;
   seed : int64;
   domains : int;
   grain : int;
@@ -43,18 +43,18 @@ type t = {
 
 let create ?(frame = 0L) ?(time = 0.) ?input ?(seed = 0L) ?domains
     ?(grain = 16_384) ?cancel () =
-  let domains = Option.value ~default:(Rays_math.Parallel.recommended_domains ()) domains in
+  let domains = Option.value ~default:(Parallel.recommended_domains ()) domains in
   if not (Float.is_finite time) then Error "Context.create: time must be finite"
   else if frame < 0L then Error "Context.create: frame must be non-negative"
   else if domains <= 0 then Error "Context.create: domains must be positive"
   else if grain <= 0 then Error "Context.create: grain must be positive"
   else if frame > Int64.of_int max_int then Error "Context.create: frame exceeds the logical frame index range"
-  else let input = { (Option.value ~default:(Frame_input.at_time time) input) with
-    Frame_input.t = time; frame = Int64.to_int frame } in
+  else let input = { (Option.value ~default:(Input.at_time time) input) with
+    Input.t = time; frame = Int64.to_int frame } in
   Result.map (fun () -> {
     frame; time; input; seed; domains; grain;
     cancel = Option.value ~default:(Cancel.create ()) cancel;
-  }) (Frame_input.validate input)
+  }) (Input.validate input)
 
 let frame value = value.frame
 let time value = value.time
@@ -79,5 +79,5 @@ let cache_projection dependencies value =
   if Dependencies.mem Seed dependencies then add 's' (Int64.to_string value.seed);
   if Dependencies.mem Domains dependencies then add 'd' (string_of_int value.domains);
   if Dependencies.mem Grain dependencies then add 'g' (string_of_int value.grain);
-  if Dependencies.mem Input dependencies then add 'i' (Frame_input.key value.input);
+  if Dependencies.mem Input dependencies then add 'i' (Input.identity value.input);
   Buffer.contents buffer

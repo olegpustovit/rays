@@ -1,10 +1,10 @@
 module E = Flow.Eval
 module C = Flow_ir.Core
-let ok = function Ok x -> x | Error d -> failwith (Flow.Diagnostic.to_string d)
+let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let checked body =
   let forms = ok (Flow.Syntax.parse ("(workspace w (graph g :context value " ^ body ^ "))")) in
   match Flow.Workspace.check {Flow.Check.version=1;kinds=[]} forms with
-  | Some ws,[] -> ws | _,ds -> failwith (String.concat "; " (List.map Flow.Diagnostic.to_string ds))
+  | Some ws,[] -> ws | _,ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
 let expressions = Core_fixtures.lower_expressions
 let dump () =
   let buffer = Buffer.create 4096 in
@@ -44,16 +44,17 @@ let () =
    | E.Residual r -> assert (Result.is_ok (Flow_ir.Core_lower.lower ~budget:32768 r))
    | _ -> assert false);
   let observed=ref false in
-  ignore (ok (E.Private.static_with_kernels ~observe:(fun r ->
-    match (E.Private.residual_view r).term.node with
+  ignore (ok (E.Residual.handle ~observe:(fun r ->
+    match (E.Residual.residual_view r).term.node with
     | Flow.Workspace.Loop {kind=`Fold;_} ->
         observed:=true;
         let program=Result.get_ok (Flow_ir.Core_lower.lower r) in
         List.iter (fun time ->
-          let live=Frame_input.at_time time in
+          let live=Input.at_time time in
           assert (Flow_ir.Core_exec.run program ~live = E.Private.force_reference (E.Residual r) ~live))
           [0.;0.37;2.]
-    | _ -> ()) (checked "(fold [s 0.] [i (range 2)] (+ s (+ t i)))")));
+    | _ -> ()) (fun () -> E.Private.static_with_requests
+      (checked "(fold [s 0.] [i (range 2)] (+ s (+ t i)))"))));
   assert !observed;
   assert (C.literal_of_value (E.Residual (match List.assoc "g" (ok (E.static (checked "(+ t 1)"))).results with
     E.Residual r -> r | _ -> assert false)) = None)
@@ -70,13 +71,13 @@ let () =
       "[(selected : bool false) (geo : geometry (handle_geometry)) (img : image (handle_image)) (bad : geometry (handle_geometry))] " ^
       "(let* [tested (if selected " ^ body ^ " " ^ body ^ ")] 0.)))")) in
     let workspace=match Flow.Workspace.check ~ops {Flow.Check.version=1;kinds=[]} forms with
-      |Some workspace,[]->workspace|_,ds->failwith(String.concat "; " (List.map Flow.Diagnostic.to_string ds)) in
+      |Some workspace,[]->workspace|_,ds->failwith(String.concat "; " (List.map Diagnostic.to_string ds)) in
     let inputs=["g",["selected",E.Source("test/selected",Flow.Ty.Bool,[]);
       "geo",E.Deferred(geometry,11);"img",E.Deferred(image,11);"bad",E.Deferred(geometry,99)]] in
     let value=snd(List.hd(List.assoc["g";"tested"](ok(E.static ~record:true ~inputs workspace)).records)) in
     let residual=match value with E.Residual r->r|_->failwith("Expected cooked residual: "^body^" = "^E.show value) in
     Flow_ir.Core_exec.prepare(Result.get_ok(Flow_ir.Core_lower.lower ~strict:true residual)) in
-  let reason=Flow.Diagnostic.error ~cause:"unknown handle cause" ~code:"E_TEST_HANDLE" "Unknown cooked handle." in
+  let reason=Diagnostic.error ~cause:"unknown handle cause" ~code:"E_TEST_HANDLE" "Unknown cooked handle." in
   let run prepared time allow_bad =
     let calls=ref [] in
     let resolve=function
@@ -87,7 +88,7 @@ let () =
           if (ty=geometry || ty=image) && (id=11 || allow_bad && id=99) then Ok(E.Deferred(ty,id))
           else Error reason
       |_->assert false in
-    let result=Flow_ir.Core_exec.execute ~resolve prepared ~live:(Frame_input.at_time time) in
+    let result=Flow_ir.Core_exec.execute ~resolve prepared ~live:(Input.at_time time) in
     result,List.rev !calls in
   let mixed=compiled "(if selected {:a geo :b geo :picture img} {:a geo :b geo :picture img})" in
   List.iter(fun time->let result,calls=run mixed time false in
@@ -115,22 +116,22 @@ let () =
   let program body=
     let forms=ok(Flow.Syntax.parse("(workspace constants (graph g :context value (let* [tested "^body^"] 0.)))")) in
     let ws=match Flow.Workspace.check ~ops:[storage] {Flow.Check.version=1;kinds=[]}forms with
-      |Some ws,[]->ws|_,ds->failwith(String.concat";"(List.map Flow.Diagnostic.to_string ds)) in
+      |Some ws,[]->ws|_,ds->failwith(String.concat";"(List.map Diagnostic.to_string ds)) in
     let value=snd(List.hd(List.assoc["g";"tested"](ok(E.static ~record:true ws)).records)) in
     match value with E.Residual r->Result.get_ok(Flow_ir.Core_lower.lower ~strict:true r)
       |_->failwith("Expected constructor residual: "^E.show value) in
   let count_descriptors program=
     let count=ref 0 in
-    let rec visit(statement:C.statement)=match statement.node with
+    C.iter (fun (statement:C.statement)->match statement.node with
       |Assign(_,Source_descriptor{name;_}) when String.starts_with ~prefix:"$core/constant-array/" name->incr count
-      |If{yes;no;_}->List.iter visit yes;List.iter visit no
-      |_->() in List.iter visit program.C.body; !count in
+      |_->()) program.C.body;
+    !count in
   let run program time=
     let received=ref None in
     let resolve=function
       |E.Source("$core/operator",_,args)->received:=List.assoc_opt "values" args;Ok(E.Deferred(Flow.Ty.geometry,1))
       |_->assert false in
-    let result=Flow_ir.Core_exec.run ~resolve program ~live:(Frame_input.at_time time) in
+    let result=Flow_ir.Core_exec.run ~resolve program ~live:(Input.at_time time) in
     result, !received in
   let only=program "(let* [colors (array/vec4 (int t) [-0.0 1.0 2.0 3.0]) alias colors] (test/storage (exact alias)))" in
   assert(count_descriptors only=1);
@@ -148,3 +149,26 @@ let () =
   (match fst(run early (-1.))with Error d->assert(d.code="E_ARRAY_RANGE")|_->assert false);
   (match fst(run early 1.)with Error d->assert(d.code="E_LATER")|_->assert false);
   print_endline "Core constant arrays: original-site validation, cooked storage aliases, mixed-use dense path and empty/large metadata"
+
+let () =
+  List.iter(fun(body,expected_time)->
+    let value=List.assoc "g"(ok(E.static(checked body))).results in
+    let residual=match value with E.Residual r->r|_->failwith("Expected live frame facts: "^body)in
+    let program=Result.get_ok(Flow_ir.Core_lower.lower residual)in
+    let times=ref 0 in
+    C.iter(fun(statement:C.statement)->match statement.node with
+      |Assign(_,Frame Time)->incr times|_->())program.body;
+    assert(!times=expected_time);
+    let prepared=Flow_ir.Core_exec.prepare program in
+    List.iter(fun(time,frame)->
+      let live={(Input.at_time time)with frame;dt=0.125;pointer=(3.,4.)}in
+      let expected=E.Private.force_reference value ~live in
+      let actual=Flow_ir.Core_exec.execute prepared ~live in
+      assert(Marshal.to_string actual[Marshal.No_sharing]=Marshal.to_string expected[Marshal.No_sharing]))
+      [-1.,0;0.,1;0.37,2;2.,0])[
+    "(+ (* (sin t) 0.5) (* t t))",1;
+    "(+ (+ t t) (+ (+ (frame/dt) (frame/dt)) (+ (pointer/x) (pointer/x))))",1;
+    "(+ (if (> (frame/index) 0) t 0.) t)",2;
+    "(let* [total (fold [a 0.] [i (range (frame/index))] (+ a t))] (+ total t))",2;
+  ];
+  print_endline "Core frame facts: scoped sharing, changing inputs, branch dominance and empty loops agree"

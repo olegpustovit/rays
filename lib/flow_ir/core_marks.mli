@@ -18,7 +18,7 @@ end
 type sink
 val sink : ?image:(Flow.Eval.value -> int) -> size:int * int -> Buffers.t -> sink
 (** [size] is the canvas (for [draw/background]); [image] resolves an image node to a
-    host resource id (positive) or raises [Flow.Value.Fail]. *)
+    host resource id (positive) or raises [Diagnostic.Error]. *)
 
 val is_device : Flow.Eval.value -> bool
 (** A [device_value]: it names an entry of one draw's buffers. *)

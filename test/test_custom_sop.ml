@@ -25,15 +25,19 @@ let x geometry =
 
 let run () =
   let input = Lisp_sop.snapshot (Rdk.Line_geometry.points [|0., 0., 0.|]) in
-  let node = Custom.map ~label:"animated wrangle" ~version:2
-      ~dependencies:(Context.Dependencies.one Context.Dependencies.Time)
-      ~operation:"animated_translate" ~schema:controls_schema
-      ~values:{ translate_x = 1.; time_scale = 2. } input
-      (fun ~parameters ~context geometry ->
+  let dependencies = Context.Dependencies.one Context.Dependencies.Time in
+  let node = Custom.node ~label:"animated wrangle" ~operation:"animated_translate"
+      ~schema:controls_schema ~values:{ translate_x = 1.; time_scale = 2. } [input]
+      (fun ~label ~inputs ~parameters ->
+        Custom.plain ~label ~version:2 ~parameters:(Param.key controls_schema parameters)
+          ~cook_mode:(Node.Duplicate_input 0) ~dependencies
+          ~operation:"animated_translate" inputs
+          (fun ~context geometries ->
+        if Array.length geometries <> 1 then Error "expected one input" else
         let offset = parameters.translate_x
             +. (parameters.time_scale *. Context.time context) in
         Ok (Rdk.Transform_ops.transform
-          (Mat4.translation (Vec3.create offset 0. 0.)) geometry)) in
+          (Rays_math.Mat4.translation (Rays_math.Vec3.create offset 0. 0.)) geometries.(0)))) in
   if List.length (Node.parameter_fields node) <> 2
      || not (Node.has_parameters node)
      || not (Context.Dependencies.mem Context.Dependencies.Time
@@ -46,16 +50,16 @@ let run () =
     fail "custom SOP did not receive parameters and timeline context";
   let before_key = Node.parameters node and node_id = Node.id node in
   let edited, effects = edit_parameters node ~node_id
-      ["translate_x", Parameter.Float_value 4.] |> Result.get_ok in
+      ["translate_x", Param.Float_value 4.] |> Result.get_ok in
   if not effects.cook || Node.id edited <> node_id
      || Node.parameters edited = before_key
   then fail "custom SOP edit lost stable identity or cache-key invalidation";
   if x (cook session (context 3.) edited) <> 10. then
     fail "custom SOP edit did not rebuild its cook closure";
   let fields = Node.parameter_fields edited in
-  let translated = List.find (fun field -> field.Parameter.name = "translate_x")
+  let translated = List.find (fun field -> field.Param.name = "translate_x")
       fields in
-  if translated.current <> Parameter.Float_value 4. then
+  if translated.current <> Param.Float_value 4. then
     fail "custom SOP inspector metadata did not retain edited values";
   Session.close session;
   let custom_factories =
@@ -70,10 +74,10 @@ let run () =
     (graph g :context sop
       (sop/my_custom_sop)))|} in
   let doc = match Rays_editor.Workspace.load ~factories:custom_factories text with
-    | Ok d -> d | Error ds -> fail (String.concat "; " (List.map (fun (d : Flow.Diagnostic.t) -> d.message) ds)) in
-  let base_cam = Rays.Easy_camera.create ~target:Rays.Vec3.zero ~distance:5. () in
+    | Ok d -> d | Error ds -> fail (String.concat "; " (List.map (fun (d : Diagnostic.t) -> d.message) ds)) in
+  let base_cam = Rays.Easy_camera.create ~target:Rays_math.Vec3.zero ~distance:5. () in
   let dec_cam = Rays_editor.Workspace.declared_camera ~factories:custom_factories doc base_cam in
   let eye = Rays.Camera.position (Rays.Easy_camera.camera dec_cam) in
-  if not (Rays.Vec3.nearly_equal eye (Rays.Vec3.create 1. 2. 3.) ~eps:0.001) then
+  if not (Rays_math.Vec3.nearly_equal eye (Rays_math.Vec3.create 1. 2. 3.) ~eps:0.001) then
     fail "declared_camera with custom factories did not read camera";
   print_endline "custom SOP tests passed"

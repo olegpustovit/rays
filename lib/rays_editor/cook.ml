@@ -2,7 +2,7 @@ open Rays
 open Sop
 open Editor_document
 
-type bounds = Vec3.t * Vec3.t
+type bounds = Rays_math.Vec3.t * Rays_math.Vec3.t
 
 (* One geometry object's latest cook: its displayed SOP graph, the sketch's
    prepared value, and bounds in the object's own space. *)
@@ -74,30 +74,30 @@ let geometry_bounds geometry =
       lo.(2) <- Float.min lo.(2) z; hi.(0) <- Float.max hi.(0) x;
       hi.(1) <- Float.max hi.(1) y; hi.(2) <- Float.max hi.(2) z
     done;
-    Some (Vec3.create lo.(0) lo.(1) lo.(2), Vec3.create hi.(0) hi.(1) hi.(2))
+    Some (Rays_math.Vec3.create lo.(0) lo.(1) lo.(2), Rays_math.Vec3.create hi.(0) hi.(1) hi.(2))
   end
 
 (* The eight corners of a box under a transform: the one walk for every box taken to another
    space (an instance's, the world's, the screen's). *)
 let iter_corners matrix ((lo, hi) : bounds) f =
   for corner = 0 to 7 do
-    f (Mat4.transform_point matrix (Vec3.create
-      (if corner land 1 = 0 then lo.Vec3.x else hi.Vec3.x)
+    f (Rays_math.Mat4.transform_point matrix (Rays_math.Vec3.create
+      (if corner land 1 = 0 then lo.Rays_math.Vec3.x else hi.Rays_math.Vec3.x)
       (if corner land 2 = 0 then lo.y else hi.y)
       (if corner land 4 = 0 then lo.z else hi.z)))
   done
 
 let union ((a, b) : bounds) ((c, d) : bounds) : bounds =
-  Vec3.create (Float.min a.x c.x) (Float.min a.y c.y) (Float.min a.z c.z),
-  Vec3.create (Float.max b.x d.x) (Float.max b.y d.y) (Float.max b.z d.z)
+  Rays_math.Vec3.create (Float.min a.x c.x) (Float.min a.y c.y) (Float.min a.z c.z),
+  Rays_math.Vec3.create (Float.max b.x d.x) (Float.max b.y d.y) (Float.max b.z d.z)
 
 (* The box around a box under each of [matrices]. *)
 let transformed_all matrices bounds : bounds =
-  let lower = ref (Vec3.create infinity infinity infinity)
-  and upper = ref (Vec3.create neg_infinity neg_infinity neg_infinity) in
-  Array.iter (fun matrix -> iter_corners matrix bounds (fun (p : Vec3.t) ->
-    lower := Vec3.create (Float.min !lower.x p.x) (Float.min !lower.y p.y) (Float.min !lower.z p.z);
-    upper := Vec3.create (Float.max !upper.x p.x) (Float.max !upper.y p.y) (Float.max !upper.z p.z)))
+  let lower = ref (Rays_math.Vec3.create infinity infinity infinity)
+  and upper = ref (Rays_math.Vec3.create neg_infinity neg_infinity neg_infinity) in
+  Array.iter (fun matrix -> iter_corners matrix bounds (fun (p : Rays_math.Vec3.t) ->
+    lower := Rays_math.Vec3.create (Float.min !lower.x p.x) (Float.min !lower.y p.y) (Float.min !lower.z p.z);
+    upper := Rays_math.Vec3.create (Float.max !upper.x p.x) (Float.max !upper.y p.y) (Float.max !upper.z p.z)))
     matrices;
   !lower, !upper
 
@@ -133,7 +133,7 @@ let create ~prepare ~seed ~grain ?domains ?await ~max_entries ~max_payload_bytes
 (* the failing node of a cook error: the innermost entry of its trace *)
 let failure_of = function
   | Async_cook.Cook_error { code; trace; _ } when trace <> [] ->
-      Some (code, (List.nth trace (List.length trace - 1)).Sop.Diagnostic.node_id)
+      Some (code, (List.nth trace (List.length trace - 1)).Diagnostic.node_id)
   | _ -> None
 
 let failed_node value = if value.error = None then None else !(value.failure)
@@ -155,7 +155,7 @@ let reset_state ?(host_state=true) value =
 let context value timeline frame = Context.create ~seed:value.seed
     ~grain:value.grain ~domains:value.domains
     ~frame:(Timeline.frame timeline) ~time:(Timeline.time timeline)
-    ~input:(Live_frame.of_frame frame) ()
+    ~input:(Flow_native.Live_frame.of_frame frame) ()
 
 let busy value = match status value with
   | Async_cook.Idle -> false | Cooking _ -> true
@@ -163,13 +163,13 @@ let force value = { value with force = true }
 
 (* [objects] are the visible geometry objects as (id, network graph,
    display node); [frame_request] is (object, node) to frame. *)
-let update ?input ?live ?(probes = []) ?(lit = Pick.Set.empty) value ~settings ~objects
+let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty) ?(pump=fun()->()) value ~settings ~objects
     ~edit_error ~effects ~timeline_changes
     ~timeline ~frame ~frame_request =
-  Flow.Phase_timer.measure Cook (fun () ->
+  Flow.Phase_timer.measure "cook" (fun () ->
   if List.exists (function Timeline.Reset_now | Stopped_now -> true | _ -> false)
       timeline_changes then reset_state ~host_state:false value;
-  let input = match input with Some input->input|None->Live_frame.of_frame frame in
+  let input = match input with Some input->input|None->Flow_native.Live_frame.of_frame frame in
   let input={input with t=Timeline.time timeline;
     frame=Int64.to_int(Timeline.frame timeline)} in
   let objects, value_lanes, applied, resolve_error =
@@ -178,7 +178,7 @@ let update ?input ?live ?(probes = []) ?(lit = Pick.Set.empty) value ~settings ~
       let lane = match Document.Int_map.find_opt id value.value_lanes with
         | Some lane -> lane | None -> Flow_sop.Value_lane.create ~state:value.state () in
       let lanes = Document.Int_map.add id lane lanes in
-      match Flow_sop.Value_lane.resolve lane
+      match Flow_sop.Value_lane.resolve ?gpu lane
           ~live:input
           ~time:(Timeline.time timeline) network with
       | Ok resolved -> (id, resolved.geometry, displayed) :: objects,
@@ -191,7 +191,7 @@ let update ?input ?live ?(probes = []) ?(lit = Pick.Set.empty) value ~settings ~
           let applied = match previous with
             | Some previous -> Document.Int_map.add id previous applied
             | None -> applied in
-          objects, lanes, applied, Some (Flow.Diagnostic.to_string diagnostic))
+          objects, lanes, applied, Some (Diagnostic.to_string diagnostic))
       ([], Document.Int_map.empty, Document.Int_map.empty, None) objects in
   let objects = List.rev objects in
   let edit_error = match edit_error with Some _ -> edit_error
@@ -271,13 +271,13 @@ let update ?input ?live ?(probes = []) ?(lit = Pick.Set.empty) value ~settings ~
     | Some _ as node -> node
     | None -> Option.bind (List.assoc_opt object_id graphs) (fun graph -> Graph.find graph ~node_id) in
   let probed = if not submit then [] else List.filter_map (fun key ->
-    Option.map (fun node -> key, node) (node_of key)) (List.filteri (fun i _ -> i < 64) probes) in
+    Option.map (fun node -> key, node) (node_of key)) (List.take 64 probes) in
   let summary (key, node) (output : Session.output) =
     let g = Result.get_ok (Payload.geometry output.payload) in
     key, { Flow_graph.Probe.seconds = Async_cook.node_seconds value.worker (Node.id node); points = Rdk.Packed.Float3.length (Rdk.Geometry.positions g);
            prims = Rdk.Geometry.primitive_count g;
            extent = Option.map (fun (lo, hi) ->
-             hi.Vec3.x -. lo.Vec3.x, hi.y -. lo.y, hi.z -. lo.z) (geometry_bounds g);
+             hi.Rays_math.Vec3.x -. lo.Rays_math.Vec3.x, hi.y -. lo.y, hi.z -. lo.z) (geometry_bounds g);
            groups = List.sort_uniq compare (List.map Rdk.Group.name (Rdk.Geometry.groups g));
            attributes = List.map (fun a ->
              let owner = match Rdk.Attribute.owner a with Point -> "point" | Vertex -> "vertex"
@@ -326,7 +326,7 @@ let update ?input ?live ?(probes = []) ?(lit = Pick.Set.empty) value ~settings ~
     if submit && Option.is_none error && value.await then
       let rec settle () = match Async_cook.poll value.worker with
         | Some completion -> completion
-        | None -> Flow_ir.Gpu.pump (); Unix.sleepf 0.0005; settle () in
+        | None -> pump (); Unix.sleepf 0.0005; settle () in
       let awaited = settle () in
       match awaited.result with
       | Ok (Displayed (pieces, found, data)) ->
@@ -390,18 +390,18 @@ let close value = Async_cook.close value.worker
    casts the ray into each instance's own frame (about 2 us each; per click, never per frame). *)
 let pick_by pick_hit piece ~origin ~direction =
   let cast ~origin ~direction =
-    Option.map (fun (distance, found) -> distance /. Vec3.length direction, found)
+    Option.map (fun (distance, found) -> distance /. Rays_math.Vec3.length direction, found)
       (match piece.output.payload with
        | Payload.Image _ | Payload.Kernel _ -> None
        | Geometry geometry -> pick_hit (Lazy.force piece.surface) geometry ~origin ~direction) in
   match piece.output.instances with
   | None | Some [||] -> cast ~origin ~direction
   | Some transforms ->
-      Array.fold_left (fun best matrix -> match Mat4.inverse matrix with
+      Array.fold_left (fun best matrix -> match Rays_math.Mat4.inverse matrix with
         | None -> best
         | Some inverse ->
-            match cast ~origin:(Mat4.transform_point inverse origin)
-                ~direction:(Mat4.transform_direction inverse direction), best with
+            match cast ~origin:(Rays_math.Mat4.transform_point inverse origin)
+                ~direction:(Rays_math.Mat4.transform_direction inverse direction), best with
             | Some (t, _), Some (nearer, _) when t >= nearer -> best
             | (Some _ as hit), _ -> hit
             | None, _ -> best) None transforms

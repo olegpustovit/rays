@@ -1,10 +1,10 @@
 module E=Flow.Eval
 module I=Flow_ir
 module P=I.Packed
-let ok=function Ok v->v|Error d->failwith(Flow.Diagnostic.to_string d)
-let packed=function Ok v->v|Error ds->failwith(String.concat ";"(List.map Flow.Diagnostic.to_string ds))
+let ok=function Ok v->v|Error d->failwith(Diagnostic.to_string d)
+let packed=function Ok v->v|Error ds->failwith(String.concat ";"(List.map Diagnostic.to_string ds))
 let quote=Flow_web.Kernel_table.json_string
-let number x=if Int64.bits_of_float x=Int64.min_int then "-0" else Printf.sprintf "%.17g" x
+let number x=Param.float_text x
 let numeric=function
   |E.Int_array a->"BigInt64Array.from(["^String.concat ","(Array.to_list(Array.map(fun i->string_of_int i^"n")a))^"])"
   |E.Float_array a|Vec2_array a|Vec3_array a|Vec4_array a->
@@ -14,7 +14,7 @@ let numeric=function
 let root body=
   let text="(workspace grade_index (graph g :context host (if (> t -1000.) "^body^" "^body^")))" in
   let ws=match Flow.Workspace.check Flow.Check.{version=1;kinds=[]}(ok(Flow.Syntax.parse text))with
-    |Some w,[]->w|_,ds->failwith(String.concat ";"(List.map Flow.Diagnostic.to_string ds))in
+    |Some w,[]->w|_,ds->failwith(String.concat ";"(List.map Diagnostic.to_string ds))in
   let value=List.assoc "g"(ok(E.static ws)).results in
   let r=match value with E.Residual r->r|_->failwith "Live grade_index expected"in
   let program=match I.Core_lower.lower ~strict:true r with Ok p->p|Error form->failwith form in
@@ -29,14 +29,14 @@ let raw=[|"";"a";"a";"x\000y";"\255\128";"é日本😀";"\240\144\128\128";"\238
 let all=Array.init 256(fun i->String.make 1(Char.chr(255-i)))
 let ()=
   let js=Buffer.create 1000000 in
-  let path name="file://"^Filename.concat(Sys.getcwd())("../../tools/web/runtime/"^name)in
+  let path name="file://"^Filename.concat(Sys.getcwd())("../web_export/runtime/"^name)in
   Printf.bprintf js "import {createRuntime} from %s;import {createPool} from %s;import * as p from %s;const bytes=a=>Buffer.from(a.buffer,a.byteOffset,a.byteLength);const pools=[null,await createPool({size:1}),await createPool({size:8})];try{\n"
     (quote(path "runtime.js"))(quote(path "workers.js"))(quote(path "prims.js"));
-  let live={(Frame_input.at_time 0.25)with frame=3} in
+  let live={(Input.at_time 0.25)with frame=3} in
   List.iter(fun body->let value,program=root body in
     let result=E.Private.force_reference value ~live in
-    let prepared=Array.map(fun region->let packed=packed(P.of_region region)in
-      let ty=(P.to_region packed).term.ty in
+    let prepared=Array.map(fun (region:I.Core.Region.t)->let packed=region in
+      let ty=packed.term.ty in
       if ty=Flow.Ty.Array Flow.Ty.Int || ty=Flow.Ty.Array Flow.Ty.Text then
         assert(P.gpu_refusals packed<>[] && Result.is_error(Flow_web.Wgsl.kernel packed));
       packed,(if P.Private.argument_types packed=[||] then Some(ok(P.Private.prepare_values packed ~live)) else None))program.regions in
@@ -48,7 +48,7 @@ let ()=
     Buffer.add_string js "for(const a of arrays.flat())if(Array.isArray(a))Object.freeze(a);const texts=arrays.flat().filter(Array.isArray).map(a=>JSON.stringify(a));const data=new ArrayBuffer(arrays.flat().reduce((n,a)=>n+(a.byteLength??0),0));let offset=0;const store=a=>{if(Array.isArray(a))return {texts:a};const spec=[offset,a.length,a instanceof BigInt64Array];new a.constructor(data,offset,a.length).set(a);offset+=a.byteLength;return spec};const inputs=arrays.map(xs=>xs.map(store));const inputBytes=bytes(new Uint8Array(data)).toString('hex');\n";
     let entries=Array.to_list(Array.mapi(fun i(p,v)->match v with
       |None->"{source:"^quote(Flow_web.Js.region p)^"}"
-      |Some v->let r=P.to_region p in
+      |Some v->let r=p in
       let rec facts slot=function
         |I.Core.Region.Frame name->[Printf.sprintf "[%d,%s,false]"slot(quote name)]
         |Int_frame name->[Printf.sprintf "[%d,%s,true]"slot(quote name)]

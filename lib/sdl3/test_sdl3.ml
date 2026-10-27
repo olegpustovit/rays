@@ -69,11 +69,8 @@ let run () =
   if get (Window.size window) <> (112, 72)
       || get (Window.size_in_pixels window) <> (112, 72) then
     fail "synchronized 1x window resize changed logical/drawable size";
-  let facts = get (Window.presentation_facts window ~vsync:true) in
-  if facts.logical_width <> 112 || facts.logical_height <> 72
-      || facts.drawable_width <> 112 || facts.drawable_height <> 72
-      || facts.pixel_density <> 1. || not facts.vsync then
-    fail "dummy presentation facts changed";
+  if get (Window.pixel_density window) <> 1. then
+    fail "dummy window pixel density changed";
   (match Window.set_size window ~width:0 ~height:72 with
    | Error { kind = Invalid_argument; _ } -> ()
    | Ok () | Error _ -> fail "invalid window resize was not rejected");
@@ -155,8 +152,8 @@ let run () =
   in
   expect_wrong_domain "init"
     (Domain.spawn (fun () -> Init.init [Init.Events]) |> Domain.join);
-  expect_wrong_domain "presentation facts"
-    (Domain.spawn (fun () -> Window.presentation_facts window ~vsync:true)
+  expect_wrong_domain "pixel density"
+    (Domain.spawn (fun () -> Window.pixel_density window)
      |> Domain.join);
   expect_wrong_domain "window state"
     (Domain.spawn (fun () -> Window.state window) |> Domain.join);

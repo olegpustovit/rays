@@ -3,9 +3,6 @@
 module Store = Store
 module Panels = Panels
 
-(** Typed parameter schemas (the same values as [Sop.Parameter]). *)
-module Param = Param
-
 (** Bounded immutable undo history with explicit edit merge rules. *)
 module History : sig
   type 'a t
@@ -37,7 +34,7 @@ module History : sig
 end
 
 module Keymap : sig
-  type trigger = Leader of string | Chord of Rays.Input.key * Rays.Input.key list
+  type trigger = Leader of string | Chord of Input.key * Input.key list
   val label : trigger -> string
   (** Shared key spelling for guides, which-key and command feedback. *)
 end
@@ -77,7 +74,7 @@ module Router : sig
       router after ending the mode. Escape ends fly without opening a shortcut. *)
   val fly : Rays.Frame.t -> bool * Rays.Frame.t
 
-  val step : ?previous_keys:Rays.Input.key list ->
+  val step : ?previous_keys:Input.key list ->
     ('scope, 'action) Command.t list -> focus:'scope ->
     text_focus:bool -> frame:Rays.Frame.t -> state ->
     state * ('scope, 'action) Command.t list * Rays.Frame.t

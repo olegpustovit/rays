@@ -11,16 +11,19 @@
 (library
  (name rays_pathtracer)
  (public_name rays.pathtracer)
- (modules rays_pathtracer pathtrace_source)
- (libraries rays ogpu rdk rays_execution runtime_resources unix))
+ (modules rays_pathtracer pathtrace_source mesh_data mesh_build frame_data)
+ (private_modules mesh_data mesh_build frame_data)
+ (libraries rays ogpu renderer runtime_resources rays_math unix))
 
 (executable
+ (enabled_if (= %{system} macosx))
  (name test_main)
  (modules test_main test_pathtracer test_gpu_film test_parity test_world test_scene)
- (libraries rays rays_pathtracer rays_execution runtime_resources ogpu rdk rdk_rays unix))
+ (libraries rays rays_pathtracer renderer runtime_resources ogpu ogpu_metal rdk rdk_rays rays_math unix))
 
 (rule
- (aliases qualification runtest-native test_pathtracer)
+ (enabled_if (= %{system} macosx))
+ (alias test_pathtracer)
  (deps pathtrace.metal)
  (action (run %{exe:test_main.exe} test_pathtracer)))
 
@@ -28,26 +31,47 @@
 ; another chip prints that it does not compare. Refreshing a digest:
 ; Test_pathtracer.exact_m1_digests.
 (rule
- (aliases qualification test_pathtracer_exact_m1)
+ (enabled_if (= %{system} macosx))
+ (alias test_pathtracer_exact_m1)
  (locks smoke_window)
  (deps pathtrace.metal)
  (action (run %{exe:test_main.exe} test_pathtracer_exact_m1)))
 
 (rule
- (aliases qualification runtest-native test_world)
+ (enabled_if (= %{system} macosx))
+ (alias test_world)
  (action (run %{exe:test_main.exe} test_world)))
 
 (rule
- (aliases runtest-native test_gpu_film)
+ (enabled_if (= %{system} macosx))
+ (alias test_gpu_film)
  (locks smoke_window)
  (action (run %{exe:test_main.exe} test_gpu_film)))
 
 (rule
+ (enabled_if (= %{system} macosx))
  (alias qualification)
  (locks smoke_window)
  (deps pathtrace.metal)
  (action (run %{exe:test_main.exe} test_parity)))
 
 (rule
- (aliases qualification runtest-native test_scene)
+ (enabled_if (= %{system} macosx))
+ (alias test_scene)
  (action (run %{exe:test_main.exe} test_scene)))
+
+(alias
+ (name qualification)
+ (deps
+  (alias test_pathtracer)
+  (alias test_pathtracer_exact_m1)
+  (alias test_world)
+  (alias test_scene)))
+
+(alias
+ (name runtest-native)
+ (deps
+  (alias test_pathtracer)
+  (alias test_world)
+  (alias test_gpu_film)
+  (alias test_scene)))

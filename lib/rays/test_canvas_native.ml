@@ -1,17 +1,19 @@
 open Rays
 
-let green=Color.rgb 0 255 0
-let blue=Color.rgb 0 0 255
+let green=Rays_math.Color.rgb 0 255 0
+let blue=Rays_math.Color.rgb 0 0 255
 
 let require condition message=if not condition then failwith message
+let render_canvas ?density canvas scene=Result.get_ok(Canvas.render ?density canvas scene)
+let native_stats canvas=Result.get_ok(Canvas.Private.native_stats canvas)
 let channel canvas ~x ~y=
-  match Canvas.pixel canvas~x~y with
-  |Some color->Color.to_tuple color
+  match Result.get_ok(Canvas.pixel canvas~x~y) with
+  |Some color->Rays_math.Color.to_tuple color
   |None->failwith"Canvas native pixel is out of bounds"
 let live_handles=snd(Ogpu.Impl.create_driver())
 let snapshot canvas=
   let image=Result.get_ok(Canvas.to_image canvas)in
-  Fun.protect~finally:(fun()->Image.destroy image)(fun()->
+  Fun.protect~finally:(fun()->ignore(Image.destroy image))(fun()->
     Result.get_ok(Image.Private.pixels image))
 let region_has_pixel_other_than canvas ~x0 ~y0 ~x1 ~y1 expected=
   let found=ref false in
@@ -25,26 +27,26 @@ let region_has_pixel_other_than canvas ~x0 ~y0 ~x1 ~y1 expected=
 let camera_depth ()=
   let baseline=live_handles()in
   let canvas=Canvas.create_exn ~width:32 ~height:32 in
-  Fun.protect ~finally:(fun()->Canvas.destroy canvas)(fun()->
+  Fun.protect ~finally:(fun()->ignore(Canvas.destroy canvas))(fun()->
     let mesh=Mesh.plane ~width:1. ~height:1.()in
-    let cameras=[Camera.orthographic ~height:2. ~at:(Vec3.create 0. 0. 2.) ~target:Vec3.zero();
-      Camera.perspective ~at:(Vec3.create 0. 0. 0.15) ~target:Vec3.zero()]in
+    let cameras=[Camera.orthographic ~height:2. ~at:(Rays_math.Vec3.create 0. 0. 2.) ~target:Rays_math.Vec3.zero();
+      Camera.perspective ~at:(Rays_math.Vec3.create 0. 0. 0.15) ~target:Rays_math.Vec3.zero()]in
     List.iter(fun camera->
-      let far=Scene3.translate(Vec3.create 0. 0.(-0.02))
-        [Scene3.mesh ~material:(Material.unlit Color.red) ~cull:Cull_none mesh]in
+      let far=Scene3.translate(Rays_math.Vec3.create 0. 0.(-0.02))
+        [Scene3.mesh ~material:(Material.unlit Rays_math.Color.red) ~cull:Cull_none mesh]in
       let near=Scene3.mesh ~material:(Material.unlit green) ~cull:Cull_none mesh in
-      let scene=Scene.[clear Color.black;view3d ~camera(Scene3.create[near;far])]in
-      Canvas.render canvas scene;
+      let scene=Scene.[clear Rays_math.Color.black;view3d ~camera(Scene3.create[near;far])]in
+      render_canvas canvas scene;
       require(channel canvas ~x:16 ~y:16=(0,255,0,255)) "camera native near/far clipping or depth order";
-      let first=snapshot canvas in Canvas.render canvas scene;
+      let first=snapshot canvas in render_canvas canvas scene;
       require(snapshot canvas=first) "camera depth retained replay pixels";
-      let transforms=[|Mat4.identity;Mat4.translation(Vec3.create 0. 0.(-0.02))|]in
+      let transforms=[|Rays_math.Mat4.identity;Rays_math.Mat4.translation(Rays_math.Vec3.create 0. 0.(-0.02))|]in
       let instances=Scene3.instances_array ~material:(Material.unlit blue)
         ~cull:Cull_none mesh transforms in
-      let scene=Scene.[clear Color.black;view3d ~camera(Scene3.create[instances])]in
-      Canvas.render canvas scene;
+      let scene=Scene.[clear Rays_math.Color.black;view3d ~camera(Scene3.create[instances])]in
+      render_canvas canvas scene;
       require(channel canvas ~x:16 ~y:16=(0,0,255,255)) "camera native instance clipping";
-      let first=snapshot canvas in Canvas.render canvas scene;
+      let first=snapshot canvas in render_canvas canvas scene;
       require(snapshot canvas=first) "camera instance retained replay pixels")cameras);
   require(live_handles()=baseline) "camera native live-handle delta";
   print_endline "camera native depth: default orthographic, close perspective, depth order, instances and retained replay pass"
@@ -55,32 +57,34 @@ let completed_source ()=
   and destination=Canvas.create_exn ~width:65 ~height:3 in
   let images=ref[]in
   Fun.protect ~finally:(fun()->
-    List.iter Image.destroy !images;Canvas.destroy canvas;Canvas.destroy destination)(fun()->
+    List.iter(fun image->ignore(Image.destroy image))!images;ignore(Canvas.destroy canvas);ignore(Canvas.destroy destination))(fun()->
     require(Result.is_error(Canvas.Private.gpu_source canvas))"fresh Canvas allowed a GPU borrow";
-    let render color=Canvas.render canvas Scene.[clear color]in
+    let render color=render_canvas canvas Scene.[clear color]in
     let borrow()=
       let width,height,source=Result.get_ok(Canvas.Private.gpu_source canvas)in
       require((width,height)=(65,3))"Canvas borrow extent";
       let resource=Result.get_ok(Runtime_resources.Image.Private.of_gpu ~width ~height ~source)in
-      let image=Image.Private.of_resource resource in images:=image:: !images;
+      let image=Result.get_ok(Image.Private.of_resource resource)in images:=image:: !images;
       source,image in
     let expires source image=
       require(Option.is_none(source()))"old Canvas source remains current";
       match Runtime_resources.Image.Private.gpu_snapshot(Image.Private.resource image)with
-      |Error{kind=Runtime_resources.Destroyed;_}->()
+      |Error{kind=Ogpu.Error.Destroyed;_}->()
       |_->failwith"expired Canvas image did not report Destroyed"in
-    render Color.red;
+    render Rays_math.Color.red;
     let source,image=borrow()in
     let generation=Runtime_resources.Image.generation(Image.Private.resource image)in
     let published=image in
-    let scene=Scene.[clear Color.black;image published ~at:(0,0)()]in
-    Canvas.render destination scene;
+    let scene=Scene.[clear Rays_math.Color.black;image published ~at:(0,0)()]in
+    render_canvas destination scene;
     require(channel destination ~x:64 ~y:2=(255,0,0,255))"borrowed Canvas native consumer pixel";
     require(Canvas.Private.pixel_stats canvas=(0,0))"Canvas borrowing captured or read source pixels";
     let wrong_context()=
       require(Option.is_none(source()))"Canvas callback accepted wrong execution context";
       require(Result.is_error(Canvas.Private.gpu_source canvas))"Canvas borrow accepted wrong execution context";
-      let rejected=try render green;false with Failure _->true in
+      require(Result.is_error(Canvas.destroy canvas))"Canvas destroy accepted wrong execution context";
+      require(Result.is_error(Image.destroy image))"Image destroy accepted wrong execution context";
+      let rejected=Result.is_error(Canvas.render canvas Scene.[clear green]) in
       require rejected "Canvas render accepted wrong execution context"in
     Domain.join(Domain.spawn wrong_context);
     let thread_result=ref(Ok())in
@@ -94,23 +98,21 @@ let completed_source ()=
     render blue;expires source image;
     require(Runtime_resources.Image.generation(Image.Private.resource image)=generation)
       "source expiry mutated published Image generation";
-    let replay_failed=try Canvas.render destination scene;false with Failure _->true in
+    let replay_failed=Result.is_error(Canvas.render destination scene)in
     require replay_failed "retained Scene replay accepted an expired Canvas source";
     let source,image=borrow()in
-    let failed=try Canvas.render canvas Scene.[rect ~at:(0,0) ~w:1 ~h:1();clear Color.red];false
-      with Failure _->true in
+    let failed=Result.is_error(Canvas.render canvas Scene.[rect ~at:(0,0) ~w:1 ~h:1();clear Rays_math.Color.red])in
     require failed "Canvas late Clear fixture succeeded";expires source image;
     require(Result.is_error(Canvas.Private.gpu_source canvas))"failed render left a completed Canvas source";
     require(Canvas.Private.pixel_stats canvas=(0,0))"failed Canvas render read or captured pixels";
     render green;
     let source,image=borrow()in
-    let failed=try Canvas.render ~density:0 canvas Scene.[clear blue];false
-      with Invalid_argument _->true in
+    let failed=Result.is_error(Canvas.render ~density:0 canvas Scene.[clear blue])in
     require failed "Canvas accepted zero density";expires source image;
     require(Result.is_error(Canvas.Private.gpu_source canvas))"invalid density left a completed source";
     render green;
     let source,image=borrow()in
-    Canvas.Private.invalidate canvas;expires source image;
+    ignore(Result.get_ok(Canvas.Private.invalidate canvas));expires source image;
     render green;
     let captured=Result.get_ok(Canvas.to_image canvas)in images:=captured:: !images;
     let _,_,_,bytes,lease=Result.get_ok(Runtime_resources.Image.Private.borrow_snapshot
@@ -121,24 +123,24 @@ let completed_source ()=
       require(Canvas.Private.pixel_stats canvas=(1,1))"Canvas capture actual readback count";
       render blue;
       let source,image=borrow()in
-      Canvas.destroy canvas;expires source image;
+      ignore(Canvas.destroy canvas);expires source image;
       require(Canvas.Private.pixel_stats canvas=(1,1))"Canvas destruction read discarded GPU pixels";
       require(bytes=saved && Result.get_ok(Image.Private.pixels captured)=saved)
         "Canvas updates or destruction changed retained CPU bytes";
-      Canvas.destroy canvas));
+      ignore(Canvas.destroy canvas)));
   require(live_handles()=baseline)"Canvas borrowed-source live-handle delta";
   print_endline "Canvas completed source: native consumer, domain/thread guards, attempt/CPU/destroy expiry, retained CPU lease, no teardown readback, zero delta"
 
 let rotated_image ()=
   let source=Canvas.create_exn ~width:20 ~height:10
   and canvas=Canvas.create_exn ~width:60 ~height:60 in
-  Fun.protect ~finally:(fun()->Canvas.destroy source;Canvas.destroy canvas)(fun()->
-    Canvas.render source Scene.[clear Color.red;rect ~at:(10,0) ~w:10 ~h:10 ~fill:green()];
+  Fun.protect ~finally:(fun()->ignore(Canvas.destroy source);ignore(Canvas.destroy canvas))(fun()->
+    render_canvas source Scene.[clear Rays_math.Color.red;rect ~at:(10,0) ~w:10 ~h:10 ~fill:green()];
     let picture=Result.get_ok(Canvas.to_image source)in
-    Fun.protect ~finally:(fun()->Image.destroy picture)(fun()->
+    Fun.protect ~finally:(fun()->ignore(Image.destroy picture))(fun()->
       (* 20x10 at (10,20): centre (20,25). A quarter turn about it maps the red left half to
          x 15..25, y 25..35 and the green right half to x 15..25, y 15..25. *)
-      Canvas.render canvas Scene.[clear Color.black;image picture ~at:(10,20) ~angle:(Float.pi /. 2.)()];
+      render_canvas canvas Scene.[clear Rays_math.Color.black;image picture ~at:(10,20) ~angle:(Float.pi /. 2.)()];
       require(channel canvas ~x:20 ~y:30=(255,0,0,255))"rotated image: red half not below the pivot";
       require(channel canvas ~x:20 ~y:20=(0,255,0,255))"rotated image: green half not above the pivot";
       require(channel canvas ~x:12 ~y:25=(0,0,0,255))"rotated image left its unrotated footprint";
@@ -152,9 +154,9 @@ let run () =
   let baseline=live_handles()in
   let canvas=Canvas.create_exn~width:64~height:64 in
   let rendered=ref 0 in
-  let render scene=Canvas.render canvas scene;incr rendered in
+  let render scene=render_canvas canvas scene;incr rendered in
   try
-    render Scene.[clear(Color.rgba 7 11 13 17)];
+    render Scene.[clear(Rays_math.Color.rgba 7 11 13 17)];
     require(channel canvas~x:0~y:0=(7,11,13,17))
       "Canvas native clear-only pixel";
     render Scene.[clear blue;
@@ -170,7 +172,7 @@ let run () =
     require(references=0)"Canvas retained automatic text through capture";
     Gc.full_major();let gc_before=Gc.quick_stat()in
     for frame=3 to 600 do
-      let clear_color=if frame land 1=0 then Color.red else blue in
+      let clear_color=if frame land 1=0 then Rays_math.Color.red else blue in
       render Scene.[clear clear_color;
         rect~at:(2,2)~w:4~h:4~fill:green();
         text~at:(12,2)~size:12"steady"];
@@ -186,24 +188,21 @@ let run () =
       float(Sys.word_size/8)/.598. in
     require(promoted_per_frame<4_096.)
       "Canvas native transient Scene promotion regression";
-    let borrowed=Image.create~width:2~height:2~color:(Color.rgba 37 83 149 211)()in
-    let stage_failed=try
-      Canvas.render canvas Scene.[image borrowed~at:(3,3)();
-        text~at:(12,2)~size:12"stage failure";clear Color.red];
-      false
-    with Failure _->true in
+    let borrowed=Image.create~width:2~height:2~color:(Rays_math.Color.rgba 37 83 149 211)()|>Result.get_ok in
+    let stage_failed=Result.is_error(Canvas.render canvas Scene.[image borrowed~at:(3,3)();
+      text~at:(12,2)~size:12"stage failure";clear Rays_math.Color.red])in
     require stage_failed"Canvas accepted a late native Clear";
     let _,_,references=Font.Private.automatic_counts()in
     require(references=0)"stage failure retained automatic text";
     require(Result.is_ok(Image.Private.pixels borrowed))
       "stage failure shortened explicit Image ownership";
     let font=Result.get_ok(Font.system~size:12())in
-    let camera=Camera.orthographic~height:2.~at:(Vec3.create 0. 0. 2.)
-      ~target:Vec3.zero()in
+    let camera=Camera.orthographic~height:2.~at:(Rays_math.Vec3.create 0. 0. 2.)
+      ~target:Rays_math.Vec3.zero()in
     let mesh=Result.get_ok(Mesh.Private.create_owned~indices:[|0;1;2|]
-      [|Vec3.create(-0.8)(-0.8)0.;Vec3.create 0.8(-0.8)0.;Vec3.create 0. 0.8 0.|])in
-    let scene3=Scene3.create[Scene3.mesh~material:(Material.unlit Color.red)mesh]in
-    let reusable=Scene.[clear(Color.rgba 9 17 31 255);
+      [|Rays_math.Vec3.create(-0.8)(-0.8)0.;Rays_math.Vec3.create 0.8(-0.8)0.;Rays_math.Vec3.create 0. 0.8 0.|])in
+    let scene3=Scene3.create[Scene3.mesh~material:(Material.unlit Rays_math.Color.red)mesh]in
+    let reusable=Scene.[clear(Rays_math.Color.rgba 9 17 31 255);
       image borrowed~at:(3,3)();text~at:(12,2)~size:12"reusable";
       view3d~viewport:(32,32,32,32)~camera scene3;
       rect~at:(46,46)~w:4~h:4~fill:green()]in
@@ -227,26 +226,26 @@ let run () =
      |Ok _->()|Error message->failwith message);
     (* A fresh Scene value, as a sketch's view builds each frame, sees the
        replacement; the released [reusable] value keeps its snapshot. *)
-    render Scene.[clear(Color.rgba 9 17 31 255);image borrowed~at:(3,3)()];
+    render Scene.[clear(Rays_math.Color.rgba 9 17 31 255);image borrowed~at:(3,3)()];
     require(channel canvas~x:3~y:3<>before_replacement&&channel canvas~x:3~y:3=(0x11,0x22,0x33,0xff))
       "replaced image pixels did not reach the render";
-    Image.destroy borrowed;Font.destroy font;
+    ignore(Image.destroy borrowed);Font.destroy font;
     require(!rendered=603)"Canvas native frame count";
-    let stats=Canvas.Private.native_stats canvas in
+    let stats=native_stats canvas in
     require(stats.logical_passes=603L)"Canvas native submission accounting";
     require(stats.logical_draws>=599L)"Canvas native draw accounting";
     require(stats.uploaded_bytes>0L)"Canvas native upload accounting";
     let image=Result.get_ok(Canvas.to_image canvas)in
-    Fun.protect~finally:(fun()->Image.destroy image)(fun()->
-      require(Image.get_size image=(64,64))"Canvas native to_image extent";
+    Fun.protect~finally:(fun()->ignore(Image.destroy image))(fun()->
+      require(Result.get_ok(Image.get_size image)=(64,64))"Canvas native to_image extent";
       let pixels=Result.get_ok(Image.Private.pixels image)in
       require(Bytes.sub pixels 0 4=Bytes.of_string"\009\017\031\255")
         "Canvas native to_image exact pixel");
-    Canvas.destroy canvas;
-    require(Canvas.Private.native_stats canvas=Runtime.zero_stats)"Canvas native cache teardown delta";
-    Canvas.destroy canvas;
+    ignore(Canvas.destroy canvas);
+    require(native_stats canvas=Renderer.zero_stats)"Canvas native cache teardown delta";
+    ignore(Canvas.destroy canvas);
     require(live_handles()=baseline)"Canvas native Metal live-handle delta";
     Printf.printf
       "Canvas native: exact released-scene reuse, %.1f promoted B/frame, frames1/2/60/600, bounded cache, zero delta\n"
       promoted_per_frame
-  with exn->Canvas.destroy canvas;raise exn
+  with exn->ignore(Canvas.destroy canvas);raise exn

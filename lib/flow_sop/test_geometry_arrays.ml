@@ -3,7 +3,7 @@ open Rdk_test_support
 module E = Flow.Eval
 module L = Flow_sop.Lower
 module Edit = Sop.Edit_graph
-let flow = function Ok value->value|Error diagnostic->failwith(Flow.Diagnostic.to_string diagnostic)
+let flow = function Ok value->value|Error diagnostic->failwith(Diagnostic.to_string diagnostic)
 let parse source=Flow.Syntax.parse source |>flow
 let factories=Sop_catalog.Editor.factories
 let with_session fn=
@@ -17,7 +17,7 @@ let cook session ?(domains=1) ?(grain=97) ?(time=0.) node=
   Sop.Session.cook session ~context node
 let geometry=function
   |Ok(output:Sop.Session.output)->Result.get_ok(Sop.Payload.geometry output.payload)
-  |Error diagnostic->failwith(Sop.Diagnostic.error_to_string diagnostic)
+  |Error diagnostic->failwith(Diagnostic.error_to_string diagnostic)
 let fields geometry=
   let topology=Topology.Private.view(Geometry.topology geometry)
   and positions=Packed.Float3.Private.view(Geometry.positions geometry)in
@@ -116,12 +116,12 @@ let ()=
     let source="(workspace query (graph g :context sop [(geo : geometry nil)] (let* [tested "^expression^"] geo)))"in
     let catalog=Flow_sop.Catalog.of_factories ~version:1 factories |>flow in
     let checked=match Flow_sop.Catalog.check_workspace ~ops:Flow_sop.Operators.all catalog(parse source)with
-      |Some checked,[]->checked|_,diagnostics->failwith(String.concat ";"(List.map Flow.Diagnostic.to_string diagnostics))in
+      |Some checked,[]->checked|_,diagnostics->failwith(String.concat ";"(List.map Diagnostic.to_string diagnostics))in
     let evaluation=E.static ~record:true ~inputs:["g",["geo",E.Deferred(Flow.Ty.geometry,7)]] checked |>flow in
     List.assoc["g";"tested"]evaluation.records |>List.hd |>snd in
   let resolver=Flow_sop.Attribute_kernel.resolve ~geometry:(fun id->if id=7 then Some original else None)in
   let queried=evaluate "(sop/topology geo)"in
-  let live=Frame_input.at_time 0. in
+  let live=Input.at_time 0. in
   let expected=E.Record(List.tl(fields original))in
   let result=E.Private.force_reference ~resolve:resolver queried ~live |>flow in
   check(result=expected)"C1 topology kind codes or plane order differ";
@@ -135,8 +135,7 @@ let ()=
     let values=evaluate expression in
     check(Flow_sop.Attribute_kernel.sources values=[7])"C1 topology capture lost its geometry dependency";
     let program=Flow_sop.Attribute_kernel.prepare ~strict:true ~sources:[7][source]values |>flow in
-    let packed=Array.find_map(fun(node:Flow_ir.node)->match node.kind with
-      |Kernel{body=Packed_map packed;_}->Some packed|_->None)(Flow_ir.Executor.graph program).nodes |>Option.get in
+    let packed=Option.get(Flow_ir.Executor.packed_region program)in
     match Flow_ir.Packed.count_origin packed with Some origin->origin
     |None->fail("C1 topology count origin missing for "^expression) in
     let captured=origin captured and direct=origin direct in
@@ -144,7 +143,7 @@ let ()=
     captured)
     ["vertex_points";"primitive_offsets";"kinds"]in
   check(List.length(List.sort_uniq compare origins)=3)"C1 distinct topology plane counts share a false origin";
-  List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+  List.iter(fun domains->Parallel.run ~domains(fun()->
     let program=Flow_ir.Executor.compile ~strict:true queried |>flow in
     check(Flow_ir.Executor.force ~strict:true ~resolve:resolver program ~live |>flow=expected)
       "C1 compiled topology differs from reference")) [1;8];
@@ -167,7 +166,7 @@ let ()=
   let checked=match Flow.Workspace.check ~ops:Flow_sop.Operators.all
       {Flow.Check.version=1;kinds=[]}(parse values)with
     |Some checked,[]->checked|_,diagnostics->fail(String.concat ";"
-        (List.map Flow.Diagnostic.to_string diagnostics)) in
+        (List.map Diagnostic.to_string diagnostics)) in
   let value=E.static ~record:true ~inputs:["g",["geo",E.Deferred(Flow.Ty.geometry,7)]] checked |>flow
     |>fun evaluation->List.assoc["g";"tested"]evaluation.records |>List.hd |>snd in
   let node=Flow_sop.Attribute_kernel.node ~strict:true ~owner:Attribute.Detail ~kind:"int"
@@ -295,7 +294,7 @@ let ()=
     let state=E.create_state()in
     let lane=Flow_sop.Value_lane.create ~state ()in
     with_session(fun session->List.iter(fun(time,dt)->
-      let live={(Frame_input.at_time time)with dt;frame=int_of_float time;tick=int_of_float time}in
+      let live={(Input.at_time time)with dt;frame=int_of_float time;tick=int_of_float time}in
       let resolved=Flow_sop.Value_lane.resolve ~live lane ~time graph.network |>flow in
       let node=Edit.compile_node resolved.geometry ~node_id:(Option.get graph.root) |>get_string_ok in
       let stamp=E.state_stamp state in
@@ -326,7 +325,7 @@ let ()=
     let lowered=L.workspace ~reference ~factories(parse source) |>flow in
     let graph=List.hd lowered.graphs and state=E.create_state() in
     let lane=Flow_sop.Value_lane.create ~state () in
-    let live={(Frame_input.at_time 1.)with dt=0.5;frame=1;tick=1} in
+    let live={(Input.at_time 1.)with dt=0.5;frame=1;tick=1} in
     let network=Flow_sop.Value_lane.resolve ~live lane ~time:1. graph.network |>flow in
     let node=Edit.compile_node network.geometry ~node_id:(Option.get graph.root) |>get_string_ok in
     let stamp=E.state_stamp state in
@@ -426,7 +425,7 @@ let ()=
     "Mesh planes narrowed native scalar capacity";
   (try ignore(Flow.Op.Private.array_count "array/float"(E.Int(Sys.max_floatarray_length+1)));
       fail "Scalar point plane exceeded native array capacity"
-   with Flow.Value.Fail(code,_,_)->check(code="E_ARRAY_RANGE")"Scalar plane capacity error changed");
+   with Diagnostic.Error d -> check(d.code="E_ARRAY_RANGE")"Scalar plane capacity error changed");
   print_endline "Mesh planes finite/count/topology errors, lazy causes and exact scalar capacity retain native boundaries"
 let ()=
   let catalog=Flow_sop.Catalog.of_factories ~version:1 factories|>flow in
@@ -481,7 +480,7 @@ let ()=
     let graph=List.hd lowered.graphs and state=E.create_state()in
     let lane=Flow_sop.Value_lane.create ~state ()in
     with_session(fun session->List.iter(fun(time,dt)->
-      let live={(Frame_input.at_time time)with dt;frame=int_of_float time;tick=int_of_float time}in
+      let live={(Input.at_time time)with dt;frame=int_of_float time;tick=int_of_float time}in
       let network=Flow_sop.Value_lane.resolve ~live lane ~time graph.network|>flow in
       let node=Edit.compile_node network.geometry ~node_id:(Option.get graph.root)|>get_string_ok in
       let stamp=E.state_stamp state in
@@ -531,7 +530,7 @@ let ()=
   List.iter(fun reference->let lowered=L.workspace ~reference ~factories(parse source)|>flow in
     let graph=List.hd lowered.graphs and state=E.create_state()in
     let lane=Flow_sop.Value_lane.create ~state ()in
-    let live={(Frame_input.at_time 1.)with dt=0.5;frame=1;tick=1}in
+    let live={(Input.at_time 1.)with dt=0.5;frame=1;tick=1}in
     let network=Flow_sop.Value_lane.resolve ~live lane ~time:1. graph.network|>flow in
     let node=Edit.compile_node network.geometry ~node_id:(Option.get graph.root)|>get_string_ok in
     let stamp=E.state_stamp state in
@@ -550,7 +549,7 @@ let ()=
        :z (exact (map (fn [(point : vec3)] point.z) p))}] geo)))|}in
   let catalog=Flow_sop.Catalog.of_factories ~version:1 factories|>flow in
   let checked=match Flow_sop.Catalog.check_workspace ~ops:Flow_sop.Operators.all catalog(parse source)with
-    |Some checked,[]->checked|_,ds->fail(String.concat ";"(List.map Flow.Diagnostic.to_string ds))in
+    |Some checked,[]->checked|_,ds->fail(String.concat ";"(List.map Diagnostic.to_string ds))in
   let evaluation=E.static ~record:true ~inputs:["g",["geo",E.Deferred(Flow.Ty.geometry,7)]]checked|>flow in
   let coordinates=List.assoc["g";"coords"]evaluation.records|>List.hd|>snd in
   check(Flow_sop.Attribute_kernel.sources coordinates=[7])"Mesh plane record capture lost geometry dependency";
@@ -559,8 +558,11 @@ let ()=
   let origins=match coordinates with E.Record planes->List.map(fun(_,value)->
     let program=Flow_sop.Attribute_kernel.prepare ~strict:true ~sources:[7]
       [input]value|>flow in
-    let packed=Array.find_map(fun(node:Flow_ir.node)->match node.kind with
-      |Kernel{body=Packed_map packed;_}->Some packed|_->None)(Flow_ir.Executor.graph program).nodes|>Option.get in
+    check(Flow_ir.Executor.packed_region program=None)
+      "Exact coordinate unexpectedly became a direct packed root";
+    check(Flow_ir.Executor.root_is_packed_or_readback program)
+      "Exact coordinate lost its packed readback root";
+    let packed=Option.get(Flow_ir.Executor.packed_root program)in
     Flow_ir.Packed.count_origin packed|>Option.get)planes|_->assert false in
   check(List.length(List.sort_uniq compare origins)=1)"Coordinate fields acquired false independent owner counts";
   print_endline "Mesh planes keep precise P read facts, source ownership and a shared point-owner count through captured records"
@@ -590,7 +592,7 @@ let ()=
 
 let ()=
   let invoke name args=(Option.get(Flow.Op.find name Flow.Context.value)).body
-    ~live:(Frame_input.at_time 0.) ~node:(fun _ _->assert false)args in
+    ~live:(Input.at_time 0.) ~node:(fun _ _->assert false)args in
   let int_attribute name geometry=match Geometry.find_attribute ~owner:Attribute.Point name geometry with
     |Some attribute->(match Attribute.Private.storage attribute with Attribute.Int a->a|_->assert false)
     |None->assert false in
@@ -601,7 +603,7 @@ let ()=
     let attribute=Attribute.create_owned ~owner:Attribute.Point ~name:"key" storage|>get_string_ok in
     let source=Geometry.with_attribute attribute source|>get_string_ok in
     let before=geometry_bytes source in
-    List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->List.iter(fun descending->
+    List.iter(fun domains->Parallel.run ~domains(fun()->List.iter(fun descending->
       let permutation=match invoke "array/grade"["keys",keys;"descending",E.Bool descending]with
         |E.Int_array a->a|_->assert false in
       let ranks=Array.make count 0 in Array.iteri(fun rank source->ranks.(source)<-rank)permutation;
@@ -617,7 +619,7 @@ let ()=
        let mask=Array.mapi(fun i position->if i=position then 1 else 0)first_indices in
        let compact=invoke "array/compact"["mask",E.Int_array mask]in
        let dense=invoke "array/index_of"["keys",compact;"queries",first]in
-       List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+       List.iter(fun domains->Parallel.run ~domains(fun()->
          let native=Attribute_ops.enumerate ~grain:1 ~piece_attribute:"key"
            ~mode:Attribute_ops.Enumerate_pieces ~owner:Attribute.Point ~name:"dense" source|>get_rdk in
          check(dense=E.Int_array(int_attribute "dense" native))

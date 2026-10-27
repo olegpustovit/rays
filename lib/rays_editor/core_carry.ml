@@ -1,6 +1,11 @@
+open Core_model
 open Rays
 open Editor_document
-include Core_menu
+open Core_panes
+open Core_inspect
+open Core_shell
+open Core_text
+open Core_menu
 
 (* ---- carry ---- *)
 
@@ -132,10 +137,10 @@ let carry_step value ~text_focus (frame : Frame.t) =
                chosen = None; anchor = None; preview = None; resting = None; hint = None } }, frame, false
        | None -> value, frame, false)
   | Some c ->
-      let pressed = List.filter_map (function Event.KeyPressed k -> Some k | _ -> None) frame.events in
+      let pressed = List.filter_map (function Input.Key_pressed k -> Some k | _ -> None) frame.input.events in
       let idle = value.leader = Leader.Idle in
       let escape = idle && List.mem Input.Escape pressed
-      and lost = List.exists (function Event.WindowFocusLost -> true | _ -> false) frame.events in
+      and lost = List.exists (function Input.Focus_lost -> true | _ -> false) frame.input.events in
       let typing = (not text_focus) && idle && value.prompt = None && value.menu = None in
       let c = if c.via = `Keys then carry_targets value c else c in
       let letters = match c.targets with
@@ -148,16 +153,16 @@ let carry_step value ~text_focus (frame : Frame.t) =
       let consumed key = (idle && key = Input.Escape)
         || (c.via = `Keys && typing && (key = Input.Enter
             || List.exists (fun (l, _, _) -> Input.KeyChar l.[0] = key) letters)) in
-      let taken = { frame with
+      let taken = { frame with input = { frame.input with
         events = List.filter (function
-          | Event.KeyPressed k | Event.KeyReleased k -> not (consumed k) | _ -> true) frame.events;
-        keys = List.filter (fun k -> not (consumed k)) frame.keys } in
+          | Input.Key_pressed k | Input.Key_released k -> not (consumed k) | _ -> true) frame.input.events;
+        keys = List.filter (fun k -> not (consumed k)) frame.input.keys } } in
       let c = match letter with
-        | Some (_, place, _) -> { c with chosen = Some place; anchor = Some frame.mouse; hint = None }
+        | Some (_, place, _) -> { c with chosen = Some place; anchor = Some frame.input.pointer; hint = None }
         | None -> c in
       let dropped = match c.report with Some { dropped = true; over } -> Some over | _ -> None
       and hovering = match c.report with Some { dropped = false; over } -> Some over | _ -> None in
-      let pointer_wins = match c.anchor with Some at -> frame.mouse <> at | None -> true in
+      let pointer_wins = match c.anchor with Some at -> frame.input.pointer <> at | None -> true in
       let desired = match dropped, hovering with
         | Some _, _ -> dropped
         | None, Some _ when pointer_wins -> hovering
@@ -184,10 +189,10 @@ let carry_step value ~text_focus (frame : Frame.t) =
             | Some (Carry.Node _ as place) ->
                 (match c.resting with
                  | Some (q, since) when q = place -> Some (q, since)
-                 | _ -> Some (place, frame.time))
+                 | _ -> Some (place, frame.input.t))
             | _ -> None in
           let entered = match resting with
-            | Some (Carry.Node path, since) when frame.time -. since >= carry_rest ->
+            | Some (Carry.Node path, since) when frame.input.t -. since >= carry_rest ->
                 (* what the original document references, not the preview *)
                 follow_target ~path { value with doc = c.original }
             | _ -> None in

@@ -38,13 +38,13 @@ let expect_invalid operation message = match operation () with
 let test_points_and_base () =
   let source = Line_geometry.points (Array.init 64 (fun point ->
       float_of_int point, 0., 0.)) in
-  let seed = Rand.seed 17 and probability = 0.37 in
+  let seed = Rays_math.Rand.seed 17 and probability = 0.37 in
   let output = Group_ops.group_random ~grain:7 ~seed ~probability
       ~owner:Group_ops.Group_points ~name:"random" source |> get_ok in
   let random = group Group.Point "random" output in
   for point = 0 to 63 do
     check (Group.mem point random
-        = (Rand.float_at seed ~index:point < probability))
+        = (Rays_math.Rand.float_at seed ~index:point < probability))
       "Group Random point indexed sample"
   done;
   let even = Group.init ~grain:1 ~owner:Group.Point ~name:"even" 64
@@ -69,7 +69,7 @@ let test_seed_attributes_and_owners () =
   and primitive_count = Geometry.primitive_count source in
   let point_seeds = Array.init point_count (fun point -> point / 2) in
   let point_source = with_int Attribute.Point "seed_id" point_seeds source in
-  let points = Group_ops.group_random ~seed:(Rand.seed 31) ~seed_attribute:"seed_id"
+  let points = Group_ops.group_random ~seed:(Rays_math.Rand.seed 31) ~seed_attribute:"seed_id"
       ~probability:0.5 ~owner:Group_ops.Group_points ~name:"points" point_source
       |> get_ok |> group Group.Point "points" in
   for point = 0 to point_count - 2 do
@@ -77,7 +77,7 @@ let test_seed_attributes_and_owners () =
       check (Group.mem point points = Group.mem (point + 1) points)
         "Group Random equal point seed values"
   done;
-  let vertices = Group_ops.group_random ~seed:(Rand.seed 47)
+  let vertices = Group_ops.group_random ~seed:(Rays_math.Rand.seed 47)
       ~seed_attribute:"seed_id" ~probability:0.5 ~owner:Group_ops.Group_vertices
       ~name:"vertices" point_source |> get_ok |> group Group.Vertex "vertices" in
   let topology = Topology.Private.view (Geometry.topology source) in
@@ -91,7 +91,7 @@ let test_seed_attributes_and_owners () =
   let primitive_seeds = Array.init primitive_count (fun primitive -> primitive / 3) in
   let primitive_source = with_int Attribute.Primitive "seed_id"
       primitive_seeds source in
-  let primitives = Group_ops.group_random ~seed:(Rand.seed 53)
+  let primitives = Group_ops.group_random ~seed:(Rays_math.Rand.seed 53)
       ~seed_attribute:"seed_id" ~probability:0.5 ~owner:Group_ops.Group_primitives
       ~name:"primitives" primitive_source |> get_ok
       |> group Group.Primitive "primitives" in
@@ -100,7 +100,7 @@ let test_seed_attributes_and_owners () =
       check (Group.mem primitive primitives = Group.mem (primitive + 1) primitives)
         "Group Random equal primitive seed values"
   done;
-  let edges = Group_ops.group_random ~seed:(Rand.seed 59) ~seed_attribute:"seed_id"
+  let edges = Group_ops.group_random ~seed:(Rays_math.Rand.seed 59) ~seed_attribute:"seed_id"
       ~probability:0.5 ~owner:Group_ops.Group_edges ~name:"edges" point_source
       |> get_ok |> edge_group "edges" in
   check (Edge_group.length edges
@@ -122,7 +122,7 @@ let test_seed_attributes_and_owners () =
       if point land 1 = 0 then 10_000 + (point / 2) else point / 2) in
   let left = with_int Attribute.Point "seed_id" left curves
   and right = with_int Attribute.Point "seed_id" right curves in
-  let select geometry = Group_ops.group_random ~seed:(Rand.seed 61)
+  let select geometry = Group_ops.group_random ~seed:(Rays_math.Rand.seed 61)
       ~seed_attribute:"seed_id" ~probability:0.5 ~owner:Group_ops.Group_edges
       ~name:"edges" geometry |> get_ok |> edge_group "edges" |> edge_members in
   check (select left = select right)
@@ -184,7 +184,7 @@ let test_merge_and_failures () =
 let test_scale_parallel_exactness () =
   let source = Plane_generators.grid ~columns:500 ~rows:300 ~size:20. () |> get_ok in
   let run domains = Parallel.run ~domains (fun () ->
-    let seed = Rand.seed 0x514e in
+    let seed = Rays_math.Rand.seed 0x514e in
     source
     |> Group_ops.group_random ~grain:1_009 ~seed ~probability:0.431
          ~owner:Group_ops.Group_points ~name:"points" |> get_ok
@@ -224,13 +224,13 @@ let test_scale_parallel_exactness () =
 
 let test_checked_boundary () =
   let source = Line_geometry.points [|(0., 0., 0.); (1., 0., 0.)|] in
-  let seed = Rand.seed 29 in
+  let seed = Rays_math.Rand.seed 29 in
   let selected = Group_ops.group_random ~seed ~probability:0.5
       ~owner:Group_ops.Group_points ~name:"selected" source |> get_ok
       |> group Group.Point "selected" in
   for point = 0 to 1 do
     check (Group.mem point selected
-        = (Rand.float_at seed ~index:point < 0.5))
+        = (Rays_math.Rand.float_at seed ~index:point < 0.5))
       "Group Random checked boundary selection"
   done;
   let expect_error result expected_code =

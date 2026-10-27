@@ -6,7 +6,7 @@ This is an active-development project. Native rendering requires an Apple-Silico
 
 ## Platform and build
 
-The package manifest requires OCaml 5.3 or newer and Dune 3.21 or newer. Its Dune language declaration is not the package's minimum Dune version. You also need opam, the macOS developer SDK/frameworks and SDL3, SDL3_image, SDL3_ttf and SDL3_mixer development packages.
+The package requires OCaml 5.3 or newer and Dune 3.21 or newer. You also need opam, the macOS developer SDK/frameworks and SDL3, SDL3_image, SDL3_ttf and SDL3_mixer development packages.
 
 On the supported Mac host:
 
@@ -21,8 +21,6 @@ eval "$(opam env --switch=. --set-switch)"
 opam install . --deps-only --with-test --with-doc
 dune build @all
 ```
-
-These are the repository's native setup instructions. They were source-checked, not qualified on a Mac during this review. The local Linux build attempt stopped on a missing domainslib dependency; it did not establish native rendering, SDL integration or Metal startup behavior.
 
 ## Run a workspace
 
@@ -42,16 +40,15 @@ The application is built around Rays Lisp. `Sketch`, `Frame` and `Scene` are int
 
 ## Verification
 
-Native rendering was not tested on the Linux ARM64 review host. This editor targets Apple Silicon with Metal. Design-kit images and the HTML behavioral prototype are not presented as a running editor demo.
-
-To verify native behavior, build on a supported host and run the basic Lisp workspace. The setup text and package-metadata check do not establish a native runtime pass.
-
 ```sh
-dune runtest
+dune build tools/check.exe
+_build/default/tools/check.exe --ship
 dune build @doc
 ```
 
-Those full native checks were not completed here. [Development reference](docs/reference.md) preserves the example catalogue, architecture links and historical sketch-port notes. [AGENTS.md](AGENTS.md) records the current direction and dependency boundaries.
+[AGENTS.md](AGENTS.md) records development commands and dependency boundaries.
+The [architecture cleanup tracker](specification/cleanup/status.md) records
+implementation and verification against the approved plan.
 
 ## License
 

@@ -53,8 +53,8 @@ module Iso_surface = struct
     let rx = int_of_float parameters.resolution_x
     and ry = int_of_float parameters.resolution_y
     and rz = int_of_float parameters.resolution_z in
-    let min = Vec3.create parameters.min_x parameters.min_y parameters.min_z
-    and max = Vec3.create parameters.max_x parameters.max_y parameters.max_z in
+    let min = Rays_math.Vec3.create parameters.min_x parameters.min_y parameters.min_z
+    and max = Rays_math.Vec3.create parameters.max_x parameters.max_y parameters.max_z in
     let dx = (max.x -. min.x) /. float_of_int rx
     and dy = (max.y -. min.y) /. float_of_int ry
     and dz = (max.z -. min.z) /. float_of_int rz in
@@ -91,7 +91,7 @@ module Iso_surface = struct
                     ~resolution:(rx, ry, rz) ~min ~max ~iso:parameters.iso ~samples () with
                 | Error error -> structured_rdk_error error
                 | Ok geometry -> Ok Node.Private.{payload = Payload.Geometry geometry;
-                    diagnostics = []; instances = None})))))
+                    instances = None})))))
   let factory = parameters_factory build
 end
 
@@ -121,7 +121,7 @@ module Merge = struct
 end
 
 module Line = struct
-  let kind_parameter = Parameter.choice ~equal:( = ) [
+  let kind_parameter = Param.choice ~equal:( = ) [
       "Polygon curve", Rdk.Line_geometry.Line_curve;
       "Points", Rdk.Line_geometry.Line_points;
     ]
@@ -154,9 +154,9 @@ module Line = struct
     let label = Some label in
     let kind = parameters.kind in
     let points = parameters.points in
-    let origin = Vec3.create parameters.origin_x parameters.origin_y
+    let origin = Rays_math.Vec3.create parameters.origin_x parameters.origin_y
           parameters.origin_z in
-    let direction = Vec3.create parameters.direction_x parameters.direction_y
+    let direction = Rays_math.Vec3.create parameters.direction_x parameters.direction_y
           parameters.direction_z in
     let length = parameters.length in
     let origin = vec3_copy origin and direction = vec3_copy direction in
@@ -197,9 +197,9 @@ module Mirror = struct
   let build = parameters_build (fun ~label parameters input ->
     let label = Some label in
     let keep_original = parameters.keep_original in
-    let origin = Vec3.create parameters.origin_x parameters.origin_y
+    let origin = Rays_math.Vec3.create parameters.origin_x parameters.origin_y
           parameters.origin_z in
-    let normal = Vec3.create parameters.normal_x parameters.normal_y
+    let normal = Rays_math.Vec3.create parameters.normal_x parameters.normal_y
           parameters.normal_z in
     let origin = vec3_copy origin and normal = vec3_copy normal in
     Node.Private.make_geometry ?label ~operation:"mirror" ~version:1
@@ -237,9 +237,9 @@ module Match_axis = struct
 
   let build = parameters_build (fun ~label parameters input ->
     let label = Some label in
-    let from = Vec3.create parameters.from_x parameters.from_y
+    let from = Rays_math.Vec3.create parameters.from_x parameters.from_y
           parameters.from_z in
-    let into = Vec3.create parameters.into_x parameters.into_y
+    let into = Rays_math.Vec3.create parameters.into_x parameters.into_y
           parameters.into_z in
     let from = vec3_copy from and into = vec3_copy into in
     Node.Private.make_geometry ?label ~operation:"match_axis" ~version:1
@@ -254,7 +254,7 @@ module Match_axis = struct
 end
 
 module Noise_displace = struct
-  let mode_parameter = Parameter.choice ~equal:( = ) [
+  let mode_parameter = Param.choice ~equal:( = ) [
     "height_2d", Rdk.Deform.Height_2d;
     "normal_3d", Rdk.Deform.Normal_3d;
   ]
@@ -303,12 +303,12 @@ module Noise_displace = struct
 end
 
 module Separate_pieces = struct
-  let owner_parameter = Parameter.choice ~equal:( = ) [
+  let owner_parameter = Param.choice ~equal:( = ) [
       "Point", Rdk.Attribute.Point;
       "Primitive", Rdk.Attribute.Primitive;
     ]
 
-  let mode_parameter = Parameter.choice ~equal:( = ) [
+  let mode_parameter = Param.choice ~equal:( = ) [
       "Separate", Rdk.Separate_pieces.Separate_pieces_separate;
       "Move back", Rdk.Separate_pieces.Separate_pieces_move_back;
     ]
@@ -340,7 +340,7 @@ module Separate_pieces = struct
     let label = Some label in
     let owner = parameters.owner in
     let translation_attribute = parameters.translation_attribute in
-    let axis = Vec3.create parameters.axis_x parameters.axis_y
+    let axis = Rays_math.Vec3.create parameters.axis_x parameters.axis_y
           parameters.axis_z in
     let gap = parameters.gap in
     let mode = parameters.mode in
@@ -362,21 +362,21 @@ module Separate_pieces = struct
 end
 
 module Box = struct
-  let connectivity_parameter = Parameter.choice ~equal:( = ) [
+  let connectivity_parameter = Param.choice ~equal:( = ) [
       "Triangles", Rdk.Box_generator.Box_triangles;
       "Quads", Rdk.Box_generator.Box_quads;
       "Surface points", Rdk.Box_generator.Box_surface_points;
       "Lattice points", Rdk.Box_generator.Box_lattice_points;
     ]
 
-  let normals_parameter = Parameter.choice ~equal:( = ) [
+  let normals_parameter = Param.choice ~equal:( = ) [
       "Auto", None;
       "None", Some Rdk.Box_generator.Box_no_normals;
       "Point", Some Rdk.Box_generator.Box_point_normals;
       "Vertex", Some Rdk.Box_generator.Box_vertex_normals;
     ]
 
-  let rotation_order_parameter = Parameter.choice ~equal:( = ) [
+  let rotation_order_parameter = Param.choice ~equal:( = ) [
       "XYZ", Rdk.Box_generator.Box_xyz; "XZY", Rdk.Box_generator.Box_xzy;
       "YXZ", Rdk.Box_generator.Box_yxz; "YZX", Rdk.Box_generator.Box_yzx;
       "ZXY", Rdk.Box_generator.Box_zxy; "ZYX", Rdk.Box_generator.Box_zyx;
@@ -435,14 +435,14 @@ module Box = struct
 
   let build = parameters_build (fun ~label parameters ->
     let label = Some label in
-    let size = Vec3.create parameters.size_x parameters.size_y
+    let size = Rays_math.Vec3.create parameters.size_x parameters.size_y
         parameters.size_z in
     let connectivity = parameters.connectivity in
     let consolidate_points = parameters.consolidate_points in
     let normals = parameters.normals in
-    let center = Vec3.create parameters.center_x parameters.center_y
+    let center = Rays_math.Vec3.create parameters.center_x parameters.center_y
           parameters.center_z in
-    let rotation = Vec3.create parameters.rotation_x parameters.rotation_y
+    let rotation = Rays_math.Vec3.create parameters.rotation_x parameters.rotation_y
           parameters.rotation_z in
     let rotation_order = parameters.rotation_order in
     let uniform_scale = parameters.uniform_scale in
@@ -474,10 +474,10 @@ module Sort = struct
   type key = Support.sort_key = Sort_x | Sort_y | Sort_z | Sort_distance | Sort_vector
     | Sort_attribute | Sort_vertex_order | Sort_primitive_index | Sort_spatial
     | Sort_random | Sort_index_attribute | Sort_reverse | Sort_shift
-  let owner_parameter = Parameter.choice ~equal:( = ) [
+  let owner_parameter = Param.choice ~equal:( = ) [
       "Points", Rdk.Ordering.Points; "Primitives", Rdk.Ordering.Primitives;
     ]
-  let key_parameter = Parameter.choice ~equal:( = ) [
+  let key_parameter = Param.choice ~equal:( = ) [
       "X", Sort_x; "Y", Sort_y; "Z", Sort_z; "Distance to point", Sort_distance;
       "Along vector", Sort_vector; "Attribute component", Sort_attribute;
       "Vertex order", Sort_vertex_order; "Primitive index", Sort_primitive_index;
@@ -532,8 +532,8 @@ module Sort = struct
     let shift = parameters.shift in
     let key = match key with
       | Sort_x -> Rdk.Ordering.X | Sort_y -> Rdk.Ordering.Y | Sort_z -> Rdk.Ordering.Z
-      | Sort_distance -> Rdk.Ordering.Distance_to (Vec3.create x y z)
-      | Sort_vector -> Rdk.Ordering.Along_vector (Vec3.create x y z)
+      | Sort_distance -> Rdk.Ordering.Distance_to (Rays_math.Vec3.create x y z)
+      | Sort_vector -> Rdk.Ordering.Along_vector (Rays_math.Vec3.create x y z)
       | Sort_attribute -> Rdk.Ordering.Attribute_component { name = attribute; component }
       | Sort_vertex_order -> Rdk.Ordering.By_vertex_order
       | Sort_primitive_index -> Rdk.Ordering.By_primitive_index
@@ -600,12 +600,12 @@ module Switch = struct
   let schema _parameters node =
     let labels = List.mapi (fun index input ->
       Printf.sprintf "%d · %s" index (Node.label input)) (Node.inputs node) in
-    Parameter.schema ~name:"parameters" ~default:parameters_default
-      (List.map (fun (Parameter.Field field as original) ->
+    Param.schema ~name:"parameters" ~default:parameters_default
+      (List.map (fun (Param.Field field as original) ->
          match field.kind with
-         | Parameter.Integer _ -> Parameter.Field { field with
-             kind = Parameter.index_choice labels }
-         | _ -> original) (Parameter.fields parameters_schema))
+         | Param.Integer _ -> Param.Field { field with
+             kind = Param.index_choice labels }
+         | _ -> original) (Param.fields parameters_schema))
 
   let build = parameters_build ~schema (fun ~label parameters a b inputs ->
     let inputs = Array.of_list (a :: b :: inputs) and index = parameters.input in
@@ -621,11 +621,11 @@ end
 
 module Extract_centroid = struct
   type run_mode = Support.centroid_run_mode = Detail | Primitives | Point_pieces | Primitive_pieces
-  let run_parameter = Parameter.choice ~equal:( = ) [
+  let run_parameter = Param.choice ~equal:( = ) [
       "Detail", Detail; "Primitives", Primitives;
       "Point pieces", Point_pieces; "Primitive pieces", Primitive_pieces;
     ]
-  let method_parameter = Parameter.choice ~equal:( = ) [
+  let method_parameter = Param.choice ~equal:( = ) [
       "Point mass", Rdk.Curve_topology.Centroid_point_mass;
       "Bounding box", Rdk.Curve_topology.Centroid_bounding_box;
       "Convex hull", Rdk.Curve_topology.Centroid_convex_hull;
@@ -797,10 +797,10 @@ module Bend = struct
       let unit x y z =
         let scale = max (abs_float x) (max (abs_float y) (abs_float z)) in
         if scale = 0. then invalid_arg "sop/bend: capture direction and up must be non-zero";
-        Vec3.normalize (Vec3.create (x /. scale) (y /. scale) (z /. scale)) in
+        Rays_math.Vec3.normalize (Rays_math.Vec3.create (x /. scale) (y /. scale) (z /. scale)) in
       let direction = unit parameters.direction_x parameters.direction_y parameters.direction_z
       and up = unit parameters.up_x parameters.up_y parameters.up_z in
-      let projection = Vec3.dot up direction in
+      let projection = Rays_math.Vec3.dot up direction in
       if up.x -. projection *. direction.x = 0. && up.y -. projection *. direction.y = 0.
           && up.z -. projection *. direction.z = 0. then
         invalid_arg "sop/bend: up must not be parallel to capture direction";
@@ -815,11 +815,11 @@ module Bend = struct
     let group_owner = parameters.group_owner in
     let group = parameters.group in
     let mask_attribute = optional_text parameters.mask_attribute in
-    let origin = Vec3.create parameters.origin_x parameters.origin_y
+    let origin = Rays_math.Vec3.create parameters.origin_x parameters.origin_y
           parameters.origin_z in
-    let direction = Vec3.create parameters.direction_x parameters.direction_y
+    let direction = Rays_math.Vec3.create parameters.direction_x parameters.direction_y
           parameters.direction_z in
-    let up = Vec3.create parameters.up_x parameters.up_y parameters.up_z in
+    let up = Rays_math.Vec3.create parameters.up_x parameters.up_y parameters.up_z in
     let length = parameters.length in
     let bend_angle = parameters.bend_angle in
     let twist_angle = parameters.twist_angle in
@@ -850,7 +850,7 @@ module Bend = struct
 end
 
 module Clip = struct
-  let keep_parameter = Parameter.choice ~equal:( = ) [
+  let keep_parameter = Param.choice ~equal:( = ) [
       "Above", Rdk.Plane_clip.Above;
       "Below", Rdk.Plane_clip.Below;
       "All", Rdk.Plane_clip.All;
@@ -931,9 +931,9 @@ module Clip = struct
     let clipped_group = optional_text parameters.clipped_group in
     let above_group = optional_text parameters.above_group in
     let below_group = optional_text parameters.below_group in
-    let origin = Vec3.create parameters.origin_x parameters.origin_y
+    let origin = Rays_math.Vec3.create parameters.origin_x parameters.origin_y
           parameters.origin_z in
-    let normal = Vec3.create parameters.normal_x parameters.normal_y
+    let normal = Rays_math.Vec3.create parameters.normal_x parameters.normal_y
           parameters.normal_z in
     let selection = optional_element_group group_owner group in
     let clip_attribute = Option.value ~default:"P" (optional_text clip_attribute) in
@@ -961,18 +961,18 @@ end
 module Smooth = struct
   type mode = Support.smoothing_mode = Laplacian | Custom
 
-  let boundary_parameter = Parameter.choice ~equal:( = ) [
+  let boundary_parameter = Param.choice ~equal:( = ) [
       "Free", Rdk.Smooth.Smooth_free;
       "Pin unshared", Rdk.Smooth.Smooth_unshared;
       "Pin group boundary", Rdk.Smooth.Smooth_group_boundary;
     ]
 
-  let method_parameter = Parameter.choice ~equal:( = ) [
+  let method_parameter = Param.choice ~equal:( = ) [
       "Uniform", Rdk.Attribute_ops.Uniform;
       "Edge length", Rdk.Attribute_ops.Edge_length;
     ]
 
-  let mode_parameter = Parameter.choice ~equal:( = ) [
+  let mode_parameter = Param.choice ~equal:( = ) [
       "Laplacian", Laplacian; "Custom steps", Custom;
     ]
 
@@ -1073,7 +1073,7 @@ end
 module Bound = struct
   open Rays_math
   type shape = Support.group_bounds_shape = Box | Sphere
-  let shape_parameter = Parameter.choice ~equal:( = ) [
+  let shape_parameter = Param.choice ~equal:( = ) [
       "Box", Box; "Sphere", Sphere;
     ]
 
@@ -1144,9 +1144,9 @@ module Bound = struct
     let segments = parameters.segments in
     let rings = parameters.rings in
     let minimum_radius = parameters.minimum_radius in
-    let lower = Vec3.create parameters.lower_x parameters.lower_y
+    let lower = Rays_math.Vec3.create parameters.lower_x parameters.lower_y
           parameters.lower_z in
-    let upper = Vec3.create parameters.upper_x parameters.upper_y
+    let upper = Rays_math.Vec3.create parameters.upper_x parameters.upper_y
           parameters.upper_z in
     let bounds_group = optional_text parameters.bounds_group in
     let center_attribute = optional_text parameters.center_attribute in
@@ -1175,10 +1175,10 @@ end
 module Match_size = struct
   open Rays_math
   type target_justify_mode = Support.target_justify_mode = Justify_explicit | Justify_auto
-  let target_justify_parameter = Parameter.choice ~equal:( = ) [
+  let target_justify_parameter = Param.choice ~equal:( = ) [
       "Explicit", Justify_explicit; "Auto", Justify_auto;
     ]
-  let fit_parameter = Parameter.choice ~equal:( = ) [
+  let fit_parameter = Param.choice ~equal:( = ) [
       "Translate only", Rdk.Match_size.Translate_only;
       "Stretch", Rdk.Match_size.Stretch;
       "Contain", Rdk.Match_size.Contain;
@@ -1293,16 +1293,16 @@ module Match_size = struct
     let scale_x = parameters.scale_x in
     let scale_y = parameters.scale_y in
     let scale_z = parameters.scale_z in
-    let justify = Vec3.create parameters.justify_x parameters.justify_y
+    let justify = Rays_math.Vec3.create parameters.justify_x parameters.justify_y
           parameters.justify_z in
     let target_justify_mode = parameters.target_justify_mode in
-    let target_justify = Vec3.create parameters.target_justify_x
+    let target_justify = Rays_math.Vec3.create parameters.target_justify_x
           parameters.target_justify_y parameters.target_justify_z in
-    let offset = Vec3.create parameters.offset_x parameters.offset_y
+    let offset = Rays_math.Vec3.create parameters.offset_x parameters.offset_y
           parameters.offset_z in
     let scale = parameters.scale in
-    let target_center = Vec3.create parameters.target_center_x parameters.target_center_y parameters.target_center_z in
-    let target_size = Vec3.create parameters.target_size_x parameters.target_size_y parameters.target_size_z in
+    let target_center = Rays_math.Vec3.create parameters.target_center_x parameters.target_center_y parameters.target_center_z in
+    let target_size = Rays_math.Vec3.create parameters.target_size_x parameters.target_size_y parameters.target_size_z in
     let selection = optional_element_group group_owner group
     and source_selection = optional_element_group source_group_owner source_group
     and target_selection = optional_element_group target_group_owner target_group in
@@ -1399,7 +1399,7 @@ module Platonic = struct
   open Rays_math
   type orientation_mode = Support.axis_orientation = Axis_x | Axis_y | Axis_z | Axis_custom
 
-  let kind_parameter = Parameter.choice ~equal:( = ) [
+  let kind_parameter = Param.choice ~equal:( = ) [
       "Tetrahedron", Rdk.Parametric_generators.Platonic_tetrahedron;
       "Cube", Rdk.Parametric_generators.Platonic_cube;
       "Octahedron", Rdk.Parametric_generators.Platonic_octahedron;
@@ -1408,18 +1408,18 @@ module Platonic = struct
       "Soccer ball", Rdk.Parametric_generators.Platonic_soccer_ball;
     ]
 
-  let normals_parameter = Parameter.choice ~equal:( = ) [
+  let normals_parameter = Param.choice ~equal:( = ) [
       "None", Rdk.Parametric_generators.Platonic_no_normals;
       "Point", Rdk.Parametric_generators.Platonic_point_normals;
       "Vertex", Rdk.Parametric_generators.Platonic_vertex_normals;
     ]
 
-  let orientation_parameter = Parameter.choice ~equal:( = ) [
+  let orientation_parameter = Param.choice ~equal:( = ) [
       "X axis", Axis_x; "Y axis", Axis_y; "Z axis", Axis_z;
       "Custom axis", Axis_custom;
     ]
 
-  let rotation_order_parameter = Parameter.choice ~equal:( = ) [
+  let rotation_order_parameter = Param.choice ~equal:( = ) [
       "XYZ", Rdk.Parametric_generators.Platonic_xyz; "XZY", Rdk.Parametric_generators.Platonic_xzy;
       "YXZ", Rdk.Parametric_generators.Platonic_yxz; "YZX", Rdk.Parametric_generators.Platonic_yzx;
       "ZXY", Rdk.Parametric_generators.Platonic_zxy; "ZYX", Rdk.Parametric_generators.Platonic_zyx;
@@ -1484,10 +1484,10 @@ module Platonic = struct
     let kind = parameters.kind in
     let normals = parameters.normals in
     let orientation = parameters.orientation in
-    let axis = Vec3.create parameters.axis_x parameters.axis_y parameters.axis_z in
-    let center = Vec3.create parameters.center_x parameters.center_y
+    let axis = Rays_math.Vec3.create parameters.axis_x parameters.axis_y parameters.axis_z in
+    let center = Rays_math.Vec3.create parameters.center_x parameters.center_y
           parameters.center_z in
-    let rotation = Vec3.create parameters.rotation_x parameters.rotation_y
+    let rotation = Rays_math.Vec3.create parameters.rotation_x parameters.rotation_y
           parameters.rotation_z in
     let rotation_order = parameters.rotation_order in
     let face_groups = optional_text parameters.face_groups in
@@ -1513,13 +1513,13 @@ module Platonic = struct
 end
 
 module Snap_to_grid = struct
-  let rounding_parameter = Parameter.choice ~equal:( = ) [
+  let rounding_parameter = Param.choice ~equal:( = ) [
       "Nearest", Rdk.Fuse_grid.Grid_nearest;
       "Down", Rdk.Fuse_grid.Grid_down;
       "Up", Rdk.Fuse_grid.Grid_up;
     ]
 
-  let position_parameter = Parameter.choice ~equal:( = ) [
+  let position_parameter = Param.choice ~equal:( = ) [
       "First", Rdk.Fuse_reduce.First_position;
       "Least point", Rdk.Fuse_reduce.Least_point_position;
       "Greatest point", Rdk.Fuse_reduce.Greatest_point_position;
@@ -1537,7 +1537,7 @@ module Snap_to_grid = struct
       "Maximum weight", Rdk.Fuse_reduce.Maximum_weight_position;
     ]
 
-  let attributes_parameter = Parameter.choice ~equal:( = ) [
+  let attributes_parameter = Param.choice ~equal:( = ) [
       "Keep first", Rdk.Fuse_reduce.Keep_first;
       "Average numeric", Rdk.Fuse_reduce.Average_numeric;
     ]
@@ -1604,9 +1604,9 @@ module Snap_to_grid = struct
   let build = parameters_build (fun ~label parameters input ->
     let label = Some label in
     let group = parameters.group in
-    let spacing = Vec3.create parameters.spacing_x parameters.spacing_y
+    let spacing = Rays_math.Vec3.create parameters.spacing_x parameters.spacing_y
           parameters.spacing_z in
-    let offset = Vec3.create parameters.offset_x parameters.offset_y
+    let offset = Rays_math.Vec3.create parameters.offset_x parameters.offset_y
           parameters.offset_z in
     let rounding = parameters.rounding in
     let limit_distance = parameters.limit_distance in
@@ -1681,7 +1681,7 @@ module Point_jitter = struct
     let seed_mode = parameters.seed_mode in
     let seed = parameters.seed in
     let scale = parameters.scale in
-    let axis_scales = Vec3.create parameters.axis_x parameters.axis_y
+    let axis_scales = Rays_math.Vec3.create parameters.axis_x parameters.axis_y
           parameters.axis_z in
     let use_point_scale = parameters.use_point_scale in
     let group = optional_text group and mask_attribute = optional_text mask_attribute
@@ -1712,7 +1712,7 @@ module Point_jitter = struct
             let seed = Option.value ~default:(mixed_seed context identity) seed in
             match Rdk.Point_jitter.run ~cancel:(Context.cancel_token context)
                 ~grain:(Context.grain context) ?points ?mask_attribute
-                ?id_attribute ~use_point_scale ~seed:(Rand.seed seed) ~scale
+                ?id_attribute ~use_point_scale ~seed:(Rays_math.Rand.seed seed) ~scale
                 ~axis_scales inputs.(0) with
             | Ok geometry -> cooked geometry
             | Error error -> structured_rdk_error error)
@@ -1830,8 +1830,7 @@ module Copy_to_points = struct
             (* Packed: the whole source once, drawn at each target's transform. *)
             (match Rdk.Instance_copy.copy_transforms ~grain:(Context.grain context)
                 ~cancel:(Context.cancel_token context) ?target_points inputs.(1) with
-              | Ok transforms -> Ok Node.Private.{ geometry = inputs.(0); diagnostics = [];
-                  instances = Some transforms }
+              | Ok transforms -> Ok Node.Private.{ geometry = inputs.(0); instances = Some transforms }
               | Error error -> structured_rdk_error error)
         | Ok source_primitives, Ok target_points ->
             match Rdk.Instance_copy.copy_to_points ~grain:(Context.grain context)
@@ -1871,7 +1870,7 @@ module Pack_instances = struct
             Rays_math.Mat4.of_rows (r0.x.(i), r0.y.(i), r0.z.(i), r0.w.(i))
               (r1.x.(i), r1.y.(i), r1.z.(i), r1.w.(i)) (r2.x.(i), r2.y.(i), r2.z.(i), r2.w.(i))
               (0., 0., 0., 1.)) in
-          Ok Node.Private.{ geometry = inputs.(0); diagnostics = []; instances = Some transforms })))))
+          Ok Node.Private.{ geometry = inputs.(0); instances = Some transforms })))))
 
   let factory = parameters_factory build
 
@@ -1879,27 +1878,27 @@ end
 
 module Spiral = struct
   open Rays_math
-  let extent_parameter = Parameter.choice ~equal:( = ) [
+  let extent_parameter = Param.choice ~equal:( = ) [
       "Turns and height", Spiral_turns_height; "Height and pitch", Spiral_height_pitch;
     ]
-  let radius_parameter = Parameter.choice ~equal:( = ) [
+  let radius_parameter = Param.choice ~equal:( = ) [
       "Archimedean change", Spiral_archimedean_change;
       "Archimedean end", Spiral_archimedean_end;
       "Logarithmic change", Spiral_logarithmic_change;
       "Logarithmic end", Spiral_logarithmic_end;
     ]
-  let direction_parameter = Parameter.choice ~equal:( = ) [
+  let direction_parameter = Param.choice ~equal:( = ) [
       "Counterclockwise", Rdk.Spiral.Spiral_counterclockwise;
       "Clockwise", Rdk.Spiral.Spiral_clockwise;
     ]
-  let divisions_parameter = Parameter.choice ~equal:( = ) [
+  let divisions_parameter = Param.choice ~equal:( = ) [
       "Per curve", Spiral_per_curve; "Per turn", Spiral_per_turn;
     ]
-  let orientation_parameter = Parameter.choice ~equal:( = ) [
+  let orientation_parameter = Param.choice ~equal:( = ) [
       "X axis", Axis_x; "Y axis", Axis_y; "Z axis", Axis_z;
       "Custom axis", Axis_custom;
     ]
-  let rotation_order_parameter = Parameter.choice ~equal:( = ) [
+  let rotation_order_parameter = Param.choice ~equal:( = ) [
       "XYZ", Rdk.Spiral.Spiral_xyz; "XZY", Rdk.Spiral.Spiral_xzy;
       "YXZ", Rdk.Spiral.Spiral_yxz; "YZX", Rdk.Spiral.Spiral_yzx;
       "ZXY", Rdk.Spiral.Spiral_zxy; "ZYX", Rdk.Spiral.Spiral_zyx;
@@ -2060,9 +2059,9 @@ module Spiral = struct
     let uniform_angle = parameters.uniform_angle in
     let spiral_count = parameters.spiral_count in
     let orientation = parameters.orientation in
-    let axis = Vec3.create parameters.axis_x parameters.axis_y parameters.axis_z in
-    let center = Vec3.create parameters.center_x parameters.center_y parameters.center_z in
-    let rotation = Vec3.create parameters.rotation_x parameters.rotation_y parameters.rotation_z in
+    let axis = Rays_math.Vec3.create parameters.axis_x parameters.axis_y parameters.axis_z in
+    let center = Rays_math.Vec3.create parameters.center_x parameters.center_y parameters.center_z in
+    let rotation = Rays_math.Vec3.create parameters.rotation_x parameters.rotation_y parameters.rotation_z in
     let rotation_order = parameters.rotation_order in
     let uniform_scale = parameters.uniform_scale in
     let angle_attribute = parameters.angle_attribute in
@@ -2110,12 +2109,12 @@ end
 module Circle = struct
   open Rays_math
 
-  let arc_parameter = Parameter.choice ~equal:( = ) [
+  let arc_parameter = Param.choice ~equal:( = ) [
       "Closed", Circle_closed; "Open arc", Circle_open; "Chord closed", Circle_chord;
       "Sliced", Circle_sliced;
     ]
 
-  let orientation_parameter = Parameter.choice ~equal:( = ) [
+  let orientation_parameter = Param.choice ~equal:( = ) [
       "XZ", Plane_xz; "XY", Plane_xy;
       "YZ", Plane_yz; "Custom axes", Plane_axes;
     ]
@@ -2186,8 +2185,8 @@ module Circle = struct
       end;
       if parameters.orientation = Plane_axes then
         validate_plane_axes "sop/circle"
-          (Vec3.create parameters.horizontal_x parameters.horizontal_y parameters.horizontal_z)
-          (Vec3.create parameters.vertical_x parameters.vertical_y parameters.vertical_z)]
+          (Rays_math.Vec3.create parameters.horizontal_x parameters.horizontal_y parameters.horizontal_z)
+          (Rays_math.Vec3.create parameters.vertical_x parameters.vertical_y parameters.vertical_z)]
     [@@sop.node_category "Create/Curve"] [@@sop.node_inputs 0]
 
     [@@deriving sop_params, sop_node]
@@ -2198,10 +2197,10 @@ module Circle = struct
     let start_angle = parameters.start_angle in
     let end_angle = parameters.end_angle in
     let orientation = parameters.orientation in
-    let horizontal = Vec3.create parameters.horizontal_x parameters.horizontal_y parameters.horizontal_z in
-    let vertical = Vec3.create parameters.vertical_x parameters.vertical_y parameters.vertical_z in
+    let horizontal = Rays_math.Vec3.create parameters.horizontal_x parameters.horizontal_y parameters.horizontal_z in
+    let vertical = Rays_math.Vec3.create parameters.vertical_x parameters.vertical_y parameters.vertical_z in
     let reverse = parameters.reverse in
-    let center = Vec3.create parameters.center_x parameters.center_y parameters.center_z in
+    let center = Rays_math.Vec3.create parameters.center_x parameters.center_y parameters.center_z in
     let radius = parameters.radius in
     let radius_x_mode = parameters.radius_x_mode in
     let radius_x = parameters.radius_x in
@@ -2235,12 +2234,12 @@ end
 
 module Grid = struct
   open Rays_math
-  let counts_parameter = Parameter.choice ~equal:( = ) [
+  let counts_parameter = Param.choice ~equal:( = ) [
       "Divisions", Rdk.Plane_generators.Grid_divisions;
       "Point counts", Rdk.Plane_generators.Grid_point_counts;
     ]
 
-  let connectivity_parameter = Parameter.choice ~equal:( = ) [
+  let connectivity_parameter = Param.choice ~equal:( = ) [
       "Points", Rdk.Plane_generators.Grid_points;
       "Rows", Rdk.Plane_generators.Grid_rows;
       "Columns", Rdk.Plane_generators.Grid_columns;
@@ -2251,7 +2250,7 @@ module Grid = struct
       "Reverse triangles", Rdk.Plane_generators.Grid_reverse_triangles;
     ]
 
-  let orientation_parameter = Parameter.choice ~equal:( = ) [
+  let orientation_parameter = Param.choice ~equal:( = ) [
       "XY", Plane_xy;
       "XZ", Plane_xz;
       "YZ", Plane_yz; "Custom axes", Plane_axes;
@@ -2329,8 +2328,8 @@ module Grid = struct
       if not valid then refuse "topology cardinality exceeds array limits";
       if List.mem (String.trim parameters.uv_attribute) ["P";"N"] then refuse "UV name cannot be P or N";
       if parameters.orientation = Plane_axes then validate_plane_axes "sop/grid"
-        (Vec3.create parameters.horizontal_x parameters.horizontal_y parameters.horizontal_z)
-        (Vec3.create parameters.vertical_x parameters.vertical_y parameters.vertical_z)]
+        (Rays_math.Vec3.create parameters.horizontal_x parameters.horizontal_y parameters.horizontal_z)
+        (Rays_math.Vec3.create parameters.vertical_x parameters.vertical_y parameters.vertical_z)]
     [@@sop.node_category "Create/Primitive"] [@@sop.node_inputs 0]
 
     [@@deriving sop_params, sop_node]
@@ -2340,9 +2339,9 @@ module Grid = struct
     let counts = parameters.counts in
     let connectivity = parameters.connectivity in
     let orientation = parameters.orientation in
-    let horizontal = Vec3.create parameters.horizontal_x parameters.horizontal_y parameters.horizontal_z in
-    let vertical = Vec3.create parameters.vertical_x parameters.vertical_y parameters.vertical_z in
-    let center = Vec3.create parameters.center_x parameters.center_y parameters.center_z in
+    let horizontal = Rays_math.Vec3.create parameters.horizontal_x parameters.horizontal_y parameters.horizontal_z in
+    let vertical = Rays_math.Vec3.create parameters.vertical_x parameters.vertical_y parameters.vertical_z in
+    let center = Rays_math.Vec3.create parameters.center_x parameters.center_y parameters.center_z in
     let width_mode = parameters.width_mode in
     let width = parameters.width in
     let height_mode = parameters.height_mode in
@@ -2373,7 +2372,7 @@ module Grid = struct
 end
 
 module Uv_sphere = struct
-  let connectivity_parameter = Parameter.choice ~equal:( = ) [
+  let connectivity_parameter = Param.choice ~equal:( = ) [
       "Triangles", Rdk.Uv_sphere.Sphere_triangles;
       "Alternating triangles", Rdk.Uv_sphere.Sphere_alternating_triangles;
       "Quads", Rdk.Uv_sphere.Sphere_quads;
@@ -2383,15 +2382,15 @@ module Uv_sphere = struct
       "Points", Rdk.Uv_sphere.Sphere_points;
     ]
 
-  let normals_parameter = Parameter.choice ~equal:( = ) [
+  let normals_parameter = Param.choice ~equal:( = ) [
       "None", Rdk.Uv_sphere.Sphere_no_normals;
       "Point", Rdk.Uv_sphere.Sphere_point_normals;
       "Vertex", Rdk.Uv_sphere.Sphere_vertex_normals;
     ]
 
-  let orientation_parameter = Parameter.choice ~equal:( = ) [
+  let orientation_parameter = Param.choice ~equal:( = ) [
       "X axis", Axis_x; "Y axis", Axis_y; "Z axis", Axis_z; "Custom axis", Axis_custom]
-  let rotation_order_parameter = Parameter.choice ~equal:( = ) [
+  let rotation_order_parameter = Param.choice ~equal:( = ) [
       "XYZ", Rdk.Uv_sphere.Sphere_xyz; "XZY", Rdk.Uv_sphere.Sphere_xzy;
       "YXZ", Rdk.Uv_sphere.Sphere_yxz; "YZX", Rdk.Uv_sphere.Sphere_yzx;
       "ZXY", Rdk.Uv_sphere.Sphere_zxy; "ZYX", Rdk.Uv_sphere.Sphere_zyx]
@@ -2522,9 +2521,9 @@ module Uv_sphere = struct
     let normals_mode = parameters.normals_mode in
     let normals = parameters.normals in
     let orientation = parameters.orientation in
-    let axis = Vec3.create parameters.axis_x parameters.axis_y parameters.axis_z in
-    let center = Vec3.create parameters.center_x parameters.center_y parameters.center_z in
-    let rotation = Vec3.create parameters.rotation_x parameters.rotation_y parameters.rotation_z in
+    let axis = Rays_math.Vec3.create parameters.axis_x parameters.axis_y parameters.axis_z in
+    let center = Rays_math.Vec3.create parameters.center_x parameters.center_y parameters.center_z in
+    let rotation = Rays_math.Vec3.create parameters.rotation_x parameters.rotation_y parameters.rotation_z in
     let rotation_order = parameters.rotation_order in
     let uniform_scale = parameters.uniform_scale in
     let radius_x_mode = parameters.radius_x_mode in
@@ -2562,7 +2561,7 @@ module Uv_sphere = struct
 end
 
 module Torus = struct
-  let connectivity_parameter = Parameter.choice ~equal:( = ) [
+  let connectivity_parameter = Param.choice ~equal:( = ) [
       "Triangles", Rdk.Parametric_generators.Torus_triangles;
       "Alternating triangles", Rdk.Parametric_generators.Torus_alternating_triangles;
       "Quads", Rdk.Parametric_generators.Torus_quads;
@@ -2572,15 +2571,15 @@ module Torus = struct
       "Points", Rdk.Parametric_generators.Torus_points;
     ]
 
-  let normals_parameter = Parameter.choice ~equal:( = ) [
+  let normals_parameter = Param.choice ~equal:( = ) [
       "None", Rdk.Parametric_generators.Torus_no_normals;
       "Point", Rdk.Parametric_generators.Torus_point_normals;
       "Vertex", Rdk.Parametric_generators.Torus_vertex_normals;
     ]
 
-  let orientation_parameter = Parameter.choice ~equal:( = ) [
+  let orientation_parameter = Param.choice ~equal:( = ) [
       "X axis", Axis_x; "Y axis", Axis_y; "Z axis", Axis_z; "Custom axis", Axis_custom]
-  let rotation_order_parameter = Parameter.choice ~equal:( = ) [
+  let rotation_order_parameter = Param.choice ~equal:( = ) [
       "XYZ", Rdk.Parametric_generators.Torus_xyz; "XZY", Rdk.Parametric_generators.Torus_xzy;
       "YXZ", Rdk.Parametric_generators.Torus_yxz; "YZX", Rdk.Parametric_generators.Torus_yzx;
       "ZXY", Rdk.Parametric_generators.Torus_zxy; "ZYX", Rdk.Parametric_generators.Torus_zyx]
@@ -2722,9 +2721,9 @@ module Torus = struct
     let normals_mode = parameters.normals_mode in
     let normals = parameters.normals in
     let orientation = parameters.orientation in
-    let axis = Vec3.create parameters.axis_x parameters.axis_y parameters.axis_z in
-    let center = Vec3.create parameters.center_x parameters.center_y parameters.center_z in
-    let rotation = Vec3.create parameters.rotation_x parameters.rotation_y parameters.rotation_z in
+    let axis = Rays_math.Vec3.create parameters.axis_x parameters.axis_y parameters.axis_z in
+    let center = Rays_math.Vec3.create parameters.center_x parameters.center_y parameters.center_z in
+    let rotation = Rays_math.Vec3.create parameters.rotation_x parameters.rotation_y parameters.rotation_z in
     let rotation_order = parameters.rotation_order in
     let uniform_scale = parameters.uniform_scale in
     let u_start = parameters.u_start in
@@ -2761,7 +2760,7 @@ module Torus = struct
 end
 
 module Tube = struct
-  let connectivity_parameter = Parameter.choice ~equal:( = ) [
+  let connectivity_parameter = Param.choice ~equal:( = ) [
       "Triangles", Rdk.Parametric_generators.Tube_triangles;
       "Alternating triangles", Rdk.Parametric_generators.Tube_alternating_triangles;
       "Quads", Rdk.Parametric_generators.Tube_quads;
@@ -2771,15 +2770,15 @@ module Tube = struct
       "Points", Rdk.Parametric_generators.Tube_points;
     ]
 
-  let normals_parameter = Parameter.choice ~equal:( = ) [
+  let normals_parameter = Param.choice ~equal:( = ) [
       "None", Rdk.Parametric_generators.Tube_no_normals;
       "Point", Rdk.Parametric_generators.Tube_point_normals;
       "Vertex", Rdk.Parametric_generators.Tube_vertex_normals;
     ]
 
-  let orientation_parameter = Parameter.choice ~equal:( = ) [
+  let orientation_parameter = Param.choice ~equal:( = ) [
       "X axis", Axis_x; "Y axis", Axis_y; "Z axis", Axis_z; "Custom axis", Axis_custom]
-  let rotation_order_parameter = Parameter.choice ~equal:( = ) [
+  let rotation_order_parameter = Param.choice ~equal:( = ) [
       "XYZ", Rdk.Parametric_generators.Tube_xyz; "XZY", Rdk.Parametric_generators.Tube_xzy;
       "YXZ", Rdk.Parametric_generators.Tube_yxz; "YZX", Rdk.Parametric_generators.Tube_yzx;
       "ZXY", Rdk.Parametric_generators.Tube_zxy; "ZYX", Rdk.Parametric_generators.Tube_zyx]
@@ -2910,9 +2909,9 @@ module Tube = struct
     let normals_mode = parameters.normals_mode in
     let normals = parameters.normals in
     let orientation = parameters.orientation in
-    let axis = Vec3.create parameters.axis_x parameters.axis_y parameters.axis_z in
-    let center = Vec3.create parameters.center_x parameters.center_y parameters.center_z in
-    let rotation = Vec3.create parameters.rotation_x parameters.rotation_y parameters.rotation_z in
+    let axis = Rays_math.Vec3.create parameters.axis_x parameters.axis_y parameters.axis_z in
+    let center = Rays_math.Vec3.create parameters.center_x parameters.center_y parameters.center_z in
+    let rotation = Rays_math.Vec3.create parameters.rotation_x parameters.rotation_y parameters.rotation_z in
     let rotation_order = parameters.rotation_order in
     let radius_scale = parameters.radius_scale in
     let uv_attribute = parameters.uv_attribute in
@@ -3016,8 +3015,8 @@ module Mountain = struct
     let normalize_direction = parameters.normalize_direction in
     let mask_attribute = parameters.mask_attribute in
     let height = parameters.height in
-    let frequency = Vec3.create parameters.frequency_x parameters.frequency_y parameters.frequency_z in
-    let offset = Vec3.create parameters.offset_x parameters.offset_y parameters.offset_z in
+    let frequency = Rays_math.Vec3.create parameters.frequency_x parameters.frequency_y parameters.frequency_z in
+    let offset = Rays_math.Vec3.create parameters.offset_x parameters.offset_y parameters.offset_z in
     let octaves = parameters.octaves in
     let lacunarity = parameters.lacunarity in
     let roughness = parameters.roughness in
@@ -3061,7 +3060,7 @@ module Mountain = struct
 end
 
 module Extract_point_from_curve = struct
-  let cut_parameter = Parameter.choice ~equal:( = ) [
+  let cut_parameter = Param.choice ~equal:( = ) [
       "Constant", Extract_point_constant; "Primitive attribute", Extract_point_primitive_attribute;
       "Current time", Extract_point_current_time;
     ]
@@ -3155,7 +3154,7 @@ module Extract_point_from_curve = struct
 end
 
 module Point_generate_from_input = struct
-  let mode_parameter = Parameter.choice ~equal:( = ) [
+  let mode_parameter = Param.choice ~equal:( = ) [
       "Total count", Point_generate_total; "Per point", Point_generate_per_point;
       "Probability attribute", Point_generate_probability;
     ]
@@ -3252,7 +3251,7 @@ module Point_generate_from_input = struct
                 stable_identity in
             let seed = Option.value ~default:(mixed_seed context identity) seed in
             match Rdk.Point_generate.run ~cancel:(Context.cancel_token context)
-                ~grain:(Context.grain context) ?points ~keep_input ~seed:(Rand.seed seed)
+                ~grain:(Context.grain context) ?points ~keep_input ~seed:(Rays_math.Rand.seed seed)
                 ?generated_group ~source_point_attribute ~source_index_attribute
                 ~copy_point_attributes ~copy_detail_attributes ~mode geometry with
             | Ok geometry -> cooked geometry
@@ -3262,17 +3261,17 @@ module Point_generate_from_input = struct
 end
 
 module Soft_transform = struct
-  let order_parameter = Parameter.choice ~equal:( = ) [
+  let order_parameter = Param.choice ~equal:( = ) [
       "SRT", Rdk.Transform_ops.Transform_srt; "STR", Rdk.Transform_ops.Transform_str;
       "RST", Rdk.Transform_ops.Transform_rst; "RTS", Rdk.Transform_ops.Transform_rts;
       "TSR", Rdk.Transform_ops.Transform_tsr; "TRS", Rdk.Transform_ops.Transform_trs;
     ]
-  let rotation_order_parameter = Parameter.choice ~equal:( = ) [
+  let rotation_order_parameter = Param.choice ~equal:( = ) [
       "XYZ", Rdk.Transform_ops.Transform_xyz; "XZY", Rdk.Transform_ops.Transform_xzy;
       "YXZ", Rdk.Transform_ops.Transform_yxz; "YZX", Rdk.Transform_ops.Transform_yzx;
       "ZXY", Rdk.Transform_ops.Transform_zxy; "ZYX", Rdk.Transform_ops.Transform_zyx;
     ]
-  let metric_parameter = Parameter.choice ~equal:( = ) [
+  let metric_parameter = Param.choice ~equal:( = ) [
       "Radius", Soft_radius; "Edge distance", Soft_edge; "Attribute", Soft_attribute;
     ]
   type parameters = {
@@ -3366,18 +3365,18 @@ module Soft_transform = struct
         refuse "metric attribute requires scalar storage";
       if String.trim parameters.falloff_attribute = "P" then refuse "falloff output must not replace P";
       match Rdk.Transform_ops.compose_transform ~order:parameters.order ~rotation_order:parameters.rotation_order
-        ~translate:(Vec3.create parameters.translate_x parameters.translate_y parameters.translate_z)
-        ~rotate:(Vec3.create parameters.rotate_x parameters.rotate_y parameters.rotate_z)
-        ~scale:(Vec3.create parameters.scale_x parameters.scale_y parameters.scale_z)
-        ~shear:(Vec3.create parameters.shear_xy parameters.shear_xz parameters.shear_yz)
+        ~translate:(Rays_math.Vec3.create parameters.translate_x parameters.translate_y parameters.translate_z)
+        ~rotate:(Rays_math.Vec3.create parameters.rotate_x parameters.rotate_y parameters.rotate_z)
+        ~scale:(Rays_math.Vec3.create parameters.scale_x parameters.scale_y parameters.scale_z)
+        ~shear:(Rays_math.Vec3.create parameters.shear_xy parameters.shear_xz parameters.shear_yz)
         ~uniform_scale:parameters.uniform_scale
-        ~pivot:(Vec3.create parameters.pivot_x parameters.pivot_y parameters.pivot_z)
-        ~pivot_rotation:(Vec3.create parameters.pivot_rotation_x parameters.pivot_rotation_y parameters.pivot_rotation_z)
+        ~pivot:(Rays_math.Vec3.create parameters.pivot_x parameters.pivot_y parameters.pivot_z)
+        ~pivot_rotation:(Rays_math.Vec3.create parameters.pivot_rotation_x parameters.pivot_rotation_y parameters.pivot_rotation_z)
         ~invert:parameters.invert () with
       | Error error -> refuse (Rdk.Error.to_string error)
       | Ok matrix ->
           for index = 0 to 15 do
-            if not (Float.is_finite (Mat4.get matrix ~row:(index / 4) ~column:(index mod 4))) then
+            if not (Float.is_finite (Rays_math.Mat4.get matrix ~row:(index / 4) ~column:(index mod 4))) then
               refuse "composed transform must be finite"
           done]
     [@@sop.node_category "Deform"] [@@sop.node_inputs 1]
@@ -3388,15 +3387,15 @@ module Soft_transform = struct
     let label = Some label in
     let order = parameters.order in
     let rotation_order = parameters.rotation_order in
-    let translate = Vec3.create parameters.translate_x parameters.translate_y parameters.translate_z in
-    let rotate = Vec3.create parameters.rotate_x parameters.rotate_y parameters.rotate_z in
-    let scale = Vec3.create parameters.scale_x parameters.scale_y parameters.scale_z in
+    let translate = Rays_math.Vec3.create parameters.translate_x parameters.translate_y parameters.translate_z in
+    let rotate = Rays_math.Vec3.create parameters.rotate_x parameters.rotate_y parameters.rotate_z in
+    let scale = Rays_math.Vec3.create parameters.scale_x parameters.scale_y parameters.scale_z in
     let shear_xy = parameters.shear_xy in
     let shear_xz = parameters.shear_xz in
     let shear_yz = parameters.shear_yz in
     let uniform_scale = parameters.uniform_scale in
-    let pivot = Vec3.create parameters.pivot_x parameters.pivot_y parameters.pivot_z in
-    let pivot_rotation = Vec3.create parameters.pivot_rotation_x parameters.pivot_rotation_y parameters.pivot_rotation_z in
+    let pivot = Rays_math.Vec3.create parameters.pivot_x parameters.pivot_y parameters.pivot_z in
+    let pivot_rotation = Rays_math.Vec3.create parameters.pivot_rotation_x parameters.pivot_rotation_y parameters.pivot_rotation_z in
     let invert = parameters.invert in
     let group_owner = parameters.group_owner in
     let group = parameters.group in
@@ -3414,7 +3413,7 @@ module Soft_transform = struct
       | Soft_edge -> Rdk.Transform_ops.Soft_edge
       | Soft_attribute -> Rdk.Transform_ops.Soft_attribute {attribute=metric_attribute;apply_rolloff} in
     let matrix = Rdk.Transform_ops.compose_transform ~order ~rotation_order ~translate ~rotate ~scale
-        ~shear:(Vec3.create shear_xy shear_xz shear_yz) ~uniform_scale ~pivot ~pivot_rotation ~invert ()
+        ~shear:(Rays_math.Vec3.create shear_xy shear_xz shear_yz) ~uniform_scale ~pivot ~pivot_rotation ~invert ()
         |> Result.get_ok in
     Node.Private.make_geometry ?label ~operation:"soft_transform" ~version:1
       ~parameters:""
@@ -3554,24 +3553,24 @@ module Scatter = struct
 end
 
 module Ray = struct
-  let method_parameter = Parameter.choice ~equal:( = ) [
+  let method_parameter = Param.choice ~equal:( = ) [
       "Minimum distance", Rdk.Ray.Ray_minimum_distance;
       "Project rays", Rdk.Ray.Ray_project;
     ]
-  let direction_parameter = Parameter.choice ~equal:( = ) [
+  let direction_parameter = Param.choice ~equal:( = ) [
       "Vector", Direction_vector; "Normal", Direction_normal;
       "Attribute", Direction_attribute;
     ]
-  let direction_mode_parameter = Parameter.choice ~equal:( = ) [
+  let direction_mode_parameter = Param.choice ~equal:( = ) [
       "Forward", Rdk.Ray.Ray_forward; "Reverse", Rdk.Ray.Ray_reverse;
       "Bidirectional closest", Rdk.Ray.Ray_bidirectional_closest;
       "Bidirectional farthest", Rdk.Ray.Ray_bidirectional_farthest;
     ]
-  let surface_parameter = Parameter.choice ~equal:( = ) [
+  let surface_parameter = Param.choice ~equal:( = ) [
       "First surface", Rdk.Ray.Ray_first_surface;
       "Last surface", Rdk.Ray.Ray_last_surface;
     ]
-  let combine_parameter = Parameter.choice ~equal:( = ) [
+  let combine_parameter = Param.choice ~equal:( = ) [
       "Average", Rdk.Ray.Ray_average; "Median", Rdk.Ray.Ray_median;
       "Shortest", Rdk.Ray.Ray_shortest; "Longest", Rdk.Ray.Ray_longest;
     ]
@@ -3691,7 +3690,7 @@ module Ray = struct
     let collision_group = parameters.collision_group in
     let method_ = parameters.method_ in
     let direction = parameters.direction in
-    let direction_vector = Vec3.create parameters.direction_x parameters.direction_y parameters.direction_z in
+    let direction_vector = Rays_math.Vec3.create parameters.direction_x parameters.direction_y parameters.direction_z in
     let direction_attribute = parameters.direction_attribute in
     let direction_mode = parameters.direction_mode in
     let surface_hit = parameters.surface_hit in
@@ -3761,12 +3760,12 @@ module Ray = struct
 end
 
 module Point_replicate = struct
-  let shape_parameter = Parameter.choice ~equal:( = ) [
+  let shape_parameter = Param.choice ~equal:( = ) [
       "Point", Rdk.Point_replication.Replicate_point; "Box", Rdk.Point_replication.Replicate_box;
       "Sphere", Rdk.Point_replication.Replicate_sphere; "Disk", Rdk.Point_replication.Replicate_disk;
       "Line", Rdk.Point_replication.Replicate_line; "Custom", Rdk.Point_replication.Replicate_custom;
     ]
-  let velocity_parameter = Parameter.choice ~equal:( = ) [
+  let velocity_parameter = Param.choice ~equal:( = ) [
       "None", Rdk.Point_replication.Replicate_no_velocity_stretch;
       "Scaled velocity", Rdk.Point_replication.Replicate_scaled_velocity;
       "Velocity only", Rdk.Point_replication.Replicate_velocity_only;
@@ -3909,9 +3908,9 @@ module Point_replicate = struct
     let source_point_attribute = parameters.source_point_attribute in
     let source_index_attribute = parameters.source_index_attribute in
     let shape = parameters.shape in
-    let center = Vec3.create parameters.center_x parameters.center_y parameters.center_z in
-    let size = Vec3.create parameters.size_x parameters.size_y parameters.size_z in
-    let orientation = Vec3.create parameters.orientation_x parameters.orientation_y parameters.orientation_z in
+    let center = Rays_math.Vec3.create parameters.center_x parameters.center_y parameters.center_z in
+    let size = Rays_math.Vec3.create parameters.size_x parameters.size_y parameters.size_z in
+    let orientation = Rays_math.Vec3.create parameters.orientation_x parameters.orientation_y parameters.orientation_z in
     let uniform_scale = parameters.uniform_scale in
     let quasi_stratified = parameters.quasi_stratified in
     let velocity_stretch = parameters.velocity_stretch in
@@ -3919,9 +3918,9 @@ module Point_replicate = struct
     let inherit_velocity = parameters.inherit_velocity in
     let radial_velocity = parameters.radial_velocity in
     let use_noise = parameters.use_noise in
-    let noise_amplitude = Vec3.create parameters.noise_amplitude_x parameters.noise_amplitude_y parameters.noise_amplitude_z in
-    let noise_frequency = Vec3.create parameters.noise_frequency_x parameters.noise_frequency_y parameters.noise_frequency_z in
-    let noise_offset = Vec3.create parameters.noise_offset_x parameters.noise_offset_y parameters.noise_offset_z in
+    let noise_amplitude = Rays_math.Vec3.create parameters.noise_amplitude_x parameters.noise_amplitude_y parameters.noise_amplitude_z in
+    let noise_frequency = Rays_math.Vec3.create parameters.noise_frequency_x parameters.noise_frequency_y parameters.noise_frequency_z in
+    let noise_offset = Rays_math.Vec3.create parameters.noise_offset_x parameters.noise_offset_y parameters.noise_offset_z in
     let noise_roughness = parameters.noise_roughness in
     let noise_attenuation = parameters.noise_attenuation in
     let noise_turbulence = parameters.noise_turbulence in
@@ -3966,7 +3965,7 @@ module Point_replicate = struct
             let custom_shape = if shape = Rdk.Point_replication.Replicate_custom && Array.length inputs = 2 then Some inputs.(1) else None in
             match Rdk.Point_replication.run ~cancel:(Context.cancel_token context)
                 ~grain:(Context.grain context) ?points:selection ~keep_input
-                ~seed:(Rand.seed seed) ~id_attribute ?generated_group
+                ~seed:(Rays_math.Rand.seed seed) ~id_attribute ?generated_group
                 ~copy_point_attributes ~keep_source_attributes
                 ~transform_attributes
                 ~source_point_attribute ~source_index_attribute ~shape ?custom_shape
@@ -4057,7 +4056,7 @@ module Duplicate = struct
     let group = parameters.group in
     let copy_group_prefix = parameters.copy_group_prefix in
     let preserve_groups = parameters.preserve_groups in
-    let transform = Mat4.of_rows (m00,m01,m02,m03) (m10,m11,m12,m13) (m20,m21,m22,m23) (m30,m31,m32,m33) in
+    let transform = Rays_math.Mat4.of_rows (m00,m01,m02,m03) (m10,m11,m12,m13) (m20,m21,m22,m23) (m30,m31,m32,m33) in
     let group = optional_text group and copy_group_prefix = optional_text copy_group_prefix in
     Node.Private.make_geometry ?label ~operation:"duplicate" ~version:2
       ~parameters:""
@@ -4085,7 +4084,7 @@ end
 module Transform = struct
   let order_parameter = Soft_transform.order_parameter
   let rotation_order_parameter = Soft_transform.rotation_order_parameter
-  let mode_parameter = Parameter.choice ~equal:( = ) ["TRS", Support.Transform_trs; "Matrix", Support.Transform_matrix]
+  let mode_parameter = Param.choice ~equal:( = ) ["TRS", Support.Transform_trs; "Matrix", Support.Transform_matrix]
   type parameters = {
     mode : Support.transform_mode [@sop.default Transform_trs]
       [@sop.label "Transform mode"] [@sop.kind mode_parameter];
@@ -4166,26 +4165,26 @@ module Transform = struct
 
     [@@sop.validate fun parameters ->
     let matrix = match parameters.mode with
-      | Transform_matrix -> Mat4.of_rows
+      | Transform_matrix -> Rays_math.Mat4.of_rows
           (parameters.m00,parameters.m01,parameters.m02,parameters.m03)
           (parameters.m10,parameters.m11,parameters.m12,parameters.m13)
           (parameters.m20,parameters.m21,parameters.m22,parameters.m23)
           (parameters.m30,parameters.m31,parameters.m32,parameters.m33)
       | Transform_trs -> Rdk.Transform_ops.compose_transform
           ~order:parameters.order ~rotation_order:parameters.rotation_order
-          ~translate:(Vec3.create parameters.translate_x parameters.translate_y parameters.translate_z)
-          ~rotate:(Vec3.create parameters.rotate_x parameters.rotate_y parameters.rotate_z)
-          ~scale:(Vec3.create parameters.scale_x parameters.scale_y parameters.scale_z)
-          ~shear:(Vec3.create parameters.shear_xy parameters.shear_xz parameters.shear_yz)
+          ~translate:(Rays_math.Vec3.create parameters.translate_x parameters.translate_y parameters.translate_z)
+          ~rotate:(Rays_math.Vec3.create parameters.rotate_x parameters.rotate_y parameters.rotate_z)
+          ~scale:(Rays_math.Vec3.create parameters.scale_x parameters.scale_y parameters.scale_z)
+          ~shear:(Rays_math.Vec3.create parameters.shear_xy parameters.shear_xz parameters.shear_yz)
           ~uniform_scale:parameters.uniform_scale
-          ~pivot:(Vec3.create parameters.pivot_x parameters.pivot_y parameters.pivot_z)
-          ~pivot_rotation:(Vec3.create parameters.pivot_rotation_x parameters.pivot_rotation_y parameters.pivot_rotation_z)
+          ~pivot:(Rays_math.Vec3.create parameters.pivot_x parameters.pivot_y parameters.pivot_z)
+          ~pivot_rotation:(Rays_math.Vec3.create parameters.pivot_rotation_x parameters.pivot_rotation_y parameters.pivot_rotation_z)
           ~invert:parameters.invert () |> function
             | Ok matrix -> matrix
             | Error error -> invalid_arg ("sop/transform: " ^ Rdk.Error.to_string error)
     in
     for index = 0 to 15 do
-      if not (Float.is_finite (Mat4.get matrix ~row:(index / 4) ~column:(index mod 4))) then
+      if not (Float.is_finite (Rays_math.Mat4.get matrix ~row:(index / 4) ~column:(index mod 4))) then
         invalid_arg "sop/transform: matrix must be finite"
     done]
 
@@ -4198,15 +4197,15 @@ module Transform = struct
     let group = parameters.group in
     let order = parameters.order in
     let rotation_order = parameters.rotation_order in
-    let translate = Vec3.create parameters.translate_x parameters.translate_y parameters.translate_z in
-    let rotate = Vec3.create parameters.rotate_x parameters.rotate_y parameters.rotate_z in
-    let scale = Vec3.create parameters.scale_x parameters.scale_y parameters.scale_z in
+    let translate = Rays_math.Vec3.create parameters.translate_x parameters.translate_y parameters.translate_z in
+    let rotate = Rays_math.Vec3.create parameters.rotate_x parameters.rotate_y parameters.rotate_z in
+    let scale = Rays_math.Vec3.create parameters.scale_x parameters.scale_y parameters.scale_z in
     let shear_xy = parameters.shear_xy in
     let shear_xz = parameters.shear_xz in
     let shear_yz = parameters.shear_yz in
     let uniform_scale = parameters.uniform_scale in
-    let pivot = Vec3.create parameters.pivot_x parameters.pivot_y parameters.pivot_z in
-    let pivot_rotation = Vec3.create parameters.pivot_rotation_x parameters.pivot_rotation_y parameters.pivot_rotation_z in
+    let pivot = Rays_math.Vec3.create parameters.pivot_x parameters.pivot_y parameters.pivot_z in
+    let pivot_rotation = Rays_math.Vec3.create parameters.pivot_rotation_x parameters.pivot_rotation_y parameters.pivot_rotation_z in
     let invert = parameters.invert in
     let m00 = parameters.m00 in
     let m01 = parameters.m01 in
@@ -4227,9 +4226,9 @@ module Transform = struct
     let preserve_normal_length = parameters.preserve_normal_length in
     let recompute_normals = parameters.recompute_normals in
     let matrix = match mode with
-      | Transform_matrix -> Mat4.of_rows (m00,m01,m02,m03) (m10,m11,m12,m13) (m20,m21,m22,m23) (m30,m31,m32,m33)
+      | Transform_matrix -> Rays_math.Mat4.of_rows (m00,m01,m02,m03) (m10,m11,m12,m13) (m20,m21,m22,m23) (m30,m31,m32,m33)
       | Transform_trs -> Rdk.Transform_ops.compose_transform ~order ~rotation_order ~translate ~rotate ~scale
-          ~shear:(Vec3.create shear_xy shear_xz shear_yz) ~uniform_scale ~pivot ~pivot_rotation ~invert () |> Result.get_ok in
+          ~shear:(Rays_math.Vec3.create shear_xy shear_xz shear_yz) ~uniform_scale ~pivot ~pivot_rotation ~invert () |> Result.get_ok in
     let selection = optional_element_group group_owner group in
     Node.Private.make_geometry ?label ~operation:"transform" ~version:2
       ~parameters:""

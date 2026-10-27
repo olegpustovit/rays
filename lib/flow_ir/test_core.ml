@@ -65,10 +65,13 @@ let () =
   return %3
 |}
 
-(* A region prints its register program; Packed rebuilds the same program from it. *)
+(* Packed is the validated Core.Region representation itself. *)
 let () =
   let packed = Test_program.compile "(map (fn [x] (+ (* x 2) t)) (array/range 4))" in
-  let region = Flow_ir.Packed.to_region packed in
+  let region = packed in
+  assert (Atomic.get region.dependent = None);
+  assert (Array.length (C.Region.dependent_flags region) = Array.length region.code);
+  assert (Option.is_some (Atomic.get region.dependent));
   check {(program [||] [||] [] [||]) with regions = [|region|]}
 {|core
   region[0] zip collect count=4 widths=[1] output=[4] uniforms=0 skip=[] stages=1
@@ -79,6 +82,4 @@ let () =
     r4 = +(r2 r3)
   return 
 |};
-  match Flow_ir.Packed.of_region region with
-  | Ok again -> assert (Flow_ir.Packed.Private.view again = Flow_ir.Packed.Private.view packed)
-  | Error _ -> assert false
+  assert (region == packed)

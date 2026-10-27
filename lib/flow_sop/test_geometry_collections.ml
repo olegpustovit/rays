@@ -1,13 +1,13 @@
 open Rdk
 open Rdk_test_support
 let ok=function Ok value->value|Error message->failwith message
-let flow=function Ok value->value|Error d->failwith(Flow.Diagnostic.to_string d)
+let flow=function Ok value->value|Error d->failwith(Diagnostic.to_string d)
 let source x=Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn
   ~x:[|x|] ~y:[|-0.|] ~z:[|Float.next_after 0. 1.|]) ~topology:(Topology.empty ~point_count:1)()|>ok
 let factory counter key geometry=Sop.Edit_graph.factory ~key ~label:key ~category:["Test"] ~arity:0(fun _->
   Sop.Node.Private.make_geometry ~operation:key ~version:1 ~parameters:(geometry_bytes geometry)
     ~cook_mode:Sop.Node.Generator ~dependencies:Sop.Context.Dependencies.static ~inputs:[||]
-    (fun ~node_id:_ _ _->incr counter;Ok Sop.Node.Private.{geometry;diagnostics=[];instances=None}))
+    (fun ~node_id:_ _ _->incr counter;Ok Sop.Node.Private.{geometry;instances=None}))
 let ()=
   let count=5001 in
   let a=source 1. and b=source 2. and a_calls=ref 0 and b_calls=ref 0 in
@@ -33,9 +33,9 @@ let ()=
       let session=Sop.Session.create ~max_entries:64 ~max_payload_bytes:8_000_000|>ok in
       Fun.protect ~finally:(fun()->Sop.Session.close session)(fun()->
         List.iter(fun time->Sop.Session.clear session;a_calls:=0;b_calls:=0;
-          let context=Sop.Context.create ~domains ~grain ~time ~input:(Frame_input.at_time time)()|>ok in
-          let output=Sop.Session.cook session ~context node|>Result.map_error Sop.Diagnostic.error_to_string|>ok in
-          let actual=Sop.Payload.geometry output.payload|>Result.map_error Sop.Diagnostic.error_to_string|>ok in
+          let context=Sop.Context.create ~domains ~grain ~time ~input:(Input.at_time time)()|>ok in
+          let output=Sop.Session.cook session ~context node|>Result.map_error Diagnostic.error_to_string|>ok in
+          let actual=Sop.Payload.geometry output.payload|>Result.map_error Diagnostic.error_to_string|>ok in
           check(geometry_bytes actual=geometry_bytes expected)
             (case^": live 5001 geometry collection truncated or reordered native payload blocks");
           check(!a_calls=1 && !b_calls=1)"repeated geometry list handles recooked their child";
@@ -47,7 +47,7 @@ let ()=
     let _,diagnostics=Flow_sop.Catalog.check_workspace ~sources:(Flow_sop.Catalog.sources ()|>flow) ~ops:Flow_sop.Operators.all
       (Flow_sop.Catalog.of_factories ~nodes:[] ~version:Flow_sop.Manifest.version factories|>flow)
       (Flow.Syntax.parse text|>flow)in
-    check(List.exists(fun(d:Flow.Diagnostic.t)->d.code=code)diagnostics)
+    check(List.exists(fun(d:Diagnostic.t)->d.code=code)diagnostics)
       "Geometry collection capacity relaxed the fixed-network time rules")
     ["(sop/merge (map (fn [(geo : geometry)] (if (< t 0.5) geo nil)) parts))","E_TIME_BRANCH";
      "(sop/merge (filter (fn [(geo : geometry)] (< t 0.5)) parts))","E_TIME_COUNT"];

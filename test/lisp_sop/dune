@@ -3,7 +3,7 @@
 (library
  (name lisp_sop)
  (modules lisp_sop)
- (libraries flow flow_sop editor_document sop_catalog sop rdk rays_math))
+ (libraries flow flow_sop sop_catalog sop rdk rays_math))
 
 (test
  (name test_workspace_node)

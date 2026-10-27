@@ -24,21 +24,23 @@ let () =
   let fail text = prerr_endline text; exit 1 in
   let _, doc = Web_export.load file in
   let lowered = match doc with
-    | Error (d :: _) -> fail (Flow.Diagnostic.to_string d) | Error [] -> fail "does not check"
-    | Ok doc -> (match Web_export.lower doc with Ok l -> l | Error d -> fail (Flow.Diagnostic.to_string d)) in
+    | Error (d :: _) -> fail (Diagnostic.to_string d) | Error [] -> fail "does not check"
+    | Ok doc -> (match Web_export.lower doc with Ok l -> l | Error d -> fail (Diagnostic.to_string d)) in
   (* RAYS_SHOT_FAST=1: fast precision's native path, a drawing's resident folds on the Metal host, the
      oracle of the browser's resident folds (both f32 on the device; exact CPU elsewhere) *)
   let fast = Sys.getenv_opt "RAYS_SHOT_FAST" = Some "1" in
   let prepared = C.prepare ~remember_loops:fast lowered.program and state = E.create_state () and buffers = C.Buffers.create () in
   let images = Hashtbl.create 8 in
-  let get = function Ok v -> v | Error d -> fail (Flow.Diagnostic.to_string d) in
-  let gpu = if gpu_images || fast then Some (match Rays_execution.acquire_gpu () with Ok g -> g
-    | Error e -> fail (Format.asprintf "%a" Rays_execution.pp_error e)) else None in
-  let pipelines = Option.map (fun g -> Flow_gpu.Pipelines.create ~clock:Unix.gettimeofday (Rays_execution.gpu_device g)) gpu in
+  let get = function Ok v -> v | Error d -> fail (Diagnostic.to_string d) in
+  let gpu = if gpu_images || fast then Some (match Renderer.acquire_gpu () with Ok g -> g
+    | Error e -> fail (Format.asprintf "%a" Renderer.pp_error e)) else None in
+  let pipelines = Option.map (fun g -> Flow_gpu.Pipelines.create ~clock:Unix.gettimeofday (Renderer.gpu_device g)) gpu in
   let host = if fast then Option.map (fun g -> Flow_gpu.Host.create ~clock:Unix.gettimeofday g) gpu else None in
-  if fast then Domain.DLS.set Flow_ir.Gpu.fast true;
-  let resident () = Option.map Flow_gpu.Host.resident host in
-  let current = ref (Frame_input.at_time 0.) in
+  let gpu_config=match host with
+    |None->Flow_ir.Gpu.default
+    |Some host->{Flow_ir.Gpu.default with backend=Some(Flow_gpu.Host.backend host);fast=true} in
+  let resident () = Option.map (Flow_gpu.Host.resident ~fast:true) host in
+  let current = ref (Input.at_time 0.) in
   let rec resolve id = match Hashtbl.find_opt images id with Some image -> image | None ->
     let live = !current in
     let node = lowered.plan.nodes.(id - 1) in
@@ -56,21 +58,27 @@ let () =
         message (Rays.Image.load path)
     | "image/render" ->
         let width = int "width" (fst live.size) and height = int "height" (snd live.size) in
-        let drawing = get (Rays_editor.Drawing.prepare lowered.plan (List.assoc "drawing" args)) in
-        let scene = get (Rays_editor.Drawing.render_prepared ~state
-          ~image:(function E.Deferred (_, child) -> Ok (resolve (child + 1)) | _ -> Error (Flow.Diagnostic.error ~code:"E_IMAGE" "Expected image."))
+        let drawing = get (Flow_native.Drawing.prepare ~gpu:gpu_config lowered.plan (List.assoc "drawing" args)) in
+        let scene = get (Flow_native.Drawing.render_prepared ~state
+          ~image:(function E.Deferred (_, child) -> Ok (resolve (child + 1)) | _ -> Error (Diagnostic.error ~code:"E_IMAGE" "Expected image."))
           drawing ~live ~size:(width,height)) in
         let canvas = Rays.Canvas.create_exn ~width ~height in
-        Fun.protect ~finally:(fun () -> Rays.Canvas.destroy canvas) (fun () ->
-          Rays.Canvas.render canvas scene; message (Rays.Canvas.to_image canvas))
+        Fun.protect ~finally:(fun () -> ignore(Rays.Canvas.destroy canvas)) (fun () ->
+          message (Result.bind (Rays.Canvas.render canvas scene) (fun () ->
+            Rays.Canvas.to_image canvas)))
     | "image/noise" ->
-        let width = int "width" 256 and height = int "height" 256 in
-        let frequency = match List.assoc_opt "frequency" args, List.assoc_opt "freq" args with
-          | Some (E.Float f), _ | _, Some (E.Float f) -> f | _ -> 0.02 in
         let context = message (Sop.Context.create ~input:live ()) in
-        let source = Sop.Image_nodes.noise ~width ~height ~frequency ~seed:(int "seed" 0) () in
-        let cooked = match Sop.Node.Private.cook source context [||] with Ok v -> v | Error d -> fail d.Sop.Diagnostic.message in
-        let pixels = match Sop.Payload.image cooked.payload with Ok v -> v | Error d -> fail d.Sop.Diagnostic.message in
+        let factory = Sop.Image_nodes.noise_factory in
+        let source = Sop.Edit_graph.instantiate factory [] |> message in
+        let changes = Sop.Edit_graph.factory_fields factory |> List.filter_map (fun (field : Param.field_view) ->
+          Option.map (fun value -> field.name, match field.kind with
+            | Integer_view _ -> Param.Int_value (int field.name 0)
+            | Floating_view _ -> Param.Float_value (match value with E.Float f -> f | E.Int n -> float n | _ -> assert false)
+            | _ -> assert false) (List.assoc_opt field.name args)) in
+        let source, _ = Sop.Node.apply_parameters source changes |> message in
+        let cooked = match Sop.Node.Private.cook source context [||] with Ok v -> v | Error d -> fail d.Diagnostic.message in
+        let pixels = match Sop.Payload.image cooked.payload with Ok v -> v | Error d -> fail d.Diagnostic.message in
+        let width = Sop.Image.width pixels and height = Sop.Image.height pixels in
         let rgba = match Sop.Image.Private.rgba8 pixels with Some b -> b | None ->
           let floats = Sop.Image.Private.storage pixels in
           Bytes.init (Array.length floats) (fun i -> let q = floats.(i) *. 255. in
@@ -83,9 +91,8 @@ let () =
     let kernel = get (Flow_sop.Image_kernel.prepare ~identity:0 ~width ~height ~fn ~sources:[] []) in
     let rgba = match gpu, pipelines with
       | Some gpu, Some pipelines ->
-          let ir = Flow_ir.Executor.graph (Flow_sop.Image_kernel.program kernel) in
-          let packed = match ir.nodes.(ir.roots.(0)).kind with
-            | Flow_ir.Kernel {body=Packed_map p; _} -> p | _ -> fail "Image has no packed kernel." in
+          let packed = match Flow_ir.Executor.packed_region (Flow_sop.Image_kernel.program kernel) with
+            | Some packed -> packed | None -> fail "Image has no packed kernel." in
           let run = Flow_gpu.Run.create gpu pipelines (get (Flow_gpu.Emit.kernel packed)) in
           let sink = get (Flow_gpu.Image_sink.create gpu) in
           Fun.protect ~finally:(fun () -> Flow_gpu.Image_sink.close sink; Flow_gpu.Run.close run) (fun () ->
@@ -97,34 +104,34 @@ let () =
       | _ ->
           let context = match Sop.Context.create ~input:live () with Ok c -> c | Error e -> fail e in
           let cooked = match Sop.Node.Private.cook (Flow_sop.Image_kernel.node ~state kernel) context [||] with
-            | Ok c -> c | Error d -> fail d.Sop.Diagnostic.message in
-          let pixels = match Sop.Payload.image cooked.payload with Ok p -> p | Error d -> fail d.Sop.Diagnostic.message in
+            | Ok c -> c | Error d -> fail d.Diagnostic.message in
+          let pixels = match Sop.Payload.image cooked.payload with Ok p -> p | Error d -> fail d.Diagnostic.message in
           Option.get (Sop.Image.Private.rgba8 pixels) in
     message (Rays.Image.upload_rgba ~width ~height ~rgba ())
     | kind -> fail ("Unknown image: " ^ kind) in
     Hashtbl.add images id image; image in
   let image = function E.Deferred (_, id) -> ignore (resolve (id + 1)); Ok (id + 1)
-    | _ -> Error (Flow.Diagnostic.error ~code:"E_IMAGE" "Expected an image plan node.") in
+    | _ -> Error (Diagnostic.error ~code:"E_IMAGE" "Expected an image plan node.") in
   let last = ref None in
   for i = 1 to frames do
-    Hashtbl.iter (fun _ image -> Rays.Image.destroy image) images; Hashtbl.clear images;
-    let live = { (Frame_input.at_time (float i *. dt)) with dt; frame = i; tick = i; size; pointer = pointer_at i } in
+    Hashtbl.iter (fun _ image -> ignore(Rays.Image.destroy image)) images; Hashtbl.clear images;
+    let live = { (Input.at_time (float i *. dt)) with dt; frame = i; tick = i; size; pointer = pointer_at i } in
     current := live; C.Buffers.clear buffers;
-    let drawn = ref (Error (Flow.Diagnostic.error ~code:"E_CORE" "The draw program did not run.")) in
+    let drawn = ref (Error (Diagnostic.error ~code:"E_CORE" "The draw program did not run.")) in
     (match lowered.root with
      | None -> drawn := C.draw ?resident:(resident ()) ~image prepared ~live ~size ~buffers
      | Some root ->
-         let execute r live = drawn := C.draw ~root:r ?resident:(resident ()) ~image prepared ~live ~size ~buffers; Some (Ok (E.Int 0)) in
-         ignore (E.Private.force_with_executor ~state ~execute (E.Residual root) ~live));
+         ignore (Result.get_ok (E.Residual.bind_live ~state root ~live));
+         drawn := C.draw ~root ?resident:(resident ()) ~image prepared ~live ~size ~buffers);
     last := Some !drawn
   done;
-  let marks = match !last with Some (Ok m) -> m | Some (Error d) -> fail (Flow.Diagnostic.to_string d) | None -> fail "no frames" in
-  let scene = match Marks_scene.scene ~buffers ~image:resolve marks with Ok s -> s | Error d -> fail (Flow.Diagnostic.to_string d) in
+  let marks = match !last with Some (Ok m) -> m | Some (Error d) -> fail (Diagnostic.to_string d) | None -> fail "no frames" in
+  let scene = match Flow_native.Marks_scene.scene ~buffers ~image:resolve marks with Ok s -> s | Error d -> fail (Diagnostic.to_string d) in
   let canvas = Rays.Canvas.create_exn ~width ~height in
-  Rays.Canvas.render canvas scene;
+  (match Rays.Canvas.render canvas scene with Ok () -> () | Error message -> fail message);
   (match Rays.Canvas.save_png canvas output with Ok () -> () | Error e -> fail e);
-  Rays.Canvas.destroy canvas;
-  Hashtbl.iter (fun _ image -> Rays.Image.destroy image) images;
+  ignore(Rays.Canvas.destroy canvas);
+  Hashtbl.iter (fun _ image -> ignore(Rays.Image.destroy image)) images;
   Option.iter Flow_gpu.Pipelines.close pipelines;
   Option.iter Flow_gpu.Host.close host;
-  Option.iter Rays_execution.release_gpu gpu
+  Option.iter Renderer.release_gpu gpu

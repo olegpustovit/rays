@@ -31,30 +31,16 @@ external raw_open_font : string -> float -> (nativeint, string) result
 external raw_close_font : nativeint -> unit = "caml_sdl3_ttf_close_font"
 external raw_font_metrics : nativeint -> int * int * int * int
   = "caml_sdl3_ttf_font_metrics"
-external raw_font_family_name : nativeint -> string option
-  = "caml_sdl3_ttf_font_family_name"
-external raw_font_style_name : nativeint -> string option
-  = "caml_sdl3_ttf_font_style_name"
 external raw_set_font_size_dpi :
   nativeint -> float -> int -> int -> (unit, string) result
   = "caml_sdl3_ttf_set_font_size_dpi"
-external raw_set_font_style : nativeint -> int -> unit
-  = "caml_sdl3_ttf_set_font_style"
-external raw_set_font_outline : nativeint -> int -> (unit, string) result
-  = "caml_sdl3_ttf_set_font_outline"
 external raw_set_font_hinting : nativeint -> int -> unit
   = "caml_sdl3_ttf_set_font_hinting"
-external raw_set_font_kerning : nativeint -> bool -> unit
-  = "caml_sdl3_ttf_set_font_kerning"
 external raw_set_font_wrap_alignment : nativeint -> int -> unit
   = "caml_sdl3_ttf_set_font_wrap_alignment"
 external raw_glyph_metrics : nativeint -> int ->
   ((int * int * int * int * int), string) result
   = "caml_sdl3_ttf_glyph_metrics"
-external raw_size_text : nativeint -> string -> ((int * int), string) result
-  = "caml_sdl3_ttf_size_text"
-external raw_size_text_wrapped : nativeint -> string -> int ->
-  ((int * int), string) result = "caml_sdl3_ttf_size_text_wrapped"
 external raw_render_blended :
   nativeint -> string -> int -> int -> int -> int -> (decoded, string) result
   = "caml_sdl3_ttf_render_blended_bytecode" "caml_sdl3_ttf_render_blended"
@@ -157,7 +143,6 @@ module Font = struct
     line_skip : int;
   }
 
-  type style = Normal | Bold | Italic | Underline | Strikethrough
   type alignment = Left | Center | Right
   type hinting = Normal_hinting | Light_hinting | Mono_hinting
     | None_hinting | Light_subpixel_hinting
@@ -274,12 +259,6 @@ module Font = struct
     let height, ascent, descent, line_skip = raw_font_metrics raw in
     Ok { height; ascent; descent; line_skip })
 
-  let family_name value = live "SDL3_ttf.Font.family_name" value (fun raw ->
-    Ok (raw_font_family_name raw))
-
-  let style_name value = live "SDL3_ttf.Font.style_name" value (fun raw ->
-    Ok (raw_font_style_name raw))
-
   let set_size_dpi value ~size ~horizontal ~vertical =
     let operation = "SDL3_ttf.Font.set_size_dpi" in
     if not (valid_size size) then
@@ -294,21 +273,6 @@ module Font = struct
           ();
           Ok ())
 
-  let style_bit = function
-    | Normal -> 0 | Bold -> 1 | Italic -> 2 | Underline -> 4
-    | Strikethrough -> 8
-
-  let set_style value styles =
-    let operation = "SDL3_ttf.Font.set_style" in
-    let bits = List.fold_left (fun bits style -> bits lor style_bit style) 0 styles in
-    mutate value operation (fun raw -> raw_set_font_style raw bits; Ok ())
-
-  let set_outline value outline =
-    let operation = "SDL3_ttf.Font.set_outline" in
-    if outline < 0 then error operation Invalid_argument "outline must be non-negative"
-    else mutate value operation (fun raw ->
-      ttf_result operation (raw_set_font_outline raw outline))
-
   let hinting_code = function
     | Normal_hinting -> 0 | Light_hinting -> 1 | Mono_hinting -> 2
     | None_hinting -> 3 | Light_subpixel_hinting -> 4
@@ -317,10 +281,6 @@ module Font = struct
     let operation = "SDL3_ttf.Font.set_hinting" in
     mutate value operation (fun raw ->
       raw_set_font_hinting raw (hinting_code hinting); Ok ())
-
-  let set_kerning value enabled =
-    let operation = "SDL3_ttf.Font.set_kerning" in
-    mutate value operation (fun raw -> raw_set_font_kerning raw enabled; Ok ())
 
   let set_wrap_alignment value alignment =
     let code = match alignment with Left -> 0 | Center -> 1 | Right -> 2 in
@@ -339,22 +299,6 @@ module Font = struct
       | Error _ as failure -> failure
       | Ok (min_x, max_x, min_y, max_y, advance) ->
           Ok { min_x; max_x; min_y; max_y; advance })
-
-  let size_text value text =
-    let operation = "SDL3_ttf.Font.size_text" in
-    match validate_text operation text with
-    | Error _ as failure -> failure
-    | Ok () when text = "" -> live operation value (fun _ -> Ok (0, 0))
-    | Ok () -> live operation value (fun raw -> ttf_result operation (raw_size_text raw text))
-
-  let size_text_wrapped value ~wrap_width text =
-    let operation = "SDL3_ttf.Font.size_text_wrapped" in
-    if wrap_width < 0 then error operation Invalid_argument "wrap width must be non-negative"
-    else match validate_text operation text with
-    | Error _ as failure -> failure
-    | Ok () when text = "" -> live operation value (fun _ -> Ok (0, 0))
-    | Ok () -> live operation value (fun raw ->
-        ttf_result operation (raw_size_text_wrapped raw text wrap_width))
 
   let valid_channel value = value >= 0 && value <= 255
 

@@ -27,4 +27,3 @@ description: Add a GPU feature to OGPU in rays, capability-gated and implemented
    the feature in the OGPU section of `specification/backend.md`.
 6. Run `dune build @lib/ogpu/runtest @lib/ogpu_metal/runtest
    @test/ogpu_conformance/runtest`, then `@all` and `git diff --check`.
-   A changed public `.mli` shows as an API manifest diff: `promote-manifests`.

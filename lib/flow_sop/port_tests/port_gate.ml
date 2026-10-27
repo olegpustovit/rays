@@ -1,6 +1,6 @@
 (* HOW TO PORT A SOP NODE (the whole verification is this directory).
    Porting a node adds exactly two files and edits no shared file:
-     lib/flow_sop/nodes/<key>.pending   the draft defnode (rename to <key>.rays to accept)
+     lib/flow_sop/nodes/<key>.rays   the defnode
      lib/flow_sop/port_tests/port_<key>.ml   one registration, see port_points.ml
    The dune file picks up every .ml here; the toplevel `Port_gate.register` runs at start.
 
@@ -17,15 +17,15 @@
 
    Run (repo root, or `dune build --root .` in a worktree):
      dune build ./lib/flow_sop/port_tests/main.exe        then
-     _build/default/lib/flow_sop/port_tests/main.exe KEY            quick gate, accepted or pending:
+     _build/default/lib/flow_sop/port_tests/main.exe KEY            quick gate:
                                                                     all cases on the last fixture,
                                                                     defaults on the others
      _build/default/lib/flow_sop/port_tests/main.exe KEY --full     every case on every fixture
      _build/default/lib/flow_sop/port_tests/main.exe KEY --bench    timing, fails above 2.0x
      _build/default/lib/flow_sop/port_tests/main.exe                every accepted node
+     _build/default/lib/flow_sop/port_tests/main.exe --capture-goldens DIR
+                                                                    Lisp cases plus portable input files
      dune build @lib/flow_sop/port_tests/ports                      same, as a dune alias
-   A pending node is checked with the catalog minus the native KEY plus <key>.pending.
-
    Checks, for each fixture x case:
      oracle        Lisp vs native cook: integer data/groups/names exactly, floats within
                    ulps (Rdk_test_support.close_geometry); a native error must be a Lisp
@@ -112,8 +112,8 @@ let standard_inputs = List.map (fun (label, g) -> label, [g]) [
   "mixed", fixture_attributes (fixture_groups (polygon_polyline ()))]
 
 (* ---- building nodes ---- *)
-let checked = function Ok v -> v | Error d -> fail (Flow.Diagnostic.to_string d)
-let errors ds = List.filter (fun (d : Flow.Diagnostic.t) -> d.severity = Error) ds
+let checked = function Ok v -> v | Error d -> fail (Diagnostic.to_string d)
+let errors ds = List.filter (fun (d : Diagnostic.t) -> d.severity = Diagnostic.Error_severity) ds
 let render = function
   | P.Bool_value b -> string_of_bool b | Int_value n -> string_of_int n
   | Float_value f -> Flow.Lisp.float f
@@ -123,21 +123,17 @@ let snapshots geometries = List.map Lisp_sop.snapshot geometries
 (* Everything that depends only on the node and one input fixture. *)
 type ctx = { node : t; sources : Flow.Syntax.t list; factories : Sop.Edit_graph.factory list;
              catalog : Flow.Check.catalog; head : string; native_inputs : N.t list;
-             ops : Flow.Op.t list }
+             ops : Flow.Op.t list; geometry_count : int; image_count : int }
 let key_of f = Sop.Edit_graph.factory_key f
 let image_node image = Sop.Node.Private.make ~operation:"image/external" ~version:1
   ~parameters:(string_of_int (Sop.Image.data_id image)) ~cook_mode:Sop.Node.Generator
   ~dependencies:Sop.Context.Dependencies.static ~inputs:[||] (fun ~node_id:_ _ _ ->
-    Ok Sop.Node.Private.{payload = Sop.Payload.Image image; diagnostics = []; instances = None})
-let context ?(label = "") ~dir node geometries =
-  let accepted = Sys.file_exists (Filename.concat dir (node.key ^ ".rays")) in
+    Ok Sop.Node.Private.{payload = Sop.Payload.Image image; instances = None})
+let context ?(label = "") ~dir:_ node geometries =
   let others = List.filter (fun f -> key_of f <> node.key) Sop_catalog.Editor.factories in
   let sources = Flow_sop.Catalog.sources () |> checked in
-  let sources =
-    if accepted then (check (List.length others = List.length Sop_catalog.Editor.factories)
-      (node.key ^ ": accepted but still registered in Sop_catalog.Editor.factories"); sources)
-    else sources @ (In_channel.with_open_text (Filename.concat dir (node.key ^ ".pending"))
-      In_channel.input_all |> Flow.Syntax.parse |> checked) in
+  check (List.length others = List.length Sop_catalog.Editor.factories)
+    (node.key ^ ": Lisp port must not retain a native catalog factory");
   let images = match List.assoc_opt node.key !image_registry with Some f -> f label | None -> [] in
   let natives = snapshots geometries @ List.map image_node images in
   let inputs = List.mapi (fun i n -> Sop.Edit_graph.factory ~key:(Printf.sprintf "port_in%d" i)
@@ -154,6 +150,7 @@ let context ?(label = "") ~dir node geometries =
   let factories = inputs @ image_factories @ others in
   { node; sources; factories; native_inputs = natives; ops = image_ops @ Flow_sop.Operators.all;
     catalog = Flow_sop.Catalog.of_factories ~nodes:[] ~version:Flow_sop.Manifest.version factories |> checked;
+    geometry_count = List.length geometries; image_count = List.length images;
     head = String.concat " " (List.mapi (fun i _ -> Printf.sprintf "(sop/port_in%d)" i) (snapshots geometries)
       @ List.mapi (fun i _ -> Printf.sprintf "(image/port_img%d)" i) images) }
 
@@ -182,26 +179,140 @@ let keywords ctx changes =
   @ List.map (fun group -> Printf.sprintf ":%s [%s]" group (String.concat " " (List.map (fun i ->
       render (value (List.find (fun (f : P.field_view) -> f.vec3 = Some (group, i)) fields))) [0; 1; 2]))) groups
 
-(* Ok (fun ~reference -> node, lowered factories) or the checker/lowering refusal. *)
-let lisp ctx changes =
+let lisp_source ctx changes =
   let words = String.concat " " (keywords ctx changes) in
-  let text = Printf.sprintf "(workspace port (graph g :context sop (sop/%s %s %s)))" ctx.node.key ctx.head words in
-  match Flow.Syntax.parse text with
-  | Error d -> Error (Flow.Diagnostic.to_string d)
-  | Ok forms -> match Flow_sop.Catalog.check_workspace ~sources:ctx.sources ~ops:ctx.ops ctx.catalog forms with
+  Printf.sprintf "(workspace port (graph g :context sop (sop/%s %s %s)))" ctx.node.key ctx.head words
+
+(* Check and lower once; also return the reference-toggle builder used by parity tests. *)
+let lisp_compiled ?(phase = fun _ _ -> ()) ?(initial_reference = false) ctx changes =
+  let timed name f =
+    let started = Unix.gettimeofday () in
+    let result = f () in
+    phase name (Unix.gettimeofday () -. started);
+    result in
+  let text = lisp_source ctx changes in
+  match timed "parse" (fun () -> Flow.Syntax.parse text) with
+  | Error d -> Error (Diagnostic.to_string d)
+  | Ok forms -> match timed "check" (fun () -> Flow_sop.Catalog.check_workspace ~sources:ctx.sources ~ops:ctx.ops ctx.catalog forms) with
     | Some w, ds when errors ds = [] ->
-        let build reference = match Flow_sop.Lower.of_checked ~provenance_tags:false ~reference ~factories:ctx.factories w with
-          | Error d -> Error (Flow.Diagnostic.to_string d)
+      let build reference = match timed "lower" (fun () ->
+        Flow_sop.Lower.of_checked ~provenance_tags:false ~reference ~factories:ctx.factories w) with
+          | Error d -> Error (Diagnostic.to_string d)
           | Ok lowered -> let g = List.hd lowered.graphs in
               Result.map (fun n -> n, lowered.factories)
-                (Sop.Edit_graph.compile_node g.network.geometry ~node_id:(Option.get g.root)) in
-        (* Lowering runs :validate: build once now so a construction refusal is seen. *)
-        (match (try build false with Invalid_argument m | Failure m -> Error m) with
-         | Error m -> Error m | Ok _ -> Ok build)
-    | _, ds -> Error (String.concat "\n" (List.map Flow.Diagnostic.to_string (match errors ds with [] -> ds | e -> e)))
+                (timed "compile_node" (fun () ->
+                   Sop.Edit_graph.compile_node g.network.geometry ~node_id:(Option.get g.root))) in
+        (* Build the selected tier once so a construction refusal is seen. *)
+        (match (try build initial_reference with Invalid_argument m | Failure m -> Error m) with
+         | Error m -> Error m | Ok node -> Ok (node, build))
+    | _, ds -> Error (String.concat "\n" (List.map Diagnostic.to_string (match errors ds with [] -> ds | e -> e)))
+
+let lisp ctx changes = Result.map snd (lisp_compiled ctx changes)
+
+let symbol value = Flow.Syntax.make (Flow.Syntax.Sym value)
+let string value = Flow.Syntax.make (Flow.Syntax.Str value)
+let form values = Flow.Syntax.make (Flow.Syntax.List values)
+let tagged name values = form (symbol name :: values)
+let write_once path contents =
+  if Sys.file_exists path then
+    check (In_channel.with_open_bin path In_channel.input_all = contents)
+      ("frozen fixture changed without review: " ^ path)
+  else Out_channel.with_open_bin path (fun channel -> output_string channel contents)
+
+let frozen_fixture out_dir kind value encode decode equal =
+  let contents = encode value in
+  let rebuilt = decode contents in
+  check (equal value rebuilt) ("fixture serializer failed round-trip for " ^ kind);
+  let digest = Digest.to_hex (Digest.string contents) in
+  let relative = "inputs/" ^ kind ^ "-" ^ digest ^ ".sexp" in
+  let inputs_dir = Filename.concat out_dir "inputs" in
+  if not (Sys.file_exists inputs_dir) then Unix.mkdir inputs_dir 0o755;
+  write_once (Filename.concat out_dir relative) contents;
+  relative
+
+type fixture_cache = {
+  mutable geometries : (Geometry.t * string) list;
+  mutable geometry_count : int;
+  mutable images : (Sop.Image.t * string) list;
+  mutable image_count : int;
+}
+let fixture_cache_capacity = 256
+let create_fixture_cache () = { geometries = []; geometry_count = 0; images = []; image_count = 0 }
+
+let frozen_geometry cache out_dir geometry =
+  match List.find_opt (fun (cached, _) -> cached == geometry) cache.geometries with
+  | Some (_, relative) -> relative
+  | None ->
+      let relative = frozen_fixture out_dir "geometry" geometry Fixture_codec.encode
+        Fixture_codec.decode
+        (fun left right -> geometry_bytes left = geometry_bytes right) in
+      if cache.geometry_count < fixture_cache_capacity then begin
+        cache.geometries <- (geometry, relative) :: cache.geometries;
+        cache.geometry_count <- cache.geometry_count + 1
+      end;
+      relative
+
+let frozen_image cache out_dir image =
+  match List.find_opt (fun (cached, _) -> cached == image) cache.images with
+  | Some (_, relative) -> relative
+  | None ->
+      let relative = frozen_fixture out_dir "image" image Fixture_codec.encode_image
+        Fixture_codec.decode_image
+        (fun left right -> Sop.Image.width left = Sop.Image.width right
+          && Sop.Image.height left = Sop.Image.height right
+          && Option.map Bytes.to_string (Sop.Image.Private.rgba8 left)
+             = Option.map Bytes.to_string (Sop.Image.Private.rgba8 right)
+          && Array.map Int64.bits_of_float (Sop.Image.Private.storage left)
+             = Array.map Int64.bits_of_float (Sop.Image.Private.storage right)) in
+      if cache.image_count < fixture_cache_capacity then begin
+        cache.images <- (image, relative) :: cache.images;
+        cache.image_count <- cache.image_count + 1
+      end;
+      relative
+
+let stable_error message =
+  let bracketed = match String.index_opt message '[' with
+    | Some bracket -> Option.map (fun finish -> bracket + 1, finish)
+        (String.index_from_opt message (bracket + 1) ']')
+    | None -> None in
+  let code, body = match bracketed with
+    | Some (start, finish) ->
+      String.sub message start (finish - start),
+      String.trim (String.sub message (finish + 1) (String.length message - finish - 1))
+    | None ->
+        let code_end = ref 0 in
+        while !code_end < String.length message
+            && (match message.[!code_end] with 'A'..'Z' | '0'..'9' | '_' -> true | _ -> false) do
+          incr code_end
+        done;
+        if !code_end >= 3 && String.starts_with ~prefix:"E_" message then begin
+          let rest = String.trim (String.sub message !code_end (String.length message - !code_end)) in
+          if String.starts_with ~prefix:"at " rest then
+            let line = match String.index_opt rest ':' with
+              | None -> None | Some first -> String.index_from_opt rest (first + 1) ':' in
+            (match line with
+             | Some colon -> String.sub message 0 !code_end,
+                 String.trim (String.sub rest (colon + 1) (String.length rest - colon - 1))
+             | None -> String.sub message 0 !code_end, rest)
+          else String.sub message 0 !code_end,
+            (if String.starts_with ~prefix:":" rest then String.trim (String.sub rest 1 (String.length rest - 1)) else rest)
+        end else match String.index_opt message ':' with
+          | Some colon -> String.sub message 0 colon,
+              String.trim (String.sub message (colon + 1) (String.length message - colon - 1))
+          | None -> "E_LISP", message in
+  code, body
+
+let replay_source ctx changes =
+  let words = String.concat " " (keywords ctx changes) in
+  let geometry_inputs = List.init ctx.geometry_count (fun i -> Printf.sprintf "(sop/ext_port_in%d)" i) in
+  let image_inputs = List.init ctx.image_count (fun i -> Printf.sprintf "(image/ext_port_img%d)" i) in
+  Printf.sprintf "(sop/%s %s %s)" ctx.node.key (String.concat " " (geometry_inputs @ image_inputs)) words
 
 let with_session f =
   let s = Sop.Session.create ~max_entries:64 ~max_payload_bytes:512_000_000 |> get_string_ok in
+  Fun.protect ~finally:(fun () -> Sop.Session.close s) (fun () -> f s)
+let with_capture_session f =
+  let s = Sop.Session.create ~max_entries:0 ~max_payload_bytes:0 |> get_string_ok in
   Fun.protect ~finally:(fun () -> Sop.Session.close s) (fun () -> f s)
 let cook s domains grain node =
   let context = Sop.Context.create ~domains ~grain () |> get_string_ok in
@@ -209,9 +320,90 @@ let cook s domains grain node =
     Result.bind (Sop.Payload.geometry o.Sop.Session.payload) (fun g -> match o.Sop.Session.instances with
       | None -> Ok g
       | Some transforms -> (* packed result: compared as its materialized copies *)
-          Result.map_error (fun e -> Sop.Diagnostic.error ~code:"E_INSTANCES" (Rdk.Error.to_string e))
+          Result.map_error (fun e -> Diagnostic.error ~code:"E_INSTANCES" (Rdk.Error.to_string e))
             (Rdk.Instance_copy.materialize_instances ~transforms g)))
-let must = function Ok g -> g | Error d -> fail (Sop.Diagnostic.error_to_string d)
+let must = function Ok g -> g | Error d -> fail (Diagnostic.error_to_string d)
+
+(* Capture time uses registry builders once. Every row then contains a literal Lisp call and
+   references portable checked input files; the check path need not load the native registry. *)
+let capture_goldens ~dir ~out_dir ~cache node =
+  let cases = ("defaults", []) :: node.cases in
+  List.concat_map (fun (fixture, geometries) ->
+    let ctx = context ~label:fixture ~dir node geometries in
+    (* Inputs do not vary between cases. Serialize and validate each fixture once, not once per
+       parameter row (the large geometry codec allocates heavily during its round-trip check). *)
+    let fixture_codec_started = Unix.gettimeofday () in
+    let geometry_inputs = List.map (fun geometry ->
+      tagged "geometry" [string (frozen_geometry cache out_dir geometry)]) geometries in
+    let images = match List.assoc_opt node.key !image_registry with
+      | Some build -> build fixture | None -> [] in
+    let image_inputs = List.map (fun image ->
+      tagged "image" [string (frozen_image cache out_dir image)]) images in
+    let fixture_codec_elapsed = Unix.gettimeofday () -. fixture_codec_started in
+    let inputs = tagged "inputs" (geometry_inputs @ image_inputs) in
+    let input_sizes = geometries |> List.mapi (fun i geometry ->
+      Printf.sprintf "g%d:p%d/v%d/f%d" i (Geometry.point_count geometry)
+        (Geometry.vertex_count geometry) (Geometry.primitive_count geometry))
+      |> String.concat "," in
+    Printf.eprintf "fixture_codec node=%s fixture=%S inputs=[%s] in %.4fs\n%!"
+      node.key fixture input_sizes fixture_codec_elapsed;
+    List.mapi (fun index (label, changes) ->
+      let gc_before = Gc.quick_stat () in
+      Printf.eprintf "starting node=%s fixture=%S case=%S (%d/%d) inputs=[%s] live_words=%d\n%!"
+        node.key fixture label (index + 1) (List.length cases) input_sizes gc_before.Gc.live_words;
+      let started = Unix.gettimeofday () in
+      let source = replay_source ctx changes in
+      let output_size = ref "not-cooked" in
+      let phases = Hashtbl.create 4 in
+      let phase name elapsed = Hashtbl.replace phases name elapsed in
+      let outcome = Fun.protect ~finally:Flow_sop.Lower.Private.clear_cache (fun () ->
+        (* Goldens freeze Lisp semantics through the reference evaluator; parity tests separately
+           require the packed path to match before these rows can replace the old oracle checks. *)
+        match lisp_compiled ~phase ~initial_reference:true ctx changes with
+        | Error message ->
+            output_size := "refused";
+            let code, message = stable_error message in tagged "error" [string code; string message]
+        | Ok ((node, _), _build) ->
+            (* Capture Lisp meaning independently of the packed compiler. The port parity gate
+               separately checks that packed execution matches this reference path. A one-cook
+               session cannot hit its cache, so disable it to avoid key construction and retention. *)
+            let cook_started = Unix.gettimeofday () in
+            let cooked = with_capture_session (fun session -> cook session 4 97 node) in
+            phase "cook" (Unix.gettimeofday () -. cook_started);
+            (match cooked with
+             | Error error ->
+                 output_size := "error";
+                 tagged "error" [string error.Diagnostic.code; string error.message]
+             | Ok geometry ->
+                 output_size := Printf.sprintf "p%d/v%d/f%d" (Geometry.point_count geometry)
+                   (Geometry.vertex_count geometry) (Geometry.primitive_count geometry);
+                 let codec_started = Unix.gettimeofday () in
+                 let bytes = geometry_bytes geometry in
+                 let digest = Digest.to_hex (Digest.string bytes) in
+                 phase "geometry_bytes_digest" (Unix.gettimeofday () -. codec_started);
+                 tagged "ok" [string digest])) in
+      let gc_after = Gc.quick_stat () in
+      Printf.eprintf "captured node=%s fixture=%S case=%S in %.2fs phases=parse:%.4f check:%.4f lower:%.4f compile_node:%.4f cook:%.4f geometry_bytes_digest:%.4f output=%s major_words_delta=%.0f live_words=%d\n%!"
+        node.key fixture label (Unix.gettimeofday () -. started)
+        (Option.value (Hashtbl.find_opt phases "parse") ~default:0.)
+        (Option.value (Hashtbl.find_opt phases "check") ~default:0.)
+        (Option.value (Hashtbl.find_opt phases "lower") ~default:0.)
+        (Option.value (Hashtbl.find_opt phases "compile_node") ~default:0.)
+        (Option.value (Hashtbl.find_opt phases "cook") ~default:0.)
+        (Option.value (Hashtbl.find_opt phases "geometry_bytes_digest") ~default:0.)
+        !output_size
+        (gc_after.Gc.major_words -. gc_before.Gc.major_words) gc_after.Gc.live_words;
+      Flow.Lisp.flat (tagged "golden" [string node.key; string fixture; string label; string source; inputs; outcome]))
+      cases) node.inputs
+
+let coverage_rows nodes =
+  List.concat_map (fun node ->
+    List.concat_map (fun (fixture, _) ->
+      List.map (fun (label, _) ->
+        Flow.Lisp.flat (tagged "case" [string node.key; string fixture; string label]))
+        (("defaults", []) :: node.cases))
+      node.inputs)
+    nodes
 
 (* ---- checks ---- *)
 let changed (v : P.field_view) = match v.kind, v.current with
@@ -263,8 +455,8 @@ let verify_case ~full ctx ulps label changes =
       with_session (fun s -> match cook s 1 97 expected, cook s 1 97 actual with
         | Error e, Error g -> protect "oracle" (fun () -> check (e.code = g.code)
             ("error code " ^ g.code ^ " but native " ^ e.code))
-        | Error e, Ok _ -> fail (at ("oracle: native error " ^ Sop.Diagnostic.error_to_string e ^ " but Lisp succeeded"))
-        | Ok _, Error g -> fail (at ("oracle: Lisp error " ^ Sop.Diagnostic.error_to_string g ^ " but native succeeded"))
+        | Error e, Ok _ -> fail (at ("oracle: native error " ^ Diagnostic.error_to_string e ^ " but Lisp succeeded"))
+        | Ok _, Error g -> fail (at ("oracle: Lisp error " ^ Diagnostic.error_to_string g ^ " but native succeeded"))
         | Ok e, Ok g ->
             (if not (close_geometry ~ulps e g) && Sys.getenv_opt "PORT_DIFF" <> None then begin
               (let counts h = Printf.sprintf "p%d v%d f%d" (Rdk.Geometry.point_count h) (Rdk.Geometry.vertex_count h) (Rdk.Geometry.primitive_count h) in

@@ -1,8 +1,16 @@
 (library
  (name native_layer_token)
  (public_name rays.native_layer_token)
+ (modules native_layer_token)
  (foreign_stubs
   (language c)
   (names native_layer_token_stubs)
-  (flags -I%{project_root}/lib/native_layer_token))
- (c_library_flags -framework CoreFoundation))
+  (flags -I%{project_root}/lib/native_layer_token)))
+
+(test
+ (name test_native_layer_token)
+ (modules test_native_layer_token)
+ (libraries native_layer_token)
+ (foreign_stubs
+  (language c)
+  (names test_native_layer_token_stubs)))

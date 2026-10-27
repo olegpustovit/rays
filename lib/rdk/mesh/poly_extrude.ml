@@ -52,7 +52,7 @@ module Pair_table = struct
       size = 0 }
 
   let hash component point mask =
-    let value = (point * 65_599) lxor (component * 8_191) in
+    let value = Hash.mix point (component * 8_191) in
     (value lxor (value lsr 16)) land mask
 
   let slot components points component point =

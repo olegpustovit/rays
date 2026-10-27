@@ -10,5 +10,4 @@ module Pipeline = Ogpu_core.Pipeline
 module Acceleration = Ogpu_core.Acceleration
 module Render_pass = Ogpu_core.Render_pass
 module Backend = Ogpu_core.Backend
-module Command_buffer = Ogpu_core.Command_buffer
 module Impl = Impl

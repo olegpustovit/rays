@@ -22,7 +22,7 @@ type element = {
 val max_elements : int
 (** 4,096, as for every loop. *)
 
-val elements : kind -> ?key:string -> Rdk.Geometry.t -> (element array, Diagnostic.error) result
+val elements : kind -> ?key:string -> Rdk.Geometry.t -> (element array, Diagnostic.t) result
 (** Ordered by [key] (an int or float attribute of the points, or of the
     primitives for pieces) when the geometry carries it, else by index (ties
     keep index order). *)

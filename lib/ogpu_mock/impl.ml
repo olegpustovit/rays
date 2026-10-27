@@ -1,3 +1,4 @@
+let backend = "mock"
 let create_driver () =
   let driver, control = Backend_mock.create () in
   let live_handles () =

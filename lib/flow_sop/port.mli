@@ -9,16 +9,17 @@ type parameter = private {
   ty : Flow.Port_type.t option;
 }
 
-val parameters : Param.field_view list -> (parameter list, Flow.Diagnostic.t) result
+val parameters : ?infer:bool -> Param.field_view list -> (parameter list, Diagnostic.t) result
 (** Group vec3 metadata, checking the same grouping invariants as the PPX.
+    [infer=true] uses native scene-schema suffix inference from [Param.group_vec3].
     Underlying component field names are not public port paths. *)
 
-val find_parameter : parameter list -> string -> (parameter, Flow.Diagnostic.t) result
+val find_parameter : parameter list -> string -> (parameter, Diagnostic.t) result
 val literal : parameter -> literal
-val literal_changes : parameter -> literal -> ((string * Param.value) list, Flow.Diagnostic.t) result
+val literal_changes : parameter -> literal -> ((string * Param.value) list, Diagnostic.t) result
 val normalize :
   parameter -> Flow.Port_type.value ->
-  (Flow.Port_type.value * (string * Param.value) list, Flow.Diagnostic.t) result
+  (Flow.Port_type.value * (string * Param.value) list, Diagnostic.t) result
 (** Coerce and use [Param.normalize_value] for hard bounds, matching writes
     through [Param.apply]. The returned value is the effective live readout. *)
 

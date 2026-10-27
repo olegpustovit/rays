@@ -1,6 +1,9 @@
+open Core_model
+open Core_shell
+open Rays
 open Sop
 open Editor_document
-include Core_inspect
+open Core_inspect
 
 let stored_projection value =
   match Level_map.find_opt value.level value.projections with
@@ -31,7 +34,7 @@ let local_of value key = match List.assoc_opt key value.locals with Some l -> l 
 let locals_capacity = 64
 let put_local key f locals =
   (key, f (match List.assoc_opt key locals with Some l -> l | None -> fresh_local ()))
-  :: List.filteri (fun i _ -> i < locals_capacity - 1) (List.remove_assoc key locals)
+  :: List.take (locals_capacity - 1) (List.remove_assoc key locals)
 
 (* The open panels that hold a list, a text pane or an outline: a graph panel holds the one its
    view shows. *)
@@ -181,7 +184,7 @@ let panels_line value =
 
 (* Follow a reference: the pane shows [graph], and [u] comes back to what it showed. *)
 let remember value =
-  { value with back = List.filteri (fun i _ -> i < 32) ((value.level, value.pane_graph) :: value.back) }
+  { value with back = List.take 32 ((value.level, value.pane_graph) :: value.back) }
 
 let go value graph =
   if graph_name value = Some graph then value else { (remember value) with pane_graph = Some graph }
@@ -239,7 +242,7 @@ let route value =
   List.rev_map (fun (level, pane_graph) -> graph_name { value with level; pane_graph }) value.back
   @ [ graph_name value ]
   |> List.filter_map Fun.id
-  |> (fun names -> List.filteri (fun i _ -> i >= List.length names - 3) names)
+  |> (fun names -> List.drop (max 0 (List.length names - 3)) names)
   |> String.concat " > "
 
 let scope_name value = if projection value = Graph_view then graph_name value else None
@@ -279,3 +282,196 @@ let failed_nodes value =
       List.filter_map (fun (n : Flow_graph.Projection.node) ->
         if compiled_at value chains records n.path = Some node_id then Some (n.path, code) else None) (nodes scope)
   | _ -> []
+
+let draw_list_panes ~ui ~shortcut_frame ~value ~hosted ~root_at ~pane_of ~in_use ~title_of
+    ~rows ~columns ~host_rows ~selected ~tree ~intents ~locals =
+  List.fold_left (fun (tree, intents, locals) ((key, path, _, _) as host) ->
+    match root_at path with
+    | None -> tree, intents, locals
+    | Some ((leaf : Pxui_shell.Layout.leaf), root) ->
+        let pane = pane_of host in
+        let mine = in_use pane in
+        let rows, columns = if mine then rows, columns else List.assoc key host_rows in
+        let selected = if mine then selected () else Selection.selected_nodes pane.selection in
+        let draw state = on_sheet ui leaf.floating (fun () -> Pxui.Ui.within ui root (fun () ->
+          Pxui_shell.Tree.update state ui shortcut_frame ~bounds:leaf.body
+            ~title:(title_of pane) ~columns rows ~selected)) in
+        if Some key = value.list_at then
+          let tree, emitted = draw tree in
+          tree, (if mine then intents @ emitted else intents), locals
+        else
+          let state, emitted = draw (local_of value key).rows in
+          tree, (if mine then intents @ emitted else intents),
+          put_local key (fun l -> { l with rows = state }) locals)
+    (tree, intents, locals) hosted
+
+let draw_text_panes ~ui ~frame ~value ~root_at ~header_slots ~text_host ~text_shown
+    ~text ~other_texts ~locals =
+  let names = lazy (completion_names value) in
+  let view_text path state shown = match root_at path with
+    | Some ((leaf : Pxui_shell.Layout.leaf), root) ->
+        Pxui.Ui.within ui root (fun () ->
+          Text_pane.view ui ~bounds:leaf.body
+            ~tabs_right:(Option.join (List.nth_opt (List.rev (header_slots leaf)) 0))
+            ~vocab:(Lazy.force value.lisp_vocab) ~names:(Lazy.force names) ~time:frame.Frame.input.t state shown)
+    | None -> [] in
+  let text_intents = match text_shown, text_host with
+    | Some shown, Some (_, path, _, _) -> view_text path text shown
+    | _ -> [] in
+  let locals, other_texts = List.fold_left (fun (locals, texts) (key, path, state, shown) ->
+    put_local key (fun l -> { l with code = state }) locals,
+    (key, shown, view_text path state shown) :: texts)
+    (locals, []) other_texts in
+  text, text_intents, locals, other_texts
+
+let draw_outline_panes ~ui ~value ~hosted ~root_at ~params_of ~outline ~locals =
+  List.fold_left (fun (outline, intents, locals) (key, path, _, _) ->
+    match root_at path with
+    | None -> outline, intents, locals
+    | Some ((leaf : Pxui_shell.Layout.leaf), root) ->
+        let draw state = on_sheet ui leaf.floating (fun () -> Pxui.Ui.within ui root (fun () ->
+          Navigator.view state ui ~bounds:leaf.body (params_of value))) in
+        if Some key = value.outline_at then
+          let outline, emitted = draw outline in outline, intents @ emitted, locals
+        else
+          let state, emitted = draw (local_of value key).nav in
+          outline, intents @ emitted, put_local key (fun l -> { l with nav = state }) locals)
+    (outline, [], locals) hosted
+
+let draw_spreadsheet_panes ~ui ~value ~panes ~locals =
+  List.fold_left (fun locals ((leaf : Pxui_shell.Layout.leaf), root) ->
+    let key = panel_key value.doc leaf.path in
+    let pane = shown_as value (key, leaf.path, leaf.panel) in
+    let owner = (local_of { value with locals } key).sheet_owner in
+    let changed = Pxui.Ui.within ui root (fun () ->
+      Spreadsheet.view ui ~bounds:leaf.body ~owner (spreadsheet_source pane)) in
+    match changed with None -> locals
+    | Some sheet_owner -> put_local key (fun local -> { local with sheet_owner }) locals)
+    locals panes
+
+let draw_other_graph_panes ~ui ~shortcut_frame ~value ~other_panes ~roots ~stash =
+  List.filter_map (fun (key, path, (pane : _ t)) ->
+    match List.find_opt (fun ((leaf : Pxui_shell.Layout.leaf), _) -> leaf.path = path) roots with
+    | Some ((leaf : Pxui_shell.Layout.leaf), hosted) when (let _, _, _, h = leaf.body in h > 0) ->
+        let x, y, width, height = leaf.body in
+        let view = if stored_projection pane = Graph_view && graph_name pane <> None then
+            Pxui.Ui.within ui hosted (fun () ->
+              pane.scope_view
+              |> Pxui_graph.Scope.with_guide false
+              |> Pxui_graph.Scope.with_theme (let theme = Pxui.Ui.theme ui in
+                   if leaf.floating then sheet_theme theme else theme)
+              |> Pxui_graph.Scope.with_bounds ~x ~y ~width:(max 1 width) ~height:(max 1 height)
+              |> fun view -> fst (Pxui_graph.Scope.update view ui shortcut_frame))
+          else pane.scope_view in
+        Some (key, { (stash pane) with view })
+    | _ -> Some (key, stash pane)) other_panes
+
+let draw_graph_header ~ui ~value ~geometry:g
+    ~graph_host:(graph_host : Pxui_shell.Layout.leaf option) ~header_slots ~tools_from =
+  let tool_action = match graph_host with
+    | Some leaf when projection value = Graph_view && has_panel value Pxui_shell.Layout.Graph ->
+        (match Bars.graph_tools ~outline:(not (has_panel value Pxui_shell.Layout.Outline)) ui
+            ~header:leaf.header ~from:(tools_from leaf)
+            ~enabled:(fun tool -> tool = Bars.Outline || scope_name value <> None
+              && (tool = Bars.Add || Pxui_graph.Scope.selected value.scope_view <> [])) with
+         | Some Add -> Some Leader.Add_node
+         | Some Repeat -> Some (Leader.Scope_command Pxui_graph.Scope.Wrap_repeat)
+         | Some Iterate -> Some (Leader.Scope_command Pxui_graph.Scope.Wrap_iterate)
+         | Some Fn -> Some (Leader.Scope_command Pxui_graph.Scope.Make_fn)
+         | Some Macro -> Some (Leader.Scope_command Pxui_graph.Scope.Make_macro)
+         | Some Defn -> Some (Leader.Scope_command Pxui_graph.Scope.Make_defn)
+         | Some Outline -> Some (Leader.Panel_split_at (leaf.path, `H, 0.7, Pxui_shell.Layout.Outline))
+         | None -> None)
+    | _ -> None in
+  let view_pick = match graph_host with
+    | Some leaf when has_panel value Pxui_shell.Layout.Graph ->
+        let _, hy, _, hh = leaf.header in
+        let active = match projection value with Graph_view -> 0 | List_view -> 1 | Text_view -> 2 in
+        (match Option.bind (List.nth_opt (header_slots leaf) 0) (fun slot -> Option.bind slot (fun right ->
+          fst (Pxui_shell.Kit.segments ui ~key:"workspace-view" ~right
+            ~y:(float hy +. float (hh - 20) /. 2.) [ "Graph"; "List"; "Text" ] active))) with
+         | Some i -> Some (List.nth [ Graph_view; List_view; Text_view ] i)
+         | None -> None)
+    | _ -> None in
+  let view_action = match active_view value g, value.view_tools with
+    | Some ({ header = (hx, hy, hw, hh); _ } as leaf), Some (looks, mode) when hh > 0 ->
+        let from = float hx +. tools_from leaf in
+        let modes = [ "Solid"; "Wire"; "Traced" ] in
+        let seg_w = List.fold_left (fun w label -> w +. Pxui.Ui.text_width ui label) 24. modes in
+        let look_w = Pxui_shell.Kit.button_width ui ~hint:"C" "Look through" in
+        let ty = float hy +. float (hh - 20) /. 2. in
+        let frame_w = Pxui_shell.Kit.button_width ui ~hint:"F" "Frame" in
+        if from +. seg_w +. 8. +. look_w +. 8. +. frame_w < float (hx + hw - 36) then begin
+          Bars.rule ui ~key:"workspace-view-rule" ~header:leaf.header ~from:(from -. float hx);
+          let render = match fst (Pxui_shell.Kit.segments ui ~key:"workspace-render"
+            ~right:(from +. seg_w) ~y:ty modes mode) with
+            | Some i when i <> mode -> Some (Leader.Render_mode i)
+            | _ -> None in
+          let look = Pxui_shell.Kit.button ui ~key:"workspace-look" ~at:(from +. seg_w +. 8., ty)
+              ~w:look_w ~active:looks ~hint:"C" "Look through" in
+          let framed = Pxui_shell.Kit.button ui ~key:"workspace-frame"
+              ~at:(from +. seg_w +. 8. +. look_w +. 8., ty) ~w:frame_w ~hint:"F" "Frame" in
+          if framed then Some Leader.Frame_camera else if look then Some Leader.Look_through else render
+        end else None
+    | _ -> None in
+  tool_action, view_action, view_pick
+
+let draw_graph_pane ~ui ~frame ~value ~shortcut_frame ~scope_view ~scope_active ~guide
+    ~carry_lit ~carry_hot ~graph_root ~graph_host:(graph_host : Pxui_shell.Layout.leaf option)
+    ~workspace ~menu ~open_menu =
+  let (frame : Frame.t) = frame in
+  let graph_body = match graph_host with Some leaf -> leaf.body | None -> 0, 0, 0, 0 in
+  let gx, gy, gw, gh = graph_body in
+  let scope_view, scope_frame_changes =
+    if not scope_active then Pxui_graph.Scope.suspend scope_view, []
+    else Pxui.Ui.within ui graph_root (fun () ->
+      scope_view
+      |> Pxui_graph.Scope.with_guide guide
+      |> Pxui_graph.Scope.with_failed (failed_nodes value)
+      |> Pxui_graph.Scope.with_theme (let theme = Pxui.Ui.theme ui in
+           match graph_host with Some { floating = true; _ } -> sheet_theme theme | _ -> theme)
+      |> Pxui_graph.Scope.with_bounds ~x:gx ~y:gy ~width:(max 1 gw) ~height:(max 1 gh)
+      |> Pxui_graph.Scope.with_carry ~lit:carry_lit ~hot:carry_hot
+      |> fun view -> Pxui_graph.Scope.update view ui shortcut_frame) in
+  let menu = match menu, List.find_map (function
+      | Pxui_graph.Scope.Menu_requested (x, y) -> Some (int_of_float x, int_of_float y)
+      | _ -> None) scope_frame_changes with
+    | None, Some at -> open_menu ?scope_view:(Some scope_view) value at
+    | menu, _ -> menu in
+  let menu, menu_pick = match menu with
+    | Some menu -> Pxui.Ui.within ui graph_root (fun () ->
+        Pxui_graph.Node_menu.update menu ui ~bounds:(0, 0, fst frame.input.size,
+          (let _, sy, _, _ = (geometry value workspace frame).status_at in sy)))
+    | None -> None, None in
+  graph_body, scope_view, scope_frame_changes, menu, menu_pick
+
+let draw_timeline_pane ~ui ~timeline ~max_frame ~slots ~timeline_root ~strip_bounds =
+  let intents = List.concat_map (fun (((_, _, _, height) as bounds), box, edge) ->
+    if height <= 0 then [] else
+    Pxui.Ui.within ui box (fun () ->
+      Pxui_shell.Timeline_bar.draw ui ~bounds ~edge
+        ~playing:(Timeline.mode timeline = Timeline.Playing)
+        ~frame:(Timeline.frame timeline)
+        ~time:(Timeline.time timeline) ~max_frame ())) slots in
+  let strip_playback, strip_layout = match timeline_root with
+    | Some (_, box) when (let _, _, _, h = strip_bounds in h > 0) ->
+        Pxui.Ui.within ui box (fun () ->
+          let module Ui = Pxui.Ui in
+          Option.iter (fun (x, y) -> Ui.set_text_state ui box (Some (Printf.sprintf "%g %g" x y)))
+            (Ui.context_at ui box);
+          match Option.map (String.split_on_char ' ') (Ui.text_state ui box) with
+          | Some [x; y] ->
+              (match float_of_string_opt x, float_of_string_opt y with
+               | Some x, Some y ->
+                   let playing = Timeline.mode timeline = Timeline.Playing in
+                   (match Ui.context_menu ui ~at:(x, y) "timeline-context"
+                       [(if playing then "Pause" else "Play"), true; "Stop", true; "Hide timeline", true] with
+                    | `Open -> [], []
+                    | result ->
+                        Ui.set_text_state ui box None;
+                        (match result with `Pick 0 -> [Pause_toggle], [] | `Pick 1 -> [Stop_playback], []
+                         | `Pick 2 -> [], [Pxui_shell.Chrome.Toggle [-1]] | _ -> [], []))
+               | _ -> [], [])
+          | _ -> [], [])
+    | _ -> [], [] in
+  intents @ strip_playback, strip_layout

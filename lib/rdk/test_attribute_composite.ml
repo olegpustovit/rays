@@ -136,7 +136,7 @@ let test_mean_patterns_owners_and_position () =
       |> Option.get in
   check (Attribute.storage_id source_id = Attribute.storage_id output_id)
     "Attribute Composite copied an untouched discrete field";
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
     Attribute_composite.run ~grain:1 ~operation:Attribute_composite.Composite_mean
       ~allow_position:true ~alpha_attribute:"a"
       ~point_attributes:"P density uv Cd solo target_only"
@@ -316,7 +316,7 @@ let test_parallel_scale () =
     |> add ~owner:Attribute.Point ~name:"alpha"
       (Attribute.Float alpha) in
   let first = make 0. and second = make 10. and third = make (-5.) in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
     Attribute_composite.run ~grain:127 ~operation:Attribute_composite.Composite_mean
       ~weight:0.2 ~alpha_attribute:"alpha" ~point_attributes:"P value"
       ~vertex_attributes:"^*" ~primitive_attributes:"^*"

@@ -1,4 +1,4 @@
-type render_mode=Blended of Color.t
+type render_mode=Blended of Rays_math.Color.t
 type hinting=Normal_hinting|Light_hinting|Mono_hinting|None_hinting
 type alignment=Left|Center|Right
 (* density, size, text, wrap, align, rgba *)
@@ -10,13 +10,12 @@ type t={resource:Runtime_resources.Font.t;
   mutable generation:int;
   cache:Image.t Text_cache.t}
 let text_cache_capacity=256
-let text_cache()=Text_cache.create ~release:(fun _ image->Image.destroy image)text_cache_capacity
+let text_cache()=Text_cache.create ~release:(fun _ image->ignore(Image.destroy image))text_cache_capacity
 let message operation error=`Msg(Format.asprintf"%s: %a"operation Runtime_resources.pp_error error)
-let fonts:t list ref=ref[]
-let make ?source:_ _size=function Ok resource->let value={resource;generation=1;cache=text_cache()}in fonts:=value::!fonts;Ok value|Error error->Error(message"Font.load"error)
+let make ?source:_ _size=function Ok resource->Ok{resource;generation=1;cache=text_cache()}|Error error->Error(message"Font.load"error)
 let load path size=make ~source:path size(Runtime_resources.Font.open_file ~path ~size:(float size))
 let system ?(size=16)()=make size(Runtime_resources.Font.open_system ~size:(float size))
-let rgba(Blended c)=c.Color.r,c.g,c.b,c.a
+let rgba(Blended c)=c.Rays_math.Color.r,c.g,c.b,c.a
 (* Invalid UTF-8 becomes U+FFFD rather than failing mid-frame. *)
 let sanitize text=if String.is_valid_utf_8 text then text else begin
   let buffer=Buffer.create(String.length text)in
@@ -26,10 +25,11 @@ let sanitize text=if String.is_valid_utf_8 text then text else begin
   loop 0;Buffer.contents buffer end
 let resource_align=function Left->Runtime_resources.Font.Left|Center->Center|Right->Right
 let image_of_text text=match Runtime_resources.Text.Private.into_image text with
-  |Ok image->Ok(Image.Private.of_resource image)
+  |Ok image->Image.Private.of_resource image|>Result.map_error(fun message->`Msg message)
   |Error error->Error(message"Font.image"error)
 let paint ?(density=1) ?wrap ?(align=Left) font text mode=match Runtime_resources.Font.render font.resource ?wrap_width:wrap ~align:(resource_align align) ~density ~color:(rgba mode)(sanitize text)with
-  |Error error->Error(message"Font.render_text"error)|Ok None->Ok(Image.create ~width:1 ~height:1())
+  |Error error->Error(message"Font.render_text"error)|Ok None->
+      Image.create ~width:1 ~height:1()|>Result.map_error(fun message->`Msg message)
   |Ok(Some value)->let result=image_of_text value in ignore(Runtime_resources.Text.destroy value);result
 let key ?wrap ?(align=Left) ?(density=1) ?(size=0) text mode:Text_key.t=density,size,text,wrap,align,rgba mode
 let cached_text ?wrap ?(align=Left) ?(density=1) font text mode=let key=key ?wrap ~align ~density text mode in match Text_cache.find font.cache key with image->Ok image|exception Not_found->
@@ -43,51 +43,64 @@ let resource_hinting=function
   |None_hinting->Runtime_resources.Font.None_hinting
 let set_hinting font value=match Runtime_resources.Font.set_hinting font.resource(resource_hinting value)with Ok()->clear_cache font;();font.generation<-font.generation+1;Ok()|Error e->Error(message"Font.set_hinting"e)
 let destroy font=
-  fonts:=List.filter(fun candidate->candidate!=font)!fonts;
   clear_cache font;ignore(Runtime_resources.Font.destroy font.resource)
 module Private=struct
  type automatic_entry={image:Image.t;mutable references:int;mutable cached:bool}
- type automatic={entry:automatic_entry;mutable released:bool}
- let capacity=256 and font_capacity=32
- (* Borrowed entries are pinned: only unreferenced text can be evicted, so
-    the table may hold more than [capacity] while every entry is in use. *)
- let automatic_cache=Text_cache.create capacity
-   ~evictable:(fun _ entry->entry.references=0)
-   ~release:(fun _ entry->entry.cached<-false;
-     if entry.references=0 then Image.destroy entry.image)
  module Font_cache=Lru.Make(Int)
- let automatic_fonts=Font_cache.create font_capacity ~release:(fun _ font->destroy font)
- let automatic_references=ref 0
- let font size=
-   match Font_cache.find automatic_fonts size with
+ type cache_context={automatic_cache:automatic_entry Text_cache.t;
+   automatic_fonts:t Font_cache.t;mutable automatic_references:int}
+ and automatic={entry:automatic_entry;context:cache_context option;mutable released:bool}
+ let capacity=256 and font_capacity=32
+ let current_cache=Domain.DLS.new_key(fun()->None)
+ let create_cache_context()={
+   automatic_cache=Text_cache.create capacity
+     ~evictable:(fun _ entry->entry.references=0)
+     ~release:(fun _ entry->entry.cached<-false;
+       if entry.references=0 then ignore(Image.destroy entry.image));
+   automatic_fonts=Font_cache.create font_capacity ~release:(fun _ font->destroy font);
+   automatic_references=0}
+ let with_cache_context context f=
+   let previous=Domain.DLS.get current_cache in
+   Domain.DLS.set current_cache(Some context);
+   Fun.protect~finally:(fun()->Domain.DLS.set current_cache previous)f
+ let clear_cache_context context=
+   Text_cache.clear context.automatic_cache;
+   Font_cache.clear context.automatic_fonts
+ let font context size=
+   match Font_cache.find context.automatic_fonts size with
    |value->Ok value
    |exception Not_found->
-     match system~size()with Error _ as error->error|Ok value->Font_cache.add automatic_fonts size value;Ok value
+     match system~size()with Error _ as error->error|Ok value->Font_cache.add context.automatic_fonts size value;Ok value
  let borrow_automatic ?wrap ?(align=Left) ?(density=1) ~size text mode=
    let key=key?wrap~align~density~size text mode in
-   match Text_cache.find automatic_cache key with
-   |entry->
-     entry.references<-entry.references+1;incr automatic_references;
-     Ok{entry;released=false}
-   |exception Not_found->match font size with Error _ as error->error|Ok font->
-     match paint ~density ?wrap ~align font text mode with Error _ as error->error|Ok image->
-      (* A full table of borrowed entries makes the new value transient
-         instead of invalidating an image an active scene still holds. *)
-      let can_cache=Text_cache.length automatic_cache<capacity||
-        Option.is_some(Text_cache.find_first automatic_cache(fun _ entry->entry.references=0))in
-      let entry={image;references=1;cached=can_cache}in
-      if can_cache then Text_cache.add automatic_cache key entry;
-      incr automatic_references;
-      Ok{entry;released=false}
+   let paint_uncached()=match system~size()with Error _ as error->error|Ok font->
+     Fun.protect~finally:(fun()->destroy font)(fun()->paint~density?wrap~align font text mode)
+     |>Result.map(fun image->{entry={image;references=1;cached=false};context=None;released=false})in
+   match Domain.DLS.get current_cache with
+   |None->paint_uncached()
+   |Some context->(match Text_cache.find context.automatic_cache key with
+     |entry->entry.references<-entry.references+1;context.automatic_references<-context.automatic_references+1;
+       Ok{entry;context=Some context;released=false}
+     |exception Not_found->match font context size with Error _ as error->error|Ok font->
+       match paint~density?wrap~align font text mode with Error _ as error->error|Ok image->
+        (* Borrowed entries remain pinned until their scene is released. *)
+        let can_cache=Text_cache.length context.automatic_cache<capacity||
+          Option.is_some(Text_cache.find_first context.automatic_cache(fun _ entry->entry.references=0))in
+        let entry={image;references=1;cached=can_cache}in
+        if can_cache then Text_cache.add context.automatic_cache key entry;
+        context.automatic_references<-context.automatic_references+1;
+        Ok{entry;context=Some context;released=false})
  let automatic_image handle=handle.entry.image
  let release_automatic handle=if not handle.released then begin
    handle.released<-true;handle.entry.references<-handle.entry.references-1;
-   decr automatic_references;
-   if handle.entry.references=0&&not handle.entry.cached then Image.destroy handle.entry.image
+   Option.iter(fun context->context.automatic_references<-context.automatic_references-1)handle.context;
+   if handle.entry.references=0&&not handle.entry.cached then ignore(Image.destroy handle.entry.image)
   end
  let automatic_counts()=
-  Text_cache.length automatic_cache,Font_cache.length automatic_fonts,
-    !automatic_references
+  match Domain.DLS.get current_cache with
+  |None->0,0,0
+  |Some context->Text_cache.length context.automatic_cache,Font_cache.length context.automatic_fonts,
+    context.automatic_references
  let generation font=font.generation
  type glyph={glyph_width:int;glyph_height:int;glyph_advance:int;glyph_alpha:bytes}
  (* One code point rendered exactly as [render_text] rasterizes it inside a

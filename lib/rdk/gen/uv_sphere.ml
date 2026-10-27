@@ -14,38 +14,38 @@ type sphere_connectivity =
 type sphere_normals =
   | Sphere_no_normals | Sphere_point_normals | Sphere_vertex_normals
 type sphere_orientation =
-  | Sphere_x | Sphere_y | Sphere_z | Sphere_axis of Vec3.t
+  | Sphere_x | Sphere_y | Sphere_z | Sphere_axis of Rays_math.Vec3.t
 type sphere_rotation_order =
   | Sphere_xyz | Sphere_xzy | Sphere_yxz
   | Sphere_yzx | Sphere_zxy | Sphere_zyx
 let sphere_rotation_matrix order rotation =
-  let x = Mat4.rotation_x rotation.Vec3.x
-  and y = Mat4.rotation_y rotation.y
-  and z = Mat4.rotation_z rotation.z in
+  let x = Rays_math.Mat4.rotation_x rotation.Rays_math.Vec3.x
+  and y = Rays_math.Mat4.rotation_y rotation.y
+  and z = Rays_math.Mat4.rotation_z rotation.z in
   match order with
-  | Sphere_xyz -> Mat4.mul z (Mat4.mul y x)
-  | Sphere_xzy -> Mat4.mul y (Mat4.mul z x)
-  | Sphere_yxz -> Mat4.mul z (Mat4.mul x y)
-  | Sphere_yzx -> Mat4.mul x (Mat4.mul z y)
-  | Sphere_zxy -> Mat4.mul y (Mat4.mul x z)
-  | Sphere_zyx -> Mat4.mul x (Mat4.mul y z)
+  | Sphere_xyz -> Rays_math.Mat4.mul z (Rays_math.Mat4.mul y x)
+  | Sphere_xzy -> Rays_math.Mat4.mul y (Rays_math.Mat4.mul z x)
+  | Sphere_yxz -> Rays_math.Mat4.mul z (Rays_math.Mat4.mul x y)
+  | Sphere_yzx -> Rays_math.Mat4.mul x (Rays_math.Mat4.mul z y)
+  | Sphere_zxy -> Rays_math.Mat4.mul y (Rays_math.Mat4.mul x z)
+  | Sphere_zyx -> Rays_math.Mat4.mul x (Rays_math.Mat4.mul y z)
 
-let sphere_frame orientation rotation_order (rotation : Vec3.t) =
+let sphere_frame orientation rotation_order (rotation : Rays_math.Vec3.t) =
   let oriented = match orientation with
-    | Sphere_x -> Ok (Vec3.unit_y, Vec3.unit_x,
-        Vec3.create 0. 0. (-1.))
-    | Sphere_y -> Ok (Vec3.unit_x, Vec3.unit_y, Vec3.unit_z)
-    | Sphere_z -> Ok (Vec3.unit_x, Vec3.unit_z,
-        Vec3.create 0. (-1.) 0.)
+    | Sphere_x -> Ok (Rays_math.Vec3.unit_y, Rays_math.Vec3.unit_x,
+        Rays_math.Vec3.create 0. 0. (-1.))
+    | Sphere_y -> Ok (Rays_math.Vec3.unit_x, Rays_math.Vec3.unit_y, Rays_math.Vec3.unit_z)
+    | Sphere_z -> Ok (Rays_math.Vec3.unit_x, Rays_math.Vec3.unit_z,
+        Rays_math.Vec3.create 0. (-1.) 0.)
     | Sphere_axis axis ->
         Result.bind (normalize_plane_axis "Rdk.Uv_sphere.uv_sphere" "pole" axis)
           (fun pole ->
             let ax = abs_float pole.x and ay = abs_float pole.y
             and az = abs_float pole.z in
-            let reference = if ax <= ay && ax <= az then Vec3.unit_x
-              else if ay <= az then Vec3.unit_y else Vec3.unit_z in
-            let projection = Vec3.dot reference pole in
-            let radial = Vec3.create
+            let reference = if ax <= ay && ax <= az then Rays_math.Vec3.unit_x
+              else if ay <= az then Rays_math.Vec3.unit_y else Rays_math.Vec3.unit_z in
+            let projection = Rays_math.Vec3.dot reference pole in
+            let radial = Rays_math.Vec3.create
                 (reference.x -. (projection *. pole.x))
                 (reference.y -. (projection *. pole.y))
                 (reference.z -. (projection *. pole.z)) in
@@ -53,20 +53,20 @@ let sphere_frame orientation rotation_order (rotation : Vec3.t) =
                 radial) (fun radial ->
               Result.map (fun tangent -> radial, pole, tangent)
                 (normalize_plane_axis "Rdk.Uv_sphere.uv_sphere" "tangent"
-                   (Vec3.cross radial pole)))) in
+                   (Rays_math.Vec3.cross radial pole)))) in
   Result.map (fun (radial, pole, tangent) ->
     if rotation.x = 0. && rotation.y = 0. && rotation.z = 0. then
       radial, pole, tangent
     else
       let matrix = sphere_rotation_matrix rotation_order rotation in
-      Mat4.transform_direction matrix radial,
-      Mat4.transform_direction matrix pole,
-      Mat4.transform_direction matrix tangent) oriented
+      Rays_math.Mat4.transform_direction matrix radial,
+      Rays_math.Mat4.transform_direction matrix pole,
+      Rays_math.Mat4.transform_direction matrix tangent) oriented
 
 let run ?cancel ?(grain = 16_384)
     ?(connectivity = Sphere_triangles) ?(unique_points_per_pole = false)
     ?(triangular_poles = true) ?normals ?(orientation = Sphere_y)
-    ?(center = Vec3.zero) ?(rotation = Vec3.zero)
+    ?(center = Rays_math.Vec3.zero) ?(rotation = Rays_math.Vec3.zero)
     ?(rotation_order = Sphere_xyz) ?(uniform_scale = 1.)
     ?radius_x ?radius_y ?radius_z ?uv_attribute ?(segments = 48) ?(rings = 24)
     ~radius () =

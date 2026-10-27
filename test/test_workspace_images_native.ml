@@ -1,7 +1,7 @@
 module E=Flow.Eval
-let ok=function Ok value->value|Error d->failwith(Flow.Diagnostic.to_string d)
+let ok=function Ok value->value|Error d->failwith(Diagnostic.to_string d)
 let load text=match Rays_editor.Workspace.load text with Ok doc->doc|Error diagnostics->
-  failwith(String.concat "; "(List.map Flow.Diagnostic.to_string diagnostics))
+  failwith(String.concat "; "(List.map Diagnostic.to_string diagnostics))
 let ()=
   let module Editor=Rays_editor.Editor in
   let doc=load {|(workspace animated
@@ -10,17 +10,16 @@ let ()=
         (draw/image (image/map (fn [uv] [bias uv.y 0 1]) :width 64 :height 64))))
     (graph editor :context editor (ui/workspace (ui/canvas (ref picture)))))|}in
   let owner=ref(Result.get_ok(Editor.create ~workspace:doc ~await:true ~domains:1
-    ~prepare:(fun _ _->Ok()) ~scene3:(fun _ ()->Rays.Scene3.empty)()))in
+    ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)()))in
   let canvas=Rays.Canvas.create_exn ~width:900 ~height:640 in
-  Fun.protect ~finally:(fun()->Editor.close !owner;Rays.Canvas.destroy canvas)(fun()->
+  Fun.protect ~finally:(fun()->Editor.close !owner;ignore(Rays.Canvas.destroy canvas))(fun()->
     let sample count=
-      let frame:Rays.Frame.t={width=900;height=640;size=900,640;
-        pixel_scale=1.,1.;
-        time=float count;dt=1.;fps=1.;count;mouse=(-100.,-100.);mouse_delta=0.,0.;
-        keys=[];mouse_buttons=[];events=[]}in
+      let frame : Rays.Frame.t = { input = { (Input.at_time (float count)) with
+        dt = 1.; frame = count; tick = count; size = 900, 640; pointer = -100., -100. };
+        pixel_scale = 1., 1.; fps = 1.; mouse_delta = 0., 0. } in
       owner:=Editor.update !owner frame;
-      Rays.Canvas.render canvas(Editor.scene !owner frame);
-      Rays.Canvas.pixel canvas ~x:10 ~y:40 in
+      Result.get_ok (Rays.Canvas.render canvas (Editor.scene !owner frame));
+      Result.get_ok (Rays.Canvas.pixel canvas ~x:10 ~y:40) in
     let first=sample 0 in
     assert(first<>sample 1));
   print_endline "Canvas playback refreshes image/map functions with captured time"
@@ -44,7 +43,7 @@ let ()=
     (graph backdrop :context draw (draw/background "#102030"))
     (graph fixed :context image (image/render (ref backdrop) :width 65 :height 17)))|}in
   let owner domains=Result.get_ok(Editor.create ~workspace:doc ~await:true ~domains
-    ~prepare:(fun _ _->Ok()) ~scene3:(fun _ ()->Rays.Scene3.empty)())in
+    ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)())in
   let display=owner 8 and cpu1=owner 1 and cpu8=owner 8 in
   Fun.protect ~finally:(fun()->List.iter Editor.close[display;cpu1;cpu8])(fun()->
     Editor.Private.gpu_qualification display;
@@ -53,7 +52,7 @@ let ()=
       Array.find_opt(fun(n:E.node)->n.kind=kind && plan.instances.(n.inst).graph=graph
         && plan.instances.(n.inst).default<>override)plan.nodes |> Option.get in
     let value owner ~override kind graph=E.Deferred(Flow.Ty.image,(node owner ~override kind graph).id)in
-    let live time=Frame_input.at_time time in
+    let live time=Input.at_time time in
     let exact owner time ~override kind graph=Editor.Private.image_payload ~live:(live time)owner
       (value owner ~override kind graph) |> ok in
     let rgba payload=match P.Image.Private.rgba8 payload with Some bytes->bytes|None->
@@ -107,7 +106,7 @@ let () =
       (graph drawing :context draw (draw/image (ref img)"^scale^"))
       (graph rendered :context image (image/render (ref drawing) :width 65 :height 3)))")in
     let owner=Result.get_ok(Rays_editor.Editor.create ~workspace:doc ~await:true ~domains:1
-      ~prepare:(fun _ _->Ok()) ~scene3:(fun _ ()->Rays.Scene3.empty)())in
+      ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)())in
     Fun.protect ~finally:(fun()->Rays_editor.Editor.close owner)(fun()->
       let evaluated=ok(E.static doc.checked)in
       let image_value=List.assoc "rendered" evaluated.results in
@@ -115,7 +114,7 @@ let () =
         (fun ~image ~texture:_->let image=ok(image image_value)in
           image,Result.get_ok(Rays.Image.Private.pixels image))in
       let state=E.create_state()in
-      let live0=Frame_input.at_time 0. and live1={(Frame_input.at_time 1.)with frame=1}in
+      let live0=Input.at_time 0. and live1={(Input.at_time 1.)with frame=1}in
       if stateful then ignore(ok(E.run ~state ~live:live0 ~time:0. doc.checked));
       let first,zero=snapshot state live0 in
       if stateful then ignore(ok(E.run ~state ~live:live1 ~time:1. doc.checked));
@@ -138,17 +137,17 @@ let ()=
     (graph rendered :context image (image/render (ref drawing) :width 8 :height 8)) \
     (graph picture :context draw (draw/image (ref rendered))))"in
   let owner=Result.get_ok(Rays_editor.Editor.create ~workspace:doc ~await:true ~domains:1
-    ~prepare:(fun _ _->Ok()) ~scene3:(fun _ ()->Rays.Scene3.empty)())in
+    ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)())in
   Fun.protect ~finally:(fun()->Rays_editor.Editor.close owner)(fun()->
     let evaluated=ok(E.static doc.checked)in
     let image=ok(Rays_editor.Editor.Private.image owner(List.assoc "rendered" evaluated.results))in
     let expected=Result.get_ok(Rays.Image.Private.pixels image)in
-    assert(Rays.Image.get_size image=(8,8));
+    assert(Result.get_ok (Rays.Image.get_size image)=(8,8));
     assert(ok(Rays_editor.Editor.Private.image owner(List.assoc "rendered" evaluated.results))==image);
     assert(Rays_editor.Editor.Private.image_stats owner=(1,0));
-    List.iter(fun domains->Rays.Parallel.run ~domains(fun()->
+    List.iter(fun domains->Parallel.run ~domains(fun()->
       let fresh=Result.get_ok(Rays_editor.Editor.create ~workspace:doc ~await:true ~domains
-        ~prepare:(fun _ _->Ok()) ~scene3:(fun _ ()->Rays.Scene3.empty)())in
+        ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)())in
       Fun.protect ~finally:(fun()->Rays_editor.Editor.close fresh)(fun()->
         let actual=ok(Rays_editor.Editor.Private.image fresh(List.assoc "rendered" evaluated.results))in
         assert(Result.get_ok(Rays.Image.Private.pixels actual)=expected))))[1;8]);
@@ -178,13 +177,13 @@ let ()=
   let doc=load initial in
   let owner=ref(Result.get_ok(Editor.create ~workspace:doc ~await:true ~domains:1
     ~source:(Rays_editor.Source.at ~file:source ~digest:(Editor_document.Contexts.sha256 initial))
-    ~prepare:(fun _ _->Ok()) ~scene3:(fun _ ()->Rays.Scene3.empty)()))in
+    ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)()))in
   Fun.protect ~finally:(fun()->Editor.close !owner;Sys.remove source)(fun()->
     Editor.Private.gpu_qualification !owner;
     let value()=let plan=Editor.Private.image_plan !owner in
       let node=Array.find_opt(fun(n:E.node)->n.kind="image/map")plan.nodes |> Option.get in
       plan,node,E.Deferred(Flow.Ty.image,node.id)in
-    let live time=Frame_input.at_time time in
+    let live time=Input.at_time time in
     let exact time=let _,_,value=value()in
       Editor.Private.image_payload ~live:(live time) !owner value |> ok in
     let resolve time=let _,_,value=value()in
@@ -201,16 +200,16 @@ let ()=
     assert(exact 0.==saved && I.generation resource=generation);
     print_endline "test,width,height,time,max_channel_difference,differing_channels,differing_pixels";
     let canvas=Rays.Canvas.create ~width:65 ~height:17 |> Result.get_ok in
-    Fun.protect ~finally:(fun()->Rays.Canvas.destroy canvas)(fun()->
+    Fun.protect ~finally:(fun()->ignore(Rays.Canvas.destroy canvas))(fun()->
       let mesh=Rays.Mesh.plane ~width:(2.*.65./.17.) ~height:2.()in
-      let camera=Rays.Camera.orthographic ~height:2. ~at:(Rays.Vec3.create 0. 0. 2.) ~target:Rays.Vec3.zero()in
-      let scene source_image texture=Rays.Scene.[clear Rays.Color.black;
+      let camera=Rays.Camera.orthographic ~height:2. ~at:(Rays_math.Vec3.create 0. 0. 2.) ~target:Rays_math.Vec3.zero()in
+      let scene source_image texture=Rays.Scene.[clear Rays_math.Color.black;
         image source_image ~at:(0,0)();Private.layer_break;
-        view3d ~viewport:(33,0,32,17) ~camera(Rays.Scene3.create ~ambient:Rays.Color.white
-          [Rays.Scene3.mesh ~material:(Rays.Material.matte Rays.Color.white) ~cull:Cull_none
+        view3d ~viewport:(33,0,32,17) ~camera(Rays.Scene3.create ~ambient:Rays_math.Color.white
+          [Rays.Scene3.mesh ~material:(Rays.Material.matte Rays_math.Color.white) ~cull:Cull_none
             ~texture:(Rays.Scene3.textured ~filter:Nearest texture) mesh])]in
       let snapshot()=let image=Rays.Canvas.to_image canvas |> Result.get_ok in
-        Fun.protect ~finally:(fun()->Rays.Image.destroy image)(fun()->Rays.Image.Private.pixels image |> Result.get_ok)in
+        Fun.protect ~finally:(fun()->ignore(Rays.Image.destroy image))(fun()->Rays.Image.Private.pixels image |> Result.get_ok)in
       let verify time=
         let actual_image,actual_texture=resolve time in
         assert(actual_image==image && Rays.Texture.Private.identity actual_texture=identity);
@@ -220,7 +219,7 @@ let ()=
         assert(I.generation resource=generation && I.Private.readbacks resource=0);
         assert(rgba saved=saved_bytes);
         let _,node,_=value()in
-        let width,height=Rays.Image.get_size image in
+        let width,height=Result.get_ok (Rays.Image.get_size image) in
         let fn=match List.assoc "function" node.args with E.Fn fn->fn|_->assert false in
         let kernel=Flow_sop.Image_kernel.prepare ~identity:0 ~width ~height ~fn ~sources:[] [] |> ok in
         List.iter(fun domains->
@@ -230,17 +229,17 @@ let ()=
             let cooked=P.Session.cook session ~context(Flow_sop.Image_kernel.node kernel) |> Result.get_ok in
             assert(rgba(P.Payload.image cooked.payload |> Result.get_ok)=rgba payload)))[1;8];
         let displayed=scene actual_image actual_texture in
-        Rays.Canvas.render canvas displayed;Rays.Canvas.render canvas displayed;
-        let uploaded=(Rays.Canvas.Private.native_stats canvas).uploaded_bytes in
-        Rays.Canvas.render canvas displayed;
-        assert((Rays.Canvas.Private.native_stats canvas).uploaded_bytes=uploaded);
+        Result.get_ok (Rays.Canvas.render canvas displayed);Result.get_ok (Rays.Canvas.render canvas displayed);
+        let uploaded=(Result.get_ok(Rays.Canvas.Private.native_stats canvas)).uploaded_bytes in
+        Result.get_ok (Rays.Canvas.render canvas displayed);
+        assert((Result.get_ok(Rays.Canvas.Private.native_stats canvas)).uploaded_bytes=uploaded);
         let actual=snapshot()in
         let reference=Rays.Image.upload_rgba ~width ~height ~rgba:(rgba payload)() |> Result.get_ok in
-        Fun.protect ~finally:(fun()->Rays.Image.destroy reference)(fun()->
+        Fun.protect ~finally:(fun()->ignore(Rays.Image.destroy reference))(fun()->
           let texture=Rays.Texture.init ~width ~height(fun ~x ~y->let o=(y*width+x)*4 in
-            let bytes=rgba payload in Rays.Color.rgba(Char.code(Bytes.get bytes o))
+            let bytes=rgba payload in Rays_math.Color.rgba(Char.code(Bytes.get bytes o))
               (Char.code(Bytes.get bytes(o+1)))(Char.code(Bytes.get bytes(o+2)))(Char.code(Bytes.get bytes(o+3))))in
-          Rays.Canvas.render canvas(scene reference texture);
+          Result.get_ok (Rays.Canvas.render canvas (scene reference texture));
           let expected=snapshot()in
           let maximum=ref 0 and channels=ref 0 and pixels=ref 0 in
           Bytes.iteri(fun i c->let difference=abs(Char.code c-Char.code(Bytes.get expected i))in
@@ -254,15 +253,15 @@ let ()=
           assert(!maximum<=1));
         assert(I.Private.readbacks resource=0)in
       verify 0.;verify 1.;
-      let frame time={Rays.Frame.width=65;height=17;size=65,17;
-        pixel_scale=1.,1.;time;dt=0.;fps=60.;count=int_of_float time;
-        mouse=0.,0.;mouse_delta=0.,0.;keys=[];mouse_buttons=[];events=[]}in
+      let frame time = { Rays.Frame.input = { (Input.at_time time) with size = 65, 17;
+        frame = int_of_float time; tick = int_of_float time };
+        pixel_scale = 1., 1.; fps = 60.; mouse_delta = 0., 0. } in
       let reload time text=
         Out_channel.with_open_bin source(fun ch->output_string ch text);
         owner:=Editor.update !owner(frame time)in
       reload 10.(text 35 33 "[uv.y uv.x (* t 0.5) 1]");
       verify 0.5;
-      assert(Rays.Image.get_size image=(35,33));
+      assert(Result.get_ok (Rays.Image.get_size image)=(35,33));
       assert(Editor.Private.image_stats !owner=(1,0));
       reload 20.(text 65 3 "[uv.x uv.y 0.5 1]");
       let cpu_image,cpu_texture=resolve 0. in
@@ -276,7 +275,7 @@ let ()=
       let _,_,value=value()in
       List.iter(fun time->
         let failed=Editor.Private.with_images ~live:(live time) !owner(fun ~image ~texture:_->image value)in
-        assert(match failed with Error d->d.Flow.Diagnostic.code="E_KERNEL"|Ok _->false))[0.;0.];
+        assert(match failed with Error d->d.Diagnostic.code="E_KERNEL"|Ok _->false))[0.;0.];
       assert(I.Private.readbacks resource=0);
       reload 50.(text 65 17 "[uv.x uv.y 0.5 1]");
       verify 0.5;
@@ -296,7 +295,7 @@ let ()=
     (graph picture :context draw (draw/image (ref rendered)))
     (graph settings :context settings (settings/config :width 320 :height 240)))"in
   let owner domains=Result.get_ok(Editor.create ~workspace:doc ~await:true ~domains
-    ~prepare:(fun _ _->Ok()) ~scene3:(fun _ ()->Rays.Scene3.empty)())in
+    ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)())in
   let display=owner 1 in
   let expected=Fun.protect ~finally:(fun()->Editor.close display)(fun()->
     Editor.Private.gpu_qualification display;
@@ -325,9 +324,9 @@ let ()=
       ok(Rays_editor.Workspace.export ~graph:"picture" ~fps:60 ~directory ~frames:2 doc);
       let files=Sys.readdir directory in assert(Array.length files=2);
       Array.iter(fun name->let image=Rays.Image.load(Filename.concat directory name) |> Result.get_ok in
-        Fun.protect ~finally:(fun()->Rays.Image.destroy image)(fun()->
+        Fun.protect ~finally:(fun()->ignore(Rays.Image.destroy image))(fun()->
           (* an export renders at the logical size whatever the display's density *)
-          assert(Rays.Image.get_size image=(320,240));
+          assert(Result.get_ok (Rays.Image.get_size image)=(320,240));
           assert(Result.get_ok(Rays.Image.Private.pixels image)=expected)))files);
   print_endline "Nested image/render exactness: CPU rounding survives an already-resident GPU child without reading or replacing it"
 
@@ -336,14 +335,14 @@ let ()=
   let doc=load "(workspace stamp (graph img :context image
     (image/noise :width 4 :height 4 :frequency (+ 0.1 (* t 0.01)) :seed 31)))"in
   let owner=Result.get_ok(Editor.create ~workspace:doc ~await:true ~domains:1
-    ~prepare:(fun _ _->Ok()) ~scene3:(fun _ ()->Rays.Scene3.empty)())in
+    ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)())in
   Fun.protect ~finally:(fun()->Editor.close owner)(fun()->
     let node=(Editor.Private.image_plan owner).nodes.(0)in
     let value=E.Deferred(Flow.Ty.image,node.id)in
-    let display time=Editor.Private.with_images ~live:(Frame_input.at_time time) owner(fun ~image ~texture:_->
+    let display time=Editor.Private.with_images ~live:(Input.at_time time) owner(fun ~image ~texture:_->
       let image=ok(image value)in Rays.Image.Private.pixels image |> Result.get_ok)in
     let first=display 0. in
-    ignore(ok(Editor.Private.image_payload ~live:(Frame_input.at_time 10.) owner value));
+    ignore(ok(Editor.Private.image_payload ~live:(Input.at_time 10.) owner value));
     assert(display 0.=first));
   print_endline "Legacy image stamps: display A, exact B, display A restores A pixels"
 
@@ -361,12 +360,12 @@ let ()=
     (graph width_only :context image (image/render (ref drawing) :width 9))
     (graph height_only :context image (image/render (ref drawing) :height 11)))"in
   let owner=Result.get_ok(Editor.create ~workspace:doc ~await:true ~domains:1
-    ~prepare:(fun _ _->Ok()) ~scene3:(fun _ ()->Rays.Scene3.empty)())in
+    ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)())in
   Fun.protect ~finally:(fun()->Editor.close owner)(fun()->
     let plan=Editor.Private.image_plan owner in
     let value name=(Array.find_opt(fun(instance:E.instance)->instance.graph=name && instance.default)
       plan.instances |> Option.get).result in
-    let live width height={(Frame_input.at_time 0.)with size=width,height}in
+    let live width height={(Input.at_time 0.)with size=width,height}in
     let display size name=Editor.Private.with_images ~live:size owner
       (fun ~image ~texture:_->ok(image(value name)))in
     let a=live 65 17 and b=live 35 33 in
@@ -376,11 +375,11 @@ let ()=
     let generation image=I.generation(Rays.Image.Private.resource image)in
     let parent_before=generation parent and fixed_before=generation fixed in
     assert(Editor.Private.image_render_stats owner=(5,0,0,0));
-    assert(display b "child"==child && Rays.Image.get_size child=(35,33));
+    assert(display b "child"==child && Result.get_ok (Rays.Image.get_size child)=(35,33));
     assert(display b "parent"==parent && generation parent>parent_before);
     assert(display b "fixed"==fixed && generation fixed=fixed_before);
-    assert(display b "width_only"==width && Rays.Image.get_size width=(9,33));
-    assert(display b "height_only"==height && Rays.Image.get_size height=(35,11));
+    assert(display b "width_only"==width && Result.get_ok (Rays.Image.get_size width)=(9,33));
+    assert(display b "height_only"==height && Result.get_ok (Rays.Image.get_size height)=(35,11));
     assert(Editor.Private.image_render_stats owner=(8,3,0,0));
     let parent_bytes=Result.get_ok(Rays.Image.Private.pixels parent)in
     let offset=(20*80+50)*4 in
@@ -414,12 +413,12 @@ let ()=
   Out_channel.with_open_bin source(fun ch->output_string ch initial);
   let owner=ref(Result.get_ok(Editor.create ~workspace:(load initial) ~await:true ~domains:1
     ~source:(Rays_editor.Source.at ~file:source ~digest:(Editor_document.Contexts.sha256 initial))
-    ~prepare:(fun _ _->Ok()) ~scene3:(fun _ ()->Rays.Scene3.empty)()))in
+    ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)()))in
   let destination=Rays.Canvas.create_exn ~width:65 ~height:17 in
-  Fun.protect ~finally:(fun()->Rays.Canvas.destroy destination;Editor.close !owner;Sys.remove source)(fun()->
+  Fun.protect ~finally:(fun()->ignore(Rays.Canvas.destroy destination);Editor.close !owner;Sys.remove source)(fun()->
     let value()=(Array.find_opt(fun(instance:E.instance)->instance.graph="rendered")
       (Editor.Private.image_plan !owner).instances |> Option.get).result in
-    let live=Frame_input.at_time in
+    let live=Input.at_time in
     let exact time=ok(Editor.Private.image_payload ~live:(live time) !owner(value()))in
     let rgba payload=match Sop.Image.Private.rgba8 payload with Some bytes->bytes|None->
       let channels=Sop.Image.Private.storage payload in
@@ -440,13 +439,13 @@ let ()=
     assert(I.generation resource>initial_generation);
     assert(I.Private.cpu_storage_bytes resource=0 && I.Private.readbacks resource=0);
     let mesh=Rays.Mesh.plane ~width:(2.*.65./.17.) ~height:2.()in
-    let camera=Rays.Camera.orthographic ~height:2. ~at:(Rays.Vec3.create 0. 0. 2.) ~target:Rays.Vec3.zero()in
-    let scene source_image texture=Rays.Scene.[clear Rays.Color.black;image source_image ~at:(0,0)();Private.layer_break;
-      view3d ~viewport:(33,0,32,17) ~camera(Rays.Scene3.create ~ambient:Rays.Color.white
-        [Rays.Scene3.mesh ~material:(Rays.Material.matte Rays.Color.white) ~cull:Cull_none
+    let camera=Rays.Camera.orthographic ~height:2. ~at:(Rays_math.Vec3.create 0. 0. 2.) ~target:Rays_math.Vec3.zero()in
+    let scene source_image texture=Rays.Scene.[clear Rays_math.Color.black;image source_image ~at:(0,0)();Private.layer_break;
+      view3d ~viewport:(33,0,32,17) ~camera(Rays.Scene3.create ~ambient:Rays_math.Color.white
+        [Rays.Scene3.mesh ~material:(Rays.Material.matte Rays_math.Color.white) ~cull:Cull_none
           ~texture:(Rays.Scene3.textured ~filter:Nearest texture) mesh])]in
     let snapshot()=let image=Result.get_ok(Rays.Canvas.to_image destination)in
-      Fun.protect ~finally:(fun()->Rays.Image.destroy image)(fun()->Result.get_ok(Rays.Image.Private.pixels image))in
+      Fun.protect ~finally:(fun()->ignore(Rays.Image.destroy image))(fun()->Result.get_ok(Rays.Image.Private.pixels image))in
     let verify time=
       let actual,view=resolve time in
       assert(actual==image && Rays.Texture.Private.identity view=identity);
@@ -455,29 +454,29 @@ let ()=
       assert(I.generation resource=generation && I.Private.readbacks resource=0);
       assert(rgba saved=saved_bytes);
       let displayed=scene actual view in
-      Rays.Canvas.render destination displayed;Rays.Canvas.render destination displayed;
-      let uploaded=(Rays.Canvas.Private.native_stats destination).uploaded_bytes in
-      Rays.Canvas.render destination displayed;
-      assert((Rays.Canvas.Private.native_stats destination).uploaded_bytes=uploaded);
+      Result.get_ok (Rays.Canvas.render destination displayed);Result.get_ok (Rays.Canvas.render destination displayed);
+      let uploaded=(Result.get_ok(Rays.Canvas.Private.native_stats destination)).uploaded_bytes in
+      Result.get_ok (Rays.Canvas.render destination displayed);
+      assert((Result.get_ok(Rays.Canvas.Private.native_stats destination)).uploaded_bytes=uploaded);
       let actual=snapshot()in
       let width=Sop.Image.width payload and height=Sop.Image.height payload and bytes=rgba payload in
       let oracle=Result.get_ok(Rays.Image.upload_rgba ~width ~height ~rgba:bytes())in
-      Fun.protect ~finally:(fun()->Rays.Image.destroy oracle)(fun()->
+      Fun.protect ~finally:(fun()->ignore(Rays.Image.destroy oracle))(fun()->
         let texture=Rays.Texture.init ~width ~height(fun ~x ~y->let o=(y*width+x)*4 in
-          Rays.Color.rgba(Char.code(Bytes.get bytes o))(Char.code(Bytes.get bytes(o+1)))
+          Rays_math.Color.rgba(Char.code(Bytes.get bytes o))(Char.code(Bytes.get bytes(o+1)))
             (Char.code(Bytes.get bytes(o+2)))(Char.code(Bytes.get bytes(o+3))))in
-        Rays.Canvas.render destination(scene oracle texture);
+        Result.get_ok (Rays.Canvas.render destination (scene oracle texture));
         assert(snapshot()=actual));
       Printf.printf "workspace_retained_canvas,%d,%d,%.2f,0,0,0\n%!" width height time in
     verify 0.;verify 0.5;
     let reload time contents=
       Out_channel.with_open_bin source(fun ch->output_string ch contents);
-      let frame:Rays.Frame.t={width=65;height=17;size=65,17;
-        pixel_scale=1.,1.;time;dt=0.;fps=60.;count=int_of_float time;
-        mouse=0.,0.;mouse_delta=0.,0.;keys=[];mouse_buttons=[];events=[]}in
+      let frame : Rays.Frame.t = { input = { (Input.at_time time) with size = 65, 17;
+        frame = int_of_float time; tick = int_of_float time };
+        pixel_scale = 1., 1.; fps = 60.; mouse_delta = 0., 0. } in
       owner:=Editor.update !owner frame in
     reload 10.(text 35 33 "(* t 16)");verify 0.5;
-    assert(Rays.Image.get_size image=(35,33));
+    assert(Result.get_ok (Rays.Image.get_size image)=(35,33));
     let failure_text=text 35 33 "(* t 1e19)"in
     ignore(load failure_text);
     reload 20. failure_text;
@@ -485,7 +484,7 @@ let ()=
     List.iter(fun _->assert(Editor.Private.with_images ~live:(live 2.) !owner
       (fun ~image ~texture:_->image(value())) |> Result.is_error))[0;1];
     assert(I.generation resource=generation && Editor.Private.image_render_stats !owner=stats);
-    assert(match I.Private.gpu_snapshot resource with Error{kind=Runtime_resources.Destroyed;_}->true|_->false);
+    assert(match I.Private.gpu_snapshot resource with Error{kind=Ogpu.Error.Destroyed;_}->true|_->false);
     verify 0.;
     reload 30.(text ~width_expression:"(+ 35 (int (* t 1e19)))" 35 33 "(* t 16)");
     ignore(resolve 0.);
@@ -493,7 +492,7 @@ let ()=
     List.iter(fun _->assert(Editor.Private.with_images ~live:(live 2.) !owner
       (fun ~image ~texture:_->image(value())) |> Result.is_error))[0;1];
     assert(I.generation resource=generation && Editor.Private.image_render_stats !owner=stats);
-    assert(match I.Private.gpu_snapshot resource with Error{kind=Runtime_resources.Destroyed;_}->true|_->false);
+    assert(match I.Private.gpu_snapshot resource with Error{kind=Ogpu.Error.Destroyed;_}->true|_->false);
     verify 0.;
     assert(I.Private.cpu_storage_bytes resource=0 && I.Private.readbacks resource=0);
     let _,_,captures,readbacks=Editor.Private.image_render_stats !owner in
@@ -512,7 +511,7 @@ let ()=
     (graph drawing :context draw (draw/background \"#102030\"))
     (graph rendered :context image (image/render (ref drawing) :width %d :height 8)))" width)in
   let owner=Result.get_ok(Editor.create ~workspace:(doc 8) ~await:true ~domains:1
-    ~prepare:(fun _ _->Ok()) ~scene3:(fun _ ()->Rays.Scene3.empty)())in
+    ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)())in
   Fun.protect ~finally:(fun()->Editor.close owner)(fun()->
     let request width=let evaluated=ok(E.static(doc width).checked)in
       Editor.Private.with_images ~plan:evaluated.plan owner(fun ~image ~texture:_->
@@ -520,10 +519,10 @@ let ()=
     let image=ok(request 8)in
     assert(Editor.Private.image_render_stats owner=(1,0,0,0));
     (* Force replacement publication to fail after a resized candidate renders. *)
-    Rays.Image.destroy image;
-    assert(match request 9 with Error d->d.Flow.Diagnostic.code="E_IMAGE"|Ok _->false);
+    ignore(Rays.Image.destroy image);
+    assert(match request 9 with Error d->d.Diagnostic.code="E_IMAGE"|Ok _->false);
     assert(Editor.Private.image_render_stats owner=(2,1,0,0));
-    assert(match request 9 with Error d->d.Flow.Diagnostic.code="E_IMAGE"|Ok _->false);
+    assert(match request 9 with Error d->d.Diagnostic.code="E_IMAGE"|Ok _->false);
     assert(Editor.Private.image_render_stats owner=(3,2,0,0)));
   assert(Editor.Private.image_render_stats owner=(3,3,0,0));
   assert(handles()=baseline);

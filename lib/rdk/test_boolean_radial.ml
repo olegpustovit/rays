@@ -89,7 +89,7 @@ let signature radial =
         Radial.incident_local radial (first + offset)))
 
 let test_domain_exactness () =
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       let _, radial, _ = seam_bundle () in signature radial) in
   if run 1 <> run 4 then fail "radial bundles differ between domain counts"
 

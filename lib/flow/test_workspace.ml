@@ -10,7 +10,7 @@ let parse source = match Syntax.parse source with
   | Ok forms -> forms
   | Error d -> failwith (Diagnostic.to_string d)
 let run source = Workspace.check catalog (parse source)
-let errors ds = List.filter (fun (d : Diagnostic.t) -> d.severity = Diagnostic.Error) ds
+let errors ds = List.filter (fun (d : Diagnostic.t) -> d.severity = Diagnostic.Error_severity) ds
 let show ds = String.concat "; " (List.map Diagnostic.to_string ds)
 
 let sop b = "(workspace w (graph g :context sop " ^ b ^ "))"
@@ -28,7 +28,7 @@ let bad ?(text = "") source code =
     at 0 in
   match run source with
   | None, ds when List.exists (fun (d : Diagnostic.t) ->
-      d.code = code && d.severity = Diagnostic.Error && has_text d) ds -> ()
+      d.code = code && d.severity = Diagnostic.Error_severity && has_text d) ds -> ()
   | _, ds -> failwith (Printf.sprintf "%s\n  expected %s %S, got: %s" source code text (show ds))
 let warns source code = match run source with
   | Some _, ds -> assert (List.exists (fun (d : Diagnostic.t) ->
@@ -52,7 +52,7 @@ let () =
         {:pair pair :quad quad :moved moved :fields (+ px (+ py qw))})))" in
   let result = List.assoc "g" (Result.get_ok (Eval.static ws)).results in
   List.iter (fun time ->
-    let live = Frame_input.at_time time in
+    let live = Input.at_time time in
     let actual = Result.get_ok (Eval.force ~live result)
     and reference = Result.get_ok (Eval.Private.force_reference ~live result) in
     let expected = Eval.Record ["pair", Vec2 (time,2.); "quad", Vec4 (1.,2.,3.,time);
@@ -78,7 +78,7 @@ let () =
 let () = (* Function ports instantiate bodies, and keep each caller's captures. *)
   let field = Check.{name = "field"; label = "Field"; fields = []; folder = [];
     primary = true; unit = None; ty = Some (Port_type.Fn Ty.{params = [Float]; result = Float})} in
-  let kind = Check.{qualified = "sop/test_field"; aliases = []; context = Context.sop;
+  let kind = Check.{qualified = "sop/test_field"; context = Context.sop;
     slots = []; parameters = [field]; outputs = ["geo", Port_type.Geometry]; facts = None} in
   let run_with signature source =
     let parameter = {field with ty = Some (Port_type.Fn signature)} in
@@ -110,9 +110,9 @@ let () = (* Function ports instantiate bodies, and keep each caller's captures. 
     else None) in
   assert (List.length functions = 2);
   List.iteri (fun i fn ->
-    let _, body = Option.get (Eval.Private.function_body fn) in
+    let _, body = Option.get (Eval.Residual.function_body fn) in
     assert (body.ty = Ty.Float);
-    if i = 0 then assert (List.assoc "offset" (Eval.Private.function_bindings fn) = Eval.Float 7.)) functions
+    if i = 0 then assert (List.assoc "offset" (Eval.Residual.function_bindings fn) = Eval.Float 7.)) functions
 
 let () = (* A canvas accepts an image through the ordinary drawing operator. *)
   let ws = good "(workspace w (graph picture :context image (image/noise :width 2 :height 2)) (graph editor :context editor (ui/workspace (ui/canvas (ref picture)))))" in
@@ -350,7 +350,7 @@ let () = (* E_TIME_BRANCH (T3) *)
   (* a static test may choose shapes *)
   ignore (good "(workspace w (graph g :context sop [(k : int 1)] (if (> k 0) (sop/box) (sop/uv_sphere))))")
 
-let () = (* W_UNKNOWN_GROUP (G1) and computed names (G2) *)
+let () = (* Unknown groups and computed names. *)
   warns (sop "(sop/blast (sop/box) :group \"nobody\")") "W_UNKNOWN_GROUP";
   quiet (sop "(sop/blast (sop/group_bounds (sop/box) :name \"attic\") :group \"attic\")");
   quiet (sop "(let* [a (sop/group_random (sop/box) :name \"lit\") b (sop/transform a) c (sop/merge b (sop/box))] (sop/set_color c :group \"lit\" :color \"#f5cf4f\"))");
@@ -444,9 +444,7 @@ let () = (* the other contexts: scene, world, settings, editor *)
   bad (world "(scene/merge)") "E_WRONG_CONTEXT";
   bad "(workspace w (graph e :context editor (ui/workspace (ui/split \"diagonal\" (ui/graph) (ui/lisp)))))" "E_RANGE" ~text:"axis";
   bad "(workspace w (graph e :context editor (ui/workspace (ui/split-at \"vertical\" 0.95 (ui/graph) (ui/lisp)))))" "E_RANGE" ~text:"ratio";
-  ignore (good "(workspace w (graph e :context editor (ui/workspace (ui/graph :wires \"rect\"))))");
-  ignore (good "(workspace w (graph e :context editor (ui/workspace (ui/graph :wires \"straight\"))))");
-  bad "(workspace w (graph e :context editor (ui/workspace (ui/graph :wires \"curved\"))))" "E_RANGE" ~text:"wires"
+  bad "(workspace w (graph e :context editor (ui/workspace (ui/graph :wires \"straight\"))))" "E_UNKNOWN_PARAM" ~text:"wires"
 
 let () = (* IR shapes, notes and reporting *)
   let ws = good "(workspace w\n  ; a helper\n  (defn f :context value [(x : float 2.0) (y : float 1.0)] (+ x y))\n  (graph g :context value [(n : int 3)]\n    (let* [; loop\n           s (sum [i (range n)] (f :y i))\n           l (map (fn [k] (* k 2)) (range 3))\n           c (cond (< s 1) 1 :else 2)\n           k (case n 1 \"a\" :else \"b\")]\n      (+ s (+ (count l) c)))))" in
@@ -766,14 +764,12 @@ let () =
   let ws = good "(workspace w (defn wave :context value [(x : float)] (sin x))
     (graph g :context value (let* [candidate (map wave (array/float 4))] 0)))" in
   assert (is_candidate ws ["g"; "candidate"]);
-  let noise = { (Op.find "sin" Context.value |> Option.get) with name = "noise3";
-    signature = {pos = ["position", Ty.Vec3]; opt = []; rest = None; kw = ["seed", Ty.Int; "octaves", Ty.Int]} } in
-  let opaque = Check.{qualified = "value/opaque"; aliases = []; context = Context.value; slots = [];
+  let opaque = Check.{qualified = "value/opaque"; context = Context.value; slots = [];
     parameters = [{name = "value"; label = "Value"; ty = Some Port_type.Float;
       fields = ["value", Param.Floating_view Param.{soft_min = 0.; soft_max = 1.; hard_min = None; hard_max = None}, Param.Float_value 0.];
       folder = []; primary = false; unit = None}]; outputs = ["out", Port_type.Float]; facts = None} in
   let catalog = {catalog with kinds = opaque :: catalog.kinds} in
-  let checked source = match Workspace.check ~ops:[noise] catalog (parse source) with
+  let checked source = match Workspace.check ~ops:[] catalog (parse source) with
     | Some ws, _ -> ws | None, ds -> failwith (show ds) in
   let is source = is_candidate (checked source) ["g"; "candidate"] in
   assert (is (candidate "(map (fn [(p : vec3)] (noise3 p :seed 7 :octaves 3)) (array/vec3 4))"));
@@ -812,7 +808,7 @@ let () =
   assert (marked "(map (fn [x] (case x 0 [0 0 0] :else [x 0 0])) (array/float 4))");
   assert (Op.is_display_kind "draw/circles" && Op.is_display_kind "ui/canvas"
     && not (Op.is_display_kind "scene/camera"));
-  let kind = Check.{qualified = "value/test_sink"; aliases = []; context = Context.value;
+  let kind = Check.{qualified = "value/test_sink"; context = Context.value;
     slots = [{name = "source"; required = true; rest = false; ty = Some (Ty.Array Ty.Float)}];
     parameters = []; outputs = ["out", Port_type.Float]; facts = None} in
   let checked body = Workspace.check {catalog with kinds = kind :: catalog.kinds}

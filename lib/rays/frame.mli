@@ -1,23 +1,14 @@
 (** Immutable facts about one sketch frame. *)
 
 type t = {
-  width : int;
-  height : int;
-  size : int * int;
-  (** Logical window dimensions used by scenes and pointer events. *)
+  input : Input.t;
+  (** Canonical logical input and frame facts. *)
   pixel_scale : float * float;
   (** Backing pixels per logical point on each axis. *)
-  time : float;
-  dt : float;
   fps : float;
-  count : int;
-  mouse : float * float;
   mouse_delta : float * float;
-  (** Logical pointer position and accumulated movement for this frame. *)
-  keys : Input.key list;
-  mouse_buttons : Input.mouse_button list;
-  events : Event.t list;
+  (** Accumulated logical pointer movement for this frame. *)
 }
 
 val mouse_down : Input.mouse_button -> t -> bool
-val has_event : (Event.t -> bool) -> t -> bool
+val has_event : (Input.event -> bool) -> t -> bool

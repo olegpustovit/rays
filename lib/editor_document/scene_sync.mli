@@ -21,15 +21,15 @@ val in_text : Document.t -> Document.level -> int -> bool
     of its own that an edit can be written to. *)
 
 val set_fields : factories:Sop.Edit_graph.factory list -> Document.t -> Document.level ->
-  node:int -> (string * Editor_core.Param.value) list ->
-  ((Document.t * Editor_core.Param.effects * Document.home) option, string) result
+  node:int -> (string * Param.value) list ->
+  ((Document.t * Param.effects * Document.home) option, string) result
 (** Field values of one object written to its text and lowered again, the derived object never
     edited in between: the values as the node's ranges leave them, an inline call unfolded first, a
     loop's copy its template (a computed argument refuses).  The document, the effects of the
     fields and the home written; [None] when the object has no text ({!reconcile} adopts it). *)
 
 type edit =
-  | Fields of (int * (string * Editor_core.Param.value) list) list
+  | Fields of (int * (string * Param.value) list) list
       (** field values of several objects (a stroke down a flag column) *)
   | Rename of int * string  (** an object's name; its children's [:parent] follows *)
   | Delete of int list
@@ -39,7 +39,7 @@ type edit =
           [scene/merge] that holds it) is added to a [:skip] list (register L16), and every other
           copy keeps its iteration tuple. *)
   | Restack of int list  (** the World's layers, bottom first *)
-  | Layers of Document.network * (string * Editor_core.Param.value) list
+  | Layers of Document.network * (string * Param.value) list
       (** a preset: the World's layers replaced and its own fields set (the level is the World) *)
   | Camera of int option
       (** the render camera: the root's [:camera], else [:active]; the document's alone when the
@@ -67,7 +67,7 @@ val write : factories:Sop.Edit_graph.factory list -> Document.t -> Document.leve
 val template_note : Document.t -> Document.home -> string option
 (** The status line for an edit written to a loop's template: every copy changes. *)
 
-val value_syntax : Editor_core.Param.field_view list -> Flow.Syntax.t
+val value_syntax : Param.field_view list -> Flow.Syntax.t
 (** The text of a parameter's current value: a number, flag or text, or a vector of numbers
     for the three fields of a vec3. *)
 

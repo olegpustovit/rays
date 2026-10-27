@@ -119,7 +119,7 @@ let test_text_axis_and_point_owner () =
       [|[|0;1|];[|2;3|]|]
       |> with_attribute Attribute.Primitive "name"
            (Attribute.Text [|"left";"right"|]) in
-  let output = Separate_pieces.run ~grain:1 ~axis:Vec3.unit_y ~gap:2.
+  let output = Separate_pieces.run ~grain:1 ~axis:Rays_math.Vec3.unit_y ~gap:2.
       ~mode:Separate_pieces.Separate_pieces_separate ~piece_attribute:"name" source
       |> get_ok in
   let positions = position_view output in
@@ -165,7 +165,7 @@ let test_validation_and_cancellation () =
   expect_invalid (fun () -> Separate_pieces.run ~gap:(-1.)
       ~mode:Separate_pieces.Separate_pieces_separate ~piece_attribute:"piece" valid)
     "negative gap";
-  expect_invalid (fun () -> Separate_pieces.run ~axis:Vec3.zero
+  expect_invalid (fun () -> Separate_pieces.run ~axis:Rays_math.Vec3.zero
       ~mode:Separate_pieces.Separate_pieces_separate ~piece_attribute:"piece" valid)
     "zero axis";
   expect_invalid (fun () -> Separate_pieces.run ~owner:Attribute.Vertex
@@ -245,7 +245,7 @@ let test_dense_parallel_exactness () =
       |> with_attribute Attribute.Point "id"
            (Attribute.Int (Array.init point_count Fun.id)) in
   let cook domains = Parallel.run ~domains (fun () ->
-      Separate_pieces.run ~grain:257 ~axis:(Vec3.create 1. 2. 3.) ~gap:0.01
+      Separate_pieces.run ~grain:257 ~axis:(Rays_math.Vec3.create 1. 2. 3.) ~gap:0.01
         ~mode:Separate_pieces.Separate_pieces_separate ~piece_attribute:"piece" source
       |> get_ok) in
   let one = cook 1 and four = cook 4 in

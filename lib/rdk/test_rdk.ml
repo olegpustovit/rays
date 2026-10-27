@@ -175,7 +175,7 @@ let run () =
   let payload_bytes = geometry_bytes payload_source in
   let duplicate_payload domains = Parallel.run ~domains (fun () ->
     Instance_copy.duplicate ~grain:1 ~copies:2
-      ~transform:(Mat4.translation (Vec3.create 2. 0. 0.)) payload_source |> get_ok) in
+      ~transform:(Rays_math.Mat4.translation (Rays_math.Vec3.create 2. 0. 0.)) payload_source |> get_ok) in
   let payload_one = duplicate_payload 1 and payload_many = duplicate_payload 4 in
   check (geometry_bytes payload_one = geometry_bytes payload_many
       && geometry_bytes payload_source = payload_bytes
@@ -190,7 +190,7 @@ let run () =
         = Attribute.Int (Array.init 6 (fun index -> 10 + ((index land 1) * 10))))
     "duplicate vertex/primitive payload ancestry/cardinality/domain exactness";
   let duplicated = Instance_copy.duplicate ~grain:1 ~copies:2
-      ~transform:(Mat4.translation (Vec3.create 2. 0. 0.)) sortable_points
+      ~transform:(Rays_math.Mat4.translation (Rays_math.Vec3.create 2. 0. 0.)) sortable_points
       |> get_ok in
   (match Geometry.find_group ~owner:Group.Point "even" duplicated with
    | Some group when Group.cardinality group = 6 -> ()
@@ -218,10 +218,10 @@ let run () =
   (match Fuse_grid.fuse ~cancel:cancelled ~tolerance:0. grid with
    | Error error when Error.code error = "cancelled" -> ()
    | _ -> fail "cancelled fuse published geometry or wrong error");
-  (match Mirror_geometry.run ~cancel:cancelled ~origin:Vec3.zero ~normal:Vec3.unit_x grid with
+  (match Mirror_geometry.run ~cancel:cancelled ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x grid with
    | Error error when Error.code error = "cancelled" -> ()
    | _ -> fail "cancelled mirror published geometry or wrong error");
-  (match Plane_clip.clip ~cancel:cancelled ~origin:Vec3.zero ~normal:Vec3.unit_x grid with
+  (match Plane_clip.clip ~cancel:cancelled ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x grid with
    | Error error when Error.code error = "cancelled" -> ()
    | _ -> fail "cancelled clip published geometry or wrong error");
   (match promote ~cancel:cancelled ~source:Attribute.Point

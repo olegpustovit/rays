@@ -2,10 +2,10 @@ let ok = function Ok value -> value | Error message -> failwith message
 let check condition message = if not condition then failwith message
 
 let parse text = match Flow.Syntax.parse text with
-  | Ok forms -> forms | Error d -> failwith (Flow.Diagnostic.to_string d)
+  | Ok forms -> forms | Error d -> failwith (Diagnostic.to_string d)
 let lower ?(reference = false) text =
   match Flow_sop.Lower.workspace ~reference ~factories:Sop_catalog.Editor.factories (parse text) with
-  | Error d -> failwith (Flow.Diagnostic.to_string d)
+  | Error d -> failwith (Diagnostic.to_string d)
   | Ok lowered ->
       let graph = List.find (fun (graph : Flow_sop.Lower.graph) -> graph.default) lowered.graphs in
       ok (Sop.Edit_graph.compile_node graph.network.geometry ~node_id:(Option.get graph.root))
@@ -15,8 +15,8 @@ let with_session fn =
 let cook session ?(domains = 1) ?(grain = 97) ?(seed = 0L) node =
   match Sop.Session.cook session ~context:(ok (Sop.Context.create ~domains ~grain ~seed ())) node with
   | Ok output -> (match Sop.Payload.geometry output.payload with
-      | Ok geometry -> geometry | Error d -> failwith (Sop.Diagnostic.error_to_string d))
-  | Error d -> failwith (Sop.Diagnostic.error_to_string d)
+      | Ok geometry -> geometry | Error d -> failwith (Diagnostic.error_to_string d))
+  | Error d -> failwith (Diagnostic.error_to_string d)
 
 let source = {|(workspace test
   (defnode sop/lisp_shift :label "Lisp shift" :category ["Deform"]
@@ -39,7 +39,7 @@ let () =
     (fun _->Lisp_sop.snapshot geometry) in
   let compile reference=match Flow_sop.Lower.workspace ~reference
       ~factories:(factory::Sop_catalog.Editor.factories)(parse source) with
-    |Error d->failwith(Flow.Diagnostic.to_string d)
+    |Error d->failwith(Diagnostic.to_string d)
     |Ok lowered->let graph=List.hd lowered.graphs in
         ok(Sop.Edit_graph.compile_node graph.network.geometry ~node_id:(Option.get graph.root)) in
   let expected=with_session(fun session->cook session (compile false)) in
@@ -67,7 +67,7 @@ let () =
   let expect_error session domains node=match Sop.Session.cook session
       ~context:(ok(Sop.Context.create ~domains ())) node with
     |Error d->check(d.code="E_BODY" && d.message="body failure" && d.cause=Some "authored cause")
-        ("authored body error changed during cooking: "^Sop.Diagnostic.error_to_string d)
+        ("authored body error changed during cooking: "^Diagnostic.error_to_string d)
     |Ok _->failwith "authored body error succeeded" in
   List.iter(fun reference->List.iter(fun body->
     let node=lower ~reference(source body) in
@@ -109,7 +109,7 @@ let () =
         (sop/transform geo :translate [%s 0.0 0.0]))
       (graph g :context sop (sop/live_body (sop/line :points 2))))|} expression) in
     with_session(fun session->List.iter(fun(time,dt)->
-      let live={(Frame_input.at_time time) with dt;frame=int_of_float time;tick=int_of_float time} in
+      let live={(Input.at_time time) with dt;frame=int_of_float time;tick=int_of_float time} in
       let context=ok(Sop.Context.create ~time ~frame:(Int64.of_int live.frame) ~input:live ()) in
       let actual=Sop.Session.cook session ~context node |>Result.get_ok
         |>fun(output:Sop.Session.output)->Result.get_ok(Sop.Payload.geometry output.payload) in
@@ -133,9 +133,7 @@ let () =
     Rays_math.Mat4.translation(Rays_math.Vec3.create 3. 0. 0.)|] in
   let input=Sop.Node.Private.make_geometry ~operation:"test.materialized_input" ~version:1
     ~parameters:"" ~cook_mode:Sop.Node.Generator ~dependencies:Sop.Context.Dependencies.static ~inputs:[||]
-    (fun ~node_id _ _->Ok Sop.Node.Private.{geometry=original;instances=Some transforms;
-      diagnostics=[Sop.Diagnostic.{severity=Warning;code="W_SOURCE";message="source retained";
-        node={node_id;label="source";operation="test.materialized_input"}}]}) in
+    (fun ~node_id:_ _ _->Ok Sop.Node.Private.{geometry=original;instances=Some transforms}) in
   let body={|(let* [data (exact (map (fn [p] (+ p [0.5 -0.0 0.0])) (sop/attr geo :P)))
                       copied (sop/with_attr geo :copied data)
                       rows {:offsets (array/range (int/add (sop/count copied :points) 1) :type int)
@@ -151,8 +149,6 @@ let () =
     let output=Sop.Session.cook session ~context actual |>Result.get_ok in
     let geometry=Sop.Payload.geometry output.payload |>Result.get_ok in
     check(output.instances=None) "Materialized write retained already-expanded instances";
-    check(List.filter(fun(d:Sop.Diagnostic.t)->d.code="W_SOURCE")output.diagnostics|>List.length=1)
-      "Materialized write lost or duplicated source diagnostics";
     check(Rdk.Geometry.point_count geometry=Rdk.Geometry.point_count expected)
       "Materialized write lost source instance cardinality";
     let storage name=Rdk.Geometry.find_attribute ~owner:Rdk.Attribute.Point name geometry|>Option.get
@@ -178,7 +174,7 @@ let () =
      |Error error->check(error.code="cancelled" || error.code="E_CANCELLED") "Materialized write lost cancellation"
      |Ok _->failwith "Cancelled materialized write succeeded")) [1;8]);
   check(before=Rdk_test_support.geometry_bytes original) "Materialized writes mutated their input";
-  print_endline "Cooked materialized writes: owned tuple/CSR storage, expanded instances, diagnostics, producer/count errors and cancellation"
+  print_endline "Cooked materialized writes: owned tuple/CSR storage, expanded instances, producer/count errors and cancellation"
 
 let () = with_session(fun session->
   let node=lower {|(workspace selected_error
@@ -190,7 +186,7 @@ let () = with_session(fun session->
   List.iter(fun domains->match Sop.Session.cook session
       ~context:(ok(Sop.Context.create ~domains()))node with
     |Error d->check(d.code="E_SELECTED" && d.message="selected failure" && d.cause=Some "point count 1")
-        ("compiled cooked selection diagnostic differs: "^Sop.Diagnostic.error_to_string d)
+        ("compiled cooked selection diagnostic differs: "^Diagnostic.error_to_string d)
     |Ok _->failwith "selected cooked error succeeded") [1;8])
 
 let () =
@@ -207,15 +203,15 @@ let () =
         (fun _->Lisp_sop.snapshot geometry) in
       let factories=factory::Sop_catalog.Editor.factories in
       let catalog=match Flow_sop.Catalog.of_factories ~version:1 factories with
-        |Ok catalog->catalog|Error d->failwith(Flow.Diagnostic.to_string d) in
+        |Ok catalog->catalog|Error d->failwith(Diagnostic.to_string d) in
       let forms=parse {|(workspace handles
         (defnode sop/handle_probe [(geo : geometry)]
           (if (int/gt (sop/count geo :points) 0) (if (bad_handle) geo geo) geo))
         (graph g :context sop (sop/handle_probe (sop/handle_source))))|} in
       let checked=match Flow_sop.Catalog.check_workspace ~ops:(probe::Flow_sop.Operators.all) catalog forms with
-        |Some checked,_->checked|_,diagnostics->failwith(String.concat "; " (List.map Flow.Diagnostic.to_string diagnostics)) in
+        |Some checked,_->checked|_,diagnostics->failwith(String.concat "; " (List.map Diagnostic.to_string diagnostics)) in
       let lowered=match Flow_sop.Lower.of_checked ~factories checked with
-        |Ok lowered->lowered|Error d->failwith(Flow.Diagnostic.to_string d) in
+        |Ok lowered->lowered|Error d->failwith(Diagnostic.to_string d) in
       let graph=List.hd lowered.graphs in
       let node=ok(Sop.Edit_graph.compile_node graph.network.geometry ~node_id:(Option.get graph.root)) in
       List.iter(fun domains->with_session(fun session->
@@ -223,7 +219,7 @@ let () =
         if count=0 then match result with
           |Ok output->check(Rdk_test_support.geometry_bytes(Result.get_ok(Sop.Payload.geometry output.payload))=
               Rdk_test_support.geometry_bytes geometry) "untaken malformed handle changed geometry"
-          |Error d->failwith(Sop.Diagnostic.error_to_string d)
+          |Error d->failwith(Diagnostic.error_to_string d)
         else match result with
           |Error d->check(d.code="E_DATA_SOURCE" && d.message=message) "malformed cooked handle bypassed its typed guard"
           |Ok _->failwith "malformed cooked handle succeeded")) [1;8]) [0;1])
@@ -288,8 +284,8 @@ let () =
     let cook node = match Sop.Session.cook session ~context node with
       | Ok output -> (match Sop.Payload.geometry output.payload with
           | Ok geometry -> geometry
-          | Error error -> failwith (Sop.Diagnostic.error_to_string error))
-      | Error error -> failwith (Sop.Diagnostic.error_to_string error) in
+          | Error error -> failwith (Diagnostic.error_to_string error))
+      | Error error -> failwith (Diagnostic.error_to_string error) in
     let input = cook original and first = cook node in
     let ix, iy, iz = Rdk.Packed.Float3.get (Rdk.Geometry.positions input) 0 in
     let x, y, z = Rdk.Packed.Float3.get (Rdk.Geometry.positions first) 0 in
@@ -515,10 +511,28 @@ let () =
         (map (fn [p] (if (equal? p [0.0 0.0 0.0]) p (+ p [1.0 0.0 0.0])))
           (sop/attr geo :P)))))
     (graph g :context sop (sop/unsupported_map (sop/grid :columns 2 :rows 2))))|} in
+  (* Projection and graph compilation retain the body; cooking is where strict kernel preparation must refuse it. *)
   match Flow_sop.Lower.workspace ~factories:Sop_catalog.Editor.factories (parse source) with
-  | Error diagnostic -> check (diagnostic.code = "E_KERNEL_FORM")
-      ("non-packed numeric Lisp body had an unrelated refusal: " ^ Flow.Diagnostic.to_string diagnostic)
-  | Ok _ -> failwith "numeric Lisp body silently accepted an interpreter fallback"
+  | Error diagnostic ->
+      check (diagnostic.code = "E_KERNEL_FORM"
+        && diagnostic.message = "Numeric node bodies must compile to packed kernels."
+        && diagnostic.span <> None)
+        ("numeric Lisp body had an unrelated refusal: " ^ Diagnostic.to_string diagnostic)
+  | Ok lowered ->
+      let graph = List.find (fun (graph : Flow_sop.Lower.graph) -> graph.default) lowered.graphs in
+      (match Sop.Edit_graph.compile_node graph.network.geometry ~node_id:(Option.get graph.root) with
+       | Error message ->
+           check (List.mem "[E_KERNEL_FORM]" (String.split_on_char ' ' message))
+             ("numeric Lisp body had an unrelated graph refusal: " ^ message)
+       | Ok node ->
+           with_session (fun session ->
+             match Sop.Session.cook session ~context:(ok (Sop.Context.create ~domains:1 ())) node with
+             | Error diagnostic ->
+                 check (diagnostic.code = "E_KERNEL_FORM"
+                   && diagnostic.message = "Numeric node bodies must compile to packed kernels."
+                   && diagnostic.span <> None)
+                   ("numeric Lisp body had an unrelated cook refusal: " ^ Diagnostic.error_to_string diagnostic)
+             | Ok _ -> failwith "numeric Lisp body silently accepted an interpreter fallback"))
 
 let () = with_session (fun session ->
   let prefix call = Printf.sprintf {|(let* [base (sop/line :kind "Points" :points 1 :origin [0.7 0.2 -0.1])
@@ -602,7 +616,7 @@ let () =
     match Flow_sop.Lower.workspace ?compiled_ids ?sites ~factories:Sop_catalog.Editor.factories(parse text) with
     |Ok lowered->let graph=List.hd lowered.graphs in
         lowered,ok(Sop.Edit_graph.compile_node graph.network.geometry ~node_id:(Option.get graph.root))
-    |Error d->failwith(Flow.Diagnostic.to_string d) in
+    |Error d->failwith(Diagnostic.to_string d) in
   List.iter(fun domains->with_session(fun session->
     let first,node=lower(source "1.0" "2.0") in
     ignore(cook session ~domains node);
@@ -659,7 +673,7 @@ let ()=
       |Some(lowered:Flow_sop.Lower.t)->Some lowered.compiled_ids,Some lowered.sites in
     let lowered=match Flow_sop.Lower.workspace ?compiled_ids ?sites
       ~factories:Sop_catalog.Editor.factories (parse(source ?extra values))with
-      |Ok lowered->lowered|Error d->failwith(Flow.Diagnostic.to_string d) in
+      |Ok lowered->lowered|Error d->failwith(Diagnostic.to_string d) in
     let graph=List.hd lowered.graphs in
     lowered,ok(Sop.Edit_graph.compile_node graph.network.geometry ~node_id:(Option.get graph.root)) in
   List.iter(fun domains->List.iter(fun(index,value,label)->with_session(fun session->
@@ -706,9 +720,9 @@ let ()=
 (* Deferred child cooking stays inside its authored error boundary. *)
 let ()=
   let calls=ref 0 in
-  let retained=[Sop.Diagnostic.{node_id=88;label="retained child";operation="native.retained"};
-    Sop.Diagnostic.{node_id=89;label="retained input";operation="native.input"}]in
-  let child_error={ (Sop.Diagnostic.error ~cause:"\255 raw 日本😀" ~hints:["retained hint"]
+  let retained=[Diagnostic.{node_id=88;label="retained child";operation="native.retained"};
+    Diagnostic.{node_id=89;label="retained input";operation="native.input"}]in
+  let child_error={ (Diagnostic.error ~cause:"\255 raw 日本😀" ~hints:["retained hint"]
     ~code:"E_CHILD" "child cook failed") with trace=retained }in
   let factory=Sop.Edit_graph.factory ~key:"failing_child" ~label:"Failing child" ~category:["Test"] ~arity:1
     (fun inputs->Sop.Node.Private.make ~operation:"native.failing_child" ~version:1 ~parameters:""
@@ -730,7 +744,7 @@ let ()=
     (graph g :context sop (sop/error_boundary (sop/line :points 2))))|}in
   let compile reference text=match Flow_sop.Lower.workspace ~reference
       ~factories:(factory::Sop_catalog.Editor.factories)(parse text)with
-    |Error d->failwith(Flow.Diagnostic.to_string d)
+    |Error d->failwith(Diagnostic.to_string d)
     |Ok lowered->let graph=List.hd lowered.graphs in
       ok(Sop.Edit_graph.compile_node graph.network.geometry ~node_id:(Option.get graph.root)) in
   List.iter(fun source->List.iter(fun reference->let node=compile reference source in
@@ -768,8 +782,8 @@ let () =
     (graph g :context sop (sop/frame_probe (sop/line :points 3))))|} body in
   let cook_at session frame node=
     match Sop.Session.cook session ~context:(ok (Sop.Context.create ~frame ())) node with
-    | Ok output -> (match Sop.Payload.geometry output.payload with Ok g -> Rdk_test_support.geometry_bytes g | Error d -> failwith (Sop.Diagnostic.error_to_string d))
-    | Error d -> failwith (Sop.Diagnostic.error_to_string d) in
+    | Ok output -> (match Sop.Payload.geometry output.payload with Ok g -> Rdk_test_support.geometry_bytes g | Error d -> failwith (Diagnostic.error_to_string d))
+    | Error d -> failwith (Diagnostic.error_to_string d) in
   List.iter (fun reference ->
     let node=lower ~reference (source "(sop/context_frame)") in
     check (Sop.Context.Dependencies.mem Frame (Sop.Node.dependencies node))
@@ -800,8 +814,8 @@ let () =
     (graph g :context sop (sop/time_probe (sop/line :points 3))))|} body in
   let cook_at session time node=
     match Sop.Session.cook session ~context:(ok (Sop.Context.create ~time ())) node with
-    | Ok output -> (match Sop.Payload.geometry output.payload with Ok g -> Rdk_test_support.geometry_bytes g | Error d -> failwith (Sop.Diagnostic.error_to_string d))
-    | Error d -> failwith (Sop.Diagnostic.error_to_string d) in
+    | Ok output -> (match Sop.Payload.geometry output.payload with Ok g -> Rdk_test_support.geometry_bytes g | Error d -> failwith (Diagnostic.error_to_string d))
+    | Error d -> failwith (Diagnostic.error_to_string d) in
   List.iter (fun reference ->
     let node=lower ~reference (source "(sop/context_time)") in
     check (Sop.Context.Dependencies.mem Time (Sop.Node.dependencies node))
@@ -830,9 +844,9 @@ let () =
     (defnode sop/lisp_line [(n : int 3 :min 2 :max 9)] (sop/line :points n))
     (graph g :context sop (sop/lisp_line)))|} in
   let factories = Sop_catalog.Editor.factories in
-  let build () =
-    let node = match Flow_sop.Lower.workspace ~factories (parse source) with
-      | Error d -> failwith (Flow.Diagnostic.to_string d)
+  let build ?(gpu=Flow_ir.Gpu.default) () =
+    let node = match Flow_sop.Lower.workspace ~gpu ~factories (parse source) with
+      | Error d -> failwith (Diagnostic.to_string d)
       | Ok lowered -> let graph = List.hd lowered.graphs in
           ok (Sop.Edit_graph.compile_node graph.network.geometry ~node_id:(Option.get graph.root)) in
     node in
@@ -848,12 +862,12 @@ let () =
   let h1 = hits () in
   let moved, _ = ok (Sop.Node.apply_parameters base ["n", Param.Int_value 5]) in
   check (hits () = h1 && bytes moved <> first) "a changed parameter returned a stale entry";
-  let backend : Flow_ir.Gpu.backend = {cost = (fun _ ~count:_ -> None);
-    prepare = (fun _ -> Error (Flow.Diagnostic.error ~code:"E_TEST" "no kernel"))} in
-  Flow_ir.Gpu.with_backend backend (fun () ->
-    let h2 = hits () in ignore (build ());
-    Flow_ir.Gpu.with_backend ~policy:Qualification backend (fun () ->
-      let h3 = hits () in ignore (build ());
-      check (hits () = h3) "a changed GPU policy returned a stale entry");
-    check (hits () = h2) "a new GPU backend returned a stale entry");
+  let backend : Flow_ir.Gpu.backend = {cost = (fun ~fast:_ _ ~count:_ -> None);
+    prepare = (fun ~fast:_ _ -> Error (Diagnostic.error ~code:"E_TEST" "no kernel"))} in
+  let measured={Flow_ir.Gpu.default with backend=Some backend} in
+  let qualified={measured with policy=Qualification} in
+  let h2 = hits () in ignore (build ~gpu:measured ());
+  let h3 = hits () in ignore (build ~gpu:qualified ());
+  check (hits () = h3) "a changed GPU policy returned a stale entry";
+  check (hits () = h2) "a new GPU backend returned a stale entry";
   print_endline "Lower build cache: hits match uncached bytes; parameter, backend and policy miss"

@@ -105,42 +105,78 @@ type field_view = {
   current : value;
 }
 
+let group_vec3 ?(infer = false) fields =
+  let names = List.map (fun (field : field_view) -> field.name) fields in
+  let floating (field : field_view) = match field.kind with Floating_view _ -> true | _ -> false in
+  let rec inferred = function
+    | (x : field_view) :: y :: z :: rest when floating x && floating y && floating z
+        && x.vec3 = None && y.vec3 = None && z.vec3 = None
+        && x.folder = y.folder && x.folder = z.folder ->
+        let group = List.find_map (fun (sx, sy, sz) ->
+          if not (String.ends_with ~suffix:sx x.name) then None else
+          let stem = String.sub x.name 0 (String.length x.name - 2) in
+          if y.name = stem ^ sy && z.name = stem ^ sz
+          then Some (if List.mem stem names then stem ^ "_color" else stem) else None)
+          ["_x", "_y", "_z"; "_r", "_g", "_b"] in
+        (match group with
+         | Some group -> {x with vec3 = Some (group, 0)} :: {y with vec3 = Some (group, 1)}
+             :: {z with vec3 = Some (group, 2)} :: inferred rest
+         | None -> x :: inferred (y :: z :: rest))
+    | field :: rest -> field :: inferred rest
+    | [] -> [] in
+  let fields = if infer then inferred fields else fields in
+  let rec group seen result = function
+    | [] -> Ok (List.rev result)
+    | (field : field_view) :: rest ->
+        match field.vec3 with
+        | None -> group seen ([field] :: result) rest
+        | Some (name, 0) when not (List.mem name names || List.mem name seen) ->
+            (match rest with
+             | y :: z :: rest when y.vec3 = Some (name, 1) && z.vec3 = Some (name, 2)
+                 && field.folder = y.folder && field.folder = z.folder
+                 && List.for_all (fun (field : field_view) ->
+                      match field.kind with Floating_view _ -> true | _ -> false) [field; y; z] ->
+                 group (name :: seen) ([field; y; z] :: result) rest
+             | _ -> Error ("Invalid vec3 group " ^ name))
+        | Some (name, _) -> Error ("Invalid or overlapping vec3 group " ^ name) in
+  group [] [] fields
+
 let nonblank what value =
   if String.trim value = "" then invalid_arg (what ^ " must not be blank")
 
 let validate_int_range (range : int_range) =
   if range.soft_max <= range.soft_min then
-    invalid_arg "Parameter.integer: soft max must be greater than soft min";
+    invalid_arg "Param.integer: soft max must be greater than soft min";
   (match range.hard_min, range.hard_max with
    | Some low, Some high when high < low ->
-       invalid_arg "Parameter.integer: hard max must be at least hard min"
+       invalid_arg "Param.integer: hard max must be at least hard min"
    | _ -> ());
   Option.iter (fun low ->
     if range.soft_min < low then invalid_arg
-        "Parameter.integer: soft min must not be below hard min") range.hard_min;
+        "Param.integer: soft min must not be below hard min") range.hard_min;
   Option.iter (fun high ->
     if range.soft_max > high then invalid_arg
-        "Parameter.integer: soft max must not exceed hard max") range.hard_max
+        "Param.integer: soft max must not exceed hard max") range.hard_max
 
 let validate_float_range (range : float_range) =
   if not (Float.is_finite range.soft_min && Float.is_finite range.soft_max)
      || range.soft_max <= range.soft_min
   then invalid_arg
-      "Parameter.floating: soft bounds must be finite and increasing";
+      "Param.floating: soft bounds must be finite and increasing";
   Option.iter (fun value -> if not (Float.is_finite value) then invalid_arg
-      "Parameter.floating: hard bounds must be finite") range.hard_min;
+      "Param.floating: hard bounds must be finite") range.hard_min;
   Option.iter (fun value -> if not (Float.is_finite value) then invalid_arg
-      "Parameter.floating: hard bounds must be finite") range.hard_max;
+      "Param.floating: hard bounds must be finite") range.hard_max;
   (match range.hard_min, range.hard_max with
    | Some low, Some high when high < low ->
-       invalid_arg "Parameter.floating: hard max must be at least hard min"
+       invalid_arg "Param.floating: hard max must be at least hard min"
    | _ -> ());
   Option.iter (fun low ->
     if range.soft_min < low then invalid_arg
-        "Parameter.floating: soft min must not be below hard min") range.hard_min;
+        "Param.floating: soft min must not be below hard min") range.hard_min;
   Option.iter (fun high ->
     if range.soft_max > high then invalid_arg
-        "Parameter.floating: soft max must not exceed hard max") range.hard_max
+        "Param.floating: soft max must not exceed hard max") range.hard_max
 
 let integer ?hard_min ?hard_max ~min:soft_min ~max:soft_max () =
   let range : int_range = { soft_min; soft_max; hard_min; hard_max } in
@@ -153,13 +189,13 @@ let floating ?hard_min ?hard_max ~min:soft_min ~max:soft_max () =
   Floating range
 
 let choice ~equal values =
-  if values = [] then invalid_arg "Parameter.choice: options must not be empty";
+  if values = [] then invalid_arg "Param.choice: options must not be empty";
   let options = Array.of_list values in
   Array.iteri (fun index (label, _) ->
-    nonblank "Parameter.choice label" label;
+    nonblank "Param.choice label" label;
     for previous = 0 to index - 1 do
       if fst options.(previous) = label then invalid_arg
-          (Printf.sprintf "Parameter.choice: duplicate label %S" label)
+          (Printf.sprintf "Param.choice: duplicate label %S" label)
     done) options;
   Choice { options; equal }
 
@@ -225,31 +261,31 @@ let default_label name =
 
 let validate_vec3 : type a. a kind -> (string * int) option -> unit = fun kind ->
   Option.iter (fun (group, component) ->
-    nonblank "Parameter.field vec3 group" group;
-    if component < 0 || component > 2 then invalid_arg "Parameter.field: vec3 component must be 0, 1 or 2";
+    nonblank "Param.field vec3 group" group;
+    if component < 0 || component > 2 then invalid_arg "Param.field: vec3 component must be 0, 1 or 2";
     match kind with Floating _ -> ()
-      | _ -> invalid_arg "Parameter.field: vec3 components must be float fields")
+      | _ -> invalid_arg "Param.field: vec3 components must be float fields")
 
 let field ~name ?label ?description ?(folder = []) ?(impact = Cook)
     ?(primary = false) ?unit ?vec3
     ~kind ~default ~get ~set () =
-  nonblank "Parameter.field name" name;
-  List.iter (nonblank "Parameter.field folder") folder;
+  nonblank "Param.field name" name;
+  List.iter (nonblank "Param.field folder") folder;
   let label = Option.value ~default:(default_label name) label in
-  nonblank "Parameter.field label" label;
+  nonblank "Param.field label" label;
   validate_vec3 kind vec3;
   let default = match normalize_value kind default with
     | Ok value -> value
-    | Error message -> invalid_arg ("Parameter.field " ^ name ^ ": " ^ message)
+    | Error message -> invalid_arg ("Param.field " ^ name ^ ": " ^ message)
   in
   Field { name; label; description; folder; impact; primary; unit; vec3; kind; default; get; set }
 
 let schema ~name ~default fields =
-  nonblank "Parameter.schema name" name;
+  nonblank "Param.schema name" name;
   let seen = Hashtbl.create (List.length fields) in
   List.iter (fun (Field field) ->
     if Hashtbl.mem seen field.name then invalid_arg
-        (Printf.sprintf "Parameter.schema: duplicate field %S" field.name);
+        (Printf.sprintf "Param.schema: duplicate field %S" field.name);
     Hashtbl.add seen field.name ()) fields;
   let by_name = Hashtbl.create (List.length fields) in
   List.iter (fun ((Field field) as packed) ->
@@ -261,7 +297,7 @@ let schema ~name ~default fields =
           normalize_field record field)) (Ok default) fields
     with
     | Ok value -> value
-    | Error message -> invalid_arg ("Parameter.schema " ^ name ^ ": " ^ message)
+    | Error message -> invalid_arg ("Param.schema " ^ name ^ ": " ^ message)
   in
   { schema with default }
 
@@ -272,7 +308,7 @@ let choice_label (choice : 'a choice) value =
   match Array.find_opt (fun (_, candidate) -> choice.equal candidate value)
       choice.options with
   | Some (label, _) -> label
-  | None -> invalid_arg "Parameter.view: choice value is not an option"
+  | None -> invalid_arg "Param.view: choice value is not an option"
 
 let view_field : type record. record -> record field -> field_view =
   fun record (Field field) ->
@@ -301,6 +337,68 @@ let view_field : type record. record -> record field -> field_view =
 
 let view schema record = List.map (view_field record) schema.fields
 
+let float_text ?(decimal = false) value =
+  if Float.is_nan value then "NaN"
+  else if not (Float.is_finite value) then if value > 0. then "Infinity" else "-Infinity"
+  else
+    let bits = Int64.bits_of_float value in
+    let same text = Int64.bits_of_float (float_of_string text) = bits in
+    let rec shortest lo hi best =
+      if lo > hi then best else
+      let precision = (lo + hi) / 2 in
+      let text = Printf.sprintf "%.*g" precision value in
+      if same text
+      then shortest lo (precision - 1) text
+      else shortest (precision + 1) hi best in
+    let text = Printf.sprintf "%.15g" value in
+    let text = if not (same text) then
+      let text = Printf.sprintf "%.16g" value in
+      if same text then text else Printf.sprintf "%.17g" value
+    else
+      let count = ref 0 and started = ref false in
+      let last = Option.value ~default:(String.length text) (String.index_opt text 'e') in
+      for i = 0 to last - 1 do
+        let c = text.[i] in
+        if c >= '0' && c <= '9' then begin
+          if c <> '0' then started := true;
+          if !started then incr count
+        end
+      done;
+      if !count <= 1 then text else
+      let shorter = Printf.sprintf "%.*g" (!count - 1) value in
+      if same shorter then shortest 1 (!count - 2) shorter else text in
+    let dotted text = if String.contains text '.' then text else text ^ ".0" in
+    match String.index_opt text 'e' with
+    | None ->
+        if decimal then dotted text
+        else if value = 0. || Float.abs value >= 0.01 then text
+        else
+          let start = if text.[0] = '-' then 1 else 0 in
+          let first = ref (start + 2) in
+          while text.[!first] = '0' do incr first done;
+          let n = String.length text - !first in
+          let scientific = (if start = 1 then "-" else "")
+            ^ String.make 1 text.[!first]
+            ^ (if n = 1 then "" else "." ^ String.sub text (!first + 1) (n - 1))
+            ^ "e-" ^ string_of_int (!first - start - 1) in
+          if String.length scientific < String.length text then scientific else text
+    | Some at ->
+        let exponent = int_of_string (String.sub text (at + 1) (String.length text - at - 1)) in
+        let scientific = String.sub text 0 at ^ "e" ^ string_of_int exponent in
+        let negative = text.[0] = '-' in
+        let mantissa = String.sub text (if negative then 1 else 0)
+          (at - if negative then 1 else 0) in
+        let point = Option.value ~default:(String.length mantissa) (String.index_opt mantissa '.') in
+        let digits = String.concat "" (String.split_on_char '.' mantissa) in
+        let shifted = point + exponent and n = String.length digits in
+        let plain_length = (if negative then 1 else 0)
+          + (if shifted <= 0 then 2 - shifted + n else if shifted >= n then shifted else n + 1) in
+        if not decimal && plain_length > String.length scientific then scientific else
+        (if negative then "-" else "")
+        ^ (if shifted <= 0 then "0." ^ String.make (-shifted) '0' ^ digits
+           else if shifted >= n then digits ^ String.make (shifted - n) '0' ^ (if decimal then ".0" else "")
+           else String.sub digits 0 shifted ^ "." ^ String.sub digits shifted (n - shifted))
+
 let append_token buffer token =
   Printf.bprintf buffer "%d:%s" (String.length token) token
 
@@ -310,7 +408,7 @@ let append_field buffer record (Field field) =
   | Toggle -> Buffer.add_string buffer (if field.get record then "b1" else "b0")
   | Integer _ -> Printf.bprintf buffer "i%d;" (field.get record)
   | Index_choice _ -> Printf.bprintf buffer "i%d;" (field.get record)
-  | Floating _ -> Printf.bprintf buffer "f%.17g;" (field.get record)
+  | Floating _ -> Printf.bprintf buffer "f%s;" (float_text (field.get record))
   | Text -> Buffer.add_char buffer 's'; append_token buffer (field.get record)
   | Choice choice ->
       Buffer.add_char buffer 'c';
@@ -341,11 +439,7 @@ let cook_text (schema : 'record schema) record =
       | Toggle -> string_of_bool (field.get record)
       | Integer _ -> string_of_int (field.get record)
       | Index_choice _ -> string_of_int (field.get record)
-      | Floating _ ->
-          (* shortest decimal that reads back to the same float *)
-          let value = field.get record in
-          let short = Printf.sprintf "%.15g" value in
-          if float_of_string short = value then short else Printf.sprintf "%.17g" value
+      | Floating _ -> float_text (field.get record)
       | Text -> field.get record
       | Choice choice -> token (choice_label choice (field.get record))
       | Encoded encoding -> encoding.encode (field.get record))))

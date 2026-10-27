@@ -17,17 +17,20 @@ let float state =
   let mantissa = Int64.shift_right_logical value 11 in
   Int64.to_float mantissa /. 9_007_199_254_740_992., state
 
-let[@inline] mix_index value =
+let[@inline always] mix_index value =
   let value = value lxor (value lsr 30) in
   let value = value * 0x3f58476d1ce4e5b9 in
   let value = value lxor (value lsr 27) in
   let value = value * 0x14d049bb133111eb in
   value lxor (value lsr 31)
 
-let[@inline] float_at state ~index =
-  let keyed = Int64.to_int state lxor
+let[@inline always] float_at_int seed ~index =
+  let keyed = seed lxor
       ((index + 0x11b54a32d192ed03) * 0x1e3779b97f4a7c15) in
-  float_of_int (mix_index keyed lsr 10) /. 9_007_199_254_740_992.
+  float_of_int (mix_index keyed lsr 10)
+  *. (1. /. 9_007_199_254_740_992.)
+
+let[@inline always] float_at state ~index = float_at_int (Int64.to_int state) ~index
 
 let int ~bound state =
   if bound <= 0 then invalid_arg "Rand.int: bound must be positive";

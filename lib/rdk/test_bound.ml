@@ -36,11 +36,11 @@ let equal_geometry left right =
       | None, None -> true | _ -> false)
 
 let check_divided_box () =
-  let source = Box_generator.box ~size:(Vec3.create 2. 3. 4.) () |> get_ok
-      |> Transform_ops.transform (Mat4.translation (Vec3.create 3. (-2.) 5.)) in
+  let source = Box_generator.box ~size:(Rays_math.Vec3.create 2. 3. 4.) () |> get_ok
+      |> Transform_ops.transform (Rays_math.Mat4.translation (Rays_math.Vec3.create 3. (-2.) 5.)) in
   let output = Bound.run ~shape:(Bound.Bound_box { divisions = 2, 3, 4 })
-      ~lower_padding:(Vec3.create 1. 2. 3.)
-      ~upper_padding:(Vec3.create 0.5 1. 1.5) ~bounds_group:"bounds"
+      ~lower_padding:(Rays_math.Vec3.create 1. 2. 3.)
+      ~upper_padding:(Rays_math.Vec3.create 0.5 1. 1.5) ~bounds_group:"bounds"
       ~center_attribute:"bound_center" ~radii_attribute:"bound_radii" source
       |> get_ok in
   check (Geometry.point_count output = 94
@@ -85,12 +85,12 @@ let check_divided_box () =
   done
 
 let check_typed_selection () =
-  let source = Box_generator.box ~size:(Vec3.create 2. 2. 2.) () |> get_ok in
+  let source = Box_generator.box ~size:(Rays_math.Vec3.create 2. 2. 2.) () |> get_ok in
   let faces = Group.init ~owner:Group.Primitive ~name:"positive_x" 12
       (fun primitive -> primitive < 2) in
   let output = Bound.run ~selection:(Transform_ops.Selected_primitives faces)
-      ~lower_padding:(Vec3.create 0.1 0. 0.)
-      ~upper_padding:(Vec3.create 0.1 0. 0.) source |> get_ok in
+      ~lower_padding:(Rays_math.Vec3.create 0.1 0. 0.)
+      ~upper_padding:(Rays_math.Vec3.create 0.1 0. 0.) source |> get_ok in
   (match Analysis.bounds output with
    | Some bounds -> check (near bounds.center.x 1. && near bounds.size.x 0.2
        && near bounds.size.y 2. && near bounds.size.z 2.)
@@ -98,11 +98,11 @@ let check_typed_selection () =
    | None -> fail "selected Bound output empty")
 
 let check_sphere () =
-  let source = Box_generator.box ~size:(Vec3.create 2. 2. 2.) () |> get_ok in
+  let source = Box_generator.box ~size:(Rays_math.Vec3.create 2. 2. 2.) () |> get_ok in
   let output = Bound.run
       ~shape:(Bound.Bound_sphere { segments = 16; rings = 8; minimum_radius = 0. })
-      ~lower_padding:(Vec3.create 0.2 0.4 0.6)
-      ~upper_padding:(Vec3.create 0.6 0.4 0.2)
+      ~lower_padding:(Rays_math.Vec3.create 0.2 0.4 0.6)
+      ~upper_padding:(Rays_math.Vec3.create 0.6 0.4 0.2)
       ~center_attribute:"center" ~radii_attribute:"radii" source |> get_ok in
   check (Geometry.point_count output = 114
       && Geometry.primitive_count output = 224)
@@ -133,13 +133,13 @@ let check_validation () =
       ~shape:(Bound.Bound_sphere { segments = 2; rings = 1;
         minimum_radius = -1. }) source);
   expect_code "invalid_geometry" (Bound.run
-      ~lower_padding:(Vec3.create Float.nan 0. 0.) source);
+      ~lower_padding:(Rays_math.Vec3.create Float.nan 0. 0.) source);
   expect_code "invalid_geometry" (Bound.run ~center_attribute:"same"
       ~radii_attribute:"same" source);
   expect_code "invalid_geometry" (Bound.run ~bounds_group:"" source);
   expect_code "invalid_geometry" (Bound.run
       ~shape:(Bound.Bound_box { divisions = max_int, max_int, max_int })
-      ~lower_padding:(Vec3.create 1. 1. 1.) source);
+      ~lower_padding:(Rays_math.Vec3.create 1. 1. 1.) source);
   let empty = Group.init ~owner:Group.Point ~name:"empty" 1 (fun _ -> false) in
   expect_code "invalid_geometry" (Bound.run
       ~selection:(Transform_ops.Selected_points empty) source);
@@ -155,8 +155,8 @@ let check_parallel_exact () =
   let run domains = Parallel.run ~domains (fun () ->
     Bound.run ~grain:1024
       ~shape:(Bound.Bound_box { divisions = 256, 128, 64 })
-      ~lower_padding:(Vec3.create 0.25 0.5 0.75)
-      ~upper_padding:(Vec3.create 0.75 0.5 0.25)
+      ~lower_padding:(Rays_math.Vec3.create 0.25 0.5 0.75)
+      ~upper_padding:(Rays_math.Vec3.create 0.75 0.5 0.25)
       ~bounds_group:"bounds" source |> get_ok) in
   let one = run 1 and many = run 4 in
   check (equal_geometry one many)

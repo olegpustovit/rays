@@ -12,8 +12,8 @@ type image = {node:int; width:int; height:int}
 type summary = Value of E.value | Geometry of geometry | Image of image
 type execution = {tier : string; group : path; seconds : float option}
 type force = ?state:E.state -> ?elems:(string * E.value) list ->
-  ?resolve:(E.value -> (E.value, Flow.Diagnostic.t) result) -> E.value ->
-  live:Frame_input.t -> (E.value, Flow.Diagnostic.t) result
+  ?resolve:(E.value -> (E.value, Diagnostic.t) result) -> E.value ->
+  live:Input.t -> (E.value, Diagnostic.t) result
 
 type footer = {
   value : string; spark : (float array * int) option; branch : string option;
@@ -23,13 +23,12 @@ type footer = {
 
 type t = {
   force : force;
-  execute : (E.residual -> Frame_input.t -> (E.value, Flow.Diagnostic.t) result option) option;
   execution : path -> probes:int list -> execution option;
-  live_frame : Frame_input.t option;
+  live_frame : Input.t option;
   state : E.state option;
-  resolve : (E.value -> (E.value, Flow.Diagnostic.t) result) option;
-  maps : (path * int list, (int * int * (int -> ((path * (int list * E.value) list) list, Flow.Diagnostic.t) result)) list) Hashtbl.t;
-  bulk_calls : path -> int list -> (int * int * (int -> ((path * (int list * E.value) list) list, Flow.Diagnostic.t) result)) list;
+  resolve : (E.value -> (E.value, Diagnostic.t) result) option;
+  maps : (path * int list, (int * int * (int -> ((path * (int list * E.value) list) list, Diagnostic.t) result)) list) Hashtbl.t;
+  bulk_calls : path -> int list -> (int * int * (int -> ((path * (int list * E.value) list) list, Diagnostic.t) result)) list;
   calls : (path * int list, (path * (int list * E.value) list) list) Hashtbl.t;
   dynamic : path -> int option;
   templates : (path, unit) Hashtbl.t;
@@ -54,17 +53,16 @@ let make ?state ?live ?time ?resolve ?force ?(bulk_calls = fun _ _ -> [])
   let templates = Hashtbl.create 8 in
   Array.iter (fun (node : E.node) -> if node.kind = "zone/points" || node.kind = "zone/pieces"
     then Hashtbl.replace templates node.site ()) eval.plan.nodes;
-  let live_frame = match live with Some _ -> live | None -> Option.map Frame_input.at_time time in
+  let live_frame = match live with Some _ -> live | None -> Option.map Input.at_time time in
   let state = Option.map E.fork_state state in
   let force : force option = force in
-  let execute = Option.map (fun (force : force) r live -> Some (force ?state ?resolve (E.Residual r) ~live)) force in
   let force = Option.value ~default:E.Private.force_reference force in
   let image id =
     let dimensions=match image id with Some _ as dimensions->dimensions|None->
       if id<0 || id>=Array.length eval.plan.nodes then None else
       let node=eval.plan.nodes.(id) in
       if node.kind<>"image/noise" && node.kind<>"image/render" then None else
-      let live=Option.value ~default:(Frame_input.at_time 0.) live_frame in
+      let live=Option.value ~default:(Input.at_time 0.) live_frame in
       let dimension name default = match List.assoc_opt name node.args with
         |None->Some default
         |Some value->(match force ?state ?resolve value ~live with
@@ -73,7 +71,7 @@ let make ?state ?live ?time ?resolve ?force ?(bulk_calls = fun _ _ -> [])
       Option.bind(dimension "width" w)(fun width->
         Option.map(fun height->width,height)(dimension "height" h)) in
     Option.map(fun(width,height)->{node=id;width;height}) dimensions in
-  { force; execute; live_frame; state; resolve; execution; bulk_calls; maps = Hashtbl.create 16; calls = Hashtbl.create 16;
+  { force; live_frame; state; resolve; execution; bulk_calls; maps = Hashtbl.create 16; calls = Hashtbl.create 16;
     dynamic; templates; element; geometry; image; raw; forced = Hashtbl.create 64; spots = Hashtbl.create 64;
     across = Hashtbl.create 64; feet = Hashtbl.create 64;
     arms = Hashtbl.create 8 }
@@ -92,7 +90,7 @@ let summarize t v =
   let v = match t.live_frame, t.resolve with
     | (Some _ | None), _ when E.is_live v && (t.live_frame <> None || Option.is_some t.resolve) ->
         (match t.force ?state:t.state ?resolve:t.resolve v
-          ~live:(Option.value ~default:(Frame_input.at_time 0.) t.live_frame) with Ok v -> v | Error _ -> v)
+          ~live:(Option.value ~default:(Input.at_time 0.) t.live_frame) with Ok v -> v | Error _ -> v)
     | _ -> v in
   match v with
   | E.Deferred ((Flow.Ty.Named "geometry"), id) -> (match t.geometry id with Some g -> Geometry g | None -> Value v)
@@ -107,10 +105,10 @@ let plan_node ?(ty = Flow.Ty.geometry) t path ~probes =
   | None ->
       let template = ref probes in
       for length = 1 to List.length path - 1 do
-        let zone = List.filteri (fun i _ -> i < length) path in
+        let zone = List.take length path in
         if Hashtbl.mem t.templates zone then
           List.iter (fun (it, _) ->
-            if it = List.filteri (fun i _ -> i < List.length it) !template then
+            if it = List.take (List.length it) !template then
               template := List.mapi (fun i value -> if i = List.length it then 0 else value) !template)
             (Option.value ~default:[] (Hashtbl.find_opt t.raw zone))
       done;
@@ -207,8 +205,8 @@ let map_calls t zone outer =
       let calls = List.filter_map (fun (it, value) -> if it <> outer then None else
         match value with
         | E.Record ["offset", E.Int offset; "call", E.Residual call] ->
-            (match E.Private.map_probe ?state:t.state ?resolve:t.resolve ?execute:t.execute ~offset call
-              ~live:(Option.value ~default:(Frame_input.at_time 0.) t.live_frame) with
+            (match E.Private.map_probe ?state:t.state ?resolve:t.resolve ~offset call
+              ~live:(Option.value ~default:(Input.at_time 0.) t.live_frame) with
              | Ok (count, at) -> Some (offset, count, at)
              | Error _ -> None)
         | _ -> None) (Option.value ~default:[] (Hashtbl.find_opt t.raw (zone @ ["~calls"]))) in
@@ -249,7 +247,7 @@ let at_element t path zone k =
       (Option.value ~default:[] (Hashtbl.find_opt t.raw path)) in
   match raw, t.element zone k with
   | Some raw, Some elems when E.is_live raw ->
-      (match t.force ?state:t.state ?resolve:t.resolve ~elems raw ~live:(Option.value ~default:(Frame_input.at_time 0.) t.live_frame) with
+      (match t.force ?state:t.state ?resolve:t.resolve ~elems raw ~live:(Option.value ~default:(Input.at_time 0.) t.live_frame) with
        | Ok v -> Some (summarize t v) | Error _ -> None)
   | _ -> None
 
@@ -263,18 +261,18 @@ let compute_at t path ~probes =
       (List.find_map (fun (it, v) -> if it = probes then Some (summarize t v) else None)) with
   | Some _ as found -> found
   | None ->
-      let zones = List.filter (fun i -> t.dynamic (List.filteri (fun j _ -> j < i) path) <> None)
+      let zones = List.filter (fun i -> t.dynamic (List.take i path) <> None)
         (List.init (max 0 (List.length path - 1)) succ) in
       if zones = [] then None
       else
         let template it = List.compare_lengths it probes = 0 && List.for_all2 (fun r p -> r = p || r = 0) it probes in
-        let zone = List.filteri (fun j _ -> j < List.fold_left max 0 zones) path in
+        let zone = List.take (List.fold_left max 0 zones) path in
         let raw = List.find_map (fun (it, v) -> if template it then Some v else None)
             (Option.value ~default:[] (Hashtbl.find_opt t.raw path)) in
         let elems = if probes = [] then None else t.element zone (List.nth probes (List.length probes - 1)) in
         match raw, elems with
         | Some raw, Some elems when E.is_live raw ->
-            (match t.force ?state:t.state ?resolve:t.resolve ~elems raw ~live:(Option.value ~default:(Frame_input.at_time 0.) t.live_frame) with
+            (match t.force ?state:t.state ?resolve:t.resolve ~elems raw ~live:(Option.value ~default:(Input.at_time 0.) t.live_frame) with
              | Ok v -> Some (summarize t v)
              | Error _ -> List.find_map (fun (it, v) -> if template it then Some (summarize t v) else None)
                  (Option.value ~default:[] (Hashtbl.find_opt t.raw path)))
@@ -296,14 +294,14 @@ let compute_taken_arm t (node : P.node) ~probes =
     Option.bind (Hashtbl.find_opt t.raw node.path) (fun records ->
       List.find_map (fun (tuple, value) -> match value with
         | E.Residual residual when tuple = probes ->
-            let view = E.Private.residual_view residual in
+            let view = E.Residual.residual_view residual in
             let term = match view.term.node, key with
               | Flow.Workspace.If (test,_,_), "test" | Case (test,_,_), "of" -> Some test
               | Cond (arms,_), key when String.starts_with ~prefix:"test" key ->
                   Option.bind (int_of_string_opt (String.sub key 4 (String.length key - 4)))
                     (fun i -> Option.map fst (List.nth_opt arms i))
               | _ -> None in
-            Option.bind term (fun term -> Result.to_option (E.Private.eval_term ?state:t.state ?resolve:t.resolve residual term ~live)
+            Option.bind term (fun term -> Result.to_option (E.Residual.eval_term ?state:t.state ?resolve:t.resolve residual term ~live)
               |> Option.map (fun value -> Value value))
         | _ -> None) records)) in
   let at_key key = match List.rev node.path with
@@ -354,17 +352,17 @@ let across t path ~outer =
   | None ->
       let n = List.length outer in
       let matches it = List.compare_length_with it (n + 1) = 0
-        && List.for_all2 ( = ) outer (List.filteri (fun i _ -> i < n) it) in
+        && List.for_all2 ( = ) outer (List.take n it) in
       let a = Array.of_seq (Seq.filter_map (fun (it, s) -> if matches it then Some s else None)
         (Array.to_seq (records t path))) in
       let a =
         if Array.length a > 1 || outer <> [] then a else
-        let zones = List.filter (fun i -> t.dynamic (List.filteri (fun j _ -> j < i) path) <> None)
+      let zones = List.filter (fun i -> t.dynamic (List.take i path) <> None)
           (List.init (max 0 (List.length path - 1)) succ) in
         match zones with
         | [] -> a
         | _ ->
-            let zone = List.filteri (fun j _ -> j < List.fold_left max 0 zones) path in
+            let zone = List.take (List.fold_left max 0 zones) path in
             (match t.dynamic zone with
              | Some count when count > 1 ->
                  let forced = Array.init count (fun k -> at_element t path zone k) in
@@ -398,7 +396,7 @@ let position t path ~probes ~len =
         (int_of_float (Float.round (float p *. float (len - 1) /. float (count - 1))))
   | _ ->
   let mine = List.filter (fun (it, _) ->
-    List.compare_length_with it (n + 1) = 0 && List.filteri (fun i _ -> i < n) it = outer)
+    List.compare_length_with it (n + 1) = 0 && List.take n it = outer)
     (Array.to_list (records t path)) in
   (* a loop over geometry has one template record, forced for each element: no iteration is missing *)
   if List.length mine <> len then min p (len - 1)

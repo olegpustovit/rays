@@ -1,9 +1,9 @@
 // node runtime.mjs RUNTIME_JS
 //
-// Event translation, the held sets, per-frame ordering and the frame clock of tools/web/runtime/runtime.js,
+// Event translation, the held sets, per-frame ordering and the frame clock of lib/web_export/runtime/runtime.js,
 // from synthetic DOM-like events. The expected records are written from the native shapes:
 //   event fields and defaults      lib/flow/op.ml:104-107, 120-134 (event_fields, event_value)
-//   the frame record               lib/flow/op.ml:108-112, 136-139 (frame_ty, frame_value), frame_input.mli:21-24
+//   the frame record               lib/flow/op.ml:108-112, 136-139 (frame_ty, frame_value), input.mli:21-24
 //   held buttons and keys, pointer lib/rays/input_state.ml:14-24, 115-116; names lib/rays_editor/live_frame.ml:3-18
 //   the clock                      lib/rays/sketch.ml:211-212, lib/rays/time.ml:19
 // Prints one "ok" line, or every mismatch and exits 1.

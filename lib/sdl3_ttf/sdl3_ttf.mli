@@ -39,7 +39,6 @@ module Font : sig
     descent : int;
     line_skip : int;
   }
-  type style = Normal | Bold | Italic | Underline | Strikethrough
   type alignment = Left | Center | Right
   type hinting = Normal_hinting | Light_hinting | Mono_hinting
     | None_hinting | Light_subpixel_hinting
@@ -53,21 +52,13 @@ module Font : sig
       non-empty; otherwise the macOS system fonts are tried in stable order. *)
   val system_path : unit -> (string, error) result
   val metrics : t -> (metrics, error) result
-  val family_name : t -> (string option, error) result
-  val style_name : t -> (string option, error) result
   val set_size_dpi :
     t -> size:float -> horizontal:int -> vertical:int -> (unit, error) result
-  val set_style : t -> style list -> (unit, error) result
-  val set_outline : t -> int -> (unit, error) result
   val set_hinting : t -> hinting -> (unit, error) result
-  val set_kerning : t -> bool -> (unit, error) result
   val set_wrap_alignment : t -> alignment -> (unit, error) result
   (** Line alignment inside [render_blended_wrapped] output. *)
 
   val glyph_metrics : t -> int -> (glyph_metrics, error) result
-  val size_text : t -> string -> (int * int, error) result
-  val size_text_wrapped : t -> wrap_width:int -> string ->
-    (int * int, error) result
 
   (** Render UTF-8 to tightly packed RGBA8 rows. Empty text is [Ok None], preserving
       the high-level no-op contract instead of asking SDL_ttf for a 0-width

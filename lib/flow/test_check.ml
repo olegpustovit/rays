@@ -10,10 +10,10 @@ let rows = Check.{name = "rows"; label = "Rows"; ty = Some Port_type.Int;
 let mode = Check.{name = "mode"; label = "Mode"; ty = None;
   fields = ["mode", Param.Choice_view [|"solid"; "wire"|],
     Param.Choice_value "solid"]; folder = []; primary = false; unit = None}
-let box = Check.{qualified = "sop/box"; aliases = [];
+let box = Check.{qualified = "sop/box";
   context = Context.sop; slots = []; parameters = [size; rows; mode];
   outputs = ["geo", Port_type.Geometry]; facts = None}
-let transform = Check.{qualified = "sop/transform"; aliases = [];
+let transform = Check.{qualified = "sop/transform";
   context = Context.sop; slots = [{name = "in0"; required = true; rest = false; ty = None}]; parameters = [];
   outputs = ["geo", Port_type.Geometry]; facts = None}
 let catalog = Check.{version = 202609; kinds = [box; transform]}
@@ -45,12 +45,16 @@ let () =
   assert (code (resolve Context.sop "boxx") = "E_UNKNOWN_KIND");
   assert (code (resolve Context.sop "nope/box") = "E_NAMESPACE");
   assert (code (resolve Context.scene "sop/box") = "E_WRONG_CONTEXT");
+  let scene_box = {box with Check.qualified = "scene/box"; context = Context.scene} in
+  let ambiguous = {catalog with Check.kinds = box :: transform :: [scene_box]} in
+  assert (code (Check.resolve_kind ambiguous Context.sop "box") = "E_AMBIGUOUS");
+  assert (Check.resolve_kind ambiguous Context.sop "sop/box" |> Result.is_ok);
   (match Check.catalog_of_manifest "(flow_manifest (version 1) (digest \"wrong\") (kinds))" with
    | Error diagnostic -> assert (diagnostic.code = "E_CATALOG"
        && diagnostic.message = "Flow manifest digest must be 32 lowercase hex digits")
    | Ok _ -> failwith "accepted malformed Flow manifest digest");
   let manifest facts =
-    let kind = "(kind \"sop/box\" (key \"box\") (aliases) (operation \"box\")\n\
+    let kind = "(kind \"sop/box\" (key \"box\") (operation \"box\")\n\
       (label \"Box\") (category \"Create\") (slots) (fields) (outputs) " ^ facts ^ ")" in
     let digest = Digest.to_hex (Digest.string ("(version 1)\n(kinds " ^ kind ^ ")")) in
     "(flow_manifest (version 1) (digest \"" ^ digest ^ "\") (kinds " ^ kind ^ "))" in
@@ -70,7 +74,7 @@ let () =
      facts "points" "\"P\"" "generic" "";
      valid ^ " " ^ valid];
   let field_manifest metadata =
-    let kind = "(kind \"sop/test\" (key \"test\") (aliases) (operation \"test\") (label \"Test\") (category)
+    let kind = "(kind \"sop/test\" (key \"test\") (operation \"test\") (label \"Test\") (category)
       (slots) (fields (field \"amount\" \"Amount\" (folder) (float (soft 0 1) (hard nil nil))
         (float 0) (primary false) (vec3) " ^ metadata ^ ")) (outputs))" in
     let kind=Lisp.flat (List.hd (Result.get_ok (Syntax.parse kind))) in

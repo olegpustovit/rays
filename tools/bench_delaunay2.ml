@@ -12,11 +12,11 @@ let refinement_points = integer_env "RAYS_REFINEMENT_POINTS" 100_000
 let refinement_constraints = integer_env "RAYS_REFINEMENT_CONSTRAINTS" 10_000
 let regularization_points = integer_env "RAYS_REGULARIZATION_POINTS" 10_000
 let domains = integer_env "RAYS_DELAUNAY_DOMAINS"
-    (Rays.Parallel.recommended_domains ())
+    (Parallel.recommended_domains ())
 
 let coordinate point salt =
-  let state = Rays.Rand.seed ((point * 2) + salt) in
-  let value,_ = Rays.Rand.float state in
+  let state = Rays_math.Rand.seed ((point * 2) + salt) in
+  let value,_ = Rays_math.Rand.float state in
   value
 
 let x = Array.init points (fun point -> coordinate point 17)
@@ -352,4 +352,4 @@ let run_benchmarks () =
 
 let () =
   Printf.eprintf "bench_delaunay2: domains=%d ocaml=%s\n%!" domains Sys.ocaml_version;
-  Rays.Parallel.run ~domains run_benchmarks
+  Parallel.run ~domains run_benchmarks

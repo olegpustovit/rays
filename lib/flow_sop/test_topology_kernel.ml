@@ -2,7 +2,7 @@ module E = Flow.Eval
 module G = Rdk.Geometry
 module T = Rdk.Topology
 let ok = function Ok value -> value | Error message -> failwith message
-let flow_ok = function Ok value -> value | Error d -> failwith (Flow.Diagnostic.to_string d)
+let flow_ok = function Ok value -> value | Error d -> failwith (Diagnostic.to_string d)
 
 let fixtures () =
   let topology points vertex_points primitive_offsets primitive_kinds =
@@ -24,7 +24,7 @@ let checked body =
   let forms = Flow.Syntax.parse source |> flow_ok in
   match Flow.Workspace.check ~ops:Flow_sop.Operators.all {Flow.Check.version=1;kinds=[]} forms with
   | Some checked, [] -> checked
-  | _, ds -> failwith (String.concat "; " (List.map Flow.Diagnostic.to_string ds))
+  | _, ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
 
 let evaluate geometry body =
   let value = Flow.Eval.static ~record:true ~inputs:["g",["geo",E.Deferred (Flow.Ty.geometry,7)]] (checked body)
@@ -38,17 +38,17 @@ let () =
     let view = Rdk.Topology_index.Private.view index in
     List.iter (fun (element, expected) ->
       let value, resolve = evaluate geometry ("(sop/count geo :" ^ element ^ ")") in
-      let live=Frame_input.at_time 0. in
+      let live=Input.at_time 0. in
       let program=Flow_ir.Executor.compile ~strict:true value |> flow_ok in
-      List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+      List.iter(fun domains->Parallel.run ~domains(fun()->
         assert(flow_ok(E.Private.force_reference ~resolve value ~live)=E.Int expected);
         assert(flow_ok(Flow_ir.Executor.force ~strict:true ~resolve program ~live)=E.Int expected))) [1;8])
       ["points",G.point_count geometry;"vertices",G.vertex_count geometry;
        "primitives",G.primitive_count geometry;"edges",Rdk.Topology_index.edge_count index];
     let value, resolve = evaluate geometry "(sop/edges geo)" in
     let expected = E.Record ["a",E.Int_array (Array.copy view.edge_a);"b",E.Int_array (Array.copy view.edge_b)] in
-    List.iter (fun domains -> Rays_math.Parallel.run ~domains (fun () ->
-      let live = Frame_input.at_time 0.25 in
+    List.iter (fun domains -> Parallel.run ~domains (fun () ->
+      let live = Input.at_time 0.25 in
       let result = flow_ok (E.Private.force_reference ~resolve value ~live) in
       assert (result=expected);
       let core = Flow_ir.Executor.compile ~strict:true value |> flow_ok in
@@ -59,9 +59,9 @@ let () =
     let value, resolve = evaluate geometry
       "(map (fn [(x : int)] (int/add x (frame/index))) (get (sop/edges geo) :a))" in
     let core = Flow_ir.Executor.compile ~strict:true value |> flow_ok in
-    let live = {(Frame_input.at_time 0.25) with frame=3} in
+    let live = {(Input.at_time 0.25) with frame=3} in
     let expected = E.Int_array (Array.map (fun x -> x+3) view.edge_a) in
-    List.iter (fun domains -> Rays_math.Parallel.run ~domains (fun () ->
+    List.iter (fun domains -> Parallel.run ~domains (fun () ->
       assert (flow_ok (E.Private.force_reference ~resolve value ~live)=expected);
       assert (flow_ok (Flow_ir.Executor.force ~strict:true ~resolve core ~live)=expected))) [1;8];
     let value, resolve = evaluate geometry
@@ -88,7 +88,7 @@ let () =
         match Sop.Session.cook session ~context node with
         | Ok output -> assert(Rdk_test_support.geometry_bytes(Result.get_ok(Sop.Payload.geometry output.payload))
             =Rdk_test_support.geometry_bytes expected)
-        | Error diagnostic -> failwith(Sop.Diagnostic.error_to_string diagnostic))) [1;8])
+        | Error diagnostic -> failwith(Diagnostic.error_to_string diagnostic))) [1;8])
     ["point","points",Rdk.Attribute.Point,G.point_count;
      "vertex","vertices",Vertex,G.vertex_count;
      "primitive","primitives",Primitive,G.primitive_count]) (fixtures());
@@ -116,11 +116,11 @@ let () =
   (match source with E.Source("sop/count",Flow.Ty.Int,args)->assert(List.assoc "element" args=E.Text "edges")
     |_->assert false);
   List.iter(fun text->let _,diagnostics=checker catalog (Flow.Syntax.parse text |> flow_ok) in
-    assert(List.exists(fun(d:Flow.Diagnostic.t)->d.severity=Error)diagnostics))
+    assert(List.exists(fun(d:Diagnostic.t)->d.severity=Diagnostic.Error_severity)diagnostics))
     ["(workspace bad (graph g :context sop (sop/count nil :detail)))";
      "(workspace bad (graph g :context sop (sop/count nil 2)))";
      "(workspace bad (graph g :context sop (sop/edges 2)))"];
-  let refused code = function Error(d:Flow.Diagnostic.t)->assert(d.code=code)|Ok _->assert false in
+  let refused code = function Error(d:Diagnostic.t)->assert(d.code=code)|Ok _->assert false in
   let missing=Flow_sop.Attribute_kernel.resolve ~geometry:(fun _->None) in
   refused "E_DATA_SOURCE" (missing(E.Source("sop/count",Flow.Ty.Int,
     ["geometry",E.Deferred(Flow.Ty.geometry,7);"element",E.Text"points"])));
@@ -146,7 +146,7 @@ let () =
   assert((Sop.Node.facts node).reads=[]);
   let cooked session node = match Sop.Session.cook session ~context:(Sop.Context.create() |> ok) node with
     | Ok output -> Sop.Payload.geometry output.payload |> Result.get_ok
-    | Error d -> failwith(Sop.Diagnostic.error_to_string d) in
+    | Error d -> failwith(Diagnostic.error_to_string d) in
   let edge_count geometry=Rdk.Topology_index.edge_count(Rdk.Topology_index.create(G.topology geometry)) in
   let check output expected =
     let values=G.find_attribute ~owner:Rdk.Attribute.Detail "edge_count" output |> Option.get

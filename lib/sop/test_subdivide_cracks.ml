@@ -20,8 +20,8 @@ let () =
     let node = ok (Edit_graph.instantiate_optional factory [Some input; None]) in
     fst (ok (Node.apply_parameters node values)) in
   List.iter (fun cracks ->
-    let values = [ "group", Parameter.Text_value "part"; "hole_group", Parameter.Text_value "";
-                   "cracks", Parameter.Choice_value cracks ] in
+    let values = [ "group", Param.Text_value "part"; "hole_group", Param.Text_value "";
+                   "cracks", Param.Choice_value cracks ] in
     let a = cook (make Nodes.Subdivide.factory values)
     and b = cook (make Nodes.Subdivide_cracks.factory values) in
     assert (Rdk.Geometry.point_count a = Rdk.Geometry.point_count b);

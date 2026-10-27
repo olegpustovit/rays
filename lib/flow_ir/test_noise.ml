@@ -1,5 +1,5 @@
 module N = Rays_math.Noise
-module P = Rays_math.Parallel
+module P = Parallel
 let bits x y = Int64.bits_of_float x = Int64.bits_of_float y
 let rejects f = match f () with
   | exception Invalid_argument _ -> ()
@@ -72,46 +72,46 @@ let () =
     rejects (fun () -> N.Private.sample3_into noise ~first:0 ~last:(count - 1)
       ~x:in_place ~y ~z ~output:in_place ~output_offset:1 ());
     N.Private.sample3_into noise ~first:count ~last:count ~x ~y ~z ~output:in_place ())
-    [0; 42; -17];
+  [0; 42; -17];
   List.iter (fun (op : Flow.Op.t) ->
-    assert (Flow.Op.validate [op] = None);
-    assert (Option.get (Flow.Op.find ~extra:Flow_ir.Operators.all op.name Flow.Context.sop) == op);
-    let result = op.body ~live:(Frame_input.at_time 0.)
+    assert (match Flow.Op.find op.name Flow.Context.value with Some found -> found == op | None -> false);
+    let result = op.body ~live:(Input.at_time 0.)
       ~node:(fun _ _ -> failwith "noise created a geometry node")
       ["position", Flow.Value.Vec3 (0.37, -1.25, 17.4)] in
     assert (Flow.Ty.fits (Flow.Value.ty_of result) (op.out [Flow.Ty.Vec3]));
     match result with
     | Flow.Value.Float n -> assert (bits n (N.sample3 (N.create 0) ~x:0.37 ~y:(-1.25) ~z:17.4))
-    | _ -> assert false) [Flow_ir.Operators.noise3];
+    | _ -> assert false) [Flow.Op.noise3];
   print_endline "Packed noise spans, scalar bits and one/eight-domain parity passed"
 
 let () =
   let forms=Result.get_ok (Flow.Syntax.parse "(workspace noise_scaling (graph g :context value
     (let* [tested (map (fn [p] (if (> t 1e308) (noise3 (* p t)) 0.0))
       (array/vec3 2051 [2.0 3.0 4.0]))] 0.0)))") in
-  let workspace=match Flow.Workspace.check ~ops:Flow_ir.Operators.all {Flow.Check.version=1;kinds=[]} forms with
-    |Some w,ds when not (List.exists (fun (d:Flow.Diagnostic.t)->d.severity=Error) ds)->w
-    |_,ds->failwith (String.concat "\n" (List.map Flow.Diagnostic.to_string ds)) in
+  let workspace=match Flow.Workspace.check ~ops:[] {Flow.Check.version=1;kinds=[]} forms with
+    |Some w,ds when not (List.exists (fun (d:Diagnostic.t)->d.severity=Diagnostic.Error_severity) ds)->w
+    |_,ds->failwith (String.concat "\n" (List.map Diagnostic.to_string ds)) in
   let evaluation=Result.get_ok (Flow.Eval.static ~record:true workspace) in
   let value=List.assoc ["g";"tested"] evaluation.records |> List.hd |> snd in
   let packed=match value with Flow.Eval.Residual r->
-    Flow_ir.Packed.compile r (Flow.Eval.Private.residual_view r).term |> Option.get
+    Flow_ir.Packed.compile r (Flow.Eval.Residual.residual_view r).term |> Option.get
     |_->assert false in
-  (match Flow_ir.Packed.force ~strict:true packed ~live:(Frame_input.at_time 1e308) with
+  (match Flow_ir.Packed.force ~strict:true packed ~live:(Input.at_time 1e308) with
    | Ok (Flow.Eval.Float_array values) -> assert (Array.for_all ((=) 0.) values)
    | _ -> failwith "Untaken scaled noise branch was evaluated");
-  assert (Result.is_error (Flow_ir.Packed.force ~strict:true packed ~live:(Frame_input.at_time Float.max_float)));
+  assert (Result.is_error (Flow_ir.Packed.force ~strict:true packed ~live:(Input.at_time Float.max_float)));
   print_endline "Packed scaled noise skips untaken overflow and refuses selected overflow"
 
 let () =
-  let noise = Flow_ir.Operators.noise3 in
+  let noise = Flow.Op.noise3 in
   assert (Flow.Op.packed_kind noise = Some Flow.Op.Noise3);
-  assert (noise.packed_extension = Some Flow.Packed_ops.Noise3);
+  assert (noise.packed_extension = Some Flow.Op.Noise3);
   List.iter (fun (op : Flow.Op.t) ->
-    assert (op.packed_extension = None && Flow.Op.packed_kind op = None))
-    (List.filter (fun (op : Flow.Op.t) -> op.name <> "noise3") Flow_ir.Operators.all);
+    assert (op.packed_extension = None && Flow.Op.packed_kind op <> Some Flow.Op.Noise3))
+    (List.filter (fun (op : Flow.Op.t) ->
+      List.mem op.name ["color/hsl"; "color/hsla"; "color/gradient"]) Flow.Op.all);
   let reversed = {noise with signature = {noise.signature with kw = List.rev noise.signature.kw}} in
-  assert (Flow.Op.validate [reversed] = None && Flow.Op.packed_kind reversed = Some Flow.Op.Noise3);
+  assert (Flow.Op.packed_kind reversed = Some Flow.Op.Noise3);
   List.iter (fun (op : Flow.Op.t) ->
     assert (Flow.Op.packed_kind op = None);
     match Flow.Op.validate [op] with
@@ -121,21 +121,25 @@ let () =
      {noise with out = (fun _ -> Flow.Ty.Vec3)};
      {noise with signature = {noise.signature with kw = ["seed", Flow.Ty.Int; "seed", Flow.Ty.Int]}};
      {noise with signature = {noise.signature with kw = ["seed", Flow.Ty.Int; "octaves", Flow.Ty.Float]}};
-     {noise with name = "other_noise"}; {noise with live = true}];
+     {noise with name = "other_noise"}; {noise with live = true};
+     {noise with name = "toy_intrinsic"; packed_extension = Some Flow.Op.Fma}];
   let sine = Option.get (Flow.Op.find "sin" Flow.Context.value) in
   let counterfeit = {sine with name = "noise3"} in
-  assert (Flow.Op.validate [counterfeit] = None && Flow.Op.packed_kind counterfeit = None);
-  let compile op body source =
+  assert (Option.fold ~none:false ~some:(fun (d : Diagnostic.t) -> d.code = "E_OP_DECLARATION")
+    (Flow.Op.validate [counterfeit]) && Flow.Op.packed_kind counterfeit = None);
+  let compile (op : Flow.Op.t) body source =
     let text = "(workspace w (graph g :context value (let* [tested (map (fn [p] "
       ^ body ^ ") " ^ source ^ ")] 0.0)))" in
     let forms = Result.get_ok (Flow.Syntax.parse text) in
-    let workspace = match Flow.Workspace.check ~ops:[op] {Flow.Check.version=1;kinds=[]} forms with
+    let ops = if op.name = "noise3" then [] else [op] in
+    let workspace = match Flow.Workspace.check ~ops {Flow.Check.version=1;kinds=[]} forms with
       | Some w, [] -> w
-      | _, ds -> failwith (String.concat "\n" (List.map Flow.Diagnostic.to_string ds)) in
+      | _, ds -> failwith (String.concat "\n" (List.map Diagnostic.to_string ds)) in
     let evaluated = Result.get_ok (Flow.Eval.static ~record:true workspace) in
     match List.assoc ["g";"tested"] evaluated.records |> List.hd |> snd with
     | Flow.Eval.Residual residual ->
-        Flow_ir.Packed.compile residual (Flow.Eval.Private.residual_view residual).term
+        Flow_ir.Packed.compile residual (Flow.Eval.Residual.residual_view residual).term
     | _ -> failwith "capability test did not defer its map" in
   assert (Option.is_some (compile noise "(noise3 (+ p [t 0 0]))" "(array/vec3 2051 [0.3 0.7 -0.2])"));
-  assert (compile counterfeit "(noise3 (+ p t))" "(array/range 2051)" = None)
+  let custom = {noise with name = "toy_noise3"; packed_extension = None} in
+  assert (compile custom "(toy_noise3 (+ p [t 0 0]))" "(array/vec3 2051 [0.3 0.7 -0.2])" = None)

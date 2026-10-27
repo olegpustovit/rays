@@ -32,8 +32,7 @@ val empty : t
    typed lowering error instead of dropping lights. *)
 val create :
   ?lights:Light.t list ->
-  ?shadow:Shadow3.t ->
-  ?ambient:Color.t ->
+  ?ambient:Rays_math.Color.t ->
   ?separate_specular:bool ->
   ?samples:int ->
   node list ->
@@ -63,7 +62,7 @@ val instances_array :
   ?cull:cull ->
   ?shading:shading ->
   Mesh.t ->
-  Mat4.t array ->
+  Rays_math.Mat4.t array ->
   node
 (** Array-native instance submission. The array is copied once; meshes remain
     shared and instance transforms stream through rendering without first
@@ -74,8 +73,8 @@ val nodes : t -> node list
     place a whole scene under a [transform] inside another. *)
 
 val group : node list -> node
-val transform : Mat4.t -> node list -> node
-val translate : Vec3.t -> node list -> node
+val transform : Rays_math.Mat4.t -> node list -> node
+val translate : Rays_math.Vec3.t -> node list -> node
 val with_depth : depth_state -> node list -> node
 val with_blend : blend -> node list -> node
 
@@ -107,20 +106,18 @@ module Private : sig
     depth : depth_state;
 
     blend : blend;
-    transform : Mat4.t;
+    transform : Rays_math.Mat4.t;
   }
 
   val drawings : t -> drawing list
   val cacheable : t -> bool
   (* Iterate one descriptor per mesh node. [Some transforms] is a borrowed
      instance batch composed after the descriptor's parent transform. *)
-  val iter_batches : (drawing -> Mat4.t array option -> unit) -> t -> unit
+  val iter_batches : (drawing -> Rays_math.Mat4.t array option -> unit) -> t -> unit
   val lights : t -> Light.t list
-  val shadow : t -> Shadow3.t option
-  val ambient : t -> Color.t
+  val ambient : t -> Rays_math.Color.t
   val separate_specular : t -> bool
   val depth_clear : t -> float
-  val stencil_clear : t -> int
   val samples : t -> int
   val world : t -> World.baked option
 end

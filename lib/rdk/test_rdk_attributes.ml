@@ -539,7 +539,7 @@ let transfer ~geometry ~triangle_geometry =
       ~owner:Attribute.Primitive (Attribute.Int [|4; 8|]) |> get_ok in
   let primitive_source = triangle_geometry
       (* Exact centroids (2,1)/(1,2) make the target (1.5,1.5) a true tie. *)
-      |> Transform_ops.transform (Mat4.scaling (Vec3.create 3. 3. 3.))
+      |> Transform_ops.transform (Rays_math.Mat4.scaling (Rays_math.Vec3.create 3. 3. 3.))
       |> Geometry.with_attribute primitive_weight |> get_ok
       |> Geometry.with_attribute primitive_id |> get_ok in
   let primitive_target_positions = Packed.Float3.Private.of_owned_exn
@@ -799,8 +799,8 @@ let transfer ~geometry ~triangle_geometry =
   let concave_index = Surface_index.create concave_geometry |> get_ok in
   if Surface_index.triangle_count concave_index <> 3 then
     fail "surface index concave polygon triangle cardinality";
-  (match Surface_index.raycast concave_index ~origin:(Vec3.create 0.4 1.4 0.75)
-      ~direction:(Vec3.neg Vec3.unit_z) with
+  (match Surface_index.raycast concave_index ~origin:(Rays_math.Vec3.create 0.4 1.4 0.75)
+      ~direction:(Rays_math.Vec3.neg Rays_math.Vec3.unit_z) with
    | Ok (Some hit) when hit.primitive = 0 && near hit.distance 0.75 -> ()
    | _ -> fail "surface index missed a concave polygon interior");
   let bow_tie_positions = Packed.Float3.Private.of_owned_exn

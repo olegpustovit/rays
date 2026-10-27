@@ -9,7 +9,7 @@
 val node :
   ?label:string ->
   operation:string ->
-  schema:'parameters Parameter.schema ->
+  schema:'parameters Param.schema ->
   values:'parameters ->
   Node.t list ->
   (label:string -> inputs:Node.t list -> parameters:'parameters -> Node.t) ->
@@ -18,19 +18,6 @@ val node :
     writing the recursive [Node.parameterize] reconstruction boilerplate. The
     callback must build the unparameterized local operator from its supplied
     label, current graph inputs, and immutable parameter record. *)
-
-val map :
-  ?label:string ->
-  ?version:int ->
-  ?dependencies:Context.Dependencies.t ->
-  operation:string ->
-  schema:'parameters Parameter.schema ->
-  values:'parameters ->
-  Node.t ->
-  (parameters:'parameters -> context:Context.t -> Rdk.Geometry.t ->
-   (Rdk.Geometry.t, string) result) ->
-  Node.t
-(** Unary convenience for attribute/topology wrangle-like transforms. *)
 
 val plain :
   ?label:string ->

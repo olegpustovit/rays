@@ -1,0 +1,29 @@
+kind     style                 n |         ms          bytes  kernels
+circles  uniform          100000 |      0.684          22336        1
+circles  radius           100000 |      0.694          22432        1
+circles  fill             100000 |      0.708          22256        1
+circles  per-instance     100000 |      0.706          22352        1
+circles  moving radius    100000 |      0.707          25464        1
+circles  moving fill      100000 |      0.693          25280        1
+circles  moving both      100000 |      0.922          27464        1
+rects    uniform          100000 |      0.696          22248        1
+rects    radius           100000 |      0.677          22296        1
+rects    fill             100000 |      0.692          22168        1
+rects    per-instance     100000 |      0.766          22216        1
+rects    moving radius    100000 |      0.875          25344        1
+rects    moving fill      100000 |      0.840          25192        1
+rects    moving both      100000 |      0.749          27344        1
+circles  uniform         1000000 |      1.111          22264        1
+circles  radius          1000000 |      1.231          22360        1
+circles  fill            1000000 |      1.223          22184        1
+circles  per-instance    1000000 |      1.034          22280        1
+circles  moving radius   1000000 |      1.753          25392        1
+circles  moving fill     1000000 |      1.633          25208        1
+circles  moving both     1000000 |      2.533          27392        1
+rects    uniform         1000000 |      1.149          22176        1
+rects    radius          1000000 |      1.217          22224        1
+rects    fill            1000000 |      1.138          22096        1
+rects    per-instance    1000000 |      1.030          22144        1
+rects    moving radius   1000000 |      1.817          25272        1
+rects    moving fill     1000000 |      1.544          25120        1
+rects    moving both     1000000 |      2.212          27272        1

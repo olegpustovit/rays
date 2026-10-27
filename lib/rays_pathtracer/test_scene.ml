@@ -1,17 +1,20 @@
 (* Several objects per trace (scene_mesh), Light.t conversion, and a flat mesh
    mixing triangles with analytic spheres (one BLAS per geometry kind). *)
 module P = Rays_pathtracer
-module V = Rays.Vec3
-module M = Rays.Mat4
+module V = Rays_math.Vec3
+module M = Rays_math.Mat4
 let rgb = P.Linear_color.rgb
 let get = function Ok v -> v | Error e -> failwith e
 let rdk r = get (Result.map_error Rdk.Error.to_string r)
+let rays_mesh geometry = get (Result.map_error Rdk.Error.to_string
+  (Rdk_rays.Rays_mesh.to_trace_mesh geometry))
+let prepared geometry material = get (P.mesh [rays_mesh geometry, material])
 let live_handles = let _, live = Ogpu.Impl.create_driver () in live
 let black = { P.sky = rgb 0. 0. 0.; ground = rgb 0. 0. 0.; panels = [] }
 
 (* The kernel's resolve (ACES fit, gamma 2.2, exposure 1) and its inverse. *)
 let resolve x =
-  let c = x *. (2.51 *. x +. 0.03) /. (x *. (2.43 *. x +. 0.59) +. 0.14) in
+  let c = Rays_math.Color.aces x in
   Float.min 1. (Float.max 0. c) ** (1. /. 2.2) *. 255.
 let unresolve value =
   let rec search lo hi n = if n = 0 then (lo +. hi) /. 2. else
@@ -23,7 +26,7 @@ let run () =
   let floor = rdk (Rdk.Box_generator.box ~center:(V.create 0. (-0.05) 0.) ~size:(V.create 20. 0.1 20.) ()) in
   let box = rdk (Rdk.Box_generator.box ~center:(V.create 0. 0.5 0.) ~size:(V.create 1. 1. 1.) ()) in
   let ball = rdk (Rdk.Uv_sphere.run ~center:V.zero ~segments:24 ~rings:12 ~radius:0.4 ()) in
-  let scene = { P.objects = [ (floor, P.material (rgb 0.5 0.5 0.5)) ]; spheres = []; strands = []
+  let scene = { P.objects = [ (rays_mesh floor, P.material (rgb 0.5 0.5 0.5)) ]; spheres = []; strands = []
               ; environment = { sky = rgb 0.5 0.6 0.8; ground = rgb 0.2 0.2 0.2; panels = [] }
               ; lights = [ P.rect_light ~intensity:20. ~size:(2., 2.) ~target:V.zero (V.create (-2.) 5. 2.) ] } in
   match P.create ~spp:2 ~width:64 ~height:48 scene with
@@ -41,14 +44,14 @@ let run () =
       let a = M.translation (V.create 0. 0.4 0.)
       and b = M.mul (M.translation (V.create 0.3 1.3 0.)) (M.scaling (V.create 0.8 0.8 0.8)) in
       let scene_of t1 = get (P.scene_mesh
-        [ (t1, get (P.mesh [ (box, red) ]))
-        ; (t2, get (P.mesh_instanced ~prototype:(ball, gray) ~materials:[| green; blue |] [| a; b |]))
-        ; (M.identity, get (P.mesh [ (floor, gray) ])) ]) in
+        [ (t1, get (P.mesh [ (rays_mesh box, red) ]))
+        ; (t2, get (P.mesh_instanced ~prototype:(prepared ball gray) ~materials:[| green; blue |] [| a; b |]))
+        ; (M.identity, get (P.mesh [ (rays_mesh floor, gray) ])) ]) in
       let composed = get (P.mesh
-        [ (Rdk.Transform_ops.transform t1 box, red)
-        ; (Rdk.Transform_ops.transform (M.mul t2 a) ball, green)
-        ; (Rdk.Transform_ops.transform (M.mul t2 b) ball, blue)
-        ; (floor, gray) ]) in
+        [ (rays_mesh (Rdk.Transform_ops.transform t1 box), red)
+        ; (rays_mesh (Rdk.Transform_ops.transform (M.mul t2 a) ball), green)
+        ; (rays_mesh (Rdk.Transform_ops.transform (M.mul t2 b) ball), blue)
+        ; (rays_mesh floor, gray) ]) in
       let placed = scene_of t1 in
       let render ?(frames = 2) () =
         P.reset tracer;
@@ -123,9 +126,9 @@ let run () =
       assert (P.samples tracer = 2);
       (* Timing: ~2000 instances of a 12-triangle box plus a 20k-triangle
          mesh, a full scene_mesh + queue_mesh + flush against move + flush. *)
-      let boxes = get (P.mesh_instanced ~prototype:(box, red)
+      let boxes = get (P.mesh_instanced ~prototype:(prepared box red)
         (Array.init 2000 (fun i -> M.translation (V.create (float (i mod 50) *. 0.3 -. 7.5) 0. (float (i / 50) *. -0.3))))) in
-      let dense = get (P.mesh [ (rdk (Rdk.Uv_sphere.run ~center:V.zero ~segments:100 ~rings:101 ~radius:0.5 ()), blue) ]) in
+      let dense = get (P.mesh [ (rays_mesh (rdk (Rdk.Uv_sphere.run ~center:V.zero ~segments:100 ~rings:101 ~radius:0.5 ())), blue) ]) in
       let at x = M.translation (V.create x 1. 0.) in
       let time f = let start = Unix.gettimeofday () in f (); (Unix.gettimeofday () -. start) *. 1000. in
       let runs = 8 in
@@ -146,7 +149,7 @@ let run () =
          lit floor. *)
       let spheres = [{ P.center = V.create 0. 1. 0.; radius = 0.5;
         sphere_material = P.material ~emission:(rgb 4. 0. 0.) (rgb 0. 0. 0.) }] in
-      let mixed = get (P.mesh ~spheres [floor, gray]) in
+      let mixed = get (P.mesh ~spheres [rays_mesh floor, gray]) in
       let mixed_pixels = capture mixed in
       (* The red pixels are the sphere's footprint: none outside its projected
          disc and most of the disc. Green and blue stay below 100, not near
@@ -184,7 +187,7 @@ let run () =
       (* 3. light_of: a white matte plane under each converted light converges
          to the raster irradiance pi I / d^2, i.e. outgoing radiance
          albedo * I / d^2 (x0.97 for the BSDF's Fresnel at normal incidence). *)
-      let plane = { P.objects = [ (floor, P.material ~roughness:1. (rgb 0.8 0.8 0.8)) ]; spheres = []; strands = []
+      let plane = { P.objects = [ (rays_mesh floor, P.material ~roughness:1. (rgb 0.8 0.8 0.8)) ]; spheres = []; strands = []
                   ; environment = black; lights = [] } in
       let tracer = get (P.create ~spp:4 ~width:32 ~height:32 plane) in
       let camera = Rays.Camera.perspective ~fov_y:0.1 ~at:(V.create 0. 4. 0.001)
@@ -219,11 +222,11 @@ let run () =
 let bench () =
   let concrete = P.material ~roughness:0.6 ~round:0.07 (rgb 0.42 0.42 0.44) in
   let box = rdk (Rdk.Box_generator.box ~size:(V.create 0.28 0.28 0.28) ()) in
-  let boxes = get (P.mesh_instanced ~prototype:(box, concrete)
+  let boxes = get (P.mesh_instanced ~prototype:(prepared box concrete)
     (Array.init 2000 (fun i -> M.translation (V.create (float (i mod 50) *. 0.3 -. 7.5) (float (i / 50) *. 0.3) 0.)))) in
-  let dense = get (P.mesh [ (rdk (Rdk.Uv_sphere.run ~center:V.zero ~segments:100 ~rings:101 ~radius:1. ()), concrete) ]) in
+  let dense = get (P.mesh [ (rays_mesh (rdk (Rdk.Uv_sphere.run ~center:V.zero ~segments:100 ~rings:101 ~radius:1. ())), concrete) ]) in
   let at x = M.translation (V.create x 6. 2.) in
-  let scene = { P.objects = [ (box, concrete) ]; spheres = []; strands = []
+  let scene = { P.objects = [ (rays_mesh box, concrete) ]; spheres = []; strands = []
               ; environment = { sky = rgb 0.006 0.007 0.009; ground = rgb 0.002 0.002 0.003; panels = [] }
               ; lights = [ P.rect_light ~intensity:9. ~size:(24., 24.) ~target:V.zero (V.create (-34.) 40. 30.) ] } in
   let tracer = get (P.create ~bounces:4 ~width:1200 ~height:1560 scene) in

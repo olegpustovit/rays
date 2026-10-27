@@ -148,8 +148,8 @@ type invalid_name_policy = Ignore_invalid | Force_valid
 type name_overlap = First_group | Last_group | Error_on_overlap
 
 type bounds =
-  | Bounds_box of { minimum : Vec3.t; maximum : Vec3.t }
-  | Bounds_sphere of { center : Vec3.t; radius : float }
+  | Bounds_box of { minimum : Rays_math.Vec3.t; maximum : Rays_math.Vec3.t }
+  | Bounds_sphere of { center : Rays_math.Vec3.t; radius : float }
 
 type containment = Fully_contained | Partially_contained
 
@@ -2574,7 +2574,7 @@ let group_edge_depth ?cancel ?(grain = 16_384) ?(merge = Group_replace)
         publish_merged_selection ?cancel ~grain ~merge ~owner:Group_points
           ~name (Ordinary generated) geometry
 
-let group_random ?cancel ?(grain = 16_384) ?(seed = Rand.seed 0)
+let group_random ?cancel ?(grain = 16_384) ?(seed = Rays_math.Rand.seed 0)
     ?seed_attribute ?base ?(merge = Group_replace) ~probability ~owner ~name
     geometry =
   if grain <= 0 then Error "Group Random: grain must be positive"
@@ -2654,7 +2654,7 @@ let group_random ?cancel ?(grain = 16_384) ?(seed = Rand.seed 0)
            | None -> true
            | Some selection -> selection_mem selection element)
           && (probability = 1. || probability > 0.
-              && Rand.float_at seed ~index:(identity element) < probability) in
+              && Rays_math.Rand.float_at seed ~index:(identity element) < probability) in
         let generated = match owner with
           | Group_points | Group_vertices | Group_primitives ->
               let group_owner = Option.get (ordinary_owner owner) in
@@ -2667,7 +2667,7 @@ let group_random ?cancel ?(grain = 16_384) ?(seed = Rand.seed 0)
           geometry))
   end
 
-let finite_vec3 value = Float.is_finite value.Vec3.x
+let finite_vec3 value = Float.is_finite value.Rays_math.Vec3.x
     && Float.is_finite value.y && Float.is_finite value.z
 
 let[@inline always] float_max (left : float) (right : float) =
@@ -2679,7 +2679,7 @@ let[@inline always] point_in_sphere_at center radius
     (positions : Packed.Float3.Private.view) point =
   let x = positions.x.(point)
   and y = positions.y.(point) and z = positions.z.(point) in
-  let dx = abs_float (x -. center.Vec3.x)
+  let dx = abs_float (x -. center.Rays_math.Vec3.x)
   and dy = abs_float (y -. center.y)
   and dz = abs_float (z -. center.z) in
   if dx > radius || dy > radius || dz > radius then false
@@ -2695,7 +2695,7 @@ let[@inline always] point_in_box_at minimum maximum
     (positions : Packed.Float3.Private.view) point =
   let x = positions.x.(point) and y = positions.y.(point)
   and z = positions.z.(point) in
-  x >= minimum.Vec3.x && x <= maximum.Vec3.x
+  x >= minimum.Rays_math.Vec3.x && x <= maximum.Rays_math.Vec3.x
   && y >= minimum.y && y <= maximum.y
   && z >= minimum.z && z <= maximum.z
 
@@ -2713,9 +2713,9 @@ let[@inline always] segment_intersects_box_at minimum maximum
       (float_max (abs_float ay) (abs_float az))
   and scale_b = float_max (abs_float bx)
       (float_max (abs_float by) (abs_float bz))
-  and scale_min = float_max (abs_float minimum.Vec3.x)
+  and scale_min = float_max (abs_float minimum.Rays_math.Vec3.x)
       (float_max (abs_float minimum.y) (abs_float minimum.z))
-  and scale_max = float_max (abs_float maximum.Vec3.x)
+  and scale_max = float_max (abs_float maximum.Rays_math.Vec3.x)
       (float_max (abs_float maximum.y) (abs_float maximum.z)) in
   let scale = float_max (float_max scale_a scale_b)
       (float_max scale_min scale_max) in
@@ -2752,7 +2752,7 @@ let[@inline always] segment_intersects_sphere_at center radius
         (float_max (abs_float ay) (abs_float az))
     and scale_b = float_max (abs_float bx)
         (float_max (abs_float by) (abs_float bz))
-    and scale_c = float_max (abs_float center.Vec3.x)
+    and scale_c = float_max (abs_float center.Rays_math.Vec3.x)
         (float_max (abs_float center.y) (abs_float center.z)) in
     let scale = float_max scale_a (float_max scale_b scale_c) in
     if scale = 0. then radius >= 0.
@@ -3169,7 +3169,7 @@ let group_normal ?cancel ?(grain = 16_384) ?normal_attribute
       || spread_angle > Float.pi then Error
       "Group Normal: spread angle must be finite and within [0, pi]"
   else
-    let direction_scale = float_max (abs_float direction.Vec3.x)
+    let direction_scale = float_max (abs_float direction.Rays_math.Vec3.x)
         (float_max (abs_float direction.y) (abs_float direction.z)) in
     if direction_scale = 0. then Error
         "Group Normal: direction must be finite and non-zero"
@@ -3467,7 +3467,7 @@ let[@inline always] primitive_is_backface viewpoint
         let cx = !cx *. inverse_count and cy = !cy *. inverse_count
         and cz = !cz *. inverse_count in
         let view_scale = float_max !geometry_scale
-            (float_max (abs_float viewpoint.Vec3.x)
+            (float_max (abs_float viewpoint.Rays_math.Vec3.x)
                (float_max (abs_float viewpoint.y) (abs_float viewpoint.z))) in
         let geometry_ratio = !geometry_scale /. view_scale in
         let vx = (viewpoint.x /. view_scale) -. (cx *. geometry_ratio)

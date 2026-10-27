@@ -91,7 +91,7 @@ module Kit : sig
   (** Text tabs laid out leftwards from [right], the one in use underlined: the tab clicked
       and where the row starts. *)
 
-  val colour : Pxui.Ui.t -> key:string -> at:float * float -> w:float -> swatch:Rays.Color.t ->
+  val colour : Pxui.Ui.t -> key:string -> at:float * float -> w:float -> swatch:Rays_math.Color.t ->
     hex:string -> string
   (** A colour in the control column at [at], [w] wide: a 20-point swatch and its hex field;
       the hex text as typed. *)
@@ -166,11 +166,13 @@ end
 
 module Which_key : sig
   val sheet_sections : ?category:(('scope, 'action) Editor_core.Command.t -> string) ->
+    ?text_keys:(string * Editor_core.Keymap.trigger) list ->
     ('scope, 'action) Editor_core.Command.t list -> (string * (string * string) list) list
   (** The sections of {!sheet}: every command a key reaches, once per id, as its keys and its
       label, under the section [category] names (the host's, as for {!panel}). *)
 
   val sheet : Pxui.Ui.t -> ?context:string -> ?category:(('scope, 'action) Editor_core.Command.t -> string) ->
+    ?text_keys:(string * Editor_core.Keymap.trigger) list ->
     ('scope, 'action) Editor_core.Command.t list -> bool
   (** The Flow key table, the sheet's [05]: a title row with [context] (what has the focus) and a
       close button, the filter (at rest until typed in), and the sections of {!sheet_sections} in
@@ -266,7 +268,7 @@ module Tree : sig
     depth : int;  (** depth-first order; a child is one deeper than its parent *)
     label : string;
     detail : string;  (** muted text after the label, e.g. the kind *)
-    badge : string * Rays.Color.t;  (** a kind letter on its colour *)
+    badge : string * Rays_math.Color.t;  (** a kind letter on its colour *)
     link : bool;  (** a muted [↳] row repeating [id] shown elsewhere *)
     ghost : bool;  (** dimmed and locked: no rename, drag, or toggles *)
     flags : bool list;  (** one per column *)
@@ -310,28 +312,22 @@ module Tree : sig
   (** The filter or rename prompt holds the keyboard. *)
 end
 
-module Shell : sig
-  val frame : Pxui.Ui.t -> Rays.Frame.t -> visible:bool ->
-    body:(Pxui.Ui.t -> 'a) -> overlay:(Pxui.Ui.t -> unit) option -> 'a option
-  (** Build editor content when visible, and a pending overlay when hidden. *)
-end
-
-(** Parameter rows generated from [Editor_core.Param] metadata: the one
+(** Parameter rows generated from [Param] metadata: the one
     inspector path for SOP nodes and plain sketch settings alike. *)
 module Inspector : sig
   type flow_row = {
     path : string;
-    fields : Editor_core.Param.field_view list;
+    fields : Param.field_view list;
     shown : bool;
     locked : bool;
     drive : string option;
     live : string option;
   }
-  type flow_change = Edited of string * Editor_core.Param.value
+  type flow_change = Edited of string * Param.value
     | Pinned of string * bool | Reset of string
     | Expression of string * string | Follow of string
   val flow_fields : Pxui.Ui.t -> ?expanded:string list -> ?width:float ->
-    ?pins:bool -> ?pin_click:bool -> ?chips:(string * Rays.Color.t) list -> ?kind_label:string ->
+    ?pins:bool -> ?pin_click:bool -> ?chips:(string * Rays_math.Color.t) list -> ?kind_label:string ->
     ?on_choice:(string -> Pxui.Ui.box -> unit) -> flow_row list -> flow_change list
   (** Responsive rows shared by Flow, scene, World, and compound interface
       inspectors, laid out as the kit's inspector sheet. [pins] draws each row's pin dot ([shown]: filled when the row is on its card, a
@@ -344,12 +340,12 @@ module Inspector : sig
       arguments that have no folder go in a first, open section of that name. *)
 
   val fields : Pxui.Ui.t -> ?expanded:string list -> ?width:float ->
-    Editor_core.Param.field_view list -> (string * Editor_core.Param.value) list
+    Param.field_view list -> (string * Param.value) list
   (** One inspector row per field inside the current panel; folders become
       sections, open when their ["/"]-joined path is in [expanded]. Returns
       this frame's edits, empty when nothing changed. *)
 
-  val record : Pxui.Ui.t -> 'record Editor_core.Param.schema -> 'record ->
-    ('record * Editor_core.Param.effects, string) result
+  val record : Pxui.Ui.t -> 'record Param.schema -> 'record ->
+    ('record * Param.effects, string) result
   (** [fields] over a typed record, edits applied through [Param.apply_all]. *)
 end

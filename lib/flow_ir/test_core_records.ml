@@ -1,10 +1,10 @@
 module E = Flow.Eval
 module I = Flow_ir
-let ok = function Ok x -> x | Error d -> failwith (Flow.Diagnostic.to_string d)
+let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let residual ?(inputs="") body =
   let source="(workspace w (graph g :context value " ^ inputs ^ " (let* [tested " ^ body ^ "] 0.)))" in
   let ws=match Flow.Workspace.check {Flow.Check.version=1;kinds=[]} (ok (Flow.Syntax.parse source)) with
-    | Some ws,[] -> ws | _,ds -> failwith (String.concat "; " (List.map Flow.Diagnostic.to_string ds)) in
+    | Some ws,[] -> ws | _,ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds)) in
   match snd (List.hd (List.assoc ["g";"tested"] (ok (E.static ~record:true ws)).records)) with
   | E.Residual r -> r | _ -> failwith ("Expected a residual: " ^ body)
 let () =
@@ -12,10 +12,10 @@ let () =
     (* The Slice C record fold (lib/flow/test_workspace_eval.ml), prepared and forced through Executor's core path. *)
     let source="(workspace w (graph g :context value (let* [a (fold [a {:n 0.}] [x (array/range 4096)] (assoc a :n (+ a.n t)))] a.n)))" in
     let ws=match Flow.Workspace.check {Flow.Check.version=1;kinds=[]} (ok (Flow.Syntax.parse source)) with
-      | Some ws,[] -> ws | _,ds -> failwith (String.concat "; " (List.map Flow.Diagnostic.to_string ds)) in
+      | Some ws,[] -> ws | _,ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds)) in
     let v=List.assoc "g" (ok (E.static ws)).results in
     let program=ok (I.Executor.compile v) in
-    let force time=ignore (ok (I.Executor.force program ~live:(Frame_input.at_time time))) in
+    let force time=ignore (ok (I.Executor.force program ~live:(Input.at_time time))) in
     force 0.1;
     let samples=List.init 3 (fun _ ->
       Gc.full_major ();
@@ -36,14 +36,13 @@ let () =
     let program=ok(I.Executor.compile ~strict:true ~profile value) in
     let state=E.create_state() in let stamp=E.state_stamp state in
     let resolutions=ref 0 in
-    let resolve _=incr resolutions;Error(Flow.Diagnostic.error ~code:"E_UNUSED" "unused resolver") in
+    let resolve _=incr resolutions;Error(Diagnostic.error ~code:"E_UNUSED" "unused resolver") in
     let result=I.Executor.force ~strict:true ~reference ~state ~resolve program
-      ~live:(Frame_input.at_time nan) |>ok in
+      ~live:(Input.at_time nan) |>ok in
     assert(result==value && E.state_stamp state=stamp && !resolutions=0 && !ticks=2);
     match I.Profile.executions profile with
-    |[execution]->let graph=I.Executor.graph program in
-      let root=graph.nodes.(graph.roots.(0)) in
-      assert(execution.seconds=1. && execution.tier=(if reference then I.Interp else root.tier))
+    |[execution]->
+      assert(execution.seconds=1. && execution.tier=(if reference then I.Interp else I.Core))
     |_->failwith "Concrete execution lost its profile entry") [false;true]
 let rec same (a : E.value) (b : E.value) = match a,b with
   | Float a,Float b -> bits a b
@@ -91,14 +90,14 @@ let dump () = String.concat "" (List.map (fun (name,r) ->
   let program=ok (I.Executor.compile (E.Residual r)) in
   let printed=Format.asprintf "%a" I.Core.pp core in
   List.iter (fun time ->
-    let live=Frame_input.at_time time in
+    let live=Input.at_time time in
     let expected=E.Private.force_reference (E.Residual r) ~live in
-    let equal_result (a : (E.value,Flow.Diagnostic.t) result) (b : (E.value,Flow.Diagnostic.t) result) = match a,b with
+    let equal_result (a : (E.value,Diagnostic.t) result) (b : (E.value,Diagnostic.t) result) = match a,b with
       | Ok a,Ok b -> same a b | Error a,Error b -> a.code=b.code | _ -> false in
     assert (equal_result (E.force (E.Residual r) ~live) expected);
     (let actual=I.Executor.force program ~live in
      if not (equal_result actual expected) then
-       let show = function Ok v -> E.show v | Error d -> Flow.Diagnostic.to_string d in
+       let show = function Ok v -> E.show v | Error d -> Diagnostic.to_string d in
        failwith (Printf.sprintf "%s at %g: %s <> %s" name time (show actual) (show expected)));
     match I.Core_exec.run core ~live,expected with
     | Ok actual,Ok expected -> if not (same actual expected) then
@@ -113,11 +112,11 @@ let () =
     let core=match I.Core_lower.lower r with Ok p->p|Error name->failwith name in
     let program=ok(I.Executor.compile(E.Residual r)) in
     List.iter (fun time ->
-      let live=Frame_input.at_time time in
+      let live=Input.at_time time in
       let expected=E.Private.force_reference(E.Residual r) ~live in
       List.iter (fun actual -> match actual,expected with
         | Ok a,Ok b->assert(same a b)
-        | Error a,Error b->assert(a.Flow.Diagnostic.code=b.code && a.message=b.message && a.cause=b.cause)
+        | Error a,Error b->assert(a.Diagnostic.code=b.code && a.message=b.message && a.cause=b.cause)
         | _->failwith "Lazy record accumulator error changed")
         [I.Core_exec.run core ~live;I.Executor.force program ~live]) [0.;1.])
     [ {|(fold [state {:n 0}] [i (range 3)]

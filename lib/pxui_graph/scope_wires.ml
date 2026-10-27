@@ -16,19 +16,12 @@ module Paths = Hashtbl.Make (struct
   let rec hash : t -> int = function [] -> 0 | [ leaf ] -> Hashtbl.hash leaf | _ :: rest -> hash rest
 end)
 
-(* a wire's route by its ends and the cards it may cross: floats and paths, compared as such *)
-module Routes = Hashtbl.Make (struct
-  type t = (float * float) * (float * float) * path list
-  let equal (((ax, ay), (bx, by), a) : t) (((cx, cy), (dx, dy), b) : t) =
-    Float.equal ax cx && Float.equal ay cy && Float.equal bx dx && Float.equal by dy && List.equal path_equal a b
-  let hash (((ax, ay), (bx, by), _) : t) = Hashtbl.hash (ax, ay, bx, by)
-end)
-
 (* bucket grids are keyed by cell *)
 module Cells = Hashtbl.Make (Int)
 
 (* a cell's key: one int (cells are far fewer than 32768 high) *)
 let cell_key cx cy = cx * 65536 + cy
+let tag_span = 3. *. 288.
 
 (* ---- what is in view: a bucket grid over boxes (the tiles, the wires' bounds), built once per
    geometry, so a frame asks the cells its viewport covers and not every node of the graph ---- *)
@@ -74,31 +67,24 @@ type wire = {
   target : (path * E.arg_key * S.t option) option;
   pts : (float * float) list;  (* the drawn polyline, [a] .. [b]: straight, or bent clear of the cards *)
   refers : bool;  (* a name read inside a formula, not the value a row takes: drawn faint until lit *)
-  junction : float option;  (* x of the shared trunk's end, when the wire is bundled with its siblings *)
   from : path option;  (* the node (or zone) it reads from, and the one it ends at: the dataflow chains *)
   into : path option;
 }
-
-type obstacle = { path : path; rx : float; ry : float; rw : float; rh : float }
 
 type geo = {
   items : (P.placed * float * float) array;  (* absolute top-left, graph units *)
   wires : wire array;
   origins : (path * (float * float)) list;  (* where each scope's own coordinates start *)
-  obstacles : obstacle list;  (* what the routes were drawn around *)
   inside : (path, int list) Hashtbl.t;  (* the wires that end at a node of a zone's body, by the zone's path *)
   slot : int Paths.t;  (* an item's place in [items]: its box and its position inside its scope come from there *)
   tiles : index;  (* over the items' boxes *)
   reach : index;  (* over the wires' bounds *)
   read : (float * float, unit) Hashtbl.t;  (* the points a wire starts from: an out-port there is wired *)
-  routes : (float * float) list Routes.t;
-      (* each wire's route by its ends: a rebuild around the same obstacles (a number scrubbed, a
-         name edited) reuses them; one entry, replaced by every rebuild *)
 }
 
-let empty_geo = { items = [||]; wires = [||]; origins = []; obstacles = [];
+let empty_geo = { items = [||]; wires = [||]; origins = [];
                   inside = Hashtbl.create 1; slot = Paths.create 1; tiles = { buckets = Cells.create 1; large = [] };
-                  reach = { buckets = Cells.create 1; large = [] }; read = Hashtbl.create 1; routes = Routes.create 1 }
+                  reach = { buckets = Cells.create 1; large = [] }; read = Hashtbl.create 1 }
 let root_name s = match String.index_opt s '.' with Some i -> String.sub s 0 i | None -> s
 (* what a row reads once its wire is taken off: a named argument goes back to its schema default,
    written so the row stays on the card; a positional one takes a value of its type; an item of a
@@ -136,25 +122,8 @@ let line_of_row (lines : P.line array) =
   Array.iteri (fun k -> function P.Row (i, _) -> Hashtbl.replace tbl i k | _ -> ()) lines;
   tbl
 
-(* ---- wire routing: straight, or bent clear of every card ---- *)
-
-(* a bucket grid over the cards: a wire asks only the cells its box crosses *)
-type grid = { cell : float; cells : obstacle list Cells.t }
-
-let grid_of obstacles =
-  let cell = 128. in
-  let cells = Cells.create 64 in
-  List.iter (fun o ->
-    for cx = int_of_float (Float.floor (o.rx /. cell)) to int_of_float (Float.floor ((o.rx +. o.rw) /. cell)) do
-      for cy = int_of_float (Float.floor (o.ry /. cell)) to int_of_float (Float.floor ((o.ry +. o.rh) /. cell)) do
-        Cells.replace cells (cell_key cx cy) (o :: Option.value ~default:[] (Cells.find_opt cells (cell_key cx cy)))
-      done
-    done) obstacles;
-  { cell; cells }
-
 (* the part of a segment inside a rectangle, as the parameters of its two ends (Liang-Barsky);
-   [t0 > t1] when it misses.  The one clip of the pane: routing asks whether a wire crosses a card,
-   painting and the hit boxes cut a wire to what is shown (the GPU's diagonal line ignores the
+   [t0 > t1] when it misses. Painting and the hit boxes cut a wire to what is shown (the GPU's diagonal line ignores the
    clip of the box that paints it). *)
 let clip_span x0 y0 x1 y1 ~xmin ~ymin ~xmax ~ymax =
   let dx = x1 -. x0 and dy = y1 -. y0 in
@@ -174,152 +143,8 @@ let clip_segment (x0, y0) (x1, y1) (rx, ry, rw, rh) =
   if t0 <= t1 then Some ((x0 +. (x1 -. x0) *. t0, y0 +. (y1 -. y0) *. t0), (x0 +. (x1 -. x0) *. t1, y0 +. (y1 -. y0) *. t1))
   else None
 
-(* does the segment cross the rectangle grown by [margin]? *)
-let crosses (x0, y0) (x1, y1) o ~margin =
-  let xmin = o.rx -. margin and xmax = o.rx +. o.rw +. margin
-  and ymin = o.ry -. margin and ymax = o.ry +. o.rh +. margin in
-  (* the segment's box misses the rectangle: no need for the clip *)
-  if Float.max x0 x1 < xmin || Float.min x0 x1 > xmax || Float.max y0 y1 < ymin || Float.min y0 y1 > ymax then false else
-  let t0, t1 = clip_span x0 y0 x1 y1 ~xmin ~ymin ~xmax ~ymax in
-  t0 <= t1
 
-let blockers grid ~excl p q =
-  let x0, y0 = p and x1, y1 = q in
-  let c v = int_of_float (Float.floor (v /. grid.cell)) in
-  let found = ref [] in
-  for cx = c (Float.min x0 x1) to c (Float.max x0 x1) do
-    for cy = c (Float.min y0 y1) to c (Float.max y0 y1) do
-      List.iter (fun o ->
-        if crosses p q o ~margin:2. && not (List.memq o !found) && not (List.mem o.path excl) then found := o :: !found)
-        (Option.value ~default:[] (Cells.find_opt grid.cells (cell_key cx cy)))
-    done
-  done;
-  !found
-
-(* is anything in the way?  The same walk, stopping at the first card *)
-exception Blocked
-let is_blocked ?(margin = 2.) grid ~excl p q =
-  let x0, y0 = p and x1, y1 = q in
-  let c v = int_of_float (Float.floor (v /. grid.cell)) in
-  try
-    for cx = c (Float.min x0 x1) to c (Float.max x0 x1) do
-      for cy = c (Float.min y0 y1) to c (Float.max y0 y1) do
-        List.iter (fun o ->
-          if crosses p q o ~margin && not (List.mem o.path excl) then raise Blocked)
-          (Option.value ~default:[] (Cells.find_opt grid.cells (cell_key cx cy)))
-      done
-    done;
-    false
-  with Blocked -> true
-
-let length pts =
-  let rec go acc = function
-    | (x0, y0) :: ((x1, y1) :: _ as rest) -> go (acc +. Float.hypot (x1 -. x0) (y1 -. y0)) rest
-    | _ -> acc in
-  go 0. pts
-
-(* A wire is one straight segment, port to port.  One that would pass under a card gets one bend
-   (a 5-point square), as box1 -> copy1.template does in the sheet: horizontal out of the source,
-   then one diagonal into the port, the bend 72 points before the target; or, when that is not
-   clear, the diagonal first and the horizontal into the port.  A backward wire goes round above or
-   below. *)
-let route ?(inside = false) grid ~excl ((ax, ay) as a) ((bx, by) as b) =
-  let free ?margin pts =
-    let rec go = function
-      | p :: (q :: _ as rest) -> (not (is_blocked ?margin grid ~excl p q)) && go rest
-      | _ -> true in
-    go pts in
-  let forward = bx > ax +. 8. in
-  if forward && free [ a; b ] then [ a; b ]
-  else if forward then begin
-    let room = bx -. ax -. 24. in
-    let steps = 72. :: List.filter (fun d -> d <> 72.) (List.init 12 (fun k -> 24. *. float (k + 1))) in
-    let candidates = List.concat_map (fun d ->
-      if d > room then [] else [ [ a; (bx -. d, ay); b ]; [ a; (ax +. d, by); b ] ]) steps in
-    match List.find_opt (free ~margin:6.) candidates with
-    | Some c -> c
-    | None ->
-        (match List.find_opt free candidates with
-         | Some c -> c
-         | None ->
-             (* no one-bend way: round the cards above or below, 24 points clear *)
-             let hit = blockers grid ~excl a b in
-             let top = List.fold_left (fun m o -> Float.min m o.ry) (Float.min ay by) hit -. 24.
-             and bottom = List.fold_left (fun m o -> Float.max m (o.ry +. o.rh)) (Float.max ay by) hit +. 24. in
-             let round y = [ a; (ax +. 24., y); (bx -. 24., y); b ] in
-             let around = [ round top; round bottom ] in
-             (match List.filter free around with
-              | [] -> [ a; b ]
-              | c :: rest -> List.fold_left (fun best c -> if length c < length best then c else best) c rest))
-  end else begin
-    let hit = blockers grid ~excl (Float.min ax bx, Float.min ay by) (Float.max ax bx, Float.max ay by) in
-    let top = List.fold_left (fun m o -> Float.min m o.ry) (Float.min ay by) hit -. 24.
-    and bottom = List.fold_left (fun m o -> Float.max m (o.ry +. o.rh)) (Float.max ay by) hit +. 24. in
-    (* a zone's own variable reads backward into its body: its stub stays inside the frame (the
-       edge is 12 points on) and it runs one row below its rail row, not through the label row above *)
-    let stub = if inside then 6. else 24. in
-    let via y = [ a; (ax +. stub, ay); (ax +. stub, y); (bx -. 24., y); (bx -. 24., by); b ] in
-    let candidates = if inside then [ via (ay +. 24.); via bottom ] else [ via top; via bottom ] in
-    let clear = List.filter free candidates in
-    match (if inside then List.take 1 clear else clear) with
-    | [] -> List.hd (List.rev candidates)
-    | clear -> List.fold_left (fun best c -> if length c < length best then c else best) (List.hd clear) clear
-  end
-
-(* Trunk and branch: a source read by [bundle_min] or more inputs (two of them able to join)
-   leaves the port as one shared trunk to a junction [trunk] points out, then a branch to each sink.
-   A straight wire becomes [a; junction; b].  A bent wire whose first leg runs level out of the
-   port keeps its own route after the junction: a longer leg gains the junction as a point, a
-   24-point stub is stretched to it.  Each wire keeps its own polyline, so each is still hovered
-   and selected alone (the trunk answers as the topmost of them).  A wire that is dashed, level
-   with its source or long enough to be drawn as a tag does not bundle. *)
-let trunk = 36.
-let bundle_min = 3
-let tag_span = 3. *. 288.
-let bundle grid (wires : wire array) =
-  let all = Hashtbl.create 16 and groups = Hashtbl.create 16 in
-  Array.iteri (fun i (w : wire) ->
-    let (ax, ay), (bx, by) = w.a, w.b in
-    Hashtbl.replace all w.a (1 + Option.value ~default:0 (Hashtbl.find_opt all w.a));
-    let straight = w.pts = [ w.a; w.b ] && bx -. ax > 2. *. trunk && Float.abs (by -. ay) > 1.
-    and bent = match w.pts with
-      | _ :: (x1, _) :: _ :: _ -> x1 > ax +. 1.
-      | _ -> false in
-    if bx -. ax <= tag_span && (straight || bent) then
-      Hashtbl.replace groups w.a (i :: Option.value ~default:[] (Hashtbl.find_opt groups w.a))) wires;
-  Hashtbl.iter (fun (ax, ay) members ->
-    if Hashtbl.find all (ax, ay) >= bundle_min && List.length members >= 2 then begin
-      let jx = ax +. trunk in
-      let j = jx, ay in
-      let joined = List.filter_map (fun i ->
-        let w = wires.(i) in
-        let excl = Option.to_list w.from @ Option.to_list w.into in
-        let rec free = function
-          | p :: (q :: _ as rest) -> not (is_blocked grid ~excl p q) && free rest
-          | _ -> true in
-        let pts = match w.pts with
-          | [ a; b ] -> if route grid ~excl j b = [ j; b ] then Some [ a; j; b ] else None
-          | a :: ((x1, _) :: _ as rest) when x1 > jx +. 1. -> Some (a :: j :: rest)
-          | a :: (x1, y1) :: (x2, y2) :: ((x3, _) :: _ as rest) when y1 = ay && x2 = x1 && x3 > jx +. 1. ->
-              Some (a :: j :: (jx, y2) :: rest)
-          (* a stub up or down to a level run: rise from the junction instead *)
-          | a :: (_, y1) :: (x2, y2) :: rest when y2 = y1 && y1 <> ay && x2 > jx +. 1. ->
-              Some (a :: j :: (jx, y1) :: (x2, y2) :: rest)
-          | _ -> None in
-        match pts with
-        | Some pts when free pts -> Some (i, pts)
-        | _ -> None) members in
-      if List.length joined >= 2 then
-        List.iter (fun (i, pts) -> wires.(i) <- { wires.(i) with pts; junction = Some jx }) joined
-    end) groups
-
-(* the old orthogonal style, kept for [:wires "rect"] *)
-let rect_points (ax, ay) (bx, by) =
-  let mx = if bx >= ax +. 24. then (ax +. bx) /. 2. else ax +. 12. in
-  if bx >= ax +. 24. then [ (ax, ay); (mx, ay); (mx, by); (bx, by) ]
-  else [ (ax, ay); (mx, ay); (mx, (ay +. by) /. 2.); (bx -. 12., (ay +. by) /. 2.); (bx -. 12., by); (bx, by) ]
-
-(* the default style: a 12-point lead out of and into each port, as the kit's port stubs, and a
+(* A wire is a 12-point lead out of and into each port, as the kit's port stubs, and a
    cubic between them whose pull is capped, so a long wire stays taut.  With no room for the leads
    (a begin bar's wire to the card beside it) it is a gentle S; a wire running back swings out by
    its height.  Sampled as the polyline the pane paints and picks. *)
@@ -367,15 +192,14 @@ let point_box_w ~name_w name = P.point_size +. 8. +. name_w name
 
 (* [shift] moves a placed item by its path (a drag in progress); a zone's
    children follow through the origin they are laid out from. *)
-let compute ?(style = `Curve) ?(previous = empty_geo) ~name_w ~shown (scope : P.scope) (layout : P.layout) ~shift =
+let compute ~name_w ~shown (scope : P.scope) (layout : P.layout) ~shift =
   let items = ref [] and count = ref 0 and slot = Paths.create 64 in
   let origins = ref [ (scope.path, (0., 0.)) ] in
   let rec walk ox oy (l : P.layout) =
     List.iter (fun (p : P.placed) ->
       let dx, dy = shift p.path in
       let ax = ox +. p.x +. dx and ay = oy +. p.y +. dy in
-      (* one geometry per node at the level it is shown: the box, the ports and the wires' ends,
-         the obstacles and the hit boxes all come from it *)
+      (* one geometry per node at the level it is shown: the box, the ports and the wires' ends *)
       let lv = shown p in
       let p, ay = match lv with
         | P.Point -> { p with shown = lv; w = point_box_w ~name_w (point_name p); h = P.point_size },
@@ -392,18 +216,6 @@ let compute ?(style = `Curve) ?(previous = empty_geo) ~name_w ~shown (scope : P.
       | _ -> ()) l.placed in
   walk 0. 0. layout;
   let items_list = List.rev !items in
-  let obstacles = List.concat_map (fun ((p : P.placed), ax, ay) -> match p.item with
-    | P.Item { zone = Some _; _ } when not p.collapsed ->
-        (* an expanded zone's label row is in the way, and its bottom edge (no wire runs along it);
-           its inside is not *)
-        [ { path = p.path; rx = ax; ry = ay; rw = p.w; rh = P.head_height };
-          { path = p.path; rx = ax; ry = ay +. p.h -. 3.; rw = p.w; rh = 6. } ]
-    | _ -> [ { path = p.path; rx = ax; ry = ay; rw = p.w; rh = p.h } ]) items_list in
-  let grid = grid_of obstacles in
-  let same (a : obstacle) (b : obstacle) =
-    Float.equal a.rx b.rx && Float.equal a.ry b.ry && Float.equal a.rw b.rw && Float.equal a.rh b.rh && path_equal a.path b.path in
-  let reuse = if List.equal same previous.obstacles obstacles then previous.routes else Routes.create 1 in
-  let routes = Routes.create (max 16 (Routes.length reuse)) in
   let wires = ref [] in
   (* the begin bars' ports: their wires leave down the bar *)
   let bars = Hashtbl.create 8 in
@@ -429,19 +241,10 @@ let compute ?(style = `Curve) ?(previous = empty_geo) ~name_w ~shown (scope : P.
     match s, Option.bind s (fun s -> spine s into b) with
     | Some s, Some pts ->
         let a = List.hd pts and b = List.nth pts (List.length pts - 1) in
-        wires := { a; b; ty = s.ty; target; pts; refers; junction = None; from = s.owner; into = (match into with i :: _ -> Some i | [] -> None) } :: !wires
+        wires := { a; b; ty = s.ty; target; pts; refers; from = s.owner; into = (match into with i :: _ -> Some i | [] -> None) } :: !wires
     | Some s, None ->
-        let excl = (match s.owner with Some o -> [ o ] | None -> []) @ into in
-        let pts = match style with
-          | `Straight ->
-              let key = (s.pos, b, excl) in
-              let inside = match s.owner with
-                | Some o -> List.exists (fun i -> List.length i > List.length o && List.filteri (fun k _ -> k < List.length o) i = o) into | None -> false in
-              let pts = match Routes.find_opt reuse key with Some pts -> pts | None -> route ~inside grid ~excl s.pos b in
-              Routes.replace routes key pts; pts
-          | `Rect -> rect_points s.pos b
-          | `Curve -> curve_points ~drop:(Hashtbl.mem bars s.pos) s.pos b in
-        wires := { a = s.pos; b; ty = s.ty; target; pts; refers; junction = None; from = s.owner; into = (match into with i :: _ -> Some i | [] -> None) } :: !wires
+        let pts = curve_points ~drop:(Hashtbl.mem bars s.pos) s.pos b in
+        wires := { a = s.pos; b; ty = s.ty; target; pts; refers; from = s.owner; into = (match into with i :: _ -> Some i | [] -> None) } :: !wires
     | None, _ -> () in
   let resolve chain name =
     List.find_map (fun tbl -> match Hashtbl.find_opt tbl name with
@@ -566,7 +369,6 @@ let compute ?(style = `Curve) ?(previous = empty_geo) ~name_w ~shown (scope : P.
             wire source target ~into:[ scope.path @ [ "@return" ] ]
         | None -> ()));
   let wires = Array.of_list (List.rev !wires) in
-  if style = `Straight then bundle grid wires;
   let inside = Hashtbl.create 16 in
   Array.iteri (fun i w -> match w.target with
     | Some (_ :: _ :: _ :: _ as path, _, _) ->
@@ -579,5 +381,4 @@ let compute ?(style = `Curve) ?(previous = empty_geo) ~name_w ~shown (scope : P.
       (infinity, infinity, neg_infinity, neg_infinity) wires.(i).pts) in
   let read = Hashtbl.create (max 16 (Array.length wires)) in
   Array.iter (fun (w : wire) -> Hashtbl.replace read w.a ()) wires;
-  { items; wires; origins = !origins; obstacles; inside; slot; tiles; reach; read; routes }
-
+  { items; wires; origins = !origins; inside; slot; tiles; reach; read }

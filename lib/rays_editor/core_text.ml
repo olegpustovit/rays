@@ -1,5 +1,10 @@
+open Core_model
 open Editor_document
-include Core_actions
+open Core_inspect
+open Core_shell
+open Core_scope
+open Core_panes
+open Core_actions
 
 (* Every editor path records the same immutable document. No-op/rejected
    edits leave both the present and the merge state untouched. *)
@@ -26,18 +31,18 @@ let install value doc ~label ~merge =
    binding's expression; atomic, one history entry "Edit text". *)
 let text_edit ?imports ?(label = "Edit text") ?(merge = Editor_core.History.Step) value text =
   Result.map (fun doc -> install value doc ~label ~merge)
-    (Doc.text_edit ?imports ~factories:value.factories value.doc text)
+    (Editor_document.Document_edit.text_edit ?imports ~factories:value.factories value.doc text)
 
 (* Selection patches root bindings into one candidate graph, checked and
    installed once. Omitted bindings stay and the shown result cannot change.
    Without a closure the tab shows the graph form, replaced whole. *)
 let binding_edit ?(merge = Editor_core.History.Step) value path text =
-  let at_line_1 (d : Flow.Diagnostic.t) = { d with position = Some { line = 1; col = 0 }; span = None } in
+  let at_line_1 (d : Diagnostic.t) = { d with position = Some { line = 1; col = 0 }; span = None } in
   let ws, _ = value.doc.Document.workspace in
   match Text_pane.graph_op ws.source ~graph:(List.hd path) ~selection:path text with
   | Error d -> Error [ (if d.position = None then at_line_1 d else d) ]
   | Ok op ->
-      (match Doc.syntax_edit_result ~factories:value.factories value.doc op with
+      (match Editor_document.Document_edit.syntax_edit_result ~factories:value.factories value.doc op with
        | Ok doc -> Ok (install value doc ~label:"Edit text" ~merge)
        | Error d -> Error [ at_line_1 d ])
 
@@ -49,7 +54,7 @@ let graph_edit ?(merge = Editor_core.History.Step) value name text =
   | Error d ->
       Error [ (if d.position = None then { d with position = Some { line = 1; col = 0 } } else d) ]
   | Ok op ->
-      (match Doc.syntax_edit_result ~factories:value.factories value.doc op with
+      (match Editor_document.Document_edit.syntax_edit_result ~factories:value.factories value.doc op with
        | Ok doc -> Ok (install value doc ~label:"Edit text" ~merge)
        | Error d -> Error [ { d with position = Some { line = 1; col = 0 }; span = None } ])
 
@@ -103,7 +108,7 @@ let apply_text value intents =
           (match Text_pane.merge3 ~base:(shown previous) ~mine:draft ~theirs:(shown workspace) with
            | Some merged -> apply merged
            | None ->
-               Error [Flow.Diagnostic.error ~position:{line = 1; col = 0} ~code:"E_DRAFT_CONFLICT"
+               Error [Diagnostic.error ~position:{line = 1; col = 0} ~code:"E_DRAFT_CONFLICT"
                  "The document changed in the same place as this draft. Your draft is kept; discard it and reapply your edits to the current text."])
       | _ -> apply draft in
     let whole = Editor_document.Workspace_doc.to_text in
@@ -121,15 +126,15 @@ let apply_text value intents =
                let mine = fst (Flow.Lisp.print [form]) in
                (match Text_pane.merge3 ~base:(of_graph name previous) ~mine ~theirs:(of_graph name workspace) with
                 | Some merged -> graph_edit ~merge value name merged
-                | None -> Error [Flow.Diagnostic.error ~position:{line = 1; col = 0} ~code:"E_DRAFT_CONFLICT"
+                | None -> Error [Diagnostic.error ~position:{line = 1; col = 0} ~code:"E_DRAFT_CONFLICT"
                     "The document changed in the same place as this draft. Your draft is kept; discard it and reapply your edits to the current text."])
            | Ok _ -> apply draft)
       | _ -> apply draft in
     let scrub apply draft = match literal with
       | Some (source, op, position) when source == workspace.source ->
-          Doc.syntax_edit_result ~factories:value.factories value.doc op
+          Editor_document.Document_edit.syntax_edit_result ~factories:value.factories value.doc op
           |> Result.map (fun doc -> install value doc ~label:"Edit text" ~merge:scrub_merge)
-          |> Result.map_error (fun d -> [{d with Flow.Diagnostic.position = Some position; span = None}])
+          |> Result.map_error (fun d -> [{d with Diagnostic.position = Some position; span = None}])
       | _ -> apply draft in
     let finished done_ draft previous current = done_ && current = Some draft
       && Option.fold ~none:false ~some:(fun previous -> previous == workspace) previous in

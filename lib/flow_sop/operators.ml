@@ -1,4 +1,4 @@
-let checked = function Ok value->value|Error (d:Flow.Diagnostic.t)->Flow.Value.raise_diagnostic d
+let checked = function Ok value->value|Error (d:Diagnostic.t)->Flow.Value.raise_diagnostic d
 let type_argument args = match List.find_opt (fun (name,_,_)->name="type") args with
   | None -> "vec3"
   | Some (_,_,Some(Param.Text_value kind)) -> ignore(checked(Attribute_kernel.value_type kind));kind
@@ -343,12 +343,10 @@ let context_time : Flow.Op.t = {
 }
 
 let seed_for ?(salt=0) ~seed ~namespace ~label () =
-  let identity=ref 0xcbf29ce484222325L in
-  String.iter (fun c -> identity:=Int64.mul (Int64.logxor !identity (Int64.of_int (Char.code c)))
-    0x100000001b3L) (namespace^":"^label);
+  let identity=Rays_math.Hash.string (namespace^":"^label) in
   (* The salt is the low 63 bits of a 64-bit word, xor-ed into the identity before mixing. *)
   let salt=Int64.logand (Int64.of_int salt) Int64.max_int in
-  let mixed=Int64.logxor seed (Int64.mul (Int64.logxor !identity salt) 0x9e3779b97f4a7c15L) in
+  let mixed=Int64.logxor seed (Int64.mul (Int64.logxor identity salt) 0x9e3779b97f4a7c15L) in
   Int64.to_int (Int64.logxor mixed (Int64.shift_right_logical mixed 32))
 
 let metadata_text args name = match List.assoc name args with Flow.Value.Text text->text
@@ -449,14 +447,6 @@ let glob_error : Flow.Op.t = {
   signature={pos=["pattern",Text];opt=[];rest=None;kw=[]};choices=[];check=(fun _->());
   body=(fun ~live:_ ~node:_ args->Flow.Value.Text(match
     Rdk.Attribute_pattern.compile(metadata_text args "pattern") with Ok _->""|Error message->message));
-}
-(* The native encoders print floats as %.17g; a canonical encoded table must match them. *)
-let float_g17 : Flow.Op.t = {
-  glob_error with name="text/float_g17";
-  signature={pos=["value",Flow.Ty.Float];opt=[];rest=None;kw=[]};
-  body=(fun ~live:_ ~node:_ args->match List.assoc "value" args with
-    | Flow.Value.Float value->Flow.Value.Text(Printf.sprintf "%.17g" value)
-    | _->Flow.Value.fail "E_METADATA_TEXT" "text/float_g17 takes a float.");
 }
 let glob_rewrite_error : Flow.Op.t = {
   glob_error with name="text/glob_rewrite_error";
@@ -564,7 +554,7 @@ let concat : Flow.Op.t = {
   body=(fun ~live:_ ~node args->node "sop/concat" args);
 }
 
-let all = Flow_ir.Operators.all @ [attr; attr_checked; with_attr; has_attr; delete_attr; count; edges; topology; adjacency; triangles; components; shortest_paths; forest; color; chains; mesh; mesh_planes; remap; concat; attr_planes; with_planes;
+let all = [attr; attr_checked; with_attr; has_attr; delete_attr; count; edges; topology; adjacency; triangles; components; shortest_paths; forest; color; chains; mesh; mesh_planes; remap; concat; attr_planes; with_planes;
   group; group_order; group_names; group_entries; with_group; context_seed; provenance_base; context_frame; context_time;
   rename_attr;swap_attr;delete_attrs;rename_group;delete_group;rename_edge;delete_edge;attr_type;attr_names;attr_entries;
-  glob_error;float_g17;glob_rewrite_error;glob_rewrite;glob_rewrite_set_error;glob_rewrite_set;glob_rewrite_set_matches;glob_literal;group_name_valid;group_name_forced]
+  glob_error;glob_rewrite_error;glob_rewrite;glob_rewrite_set_error;glob_rewrite_set;glob_rewrite_set_matches;glob_literal;group_name_valid;group_name_forced]

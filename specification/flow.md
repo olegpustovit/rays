@@ -10,7 +10,7 @@ What is normative, and where:
 
 | Subject | Specified in | Implemented by |
 |---|---|---|
-| The language's forms, types, loops, functions, macros, time rules | `workspace/iteration.md` §2 and §7, with the rule register `workspace/ambiguities.md` | `Flow.Syntax`, `Flow.Macro`, `Flow.Workspace`, `Flow.Eval` |
+| The language's forms, types, loops, functions, macros, and time rules | §11–§13 of this file | `Flow.Syntax`, `Flow.Macro`, `Flow.Workspace`, `Flow.Eval` |
 | The reader, the printer, argument rules, metadata, the editor graph's layout forms | this file, §11 | `Flow.Syntax`, `Flow.Lisp`, `Flow.Workspace`, `Editor_document.Contexts` |
 | The document, layout, exposure, the graph pane, its gestures and keys, carry, the views | this file, §3 to §10 | `Editor_document`, `Flow_graph.Flow_edit`, `Flow_graph.Projection`, `Pxui_graph.Scope`, `Rays_editor` |
 | Lowering and live values | this file, §13 | `Flow_sop.Lower`, `Flow_sop.Value_lane` |
@@ -20,10 +20,10 @@ What is normative, and where:
 Section numbers are stable because code comments cite them (§5.1, §6.4, §7.5, §7.7, §7.12,
 §11.11); a number whose section was removed is not reused.
 
-Two HTML studies are behavioural references and never product code or a web fallback:
-`specification/flow/prototype/` (the first canvas study, older than the workspace: its value
-nodes and grouped definitions were never kept) and `specification/workspace/prototype/` (the language
-and zones). When a study and this file disagree, the code and this file win. `specification/flow/tutorial.md` walks the gestures on a real sketch.
+The older canvas study at `specification/flow/prototype/` is a behavioural reference, never
+product code or a web fallback; its value nodes and grouped definitions were not kept. The
+implementation and this file are authoritative. `specification/flow/tutorial.md` walks the
+gestures on a real sketch.
 
 If an implementation shows that this file is wrong, change it in the same change as the code
 and record a decision in §18.
@@ -34,8 +34,8 @@ In scope: the workspace document; the graph pane and its keys; the list and text
 inspector's role; exposure; carry; the reader and printer; the layout forms; lowering and the
 live value lane.
 
-Not built (do not add without a spec change): Bézier wires; authored wire bends and wireless
-wires; per-element fields; zoom-driven detail; any Python or JavaScript in the build.
+Not built (do not add without a spec change): authored wire bends and wireless wires;
+per-element fields; zoom-driven detail; any Python or JavaScript in the build.
 
 | Term | Meaning |
 |---|---|
@@ -64,7 +64,7 @@ positions with `nil`; disconnecting extras preserves the fixed slot identities.
 
 ### 3.1 Contexts
 
-`Flow.Context.t` is an abstract registered ID. Descriptors supply each context's
+`Flow.Context.t` is an abstract built-in ID. Descriptors supply each context's
 result type, value support, label, color, group and catalog prefix. A graph
 declares its context; a kind belongs to one (the namespace of its qualified name) and a call
 of a kind from another context is `E_WRONG_CONTEXT`. No kind is an `Editor` kind: an editor
@@ -75,7 +75,7 @@ another graph, with input overrides.
 
 The structural types of `Flow.Ty.t` are `Float`, `Int`, `Bool`, `Vec2`, `Vec3`, `Vec4`, `Text`,
 `Color` (text or vec3; only catalog parameters ask for it), `List`, `Array`, `Record`, `Fn`
-and `Any`. Domain types use `Named of string`; registered names include geometry,
+and `Any`. Domain types use `Named of string`; built-in names include geometry,
 drawing, scene, world, settings, panel, editor and material. `Ty.fits`
 decides whether a value may be used where a type is expected: numbers and Bool interconvert,
 numbers widen to a vector, a record fits when it has every wanted field.
@@ -155,9 +155,8 @@ parameter is coerced by `Port_type.coerce`, then normalised to the field's hard 
   list operations, `value/rand`, `value/hsv`, `value/lerp`, `value/polar`, ...); they are the
   value part of the add menu. `material/standard`, `scene/merge` and the `ui/`
   forms are operators of their contexts.
-- A short name resolves within the graph's context (`Flow.Check.resolve_kind`); a kind's
-  aliases, when the manifest lists any, resolve to it. A catalog kind may be passed as a
-  function value: `(map sop/facet xs)`.
+- A short name resolves within the graph's context (`Flow.Check.resolve_kind`); a qualified
+  name resolves exactly. A catalog kind may be passed as a function value: `(map sop/facet xs)`.
 
 ### 3.4 Identity
 
@@ -347,13 +346,9 @@ with `false`; case starts with a literal of the existing test's kind.
 The final else stays. Arm insertion/deletion remaps the remaining arm paths.
 Bypass on `if` selects its then arm; `cond` and `case` cannot be bypassed.
 
-- A wire is one straight segment from port to port, 1.5 points in the port colour, drawn
-  with `Ui.line`. No curves.
-- When a card is in the way it gets one bend (a 5-point square): horizontal out of the
-  source, then a diagonal into the port, the bend 72 points before it. Only when no one-bend
-  way is clear does the wire go round above or below, 24 points clear. A zone's label row
-  and bottom edge are obstacles. Bends are computed, never authored or saved.
-- Wires are cubic curves that leave and enter level by default; `:wires "straight"` on a `ui/graph` panel gives the routed straight segments above, `:wires "rect"` the older orthogonal routing.
+- A wire is a sampled cubic curve from port to port, 1.5 points in the port colour. It leaves
+  and enters level; loop-variable wires leave downward along the begin bar. Curves are derived
+  from the graph and are never authored or saved.
 - A fold's feedback is a dashed wire.
 - **Chains.** With nodes selected, the nodes upstream and downstream of them (along the wires,
   the selection included) and the wires between them stay at full ink and thicker; every
@@ -363,14 +358,6 @@ Bypass on `if` selects its then arm; `cond` and `case` cannot be bypassed.
   a 14-point stub at each end and the source's title in ink-2 left of the input (a
   *tag*). Selecting either end lights the chain and draws the real wire. A tagged wire has no
   hit boxes. `⇧Y` (`scope.tags`) turns tags off and on (view state).
-- **Trunk and branch.** A source read by three or more inputs (two of them plain straight
-  segments) leaves its port as one trunk 36 points long to a junction (a 5-point square, drawn
-  as a bend), then one branch to each sink (`Scope_wires.bundle`). Every wire keeps its own
-  polyline `[port; junction; sink]`, so hover and selection address one wire by its branch (the
-  trunk answers as the topmost of them). A bent wire joins too: it keeps its routed polyline
-  after the junction (the junction is inserted into its first leg, or a 24-point stub is stretched
-  to it), so one fan-out is one trunk and its branches. A dashed, level or tagged wire does not
-  bundle.
 - An unfolded call lands one column left of its owner (§6.1); when it falls outside the view
   the pane pans to it, nothing else moves.
 - Hovering a connected port highlights its wires; hovering a wire highlights that
@@ -746,10 +733,70 @@ On by default until the user turns it off (`?`); the setting persists in user pr
 
 ## 11. Language
 
-The forms of the language, their types and their meaning are in
-`specification/workspace/iteration.md` (§2 loops, lists, `if`, `ref`, checking and bounds; §7
-functions, data, branches, macros) with the rule register `ambiguities.md`. This section has
-what those files leave to the reader, the printer and the checker's argument handling.
+This section specifies the workspace language as well as the reader, printer, graph projection
+and checker. `Flow.Syntax`, `Flow.Lisp`, `Flow.Macro`, `Flow.Workspace` and `Flow.Eval` implement
+it; tests under `lib/flow` and `lib/flow_sop` exercise the contract.
+
+### Core forms and evaluation
+
+`graph` and `defn` declare context-typed bodies; graph inputs each have a default, and `ref`
+evaluates a graph with named input overrides. `let*` bindings are sequential and lexical.
+Bindings, destructuring names, function parameters, loop variables and accumulators may not
+shadow an outer name (`E_SHADOW`). Recursive definitions and unbounded `while` loops are not
+supported.
+
+| Form | Meaning |
+|---|---|
+| `for` | Collect the body once per iteration into a list. Multiple clauses form a row-major product; later clauses may use earlier bindings, and the last clause varies fastest. |
+| `fold` | Carry one accumulator, which may be a record, through the iterations and return its final value. |
+| `scan` | As `fold`, while collecting each updated accumulator into a list. |
+| `sum` | Add the body values; an empty sum is integer zero. |
+| `if`, `cond`, `case` | Check every arm and require exhaustive `cond`/`case` forms; evaluate only the selected arm. |
+| `map` | Apply a function elementwise to equal-length lists or arrays. It zips inputs; it does not form a product. |
+| `fn` | A typed or inferred function value that may be bound, called, or passed to a higher-order form. Functions do not escape through results, records, lists, state or graph references. |
+| `list`, `values`, record access and destructuring | Lists are homogeneous ordered values; records are structural and preserve field order. A `values` form returns one record with the named results. |
+| `ref` | Evaluate a named graph with default inputs overridden by the supplied values. |
+
+Variadic geometry and panel slots splice a list argument one level; other slots keep it as one
+list value. An Int widens when used as a Float. A Float used where an Int is required rounds
+half away from zero; `int` truncates toward zero, while `floor`, `ceil` and `round` are explicit
+conversions. `range` produces Int indices; `linspace` produces Float values including both
+endpoints.
+
+The static pass checks every definition and both branches, independent of iteration counts.
+The run pass evaluates non-geometry values in source order and lowers geometry into a plan; it
+does not cook geometry. Only a taken branch runs. Structural lists and geometry choices cannot
+depend on `t` (`E_TIME_COUNT`, `E_TIME_BRANCH`); live value expressions are residuals evaluated
+for the requested frame. The normal evaluator bounds each structural list or zone to 4,096
+iterations, the evaluation to 600,000 steps, and nested calls to 64. Packed-array storage is
+bounded by native storage rather than the 4,096-list limit; packed block work remains subject to
+the evaluation budget. Exceeding a bound returns a diagnostic.
+
+Values captured outside a zone are evaluated once and shared across its iterations. `value/rand`
+is a pure hash of explicit keys, so reordering, hoisting and parallel evaluation do not change
+results. Pass the loop indices as keys for per-iteration variation. The evaluator is deterministic
+for one and many domains.
+
+`state [previous initial] step` keeps one environment-owned value per source, graph instance,
+lexical path and iteration tuple. Repeated reads in a frame agree; advancing commits the prior
+frame, and a failed evaluation rolls back. Explicit reset, backward seek, stop, source reload and
+new export reset state. Functions, deferred nodes and layouts cannot be stored in state.
+
+The full live frame record, pointer routing, fold reset rules, packed-array constructors and
+native storage limits are specified in §13. Graph inputs and the checked `.rays` file are the
+source of truth; the `rays` executable reads them directly and does not generate OCaml source.
+
+**Skipping a loop copy.** `(for [x xs …] :skip tuples body)` omits the listed iteration
+tuples, and `(scene/merge a b … :skip tuples)` omits the listed arguments. A tuple contains
+the running index of each enclosing loop, outermost first, followed by this form's index: the
+row-major product index for `for`, or the argument's written position for `scene/merge`. A
+single index may be written as an integer. Entries are static non-negative integer literals;
+otherwise the checker reports `E_SKIP`. Only `for` and `scene/merge` accept `:skip`; geometry
+element loops do not. A skipped iteration is not evaluated and contributes no result, while
+remaining indices, node identities, cache keys and provenance stay fixed. The selector still
+includes skipped iterations and reports that a node did not run there. Deleting a loop-made
+scene object writes to the loop's `:skip`, or to its containing `scene/merge` when the loop
+iteration also makes objects that remain.
 
 ### 11.1 Lexical syntax
 
@@ -781,8 +828,8 @@ per line when a form breaks, notes and `^:` flags kept. Printing is a fixed poin
 `print (parse (print x)) = print x`. Comments are kept inside parameter vectors and between
 and after root forms; a comment written after a quote prefix is moved before it.
 
-`Flow.Lisp.float` is the one spelling of a float in workspace text, and every writer uses
-it: the shortest digits that read back as the same value, always with a `.` and never an
+`Flow.Lisp.float` uses `Param.float_text` in workspace-literal mode: the shortest
+digits that read back as the same value, always with a `.` and never an
 exponent (`1e-14` is written `0.00000000000001`). Non-finite values print as
 `NaN`, `Infinity` or `-Infinity`, preserving their class when read back. Finite
 parameter, integer conversion and packed-array boundaries still reject them.
@@ -932,24 +979,16 @@ frame dependencies; a changed resolved graph recompiles the body.
 contains its context, signature, output type, choices, value shape, validation, evaluator body
 and menu category. The checker, evaluator (including compiled arithmetic) and editor read that
 record; adding an operator does not add a second name table. Lookup is a hash table built once
-from `Op.all`, independent of evaluator initialization. `Context.all ()` and `Ty.names ()` supply
-the editor's context and type vocabulary.
-
-Domain types are nominal `Ty.Named name` values; the structural data types stay
-closed. `Ty.register` declares a nominal type's palette role, shape behavior
-and optional literal default. `Context.register` declares an abstract,
-marshalable context identity with a result type, value support, label, palette
-role, Outline group and optional catalog prefix. Register on the initial
-domain before checking. Repeating an identical declaration is idempotent;
-invalid or conflicting declarations leave the registry unchanged.
+from `Op.all`, independent of evaluator initialization. `Context.all ()` and `Ty.names ()` are
+immutable built-in descriptors and supply the editor's context and type vocabulary.
 
 `Workspace.check ~ops` accepts an immutable operator extension list and retains
 it in the checked workspace. Evaluation, checked edits, projection, completion
 and the add menu use that same list; it is not a mutable global operator
-registry. A new domain therefore needs a named type, a context descriptor and
-its operator list, without a new domain match in the checker or pane. The
-`test_open_domain` gate checks this through both the pane and the editor host,
-including insertion, colored painting and preset reload.
+registry. Extensions use a built-in context and type; context identities,
+catalog prefixes and nominal types are closed to the built-in descriptors. The
+`test_open_domain` gate checks custom operators and catalog entries through the
+checker, evaluator, pane and editor host, including insertion, painting and preset reload.
 
 `Port_type.t` stays closed because it is the SOP parameter bridge for the
 existing numeric, Boolean and vector field schemas, rather than the graph's
@@ -1003,7 +1042,7 @@ head of a call, not as an argument.
 
 ### 11.9 Diagnostics
 
-`Flow.Diagnostic.t = { code; severity; position : { line; col } option; message; span }`.
+`Diagnostic.t` is the shared record with code, severity, source position and span, message, cause, hints, and trace. `Diagnostic.Error` carries one such value at refusal boundaries.
 A source diagnostic has a 1-based position and a half-open byte span; one without source
 text leaves both absent. `Diagnostic.report` prints the OCaml compiler's format, so dune and
 editors jump to the line. Messages are sentences that name the fix.
@@ -1035,18 +1074,22 @@ The reader's and the argument checker's codes (the language's own are listed in
 | `E_DOCUMENT_FORM` / `E_LAYOUT` / `E_SETTINGS` | a root form of the document that does not read (§4.4) | |
 | `E_UNKNOWN_GRAPH` / `E_PANEL_OF` | a `ui/graph` or `:of` that names nothing (§11.11) | |
 
-### 11.10 Ambiguity rules
+### 11.10 Language decisions
 
-The register `workspace/ambiguities.md` extends this table.
+These rules settle language and editor cases that would otherwise admit two readings.
 
-| # | Case | Rule |
-|---|---|---|
-| 01 | `3` versus `3.0` | the spelling decides (register L15); an integer literal fits Int and Float fields, `2.5` into an Int field is `E_INT_LITERAL` |
-| 02 | soft versus hard range | hard is an error, soft a warning |
-| 03 | rename | identity is the path; `Rename` rewrites the binding, its uses and the layout keys together |
-| 04 | levels, pins, positions, frames, collapsed zones | layout; never printed in the workspace form |
-| 05 | bypass | metadata `^:bypass`, never a parameter |
-| 06 | a positional after a keyword | allowed; positionals are numbered in written order (§11.6) |
+| Case | Rule |
+|---|---|
+| `3` versus `3.0` | Spelling decides: integer literals remain Int and decimal or exponent spellings remain Float. |
+| Soft versus hard range | Hard-range violations are errors; soft-range violations warn and are not clamped. |
+| Rename | Identity is the lexical path; rename updates the binding, its uses and corresponding layout keys together. |
+| Layout versus source | Levels, pins, positions, frames, collapsed zones and panel state are layout data, never workspace expressions. |
+| Bypass | `^:bypass` is the only expression metadata; it is never an input parameter. |
+| Arguments | Keywords may appear among positionals; positionals are numbered in written order and duplicate inputs are `E_DUPLICATE_PARAM`. |
+| Loop copies | A deleted loop-made object adds its static iteration tuple to `:skip`; retained instances keep their indices, ids, cache keys and provenance. |
+| Time | Time may change values but not structural counts, geometry lists or the chosen geometry branch. |
+| Function values | Functions can be bound, called and passed to higher-order forms but cannot escape as a returned or stored value. |
+| Macro templates | Templates are quasiquoted and hygienic; each expansion has a separate evaluation site. |
 
 ### 11.11 Editor context: the layout forms
 
@@ -1065,7 +1108,7 @@ places it. All sizes are logical points.
 | `(ui/switch panel... :active n)` | the layouts of the graph; the active one is the tree |
 | `(ui/viewport scene :look_through b)` | a viewport of a scene |
 | `(ui/canvas drawing :focus b)` | a native 2D Canvas over a Drawing value; an image input is wrapped in `draw/image` at the origin |
-| `(ui/graph ["name"] :wires w :view v)` | the graph pane; `name` pins a graph of the workspace (`def:name` a function), `:wires` is `"curve"` (default), `"straight"` or `"rect"`, `:view` is `"graph"`, `"list"` or `"text"` |
+| `(ui/graph ["name"] :view v)` | the graph pane; `name` pins a graph of the workspace (`def:name` a function), `:view` is `"graph"`, `"list"` or `"text"` |
 | `(ui/list :of g)` `(ui/inspector :of g)` | a list view, an inspector; `:of` names the graph panel it shows |
 | `(ui/lisp :tab t :of g)` | a text pane; `:tab` is `"selection"`, `"graph"` or `"document"` |
 | `(ui/outline)` | the Navigator |
@@ -1149,8 +1192,14 @@ wins for that leaf.
 `Set_panel_kind`, `Set_layout`, `Layout_new`, `Layout_remove`, `Layout_window`, `Layout_float`,
 `Merge_layouts`) accept a graph whose result is the `ui/workspace` call or a binding of it. The
 printer never threads a `ui/` call (§11.3): a layout is a tree of containers, not a pipeline.
-Named layouts, the `/ [` keys and the migration of an older file with several editor graphs are
-in `workspace/iteration.md` §4.
+Named layouts are panels of one editor graph selected by `(ui/switch ... :active n)`. Panel
+bindings are shared across layouts, preserving each panel's view state. The computed panel
+names appear in the inspector and on the graph pane's layout rows; `/ [` lists them and
+`Space [ 0`–`9` switches layouts. `Space [ n` adds a copy of the active layout (up to ten), and
+`Space [ x` removes it (the final layout remains). Existing documents with several editor
+graphs and `(layout (editor "name"))` remain readable. The first layout-copy command merges
+those graphs into the selected graph's switch, renames copied bindings to avoid collisions,
+removes the extra graphs and clears the selected-graph layout key in one undoable edit.
 
 ### Import
 
@@ -1185,9 +1234,9 @@ the table remains read-only.
 
 ## 12. Catalog manifest and `rays`
 
-`tools/flow_manifest.exe` writes `lib/sop_catalog/flow_manifest.sexp`
+`lib/sop_catalog/flow_manifest.exe` writes `lib/sop_catalog/flow_manifest.sexp`
 (`Flow_sop.Manifest.generate`): the catalog version, a digest, and for every kind its
-qualified name, key, aliases, operation, label, category path, slots, fields (name, label,
+qualified name, key, operation, label, category path, slots, fields (name, label,
 folder, kind with soft and hard range, default, primary, vec3 group, unit) and outputs. The
 file is checked in; `dune build @lib/sop_catalog/runtest` regenerates it and diffs, and an
 intended change is accepted with `dune promote`. `Flow.Check.catalog_of_manifest` reads it:
@@ -1196,7 +1245,7 @@ intended change is accepted with `dune promote`. `Flow.Check.catalog_of_manifest
 check against the live catalog (`Editor_document.Contexts.catalog`): `rays` interprets a `.rays` file,
 so nothing is generated and nothing can be stale.
 
-`tools/lisp/rays.ml` is `rays`:
+`bin/rays.ml` is `rays`:
 
 | Command | Does |
 |---|---|
@@ -1252,7 +1301,7 @@ draw graph does not lower to the core), `E_WEB_IMAGE` (unavailable or undecodabl
 not known at export time, image capacity or unsupported pixel bodies), `E_WEB_REGION` (a sum or fold region, a frame fact the runtime lacks) and
 `E_WEB_CAPTURE` (a region input that changes from frame to frame). `tools/web_parity.exe DIR...` runs the
 exported program under `node` for 120 fixed-step frames and compares each frame's mark table with the native
-core executor's (structure exactly, floats within 1e-6); results are in `specification/web-export/results.md`.
+core executor's (structure exactly, floats within 1e-6); historical results are in Git at `62582188`.
 
 ## 13. Evaluation
 
@@ -1289,7 +1338,7 @@ The recording evaluation associates plan node IDs with originating syntax IDs,
 so anonymous nested calls, thread steps, defn calls and graph overrides update
 every copy of that authored call. Syntax IDs belong to one checked source;
 they can change on reparse and are kept outside the semantic plan.
-The pane updates the existing literal rows and keeps its geometry and routes.
+The pane updates the existing literal rows and keeps its geometry and hit indices.
 The patch lineage is bounded to 4,096 distinct arguments; structural edits and
 unsupported literals use the full check. Geometry templates, frame folds,
 retained function records and non-SOP values use the full lowering after the
@@ -1315,8 +1364,8 @@ invalidates the projection.
 ### 13.2 The value lane
 
 Residuals retain only lexically free bindings, including names read by nested
-functions and zone bodies. Sequential and destructured bindings shadow outer
-names; a state's initializer is read in the outer scope. A bounded weak cache
+functions and zone bodies. Sequential and destructured bindings may not shadow
+outer names (`E_SHADOW`); a state's initializer is read in the outer scope. A bounded weak cache
 per domain memoizes the checked-term walk. Function closures keep their existing
 captures: measured retained closure bytes are below 10% of evaluation allocation.
 Residual identities and template rebinding by name remain unchanged.
@@ -1590,7 +1639,7 @@ recent execution groups. Packed timings exclude source materialization and
 nested groups. Their provenance includes function body cards and the consuming
 stage; only that stage displays the duration. Fused members share the `CPU`
 badge, beside `t` in card headers, and name the group in the inspector. Reference
-fallback reports `Interp`; scalar programs retain `Closure` or `Interp` and
+fallback reports `Interp`; scalar programs retain `Core` or `Interp` and
 cooked geometry reports `Cooked`. Probe reads never add execution timings.
 Value lanes, cooked attribute kernels and prepared drawing share the workspace's
 profile; atomic snapshots cross the cook-worker boundary, and a new snapshot
@@ -1889,12 +1938,42 @@ filtering is bilinear with clamped edges and v=0 at the first image row.
 Topology is preserved. The constructor/schema/catalog come from one SOP
 declaration, including mixed slot types, rather than a checker kind-name case.
 
-The full frame record, `(state [previous init] step)` and packed float/vec3
-arrays follow [iteration.md §2.5](workspace/iteration.md#25-frames-frame-folds-and-packed-arrays).
-All frame fields are live; array lengths are data, while structural lists
-retain T2/T3. A state form has a zone, editable seed rail, step body and
-next-value feedback. New drawing calls, including calls nested in arguments,
-are ordinary typed cards with editable rows.
+`Input.t` is the full live record `{ t; dt; frame; tick; size; pointer; buttons; keys; events }`.
+Size and pointer coordinates are logical points; events retain host order. The host captures
+one snapshot before routing editor keys and passes it to probes, value lanes, context lowering
+and drawing; geometry workers receive that same snapshot through `Sop.Context.input`. Cache
+equality includes every field and floating-point bit, including signed zero. `frame/dt`,
+`frame/index`, `frame/width`, `frame/height`, `pointer/x`, `pointer/y`, `(pointer/down [button])`,
+`(key/down key)` and `(frame/input)` read the snapshot. Pointer buttons are `left` (default),
+`middle`, `right`, `x1` and `x2`.
+
+A canvas pane evaluates its drawing with `size` set to that pane's logical size; probes, value
+lanes and geometry keep the window snapshot and pointer coordinates remain window points.
+Export uses the configured window size. In the editor, pointer facts belong to the sketch only
+over a picture, canvas or viewport: over another pane, menu or prompt, the picture's last
+position remains, no button is down, and pointer, scroll and pinch events are omitted from
+`frame/input`. A press begun on a picture remains its drag through release; a press begun
+elsewhere never becomes the sketch's drag. Keys are unaffected.
+
+`state [previous init] step` stores static data and computes a next value from the previous
+value and current frame; numeric results use the wider type. A cell is keyed by source, graph
+instance, lexical path and iteration tuple. Repeated reads in one frame agree; advancing commits
+the previous frame, and failed evaluation rolls back. Backward seeks, explicit reset, stop,
+source reload and new export reset the fold. The environment owns fold state and probes inspect
+a copy. A fold outside a geometry loop is captured immutably by every worker and is exact across
+one and many domains. A fold inside a cooked-geometry element body is `E_STATE_ELEMENT`; bind it
+outside that zone. Packed-array iteration may contain folds keyed by element index. The graph
+draws a state form as a zone with an editable seed rail, step body and next-value feedback.
+
+Packed `(array float)` and `(array vec3)` values use finite native storage and have no 4,096
+element list cap. Constructors are `(array/range count)`, `(array/float count [value])` and
+`(array/vec3 count [value])`; omitted values are zero. Access uses `array/count`, `array/nth`
+and `array/sum`. Negative counts, native storage overflow, non-finite values and out-of-range
+indices are errors. Array length is data and may depend on frame input or a fold; structural
+list lengths and geometry choices may not. Packed higher-order operations and zones charge the
+600,000-step evaluation budget independently per 1,024-element block, then restore the enclosing
+counter. The order of element evaluation and floating-point operations is unchanged. New drawing
+calls, including calls nested in arguments, are ordinary typed cards with editable rows.
 
 A graph with `:context draw` returns `Drawing`. Its operators are
 `draw/background`, `draw/point`, `draw/points`, `draw/line`, `draw/rect`,
@@ -1920,7 +1999,7 @@ point arrays are not rebuilt each frame.
 
 `Drawing` has no per-kind code. A draw graph lowers once to a core program
 (`Flow_ir.Core_draw`, [core.md](core.md)), runs each frame into one mark table
-(`Scene_command.Marks`, [marks.md](marks.md)), and `Marks_scene` adapts the table
+(`Scene_command.Marks`, [marks.md](marks.md)), and `Flow_native.Marks_scene` adapts the table
 to `Scene`. All defaults and checks live in the lowering rules and the executor;
 a graph the lowering refuses (a drawing chosen by a live value, an image that is
 not a plan node, an unknown kind) is a diagnostic, never a second implementation.
@@ -1937,6 +2016,49 @@ pointer, held keys/buttons and events; `sketches/particles.rays` is
 the 10,000-particle reference and its native fixed exports are byte-identical
 to the original OCaml example.
 
+### Editor consistency
+
+Authored source, layout and sketch settings install as one checked document. A derived
+scene, World or settings edit reconciles through its source before entering history; a
+refusal preserves the installed document. Document Lisp and whole-document copy include
+saved metadata. Missing metadata preserves its supplied fallback, explicit settings start
+from schema defaults, an explicit empty layout clears the layout, and a full preset starts
+with default settings independently of the running session. Text applies before cook
+submission; asynchronous rendering may retain the last successful cook, while an awaited
+update renders the applied document.
+
+Geometry, lights and camera bookkeeping use the same viewport instance. An empty override
+differs from a missing override, focused previews remain focused when the UI is hidden, and
+renderer caches include viewport identity. Inspector ownership does not depend on navigation
+level. Composition invalidation includes the actual scene, level and viewport membership.
+Named SOP handle selection, transforms and argument edits resolve the compiled node's owner.
+Viewport framing works without a graph pane and uses only the focused scene instance's bounds;
+an empty instance has no frame target. Named viewport bindings key their orbit/render slots by
+editor graph and binding name, so reordering and docking preserve their identity. Inline,
+looped or repeated uses use placement keys and may reset transient state when rearranged; no
+additional persistence format is introduced.
+
+Each lowered viewport retains its panel origin, authored scene reference when present, and
+evaluated instance. Derived auxiliary objects are read-only; their inspector names the source
+edit route, and shared reconciliation refuses write-back with the viewport identity. Editing
+reference overrides remains the authored route.
+
+Light `:intensity` and `:color` retain residual expressions and resolve at the editor
+timeline's `t` during composition, including independent preview overrides. The saved document
+stays at its checked source-derived state; object and panel identities, SOP networks and
+prepared geometry stay unchanged. Only recorded live fields are evaluated, using checked port
+descriptors. One resolved scene is cached by authored scene, drives and time. A failed or
+non-finite field evaluation keeps that light's last successful values while healthy siblings
+advance, reports `E_CONTEXT_LIVE` with object, view and field attribution, and clears on
+recovery. Intensity and color use the schema's ordinary hard-bound normalization.
+
+Time-dependent fields in scene, World, settings, editor and material structs are refused when
+installing the document or reading startup configuration, with `E_CONTEXT_TIME` naming the
+graph and field; they are never silently evaluated at zero. Live SOP and value drives remain
+supported, including scene references to time-driven geometry. Startup window settings and
+the cook seed are captured when the host starts, and their inspector labels say “on restart”.
+Live fields do not change the window or its captured cook seed.
+
 ## 14. Libraries
 
 The native/web compiler's shared frame and numeric region contract is specified
@@ -1946,7 +2068,7 @@ in [core.md](core.md); its implementation sequence is [web-export/plan.md](web-e
 |---|---|
 | `param` | field schemas, with `primary` and `vec3` |
 | `flow` | `Syntax` (reader), `Lisp` (printer), `Macro`, `Workspace` (checker), `Eval`, `Ty`, `Port_type`, `Context`, `Check` (catalog descriptors and the manifest reader), `Diagnostic` |
-| `frame_input` | immutable logical frame facts, validation and exact cache equality |
+| `input` | immutable logical frame facts, validation and exact cache equality |
 | `flow_graph` | `Flow_edit`, `Projection`, `Exposure`, `Probe`, independent of geometry |
 | `flow_sop` | `Catalog`, `Manifest`, `Lower`, `Network`, `Port`, `Value_lane`, `Curve` |
 | `editor_document` | `Workspace_doc`, `Layout_by_path`, `Contexts` (scene, World, settings and editor lowering), `Scene_sync`, `Preset` |
@@ -1986,7 +2108,7 @@ the text pane (`test/test_text_pane.ml`), the carry (`lib/pxui/test_ui.ml`,
 ## 17. Deferred
 
 Fields and the diamond socket as data; zoom-to-enter; a `[%workspace]` PPX with generated
-input records (register O2); procedural macros; a per-node cache ring for scrubbing; a file
+input records; procedural macros; a per-node cache ring for scrubbing; a file
 dropped from Finder (§7.12).
 
 ## 18. Decisions
@@ -1996,7 +2118,7 @@ dropped from Finder (§7.12).
 | The document | the workspace text; graphs, networks and cards are derived from it and nothing is stored beside it but layout |
 | Identity | the lexical path of a binding; a nested node's leaf is `holder#input` |
 | Edits | one variant (`Flow_edit.op`) and one `apply` that prints, re-parses and re-checks; a refused edit changes nothing |
-| Wire shape | straight segments with computed bends; no curves, no authored bends, no wireless wires |
+| Wire shape | cubic curves; no authored bends or wireless wires |
 | Levels | explicit (`o`, `p`), never zoom-driven |
 | Viewing a node | `v` is a per-object lexical preview request outside the source, layout and history; loop selectors choose its tuple |
 | Vec3 | metadata grouping of three float fields; no new `Param.value` case |
@@ -2029,7 +2151,7 @@ Lengths and finite float32 bounds are checked before publication. Circles and re
 one `:fill`/`:stroke` color or a packed RGB array with exactly one entry per position. The latter
 is used by the generative and noise examples. Line width is shared by the batch. Every batch
 retains painter order and enclosing transforms, clip and blend state; unchanged instance bytes
-retain their upload. `draw/points` keeps the established `Ink` rasterization.
+retain their upload. `draw/points` emits unit rectangles in the shared `Ui_batch` format.
 
 `draw/rotate angle drawing` uses radians. `draw/scale factor drawing` accepts a scalar or vec3
 (x/y). `draw/rounded_rect at size :radius :fill :stroke`, `draw/polygon points :fill :stroke` and
@@ -2079,7 +2201,7 @@ Dialog filters use records `(list {:label "Images" :extensions (list "png" "jpg"
 Host-context state folds advance once per logical host frame, including while the animation
 timeline is paused. Draw/value/SOP state continues to follow the timeline index, so seeking and
 fixed-step exports retain their existing deterministic playback semantics. The internal
-`Frame_input.tick` is the raw host frame count; exports set it equal to the timeline frame.
+`Input.tick` is the raw host frame count; exports set it equal to the timeline frame.
 A successful dialog request returns a `frame/input` event of kind `dialog-opened` with its real
 `:id` on the following frame; subsequent `file-dialog` events carry that same request ID.
 Fixed-step window runs use the export effect policy: active quit/dialog requests return

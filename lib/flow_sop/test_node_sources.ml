@@ -1,7 +1,38 @@
-let ok = function Ok value -> value | Error diagnostic -> failwith (Flow.Diagnostic.to_string diagnostic)
+let ok = function Ok value -> value | Error diagnostic -> failwith (Diagnostic.to_string diagnostic)
 let parse text = Flow.Syntax.parse text |> ok
 let checked = function Some workspace, [] -> workspace
-  | _, diagnostics -> failwith (String.concat "\n" (List.map Flow.Diagnostic.to_string diagnostics))
+  | _, diagnostics -> failwith (String.concat "\n" (List.map Diagnostic.to_string diagnostics))
+
+let () =
+  let factories = [Sop.Nodes.Line.factory] in
+  let forms = parse {|(workspace checked_field_defaults
+    (defnode sop/iso_surface
+      [(field : (fn [vec3] float) :keyword true)
+       (resolution_x : float 1.0 :vec3 ["resolution" 0])
+       (resolution_y : float 1.0 :vec3 ["resolution" 1])
+       (resolution_z : float 1.0 :vec3 ["resolution" 2])
+       (min_x : float -3.0 :vec3 ["min" 0])
+       (min_y : float -4.0 :vec3 ["min" 1])
+       (min_z : float -5.0 :vec3 ["min" 2])
+       (max_x : float 7.0 :vec3 ["max" 0])
+       (max_y : float 8.0 :vec3 ["max" 1])
+       (max_z : float 9.0 :vec3 ["max" 2])]
+      (sop/line :kind "Points" :points 2))
+    (graph g :context sop
+      (let* [field (fn [p] (+ p.x (+ p.y p.z)))]
+        (sop/iso_surface :field field))))|} in
+  let catalog = Flow_sop.Catalog.of_factories ~version:1 ~nodes:[] factories |> ok in
+  let workspace = Flow_sop.Catalog.check_workspace ~sources:[]
+      ~ops:Flow_sop.Operators.all catalog forms |> checked in
+  let lowered = Flow_sop.Lower.of_checked ~factories workspace |> ok in
+  let calls = Flow_sop.Lower.field_calls ~live:(Input.at_time 0.)
+      ~resolve:(fun value -> Ok value) lowered in
+  match calls ["g"; "field"] [] with
+  | [(0, 8, at)] ->
+      let samples k = List.assoc ["g"; "field"; "@result"] (ok (at k)) |> List.map snd in
+      assert (samples 0 = [Flow.Eval.Float (-12.)]);
+      assert (samples 7 = [Flow.Eval.Float 24.])
+  | _ -> failwith "Field probe ignored the checked declaration's defaults"
 
 let () =
   let catalog = Flow.Check.{version=1;kinds=[]} in
@@ -16,6 +47,39 @@ let () =
   assert (List.map (fun (node : Flow.Workspace.node_definition) -> node.kind.qualified)
     workspace.nodes=["sop/selected_fixture"]);
   assert (workspace.source=authored)
+
+let () =
+  (* The embedded immutable source list uses the prepared index; a fresh list spine with
+     the same forms takes the uncached path. Both must select the same definitions and
+     preserve identical checker diagnostics. *)
+  let embedded = ok (Flow_sop.Catalog.sources ()) in
+  let copied = List.map Fun.id embedded in
+  let nodes = ok (Flow_sop.Catalog.node_definitions ()) in
+  let catalog = Flow_sop.Catalog.of_factories
+      ~version:Flow_sop.Manifest.version ~nodes [] |> ok in
+  let describe = function
+    | None, diagnostics ->
+        `Error (List.map Diagnostic.to_string diagnostics)
+    | Some (workspace : Flow.Workspace.t), diagnostics ->
+        `Ok (List.map Diagnostic.to_string diagnostics,
+          List.map (fun (node : Flow.Workspace.node_definition) -> node.kind.qualified)
+            workspace.nodes,
+          List.map Flow.Syntax.head workspace.source)
+  in
+  let check sources text =
+    let forms = parse text in
+    let result = Flow_sop.Catalog.check_workspace ~sources
+        ~ops:Flow_sop.Operators.all catalog forms in
+    (forms, describe result)
+  in
+  let valid = {|(workspace indexed (graph g :context sop (sop/points :points 2)))|} in
+  let invalid = {|(workspace indexed (graph g :context sop (sop/points :not_a_parameter 2)))|} in
+  List.iter (fun text ->
+    let fast_forms, fast = check embedded text in
+    let fallback_forms, fallback = check copied text in
+    assert (fast = fallback);
+    assert (List.map Flow.Syntax.head fast_forms = List.map Flow.Syntax.head fallback_forms))
+    [valid; invalid]
 
 let () =
   let factories = [Sop.Nodes.Line.factory] in

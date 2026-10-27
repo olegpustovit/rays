@@ -3,7 +3,7 @@ open Rays_math
 type method_ = Ray_minimum_distance | Ray_project
 
 type direction =
-  | Ray_vector of Vec3.t
+  | Ray_vector of Rays_math.Vec3.t
   | Ray_normal
   | Ray_attribute of string
 
@@ -63,7 +63,7 @@ let point_selection ?cancel ~grain geometry selection =
 
 let direction_planes ?cancel ~grain source = function
   | Ray_vector value ->
-      if not (Float.is_finite value.Vec3.x && Float.is_finite value.y && Float.is_finite value.z) then
+      if not (Float.is_finite value.Rays_math.Vec3.x && Float.is_finite value.y && Float.is_finite value.z) then
         fail "invalid_direction" "ray direction vector must be finite";
       if value.x = 0. && value.y = 0. && value.z = 0. then
         fail "invalid_direction" "ray direction vector must be non-zero";

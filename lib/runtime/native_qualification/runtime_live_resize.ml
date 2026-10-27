@@ -25,7 +25,11 @@
 
 let get = function
   | Ok value -> value
-  | Error error -> failwith (Ogpu.Error.to_string error)
+  | Error error -> failwith (Format.asprintf "%a" Renderer.pp_error error)
+
+let create width height =
+  Renderer.create {Renderer.default_configuration with logical_width=width;logical_height=height;
+    drawable_width=width;drawable_height=height;vsync=true}
 
 let events = match Runtime_input.create ~max_events:256 ~logical_width:1 ~logical_height:1 with
   | Ok source -> source
@@ -39,31 +43,31 @@ let frame runtime ~clear =
    | Error message -> failwith ("pump: " ^ message));
   let delivered = Runtime_input.drain events in
   if List.exists (function
-      | Runtime_input.Resized _ | Pixel_size_changed _ -> true | _ -> false) delivered
-  then Runtime.window_changed runtime;
-  ignore (get (Runtime.render ~clear runtime []));
+      | Input.Resized _ | Pixel_size_changed _ -> true | _ -> false) delivered
+  then Runtime.window_changed (Renderer.Private.runtime runtime);
+  ignore (get (Renderer.draw ~clear runtime []));
   delivered
 
 let seconds_now = Unix.gettimeofday
 
 let auto () =
-  let runtime = get (Runtime.create ~hidden:false ~vsync:true ~width:320 ~height:240 ()) in
-  Fun.protect ~finally:(fun () -> ignore (Runtime.destroy runtime)) (fun () ->
+  let runtime = get (create 320 240) in
+  Fun.protect ~finally:(fun () -> ignore (Renderer.destroy runtime)) (fun () ->
     ignore (frame runtime ~clear:(0.1, 0.1, 0.1, 1.));
     let size_events = ref 0 and longest_gap = ref 0. in
     let last = ref (seconds_now ()) in
     let sizes = [ 400, 300; 480, 360; 360, 270; 320, 240 ] in
     List.iter (fun (width, height) ->
-      get (Runtime.resize runtime ~width ~height);
+      get (Runtime.resize (Renderer.Private.runtime runtime) ~width ~height);
       for step = 1 to 12 do
         let delivered = frame runtime ~clear:(float step /. 12., 0.2, 0.3, 1.) in
         size_events := !size_events + List.length (List.filter (function
-          | Runtime_input.Resized _ | Pixel_size_changed _ -> true | _ -> false) delivered);
+          | Input.Resized _ | Pixel_size_changed _ -> true | _ -> false) delivered);
         let now = seconds_now () in
         longest_gap := Float.max !longest_gap (now -. !last);
         last := now
       done;
-      let facts = Runtime.frame_facts runtime in
+      let facts = get (Runtime.presentation_facts (Renderer.Private.runtime runtime)) in
       if facts.logical_width <> width || facts.logical_height <> height then
         failwith (Printf.sprintf "the runtime's size %dx%d did not follow the window's %dx%d"
           facts.logical_width facts.logical_height width height))
@@ -73,17 +77,17 @@ let auto () =
     (* A size changed behind the runtime's back (what a drag does) reaches it
        through SDL's event alone: the frame pumps, sees Resized and
        Pixel_size_changed, announces, and renders at the new size. *)
-    let window = Option.get (Runtime.Private.window_handle runtime) in
+    let window = Option.get (Renderer.Private.window_handle runtime) in
     (match Sdl3.Window.set_size window ~width:500 ~height:400 with
      | Ok () -> () | Error error -> failwith (Format.asprintf "%a" Sdl3.pp_error error));
     (match Sdl3.Window.sync window with
      | Ok () -> () | Error error -> failwith (Format.asprintf "%a" Sdl3.pp_error error));
     let announced = frame runtime ~clear:(0.3, 0.3, 0.3, 1.) in
-    if not (List.exists (function Runtime_input.Resized (500, 400) -> true | _ -> false) announced)
-       || not (List.exists (function Runtime_input.Pixel_size_changed _ -> true | _ -> false) announced)
+    if not (List.exists (function Input.Resized (500, 400) -> true | _ -> false) announced)
+       || not (List.exists (function Input.Pixel_size_changed _ -> true | _ -> false) announced)
     then failwith "SDL did not announce the new size as Resized and Pixel_size_changed";
     ignore (frame runtime ~clear:(0.4, 0.4, 0.4, 1.));
-    let after = Runtime.frame_facts runtime in
+    let after = get (Runtime.presentation_facts (Renderer.Private.runtime runtime)) in
     if after.logical_width <> 500 || after.logical_height <> 400 then
       failwith "SDL's size event did not bring the new size to the runtime";
     if !longest_gap > 0.25 then
@@ -95,9 +99,8 @@ let auto () =
       !size_events (!longest_gap *. 1000.))
 
 let drag duration =
-  let runtime = get (Runtime.create ~hidden:false ~vsync:true ~width:640 ~height:480 ()) in
-  Fun.protect ~finally:(fun () -> ignore (Runtime.destroy runtime)) (fun () ->
-    get (Runtime.set_resizable runtime true);
+  let runtime = get (create 640 480) in
+  Fun.protect ~finally:(fun () -> ignore (Renderer.destroy runtime)) (fun () ->
     Printf.printf "Drag an edge or corner of the window for %.0f seconds...\n%!" duration;
     let started = seconds_now () in
     let last = ref started and frames = ref 0 and size_events = ref 0 in
@@ -106,7 +109,7 @@ let drag duration =
       let delivered = frame runtime
           ~clear:(0.5 +. 0.5 *. sin (seconds_now () -. started), 0.2, 0.3, 1.) in
       size_events := !size_events + List.length (List.filter (function
-        | Runtime_input.Resized _ -> true | _ -> false) delivered);
+        | Input.Resized _ -> true | _ -> false) delivered);
       let now = seconds_now () in
       let gap = now -. !last in
       last := now;
@@ -128,8 +131,8 @@ let drag duration =
 let () =
   match Array.to_list Sys.argv with
   | [ _ ] | [ _; "--auto" ] ->
-      (match Runtime.create ~width:1 ~height:1 () with
+      (match create 1 1 with
        | Error _ -> print_endline "live resize control: skipped (no window/Metal device)"
-       | Ok probe -> ignore (Runtime.destroy probe); auto ())
+       | Ok probe -> ignore (Renderer.destroy probe); auto ())
   | [ _; "--drag"; seconds ] -> drag (float_of_string seconds)
   | _ -> prerr_endline "usage: runtime_live_resize [--auto | --drag SECONDS]"; exit 2

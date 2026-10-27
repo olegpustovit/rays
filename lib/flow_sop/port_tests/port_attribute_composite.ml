@@ -51,7 +51,7 @@ let stack base = [ base |> layer 0 |> spread 0 |> with_normals;
                    base |> layer ~skip:["v3"] ~scale:0.5 3 |> spread 3 |> with_normals;
                    base |> layer 4 |> spread 4;
                    base |> layer ~skip:["alpha"] 5 |> spread 5 |> with_normals ]
-let take n l = List.filteri (fun i _ -> i < n) l
+let take = List.take
 let inputs = [
   "six mixed", stack (mixed ());
   "single", [mixed () |> layer 0];

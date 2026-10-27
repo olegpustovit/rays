@@ -10,8 +10,6 @@ type 'prepared t = {
   viewing : string option;
   control : V.control;
   draw : Sop.Node.t -> 'prepared -> V.rendered;
-  overlay : Sop.Node.t -> 'prepared option -> Rays.Frame.t -> Rays.Scene.t;
-  status : 'prepared option -> string option;
   rendered : V.rendered option;
   views : (string * V.rendered) list;
   drawn :
@@ -22,7 +20,7 @@ type 'prepared t = {
      (string * int list) list)
     option;
   resolved :
-    (Editor_document.Document.t * Frame_input.t * Sop.Edit_graph.t) option;
+    (Editor_document.Document.t * Input.t * Sop.Edit_graph.t) option;
   context_error : string option;
   baked : Rays.World.baked option;
   baked_from : (Rays.World.t * Rays.World.baked) option;
@@ -46,13 +44,14 @@ type 'prepared t = {
   saved_view : Flow.Syntax.t;
   state_error : string option;
   canvases : (string * canvas_picture) list;
-  host : Workspace_host.t;
+  host : Flow_native.Workspace_host.t;
 }
 val create :
   ?inputs:(string * (string * Flow.Eval.value) list) list ->
   ?name:string ->
   ?presets:string ->
   ?factories:Sop.Edit_graph.factory list ->
+  ?gpu_owner:Flow_native.Workspace_gpu.t ->
   ?settings:Editor_document.Settings.t ->
   ?lights:Rays.Light.t list ->
   ?camera:V.camera ->
@@ -70,8 +69,7 @@ val create :
   prepare:(Editor_document.Settings.t ->
            Sop.Session.output -> ('a, string) result) ->
   draw:(Sop.Node.t -> 'a -> V.rendered) ->
-  ?overlay:(Sop.Node.t -> 'a option -> Rays.Frame.t -> Rays.Scene.t) ->
-  ?status:('a option -> string option) -> unit -> ('a t, string) result
+  unit -> ('a t, string) result
 val document : 'a t -> Sop.Edit_graph.t
 val prepared : 'a t -> 'a option
 val camera : 'a t -> V.camera
@@ -114,8 +112,6 @@ val paint_view :
 val viewport_camera : 'a t -> string -> V.view
 val focused_image : 'a t -> V.rendered option
 val film : 'a t -> Rays.Frame.t -> int * int * int * int
-val take_export : 'a t -> 'a t * string option
-val set_render_status : 'a t -> string option -> 'a t
 val refresh_hidden : 'a t -> Rays.Frame.t -> 'a t
 val composition_key :
   'a Core_model.t ->

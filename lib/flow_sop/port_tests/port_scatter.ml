@@ -139,7 +139,7 @@ let () = Printexc.register_printer (fun e ->
   let r = Obj.repr e in
   if Obj.tag r = 0 && Obj.size r = 2 && Obj.is_block (Obj.field r 0) && Obj.tag (Obj.field r 0) = Obj.object_tag
      && (Obj.obj (Obj.field (Obj.field r 0) 0) : string) = "Flow_sop.Lower.Fail"
-  then Some ("Lower.Fail " ^ Flow.Diagnostic.to_string (Obj.obj (Obj.field r 1))) else None)
+  then Some ("Lower.Fail " ^ Diagnostic.to_string (Obj.obj (Obj.field r 1))) else None)
 (* Dropped case "density_nan" (a NaN point density): the language refuses non-finite array input with
    E_NONFINITE before the body can report scatter's invalid_geometry (PP.md work order 2, one contract for all ports). *)
 (* Debugging aid: SC_INPUT=<index> and SC_CASES=a,b restrict the fixtures and cases. *)

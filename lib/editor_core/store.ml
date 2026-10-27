@@ -1,29 +1,4 @@
-let rec ensure_directory path =
-  if path <> "" && path <> "." && not (Sys.file_exists path) then (
-    let parent = Filename.dirname path in
-    if parent <> path then ensure_directory parent;
-    try Unix.mkdir path 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
-
-(* Written to a temporary file, synced and renamed, so a crash never leaves a torn file.  A
-   symlink stays a link: the rename replaces the file it points at. *)
-let write_text ~filename text =
-  try
-    let filename = try Unix.realpath filename with Unix.Unix_error _ -> filename in
-    let directory = Filename.dirname filename in
-    ensure_directory directory;
-    let temporary, channel = Filename.open_temp_file ~temp_dir:directory
-      ".rays-" ".tmp" in
-    Fun.protect ~finally:(fun () ->
-      close_out_noerr channel;
-      if Sys.file_exists temporary then Sys.remove temporary) (fun () ->
-      output_string channel text;
-      flush channel;
-      Unix.fsync (Unix.descr_of_out_channel channel);
-      close_out channel;
-      Sys.rename temporary filename);
-    Ok ()
-  with Sys_error message -> Error message
-     | Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)
+let write_text = Runtime_resources.write_text
 
 let read_text ~filename =
   try Ok (In_channel.with_open_bin filename In_channel.input_all)
@@ -58,14 +33,14 @@ module Viewport = struct
 
   let encode easy ~look_through =
     let camera = Easy_camera.camera easy in
-    let vector (v : Vec3.t) = vec [ v.x; v.y; v.z ] in
+    let vector (v : Rays_math.Vec3.t) = vec [ v.x; v.y; v.z ] in
     map [ "eye", vector (Camera.position camera); "target", vector (Camera.target camera);
           "fov", number (Easy_camera.fov_y easy);
           "look_through", make (S.Sym (string_of_bool look_through)) ]
 
   let decode easy form =
     let vector name = match Option.bind (field form name) vec_of with
-      | Some [ x; y; z ] -> Some (Vec3.create x y z) | _ -> None in
+      | Some [ x; y; z ] -> Some (Rays_math.Vec3.create x y z) | _ -> None in
     let easy = match vector "eye", vector "target" with
       | Some eye, Some target -> Easy_camera.of_view ~eye ~target easy
       | _ -> easy in
@@ -114,7 +89,7 @@ module Settings = struct
   let load ~sketch filename =
     let ( let* ) = Result.bind in
     let* text = read_text ~filename in
-    let* forms = Result.map_error Flow.Diagnostic.to_string (S.parse text) in
+    let* forms = Result.map_error Diagnostic.to_string (S.parse text) in
     match forms with
     | [ { S.node = S.List ({ S.node = S.Sym "settings"; _ } :: items); _ } ] ->
         let rec pairs acc = function

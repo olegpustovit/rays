@@ -1,5 +1,9 @@
 (library
  (name rays_math)
  (public_name rays.math)
- (modules vec2 vec3 mat4 quat rand noise parallel color)
- (libraries domainslib))
+ (modules vec2 vec3 mat4 quat rand noise color hash))
+
+(test
+ (name test_color)
+ (modules test_color)
+ (libraries rays_math))

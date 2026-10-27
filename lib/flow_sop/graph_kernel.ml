@@ -3,8 +3,7 @@
    CSR row record for coloring), so the same call is a JavaScript host twin. *)
 module E = Flow.Eval
 
-exception Refuse of string * string
-let refuse code message = raise (Refuse (code, message))
+let refuse code message = raise (Diagnostic.Error (Diagnostic.error ~code message))
 
 let int_array record name = match List.assoc_opt name record with
   | Some (E.Int_array values) -> values
@@ -208,5 +207,5 @@ let resolve = function
                | "values" -> E.Int_array values | "closed" -> E.Int_array closed
                | _ -> unknown ())
          | _ -> refuse "E_DATA_SOURCE" "Unknown graph data source."
-       with Refuse (code, message) -> Error (Flow.Diagnostic.error ~code message))
-  | _ -> Error (Flow.Diagnostic.error ~code:"E_DATA_SOURCE" "Unknown graph data source.")
+       with Diagnostic.Error diagnostic -> Error diagnostic)
+  | _ -> Error (Diagnostic.error ~code:"E_DATA_SOURCE" "Unknown graph data source.")

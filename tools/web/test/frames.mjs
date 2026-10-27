@@ -1,5 +1,5 @@
 // node frames.mjs EXPORT_DIR NATIVE_JSON
-// Runs an exported program.js (the files rays-lisp web wrote) for 120 fixed-step frames at 640x480 with the pointer
+// Runs an exported program.js (the files `rays web` wrote) for 120 fixed-step frames at 640x480 with the pointer
 // at (100, 100), CPU regions only, and compares each frame's mark table with the native one written by
 // tools/web_parity.exe: structure exactly, floats within 1e-6 (colours, counts, indices, text exactly). A frame
 // that throws is {error: code}.

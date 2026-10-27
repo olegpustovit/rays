@@ -25,14 +25,14 @@ let geometry () =
 let positions mesh = (Rays.Mesh.Private.packed_view mesh).vertices
 
 let frame mouse_buttons = {
-  Rays.Frame.width = 100; height = 100; size = 100, 100;
-  pixel_scale = 1., 1.; time = 0.; dt = 1. /. 60.; fps = 60.; count = 0;
-  mouse = 0., 0.; mouse_delta = 0., 0.; keys = []; mouse_buttons; events = [];
+  Rays.Frame.input = { (Input.at_time 0.) with frame = 0; tick = 0; size = 100, 100;
+    dt = 1. /. 60.; buttons = mouse_buttons };
+  pixel_scale = 1., 1.; fps = 60.; mouse_delta = 0., 0.;
 }
 
-let timeline_frame ?(dt = 0.25) ?(events = []) ?(buttons = []) () = {
-  (frame buttons) with Rays.Frame.dt = dt; events
-}
+let timeline_frame ?(dt = 0.25) ?(events = []) ?(buttons = []) () =
+  let frame = frame buttons in
+  { frame with Rays.Frame.input = { frame.input with dt; events } }
 
 let test_timeline_and_schedule () =
   let timeline = Rays_editor.Timeline.create () in
@@ -68,7 +68,7 @@ let test_timeline_and_schedule () =
   if T.frame (fst (T.seek timeline ~frame:(-3L))) <> 0L then
     fail "sketch timeline seek did not clamp at frame 0";
   let quiet, _ = T.update (T.create ())
-      (timeline_frame ~events:[Rays.Event.KeyPressed (Rays.Input.KeyChar 'p')] ()) in
+      (timeline_frame ~events:[Input.Key_pressed (Input.KeyChar 'p')] ()) in
   if T.mode quiet <> T.Playing then fail "timeline reacted to a key press";
 
   let static_graph = Lisp_sop.node "(sop/box)" in
@@ -77,31 +77,31 @@ let test_timeline_and_schedule () =
       [static_graph] (fun ~context:_ inputs -> Ok inputs.(0)) in
   let schedule, fire = Rays_editor.Private.Schedule.step
       Rays_editor.Private.Schedule.initial ~graphs:[static_graph]
-      ~effects:Parameter.no_effects ~context_changed:false ~force:false
+      ~effects:Param.no_effects ~context_changed:false ~force:false
       ~busy:false
       ~frame:(timeline_frame ()) in
   if not fire then fail "cook scheduler skipped the initial graph";
   let schedule, fire = Rays_editor.Private.Schedule.step schedule
-      ~graphs:[static_graph] ~effects:Parameter.no_effects ~context_changed:true
+      ~graphs:[static_graph] ~effects:Param.no_effects ~context_changed:true
       ~force:false ~busy:false ~frame:(timeline_frame ()) in
   if fire then fail "static graph recooked for an unrelated clock change";
   let schedule, fire = Rays_editor.Private.Schedule.step schedule
-      ~graphs:[dynamic_graph] ~effects:Parameter.no_effects ~context_changed:true
+      ~graphs:[dynamic_graph] ~effects:Param.no_effects ~context_changed:true
       ~force:false ~busy:false
-      ~frame:(timeline_frame ~buttons:[Rays.Input.LeftButton] ()) in
+      ~frame:(timeline_frame ~buttons:[Input.LeftButton] ()) in
   if fire then fail "dynamic graph cooked while a parameter drag was held";
   let _, fire = Rays_editor.Private.Schedule.step ~live:true schedule
-      ~graphs:[dynamic_graph] ~effects:Parameter.no_effects ~context_changed:true
+      ~graphs:[dynamic_graph] ~effects:Param.no_effects ~context_changed:true
       ~force:false ~busy:false
-      ~frame:(timeline_frame ~buttons:[Rays.Input.LeftButton] ()) in
+      ~frame:(timeline_frame ~buttons:[Input.LeftButton] ()) in
   if not fire then fail "live cooking did not cook during a held drag";
   let _, fire = Rays_editor.Private.Schedule.step ~live:true schedule
-      ~graphs:[dynamic_graph] ~effects:Parameter.no_effects ~context_changed:true
+      ~graphs:[dynamic_graph] ~effects:Param.no_effects ~context_changed:true
       ~force:false ~busy:true
-      ~frame:(timeline_frame ~buttons:[Rays.Input.LeftButton] ()) in
+      ~frame:(timeline_frame ~buttons:[Input.LeftButton] ()) in
   if fire then fail "live cooking cancelled a running cook during a drag";
   let _, fire = Rays_editor.Private.Schedule.step schedule
-      ~graphs:[dynamic_graph] ~effects:Parameter.no_effects ~context_changed:false
+      ~graphs:[dynamic_graph] ~effects:Param.no_effects ~context_changed:false
       ~force:false ~busy:false ~frame:(timeline_frame ()) in
   if not fire then fail "cook scheduler lost the latest held dynamic request"
 
@@ -110,22 +110,25 @@ let test_timeline_and_schedule () =
 let exploded pieces parameters =
   let node = Lisp_sop.node ~with_:["src", Lisp_sop.snapshot (geometry ())]
       (Printf.sprintf {|(sop/exploded_view (sop/ext_src) :piece_attribute "class" %s)|} parameters) in
-  if Rays_editor.Packed_pieces.explosion node = None then
+  let explosion = Rdk_rays.Packed_pieces.explosion
+      ~operation:(Node.operation node) ~fields:(Node.parameter_fields node) in
+  if explosion = None then
     fail "an Exploded View node carried no explosion";
-  Rays_editor.Packed_pieces.mesh_for_node node pieces
+  Rdk_rays.Packed_pieces.mesh_for_explosion explosion pieces
 
 let run () =
   test_timeline_and_schedule ();
-  let pieces = Rays_editor.Packed_pieces.of_geometry
+  let pieces = Rdk_rays.Packed_pieces.of_geometry
       ~piece_attribute:"class" (geometry ()) |> string_ok in
-  if Rays_editor.Packed_pieces.piece_count pieces <> 2 then
+  if Rdk_rays.Packed_pieces.piece_count pieces <> 2 then
     fail "Packed_pieces did not preserve two connected pieces";
   let plain = Lisp_sop.node ~with_:["src", Lisp_sop.snapshot (geometry ())] "(sop/ext_src)" in
-  if Rays_editor.Packed_pieces.explosion plain <> None then
+  if Rdk_rays.Packed_pieces.explosion ~operation:(Node.operation plain)
+      ~fields:(Node.parameter_fields plain) <> None then
     fail "a node that is not an Exploded View carried an explosion";
   let base = exploded pieces ":amount 0.0" |> positions
   and moved = exploded pieces ":amount 1.0" |> positions in
-  if positions (Rays_editor.Packed_pieces.mesh_for_node plain pieces) <> base then
+  if positions (Rdk_rays.Packed_pieces.mesh_for_explosion None pieces) <> base then
     fail "a zero explosion moved the pieces";
   let base_normals = (exploded pieces ":amount 0.0"
       |> Rays.Mesh.Private.packed_view).normals |> Option.get in
@@ -178,9 +181,9 @@ let run () =
        Array.iter (fun piece -> counts.(piece) <- counts.(piece) + 1) values;
        if counts.(0) <= 1 || counts.(1) <= 1 then
          fail "Boolean fracture assigned individual polygons as pieces";
-       let packed = Rays_editor.Packed_pieces.of_geometry
+       let packed = Rdk_rays.Packed_pieces.of_geometry
            ~piece_attribute:"piece" (Result.get_ok (Sop.Payload.geometry output.payload)) |> string_ok in
-       if Rays_editor.Packed_pieces.piece_count packed <> 2 then
+       if Rdk_rays.Packed_pieces.piece_count packed <> 2 then
          fail "Boolean fracture piece attribute did not pack two rigid shards"
    | _ -> fail "Boolean fracture piece attribute is not integer-valued");
   print_endline "sketch support tests passed"

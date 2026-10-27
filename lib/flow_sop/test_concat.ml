@@ -4,7 +4,7 @@ open Rdk
 open Rdk_test_support
 module L = Flow_sop.Lower
 module Edit = Sop.Edit_graph
-let flow = function Ok x->x|Error d->failwith(Flow.Diagnostic.to_string d)
+let flow = function Ok x->x|Error d->failwith(Diagnostic.to_string d)
 let grid c r = Plane_generators.grid ~connectivity:Grid_quads ~columns:c ~rows:r ~size:2. () |> get_ok
 let with_float name owner k g =
   let n = match owner with Attribute.Point->Geometry.point_count g|Vertex->Geometry.vertex_count g
@@ -47,10 +47,10 @@ let cook ?(reference=false) ?(domains=1) ?(grain=97) names extra=
   Fun.protect ~finally:(fun()->Sop.Session.close session)(fun()->
     Sop.Session.cook session ~context:(Sop.Context.create ~domains ~grain () |> get_string_ok) node)
 let geometry = function Ok (o:Sop.Session.output)->Ok (Sop.Payload.geometry o.payload |> Result.get_ok)
-  |Error (d:Sop.Diagnostic.error)->Error d
+  |Error (d:Diagnostic.t)->Error d
 let same what expected actual = match expected,actual with
   |Ok e,Ok a->check (geometry_bytes e=geometry_bytes a) (what^": bytes differ from native merge")
-  |Error e,Error (a:Sop.Diagnostic.error)->check (Rdk.Error.code e=a.code) (what^": error code differs")
+  |Error e,Error (a:Diagnostic.t)->check (Rdk.Error.code e=a.code) (what^": error code differs")
   |_->fail (what^": result kind differs")
 let ()=
   let case what sources extra expected =

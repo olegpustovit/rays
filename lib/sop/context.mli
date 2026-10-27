@@ -19,7 +19,7 @@ type t
 val create :
   ?frame:int64 ->
   ?time:float ->
-  ?input:Frame_input.t ->
+  ?input:Input.t ->
   ?seed:int64 ->
   ?domains:int ->
   ?grain:int ->
@@ -29,7 +29,7 @@ val create :
 
 val frame : t -> int64
 val time : t -> float
-val input : t -> Frame_input.t
+val input : t -> Input.t
 (** Full logical frame. Its time and index follow this context's clock. *)
 
 val seed : t -> int64

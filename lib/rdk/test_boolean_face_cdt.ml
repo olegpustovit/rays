@@ -124,7 +124,7 @@ let test_coplanar_overlay () =
   validate triangulation
 
 let test_domain_exactness () =
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       let constraints, arrangement = crossing_input () in
       Triangulation.build constraints arrangement
         ~side:Arrangement.Left ~triangle:0 |> get |> signature) in
@@ -152,7 +152,7 @@ let many_constraint_input count =
 let test_incremental_topology_and_walk () =
   let count = 64 in
   let run domains =
-    Rays.Parallel.run ~domains (fun () ->
+    Parallel.run ~domains (fun () ->
       let constraints,arrangement = many_constraint_input count in
       Triangulation.build constraints arrangement
         ~side:Arrangement.Left ~triangle:0 |> get) in

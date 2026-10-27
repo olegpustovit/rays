@@ -425,7 +425,7 @@ let run () =
     with Invalid_argument _ -> true) "polygon area accepted a short range";
 
   (* The filtered path and exact fallback are pure and domain-independent. *)
-  let sample domains = Rays.Parallel.run ~domains (fun () ->
+  let sample domains = Parallel.run ~domains (fun () ->
       Array.init 20_000 (fun index ->
         let offset = float_of_int index *. 0.125 in
         Predicates.orient2d ~ax:offset ~ay:0. ~bx:(offset +. 1.) ~by:0.

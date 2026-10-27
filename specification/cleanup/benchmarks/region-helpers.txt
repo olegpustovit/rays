@@ -1,0 +1,89 @@
+Region helper extraction benchmark, 2026-10-27, Apple M1, macOS27, OCaml5.3/Dune3.24.
+Command: frozen bench_core.exe kernels; same harness in both binaries.
+Compile: median of three samples, 2000 lowerings/sample, wall clock.
+Force: median of three samples, one/eight domains, warmed prepared kernels.
+Reference capture and other agent/system work continued. These results are noisy;
+no speedup or tight no-regression bound is claimed. The benchmark is timing,
+not an exactness oracle; full focused IR parity/goldens are the correctness check.
+Before binary: /tmp/rays-frame-sharing-20261027/bench_core.exe
+SHA-256 b2e698c8422deb5854ab48890c1606ba534345f6b4bf90628f8dae2cf0181906
+After binary: /tmp/rays-region-helpers-20261027/bench_core.exe
+SHA-256 b75ad94e80e8ba26d502804bfa1924ec56c96d104707f4c9be46219cbbac7603
+After source archive: /tmp/rays-region-helpers-20261027/source.tar.gz
+SHA-256 5d9332f59458fbac14b4aeb0f4f867e45e6d6ba2a9bd7afa5495387667a1f87e
+Commands A/B wall time: 1.84/3.08/2.17/1.87 s.
+Pair C is excluded: after-C was started before before-C finished, and the
+host had substantial Chrome/Metal/compiler/native-process load. Retained only
+as rejected raw evidence (8.84/4.48 s wall).
+
+before-a
+Packed kernels; median of 3 samples; compile in microseconds, force in milliseconds
+case                   domains   compile us     force ms
+map 1,024              1              2.89        0.017
+map 1,024              8              2.89        0.042
+map 1,000,000          1              4.57        7.633
+map 1,000,000          8              4.57        5.942
+fused maps 1,000,000   1             13.05       14.362
+fused maps 1,000,000   8             13.05        5.365
+sum 1,000,000          1              2.95       16.666
+sum 1,000,000          8              2.95       16.868
+
+after-a
+Packed kernels; median of 3 samples; compile in microseconds, force in milliseconds
+case                   domains   compile us     force ms
+map 1,024              1              2.94        0.025
+map 1,024              8              2.94        0.040
+map 1,000,000          1             10.23        8.400
+map 1,000,000          8             10.23        6.674
+fused maps 1,000,000   1             75.36       16.541
+fused maps 1,000,000   8             75.36       10.141
+sum 1,000,000          1             11.85       17.787
+sum 1,000,000          8             11.85       17.500
+
+before-b
+Packed kernels; median of 3 samples; compile in microseconds, force in milliseconds
+case                   domains   compile us     force ms
+map 1,024              1              2.98        0.018
+map 1,024              8              2.98        0.044
+map 1,000,000          1             10.13        8.574
+map 1,000,000          8             10.13        5.116
+fused maps 1,000,000   1             14.21       14.145
+fused maps 1,000,000   8             14.21       11.783
+sum 1,000,000          1             16.02       17.051
+sum 1,000,000          8             16.02       17.555
+
+after-b
+Packed kernels; median of 3 samples; compile in microseconds, force in milliseconds
+case                   domains   compile us     force ms
+map 1,024              1              2.93        0.018
+map 1,024              8              2.93        0.031
+map 1,000,000          1              4.20        6.936
+map 1,000,000          8              4.20        3.865
+fused maps 1,000,000   1              9.04       13.829
+fused maps 1,000,000   8              9.04        7.534
+sum 1,000,000          1              8.70       17.112
+sum 1,000,000          8              8.70       18.191
+
+before-c (excluded)
+Packed kernels; median of 3 samples; compile in microseconds, force in milliseconds
+case                   domains   compile us     force ms
+map 1,024              1              8.45        0.122
+map 1,024              8              8.45        0.283
+map 1,000,000          1              9.91       25.310
+map 1,000,000          8              9.91        7.798
+fused maps 1,000,000   1             39.70       39.280
+fused maps 1,000,000   8             39.70       14.059
+sum 1,000,000          1             34.47       70.936
+sum 1,000,000          8             34.47       48.764
+
+after-c (excluded)
+Packed kernels; median of 3 samples; compile in microseconds, force in milliseconds
+case                   domains   compile us     force ms
+map 1,024              1              5.07        0.041
+map 1,024              8              5.07        0.069
+map 1,000,000          1             20.39       21.895
+map 1,000,000          8             20.39        9.179
+fused maps 1,000,000   1             33.68       28.117
+fused maps 1,000,000   8             33.68       10.230
+sum 1,000,000          1             11.63       38.779
+sum 1,000,000          8             11.63       56.483

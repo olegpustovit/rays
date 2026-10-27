@@ -51,10 +51,10 @@ type t = {
   choices : (string * string list) list; shape : shape;
   live : bool;
   check : 'f 'r. (string * ('f, 'r) Value.t) list -> unit;
-  body : 'f 'r. live:Frame_input.t -> node:(string -> (string * ('f, 'r) Value.t) list -> ('f, 'r) Value.t) ->
+  body : 'f 'r. live:Input.t -> node:(string -> (string * ('f, 'r) Value.t) list -> ('f, 'r) Value.t) ->
     (string * ('f, 'r) Value.t) list -> ('f, 'r) Value.t;
   category : string; arithmetic : arithmetic option;
-  packed_extension : Packed_ops.extension option;
+  packed_extension : packed_kind option;
 }
 type implementation = { run : 'f 'r. name:string -> node:(string -> (string * ('f, 'r) Value.t) list -> ('f, 'r) Value.t) ->
   (string * ('f, 'r) Value.t) list -> ('f, 'r) Value.t }
@@ -135,27 +135,102 @@ let panel ?opt ?rest ?kw ?choices ?check ?splice name pos =
   structure ?opt ?rest ?kw ?choices ?check ?splice name pos (fun _ -> Ty.panel)
 let leaf ?opt ?(kw = []) ?choices ?check name pos =
   panel ?opt ~kw:(kw @ ["focus", Ty.Bool]) ?choices ?check name pos
-let hsv h s v =
-  let h = Float.rem (Float.rem h 1. +. 1.) 1. in
-  (* Separately rounded products, as in core.md: no contraction into fused multiply-add. *)
-  let h6 = Sys.opaque_identity (h *. 6.) in
-  let i = int_of_float (Float.floor h6) in
-  let f = h6 -. float_of_int i in
-  let p = v *. (1. -. s) and q = v *. (1. -. Sys.opaque_identity (f *. s))
-  and t = v *. (1. -. Sys.opaque_identity ((1. -. f) *. s)) in
-  match i mod 6 with
-  | 0 -> (v, t, p) | 1 -> (q, v, p) | 2 -> (p, v, t) | 3 -> (p, q, v) | 4 -> (t, p, v)
-  | _ -> (v, p, q)
+let hsv = Rays_math.Color.hsv
 
-let range lo hi =
-  if hi - lo > max_iterations then
-    failf "E_ITER_BOUND" "range %d‥%d exceeds 4,096 iterations." lo hi;
-  List (Array.init (max 0 (hi - lo)) (fun i -> Int (lo + i)))
+let noise_tables = Domain.DLS.new_key (fun () -> ref [])
+let noise_table seed =
+  let cache=Domain.DLS.get noise_tables in
+  match List.assoc_opt seed !cache with
+  |Some table->table
+  |None->let table=Rays_math.Noise.create seed in
+      cache:=(seed,table)::List.take 15 !cache;table
+let noise_settings args =
+  let integer key default = Option.fold ~none:default ~some:(function
+    | Int n -> n | value -> int_of value) (List.assoc_opt key args) in
+  let number key default = Option.fold ~none:default ~some:num (List.assoc_opt key args) in
+  let seed=integer "seed" 0 and octaves=integer "octaves" 1 in
+  let lacunarity=number "lacunarity" 2. and gain=number "gain" 0.5 in
+  if octaves<1 || octaves>64 then fail "E_NOISE_RANGE" "Noise octaves are 1 to 64.";
+  if not (Float.is_finite lacunarity && lacunarity>0.) then
+    fail "E_NOISE_RANGE" "Noise lacunarity must be finite and positive.";
+  if not (gain>=0. && gain<=1.) then fail "E_NOISE_RANGE" "Noise gain is 0 to 1.";
+  seed,octaves,lacunarity,gain
+let noise3 = {
+  name = "noise3"; ctx = Context.value;
+  signature = {pos = ["position", Ty.Vec3]; opt = []; rest = None;
+    kw = ["seed",Ty.Int;"octaves",Ty.Int;"lacunarity",Ty.Float;"gain",Ty.Float]};
+  out = (fun _ -> Ty.Float); out_args = None; any_num = false; choices = [];
+  shape = Scalar; live = false; category = "Noise"; arithmetic = None;
+  packed_extension = Some Noise3;
+  check = (fun args ->
+    if not(List.exists(fun (_,v)->match v with Residual _->true|_->false)args)
+    then ignore(noise_settings args));
+  body = (fun ~live:_ ~node:_ args -> match List.assoc "position" args with
+    | Vec3 (x, y, z) ->
+        ignore (fin "noise3 position" x);
+        ignore (fin "noise3 position" y);
+        ignore (fin "noise3 position" z);
+        let seed,octaves,lacunarity,gain=noise_settings args in
+        Float (fin "noise3"
+          (if octaves=1 then Rays_math.Noise.sample3 (noise_table seed) ~x ~y ~z
+           else if lacunarity=2. && gain=0.5 then Rays_math.Noise.fbm3 ~octaves (noise_table seed) ~x ~y ~z
+           else Rays_math.Noise.Private.fbm3_with_scratch (Rays_math.Noise.Private.create_fbm3_scratch ())
+             (noise_table seed) ~octaves ~lacunarity ~gain ~x ~y ~z))
+    | _ -> fail "E_TYPE" "noise3 takes a vec3 position.");
+}
+let drawing_color = function
+  |Text text->(match Rays_math.Color.hex text with
+      |Ok color->color|Error message->fail "E_DRAW_COLOR" message)
+  |Vec3(r,g,b)->Rays_math.Color.of_floats (fin "red" r)
+      (fin "green" g) (fin "blue" b) 1.
+  |List values when Array.length values=4->
+      let channel i=fin "color" (num values.(i))in
+      Rays_math.Color.of_floats (channel 0) (channel 1) (channel 2) (channel 3)
+  |_->fail "E_TYPE" "A color is hex text, vec3 or (list r g b a)."
+let color_value color =
+  let r,g,b,a=Rays_math.Color.to_floats color in
+  if color.Rays_math.Color.a=255 then Vec3(r,g,b)
+  else List [|Float r;Float g;Float b;Float a|]
+let hsl_channels = Rays_math.Color.hsl_channels
+let hsl = {noise3 with name="color/hsl"; category="Color"; packed_extension=None;
+  signature={pos=["h",Ty.Float;"s",Ty.Float;"l",Ty.Float];opt=[];rest=None;kw=[]};
+  out=(fun _->Ty.Vec3);check=(fun _->());
+  body=(fun ~live:_ ~node:_ args->
+    let number key=fin key (num(List.assoc key args))in
+    let r,g,b=hsl_channels (number "h") (number "s") (number "l") in Vec3(r,g,b))}
+let hsla = {hsl with name="color/hsla";
+  signature={hsl.signature with pos=hsl.signature.pos@["a",Ty.Float]};
+  out=(fun _->Ty.List Ty.Float);
+  body=(fun ~live:_ ~node:_ args->
+    let number key=fin key (num(List.assoc key args))in
+    let r,g,b,a=Rays_math.Color.to_floats (Rays_math.Color.hsl ~alpha:(number "a")
+      (number "h") (number "s") (number "l"))in
+    List [|Float r;Float g;Float b;Float a|])}
+let gradient = {hsl with name="color/gradient";
+  signature={pos=["stops",Ty.List Ty.Color;"x",Ty.Float];opt=[];rest=None;kw=[]};
+  out=(fun _->Ty.Vec3);
+  body=(fun ~live:_ ~node:_ args->
+    let stops=match List.assoc "stops" args with
+      |List xs when Array.length xs>0->Array.to_list(Array.map drawing_color xs)
+      |_->fail "E_DRAW_COLOR" "A gradient needs at least one color stop."in
+    if List.exists(fun color->color.Rays_math.Color.a<>255)stops then
+      fail "E_DRAW_COLOR" "A packed RGB gradient requires opaque stops.";
+    color_value(Rays_math.Color.gradient stops (fin "gradient position"
+      (num(List.assoc "x" args)))))}
 
-type frame_read = { read : 'f 'r. Frame_input.t -> (string * ('f, 'r) Value.t) list -> ('f, 'r) Value.t }
+let range_length ?(limit=max_iterations) lo hi =
+  let length=Int64.sub(Int64.of_int hi)(Int64.of_int lo)in
+  if length>Int64.of_int limit then
+    failf "E_ITER_BOUND" "range %d‥%d exceeds %s iterations." lo hi
+      (if limit=4096 then "4,096" else string_of_int limit);
+  if length<=0L then 0 else Int64.to_int length
+
+let range lo hi = List (Array.init (range_length lo hi) (fun i -> Int (lo + i)))
+
+type frame_read = { read : 'f 'r. Input.t -> (string * ('f, 'r) Value.t) list -> ('f, 'r) Value.t }
 let frame_op ?opt name pos out read =
   let o = mk ?opt ~category:"Frame" name pos (fun _ -> out)
-    {run = fun ~name:_ ~node:_ args -> read.read (Frame_input.at_time 0.) args} in
+    {run = fun ~name:_ ~node:_ args -> read.read (Input.at_time 0.) args} in
   {o with live = true; body = (fun ~live ~node:_ args -> read.read live args)}
 
 let event_fields = ["kind", Ty.Text; "key", Ty.Text; "button", Ty.Text;
@@ -169,12 +244,12 @@ let text_list xs = List (Array.of_list (List.map (fun s -> Text s) xs))
 let event_value event =
   let point (x, y) = Vec3 (x, y, 0.) in
   let kind, fields = match event with
-    | Frame_input.Key_pressed key -> "key-pressed", ["key", Text key]
-    | Key_released key -> "key-released", ["key", Text key]
+    | Input.Key_pressed key -> "key-pressed", ["key", Text (Input.key_name key)]
+    | Key_released key -> "key-released", ["key", Text (Input.key_name key)]
     | Pointer_moved (x, y) -> "pointer-moved", ["position", point (x, y)]
-    | Pointer_pressed (b, p) -> "pointer-pressed", ["button", Text b; "position", point p]
-    | Pointer_released (b, p) -> "pointer-released", ["button", Text b; "position", point p]
-    | Pointer_cancelled b -> "pointer-cancelled", ["button", Text b]
+    | Pointer_pressed (b, p) -> "pointer-pressed", ["button", Text (Input.button_name b); "position", point p]
+    | Pointer_released (b, p) -> "pointer-released", ["button", Text (Input.button_name b); "position", point p]
+    | Pointer_cancelled b -> "pointer-cancelled", ["button", Text (Input.button_name b)]
     | Scrolled (x, y) -> "scrolled", ["delta", point (x, y)]
     | Text_input s -> "text-input", ["text", Text s]
     | Text_editing {text; start; length} -> "text-editing", ["text", Text text; "start", Int start; "length", Int length]
@@ -186,17 +261,19 @@ let event_value event =
         (match result with Ok xs -> ["paths", text_list xs] | Error s -> ["error", Text s])
     | Dialog_opened id -> "dialog-opened", ["id",Int id]
     | Resized (w, h) -> "resized", ["width", Int w; "height", Int h]
-    | Focus_lost -> "focus-lost", [] | Closed -> "closed", []
-    | Trackpad_scrolled {delta; phase; time} -> "trackpad-scrolled", ["delta", point delta; "phase", Text phase; "time", Float time] in
+    | Focus_lost -> "focus-lost", [] | Focus_gained -> "focus-gained", [] | Closed -> "closed", []
+    | Pixel_size_changed (w, h) -> "pixel-size-changed", ["width", Int w; "height", Int h]
+    | Visibility_changed _ -> "visibility-changed", []
+    | Trackpad_scrolled {delta; phase; time} -> "trackpad-scrolled", ["delta", point delta; "phase", Text (Input.scroll_phase_name phase); "time", Float time] in
   Record (List.map (fun (name, ty) -> name, if name = "kind" then Text kind else
     match List.assoc_opt name fields with Some v -> v | None ->
       match ty with Ty.Int -> Int 0 | Float -> Float 0. | Vec3 -> Vec3 (0., 0., 0.)
       | List _ -> List [||] | _ -> Text "") event_fields)
 
-let frame_value (f : Frame_input.t) = Record ["t", Float f.t; "dt", Float f.dt;
+let frame_value (f : Input.t) = Record ["t", Float f.t; "dt", Float f.dt;
   "index", Int f.frame; "width", Int (fst f.size); "height", Int (snd f.size);
-  "pointer", Vec3 (fst f.pointer, snd f.pointer, 0.); "buttons", text_list f.buttons;
-  "keys", text_list f.keys; "events", List (Array.of_list (List.map event_value f.events))]
+  "pointer", Vec3 (fst f.pointer, snd f.pointer, 0.); "buttons", text_list (List.map Input.button_name f.buttons);
+  "keys", text_list (List.map Input.key_name f.keys); "events", List (Array.of_list (List.map event_value f.events))]
 
 let frame = [
   frame_op "frame/input" [] frame_ty {read = fun f _ -> frame_value f};
@@ -207,14 +284,14 @@ let frame = [
   frame_op "pointer/x" [] fl {read = fun f _ -> Float (fst f.pointer)};
   frame_op "pointer/y" [] fl {read = fun f _ -> Float (snd f.pointer)};
   frame_op ~opt:["button", Ty.Text] "pointer/down" [] Ty.Bool {read = fun f args ->
-    match args with [] -> Bool (List.mem "left" f.buttons)
+    match args with [] -> Bool (List.mem Input.LeftButton f.buttons)
     | [_, Text button] ->
         if not (List.mem button ["left"; "right"; "middle"; "x1"; "x2"]) then
           fail "E_RANGE" "Pointer button is left, right, middle, x1 or x2.";
-        Bool (List.mem button f.buttons)
+        Bool (List.exists (fun value -> Input.button_name value = button) f.buttons)
     | _ -> fail "E_TYPE" "pointer/down takes a button name."};
   frame_op "key/down" ["key", Ty.Text] Ty.Bool {read = fun f args ->
-    match args with [_, Text key] -> Bool (List.mem key f.keys)
+    match args with [_, Text key] -> Bool (List.exists (fun value -> Input.key_name value = key) f.keys)
     | _ -> fail "E_TYPE" "key/down takes a key name."};
 ]
 
@@ -709,11 +786,22 @@ let images = [
   mk ~category:"Image" ~shape:(Struct {splice=false}) ~kw:["width",Ty.Int;"height",Ty.Int] "image/render"
     ["drawing",Ty.drawing] (fun _->Ty.image) {run=fun ~name ~node args->node name args};
   mk ~category:"Image" ~shape:(Struct {splice=false}) ~kw:["width",Ty.Int;"height",Ty.Int;"frequency",Ty.Float;"freq",Ty.Float;"seed",Ty.Int]
-    "image/noise" [] (fun _->Ty.image) {run=fun ~name ~node args->node name args};
+    "image/noise" [] (fun _->Ty.image) {run=fun ~name ~node args->
+      let frequency = match List.assoc_opt "frequency" args with
+        | Some _ as value -> value | None -> List.assoc_opt "freq" args in
+      let args = List.remove_assoc "freq" args in
+      node name (match frequency with
+        | Some value -> ("frequency", value) :: List.remove_assoc "frequency" args
+        | None -> args)};
   mk ~category:"Image" ~shape:(Struct {splice=false}) ~kw:["width",Ty.Int;"height",Ty.Int]
     "image/map" ["function",Ty.Fn (Some {params=[Ty.Vec2];result=Ty.Vec4})]
     (fun _->Ty.image) {run=fun ~name ~node args->node name args};
 ]
+
+let text_float = mk ~category:"Text" "text/float" ["value", Ty.Float] (fun _ -> Ty.Text)
+  {run=fun ~name:_ ~node:_ args -> match List.assoc "value" args with
+    | Float value -> Text (Param.float_text value)
+    | _ -> fail "E_METADATA_TEXT" "text/float takes a float."}
 
 let all = frame @ arrays @ reductions @ draw @ host @ integers @ images @ [
   float_unary "tan" tan;
@@ -1009,9 +1097,9 @@ let all = frame @ arrays @ reductions @ draw @ host @ integers @ images @ [
   structure ~ctx:Context.editor ~kw:["effects",Ty.Any] "ui/workspace" [ "root", Ty.panel ] (fun _ -> Ty.editor);
   leaf ~kw:[ "look_through", Ty.Bool ] "ui/viewport" [ "scene", Ty.scene ];
   leaf "ui/canvas" ["drawing", Ty.drawing];
-  leaf ~choices:["wires", ["rect"; "straight"]; "view", ["graph"; "list"; "text"]]
+  leaf ~choices:["view", ["graph"; "list"; "text"]]
     ~check:{ validate = fun choices args -> one_of args "view" "A graph panel's view" (List.assoc "view" choices) }
-    ~opt:["graph", Ty.Text] ~kw:["wires", Ty.Text; "view", Ty.Text] "ui/graph" [];
+    ~opt:["graph", Ty.Text] ~kw:["view", Ty.Text] "ui/graph" [];
   leaf ~kw:[ "of", Ty.panel ] "ui/inspector" [];
   leaf ~kw:[ "of", Ty.panel ] "ui/spreadsheet" [];
   leaf "ui/outline" [];
@@ -1026,7 +1114,7 @@ let all = frame @ arrays @ reductions @ draw @ host @ integers @ images @ [
   panel ~splice:true ~check:{ validate = fun _ args -> tile_check args } ~rest:("panel", Ty.panel) "ui/tile" [];
   panel "ui/floating" [ "panel", Ty.panel ];
   panel ~check:{ validate = fun _ args -> switch_check args } ~rest:("panel", Ty.panel) ~kw:["active", Ty.Int] "ui/switch" []
-]
+] @ [noise3; hsl; hsla; gradient; text_float]
 
 let table =
   let h = Hashtbl.create 64 in
@@ -1069,14 +1157,15 @@ let arith name = Option.bind (Hashtbl.find_opt table name) (fun o -> o.arithmeti
 
 let valid_extension op = match op.packed_extension with
   | None -> true
-  | Some Packed_ops.Noise3 ->
+  | Some Noise3 ->
       op.name = "noise3" && op.ctx = Context.value && op.shape = Scalar
       && not op.live && not op.any_num && op.arithmetic = None && op.out_args = None
       && op.signature.pos = ["position", Ty.Vec3]
       && op.signature.opt = [] && op.signature.rest = None
       && List.sort Stdlib.compare op.signature.kw = ["gain", Ty.Float; "lacunarity", Ty.Float; "octaves", Ty.Int; "seed", Ty.Int]
       && (try op.out [Ty.Vec3] = Ty.Float
-          with Value.Fail _ | Invalid_argument _ -> false)
+          with Diagnostic.Error _ | Invalid_argument _ -> false)
+  | Some _ -> false
 
 let packed_kind op =
   if op.ctx <> Context.value || op.shape <> Scalar then None
@@ -1097,12 +1186,13 @@ let packed_kind op =
     | _ when op.name = "float/mul_checked" -> Some Checked_mul
     | _ when op.name = "float/fma_checked" -> Some Checked_fma
     | _ when op.name = "rand/at" -> Some Rand_at
+    | _ when op.name = "noise3" -> Some Noise3
     | _ when op.name = "exact" -> Some Exact
     | _ when op.name = "array/nth" -> Some Gather
     | _ when op.live -> Some Frame
     | _ -> Some Constant_only
   else match op.packed_extension with
-    | Some Packed_ops.Noise3 when valid_extension op -> Some Noise3
+    | Some Noise3 when valid_extension op -> Some Noise3
     | _ -> None
 
 let validate extra =

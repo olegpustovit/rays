@@ -12,14 +12,14 @@ let cases = "../specification/workspace/cases"
 let catalog = Editor_document.Contexts.catalog ~version:1 Sop_catalog.Editor.factories |> Result.get_ok
 
 let parse text = match S.parse text with
-  | Ok forms -> forms | Error d -> fail (Flow.Diagnostic.to_string d)
+  | Ok forms -> forms | Error d -> fail (Diagnostic.to_string d)
 let canon forms = fst (Flow.Lisp.print forms)
 let norm text = canon (parse text)
 
 let apply text op =
   match E.apply catalog (parse text) op with
   | Ok forms -> canon forms
-  | Error d -> fail (E.label op ^ ": " ^ Flow.Diagnostic.to_string d)
+  | Error d -> fail (E.label op ^ ": " ^ Diagnostic.to_string d)
 
 let same name text op expected =
   let got = try apply text op with Failure m -> fail (name ^ ": " ^ m) and want = norm expected in
@@ -216,7 +216,7 @@ let part7 () = (* functions and macros *)
 let dialog () =
   let src = parse base in
   let draft = match E.macro_draft src [ node [ "b" ] ] with
-    | Ok d -> d | Error d -> fail (Flow.Diagnostic.to_string d) in
+    | Ok d -> d | Error d -> fail (Diagnostic.to_string d) in
   check (List.map fst draft.literals = [ [ 3; 0 ]; [ 3; 1 ]; [ 3; 2 ] ] && draft.free = [ "a" ]
          && draft.name = "b_tpl") "the draft of b";
   let op = E.macro_op draft ~nodes:[ node [ "b" ] ] ~name:"shifted" [| true, "dx"; false, "dy"; true, "dz" |] in
@@ -391,23 +391,23 @@ let part12 () = (* the 12 fixtures: notes survive, edits round trip *)
       | _ -> fail (file ^ ": shape") in
     (* a note on the graph and back leaves the text unchanged *)
     let noted = match E.apply catalog forms (E.Set_note { node = [ graph ]; text = "edited" }) with
-      | Ok f -> f | Error d -> fail (file ^ ": " ^ Flow.Diagnostic.to_string d) in
+      | Ok f -> f | Error d -> fail (file ^ ": " ^ Diagnostic.to_string d) in
     check (canon noted <> canon forms) (file ^ ": note prints");
     (match E.apply catalog noted (E.Set_note { node = [ graph ]; text = "" }) with
      | Ok f -> check (canon f = canon forms) (file ^ ": note round trip")
-     | Error d -> fail (file ^ ": " ^ Flow.Diagnostic.to_string d))) files;
+     | Error d -> fail (file ^ ": " ^ Diagnostic.to_string d))) files;
   (* bloom: rename a graph binding and back; the comments survive *)
   let bloom = parse (read (Filename.concat cases "bloom.lisp")) in
   let there = E.Rename { node = [ "flower"; "bloom" ]; to_ = "blossom" } in
   match E.apply catalog bloom there with
-  | Error d -> fail (Flow.Diagnostic.to_string d)
+  | Error d -> fail (Diagnostic.to_string d)
   | Ok renamed ->
       check (canon renamed <> canon bloom) "bloom renamed";
       (match E.apply catalog renamed (E.Rename { node = [ "flower"; "blossom" ]; to_ = "bloom" }) with
        | Ok back -> check (canon back = canon bloom) "bloom rename round trip"
-       | Error d -> fail (Flow.Diagnostic.to_string d))
+       | Error d -> fail (Diagnostic.to_string d))
 
-let part13 () = (* G3: move a binding, wrap in map / filter, inline a function *)
+let part13 () = (* Move a binding, wrap in map / filter, inline a function. *)
   let order = v "(let* [a 1 b 2 c (+ a b)] c)" in
   same "move down" order (E.Move_binding { node = node [ "a" ]; by = 1 }) (v "(let* [b 2 a 1 c (+ a b)] c)");
   same "move up" order (E.Move_binding { node = node [ "b" ]; by = -1 }) (v "(let* [b 2 a 1 c (+ a b)] c)");

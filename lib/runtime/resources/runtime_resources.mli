@@ -1,8 +1,16 @@
 (** Target-neutral owned resource snapshots for the SDL3 migration. *)
 
-type error_kind = Wrong_domain | Destroyed | Invalid_argument | Decode | Io
-type error = private { operation:string; kind:error_kind; message:string }
+type error = Ogpu.Error.t
 val pp_error : Format.formatter -> error -> unit
+
+val ensure_directory : string -> (unit, string) result
+(** Create a directory and its parents, or return the filesystem error. *)
+
+val write_atomic : filename:string -> (string -> (unit, string) result) -> (unit, string) result
+(** Let a writer fill a temporary file beside [filename], then sync and atomically replace it. *)
+
+val write_text : filename:string -> string -> (unit, string) result
+(** Write text through a synced temporary file and atomic rename. *)
 
 module Image : sig
   type t
@@ -52,6 +60,9 @@ end
 module Canvas : sig
   type t
   val create : width:int -> height:int -> (t,error) result
+  (** Adopt a packed RGBA byte buffer without copying it. The caller must not
+      read or mutate [rgba] after a successful call. *)
+  val of_rgba_bytes : width:int -> height:int -> rgba:bytes -> (t,error) result
   val generation : t -> int
   val destroyed : t -> bool
   val size : t -> ((int*int),error) result

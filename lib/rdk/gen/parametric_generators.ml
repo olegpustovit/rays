@@ -14,7 +14,7 @@ type torus_connectivity =
 type torus_normals =
   | Torus_no_normals | Torus_point_normals | Torus_vertex_normals
 type torus_orientation =
-  | Torus_x | Torus_y | Torus_z | Torus_axis of Vec3.t
+  | Torus_x | Torus_y | Torus_z | Torus_axis of Rays_math.Vec3.t
 type torus_rotation_order =
   | Torus_xyz | Torus_xzy | Torus_yxz
   | Torus_yzx | Torus_zxy | Torus_zyx
@@ -29,7 +29,7 @@ type tube_connectivity =
 type tube_normals =
   | Tube_no_normals | Tube_point_normals | Tube_vertex_normals
 type tube_orientation =
-  | Tube_x | Tube_y | Tube_z | Tube_axis of Vec3.t
+  | Tube_x | Tube_y | Tube_z | Tube_axis of Rays_math.Vec3.t
 type tube_rotation_order =
   | Tube_xyz | Tube_xzy | Tube_yxz
   | Tube_yzx | Tube_zxy | Tube_zyx
@@ -43,37 +43,37 @@ type platonic_kind =
 type platonic_normals =
   | Platonic_no_normals | Platonic_point_normals | Platonic_vertex_normals
 type platonic_orientation =
-  | Platonic_x | Platonic_y | Platonic_z | Platonic_axis of Vec3.t
+  | Platonic_x | Platonic_y | Platonic_z | Platonic_axis of Rays_math.Vec3.t
 type platonic_rotation_order =
   | Platonic_xyz | Platonic_xzy | Platonic_yxz
   | Platonic_yzx | Platonic_zxy | Platonic_zyx
 
 let torus_rotation_matrix order rotation =
-  let x = Mat4.rotation_x rotation.Vec3.x
-  and y = Mat4.rotation_y rotation.y
-  and z = Mat4.rotation_z rotation.z in
+  let x = Rays_math.Mat4.rotation_x rotation.Rays_math.Vec3.x
+  and y = Rays_math.Mat4.rotation_y rotation.y
+  and z = Rays_math.Mat4.rotation_z rotation.z in
   match order with
-  | Torus_xyz -> Mat4.mul z (Mat4.mul y x)
-  | Torus_xzy -> Mat4.mul y (Mat4.mul z x)
-  | Torus_yxz -> Mat4.mul z (Mat4.mul x y)
-  | Torus_yzx -> Mat4.mul x (Mat4.mul z y)
-  | Torus_zxy -> Mat4.mul y (Mat4.mul x z)
-  | Torus_zyx -> Mat4.mul x (Mat4.mul y z)
+  | Torus_xyz -> Rays_math.Mat4.mul z (Rays_math.Mat4.mul y x)
+  | Torus_xzy -> Rays_math.Mat4.mul y (Rays_math.Mat4.mul z x)
+  | Torus_yxz -> Rays_math.Mat4.mul z (Rays_math.Mat4.mul x y)
+  | Torus_yzx -> Rays_math.Mat4.mul x (Rays_math.Mat4.mul z y)
+  | Torus_zxy -> Rays_math.Mat4.mul y (Rays_math.Mat4.mul x z)
+  | Torus_zyx -> Rays_math.Mat4.mul x (Rays_math.Mat4.mul y z)
 
-let torus_frame orientation rotation_order (rotation : Vec3.t) =
+let torus_frame orientation rotation_order (rotation : Rays_math.Vec3.t) =
   let oriented = match orientation with
-    | Torus_x -> Ok (Vec3.unit_y, Vec3.unit_x, Vec3.create 0. 0. (-1.))
-    | Torus_y -> Ok (Vec3.unit_x, Vec3.unit_y, Vec3.unit_z)
-    | Torus_z -> Ok (Vec3.unit_x, Vec3.unit_z, Vec3.create 0. (-1.) 0.)
+    | Torus_x -> Ok (Rays_math.Vec3.unit_y, Rays_math.Vec3.unit_x, Rays_math.Vec3.create 0. 0. (-1.))
+    | Torus_y -> Ok (Rays_math.Vec3.unit_x, Rays_math.Vec3.unit_y, Rays_math.Vec3.unit_z)
+    | Torus_z -> Ok (Rays_math.Vec3.unit_x, Rays_math.Vec3.unit_z, Rays_math.Vec3.create 0. (-1.) 0.)
     | Torus_axis axis ->
         Result.bind (normalize_plane_axis "Rdk.Parametric_generators.torus" "hole" axis)
           (fun pole ->
             let ax = abs_float pole.x and ay = abs_float pole.y
             and az = abs_float pole.z in
-            let reference = if ax <= ay && ax <= az then Vec3.unit_x
-              else if ay <= az then Vec3.unit_y else Vec3.unit_z in
-            let projection = Vec3.dot reference pole in
-            let radial = Vec3.create
+            let reference = if ax <= ay && ax <= az then Rays_math.Vec3.unit_x
+              else if ay <= az then Rays_math.Vec3.unit_y else Rays_math.Vec3.unit_z in
+            let projection = Rays_math.Vec3.dot reference pole in
+            let radial = Rays_math.Vec3.create
                 (reference.x -. (projection *. pole.x))
                 (reference.y -. (projection *. pole.y))
                 (reference.z -. (projection *. pole.z)) in
@@ -81,19 +81,19 @@ let torus_frame orientation rotation_order (rotation : Vec3.t) =
               (fun radial ->
                 Result.map (fun tangent -> radial, pole, tangent)
                   (normalize_plane_axis "Rdk.Parametric_generators.torus" "tangent"
-                     (Vec3.cross radial pole)))) in
+                     (Rays_math.Vec3.cross radial pole)))) in
   Result.map (fun (radial, pole, tangent) ->
     if rotation.x = 0. && rotation.y = 0. && rotation.z = 0. then
       radial, pole, tangent
     else
       let matrix = torus_rotation_matrix rotation_order rotation in
-      Mat4.transform_direction matrix radial,
-      Mat4.transform_direction matrix pole,
-      Mat4.transform_direction matrix tangent) oriented
+      Rays_math.Mat4.transform_direction matrix radial,
+      Rays_math.Mat4.transform_direction matrix pole,
+      Rays_math.Mat4.transform_direction matrix tangent) oriented
 
 let torus ?cancel ?(grain = 16_384) ?(connectivity = Torus_triangles)
-    ?normals ?(orientation = Torus_y) ?(center = Vec3.zero)
-    ?(rotation = Vec3.zero) ?(rotation_order = Torus_xyz)
+    ?normals ?(orientation = Torus_y) ?(center = Rays_math.Vec3.zero)
+    ?(rotation = Rays_math.Vec3.zero) ?(rotation_order = Torus_xyz)
     ?(uniform_scale = 1.) ?(u_start = 0.) ?(u_end = 2. *. Float.pi)
     ?(v_start = 0.) ?(v_end = 2. *. Float.pi) ?(u_wrap = true)
     ?(v_wrap = true) ?(u_end_caps = false) ?(v_end_cap = false)
@@ -574,31 +574,31 @@ let torus ?cancel ?(grain = 16_384) ?(connectivity = Torus_triangles)
               ())
 
 let tube_rotation_matrix order rotation =
-  let x = Mat4.rotation_x rotation.Vec3.x
-  and y = Mat4.rotation_y rotation.y
-  and z = Mat4.rotation_z rotation.z in
+  let x = Rays_math.Mat4.rotation_x rotation.Rays_math.Vec3.x
+  and y = Rays_math.Mat4.rotation_y rotation.y
+  and z = Rays_math.Mat4.rotation_z rotation.z in
   match order with
-  | Tube_xyz -> Mat4.mul z (Mat4.mul y x)
-  | Tube_xzy -> Mat4.mul y (Mat4.mul z x)
-  | Tube_yxz -> Mat4.mul z (Mat4.mul x y)
-  | Tube_yzx -> Mat4.mul x (Mat4.mul z y)
-  | Tube_zxy -> Mat4.mul y (Mat4.mul x z)
-  | Tube_zyx -> Mat4.mul x (Mat4.mul y z)
+  | Tube_xyz -> Rays_math.Mat4.mul z (Rays_math.Mat4.mul y x)
+  | Tube_xzy -> Rays_math.Mat4.mul y (Rays_math.Mat4.mul z x)
+  | Tube_yxz -> Rays_math.Mat4.mul z (Rays_math.Mat4.mul x y)
+  | Tube_yzx -> Rays_math.Mat4.mul x (Rays_math.Mat4.mul z y)
+  | Tube_zxy -> Rays_math.Mat4.mul y (Rays_math.Mat4.mul x z)
+  | Tube_zyx -> Rays_math.Mat4.mul x (Rays_math.Mat4.mul y z)
 
-let tube_frame orientation rotation_order (rotation : Vec3.t) =
+let tube_frame orientation rotation_order (rotation : Rays_math.Vec3.t) =
   let oriented = match orientation with
-    | Tube_x -> Ok (Vec3.unit_y, Vec3.unit_x, Vec3.create 0. 0. (-1.))
-    | Tube_y -> Ok (Vec3.unit_x, Vec3.unit_y, Vec3.unit_z)
-    | Tube_z -> Ok (Vec3.unit_x, Vec3.unit_z, Vec3.create 0. (-1.) 0.)
+    | Tube_x -> Ok (Rays_math.Vec3.unit_y, Rays_math.Vec3.unit_x, Rays_math.Vec3.create 0. 0. (-1.))
+    | Tube_y -> Ok (Rays_math.Vec3.unit_x, Rays_math.Vec3.unit_y, Rays_math.Vec3.unit_z)
+    | Tube_z -> Ok (Rays_math.Vec3.unit_x, Rays_math.Vec3.unit_z, Rays_math.Vec3.create 0. (-1.) 0.)
     | Tube_axis axis ->
         Result.bind (normalize_plane_axis "Rdk.Parametric_generators.tube" "primary" axis)
           (fun pole ->
             let ax = abs_float pole.x and ay = abs_float pole.y
             and az = abs_float pole.z in
-            let reference = if ax <= ay && ax <= az then Vec3.unit_x
-              else if ay <= az then Vec3.unit_y else Vec3.unit_z in
-            let projection = Vec3.dot reference pole in
-            let radial = Vec3.create
+            let reference = if ax <= ay && ax <= az then Rays_math.Vec3.unit_x
+              else if ay <= az then Rays_math.Vec3.unit_y else Rays_math.Vec3.unit_z in
+            let projection = Rays_math.Vec3.dot reference pole in
+            let radial = Rays_math.Vec3.create
                 (reference.x -. (projection *. pole.x))
                 (reference.y -. (projection *. pole.y))
                 (reference.z -. (projection *. pole.z)) in
@@ -606,19 +606,19 @@ let tube_frame orientation rotation_order (rotation : Vec3.t) =
               (fun radial ->
                 Result.map (fun tangent -> radial, pole, tangent)
                   (normalize_plane_axis "Rdk.Parametric_generators.tube" "tangent"
-                     (Vec3.cross radial pole)))) in
+                     (Rays_math.Vec3.cross radial pole)))) in
   Result.map (fun (radial, pole, tangent) ->
     if rotation.x = 0. && rotation.y = 0. && rotation.z = 0. then
       radial, pole, tangent
     else
       let matrix = tube_rotation_matrix rotation_order rotation in
-      Mat4.transform_direction matrix radial,
-      Mat4.transform_direction matrix pole,
-      Mat4.transform_direction matrix tangent) oriented
+      Rays_math.Mat4.transform_direction matrix radial,
+      Rays_math.Mat4.transform_direction matrix pole,
+      Rays_math.Mat4.transform_direction matrix tangent) oriented
 
 let tube ?cancel ?(grain = 16_384) ?(connectivity = Tube_quads)
     ?(end_caps = false) ?(consolidate_cap_points = true) ?normals
-    ?(orientation = Tube_y) ?(center = Vec3.zero) ?(rotation = Vec3.zero)
+    ?(orientation = Tube_y) ?(center = Rays_math.Vec3.zero) ?(rotation = Rays_math.Vec3.zero)
     ?(rotation_order = Tube_xyz) ?(radius_scale = 1.) ?uv_attribute ?cap_group
     ?(rows = 2) ?(columns = 32) ~top_radius ~bottom_radius ~height () =
   Error.guard ~operation:"tube" ~code:"invalid_parameter" @@ fun () ->
@@ -1292,7 +1292,7 @@ let platonic_soccer_ball_data =
 
 let platonic ?cancel ?(kind = Platonic_tetrahedron)
     ?(normals = Platonic_point_normals) ?(orientation = Platonic_y)
-    ?(center = Vec3.zero) ?(rotation = Vec3.zero)
+    ?(center = Rays_math.Vec3.zero) ?(rotation = Rays_math.Vec3.zero)
     ?(rotation_order = Platonic_xyz) ?face_groups ~radius () =
   Error.guard ~operation:"platonic" ~code:"invalid_parameter" @@ fun () ->
   Cancel.check_opt cancel;

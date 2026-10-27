@@ -107,8 +107,8 @@ let kind_label = function
   | P.For -> "for" | Fold -> "fold" | Scan -> "scan" | Sum -> "sum" | Let -> "let" | Fn -> "fn" | State -> "state" | Branch -> "branch"
 
 let note_colors theme =
-  if Pxui.Theme.dark theme then Color.hex_exn "#4a4220", Color.hex_exn "#f3e6a8"
-  else Color.hex_exn "#f3e6a8", Color.hex_exn "#4a3f10"
+  if Pxui.Theme.dark theme then Rays_math.Color.hex_exn "#4a4220", Rays_math.Color.hex_exn "#f3e6a8"
+  else Rays_math.Color.hex_exn "#f3e6a8", Rays_math.Color.hex_exn "#4a3f10"
 
 (* the marks a node or zone carries: live time, loop-invariant, macro, loop order *)
 let marks ?execution (n : P.node) =
@@ -593,7 +593,7 @@ let paint_lens paint ui t ~z ~fs (l : P.lens) ~step (x, y, w) ~lh =
 (* a card's hairline: line-2, line-3 when selected, composed over the card's own fill (the sheet's
    border sits on its background) *)
 let card_edge t ~fill ~selected =
-  Color.blend t.theme.foreground fill ~pct:(if selected then 0.70 else 0.85)
+  Rays_math.Color.blend t.theme.foreground fill ~pct:(if selected then 0.70 else 0.85)
 
 (* the card: its fill and a 1-point border inside its box (a stroke is centred on its rectangle) *)
 let paint_card paint ~x ~y ~w ~h ~fill ~edge =
@@ -669,7 +669,7 @@ let paint_node paint ui t ~z ~fs ?footer ?lens_step ?(hovered = false) ?(carry =
    | Some f when shown <> P.Full && z_ = None && out_wired
                  && not (Array.exists (fun (w : wire) -> w.from = Some n.path && (match w.into with
                      | Some zone -> List.length zone < List.length n.path
-                         && List.filteri (fun i _ -> i < List.length zone) n.path = zone
+                         && List.take (List.length zone) n.path = zone
                      | None -> false)) t.geo.wires) ->
        (* not beside a card that yields to its zone's end bar: the bar's port is there *)
        let ink_3 = Pxui.Theme.ink_3 theme in
@@ -846,18 +846,6 @@ let paint_dashed_polyline paint ~width color pts =
     | _ -> () in
   go pts
 
-(* a bend: the 5-point square of the wire's colour on the line (kit [.bend]) *)
-let paint_bends paint ~z color pts =
-  match pts with
-  | _ :: (_ :: _ as rest) ->
-      let rec go = function
-        | (x, y) :: (_ :: _ as more) ->
-            let s = Float.max 3. (5. *. z) in
-            Ui.Paint.fill paint ~x:(x -. 2. *. z) ~y:(Float.floor (y -. 2.5 *. z)) ~w:s ~h:s color; go more
-        | _ -> () in
-      go rest
-  | _ -> ()
-
 let tag_name t (w : wire) = match w.from with
   | Some p ->
       let n = match node_of t p with Some n -> P.title n | None -> List.hd (List.rev p) in
@@ -874,7 +862,7 @@ let paint_background paint t ~viewport ~wires (zones : (P.node * P.zone * P.plac
   Ui.Paint.fill paint ~x:vx ~y:vy ~w:vw ~h:vh theme.panel;
   Ui.Paint.grid paint ~x:vx ~y:vy ~w:vw ~h:vh
     ~origin:(vx +. Float.rem t.pan_x spacing -. 1., vy +. Float.rem t.pan_y spacing -. 1.) ~spacing ~dot:2.
-    (Color.with_alpha theme.foreground 66);
+    (Rays_math.Color.with_alpha theme.foreground 66);
   if z >= 0.5 then begin
     let px = 480. *. z and py = 192. *. z in
     let rem v m = let r = Float.rem v m in if r < 0. then r +. m else r in
@@ -914,7 +902,7 @@ let paint_background paint t ~viewport ~wires (zones : (P.node * P.zone * P.plac
   List.iter (fun (scope_path, (ox, oy)) ->
     List.iter (fun (title, (fx, fy), (fw, fh)) ->
       let x = sx t (ox +. fx) and y = sy t (oy +. fy) in
-      frame_in paint ~x ~y ~w:(fw *. z) ~h:(fh *. z) ~fill:(Color.with_alpha theme.foreground 8)
+      frame_in paint ~x ~y ~w:(fw *. z) ~h:(fh *. z) ~fill:(Rays_math.Color.with_alpha theme.foreground 8)
         (Pxui.Theme.edge theme);
       Ui.Paint.text paint ~at:(x +. 6., y +. 4.) ~size:(max 7 (int_of_float (10. *. z)))
         ~color:(Pxui.Theme.muted theme) title;
@@ -943,7 +931,7 @@ let paint_background paint t ~viewport ~wires (zones : (P.node * P.zone * P.plac
       else if layout = Some false then Pxui.Theme.muted theme else ty_color t w.ty in
     (* a formula's reads rest thin and faint; selecting either end draws them in full *)
     let faint = w.refers && not (is_selected || is_highlighted || lit = Some true) in
-    let color = if lit = Some false || faint then Color.with_alpha color (if faint then 90 else 40) else color in
+    let color = if lit = Some false || faint then Rays_math.Color.with_alpha color (if faint then 90 else 40) else color in
     let width = if faint then Float.max 1. z else width in
     if tagged t w && not is_selected then begin
       (* a long wire reads as a stub and the source's name at the use site *)
@@ -954,11 +942,10 @@ let paint_background paint t ~viewport ~wires (zones : (P.node * P.zone * P.plac
       let name = tag_name t w in
       let tw = Ui.Paint.text_width paint ~size:tag_size name in
       Ui.Paint.text paint ~at:(bx -. stub -. 4. -. tw, by -. float tag_size /. 2. -. 1.) ~size:tag_size
-        ~color:(if lit = Some false then Color.with_alpha (Pxui.Theme.ink_2 theme) 60 else Pxui.Theme.ink_2 theme) name
+        ~color:(if lit = Some false then Rays_math.Color.with_alpha (Pxui.Theme.ink_2 theme) 60 else Pxui.Theme.ink_2 theme) name
     end else begin
       if layout = Some false then paint_dashed_polyline paint ~width color pts
-      else paint_polyline ~clip:viewport paint ~width color pts;
-      if t.wires = `Straight then paint_bends paint ~z color pts
+      else paint_polyline ~clip:viewport paint ~width color pts
     end) wires
 
 (* ---------------------------------------------------------------- update *)

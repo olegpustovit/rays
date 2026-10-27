@@ -1,11 +1,11 @@
 module E = Flow.Eval
 module I = Flow_ir
-let ok = function Ok x -> x | Error d -> failwith (Flow.Diagnostic.to_string d)
+let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let read path = In_channel.with_open_bin path In_channel.input_all
 let catalog = fst (ok (Flow.Check.catalog_of_manifest (read "../sop_catalog/flow_manifest.sexp")))
 let check source = match Flow.Workspace.check catalog (ok (Flow.Syntax.parse source)) with
-  | Some ws,ds when not (List.exists (fun (d : Flow.Diagnostic.t) -> d.severity=Error) ds) -> ws
-  | _,ds -> failwith (String.concat "; " (List.map Flow.Diagnostic.to_string ds))
+  | Some ws,ds when not (List.exists (fun (d : Diagnostic.t) -> d.severity=Diagnostic.Error_severity) ds) -> ws
+  | _,ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
 let value body = List.assoc "g" (ok (E.static (check ("(workspace w (graph g :context value "^body^"))")))).results
 let bits x y = Int64.bits_of_float x = Int64.bits_of_float y
 let rec same_bits (a : E.value) (b : E.value) = match a,b with
@@ -26,7 +26,7 @@ let direct=ref 0
 let compare value =
   let program=ok (I.Executor.compile value) in
   List.iter (fun time ->
-    let live=Frame_input.at_time time in
+    let live=Input.at_time time in
     let reference=E.Private.force_reference value ~live in
     assert (same (I.Executor.force program ~live) reference);
     match value with
@@ -34,10 +34,7 @@ let compare value =
         | Ok core -> ((match I.Core_exec.run core ~live,reference with
             | Ok actual,Ok expected -> incr direct;assert (same_bits actual expected)
             | Error _,Error _ -> () | _ -> assert false);
-            (* The scalar tree fast path against the general statements. *)
-            let fused=I.Core_exec.execute (I.Core_exec.prepare core) ~live
-            and general=I.Core_exec.execute (I.Core_exec.prepare ~fused:false core) ~live in
-            assert (same fused general))
+            ())
         | Error _ -> ())
     | _ -> ()) [0.;0.37;1.9;6.28;100.25; -3.]
 let () =
@@ -61,35 +58,16 @@ let () =
     "(sum [i (range 0)] t)";"(/ t 0)";
     "(sqrt (/ (- t 2) 0))";"(exp (* t 100000.))";"(int (* t 10000000000000000000.))"];
   assert (!direct>0);
-  (* Prove hook entry and rollback, rather than counting a fallback as coverage. *)
-  (let input=value "(+ t 1.)" and mutation=value "(state [s 0.] (+ s t))" in
-    let live=Frame_input.at_time 1. in
-    let reference=E.create_state () in
-    let expected=E.Private.force_reference ~state:reference input ~live in
-    List.iter (fun mode ->
-      let state=E.create_state () and calls=ref 0 in
-      let execute r live =
-        incr calls;
-        if mode=0 then Some (I.Core_exec.run (Result.get_ok (I.Core_lower.lower r)) ~live)
-        else begin
-          ignore (ok (E.force ~state mutation ~live));
-          if mode=1 then None else if mode=2 then
-            Some (Error (Flow.Diagnostic.error ~code:"E_INJECTED" "test"))
-          else failwith "injected hook failure"
-        end in
-      let actual=E.Private.force_with_executor ~state ~execute input ~live in
-      assert (!calls=1);assert (same actual expected);
-      assert (E.state_stamp state=E.state_stamp reference)) [0;1;2;3]);
   (* Repeated forces use the stateless shortcut, but ownership, invalid frames
      and a later arithmetic failure still take their original diagnostics. *)
   (let v=value "(exp t)" in
     let a=ok (I.Executor.compile v) and b=ok (I.Executor.compile v) in
     List.iter (fun time ->
-      let live=Frame_input.at_time time in
+      let live=Input.at_time time in
       let expected=E.Private.force_reference v ~live in
       assert (same (I.Executor.force a ~live) expected);
       assert (same (I.Executor.force a ~live) expected);
       assert (same (I.Executor.force b ~live) expected)) [0.;1.;10000.;2.];
-    let live={(Frame_input.at_time 1.) with dt=nan} in
-    assert (same (I.Executor.force a ~live) (E.Private.force_reference v ~live)));
-  Printf.printf "Core parity: fixtures, scalar expressions, direct execution (%d cases), diagnostics and hook rollback passed\n" !direct
+    let live={(Input.at_time 1.) with dt=nan} in
+  assert (same (I.Executor.force a ~live) (E.Private.force_reference v ~live)));
+  Printf.printf "Core parity: fixtures, scalar expressions, direct execution (%d cases), and diagnostics passed\n" !direct

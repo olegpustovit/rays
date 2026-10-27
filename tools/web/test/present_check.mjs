@@ -1,10 +1,10 @@
 // node present_check.mjs RUNTIME_DIR [EXPORT_DIR NATIVE_PNG_DIR ...]
 //
-// Real-Chrome check of the presenter (plan P6.4, P6.5): tools/web/runtime/present.js + marks.wgsl.
+// Real-Chrome check of the presenter (plan P6.4, P6.5): lib/web_export/runtime/present.js + marks.wgsl.
 //  1. Hand-built mark tables (rect, circle, line, with and without stroke; constants and per-instance
 //     buffers; geometry; point set; transform; clip; blend; text; image; device pixel ratio 2) are drawn and
-//     the canvas pixels are read back; every probe sits at least 2 pixels from an edge, so antialiasing never
-//     enters. Colour tolerance 2 of 255 (f32 coverage and blend rounding).
+//     the canvas pixels are read back. Interior probes avoid edges; fractional point probes pin native
+//     analytic edge coverage. Colour tolerance 2 of 255 (f32 coverage and blend rounding).
 //  2. End to end (when EXPORT_DIR and NATIVE_PNG_DIR are given): see present_e2e.mjs.
 // Exit: 0 pass (or skipped: no Chrome, printed), 1 mismatch, 2 usage, 3 WebGPU unavailable.
 import { readFileSync } from 'node:fs';
@@ -48,8 +48,14 @@ const cases = [
       [50, 80, [0, 255, 0]], [50, 77, [0, 255, 0]], [50, 40, [0, 0, 0]], [12, 20, [255, 0, 0]]] },
   { name: 'geometry and points', marks: `[{ type: 'geometry', vertices: Float64Array.of(10, 10, 60, 10, 10, 60), indices: Int32Array.of(0, 1, 2), color: C(255, 128, 0) },
       { type: 'geometry', vertices: Float64Array.of(), indices: Int32Array.of(), color: RED },
-      { type: 'mark_set', kind: 'point', count: 2, position: buf([80.7, 80.9, 90.2, 70.5], 2), fill: BLUE }]`,
-    probes: [[20, 20, [255, 128, 0]], [50, 50, [0, 0, 0]], [80, 80, [0, 0, 255]], [81, 80, [0, 0, 0]], [90, 70, [0, 0, 255]], [90, 71, [0, 0, 0]]] },
+      { type: 'mark_set', kind: 'point', count: 2, position: buf([80.7, 80.9, 90.2, 70.5], 2), fill: BLUE },
+      { type: 'mark_set', kind: 'point', count: 1, position: buf([40, 80], 2), fill: BLUE }]`,
+    // Fractional points use the native rect-AA path. Exact samples came from two identical `marks_shot`
+    // renders of this geometry; the integer point remains a solid-pixel check.
+    probes: [[20, 20, [255, 128, 0]], [50, 50, [0, 0, 0]],
+      [80, 80, [0, 0, 14]], [81, 80, [0, 0, 26]], [80, 81, [0, 0, 77]], [81, 81, [0, 0, 178]],
+      [90, 70, [0, 0, 128]], [90, 71, [0, 0, 128]], [91, 70, [0, 0, 51]], [91, 71, [0, 0, 51]],
+      [40, 80, [0, 0, 255]], [41, 80, [0, 0, 0]]] },
   { name: 'transform and clip', marks: `[move(50, 0), rect(0, 0, 20, 20, RED), pop, rect(0, 40, 20, 20, GREEN),
       { type: 'push_transform', xx: 2, xy: 0, yx: 0, yy: 2, tx: 0, ty: 0 }, rect(20, 35, 10, 10, BLUE), pop,
       { type: 'push_clip', x: 60, y: 60, width: 20, height: 20 }, rect(50, 50, 50, 50, WHITE),

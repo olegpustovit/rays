@@ -10,14 +10,12 @@ let cook session domains node =
   | Ok output -> output
   | Error error -> fail (Diagnostic.error_to_string error)
 
-let node ?(inputs=[||]) ?(run=fun _ -> ()) ?(diagnostic=false) label geometry =
+let node ?(inputs=[||]) ?(run=fun _ -> ()) label geometry =
   Node.Private.make_geometry ~label ~operation:"branch_test" ~version:1 ~parameters:label
     ~cook_mode:Node.Generic ~dependencies:Context.Dependencies.static ~inputs
-    (fun ~node_id context _ ->
+    (fun ~node_id:_ context _ ->
       run context;
-      let diagnostics=if diagnostic then [Diagnostic.{severity=Warning;
-        code=label;message=label;node={node_id;label;operation="branch_test"}}] else [] in
-      Ok Node.Private.{geometry;diagnostics;instances=None})
+      Ok Node.Private.{geometry;instances=None})
 
 let counters session =
   let s=Session.stats session in
@@ -32,7 +30,6 @@ let exact ?(entries=64) ?(prepare=fun _ -> ()) graph =
     Session.Private.set_parallel_override eight (Some true);
     let a=cook one 1 graph and b=cook eight 8 graph in
     check (geometry_bytes (Result.get_ok (Sop.Payload.geometry a.payload))=geometry_bytes (Result.get_ok (Sop.Payload.geometry b.payload))) "branch geometry changed";
-    check (a.diagnostics=b.diagnostics) "input-order diagnostics changed";
     check (counters one=counters eight) "input-order cache counters changed";
     check (Session.Private.cache_keys one=Session.Private.cache_keys eight)
       "cache identities changed for shared immutable output planes";
@@ -42,15 +39,13 @@ let run () =
   let seed=session () in
   let geometry=(Result.get_ok (Sop.Payload.geometry (cook seed 1 (Lisp_sop.snapshot (Rdk.Line_geometry.points [|0.,0.,0.;1.,0.,0.|]))).payload)) in
   Session.close seed;
-  let source_a=node ~diagnostic:true "source_a" geometry
-  and source_b=node ~diagnostic:true "source_b" geometry in
-  let a=node ~inputs:[|source_a|] ~diagnostic:true "a" geometry
-  and b=node ~inputs:[|source_b|] ~diagnostic:true "b" geometry in
+  let source_a=node "source_a" geometry
+  and source_b=node "source_b" geometry in
+  let a=node ~inputs:[|source_a|] "a" geometry
+  and b=node ~inputs:[|source_b|] "b" geometry in
   let root=node ~inputs:[|a;b|] "join" geometry in
-  let output,_,fanouts=exact root in
+  let _,_,fanouts=exact root in
   check (fanouts=1) "two independent branches were not forked";
-  check (List.map(fun (d:Diagnostic.t) -> d.code)output.diagnostics=["source_a";"a";"source_b";"b"])
-    "branch diagnostics were reordered";
   let shared_calls=Atomic.make 0 in
   let shared=node ~run:(fun _ -> ignore(Atomic.fetch_and_add shared_calls 1)) "shared" geometry in
   let left=node ~inputs:[|shared|] "left" geometry
@@ -192,13 +187,12 @@ let run () =
 
   let packed=Node.Private.make_geometry ~operation:"packed_source" ~version:1 ~parameters:""
     ~cook_mode:Node.Generator ~dependencies:Context.Dependencies.static ~inputs:[||]
-    (fun ~node_id:_ _ _ -> Ok Node.Private.{geometry;diagnostics=[];
-      instances=Some[|Rays_math.Mat4.identity;
+    (fun ~node_id:_ _ _ -> Ok Node.Private.{geometry;      instances=Some[|Rays_math.Mat4.identity;
         Rays_math.Mat4.translation(Rays_math.Vec3.create 2. 0. 0.)|]}) in
   let consume label=Node.Private.make_geometry ~label ~operation:"consume_packed" ~version:1
     ~parameters:label ~cook_mode:Node.Generic ~dependencies:Context.Dependencies.static
     ~inputs:[|packed|] (fun ~node_id:_ _ inputs ->
-      Ok Node.Private.{geometry=inputs.(0);diagnostics=[];instances=None}) in
+      Ok Node.Private.{geometry=inputs.(0);instances=None}) in
   let graph=Lisp_sop.node ~with_:["in1798", (consume "packed_a"); "in1799", (consume "packed_b")] {|(sop/merge (sop/ext_in1798) (sop/ext_in1799))|} in
   let one=session () and eight=session () in
   Session.Private.set_parallel_override eight (Some true);
@@ -229,6 +223,6 @@ let run () =
   check (counters one=counters eight) "zone cache accounting differs";
   check (Session.Private.fanouts eight>0) "expanded zone roots were not forked";
   Session.close one;Session.close eight;
-  print_endline "parallel branch transactions: exact bytes, keys, counters, diagnostics and cancellation"
+  print_endline "parallel branch transactions: exact bytes, keys, counters and cancellation"
 
 let () = run ()

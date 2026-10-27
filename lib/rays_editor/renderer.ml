@@ -4,23 +4,17 @@ open Rays
 
 type t = Path_traced | Raster | Wireframe
 
-let kind = Editor_core.Param.choice ~equal:( = )
+let kind = Param.choice ~equal:( = )
     [ "Path traced", Path_traced; "Raster", Raster; "Wireframe", Wireframe ]
 
 let field ~default ~get ~set =
-  Editor_core.Param.field ~name:"renderer" ~label:"Renderer" ~kind ~default ~get ~set ()
-
-let of_env name = match Sys.getenv_opt name with
-  | Some "path" -> Some Path_traced
-  | Some "raster" -> Some Raster
-  | Some "wireframe" -> Some Wireframe
-  | Some _ | None -> None
+  Param.field ~name:"renderer" ~label:"Renderer" ~kind ~default ~get ~set ()
 
 let wire_color background =
-  let lightness = 299 * background.Color.r + 587 * background.g
+  let lightness = 299 * background.Rays_math.Color.r + 587 * background.g
     + 114 * background.b in
-  if lightness >= 128000 then Color.hex_exn "#285f77"
-  else Color.hex_exn "#bed7e1"
+  if lightness >= 128000 then Rays_math.Color.hex_exn "#285f77"
+  else Rays_math.Color.hex_exn "#bed7e1"
 
 (* Every polygon edge once, as a line mesh. *)
 let wire_mesh geometry =
@@ -28,7 +22,7 @@ let wire_mesh geometry =
   let edges = Rdk.Topology_index.create topology in
   let points = Rdk.Geometry.positions geometry in
   let vertices = Array.init (Rdk.Packed.Float3.length points) (fun index ->
-    let x, y, z = Rdk.Packed.Float3.get points index in Vec3.create x y z) in
+    let x, y, z = Rdk.Packed.Float3.get points index in Rays_math.Vec3.create x y z) in
   let indices = Array.make (Rdk.Topology_index.edge_count edges * 2) 0 in
   for edge = 0 to Rdk.Topology_index.edge_count edges - 1 do
     let a, b = Rdk.Topology_index.edge_points edges edge in
@@ -41,8 +35,10 @@ let of_label = function "Path traced" -> Some Path_traced | "Raster" -> Some Ras
   | "Wireframe" -> Some Wireframe | _ -> None
 
 module P = Rays_pathtracer
-type cached_mesh = { source : Mesh.t; material : Material.t; geometry : Rdk.Geometry.t;
-                     traced : P.mesh }
+type cached_mesh = { trace_source : Mesh.t; traced : P.mesh }
+module Mesh_cache = Lru.Identity_list
+let same_mesh_key (a, material_a) (b, material_b) = a == b && material_a = material_b
+let empty_meshes () = Mesh_cache.create ~equal:same_mesh_key 64
 (* how one viewport renders: the root of its scene instance, else the document's.  The sample cap
    is not part of it: a cap is read each frame, so raising one continues the accumulation while any
    other change discards the tracer *)
@@ -60,9 +56,10 @@ type slot = { keys : string list; film : int * int; step : int; scene : Scene3.t
               failure : string option  (* why the last render of the slot failed, until one succeeds *) }
 (* [mode] is the document's; [raster_only]: every viewport draws as raster, so there are no slots;
    [turn]: the viewport whose slot last took a turn of the sample budget *)
-type state = { mode : t; custom : bool; slots : slot list; meshes : cached_mesh list;
+type state = { mode : t; custom : bool; slots : slot list;
+               meshes : (Mesh.t * Material.t, cached_mesh) Mesh_cache.t;
                error : string option; raster_only : bool; turn : string option }
-let empty = { mode = Raster; custom = false; slots = []; meshes = []; error = None; raster_only = true;
+let empty = { mode = Raster; custom = false; slots = []; meshes = empty_meshes (); error = None; raster_only = true;
               turn = None }
 let close state = List.iter (fun slot -> Option.iter P.destroy slot.tracer) state.slots
 
@@ -79,7 +76,7 @@ let film ~through ~resolution:(width, height) ~gate:(gate_width, gate_height) =
     width / step <= gate_width && height / step <= gate_height) film_steps) in
   (max 1 (width / step), max 1 (height / step)), step
 
-let linear (color : Color.t) = P.Linear_color.rgb
+let linear (color : Rays_math.Color.t) = P.Linear_color.rgb
   (float color.r /. 255.) (float color.g /. 255.) (float color.b /. 255.)
 let traced_material (material : Material.t) =
   P.material ~roughness:(sqrt (2. /. (max 0. material.shininess +. 2.))) ~round:material.round
@@ -100,29 +97,30 @@ let wire_scene scene =
    tracer's instance structure, so an orbit does not convert or upload geometry. *)
 let traced_scene meshes scene =
   let ( let* ) = Result.bind in
-  let cache = ref meshes and result = ref (Ok []) in
+  let cache = Mesh_cache.copy ~release:(fun _ _ -> ()) meshes and result = ref (Ok []) in
   Scene3.Private.iter_batches (fun (drawing : Scene3.Private.drawing) transforms ->
     result := let* placed = !result in
       let* () = if drawing.texture = None then Ok ()
         else Error "Path tracing textured meshes is not supported." in
-      let* cached = match List.find_opt (fun cached -> cached.source == drawing.mesh
-          && cached.material = drawing.material) !cache with
+      let* cached = match Mesh_cache.peek cache (drawing.mesh, drawing.material) with
         | Some cached -> Ok cached
         | None ->
             let* geometry = Result.map_error Rdk.Error.to_string
                 (Rdk_rays.Rays_mesh.of_mesh drawing.mesh) in
-            let* traced = P.mesh [geometry, traced_material drawing.material] in
-            let cached = {source = drawing.mesh; material = drawing.material; geometry; traced} in
-            cache := cached :: List.filteri (fun i _ -> i < 63) !cache;
+            let* trace_mesh = Result.map_error Rdk.Error.to_string
+                (Rdk_rays.Rays_mesh.to_trace_mesh geometry) in
+            let* traced = P.mesh [trace_mesh, traced_material drawing.material] in
+            let cached = {trace_source = trace_mesh; traced} in
+            Mesh_cache.add cache (drawing.mesh, drawing.material) cached;
             Ok cached in
       let* mesh = match transforms with
         | None -> Ok cached.traced
         | Some transforms -> P.mesh_instanced
-            ~prototype:(cached.geometry, traced_material cached.material) transforms in
+            ~prototype:cached.traced transforms in
       Ok ((drawing.transform, mesh) :: placed)) scene;
   let* placed = !result in
   let* mesh = P.scene_mesh (List.rev placed) in
-  Ok (!cache, mesh)
+  Ok (cache, mesh)
 
 (* Viewports asking for the same traced picture share one tracer: the same scene, camera, film
    and setting. *)
@@ -222,12 +220,12 @@ let update state ~mode ~custom ~focus views =
               let* tracer = match prior.tracer with
                 | Some tracer -> Ok tracer
                 | None ->
-                    let first = List.hd cache in
+                    let (_, source_material), cached = Option.get (Mesh_cache.head cache) in
                     let* tracer = P.create ~bounces:setting.bounces ~round_samples:setting.round_samples
                       ~width ~height
-                      {P.objects = [first.geometry, traced_material first.material]; spheres = []; strands = [];
-                       environment = {sky = linear (Color.rgb 130 145 170);
-                         ground = linear (Color.rgb 80 80 80); panels = []}; lights = []} in
+                      {P.objects = [cached.trace_source, traced_material source_material]; spheres = []; strands = [];
+                       environment = {sky = linear (Rays_math.Color.rgb 130 145 170);
+                         ground = linear (Rays_math.Color.rgb 80 80 80); panels = []}; lights = []} in
                     created := Some tracer; Ok tracer in
               let submitted = match mesh with None -> Ok () | Some mesh -> P.queue_mesh tracer mesh in
               let* () = submitted in

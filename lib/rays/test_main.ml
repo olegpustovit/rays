@@ -10,7 +10,6 @@ let tests = [
   "test_scene3_float32", Test_scene3_float32.run;
   "test_scene3_float32_native", Test_scene3_float32.run_native;
   "test_scene_display_list", Test_scene_display_list.run;
-  "test_ink", Test_ink.run;
   "test_canvas_native", Test_canvas_native.run;
   "test_world", Test_world.run;
   "test_rays_api", Test_rays_api.run;

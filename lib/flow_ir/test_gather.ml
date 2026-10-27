@@ -2,9 +2,9 @@ module E=Flow.Eval
 module V=Flow.Value
 module I=Flow_ir
 module P=I.Packed
-let ok=function Ok v->v|Error d->failwith(Flow.Diagnostic.to_string d)
+let ok=function Ok v->v|Error d->failwith(Diagnostic.to_string d)
 let bytes v=Marshal.to_string v [Marshal.No_sharing]
-let source ty : Flow.Op.t={I.Operators.noise3 with
+let source ty : Flow.Op.t={Flow.Op.noise3 with
   name="probe/table";packed_extension=None;
   signature={pos=[];opt=[];rest=None;kw=[]};out=(fun _->ty);
   shape=Flow.Op.Struct{splice=false};check=(fun _->());
@@ -13,7 +13,7 @@ let fn ?(bindings="") ty body =
   let text="(workspace w (graph g :context value (let* [data (probe/table) "^bindings^" tested "^body^"] 0.0)))" in
   let ws=match Flow.Workspace.check ~ops:[source ty] {Flow.Check.version=1;kinds=[]}
     (ok(Flow.Syntax.parse text))with
-    |Some ws,[]->ws|_,ds->failwith(String.concat "; "(List.map Flow.Diagnostic.to_string ds))in
+    |Some ws,[]->ws|_,ds->failwith(String.concat "; "(List.map Diagnostic.to_string ds))in
   match snd(List.hd(List.assoc ["g";"tested"](ok(E.static ~record:true ws)).records))with
   |E.Fn fn->fn|_->assert false
 let instantiate ?table ?bindings ty body indices =
@@ -23,12 +23,12 @@ let instantiate ?table ?bindings ty body indices =
   ok(E.Private.map_function ~signature:Flow.Ty.{params=[Int];result=Option.get(elem ty)} fn
     [E.Int_array indices])
 let packed ?(fusion=true) value=match value with
-  |E.Residual r->(match P.compile_result ~fusion r(E.Private.residual_view r).term with
-    |Ok p->p|Error ds->failwith(String.concat "; "(List.map Flow.Diagnostic.to_string ds)))
+  |E.Residual r->(match P.compile_result ~fusion r(E.Residual.residual_view r).term with
+    |Ok p->p|Error ds->failwith(String.concat "; "(List.map Diagnostic.to_string ds)))
   |_->failwith "Expected a gathered residual"
-let diagnostic=function Error (d:Flow.Diagnostic.t)->d|Ok _->failwith "Expected gather failure"
+let diagnostic=function Error (d:Diagnostic.t)->d|Ok _->failwith "Expected gather failure"
 let same_error a b=let a=diagnostic a and b=diagnostic b in
-  assert(a.Flow.Diagnostic.code=b.code && a.message=b.message && a.cause=b.cause)
+  assert(a.Diagnostic.code=b.code && a.message=b.message && a.cause=b.cause)
 let array ty count=match ty with
   |Flow.Ty.Int->E.Int_array(Array.init count(fun i->[|min_int;max_int;9007199254740993;0;-1|].(i mod 5)))
   |ty->let width=Option.get(Flow.Packed_ops.scalar_width ty)in
@@ -38,7 +38,7 @@ let recorded ty body=
   let text="(workspace w (graph g :context value (let* [data (probe/table) tested "^body^"] 0.0)))"in
   let ws=match Flow.Workspace.check ~ops:[source ty] Flow.Check.{version=1;kinds=[]}
     (ok(Flow.Syntax.parse text))with Some ws,[]->ws|_,ds->
-      failwith(String.concat ";"(List.map Flow.Diagnostic.to_string ds))in
+      failwith(String.concat ";"(List.map Diagnostic.to_string ds))in
   snd(List.hd(List.assoc["g";"tested"](ok(E.static ~record:true ws)).records))
 let ()=
   List.iter(fun ty->let table=array ty 7 in
@@ -46,89 +46,89 @@ let ()=
       let value=instantiate ~table (Flow.Ty.Array ty)
         "(fn [(index : int)] (let* [alias data] (array/nth alias (int/mod index 7))))"
         (Array.init count Fun.id)in
-      let reference=ok(E.Private.force_reference value ~live:(Frame_input.at_time 0.25))in
+      let reference=ok(E.Private.force_reference value ~live:(Input.at_time 0.25))in
       List.iter(fun fusion->let p=packed ~fusion value in
         assert(P.static_count p=Some count);
-        assert(List.exists(fun d->d.Flow.Diagnostic.code="E_GPU_FORM")(P.gpu_refusals p));
+        assert(List.exists(fun d->d.Diagnostic.code="E_GPU_FORM")(P.gpu_refusals p));
         let executor=ok(I.Executor.compile ~strict:true value)in
-        List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
-          assert(bytes(ok(P.force ~strict:true p ~live:(Frame_input.at_time 0.25)))=bytes reference);
-          assert(bytes(ok(I.Executor.force ~strict:true executor ~live:(Frame_input.at_time 0.25)))=bytes reference))) [1;4;8]) [false;true])
+        List.iter(fun domains->Parallel.run ~domains(fun()->
+          assert(bytes(ok(P.force ~strict:true p ~live:(Input.at_time 0.25)))=bytes reference);
+          assert(bytes(ok(I.Executor.force ~strict:true executor ~live:(Input.at_time 0.25)))=bytes reference))) [1;4;8]) [false;true])
       [0;1;13;32769]) [Flow.Ty.Int;Float;Vec2;Vec3;Vec4];
   let table=E.Int_array[|min_int;max_int;9007199254740993|]in
   let helper=instantiate ~table ~bindings:"lookup (fn [(table : (array int)) (index : int)] (array/nth table index))" (Flow.Ty.Array Flow.Ty.Int)
     "(fn [(index : int)] (lookup data (int/mod index 3)))"
     (Array.init 5001 Fun.id)in
-  assert(bytes(ok(P.force ~strict:true(packed helper)~live:(Frame_input.at_time 0.)))=
-    bytes(ok(E.Private.force_reference helper ~live:(Frame_input.at_time 0.))));
+  assert(bytes(ok(P.force ~strict:true(packed helper)~live:(Input.at_time 0.)))=
+    bytes(ok(E.Private.force_reference helper ~live:(Input.at_time 0.))));
   List.iter(fun index->let value=instantiate ~table (Flow.Ty.Array Flow.Ty.Int)
     "(fn [(index : int)] (array/nth data index))"[|index|]in
-    same_error(P.force ~strict:true(packed value)~live:(Frame_input.at_time 0.))
-      (E.Private.force_reference value ~live:(Frame_input.at_time 0.))) [-1;3;Sys.max_array_length+1;max_int];
+    same_error(P.force ~strict:true(packed value)~live:(Input.at_time 0.))
+      (E.Private.force_reference value ~live:(Input.at_time 0.))) [-1;3;Sys.max_array_length+1;max_int];
   let value=instantiate ~table (Flow.Ty.Array Flow.Ty.Int)
     "(fn [(index : int)] (if (int/lt index 0) 0 (array/nth data index)))"[|-1;0;1|]in
-  assert(ok(P.force ~strict:true(packed value)~live:(Frame_input.at_time 0.))=E.Int_array[|0;min_int;max_int|]);
+  assert(ok(P.force ~strict:true(packed value)~live:(Input.at_time 0.))=E.Int_array[|0;min_int;max_int|]);
   (* A later lane's earlier instruction must not replace the first lane's error. *)
   let value=instantiate ~table (Flow.Ty.Array Flow.Ty.Int)
     "(fn [(index : int)] (let* [divisor (if (int/eq index 1) 0 1) before (int/div 1 divisor)] (array/nth data index)))"
     (Array.init 32769(fun i->if i=0 then 3 else 1))in
-  List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
-    same_error(P.force ~strict:true(packed value)~live:(Frame_input.at_time 0.))
-      (E.Private.force_reference value ~live:(Frame_input.at_time 0.))))[1;4;8];
+  List.iter(fun domains->Parallel.run ~domains(fun()->
+    same_error(P.force ~strict:true(packed value)~live:(Input.at_time 0.))
+      (E.Private.force_reference value ~live:(Input.at_time 0.))))[1;4;8];
   let value=instantiate ~table (Flow.Ty.Array Flow.Ty.Int)
     "(fn [(index : int)] (array/nth data index))"(Array.init 32769(fun i->if i=4 then 3 else if i=20000 then -1 else 0))in
-  List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
-    same_error(P.force ~strict:true(packed value)~live:(Frame_input.at_time 0.))
-      (E.Private.force_reference value ~live:(Frame_input.at_time 0.))))[1;4;8];
+  List.iter(fun domains->Parallel.run ~domains(fun()->
+    same_error(P.force ~strict:true(packed value)~live:(Input.at_time 0.))
+      (E.Private.force_reference value ~live:(Input.at_time 0.))))[1;4;8];
   (* Host tables resolve on the initial domain, once for the selected execution. *)
   let value=instantiate (Flow.Ty.Array Flow.Ty.Int)
     "(fn [(index : int)] (array/nth data (int/mod index 3)))"(Array.init 32769 Fun.id)in
   let calls=ref 0 and domain=Domain.self()in
   let resolve=function E.Source("probe/table",_,_)->assert(Domain.self()=domain);incr calls;Ok table
-    |_->Error(Flow.Diagnostic.error ~code:"E_DATA_SOURCE" "Unexpected source")in
-  List.iter(fun domains->calls:=0;Rays_math.Parallel.run ~domains(fun()->
-    ignore(ok(P.force ~strict:true ~resolve(packed value)~live:(Frame_input.at_time 0.))));assert(!calls=1))[1;8];
+    |_->Error(Diagnostic.error ~code:"E_DATA_SOURCE" "Unexpected source")in
+  List.iter(fun domains->calls:=0;Parallel.run ~domains(fun()->
+    ignore(ok(P.force ~strict:true ~resolve(packed value)~live:(Input.at_time 0.))));assert(!calls=1))[1;8];
   let repeated=instantiate(Flow.Ty.Array Flow.Ty.Int)
     "(fn [(index : int)] (int/add (array/nth data 0) (array/nth data (int/mod index 3))))"(Array.init 5001 Fun.id)in
-  calls:=0;ignore(ok(P.force ~strict:true ~resolve(packed repeated)~live:(Frame_input.at_time 0.)));assert(!calls=1);
+  calls:=0;ignore(ok(P.force ~strict:true ~resolve(packed repeated)~live:(Input.at_time 0.)));assert(!calls=1);
   let untouched=instantiate (Flow.Ty.Array Flow.Ty.Int)
     "(fn [(index : int)] (if (int/lt index 0) 0 (array/nth data index)))"[|-1|]in
-  calls:=0;ignore(ok(P.force ~strict:true ~resolve(packed untouched)~live:(Frame_input.at_time 0.)));assert(!calls=0);
-  let failing=function E.Source("probe/table",_,_)->Error(Flow.Diagnostic.error ~cause:"table first" ~code:"E_DATA_SOURCE" "Missing table")
+  calls:=0;ignore(ok(P.force ~strict:true ~resolve(packed untouched)~live:(Input.at_time 0.)));assert(!calls=0);
+  let failing=function E.Source("probe/table",_,_)->Error(Diagnostic.error ~cause:"table first" ~code:"E_DATA_SOURCE" "Missing table")
     |_->assert false in
   let ordered=instantiate (Flow.Ty.Array Flow.Ty.Int)
     "(fn [(index : int)] (array/nth data (int/div index 0)))"[|0|]in
-  same_error(P.force ~strict:true ~resolve:failing(packed ordered)~live:(Frame_input.at_time 0.))
-    (E.Private.force_reference ~resolve:failing ordered ~live:(Frame_input.at_time 0.));
+  same_error(P.force ~strict:true ~resolve:failing(packed ordered)~live:(Input.at_time 0.))
+    (E.Private.force_reference ~resolve:failing ordered ~live:(Input.at_time 0.));
   (* Live term evaluation concretizes each let value, even an unused alias.
      That table position must remain ordered against an earlier/later error. *)
   List.iter(fun body->let value=instantiate(Flow.Ty.Array Flow.Ty.Int)body[|0|]in
-    same_error(P.force ~strict:true ~resolve:failing(packed value)~live:(Frame_input.at_time 0.))
-      (E.Private.force_reference ~resolve:failing value ~live:(Frame_input.at_time 0.)))
+    same_error(P.force ~strict:true ~resolve:failing(packed value)~live:(Input.at_time 0.))
+      (E.Private.force_reference ~resolve:failing value ~live:(Input.at_time 0.)))
     ["(fn [(index : int)] (let* [alias data] 0))";
      "(fn [(index : int)] (let* [before (int/div index 0) alias data] (array/nth alias 0)))";
      "(fn [(index : int)] (let* [alias data after (int/div index 0)] (array/nth alias 0)))"];
   (* Handles cannot escape or be interpreted as scalar arithmetic in public regions. *)
-  let region=P.to_region(packed value)in
+  let region=packed value in
   let prepare=Array.find_index(function I.Core.Region.Array_prepare _->true|_->false)region.code |>Option.get in
-  assert(Result.is_error(P.of_region{region with outputs=[|[|prepare|]|]}));
+  assert(Result.is_error(I.Core.Region.rebuild region ~outputs:[|[|prepare|]|]()));
   let input=Array.find_index(function I.Core.Region.Int_input _->true|_->false)region.code |>Option.get in
   let code=Array.copy region.code in
   code.(Array.length code-1)<-I.Core.Region.Int_gather(input,input);
-  assert(Result.is_error(P.of_region{region with code}));
+  assert(Result.is_error(I.Core.Region.rebuild region ~code()));
   let code=Array.copy region.code in
   code.(prepare)<-I.Core.Region.Guarded([input,true],code.(prepare));
-  assert(Result.is_error(P.of_region{region with code}));
+  assert(Result.is_error(I.Core.Region.rebuild region ~code()));
   let dependent=instantiate ~table (Flow.Ty.Array Flow.Ty.Int)
     "(fn [(index : int)] (array/nth (array/int (int/add index 1)) 0))"[|0;1|]in
-  (match dependent with E.Residual r->assert(Result.is_error(P.compile_result r(E.Private.residual_view r).term))|_->assert false);
-  let live=Frame_input.at_time 0.25 in
+  (match dependent with E.Residual r->assert(Result.is_error(P.compile_result r(E.Residual.residual_view r).term))|_->assert false);
+  let live=Input.at_time 0.25 in
   (* Table counts are independent of Zip/Product counts and ordered accumulator steps. *)
   List.iter(fun body->let value=recorded(Flow.Ty.Array Flow.Ty.Int)body in
     let p=packed value and core=ok(I.Executor.compile ~strict:true value)in
     List.iter(fun table->let resolve=function E.Source("probe/table",_,_)->Ok table|_->assert false in
       let expected=E.Private.force_reference ~resolve value ~live in
-      List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+      List.iter(fun domains->Parallel.run ~domains(fun()->
         assert(bytes(ok(P.force ~strict:true ~resolve p ~live))=bytes(ok expected));
         assert(bytes(ok(I.Executor.force ~strict:true ~resolve core ~live))=bytes(ok expected))))[1;4;8])
       [table;E.Int_array[|9007199254740993;min_int;max_int|]])
@@ -173,7 +173,7 @@ let ()=
     assert(bytes(ok(I.Executor.force ~strict:true program ~live))=
       bytes(ok(E.Private.force_reference changing ~live))))[0;42;9007199254740993];
   let residual=match changing with E.Residual r->r|_->assert false in
-  let template=Option.get(P.compile_template residual(E.Private.residual_view residual).term)in
+  let template=Option.get(P.compile_template residual(E.Residual.residual_view residual).term)in
   let rebound=Option.get(P.rebind template residual)in
   assert(bytes(ok(P.force ~strict:true rebound ~live))=bytes(ok(E.Private.force_reference changing ~live)));
   (* An unsupported captured producer must never hide a tree-walker fallback. *)
@@ -195,30 +195,30 @@ let ()=
   let fold=recorded(Flow.Ty.Array Flow.Ty.Int)"(state [a 0] (int/add a 1))"in
   let bad=instantiate(Flow.Ty.Array Flow.Ty.Int)
     "(fn [(index : int)] (array/nth data index))"[|-1|]in
-  List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+  List.iter(fun domains->Parallel.run ~domains(fun()->
     let state=E.create_state()and reference=E.create_state()in
-    let before=E.state_stamp state in
+    let before=E.state_stamp state and reference_before=E.state_stamp reference in
     let resolve state _=ignore(ok(E.Private.force_reference ~state fold ~live));Ok table in
     same_error(P.force ~strict:true ~state ~resolve:(resolve state)(packed bad)~live)
       (E.Private.force_reference ~state:reference ~resolve:(resolve reference)bad ~live);
-    assert(E.state_stamp state=before && E.state_stamp reference=before)))[1;8];
+    assert(E.state_stamp state=before && E.state_stamp reference=reference_before)))[1;8];
   print_endline "Numeric gather: independent tables, exact Int/vector bytes, lazy preparation, first-error order and one/four/eight domains pass"
 
 let () =
-  let live=Frame_input.at_time 0.25 in
+  let live=Input.at_time 0.25 in
   List.iter(fun(ty,table,constant,scalar)->
     List.iter(fun count->
       let value=instantiate ~table (Flow.Ty.Array ty)
         ("(fn [(index : int)] (if (int/lt index 0) "^constant^" (array/nth data index)))")
         (Array.init count(fun i->if i mod 2=0 then -1 else 0))in
       let reference=ok(E.Private.force_reference value ~live)in
-      List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+      List.iter(fun domains->Parallel.run ~domains(fun()->
         assert(bytes(ok(P.force ~strict:true(packed value)~live))=bytes reference))) [1;4;8])
       [0;1;1025;32769];
     List.iter(fun count->
       let value=recorded ty
         (Printf.sprintf "(map (fn [(index : int)] (if (int/ge index 0) data (error \"E_UNTAKEN\" \"unused\"))) (array/range %d :type int))"count)in
-      List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+      List.iter(fun domains->Parallel.run ~domains(fun()->
         let calls=ref 0 and domain=Domain.self()in
         let resolve _=assert(Domain.self()=domain);incr calls;Ok scalar in
         let result=ok(P.force ~strict:true ~resolve(packed value)~live)in
@@ -231,36 +231,36 @@ let () =
   print_endline "Typed one-lane copies: constants, initial-domain uniforms, signed zeros/exact Int/native bytes and one/four/eight domains pass"
 
 let () =
-  let live=Frame_input.at_time 0.25 and table=E.Text_array[|"raw\255\000"|]in
+  let live=Input.at_time 0.25 and table=E.Text_array[|"raw\255\000"|]in
   let body="(fn [(index : int)] (let* [wrapped (int/add index 4611686018427387903) recovered (int/sub wrapped 4611686018427387903) magnitude (abs recovered) bit (int/and (int/or (int/xor magnitude 0) 0) 1)] (if (int/lt recovered 0) (if (int/eq bit 0) \"even\255\000\" \"odd\128\000\") (array/nth data 0))))"in
   List.iter(fun count->
     let value=instantiate ~table (Flow.Ty.Array Flow.Ty.Text)body
       (Array.init count(fun i->[|min_int;max_int;9007199254740993;-2;-1;0|].(i mod 6)))in
     let reference=ok(E.Private.force_reference value ~live)in
     List.iter(fun fusion->let p=packed ~fusion value in
-      let code=(P.to_region p).code in
+      let code=p.code in
       let rec bare=function I.Core.Region.Guarded(_,body)->bare body|body->body in
       let boundary=Option.get(Array.find_index(fun instruction->match bare instruction with
         |I.Core.Region.Array_prepare _->true|_->false)code)in
       assert(boundary>0 && Array.exists(function I.Core.Region.Int_input _->true|_->false)(Array.sub code 0 boundary));
-      List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+      List.iter(fun domains->Parallel.run ~domains(fun()->
         assert(bytes(ok(P.force ~strict:true p ~live))=bytes reference)))[1;4;8]) [false;true])
     [0;1;1023;1024;1025;16383;16384;16385;32769];
   (* A malformed public-region input is still checked at its selected
      instruction, even when earlier total instructions have been batched. *)
-  let template=P.to_region(packed(instantiate ~table(Flow.Ty.Array Flow.Ty.Text)
-    "(fn [(index : int)] (array/nth data 0))"[|0|]))in
+  let template=packed(instantiate ~table(Flow.Ty.Array Flow.Ty.Text)
+    "(fn [(index : int)] (array/nth data 0))"[|0|])in
   let residual,term=template.sources.(0)in
   let term={term with Flow.Workspace.node=Flow.Workspace.Ref_binding("bad_storage",[])}in
-  List.iter(fun count->let residual=E.Private.with_bindings residual ~term
+  List.iter(fun count->let residual=E.Residual.with_bindings residual ~term
       ["bad_storage",E.Float_array(Array.make count 0.)]in
     List.iter(fun selected->
-      let region={template with sources=[|residual,term|];widths=[|1|];uniforms=[||];
-        code=[|I.Core.Region.Const(if selected then 1. else 0.);
-          Guarded([0,true],Int_input 0);Text_const "safe\255\000"|];outputs=[|[|2|]|];count=Some count}in
-      let p=match P.of_region region with Ok p->p|Error ds->
-        failwith(String.concat "; "(List.map Flow.Diagnostic.to_string ds))in
-      List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+      let p=match I.Core.Region.rebuild template ~sources:[|residual,term|] ~widths:[|1|] ~uniforms:[||]
+        ~code:[|I.Core.Region.Const(if selected then 1. else 0.);
+          Guarded([0,true],Int_input 0);Text_const "safe\255\000"|] ~outputs:[|[|2|]|] ~count:(Some count) () with
+        |Ok p->p|Error ds->
+        failwith(String.concat "; "(List.map Diagnostic.to_string ds))in
+      List.iter(fun domains->Parallel.run ~domains(fun()->
         match P.force ~strict:true p ~live with
         |Ok result->assert(not selected && result=E.Text_array(Array.make count "safe\255\000"))
         |Error d->assert(selected && d.code="E_ARRAY_TYPE" && d.message="Kernel input changed its packed element type.")))[1;4;8])
@@ -271,13 +271,13 @@ let () =
     "(fn [(index : int)] (let* [divisor (if (int/eq index 2) 0 1) before (int/div 1 divisor)] (array/nth data index)))"
     (Array.init 32769(fun i->if i=first then 1 else if i=first+1 then 2 else 0))in
     let reference=E.Private.force_reference value ~live in
-    List.iter(fun fusion->List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+    List.iter(fun fusion->List.iter(fun domains->Parallel.run ~domains(fun()->
       same_error(P.force ~strict:true(packed ~fusion value)~live)reference))[1;4;8]) [false;true])
     [0;1023;1024;16383;16384];
   print_endline "Typed total prefix: wrapping Int/native Text bytes, guarded storage checks and earliest-row block/chunk errors pass"
 
 let () =
-  let live=Frame_input.at_time 0.25 and domain=Domain.self()in
+  let live=Input.at_time 0.25 and domain=Domain.self()in
   (* The first two blocks leave the table untaken. Later warmed blocks still
      contain inactive negative indices. Table contents and cardinality change
      across forces; no prepared snapshot may cross a force. *)
@@ -286,9 +286,9 @@ let () =
     (Array.init 32769(fun i->if i<2048 || i mod 5=0 then -1 else i mod 3))in
   let current=ref(E.Text_array[|"old\255\000";"old1";"old2"|])in
   List.iter(fun fusion->let p=packed ~fusion value in
-    List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+    List.iter(fun domains->Parallel.run ~domains(fun()->
       List.iteri(fun step table->current:=table;let calls=ref 0 in
-        let live=Frame_input.at_time(float step)in
+        let live=Input.at_time(float step)in
         let resolve _=assert(Domain.self()=domain);incr calls;Ok !current in
         let result=P.force ~strict:true ~resolve p ~live in
         let reference=E.Private.force_reference ~resolve:(fun _->Ok !current)value ~live in
@@ -317,15 +317,15 @@ let () =
       |E.Source("probe/a",_,_)->assert(Domain.self()=domain);calls:="a"::!calls;Ok(E.Text_array[|"a0";"a1"|])
       |E.Source("probe/b",_,_)->assert(Domain.self()=domain);calls:="b"::!calls;
           ignore(ok(E.Private.force_reference ~state advancing ~live));
-          Error(Flow.Diagnostic.error ~code:"E_LATE_TABLE" ~cause:"b\255\000cause" "B failed")
+          Error(Diagnostic.error ~code:"E_LATE_TABLE" ~cause:"b\255\000cause" "B failed")
       |_->assert false in
     let reference_state=E.create_state()in
     let reference=E.Private.force_reference ~state:reference_state ~resolve:(resolve reference_state(ref[]))value ~live in
-    List.iter(fun fusion->List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+    List.iter(fun fusion->List.iter(fun domains->Parallel.run ~domains(fun()->
       let calls=ref []and state=E.create_state()in
-      let before=E.state_stamp state in
+      let before=E.state_stamp state and reference_before=E.state_stamp reference_state in
       same_error(P.force ~strict:true ~state ~resolve:(resolve state calls)(packed ~fusion value)~live)reference;
-      assert(E.state_stamp state=before && E.state_stamp reference_state=before);
+      assert(E.state_stamp state=before && E.state_stamp reference_state=reference_before);
       assert(List.rev !calls=(if early<late then ["a";"b"]else["a"]))))[1;4;8]) [false;true])
     [1100,1600;1600,1100;16383,16384;16384,16383];
   print_endline "Prepared table prefix: delayed forcing, per-force content/count changes, late bounds versus earlier table cause and one/four/eight domains pass"
@@ -346,8 +346,8 @@ let ()=if Array.exists((=)"--bench")Sys.argv then begin
     let measure f=let samples=Array.init 3(fun _->Gc.full_major();let before=Gc.allocated_bytes()and started=Unix.gettimeofday()in
       ignore(f());Unix.gettimeofday()-.started,Gc.allocated_bytes()-.before)in
       Array.sort(fun(a,_)(b,_)->Float.compare a b)samples;samples.(1)in
-    List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
-      let run()=ok(P.force ~strict:true p ~live:(Frame_input.at_time 0.25))in
+    List.iter(fun domains->Parallel.run ~domains(fun()->
+      let run()=ok(P.force ~strict:true p ~live:(Input.at_time 0.25))in
       assert(bytes(run())=bytes(native()));
       let nt,nb=measure native and pt,pb=measure run in
       Printf.printf "%s domains%d native %.6f/%.0fB packed %.6f/%.0fB ratio %.3f\n%!"
@@ -357,7 +357,7 @@ end
 
 let () =
   let strings=[|"";"é日本😀";"nul\000tail";"\255\128";"\237\160\128";"quote\"\\";"\239\187\191BOM"|] in
-  let table=E.Text_array strings and live=Frame_input.at_time 0.25 in
+  let table=E.Text_array strings and live=Input.at_time 0.25 in
   (* Nested one-lane guards change across blocks; the last lane alone takes
      the error arm, and untaken invalid reads must never execute. *)
   List.iter(fun count->
@@ -365,7 +365,7 @@ let () =
       "(fn [(index : int)] (if (int/lt index 32768) (if (int/eq (int/mod index 2) 0) (array/nth data (int/mod index 7)) (if (int/ge index 0) \"odd\" (array/nth data -1))) (error \"E_LAST\" \"last lane\" :cause \"selected\")))"
       (Array.init count Fun.id)in
     let reference=E.Private.force_reference value ~live in
-    List.iter(fun fusion->List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+    List.iter(fun fusion->List.iter(fun domains->Parallel.run ~domains(fun()->
       let result=P.force ~strict:true(packed ~fusion value)~live in
       if count=32768 then assert(bytes(ok result)=bytes(ok reference))
       else same_error result reference))[1;4;8])[false;true]) [32768;32769];
@@ -377,7 +377,7 @@ let () =
     List.iter(fun fusion->let p=packed ~fusion value in
       assert(P.static_count p=Some count && P.gpu_refusals p<>[]);
       let core=ok(I.Executor.compile ~strict:true value)in
-      List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+      List.iter(fun domains->Parallel.run ~domains(fun()->
         let got=ok(P.force ~strict:true p ~live)in
         assert(bytes got=bytes reference);
         assert(bytes(ok(I.Executor.force ~strict:true core ~live))=bytes reference);
@@ -396,7 +396,7 @@ let () =
   let old=Array.init 32769(fun i->strings.((i+2)mod 7))in
   let selected=ok(E.Private.map_function ~signature:Flow.Ty.{params=[Int;Text];result=Text}
     closure [E.Int_array indices;E.Text_array old])in
-  List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+  List.iter(fun domains->Parallel.run ~domains(fun()->
     let got=ok(P.force ~strict:true(packed selected)~live)in
     assert(bytes got=bytes(ok(E.Private.force_reference selected ~live)));
     match got with E.Text_array output->assert(output!=old);
@@ -404,7 +404,7 @@ let () =
     |_->assert false))[1;4;8];
   List.iter(fun indices->let value=instantiate ~table (Flow.Ty.Array Flow.Ty.Text)
     "(fn [(index : int)] (array/nth data index))"indices in
-    List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->same_error
+    List.iter(fun domains->Parallel.run ~domains(fun()->same_error
       (P.force ~strict:true(packed value)~live)(E.Private.force_reference value ~live)))[1;4;8])
     [[|-1|];[|7|];[|max_int|];Array.init 32769(fun i->if i=3 then 7 else if i=20000 then -1 else 0)];
   let value=instantiate ~table (Flow.Ty.Array Flow.Ty.Text)
@@ -414,7 +414,7 @@ let () =
   assert(P.gpu_refusals(packed identity)<>[]);
   let calls=ref 0 and domain=Domain.self()in
   let resolve _=assert(Domain.self()=domain);incr calls;Ok table in
-  List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->calls:=0;
+  List.iter(fun domains->Parallel.run ~domains(fun()->calls:=0;
     assert(ok(P.force ~strict:true ~resolve(packed identity)~live)=table);assert(!calls=1)))[1;8];
   let uniform=recorded Flow.Ty.Text
     "(map (fn [(index : int)] (if (int/ge index 0) data \"safe\")) (array/range 5001 :type int))"in
@@ -422,11 +422,11 @@ let () =
   assert(ok(P.force ~strict:true ~resolve(packed uniform)~live)=E.Text_array(Array.make 5001 strings.(3)));assert(!calls=1);
   let bad=instantiate(Flow.Ty.Array Flow.Ty.Text)
     "(fn [(index : int)] (array/nth data (int/div index 0)))"[|0|]in
-  let failing _=Error(Flow.Diagnostic.error ~code:"E_DATA_SOURCE" ~cause:strings.(3) "Text source failed")in
+  let failing _=Error(Diagnostic.error ~code:"E_DATA_SOURCE" ~cause:strings.(3) "Text source failed")in
   same_error(P.force ~strict:true ~resolve:failing(packed bad)~live)(E.Private.force_reference ~resolve:failing bad ~live);
   let error=instantiate ~table(Flow.Ty.Array Flow.Ty.Text)
     "(fn [(index : int)] (if (int/lt index 0) (error \"E_TEXT\" \"selected\" :cause \"raw\255\000cause\") (array/nth data index)))"[|-1;0|]in
-  List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->same_error
+  List.iter(fun domains->Parallel.run ~domains(fun()->same_error
     (P.force ~strict:true(packed error)~live)(E.Private.force_reference error ~live)))[1;4;8];
   List.iter(fun returned->let resolve _=Ok returned in
     same_error(P.force ~strict:true ~resolve(packed bad)~live)
@@ -435,46 +435,46 @@ let () =
   let advancing=recorded(Flow.Ty.Array Flow.Ty.Text)"(state [a 0] (int/add a 1))"in
   let rollback=instantiate(Flow.Ty.Array Flow.Ty.Text)
     "(fn [(index : int)] (array/nth data index))"[|-1|]in
-  List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+  List.iter(fun domains->Parallel.run ~domains(fun()->
     let state=E.create_state()and reference=E.create_state()in
-    let before=E.state_stamp state in
+    let before=E.state_stamp state and reference_before=E.state_stamp reference in
     let resolve state _=ignore(ok(E.Private.force_reference ~state advancing ~live));Ok table in
     same_error(P.force ~strict:true ~state ~resolve:(resolve state)(packed rollback)~live)
       (E.Private.force_reference ~state:reference ~resolve:(resolve reference)rollback ~live);
-    assert(E.state_stamp state=before && E.state_stamp reference=before)))[1;8];
+    assert(E.state_stamp state=before && E.state_stamp reference=reference_before)))[1;8];
   let product=recorded(Flow.Ty.Array Flow.Ty.Text)
     "(for [i (array/range 5001 :type int) j (array/range 3 :type int)] :skip [4] (if (int/eq i 1) (if (int/eq j 1) (array/nth data -1) \"old\") (array/nth data (int/mod i 7))))"in
   let resolve _=Ok table in
-  List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+  List.iter(fun domains->Parallel.run ~domains(fun()->
     assert(bytes(ok(P.force ~strict:true ~resolve(packed product)~live))=
       bytes(ok(E.Private.force_reference ~resolve product ~live)))))[1;4;8];
   let changing=recorded(Flow.Ty.Array Flow.Ty.Text)
     "(let* [table (array/text 7 (if (> t 0.) \"é日本😀\" \"other\")) nested {:names table}] (map (fn [(index : int)] (array/nth nested.names (int/mod index 7))) (array/range 5001 :type int)))"in
   let program=ok(I.Executor.compile ~strict:true changing)in
   let residual=match changing with E.Residual r->r|_->assert false in
-  let template=Option.get(P.compile_template residual(E.Private.residual_view residual).term)in
+  let template=Option.get(P.compile_template residual(E.Residual.residual_view residual).term)in
   let rebound=Option.get(P.rebind template residual)in
-  List.iter(fun time->let live=Frame_input.at_time time in
+  List.iter(fun time->let live=Input.at_time time in
     let expected=bytes(ok(E.Private.force_reference changing ~live))in
     assert(bytes(ok(I.Executor.force ~strict:true program ~live))=expected);
     assert(bytes(ok(P.force ~strict:true rebound ~live))=expected))[-1.;1.];
   let fused=recorded(Flow.Ty.Array Flow.Ty.Text)
     "(map (fn [(old : text)] (if (> t 0.) old \"other\")) (map (fn [(index : int)] (array/nth data (int/mod index 7))) (array/range 5001 :type int)))"in
-  List.iter(fun fusion->List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+  List.iter(fun fusion->List.iter(fun domains->Parallel.run ~domains(fun()->
     assert(bytes(ok(P.force ~strict:true ~resolve(packed ~fusion fused)~live))=
       bytes(ok(E.Private.force_reference ~resolve fused ~live)))))[1;4;8])[false;true];
   let middle=instantiate ~table(Flow.Ty.Array Flow.Ty.Text)
     "(fn [(index : int)] (str (array/nth data index)))"[|0|]in
-  (match middle with E.Residual r->assert(Result.is_error(P.compile_result r(E.Private.residual_view r).term))|_->assert false);
+  (match middle with E.Residual r->assert(Result.is_error(P.compile_result r(E.Residual.residual_view r).term))|_->assert false);
   let value=instantiate ~table(Flow.Ty.Array Flow.Ty.Text)
     "(fn [(index : int)] (array/nth data index))"[|0|]in
   let p=packed value in
   assert(Result.is_error(P.force_into ~strict:true p ~live ~count:1 ~outputs:[|[|None|]|]
     ~column_source:(fun _ _->Ok None)));
-  let region=P.to_region p in
+  let region=p in
   let output=region.outputs.(0).(0)in
   let code=Array.append region.code[|I.Core.Region.Unary(Flow.Packed_ops.Not,output)|]in
-  assert(Result.is_error(P.of_region{region with code;outputs=[|[|Array.length code-1|]|]}));
+  assert(Result.is_error(I.Core.Region.rebuild region ~code ~outputs:[|[|Array.length code-1|]|]()));
   print_endline "Text gather: immutable byte leaves, identity/uniform/select/helper, strict Core and one/four/eight domains pass"
 
 let ()=if Array.exists(fun arg->arg="--bench-text" || arg="--profile-text" || arg="--trace-text")Sys.argv then begin
@@ -487,12 +487,12 @@ let ()=if Array.exists(fun arg->arg="--bench-text" || arg="--profile-text" || ar
     |E.Source("probe/table",_,_)->E.Text_array strings|v->v)closure in
   let value=ok(E.Private.map_function ~signature:Flow.Ty.{params=[Int;Text];result=Text}
     closure [E.Int_array indices;E.Text_array old])in
-  let p=packed value and live=Frame_input.at_time 0.25 in
+  let p=packed value and live=Input.at_time 0.25 in
   if Array.exists((=)"--trace-text")Sys.argv then
     Format.printf "%a\n%!" I.Core.pp I.Core.{constants=[||];locals=[||];body=[];results=[||];
-      state_slots=[||];regions=[|P.to_region p|];call_slots=0};
+      state_slots=[||];regions=[|p|];call_slots=0};
   let native()=E.Text_array(Array.init count(fun i->if indices.(i)<0 then old.(i)else strings.(indices.(i))))in
-  if Array.exists((=)"--profile-text")Sys.argv then Rays_math.Parallel.run ~domains:1(fun()->
+  if Array.exists((=)"--profile-text")Sys.argv then Parallel.run ~domains:1(fun()->
     assert(bytes(ok(P.force ~strict:true p ~live))=bytes(native()));
     Gc.full_major();
     let before=Gc.allocated_bytes() and started=Unix.gettimeofday() and runs=ref 0 in
@@ -505,7 +505,7 @@ let ()=if Array.exists(fun arg->arg="--bench-text" || arg="--profile-text" || ar
     ignore(f());Unix.gettimeofday()-.started,Gc.allocated_bytes()-.before)in
     Array.sort(fun(a,_)(b,_)->Float.compare a b)samples;samples.(1)in
   Printf.printf "Text gather: OCaml %s, strict Packed Collect, block1024/chunk16384, million rows, median3; allocations observe the initial domain only\n%!"Sys.ocaml_version;
-  List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+  List.iter(fun domains->Parallel.run ~domains(fun()->
     let run()=ok(P.force ~strict:true p ~live)in
     assert(bytes(run())=bytes(native()));
     let nt,nb=measure native and pt,pb=measure run in
@@ -521,8 +521,8 @@ let ()=
   let domain=Domain.self() in
   List.iter(fun count->let value=instantiate (Flow.Ty.Array Flow.Ty.Int)body(Array.init count Fun.id)in
     List.iter(fun fusion->let p=packed ~fusion value in
-      List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
-        List.iter(fun time->let live=Frame_input.at_time time and calls=ref 0 in
+      List.iter(fun domains->Parallel.run ~domains(fun()->
+        List.iter(fun time->let live=Input.at_time time and calls=ref 0 in
           let resolve=function E.Source("probe/table",_,_)->
             assert(Domain.self()=domain);incr calls;Ok(E.Int_array[|min_int;max_int;9007199254740993|])
             |_->assert false in
@@ -533,7 +533,7 @@ let ()=
           assert(!calls=(if count=0 || time<0. then 0 else 1))) [0.25;-0.25])) [1;4;8]) [false;true]) [0;1;32769];
   let value=instantiate (Flow.Ty.Array Flow.Ty.Int)body[|-1|]in
   let resolve _=assert false in
-  assert(ok(P.force ~strict:true ~resolve(packed value)~live:(Frame_input.at_time(-0.25)))=E.Int_array[|0|]);
+  assert(ok(P.force ~strict:true ~resolve(packed value)~live:(Input.at_time(-0.25)))=E.Int_array[|0|]);
   let varying=instantiate (Flow.Ty.Array Flow.Ty.Int)
     "(fn [(index : int)] (array/nth (if (int/eq index 0) data (array/int 1 7)) 0))"[|0;1|]in
-  (match varying with E.Residual r->assert(Result.is_error(P.compile_result r(E.Private.residual_view r).term))|_->assert false)
+  (match varying with E.Residual r->assert(Result.is_error(P.compile_result r(E.Residual.residual_view r).term))|_->assert false)

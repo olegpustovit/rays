@@ -382,7 +382,7 @@ let take ~dry_run paths =
                while source.text.[!stop - 1] <> ')' do incr stop done
              end;
              edits := ((loc.loc_start.pos_cnum, loc.loc_end.pos_cnum), "List.take", `Text)
-               :: ((!start, !stop), bound, `Text) :: !edits
+               :: ((!start, !stop), " " ^ bound ^ " ", `Text) :: !edits
          | _ -> ());
         Ast_iterator.default_iterator.expr self expression) } in
     let lexbuf = Lexing.from_string source.text in

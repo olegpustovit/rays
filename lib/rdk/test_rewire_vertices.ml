@@ -213,7 +213,7 @@ let scale_source count =
 
 let test_parallel_exactness () =
   let geometry = scale_source 300_000 in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
     Rewire_vertices.run ~grain:257 ~keep_unused_points:true
       ~original_point_attribute:"orig" ~owner:Attribute.Point
       ~target_attribute:"target" geometry |> get_ok) in

@@ -6,15 +6,14 @@ module Ui = Pxui.Ui
 
 let fail message = raise (Failure message)
 let pointer (x, y) = float x, float y
-let press point = Event.MousePressed (Input.LeftButton, pointer point)
-let release point = Event.MouseReleased (Input.LeftButton, pointer point)
-let move point = Event.MouseMoved (pointer point)
+let press point = Input.Pointer_pressed (Input.LeftButton, pointer point)
+let release point = Input.Pointer_released (Input.LeftButton, pointer point)
+let move point = Input.Pointer_moved (pointer point)
 
-let frame ~scale ~time events : Frame.t =
-  { width = 320; height = 240; size = 320, 240;
-
-    pixel_scale = scale, scale; time; dt = 1. /. 60.; fps = 60.; count = 0;
-    mouse = 0., 0.; mouse_delta = 0., 0.; keys = []; mouse_buttons = []; events }
+let frame ?(keys = []) ~scale ~time events : Frame.t =
+  { input = { (Input.at_time time) with dt = 1. /. 60.; size = 320, 240;
+      pointer = 0., 0.; keys; events };
+    pixel_scale = scale, scale; fps = 60.; mouse_delta = 0., 0. }
 
 (* A panel at the origin, 240 wide: rows start at y = 3 and are 24 tall; the
    value column starts at x = 120 (half the 234-point inner width) and
@@ -29,9 +28,7 @@ let with_scale scale =
       Ui.panel ui ~x:0. ~y:0. ~width:240. "panel" (fun () -> build ui)) in
   let modified_step ui modifiers key build =
     time := !time +. 0.5;
-    Ui.frame ui
-      { (frame ~scale ~time:!time [Event.KeyPressed key])
-        with keys = modifiers }
+    Ui.frame ui (frame ~keys:modifiers ~scale ~time:!time [Input.Key_pressed key])
       (fun ui -> Ui.panel ui ~x:0. ~y:0. ~width:240. "panel"
         (fun () -> build ui)) in
   let command_step ui key build =
@@ -91,8 +88,7 @@ let with_scale scale =
   if abs_float (Option.get (float_of_string_opt !compact) -. 0.5) > 0.02
       || Ui.text_input_focused ui then
     fail (label "compact slider click did not jump to the pointer");
-  ignore (Ui.frame ui { (frame ~scale ~time:1. [press (90, 30); release (90, 30)])
-    with keys = [Input.Alt] } build);
+  ignore (Ui.frame ui (frame ~keys:[Input.Alt] ~scale ~time:1. [press (90, 30); release (90, 30)]) build);
   if not (Ui.text_input_focused ui) then
     fail (label "Option-click did not open compact numeric entry");
   (* The track keeps the pointer from press to release, even outside the field; a lost window or a
@@ -109,11 +105,11 @@ let with_scale scale =
   tick 2. [release (30, 30)];
   tick 2.5 [press (50, 30)];
   let before = !compact in
-  tick 3. [Event.WindowFocusLost; move (400, 30)];
+  tick 3. [Input.Focus_lost; move (400, 30)];
   if !compact <> before then fail (label "window focus loss did not cancel capture");
   tick 3.5 [press (50, 30)];
   let before = !compact in
-  tick 4. [Event.PointerCancelled Input.LeftButton; move (400, 30)];
+  tick 4. [Input.Pointer_cancelled Input.LeftButton; move (400, 30)];
   if !compact <> before then fail (label "pointer cancellation did not stop capture");
 
   (* Buttons fire on release inside only. *)
@@ -150,24 +146,24 @@ let with_scale scale =
   let ui = Ui.create ~font_size:11 () and clock = ref 0. in
   let fstep ?(keys = []) ?(dt = 0.5) ui events build =
     clock := !clock +. dt;
-    ignore (Ui.frame ui { (frame ~scale ~time:!clock events) with keys } build) in
+    ignore (Ui.frame ui (frame ~keys ~scale ~time:!clock events) build) in
   let ffast ui events build = fstep ~dt:0.1 ui events build in
   let fcommand ui key build =
-    fstep ~keys:[Input.Meta] ui [Event.KeyPressed (Input.KeyChar key)] build in
+    fstep ~keys:[Input.Meta] ui [Input.Key_pressed (Input.KeyChar key)] build in
   let open_field () =
     fstep ui [press (70, 30); release (70, 30)] build;
     ffast ui [press (70, 30); release (70, 30)] build in
   fstep ui [] build;
   open_field ();
   if not (Ui.text_input_focused ui) then fail (label "a click did not open the field");
-  fstep ui [Event.TextInput "27"; Event.KeyPressed Input.Enter] build;
+  fstep ui [Input.Text_input "27"; Input.Key_pressed Input.Enter] build;
   if !count <> "27" || Ui.text_input_focused ui then
     fail (label ("typed number was not committed: " ^ !count));
   open_field ();
-  fstep ui [Event.TextInput "x"; Event.KeyPressed Input.Enter] build;
+  fstep ui [Input.Text_input "x"; Input.Key_pressed Input.Enter] build;
   if !count <> "27" || not (Ui.text_input_focused ui) then
     fail (label "invalid number text was committed or dismissed");
-  fstep ui [Event.KeyPressed Input.Escape; Event.TextInput "4"] build;
+  fstep ui [Input.Key_pressed Input.Escape; Input.Text_input "4"] build;
   if !count <> "27" || Ui.text_input_focused ui then
     fail (label "Escape did not cancel numeric editing");
   open_field ();
@@ -180,21 +176,21 @@ let with_scale scale =
       (match Clipboard.set_text "12\n" with Ok () -> ()
        | Error message -> fail message);
       fcommand ui 'v' build;
-      fstep ui [Event.KeyPressed Input.Enter] build;
+      fstep ui [Input.Key_pressed Input.Enter] build;
       if !count <> "12" then fail (label "numeric editor refused a pasted line for its break");
       open_field ();
       (match Clipboard.set_text "31" with Ok () -> ()
        | Error message -> fail message);
       fcommand ui 'v' build;
-      fstep ui [Event.KeyPressed Input.Enter] build;
+      fstep ui [Input.Key_pressed Input.Enter] build;
       if !count <> "31" then fail (label "numeric editor did not paste valid text"));
   open_field ();
-  fstep ui [Event.KeyPressed Input.ArrowRight;
-    Event.KeyPressed Input.ArrowLeft; Event.TextInput "2";
-    Event.KeyPressed Input.Enter] build;
+  fstep ui [Input.Key_pressed Input.ArrowRight;
+    Input.Key_pressed Input.ArrowLeft; Input.Text_input "2";
+    Input.Key_pressed Input.Enter] build;
   if !count <> "321" then fail (label "numeric editor ignored its insertion caret");
   open_field ();
-  fstep ui [Event.TextInput "2.5"] build;
+  fstep ui [Input.Text_input "2.5"] build;
   fstep ui [press (300, 200)] build;
   if !count <> "2.5" then fail (label "typed number was not committed by an outside press");
 
@@ -210,7 +206,7 @@ let with_scale scale =
     time := !time +. 0.5;
     Ui.frame ui (frame ~scale ~time:!time events) scrolled in
   scroll_step [];
-  scroll_step [move (100, 40); Event.MouseScrolled (0., (-2.))];
+  scroll_step [move (100, 40); Input.Scrolled (0., (-2.))];
   (* 102 points of rows in an 80-point panel scroll by at most 22. *)
   scroll_step [press (210, 40); release (210, 40)];
   if not toggles.(2) || toggles.(0) || toggles.(1) then
@@ -226,7 +222,7 @@ let with_scale scale =
           fixed.(index) <- Ui.toggle ui (Printf.sprintf "Fixed %d" index) value)
           fixed)) in
   fixed_panel [];
-  fixed_panel [move (100, 40); Event.MouseScrolled (0., -2.)];
+  fixed_panel [move (100, 40); Input.Scrolled (0., -2.)];
   fixed_panel [press (210, 40); release (210, 40)];
   if not fixed.(2) || fixed.(0) || fixed.(1) then
     fail (label "fixed-height inspector panel did not scroll its rows");
@@ -242,7 +238,7 @@ let with_scale scale =
         Ui.box ui ~w:(Ui.Px 100.) ~h:(Ui.Px 100.) "content")) in
     child_y := let _, y, _, _ = Ui.rect ui child in y in
   rubber [];
-  rubber [move (50, 40); Event.MouseScrolled (0., 1.)];
+  rubber [move (50, 40); Input.Scrolled (0., 1.)];
   if !child_y <= 0. then fail (label "scroll did not stretch past the top edge");
   rubber [];
   if Float.abs !child_y > 0.25 then
@@ -260,14 +256,14 @@ let with_scale scale =
       parent) in
   let parent = scroll_dir [] in
   Ui.set_scroll_offset ui parent 80.;
-  let parent = scroll_dir [move (50, 40); Event.MouseScrolled (0., 1.)] in
+  let parent = scroll_dir [move (50, 40); Input.Scrolled (0., 1.)] in
   if Ui.scroll_offset ui parent <> 56. then
     fail (label "positive natural scroll did not move the view up");
-  let parent = scroll_dir [Event.MouseScrolled (0., -1.)] in
+  let parent = scroll_dir [Input.Scrolled (0., -1.)] in
   if Ui.scroll_offset ui parent <> 80. then
     fail (label "negative wheel scroll did not move the view down");
 
-  (* A trackpad (Event.TrackpadScrolled, each motion with the wheel steps SDL makes of it): the
+  (* A trackpad (Input.Trackpad_scrolled, each motion with the wheel steps SDL makes of it): the
      fingers move the content point for point, a lift in motion coasts to rest, an edge is
      overshot and returned to, a stretch is held until the lift, and content that fits stays. *)
   let pad ?(content = 2000.) ?(start = 0.) ?(h = Ui.Px 80.) ~dt () =
@@ -282,12 +278,12 @@ let with_scale scale =
         parent) in
     let parent = step [move (50, 40)] in
     Ui.set_scroll_offset ui parent start;
-    ignore (step [Event.TrackpadScrolled { delta = (0., 0.); phase = Touched; time = 5. }]);
+    ignore (step [Input.Trackpad_scrolled { delta = (0., 0.); phase = Touched; time = 5. }]);
     ui, step in
   let finger time dy =
-    [Event.TrackpadScrolled { delta = (0., dy); phase = Moved; time };
-     Event.MouseScrolled (0., dy *. 0.1)] in
-  let lifted = [Event.TrackpadScrolled { delta = (0., 0.); phase = Lifted; time = 5.04 }] in
+    [Input.Trackpad_scrolled { delta = (0., dy); phase = Moved; time };
+     Input.Scrolled (0., dy *. 0.1)] in
+  let lifted = [Input.Trackpad_scrolled { delta = (0., 0.); phase = Lifted; time = 5.04 }] in
   (* the same flick at two frame rates: 625 points a second at the lift *)
   let glide dt =
     let pad_ui, flick = pad ~dt () in
@@ -343,7 +339,7 @@ let with_scale scale =
   let still () = Ui.scroll_position pad_ui !parent = 0. in
   let ok = ref (still ()) in
   parent := flick lifted; ok := !ok && still ();
-  parent := flick [Event.MouseScrolled (0., -3.)]; ok := !ok && still ();
+  parent := flick [Input.Scrolled (0., -3.)]; ok := !ok && still ();
   for _ = 1 to 30 do parent := flick []; ok := !ok && still () done;
   if not !ok then fail (label "content that fits moved under a scroll");
 
@@ -360,11 +356,11 @@ let with_scale scale =
     !seen in
   ignore (pinched []);
   if pinched [move (50, 40)] <> 1. then fail (label "a frame without a pinch reported one");
-  if pinched [move (50, 40); Event.MousePinched 1.25] <> 1.25 then
+  if pinched [move (50, 40); Input.Pinched 1.25] <> 1.25 then
     fail (label "a pinch over the canvas did not reach its signal");
-  if Float.abs (pinched [move (50, 40); Event.MousePinched 1.1; Event.MousePinched 0.5] -. 0.55) > 1e-9 then
+  if Float.abs (pinched [move (50, 40); Input.Pinched 1.1; Input.Pinched 0.5] -. 0.55) > 1e-9 then
     fail (label "two pinches in a frame were not multiplied");
-  if pinched [move (300, 200); Event.MousePinched 1.25] <> 1. then
+  if pinched [move (300, 200); Input.Pinched 1.25] <> 1. then
     fail (label "a pinch away from the canvas reached it");
 
   (* Text fields: UTF-8 entry, Backspace/Delete, focus kept on cancel. *)
@@ -373,27 +369,27 @@ let with_scale scale =
   let ui = Ui.create ~font_size:11 () in
   settle ui build;
   step ui [press (150, row 0); release (150, row 0);
-    Event.TextEditing { text = "e"; start = 0; length = 1 };
-    Event.TextInput "hé"; Event.KeyPressed Input.Backspace] build;
+    Input.Text_editing { text = "e"; start = 0; length = 1 };
+    Input.Text_input "hé"; Input.Key_pressed Input.Backspace] build;
   if !title <> "h" then fail (label "text field did not accept UTF-8 input and backspace");
   let ime_cursor () = match Scene.Private.text_regions (Ui.scene ui) with
     | [(_, _, _, _, true, cursor)] -> cursor
     | _ -> fail (label "focused text field lost its IME region") in
   let cursor_after_h = ime_cursor () in
   if cursor_after_h <= 8 then fail (label "IME cursor stayed at the field origin");
-  step ui [Event.PointerCancelled Input.LeftButton; Event.TextInput "!"] build;
+  step ui [Input.Pointer_cancelled Input.LeftButton; Input.Text_input "!"] build;
   if !title <> "h!" then fail (label "pointer cancellation dismissed text focus");
   if ime_cursor () <= cursor_after_h then
     fail (label "IME cursor did not follow the inserted text");
-  step ui [Event.TextInput " two words"; Event.KeyPressed Input.Delete;
-    Event.TextInput "!"] build;
+  step ui [Input.Text_input " two words"; Input.Key_pressed Input.Delete;
+    Input.Text_input "!"] build;
   if !title <> "h! two words!" || not (Ui.text_input_focused ui) then
     fail (label "focused text input lost spaces or changed at-end Delete");
-  step ui [Event.KeyPressed Input.ArrowLeft; Event.KeyPressed Input.Backspace] build;
+  step ui [Input.Key_pressed Input.ArrowLeft; Input.Key_pressed Input.Backspace] build;
   if !title <> "h! two word!" then
     fail (label "Backspace ignored the moved caret");
   let cursor_before_end = ime_cursor () in
-  step ui [Event.KeyPressed Input.End] build;
+  step ui [Input.Key_pressed Input.End] build;
   if ime_cursor () <= cursor_before_end then
     fail (label "IME cursor ignored keyboard caret movement");
   let previous_clipboard = Clipboard.get_text () in
@@ -412,10 +408,10 @@ let with_scale scale =
       command_step ui 'x' build;
       if !title <> "" || Clipboard.get_text () <> Ok "h! two word! pasted" then
         fail (label "Command-X did not cut the focused text field");
-      step ui [Event.TextInput "aé中z";
-        Event.KeyPressed Input.ArrowLeft;
-        Event.KeyPressed Input.ArrowLeft;
-        Event.KeyPressed Input.Delete] build;
+      step ui [Input.Text_input "aé中z";
+        Input.Key_pressed Input.ArrowLeft;
+        Input.Key_pressed Input.ArrowLeft;
+        Input.Key_pressed Input.Delete] build;
       if !title <> "aéz" then
         fail (label "Delete did not remove one UTF-8 character at the caret");
       modified_step ui [Input.Shift] Input.ArrowLeft build;
@@ -426,7 +422,7 @@ let with_scale scale =
       if !title <> "az" then fail (label "Command-X ignored selection bounds");
       command_step ui 'v' build;
       if !title <> "aéz" then fail (label "paste ignored the insertion caret"));
-  step ui [press (125, row 0); release (125, row 0); Event.TextInput "!"] build;
+  step ui [press (125, row 0); release (125, row 0); Input.Text_input "!"] build;
   if !title <> "!aéz" then fail (label "mouse click did not place the text caret");
   step ui [press (300, 200)] build;
   if Ui.text_input_focused ui then fail (label "an outside press kept text focus");
@@ -458,7 +454,7 @@ let with_scale scale =
   if !typing then fail (label "one click on a scrub field opened typing");
   tick [press (60, 30); release (60, 30)]; tick [];
   if not !typing then fail (label "a double-click on a scrub field did not open typing");
-  tick [Event.KeyPressed (Input.KeyChar 'a'); Event.TextInput "99"]; tick [Event.KeyPressed Input.Enter]; tick [];
+  tick [Input.Key_pressed (Input.KeyChar 'a'); Input.Text_input "99"]; tick [Input.Key_pressed Input.Enter]; tick [];
   if !typing || not (String.ends_with ~suffix:"99" !number) then
     fail (label ("typing in a scrub field did not commit: " ^ !number));
   Ui.destroy ui;
@@ -473,20 +469,19 @@ let with_scale scale =
   let field_time = ref 0. in
   let field_step ?(keys = []) events =
     field_time := !field_time +. 0.5;
-    ignore (Ui.frame ui { (frame ~scale ~time:!field_time events) with keys }
-      build) in
+    ignore (Ui.frame ui (frame ~keys ~scale ~time:!field_time events) build) in
   field_step [];
   field_step [press (40, 30); release (40, 30)];
   let cursor () = match Scene.Private.text_regions (Ui.scene ui) with
     | [(_, _, _, _, true, cursor)] -> cursor
     | regions -> fail (label (Printf.sprintf "long field lost its IME region (%d)"
         (List.length regions))) in
-  field_step ~keys:[Input.Meta] [Event.KeyPressed Input.ArrowLeft];
+  field_step ~keys:[Input.Meta] [Input.Key_pressed Input.ArrowLeft];
   if cursor () > 12 then fail (label "Command-Left did not reveal the start");
-  field_step ~keys:[Input.Meta] [Event.KeyPressed Input.ArrowRight];
+  field_step ~keys:[Input.Meta] [Input.Key_pressed Input.ArrowRight];
   if cursor () < 80 || cursor () > 100 then
     fail (label "Command-Right did not reveal the end");
-  field_step ~keys:[Input.Meta] [Event.KeyPressed Input.ArrowLeft];
+  field_step ~keys:[Input.Meta] [Input.Key_pressed Input.ArrowLeft];
   field_step [press (21, 30)];
   field_step [move (220, 30)];
   for _ = 1 to 30 do field_step [] done;
@@ -496,7 +491,7 @@ let with_scale scale =
     match previous_clipboard with
     | Ok text -> ignore (Clipboard.set_text text)
     | Error _ -> ()) (fun () ->
-      field_step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar 'c')];
+      field_step ~keys:[Input.Meta] [Input.Key_pressed (Input.KeyChar 'c')];
       if Clipboard.get_text () <> Ok long_value then
         fail (label "edge drag did not select through the end"));
   Ui.destroy ui;
@@ -527,7 +522,7 @@ let run () =
     if ready then fail "pointer motion did not restart hover rest";
     let ready,_,_ = step 0.881 [] in
     if not ready then fail "tooltip did not restart after movement";
-    ignore (step 0.9 [Event.WindowFocusLost]);
+    ignore (step 0.9 [Input.Focus_lost]);
     let ready,_,_ = step 0.91 [move (11,10)] in
     if ready then fail "focus loss kept hover rest";
     let ready,_,_ = step ~key:"b" 1.3 [] in
@@ -619,17 +614,15 @@ let run () =
   (* Picker: typing filters, arrows move the cursor, Enter picks an index of
      the filtered rows, Delete arms then deletes, Backspace on an empty query
      goes back, Escape cancels. *)
-  let key k = Event.KeyPressed k in
+  let key k = Input.Key_pressed k in
   let items = [| "alpha", "1"; "beta", "2"; "gamma", "3"; "delta", "4" |] in
   let rows query = Array.of_list (List.filter
       (fun (label, _) -> Ui.fuzzy_match ~query label) (Array.to_list items)) in
   let ui = Ui.create ~font_size:11 () and query = ref "" and last = ref `None in
   let off = ref (fun _ -> false) in
   let pick ?(command=false) ?(shift=false) events =
-    Ui.frame ui
-      { (frame ~scale:1. ~time:0. events) with
-        keys = (if command then [Input.Meta]
-          else if shift then [Input.Shift] else []) } (fun ui ->
+    Ui.frame ui (frame ~keys:(if command then [Input.Meta]
+      else if shift then [Input.Shift] else []) ~scale:1. ~time:0. events) (fun ui ->
       Ui.panel ui ~x:0. ~y:0. ~width:240. "p" (fun () ->
         let edited, result = Ui.picker ui ~off:(fun index -> !off index) "Search" ~query:!query rows in
         query := edited; last := result)) in
@@ -637,7 +630,7 @@ let run () =
   if not (Ui.text_input_focused ui) then fail "picker did not take keyboard focus";
   pick [key Input.ArrowDown; key Input.ArrowDown; key Input.Enter];
   if !last <> `Pick 2 then fail "picker arrows did not move the cursor";
-  pick [Event.TextInput "dla"; key Input.Enter];
+  pick [Input.Text_input "dla"; key Input.Enter];
   if !query <> "dla" || !last <> `Pick 0 || fst (rows !query).(0) <> "delta" then
     fail "picker typing did not filter rows before Enter";
   let previous_clipboard = Clipboard.get_text () in
@@ -671,7 +664,7 @@ let run () =
   if !last <> `None then fail "picker deleted on the first Delete";
   pick [key Input.Delete];
   if !last <> `Delete 0 then fail "picker did not delete on the second Delete";
-  pick [Event.TextInput "zzz"; key Input.Enter];
+  pick [Input.Text_input "zzz"; key Input.Enter];
   if !last <> `Submit then fail "picker Enter with no rows did not submit";
   query := "";
   pick [key Input.Backspace];
@@ -685,7 +678,7 @@ let run () =
   off := (fun index -> index = 1);
   pick [];
   pick [press (60, 3 + 48 + 12); release (60, 3 + 48 + 12)];
-  pick [Event.TextInput "a"];
+  pick [Input.Text_input "a"];
   if !last <> `None || !query <> "a" then fail "a click on an unavailable picker row took the keyboard";
   off := (fun _ -> false);
   query := "";
@@ -736,7 +729,7 @@ let run () =
   let selected = ref (0, 0) in
   let area_step ?(keys = []) ?reveal ?reveal_nonce ?select ?splice events =
     time := !time +. 0.5;
-    ignore (Ui.frame ui { (frame ~scale:1. ~time:!time events) with keys } (fun ui ->
+    ignore (Ui.frame ui (frame ~keys ~scale:1. ~time:!time events) (fun ui ->
       let text, submit = Ui.text_area_submit ui ~at:(0., 0.) ~w:300. ~h:96.
         ?reveal ?reveal_nonce ?select ?splice ~on_select:(fun range -> selected := range)
         ~wrap:!wrapped ~errors:!errors ?language:!language ~on_context:(fun at -> context := Some at)
@@ -749,84 +742,84 @@ let run () =
   let expect what want = if !area <> want then
     fail (Printf.sprintf "text area %s: %S" what !area) in
   area_step [];
-  area_step [press (150, 12); release (150, 12); Event.TextInput "ab"; Event.KeyPressed Input.Enter;
-    Event.TextInput "cd"];
+  area_step [press (150, 12); release (150, 12); Input.Text_input "ab"; Input.Key_pressed Input.Enter;
+    Input.Text_input "cd"];
   expect "insert and Enter" "ab\ncd";
-  area_step [Event.KeyPressed Input.ArrowUp; Event.TextInput "X"];
+  area_step [Input.Key_pressed Input.ArrowUp; Input.Text_input "X"];
   expect "Up keeps the column" "abX\ncd";
-  area_step [Event.KeyPressed Input.Home; Event.TextInput "_"];
+  area_step [Input.Key_pressed Input.Home; Input.Text_input "_"];
   expect "Home is line-scoped" "_abX\ncd";
-  area_step [Event.KeyPressed Input.ArrowDown; Event.KeyPressed Input.End; Event.KeyPressed Input.Backspace];
+  area_step [Input.Key_pressed Input.ArrowDown; Input.Key_pressed Input.End; Input.Key_pressed Input.Backspace];
   expect "Down then End then Backspace" "_abX\nc";
-  area_step [Event.KeyPressed Input.Delete];
+  area_step [Input.Key_pressed Input.Delete];
   expect "Delete at the end" "_abX\nc";
   let cursor = snd (region ()) in
-  area_step [Event.TextEditing { text = "e"; start = 0; length = 1 }];
+  area_step [Input.Text_editing { text = "e"; start = 0; length = 1 }];
   if snd (region ()) <> cursor then fail "composition moved the caret";
-  area_step [Event.TextInput "é"];
+  area_step [Input.Text_input "é"];
   expect "IME commit" "_abX\ncé";
   let previous_clipboard = Clipboard.get_text () in
   Fun.protect ~finally:(fun () -> match previous_clipboard with
     | Ok text -> ignore (Clipboard.set_text text) | Error _ -> ()) (fun () ->
-    area_step ~keys:[Input.Shift] [Event.KeyPressed Input.ArrowLeft];
-    area_step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar 'c')];
+    area_step ~keys:[Input.Shift] [Input.Key_pressed Input.ArrowLeft];
+    area_step ~keys:[Input.Meta] [Input.Key_pressed (Input.KeyChar 'c')];
     if Clipboard.get_text () <> Ok "é" then fail "text area copy ignored the selection";
-    area_step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar 'a')];
-    area_step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar 'x')];
+    area_step ~keys:[Input.Meta] [Input.Key_pressed (Input.KeyChar 'a')];
+    area_step ~keys:[Input.Meta] [Input.Key_pressed (Input.KeyChar 'x')];
     expect "cut all" "";
     if Clipboard.get_text () <> Ok "_abX\ncé" then fail "text area cut lost the text";
-    area_step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar 'v')];
+    area_step ~keys:[Input.Meta] [Input.Key_pressed (Input.KeyChar 'v')];
     expect "paste keeps the newline" "_abX\ncé";
     (* copy and cut with no selection take the caret's line: of an empty area, nothing *)
     area := "";
     area_step [press (150, 12); release (150, 12)];
-    area_step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar 'c')];
-    area_step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar 'x')];
+    area_step ~keys:[Input.Meta] [Input.Key_pressed (Input.KeyChar 'c')];
+    area_step ~keys:[Input.Meta] [Input.Key_pressed (Input.KeyChar 'x')];
     expect "copy and cut of an empty area" "";
     area := "ab\ncd";
     area_step [press (150, 12); release (150, 12)];
-    area_step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar 'x')];
+    area_step ~keys:[Input.Meta] [Input.Key_pressed (Input.KeyChar 'x')];
     expect "cut with no selection takes the caret's line" "cd");
   (* Tab keeps the focus and inserts two spaces, Shift-Tab takes them off, Command-Enter is the
      host's apply *)
   area := "ab";
   area_step [press (150, 12); release (150, 12)];
-  area_step [Event.KeyPressed Input.Tab];
+  area_step [Input.Key_pressed Input.Tab];
   expect "Tab" "ab  ";
   if not (Ui.text_input_focused ui) then fail "Tab moved the focus out of the text area";
-  area_step [Event.KeyPressed Input.Home; Event.KeyPressed Input.Tab];
+  area_step [Input.Key_pressed Input.Home; Input.Key_pressed Input.Tab];
   expect "Tab at the start of the line" "  ab  ";
-  area_step ~keys:[Input.Shift] [Event.KeyPressed Input.Tab];
+  area_step ~keys:[Input.Shift] [Input.Key_pressed Input.Tab];
   expect "Shift-Tab takes two spaces" "ab  ";
-  area_step [Event.TextInput "x"];
-  area_step ~keys:[Input.Shift] [Event.KeyPressed Input.Tab];
+  area_step [Input.Text_input "x"];
+  area_step ~keys:[Input.Shift] [Input.Key_pressed Input.Tab];
   expect "Shift-Tab on an unindented line" "xab  ";
   if !submitted then fail "an edit submitted the text area";
-  area_step ~keys:[Input.Meta] [Event.KeyPressed Input.Enter];
+  area_step ~keys:[Input.Meta] [Input.Key_pressed Input.Enter];
   if not !submitted then fail "Command-Enter did not report an apply";
   expect "Command-Enter inserts nothing" "xab  ";
-  area_step ~keys:[Input.Ctrl] [Event.KeyPressed Input.Enter];
+  area_step ~keys:[Input.Ctrl] [Input.Key_pressed Input.Enter];
   if not !submitted then fail "Control-Enter did not report an apply";
   (* soft wrapping: one long line is several rows, the caret and Up/Down follow the rows, and
      nothing scrolls sideways *)
   area := String.make 100 'a';
   wrapped := true;
   area_step [press (150, 60); release (150, 60)];
-  area_step [Event.TextInput "X"];
+  area_step [Input.Text_input "X"];
   let x_at = String.index !area 'X' in
   if x_at < 60 || x_at > 99 then fail (Printf.sprintf "a click on the third row landed at column %d" x_at);
   (* a text line is one and a half times the 11-point text: 17 points *)
   let y_third, _ = region () in
   if y_third < 2 * 17 then fail (Printf.sprintf "a wrapped caret is on the first row (y %d)" y_third);
-  area_step [Event.KeyPressed Input.ArrowUp; Event.TextInput "Y"];
+  area_step [Input.Key_pressed Input.ArrowUp; Input.Text_input "Y"];
   let y_at = String.index !area 'Y' in
   if y_at >= x_at || x_at - y_at > 60 then
     fail (Printf.sprintf "Up did not move to the row above (%d then %d)" x_at y_at);
-  area_step [Event.KeyPressed Input.Home; Event.TextInput "H"];
+  area_step [Input.Key_pressed Input.Home; Input.Text_input "H"];
   let h_at = String.index !area 'H' in
   if h_at = 0 || h_at > y_at then fail "Home on a wrapped row was not row-scoped";
-  area_step [Event.KeyPressed Input.ArrowUp; Event.KeyPressed Input.ArrowUp; Event.KeyPressed Input.ArrowUp];
-  area_step [Event.TextInput "T"];
+  area_step [Input.Key_pressed Input.ArrowUp; Input.Key_pressed Input.ArrowUp; Input.Key_pressed Input.ArrowUp];
+  area_step [Input.Text_input "T"];
   if String.index !area 'T' > 40 then fail "Up at the first row did not go to the start";
   wrapped := false;
   area_step [];
@@ -834,12 +827,12 @@ let run () =
   area := String.concat "\n" (List.init 40 string_of_int);
   errors := [ 3; 40 ];
   area_step [press (150, 12); release (150, 12)];
-  area_step ~keys:[Input.Meta] [Event.KeyPressed Input.ArrowDown];
-  for _ = 1 to 39 do area_step [Event.KeyPressed Input.ArrowDown] done;
+  area_step ~keys:[Input.Meta] [Input.Key_pressed Input.ArrowDown];
+  for _ = 1 to 39 do area_step [Input.Key_pressed Input.ArrowDown] done;
   area_step [];
   let y, _ = region () in
   if y < 0 || y > 96 then fail (Printf.sprintf "caret line left the area (y %d)" y);
-  area_step [Event.KeyPressed Input.Escape];
+  area_step [Input.Key_pressed Input.Escape];
   if Ui.text_input_focused ui then fail "Escape did not leave the text area";
   (* a language: brackets in pairs, Enter indents, right-click reports the point *)
   errors := [];
@@ -853,20 +846,20 @@ let run () =
       if !quotes mod 2 = 1 then `String else `Code);
     comment = ";"; rewrite = None };
   area := "";
-  area_step [press (150, 12); release (150, 12); Event.TextInput "("];
+  area_step [press (150, 12); release (150, 12); Input.Text_input "("];
   expect "an opener inserts its pair" "()";
-  area_step [Event.TextInput "a"; Event.TextInput ")"];
+  area_step [Input.Text_input "a"; Input.Text_input ")"];
   expect "a closer typed before itself steps over it" "(a)";
-  area_step [Event.KeyPressed Input.ArrowLeft; Event.KeyPressed Input.Enter];
+  area_step [Input.Key_pressed Input.ArrowLeft; Input.Key_pressed Input.Enter];
   expect "Enter indents as the language says" "(a\n  )";
-  area_step [Event.TextInput "\""; Event.TextInput "\""];
+  area_step [Input.Text_input "\""; Input.Text_input "\""];
   expect "a quote pairs, then steps over its twin" "(a\n  \"\")";
-  area_step [Event.KeyPressed Input.ArrowLeft; Event.KeyPressed Input.Backspace];
+  area_step [Input.Key_pressed Input.ArrowLeft; Input.Key_pressed Input.Backspace];
   expect "Backspace between an empty pair takes both" "(a\n  )";
-  area_step ~keys:[Input.Shift] [Event.KeyPressed Input.Home];
-  area_step [Event.TextInput "("];
+  area_step ~keys:[Input.Shift] [Input.Key_pressed Input.Home];
+  area_step [Input.Text_input "("];
   expect "an opener wraps the selection" "(a\n(  ))";
-  area_step [Event.MousePressed (Input.RightButton, (100., 20.)); Event.MouseReleased (Input.RightButton, (100., 20.))];
+  area_step [Input.Pointer_pressed (Input.RightButton, (100., 20.)); Input.Pointer_released (Input.RightButton, (100., 20.))];
   if !context = None then fail "a right-click did not reach on_context";
   (* completions: typing opens the popup, Down moves, Tab accepts; Escape closes it before it
      leaves the editor *)
@@ -887,60 +880,60 @@ let run () =
         Some (a byte, b byte)
       else None) };
   area := "";
-  area_step [press (150, 12); release (150, 12); Event.TextInput "z"; Event.TextInput "e"];
+  area_step [press (150, 12); release (150, 12); Input.Text_input "z"; Input.Text_input "e"];
   expect "typing opens the popup without changing the text" "ze";
-  area_step [Event.KeyPressed Input.ArrowDown];
+  area_step [Input.Key_pressed Input.ArrowDown];
   expect "Down moves in the popup, not in the text" "ze";
-  area_step [Event.KeyPressed Input.Tab];
+  area_step [Input.Key_pressed Input.Tab];
   expect "Tab accepts the chosen completion" "zephyr";
-  area_step [Event.TextInput " "; Event.TextInput "z"];
-  area_step [Event.KeyPressed Input.Escape];
+  area_step [Input.Text_input " "; Input.Text_input "z"];
+  area_step [Input.Key_pressed Input.Escape];
   if not (Ui.text_input_focused ui) then fail "Escape closed the editor instead of the popup";
-  area_step [Event.KeyPressed Input.Escape];
+  area_step [Input.Key_pressed Input.Escape];
   if Ui.text_input_focused ui then fail "a second Escape did not leave the editor";
   (* Enter breaks the line unless Up or Down chose a row; Tab always accepts *)
   let saved = !language in
   area := "";
-  area_step [press (150, 12); release (150, 12); Event.TextInput "z"; Event.TextInput "e"];
-  area_step [Event.KeyPressed Input.Enter];
+  area_step [press (150, 12); release (150, 12); Input.Text_input "z"; Input.Text_input "e"];
+  area_step [Input.Key_pressed Input.Enter];
   expect "Enter after a typed word breaks the line, it does not take the popup" "ze\n";
-  area_step [Event.TextInput " "; Event.TextInput "z"; Event.TextInput "e"];
-  area_step [Event.KeyPressed Input.ArrowDown];
-  area_step [Event.KeyPressed Input.Enter];
+  area_step [Input.Text_input " "; Input.Text_input "z"; Input.Text_input "e"];
+  area_step [Input.Key_pressed Input.ArrowDown];
+  area_step [Input.Key_pressed Input.Enter];
   expect "Enter takes the row an arrow chose" "ze\n zephyr";
-  area_step [Event.KeyPressed Input.Escape; Event.KeyPressed Input.Escape];
+  area_step [Input.Key_pressed Input.Escape; Input.Key_pressed Input.Escape];
   (* Tab and Shift-Tab with a selection indent and dedent every line it touches *)
   language := Some { (Option.get !language) with complete = (fun _ _ -> []) };
   area := "a\n\nb\nc";
   area_step [press (150, 12); release (150, 12)];
-  area_step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar 'a')];
-  area_step [Event.KeyPressed Input.Tab];
+  area_step ~keys:[Input.Meta] [Input.Key_pressed (Input.KeyChar 'a')];
+  area_step [Input.Key_pressed Input.Tab];
   expect "Tab with a selection indents every line and keeps the selection" "  a\n\n  b\n  c";
   if fst !selected <> 0 || snd !selected <> String.length !area then fail "the indented lines lost their selection";
-  area_step ~keys:[Input.Shift] [Event.KeyPressed Input.Tab];
+  area_step ~keys:[Input.Shift] [Input.Key_pressed Input.Tab];
   expect "Shift-Tab with a selection dedents every line" "a\n\nb\nc";
-  area_step [Event.KeyPressed Input.ArrowDown];
-  area_step [Event.KeyPressed Input.Tab];
+  area_step [Input.Key_pressed Input.ArrowDown];
+  area_step [Input.Key_pressed Input.Tab];
   expect "Tab without a selection still inserts two spaces" "a\n\nb\nc  ";
   (* brackets and quotes pair and step over only in code *)
   area := "";
-  area_step [press (150, 12); release (150, 12); Event.TextInput "\""; Event.TextInput "("];
+  area_step [press (150, 12); release (150, 12); Input.Text_input "\""; Input.Text_input "("];
   expect "a bracket inside a string is typed as it is" "\"(\"";
-  area_step [Event.TextInput "\""];
+  area_step [Input.Text_input "\""];
   expect "a quote before the closing quote steps over it" "\"(\"";
   area := "\"x\"";
   area_step [];
-  area_step ~keys:[Input.Meta] [Event.KeyPressed Input.ArrowUp];
-  area_step [Event.TextInput "\""];
+  area_step ~keys:[Input.Meta] [Input.Key_pressed Input.ArrowUp];
+  area_step [Input.Text_input "\""];
   expect "a quote before a string's opening quote does not step over it" "\"\"\"x\"";
   (* Up and Down keep their column across a short line *)
   area := "abcdef\nab\nabcdef";
   area_step [];
-  area_step ~keys:[Input.Meta] [Event.KeyPressed Input.ArrowUp];
-  area_step (List.init 5 (fun _ -> Event.KeyPressed Input.ArrowRight));
-  area_step [Event.KeyPressed Input.ArrowDown];
-  area_step [Event.KeyPressed Input.ArrowDown];
-  area_step [Event.TextInput "X"];
+  area_step ~keys:[Input.Meta] [Input.Key_pressed Input.ArrowUp];
+  area_step (List.init 5 (fun _ -> Input.Key_pressed Input.ArrowRight));
+  area_step [Input.Key_pressed Input.ArrowDown];
+  area_step [Input.Key_pressed Input.ArrowDown];
+  area_step [Input.Text_input "X"];
   expect "Down across a short line returns to the column it left" "abcdef\nab\nabcdeXf";
   (* [select] takes the keyboard and places the selection; [splice] is one undo step *)
   language := None;
@@ -948,19 +941,19 @@ let run () =
   Ui.unfocus ui;
   area_step ~select:(4, 7) [];
   if not (Ui.text_input_focused ui) then fail "a select request did not focus the area";
-  area_step [Event.TextInput "2"];
+  area_step [Input.Text_input "2"];
   expect "typing replaces the requested selection" "one 2 one";
   area := "one two one";
   area_step ~splice:[ 0, 3, "1"; 8, 11, "111" ] ~select:(1, 1) [];
   expect "a splice replaces every range" "1 two 111";
-  area_step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar 'z')];
+  area_step ~keys:[Input.Meta] [Input.Key_pressed (Input.KeyChar 'z')];
   expect "Command-Z takes the whole splice back" "one two one";
   (* [reveal] fires again for a new nonce, not for the same one after the user scrolled away *)
   area := String.concat "\n" (List.init 40 string_of_int);
   let visible () = let y, _ = region () in y >= 0 && y < 96 in
   let back_to_end ?reveal ?reveal_nonce () =
-    area_step ?reveal ?reveal_nonce ~keys:[Input.Meta] [Event.KeyPressed Input.ArrowUp];
-    area_step ?reveal ?reveal_nonce ~keys:[Input.Meta] [Event.KeyPressed Input.ArrowDown] in
+    area_step ?reveal ?reveal_nonce ~keys:[Input.Meta] [Input.Key_pressed Input.ArrowUp];
+    area_step ?reveal ?reveal_nonce ~keys:[Input.Meta] [Input.Key_pressed Input.ArrowDown] in
   area_step [press (150, 12); release (150, 12)];
   back_to_end ();
   let off = String.length (String.concat "\n" (List.init 30 string_of_int)) in
@@ -987,70 +980,70 @@ let run () =
   let alt = [Input.Alt] and alt_shift = [Input.Alt; Input.Shift] in
   area := "a\n\n  b\nc";
   area_step [press (150, 12); release (150, 12)];
-  area_step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar 'a')];
-  area_step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar '/')];
+  area_step ~keys:[Input.Meta] [Input.Key_pressed (Input.KeyChar 'a')];
+  area_step ~keys:[Input.Meta] [Input.Key_pressed (Input.KeyChar '/')];
   expect "Command-/ comments every non-blank line at the smallest indent" "; a\n\n;   b\n; c";
-  area_step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar '/')];
+  area_step ~keys:[Input.Meta] [Input.Key_pressed (Input.KeyChar '/')];
   expect "Command-/ again takes the comments off" "a\n\n  b\nc";
   area := "x\n y";
   area_step [];
-  area_step ~keys:[Input.Meta] [Event.KeyPressed Input.ArrowUp];
-  area_step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar '/')];
-  area_step [Event.TextInput "Q"];
+  area_step ~keys:[Input.Meta] [Input.Key_pressed Input.ArrowUp];
+  area_step ~keys:[Input.Meta] [Input.Key_pressed (Input.KeyChar '/')];
+  area_step [Input.Text_input "Q"];
   expect "the caret keeps its place in a commented line" "; Qx\n y";
   area := "one\ntwo\nthree";
   area_step [];
-  area_step ~keys:[Input.Meta] [Event.KeyPressed Input.ArrowUp];
-  area_step ~keys:[Input.Meta] [Event.KeyPressed Input.ArrowDown];
-  area_step ~keys:[Input.Meta] [Event.KeyPressed Input.ArrowUp];
-  area_step [Event.KeyPressed Input.End];
-  area_step ~keys:alt [Event.KeyPressed Input.ArrowUp];
+  area_step ~keys:[Input.Meta] [Input.Key_pressed Input.ArrowUp];
+  area_step ~keys:[Input.Meta] [Input.Key_pressed Input.ArrowDown];
+  area_step ~keys:[Input.Meta] [Input.Key_pressed Input.ArrowUp];
+  area_step [Input.Key_pressed Input.End];
+  area_step ~keys:alt [Input.Key_pressed Input.ArrowUp];
   expect "Option-Up on the first line does nothing" "one\ntwo\nthree";
-  area_step ~keys:alt [Event.KeyPressed Input.ArrowDown];
+  area_step ~keys:alt [Input.Key_pressed Input.ArrowDown];
   expect "Option-Down moves the line down" "two\none\nthree";
-  area_step [Event.TextInput "X"];
+  area_step [Input.Text_input "X"];
   expect "the caret travels with the moved line" "two\noneX\nthree";
-  area_step ~keys:alt [Event.KeyPressed Input.ArrowDown];
-  area_step ~keys:alt [Event.KeyPressed Input.ArrowDown];
+  area_step ~keys:alt [Input.Key_pressed Input.ArrowDown];
+  area_step ~keys:alt [Input.Key_pressed Input.ArrowDown];
   expect "Option-Down on the last line does nothing" "two\nthree\noneX";
-  area_step ~keys:alt [Event.KeyPressed Input.ArrowUp];
+  area_step ~keys:alt [Input.Key_pressed Input.ArrowUp];
   expect "Option-Up moves the line up" "two\noneX\nthree";
   area := "ab";
   area_step [];
-  area_step ~keys:[Input.Meta] [Event.KeyPressed Input.ArrowDown];
-  area_step ~keys:alt_shift [Event.KeyPressed Input.ArrowDown];
-  area_step [Event.TextInput "Z"];
+  area_step ~keys:[Input.Meta] [Input.Key_pressed Input.ArrowDown];
+  area_step ~keys:alt_shift [Input.Key_pressed Input.ArrowDown];
+  area_step [Input.Text_input "Z"];
   expect "Shift-Option-Down copies the line and keeps the caret on the copy" "ab\nabZ";
   area := "ab";
   area_step [];
-  area_step ~keys:[Input.Meta] [Event.KeyPressed Input.ArrowDown];
-  area_step ~keys:alt_shift [Event.KeyPressed Input.ArrowUp];
-  area_step [Event.TextInput "Z"];
+  area_step ~keys:[Input.Meta] [Input.Key_pressed Input.ArrowDown];
+  area_step ~keys:alt_shift [Input.Key_pressed Input.ArrowUp];
+  area_step [Input.Text_input "Z"];
   expect "Shift-Option-Up copies the line above and keeps the caret on the original" "abZ\nab";
   area := "(a (b c) d)";
   area_step [];
-  area_step [Event.KeyPressed Input.Home];
-  area_step (List.init 5 (fun _ -> Event.KeyPressed Input.ArrowRight));
-  area_step ~keys:[Input.Meta; Input.Alt] [Event.KeyPressed Input.ArrowUp];
+  area_step [Input.Key_pressed Input.Home];
+  area_step (List.init 5 (fun _ -> Input.Key_pressed Input.ArrowRight));
+  area_step ~keys:[Input.Meta; Input.Alt] [Input.Key_pressed Input.ArrowUp];
   if !selected <> (3, 8) then fail "Command-Option-Up did not select the innermost form";
-  area_step ~keys:[Input.Meta; Input.Alt] [Event.KeyPressed Input.ArrowUp];
+  area_step ~keys:[Input.Meta; Input.Alt] [Input.Key_pressed Input.ArrowUp];
   if !selected <> (0, 11) then fail "a second Command-Option-Up did not widen to the next form";
-  area_step [Event.KeyPressed Input.Home];
-  area_step (List.init 5 (fun _ -> Event.KeyPressed Input.ArrowRight));
-  area_step ~keys:[Input.Meta; Input.Shift] [Event.KeyPressed (Input.KeyChar '\\')];
+  area_step [Input.Key_pressed Input.Home];
+  area_step (List.init 5 (fun _ -> Input.Key_pressed Input.ArrowRight));
+  area_step ~keys:[Input.Meta; Input.Shift] [Input.Key_pressed (Input.KeyChar '\\')];
   if !selected <> (3, 3) then fail (Printf.sprintf "the bracket jump did not go to the opener of the pair around the caret %d %d" (fst !selected) (snd !selected));
-  area_step ~keys:[Input.Meta; Input.Shift] [Event.KeyPressed (Input.KeyChar '\\')];
+  area_step ~keys:[Input.Meta; Input.Shift] [Input.Key_pressed (Input.KeyChar '\\')];
   if !selected <> (8, 8) then fail "the bracket jump did not cross to the far side of the pair";
   (* a text that comes back unchanged takes its own undo steps back *)
   area := "foo";
   area_step [press (150, 12); release (150, 12)];
-  area_step [Event.TextInput "x"];
+  area_step [Input.Text_input "x"];
   expect "typing" "foox";
   area := "other";
   area_step [];
   area := "foox";
   area_step [];
-  area_step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar 'z')];
+  area_step ~keys:[Input.Meta] [Input.Key_pressed (Input.KeyChar 'z')];
   expect "Command-Z after the text returned undoes the typing" "foo";
   language := saved;
   (* a number dragged sideways follows the pointer: an integer one per five points, a float a
@@ -1073,7 +1066,7 @@ let run () =
   area_step [release (nx + 20, 18)];
   if List.hd !scrubs <> `Done then fail "a drag's end did not report on_scrub `Done";
   expect "the release keeps the value" "14 x";
-  area_step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar 'z')];
+  area_step ~keys:[Input.Meta] [Input.Key_pressed (Input.KeyChar 'z')];
   expect "Command-Z takes the whole drag back" "10 x";
   area := "0.5 y";
   area_step [];
@@ -1094,9 +1087,9 @@ let run () =
   (* the language's rewrite runs after each edited frame and maps the caret *)
   language := Some { (Option.get !language) with rewrite = Some (fun text caret -> text ^ "!", caret) };
   area := "";
-  area_step [press (150, 12); release (150, 12); Event.TextInput "a"];
+  area_step [press (150, 12); release (150, 12); Input.Text_input "a"];
   expect "the rewrite keeps the text as the language wants it" "a!";
-  area_step [Event.TextInput "b"];
+  area_step [Input.Text_input "b"];
   expect "the caret stays where the rewrite put it" "ab!!";
   language := None;
   (* macOS editing: a double click selects the word and a triple the line, Option and
@@ -1105,45 +1098,45 @@ let run () =
   (* a click past the end of the first row lands after "beta" *)
   let at = 290, 12 in
   area_step [press at; release at; press at; release at];
-  area_step [Event.TextInput "X"];
+  area_step [Input.Text_input "X"];
   expect "a double click selects the word" "alpha X\ngamma delta";
   area_step [press at; release at; press at; release at; press at; release at];
-  area_step [Event.TextInput "L"];
+  area_step [Input.Text_input "L"];
   expect "a triple click selects the line with its break" "Lgamma delta";
   area := "one two three";
   area_step [press (150, 12); release (150, 12)];
-  area_step ~keys:[Input.Meta] [Event.KeyPressed Input.ArrowDown];
-  area_step ~keys:[Input.Alt] [Event.KeyPressed Input.ArrowLeft];
-  area_step [Event.TextInput "X"];
+  area_step ~keys:[Input.Meta] [Input.Key_pressed Input.ArrowDown];
+  area_step ~keys:[Input.Alt] [Input.Key_pressed Input.ArrowLeft];
+  area_step [Input.Text_input "X"];
   expect "Option-Left moves to the start of the word" "one two Xthree";
-  area_step ~keys:[Input.Alt] [Event.KeyPressed Input.Backspace];
+  area_step ~keys:[Input.Alt] [Input.Key_pressed Input.Backspace];
   expect "Option-Backspace takes the word before the caret" "one two three";
-  area_step ~keys:[Input.Alt; Input.Shift] [Event.KeyPressed Input.ArrowLeft];
-  area_step [Event.TextInput "2"];
+  area_step ~keys:[Input.Alt; Input.Shift] [Input.Key_pressed Input.ArrowLeft];
+  area_step [Input.Text_input "2"];
   expect "Shift-Option-Left extends the selection by a word" "one 2three";
-  area_step ~keys:[Input.Meta] [Event.KeyPressed Input.Backspace];
+  area_step ~keys:[Input.Meta] [Input.Key_pressed Input.Backspace];
   expect "Command-Backspace takes the line to the caret" "three";
-  area_step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar 'z')];
+  area_step ~keys:[Input.Meta] [Input.Key_pressed (Input.KeyChar 'z')];
   expect "Command-Z undoes the last change" "one 2three";
-  area_step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar 'z')];
-  area_step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar 'z')];
+  area_step ~keys:[Input.Meta] [Input.Key_pressed (Input.KeyChar 'z')];
+  area_step ~keys:[Input.Meta] [Input.Key_pressed (Input.KeyChar 'z')];
   expect "Command-Z steps back through the changes" "one two Xthree";
-  area_step ~keys:[Input.Meta; Input.Shift] [Event.KeyPressed (Input.KeyChar 'z')];
+  area_step ~keys:[Input.Meta; Input.Shift] [Input.Key_pressed (Input.KeyChar 'z')];
   expect "Shift-Command-Z redoes" "one two three";
   area := "";
   area_step [press (150, 12); release (150, 12)];
-  area_step [Event.TextInput "a"];
-  area_step [Event.TextInput "b"];
-  area_step [Event.TextInput "c"];
-  area_step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar 'z')];
+  area_step [Input.Text_input "a"];
+  area_step [Input.Text_input "b"];
+  area_step [Input.Text_input "c"];
+  area_step ~keys:[Input.Meta] [Input.Key_pressed (Input.KeyChar 'z')];
   expect "consecutive typing undoes as one step" "";
-  area_step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar 'y')];
+  area_step ~keys:[Input.Meta] [Input.Key_pressed (Input.KeyChar 'y')];
   expect "Command-Y redoes the typing" "abc";
   if Ui.passed_undo ui <> None then fail "a redo the area took was passed on";
-  area_step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar 'y')];
+  area_step ~keys:[Input.Meta] [Input.Key_pressed (Input.KeyChar 'y')];
   if Ui.passed_undo ui <> Some `Redo then fail "a redo with an empty stack was not passed on";
-  area_step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar 'z')];
-  area_step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar 'z')];
+  area_step ~keys:[Input.Meta] [Input.Key_pressed (Input.KeyChar 'z')];
+  area_step ~keys:[Input.Meta] [Input.Key_pressed (Input.KeyChar 'z')];
   if Ui.passed_undo ui <> Some `Undo then fail "an undo with an empty stack was not passed on";
   expect "the passed undo leaves the text alone" "";
   area_step [];
@@ -1205,13 +1198,13 @@ let run () =
     Ui.to_front ui front;
     let back = Ui.box ui ~flags:Ui.clickable ~at:(0., 0.) ~w:(Ui.Px 100.) ~h:(Ui.Px 60.) "back" in
     List.iter (fun box -> Ui.draw ui box (fun paint (x, y, w, h) ->
-      Ui.Paint.fill paint ~x ~y ~w ~h Color.white)) [front; back];
+      Ui.Paint.fill paint ~x ~y ~w ~h Rays_math.Color.white)) [front; back];
     (Ui.signal ui front).clicked, (Ui.signal ui back).clicked) in
   ignore (raised []);
   if raised [press (20, 20); release (20, 20)] <> (true, false) then
     fail "a later body covered a raised floating control";
   let scene = Ui.scene ui ~under:(fun key -> if key = !front_key then
-    [Scene.rect ~at:(0, 0) ~w:100 ~h:60 ~fill:Color.black ()] else []) in
+    [Scene.rect ~at:(0, 0) ~w:100 ~h:60 ~fill:Rays_math.Color.black ()] else []) in
   (match Scene.Private.stage_native ~width:320 ~height:240 scene with
    | Ok {layers = [Ui_layer _; Scene2_layer _; Ui_layer _]; _} -> ()
    | _ -> fail "native content was not between the background and floating controls");
@@ -1223,19 +1216,19 @@ let run () =
   let words = ref "alpha beta gamma" and number = ref "240" and clock = ref 0. in
   let tick ?(keys = []) ?(dt = 0.05) events =
     clock := !clock +. dt;
-    ignore (Ui.frame ui { (frame ~scale:1. ~time:!clock events) with keys } (fun ui ->
+    ignore (Ui.frame ui (frame ~keys ~scale:1. ~time:!clock events) (fun ui ->
       words := fst (Ui.value_field ui ~at:(20., 20.) ~w:100. ~h:21. ~valid:(fun _ -> true) "words" !words);
       number := fst (Ui.value_field ui ~at:(20., 60.) ~w:100. ~h:21. ~scrub:(fun origin _ _ -> origin)
         ~valid:(fun text -> int_of_string_opt text <> None) "number" !number))) in
   tick []; tick [press (100, 30); release (100, 30)];
   tick ~dt:1. [press (100, 30); release (100, 30); press (100, 30)]; tick [release (100, 30)];
-  tick [Event.TextInput "X"];
+  tick [Input.Text_input "X"];
   tick ~dt:1. [press (60, 70); release (60, 70); press (60, 70)];
   tick [move (61, 70)]; tick [release (61, 70)];
   if not (Ui.text_input_focused ui) then fail "a double click did not open the numeric editor";
-  tick ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar 'z')];
+  tick ~keys:[Input.Meta] [Input.Key_pressed (Input.KeyChar 'z')];
   if Ui.passed_undo ui <> Some `Undo then fail "a numeric editor undid another widget's edit";
-  tick [Event.KeyPressed Input.Escape];
+  tick [Input.Key_pressed Input.Escape];
   if !number <> "240" then fail ("a numeric editor took another widget's text: " ^ !number);
   Ui.destroy ui;
   (* A carry: held once the pointer has left the 4-point dead zone of the press, seen as hover
@@ -1274,12 +1267,12 @@ let run () =
    | None, None, _ -> () | _ -> fail "a release over nothing delivered a payload");
   (* cancellation and focus loss clear it, delivering nothing *)
   ignore (carried [ press (10, 10) ]); ignore (carried [ move (10, 120) ]);
-  (match carried [ Event.PointerCancelled Input.LeftButton ] with
+  (match carried [ Input.Pointer_cancelled Input.LeftButton ] with
    | None, None, _ -> () | _ -> fail "a pointer cancellation left the payload held");
   (match carried [ release (10, 120) ] with
    | None, None, _ -> () | _ -> fail "a cancelled carry was put on release");
   ignore (carried [ press (10, 10) ]); ignore (carried [ move (10, 120) ]);
-  (match carried [ Event.WindowFocusLost ] with
+  (match carried [ Input.Focus_lost ] with
    | None, None, _ -> () | _ -> fail "a focus loss left the payload held");
   ignore (carried [ release (10, 120) ]);
   (* a popup that takes the capture takes the carry: the release after it puts nothing *)

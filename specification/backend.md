@@ -9,7 +9,7 @@ Generated `image/map` pixels use the shared packed compiler and WGSL target, the
 existing textured-quad presenter on one WebGPU device; no native renderer or geometry dependency enters `flow_web`.
 `image/render` uses that presenter with an owned RGBA8 offscreen target on the same device. The export tool
 decodes `image/load` assets through the existing SDL3_image decoder and bundles straight-alpha RGBA8 bytes;
-this native dependency stays in `tools/lisp`, outside `flow_web`. `image/noise` uses the shared JavaScript
+this native dependency stays in `web_export`, outside `flow_web`. `image/noise` uses the shared JavaScript
 noise implementation at double precision, matching the native CPU generator before uploading its pixels.
 Every image producer shares the workspace state slots by native source identity (instance, path and plane).
 An absent system-default Metal device maps to OGPU `No_adapter`. A failure reading the
@@ -18,19 +18,48 @@ device's registry identifier remains `Device_lost`, with source operation
 
 ## Ownership and dependency direction
 
-`flow` depends only on dependency-free `param` and `frame_input`. Its value graphs, expressions,
+`bin/rays.ml` owns the product executable. `lib/web_export` owns static export
+and its embedded `runtime/` assets, with a narrow lower/files/load interface.
+Its direct dependencies are `flow`, `flow_ir`, `flow_web`, `flow_sop`,
+`editor_document`, `sop_catalog`, `input`, `param`, `scene_command` and
+`sdl3_image`. The gate rejects UI dependencies and checks the binary's terminal
+backend selection. The emitters in `flow_web` keep their existing lower-layer
+boundary; native decoding and document/catalog integration remain in
+`web_export`.
+
+The shared file-table embedder belongs to `flow`; both the node catalog and
+web runtime embedding invoke it. The manifest generator belongs to
+`sop_catalog`, and the one SDL binding generator belongs to `sdl3`, reused by
+the image, TTF and mixer bindings. Generator executables do not add product
+library edges. The test-only `lisp_sop` helper depends on Flow/SOP/RDK/math and
+has no document, renderer or UI reach; the gate pins that boundary.
+
+`Runtime_resources` owns recursive directory creation and atomic file
+replacement, including text writes and callback-written files such as PNG
+exports. Crash reports, presets, source saves and web exports use the same
+replacement path through `Runtime_resources.write_text` or `write_atomic`.
+Its owned-resource APIs return `Ogpu.Error.t` directly. The shared kind set
+includes `Wrong_domain`, `Destroyed`, `Decode` and `Io` alongside the GPU
+validation kinds; SDL image, TTF and mixer binding errors remain their own
+types and are translated at the resource boundary.
+
+`flow` depends on the dependency-free `diagnostic`, `param`, `input` and `rays_math` libraries. Its value graphs, expressions,
 contexts and coercions have no geometry, editor, UI, renderer or GPU
 dependencies; the dependency gate rejects those transitive edges.
 `flow_ir` consumes specialized Flow plans and residual captures. It depends
-only on `flow`, `param`, `rays_math` and the dependency-free `scene_command` (the marks
+only on `flow`, `param`, `rays_math`, `parallel`, `lru` and the dependency-free `scene_command` (the marks
 contract as pure data, P3.3b); its dataflow passes and packed/scalar
-executor cannot reach geometry, presentation, editor or GPU libraries.
+executor cannot reach geometry, presentation, editor or GPU libraries. Its
+`Kernel_layout` plans register reachability, uniform/frame slots, noise tables,
+gathers and binding offsets once for both Metal and WGSL; each backend owns only
+its instruction printer. CPU JavaScript regions call the imported `noise3` from
+`prims.js`, matching the shared web runtime primitive.
 `flow` never depends on `flow_ir` and retains an independently callable
 reference tree walker. `flow_gpu` sits above the numeric IR and the public OGPU API:
 it emits Metal source from borrowed immutable register programs, caches at
 most 64 library/pipeline pairs per device owner, and owns geometrically grown
 upload/output buffers per program. It depends directly only on `flow`,
-`flow_ir`, `rays_math`, `ogpu`, `rays_execution` and `lru`; it cannot reach
+`flow_ir`, `rays_math`, `ogpu`, `renderer`, `lru` and `parallel`; it cannot reach
 procedural geometry or editor/UI libraries. The dependency gate rejects an
 upward edge from `flow_ir` to `flow_gpu`. Native leases, pipeline compilation,
 uploads and dispatch remain initial-domain host work. Closing programs drops
@@ -54,13 +83,10 @@ The validation-only workspace tool additionally compares fused/unfused
 programs with pure emission using each caller's actual catalog. No execution
 proof cache or per-frame qualification is introduced.
 
-`flow_sop` depends
-only on `flow`, `flow_ir`, `param`, `sop` and the standard-library `unix`
-clock; its typed overlay and
-value lane cannot reach presentation, the catalog, editor or GPU libraries.
-Math-backed value declarations such as `noise3` live in `flow_ir` and are
-included in the SOP/editor host's immutable `Flow_sop.Operators.all` list.
-Plain Flow checking remains independent of the math library.
+`flow_sop` depends directly on `flow`, `flow_ir`, `lru`, `param`, `sop`, `diagnostic`, `rays_math`, `parallel` and `unix`; its typed overlay and value lane cannot reach presentation, the catalog, editor or GPU libraries.
+Math-backed value declarations such as `noise3` live in `flow.Op` with the
+other built-in Flow operators. Plain Flow checking remains independent of SOP
+geometry and presentation libraries.
 Cook-time `sop/attr` and `sop/with_attr` declarations live in `flow_sop`.
 Its attribute kernel resolves immutable packed Flow sources against cooked
 RDK inputs and writes through `Rdk.Kernel.edit_point_ranges` or point
@@ -78,6 +104,13 @@ Neither `flow_ir` nor `flow_graph` gains a platform-clock dependency.
 that neutral layer and menu entries supplied by the host; it never reaches
 `sop` or `rdk`, even transitively. The gate checks both boundaries.
 
+`flow_native` owns native Flow drawing, marks, live-frame conversion and
+workspace execution. It consumes the UI-free `editor_document` model and
+the shared renderer; the gate rejects PXUI or editor dependencies. Geometry
+conversion lives in `rdk_rays.Surface` and `Packed_pieces`, using geometry,
+instance transforms and typed parameter views rather than SOP nodes or
+session outputs. The SOP host extracts those values at its existing boundary.
+
 `Value.Deferred (ty, id)` identifies a typed node in the evaluator plan.
 Geometry nodes lower through `flow_sop`; Drawing nodes lower through
 `Rays_editor.Drawing` into existing native `Rays.Scene` commands. Canvas
@@ -90,9 +123,9 @@ the packed tier with current immutable bindings. `flow` owns fold identity and
 transactions and receives only a private execution callback; it never imports
 `flow_ir`. Reference drawing evaluation remains available for parity checks.
 
-`frame_input` owns immutable logical frame facts (time, step, index, size,
+`input` owns immutable logical frame facts (time, step, index, size,
 pointer, held keys/buttons and ordered events), with no dependencies. The host
-captures these once from `Rays.Frame` through `Rays_editor.Live_frame`.
+captures these once from `Rays.Frame` through `Flow_native.Live_frame`.
 `Sop.Context` carries the same snapshot for geometry-zone bodies;
 its `Input` dependency projects every field into the cook cache key. No SDL,
 runtime or renderer value crosses either pure boundary.
@@ -137,12 +170,12 @@ examples / sketches / pxui / editor / rdk_rays
                       rays ----------------------> runtime_input ---> sdl3
                          |
                          v
-                  rays_execution
+                  renderer
                          |
                          v
                       runtime ------> sdl3     runtime_resources ---> sdl3,
                          |                     (used by rays and      sdl3_image,
-                         v                      rays_execution)       sdl3_ttf, sdl3_mixer
+                         v                      renderer)       sdl3_ttf, sdl3_mixer
                      ogpu (virtual) ---> ogpu_core ---> native_layer_token
 
                     ogpu_metal (implementation) ---> ogpu_metal_native ---> metal
@@ -163,24 +196,31 @@ the dependency gate rejects upward edges from lower to higher RDK libraries.
 `rays` never depends directly on an SDL library: window, event, clipboard,
 cursor, image, font and audio services sit behind `runtime`,
 `runtime_input` and `runtime_resources`, and the dependency gate rejects a
-direct `rays` → `sdl3*` edge. One `Runtime.t` is either a window or an
-offscreen target: the same render, replay, readback, resize, stats and
-presentation-facts calls serve both, and window-only calls return
-`Unsupported` offscreen. It owns the target's lifecycle, its single `stats`
-record (frame, presentation, draw, pass and submission counts beside cache,
-upload, GPU-timing and retained-plan counters) and the one presentation-facts
-cache, requeried from SDL whenever the drawable changes; `Rays_execution`
-is the frame coordinator above it and re-exports both records rather than
-defining its own.
+direct `rays` → `sdl3*` edge. `Runtime.t` owns the window/view lifecycle,
+logical/drawable frame facts and cached presentation facts, requeried when SDL
+announces a drawable change. It has no render pipelines, GPU target, renderer
+statistics or readback ownership. `Renderer` creates and owns the OGPU driver,
+the prepared execution core, pipelines and render statistics. It supplies the
+same draw, replay and readback paths for a window or offscreen shell, and
+synchronizes GPU targets with Runtime's presentation facts on the next step
+or replay after a resize. Hosts call Runtime's window operations through the
+borrowed shell. Renderer destroys GPU resources before that shell. Window-only calls return
+`Unsupported` offscreen. The former `scene_execution` and `rays_execution`
+libraries are merged into `renderer`; `Scene_execution` is a module in it.
+`Ogpu.Impl.backend` identifies the linked implementation for backend-tagged
+shader descriptors; it is not a runtime backend selector. An implementation
+without the required shader set returns typed `Unsupported`.
 `rdk_rays` is the separate renderer conversion leaf.
 `rays_editor` also composes `rays_pathtracer` for its shared 3D Renderer
 control. It owns bounded per-viewport tracing resources and inserts their images
 through the existing Scene presentation path. Raster and wireframe use Scene3;
 all three modes run on the native Metal backend. This adds no dependency from
 the renderer or foundational libraries back into the editor.
-`sop` depends only on `rdk`, `rays_math` (vectors, matrices,
-`Color`, `Parallel`) and `lru`; it never reaches `rays` or the GPU
-runtime, and the dependency gate keeps it so. The Rays-dependent glue (`Surface`, `Packed_pieces`) lives in `rays_editor`.
+`sop` depends on `rdk`, `rays_math` (vectors, matrices, colors), `parallel`
+and `lru`; it never reaches `rays` or the GPU
+runtime, and the dependency gate keeps it so. The Rays-dependent geometry glue
+(`Surface`, `Packed_pieces`) lives in `rdk_rays` and accepts geometry/parameter
+values, without a dependency on SOP or the editor.
 `sop_catalog` depends only on `rays_math`, `rdk` and `sop`: its node
 schemas name `Rays_math.Vec3`/`Mat4` directly, and the gate rejects any path
 from it to `rays`, the runtime or a GPU library.
@@ -199,8 +239,11 @@ and the surface configuration carries the window's `Native_layer_token`, which
 the Metal adapter adopts as its `CAMetalLayer` and releases with the surface.
 `Ogpu.Backend.gpu_timing` reports the queue's accumulated GPU time, so the
 runtime reads no Metal counter. `ogpu_metal_native` owns the translation from
-the checked high-level GPU interface to typed Metal bindings; `ogpu_metal`
-selects it as the default virtual OGPU implementation. `metal` owns the safe
+the checked high-level GPU interface to typed Metal bindings; native executables
+select `ogpu_metal` explicitly. Pure and mock test executables select
+`ogpu_mock`. The virtual library has no default implementation, so configuring
+an explicit mock target does not require Metal. Metal libraries, native tests
+and the native executable are enabled only on macOS. `metal` owns the safe
 Metal resource and command API. Rays owns pure scene
 values and records rendering through the narrow GPU boundary; it never exposes
 native handles in its public API.
@@ -208,8 +251,8 @@ All raw Metal binding declarations come from `lib/metal/gen/registry.ml`;
 typed SDK calls are generated, while custom marshalling/ownership primitives
 are explicitly registered as `Native` entries. This does not change the OGPU
 boundary or expose the private raw ABI (see `specification/metal.md`).
-The dependency-free `param` library owns typed parameter schemas
-(`Sop.Parameter` and `Editor_core.Param` are aliases of it), so
+The dependency-free `param` library owns typed parameter schemas under the
+single `Param` name, including canonical float text and vector grouping, so
 `Pxui_shell.Inspector` renders SOP nodes and plain sketch records alike
 without the geometry stack. The `editor_core` library owns bounded,
 labelled undo history with explicit edit merge rules, named commands, key
@@ -218,22 +261,25 @@ s-expressions printed by `Flow.Lisp`). Sketch hosts use
 `Editor_core.History`, `Editor_core.Router`, and `Editor_core.Store`;
 the router filters fly-mode keyboard events before leader and chord routing,
 while passing `/` through to arm the leader after fly exits (`/` and Space both exit; only `/` is passed on, so Space does not also play).
-`flow` supplies the expression/value model, diagnostics and the workspace language
+`diagnostic` is the dependency-free shared error value and formatter; `flow` supplies the expression/value model and workspace language
 (reader, checker, evaluator) over `param`. `ppx_rays` depends on `flow` for
 declaration checks only.
-`flow_sop` depends on `flow`, `param` and `sop` for the SOP overlay, value
-lane, lowering, edits, projection and probes. The editor runs
+`flow_sop` depends directly on `flow`, `flow_ir`, `lru`, `param`, `sop`, `diagnostic`, `rays_math`, `parallel` and `unix` for the SOP overlay, value lane, lowering, edits, projection and probes. The editor runs
 the value lane on its initial domain before cook submissions and retains
 applied values for the graph and inspector. The gate forbids
-`flow` from reaching anything but `param` and `frame_input`, and `flow_sop` from reaching UI,
+`flow` from reaching anything but `diagnostic`, `param`, `input` and `rays_math`, and `flow_sop` from reaching UI,
 the SOP catalog, editor or GPU libraries.
 `editor_document` owns the UI-free saved overlay, while `pxui_graph` and
-`pxui_shell` are presentation adapters over it. `rays_editor` applies their
-typed requests and schedules cooks; none of these edges points back into
+`pxui_shell` are presentation adapters over it. The PXUI engine depends directly
+on `rays` and `rays_math` for UI values and shared hashing; `pxui_shell`
+depends on `rays`, `rays_math`, `editor_core` and `pxui`. `editor_core`,
+`editor_document`, `pxui_graph` and `rays_editor` name math values from
+`rays_math` directly. `rays_editor` applies their typed requests and schedules
+cooks; none of these edges points back into
 `flow` or `flow_sop`.
 `pxui_graph` exports its graph commands as `Editor_core.Command.t` entries without handling key
-events. `editor_core` depends on `rays` for frame and event values, never on UI
-or geometry libraries. `pxui_shell` owns editor chrome over the shared PXUI
+events. `editor_core` depends on `rays` for frame and event values and on
+`rays_math` for math values, never on UI or geometry libraries. `pxui_shell` owns editor chrome over the shared PXUI
 handle; `Layout` computes pane geometry and `Chrome` handles standard splitters,
 headers, and focus outline. Layout geometry is pure and has no mutable cache
 inside the PXUI frame. Its which-key panel reads generic editor commands, while its
@@ -275,7 +321,7 @@ encoders share, and `Types.origin`/`extent` describe blit regions.
 The native queue can poll completion through an epoch without blocking using
 Metal command-buffer status; a terminal poll uses the same ordered cleanup
 and epoch accounting as a blocking wait.
-The portable `Ogpu.Command_buffer.status` polls a queue receipt and returns
+The portable `Ogpu.Backend.status` polls a queue receipt and returns
 `Pending` or `Completed`; terminal GPU errors remain typed errors. Its
 `completed_epoch` query is scoped to that queue. The Metal driver passes the
 native poll through the presentation cleanup path;
@@ -296,7 +342,7 @@ are binding kinds). `begin_commands` records one command buffer through
 compute, acceleration, blit, and render encoders (`set_pipeline`, `set_buffer`,
 `set_bytes`, `set_texture`, `set_accel`, `set_table`, `dispatch_threads`,
 `build_accel`, `write_compacted_size`, `compact_accel`, `buffer_to_texture`)
-and commits without blocking, so `Command_buffer.status` and `gpu_duration`
+and commits without blocking, so `Backend.status` and `gpu_duration`
 observe it through the queue's epochs. Buffers take a `Types.memory` class;
 device-local buffers reject host access with `Unsupported`. The Metal adapter
 retains every referenced resource until the native command buffer completes;
@@ -354,7 +400,7 @@ accepts only an unshifted perspective view. The M1 fixed-image qualification
 also covers this API migration.
 Path-tracer materials and environment light use
 `Rays_pathtracer.Linear_color.t`, a floating-point RGB record. It preserves
-low-intensity and HDR inputs that byte-channel `Rays.Color.t` cannot express;
+low-intensity and HDR inputs that byte-channel `Rays_math.Color.t` cannot express;
 the GPU upload keeps the same float channel order and the fixed M1 image digest.
 `Ogpu.Caps` now owns the portable feature matrix and typed `Unsupported`
 check. Metal probes populate that profile in `ogpu_metal_native.Device`, which also
@@ -375,20 +421,37 @@ aliases them without changing type identity. Nothing outside `lib/metal` and
 `lib/ogpu_metal` references `Metal` or `Ogpu_metal_native`; the dependency
 gate lists no Metal exception.
 
-The gate (`test/dependency_gate.ml`) holds three kinds of rule. "May never
+The gate (`test/dependency_gate.ml`) reads the library graph and terminal
+stanzas from Dune files under `lib`, `ppx`, `tools`, `test` and `bin` when
+present. Every executable or test that reaches virtual OGPU must select exactly
+one implementation directly; missing and ambiguous selections fail, including
+through private helper libraries and public library aliases. The gate also
+rejects a default implementation on virtual OGPU.
+The same gate rejects Dune `copy_files` of library ML sources. Existing shared
+IR fixture modules live in the test-only `flow_ir_test_support` library;
+product libraries cannot reach it, including transitively. This repackages
+existing test data and builders without adding a product abstraction.
+"May never
 reach" rules run over the transitive closure; `rays_pathtracer` (no Metal
 backend, mock, geometry graph, catalog, UI or editor library), `rdk_rays`
 (the renderer leaf: `rdk_core`, `rdk_attrib`, `rdk_mesh` and `rays`, never the
 Boolean stack, `sop` or anything above) and `scene_execution_fixtures`
-(only `scene_execution` and `ogpu`) have theirs. "Depends only on" whitelists
+(only `renderer` and `ogpu`) have theirs. "Depends only on" whitelists
 check every direct dependency, external ones included: `param`,
-`native_layer_token`, `frame_input` and `lru` list none, `flow` only `param` and `frame_input`, `ogpu_core`
+`native_layer_token`, `input`, `diagnostic` and `lru` list none, `flow` only `diagnostic`, `param`, `input` and `rays_math`, `ogpu_core`
 only `native_layer_token`, `ogpu` and `ogpu_mock` only `ogpu_core`, `metal`
 only `threads` and `native_layer_token`, `ogpu_metal_native` only `ogpu_core`,
 `metal` and `lru`, `ogpu_metal` only `ogpu_metal_native` and `metal`,
-`pxui_shell` only `rays`, `editor_core` and `pxui`, `sop_catalog` only
-`rays_math`, `rdk` and `sop`. The Metal token scan covers `lib`,
-`examples`, `sketches`, `tools` and `test`; outside the backend it admits
+`pxui_shell` only `rays`, `rays_math`, `editor_core` and `pxui`, `sop_catalog` only
+`rays_math`, `rdk` and `sop`. Runtime lists only `sdl3` and `ogpu`; Renderer
+lists only `ogpu`, `scene_command`, `runtime`, `lru`, `rays_math` and
+`runtime_resources`. The path tracer lists only `rays`, `ogpu`, `renderer`,
+`runtime_resources`, `rays_math` and `unix`; it cannot reach `rdk_core` through
+any dependency. Negative gate fixtures also reject direct `rdk` and
+`rdk_rays` edges. Callers triangulate and prepare normals through `rdk_rays`
+when their source mesh changes; the tracer consumes `Rays.Mesh.t` planes.
+The Metal token scan covers the same source roots;
+outside the backend it admits
 only the binding tooling (`tools/codemod/metal_registry.ml`), the
 Metal conformance driver (`test/ogpu_conformance/test_metal.ml`) and the gate
 itself. `lib/metal` takes its source preprocessor from
@@ -396,18 +459,21 @@ itself. `lib/metal` takes its source preprocessor from
 `tools/`; the gate rejects a `tools/` path in `lib/metal/dune`. Each rule has
 an injected violation in the gate's own run.
 
-Texture pixel formats (World plan P6): `Types.texture_descriptor.format` is
-`Rgba8_unorm`, `Rgba16_float`, or `Rgba32_float` (4, 8, 16 bytes per texel,
-`Types.texel_bytes`). Host bytes are little-endian; half floats are IEEE
-binary16 (`Types.half_of_float`/`float_of_half`, round to nearest even).
-Upload and readback row pitches must cover `width * texel_bytes`; texture
-copies require equal formats. All three are sampled with linear filtering
-and mip LOD and are storage-capable on Apple7+ (the M1 reports
+Texture formats use one backend-neutral `Types.texture_format` enum. It has
+seven Metal formats: `R8_unorm`, `Rgba8_unorm`, `Bgra8_unorm`,
+`Bgra8_unorm_srgb`, `Rgba16_float`, `Rgba32_float`, and `Depth32_float`.
+`Types.texel_bytes` gives 1, 4, 8, or 16 bytes per texel. OGPU host texture
+descriptors accept the three RGBA color formats; R8, BGRA/sRGB and depth are
+backend resources for internal uploads, drawable presentation, and depth
+attachments. Host bytes are little-endian; half floats are IEEE binary16
+(`Types.half_of_float`/`float_of_half`, round to nearest even). Upload and
+readback row pitches must cover `width * texel_bytes`; texture copies require
+equal formats. The three RGBA formats are sampled with linear filtering and
+mip LOD and are storage-capable on Apple7+ (the M1 reports
 `supports32BitFloatFiltering`), so no capability gate exists. Float formats
 reject `Render_attachment` and multisampling with a typed `Unsupported`:
 pipelines target `Rgba8_unorm` only and HDR is tone-mapped in the shader.
-Presentation and MetalFX sources must be `Rgba8_unorm`. Depth and stencil
-constructors keep their own native format.
+Presentation and MetalFX sources must be `Rgba8_unorm`.
 
 `Scene_execution` sampled textures take their format from level 0's byte
 count (4, 8 or 16 bytes per texel); `world:` keys are identity keys like
@@ -424,7 +490,7 @@ owns GPU submissions and presentation facts; its step result carries no second
 event queue, clock, or input snapshot.
 SDL3 file-drop events enter `Runtime_input` as validated full paths only.
 The pump never reads file bytes; the sketch receives the same path through
-`Event.FileDropped` and decides when to perform I/O. The input queue retains
+`Input.File_dropped` in `Frame.input.events` and decides when to perform I/O. The input queue retains
 its event-count bound, with no separate file-size limit or byte payload.
 
 Scene visibility, culling, batch selection, and Scene2/Scene3 lowering remain
@@ -486,7 +552,7 @@ pool, but all results join before crossing the native boundary.
 
 `rays_pathtracer` is an ordinary sibling library on the virtual `ogpu`
 API: it leases the presenting window's OGPU device through
-`Rays_execution.acquire_gpu` (or a lazily created headless device when
+`Renderer.acquire_gpu` (or a lazily created headless device when
 no window exists), owns one queue on it, and builds its acceleration
 structures, library, pipelines, and frames through OGPU encoders. Its
 packed-mesh path builds one bottom-level structure and a top-level instance
@@ -500,7 +566,8 @@ the runtime, and nothing below it imports it. See `specification/pathtracer.md`.
 1. Runtime creates an SDL3 Metal view and obtains its `CAMetalLayer`.
 2. The layer supplies a drawable for each presented frame; resize updates the
    drawable extent before recording work.
-3. Rays lowers immutable `Scene` data into checked OGPU commands. Native
+3. Rays lowers immutable `Scene` data into Renderer, which owns the OGPU
+   execution core and pipelines. Native
    implementation code validates device identity, resource lifetime, numeric
    ranges, and command ordering before encoding Metal commands.
 4. Scene passes render into one owned RGBA8 texture, which remains the exact
@@ -594,7 +661,7 @@ texture) and its bound textures. Staging keeps it as its own
 `Ui_layer`. PXUI reaches the batch builder through `Scene.Private.Ui_batch`,
 so its library depends on `rays` without a direct `scene_command` edge.
 Like `view3d`, the Render_ir materializer skips it, and enclosing
-Scene transforms and clips do not apply. `Rays_execution.Private
+Scene transforms and clips do not apply. `Renderer.Private
 .lower_ui` turns each batch into one indexed draw of the `Ui` pipeline family:
 vertex pulling reads the instances, a 24-byte affine uniform maps logical
 screen points to clip space, and the logical scissor is scaled to physical
@@ -637,7 +704,7 @@ and Immediate presentation otherwise. The selected mode is retained across
 surface resize and is the mode reported in presentation facts. Layerless
 Canvas targets always report `vsync = false` and `presented = 0`.
 
-Drawable dimensions are physical pixels. `Frame.width`, `Frame.height`, scene
+Drawable dimensions are physical pixels. `Frame.input.size`, scene
 coordinates, input positions, and PXUI layout remain logical points; the
 backend performs the logical-to-drawable conversion exactly once at the native
 viewport boundary. Captures read the owned drawable-sized RGBA8 target;
@@ -645,10 +712,10 @@ they do not masquerade as a read of the BGRA window drawable.
 
 ## Resource rules
 
-Public camera and authored Shadow3 matrices use clip depth [-1,1]. Native
+Public camera matrices use clip depth [-1,1]. Native
 Scene3 lowering converts that depth once to [0,1] before packing ordinary and
-instance MVPs, inverting the World background projection, or uploading an
-authored shadow matrix. The fitted GPU sun-shadow matrix already uses [0,1].
+instance MVPs or inverting the World background projection.
+The fitted GPU sun-shadow matrix already uses [0,1].
 Generic shaders accept native matrices directly. This preserves default
 orthographic near/far clipping and perspective geometry close to the near plane.
 
@@ -755,6 +822,24 @@ Long-running, SDK-, driver- and machine-specific checks run under
 gate.
 # Native UI input and export
 
+`native_layer_token` stores only an opaque handle, owner/generation identity
+and its platform-supplied release operation; it links no Apple framework.
+The macOS SDL adapter supplies CoreFoundation retain/release operations.
+Invalidation releases the owned handle once and refuses future borrows.
+SDL selects its macOS or portable C hooks and link flags through Dune's
+`system` condition. Metal libraries, build actions and tests are enabled
+only on macOS, and the native `rays` executable explicitly links that backend.
+Mock conformance selects its own implementation independently.
+
+The dependency-free `input` leaf owns keys, buttons, scroll phases, ordered
+events and immutable logical frame facts. `Runtime_input.event` is an alias
+of `Input.event`; the SDL adapter is the only native translation. The native
+host and editor use the same variants, without an intermediate Rays event
+type or string-valued frame events. `Input.key_name`, `button_name` and
+`scroll_phase_name` serialize the documented Lisp/web vocabulary at that
+boundary. Runtime depends directly on `input` and `sdl3`; `input` reaches
+neither the binding nor the host, as the dependency gate checks.
+
 The native window runs SDL3 text input only while a text field has focus. PXUI
 emits a focused text region in logical points; Sketch forwards it on each
 render, which starts text input and places SDL3's IME candidate area, and
@@ -780,7 +865,7 @@ shape, and destroys them with the window. PXUI never imports SDL3.
 # Relative pointer mode
 
 `Sketch.set_relative_mouse` is the only public entry to SDL relative mouse
-mode: it runs `Rays_execution.set_relative_mouse` →
+mode: it runs `Renderer.set_relative_mouse` →
 `Runtime.set_relative_mouse`
 (`Sdl3.Window.set_relative_mouse`) and switches the shared
 `Runtime_input` source to relative accounting, so `Frame.mouse_delta`
@@ -802,7 +887,7 @@ handles to Scene. The Scene command walker applies its full affine transform and
 stack before preparing these draws; this path is separate from PXUI's self-contained batch
 coordinates. Shape instance/index/affine payloads retain per-slot storage when equal, allowing
 the backend's identity/version upload cache to reuse them. Packed GPU output carries an opaque
-identity/count/stamp. P5's private `Rays_execution` circle sink converts interleaved float32 xyz
+identity/count/stamp. P5's private `Renderer` circle sink converts interleaved float32 xyz
 positions into this same instance ABI on the GPU, then `Scene_execution` borrows the completed
 vertex buffer. CPU uploads cover only retained quad indices and the existing affine uniforms;
 the drawing path never reads positions or instances back. The full affine, clip and blend
@@ -902,12 +987,24 @@ components in ascending order with the same finite checks, without scratch
 storage or instruction dispatch. Other layouts, Product folds and scans retain
 generic packed execution.
 
-Flow IR accepts an initial-domain GPU backend through scoped, renderer-neutral
-callbacks. GPU values carry identity, count, width, generation and optional
+Flow IR accepts an explicit renderer-neutral `Gpu.config`: backend callbacks,
+precision and placement policy are immutable data, with no ambient installed
+backend. The same configuration follows startup, lowering, cooking and deferred
+attribute execution. `Flow_native.Workspace_gpu` owns each workspace's worker
+proxy, mailbox, cancellation and initial-domain pump. Its proxy remains usable
+by worker cooks between frame scopes, and closing the owner cancels pending
+requests. Pre-window cost queries decline until that owner has entered its pump
+loop, avoiding count-sized GPU calibration during static startup. Compiled
+kernel and display caches distinguish precision as well as backend/program.
+GPU values carry identity, count, width, output index, generation and optional
 completed device dispatch duration; they carry no backend handle. A
 bounded `Flow_gpu.Host` owns pipelines and runners; the drawing boundary borrows
-the current generation or returns a typed stale-output error. Production
-placement requires a measured cost and an approximable packed producer; absent
+the current generation after checking completion and kernel status, preserving
+typed execution failures; closed or superseded generations are absent.
+Sibling mark attributes use the shared `Core_draw.device_groups` policy.
+Their output views select distinct buffers of one dispatch while sharing its
+owner and generation; selection does not extend a borrowed buffer's lifetime.
+Production placement requires a measured cost and an approximable packed producer; absent
 measurements keep the CPU tier. Explicit qualification can exercise the GPU
 route, while references and exports retain the CPU path. Compile, dispatch and
 readback appear separately in execution reports. GPU group time uses the

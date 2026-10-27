@@ -63,7 +63,7 @@ open Rays
       Ui.Paint.stroke paint ~x:(sx +. 0.5) ~y:(sy +. 0.5) ~w:(sw -. 1.) ~h:(sh -. 1.)
         (Pxui.Theme.edge (Ui.theme ui)));
     fst (Ui.value_field ui ~at:(x +. 28., y) ~w:(w -. 28.) ~h:20.
-      ~left:true ~valid:(fun t -> Result.is_ok (Color.hex t)) ("hex-" ^ key) hex)
+      ~left:true ~valid:(fun t -> Result.is_ok (Rays_math.Color.hex t)) ("hex-" ^ key) hex)
 
   (* A vector: three cells in the control column, 8 between, each with its axis letter in ink-3
      drawn on [box] (the row); [cell index ~x ~w] makes the cell's own field (x, w relative to

@@ -3,18 +3,17 @@ let tests = [
   "test_metal_device_safe", Test_metal_device_safe.run;
   "test_metal_texture_safe", Test_metal_texture_safe.run;
   "test_metal_sampler_safe", Test_metal_sampler_safe.run;
-  "test_metal_function_constant_values3_safe", Test_metal_function_constant_values3_safe.run;
-  "test_metal_pipeline113_safe", Test_metal_pipeline113_safe.run;
+  "test_metal_function_constants_safe", Test_metal_function_constants_safe.run;
+  "test_metal_render_pipeline_safe", Test_metal_render_pipeline_safe.run;
   "test_metal_resource_bounds", Test_metal_resource_bounds.run;
-  "test_metal_blit_command25_safe", Test_metal_blit_command25_safe.run;
-  "test_metal_command_support121_safe", Test_metal_command_support121_safe.run;
-  "test_metal_device_library5_safe", Test_metal_device_library5_safe.run;
-  "test_metal_device_queues3_safe", Test_metal_device_queues3_safe.run;
+  "test_metal_blit_safe", Test_metal_blit_safe.run;
+  "test_metal_device_library_safe", Test_metal_device_library_safe.run;
+  "test_metal_device_queue_safe", Test_metal_device_queue_safe.run;
   "test_metal_function_tables_safe", Test_metal_function_tables_safe.run;
   "test_metal_render_encoder_safe", Test_metal_render_encoder_safe.run;
-  "test_metal_compute_encoder35_safe", Test_metal_compute_encoder35_safe.run;
-  "test_metal_command_buffer19_safe", Test_metal_command_buffer19_safe.run;
-  "test_metal_compute_pipeline11_safe", Test_metal_compute_pipeline11_safe.run;
+  "test_metal_compute_encoder_safe", Test_metal_compute_encoder_safe.run;
+  "test_metal_command_buffer_safe", Test_metal_command_buffer_safe.run;
+  "test_metal_compute_pipeline_safe", Test_metal_compute_pipeline_safe.run;
   "test_metal_render_icb_argument", Test_metal_render_icb_argument.run;
 ]
 

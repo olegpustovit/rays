@@ -1,0 +1,17 @@
+Small-map scratch; 47 instructions, median of 3 samples; seconds and allocated bytes per force
+float count=1 registers=47 domains=1 seconds=0.000003650 allocated_bytes=13825
+float count=1 registers=47 domains=8 seconds=0.000005181 allocated_bytes=14481
+float count=11 registers=47 domains=1 seconds=0.000005622 allocated_bytes=17745
+float count=11 registers=47 domains=8 seconds=0.000005312 allocated_bytes=18401
+float count=65 registers=47 domains=1 seconds=0.000014429 allocated_bytes=38913
+float count=65 registers=47 domains=8 seconds=0.000015230 allocated_bytes=39569
+float count=1024 registers=47 domains=1 seconds=0.000245581 allocated_bytes=414841
+float count=1024 registers=47 domains=8 seconds=0.000307851 allocated_bytes=415497
+int count=1 registers=47 domains=1 seconds=0.000003979 allocated_bytes=10681
+int count=1 registers=47 domains=8 seconds=0.000003378 allocated_bytes=10681
+int count=11 registers=47 domains=1 seconds=0.000006530 allocated_bytes=18601
+int count=11 registers=47 domains=8 seconds=0.000009501 allocated_bytes=18601
+int count=65 registers=47 domains=1 seconds=0.000050528 allocated_bytes=61369
+int count=65 registers=47 domains=8 seconds=0.000033860 allocated_bytes=61369
+int count=1024 registers=47 domains=1 seconds=0.000399981 allocated_bytes=820897
+int count=1024 registers=47 domains=8 seconds=0.000453248 allocated_bytes=820897

@@ -22,36 +22,15 @@ type ('f, 'r) t =
   | Residual of 'r
 
 
-exception Fail of string * string * Diagnostic.span option
-exception Diagnostic_fail of Diagnostic.t
+let raise_diagnostic (d:Diagnostic.t) = raise (Diagnostic.Error d)
 
-let raise_diagnostic (d:Diagnostic.t) =
-  if d.cause=None && d.position=None && d.hints=[] && d.trace=[] then
-    raise(Fail(d.code,d.message,d.span))
-  else raise(Diagnostic_fail d)
-
-let fail code msg = raise (Fail (code, msg, None))
+let fail code msg = raise (Diagnostic.Error (Diagnostic.error ~code msg))
 let failf code fmt = Printf.ksprintf (fail code) fmt
 
 (* ---- hash: bit-exact port of the study's [hash] (iteration.md 2.2) ---- *)
 
-let to_uint32 x =
-  if not (Float.is_finite x) then 0
-  else
-    let m = Float.rem (Float.trunc x) 4294967296. in
-    int_of_float (if m < 0. then m +. 4294967296. else m)
-
-let imul a b = a * b land 0xFFFFFFFF
-
 let hash xs =
-  let h = ref 0x9e3779b9 in
-  List.iter (fun x ->
-    let k = to_uint32 (Float.floor (x *. 1000003.)) in
-    h := imul (!h lxor k) 0x85ebca6b;
-    h := !h lxor (!h lsr 13);
-    h := imul !h 0xc2b2ae35;
-    h := !h lxor (!h lsr 16)) xs;
-  float_of_int (!h mod 1_000_000) /. 1_000_000.
+  float_of_int (Rays_math.Hash.float_sequence32 xs mod 1_000_000) /. 1_000_000.
 
 (* ---- numbers ---- *)
 
@@ -69,7 +48,7 @@ let num = function
 let truthy = function
   | Bool b -> b | Int n -> n <> 0 | Float f -> f <> 0.
   | _ -> fail "E_TYPE" "Expected a bool."
-let int_of v = to_int "int" (round (num v))
+let int_of = function Int n -> n | v -> to_int "int" (round (num v))
 
 (* JS [(+x).toFixed(4)] then [String]: up to 4 decimals, trailing zeros removed;
    an exact tie rounds away from zero, as [toFixed] does (printf would round to even). *)
@@ -290,10 +269,8 @@ module Private = struct
     let handle (original:Diagnostic.t) =
       if cancelled original then raise_diagnostic original;
       let result = try map (payload original) with
-        | Fail(code,message,span)->let mapped=Diagnostic.error ?span ~code message in
-            raise_diagnostic(if cancelled mapped then mapped else inherit_envelope original mapped)
-        | Diagnostic_fail mapped when cancelled mapped->raise_diagnostic mapped
-        | Diagnostic_fail mapped->raise_diagnostic(inherit_envelope original mapped) in
+        | Diagnostic.Error mapped when cancelled mapped->raise_diagnostic mapped
+        | Diagnostic.Error mapped->raise_diagnostic(inherit_envelope original mapped) in
       let malformed ()=raise_diagnostic {original with code="E_DIAGNOSTIC_MAP";
         message="An error mapper returns code, message and zero or one text causes."} in
       match result with
@@ -305,8 +282,7 @@ module Private = struct
            | _->malformed())
       | _->malformed() in
     try protected() with
-    | Fail(code,message,span)->handle(Diagnostic.error ?span ~code message)
-    | Diagnostic_fail diagnostic->handle diagnostic
+    | Diagnostic.Error diagnostic->handle diagnostic
 (* Validate the entire immutable mask before reporting any selected row. *)
 let error_row_index ?grain ?(check=(fun()->())) value =
   let rows=match value with Int_array rows->rows

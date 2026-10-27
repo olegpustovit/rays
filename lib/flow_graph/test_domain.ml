@@ -165,7 +165,7 @@ let () =
   let evaluated = ok (Eval.static ~record:true workspace) in
   assert (Array.length evaluated.plan.nodes = 2);
   let session = Eval.create_state () in
-  let live = {(Frame_input.at_time 0.) with dt = 0.25} in
+  let live = {(Input.at_time 0.) with dt = 0.25} in
   let probes = Probe.make ~state:session ~live evaluated in
   ignore (Probe.records probes ["g"; "elapsed"]);
   let record = List.assoc ["g"; "elapsed"] evaluated.records |> List.hd |> snd in

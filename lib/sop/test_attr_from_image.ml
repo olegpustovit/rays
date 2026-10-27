@@ -6,7 +6,7 @@ let image = ok (Image.create ~width:2 ~height:2 ~rgba)
 let image_node image = Node.Private.make ~operation:"image/test" ~version:1
   ~parameters:(string_of_int (Image.data_id image)) ~cook_mode:Node.Generator
   ~dependencies:Context.Dependencies.static ~inputs:[||]
-  (fun ~node_id:_ _ _ -> Ok Node.Private.{payload=Payload.Image image; diagnostics=[]; instances=None})
+  (fun ~node_id:_ _ _ -> Ok Node.Private.{payload=Payload.Image image; instances=None})
 let geometry ?(float3 = false) ?(name = "uv") us vs =
   let count = Array.length us in
   let values = if float3 then A.Float3 (ok (Rdk.Packed.Float3.of_owned
@@ -41,7 +41,7 @@ let run () =
       ~inputs:[|Lisp_sop.snapshot source|] (fun ~node_id:_ _ inputs ->
         assert (Array.length inputs = 1 && Result.is_ok (Payload.geometry inputs.(0)));
         incr image_cooks;
-        Ok Node.Private.{payload=Payload.Image image; diagnostics=[]; instances=None}) in
+        Ok Node.Private.{payload=Payload.Image image; instances=None}) in
   let node = Lisp_sop.node
       ~with_:["src", Lisp_sop.snapshot source; "image/pixels", image_source]
       "(let* [pixels (image/ext_pixels)] (sop/attr_from_image (sop/ext_src) :image pixels :attribute \"sample\"))" in

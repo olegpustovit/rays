@@ -1,6 +1,7 @@
+open Core_model
 open Sop
 open Editor_document
-include Core_shell
+open Core_shell
 
 (* ---- levels ---- *)
 
@@ -134,7 +135,7 @@ let expression_text text =
   match Flow.Syntax.parse (String.sub text 1 (String.length text - 1)) with
   | Ok [ expr ] -> Ok expr
   | Ok _ -> Error "Write one expression after the ="
-  | Error d -> Error ("Expression: " ^ d.Flow.Diagnostic.message)
+  | Error d -> Error ("Expression: " ^ d.Diagnostic.message)
 
 (* 1204 as "1 204" *)
 let group_digits n =
@@ -160,23 +161,23 @@ let kind_fields value graph head authored =
     (List.find_opt (fun (g : Flow.Workspace.graph) -> g.name = graph)
       (ws.checked.graphs @ ws.checked.defs)) in
   let declaration = List.find_opt (fun (node : Flow.Workspace.node_definition) ->
-    node.kind.qualified = head || List.mem head node.kind.aliases) ws.checked.nodes in
+    node.kind.qualified = head) ws.checked.nodes in
   match Lazy.force value.flow_catalog, context with
   | _ when head = "material/standard" ->
       (* a built-in of the workspace, not a catalog kind: its four keywords *)
       let number (e : S.t) = match e.node with S.Num t -> float_of_string_opt t | _ -> None in
       let field name default view =
         let current = match authored name, default with
-          | Some { S.node = S.Str t; _ }, Parameter.Text_value _ -> Parameter.Text_value t
-          | Some e, Parameter.Float_value _ -> (match number e with Some f -> Parameter.Float_value f | None -> default)
+          | Some { S.node = S.Str t; _ }, Param.Text_value _ -> Param.Text_value t
+          | Some e, Param.Float_value _ -> (match number e with Some f -> Param.Float_value f | None -> default)
           | _ -> default in
-        { Parameter.name; label = name; description = None; folder = []; impact = Parameter.Cook; primary = false;
+        { Param.name; label = name; description = None; folder = []; impact = Param.Cook; primary = false;
           unit = None; vec3 = None; kind = view; default; current } in
-      Some [ field "name" (Parameter.Text_value "") Parameter.Text_view;
-             field "color" (Parameter.Text_value "#cccccc") Parameter.Text_view;
-             field "roughness" (Parameter.Float_value 0.5)
-               (Parameter.Floating_view { soft_min = 0.; soft_max = 1.; hard_min = Some 0.; hard_max = Some 1. });
-             field "emission" (Parameter.Text_value "#000000") Parameter.Text_view ]
+      Some [ field "name" (Param.Text_value "") Param.Text_view;
+             field "color" (Param.Text_value "#cccccc") Param.Text_view;
+             field "roughness" (Param.Float_value 0.5)
+               (Param.Floating_view { soft_min = 0.; soft_max = 1.; hard_min = Some 0.; hard_max = Some 1. });
+             field "emission" (Param.Text_value "#000000") Param.Text_view ]
   | Some catalog, Some context ->
       (match (match declaration with
          | Some node when node.kind.context = context -> Ok node.kind
@@ -189,22 +190,22 @@ let kind_fields value graph head authored =
              let three = List.length p.fields = 3 && p.ty = Some Flow.Port_type.Vec3 in
              List.mapi (fun i (name, view, default) ->
                let current = match written, default with
-                 | Some { S.node = S.Vec [ a; b; c ]; _ }, Parameter.Float_value _ when three ->
-                     (match number (List.nth [ a; b; c ] i) with Some f -> Parameter.Float_value f | None -> default)
-                 | Some e, Parameter.Float_value _ when not three ->
-                     (match number e with Some f -> Parameter.Float_value f | None -> default)
-                 | Some { S.node = S.Num t; _ }, Parameter.Int_value _ ->
-                     (match int_of_string_opt t with Some n -> Parameter.Int_value n | None -> default)
-                 | Some { S.node = S.Str t; _ }, Parameter.Choice_value _ -> Parameter.Choice_value t
-                 | Some { S.node = S.Str t; _ }, Parameter.Text_value _ -> Parameter.Text_value t
-                 | Some { S.node = S.Sym ("true" | "false" as b); _ }, Parameter.Bool_value _ ->
-                     Parameter.Bool_value (b = "true")
+                 | Some { S.node = S.Vec [ a; b; c ]; _ }, Param.Float_value _ when three ->
+                     (match number (List.nth [ a; b; c ] i) with Some f -> Param.Float_value f | None -> default)
+                 | Some e, Param.Float_value _ when not three ->
+                     (match number e with Some f -> Param.Float_value f | None -> default)
+                 | Some { S.node = S.Num t; _ }, Param.Int_value _ ->
+                     (match int_of_string_opt t with Some n -> Param.Int_value n | None -> default)
+                 | Some { S.node = S.Str t; _ }, Param.Choice_value _ -> Param.Choice_value t
+                 | Some { S.node = S.Str t; _ }, Param.Text_value _ -> Param.Text_value t
+                 | Some { S.node = S.Sym ("true" | "false" as b); _ }, Param.Bool_value _ ->
+                     Param.Bool_value (b = "true")
                  | _ -> default in
-               let field = { Parameter.name; label = (if three then name else p.label); description = None; folder = p.folder;
-                 impact = Parameter.Cook; primary = false; unit = (if three then None else p.unit);
+               let field = { Param.name; label = (if three then name else p.label); description = None; folder = p.folder;
+                 impact = Param.Cook; primary = false; unit = (if three then None else p.unit);
                  vec3 = (if three then Some (p.name, i) else None); kind = view; default; current } in
                match Option.bind declaration (fun node ->
-                 List.find_opt (fun (field : Parameter.field_view) -> field.name = name) node.fields) with
+                 List.find_opt (fun (field : Param.field_view) -> field.name = name) node.fields) with
                | Some field -> {field with current}
                | None -> field)
                p.fields) k.parameters))
@@ -250,11 +251,11 @@ let sub_entries ~shown (r : Flow_graph.Projection.row) =
                   let label = r.label ^ "." ^ String.concat "." (List.map (fun k -> string_of_int (k - 1)) sub) in
                   let base = Printf.sprintf "%s%s@%s" arg_prefix r.label (String.concat "." (List.map string_of_int sub)) in
                   let field ?vec3 ?(suffix = "") kind current =
-                    { Parameter.name = base ^ suffix; label = (if vec3 = None then label else suffix);
-                      description = None; folder = []; impact = Parameter.Cook; primary = false;
+                    { Param.name = base ^ suffix; label = (if vec3 = None then label else suffix);
+                      description = None; folder = []; impact = Param.Cook; primary = false;
                       unit = None; vec3; kind; default = current; current } in
                   let range f = let m = Float.max 1. (Float.abs f *. 2.) in
-                    { Parameter.soft_min = -. m; soft_max = m; hard_min = None; hard_max = None } in
+                    { Param.soft_min = -. m; soft_max = m; hard_min = None; hard_max = None } in
                   let make fields drive =
                     [ base, r, sub, { Pxui_shell.Inspector.path = base; fields; shown;
                                       locked = false; drive; live = None } ] in
@@ -262,20 +263,20 @@ let sub_entries ~shown (r : Flow_graph.Projection.row) =
                    | S.Num t ->
                        (match int_of_string_opt t, float_of_string_opt t with
                         | Some i, _ ->
-                            make [ field (Parameter.Integer_view { Parameter.soft_min = min 0 (2 * i);
-                              soft_max = max 10 (2 * i); hard_min = None; hard_max = None }) (Parameter.Int_value i) ] None
-                        | _, Some f -> make [ field (Parameter.Floating_view (range f)) (Parameter.Float_value f) ] None
+                            make [ field (Param.Integer_view { Param.soft_min = min 0 (2 * i);
+                              soft_max = max 10 (2 * i); hard_min = None; hard_max = None }) (Param.Int_value i) ] None
+                        | _, Some f -> make [ field (Param.Floating_view (range f)) (Param.Float_value f) ] None
                         | _ -> [])
-                   | S.Str t -> make [ field Parameter.Text_view (Parameter.Text_value t) ] None
-                   | S.Sym ("true" | "false" as b) -> make [ field Parameter.Toggle_view (Parameter.Bool_value (b = "true")) ] None
+                   | S.Str t -> make [ field Param.Text_view (Param.Text_value t) ] None
+                   | S.Sym ("true" | "false" as b) -> make [ field Param.Toggle_view (Param.Bool_value (b = "true")) ] None
                    | S.Vec l when List.length l >= 2 && List.length l <= 4 && List.for_all (fun (x : S.t) -> match x.node with
                        | S.Num t -> float_of_string_opt t <> None | _ -> false) l ->
                        make (List.mapi (fun i (x : S.t) ->
                          let f = match x.node with S.Num t -> float_of_string t | _ -> 0. in
                          field ~vec3:(base, i) ~suffix:(List.nth [ ".x"; ".y"; ".z"; ".w" ] i)
-                           (Parameter.Floating_view (range f)) (Parameter.Float_value f)) l) None
-                   | S.Sym s -> make [ field Parameter.Text_view (Parameter.Text_value "") ] (Some s)
-                   | _ -> make [ field Parameter.Text_view (Parameter.Text_value "") ] (Some ("=" ^ Flow.Lisp.flat c)))) (S.children e))
+                           (Param.Floating_view (range f)) (Param.Float_value f)) l) None
+                   | S.Sym s -> make [ field Param.Text_view (Param.Text_value "") ] (Some s)
+                   | _ -> make [ field Param.Text_view (Param.Text_value "") ] (Some ("=" ^ Flow.Lisp.flat c)))) (S.children e))
         | _ -> [] in
       walk [] 0 [] e
   | _ -> []
@@ -313,7 +314,7 @@ let arg_request ~source (n : Flow_graph.Projection.node) ~arg_row = function
           else if String.ends_with ~suffix:".y" name then Some 1
           else if String.ends_with ~suffix:".z" name then Some 2 else None in
         let syntax = match edited with
-          | Editor_core.Param.Float_value f -> Some (S.make (S.Num (Flow.Lisp.float f)))
+          | Param.Float_value f -> Some (S.make (S.Num (Flow.Lisp.float f)))
           | Int_value i -> Some (S.make (S.Num (string_of_int i)))
           | Bool_value b -> Some (S.make (S.Sym (string_of_bool b)))
           | Text_value t | Choice_value t -> Some (S.make (S.Str t)) in
@@ -405,7 +406,7 @@ let workspace_inspector ?(image=fun _->None) ?(window = false) ?(on_choice = fun
                      [ Syntax_edit (Flow_graph.Flow_edit.Set_input_default { form = graph; input = input.name; value = form }) ], []
                  | Ok [] -> [], []
                  | Ok _ -> [ Declined "A default is one Lisp form" ], []
-                 | Error d -> [ Declined ("Default: " ^ d.Flow.Diagnostic.message) ], []))
+                 | Error d -> [ Declined ("Default: " ^ d.Diagnostic.message) ], []))
        | Some n ->
            let chains = Probe.chains scope in
            let chain = Option.value ~default:[] (Hashtbl.find_opt chains n.path) in
@@ -416,7 +417,7 @@ let workspace_inspector ?(image=fun _->None) ?(window = false) ?(on_choice = fun
              |Some(Probe.Image preview)->image preview.node
              |_->None in
            Option.iter(fun image->
-             let w,h=Rays.Image.get_size image in
+             let w,h=Rays.Image.Private.dimensions image in
              Pxui.Ui.inspector_readout ui ~width ~key:"image-size" ~label:"image"
                (Printf.sprintf "%d × %d" w h);
              let height=min 160.(width *. float h /. float w)in
@@ -561,7 +562,7 @@ let workspace_inspector ?(image=fun _->None) ?(window = false) ?(on_choice = fun
            (if Flow.Workspace.Paths.mem n.path checked.approx then
              Pxui.Ui.inspector_readout ui ~width ~key:"ws-precision" ~label:"precision" "approximable"
            else match List.assoc_opt n.path checked.approx_reasons with
-             | Some reasons -> List.iteri (fun i (reason : Flow.Diagnostic.t) ->
+             | Some reasons -> List.iteri (fun i (reason : Diagnostic.t) ->
                  Pxui.Ui.inspector_readout ui ~width ~key:("ws-precision-" ^ string_of_int i)
                    ~label:"precision" reason.message) reasons
              | None -> ());
@@ -610,17 +611,17 @@ let workspace_inspector ?(image=fun _->None) ?(window = false) ?(on_choice = fun
              let field_name = "@ref:" ^ r.label in
              let current_val = if target <> "" then target else choices.(0) in
              let field = {
-               Parameter.name = field_name;
+               Param.name = field_name;
                label = String.capitalize_ascii r.label;
                description = Some (if is_material then "Material graph reference" else "SOP graph reference");
                folder = [];
-               impact = Parameter.Cook;
+               impact = Param.Cook;
                primary = false;
                unit = None;
                vec3 = None;
-               kind = Parameter.Choice_view choices;
-               default = Parameter.Choice_value choices.(0);
-               current = Parameter.Choice_value current_val;
+               kind = Param.Choice_view choices;
+               default = Param.Choice_value choices.(0);
+               current = Param.Choice_value current_val;
              } in
              Some (r, { Pxui_shell.Inspector.path = field_name; fields = [ field ]; shown = true; locked = false;
                         drive = None; live = None }))
@@ -633,9 +634,9 @@ let workspace_inspector ?(image=fun _->None) ?(window = false) ?(on_choice = fun
                  Some (Array.of_list (Editor_core.Panels.labels sw.layouts), sw.active)
              | _ -> None in
            let layout_row = Option.map (fun (names, active) ->
-             let field = { Parameter.name = "@layout"; label = "Layout"; description = Some "The layout shown";
-               folder = []; impact = Parameter.View; primary = true; unit = None; vec3 = None; kind = Parameter.Choice_view names;
-               default = Parameter.Choice_value names.(0); current = Parameter.Choice_value names.(active) } in
+             let field = { Param.name = "@layout"; label = "Layout"; description = Some "The layout shown";
+               folder = []; impact = Param.View; primary = true; unit = None; vec3 = None; kind = Param.Choice_view names;
+               default = Param.Choice_value names.(0); current = Param.Choice_value names.(active) } in
              { Pxui_shell.Inspector.path = "@layout"; fields = [ field ]; shown = true; locked = false;
                drive = None; live = None }) layout_names in
            (* a split is sized by ratio or with one side fixed: the choice converts it, keeping
@@ -644,9 +645,9 @@ let workspace_inspector ?(image=fun _->None) ?(window = false) ?(on_choice = fun
            let size_row = if n.head <> "ui/split" && n.head <> "ui/split-at" then None else begin
              let given key = List.exists (fun (r : P.row) -> r.key = Flow_graph.Flow_edit.Kw key && r.expr <> None) n.rows in
              let now = if given "first_size" then 1 else if given "second_size" then 2 else 0 in
-             let field = { Parameter.name = "@size"; label = "Size"; description = Some "What the split is sized by";
-               folder = []; impact = Parameter.View; primary = true; unit = None; vec3 = None; kind = Parameter.Choice_view size_names;
-               default = Parameter.Choice_value size_names.(0); current = Parameter.Choice_value size_names.(now) } in
+             let field = { Param.name = "@size"; label = "Size"; description = Some "What the split is sized by";
+               folder = []; impact = Param.View; primary = true; unit = None; vec3 = None; kind = Param.Choice_view size_names;
+               default = Param.Choice_value size_names.(0); current = Param.Choice_value size_names.(now) } in
              Some { Pxui_shell.Inspector.path = "@size"; fields = [ field ]; shown = true; locked = false;
                     drive = None; live = None }
            end in
@@ -659,35 +660,35 @@ let workspace_inspector ?(image=fun _->None) ?(window = false) ?(on_choice = fun
                | (P.Arg | P.Rest | P.Hole), Some e when not r.head ->
                    let name = arg_prefix ^ r.label in
                    let field ?vec3 ?(suffix = "") kind current =
-                     { Parameter.name = name ^ suffix; label = (if vec3 = None then r.label else suffix);
-                       description = None; folder = []; impact = Parameter.Cook; primary = false;
+                     { Param.name = name ^ suffix; label = (if vec3 = None then r.label else suffix);
+                       description = None; folder = []; impact = Param.Cook; primary = false;
                        unit = None; vec3; kind; default = current; current } in
-                   let range lo hi = { Parameter.soft_min = lo; soft_max = hi; hard_min = None; hard_max = None } in
+                   let range lo hi = { Param.soft_min = lo; soft_max = hi; hard_min = None; hard_max = None } in
                    let float_range f = match r.control with
                      | P.Range (lo, hi) -> range lo hi
                      | _ -> let m = Float.max 1. (Float.abs f *. 2.) in range (-. m) m in
                    let row fields drive live =
                      Some (r, { Pxui_shell.Inspector.path = name; fields; shown = P.row_shown ?pin:(pin_of r) r;
                                 locked = false; drive; live }) in
-                   let wired () = row [ field Parameter.Text_view (Parameter.Text_value "") ]
+                   let wired () = row [ field Param.Text_view (Param.Text_value "") ]
                      (Some (match e with { S.node = S.Sym s; _ } -> s | e -> "=" ^ Flow.Lisp.flat e)) None in
                    (match e.node with
                     | S.Num t ->
                         (match r.ty, float_of_string_opt t with
                          | Some Flow.Ty.Int, _ when int_of_string_opt t <> None ->
                              let i = int_of_string t in
-                             row [ field (Parameter.Integer_view { Parameter.soft_min = min 0 (2 * i); soft_max = max 10 (2 * i);
-                                 hard_min = None; hard_max = None }) (Parameter.Int_value i) ] None None
-                         | _, Some f -> row [ field (Parameter.Floating_view (float_range f)) (Parameter.Float_value f) ] None None
+                             row [ field (Param.Integer_view { Param.soft_min = min 0 (2 * i); soft_max = max 10 (2 * i);
+                                 hard_min = None; hard_max = None }) (Param.Int_value i) ] None None
+                         | _, Some f -> row [ field (Param.Floating_view (float_range f)) (Param.Float_value f) ] None None
                          | _ -> wired ())
-                    | S.Str t -> row [ field Parameter.Text_view (Parameter.Text_value t) ] None None
-                    | S.Sym ("true" | "false" as b) -> row [ field Parameter.Toggle_view (Parameter.Bool_value (b = "true")) ] None None
+                    | S.Str t -> row [ field Param.Text_view (Param.Text_value t) ] None None
+                    | S.Sym ("true" | "false" as b) -> row [ field Param.Toggle_view (Param.Bool_value (b = "true")) ] None None
                     | S.Vec ([ _; _; _ ] as l) when List.for_all (fun (x : S.t) -> match x.node with
                         | S.Num t -> float_of_string_opt t <> None | _ -> false) l ->
                         row (List.mapi (fun i (x : S.t) ->
                           let f = match x.node with S.Num t -> float_of_string t | _ -> 0. in
                           field ~vec3:(name, i) ~suffix:(List.nth [ ".x"; ".y"; ".z" ] i)
-                            (Parameter.Floating_view (float_range f)) (Parameter.Float_value f)) l) None None
+                            (Param.Floating_view (float_range f)) (Param.Float_value f)) l) None None
                     | _ -> wired ())
                | _ -> None) n.rows in
            let entries = List.concat_map (fun ((r : P.row), (ir : Pxui_shell.Inspector.flow_row)) ->
@@ -712,11 +713,11 @@ let workspace_inspector ?(image=fun _->None) ?(window = false) ?(on_choice = fun
                  | _ -> None);
                (* what the drive gives now: the node's value at the probe *)
                live = (match parameter.fields with
-                 | [ { Parameter.current = Parameter.Int_value i; _ } ] -> Some (string_of_int i)
-                 | [ { current = Parameter.Float_value f; _ } ] -> Some (Editor_core.Number.show f)
-                 | [ { current = Parameter.Bool_value b; _ } ] -> Some (string_of_bool b)
+                 | [ { Param.current = Param.Int_value i; _ } ] -> Some (string_of_int i)
+                 | [ { current = Param.Float_value f; _ } ] -> Some (Editor_core.Number.show f)
+                 | [ { current = Param.Bool_value b; _ } ] -> Some (string_of_bool b)
                  | _ -> None) }) parameters in
-           let expanded = List.filter_map (fun (f : Parameter.field_view) ->
+           let expanded = List.filter_map (fun (f : Param.field_view) ->
              match f.folder with [] -> None | first :: _ -> Some first) fields |> List.sort_uniq String.compare in
            let num f =
 S.make (S.Num (Flow.Lisp.float f)) in
@@ -764,18 +765,18 @@ S.make (S.Num (Flow.Lisp.float f)) in
                          | _ -> None)
                     | None ->
                         List.find_map (fun (parameter : Flow_sop.Port.parameter) ->
-                          match List.find_index (fun (f : Parameter.field_view) -> f.name = name) parameter.fields with
+                          match List.find_index (fun (f : Param.field_view) -> f.name = name) parameter.fields with
                           | None -> None
                           | Some index ->
                               let syntax = match edited with
-                                | Editor_core.Param.Float_value f -> num f
+                                | Param.Float_value f -> num f
                                 | Int_value i -> S.make (S.Num (string_of_int i))
                                 | Bool_value b -> S.make (S.Sym (string_of_bool b))
                                 | Text_value t | Choice_value t -> S.make (S.Str t) in
                               let syntax = if List.length parameter.fields <> 3 then syntax else
-                                S.make (S.Vec (List.mapi (fun i (f : Parameter.field_view) ->
+                                S.make (S.Vec (List.mapi (fun i (f : Param.field_view) ->
                                   if i = index then syntax else match f.current with
-                                    | Editor_core.Param.Float_value x -> num x
+                                    | Param.Float_value x -> num x
                                     | Int_value x -> num (float x) | _ -> S.make (S.Num "0.0")) parameter.fields)) in
                               Some (Syntax_edit (Flow_graph.Flow_edit.Set_arg
                                 { node = n.path; key = Flow_graph.Flow_edit.Kw parameter.path; sub = []; value = syntax })))

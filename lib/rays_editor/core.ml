@@ -1,33 +1,34 @@
+open Core_model
 open Rays
 open Sop
 open Editor_document
-include Core_host
+open Core_viewport_pane
 
 (* a viewer or a canvas: the panels a sketch's picture is drawn in *)
 let is_picture : Pxui_shell.Layout.panel -> bool = function
   | View _ | Canvas _ -> true
   | _ -> false
 
-let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_focus ~camera_panel ~view_handles
+let update_frame ?gpu ?pump ~image ~host_events ~carry_changed value ~all_ui_visible ~text_focus ~camera_panel ~view_handles
     ~render_status ~error_status ~view_state (frame : Frame.t) =
   let carrying = value.carry <> None in
   let window_focus = List.fold_left (fun f -> function
-    | Event.WindowFocusLost -> -1 | Event.WindowFocusGained -> 0 | _ -> f) value.window_focus frame.events in
+    | Input.Focus_lost -> -1 | Input.Focus_gained -> 0 | _ -> f) value.window_focus frame.input.events in
   let window_focus = if window_focus >= 0 then min 2 (window_focus + 1) else -1 in
   let live_frame, sketch_blocked =
-    let pane_is_picture = match Pxui.Ui.root_at value.ui frame.mouse (List.map fst value.pane_keys) with
+    let pane_is_picture = match Pxui.Ui.root_at value.ui frame.input.pointer (List.map fst value.pane_keys) with
       | None -> true
       | Some key -> (match List.assoc_opt key value.pane_keys with
           | Some (panel, _) -> is_picture panel
           | None -> false) in
-    Gate.gate { prompt = value.prompt <> None; menu = value.menu <> None; leader = value.leader <> Leader.Idle;
+    Input.Gate.gate { prompt = value.prompt <> None; menu = value.menu <> None; leader = value.leader <> Leader.Idle;
       text_focus;
       focus_on_picture = is_picture value.focus;
       pointer_on_picture = pane_is_picture;
       window_key = window_focus >= 2;
-      pressed = List.exists (function Event.MousePressed _ -> true | _ -> false) frame.events;
+      pressed = List.exists (function Input.Pointer_pressed _ -> true | _ -> false) frame.input.events;
       previous = value.live_frame; blocked = value.sketch_blocked }
-      (Live_frame.of_frame frame) in
+      (Flow_native.Live_frame.of_frame frame) in
   let live_frame=if host_events=[]then live_frame else
     {live_frame with events=host_events @ live_frame.events} in
   let value = {value with live_frame; sketch_blocked; window_focus} in
@@ -57,18 +58,18 @@ let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_
       match command.Editor_core.Command.action with
       | Leader.List_command _ | Leader.Frame_camera -> false
       | _ -> true) keymap in
-  let held_keys = frame.keys in
+  let held_keys = frame.input.keys in
   let leader, commands, frame = Editor_core.Router.step ~previous_keys:value.held_keys
       keymap ~focus:(Leader.scope focus) ~text_focus ~frame value.leader in
   let hud = match List.rev commands with
     | command :: _ -> Some (Editor_core.Keymap.label (Option.get command.trigger)
-        ^ " · " ^ command.label, frame.time +. 1.5)
+        ^ " · " ^ command.label, frame.input.t +. 1.5)
     | [] -> (match leader with
         | Leader.Pending prefix when leader <> value.leader ->
-            Some ((if prefix = "" then "Space" else "/ " ^ prefix) ^ " · leader", frame.time +. 1.5)
+            Some ((if prefix = "" then "Space" else "/ " ^ prefix) ^ " · leader", frame.input.t +. 1.5)
         | _ -> value.hud) in
   let actions = List.map (fun (command : Leader.command) -> command.action) commands in
-  let hud = match hud with Some (_, until) when frame.time >= until -> None | _ -> hud in
+  let hud = match hud with Some (_, until) when frame.input.t >= until -> None | _ -> hud in
   let guide = List.fold_left (fun guide -> function Leader.Guide_toggle -> not guide
     | _ -> guide) value.guide actions in
   (* Command-Z in a text whose own undo stack is empty (a dragged number applies as it goes)
@@ -91,17 +92,17 @@ let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_
         let index = if delta = 0 then default else max 0 (min (List.length sizes - 1) (here + delta)) in
         Pxui.Ui.set_font_size value.ui (List.nth sizes index)
     | _ -> ()) actions;
-  let steady = if frame.dt > 0. && frame.dt = value.last_dt then value.steady + 1 else 0 in
-  let sample_fps = frame.time < value.status_fps_at
-    || frame.time -. value.status_fps_at >= 1. in
+  let steady = if frame.input.dt > 0. && frame.input.dt = value.last_dt then value.steady + 1 else 0 in
+  let sample_fps = frame.input.t < value.status_fps_at
+    || frame.input.t -. value.status_fps_at >= 1. in
   let status_fps, status_fps_at = if not sample_fps then
       value.status_fps, value.status_fps_at
     else (if frame.fps > 0. && Float.is_finite frame.fps
-      then Some (int_of_float (Float.round frame.fps)) else None), frame.time in
+      then Some (int_of_float (Float.round frame.fps)) else None), frame.input.t in
   let shortcut_frame = if text_focus then
-      { frame with Frame.events = List.filter (function
-        | Event.KeyPressed _ | Event.KeyReleased _ | Event.TextInput _
-        | Event.TextEditing _ -> false | _ -> true) frame.events }
+      { frame with input = { frame.input with events = List.filter (function
+        | Input.Key_pressed _ | Input.Key_released _ | Input.Text_input _
+        | Input.Text_editing _ -> false | _ -> true) frame.input.events } }
     else frame in
   let timeline, timeline_changes = Timeline.update
       value.timeline shortcut_frame in
@@ -166,7 +167,7 @@ let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_
     if List.mem Leader.Add_node actions && graph_shown then begin
       let gx, gy, gw, gh = match graph_leaf value (geometry value workspace frame) with
         | Some leaf -> leaf.body | None -> 0, 0, 0, 0 in
-      let mx, my = frame.mouse in
+      let mx, my = frame.input.pointer in
       let at = if mx >= float gx && my >= float gy && mx < float (gx + gw) && my < float (gy + gh)
         then int_of_float mx, int_of_float my else gx + (gw / 3), gy + (gh / 3) in
       match open_menu value at with
@@ -291,53 +292,8 @@ let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_
     let g = geometry value workspace frame in
     (* the graph panel's toolbar; a click is one command or edit *)
     let graph_host = graph_leaf vw g in
-    let tool_action = match graph_host with
-     | Some leaf when projection vw = Graph_view && has_panel vw Pxui_shell.Layout.Graph ->
-         (match Bars.graph_tools ~outline:(not (has_panel vw Pxui_shell.Layout.Outline)) ui ~header:leaf.header ~from:(tools_from leaf)
-                  (* the wrapping tools act on the selection: without one they are dimmed, never silent *)
-                  ~enabled:(fun tool -> tool = Bars.Outline || scope_name vw <> None && (tool = Bars.Add || Pxui_graph.Scope.selected vw.scope_view <> [])) with
-          | Some Add -> Some Leader.Add_node
-          | Some Repeat -> Some (Leader.Scope_command Pxui_graph.Scope.Wrap_repeat)
-          | Some Iterate -> Some (Leader.Scope_command Pxui_graph.Scope.Wrap_iterate)
-          | Some Fn -> Some (Leader.Scope_command Pxui_graph.Scope.Make_fn)
-          | Some Macro -> Some (Leader.Scope_command Pxui_graph.Scope.Make_macro)
-          | Some Defn -> Some (Leader.Scope_command Pxui_graph.Scope.Make_defn)
-          | Some Outline -> Some (Leader.Panel_split_at (leaf.path, `H, 0.7, Pxui_shell.Layout.Outline))
-          | None -> None)
-     | _ -> None in
-    let view_pick = match graph_host with
-     | Some leaf when has_panel vw Pxui_shell.Layout.Graph ->
-         let _, hy, _, hh = leaf.header in
-         let active = match projection vw with Graph_view -> 0 | List_view -> 1 | Text_view -> 2 in
-         (* 12 apart, 8 and the 20-point collapse button from the edge (a window: dock and close) *)
-         (match Option.bind (List.nth_opt (header_slots leaf) 0) (fun slot -> Option.bind slot (fun right ->
-            fst (Pxui_shell.Kit.segments ui ~key:"workspace-view" ~right
-                   ~y:(float hy +. float (hh - 20) /. 2.) [ "Graph"; "List"; "Text" ] active))) with
-          | Some i -> Some (List.nth [ Graph_view; List_view; Text_view ] i)
-          | None -> None)
-     | _ -> None in
-    (* the view's header tools; the last one clicked is the command *)
-    let view_action = match active_view vw g, value.view_tools with
-     | Some ({ header = (hx, hy, hw, hh); _ } as leaf), Some (looks, mode) when hh > 0 ->
-         let from = float hx +. tools_from leaf in
-         let modes = [ "Solid"; "Wire"; "Traced" ] in
-         let seg_w = List.fold_left (fun w label -> w +. Pxui.Ui.text_width ui label) 24. modes in
-         let look_w = Pxui_shell.Kit.button_width ui ~hint:"C" "Look through" in
-         let ty = float hy +. float (hh - 20) /. 2. in
-         let frame_w = Pxui_shell.Kit.button_width ui ~hint:"F" "Frame" in
-         if from +. seg_w +. 8. +. look_w +. 8. +. frame_w < float (hx + hw - 36) then begin
-           Bars.rule ui ~key:"workspace-view-rule" ~header:leaf.header ~from:(from -. float hx);
-           let render = match fst (Pxui_shell.Kit.segments ui ~key:"workspace-render" ~right:(from +. seg_w) ~y:ty modes mode) with
-            | Some i when i <> mode -> Some (Leader.Render_mode i)
-            | _ -> None in
-           let look = Pxui_shell.Kit.button ui ~key:"workspace-look" ~at:(from +. seg_w +. 8., ty) ~w:look_w
-                ~active:looks ~hint:"C" "Look through" in
-           (* the key's own command (view.frame-camera): the camera onto the displayed node *)
-           let framed = Pxui_shell.Kit.button ui ~key:"workspace-frame" ~at:(from +. seg_w +. 8. +. look_w +. 8., ty) ~w:frame_w
-                ~hint:"F" "Frame" in
-           if framed then Some Leader.Frame_camera else if look then Some Leader.Look_through else render
-         end else None
-     | _ -> None in
+    let tool_action, view_action, view_pick =
+      draw_graph_header ~ui ~value:vw ~geometry:g ~graph_host ~header_slots ~tools_from in
     let root order (leaf : Pxui_shell.Layout.leaf) =
       let box = Pxui_shell.Chrome.pane_root ui frame ~bounds:leaf.body
         ("workspace-pane-" ^ Leader.pane_name leaf.panel ^ Pxui_shell.Chrome.key leaf.path) in
@@ -363,273 +319,20 @@ let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_
     let graph_root = match Option.bind graph_host (fun (l : Pxui_shell.Layout.leaf) -> root_at l.path) with
       | Some (_, box) -> box | None -> none_root () in
     let active = active_view vw g in
-    (* What is painted over a view stays in its pane: the box the marks are drawn in fills a
-       clipping one ([Ui.clip] binds a box's children, not its own paint), so a bracket, a label
-       or a frame that runs past the pane's edge is cut there and never lies on its neighbour. *)
-    let view_layer ui (bx, by, bw, bh) key =
-      let pane = Pxui.Ui.box ui ~flags:Pxui.Ui.clip ~w:(Pxui.Ui.Px (float bw)) ~h:(Pxui.Ui.Px (float bh))
-          ~at:(float bx, float by) key in
-      Pxui.Ui.within ui pane (fun () -> Pxui.Ui.box ui ~w:Pxui.Ui.Grow ~h:Pxui.Ui.Grow "marks") in
-    (* the iteration the selected node shows, over the viewport's lower left corner *)
-    (match probe_caption vw, active with
-     | Some text, Some (leaf : Pxui_shell.Layout.leaf) ->
-         (* a label on the ground, like every readout over the view *)
-         Pxui.Ui.draw ui (view_layer ui leaf.body "viewport-caption") (fun paint (x, y, _, h) ->
-           let px = x +. 12. and py = y +. h -. 24. in
-           let theme = Pxui.Ui.theme ui in
-           Pxui.Ui.Paint.fill paint ~x:(px -. 4.) ~y:py ~w:(Pxui.Ui.Paint.cap_width paint text +. 8.) ~h:16. theme.panel;
-           Pxui.Ui.Paint.cap paint ~at:(px, py +. 2.) text)
-     | _ -> ());
-    (* over each view, in the kit's marks (viewport.html): the render frame and its label, the
-       traced readout at the upper left, the render camera at the upper right, the selected
-       object's brackets and name, and the scene's size and the frame rate at the lower right;
-       every label is a row high and sits on a patch of the ground *)
-    let module P = Pxui.Ui.Paint in
-    let theme = Pxui.Ui.theme ui in
-    let rh = float (Pxui.Ui.row_height ui) in
-    let cap_y y = Pxui_shell.Kit.cap_y ui y rh in
-    (* a label in the row at [y]; [pl] and [pr] points of ground beside it; its width *)
-    let label paint ~x ~y ?(pl = 0.) ?(pr = 0.) ?color text =
-      let w = P.cap_width paint text in
-      P.fill paint ~x:(x -. pl) ~y ~w:(w +. pl +. pr) ~h:rh theme.panel;
-      P.cap paint ~at:(x, cap_y y) ?color text; w in
-    (* a viewport window labels its frame at the top left: the shading and the camera ("Wire · top") *)
-    List.iter (fun ((leaf : Pxui_shell.Layout.leaf), _) -> match leaf.panel, value.view_tools with
-      | View key, Some (_, mode) when leaf.floating && (let _, _, w, h = leaf.body in w > 120 && h > 60) ->
-          let bx, by, _, _ = leaf.body in
-          let camera = Option.bind value.doc.Document.active_camera (fun id ->
-            Option.map Node.label (Edit_graph.find (scene value) ~node_id:id)) in
-          let text = String.concat " \xc2\xb7 " ([ List.nth [ "Solid"; "Wire"; "Traced" ] (max 0 (min 2 mode)) ]
-            @ Option.to_list camera) in
-          let w = Pxui_shell.Kit.cap_width ui text +. 8. in
-          let box = Pxui.Ui.box ui ~w:(Pxui.Ui.Px w) ~h:(Pxui.Ui.Px 16.)
-              ~at:(float bx +. 8., float by +. 4.) ("viewport-window-label-" ^ key) in
-          Pxui.Ui.to_front ui ~order:max_int box;
-          Pxui.Ui.draw ui box (fun paint (x, y, _, h) ->
-            Pxui.Ui.Paint.cap paint ~at:(x +. 4., Pxui_shell.Kit.cap_y ui y h) text)
-      | _ -> ()) roots;
-    List.iter (fun ((leaf : Pxui_shell.Layout.leaf), _) -> match leaf.panel with
-      | View key when (let _, _, w, h = leaf.body in w > 320 && h > 160) ->
-          let _, _, bw, _ = leaf.body in
-          let overlay = view_layer ui leaf.body ("viewport-marks-" ^ key) in
-          let gate = List.assoc_opt key value.gates in
-          let box = match value.selected_box with Some (k, rect, name) when k = key -> Some (rect, name) | _ -> None in
-          let root : Objects.Root.parameters = Option.fold ~none:value.doc.Document.root
-              ~some:(fun (r : Document.view_root) -> r.params) (List.assoc_opt key value.doc.Document.view_roots) in
-          let camera = Option.bind value.doc.Document.active_camera (fun id -> Edit_graph.find (scene value) ~node_id:id) in
-          (* the triangles the scene draws: a polygon of n corners fans into n - 2 (exact for polygons, a
-             count of corners and faces, not a walk of every face, for a frame's cost) *)
-          let tris = List.fold_left (fun n (piece : _ Cook.piece) ->
-            match piece.output.Sop.Session.payload with
-            | Payload.Image _ | Payload.Kernel _ -> n
-            | Geometry g -> n + max 0 (Rdk.Geometry.vertex_count g - (2 * Rdk.Geometry.primitive_count g))) 0 (pieces value) in
-          let objects = List.length (pieces value) in
-          let points = Option.bind (piece value) (fun (piece : _ Cook.piece) ->
-            Option.map Rdk.Geometry.point_count
-              (Result.to_option (Payload.geometry piece.output.Sop.Session.payload))) in
-          (* the traced readout: its samples are the caption's "n/cap spp" *)
-          let traced = List.assoc_opt key value.traces in
-          (* a body about as wide as the workspace sheet's follows that sheet: the narrow traced
-             block, no camera readout, no object count; a wide one follows viewport.html *)
-          let narrow = bw < 1000 in
-          Pxui.Ui.draw ui overlay (fun paint (x, y, w, h) ->
-            Option.iter (fun (gx, gy, gw, gh) ->
-              let gx = float gx and gy = float gy and gw = float gw and gh = float gh in
-              P.stroke paint ~x:(gx +. 0.5) ~y:(gy +. 0.5) ~w:(gw -. 1.) ~h:(gh -. 1.) (Pxui.Theme.edge theme);
-              (* the corner marks lie on the frame's own edge: 16 points, 1 wide, in ink *)
-              P.brackets paint ~x:gx ~y:gy ~w:gw ~h:gh ~offset:0. ~length:16. ~width:1. theme.foreground;
-              (* the label stands over the frame's left end with no ground of its own; the traced
-                 readout, drawn after it, covers its head where the sheet's does *)
-              P.cap paint ~at:(gx, cap_y (if gy -. y >= 20. then gy -. 20. else gy +. 4.))
-                (Printf.sprintf "Render frame \xc2\xb7 %d \xc3\x97 %d" root.width root.height)) gate;
-            (* a traced viewport's readout: the path tracer and its backend as labels, the samples as
-               a 20-point count over a 4-point bar, the film as a label; 4 apart, on the ground *)
-            Option.iter (fun (t : trace) ->
-              if w > 200. && h > 120. then begin
-                (* the readout's ground stands 8 clear of its text and bar on both sides *)
-                let fx = x +. (if narrow then 8. else 12.) and oy = y +. (if narrow then 8. else 12.) in
-                let ox = fx +. 8. in
-                let title = Pxui.Ui.font_size ui * Pxui.Theme.title_size / Pxui.Theme.font_size in
-                let bar_w = if narrow then 112. else Float.min 224. (w -. 24.) in
-                P.fill paint ~x:fx ~y:oy ~w:(bar_w +. 16.) ~h:((3. *. rh) +. 24.) theme.panel;
-                let tw = label paint ~x:ox ~y:oy ~color:theme.foreground "Path traced" in
-                if not narrow then
-                  ignore (P.cap paint ~at:(ox +. tw +. 6., cap_y oy) ~color:(Pxui.Theme.ink_2 theme) "Metal RT");
-                let ty = Pxui.Ui.text_top ui ~size:title in
-                let row2 = oy +. rh +. 4. in
-                let count = string_of_int (min t.samples t.cap) in
-                P.text paint ~size:title ~at:(ox, ty row2 rh -. 1.) ~color:theme.foreground count;
-                P.text paint ~size:title
-                  ~at:(ox +. P.text_width paint ~size:title (count ^ " "), ty row2 rh -. 1.)
-                  ~color:(Pxui.Theme.ink_2 theme)
-                  (if narrow then Printf.sprintf "/ %d" t.cap else Printf.sprintf "/ %d spp" t.cap);
-                (* the bar: a line-3 box 4 high, filled inside it with the share of the samples *)
-                let by = row2 +. rh +. 4. in
-                P.stroke paint ~x:(ox +. 0.5) ~y:(by +. 0.5) ~w:(bar_w -. 1.) ~h:3. (Pxui.Theme.border theme);
-                P.fill paint ~x:(ox +. 1.) ~y:(by +. 1.) ~w:((bar_w -. 2.) *. Float.min 1. (float t.samples /. float (max 1 t.cap)))
-                  ~h:2. theme.foreground;
-                (* under it: the seconds the accumulation took and, on a wide body, the bounces and
-                   the film in pixels *)
-                let fw, fh = t.film in
-                ignore (P.cap paint ~at:(ox, cap_y (by +. 8.))
-                  (if narrow then Printf.sprintf "spp \xc2\xb7 %.1f s" t.seconds
-                   else Printf.sprintf "%.1f s \xc2\xb7 %d bounce%s \xc2\xb7 %d \xc3\x97 %d" t.seconds t.bounces
-                     (if t.bounces = 1 then "" else "s") fw fh))
-              end) traced;
-            Option.iter (fun ((sx, sy, sw, sh), name) ->
-              let sx = float sx and sy = float sy and sw = float sw and sh = float sh in
-              if sw > 8. && sh > 8. then begin
-                P.brackets paint ~x:sx ~y:sy ~w:sw ~h:sh theme.accent;
-                (* the name in the accent, in the row that ends where the brackets begin, then how
-                   many points the object cooked to, on the ground *)
-                let ny = sy -. 4. -. rh in
-                P.cap paint ~at:(sx -. 4., cap_y ny) ~color:theme.accent name;
-                Option.iter (fun n ->
-                  ignore (label paint ~x:(sx -. 4. +. P.cap_width paint name +. 8.) ~y:ny ~pl:4. ~pr:4.
-                    ~color:(Pxui.Theme.ink_2 theme) (group_digits n ^ " pts"))) points
-              end) box;
-            (* the render camera: its name, its lens and focus as a two-column grid whose labels
-               and values both end at their column's right edge, 10 apart *)
-            if not narrow then Option.iter (fun node ->
-              let field name = List.find_map (fun (f : Parameter.field_view) ->
-                match f.name = name, f.current with
-                | true, Parameter.Float_value v -> Some v | _ -> None) (Node.parameter_fields node) in
-              let rows = [ "Camera", Node.label node ]
-                @ (match field "fov" with
-                   | Some fov when fov > 0. && fov < 180. ->
-                       (* the focal length that gives this vertical angle on a 24 mm gate *)
-                       let mm = 12. /. Float.tan (fov *. Float.pi /. 360.) in
-                       [ "Lens", Printf.sprintf "%.0f mm" mm
-                         ^ (match field "aperture" with Some a when a > 0. -> Printf.sprintf " \xc2\xb7 r %g" a | _ -> "") ]
-                   | _ -> [])
-                @ (match field "focus_distance" with Some d when d > 0. -> [ "Focus", Printf.sprintf "%.2f" d ] | _ -> []) in
-              let value_w = List.fold_left (fun m (_, v) -> Float.max m (P.text_width paint v)) 0. rows in
-              let label_w = List.fold_left (fun m (l, _) -> Float.max m (P.cap_width paint l)) 0. rows in
-              let right = x +. w -. 12. in
-              P.fill paint ~x:(right -. value_w -. 10. -. label_w -. 8.) ~y:(y +. 12.)
-                ~w:(value_w +. 10. +. label_w +. 8.) ~h:((rh *. float (List.length rows)) +. 4.) theme.panel;
-              List.iteri (fun i (name, text) ->
-                let ry = y +. 12. +. (rh *. float i) in
-                P.cap paint ~at:(right -. value_w -. 10. -. P.cap_width paint name, cap_y ry) name;
-                P.text paint ~at:(right -. P.text_width paint text, Pxui_shell.Kit.text_y ui ry rh)
-                  ~color:theme.foreground text) rows) camera;
-            (* the scene's size and the frame rate: labels 12 apart, the rate in ink, in the row
-               that ends 12 (6 on a narrow body) above the pane's foot *)
-            let edge = if narrow then 8. else 12. in
-            let row_y = y +. h -. (if narrow then 6. else 12.) -. rh in
-            let tris_text = Printf.sprintf "%s tris" (group_digits tris) in
-            let items =
-              (tris_text, None)
-              :: (if narrow then [] else
-                  [ Printf.sprintf "%d object%s" objects (if objects = 1 then "" else "s"), None ])
-              @ (match value.status_fps with Some fps -> [ Printf.sprintf "%d fps" fps, Some theme.foreground ] | None -> []) in
-            let total = List.fold_left (fun sum (text, _) -> sum +. P.cap_width paint text) (12. *. float (List.length items - 1)) items in
-            (* the wide sheet's readout stands on a patch of the ground; the narrow one on the view *)
-            if not narrow then P.fill paint ~x:(x +. w -. edge -. total -. 8.) ~y:row_y ~w:(total +. 8.) ~h:rh theme.panel;
-            ignore (List.fold_left (fun at (text, color) ->
-              P.cap paint ~at:(at, cap_y row_y) ?color text;
-              at +. P.cap_width paint text +. 12.) (x +. w -. edge -. total) items))
-      | _ -> ()) roots;
-    let view_root = match active with
-      | Some leaf -> snd (List.find (fun ((l : Pxui_shell.Layout.leaf), _) -> l == leaf) roots)
-      | None -> none_root () in
-    let graph_body = match graph_host with Some leaf -> leaf.body | None -> 0, 0, 0, 0 in
-    let gx, gy, gw, gh = graph_body in
-    let scope_view, scope_frame_changes =
-      (* a pane that is not drawn gives up what it held: a field, the hints, a drag, the pointer *)
-      if not scope_active then Pxui_graph.Scope.suspend scope_view, []
-      else Pxui.Ui.within ui graph_root (fun () ->
-        scope_view
-        |> Pxui_graph.Scope.with_guide guide
-        |> Pxui_graph.Scope.with_failed (failed_nodes value)
-        |> Pxui_graph.Scope.with_theme (let theme = Pxui.Ui.theme ui in
-             match graph_host with Some { floating = true; _ } -> sheet_theme theme | _ -> theme)
-        |> Pxui_graph.Scope.with_bounds ~x:gx ~y:gy ~width:(max 1 gw) ~height:(max 1 gh)
-        |> Pxui_graph.Scope.with_carry ~lit:carry_lit ~hot:carry_hot
-        |> fun view -> Pxui_graph.Scope.update view ui shortcut_frame) in
-    (* a right-click on the pane's empty canvas opens the add menu there *)
-    let menu = match menu, List.find_map (function
-        | Pxui_graph.Scope.Menu_requested (x, y) -> Some (int_of_float x, int_of_float y)
-        | _ -> None) scope_frame_changes with
-      | None, Some at -> open_menu ~scope_view value at
-      | menu, _ -> menu in
-    let menu, menu_pick = match menu with
-      | Some menu -> Pxui.Ui.within ui graph_root (fun () ->
-          Pxui_graph.Node_menu.update menu ui ~bounds:(0, 0, frame.width, (let _, sy, _, _ = (geometry value workspace frame).status_at in sy)))
-      | None -> None, None in
-    (* every list shows the level and selection of its graph panel, with its own folds, filter and
-       scroll; the one in use takes the keys.  A list of another pane only shows: a press makes its
-       pane the one in use before the frame builds *)
-    let tree, list_intents, locals = List.fold_left (fun (tree, intents, locals) ((key, path, _, _) as host) ->
-      match root_at path with
-      | None -> tree, intents, locals
-      | Some ((leaf : Pxui_shell.Layout.leaf), root) ->
-          let pane = pane_of host in
-          let mine = in_use pane in
-          let rows, columns = if mine then rows, columns else List.assoc key host_rows in
-          let selected = if mine then selected () else Selection.selected_nodes pane.selection in
-          let draw state = on_sheet ui leaf.floating (fun () -> Pxui.Ui.within ui root (fun () ->
-            Pxui_shell.Tree.update state ui shortcut_frame ~bounds:leaf.body
-              ~title:(level_name pane) ~columns rows ~selected)) in
-          if Some key = value.list_at then
-            let tree, emitted = draw tree in tree, (if mine then intents @ emitted else intents), locals
-          else
-            let state, emitted = draw (local_of value key).rows in
-            tree, (if mine then intents @ emitted else intents), put_local key (fun l -> { l with rows = state }) locals)
-      (tree, list_intents, value.locals) (hosted `List) in
-    let names = lazy (completion_names value) in
-    let view_text path state shown = match root_at path with
-      | Some ((leaf : Pxui_shell.Layout.leaf), root) ->
-          Pxui.Ui.within ui root (fun () ->
-            Text_pane.view ui ~bounds:leaf.body
-              (* a graph panel in text view keeps its Graph / List / Text at the header's end *)
-              ~tabs_right:(Option.join (List.nth_opt (List.rev (header_slots leaf)) 0))
-              ~vocab:(Lazy.force value.lisp_vocab) ~names:(Lazy.force names) ~time:frame.time state shown)
-      | None -> [] in
-    let text_intents = match text_shown, text_host with
-      | Some shown, Some (_, path, _, _) -> view_text path text shown
-      | _ -> [] in
-    (* every other text pane, with its own tab and drafts *)
-    let locals, other_texts = List.fold_left (fun (locals, texts) (key, path, state, shown) ->
-      put_local key (fun l -> { l with code = state }) locals, (key, shown, view_text path state shown) :: texts)
-      (locals, []) other_texts in
-    let outline, outline_intents, locals = List.fold_left (fun (outline, intents, locals) (key, path, _, _) ->
-      match root_at path with
-      | None -> outline, intents, locals
-      | Some ((leaf : Pxui_shell.Layout.leaf), root) ->
-          let draw state = on_sheet ui leaf.floating (fun () -> Pxui.Ui.within ui root (fun () ->
-            Navigator.view state ui ~bounds:leaf.body (navigator_params value))) in
-          if Some key = value.outline_at then let outline, emitted = draw outline in outline, intents @ emitted, locals
-          else
-            let state, emitted = draw (local_of value key).nav in
-            outline, intents @ emitted, put_local key (fun l -> { l with nav = state }) locals)
-      (value.outline, [], locals) (hosted `Outline) in
-    let locals = List.fold_left (fun locals ((leaf : Pxui_shell.Layout.leaf), root) ->
-          let key = panel_key value.doc leaf.path in
-          let pane = shown_as value (key, leaf.path, leaf.panel) in
-          let owner = (local_of {value with locals} key).sheet_owner in
-          let changed = Pxui.Ui.within ui root (fun () ->
-            Spreadsheet.view ui ~bounds:leaf.body ~owner (spreadsheet_source pane)) in
-          match changed with None -> locals
-          | Some sheet_owner -> put_local key (fun local -> {local with sheet_owner}) locals)
-      locals (of_kind Pxui_shell.Layout.Spreadsheet) in
-    (* every other graph panel draws its own canvas; a press gives a panel the focus before the
-       frame builds, so the pane a gesture starts in is the one in use *)
-    let graph_panes = List.filter_map (fun (key, path, (pane : _ t)) ->
-      match List.find_opt (fun ((l : Pxui_shell.Layout.leaf), _) -> l.path = path) roots with
-      | Some (leaf, hosted) when (let _, _, _, h = leaf.body in h > 0) ->
-          let x, y, width, height = leaf.body in
-          let view = if stored_projection pane = Graph_view && graph_name pane <> None then
-              Pxui.Ui.within ui hosted (fun () ->
-                pane.scope_view
-                |> Pxui_graph.Scope.with_guide false
-                |> Pxui_graph.Scope.with_theme (let theme = Pxui.Ui.theme ui in
-                     if leaf.floating then sheet_theme theme else theme)
-                |> Pxui_graph.Scope.with_bounds ~x ~y ~width:(max 1 width) ~height:(max 1 height)
-                |> fun view -> fst (Pxui_graph.Scope.update view ui shortcut_frame))
-            else pane.scope_view in  (* its list or text view is drawn with the lists and text panes *)
-          Some (key, { (stash pane) with view })
-      | _ -> Some (key, stash pane)) other_panes in
+    let view_root = draw_viewport_pane ~ui ~value ~caption:(probe_caption vw) ~roots ~active ~none_root in
+    let graph_body, scope_view, scope_frame_changes, menu, menu_pick = draw_graph_pane
+      ~ui ~frame ~value ~shortcut_frame ~scope_view ~scope_active ~guide ~carry_lit ~carry_hot
+      ~graph_root ~graph_host ~workspace ~menu ~open_menu in
+    (* Each pane builder returns only its frame intents and updated pane-local state. *)
+    let tree, list_intents, locals = draw_list_panes ~ui ~shortcut_frame ~value
+      ~hosted:(hosted `List) ~root_at ~pane_of ~in_use ~title_of:level_name ~rows ~columns ~host_rows
+      ~selected ~tree ~intents:list_intents ~locals:value.locals in
+    let text, text_intents, locals, other_texts = draw_text_panes ~ui ~frame ~value
+      ~root_at ~header_slots ~text_host ~text_shown ~text ~other_texts ~locals in
+    let outline, outline_intents, locals = draw_outline_panes ~ui ~value
+      ~hosted:(hosted `Outline) ~root_at ~params_of:navigator_params ~outline:value.outline ~locals in
+    let locals = draw_spreadsheet_panes ~ui ~value ~panes:(of_kind Pxui_shell.Layout.Spreadsheet) ~locals in
+    let graph_panes = draw_other_graph_panes ~ui ~shortcut_frame ~value ~other_panes ~roots ~stash in
     let scope_changes = scope_command_changes @ scope_frame_changes in
     let changes = command_changes
       @ List.concat_map (function
@@ -670,8 +373,8 @@ let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_
     (* Selection is view state; inspection intents retain the selected stable
        id. Topology and parameter application wait until Ui.frame finishes. *)
     let selection = List.fold_left (fun selection -> function
-      | Pxui_shell.Tree.Select [] -> Selection.clear selection
-      | Select ids -> Selection.select_nodes ids selection
+      | Pxui_shell.Tree.Select [] -> Selection.clear
+      | Select ids -> Selection.select_nodes ids
       | _ -> selection) selection list_intents in
     let inspector_visible = has_panel vw Pxui_shell.Layout.Inspector in
     let selected_ids = Selection.selected_nodes selection in
@@ -692,199 +395,12 @@ let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_
             Option.map (fun splitter -> Pxui_shell.Layout.resized splitter how)
               (List.find_opt (fun (s : Pxui_shell.Layout.splitter) -> s.node = Some path) g.splitters))
       | _ -> None in
-    (* every inspector shows the same selection in its own root (its scroll and open sections are
-       its own); the edits of all are this frame's, the host's panel is the focused one's *)
-    let inspect (value, scope_view, selection, scope_active) inspector_root bounds =
-      let document = (network value).graph.geometry in
-      let selected_ids = Selection.selected_nodes selection in
-      let lowered_level = match value.level with
-        | Document.Inside id -> kind value id = Some "geometry" | Scene -> false in
-      (* a row of a geometry object's list selects its node in the pane: the inspector follows it *)
-      let scope_selected = if (match value.scope_key with Some k -> Some k.graph = graph_name value | None -> false)
-          || (lowered_level && value.scope_key <> None)
-        then inspector_paths (Pxui_graph.Scope.selected scope_view) else [] in
-      let open_network = network value in
-      let window = List.exists (fun (l : Pxui_shell.Layout.leaf) -> l.floating && l.panel = Inspector && l.body = bounds) g.leaves in
-      (* a window keeps its 1-point border on the left, right and bottom: its panel lies inside *)
-      let bounds = if window then (let x, y, w, h = bounds in x, y, max 1 w, max 1 (h - 1)) else bounds in
-      let inspector_panel ui bounds build = inspector_panel ~window ui bounds build in
-      on_sheet ui window
-      @@ fun () -> Pxui.Ui.within ui inspector_root (fun () -> match selected_ids with
-      | _ when not inspector_visible ->
-          None, [], [], value.live_cook, [], []
-      | _ when scope_selected <> [] ->
-          (match scope_selected with
-            | [ path ] ->
-                (* the inspector reports each choice control it builds: the material one is a place
-                   a carried payload can be put, gathered here and returned with the rows' requests *)
-                let drops = ref [] in
-                let requests, moves = inspector_panel ui bounds (fun () ->
-                  workspace_inspector ~image ~window value ui ~width:(float (let _, _, w, _ = bounds in max 1 w)) path ~resized
-                    ~follows:(fun path -> follow_target ~path value)
-                    ~on_choice:(fun name box -> if name = "@ref:material" then
-                      Option.iter (fun d -> drops := (Carry.Node path, (match d with
-                        | Pxui.Ui.Dropped _ -> true | Hover _ -> false)) :: !drops)
-                        (Pxui.Ui.drop_target ui box))) in
-                None, requests, [], value.live_cook, moves, List.rev !drops
-            | paths -> inspector_panel ui bounds (fun () ->
-                ignore (Pxui.Ui.inspector_header ui ~key:"multi-header"
-                  ~title:(Printf.sprintf "%d nodes" (List.length paths)) ~detail:"Selected" ()));
-                None, [], [], value.live_cook, [], [])
-      | [] ->
-          (* Sketch settings above the environment's camera/render panel. *)
-          let changes, live, panel = inspector_panel ui bounds (fun () ->
-            let node_count = List.length (Edit_graph.inspect document) in
-            let display = Option.fold ~none:"none" ~some:(fun id ->
-              Option.fold ~none:("#" ^ string_of_int id) ~some:Node.label
-                (Edit_graph.find document ~node_id:id)) open_network.displayed in
-            let title, detail = match value.scope_key with
-              | Some k when scope_active && Some k.graph = graph_name value ->
-                  let rec count (s : Flow_graph.Projection.scope) = List.fold_left
-                    (fun n (x : Flow_graph.Projection.node) ->
-                      n + 1 + Option.fold ~none:0 ~some:(fun (z : Flow_graph.Projection.zone) -> count z.scope) x.zone)
-                    0 s.nodes in
-                  let zones = List.length (Flow_graph.Projection.zones k.scope) in
-                  k.graph, Printf.sprintf "%d node%s · %d loop%s · select a node to edit it" (count k.scope)
-                    (if count k.scope = 1 then "" else "s") zones (if zones = 1 then "" else "s")
-              | _ -> level_name value, Printf.sprintf "%d node%s · display %s" node_count (if node_count = 1 then "" else "s") display in
-            ignore (Pxui.Ui.inspector_header ui ~key:"network-header" ~title ~detail ());
-            Pxui.Ui.inspector_body ui (fun () ->
-            (* the row sits under a section named for the graph, as every row of the sheet does *)
-            let live = Option.value ~default:value.live_cook (Pxui.Ui.inspector_section ui
-                ~key:"live-cook-section" ~expanded:true title (fun () ->
-                  Pxui.Ui.inspector_toggle ui ~key:"live-cook" ~label:"Live update" value.live_cook)) in
-            let changes = match Settings.fields unchanged |> List.filter (fun (field : Parameter.field_view) ->
-                field.name <> "renderer") with
-              | [] -> []
-              | fields ->
-                  Pxui.Ui.scope ui "sketch-settings" (fun () ->
-                    let _, _, width, _ = bounds in
-                    Option.value ~default:[] (Pxui.Ui.inspector_section ui
-                      ~key:"sketch-settings-section" ~expanded:true "Settings"
-                      (fun () -> Pxui_shell.Inspector.fields ui
-                        ~width:(float width) fields))) in
-            changes, live, camera_panel ())) in
-          Some panel, [], changes, live, [], []
-      | _ :: _ :: _ ->
-          let () = inspector_panel ui bounds (fun () ->
-            ignore (Pxui.Ui.inspector_header ui ~key:"multi-header"
-              ~title:(Printf.sprintf "%d nodes" (List.length selected_ids))
-              ~detail:"Selected" ())) in
-          None, [], [], value.live_cook, [], []
-      | [node_id] ->
-          (* the nodes of a geometry object are the lowering of its graph: the graph pane's node
-             is the one to edit (its arguments are the text) *)
-          let derived = match value.level with
-            | Document.Inside id -> kind value id = Some "geometry" | Scene -> false in
-          let fields, label, kind = match Edit_graph.find document ~node_id with
-            | Some node -> Node.parameter_fields node, Node.label node, Node.operation node
-            | None -> [], "#" ^ string_of_int node_id, "unknown" in
-          let preview = value.level = Document.Scene && Option.fold ~none:false
-            ~some:(fun shell -> List.exists (fun (_, ids) -> List.mem node_id ids) shell.Document.views)
-            value.doc.shell in
-          let changes = inspector_panel ui bounds (fun () ->
-            Pxui.Ui.scope ui (Printf.sprintf "node.%d" node_id) (fun () ->
-              let _, _, inspector_width, _ = bounds in
-              let inspector_width = float (max 1 inspector_width) in
-              let input_count = Array.length (Option.value ~default:[||] (Edit_graph.inputs document ~node_id)) in
-              (* the head: the kind as the sheet writes it (scene/camera), VIEW while displayed,
-                 the node's number; the name edited in place; what is true of the node *)
-              let facts = List.filter_map Fun.id [
-                if Edit_graph.is_bypassed document ~node_id then Some "muted" else None;
-                if value.doc.Document.active_camera = Some node_id then Some "active camera" else None;
-                if input_count > 0 then Some (Printf.sprintf "%d input%s" input_count (if input_count = 1 then "" else "s"))
-                else None;
-                if preview then Some "preview instance" else None ] in
-              let head = Pxui.Ui.inspector_header ui
-                  ~key:"flow-inspector-header"
-                  ~kind:(Printf.sprintf "%s/%s" (Flow.Context.name open_network.context) kind)
-                  ?badge:(if open_network.displayed = Some node_id then Some "view" else None)
-                  ~index:(Printf.sprintf "NO. %04d" node_id)
-                  ?rename:(if derived || preview then None else Some (fun text -> String.trim text <> ""))
-                  ~title:label
-                  ~detail:(match facts with
-                    | [] -> Printf.sprintf "%d parameter%s" (List.length fields) (if List.length fields = 1 then "" else "s")
-                    | facts -> String.concat " · " facts) () in
-              let renamed = head.renamed in
-              let rename = if renamed = label || derived || preview then [] else
-                [Rename {node = node_id; label = renamed}] in
-              rename @ Pxui.Ui.inspector_body ui (fun () ->
-              let names = Option.value ~default:[]
-                (Edit_graph.node_slot_names document ~node_id) in
-              let inputs = Option.value ~default:[||]
-                (Edit_graph.inputs document ~node_id) in
-              if Array.length inputs > 0 then
-                ignore (Pxui.Ui.inspector_section ui
-                  ~key:"flow-input-heading" ~expanded:true "Inputs"
-                  (fun () -> Array.iteri (fun index input ->
-                    let name = Option.value
-                        ~default:("in" ^ string_of_int index)
-                        (List.nth_opt names index) in
-                    let source = match input with
-                      | None -> "empty"
-                      | Some id -> Option.fold
-                          ~none:("#" ^ string_of_int id)
-                          ~some:Node.label
-                          (Edit_graph.find document ~node_id:id) in
-                    Pxui.Ui.inspector_readout ui ~width:inspector_width
-                      ~key:("flow-input-" ^ string_of_int index)
-                      ~label:name ("← " ^ source)) inputs));
-              if derived then Pxui.Ui.inspector_message ui ~key:"flow-derived"
-                "Made from the graph's text. Select the node in the graph pane to edit its arguments.";
-              if preview then Pxui.Ui.inspector_message ui ~key:"flow-preview"
-                "Preview instance. Edit its viewport scene reference or source graph.";
-              let edits = match object_rows ~locked:(derived || preview) fields with
-                | Error diagnostic ->
-                    Pxui.Ui.inspector_message ui ~key:"flow-diagnostic"
-                      (Flow.Diagnostic.to_string diagnostic); []
-                | Ok [] -> []
-                | Ok rows ->
-                    let expanded = fields |> List.filter_map (fun field ->
-                      match field.Parameter.folder with [] -> None
-                      | first :: _ -> Some first) |> List.sort_uniq String.compare in
-                    Pxui_shell.Inspector.flow_fields ui ~expanded
-                      ~kind_label:(kind_label kind) ~width:inspector_width rows in
-              List.filter_map (function
-                | Pxui_shell.Inspector.Edited (path, value) ->
-                    Some (Set_parameter {node = node_id; path; value})
-                | Pxui_shell.Inspector.Expression (path, text) ->
-                    (* a row is a field of the node; its argument is the parameter holding it (a
-                       vector's field is one component of it) *)
-                    let parameters = Result.value ~default:[] (Flow_sop.Port.parameters (Editor_document.Contexts.group_triples fields)) in
-                    let key_sub = List.find_map (fun (p : Flow_sop.Port.parameter) ->
-                      match List.find_index (fun (f : Parameter.field_view) -> f.name = path) p.fields with
-                      | Some i -> Some (p.path, if List.length p.fields = 3 then [ i ] else [])
-                      | None ->
-                          (* a vector's component row is named [row.axis] *)
-                          Option.map (fun i -> p.path, [ i ])
-                            (List.find_index (fun axis -> p.path ^ "." ^ axis = path) [ "x"; "y"; "z" ])
-                          |> fun found -> if List.length p.fields = 3 then found else None) parameters in
-                    (match expression_text text, key_sub with
-                     | Ok expr, Some (key, sub) -> Some (Object_arg { node = node_id; key; sub; expr })
-                     | Error message, _ -> Some (Declined message)
-                     | Ok _, None -> None)
-                | Follow path ->
-                    let home = match value.level with
-                      | Document.Scene -> List.assoc_opt node_id value.doc.homes.objects
-                      | Inside _ -> List.assoc_opt node_id value.doc.homes.layers in
-                    Option.bind home (fun (home : Document.home) -> match home with
-                      | Bound_at from ->
-                          Option.bind (Flow_graph.Flow_edit.arg_text ws.source from (Kw path)) (fun expr ->
-                            match expr.Flow.Syntax.node with
-                            | Sym name -> Option.map (fun path -> Follow_source path)
-                                (Text_pane.reference_target ws.source ~from name)
-                            | _ -> None)
-                      | _ -> None)
-                | Pinned _ | Reset _ -> None) edits))) in
-          None, changes, [], value.live_cook, [], []) in
-    (* an inspector shows the pane in use, or the graph panel its [:of] names; one of another pane
-       only shows (a press there makes that pane the one in use first) *)
     let inspectors = List.map (fun ((leaf : Pxui_shell.Layout.leaf), root) ->
       let pane = pane_of (panel_key value.doc leaf.path, leaf.path, leaf.panel, `List) in
-      if in_use pane then leaf, inspect (value, scope_view, selection, scope_active) root leaf.body
+      if in_use pane then leaf, inspect_panel ~image ~camera_panel ~inspector_visible ~unchanged ~resized ~geometry:g ~ui (value, scope_view, selection, scope_active) root leaf.body
       else
         let shown = graph_shown && stored_projection pane = Graph_view && graph_name pane <> None in
-        let panel, _, _, _, moves, drops = inspect (pane, pane.scope_view, pane.selection, shown) root leaf.body in
+        let panel, _, _, _, moves, drops = inspect_panel ~image ~camera_panel ~inspector_visible ~unchanged ~resized ~geometry:g ~ui (pane, pane.scope_view, pane.selection, shown) root leaf.body in
         leaf, (panel, [], [], value.live_cook, moves, drops))
       (of_kind Pxui_shell.Layout.Inspector) in
     let panel = match List.find_opt (fun ((l : Pxui_shell.Layout.leaf), _) ->
@@ -903,14 +419,8 @@ let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_
     let timeline_slots = match of_kind Timeline with
       | [] -> Option.to_list (Option.map (fun (_, box) -> g.timeline_at, box, true) timeline_root)
       | leaves -> List.map (fun ((l : Pxui_shell.Layout.leaf), box) -> l.body, box, false) leaves in
-    let timeline_intents = List.concat_map (fun (((_, _, _, height) as bounds), box, edge) ->
-      if height <= 0 then [] else
-      Pxui.Ui.within ui box (fun () ->
-        Pxui_shell.Timeline_bar.draw ui ~bounds ~edge
-          ~playing:(Timeline.mode timeline = Timeline.Playing)
-          ~frame:(Timeline.frame timeline)
-          ~time:(Timeline.time timeline)
-          ~max_frame:value.timeline_frames ())) timeline_slots in
+    let timeline_intents, strip_layout = draw_timeline_pane ~ui ~timeline ~max_frame:value.timeline_frames
+      ~slots:timeline_slots ~timeline_root ~strip_bounds:g.timeline_at in
     (* a lowered node is edited through its text: the handles of the node selected in the
        graph pane write its arguments, the list's rows of a geometry object have none *)
     let scope_target = if scope_active then scope_node value else None in
@@ -924,16 +434,16 @@ let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_
               ~bounds:leaf.body)
       | _ -> [], false, None in
     let selection = match picked with
-      | Some id when value.level = Document.Scene -> Selection.select id selection
+      | Some id when value.level = Document.Scene -> Selection.select id
       | Some _ | None -> selection in
     let handle_ops, handle_changes = match scope_target, handle_target, handle_edits with
       | Some (path, node), _, _ :: _ ->
           let parameters = Result.value ~default:[] (Flow_sop.Port.parameters (Node.parameter_fields node)) in
           List.filter_map (fun (p : Flow_sop.Port.parameter) ->
-            if List.exists (fun (f : Parameter.field_view) -> List.mem_assoc f.name handle_edits) p.fields
+            if List.exists (fun (f : Param.field_view) -> List.mem_assoc f.name handle_edits) p.fields
             then Some (Syntax_edit (Flow_graph.Flow_edit.Set_arg { node = path;
               key = Flow_graph.Flow_edit.Kw p.path; sub = [];
-              value = Editor_document.Scene_sync.value_syntax (List.map (fun (f : Parameter.field_view) ->
+              value = Editor_document.Scene_sync.value_syntax (List.map (fun (f : Param.field_view) ->
                 match List.assoc_opt f.name handle_edits with
                 | Some current -> { f with current } | None -> f) p.fields) }))
             else None) parameters, None
@@ -954,7 +464,7 @@ let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_
        press; the last one fades after 3 seconds.  It stands at the bottom-left of the focused pane,
        above the strip. *)
     (match value.notice with
-     | Some (kind, text) when frame.time -. value.notice_at < 3. ->
+     | Some (kind, text) when frame.input.t -. value.notice_at < 3. ->
          let bounds = match List.find_opt (fun ((l : Pxui_shell.Layout.leaf), _) -> Some l.path = header_focus) roots with
            | Some (l, _) -> l.body | None -> graph_body in
          let rec cards (s : Flow_graph.Projection.scope) = List.concat_map (fun (n : Flow_graph.Projection.node) ->
@@ -991,28 +501,6 @@ let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_
           ~key_of:(fun id -> match List.find_opt (fun (c : Leader.command) -> c.id = id) keymap with
             | Some {trigger = Some trigger; _} -> Editor_core.Keymap.label trigger | _ -> "")
           ui leaf box ~at:(Pxui.Ui.context_at ui box))) (of_kind Timeline) in
-    let strip_playback, strip_layout = match timeline_root with
-      | Some (_, box) when (let _, _, _, h = g.timeline_at in h > 0) ->
-          Pxui.Ui.within ui box (fun () ->
-            let module Ui = Pxui.Ui in
-            Option.iter (fun (x, y) -> Ui.set_text_state ui box (Some (Printf.sprintf "%g %g" x y)))
-              (Ui.context_at ui box);
-            match Option.map (String.split_on_char ' ') (Ui.text_state ui box) with
-            | Some [x; y] ->
-                (match float_of_string_opt x, float_of_string_opt y with
-                 | Some x, Some y ->
-                     let playing = Timeline.mode timeline = Timeline.Playing in
-                     (match Ui.context_menu ui ~at:(x, y) "timeline-context"
-                       [(if playing then "Pause" else "Play"), true; "Stop", true; "Hide timeline", true] with
-                      | `Open -> [], []
-                      | result ->
-                          Ui.set_text_state ui box None;
-                          (match result with `Pick 0 -> [Pause_toggle], [] | `Pick 1 -> [Stop_playback], []
-                           | `Pick 2 -> [], [Pxui_shell.Chrome.Toggle [-1]] | _ -> [], []))
-                 | _ -> [], [])
-            | _ -> [], [])
-      | _ -> [], [] in
-    let timeline_intents = timeline_intents @ strip_playback in
     let workspace, drag_changes = layout_intents vw workspace (grips @ drops @ timeline_menus @ strip_layout) in
     let workspace = match workspace.window_live with
       | None -> workspace
@@ -1024,13 +512,13 @@ let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_
     let workspace = match workspace.live with
       | Some _ when not (List.exists (function Pxui_shell.Chrome.Resize _ | Settled -> true | _ -> false) grips)
           && (not (Frame.mouse_down Input.LeftButton frame) || Frame.has_event (function
-               | Event.WindowFocusLost | Event.PointerCancelled Input.LeftButton -> true | _ -> false) frame) ->
+               | Input.Focus_lost | Input.Pointer_cancelled Input.LeftButton -> true | _ -> false) frame) ->
           { workspace with live = None }
       | _ -> workspace in
     let changes = changes @ drag_changes in
     { workspace; focus; focus_path; pane_keys; outline; outline_intents; selection; menu; menu_pick; scope_view; scope_changes; tree; document = (network value).graph;
       edit_error = value.edit_error;
-      effects = Parameter.no_effects;
+      effects = Param.no_effects;
       timeline_intents; frame_request = initial_frame_request; prompt = None; prompt_intent = None;
       panel; grab; settings = unchanged;
       opened = None; live_cook; label = "Edit";
@@ -1054,8 +542,8 @@ let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_
     | Jump -> Some (Jumping "")
     | Goto_symbol when text_shown <> None -> Some (Symbols "")
     | Goto_line when text_shown <> None -> Some (Going "")
-    | Panel_pick -> Some (Picking { split = true; at = frame.mouse })
-    | Window_pick -> Some (Picking { split = false; at = frame.mouse })
+    | Panel_pick -> Some (Picking { split = true; at = frame.input.pointer })
+    | Window_pick -> Some (Picking { split = false; at = frame.input.pointer })
     | _ -> prompt) value.prompt actions in
   let prompt_panel ui prompt =
     let module Ui = Pxui.Ui in
@@ -1070,11 +558,12 @@ let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_
       | Some (query, _) -> Some (again query), None in
     let next = match prompt with
     | None -> None, None
-    | Some Keys ->
+        | Some Keys ->
         let commands = List.filter (fun (command : Leader.command) -> match command.action with
-          | List_command _ | Frame_tile -> false | _ -> true) value.keymap @ Leader.text_keys in
+          | List_command _ | Frame_tile -> false | _ -> true) Leader.keymap in
         let context = String.lowercase_ascii (Leader.pane_name focus) ^ " focused" in
-        (if Pxui_shell.Which_key.sheet ui ~context ~category:Leader.sheet_group commands then Some Keys else None), None
+        (if Pxui_shell.Which_key.sheet ui ~context ~category:Leader.sheet_group
+            ~text_keys:Leader.text_keys commands then Some Keys else None), None
     | Some (Saving name) ->
         (match Pxui_shell.Prompt.name ui ~key:"preset-save"
             ~title:"Save preset" ~description:"Name for the current state of the document"
@@ -1129,7 +618,7 @@ let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_
         let all = match current with
           | Some (source, _) ->
               List.map (fun (name, kind, byte) ->
-                name, Printf.sprintf "%s · line %d" kind (Flow.Diagnostic.position_of_offset source byte).line, byte)
+                name, Printf.sprintf "%s · line %d" kind (Diagnostic.position_of_offset source byte).line, byte)
                 (Text_pane.symbols source)
           | None -> [] in
         search_prompt ~key:"symbol-jump" ~title:"Go to symbol" ~label:"Search bindings" ~query all
@@ -1138,7 +627,7 @@ let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_
     | Some (Referencing (name, query)) ->
         let all = match text_shown with
           | Some shown -> List.map (fun (byte, line) ->
-              line, Printf.sprintf "line %d" (Flow.Diagnostic.position_of_offset (Text_pane.current_text text shown) byte).line, byte)
+              line, Printf.sprintf "line %d" (Diagnostic.position_of_offset (Text_pane.current_text text shown) byte).line, byte)
               (Text_pane.references (Text_pane.current_text text shown) name)
           | None -> [] in
         search_prompt ~key:"references" ~title:("References to " ^ name) ~label:"Search uses" ~query all
@@ -1157,9 +646,9 @@ let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_
     | Some (Picking { split; at } as open_prompt) ->
         let kinds = Pxui_shell.Layout.[ Graph; List; Lisp; Inspector; Outline; Timeline; View ""; Canvas "" ] in
         let digit = List.find_map (function
-          | Event.KeyPressed (Input.KeyChar c) when c >= '1' && c < Char.chr (Char.code '1' + List.length kinds) ->
+          | Input.Key_pressed (Input.KeyChar c) when c >= '1' && c < Char.chr (Char.code '1' + List.length kinds) ->
               Some (Char.code c - Char.code '1')
-          | _ -> None) frame.events in
+          | _ -> None) frame.input.events in
         let pick i =
           let panel = List.nth kinds i in
           if split then Some (Splitting { panel; axis = `H }), None
@@ -1175,9 +664,9 @@ let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_
               | `Pick i -> pick i))
     | Some (Splitting { panel; axis }) ->
         (* the split follows the pointer over the panel under it; Tab turns it, a click places it *)
-        let pressed key = List.exists (function Event.KeyPressed k -> k = key | _ -> false) frame.events in
+        let pressed key = List.exists (function Input.Key_pressed k -> k = key | _ -> false) frame.input.events in
         let axis = if pressed Input.Tab then (if axis = `H then `V else `H) else axis in
-        let mx, my = frame.mouse in
+        let mx, my = frame.input.pointer in
         let leaf = List.find_opt (fun (l : Pxui_shell.Layout.leaf) ->
           let x, y, w, h = l.frame in
           not l.floating && mx >= float x && mx < float (x + w) && my >= float y && my < float (y + h))
@@ -1188,7 +677,7 @@ let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_
               let r = if axis = `H then (mx -. float x) /. float (max 1 w) else (my -. float y) /. float (max 1 h) in
               Float.max 0.1 (Float.min 0.9 r)
           | None -> 0.5 in
-        let box = Ui.box ui ~flags:Ui.clickable ~w:(Ui.Px (float frame.width)) ~h:(Ui.Px (float frame.height))
+        let box = Ui.box ui ~flags:Ui.clickable ~w:(Ui.Px (float (fst frame.input.size))) ~h:(Ui.Px (float (snd frame.input.size)))
           ~at:(0., 0.) "split-pending" in
         Ui.to_front ui ~order:900 box;
         Ui.draw_over ui box (fun paint _ ->
@@ -1199,7 +688,7 @@ let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_
             let cut = if axis = `H then x +. (w *. ratio) else y +. (h *. ratio) in
             let nx, ny, nw, nh = if axis = `H then cut, y, x +. w -. cut, h else x, cut, w, y +. h -. cut in
             (* the panel being split is tinted, the room of the new one more *)
-            let tint alpha = Color.with_alpha theme.accent alpha in
+            let tint alpha = Rays_math.Color.with_alpha theme.accent alpha in
             Ui.Paint.fill paint ~x ~y ~w ~h (tint 22);
             Ui.Paint.fill paint ~x:nx ~y:ny ~w:nw ~h:nh (tint 56);
             (* the new panel's room: accent brackets 6 inside its corners; the panel kept stays as it is *)
@@ -1226,7 +715,7 @@ let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_
               (100 - int_of_float (ratio *. 100.))) leaf);
         let signal = Ui.signal ui box in
         let cancel = pressed Input.Escape
-          || List.exists (function Event.MousePressed (Input.RightButton, _) -> true | _ -> false) frame.events in
+          || List.exists (function Input.Pointer_pressed (Input.RightButton, _) -> true | _ -> false) frame.input.events in
         if cancel then None, None
         else (match signal.clicked, leaf with
           | true, Some l -> None, Some (Run_action (Panel_split_at (l.path, axis, ratio, panel)))
@@ -1243,19 +732,19 @@ let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_
     (* A closed prompt must not keep keyboard focus into the next frame. *)
     if fst next = None && prompt <> None then Ui.dismiss_popup ui;
     next in
-  let result = match Pxui_shell.Shell.frame value.ui frame
-      ~visible:all_ui_visible ~overlay:leader_panel
-      ~body:(fun ui ->
+  let result = match Pxui.Ui.frame value.ui frame (fun ui ->
+      Option.iter (fun draw -> draw ui) leader_panel;
+      if all_ui_visible then Some (
         let prompt, prompt_intent = prompt_panel ui initial_prompt in
         let result = build ui in
         let prompt_intent = match prompt_intent, result.bar_action with
           | None, Some action -> Some (Run_action action) | intent, _ -> intent in
-        { result with prompt; prompt_intent }) with
+        { result with prompt; prompt_intent }) else None) with
     | Some result -> result
     | None ->
       { workspace; focus; focus_path; pane_keys = []; graph_panes = value.graph_panes; locals = value.locals; other_texts = []; outline = value.outline; outline_intents = []; selection; menu; menu_pick = None; scope_view; scope_changes = scope_command_changes; tree; document = (network value).graph;
         edit_error = value.edit_error;
-        effects = Parameter.no_effects; timeline_intents = [];
+        effects = Param.no_effects; timeline_intents = [];
         frame_request = initial_frame_request; prompt = initial_prompt;
         prompt_intent = None; panel = None; grab = false;
         settings = value.doc.settings;
@@ -1263,12 +752,12 @@ let update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_
         changes = command_changes; tree_intents = list_intents;
         text_intents = []; open_graph;
         settings_changes = []; handle_changes = None; bar_action = None; view_pick = None; drops = [] } in
-  reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~leader ~frame ~hud ~actions ~guide ~copied ~steady ~status_fps ~status_fps_at ~timeline ~timeline_changes ~graph_shown ~text ~text_shown ~row_sets ~rows value result
-let update ?(image=fun _->None) ?(host_events=[]) value ~all_ui_visible ~text_focus ~camera_panel ~view_handles ~render_status
+  reduce ?gpu ?pump ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~leader ~frame ~hud ~actions ~guide ~copied ~steady ~status_fps ~status_fps_at ~timeline ~timeline_changes ~graph_shown ~text ~text_shown ~row_sets ~rows value result
+let update ?gpu ?(image=fun _->None) ?(host_events=[]) ?pump value ~all_ui_visible ~text_focus ~camera_panel ~view_handles ~render_status
     ~error_status ~view_state (frame : Frame.t) =
   let update, phases = Flow.Phase_timer.sample ~clock:Unix.gettimeofday (fun () ->
   let value, frame, carry_changed = carry_step value ~text_focus frame in
-  update_frame ~image ~host_events ~carry_changed value ~all_ui_visible ~text_focus ~camera_panel ~view_handles
+  update_frame ?gpu ?pump ~image ~host_events ~carry_changed value ~all_ui_visible ~text_focus ~camera_panel ~view_handles
     ~render_status ~error_status ~view_state frame) in
   if update.core.doc == value.doc then update
   else { update with core = { update.core with edit_phases = phases } }

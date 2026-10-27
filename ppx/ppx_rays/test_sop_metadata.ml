@@ -36,7 +36,7 @@ let floating_calls declaration =
     method! expression expression =
       (match expression.pexp_desc with
        | Pexp_apply ({pexp_desc=Pexp_ident {txt=Longident.Ldot
-           (Longident.Ldot (Longident.Lident "Sop", "Parameter"), "floating"); _}; _}, _) ->
+           (Longident.Lident "Param", "floating"); _}; _}, _) ->
            incr count
        | _ -> ());
       super#expression expression

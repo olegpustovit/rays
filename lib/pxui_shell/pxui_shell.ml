@@ -14,6 +14,4 @@ module Prompt = Prompt
 
 module Tree = Tree
 
-module Shell = Shell
-
 module Inspector = Inspector

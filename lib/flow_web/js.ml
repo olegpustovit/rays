@@ -1,48 +1,6 @@
 module P = Flow_ir.Packed
 module R = Flow_ir.Core.Region
-let perlin = {|  const fade = (t) => t * t * t * (t * (t * 6 - 15) + 10);
-  const lerp = (a, b, t) => a + t * (b - a);
-  const grad = (hash, x, y, z) => {
-    const h = hash & 15;
-    const u = h < 8 ? x : y;
-    const v = h < 4 ? y : ((h === 12 || h === 14) ? x : z);
-    return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
-  };
-  const raw3 = (p, x, y, z) => {
-    const fx = Math.floor(x), fy = Math.floor(y), fz = Math.floor(z);
-    const xi = fx & 255, yi = fy & 255, zi = fz & 255;
-    x = x - fx; y = y - fy; z = z - fz;
-    const u = fade(x), v = fade(y), w = fade(z);
-    const h000 = p[p[p[xi] + yi] + zi], h100 = p[p[p[xi + 1] + yi] + zi];
-    const h010 = p[p[p[xi] + yi + 1] + zi], h110 = p[p[p[xi + 1] + yi + 1] + zi];
-    const h001 = p[p[p[xi] + yi] + zi + 1], h101 = p[p[p[xi + 1] + yi] + zi + 1];
-    const h011 = p[p[p[xi] + yi + 1] + zi + 1], h111 = p[p[p[xi + 1] + yi + 1] + zi + 1];
-    const x00 = lerp(grad(h000, x, y, z), grad(h100, x - 1, y, z), u);
-    const x10 = lerp(grad(h010, x, y - 1, z), grad(h110, x - 1, y - 1, z), u);
-    const x01 = lerp(grad(h001, x, y, z - 1), grad(h101, x - 1, y, z - 1), u);
-    const x11 = lerp(grad(h011, x, y - 1, z - 1), grad(h111, x - 1, y - 1, z - 1), u);
-    return lerp(lerp(x00, x10, v), lerp(x01, x11, v), w);
-  };
-  const fbm = (p, x, y, z, octaves, lacunarity, gain) => {
-    let frequency = 1, amplitude = 1, sum = 0, weights = 0;
-    for (let octave = 0; octave < octaves; octave++) {
-      const sx = x * frequency, sy = y * frequency, sz = z * frequency;
-      if (Number.isFinite(sx) && Number.isFinite(sy) && Number.isFinite(sz)
-          && Number.isFinite(sum) && Number.isFinite(weights)) {
-        const raw = (raw3(p, sx, sy, sz) + 1) * 0.5;
-        sum = sum + (raw <= 0 ? 0 : raw >= 1 ? 1 : raw) * amplitude;
-        weights = weights + amplitude;
-        frequency = frequency * lacunarity;
-        amplitude = amplitude * gain;
-      } else sum = NaN;
-    }
-    if (Number.isFinite(sum) && Number.isFinite(weights)) return weights === 0 ? 0 : sum / weights;
-    return NaN;
-  };
-|}
-let number x =
-  if Float.is_nan x then "NaN" else if x = Float.infinity then "Infinity"
-  else if x = Float.neg_infinity then "-Infinity" else Printf.sprintf "%.17g" x
+let number x = Param.float_text x
 let register index = "r" ^ string_of_int index
 let flag condition = "(" ^ condition ^ " ? 1 : 0)"
 let binary operation a b = match operation with
@@ -112,15 +70,17 @@ let fast64 = {|  let RH = 0;
   const shift64 = (ah, al, b, right) => {
     if (b < 0 || b > 62) fail('E_RANGE', 'Integer shift count must be within [0, 62].');
     if (b === 0) { RH = ah; return al; }
-    if (right) { if (b >= 32) { RH = 0; return ah >>> (b - 32); } RH = (ah >>> b) | 0; return ((al >>> b) | (ah << (32 - b))) >>> 0; }
+    if (right) { ah &= 0x7fffffff; if (b >= 32) { RH = 0; return ah >>> (b - 32); } RH = (ah >>> b) | 0; return ((al >>> b) | (ah << (32 - b))) >>> 0; }
     if (b >= 32) { RH = (al << (b - 32)) | 0; return 0; }
     RH = ((ah << b) | (al >>> (32 - b))) | 0; return (al << b) >>> 0; };
 |}
 
 (* [fast] (the workspace's fast precision, a collecting region): integer registers are exact 64-bit
    pairs ([fast64]), as native fast precision's kernels hold them. *)
+let fast_less a b = Printf.sprintf "(r%dh < r%dh || (r%dh === r%dh && r%dl < r%dl))" a b a b a b
+
 let region ?(fast=false) program =
-  let view = P.Private.view program and region = P.to_region program in
+  let view = P.Private.view program and region = program in
   let fast = fast && region.result = R.Collect
     && not (Array.exists (fun i -> match i with P.Rand_at _ -> true | P.Guarded (_, P.Rand_at _) -> true | _ -> false) view.code) in
   let line = Buffer.create 4096 in
@@ -130,8 +90,6 @@ let region ?(fast=false) program =
   let gathered=Array.exists(fun instruction->match unguarded instruction with
     | P.Array_prepare _->true|_->false)view.code in
   let nonfinite = if gathered then "fail('E_NONFINITE', 'packed produced a nonfinite value.');" else "return 1;" in
-  let seeds = Array.to_list view.code |> List.filter_map (fun instruction -> match unguarded instruction with P.Noise3 (_,_,_,seed,_,_,_) -> Some seed | _ -> None)
-    |> List.sort_uniq Int.compare in
   let collecting = match region.result with R.Collect | R.Accumulate (_, true) -> true | _ -> false in
   let accumulating = region.result <> R.Collect in
   let outputs = Array.length view.outputs and width = Array.length view.outputs.(0) in
@@ -172,6 +130,8 @@ let region ?(fast=false) program =
     add "%s" fused;
   if Array.exists(fun instruction->match unguarded instruction with P.Checked_mul _ | Checked_fma _ -> true | _ -> false)view.code then
     add "  const checked = (valid, value) => Number.isFinite(value) ? (valid ? 1 : value) : 0;\n";
+  if Array.exists (fun instruction -> match unguarded instruction with P.Noise3 _ -> true | _ -> false) view.code then
+    add "  const noise = (...args) => { try { return noise3(...args); } catch (e) { if (e?.code === 'E_NONFINITE') return NaN; throw e; } };\n";
   if Array.exists(fun instruction->match unguarded instruction with P.Rand_at _->true|_->false)view.code then
     add "  const randAt = (seed, index) => { let x = wrap(seed ^ wrap(wrap(index + 0x11b54a32d192ed03n) * 0x1e3779b97f4a7c15n)); x = wrap(x ^ (BigInt.asUintN(63, x) >> 30n)); x = wrap(x * 0x3f58476d1ce4e5b9n); x = wrap(x ^ (BigInt.asUintN(63, x) >> 27n)); x = wrap(x * 0x14d049bb133111ebn); x = wrap(x ^ (BigInt.asUintN(63, x) >> 31n)); return Number(BigInt.asUintN(63, x) >> 10n) / 9007199254740992; };\n";
   if fast then
@@ -180,13 +140,6 @@ let region ?(fast=false) program =
   add "  const convert = (name, x) => Number.isFinite(x) && Math.abs(x) < 4e18 ? BigInt(Math.trunc(x)) : fail('E_NONFINITE', name + ' produced a nonfinite value.');\n";
   add "  const divide = (a, b, mod) => b === 0n ? fail('E_RANGE', 'Integer division by zero.') : wrap(mod ? a %% b : a / b);\n";
   add "  const shift = (a, b, right) => b < 0n || b > 62n ? fail('E_RANGE', 'Integer shift count must be within [0, 62].') : wrap(right ? BigInt.asUintN(63, a) >> b : a << b);\n"
-  end;
-  if seeds <> [] then begin
-    add "%s" perlin;
-    List.iter (fun seed ->
-      let table = Rays_math.Noise.Private.permutation (Rays_math.Noise.create seed) in
-      add "  const table%d = Int32Array.from([%s]);\n" seed
-        (String.concat "," (Array.to_list (Array.map string_of_int table)))) seeds
   end;
   Array.iteri (fun k _ -> add "  const in%d = inputs[%d];\n" k k) view.widths;
   if product then begin
@@ -211,6 +164,8 @@ let region ?(fast=false) program =
   let index r=if fast && R.integer_register view.code.(r) then numeric r else register r in
   let rec expression slot instruction = match instruction with
       | P.Const value -> number value
+      | Loop_result (loop,component,_) -> register (loop+1+component)
+      | Loop_begin _ | Loop_carry _ | Loop_end _ -> assert false
       | Input (input, w, component) -> Printf.sprintf "Number(in%d[j%d * %d + %d])" input input w component
       | Uniform (index, component) -> Printf.sprintf "Number(uniforms[%d][%d])" index component
       | Frame _ -> Printf.sprintf "uniforms[%d][%d]" (Array.length view.uniform_widths) slot
@@ -218,8 +173,9 @@ let region ?(fast=false) program =
       | Binary (op, a, b) -> binary op (numeric a) (numeric b)
       | Unary (op, a) -> unary op (numeric a)
       | Select (c, yes, no) -> Printf.sprintf "%s !== 0 ? %s : %s" (numeric c) (numeric yes) (numeric no)
-      | Noise3 (x, y, z, seed, octaves, lacunarity, gain) -> Printf.sprintf "fbm(table%d, %s, %s, %s, %d, %s, %s)" seed
-          (numeric x) (numeric y) (numeric z) octaves (number lacunarity) (number gain)
+      | Noise3 (x, y, z, seed, octaves, lacunarity, gain) -> Printf.sprintf
+          "noise(Float64Array.of(%s, %s, %s), %dn, %dn, %s, %s)"
+          (numeric x) (numeric y) (numeric z) seed octaves (number lacunarity) (number gain)
       | Fma (a,b,c) -> Printf.sprintf "fused(%s, %s, %s)" (numeric a) (numeric b) (numeric c)
       | Checked_mul(p,a,b) -> Printf.sprintf "checked(%b, %s * %s)" (p=P.Valid) (numeric a) (numeric b)
       | Checked_fma(p,a,b,c) -> Printf.sprintf "checked(%b, fused(%s, %s, %s))" (p=P.Valid) (numeric a) (numeric b) (numeric c)
@@ -236,7 +192,7 @@ let region ?(fast=false) program =
       | Text_select(condition,yes,no) -> Printf.sprintf "(%s !== 0 ? %s : %s)" (numeric condition)(register yes)(register no)
       | Rand_at(seed,index) -> Printf.sprintf "randAt(%s, %s)" (register seed) (register index)
       | Int_compare(op,a,b) when fast->let h r=Printf.sprintf "r%dh" r and l r=Printf.sprintf "r%dl" r in
-          let lt a b=Printf.sprintf "(%s < %s || (%s === %s && %s < %s))" (h a)(h b)(h a)(h b)(l a)(l b) in
+          let lt=fast_less in
           let eq=Printf.sprintf "(%s === %s && %s === %s)" (h a)(h b)(l a)(l b) in
           flag(match op with Ilt->lt a b|Igt->lt b a|Ile->"!"^lt b a|Ige->"!"^lt a b|Ieq->eq)
       | Int_const n->string_of_int n^"n" | Int_input i->Printf.sprintf "in%d[j%d]" i i
@@ -283,13 +239,16 @@ let region ?(fast=false) program =
          |Iand->bits "&"|Ior->bits "|"|Ixor->bits "^"
          |Ishl->lo (Printf.sprintf "shift64(%s, %s, %s, false)" (h a)(l a)(numeric b))
          |Ishr->lo (Printf.sprintf "shift64(%s, %s, %s, true)" (h a)(l a)(numeric b)))
-    | Int_abs a -> Printf.sprintf "if (%s < 0) { r%dl = sub64(0, 0, %s, %s); r%dh = RH; } else { r%dh = %s; r%dl = %s; }"
-        (h a) slot (h a)(l a) slot slot (h a) slot (l a)
+        ^ Printf.sprintf " r%dh = (r%dh << 1) >> 1;" slot slot
+    | Int_abs a -> Printf.sprintf "if (%s < 0) { r%dl = sub64(0, 0, %s, %s); r%dh = RH; } else { r%dh = %s; r%dl = %s; } r%dh = (r%dh << 1) >> 1;"
+        (h a) slot (h a)(l a) slot slot (h a) slot (l a) slot slot
     | Int_select(c,a,b) -> Printf.sprintf "if (%s !== 0) { r%dh = %s; r%dl = %s; } else { r%dh = %s; r%dl = %s; }"
         (numeric c) slot (h a) slot (l a) slot (h b) slot (l b)
+    | Loop_result(loop,component,_) -> let source=loop+1+component in
+        Printf.sprintf "r%dh = %s; r%dl = %s;" slot (h source) slot (l source)
     | Convert(_,_) -> lo (Printf.sprintf "split(%s)" (expression slot body))
     | _ -> invalid_arg "fast integer register" in
-  Array.iteri (fun slot instruction ->
+  let emit slot instruction =
     let guards,body=match instruction with P.Guarded(g,b)->g,b|b->[],b in
     let guard=String.concat " && "(List.map(fun(r,yes)->numeric r^(if yes then " !== 0" else " === 0"))guards)in
     if fast && R.integer_register body then begin
@@ -306,7 +265,56 @@ let region ?(fast=false) program =
      | _ -> ());
     add "    r%d = %s;\n" slot (expression slot body);
     if not(R.integer_register body) && checks.(slot) then add "    if (!Number.isFinite(r%d)) %s\n" slot nonfinite;
-    if guards<>[] then add "    }\n" end) view.code;
+    if guards<>[] then add "    }\n" end in
+  let declare slot =
+    if fast && R.integer_register view.code.(slot) then add "    let r%dh = 0, r%dl = 0;\n" slot slot
+    else add "    let r%d;\n" slot in
+  let assign target source =
+    if fast && R.integer_register view.code.(target) then
+      add "    r%dh = r%dh; r%dl = r%dl;\n" target source target source
+    else add "    r%d = r%d;\n" target source in
+  let exact slot = if fast then Printf.sprintf "big(r%dh, r%dl)" slot slot else register slot in
+  let rec emit_range first last =
+    let slot=ref first in
+    while !slot<last do
+      let instruction=view.code.(!slot)in
+      (match unguarded instruction with
+       | P.Loop_begin loop ->
+           let header= !slot and count=Array.length loop.initial in
+           declare header;
+           Array.iteri(fun component _->declare(header+1+component))loop.initial;
+           let guards=match instruction with P.Guarded(guards,_)->guards|_->[]in
+           if guards<>[] then add "    if (%s) {\n" (String.concat " && "
+             (List.map(fun(r,yes)->numeric r^(if yes then " !== 0" else " === 0"))guards));
+           Option.iter(fun limit->
+             add "    const length%d = %s - %s;\n" header (exact loop.last)(exact loop.first);add
+             "    if (length%d > %dn) fail('E_ITER_BOUND', `range ${%s}‥${%s} exceeds %s iterations.`);\n"
+             header limit (exact loop.first)(exact loop.last)
+             (if limit=4096 then "4,096" else string_of_int limit))loop.limit;
+           assign header loop.first;
+           Array.iteri(fun component initial->assign(header+1+component)initial)loop.initial;
+           add "    for (; %s;) {\n" (if fast then fast_less header loop.last
+             else Printf.sprintf "r%d < r%d" header loop.last);
+           emit_range (header+1+count) loop.finish;
+           let values,stop=match unguarded view.code.(loop.finish)with P.Loop_end(_,values,stop)->values,stop|_->assert false in
+           Option.iter(fun source->add "    const stop%d = %s !== 0;\n" header (numeric source))stop;
+           Array.iteri(fun component source->
+             if fast && R.integer_register view.code.(source) then
+               add "    const next%dh%d = r%dh, next%dl%d = r%dl;\n" header component source header component source
+             else add "    const next%d_%d = r%d;\n" header component source)values;
+           Array.iteri(fun component _->let target=header+1+component in
+             if fast && R.integer_register view.code.(target)then
+               add "    r%dh = next%dh%d; r%dl = next%dl%d;\n" target header component target header component
+             else add "    r%d = next%d_%d;\n" target header component)values;
+           Option.iter(fun _->add "    if (stop%d) break;\n" header)stop;
+           if fast then add "    r%dl = add64(r%dh, r%dl, 0, 1); r%dh = RH;\n" header header header header
+           else add "    r%d++;\n" header;
+           add "    }\n";
+           if guards<>[] then add "    }\n";
+           slot:=loop.finish+1
+       | _ ->emit !slot instruction;incr slot)
+    done in
+  emit_range 0 (Array.length view.code);
   Array.iteri (fun k registers -> Array.iteri (fun component slot ->
     if not(R.integer_register view.code.(slot) || R.text_register view.code.(slot)) then add "    if (!Number.isFinite(r%d)) %s\n" slot nonfinite;
     (match region.result with
@@ -332,8 +340,6 @@ let region ?(fast=false) program =
 
 (* ---- the frame level ---- *)
 module C = Flow_ir.Core
-
-exception Refused of string * string * Flow.Diagnostic.span option
 
 let escape = Text_literal.quote
 
@@ -399,6 +405,12 @@ let signature : C.primitive -> string list option = function
 
 (* Helpers the module carries, emitted only when the body calls them (name, text). *)
 let helpers = [
+  "floatPoint", {|const floatPoint = (rt, v) => { const c = comps(rt, v);
+  if (![c[0], c[1]].every(x => Number.isFinite(x) && Math.abs(x) <= 3.4028234663852886e38))
+    rt.fail("E_DRAW_RANGE", "A drawing coordinate must be finite and fit a 32-bit float.");
+  return [c[0], c[1]];
+};
+|};
   "field", {|const field = (rt, v, name) => v instanceof Map
   ? (v.has(name) ? v.get(name) : rt.fail("E_FIELD", "Missing core field."))
   : v instanceof Float64Array && "xyzw".indexOf(name) >= 0 && "xyzw".indexOf(name) < v.length
@@ -527,11 +539,11 @@ const markSet = (rt, batch, kind, a) => {
 };
 const optColour = (rt, v) => v === undefined ? null : rgba(rt, v);
 const pathOf = (rt, kind, a) => {
-  if (kind === "polygon") emitAll(rt, rt.polygon(items(rt, arg(rt, a, "points")).map(p => point(rt, p)), optColour(rt, a.fill), optColour(rt, a.stroke)));
-  else if (kind === "polyline") emitAll(rt, rt.polyline(items(rt, arg(rt, a, "points")).map(p => point(rt, p)), ink(rt, arg(rt, a, "color"))));
+  if (kind === "polygon") emitAll(rt, rt.polygon(items(rt, arg(rt, a, "points")).map(p => floatPoint(rt, p)), optColour(rt, a.fill), optColour(rt, a.stroke)));
+  else if (kind === "polyline") emitAll(rt, rt.polyline(items(rt, arg(rt, a, "points")).map(p => floatPoint(rt, p)), ink(rt, arg(rt, a, "color"))));
   else {
-    const [w, h] = point(rt, arg(rt, a, "size")), [x, y] = point(rt, arg(rt, a, "at"));
-    const radius = Math.max(0, Math.min(Number(rt.coerce("int", arg(rt, a, "radius"))), Math.trunc(Math.min(Math.abs(w), Math.abs(h)) / 2)));
+    const [w, h] = floatPoint(rt, arg(rt, a, "size")), [x, y] = floatPoint(rt, arg(rt, a, "at"));
+    const radius = Math.max(0, Math.min(num(rt, arg(rt, a, "radius")), Math.min(Math.abs(w), Math.abs(h)) / 2));
     emit(rt, { type: "push_transform", xx: 1, xy: 0, yx: 0, yy: 1, tx: x, ty: y });
     emitAll(rt, rt.rounded_rect(w, h, radius, optColour(rt, a.fill), optColour(rt, a.stroke)));
     emit(rt, { type: "pop_transform" });
@@ -554,7 +566,7 @@ const transform = (rt, kind, v) => {
 |}]
 
 type context = { program : C.program; body : Buffer.t; used : (string, unit) Hashtbl.t;
-  mutable map : (int * Flow.Diagnostic.span) list; mutable async : bool; gpu : int -> bool; state_slot : int -> int;
+  mutable map : (int * Diagnostic.span) list; mutable async : bool; gpu : int -> bool; state_slot : int -> int;
   bindings : bool; templated : bool; plans : (int, string) Hashtbl.t; fast : bool;
   mutable remembered : bool; mutable resident : bool; kernel : int -> string option }
 
@@ -562,7 +574,7 @@ let local n = "l" ^ string_of_int n
 let use ctx name = Hashtbl.replace ctx.used name ()
 
 let call ctx primitive args =
-  let refuse message = raise (Refused ("E_WEB_PRIMITIVE", message, None)) in
+  let refuse message = raise (Diagnostic.Error (Diagnostic.error ~code:"E_WEB_PRIMITIVE" message)) in
   let values = match signature primitive with
     | None -> List.map (fun (_, n) -> local n) args
     | Some names ->
@@ -581,7 +593,7 @@ let call ctx primitive args =
         Option.fold ~none:"undefined" ~some:escape d.cause] @
         (if d.hints=[] && d.trace=[] then [] else
           ["[" ^ String.concat "," (List.map escape d.hints) ^ "]";
-           "[" ^ String.concat "," (List.map (fun (t:Flow.Diagnostic.trace) ->
+           "[" ^ String.concat "," (List.map (fun (t:Diagnostic.trace) ->
              Printf.sprintf "{node_id:%dn,label:%s,operation:%s}" t.node_id
                (escape t.label) (escape t.operation)) d.trace) ^ "]"])
     | _ -> [] in
@@ -593,7 +605,7 @@ let expression ctx : C.expr -> string = function
   | Call_index slot -> Printf.sprintf "BigInt(calls[%d]++)" slot
 | Source (Flow.Eval.Source ("$core/argument", _, ["index", Flow.Eval.Int index]))
       when ctx.bindings && index >= 0 -> Printf.sprintf "rt.coreArgument(%d)" index
-  | Source _ | Host_source _ | Source_descriptor _ -> raise (Refused ("E_WEB_SOURCE", "This host-owned source is outside the 2D web target.", None))
+  | Source _ | Host_source _ | Source_descriptor _ -> raise (Diagnostic.Error (Diagnostic.error ~code:"E_WEB_SOURCE" "This host-owned source is outside the 2D web target."))
   | Frame field -> (match field with
       | Time -> "input.t" | Dt -> "input.dt" | Index -> "BigInt(input.frame)" | Tick -> "BigInt(input.tick)"
       | Width -> "BigInt(input.size[0])" | Height -> "BigInt(input.size[1])"
@@ -612,11 +624,11 @@ let draw ctx : C.draw -> string = fun d ->
   use ctx "num";
   match d with
   | Background c -> Printf.sprintf "{ const size = rt.drawSize ?? input.size; emitAll(rt, rt.polygon([[0, 0], [size[0], 0], [size[0], size[1]], [0, size[1]]], rgba(rt, %s), null)); }" (local c)
-  | Point {at; ink} -> Printf.sprintf "{ const [x, y] = point(rt, %s); emitAll(rt, rt.polygon([[x, y], [x + 1, y], [x + 1, y + 1], [x, y + 1]], ink(rt, %s), null)); }" (local at) (local ink)
+  | Point {at; ink} -> use ctx "floatPoint"; Printf.sprintf "{ const [x, y] = floatPoint(rt, %s); emitAll(rt, rt.polygon([[x, y], [x + 1, y], [x + 1, y + 1], [x, y + 1]], ink(rt, %s), null)); }" (local at) (local ink)
   | Mark {mark; args} -> Printf.sprintf "markSet(rt, false, %s, %s);" (escape (kind_name mark)) (object_of args)
   | Batch {mark; args} -> Printf.sprintf "markSet(rt, true, %s, %s);" (escape (kind_name mark)) (object_of args)
   | Points {positions; ink} -> Printf.sprintf "{ const [count, position] = pointsAttr(rt, %s); emit(rt, {type: \"mark_set\", kind: \"point\", count, position, fill: ink(rt, %s)}); }" (local positions) (local ink)
-  | Path {path; args} -> Printf.sprintf "pathOf(rt, %s, %s);"
+  | Path {path; args} -> use ctx "floatPoint"; Printf.sprintf "pathOf(rt, %s, %s);"
       (escape (match path with C.Rounded_rect -> "rounded_rect" | Polygon -> "polygon" | Polyline -> "polyline")) (object_of args)
   | Text_run {at; text; ink; size} -> Printf.sprintf "if (typeof %s !== \"string\") rt.fail(\"E_TYPE\", \"Drawing text is text.\"); else if (%s !== \"\") { const [x, y] = point(rt, %s); emit(rt, {type: \"text\", x, y, size: Number(rt.coerce(\"int\", %s)), color: ink(rt, %s), text: %s}); }"
       (local text) (local text) (local at) (local size) (local ink) (local text)
@@ -672,7 +684,7 @@ and statement ctx depth (s : C.statement) =
   | Draw d -> line "%s%s" at (draw ctx d)
   | Diagnose_rows{rows;policy;index;handler;diagnostic;result}->
       if policy=Flow.Workspace.Range_last then
-        raise(Refused("E_WEB_SOURCE","Range-last diagnosis needs its native host.",s.source.span));
+        raise (Diagnostic.Error (Diagnostic.error ?span:s.source.span ~code:"E_WEB_SOURCE" "Range-last diagnosis needs its native host."));
       line "%s{" at;
       line "  const row%d = rt.diagnosticFirst(%s);" s.id(local rows);
       line "  if (row%d >= 0) {" s.id;
@@ -703,15 +715,19 @@ and statement ctx depth (s : C.statement) =
       line "    %s = BigInt(i%d); %s = Array.isArray(s%d) ? s%d[i%d] : rt.array_nth(s%d, i%d);" (local index) id (local item) id id id id id;
       statements ctx (depth + 2) body;
       line "  }"; line "}"
-  | Counted {first; last; count; index; item; limit; init; body} ->
+  | Counted {first; last; count; index; item; limit; stop; init; body} ->
       let id = s.id in
       line "%s{" at;
       line "  const f%d = rt.coerce(\"int\", %s), e%d = rt.coerce(\"int\", %s), n%d = e%d > f%d ? e%d - f%d : 0n;" id (local first) id (local last) id id id id id;
       line "  if (n%d > %dn) rt.fail(\"E_ITER_BOUND\", \"Core iteration exceeds its bound.\");" id limit;
       line "  %s = n%d;" (local count) id;
       statements ctx (depth + 1) init;
-      line "  for (let i%d = 0, c%d = Number(n%d); i%d < c%d; i%d++) {" id id id id id id;
-      line "    const j%d = BigInt(i%d); %s = j%d; %s = f%d + j%d;" id id (local index) id (local item) id id;
+      let exact_count=Int64.of_int limit>9007199254740991L in
+      line "  for (let i%d = %s, c%d = %s; i%d < c%d%s; i%d++) {" id
+        (if exact_count then "0n" else "0")id (Printf.sprintf (if exact_count then "n%d" else "Number(n%d)")id)id id
+        (Option.fold ~none:"" ~some:(fun n->" && !rt.truthy("^local n^")")stop)id;
+      line "    const j%d = %s; %s = j%d; %s = f%d + j%d;" id
+        (Printf.sprintf (if exact_count then "i%d" else "BigInt(i%d)")id)(local index)id(local item)id id;
       statements ctx (depth + 2) body;
       line "  }"; line "}"
   | Store {sequence; index; value} ->
@@ -732,13 +748,11 @@ and statement ctx depth (s : C.statement) =
       ctx.async <- true;
       if ctx.gpu region && ctx.kernel region = None then line "%s%s = await rt.gpuArray(%d);" at (local result) region
       else begin
-        let p = match P.of_region ctx.program.regions.(region) with
-          | Ok p -> p | Error (d :: _) -> raise (Refused (d.code,d.message,d.span))
-          | Error [] -> assert false in
-        let r=P.to_region p in
+        let p = ctx.program.regions.(region) in
+        let r=p in
         let dynamic = ctx.templated || Array.exists(fun(residual,term)->
           Flow.Eval.frame_dependent(Flow.Eval.Residual
-            (Flow.Eval.Private.with_bindings residual ~term [])))r.sources
+            (Flow.Eval.Residual.with_bindings residual ~term [])))r.sources
           || Array.exists Flow.Eval.frame_dependent r.uniforms in
         let plan = if dynamic then ", B" ^ string_of_int region else "" in
         if dynamic && not (Hashtbl.mem ctx.plans region) then
@@ -752,8 +766,8 @@ and statement ctx depth (s : C.statement) =
       end
 
 and binding_plan ?(fast=false) ?kernel packed =
-  let r=P.to_region packed in
-  let refuse message = raise (Refused ("E_WEB_SOURCE",message,None)) in
+  let r=packed in
+  let refuse message = raise (Diagnostic.Error (Diagnostic.error ~code:"E_WEB_SOURCE" message)) in
   if r.result<>R.Collect || Array.length r.outputs<>1 then
     refuse "Dynamic region arguments require a single Collect output.";
   let rec supported = function
@@ -768,35 +782,31 @@ and binding_plan ?(fast=false) ?kernel packed =
     if Array.length program.C.state_slots<>0 || program.call_slots<>0 then
       refuse "Region preparation cannot own state or call-index slots.";
     (* A capture is read by synchronous selected instructions, including workers. *)
-    let rec asynchronous statements=List.exists(fun (s:C.statement)->match s.node with
-      |Invoke _->true|If{yes;no;_}->asynchronous yes||asynchronous no
-      |Iterate{body;_}->asynchronous body|Counted{init;body;_}->asynchronous init||asynchronous body
-      |State_read{init;_}->asynchronous init|Protect{body;handler;_}->asynchronous body||asynchronous handler
-      |Diagnose_rows{handler;_}->asynchronous handler|_->false)statements in
-    let rec frame_input statements=List.exists(fun (s:C.statement)->match s.node with
-      |Assign(_,Frame Input)->true|If{yes;no;_}->frame_input yes||frame_input no
-      |Iterate{body;_}->frame_input body|Counted{init;body;_}->frame_input init||frame_input body
-      |State_read{init;_}->frame_input init|Protect{body;handler;_}->frame_input body||frame_input handler
-      |Diagnose_rows{handler;_}->frame_input handler|_->false)statements in
-    if uniform && frame_input program.body then needs_frame_value:=true;
+    let has predicate statements =
+      let found = ref false in
+      C.iter (fun statement -> if predicate statement then found := true) statements;
+      !found in
+    let asynchronous = has (fun (s : C.statement) -> match s.node with Invoke _ -> true | _ -> false) in
+    let input = has (fun (s : C.statement) -> match s.node with Assign (_, Frame Input) -> true | _ -> false) in
+    if uniform && input program.body then needs_frame_value:=true;
     if uniform && asynchronous program.body then
       refuse "Asynchronous region captures require a compiled synchronous preparation path.";
     fst(frame_result ~fast ~bindings:true ~internal:true program) in
   let source (residual,term) =
-    let view=Flow.Eval.Private.residual_view residual in
-    let residual=Flow.Eval.Private.with_bindings residual ~term view.bindings in
+    let view=Flow.Eval.Residual.residual_view residual in
+    let residual=Flow.Eval.Residual.with_bindings residual ~term view.bindings in
     let program=match Flow_ir.Core_lower.lower ~strict:true residual with
       |Ok p->p|Error form->refuse("Region input preparation: "^form) in
     "{type:"^ty_json term.Flow.Workspace.ty^",source:"^escape(prepare ~uniform:false program)^"}" in
   let uniform value =
-    let view=Flow.Eval.Private.residual_view r.residual in
+    let view=Flow.Eval.Residual.residual_view r.residual in
     let source:C.source={site=view.site;owner=view.owner;instance=view.instance;prefix=view.prefix;
       iter=List.map(fun i->C.Static_index i)view.iter;span=Some view.term.form.span} in
     let result=ref(-1) in
     let program=match Flow_ir.Core_lower.lower_draw ~root:(lazy r.residual)
       (fun ctx->result:=ctx.value source value) with
       |Ok p->{p with results=[| !result |]}|Error form->refuse("Region capture preparation: "^form) in
-    let ty=match value with Flow.Eval.Residual residual->(Flow.Eval.Private.residual_view residual).term.ty
+    let ty=match value with Flow.Eval.Residual residual->(Flow.Eval.Residual.residual_view residual).term.ty
       |v->Flow.Value.ty_of v in
     "{type:"^ty_json ty^",source:"^escape(prepare ~uniform:true program)^"}" in
   let rec facts slot = function
@@ -825,8 +835,7 @@ and frame_result ?store ?(fast=false) ?(kernel = fun _ -> None) ?(gpu = fun _ ->
   let body = Buffer.create 4096 in
   (* Once one region consumes computed locals, its producer Invokes need real
      source preparation too. Argument-free fixed exports keep data.bin calls. *)
-  let templated=bindings || Array.exists(fun r->match P.of_region r with
-    |Ok p->P.Private.argument_types p<>[||]|Error _->false)program.regions in
+  let templated=bindings || Array.exists(fun region->P.Private.argument_types region<>[||])program.regions in
   let ctx = { program; body; used = Hashtbl.create 8; map = []; async = false; gpu; state_slot; bindings; templated; plans=Hashtbl.create 4; fast;
     remembered=false; resident=false; kernel } in
   (* A drawing's loop memory, as native [Core_exec.prepare ~remember_loops]: a top-level loop or
@@ -867,7 +876,7 @@ and frame_result ?store ?(fast=false) ?(kernel = fun _ -> None) ?(gpu = fun _ ->
   if n > 0 then begin
     let names = List.init n local in
     let rec rows = function [] -> [] | l ->
-      let row = List.filteri (fun i _ -> i < 16) l and rest = List.filteri (fun i _ -> i >= 16) l in
+      let row = List.take 16 l and rest = List.drop 16 l in
       ("  let " ^ String.concat ", " row ^ ";\n") :: rows rest in
     List.iter (Buffer.add_string out) (rows names)
   end;
@@ -885,14 +894,14 @@ and frame_result ?store ?(fast=false) ?(kernel = fun _ -> None) ?(gpu = fun _ ->
 let frame ?store ?fast ?kernel ?gpu ?state_slot program =
   match frame_result ?store ?fast ?kernel ?gpu ?state_slot program with
   | result -> Ok (fst result)
-  | exception Refused (code, message, span) -> Error (Flow.Diagnostic.error ?span ~code message)
+  | exception Diagnostic.Error diagnostic -> Error diagnostic
 
 (* A region with arguments or frame-dependent inputs runs from a binding plan; this is whether one
    can be made for it, so a draw lowering may keep it a region on the web. *)
-let bindable packed = match binding_plan ~fast:true packed with _ -> true | exception (Refused _ | Not_found | Invalid_argument _ | Failure _) -> false
+let bindable packed = match binding_plan ~fast:true packed with _ -> true | exception Diagnostic.Error _ -> false
 
 let frame_map program =
   match frame_result program with
-  | _, map -> String.concat "" (List.map (fun (id, (s : Flow.Diagnostic.span)) ->
+  | _, map -> String.concat "" (List.map (fun (id, (s : Diagnostic.span)) ->
       Printf.sprintf "%d %d %d\n" id s.start s.finish) map)
-  | exception Refused _ -> ""
+  | exception Diagnostic.Error _ -> ""

@@ -72,7 +72,7 @@ let () =
             check (geometry_bytes expected = geometry_bytes actual)
               "Lisp source merge changed geometry, tags, or attribute order"
         | Error _, Error error ->
-            check (error.Sop.Diagnostic.code = "schema_mismatch")
+            check (error.Diagnostic.code = "schema_mismatch")
               "Lisp source merge failed for an unrelated reason"
         | _ -> fail "Lisp source merge changed success/refusal") [1;8];
       check (List.map geometry_bytes geometries = originals) "source merge mutated its inputs")

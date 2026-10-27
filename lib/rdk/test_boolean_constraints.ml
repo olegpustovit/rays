@@ -109,7 +109,7 @@ let test_coplanar_and_disjoint () =
     "disjoint faces produced constraints"
 
 let test_domain_exactness () =
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       Constraints.build ~grain:1 ~left:(left_triangle ())
         ~right:(crossing_triangle ()) () |> get |> signature) in
   if run 1 <> run 4 then fail "constraint plans differ between one and four domains"

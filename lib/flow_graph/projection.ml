@@ -46,7 +46,7 @@ let macro_lens (w : W.t) (call : S.t) =
   let rec go cur acc n =
     if n = 12 then acc, None else
     match Flow.Macro.expand_once ~state w.macros cur with
-    | Error (d : Flow.Diagnostic.t) -> acc, Some d.message
+    | Error (d : Diagnostic.t) -> acc, Some d.message
     | Ok next -> if next == cur then acc, None else go next (text next :: acc) (n + 1) in
   let steps, error = go call [ text call ] 0 in
   let template = match S.head call with
@@ -74,26 +74,10 @@ let last (e : S.t) = List.nth (S.children e) (List.length (S.children e) - 1)
 let root_of s = match String.index_opt s '.' with Some i -> String.sub s 0 i | None -> s
 let is_zone_head = function "for" | "fold" | "scan" | "sum" | "state" -> true | _ -> false
 
-let subterms (t : W.term) = match t.node with
-  | Lit _ | Text _ | Nil | Time | Ref_binding _ | Fn_ref _ -> []
-  | Vec l | List_lit l | Str l | List_op (_, l) | Hof (_, l) -> l
-  | Call { args; _ } | Op { args; _ } -> List.map snd args
-  | Call_fn { args; _ } -> args
-  | Graph_ref { inputs; _ } -> List.map snd inputs
-  | Let (bs, r) -> List.map snd bs @ [ r ]
-  | State {init; step; _} -> [init; step]
-  | Loop { accs; clauses; body; _ } -> List.map snd accs @ List.map snd clauses @ [ body ]
-  | With_error(a,b) -> [a;b]
-  | Error_rows{rows=a;mapper=b;_} -> [a;b]
-  | If (a, b, c) -> [ a; b; c ]
-  | Cond (arms, d) -> List.concat_map (fun (a, b) -> [ a; b ]) arms @ [ d ]
-  | Case (s, arms, d) -> (s :: List.map snd arms) @ [ d ]
-  | Fn { body; _ } -> [ body ]
-  | Record fs -> List.map snd fs
-  | Get (t, _) -> [ t ]
-  | Assoc (t, fs) -> t :: List.map snd fs
-  | Bypass t -> [ t ]
-  | Expanded { body; _ } -> [ body ]
+let subterms (term : W.term) = match term.node with
+  | W.Call_fn {args; _} -> args
+  | W.Fn {body; _} -> [body]
+  | _ -> W.children term
 
 let rec collect tbl forms (t : W.term) =
   Option.iter (fun p -> Hashtbl.replace tbl p t) t.path;
@@ -198,7 +182,7 @@ let macro_rows c (m : S.t) pos =
         | None -> []
         | Some r ->
             let n = List.length req in
-            List.filteri (fun i _ -> i >= n) pos |> List.mapi (fun j a ->
+            List.drop n pos |> List.mapi (fun j a ->
               row c ~kind:Rest (if j = 0 then r else Printf.sprintf "%s %d" r (j + 1)) (E.Pos (n + j)) (Some a))
             |> fun rows -> rows @ [ add c ("+ " ^ r) (E.Pos npos) None ] in
       req_rows @ rest_rows
@@ -212,7 +196,7 @@ let kind_rows c (k : Flow.Check.kind) pos kws =
     (* the first geometry slot is the header's in-port, not a row of the body *)
     let head_of i = i = 0 && slot_ty = Flow.Ty.geometry in
     if s.rest then
-      List.filteri (fun j _ -> j >= i) pos |> List.mapi (fun j a ->
+      List.drop i pos |> List.mapi (fun j a ->
         row c ~ty:slot_ty ~kind:Rest ~head:(head_of i && j = 0)
           (if j = 0 then s.name else Printf.sprintf "%s %d" s.name (j + 1))
           (E.Pos (i + j)) (Some a))
@@ -323,7 +307,7 @@ let call_rows c (e : S.t) h args =
                      (o.pos @ o.opt))
                    @ (match o.rest with
                       | Some (rn, ty) ->
-                          List.filteri (fun i _ -> i >= np) pos |> List.mapi (fun j a ->
+                          List.drop np pos |> List.mapi (fun j a ->
                             row c ~ty ~kind:Rest (if j = 0 then rn else Printf.sprintf "%s %d" rn (j + 1)) (E.Pos (np + j)) (Some a))
                           |> fun rows -> rows @ [ add c ("+ " ^ rn) (E.Pos (max npos np)) (Some ty) ]
                       | None -> [])
@@ -578,7 +562,7 @@ let reorderable (n : node) =
   n.zone = None && List.mem n.head [ "list"; "str"; "scene/merge" ]
 
 let of_graph ?(folded = fun _ -> true) (catalog : Flow.Check.catalog) (w : W.t) name =
-  Flow.Phase_timer.measure Project (fun () ->
+  Flow.Phase_timer.measure "project" (fun () ->
   let catalog = {catalog with Flow.Check.kinds =
     List.map (fun (node : W.node_definition) -> node.kind) w.nodes @ catalog.kinds} in
   let def = String.starts_with ~prefix:"def:" name in

@@ -1,6 +1,5 @@
 module Store = Store
 module Panels = Panels
-module Param = Param
 
 module History = struct
   type merge =
@@ -35,7 +34,7 @@ module History = struct
       let past = (t.present, t.label) :: t.past in
       let past, depth =
         if t.depth < t.capacity then past, t.depth + 1
-        else List.filteri (fun index _ -> index < t.capacity) past, t.capacity in
+        else List.take t.capacity past, t.capacity in
       { t with past; present = value; label; future = []; depth; merge = None }
 
   (* the present replaced in place: a continued gesture, or a repair that is no edit of the
@@ -75,7 +74,7 @@ module History = struct
 end
 
 module Keymap = struct
-  type trigger = Leader of string | Chord of Rays.Input.key * Rays.Input.key list
+  type trigger = Leader of string | Chord of Input.key * Input.key list
 
   (* What a symbol key types with Shift held (the US layout): the key event names the key, a
      binding names the symbol. *)
@@ -91,7 +90,7 @@ module Keymap = struct
         (* the sheets write each key apart: / o v *)
         "/ " ^ String.concat " " (List.init (String.length sequence) (fun i -> String.make 1 sequence.[i]))
     | Chord (key, modifiers) ->
-        let open Rays.Input in
+        let open Input in
         let key, modifiers = match key with
           | KeyChar c when List.mem Shift modifiers && shifted c <> None ->
               KeyChar (Option.get (shifted c)), List.filter (( <> ) Shift) modifiers
@@ -149,7 +148,7 @@ module Router = struct
     command.scope = None || command.scope = Some focus) commands
 
   let same_key a b = match a, b with
-    | Rays.Input.KeyChar a, Rays.Input.KeyChar b ->
+    | Input.KeyChar a, Input.KeyChar b ->
         Char.lowercase_ascii a = Char.lowercase_ascii b
     | _ -> a = b
 
@@ -158,12 +157,12 @@ module Router = struct
       match command.trigger with
       | Some (Chord (bound, modifiers)) when same_key bound key
           && List.for_all (fun modifier -> List.mem modifier keys) modifiers
-          && (bound <> Rays.Input.Tab || List.for_all (fun modifier ->
+          && (bound <> Input.Tab || List.for_all (fun modifier ->
                List.mem modifier keys = List.mem modifier modifiers)
-               [Rays.Input.Shift; Rays.Input.Alt])
+               [Input.Shift; Input.Alt])
           && List.for_all (fun modifier ->
                not (List.mem modifier keys) || List.mem modifier modifiers)
-               [Rays.Input.Meta; Rays.Input.Ctrl] ->
+               [Input.Meta; Input.Ctrl] ->
           Some (List.length modifiers, command)
       | _ -> None)
     |> List.fold_left (fun best candidate -> match best with
@@ -174,18 +173,18 @@ module Router = struct
   let fly (frame : Rays.Frame.t) =
     let open Rays in
     let exits = List.exists (function
-      | Event.KeyPressed (Input.Escape | Input.Space | Input.KeyChar '/')
-      | Event.WindowFocusLost -> true
-      | _ -> false) frame.events in
-    exits, { frame with events = List.filter (function
-      | Event.KeyPressed (Input.KeyChar '/') | Event.WindowFocusLost -> true
-      | Event.KeyPressed _ | Event.KeyReleased _ | Event.TextInput _
-      | Event.TextEditing _ -> false
-      | _ -> true) frame.events }
+      | Input.Key_pressed (Input.Escape | Input.Space | Input.KeyChar '/')
+      | Input.Focus_lost -> true
+      | _ -> false) frame.input.events in
+      exits, { frame with input = { frame.input with events = List.filter (function
+        | Input.Key_pressed (Input.KeyChar '/') | Input.Focus_lost -> true
+        | Input.Key_pressed _ | Input.Key_released _ | Input.Text_input _
+        | Input.Text_editing _ -> false
+        | _ -> true) frame.input.events } }
 
   let modifier = function
-    | Rays.Input.Shift | Rays.Input.Ctrl | Rays.Input.Alt
-    | Rays.Input.Meta -> true
+    | Input.Shift | Input.Ctrl | Input.Alt
+    | Input.Meta -> true
     | _ -> false
 
   (* A text field owns the keyboard except the Command/Ctrl chords it has no use for (its own are
@@ -198,39 +197,39 @@ module Router = struct
       | Input.KeyChar c -> List.mem (Char.lowercase_ascii c) [ 'a'; 'c'; 'v'; 'x'; 'z'; 'y' ]
       | Input.F12 -> false
       | _ -> true in
-    let modifiers = ref (Event.Private.keys_before ~previous:previous_keys ~held:frame.keys frame.events) in
+    let modifiers = ref (Input.keys_before ~previous:previous_keys ~held:frame.input.keys frame.input.events) in
     let actions, passed = List.fold_left (fun (actions, passed) event ->
-      modifiers := Event.Private.keys_after !modifiers event;
+      modifiers := Input.keys_after !modifiers event;
       match event with
-      | Event.KeyPressed key when not (owned key)
+      | Input.Key_pressed key when not (owned key)
           && (List.mem Input.Meta !modifiers || List.mem Input.Ctrl !modifiers || key = Input.F12) ->
           (match chord global focus !modifiers key with
            | Some command -> command :: actions, passed
            | None -> actions, event :: passed)
-      | _ -> actions, event :: passed) ([], []) frame.events in
-    List.rev actions, { frame with events = List.rev passed }
+      | _ -> actions, event :: passed) ([], []) frame.input.events in
+    List.rev actions, { frame with input = { frame.input with events = List.rev passed } }
 
   let step ?(previous_keys = []) keymap ~focus ~text_focus ~(frame : Rays.Frame.t) state =
     let open Rays in
     if text_focus then
       let actions, frame = text_chords keymap ~focus ~previous_keys ~frame in Idle, actions, frame
     else
-    let modifiers = ref (Event.Private.keys_before ~previous:previous_keys
-      ~held:frame.keys frame.events) in
+    let modifiers = ref (Input.keys_before ~previous:previous_keys
+      ~held:frame.input.keys frame.input.events) in
     let traversing = ref false in
     let state, actions, passed = List.fold_left (fun (state, actions, passed) event ->
-      modifiers := Event.Private.keys_after !modifiers event;
+      modifiers := Input.keys_after !modifiers event;
       let command = List.mem Input.Meta !modifiers || List.mem Input.Ctrl !modifiers in
       if !traversing then Idle, actions, event :: passed else match state, event with
-      | _, Event.KeyPressed Input.Tab when not command ->
+      | _, Input.Key_pressed Input.Tab when not command ->
           traversing := true;
           (match chord keymap focus !modifiers Input.Tab with
            | None -> Idle, actions, event :: passed
            | Some action -> Idle, action :: actions, passed)
-      | Idle, Event.KeyPressed (Input.KeyChar '/')
+      | Idle, Input.Key_pressed (Input.KeyChar '/')
           when not text_focus && not command && not (List.mem Input.Shift !modifiers) ->
           Pending "", actions, passed
-      | Idle, Event.KeyPressed key when not text_focus ->
+      | Idle, Input.Key_pressed key when not text_focus ->
           (* Shift and a symbol key is the symbol it types, when a chord is bound to that *)
           let typed = match key with
             | Input.KeyChar c when List.mem Input.Shift !modifiers ->
@@ -239,10 +238,10 @@ module Router = struct
           (match (match typed with Some _ -> typed | None -> chord keymap focus !modifiers key) with
            | Some action -> Idle, action :: actions, passed
            | None -> Idle, actions, event :: passed)
-      | Idle, Event.TextInput _ when actions <> [] -> Idle, actions, passed
+      | Idle, Input.Text_input _ when actions <> [] -> Idle, actions, passed
       | Idle, _ -> Idle, actions, event :: passed
-      | Pending _, Event.KeyPressed key when modifier key -> state, actions, passed
-      | Pending prefix, Event.KeyPressed (Input.KeyChar character) ->
+      | Pending _, Input.Key_pressed key when modifier key -> state, actions, passed
+      | Pending prefix, Input.Key_pressed (Input.KeyChar character) ->
           (* An exact sequence runs; a proper prefix opens the next page. *)
           (* / then Shift-/ is the sequence "?", as the sheets write it *)
           let character = if List.mem Input.Shift !modifiers
@@ -256,12 +255,12 @@ module Router = struct
                | Some (Leader sequence) -> String.starts_with ~prefix:typed sequence
                | _ -> false) commands -> Pending typed, actions, passed
            | None -> Idle, actions, passed)
-      | Pending _, (Event.TextInput _ | Event.TextEditing _) -> state, actions, passed
-      | Pending _, (Event.KeyPressed _ | Event.MousePressed _) -> Idle, actions, passed
-      | Pending _, Event.WindowFocusLost -> Idle, actions, event :: passed
+      | Pending _, (Input.Text_input _ | Input.Text_editing _) -> state, actions, passed
+      | Pending _, (Input.Key_pressed _ | Input.Pointer_pressed _) -> Idle, actions, passed
+      | Pending _, Input.Focus_lost -> Idle, actions, event :: passed
       | Pending _, _ -> state, actions, event :: passed)
-      (state, [], []) frame.events in
-    state, List.rev actions, { frame with events = List.rev passed }
+      (state, [], []) frame.input.events in
+    state, List.rev actions, { frame with input = { frame.input with events = List.rev passed } }
 end
 
 module Number = struct
@@ -275,9 +274,7 @@ module Number = struct
     | Some v when hi > lo -> Some (Float.max 0. (Float.min 1. ((v -. lo) /. (hi -. lo))))
     | _ -> None
 
-  let show v =
-    let short = Printf.sprintf "%.10g" v in
-    if String.contains short 'e' || not (Float.is_finite v) then Flow.Lisp.float v else short
+  let show v = Param.float_text ~decimal:true v
 
   (* the digits a text writes after its point *)
   let decimals text = match String.index_opt text '.' with

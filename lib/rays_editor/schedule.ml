@@ -17,7 +17,7 @@ let initial = { initialized = false; dirty = false;
   graphs = []; dependencies = Context.Dependencies.static }
 
 let step ?(live = false) value ~graphs ~effects ~context_changed ~force ~busy ~frame =
-  let dirty = value.dirty || effects.Parameter.cook || force in
+  let dirty = value.dirty || effects.Param.cook || force in
   let dependencies = if List.equal ( == ) graphs value.graphs then value.dependencies
     else List.fold_left (fun union graph ->
       Context.Dependencies.union union (Graph.dependencies graph))
@@ -27,7 +27,7 @@ let step ?(live = false) value ~graphs ~effects ~context_changed ~force ~busy ~f
           || Context.Dependencies.mem Context.Dependencies.Frame dependencies)) in
   let held = Frame.mouse_down Input.LeftButton frame in
   let desired = not value.initialized || dirty || dynamic in
-  let urgent = not value.initialized || effects.Parameter.cook || force in
+  let urgent = not value.initialized || effects.Param.cook || force in
   (* Live: while a drag holds the pointer, cook whenever the worker is idle,
      so each finished cook shows and the next picks up the latest value. *)
   let fire = if held then live && desired && not busy

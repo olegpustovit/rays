@@ -1,6 +1,9 @@
+open Core_model
 open Sop
 open Editor_document
-include Core_scope
+open Core_panes
+open Core_inspect
+open Core_scope
 
 (* the binding a selected path ends in, none for a keyword input, a result or a nested call *)
 let binding_name path =
@@ -178,7 +181,7 @@ let scope_add value key =
                edit itself does that *)
             [ graph ], None
         | [ path ] when List.length path >= 2 ->
-            List.filteri (fun i _ -> i < List.length path - 1) path,
+            List.take (max 0 (List.length path - 1)) path,
             (if arity > 0 then binding_name path else None)
         | _ ->
             (* nothing selected: a kind with an input reads the graph's result, so the text

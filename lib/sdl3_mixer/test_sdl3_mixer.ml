@@ -69,10 +69,6 @@ let run () =
    | Error _ -> fail "invalid channels returned the wrong error");
 
   let mixer = get (Mixer.create_memory ~sample_rate:48_000 ~channels:2) in
-  get (Mixer.set_gain mixer 0.75);
-  (match Mixer.set_gain mixer nan with
-   | Error { kind = Invalid_argument; _ } -> ()
-   | Ok () | Error _ -> fail "NaN mixer gain was accepted");
 
   let encoded = tiny_wav () in
   let audio = get (Audio.load_bytes mixer encoded) in
@@ -90,45 +86,22 @@ let run () =
          fail "mixer error text changed after a subsequent native call"
    | Ok audio -> ignore (Audio.destroy audio); fail "malformed audio loaded"
    | Error _ -> fail "malformed audio returned the wrong error");
-  (* a failed reload leaves the original usable; a good one is a new value *)
-  (match Audio.reload_bytes audio (Bytes.of_string "bad reload") with
-   | Error { kind = Mixer_error; _ } -> ()
-   | Ok replacement -> ignore (Audio.destroy replacement); fail "malformed reload succeeded"
-   | Error _ -> fail "malformed reload returned the wrong error");
-  let reloaded = get (Audio.reload_bytes audio (tiny_wav ())) in
-  if reloaded == audio then fail "encoded reload did not create an owned replacement";
-
   let track = get (Music.create mixer) in
   get (Music.set_audio track audio);
-  get (Music.set_volume track 0.5);
-  (match Music.set_volume track nan with
-   | Error { kind = Invalid_argument; _ } -> ()
-   | Ok () | Error _ -> fail "NaN track volume was accepted");
   get (Music.play track ~loops:1 ~fade_in_ms:5 ());
   let generated = get (Mixer.generate mixer ~frames:256) in
   if Bytes.length generated.pcm_f32 <> 256 * 2 * 4
       || generated.mixed_bytes <= 0 || not (any_nonzero generated.pcm_f32) then
     fail "memory mixer did not generate finite non-silent float32 PCM";
-  get (Music.pause track);
-  get (Music.resume track);
   get (Music.stop track ~fade_out_ms:2 ());
 
   let channels = get (Channels.create mixer ~count:32) in
-  if Channels.count channels <> 32 then fail "bounded channel count changed";
   let selected = get (Channels.play channels ~loops:1 ~fade_in_ms:1 audio) in
   get (Channels.set_volume channels selected 0.4);
-  if not (get (Channels.playing channels selected)) then
-    fail "channel playback state changed";
-  get (Channels.pause channels selected);
-  get (Channels.resume channels selected);
-  get (Channels.stop channels selected ~fade_out_ms:1 ());
-  (match Channels.playing channels 32 with
-   | Error { kind = Invalid_argument; _ } -> ()
-   | Ok _ | Error _ -> fail "out-of-range channel was accepted");
   (match Channels.set_volume channels 0 nan with
    | Error { kind = Invalid_argument; _ } -> ()
    | Ok () | Error _ -> fail "NaN channel volume was accepted");
-  (match Domain.spawn (fun () -> Channels.playing channels 0) |> Domain.join with
+  (match Domain.spawn (fun () -> Channels.play channels audio) |> Domain.join with
    | Error { kind = Wrong_domain; _ } -> ()
    | Ok _ | Error _ -> fail "concurrent channel misuse was not rejected");
   for index = 0 to 31 do
@@ -137,7 +110,6 @@ let run () =
   (match Channels.play channels audio with
    | Error { kind = Mixer_error; _ } -> ()
    | Ok _ | Error _ -> fail "full channel bank did not reject an unnamed channel");
-  for index = 0 to 31 do get (Channels.stop channels index ()) done;
   get (Channels.destroy channels);
   get (Channels.destroy channels);
 
@@ -156,14 +128,13 @@ let run () =
   (match Mixer.destroy mixer with
    | Error { kind = Parent_has_dependents; _ } -> ()
    | Ok () | Error _ -> fail "mixer teardown ignored child handles");
-  (match Domain.spawn (fun () -> Mixer.set_gain mixer 1.) |> Domain.join with
+  (match Domain.spawn (fun () -> Mixer.generate mixer ~frames:1) |> Domain.join with
    | Error { kind = Wrong_domain; _ } -> ()
    | Ok _ | Error _ -> fail "wrong-domain mixer access was not rejected");
   get (Music.destroy track);
   get (Music.destroy track);
   get (Audio.destroy audio);
-  get (Audio.destroy reloaded);
-  (match Music.pause track with
+  (match Music.stop track () with
    | Error { kind = Destroyed; _ } -> ()
    | Ok _ | Error _ -> fail "stale track access was not rejected");
   get (Mixer.destroy mixer);
@@ -178,8 +149,6 @@ let run () =
   let device_track = get (Music.create device) in
   get (Music.set_audio device_track device_audio);
   get (Music.play device_track ());
-  get (Music.pause device_track);
-  get (Music.resume device_track);
   get (Music.stop device_track ());
   get (Music.destroy device_track);
   get (Audio.destroy device_audio);

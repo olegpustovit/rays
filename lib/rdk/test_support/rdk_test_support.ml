@@ -40,12 +40,12 @@ module Analysis = struct
     let lo a = Array.fold_left Float.min infinity a
     and hi a = Array.fold_left Float.max neg_infinity a in
     let open Rays_math in
-    let min = Vec3.create (lo p.x) (lo p.y) (lo p.z)
-    and max = Vec3.create (hi p.x) (hi p.y) (hi p.z) in
+    let min = Rays_math.Vec3.create (lo p.x) (lo p.y) (lo p.z)
+    and max = Rays_math.Vec3.create (hi p.x) (hi p.y) (hi p.z) in
     Some { min; max;
-      center = Vec3.create ((min.x +. max.x) /. 2.) ((min.y +. max.y) /. 2.)
+      center = Rays_math.Vec3.create ((min.x +. max.x) /. 2.) ((min.y +. max.y) /. 2.)
           ((min.z +. max.z) /. 2.);
-      size = Vec3.create (max.x -. min.x) (max.y -. min.y) (max.z -. min.z) }
+      size = Rays_math.Vec3.create (max.x -. min.x) (max.y -. min.y) (max.z -. min.z) }
 end
 
 let same_float_array left right =

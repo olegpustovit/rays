@@ -6,7 +6,9 @@ entry and editor factory, next to the cook that reads it. A Lisp `defnode` in
 `lib/flow_sop/nodes/<key>.rays` is the alternative declaration: its header owns
 the schema and defaults, its body owns the operation, and Flow_sop builds its
 editor factory. Do not keep an OCaml registration for a ported kind; keep the
-RDK kernel as its test oracle through the SOP Lisp migration. There is no typed
+existing parity coverage until all its Lisp-output golden cases are captured,
+then delete the OCaml twin, parity-only RDK kernel and parity tests. Do not
+create an oracle library. There is no typed
 OCaml constructor: Lisp and `Edit_graph.instantiate` are the ways to build a
 node. Defaults come only from the declaration. Do not add a separate function
 name, argument list, typed default override or argument-presence toggle.
@@ -18,7 +20,7 @@ A parameter-free node uses `type parameters = unit` with the same derivation;
 do not invent a field. Structured kernel arguments are assembled in the cook.
 The combined deterministic manifest, generated from PPX factories and embedded
 Lisp declarations, is the node-menu registry. The source embedding reuses
-`tools/lisp/embed.exe`; `Flow_sop.Catalog.check_workspace` loads the library
+`lib/flow/embed.exe`; `Flow_sop.Catalog.check_workspace` loads the library
 definitions, and `Flow_sop.Lower.t.factories` supplies their factories to the
 editor beside the native list. Do not add a parallel hand-written factory list,
 mutable registration initializer, or menu-only parameter defaults. Catalog
@@ -52,7 +54,7 @@ labels remain integer values for cache keys and drives. Ordinary nodes omit this
 callback.
 
 For SOP-backed inspectors, declare typed templates beside each operator with
-`Sop.Parameter` (or `[@@deriving sop_params]`) and attach them to that
+`Param` (or `[@@deriving sop_params]`) and attach them to that
 node. Use `Sop.Custom.node/create/map` for custom parameterized nodes,
 and `Pxui_shell.Inspector.fields` plus `Node.apply_parameters` for selected-node
 editing. Do not recreate a sketch-wide shadow parameter record, copy
@@ -61,7 +63,7 @@ PXUI.
 
 Workflow for a new node: the `add-sop` skill.
 
-Boundary checks: the editor clamps its numeric fields. `Node.parameters` uses `Parameter.cook_text` of the values.
+Boundary checks: the editor clamps its numeric fields. `Node.parameters` uses `Param.cook_text` of the values.
 Use `[@@sop.validate fun parameters -> ...]` on the record for a pure check
 that involves several fields or encoded values. It runs before operator
 construction for factory rebuilds; inspector writes return
@@ -84,6 +86,6 @@ Value operators (`+`, `range`, `value/rand`, ...) are built into `lib/flow`, nev
 `lib/sop_catalog/flow_manifest.sexp` is generated from the registered OCaml factories,
 embedded Lisp declarations (with `(body lisp)` and checked `(calls ...)`),
 and the scene, World and settings kinds of `Editor_document.Contexts`. Its runtest rule diffs the live catalog; accept an
-intended metadata change with `dune promote`, as for the API manifest.
+intended metadata change with `dune promote`.
 `lib/flow`'s tests read this snapshot (`Flow.Check.catalog_of_manifest`); `rays` checks and opens a
 `.rays` sketch against the live catalog it runs with; nothing is generated, so nothing is stale.

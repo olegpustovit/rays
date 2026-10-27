@@ -3,38 +3,29 @@
  (public_name rays.ogpu)
  (modules Ogpu Impl)
  (libraries ogpu_core)
- (virtual_modules Impl)
- (default_implementation ogpu_metal))
+ (virtual_modules Impl))
 
 (executable
  (name test_main)
  (modules test_main test_ogpu_foundation test_ogpu_shader test_ogpu_surface test_ogpu_binding test_ogpu_pipeline test_ogpu_acceleration test_ogpu_validation)
- (libraries ogpu))
+ (libraries ogpu ogpu_mock))
 
 (rule
- (aliases runtest test_ogpu_foundation)
- (action (run %{exe:test_main.exe} test_ogpu_foundation)))
+ (alias runtest)
+ (action
+  (progn
+   (run %{exe:test_main.exe} test_ogpu_foundation)
+   (run %{exe:test_main.exe} test_ogpu_shader)
+   (run %{exe:test_main.exe} test_ogpu_surface)
+   (run %{exe:test_main.exe} test_ogpu_binding)
+   (run %{exe:test_main.exe} test_ogpu_pipeline)
+   (run %{exe:test_main.exe} test_ogpu_acceleration)
+   (run %{exe:test_main.exe} test_ogpu_validation))))
 
-(rule
- (aliases runtest test_ogpu_shader)
- (action (run %{exe:test_main.exe} test_ogpu_shader)))
-
-(rule
- (aliases runtest test_ogpu_surface)
- (action (run %{exe:test_main.exe} test_ogpu_surface)))
-
-(rule
- (aliases runtest test_ogpu_binding)
- (action (run %{exe:test_main.exe} test_ogpu_binding)))
-
-(rule
- (aliases runtest test_ogpu_pipeline)
- (action (run %{exe:test_main.exe} test_ogpu_pipeline)))
-
-(rule
- (aliases runtest test_ogpu_acceleration)
- (action (run %{exe:test_main.exe} test_ogpu_acceleration)))
-
-(rule
- (aliases runtest test_ogpu_validation)
- (action (run %{exe:test_main.exe} test_ogpu_validation)))
+(rule (alias test_ogpu_foundation) (action (run %{exe:test_main.exe} test_ogpu_foundation)))
+(rule (alias test_ogpu_shader) (action (run %{exe:test_main.exe} test_ogpu_shader)))
+(rule (alias test_ogpu_surface) (action (run %{exe:test_main.exe} test_ogpu_surface)))
+(rule (alias test_ogpu_binding) (action (run %{exe:test_main.exe} test_ogpu_binding)))
+(rule (alias test_ogpu_pipeline) (action (run %{exe:test_main.exe} test_ogpu_pipeline)))
+(rule (alias test_ogpu_acceleration) (action (run %{exe:test_main.exe} test_ogpu_acceleration)))
+(rule (alias test_ogpu_validation) (action (run %{exe:test_main.exe} test_ogpu_validation)))

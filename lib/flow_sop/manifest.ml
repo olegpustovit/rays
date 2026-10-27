@@ -71,7 +71,7 @@ let entry ?facts:declaration ?(keyword_inputs = []) ?(properties = []) ~qualifie
     | fields -> "(fields\n        " ^
         String.concat "\n        " (List.map field fields) ^ ")" in
   let properties = [
-    group "key" [quote key]; group "aliases" [];
+    group "key" [quote key];
     group "operation" [quote operation]; group "label" [quote label];
     strings "category" category; group "slots" slots; fields; outputs result]
     @ (if keyword_inputs = [] then [] else [strings "keyword-inputs" keyword_inputs])

@@ -104,7 +104,7 @@ let test_boundary_components () =
       ~max_groups:1 source) "boundary component group-count preflight";
   expect_invalid (fun () -> Group_ops.group_boundary_components ~prefix:"rim"
       ~max_payload_bytes:0 source) "boundary component payload preflight";
-  let closed = Box_generator.box ~size:(Vec3.create 1. 1. 1.) () |> get_ok
+  let closed = Box_generator.box ~size:(Rays_math.Vec3.create 1. 1. 1.) () |> get_ok
       |> Fuse_grid.fuse ~tolerance:0. ~attributes:Fuse_reduce.Average_numeric |> get_ok
       |> Group_ops.group_boundary_components ~prefix:"closed" |> get_ok in
   check (Geometry.find_group ~owner:Group.Point "closed__0" closed = None)

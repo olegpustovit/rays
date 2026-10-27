@@ -1,8 +1,7 @@
 (* The workspace text pane: three tabs over the Lisp text.
    Selection prints the selected binding's top-level ancestor with its upstream
    closure and marks the selection; Graph prints the active graph; Document is
-   the whole workspace, an editable draft with an atomic Check and apply.  The
-   study's Lisp panel (prototype/src/e4.js) is the behavioural reference.
+   the whole workspace, an editable draft with an atomic Check and apply.
 
    Pure state and text here; [view] draws it and returns intents, [Core]
    applies them (the model is never touched inside [Ui.frame]). *)
@@ -17,7 +16,7 @@ type shown = {
   mark : (int * int) option;  (* byte span of the selected binding in [text] *)
   key : path;  (* what the Selection tab shows: the selected binding's path, else [graph] *)
   applied : string Lazy.t;  (* the whole document's text, for the draft's dirty mark *)
-  body : (S.t * (int * Flow.Diagnostic.span) list) option;  (* the graph's body and the spans of [text], for the caret *)
+  body : (S.t * (int * Diagnostic.span) list) option;  (* the graph's body and the spans of [text], for the caret *)
   source : S.t list;
   spans : Flow.Lisp.spans;
   applied_spans : Flow.Lisp.spans Lazy.t;
@@ -38,7 +37,7 @@ type request = { select : int * int; splice : (int * int * string) list }
 
 (* The diagnostics found in the text [at]; a later text shows one only while the text up to the end
    of its line still reads the same ({!visible}), so no mark names a line it has drifted from. *)
-type checked = { at : string; found : Flow.Diagnostic.t list }
+type checked = { at : string; found : Diagnostic.t list }
 
 (* One Graph tab's unapplied text, the document it began from and the errors of its last apply:
    every graph keeps its own. *)
@@ -46,7 +45,7 @@ type slot = { gtext : string; gbase : Editor_document.Workspace_doc.t option; ge
 
 (* The parse of a draft: [found] is [None] until [seen] has rested for the debounce, and
    belongs to [seen] alone. *)
-type live = { seen : string; since : float; found : Flow.Diagnostic.t list option }
+type live = { seen : string; since : float; found : Diagnostic.t list option }
 
 type state = {
   tab : tab;
@@ -177,7 +176,7 @@ let mark spans (found : (S.t option * S.t) option) = match found with
   | None -> None
   | Some (p, v) ->
       (match Option.bind p (span_of spans), span_of spans v with
-       | Some a, Some b -> Some (a.Flow.Diagnostic.start, b.finish)
+       | Some a, Some b -> Some (a.Diagnostic.start, b.finish)
        | None, Some b -> Some (b.start, b.finish)
        | _ -> None)
 
@@ -203,7 +202,7 @@ let binding_at (shown : shown) byte =
   | None -> None
   | Some (body, spans) ->
       let holds (f : S.t) = match span_of spans f with
-        | Some s -> s.Flow.Diagnostic.start <= byte && byte <= s.finish | None -> false in
+        | Some s -> s.Diagnostic.start <= byte && byte <= s.finish | None -> false in
       (* the nested node the byte is in, innermost: a step of a ->, a call inside a call *)
       let rec nested prefix leaf (v : S.t) =
         let body = enter v in
@@ -220,7 +219,7 @@ let binding_at (shown : shown) byte =
             let inside leaf v = Some (nested prefix leaf v) in
             (match List.find_map (fun ((p : S.t), v) ->
               match span_of spans p, span_of spans v with
-              | Some a, Some b when a.Flow.Diagnostic.start <= byte && byte <= b.Flow.Diagnostic.finish ->
+              | Some a, Some b when a.Diagnostic.start <= byte && byte <= b.Diagnostic.finish ->
                   inside (Flow_graph.Flow_edit.pat_key p) v
               | _ -> None) bindings with
              | Some _ as found -> found
@@ -244,12 +243,12 @@ let reference_target source ~from name =
     | Some ("for" | "sum" | "fold" | "scan" | "state"), _ :: args ->
         List.concat_map (fun (arg : S.t) -> match arg.node with
           | S.Vec ps -> List.concat_map (fun (p, _) -> E.pat_names p) (pairs ps)
-          | _ -> []) (List.filteri (fun i _ -> i < List.length args - 1) args)
+          | _ -> []) (List.take (max 0 (List.length args - 1)) args)
     | _ -> [] in
   let input prefix = match prefix with
     | [graph] -> Option.bind (root_form source graph) (fun root ->
         let params = List.find_map (fun (arg : S.t) -> match arg.node with S.Vec ps -> Some ps | _ -> None)
-          (List.filteri (fun i _ -> i > 1) (S.children root)) in
+          (List.drop 2 (S.children root)) in
         if Option.fold ~none:false ~some:(fun ps -> List.exists (fun p -> List.mem name (parameter p)) ps) params
         then Some [graph; ":" ^ name] else None)
     | _ -> None in
@@ -294,7 +293,7 @@ let definition_at (shown : shown) byte =
 
 let path_mark source spans = function
   | [graph] -> Option.bind (root_form source graph) (fun root ->
-      Option.map (fun (span : Flow.Diagnostic.span) -> span.start, span.finish) (span_of spans root))
+      Option.map (fun (span : Diagnostic.span) -> span.start, span.finish) (span_of spans root))
   | [graph; input] when String.starts_with ~prefix:":" input ->
       let name = String.sub input 1 (String.length input - 1) in
       Option.bind (root_form source graph) (fun root ->
@@ -302,9 +301,9 @@ let path_mark source spans = function
           | S.Vec ps -> List.find_map (fun (p : S.t) ->
               let pattern = match p.node with S.List (p :: _) -> p | _ -> p in
               if List.mem name (Flow_graph.Flow_edit.pat_names pattern) then
-                Option.map (fun (span : Flow.Diagnostic.span) -> span.start, span.finish) (span_of spans p)
+                Option.map (fun (span : Diagnostic.span) -> span.start, span.finish) (span_of spans p)
               else None) ps
-          | _ -> None) (List.filteri (fun i _ -> i > 1) (S.children root)))
+          | _ -> None) (List.drop 2 (S.children root)))
   | path -> mark spans (binding source path)
 
 (* the bindings of a scene graph that are cameras (the values of [scene/root :camera]) *)
@@ -355,7 +354,7 @@ let closure (root : S.t) top =
 (* Build the complete candidate graph before checking: dependent bindings may
    change type together, so checking individual replacements is incorrect. *)
 let selection_form source path form =
-  let error message = Error (Flow.Diagnostic.error ~code:"E_EDIT" message) in
+  let error message = Error (Diagnostic.error ~code:"E_EDIT" message) in
   match path, scope form with
   | graph :: top :: _, Some (patches, result) ->
       let printed f = fst (Flow.Lisp.print [f]) in
@@ -395,7 +394,7 @@ let selection_form source path form =
    replaces the graph's; a Selection closure is patched into it ({!selection_form}).  The errors
    that are not the reader's carry no position. *)
 let graph_op source ~graph ?selection text =
-  let error message = Error (Flow.Diagnostic.error ~code:"E_EDIT" message) in
+  let error message = Error (Diagnostic.error ~code:"E_EDIT" message) in
   let set form = Flow_graph.Flow_edit.Set_graph { name = graph; form } in
   match S.parse text, selection with
   | Error d, _ -> Error d
@@ -463,9 +462,9 @@ let patched_shown previous workspace shown =
           body = (match shown.body, body with Some _, Some body -> Some (body, spans) | _ -> None);
           mark = Option.map (fun (a,b) ->
             (* Selection marks are form boundaries in the repaired span map. *)
-            let boundary old = List.find_map (fun (id, (span : Flow.Diagnostic.span)) ->
-              if span.start = old then Option.map (fun s -> s.Flow.Diagnostic.start) (List.assoc_opt id spans)
-              else if span.finish = old then Option.map (fun s -> s.Flow.Diagnostic.finish) (List.assoc_opt id spans)
+            let boundary old = List.find_map (fun (id, (span : Diagnostic.span)) ->
+              if span.start = old then Option.map (fun s -> s.Diagnostic.start) (List.assoc_opt id spans)
+              else if span.finish = old then Option.map (fun s -> s.Diagnostic.finish) (List.assoc_opt id spans)
               else None) shown.spans in
             Option.value ~default:a (boundary a), Option.value ~default:b (boundary b)) shown.mark})
         (Flow.Lisp.patch_atoms (Lazy.force shown.applied, applied_spans) (present applied_spans)))))
@@ -499,7 +498,7 @@ let shown ?workspace state ~(source : S.t list) ~graph ~selected =
    then address its argument's child; no text is parsed or searched. *)
 let scrub_op (shown : shown) (start, finish) replacement =
   let module F = Flow_graph.Flow_edit in
-  let id = List.find_map (fun (id, (span : Flow.Diagnostic.span)) ->
+  let id = List.find_map (fun (id, (span : Diagnostic.span)) ->
     if id <> 0 && span.start = start && span.finish = finish then Some id else None) shown.spans in
   Option.bind id (fun id ->
   if not (S.number replacement) then None else
@@ -721,12 +720,12 @@ let command state = function
 
 (* ---- errors ---- *)
 
-let line_of text (d : Flow.Diagnostic.t) = match d.position, d.span with
+let line_of text (d : Diagnostic.t) = match d.position, d.span with
   | Some p, _ -> Some p.line
-  | None, Some s -> Some (Flow.Diagnostic.position_of_offset text s.start).line
+  | None, Some s -> Some (Diagnostic.position_of_offset text s.start).line
   | None, None -> None
 
-let real_errors = List.filter (fun (d : Flow.Diagnostic.t) -> d.severity = Flow.Diagnostic.Error)
+let real_errors = List.filter (fun (d : Diagnostic.t) -> d.severity = Diagnostic.Error_severity)
 
 (* the byte where 1-based [line] of [text] ends *)
 let line_stop text line = line_end text (line_start text line)
@@ -739,12 +738,12 @@ let symbol_spans text = match S.parse text with
         (match f.node with S.Sym name -> (name, f.span) :: acc | _ -> acc) (S.children f) in
       List.rev (List.fold_left walk [] forms)
 
-let symbol_at text byte = List.find_map (fun (name, (span : Flow.Diagnostic.span)) ->
+let symbol_at text byte = List.find_map (fun (name, (span : Diagnostic.span)) ->
   if span.start <= byte && byte <= span.finish then Some name else None) (symbol_spans text)
 
-let references text name = List.filter_map (fun (n, (span : Flow.Diagnostic.span)) ->
+let references text name = List.filter_map (fun (n, (span : Diagnostic.span)) ->
   if n <> name then None else
-  let line = (Flow.Diagnostic.position_of_offset text span.start).line in
+  let line = (Diagnostic.position_of_offset text span.start).line in
   Some (span.start, String.trim (String.sub text (line_start text line) (line_stop text line - line_start text line)))) (symbol_spans text)
 
 
@@ -755,7 +754,7 @@ let visible (c : checked) text =
   let n = min (String.length c.at) (String.length text) in
   let shared = ref 0 in
   while !shared < n && c.at.[!shared] = text.[!shared] do incr shared done;
-  List.filter (fun (d : Flow.Diagnostic.t) -> match line_of c.at d with
+  List.filter (fun (d : Diagnostic.t) -> match line_of c.at d with
     | Some line -> !shared >= max (line_stop c.at line) (match d.span with Some s -> s.finish | None -> 0)
     | None -> false) c.found
 
@@ -799,16 +798,16 @@ let summary state =
      | d :: _, Some draft, _ ->
          Printf.sprintf ", error%s: %s"
            (match line_of draft d with Some l -> Printf.sprintf " at line %d" l | None -> "")
-           (Flow.Diagnostic.to_string d)
+           (Diagnostic.to_string d)
      | _, _, d :: _ ->
          Printf.sprintf ", error%s: %s"
            (match Option.bind state.binding_draft (fun (_, t) -> line_of t d) with
             | Some l -> Printf.sprintf " at line %d" l | None -> "")
-           (Flow.Diagnostic.to_string d)
-     | d :: _, None, _ -> ", error: " ^ Flow.Diagnostic.to_string d
+           (Diagnostic.to_string d)
+     | d :: _, None, _ -> ", error: " ^ Diagnostic.to_string d
      | [], _, [] ->
          (match graph_errors state @ live_errors state with
-          | d :: _ -> ", error: " ^ Flow.Diagnostic.to_string d
+          | d :: _ -> ", error: " ^ Diagnostic.to_string d
           | [] -> ""))
   ^ (match List.sort compare (List.map fst state.graphs) with
      | [] -> "" | names -> ", graph drafts: " ^ String.concat " " names)
@@ -836,7 +835,7 @@ type intent =
   | Graph_scrub of string * string * bool
   | Binding_scrub of path * string * bool
   | Literal_scrub of { source : S.t list; op : Flow_graph.Flow_edit.op;
-      position : Flow.Diagnostic.position; fallback : intent }
+      position : Diagnostic.position; fallback : intent }
   | Toggle_parinfer
   | Picker of (int * int * bool) option
   | Open_graph of string
@@ -858,14 +857,13 @@ let dirty state (shown : shown) = match state.draft with
    the new literal while it is edited. *)
 let colour_popup ui ~at text (a, b) =
   let module Ui = Pxui.Ui in
-  let module Color = Rays.Color in
+  let module Color = Rays_math.Color in
   let theme = Ui.theme ui in
   let literal = String.sub text (a + 1) (b - a - 2) in
-  let colour = Result.value (Color.hex literal) ~default:Color.white in
-  let r, g, bl, _ = Color.to_floats colour in
-  let clamp x = max 0 (min 255 (int_of_float (Float.round (x *. 255.)))) in
+  let colour = Result.value (Rays_math.Color.hex literal) ~default:Rays_math.Color.white in
+  let r, g, bl, _ = Rays_math.Color.to_floats colour in
   let alpha = if String.length literal = 9 then String.sub literal 7 2 else "" in
-  let hex r g b = Printf.sprintf "#%02x%02x%02x%s" (clamp r) (clamp g) (clamp b) alpha in
+  let hex r g b = Rays_math.Color.to_hex_string (Color.of_unit_floats r g b) ^ alpha in
   let shown = hex r g bl in
   Ui.popup ui ~stroke:(Pxui.Theme.edge theme) ~at ~width:300. ~height:24. "text-colour" (fun () ->
     let box, cx, cy, cw = Ui.inspector_row ui ~width:300. ~key:"text-colour-row" ~label:"colour" () in
@@ -874,7 +872,7 @@ let colour_popup ui ~at text (a, b) =
       let hex_x = cx +. 28. in
       let typed = Pxui_shell.Kit.colour ui ~key:"text-colour" ~at:(cx, cy) ~w:92. ~swatch:colour ~hex:shown in
       let from_hex = if typed = shown then None else
-          Option.map (fun c -> let r, g, b, _ = Color.to_floats c in hex r g b) (Result.to_option (Color.hex typed)) in
+          Option.map (fun c -> let r, g, b, _ = Rays_math.Color.to_floats c in hex r g b) (Result.to_option (Rays_math.Color.hex typed)) in
       let sliders_x = hex_x +. 72. in
       let field_w = (Float.max 60. (cw -. 100.) -. 16.) /. 3. in
       let from_slider = List.find_map Fun.id (List.mapi (fun index (axis, cur) ->
@@ -962,7 +960,7 @@ let view ui ~bounds:(x, y, width, height) ~tabs_right ~vocab ~names ~time state 
       | Some f -> find_all ~case:f.case f.query text | None -> [] in
     let current = Option.bind state.find (fun f -> find_current f matches) in
     (* every match is a band, the current one also a bar under it; the view goes to the current one *)
-    let spans = spans @ List.filteri (fun i _ -> i < 2000) matches in
+    let spans = spans @ List.take 2000 matches in
     let shown_chips = chips @ (match current with
       | Some (a, b) -> [ a, b, theme.accent ] | None -> []) in
     let reveal = match current with Some (a, _) -> Some a | None -> reveal in
@@ -978,9 +976,9 @@ let view ui ~bounds:(x, y, width, height) ~tabs_right ~vocab ~names ~time state 
         emit (Jump_definition path)) target in
     let text', submitted = Ui.text_area_submit ui ~at:(x, ey) ~w:width ~h:area_h
         ~wrap:state.wrap ~errors:(List.filter_map (line_of text) errors)
-        ~messages:(List.filter_map (fun (d : Flow.Diagnostic.t) ->
+        ~messages:(List.filter_map (fun (d : Diagnostic.t) ->
           Option.map (fun line ->
-            line, Option.map (fun (s : Flow.Diagnostic.span) -> s.start, s.finish) d.span,
+            line, Option.map (fun (s : Diagnostic.span) -> s.start, s.finish) d.span,
             d.code ^ "  " ^ String.map (function '\n' -> ' ' | c -> c) d.message) (line_of text d)) errors)
         ~spans ?reveal ~reveal_nonce:state.nonce ?select:(Option.map (fun r -> r.select) state.request)
         ?splice:(Option.map (fun r -> r.splice) state.request) ~language
@@ -1008,7 +1006,7 @@ let view ui ~bounds:(x, y, width, height) ~tabs_right ~vocab ~names ~time state 
            if text <> shown.text || start < 0 || finish > String.length text
              || text' <> String.sub text 0 start ^ replacement
                  ^ String.sub text finish (String.length text - finish) then None
-           else Option.map (fun op -> op, Flow.Diagnostic.position_of_offset text start) (scrub_op shown range replacement)) in
+           else Option.map (fun op -> op, Diagnostic.position_of_offset text start) (scrub_op shown range replacement)) in
          emit (match literal with Some (op, position) -> Literal_scrub {source = shown.source; op; position; fallback}
            | None -> fallback)
      | Some `Done -> emit (scrub text' true)
@@ -1115,7 +1113,7 @@ let view ui ~bounds:(x, y, width, height) ~tabs_right ~vocab ~names ~time state 
     let hint = "\xe2\x8c\x98\xe2\x86\xb5" in
     (* the caret's line and column, 1-based, in the status row's label *)
     let position = Option.map (fun byte ->
-      let p = Flow.Diagnostic.position_of_offset text' (min byte (String.length text')) in
+      let p = Diagnostic.position_of_offset text' (min byte (String.length text')) in
       Printf.sprintf "%d:%d" p.line p.col) !caret in
     let apply_w = Pxui_shell.Kit.button_width ui ~hint "Check and apply" in
     let by = ty +. 1. +. ((bar -. 20.) /. 2.) in
@@ -1153,12 +1151,12 @@ let view ui ~bounds:(x, y, width, height) ~tabs_right ~vocab ~names ~time state 
       let tail = if state_label <> "" then Pxui_shell.Kit.cap_width ui state_label +. 20. else 12. in
       let ty = Pxui_shell.Kit.text_y ui y h in
       (match errors with
-       | (first : Flow.Diagnostic.t) :: _ ->
+       | (first : Diagnostic.t) :: _ ->
            let count = Printf.sprintf "%d error%s" (List.length errors) (if List.length errors = 1 then "" else "s") in
            Ui.Paint.text paint ~at:(tx, ty) ~color:(Pxui.Theme.invalid) count;
            let dx = tx +. Ui.Paint.text_width paint count +. 8. in
            let detail = (match line_of text first with Some l -> Printf.sprintf "line %d \xc2\xb7 " l | None -> "")
-             ^ String.map (function '\n' -> ' ' | c -> c) (Flow.Diagnostic.to_string first) in
+             ^ String.map (function '\n' -> ' ' | c -> c) (Diagnostic.to_string first) in
            Ui.Paint.text paint ~at:(dx, ty) ~color:(Pxui.Theme.ink_2 theme)
              (Ui.ellipsis ~width:(Ui.Paint.text_width paint) ~limit:(x +. w -. tail -. dx) detail)
        | [] ->
@@ -1182,7 +1180,7 @@ let view ui ~bounds:(x, y, width, height) ~tabs_right ~vocab ~names ~time state 
           | `Pick 3 -> emit (Menu None); emit Toggle_wrap
           | `Pick _ -> emit (Menu None); emit Toggle_parinfer)) in
   let message errors ~dirty ~clean = match real_errors errors with
-    | d :: _ -> String.map (function '\n' -> ' ' | c -> c) (Flow.Diagnostic.to_string d)
+    | d :: _ -> String.map (function '\n' -> ' ' | c -> c) (Diagnostic.to_string d)
     | [] -> if dirty then "Unapplied draft. Every other pane shows the last applied document."
         else clean in
   let caret_select text =

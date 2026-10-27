@@ -2,7 +2,7 @@ module E = Flow.Eval
 module M = Rays_math.Mat4
 module V = Rays_math.Vec3
 module Q = Rays_math.Quat
-let ok = function Ok x -> x | Error d -> failwith (Flow.Diagnostic.to_string d)
+let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let parse x = Flow.Syntax.parse x |> ok
 let sources =
   let channel = open_in "nodes/prelude.rays" in
@@ -19,7 +19,7 @@ let evaluate body =
   let workspace = match Flow_sop.Catalog.check_workspace ~ops:Flow_sop.Operators.all ~library:false ~sources
       Flow.Check.{version=1;kinds=[]} source with
     | Some workspace, [] -> workspace
-    | _, ds -> failwith (String.concat "\n" (List.map Flow.Diagnostic.to_string ds)) in
+    | _, ds -> failwith (String.concat "\n" (List.map Diagnostic.to_string ds)) in
   List.assoc "result" (ok (E.static workspace)).results
 let number = Flow.Lisp.float
 let vector values = "[" ^ String.concat " " (List.map number values) ^ "]"

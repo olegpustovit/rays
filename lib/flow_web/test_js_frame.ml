@@ -6,15 +6,15 @@ module I = Flow_ir
 module C = I.Core
 module M = Scene_command.Marks
 
-let ok = function Ok x -> x | Error d -> failwith (Flow.Diagnostic.to_string d)
+let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let writing = Array.to_list Sys.argv = [Sys.argv.(0); "--write-goldens"]
 let node = Sys.command "command -v node >/dev/null 2>&1" = 0
 
-let ops = Core_fixtures.offset :: I.Operators.all
+let ops = Core_fixtures.offset :: []
 let check source =
   match Flow.Workspace.check ~ops {Flow.Check.version = 1; kinds = []} (ok (Flow.Syntax.parse source)) with
   | Some ws, [] -> ws
-  | _, ds -> failwith (String.concat "; " (List.map Flow.Diagnostic.to_string ds))
+  | _, ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
 
 (* ---- the fixtures as core programs ---- *)
 let lower_residual name = function
@@ -22,8 +22,12 @@ let lower_residual name = function
   | _ -> failwith (name ^ ": expected a residual")
 let tested name source =
   lower_residual name (snd (List.hd (List.assoc ["g"; "tested"] (ok (E.static ~record:true (check source))).records)))
-let wrapped name body = tested name (Core_fixtures.workspace
-  (if String.starts_with ~prefix:"captured-" name then body else "(if (> t -1000.) " ^ body ^ " " ^ body ^ ")"))
+let wrapped name body =
+  let residual,program=tested name (Core_fixtures.workspace
+    (if String.starts_with ~prefix:"captured-" name then body else "(if (> t -1000.) " ^ body ^ " " ^ body ^ ")"))in
+  if name="iterate-huge-until"then C.iter(fun(s:C.statement)->match s.node with
+    |Counted{stop;_}->assert(Option.is_some stop)|_->())program.body;
+  residual,program
 let expression name body =
   match List.assoc "g" (ok (E.static (check ("(workspace w (graph g :context value " ^ body ^ "))")))).results with
   | E.Residual _ as v -> Some (lower_residual name v) | _ -> None
@@ -41,7 +45,7 @@ let values =
       "pattern-error"; "bypass"; "untaken-error"] Core_fixtures.control)
   @ List.map (fun (n, b) -> "lists_" ^ n, wrapped n b) (pick ["literal"; "range"; "range-two"; "take"; "reverse"; "concat"; "nth";
       "map"; "filter"; "reduce"; "sort"; "for-product"; "for-dependent"; "sum-dynamic"; "scan"; "fold-record"; "count";
-      "map-tags"; "nested-skip"; "captured-list-nth"; "iterate"; "iterate-large"; "iterate-until"; "iterate-record"; "iterate-widen"] Core_fixtures.lists)
+      "map-tags"; "nested-skip"; "captured-list-nth"; "iterate"; "iterate-large"; "iterate-until"; "iterate-huge-until"; "iterate-record"; "iterate-widen"] Core_fixtures.lists)
   @ List.map (fun (n, b) -> "primitives_" ^ n, wrapped n b) (pick ["range"; "float"; "vec3"; "count"; "nth"; "slice"; "concat";
       "noise3"; "packed-map-int"; "packed-filter"] Core_fixtures.primitives)
   @ List.map (fun (n, b) -> "regions_" ^ n, tested n (Core_fixtures.workspace b)) (pick ["map"; "sum"; "fold"] Core_fixtures.regions)
@@ -70,6 +74,12 @@ let draw_source name body =
   let evaluation = ok (E.static ws) in
   draw_of name evaluation (List.assoc "g" evaluation.results)
 let pictures = List.mapi (fun i b -> draw_source (Printf.sprintf "draw_%02d" i) b) Core_fixtures.pictures
+let fractional_picture = draw_source "fractional_shapes"
+  ("(draw/merge (draw/point [3.25 -4.75 0] :color \"#abc\") "
+   ^ "(draw/points (map (fn [i] [(+ 1.25 (* i 2.25)) (+ -2.75 (* i 3.5)) 0]) (array/range 2)) :color \"#def\") "
+   ^ "(draw/circle [10.5 20.25 0] 4) "
+   ^ "(draw/polygon (map (fn [i] [(+ 0.125 (* i 2.1)) (+ 0.25 (* i i)) 0]) (array/range 3)) :fill \"#123\") "
+   ^ "(draw/polyline (map (fn [i] [(+ 0.25 (* i 2.25)) (+ 1.75 (* i 1.375)) 0]) (array/range 2)) :color \"#f0f\"))")
 let workspace_picture name path =
   (* Only the draw graph: the settings and editor graphs need the application catalog. *)
   let text = In_channel.with_open_bin path In_channel.input_all in
@@ -85,14 +95,14 @@ let workspace_picture name path =
       let root = match root with Some _ -> root | None ->
         List.find_map (function E.Residual r -> Some r | _ -> None) evaluation.states in
       name, program, root
-  | _, ds -> failwith (path ^ ": " ^ String.concat "; " (List.map Flow.Diagnostic.to_string ds))
+  | _, ds -> failwith (path ^ ": " ^ String.concat "; " (List.map Diagnostic.to_string ds))
 let workspaces = [workspace_picture "workspace_flow_vectors" "../../sketches/flow_vectors.rays";
                   workspace_picture "workspace_basic" "../../sketches/basic.rays"]
 
 (* ---- goldens ---- *)
 let emitted name program = match Flow_web.Js.frame program with
   | Ok source -> source
-  | Error d -> failwith (name ^ ": " ^ Flow.Diagnostic.to_string d)
+  | Error d -> failwith (name ^ ": " ^ Diagnostic.to_string d)
 let golden name program =
   let source = emitted name program and path = "goldens/frame_" ^ name ^ ".js" in
   if writing then Out_channel.with_open_bin path (fun c -> output_string c source)
@@ -129,7 +139,7 @@ let coverage programs =
 
 (* ---- canonical text, shared with tools/web/test/frame_semantics.mjs ---- *)
 let hex s = String.concat "" (List.map (fun c -> Printf.sprintf "%02x" (Char.code c)) (List.of_seq (String.to_seq s)))
-let f x = Printf.sprintf "f:%.17g" x
+let f x = "f:" ^ Param.float_text x
 let rec value b : E.value -> unit = fun v ->
   let add = Buffer.add_string b in
   let arr tag data = add (Printf.sprintf "%s[ %s ]" tag (String.concat " " (List.map f (Array.to_list data)))) in
@@ -161,7 +171,9 @@ let canon_marks buffers (marks : M.t) =
           | Line {position; end_; stroke; stroke_width} ->
               String.concat " " [attr pair position; attr pair end_; attr ink stroke; attr f stroke_width]
           | Point {position; fill} -> attr pair position ^ " " ^ ink fill)
-    | Geometry _ -> "G"
+    | Geometry {vertices; indices; color} ->
+        "G " ^ ink color ^ " " ^ String.concat " " (Array.to_list (Array.map f vertices))
+        ^ " | " ^ String.concat " " (Array.to_list (Array.map string_of_int indices))
     | Image {resource; x; y; scale; angle} -> Printf.sprintf "I i:%d i:%d i:%d %s %s" resource x y (f scale) (f angle)
     | Text {x; y; size; color; text} -> Printf.sprintf "T i:%d i:%d i:%d %s t:%s" x y size (ink color) (hex text)
     | Push_transform {xx; xy; yx; yy; tx; ty} -> "P " ^ String.concat " " (List.map f [xx; xy; yx; yy; tx; ty])
@@ -177,18 +189,18 @@ let same_text a b =
   let a = tokens a and b = tokens b in List.compare_lengths a b = 0 && List.for_all2 same a b
 
 (* ---- the node run ---- *)
-type case = { name : string; program : C.program; mode : [ `Value | `Marks ]; lives : Frame_input.t list;
+type case = { name : string; program : C.program; mode : [ `Value | `Marks ]; lives : Input.t list;
   expected : string list }
 
-let number x = Printf.sprintf "%.17g" x
-let json_of_live (l : Frame_input.t) =
+let number x = Param.float_text x
+let json_of_live (l : Input.t) =
   Printf.sprintf {|{"t":%s,"dt":%s,"frame":%d,"tick":%d,"size":[%d,%d],"pointer":[%s,%s],"buttons":[],"keys":[],"events":[%s]}|}
     (number l.t) (number l.dt) l.frame l.tick (fst l.size) (snd l.size) (number (fst l.pointer)) (number (snd l.pointer))
-    (String.concat "," (List.map (function Frame_input.Key_pressed k -> Printf.sprintf {|{"kind":"key-pressed","key":"%s"}|} k
+    (String.concat "," (List.map (function Input.Key_pressed k -> Printf.sprintf {|{"kind":"key-pressed","key":"%s"}|} (Input.key_name k)
       | _ -> failwith "unsupported event") l.events))
-let live ?(events = []) i t = {(Frame_input.at_time t) with dt = 0.25; frame = i; tick = i; size = (640, 360);
+let live ?(events = []) i t = {(Input.at_time t) with dt = 0.25; frame = i; tick = i; size = (640, 360);
   pointer = (12.5, 40.); events}
-let outcome render = function Ok v -> "ok\t" ^ render v | Error (d : Flow.Diagnostic.t) -> "err\t" ^ d.code
+let outcome render = function Ok v -> "ok\t" ^ render v | Error (d : Diagnostic.t) -> "err\t" ^ d.code
   ^Option.fold ~none:"" ~some:(fun cause->"\t"^hex cause)d.cause
 
 let value_case name (_, program) =
@@ -200,14 +212,17 @@ let value_case name (_, program) =
 let state_case name fixture =
   let values = state_values fixture and st = E.create_state () and calls = ref [] in
   let text p = Format.asprintf "%a" C.pp p in
-  let execute r lv = match I.Core_lower.lower r with
-    | Ok p when Array.length p.state_slots > 0 ->
-        let result = I.Core_exec.run ~root:r p ~live:lv in
-        calls := (p, lv, outcome canon_value result) :: !calls; Some result
-    | _ -> None in
   for i = 0 to 7 do
-    let lv = live ~events:(if i mod 2 = 1 then [Frame_input.Key_pressed "a"; Key_pressed "b"] else []) i (float_of_int i *. 0.25) in
-    List.iter (fun v -> ignore (E.Private.force_with_executor ~state:st ~execute v ~live:lv)) values
+    let lv = live ~events:(if i mod 2 = 1 then [Input.Key_pressed (Input.KeyChar 'a'); Key_pressed (Input.KeyChar 'b')] else []) i (float_of_int i *. 0.25) in
+    List.iter (function E.Residual r as v ->
+      (match I.Core_lower.lower r with
+       | Ok p when Array.length p.state_slots > 0 ->
+           ignore (E.Residual.bind_live ~state:st r ~live:lv);
+           let result = I.Core_exec.run ~root:r p ~live:lv in
+           calls := (p, lv, outcome canon_value result) :: !calls;
+           ignore v
+       | _ -> ())
+      | _ -> ()) values
   done;
   match List.rev !calls with
   | (program, _, _) :: _ as calls when List.for_all (fun (p, _, _) -> text p = text program) calls ->
@@ -242,12 +257,27 @@ let run_node cases =
     | name::frame::status::payload -> Some ((name, int_of_string frame), status ^ "\t" ^ String.concat "\t" payload)
     | _ -> None)
 
-let rec has_invoke l = List.exists (fun (s : C.statement) -> match s.node with
-  | Invoke _ -> true | If {yes; no; _} -> has_invoke yes || has_invoke no
-  | Iterate {body; _} -> has_invoke body | Counted {init; body; _} -> has_invoke init || has_invoke body
-  | Protect {body;handler;_}->has_invoke body || has_invoke handler
-  | Diagnose_rows{handler;_}->has_invoke handler
-  | State_read {init; _} -> has_invoke init | _ -> false) l
+let has_invoke statements =
+  let found = ref false in
+  C.iter (fun (s : C.statement) -> match s.node with Invoke _ -> found := true | _ -> ()) statements;
+  !found
+let invoked_region statements =
+  let found = ref None in
+  C.iter (fun (s : C.statement) -> match s.node with
+    | Invoke {region; _} when !found = None -> found := Some region
+    | _ -> ()) statements;
+  !found
+
+(* Region layouts are rejected at their single construction boundary; an invalid region cannot
+   be inserted into a compiled frame program. *)
+let () =
+  let programs=List.map(fun(_,(_,program))->program)values
+    @List.map(fun(_,program,_)->program)pictures
+    @List.map(fun(_,program,_)->program)workspaces in
+  let region=List.find_map(fun (program:C.program)->
+    Option.map(fun region->program.regions.(region))(invoked_region program.C.body))programs
+    |>Option.get in
+  assert(Result.is_error(I.Core.Region.rebuild region ~outputs:[||] ()))
 
 (* prims.js has no packed form of sequence_build (core.md: a width allocates packed storage), so
    these two programs fail under node with E_ITER_BOUND. Golden only; reported to the owner. *)
@@ -328,7 +358,7 @@ let () =
     let cases = List.filter (fun c -> not (has_invoke c.program.body) && not (List.mem c.name prims_gaps) && not (List.mem c.name no_native_state))
       (List.map (fun (n, (r, p)) -> value_case n (r, p)) values
        @ List.filter_map (fun (n, _, _ as f) -> if List.mem n state_picked then state_case ("state_" ^ n) f else None) state_fixtures
-       @ List.map (fun c -> draw_case c) (pictures @ workspaces)) in
+       @ List.map (fun c -> draw_case c) (pictures @ workspaces @ [fractional_picture])) in
     let skipped = List.filter (fun n -> not (List.exists (fun c -> c.name = n) cases)) (List.map fst programs) in
     Printf.printf "JS frames: not run under node (regions, shim gaps): %s\n" (String.concat " " skipped);
     let produced = run_node cases in
@@ -357,7 +387,23 @@ let ()=
     {|(let* [unused (error_rows (array/int 2 1) (fn [index]
         {:code "E_ROW" :message (str index) :cause (list)}) :policy "range-last")] 0)|})with
   |Some(_,program)->(match Flow_web.Js.frame program with
-      |Error d->assert(d.code="E_WEB_SOURCE")|Ok _->assert false)
+      |Error d->
+        let rec span statements=List.find_map(fun (s:C.statement)->match s.node with
+          |Diagnose_rows _->s.source.span
+          |If{yes;no;_}->(match span yes with Some _ as found->found|None->span no)
+          |Iterate{body;_}->span body
+          |Counted{init;body;_}->(match span init with Some _ as found->found|None->span body)
+          |State_read{init;_}->span init
+          |Protect{body;handler;_}->(match span body with Some _ as found->found|None->span handler)
+          |_->None)statements in
+        let span=span program.body in
+        let expected=Diagnostic.error ?span ~code:"E_WEB_SOURCE" "Range-last diagnosis needs its native host." in
+        if d<>expected then failwith(Printf.sprintf "Range-last refusal changed: actual %s span=%s; expected %s span=%s"
+          (Diagnostic.to_string d)
+          (Option.fold ~none:"none" ~some:(fun (s:Diagnostic.span)->Printf.sprintf "%d..%d" s.start s.finish)d.span)
+          (Diagnostic.to_string expected)
+          (Option.fold ~none:"none" ~some:(fun (s:Diagnostic.span)->Printf.sprintf "%d..%d" s.start s.finish)expected.span))
+      |Ok _->assert false)
   |None->assert false
 
 let ()=if node then begin
@@ -370,7 +416,7 @@ let ()=if node then begin
     results=[|2|];state_slots=[||];regions=[||];call_slots=0} in
   let programs=["geometry_collection_5001",program 5001 true;
     "ordinary_collection_5001",program 5001 false;"geometry_collection_negative",program (-1) true] in
-  let lives=[Frame_input.at_time 0.] in
+  let lives=[Input.at_time 0.] in
   let cases=List.map(fun(name,program)->{name;program;mode=`Value;lives;
     expected=List.map(fun live->outcome canon_value(I.Core_exec.run ~strict:true program ~live))lives})programs in
   let actual=run_node cases in

@@ -5,27 +5,18 @@ module Map = Map.Make (struct type nonrec t = t let compare = compare end)
 
 type literal = Scalar of Param.value | Vector of float * float * float
 type parameter = { path : string; fields : Param.field_view list; ty : Flow.Port_type.t option }
-let error code message = Error (Flow.Diagnostic.error ~code message)
-let parameters fields =
-  let names = List.map (fun (field : Param.field_view) -> field.name) fields in
-  let rec group seen result = function
-    | [] -> Ok (List.rev result)
-    | (field : Param.field_view) :: rest ->
-        (match field.vec3 with
-         | None -> group seen ({path = field.name; fields = [field];
-             ty = (match field.kind, field.current with
-               | Param.Choice_view _, Param.Int_value _ -> Some Flow.Port_type.Int
-               | _ -> Flow.Port_type.of_field_kind field.kind)} :: result) rest
-         | Some (name, 0) when not (List.mem name names || List.mem name seen) ->
-             (match rest with
-              | y :: z :: rest when y.vec3 = Some (name,1) && z.vec3 = Some (name,2)
-                  && field.folder = y.folder && field.folder = z.folder
-                  && List.for_all (fun (field : Param.field_view) ->
-                       match field.kind with Param.Floating_view _ -> true | _ -> false) [field;y;z] ->
-                  group (name :: seen) ({path = name; fields = [field;y;z]; ty = Some Flow.Port_type.Vec3} :: result) rest
-              | _ -> error "E_VEC3" ("Invalid vec3 group " ^ name))
-         | Some (name, _) -> error "E_VEC3" ("Invalid or overlapping vec3 group " ^ name))
-  in group [] [] fields
+let error code message = Error (Diagnostic.error ~code message)
+let parameters ?infer fields =
+  Result.map (List.map (function
+    | [] -> assert false
+    | (field : Param.field_view) :: _ as fields ->
+        let path, ty = match field.vec3 with
+          | Some (name, _) -> name, Some Flow.Port_type.Vec3
+          | None -> field.name, (match field.kind, field.current with
+              | Param.Choice_view _, Param.Int_value _ -> Some Flow.Port_type.Int
+              | _ -> Flow.Port_type.of_field_kind field.kind) in
+        {path; fields; ty}))
+    (Result.map_error (Diagnostic.error ~code:"E_VEC3") (Param.group_vec3 ?infer fields))
 
 let components parameter = match parameter.ty, parameter.fields with
   | Some Flow.Port_type.Vec3, [x;y;z] -> List.map2 (fun axis field ->
@@ -52,7 +43,7 @@ let literal_changes parameter value = match parameter.fields, value with
 
 let normalize_float (field : Param.field_view) number = match field.kind with
   | Param.Floating_view range -> Result.map_error
-      (fun message -> Flow.Diagnostic.error ~code:"E_TYPE" (field.name ^ ": " ^ message))
+      (fun message -> Diagnostic.error ~code:"E_TYPE" (field.name ^ ": " ^ message))
       (Param.normalize_value (Param.Floating range) number)
   | _ -> error "E_TYPE" ("Not a float field: " ^ field.name)
 let normalize parameter value =
@@ -66,11 +57,11 @@ let normalize parameter value =
           (match field.kind with
            | Param.Integer_view range -> Result.map (fun value ->
                Flow.Port_type.Int_value value, [field.name, Param.Int_value value])
-               (Result.map_error (Flow.Diagnostic.error ~code:"E_TYPE") (Param.normalize_value (Param.Integer range) value))
+               (Result.map_error (Diagnostic.error ~code:"E_TYPE") (Param.normalize_value (Param.Integer range) value))
            | Param.Choice_view labels when (match field.current with Param.Int_value _ -> true | _ -> false) ->
                Result.map (fun value ->
                  Flow.Port_type.Int_value value, [field.name, Param.Int_value value])
-                 (Result.map_error (Flow.Diagnostic.error ~code:"E_TYPE")
+                 (Result.map_error (Diagnostic.error ~code:"E_TYPE")
                    (Param.normalize_value (Param.Index_choice labels) value))
            | _ -> error "E_TYPE" ("Not an integer field: " ^ field.name))
       | [field], Flow.Port_type.Bool_value value -> Ok (Flow.Port_type.Bool_value value, [field.name, Param.Bool_value value])

@@ -85,7 +85,7 @@ val request_cursor : t -> [`Horizontal_resize|`Vertical_resize|`Text] -> unit
     the I-beam over a text field or text area. The last request of a frame
     wins. *)
 
-val key_pressed : t -> Rays.Input.key -> bool
+val key_pressed : t -> Input.key -> bool
 (** The key was pressed in this frame's events (a dialog's Enter). *)
 
 val text_input_focused : t -> bool
@@ -103,6 +103,9 @@ val ellipsis : width:(string -> float) -> limit:float -> string -> string
     what is shown, not the label's length. *)
 
 val unfocus : t -> unit
+
+val contains : float * float * float * float -> float * float -> bool
+(** Whether a logical point is in a rectangle: left/top included, right/bottom excluded. *)
 
 val dismiss_popup : t -> unit
 (** When the host closes a popup after accepting its result, release focus
@@ -236,13 +239,13 @@ type signal = {
   pointer : float * float;  (** latest pointer, screen space *)
   press_point : float * float;  (** where the current or last press began *)
   release_point : float * float;
-  button : Rays.Input.mouse_button option;
+  button : Input.mouse_button option;
   scroll : float * float;  (** wheel steps routed to this box *)
   pinch : float;
   (** product of the trackpad pinch factors routed to this box this frame
       (the box under the pointer, like the wheel): above 1 zooms in, 1 when
       there was none *)
-  keys : Rays.Event.t list;  (** ordered key/text events while focused *)
+  keys : Input.event list;  (** ordered key/text events while focused *)
 }
 
 val signal : t -> box -> signal
@@ -250,7 +253,7 @@ val signal : t -> box -> signal
 val context_at : t -> box -> (float * float) option
 (** The released right-click in this box or a descendant, through shared capture. *)
 
-val press_keys : t -> box -> Rays.Input.key list
+val press_keys : t -> box -> Input.key list
 (** Held keys at this box's captured press, retained through release. *)
 
 val focused : t -> box -> bool
@@ -275,42 +278,42 @@ module Paint : sig
   (** Borrow a host-owned image for this frame through the normal UI texture batch. *)
 
   val fill :
-    t -> x:float -> y:float -> w:float -> h:float -> Rays.Color.t -> unit
+    t -> x:float -> y:float -> w:float -> h:float -> Rays_math.Color.t -> unit
   (** Square fills cover exactly the pixels of the equivalent triangle
       rectangle; [radius > 0] is anti-aliased. *)
 
   val stroke :
     t -> x:float -> y:float -> w:float -> h:float -> ?width:float ->
-    Rays.Color.t -> unit
+    Rays_math.Color.t -> unit
   (** A band of [width] centred on the rectangle's edges. *)
 
   val frame :
-    t -> x:float -> y:float -> w:float -> h:float -> ?width:float -> Rays.Color.t -> unit
+    t -> x:float -> y:float -> w:float -> h:float -> ?width:float -> Rays_math.Color.t -> unit
   (** A border drawn inside the box, as CSS draws one: [stroke] centres its band on the edge, so
       a caller handing it the box of a frame ends half a [width] outside; [frame] insets by half a
       [width], so a 1-point border covers exactly the box's outermost whole point.  The one way to
       frame a box. *)
 
   val rect :
-    t -> x:float -> y:float -> w:float -> h:float -> ?fill:Rays.Color.t ->
-    ?stroke:Rays.Color.t -> unit -> unit
+    t -> x:float -> y:float -> w:float -> h:float -> ?fill:Rays_math.Color.t ->
+    ?stroke:Rays_math.Color.t -> unit -> unit
 
   val line :
     t -> from_:float * float -> to_:float * float -> ?width:float ->
-    Rays.Color.t -> unit
+    Rays_math.Color.t -> unit
   (** Butt-capped; axis-aligned lines are exact rectangles. *)
 
   val circle :
-    t -> at:float * float -> radius:float -> ?fill:Rays.Color.t ->
-    ?stroke:Rays.Color.t -> unit -> unit
+    t -> at:float * float -> radius:float -> ?fill:Rays_math.Color.t ->
+    ?stroke:Rays_math.Color.t -> unit -> unit
 
   val grid :
     t -> x:float -> y:float -> w:float -> h:float -> origin:float * float ->
-    spacing:float -> ?dot:float -> Rays.Color.t -> unit
+    spacing:float -> ?dot:float -> Rays_math.Color.t -> unit
   (** Dots every [spacing] points from [origin], drawn by one quad. *)
 
   val text :
-    t -> at:float * float -> ?size:int -> ?tracking:float -> ?color:Rays.Color.t -> string ->
+    t -> at:float * float -> ?size:int -> ?tracking:float -> ?color:Rays_math.Color.t -> string ->
     unit
   (** Kit text with its top-left corner at [at]. Without [size] it uses the
       UI's own font; with [size] the kit face at that size. Inside a canvas
@@ -325,23 +328,23 @@ module Paint : sig
   val label_size : t -> int
   (** The label size: two points under the kit text. *)
 
-  val cap : t -> at:float * float -> ?color:Rays.Color.t -> string -> unit
+  val cap : t -> at:float * float -> ?color:Rays_math.Color.t -> string -> unit
   (** A label: upper case at {!label_size} with 0.08 em of tracking, ink-2 by default.
       Sections, headers, units. *)
 
   val cap_width : t -> string -> float
   (** The width of {!cap}: the tracking follows every letter but the last. *)
 
-  val chevron : t -> at:float * float -> [ `Down | `Up | `Left | `Right ] -> Rays.Color.t -> unit
+  val chevron : t -> at:float * float -> [ `Down | `Up | `Left | `Right ] -> Rays_math.Color.t -> unit
   (** A chevron centred at [at]: strokes 7 by 3.5 points, 9 by 5.5 of ink with the line. *)
 
   val brackets :
     t -> x:float -> y:float -> w:float -> h:float -> ?offset:float -> ?length:float ->
-    ?width:float -> Rays.Color.t -> unit
+    ?width:float -> Rays_math.Color.t -> unit
   (** Corner brackets [offset] (default 4) outside the rectangle: the selected object. *)
 
-  val dashed : t -> from_:float * float -> to_:float * float -> ?width:float -> Rays.Color.t -> unit
-  val dashed_rect : t -> x:float -> y:float -> w:float -> h:float -> Rays.Color.t -> unit
+  val dashed : t -> from_:float * float -> to_:float * float -> ?width:float -> Rays_math.Color.t -> unit
+  val dashed_rect : t -> x:float -> y:float -> w:float -> h:float -> Rays_math.Color.t -> unit
   (** 4 on, 3 off: a zone, a drop target. *)
 
   val flag : t -> at:float * float -> ?round:bool -> bool -> unit
@@ -458,7 +461,7 @@ val inspector_message : t -> key:string -> string -> unit
 (** A short muted inspector note, clipped to the available width. *)
 
 val popup :
-  t -> ?stroke:Rays.Color.t -> ?max_height:float -> ?dismiss_initial:bool -> ?attached:bool ->
+  t -> ?stroke:Rays_math.Color.t -> ?max_height:float -> ?dismiss_initial:bool -> ?attached:bool ->
   at:float * float -> width:float -> height:float -> string ->
   (unit -> 'a) -> 'a option
 (** A floating panel dismissed by Escape, focus loss, or a press outside its
@@ -486,7 +489,7 @@ val footer : t -> ?right:string -> (string * string) list -> unit
 
 val button :
   t -> ?bare:bool -> ?icon:bool ->
-  ?at_end:bool -> ?ink:Rays.Color.t -> string -> bool
+  ?at_end:bool -> ?ink:Rays_math.Color.t -> string -> bool
 (** [true] on the frame a press and release both land inside the button. A button is its text
     (kit rev 3).  [bare] narrows the padding to 4 points (a button in a head); [icon] makes it the
     20-point square with its glyph (a [x], [+], [<]) centred; [at_end] puts the box at the row's end,
@@ -520,7 +523,7 @@ type completion = {
 (** One ranked suggestion of {!language.complete}. *)
 
 type language = {
-  colorize : string -> (int * int * Rays.Color.t) list;
+  colorize : string -> (int * int * Rays_math.Color.t) list;
       (** sorted, non-overlapping byte spans and their colour; the rest is the foreground *)
   brackets : string -> (int * int) list;
       (** the matched bracket pairs as (open, close) byte positions: the pair at the caret is lit *)
@@ -563,7 +566,7 @@ val text_area_submit :
   ?on_scrub_edit:(int * int -> string -> unit) ->
   ?on_click:(int -> bool -> unit) -> ?on_caret:(int -> unit) -> ?on_caret_move:(int -> unit) ->
   ?on_select:(int * int -> unit) -> ?on_drop:(int -> drop -> unit) ->
-  ?chips:(int * int * Rays.Color.t) list ->
+  ?chips:(int * int * Rays_math.Color.t) list ->
   string -> string -> string * bool
 (** A text area that also reports Command- or Ctrl-Enter pressed in it this frame (the host's
     "apply").  Tab inserts two spaces and Shift-Tab takes up to two leading spaces off the line
@@ -607,7 +610,7 @@ val value_field : t -> at:float * float -> w:float -> h:float ->
   ?size:int -> ?display:string -> ?fraction:float ->
   ?slide:(float -> string) ->
   ?scrub:(string -> float -> bool -> string) -> ?left:bool -> ?edit:bool ->
-  ?lead:string * Rays.Color.t -> ?trail:string * Rays.Color.t -> ?line:Rays.Color.t ->
+  ?lead:string * Rays_math.Color.t -> ?trail:string * Rays_math.Color.t -> ?line:Rays_math.Color.t ->
   ?bare:bool -> ?placeholder:string -> ?tracking:float -> valid:(string -> bool) ->
   string -> string -> string * bool
 (** Compact field. Numeric sliders follow the pointer with [slide]; Option-click, a
@@ -625,7 +628,7 @@ val fuzzy_match : query:string -> string -> bool
 (** Case-insensitive subsequence match. *)
 
 val picker :
-  t -> ?limit:int -> ?mark:(int -> Rays.Color.t option) -> ?off:(int -> bool) -> ?slash:bool -> ?at_rest:bool ->
+  t -> ?limit:int -> ?mark:(int -> Rays_math.Color.t option) -> ?off:(int -> bool) -> ?slash:bool -> ?at_rest:bool ->
   string -> query:string ->
   (string -> (string * string) array) -> string * pick
 (** A focused search row (the label is its placeholder and key) over the
@@ -652,7 +655,7 @@ type submenu = {
 }
 
 val context_menu :
-  t -> at:float * float -> ?width:float -> ?selected:int -> ?swatches:Rays.Color.t option list ->
+  t -> at:float * float -> ?width:float -> ?selected:int -> ?swatches:Rays_math.Color.t option list ->
   ?keys:string list -> ?danger:int list -> ?submenus:submenu list -> ?lead_from:int -> string ->
   (string * bool) list ->
   [ `Open | `Pick of int | `Dismiss ]

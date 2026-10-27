@@ -1,9 +1,9 @@
 let ok = function Ok value -> value | Error message -> failwith message
 let parse text = match Flow.Syntax.parse text with
-  | Ok forms -> forms | Error d -> failwith (Flow.Diagnostic.to_string d)
+  | Ok forms -> forms | Error d -> failwith (Diagnostic.to_string d)
 let lower ?(reference = false) text =
   match Flow_sop.Lower.workspace ~reference ~factories:Sop_catalog.Editor.factories (parse text) with
-  | Error d -> failwith (Flow.Diagnostic.to_string d)
+  | Error d -> failwith (Diagnostic.to_string d)
   | Ok lowered ->
       let graph = List.find (fun (graph : Flow_sop.Lower.graph) -> graph.default) lowered.graphs in
       ok (Sop.Edit_graph.compile_node graph.network.geometry ~node_id:(Option.get graph.root))
@@ -13,8 +13,8 @@ let with_session fn =
 let cook session ?(domains = 1) node =
   match Sop.Session.cook session ~context:(ok (Sop.Context.create ~domains ~grain:257 ())) node with
   | Ok output -> (match Sop.Payload.geometry output.payload with
-      | Ok geometry -> geometry | Error d -> failwith (Sop.Diagnostic.error_to_string d))
-  | Error d -> failwith (Sop.Diagnostic.error_to_string d)
+      | Ok geometry -> geometry | Error d -> failwith (Diagnostic.error_to_string d))
+  | Error d -> failwith (Diagnostic.error_to_string d)
 
 let check condition message = if not condition then failwith message
 let points = 40
@@ -69,7 +69,7 @@ let () =
   (* the pass count is data, not graph structure: the plan has the same nodes for 1 and 5000 passes *)
   let plan_nodes passes = match Flow_sop.Lower.workspace ~reference:false ~factories:Sop_catalog.Editor.factories
       (parse (text "sop/smooth_loop" passes)) with
-    | Ok lowered -> Array.length lowered.plan.nodes | Error d -> failwith (Flow.Diagnostic.to_string d) in
+    | Ok lowered -> Array.length lowered.plan.nodes | Error d -> failwith (Diagnostic.to_string d) in
   check (plan_nodes 1 = plan_nodes 5000) "the pass count changed the number of cook nodes";
   (* a negative count returns the seed *)
   check (Rdk_test_support.geometry_bytes (with_session (fun s -> cook s (lower (text "sop/smooth_loop" (-3))))) = expected 0)

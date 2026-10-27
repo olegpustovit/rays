@@ -2,15 +2,17 @@
  (name pxui)
  (public_name rays.pxui)
  (modules pxui theme ui camera_controls)
- (libraries rays))
+ (libraries rays rays_math))
 
 (executable
+ (enabled_if (= %{system} macosx))
  (name test_main)
  (modules test_main test_ui_parity test_ui test_input test_keyboard test_table)
- (libraries rays pxui scene_command sdl3))
+ (libraries rays rays_math pxui scene_command sdl3 ogpu_metal))
 
 (rule
- (aliases runtest test_ui_parity)
+ (enabled_if (= %{system} macosx))
+ (alias test_ui_parity)
  (deps fixtures/kit_panel_2x.png fixtures/kit_overlays_2x.png fixtures/kit_zones_2x.png fixtures/kit_table_2x.png)
  (action
   (setenv SDL_VIDEODRIVER dummy
@@ -18,29 +20,44 @@
    (run %{exe:test_main.exe} test_ui_parity)))))
 
 (rule
- (aliases runtest test_ui)
+ (enabled_if (= %{system} macosx))
+ (alias test_ui)
  ; pointer positions in the text tests assume the golden face's advance
  (action (setenv SDL_VIDEODRIVER dummy
   (setenv RAYS_UI_FONT %{dep:../../assets/fonts/DepartureMono-Regular.otf}
    (run %{exe:test_main.exe} test_ui)))))
 
 (rule
- (aliases runtest test_ui_commands)
+ (enabled_if (= %{system} macosx))
+ (alias test_ui_commands)
  (action (setenv SDL_VIDEODRIVER dummy
   (setenv RAYS_UI_FONT %{dep:../../assets/fonts/DepartureMono-Regular.otf}
    (run %{exe:test_main.exe} test_ui_commands)))))
 
 (rule
- (aliases runtest test_input)
+ (enabled_if (= %{system} macosx))
+ (alias test_input)
  (action (setenv SDL_VIDEODRIVER dummy
   (run %{exe:test_main.exe} test_input))))
 
 (rule
- (aliases runtest test_keyboard)
+ (enabled_if (= %{system} macosx))
+ (alias test_keyboard)
  (action (setenv SDL_VIDEODRIVER dummy
   (run %{exe:test_main.exe} test_keyboard))))
 
 (rule
- (aliases runtest test_table)
+ (enabled_if (= %{system} macosx))
+ (alias test_table)
  (action (setenv SDL_VIDEODRIVER dummy
   (run %{exe:test_main.exe} test_table))))
+
+(alias
+ (name runtest)
+ (deps
+  (alias test_ui_parity)
+  (alias test_ui)
+  (alias test_ui_commands)
+  (alias test_input)
+  (alias test_keyboard)
+  (alias test_table)))

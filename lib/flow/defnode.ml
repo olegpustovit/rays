@@ -13,8 +13,7 @@ let valid_name name = match String.split_on_char '/' name with
   | ["sop"; key] -> Symbol.valid_name key
   | _ -> false
 
-exception Invalid of Diagnostic.t
-let bad (x : S.t) message = raise (Invalid (Diagnostic.error ~span:x.span ~code:"E_SHAPE" message))
+let bad (x : S.t) message = raise (Diagnostic.Error (Diagnostic.error ~span:x.span ~code:"E_SHAPE" message))
 let text x = match x.S.node with S.Str s -> s | _ -> bad x "Metadata text must be a string."
 let word x = match x.S.node with S.Sym s | S.Kw s | S.Str s -> s | _ -> bad x "Expected a metadata name."
 let bool x = match x.S.node with S.Sym "true" -> true | S.Sym "false" -> false | _ -> bad x "Expected true or false."
@@ -179,23 +178,15 @@ let parse form = try
   List.iteri (fun i (s:Check.slot) -> if s.rest && i<>List.length !slots-1 then bad form "A rest slot must be the final slot.") !slots;
   let field_names=List.map (fun (f:Param.field_view) -> f.name) !fields in
   if List.length field_names<>List.length (List.sort_uniq String.compare field_names) then bad form "Overlapping parameter field names.";
-  let rec groups seen = function
-    | [] -> ()
-    | (f:Param.field_view)::rest -> match f.vec3,rest with
-      | None,_ -> groups seen rest
-      | Some (group,0),y::z::rest when y.vec3=Some (group,1) && z.vec3=Some (group,2)
-          && not (List.mem group field_names || List.mem group seen)
-          && f.folder=y.folder && f.folder=z.folder
-          && List.for_all (fun (f:Param.field_view) -> match f.kind with Param.Floating_view _ -> true | _ -> false) [f;y;z] ->
-          groups (group::seen) rest
-      | _ -> bad form "A vec3 group contains three contiguous float fields in the same folder." in
-  groups [] !fields;
+  let parameters = match Check.parameters_of_fields !fields with
+    | Ok parameters -> parameters
+    | Error _ -> bad form "A vec3 group contains three contiguous float fields in the same folder." in
   let keyword_inputs=List.map (fun (p:Check.parameter)->p.name) !keywords in
-  let kind={Check.qualified=name;aliases=[];context=Context.sop;
+  let kind={Check.qualified=name;context=Context.sop;
     slots=List.filter (fun (s:Check.slot)->not(List.mem s.name keyword_inputs)) !slots;
-    parameters=Check.parameters_of_fields !fields @ !keywords;
+    parameters=parameters @ !keywords;
     outputs=["geo",Port_type.Geometry];facts=opt hs "facts" facts} in
   Ok {kind;slots= !slots;keyword_inputs;fields= !fields;label=get hs "label" text (title (Check.short name));operation;version=get hs "version" version 1;
     category=get hs "category" strings [];description=opt hs "description" text;inputs;body;validations= !validations;
     normalizers= !normalizers;form}
-with Invalid d -> Error d
+with Diagnostic.Error d -> Error d

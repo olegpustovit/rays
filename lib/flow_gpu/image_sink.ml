@@ -20,9 +20,9 @@ kernel void rays_flow_image_rgba8(device const float4 *colors [[buffer(0)]],
 |}
 let interface = List.init 3 (fun binding -> Ogpu.Shader.{group=0;binding;
   kind=(if binding=2 then Uniform_buffer else Storage_buffer);visibility=[Compute]})
-let diagnostic e = Flow.Diagnostic.error ~code:"E_GPU" (Ogpu.Error.to_string e)
+let diagnostic e = Diagnostic.error ~code:"E_GPU" (Ogpu.Error.to_string e)
 let gpu result = Result.map_error diagnostic result
-let error code message = Error (Flow.Diagnostic.error ~code message)
+let error code message = Error (Diagnostic.error ~code message)
 let create_owned device queue =
   if not(Domain.is_main_domain()) then error "E_GPU" "Image sinks require the initial domain."
   else
@@ -35,7 +35,7 @@ let create_owned device queue =
     | Error e -> ignore(B.destroy_library library); Error(diagnostic e)
     | Ok pipeline -> Ok {device;queue;library;pipeline;uniforms=Bytes.create 12;domain=Domain.self();
         storage=None;generation=0;closed=false;buffers=0;textures=0}
-let create gpu = create_owned (Rays_execution.gpu_device gpu) (Rays_execution.gpu_queue gpu)
+let create gpu = create_owned (Renderer.gpu_device gpu) (Renderer.gpu_queue gpu)
 let release (storage:storage) = ignore(B.destroy_texture storage.texture);ignore(B.destroy_buffer storage.buffer)
 let allocate t ~width ~height ~pitch =
   let (let*) = Result.bind in
@@ -45,15 +45,14 @@ let allocate t ~width ~height ~pitch =
     mip_levels=1;sample_count=1;format=Rgba8_unorm;
     usage=[Texture_binding;Texture_copy_src;Texture_copy_dst]} in
   let caps=B.capabilities t.device in
-  let* ()=gpu(Ogpu.Types.validate_buffer caps buffer_descriptor) in
-  let* ()=gpu(Ogpu.Types.validate_texture caps texture_descriptor) in
+  let* ()=gpu(Ogpu.Validation.validate_buffer caps buffer_descriptor) in
+  let* ()=gpu(Ogpu.Validation.validate_texture caps texture_descriptor) in
   let* buffer = gpu (B.create_buffer t.device buffer_descriptor) in
   t.buffers<-t.buffers+1;
   match B.create_texture t.device texture_descriptor with
   | Error e -> ignore(B.destroy_buffer buffer);Error(diagnostic e)
   | Ok texture -> t.textures<-t.textures+1;Ok {buffer;texture;width;height}
-exception Failed of Flow.Diagnostic.t
-let get = function Ok value -> value | Error e -> raise(Failed(diagnostic e))
+let get = function Ok value -> value | Error e -> raise(Diagnostic.Error(diagnostic e))
 let convert t ~width ~height input =
   if t.closed || Domain.self()<>t.domain then error "E_GPU" "Image sink is closed or called from another domain."
   else if width<=0 || height<=0 || width>Sys.max_string_length/4/height then
@@ -102,7 +101,7 @@ let convert t ~width ~height input =
         if fresh then Option.iter release t.storage;
         t.storage<-Some storage;published:=true;
         Ok {owner=t;texture=storage.texture;generation=t.generation}
-      with Failed e -> Error e
+      with Diagnostic.Error e -> Error e
         | Out_of_memory -> error "E_IMAGE" "Image conversion exceeds available storage.")
 let texture output =
   let t=output.owner in

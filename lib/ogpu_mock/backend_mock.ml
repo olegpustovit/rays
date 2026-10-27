@@ -179,7 +179,6 @@ let create()=
                      "texture exceeds mock byte capacity")
       end);
     create_depth_texture=(fun _d->if should_fail c.fail_depth_after then(c.fail_depth_after<-None;error"Backend_mock.create_depth_texture"Error.Capacity"injected depth allocation failure")else(c.fail_depth_after<-advance c.fail_depth_after;let id=token c in c.textures<-c.textures+1;add c(Printf.sprintf"create-depth-texture:%Ld"id);Ok{Backend.token=id;write=(fun _ _->error"Backend_mock.depth.write"Error.Unsupported"depth textures are not host writable");read=(fun _ _->error"Backend_mock.depth.read"Error.Unsupported"depth textures are not host readable");read_into=(fun _ _ _ _->error"Backend_mock.depth.read_into"Error.Unsupported"depth textures are not host readable");destroy=(fun()->c.textures<-c.textures-1;add c(Printf.sprintf"destroy-depth-texture:%Ld"id);Ok())}));
-    create_stencil_texture=(fun _d->let id=token c in c.textures<-c.textures+1;add c(Printf.sprintf"create-stencil-texture:%Ld"id);Ok{Backend.token=id;write=(fun _ _->error"Backend_mock.stencil.write"Error.Unsupported"stencil textures are not host writable");read=(fun _ _->error"Backend_mock.stencil.read"Error.Unsupported"stencil textures are not host readable");read_into=(fun _ _ _ _->error"Backend_mock.stencil.read_into"Error.Unsupported"stencil textures are not host readable");destroy=(fun()->c.textures<-c.textures-1;add c(Printf.sprintf"destroy-stencil-texture:%Ld"id);Ok())});
     create_queue=(fun()->
       let id=token c and clock={epoch=0L;completed=0L} in
       let run=run_ops in

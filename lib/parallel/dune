@@ -1,0 +1,6 @@
+(library
+ (name parallel)
+ (public_name rays.parallel)
+ (wrapped false)
+ (modules parallel)
+ (libraries domainslib))

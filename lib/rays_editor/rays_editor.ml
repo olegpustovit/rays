@@ -3,10 +3,6 @@ open Editor_document
 module Settings = Settings
 module Source = Source_file
 module Workspace_doc = Workspace_doc
-module Drawing = Drawing
-module Live_frame = Live_frame
-module Packed_pieces = Packed_pieces
-module Surface = Surface
 module Timeline = Timeline
 
 let workspace_catalog ?(factories = Sop_catalog.Editor.factories) () =
@@ -21,12 +17,12 @@ module Renderer = Renderer
 module Editor = struct
   include Environment
   module Private = struct
-    let gpu_qualification value=Workspace_gpu.qualification value.Environment.host.gpu
+    let gpu_qualification value=Flow_native.Workspace_gpu.qualification value.Environment.host.gpu
     let image_plan value=(snd value.Environment.core.doc.workspace).plan
     let image_payload ?state ?live value image=
       let core=value.Environment.core in
-      Workspace_images.bind value.host.images (snd core.doc.workspace);
-      Workspace_images.payload value.host.images (image_plan value)
+      Flow_native.Workspace_images.bind value.host.images (snd core.doc.workspace);
+      Flow_native.Workspace_images.payload value.host.images (image_plan value)
         ~state:(Option.value ~default:core.cook.state state)
         ~live:(Option.value ~default:core.live_frame live) image
     let image_stats value = let resources=value.Environment.host.resources in
@@ -38,26 +34,28 @@ module Editor = struct
     let menu_forms = List.map (fun (_, form, text, _) -> form, text) Core.forms
     let lisp_completions value text =
       Lisp_text.complete (Lazy.force value.Environment.core.lisp_vocab) text (String.length text)
-    let image_render_stats value=Workspace_images.render_stats value.Environment.host.images
+    let image_render_stats value=Flow_native.Workspace_images.render_stats value.Environment.host.images
     let canvas_scenes value=List.map (fun (_,(p:Environment.canvas_picture))->p.scene) value.Environment.canvases
-    let image_gpu_stats value=Workspace_gpu.image_stats value.Environment.host.gpu
+    let image_gpu_stats value=Flow_native.Workspace_gpu.image_stats value.Environment.host.gpu
     let host_stats value = let host=value.Environment.host in
       host.quit_requested,host.fired,host.resources.samples_created,host.resources.samples_destroyed
     let image value image = let core=value.Environment.core in
-      Workspace_images.bind value.host.images (snd core.doc.workspace);
-      Workspace_images.image value.host.images ~state:core.cook.state ~live:core.live_frame
+      Flow_native.Workspace_images.bind value.host.images (snd core.doc.workspace);
+      let gpu=Flow_native.Workspace_gpu.config ~fast:(Editor_document.Contexts.fast core.doc) value.host.gpu in
+      Flow_native.Workspace_images.image ~gpu value.host.images ~state:core.cook.state ~live:core.live_frame
         (snd core.doc.workspace).plan image
     let with_images ?state ?live ?plan value run =
       let core = value.Environment.core in
       let state = Option.value ~default:core.cook.state state
       and live = Option.value ~default:core.live_frame live
       and plan = Option.value ~default:(snd core.doc.workspace).plan plan in
-      Workspace_images.bind value.host.images (snd core.doc.workspace);
-      Flow_sop.Lower.with_images
-        ~metadata:(fun plan id -> Option.map Rays.Image.get_size (Workspace_images.peek value.host.images plan id))
-        (Workspace_images.payload value.host.images) (fun () ->
-          run ~image:(Workspace_images.image value.host.images ~state ~live plan)
-            ~texture:(Workspace_images.texture value.host.images ~state ~live plan))
+      Flow_native.Workspace_images.bind value.host.images (snd core.doc.workspace);
+      Flow_native.Workspace_gpu.with_backend ~fast:(Editor_document.Contexts.fast core.doc) value.host.gpu (fun gpu ->
+        Flow_sop.Lower.with_images ~gpu
+          ~metadata:(fun plan id -> Option.map Rays.Image.Private.dimensions (Flow_native.Workspace_images.peek value.host.images plan id))
+          (Flow_native.Workspace_images.payload value.host.images) (fun () ->
+            run ~image:(Flow_native.Workspace_images.image ~gpu value.host.images ~state ~live plan)
+              ~texture:(Flow_native.Workspace_images.texture ~gpu value.host.images ~state ~live plan)))
   end
 
   type render_settings = Objects.Root.render = { width : int; height : int; max_spp : int }
@@ -72,27 +70,22 @@ module Editor = struct
       { film = info.size; step = info.step; samples = info.samples; max_spp = info.cap;
         viewports = info.viewports })
       (Renderer.info (extra value).Viewport.renderer ~key)
-  let take_export value = take_export value
-  let set_render_status value status = set_render_status value status
   let flying value = (extra value).Viewport.fly <> None
   let look_through value = Viewport.look_through (extra value)
   let renderer value = (extra value).Viewport.renderer.mode
   let set_renderer value mode =
     {value with extra = {value.extra with Viewport.renderer_request = Some mode}}
 
-  let create ?name ?presets ?factories ?settings ?lights ?camera
-      ?background ?seed ?grain ?domains ?max_entries ?max_payload_bytes ?await ?carry_budget ~workspace ?source ~prepare ~scene3
-      ?overlay ?status () =
-    create ?name ?presets ?factories ?settings ?lights ?camera
-      ?background ?seed ?grain ?domains ?max_entries ?max_payload_bytes ?await ?carry_budget ~workspace ?source ~prepare
-      ~draw:scene3 ?overlay ?status ()
+  let create ?name ?presets ?factories ?settings ?camera ?seed ?grain ?domains
+      ?max_entries ?max_payload_bytes ?await ?carry_budget ~workspace ?source ~prepare ~draw () =
+    Environment.create ?name ?presets ?factories ?settings ?camera ?seed ?grain ?domains
+      ?max_entries ?max_payload_bytes ?await ?carry_budget ~workspace ?source ~prepare ~draw ()
 
-  let run ?inputs ?name ?factories ?lights ?camera
-      ?seed ?grain ?max_entries ?max_payload_bytes ~config ~workspace ?source ~prepare
-      ~scene3 ?overlay () =
-    run ?inputs ?name ?factories ?lights ?camera
-      ?seed ?grain ?max_entries ?max_payload_bytes ~config ~workspace ?source ~prepare
-      ~draw:scene3 ?overlay ()
+  let run ?inputs ?name ?factories ?camera ?seed ?grain ?max_entries
+      ?max_payload_bytes ~config ~workspace ?source ~prepare ~draw () =
+    Environment.run ?inputs ?name ?factories ?camera ?seed ?grain ?max_entries
+      ?max_payload_bytes ~config ~workspace ?source ~prepare ~draw ()
+
 end
 
 module Reduce = struct
@@ -132,14 +125,14 @@ module Workspace = struct
     | Error d -> Error [ d ]
     | Ok catalog -> Workspace_doc.of_text ?ops ?imports catalog text
 
-  (* A hand-written host: the checked document and its file, or the diagnostics and exit 1. *)
+  (* A hand-written host: the checked document and its file, or diagnostics. *)
   (* The viewport starts where the scene's first camera is (else the default orbit); the host's
      light below is a default of a workspace with no scene graph (Contexts.of_workspace).
      Piece preparation is shared with the hand-written shattered-cube host. *)
   (* Every [sop] graph of the document, lowered and compiled, for headless cooking. *)
   let sop_graphs ?(factories = Sop_catalog.Editor.factories) (doc : Workspace_doc.t) =
     let ( let* ) = Result.bind in
-    let* lowered = Result.map_error Flow.Diagnostic.to_string
+    let* lowered = Result.map_error Diagnostic.to_string
         (Flow_sop.Lower.workspace ~extra:Contexts.descriptors ~inputs:doc.inputs ~factories doc.source) in
     List.fold_right (fun (g : Flow_sop.Lower.graph) rest ->
       let* rest = rest in
@@ -169,74 +162,87 @@ module Workspace = struct
      same document, so it shares nothing. *)
   let run ?inputs ?factories ?source doc =
     let doc = match inputs with None -> doc | Some inputs -> {doc with Workspace_doc.inputs} in
-    let source = Option.bind source (fun { path; digest } -> Source.find ~path ~digest)
-      |> Option.map (fun source -> Source_file.with_imports source (Workspace_doc.import_texts doc)) in
-    let opened = match factories with
-      | Some [] -> None
-      | _ -> Result.to_option (Contexts.of_workspace
-          ~factories:(Option.value factories ~default:Sop_catalog.Editor.factories) doc) in
-    Result.map (fun window ->
-    let config = { Rays.Sketch.default_config with width = window.width; height = window.height;
-                   title = window.title; fps = Some window.fps } in
-    let prepare _ = Surface.of_output in
-    let scene3 = Surface.scene3 in
-    let lights = [ Rays.Light.directional ~direction:(Rays.Vec3.create (-1.) (-1.4) (-0.8))
-                     ~diffuse:Rays.Color.white () ] in
-    let base = Rays.Easy_camera.create ~target:Rays.Vec3.zero ~distance:3.6 ~azimuth:0.4 ~elevation:0.6 () in
-    let camera = match opened, factories with
-      | Some document, _ -> document_camera document base
-      | None, Some [] -> declared_camera ~factories:[] doc base
-      | None, _ -> base in
-    Environment.run ?inputs ~config ~lights ~camera ?factories ~seed:(Int64.of_int window.seed) ?opened
-      ~workspace:doc ?source ~prepare ~draw:scene3 ())
-      (match opened with Some document -> Contexts.document_window document | None -> workspace_window doc)
+    let gpu_owner = Flow_native.Workspace_gpu.create () in
+    Fun.protect ~finally:(fun () -> Flow_native.Workspace_gpu.close gpu_owner) (fun () ->
+      let gpu=Flow_native.Workspace_gpu.config gpu_owner in
+      let source = Option.bind source (fun { path; digest } -> Source.find ~path ~digest)
+        |> Option.map (fun source -> Source_file.with_imports source (Workspace_doc.import_texts doc)) in
+      let opened = match factories with
+        | Some [] -> None
+        | _ -> Result.to_option (Contexts.of_workspace
+            ~gpu ~factories:(Option.value factories ~default:Sop_catalog.Editor.factories) doc) in
+      let window=match opened with Some document->Contexts.document_window document
+        |None->workspace_window doc in
+      Result.bind window (fun window ->
+        let config = { Rays.Sketch.default_config with width = window.width; height = window.height;
+                       title = window.title; fps = Some window.fps } in
+        let prepare _ (output : Sop.Session.output) =
+          let ( let* ) = Result.bind in
+          let* geometry = Sop.Payload.geometry output.payload
+            |> Result.map_error Diagnostic.error_to_string in
+          Rdk_rays.Surface.of_geometry ?instances:output.instances geometry in
+        let scene3 node surface =
+          let explosion = Rdk_rays.Packed_pieces.explosion
+            ~operation:(Sop.Node.operation node) ~fields:(Sop.Node.parameter_fields node) in
+          Rdk_rays.Surface.scene3 ?explosion surface in
+        let lights = [ Rays.Light.directional ~direction:(Rays_math.Vec3.create (-1.) (-1.4) (-0.8))
+                         ~diffuse:Rays_math.Color.white () ] in
+        let base = Rays.Easy_camera.create ~target:Rays_math.Vec3.zero ~distance:3.6 ~azimuth:0.4 ~elevation:0.6 () in
+        let camera = match opened, factories with
+          | Some document, _ -> document_camera document base
+          | None, Some [] -> declared_camera ~factories:[] doc base
+          | None, _ -> base in
+        Environment.run ?inputs ~gpu_owner ~config ~lights ~camera ?factories ~seed:(Int64.of_int window.seed) ?opened
+          ~workspace:doc ?source ~prepare ~draw:scene3 ()
+          |> Result.map_error (fun error -> Diagnostic.error ~code:"E_RUNTIME"
+            (Rays.Sketch.error_to_string error))))
 
   let export ?graph ?(fps = 60) ~directory ~frames doc =
     let factories = Sop_catalog.Editor.factories in
     let ( let* ) = Result.bind in
     let* () = if fps > 0 && frames > 0 then Ok () else
-      Error (Flow.Diagnostic.error ~code:"E_EXPORT_RANGE" "Export frame count and fps must be positive.") in
+      Error (Diagnostic.error ~code:"E_EXPORT_RANGE" "Export frame count and fps must be positive.") in
     let* window = workspace_window doc in
     let* lowered = Flow_sop.Lower.of_checked ~reference:true ~factories ~inputs:doc.inputs doc.checked in
     let evaluated=lowered.evaluated in
-    let* ()=Workspace_host.export_check doc evaluated.plan in
+    let* ()=Flow_native.Workspace_host.export_check doc evaluated.plan in
     let chosen = List.find_opt (fun (g : Flow.Workspace.graph) ->
       g.context = Flow.Context.draw && Option.fold ~none:true ~some:((=) g.name) graph) doc.checked.graphs in
     match chosen with
-    | None -> Error (Flow.Diagnostic.error ~code:"E_DRAW_GRAPH" "Export needs a draw graph.")
+    | None -> Error (Diagnostic.error ~code:"E_DRAW_GRAPH" "Export needs a draw graph.")
     | Some graph ->
         let state = Flow.Eval.create_state () in
-        let host=Workspace_host.create ~seed:(Int64.of_int window.seed)()in
-        Workspace_images.bind host.images lowered;
+        let host=Flow_native.Workspace_host.create ~seed:(Int64.of_int window.seed)()in
+        Flow_native.Workspace_images.bind host.images lowered;
         let value = List.assoc graph.name evaluated.results in
-        let* prepared = Drawing.prepare ~states:evaluated.states evaluated.plan value in
+        let* prepared = Flow_native.Drawing.prepare ~states:evaluated.states evaluated.plan value in
         let view () frame =
-          let live = {(Frame_input.at_time frame.Rays.Frame.time) with
-            dt = 1. /. float fps; frame = frame.count; tick = frame.count; size = (window.width, window.height)} in
-          match Drawing.render_prepared ~state prepared
-            ~image:(Workspace_images.image ~display:false host.images ~state ~live evaluated.plan) ~live ~size:live.size with
-          | Ok scene -> (match Workspace_host.export_update host ~state ~live doc evaluated.plan with
+          let live = {(Input.at_time frame.Rays.Frame.input.t) with
+            dt = 1. /. float fps; frame = frame.input.frame; tick = frame.input.tick;
+            size = (window.width, window.height)} in
+          match Flow_native.Drawing.render_prepared ~state prepared
+            ~image:(Flow_native.Workspace_images.image ~display:false host.images ~state ~live evaluated.plan) ~live ~size:live.size with
+          | Ok scene -> (match Flow_native.Workspace_host.export_update host ~state ~live doc evaluated.plan with
               |Ok()->scene|Error d->Flow.Value.raise_diagnostic d)
           | Error d -> Flow.Value.raise_diagnostic d in
         let config = {Rays.Sketch.default_config with width = window.width; height = window.height;
           title = window.title;  clock = Rays.Sketch.Fixed (1. /. float fps)} in
-        let after_present () _=match Workspace_host.save_pending host Rays.Canvas.save_screen_png with
+        let after_present () _=match Flow_native.Workspace_host.save_pending host Rays.Canvas.save_screen_png with
           |Ok()->()|Error d->Flow.Value.raise_diagnostic d in
-        (try ignore (Rays.Sketch.export_state ~config ~fps ~directory ~frames
+        (try match Rays.Sketch.export_state ~config ~fps ~directory ~frames
            ~init:(fun _ -> ()) ~update:(fun () _ -> ()) ~view ~after_present
-           ~on_stop:(fun()->Workspace_host.close host) ()); Ok ()
-         with Flow.Value.Fail (code, message, span) -> Error (Flow.Diagnostic.error ?span ~code message)
-           | Flow.Value.Diagnostic_fail diagnostic -> Error diagnostic)
+           ~on_stop:(fun()->Flow_native.Workspace_host.close host) () with
+           |Ok _->Ok()
+           |Error error->Error(Diagnostic.error~code:"E_EXPORT"(Rays.Sketch.error_to_string error))
+         with Diagnostic.Error d -> Error d)
 
   let main ?text path =
-    let text = match text with Some text -> text | None ->
-      try In_channel.with_open_bin path In_channel.input_all
-      with Sys_error message -> prerr_endline message; exit 1 in
-    let fail ds = List.iter (fun d -> prerr_endline (Flow.Diagnostic.report ~file:path ~source:text d)) ds; exit 1 in
-    match Result.bind (Source_file.read_imports ~file:path text) (fun imports -> load ~imports text) with
-    | Error ds -> fail ds
-    | Ok doc ->
-        (match run ~source:{ path; digest = Contexts.sha256 text } doc with
-         | Ok () -> ()
-         | Error d -> fail [d])
+    let ( let* ) = Result.bind in
+    let* text = match text with Some text -> Ok text | None ->
+      try Ok (In_channel.with_open_bin path In_channel.input_all)
+      with Sys_error message -> Error [Diagnostic.error ~code:"E_IO" message] in
+    let* imports = Source_file.read_imports ~file:path text in
+    let* doc = load ~imports text in
+    Result.map_error(fun diagnostic->[diagnostic])
+      (run ~source:{ path; digest = Contexts.sha256 text } doc)
 end

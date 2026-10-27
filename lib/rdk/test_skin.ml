@@ -141,7 +141,7 @@ let equal_geometry left right =
 
 let test_parallel_exactness () =
   let source = rings ~sections:96 ~points:257 () in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       Poly_loft.run ~output:Poly_loft.Polygons ~operation:"skin" ~grain:113 ~output_group:"skin" source |> get_rdk) in
   let one = run 1 and four = run 4 in
   check (equal_geometry one four) "one/four-domain output differs";

@@ -1,6 +1,5 @@
 let tests = [
   "test_pxui_graph", Test_pxui_graph.run;
-  "test_pxui_graph_scope", Test_pxui_graph.run_scope;
   "bench_scope_big", Test_pxui_graph.bench_scope_big;
 ]
 

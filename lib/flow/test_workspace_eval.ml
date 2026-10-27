@@ -9,7 +9,7 @@ let cases = "../../specification/workspace/cases"
 let parse source = match Syntax.parse source with
   | Ok forms -> forms
   | Error d -> failwith (Diagnostic.to_string d)
-let errors ds = List.filter (fun (d : Diagnostic.t) -> d.severity = Diagnostic.Error) ds
+let errors ds = List.filter (fun (d : Diagnostic.t) -> d.severity = Diagnostic.Error_severity) ds
 let show_ds ds = String.concat "; " (List.map Diagnostic.to_string ds)
 let check source = match Workspace.check catalog (parse source) with
   | Some ws, ds when errors ds = [] -> ws
@@ -71,7 +71,7 @@ let () =
   if Array.length Sys.argv=2 && Sys.argv.(1)="--bench-records" then begin
     let v=result (static (check (value
       "(let* [a (fold [a {:n 0.}] [x (array/range 4096)] (assoc a :n (+ a.n t)))] a.n)"))) "g" in
-    let force time=ignore (ok (Eval.force v ~live:(Frame_input.at_time time))) in
+    let force time=ignore (ok (Eval.force v ~live:(Input.at_time time))) in
     force 0.1;
     let samples=List.init 3 (fun _ ->
       Gc.full_major ();
@@ -83,26 +83,82 @@ let () =
     exit 0
   end
 
+module Seen_bench_term = Hashtbl.Make (struct
+  type t = Workspace.term
+  let equal = ( == )
+  let hash = Hashtbl.hash
+end)
+
+let legacy_kind_calls root =
+  let seen = Seen_bench_term.create 256 and out = ref [] in
+  let rec calls (term : Workspace.term) =
+    if not (Seen_bench_term.mem seen term) then begin
+      Seen_bench_term.add seen term ();
+      match term.node with
+      | Workspace.Call {kind; args; _} -> out := kind :: !out; fields args
+      | Op {args; _} | Record args -> fields args
+      | Call_fn {args; body; _} -> List.iter calls args; Option.iter calls body
+      | Graph_ref {inputs; _} -> fields inputs
+      | Let (bindings, body) -> List.iter (fun (_, value) -> calls value) bindings; calls body
+      | State {init; step; _} -> calls init; calls step
+      | Loop {accs; clauses; body; _} -> List.iter (fun (_, value) -> calls value) (accs @ clauses); calls body
+      | With_error (a, b) -> calls a; calls b
+      | Error_rows {rows; mapper; _} -> calls rows; calls mapper
+      | If (a, b, c) -> calls a; calls b; calls c
+      | Cond (arms, default) -> List.iter (fun (a, b) -> calls a; calls b) arms; calls default
+      | Case (scrutinee, arms, default) -> calls scrutinee; List.iter (fun (_, value) -> calls value) arms; calls default
+      | Fn {body; capture; _} -> calls body; Option.iter calls capture
+      | Hof (_, terms) | Vec terms | List_lit terms | Str terms | List_op (_, terms) -> List.iter calls terms
+      | Get (value, _) | Bypass value | Expanded {body = value; _} -> calls value
+      | Assoc (value, fields_) -> calls value; fields fields_
+      | Lit _ | Text _ | Nil | Time | Ref_binding _ | Fn_ref _ -> ()
+    end
+  and fields fields_ = List.iter (fun (_, value) -> calls value) fields_ in
+  calls root;
+  List.sort_uniq String.compare !out
+
+let () = if Array.length Sys.argv=2 && Sys.argv.(1)="--bench-kind-calls" then begin
+  let files = Sys.readdir cases |> Array.to_list
+    |> List.filter (fun file -> Filename.check_suffix file ".lisp") |> List.sort String.compare in
+  let layout = read "../../sketches/ws_layout.rays" |> parse
+    |> List.find (fun form -> Syntax.head form = Some "workspace") in
+  let layout = match Workspace.check catalog [layout] with
+    | Some workspace, ds when errors ds = [] -> workspace
+    | _, ds -> failwith (show_ds ds) in
+  let workspaces = layout
+    :: List.map (fun file -> check (read (Filename.concat cases file))) files in
+  let terms = List.concat_map (fun (ws : Workspace.t) ->
+    List.map (fun (node : Workspace.node_definition) -> node.body.body) ws.nodes
+    @ List.map (fun (graph : Workspace.graph) -> graph.body) (ws.graphs @ ws.defs)) workspaces in
+  let current () = List.map Workspace.kind_calls terms
+  and legacy () = List.map legacy_kind_calls terms in
+  let expected = legacy () in
+  assert (current () = expected);
+  let measure run =
+    let samples = List.init 9 (fun _ ->
+      Gc.full_major ();
+      let allocated = Gc.allocated_bytes () and start = Unix.gettimeofday () in
+      for _ = 1 to 100 do ignore (run ()) done;
+      Unix.gettimeofday () -. start, Gc.allocated_bytes () -. allocated) in
+    List.nth (List.sort (fun (a, _) (b, _) -> Float.compare a b) samples) 4 in
+  let seconds, bytes = measure current and legacy_seconds, legacy_bytes = measure legacy in
+  let rec count n term = List.fold_left count (n + 1) (Workspace.children term) in
+  let size = List.fold_left count 0 terms in
+  Printf.printf "Workspace kind_calls ws_layout + all workspace cases: %d terms; 100 full passes; domains=1; median of 9\nold %.6fs %.0f allocated bytes\nshared %.6fs %.0f allocated bytes\n"
+    size legacy_seconds legacy_bytes seconds bytes;
+  exit 0
+end
+
 (* IR walk, for the static types *)
 let rec walk f (x : Workspace.term) =
   f x;
-  let all = List.iter (walk f) in
-  let named l = List.iter (fun (_, x) -> walk f x) l in
-  match x.node with
-  | Workspace.Lit _ | Text _ | Nil | Time | Ref_binding _ | Fn_ref _ -> ()
-  | Vec ts | List_lit ts | Str ts | List_op (_, ts) | Hof (_, ts) | Call_fn { args = ts; _ } -> all ts
-  | Call { args; _ } | Op { args; _ } | Graph_ref { inputs = args; _ } | Record args -> named args
-  | Let (bs, r) -> named bs; walk f r
-  | State {init; step; _} -> all [init; step]
-  | With_error (protected, mapper) -> all [protected; mapper]
-  | Error_rows {rows; mapper; _} -> all [rows; mapper]
-  | Loop { accs; clauses; body; _ } -> named accs; named clauses; walk f body
-  | If (a, b, c) -> all [ a; b; c ]
-  | Cond (arms, d) -> List.iter (fun (a, b) -> all [ a; b ]) arms; walk f d
-  | Case (s, arms, d) -> walk f s; List.iter (fun (_, b) -> walk f b) arms; walk f d
-  | Fn { body; _ } | Bypass body | Expanded { body; _ } -> walk f body
-  | Get (r, _) -> walk f r
-  | Assoc (r, us) -> walk f r; named us
+  (* This lookup tests the declared function body, not call-site specializations
+     retained by Call_fn/Fn for evaluation. *)
+  let children = match x.node with
+    | Workspace.Call_fn {args; _} -> args
+    | Workspace.Fn {body; _} -> [body]
+    | _ -> Workspace.children x in
+  List.iter (walk f) children
 let ty_at (ws : Workspace.t) path =
   let found = ref None in
   List.iter (fun (g : Workspace.graph) ->
@@ -195,7 +251,7 @@ let () = (* the first block *)
   t "loops tag what they make" (fun () ->
     let r = run (check (read (Filename.concat cases "bloom.lisp"))) in
     assert (Array.exists (fun (n : Eval.node) ->
-      n.iter = [ 5 ] && List.filteri (fun i _ -> i < 2) n.site = [ "flower"; "ring" ]) r.plan.nodes));
+      n.iter = [ 5 ] && List.take 2 n.site = [ "flower"; "ring" ]) r.plan.nodes));
   t "only the taken branch runs" (fun () ->
     (* the study runs a literal (range 9999) in the untaken arm; the checker rejects that literal,
        so the count is a graph input *)
@@ -400,11 +456,11 @@ let () = (* t: live values and the split evaluation *)
     (match arg n "translate", arg n "uniform_scale" with
      | Eval.Residual res, Eval.Int 2 ->
          assert (Eval.is_live (arg n "translate"));
-         assert (Eval.residual_eval res ~live:(Frame_input.at_time (3. )) = Ok (Eval.Vec3 (6., 0., 0.)));
-         assert (Eval.residual_eval res ~live:(Frame_input.at_time (0.5 )) = Ok (Eval.Vec3 (1., 0., 0.)))
+         assert (Eval.residual_eval res ~live:(Input.at_time (3. )) = Ok (Eval.Vec3 (6., 0., 0.)));
+         assert (Eval.residual_eval res ~live:(Input.at_time (0.5 )) = Ok (Eval.Vec3 (1., 0., 0.)))
      | _ -> failwith "translate is not a residual");
-    assert (Eval.force (arg n "translate") ~live:(Frame_input.at_time (1. )) = Ok (Eval.Vec3 (2., 0., 0.)));
-    assert (Eval.force (Eval.Int 4) ~live:(Frame_input.at_time (1. )) = Ok (Eval.Int 4)));
+    assert (Eval.force (arg n "translate") ~live:(Input.at_time (1. )) = Ok (Eval.Vec3 (2., 0., 0.)));
+    assert (Eval.force (Eval.Int 4) ~live:(Input.at_time (1. )) = Ok (Eval.Int 4)));
   t "residuals: values, if on values, fold, fn, ref and shared chains" (fun () ->
     let at src time = match Eval.run ~time (check src) with
       | Ok r -> result r "g" | Error d -> failwith (Diagnostic.to_string d) in
@@ -450,26 +506,26 @@ let () =
     let bindings = String.concat " " (List.init 20 (fun i -> Printf.sprintf "b%d %d.0" i i)) in
     let ws = check (value ("(let* [" ^ bindings ^ "] (+ (+ b3 b17) t))")) in
     let residual = match result (static ws) "g" with Eval.Residual r -> r | _ -> assert false in
-    assert (List.map fst (Eval.Private.residual_view residual).bindings = ["b17"; "b3"]);
-    assert (Eval.residual_eval residual ~live:(Frame_input.at_time 2.) = Ok (Eval.Float 22.)));
+    assert (List.map fst (Eval.Residual.residual_view residual).bindings = ["b17"; "b3"]);
+    assert (Eval.residual_eval residual ~live:(Input.at_time 2.) = Ok (Eval.Float 22.)));
   t "residual capture retains a nested function's outer binding" (fun () ->
     let ws = check (value "(let* [outer 7.0 unused 99.0 mapped (map (fn [x] (+ x (+ outer t))) (array/range 2))] 0.0)") in
     let residual = match List.hd (List.assoc ["g"; "mapped"] (static ~record:true ws).records) |> snd with
       | Eval.Residual r -> r | _ -> assert false in
-    assert (List.map fst (Eval.Private.residual_view residual).bindings = ["outer"]);
-    assert (Eval.residual_eval residual ~live:(Frame_input.at_time 2.) = Ok (Eval.Float_array [|9.; 10.|])));
+    assert (List.map fst (Eval.Residual.residual_view residual).bindings = ["outer"]);
+    assert (Eval.residual_eval residual ~live:(Input.at_time 2.) = Ok (Eval.Float_array [|9.; 10.|])));
   t "free-name walk respects sequential bindings and nested captures" (fun () ->
     let ws = check (value "(let* [outside 7.0 unused 8.0] (let* [local (+ outside t) f (fn [x] (+ x (+ local outside))) mapped (map f (list 1.0 2.0))] 0.0))") in
     let body = (List.hd ws.graphs).body in
     let term = match body.node with Workspace.Let (_, term) -> term | _ -> assert false in
-    assert (Eval.Private.free_names term = ["outside"]);
+    assert (Eval.Residual.free_names term = ["outside"]);
     let walks = Eval.Private.free_name_walks () in
-    ignore (Eval.Private.free_names term);
+    ignore (Eval.Residual.free_names term);
     assert (Eval.Private.free_name_walks () = walks));
   t "free-name walk includes destructured sources and state initial values" (fun () ->
     let ws = check (value "(let* [source (list 3.0 4.0) initial 2.0] (let* [[x y] source total (state [s initial] (+ s t))] (+ x (+ y total))))") in
     let term = match (List.hd ws.graphs).body.node with Workspace.Let (_, term) -> term | _ -> assert false in
-    assert (Eval.Private.free_names term = ["initial"; "source"]))
+    assert (Eval.Residual.free_names term = ["initial"; "source"]))
 
 (* the core executor against the walker, bit for bit at every time: lib/flow_ir/test_core_parity.ml *)
 
@@ -637,10 +693,10 @@ let () = (* W8: a loop over geometry is one zone node with a template body *)
     let p = arg tr "translate" in
     assert (Eval.is_live p);
     let key = Eval.element_key [ "g"; "dots" ] in
-    (match Eval.force ~elems:[ (key, Eval.Vec3 (1., 2., 3.)) ] p ~live:(Frame_input.at_time (0. )) with
+    (match Eval.force ~elems:[ (key, Eval.Vec3 (1., 2., 3.)) ] p ~live:(Input.at_time (0. )) with
      | Ok (Eval.Vec3 (1., 2., 3.)) -> ()
      | _ -> failwith "element not bound");
-    assert (Result.is_error (Eval.force p ~live:(Frame_input.at_time (0. ))));
+    assert (Result.is_error (Eval.force p ~live:(Input.at_time (0. ))));
     (* not a list: only sop/merge takes it, and the structure cannot read the element *)
     err (sop "(let* [g (sop/grid) n (count (for [p (sop/point_list g)] (sop/box)))] g)") "E_TYPE";
     err (sop "(let* [g (sop/grid)] (sop/merge (for [p (sop/point_list g)] (if (> p.x 0) (sop/box) (sop/grid)))))") "E_ZONE";
@@ -709,21 +765,22 @@ let () =
     let seen = ref [] and adapter_checked = ref false in
     let observe residual =
       seen := residual :: !seen;
-      let view = Eval.Private.residual_view residual in
+      let view = Eval.Residual.residual_view residual in
       if not !adapter_checked && view.site = ["g";"static_map"] then begin
         adapter_checked := true;
         let count = List.length !seen in
-        assert (Eval.Private.eval_term residual view.term ~live:(Frame_input.at_time 0.)
+        assert (Eval.Residual.eval_term residual view.term ~live:(Input.at_time 0.)
           = Ok (Eval.Float_array [|2.;3.|]));
         assert (List.length !seen = count)
       end in
-    let observed = ok (Eval.Private.static_with_kernels ~record:true ~observe ws) in
+    let observed = ok (Eval.Residual.handle ~observe (fun () ->
+      Eval.Private.static_with_requests ~record:true ws)) in
     assert (!adapter_checked);
     (* Compare ordinary identities as well as immutable data, without comparing
        the closures embedded in function/residual contexts. *)
     let rec identity = function
-      | Eval.Fn fn -> Eval.Text ("fn:" ^ string_of_int (Eval.Private.function_id fn))
-      | Residual r -> Eval.Text ("residual:" ^ string_of_int (Eval.Private.residual_id r))
+      | Eval.Fn fn -> Eval.Text ("fn:" ^ string_of_int (Eval.Residual.function_id fn))
+      | Residual r -> Eval.Text ("residual:" ^ string_of_int (Eval.Residual.residual_id r))
       | List xs -> Eval.List (Array.map identity xs)
       | Record fs -> Eval.Record (List.map (fun (name, v) -> name, identity v) fs)
       | Struct (name, ty, fs) -> Eval.Struct (name, ty, List.map (fun (name, v) -> name, identity v) fs)
@@ -736,40 +793,40 @@ let () =
     assert (results ordinary = results observed && records ordinary = records observed);
     assert (instances ordinary = instances observed && ordinary.authored = observed.authored);
     assert (ordinary.plan.nodes = observed.plan.nodes && ordinary.states = observed.states);
-    let ids = List.map Eval.Private.residual_id !seen in
+    let ids = List.map Eval.Residual.residual_id !seen in
     assert (List.for_all (fun id -> id < 0) ids);
     assert (List.length (List.sort_uniq compare ids) = List.length ids);
-    let views = List.map Eval.Private.residual_view (List.rev !seen) in
-    let at path = List.filter (fun (v : Eval.Private.residual_view) -> v.site = path) views in
-    let offsets views = List.map (fun (v : Eval.Private.residual_view) -> List.assoc "offset" v.bindings) views in
+    let views = List.map Eval.Residual.residual_view (List.rev !seen) in
+    let at path = List.filter (fun (v : Eval.Residual.residual_view) -> v.site = path) views in
+    let offsets views = List.map (fun (v : Eval.Residual.residual_view) -> List.assoc "offset" v.bindings) views in
     let maps = at ["g";"static_map"] in
     assert (offsets maps = [Eval.Float 2.; Float 7.]);
     let authored = match (List.find (fun (g : Workspace.graph) -> g.name = "g") ws.graphs).body.node with
       | Workspace.Let (bindings, _) -> List.assoc (Workspace.Name "static_map") bindings
       | _ -> assert false in
-    List.iter (fun (v : Eval.Private.residual_view) ->
+    List.iter (fun (v : Eval.Residual.residual_view) ->
       assert (v.term == authored && v.iter = []);
       assert (List.map fst v.bindings = ["offset"]);
       let instance = observed.plan.instances.(v.instance) in
       assert (instance.graph = "g" && List.assoc "offset" instance.inputs = List.assoc "offset" v.bindings)) maps;
     List.iter (fun path -> assert (offsets (at ["g";path]) = [Eval.Float 2.; Float 7.]))
       ["empty_map";"live_map";"list_map"];
-    assert (List.for_all (fun (v : Eval.Private.residual_view) -> match v.term.ty with
+    assert (List.for_all (fun (v : Eval.Residual.residual_view) -> match v.term.ty with
       | Ty.List _ -> true | _ -> false) (at ["g";"list_map"]));
     assert (List.length (at ["g";"reduced"]) = 2);
-    let nested = List.filter (fun (v : Eval.Private.residual_view) -> List.mem_assoc "i" v.bindings) views in
-    assert (List.map (fun (v : Eval.Private.residual_view) -> v.iter, List.assoc "i" v.bindings,
+    let nested = List.filter (fun (v : Eval.Residual.residual_view) -> List.mem_assoc "i" v.bindings) views in
+    assert (List.map (fun (v : Eval.Residual.residual_view) -> v.iter, List.assoc "i" v.bindings,
       List.assoc "offset" v.bindings) nested =
       [[0], Eval.Int 0, Float 2.; [1], Int 1, Float 2.; [0], Int 0, Float 7.; [1], Int 1, Float 7.]);
-    let definitions = List.filter (fun (v : Eval.Private.residual_view) -> match v.term.node with
+    let definitions = List.filter (fun (v : Eval.Residual.residual_view) -> match v.term.node with
       | Workspace.Hof (`Map, _) -> List.mem "def:doubled" v.site | _ -> false) views in
     assert (offsets definitions = [Eval.Float 2.; Float 7.]);
-    assert (List.exists (fun (v : Eval.Private.residual_view) -> match v.term.node with
+    assert (List.exists (fun (v : Eval.Residual.residual_view) -> match v.term.node with
       | Workspace.Op {op = "array/sum"; _} -> true | _ -> false) views);
-    assert (not (List.exists (fun (v : Eval.Private.residual_view) -> List.mem "unvisited" v.site) views));
+    assert (not (List.exists (fun (v : Eval.Residual.residual_view) -> List.mem "unvisited" v.site) views));
     let count = List.length !seen in
     List.iter (fun time ->
-      let live = Frame_input.at_time time in
+      let live = Input.at_time time in
       List.iter2 (fun (name, a) (other, b) ->
         assert (name = other && Eval.force a ~live = Eval.force b ~live)) ordinary.results observed.results;
       assert (List.length !seen = count)) [0.;0.125;1.25;7.]);
@@ -778,11 +835,11 @@ let () =
       let workspace = check (value body) in
       let v = result (static workspace) "g" in
       (match v with
-       | Eval.Residual r -> (match (Eval.Private.residual_view r).term.node with
+       | Eval.Residual r -> (match (Eval.Residual.residual_view r).term.node with
            | Workspace.Loop {kind = `Fold; _} | Workspace.Hof (`Reduce, _) -> ()
            | _ -> failwith "accumulator was unrolled into per-element residuals")
        | _ -> failwith "live accumulator did not defer");
-      assert (Eval.force v ~live:(Frame_input.at_time 0.5) = Ok (Eval.Float 1025.5)))
+      assert (Eval.force v ~live:(Input.at_time 0.5) = Ok (Eval.Float 1025.5)))
       ["(fold [a 0] [x (array/range 2051)] (+ a t))";
        "(reduce (fn [a x] (+ a t)) 0.0 (array/range 2051))"]);
   t "image constructors preserve live arguments in deferred image nodes" (fun () ->
@@ -794,14 +851,16 @@ let () =
         | _ -> failwith "live image constructor did not create a deferred image node" in
       let argument = List.assoc field evaluated.plan.nodes.(id).args in
       assert (Eval.is_live argument);
-      assert (Eval.force argument ~live:(Frame_input.at_time 2.) = Ok expected))
+      assert (Eval.force argument ~live:(Input.at_time 2.) = Ok expected))
       ["(image/noise :width 2 :height 2 :frequency (+ 0.3 t))", "frequency", Eval.Float 2.3;
+       "(image/noise :width 2 :height 2 :freq (+ 0.3 t))", "frequency", Eval.Float 2.3;
+       "(image/noise :width 2 :height 2 :freq 0.7 :frequency (+ 0.3 t))", "frequency", Eval.Float 2.3;
        "(image/load (if (< t 1.0) \"before.png\" \"after.png\"))", "path", Eval.Text "after.png";
        "(image/render (ref drawing) :width (if (< t 1.0) 2 3) :height 2)", "width", Eval.Int 3]);
   t "equality compares current captured record/list fields" (fun () ->
     List.iter (fun (body,want) ->
       let v=result (static (check (value body))) "g" in
-      List.iter (fun time -> assert (Eval.force v ~live:(Frame_input.at_time time) = Ok (Eval.Bool want)))
+      List.iter (fun time -> assert (Eval.force v ~live:(Input.at_time time) = Ok (Eval.Bool want)))
         [0.;0.37;2.])
       ["(let* [a {:v t} b {:v t}] (equal? a b))",true;
        "(let* [a (list {:v t}) b (list {:v t})] (equal? a b))",true;
@@ -811,7 +870,7 @@ let () =
   t "updates and accumulators use the current captured field tag" (fun () ->
     List.iter (fun body ->
       let v=result (static (check (value body))) "g" in
-      List.iter (fun time -> match Eval.force v ~live:(Frame_input.at_time time) with
+      List.iter (fun time -> match Eval.force v ~live:(Input.at_time time) with
         | Ok (Eval.Int 2) -> ()
         | Ok actual -> failwith (Printf.sprintf "%s at %g: got %s" body time (Eval.show actual))
         | Error d -> failwith (Diagnostic.to_string d))
@@ -825,7 +884,7 @@ let () =
     List.iter (fun body ->
       let v=result (static (check (value body))) "g" in
       List.iter (fun time ->
-        let live=Frame_input.at_time time in
+        let live=Input.at_time time in
         assert (Eval.force v ~live = Ok (Eval.Int 2));
         assert (Eval.Private.force_reference v ~live = Ok (Eval.Int 2))) [-2.5;0.;0.37;2.])
       ["(let* [r {:n (int t)} updated (reduce (fn [a x] (assoc a :n 1.7)) r (list 0))] updated.n)";
@@ -883,14 +942,15 @@ let () =
     if Value.array_length v = n then Some v else None) ["large"; "again"; "floats"] in
   let offered = ref [] in
   let run bulk = offered := [];
-    ok (Eval.Private.static_with_kernels ~record:true ~bulk:(fun residual ->
-      let view = Eval.Private.residual_view residual in
+    ok (Eval.Residual.handle ~bulk:(fun residual ->
+      let view = Eval.Residual.residual_view residual in
       let n = match view.term.node with
         | Workspace.Hof (`Map, [_; source]) ->
-            (match Eval.Private.eval_term residual source ~live:(Frame_input.at_time 0.) with
+            (match Eval.Residual.eval_term residual source ~live:(Input.at_time 0.) with
              | Ok v -> Value.array_length v | Error d -> failwith (Diagnostic.to_string d))
         | _ -> failwith "a map is offered" in
-      offered := n :: !offered; bulk n) ws) in
+      offered := n :: !offered; bulk n) (fun () ->
+        Eval.Private.static_with_requests ~record:true ws)) in
   (* Supplied whole and correct: used. Only the maps over 4,096 elements are offered, once each. *)
   let supplied = run whole in
   assert (List.sort compare !offered = [4097; 4100; 5000]);
@@ -921,13 +981,15 @@ let () =
   assert ((data (field trusted "large")).(14999) = 99.);
   (* A failure past the walked elements is the walker's own when the host has no value. *)
   let failing = check "(workspace bulk (graph g :context host (map (fn [i] (exp (- i 4300))) (array/range 5200))))" in
-  (match Eval.static failing, Eval.Private.static_with_kernels ~bulk:(fun _ -> None) failing with
+  (match Eval.static failing, Eval.Residual.handle ~bulk:(fun _ -> None) (fun () ->
+      Eval.Private.static_with_requests failing) with
    | Error a, Error b -> assert (a.code = "E_NONFINITE" && a = b)
    | _ -> failwith "a nonfinite element past the walked ones fails either way");
   (* A map that reads the frame is never offered: it becomes a residual before any host call. *)
   let live = check "(workspace bulk (graph g :context host (map (fn [i] (+ i t)) (array/range 5000))))" in
   let asked = ref 0 in
-  (match ok (Eval.Private.static_with_kernels ~bulk:(fun _ -> incr asked; None) live) with
+  (match ok (Eval.Residual.handle ~bulk:(fun _ -> incr asked; None) (fun () ->
+      Eval.Private.static_with_requests live)) with
    | r -> (match result r "g" with Eval.Residual _ -> () | _ -> failwith "a live map stays a residual"));
   assert (!asked = 0);
   print_endline "Static bulk maps: offered past 4,096 elements, checked against the walked ones, refused or wrong values walked"

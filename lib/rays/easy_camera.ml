@@ -1,7 +1,7 @@
 type interaction = Orbit | Pan
 
 type settings = {
-  target : Vec3.t;
+  target : Rays_math.Vec3.t;
   distance : float;
   azimuth : float;
   elevation : float;
@@ -14,7 +14,7 @@ type motion = {
 }
 
 type camera_snapshot = {
-  snapshot_target : Vec3.t;
+  snapshot_target : Rays_math.Vec3.t;
   snapshot_distance : float;
   snapshot_azimuth : float;
   snapshot_elevation : float;
@@ -25,7 +25,7 @@ type camera_snapshot = {
 }
 
 type t = {
-  target : Vec3.t;
+  target : Rays_math.Vec3.t;
   distance : float;
   azimuth : float;
   elevation : float;
@@ -61,14 +61,14 @@ let clamp_elevation elevation =
   let limit = (Float.pi /. 2.) -. 1e-4 in
   Float.max (-.limit) (Float.min limit elevation)
 
-let create ?(target = Vec3.zero) ?(distance = 10.) ?(azimuth = 0.)
+let create ?(target = Rays_math.Vec3.zero) ?(distance = 10.) ?(azimuth = 0.)
     ?(elevation = 0.) ?(fov_y = Float.pi /. 3.)
     ?(inertia = true) () =
   let near = 0.1 and far = 1000. in
   validate_distance distance;
   ignore
     (Camera.perspective ~fov_y ~near ~far
-       ~at:(Vec3.create 0. 0. distance) ~target ());
+       ~at:(Rays_math.Vec3.create 0. 0. distance) ~target ());
   let elevation = clamp_elevation elevation in
   {
     target;
@@ -90,14 +90,14 @@ let create ?(target = Vec3.zero) ?(distance = 10.) ?(azimuth = 0.)
 
 let orbit_basis up =
   let candidate =
-    if abs_float (Vec3.dot up Vec3.unit_z) < 0.999 then Vec3.unit_z
-    else Vec3.unit_x
+    if abs_float (Rays_math.Vec3.dot up Rays_math.Vec3.unit_z) < 0.999 then Rays_math.Vec3.unit_z
+    else Rays_math.Vec3.unit_x
   in
   let forward =
-    Vec3.sub candidate (Vec3.scale up (Vec3.dot candidate up))
-    |> Vec3.normalize
+    Rays_math.Vec3.sub candidate (Rays_math.Vec3.scale up (Rays_math.Vec3.dot candidate up))
+    |> Rays_math.Vec3.normalize
   in
-  let right = Vec3.cross up forward |> Vec3.normalize in
+  let right = Rays_math.Vec3.cross up forward |> Rays_math.Vec3.normalize in
   right, forward
 
 let camera value =
@@ -111,21 +111,21 @@ let camera value =
       && cached.snapshot_far = value.far ->
       cached.snapshot_camera
   | _ ->
-      let up = Vec3.unit_y in
+      let up = Rays_math.Vec3.unit_y in
       let right, forward = orbit_basis up in
       let cosine = cos value.elevation in
       let horizontal =
-        Vec3.add
-          (Vec3.scale right (cosine *. sin value.azimuth))
-          (Vec3.scale forward (cosine *. cos value.azimuth))
+        Rays_math.Vec3.add
+          (Rays_math.Vec3.scale right (cosine *. sin value.azimuth))
+          (Rays_math.Vec3.scale forward (cosine *. cos value.azimuth))
       in
       let offset =
-        Vec3.add horizontal (Vec3.scale up (sin value.elevation))
-        |> Fun.flip Vec3.scale value.distance
+        Rays_math.Vec3.add horizontal (Rays_math.Vec3.scale up (sin value.elevation))
+        |> Fun.flip Rays_math.Vec3.scale value.distance
       in
       let camera =
         Camera.perspective ~fov_y:value.fov_y ~near:value.near ~far:value.far
-          ~at:(Vec3.add value.target offset) ~target:value.target ()
+          ~at:(Rays_math.Vec3.add value.target offset) ~target:value.target ()
         |> Camera.with_up up in
       value.camera_cache <- Some
         { snapshot_target = value.target;
@@ -149,23 +149,23 @@ let inertia value = value.inertia
 (* Inverse of [camera]'s orbit placement; keeps the up axis, lens, and input
    settings and drops any in-flight inertia. *)
 let of_view ~eye ~target value =
-  let offset = Vec3.sub eye target in
-  let distance = Vec3.length offset in
+  let offset = Rays_math.Vec3.sub eye target in
+  let distance = Rays_math.Vec3.length offset in
   if not (Float.is_finite distance) || distance <= 1e-9 then
     { value with target; drag = None; velocity = None }
   else
-    let unit = Vec3.scale offset (1. /. distance) in
-    let right, forward = orbit_basis Vec3.unit_y in
-    let height = Float.max (-1.) (Float.min 1. (Vec3.dot unit Vec3.unit_y)) in
+    let unit = Rays_math.Vec3.scale offset (1. /. distance) in
+    let right, forward = orbit_basis Rays_math.Vec3.unit_y in
+    let height = Float.max (-1.) (Float.min 1. (Rays_math.Vec3.dot unit Rays_math.Vec3.unit_y)) in
     { value with target; distance; elevation = clamp_elevation (asin height);
-      azimuth = atan2 (Vec3.dot unit right) (Vec3.dot unit forward);
+      azimuth = atan2 (Rays_math.Vec3.dot unit right) (Rays_math.Vec3.dot unit forward);
       drag = None; velocity = None }
 
 (* Aim at the box center from the current direction, far enough that the
    bounding sphere fills the vertical field of view with 20% margin. *)
 let frame_bounds ~min ~max value =
-  let center = Vec3.scale (Vec3.add min max) 0.5 in
-  let radius = 0.5 *. Vec3.length (Vec3.sub max min) in
+  let center = Rays_math.Vec3.scale (Rays_math.Vec3.add min max) 0.5 in
+  let radius = 0.5 *. Rays_math.Vec3.length (Rays_math.Vec3.sub max min) in
   let distance = Float.max 1e-3 (radius /. tan (value.fov_y /. 2.) *. 1.2) in
   { value with target = center; distance; drag = None; velocity = None }
 
@@ -178,7 +178,7 @@ let with_fov_y fov_y value =
   else begin
     ignore
       (Camera.perspective ~fov_y ~near:value.near ~far:value.far
-         ~at:(Vec3.create 0. 0. value.distance) ~target:Vec3.zero ());
+         ~at:(Rays_math.Vec3.create 0. 0. value.distance) ~target:Rays_math.Vec3.zero ());
     { value with fov_y }
   end
 
@@ -187,7 +187,7 @@ let with_clip ~near ~far value =
   else begin
     ignore
       (Camera.perspective ~fov_y:value.fov_y ~near ~far
-         ~at:(Vec3.create 0. 0. value.distance) ~target:Vec3.zero ());
+         ~at:(Rays_math.Vec3.create 0. 0. value.distance) ~target:Rays_math.Vec3.zero ());
     { value with near; far }
   end
 
@@ -221,14 +221,14 @@ let contains value (x, y) =
 let pan_axes value =
   let camera = camera value in
   let forward =
-    Vec3.normalize (Vec3.sub (Camera.target camera) (Camera.position camera))
+    Rays_math.Vec3.normalize (Rays_math.Vec3.sub (Camera.target camera) (Camera.position camera))
   in
   let up = Camera.up camera in
-  let right = Vec3.normalize (Vec3.cross forward up) in
-  let up = Vec3.normalize (Vec3.cross right forward) in
+  let right = Rays_math.Vec3.normalize (Rays_math.Vec3.cross forward up) in
+  let up = Rays_math.Vec3.normalize (Rays_math.Vec3.cross right forward) in
   right, up
 
-let apply_delta frame value interaction dx dy =
+let apply_delta (frame : Frame.t) value interaction dx dy =
   match interaction with
   | Orbit ->
       {
@@ -241,19 +241,19 @@ let apply_delta frame value interaction dx dy =
       }
   | Pan ->
       let right, up = pan_axes value in
-      let height = max 1 frame.Frame.height in
+      let height = max 1 (snd frame.input.size) in
       let units_per_pixel =
         2. *. value.distance *. tan (value.fov_y /. 2.)
         /. float_of_int height
       in
       let delta =
-        Vec3.add
-          (Vec3.scale right
+        Rays_math.Vec3.add
+          (Rays_math.Vec3.scale right
              (-.dx *. units_per_pixel))
-          (Vec3.scale up
+          (Rays_math.Vec3.scale up
              (dy *. units_per_pixel))
       in
-      { value with target = Vec3.add value.target delta }
+      { value with target = Rays_math.Vec3.add value.target delta }
 
 let interaction_for_button = function
   | Input.LeftButton -> Some Orbit
@@ -271,10 +271,10 @@ let double_click value button point time =
          +. ((y -. previous_y) *. (y -. previous_y)) <= 25.
   | None -> false
 
-let apply_inertia frame value =
+let apply_inertia (frame : Frame.t) value =
   match value.drag, value.velocity with
-  | None, Some motion when value.inertia && frame.Frame.dt > 0. ->
-      let frames = frame.dt *. 60. in
+  | None, Some motion when value.inertia && frame.input.dt > 0. ->
+      let frames = frame.input.dt *. 60. in
       let decay = drag_coefficient ** frames in
       let value =
         apply_delta frame value motion.interaction
@@ -292,37 +292,37 @@ let apply_inertia frame value =
   | None, Some _ -> { value with velocity = None }
   | _ -> value
 
-let update value frame =
-  if frame.Frame.events = [] then
+let update value (frame : Frame.t) =
+  if frame.input.events = [] then
     apply_inertia frame value
   else
     let has_pointer = List.exists (function
-      | Event.MousePressed _ | MouseMoved _ | MouseReleased _ -> true
-      | _ -> false) frame.events in
-    let pointer = ref (if has_pointer then Option.value ~default:frame.Frame.mouse value.pointer
-      else frame.mouse) in
+      | Input.Pointer_pressed _ | Pointer_moved _ | Pointer_released _ -> true
+      | _ -> false) frame.input.events in
+    let pointer = ref (if has_pointer then Option.value ~default:frame.input.pointer value.pointer
+      else frame.input.pointer) in
     let value =
       List.fold_left
         (fun value event ->
           match event with
-          | Event.MousePressed (button, point) ->
+          | Input.Pointer_pressed (button, point) ->
               pointer := point;
               if not (contains value point) then value
-              else if double_click value button point frame.Frame.time then
+              else if double_click value button point frame.input.t then
                 let value = reset value in
-                { value with last_press = Some (button, point, frame.time) }
+                { value with last_press = Some (button, point, frame.input.t) }
               else
                 (match interaction_for_button button with
                  | None ->
-                     { value with last_press = Some (button, point, frame.time) }
+                     { value with last_press = Some (button, point, frame.input.t) }
                  | Some interaction ->
                      {
                        value with
                        drag = Some (button, interaction, point);
                        velocity = None;
-                       last_press = Some (button, point, frame.time);
+                       last_press = Some (button, point, frame.input.t);
                      })
-          | MouseMoved (x, y) ->
+          | Pointer_moved (x, y) ->
               let point = x, y in
               pointer := point;
               (match value.drag with
@@ -337,7 +337,7 @@ let update value frame =
                      drag = Some (button, interaction, point);
                      velocity = Some { interaction; dx; dy };
                    })
-          | MouseReleased (button, point) ->
+          | Pointer_released (button, point) ->
               pointer := point;
               (match value.drag with
                | Some (captured, _, _) when captured = button ->
@@ -347,7 +347,7 @@ let update value frame =
                      velocity = if value.inertia then value.velocity else None;
                    }
                | _ -> value)
-          | MouseScrolled (horizontal, vertical)
+          | Scrolled (horizontal, vertical)
               when contains value !pointer ->
               ignore horizontal;
               {
@@ -361,15 +361,15 @@ let update value frame =
                 velocity = None;
                 pointer = Some !pointer;
               }
-          | PointerCancelled button ->
+          | Pointer_cancelled button ->
               (match value.drag with
                | Some (captured, _, _) when captured = button ->
                    { value with drag = None; velocity = None }
                | _ -> value)
-          | WindowFocusLost ->
+          | Focus_lost ->
               { value with drag = None; velocity = None; last_press = None }
           | _ -> value)
-        value frame.events
+        value frame.input.events
     in
     let value = if not has_pointer then value else match value.pointer with
       | Some previous when previous = !pointer -> value
@@ -381,32 +381,32 @@ let update value frame =
    the up axis and pitches within +-89 degrees; each wheel step scales the
    speed by 1.2. The orbit target stays [distance] ahead. *)
 let fly ~speed value (frame : Frame.t) =
-  let view = camera value and up = Vec3.unit_y in
+  let view = camera value and up = Rays_math.Vec3.unit_y in
   let eye = Camera.position view in
-  let forward = Vec3.normalize (Vec3.sub (Camera.target view) eye) in
+  let forward = Rays_math.Vec3.normalize (Rays_math.Vec3.sub (Camera.target view) eye) in
   let dx, dy = frame.mouse_delta in
   let yaw = -0.003 *. dx and pitch = -0.003 *. dy in
-  let along = Vec3.dot up forward in
-  let yawed = Vec3.add (Vec3.add (Vec3.scale forward (cos yaw))
-      (Vec3.scale (Vec3.cross up forward) (sin yaw)))
-      (Vec3.scale up (along *. (1. -. cos yaw))) in
+  let along = Rays_math.Vec3.dot up forward in
+  let yawed = Rays_math.Vec3.add (Rays_math.Vec3.add (Rays_math.Vec3.scale forward (cos yaw))
+      (Rays_math.Vec3.scale (Rays_math.Vec3.cross up forward) (sin yaw)))
+      (Rays_math.Vec3.scale up (along *. (1. -. cos yaw))) in
   let limit = 89. *. Float.pi /. 180. in
   let elevation = Float.max (-.limit) (Float.min limit
-      (asin (Float.max (-1.) (Float.min 1. (Vec3.dot yawed up))) +. pitch)) in
-  let horizontal = Vec3.normalize
-      (Vec3.sub yawed (Vec3.scale up (Vec3.dot yawed up))) in
-  let forward = Vec3.add (Vec3.scale horizontal (cos elevation))
-      (Vec3.scale up (sin elevation)) in
-  let right = Vec3.normalize (Vec3.cross forward up) in
-  let held key = List.mem (Input.KeyChar key) frame.keys in
+      (asin (Float.max (-1.) (Float.min 1. (Rays_math.Vec3.dot yawed up))) +. pitch)) in
+  let horizontal = Rays_math.Vec3.normalize
+      (Rays_math.Vec3.sub yawed (Rays_math.Vec3.scale up (Rays_math.Vec3.dot yawed up))) in
+  let forward = Rays_math.Vec3.add (Rays_math.Vec3.scale horizontal (cos elevation))
+      (Rays_math.Vec3.scale up (sin elevation)) in
+  let right = Rays_math.Vec3.normalize (Rays_math.Vec3.cross forward up) in
+  let held key = List.mem (Input.KeyChar key) frame.input.keys in
   let axis positive negative =
     (if held positive then 1. else 0.) -. (if held negative then 1. else 0.) in
-  let move = Vec3.add (Vec3.add (Vec3.scale forward (axis 'w' 's'))
-      (Vec3.scale right (axis 'd' 'a'))) (Vec3.scale up (axis 'q' 'e')) in
-  let step = speed *. frame.dt *. (if List.mem Input.Shift frame.keys then 4. else 1.) in
-  let eye = if Float.is_finite step then Vec3.add eye (Vec3.scale move step) else eye in
+  let move = Rays_math.Vec3.add (Rays_math.Vec3.add (Rays_math.Vec3.scale forward (axis 'w' 's'))
+      (Rays_math.Vec3.scale right (axis 'd' 'a'))) (Rays_math.Vec3.scale up (axis 'q' 'e')) in
+  let step = speed *. frame.input.dt *. (if List.mem Input.Shift frame.input.keys then 4. else 1.) in
+  let eye = if Float.is_finite step then Rays_math.Vec3.add eye (Rays_math.Vec3.scale move step) else eye in
   let wheel = List.fold_left (fun total -> function
-    | Event.MouseScrolled (_, steps) -> total +. steps | _ -> total) 0. frame.events in
+    | Input.Scrolled (_, steps) -> total +. steps | _ -> total) 0. frame.input.events in
   let speed = Float.max 0.01 (Float.min 1e4 (speed *. Float.pow 1.2 wheel)) in
-  let target = Vec3.add eye (Vec3.scale forward (distance value)) in
+  let target = Rays_math.Vec3.add eye (Rays_math.Vec3.scale forward (distance value)) in
   of_view ~eye ~target value, speed

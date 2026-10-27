@@ -65,7 +65,7 @@ let with_vertex_normals ?(cusp_angle = Float.pi) geometry =
 let test_solid_products () =
   let left = tetra ~origin:(0.,0.,0.) 2.
   and right = tetra ~origin:(0.5,0.2,0.2) 2. in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       [|Boolean.Union; Boolean.Intersection; Boolean.Difference;
         Boolean.Reverse_difference; Boolean.Xor|]
       |> Array.map (fun operation ->
@@ -103,7 +103,7 @@ let test_normal_payload_orientation () =
       [|-1.,1.,-1.; 3.,1.,-1.; -1.,1.,3.; 3.,1.,3.|]
       [|0;1;2; 1;3;2|]
       |> with_vertex_normals in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       Boolean.run ~grain:1 ~operation:Boolean.Difference
         ~right_treatment:Boolean.Surface ~right left |> get) in
   let output = run 1 and parallel = run 4 in
@@ -166,7 +166,7 @@ let test_surface_fracture_pieces () =
   and right = triangles
       [|-1.,1.,-1.; 3.,1.,-1.; -1.,1.,3.; 3.,1.,3.|]
       [|0;1;2; 1;3;2|] in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       Boolean.run ~grain:1 ~operation:Boolean.Difference
         ~right_treatment:Boolean.Surface
         ~piece_attribute:"piece" ~require_closed:true ~right left
@@ -212,7 +212,7 @@ let test_surface_fracture_pieces () =
 let test_shatter () =
   let left = tetra ~origin:(0.,0.,0.) 2.
   and right = tetra ~origin:(0.5,0.2,0.2) 2. in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       let output = Boolean.run ~grain:1 ~operation:Boolean.Shatter ~right left
           |> get in
       let groups = [|"boolean_left"; "boolean_overlap"; "boolean_right"|]
@@ -247,7 +247,7 @@ let test_shatter () =
 
 let test_shatter_scale () =
   let left = tetra_batch 16 0. and right = tetra_batch 16 0.5 in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       let output = Boolean.run ~grain:1 ~operation:Boolean.Shatter
           ~right left |> get in
       let groups = [|"boolean_left"; "boolean_overlap"; "boolean_right"|]
@@ -275,11 +275,11 @@ let test_output_policies () =
   check (Geometry.point_count split > Geometry.point_count shared
       && Geometry.primitive_count split = Geometry.primitive_count shared)
     "public Boolean seam-point policy did not split topology components";
-  let host = Box_generator.box ~grain:1 ~size:(Rays.Vec3.create 2.8 2.2 2.2)
+  let host = Box_generator.box ~grain:1 ~size:(Rays_math.Vec3.create 2.8 2.2 2.2)
       ~connectivity:Box_generator.Box_quads ~consolidate_points:true () |> get
-  and cutter = Box_generator.box ~grain:1 ~size:(Rays.Vec3.create 2.2 1.15 1.15)
-      ~center:(Rays.Vec3.create 0.85 0. 0.)
-      ~rotation:(Rays.Vec3.create 0.35 0.42 0.12)
+  and cutter = Box_generator.box ~grain:1 ~size:(Rays_math.Vec3.create 2.2 1.15 1.15)
+      ~center:(Rays_math.Vec3.create 0.85 0. 0.)
+      ~rotation:(Rays_math.Vec3.create 0.35 0.42 0.12)
       ~connectivity:Box_generator.Box_quads ~consolidate_points:true () |> get in
   let cut = Boolean.run ~grain:1 ~operation:Boolean.Difference
       ~detriangulation:Boolean.All_polygons ~right:cutter host |> get in
@@ -312,7 +312,7 @@ let test_bounded_cleanup () =
       ~origin:(Float.next_after 0.6 Float.infinity,
         0.60000000000000009,0.60000000000000009) 2. in
   let threshold = 0.60000000000000009 in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       Boolean.run ~grain:1 ~tiny_seam_threshold:threshold
         ~cleanup_max_batches:8 ~strict_cleanup:false ~right left
       |> get |> signature) in
@@ -322,7 +322,7 @@ let test_bounded_cleanup () =
 let test_seam_products () =
   let left = tetra ~origin:(0.,0.,0.) 2.
   and right = tetra ~origin:(0.5,0.2,0.2) 2. in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       let output = Boolean.seam ~grain:1 ~right left |> get in
       let between = Geometry.find_group ~owner:Group.Primitive
           "boolean_seam" output |> Option.get in

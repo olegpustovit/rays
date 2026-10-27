@@ -34,8 +34,8 @@ let inline_autos src sp names = List.fold_left (fun src n ->
     (match scope_of s with
      | Some sc when not (nested n) && sc.res.node <> S.Sym n ->
          Option.iter (fun j -> let e = snd (List.nth sc.ps j) in ok := value_call e && auto_named n e) (find_pair sc n)
-     | _ -> ()); s)) with Fail _ -> ());
-  if !ok then (try fold_into src (sp @ [ n ]) with Fail _ -> src) else src) src names
+     | _ -> ()); s)) with Diagnostic.Error _ -> ());
+  if !ok then (try fold_into src (sp @ [ n ]) with Diagnostic.Error _ -> src) else src) src names
 
 let rewrite ?fallback src op : (unit -> S.t list) list =
   let one f = [ f ] in
@@ -183,7 +183,7 @@ let rewrite ?fallback src op : (unit -> S.t list) list =
         (* read inside its own scope only: a sibling scope may bind the same name (a duplicated loop) *)
         let sp, name = split_node node in
         let used = ref false in
-        (try ignore (edit_scope out sp (fun s -> used := List.mem name (sym_list s); s)) with Fail _ -> ());
+        (try ignore (edit_scope out sp (fun s -> used := List.mem name (sym_list s); s)) with Diagnostic.Error _ -> ());
         if not (nested name) && !used then
           fail "%s is still read (a field read such as %s.x, or a scene object). Disconnect those first." name name) nodes;
       List.fold_left (fun out (sp, names) -> inline_autos out sp names) out !touched)
@@ -365,7 +365,7 @@ let rewrite ?fallback src op : (unit -> S.t list) list =
         let e = get_node s leaf in
         match Flow.Macro.expand macros e with
         | Ok x -> reorder (set_node s leaf x)
-        | Error d -> raise (Fail d)))
+        | Error d -> raise (Diagnostic.Error d)))
   | Inline_defn { node } -> one (fun () ->
       let sp, leaf = split_node node in
       let _, items = workspace_parts src in
@@ -535,8 +535,8 @@ let rewrite ?fallback src op : (unit -> S.t list) list =
         let split = call "ui/split-at"
           [ mk (S.Str (if axis = `H then "horizontal" else "vertical")); mk (S.Num ratio);
             sym a; sym b ] in
-        let before = List.filteri (fun k _ -> k < j) sc.ps
-        and after = List.filteri (fun k _ -> k > j) sc.ps in
+        let before = List.take j sc.ps
+        and after = List.drop (j + 1) sc.ps in
         reorder (rebuild sc (before @ [ sym a, orig; sym b, (match kind with Some kind -> panel_expr src kind | None -> call other []); p, split ] @ after) sc.res)))
   | Close_panel { node } -> one (fun () ->
       let sp, leaf = split_node node in
@@ -787,7 +787,7 @@ let macro_draft src nodes =
                       name = fresh_name src ~root (x.out_name ^ "_tpl") };
       s));
     Ok (Option.get !draft)
-  with Fail d -> Error d
+  with Diagnostic.Error d -> Error d
 
 type defn_draft = { free : string list; name : string }
 
@@ -802,10 +802,10 @@ let defn_draft src nodes =
       draft := Some { free = outside_names ~root:rootf x; name = fresh_name src ~root x.out_name };
       s));
     Ok (Option.get !draft)
-  with Fail d -> Error d
+  with Diagnostic.Error d -> Error d
 
 let macro_op draft ~nodes ~name choices =
-  Make_macro { nodes; name; holes = List.filteri (fun i _ -> i < Array.length choices) draft.literals
+  Make_macro { nodes; name; holes = List.take (Array.length choices) draft.literals
     |> List.mapi (fun i (path, _) -> path, choices.(i))
     |> List.filter_map (fun (path, (on, hole)) -> if on then Some (path, hole) else None) }
 
@@ -817,16 +817,16 @@ let check ?ops ?library ?checker catalog forms =
       (match (Option.value checker ~default:(W.check ?ops ?library)) catalog forms with
        | Some ws, _ -> Ok (forms, ws)
        | None, ds ->
-           Error (match List.find_opt (fun (d : Flow.Diagnostic.t) -> d.severity = Flow.Diagnostic.Error) ds with
+           Error (match List.find_opt (fun (d : Diagnostic.t) -> d.severity = Diagnostic.Error_severity) ds with
              | Some d -> d
-             | None -> Flow.Diagnostic.error ~code:"E_EDIT" "The edit does not check."))
+             | None -> Diagnostic.error ~code:"E_EDIT" "The edit does not check."))
 
 (* the last resort: whatever a rewrite raises ([List.nth], [Option.get], [Failure]) is a refused
    edit, never a dead editor *)
 let refusal = function
-  | Fail d -> d
+  | Diagnostic.Error d -> d
   | (Out_of_memory | Sys.Break) as e -> raise e
-  | e -> Flow.Diagnostic.error ~code:"E_EDIT" ("The edit failed: " ^ Printexc.to_string e)
+  | e -> Diagnostic.error ~code:"E_EDIT" ("The edit failed: " ^ Printexc.to_string e)
 
 let apply_checked ?ops ?library ?checker catalog src op =
   let candidates () =
@@ -835,25 +835,17 @@ let apply_checked ?ops ?library ?checker catalog src op =
         let path = ref None and scope = scope_path_of nodes in
         (try ignore (edit_scope src scope (fun s ->
           let selection = select s nodes "Wrap conditional" in
-          path := Some (scope @ [selection.out_name]); s)) with Fail _ -> ());
+          path := Some (scope @ [selection.out_name]); s)) with Diagnostic.Error _ -> ());
         !path
     | Add_arm {node; _} -> Some node | _ -> None in
   let fallback = Option.bind path (fun path ->
     let rec find (term : W.term) =
       if term.path = Some path then Some term.ty else
       let children = match term.node with
-        | Vec xs | List_lit xs | Str xs | List_op (_,xs) | Hof (_,xs) -> xs
-        | Call {args;_} | Op {args;_} -> List.map snd args
-        | Call_fn {args;_} -> args | Graph_ref {inputs;_} -> List.map snd inputs
-        | Let (bs,r) -> List.map snd bs @ [r] | State {init;step;_} -> [init;step]
-        | Loop {accs;clauses;body;_} -> List.map snd accs @ List.map snd clauses @ [body]
-        | With_error(a,b) -> [a;b]
-        | Error_rows{rows=a;mapper=b;_} -> [a;b]
-        | If (a,b,c) -> [a;b;c] | Cond (arms,d) -> List.concat_map (fun (a,b) -> [a;b]) arms @ [d]
-        | Case (s,arms,d) -> s :: List.map snd arms @ [d] | Fn {body;_} -> [body]
-        | Record fs -> List.map snd fs | Assoc (r,fs) -> r :: List.map snd fs
-        | Get (r,_) | Bypass r | Expanded {body = r; _} -> [r]
-        | _ -> [] in List.find_map find children in
+        | W.Call_fn {args; _} -> args
+        | W.Fn {body; _} -> [body]
+        | _ -> W.children term in
+      List.find_map find children in
     match (Option.value checker ~default:(W.check ?ops ?library)) catalog src with
     | Some ws, _ -> Option.bind (List.find_map (fun (g : W.graph) -> find g.body) (ws.graphs @ ws.defs))
         branch_default
@@ -876,12 +868,12 @@ let apply catalog src op = Result.map fst (apply_checked catalog src op)
 
 let has_prefix ~prefix p =
   let n = List.length prefix in
-  List.length p >= n && List.filteri (fun i _ -> i < n) p = prefix
+  List.length p >= n && List.take n p = prefix
 
 (* the leaf of [p] at the depth of [node]'s, when [p] is [node], a node nested in it, or below either *)
 let under node p =
   let k = List.length node - 1 in
-  if List.length p > k && has_prefix ~prefix:(List.filteri (fun i _ -> i < k) node) p then
+  if List.length p > k && has_prefix ~prefix:(List.take k node) p then
     let leaf = List.nth node k and at = List.nth p k in
     if at = leaf then Some (k, "")
     else if String.starts_with ~prefix:(leaf ^ "#") at then
@@ -933,18 +925,18 @@ let nested_nodes (e : S.t) = match e.node with
   | _ -> []
 
 let leaf_keys leaf = match split_leaf leaf with
-  | exception Fail _ -> None
+  | exception Diagnostic.Error _ -> None
   | parts -> Some parts
 
 let arg_text src node key =
   let sp, leaf = split_node node in
   let found = ref None in
-  (try ignore (edit_scope src sp (fun s -> found := arg_get (get_node s leaf) key; s)) with Fail _ -> ());
+  (try ignore (edit_scope src sp (fun s -> found := arg_get (get_node s leaf) key; s)) with Diagnostic.Error _ -> ());
   !found
 
 let duplicated src nodes =
   match duplicate_plan src nodes with
-  | exception Fail _ -> []
+  | exception Diagnostic.Error _ -> []
   | sp, names -> List.map (fun (_, fresh) -> sp @ [ fresh ]) names
 
 let free_names e = dedup (free e)

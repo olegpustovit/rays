@@ -5,7 +5,7 @@ module E=Flow.Eval
 module K=Flow_sop.Attribute_kernel
 let count=1_000_000
 let grain=4096
-let flow_ok=function Ok x->x|Error d->fail(Flow.Diagnostic.to_string d)
+let flow_ok=function Ok x->x|Error d->fail(Diagnostic.to_string d)
 let names=[|"x";"y";"z";"w"|]
 let storage planes=match Array.length planes with
   |2->Attribute.Float2(Packed.Float2.of_owned ~x:planes.(0) ~y:planes.(1)|>get_string_ok)
@@ -34,10 +34,10 @@ let tuple width data=match width with 2->E.Vec2_array data|3->Vec3_array data|4-
 let zero width=match width with 2->E.Vec2(-0.,0.)|3->Vec3(-0.,0.,0.)|4->Vec4(-0.,0.,0.,0.)|_->assert false
 let planar planes=E.Record(Array.to_list(Array.mapi(fun c data->names.(c),E.Float_array data)planes))
 let error label code result=match result with
-  |Error d->check(d.Flow.Diagnostic.code=code)(label^": wrong error code");label,d
+  |Error d->check(d.Diagnostic.code=code)(label^": wrong error code");label,d
   |Ok _->fail(label^": invalid writer succeeded")
-type fixture={key:string;original:Geometry.t;run:unit->(Geometry.t,Flow.Diagnostic.t)result;
-  native:unit->Geometry.t;errors:unit->(string*Flow.Diagnostic.t)list;new_plane:bool;
+type fixture={key:string;original:Geometry.t;run:unit->(Geometry.t,Diagnostic.t)result;
+  native:unit->Geometry.t;errors:unit->(string*Diagnostic.t)list;new_plane:bool;
   verify:Geometry.t->unit}
 let vector_fixture ~selected ~canonical width=
   let kind="vec"^string_of_int width and name=if canonical then "P" else "target" in
@@ -126,12 +126,12 @@ let capture directory after fixture domains expected errors=
   let bytes=geometry_bytes expected in
   let captured=1,count,grain,fixture.key,bytes,errors in
   if not after && domains=1 then put path captured else
-    check((get path : int*int*int*string*string*(string*Flow.Diagnostic.t)list)=captured)
+    check((get path : int*int*int*string*string*(string*Diagnostic.t)list)=captured)
       (fixture.key^": exact before/after/native/domain bytes or diagnostics changed");
   Printf.printf "capture mode=%s key=%s domains=%d bytes=%d digest=%s errors=%d PASS\n%!"
     (if after then "after"else "before")fixture.key domains(String.length bytes)(Digest.to_hex(Digest.string bytes))(List.length errors)
 let row directory after fixture domains=
-  Rays_math.Parallel.run ~domains(fun()->
+  Parallel.run ~domains(fun()->
     let before=geometry_bytes fixture.original in let expected=fixture.native() in
     let errors=fixture.errors() in
     if not fixture.new_plane || after then begin

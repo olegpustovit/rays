@@ -15,16 +15,16 @@ type uv_projection = Planar | Cylindrical | Spherical
 type axis_orientation = Axis_x | Axis_y | Axis_z | Axis_custom
 type transport_roots = Transport_first | Transport_last | Transport_group
 type kernel_mode = Kernel_explicit | Kernel_auto
-let kernel_mode_parameter = Parameter.choice ~equal:( = )
+let kernel_mode_parameter = Param.choice ~equal:( = )
     ["Explicit", Kernel_explicit; "Auto", Kernel_auto]
 type clean_overlap = Clean_keep_first | Clean_delete_pairs | Clean_overlap_auto
 type numeric_kind = Numeric_scalar | Numeric_vec2 | Numeric_vec3 | Numeric_vec4
-let numeric_kind_parameter = Parameter.choice ~equal:( = )
+let numeric_kind_parameter = Param.choice ~equal:( = )
     ["Scalar", Numeric_scalar; "Vector 2", Numeric_vec2; "Vector 3", Numeric_vec3; "Vector 4", Numeric_vec4]
 let numeric_value kind x y z w = match kind with
   | Numeric_scalar -> Rdk.Attribute_ops.Scalar x
-  | Numeric_vec2 -> Rdk.Attribute_ops.Vec2 (Vec2.create x y)
-  | Numeric_vec3 -> Rdk.Attribute_ops.Vec3 (Vec3.create x y z)
+  | Numeric_vec2 -> Rdk.Attribute_ops.Vec2 (Rays_math.Vec2.create x y)
+  | Numeric_vec3 -> Rdk.Attribute_ops.Vec3 (Rays_math.Vec3.create x y z)
   | Numeric_vec4 -> Rdk.Attribute_ops.Vec4 (x, y, z, w)
 type remap_range = Remap_automatic | Remap_explicit
 
@@ -65,14 +65,13 @@ type element_group = Point_group of string | Vertex_group of string
 (* [rays.ppx] names the generated schema and node code [Sop.X]; inside
    this library those units are the bare [X]. *)
 module Sop = struct
-  module Parameter = Parameter
   module Node = Node
   module Edit_graph = Edit_graph
 end
 
-let vec3_copy value = Vec3.create value.Vec3.x value.y value.z
+let vec3_copy value = Rays_math.Vec3.create value.Rays_math.Vec3.x value.y value.z
 
-let cooked geometry = Ok Node.Private.{ geometry; diagnostics = []; instances = None }
+let cooked geometry = Ok Node.Private.{ geometry; instances = None }
 let rdk_error ?(hints = []) operation message =
   Error (Diagnostic.error ~code:(operation ^ "_failed") ~cause:message ~hints
     (operation ^ " could not produce valid geometry"))
@@ -91,7 +90,7 @@ let transport_roots mode group = match mode with
   | Transport_last -> None, Rdk.Edge_transport.Transport_last_point
   | Transport_group -> optional_text group, Rdk.Edge_transport.Transport_first_point
 
-let element_owner_parameter = Parameter.choice ~equal:( = ) [
+let element_owner_parameter = Param.choice ~equal:( = ) [
     "Point", Element_point; "Vertex", Element_vertex;
     "Primitive", Element_primitive; "Edge", Element_edge;
   ]
@@ -127,27 +126,22 @@ let resolve_element_group ~operation selection geometry = match selection with
 
 type target_justify_mode = Justify_explicit | Justify_auto
 type distance_radius_mode = Radius_fixed | Radius_maximum
-let distance_radius_parameter = Parameter.choice ~equal:( = ) [
+let distance_radius_parameter = Param.choice ~equal:( = ) [
     "Fixed", Radius_fixed; "Maximum distance", Radius_maximum;
   ]
 
-let group_merge_parameter = Parameter.choice ~equal:( = ) [
+let group_merge_parameter = Param.choice ~equal:( = ) [
     "Replace", Rdk.Group_ops.Group_replace; "Union", Rdk.Group_ops.Group_union;
     "Intersection", Rdk.Group_ops.Group_intersection;
     "Subtract", Rdk.Group_ops.Group_subtract; "Exclusive or", Rdk.Group_ops.Group_xor;
   ]
 
-let group_owner_parameter = Parameter.choice ~equal:( = ) [
+let group_owner_parameter = Param.choice ~equal:( = ) [
     "Points", Rdk.Group_ops.Group_points; "Vertices", Rdk.Group_ops.Group_vertices;
     "Primitives", Rdk.Group_ops.Group_primitives; "Edges", Rdk.Group_ops.Group_edges;
   ]
 
-let stable_string_hash value =
-  let hash = ref 0xcbf29ce484222325L in
-  String.iter (fun character ->
-    hash := Int64.mul (Int64.logxor !hash (Int64.of_int (Char.code character)))
-        0x100000001b3L) value;
-  !hash
+let stable_string_hash = Rays_math.Hash.string
 
 let mixed_seed context identity =
   let mixed = Int64.logxor (Context.seed context)
@@ -187,7 +181,7 @@ let decode_boundary_attributes text = Result.bind (decode_table text) (fun rows 
           "boundary attribute needs owner and pattern, got %d columns"
           (List.length row)))) (Ok []) rows |> Result.map List.rev)
 
-let boundary_attributes_parameter = Parameter.encoded ~equal:( = )
+let boundary_attributes_parameter = Param.encoded ~equal:( = )
     ~encode:encode_boundary_attributes ~decode:decode_boundary_attributes
 
 let fuse_attribute_methods =
@@ -285,7 +279,7 @@ let decode_copy_target_rules text = List.map (function
   | _ -> invalid_arg "sop/copy_to_points: target rule needs pattern, owner and operation columns")
     (parameter_table_rows "sop/copy_to_points" text)
 
-let element_attribute_owner_parameter = Parameter.choice ~equal:( = ) [
+let element_attribute_owner_parameter = Param.choice ~equal:( = ) [
     "Point", Rdk.Attribute.Point; "Vertex", Rdk.Attribute.Vertex;
     "Primitive", Rdk.Attribute.Primitive;
   ]
@@ -303,12 +297,12 @@ let group_owner_of_token = function
   | "edge" | "edges" -> Ok Rdk.Group_ops.Group_edges
   | token -> Error (Printf.sprintf "unknown group owner %S" token)
 
-let group_copy_conflict_parameter = Parameter.choice ~equal:( = ) [
+let group_copy_conflict_parameter = Param.choice ~equal:( = ) [
     "Skip", Rdk.Group_ops.Copy_skip; "Overwrite", Rdk.Group_ops.Copy_overwrite;
     "Add suffix", Rdk.Group_ops.Copy_add_suffix;
   ]
 
-let ordinary_group_owner_parameter = Parameter.choice ~equal:( = ) [
+let ordinary_group_owner_parameter = Param.choice ~equal:( = ) [
     "Points", Rdk.Group.Point; "Vertices", Rdk.Group.Vertex;
     "Primitives", Rdk.Group.Primitive;
   ]
@@ -318,7 +312,7 @@ let group_owner_key = function
   | Rdk.Group.Vertex -> "vertex"
   | Rdk.Group.Primitive -> "primitive"
 
-let delete_topology_policy_parameter = Parameter.choice ~equal:( = ) [
+let delete_topology_policy_parameter = Param.choice ~equal:( = ) [
     "Destroy touched primitives", Rdk.Deletion.Destroy_touched_primitives;
     "Heal primitives", Rdk.Deletion.Heal_primitives;
   ]
@@ -342,7 +336,7 @@ let attribute_owner_key = function
   | Rdk.Attribute.Primitive -> "primitive"
   | Rdk.Attribute.Detail -> "detail"
 
-let group_rename_conflict_parameter = Parameter.choice ~equal:( = ) [
+let group_rename_conflict_parameter = Param.choice ~equal:( = ) [
     "Skip", Rdk.Group_ops.Rename_skip; "Error", Rdk.Group_ops.Rename_error;
     "Overwrite", Rdk.Group_ops.Rename_overwrite; "Union", Rdk.Group_ops.Rename_union;
   ]
@@ -377,21 +371,21 @@ let float_of_token value = match float_of_string_opt (String.trim value) with
   | Some value when Float.is_finite value -> Ok value
   | Some _ | None -> Error (Printf.sprintf "expected finite float, got %S" value)
 
-let group_normal_owner_parameter = Parameter.choice ~equal:( = ) [
+let group_normal_owner_parameter = Param.choice ~equal:( = ) [
     "Points", Rdk.Group_ops.Group_points; "Primitives", Rdk.Group_ops.Group_primitives;
     "Edges", Rdk.Group_ops.Group_edges;
   ]
 
-let uv_owner_parameter = Parameter.choice ~equal:( = ) [
+let uv_owner_parameter = Param.choice ~equal:( = ) [
     "Point", Rdk.Attribute.Point; "Vertex", Rdk.Attribute.Vertex;
   ]
 
-let edge_transport_direction_parameter = Parameter.choice ~equal:( = ) [
+let edge_transport_direction_parameter = Param.choice ~equal:( = ) [
     "Forward", Rdk.Edge_transport.Transport_forward;
     "Backward", Rdk.Edge_transport.Transport_backward;
   ]
 
-let edge_transport_operation_parameter = Parameter.choice ~equal:( = ) [
+let edge_transport_operation_parameter = Param.choice ~equal:( = ) [
     "Transport", Rdk.Edge_transport.Transport;
     "From root", Rdk.Edge_transport.Transport_from_root;
     "Total", Rdk.Edge_transport.Transport_total;
@@ -399,12 +393,12 @@ let edge_transport_operation_parameter = Parameter.choice ~equal:( = ) [
     "Minimum", Rdk.Edge_transport.Transport_minimum;
   ]
 
-let edge_transport_root_value_parameter = Parameter.choice ~equal:( = ) [
+let edge_transport_root_value_parameter = Param.choice ~equal:( = ) [
     "Zero", Rdk.Edge_transport.Transport_root_zero;
     "Hold", Rdk.Edge_transport.Transport_root_hold;
   ]
 
-let edge_transport_normalization_parameter = Parameter.choice ~equal:( = ) [
+let edge_transport_normalization_parameter = Param.choice ~equal:( = ) [
     "None", Rdk.Edge_transport.Transport_no_normalization;
     "Per component", Rdk.Edge_transport.Transport_normalize_components;
     "Global", Rdk.Edge_transport.Transport_normalize_global;
@@ -418,11 +412,11 @@ let resolve_optional_primitive_group operation name geometry = match name with
        | None -> Error (Diagnostic.error ~code:"missing_group"
            (Printf.sprintf "%s could not find primitive group %S" operation name)))
 
-let edge_transport_split_parameter = Parameter.choice ~equal:( = ) [
+let edge_transport_split_parameter = Param.choice ~equal:( = ) [
     "Copy", Rdk.Edge_transport.Transport_copy; "Split", Rdk.Edge_transport.Transport_split;
   ]
 
-let edge_transport_merge_parameter = Parameter.choice ~equal:( = ) [
+let edge_transport_merge_parameter = Param.choice ~equal:( = ) [
     "Add", Rdk.Edge_transport.Transport_merge_add;
     "Maximum", Rdk.Edge_transport.Transport_merge_maximum;
     "Minimum", Rdk.Edge_transport.Transport_merge_minimum;
@@ -465,7 +459,7 @@ let uv_projection_copy = function
         seam = vec3_copy seam;
       }
 
-let attribute_owner_parameter = Parameter.choice ~equal:( = ) [
+let attribute_owner_parameter = Param.choice ~equal:( = ) [
     "Point", Rdk.Attribute.Point; "Vertex", Rdk.Attribute.Vertex;
     "Primitive", Rdk.Attribute.Primitive; "Detail", Rdk.Attribute.Detail;
   ]
@@ -487,7 +481,7 @@ let set_attribute_cook ~operation ~owner ~name make geometry =
               | Ok geometry -> cooked geometry
               | Error message -> rdk_error operation message
 
-let attribute_promotion_method_parameter = Parameter.choice ~equal:( = ) [
+let attribute_promotion_method_parameter = Param.choice ~equal:( = ) [
     "First", Rdk.Attribute_ops.First;
     "Last", Rdk.Attribute_ops.Last;
     "Average", Rdk.Attribute_ops.Average;
@@ -502,12 +496,12 @@ let attribute_promotion_method_parameter = Parameter.choice ~equal:( = ) [
     "Unique values", Rdk.Attribute_ops.Unique_values;
   ]
 
-let soft_falloff_parameter = Parameter.choice ~equal:( = ) [
+let soft_falloff_parameter = Param.choice ~equal:( = ) [
     "Linear", Rdk.Transform_ops.Soft_linear; "Quadratic", Rdk.Transform_ops.Soft_quadratic;
     "Cubic", Rdk.Transform_ops.Soft_cubic;
   ]
 
-let transport_roots_parameter = Parameter.choice ~equal:( = ) [
+let transport_roots_parameter = Param.choice ~equal:( = ) [
     "First point", Transport_first; "Last point", Transport_last;
     "Root group", Transport_group;
   ]
@@ -549,14 +543,14 @@ type circle_arc = Circle_closed | Circle_open | Circle_chord | Circle_sliced
 type plane_orientation = Plane_xy | Plane_xz | Plane_yz | Plane_axes
 let validate_plane_axes operation horizontal vertical =
   let normalize value =
-    let scale = Float.max (Float.abs value.Vec3.x) (Float.max (Float.abs value.y) (Float.abs value.z)) in
+    let scale = Float.max (Float.abs value.Rays_math.Vec3.x) (Float.max (Float.abs value.y) (Float.abs value.z)) in
     if scale = 0. then invalid_arg (operation ^ ": custom axes must be nonzero and independent");
     let x = value.x /. scale and y = value.y /. scale and z = value.z /. scale in
     let length = sqrt (x *. x +. y *. y +. z *. z) in
-    Vec3.create (x /. length) (y /. length) (z /. length) in
+    Rays_math.Vec3.create (x /. length) (y /. length) (z /. length) in
   let horizontal = normalize horizontal and vertical = normalize vertical in
-  let projection = Vec3.dot vertical horizontal in
-  ignore (normalize (Vec3.create (vertical.x -. projection *. horizontal.x)
+  let projection = Rays_math.Vec3.dot vertical horizontal in
+  ignore (normalize (Rays_math.Vec3.create (vertical.x -. projection *. horizontal.x)
     (vertical.y -. projection *. horizontal.y) (vertical.z -. projection *. horizontal.z)))
 
 type blast_attribute_mode = Blast_below | Blast_range | Blast_width
@@ -567,22 +561,22 @@ let blast_attribute_owner_key = function
   | Rdk.Blast_by_attribute.Blast_primitives -> "primitives"
 
 type facet_consolidation = Consolidation_none | Consolidation_points | Consolidation_normals
-let facet_consolidation_parameter = Parameter.choice ~equal:( = ) [
+let facet_consolidation_parameter = Param.choice ~equal:( = ) [
   "None", Consolidation_none; "Points", Consolidation_points; "Normals", Consolidation_normals]
 
 type transfer_mode = Transfer_nearest | Transfer_inverse | Transfer_links
   | Transfer_renderman | Transfer_hart
-let transfer_mode_parameter = Parameter.choice ~equal:( = ) [
+let transfer_mode_parameter = Param.choice ~equal:( = ) [
     "Nearest", Transfer_nearest; "Inverse distance", Transfer_inverse;
     "Links kernel", Transfer_links; "RenderMan kernel", Transfer_renderman;
     "Hart kernel", Transfer_hart;
   ]
 type transfer_falloff = Transfer_linear | Transfer_smoothstep | Transfer_uniform
-let transfer_falloff_parameter = Parameter.choice ~equal:( = ) [
+let transfer_falloff_parameter = Param.choice ~equal:( = ) [
     "Linear", Transfer_linear; "Smoothstep", Transfer_smoothstep;
     "Uniform", Transfer_uniform;
   ]
-let transfer_unmatched_parameter = Parameter.choice ~equal:( = ) [
+let transfer_unmatched_parameter = Param.choice ~equal:( = ) [
     "Keep target", Rdk.Attribute_ops.Keep_target;
     "Default value", Rdk.Attribute_ops.Default_value;
   ]
@@ -713,24 +707,24 @@ module Quaternion_noise_encoding = struct
     | _ -> Error "location must be position, element-number, or attribute:name"
 
   let encode_numeric value = String.concat "," (match value with
-    | Rdk.Attribute_ops.Scalar x -> ["scalar"; string_of_float x]
-    | Vec2 value -> ["vec2"; string_of_float value.Vec2.x;
-        string_of_float value.y]
-    | Vec3 value -> ["vec3"; string_of_float value.Vec3.x;
-        string_of_float value.y; string_of_float value.z]
-    | Vec4 (x, y, z, w) -> ["vec4"; string_of_float x;
-        string_of_float y; string_of_float z; string_of_float w])
+    | Rdk.Attribute_ops.Scalar x -> ["scalar"; Param.float_text x]
+    | Vec2 value -> ["vec2"; Param.float_text value.Rays_math.Vec2.x;
+        Param.float_text value.y]
+    | Vec3 value -> ["vec3"; Param.float_text value.Rays_math.Vec3.x;
+        Param.float_text value.y; Param.float_text value.z]
+    | Vec4 (x, y, z, w) -> ["vec4"; Param.float_text x;
+        Param.float_text y; Param.float_text z; Param.float_text w])
 
   let decode_numeric value = match String.split_on_char ',' value with
     | ["scalar"; x] -> Option.map (fun x -> Rdk.Attribute_ops.Scalar x)
         (float_of_string_opt x)
     | ["vec2"; x; y] ->
         (match float_of_string_opt x, float_of_string_opt y with
-         | Some x, Some y -> Some (Vec2 (Vec2.create x y)) | _ -> None)
+         | Some x, Some y -> Some (Vec2 (Rays_math.Vec2.create x y)) | _ -> None)
     | ["vec3"; x; y; z] ->
         (match float_of_string_opt x, float_of_string_opt y,
             float_of_string_opt z with
-         | Some x, Some y, Some z -> Some (Vec3 (Vec3.create x y z))
+         | Some x, Some y, Some z -> Some (Vec3 (Rays_math.Vec3.create x y z))
          | _ -> None)
     | ["vec4"; x; y; z; w] ->
         (match float_of_string_opt x, float_of_string_opt y,
@@ -770,7 +764,7 @@ type random_distribution =
 
 let random_distribution_value ~distribution ~kind ~a ~a_w ~b ~b_w ~step ~step_w
     ~probability_b ~cone_angle ~dimensions ~ramp ~entries ~text_entries =
-  let number value w = numeric_value kind value.Vec3.x value.y value.z w in
+  let number value w = numeric_value kind value.Rays_math.Vec3.x value.y value.z w in
   let a = number a a_w and b = number b b_w and step = number step step_w in
   let finite text = match float_of_string_opt text with
     | Some value when Float.is_finite value -> value
@@ -797,8 +791,8 @@ let random_distribution_value ~distribution ~kind ~a ~a_w ~b ~b_w ~step ~step_w
           let components = List.rev components |> List.map finite in
           let value = match kind,components with
             | Numeric_scalar,[x] -> Rdk.Attribute_ops.Scalar x
-            | Numeric_vec2,[x;y] -> Vec2 (Vec2.create x y)
-            | Numeric_vec3,[x;y;z] -> Vec3 (Vec3.create x y z)
+            | Numeric_vec2,[x;y] -> Vec2 (Rays_math.Vec2.create x y)
+            | Numeric_vec3,[x;y;z] -> Vec3 (Rays_math.Vec3.create x y z)
             | Numeric_vec4,[x;y;z;w] -> Vec4 (x,y,z,w)
             | _ -> invalid_arg "sop/attribute_randomize: table dimension does not match value type" in
           value,finite weight
@@ -811,8 +805,8 @@ let validate_random_distribution ~direction_bias distribution =
   let refuse message = invalid_arg ("sop/attribute_randomize: " ^ message) in
   let components = function
     | Rdk.Attribute_ops.Scalar x -> [x]
-    | Vec2 v -> [v.Vec2.x;v.y]
-    | Vec3 v -> [v.Vec3.x;v.y;v.z]
+    | Vec2 v -> [v.Rays_math.Vec2.x;v.y]
+    | Vec3 v -> [v.Rays_math.Vec3.x;v.y;v.z]
     | Vec4 (x,y,z,w) -> [x;y;z;w] in
   let all predicate value = List.for_all predicate (components value) in
   let positive value = all (fun x -> x > 0.) value

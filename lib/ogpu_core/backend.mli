@@ -74,11 +74,10 @@ type driver_blit_encoder =
   ; end_blit:unit -> (unit,Error.t) result }
 type shader_stage = Vertex | Fragment
 type winding = Clockwise | Counter_clockwise
-type depth_state = { depth_compare:Render_pass.comparison; depth_write:bool; stencil:Render_pass.stencil_state option }
+type depth_state = { depth_compare:Render_pass.comparison; depth_write:bool }
 type driver_color_attachment = { color:token; color_resolve:token option; color_load:Render_pass.load; color_store:Render_pass.store; color_clear:float * float * float * float }
 type driver_depth_attachment = { depth:token; depth_load:Render_pass.load; depth_store:Render_pass.store; depth_clear:float }
-type driver_stencil_attachment = { stencil:token; stencil_load:Render_pass.load; stencil_store:Render_pass.store; stencil_clear:int }
-type driver_render_target = { target_colors:driver_color_attachment array; target_depth:driver_depth_attachment option; target_stencil:driver_stencil_attachment option; target_width:int; target_height:int; target_samples:int }
+type driver_render_target = { target_colors:driver_color_attachment array; target_depth:driver_depth_attachment option; target_width:int; target_height:int; target_samples:int }
 type driver_batch_draw = { batch_pipeline:token; batch_buffers:(shader_stage * int * token * int64) array; batch_primitive:Render_pass.primitive; batch_index:(Render_pass.index_type * token * int64 * int64) option; batch_vertex_start:int; batch_vertex_count:int; batch_instances:int }
 type driver_render_encoder =
   { render_set_pipeline:token -> (unit,Error.t) result
@@ -90,7 +89,6 @@ type driver_render_encoder =
   ; set_cull:Render_pass.cull -> (unit,Error.t) result
   ; set_winding:winding -> (unit,Error.t) result
   ; set_depth_state:depth_state option -> (unit,Error.t) result
-  ; set_stencil_reference:front:int32 -> back:int32 -> (unit,Error.t) result
   ; draw:primitive:Render_pass.primitive -> first:int -> count:int -> instances:int -> (unit,Error.t) result
   ; draw_indexed:primitive:Render_pass.primitive -> index_type:Render_pass.index_type -> token -> offset:int64 -> count:int64 -> instances:int -> (unit,Error.t) result
   ; draw_indexed_indirect:primitive:Render_pass.primitive -> index_type:Render_pass.index_type -> token -> offset:int64 -> token -> arguments_offset:int64 -> (unit,Error.t) result
@@ -134,7 +132,6 @@ type driver_device =
   ; create_buffer:Types.memory -> Types.buffer_descriptor -> (driver_resource,Error.t) result
   ; create_texture:Types.texture_descriptor -> (driver_resource,Error.t) result
   ; create_depth_texture:Types.texture_descriptor -> (driver_resource,Error.t) result
-  ; create_stencil_texture:Types.texture_descriptor -> (driver_resource,Error.t) result
   ; create_library:Shader.t -> (driver_library,Error.t) result
   ; create_accel:driver_accel_descriptor -> (driver_accel,Error.t) result
   ; instance_layout:instance_kind -> Acceleration.instance_layout
@@ -161,7 +158,6 @@ val device_handle : device -> Handle.device
 val create_buffer : ?memory:Types.memory -> device -> Types.buffer_descriptor -> (buffer,Error.t) result
 val create_texture : device -> Types.texture_descriptor -> (texture,Error.t) result
 val create_depth_texture : device -> Types.texture_descriptor -> (texture,Error.t) result
-val create_stencil_texture : device -> Types.texture_descriptor -> (texture,Error.t) result
 val create_queue : device -> (queue,Error.t) result
 val create_surface : device -> Surface.configuration -> (surface,Error.t) result
 val buffer_id : buffer -> int64
@@ -174,6 +170,11 @@ val read_texture_into : texture -> bytes_per_row:int -> destination:bytes ->
 val complete_through : queue -> int64 -> (unit,Error.t) result
 val poll_through : queue -> int64 -> (bool,Error.t) result
 val completed_epoch : queue -> int64
+type status = Pending | Completed
+
+(** Polls a submitted receipt without waiting. Terminal GPU errors are returned
+    as typed errors after the queue releases its submission resources. *)
+val status : queue -> receipt -> (status,Error.t) result
 val configure : surface -> Surface.configuration -> (unit,Error.t) result
 val acquire_sync : surface -> ([ `Acquired of frame | `Timeout | `Occluded | `Device_lost ],Error.t) result
 val discard : frame -> (unit,Error.t) result
@@ -194,7 +195,7 @@ end
 
     Immediate-mode command recording modelled on Metal: a [commands] value is
     recorded through one open encoder at a time and committed without
-    blocking; [Command_buffer.status] polls its receipt. Drivers translate
+    blocking; [status] polls its receipt. Drivers translate
     tokens; every state, range, capability, and device check lives here. *)
 type library
 type accel
@@ -308,8 +309,7 @@ type render_encoder
     [Discard] keeps nothing and cannot be combined with [resolve]. *)
 type color_attachment = { texture:texture; resolve:texture option; load:Render_pass.load; store:Render_pass.store; clear:float * float * float * float }
 type depth_attachment = { depth_texture:texture; depth_load:Render_pass.load; depth_store:Render_pass.store; depth_clear:float }
-type stencil_attachment = { stencil_texture:texture; stencil_load:Render_pass.load; stencil_store:Render_pass.store; stencil_clear:int }
-type render_target = { colors:color_attachment list; depth:depth_attachment option; stencil:stencil_attachment option }
+type render_target = { colors:color_attachment list; depth:depth_attachment option }
 type batch_draw =
   { pipeline:pipeline; buffers:(shader_stage * int * buffer * int64) array; primitive:Render_pass.primitive
   ; index:(Render_pass.index_type * buffer * int64 * int64) option; vertex_start:int; vertex_count:int; instances:int }
@@ -341,7 +341,6 @@ val set_scissor : render_encoder -> Render_pass.rect -> (unit,Error.t) result
 val set_cull : render_encoder -> Render_pass.cull -> (unit,Error.t) result
 val set_winding : render_encoder -> winding -> (unit,Error.t) result
 val set_depth_state : render_encoder -> depth_state option -> (unit,Error.t) result
-val set_stencil_reference : render_encoder -> front:int32 -> back:int32 -> (unit,Error.t) result
 val draw : render_encoder -> primitive:Render_pass.primitive -> first:int -> count:int -> ?instances:int -> unit -> (unit,Error.t) result
 val draw_indexed : render_encoder -> primitive:Render_pass.primitive -> index_type:Render_pass.index_type -> buffer -> offset:int64 -> count:int64 -> ?instances:int -> unit -> (unit,Error.t) result
 val draw_indexed_indirect : render_encoder -> primitive:Render_pass.primitive -> index_type:Render_pass.index_type ->

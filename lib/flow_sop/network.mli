@@ -10,8 +10,8 @@ type t = private {
           for a text-encoded list parameter), keyed (node, argument name).  Compare with [==]. *)
   states : Flow.Eval.value list;
       (** Frame folds of this workspace, advanced before its live parameters. *)
-  frame_nodes : (network:t -> Flow.Eval.state -> Frame_input.t -> Sop.Node.t ->
-    (Sop.Node.t, Flow.Diagnostic.t) result) Int_map.t;
+  frame_nodes : (network:t -> Flow.Eval.state -> Input.t -> Sop.Node.t ->
+    (Sop.Node.t, Diagnostic.t) result) Int_map.t;
       (** Static-plan-bounded geometry zones rebuilt with an immutable fold
           snapshot on the initial domain, before worker submission. *)
   profile : Flow_ir.Profile.t option;
@@ -27,15 +27,15 @@ val with_reference : bool -> t -> t
 val with_approx : Flow.Workspace.Paths.t -> t -> t
 
 val with_states : Flow.Eval.value list -> t -> t
-val with_frame_nodes : (network:t -> Flow.Eval.state -> Frame_input.t -> Sop.Node.t ->
-  (Sop.Node.t, Flow.Diagnostic.t) result) Int_map.t -> t -> t
-val with_drives : Flow.Eval.value Port.Map.t -> t -> (t, Flow.Diagnostic.t) result
-val validate : t -> (unit, Flow.Diagnostic.t) result
-val parameter : t -> Port.t -> (Port.parameter, Flow.Diagnostic.t) result
-val relabel : node_id:int -> string -> t -> (t, Flow.Diagnostic.t) result
-val with_geometry : Sop.Edit_graph.t -> t -> (t, Flow.Diagnostic.t) result
+val with_frame_nodes : (network:t -> Flow.Eval.state -> Input.t -> Sop.Node.t ->
+  (Sop.Node.t, Diagnostic.t) result) Int_map.t -> t -> t
+val with_drives : Flow.Eval.value Port.Map.t -> t -> (t, Diagnostic.t) result
+val validate : t -> (unit, Diagnostic.t) result
+val parameter : t -> Port.t -> (Port.parameter, Diagnostic.t) result
+val relabel : node_id:int -> string -> t -> (t, Diagnostic.t) result
+val with_geometry : Sop.Edit_graph.t -> t -> (t, Diagnostic.t) result
 
-val apply_parameters : node_id:int -> (string * Param.value) list -> t -> (t, Flow.Diagnostic.t) result
+val apply_parameters : node_id:int -> (string * Param.value) list -> t -> (t, Diagnostic.t) result
 (** Apply validated node fields without changing slots or drive targets. *)
 
-val remove_nodes : int list -> t -> (t, Flow.Diagnostic.t) result
+val remove_nodes : int list -> t -> (t, Diagnostic.t) result

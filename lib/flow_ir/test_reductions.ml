@@ -2,15 +2,15 @@ module E = Flow.Eval
 module V = Flow.Value
 module O = Flow.Op.Private
 module I = Flow_ir
-let ok = function Ok x -> x | Error d -> failwith (Flow.Diagnostic.to_string d)
+let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let same a b = Marshal.to_string a [Marshal.No_sharing] = Marshal.to_string b [Marshal.No_sharing]
 let reject code f = try ignore(f());failwith("accepted "^code)
-  with V.Fail(actual,_,_) -> assert(actual=code)
+  with Diagnostic.Error d -> assert(d.code=code)
 let value ?(declarations="") ?inputs body =
   let source="(workspace w (graph g :context host "^declarations^" (if (> t -1000.) "^body^" "^body^")))" in
   let workspace=match Flow.Workspace.check {Flow.Check.version=1;kinds=[]} (ok(Flow.Syntax.parse source)) with
     |Some workspace,[] -> workspace
-    |_,ds -> failwith(String.concat "; "(List.map Flow.Diagnostic.to_string ds)) in
+    |_,ds -> failwith(String.concat "; "(List.map Diagnostic.to_string ds)) in
   List.assoc "g" (ok(E.static ?inputs workspace)).results
 let () =
   let ints=V.Int_array[|min_int;max_int;9007199254740993;-9007199254740993|] in
@@ -46,8 +46,8 @@ let () =
     let before=Marshal.to_string(data,offsets)[Marshal.No_sharing] in
     let reference=O.reduce_array operation ~offsets data in
     List.iter(fun domains ->
-      let result=Rays_math.Parallel.run ~domains(fun()->O.reduce_array operation ~offsets data
-        ~rows:(fun ~start ~finish f -> Rays_math.Parallel.for_ ~chunk_size:97 ~start ~finish f)) in
+      let result=Parallel.run ~domains(fun()->O.reduce_array operation ~offsets data
+        ~rows:(fun ~start ~finish f -> Parallel.for_ ~chunk_size:97 ~start ~finish f)) in
       assert(same result reference)) [1;8];
     assert(Marshal.to_string(data,offsets)[Marshal.No_sharing]=before)) [O.Sum;Minimum;Maximum];
   List.iter(fun body ->
@@ -55,9 +55,9 @@ let () =
     let residual=match value with E.Residual r->r | _->failwith"not live" in
     let core=match I.Core_lower.lower ~strict:true residual with Ok p->p | Error form->failwith(body^": "^form) in
     let executable=ok(I.Executor.compile ~strict:true value) in
-    List.iter(fun time->let live=Frame_input.at_time time in
+    List.iter(fun time->let live=Input.at_time time in
       let reference=ok(E.Private.force_reference value ~live) in
-      List.iter(fun domains->let direct,compiled=Rays_math.Parallel.run ~domains(fun()->
+      List.iter(fun domains->let direct,compiled=Parallel.run ~domains(fun()->
         ok(I.Core_exec.run ~root:residual core ~live),ok(I.Executor.force ~strict:true executable ~live)) in
         assert(same direct reference && same compiled reference)) [1;8]) [-0.;0.;0.25;2.])
     ["(array/min (array/vec3 5001 [t 3 -0.]))";
@@ -75,11 +75,13 @@ let () =
          sample {:nested {:column column :bias minimum}} shift (fn [x] (+ x sample.nested.bias))]
          (map shift sample.nested.column))"];
   let empty=value "(map (fn [x] (if (> t 0.) (array/min (array/float 0)) 0.)) (array/range 0))" in
-  assert(ok(E.Private.force_reference empty ~live:(Frame_input.at_time 1.))=E.Float_array[||]);
-  assert(Result.is_error(I.Executor.compile ~strict:true empty));
+  assert(ok(E.Private.force_reference empty ~live:(Input.at_time 1.))=E.Float_array[||]);
+  (match I.Executor.compile ~strict:true empty with
+   | Error _ -> ()
+   | Ok _ -> failwith "strict compilation accepted an empty body reduction");
   let captured=value "(let* [minimum (array/min (array/float 7 t))] (map (fn [x] (+ x minimum)) (array/range 11)))" in
   let core=match captured with E.Residual r->Result.get_ok(I.Core_lower.lower ~strict:true r)|_->assert false in
-  let packed=Result.get_ok(I.Packed.of_region core.regions.(0)) in
+  let packed=core.regions.(0) in
   assert(I.Packed.Private.argument_types packed=[|Flow.Ty.Float|]);
   List.iter(fun arguments->match I.Packed.Private.bind_arguments packed arguments with
     |Error d->assert(d.code="E_CORE_ARGUMENT")|Ok _->failwith"invalid argument accepted")
@@ -87,19 +89,19 @@ let () =
   (match I.Packed.Private.bind_arguments packed[|E.Float nan|] with
    |Error d->assert(d.code="E_NONFINITE")|Ok _->failwith"nonfinite argument accepted");
   let bound=ok(I.Packed.Private.bind_arguments packed[|E.Float 3.|]) in
-  assert(ok(I.Packed.force ~strict:true bound ~live:(Frame_input.at_time 1.))
+  assert(ok(I.Packed.force ~strict:true bound ~live:(Input.at_time 1.))
     =E.Float_array(Array.init 11(fun i->float i+.3.)));
   let source=value ~declarations:"[(data : (array float) (array/float 0))]"
     ~inputs:["g",["data",E.Source("fixture/column",Flow.Ty.Array Flow.Ty.Float,[])]]
     "(let* [minimum (array/min data) sample {:nested {:column data :bias minimum}}\n      shift (fn [x] (+ x sample.nested.bias))] (map shift sample.nested.column))" in
   let compiled=ok(I.Executor.compile ~strict:true source) in
-  List.iter(fun domain->Rays_math.Parallel.run ~domains:domain(fun()->
+  List.iter(fun domain->Parallel.run ~domains:domain(fun()->
     let data=E.Float_array(Array.init 5001(fun i->float(i mod 17)-.5.)) in
     let before=Marshal.to_string data[Marshal.No_sharing] in
     let resolve=function
       |E.Source("fixture/column",_,[])->Ok data
-      |_->Error(Flow.Diagnostic.error ~code:"E_DATA_SOURCE" "Unexpected reduction fixture source.") in
-    let live=Frame_input.at_time 0.25 in
+      |_->Error(Diagnostic.error ~code:"E_DATA_SOURCE" "Unexpected reduction fixture source.") in
+    let live=Input.at_time 0.25 in
     assert(same(ok(I.Executor.force ~strict:true ~resolve compiled ~live))
       (ok(E.Private.force_reference ~resolve source ~live)));
     assert(before=Marshal.to_string data[Marshal.No_sharing]))) [1;8];
@@ -122,8 +124,8 @@ let () = if Array.exists((=) "--bench") Sys.argv then begin
   measure "global_min_intrinsic" (fun()->O.reduce_array O.Minimum values);
   measure "segment_sum_reference" (fun()->Array.init rows(fun row->
     let sum=ref 0. in for i=row*10 to row*10+9 do sum:= !sum+.data.(i) done;!sum));
-  List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+  List.iter(fun domains->Parallel.run ~domains(fun()->
     measure(Printf.sprintf "segment_sum_intrinsic_domains%d" domains)(fun()->
       O.reduce_array O.Sum ~offsets values ~rows:(fun ~start ~finish f->
-        Rays_math.Parallel.for_ ~start ~finish f)))) [1;8]
+        Parallel.for_ ~start ~finish f)))) [1;8]
 end

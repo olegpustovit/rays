@@ -20,7 +20,7 @@ type direction = Spiral_counterclockwise | Spiral_clockwise
 type divisions =
   | Spiral_divisions_per_curve of int
   | Spiral_divisions_per_turn of int
-type orientation = Spiral_x | Spiral_y | Spiral_z | Spiral_axis of Vec3.t
+type orientation = Spiral_x | Spiral_y | Spiral_z | Spiral_axis of Rays_math.Vec3.t
 type rotation_order =
   | Spiral_xyz | Spiral_xzy | Spiral_yxz
   | Spiral_yzx | Spiral_zxy | Spiral_zyx
@@ -153,7 +153,7 @@ let[@inline always] gauss_length profile lower upper =
           +. speed profile (midpoint +. (half *. n2)))))
 
 let normalize_axis label value =
-  if not (Float.is_finite value.Vec3.x && Float.is_finite value.y && Float.is_finite value.z) then
+  if not (Float.is_finite value.Rays_math.Vec3.x && Float.is_finite value.y && Float.is_finite value.z) then
     Error ("Rdk.Spiral.spiral: " ^ label ^ " axis must be finite")
   else
     let scale = max (abs_float value.x)
@@ -163,47 +163,47 @@ let normalize_axis label value =
       let x = value.x /. scale and y = value.y /. scale
       and z = value.z /. scale in
       let length = sqrt ((x *. x) +. (y *. y) +. (z *. z)) in
-      Ok (Vec3.create (x /. length) (y /. length) (z /. length))
+      Ok (Rays_math.Vec3.create (x /. length) (y /. length) (z /. length))
 
 let rotation_matrix order rotation =
-  let x = Mat4.rotation_x rotation.Vec3.x
-  and y = Mat4.rotation_y rotation.y
-  and z = Mat4.rotation_z rotation.z in
+  let x = Rays_math.Mat4.rotation_x rotation.Rays_math.Vec3.x
+  and y = Rays_math.Mat4.rotation_y rotation.y
+  and z = Rays_math.Mat4.rotation_z rotation.z in
   match order with
-  | Spiral_xyz -> Mat4.mul z (Mat4.mul y x)
-  | Spiral_xzy -> Mat4.mul y (Mat4.mul z x)
-  | Spiral_yxz -> Mat4.mul z (Mat4.mul x y)
-  | Spiral_yzx -> Mat4.mul x (Mat4.mul z y)
-  | Spiral_zxy -> Mat4.mul y (Mat4.mul x z)
-  | Spiral_zyx -> Mat4.mul x (Mat4.mul y z)
+  | Spiral_xyz -> Rays_math.Mat4.mul z (Rays_math.Mat4.mul y x)
+  | Spiral_xzy -> Rays_math.Mat4.mul y (Rays_math.Mat4.mul z x)
+  | Spiral_yxz -> Rays_math.Mat4.mul z (Rays_math.Mat4.mul x y)
+  | Spiral_yzx -> Rays_math.Mat4.mul x (Rays_math.Mat4.mul z y)
+  | Spiral_zxy -> Rays_math.Mat4.mul y (Rays_math.Mat4.mul x z)
+  | Spiral_zyx -> Rays_math.Mat4.mul x (Rays_math.Mat4.mul y z)
 
-let frame orientation rotation_order (rotation : Vec3.t) =
+let frame orientation rotation_order (rotation : Rays_math.Vec3.t) =
   let oriented = match orientation with
-    | Spiral_x -> Ok (Vec3.unit_y, Vec3.unit_x, Vec3.create 0. 0. (-1.))
-    | Spiral_y -> Ok (Vec3.unit_x, Vec3.unit_y, Vec3.unit_z)
-    | Spiral_z -> Ok (Vec3.unit_x, Vec3.unit_z, Vec3.create 0. (-1.) 0.)
+    | Spiral_x -> Ok (Rays_math.Vec3.unit_y, Rays_math.Vec3.unit_x, Rays_math.Vec3.create 0. 0. (-1.))
+    | Spiral_y -> Ok (Rays_math.Vec3.unit_x, Rays_math.Vec3.unit_y, Rays_math.Vec3.unit_z)
+    | Spiral_z -> Ok (Rays_math.Vec3.unit_x, Rays_math.Vec3.unit_z, Rays_math.Vec3.create 0. (-1.) 0.)
     | Spiral_axis axis ->
         Result.bind (normalize_axis "central" axis) (fun axis ->
           let ax = abs_float axis.x and ay = abs_float axis.y
           and az = abs_float axis.z in
-          let reference = if ax <= ay && ax <= az then Vec3.unit_x
-            else if ay <= az then Vec3.unit_y else Vec3.unit_z in
-          let projection = Vec3.dot reference axis in
-          let radial = Vec3.create
+          let reference = if ax <= ay && ax <= az then Rays_math.Vec3.unit_x
+            else if ay <= az then Rays_math.Vec3.unit_y else Rays_math.Vec3.unit_z in
+          let projection = Rays_math.Vec3.dot reference axis in
+          let radial = Rays_math.Vec3.create
               (reference.x -. (projection *. axis.x))
               (reference.y -. (projection *. axis.y))
               (reference.z -. (projection *. axis.z)) in
           Result.bind (normalize_axis "radial" radial) (fun radial ->
             Result.map (fun tangent -> radial, axis, tangent)
-              (normalize_axis "tangent" (Vec3.cross radial axis)))) in
+              (normalize_axis "tangent" (Rays_math.Vec3.cross radial axis)))) in
   Result.map (fun (x_axis, y_axis, z_axis) ->
     if rotation.x = 0. && rotation.y = 0. && rotation.z = 0. then
       x_axis, y_axis, z_axis
     else
       let matrix = rotation_matrix rotation_order rotation in
-      Mat4.transform_direction matrix x_axis,
-      Mat4.transform_direction matrix y_axis,
-      Mat4.transform_direction matrix z_axis) oriented
+      Rays_math.Mat4.transform_direction matrix x_axis,
+      Rays_math.Mat4.transform_direction matrix y_axis,
+      Rays_math.Mat4.transform_direction matrix z_axis) oriented
 
 let validate_names names =
   let names = List.filter_map Fun.id names in
@@ -231,8 +231,8 @@ let generate ?cancel ?(grain = 16_384)
     ?(height_ramp = []) ?(radius_scale = 1.) ?(radius_ramp = [])
     ?(direction = Spiral_counterclockwise) ?(start_angle = 0.)
     ?(divisions = Spiral_divisions_per_turn 32) ?(uniform_angle = true)
-    ?(spiral_count = 1) ?(orientation = Spiral_y) ?(center = Vec3.zero)
-    ?(rotation = Vec3.zero) ?(rotation_order = Spiral_xyz)
+    ?(spiral_count = 1) ?(orientation = Spiral_y) ?(center = Rays_math.Vec3.zero)
+    ?(rotation = Rays_math.Vec3.zero) ?(rotation_order = Spiral_xyz)
     ?(uniform_scale = 1.) ?angle_attribute ?x_axis_attribute ?y_axis_attribute
     ?tangent_attribute ?orient_attribute ?distance_attribute () =
   let turns, height, extent_valid = match extent with

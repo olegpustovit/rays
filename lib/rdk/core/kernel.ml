@@ -36,7 +36,7 @@ let transform ?grain matrix geometry =
   let count = Array.length source.x in
   let x = Array.make count 0. and y = Array.make count 0. and z = Array.make count 0. in
   let (m00,m01,m02,m03), (m10,m11,m12,m13),
-      (m20,m21,m22,m23), (m30,m31,m32,m33) = Mat4.to_rows matrix in
+      (m20,m21,m22,m23), (m30,m31,m32,m33) = Rays_math.Mat4.to_rows matrix in
   run ?grain count (fun index ->
     let vx = source.x.(index) and vy = source.y.(index) and vz = source.z.(index) in
     let ox = m00*.vx +. m01*.vy +. m02*.vz +. m03

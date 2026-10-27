@@ -1,5 +1,4 @@
 module S = Flow.Syntax
-module Param = Editor_core.Param
 
 type literal = { base : Flow.Workspace.t; edits : Literal_edit.change Layout_by_path.Path_map.t }
 
@@ -49,7 +48,7 @@ let import_paths text = match S.parse text with
       List.fold_left (fun result (f : S.t) -> Result.bind result (fun paths ->
         match head f, f.node with
         | Some "import", S.List [_; {S.node = S.Str path; _}] when Filename.is_relative path -> Ok (paths @ [path])
-        | Some "import", _ -> Error [Flow.Diagnostic.error ~span:f.span ~code:"E_IMPORT"
+        | Some "import", _ -> Error [Diagnostic.error ~span:f.span ~code:"E_IMPORT"
             "Import takes one relative file path."]
         | _ -> Ok paths)) (Ok []) forms
 
@@ -105,7 +104,7 @@ let read_settings base (form : S.t) =
 
 (* ---- text ---- *)
 
-let diag ?span code message = Flow.Diagnostic.error ?span ~code message
+let diag ?span code message = Diagnostic.error ?span ~code message
 
 let check_forms forms =
   let rec go seen = function

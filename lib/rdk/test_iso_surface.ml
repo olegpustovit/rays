@@ -18,8 +18,8 @@ let snapshot geometry =
    Array.init (Geometry.point_count geometry) (Packed.Float3.get normals))
 
 let run () =
-  let minimum = Vec3.create (-1.) (-1.) (-1.)
-  and maximum = Vec3.create 1. 1. 1. in
+  let minimum = Rays_math.Vec3.create (-1.) (-1.) (-1.)
+  and maximum = Rays_math.Vec3.create 1. 1. 1. in
   let corner_to_flat = [|0;1;3;2;4;5;7;6|] in
   let masks = Buffer.create 262144 in
   List.iter (fun smooth -> List.iter (fun inside ->
@@ -70,7 +70,7 @@ let run () =
     && normals = Array.make 24 (0., 0., -1.))
     "single-cell isosurface ordered baseline changed";
   List.iter (fun domains -> Parallel.run ~domains (fun () ->
-    let min = Vec3.create (-1.) (-1.) (-3.) and max = Vec3.create 1. 1. 3. in
+    let min = Rays_math.Vec3.create (-1.) (-1.) (-3.) and max = Rays_math.Vec3.create 1. 1. 3. in
     let dense = Iso_surface.extract_dense ~resolution:(1,1,3) ~min ~max ~iso:0.
         ~field:(Iso_surface.Field.custom (fun xyz -> xyz.(2))) () |> get |> snapshot in
     let samples = [| -3.;-3.;-3.;-3.; -1.;-1.;-1.;-1.;
@@ -82,9 +82,9 @@ let run () =
   List.iter (fun (resolution, min, max, center, radius) ->
     let rx, ry, rz = resolution in
     let field x y z =
-      let x = x -. center.Vec3.x and y = y -. center.y and z = z -. center.z in
+      let x = x -. center.Rays_math.Vec3.x and y = y -. center.y and z = z -. center.z in
       sqrt ((x *. x +. y *. y) +. z *. z) -. radius in
-    let sx = (max.Vec3.x -. min.Vec3.x) /. float rx
+    let sx = (max.Rays_math.Vec3.x -. min.Rays_math.Vec3.x) /. float rx
     and sy = (max.y -. min.y) /. float ry
     and sz = (max.z -. min.z) /. float rz in
     let samples = Array.make ((rx+1)*(ry+1)*(rz+1)) 0. in
@@ -112,12 +112,12 @@ let run () =
         = Rdk_test_support.geometry_bytes (Iso_surface.extract_sampled ~resolution ~min ~max ~iso:0. ~samples () |> get))
       "dense isosurface differs from the sampled lattice";
     check (Marshal.to_string samples [Marshal.No_sharing] = before) "extract_sampled mutated borrowed samples")
-    [(64,64,64), Vec3.create (-2.) (-2.) (-2.), Vec3.create 2. 2. 2., Vec3.zero, 1.;
-     (129,256,2), Vec3.create (-2.) (-1.5) (-1.), Vec3.create 3. 2. 1.7,
-       Vec3.create 0.2 (-0.3) 0.1, 0.8];
+    [(64,64,64), Rays_math.Vec3.create (-2.) (-2.) (-2.), Rays_math.Vec3.create 2. 2. 2., Rays_math.Vec3.zero, 1.;
+     (129,256,2), Rays_math.Vec3.create (-2.) (-1.5) (-1.), Rays_math.Vec3.create 3. 2. 1.7,
+       Rays_math.Vec3.create 0.2 (-0.3) 0.1, 0.8];
   let resolution = 7,5,9 in
-  let min = Vec3.create (-2.) (-1.4) (-1.2)
-  and max = Vec3.create 2.5 1.7 2.1 in
+  let min = Rays_math.Vec3.create (-2.) (-1.4) (-1.2)
+  and max = Rays_math.Vec3.create 2.5 1.7 2.1 in
   let field x y z = x +. 0.2 *. y +. 0.1 *. z *. z -. 0.15 in
   let samples = Array.init (8 * 6 * 10) (fun i ->
     field (min.x +. float (i mod 8) *. ((max.x -. min.x) /. 7.))

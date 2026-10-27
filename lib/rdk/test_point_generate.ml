@@ -122,7 +122,7 @@ let test_per_point_and_probability () =
   check (Geometry.point_count scaled = 7
       && int_attr "sourcepoint" scaled = [|0;0;1;2;2;2;2|])
     "Point Generate scaled counts";
-  let probability = Point_generate.run ~seed:(Rand.seed 19)
+  let probability = Point_generate.run ~seed:(Rays_math.Rand.seed 19)
       ~mode:(Point_generate.Generate_probability { attribute = "probability" }) input
       |> get in
   check (Geometry.point_count probability = 2
@@ -273,7 +273,7 @@ let test_malformed_and_cancel () =
 
 let geometry_hash geometry =
   let hash = ref 17 in
-  let add value = hash := (!hash * 65599) lxor value in
+  let add value = hash := Rays_math.Hash.mix !hash value in
   let positions = Packed.Float3.Private.view (Geometry.positions geometry) in
   Array.iter (fun value -> add (Hashtbl.hash value)) positions.x;
   Array.iter (fun value -> add (Hashtbl.hash value)) positions.y;
@@ -295,7 +295,7 @@ let test_parallel_exact () =
   let input = Geometry.create ~positions ~topology ~attributes:[density] ()
       |> Result.get_ok in
   let cook domains = Parallel.run ~domains (fun () ->
-    Point_generate.run ~grain:4096 ~seed:(Rand.seed 778)
+    Point_generate.run ~grain:4096 ~seed:(Rays_math.Rand.seed 778)
       ~mode:(Point_generate.Generate_per_point {
         points_per_point = 10.; scale_attribute = Some "density" }) input
     |> get) in

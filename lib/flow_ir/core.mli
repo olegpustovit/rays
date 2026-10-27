@@ -23,7 +23,7 @@ type primitive =
   | Array_segment_argmax | Next_after
   | Array_scatter_add | Array_compact | Array_scan_sum | Array_grade | Array_index_of
   | Rand | Rand_at | Fma | Checked_mul | Checked_fma | Noise3 | Color_parse | Color_byte of byte_mode
-  | Coerce of Flow.Ty.t | Truthy | Error | Fail of string * string | Fail_diagnostic of Flow.Diagnostic.t
+  | Coerce of Flow.Ty.t | Truthy | Error | Fail of string * string | Fail_diagnostic of Diagnostic.t
 
 type frame_field = Time | Dt | Index | Tick | Width | Height | Pointer_x | Pointer_y | Input
 
@@ -48,7 +48,7 @@ type iteration = Static_index of int | Local_index of int
 type source = {
   site : Flow.Workspace.path; owner : Flow.Workspace.path;
   instance : int; prefix : Flow.Workspace.path;
-  iter : iteration list; span : Flow.Diagnostic.span option;
+  iter : iteration list; span : Diagnostic.span option;
 }
 
 (** Drawing statements: operands are locals holding the operator's own inputs, with every
@@ -84,10 +84,11 @@ and statement_node =
   | If of { condition : int; yes : statement list; no : statement list }
   | Iterate of { sequence : int; index : int; item : int; limit : int; body : statement list }
   | Counted of { first : int; last : int; count : int; index : int; item : int;
-      limit : int; init : statement list; body : statement list }
+      limit : int; stop : int option; init : statement list; body : statement list }
       (** Exact integer induction after the source's endpoint conversion.
           Assign max(0,last-first) to count, check limit, run init once, then
-          run body with ordinal index and Int(first+index) item. *)
+          run body with ordinal index and Int(first+index) item. A true [stop]
+          local terminates before the next pass. *)
   | Store of { sequence : int; index : int; value : int }
   | State_read of { slot : int; result : int; init : statement list; initial : int }
   | State_peek of { slot : int; found : int; value : int }
@@ -104,6 +105,8 @@ type state_slot = {
 module Region : sig
   type projection = Value | Valid
   type conversion = Flow.Packed_ops.conversion = To_float | Truncate | Floor | Ceil | Round | Coerce_int | Integer_result of string
+  type loop = {first:int; last:int; finish:int; initial:int array; limit:int option;
+    span:Diagnostic.span}
   type instruction =
     | Const of float | Input of int * int * int  (** source, width, component *)
     | Uniform of int * int | Frame of string | Accumulator of int
@@ -124,6 +127,16 @@ module Region : sig
     | Convert of conversion * int | Int_select of int * int * int
     | Guarded of (int * bool) list * instruction
     | Raise of Flow.Ty.t * string * string * string option
+    | Loop_begin of loop
+    | Loop_carry of int * int * Flow.Ty.t
+    | Loop_end of int * int array * int option
+    | Loop_result of int * int * Flow.Ty.t
+      (** Structured carried loops: [Loop_begin] defines the Int index,
+          contiguous [Loop_carry] registers define its scalar state, and
+          [Loop_end] supplies simultaneous next values and an optional Bool
+          register tested before the update; a true value stops after committing
+          those next values. Only [Loop_result]
+          exposes the final state outside the body. *)
   val integer_register : instruction -> bool
   val text_register : instruction -> bool
   (* Text leaf registers are separate from numeric and array-handle registers. *)
@@ -133,17 +146,40 @@ module Region : sig
   type result = Collect | Sum of bool | Accumulate of Flow.Workspace.term * bool
   type origin = Flow.Workspace.path * int list
   type count_source = Flow.Eval.residual -> Flow.Workspace.term -> origin option
-  type t = {
+  type t = private {
     residual : Flow.Eval.residual; term : Flow.Workspace.term;
     sources : (Flow.Eval.residual * Flow.Workspace.term) array; widths : int array;
     uniforms : Flow.Eval.value array; uniform_names : (string * string list) array;
-    code : instruction array; outputs : int array array;
+    code : instruction array; dependent : bool array option Atomic.t; outputs : int array array;
     count : int option; origin : origin option;
     iteration : iteration; result : result; skip : int array;
     stages : (Flow.Eval.residual * Flow.Workspace.term) list;
     fusion : bool; dynamic : bool; count_source : count_source;
     body : Flow.Workspace.term; binding_fn : string option;
     sites : (int * Flow.Workspace.path * int list) list }
+  val make : residual:Flow.Eval.residual -> term:Flow.Workspace.term ->
+    sources:(Flow.Eval.residual * Flow.Workspace.term) array -> widths:int array ->
+    uniforms:Flow.Eval.value array -> uniform_names:(string * string list) array ->
+    code:instruction array -> outputs:int array array -> count:int option -> origin:origin option ->
+    iteration:iteration -> result:result -> skip:int array ->
+    stages:(Flow.Eval.residual * Flow.Workspace.term) list -> fusion:bool -> dynamic:bool ->
+    count_source:count_source -> body:Flow.Workspace.term -> binding_fn:string option ->
+    sites:(int * Flow.Workspace.path * int list) list -> (t, Diagnostic.t list) Stdlib.result
+  val dependent_flags : t -> bool array
+  val rebuild : t -> ?residual:Flow.Eval.residual -> ?term:Flow.Workspace.term ->
+    ?sources:(Flow.Eval.residual * Flow.Workspace.term) array -> ?widths:int array ->
+    ?uniforms:Flow.Eval.value array -> ?uniform_names:(string * string list) array ->
+    ?code:instruction array -> ?outputs:int array array -> ?count:int option ->
+    ?origin:origin option -> ?iteration:iteration -> ?result:result -> ?skip:int array ->
+    ?stages:(Flow.Eval.residual * Flow.Workspace.term) list -> ?fusion:bool -> ?dynamic:bool ->
+    ?count_source:count_source -> ?body:Flow.Workspace.term -> ?binding_fn:string option ->
+    ?sites:(int * Flow.Workspace.path * int list) list -> unit -> (t, Diagnostic.t list) Stdlib.result
+  module Private : sig
+    val with_captures : t -> residual:Flow.Eval.residual -> uniforms:Flow.Eval.value array ->
+      sources:(Flow.Eval.residual * Flow.Workspace.term) array ->
+      stages:(Flow.Eval.residual * Flow.Workspace.term) list -> count:int option ->
+      (t, Diagnostic.t) Stdlib.result
+  end
 end
 type region = Region.t
 
@@ -153,6 +189,16 @@ type program = {
   state_slots : state_slot array; regions : region array;
   call_slots : int;
 }
+
+val reads : statement -> int list
+(** Local operands read directly by one statement, in operand order. *)
+val writes : statement -> int list
+(** Local slots written directly by one statement. Nested statements are not included. *)
+val children : statement -> statement list
+(** Immediate nested statements in execution/source order: body before handler,
+    yes before no, and loop initialization before its body. *)
+val iter : (statement -> unit) -> statement list -> unit
+(** Visit statements in preorder, recursively following [children]. *)
 
 val primitive_name : primitive -> string
 val literal_of_value : Flow.Eval.value -> literal option

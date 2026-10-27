@@ -5,7 +5,7 @@ type geometry={vertices:float array;indices:int array;color:int32}
 type image={resource_id:int;source:rect;destination:rect}
 type glyph={glyph_id:int;x:float;y:float}
 type glyphs={resource_id:int;color:int32;glyphs:glyph array}
-type command=Clear of int32|Set_blend of blend|Push_clip of rect|Pop_clip|Push_transform of transform|Pop_transform|Geometry of geometry|Shapes of Shape_batch.t|Image of image|Glyphs of glyphs
+type command=Clear of int32|Set_blend of blend|Push_clip of rect|Pop_clip|Push_transform of transform|Pop_transform|Geometry of geometry|Shapes of Ui_batch.t|Image of image|Glyphs of glyphs
 type t={id:int;commands:command array}
 let next_id=Atomic.make 1
 type error=Non_finite|Invalid_extent|Invalid_cardinality|Invalid_index of int|Invalid_resource_id of int|Invalid_glyph_id of int|Unbalanced_clip|Unbalanced_transform|Complexity_limit
@@ -27,14 +27,14 @@ let valid_indices ~vertex_count values=
     incr index
   done;
   !invalid
-let copy_command=function Clear c->Clear c|Set_blend b->Set_blend b|Push_clip r->Push_clip r|Pop_clip->Pop_clip|Push_transform t->Push_transform t|Pop_transform->Pop_transform|Geometry g->Geometry{g with vertices=Array.copy g.vertices;indices=Array.copy g.indices}|Shapes s->Shapes(Shape_batch.Private.copy s)|Image i->Image i|Glyphs g->Glyphs{g with glyphs=Array.copy g.glyphs}
+let copy_command=function Clear c->Clear c|Set_blend b->Set_blend b|Push_clip r->Push_clip r|Pop_clip->Pop_clip|Push_transform t->Push_transform t|Pop_transform->Pop_transform|Geometry g->Geometry{g with vertices=Array.copy g.vertices;indices=Array.copy g.indices}|Shapes s->Shapes(Ui_batch.Private.copy s)|Image i->Image i|Glyphs g->Glyphs{g with glyphs=Array.copy g.glyphs}
 let create_internal ~copy input=
   if Array.length input>1_048_576 then Error Complexity_limit else
   let clip=ref 0 and transform=ref 0 and failure=ref None in
   let fail e=if !failure=None then failure:=Some e in
   Array.iter(fun command->match command with
   |Clear _|Set_blend _->()
-  |Shapes s->if not(Shape_batch.Private.valid s)then fail Invalid_cardinality
+  |Shapes s->if not(Ui_batch.Private.valid_shapes s)then fail Invalid_cardinality
   |Push_clip r->if valid_rect r then incr clip else fail(if finite_rect r then Invalid_extent else Non_finite)
   |Pop_clip->if !clip=0 then fail Unbalanced_clip else decr clip
   |Push_transform t->if finite_transform t then incr transform else fail Non_finite
@@ -54,15 +54,51 @@ module Private=struct
   let commands_readonly t=t.commands
   let create_owned input=create_internal~copy:false input
 end
-module Encoder=struct
- type t={mutable bytes:bytes;mutable length:int}
- let create()={bytes=Bytes.create 256;length=0}
- let ensure t n=if n>Bytes.length t.bytes-t.length then(let size=ref(Bytes.length t.bytes)in while !size<t.length+n do size:=2* !size done;let b=Bytes.create !size in Bytes.blit t.bytes 0 b 0 t.length;t.bytes<-b)
- let byte t x=ensure t 1;Bytes.set t.bytes t.length(Char.chr(x land 255));t.length<-t.length+1
- let i32 t x=for n=0 to 3 do byte t Int32.(to_int(logand(shift_right_logical x(8*n))0xffl))done
- let i64 t x=for n=0 to 7 do byte t Int64.(to_int(logand(shift_right_logical x(8*n))0xffL))done
- let int t x=i64 t(Int64.of_int x)
- let float t x=i64 t(Int64.bits_of_float x)
- let result t=Bytes.sub t.bytes 0 t.length
-end
-let serialize value=let e=Encoder.create()in Encoder.i32 e 0x52324931l;Encoder.int e(Array.length value.commands);let rect (r:rect)=List.iter(Encoder.float e)[r.x;r.y;r.width;r.height]and transform (t:transform)=List.iter(Encoder.float e)[t.xx;t.xy;t.yx;t.yy;t.tx;t.ty]in Array.iter(function Clear c->Encoder.byte e 0;Encoder.i32 e c|Set_blend b->Encoder.byte e 8;Encoder.byte e(match b with Source_over->0|Copy->1|Replace->2|Alpha->3|Add->4|Multiply->5|Screen->6|Subtract->7)|Push_clip r->Encoder.byte e 1;rect r|Pop_clip->Encoder.byte e 2|Push_transform t->Encoder.byte e 3;transform t|Pop_transform->Encoder.byte e 4|Geometry g->Encoder.byte e 5;Encoder.i32 e g.color;Encoder.int e(Array.length g.vertices);Array.iter(Encoder.float e)g.vertices;Encoder.int e(Array.length g.indices);Array.iter(Encoder.int e)g.indices|Shapes s->Encoder.byte e 9;Encoder.int e(Shape_batch.count s);(match Shape_batch.gpu s with None->Encoder.byte e 0|Some g->Encoder.byte e 1;Encoder.int e(Shape_batch.Private.gpu_identity g);Encoder.i64 e(Shape_batch.Private.gpu_stamp g));let bytes=Shape_batch.instances s in Encoder.int e(Bytes.length bytes);Bytes.iter(fun c->Encoder.byte e(Char.code c))bytes|Image i->Encoder.byte e 6;Encoder.int e i.resource_id;rect i.source;rect i.destination|Glyphs g->Encoder.byte e 7;Encoder.int e g.resource_id;Encoder.i32 e g.color;Encoder.int e(Array.length g.glyphs);Array.iter(fun p->Encoder.int e p.glyph_id;Encoder.float e p.x;Encoder.float e p.y)g.glyphs)value.commands;Encoder.result e
+let serialize value =
+  let buffer = Buffer.create 256 in
+  let byte = Buffer.add_uint8 buffer
+  and i32 = Buffer.add_int32_le buffer
+  and i64 = Buffer.add_int64_le buffer in
+  let int value = i64 (Int64.of_int value)
+  and float value = i64 (Int64.bits_of_float value) in
+  let rect (r : rect) = List.iter float [r.x; r.y; r.width; r.height]
+  and transform (t : transform) = List.iter float [t.xx; t.xy; t.yx; t.yy; t.tx; t.ty] in
+  i32 0x52324931l;
+  int (Array.length value.commands);
+  Array.iter (function
+    | Clear color -> byte 0; i32 color
+    | Set_blend blend ->
+        byte 8;
+        byte (match blend with Source_over -> 0 | Copy -> 1 | Replace -> 2
+          | Alpha -> 3 | Add -> 4 | Multiply -> 5 | Screen -> 6 | Subtract -> 7)
+    | Push_clip r -> byte 1; rect r
+    | Pop_clip -> byte 2
+    | Push_transform t -> byte 3; transform t
+    | Pop_transform -> byte 4
+    | Geometry geometry ->
+        byte 5;
+        i32 geometry.color;
+        int (Array.length geometry.vertices);
+        Array.iter float geometry.vertices;
+        int (Array.length geometry.indices);
+        Array.iter int geometry.indices
+    | Shapes shapes ->
+        byte 9;
+        int (Ui_batch.count shapes);
+        (match Ui_batch.marks shapes with
+         | None -> byte 0
+         | Some gpu ->
+             byte 1;
+             int (Marks.Private.gpu_identity gpu);
+             i64 (Marks.Private.gpu_stamp gpu));
+        let bytes = Ui_batch.instances shapes in
+        int (Bytes.length bytes);
+        Buffer.add_bytes buffer bytes
+    | Image image ->
+        byte 6; int image.resource_id; rect image.source; rect image.destination
+    | Glyphs glyphs ->
+        byte 7; int glyphs.resource_id; i32 glyphs.color;
+        int (Array.length glyphs.glyphs);
+        Array.iter (fun glyph -> int glyph.glyph_id; float glyph.x; float glyph.y)
+          glyphs.glyphs) value.commands;
+  Buffer.to_bytes buffer

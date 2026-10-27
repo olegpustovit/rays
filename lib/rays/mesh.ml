@@ -15,14 +15,14 @@ module Vec3_buffer = struct
   }
 
   let length values = Array.length values.x
-  let get values index = Vec3.create values.x.(index) values.y.(index) values.z.(index)
+  let get values index = Rays_math.Vec3.create values.x.(index) values.y.(index) values.z.(index)
 
   let of_array values =
     let count = Array.length values in
     let x = Array.make count 0. and y = Array.make count 0.
     and z = Array.make count 0. in
     Array.iteri (fun index value ->
-      x.(index) <- value.Vec3.x;
+      x.(index) <- value.Rays_math.Vec3.x;
       y.(index) <- value.y;
       z.(index) <- value.z) values;
     { x; y; z }
@@ -35,7 +35,7 @@ module Vec3_buffer = struct
     and z = Array.make count 0. in
     let fill index =
       let value = make index in
-      x.(index) <- value.Vec3.x;
+      x.(index) <- value.Rays_math.Vec3.x;
       y.(index) <- value.y;
       z.(index) <- value.z
     in
@@ -51,8 +51,8 @@ type t = {
   vertices : Vec3_buffer.t;
   indices : int array;
   normals : Vec3_buffer.t option;
-  colors : Color.t array option;
-  tex_coords : Vec2.t array option;
+  colors : Rays_math.Color.t array option;
+  tex_coords : Rays_math.Vec2.t array option;
 }
 
 let validate_attribute_array name vertex_count = function
@@ -125,7 +125,7 @@ let centroid (mesh : t) =
       z := !z +. mesh.vertices.z.(index)
     done;
     let inverse = 1. /. float_of_int count in
-    Some (Vec3.create (!x *. inverse) (!y *. inverse) (!z *. inverse))
+    Some (Rays_math.Vec3.create (!x *. inverse) (!y *. inverse) (!z *. inverse))
 
 let vertex index (mesh : t) =
   if index < 0 || index >= Vec3_buffer.length mesh.vertices then None
@@ -173,8 +173,8 @@ let recalculate_normals mesh =
   let normals = Vec3_buffer.init ~parallel:true vertex_count (fun index ->
     let x = nx.(index) and y = ny.(index) and z = nz.(index) in
     let length = sqrt (x*.x +. y*.y +. z*.z) in
-    if length <= 1e-18 then Vec3.zero
-    else Vec3.create (x/.length) (y/.length) (z/.length)) in
+    if length <= 1e-18 then Rays_math.Vec3.zero
+    else Rays_math.Vec3.create (x/.length) (y/.length) (z/.length)) in
   { mesh with normals = Some normals }
 
 let positive name value =
@@ -185,10 +185,10 @@ let plane ~width ~height () =
   positive "plane" width;
   positive "plane" height;
   let x = width *. 0.5 and y = height *. 0.5 in
-  let vertices = [| Vec3.create (-.x) (-.y) 0.; Vec3.create x (-.y) 0.;
-                    Vec3.create (-.x) y 0.; Vec3.create x y 0. |]
-  and normals = Array.make 4 Vec3.unit_z
-  and tex_coords = [| Vec2.create 0. 1.; Vec2.create 1. 1.; Vec2.create 0. 0.; Vec2.create 1. 0. |]
+  let vertices = [| Rays_math.Vec3.create (-.x) (-.y) 0.; Rays_math.Vec3.create x (-.y) 0.;
+                    Rays_math.Vec3.create (-.x) y 0.; Rays_math.Vec3.create x y 0. |]
+  and normals = Array.make 4 Rays_math.Vec3.unit_z
+  and tex_coords = [| Rays_math.Vec2.create 0. 1.; Rays_math.Vec2.create 1. 1.; Rays_math.Vec2.create 0. 0.; Rays_math.Vec2.create 1. 0. |]
   and indices = [| 0; 1; 3; 0; 3; 2 |] in
   match create_owned ~indices ~normals ~tex_coords vertices with
   | Ok mesh -> mesh | Error message -> invalid_arg message
@@ -202,11 +202,11 @@ module Private = struct
 
   type view = {
     mode : mode;
-    vertices : Vec3.t array;
+    vertices : Rays_math.Vec3.t array;
 
-    normals : Vec3.t array option;
-    colors : Color.t array option;
-    tex_coords : Vec2.t array option;
+    normals : Rays_math.Vec3.t array option;
+    colors : Rays_math.Color.t array option;
+    tex_coords : Rays_math.Vec2.t array option;
   }
 
   let view (mesh : t) = {
@@ -223,8 +223,8 @@ module Private = struct
     vertices : vec3_view;
     indices : int array;
     normals : vec3_view option;
-    colors : Color.t array option;
-    tex_coords : Vec2.t array option;
+    colors : Rays_math.Color.t array option;
+    tex_coords : Rays_math.Vec2.t array option;
   }
 
   let packed_view (mesh : t) = {

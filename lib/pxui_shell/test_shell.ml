@@ -1,11 +1,8 @@
 open Rays
 
 let frame : Frame.t = {
-  width = 400; height = 300; size = 400, 300;
-
-   pixel_scale = 1., 1.;
-  time = 0.; dt = 0.; fps = 0.; count = 0; mouse = 0., 0.;
-  mouse_delta = 0., 0.; keys = []; mouse_buttons = []; events = [];
+  input = { (Input.at_time 0.) with frame = 0; tick = 0; size = 400, 300 };
+  pixel_scale = 1., 1.; fps = 0.; mouse_delta = 0., 0.;
 }
 
 let bindings = Editor_core.[
@@ -37,7 +34,7 @@ let status_instances height =
 
 let () =
   let ui = Pxui.Ui.create ~font_size:11 () in
-  let pane events = Pxui.Ui.frame ui { frame with events } (fun ui ->
+  let pane events = Pxui.Ui.frame ui { frame with input = { frame.input with events } } (fun ui ->
     let root = Pxui_shell.Chrome.pane_root ui frame
       ~bounds:(100, 20, 100, 80) "pane" in
     let child = Pxui.Ui.within ui root (fun () ->
@@ -46,17 +43,16 @@ let () =
         ~at:(110., 30.) "child") in
     Pxui.Ui.signal ui root, Pxui.Ui.signal ui child) in
   ignore (pane []);
-  let root, child = pane [Event.MousePressed (Input.LeftButton, (115., 35.))] in
+  let root, child = pane [Input.Pointer_pressed (Input.LeftButton, (115., 35.))] in
   if root.subtree_press <> Some 0 || not child.pressed then
     failwith "pane root missed its child control press";
-  let root, _ = pane [Event.MouseReleased (Input.LeftButton, (115., 35.));
-    Event.MousePressed (Input.LeftButton, (5., 5.))] in
+  let root, _ = pane [Input.Pointer_released (Input.LeftButton, (115., 35.));
+    Input.Pointer_pressed (Input.LeftButton, (5., 5.))] in
   if root.subtree_press <> None then
     failwith "pane root accepted a press outside its hit bounds";
   Pxui.Ui.destroy ui;
   let layout = Pxui_shell.Layout.default in
-  let wide_frame = { frame with width = 1000; size = 1000, 300;
-     } in
+  let wide_frame = { frame with input = { frame.input with size = 1000, 300 } } in
   let panes = Pxui_shell.Layout.(panes (geometry layout wide_frame)) in
   let _, _, view_width, _ = panes.view
   and _, _, graph_width, _ = panes.graph
@@ -65,11 +61,11 @@ let () =
     failwith "shell layout defaults are not 45/35/20";
   let divider_x = view_width in
   let hit_ui = Pxui.Ui.create ~font_size:11 () in
-  let chrome events = ignore (Pxui.Ui.frame hit_ui { wide_frame with events }
+  let chrome events = ignore (Pxui.Ui.frame hit_ui { wide_frame with input = { wide_frame.input with events } }
     (fun ui -> ignore (Pxui_shell.Chrome.update layout ui wide_frame);
       Pxui_shell.Chrome.splitters layout ui wide_frame)) in
   chrome [];
-  chrome [Rays.Event.MouseMoved (float (divider_x - 2), 100.)];
+  chrome [Input.Pointer_moved (float (divider_x - 2), 100.)];
   if Pxui.Ui.cursor hit_ui <> Some `Horizontal_resize then
     failwith "thin splitter lost its wider resize hit area";
   Pxui.Ui.destroy hit_ui;
@@ -82,8 +78,7 @@ let () =
     failwith "collapsed graph and inspector did not vanish";
   (* the default three columns match the retired fixed layout at these sizes and states *)
   let golden (w, h) hidden (view, graph_w, inspector_w, status, timeline) =
-    let f = { frame with width = w; height = h; size = w, h;
-       } in
+    let f = { frame with input = { frame.input with size = w, h } } in
     let p = Pxui_shell.Layout.(panes (geometry ~hidden layout f)) in
     let width (_, _, w, _) = w in
     if p.view <> view || width p.graph <> graph_w || width p.inspector <> inspector_w
@@ -111,7 +106,7 @@ let () =
       b = Leaf List }; b = Split { axis = `H; size = `Ratio 0.5; a = Leaf Inspector; b = Leaf (View "z") } } ] in
   List.iter (fun (name, tree) ->
     List.iter (fun (w, h) ->
-      let f = { frame with width = w; height = h; size = w, h } in
+      let f = { frame with input = { frame.input with size = w, h } } in
       let g = L.geometry tree f in
       let seen = Array.make_matrix w h 0 in
       let cover (x, y, cw, ch) = for i = x to x + cw - 1 do for j = y to y + ch - 1 do
@@ -155,7 +150,7 @@ let () =
       (fixed `V (`Second 336) (fixed `V (`Ratio 0.5) (Leaf (View "main")) (Leaf Timeline)) (Leaf Graph))
       (fixed `V (`Second 300) (Leaf Inspector) (Leaf Lisp))) in
   List.iter (fun (w, h) ->
-    let g = L.geometry ~hidden:[] target { frame with width = w; height = h; size = w, h } in
+    let g = L.geometry ~hidden:[] target { frame with input = { frame.input with size = w, h } } in
     let whole panel = match List.find_opt (fun (l : L.leaf) -> l.panel = panel) g.leaves with
       | Some { frame; _ } -> frame
       | None -> failwith "the target lost a panel" in
@@ -176,7 +171,7 @@ let () =
   (* too small for both: the other side keeps its minimum, then the fixed side shrinks to a point *)
   let narrow = fixed `H (`First 216) (Leaf Outline) (Leaf Graph) in
   let widths w = List.map (fun (l : L.leaf) -> let _, _, lw, _ = l.header in lw)
-    (L.geometry narrow { frame with width = w; height = 300; size = w, 300 }).leaves in
+    (L.geometry narrow { frame with input = { frame.input with size = w, 300 } }).leaves in
   if widths 300 <> [ 119; 180 ] || widths 100 <> [ 1; 98 ] then failwith "a fixed side did not yield";
   (* a collapsed panel in a stack is its 24-point header, with no margin over it; the next panel's
      header sits under its own 4-point margin *)
@@ -215,36 +210,36 @@ let () =
   (* dragging a splitter reports a ratio, and the header menu reports its intents *)
   let drag_ui = Pxui.Ui.create ~font_size:11 () in
   let chrome tree ?(mouse = 0., 0.) events =
-    let f = { wide_frame with events; mouse; height = 600; size = 1000, 600 } in
+    let f = { wide_frame with input = { wide_frame.input with events; pointer = mouse; size = 1000, 600 } } in
     Pxui.Ui.frame drag_ui f (fun ui -> let a = Pxui_shell.Chrome.update tree ui f in
       a @ Pxui_shell.Chrome.splitters tree ui f) in
   ignore (chrome L.default []);
   let x = 449. in
-  ignore (chrome L.default ~mouse:(x, 100.) [Event.MouseMoved (x, 100.)]);
-  ignore (chrome L.default ~mouse:(x, 100.) [Event.MousePressed (Input.LeftButton, (x, 100.))]);
-  let moved = chrome L.default ~mouse:(300., 100.) [Event.MouseMoved (300., 100.)] in
+  ignore (chrome L.default ~mouse:(x, 100.) [Input.Pointer_moved (x, 100.)]);
+  ignore (chrome L.default ~mouse:(x, 100.) [Input.Pointer_pressed (Input.LeftButton, (x, 100.))]);
+  let moved = chrome L.default ~mouse:(300., 100.) [Input.Pointer_moved (300., 100.)] in
   (match moved with
    | [ Pxui_shell.Chrome.Resize { node = []; size = `Ratio ratio } ] ->
        if Float.abs (ratio -. 0.3) > 0.01 then failwith "splitter ratio does not follow the pointer"
    | _ -> failwith "a drag did not report one resize of the outer split");
-  let released = chrome L.default ~mouse:(300., 100.) [Event.MouseReleased (Input.LeftButton, (300., 100.))] in
+  let released = chrome L.default ~mouse:(300., 100.) [Input.Pointer_released (Input.LeftButton, (300., 100.))] in
   if not (List.mem Pxui_shell.Chrome.Settled released) then failwith "a drag did not settle";
   (* the gutter of a fixed split reports whole points of its fixed side *)
   let sized = fixed `H (`Second 320) (Leaf Graph) (Leaf Inspector) in
-  ignore (chrome sized ~mouse:(679., 100.) [Event.MouseMoved (679., 100.)]);
-  ignore (chrome sized ~mouse:(679., 100.) [Event.MousePressed (Input.LeftButton, (679., 100.))]);
-  (match chrome sized ~mouse:(599.4, 100.) [Event.MouseMoved (599.4, 100.)] with
+  ignore (chrome sized ~mouse:(679., 100.) [Input.Pointer_moved (679., 100.)]);
+  ignore (chrome sized ~mouse:(679., 100.) [Input.Pointer_pressed (Input.LeftButton, (679., 100.))]);
+  (match chrome sized ~mouse:(599.4, 100.) [Input.Pointer_moved (599.4, 100.)] with
    | [ Pxui_shell.Chrome.Resize { node = []; size = `Second 400 } ] -> ()
    | _ -> failwith "a fixed split's gutter did not report points");
-  ignore (chrome sized ~mouse:(599.4, 100.) [Event.MouseReleased (Input.LeftButton, (599.4, 100.))]);
+  ignore (chrome sized ~mouse:(599.4, 100.) [Input.Pointer_released (Input.LeftButton, (599.4, 100.))]);
   (* a right-click on a gutter sizes its split another way, keeping the sizes it shows *)
   let menu_pick row =
-    ignore (chrome sized ~mouse:(679., 100.) [Event.MouseMoved (679., 100.)]);
-    ignore (chrome sized ~mouse:(679., 100.) [Event.MousePressed (Input.RightButton, (679., 100.))]);
-    ignore (chrome sized ~mouse:(679., 100.) [Event.MouseReleased (Input.RightButton, (679., 100.))]);
+    ignore (chrome sized ~mouse:(679., 100.) [Input.Pointer_moved (679., 100.)]);
+    ignore (chrome sized ~mouse:(679., 100.) [Input.Pointer_pressed (Input.RightButton, (679., 100.))]);
+    ignore (chrome sized ~mouse:(679., 100.) [Input.Pointer_released (Input.RightButton, (679., 100.))]);
     let at = 700., 112. +. 24. *. float row in
-    ignore (chrome sized ~mouse:at [Event.MouseMoved at]);
-    chrome sized ~mouse:at [Event.MousePressed (Input.LeftButton, at); Event.MouseReleased (Input.LeftButton, at)] in
+    ignore (chrome sized ~mouse:at [Input.Pointer_moved at]);
+    chrome sized ~mouse:at [Input.Pointer_pressed (Input.LeftButton, at); Input.Pointer_released (Input.LeftButton, at)] in
   (match menu_pick 1 with
    | [ Pxui_shell.Chrome.Resize { node = []; size = `First 679 }; Settled ] -> ()
    | intents -> failwith (Printf.sprintf "the gutter menu did not fix the first side (%d intents)" (List.length intents)));
@@ -252,21 +247,21 @@ let () =
    | [ Pxui_shell.Chrome.Resize { node = []; size = `Ratio r }; Settled ] when Float.abs (r -. (679.5 /. 999.)) < 1e-6 -> ()
    | _ -> failwith "the gutter menu did not size the split by its ratio");
   (* the header menu no longer holds the size rows: the gutter's right-click above does *)
-  let gutter = List.hd (L.geometry sized { wide_frame with height = 600; size = 1000, 600 }).splitters in
+  let gutter = List.hd (L.geometry sized { wide_frame with input = { wide_frame.input with size = 1000, 600 } }).splitters in
   if L.sides gutter <> (679, 320) || L.resized gutter `Second <> `Second 320 then
     failwith "a gutter does not report the sides of its split";
-  ignore (chrome L.default ~mouse:(600., 10.) [Event.MouseMoved (600., 10.)]);
-  ignore (chrome L.default ~mouse:(600., 10.) [Event.MousePressed (Input.RightButton, (600., 10.))]);
-  ignore (chrome L.default ~mouse:(600., 10.) [Event.MouseReleased (Input.RightButton, (600., 10.))]);
-  ignore (chrome L.default ~mouse:(620., 28.) [Event.MouseMoved (620., 28.)]);
-  let pick = [Event.MousePressed (Input.LeftButton, (620., 28.));
-    Event.MouseReleased (Input.LeftButton, (620., 28.))] in
+  ignore (chrome L.default ~mouse:(600., 10.) [Input.Pointer_moved (600., 10.)]);
+  ignore (chrome L.default ~mouse:(600., 10.) [Input.Pointer_pressed (Input.RightButton, (600., 10.))]);
+  ignore (chrome L.default ~mouse:(600., 10.) [Input.Pointer_released (Input.RightButton, (600., 10.))]);
+  ignore (chrome L.default ~mouse:(620., 28.) [Input.Pointer_moved (620., 28.)]);
+  let pick = [Input.Pointer_pressed (Input.LeftButton, (620., 28.));
+    Input.Pointer_released (Input.LeftButton, (620., 28.))] in
   (match chrome L.default ~mouse:(620., 28.) pick with
    | [ Pxui_shell.Chrome.Split_panel ([ 1; 0 ], `H) ] -> ()
    | intents -> failwith (Printf.sprintf "the header menu did not split the graph panel (%d intents)" (List.length intents)));
-  let collapse = [Event.MousePressed (Input.LeftButton, (985., 10.));
-    Event.MouseReleased (Input.LeftButton, (985., 10.))] in
-  ignore (chrome L.default ~mouse:(985., 10.) [Event.MouseMoved (985., 10.)]);
+  let collapse = [Input.Pointer_pressed (Input.LeftButton, (985., 10.));
+    Input.Pointer_released (Input.LeftButton, (985., 10.))] in
+  ignore (chrome L.default ~mouse:(985., 10.) [Input.Pointer_moved (985., 10.)]);
   if not (List.mem (Pxui_shell.Chrome.Toggle [1; 1]) (chrome L.default ~mouse:(985., 10.) collapse)) then
     failwith "the collapse button did not toggle the inspector";
   Pxui.Ui.destroy drag_ui;
@@ -280,11 +275,12 @@ let () =
       ~playing:false ~frame:12L ~time:0.2 ~max_frame:240 ()) in
   if intents <> [] then failwith "idle timeline emitted a playback request";
   (* the frame field: found by pressing along the strip until a control takes the keyboard *)
-  let bar ?(mouse = 0., 0.) events = Pxui.Ui.frame ui { frame with events; mouse } (fun ui ->
+  let bar ?(mouse = 0., 0.) events = Pxui.Ui.frame ui
+    { frame with input = { frame.input with events; pointer = mouse } } (fun ui ->
     Pxui_shell.Timeline_bar.draw ui ~bounds:(0, 270, 400, 30)
       ~playing:false ~frame:12L ~time:0.2 ~max_frame:240 ()) in
-  let press p = ignore (bar ~mouse:p [ Event.MouseMoved p ]);
-    ignore (bar ~mouse:p [ Event.MousePressed (Input.LeftButton, p); Event.MouseReleased (Input.LeftButton, p) ]);
+  let press p = ignore (bar ~mouse:p [ Input.Pointer_moved p ]);
+    ignore (bar ~mouse:p [ Input.Pointer_pressed (Input.LeftButton, p); Input.Pointer_released (Input.LeftButton, p) ]);
     ignore (bar ~mouse:p []) in
   let rec find x = if x > 400. then failwith "the timeline has no frame field" else begin
     press (x, 285.);
@@ -292,8 +288,8 @@ let () =
   let x = find 3. in
   let enter text key =
     if not (Pxui.Ui.text_input_focused ui) then press (x, 285.);
-    ignore (bar ~mouse:(x, 285.) [ Event.TextInput text ]);
-    let sought = bar ~mouse:(x, 285.) [ Event.KeyPressed key ] @ bar ~mouse:(x, 285.) [] in
+    ignore (bar ~mouse:(x, 285.) [ Input.Text_input text ]);
+    let sought = bar ~mouse:(x, 285.) [ Input.Key_pressed key ] @ bar ~mouse:(x, 285.) [] in
     List.filter_map (function Pxui_shell.Timeline_bar.Seek_playback n -> Some n | _ -> None) sought in
   if enter "7" Input.Enter <> [ 7L ] then failwith "a typed frame did not seek";
   if enter "9" Input.Escape <> [] then failwith "Escape did not cancel the typed frame";
@@ -301,7 +297,7 @@ let () =
   if enter "99999" Input.Enter <> [ 240L ] then failwith "a frame past the end did not clamp to the last frame";
   if enter "-5" Input.Enter <> [ 0L ] then failwith "a negative frame did not clamp to 0";
   if enter "x" Input.Enter <> [] then failwith "text that is not a frame was committed";
-  ignore (bar [ Event.KeyPressed Input.Escape ]);
+  ignore (bar [ Input.Key_pressed Input.Escape ]);
   let query = Pxui.Ui.frame ui frame (fun ui ->
     Pxui_shell.Prompt.name ui ~key:"name" ~title:"Save" ~description:"Name it" ~label:"Name"
       ~query:"draft") in
@@ -313,50 +309,20 @@ let () =
     Pxui_shell.Prompt.macro ui ~key:"macro" ~title:"Make a macro" ~literals:[| "0.5"; "12"; "\"a\"" |]
       ~free:[ "seed" ] macro) in
   if answer <> Some (macro, `None) then failwith "macro prompt changed its state or submitted on its own";
-  let shell = Pxui.Ui.create ~font_size:11 () in
-  if Pxui_shell.Shell.frame shell frame ~visible:false
-      ~body:(fun _ -> 7) ~overlay:None <> None then
-    failwith "hidden shell built editor content";
-  if Pxui_shell.Shell.frame shell frame ~visible:true
-      ~body:(fun _ -> 7) ~overlay:None <> Some 7 then
-    failwith "visible shell lost editor result";
-  let controls ui =
-    let box = Pxui.Ui.box ui ~flags:Pxui.Ui.(clickable + focusable)
-      ~at:(10., 10.) ~w:(Pxui.Ui.Px 50.) ~h:(Pxui.Ui.Px 50.) "focused-control" in
-    Pxui.Ui.signal ui box in
-  let show events = Pxui_shell.Shell.frame shell { frame with events }
-    ~visible:true ~body:controls ~overlay:None in
-  let hide events = Pxui_shell.Shell.frame shell { frame with events }
-    ~visible:false ~body:controls ~overlay:None in
-  ignore (show []);
-  let captured = show [Event.MousePressed (Input.LeftButton, (20., 20.))] |> Option.get in
-  if not captured.held || not (Pxui.Ui.text_input_focused shell) then
-    failwith "shell did not establish focus and capture";
-  ignore (hide [Event.WindowFocusLost]);
-  if Pxui.Ui.text_input_focused shell || Pxui.Ui.wants_pointer shell then
-    failwith "hidden shell did not process focus-loss cancellation";
-  ignore (show []);
-  ignore (show [Event.MousePressed (Input.LeftButton, (20., 20.))]);
-  ignore (hide []);
-  if Pxui.Ui.text_input_focused shell || Pxui.Ui.wants_pointer shell then
-    failwith "hidden shell did not prune removed controls";
-  let returned = show [Event.MouseReleased (Input.LeftButton, (20., 20.))] |> Option.get in
-  if returned.clicked || returned.held then failwith "hidden control committed after disappearing";
-  Pxui.Ui.destroy shell;
   (* a window saved past the right edge is drawn inside the frame, and a drag moves it from
      where it is drawn: the pointer is followed at once *)
   let window_ui = Pxui.Ui.create ~font_size:11 () in
   let past = { Editor_core.Panels.default_state with window = Some (900, 50, 300, 200) } in
   let windowed ?(mouse = 0., 0.) events =
-    let f = { wide_frame with events; mouse; height = 600; size = 1000, 600 } in
+    let f = { wide_frame with input = { wide_frame.input with events; pointer = mouse; size = 1000, 600 } } in
     Pxui.Ui.frame window_ui f (fun ui ->
       Pxui_shell.Chrome.update ~state:(fun path -> if path = [] then past else Editor_core.Panels.default_state)
         (L.Leaf L.Graph) ui f) in
   ignore (windowed []);
-  ignore (windowed ~mouse:(750., 67.) [Event.MouseMoved (750., 67.)]);
-  ignore (windowed ~mouse:(750., 67.) [Event.MousePressed (Input.LeftButton, (750., 67.))]);
+  ignore (windowed ~mouse:(750., 67.) [Input.Pointer_moved (750., 67.)]);
+  ignore (windowed ~mouse:(750., 67.) [Input.Pointer_pressed (Input.LeftButton, (750., 67.))]);
   (match List.filter_map (function Pxui_shell.Chrome.Window_drag (_, (x, _, w, _), _) -> Some (x, w) | _ -> None)
-      (windowed ~mouse:(650., 67.) [Event.MouseMoved (650., 67.)]) with
+      (windowed ~mouse:(650., 67.) [Input.Pointer_moved (650., 67.)]) with
    | [ (600, 300) ] -> ()
    | [ (x, _) ] -> failwith (Printf.sprintf "a window saved past the edge did not follow the pointer: x %d" x)
    | _ -> failwith "a header drag did not move its window");
@@ -364,30 +330,29 @@ let () =
   (* the parts of a docked header's breadcrumb before its last are buttons *)
   let crumb_ui = Pxui.Ui.create ~font_size:11 () in
   let crumbed ?(mouse = 0., 0.) events =
-    let f = { wide_frame with events; mouse; height = 600; size = 1000, 600 } in
+    let f = { wide_frame with input = { wide_frame.input with events; pointer = mouse; size = 1000, 600 } } in
     Pxui.Ui.frame crumb_ui f (fun ui ->
       Pxui_shell.Chrome.update ~title:(fun _ -> "Graph\tfirst / second / third / sop") (L.Leaf L.Graph) ui f) in
   ignore (crumbed []);
   let hit = ref [] in
   List.iter (fun x ->
     let p = (float x, 10.) in
-    ignore (crumbed ~mouse:p [ Event.MouseMoved p ]);
-    ignore (crumbed ~mouse:p [ Event.MousePressed (Input.LeftButton, p) ]);
+    ignore (crumbed ~mouse:p [ Input.Pointer_moved p ]);
+    ignore (crumbed ~mouse:p [ Input.Pointer_pressed (Input.LeftButton, p) ]);
     List.iter (function Pxui_shell.Chrome.Crumb (_, i) -> if not (List.mem i !hit) then hit := i :: !hit | _ -> ())
-      (crumbed ~mouse:p [ Event.MouseReleased (Input.LeftButton, p) ])) (List.init 40 (fun i -> 20 + (i * 6)));
+      (crumbed ~mouse:p [ Input.Pointer_released (Input.LeftButton, p) ])) (List.init 40 (fun i -> 20 + (i * 6)));
   if List.sort compare !hit <> [ 0; 1; 2 ] then
     failwith (Printf.sprintf "breadcrumb clicks reported %s, not the first three parts"
       (String.concat "," (List.map string_of_int (List.sort compare !hit))));
   Pxui.Ui.destroy crumb_ui;
   let hidden = Pxui.Ui.create ~font_size:11 () in
-  ignore (Pxui_shell.Shell.frame hidden frame ~visible:false
-    ~body:(fun _ -> ())
-    ~overlay:(Some (fun ui -> Pxui_shell.Status_bar.draw ui
-      ~bounds:(0, 272, 400, 28) ~text:"Overlay" ~fps:None ())));
+  ignore (Pxui.Ui.frame hidden frame (fun ui ->
+    Pxui_shell.Status_bar.draw ui ~bounds:(0, 272, 400, 28) ~text:"Overlay" ~fps:None ()));
   if Pxui.Ui.scene hidden = [] then
-    failwith "hidden shell did not draw its pending overlay";
+    failwith "PXUI did not draw the status bar";
+  Pxui.Ui.destroy hidden;
   if Sys.getenv_opt "RAYS_BENCH_LAYOUT" = Some "1" then begin
-    let benchmark_frame = { frame with width = 1000; size = 1000, 300 } in
+    let benchmark_frame = { frame with input = { frame.input with size = 1000, 300 } } in
     let start_alloc = Gc.allocated_bytes () and start = Sys.time () in
     let width_sum = ref 0 in
     for _ = 1 to 200_000 do
@@ -399,17 +364,17 @@ let () =
       (Sys.time () -. start) (Gc.allocated_bytes () -. start_alloc) !width_sum
   end;
   (* Inspector.record: a plain sketch record edited through its schema. *)
-  let schema = Editor_core.Param.(schema ~name:"look" ~default:false
+  let schema = Param.(schema ~name:"look" ~default:false
     [ field ~name:"on" ~label:"On" ~kind:Toggle ~default:false
         ~get:Fun.id ~set:(fun on _ -> on) () ]) in
   let ui = Pxui.Ui.create ~font_size:11 () in
-  let click = [ Event.MousePressed (Input.LeftButton, (115., 15.));
-                Event.MouseReleased (Input.LeftButton, (115., 15.)) ] in
-  let record events value = Pxui.Ui.frame ui { frame with events } (fun ui ->
+  let click = [ Input.Pointer_pressed (Input.LeftButton, (115., 15.));
+                Input.Pointer_released (Input.LeftButton, (115., 15.)) ] in
+  let record events value = Pxui.Ui.frame ui { frame with input = { frame.input with events } } (fun ui ->
     Pxui.Ui.panel ui ~x:0. ~y:0. ~width:260. "record" (fun () ->
       Pxui_shell.Inspector.record ui schema value)) in
   (match record [] false with
-   | Ok (false, effects) when not (Editor_core.Param.has_effects effects) -> ()
+   | Ok (false, effects) when not (Param.has_effects effects) -> ()
    | _ -> failwith "idle inspector frame changed the record");
   (match record click false with
    | Ok (true, effects) when effects.cook -> ()
@@ -418,7 +383,7 @@ let () =
   (* Tree: WAI-ARIA keys through [run_command], and pointer gestures (dead
      zone, before/inside/after drops, toggle paint, double-click). *)
   let module T = Pxui_shell.Tree in
-  let row id depth label = { T.id; depth; label; detail = ""; badge = "S", Color.gray 90; link = false;
+  let row id depth label = { T.id; depth; label; detail = ""; badge = "S", Rays_math.Color.gray 90; link = false;
     ghost = false; flags = [true] } in
   let rows = [| row 1 0 "a"; row 2 1 "b"; row 3 1 "c"; row 4 0 "d" |] in
   let expect name got want = if got <> want then failwith ("tree: " ^ name) in
@@ -458,21 +423,21 @@ let () =
   let ui = Pxui.Ui.create ~font_size:11 () in
   let center k = 200., 24. +. (24. *. float_of_int k) +. 12. in
   let step t ?(mouse = 0., 0.) events =
-    Pxui.Ui.frame ui { frame with events; mouse } (fun ui ->
-      T.update t ui { frame with events; mouse } ~bounds:(0, 0, 400, 300)
+    Pxui.Ui.frame ui { frame with input = { frame.input with events; pointer = mouse } } (fun ui ->
+      T.update t ui { frame with input = { frame.input with events; pointer = mouse } } ~bounds:(0, 0, 400, 300)
         ~columns:["vis"] rows ~selected:[]) in
   let gesture t from_ to_ =
     let t, _ = step t ~mouse:from_ [] in
-    let t, pressed = step t ~mouse:from_ [Event.MousePressed (Input.LeftButton, from_)] in
-    let t, moved = step t ~mouse:to_ [Event.MouseMoved to_] in
-    let t, released = step t ~mouse:to_ [Event.MouseReleased (Input.LeftButton, to_)] in
+    let t, pressed = step t ~mouse:from_ [Input.Pointer_pressed (Input.LeftButton, from_)] in
+    let t, moved = step t ~mouse:to_ [Input.Pointer_moved to_] in
+    let t, released = step t ~mouse:to_ [Input.Pointer_released (Input.LeftButton, to_)] in
     t, pressed @ moved @ released in
   let moves intents = List.filter (function T.Move _ -> true | _ -> false) intents in
   let chevron = 13., snd (center 0) in
   let t, _ = step (T.create ()) [] in
   let t, intents = step t ~mouse:chevron
-      [Event.MousePressed (Input.LeftButton, chevron);
-       Event.MouseReleased (Input.LeftButton, chevron)] in
+      [Input.Pointer_pressed (Input.LeftButton, chevron);
+       Input.Pointer_released (Input.LeftButton, chevron)] in
   expect "chevron click does not select or drag" intents [];
   let t, _ = run t T.Down in
   let _, intents = run t T.Down in
@@ -496,8 +461,8 @@ let () =
     (List.filter (function T.Flag _ -> true | _ -> false) intents)
     [T.Flag { ids = [1]; column = 0; value = false };
      T.Flag { ids = [3]; column = 0; value = false }];
-  let click = [Event.MousePressed (Input.LeftButton, center 3);
-    Event.MouseReleased (Input.LeftButton, center 3)] in
+  let click = [Input.Pointer_pressed (Input.LeftButton, center 3);
+    Input.Pointer_released (Input.LeftButton, center 3)] in
   let t, _ = step t ~mouse:(center 3) click in
   let _, intents = step t ~mouse:(center 3) click in
   expect "a double-click activates the row"
@@ -505,88 +470,88 @@ let () =
   let scroll_rows = Array.init 20 (fun index -> row (index + 1) 0
       (string_of_int (index + 1))) in
   let scroll_ui = Pxui.Ui.create ~font_size:11 () in
-  let scroll_step t events = Pxui.Ui.frame scroll_ui { frame with events;
-      mouse = 200., 60. } (fun ui ->
+  let scroll_step t events = Pxui.Ui.frame scroll_ui { frame with input = { frame.input with events;
+      pointer = 200., 60. } } (fun ui ->
     T.update t ui frame ~bounds:(0, 0, 400, 96)
       ~columns:[] scroll_rows ~selected:[]) in
   let t, _ = scroll_step (T.create ()) [] in
-  let t, _ = scroll_step t [Event.MouseMoved (200., 60.);
-    Event.MouseScrolled (0., -2.)] in
+  let t, _ = scroll_step t [Input.Pointer_moved (200., 60.);
+    Input.Scrolled (0., -2.)] in
   let t, _ = scroll_step t [] in
-  let _, intents = scroll_step t [Event.MousePressed (Input.LeftButton, (200., 60.))] in
+  let _, intents = scroll_step t [Input.Pointer_pressed (Input.LeftButton, (200., 60.))] in
   expect "list uses shared scroll for row hits" intents [T.Select [4]];
   Pxui.Ui.destroy scroll_ui;
   (* a sticky ancestor row takes its own click, not the row scrolled under it *)
   let family = Array.init 21 (fun index -> row (index + 1) (if index = 0 then 0 else 1) (string_of_int (index + 1))) in
   let sticky_ui = Pxui.Ui.create ~font_size:11 () in
-  let sticky_step t ?(at = 200., 60.) events = Pxui.Ui.frame sticky_ui { frame with events; mouse = at } (fun ui ->
+  let sticky_step t ?(at = 200., 60.) events = Pxui.Ui.frame sticky_ui { frame with input = { frame.input with events; pointer = at } } (fun ui ->
     T.update t ui frame ~bounds:(0, 0, 400, 96) ~columns:[] family ~selected:[]) in
   let t, _ = sticky_step (T.create ()) [] in
-  let t, _ = sticky_step t [Event.MouseMoved (200., 60.); Event.MouseScrolled (0., -2.)] in
+  let t, _ = sticky_step t [Input.Pointer_moved (200., 60.); Input.Scrolled (0., -2.)] in
   let t, _ = sticky_step t [] in
-  let _, intents = sticky_step t ~at:(200., 36.) [Event.MousePressed (Input.LeftButton, (200., 36.))] in
+  let _, intents = sticky_step t ~at:(200., 36.) [Input.Pointer_pressed (Input.LeftButton, (200., 36.))] in
   expect "a click on a sticky ancestor selects it" intents [T.Select [1]];
   Pxui.Ui.destroy sticky_ui;
   let t, _ = step (T.create ()) [] in
-  let t, _ = step t ~mouse:(center 0) [Event.MousePressed (Input.LeftButton, center 0);
-    Event.MouseReleased (Input.LeftButton, center 0)] in
-  let _, intents = step t ~mouse:(center 2) [Event.KeyPressed Input.Shift;
-    Event.MousePressed (Input.LeftButton, center 2); Event.KeyReleased Input.Shift;
-    Event.MouseReleased (Input.LeftButton, center 2)] in
+  let t, _ = step t ~mouse:(center 0) [Input.Pointer_pressed (Input.LeftButton, center 0);
+    Input.Pointer_released (Input.LeftButton, center 0)] in
+  let _, intents = step t ~mouse:(center 2) [Input.Key_pressed Input.Shift;
+    Input.Pointer_pressed (Input.LeftButton, center 2); Input.Key_released Input.Shift;
+    Input.Pointer_released (Input.LeftButton, center 2)] in
   expect "Shift selection uses the captured press keys" intents [T.Select [3; 1; 2]];
   Pxui.Ui.destroy ui;
   (* a vector's cell has no track: a click without a drag writes nothing, a drag changes the
      value from what it was *)
-  let cell name index : Editor_core.Param.field_view =
-    { name; label = name; description = None; folder = []; impact = Editor_core.Param.Cook; primary = false;
+  let cell name index : Param.field_view =
+    { name; label = name; description = None; folder = []; impact = Param.Cook; primary = false;
       unit = None; vec3 = Some ("translate", index);
-      kind = Editor_core.Param.Floating_view { soft_min = -10.; soft_max = 10.; hard_min = None; hard_max = None };
-      default = Editor_core.Param.Float_value 0.; current = Editor_core.Param.Float_value 1. } in
+      kind = Param.Floating_view { soft_min = -10.; soft_max = 10.; hard_min = None; hard_max = None };
+      default = Param.Float_value 0.; current = Param.Float_value 1. } in
   let vector = [ { Pxui_shell.Inspector.path = "translate";
     fields = [ cell "translate_x" 0; cell "translate_y" 1; cell "translate_z" 2 ]; shown = false; locked = false;
     drive = None; live = None } ] in
   (* one press at each place per UI: a second one there would be a double-click, which types *)
   let pass gesture =
     let vector_ui = Pxui.Ui.create ~font_size:11 () in
-    let cells ?(mouse = 0., 0.) events = Pxui.Ui.frame vector_ui { frame with events; mouse } (fun ui ->
+    let cells ?(mouse = 0., 0.) events = Pxui.Ui.frame vector_ui { frame with input = { frame.input with events; pointer = mouse } } (fun ui ->
       Pxui.Ui.panel ui ~x:0. ~y:0. ~width:260. "vector" (fun () ->
         Pxui_shell.Inspector.flow_fields ui vector)) in
     ignore (cells []);
     let found = List.map (fun x ->
       let at = float x, 12. in
-      ignore (cells ~mouse:at [Event.MouseMoved at]);
-      let pressed = cells ~mouse:at [Event.MousePressed (Input.LeftButton, at)] in
+      ignore (cells ~mouse:at [Input.Pointer_moved at]);
+      let pressed = cells ~mouse:at [Input.Pointer_pressed (Input.LeftButton, at)] in
       let found = pressed @ gesture cells at in
       ignore (cells []); found <> []) [ 90; 110; 130; 150; 170; 190; 210; 230 ] in
     Pxui.Ui.destroy vector_ui; found in
-  if List.mem true (pass (fun cells at -> cells ~mouse:at [Event.MouseReleased (Input.LeftButton, at)])) then
+  if List.mem true (pass (fun cells at -> cells ~mouse:at [Input.Pointer_released (Input.LeftButton, at)])) then
     failwith "a click on a vector's cell wrote a value";
   if not (List.mem true (pass (fun cells (x, y) ->
-      let moved = cells ~mouse:(x +. 40., y) [Event.MouseMoved (x +. 40., y)] in
-      moved @ cells ~mouse:(x +. 40., y) [Event.MouseReleased (Input.LeftButton, (x +. 40., y))])))
+      let moved = cells ~mouse:(x +. 40., y) [Input.Pointer_moved (x +. 40., y)] in
+      moved @ cells ~mouse:(x +. 40., y) [Input.Pointer_released (Input.LeftButton, (x +. 40., y))])))
   then failwith "no drag on a vector's cell changed it";
-  (* G13: a ranged float is the same field (Kit.number): a click writes nothing, a drag moves the
+  (* A ranged float is the same field (Kit.number): a click writes nothing, a drag moves the
      value from what it was by a fraction, and a long value keeps its digits (no %.6g) *)
   let scalar value = [ { Pxui_shell.Inspector.path = "radius";
-    fields = [ { (cell "radius" 0) with vec3 = None; current = Editor_core.Param.Float_value value } ];
+    fields = [ { (cell "radius" 0) with vec3 = None; current = Param.Float_value value } ];
     shown = false; locked = false; drive = None; live = None } ] in
   let edits value gesture =
     let ui = Pxui.Ui.create ~font_size:11 () in
-    let build ~mouse events = Pxui.Ui.frame ui { frame with events; mouse } (fun ui ->
+    let build ~mouse events = Pxui.Ui.frame ui { frame with input = { frame.input with events; pointer = mouse } } (fun ui ->
       Pxui.Ui.panel ui ~x:0. ~y:0. ~width:260. "scalar" (fun () ->
         Pxui_shell.Inspector.flow_fields ui (scalar value))) in
     ignore (build ~mouse:(0., 0.) []);
     let at = 180., 12. in
-    ignore (build ~mouse:at [Event.MouseMoved at]);
-    let pressed = build ~mouse:at [Event.MousePressed (Input.LeftButton, at)] in
+    ignore (build ~mouse:at [Input.Pointer_moved at]);
+    let pressed = build ~mouse:at [Input.Pointer_pressed (Input.LeftButton, at)] in
     let found = pressed @ gesture build at in
     Pxui.Ui.destroy ui; found in
   let drag by build (x, y) =
-    let moved = build ~mouse:(x +. by, y) [Event.MouseMoved (x +. by, y)] in
-    moved @ build ~mouse:(x +. by, y) [Event.MouseReleased (Input.LeftButton, (x +. by, y))] in
+    let moved = build ~mouse:(x +. by, y) [Input.Pointer_moved (x +. by, y)] in
+    moved @ build ~mouse:(x +. by, y) [Input.Pointer_released (Input.LeftButton, (x +. by, y))] in
   let floats = List.filter_map (function
-    | Pxui_shell.Inspector.Edited (_, Editor_core.Param.Float_value v) -> Some v | _ -> None) in
-  if edits 1. (fun build at -> build ~mouse:at [Event.MouseReleased (Input.LeftButton, at)]) <> [] then
+    | Pxui_shell.Inspector.Edited (_, Param.Float_value v) -> Some v | _ -> None) in
+  if edits 1. (fun build at -> build ~mouse:at [Input.Pointer_released (Input.LeftButton, at)]) <> [] then
     failwith "a click on a ranged number wrote a value";
   (match floats (edits 1. (drag 5.)) with
    | v :: _ when not (Float.is_integer v) && Float.abs (v -. 1.5) < 1e-9 -> ()

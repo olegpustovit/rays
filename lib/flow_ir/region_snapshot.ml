@@ -41,6 +41,11 @@ let rec instruction : P.instruction -> string = function
   | Guarded(guards,body)->Printf.sprintf "Guarded %s (%s)" (String.concat ";" (List.map(fun(r,b)->Printf.sprintf "%d:%b" r b)guards))(instruction body)
   | Raise(ty,code,message,cause)->Printf.sprintf "Raise %s %S %S%s"(Flow.Ty.to_string ty)code message
       (Option.fold ~none:"" ~some:(Printf.sprintf " cause=%S")cause)
+  | Loop_begin loop -> Printf.sprintf "Loop_begin %d %d end=%d" loop.first loop.last loop.finish
+  | Loop_carry(loop,component,ty) -> Printf.sprintf "Loop_carry %d %d %s" loop component (Flow.Ty.to_string ty)
+  | Loop_end(loop,_,stop) -> Printf.sprintf "Loop_end %d%s" loop
+      (Option.fold ~none:"" ~some:(Printf.sprintf " until=%d") stop)
+  | Loop_result(loop,component,ty) -> Printf.sprintf "Loop_result %d %d %s" loop component (Flow.Ty.to_string ty)
 
 let ints a = "[" ^ String.concat ";" (Array.to_list (Array.map string_of_int a)) ^ "]"
 
@@ -50,8 +55,8 @@ let record result =
   let entry = Buffer.create 256 in
   let add format = Printf.bprintf entry format in
   (match result with
-  | Error (ds : Flow.Diagnostic.t list) ->
-      List.iter (fun (d : Flow.Diagnostic.t) ->
+  | Error (ds : Diagnostic.t list) ->
+      List.iter (fun (d : Diagnostic.t) ->
         add "refused %s%s %S\n" d.code
           (match d.span with Some s -> Printf.sprintf " %d..%d" s.start s.finish | None -> "") d.message) ds;
       add "\n"
@@ -63,7 +68,7 @@ let record result =
         (ints view.widths)
         (String.concat "" (Array.to_list (Array.map (fun o -> "  output " ^ ints o ^ "\n") view.outputs)))
         (ints view.uniform_widths) view.collecting;
-      List.iter (fun (d : Flow.Diagnostic.t) -> add "  gpu_refusal %s %S\n" d.code d.message)
+      List.iter (fun (d : Diagnostic.t) -> add "  gpu_refusal %s %S\n" d.code d.message)
         (P.gpu_refusals packed);
       add "\n");
   let text = Buffer.contents entry in

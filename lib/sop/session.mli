@@ -30,7 +30,6 @@ type stats = {
 
 type output = {
   payload : Payload.t;
-  diagnostics : Diagnostic.t list;
   instances : Rays_math.Mat4.t array option;
   (** A packed result (e.g. Copy to Points with Pack and instance): draw
       the [Geometry] payload once per transform. A node that consumes it receives it
@@ -50,7 +49,7 @@ val set_volatile : t -> (int -> bool) -> unit
     back recooks). Replaces the previous predicate (a new lowering) and drops
     the slots of nodes that stopped being volatile. *)
 
-val cook : t -> context:Context.t -> Node.t -> (output, Diagnostic.error) result
+val cook : t -> context:Context.t -> Node.t -> (output, Diagnostic.t) result
 
 val node_seconds : t -> int -> float option
 (** The seconds node [id] took the last time it was really cooked (its own work, not its inputs';

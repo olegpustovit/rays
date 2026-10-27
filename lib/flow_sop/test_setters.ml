@@ -3,7 +3,7 @@ open Rdk
 open Rdk_test_support
 module N = Sop.Node
 module P = Param
-let checked = function Ok value -> value | Error diagnostic -> fail (Flow.Diagnostic.to_string diagnostic)
+let checked = function Ok value -> value | Error diagnostic -> fail (Diagnostic.to_string diagnostic)
 let sources = Flow_sop.Catalog.sources () |> checked
 let keys = ["set_float";"set_int";"set_vector";"set_orient";"set_transform"]
 let native_factory = function
@@ -16,10 +16,10 @@ let node ~reference input key keywords =
   let catalog = Flow_sop.Catalog.of_factories ~nodes:[] ~version:Flow_sop.Manifest.version factories |> checked in
   let forms = Printf.sprintf "(workspace setters (graph g :context sop (sop/%s (sop/setter_input) %s)))" key keywords |> Flow.Syntax.parse |> checked in
   let workspace = match Flow_sop.Catalog.check_workspace ~sources ~ops:Flow_sop.Operators.all catalog forms with
-    |Some workspace, diagnostics when not (List.exists (fun (diagnostic:Flow.Diagnostic.t)->diagnostic.severity=Error) diagnostics) -> workspace
-    |_, diagnostics -> fail (String.concat "\n" (List.map Flow.Diagnostic.to_string diagnostics)) in
+    |Some workspace, diagnostics when not (List.exists (fun (diagnostic:Diagnostic.t)->diagnostic.severity=Diagnostic.Error_severity) diagnostics) -> workspace
+    |_, diagnostics -> fail (String.concat "\n" (List.map Diagnostic.to_string diagnostics)) in
   let lowered = match Flow_sop.Lower.of_checked ~reference ~factories workspace with
-    |Ok lowered->lowered|Error diagnostic->fail(key^" "^keywords^": "^Flow.Diagnostic.to_string diagnostic) in
+    |Ok lowered->lowered|Error diagnostic->fail(key^" "^keywords^": "^Diagnostic.to_string diagnostic) in
   if keywords="" then begin
     let actual=List.find(fun factory->Sop.Edit_graph.factory_key factory=key)lowered.factories
     and expected=native_factory key in
@@ -164,10 +164,10 @@ let trace_transform ()=
   let programs=ref [] and previous= !(Flow_ir.Packed.Private.trace) in
   let seen=Hashtbl.create 32 in
   let trace result=match result with
-    |Error diagnostics->List.iter(fun(d:Flow.Diagnostic.t)->
+    |Error diagnostics->List.iter(fun(d:Diagnostic.t)->
       let key=d.code^":"^d.message in if not(Hashtbl.mem seen key)then begin
-        Hashtbl.add seen key();Printf.printf "packed refusal %s\n%!"(Flow.Diagnostic.to_string d)end)diagnostics
-    |Ok packed->let region=Flow_ir.Packed.to_region packed in
+        Hashtbl.add seen key();Printf.printf "packed refusal %s\n%!"(Diagnostic.to_string d)end)diagnostics
+    |Ok (packed:Flow_ir.Packed.t)->let region=packed in
       let key=Flow.Lisp.flat region.term.form in
       if not(Hashtbl.mem seen key)then begin Hashtbl.add seen key();programs:=packed:: !programs;
         Printf.printf "packed success form=%s result=%s iteration=%s sources=[%s] registers=%d outputs=%d\n%!"
@@ -182,15 +182,15 @@ let trace_transform ()=
     let session=Sop.Session.create ~max_entries:64 ~max_payload_bytes:16_000_000|>get_string_ok in
     Fun.protect ~finally:(fun()->Sop.Session.close session)(fun()->ignore(cook session 1 4096 tested)));
   let resolve=Flow_sop.Attribute_kernel.resolve ~geometry:(fun _->Some geometry) in
-  List.iter(fun packed->let region=Flow_ir.Packed.to_region packed in
+  List.iter(fun (packed:Flow_ir.Packed.t)->let region=packed in
     if region.iteration=Product then begin
-      (match Flow_ir.Packed.Private.prepare_values ~resolve packed ~live:(Frame_input.at_time 0.)with
+      (match Flow_ir.Packed.Private.prepare_values ~resolve packed ~live:(Input.at_time 0.)with
        |Ok inputs->Printf.printf "product concrete count=%d sources=[%s]\n%!"inputs.count
            (String.concat ";"(Array.to_list(Array.map(fun value->Flow.Ty.to_string(Flow.Value.ty_of value))inputs.arrays)))
-       |Error diagnostic->Printf.printf "product input failure %s\n%!"(Flow.Diagnostic.to_string diagnostic));
-      match Flow_ir.Packed.force ~strict:true ~resolve packed ~live:(Frame_input.at_time 0.)with
+       |Error diagnostic->Printf.printf "product input failure %s\n%!"(Diagnostic.to_string diagnostic));
+      match Flow_ir.Packed.force ~strict:true ~resolve packed ~live:(Input.at_time 0.)with
       |Ok value->Printf.printf "product strict force=%s\n%!"(Flow.Ty.to_string(Flow.Value.ty_of value))
-      |Error diagnostic->Printf.printf "product strict failure %s\n%!"(Flow.Diagnostic.to_string diagnostic)
+      |Error diagnostic->Printf.printf "product strict failure %s\n%!"(Diagnostic.to_string diagnostic)
     end) !programs
 
 let projection ()=
@@ -204,8 +204,8 @@ let projection ()=
   let catalog factories=Flow_sop.Catalog.of_factories ~nodes:[] ~version:Flow_sop.Manifest.version factories |>checked in
   let catalog=catalog factories and native_catalog=catalog native_factories in
   let checker catalog forms=Flow_sop.Catalog.check_workspace ~sources ~ops:Flow_sop.Operators.all catalog forms in
-  let workspace=function Some workspace,diagnostics when not(List.exists(fun(d:Flow.Diagnostic.t)->d.severity=Error)diagnostics)->workspace
-    |_,diagnostics->fail(String.concat"\n"(List.map Flow.Diagnostic.to_string diagnostics)) in
+  let workspace=function Some workspace,diagnostics when not(List.exists(fun(d:Diagnostic.t)->d.severity=Diagnostic.Error_severity)diagnostics)->workspace
+    |_,diagnostics->fail(String.concat"\n"(List.map Diagnostic.to_string diagnostics)) in
   let card catalog workspace=Option.get(Projection.find(Projection.of_graph catalog workspace "g")["g";"card"]) in
   let normalize(card:Projection.node)={card with rows=List.map(fun(row:Projection.row)->
     {row with expr=Option.map(fun expr->List.hd(Flow.Syntax.parse(Flow.Lisp.flat expr)|>checked))row.expr})card.rows} in

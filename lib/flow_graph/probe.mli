@@ -28,17 +28,17 @@ type execution = {tier : string; group : path; seconds : float option}
     other fused cards name the same group and tier. *)
 
 type force = ?state:Flow.Eval.state -> ?elems:(string * Flow.Eval.value) list ->
-  ?resolve:(Flow.Eval.value -> (Flow.Eval.value, Flow.Diagnostic.t) result) -> Flow.Eval.value ->
-  live:Frame_input.t -> (Flow.Eval.value, Flow.Diagnostic.t) result
+  ?resolve:(Flow.Eval.value -> (Flow.Eval.value, Diagnostic.t) result) -> Flow.Eval.value ->
+  live:Input.t -> (Flow.Eval.value, Diagnostic.t) result
 
 type t
 
 val make :
-  ?state:Flow.Eval.state -> ?live:Frame_input.t -> ?time:float ->
-  ?resolve:(Flow.Eval.value -> (Flow.Eval.value, Flow.Diagnostic.t) result) ->
+  ?state:Flow.Eval.state -> ?live:Input.t -> ?time:float ->
+  ?resolve:(Flow.Eval.value -> (Flow.Eval.value, Diagnostic.t) result) ->
   ?force:force ->
   ?bulk_calls:(path -> int list ->
-    (int * int * (int -> ((path * (int list * Flow.Eval.value) list) list, Flow.Diagnostic.t) result)) list) ->
+    (int * int * (int -> ((path * (int list * Flow.Eval.value) list) list, Diagnostic.t) result)) list) ->
   ?execution:(path -> probes:int list -> execution option) ->
   ?geometry:(int -> geometry option) -> ?image:(int -> (int * int) option) -> ?dynamic:(path -> int option) ->
   ?element:(path -> int -> (string * Flow.Eval.value) list option) -> Flow.Eval.t -> t

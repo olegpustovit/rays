@@ -60,7 +60,7 @@ let run () =
     let sampler=get(Backend.create_sampler device descriptor)in
     let commands=get(Backend.begin_commands queue)in
     let encoder=get(Backend.render_encoder commands
-      {colors=[{texture=target;resolve=None;load=Clear;store=Store;clear=(0.,0.,0.,0.)}];depth=None;stencil=None})in
+      {colors=[{texture=target;resolve=None;load=Clear;store=Store;clear=(0.,0.,0.,0.)}];depth=None})in
     get(Backend.set_render_pipeline encoder pipeline);
     get(Backend.set_stage_texture encoder Fragment~index:0 sampled);
     get(Backend.set_stage_sampler encoder Fragment~index:1 sampler);

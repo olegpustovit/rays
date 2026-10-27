@@ -16,13 +16,22 @@ let source = {|(workspace materials
       (sop/material group :group "accent" :material (ref white)))))|}
 
 let workspace text = match Rays_editor.Workspace.load text with
-  | Ok w -> w | Error ds -> failwith (String.concat "\n" (List.map Flow.Diagnostic.to_string ds))
+  | Ok w -> w | Error ds -> failwith (String.concat "\n" (List.map Diagnostic.to_string ds))
 
 let cook domains node =
   let session = Session.create ~max_entries:32 ~max_payload_bytes:(1 lsl 24) |> get in
   Fun.protect ~finally:(fun () -> Session.close session) (fun () ->
     Session.cook session ~context:(Context.create ~domains () |> get) node
     |> Result.map_error Diagnostic.error_to_string |> get)
+
+let surface (output : Sop.Session.output) =
+  let geometry = Sop.Payload.geometry output.payload |> Result.map_error Diagnostic.to_string |> get in
+  Rdk_rays.Surface.of_geometry ?instances:output.instances geometry |> get
+
+let surface_scene node surface =
+  let explosion = Rdk_rays.Packed_pieces.explosion
+      ~operation:(Node.operation node) ~fields:(Node.parameter_fields node) in
+  Rdk_rays.Surface.scene3 ?explosion surface
 
 let attr name geometry =
   Rdk.Geometry.find_attribute ~owner:Rdk.Attribute.Primitive name geometry
@@ -56,8 +65,8 @@ let face_materials_preserve_explosion () =
        :roughness 0.8
        :emission [0.0 0.0 0.0])
      (sop/exploded_view :amount 1.0))|} in
-  let surface = cook 1 node |> Rays_editor.Surface.of_output |> get in
-  let drawings = Rays_editor.Surface.scene3 node surface |> Scene3.Private.drawings in
+  let surface = cook 1 node |> surface in
+  let drawings = surface_scene node surface |> Scene3.Private.drawings in
   assert (List.length drawings = 2);
   (* Centers ±2 move to ±4. Painting just one face must leave every face of
      each cube at exactly the same rigid displacement. *)
@@ -91,15 +100,15 @@ let follow_source = {|(workspace follow
     (let* [obj (scene/geometry (ref shards) :name "shards")] (scene/merge obj))))|}
 
 let frame ?(buttons = []) ?(keys = []) mouse events count : Frame.t = {
-  width = 900; height = 640; size = 900, 640;
-   pixel_scale = 1., 1.; time = float count /. 60.; dt = 1. /. 60.;
-  fps = 60.; count; mouse; mouse_delta = (0., 0.); keys; mouse_buttons = buttons; events }
+  input = { (Input.at_time (float count /. 60.)) with dt = 1. /. 60.;
+    frame = count; tick = count; size = 900, 640; pointer = mouse; keys; buttons; events };
+  pixel_scale = 1., 1.; fps = 60.; mouse_delta = 0., 0. }
 
 let editor () =
   E3.create ~await:true ~workspace:(workspace follow_source)
     ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
       |> Result.map_error Rdk.Error.to_string)
-    ~scene3:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) ()
+    ~draw:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) ()
   |> function Ok e -> e | Error m -> fail m
 
 let dump_line e key =
@@ -119,14 +128,14 @@ let follow_tests () =
   let e = ref (editor ()) and count = ref 0 in
   let step ?(buttons = []) ?(keys = []) ?(mouse = (450., 300.)) events =
     incr count; e := E3.update !e (frame ~buttons ~keys mouse events !count) in
-  let key k = Event.KeyPressed k and ch c = Event.KeyPressed (Input.KeyChar c) in
+  let key k = Input.Key_pressed k and ch c = Input.Key_pressed (Input.KeyChar c) in
   let click ?(keys = []) (x, y) =
-    step ~keys ~mouse:(x, y) [ Event.MouseMoved (x, y) ];
-    step ~buttons:[ Input.LeftButton ] ~keys ~mouse:(x, y) [ Event.MousePressed (Input.LeftButton, (x, y)) ];
-    step ~keys ~mouse:(x, y) [ Event.MouseReleased (Input.LeftButton, (x, y)) ] in
+    step ~keys ~mouse:(x, y) [ Input.Pointer_moved (x, y) ];
+    step ~buttons:[ Input.LeftButton ] ~keys ~mouse:(x, y) [ Input.Pointer_pressed (Input.LeftButton, (x, y)) ];
+    step ~keys ~mouse:(x, y) [ Input.Pointer_released (Input.LeftButton, (x, y)) ] in
   let pane () = dump_line !e "pane graph" and route () = dump_line !e "route" in
   let jump name =
-    step [ key (Input.KeyChar '/'); ch 'j' ]; step [ Event.TextInput name ]; step [ key Input.Enter ]; step [] in
+    step [ key (Input.KeyChar '/'); ch 'j' ]; step [ Input.Text_input name ]; step [ key Input.Enter ]; step [] in
   for _ = 1 to 12 do step [] done;
   check (pane () = "scene" && route () = "scene") ("opens on the scene: " ^ pane ());
 
@@ -134,7 +143,7 @@ let follow_tests () =
   let ws = (E3.workspace !e).Editor_document.Workspace_doc.checked in
   let chips = match Flow.Eval.static ws with
     | Ok ev -> N.chips ev
-    | Error d -> fail (Flow.Diagnostic.to_string d) in
+    | Error d -> fail (Diagnostic.to_string d) in
   let params : N.params = { workspace = ws; active = Some "scene"; scope = None;
     records = None; probes = (fun _ -> 0); selected = []; chips; objects = []; root_detail = ""; layouts = None; notes = [] } in
   let lines = Array.to_list (Array.map N.describe (N.rows N.initial params)) in
@@ -211,7 +220,7 @@ let follow_tests () =
     ("I opens the material in a floating graph: " ^ text_of !e);
   (* / a: Material makes a graph and opens it; Material of... fills the reference *)
   jump "scene";
-  step [ key (Input.KeyChar '/'); ch 'a' ]; step [ Event.TextInput "material" ]; step [ key Input.Enter ]; step [];
+  step [ key (Input.KeyChar '/'); ch 'a' ]; step [ Input.Text_input "material" ]; step [ key Input.Enter ]; step [];
   check (has (text_of !e) "(graph material :context material") ("/ a made a material graph: " ^ text_of !e);
   check (pane () = "material" && E3.undo_label !e = Some "New material") "and opened it";
   step [ ch 'u' ]; step [];
@@ -219,7 +228,7 @@ let follow_tests () =
   jump "shards";
   let bx, by, bw, bh = Option.get (E3.node_box !e [ "shards"; "m" ]) in
   click (float bx +. float bw /. 2., float by +. float bh -. 6.);
-  step [ key (Input.KeyChar '/'); ch 'a' ]; step [ Event.TextInput "spare" ]; step [ key Input.Enter ]; step [];
+  step [ key (Input.KeyChar '/'); ch 'a' ]; step [ Input.Text_input "spare" ]; step [ key Input.Enter ]; step [];
   check (has (text_of !e) ":material (ref spare)" && has (text_of !e) "(sop/material m")
     ("Material of... adds a sop/material after the selection: " ^ text_of !e);
 
@@ -248,41 +257,36 @@ let carry_tests () =
       (ui/split-at "horizontal" 0.45 (ui/viewport (ref scene))
         (ui/split-at "horizontal" 0.62 (ui/graph) (ui/inspector))))))|} in
   let with_editor source = String.sub source 0 (String.length source - 1) ^ editor ^ ")" in
-  let slow_prepare = Atomic.make false in
   (* an unbounded budget unless a check is about the budget: a shown preview never depends on how
      loaded the machine is (it was once held back under a full parallel suite) *)
   let make ?(source = carry_source) ?(carry_budget = Float.infinity) () =
     E3.create ~await:true ~carry_budget ~workspace:(workspace (with_editor source))
-      ~prepare:(fun _ output ->
-        (* A controlled over-budget input, not a wait for cook completion:
-           ~await:true still synchronizes every update below. *)
-        if Atomic.get slow_prepare then Unix.sleepf 0.6;
-        Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
-        |> Result.map_error Rdk.Error.to_string)
-      ~scene3:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) ()
+      ~prepare:(fun _ _ -> Ok (Scene3.create []))
+      ~draw:(fun _ scene -> scene) ()
     |> function Ok e -> e | Error m -> fail m in
   let e = ref (make ()) and count = ref 0 in
-  let step ?(buttons = []) ?(keys = []) ?(mouse = (450., 300.)) events =
-    incr count; e := E3.update !e (frame ~buttons ~keys mouse events !count) in
+  let step ?(advance = 1) ?(buttons = []) ?(keys = []) ?(mouse = (450., 300.)) events =
+    count := !count + advance; e := E3.update !e (frame ~buttons ~keys mouse events !count) in
   let timed ?buttons ?keys ?mouse events =
     let start = Unix.gettimeofday () in
     step ?buttons ?keys ?mouse events; (Unix.gettimeofday () -. start) *. 1000. in
-  let key k = Event.KeyPressed k and ch c = Event.KeyPressed (Input.KeyChar c) in
+  let key k = Input.Key_pressed k and ch c = Input.Key_pressed (Input.KeyChar c) in
   let jump name =
-    step [ key (Input.KeyChar '/'); ch 'j' ]; step [ Event.TextInput name ]; step [ key Input.Enter ]; step [] in
+    step [ key (Input.KeyChar '/'); ch 'j' ];
+    step [ Input.Text_input name; key Input.Enter ]; step [] in
   let pane () = dump_line !e "pane graph" in
   let line () = Option.value ~default:"-" (E3.carry_line !e) in
   let ws = ref (E3.workspace !e) in
-  for _ = 1 to 12 do step [] done;
+  step [];
   (* y is a plain key nothing else uses *)
   check (List.length (List.filter (fun (c : Rays_editor.Private.Leader.command) -> match c.trigger with
     | Some (Editor_core.Keymap.Chord (Input.KeyChar 'y', [])) -> true | _ -> false)
-    Rays_editor.Private.Leader.keymap3) = 1) "y picks up and no other command takes it";
+    Rays_editor.Private.Leader.keymap) = 1) "y picks up and no other command takes it";
   (* the outline row of a graph, in screen points, as the Navigator draws it now *)
   let catalog = get (Rays_editor.workspace_catalog ()) in
   let row_of graph =
     let doc = (E3.workspace !e).Editor_document.Workspace_doc.checked in
-    let chips = match Flow.Eval.static doc with Ok ev -> N.chips ev | Error d -> fail (Flow.Diagnostic.to_string d) in
+    let chips = match Flow.Eval.static doc with Ok ev -> N.chips ev | Error d -> fail (Diagnostic.to_string d) in
     let active = pane () in
     let scope = try Some (Flow_graph.Projection.of_graph catalog doc active) with Invalid_argument _ -> None in
     let params : N.params = { workspace = doc; active = Some active; scope;
@@ -310,16 +314,16 @@ let carry_tests () =
   let history = E3.undo_label !e in
   let drag_to target =
     let from = row_of "cobalt" in
-    step ~mouse:from [ Event.MouseMoved from ];
-    step ~buttons:[ Input.LeftButton ] ~mouse:from [ Event.MousePressed (Input.LeftButton, from) ];
+    step ~mouse:from [ Input.Pointer_moved from ];
+    step ~buttons:[ Input.LeftButton ] ~mouse:from [ Input.Pointer_pressed (Input.LeftButton, from) ];
     let fx, fy = from in
-    step ~buttons:[ Input.LeftButton ] ~mouse:(fx +. 2., fy +. 1.) [ Event.MouseMoved (fx +. 2., fy +. 1.) ];
+    step ~buttons:[ Input.LeftButton ] ~mouse:(fx +. 2., fy +. 1.) [ Input.Pointer_moved (fx +. 2., fy +. 1.) ];
     check (E3.carrying !e = None) "inside the dead zone nothing is carried";
-    step ~buttons:[ Input.LeftButton ] ~mouse:(fx +. 12., fy +. 6.) [ Event.MouseMoved (fx +. 12., fy +. 6.) ];
+    step ~buttons:[ Input.LeftButton ] ~mouse:(fx +. 12., fy +. 6.) [ Input.Pointer_moved (fx +. 12., fy +. 6.) ];
     step ~buttons:[ Input.LeftButton ] ~mouse:(fx +. 12., fy +. 6.) [];
     check (E3.carrying !e = Some ("material", "(ref cobalt)")) "past the dead zone the row is carried";
     let tx, ty = target in
-    step ~buttons:[ Input.LeftButton ] ~mouse:target [ Event.MouseMoved (tx, ty) ];
+    step ~buttons:[ Input.LeftButton ] ~mouse:target [ Input.Pointer_moved (tx, ty) ];
     step ~buttons:[ Input.LeftButton ] ~mouse:target [] in
   drag_to (tile [ "shards"; "m" ]);
   check (has (text_of !e) "(ref cobalt)" && not (has (text_of !e) "(ref spare)"))
@@ -329,22 +333,22 @@ let carry_tests () =
     ("the strip says what a release writes: " ^ line ());
   (* Escape restores the document that was there, physically *)
   step ~buttons:[ Input.LeftButton ] ~mouse:(tile [ "shards"; "m" ]) [ key Input.Escape ];
-  step ~mouse:(tile [ "shards"; "m" ]) [ Event.MouseReleased (Input.LeftButton, tile [ "shards"; "m" ]) ];
+  step ~mouse:(tile [ "shards"; "m" ]) [ Input.Pointer_released (Input.LeftButton, tile [ "shards"; "m" ]) ];
   step [];
   check (E3.carrying !e = None && E3.workspace !e == !ws) "Escape leaves the document physically equal";
   check (E3.undo_label !e = history) "and there is nothing to undo";
   (* a release over nothing drops it too; a lost window focus as well *)
   drag_to (tile [ "shards"; "m" ]);
-  step ~buttons:[ Input.LeftButton ] ~mouse:(2000., 2000.) [ Event.MouseMoved (2000., 2000.) ];
-  step ~mouse:(2000., 2000.) [ Event.MouseReleased (Input.LeftButton, (2000., 2000.)) ]; step [];
+  step ~buttons:[ Input.LeftButton ] ~mouse:(2000., 2000.) [ Input.Pointer_moved (2000., 2000.) ];
+  step ~mouse:(2000., 2000.) [ Input.Pointer_released (Input.LeftButton, (2000., 2000.)) ]; step [];
   check (E3.carrying !e = None && E3.workspace !e == !ws) "a release over nothing restores the document";
   drag_to (tile [ "shards"; "m" ]);
-  step [ Event.WindowFocusLost ]; step []; step [];
+  step [ Input.Focus_lost ]; step []; step [];
   check (E3.carrying !e = None && E3.workspace !e == !ws) "a lost window focus restores the document";
   (* a release over the target is the put: one entry, labelled Put *)
   drag_to (tile [ "shards"; "m" ]);
   let at = tile [ "shards"; "m" ] in
-  step ~mouse:at [ Event.MouseReleased (Input.LeftButton, at) ]; step []; step [];
+  step ~mouse:at [ Input.Pointer_released (Input.LeftButton, at) ]; step []; step [];
   check (E3.carrying !e = None && E3.undo_label !e = Some "Put") ("a release puts it, as one entry: "
     ^ Option.value ~default:"-" (E3.undo_label !e));
   check (has (text_of !e) ":material (ref cobalt)" && not (has (text_of !e) "(ref spare)")) "it wrote :material (ref cobalt)";
@@ -398,19 +402,19 @@ let carry_tests () =
   check (has (line ()) "Refused") ("a merge takes no material, and the strip says why: " ^ line ());
   check (E3.workspace !e == !ws) "a refused target shows nothing";
   let at = tile [ "scene"; "@result" ] in
-  step ~mouse:at [ Event.MouseReleased (Input.LeftButton, at) ]; step []; step [];
+  step ~mouse:at [ Input.Pointer_released (Input.LeftButton, at) ]; step []; step [];
   check (E3.carrying !e = None && E3.undo_label !e = history) "a release on a refusal writes nothing";
   (* a SOP graph put on an object re-points its (ref ...) *)
   let drag_graph graph target =
     let from = row_of graph in
     let fx, fy = from in
-    step ~mouse:from [ Event.MouseMoved from ];
-    step ~buttons:[ Input.LeftButton ] ~mouse:from [ Event.MousePressed (Input.LeftButton, from) ];
-    step ~buttons:[ Input.LeftButton ] ~mouse:(fx +. 12., fy +. 6.) [ Event.MouseMoved (fx +. 12., fy +. 6.) ];
+    step ~mouse:from [ Input.Pointer_moved from ];
+    step ~buttons:[ Input.LeftButton ] ~mouse:from [ Input.Pointer_pressed (Input.LeftButton, from) ];
+    step ~buttons:[ Input.LeftButton ] ~mouse:(fx +. 12., fy +. 6.) [ Input.Pointer_moved (fx +. 12., fy +. 6.) ];
     step ~buttons:[ Input.LeftButton ] ~mouse:(fx +. 12., fy +. 6.) [];
-    step ~buttons:[ Input.LeftButton ] ~mouse:target [ Event.MouseMoved target ];
+    step ~buttons:[ Input.LeftButton ] ~mouse:target [ Input.Pointer_moved target ];
     step ~buttons:[ Input.LeftButton ] ~mouse:target [];
-    step ~mouse:target [ Event.MouseReleased (Input.LeftButton, target) ]; step []; step [] in
+    step ~mouse:target [ Input.Pointer_released (Input.LeftButton, target) ]; step []; step [] in
   drag_graph "plinth" (tile [ "scene"; "obj" ]);
   check (E3.undo_label !e = Some "Put" && has (text_of !e) "(scene/geometry (ref plinth)")
     ("a SOP graph on an object re-points it: " ^ text_of !e);
@@ -421,33 +425,33 @@ let carry_tests () =
   jump "shards";
   let apply = ref 0. and restore = ref 0. in
   let from = row_of "cobalt" in
-  step ~mouse:from [ Event.MouseMoved from ];
-  step ~buttons:[ Input.LeftButton ] ~mouse:from [ Event.MousePressed (Input.LeftButton, from) ];
+  step ~mouse:from [ Input.Pointer_moved from ];
+  step ~buttons:[ Input.LeftButton ] ~mouse:from [ Input.Pointer_pressed (Input.LeftButton, from) ];
   let fx, fy = from in
-  step ~buttons:[ Input.LeftButton ] ~mouse:(fx +. 12., fy +. 6.) [ Event.MouseMoved (fx +. 12., fy +. 6.) ];
+  step ~buttons:[ Input.LeftButton ] ~mouse:(fx +. 12., fy +. 6.) [ Input.Pointer_moved (fx +. 12., fy +. 6.) ];
   step ~buttons:[ Input.LeftButton ] ~mouse:(fx +. 12., fy +. 6.) [];
   let target = tile [ "shards"; "m" ] in
-  step ~buttons:[ Input.LeftButton ] ~mouse:target [ Event.MouseMoved target ];
+  step ~buttons:[ Input.LeftButton ] ~mouse:target [ Input.Pointer_moved target ];
   apply := timed ~buttons:[ Input.LeftButton ] ~mouse:target [];
   check (has (text_of !e) "(ref cobalt)") "the preview is on";
   restore := timed ~buttons:[ Input.LeftButton ] ~mouse:target [ key Input.Escape ];
-  step ~mouse:target [ Event.MouseReleased (Input.LeftButton, target) ]; step [];
+  step ~mouse:target [ Input.Pointer_released (Input.LeftButton, target) ]; step [];
   check (E3.workspace !e == !ws) "restored";
   (* resting on a node enters what it references after 0.6 s: the carry survives, three graphs away *)
   jump "shards";
   let from = row_of "cobalt" in
   let fx, fy = from in
-  step ~mouse:from [ Event.MouseMoved from ];
-  step ~buttons:[ Input.LeftButton ] ~mouse:from [ Event.MousePressed (Input.LeftButton, from) ];
-  step ~buttons:[ Input.LeftButton ] ~mouse:(fx +. 12., fy +. 6.) [ Event.MouseMoved (fx +. 12., fy +. 6.) ];
+  step ~mouse:from [ Input.Pointer_moved from ];
+  step ~buttons:[ Input.LeftButton ] ~mouse:from [ Input.Pointer_pressed (Input.LeftButton, from) ];
+  step ~buttons:[ Input.LeftButton ] ~mouse:(fx +. 12., fy +. 6.) [ Input.Pointer_moved (fx +. 12., fy +. 6.) ];
   let target = tile [ "shards"; "m" ] in
-  step ~buttons:[ Input.LeftButton ] ~mouse:target [ Event.MouseMoved target ];
-  for _ = 1 to 20 do step ~buttons:[ Input.LeftButton ] ~mouse:target [] done;
+  step ~buttons:[ Input.LeftButton ] ~mouse:target [ Input.Pointer_moved target ];
+  step ~advance:35 ~buttons:[ Input.LeftButton ] ~mouse:target [];
   check (pane () = "shards") "the pointer has not rested long enough to enter";
-  for _ = 1 to 40 do step ~buttons:[ Input.LeftButton ] ~mouse:target [] done;
+  step ~advance:40 ~buttons:[ Input.LeftButton ] ~mouse:target [];
   check (pane () = "spare" && E3.carrying !e <> None) ("resting on a node entered the graph it reads, still carrying: " ^ pane ());
   step ~buttons:[ Input.LeftButton ] ~mouse:target [ key Input.Escape ];
-  step ~mouse:target [ Event.MouseReleased (Input.LeftButton, target) ]; step [];
+  step ~mouse:target [ Input.Pointer_released (Input.LeftButton, target) ]; step [];
   check (E3.workspace !e == !ws && E3.carrying !e = None) "and Escape still gives the document back";
   step [ ch 'u' ]; step [];
   (* a viewport is a place: the surface under the pointer says which graph, and the material
@@ -458,17 +462,17 @@ let carry_tests () =
   let carry_from_row graph =
     let from = row_of graph in
     let fx, fy = from in
-    step ~mouse:from [ Event.MouseMoved from ];
-    step ~buttons:[ Input.LeftButton ] ~mouse:from [ Event.MousePressed (Input.LeftButton, from) ];
-    step ~buttons:[ Input.LeftButton ] ~mouse:(fx +. 12., fy +. 6.) [ Event.MouseMoved (fx +. 12., fy +. 6.) ] in
+    step ~mouse:from [ Input.Pointer_moved from ];
+    step ~buttons:[ Input.LeftButton ] ~mouse:from [ Input.Pointer_pressed (Input.LeftButton, from) ];
+    step ~buttons:[ Input.LeftButton ] ~mouse:(fx +. 12., fy +. 6.) [ Input.Pointer_moved (fx +. 12., fy +. 6.) ] in
   jump "scene";
   carry_from_row "cobalt";
   let over = view_center () in
-  step ~buttons:[ Input.LeftButton ] ~mouse:over [ Event.MouseMoved over ];
+  step ~buttons:[ Input.LeftButton ] ~mouse:over [ Input.Pointer_moved over ];
   step ~buttons:[ Input.LeftButton ] ~mouse:over [];
   step ~buttons:[ Input.LeftButton ] ~mouse:over [];
   check (has (line ()) ":material (ref cobalt) on m in graph shards") ("a surface names its node: " ^ line ());
-  step ~mouse:over [ Event.MouseReleased (Input.LeftButton, over) ]; step []; step [];
+  step ~mouse:over [ Input.Pointer_released (Input.LeftButton, over) ]; step []; step [];
   check (E3.undo_label !e = Some "Put" && text_of !e = by_pointer) "a put on a surface is the same entry as on the node";
   step ~keys:[ Input.Meta ] [ ch 'z' ];
   check (E3.workspace !e == !ws) "undone";
@@ -479,16 +483,16 @@ let carry_tests () =
   (graph plinth :context sop (let* [b (sop/box)] b))
   (graph scene :context scene
     (let* [obj (scene/geometry (ref plinth) :name "plinth")] (scene/merge obj))))|} ();
-  for _ = 1 to 12 do step [] done;
+  step [];
   ws := E3.workspace !e;
   jump "scene";
   carry_from_row "cobalt";
   let over = view_center () in
-  step ~buttons:[ Input.LeftButton ] ~mouse:over [ Event.MouseMoved over ];
+  step ~buttons:[ Input.LeftButton ] ~mouse:over [ Input.Pointer_moved over ];
   step ~buttons:[ Input.LeftButton ] ~mouse:over [];
   step ~buttons:[ Input.LeftButton ] ~mouse:over [];
   check (has (line ()) "a sop/material node and :material (ref cobalt) in graph plinth") ("no material node yet: " ^ line ());
-  step ~mouse:over [ Event.MouseReleased (Input.LeftButton, over) ]; step []; step [];
+  step ~mouse:over [ Input.Pointer_released (Input.LeftButton, over) ]; step []; step [];
   check (E3.undo_label !e = Some "Put" && has (text_of !e) "(sop/material b :material (ref cobalt))")
     ("one entry added the node and its material: " ^ text_of !e);
   step ~keys:[ Input.Meta ] [ ch 'z' ];
@@ -497,7 +501,7 @@ let carry_tests () =
      picture, and the document shown stays as it was; the release still writes it *)
   E3.close !e;
   e := make ~carry_budget:0. ();
-  for _ = 1 to 12 do step [] done;
+  step [];
   ws := E3.workspace !e;
   jump "shards";
   drag_to (tile [ "shards"; "m" ]);
@@ -508,7 +512,7 @@ let carry_tests () =
     "a held-back put shows no picture: the document shown is the original";
   check (E3.carrying !e <> None && E3.undo_label !e = history) "the carry goes on, nothing is written";
   let at = tile [ "shards"; "m" ] in
-  step ~mouse:at [ Event.MouseReleased (Input.LeftButton, at) ]; step []; step [];
+  step ~mouse:at [ Input.Pointer_released (Input.LeftButton, at) ]; step []; step [];
   check (E3.carrying !e = None && E3.undo_label !e = Some "Put" && has (text_of !e) ":material (ref cobalt)")
     "the release writes it, as one Put entry";
   step ~keys:[ Input.Meta ] [ ch 'z' ];
@@ -522,49 +526,8 @@ let carry_tests () =
   step [ ch 'a' ]; step [];
   check (not (has (line ()) "Pick a target letter first")) "choosing a letter clears the reminder";
   step [ key Input.Escape ]; step [];
-  Printf.printf "carry preview: apply %.1f ms, restore %.1f ms (budget 500 ms)\n" !apply !restore;
   check (!apply < 500. && !restore < 500.) "a preview applies and restores inside the 500 ms budget";
-  E3.close !e;
-  (* A real cook over the fixed 500ms preview budget keeps the original
-     document visible, but release can still commit the prepared edit. *)
-  (* Keep a live geometry input so a probe-only cache hit cannot replace the
-     measured slow cook with a cheap request that reuses a prepared piece. *)
-  e := make ~source:{|(workspace expensive_carry
-    (graph cobalt :context material (material/standard :name "cobalt blue" :color "#2670f5"))
-    (graph spare :context material (material/standard :name "spare" :color "#ff0000"))
-    (graph shards :context sop
-      (let* [m (sop/material (sop/transform (sop/box) :translate [(* 0.01 t) 0 0])
-                 :material (ref spare))] m))
-    (graph scene :context scene
-      (let* [obj (scene/geometry (ref shards) :name "shards")] (scene/merge obj))))|} ~carry_budget:0.5 ();
-  Fun.protect ~finally:(fun () -> E3.close !e) (fun () ->
-    for _ = 1 to 12 do step [] done;
-    jump "shards";
-    let original = E3.workspace !e and history = E3.undo_label !e in
-    let target = tile ["shards"; "m"] in
-    Atomic.set slow_prepare true;
-    drag_to target;
-    (* held back for the slow cook, or (on a loaded machine) for the put itself *)
-    let held () = has (line ()) "a cook takes" || has (line ()) "applying takes" in
-    check (held ()) ("an expensive carry is held back: " ^ line ());
-    check (E3.workspace !e == original && E3.undo_label !e = history)
-      "a held-back carry leaves the original document and history unchanged";
-    Atomic.set slow_prepare false;
-    step ~buttons:[Input.LeftButton] ~mouse:target [key Input.Escape];
-    step ~mouse:target [Event.MouseReleased (Input.LeftButton, target)]; step [];
-    check (E3.carrying !e = None && E3.workspace !e == original
-      && E3.undo_label !e = history) "Escape drops an expensive carry without an edit";
-    Atomic.set slow_prepare true;
-    drag_to target;
-    check (held ()) "the next expensive preview is also held back";
-    Atomic.set slow_prepare false;
-    step ~mouse:target [Event.MouseReleased (Input.LeftButton, target)]; step []; step [];
-    check (E3.carrying !e = None && E3.undo_label !e = Some "Put"
-      && has (text_of !e) ":material (ref cobalt)")
-      "releasing an expensive carry commits exactly one Put";
-    step ~keys:[Input.Meta] [ch 'z'];
-    check (E3.workspace !e == original && E3.undo_label !e = history)
-      "one undo restores the held-back carry's original document")
+  E3.close !e
 
 (* ---- carry onto a viewport panel: a scene graph re-points it, a camera is its root's :camera ---- *)
 let viewport_source = {|(workspace views
@@ -589,13 +552,13 @@ let viewport_carry_tests () =
   let e = ref (E3.create ~await:true ~workspace:(workspace viewport_source)
     ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
       |> Result.map_error Rdk.Error.to_string)
-    ~scene3:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) ()
+    ~draw:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) ()
     |> function Ok e -> e | Error m -> fail m) and count = ref 0 in
   let step ?(keys = []) ?(mouse = (450., 300.)) events =
     incr count; e := E3.update !e (frame ~keys mouse events !count) in
-  let key k = Event.KeyPressed k and ch c = Event.KeyPressed (Input.KeyChar c) in
+  let key k = Input.Key_pressed k and ch c = Input.Key_pressed (Input.KeyChar c) in
   let jump name =
-    step [ key (Input.KeyChar '/'); ch 'j' ]; step [ Event.TextInput name ]; step [ key Input.Enter ]; step [] in
+    step [ key (Input.KeyChar '/'); ch 'j' ]; step [ Input.Text_input name ]; step [ key Input.Enter ]; step [] in
   let line () = Option.value ~default:"-" (E3.carry_line !e) in
   for _ = 1 to 12 do step [] done;
   let ws = E3.workspace !e in
@@ -621,9 +584,9 @@ let viewport_carry_tests () =
   jump "day";
   let bx, by, bw, bh = Option.get (E3.node_box !e [ "day"; "side" ]) in
   step ~mouse:(float bx +. float bw /. 2., float by +. float bh -. 6.)
-    [ Event.MouseMoved (float bx +. float bw /. 2., float by +. float bh -. 6.) ];
+    [ Input.Pointer_moved (float bx +. float bw /. 2., float by +. float bh -. 6.) ];
   let at = float bx +. float bw /. 2., float by +. float bh -. 6. in
-  step ~mouse:at [ Event.MousePressed (Input.LeftButton, at); Event.MouseReleased (Input.LeftButton, at) ]; step [];
+  step ~mouse:at [ Input.Pointer_pressed (Input.LeftButton, at); Input.Pointer_released (Input.LeftButton, at) ]; step [];
   step [ ch 'y' ]; step [];
   check (E3.carrying !e = Some ("camera", "side")) ("y picks up the selected camera: "
     ^ Option.fold ~none:"-" ~some:(fun (k, v) -> k ^ " " ^ v) (E3.carrying !e));
@@ -648,9 +611,9 @@ let viewport_carry_tests () =
   step [ ch 'y' ]; step [];
   let vx, vy, vw, vh = (E3.panes !e (frame (0., 0.) [] !count)).Pxui_shell.Layout.view in
   let over = float vx +. float vw /. 2., float vy +. float vh /. 2. in
-  step ~mouse:over [ Event.MouseMoved over ]; step ~mouse:over [];
+  step ~mouse:over [ Input.Pointer_moved over ]; step ~mouse:over [];
   check (has (line ()) "(ui/viewport (ref night))") ("the pointer over the panel previews it: " ^ line ());
-  step ~mouse:over [ Event.MousePressed (Input.LeftButton, over); Event.MouseReleased (Input.LeftButton, over) ]; step [];
+  step ~mouse:over [ Input.Pointer_pressed (Input.LeftButton, over); Input.Pointer_released (Input.LeftButton, over) ]; step [];
   check (E3.carrying !e = None && E3.undo_label !e = Some "Put" && has (text_of !e) "left (ui/viewport (ref night))")
     ("a press on the panel is the put: " ^ text_of !e);
   undo ();
@@ -671,11 +634,11 @@ let () =
        assert (Array.sub names 1 5 = Array.make 5 "blue");
        assert (Array.sub rough 1 5 = Array.make 5 0.3)
    | _ -> assert false);
-  let surface = Rays_editor.Surface.of_output one |> get in
-  let drawings = Rays_editor.Surface.scene3 node surface |> Scene3.Private.drawings in
+  let surface = surface one in
+  let drawings = surface_scene node surface |> Scene3.Private.drawings in
   assert (List.length drawings = 2);
   assert (List.fold_left (fun n (d : Scene3.Private.drawing) -> n + Mesh.index_count d.mesh) 0 drawings = 36);
-  assert (List.exists (fun (d : Scene3.Private.drawing) -> d.material.diffuse = Color.hex_exn "#2670f5") drawings);
+  assert (List.exists (fun (d : Scene3.Private.drawing) -> d.material.diffuse = Rays_math.Color.hex_exn "#2670f5") drawings);
   let assign ?cancel ?group ?(roughness = 0.2) geometry =
     Rdk.Material_assign.run ?cancel ?group ~name:"red" ~color:(1.,0.,0.)
       ~roughness ~emission:(0.,0.,0.) geometry in

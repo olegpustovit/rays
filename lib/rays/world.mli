@@ -14,7 +14,7 @@
     about +Y) turns the whole World, lights and sun included: layers are
     evaluated at azimuth [phi - rotation]. *)
 
-type rgb = { r : float; g : float; b : float }
+type rgb = Rays_math.Color.Linear.t = { r : float; g : float; b : float }
 val rgb : float -> float -> float -> rgb
 
 type emit =
@@ -99,7 +99,7 @@ val default : t
 val presets : (string * t) list
 (** ["neon corridor"], ["soft blobs"], ["white room"], ["daylight"]. *)
 
-val direction_of_uv : float -> float -> Vec3.t
+val direction_of_uv : float -> float -> Rays_math.Vec3.t
 
 (** {1 Bake} *)
 
@@ -107,14 +107,14 @@ type map = { width : int; height : int; pixels : Float.Array.t }
 (** Row-major RGB, 3 floats per texel, equirectangular as above. *)
 
 type light = {
-  position : Vec3.t;
-  normal : Vec3.t;  (** Emitting side; faces the origin. *)
-  u : Vec3.t;  (** Half-extent axes: the rect is [position +- u +- v]. *)
-  v : Vec3.t;
+  position : Rays_math.Vec3.t;
+  normal : Rays_math.Vec3.t;  (** Emitting side; faces the origin. *)
+  u : Rays_math.Vec3.t;  (** Half-extent axes: the rect is [position +- u +- v]. *)
+  v : Rays_math.Vec3.t;
   radiance : rgb;
 }
 
-type sun = { direction : Vec3.t; radiance : rgb; angular_radius : float }
+type sun = { direction : Rays_math.Vec3.t; radiance : rgb; angular_radius : float }
 (** [direction] points toward the sun; [radiance] is the disc's. *)
 
 type cdf = {
@@ -154,5 +154,11 @@ val bake : ?domains:int -> ?light_radius:float -> width:int -> height:int ->
 
 val bake_cached : width:int ->
   height:int -> t -> baked
-(** [bake] behind a per-domain LRU of capacity 4 keyed structurally;
+(** [bake] behind a run-owned LRU of capacity 4 keyed structurally;
     changing only [background] or [exposure] is a hit. *)
+
+module Private : sig
+  type cache_context
+  val create_cache_context : unit -> cache_context
+  val with_cache_context : cache_context -> (unit -> 'a) -> 'a
+end

@@ -44,6 +44,62 @@ and node =
   | Bypass of term
   | Expanded of { macro : string; body : term }
 
+let iter_children f (term : term) = match term.node with
+  | Lit _ | Text _ | Nil | Time | Ref_binding _ | Fn_ref _ -> ()
+  | Vec terms | Hof (_, terms) | List_lit terms | Str terms | List_op (_, terms) -> List.iter f terms
+  | Call {args; _} | Op {args; _} | Graph_ref {inputs = args; _} | Record args -> List.iter (fun (_, term) -> f term) args
+  | Call_fn {args; body; _} -> List.iter f args; Option.iter f body
+  | Let (bindings, body) -> List.iter (fun (_, term) -> f term) bindings; f body
+  | State {init; step; _} -> f init; f step
+  | Loop {accs; clauses; body; _} ->
+      List.iter (fun (_, term) -> f term) accs;
+      List.iter (fun (_, term) -> f term) clauses;
+      f body
+  | With_error (a, b) -> f a; f b
+  | Error_rows {rows; mapper; _} -> f rows; f mapper
+  | If (a, b, c) -> f a; f b; f c
+  | Cond (arms, default) -> List.iter (fun (test, value) -> f test; f value) arms; f default
+  | Case (value, arms, default) -> f value; List.iter (fun (_, term) -> f term) arms; f default
+  | Fn {body; capture; _} -> f body; Option.iter f capture
+  | Get (value, _) | Bypass value | Expanded {body = value; _} -> f value
+  | Assoc (value, fields) -> f value; List.iter (fun (_, term) -> f term) fields
+
+let children term =
+  let reversed = ref [] in
+  iter_children (fun child -> reversed := child :: !reversed) term;
+  List.rev !reversed
+
+let map_children f (term : term) =
+  let map_fields fields = List.map (fun (name, value) -> name, f value) fields in
+  let node = match term.node with
+    | (Lit _ | Text _ | Nil | Time | Ref_binding _ | Fn_ref _) as node -> node
+    | Vec terms -> Vec (List.map f terms)
+    | Call ({args; _} as call) -> Call {call with args = map_fields args}
+    | Op ({args; _} as op) -> Op {op with args = map_fields args}
+    | Call_fn ({args; body; _} as call) -> Call_fn {call with args = List.map f args; body = Option.map f body}
+    | Graph_ref ({inputs; _} as graph) -> Graph_ref {graph with inputs = map_fields inputs}
+    | Let (bindings, body) -> Let (List.map (fun (pattern, value) -> pattern, f value) bindings, f body)
+    | State ({init; step; _} as state) -> State {state with init = f init; step = f step}
+    | Loop ({accs; clauses; body; _} as loop) ->
+        let map_bindings bindings = List.map (fun (pattern, value) -> pattern, f value) bindings in
+        Loop {loop with accs = map_bindings accs; clauses = map_bindings clauses; body = f body}
+    | With_error (a, b) -> With_error (f a, f b)
+    | Error_rows ({rows; mapper; _} as error_rows) -> Error_rows {error_rows with rows = f rows; mapper = f mapper}
+    | If (a, b, c) -> If (f a, f b, f c)
+    | Cond (arms, default) -> Cond (List.map (fun (test, value) -> f test, f value) arms, f default)
+    | Case (value, arms, default) -> Case (f value, List.map (fun (pattern, value) -> pattern, f value) arms, f default)
+    | Fn ({body; capture; _} as fn) -> Fn {fn with body = f body; capture = Option.map f capture}
+    | Hof (kind, terms) -> Hof (kind, List.map f terms)
+    | List_lit terms -> List_lit (List.map f terms)
+    | Record fields -> Record (map_fields fields)
+    | Get (value, field) -> Get (f value, field)
+    | Assoc (value, fields) -> Assoc (f value, map_fields fields)
+    | Str terms -> Str (List.map f terms)
+    | List_op (op, terms) -> List_op (op, List.map f terms)
+    | Bypass value -> Bypass (f value)
+    | Expanded ({body; _} as expanded) -> Expanded {expanded with body = f body} in
+  {term with node}
+
 type graph = { name : string; context : context;
   inputs : (string * Ty.t * term option) list; body : term; form : S.t }
 
@@ -63,26 +119,14 @@ let body_context_ops = ["sop/context_seed"; "sop/provenance_base"; "sop/context_
 module Seen_term = Hashtbl.Make (struct type t = term let equal = ( == ) let hash = Hashtbl.hash end)
 let called_names ~include_ops root =
   let seen = Seen_term.create 256 and out = ref [] in
-  let rec calls (t:term) = if not (Seen_term.mem seen t) then begin Seen_term.add seen t (); match t.node with
-    | Call {kind;args;_} -> out := kind :: !out; fields args
-    | Op {op;args;_} -> if include_ops then out := op :: !out; fields args
-    | Record args -> fields args
-    | Call_fn {args;body;_} -> List.iter calls args; Option.iter calls body
-    | Graph_ref {inputs;_} -> fields inputs
-    | Let (bindings,body) -> List.iter (fun (_,v) -> calls v) bindings; calls body
-    | State {init;step;_} -> calls init; calls step
-    | Loop {accs;clauses;body;_} -> List.iter (fun (_,v) -> calls v) (accs@clauses); calls body
-    | With_error(a,b) -> calls a; calls b
-    | Error_rows{rows=a;mapper=b;_} -> calls a; calls b
-    | If (a,b,c) -> calls a; calls b; calls c
-    | Cond (arms,default) -> List.iter (fun (a,b) -> calls a; calls b) arms; calls default
-    | Case (scrutinee,arms,default) -> calls scrutinee; List.iter (fun (_,v) -> calls v) arms; calls default
-    | Fn {body;capture;_} -> calls body; Option.iter calls capture
-    | Hof (_,args) | Vec args | List_lit args | Str args | List_op (_,args) -> List.iter calls args
-    | Get (value,_) | Bypass value | Expanded {body=value;_} -> calls value
-    | Assoc (value,args) -> calls value; fields args
-    | Lit _ | Text _ | Nil | Time | Ref_binding _ | Fn_ref _ -> () end
-  and fields args = List.iter (fun (_,v) -> calls v) args in
+  let rec calls (t : term) = if not (Seen_term.mem seen t) then begin
+    Seen_term.add seen t ();
+    (match t.node with
+     | Call {kind; _} -> out := kind :: !out
+     | Op {op; _} when include_ops -> out := op :: !out
+     | _ -> ());
+    iter_children calls t
+  end in
   calls root; List.sort_uniq String.compare !out
 let kind_calls root = called_names ~include_ops:false root
 
@@ -300,11 +344,11 @@ let validate_parameter ?ty report (p : Check.parameter) (term : term) =
   let want = param_ty p and have = Option.value ~default:term.ty ty in
   if have <> Ty.Any then begin
     if not (Ty.fits have want) then
-      report Diagnostic.Error "E_TYPE" (Printf.sprintf ":%s takes %s, but this is %s" p.name (show want) (show have))
+      report Diagnostic.Error_severity "E_TYPE" (Printf.sprintf ":%s takes %s, but this is %s" p.name (show want) (show have))
     else match want, term.node with
       | Ty.Color, Text s ->
           if not (hex_colour s) then
-            report Diagnostic.Error "E_TYPE" (Printf.sprintf ":%s is a colour: write \"#rrggbb\" or a vec3, not \"%s\"" p.name s)
+            report Diagnostic.Error_severity "E_TYPE" (Printf.sprintf ":%s is a colour: write \"#rrggbb\" or a vec3, not \"%s\"" p.name s)
       | Ty.Color, _ ->
           if have = Ty.Vec3 then
             Check.validate_parameter report { p with ty = Some Port_type.Vec3 } (to_check term)
@@ -345,7 +389,7 @@ let skip_tuples (v : S.t) : int list list option =
   | _ -> None
 
 let check ?(ops = []) ?(library = false) catalog forms =
-  Phase_timer.measure Check (fun () ->
+  Phase_timer.measure "check" (fun () ->
   match Op.validate ops with Some error -> None, [error] | None ->
   let find_op = Op.find ~extra:ops in
   let diags = ref [] in
@@ -402,9 +446,9 @@ let check ?(ops = []) ?(library = false) catalog forms =
   let add sev (x : S.t) code msg =
     let span = if x.span.start = 0 && x.span.finish = 0 then None else Some x.span in
     diags := (match sev with
-      | Diagnostic.Error -> Diagnostic.error ?span ~code msg
+      | Diagnostic.Error_severity -> Diagnostic.error ?span ~code msg
       | Diagnostic.Warning -> Diagnostic.warning ?span ~code msg) :: !diags in
-  let err x code msg = add Diagnostic.Error x code msg in
+  let err x code msg = add Diagnostic.Error_severity x code msg in
   let precision path (v : v) =
     if v.approx && Paths.is_empty v.approx_sources then
       {v with approx_sources = Paths.singleton path} else v in
@@ -560,7 +604,7 @@ let check ?(ops = []) ?(library = false) catalog forms =
   let def_defaults : (string * string, term * v) Hashtbl.t = Hashtbl.create 8 in
   let unbound cx x s =
     let bound = List.map fst (Smap.bindings cx.env) in
-    let recent = List.filteri (fun i _ -> i >= List.length bound - 6) bound in
+    let recent = List.drop (max 0 (List.length bound - 6)) bound in
     bad x "E_UNBOUND" (Printf.sprintf "%s is not bound in %s.%s%s" s cx.scope
       (if bound = [] then "" else " Bound here: " ^ String.concat ", " recent ^ ".")
       (Check.suggestion s bound)) in
@@ -1229,7 +1273,7 @@ let check ?(ops = []) ?(library = false) catalog forms =
         | _ -> fn_value cx f_form h in
       let init = if h = "reduce" then Some (input cx "1" (List.nth args 1)) else None in
       (match init with Some (_, iv) -> no_fn x iv.ty "The reduce accumulator" | None -> ());
-      let list_forms = List.filteri (fun i _ -> i >= (if h = "reduce" then 2 else 1)) args in
+      let list_forms = List.drop (if h = "reduce" then 2 else 1) args in
       let lists = List.mapi (fun i (a : S.t) ->
         let (t, v) = input cx (string_of_int (i + if h = "reduce" then 2 else 1)) a in
         if Ty.elem v.ty = None && v.ty <> Ty.Any then
@@ -1597,8 +1641,7 @@ let check ?(ops = []) ?(library = false) catalog forms =
           | Expanded {body;_} -> literal body | _ -> None in
         let ty = try Op.result_type o (List.rev_map (fun (name, (term : term)) ->
           name, term.ty, literal term) !named)
-          with Value.Fail (code, message, _) -> err x code message; Ty.Any
-            |Value.Diagnostic_fail d->diags:={d with span=Some x.span}:: !diags;Ty.Any in
+          with Diagnostic.Error d -> diags := {d with span=Some x.span} :: !diags; Ty.Any in
         let avs = List.map (fun a -> a.av) args in
         let nth_live_len i = match List.nth_opt pos i with Some a -> a.av.live_len | None -> false in
         let live_len = match o.name with
@@ -1695,10 +1738,6 @@ let check ?(ops = []) ?(library = false) catalog forms =
         if size "first_size" <> None && size "second_size" <> None then
           err x "E_RANGE" "A split fixes one side: :first_size or :second_size."
     | "ui/graph" ->
-        (match List.find_opt (fun (a : arg) -> a.key = Some "wires") args with
-         | Some { aterm = { node = Text w; _ }; _ } when not (List.mem w (List.assoc "wires" o.choices)) ->
-             err x "E_RANGE" "Graph wires style is rect or straight."
-         | _ -> ());
         (* the graph the panel pins: a graph of the workspace, or [def:name] for a function *)
         (match pos with
          | { aterm = { node = Text g; _ }; aform; _ } :: _
@@ -2031,7 +2070,7 @@ let check ?(ops = []) ?(library = false) catalog forms =
       | S.List ({ S.node = S.Sym (("graph" | "defn" | "defnode" | "defmacro") as head); _ } :: { S.node = S.Sym n; _ } :: _) ->
           if (if head="defnode" then not (Defnode.valid_name n) else not (Macro.valid_name n))
              || reserved n || Hashtbl.mem names n
-             || (head="defnode" && List.exists (fun (k:Check.kind) -> k.qualified=n || List.mem n k.aliases) catalog.kinds)
+             || (head="defnode" && List.exists (fun (k:Check.kind) -> k.qualified=n) catalog.kinds)
              || (match find_op n Context.value with Some o -> o.name = n | None -> false) then
             err f "E_NAME" (Printf.sprintf "Invalid, reserved or duplicate name: %s." n)
           else (Hashtbl.add names n (); items := (head, n, f) :: !items)
@@ -2124,7 +2163,7 @@ let check ?(ops = []) ?(library = false) catalog forms =
   let diagnostics = List.filter (fun (d : Diagnostic.t) ->
     let key = (d.code, d.span, d.message) in
     if Hashtbl.mem seen key then false else (Hashtbl.add seen key (); true)) (List.rev !diags) in
-  let has_error = List.exists (fun (d : Diagnostic.t) -> d.severity = Diagnostic.Error) diagnostics in
+  let has_error = List.exists (fun (d : Diagnostic.t) -> d.severity = Diagnostic.Error_severity) diagnostics in
   match outcome with
   | Some (wname, _, go, dos) when not has_error ->
       let get tbl = List.filter_map (Hashtbl.find_opt tbl) in

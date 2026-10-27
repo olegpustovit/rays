@@ -7,10 +7,6 @@ let get_ttf = function
   | Ok value -> value
   | Error error -> fail (Format.asprintf "%a" Sdl3_ttf.pp_error error)
 
-let get_sdl = function
-  | Ok value -> value
-  | Error error -> fail (Format.asprintf "%a" Sdl3.pp_error error)
-
 let has_visible_alpha pixels =
   let rec loop index =
     index < Bytes.length pixels
@@ -61,19 +57,6 @@ let run () =
   let metrics = get_ttf (Font.metrics font) in
   if metrics.height <= 0 || metrics.ascent <= 0 || metrics.line_skip <= 0 then
     fail "font metrics are not positive";
-  (match get_ttf (Font.family_name font), get_ttf (Font.style_name font) with
-   | Some family, Some style when family <> "" && style <> "" -> ()
-   | _ -> fail "borrowed font names were not copied");
-  let width, height = get_ttf (Font.size_text font "Rays ž") in
-  if width <= 0 || height <= 0 then fail "UTF-8 text metrics are empty";
-  if get_ttf (Font.size_text font "") <> (0, 0) then
-    fail "empty text metrics are not a safe no-op";
-  (match Font.size_text font "bad\x00text" with
-   | Error { kind = Invalid_argument; _ } -> ()
-   | Ok _ | Error _ -> fail "NUL text metrics were accepted");
-  (match Font.size_text font "bad\xc0\xaf" with
-   | Error { kind = Invalid_argument; _ } -> ()
-   | Ok _ | Error _ -> fail "malformed UTF-8 text metrics were accepted");
   (match Font.render_blended font ~color:(256, 0, 0, 255) "bad" with
    | Error { kind = Invalid_argument; _ } -> ()
    | Ok _ | Error _ -> fail "out-of-range text color was accepted");
@@ -88,8 +71,8 @@ let run () =
     | Some rgba -> rgba
     | None -> fail "non-empty text did not rasterize"
   in
-  if rgba.width <> width || rgba.height <> height
-      || Bytes.length rgba.pixels <> width * height * 4
+  if rgba.width <= 0 || rgba.height <= 0
+      || Bytes.length rgba.pixels <> rgba.width * rgba.height * 4
       || not (has_visible_alpha rgba.pixels) then
     fail "CPU glyph rasterization disagrees with text metrics or alpha";
   (* every render owns its buffer *)
@@ -99,18 +82,9 @@ let run () =
   if again.pixels == rgba.pixels || again.pixels <> rgba.pixels then
     fail "two renders of one text share a buffer or differ";
 
-  (* setters: accepted values and the rejected one *)
-  get_ttf (Font.set_style font [Font.Bold; Font.Italic; Font.Underline]);
-  get_ttf (Font.set_style font [Font.Normal]);
-  get_ttf (Font.set_outline font 2);
-  (match Font.set_outline font (-1) with
-   | Error { kind = Invalid_argument; _ } -> ()
-   | Ok () | Error _ -> fail "negative font outline was accepted");
-  get_ttf (Font.set_outline font 0);
+  (* Setters used by the runtime and glyph metrics. *)
   get_ttf (Font.set_hinting font Font.Mono_hinting);
   get_ttf (Font.set_hinting font Font.Normal_hinting);
-  get_ttf (Font.set_kerning font false);
-  get_ttf (Font.set_kerning font true);
   let glyph = get_ttf (Font.glyph_metrics font (Char.code 'A')) in
   if glyph.advance <= 0 || glyph.max_x < glyph.min_x || glyph.max_y < glyph.min_y then
     fail "ASCII glyph metrics are invalid";
@@ -119,12 +93,6 @@ let run () =
     | Error { kind = Invalid_argument; _ } -> ()
     | Ok _ | Error _ -> fail "invalid Unicode scalar was accepted")
     [-1; 0xd800; 0x110000];
-  let wrapped_width, wrapped_height =
-    get_ttf (Font.size_text_wrapped font ~wrap_width:80
-      "a deterministic wrapped line with several words")
-  in
-  if wrapped_width > 80 || wrapped_height <= metrics.line_skip then
-    fail "wrapped text metrics did not produce multiple bounded lines";
   get_ttf (Font.set_wrap_alignment font Font.Center);
   let wrapped = match get_ttf (Font.render_blended_wrapped font
       ~color:(200, 180, 160, 255) ~wrap_width:80
@@ -132,7 +100,8 @@ let run () =
     | Some rgba -> rgba
     | None -> fail "wrapped non-empty text did not rasterize"
   in
-  if wrapped.width <> wrapped_width || wrapped.height <> wrapped_height
+  if wrapped.width <= 0 || wrapped.width > 80 || wrapped.height <= metrics.line_skip
+      || Bytes.length wrapped.pixels <> wrapped.width * wrapped.height * 4
       || not (has_visible_alpha wrapped.pixels) then
     fail "wrapped raster disagrees with wrapped metrics";
   (match Font.render_blended_wrapped font ~color:(0, 0, 0, 255)
@@ -142,22 +111,26 @@ let run () =
 
   (* density: the same text at 144 DPI is about twice the size of 72 DPI *)
   get_ttf (Font.set_size_dpi font ~size:18. ~horizontal:72 ~vertical:72);
-  let one_x_width, one_x_height = get_ttf (Font.size_text font "Density") in
+  let one_x = match get_ttf (Font.render_blended font
+      ~color:(12, 34, 56, 200) "Density") with
+    | Some rgba -> rgba | None -> fail "72-DPI density raster was empty" in
   get_ttf (Font.set_size_dpi font ~size:18. ~horizontal:144 ~vertical:144);
-  let two_x_width, two_x_height = get_ttf (Font.size_text font "Density") in
-  let width_scale = float_of_int two_x_width /. float_of_int one_x_width
-  and height_scale = float_of_int two_x_height /. float_of_int one_x_height in
+  let two_x = match get_ttf (Font.render_blended font
+      ~color:(12, 34, 56, 200) "Density") with
+    | Some rgba -> rgba | None -> fail "144-DPI density raster was empty" in
+  let width_scale = float_of_int two_x.width /. float_of_int one_x.width
+  and height_scale = float_of_int two_x.height /. float_of_int one_x.height in
   if width_scale < 1.8 || width_scale > 2.2
       || height_scale < 1.8 || height_scale > 2.2 then
     fail (Printf.sprintf
       "144-DPI raster metrics are not approximately twice 72-DPI metrics: \
        %dx%d -> %dx%d"
-      one_x_width one_x_height two_x_width two_x_height);
+      one_x.width one_x.height two_x.width two_x.height);
   (match Font.set_size_dpi font ~size:18. ~horizontal:0 ~vertical:144 with
    | Error { kind = Invalid_argument; _ } -> ()
    | Ok () | Error _ -> fail "non-positive font DPI was accepted");
 
-  let wrong_domain = Domain.spawn (fun () -> Font.size_text font "domain")
+  let wrong_domain = Domain.spawn (fun () -> Font.metrics font)
     |> Domain.join in
   (match wrong_domain with
    | Error { kind = Wrong_domain; _ } -> ()

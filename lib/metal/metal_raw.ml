@@ -2,45 +2,6 @@ include Metal_raw_types
 module Registry = (Metal_gen.Make)(Metal_raw_types)
 include Registry
 let get = function | Ok value -> value | Error message -> failwith message
-[@@@ocaml.text
-  " Positional native ABI record. Keep field order synchronized with\n    [texture_descriptor] in [metal_bridge.mm]. "]
-[@@@ocaml.text
-  " Positional native ABI record for texture-view construction. "]
-[@@@ocaml.text
-  " Positional native ABI value for one function-constant specialization. "]
-[@@@ocaml.text " Name, Metal data-type code, index, and required flag. "]
-[@@@ocaml.text
-  " Positional native ABI value for one reflected pipeline binding. Keep this\n    synchronized with [copy_bindings] in [metal_bridge.mm]. "]
-[@@@ocaml.text
-  " Library handle and function name used by Metal 4 static linking. "]
-[@@@ocaml.text
-  " Positional native ABI record for synchronous Metal 4 compute compilation. "]
-[@@@ocaml.text
-  " Positional native ABI record for one base-level Metal 4 render-pass color\n    attachment and its optional single-sample resolve target. "]
-[@@@ocaml.text
-  " Positional native ABI record for one base-level Metal 4 render-pass depth\n    attachment. "]
-[@@@ocaml.text
-  " Positional native ABI record for one base-level Metal 4 render-pass stencil\n    attachment. "]
-[@@@ocaml.text " Positional native ABI record for a Metal 4 render pass. "]
-[@@@ocaml.text
-  " Positional native ABI record for one amplified vertex view. "]
-[@@@ocaml.text
-  " Positional native ABI record for one Metal scissor rectangle. "]
-[@@@ocaml.text
-  " Positional native ABI record for one immutable stencil face. "]
-[@@@ocaml.text
-  " Positional native ABI record for immutable depth/stencil state. "]
-[@@@ocaml.text
-  " Positional native ABI record for a Metal 4 argument-table descriptor. "]
-[@@@ocaml.text
-  " Positional native ABI record for a Metal 4 binary-function lookup or\n    compilation. "]
-[@@@ocaml.text
-  " Resource100 generated raw integration. Internal handles only. "]
-[@@@ocaml.text
-  " Mesh/tile105 owned descriptor inputs. Field order is the native positional\n    ABI consumed by [rays_mesh_tile_objects_from_value]. "]
-[@@@ocaml.text " Counter and blit-pass bindings. "]
-[@@@ocaml.text
-  " Authoritative Metal4 lifecycle190 prepared CAML subset. The resource and\n    compute-owner shards currently contain typed native helpers only, not OCaml\n    primitives, so they are intentionally absent here. "]
 let buffer_info raw =
   ((get (Registry.buffer_info_length raw)),
     (Int64.to_int (get (Registry.buffer_info_storageMode raw))),

@@ -153,7 +153,7 @@ let get_ok = function Ok value -> value | Error message -> invalid_arg message
 let ceiling_div value divisor =
   (value / divisor) + if value mod divisor = 0 then 0 else 1
 
-module Parallel = Rays_math.Parallel
+module Parallel = Parallel
 
 let parallel_for ?cancel ~grain count work =
   if count > 0 then Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(count - 1)

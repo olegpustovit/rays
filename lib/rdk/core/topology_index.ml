@@ -29,7 +29,7 @@ let next_power_of_two value =
   !result
 
 let hash_pair a b =
-  let value = (a * 65_599) lxor (b * 31_337) in
+  let value = Rays_math.Hash.mix a (b * 31_337) in
   (value lxor (value lsr 16)) land max_int
 
 let create_from_point_index ?cancel point_index topology =

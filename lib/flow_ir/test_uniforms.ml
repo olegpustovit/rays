@@ -1,15 +1,15 @@
 module E=Flow.Eval
 module P=Flow_ir.Packed
-let ok=function Ok value->value|Error d->failwith(Flow.Diagnostic.to_string d)
+let ok=function Ok value->value|Error d->failwith(Diagnostic.to_string d)
 let bytes value=Marshal.to_string value [Marshal.No_sharing]
 let same a b=match a,b with
   |Ok a,Ok b->bytes a=bytes b
-  |Error a,Error b->Flow.Diagnostic.to_string a=Flow.Diagnostic.to_string b
+  |Error a,Error b->Diagnostic.to_string a=Diagnostic.to_string b
   |_->false
 let components=function E.Float x->[|x|]|Vec2(x,y)->[|x;y|]
   |Vec3(x,y,z)->[|x;y;z|]|Vec4(x,y,z,w)->[|x;y;z;w|]|_->assert false
 let width=function Flow.Ty.Float->1|Vec2->2|Vec3->3|Vec4->4|_->assert false
-let source ty : Flow.Op.t={Flow_ir.Operators.noise3 with
+let source ty : Flow.Op.t={Flow.Op.noise3 with
   name="probe/data";packed_extension=None;
   signature={pos=[];opt=[];rest=None;kw=[]};out=(fun _->Flow.Ty.Array ty);
   shape=Flow.Op.Struct{splice=false};check=(fun _->());
@@ -19,7 +19,7 @@ let workspace ?(bindings="") ops body=
     " tested "^body^"] 0.0)))"))in
   match Flow.Workspace.check ~ops {Flow.Check.version=1;kinds=[]} forms with
   |Some workspace,[]->workspace
-  |_,ds->failwith(String.concat "; "(List.map Flow.Diagnostic.to_string ds))
+  |_,ds->failwith(String.concat "; "(List.map Diagnostic.to_string ds))
 let evaluate workspace=List.assoc ["g";"tested"](ok(E.static ~record:true workspace)).records
   |> List.hd |> snd
 let fixture ?override ?seed ty reducer=
@@ -33,13 +33,13 @@ let fixture ?override ?seed ty reducer=
   (* Exercise the compiler's independent declaration guard even for an unchecked extension. *)
   let workspace=Option.fold ~none:workspace ~some:(fun op->{workspace with ops=op::workspace.ops})override in
   let fn=match evaluate workspace with E.Fn fn->fn|_->assert false in
-  let sum=List.assoc "s"(E.Private.function_bindings fn)in
+  let sum=List.assoc "s"(E.Residual.function_bindings fn)in
   let uv=E.Vec2_array(Array.init(32769*2)(fun i->float(i mod 17)/.16.))in
   let value=ok(E.Private.map_function ~signature:Flow.Ty.{params=[Vec2];result=Vec4} fn [uv])in
   let packed=match value with E.Residual r->
-    (match P.compile_result r(E.Private.residual_view r).term with
+    (match P.compile_result r(E.Residual.residual_view r).term with
       |Ok packed->packed|Error ds->failwith(Printf.sprintf "uniform compile %s reducer=%s seed=%s: %s"
-          (Flow.Ty.to_string ty)reducer seed (String.concat "; "(List.map Flow.Diagnostic.to_string ds))))
+          (Flow.Ty.to_string ty)reducer seed (String.concat "; "(List.map Diagnostic.to_string ds))))
     |_->assert false in
   value,sum,packed
 let observed ?fast counter=Some((fun()->0.),(fun packed ~seconds:_ ~reference->
@@ -47,8 +47,8 @@ let observed ?fast counter=Some((fun()->0.),(fun packed ~seconds:_ ~reference->
     incr counter;Option.iter(fun expected->if P.Private.ordered_add packed<>expected then
       failwith(Printf.sprintf "uniform ordered-add expected=%b actual=%b result=%s body=%s"
         expected(P.Private.ordered_add packed)
-        (Flow.Ty.to_string(P.to_region packed).term.ty)
-        (Flow.Ty.to_string(P.to_region packed).body.ty)))fast
+        (Flow.Ty.to_string packed.term.ty)
+        (Flow.Ty.to_string packed.body.ty)))fast
   end))
 let cancellation i=match i mod 5 with 0->1e16|1->1.|2-> -1e16|3->1.|_-> -0.
 let data ty count time=
@@ -61,7 +61,7 @@ let data ty count time=
     |3->Vec3_array values|_->Vec4_array values
 let resolve_source current=function
   |E.Struct("probe/data",_,_)->Ok !current
-  |_->Error(Flow.Diagnostic.error ~code:"E_DATA_SOURCE" "Unexpected source.")
+  |_->Error(Diagnostic.error ~code:"E_DATA_SOURCE" "Unexpected source.")
 let () =
   let fn = match evaluate (workspace []
     "(fn [(x : float)] [(* (- x 6.0) 50.0) t 0.0])") with
@@ -74,11 +74,29 @@ let () =
   List.iter (fun strict ->
     let program = ok (Flow_ir.Executor.compile ~strict value) in
     List.iter (fun time ->
-      let live = Frame_input.at_time time in
+      let live = Input.at_time time in
       let expected = E.Private.force_reference value ~live in
-      List.iter (fun domains -> Rays_math.Parallel.run ~domains (fun () ->
-        assert (same (Flow_ir.Executor.force ~strict program ~live) expected))) [1;8]) [0.;0.25]) [false;true];
-  print_endline "Tiny maps in recorded-call records preserve reference results and strict packed execution at one/eight domains"
+      List.iter (fun domains -> Parallel.run ~domains (fun () ->
+        let actual = Flow_ir.Executor.force ~strict program ~live in
+        if not (same actual expected) then failwith (Printf.sprintf
+          "recorded map mismatch: strict=%b t=%g domains=%d expected=%s actual=%s"
+          strict time domains
+          (match expected with Ok value -> E.show value | Error d -> Diagnostic.to_string d)
+          (match actual with Ok value -> E.show value | Error d -> Diagnostic.to_string d)))) [1;8]) [0.;0.25]) [false;true];
+  print_endline "Tiny maps in recorded-call records preserve reference results and strict packed execution at one/eight domains"; flush stdout
+let () =
+  let fn = match evaluate (workspace [] "(fn [(x : float)] [x t 0.0])") with
+    | E.Fn fn -> fn | _ -> assert false in
+  let residuals = Array.init 129 (fun i ->
+    ok (E.Private.map_function ~signature:Flow.Ty.{params=[Float];result=Vec3} fn
+      [E.Float_array [|float i|]])) in
+  let value = E.List (Array.append residuals [|residuals.(0)|]) in
+  let program = ok (Flow_ir.Executor.compile value) in
+  let live = Input.at_time 0.25 in
+  let actual, attempts = Flow_ir.Executor.Private.force_with_lower_attempts program ~live in
+  assert (same actual (E.Private.force_reference value ~live));
+  assert (attempts = 129);
+  print_endline "One force lowers 129 distinct residuals once and reuses the first shared value"; flush stdout
 let () =
   List.iter (fun reducer -> List.iter (fun wrapped -> List.iter (fun integer ->
     let reduction = "(reduce " ^ reducer ^ " 0.0 data)" in
@@ -91,23 +109,25 @@ let () =
       ~signature:Flow.Ty.{params=[Float];result=(if integer then Int else Float)} fn
       [E.Float_array (Array.init 32769 (fun i -> float (i mod 11)))]) in
     let packed = match value with E.Residual residual ->
-      Option.get (P.compile residual (E.Private.residual_view residual).term)
+      Option.get (P.compile residual (E.Residual.residual_view residual).term)
       | _ -> assert false in
     let current = ref (E.Float_array [|1.;2.;3.;4.|]) in
-    let resolve = resolve_source current and live = Frame_input.at_time 0.25 in
+    let resolve = resolve_source current and live = Input.at_time 0.25 in
     let reference = E.Private.force_reference ~resolve value ~live in
-    List.iter (fun domains -> Rays_math.Parallel.run ~domains (fun () ->
+    List.iter (fun domains -> Parallel.run ~domains (fun () ->
       let actual = P.force ~strict:true ~resolve packed ~live in
       let compiled = Flow_ir.Executor.compile ~strict:true value in
       if reducer = "+" then begin
-        assert (same actual reference);
+        if not (same actual reference) then failwith (Printf.sprintf "strict uniform packed mismatch reducer=%s actual=%s expected=%s"
+          reducer (match actual with Ok value -> E.show value | Error d -> Diagnostic.to_string d)
+          (match reference with Ok value -> E.show value | Error d -> Diagnostic.to_string d));
         assert (same (Flow_ir.Executor.force ~strict:true ~resolve (ok compiled) ~live) reference)
       end else begin
-        let refused = function Error (d : Flow.Diagnostic.t) -> assert (d.code="E_KERNEL_FORM")
+        let refused = function Error (d : Diagnostic.t) -> assert (d.code="E_KERNEL_FORM")
           | Ok _ -> failwith "Strict captured reduction used the interpreter" in
         refused actual; refused compiled
       end)) [1;8]) [false;true]) [false;true]) ["+";"min"];
-  print_endline "Strict uniforms: direct/wrapped unsupported reductions refuse; Float/Int outputs and supported add match reference at one/eight domains"
+  print_endline "Strict uniforms: direct/wrapped unsupported reductions refuse; Float/Int outputs and supported add match reference at one/eight domains"; flush stdout
 let ()=
   let addition=Option.get(Flow.Op.find "+" Flow.Context.value)in
   let custom={addition with arithmetic=None;
@@ -119,13 +139,13 @@ let ()=
       [0;1;1023;1024;1025;16383;16384;16385;32769]else[0;32769]in
     List.iter(fun count->List.iter(fun time->
       let current=ref(data ty count time)in let original=bytes !current in
-      let live={(Frame_input.at_time time)with frame=int_of_float(time*.4.)}in
+      let live={(Input.at_time time)with frame=int_of_float(time*.4.)}in
       let expected=E.Private.force_reference ~resolve:(resolve_source current) value ~live in
       let scalar=ok(E.Private.force_reference ~resolve:(resolve_source current) sum ~live)in
       if seed=Some "0" then (match count,scalar with
         |0,E.Int 0->()|n,E.Float _ when n>0->()|_->assert false);
       let uniform=match scalar with E.Int n->[|float n|]|_->components scalar in
-      List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+      List.iter(fun domains->Parallel.run ~domains(fun()->
         let cpu=ref 0 and gpu=ref 0 in
         assert(same(P.force ~resolve:(resolve_source current) ?measure:(observed ~fast cpu) packed ~live)expected);
         let actual=Flow_ir.Executor.force ~resolve:(resolve_source current)
@@ -133,7 +153,7 @@ let ()=
         if not(same actual (Ok scalar))then
           failwith(Printf.sprintf "uniform executor %s reducer=%s seed=%s count=%d time=%g domains=%d expected=%s actual=%s"
             (Flow.Ty.to_string ty)reducer(Option.value ~default:"default" seed)count time domains
-            (E.show scalar)(match actual with Ok value->E.show value|Error d->Flow.Diagnostic.to_string d));
+            (E.show scalar)(match actual with Ok value->E.show value|Error d->Diagnostic.to_string d));
         let prepared=ok(P.Private.prepare ~resolve:(resolve_source current) ?measure:(observed ~fast gpu) packed ~live)in
         assert(Array.exists(fun actual->bytes actual=bytes uniform)prepared.uniforms);
         if (!cpu>0)<>packed_expected || (!gpu>0)<>packed_expected then
@@ -153,33 +173,33 @@ let ()=
      Float,"+",None,Some "0",true,true];
   List.iter(fun body->
     let value=evaluate(workspace [] body)in
-    let packed=match value with E.Residual r->P.compile r(E.Private.residual_view r).term
+    let packed=match value with E.Residual r->P.compile r(E.Residual.residual_view r).term
       |> Option.get|_->assert false in
     assert(not(P.Private.ordered_add packed));
-    List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
-      let live=Frame_input.at_time 0. in
+    List.iter(fun domains->Parallel.run ~domains(fun()->
+      let live=Input.at_time 0. in
       assert(same(P.force packed ~live)(E.Private.force_reference value ~live))))[1;8])
     ["(scan [a [t 0.0]] [x (map (fn [x] [x -0.0]) (array/range 32769))] (+ a x))";
      "(fold [a [t 0.0]] [x (array/range 32769)] (+ a x))"];
   let value=evaluate(workspace []
     "(fold [a [t 0.0 0.0]] [x (array/vec3 32769 [0.25 -0.0 1.0])] (+ a x))")in
-  let packed=match value with E.Residual r->P.compile r(E.Private.residual_view r).term
+  let packed=match value with E.Residual r->P.compile r(E.Residual.residual_view r).term
     |> Option.get|_->assert false in
   (* Same instructions as a supported reduction, but the fold is a Product loop. *)
   assert((P.Private.view packed).code=[|P.Input(0,3,0);Input(0,3,1);Input(0,3,2);
     Accumulator 0;Accumulator 1;Accumulator 2;
     Binary(Add,3,0);Binary(Add,4,1);Binary(Add,5,2)|]);
   assert(not(P.Private.ordered_add packed));
-  List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
-    let live=Frame_input.at_time 0.25 in
+  List.iter(fun domains->Parallel.run ~domains(fun()->
+    let live=Input.at_time 0.25 in
     assert(same(P.force packed ~live)(E.Private.force_reference value ~live))))[1;8];
   (* A resolver may advance a fold before a later reduction error; both callers roll it back. *)
   let fold=evaluate(workspace [] "(state [a 0.0] (+ a 1.0))")in
-  let live=Frame_input.at_time 0. in
+  let live=Input.at_time 0. in
   List.iter(fun(ty,failed_component)->
   let value,sum,packed=fixture ty "+"in
   let width=width ty in
-  List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+  List.iter(fun domains->Parallel.run ~domains(fun()->
     List.iter(fun count->List.iter(fun gpu->
       let state=E.create_state()in let before=E.state_stamp state in
       let values=Array.init(count*width)(fun i->
@@ -187,11 +207,11 @@ let ()=
       let current=ref(if width=1 then E.Float_array values else E.Vec3_array values)in
       let original=bytes !current in
       let resolve value=ignore(ok(E.Private.force_reference ~state fold ~live));resolve_source current value in
-      let reference_state=E.create_state()in
+      let reference_state=E.create_state()in let reference_before=E.state_stamp reference_state in
       let reference_resolve value=ignore(ok(E.Private.force_reference ~state:reference_state fold ~live));
         resolve_source current value in
       let expected=E.Private.force_reference ~state:reference_state ~resolve:reference_resolve value ~live in
-      assert(Result.is_error expected && E.state_stamp reference_state=before);
+      assert(Result.is_error expected && E.state_stamp reference_state=reference_before);
       let result=if gpu then Result.map(fun _->E.Int 0)(P.Private.prepare ~state ~resolve packed ~live)
         else P.force ~state ~resolve packed ~live in
       assert(same result expected && E.state_stamp state=before);
@@ -208,4 +228,4 @@ let ()=
       else assert(same(P.force ~state ~resolve packed ~live)expected);
       assert(ok(E.Private.force_reference ~state fold ~live)=E.Float 1.)) [false;true]) [2;16385])) [1;8])
     [Flow.Ty.Float,0;Vec3,0;Vec3,1;Vec3,2];
-  print_endline "Captured uniform packed/reference parity, ordered named reductions, changing inputs, errors and rollback passed"
+  print_endline "Captured uniform packed/reference parity, ordered named reductions, changing inputs, errors and rollback passed"; flush stdout

@@ -8,14 +8,14 @@ let merge_of inputs =
 
 let run () =
   let source = Lisp_sop.node {|(sop/box :normals "Auto" :connectivity "Triangles" :size [1.0 1.0 1.0])|} in
-  let metadata_schema = Parameter.schema ~name:"metadata_sharing" ~default:0.
-      [Parameter.field ~name:"value" ~kind:(Parameter.floating ~min:(-1.) ~max:1. ())
+  let metadata_schema = Param.schema ~name:"metadata_sharing" ~default:0.
+      [Param.field ~name:"value" ~kind:(Param.floating ~min:(-1.) ~max:1. ())
         ~default:0. ~get:Fun.id ~set:(fun value _ -> value) ()] in
-  let metadata = List.hd (Parameter.view metadata_schema 0.) in
-  let signed = { metadata with name="signed"; current=Parameter.Float_value (-0.) }
-  and text = { metadata with name="text"; kind=Parameter.Text_view;
-    default=Parameter.Text_value (String.make 256 'a');
-    current=Parameter.Text_value (String.make 256 'a') } in
+  let metadata = List.hd (Param.view metadata_schema 0.) in
+  let signed = { metadata with name="signed"; current=Param.Float_value (-0.) }
+  and text = { metadata with name="text"; kind=Param.Text_view;
+    default=Param.Text_value (String.make 256 'a');
+    current=Param.Text_value (String.make 256 'a') } in
   let fields = [metadata; signed; text] in
   let factories = [
     Edit_graph.factory ~fields ~key:"metadata" ~label:"Metadata"
@@ -28,7 +28,7 @@ let run () =
         check (value.default == value.current && text.default == text.current)
           "factory metadata retained duplicate immutable default values";
         (match signed.current with
-         | Parameter.Float_value current ->
+         | Param.Float_value current ->
              check (Int64.bits_of_float current = Int64.bits_of_float (-0.))
                "factory metadata sharing changed signed-zero bits"
          | _ -> fail "factory metadata sharing changed the value kind")

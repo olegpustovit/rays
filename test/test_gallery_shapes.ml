@@ -34,7 +34,7 @@ let disc = Rdk.Line_geometry.points (Array.init 80 (fun i ->
   let a = float i *. 2.399963 and r = 1.8 *. sqrt (float i /. 79.) in
   r *. cos a, r *. sin a, 0.))
 let gyroid () = Rdk.Iso_surface.extract_dense ~resolution:(20,20,20)
-  ~min:(Vec3.create (-1.4) (-1.4) (-1.4)) ~max:(Vec3.create 1.4 1.4 1.4) ~iso:0.
+  ~min:(Rays_math.Vec3.create (-1.4) (-1.4) (-1.4)) ~max:(Rays_math.Vec3.create 1.4 1.4 1.4) ~iso:0.
   ~field:(Rdk.Iso_surface.Field.custom (fun p ->
     let x=p.(0)*.2.6 and y=p.(1)*.2.6 and z=p.(2)*.2.6 in
     sin x *. cos y +. sin y *. cos z +. sin z *. cos x)) () |> Result.get_ok
@@ -61,9 +61,9 @@ let bounds geometry = Rdk.Bound.Private.selected_bounds ~grain:16384
   ~operation:"gallery comparison" None geometry |> Result.get_ok
 let scene geometry =
   let mesh=Rdk_rays.Rays_mesh.to_mesh geometry |> Result.get_ok in
-  Scene3.create [Scene3.mesh ~cull:Cull_none ~material:(Material.unlit Color.white) mesh]
+  Scene3.create [Scene3.mesh ~cull:Cull_none ~material:(Material.unlit Rays_math.Color.white) mesh]
 let packed geometry =
-  let camera=Camera.orthographic ~height:4. ~at:(Vec3.create 0. 0. 4.) ~target:Vec3.zero () in
+  let camera=Camera.orthographic ~height:4. ~at:(Rays_math.Vec3.create 0. 0. 4.) ~target:Rays_math.Vec3.zero () in
   let staged=Scene.Private.stage_native ~width:128 ~height:128 [Scene.view3d ~camera (scene geometry)]
     |> Result.get_ok in
   (List.hd staged.scene3).entries.(0)
@@ -88,8 +88,8 @@ let geometry_check name actual expected =
     let actual = measure actual |> Result.get_ok and expected = measure expected |> Result.get_ok in
     assert (abs_float (actual-.expected)<1e-9)) [Rdk.Analysis.surface_area;Rdk.Analysis.signed_volume]
 let pixels canvas camera geometry =
-  Canvas.render canvas [Scene.clear Color.black;Scene.view3d ~camera (scene geometry)];
-  Canvas.pixels canvas
+  Result.get_ok (Canvas.render canvas [Scene.clear Rays_math.Color.black;Scene.view3d ~camera (scene geometry)]);
+  Result.get_ok (Canvas.pixels canvas)
 let run native =
   let session = Sop.Session.create ~max_entries:64 ~max_payload_bytes:64_000_000 |> Result.get_ok in
   Fun.protect ~finally:(fun () -> Sop.Session.close session) (fun () ->
@@ -100,13 +100,13 @@ let run native =
         let b=bounds expected in
         let size=max b.size.x (max b.size.y b.size.z) in
         let canvas=Canvas.create_exn ~width:128 ~height:128 in
-        Fun.protect ~finally:(fun () -> Canvas.destroy canvas) (fun () ->
+        Fun.protect ~finally:(fun () -> ignore(Canvas.destroy canvas)) (fun () ->
           List.iter (fun (x,y,z) ->
             let camera = Camera.orthographic ~height:(size*.3.) ~target:b.center
-              ~at:(Vec3.add b.center (Vec3.create (x*.size) (y*.size) (z*.size))) () in
+              ~at:(Rays_math.Vec3.add b.center (Rays_math.Vec3.create (x*.size) (y*.size) (z*.size))) () in
             let expected=pixels canvas camera expected and actual=pixels canvas camera actual in
             assert (Array.length actual=128*128 && expected=actual);
-            let visible=Array.fold_left (fun n (c:Color.t) -> if c.r>0 then n+1 else n) 0 actual in
+            let visible=Array.fold_left (fun n (c:Rays_math.Color.t) -> if c.r>0 then n+1 else n) 0 actual in
             assert (visible>100 && visible<Array.length actual/2))
             [3.,2.,4.;-3.,2.,4.;0.,3.,4.;0.,-3.,4.])
       end) (fixtures ()));

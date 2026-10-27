@@ -1,0 +1,29 @@
+kind     style                 n |         ms          bytes  kernels
+circles  uniform          100000 |      1.035         824608        1
+circles  radius           100000 |      1.033         824704        1
+circles  fill             100000 |      1.077         824528        1
+circles  per-instance     100000 |      1.054         824624        1
+circles  moving radius    100000 |      1.694        1639392        2
+circles  moving fill      100000 |      1.775        1639208        2
+circles  moving both      100000 |      2.424        2454176        3
+rects    uniform          100000 |      1.055         824520        1
+rects    radius           100000 |      1.011         824568        1
+rects    fill             100000 |      1.040         824440        1
+rects    per-instance     100000 |      1.047         824488        1
+rects    moving radius    100000 |      1.817        1639296        2
+rects    moving fill      100000 |      1.750        1639120        2
+rects    moving both      100000 |      2.401        2454080        3
+circles  uniform         1000000 |      4.900        8024536        1
+circles  radius          1000000 |      4.844        8024632        1
+circles  fill            1000000 |      4.837        8024456        1
+circles  per-instance    1000000 |      5.121        8024552        1
+circles  moving radius   1000000 |     85.935       16039104        2
+circles  moving fill     1000000 |     11.159       16038920        2
+circles  moving both     1000000 |     19.371       24053816        3
+rects    uniform         1000000 |      7.409        8024448        1
+rects    radius          1000000 |      5.410        8024496        1
+rects    fill            1000000 |      5.315        8024368        1
+rects    per-instance    1000000 |      5.266        8024416        1
+rects    moving radius   1000000 |     10.559       16039008        2
+rects    moving fill     1000000 |     10.742       16038832        2
+rects    moving both     1000000 |     15.613       24053720        3

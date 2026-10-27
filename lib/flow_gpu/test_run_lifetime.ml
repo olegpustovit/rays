@@ -50,7 +50,7 @@ let ()=
   let run=R.Private.create_owned device queue cache msl in
   Fun.protect ~finally:(fun()->R.close run;Flow_gpu.Pipelines.close cache;
     ignore(B.destroy_queue queue);ignore(B.destroy_device device))(fun()->
-    let values=Test_program.ok(Flow_ir.Packed.Private.prepare packed ~live:(Frame_input.at_time 1.))in
+    let values=Test_program.ok(Flow_ir.Packed.Private.prepare packed ~live:(Input.at_time 1.))in
     let first=Test_program.ok(R.dispatch run values)in
     assert(R.buffer first<>None);
     assert(Domain.join(Domain.spawn(fun()->R.buffer first=None)));
@@ -75,7 +75,7 @@ let ()=
     assert(R.Private.input_uploaded_bytes run=5*4096);
     fail:=true;
     let larger=List.assoc "arithmetic"(Test_program.fixtures 65536)in
-    let values=Test_program.ok(Flow_ir.Packed.Private.prepare larger ~live:(Frame_input.at_time 1.))in
+    let values=Test_program.ok(Flow_ir.Packed.Private.prepare larger ~live:(Input.at_time 1.))in
     assert(Result.is_error(R.dispatch run values));
     assert(R.buffer first=None && Result.is_error(R.readback first));
     assert(R.Private.buffer_creations run=5 && !submitted=8 && !input_writes=7);
@@ -83,7 +83,7 @@ let ()=
     let fresh=Test_program.ok(R.dispatch run values)in
     assert(R.buffer fresh<>None);
     invalid_output:=true;
-    assert(match R.dispatch run values with Error d->d.Flow.Diagnostic.code="E_KERNEL"|Ok _->false);
+    assert(match R.dispatch run values with Error d->d.Diagnostic.code="E_KERNEL"|Ok _->false);
     assert(R.buffer fresh=None);
     invalid_output:=false;
     let invalid={values with arrays=Array.map Array.copy values.arrays}in
@@ -95,7 +95,7 @@ let ()=
     let packed=List.assoc "noise"(Test_program.fixtures 1024)in
     let noise=R.Private.create_owned device queue cache (Test_program.ok(Flow_gpu.Emit.kernel packed))in
     Fun.protect ~finally:(fun()->R.close noise)(fun()->
-      let values=Test_program.ok(Flow_ir.Packed.Private.prepare packed ~live:(Frame_input.at_time 1.))in
+      let values=Test_program.ok(Flow_ir.Packed.Private.prepare packed ~live:(Input.at_time 1.))in
       fail_table:=true;
       assert(Result.is_error(R.dispatch noise values));
       assert(!table_writes=1);

@@ -5,7 +5,7 @@ let get = Result.get_ok
 let path = Sys.argv.(1)
 let workspace = In_channel.with_open_bin path In_channel.input_all
   |> Rays_editor.Workspace.load |> Result.map_error (fun ds ->
-      String.concat "\n" (List.map Flow.Diagnostic.to_string ds)) |> get
+      String.concat "\n" (List.map Diagnostic.to_string ds)) |> get
 let graph = Rays_editor.Workspace.sop_graphs workspace |> get |> List.assoc "shards"
 let fracture = Graph.inspect graph |> List.find (fun (i : Graph.info) -> i.operation = "boolean")
   |> fun i -> Graph.find graph ~node_id:i.id |> Option.get
@@ -49,8 +49,11 @@ let () = with_cook 1 (fun cook ->
   and fractured_volume = Rdk.Analysis.signed_volume g |> get in
   assert (abs_float (original_volume -. fractured_volume) < 1e-7 *. abs_float original_volume);
   let colored = cook graph in
-  let prepared = Rays_editor.Surface.of_output colored |> get in
-  let drawings = Rays_editor.Surface.scene3 graph prepared |> Scene3.Private.drawings in
+  let geometry = Sop.Payload.geometry colored.payload |> Result.map_error Diagnostic.to_string |> get in
+  let prepared = Rdk_rays.Surface.of_geometry ?instances:colored.instances geometry |> get in
+  let explosion = Rdk_rays.Packed_pieces.explosion
+      ~operation:(Node.operation graph) ~fields:(Node.parameter_fields graph) in
+  let drawings = Rdk_rays.Surface.scene3 ?explosion prepared |> Scene3.Private.drawings in
   assert (List.length drawings = 4);
   Printf.printf "studio fracture: %d closed manifold shards, %d faces, volume %.9g; exact across 1/4 domains; four material batches\n%!"
     !count (Rdk.Geometry.primitive_count g) fractured_volume)

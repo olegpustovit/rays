@@ -54,11 +54,10 @@ type driver_blit_encoder={
   end_blit:unit->(unit,Error.t)result}
 type shader_stage=Vertex|Fragment
 type winding=Clockwise|Counter_clockwise
-type depth_state={depth_compare:Render_pass.comparison;depth_write:bool;stencil:Render_pass.stencil_state option}
+type depth_state={depth_compare:Render_pass.comparison;depth_write:bool}
 type driver_color_attachment={color:token;color_resolve:token option;color_load:Render_pass.load;color_store:Render_pass.store;color_clear:float*float*float*float}
 type driver_depth_attachment={depth:token;depth_load:Render_pass.load;depth_store:Render_pass.store;depth_clear:float}
-type driver_stencil_attachment={stencil:token;stencil_load:Render_pass.load;stencil_store:Render_pass.store;stencil_clear:int}
-type driver_render_target={target_colors:driver_color_attachment array;target_depth:driver_depth_attachment option;target_stencil:driver_stencil_attachment option;target_width:int;target_height:int;target_samples:int}
+type driver_render_target={target_colors:driver_color_attachment array;target_depth:driver_depth_attachment option;target_width:int;target_height:int;target_samples:int}
 type driver_batch_draw={batch_pipeline:token;batch_buffers:(shader_stage*int*token*int64)array;batch_primitive:Render_pass.primitive;batch_index:(Render_pass.index_type*token*int64*int64)option;batch_vertex_start:int;batch_vertex_count:int;batch_instances:int}
 type driver_render_encoder={
   render_set_pipeline:token->(unit,Error.t)result;
@@ -71,7 +70,6 @@ type driver_render_encoder={
   set_cull:Render_pass.cull->(unit,Error.t)result;
   set_winding:winding->(unit,Error.t)result;
   set_depth_state:depth_state option->(unit,Error.t)result;
-  set_stencil_reference:front:int32->back:int32->(unit,Error.t)result;
   draw:primitive:Render_pass.primitive->first:int->count:int->instances:int->(unit,Error.t)result;
   draw_indexed:primitive:Render_pass.primitive->index_type:Render_pass.index_type->token->offset:int64->count:int64->instances:int->(unit,Error.t)result;
   draw_indexed_indirect:primitive:Render_pass.primitive->index_type:Render_pass.index_type->token->offset:int64->token->arguments_offset:int64->(unit,Error.t)result;
@@ -109,7 +107,7 @@ type driver_queue={complete_through:int64->(unit,Error.t)result;poll_through:int
   gpu_duration:int64->float option;
   gpu_timing:unit->gpu_timing;
   destroy_queue:unit->(unit,Error.t)result}
-type driver_device={device_handle:Handle.device;capabilities:Caps.t;create_buffer:Types.memory->Types.buffer_descriptor->(driver_resource,Error.t)result;create_texture:Types.texture_descriptor->(driver_resource,Error.t)result;create_depth_texture:Types.texture_descriptor->(driver_resource,Error.t)result;create_stencil_texture:Types.texture_descriptor->(driver_resource,Error.t)result;create_library:Shader.t->(driver_library,Error.t)result;
+type driver_device={device_handle:Handle.device;capabilities:Caps.t;create_buffer:Types.memory->Types.buffer_descriptor->(driver_resource,Error.t)result;create_texture:Types.texture_descriptor->(driver_resource,Error.t)result;create_depth_texture:Types.texture_descriptor->(driver_resource,Error.t)result;create_library:Shader.t->(driver_library,Error.t)result;
   create_accel:driver_accel_descriptor->(driver_accel,Error.t)result;
   instance_layout:instance_kind->Acceleration.instance_layout;
   create_sampler:Types.sampler_descriptor->(driver_sampler,Error.t)result;
@@ -141,11 +139,10 @@ let device_handle (value:device)=value.handle
 let live op (device:device)=if device.dead then error op Error.Stale_handle"device is destroyed"else Ok()
 let make_resource (device:device) raw={raw;handle=Handle.create~device:device.handle;
   device;dead=false}
-let create_buffer ?(memory=Types.Shared) device descriptor=match live"Backend.create_buffer"device with Error _ as e->e|Ok()->match Types.validate_buffer device.raw.capabilities descriptor with Error _ as e->e|Ok()->match device.raw.create_buffer memory descriptor with Error _ as e->e|Ok raw->device.children<-device.children+1;Ok{resource=make_resource device raw;buffer_descriptor=descriptor;memory}
+let create_buffer ?(memory=Types.Shared) device descriptor=match live"Backend.create_buffer"device with Error _ as e->e|Ok()->match Validation.validate_buffer device.raw.capabilities descriptor with Error _ as e->e|Ok()->match device.raw.create_buffer memory descriptor with Error _ as e->e|Ok raw->device.children<-device.children+1;Ok{resource=make_resource device raw;buffer_descriptor=descriptor;memory}
 let buffer_size (value:buffer)=value.buffer_descriptor.size
-let create_texture device descriptor=match live"Backend.create_texture"device with Error _ as e->e|Ok()->match Types.validate_texture device.raw.capabilities descriptor with Error _ as e->e|Ok()->match device.raw.create_texture descriptor with Error _ as e->e|Ok raw->device.children<-device.children+1;Ok{resource=make_resource device raw;texture_descriptor=descriptor}
-let create_depth_texture device descriptor=match live"Backend.create_depth_texture"device with Error _ as e->e|Ok()->match Types.validate_texture device.raw.capabilities descriptor with Error _ as e->e|Ok() when not(List.mem Types.Render_attachment descriptor.usage)||List.exists(fun usage->usage<>Types.Render_attachment)descriptor.usage->error"Backend.create_depth_texture"Error.Invalid_argument"depth textures are render-attachment only"|Ok()->match device.raw.create_depth_texture descriptor with Error _ as e->e|Ok raw->device.children<-device.children+1;Ok{resource=make_resource device raw;texture_descriptor=descriptor}
-let create_stencil_texture device descriptor=match live"Backend.create_stencil_texture"device with Error _ as e->e|Ok()->match Types.validate_texture device.raw.capabilities descriptor with Error _ as e->e|Ok() when not(List.mem Types.Render_attachment descriptor.usage)||List.exists(fun usage->usage<>Types.Render_attachment)descriptor.usage->error"Backend.create_stencil_texture"Error.Invalid_argument"stencil textures are render-attachment only"|Ok()->match device.raw.create_stencil_texture descriptor with Error _ as e->e|Ok raw->device.children<-device.children+1;Ok{resource=make_resource device raw;texture_descriptor=descriptor}
+let create_texture device descriptor=match live"Backend.create_texture"device with Error _ as e->e|Ok()->match Validation.validate_texture device.raw.capabilities descriptor with Error _ as e->e|Ok()->match device.raw.create_texture descriptor with Error _ as e->e|Ok raw->device.children<-device.children+1;Ok{resource=make_resource device raw;texture_descriptor=descriptor}
+let create_depth_texture device descriptor=match live"Backend.create_depth_texture"device with Error _ as e->e|Ok()->match Validation.validate_texture device.raw.capabilities descriptor with Error _ as e->e|Ok() when not(List.mem Types.Render_attachment descriptor.usage)||List.exists(fun usage->usage<>Types.Render_attachment)descriptor.usage->error"Backend.create_depth_texture"Error.Invalid_argument"depth textures are render-attachment only"|Ok()->match device.raw.create_depth_texture descriptor with Error _ as e->e|Ok raw->device.children<-device.children+1;Ok{resource=make_resource device raw;texture_descriptor=descriptor}
 let create_queue device=
   let operation="Backend.create_queue"in
   match live operation device with Error _ as e->e|Ok()->
@@ -172,6 +169,10 @@ let read_texture_into (value:texture) ~bytes_per_row ~destination=
 let complete_through (queue:queue) epoch=if queue.dead then error"Backend.complete_through"Error.Stale_handle"queue is destroyed"else queue.raw.complete_through epoch
 let poll_through (queue:queue) epoch=if queue.dead then error"Backend.poll_through"Error.Stale_handle"queue is destroyed"else queue.raw.poll_through epoch
 let completed_epoch (queue:queue)=queue.raw.completed_epoch()
+type status = Pending | Completed
+let status queue (receipt:receipt) =
+  Result.map (function true -> Completed | false -> Pending)
+    (poll_through queue receipt.epoch)
 let configure (surface:surface) value=
   if surface.dead then error"Backend.configure"Error.Stale_handle"surface is destroyed"
   else if surface.frames<>0 then error"Backend.configure"Error.Invalid_state"surface has acquired frames"
@@ -568,13 +569,12 @@ type argument={argument_raw:driver_argument;argument_device:device;mutable argum
 type render_encoder={render_raw:driver_render_encoder;render_commands:commands;mutable render_open:bool;mutable render_pipeline_set:bool;mutable render_shape:pipeline_shape}
 type color_attachment={texture:texture;resolve:texture option;load:Render_pass.load;store:Render_pass.store;clear:float*float*float*float}
 type depth_attachment={depth_texture:texture;depth_load:Render_pass.load;depth_store:Render_pass.store;depth_clear:float}
-type stencil_attachment={stencil_texture:texture;stencil_load:Render_pass.load;stencil_store:Render_pass.store;stencil_clear:int}
-type render_target={colors:color_attachment list;depth:depth_attachment option;stencil:stencil_attachment option}
+type render_target={colors:color_attachment list;depth:depth_attachment option}
 type batch_draw={pipeline:pipeline;buffers:(shader_stage*int*buffer*int64)array;primitive:Render_pass.primitive;index:(Render_pass.index_type*buffer*int64*int64)option;vertex_start:int;vertex_count:int;instances:int}
 let create_sampler device descriptor=
   let op="Backend.create_sampler"in
   match live op device with Error _ as e->e|Ok()->
-  match Types.validate_sampler descriptor with Error _ as e->e|Ok()->
+  match Validation.validate_sampler descriptor with Error _ as e->e|Ok()->
   match device.raw.create_sampler descriptor with Error _ as e->e|Ok raw->
   device.children<-device.children+1;
   Ok{sampler_raw=raw;sampler_device=device;sampler_dead=false}
@@ -700,25 +700,17 @@ let render_encoder commands (target:render_target)=
     else if d.depth_store=Render_pass.Resolve then error op Error.Invalid_argument"depth attachments cannot resolve"
     else if not(Float.is_finite d.depth_clear)||d.depth_clear<0.||d.depth_clear>1. then error op Error.Invalid_argument"depth clear is outside [0,1]"else Ok()in
   match depth_ok with Error _ as e->e|Ok()->
-  let stencil_ok=match target.stencil with None->Ok()|Some s->
-    match attachment_check s.stencil_texture with Error _ as e->e|Ok()->
-    if not(same_extent s.stencil_texture)||s.stencil_texture.texture_descriptor.sample_count<>samples then error op Error.Invalid_argument"stencil attachment extent or sample count differs"
-    else if s.stencil_store=Render_pass.Resolve then error op Error.Invalid_argument"stencil attachments cannot resolve"
-    else if s.stencil_clear<0||s.stencil_clear>255 then error op Error.Invalid_argument"stencil clear is outside [0,255]"else Ok()in
-  match stencil_ok with Error _ as e->e|Ok()->
   let r,g,b,a=color.clear in
   if not(List.for_all Float.is_finite[r;g;b;a])then error op Error.Invalid_argument"clear color is not finite"else
   let token (t:texture)=t.resource.raw.token in
   let driver_target={target_colors=[|{color=token color.texture;color_resolve=Option.map token color.resolve;color_load=color.load;color_store=color.store;color_clear=color.clear}|];
     target_depth=Option.map(fun d->{depth=token d.depth_texture;depth_load=d.depth_load;depth_store=d.depth_store;depth_clear=d.depth_clear})target.depth;
-    target_stencil=Option.map(fun s->{stencil=token s.stencil_texture;stencil_load=s.stencil_load;stencil_store=s.stencil_store;stencil_clear=s.stencil_clear})target.stencil;
     target_width=width;target_height=height;target_samples=samples}in
   match commands.commands_raw.render_encoder driver_target with Error _ as e->e|Ok raw->
   let queue=commands.commands_queue in
   mark_submitted queue color.texture.resource;
   Option.iter(fun (t:texture)->mark_submitted queue t.resource)color.resolve;
   Option.iter(fun d->mark_submitted queue d.depth_texture.resource)target.depth;
-  Option.iter(fun s->mark_submitted queue s.stencil_texture.resource)target.stencil;
   commands.state<-Encoding;
   Ok{render_raw=raw;render_commands=commands;render_open=true;render_pipeline_set=false;render_shape=Vertex_shape}
 let open_render op (encoder:render_encoder)=if encoder.render_open then Ok()else error op Error.Invalid_state"render encoder is ended"
@@ -762,7 +754,6 @@ let set_scissor (encoder:render_encoder) rect=
 let set_cull (encoder:render_encoder) cull=match open_render"Backend.set_cull"encoder with Error _ as e->e|Ok()->encoder.render_raw.set_cull cull
 let set_winding (encoder:render_encoder) winding=match open_render"Backend.set_winding"encoder with Error _ as e->e|Ok()->encoder.render_raw.set_winding winding
 let set_depth_state (encoder:render_encoder) state=match open_render"Backend.set_depth_state"encoder with Error _ as e->e|Ok()->encoder.render_raw.set_depth_state state
-let set_stencil_reference (encoder:render_encoder) ~front ~back=match open_render"Backend.set_stencil_reference"encoder with Error _ as e->e|Ok()->encoder.render_raw.set_stencil_reference ~front ~back
 let vertex_pipeline op (encoder:render_encoder)=
   if not encoder.render_pipeline_set then error op Error.Invalid_state"no render pipeline is set"
   else if encoder.render_shape<>Vertex_shape then error op Error.Invalid_state"vertex draws need a vertex/fragment pipeline"else Ok()

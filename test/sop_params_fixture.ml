@@ -59,11 +59,11 @@ module Dynamic_schema_fixture = struct
   let schema _parameters node =
     let labels = List.mapi (fun index node -> Printf.sprintf "%d · %s" index (Node.label node))
       (Node.inputs node) in
-    Parameter.schema ~name:"parameters" ~default:parameters_default
-      (List.map (fun (Parameter.Field field as original) -> match field.kind with
-        | Parameter.Integer _ -> Parameter.Field {field with
-            kind=Parameter.index_choice labels}
-        | _ -> original) (Parameter.fields parameters_schema))
+    Param.schema ~name:"parameters" ~default:parameters_default
+      (List.map (fun (Param.Field field as original) -> match field.kind with
+        | Param.Integer _ -> Param.Field {field with
+            kind=Param.index_choice labels}
+        | _ -> original) (Param.fields parameters_schema))
   let build = parameters_build ~schema (fun ~label:_ parameters inputs ->
     match inputs with
     | _ :: _ :: _ ->

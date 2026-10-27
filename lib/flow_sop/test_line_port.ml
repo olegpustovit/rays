@@ -3,13 +3,13 @@ open Rdk_test_support
 module N = Sop.Node
 module P = Param
 module S = Flow.Syntax
-let checked = function Ok value->value|Error d->fail(Flow.Diagnostic.to_string d)
+let checked = function Ok value->value|Error d->fail(Diagnostic.to_string d)
 let sources = Flow_sop.Catalog.sources() |>checked
 let factories=List.filter(fun f->Sop.Edit_graph.factory_key f<>"line")Sop_catalog.Editor.factories
 let catalog fs=Flow_sop.Catalog.of_factories ~nodes:[] ~version:Flow_sop.Manifest.version fs |>checked
 let checker forms=Flow_sop.Catalog.check_workspace ~sources ~ops:Flow_sop.Operators.all (catalog factories) forms
-let workspace=function Some w,ds when not(List.exists(fun(d:Flow.Diagnostic.t)->d.severity=Error)ds)->w
-  |_,ds->fail(String.concat "\n"(List.map Flow.Diagnostic.to_string ds))
+let workspace=function Some w,ds when not(List.exists(fun(d:Diagnostic.t)->d.severity=Diagnostic.Error_severity)ds)->w
+  |_,ds->fail(String.concat "\n"(List.map Diagnostic.to_string ds))
 let compile ?(reference=false) w=
   let lowered=Flow_sop.Lower.of_checked ~reference ~factories w |>checked in
   let graph=List.hd lowered.graphs in
@@ -31,8 +31,8 @@ let result ?(seed=0L) ?(time=0.) ?cancel session domains grain node=
   let context=Sop.Context.create ~seed ~time ?cancel ~domains ~grain () |>get_string_ok in
   Result.bind(Sop.Session.cook session ~context node)(fun cooked->Sop.Payload.geometry cooked.payload)
 let cook session domains grain node=match result session domains grain node with
-  |Ok geo->geo|Error error->fail(Sop.Diagnostic.error_to_string error)
-let cooked=function Ok value->value|Error error->fail(Sop.Diagnostic.error_to_string error)
+  |Ok geo->geo|Error error->fail(Diagnostic.error_to_string error)
+let cooked=function Ok value->value|Error error->fail(Diagnostic.error_to_string error)
 let keywords changes=
   let fields=N.parameter_fields(native changes) in
   let scalar=function P.Choice_value s|Text_value s->Printf.sprintf "%S" s
@@ -194,7 +194,7 @@ let projection ()=
     "Line actual Add_node/menu starter missing card";
   List.iter(fun expression->let forms=S.parse("(workspace bad (graph g :context sop "^expression^"))") |>checked in
     let _,errors=checker forms in
-    check(List.exists(fun(d:Flow.Diagnostic.t)->d.severity=Error)errors)"Line wrong input accepted")
+    check(List.exists(fun(d:Diagnostic.t)->d.severity=Diagnostic.Error_severity)errors)"Line wrong input accepted")
     ["(sop/line (sop/line))";"(sop/line :origin \"wrong\")";"(sop/line :kind \"wrong\")"];
   print_endline "Line native card/inspector, every physical Flow_edit gesture, bypass and bad input/choice projection"
 let live_parameters ()=
@@ -210,7 +210,7 @@ let live_parameters ()=
     let native_graph=List.hd native_lowered.graphs and native_state=Flow.Eval.create_state()in
     let native_lane=Flow_sop.Value_lane.create ~state:native_state ()and accumulated=ref 0. in
     session(fun s->List.iter(fun(time,dt)->
-      let live={(Frame_input.at_time time)with dt;frame=int_of_float time;tick=int_of_float time}in
+      let live={(Input.at_time time)with dt;frame=int_of_float time;tick=int_of_float time}in
       let network=Flow_sop.Value_lane.resolve ~live lane ~time graph.network |>checked in
       let actual=Sop.Edit_graph.compile_node network.geometry ~node_id:(Option.get graph.root) |>get_string_ok in
       let stamp=Flow.Eval.state_stamp state in

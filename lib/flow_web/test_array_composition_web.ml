@@ -2,7 +2,7 @@ module C=Array_composition_cases
 module E=Flow.Eval
 module I=Flow_ir
 let quote=Flow_web.Kernel_table.json_string
-let number value=if Int64.bits_of_float value=Int64.min_int then "-0" else Printf.sprintf "%.17g" value
+let number value=Param.float_text value
 let data=function
  |E.Int_array a->"BigInt64Array.from(["^String.concat ","(Array.to_list(Array.map(fun i->string_of_int i^"n")a))^"])"
  |Text_array a->"["^String.concat ","(Array.to_list(Array.map quote a))^"]"
@@ -10,7 +10,7 @@ let data=function
  |_->failwith "Composition array expected"
 let ()=
  let code=Buffer.create 1000000 in
- let path name="file://"^Filename.concat(Sys.getcwd())("../../tools/web/runtime/"^name)in
+ let path name="file://"^Filename.concat(Sys.getcwd())("../web_export/runtime/"^name)in
  Printf.bprintf code "import {createRuntime} from %s;import {createPool} from %s;import * as p from %s;const bytes=a=>Buffer.from(a.buffer,a.byteOffset,a.byteLength);const textBytes=a=>a.map(s=>Buffer.from(p.textBytes(s)).toString('hex'));const snapshot=v=>v instanceof p.PArray||v instanceof p.TextArray?snapshot(v.data):ArrayBuffer.isView(v)?bytes(v).toString('hex'):v instanceof Map?[...v].map(([n,x])=>[n,snapshot(x)]):Array.isArray(v)?v.map(snapshot):typeof v==='bigint'?v.toString():v;const pools=[null,await createPool({size:1}),await createPool({size:8})];try{\n"
   (quote(path "runtime.js"))(quote(path "workers.js"))(quote(path "prims.js"));
  (* Argument-free kernels with changing counts/captures also require actual
@@ -25,11 +25,9 @@ let ()=
  List.iter(fun(name,value)->
   let _,core=C.core value in
   if String.starts_with ~prefix:"closure-"name || name="fixed-count-changing-source" then
-    assert(Array.for_all(fun r->match I.Packed.of_region r with
-      |Ok packed->I.Packed.Private.argument_types packed=[||]|Error _->assert false)core.regions);
+    assert(Array.for_all(fun r->I.Packed.Private.argument_types r=[||])core.regions);
   let frame=C.ok(Flow_web.Js.frame core)in
-  let regions=Array.to_list(Array.map(fun r->let packed=match I.Packed.of_region r with
-    |Ok p->p|Error ds->failwith(String.concat ";"(List.map Flow.Diagnostic.to_string ds))in
+  let regions=Array.to_list(Array.map(fun r->let packed=r in
     let rec table=function I.Core.Region.Array_prepare _->true|Guarded(_,inner)->table inner|_->false in
     if Array.exists table r.I.Core.Region.code then begin
       assert(I.Packed.gpu_refusals packed<>[]);
@@ -38,7 +36,7 @@ let ()=
     "{source:"^quote(Flow_web.Js.region packed)^"}")core.regions)in
   Printf.bprintf code "{const {frame}=await import('data:text/javascript;base64,'+Buffer.from(%s).toString('base64'));const program={regions:[%s]};for(const pool of pools){const rt=createRuntime(program,{pool});const invoke=rt.invoke;rt.invoke=async function(k,args,plan){if(!plan)throw Error('Composition producer has no real source-preparation plan');const before=JSON.stringify(snapshot(args));try{return await invoke.call(this,k,args,plan)}finally{if(JSON.stringify(snapshot(args))!==before)throw Error('composition changed inputs')}};\n"
     (quote frame)(String.concat ","regions);
-  List.iter(fun(count,time)->let live={(Frame_input.at_time time)with frame=count;tick=count}in
+  List.iter(fun(count,time)->let live={(Input.at_time time)with frame=count;tick=count}in
    Printf.bprintf code "{const input={t:%s,dt:0,frame:%d,tick:%d,size:[1,1]};rt.current=input;\n" (number time)count count;
    (match E.Private.force_reference value ~live with
     |Ok expected->Printf.bprintf code "const got=await frame(input,rt.slots,rt),expected=%s;if(%b?JSON.stringify(textBytes(got.data))!==JSON.stringify(textBytes(expected)):!bytes(got.data).equals(bytes(expected)))throw Error(%s);\n"

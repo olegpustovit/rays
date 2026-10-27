@@ -25,16 +25,16 @@ let catalog = Editor_document.Contexts.catalog ~version:1 factories |> Result.ge
 (* wide enough for the outline to be the wide sheet's (300 points): node rows, data flow *)
 let width = 2400 and height = 1400
 let frame ?(buttons = []) ?(keys = []) mouse events count =
-  { (Test_editor_input.frame ~buttons ~keys mouse events count) with
-    width; height; size = width, height;   }
+  let frame = Test_editor_input.frame ~buttons ~keys mouse events count in
+  { frame with input = { frame.input with size = width, height } }
 
 let editor () =
   let workspace = match Doc.of_text catalog (bloom ()) with
-    | Ok d -> d | Error ds -> fail (String.concat "; " (List.map Flow.Diagnostic.to_string ds)) in
+    | Ok d -> d | Error ds -> fail (String.concat "; " (List.map Diagnostic.to_string ds)) in
   E3.create ~await:true ~workspace
     ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
       |> Result.map_error Rdk.Error.to_string)
-    ~scene3:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) ()
+    ~draw:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) ()
   |> function Ok e -> e | Error m -> fail m
 
 let dump_line = Test_workspace_shell.dump_line
@@ -45,16 +45,16 @@ let run () =
   let step ?(buttons = []) ?(keys = []) ?(mouse = (450., 300.)) events =
     incr count; e := E3.update !e (frame ~buttons ~keys mouse events !count) in
   let click ?(button = Input.LeftButton) (x, y) =
-    step ~mouse:(x, y) [ Event.MouseMoved (x, y) ];
-    step ~buttons:[ button ] ~mouse:(x, y) [ Event.MousePressed (button, (x, y)) ];
-    step ~mouse:(x, y) [ Event.MouseReleased (button, (x, y)) ];
+    step ~mouse:(x, y) [ Input.Pointer_moved (x, y) ];
+    step ~buttons:[ button ] ~mouse:(x, y) [ Input.Pointer_pressed (button, (x, y)) ];
+    step ~mouse:(x, y) [ Input.Pointer_released (button, (x, y)) ];
     step [] in
   for _ = 1 to 12 do step [] done;
   (* the sketch opens on flower's network,  *)
   check (dump_line !e "projection" = "graph" && dump_line !e "pane graph" = "flower")
     ("the sketch opens on the network of flower: " ^ dump_line !e "projection" ^ " / " ^ dump_line !e "pane graph");
   let shell () = match (E3.workspace !e |> fun w -> Editor_document.Contexts.of_workspace ~factories w) with
-    | Ok d -> Option.get d.Document.shell | Error d -> fail (Flow.Diagnostic.to_string d) in
+    | Ok d -> Option.get d.Document.shell | Error d -> fail (Diagnostic.to_string d) in
   let geometry () = Layout.geometry ~hidden:[ Layout.Timeline ] (shell ()).tree (frame (0., 0.) [] 0) in
   let outline () = (Option.get (Layout.find (geometry ()) Layout.Outline)).body in
   let graph_leaf () = Option.get (Layout.find (geometry ()) Layout.Graph) in
@@ -110,13 +110,13 @@ let run () =
   (* a Shift-click on empty canvas focuses the pane and keeps the selection *)
   let gx, gy, gw, _ = (graph_leaf ()).body in
   let p = float (gx + gw - 40), float (gy + 40) in  (* the top right: nothing is laid out there *)
-  step ~mouse:p [ Event.MouseMoved p ];
-  step ~keys:[ Input.Shift ] ~buttons:[ Input.LeftButton ] ~mouse:p [ Event.MousePressed (Input.LeftButton, p) ];
-  step ~keys:[ Input.Shift ] ~mouse:p [ Event.MouseReleased (Input.LeftButton, p) ];
+  step ~mouse:p [ Input.Pointer_moved p ];
+  step ~keys:[ Input.Shift ] ~buttons:[ Input.LeftButton ] ~mouse:p [ Input.Pointer_pressed (Input.LeftButton, p) ];
+  step ~keys:[ Input.Shift ] ~mouse:p [ Input.Pointer_released (Input.LeftButton, p) ];
   step ~mouse:p [];
   check (dump_line !e "scope selected" = "flower/heart") ("heart stays selected: " ^ dump_line !e "scope selected");
   let before = E3.workspace !e and label = E3.undo_label !e in
-  step ~mouse:p [ Event.KeyPressed (Input.KeyChar 'v') ];
+  step ~mouse:p [ Input.Key_pressed (Input.KeyChar 'v') ];
   step ~mouse:p []; step [];
   check (E3.workspace !e == before && E3.undo_label !e = label) "v changed the source or history";
   check (Sop.Node.label (E3.displayed_node !e) = "uv_sphere")
@@ -128,10 +128,10 @@ let run () =
     | Some (_, (x, y, w, h)) -> y +. (h /. 2.), x +. 76., w -. 86.
     | None -> fail "no petals slider" in
   let from = (slider_x +. (slider_w *. 0.3), slider_y) and to_ = (slider_x +. (slider_w *. 0.9), slider_y) in
-  step ~mouse:from [ Event.MouseMoved from ];
-  step ~buttons:[ Input.LeftButton ] ~mouse:from [ Event.MousePressed (Input.LeftButton, from) ];
-  step ~buttons:[ Input.LeftButton ] ~mouse:to_ [ Event.MouseMoved to_ ];
-  step ~mouse:to_ [ Event.MouseReleased (Input.LeftButton, to_) ];
+  step ~mouse:from [ Input.Pointer_moved from ];
+  step ~buttons:[ Input.LeftButton ] ~mouse:from [ Input.Pointer_pressed (Input.LeftButton, from) ];
+  step ~buttons:[ Input.LeftButton ] ~mouse:to_ [ Input.Pointer_moved to_ ];
+  step ~mouse:to_ [ Input.Pointer_released (Input.LeftButton, to_) ];
   step [];
   check (not (has (source !e) "(petals : int 3)") && has (source !e) "(petals : int ")
     ("the slider changed the input's default: " ^ source !e);
@@ -140,7 +140,7 @@ let run () =
   (* a double click on the input's name types in its field; Enter writes the default, an int *)
   let name_at = (slider_x -. 60., slider_y) in
   click name_at; click name_at;
-  step [ Event.TextInput "7" ]; step [ Event.KeyPressed Input.Enter ]; step [];
+  step [ Input.Text_input "7" ]; step [ Input.Key_pressed Input.Enter ]; step [];
   check (has (source !e) "(petals : int 7)") ("a typed default is written as an int: " ^ source !e);
   check (E3.undo_label !e = Some "Input default") "the typed default is a history entry";
   (* the search field lists matches instead of the tree *)

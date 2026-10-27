@@ -110,7 +110,7 @@ let signature value =
 let test_domain_exactness () =
   let left = triangle [|0.,0.,0.; 4.,0.,0.; 2.,4.,0.|]
   and right = triangle [|0.,3.,0.; 4.,3.,0.; 2.,-1.,0.|] in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       let _, _, value = pipeline left right in signature value) in
   if run 1 <> run 4 then fail "Boolean complex differs between domain counts"
 

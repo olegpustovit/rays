@@ -29,18 +29,23 @@ val with_library : descriptor list -> descriptor list
 
 val of_factories :
   version:int -> ?extra:descriptor list -> ?nodes:Flow.Defnode.t list -> Sop.Edit_graph.factory list ->
-  (Flow.Check.catalog, Flow.Diagnostic.t) result
+  (Flow.Check.catalog, Diagnostic.t) result
 
-val sources : unit -> (Flow.Syntax.t list, Flow.Diagnostic.t) result
+val sources : unit -> (Flow.Syntax.t list, Diagnostic.t) result
 (** Embedded node-library definitions, sorted by source filename. *)
 
 
-val node_definitions : unit -> (Flow.Defnode.t list, Flow.Diagnostic.t) result
+val node_definitions : unit -> (Flow.Defnode.t list, Diagnostic.t) result
+
+module Private : sig
+  val reachable_sources : Flow.Syntax.t list -> Flow.Syntax.t list -> Flow.Syntax.t list
+  val definitions_of_sources : Flow.Syntax.t list -> (Flow.Defnode.t list, Diagnostic.t) result
+end
 
 val check_workspace :
   ?ops:Flow.Op.t list -> ?library:bool -> ?sources:Flow.Syntax.t list ->
   Flow.Check.catalog -> Flow.Syntax.t list ->
-  Flow.Workspace.t option * Flow.Diagnostic.t list
+  Flow.Workspace.t option * Diagnostic.t list
 (** Check with the embedded definitions registered in [catalog] in scope. Authored form IDs stay intact;
     library forms receive a disjoint ID space and stay out of [Workspace.source]. [sources] overrides the embedded
     definitions for callers providing their own node library, regardless of catalog membership. *)

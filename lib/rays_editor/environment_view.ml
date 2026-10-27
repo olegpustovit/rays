@@ -1,6 +1,5 @@
 open Rays
 open Editor_document
-open Common
 module Image = Rays.Image
 open World_map
 
@@ -15,14 +14,14 @@ type ('rendered, 'camera) hidden_scene_cache = {
   height : int;
   rendered : 'rendered option;
   camera : 'camera;
-  background : Color.t;
+  background : Rays_math.Color.t;
   view_visible : bool;
   scene : Scene.t;
 }
 
 type canvas_picture = {size : int * int; dynamic : bool; scene : Scene.t;
   plan : Flow.Eval.plan;
-  prepared : Drawing.prepared option;
+  prepared : Flow_native.Drawing.prepared option;
   preview : (Flow.Ty.t * int) option  (* the node shown instead of the pane's own picture *)}
 
 (* A World bake for this frame: the preview size while a gesture or the
@@ -72,25 +71,25 @@ let hidden_entry ~background ~rendered ~camera ~paint_view ~cache core
     (frame : Frame.t) =
   let view_visible = Core.view_visible core in
   match cache with
-  | Some cached when cached.width = frame.width
-      && cached.height = frame.height && cached.rendered == rendered
+  | Some cached when cached.width = (fst frame.input.size)
+      && cached.height = (snd frame.input.size) && cached.rendered == rendered
       && cached.camera == camera && cached.background = background
       && cached.view_visible = view_visible -> cached
   | _ ->
       let scene = Scene.clear background ::
         world ~paint_view ~key:"@hidden" ~camera ~rendered ~view_visible
-          (0, 0, frame.width, frame.height) in
-      { width = frame.width; height = frame.height;
+          (0, 0, (fst frame.input.size), (snd frame.input.size)) in
+      { width = (fst frame.input.size); height = (snd frame.input.size);
         rendered; camera; background; view_visible; scene }
 
-let compose_view ?map ~canvases ~ui_visible ~background ~rendered ~focused ~views ~camera ~camera_of ~paint_view ~film
-    ~overlay ~guides ~cache core (frame : Frame.t) =
+let compose_view ?map ~canvases ~ui_visible ~background ~rendered ~focused ~views ~camera ~camera_of ~paint_view
+    ~guides ~cache core (frame : Frame.t) =
   let view_visible = Core.view_visible core in
   let paint_world = match map with
     | Some image when view_visible && core.Core.map_view -> (fun viewport ->
         let x, y, w, _ = map_rect viewport in
         [Scene.image image ~at:(x, y)
-           ~scale:(float w /. float (max 1 (Image.get_width image))) ()])
+           ~scale:(float w /. float (max 1 (fst(Image.Private.dimensions image)))) ()])
     | _ -> world ~paint_view ~key:(match core.Core.focus with View key -> key | _ -> "main")
         ~camera ~rendered:focused ~view_visible in
   (* each viewport is drawn from its own orbit *)
@@ -102,17 +101,11 @@ let compose_view ?map ~canvases ~ui_visible ~background ~rendered ~focused ~view
     (hidden_entry ~background ~rendered:focused ~camera ~paint_view ~cache core frame).scene
   else if not ui_visible then
     Scene.clear background :: (world ~paint_view ~key:"@hidden" ~camera ~rendered:focused ~view_visible
-      (0, 0, frame.width, frame.height))
+      (0, 0, (fst frame.input.size), (snd frame.input.size)))
     @ Core.machinery core ~all_ui_visible:false
   else
     let viewport = (Core.panes core frame).view in
-    let x, y, width, height = viewport in
     let guides = if view_visible then guides viewport else [] in
-    (* The sketch overlay is drawn in the film rect: its frame is that size. *)
-    let (fx, fy, _, _) as film = film viewport in
-    let overlay = [Scene.clip ~at:(x, y) ~w:width ~h:height
-        (Scene.translate fx fy (overlay (Core.graph core) (Core.prepared core)
-          (viewport_frame film frame)) :: guides)] in
     (* every viewport shows its own scene instance's image; the map replaces the focused one *)
     let floating = List.filter_map (fun (leaf : Pxui_shell.Layout.leaf) ->
       match leaf.panel with
@@ -128,8 +121,7 @@ let compose_view ?map ~canvases ~ui_visible ~background ~rendered ~focused ~view
           let root = List.find_map (fun (root, (panel, p)) ->
             if panel = Pxui_shell.Layout.View key && p = Some path then Some root else None) core.Core.pane_keys in
           (* inside the window's line-2 frame, which Chrome paints on the body's edge *)
-          let image = Scene.rect ~at:(x + 1, y + 1) ~w:(w - 2) ~h:(h - 2) ~fill:Color.white () :: image
-            @ (if bounds = viewport then overlay else []) in
+          let image = Scene.rect ~at:(x + 1, y + 1) ~w:(w - 2) ~h:(h - 2) ~fill:Rays_math.Color.white () :: image in
           painted, (root, image) :: windows) ([], []) (Core.view_bodies core frame) in
     let canvas_painted, canvas_windows = List.fold_left (fun (painted, windows) (leaf : Pxui_shell.Layout.leaf) -> match leaf.panel with
       | Canvas key ->
@@ -143,5 +135,5 @@ let compose_view ?map ~canvases ~ui_visible ~background ~rendered ~focused ~view
       | _ -> painted, windows) ([], []) (Core.geometry core core.Core.workspace frame).leaves in
     let under key = Option.value ~default:[] (List.assoc_opt (Some key) (canvas_windows @ windows)) in
     Scene.clear background :: List.concat (List.rev (canvas_painted @ painted))
-    @ (if List.exists (fun (_, _, bounds) -> bounds = viewport) floating then [] else overlay)
+    @ guides
     @ Core.machinery ~under core ~all_ui_visible:true

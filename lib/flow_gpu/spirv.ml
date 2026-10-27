@@ -1,0 +1,937 @@
+module P = Flow_ir.Packed
+
+type t = {
+  bytes : bytes;
+  entry : string;
+  interface : Ogpu.Shader.binding list;
+  layout : Flow_ir.Kernel_layout.t;
+  uniform_bytes : int;
+}
+
+(* Opcodes and operands follow the Khronos unified SPIR-V grammar:
+   https://registry.khronos.org/SPIR-V/ *)
+module Words = struct
+  type t = {
+    mutable next : int;
+    annotations : Buffer.t;
+    declarations : Buffer.t;
+    mutable body : Buffer.t;
+    constants : (int * int32, int) Hashtbl.t;
+    wide_constants : (int64, int) Hashtbl.t;
+  }
+
+  let create () =
+    {
+      next = 1;
+      annotations = Buffer.create 256;
+      declarations = Buffer.create 512;
+      body = Buffer.create 2048;
+      constants = Hashtbl.create 32;
+      wide_constants = Hashtbl.create 16;
+    }
+
+  let id w =
+    let result = w.next in
+    w.next <- result + 1;
+    result
+
+  let instruction into opcode operands =
+    Buffer.add_int32_le into (Int32.of_int (((List.length operands + 1) lsl 16) lor opcode));
+    List.iter (fun word -> Buffer.add_int32_le into (Int32.of_int word)) operands
+
+  let declare w opcode operands =
+    let result = id w in
+    instruction w.declarations opcode (result :: operands);
+    result
+
+  let value w ty opcode operands =
+    let result = id w in
+    instruction w.body opcode (ty :: result :: operands);
+    result
+
+  let constant w ty bits =
+    match Hashtbl.find_opt w.constants (ty, bits) with
+    | Some id -> id
+    | None ->
+        let result = id w in
+        instruction w.declarations 43 [ ty; result; Int32.to_int bits ];
+        Hashtbl.add w.constants (ty, bits) result;
+        result
+
+  let string_words text =
+    let bytes = Bytes.make ((String.length text + 4) / 4 * 4) '\000' in
+    Bytes.blit_string text 0 bytes 0 (String.length text);
+    List.init
+      (Bytes.length bytes / 4)
+      (fun index -> Int32.to_int (Bytes.get_int32_le bytes (index * 4)))
+
+  let wide_constant w ty bits =
+    match Hashtbl.find_opt w.wide_constants bits with
+    | Some id -> id
+    | None ->
+        let result = id w in
+        instruction w.declarations 43
+          [
+            ty;
+            result;
+            Int32.to_int (Int64.to_int32 bits);
+            Int32.to_int (Int64.to_int32 (Int64.shift_right_logical bits 32));
+          ];
+        Hashtbl.add w.wide_constants bits result;
+        result
+end
+
+type emitter = {
+  words : Words.t;
+  boolean : int;
+  uint : int;
+  sint : int;
+  float : int;
+  long : int option;
+  ulong : int option;
+  glsl : int;
+  uniform : int;
+  uniform_pointer : int;
+  storage_pointer : int;
+  uint_storage_pointer : int;
+  status : int;
+  table : int option;
+  noise : (int * int) option;
+  mutable block : int;
+  mutable loop_depth : int;
+}
+
+let fail message = raise (Diagnostic.Error (Diagnostic.error ~code:"E_GPU_FORM" message))
+let u e value = Words.constant e.words e.uint (Int32.of_int value)
+let f e value = Words.constant e.words e.float (Int32.bits_of_float value)
+let result e ty opcode operands = Words.value e.words ty opcode operands
+let long e = Option.get e.long
+let l e value = Words.wide_constant e.words (long e) value
+let from_long e value = result e e.float 111 [ value ]
+
+let floating e opcode operands =
+  let value = result e e.float opcode operands in
+  if List.mem opcode [ 129; 131; 133; 136; 140; 141 ] then
+    Words.instruction e.words.annotations 71 [ value; 42 ];
+  value
+
+let compare e opcode a b = result e e.boolean opcode [ a; b ]
+let select e ty condition yes no = result e ty 169 [ condition; yes; no ]
+let truth e value = compare e 183 value (f e 0.)
+let numeric_truth e value = select e e.float value (f e 1.) (f e 0.)
+let ext e opcode operands = result e e.float 12 (e.glsl :: opcode :: operands)
+
+let uniform e word =
+  let pointer =
+    result e e.uniform_pointer 65 [ e.uniform; u e 0; u e (word / 4); u e (word mod 4) ]
+  in
+  result e e.uint 61 [ pointer ]
+
+let uniform_float e word = result e e.float 124 [ uniform e word ]
+
+let load e variable index =
+  let pointer = result e e.storage_pointer 65 [ variable; u e 0; index ] in
+  result e e.float 61 [ pointer ]
+
+let store e variable index value =
+  let pointer = result e e.storage_pointer 65 [ variable; u e 0; index ] in
+  Words.instruction e.words.body 62 [ pointer; value ]
+
+let load_uint e variable index =
+  let pointer = result e e.uint_storage_pointer 65 [ variable; u e 0; index ] in
+  result e e.uint 61 [ pointer ]
+
+let store_uint e variable index value =
+  let pointer = result e e.uint_storage_pointer 65 [ variable; u e 0; index ] in
+  Words.instruction e.words.body 62 [ pointer; value ]
+
+let offset e index width component =
+  result e e.uint 128 [ result e e.uint 132 [ index; u e width ]; u e component ]
+
+let non_finite e value =
+  result e e.boolean 166 [ result e e.boolean 156 [ value ]; result e e.boolean 157 [ value ] ]
+
+let label e id =
+  Words.instruction e.words.body 248 [ id ];
+  e.block <- id
+
+let jump e id = Words.instruction e.words.body 249 [ id ]
+
+let record_status e condition bits =
+  let yes = Words.id e.words and after = Words.id e.words in
+  Words.instruction e.words.body 247 [ after; 0 ];
+  Words.instruction e.words.body 250 [ condition; yes; after ];
+  label e yes;
+  let pointer = result e e.uint_storage_pointer 65 [ e.status; u e 0; u e 0 ] in
+  ignore (result e e.uint 241 [ pointer; u e 1; u e 0; u e bits ]);
+  jump e after;
+  label e after
+
+let mark_invalid e invalid condition =
+  if e.loop_depth > 0 then record_status e condition 1
+  else invalid := result e e.boolean 166 [ !invalid; condition ]
+
+let conditional e ty condition yes no =
+  let yes_block = Words.id e.words and no_block = Words.id e.words and after = Words.id e.words in
+  Words.instruction e.words.body 247 [ after; 0 ];
+  Words.instruction e.words.body 250 [ condition; yes_block; no_block ];
+  label e yes_block;
+  let yes_value = yes () in
+  let yes_end = e.block in
+  jump e after;
+  label e no_block;
+  let no_value = no () in
+  let no_end = e.block in
+  jump e after;
+  label e after;
+  result e ty 245 [ yes_value; yes_end; no_value; no_end ]
+
+let noise_sample e offset x y z =
+  let add a b = floating e 129 [ a; b ]
+  and sub a b = floating e 131 [ a; b ]
+  and mul a b = floating e 133 [ a; b ] in
+  let either a b = result e e.boolean 166 [ a; b ] in
+  let invalid = either (non_finite e x) (either (non_finite e y) (non_finite e z)) in
+  conditional e e.float invalid
+    (fun () -> f e nan)
+    (fun () ->
+      let coordinate value =
+        let base = ext e 8 [ value ] in
+        let q = sub value base in
+        let index = result e e.sint 110 [ floating e 140 [ base; f e 256. ] ] in
+        let index = result e e.uint 199 [ result e e.uint 124 [ index ]; u e 255 ] in
+        let fade = mul (mul (mul q q) q) (add (mul q (sub (mul q (f e 6.)) (f e 15.))) (f e 10.)) in
+        (index, q, fade)
+      in
+      let ix, x, fx = coordinate x and iy, y, fy = coordinate y and iz, z, fz = coordinate z in
+      let table index =
+        let index = result e e.uint 128 [ offset; index ] in
+        let pointer = result e e.uint_storage_pointer 65 [ Option.get e.table; u e 0; index ] in
+        result e e.uint 61 [ pointer ]
+      in
+      let plus a b = result e e.uint 128 [ a; b ] in
+      let next a = plus a (u e 1) in
+      let a = plus (table ix) iy and b = plus (table (next ix)) iy in
+      let aa = plus (table a) iz
+      and ab = plus (table (next a)) iz
+      and ba = plus (table b) iz
+      and bb = plus (table (next b)) iz in
+      let gradient hash x y z =
+        let h = result e e.uint 199 [ hash; u e 15 ] in
+        let first = select e e.float (compare e 176 h (u e 8)) x y in
+        let middle = either (compare e 170 h (u e 12)) (compare e 170 h (u e 14)) in
+        let second = select e e.float (compare e 176 h (u e 4)) y (select e e.float middle x z) in
+        let sign mask value =
+          select e e.float
+            (compare e 170 (result e e.uint 199 [ h; u e mask ]) (u e 0))
+            value (floating e 127 [ value ])
+        in
+        add (sign 1 first) (sign 2 second)
+      in
+      let blend a b weight = add a (mul weight (sub b a)) in
+      let xm = sub x (f e 1.) and ym = sub y (f e 1.) and zm = sub z (f e 1.) in
+      let row aa ba y z = blend (gradient (table aa) x y z) (gradient (table ba) xm y z) fx in
+      let x00 = row aa ba y z
+      and x10 = row ab bb ym z
+      and x01 = row (next aa) (next ba) y zm
+      and x11 = row (next ab) (next bb) ym zm in
+      let value = mul (add (blend (blend x00 x10 fy) (blend x01 x11 fy) fz) (f e 1.)) (f e 0.5) in
+      ext e 43 [ value; f e 0.; f e 1. ])
+
+let noise_functions e =
+  match e.noise with
+  | None -> ()
+  | Some (sample, fbm) ->
+      let function_ id types body =
+        let signature = Words.declare e.words 33 (e.float :: types) in
+        Words.instruction e.words.body 54 [ e.float; id; 0; signature ];
+        let parameters =
+          List.map
+            (fun ty ->
+              let id = Words.id e.words in
+              Words.instruction e.words.body 55 [ ty; id ];
+              id)
+            types
+        in
+        label e (Words.id e.words);
+        let value = body parameters in
+        Words.instruction e.words.body 254 [ value ];
+        Words.instruction e.words.body 56 []
+      in
+      function_ sample [ e.float; e.float; e.float; e.uint ] (function
+        | [ x; y; z; offset ] -> noise_sample e offset x y z
+        | _ -> assert false);
+      function_ fbm [ e.float; e.float; e.float; e.uint; e.uint ] (function
+        | [ x; y; z; offset; octaves ] ->
+            let before = e.block in
+            let header = Words.id e.words
+            and body = Words.id e.words
+            and continuing = Words.id e.words
+            and finish = Words.id e.words in
+            let next = Array.init 5 (fun _ -> Words.id e.words) in
+            jump e header;
+            label e header;
+            let phi ty initial next = result e ty 245 [ initial; before; next; continuing ] in
+            let frequency = phi e.float (f e 1.) next.(0)
+            and amplitude = phi e.float (f e 1.) next.(1)
+            and sum = phi e.float (f e 0.) next.(2)
+            and weights = phi e.float (f e 0.) next.(3)
+            and iteration = phi e.uint (u e 0) next.(4) in
+            let within = compare e 176 iteration octaves in
+            Words.instruction e.words.body 246 [ finish; continuing; 0 ];
+            Words.instruction e.words.body 250 [ within; body; finish ];
+            label e body;
+            let scaled value = floating e 133 [ value; frequency ] in
+            let value = result e e.float 57 [ sample; scaled x; scaled y; scaled z; offset ] in
+            let weighted = floating e 133 [ value; amplitude ] in
+            jump e continuing;
+            label e continuing;
+            let define slot ty opcode operands =
+              Words.instruction e.words.body opcode (ty :: next.(slot) :: operands);
+              if ty = e.float then Words.instruction e.words.annotations 71 [ next.(slot); 42 ]
+            in
+            define 0 e.float 133 [ frequency; f e 2. ];
+            define 1 e.float 133 [ amplitude; f e 0.5 ];
+            define 2 e.float 129 [ sum; weighted ];
+            define 3 e.float 129 [ weights; amplitude ];
+            define 4 e.uint 128 [ iteration; u e 1 ];
+            jump e header;
+            label e finish;
+            select e e.float
+              (compare e 180 weights (f e 0.))
+              (f e 0.)
+              (floating e 136 [ sum; weights ])
+        | _ -> assert false)
+
+let binary e operation a b =
+  let op opcode = floating e opcode [ a; b ] in
+  let relation opcode = numeric_truth e (compare e opcode a b) in
+  match operation with
+  | P.Add -> op 129
+  | Sub -> op 131
+  | Mul -> op 133
+  | Div -> select e e.float (compare e 180 b (f e 0.)) (f e 0.) (op 136)
+  | Mod ->
+      let remainder = floating e 140 [ floating e 129 [ op 140; b ]; b ] in
+      select e e.float (compare e 180 b (f e 0.)) (f e 0.) remainder
+  | Pow ->
+      let zero =
+        select e e.float
+          (compare e 180 b (f e 0.))
+          (f e 1.)
+          (select e e.float (compare e 186 b (f e 0.)) (f e 0.) (f e infinity))
+      in
+      select e e.float (compare e 180 a (f e 0.)) zero (ext e 26 [ ext e 4 [ a ]; b ])
+  | Min -> ext e 37 [ a; b ]
+  | Max -> ext e 40 [ a; b ]
+  | Lt -> relation 184
+  | Le -> relation 188
+  | Gt -> relation 186
+  | Ge -> relation 190
+  | Eq -> relation 180
+  | And -> numeric_truth e (result e e.boolean 167 [ truth e a; truth e b ])
+  | Or -> numeric_truth e (result e e.boolean 166 [ truth e a; truth e b ])
+  | Atan2 -> ext e 25 [ a; b ]
+  | Hypot -> fail "Native-safe hypot is not supported by the SPIR-V kernel target."
+
+let unary e operation value =
+  match operation with
+  | P.Sin -> ext e 13 [ value ]
+  | Cos -> ext e 14 [ value ]
+  | Tan -> ext e 15 [ value ]
+  | Abs -> ext e 4 [ value ]
+  | Sqrt -> ext e 31 [ ext e 4 [ value ] ]
+  | Not -> numeric_truth e (compare e 180 value (f e 0.))
+  | Asin | Acos ->
+      let clamped = ext e 43 [ value; f e (-1.); f e 1. ] in
+      select e e.float
+        (compare e 186 (ext e 4 [ value ]) (f e 1.))
+        (f e nan)
+        (ext e (if operation = P.Asin then 16 else 17) [ clamped ])
+  | Exp -> ext e 27 [ value ]
+  | Log ->
+      let positive = compare e 186 value (f e 0.) in
+      select e e.float positive (ext e 28 [ select e e.float positive value (f e 1.) ]) (f e nan)
+  | Sign ->
+      select e e.float
+        (compare e 186 value (f e 0.))
+        (f e 1.)
+        (select e e.float (compare e 184 value (f e 0.)) (f e (-1.)) value)
+
+let storage_type words scalar =
+  let array = Words.declare words 29 [ scalar ] in
+  let structure = Words.declare words 30 [ array ] in
+  Words.instruction words.annotations 71 [ array; 6; 4 ];
+  Words.instruction words.annotations 71 [ structure; 2 ];
+  Words.instruction words.annotations 72 [ structure; 0; 35; 0 ];
+  (Words.declare words 32 [ 12; structure ], Words.declare words 32 [ 12; scalar ])
+
+let integer_binary e operation a b =
+  let op code operands = result e (long e) code operands in
+  match operation with
+  | Flow.Packed_ops.Iadd -> op 128 [ a; b ]
+  | Isub -> op 130 [ a; b ]
+  | Imul -> op 132 [ a; b ]
+  | Iand -> op 199 [ a; b ]
+  | Ior -> op 197 [ a; b ]
+  | Ixor -> op 198 [ a; b ]
+  | Ishl | Ishr ->
+      let a = if operation = Ishr then op 199 [a; l e Int64.max_int] else a in
+      op (if operation = Ishl then 196 else 194) [ a; op 199 [ b; l e 63L ] ]
+  | Idiv | Imod ->
+      let zero = compare e 170 b (l e 0L) in
+      let overflow =
+        result e e.boolean 167 [ compare e 170 a (l e Int64.min_int); compare e 170 b (l e (-1L)) ]
+      in
+      let unsafe = result e e.boolean 166 [ zero; overflow ] in
+      let divisor = select e (long e) unsafe (l e 1L) b in
+      let value = op (if operation = Idiv then 135 else 138) [ a; divisor ] in
+      let value = select e (long e) overflow (if operation = Idiv then a else l e 0L) value in
+      select e (long e) zero (l e 0L) value
+
+let wrap_integer e value =
+  let shifted=result e (long e) 196 [value;l e 1L]in
+  result e (long e) 195 [shifted;l e 1L]
+
+let integer_float_binary e operation a b =
+  match operation with
+  | P.Add -> integer_binary e Iadd a b
+  | Sub -> integer_binary e Isub a b
+  | Mul -> integer_binary e Imul a b
+  | Min -> select e (long e) (compare e 177 a b) a b
+  | Max -> select e (long e) (compare e 173 a b) a b
+  | Mod ->
+      let r = integer_binary e Imod a b in
+      let sign = result e e.boolean 165 [ compare e 177 r (l e 0L); compare e 177 b (l e 0L) ] in
+      let adjust = result e e.boolean 167 [ compare e 171 r (l e 0L); sign ] in
+      select e (long e) adjust (integer_binary e Iadd r b) r
+  | _ -> assert false
+
+let rec unguarded = function P.Guarded (_, body) -> unguarded body | body -> body
+
+let needs_integer (layout : Flow_ir.Kernel_layout.t) =
+  let whole = Array.make (Array.length layout.view.code) false in
+  let needed = ref false in
+  Array.iteri
+    (fun slot instruction ->
+      let instruction = unguarded instruction in
+      let integer = Flow_ir.Core.Region.integer_register instruction in
+      whole.(slot) <-
+        (integer
+        ||
+        match instruction with
+        | P.Const value -> Float.is_integer value && Float.abs value < 9007199254740992.
+        | Convert (To_float, a) -> whole.(a)
+        | Binary ((Add | Sub | Mul | Mod | Min | Max), a, b) -> whole.(a) && whole.(b)
+        | _ -> false);
+      if
+        layout.used.(slot)
+        && (integer
+           ||
+           match instruction with
+           | P.Binary ((Add | Sub | Mul | Mod | Min | Max), _, _) -> whole.(slot)
+           | _ -> false)
+      then needed := true)
+    layout.view.code;
+  !needed
+
+let emit_program e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers index =
+  let words = e.words and float = e.float and boolean = e.boolean in
+  let registers = Array.make (Array.length layout.view.code) 0 in
+  let whole = Array.make (Array.length layout.view.code) None in
+  let integer slot = Flow_ir.Core.Region.integer_register layout.view.code.(slot) in
+  let float_of slot = if integer slot then from_long e registers.(slot) else registers.(slot) in
+  let invalid = ref (compare e 171 (u e 0) (u e 0)) in
+  let to_int value =
+    let valid =
+      result e boolean 167
+        [
+          compare e 190 value (f e (-9223372036854775808.));
+          compare e 184 value (f e 9223372036854775808.);
+        ]
+    in
+    mark_invalid e invalid (result e boolean 168 [ valid ]);
+    result e (long e) 110 [ select e float valid value (f e 0.) ]
+  in
+  let int_of slot =
+    if integer slot then registers.(slot)
+    else match whole.(slot) with Some value -> value | None -> to_int (float_of slot)
+  in
+  let element prepared at width component =
+    let k = Option.get (List.find_index (fun (slot, _) -> slot = prepared) layout.gathers) in
+    let size = result e (Option.get e.ulong) 113 [ uniform e layout.gather_lengths.(k) ] in
+    let size = result e (long e) 124 [ size ] in
+    let last = integer_binary e Isub size (l e 1L) in
+    let last = select e (long e) (compare e 177 last (l e 0L)) (l e 0L) last in
+    let at = int_of at in
+    let at = select e (long e) (compare e 177 at (l e 0L)) (l e 0L) at in
+    let at = select e (long e) (compare e 173 at last) last at in
+    let at = result e e.uint 113 [ at ] in
+    result e float 124 [ load_uint e gathers.(k) (offset e at width component) ]
+  in
+  let expression slot = function
+    | P.Const value ->
+        if e.long <> None && Float.is_integer value && Float.abs value < 9007199254740992. then
+          whole.(slot) <- Some (l e (Int64.of_float value));
+        f e value
+    | Input (input, width, component) -> load e inputs.(input) (offset e index width component)
+    | Uniform (input, component) -> uniform_float e (layout.uniforms.(input) + component)
+    | Frame _ -> assert false
+    | Binary (((Add | Sub | Mul | Mod | Min | Max) as op), a, b)
+      when whole.(a) <> None && whole.(b) <> None ->
+        let value = integer_float_binary e op (Option.get whole.(a)) (Option.get whole.(b)) in
+        whole.(slot) <- Some value;
+        from_long e value
+    | Binary (op, a, b) -> binary e op (float_of a) (float_of b)
+    | Unary (op, a) -> unary e op (float_of a)
+    | Fma (a, b, c) -> ext e 50 [ float_of a; float_of b; float_of c ]
+    | (Checked_mul (projection, a, b) | Checked_fma (projection, a, b, _)) as instruction -> (
+        let value =
+          match instruction with
+          | Checked_fma (_, _, _, c) -> ext e 50 [ float_of a; float_of b; float_of c ]
+          | _ -> floating e 133 [ float_of a; float_of b ]
+        in
+        let valid = result e boolean 168 [ non_finite e value ] in
+        match projection with
+        | Value -> select e float valid value (f e 0.)
+        | Valid -> numeric_truth e valid)
+    | Noise3 (x, y, z, seed, octaves, _, _) ->
+        let table = Option.get (Array.find_index (( = ) seed) layout.table_seeds) * 512 in
+        result e float 57
+          [ snd (Option.get e.noise); float_of x; float_of y; float_of z; u e table; u e octaves ]
+    | Select (condition, yes, no) ->
+        select e float (truth e (float_of condition)) (float_of yes) (float_of no)
+    | Loop_result (loop, component, _) ->
+        whole.(slot) <- whole.(loop + 1 + component);
+        registers.(loop + 1 + component)
+    | Int_const value -> l e (Int64.of_int value)
+    | Int_input input -> to_int (load e inputs.(input) index)
+    | Int_uniform input -> to_int (uniform_float e layout.uniforms.(input))
+    | Int_frame _ -> to_int (uniform_float e layout.frames.(slot))
+    | Int_binary (op, a, b) ->
+        let a=int_of a and b=int_of b in
+        (match op with
+         | Flow.Packed_ops.Idiv | Imod ->
+             record_status e (compare e 170 b (l e 0L)) 2
+         | Ishl | Ishr ->
+             let below=compare e 177 b (l e 0L) and above=compare e 173 b (l e 62L) in
+             record_status e (result e boolean 166 [below;above]) 4
+         | _ -> ());
+        wrap_integer e (integer_binary e op a b)
+    | Int_compare (op, a, b) ->
+        let opcode =
+          match op with
+          | Flow.Packed_ops.Ilt -> 177
+          | Ile -> 179
+          | Igt -> 173
+          | Ige -> 175
+          | Ieq -> 170
+        in
+        numeric_truth e (compare e opcode (int_of a) (int_of b))
+    | Int_abs a ->
+        let value = int_of a in
+        wrap_integer e (select e (long e) (compare e 177 value (l e 0L)) (result e (long e) 126 [ value ]) value)
+    | Int_select (condition, yes, no) ->
+        select e (long e) (truth e (float_of condition)) (int_of yes) (int_of no)
+    | Gather (prepared, at, width, component) -> element prepared at width component
+    | Int_gather (prepared, at) -> to_int (element prepared at 1 0)
+    | Convert (To_float, a) ->
+        whole.(slot) <- whole.(a);
+        float_of a
+    | Convert (_, a) when whole.(a) <> None -> Option.get whole.(a)
+    | Convert ((Truncate | Coerce_int | Integer_result _), a) -> to_int (float_of a)
+    | Convert (((Floor | Ceil | Round) as op), a) ->
+        let value = float_of a in
+        let rounded =
+          match op with
+          | Floor -> ext e 8 [ value ]
+          | Ceil -> ext e 9 [ value ]
+          | _ ->
+              floating e 133
+                [ unary e Sign value; ext e 8 [ floating e 129 [ ext e 4 [ value ]; f e 0.5 ] ] ]
+        in
+        to_int rounded
+    | Guarded _ -> assert false
+    | _ -> fail "This instruction is not supported by the SPIR-V kernel target."
+  in
+  let rec emit slot guards = function
+    | P.Guarded (more, instruction) -> emit slot (guards @ more) instruction
+    | instruction ->
+        let compute () =
+          let value =
+            match instruction with
+            | P.Frame _ -> uniform_float e layout.frames.(slot)
+            | _ -> expression slot instruction
+          in
+          if layout.finite_checks.(slot) && not (integer slot) then
+            mark_invalid e invalid (non_finite e value);
+          value
+        in
+        if guards = [] then begin
+          registers.(slot) <- compute ();
+          if integer slot then whole.(slot) <- Some registers.(slot)
+        end
+        else begin
+          let before = e.block and before_invalid = !invalid in
+          let condition =
+            List.map
+              (fun (slot, selected) ->
+                let value = truth e (float_of slot) in
+                if selected then value else result e boolean 168 [ value ])
+              guards
+            |> List.fold_left
+                 (fun combined value ->
+                   match combined with
+                   | None -> Some value
+                   | Some left -> Some (result e boolean 167 [ left; value ]))
+                 None
+            |> Option.get
+          in
+          let yes = Words.id words and after = Words.id words in
+          Words.instruction words.body 247 [ after; 0 ];
+          Words.instruction words.body 250 [ condition; yes; after ];
+          label e yes;
+          let value = compute () in
+          let yes_invalid = !invalid in
+          let last = e.block in
+          jump e after;
+          label e after;
+          let ty, zero = if integer slot then (long e, l e 0L) else (float, f e 0.) in
+          registers.(slot) <- result e ty 245 [ value; last; zero; before ];
+          if e.loop_depth = 0 then
+            invalid := result e boolean 245 [ yes_invalid; last; before_invalid; before ];
+          if integer slot then whole.(slot) <- Some registers.(slot)
+          else
+            whole.(slot) <-
+              Option.map
+                (fun value -> result e (long e) 245 [ value; last; l e 0L; before ])
+                whole.(slot)
+        end
+  in
+  let emit_loop header (control : P.loop) ~next ~stop ~body:emit_body =
+    if layout.used.(header) then begin
+      let guards = match layout.view.code.(header) with
+        | P.Guarded (guards, _) -> guards
+        | _ -> []
+      in
+      let guarded = guards <> [] in
+      let preheader = Words.id words
+      and skipped = Words.id words
+      and loop_header = Words.id words
+      and loop_body = Words.id words
+      and continuing = Words.id words
+      and finished = Words.id words
+      and after_guard = Words.id words in
+      let guard_condition =
+        List.map
+          (fun (slot, selected) ->
+            let value = truth e (float_of slot) in
+            if selected then value else result e boolean 168 [ value ])
+          guards
+        |> List.fold_left
+             (fun combined value ->
+               match combined with
+               | None -> Some value
+               | Some left -> Some (result e boolean 167 [ left; value ]))
+             None
+        |> Option.value ~default:(compare e 171 (u e 0) (u e 0))
+      in
+      if guarded then begin
+        Words.instruction words.body 247 [ after_guard; 0 ];
+        Words.instruction words.body 250 [ guard_condition; preheader; skipped ];
+        label e skipped;
+        jump e after_guard;
+        label e preheader
+      end else begin
+        jump e preheader;
+        label e preheader
+      end;
+      let first = int_of control.first and last = int_of control.last in
+      let initial =
+        Array.mapi
+          (fun component source ->
+            if integer (header + 1 + component) then int_of source else registers.(source))
+          control.initial
+      in
+      let too_long =
+        match control.limit with
+        | None -> compare e 171 (u e 0) (u e 0)
+        | Some limit ->
+            let positive = compare e 173 last first in
+            let unsigned_last = result e (Option.get e.ulong) 124 [ last ]
+            and unsigned_first = result e (Option.get e.ulong) 124 [ first ] in
+            let distance = result e (Option.get e.ulong) 130 [ unsigned_last; unsigned_first ] in
+            let bound = Words.wide_constant words (Option.get e.ulong) (Int64.of_int limit) in
+            let too_long = result e boolean 167 [ positive; result e boolean 172 [ distance; bound ] ] in
+            record_status e too_long 1;
+            too_long
+      in
+      let preheader_pred = e.block in
+      let index_phi = Words.id words in
+      let carry_phis = Array.map (fun _ -> Words.id words) control.initial in
+      let stop_phi = Option.map (fun _ -> Words.id words) stop in
+      registers.(header) <- index_phi;
+      whole.(header) <- Some index_phi;
+      Array.iteri
+        (fun component phi ->
+          let slot = header + 1 + component in
+          registers.(slot) <- phi;
+          whole.(slot) <- if integer slot then Some phi else None)
+        carry_phis;
+
+      let outer_body = words.body in
+      let body_words = Buffer.create 512 in
+      words.body <- body_words;
+      label e loop_body;
+      e.loop_depth <- e.loop_depth + 1;
+      emit_body ();
+      let next_values =
+        Array.mapi
+          (fun component source ->
+            let slot = header + 1 + component in
+            if integer slot then int_of source else float_of source)
+          next
+      in
+      let stop_value = Option.map (fun source -> truth e (float_of source)) stop in
+      e.loop_depth <- e.loop_depth - 1;
+      jump e continuing;
+
+      let continuing_words = Buffer.create 128 in
+      words.body <- continuing_words;
+      label e continuing;
+      let next_index = integer_binary e Flow.Packed_ops.Iadd index_phi (l e 1L) in
+      jump e loop_header;
+      words.body <- outer_body;
+
+      let initial_stop = compare e 171 (u e 0) (u e 0) in
+      e.block <- preheader_pred;
+      jump e loop_header;
+      label e loop_header;
+      Words.instruction words.body 245 [ long e; index_phi; first; preheader_pred; next_index; continuing ];
+      Array.iteri
+        (fun component phi ->
+          let slot = header + 1 + component in
+          let ty, start = if integer slot then (long e, initial.(component)) else (float, initial.(component)) in
+          Words.instruction words.body 245 [ ty; phi; start; preheader_pred; next_values.(component); continuing ])
+        carry_phis;
+      Option.iter
+        (fun phi ->
+          Words.instruction words.body 245
+            [ boolean; phi; initial_stop; preheader_pred; Option.get stop_value; continuing ])
+        stop_phi;
+      let in_range = compare e 177 index_phi last in
+      let not_stopped = Option.fold ~none:(compare e 171 (u e 0) (u e 0))
+          ~some:(fun phi -> result e boolean 168 [ phi ]) stop_phi in
+      let condition = result e boolean 167 [ result e boolean 167 [ in_range; not_stopped ]; result e boolean 168 [ too_long ] ] in
+      Words.instruction words.body 246 [ finished; continuing; 0 ];
+      Words.instruction words.body 250 [ condition; loop_body; finished ];
+      Buffer.add_buffer words.body body_words;
+      Buffer.add_buffer words.body continuing_words;
+      label e finished;
+      if guarded then begin
+        jump e after_guard;
+        label e after_guard;
+        registers.(header) <- result e (long e) 245 [ index_phi; finished; l e 0L; skipped ];
+        Array.iteri
+          (fun component phi ->
+            let slot = header + 1 + component in
+            let ty, zero = if integer slot then (long e, l e 0L) else (float, f e 0.) in
+            registers.(slot) <- result e ty 245 [ phi; finished; zero; skipped ];
+            whole.(slot) <- if integer slot then Some registers.(slot) else None)
+          carry_phis
+      end;
+    end
+  in
+  Flow_ir.Kernel_layout.iter layout
+    ~instruction:(fun slot instruction ->
+      if layout.used.(slot) then
+        match unguarded instruction with P.Array_prepare _ -> () | _ -> emit slot [] instruction)
+    ~loop:emit_loop;
+  Array.iteri
+    (fun output values ->
+      Array.iteri
+        (fun component register ->
+          store e outputs.(output)
+            (offset e index (Array.length values) component)
+            (float_of register))
+        values)
+    layout.view.outputs;
+  !invalid
+
+let resident_count e (layout : Flow_ir.Kernel_layout.t) index buffers =
+  let n = uniform e 0 in
+  match (layout.counts, buffers) with
+  | Some bytes, Some (input, output) ->
+      let word = bytes / 4 in
+      let n =
+        conditional e e.uint
+          (compare e 171 (uniform e (word + 2)) (u e 0))
+          (fun () ->
+            let product = result e e.uint 132 [ load_uint e input (u e 0); uniform e word ] in
+            let divisor = uniform e (word + 1) in
+            let divisor = select e e.uint (compare e 170 divisor (u e 0)) (u e 1) divisor in
+            let bound = result e e.uint 134 [ product; divisor ] in
+            select e e.uint (compare e 176 n bound) n bound)
+          (fun () -> n)
+      in
+      ignore
+        (conditional e e.uint
+           (compare e 170 index (u e 0))
+           (fun () ->
+             List.iteri
+               (fun slot value -> store_uint e output (u e slot) value)
+               [ n; result e e.uint 132 [ n; u e 6 ]; u e 1; u e 0; u e 0; u e 0 ];
+             n)
+           (fun () -> n));
+      n
+  | None, None -> n
+  | _ -> assert false
+
+let kernel ?(fast = false) program =
+  try
+    (match P.gpu_refusals ~fused:true ~fast program with
+    | [] -> ()
+    | diagnostic :: _ -> raise (Diagnostic.Error diagnostic));
+    let layout = Flow_ir.Kernel_layout.plan ~fast program in
+    let words = Words.create () in
+    let void = Words.declare words 19 []
+    and boolean = Words.declare words 20 []
+    and uint = Words.declare words 21 [ 32; 0 ]
+    and sint = Words.declare words 21 [ 32; 1 ]
+    and float = Words.declare words 22 [ 32 ] in
+    let long, ulong =
+      if fast && needs_integer layout then
+        (Some (Words.declare words 21 [ 64; 1 ]), Some (Words.declare words 21 [ 64; 0 ]))
+      else (None, None)
+    in
+    let vector3 = Words.declare words 23 [ uint; 3 ]
+    and vector4 = Words.declare words 23 [ uint; 4 ] in
+    let function_type = Words.declare words 33 [ void ] in
+    let storage, storage_pointer = storage_type words float
+    and uint_storage, uint_storage_pointer = storage_type words uint in
+    let uniform_length =
+      Words.constant words uint (Int32.of_int (Flow_ir.Kernel_layout.uniform_words layout))
+    in
+    let uniform_array = Words.declare words 28 [ vector4; uniform_length ] in
+    let uniform_struct = Words.declare words 30 [ uniform_array ] in
+    Words.instruction words.annotations 71 [ uniform_array; 6; 16 ];
+    Words.instruction words.annotations 71 [ uniform_struct; 2 ];
+    Words.instruction words.annotations 72 [ uniform_struct; 0; 35; 0 ];
+    let uniform_type = Words.declare words 32 [ 2; uniform_struct ]
+    and uniform_pointer = Words.declare words 32 [ 2; uint ]
+    and invocation_pointer = Words.declare words 32 [ 1; vector3 ] in
+    let interface = ref [] in
+    let variable pointer storage =
+      let id = Words.id words in
+      Words.instruction words.declarations 59 [ pointer; id; storage ];
+      id
+    in
+    let bind pointer storage binding kind =
+      let id = variable pointer storage in
+      Words.instruction words.annotations 71 [ id; 34; 0 ];
+      Words.instruction words.annotations 71 [ id; 33; binding ];
+      interface := Ogpu.Shader.{ group = 0; binding; kind; visibility = [ Compute ] } :: !interface;
+      id
+    in
+    let inputs =
+      Array.mapi
+        (fun index used -> if used then bind storage 12 index Ogpu.Shader.Storage_buffer else 0)
+        layout.input_used
+    in
+    let outputs =
+      Array.init layout.output_count (fun index ->
+          bind storage 12 (layout.input_count + index) Ogpu.Shader.Storage_buffer)
+    in
+    let uniform_buffer = bind uniform_type 2 layout.uniform_binding Ogpu.Shader.Uniform_buffer
+    and status = bind uint_storage 12 layout.status_binding Ogpu.Shader.Storage_buffer in
+    let table =
+      Option.map
+        (fun binding -> bind uint_storage 12 binding Ogpu.Shader.Storage_buffer)
+        layout.table_binding
+    in
+    let gathers =
+      Array.of_list
+        (List.mapi
+           (fun k _ -> bind uint_storage 12 (layout.gather_base + k) Ogpu.Shader.Storage_buffer)
+           layout.gathers)
+    in
+    let counts =
+      Option.map
+        (fun _ ->
+          let input = bind uint_storage 12 layout.count_base Ogpu.Shader.Storage_buffer in
+          let output = bind uint_storage 12 (layout.count_base + 1) Ogpu.Shader.Storage_buffer in
+          input, output)
+        layout.counts
+    in
+    let noise = Option.map (fun _ -> (Words.id words, Words.id words)) table in
+    let invocation = variable invocation_pointer 1 in
+    Words.instruction words.annotations 71 [ invocation; 11; 28 ];
+    let glsl = Words.id words and main = Words.id words in
+    let e =
+      {
+        words;
+        boolean;
+        uint;
+        sint;
+        float;
+        long;
+        ulong;
+        glsl;
+        uniform = uniform_buffer;
+        uniform_pointer;
+        storage_pointer;
+        uint_storage_pointer;
+        status;
+        table;
+        noise;
+        block = 0;
+        loop_depth = 0;
+      }
+    in
+    Words.instruction words.body 54 [ void; main; 0; function_type ];
+    label e (Words.id words);
+    let gid = result e vector3 61 [ invocation ] in
+    let index = result e uint 81 [ gid; 0 ] in
+    let body = Words.id words and finish = Words.id words in
+    let count = resident_count e layout index counts in
+    let within = compare e 176 index count in
+    Words.instruction words.body 247 [ finish; 0 ];
+    Words.instruction words.body 250 [ within; body; finish ];
+    label e body;
+    let invalid = emit_program e layout inputs outputs gathers index in
+    let bad = Words.id words and after = Words.id words in
+    Words.instruction words.body 247 [ after; 0 ];
+    Words.instruction words.body 250 [ invalid; bad; after ];
+    label e bad;
+    let status_pointer = result e uint_storage_pointer 65 [ status; u e 0; u e 0 ] in
+    ignore (result e uint 241 [ status_pointer; u e 1; u e 0; u e 1 ]);
+    jump e after;
+    label e after;
+    jump e finish;
+    label e finish;
+    Words.instruction words.body 253 [];
+    Words.instruction words.body 56 [];
+    noise_functions e;
+    let module_bytes =
+      Buffer.create (Buffer.length words.body + Buffer.length words.declarations + 512)
+    in
+    List.iter
+      (Buffer.add_int32_le module_bytes)
+      [ 0x07230203l; 0x00010300l; 0l; Int32.of_int words.next; 0l ];
+    Words.instruction module_bytes 17 [ 1 ];
+    if long <> None then Words.instruction module_bytes 17 [ 11 ];
+    Words.instruction module_bytes 11 (glsl :: Words.string_words "GLSL.std.450");
+    Words.instruction module_bytes 14 [ 0; 1 ];
+    let entry = "rays_kernel" in
+    Words.instruction module_bytes 15 ((5 :: main :: Words.string_words entry) @ [ invocation ]);
+    Words.instruction module_bytes 16 [ main; 17; 64; 1; 1 ];
+    List.iter (Buffer.add_buffer module_bytes) [ words.annotations; words.declarations; words.body ];
+    Ok
+      {
+        bytes = Buffer.to_bytes module_bytes;
+        entry;
+        interface = List.rev !interface;
+        layout;
+        uniform_bytes = Flow_ir.Kernel_layout.uniform_words layout * 16;
+      }
+  with Diagnostic.Error diagnostic -> Error diagnostic

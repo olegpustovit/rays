@@ -1405,7 +1405,7 @@ module Acceleration_structure = struct
     refit_scratch_buffer_size : int64;
   }
 
-  (* Generic build descriptors (plan G5): triangles, bounding boxes, and
+  (* Generic build descriptors: triangles, bounding boxes, and
      curves, each static or keyframed, under one primitive descriptor; and
      instance descriptors of the default, user-id, or motion record kinds. *)
   module Build = struct
@@ -1802,137 +1802,13 @@ module Texture = struct
     | Texture_buffer
 
   type format = Metal_format.t =
-    | A8_unorm
     | R8_unorm
-    | R8_unorm_srgb
-    | R8_snorm
-    | R8_uint
-    | R8_sint
-    | R16_unorm
-    | R16_snorm
-    | R16_uint
-    | R16_sint
-    | R16_float
-    | Rg8_unorm
-    | Rg8_unorm_srgb
-    | Rg8_snorm
-    | Rg8_uint
-    | Rg8_sint
-    | B5g6r5_unorm
-    | A1bgr5_unorm
-    | Abgr4_unorm
-    | Bgr5a1_unorm
-    | R32_uint
-    | R32_sint
-    | R32_float
-    | Rg16_unorm
-    | Rg16_snorm
-    | Rg16_uint
-    | Rg16_sint
-    | Rg16_float
     | Rgba8_unorm
-    | Rgba8_unorm_srgb
-    | Rgba8_snorm
-    | Rgba8_uint
-    | Rgba8_sint
     | Bgra8_unorm
     | Bgra8_unorm_srgb
-    | Rgb10a2_unorm
-    | Rgb10a2_uint
-    | Rg11b10_float
-    | Rgb9e5_float
-    | Bgr10a2_unorm
-    | Bgr10_xr
-    | Bgr10_xr_srgb
-    | Rg32_uint
-    | Rg32_sint
-    | Rg32_float
-    | Rgba16_unorm
-    | Rgba16_snorm
-    | Rgba16_uint
-    | Rgba16_sint
     | Rgba16_float
-    | Bgra10_xr
-    | Bgra10_xr_srgb
-    | Rgba32_uint
-    | Rgba32_sint
     | Rgba32_float
-    | Bc1_rgba
-    | Bc1_rgba_srgb
-    | Bc2_rgba
-    | Bc2_rgba_srgb
-    | Bc3_rgba
-    | Bc3_rgba_srgb
-    | Bc4_r_unorm
-    | Bc4_r_snorm
-    | Bc5_rg_unorm
-    | Bc5_rg_snorm
-    | Bc6h_rgb_float
-    | Bc6h_rgb_ufloat
-    | Bc7_rgba_unorm
-    | Bc7_rgba_unorm_srgb
-    | Eac_r11_unorm
-    | Eac_r11_snorm
-    | Eac_rg11_unorm
-    | Eac_rg11_snorm
-    | Eac_rgba8
-    | Eac_rgba8_srgb
-    | Etc2_rgb8
-    | Etc2_rgb8_srgb
-    | Etc2_rgb8a1
-    | Etc2_rgb8a1_srgb
-    | Astc_4x4_srgb
-    | Astc_5x4_srgb
-    | Astc_5x5_srgb
-    | Astc_6x5_srgb
-    | Astc_6x6_srgb
-    | Astc_8x5_srgb
-    | Astc_8x6_srgb
-    | Astc_8x8_srgb
-    | Astc_10x5_srgb
-    | Astc_10x6_srgb
-    | Astc_10x8_srgb
-    | Astc_10x10_srgb
-    | Astc_12x10_srgb
-    | Astc_12x12_srgb
-    | Astc_4x4_ldr
-    | Astc_5x4_ldr
-    | Astc_5x5_ldr
-    | Astc_6x5_ldr
-    | Astc_6x6_ldr
-    | Astc_8x5_ldr
-    | Astc_8x6_ldr
-    | Astc_8x8_ldr
-    | Astc_10x5_ldr
-    | Astc_10x6_ldr
-    | Astc_10x8_ldr
-    | Astc_10x10_ldr
-    | Astc_12x10_ldr
-    | Astc_12x12_ldr
-    | Astc_4x4_hdr
-    | Astc_5x4_hdr
-    | Astc_5x5_hdr
-    | Astc_6x5_hdr
-    | Astc_6x6_hdr
-    | Astc_8x5_hdr
-    | Astc_8x6_hdr
-    | Astc_8x8_hdr
-    | Astc_10x5_hdr
-    | Astc_10x6_hdr
-    | Astc_10x8_hdr
-    | Astc_10x10_hdr
-    | Astc_12x10_hdr
-    | Astc_12x12_hdr
-    | Gbgr422
-    | Bgrg422
-    | Depth16_unorm
     | Depth32_float
-    | Stencil8
-    | Depth24_unorm_stencil8
-    | Depth32_float_stencil8
-    | X32_stencil8
-    | X24_stencil8
-
   type format_layout = Metal_format.layout = {
     block_width : int;
     block_height : int;
@@ -2052,25 +1928,6 @@ module Texture = struct
   let format_code = Metal_format.code
   let format_layout = Metal_format.layout
 
-  let supports_family_raw (device : Device.t) family =
-    Result.value ~default:false
-      (Metal_raw.Registry.device_supports_family device.raw (Int64.of_int (Device.family_code family)))
-
-  let supports_compression_raw (device : Device.t) format =
-    match Metal_format.compression_family format with
-    | None -> true
-    | Some Metal_format.Bc -> probe (Metal_raw.Registry.device_supports_bc_texture_compression device.raw)
-    | Some (Metal_format.Eac_etc2 | Metal_format.Astc_ldr) ->
-        supports_family_raw device Device.Apple2 || supports_family_raw device Device.Metal4
-    | Some Metal_format.Astc_hdr ->
-        supports_family_raw device Device.Apple6 || supports_family_raw device Device.Metal4
-
-  let supports_compressed_volume_raw (device : Device.t) =
-    supports_family_raw device Device.Apple3
-    || supports_family_raw device Device.Mac2
-    || supports_family_raw device Device.Metal3
-    || supports_family_raw device Device.Metal4
-
   let usage_bit = function
     | Shader_read -> 0x1
     | Shader_write -> 0x2
@@ -2135,51 +1992,8 @@ module Texture = struct
       | Texture_3d | Texture_2d_multisample_array ->
           false
     then invalid "lossy texture compression is incompatible with 1D and buffer textures"
-    else if
-      descriptor.compression = Lossy
-      && not (Metal_format.supports_lossy_compression descriptor.format)
-    then invalid "pixel format does not support lossy texture compression"
-    else if
-      descriptor.compression = Lossy
-      && not (Metal_raw.device_supports_lossy_texture_compression device.raw)
-    then error operation Unsupported "device does not support lossy texture compression"
-    else if
-      descriptor.format = Depth24_unorm_stencil8
-      && not (probe (Metal_raw.Registry.device_supports_depth24_stencil8 device.raw))
-    then error operation Unsupported "device does not support Depth24Unorm_Stencil8 textures"
-    else if not (supports_compression_raw device descriptor.format) then
-      error operation Unsupported "device does not support the selected compressed texture format"
-    else if Metal_format.is_view_only descriptor.format then
-      invalid "stencil-plane formats can only be created as texture views"
-    else if
-      Metal_format.is_compressed descriptor.format
-      &&
-      match descriptor.kind with
-      | Texture_2d | Texture_2d_array | Texture_cube | Texture_cube_array | Texture_3d -> false
-      | Texture_1d | Texture_1d_array | Texture_2d_multisample | Texture_2d_multisample_array
-      | Texture_buffer ->
-          true
-    then invalid "compressed formats require a 2D, 2D-array, cube, cube-array, or 3D texture"
-    else if
-      Metal_format.is_compressed descriptor.format
-      && descriptor.kind = Texture_3d
-      && not (supports_compressed_volume_raw device)
-    then error operation Unsupported "device does not support compressed volume textures"
-    else if
-      Metal_format.is_compressed descriptor.format
-      && List.exists
-           (function
-             | Shader_write | Render_target | Shader_atomic -> true
-             | Shader_read | Pixel_format_view -> false)
-           descriptor.usage
-    then invalid "compressed textures support only shader-read and pixel-format-view usage"
-    else if
-      Metal_format.is_subsampled descriptor.format
-      && (descriptor.kind <> Texture_2d
-         || descriptor.width mod 2 <> 0
-         || descriptor.mip_levels <> 1 || descriptor.sample_count <> 1
-         || descriptor.array_length <> 1 || descriptor.depth <> 1)
-    then invalid "subsampled 4:2:2 formats require an even-width, single-mip 2D texture"
+    else if descriptor.compression = Lossy then
+      invalid "pixel format does not support lossy texture compression"
     else
       match descriptor.label with
       | Some label when contains_nul label -> invalid "texture label contains a NUL byte"
@@ -2836,17 +2650,8 @@ module Render_pass_descriptor = struct
 
   let detach_option get = Option.iter (fun value -> detach (get value))
 
-  let depth_capable = function
-    | Texture.Depth16_unorm | Texture.Depth32_float | Texture.Depth24_unorm_stencil8
-    | Texture.Depth32_float_stencil8 ->
-        true
-    | _ -> false
-
-  let stencil_capable = function
-    | Texture.Stencil8 | Texture.Depth24_unorm_stencil8 | Texture.Depth32_float_stencil8
-    | Texture.X32_stencil8 | Texture.X24_stencil8 ->
-        true
-    | _ -> false
+  let depth_capable = function Texture.Depth32_float -> true | _ -> false
+  let stencil_capable _ = false
 
   let set_attachments (value : t) ~(color : texture) ?(clear = (0., 0., 0., 1.))
       ?(depth : texture option) ?(stencil : texture option) ()
@@ -3164,10 +2969,6 @@ module Depth_stencil = struct
     read_mask : int32;
     write_mask : int32;
   }
-
-  let face ?(compare = Always) ?(stencil_fail = Keep) ?(depth_fail = Keep) ?(pass = Keep)
-      ?(read_mask = Int32.minus_one) ?(write_mask = Int32.minus_one) () =
-    { compare; stencil_fail; depth_fail; pass; read_mask; write_mask }
 
   let operation_code = function
     | Keep -> 0
@@ -5037,16 +4838,8 @@ module Render_encoder = struct
   let stage_code = function Vertex -> 1 | Fragment -> 2 | Tile -> 4 | Object -> 8 | Mesh -> 16
   let usage_code = function Read -> 1 | Write -> 2 | Sample -> 4
 
-  let depth_attachment_formats =
-    [
-      Texture.Depth16_unorm;
-      Texture.Depth32_float;
-      Texture.Depth24_unorm_stencil8;
-      Texture.Depth32_float_stencil8;
-    ]
-
-  let stencil_attachment_formats =
-    [ Texture.Stencil8; Texture.Depth24_unorm_stencil8; Texture.Depth32_float_stencil8 ]
+  let depth_attachment_formats = [Texture.Depth32_float]
+  let stencil_attachment_formats = []
 
   let validate_attachment operation (command_buffer : command_buffer) (target : texture) formats
       (texture : texture) =
@@ -5611,17 +5404,6 @@ module Render_encoder = struct
     set_validated "Metal.Render_encoder.set_front_facing_winding"
       (fun _ winding -> Ok (match winding with Clockwise -> 0 | Counter_clockwise -> 1))
       (fun e w -> Metal_raw.Registry.render_encoder_set_winding e (Int64.of_int w))
-
-  let set_stencil_reference_values (value : t) ~front ~back =
-    on_main "Metal.Render_encoder.set_stencil_reference_values" (fun () ->
-        let* () = ensure_live "Metal.Render_encoder.set_stencil_reference_values" value.lifetime in
-        let* () =
-          native_result "Metal.Render_encoder.set_stencil_reference_values"
-            (Metal_raw.Registry.render_encoder_set_stencil_reference value.raw
-               (Int64.logand (Int64.of_int32 front) 0xFFFF_FFFFL)
-               (Int64.logand (Int64.of_int32 back) 0xFFFF_FFFFL))
-        in
-        Ok ())
 
   let validate_nonempty operation what values =
     if values = [] then error operation Invalid_argument (what ^ " must be nonempty") else Ok ()

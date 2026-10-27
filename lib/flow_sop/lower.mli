@@ -23,9 +23,9 @@
 
     - A catalog call becomes its catalog factory node with literal parameters
       (colour text [#rrggbb] becomes a vec3).
-    - Every [sop/merge] becomes one internal [flow.merge_n] node over
-      [Sop.Nodes.Merge] with its [source_attribute] set to {!source_attribute} with one slot
-      per collected input, so a spliced list is one node, not a chain.
+    - [sop/merge] uses its checked Lisp body, whose [sop/concat] host operation
+      collects all inputs in one node. Collecting merges write
+      {!source_attribute} so provenance follows the input that made a primitive.
     - [sop/curve] (a workspace operator) becomes a [flow.curve] node over
       {!Curve.factory} (a [flow.curve] node with an encoded [points] parameter).
     - [^:bypass] never reaches lowering: {!Flow.Eval} passes the input through
@@ -34,17 +34,18 @@
     A parameter that depends on [t] cooks at [t = 0] in the literal network
     and is listed in {!t.pending}, keyed (compiled id, argument name), which
     {!Value_lane.resolve} evaluates for each time.
-    [sop/curve] lowers to {!Curve.factory} (a text-encoded [points]
-    parameter), so a live list is one drive. *)
+    [sop/curve] lowers to {!Curve.factory}. Its live [points] drive stays a
+    typed Vec3 array through {!Network.drives}; authored parameter views keep
+    their encoded representation. *)
 
 val source_attribute : string
 (** ["__flow_src"]: the primitive int attribute every collecting merge writes. *)
 
 type image_context = {compiled:int Network.Int_map.t; network:Network.t}
 
-type image_resolver = ?context:image_context -> Flow.Eval.plan -> state:Flow.Eval.state -> live:Frame_input.t -> Flow.Eval.value ->
-  (Sop.Image.t, Flow.Diagnostic.t) result
-val with_images : ?metadata:(Flow.Eval.plan -> int -> (int * int) option) -> image_resolver -> (unit -> 'a) -> 'a
+type image_resolver = ?gpu:Flow_ir.Gpu.config -> ?context:image_context -> Flow.Eval.plan -> state:Flow.Eval.state -> live:Input.t -> Flow.Eval.value ->
+  (Sop.Image.t, Diagnostic.t) result
+val with_images : ?gpu:Flow_ir.Gpu.config -> ?metadata:(Flow.Eval.plan -> int -> (int * int) option) -> image_resolver -> (unit -> 'a) -> 'a
 val image_metadata : Flow.Eval.plan -> int -> (int * int) option
 (** Scope an initial-domain resource resolver around value-lane resolution.
     Loaded/rendered image nodes become immutable CPU snapshots before workers run. *)
@@ -75,6 +76,7 @@ type graph = {
 }
 
 type t = {
+  gpu : Flow_ir.Gpu.config;
   graphs : graph list;  (** one per [sop] instance, in plan order *)
   factories : Sop.Edit_graph.factory list;
   (** Factories owned by this workspace's checked Lisp declarations, including
@@ -97,7 +99,7 @@ type t = {
   states : Flow.Eval.value list;
   evaluated : Flow.Eval.t;  (** recording evaluation shared with graph probes *)
   approx : Flow.Workspace.Paths.t;  (** qualified actual packed specializations *)
-  approx_reasons : (Flow.Workspace.path * Flow.Diagnostic.t list) list;
+  approx_reasons : (Flow.Workspace.path * Diagnostic.t list) list;
       (** pending or refused specializations; rebuilt with the evaluation *)
   profile : Flow_ir.Profile.t;  (** bounded execution timings shared by value lanes, kernels and drawing *)
   preview : node:int -> probes:int list -> Network.t -> (Network.t * int) option;
@@ -106,10 +108,10 @@ type t = {
           live arguments and fold snapshot. The authored network is unchanged. *)
 }
 
-val source_context : t -> node:int -> (image_context, Flow.Diagnostic.t) result
+val source_context : t -> node:int -> (image_context, Diagnostic.t) result
 (** The captured geometry node's own instance, including graph overrides. *)
 
-val source_cone : image_context -> node:int -> (Network.t * int, Flow.Diagnostic.t) result
+val source_cone : image_context -> node:int -> (Network.t * int, Diagnostic.t) result
 (** Keep only the source's upstream inputs, drives and frame callbacks; retain
     the enclosing context separately for any nested image captures. *)
 
@@ -130,14 +132,14 @@ val zone_count : t -> Flow.Workspace.path -> int option
 (** The elements the loop over geometry bound at this path ran over in its last
     cook, [None] before it cooked. *)
 
-val field_calls : ?state:Flow.Eval.state -> live:Frame_input.t ->
-  resolve:(Flow.Eval.value -> (Flow.Eval.value, Flow.Diagnostic.t) result) -> t ->
+val field_calls : ?state:Flow.Eval.state -> live:Input.t ->
+  resolve:(Flow.Eval.value -> (Flow.Eval.value, Diagnostic.t) result) -> t ->
   Flow.Workspace.path -> int list ->
   (int * int * (int -> ((Flow.Workspace.path * (int list * Flow.Eval.value) list) list,
-    Flow.Diagnostic.t) result)) list
+    Diagnostic.t) result)) list
 (** Exact selected-call probes for the sampled field domains. Compute one
     lattice position and reference-evaluate one function call; never allocate
-    or force the complete grid. Defaults come from the generated SOP schema.
+    or force the complete grid. Defaults come from this workspace's checked Lisp schema.
     Calls sharing a function zone have stable cumulative offsets in plan order.
     A supplied fold state is copied; probing never advances the host state. *)
 
@@ -151,17 +153,17 @@ val objects : t -> (int * Network.t * int) list
     node): the [~objects] of the editor's [Cook.update] (the document-driven
     caller is W3). *)
 
-val changes : Port.parameter -> Flow.Eval.value -> ((string * Param.value) list, Flow.Diagnostic.t) result
+val changes : Port.parameter -> Flow.Eval.value -> ((string * Param.value) list, Diagnostic.t) result
 (** The field values a catalog parameter takes from an evaluated argument (colour text,
     number, vec3, choice or text), hard bounds applied.  Scene, world and settings
     lowering ([Editor_document.Contexts]) reads its structs through it. *)
 
 val workspace :
   factories:Sop.Edit_graph.factory list -> ?extra:Catalog.descriptor list ->
-  ?reference:bool ->
+  ?reference:bool -> ?gpu:Flow_ir.Gpu.config ->
   ?compiled_ids:int Instance_path.Map.t -> ?sites:Flow.Workspace.path list ->
   ?inputs:(string * (string * Flow.Eval.value) list) list ->
-  Flow.Syntax.t list -> (t, Flow.Diagnostic.t) result
+  Flow.Syntax.t list -> (t, Diagnostic.t) result
 (** [factories] is the SOP catalog ([Sop_catalog.Editor.factories]). [ops]
     defaults to {!Operators.all}; an explicit list replaces those extensions.
     Errors:
@@ -171,9 +173,10 @@ val of_checked :
   factories:Sop.Edit_graph.factory list ->
   ?provenance_tags:bool ->
   ?reference:bool ->
+  ?gpu:Flow_ir.Gpu.config ->
   ?compiled_ids:int Instance_path.Map.t -> ?sites:Flow.Workspace.path list ->
   ?inputs:(string * (string * Flow.Eval.value) list) list ->
-  Flow.Workspace.t -> (t, Flow.Diagnostic.t) result
+  Flow.Workspace.t -> (t, Diagnostic.t) result
 (** [provenance_tags] (default true) numbers a Lisp [sop/merge]'s inputs for the editor ({!tags});
     the port gate turns it off to compare the node alone with its native oracle.
     Lower an already checked document, without rebuilding a catalog or checking

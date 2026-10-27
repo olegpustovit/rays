@@ -53,7 +53,7 @@ module Private = struct
           done in
       let last = (count - 1) / grain in
       if count < 2 * grain then for k = 0 to last do chunk k done
-      else Rays_math.Parallel.for_ ~chunk_size:1 ~start:0 ~finish:last chunk;
+      else Parallel.for_ ~chunk_size:1 ~start:0 ~finish:last chunk;
       if Context.cancelled context then Error (Diagnostic.error ~code:"E_CANCELLED" "Image kernel cancelled.")
       else if Atomic.get invalid then error "Image kernel channels must be finite."
       else of_owned_rgba8 ~width ~height bytes)

@@ -6,7 +6,7 @@ let cooked_inputs = Domain.DLS.new_key (fun () -> [])
 
 let input index = match List.assoc_opt index (Domain.DLS.get cooked_inputs) with
   | Some payload -> Ok payload
-  | None -> Error (Sop.Diagnostic.error ~code:"E_DATA_SOURCE"
+  | None -> Error (Diagnostic.error ~code:"E_DATA_SOURCE"
       "A Lisp body input is only available while its node cooks")
 
 let schema name fields normalizers =
@@ -32,7 +32,7 @@ let schema name fields normalizers =
         let kind=match List.assoc_opt f.name normalizers with
           |None->Param.Text
           |Some normalize->Param.encoded ~equal:String.equal ~encode:Fun.id
-              ~decode:(fun value->Result.map_error(fun(d:Flow.Diagnostic.t)->d.message)(normalize value)) in
+              ~decode:(fun value->Result.map_error(fun(d:Diagnostic.t)->d.message)(normalize value)) in
         make kind default (function Param.Text_value v -> v | _ -> assert false)
           (fun v -> Param.Text_value v)
     | Choice_view labels, Choice_value default ->
@@ -51,7 +51,7 @@ let arguments fields values =
   let fields = List.map (fun (f : Param.field_view) ->
     {f with current = List.assoc f.name values}) fields in
   match Port.parameters fields with
-  | Error d -> invalid_arg (Flow.Diagnostic.to_string d)
+  | Error d -> invalid_arg (Diagnostic.to_string d)
   | Ok ports -> List.map (fun (p : Port.parameter) -> p.path,
       match Port.literal p with
       | Vector (x, y, z) -> E.Vec3 (x, y, z)
@@ -89,7 +89,7 @@ let node ?(unbound_function = false) ?(geometry_inputs = []) ~operation ~version
         N.Private.make ~label ~operation ~version ~parameters:source
           ~cook_mode:N.Generic ~dependencies:Sop.Context.Dependencies.static
           ~inputs:(Array.of_list inputs) (fun ~node_id:_ _ _ ->
-            Error (Sop.Diagnostic.error ~code:"disconnected_input"
+            Error (Diagnostic.error ~code:"disconnected_input"
               "A Lisp function input needs its checked callable before cooking"))
       else
       let arguments = arguments fields parameters in
@@ -125,11 +125,11 @@ let node ?(unbound_function = false) ?(geometry_inputs = []) ~operation ~version
                 (* The body's kernel nodes (labelled flow.xxx or lisp_xxx) are implementation: the enclosing session traces
                    the failure to this node, not through a card the author never wrote. Authored cards in
                    the body keep their frames. *)
-                Result.map_error (fun (error : Sop.Diagnostic.error) ->
-                  {error with trace = List.filter (fun (frame : Sop.Diagnostic.trace) ->
+                Result.map_error (fun (error : Diagnostic.t) ->
+                  {error with trace = List.filter (fun (frame : Diagnostic.trace) ->
                     not (String.starts_with ~prefix:"flow." frame.label || String.starts_with ~prefix:"lisp_" frame.label))
                     error.trace})
                   (Result.map (fun (output : Sop.Session.output) ->
-                    N.Private.{payload=output.payload;diagnostics=output.diagnostics;instances=output.instances})
+                    N.Private.{payload=output.payload;instances=output.instances})
                     (Sop.Session.cook session ~context body))))))
       |> N.Private.with_facts facts)

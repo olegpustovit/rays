@@ -4,7 +4,7 @@ type compiled = {pipeline : B.pipeline}
 type owned = {compiled : compiled; library : B.library}
 type t = {device : B.device;  cache : owned Cache.t;
   domain : Domain.id; mutable closed : bool; mutable compilations : int; releases : int ref}
-let diagnostic error = Flow.Diagnostic.error ~code:"E_GPU" (Ogpu.Error.to_string error)
+let diagnostic error = Diagnostic.error ~code:"E_GPU" (Ogpu.Error.to_string error)
 let create ~clock:_ device =
   let releases=ref 0 in
   let release _ owned =
@@ -13,7 +13,7 @@ let create ~clock:_ device =
   {device;cache=Cache.create ~release 64;domain=Domain.self ();closed=false;compilations=0;releases}
 let get t (msl : Emit.msl) =
   if t.closed || Domain.self ()<>t.domain then
-    Error (Flow.Diagnostic.error ~code:"E_GPU" "GPU pipeline owner is closed or called from another domain.")
+    Error (Diagnostic.error ~code:"E_GPU" "GPU pipeline owner is closed or called from another domain.")
   else match Cache.find t.cache msl.entry with
   | owned -> Ok owned.compiled
   | exception Not_found ->

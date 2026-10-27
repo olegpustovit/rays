@@ -1,13 +1,13 @@
 module E = Flow.Eval
 module P = Sop
-let ok = function Ok x -> x | Error d -> failwith (Flow.Diagnostic.to_string d)
-let cooked = function Ok x -> x | Error d -> failwith (P.Diagnostic.error_to_string d)
+let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
+let cooked = function Ok x -> x | Error d -> failwith (Diagnostic.error_to_string d)
 let parse text = Flow.Syntax.parse text |> ok
 let catalog = Flow.Check.{version=1;kinds=[]}
 let check text =
   match Flow.Workspace.check catalog (parse text) with
   | Some w, _ -> w
-  | _, ds -> failwith (String.concat "; " (List.map Flow.Diagnostic.to_string ds))
+  | _, ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
 let fn text =
   let w = check text in
   let evaluated = E.static w |> ok in
@@ -45,16 +45,15 @@ let () =
   (let text = "(workspace w (defn tex :context image [(f : fn)] (image/map f :width 8 :height 8)) (graph img :context image (tex (fn [uv] [uv.x uv.y 0 1]))))" in
    if fst (Flow.Workspace.check catalog (parse text))=None then failwith "image/map through a defn fn parameter was refused");
   let kernel = prepare (fn text) in
-  let ir = Flow_ir.Executor.graph (Flow_sop.Image_kernel.program kernel) in
-  let packed = match ir.nodes.(ir.roots.(0)).kind with
-    | Flow_ir.Kernel {body=Packed_map p;_} -> p | _ -> assert false in
-  let inputs = Flow_ir.Packed.Private.prepare packed ~live:(Frame_input.at_time 0.) |> ok in
+  let packed = match Flow_ir.Executor.packed_region (Flow_sop.Image_kernel.program kernel) with
+    | Some p -> p | None -> assert false in
+  let inputs = Flow_ir.Packed.Private.prepare packed ~live:(Input.at_time 0.) |> ok in
   let saved = Array.copy inputs.arrays.(0) in
   let one = cook 1 kernel and eight = cook 8 kernel in
   assert (bytes one=bytes eight && P.Image.payload_bytes one=387*91*4);
   assert (inputs.arrays.(0)=saved);
   let reference = Flow_ir.Executor.force ~reference:true (Flow_sop.Image_kernel.program kernel)
-      ~live:(Frame_input.at_time 0.) |> ok in
+      ~live:(Input.at_time 0.) |> ok in
   let reference = match reference with E.Vec4_array xs -> xs | _ -> assert false in
   let uv_byte i size =
     let numerator = (2*i+1)*255 and denominator = 2*size in
@@ -116,19 +115,19 @@ let () =
   let unqualified=prepare Flow.Workspace.Paths.empty in
   let no_provenance=prepare lowered.approx in
   let calls=ref 0 in
-  let backend:Flow_ir.Gpu.backend={cost=(fun _ ~count:_->Some 0.);prepare=(fun packed->
+  let backend:Flow_ir.Gpu.backend={cost=(fun ~fast:_ _ ~count:_->Some 0.);prepare=(fun ~fast:_ packed->
     assert(Flow_ir.Packed.site packed=(producer.inst,path,producer.iter));
     Ok{run=(fun inputs->incr calls;Ok Flow_ir.Gpu.{identity=1;count=inputs.count;width=4;
-      stamp=Int64.of_int !calls;gpu_seconds=None});readback=(fun _->assert false)})}in
-  Flow_ir.Gpu.with_backend backend(fun()->
-    List.iter(fun kernel->assert(ok(Flow_ir.Executor.try_display ~policy:Qualification
-      (Flow_sop.Image_kernel.program kernel) ~live:(Frame_input.at_time 0.5))=None))
+      output=0;stamp=Int64.of_int !calls;gpu_seconds=None});readback=(fun _->assert false)})}in
+  let gpu={Flow_ir.Gpu.default with backend=Some backend;policy=Qualification} in
+    List.iter(fun kernel->assert(ok(Flow_ir.Executor.try_display ~gpu
+      (Flow_sop.Image_kernel.program kernel) ~live:(Input.at_time 0.5))=None))
       [unqualified;no_provenance];
     assert(!calls=0);
-    (match ok(Flow_ir.Executor.try_display ~policy:Qualification
-        (Flow_sop.Image_kernel.program qualified) ~live:(Frame_input.at_time 0.5))with
+    (match ok(Flow_ir.Executor.try_display ~gpu
+        (Flow_sop.Image_kernel.program qualified) ~live:(Input.at_time 0.5))with
      |Some(Gpu output)->assert(output.width=4 && output.count=387*91)|_->assert false);
-    assert(!calls=1));
+    assert(!calls=1);
   let exact=cook ~time:0.5 1 qualified in
   assert(bytes exact=bytes(cook ~time:0.5 8 qualified));
   assert(bytes exact=bytes(cook ~time:0.5 1 unqualified));

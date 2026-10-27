@@ -1,7 +1,7 @@
 module W=Flow.Workspace
 module E=Flow.Eval
 module V=Flow.Value
-module D=Flow.Diagnostic
+module D=Diagnostic
 module I=Flow_ir
 let ok=function Ok value->value|Error d->failwith(D.to_string d)
 let catalog=Flow.Check.{version=1;kinds=[]}
@@ -9,7 +9,7 @@ let mapper="(fn [index] {:code \"E_ROW\" :message (str \"bad \" index) :cause (l
 let source body="(workspace rows (graph g :context value [(flags : (array int) (array/int 0))] (let* [tested "^body^"] 0.)))"
 let parse text=ok(Flow.Syntax.parse text)
 let checked text=match W.check catalog(parse text)with
-  |Some workspace,ds when not(List.exists(fun(d:D.t)->d.severity=D.Error)ds)->workspace
+  |Some workspace,ds when not(List.exists(fun(d:D.t)->d.severity=Diagnostic.Error_severity)ds)->workspace
   |_,ds->failwith(String.concat "; "(List.map D.to_string ds))
 let evaluate ?resolve flags body =
   let workspace=checked(source body)in
@@ -17,7 +17,7 @@ let evaluate ?resolve flags body =
   let value=snd(List.hd(List.assoc ["g";"tested"] evaluation.records)) in
   let residual=match value with E.Residual r->r|_->failwith "row diagnosis was eager" in
   let program=match I.Core_lower.lower ~strict:true residual with Ok p->p|Error form->failwith form in
-  let live=Frame_input.at_time 0. in
+  let live=Input.at_time 0. in
   let native=I.Core_exec.run ?resolve program ~live in
   let reference=E.Private.force_reference ?resolve value ~live in
   (match native,reference with
@@ -60,13 +60,13 @@ let ()=
   "(error_rows flags (fn [index] (error \"cancelled\" \"mapper cancel\" :cause \"original cancel\")))"with
   |Error d->assert(d.code="cancelled" && d.message="mapper cancel" && d.cause=Some "original cancel")|_->assert false);
 (try ignore(V.Private.error_row_index(E.Float_array[|1.|]));assert false
- with V.Fail(code,_,_)->assert(code="E_DIAGNOSTIC_ROWS"));
+ with Diagnostic.Error d -> assert(d.code="E_DIAGNOSTIC_ROWS"));
   let polls=ref 0 in
   (try ignore(V.Private.error_row_index ~grain:97 ~check:(fun()->incr polls;
     if !polls=3 then V.fail "E_CANCELLED" "cancel scan")(E.Int_array(Array.make 5001 0)));assert false
-   with V.Fail(code,_,_)->assert(code="E_CANCELLED"));
+   with Diagnostic.Error d -> assert(d.code="E_CANCELLED"));
   List.iter(fun body->let _,ds=W.check catalog(parse(source body))in
-    assert(List.exists(fun(d:D.t)->d.severity=D.Error)ds))
+    assert(List.exists(fun(d:D.t)->d.severity=Diagnostic.Error_severity)ds))
     ["(error_rows flags (fn [index] index))";
      "(error_rows flags (fn [index] {:code \"x\" :message (str t) :cause (list)}))";
      "(error_rows flags (fn [index] {:code \"x\" :message \"x\" :cause (list)}) :policy (str \"first\"))";
@@ -81,7 +81,7 @@ let ()=
     (Set_arg{node=card.path;key=Pos 1;sub=[];value=Flow.Syntax.make(Num "1")}))in
   let printed=fst(Flow.Lisp.print forms)in ignore(checked printed);
   let result=ok(E.static ~record:true ~inputs:["g",["flags",E.Int_array[||]]]workspace)in
-  failure 0(E.Private.force_reference(snd(List.hd(List.assoc ["g";"tested"] result.records)))~live:(Frame_input.at_time 0.));
+  failure 0(E.Private.force_reference(snd(List.hd(List.assoc ["g";"tested"] result.records)))~live:(Input.at_time 0.));
   assert(Result.is_error(Flow_graph.Flow_edit.apply_checked catalog forms
     (Set_arg{node=card.path;key=Pos 1;sub=[];value=Flow.Syntax.make(Str "wrong storage")})))
 let ()=

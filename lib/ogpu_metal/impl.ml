@@ -1,3 +1,4 @@
+let backend = "metal"
 let create_driver () =
   let driver = Ogpu_metal_native.Backend.create () in
   let live_handles () =

@@ -68,7 +68,7 @@ let tint (output : Sop.Session.output) lit =
         | None, None -> None in
       let r = Array.make corners 1. and g = Array.make corners 1.
       and b = Array.make corners 1. and w = Array.make corners 1. in
-      let ar, ag, ab, _ = Color.to_floats Pxui.Theme.default.accent in
+      let ar, ag, ab, _ = Rays_math.Color.to_floats Pxui.Theme.default.accent in
       for primitive = 0 to Array.length tags - 1 do
         let first, last = Rdk.Topology.primitive_vertex_range topology primitive in
         let lit = Set.mem tags.(primitive) lit in

@@ -220,42 +220,42 @@ let check_transform_and_orientation () =
       |> Analysis.bounds |> Option.get in
   let x = bounds Uv_sphere.Sphere_x and y = bounds Uv_sphere.Sphere_y
   and z = bounds Uv_sphere.Sphere_z
-  and custom = bounds (Uv_sphere.Sphere_axis (Vec3.create 0. max_float 0.)) in
+  and custom = bounds (Uv_sphere.Sphere_axis (Rays_math.Vec3.create 0. max_float 0.)) in
   check (near x.size.x 6. && near x.size.y 4. && near x.size.z 8.
       && near y.size.x 4. && near y.size.y 6. && near y.size.z 8.
       && near z.size.x 4. && near z.size.y 8. && near z.size.z 6.
       && near custom.size.x y.size.x && near custom.size.y y.size.y
       && near custom.size.z y.size.z)
     "UV Sphere orientation/radii bounds";
-  let rotation = Vec3.create 0.3 0.5 0.7 in
+  let rotation = Rays_math.Vec3.create 0.3 0.5 0.7 in
   let first order = Uv_sphere.run ~connectivity:Uv_sphere.Sphere_points
-      ~rotation ~rotation_order:order ~center:(Vec3.create 3. (-2.) 5.)
+      ~rotation ~rotation_order:order ~center:(Rays_math.Vec3.create 3. (-2.) 5.)
       ~uniform_scale:2. ~segments:8 ~rings:4 ~radius:1. () |> get_ok
       |> positions |> fun values ->
-      Vec3.create values.x.(0) values.y.(0) values.z.(0) in
-  let source = Vec3.create 0. 2. 0. in
+      Rays_math.Vec3.create values.x.(0) values.y.(0) values.z.(0) in
+  let source = Rays_math.Vec3.create 0. 2. 0. in
   let cases = [
     Uv_sphere.Sphere_xyz,
-      Mat4.mul (Mat4.rotation_z rotation.z)
-        (Mat4.mul (Mat4.rotation_y rotation.y) (Mat4.rotation_x rotation.x));
+      Rays_math.Mat4.mul (Rays_math.Mat4.rotation_z rotation.z)
+        (Rays_math.Mat4.mul (Rays_math.Mat4.rotation_y rotation.y) (Rays_math.Mat4.rotation_x rotation.x));
     Uv_sphere.Sphere_xzy,
-      Mat4.mul (Mat4.rotation_y rotation.y)
-        (Mat4.mul (Mat4.rotation_z rotation.z) (Mat4.rotation_x rotation.x));
+      Rays_math.Mat4.mul (Rays_math.Mat4.rotation_y rotation.y)
+        (Rays_math.Mat4.mul (Rays_math.Mat4.rotation_z rotation.z) (Rays_math.Mat4.rotation_x rotation.x));
     Uv_sphere.Sphere_yxz,
-      Mat4.mul (Mat4.rotation_z rotation.z)
-        (Mat4.mul (Mat4.rotation_x rotation.x) (Mat4.rotation_y rotation.y));
+      Rays_math.Mat4.mul (Rays_math.Mat4.rotation_z rotation.z)
+        (Rays_math.Mat4.mul (Rays_math.Mat4.rotation_x rotation.x) (Rays_math.Mat4.rotation_y rotation.y));
     Uv_sphere.Sphere_yzx,
-      Mat4.mul (Mat4.rotation_x rotation.x)
-        (Mat4.mul (Mat4.rotation_z rotation.z) (Mat4.rotation_y rotation.y));
+      Rays_math.Mat4.mul (Rays_math.Mat4.rotation_x rotation.x)
+        (Rays_math.Mat4.mul (Rays_math.Mat4.rotation_z rotation.z) (Rays_math.Mat4.rotation_y rotation.y));
     Uv_sphere.Sphere_zxy,
-      Mat4.mul (Mat4.rotation_y rotation.y)
-        (Mat4.mul (Mat4.rotation_x rotation.x) (Mat4.rotation_z rotation.z));
+      Rays_math.Mat4.mul (Rays_math.Mat4.rotation_y rotation.y)
+        (Rays_math.Mat4.mul (Rays_math.Mat4.rotation_x rotation.x) (Rays_math.Mat4.rotation_z rotation.z));
     Uv_sphere.Sphere_zyx,
-      Mat4.mul (Mat4.rotation_x rotation.x)
-        (Mat4.mul (Mat4.rotation_y rotation.y) (Mat4.rotation_z rotation.z)) ] in
+      Rays_math.Mat4.mul (Rays_math.Mat4.rotation_x rotation.x)
+        (Rays_math.Mat4.mul (Rays_math.Mat4.rotation_y rotation.y) (Rays_math.Mat4.rotation_z rotation.z)) ] in
   List.iter (fun (order, matrix) ->
-    let expected = Mat4.transform_point matrix source
-        |> fun value -> Vec3.add value (Vec3.create 3. (-2.) 5.) in
+    let expected = Rays_math.Mat4.transform_point matrix source
+        |> fun value -> Rays_math.Vec3.add value (Rays_math.Vec3.create 3. (-2.) 5.) in
     let actual = first order in
     check (near actual.x expected.x && near actual.y expected.y
         && near actual.z expected.z)
@@ -279,20 +279,20 @@ let check_validation () =
   expect_code "invalid_parameter"
     (Uv_sphere.run ~uniform_scale:0. ~radius:1. ());
   expect_code "invalid_parameter"
-    (Uv_sphere.run ~center:(Vec3.create Float.nan 0. 0.) ~radius:1. ());
+    (Uv_sphere.run ~center:(Rays_math.Vec3.create Float.nan 0. 0.) ~radius:1. ());
   expect_code "invalid_parameter"
-    (Uv_sphere.run ~rotation:(Vec3.create Float.infinity 0. 0.) ~radius:1. ());
+    (Uv_sphere.run ~rotation:(Rays_math.Vec3.create Float.infinity 0. 0.) ~radius:1. ());
   expect_code "invalid_parameter"
-    (Uv_sphere.run ~orientation:(Uv_sphere.Sphere_axis Vec3.zero) ~radius:1. ());
+    (Uv_sphere.run ~orientation:(Uv_sphere.Sphere_axis Rays_math.Vec3.zero) ~radius:1. ());
   expect_code "invalid_parameter"
     (Uv_sphere.run ~orientation:(Uv_sphere.Sphere_axis
-       (Vec3.create Float.nan 0. 0.)) ~radius:1. ());
+       (Rays_math.Vec3.create Float.nan 0. 0.)) ~radius:1. ());
   expect_code "invalid_parameter" (Uv_sphere.run ~uv_attribute:"N" ~radius:1. ());
   expect_code "invalid_parameter"
     (Uv_sphere.run ~connectivity:Uv_sphere.Sphere_points
        ~normals:Uv_sphere.Sphere_vertex_normals ~radius:1. ());
   expect_code "invalid_parameter"
-    (Uv_sphere.run ~center:(Vec3.create max_float 0. 0.)
+    (Uv_sphere.run ~center:(Rays_math.Vec3.create max_float 0. 0.)
        ~radius:max_float ());
   let cancelled = Cancel.create () in
   Cancel.cancel cancelled;
@@ -308,8 +308,8 @@ let check_parallel_exact () =
       ~connectivity:Uv_sphere.Sphere_alternating_triangles
       ~unique_points_per_pole:true ~normals:Uv_sphere.Sphere_vertex_normals
       ~uv_attribute:"uv" ~orientation:(Uv_sphere.Sphere_axis
-        (Vec3.create 1. 2. 3.)) ~center:(Vec3.create 3. (-2.) 5.)
-      ~rotation:(Vec3.create 0.3 0.5 0.7) ~rotation_order:Uv_sphere.Sphere_yzx
+        (Rays_math.Vec3.create 1. 2. 3.)) ~center:(Rays_math.Vec3.create 3. (-2.) 5.)
+      ~rotation:(Rays_math.Vec3.create 0.3 0.5 0.7) ~rotation_order:Uv_sphere.Sphere_yzx
       ~radius_x:3. ~radius_y:2. ~radius_z:1. ~segments:256 ~rings:128
       ~radius:1. ());
     (fun () -> Uv_sphere.run ~grain:1024 ~connectivity:Uv_sphere.Sphere_quads

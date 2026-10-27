@@ -360,19 +360,8 @@ let build_alias weights total =
   done;
   weights, aliases
 
-let[@inline always] mix_index value =
-  let value = value lxor (value lsr 30) in
-  let value = value * 0x3f58476d1ce4e5b9 in
-  let value = value lxor (value lsr 27) in
-  let value = value * 0x14d049bb133111eb in
-  value lxor (value lsr 31)
-
 let[@inline always] random_float_into output slot seed index stream =
-  let sample = (index * 8) + stream in
-  let keyed = seed lxor
-      ((sample + 0x11b54a32d192ed03) * 0x1e3779b97f4a7c15) in
-  output.(slot) <- float_of_int (mix_index keyed lsr 10)
-    *. (1. /. 9_007_199_254_740_992.)
+  output.(slot) <- Rays_math.Rand.float_at_int seed ~index:((index * 8) + stream)
 
 let unique_attribute_name geometry reserved base =
   let exists name = List.mem name reserved || List.exists (fun attribute ->

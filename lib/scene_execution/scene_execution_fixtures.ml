@@ -17,6 +17,13 @@ fragment float4 scene_fragment_shadow(Out v [[stage_in]], const device float *p 
 
 let get = function Ok value -> value | Error error -> failwith (Ogpu.Error.to_string error)
 
+let render ?clear renderer draws =
+  let draws = List.map (fun draw ->
+    { Scene_execution.family = Scene_execution.Scene2;
+      blend = Ogpu.Pipeline.Replace; texture = None; auxiliary = None;
+      vertex_attributes = None; samples = 1; draw }) draws in
+  Scene_execution.submit ?clear renderer draws
+
 let make device family blend samples =
   let module S = Ogpu.Shader in
   let module B = Ogpu.Binding in
@@ -26,13 +33,13 @@ let make device family blend samples =
         "scene_fragment_argument",
         [ { S.group = 0; binding = 1; kind = Storage_buffer; visibility = [ Fragment ] } ],
         [ { B.binding = 1; kind = Buffer; visibility = [ Fragment ] } ]
-    | Scene3_textured | Scene3_textured_stencil | Ui ->
+    | Scene3_textured | Ui ->
         "scene_fragment_textured",
         [ { S.group = 0; binding = 1; kind = Sampled_texture; visibility = [ Fragment ] };
           { group = 0; binding = 2; kind = Sampler; visibility = [ Fragment ] } ],
         [ { B.binding = 1; kind = Texture; visibility = [ Fragment ] };
           { binding = 2; kind = Sampler; visibility = [ Fragment ] } ]
-    | Scene3_shadow | Scene3_shadow_stencil | Scene3_world ->
+    | Scene3_world ->
         "scene_fragment_shadow",
         [ { S.group = 0; binding = 3; kind = Storage_buffer; visibility = [ Fragment ] };
           { group = 0; binding = 4; kind = Sampled_texture; visibility = [ Fragment ] };
@@ -40,7 +47,7 @@ let make device family blend samples =
         [ { B.binding = 3; kind = Buffer; visibility = [ Fragment ] };
           { binding = 4; kind = Texture; visibility = [ Fragment ] };
           { binding = 5; kind = Sampler; visibility = [ Fragment ] } ]
-    | Scene3 | Scene3_points | Scene3_stencil | Marks -> "scene_fragment", [], []
+    | Scene3 | Scene3_points | Marks -> "scene_fragment", [], []
   in
   let vertex_bindings =
     [ { S.group = 0; binding = 0; kind = Storage_buffer; visibility = [ Vertex ] };
@@ -57,12 +64,12 @@ let make device family blend samples =
     ~capabilities:(Ogpu.Backend.capabilities device) [ 0, group ]) in
   let depth_format = match family with
     | Scene_execution.Scene2 | Scene2_textured | Ui | Marks -> Ogpu.Pipeline.No_depth
-    | Scene3 | Scene3_points | Scene3_textured | Scene3_shadow | Scene3_world -> Depth32_float
-    | Scene3_stencil | Scene3_textured_stencil | Scene3_shadow_stencil -> Depth32_float_stencil8 in
+    | Scene3 | Scene3_points | Scene3_textured | Scene3_world -> Depth32_float
+    in
   Ogpu.Backend.create_render_pipeline ~blend
     ~topology:(if family = Scene3_points then Ogpu.Render_pass.Point_list else Triangle_list)
     ~indirect:(match family with
-      | Scene2 | Scene2_textured | Scene3 | Scene3_points | Scene3_stencil -> true
+      | Scene2 | Scene2_textured | Scene3 | Scene3_points -> true
       | _ -> false) device
     { backend = "metal"; label = Some "test-pipelines"; layout; vertex; vertex_entry = "scene_vertex";
       fragment = Some fragment; fragment_entry = Some fragment_entry; color_format = Rgba8_unorm;

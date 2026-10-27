@@ -1,4 +1,4 @@
-(* W3: the v4 document (text, layout by path, settings), presets as
+(* The workspace document (text, layout by path, settings), presets as
    s-expressions, and the editor opened on a workspace: history labels, one
    entry per gesture, live `t` recooked and static nodes cached. *)
 open Rays
@@ -14,11 +14,11 @@ let fail message = failwith ("test_workspace_doc: " ^ message)
 let check condition message = if not condition then fail message
 let factories = Sop_catalog.Editor.factories
 let catalog = Editor_document.Contexts.catalog ~version:1 factories |> Result.get_ok
-let show ds = String.concat "; " (List.map Flow.Diagnostic.to_string ds)
+let show ds = String.concat "; " (List.map Diagnostic.to_string ds)
 
 open Test_text
 
-let schema = Editor_core.Param.(schema ~name:"doc-settings" ~default:(0., "a")
+let schema = Param.(schema ~name:"doc-settings" ~default:(0., "a")
   [ field ~name:"amount" ~label:"Amount" ~kind:(floating ~min:0. ~max:10. ()) ~default:0.
       ~get:fst ~set:(fun amount (_, mode) -> amount, mode) ();
     field ~name:"mode" ~label:"Mode" ~kind:Text ~default:"a"
@@ -84,7 +84,7 @@ let part_text () =
   check (not (has (Doc.to_text plain) "settings") && not (has (Doc.to_text plain) "layout")) "empty layout and defaults are omitted";
   (* errors *)
   let bad text code = match Doc.of_text ~settings:(settings (0., "a")) catalog text with
-    | Error ds -> check (List.exists (fun (d : Flow.Diagnostic.t) -> d.code = code) ds) (code ^ ": " ^ show ds)
+    | Error ds -> check (List.exists (fun (d : Diagnostic.t) -> d.code = code) ds) (code ^ ": " ^ show ds)
     | Ok _ -> fail ("accepted: " ^ code) in
   bad (still ^ "(layout (nope))") "E_LAYOUT";
   bad (still ^ "(layout (node [\"g\"] :at [1]))") "E_LAYOUT";
@@ -101,7 +101,7 @@ let part_edit () =
 |} in
   let doc = of_text text in
   let renamed = match Doc.edit catalog doc (E.Rename { node = [ "g"; "a" ]; to_ = "ball" }) with
-    | Ok d -> d | Error d -> fail (Flow.Diagnostic.to_string d) in
+    | Ok d -> d | Error d -> fail (Diagnostic.to_string d) in
   check (Layout.Path_map.mem [ "g"; "ball" ] renamed.layout.at && not (Layout.Path_map.mem [ "g"; "a" ] renamed.layout.at))
     "rename rewrites layout keys in the same transaction";
   check (Layout.Path_map.mem [ "g"; "b" ] renamed.layout.at) "other layout keys stay";
@@ -117,20 +117,20 @@ let part_edit () =
   check (Doc.to_text doc = Doc.to_text (of_text text)) "the original document is untouched";
   let deleted = match Doc.edit catalog (of_text (still ^ "(layout (node [\"g\" \"a\"] :at [1 2]) (node [\"g\" \"b\"] :at [3 4]))"))
       (E.Add_node { scope = [ "g" ]; name = "spare"; expr = S.make (S.Num "1") }) with
-    | Ok d -> d | Error d -> fail (Flow.Diagnostic.to_string d) in
+    | Ok d -> d | Error d -> fail (Diagnostic.to_string d) in
   (match Doc.edit catalog deleted (E.Delete_nodes { nodes = [ [ "g"; "spare" ] ] }) with
    | Ok d -> check (Layout.Path_map.cardinal d.layout.at = 2) "delete keeps other keys"
-   | Error d -> fail (Flow.Diagnostic.to_string d))
+   | Error d -> fail (Diagnostic.to_string d))
 
 let frame ?(keys = []) events count = Test_editor_input.frame ~keys (450., 320.) events count
-let key k = Event.KeyPressed k
+let key k = Input.Key_pressed k
 let char c = key (Input.KeyChar c)
 
 let editor ?presets text =
   let workspace = of_text text in
   Rays_editor.Editor.create ~await:true ~workspace ?presets
     ~prepare:(fun _ output -> Ok (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload)))
-    ~scene3:(fun _ _ -> Scene3.create []) () |> function
+    ~draw:(fun _ _ -> Scene3.create []) () |> function
   | Ok e -> e | Error m -> fail m
 
 let first_x geometry =
@@ -252,21 +252,21 @@ let part_preset () =
     check (has text "(workspace study" && has text "; kept" && has text "(view") "the preset is s-expressions with its comments";
     check (not (has text "{\"") && not (has text "\"version\"")) "no JSON";
     (* it loads: same source, same comments *)
-    let loaded = Preset.load ~path ~factories ~settings:Editor_document.Settings.none |> Result.get_ok in
+    let loaded = Preset.load ~path ~factories ~settings:Editor_document.Settings.none () |> Result.get_ok in
     let ws = fst (loaded.doc.workspace) in
     check (Doc.to_text ws = Doc.to_text (E3.workspace e)) "save then load round trip";
     check (Preset.list ~directory |> List.map fst = [ name ]) "listed";
     (* load through / b: one undo entry *)
     let e = E3.edit e (E.Rename { node = [ "g"; "a" ]; to_ = "ball" }) |> Result.get_ok in
     let e = E3.update e (frame [ key (Input.KeyChar '/'); char 'b' ] (count + 3)) in
-    let e = E3.update e (frame [ Event.TextInput name; key Input.Enter ] (count + 4)) in
+    let e = E3.update e (frame [ Input.Text_input name; key Input.Enter ] (count + 4)) in
     let e = E3.update e (frame [] (count + 5)) in
     check (has (Doc.to_text (E3.workspace e)) "(sop/transform a ") "/ b restored the saved source";
     check (E3.undo_label e = Some "Load preset") "load is one undo entry";
     (* errors never touch the document *)
     let corrupt = Preset.path ~directory ~name:"corrupt" in
     Out_channel.with_open_text corrupt (fun c -> output_string c "(workspace");
-    check (Result.is_error (Preset.load ~path:corrupt ~factories ~settings:Editor_document.Settings.none)) "corrupt text is an error";
+    check (Result.is_error (Preset.load ~path:corrupt ~factories ~settings:Editor_document.Settings.none ())) "corrupt text is an error";
     check (Result.is_error (Preset.save ~directory ~name:"x" ~doc:loaded.doc ~view:Flow.Syntax.(make (Map [ make (Kw "zoom"); make (Num "inf") ]))))
       "a nonfinite view is refused";
     check (Result.is_error (Preset.save ~directory ~name:"" ~doc:loaded.doc ~view:(Flow.Syntax.make (Flow.Syntax.Map [])))) "an empty name is refused";
@@ -279,11 +279,11 @@ let part_view () =
     Array.iter (fun f -> Sys.remove (Filename.concat directory f)) (Sys.readdir directory);
     Unix.rmdir directory) (fun () ->
     let doc = match Editor_document.Contexts.of_workspace ~factories (of_text still) with
-      | Ok d -> d | Error d -> fail (Flow.Diagnostic.to_string d) in
+      | Ok d -> d | Error d -> fail (Diagnostic.to_string d) in
     let view = match Flow.Syntax.parse "{:eye [1.5 -2.0 3] :look_through true :name \"a \\\"b\\\"\"}" with
       | Ok [ v ] -> v | _ -> fail "view text" in
     let path = Preset.save ~directory ~name:"v" ~doc ~view |> Result.get_ok in
-    let loaded = Preset.load ~path ~factories ~settings:Editor_document.Settings.none |> Result.get_ok in
+    let loaded = Preset.load ~path ~factories ~settings:Editor_document.Settings.none () |> Result.get_ok in
     let print v = fst (Flow.Lisp.print [ v ]) in
     check (print loaded.view = print view) "view round trip")
 
@@ -292,7 +292,7 @@ let part_view () =
 let part_pane_layout () =
   let module M = Layout.Path_map in
   let doc = of_text still in
-  let opened = Editor_document.Contexts.of_workspace ~factories doc |> function Ok d -> d | Error m -> fail (Flow.Diagnostic.to_string m) in
+  let opened = Editor_document.Contexts.of_workspace ~factories doc |> function Ok d -> d | Error m -> fail (Diagnostic.to_string m) in
   let ws = fst (opened.workspace) in
   let ws = { ws with layout = { ws.layout with at = M.add [ "g"; "a" ] (40., 60.) ws.layout.at;
                                                collapsed = M.add [ "g"; "b" ] true ws.layout.collapsed;
@@ -328,7 +328,7 @@ let part_contexts () =
   let module Contexts = Editor_document.Contexts in
   let module Edit = Sop.Edit_graph in
   let build ?previous ws = match Contexts.of_workspace ~factories ?previous ws with
-    | Ok d -> d | Error d -> fail (Flow.Diagnostic.to_string d) in
+    | Ok d -> d | Error d -> fail (Diagnostic.to_string d) in
   let bloom = of_text (small_bloom ()) in
   let doc = build bloom in
   let scene = Document.scene_graph doc in
@@ -345,7 +345,7 @@ let part_contexts () =
                       && p.rotate_y = 0.) "a vec3 keyword sets its three fields"
    | None -> fail "accent is not a geometry object");
   (match Objects.Camera.of_node (List.hd (ops "camera")).node with
-   | Some (camera, _) -> check (Rays.Camera.position camera = Rays.Vec3.create 0.5 1.8 6.) "camera eye"
+   | Some (camera, _) -> check (Rays.Camera.position camera = Rays_math.Vec3.create 0.5 1.8 6.) "camera eye"
    | None -> fail "no camera");
   (match Objects.light (List.hd (ops "light")).node with
    | Some p -> check (p.intensity = 60. && p.translate_x = 4.) "light fields"
@@ -370,19 +370,19 @@ let part_contexts () =
          | _ -> false) "World layers, bottom first"
    | None -> fail "the World does not read");
   (* settings: the window the host opens *)
-  let window = match Contexts.window bloom with Ok w -> w | Error d -> fail (Flow.Diagnostic.to_string d) in
+  let window = match Contexts.window bloom with Ok w -> w | Error d -> fail (Diagnostic.to_string d) in
   check (window = { Contexts.title = "Bloom study"; width = 1400; height = 800; fps = 60; seed = 42; fast = true })
     "settings graph: window title, size, fps (a macro call) and seed";
   (match Contexts.window (of_text (case "tree")) with
    | Ok w -> check (w.title = "Rays" && w.fps = 60 && w.fast) "no settings graph: defaults, fast precision"
-   | Error d -> fail (Flow.Diagnostic.to_string d));
+   | Error d -> fail (Diagnostic.to_string d));
   (* :precision "exact" keeps the CPU; Contexts.fast reads it from a document every frame *)
   let exact = of_text "(workspace e (graph g :context value 1.0) (graph s :context settings (settings/config :precision \"exact\")))" in
   (match Contexts.window exact with
    | Ok w -> check (not w.fast) "settings :precision \"exact\" is not fast"
-   | Error d -> fail (Flow.Diagnostic.to_string d));
+   | Error d -> fail (Diagnostic.to_string d));
   check (Contexts.fast doc) "a document without :precision is fast";
-  check (List.exists (fun (f : Editor_core.Param.field_view) -> f.name = "title" && f.current = Text_value "Bloom study")
+  check (List.exists (fun (f : Param.field_view) -> f.name = "title" && f.current = Text_value "Bloom study")
     (Editor_document.Settings.fields doc.settings)) "the settings graph is the document's settings";
   (* determinism, print/parse and preset round trips *)
   (* ids are fresh per build; everything else is a function of the source *)
@@ -402,12 +402,12 @@ let part_contexts () =
     let path = Preset.save ~directory ~name:"bloom" ~doc ~view:(Flow.Syntax.make (Flow.Syntax.Map [])) |> Result.get_ok in
     let text = In_channel.with_open_bin path In_channel.input_all in
     check (not (has text "(settings :")) "settings owned by a graph are not written a second time";
-    let loaded = Preset.load ~path ~factories ~settings:Editor_document.Settings.none |> Result.get_ok in
+    let loaded = Preset.load ~path ~factories ~settings:Editor_document.Settings.none () |> Result.get_ok in
     check (shape loaded.doc = shape doc) "the preset round trips scene, World and settings");
   (* a Flow_edit on the scene graph rebuilds it; ids, and viewport edits of unmentioned fields, stay *)
   let edited = match Doc.edit catalog bloom (E.Set_arg { node = [ "scene"; "accent" ]; key = Kw "translate";
       sub = []; value = Flow.Syntax.make (S.Vec (List.map (fun n -> S.make (S.Num n)) [ "4"; "0"; "1" ])) }) with
-    | Ok d -> d | Error d -> fail (Flow.Diagnostic.to_string d) in
+    | Ok d -> d | Error d -> fail (Diagnostic.to_string d) in
   let doc2 = build ~previous:doc edited in
   let accent2 = List.nth (List.filter (fun (i : Edit.node_info) -> i.operation = "geometry")
     (Edit.inspect (Document.scene_graph doc2))) 1 in
@@ -482,13 +482,13 @@ let part_literals () =
     let next, phases = Flow.Phase_timer.sample ~clock:Unix.gettimeofday (fun () ->
       Doc.edit catalog old operation |> Result.get_ok) in
     List.iter (fun phase -> check (Flow.Phase_timer.calls phases phase = 0)
-      ("literal repeated " ^ Flow.Phase_timer.name phase)) [Print; Parse; Check; Project];
+      ("literal repeated " ^ phase)) ["print"; "parse"; "check"; "project"];
     check (Doc.to_text next = Doc.to_text {next with source; checked}) "literal save differs from slow edit";
     let changes = Doc.literal_changes ~previous:old next |> Option.get in
     let patched, phases = Flow.Phase_timer.sample ~clock:Unix.gettimeofday (fun () ->
       List.fold_left (fun lowered change -> Editor_document.Literal_edit.lower lowered change
         |> Option.get |> Result.get_ok) !lowered changes) in
-    check (Flow.Phase_timer.calls phases Lower = 0 && Flow.Phase_timer.calls phases Evaluate = 0)
+    check (Flow.Phase_timer.calls phases "lower" = 0 && Flow.Phase_timer.calls phases "evaluate" = 0)
       "literal re-evaluated or re-lowered";
     let reference = L.of_checked ~factories ~compiled_ids:patched.compiled_ids ~sites:patched.sites checked
       |> Result.get_ok in
@@ -497,9 +497,9 @@ let part_literals () =
       "literal plan or probe records differ from full evaluation";
     if has (Doc.to_text next) "#0088ff" then List.iter2 (fun (a : L.graph) (b : L.graph) ->
       List.iter (fun domains ->
-        let a = Test_workspace_cook.cook ~domains a |> Option.get
-        and b = Test_workspace_cook.cook ~domains b |> Option.get in
-        check (Test_workspace_cook.geometry_bytes a = Test_workspace_cook.geometry_bytes b)
+        let a = Test_support.Workspace_cook.cook ~domains a |> Option.get
+        and b = Test_support.Workspace_cook.cook ~domains b |> Option.get in
+        check (Test_support.Workspace_cook.geometry_bytes a = Test_support.Workspace_cook.geometry_bytes b)
           "literal cook differs from full evaluation") [3]) patched.graphs reference.graphs;
     let scope = Projection.of_graph catalog old.checked "g" in
     let arguments = List.map (fun (change : Editor_document.Literal_edit.change) ->
@@ -551,7 +551,7 @@ let part_literals () =
     let old = of_text text in
     let next, phases = Flow.Phase_timer.sample ~clock:Unix.gettimeofday (fun () ->
       Doc.edit catalog old operation |> Result.get_ok) in
-    check (Flow.Phase_timer.calls phases Check = 0 && Flow.Phase_timer.calls phases Parse = 0)
+    check (Flow.Phase_timer.calls phases "check" = 0 && Flow.Phase_timer.calls phases "parse" = 0)
       "literal with notes or in a loop repeated the workspace check";
     let source, checked = full_edit catalog old operation |> Result.get_ok in
     check (Doc.to_text next = Doc.to_text {next with source; checked}) "loop/comment literal text differs";
@@ -561,16 +561,16 @@ let part_literals () =
         (List.hd (Option.get (Doc.literal_changes ~previous:old next)))) in
     if fallback then check (patched = None) "geometry template or retained function did not use the full lowering fallback"
     else begin
-      check (Flow.Phase_timer.calls phases Lower = 0 && Flow.Phase_timer.calls phases Evaluate = 0)
+      check (Flow.Phase_timer.calls phases "lower" = 0 && Flow.Phase_timer.calls phases "evaluate" = 0)
         ("literal lowered or evaluated: " ^ text);
       let patched = patched |> Option.get |> Result.get_ok in
       let full = L.of_checked ~factories ~compiled_ids:patched.compiled_ids ~sites:patched.sites checked |> Result.get_ok in
       check (Marshal.to_string patched.plan [Marshal.No_sharing] = Marshal.to_string full.plan [Marshal.No_sharing])
         ("literal plan differs: " ^ text);
       if has text "(for " then List.iter2 (fun (a : L.graph) (b : L.graph) ->
-        let a = Test_workspace_cook.cook ~domains:1 a |> Option.get
-        and b = Test_workspace_cook.cook ~domains:3 b |> Option.get in
-        check (Test_workspace_cook.geometry_bytes a = Test_workspace_cook.geometry_bytes b)
+        let a = Test_support.Workspace_cook.cook ~domains:1 a |> Option.get
+        and b = Test_support.Workspace_cook.cook ~domains:3 b |> Option.get in
+        check (Test_support.Workspace_cook.geometry_bytes a = Test_support.Workspace_cook.geometry_bytes b)
           "static loop literal cook differs") patched.graphs full.graphs
     end)
     ["(workspace w (graph g :context sop (let* [a (sop/uv_sphere :radius ; radius note\n0.5)] a)))",
@@ -595,7 +595,7 @@ let part_literals () =
     let e, phases = Flow.Phase_timer.sample ~clock:Unix.gettimeofday (fun () ->
       let e = E3.edit e operation |> Result.get_ok in E3.update e (frame [] 1)) in
     List.iter (fun phase -> check (Flow.Phase_timer.calls phases phase = 0)
-      ("editor literal repeated " ^ Flow.Phase_timer.name phase)) [Print; Parse; Check; Evaluate; Lower; Project; Layout];
+      ("editor literal repeated " ^ phase)) ["print"; "parse"; "check"; "evaluate"; "lower"; "project"; "layout"];
     let source, checked = full_edit catalog (of_text still) operation |> Result.get_ok in
     let ws = E3.workspace e in
     check (Doc.to_text ws = Doc.to_text {ws with source; checked}) "editor literal save differs");
@@ -638,7 +638,7 @@ let part_files () =
     let text = In_channel.with_open_bin file In_channel.input_all in
     match Result.bind (Rays_editor.Source.read_imports ~file text)
       (fun imports -> Rays_editor.Workspace.load ~imports text) with
-    | Error ds when List.exists (fun (d : Flow.Diagnostic.t) -> d.code = "E_UNKNOWN_KIND") ds -> ()
+    | Error ds when List.exists (fun (d : Diagnostic.t) -> d.code = "E_UNKNOWN_KIND") ds -> ()
     | Error ds -> fail (file ^ ": " ^ show ds)
     | Ok doc ->
     (* a start reads its window from the document it opens: the same answer as the settings
@@ -664,8 +664,8 @@ let part_files () =
       let next, phases = Flow.Phase_timer.sample ~clock:Unix.gettimeofday (fun () -> Doc.edit catalog doc op) in
       match full, next with
       | Error a, Error b -> check (a.code = b.code) (where ^ ": the literal path refused with another code"); incr refused
-      | Ok _, Error d -> fail (where ^ ": the literal path refused an edit the full path accepts: " ^ Flow.Diagnostic.to_string d)
-      | Error d, Ok _ -> fail (where ^ ": the literal path accepted an edit the full path refuses: " ^ Flow.Diagnostic.to_string d)
+      | Ok _, Error d -> fail (where ^ ": the literal path refused an edit the full path accepts: " ^ Diagnostic.to_string d)
+      | Error d, Ok _ -> fail (where ^ ": the literal path accepted an edit the full path refuses: " ^ Diagnostic.to_string d)
       | Ok (source, checked), Ok next ->
           check (Doc.to_text next = Doc.to_text { next with source; checked }) (where ^ ": saved bytes differ from the full path");
           if next.literal = None then begin
@@ -677,15 +677,15 @@ let part_files () =
           end else begin
             incr fast;
             List.iter (fun phase -> check (Flow.Phase_timer.calls phases phase = 0)
-              (where ^ ": the literal path repeated " ^ Flow.Phase_timer.name phase)) [Print; Parse; Check; Project];
+              (where ^ ": the literal path repeated " ^ phase)) ["print"; "parse"; "check"; "project"];
             match Editor_document.Literal_edit.lower (Lazy.force lowered) (List.hd (Option.get (Doc.literal_changes ~previous:doc next))) with
             | None -> ()
             | Some (Error d) ->
                 (* the checker accepts it and lowering refuses it (a cook-level parameter rule): so must the full path *)
                 (match L.of_checked ~factories ~compiled_ids:(Lazy.force lowered).compiled_ids ~sites:(Lazy.force lowered).sites ~inputs:doc.inputs checked with
                  | Error e -> check (e.code = d.code) (Printf.sprintf "%s: the lowering patch refused with another code: %s versus %s"
-                     where (Flow.Diagnostic.to_string d) (Flow.Diagnostic.to_string e)); incr refused
-                 | Ok _ -> fail (where ^ ": the lowering patch refused an edit the full lowering accepts: " ^ Flow.Diagnostic.to_string d))
+                     where (Diagnostic.to_string d) (Diagnostic.to_string e)); incr refused
+                 | Ok _ -> fail (where ^ ": the lowering patch refused an edit the full lowering accepts: " ^ Diagnostic.to_string d))
             | Some (Ok patched_lowering) ->
                 incr patched;
                 let reference = L.of_checked ~factories ~compiled_ids:patched_lowering.compiled_ids
@@ -717,7 +717,7 @@ let part_projection_reuse () =
   let ws = of_text text in
   let renamed, phases = Flow.Phase_timer.sample ~clock:Unix.gettimeofday (fun () ->
     Doc.edit catalog ws (E.Rename {node = ["other";"b"]; to_ = "moved"}) |> Result.get_ok) in
-  check (Flow.Phase_timer.calls phases Project = 0) "a rename projected every graph to prune layout";
+  check (Flow.Phase_timer.calls phases "project" = 0) "a rename projected every graph to prune layout";
   check (Projection.same_graph ws.checked renamed.checked "g"
     && not (Projection.same_graph ws.checked renamed.checked "other")) "projection invalidation ignored lexical graph content";
   check (Layout.Path_map.find ["g";"a"] renamed.layout.at = (120.,48.)
@@ -726,7 +726,7 @@ let part_projection_reuse () =
     && not (Layout.Path_map.mem ["other";"b"] renamed.layout.at)) "path pruning lost a surviving key or kept the renamed one";
   let removed, phases = Flow.Phase_timer.sample ~clock:Unix.gettimeofday (fun () ->
     Doc.edit catalog renamed (E.Remove_graph {name = "other"}) |> Result.get_ok) in
-  check (Flow.Phase_timer.calls phases Project = 0
+  check (Flow.Phase_timer.calls phases "project" = 0
     && not (Layout.Path_map.mem ["other";"moved"] removed.layout.at)) "removing a graph projected or retained its layout";
   let typed = of_text "(workspace w (defn a :context value [] 1) (graph b :context value (let* [result (a)] 1)))" in
   let changed = of_text "(workspace w (defn a :context value [] [1 2 3]) (graph b :context value (let* [result (a)] 1)))" in
@@ -738,7 +738,7 @@ let part_projection_reuse () =
     let _, phases = Flow.Phase_timer.sample ~clock:Unix.gettimeofday (fun () ->
       E3.edit e (E.Rename {node = ["other";"b"]; to_ = "moved"}) |> Result.get_ok
       |> fun e -> E3.update e (frame [] 1)) in
-    check (Flow.Phase_timer.calls phases Project = 0) "editing another graph re-projected the pane");
+    check (Flow.Phase_timer.calls phases "project" = 0) "editing another graph re-projected the pane");
   print_endline "workspace projection: path pruning, unchanged graph reuse and dependency type invalidation passed"
 
 let part_imports () =
@@ -778,7 +778,7 @@ let part_imports () =
   check (not (has (Doc.to_text fragment) "(workspace") && not (has (Doc.to_text fragment) "(layout"))
     "editing a library fragment appended workspace metadata";
   let error imports text code = check (match Doc.of_text ~imports catalog text with
-    | Error ds -> List.exists (fun (d : Flow.Diagnostic.t) -> d.code = code) ds | _ -> false) ("missing " ^ code) in
+    | Error ds -> List.exists (fun (d : Diagnostic.t) -> d.code = code) ds | _ -> false) ("missing " ^ code) in
   error [] text "E_IMPORT";
   error ["lib.rays", "(import \"other.rays\")\n" ^ library] text "E_IMPORT";
   error imports "(workspace local (graph shared :context value 1)) (import \"lib.rays\")" "E_NAME";

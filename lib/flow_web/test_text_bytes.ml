@@ -1,7 +1,7 @@
 let () =
   let js = Buffer.create 20000 in
   Printf.bprintf js "import {textBytes,textOfBytes,text_repr} from %S;\n"
-    ("file://" ^ Filename.concat (Sys.getcwd ()) "../../tools/web/runtime/prims.js");
+    ("file://" ^ Filename.concat (Sys.getcwd ()) "../web_export/runtime/prims.js");
   Buffer.add_string js "import {Worker} from 'node:worker_threads';\nconst samples=[];\n";
   let sample text =
     let bytes = Array.init (String.length text) (fun i -> string_of_int (Char.code text.[i])) in

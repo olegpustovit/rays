@@ -164,4 +164,17 @@ let cases =
 
 (* 1,000,000 output points: a 1,000-vertex open backbone swept with a 1,000-vertex closed profile (quads). *)
 let bench () = [build [sec ~kind:open_k 1000 0.]; build [sec ~kind:closed_k 1000 0. ~radius:0.3]], []
-let () = register { key = "sweep"; native = Sop.Nodes.Sweep.factory; inputs; cases; ulps = 4; bench = Some bench }
+let node = match Sys.getenv_opt "SWEEP_INPUT", Sys.getenv_opt "SWEEP_CASES" with
+  | None, None -> { key = "sweep"; native = Sop.Nodes.Sweep.factory; inputs; cases; ulps = 4; bench = Some bench }
+  | input, selected_cases ->
+      let inputs = match input with
+        | None -> inputs
+        | Some label -> List.filter (fun (name, _) -> name = label) inputs in
+      let cases = match selected_cases with
+        | None -> cases
+        | Some prefixes ->
+            let prefixes = String.split_on_char ',' prefixes in
+            List.filter (fun (label, _) -> List.exists (fun prefix ->
+              prefix = "*" || String.starts_with ~prefix label) prefixes) cases in
+      { key = "sweep"; native = Sop.Nodes.Sweep.factory; inputs; cases; ulps = 4; bench = None }
+let () = register node

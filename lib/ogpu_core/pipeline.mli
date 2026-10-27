@@ -1,9 +1,8 @@
 type color_format = Rgba8_unorm | Bgra8_unorm
-type depth_format = No_depth | Depth32_float | Stencil8 | Depth32_float_stencil8
+type depth_format = No_depth | Depth32_float
 type blend = Replace | Alpha | Add | Multiply | Screen | Subtract
 
-(** [depth_format] states the depth/stencil attachment the pipeline is drawn
-    with. Metal 4 pipelines are not specialized on it, so the Metal driver does
+(** [depth_format] states the depth attachment the pipeline is drawn with. Metal 4 pipelines are not specialized on it, so the Metal driver does
     not read it; it is part of the portable description because a backend with
     render-pass compatibility rules needs it. *)
 type render_descriptor =

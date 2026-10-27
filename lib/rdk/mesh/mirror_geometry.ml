@@ -4,8 +4,8 @@ let run ?cancel ?(grain = 16_384) ?(keep_original = true) ~origin ~normal
     geometry =
   Error.guard ~operation:"mirror" ~code:"invalid_parameter" @@ fun () ->
   if grain <= 0 then invalid_arg "Rdk_mesh.Mirror_geometry.mirror: grain must be positive";
-  let ox = origin.Vec3.x and oy = origin.y and oz = origin.z
-  and supplied_nx = normal.Vec3.x and supplied_ny = normal.y
+  let ox = origin.Rays_math.Vec3.x and oy = origin.y and oz = origin.z
+  and supplied_nx = normal.Rays_math.Vec3.x and supplied_ny = normal.y
   and supplied_nz = normal.z in
   if not (Float.is_finite ox && Float.is_finite oy && Float.is_finite oz && Float.is_finite supplied_nx
           && Float.is_finite supplied_ny && Float.is_finite supplied_nz) then

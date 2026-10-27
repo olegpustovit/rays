@@ -4,7 +4,7 @@ open Rdk_test_support
 module N=Sop.Node
 module P=Param
 module S=Flow.Syntax
-module D=Flow.Diagnostic
+module D=Diagnostic
 let checked=function Ok value->value|Error d->fail(D.to_string d)
 let sources=Flow_sop.Catalog.sources() |>checked
 let ()=check(not(List.exists(fun f->Sop.Edit_graph.factory_key f="points")Sop_catalog.Editor.factories))
@@ -14,7 +14,7 @@ let native_factories=Sop.Nodes.Point_generate.factory::factories
 let catalog fs=Flow_sop.Catalog.of_factories ~nodes:[] ~version:Flow_sop.Manifest.version fs |>checked
 let checker forms=Flow_sop.Catalog.check_workspace ~sources ~ops:Flow_sop.Operators.all(catalog factories)forms
 let native_checker forms=Flow.Workspace.check ~ops:Flow_sop.Operators.all(catalog native_factories)forms
-let errors ds=List.filter(fun(d:D.t)->d.severity=Error)ds
+let errors ds=List.filter(fun(d:D.t)->d.severity=Diagnostic.Error_severity)ds
 let workspace=function Some w,ds when errors ds=[]->w
   |_,ds->fail(String.concat "\n"(List.map D.to_string ds))
 let compile ?(reference=false) w=
@@ -38,7 +38,7 @@ let result ?(seed=0L) ?(time=0.) ?cancel s domains grain node=
   Result.bind(Sop.Session.cook s ~context node)(fun cooked->
     check(cooked.instances=None)"Points acquired an instance payload";
     Sop.Payload.geometry cooked.payload)
-let cooked=function Ok value->value|Error d->fail(Sop.Diagnostic.error_to_string d)
+let cooked=function Ok value->value|Error d->fail(Diagnostic.error_to_string d)
 let cook s domains grain node=result s domains grain node |>cooked
 let scalar=function P.Text_value text->Printf.sprintf "%S" text|Int_value n->string_of_int n|_->assert false
 let keywords changes=N.parameter_fields(native changes) |>List.map(fun(field:P.field_view)->
@@ -265,7 +265,7 @@ let live_parameters()=
     let graph=List.hd lowered.graphs and native_graph=List.hd native_lowered.graphs
     and state=Flow.Eval.create_state()and native_state=Flow.Eval.create_state()in
     let lane=Flow_sop.Value_lane.create ~state()and native_lane=Flow_sop.Value_lane.create ~state:native_state()in
-    session(fun s->List.iter(fun(time,dt)->let live={(Frame_input.at_time time)with dt;frame=int_of_float time;tick=int_of_float time}in
+    session(fun s->List.iter(fun(time,dt)->let live={(Input.at_time time)with dt;frame=int_of_float time;tick=int_of_float time}in
       let network=Flow_sop.Value_lane.resolve ~live lane ~time graph.network |>checked
       and native_network=Flow_sop.Value_lane.resolve ~live native_lane ~time native_graph.network |>checked in
       let actual=Sop.Edit_graph.compile_node network.geometry ~node_id:(Option.get graph.root) |>get_string_ok

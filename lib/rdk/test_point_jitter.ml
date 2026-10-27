@@ -14,7 +14,7 @@ let near left right = abs_float (left -. right) <= 1e-14
 
 let sample seed identity component =
   let identity = identity * 0x1e3779b97f4a7c15 in
-  Rand.float_at seed ~index:(identity lxor
+  Rays_math.Rand.float_at seed ~index:(identity lxor
     ((component + 1) * 0x11b54a32d192ed03)) -. 0.5
 
 let expect_code code = function
@@ -50,8 +50,8 @@ let run () =
       (fun point -> point < 3) in
   check (Group.mem 0 selected && Group.mem 1 selected && Group.mem 2 selected
       && not (Group.mem 3 selected)) "Point Jitter test selection";
-  let seed = Rand.seed 91 in
-  let axis_scales = Vec3.create 1. (-2.) 0.5 in
+  let seed = Rays_math.Rand.seed 91 in
+  let axis_scales = Rays_math.Vec3.create 1. (-2.) 0.5 in
   let output = Parallel.run ~domains:1 (fun () ->
     Point_jitter.run ~grain:1 ~points:selected
       ~mask_attribute:"mask" ~id_attribute:"stable_id" ~use_point_scale:true
@@ -102,7 +102,7 @@ let run () =
   and unit_scale = Point_jitter.run ~seed ~scale:0.7 missing_pscale |> get_ok in
   check (equal_positions pscale_fallback unit_scale)
     "missing pscale did not default to one";
-  let changed_seed = Point_jitter.run ~seed:(Rand.seed 92) ~scale:0.7 input
+  let changed_seed = Point_jitter.run ~seed:(Rays_math.Rand.seed 92) ~scale:0.7 input
       |> get_ok in
   check (not (equal_positions changed_seed point_numbers))
     "Point Jitter ignored its random seed";
@@ -122,8 +122,8 @@ let run () =
       (fun point -> point mod 5 <> 0) in
   let run domains = Parallel.run ~domains (fun () ->
     Point_jitter.run ~grain:257 ~points:large_group ~mask_attribute:"mask"
-      ~id_attribute:"stable_id" ~use_point_scale:true ~seed:(Rand.seed 1234)
-      ~scale:2.75 ~axis_scales:(Vec3.create (-0.25) 1.5 0.75) large |> get_ok) in
+      ~id_attribute:"stable_id" ~use_point_scale:true ~seed:(Rays_math.Rand.seed 1234)
+      ~scale:2.75 ~axis_scales:(Rays_math.Vec3.create (-0.25) 1.5 0.75) large |> get_ok) in
   let sequential = run 1 and parallel = run 4 in
   check (equal_positions sequential parallel)
     "Point Jitter differed between one and four domains";
@@ -163,7 +163,7 @@ let run () =
     (Point_jitter.run ~seed ~scale:nan input);
   expect_code "invalid_attribute"
     (Point_jitter.run ~seed ~scale:1.
-       ~axis_scales:(Vec3.create infinity 1. 1.) input);
+       ~axis_scales:(Rays_math.Vec3.create infinity 1. 1.) input);
   let nonfinite = input |> add_attribute ~owner:Attribute.Point ~name:"bad"
       (Attribute.Float [|1.; nan; 1.; 1.|]) in
   expect_code "invalid_attribute"

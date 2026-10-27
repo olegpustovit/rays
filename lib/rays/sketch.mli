@@ -4,6 +4,9 @@ type clock =
   | Realtime
   | Fixed of float
 
+type error = Ogpu.Error.t
+val error_to_string : error -> string
+
 type config = {
   width : int;
   height : int;
@@ -26,10 +29,13 @@ val run_state :
   ?after_present:('model -> Frame.t -> 'model) ->
   ?crash_dump:('model -> string -> unit) ->
   ?on_stop:('model -> unit) ->
-  unit -> 'model
+  unit -> ('model, error) result
 (** Run a sketch with immutable user state threaded through every frame.
+    Native startup, runtime, validation and export failures are returned as
+    [Ogpu.Error.t]. Exceptions raised by sketch callbacks are fatal: they write
+    a crash report and propagate.
     A fatal exception in [init], [update], [view], or [after_present] writes
-    a crash report folder under [/tmp/rays-crash] (or
+    a crash report folder under the platform temporary directory's [rays-crash] (or
     [RAYS_CRASH_DIR]) before it propagates: [crash.txt] holds the
     exception, backtrace, the last 120 frames' input, GC and environment
     facts; [crash_dump model directory] adds the sketch's own files there
@@ -42,7 +48,7 @@ val run_state :
 
 val export :
   ?config:config -> ?prefix:string -> directory:string ->
-  frames:int -> (Frame.t -> Scene.t) -> unit
+  frames:int -> (Frame.t -> Scene.t) -> (unit, error) result
 (** Renders a deterministic PNG sequence named [prefix-NNNNNN.png]. Captured
     frames use the renderer's native backing dimensions. *)
 
@@ -57,8 +63,9 @@ val export_state :
   view:('model -> Frame.t -> Scene.t) ->
   ?after_present:('model -> Frame.t -> 'model) ->
   ?on_stop:('model -> unit) ->
-  unit -> 'model
-(** Stateful deterministic PNG-sequence export. *)
+  unit -> ('model, error) result
+(** Stateful deterministic PNG-sequence export. Startup and file-write errors
+    are returned; exceptions from sketch callbacks propagate with crash reports. *)
 
 val quit : unit -> unit
 
@@ -71,7 +78,7 @@ val set_cursor : [`Default|`Horizontal_resize|`Vertical_resize|`Text] ->
   (unit, string) result
 (** Set the active native pointer cursor; an error when no sketch is running. *)
 
-val set_window_background : Color.t -> (unit, string) result
+val set_window_background : Rays_math.Color.t -> (unit, string) result
 (** The native window's own background. A Rays window keeps the traffic lights,
     hides its title and has a transparent title bar, so this is the title bar's
     colour: a host sets it to the colour its top edge is painted with. An error
@@ -83,7 +90,7 @@ val show_file_dialog :
   ?filters:(string * string list) list -> ?default_location:string -> dialog ->
   (int, string) result
 (** Open the system's file dialog and return at once with its id. When the
-    user chooses or cancels, [Event.FileDialog] arrives in a later frame with
+    user chooses or cancels, [Input.File_dialog] arrives in a later frame with
     the same id: the chosen absolute paths ([Open_files] may choose several),
     or an empty list for a cancel. [filters] are a label with the extensions it
     lists, without dots ([("Images", ["png"; "jpg"])]); an empty list means

@@ -28,7 +28,9 @@ val region : ?fast:bool -> Flow_ir.Packed.t -> string
 
     Text leaf regions use immutable strings and string arrays, collect only,
     and accept an optional sixth [outputBase = 0] argument for worker-local
-    output slices. Their inputs, captures and outputs never use float buffers.
+    output slices. The region loader supplies [noise3] from the web runtime's
+    [prims.js] module as its closure binding. Their inputs, captures and outputs
+    never use float buffers.
 
     Covers every result kind: [Collect], [Sum] and [Accumulate], one or several
     outputs ([Collect] only), [Zip] and [Product] iteration, and [skip].
@@ -44,7 +46,7 @@ val region : ?fast:bool -> Flow_ir.Packed.t -> string
     are read as numbers, integer outputs are still written as [BigInt]. Sums, accumulators and
     [rand_at] keep the exact form. *)
 
-val frame : ?store:(float array -> string) -> ?fast:bool -> ?kernel:(int -> string option) -> ?gpu:(int -> bool) -> ?state_slot:(int -> int) -> Flow_ir.Core.program -> (string, Flow.Diagnostic.t) result
+val frame : ?store:(float array -> string) -> ?fast:bool -> ?kernel:(int -> string option) -> ?gpu:(int -> bool) -> ?state_slot:(int -> int) -> Flow_ir.Core.program -> (string, Diagnostic.t) result
 (** [store], when given, prints every packed-array constant: it receives the elements and returns a JavaScript
     expression for a [Float64Array] of them (the export keeps them in [data.bin]); without it the elements
     are written inline.
@@ -62,16 +64,16 @@ val frame : ?store:(float array -> string) -> ?fast:bool -> ?kernel:(int -> stri
     exactly when the program invokes a region or resolves an image). It returns the program's single result, or an array
     of results when there are not exactly one (a draw program returns [[]]). A failure is thrown
     as [rt.Fail] (or a JavaScript error) with the executing statement's {!C.statement} [id] set as
-    [error.statement]; {!frame_map} turns it into a source span. Errors are
-    [Error] with code [E_WEB_PRIMITIVE] when a primitive call has an argument the printer does not
-    place (nothing else is refused: constants are literals, regions are indices).
+    [error.statement]; {!frame_map} turns it into a source span. Frame generation returns a
+    [Diagnostic.t] refusal for target-incompatible primitives, host sources, range-last diagnosis,
+    or region captures; these use [E_WEB_PRIMITIVE] or [E_WEB_SOURCE].
 
-    Values are those of [tools/web/runtime/prims.js]: Int is BigInt, Float is Number, Vec is
+    Values are those of [lib/web_export/runtime/prims.js]: Int is BigInt, Float is Number, Vec is
     [Float64Array], Record is [Map], list is [Array], packed array is [rt.PArray].
 
     What the module expects:
     - [input]: [{t, dt, frame, tick, size: [w, h], pointer: [x, y], buttons, keys, events}], the
-      fields of [Frame_input.t] as JavaScript numbers (Int facts are converted to BigInt by the
+      fields of [Input.t] as JavaScript numbers (Int facts are converted to BigInt by the
       module), logical points.
     - [state]: the runtime's slot array ([[]] at start). The module creates [state[i]] on first
       use; it holds a [Map] from the iteration key to a cell [{value, pending, stamp}]. A cell

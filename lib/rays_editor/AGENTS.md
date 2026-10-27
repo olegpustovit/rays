@@ -74,9 +74,9 @@ turns the result and the frame's actions into the next model. Never set a ref or
   (`install ~label:"Put"`), and cancelling restores the original document physically.
 
 **Keys.** Keys become actions only through the one `Editor_core.Command.t` keymap
-(`Leader.keymap3`, `Pxui_graph.Scope.bindings`, `Pxui_shell.Tree.bindings`). Panes do not match `KeyPressed` for commands. A key that only means
+(`Leader.keymap`, `Pxui_graph.Scope.bindings`, `Pxui_shell.Tree.bindings`). Panes do not match `KeyPressed` for commands. A key that only means
 something on one level or view is filtered in `Core.routed`. The text area's own chords (comment, move and duplicate lines, enclosing form, matching bracket) are
-handled by `Ui.text_area`; `Leader.text_keys` only lists them on the key sheet and is never in the keymap. A focused text field keeps the
+handled by `Ui.text_area`; `Leader.text_keys` lists their labels and triggers on the key sheet and is never in the keymap. A focused text field keeps the
 keyboard except the global Command/Ctrl chords it has no use for. The graph pane's fields count as
 text focus only while the pane is drawn; a pane that is not drawn is `Scope.suspend`ed.
 
@@ -98,7 +98,7 @@ strip says so ("Reload sketch from its file" takes it). Autosave writes one reco
 sketch at 2 Hz and on close, never over an earlier session's file while the document is still the
 one opened, and never a carry preview.
 
-**Viewports.** Each viewport keeps its own orbit; handles, picks and the sketch overlay follow the
+**Viewports.** Each viewport keeps its own orbit; handles and picks follow the
 focused one. The viewport shows each object's graph result, or its transient lexical preview
 request at the loop selectors. A preview never reaches the document or history. Viewports asking for the same picture
 share a tracer; a traced slot at its cap with nothing changed does not render. Relative mouse and

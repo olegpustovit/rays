@@ -98,6 +98,13 @@ type field_view = {
   current : value;
 }
 
+val group_vec3 : ?infer:bool -> field_view list -> (field_view list list, string) result
+(** Scalars remain single fields. A vector is three contiguous float fields
+    in component order and one folder; group names cannot overlap fields or
+    other groups. [infer=true] first marks ungrouped consecutive [_x/_y/_z] or
+    [_r/_g/_b] fields used by native scene schemas; a conflicting stem gets
+    [_color] appended. The field order and remaining metadata are retained. *)
+
 val integer :
   ?hard_min:int -> ?hard_max:int -> min:int -> max:int -> unit -> int kind
 
@@ -160,6 +167,13 @@ val key : 'record schema -> 'record -> string
     the session cache identity, so every cook-affecting schema field changes a
     parameterized node's cache key and view/export edits never invalidate it. *)
 val cook_key : 'record schema -> 'record -> string
+
+val float_text : ?decimal:bool -> float -> string
+(** The fewest significant decimal digits that round-trip finite floats,
+    including signed zero. Compact output chooses the shorter plain/exponent
+    spelling, preferring plain on ties. [decimal=true] writes workspace float literals:
+    a decimal point and no exponent. Non-finite classes print [NaN],
+    [Infinity] or [-Infinity]. *)
 
 (** The [Cook] fields as readable [name=value] pairs joined by [;]: a bool as
     [true]/[false], an int as itself, a float as the shortest decimal that reads back exactly, a text or

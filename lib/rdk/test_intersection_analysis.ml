@@ -277,7 +277,7 @@ let test_restrictions_translation_and_errors () =
       ~collision_primitives:first ~collision source |> get in
   check (Geometry.point_count output = 2)
     "Intersection Analysis primitive restrictions";
-  let moved = Mat4.translation (Vec3.create 1e12 (-1e12) 1e12) in
+  let moved = Rays_math.Mat4.translation (Rays_math.Vec3.create 1e12 (-1e12) 1e12) in
   let original = Intersection_analysis.run ~include_coplanar:false ~collision
       source |> get
   and translated = Intersection_analysis.run ~include_coplanar:false
@@ -303,7 +303,7 @@ let test_restrictions_translation_and_errors () =
   let cancelled = Cancel.create () in
   Cancel.cancel cancelled;
   expect "cancelled" (Intersection_analysis.run ~cancel:cancelled source);
-  let curve = Line_geometry.line ~origin:Vec3.zero ~direction:Vec3.unit_x ~length:1. ()
+  let curve = Line_geometry.line ~origin:Rays_math.Vec3.zero ~direction:Rays_math.Vec3.unit_x ~length:1. ()
       |> get in
   check (Geometry.point_count (Intersection_analysis.run curve |> get) = 0)
     "Intersection Analysis rejected a valid polygon curve";
@@ -335,7 +335,7 @@ let test_parallel_exact () =
       ~connectivity:Plane_generators.Grid_alternating_triangles
       ~columns:80 ~rows:60 ~size:20. () |> get in
   let collision = Transform_ops.transform ~grain:31
-      (Mat4.rotation_x (Float.pi /. 2.)) source in
+      (Rays_math.Mat4.rotation_x (Float.pi /. 2.)) source in
   let run domains = Parallel.run ~domains (fun () ->
     Intersection_analysis.run ~grain:31 ~include_coplanar:false ~collision source
     |> get) in

@@ -42,7 +42,7 @@ let read_imports ~file text =
     List.fold_left (fun result path -> Result.bind result (fun imports ->
       match read (Filename.concat (Filename.dirname file) path) with
       | Ok text -> Ok (imports @ [path, text])
-      | Error message -> Error [Flow.Diagnostic.error ~code:"E_IMPORT" (path ^ ": " ^ message)])) (Ok []) paths)
+      | Error message -> Error [Diagnostic.error ~code:"E_IMPORT" (path ^ ": " ^ message)])) (Ok []) paths)
 
 let with_imports t imports = {t with imports = List.map (fun (path, text) -> path,
   at ~file:(Filename.concat (Filename.dirname t.file) path) ~digest:(sha text)) imports}

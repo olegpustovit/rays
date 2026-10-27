@@ -13,7 +13,7 @@ picture 4: (draw/line [0 0 0] [5 5 0])
 picture 5: (draw/line [0 0 0] [5 5 0] :color "#0f0" :width 3)
   line 1 from=const 0x0p+0,0x0p+0 to=const 0x1.4p+2,0x1.4p+2 color=const 00ff00ff width=const 0x1.8p+1
 picture 6: (draw/point [3.9 -4.9 0] :color "#abc")
-  geometry aabbccff vertices=[0x1.8p+1 -0x1p+2 0x1p+2 -0x1p+2 0x1p+2 -0x1.8p+1 0x1.8p+1 -0x1.8p+1] indices=[3 2 0 2 1 0]
+  geometry aabbccff vertices=[0x1.f333333333333p+1 -0x1.399999999999ap+2 0x1.399999999999ap+2 -0x1.399999999999ap+2 0x1.399999999999ap+2 -0x1.f333333333334p+1 0x1.f333333333333p+1 -0x1.f333333333334p+1] indices=[3 2 0 2 1 0]
 picture 7: (draw/translate [1.9 -2.5 0] (draw/merge (draw/point [0 0 0]) (draw/rotate 0.5 (draw/scale 2 (draw/point [1 1 0])))))
   push 0x1p+0 0x0p+0 0x0p+0 0x1p+0 0x1p+0 -0x1p+1
   geometry ffffffff vertices=[0x0p+0 0x0p+0 0x1p+0 0x0p+0 0x1p+0 0x1p+0 0x0p+0 0x1p+0] indices=[3 2 0 2 1 0]
@@ -61,5 +61,5 @@ error E_DRAW_LENGTH: Radii and positions have different lengths.
 error E_DRAW_LENGTH: Colors and positions have different lengths.
 error E_DRAW_LENGTH: Line endpoints have different lengths.
 error E_DRAW_RANGE: entry 0: size negative
-error E_DRAW_RANGE: A drawing coordinate must fit an integer.
+error E_DRAW_RANGE: A drawing coordinate must be finite and fit a 32-bit float.
 error E_IMAGE: Drawing images need an environment-owned image resolver.

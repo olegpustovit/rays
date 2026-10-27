@@ -1,5 +1,4 @@
-(* The Navigator panel: see navigator.mli.  The study's outline is
-   prototype/src/e4.js ([fillOutline]). *)
+(* The Navigator panel: see navigator.mli. *)
 module Ui = Pxui.Ui
 module W = Flow.Workspace
 module P = Flow_graph.Projection
@@ -46,7 +45,7 @@ type params = {
   records : Flow_graph.Probe.t option;
   probes : path -> int;
   selected : path list;
-  chips : (string * Rays.Color.t) list;  (** the evaluated colour of each material graph *)
+  chips : (string * Rays_math.Color.t) list;  (** the evaluated colour of each material graph *)
   objects : obj list;
   root_detail : string;  (** what the scene's root row says: its samples *)
   layouts : (string list * int) option;
@@ -60,7 +59,7 @@ type row =
   | Layout_row of { index : int; label : string; active : bool }
   | Input_row of { graph : string; name : string; integer : bool; value : float }
   | Graph_row of { graph : string; label : string; context : W.context option; detail : string;
-                   active : bool; chip : Rays.Color.t option; dim : bool; used : int option }
+                   active : bool; chip : Rays_math.Color.t option; dim : bool; used : int option }
   | Node_row of { graph : string; path : path; depth : int; label : string; detail : string;
                   zone : string option; ty : Flow.Ty.t; result : bool; selected : bool }
   | Macro_row of string * int
@@ -95,9 +94,9 @@ let chips (ev : Flow.Eval.t) =
   List.filter_map (fun (name, v) -> match v with
     | Flow.Eval.Struct ("material/standard", _, fields) ->
         let colour = match List.assoc_opt "color" fields with
-          | Some (Flow.Eval.Vec3 (r, g, b)) -> Some (Rays.Color.rgb (byte r) (byte g) (byte b))
-          | Some (Flow.Eval.Text hex) -> Result.to_option (Rays.Color.hex hex)
-          | None -> Some Rays.Color.white
+          | Some (Flow.Eval.Vec3 (r, g, b)) -> Some (Rays_math.Color.rgb (byte r) (byte g) (byte b))
+          | Some (Flow.Eval.Text hex) -> Result.to_option (Rays_math.Color.hex hex)
+          | None -> Some Rays_math.Color.white
           | Some _ -> None in
         Option.map (fun c -> name, c) colour
     | _ -> None) ev.results
@@ -325,7 +324,7 @@ let describe = function
         (if active then "> " else "") ^ label; detail;
         (match used with Some n when detail <> "unused" -> Printf.sprintf "×%d" n | _ -> "");
         (match chip with
-         | Some c -> let r, g, b, _ = Rays.Color.to_tuple c in Printf.sprintf "#%02x%02x%02x" r g b
+         | Some c -> Rays_math.Color.to_hex_string { c with a = 255 }
          | None -> "") ])
   | Node_row { label; detail; depth; zone; _ } ->
       Printf.sprintf "%s%s%s · %s" (String.make (2 * depth) ' ')
@@ -467,7 +466,7 @@ let view state ui ~bounds:(x, y, w, h) p =
         | _ -> emit (Open { graph; node = Some path }))
    | Some (Layout_row { index; _ }) -> emit (Layout index)
    | _ -> ());
-  if (typing || was_typing) && Ui.key_pressed ui Rays.Input.Enter then
+  if (typing || was_typing) && Ui.key_pressed ui Input.Enter then
     (match List.find_map (function
        | Graph_row { graph; _ } -> Some (Open { graph; node = None })
        | Node_row { graph; path; _ } -> Some (Open { graph; node = Some path })
@@ -478,8 +477,8 @@ let view state ui ~bounds:(x, y, w, h) p =
   (match Option.map (fun k -> rows.(k)) hovered with
    | Some (Graph_row { graph; _ } | Root_row { graph; _ }) when not (String.starts_with ~prefix:"def:" graph)
        && not typing && state.rename = None ->
-       if Ui.key_pressed ui Rays.Input.F2 then begin_rename := Some (graph, false)
-       else if Ui.key_pressed ui Rays.Input.Delete then emit (Remove graph)
+       if Ui.key_pressed ui Input.F2 then begin_rename := Some (graph, false)
+       else if Ui.key_pressed ui Input.Delete then emit (Remove graph)
    | _ -> ());
   (* a right-click opens the context menu: New graph (a context each), and on a graph row Rename
      and Delete.  The row's own graph is kept with the menu; a function row has neither. *)

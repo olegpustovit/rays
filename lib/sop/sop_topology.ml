@@ -48,7 +48,7 @@ module Edge_divide = struct
 end
 
 module Edge_collapse = struct
-  let position_parameter = Parameter.choice ~equal:( = ) [
+  let position_parameter = Param.choice ~equal:( = ) [
       "First", Rdk.Fuse_reduce.First_position;
       "Least point", Rdk.Fuse_reduce.Least_point_position;
       "Greatest point", Rdk.Fuse_reduce.Greatest_point_position;
@@ -118,12 +118,12 @@ module Edge_collapse = struct
 end
 
 module Dissolve = struct
-  let operation_parameter = Parameter.choice ~equal:( = ) [
+  let operation_parameter = Param.choice ~equal:( = ) [
       "Selected", Rdk.Dissolve.Dissolve_selected;
       "Non-selected", Rdk.Dissolve.Dissolve_non_selected;
     ]
 
-  let bridge_parameter = Parameter.choice ~equal:( = ) [
+  let bridge_parameter = Param.choice ~equal:( = ) [
       "Create bridged polygons", Rdk.Dissolve.Create_bridged_polygons;
       "Create disjoint polygons", Rdk.Dissolve.Create_disjoint_polygons;
       "Delete bridge polygons", Rdk.Dissolve.Delete_bridge_polygons;
@@ -352,7 +352,7 @@ module Edge_straighten = struct
 end
 
 module Poly_extrude = struct
-  let divide_parameter = Parameter.choice ~equal:( = ) [
+  let divide_parameter = Param.choice ~equal:( = ) [
       "Individual elements", Rdk.Poly_extrude.Extrude_individual;
       "Connected components", Rdk.Poly_extrude.Extrude_connected_components;
     ]
@@ -441,7 +441,7 @@ module Poly_extrude = struct
 end
 
 module Poly_fill = struct
-  let mode_parameter = Parameter.choice ~equal:( = ) [
+  let mode_parameter = Param.choice ~equal:( = ) [
       "Single polygon", Rdk.Poly_fill.Fill_single_polygon;
       "Triangles", Rdk.Poly_fill.Fill_triangles;
       "Triangle fan", Rdk.Poly_fill.Fill_triangle_fan;
@@ -598,7 +598,7 @@ module Blast = struct
 end
 
 module Crease = struct
-  let operation_parameter = Parameter.choice ~equal:( = ) [
+  let operation_parameter = Param.choice ~equal:( = ) [
       "Add", Rdk.Crease.Crease_add;
       "Set", Rdk.Crease.Crease_set;
       "Delete", Rdk.Crease.Crease_delete;
@@ -690,7 +690,7 @@ module Ends = struct
     | Rdk.Curve_topology.Ends_close_straight -> "close_straight"
     | Rdk.Curve_topology.Ends_unroll_shared -> "unroll_shared"
     | Rdk.Curve_topology.Ends_unroll_new -> "unroll_new"
-  let mode_parameter = Parameter.choice ~equal:( = ) [
+  let mode_parameter = Param.choice ~equal:( = ) [
       "Open", Rdk.Curve_topology.Ends_open;
       "Close straight", Rdk.Curve_topology.Ends_close_straight;
       "Unroll shared point", Rdk.Curve_topology.Ends_unroll_shared;
@@ -737,7 +737,7 @@ end
 
 module Reverse = struct
   type operation = Support.reverse_operation = Reverse | Shift
-  let operation_parameter = Parameter.choice ~equal:( = ) [
+  let operation_parameter = Param.choice ~equal:( = ) [
       "Reverse vertices", Reverse; "Shift vertices", Shift;
     ]
 
@@ -804,7 +804,7 @@ module Compact_points = struct
 end
 
 module Edge_equalize = struct
-  let method_parameter = Parameter.choice ~equal:( = ) [
+  let method_parameter = Param.choice ~equal:( = ) [
       "Average", Rdk.Edge_ops.Equalize_average;
       "Longest", Rdk.Edge_ops.Equalize_longest;
       "Shortest", Rdk.Edge_ops.Equalize_shortest;
@@ -1032,11 +1032,11 @@ module Resample = struct
 end
 
 module Carve = struct
-  let attribute_mode_parameter = Parameter.choice ~equal:( = ) [
+  let attribute_mode_parameter = Param.choice ~equal:( = ) [
       "Replace", Rdk.Curve_ops.Replace;
       "Scale", Rdk.Curve_ops.Scale;
     ]
-  let keep_parameter = Parameter.choice ~equal:( = ) [
+  let keep_parameter = Param.choice ~equal:( = ) [
       "Inside", Rdk.Curve_ops.Inside;
       "Outside", Rdk.Curve_ops.Outside;
       "Inside and outside", Rdk.Curve_ops.Inside_and_outside;
@@ -1122,7 +1122,7 @@ module Carve = struct
 end
 
 module Poly_loft = struct
-  let minimize_parameter = Parameter.choice ~equal:( = ) [
+  let minimize_parameter = Param.choice ~equal:( = ) [
       "Two point distance", Rdk.Poly_loft.Two_point_distance;
       "Three point distance", Rdk.Poly_loft.Three_point_distance;
     ]
@@ -1262,11 +1262,11 @@ module Skin = struct
 end
 
 module Poly_bridge = struct
-  let pairing_parameter = Parameter.choice ~equal:( = ) [
+  let pairing_parameter = Param.choice ~equal:( = ) [
       "By order", Rdk.Poly_bridge.Bridge_by_order;
       "By centroid", Rdk.Poly_bridge.Bridge_by_centroid;
     ]
-  let minimize_parameter = Parameter.choice ~equal:( = ) [
+  let minimize_parameter = Param.choice ~equal:( = ) [
       "Two point distance", Rdk.Poly_loft.Two_point_distance;
       "Three point distance", Rdk.Poly_loft.Three_point_distance;
     ]
@@ -1384,7 +1384,7 @@ module Circle_from_edges = struct
     let group = optional_text parameters.group in
     let use_radius = parameters.use_radius in
     let radius = parameters.radius in
-    let scale = Vec3.create parameters.scale_x parameters.scale_y
+    let scale = Rays_math.Vec3.create parameters.scale_x parameters.scale_y
           parameters.scale_z in
     let output_group = optional_text parameters.output_group in
     let radius = if use_radius then Some radius else None in
@@ -1461,7 +1461,7 @@ module Convex_hull = struct
 end
 
 module Edge_relax = struct
-  let target_parameter = Parameter.choice ~equal:( = ) [
+  let target_parameter = Param.choice ~equal:( = ) [
       "Individual lengths", Rdk.Edge_relax.Individual_lengths;
       "Scale-independent distribution", Rdk.Edge_relax.Scale_independent_distribution;
     ]
@@ -1650,11 +1650,11 @@ end
 
 module Revolve = struct
   open Rays_math
-  let type_parameter = Parameter.choice ~equal:( = ) [
+  let type_parameter = Param.choice ~equal:( = ) [
       "Closed", Rdk.Sweep_modeling.Revolve_closed;
       "Open arc", Rdk.Sweep_modeling.Revolve_open_arc;
     ]
-  let connectivity_parameter = Parameter.choice ~equal:( = ) [
+  let connectivity_parameter = Param.choice ~equal:( = ) [
       "Points", Rdk.Plane_generators.Grid_points;
       "Rows", Rdk.Plane_generators.Grid_rows;
       "Columns", Rdk.Plane_generators.Grid_columns;
@@ -1730,9 +1730,9 @@ module Revolve = struct
     let cap_group = parameters.cap_group in
     let uv_attribute = parameters.uv_attribute in
     let divisions = parameters.divisions in
-    let origin = Vec3.create parameters.origin_x parameters.origin_y
+    let origin = Rays_math.Vec3.create parameters.origin_x parameters.origin_y
           parameters.origin_z in
-    let axis = Vec3.create parameters.axis_x parameters.axis_y
+    let axis = Rays_math.Vec3.create parameters.axis_x parameters.axis_y
           parameters.axis_z in
     let cap_group = if caps then optional_text cap_group else None
     and uv_attribute = optional_text uv_attribute in
@@ -1762,7 +1762,7 @@ module Revolve = struct
 end
 
 module Clean = struct
-  let overlaps_parameter = Parameter.choice ~equal:( = ) [
+  let overlaps_parameter = Param.choice ~equal:( = ) [
       "Keep first", Clean_keep_first;
       "Delete pairs", Clean_delete_pairs;
       "Auto", Clean_overlap_auto;
@@ -1946,14 +1946,14 @@ module Join_curves = struct
 end
 
 module Blast_by_attribute = struct
-  let owner_parameter = Parameter.choice ~equal:( = ) [
+  let owner_parameter = Param.choice ~equal:( = ) [
       "Points", Rdk.Blast_by_attribute.Blast_points;
       "Primitives", Rdk.Blast_by_attribute.Blast_primitives;
     ]
-  let mode_parameter = Parameter.choice ~equal:( = ) [
+  let mode_parameter = Param.choice ~equal:( = ) [
       "Below threshold", Blast_below; "Range", Blast_range; "Center and width", Blast_width;
     ]
-  let output_parameter = Parameter.choice ~equal:( = ) [
+  let output_parameter = Param.choice ~equal:( = ) [
       "Delete elements", Blast_delete; "Create group", Blast_group;
     ]
   type parameters = {
@@ -2150,13 +2150,13 @@ module Facet = struct
 end
 
 module Poly_cut = struct
-  let element_parameter = Parameter.choice ~equal:( = ) [
+  let element_parameter = Param.choice ~equal:( = ) [
       "Points", Rdk.Poly_cut.Poly_cut_points; "Edges", Rdk.Poly_cut.Poly_cut_edges;
     ]
-  let strategy_parameter = Parameter.choice ~equal:( = ) [
+  let strategy_parameter = Param.choice ~equal:( = ) [
       "Remove", Rdk.Poly_cut.Poly_cut_remove; "Cut", Rdk.Poly_cut.Poly_cut_cut;
     ]
-  let detection_parameter = Parameter.choice ~equal:( = ) [
+  let detection_parameter = Param.choice ~equal:( = ) [
       "All selected", Cut_all; "Attribute crossing", Cut_crossing;
       "Attribute change", Cut_change;
     ]
@@ -2243,7 +2243,7 @@ module Poly_cut = struct
 end
 
 module Poly_reduce = struct
-  let target_parameter = Parameter.choice ~equal:( = ) [
+  let target_parameter = Param.choice ~equal:( = ) [
       "Percentage", Reduce_ratio; "Primitive count", Reduce_primitive_count;
     ]
 
@@ -2354,7 +2354,7 @@ module Poly_reduce = struct
 end
 
 module Sweep = struct
-  let connectivity_parameter = Parameter.choice ~equal:( = ) [
+  let connectivity_parameter = Param.choice ~equal:( = ) [
       "Points", Rdk.Plane_generators.Grid_points; "Rows", Rdk.Plane_generators.Grid_rows;
       "Columns", Rdk.Plane_generators.Grid_columns;
       "Rows and columns", Rdk.Plane_generators.Grid_rows_and_columns;
@@ -2362,7 +2362,7 @@ module Sweep = struct
       "Alternating triangles", Rdk.Plane_generators.Grid_alternating_triangles;
       "Reverse triangles", Rdk.Plane_generators.Grid_reverse_triangles;
     ]
-  let tangent_parameter = Parameter.choice ~equal:( = ) [
+  let tangent_parameter = Param.choice ~equal:( = ) [
       "Average edges", Rdk.Sweep_modeling.Sweep_average_edges;
       "Central difference", Rdk.Sweep_modeling.Sweep_central_difference;
       "Previous edge", Rdk.Sweep_modeling.Sweep_previous_edge;
@@ -2465,11 +2465,11 @@ module Sweep = struct
 end
 
 module Boolean_seam = struct
-  let output_parameter = Parameter.choice ~equal:( = ) [
+  let output_parameter = Param.choice ~equal:( = ) [
       "Seam curves", Rdk.Boolean.Seam_curves;
       "Coincident patches", Rdk.Boolean.Coincident_patches;
     ]
-  let treatment_parameter = Parameter.choice ~equal:( = ) [
+  let treatment_parameter = Param.choice ~equal:( = ) [
       "Solid", Rdk.Boolean.Solid; "Surface", Rdk.Boolean.Surface;
     ]
 
@@ -2537,7 +2537,7 @@ end
 
 module Poly_bevel = struct
 
-  let shape_parameter = Parameter.choice ~equal:( = ) [
+  let shape_parameter = Param.choice ~equal:( = ) [
       "Chamfer", Poly_chamfer; "Round", Poly_round;
     ]
 
@@ -2629,13 +2629,13 @@ module Poly_bevel = struct
 end
 
 module Boolean_fracture = struct
-  let detriangulation_parameter = Parameter.choice ~equal:( = ) [
+  let detriangulation_parameter = Param.choice ~equal:( = ) [
       "Triangles", Rdk.Boolean.Triangles;
       "Unchanged polygons", Rdk.Boolean.Unchanged_polygons;
       "All polygons", Rdk.Boolean.All_polygons;
     ]
 
-  let conflict_parameter = Parameter.choice ~equal:( = ) [
+  let conflict_parameter = Param.choice ~equal:( = ) [
     "Reject conflict", Rdk.Boolean.Reject; "Promote to vertex", Rdk.Boolean.Promote_to_vertex;
   ]
   type parameters = {
@@ -2778,14 +2778,14 @@ module Intersection_analysis = struct
 end
 
 module Fuse = struct
-  let targeting_parameter = Parameter.choice ~equal:( = ) [
+  let targeting_parameter = Param.choice ~equal:( = ) [
       "Near points", Fuse_near_points; "Specified points", Fuse_specified_points;
     ]
-  let using_parameter = Parameter.choice ~equal:( = ) [
+  let using_parameter = Param.choice ~equal:( = ) [
       "Least target point", Rdk.Fuse_grid.Least_target_point;
       "Closest target point", Rdk.Fuse_grid.Closest_target_point;
     ]
-  let position_parameter = Parameter.choice ~equal:( = ) [
+  let position_parameter = Param.choice ~equal:( = ) [
       "First", Rdk.Fuse_reduce.First_position;
       "Least point", Rdk.Fuse_reduce.Least_point_position;
       "Greatest point", Rdk.Fuse_reduce.Greatest_point_position;
@@ -2802,15 +2802,15 @@ module Fuse = struct
       "Minimum weight", Rdk.Fuse_reduce.Minimum_weight_position;
       "Maximum weight", Rdk.Fuse_reduce.Maximum_weight_position;
     ]
-  let attributes_parameter = Parameter.choice ~equal:( = ) [
+  let attributes_parameter = Param.choice ~equal:( = ) [
       "Keep first", Rdk.Fuse_reduce.Keep_first;
       "Average numeric", Rdk.Fuse_reduce.Average_numeric;
     ]
-  let metric_parameter = Parameter.choice ~equal:( = ) [
+  let metric_parameter = Param.choice ~equal:( = ) [
       "Euclidean", Rdk.Fuse_grid.Euclidean;
       "Componentwise", Rdk.Fuse_grid.Componentwise;
     ]
-  let condition_parameter = Parameter.choice ~equal:( = ) [
+  let condition_parameter = Param.choice ~equal:( = ) [
       "Equal", Rdk.Fuse_grid.Equal_attribute_values;
       "Unequal", Rdk.Fuse_grid.Unequal_attribute_values;
     ]
@@ -2967,13 +2967,13 @@ module Fuse = struct
 end
 
 module Subdivide = struct
-  let scheme_parameter = Parameter.choice ~equal:( = ) [
+  let scheme_parameter = Param.choice ~equal:( = ) [
       "Catmull-Clark", Rdk.Subdivide.Catmull_clark;
       "Loop", Rdk.Subdivide.Loop;
       "Bilinear", Rdk.Subdivide.Bilinear;
     ]
 
-  let cracks_parameter = Parameter.choice ~equal:( = ) [
+  let cracks_parameter = Param.choice ~equal:( = ) [
       "Do not close", Cracks_do_not_close;
       "Pull, no edge division", Cracks_pull_no_division;
       "Pull, divide edges", Cracks_pull_divide;
@@ -2983,13 +2983,13 @@ module Subdivide = struct
       "Stitch, triangulate", Cracks_stitch_triangulate;
     ]
 
-  let boundary_parameter = Parameter.choice ~equal:( = ) [
+  let boundary_parameter = Param.choice ~equal:( = ) [
       "None", Rdk.Subdivide.Subdivide_boundary_none;
       "Edge only", Rdk.Subdivide.Subdivide_boundary_edge_only;
       "Edge and corner", Rdk.Subdivide.Subdivide_boundary_edge_and_corner;
     ]
 
-  let fvar_parameter = Parameter.choice ~equal:( = ) [
+  let fvar_parameter = Param.choice ~equal:( = ) [
       "None", Rdk.Subdivide.Subdivide_fvar_none;
       "Corners only", Rdk.Subdivide.Subdivide_fvar_corners_only;
       "Corners plus 1", Rdk.Subdivide.Subdivide_fvar_corners_plus1;
@@ -2998,12 +2998,12 @@ module Subdivide = struct
       "All", Rdk.Subdivide.Subdivide_fvar_all;
     ]
 
-  let triangle_parameter = Parameter.choice ~equal:( = ) [
+  let triangle_parameter = Param.choice ~equal:( = ) [
       "Catmull-Clark", Rdk.Subdivide.Subdivide_triangles_catmull_clark;
       "Smooth", Rdk.Subdivide.Subdivide_triangles_smooth;
     ]
 
-  let creasing_parameter = Parameter.choice ~equal:( = ) [
+  let creasing_parameter = Param.choice ~equal:( = ) [
       "Uniform", Rdk.Subdivide.Subdivide_creasing_uniform;
       "Chaikin", Rdk.Subdivide.Subdivide_creasing_chaikin;
     ]
@@ -3158,13 +3158,13 @@ module Subdivide = struct
 end
 
 module Subdivide_cracks = struct
-  let scheme_parameter = Parameter.choice ~equal:( = ) [
+  let scheme_parameter = Param.choice ~equal:( = ) [
       "Catmull-Clark", Rdk.Subdivide.Catmull_clark;
       "Loop", Rdk.Subdivide.Loop;
       "Bilinear", Rdk.Subdivide.Bilinear;
     ]
 
-  let cracks_parameter = Parameter.choice ~equal:( = ) [
+  let cracks_parameter = Param.choice ~equal:( = ) [
       "Do not close", Cracks_do_not_close;
       "Pull, no edge division", Cracks_pull_no_division;
       "Pull, divide edges", Cracks_pull_divide;
@@ -3174,13 +3174,13 @@ module Subdivide_cracks = struct
       "Stitch, triangulate", Cracks_stitch_triangulate;
     ]
 
-  let boundary_parameter = Parameter.choice ~equal:( = ) [
+  let boundary_parameter = Param.choice ~equal:( = ) [
       "None", Rdk.Subdivide.Subdivide_boundary_none;
       "Edge only", Rdk.Subdivide.Subdivide_boundary_edge_only;
       "Edge and corner", Rdk.Subdivide.Subdivide_boundary_edge_and_corner;
     ]
 
-  let fvar_parameter = Parameter.choice ~equal:( = ) [
+  let fvar_parameter = Param.choice ~equal:( = ) [
       "None", Rdk.Subdivide.Subdivide_fvar_none;
       "Corners only", Rdk.Subdivide.Subdivide_fvar_corners_only;
       "Corners plus 1", Rdk.Subdivide.Subdivide_fvar_corners_plus1;
@@ -3189,12 +3189,12 @@ module Subdivide_cracks = struct
       "All", Rdk.Subdivide.Subdivide_fvar_all;
     ]
 
-  let triangle_parameter = Parameter.choice ~equal:( = ) [
+  let triangle_parameter = Param.choice ~equal:( = ) [
       "Catmull-Clark", Rdk.Subdivide.Subdivide_triangles_catmull_clark;
       "Smooth", Rdk.Subdivide.Subdivide_triangles_smooth;
     ]
 
-  let creasing_parameter = Parameter.choice ~equal:( = ) [
+  let creasing_parameter = Param.choice ~equal:( = ) [
       "Uniform", Rdk.Subdivide.Subdivide_creasing_uniform;
       "Chaikin", Rdk.Subdivide.Subdivide_creasing_chaikin;
     ]
@@ -3350,7 +3350,7 @@ end
 
 module Boolean = struct
 
-  let operation_parameter = Parameter.choice ~equal:( = ) [
+  let operation_parameter = Param.choice ~equal:( = ) [
       "Union", Rdk.Boolean.Union;
       "Intersection", Rdk.Boolean.Intersection;
       "Subtract B from A", Rdk.Boolean.Difference;
@@ -3358,23 +3358,23 @@ module Boolean = struct
       "Exclusive or", Rdk.Boolean.Xor;
       "Shatter", Rdk.Boolean.Shatter;
     ]
-  let treatment_parameter = Parameter.choice ~equal:( = ) [
+  let treatment_parameter = Param.choice ~equal:( = ) [
       "Solid", Rdk.Boolean.Solid; "Surface", Rdk.Boolean.Surface;
     ]
-  let conflict_parameter = Parameter.choice ~equal:( = ) [
+  let conflict_parameter = Param.choice ~equal:( = ) [
       "Reject conflict", Rdk.Boolean.Reject;
       "Promote to vertex", Rdk.Boolean.Promote_to_vertex;
     ]
-  let seam_points_parameter = Parameter.choice ~equal:( = ) [
+  let seam_points_parameter = Param.choice ~equal:( = ) [
       "Shared", Rdk.Boolean.Shared_seam_points;
       "Split", Rdk.Boolean.Split_seam_points;
     ]
-  let detriangulation_parameter = Parameter.choice ~equal:( = ) [
+  let detriangulation_parameter = Param.choice ~equal:( = ) [
       "Triangles", Rdk.Boolean.Triangles;
       "Unchanged polygons", Rdk.Boolean.Unchanged_polygons;
       "All polygons", Rdk.Boolean.All_polygons;
     ]
-  let closed_parameter = Parameter.choice ~equal:( = ) [
+  let closed_parameter = Param.choice ~equal:( = ) [
       "Operation default", Closed_default;
       "Require closed", Closed_required;
       "Allow open", Closed_not_required;
@@ -3575,7 +3575,7 @@ module Boolean_detect = struct
 end
 
 module Triangulate_2d = struct
-  let projection_parameter = Parameter.choice ~equal:( = ) [
+  let projection_parameter = Param.choice ~equal:( = ) [
       "Best fit", Triangulate_best_fit; "XY", Triangulate_xy; "YZ", Triangulate_yz; "ZX", Triangulate_zx;
       "Custom plane", Triangulate_plane; "Point attribute", Triangulate_attribute;
     ]

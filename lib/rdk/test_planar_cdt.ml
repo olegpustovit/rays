@@ -83,7 +83,7 @@ let test_long_recovery_and_domains () =
       if point < 2 then 0.
       else let value = ((point * 3571) mod 997) + 1 in
         if point land 1 = 0 then float_of_int value else -.float_of_int value) in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       cdt x y [|0;1|] |> get_string) in
   let one = run 1 and four = run 4 in
   check (signature one = signature four) "domain count changed constrained topology";
@@ -213,9 +213,9 @@ let test_incremental_workspace_batches () =
   x.(0) <- 0.; y.(0) <- 0.; x.(1) <- 1.; y.(1) <- 0.;
   x.(2) <- 1.; y.(2) <- 1.; x.(3) <- 0.; y.(3) <- 1.;
   for point = 4 to count - 1 do
-    let state = Rays.Rand.seed ((point * 7919) + 17) in
-    let px,state = Rays.Rand.float state in
-    let py,_ = Rays.Rand.float state in
+    let state = Rays_math.Rand.seed ((point * 7919) + 17) in
+    let px,state = Rays_math.Rand.float state in
+    let py,_ = Rays_math.Rand.float state in
     x.(point) <- 0.05 +. (0.9 *. px);
     y.(point) <- 0.05 +. (0.9 *. py)
   done;
@@ -419,9 +419,9 @@ let test_constraint_cavity_reinserts_interior_points () =
   let random_count = 96 and source_count = 100 in
   let x = Array.make source_count 0. and y = Array.make source_count 0. in
   for point = 0 to random_count - 1 do
-    let state = Rays.Rand.seed ((point * 37) + 11) in
-    let px,state = Rays.Rand.float state in
-    let py,_ = Rays.Rand.float state in
+    let state = Rays_math.Rand.seed ((point * 37) + 11) in
+    let px,state = Rays_math.Rand.float state in
+    let py,_ = Rays_math.Rand.float state in
     x.(point) <- (px *. 290.) +. 15.; y.(point) <- (py *. 190.) +. 15.
   done;
   x.(96) <- 20.; y.(96) <- 20.; x.(97) <- 300.; y.(97) <- 20.;

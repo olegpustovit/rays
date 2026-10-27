@@ -26,51 +26,46 @@ core
   %5 : float
   %6 : int
   %7 : float
-  %8 : float
-  %9 : int
-  %10 : float
-  %11 : int
+  %8 : int
+  %9 : float
+  %10 : int
+  %11 : float
   %12 : float
-  %13 : float
-  %14 : int
-  %15 : float
+  %13 : int
+  %14 : float
+  %15 : int
   %16 : float
   %17 : int
   %18 : float
-  %19 : int
-  %20 : float
+  %19 : float
+  %20 : int
   %21 : float
   %22 : int
   %23 : float
-  %24 : float
-  %25 : int
+  %24 : int
+  %25 : float
   %26 : float
   %27 : int
   %28 : float
-  %29 : float
-  %30 : int
-  %31 : float
+  %29 : int
+  %30 : float
+  %31 : int
   %32 : float
-  %33 : int
-  %34 : float
-  %35 : int
-  %36 : float
+  %33 : float
+  %34 : int
+  %35 : float
+  %36 : int
   %37 : float
   %38 : int
   %39 : float
   %40 : float
   %41 : int
   %42 : float
-  %43 : int
+  %43 : float
   %44 : float
   %45 : float
-  %46 : int
+  %46 : float
   %47 : float
-  %48 : float
-  %49 : float
-  %50 : float
-  %51 : float
-  %52 : float
   #0 %0 = frame.t @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[0] span=70..71
   #1 %1 = $0 @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[0] span=67..74
   #2 %2 = +("a":%0 "b":%1) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[0] span=67..74
@@ -79,52 +74,47 @@ core
   #5 %5 = sin("x":%4) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[0] span=59..90
   #6 %6 = $2 @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[0] span=56..105
   #7 %7 = /("a":%5 "b":%6) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[0] span=56..105
-  #8 %8 = frame.t @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1] span=70..71
-  #9 %9 = $3 @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1] span=67..74
-  #10 %10 = +("a":%8 "b":%9) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1] span=67..74
-  #11 %11 = $4 @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1] span=64..89
-  #12 %12 = *("a":%10 "b":%11) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1] span=64..89
-  #13 %13 = sin("x":%12) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1] span=59..90
-  #14 %14 = $5 @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1] span=56..105
-  #15 %15 = /("a":%13 "b":%14) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1] span=56..105
-  #16 %16 = frame.t @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2] span=70..71
-  #17 %17 = $6 @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2] span=67..74
-  #18 %18 = +("a":%16 "b":%17) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2] span=67..74
-  #19 %19 = $7 @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2] span=64..89
-  #20 %20 = *("a":%18 "b":%19) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2] span=64..89
-  #21 %21 = sin("x":%20) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2] span=59..90
-  #22 %22 = $8 @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2] span=56..105
-  #23 %23 = /("a":%21 "b":%22) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2] span=56..105
-  #24 %24 = frame.t @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3] span=70..71
-  #25 %25 = $9 @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3] span=67..74
-  #26 %26 = +("a":%24 "b":%25) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3] span=67..74
-  #27 %27 = $10 @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3] span=64..89
-  #28 %28 = *("a":%26 "b":%27) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3] span=64..89
-  #29 %29 = sin("x":%28) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3] span=59..90
-  #30 %30 = $11 @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3] span=56..105
-  #31 %31 = /("a":%29 "b":%30) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3] span=56..105
-  #32 %32 = frame.t @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4] span=70..71
-  #33 %33 = $12 @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4] span=67..74
-  #34 %34 = +("a":%32 "b":%33) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4] span=67..74
-  #35 %35 = $13 @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4] span=64..89
-  #36 %36 = *("a":%34 "b":%35) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4] span=64..89
-  #37 %37 = sin("x":%36) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4] span=59..90
-  #38 %38 = $14 @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4] span=56..105
-  #39 %39 = /("a":%37 "b":%38) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4] span=56..105
-  #40 %40 = frame.t @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[5] span=70..71
-  #41 %41 = $15 @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[5] span=67..74
-  #42 %42 = +("a":%40 "b":%41) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[5] span=67..74
-  #43 %43 = $16 @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[5] span=64..89
-  #44 %44 = *("a":%42 "b":%43) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[5] span=64..89
-  #45 %45 = sin("x":%44) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[5] span=59..90
-  #46 %46 = $17 @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[5] span=56..105
-  #47 %47 = /("a":%45 "b":%46) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[5] span=56..105
-  #48 %48 = +("a":%7 "b":%15) @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=37..106
-  #49 %49 = +("a":%48 "b":%23) @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=37..106
-  #50 %50 = +("a":%49 "b":%31) @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=37..106
-  #51 %51 = +("a":%50 "b":%39) @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=37..106
-  #52 %52 = +("a":%51 "b":%47) @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=37..106
-  return %52
+  #8 %8 = $3 @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1] span=67..74
+  #9 %9 = +("a":%0 "b":%8) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1] span=67..74
+  #10 %10 = $4 @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1] span=64..89
+  #11 %11 = *("a":%9 "b":%10) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1] span=64..89
+  #12 %12 = sin("x":%11) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1] span=59..90
+  #13 %13 = $5 @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1] span=56..105
+  #14 %14 = /("a":%12 "b":%13) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1] span=56..105
+  #15 %15 = $6 @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2] span=67..74
+  #16 %16 = +("a":%0 "b":%15) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2] span=67..74
+  #17 %17 = $7 @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2] span=64..89
+  #18 %18 = *("a":%16 "b":%17) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2] span=64..89
+  #19 %19 = sin("x":%18) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2] span=59..90
+  #20 %20 = $8 @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2] span=56..105
+  #21 %21 = /("a":%19 "b":%20) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2] span=56..105
+  #22 %22 = $9 @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3] span=67..74
+  #23 %23 = +("a":%0 "b":%22) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3] span=67..74
+  #24 %24 = $10 @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3] span=64..89
+  #25 %25 = *("a":%23 "b":%24) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3] span=64..89
+  #26 %26 = sin("x":%25) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3] span=59..90
+  #27 %27 = $11 @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3] span=56..105
+  #28 %28 = /("a":%26 "b":%27) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3] span=56..105
+  #29 %29 = $12 @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4] span=67..74
+  #30 %30 = +("a":%0 "b":%29) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4] span=67..74
+  #31 %31 = $13 @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4] span=64..89
+  #32 %32 = *("a":%30 "b":%31) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4] span=64..89
+  #33 %33 = sin("x":%32) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4] span=59..90
+  #34 %34 = $14 @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4] span=56..105
+  #35 %35 = /("a":%33 "b":%34) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4] span=56..105
+  #36 %36 = $15 @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[5] span=67..74
+  #37 %37 = +("a":%0 "b":%36) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[5] span=67..74
+  #38 %38 = $16 @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[5] span=64..89
+  #39 %39 = *("a":%37 "b":%38) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[5] span=64..89
+  #40 %40 = sin("x":%39) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[5] span=59..90
+  #41 %41 = $17 @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[5] span=56..105
+  #42 %42 = /("a":%40 "b":%41) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[5] span=56..105
+  #43 %43 = +("a":%7 "b":%14) @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=37..106
+  #44 %44 = +("a":%43 "b":%21) @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=37..106
+  #45 %45 = +("a":%44 "b":%28) @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=37..106
+  #46 %46 = +("a":%45 "b":%35) @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=37..106
+  #47 %47 = +("a":%46 "b":%42) @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=37..106
+  return %47
 expression 1: (let* [a 3 b (* a 2)] (+ (* t b) (mod t 0.7)))
 core
   $0 = 6
@@ -135,15 +125,13 @@ core
   %3 : float
   %4 : float
   %5 : float
-  %6 : float
   #0 %0 = frame.t @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=65..66
   #1 %1 = $0 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=62..69
   #2 %2 = *("a":%0 "b":%1) @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=62..69
-  #3 %3 = frame.t @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=75..76
-  #4 %4 = $1 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=70..81
-  #5 %5 = mod("a":%3 "b":%4) @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=70..81
-  #6 %6 = +("a":%2 "b":%5) @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=59..82
-  return %6
+  #3 %3 = $1 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=70..81
+  #4 %4 = mod("a":%0 "b":%3) @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=70..81
+  #5 %5 = +("a":%2 "b":%4) @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=59..82
+  return %5
 expression 2: (if (> (sin t) 0.2) (pow t 2) (- 0 t))
 core
   $0 = 0.2
@@ -154,26 +142,22 @@ core
   %2 : float
   %3 : bool
   %4 : float
-  %5 : float
-  %6 : int
-  %7 : float
+  %5 : int
+  %6 : float
+  %7 : int
   %8 : float
-  %9 : int
-  %10 : float
   #0 %0 = frame.t @["g" "@result#test"] owner=["g" "@result"] instance=0 iter=[] span=49..50
   #1 %1 = sin("x":%0) @["g" "@result#test"] owner=["g" "@result"] instance=0 iter=[] span=44..51
   #2 %2 = $0 @["g" "@result#test"] owner=["g" "@result"] instance=0 iter=[] span=41..56
   #3 %3 = >("a":%1 "b":%2) @["g" "@result#test"] owner=["g" "@result"] instance=0 iter=[] span=41..56
   #4 if %3 then {
-    #5 %5 = frame.t @["g" "@result#then" "@result"] owner=["g" "@result"] instance=0 iter=[] span=62..63
-    #6 %6 = $1 @["g" "@result#then" "@result"] owner=["g" "@result"] instance=0 iter=[] span=57..66
-    #7 %7 = pow("a":%5 "b":%6) @["g" "@result#then" "@result"] owner=["g" "@result"] instance=0 iter=[] span=57..66
-    #8 %4 = %7 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=37..75
+    #5 %5 = $1 @["g" "@result#then" "@result"] owner=["g" "@result"] instance=0 iter=[] span=57..66
+    #6 %6 = pow("a":%0 "b":%5) @["g" "@result#then" "@result"] owner=["g" "@result"] instance=0 iter=[] span=57..66
+    #7 %4 = %6 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=37..75
   } else {
-    #9 %8 = frame.t @["g" "@result#else" "@result"] owner=["g" "@result"] instance=0 iter=[] span=72..73
-    #10 %9 = $2 @["g" "@result#else" "@result"] owner=["g" "@result"] instance=0 iter=[] span=67..74
-    #11 %10 = -("a":%9 "b":%8) @["g" "@result#else" "@result"] owner=["g" "@result"] instance=0 iter=[] span=67..74
-    #12 %4 = %10 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=37..75
+    #8 %7 = $2 @["g" "@result#else" "@result"] owner=["g" "@result"] instance=0 iter=[] span=67..74
+    #9 %8 = -("a":%7 "b":%0) @["g" "@result#else" "@result"] owner=["g" "@result"] instance=0 iter=[] span=67..74
+    #10 %4 = %8 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=37..75
   } @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=37..75
   return %4
 expression 3: (let* [v [(* t 2) (+ t 1) (min t 3)]] (+ v.x v.y))
@@ -184,30 +168,26 @@ core
   %0 : float
   %1 : int
   %2 : float
-  %3 : float
-  %4 : int
-  %5 : float
+  %3 : int
+  %4 : float
+  %5 : int
   %6 : float
-  %7 : int
+  %7 : vec3
   %8 : float
-  %9 : vec3
+  %9 : float
   %10 : float
-  %11 : float
-  %12 : float
   #0 %0 = frame.t @["g" "v"] owner=["g" "v"] instance=0 iter=[] span=50..51
   #1 %1 = $0 @["g" "v"] owner=["g" "v"] instance=0 iter=[] span=47..54
   #2 %2 = *("a":%0 "b":%1) @["g" "v"] owner=["g" "v"] instance=0 iter=[] span=47..54
-  #3 %3 = frame.t @["g" "v"] owner=["g" "v"] instance=0 iter=[] span=58..59
-  #4 %4 = $1 @["g" "v"] owner=["g" "v"] instance=0 iter=[] span=55..62
-  #5 %5 = +("a":%3 "b":%4) @["g" "v"] owner=["g" "v"] instance=0 iter=[] span=55..62
-  #6 %6 = frame.t @["g" "v"] owner=["g" "v"] instance=0 iter=[] span=68..69
-  #7 %7 = $2 @["g" "v"] owner=["g" "v"] instance=0 iter=[] span=63..72
-  #8 %8 = min("a":%6 "b":%7) @["g" "v"] owner=["g" "v"] instance=0 iter=[] span=63..72
-  #9 %9 = vec[%2 %5 %8] @["g" "v"] owner=["g" "v"] instance=0 iter=[] span=46..73
-  #10 %10 = %9."x" @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=78..81
-  #11 %11 = %9."y" @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=82..85
-  #12 %12 = +("a":%10 "b":%11) @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=75..86
-  return %12
+  #3 %3 = $1 @["g" "v"] owner=["g" "v"] instance=0 iter=[] span=55..62
+  #4 %4 = +("a":%0 "b":%3) @["g" "v"] owner=["g" "v"] instance=0 iter=[] span=55..62
+  #5 %5 = $2 @["g" "v"] owner=["g" "v"] instance=0 iter=[] span=63..72
+  #6 %6 = min("a":%0 "b":%5) @["g" "v"] owner=["g" "v"] instance=0 iter=[] span=63..72
+  #7 %7 = vec[%2 %4 %6] @["g" "v"] owner=["g" "v"] instance=0 iter=[] span=46..73
+  #8 %8 = %7."x" @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=78..81
+  #9 %9 = %7."y" @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=82..85
+  #10 %10 = +("a":%8 "b":%9) @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=75..86
+  return %10
 expression 4: (nth (for [i (range 4)] (* i t)) 2)
 core
   $0 = 2
@@ -242,101 +222,95 @@ core
   %2 : float
   %3 : int
   %4 : float
-  %5 : float
-  %6 : int
-  %7 : float
-  %8 : int
-  %9 : float
+  %5 : int
+  %6 : float
+  %7 : int
+  %8 : float
+  %9 : int
   %10 : float
   %11 : int
   %12 : float
   %13 : int
   %14 : float
-  %15 : float
-  %16 : int
-  %17 : float
+  %15 : int
+  %16 : float
+  %17 : list:float
   %18 : int
-  %19 : float
-  %20 : list:float
+  %19 : int
+  %20 : int
   %21 : int
   %22 : int
   %23 : int
   %24 : int
-  %25 : int
+  %25 : float
   %26 : int
-  %27 : int
-  %28 : float
+  %27 : bool
+  %28 : int
   %29 : int
-  %30 : bool
+  %30 : int
   %31 : int
-  %32 : int
+  %32 : float
   %33 : int
-  %34 : int
+  %34 : bool
   %35 : float
-  %36 : int
-  %37 : bool
-  %38 : float
-  %39 : float
+  %36 : float
+  %37 : int
+  %38 : int
+  %39 : int
   %40 : int
-  %41 : int
-  %42 : int
-  %43 : int
   #0 %0 = frame.t @["g" "@result" "~for" "@result"] owner=["g" "@result"] instance=0 iter=[0] span=72..73
   #1 %1 = $0 @["g" "@result" "~for" "@result"] owner=["g" "@result"] instance=0 iter=[0] span=67..74
   #2 %2 = *("a":%1 "b":%0) @["g" "@result" "~for" "@result"] owner=["g" "@result"] instance=0 iter=[0] span=67..74
   #3 %3 = $1 @["g" "@result" "~for" "@result"] owner=["g" "@result"] instance=0 iter=[0] span=64..77
   #4 %4 = +("a":%2 "b":%3) @["g" "@result" "~for" "@result"] owner=["g" "@result"] instance=0 iter=[0] span=64..77
-  #5 %5 = frame.t @["g" "@result" "~for" "@result"] owner=["g" "@result"] instance=0 iter=[1] span=72..73
-  #6 %6 = $2 @["g" "@result" "~for" "@result"] owner=["g" "@result"] instance=0 iter=[1] span=67..74
-  #7 %7 = *("a":%6 "b":%5) @["g" "@result" "~for" "@result"] owner=["g" "@result"] instance=0 iter=[1] span=67..74
-  #8 %8 = $3 @["g" "@result" "~for" "@result"] owner=["g" "@result"] instance=0 iter=[1] span=64..77
-  #9 %9 = +("a":%7 "b":%8) @["g" "@result" "~for" "@result"] owner=["g" "@result"] instance=0 iter=[1] span=64..77
-  #10 %10 = frame.t @["g" "@result" "~for" "@result"] owner=["g" "@result"] instance=0 iter=[2] span=72..73
-  #11 %11 = $4 @["g" "@result" "~for" "@result"] owner=["g" "@result"] instance=0 iter=[2] span=67..74
-  #12 %12 = *("a":%11 "b":%10) @["g" "@result" "~for" "@result"] owner=["g" "@result"] instance=0 iter=[2] span=67..74
-  #13 %13 = $5 @["g" "@result" "~for" "@result"] owner=["g" "@result"] instance=0 iter=[2] span=64..77
-  #14 %14 = +("a":%12 "b":%13) @["g" "@result" "~for" "@result"] owner=["g" "@result"] instance=0 iter=[2] span=64..77
-  #15 %15 = frame.t @["g" "@result" "~for" "@result"] owner=["g" "@result"] instance=0 iter=[3] span=72..73
-  #16 %16 = $6 @["g" "@result" "~for" "@result"] owner=["g" "@result"] instance=0 iter=[3] span=67..74
-  #17 %17 = *("a":%16 "b":%15) @["g" "@result" "~for" "@result"] owner=["g" "@result"] instance=0 iter=[3] span=67..74
-  #18 %18 = $7 @["g" "@result" "~for" "@result"] owner=["g" "@result"] instance=0 iter=[3] span=64..77
-  #19 %19 = +("a":%17 "b":%18) @["g" "@result" "~for" "@result"] owner=["g" "@result"] instance=0 iter=[3] span=64..77
-  #20 %20 = list[%4 %9 %14 %19] @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=45..78
-  #21 %21 = $8 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=37..88
-  #22 %22 = %21 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=37..88
-  #23 %23 = $9 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=37..88
-  #24 %24 = %23 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=37..88
-  #25 %25 = $10 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=37..88
-  #26 %26 = %25 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=37..88
-  #27 iterate %20 index=%27 item=%28 limit=4096 do {
-    #28 %29 = $11 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%22] span=37..88
-    #29 %30 = >=("a":%22 "b":%29) @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%22] span=37..88
-    #30 if %30 then {
-      #31 %32 = fail<"E_ITER_BOUND" "Loop runs more than 4,096 iterations.">() @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%22] span=37..88
-      #32 %31 = %32 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%22] span=37..88
+  #5 %5 = $2 @["g" "@result" "~for" "@result"] owner=["g" "@result"] instance=0 iter=[1] span=67..74
+  #6 %6 = *("a":%5 "b":%0) @["g" "@result" "~for" "@result"] owner=["g" "@result"] instance=0 iter=[1] span=67..74
+  #7 %7 = $3 @["g" "@result" "~for" "@result"] owner=["g" "@result"] instance=0 iter=[1] span=64..77
+  #8 %8 = +("a":%6 "b":%7) @["g" "@result" "~for" "@result"] owner=["g" "@result"] instance=0 iter=[1] span=64..77
+  #9 %9 = $4 @["g" "@result" "~for" "@result"] owner=["g" "@result"] instance=0 iter=[2] span=67..74
+  #10 %10 = *("a":%9 "b":%0) @["g" "@result" "~for" "@result"] owner=["g" "@result"] instance=0 iter=[2] span=67..74
+  #11 %11 = $5 @["g" "@result" "~for" "@result"] owner=["g" "@result"] instance=0 iter=[2] span=64..77
+  #12 %12 = +("a":%10 "b":%11) @["g" "@result" "~for" "@result"] owner=["g" "@result"] instance=0 iter=[2] span=64..77
+  #13 %13 = $6 @["g" "@result" "~for" "@result"] owner=["g" "@result"] instance=0 iter=[3] span=67..74
+  #14 %14 = *("a":%13 "b":%0) @["g" "@result" "~for" "@result"] owner=["g" "@result"] instance=0 iter=[3] span=67..74
+  #15 %15 = $7 @["g" "@result" "~for" "@result"] owner=["g" "@result"] instance=0 iter=[3] span=64..77
+  #16 %16 = +("a":%14 "b":%15) @["g" "@result" "~for" "@result"] owner=["g" "@result"] instance=0 iter=[3] span=64..77
+  #17 %17 = list[%4 %8 %12 %16] @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=45..78
+  #18 %18 = $8 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=37..88
+  #19 %19 = %18 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=37..88
+  #20 %20 = $9 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=37..88
+  #21 %21 = %20 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=37..88
+  #22 %22 = $10 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=37..88
+  #23 %23 = %22 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=37..88
+  #24 iterate %17 index=%24 item=%25 limit=4096 do {
+    #25 %26 = $11 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%19] span=37..88
+    #26 %27 = >=("a":%19 "b":%26) @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%19] span=37..88
+    #27 if %27 then {
+      #28 %29 = fail<"E_ITER_BOUND" "Loop runs more than 4,096 iterations.">() @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%19] span=37..88
+      #29 %28 = %29 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%19] span=37..88
     } else {
-      #33 %33 = $12 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%22] span=37..88
-      #34 %31 = %33 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%22] span=37..88
-    } @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%22] span=37..88
-    #35 %34 = $13 @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[%22] span=80..87
-    #36 %35 = *("a":%28 "b":%34) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[%22] span=80..87
-    #37 %36 = $14 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%22] span=37..88
-    #38 %37 = =("a":%24 "b":%36) @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%22] span=37..88
-    #39 if %37 then {
-      #40 %38 = %35 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%22] span=37..88
+      #30 %30 = $12 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%19] span=37..88
+      #31 %28 = %30 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%19] span=37..88
+    } @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%19] span=37..88
+    #32 %31 = $13 @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[%19] span=80..87
+    #33 %32 = *("a":%25 "b":%31) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[%19] span=80..87
+    #34 %33 = $14 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%19] span=37..88
+    #35 %34 = =("a":%21 "b":%33) @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%19] span=37..88
+    #36 if %34 then {
+      #37 %35 = %32 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%19] span=37..88
     } else {
-      #41 %39 = +("a":%26 "b":%35) @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%22] span=37..88
-      #42 %38 = %39 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%22] span=37..88
-    } @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%22] span=37..88
-    #43 %26 = %38 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%22] span=37..88
-    #44 %40 = $15 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%22] span=37..88
-    #45 %41 = +("a":%24 "b":%40) @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%22] span=37..88
-    #46 %24 = %41 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%22] span=37..88
-    #47 %42 = $16 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%22] span=37..88
-    #48 %43 = +("a":%22 "b":%42) @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%22] span=37..88
-    #49 %22 = %43 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%22] span=37..88
+      #38 %36 = +("a":%23 "b":%32) @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%19] span=37..88
+      #39 %35 = %36 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%19] span=37..88
+    } @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%19] span=37..88
+    #40 %23 = %35 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%19] span=37..88
+    #41 %37 = $15 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%19] span=37..88
+    #42 %38 = +("a":%21 "b":%37) @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%19] span=37..88
+    #43 %21 = %38 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%19] span=37..88
+    #44 %39 = $16 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%19] span=37..88
+    #45 %40 = +("a":%19 "b":%39) @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%19] span=37..88
+    #46 %19 = %40 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[%19] span=37..88
   } @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=37..88
-  return %26
+  return %23
 expression 6: (sum [i (range 5)] (sum [j (range 3)] (* (+ t i) j)))
 core
   $0 = 0
@@ -374,180 +348,152 @@ core
   %2 : float
   %3 : int
   %4 : float
-  %5 : float
-  %6 : int
-  %7 : float
-  %8 : int
-  %9 : float
+  %5 : int
+  %6 : float
+  %7 : int
+  %8 : float
+  %9 : int
   %10 : float
   %11 : int
   %12 : float
-  %13 : int
+  %13 : float
   %14 : float
-  %15 : float
+  %15 : int
   %16 : float
-  %17 : float
-  %18 : int
-  %19 : float
-  %20 : int
-  %21 : float
+  %17 : int
+  %18 : float
+  %19 : int
+  %20 : float
+  %21 : int
   %22 : float
   %23 : int
   %24 : float
   %25 : int
   %26 : float
   %27 : float
-  %28 : int
-  %29 : float
-  %30 : int
-  %31 : float
+  %28 : float
+  %29 : int
+  %30 : float
+  %31 : int
   %32 : float
-  %33 : float
+  %33 : int
   %34 : float
   %35 : int
   %36 : float
   %37 : int
   %38 : float
-  %39 : float
-  %40 : int
+  %39 : int
+  %40 : float
   %41 : float
-  %42 : int
-  %43 : float
+  %42 : float
+  %43 : int
   %44 : float
   %45 : int
   %46 : float
   %47 : int
   %48 : float
-  %49 : float
+  %49 : int
   %50 : float
-  %51 : float
-  %52 : int
-  %53 : float
-  %54 : int
+  %51 : int
+  %52 : float
+  %53 : int
+  %54 : float
   %55 : float
   %56 : float
   %57 : int
   %58 : float
   %59 : int
   %60 : float
-  %61 : float
-  %62 : int
-  %63 : float
-  %64 : int
-  %65 : float
+  %61 : int
+  %62 : float
+  %63 : int
+  %64 : float
+  %65 : int
   %66 : float
-  %67 : float
+  %67 : int
   %68 : float
-  %69 : int
+  %69 : float
   %70 : float
-  %71 : int
+  %71 : float
   %72 : float
   %73 : float
-  %74 : int
-  %75 : float
-  %76 : int
-  %77 : float
-  %78 : float
-  %79 : int
-  %80 : float
-  %81 : int
-  %82 : float
-  %83 : float
-  %84 : float
-  %85 : float
-  %86 : float
-  %87 : float
-  %88 : float
+  %74 : float
   #0 %0 = frame.t @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[0 0] span=81..82
   #1 %1 = $0 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[0 0] span=78..85
   #2 %2 = +("a":%0 "b":%1) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[0 0] span=78..85
   #3 %3 = $1 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[0 0] span=75..88
   #4 %4 = *("a":%2 "b":%3) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[0 0] span=75..88
-  #5 %5 = frame.t @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[0 1] span=81..82
-  #6 %6 = $2 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[0 1] span=78..85
-  #7 %7 = +("a":%5 "b":%6) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[0 1] span=78..85
-  #8 %8 = $3 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[0 1] span=75..88
-  #9 %9 = *("a":%7 "b":%8) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[0 1] span=75..88
-  #10 %10 = frame.t @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[0 2] span=81..82
-  #11 %11 = $4 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[0 2] span=78..85
-  #12 %12 = +("a":%10 "b":%11) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[0 2] span=78..85
-  #13 %13 = $5 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[0 2] span=75..88
-  #14 %14 = *("a":%12 "b":%13) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[0 2] span=75..88
-  #15 %15 = +("a":%4 "b":%9) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[0] span=56..89
-  #16 %16 = +("a":%15 "b":%14) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[0] span=56..89
-  #17 %17 = frame.t @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1 0] span=81..82
-  #18 %18 = $6 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1 0] span=78..85
-  #19 %19 = +("a":%17 "b":%18) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1 0] span=78..85
-  #20 %20 = $7 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1 0] span=75..88
-  #21 %21 = *("a":%19 "b":%20) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1 0] span=75..88
-  #22 %22 = frame.t @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1 1] span=81..82
-  #23 %23 = $8 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1 1] span=78..85
-  #24 %24 = +("a":%22 "b":%23) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1 1] span=78..85
-  #25 %25 = $9 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1 1] span=75..88
-  #26 %26 = *("a":%24 "b":%25) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1 1] span=75..88
-  #27 %27 = frame.t @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1 2] span=81..82
-  #28 %28 = $10 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1 2] span=78..85
-  #29 %29 = +("a":%27 "b":%28) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1 2] span=78..85
-  #30 %30 = $11 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1 2] span=75..88
-  #31 %31 = *("a":%29 "b":%30) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1 2] span=75..88
-  #32 %32 = +("a":%21 "b":%26) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1] span=56..89
-  #33 %33 = +("a":%32 "b":%31) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1] span=56..89
-  #34 %34 = frame.t @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2 0] span=81..82
-  #35 %35 = $12 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2 0] span=78..85
-  #36 %36 = +("a":%34 "b":%35) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2 0] span=78..85
-  #37 %37 = $13 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2 0] span=75..88
-  #38 %38 = *("a":%36 "b":%37) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2 0] span=75..88
-  #39 %39 = frame.t @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2 1] span=81..82
-  #40 %40 = $14 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2 1] span=78..85
-  #41 %41 = +("a":%39 "b":%40) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2 1] span=78..85
-  #42 %42 = $15 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2 1] span=75..88
-  #43 %43 = *("a":%41 "b":%42) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2 1] span=75..88
-  #44 %44 = frame.t @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2 2] span=81..82
-  #45 %45 = $16 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2 2] span=78..85
-  #46 %46 = +("a":%44 "b":%45) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2 2] span=78..85
-  #47 %47 = $17 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2 2] span=75..88
-  #48 %48 = *("a":%46 "b":%47) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2 2] span=75..88
-  #49 %49 = +("a":%38 "b":%43) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2] span=56..89
-  #50 %50 = +("a":%49 "b":%48) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2] span=56..89
-  #51 %51 = frame.t @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3 0] span=81..82
-  #52 %52 = $18 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3 0] span=78..85
-  #53 %53 = +("a":%51 "b":%52) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3 0] span=78..85
-  #54 %54 = $19 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3 0] span=75..88
-  #55 %55 = *("a":%53 "b":%54) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3 0] span=75..88
-  #56 %56 = frame.t @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3 1] span=81..82
-  #57 %57 = $20 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3 1] span=78..85
-  #58 %58 = +("a":%56 "b":%57) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3 1] span=78..85
-  #59 %59 = $21 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3 1] span=75..88
-  #60 %60 = *("a":%58 "b":%59) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3 1] span=75..88
-  #61 %61 = frame.t @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3 2] span=81..82
-  #62 %62 = $22 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3 2] span=78..85
-  #63 %63 = +("a":%61 "b":%62) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3 2] span=78..85
-  #64 %64 = $23 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3 2] span=75..88
-  #65 %65 = *("a":%63 "b":%64) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3 2] span=75..88
-  #66 %66 = +("a":%55 "b":%60) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3] span=56..89
-  #67 %67 = +("a":%66 "b":%65) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3] span=56..89
-  #68 %68 = frame.t @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4 0] span=81..82
-  #69 %69 = $24 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4 0] span=78..85
-  #70 %70 = +("a":%68 "b":%69) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4 0] span=78..85
-  #71 %71 = $25 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4 0] span=75..88
-  #72 %72 = *("a":%70 "b":%71) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4 0] span=75..88
-  #73 %73 = frame.t @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4 1] span=81..82
-  #74 %74 = $26 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4 1] span=78..85
-  #75 %75 = +("a":%73 "b":%74) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4 1] span=78..85
-  #76 %76 = $27 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4 1] span=75..88
-  #77 %77 = *("a":%75 "b":%76) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4 1] span=75..88
-  #78 %78 = frame.t @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4 2] span=81..82
-  #79 %79 = $28 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4 2] span=78..85
-  #80 %80 = +("a":%78 "b":%79) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4 2] span=78..85
-  #81 %81 = $29 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4 2] span=75..88
-  #82 %82 = *("a":%80 "b":%81) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4 2] span=75..88
-  #83 %83 = +("a":%72 "b":%77) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4] span=56..89
-  #84 %84 = +("a":%83 "b":%82) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4] span=56..89
-  #85 %85 = +("a":%16 "b":%33) @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=37..90
-  #86 %86 = +("a":%85 "b":%50) @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=37..90
-  #87 %87 = +("a":%86 "b":%67) @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=37..90
-  #88 %88 = +("a":%87 "b":%84) @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=37..90
-  return %88
+  #5 %5 = $2 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[0 1] span=78..85
+  #6 %6 = +("a":%0 "b":%5) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[0 1] span=78..85
+  #7 %7 = $3 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[0 1] span=75..88
+  #8 %8 = *("a":%6 "b":%7) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[0 1] span=75..88
+  #9 %9 = $4 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[0 2] span=78..85
+  #10 %10 = +("a":%0 "b":%9) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[0 2] span=78..85
+  #11 %11 = $5 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[0 2] span=75..88
+  #12 %12 = *("a":%10 "b":%11) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[0 2] span=75..88
+  #13 %13 = +("a":%4 "b":%8) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[0] span=56..89
+  #14 %14 = +("a":%13 "b":%12) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[0] span=56..89
+  #15 %15 = $6 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1 0] span=78..85
+  #16 %16 = +("a":%0 "b":%15) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1 0] span=78..85
+  #17 %17 = $7 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1 0] span=75..88
+  #18 %18 = *("a":%16 "b":%17) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1 0] span=75..88
+  #19 %19 = $8 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1 1] span=78..85
+  #20 %20 = +("a":%0 "b":%19) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1 1] span=78..85
+  #21 %21 = $9 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1 1] span=75..88
+  #22 %22 = *("a":%20 "b":%21) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1 1] span=75..88
+  #23 %23 = $10 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1 2] span=78..85
+  #24 %24 = +("a":%0 "b":%23) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1 2] span=78..85
+  #25 %25 = $11 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1 2] span=75..88
+  #26 %26 = *("a":%24 "b":%25) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1 2] span=75..88
+  #27 %27 = +("a":%18 "b":%22) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1] span=56..89
+  #28 %28 = +("a":%27 "b":%26) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[1] span=56..89
+  #29 %29 = $12 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2 0] span=78..85
+  #30 %30 = +("a":%0 "b":%29) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2 0] span=78..85
+  #31 %31 = $13 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2 0] span=75..88
+  #32 %32 = *("a":%30 "b":%31) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2 0] span=75..88
+  #33 %33 = $14 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2 1] span=78..85
+  #34 %34 = +("a":%0 "b":%33) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2 1] span=78..85
+  #35 %35 = $15 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2 1] span=75..88
+  #36 %36 = *("a":%34 "b":%35) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2 1] span=75..88
+  #37 %37 = $16 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2 2] span=78..85
+  #38 %38 = +("a":%0 "b":%37) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2 2] span=78..85
+  #39 %39 = $17 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2 2] span=75..88
+  #40 %40 = *("a":%38 "b":%39) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2 2] span=75..88
+  #41 %41 = +("a":%32 "b":%36) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2] span=56..89
+  #42 %42 = +("a":%41 "b":%40) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[2] span=56..89
+  #43 %43 = $18 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3 0] span=78..85
+  #44 %44 = +("a":%0 "b":%43) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3 0] span=78..85
+  #45 %45 = $19 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3 0] span=75..88
+  #46 %46 = *("a":%44 "b":%45) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3 0] span=75..88
+  #47 %47 = $20 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3 1] span=78..85
+  #48 %48 = +("a":%0 "b":%47) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3 1] span=78..85
+  #49 %49 = $21 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3 1] span=75..88
+  #50 %50 = *("a":%48 "b":%49) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3 1] span=75..88
+  #51 %51 = $22 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3 2] span=78..85
+  #52 %52 = +("a":%0 "b":%51) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3 2] span=78..85
+  #53 %53 = $23 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3 2] span=75..88
+  #54 %54 = *("a":%52 "b":%53) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3 2] span=75..88
+  #55 %55 = +("a":%46 "b":%50) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3] span=56..89
+  #56 %56 = +("a":%55 "b":%54) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[3] span=56..89
+  #57 %57 = $24 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4 0] span=78..85
+  #58 %58 = +("a":%0 "b":%57) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4 0] span=78..85
+  #59 %59 = $25 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4 0] span=75..88
+  #60 %60 = *("a":%58 "b":%59) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4 0] span=75..88
+  #61 %61 = $26 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4 1] span=78..85
+  #62 %62 = +("a":%0 "b":%61) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4 1] span=78..85
+  #63 %63 = $27 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4 1] span=75..88
+  #64 %64 = *("a":%62 "b":%63) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4 1] span=75..88
+  #65 %65 = $28 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4 2] span=78..85
+  #66 %66 = +("a":%0 "b":%65) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4 2] span=78..85
+  #67 %67 = $29 @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4 2] span=75..88
+  #68 %68 = *("a":%66 "b":%67) @["g" "@result" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4 2] span=75..88
+  #69 %69 = +("a":%60 "b":%64) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4] span=56..89
+  #70 %70 = +("a":%69 "b":%68) @["g" "@result" "@result"] owner=["g" "@result"] instance=0 iter=[4] span=56..89
+  #71 %71 = +("a":%14 "b":%28) @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=37..90
+  #72 %72 = +("a":%71 "b":%42) @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=37..90
+  #73 %73 = +("a":%72 "b":%56) @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=37..90
+  #74 %74 = +("a":%73 "b":%70) @["g" "@result"] owner=["g" "@result"] instance=0 iter=[] span=37..90
+  return %74
 expression 7: (let* [a t a1 (+ a a) a2 (+ a1 a1) a3 (+ a2 a2)] (* a3 0.5))
 core
   $0 = 0.5

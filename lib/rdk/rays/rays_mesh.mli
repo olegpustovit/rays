@@ -9,4 +9,8 @@ open Rdk_core
 
 val to_mesh : Geometry.t -> (Rays.Mesh.t, Error.t) result
 
+(** Triangulate a geometry, compute the path tracer's smoothed vertex normals,
+    and return the packed triangle mesh it consumes. *)
+val to_trace_mesh : Geometry.t -> (Rays.Mesh.t, Error.t) result
+
 val of_mesh : Rays.Mesh.t -> (Geometry.t, Error.t) result

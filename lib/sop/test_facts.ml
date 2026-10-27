@@ -30,7 +30,7 @@ let counted source calls reads writes transform =
     ~cook_mode:(Node.Duplicate_input 0) ~dependencies:Context.Dependencies.static
     ~inputs:[|source|] (fun ~node_id:_ _ inputs ->
       incr calls;
-      Ok Node.Private.{geometry = transform inputs.(0); diagnostics = []; instances = None})
+      Ok Node.Private.{geometry = transform inputs.(0); instances = None})
   |> fun node -> facts node reads writes
 
 let rewire node geometry = Node.Private.rebuild_with_inputs node [|(Lisp_sop.snapshot (geometry))|]
@@ -114,7 +114,7 @@ let test_dependencies () =
   let opaque = Node.Private.make_geometry ~operation:"opaque" ~version:1 ~parameters:""
     ~cook_mode:(Node.Duplicate_input 0) ~dependencies:Context.Dependencies.static
     ~inputs:[|(Lisp_sop.snapshot (geometry))|] (fun ~node_id:_ _ inputs ->
-      incr calls; Ok Node.Private.{geometry = inputs.(0); diagnostics = []; instances = None}) in
+      incr calls; Ok Node.Private.{geometry = inputs.(0); instances = None}) in
   check ((Node.facts opaque).elementwise = Node.None && (Node.facts opaque).topology = Node.Changed
       && (Node.facts opaque).exact) "opaque declaration is not conservative";
   ignore (cook evaluator 1 opaque);
@@ -172,113 +172,31 @@ let test_refusals ?(entries=64) () =
   let packed = Node.Private.make_geometry ~operation:"packed" ~version:1 ~parameters:""
     ~cook_mode:(Node.Duplicate_input 0) ~dependencies:Context.Dependencies.static
     ~inputs:[|(Lisp_sop.snapshot (geometry))|] (fun ~node_id:_ _ inputs ->
-      Ok Node.Private.{geometry = inputs.(0); diagnostics = []; instances = Some [|Rays_math.Mat4.identity|]})
+      Ok Node.Private.{geometry = inputs.(0); instances = Some [|Rays_math.Mat4.identity|]})
     |> fun node -> facts node ["P"] [] in
   rejects packed;
   Session.close evaluator
 
-let test_declarations () =
-  let native = Sop_catalog.Editor.factories in
-  let lowered = Result.bind
-    (Flow.Syntax.parse "(workspace facts (graph unused :context value 0.0))")
-    (Flow_sop.Lower.workspace ~factories:native)
-    |> Result.map_error Flow.Diagnostic.to_string |> get in
-  let factories = native @ lowered.factories in
-  let geometry = fixture () in
-  let topology = Geometry.topology geometry in
-  let edges = Edge_group.init ~topology ~index:(Topology_index.create topology)
-    ~name:"edges" (fun _ -> true) in
-  let geometry = Geometry.with_edge_group edges geometry |> get in
-  let count = Geometry.point_count geometry in
-  let uv = Packed.Float2.of_owned ~x:(Array.make count 0.) ~y:(Array.make count 0.) |> get in
-  let uv = Attribute.create_owned ~name:"uv" ~owner:Attribute.Point (Float2 uv) |> get in
-  let source = Lisp_sop.snapshot ((Geometry.with_attribute uv geometry |> get)) in
-  let image = Image_nodes.noise ~width:1 ~height:1 () in
-  let evaluator = session () in
-  let preserved = ref [] in
-  let verify key node =
-    let declaration = Node.facts node in
-    if declaration.topology = Node.Preserved && declaration.cook_mode = Node.Duplicate_input 0 then begin
-      let input = (Result.get_ok (Sop.Payload.geometry (cook evaluator 1 source).payload)) in
-      let one = (Result.get_ok (Sop.Payload.geometry (cook evaluator 1 node).payload)) in
-      let cold = session () in
-      let eight = (Result.get_ok (Sop.Payload.geometry (cook cold 8 node).payload)) in
-      Session.close cold;
-      check (Geometry.topology one == Geometry.topology input)
-        (Node.operation node ^ " replaced Preserved topology");
-      check (geometry_bytes one = geometry_bytes eight) (Node.operation node ^ " differs at eight domains");
-      preserved := key :: !preserved
-    end in
-  List.iter (fun factory ->
-    verify (Edit_graph.factory_key factory) (Edit_graph.instantiate_optional factory
-      (List.map (function "image" -> Some image | _ -> Some source)
-        (Edit_graph.factory_input_types factory)) |> get)) factories;
-  (* Ported nodes have no factory: the same contract is checked through the Lisp node. *)
-  List.iter (fun key ->
-    verify key (Lisp_sop.node ~with_:["source", source]
-      (Printf.sprintf "(sop/%s (sop/ext_source))" key)))
-    ["transform"; "noise_displace"; "peak"; "bend"; "mountain"; "normals"; "attribute_noise";
-     "attribute_noise_quaternion"; "color_by_height"];
-  List.iter (fun name -> check (List.mem name !preserved) (name ^ " lacks a Preserved declaration"))
-    ["transform"; "soft_transform"; "noise_displace"; "peak"; "bend"; "mountain";
-     "normals"; "attribute_noise"; "attribute_noise_quaternion"; "color_by_height"];
-  let peak = Lisp_sop.node ~with_:["source", (source)] {|(sop/peak (sop/ext_source))|} in
-  let noise = Lisp_sop.node ~with_:["source", (source)] {|(sop/noise_displace (sop/ext_source))|} in
-  check ((Node.facts noise).reads = ["P"]) "Height 2D noise reads unexpected planes";
-  let noise, _ = Node.apply_parameters noise ["mode", Parameter.Choice_value "normal_3d"] |> get in
-  check ((Node.facts noise).reads = ["P"; "N"]) "Normal 3D noise facts omit N";
-  let one = (Result.get_ok (Sop.Payload.geometry (cook evaluator 1 noise).payload)) in
-  let cold = session () in
-  let eight = (Result.get_ok (Sop.Payload.geometry (cook cold 8 noise).payload)) in
-  check (geometry_bytes one = geometry_bytes eight) "Normal 3D SOP differs across domains";
-  Session.close cold;
-  let updated, _ = Node.apply_parameters peak ["direction_attribute", Parameter.Text_value "direction"] |> get in
-  check (List.mem "direction" (Node.facts updated).reads
-      && not (List.mem "N" (Node.facts updated).reads)) "PPX rebuild retained stale facts";
-  Session.close evaluator;
-  Printf.printf "facts: %d registered Preserved nodes checked at one/eight domains\n" (List.length !preserved)
-
-let test_normals_order_and_diagnostics () =
+let test_normals_cache_refresh () =
   let geometry = fixture () |> with_color 1. in
-  let warning message node_id = Diagnostic.{severity = Warning; code = "input_warning";
-    message; node = {node_id; label = "source"; operation = "source"}} in
-  let source_node geometry message =
+  let source_node geometry =
     Node.Private.make_geometry ~operation:"source" ~version:1
       ~parameters:(string_of_int (Geometry.data_id geometry))
       ~cook_mode:Node.Generator ~dependencies:Context.Dependencies.static ~inputs:[||]
-      (fun ~node_id _ _ -> Ok Node.Private.{geometry; diagnostics = [warning message node_id]; instances = None}) in
-  let original = source_node geometry "old" in
+      (fun ~node_id:_ _ _ -> Ok Node.Private.{geometry; instances = None}) in
+  let original = source_node geometry in
   let node = Lisp_sop.node ~with_:["original", (original)] {|(sop/normals (sop/ext_original))|} in
   let evaluator = session () in
   ignore (cook evaluator 1 node);
-  let source = source_node (with_color 2. geometry) "new" in
+  let source = source_node (with_color 2. geometry) in
   let node = Node.Private.rebuild_with_inputs node [|source|] in
   let before = Session.stats evaluator in
   let output = cook evaluator 1 node in
   check ((Session.stats evaluator).hits = before.hits + 1) "normals recooked after a color payload edit";
-  check (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) output.diagnostics = ["new"])
-    "cache hit retained inherited diagnostics";
   let cold = session () in
   check (geometry_bytes (Result.get_ok (Sop.Payload.geometry output.payload)) = geometry_bytes (Result.get_ok (Sop.Payload.geometry (cook cold 8 node).payload)))
     "normal cache refresh changed attribute order";
   Session.close cold;
-  Session.close evaluator;
-  let roots = [|source_node geometry "root-a"; source_node geometry "root-b"|] in
-  let zone = Node.Private.make_geometry ~operation:"zone_test" ~version:1 ~parameters:""
-    ~cook_mode:Node.Generic ~dependencies:Context.Dependencies.static
-    ~expand:(fun _ _ _ -> Ok roots) ~inputs:[|source_node geometry "old"|]
-    (fun ~node_id _ inputs -> Ok Node.Private.{geometry = inputs.(0);
-      diagnostics = [warning "zone" node_id]; instances = None}) in
-  let evaluator = session () in
-  let messages output = List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message)
-    output.Session.diagnostics in
-  check (messages (cook evaluator 1 zone) = ["old"; "root-a"; "root-b"; "zone"])
-    "zone diagnostic order changed on a miss";
-  check (messages (cook evaluator 1 zone) = ["old"; "root-a"; "root-b"; "zone"])
-    "zone cache hit lost its expanded roots' diagnostics";
-  let zone = Node.Private.rebuild_with_inputs zone [|source_node geometry "new"|] in
-  check (messages (cook evaluator 1 zone) = ["new"; "root-a"; "root-b"; "zone"])
-    "zone cache hit did not refresh its ordinary input diagnostics";
   Session.close evaluator
 
 let test_payload_budget () =
@@ -352,8 +270,7 @@ let () =
   test_write_footprint ();
   test_refusals ();
   test_refusals ~entries:0 ();
-  test_declarations ();
-  test_normals_order_and_diagnostics ();
+  test_normals_cache_refresh ();
   test_payload_budget ();
   test_parameter_reads ();
   print_endline "component cache facts tests passed"

@@ -1,14 +1,14 @@
 (** Node-owned schemas and cook identity for checked Lisp geometry bodies. *)
-val input : int -> (Sop.Payload.t, Sop.Diagnostic.error) result
+val input : int -> (Sop.Payload.t, Diagnostic.t) result
 (** Immutable cooked input in the enclosing body's caller-domain scope. *)
 
 val node :
   ?unbound_function:bool -> ?geometry_inputs:bool list ->
   operation:string -> version:int -> label:string -> fields:Param.field_view list ->
-  normalizers:(string * (string -> (string, Flow.Diagnostic.t) result)) list ->
+  normalizers:(string * (string -> (string, Diagnostic.t) result)) list ->
   source:string ->
   build:(label:string -> context:Sop.Context.t -> Sop.Node.t list -> (string * Flow.Eval.value) list ->
-    (Sop.Context.t -> (Sop.Node.t, Sop.Diagnostic.error) result) *
+    (Sop.Context.t -> (Sop.Node.t, Diagnostic.t) result) *
     Sop.Context.Dependencies.t * Sop.Node.facts) ->
   Sop.Node.t list -> Sop.Node.t
 

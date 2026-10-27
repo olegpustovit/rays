@@ -1,6 +1,10 @@
 module W = Workspace
 module S = Syntax
 module Smap = Map.Make (String)
+module State_map = Map.Make (struct
+  type t = int * W.path * int list
+  let compare = compare
+end)
 module Names = Set.Make (String)
 
 let rec pattern_names names = function
@@ -68,7 +72,7 @@ let max_iterations = W.max_iterations
 let max_concat = 4_096
 let max_depth = 64
 let packed_block_size = 1024
-let empty_live = Frame_input.at_time 0.
+let empty_live = Input.at_time 0.
 
 exception Needs_t
 
@@ -110,29 +114,20 @@ and fn =
 and residual = { rid : int; rterm : W.term; renv : value Smap.t; rc : ctx;
   previous : bool;
   mutable live : st option;  (* the evaluation that last offered this residual to the executor *)
-  mutable core : (unit ref * (Frame_input.t -> (value, Diagnostic.t) result) *
-    (Frame_input.t -> (value, Diagnostic.t) result) option) option
-    (* the prepared program of the executor named by the unit ref (physical): total, restores state and reruns the walker on failure *);
   mutable dep_frame : int; mutable dep_state : int
     (* memo of frame_dependent / state_dependent for this immutable residual: 0 unknown, 1 no, 2 yes *) }
 
 and state = { mutable source : string; mutable frame : int option;
-  mutable before : value Smap.t; mutable next : value Smap.t; mutable host : state option }
+  mutable before : value State_map.t; mutable next : value State_map.t;
+  mutable host : state option; mutable epoch : int }
 
 and ctx = { st : st; inst : int; prefix : W.path; base : W.path; route : string list;
-            iter : int list; depth : int; rec_ : bool; data : bool; geometry : bool; host : bool }
+            iter : int list; depth : int; rec_ : bool; data : bool; geometry : bool; host : bool;
+            kernel_requests : bool }
 
 and st = {
-  time : Frame_input.t option;  (* [None] while evaluating statically *)
+  time : Input.t option;  (* [None] while evaluating statically *)
   resolve : (value -> (value, Diagnostic.t) result) option;
-  execute : (residual -> Frame_input.t -> (value, Diagnostic.t) result option) option;
-  owner : unit ref;  (* identifies the executor behind [execute] *)
-  compiled_residuals : bool;  (* offer every forced residual to [execute], not only map/loop roots *)
-  strict_executor : bool;
-  mutable observe_kernel : (residual -> unit) option;
-  mutable bulk : (residual -> value option) option;  (* the whole value of a large static packed map, see [hof] *)
-  mutable bulk_approx : (residual -> value option) option;
-    (* the same, from a device whose 32-bit result is taken within a tolerance of the walked elements *)
   source : string Lazy.t;
   state : state option;
   mutable states : value list;
@@ -162,22 +157,82 @@ and node = { id : int; inst : int; site : W.path; iter : int list; kind : string
 
 and cell = { cinst : int; cgraph : string; cdefault : bool; mutable cinputs : (string * value) list; mutable cresult : value }
 
-type live = Frame_input.t
+type live = Input.t
 type instance = { graph : string; default : bool; inputs : (string * value) list; result : value }
 type plan = { instances : instance array; nodes : node array }
 type t = { plan : plan; authored : int array; results : (string * value) list; states : value list;
            records : (W.path * (int list * value) list) list }
 
 let bulk_ids = Atomic.make (-1)
+let state_epochs = Atomic.make 0
+let fresh_state_epoch () = Atomic.fetch_and_add state_epochs 1
 
-let create_state () = {source = ""; frame = None; before = Smap.empty; next = Smap.empty;host=None}
-let reset_frame s = s.source <- ""; s.frame <- None; s.before <- Smap.empty; s.next <- Smap.empty
+module Residual_effect = struct
+  type _ Effect.t +=
+    | Observe_kernel : residual -> unit Effect.t
+    | Kernel_value : residual -> value option Effect.t
+    | Bulk_static : residual -> value option Effect.t
+    | Bulk_approx : residual -> value option Effect.t
+
+  let handle : type result. ?observe:(residual -> unit) -> ?kernel:(residual -> value option) ->
+    ?bulk:(residual -> value option) -> ?bulk_approx:(residual -> value option) ->
+    (unit -> result) -> result =
+    fun ?(observe = fun _ -> ()) ?(kernel = fun _ -> None) ?(bulk = fun _ -> None)
+      ?(bulk_approx = fun _ -> None) f ->
+    let resume callback continuation =
+      match callback () with
+      | value -> Effect.Deep.continue continuation value
+      | exception exn ->
+          Effect.Deep.discontinue_with_backtrace continuation exn (Printexc.get_raw_backtrace()) in
+    Effect.Deep.match_with f () {
+      retc = Fun.id;
+      exnc = raise;
+      effc = (fun (type a) (eff : a Effect.t) ->
+        match eff with
+        | Observe_kernel residual -> Some (fun (continuation : (a, result) Effect.Deep.continuation) ->
+            resume (fun () -> observe residual) continuation)
+        | Kernel_value residual -> Some (fun (continuation : (a, result) Effect.Deep.continuation) ->
+            resume (fun () -> kernel residual) continuation)
+        | Bulk_static residual -> Some (fun (continuation : (a, result) Effect.Deep.continuation) ->
+            resume (fun () -> bulk residual) continuation)
+        | Bulk_approx residual -> Some (fun (continuation : (a, result) Effect.Deep.continuation) ->
+            resume (fun () -> bulk_approx residual) continuation)
+        | _ -> None)
+    }
+
+  let handle_kernel : type result. ?kernel:(residual -> value option) ->
+    (unit -> result) -> result = fun ?(kernel = fun _ -> None) f ->
+    let resume callback continuation =
+      match callback () with
+      | value -> Effect.Deep.continue continuation value
+      | exception exn ->
+          Effect.Deep.discontinue_with_backtrace continuation exn (Printexc.get_raw_backtrace()) in
+    Effect.Deep.match_with f () {
+      retc = Fun.id;
+      exnc = raise;
+      effc = (fun (type a) (eff : a Effect.t) -> match eff with
+        | Kernel_value residual -> Some (fun (continuation : (a, result) Effect.Deep.continuation) ->
+            resume (fun () -> kernel residual) continuation)
+        | _ -> None)
+    }
+end
+
+let rec copy_state s =
+  {source=s.source;frame=s.frame;before=s.before;next=s.next;host=Option.map copy_state s.host;epoch=s.epoch}
+let create_state () =
+  {source="";frame=None;before=State_map.empty;next=State_map.empty;host=None;epoch=fresh_state_epoch ()}
+let reset_frame s =
+  s.source <- ""; s.frame <- None; s.before <- State_map.empty; s.next <- State_map.empty;
+  s.epoch <- fresh_state_epoch ()
 let reset_state ?(host_state=true) s = reset_frame s;if host_state then s.host<-None
-let rec fork_state s = {source = s.source; frame = s.frame; before = s.before; next = s.next;
-  host=Option.map fork_state s.host}
-let restore_state s saved=s.source<-saved.source;s.frame<-saved.frame;
-  s.before<-saved.before;s.next<-saved.next;s.host<-saved.host
-let state_stamp s = Digest.to_hex (Digest.string (Marshal.to_string s []))
+let fork_state s = copy_state s
+let restore_state s saved=
+  s.source<-saved.source;s.frame<-saved.frame;s.before<-saved.before;s.next<-saved.next;
+  s.host<-Option.map copy_state saved.host;s.epoch<-saved.epoch
+let state_stamp state =
+  let rec append state = string_of_int state.epoch ^
+    match state.host with None -> "" | Some host -> ":" ^ append host in
+  append state
 let transaction s f =
   let saved = fork_state s in
   let result = f () in
@@ -188,14 +243,14 @@ let begin_frame s source frame =
   if source <> s.source || Option.fold ~none:false ~some:(fun old -> frame < old) s.frame then reset_frame s;
   s.source <- source;
   if s.frame <> Some frame then begin
-    s.before <- Smap.union (fun _ _ newer -> Some newer) s.before s.next;
-    s.next <- Smap.empty; s.frame <- Some frame
+    s.before <- State_map.union (fun _ _ newer -> Some newer) s.before s.next;
+    s.next <- State_map.empty; s.frame <- Some frame
   end
-let state_key c zone = Marshal.to_string (c.inst, c.prefix @ zone, c.iter) []
+let state_key c zone = c.inst, c.prefix @ zone, c.iter
 let state_plane c =
   let state=Option.get c.st.state and live=Option.get c.st.time in
   if not c.host then state,live.frame else
-    let plane=match state.host with Some plane->plane|None->let plane=create_state()in
+    let plane=match state.host with Some plane->plane|None->let plane=create_state () in
       state.host<-Some plane;plane in
     plane,live.tick
 let fn_id st = let id = st.nfns in st.nfns <- id + 1; id
@@ -329,9 +384,6 @@ let resolve_source resolve source =
       Value.validate value;
       value
 
-(* Set below to [state_dependent]: strict executors reference-evaluate state-reading residuals. *)
-let state_dependent_hook = ref (fun (_ : value) -> false)
-
 let rec concrete c v =
   match v with
   | Residual r -> (match c.st.time with None -> raise Needs_t | Some _ -> force_res c r)
@@ -347,28 +399,12 @@ and force_res c r =
   | Some v -> v
   | None ->
       let slow () =
-        let c = {r.rc with st = c.st} in
+        let c = {r.rc with st = c.st; kernel_requests = c.kernel_requests} in
         if r.previous then match r.rterm.node with
           | W.State {init; zone; _} -> state_previous c r.renv zone init
           | _ -> assert false
         else ev c r.renv r.rterm in
-      let v = match c.st.time,c.st.execute with
-        | Some live,Some execute when c.st.compiled_residuals ->
-            r.live <- Some c.st;
-            (match r.core with
-             | Some (owner, run, _) when owner == c.st.owner && not c.st.strict_executor -> (match run live with Ok v -> v | Error d -> raise_diagnostic d)
-             | _ ->
-                let saved = Option.map fork_state c.st.state in
-                let result = if c.st.strict_executor then execute r live else
-                  try execute r live with _ -> None in
-                (match result with Some (Ok v) -> v | result ->
-                  Option.iter (fun saved -> restore_state (Option.get c.st.state) saved) saved;
-                  match result with
-                  | Some (Error d) when c.st.strict_executor -> raise_diagnostic d
-                  | None when c.st.strict_executor && not (!state_dependent_hook (Residual r)) ->
-                      fail "E_CORE_FORM" "This value needs a compiled executor."
-                  | _ -> slow ()))
-        | _ -> slow () in
+      let v = slow () in
       Hashtbl.replace c.st.memo r.rid v;
       v
 
@@ -380,10 +416,10 @@ and ev c env (x : W.term) : value =
   let c = match x.path with Some p -> { c with base = p; route = [] } | None -> c in
   match st.time with
   | None ->
-      (match st.observe_kernel, x.node with
-       | Some observe, (W.Hof ((`Map | `Reduce), _) | W.Loop _ | W.Op {op = ("array/sum" | "image/map"); _}) ->
-           observe {rid = Atomic.fetch_and_add bulk_ids (-1); rterm = x;
-             renv = capture x env; rc = c; previous = false; live = None; core = None; dep_frame = 0; dep_state = 0}
+      (match x.node with
+       | (W.Hof ((`Map | `Reduce), _) | W.Loop _ | W.Op {op = ("array/sum" | "image/map"); _}) ->
+           Effect.perform (Residual_effect.Observe_kernel {rid = Atomic.fetch_and_add bulk_ids (-1); rterm = x;
+             renv = capture x env; rc = c; previous = false; live = None; dep_frame = 0; dep_state = 0})
        | _ -> ());
       let saved = st.nodes and saved_n = st.nnodes and saved_authored = st.authored in
       (match ev_raw c env x with
@@ -392,26 +428,22 @@ and ev c env (x : W.term) : value =
            (* ponytail: nodes made by the abandoned attempt are dropped, its records are kept *)
            st.nodes <- saved; st.nnodes <- saved_n; st.authored <- saved_authored;
            st.rids <- st.rids + 1;
-           let r = Residual { rid = st.rids; rterm = x; renv = capture x env; rc = c; previous = false; live = None; core = None; dep_frame = 0; dep_state = 0} in
+           let r = Residual { rid = st.rids; rterm = x; renv = capture x env; rc = c; previous = false; live = None; dep_frame = 0; dep_state = 0} in
            (match x.node with W.State _ -> st.states <- r :: st.states | _ -> ());
            (* the record is the residual: a probe forces it at the time it shows *)
            (match x.path with Some p -> note c p r | None -> ()); r
-       | exception Fail (code, msg, None) -> raise (Fail (code, msg, span_of x))
-       | exception Diagnostic_fail d when d.span=None -> raise_diagnostic {d with span=span_of x})
+       | exception Diagnostic.Error d when d.span=None -> raise_diagnostic {d with span=span_of x})
   | Some live ->
-      let evaluate () = match st.execute, x.node with
-        | Some execute, (W.Hof ((`Map | `Reduce), _) | W.Loop _ | W.Op {op = "array/sum"; _}) ->
-            st.rids <- st.rids + 1;
-            let r = {rid = st.rids; rterm = x; renv = capture x env; rc = c; previous = false; live = None; core = None; dep_frame = 0; dep_state = 0} in
-            (match execute r live with
-             | Some (Ok v) -> v
-             | Some (Error d) -> raise_diagnostic d
-             | None when st.strict_executor -> fail "E_CORE_FORM" "This numeric form needs a compiled executor."
-             | None -> ev_raw c env x)
-        | _ -> ev_raw c env x in
-      (match concrete c (evaluate ()) with
-       | exception Fail (code, msg, None) -> raise (Fail (code, msg, span_of x))
-       | exception Diagnostic_fail d when d.span=None -> raise_diagnostic {d with span=span_of x}
+    let evaluate () = ev_raw c env x in
+      let kernel = match x.node with
+        | (W.Hof ((`Map | `Reduce), _) | W.Loop _ | W.Op {op = ("array/sum" | "image/map"); _})
+          when c.kernel_requests ->
+            let residual = {rid = Atomic.fetch_and_add bulk_ids (-1); rterm = x;
+              renv = capture x env; rc = c; previous = false; live = None; dep_frame = 0; dep_state = 0} in
+            Effect.perform (Residual_effect.Kernel_value residual)
+        | _ -> None in
+      (match (match kernel with Some value -> value | None -> concrete c (evaluate ())) with
+       | exception Diagnostic.Error d when d.span=None -> raise_diagnostic {d with span=span_of x}
        | v -> if st.record && c.rec_ then Option.iter (fun p -> note c p v) x.path; v)
 
 and evs c env prefix ts = List.mapi (fun i t -> ev (sub c (prefix ^ string_of_int i)) env t) ts
@@ -520,7 +552,7 @@ and ev_raw c env (x : W.term) : value =
         let v = ev c env t in
         let v=match v with Residual _ when diagnostic_effect c.st env t->concrete c v|_->v in
         let pfx = match t.path with
-          | Some p -> List.filteri (fun i _ -> i < List.length p - 1) p | None -> [] in
+          | Some p -> List.take (max 0 (List.length p - 1)) p | None -> [] in
         bind_pat c ~mk:(Some (fun n -> pfx @ [ n ])) ~whole:false pat v env) env binds in
       ev c env res
   | W.Loop l -> loop c env ~out:x.ty l.kind l.accs l.clauses l.skip l.body l.zone
@@ -531,17 +563,18 @@ and ev_raw c env (x : W.term) : value =
       let previous = match st.time with
         | None ->
             st.rids <- st.rids + 1;
-            Residual {rid = st.rids; rterm = x; renv = capture x env; rc = c; previous = true; live = None; core = None; dep_frame = 0; dep_state = 0}
+            Residual {rid = st.rids; rterm = x; renv = capture x env; rc = c; previous = true; live = None; dep_frame = 0; dep_state = 0}
         | Some _ -> state_previous c env zone init in
       let env = bind_pat c ~mk:(Some (fun n -> zone @ [":" ^ n])) ~whole:true binder previous env in
       (match st.time with
        | None -> ignore (ev c env step); raise Needs_t
        | Some _ ->
            let state,_ = state_plane c in let key = state_key c zone in
-           match Smap.find_opt key state.next with
+           match State_map.find_opt key state.next with
            | Some v -> v
            | None -> let v = state_data c (coerce_to x.ty (ev c env step)) in
-               state.next <- Smap.add key v state.next; v)
+               state.next <- State_map.add key v state.next;
+               state.epoch <- fresh_state_epoch (); v)
   | W.Error_rows{rows;policy;mapper}->
       if c.st.time=None then raise Needs_t;
       let value=concrete_data c(ev(sub c "0")env rows)in
@@ -622,7 +655,7 @@ and ev_raw c env (x : W.term) : value =
 and state_previous c env zone init =
   let state,frame = state_plane c in
   begin_frame state (Lazy.force c.st.source) frame;
-  match Smap.find_opt (state_key c zone) state.before with
+  match State_map.find_opt (state_key c zone) state.before with
   | Some v -> state_data c v | None -> state_data c (ev c env init)
 
 and state_data c value =
@@ -768,7 +801,7 @@ and hof c env term kind f rest =
    | `Map, Closure cl when c.st.record && c.rec_ && (match out with Ty.Array _ -> true | _ -> false) ->
        c.st.rids <- c.st.rids + 1;
        let call = Residual {rid = c.st.rids; rterm = term; renv = capture term env; rc = c;
-         previous = false; live = None; core = None; dep_frame = 0; dep_state = 0} in
+         previous = false; live = None; dep_frame = 0; dep_state = 0} in
        note c (cl.zone @ ["~calls"]) (Record ["offset", Int !(cl.calls); "call", call])
    | _ -> ());
   let lists_of ts = List.mapi (fun i t ->
@@ -782,12 +815,12 @@ and hof c env term kind f rest =
       let n = List.fold_left (fun n (length, _) -> min n length) max_int ls in
       let n = if ls = [] then 0 else n in
       let item k = call fv (List.map (fun (_, get) -> get k) ls) in
-      (match out, c.st.time, c.st.bulk with
-       | Ty.Array Ty.Int, None, Some bulk when numeric && n > max_iterations ->
+      (match out, c.st.time with
+       | Ty.Array Ty.Int, None when numeric && n > max_iterations ->
            let head = match array_init Ty.Int max_iterations (fun k -> concrete c (item k)) with
              | Int_array data -> data | _ -> assert false in
-           let whole = bulk {rid = Atomic.fetch_and_add bulk_ids (-1); rterm = term;
-             renv = capture term env; rc = c; previous = false; live = None; core = None; dep_frame = 0; dep_state = 0} in
+           let whole = Effect.perform (Residual_effect.Bulk_static {rid = Atomic.fetch_and_add bulk_ids (-1); rterm = term;
+             renv = capture term env; rc = c; previous = false; live = None; dep_frame = 0; dep_state = 0}) in
            (match whole with
             | Some (Int_array data as value) when Array.length data = n
                 && Array.for_all2 Int.equal head (Array.sub data 0 max_iterations) ->
@@ -803,7 +836,7 @@ and hof c env term kind f rest =
                   Value.int_array_put data k (concrete c (item k))
                 done;
                 Int_array data)
-       | Ty.Array e, None, Some bulk when numeric && n > max_iterations ->
+       | Ty.Array e, None when numeric && n > max_iterations ->
            (* A large static packed map. The walker makes the first 4,096 elements as always (their
               records, call indices and failures are the ordinary ones); the host may then supply
               the whole array, which is taken only when it has the walked elements bit for bit. Any
@@ -821,17 +854,15 @@ and hof c env term kind f rest =
              let ok = ref true in
              Array.iteri (fun i w -> let g = d.(i) in
                if not (Float.abs (g -. w) <= 1e-4 *. (1. +. Float.abs w)) then ok := false) walked; !ok) in
-           let approx_whole = match c.st.bulk_approx with
-             | None -> None
-             | Some host -> (match host {rid = Atomic.fetch_and_add bulk_ids (-1); rterm = term;
-                 renv = capture term env; rc = c; previous = false; live = None; core = None; dep_frame = 0; dep_state = 0} with
+           let approx_whole = (match Effect.perform (Residual_effect.Bulk_approx {rid = Atomic.fetch_and_add bulk_ids (-1); rterm = term;
+                 renv = capture term env; rc = c; previous = false; live = None; dep_frame = 0; dep_state = 0}) with
                | Some (Float_array d as v) when width = 1 && tolerant d -> Some v
                | Some (Vec2_array d as v) when width = 2 && tolerant d -> Some v
                | Some (Vec3_array d as v) when width = 3 && tolerant d -> Some v
                | Some (Vec4_array d as v) when width = 4 && tolerant d -> Some v
                | _ -> None) in
-           let whole = if Option.is_some approx_whole then approx_whole else match bulk {rid = Atomic.fetch_and_add bulk_ids (-1); rterm = term;
-               renv = capture term env; rc = c; previous = false; live = None; core = None; dep_frame = 0; dep_state = 0} with
+           let whole = if Option.is_some approx_whole then approx_whole else match Effect.perform (Residual_effect.Bulk_static {rid = Atomic.fetch_and_add bulk_ids (-1); rterm = term;
+               renv = capture term env; rc = c; previous = false; live = None; dep_frame = 0; dep_state = 0}) with
              | Some (Float_array d as v) when width = 1 && same d -> Some v
              | Some (Vec2_array d as v) when width = 2 && same d -> Some v
              | Some (Vec3_array d as v) when width = 3 && same d -> Some v
@@ -851,7 +882,7 @@ and hof c env term kind f rest =
                 for k = max_iterations to n - 1 do Value.array_put data width k (concrete c (item k)) done;
                 (match width with 2 -> Vec2_array data | 3 -> Vec3_array data | 4 -> Vec4_array data
                  | _ -> Float_array data))
-       | Ty.Array e, _, _ -> array_init e n (fun k -> concrete c (item k))
+       | Ty.Array e, _ -> array_init e n (fun k -> concrete c (item k))
        | _ -> List (join_values (Array.init n item)))
   | `Filter, [ l ] ->
       let count, get = List.hd (lists_of [ l ]) in
@@ -1049,7 +1080,7 @@ and geometry_loop c cz env op fs p body zone =
     if points then begin
       c.st.rids <- c.st.rids + 1;
       let term = { W.path = None; ty = Ty.Vec3; node = W.Ref_binding (ekey, []); form = body.W.form } in
-      Residual { rid = c.st.rids; rterm = term; renv = Smap.empty; rc = ci; previous = false; live = None; core = None; dep_frame = 0; dep_state = 0}, Text ekey
+      Residual { rid = c.st.rids; rterm = term; renv = Smap.empty; rc = ci; previous = false; live = None; dep_frame = 0; dep_state = 0}, Text ekey
     end else
       (match mk_node (sub ci "element") "zone/element" [] with
        | Deferred ((Ty.Named "geometry"), id) as g -> g, Int id
@@ -1093,7 +1124,7 @@ and graph_value ?(rec_ = true) c name over =
     (List.map (fun (n, v) -> n ^ "=" ^ key_of v) over)) in
   let run inst =
     if c.depth > max_depth then fail "E_DEPTH" "Call depth exceeds 64.";
-    let c0 = { st; inst; prefix = []; base = [ name ]; route = []; iter = []; depth = c.depth + 1; rec_ = rec_; data = c.data; geometry = c.geometry; host=g.context=Context.host } in
+    let c0 = { st; inst; prefix = []; base = [ name ]; route = []; iter = []; depth = c.depth + 1; rec_ = rec_; data = c.data; geometry = c.geometry; host=g.context=Context.host; kernel_requests = c.kernel_requests } in
     let env, ins = List.fold_left (fun (env, ins) (n, ty, default) ->
       let v = match List.assoc_opt n over with
         | Some v -> v
@@ -1129,7 +1160,7 @@ let new_state ?(budget=max_steps) ~record ws =
   let graphs = Hashtbl.create 8 and defs = Hashtbl.create 8 in
   List.iter (fun (g : W.graph) -> Hashtbl.replace graphs g.name g) ws.W.graphs;
   List.iter (fun (g : W.graph) -> Hashtbl.replace defs g.name g) ws.W.defs;
-  { time = None; resolve = None; execute = None; owner = ref (); compiled_residuals = true; strict_executor=false; observe_kernel = None; bulk = None; bulk_approx = None;
+  { time = None; resolve = None;
     source = lazy (Digest.string (fst (Lisp.print ws.W.source))); state = None; states = [];
     nfns = 0; fn_calls = Hashtbl.create 1;
     steps = 0; budget; nodes = []; authored = []; nnodes = 0; cells = []; cache = Hashtbl.create 8;
@@ -1137,22 +1168,21 @@ let new_state ?(budget=max_steps) ~record ws =
     kind_fns = ws.W.kind_fns; ops = ws.ops; find_op = Op.finder ws.ops }
 
 let live_state (st : st) ~state ?(elems = Smap.empty) (l : live) =
-  { st with time = Some l; state = Some state; observe_kernel = None; bulk = None; bulk_approx = None;
+  { st with time = Some l; state = Some state;
     steps = 0; memo = Hashtbl.create 16;
     fn_calls = Hashtbl.create 16; record = false; elems }
 
-let root st = { st; inst = -1; prefix = []; base = []; route = []; iter = []; depth = 0; rec_ = true; data = false; geometry = false; host=false }
+let root st = { st; inst = -1; prefix = []; base = []; route = []; iter = []; depth = 0; rec_ = true; data = false; geometry = false; host=false; kernel_requests = false }
 
 let protect f =
   try Ok (f ()) with
-  | Fail (code, msg, span) -> Error (diagnostic code msg span)
-  | Diagnostic_fail d -> Error d
+  | Diagnostic.Error d -> Error d
   | Needs_t -> Error (diagnostic "E_EVAL" "A live value was needed while evaluating statically." None)
   | Stack_overflow -> Error (diagnostic "E_DEPTH" "Evaluation is nested too deeply." None)
   | Out_of_memory -> Error (diagnostic "E_ARRAY_MEMORY" "Frame data exceeds available memory." None)
 
-let static_impl ?budget ?(record = false) ?(inputs = []) ?observe ?bulk ?bulk_approx ws =
-  Phase_timer.measure Evaluate (fun () ->
+let static_impl ?budget ?(record = false) ?(inputs = []) ws =
+  Phase_timer.measure "evaluate" (fun () ->
   protect (fun () ->
     if List.length inputs <> List.length (List.sort_uniq String.compare (List.map fst inputs)) then
       fail "E_INPUT_DUPLICATE" "A graph receives more than one input override set.";
@@ -1161,8 +1191,6 @@ let static_impl ?budget ?(record = false) ?(inputs = []) ?observe ?bulk ?bulk_ap
         failf "E_UNKNOWN_GRAPH" "Unknown graph input target: %s." name) inputs;
     List.iter (fun (_, ins) -> List.iter (fun (_, value) -> Value.validate value) ins) inputs;
     let st = new_state ?budget ~record ws in
-    st.observe_kernel <- observe; st.bulk <- bulk; st.bulk_approx <- bulk_approx;
-    Fun.protect ~finally:(fun () -> st.observe_kernel <- None; st.bulk <- None; st.bulk_approx <- None) (fun () ->
     let c = root st in
     let results = List.map (fun (g : W.graph) ->
       let over = Option.value (List.assoc_opt g.name inputs) ~default:[] in
@@ -1173,9 +1201,9 @@ let static_impl ?budget ?(record = false) ?(inputs = []) ?observe ?bulk ?bulk_ap
       |> List.sort (fun (a, _) (b, _) -> compare a b) in
     { plan = { instances; nodes = Array.of_list (List.rev st.nodes) }; results; records;
       authored = Array.of_list (List.rev st.authored);
-      states = List.rev st.states })))
+      states = List.rev st.states }))
 
-let static ?record ?inputs ws = static_impl ?record ?inputs ws
+let static ?record ?inputs ws = Residual_effect.handle (fun () -> static_impl ?record ?inputs ws)
 
 let rec is_live = function
   | Residual _ -> true
@@ -1240,10 +1268,8 @@ and term_dependent frame st env (term : W.term) =
 
 let frame_dependent = dependent true
 let state_dependent = dependent false
-let () = state_dependent_hook := state_dependent
-
 (* one live state per call, made from the first residual met *)
-let with_live ?state ?elems ?resolve ?execute ?(owner = ref ()) ?(compiled = true) ?(strict=false) (l : live) (f : (residual -> ctx) -> 'a) : ('a, Diagnostic.t) result =
+let with_live ?state ?elems ?resolve ?(kernel_requests = false) (l : live) (f : (residual -> ctx) -> 'a) : ('a, Diagnostic.t) result =
   let state = match state with Some state -> state | None -> create_state () in
   let saved = fork_state state in
   let elems = Option.map Smap.of_list elems in
@@ -1251,10 +1277,10 @@ let with_live ?state ?elems ?resolve ?execute ?(owner = ref ()) ?(compiled = tru
   let ctx_of r =
     let st = match !live with
       | Some s -> s
-      | None -> let s = { (live_state r.rc.st ~state ?elems l) with compiled_residuals = compiled; strict_executor=strict; resolve; execute; owner } in
+      | None -> let s = { (live_state r.rc.st ~state ?elems l) with resolve } in
           live := Some s; s in
-    { r.rc with st } in
-  match Frame_input.validate l with
+    { r.rc with st; kernel_requests } in
+  match Input.validate l with
   | Error message -> Error (Diagnostic.error ~code:"E_FRAME" message)
   | Ok () ->
       let result = protect (fun () -> f ctx_of) in
@@ -1265,18 +1291,24 @@ let with_live ?state ?elems ?resolve ?execute ?(owner = ref ()) ?(compiled = tru
 let residual_eval r ~live =
   with_live live (fun ctx_of -> let c = ctx_of r in force_res c r)
 
+let bind_live ?state ?elems ?resolve r ~live =
+  with_live ?state ?elems ?resolve live (fun ctx_of ->
+    let c = ctx_of r in
+    r.live <- Some c.st)
+
 let rec static_source_fields = function
   | Source (_, _, fields) | Struct (_, _, fields) | Record fields ->
       List.for_all (fun (_, value) -> static_source_fields value) fields
   | List values -> Array.for_all static_source_fields values
   | value -> not (is_live value)
 
-let rec force_with ?state ?elems ?resolve ?execute ?owner ?compiled ?strict v ~live =
+let rec force_with ?state ?elems ?resolve ?on_walk v ~live =
   if not (is_live v) then Ok v
   else
-    let general () = with_live ?state ?elems ?resolve ?execute ?owner ?compiled ?strict live (fun ctx_of ->
+    let general () = with_live ?state ?elems ?resolve live (fun ctx_of ->
       let rec go v = match v with
-        | Residual r -> let c = ctx_of r in go (force_res c r)
+        | Residual r -> Option.iter (fun on_walk -> on_walk ()) on_walk;
+            let c = ctx_of r in go (force_res c r)
         | Source _ | Struct (_, Ty.Array _, _) -> (match resolve with
             | Some resolve -> go (resolve_source resolve v)
             | None -> fail "E_DATA_SOURCE" "This data source needs its host's cooked data.")
@@ -1288,21 +1320,11 @@ let rec force_with ?state ?elems ?resolve ?execute ?owner ?compiled ?strict v ~l
     match v, state, elems, resolve with
     | (Source (_, _, fields) | Struct (_, Ty.Array _, fields)), None, None, Some resolve
         when List.for_all (fun (_, value) -> static_source_fields value) fields ->
-        (match Frame_input.validate live with
+        (match Input.validate live with
          | Error message -> Error (Diagnostic.error ~code:"E_FRAME" message)
          | Ok () -> Result.bind (protect (fun () -> resolve_source resolve v)) (fun value ->
-             if is_live value then force_with ~resolve ?execute ?owner ?compiled ?strict value ~live
+             if is_live value then force_with ?on_walk ~resolve value ~live
              else Ok value))
-    | _ -> match v, owner, execute, compiled with
-    | Residual r, Some owner, Some _, (None | Some true) when strict<>Some true ->
-        (match r.core with
-         | Some (same, _, Some fast) when same == owner ->
-             (match Frame_input.validate live with
-              | Error message -> Error (Diagnostic.error ~code:"E_FRAME" message)
-              | Ok () -> (match (try Some (fast live) with _ -> None) with
-                  | Some (Ok _ as result) -> result
-                  | _ -> general ()))
-         | _ -> general ())
     | _ -> general ()
 
 let force ?state ?elems v ~live = force_with ?state ?elems v ~live
@@ -1312,9 +1334,8 @@ let run ?record ?inputs ?state ?live ~time ws =
   match static ?record ?inputs ws with
   | Error _ as e -> e
   | Ok s ->
-      let live = Option.value ~default:(Frame_input.at_time time) live in
-      let exception Stop of Diagnostic.t in
-      let f v = match force ~state v ~live with Ok v -> v | Error d -> raise (Stop d) in
+      let live = Option.value ~default:(Input.at_time time) live in
+      let f v = match force ~state v ~live with Ok v -> v | Error d -> raise (Diagnostic.Error d) in
       transaction state (fun () -> try
          let states = List.map f s.states in
          Ok { s with states;
@@ -1323,12 +1344,13 @@ let run ?record ?inputs ?state ?live ~time ws =
                                                                 result = f i.result }) s.plan.instances };
               results = List.map (fun (n, v) -> (n, f v)) s.results;
               records = List.map (fun (p, l) -> (p, List.map (fun (it, v) -> (it, f v)) l)) s.records }
-       with Stop d -> Error d)
+       with Diagnostic.Error d -> Error d)
 
 let show v = show_with Fun.id v
 
 module Private = struct
-  let static_with_kernels = static_impl
+  let static_with_requests = static_impl
+  let bind_live = bind_live
   let map_function ?site ?path ~(signature : Ty.fn_signature) fn arrays = protect (fun () ->
     match fn with
     | Named _ -> fail "E_KERNEL_FORM" "A bulk function needs an instantiated local body."
@@ -1361,23 +1383,11 @@ module Private = struct
     Residual {rid = Atomic.fetch_and_add bulk_ids (-1); rterm = term;
       renv = List.fold_left (fun env (name, value) -> Smap.add name value env)
         (Smap.singleton function_name (Fn fn)) inputs;
-      rc = {at with data = true; rec_ = false}; previous = false; live = None; core = None; dep_frame = 0; dep_state = 0})
-  let free_names term = Names.elements (free_names term)
+      rc = {at with data = true; rec_ = false}; previous = false; live = None; dep_frame = 0; dep_state = 0})
   let free_name_walks () = Atomic.get free_walks
-  let with_bindings r ~term bindings =
-    let env=List.fold_left (fun env (name,value) -> Smap.add name value env) r.renv bindings in
-    (* a new term over new bindings: the parent's memo of its own dependencies does not carry over *)
-    {r with rid=Atomic.fetch_and_add bulk_ids (-1); rterm=term; renv=capture term env;
-      previous=false;live=None;core=None;dep_frame=0;dep_state=0}
-  let force_with_executor ?state ?elems ?resolve ?owner ?compiled ?strict ~execute v ~live =
-    force_with ?state ?elems ?resolve ?owner ?compiled ?strict ~execute v ~live
-  let function_bindings = function Closure cl -> Smap.bindings cl.env | Named _ -> []
   let map_function_bindings f = function
     | Closure cl -> Closure {cl with env=Smap.map f cl.env}
     | Named _ as fn -> fn
-  let compiled_function r ~instance ~prefix ~zone ~params ~body ~bindings =
-    Closure {params;body;zone;env=Smap.of_seq(List.to_seq bindings);calls=ref 0;
-      fid=Atomic.fetch_and_add bulk_ids (-1);at={r.rc with inst=instance;prefix}}
   let remap_function_geometry ~sources fn =
     (* Residuals are shared: each is rewritten once, or the copy is exponential in the depth of the sharing. *)
     let module Seen = Hashtbl.Make (struct
@@ -1395,7 +1405,7 @@ module Private = struct
            | Some copy -> Residual copy
            | None ->
                let copy = {r with rid = Atomic.fetch_and_add bulk_ids (-1);
-                 renv = Smap.map value r.renv; live = None; core = None; dep_frame = 0; dep_state = 0} in
+                 renv = Smap.map value r.renv; live = None; dep_frame = 0; dep_state = 0} in
                Seen.add seen r copy; Residual copy)
       | List values -> List (Array.map value values)
       | Record fields -> Record (List.map (fun (name, v) -> name, value v) fields)
@@ -1406,17 +1416,60 @@ module Private = struct
       | Closure cl -> Closure {cl with env = Smap.map value cl.env}
       | Named _ as fn -> fn in
     if sources = [] then fn else function_value fn
-  let function_id = function Closure cl -> cl.fid | Named n -> n.fid
-  let state_values state = List.map snd (Smap.bindings state.before) @ List.map snd (Smap.bindings state.next)
-  let function_body = function Closure cl -> Some (cl.params, cl.body) | Named _ -> None
+  let state_values state = List.map snd (State_map.bindings state.before) @ List.map snd (State_map.bindings state.next)
   let function_scope = function
     | Closure cl -> Some (cl.at.prefix @ cl.zone, cl.at.iter) | Named _ -> None
+  let force_reference ?state ?elems ?resolve v ~live =
+    force_with ?state ?elems ?resolve v ~live
+  let force_reference_observed ?state ?elems ?resolve ~on_walk v ~live =
+    force_with ?state ?elems ?resolve ~on_walk v ~live
+  let map_probe ?state ?resolve ?(offset = 0) r ~live =
+    with_live ?state ?resolve live (fun ctx_of ->
+      let c = {(ctx_of r) with rec_ = false} in
+      match r.rterm.node with
+      | W.Hof (`Map, f :: sources) ->
+          let fn = match concrete c (ev c r.renv f) with
+            | Fn fn -> fn | _ -> fail "E_TYPE" "Expected a function." in
+          let arrays = List.map (fun source -> concrete c (ev c r.renv source)) sources in
+          let size = function List xs -> Array.length xs | v -> array_length v in
+          let count = List.fold_left (fun n v -> min n (size v)) max_int arrays in
+          let count = if arrays = [] then 0 else count in
+          let get v k = match v with List xs -> xs.(k) | v -> array_get v k in
+          let at k = protect (fun () ->
+            if k < 0 || k >= count then fail "E_LIST_RANGE" "Probe index is outside this map.";
+            let st = {c.st with record = true; recs = Hashtbl.create 16;
+              fn_calls = Hashtbl.create 1; memo = Hashtbl.create 16; steps = 0} in
+            let fid = match fn with Closure cl -> cl.fid | Named n -> n.fid in
+            Hashtbl.add st.fn_calls fid (offset + k);
+            ignore (concrete {c with st; rec_ = true}
+              (call_fn {c with st; rec_ = true} fn (List.map (fun v -> get v k) arrays)));
+            Hashtbl.fold (fun path (_, values) all -> (path, List.rev values) :: all) st.recs []) in
+          count, at
+      | _ -> fail "E_TYPE" "A map probe needs a checked map.")
+end
+
+module Residual = struct
+  include Residual_effect
+
+  let free_names term = Names.elements (free_names term)
+  let with_bindings r ~term bindings =
+    let env = List.fold_left (fun env (name, value) -> Smap.add name value env) r.renv bindings in
+    {r with rid = Atomic.fetch_and_add bulk_ids (-1); rterm = term; renv = capture term env;
+      previous = false; live = None; dep_frame = 0; dep_state = 0}
+  let bind_live = bind_live
+  let function_bindings = function Closure cl -> Smap.bindings cl.env | Named _ -> []
+  let compiled_function r ~instance ~prefix ~zone ~params ~body ~bindings =
+    Closure {params; body; zone; env = Smap.of_seq (List.to_seq bindings); calls = ref 0;
+      fid = Atomic.fetch_and_add bulk_ids (-1); at = {r.rc with inst = instance; prefix}}
+  let function_id = function Closure cl -> cl.fid | Named n -> n.fid
+  let function_body = function Closure cl -> Some (cl.params, cl.body) | Named _ -> None
   let function_origin = function
     | Closure cl -> Some (cl.at.inst, cl.at.prefix, cl.zone) | Named _ -> None
   let function_name = function Named n -> Some n.name | Closure _ -> None
   let residual_definition r name = Hashtbl.find_opt r.rc.st.defs name
   let residual_graph r name = Hashtbl.find_opt r.rc.st.graphs name
-  let graph_instance r name = Option.map (fun cell -> cell.cinst) (Hashtbl.find_opt r.rc.st.cache (name ^ "|"))
+  let graph_instance r name = Option.map (fun cell -> cell.cinst)
+      (Hashtbl.find_opt r.rc.st.cache (name ^ "|"))
   type residual_view = {
     term : W.term;
     bindings : (string * value) list;
@@ -1438,8 +1491,8 @@ module Private = struct
     let c = live_ctx r in
     let saved = Option.map fork_state c.st.state in
     fun () -> Option.iter (fun saved -> restore_state (Option.get c.st.state) saved) saved
-  let set_core r ~owner ?fast run = r.core <- Some (owner, run, fast)
-  let rerun r =
+  let rerun ?on_walk r =
+    Option.iter (fun on_walk -> on_walk ()) on_walk;
     let c = live_ctx r in
     let c = match r.rterm.path with Some p -> {c with base = p; route = []} | None -> c in
     protect (fun () ->
@@ -1447,48 +1500,28 @@ module Private = struct
           | W.State {init; zone; _} -> state_previous c r.renv zone init
           | _ -> assert false)
         else concrete c (ev_raw c r.renv r.rterm)
-      with Fail (code, msg, None) -> raise (Fail (code, msg, span_of r.rterm))
-        |Diagnostic_fail d when d.span=None -> raise_diagnostic {d with span=span_of r.rterm})
-  let state_ctx r ~instance ~path ~iter ~host = {(live_ctx r) with inst = instance; prefix = path; iter; host}
+      with Diagnostic.Error d when d.span = None -> raise_diagnostic {d with span = span_of r.rterm})
+  let state_ctx r ~instance ~path ~iter ~host =
+    {(live_ctx r) with inst = instance; prefix = path; iter; host}
   let state_read r ~instance ~path ~iter ~host ~init =
     let c = state_ctx r ~instance ~path ~iter ~host in
-    let state,frame = state_plane c in
+    let state, frame = state_plane c in
     begin_frame state (Lazy.force c.st.source) frame;
-    match Smap.find_opt (state_key c []) state.before with
+    match State_map.find_opt (state_key c []) state.before with
     | Some v -> state_data c v | None -> state_data c (init ())
   let state_peek r ~instance ~path ~iter ~host =
     let c = state_ctx r ~instance ~path ~iter ~host in
-    Smap.find_opt (state_key c []) (fst (state_plane c)).next
+    State_map.find_opt (state_key c []) (fst (state_plane c)).next
   let state_write r ~instance ~path ~iter ~host v =
     let c = state_ctx r ~instance ~path ~iter ~host in
     let v = state_data c v in
-    let state,_ = state_plane c in state.next <- Smap.add (state_key c []) v state.next; v
+    let state, _ = state_plane c in
+    state.next <- State_map.add (state_key c []) v state.next;
+    state.epoch <- fresh_state_epoch (); v
   let residual_ops r = r.rc.st.ops
-  let force_reference ?state ?elems ?resolve v ~live = force_with ?state ?elems ?resolve v ~live
-  let eval_term ?state ?elems ?resolve r term ~live =
-    with_live ?state ?elems ?resolve live (fun ctx_of ->
-      let c = ctx_of r in concrete c (ev c r.renv term))
-  let map_probe ?state ?resolve ?execute ?(offset = 0) r ~live =
-    with_live ?state ?resolve ?execute live (fun ctx_of ->
-      let c = {(ctx_of r) with rec_ = false} in
-      match r.rterm.node with
-      | W.Hof (`Map, f :: sources) ->
-          let fn = match concrete c (ev c r.renv f) with
-            | Fn fn -> fn | _ -> fail "E_TYPE" "Expected a function." in
-          let arrays = List.map (fun source -> concrete c (ev c r.renv source)) sources in
-          let size = function List xs -> Array.length xs | v -> array_length v in
-          let count = List.fold_left (fun n v -> min n (size v)) max_int arrays in
-          let count = if arrays = [] then 0 else count in
-          let get v k = match v with List xs -> xs.(k) | v -> array_get v k in
-          let at k = protect (fun () ->
-            if k < 0 || k >= count then fail "E_LIST_RANGE" "Probe index is outside this map.";
-            let st = {c.st with record = true; execute = None; compiled_residuals = false; recs = Hashtbl.create 16;
-              fn_calls = Hashtbl.create 1; memo = Hashtbl.create 16; steps = 0} in
-            let fid = match fn with Closure cl -> cl.fid | Named n -> n.fid in
-            Hashtbl.add st.fn_calls fid (offset + k);
-            ignore (concrete {c with st; rec_ = true}
-              (call_fn {c with st; rec_ = true} fn (List.map (fun v -> get v k) arrays)));
-            Hashtbl.fold (fun path (_, values) all -> (path, List.rev values) :: all) st.recs []) in
-          count, at
-      | _ -> fail "E_TYPE" "A map probe needs a checked map.")
+  let eval_term ?state ?elems ?resolve ?on_walk ?kernel r term ~live =
+    Option.iter (fun on_walk -> on_walk ()) on_walk;
+    Residual_effect.handle_kernel ?kernel (fun () ->
+      with_live ?state ?elems ?resolve ~kernel_requests:(Option.is_some kernel) live (fun ctx_of ->
+        let c = ctx_of r in concrete c (ev c r.renv term)))
 end

@@ -15,7 +15,7 @@ val descriptors : Flow_sop.Catalog.descriptor list
 (** Every generated kind; the manifest generator writes them. *)
 
 val catalog : version:int -> Sop.Edit_graph.factory list ->
-  (Flow.Check.catalog, Flow.Diagnostic.t) result
+  (Flow.Check.catalog, Diagnostic.t) result
 (** {!Flow_sop.Catalog.of_factories} with {!descriptors}: what a workspace text
     is checked against. *)
 
@@ -24,11 +24,11 @@ type window = { title : string; width : int; height : int; fps : int; seed : int
     when it starts. These fields apply on restart; editing saved settings does
     not reconfigure the running window, frame scheduler or cook seed. *)
 
-val window : Workspace_doc.t -> (window, Flow.Diagnostic.t) result
+val window : Workspace_doc.t -> (window, Diagnostic.t) result
 (** The window of a checked workspace: its settings graph evaluated, defaults
     without one. *)
 
-val plan_window : Workspace_doc.t -> Flow.Eval.plan -> (window, Flow.Diagnostic.t) result
+val plan_window : Workspace_doc.t -> Flow.Eval.plan -> (window, Diagnostic.t) result
 (** {!window} read from a plan the caller already evaluated: no second evaluation of the workspace. *)
 
 val fast : Document.t -> bool
@@ -36,14 +36,14 @@ val fast : Document.t -> bool
     GPU in float32 with 64-bit integer registers, and on the web its regions' integers are numbers.
     [:precision "exact"] keeps every value bit-identical on the CPU. *)
 
-val document_window : Document.t -> (window, Flow.Diagnostic.t) result
+val document_window : Document.t -> (window, Diagnostic.t) result
 (** {!window} of the workspace a document was made from, read from the document's own
     lowering ({!of_workspace}) with no second static evaluation. *)
 
 val has_settings : Workspace_doc.t -> bool
 
-val of_workspace : factories:Sop.Edit_graph.factory list -> ?previous:Document.t ->
-  Workspace_doc.t -> (Document.t, Flow.Diagnostic.t) result
+val of_workspace : factories:Sop.Edit_graph.factory list -> ?gpu:Flow_ir.Gpu.config -> ?previous:Document.t ->
+  Workspace_doc.t -> (Document.t, Diagnostic.t) result
 (** The document of a workspace: the objects of its scene graph as nodes of the
     scene network (each geometry object owning the lowered network of its sop
     graph; without a scene graph, one geometry object per sop graph), the World
@@ -58,11 +58,8 @@ val of_workspace : factories:Sop.Edit_graph.factory list -> ?previous:Document.t
     and editor structs are refused with [E_CONTEXT_TIME], naming the graph and
     field. Geometry references with live SOP parameters are supported. *)
 
-val group_triples : Editor_core.Param.field_view list -> Editor_core.Param.field_view list
-(** Three consecutive [_x _y _z] (or [_r _g _b]) floats of one folder as one vec3 field. *)
-
-val resolve_scene : ?previous:Sop.Edit_graph.t -> ?state:Flow.Eval.state -> ?live:Frame_input.t -> Document.t -> time:float ->
-  Sop.Edit_graph.t * Flow.Diagnostic.t list
+val resolve_scene : ?previous:Sop.Edit_graph.t -> ?state:Flow.Eval.state -> ?live:Input.t -> Document.t -> time:float ->
+  Sop.Edit_graph.t * Diagnostic.t list
 (** Resolve recorded live light intensity/color fields for composition, without
     changing source, networks, identities or history. A failed light retains
     its previous value (or the authored zero-time value without [previous]);

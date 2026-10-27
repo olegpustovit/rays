@@ -27,8 +27,8 @@ let blue = {|(sop/set_color :owner "Point" :color [0.0 0.0 1.0])|}
 
 (* The grid turned about x: the four entries a rotation leaves off the identity. *)
 let tilted =
-  let m = Mat4.rotation_x 0.8 in
-  let entry row column = float (Mat4.get m ~row ~column) in
+  let m = Rays_math.Mat4.rotation_x 0.8 in
+  let entry row column = float (Rays_math.Mat4.get m ~row ~column) in
   Printf.sprintf {|(-> %s (sop/transform :mode "Matrix" :m11 %s :m12 %s :m21 %s :m22 %s))|}
     grid (entry 1 1) (entry 1 2) (entry 2 1) (entry 2 2)
 
@@ -208,26 +208,26 @@ let cook domains graph =
         |> Result.get_ok in
     match Sop.Session.cook session ~context graph with
     | Ok output -> (Result.get_ok (Sop.Payload.geometry output.payload))
-    | Error error -> failwith (Sop.Diagnostic.error_to_string error))
+    | Error error -> failwith (Diagnostic.error_to_string error))
 
 let scene geometry =
   let mesh = Rdk_rays.Rays_mesh.to_mesh geometry |> Result.get_ok in
-  let camera = Camera.perspective ~at:(Vec3.create 3.5 3. 5.)
-      ~target:Vec3.zero () in
-  Scene.[clear (Color.hex_exn "#020617");
+  let camera = Camera.perspective ~at:(Rays_math.Vec3.create 3.5 3. 5.)
+      ~target:Rays_math.Vec3.zero () in
+  Scene.[clear (Rays_math.Color.hex_exn "#020617");
     view3d ~camera (Scene3.create ~samples:1 [
       Scene3.mesh ~cull:Scene3.Cull_none
-        ~material:(Material.unlit Color.white) mesh])]
+        ~material:(Material.unlit Rays_math.Color.white) mesh])]
 
 (* One window per domain count: every graph is one frame of the same export. *)
 let export directory domains geometries =
   let config = {Sketch.default_config with width=256; height=192;
     domains=Some domains} in
   let scenes = Array.of_list (List.map scene geometries) in
-  ignore (Sketch.export_state ~config ~directory ~prefix:"parity"
+  ignore (Result.get_ok (Sketch.export_state ~config ~directory ~prefix:"parity"
     ~frames:(Array.length scenes) ~init:(fun _ -> 0)
-    ~update:(fun _ (frame : Frame.t) -> frame.count - 1)
-    ~view:(fun index _ -> scenes.(max 0 (min index (Array.length scenes - 1)))) ())
+    ~update:(fun _ (frame : Frame.t) -> frame.input.frame - 1)
+    ~view:(fun index _ -> scenes.(max 0 (min index (Array.length scenes - 1)))) ()))
 
 let read path =
   let channel = open_in_bin path in

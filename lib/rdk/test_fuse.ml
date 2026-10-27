@@ -229,7 +229,7 @@ let check_target_scale_and_validation () =
 let check_target_parallel_exact () =
   let target = Plane_generators.grid ~columns:420 ~rows:320 ~size:30. () |> get_ok in
   let source = target
-      |> Transform_ops.transform (Mat4.translation (Vec3.create 0.013 (-0.017) 0.009)) in
+      |> Transform_ops.transform (Rays_math.Mat4.translation (Rays_math.Vec3.create 0.013 (-0.017) 0.009)) in
   let run domains = Parallel.run ~domains (fun () ->
     Fuse_grid.fuse ~grain:1024 ~target ~using:Fuse_grid.Closest_target_point
       ~tolerance:0.05 ~fuse_points:false ~snapped_group:"snapped"
@@ -240,7 +240,7 @@ let check_target_parallel_exact () =
   let base = Plane_generators.grid ~columns:220 ~rows:160 ~size:20. () |> get_ok in
   let half = Geometry.point_count base in
   let linked = Mesh_merge.run [base;
-      Transform_ops.transform (Mat4.translation (Vec3.create 0.013 (-0.017) 0.009)) base]
+      Transform_ops.transform (Rays_math.Mat4.translation (Rays_math.Vec3.create 0.013 (-0.017) 0.009)) base]
       |> get_ok in
   let linked_count = Geometry.point_count linked in
   let linked = linked
@@ -684,7 +684,7 @@ let check_offset_tolerance_selection () =
   let selection = Group.init ~owner:Group.Point ~name:"selected" 3
       (fun point -> point < 2) in
   let output = Fuse_grid.snap_to_grid ~selection
-      ~offset:(Vec3.create 0.25 0. 0.) ~max_distance:0.1
+      ~offset:(Rays_math.Vec3.create 0.25 0. 0.) ~max_distance:0.1
       ~snapped_group:"snapped" source |> get_ok in
   let p = positions output in
   check (near p.x.(0) 0.25 && near p.x.(1) 0.8 && near p.x.(2) 0.2)
@@ -727,9 +727,9 @@ let check_noop_and_validation () =
       (fun _ -> false) in
   expect_code "invalid_geometry" (Fuse_grid.snap_to_grid ~selection:wrong source);
   expect_code "invalid_geometry" (Fuse_grid.snap_to_grid
-      ~spacing:(Vec3.create 1. 0. 1.) source);
+      ~spacing:(Rays_math.Vec3.create 1. 0. 1.) source);
   expect_code "invalid_geometry" (Fuse_grid.snap_to_grid
-      ~offset:(Vec3.create 1.1 0. 0.) source);
+      ~offset:(Rays_math.Vec3.create 1.1 0. 0.) source);
   expect_code "invalid_geometry" (Fuse_grid.snap_to_grid ~max_distance:(-1.) source);
   expect_code "invalid_geometry" (Fuse_grid.snap_to_grid ~snapped_group:"" source);
   let cancelled = Cancel.create () in
@@ -741,8 +741,8 @@ let check_parallel_exact () =
   let source = Plane_generators.grid ~columns:500 ~rows:300 ~size:20. () |> get_ok
       |> Deform.noise_displace ~seed:81 ~amplitude:0.37 ~frequency:0.29 |> get_ok in
   let run domains = Parallel.run ~domains (fun () ->
-    Fuse_grid.snap_to_grid ~grain:1024 ~spacing:(Vec3.create 0.03125 0.03125 0.03125)
-      ~offset:(Vec3.create 0.25 0.5 0.75) ~snapped_group:"snapped" source
+    Fuse_grid.snap_to_grid ~grain:1024 ~spacing:(Rays_math.Vec3.create 0.03125 0.03125 0.03125)
+      ~offset:(Rays_math.Vec3.create 0.25 0.5 0.75) ~snapped_group:"snapped" source
       |> get_ok) in
   let one = run 1 and many = run 4 in
   let a = positions one and b = positions many in

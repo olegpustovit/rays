@@ -3,7 +3,7 @@ module E = Flow.Eval
 module G = Rdk.Geometry
 module T = Rdk.Topology
 let ok = function Ok value -> value | Error message -> failwith message
-let flow_ok = function Ok value -> value | Error d -> failwith (Flow.Diagnostic.to_string d)
+let flow_ok = function Ok value -> value | Error d -> failwith (Diagnostic.to_string d)
 
 let fixtures () =
   let topology points vertex_points primitive_offsets primitive_kinds =
@@ -25,7 +25,7 @@ let evaluate geometry body =
   let forms = Flow.Syntax.parse source |> flow_ok in
   let checked = match Flow.Workspace.check ~ops:Flow_sop.Operators.all {Flow.Check.version=1;kinds=[]} forms with
     | Some checked, [] -> checked
-    | _, ds -> failwith (String.concat "; " (List.map Flow.Diagnostic.to_string ds)) in
+    | _, ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds)) in
   let value = Flow.Eval.static ~record:true ~inputs:["g",["geo",E.Deferred (Flow.Ty.geometry,7)]] checked
     |> flow_ok |> fun evaluation -> List.assoc ["g";"tested"] evaluation.records |> List.hd |> snd in
   value, Flow_sop.Attribute_kernel.resolve ~geometry:(fun id -> if id=7 then Some geometry else None)
@@ -33,9 +33,9 @@ let evaluate geometry body =
 (* Both execution tiers at one and eight domains must return the same value. *)
 let agree geometry body expected =
   let value, resolve = evaluate geometry body in
-  let live = Frame_input.at_time 0.25 in
+  let live = Input.at_time 0.25 in
   let core = Flow_ir.Executor.compile ~strict:true value |> flow_ok in
-  List.iter (fun domains -> Rays_math.Parallel.run ~domains (fun () ->
+  List.iter (fun domains -> Parallel.run ~domains (fun () ->
     assert (flow_ok (E.Private.force_reference ~resolve value ~live) = expected);
     assert (flow_ok (Flow_ir.Executor.force ~strict:true ~resolve core ~live) = expected))) [1;8]
 
@@ -113,7 +113,7 @@ let () =
         "points", Rdk.Analysis.Connectivity_primitives, Rdk.Group.Primitive, G.primitive_count geometry ];
     let refused body code =
       let value, resolve = evaluate geometry body in
-      match E.Private.force_reference ~resolve value ~live:(Frame_input.at_time 0.25) with
+      match E.Private.force_reference ~resolve value ~live:(Input.at_time 0.25) with
       | Error d -> assert (d.code = code) | Ok _ -> assert false in
     refused (Printf.sprintf "(sop/components geo :seams (array/int %d 0))" (edges + 1)) "E_COMPONENTS_SEAMS";
     if edges > 0 then refused (Printf.sprintf "(sop/components geo :seams (array/int %d 2))" edges) "E_COMPONENTS_SEAMS")

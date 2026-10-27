@@ -84,7 +84,7 @@ let type_name = function
 
 let parameter_constructor ~loc name =
   pexp_construct ~loc
-    (located_path ~loc ["Sop"; "Parameter"; name]) None
+    (located_path ~loc ["Param"; name]) None
 
 let apply ~loc function_ arguments = pexp_apply ~loc function_ arguments
 
@@ -98,7 +98,7 @@ let numeric_kind declaration integer =
   Option.iter (fun value -> arguments := (Labelled "hard_max", value) :: !arguments)
     (Attribute.get hard_max_attribute declaration);
   arguments := List.rev_append !arguments [Nolabel, eunit ~loc];
-  apply ~loc (ident ~loc ["Sop"; "Parameter";
+  apply ~loc (ident ~loc ["Param";
     if integer then "integer" else "floating"]) !arguments
 
 let kind_expression declaration =
@@ -212,7 +212,7 @@ let field_expression ~kind components type_declaration declaration =
         Labelled "set", set;
         Nolabel, eunit ~loc ]
   in
-  apply ~loc (ident ~loc ["Sop"; "Parameter"; "field"]) arguments
+  apply ~loc (ident ~loc ["Param"; "field"]) arguments
 
 let value_binding ~loc name expression =
   pstr_value ~loc Nonrecursive [value_binding ~loc
@@ -231,7 +231,7 @@ let generate_type type_declaration =
       let default_name = type_declaration.ptype_name.txt ^ "_default" in
       [ value_binding ~loc default_name (eunit ~loc);
         value_binding ~loc (type_declaration.ptype_name.txt ^ "_schema")
-          (apply ~loc (ident ~loc ["Sop"; "Parameter"; "schema"])
+          (apply ~loc (ident ~loc ["Param"; "schema"])
             [ Labelled "name", estring ~loc type_declaration.ptype_name.txt;
               Labelled "default", evar ~loc default_name; Nolabel, elist ~loc [] ]) ]
   | Ptype_record declarations ->
@@ -252,7 +252,7 @@ let generate_type type_declaration =
         let literal_numeric = Attribute.get kind_attribute declaration = None
           && match kind.pexp_desc with
           | Pexp_apply ({ pexp_desc = Pexp_ident {txt = Longident.Ldot
-              (Longident.Ldot (Longident.Lident "Sop", "Parameter"),
+              (Longident.Lident "Param",
                ("integer" | "floating")); _}; _}, arguments) ->
               List.for_all (function
                 | Labelled _, {pexp_desc = Pexp_constant
@@ -277,7 +277,7 @@ let generate_type type_declaration =
           not (Attribute.has_flag ignore_attribute declaration))
         |> List.map field in
       let schema_expression = apply ~loc
-          (ident ~loc ["Sop"; "Parameter"; "schema"])
+          (ident ~loc ["Param"; "schema"])
           [ Labelled "name", estring ~loc type_declaration.ptype_name.txt;
             Labelled "default", evar ~loc default_name;
             Nolabel, elist ~loc fields ] in
@@ -314,7 +314,7 @@ let generate_signature type_declaration =
     psig_value ~loc (value_description ~loc
       ~name:{ loc; txt = schema_name }
       ~type_:(ptyp_constr ~loc
-        (located_path ~loc ["Sop"; "Parameter"; "schema"]) [type_])
+        (located_path ~loc ["Param"; "schema"]) [type_])
       ~prim:[]) ]
 
 let generate_intf ~ctxt (_recursive, declarations) =
@@ -609,7 +609,7 @@ let generate_node_type declaration =
     Labelled "label", estring ~loc label;
     Labelled "slots", elist ~loc (List.map (estring ~loc) slots);
     Labelled "fields", apply ~loc
-      (ident ~loc ["Sop"; "Parameter"; "view"])
+      (ident ~loc ["Param"; "view"])
       [Nolabel, evar ~loc (declaration.ptype_name.txt ^ "_schema");
        Nolabel, evar ~loc (declaration.ptype_name.txt ^ "_default")];
     Labelled "category", elist ~loc (List.map (estring ~loc) category) ] @ input_types

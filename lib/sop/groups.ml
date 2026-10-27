@@ -58,7 +58,7 @@ module Group_backface = struct
   let build = parameters_build (fun ~label parameters input ->
     let base = optional_text parameters.base in
     let merge = parameters.merge in
-    let viewpoint = Vec3.create parameters.viewpoint_x parameters.viewpoint_y
+    let viewpoint = Rays_math.Vec3.create parameters.viewpoint_x parameters.viewpoint_y
             parameters.viewpoint_z in
     let name = parameters.name in
     let viewpoint = vec3_copy viewpoint in
@@ -102,12 +102,12 @@ module Group_unshared = struct
 end
 
 module Group_edges = struct
-  let incidence_parameter = Parameter.choice ~equal:( = ) [
+  let incidence_parameter = Param.choice ~equal:( = ) [
       "Any", Rdk.Group_mesh.Any_edge; "Boundary", Rdk.Group_mesh.Boundary_edge;
       "Manifold", Rdk.Group_mesh.Manifold_edge;
       "Non-manifold", Rdk.Group_mesh.Non_manifold_edge;
     ]
-  let angle_basis_parameter = Parameter.choice ~equal:( = ) [
+  let angle_basis_parameter = Param.choice ~equal:( = ) [
       "Primitive dihedral", Rdk.Group_mesh.Primitive_dihedral;
       "Incident edges", Rdk.Group_mesh.Incident_edges;
     ]
@@ -225,7 +225,7 @@ module Group_random = struct
       (fun ~node_id context inputs ->
         let identity = Option.value ~default:(Int64.of_int node_id)
             stable_identity in
-        let seed = Rand.seed (Option.value ~default:(mixed_seed context identity)
+        let seed = Rays_math.Rand.seed (Option.value ~default:(mixed_seed context identity)
             seed) in
         match Rdk.Group_ops.group_random ~cancel:(Context.cancel_token context)
             ~grain:(Context.grain context) ~seed ?seed_attribute ?base ~merge
@@ -268,7 +268,7 @@ module Group_edge_depth = struct
 end
 
 module Group_boundary_components = struct
-  let conflict_parameter = Parameter.choice ~equal:( = ) [
+  let conflict_parameter = Param.choice ~equal:( = ) [
       "Replace", Rdk.Group_ops.Name_replace; "Union", Rdk.Group_ops.Name_union;
     ]
   type parameters = {
@@ -354,10 +354,10 @@ module Group_from_attribute_boundary = struct
 end
 
 module Groups_from_name = struct
-  let conflict_parameter = Parameter.choice ~equal:( = ) [
+  let conflict_parameter = Param.choice ~equal:( = ) [
       "Replace", Rdk.Group_ops.Name_replace; "Union", Rdk.Group_ops.Name_union;
     ]
-  let invalid_parameter = Parameter.choice ~equal:( = ) [
+  let invalid_parameter = Param.choice ~equal:( = ) [
       "Ignore invalid", Rdk.Group_ops.Ignore_invalid;
       "Force valid", Rdk.Group_ops.Force_valid;
     ]
@@ -405,7 +405,7 @@ module Groups_from_name = struct
 end
 
 module Name_from_groups = struct
-  let overlap_parameter = Parameter.choice ~equal:( = ) [
+  let overlap_parameter = Param.choice ~equal:( = ) [
       "First group", Rdk.Group_ops.First_group; "Last group", Rdk.Group_ops.Last_group;
       "Error on overlap", Rdk.Group_ops.Error_on_overlap;
     ]
@@ -522,7 +522,7 @@ module Group_delete = struct
       List.fold_left (fun result row -> Result.bind result (fun rules ->
         Result.map (fun rule -> rule :: rules) (decode_rule row))) (Ok []) rows
       |> Result.map List.rev)
-  let rules_parameter = Parameter.encoded ~equal:( = )
+  let rules_parameter = Param.encoded ~equal:( = )
       ~encode:(fun rules -> encode_table (List.map encode_rule rules)) ~decode
   type parameters = {
     rules : Rdk.Group_ops.delete_rule list [@sop.default []]
@@ -586,7 +586,7 @@ module Group_rename = struct
       List.fold_left (fun result row -> Result.bind result (fun rules ->
         Result.map (fun rule -> rule :: rules) (decode_rule row))) (Ok []) rows
       |> Result.map List.rev)
-  let rules_parameter = Parameter.encoded ~equal:( = )
+  let rules_parameter = Param.encoded ~equal:( = )
       ~encode:(fun rules -> encode_table (List.map encode_rule rules)) ~decode
   type parameters = {
     rules : Rdk.Group_ops.rename_rule list [@sop.default []]
@@ -633,7 +633,7 @@ module Group_copy = struct
       List.fold_left (fun result row -> Result.bind result (fun rules ->
         Result.map (fun rule -> rule :: rules) (decode_rule row))) (Ok []) rows
       |> Result.map List.rev)
-  let rules_parameter = Parameter.encoded ~equal:( = )
+  let rules_parameter = Param.encoded ~equal:( = )
       ~encode:(fun rules -> encode_table (List.map encode_rule rules)) ~decode
   type parameters = {
     use_rules : bool [@sop.default false] [@sop.label "Use rules"];
@@ -688,7 +688,7 @@ module Group_transfer = struct
       List.fold_left (fun result row -> Result.bind result (fun rules ->
         Result.map (fun rule -> rule :: rules) (decode_rule row))) (Ok []) rows
       |> Result.map List.rev)
-  let rules_parameter = Parameter.encoded ~equal:( = )
+  let rules_parameter = Param.encoded ~equal:( = )
       ~encode:(fun rules -> encode_table (List.map encode_rule rules)) ~decode
   type parameters = {
     use_rules : bool [@sop.default false] [@sop.label "Use rules"];
@@ -729,11 +729,11 @@ module Group_transfer = struct
 end
 
 module Group_find_path = struct
-  let mode_parameter = Parameter.choice ~equal:( = ) [
+  let mode_parameter = Param.choice ~equal:( = ) [
       "Through each", Rdk.Group_mesh.Through_each;
       "Start/end pairs", Rdk.Group_mesh.Start_end_pairs;
     ]
-  let ending_parameter = Parameter.choice ~equal:( = ) [
+  let ending_parameter = Param.choice ~equal:( = ) [
       "Stop at end", Rdk.Group_mesh.Stop_at_end; "Close path", Rdk.Group_mesh.Close_path;
     ]
   type parameters = {
@@ -838,7 +838,7 @@ end
 
 module Group_invert = struct
   type owner = Support.group_invert_owner = Any | Owner of Rdk.Group_ops.owner
-  let owner_parameter = Parameter.choice ~equal:( = ) [
+  let owner_parameter = Param.choice ~equal:( = ) [
       "Any", Any; "Points", Owner Rdk.Group_ops.Group_points;
       "Vertices", Owner Rdk.Group_ops.Group_vertices;
       "Primitives", Owner Rdk.Group_ops.Group_primitives;
@@ -900,7 +900,7 @@ module Group_combine = struct
       List.fold_left (fun result row -> Result.bind result (fun steps ->
         Result.map (fun step -> step :: steps) (decode_step row))) (Ok []) rows
       |> Result.map List.rev)
-  let steps_parameter = Parameter.encoded ~equal:( = )
+  let steps_parameter = Param.encoded ~equal:( = )
       ~encode:(fun steps -> encode_table (List.map encode_step steps)) ~decode
   type parameters = {
     owner : Rdk.Group_ops.owner [@sop.default Rdk.Group_ops.Group_points]
@@ -968,7 +968,7 @@ module Group_promotions = struct
           | Rdk.Group_ops.Include_shared_edge -> "shared_edge" in
         [token; "0"; "false"; "false"; "false"; ""]
     | Rdk.Group_ops.Promote_boundary options -> [
-        "boundary"; Printf.sprintf "%.17g" options.promote_boundary_tolerance;
+        "boundary"; Param.float_text options.promote_boundary_tolerance;
         bool_token options.promote_include_unshared_edges;
         bool_token options.promote_include_all_unshared_curve_edges;
         bool_token options.promote_include_all_primitives_sharing_boundary_points;
@@ -1042,7 +1042,7 @@ module Group_promotions = struct
       List.fold_left (fun result row -> Result.bind result (fun rules ->
         Result.map (fun rule -> rule :: rules) (decode_rule row))) (Ok []) rows
       |> Result.map List.rev)
-  let rules_parameter = Parameter.encoded ~equal:( = )
+  let rules_parameter = Param.encoded ~equal:( = )
       ~encode:(fun rules -> encode_table (List.map encode_rule rules)) ~decode
   let default_rules = [{
       Rdk.Group_ops.promotion_source = Rdk.Group_ops.Group_points;
@@ -1145,7 +1145,7 @@ module Group_ranges = struct
         ["connected";
          Option.fold ~none:"" ~some:string_of_int connectivity.region;
          Option.value ~default:"" connectivity.connectivity_attributes;
-         Printf.sprintf "%.17g" connectivity.connectivity_tolerance;
+         Param.float_text connectivity.connectivity_tolerance;
          collision_enabled; collision_owner; collision_pattern; keep_boundary;
          bool_token connectivity.remove_other_regions]
   let decode_connectivity = function
@@ -1206,7 +1206,7 @@ module Group_ranges = struct
       List.fold_left (fun result row -> Result.bind result (fun rules ->
         Result.map (fun rule -> rule :: rules) (decode_rule row))) (Ok []) rows
       |> Result.map List.rev)
-  let rules_parameter = Parameter.encoded ~equal:( = )
+  let rules_parameter = Param.encoded ~equal:( = )
       ~encode:(fun rules -> encode_table (List.map encode_rule rules)) ~decode
   let default_rules = [Rdk.Group_ops.range_rule
       ~owner:Rdk.Group_ops.Group_points ~name:"range"
@@ -1241,10 +1241,10 @@ end
 
 module Group_bounds = struct
   type shape = Support.group_bounds_shape = Box | Sphere
-  let shape_parameter = Parameter.choice ~equal:( = ) [
+  let shape_parameter = Param.choice ~equal:( = ) [
       "Box", Box; "Sphere", Sphere;
     ]
-  let containment_parameter = Parameter.choice ~equal:( = ) [
+  let containment_parameter = Param.choice ~equal:( = ) [
       "Fully contained", Rdk.Group_ops.Fully_contained;
       "Partially contained", Rdk.Group_ops.Partially_contained;
     ]
@@ -1290,16 +1290,16 @@ module Group_bounds = struct
     let containment = parameters.containment in
     let merge = parameters.merge in
     let shape = parameters.shape in
-    let center = Vec3.create parameters.center_x parameters.center_y parameters.center_z in
-    let size = Vec3.create parameters.size_x parameters.size_y parameters.size_z in
+    let center = Rays_math.Vec3.create parameters.center_x parameters.center_y parameters.center_z in
+    let size = Rays_math.Vec3.create parameters.size_x parameters.size_y parameters.size_z in
     let radius = parameters.radius in
     let owner = parameters.owner in
     let name = parameters.name in
     let bounds = match shape with
       | Sphere -> Rdk.Group_ops.Bounds_sphere { center = vec3_copy center; radius }
-      | Box -> let half = Vec3.scale size 0.5 in
-          Rdk.Group_ops.Bounds_box { minimum = Vec3.sub center half;
-            maximum = Vec3.add center half } in
+      | Box -> let half = Rays_math.Vec3.scale size 0.5 in
+          Rdk.Group_ops.Bounds_box { minimum = Rays_math.Vec3.sub center half;
+            maximum = Rays_math.Vec3.add center half } in
     Node.Private.make_geometry ?label ~operation:"group_bounds" ~version:1
       ~parameters:""
       ~cook_mode:(Node.Duplicate_input 0) ~dependencies:Context.Dependencies.static
@@ -1316,11 +1316,11 @@ end
 module Group_range = struct
   type range_mode = Support.group_range_mode = Start_end | From_ends | Start_length | Partition
   type connectivity_mode = Support.group_range_connectivity = No_connectivity | Disconnected | Connected
-  let range_parameter = Parameter.choice ~equal:( = ) [
+  let range_parameter = Param.choice ~equal:( = ) [
       "Start and end", Start_end; "From ends", From_ends;
       "Start and length", Start_length; "Partition", Partition;
     ]
-  let connectivity_parameter = Parameter.choice ~equal:( = ) [
+  let connectivity_parameter = Param.choice ~equal:( = ) [
       "None", No_connectivity; "Disconnected regions", Disconnected;
       "Connected with seams", Connected;
     ]
@@ -1456,7 +1456,7 @@ module Ordered_group = struct
             "expected a non-negative element index, got %d" element)
           else Ok (element :: elements)))) (Ok [])
     |> Result.map List.rev
-  let elements_parameter = Parameter.encoded ~equal:( = )
+  let elements_parameter = Param.encoded ~equal:( = )
       ~encode:(fun elements ->
         String.concat " " (List.map string_of_int elements)) ~decode
   type parameters = {
@@ -1540,7 +1540,7 @@ module Group_normal = struct
     let base = optional_text parameters.base in
     let include_opposite = parameters.include_opposite in
     let merge = parameters.merge in
-    let direction = Vec3.create parameters.direction_x parameters.direction_y
+    let direction = Rays_math.Vec3.create parameters.direction_x parameters.direction_y
             parameters.direction_z in
     let spread_angle = parameters.spread_angle in
     let owner = parameters.owner in
@@ -1561,7 +1561,7 @@ module Group_normal = struct
 end
 
 module Group_expand = struct
-  let connectivity_parameter = Parameter.choice ~equal:( = ) [
+  let connectivity_parameter = Param.choice ~equal:( = ) [
       "Share points", Rdk.Group_ops.Primitive_share_points;
       "Share edges", Rdk.Group_ops.Primitive_share_edges;
     ]

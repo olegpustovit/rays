@@ -4,9 +4,9 @@ module Keymap = Editor_core.Keymap
 module Settings = Rays_editor.Settings
 
 let check condition message = if not condition then failwith message
-let key k = Event.KeyPressed k
+let key k = Input.Key_pressed k
 let char c = key (Input.KeyChar c)
-let schema = Editor_core.Param.(schema ~name:"command-value" ~default:0
+let schema = Param.(schema ~name:"command-value" ~default:0
   [field ~name:"value" ~label:"Value" ~kind:(integer ~min:0 ~max:100 ())
     ~default:0 ~get:Fun.id ~set:(fun value _ -> value) ()])
 
@@ -25,9 +25,9 @@ let canvas_preview () =
         (ui/workspace (ui/split "vertical" preview network :second_size 264)))))|} in
   let workspace = match Rays_editor.Workspace.load text with
     | Ok workspace -> workspace
-    | Error ds -> failwith (String.concat "; " (List.map Flow.Diagnostic.to_string ds)) in
+    | Error ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds)) in
   let editor = Result.get_ok (E3.create ~workspace ~await:true ~domains:1 ~prepare:(fun _ _ -> Ok ())
-    ~scene3:(fun _ () -> Rays.Scene3.empty) ()) in
+    ~draw:(fun _ () -> Rays.Scene3.empty) ()) in
   Fun.protect ~finally:(fun () -> E3.close editor) (fun () ->
     let count = ref 0 in
     let step e = incr count; E3.update e (Test_editor_input.frame (450., 300.) [] !count) in
@@ -68,9 +68,9 @@ let canvas_frame_size () =
         (ui/workspace (ui/split "horizontal" preview network :second_size 500)))))|} in
   let workspace = match Rays_editor.Workspace.load text with
     | Ok workspace -> workspace
-    | Error ds -> failwith (String.concat "; " (List.map Flow.Diagnostic.to_string ds)) in
+    | Error ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds)) in
   let editor = Result.get_ok (E3.create ~workspace ~await:true ~domains:1 ~prepare:(fun _ _ -> Ok ())
-    ~scene3:(fun _ () -> Rays.Scene3.empty) ()) in
+    ~draw:(fun _ () -> Rays.Scene3.empty) ()) in
   Fun.protect ~finally:(fun () -> E3.close editor) (fun () ->
     let step e count = E3.update e (Test_editor_input.frame (450., 300.) [] count) in
     let e = step (step (step editor 1) 2) 3 in
@@ -92,7 +92,7 @@ let menu_forms () =
     let source = Printf.sprintf "(workspace m (graph g :context value (let* [added %s] 0)))" text in
     match Rays_editor.Workspace.load source with
     | Ok _ -> ()
-    | Error ds -> failwith (form ^ ": " ^ String.concat "; " (List.map Flow.Diagnostic.to_string ds))) forms
+    | Error ds -> failwith (form ^ ": " ^ String.concat "; " (List.map Diagnostic.to_string ds))) forms
 
 let has text piece =
   let n = String.length piece in
@@ -103,9 +103,9 @@ let with_editor text f =
   let module E3 = Rays_editor.Editor in
   let workspace = match Rays_editor.Workspace.load text with
     | Ok workspace -> workspace
-    | Error ds -> failwith (String.concat "; " (List.map Flow.Diagnostic.to_string ds)) in
+    | Error ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds)) in
   let editor = Result.get_ok (E3.create ~workspace ~await:true ~domains:1 ~prepare:(fun _ _ -> Ok ())
-    ~scene3:(fun _ () -> Rays.Scene3.empty) ()) in
+    ~draw:(fun _ () -> Rays.Scene3.empty) ()) in
   Fun.protect ~finally:(fun () -> E3.close editor) (fun () -> f editor)
 
 let world_command () =
@@ -181,25 +181,26 @@ let text_keys_are_handled () =
   let module L = Rays_editor.Private.Leader in
   let language = Rays_editor.Private.Lisp_text.language Pxui.Theme.default in
   check (L.text_keys <> []) "no text keys";
-  List.iter (fun (c : _ Editor_core.Command.t) ->
-    let key, mods = match c.trigger with
-      | Some (Editor_core.Keymap.Chord (k, m)) -> k, m | _ -> failwith "text key without a chord" in
+  List.iter (fun (label, trigger) ->
+    let key, mods = match trigger with
+      | Editor_core.Keymap.Chord (k, m) -> k, m | _ -> failwith "text key without a chord" in
     let ui = Pxui.Ui.create ~font_size:11 () in
     Fun.protect ~finally:(fun () -> Pxui.Ui.destroy ui) (fun () ->
       let text = ref "(a (b c))\n(d (e))" and sel = ref (0, 0) and caret = ref 0 and time = ref 0. in
       let step ?(keys = []) events =
         time := !time +. 0.5;
-        ignore (Pxui.Ui.frame ui { (Test_editor_input.frame (0., 0.) events 0) with keys } (fun ui ->
+        let frame = Test_editor_input.frame (0., 0.) events 0 in
+        ignore (Pxui.Ui.frame ui { frame with input = { frame.input with keys } } (fun ui ->
           let t, _ = Pxui.Ui.text_area_submit ui ~at:(0., 0.) ~w:300. ~h:96. ~language
             ~on_select:(fun r -> sel := r) ~on_caret:(fun c -> caret := c) "area" !text in
           text := t)) in
       step [];
-      step [Rays.Event.MousePressed (Rays.Input.LeftButton, (60., 31.));
-        Rays.Event.MouseReleased (Rays.Input.LeftButton, (60., 31.))];
+      step [Input.Pointer_pressed (Input.LeftButton, (60., 31.));
+        Input.Pointer_released (Input.LeftButton, (60., 31.))];
       let before = !text, !sel, !caret in
-      step ~keys:mods [Rays.Event.KeyPressed key];
+      step ~keys:mods [Input.Key_pressed key];
       check (before <> (!text, !sel, !caret))
-        (Printf.sprintf "key sheet lists %s but the text area ignores it" c.id))) L.text_keys
+        (Printf.sprintf "key sheet lists %s but the text area ignores it" label))) L.text_keys
 
 let run () =
   text_keys_are_handled ();
@@ -293,7 +294,7 @@ let run () =
   let filename = Filename.concat directory "preferences.rays" in
   let previous = Sys.getenv_opt "RAYS_EDITOR_PREFERENCES" in
   Unix.putenv "RAYS_EDITOR_PREFERENCES" filename;
-  let create () = E3.create ~workspace ~prepare:(fun _ _ -> Ok ()) ~scene3:(fun _ _ -> Scene3.empty) ()
+  let create () = E3.create ~workspace ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ _ -> Scene3.empty) ()
     |> Result.get_ok in
   let current = ref (create ()) in
   Fun.protect ~finally:(fun () ->
@@ -318,7 +319,7 @@ let run () =
     (* Toggle preserves unrelated preferences, and Hide follows the same save path. *)
     Editor_core.Store.Settings.save ~sketch:"rays-editor" filename
       ["guide", Bool false; "other", Int 7] |> Result.get_ok;
-    step [key Input.Shift; char '/'; Event.KeyReleased Input.Shift] 8;
+    step [key Input.Shift; char '/'; Input.Key_released Input.Shift] 8;
     (* the strip's keys are the sheets' own and carry no "toggle guide" pair: the key is the control,
        and it saves through the same path, keeping the other preferences *)
     step [char '?'] 9;
@@ -339,7 +340,7 @@ let run () =
         (List.init (max 0 (String.length text-n+1)) Fun.id) in
     check (contains (dump ()) "key hud: ? · toggle guide\n")
       "key HUD did not use the routed command label";
-    step [key Input.Ctrl; char 'z'; Event.KeyReleased Input.Ctrl] 13;
+    step [key Input.Ctrl; char 'z'; Input.Key_released Input.Ctrl] 13;
     E3.crash_dump !current directory;
     check (contains (dump ()) "key hud: ⌃Z · undo\n")
       "key HUD displayed a different alias from the routed chord";

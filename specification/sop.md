@@ -2,6 +2,18 @@
 
 Status: first coherent graph and core-node iteration implemented.
 
+## Lisp implementation boundary
+
+Accepted node bodies live in `lib/flow_sop/nodes/*.rays`.
+The checked `defnode` owns names, parameters, defaults, ranges and facts.
+Native geometry, spatial and exact-predicate capabilities stay behind typed host operations.
+The editor and interpreter consume the same checked definitions.
+Lisp-output geometry digests provide the regression contract for accepted bodies.
+The architecture cleanup captures all fixture/case outputs before removing native twins.
+It removes parity-only RDK code rather than retaining an oracle library.
+Migration measurements and session logs are available in Git history at `62582188`.
+Current work and verification are tracked in [cleanup/status.md](cleanup/status.md).
+
 ## Product intent
 
 `rays.sop` combines Processing-style immediacy with a non-destructive
@@ -82,7 +94,7 @@ per-copy topology.
 
 ## Node-owned parameter templates and inspectors
 
-`Sop.Parameter` separates an operator's immutable parameter template
+`Param` separates an operator's immutable parameter template
 from its current record value. This follows the same architectural distinction
 as Houdini's `ParmTemplate` versus `Parm`: metadata describes type, internal
 name, label, folder, default, and UI policy, while the user's immutable record
@@ -100,7 +112,7 @@ edits a selected node in the immutable document; compiling it preserves logical
 node IDs and shared DAG identity. A `Cook` field
 replaces that node's cook closure and cache-key parameters; `View` and `Export`
 fields update metadata without invalidating cooked geometry. `Node.parameterize`
-also records `Parameter.cook_key` of the values as `Node.parameter_key`, and the
+also records `Param.cook_key` of the values as `Node.parameter_key`, and the
 session cache identity includes it next to the operator's own parameter string,
 so every cook-impact schema field changes the key even when an operator's
 hand-written key omits it.
@@ -133,7 +145,7 @@ SOPs and sketches attach schemas to individual nodes. There is no sketch-wide
 promoted record that shadows the graph; `Edit_graph` owns document edits.
 
 The runtime API is PPX-independent. Templates may be written directly with
-`Parameter.field` and `Parameter.schema`. The optional `rays.ppx` deriver
+`Param.field` and `Param.schema`. The optional `rays.ppx` deriver
 removes record boilerplate:
 
 ```ocaml
@@ -152,11 +164,14 @@ type controls = {
 [@@deriving sop_params]
 
 let grid_node input p =
-  Custom.map ~label:"deform" ~operation:"custom-deform"
-    ~schema:controls_schema ~values:p input
-    (fun ~parameters:_ ~context:_ geometry ->
-      (* Call typed RDK operations here. *)
-      Ok geometry)
+  Custom.node ~label:"deform" ~operation:"custom-deform"
+    ~schema:controls_schema ~values:p [input]
+    (fun ~label ~inputs ~parameters ->
+      Custom.plain ~label ~parameters:(Param.key controls_schema parameters)
+        ~operation:"custom-deform" inputs
+        (fun ~context:_ geometries ->
+          (* Call typed RDK operations here. *)
+          Ok geometries.(0)))
 ```
 
 The deriver emits `controls_default` and `controls_schema`. Every record field
@@ -237,8 +252,8 @@ output must remain. Their numeric, name and mode constraints run at construction
 Material uses optional `material`, `color`, `roughness`, and `emission` fields
 with the Lisp defaults and rejects non-finite or out-of-range channels at
 construction. The node's
-cache identity is the schema's `Parameter.cook_key`, and `Node.parameters`
-reads as `Parameter.cook_text` (`name=value;...`) unless the cook retains
+cache identity is the schema's `Param.cook_key`, and `Node.parameters`
+reads as `Param.cook_text` (`name=value;...`) unless the cook retains
 legacy diagnostic text; that text does not replace the schema cache key.
 Checks involving several fields or encoded values use
 `[@@sop.validate fun parameters -> ...]` on the record. The generated builder
@@ -294,7 +309,7 @@ keep the existing node.
 ```
 
 The Dune source rule embeds the node files through the existing
-`tools/lisp/embed.exe`, sorted by filename. `Flow_sop.Catalog.check_workspace`
+`lib/flow/embed.exe`, sorted by filename. `Flow_sop.Catalog.check_workspace`
 puts these definitions in scope without changing authored form IDs. Catalog
 calls keep their `sop/<key>` identity and project to one graph card; the body is
 internal to that card. Lowering exposes the resulting factories alongside the
@@ -412,7 +427,7 @@ generated stable key. `sop/blend_shapes`, `sop/attribute_composite`, `sop/skin` 
 `sop/ordered_group` are registered as `sop/blend_shapes`, `sop/attribute_composite`,
 `sop/skin` and `sop/ordered_group`; `sketches/ws_morph` uses all four.
 
-Structured immutable parameters use `Parameter.encoded` when a SOP owns an
+Structured immutable parameters use `Param.encoded` when a SOP owns an
 ordered rule list or nested value. The codec is typed at the descriptor,
 validated on every inspector edit, encoded deterministically into node cache
 identity, and currently exposed through the ordinary text editor. This keeps
@@ -427,15 +442,13 @@ its view-impact controls update rigid piece transforms without recooking the
 upstream Boolean topology. Geometry materialization remains an explicit later
 boundary when a downstream SOP needs the transformed points.
 
-`Sop.Custom.node` attaches a schema to an existing SOP composition
-without recursive reconstruction boilerplate. `Custom.create` and unary
-`Custom.map` are the typed OCaml wrangle-like boundary: the callback receives
-the immutable parameter record, declared `Context`, and immutable RDK inputs.
-`Parameter.key` encodes every current field unambiguously into the session
-cache identity, and parameter edits rebuild the callback closure while keeping
-the logical graph ID. This is not a VEX interpreter; it is the clean native
-extension point for RDK composition, with explicit dependency and
-cancellation contracts.
+`Sop.Custom.node` attaches a schema to an existing SOP composition without
+recursive reconstruction boilerplate. `Custom.plain` builds a parameter-free
+operator from immutable RDK inputs and a declared `Context`. Together they are
+the typed OCaml extension boundary; `Param.key` supplies cache identity,
+and parameter edits rebuild the cook closure while keeping the logical graph
+ID. This is not a VEX interpreter; it is the native extension point for RDK
+composition, with explicit dependency and cancellation contracts.
 
 ## Editable graph document and sketch environment
 
@@ -445,9 +458,6 @@ optional input slots, and validates add/delete/connect/disconnect/atomic-wire-
 insert operations. Compilation rebuilds parameterized closures with their
 current inputs, rejects cycles and disconnected paths, and produces an ordinary
 immutable DAG for the existing deterministic Session cook path.
-Bypass is immutable entry metadata: compilation uses only the primary input,
-retains packed instances, and produces empty geometry without an input.
-Copy/paste retains the flag and its unchanged literal record.
 Dissolve reconnects every consumer through the selected chain's primary
 inputs. Wire insertion fills the new node's primary slot and leaves any
 additional slots disconnected.

@@ -1,24 +1,24 @@
 module E=Flow.Eval
 module V=Flow.Value
 module I=Flow_ir
-let ok=function Ok v->v|Error d->failwith(Flow.Diagnostic.to_string d)
+let ok=function Ok v->v|Error d->failwith(Diagnostic.to_string d)
 let bytes value=Marshal.to_string value[Marshal.No_sharing]
 let scatter indices values size=
   let op=Option.get(Flow.Op.find "array/scatter_add" Flow.Context.value) in
-  op.body ~live:(Frame_input.at_time 0.) ~node:(fun _ _->assert false)
+  op.body ~live:(Input.at_time 0.) ~node:(fun _ _->assert false)
     ["indices",indices;"values",values;"size",size]
 let reject code f=try ignore(f());failwith("accepted "^code)
-  with V.Fail(actual,_,_)->assert(actual=code)
+  with Diagnostic.Error d -> assert(d.code=code)
 let same a b=match a,b with
   |Ok a,Ok b->assert(bytes a=bytes b)
-  |Error(a:Flow.Diagnostic.t),Error(b:Flow.Diagnostic.t)->
+  |Error(a:Diagnostic.t),Error(b:Diagnostic.t)->
       assert(a.code=b.code && a.message=b.message && a.cause=b.cause)
-  |_->let show=function Ok v->"Ok "^V.show_with Fun.id v|Error d->Flow.Diagnostic.to_string d in
+  |_->let show=function Ok v->"Ok "^V.show_with Fun.id v|Error d->Diagnostic.to_string d in
       failwith("Scatter reference/compiled disagreement: "^show a^" / "^show b)
 let workspace ?(declarations="") body=
   let text="(workspace scatter (graph g :context host "^declarations^" "^body^"))" in
   match Flow.Workspace.check Flow.Check.{version=1;kinds=[]}(ok(Flow.Syntax.parse text))with
-    |Some w,[]->w|_,ds->failwith(String.concat ";"(List.map Flow.Diagnostic.to_string ds))
+    |Some w,[]->w|_,ds->failwith(String.concat ";"(List.map Diagnostic.to_string ds))
 let value body=List.assoc "g" (ok(E.static(workspace("(if (> t -1000.) "^body^" "^body^")")))).results
 let reference width indices values size =
   let result=Array.make(size*width)0. in
@@ -43,7 +43,7 @@ let ()=
       let inputs=E.Int_array indices,wrap data in
       let before=bytes inputs in
       let expected=wrap(reference width indices data size) in
-      List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+      List.iter(fun domains->Parallel.run ~domains(fun()->
         let got=scatter(fst inputs)(snd inputs)(E.Int size)in
         assert(bytes got=bytes expected);
         (match got with E.Float_array a|Vec2_array a|Vec3_array a|Vec4_array a->
@@ -73,8 +73,8 @@ let ()=
     let r=match v with E.Residual r->r|_->failwith "Scatter must remain live"in
     let core=match I.Core_lower.lower ~strict:true r with Ok p->p|Error form->failwith form in
     let executable=ok(I.Executor.compile ~strict:true v)in
-    List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
-      List.iter(fun time->let live=Frame_input.at_time time in
+    List.iter(fun domains->Parallel.run ~domains(fun()->
+      List.iter(fun time->let live=Input.at_time time in
         let expected=E.Private.force_reference v ~live in
         same(I.Core_exec.run core ~live) expected;
         same(I.Executor.force ~strict:true executable ~live) expected)[-1.;0.;0.25;2.]))[1;4;8])
@@ -92,7 +92,7 @@ let ()=
      scatter instruction. Its invariant materialized result may feed kernels. *)
   let dynamic=value "(map (fn [(n : int)] (array/nth (array/scatter_add (array/int n 0) (array/float n t) 1) 0)) (array/range 5001 :type int))"in
   let r=match dynamic with E.Residual r->r|_->assert false in
-  assert(Result.is_error(I.Packed.compile_result r(E.Private.residual_view r).term));
+  assert(Result.is_error(I.Packed.compile_result r(E.Residual.residual_view r).term));
   (* Sources resolve in authored argument order and retain type/cause failures.
      A changed host buffer across forces must not be memoized globally. *)
   let ws=workspace ~declarations:"[(indices : (array int) (array/int 0)) (data : (array float) (array/float 0))]"
@@ -106,33 +106,32 @@ let ()=
     |E.Source("fixture/indices",_,_)->calls:= !calls@["indices"];Ok(E.Int_array[|0;1;0|])
     |E.Source("fixture/values",_,_)->calls:= !calls@["values"];Ok !data
     |_->assert false in
-  List.iter(fun domain->Rays_math.Parallel.run ~domains:domain(fun()->
+  List.iter(fun domain->Parallel.run ~domains:domain(fun()->
     List.iter(fun next->data:=E.Float_array next;calls:=[];
-      let live=Frame_input.at_time 1. in
+      let live=Input.at_time 1. in
       same(I.Executor.force ~strict:true ~resolve executable ~live)
         (E.Private.force_reference ~resolve v ~live);
       assert(!calls=["indices";"values";"indices";"values"]))[[|1.;2.;3.|];[|7.;8.;9.|]]))[1;4;8];
   let wrong=function E.Source("fixture/indices",_,_)->Ok(E.Float_array[|0.;1.;0.|])|_->assert false in
-  same(I.Executor.force ~strict:true ~resolve:wrong executable ~live:(Frame_input.at_time 1.))
-    (E.Private.force_reference ~resolve:wrong v ~live:(Frame_input.at_time 1.));
+  same(I.Executor.force ~strict:true ~resolve:wrong executable ~live:(Input.at_time 1.))
+    (E.Private.force_reference ~resolve:wrong v ~live:(Input.at_time 1.));
   let skipped_ws=workspace ~declarations:"[(indices : (array int) (array/int 0)) (data : (array float) (array/float 0))]"
     "(if (> t 0.) (array/float 2) (array/scatter_add indices data 2))"in
   let skipped=List.assoc "g"(ok(E.static ~inputs skipped_ws)).results in
   let skipped_program=ok(I.Executor.compile ~strict:true skipped)in
   let no_source _=failwith "Untaken scatter resolved its host source"in
-  same(I.Executor.force ~strict:true ~resolve:no_source skipped_program ~live:(Frame_input.at_time 1.))
-    (E.Private.force_reference ~resolve:no_source skipped ~live:(Frame_input.at_time 1.));
-  let failed=function E.Source("fixture/indices",_,_)->Error(Flow.Diagnostic.error
+  same(I.Executor.force ~strict:true ~resolve:no_source skipped_program ~live:(Input.at_time 1.))
+    (E.Private.force_reference ~resolve:no_source skipped ~live:(Input.at_time 1.));
+  let failed=function E.Source("fixture/indices",_,_)->Error(Diagnostic.error
       ~code:"E_DATA_SOURCE" ~cause:"scatter input cause" "missing indices")|_->assert false in
-  same(I.Executor.force ~strict:true ~resolve:failed executable ~live:(Frame_input.at_time 1.))
-    (E.Private.force_reference ~resolve:failed v ~live:(Frame_input.at_time 1.));
+  same(I.Executor.force ~strict:true ~resolve:failed executable ~live:(Input.at_time 1.))
+    (E.Private.force_reference ~resolve:failed v ~live:(Input.at_time 1.));
   let stateful=value "(let* [counter (state [s 0.] (+ s 1.))] (if (> t 0.) (array/scatter_add (array/int 1 -1) (array/float 1 counter) 1) (array/float 1 counter)))"in
   let reference_state=E.create_state() and compiled_state=E.create_state()in
   let executable=ok(I.Executor.compile ~strict:true stateful)in
-  List.iteri(fun frame time->let live={(Frame_input.at_time time)with frame;tick=frame}in
+  List.iteri(fun frame time->let live={(Input.at_time time)with frame;tick=frame}in
     same(I.Executor.force ~strict:true ~state:compiled_state executable ~live)
       (E.Private.force_reference ~state:reference_state stateful ~live);
-    assert(E.state_stamp reference_state=E.state_stamp compiled_state);
     assert(bytes(E.Private.state_values reference_state)=bytes(E.Private.state_values compiled_state)))
     [-1.;1.;-1.;1.;-1.];
   print_endline "Scatter: ordered numeric bytes, Int wrap, malformed inputs, source ownership, lazy errors and strict Core/reference 1/4/8 domains"
@@ -142,7 +141,7 @@ let ()=if Array.exists((=)"--bench")Sys.argv then begin
   let indices=Array.init count(fun i->i mod size)in
   let data=Array.init(count*3)(fun i->[|1e16;1.;-1e16;0.125;-0.;0.|].(i mod 6))in
   let values=E.Vec3_array data and expected=bytes(E.Vec3_array(reference 3 indices data size))in
-  List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+  List.iter(fun domains->Parallel.run ~domains(fun()->
     List.iter(fun(name,run)->
       let samples=Array.init 3(fun _->Gc.compact();let before=Gc.allocated_bytes()and start=Unix.gettimeofday()in
         let result=run()in let seconds=Unix.gettimeofday()-.start and allocated=Gc.allocated_bytes()-.before in

@@ -58,7 +58,7 @@ let color_array ~expanded topology count source =
     let index = match source with
       | Point _ -> if expanded then Topology.point_of_vertex topology vertex else vertex
       | Vertex _ -> vertex in
-    Color.of_floats input.x.(index) input.y.(index) input.z.(index) input.w.(index))
+    Rays_math.Color.of_floats input.x.(index) input.y.(index) input.z.(index) input.w.(index))
 
 let tex_coord_array ~expanded topology count source =
   let values = match source with Point values | Vertex values -> values in
@@ -67,7 +67,7 @@ let tex_coord_array ~expanded topology count source =
     let index = match source with
       | Point _ -> if expanded then Topology.point_of_vertex topology vertex else vertex
       | Vertex _ -> vertex in
-    Vec2.create input.x.(index) input.y.(index))
+    Rays_math.Vec2.create input.x.(index) input.y.(index))
 
 let all_curves topology =
   let curves = ref true in
@@ -189,6 +189,17 @@ let rec to_mesh_raw_impl geometry =
             Mesh.Private.create_packed_shared ~mode:Mesh.Triangles
               ~indices:view.vertex_points ?normals ?colors ?tex_coords positions
 
+let protected operation work =
+  Result.map_error (Error.of_string ~operation ~code:"mesh_conversion") (work ())
+
+let to_trace_mesh geometry =
+  protected "to_trace_mesh" (fun () ->
+    let ( let* ) = Result.bind in
+    let* triangles = Triangulate.run geometry |> Result.map_error Error.to_string in
+    let* triangles = Normal_ops.run ~owner:Attribute.Vertex
+        ~cusp_angle:(Float.pi /. 4.5) triangles |> Result.map_error Error.to_string in
+    to_mesh_raw_impl triangles)
+
 let rdk_float3 (view : Mesh.Private.vec3_view) =
   Packed.Float3.Private.of_shared_exn ~x:view.x ~y:view.y ~z:view.z
 
@@ -197,7 +208,7 @@ let color_attribute colors =
   let r = Array.make count 0. and g = Array.make count 0.
   and b = Array.make count 0. and a = Array.make count 0. in
   Array.iteri (fun index color ->
-    let cr, cg, cb, ca = Color.to_floats color in
+    let cr, cg, cb, ca = Rays_math.Color.to_floats color in
     r.(index) <- cr; g.(index) <- cg; b.(index) <- cb; a.(index) <- ca) colors;
   let values = Packed.Float4.of_owned ~x:r ~y:g ~z:b ~w:a |> Result.get_ok in
   Attribute.create_key_owned (Attribute.color ~owner:Attribute.Point) values
@@ -207,7 +218,7 @@ let tex_coord_attribute tex_coords =
   let count = Array.length tex_coords in
   let u = Array.make count 0. and v = Array.make count 0. in
   Array.iteri (fun index point ->
-    u.(index) <- point.Vec2.x; v.(index) <- point.y)
+    u.(index) <- point.Rays_math.Vec2.x; v.(index) <- point.y)
     tex_coords;
   let values = Packed.Float2.of_owned ~x:u ~y:v |> Result.get_ok in
   Attribute.create_key_owned (Attribute.tex_coord ~owner:Attribute.Point) values
@@ -247,9 +258,6 @@ let of_mesh_raw_impl mesh =
   | Mesh.Lines | Mesh.Line_strip | Mesh.Line_loop
   | Mesh.Triangle_strip | Mesh.Triangle_fan ->
       Error "Rdk.Rays_mesh.of_mesh: expand non-point/non-triangle modes first"
-
-let protected operation work =
-  Result.map_error (Error.of_string ~operation ~code:"mesh_conversion") (work ())
 
 let to_mesh geometry =
   protected "to_mesh" (fun () ->

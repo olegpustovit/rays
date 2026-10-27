@@ -1,0 +1,29 @@
+kind     style                 n |         ms          bytes  kernels
+circles  uniform          100000 |      1.066         825088        1
+circles  radius           100000 |      1.054         825184        1
+circles  fill             100000 |      0.967         825008        1
+circles  per-instance     100000 |      1.027         825104        1
+circles  moving radius    100000 |      1.522        1631000        1
+circles  moving fill      100000 |      1.500        1630816        1
+circles  moving both      100000 |      2.032        2435784        1
+rects    uniform          100000 |      1.045         825000        1
+rects    radius           100000 |      1.157         825048        1
+rects    fill             100000 |      1.078         824920        1
+rects    per-instance     100000 |      1.112         824968        1
+rects    moving radius    100000 |      1.598        1630880        1
+rects    moving fill      100000 |      1.613        1630728        1
+rects    moving both      100000 |      1.986        2435664        1
+circles  uniform         1000000 |      5.365        8025016        1
+circles  radius          1000000 |      5.437        8025112        1
+circles  fill            1000000 |      5.604        8024936        1
+circles  per-instance    1000000 |      5.365        8025032        1
+circles  moving radius   1000000 |     11.225       16030928        1
+circles  moving fill     1000000 |     11.714       16030744        1
+circles  moving both     1000000 |     36.954       24035712        1
+rects    uniform         1000000 |      5.437        8024928        1
+rects    radius          1000000 |     12.098        8024976        1
+rects    fill            1000000 |      8.619        8024848        1
+rects    per-instance    1000000 |      6.610        8024896        1
+rects    moving radius   1000000 |     15.400       16030808        1
+rects    moving fill     1000000 |     19.529       16030656        1
+rects    moving both     1000000 |     19.331       24035592        1

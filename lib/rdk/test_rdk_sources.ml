@@ -133,8 +133,8 @@ let patterns () =
 let lines () =
   let generated_line domains = Parallel.run ~domains (fun () ->
     Line_geometry.line ~grain:257 ~points:100_001
-      ~origin:(Vec3.create 1. 2. 3.)
-      ~direction:(Vec3.create max_float max_float 0.) ~length:(sqrt 2.) ()
+      ~origin:(Rays_math.Vec3.create 1. 2. 3.)
+      ~direction:(Rays_math.Vec3.create max_float max_float 0.) ~length:(sqrt 2.) ()
     |> get_ok) in
   let line_one = generated_line 1 and line_many = generated_line 4 in
   let line_positions = Packed.Float3.Private.view (Geometry.positions line_one)
@@ -153,28 +153,28 @@ let lines () =
       || line_positions.z <> line_many_positions.z then
     fail "Line packed generation/domain exactness";
   let free_line = Line_geometry.line ~kind:Line_geometry.Line_points ~points:3
-      ~origin:(Vec3.create (-1.) 0. 0.) ~direction:Vec3.unit_x ~length:2. ()
+      ~origin:(Rays_math.Vec3.create (-1.) 0. 0.) ~direction:Rays_math.Vec3.unit_x ~length:2. ()
       |> get_ok in
   let free_positions = Packed.Float3.Private.view
       (Geometry.positions free_line) in
   if Geometry.primitive_count free_line <> 0
       || free_positions.x <> [|-1.; 0.; 1.|] then
     fail "Line free-point mode";
-  (match Line_geometry.line ~origin:Vec3.zero ~direction:Vec3.zero ~length:1. () with
+  (match Line_geometry.line ~origin:Rays_math.Vec3.zero ~direction:Rays_math.Vec3.zero ~length:1. () with
    | Error error when Error.code error = "invalid_parameter" -> ()
    | _ -> fail "Line accepted a zero direction");
-  (match Line_geometry.line ~points:1 ~origin:Vec3.zero ~direction:Vec3.unit_x
+  (match Line_geometry.line ~points:1 ~origin:Rays_math.Vec3.zero ~direction:Rays_math.Vec3.unit_x
       ~length:1. () with
    | Error error when Error.code error = "invalid_parameter" -> ()
    | _ -> fail "Line accepted one point in curve mode");
-  (match Line_geometry.line ~origin:(Vec3.create max_float 0. 0.)
-      ~direction:Vec3.unit_x ~length:max_float () with
+  (match Line_geometry.line ~origin:(Rays_math.Vec3.create max_float 0. 0.)
+      ~direction:Rays_math.Vec3.unit_x ~length:max_float () with
    | Error error when Error.code error = "invalid_parameter" -> ()
    | _ -> fail "Line accepted a non-finite endpoint");
   let cancelled_line = Cancel.create () in
   Cancel.cancel cancelled_line;
-  (match Line_geometry.line ~cancel:cancelled_line ~points:10_000 ~origin:Vec3.zero
-      ~direction:Vec3.unit_x ~length:1. () with
+  (match Line_geometry.line ~cancel:cancelled_line ~points:10_000 ~origin:Rays_math.Vec3.zero
+      ~direction:Rays_math.Vec3.unit_x ~length:1. () with
    | Error error when Error.code error = "cancelled" -> ()
    | _ -> fail "Line ignored cancellation");
   (match Line_geometry.polyline [|(0., 0., 0.)|] with

@@ -100,7 +100,7 @@ let signature complex weiler cells =
 let test_domain_exactness () =
   let left = tetra ~origin:(0.,0.,0.) 4.
   and right = tetra ~origin:(1.,1.,1.) 0.5 in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       let complex, weiler, cells = pipeline left right in
       signature complex weiler cells) in
   if run 1 <> run 4 then fail "cell classification differs between domain counts"
@@ -112,7 +112,7 @@ let test_component_index_domains () =
     tetra ~origin:(-2.,-2.,-2.) 4., tetra ~origin:(-1.,-1.,-1.) 4.;
   |] in
   Array.iteri (fun fixture (left, right) ->
-      let run domains = Rays.Parallel.run ~domains (fun () ->
+      let run domains = Parallel.run ~domains (fun () ->
           let complex, weiler, cells = pipeline left right in
           signature complex weiler cells) in
       if run 1 <> run 4 then
@@ -121,7 +121,7 @@ let test_component_index_domains () =
 
 let test_component_index_scale () =
   let left = tetra_batch 64 0. and right = tetra_batch 64 3. in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       let complex, weiler, cells = pipeline left right in
       signature complex weiler cells) in
   check (run 1 = run 4)

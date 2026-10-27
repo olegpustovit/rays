@@ -200,7 +200,7 @@ let seam_signature value =
 let test_domain_exactness () =
   let left = triangle [|0.,0.,0.; 4.,0.,0.; 2.,4.,0.|]
   and right = triangle [|0.,3.,0.; 4.,3.,0.; 2.,-1.,0.|] in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       pipeline left right
       |> Seam.build ~grain:1 ~parallel_cutoff:1 |> get |> seam_signature) in
   check (run 1 = run 4) "Boolean seam product differs between domain counts"
@@ -300,7 +300,7 @@ let test_post_rounding_verification () =
    | Error error -> fail "unexpected seam verification cancellation: %s"
        (Error.to_string error)
    | Ok () -> fail "cancelled seam verification completed");
-  let run domains = Rays.Parallel.run ~domains (fun () -> verify crossing) in
+  let run domains = Parallel.run ~domains (fun () -> verify crossing) in
   check (Result.map_error Error.to_string (run 1)
       = Result.map_error Error.to_string (run 4))
     "seam verification diagnostic differs between domain counts"
@@ -314,7 +314,7 @@ let test_verification_scale () =
       [|segment * 2; (segment * 2) + 1|])
   and kinds = Array.make count Topology.Open_polyline in
   let curves = curve_geometry points primitives kinds in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       Seam.Private.verify_curves ~grain:256 curves) in
   check (run 1 = Ok () && run 4 = Ok ())
     "scale seam verification failed or differs across domain counts"

@@ -4,13 +4,13 @@ let (let*) = Result.bind
 type t = {identity:int; width:int; height:int; fn:E.fn; sources:int list;
   inputs:P.Node.t list; origins:(int * int) list;
   program:Flow_ir.Executor.program; packed:Flow_ir.Packed.t}
-let error message = Error (Flow.Diagnostic.error ~code:"E_IMAGE" message)
+let error message = Error (Diagnostic.error ~code:"E_IMAGE" message)
 let prepare ?site ?path ?(approx=Flow.Workspace.Paths.empty) ~identity ~width ~height ~fn ~sources inputs =
   if width <= 0 || height <= 0 then error "Image dimensions must be positive."
   else if width > min Sys.max_floatarray_length Sys.max_string_length / 4 / height then
     error "Image dimensions exceed native storage bounds."
   else if not (Option.fold ~none:false ~some:(fun (_,body) -> body.Flow.Workspace.ty=Flow.Ty.Vec4)
-      (E.Private.function_body fn)) then
+      (E.Residual.function_body fn)) then
     error "Image map needs an instantiated vec4 pixel body."
   else
     let* origins = Attribute_kernel.source_origins ~sources inputs in
@@ -26,21 +26,20 @@ let prepare ?site ?path ?(approx=Flow.Workspace.Paths.empty) ~identity ~width ~h
       ~signature:Flow.Ty.{params=[Vec2];result=Vec4} fn [E.Vec2_array uv] in
     let approx = if path=None then Flow.Workspace.Paths.empty else approx in
     let* program = Attribute_kernel.prepare ~approx ~sink:(Flow_ir.Display "image/map") ~sources inputs values in
-    let ir = Flow_ir.Executor.graph program in
-    match ir.nodes.(ir.roots.(0)).kind with
-    | Flow_ir.Kernel {body=Packed_map packed;_} ->
+    match Flow_ir.Executor.packed_region program with
+    | Some packed ->
         Ok {identity;width;height;fn;sources;inputs;origins;program;packed}
-    | _ ->
+    | None ->
         (match values with
-         | E.Residual r -> (match Flow_ir.Packed.compile_result r (E.Private.residual_view r).term with
+         | E.Residual r -> (match Flow_ir.Packed.compile_result r (E.Residual.residual_view r).term with
              | Error (d :: _) -> Error d
-             | _ -> Error (Flow.Diagnostic.error ~code:"E_KERNEL_FORM" "Image function needs a packed map body."))
+             | _ -> Error (Diagnostic.error ~code:"E_KERNEL_FORM" "Image function needs a packed map body."))
          | _ -> error "Image function did not produce a pixel map.")
 let program t = t.program
 let with_inputs t inputs =
   let* origins = Attribute_kernel.source_origins ~sources:t.sources inputs in
   if origins <> t.origins then
-    Error (Flow.Diagnostic.error ~code:"E_DATA_SOURCE" "Image source point-origin proof changed; prepare the kernel again.")
+    Error (Diagnostic.error ~code:"E_DATA_SOURCE" "Image source point-origin proof changed; prepare the kernel again.")
   else Ok {t with inputs}
 let node ?state t =
   P.Node.Private.make ~operation:"image/map" ~version:1
@@ -54,11 +53,11 @@ let node ?state t =
         Option.bind (List.find_index ((=) id) t.sources)
           (fun i -> Result.to_option (P.Payload.geometry payloads.(i)))) in
       let result =
-        if P.Context.cancelled context then Error (Flow.Diagnostic.error ~code:"E_CANCELLED" "Image kernel cancelled.")
+        if P.Context.cancelled context then Error (Diagnostic.error ~code:"E_CANCELLED" "Image kernel cancelled.")
         else Flow_ir.Packed.force ?state ~resolve t.packed ~live:(P.Context.input context) in
-      Result.bind (Result.map_error (Diagnostic_bridge.to_sop) result)
+      Result.bind result
         (function
           | E.Vec4_array rgba -> Result.map (fun image -> P.Node.Private.{
-              payload=P.Payload.Image image;diagnostics=[];instances=None})
+              payload=P.Payload.Image image;instances=None})
               (P.Image.Private.of_vec4 ~context ~width:t.width ~height:t.height rgba)
-          | _ -> Error (P.Diagnostic.error ~code:"E_IMAGE" "Image kernel must return vec4 pixels.")))
+          | _ -> Error (Diagnostic.error ~code:"E_IMAGE" "Image kernel must return vec4 pixels.")))

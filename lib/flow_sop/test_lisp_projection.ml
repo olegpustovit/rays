@@ -6,10 +6,10 @@ module E = Flow_graph.Flow_edit
 let ok = Result.get_ok
 let check condition message = if not condition then failwith message
 let parse text = match S.parse text with
-  | Ok forms -> forms | Error d -> failwith (Flow.Diagnostic.to_string d)
+  | Ok forms -> forms | Error d -> failwith (Diagnostic.to_string d)
 let checked catalog forms = match W.check ~ops:Flow_sop.Operators.all catalog forms with
   | Some w, _ -> w
-  | None, ds -> failwith (String.concat "\n" (List.map Flow.Diagnostic.to_string ds))
+  | None, ds -> failwith (String.concat "\n" (List.map Diagnostic.to_string ds))
 
 let field ?vec3 name label kind default =
   Param.field ~name ~label ~description:("Edit " ^ label) ~folder:["Shape"]

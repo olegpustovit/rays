@@ -1,9 +1,9 @@
 type error =
   | Stage of string
-  | Resource of Runtime_resources.error
-  | Begin of Rays_execution.error
-  | Lower of Rays_execution.error
-  | Step of Rays_execution.error
+  | Resource of Ogpu.Error.t
+  | Begin of Renderer.error
+  | Lower of Renderer.error
+  | Step of Renderer.error
 
 let pp_error formatter = function
   | Stage message -> Format.fprintf formatter "native Scene staging: %s" message
@@ -11,47 +11,60 @@ let pp_error formatter = function
       Runtime_resources.pp_error error
   | Begin error ->
       Format.fprintf formatter "native Scene submission setup: %a"
-        Rays_execution.pp_error error
+        Renderer.pp_error error
   | Lower error ->
       Format.fprintf formatter "native Scene lowering: %a"
-        Rays_execution.pp_error error
+        Renderer.pp_error error
   | Step error ->
       Format.fprintf formatter "native Scene submission: %a"
-        Rays_execution.pp_error error
+        Renderer.pp_error error
 
-let draw_of_scene3_entry (entry : Scene_execution.scene3_entry) =
-  Rays_execution.prepared_draw
+let draw_of_scene3_entry (entry : Renderer.Scene_execution.scene3_entry) =
+  Renderer.prepared_draw
     ~family:entry.family ~blend:entry.blend
     ?texture:entry.texture ?auxiliary:entry.auxiliary ?vertex_attributes:entry.vertex_attributes ~samples:entry.samples
     entry.draw
 
 type retained_draws={staged:Scene.Private.staged_native;
-  layer:Scene_execution.prepared_scene3;  (* a frame with several 3D layers caches each *)
-  draws:Rays_execution.draw list}
+  layer:Renderer.Scene_execution.prepared_scene3;  (* a frame with several 3D layers caches each *)
+  draws:Renderer.draw list}
 let retained_draw_capacity=16
-let retained_draw_caches=Domain.DLS.new_key(fun()->ref[])
+module Retained_key=struct
+  type t=Scene.Private.staged_native*Renderer.Scene_execution.prepared_scene3
+  let equal(a,b)(c,d)=a==c&&b==d
+  let hash((staged:Scene.Private.staged_native),(layer:Renderer.Scene_execution.prepared_scene3))=
+    Hashtbl.hash(staged.retained,Array.length layer.Renderer.Scene_execution.entries)
+end
+module Retained_table=Lru.Make(Retained_key)
+type cache_context={retained_draws:retained_draws Retained_table.t}
+let current_cache_context=Domain.DLS.new_key(fun()->None)
+let create_cache_context()={retained_draws=Retained_table.create retained_draw_capacity}
+let with_cache_context context f=
+  let previous=Domain.DLS.get current_cache_context in
+  Domain.DLS.set current_cache_context(Some context);
+  Fun.protect~finally:(fun()->Domain.DLS.set current_cache_context previous)f
 let draws_of_prepared (staged:Scene.Private.staged_native) prepared=
   match staged.retained with
-  |None->Array.to_list prepared.Scene_execution.entries|>List.map draw_of_scene3_entry
-  |Some _->
-      let cache=Domain.DLS.get retained_draw_caches in
-      match List.find_opt(fun cached->cached.staged==staged&&cached.layer==prepared)!cache with
-      |Some cached->cached.draws
-      |None->
-          let entries=prepared.Scene_execution.entries in
+  |None->Array.to_list prepared.Renderer.Scene_execution.entries|>List.map draw_of_scene3_entry
+  |Some _->(match Domain.DLS.get current_cache_context with
+      |None->Array.to_list prepared.Renderer.Scene_execution.entries|>List.map draw_of_scene3_entry
+      |Some context->
+       let key=staged,prepared in
+       match Retained_table.find context.retained_draws key with
+       |cached->cached.draws
+       |exception Not_found->
+          let entries=prepared.Renderer.Scene_execution.entries in
           let rec build index reversed=
             if index=Array.length entries then List.rev reversed
             else build(index+1)(draw_of_scene3_entry
               (Array.unsafe_get entries index)::reversed)in
           let draws=build 0[]in
-          cache:={staged;layer=prepared;draws}::!cache;
-          if List.length!cache>retained_draw_capacity then
-            cache:=List.filteri(fun index _->index<retained_draw_capacity)!cache;
-          draws
+          Retained_table.add context.retained_draws key {staged;layer=prepared;draws};
+          draws)
 
 let rec validate_images = function
   | [] -> Ok ()
-  | (_, Rays_execution.Image image) :: rest ->
+  | (_, Renderer.Image image) :: rest ->
       Result.bind (Runtime_resources.Image.Private.gpu_snapshot image)
         (fun _ -> validate_images rest)
   | _ :: rest -> validate_images rest
@@ -85,13 +98,13 @@ let render ~execution ~density ~width ~height scene =
             | Ok () -> Result.map_error (fun error -> Step error) (match staged.retained with
             |None->Ok None
             |Some(identity,version)->
-                Rays_execution.Private.replay
+                Renderer.Private.replay
                     ~clear:staged.clear ~identity ~version execution) in
             match replayed with
             |Error error->Error error
             |Ok(Some ())->Ok `Replayed
             |Ok None->
-            match Rays_execution.Private.begin_submission execution with
+            match Renderer.Private.begin_submission execution with
             | Error error -> Error (Begin error)
             | Ok submission ->
                 active_submission:=Some submission;
@@ -101,7 +114,7 @@ let render ~execution ~density ~width ~height scene =
                             List.rev reversed))
                       | Scene.Private.Scene2_layer (ir, resources) :: rest -> (
                           match
-                            Rays_execution.Private.lower_scene2 submission
+                            Renderer.Private.lower_scene2 submission
                               ~density
                               ~resource:(fun id -> List.assoc_opt id resources)
                               ir
@@ -110,12 +123,12 @@ let render ~execution ~density ~width ~height scene =
                           | Ok batch -> lower (batch::reversed) rest)
                       | Scene.Private.Scene2_segment (segment, resources) :: rest -> (
                           let cacheable=List.for_all(function
-                            |_,Rays_execution.Text _->true
-                            |_,Rays_execution.Image _
-                            |_,Rays_execution.Canvas _->false)resources in
+                            |_,Renderer.Text _->true
+                            |_,Renderer.Image _
+                            |_,Renderer.Canvas _->false)resources in
                           let version=Scene.Private.native_segment_version
                             segment resources in
-                          match Rays_execution.Private.lower_scene2_segment
+                          match Renderer.Private.lower_scene2_segment
                             submission
                             ~identity:(Scene_command.Display_list.id segment)
                             ~version
@@ -125,25 +138,25 @@ let render ~execution ~density ~width ~height scene =
                           | Error error -> Error (Lower error)
                           | Ok batch -> lower (batch :: reversed) rest)
                       | Scene.Private.Ui_layer (ui, resources) :: rest -> (
-                          match Rays_execution.Private.lower_ui submission
+                          match Renderer.Private.lower_ui submission
                             ~density ~resource:(fun id -> List.assoc_opt id resources)
                             ui with
                           | Error error -> Error (Lower error)
                           | Ok batch -> lower (batch :: reversed) rest)
                       | Scene.Private.Scene3_layer prepared :: rest ->
                           let draws = draws_of_prepared staged prepared in
-                          (match Rays_execution.Private.adopt_retained_view
+                          (match Renderer.Private.adopt_retained_view
                             submission ~density ~layer:prepared draws with
                           |Error error->Error(Lower error)
                           |Ok batch->lower(batch::reversed)rest)
                     in
                     lower [] staged.layers)) in
       (match outcome with
-      |Error _->Option.iter Rays_execution.Private.cancel !active_submission
+      |Error _->Option.iter Renderer.Private.cancel !active_submission
       |Ok _->());
       outcome
     with exn->
-      Option.iter Rays_execution.Private.cancel !active_submission;
+      Option.iter Renderer.Private.cancel !active_submission;
       raise exn
   in
   match prepared with
@@ -151,8 +164,8 @@ let render ~execution ~density ~width ~height scene =
   | Ok `Replayed -> Ok ()
   | Ok (`Prepared (submission, retained, clear, batches)) -> (
       let stepped=match retained with
-      |None->Rays_execution.Private.step ~clear submission batches
-      |Some(identity,version)->Rays_execution.Private.step ~clear
+      |None->Renderer.Private.step ~clear submission batches
+      |Some(identity,version)->Renderer.Private.step ~clear
           ~identity ~version submission batches in
       match stepped with
       | Ok () -> Ok ()

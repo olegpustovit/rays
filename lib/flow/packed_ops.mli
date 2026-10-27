@@ -3,7 +3,6 @@
     implement its instruction semantics. *)
 type binary = Add | Sub | Mul | Div | Mod | Pow | Min | Max | Lt | Le | Gt | Ge | Eq | And | Or | Atan2 | Hypot
 type unary = Sin | Cos | Sqrt | Abs | Not | Tan | Asin | Acos | Exp | Log | Sign
-type extension = Noise3
 type integer = Iadd | Isub | Imul | Idiv | Imod | Iand | Ior | Ixor | Ishl | Ishr
 type comparison = Ilt | Ile | Igt | Ige | Ieq
 type conversion = To_float | Truncate | Floor | Ceil | Round | Coerce_int | Integer_result of string

@@ -2,7 +2,7 @@
   module Ids = Set.Make (Int)
 
   type row = { id : int; depth : int; label : string; detail : string;
-               badge : string * Rays.Color.t;
+               badge : string * Rays_math.Color.t;
                link : bool; ghost : bool; flags : bool list }
   type drop = Before | Inside | After
   type intent =
@@ -43,7 +43,7 @@
     let open Editor_core.Keymap in
     let key ?(modifiers = []) id label key action = Editor_core.Command.make
         ~id:("list." ^ id) ~label ~trigger:(Chord (key, modifiers)) action in
-    let open Rays.Input in
+    let open Input in
     [ key "up" "previous row" ArrowUp Up; key "down" "next row" ArrowDown Down;
       key "up" "previous row" (KeyChar 'k') Up; key "down" "next row" (KeyChar 'j') Down;
       key "extend-up" "extend selection up" ArrowUp Extend_up ~modifiers:[Shift];
@@ -201,7 +201,7 @@
       !chain in
     (* the ancestors of the first row in view stay at the top while the list is scrolled *)
     let sticky_of scroll = if count = 0 || scroll <= 0. then []
-      else List.filteri (fun index _ -> index < 3)
+      else List.take 3
           (ancestors (max 0 (min (count - 1) (int_of_float (Float.floor (scroll /. height)))))) in
     let row_at (_, py) =
       (* a sticky row is the row under the pointer, not the one scrolled beneath it *)
@@ -219,7 +219,7 @@
     let flag k column = match List.nth_opt (at k).flags column with
       | Some value -> value | None -> false in
     let is_selected id = List.mem id selected in
-    let left = signal.button = Some Rays.Input.LeftButton in
+    let left = signal.button = Some Input.LeftButton in
     let modifier key = List.mem key (Ui.press_keys ui box) in
     (* Presses: select, start a row drag or a toggle paint. *)
     let t, intents = if not (signal.pressed && left) then t, [] else
@@ -242,18 +242,18 @@
                [Flag { ids; column; value }]
            | _ ->
                let selection =
-                 if modifier Rays.Input.Shift then
+                 if modifier Input.Shift then
                    let anchor = Option.value ~default:k
                        (Option.bind t.anchor (position rows shown)) in
                    row.id :: List.filter (( <> ) row.id) (span rows shown anchor k)
-                 else if modifier Rays.Input.Meta || modifier Rays.Input.Ctrl then
+                 else if modifier Input.Meta || modifier Input.Ctrl then
                    if is_selected row.id then List.filter (( <> ) row.id) selected
                    else row.id :: selected
                  else if is_selected row.id then
                    row.id :: List.filter (( <> ) row.id) selected
                  else [row.id] in
                { t with focus = Some row.id;
-                 anchor = (if modifier Rays.Input.Shift then t.anchor else Some row.id);
+                 anchor = (if modifier Input.Shift then t.anchor else Some row.id);
                  drag = if row.ghost then None
                    else Some (Rows { ids = selection; moved = false }) },
                [Select selection]) in

@@ -150,42 +150,42 @@ let check_normals_groups_colors_and_bridge () =
     "soccer ball failed terminal triangulation"
 
 let check_orientation_rotation_and_validation () =
-  let rotation = Vec3.create 0.3 0.5 0.7 and center = Vec3.create 3. (-2.) 5. in
-  let source = Vec3.scale (Vec3.create 1. 1. 1.) (2. /. sqrt 3.) in
+  let rotation = Rays_math.Vec3.create 0.3 0.5 0.7 and center = Rays_math.Vec3.create 3. (-2.) 5. in
+  let source = Rays_math.Vec3.scale (Rays_math.Vec3.create 1. 1. 1.) (2. /. sqrt 3.) in
   let first order =
     let p = make ~kind:Parametric_generators.Platonic_tetrahedron ~rotation
         ~rotation_order:order ~center () |> positions in
-    Vec3.create p.x.(0) p.y.(0) p.z.(0) in
+    Rays_math.Vec3.create p.x.(0) p.y.(0) p.z.(0) in
   let cases = [
-    Parametric_generators.Platonic_xyz, Mat4.mul (Mat4.rotation_z rotation.z)
-      (Mat4.mul (Mat4.rotation_y rotation.y) (Mat4.rotation_x rotation.x));
-    Parametric_generators.Platonic_xzy, Mat4.mul (Mat4.rotation_y rotation.y)
-      (Mat4.mul (Mat4.rotation_z rotation.z) (Mat4.rotation_x rotation.x));
-    Parametric_generators.Platonic_yxz, Mat4.mul (Mat4.rotation_z rotation.z)
-      (Mat4.mul (Mat4.rotation_x rotation.x) (Mat4.rotation_y rotation.y));
-    Parametric_generators.Platonic_yzx, Mat4.mul (Mat4.rotation_x rotation.x)
-      (Mat4.mul (Mat4.rotation_z rotation.z) (Mat4.rotation_y rotation.y));
-    Parametric_generators.Platonic_zxy, Mat4.mul (Mat4.rotation_y rotation.y)
-      (Mat4.mul (Mat4.rotation_x rotation.x) (Mat4.rotation_z rotation.z));
-    Parametric_generators.Platonic_zyx, Mat4.mul (Mat4.rotation_x rotation.x)
-      (Mat4.mul (Mat4.rotation_y rotation.y) (Mat4.rotation_z rotation.z));
+    Parametric_generators.Platonic_xyz, Rays_math.Mat4.mul (Rays_math.Mat4.rotation_z rotation.z)
+      (Rays_math.Mat4.mul (Rays_math.Mat4.rotation_y rotation.y) (Rays_math.Mat4.rotation_x rotation.x));
+    Parametric_generators.Platonic_xzy, Rays_math.Mat4.mul (Rays_math.Mat4.rotation_y rotation.y)
+      (Rays_math.Mat4.mul (Rays_math.Mat4.rotation_z rotation.z) (Rays_math.Mat4.rotation_x rotation.x));
+    Parametric_generators.Platonic_yxz, Rays_math.Mat4.mul (Rays_math.Mat4.rotation_z rotation.z)
+      (Rays_math.Mat4.mul (Rays_math.Mat4.rotation_x rotation.x) (Rays_math.Mat4.rotation_y rotation.y));
+    Parametric_generators.Platonic_yzx, Rays_math.Mat4.mul (Rays_math.Mat4.rotation_x rotation.x)
+      (Rays_math.Mat4.mul (Rays_math.Mat4.rotation_z rotation.z) (Rays_math.Mat4.rotation_y rotation.y));
+    Parametric_generators.Platonic_zxy, Rays_math.Mat4.mul (Rays_math.Mat4.rotation_y rotation.y)
+      (Rays_math.Mat4.mul (Rays_math.Mat4.rotation_x rotation.x) (Rays_math.Mat4.rotation_z rotation.z));
+    Parametric_generators.Platonic_zyx, Rays_math.Mat4.mul (Rays_math.Mat4.rotation_x rotation.x)
+      (Rays_math.Mat4.mul (Rays_math.Mat4.rotation_y rotation.y) (Rays_math.Mat4.rotation_z rotation.z));
   ] in
   List.iter (fun (order, matrix) ->
-    let expected = Vec3.add (Mat4.transform_point matrix source) center
+    let expected = Rays_math.Vec3.add (Rays_math.Mat4.transform_point matrix source) center
     and actual = first order in
     check (near actual.x expected.x && near actual.y expected.y
         && near actual.z expected.z) "Platonic Euler rotation order") cases;
   let custom = make ~orientation:(Parametric_generators.Platonic_axis
-      (Vec3.create 0. max_float 0.)) () in
+      (Rays_math.Vec3.create 0. max_float 0.)) () in
   check_outward_and_regular "custom-axis tetrahedron" 2. custom;
   expect_code "invalid_parameter" (Parametric_generators.platonic ~radius:0. ());
   expect_code "invalid_parameter" (Parametric_generators.platonic ~radius:Float.nan ());
   expect_code "invalid_parameter" (Parametric_generators.platonic ~radius:max_float
-      ~center:(Vec3.create max_float 0. 0.) ());
+      ~center:(Rays_math.Vec3.create max_float 0. 0.) ());
   expect_code "invalid_parameter" (Parametric_generators.platonic ~radius:1.
-      ~rotation:(Vec3.create Float.infinity 0. 0.) ());
+      ~rotation:(Rays_math.Vec3.create Float.infinity 0. 0.) ());
   expect_code "invalid_parameter" (Parametric_generators.platonic ~radius:1.
-      ~orientation:(Parametric_generators.Platonic_axis Vec3.zero) ());
+      ~orientation:(Parametric_generators.Platonic_axis Rays_math.Vec3.zero) ());
   expect_code "invalid_parameter" (Parametric_generators.platonic ~radius:1. ~face_groups:"" ());
   let cancelled = Cancel.create () in
   Cancel.cancel cancelled;
@@ -195,9 +195,9 @@ let check_parallel_exact () =
   let run domains = Parallel.run ~domains (fun () ->
     Parametric_generators.platonic ~kind:Parametric_generators.Platonic_soccer_ball
       ~normals:Parametric_generators.Platonic_vertex_normals
-      ~orientation:(Parametric_generators.Platonic_axis (Vec3.create 1. 2. 3.))
-      ~center:(Vec3.create 3. (-2.) 5.)
-      ~rotation:(Vec3.create 0.3 0.5 0.7)
+      ~orientation:(Parametric_generators.Platonic_axis (Rays_math.Vec3.create 1. 2. 3.))
+      ~center:(Rays_math.Vec3.create 3. (-2.) 5.)
+      ~rotation:(Rays_math.Vec3.create 0.3 0.5 0.7)
       ~rotation_order:Parametric_generators.Platonic_yzx ~face_groups:"face" ~radius:4. ()
     |> get_ok) in
   check (equal_geometry (run 1) (run 4))

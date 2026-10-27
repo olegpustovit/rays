@@ -1,7 +1,7 @@
 module W=Flow.Workspace
 module E=Flow.Eval
 module V=Flow.Value
-module D=Flow.Diagnostic
+module D=Diagnostic
 module I=Flow_ir
 module C=I.Core
 let ok=function Ok value->value|Error d->failwith(D.to_string d)
@@ -9,7 +9,7 @@ let catalog=Flow.Check.{version=1;kinds=[]}
 let parse text=ok(Flow.Syntax.parse text)
 let source body="(workspace errors (graph g :context value (let* [tested "^body^"] 0.)))"
 let check text=match W.check catalog(parse text)with
-  |Some workspace,ds when not(List.exists(fun(d:D.t)->d.severity=D.Error)ds)->workspace
+  |Some workspace,ds when not(List.exists(fun(d:D.t)->d.severity=Diagnostic.Error_severity)ds)->workspace
   |_,ds->failwith(String.concat "; "(List.map D.to_string ds))
 let mapper="(fn [failure] failure)"
 let diagnostic_ty=Flow.Ty.Record["code",Text;"message",Text;"cause",List Text]
@@ -21,7 +21,7 @@ let residual body=
 let compare body=
   let r=residual body in
   let program=match I.Core_lower.lower ~strict:true r with Ok program->program|Error form->failwith form in
-  let live=Frame_input.at_time 0. in
+  let live=Input.at_time 0. in
   let a=I.Core_exec.run program ~live and b=E.Private.force_reference(E.Residual r)~live in
   (match a,b with
    |Ok a,Ok b->assert(a=b)
@@ -46,7 +46,7 @@ let ()=
   error "E_UNUSED" "unused helper" None(compare
     "(let* [guard (fn [x] (with_error (error \"E_UNUSED\" \"unused helper\") (fn [failure] failure))) unused (guard 1)] 0)");
   List.iter(fun body->let _,diagnostics=W.check catalog(parse(source body))in
-    assert(List.exists(fun(d:D.t)->d.severity=D.Error)diagnostics))
+    assert(List.exists(fun(d:D.t)->d.severity=Diagnostic.Error_severity)diagnostics))
     ["(with_error 1 (fn [failure] {:code \"bad\"}))";
      "(with_error 1 (fn [failure] (assoc failure :message (str t))))";
      "(with_error (state [s 0] (+ s 1)) (fn [failure] failure))"]
@@ -60,21 +60,38 @@ let ()=
   let program:C.program={constants=[||];locals=[|diagnostic_ty;Flow.Ty.Any;diagnostic_ty;Flow.Ty.Any|];
     body=[statement 0(Protect{body=[statement 1(Assign(1,Prim(Fail_diagnostic original,[])))];value=1;failure=0;
       handler=[statement 2(Assign(2,Local 0))];mapped=2;result=3})];results=[|3|];state_slots=[||];regions=[||];call_slots=0}in
-  (match I.Core_exec.run program ~live:(Frame_input.at_time 0.)with Error actual->assert(actual=original)|_->assert false);
+  (match I.Core_exec.run program ~live:(Input.at_time 0.)with Error actual->assert(actual=original)|_->assert false);
   let without_cause={original with cause=None}in
   (try ignore(V.Private.with_error ~protected:(fun()->V.raise_diagnostic without_cause)
     ~map:Fun.id);assert false
-   with V.Diagnostic_fail actual->assert(actual=without_cause));
+   with Diagnostic.Error actual->assert(actual=without_cause));
   let called=ref 0 in
   (try ignore(V.Private.with_error ~protected:(fun()->V.raise_diagnostic original)
     ~map:(fun _->incr called;V.Record["code",Text "E_NEW";"message",Text "new";"cause",List[|Text "a";Text "b"|]]));assert false
-   with V.Diagnostic_fail actual->assert(actual.code="E_DIAGNOSTIC_MAP" && actual.trace=original.trace
+   with Diagnostic.Error actual->assert(actual.code="E_DIAGNOSTIC_MAP" && actual.trace=original.trace
      && actual.hints=original.hints && actual.cause=original.cause));assert(!called=1);
   (try ignore(V.Private.with_error ~protected:(fun()->V.raise_diagnostic original)
     ~map:(fun _->V.fail "E_CANCELLED" "mapper cancellation"));assert false
-   with V.Diagnostic_fail actual->assert(actual.code="E_CANCELLED" && actual.hints=[] && actual.trace=[])
-     |V.Fail(code,message,span)->assert(code="E_CANCELLED" && message="mapper cancellation" && span=None));
+   with Diagnostic.Error actual->assert(actual.code="E_CANCELLED" && actual.message="mapper cancellation"
+     && actual.span=None && actual.hints=[] && actual.trace=[]));
   (try ignore(V.Private.with_error ~protected:(fun()->raise Exit) ~map:(fun _->assert false));assert false with Exit->())
+
+let () =
+  let request = residual "(exact (map (fn [x] (+ x 1.0)) (array/float 4 2.0)))" in
+  let callback_error = D.error ~code:"E_CALLBACK" ~cause:"bulk hook" "bulk hook failed" in
+  let mapped = ref 0 in
+  let actual = try
+    ignore (E.Residual.handle ~bulk:(fun _ -> raise (Diagnostic.Error callback_error)) (fun () ->
+      V.Private.with_error
+        ~protected:(fun () -> Option.get (Effect.perform (E.Residual.Bulk_static request)))
+        ~map:(function
+          | V.Record fields -> incr mapped;
+              V.Record (List.map (fun (name, value) ->
+                if name = "code" then name, V.Text "E_MAPPED" else name, value) fields)
+          | _ -> assert false)));
+    assert false
+  with Diagnostic.Error diagnostic -> diagnostic in
+  assert (!mapped = 1 && actual.code = "E_MAPPED" && actual.cause = callback_error.cause)
 
 let ()=
   let forms=parse(source "(let* [guarded (with_error (array/float 2 3.0) (fn [failure] failure))] guarded)")in
@@ -86,7 +103,7 @@ let ()=
     (Set_arg{node=card.path;key=Pos 1;sub=[];value=Flow.Syntax.make(Num "4.0")}))in
   assert(snd(List.hd(List.assoc ["g";"tested"] (ok(E.run ~record:true ~time:0. checked)).records))=E.Float_array[|4.;4.|]);
   let _,checked_again=W.check catalog(parse(fst(Flow.Lisp.print forms)))in
-  assert(not(List.exists(fun(d:D.t)->d.severity=D.Error)checked_again));
+  assert(not(List.exists(fun(d:D.t)->d.severity=Diagnostic.Error_severity)checked_again));
   assert(Result.is_error(Flow_graph.Flow_edit.apply_checked catalog forms
     (Set_arg{node=card.path;key=Pos 0;sub=[];value=Flow.Syntax.make(Str "invalid")})))
 

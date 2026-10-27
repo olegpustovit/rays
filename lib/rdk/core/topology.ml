@@ -28,7 +28,7 @@ let validate ~point_count ~vertex_points ~primitive_offsets ~primitive_kinds =
          stop flag if malformed large meshes need lower rejection latency. *)
       let blocks = ((count - 1) / block_size) + 1 in
       let invalid = Array.make blocks false in
-      Rays_math.Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(blocks - 1)
+      Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(blocks - 1)
         (fun block ->
           let first = block * block_size in
           let last = first + min block_size (count - first) in

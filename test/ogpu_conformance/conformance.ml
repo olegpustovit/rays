@@ -23,7 +23,7 @@ let run driver =
     { label = Some "conformance"; size = 16L; usage = [Copy_src; Copy_dst] } in
   let source = get (Backend.create_buffer device descriptor) in
   let queue = get (Backend.create_queue device) in
-  require (Command_buffer.completed_epoch queue = 0L)
+  require (Backend.completed_epoch queue = 0L)
     "new queue completed an epoch";
   (match Backend.poll_through queue 0L with
    | Error { Error.kind = Invalid_argument; _ } -> ()
@@ -35,11 +35,11 @@ let run driver =
   (* Blit encoder: texture upload with padded rows, read back by the host,
      and the same at an inset origin. *)
   let rec poll receipt attempts =
-    match get (Command_buffer.status queue receipt) with
-    | Command_buffer.Completed -> ()
-    | Command_buffer.Pending when attempts = 0 ->
+    match get (Backend.status queue receipt) with
+    | Backend.Completed -> ()
+    | Backend.Pending when attempts = 0 ->
         failwith "submitted epoch did not complete"
-    | Command_buffer.Pending -> Unix.sleepf 0.001; poll receipt (attempts - 1) in
+    | Backend.Pending -> Unix.sleepf 0.001; poll receipt (attempts - 1) in
   let blit encode =
     let commands=get (Backend.begin_commands queue) in
     let encoder=get (Backend.blit_encoder commands) in
@@ -65,7 +65,7 @@ let run driver =
   let receipt = blit (fun encoder ->
     get (Backend.buffer_to_texture encoder ~src:upload ~bytes_per_row:256L
       ~bytes_per_image:512L ~dst:first ~extent ())) in
-  require (Command_buffer.completed_epoch queue = receipt.epoch)
+  require (Backend.completed_epoch queue = receipt.epoch)
     "queue completed epoch differs from receipt";
   require (get (Backend.poll_through queue receipt.epoch))
     "completed epoch did not remain complete";
@@ -100,6 +100,8 @@ let run driver =
       | Types.Rgba8_unorm -> Bytes.set_uint8 rows offset (int_of_float v land 255)
       | Rgba16_float -> Bytes.set_uint16_le rows offset (Types.half_of_float v)
       | Rgba32_float -> Bytes.set_int32_le rows offset (Int32.bits_of_float v)
+      | R8_unorm | Bgra8_unorm | Bgra8_unorm_srgb | Depth32_float ->
+          failwith "conformance image writer requires an RGBA color format"
     done done done;
     rows in
   List.iter (fun format ->
@@ -193,10 +195,10 @@ let run driver =
     [{group=0;binding=0;kind=Shader.Storage_buffer;visibility=[Shader.Compute]};
      {group=0;binding=1;kind=Shader.Uniform_buffer;visibility=[Shader.Compute]}] in
   let rec poll_epoch receipt attempts =
-    match get (Command_buffer.status queue receipt) with
-    | Command_buffer.Completed -> ()
-    | Command_buffer.Pending when attempts = 0 -> failwith "encoded commands did not complete"
-    | Command_buffer.Pending -> Unix.sleepf 0.001; poll_epoch receipt (attempts - 1) in
+    match get (Backend.status queue receipt) with
+    | Backend.Completed -> ()
+    | Backend.Pending when attempts = 0 -> failwith "encoded commands did not complete"
+    | Backend.Pending -> Unix.sleepf 0.001; poll_epoch receipt (attempts - 1) in
   let words=get (Backend.create_buffer device
     {label=Some"encoded-words";size=16L;usage=[Storage;Copy_src;Copy_dst]}) in
   let local=get (Backend.create_buffer ~memory:Types.Device_local device
@@ -697,7 +699,7 @@ let run driver =
   let clear_target r g b a=
     let commands=get (Backend.begin_commands queue) in
     let encoder=get (Backend.render_encoder commands
-      {colors=[{texture=target;resolve=None;load=Clear;store=Store;clear=(r,g,b,a)}];depth=None;stencil=None}) in
+      {colors=[{texture=target;resolve=None;load=Clear;store=Store;clear=(r,g,b,a)}];depth=None}) in
     get (Backend.end_render encoder);
     poll_epoch (get (Backend.commit commands)) 1000 in
   if Caps.has profile Caps.Render_pipeline then begin
@@ -712,7 +714,7 @@ let run driver =
       get (Backend.set_stage_buffer encoder Fragment ~index:1 color) in
     let commands=get (Backend.begin_commands queue) in
     let encoder=get (Backend.render_encoder commands
-      {colors=[{texture=target;resolve=None;load=Load;store=Store;clear=(0.,0.,0.,0.)}];depth=None;stencil=None}) in
+      {colors=[{texture=target;resolve=None;load=Load;store=Store;clear=(0.,0.,0.,0.)}];depth=None}) in
     (match Backend.draw encoder ~primitive:Triangle_list ~first:0 ~count:3 () with
      | Error { Error.kind = Invalid_state; _ } -> ()
      | _ -> failwith "draw without a render pipeline was accepted");
@@ -740,7 +742,7 @@ let run driver =
     clear_target 0. 0. 0. 1.;
     let commands=get (Backend.begin_commands queue) in
     let encoder=get (Backend.render_encoder commands
-      {colors=[{texture=target;resolve=None;load=Load;store=Store;clear=(0.,0.,0.,0.)}];depth=None;stencil=None}) in
+      {colors=[{texture=target;resolve=None;load=Load;store=Store;clear=(0.,0.,0.,0.)}];depth=None}) in
     get (Backend.set_viewport encoder {x=0;y=0;width=4;height=4});
     get (Backend.draw_batch encoder
       [|{pipeline=flat;buffers=[|Vertex,0,offsets,0L;Fragment,1,color,0L|];primitive=Triangle_list;
@@ -758,7 +760,7 @@ let run driver =
     clear_target 0. 0. 0. 1.;
     let commands=get (Backend.begin_commands queue) in
     let encoder=get (Backend.render_encoder commands
-      {colors=[{texture=target;resolve=None;load=Load;store=Store;clear=(0.,0.,0.,0.)}];depth=None;stencil=None}) in
+      {colors=[{texture=target;resolve=None;load=Load;store=Store;clear=(0.,0.,0.,0.)}];depth=None}) in
     get (Backend.set_viewport encoder {x=0;y=0;width=4;height=4});
     get (Backend.set_render_pipeline encoder flat);
     get (Backend.set_stage_buffer encoder Vertex ~index:0 offsets);
@@ -787,7 +789,7 @@ let run driver =
     for _=1 to 2 do
       let commands=get (Backend.begin_commands queue) in
       let encoder=get (Backend.render_encoder commands
-        {colors=[{texture=target;resolve=None;load=Load;store=Store;clear=(0.,0.,0.,0.)}];depth=None;stencil=None}) in
+        {colors=[{texture=target;resolve=None;load=Load;store=Store;clear=(0.,0.,0.,0.)}];depth=None}) in
       get (Backend.set_viewport encoder {x=0;y=0;width=4;height=4});
       (match Backend.execute_icb encoder icb ~location:0 ~length:1 with
        | Error { Error.kind = Invalid_state; _ } -> ()
@@ -821,7 +823,7 @@ let run driver =
     clear_target 0. 0. 0. 1.;
     let commands=get (Backend.begin_commands queue) in
     let encoder=get (Backend.render_encoder commands
-      {colors=[{texture=target;resolve=None;load=Load;store=Store;clear=(0.,0.,0.,0.)}];depth=None;stencil=None}) in
+      {colors=[{texture=target;resolve=None;load=Load;store=Store;clear=(0.,0.,0.,0.)}];depth=None}) in
     get (Backend.set_viewport encoder {x=0;y=0;width=4;height=4});
     get (Backend.set_render_pipeline encoder argument_pipeline);
     get (Backend.set_stage_buffer encoder Vertex ~index:0 offsets);
@@ -836,7 +838,7 @@ let run driver =
     clear_target 0. 0. 0. 1.;
     let commands=get (Backend.begin_commands queue) in
     let encoder=get (Backend.render_encoder commands
-      {colors=[{texture=target;resolve=None;load=Load;store=Store;clear=(0.,0.,0.,0.)}];depth=None;stencil=None}) in
+      {colors=[{texture=target;resolve=None;load=Load;store=Store;clear=(0.,0.,0.,0.)}];depth=None}) in
     get (Backend.set_viewport encoder {x=0;y=0;width=4;height=4});
     get (Backend.set_render_pipeline encoder textured);
     get (Backend.set_stage_buffer encoder Vertex ~index:0 offsets);
@@ -860,10 +862,10 @@ let run driver =
       let commands=get (Backend.begin_commands queue) in
       let encoder=get (Backend.render_encoder commands
         {colors=[{texture=target;resolve=None;load=Load;store=Store;clear=(0.,0.,0.,0.)}];
-         depth=Some {depth_texture=depth;depth_load=load;depth_store=Store;depth_clear=clear};stencil=None}) in
+         depth=Some {depth_texture=depth;depth_load=load;depth_store=Store;depth_clear=clear}}) in
       get (Backend.set_viewport encoder {x=0;y=0;width=4;height=4});
       get (Backend.set_render_pipeline encoder depth_pipeline);
-      get (Backend.set_depth_state encoder (Some {depth_compare=Less;depth_write=true;stencil=None}));
+      get (Backend.set_depth_state encoder (Some {depth_compare=Less;depth_write=true}));
       get (Backend.set_stage_buffer encoder Vertex ~index:0 offsets);
       set_color encoder 1. 1. 0. 1.;
       get (Backend.draw encoder ~primitive:Triangle_list ~first:0 ~count:3 ());
@@ -881,7 +883,7 @@ let run driver =
     let msaa_pass load store clear=
       let commands=get (Backend.begin_commands queue) in
       let encoder=get (Backend.render_encoder commands
-        {colors=[{texture=msaa;resolve=Some target;load;store;clear}];depth=None;stencil=None}) in
+        {colors=[{texture=msaa;resolve=Some target;load;store;clear}];depth=None}) in
       get (Backend.end_render encoder);
       poll_epoch (get (Backend.commit commands)) 1000 in
     msaa_pass Clear Store (0.125,0.25,0.5,1.);
@@ -891,7 +893,7 @@ let run driver =
     expect_pixels "\x20\x40\x80\xff" "Store with a resolve texture did not keep the samples";
     let commands=get (Backend.begin_commands queue) in
     (match Backend.render_encoder commands
-       {colors=[{texture=msaa;resolve=Some target;load=Clear;store=Discard;clear=(0.,0.,0.,1.)}];depth=None;stencil=None} with
+       {colors=[{texture=msaa;resolve=Some target;load=Clear;store=Discard;clear=(0.,0.,0.,1.)}];depth=None} with
      | Error { Error.kind = Invalid_argument; _ } -> ()
      | _ -> failwith "a discarded attachment was allowed to resolve");
     get (Backend.abandon commands);
@@ -919,7 +921,7 @@ let run driver =
      | _ -> failwith "unsupported indirect command buffer was created");
     let commands=get (Backend.begin_commands queue) in
     (match Backend.render_encoder commands
-       {colors=[{texture=target;resolve=None;load=Clear;store=Store;clear=(0.,0.,0.,1.)}];depth=None;stencil=None} with
+       {colors=[{texture=target;resolve=None;load=Clear;store=Store;clear=(0.,0.,0.,1.)}];depth=None} with
      | Error { Error.kind = Unsupported; _ } -> ()
      | _ -> failwith "unsupported render encoder was opened");
     get (Backend.abandon commands)
@@ -928,7 +930,7 @@ let run driver =
   get (Backend.destroy_texture target);
   get (Backend.destroy_sampler sampler);
   let other_queue = get (Backend.create_queue device) in
-  require (Command_buffer.completed_epoch other_queue = 0L)
+  require (Backend.completed_epoch other_queue = 0L)
     "new queue inherited another queue's completion";
   let other_commands=get (Backend.begin_commands other_queue) in
   let other_blit=get (Backend.blit_encoder other_commands) in
@@ -938,11 +940,11 @@ let run driver =
   let other = get (Backend.commit other_commands) in
   require (other.epoch = 1L) "queue epochs are not independent";
   let rec poll_other attempts =
-    match get (Command_buffer.status other_queue other) with
-    | Command_buffer.Completed -> ()
-    | Command_buffer.Pending when attempts = 0 ->
+    match get (Backend.status other_queue other) with
+    | Backend.Completed -> ()
+    | Backend.Pending when attempts = 0 ->
         failwith "second queue did not complete"
-    | Command_buffer.Pending -> Unix.sleepf 0.001; poll_other (attempts - 1) in
+    | Backend.Pending -> Unix.sleepf 0.001; poll_other (attempts - 1) in
   poll_other 1000;
   get (Backend.destroy_buffer source);
   (match Backend.read_buffer source ~offset:0L ~length:1 with

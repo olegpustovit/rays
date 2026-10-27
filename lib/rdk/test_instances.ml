@@ -62,7 +62,7 @@ let add_attribute attribute geometry =
   Geometry.with_attribute attribute geometry |> get_ok
 
 let source_geometry () =
-  let source = Box_generator.box ~size:(Vec3.create 0.5 0.75 1.) () |> get_rdk in
+  let source = Box_generator.box ~size:(Rays_math.Vec3.create 0.5 0.75 1.) () |> get_rdk in
   let points = Geometry.point_count source
   and vertices = Geometry.vertex_count source
   and primitives = Geometry.primitive_count source in
@@ -85,11 +85,11 @@ let source_geometry () =
 
 let transforms count = Array.init count (fun instance ->
   let angle = float_of_int instance *. 0.17 in
-  Mat4.mul
-    (Mat4.translation (Vec3.create (float_of_int instance *. 1.25)
+  Rays_math.Mat4.mul
+    (Rays_math.Mat4.translation (Rays_math.Vec3.create (float_of_int instance *. 1.25)
       (sin angle *. 0.5) (cos angle *. 0.25)))
-    (Mat4.mul (Mat4.rotation_y angle)
-      (Mat4.scaling (Vec3.create 1. (0.75 +. float_of_int (instance mod 3)
+    (Rays_math.Mat4.mul (Rays_math.Mat4.rotation_y angle)
+      (Rays_math.Mat4.scaling (Rays_math.Vec3.create 1. (0.75 +. float_of_int (instance mod 3)
         *. 0.125) 1.))))
 
 let legacy_materialize matrices source =
@@ -135,13 +135,13 @@ let run () =
       "default-grain materialization mutated its inputs")
     [boundary - 1; boundary; boundary + 1; 4 * boundary + 1];
 
-  let identity = Instance_copy.materialize_instances ~transforms:[|Mat4.identity|] source
+  let identity = Instance_copy.materialize_instances ~transforms:[|Rays_math.Mat4.identity|] source
       |> get_rdk in
   check (Geometry.data_id identity = Geometry.data_id source)
     "single identity materialization did not preserve the immutable snapshot";
 
-  let single_matrix = Mat4.mul (Mat4.translation (Vec3.create 3. 2. 1.))
-      (Mat4.rotation_x 0.37) in
+  let single_matrix = Rays_math.Mat4.mul (Rays_math.Mat4.translation (Rays_math.Vec3.create 3. 2. 1.))
+      (Rays_math.Mat4.rotation_x 0.37) in
   let single = Instance_copy.materialize_instances ~transforms:[|single_matrix|] source |> get_rdk
   and single_expected = Transform_ops.transform ~grain:1 single_matrix source in
   check (geometry_equal single_expected single)
@@ -169,12 +169,12 @@ let run () =
     "empty instance materialization retained group members";
 
   let singular = Instance_copy.materialize_instances
-      ~transforms:[|Mat4.scaling (Vec3.create 1. 0. 1.)|] source |> get_rdk in
+      ~transforms:[|Rays_math.Mat4.scaling (Rays_math.Vec3.create 1. 0. 1.)|] source |> get_rdk in
   check (Geometry.find_attribute ~owner:Attribute.Point "N" singular = None
       && Geometry.find_attribute ~owner:Attribute.Vertex "N" singular = None)
     "singular instance transform retained invalid normals";
 
-  let invalid = Mat4.of_rows (Float.nan, 0., 0., 0.) (0., 1., 0., 0.)
+  let invalid = Rays_math.Mat4.of_rows (Float.nan, 0., 0., 0.) (0., 1., 0., 0.)
       (0., 0., 1., 0.) (0., 0., 0., 1.) in
   (match Instance_copy.materialize_instances ~transforms:[|invalid|] source with
    | Error error when Error.code error = "invalid_parameter" -> ()
@@ -183,7 +183,7 @@ let run () =
   let triangle = Line_geometry.polyline ~closed:true
       [|(0., 0., 0.); (1., 0., 0.); (0., 1., 0.)|] |> get_rdk in
   let scale_count = 100_000 in
-  let scaled = Instance_copy.materialize_instances ~transforms:(Array.make scale_count Mat4.identity) triangle |> get_rdk in
+  let scaled = Instance_copy.materialize_instances ~transforms:(Array.make scale_count Rays_math.Mat4.identity) triangle |> get_rdk in
   check (Geometry.point_count scaled = scale_count * 3
       && Geometry.vertex_count scaled = scale_count * 3
       && Geometry.primitive_count scaled = scale_count)

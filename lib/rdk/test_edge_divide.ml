@@ -240,7 +240,7 @@ let run () =
       && Geometry.vertex_count nonmanifold_output = 18)
     "non-manifold shared Edge Divide cardinality";
 
-  let other = Box_generator.box ~size:(Vec3.create 1. 1. 1.) () |> get_rdk
+  let other = Box_generator.box ~size:(Rays_math.Vec3.create 1. 1. 1.) () |> get_rdk
       |> Group_mesh.group_edges ~name:"other" |> get_rdk in
   let other_edges = Geometry.find_edge_group "other" other |> Option.get in
   expect_code "invalid_topology"

@@ -84,4 +84,5 @@ UI_SHOT_DO="select:picture/<card>" _build/default/tools/ui_shot.exe ...   # its 
 
 Read the picture: the status strip shows the first diagnostic, the graph shows whether
 the dataflow is the one you drew, the inspector whether the rows read as words. A new
-sketch also needs `dune build @sketches/runtest; dune promote sketches/dune.rays.inc`.
+sketch also needs `_build/default/tools/check.exe @sketches/runtest`;
+every `.rays` file is discovered directly, with no generated include to promote.

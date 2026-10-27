@@ -1,5 +1,5 @@
 (library
  (name ogpu_core)
  (public_name rays.ogpu_core)
- (modules Error Handle Caps Validation Types Shader Surface Binding Pipeline Acceleration Render_pass Backend Command_buffer)
+ (modules Error Handle Caps Validation Types Shader Surface Binding Pipeline Acceleration Render_pass Backend)
  (libraries native_layer_token))

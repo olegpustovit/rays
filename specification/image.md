@@ -64,7 +64,10 @@ Loaded or created images are owned by the caller and belong in
 `Sketch.run_state ~on_stop`:
 
 ```ocaml
-let on_stop model = Image.destroy model.sprite
+let on_stop model =
+  match Image.destroy model.sprite with
+  | Ok () -> ()
+  | Error message -> prerr_endline message
 ```
 
 Destruction is idempotent. Stale resource use is rejected at the checked native

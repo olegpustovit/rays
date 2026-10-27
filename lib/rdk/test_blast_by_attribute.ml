@@ -224,7 +224,7 @@ let test_errors_and_cancellation () =
       |> with_attribute Attribute.Point "value"
            (Attribute.Float [|Float.nan; 1.; Float.infinity|]) in
   let all = Group.init ~owner:Group.Point ~name:"all" 3 (fun _ -> true) in
-  let error domains = Rays.Parallel.run ~domains (fun () ->
+  let error domains = Parallel.run ~domains (fun () ->
       Blast_by_attribute.blast ~grain:1 ~base:all ~owner:Blast_by_attribute.Blast_points
         ~attribute:"value" ~mode:(Blast_by_attribute.Blast_below 2.)
         ~output:(Blast_by_attribute.Blast_group "picked") non_finite) in
@@ -261,12 +261,12 @@ let test_dense_parallel_exactness () =
       |> with_attribute Attribute.Primitive "class"
            (Attribute.Int (Array.init primitive_count (fun primitive ->
              (primitive * 17) mod 1_009))) in
-  let run_point domains = Rays.Parallel.run ~domains (fun () ->
+  let run_point domains = Parallel.run ~domains (fun () ->
       Blast_by_attribute.blast ~grain:257 ~owner:Blast_by_attribute.Blast_points
         ~attribute:"density"
         ~mode:(Blast_by_attribute.Blast_range { minimum = 0.35; maximum = 0.65 })
         ~output:(Blast_by_attribute.Blast_group "picked") source |> get_ok) in
-  let run_primitive domains = Rays.Parallel.run ~domains (fun () ->
+  let run_primitive domains = Parallel.run ~domains (fun () ->
       Blast_by_attribute.blast ~grain:257 ~remove_unused_points:true
         ~owner:Blast_by_attribute.Blast_primitives ~attribute:"class"
         ~mode:(Blast_by_attribute.Blast_below 400.) ~output:Blast_by_attribute.Blast_delete source |> get_ok) in

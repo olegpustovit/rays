@@ -47,7 +47,7 @@ let test_best_fit_and_explicit_plane () =
   check (Geometry.primitive_count best = 4) "best-fit tilted plane cardinality";
   let explicit = Triangulate2d.run
       ~projection:(Triangulate2d.Plane {
-        origin = Vec3.zero; normal = Vec3.create (-1.) (-2.) 1. }) input |> get in
+        origin = Rays_math.Vec3.zero; normal = Rays_math.Vec3.create (-1.) (-2.) 1. }) input |> get in
   check (Geometry.primitive_count explicit = 4)
     "explicit tilted plane cardinality"
 
@@ -83,7 +83,7 @@ let test_projected_output_positions () =
       [|0.,0.,-5.;2.,0.,20.;2.,2.,-10.;0.,2.,30.|] in
   let explicit = Triangulate2d.run ~grain:1
       ~projection:(Triangulate2d.Plane {
-        origin=Vec3.create 0. 0. 10.; normal=Vec3.create 0. 0. 1. })
+        origin=Rays_math.Vec3.create 0. 0. 10.; normal=Rays_math.Vec3.create 0. 0. 1. })
       ~restore_original_point_positions:false explicit_source |> get in
   let x,y,z = position_signature explicit in
   check (x = [|0.;2.;2.;0.|] && y = [|0.;0.;2.;2.|]
@@ -939,7 +939,7 @@ let test_errors () =
   let expect = function Error _ -> () | Ok _ -> fail "invalid input succeeded" in
   expect (Triangulate2d.run
       ~projection:(Triangulate2d.Plane {
-        origin = Vec3.zero; normal = Vec3.zero }) input);
+        origin = Rays_math.Vec3.zero; normal = Rays_math.Vec3.zero }) input);
   expect (Triangulate2d.run
       ~projection:(Triangulate2d.Point_attribute "missing") input);
   let nonfinite = Line_geometry.points [|0.,0.,0.;1.,0.,0.;0.,1.,0.|] in

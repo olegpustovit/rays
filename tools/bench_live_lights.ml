@@ -3,10 +3,9 @@ open Rays
 module E = Rays_editor.Editor
 
 let frame count : Frame.t = {
-  width = 900; height = 640; size = 900, 640;
-
-  pixel_scale = 1., 1.; time = float count /. 60.; dt = 1. /. 60.; fps = 60.; count;
-  mouse = 450., 300.; mouse_delta = 0., 0.; keys = []; mouse_buttons = []; events = [] }
+  input = { (Input.at_time (float count /. 60.)) with dt = 1. /. 60.;
+    frame = count; tick = count; size = 900, 640; pointer = 450., 300. };
+  pixel_scale = 1., 1.; fps = 60.; mouse_delta = 0., 0. }
 
 let run views live =
   let source = Buffer.create 2048 in
@@ -29,7 +28,7 @@ let run views live =
   let e = ref (E.create ~workspace ~domains:1 ~await:true ~seed:42L
     ~presets:(Filename.temp_dir "rays-live-light-bench" "")
     ~prepare:(fun _ _ -> incr prepares; Ok ())
-    ~scene3:(fun _ () -> incr drawings; Scene3.empty) () |> Result.get_ok) in
+    ~draw:(fun _ () -> incr drawings; Scene3.empty) () |> Result.get_ok) in
   Fun.protect ~finally:(fun () -> E.close !e) (fun () ->
     for i = 1 to 10 do e := E.update !e (frame i) done;
     let prepared = !prepares and drawn = !drawings in

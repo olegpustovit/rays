@@ -109,7 +109,7 @@ val with_scope :
   ?probe:(path -> int) ->
   ?frames:(path -> (string * (float * float) * (float * float)) list) ->
   ?imported:(path -> string option) -> ?display:path ->
-  ?wires:[ `Rect | `Straight | `Curve ] -> ?layouts:string list ->
+  ?layouts:string list ->
   key:string ->
   Flow_graph.Projection.scope -> t -> t
 (** Lay a scope out.  A new [key] (the graph's name) frames it and clears the
@@ -122,7 +122,7 @@ val with_display : path option -> t -> t
 (** Change the viewport flag without laying out the scope. *)
 
 val with_arguments : (path * Flow_graph.Flow_edit.arg_key * Flow.Syntax.t) list -> t -> t
-(** Update same-type literal rows in the existing placement, retaining wire routes,
+(** Update same-type literal rows in the existing placement, retaining wire geometry,
     hit indices, selection and the active pointer gesture. *)
 
 val with_records : Flow_graph.Probe.t -> t -> t
@@ -145,11 +145,6 @@ val select : path list -> t -> t
 val clear_selection : t -> t
 val stats : t -> stats
 val zoom : t -> float
-val with_wires : [ `Rect | `Straight | `Curve ] -> t -> t
-(** [`Curve] (the default): a cubic leaving and entering level; [`Straight] ([:wires "straight"]): one
-    segment port to port, bent clear of any card it would cross; [`Rect] is the old orthogonal
-    routing, for [:wires "rect"]. *)
-
 val scope_point : t -> scope:path -> float * float -> (float * float) option
 (** A screen point as a position inside [scope] (a scope path of the shown graph), snapped to the
     24-point dot lattice: where a node added from a menu opened there is placed ([Moved]). *)

@@ -30,7 +30,6 @@ val resolve_component_names : (string -> string option) -> string list -> string
 
 type kind = {
   qualified : string;
-  aliases : string list;
   context : Context.t;
   slots : slot list;
   parameters : parameter list;
@@ -40,7 +39,7 @@ type kind = {
 
 type catalog = { version : int; kinds : kind list }
 
-val parameters_of_fields : Param.field_view list -> parameter list
+val parameters_of_fields : Param.field_view list -> (parameter list, string) result
 (** Inspector fields grouped into the catalog's scalar and vec3 inputs. *)
 
 type term = { node : term_node; ty : Port_type.t option }

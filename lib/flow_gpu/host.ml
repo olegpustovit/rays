@@ -11,9 +11,9 @@ let add_run stats run={stats with
   input_uploaded_bytes=stats.input_uploaded_bytes+Run.Private.input_uploaded_bytes run;
   status_reads=stats.status_reads+Run.Private.status_reads run;
   readback_bytes=stats.readback_bytes+Run.Private.readback_bytes run}
-type t={gpu:Rays_execution.gpu;pipelines:Pipelines.t;runners:runner Cache.t;
+type t={gpu:Renderer.gpu;pipelines:Pipelines.t;runners:runner Cache.t;
   created:int ref;retired:stats ref;
-  mutable sites:(Flow_ir.Packed.instruction array*Run.t option) list;  (* resident fold runners by region site *)
+  sites:(Flow_ir.Packed.instruction array,Run.t option)Lru.Identity_list.t;  (* resident fold runners by region site *)
   mutable flight:int64 list;  (* fast dispatches' epochs, newest first *)
   pool:(int*int,Obj.t list)Hashtbl.t;  (* resident placeholders by (kind, length), reused each draw *)
   mutable iota:(Ogpu.Backend.buffer*int)option;  (* 0., 1., 2., ... on the device, for range sources *)
@@ -25,38 +25,50 @@ let next=Atomic.make 1
 let create ~clock gpu =
   if not(Domain.is_main_domain())then invalid_arg "Host.create: initial domain required";
   let created=ref 0 and retired=ref zero in
-  {gpu;pipelines=Pipelines.create ~clock(Rays_execution.gpu_device gpu);
-    created;retired;sites=[];flight=[];pool=Hashtbl.create 16;iota=None;retired_buffers=[];zeros=[||];buffers=Hashtbl.create 16;
+  {gpu;pipelines=Pipelines.create ~clock(Renderer.gpu_device gpu);
+    created;retired;sites=Lru.Identity_list.create ~equal:(==) ~release:(fun _->Option.iter Run.close)32;
+    flight=[];pool=Hashtbl.create 16;iota=None;retired_buffers=[];zeros=[||];buffers=Hashtbl.create 16;
     runners=Cache.create ~release:(fun _ runner->
       retired:={(add_run !retired runner.run) with runners_released=(!retired).runners_released+1};
       runner.output<-None;Run.close runner.run)64;
     closed=false;domain=Domain.self()}
 let live t=not t.closed && Domain.self()=t.domain
 let live_ok=live
-let error message=Error(Flow.Diagnostic.error ~code:"E_GPU" message)
+let error message=Error(Diagnostic.error ~code:"E_GPU" message)
 (* In fast precision a dispatch does not wait; its output is waited for when first borrowed or read,
    and at most two stay in flight (the queue admits three command buffers). *)
 let complete t epoch=
-  let queue=Rays_execution.gpu_queue t.gpu in
-  epoch<=Ogpu.Backend.completed_epoch queue || Result.is_ok(Ogpu.Backend.complete_through queue epoch)
+  let queue=Renderer.gpu_queue t.gpu in
+  if epoch<=Ogpu.Backend.completed_epoch queue then Ok ()
+  else Result.map_error Run.Private.diagnostic(Ogpu.Backend.complete_through queue epoch)
 (* Every command buffer the host commits without waiting (fast display regions, a resident fold's
    levels) shares one limit: before another, all but the newest in flight are waited for, so at most
    two are (the queue admits three). *)
 let admit t=
-  let queue=Rays_execution.gpu_queue t.gpu in
+  let queue=Renderer.gpu_queue t.gpu in
   t.flight<-List.filter(fun e->e>Ogpu.Backend.completed_epoch queue)t.flight;
-  match t.flight with _::older::_->ignore(complete t older);t.flight<-List.filteri(fun i _->i<1)t.flight|_->()
+  match t.flight with
+  | _::older::_ -> Result.map(fun()->t.flight<-List.take 1 t.flight)(complete t older)
+  | _ -> Ok ()
 let record t epoch=if epoch>0L then t.flight<-epoch::t.flight
 let output t (value:G.value)=
-  if not(live t)then None else
-  Option.bind(Cache.find_first t.runners(fun _ runner->runner.identity=value.identity))(fun runner->
-    if runner.stamp<>value.stamp then None else
-    Option.bind runner.output(fun output->if Run.count output<>value.count || Run.width output<>value.width
-      || Run.buffer output=None || not(complete t (Run.epoch output)) then None else Some output))
+  let stale=Ok None in
+  if not(live t)then stale else
+  match Cache.find_first t.runners(fun _ runner->runner.identity=value.identity)with
+  |None->stale
+  |Some runner when runner.stamp<>value.stamp->stale
+  |Some runner->
+    match Option.bind runner.output(Run.select_output ~index:value.output)with
+    |None->stale
+    |Some output when Run.count output<>value.count || Run.width output<>value.width
+        || (Run.count output>0 && Run.buffer output=None)->stale
+    |Some output->Result.bind(complete t(Run.epoch output))(fun()->
+        if Run.count output=0 then Ok(Some output)
+        else Result.map(fun()->Some output)(Run.Private.check_status runner.run ~epoch:(Run.epoch output)))
 let backend t : G.backend =
-  {cost=(fun _ ~count:_->None);
-   prepare=(fun packed->if not(live t)then error "GPU host is closed or called from another domain."else
-     Result.bind (Emit.kernel ~fast:(Domain.DLS.get Flow_ir.Gpu.fast) packed)(fun msl->
+  {cost=(fun ~fast:_ _ ~count:_->None);
+   prepare=(fun ~fast packed->if not(live t)then error "GPU host is closed or called from another domain."else
+     Result.bind (Emit.kernel ~fast packed)(fun msl->
      Result.map(fun _compiled->
        (* Each prepared producer owns an output generation. Sharing only its
           shader source would overwrite an earlier drawing's borrowed output. *)
@@ -69,15 +81,16 @@ let backend t : G.backend =
        {G.run=(fun inputs->if not(live t)then error "GPU host is closed or called from another domain."else
           let runner=runner()in
           runner.output<-None;
-          Result.map(fun output->runner.output<-Some output;runner.stamp<-Int64.succ runner.stamp;
-            G.{identity=runner.identity;count=Run.count output;width=Run.width output;stamp=runner.stamp;
-              gpu_seconds=Run.gpu_seconds output})
-            (let fast=Domain.DLS.get Flow_ir.Gpu.fast in
-             if fast then admit t;
-             Result.map(fun output->if fast then record t(Run.epoch output);output)
-               (Run.dispatch ~wait:(not fast) runner.run inputs)));
-        readback=(fun value->match output t value with None->error "GPU output was closed or superseded."
-          |Some output->Run.readback output)}) (Pipelines.get t.pipelines msl)))}
+          Result.bind(if fast then admit t else Ok())(fun()->
+            Result.map(fun output->if fast then record t(Run.epoch output);
+              runner.output<-Some output;runner.stamp<-Int64.succ runner.stamp;
+              G.{identity=runner.identity;count=Run.count output;width=Run.width output;output=0;stamp=runner.stamp;
+                gpu_seconds=Run.gpu_seconds output})
+              (Run.dispatch ~wait:(not fast) runner.run inputs)));
+        readback=(fun value->match output t value with
+          |Error diagnostic->Error diagnostic
+          |Ok None->error "GPU output was closed or superseded."
+          |Ok(Some output)->Run.readback output)}) (Pipelines.get t.pipelines msl)))}
 (* A resident fold: from a region of 256 elements, a loop's regions and compactions are encoded level
    by level, committed without a wait, into buffers the fold owns; nothing is read until the loop ends.  A
    region's value is a placeholder (zeros of its capacity, an upper bound) the table below maps,
@@ -85,20 +98,21 @@ let backend t : G.backend =
    ([array/range] of an array's count) is taken on the device.  [finish] reads a count, then the
    array. *)
 type placeholder={key:Obj.t;kind:int;buffer:Ogpu.Backend.buffer*int;length:int;cell:(Ogpu.Backend.buffer*int)option}
-let resident t : Flow_ir.Core_exec.resident =
+let resident ~fast t : Flow_ir.Core_exec.resident =
   let module E=Flow.Eval in
   let module P=Flow_ir.Packed.Private in
-  let queue=Rays_execution.gpu_queue t.gpu in
-  let table=ref [] and epoch=ref 0L in
+  let queue=Renderer.gpu_queue t.gpu in
+  let table=ref [] and epoch=ref 0L and status_runs=ref [] in
   let pending=ref None in
   let commands()=match !pending with Some c->Ok c|None->
     Result.map(fun c->pending:=Some c;c)(Result.map_error Run.Private.diagnostic(Ogpu.Backend.begin_commands queue))in
   (* committed per level without waiting, so the device runs a level while the host encodes the
      next; at most two in flight (the queue admits three) *)
   let flush()=match !pending with None->Ok()|Some c->pending:=None;
-    admit t;
-    Result.map(fun(r:Ogpu.Backend.receipt)->record t r.epoch;epoch:=r.epoch)
-      (Result.map_error Run.Private.diagnostic(Ogpu.Backend.commit c))in
+    match admit t with
+    |Error diagnostic->ignore(Ogpu.Backend.abandon c);Error diagnostic
+    |Ok()->Result.map(fun(r:Ogpu.Backend.receipt)->record t r.epoch;epoch:=r.epoch)
+        (Result.map_error Run.Private.diagnostic(Ogpu.Backend.commit c))in
   let raw=function E.Float_array a|Vec2_array a|Vec3_array a|Vec4_array a->Some(Obj.repr a)
     |Int_array a->Some(Obj.repr a)|_->None in
   let find v=Option.bind(raw v)(fun key->List.find_opt(fun p->p.key==key)!table) in
@@ -122,7 +136,7 @@ let resident t : Flow_ir.Core_exec.resident =
       let capacity=max length(2*Option.fold ~none:0 ~some:snd old)in
       let bytes=Bytes.create(capacity*4)in
       for k=0 to capacity-1 do Bytes.set_int32_le bytes(k*4)(Int32.bits_of_float(float k))done;
-      match Ogpu.Backend.create_buffer(Rays_execution.gpu_device t.gpu)
+      match Ogpu.Backend.create_buffer(Renderer.gpu_device t.gpu)
           {label=Some "Flow resident indices";size=Int64.of_int(capacity*4);usage=[Storage;Copy_dst]}with
       |Error _->None
       |Ok buffer->
@@ -138,17 +152,17 @@ let resident t : Flow_ir.Core_exec.resident =
   let alloc bytes=match Hashtbl.find_opt t.buffers bytes with
     |Some(b::rest)->Hashtbl.replace t.buffers bytes rest;Ok(b,bytes)
     |_->Result.map(fun b->b,bytes)(Result.map_error Run.Private.diagnostic(Ogpu.Backend.create_buffer
-        (Rays_execution.gpu_device t.gpu){label=Some "Flow resident";size=Int64.of_int bytes;usage=[Storage;Copy_src;Copy_dst]}))in
+        (Renderer.gpu_device t.gpu){label=Some "Flow resident";size=Int64.of_int bytes;usage=[Storage;Copy_src;Copy_dst]}))in
   (* a site's runner, or None when the device refuses its form; decided once per site *)
   let run packed=
     let code=(P.view packed).code in
-    match List.assq_opt code t.sites with Some run->run|None->
-      let ty=(Flow_ir.Packed.to_region packed).term.ty in
+    match Lru.Identity_list.peek t.sites code with Some run->run|None->
+      let ty=packed.term.ty in
       let run=if Flow_ir.Packed.gpu_refusals ~fused:true ~fast:true packed<>[]
           || not(List.mem ty Flow.Ty.[Array Int;Array Float;Array Vec2;Array Vec3;Array Vec4]) then None
         else Result.to_option(Result.map(fun msl->Run.create t.gpu t.pipelines msl)(Emit.kernel ~fast:true packed)) in
       (* the 32 most recent region sites are kept; a re-prepared drawing has new sites *)
-      t.sites<-List.filteri(fun i(_,old)->i<32 || (Option.iter Run.close old;false))((code,run)::t.sites);run in
+      Lru.Identity_list.add t.sites code run;run in
   (* The device count bound of a region, if its sources allow the device to keep counts: [Error]
      when a source or uniform reads a placeholder in a form the host would evaluate over zeros or a
      capacity, or when two device counts bound it. *)
@@ -167,7 +181,7 @@ let resident t : Flow_ir.Core_exec.resident =
     |(c,m,d)::rest when List.for_all(fun(c',m',d')->c'==c && m'=m && d'=d)rest->Ok(Some(c,m,d))
     |_->Error() in
   let invoke packed ~live=
-    if not(live_ok t) || not(Domain.DLS.get G.fast) then None else
+    if not(live_ok t) || not fast then None else
     match run packed with None->None|Some run->
     match device_count packed with Error()->None|Ok count->
     let shapes=P.source_shapes packed in
@@ -198,15 +212,17 @@ let resident t : Flow_ir.Core_exec.resident =
           if Array.length t.zeros<needed then t.zeros<-Array.make(max needed(2*Array.length t.zeros))0.;
           inputs.arrays.(i)<-t.zeros end)bound_inputs;
         let input i=bound_inputs.(i) in
-        let ty=(Flow_ir.Packed.to_region packed).term.ty in
+        let ty=packed.term.ty in
         let width=match ty with Flow.Ty.Array(Vec2)->2|Array Vec3->3|Array Vec4->4|_->1 in
         match alloc(max 4(values.count*width*4)),alloc 24 with
         |Error _,b|b,Error _->Result.iter give_back b;None
         |Ok output,Ok cell->
-          match Run.dispatch ~commands ?count ~into:(fst output,fst cell) ~bound:input
+          let reset_status=not(List.exists((==)run)!status_runs)in
+          match Run.dispatch ~commands ~reset_status ?count ~into:(fst output,fst cell) ~bound:input
               ~bound_table:(fun u->bound values.uniforms.(u)) run inputs with
-          |Error _->give_back output;give_back cell;None
-          |Ok _->Some(placeholder ty output(Some cell)values.count) in
+          |Error diagnostic->give_back output;give_back cell;Flow.Value.raise_diagnostic diagnostic
+          |Ok _->if reset_status then status_runs:=run::!status_runs;
+              Some(placeholder ty output(Some cell)values.count) in
   let compact mask=match find mask with None->None|Some p->
     match commands(),alloc(max 4(p.length*4)),alloc 4 with
     |Error _,k,c->Result.iter give_back k;Result.iter give_back c;None
@@ -228,6 +244,9 @@ let resident t : Flow_ir.Core_exec.resident =
   let get=function Ok x->x|Error d->Flow.Value.raise_diagnostic d in
   let finish v=match find v with None->v|Some p->
     get(flush());
+    let runners= !status_runs in
+    status_runs:=[];
+    List.iter(fun run->get(Run.Private.check_status run ~epoch:!epoch))runners;
     let length=match p.cell with None->p.length|Some(cell,_)->min p.length(get(Run.read_count queue cell ~epoch:!epoch))in
     let width=match v with Vec2_array _->2|Vec3_array _->3|Vec4_array _->4|_->1 in
     let xs=get(Run.read_floats queue(fst p.buffer)~epoch:!epoch ~length:(length*width))in
@@ -256,7 +275,7 @@ let resident t : Flow_ir.Core_exec.resident =
   {invoke;compact;coerce;finish;close}
 let close t=
   if Domain.self()<>t.domain then invalid_arg "Host.close: creating domain required";
-  if not t.closed then begin Cache.clear t.runners;List.iter(fun(_,run)->Option.iter Run.close run)t.sites;t.sites<-[];
+  if not t.closed then begin Cache.clear t.runners;Lru.Identity_list.clear t.sites;
     List.iter(fun b->ignore(Ogpu.Backend.destroy_buffer b))(Option.fold ~none:[] ~some:(fun(b,_)->[b])t.iota@t.retired_buffers);
     t.iota<-None;t.retired_buffers<-[];Hashtbl.reset t.pool;
     Hashtbl.iter(fun _ bs->List.iter(fun b->ignore(Ogpu.Backend.destroy_buffer b))bs)t.buffers;Hashtbl.reset t.buffers;Pipelines.close t.pipelines;t.closed<-true end

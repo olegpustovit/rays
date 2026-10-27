@@ -3,7 +3,7 @@
     text, see [Editor_document.Preset]. *)
 
 val write_text : filename:string -> string -> (unit, string) result
-(** Write through a temporary file and a rename; creates the directory. *)
+(** Write atomically through the shared filesystem helper; creates the directory. *)
 
 val read_text : filename:string -> (string, string) result
 

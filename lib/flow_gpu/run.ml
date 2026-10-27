@@ -6,15 +6,23 @@ type t = {device:B.device; queue:B.queue; pipelines : Pipelines.t; msl : Emit.ms
   outputs : slot array; table : slot; gathers : slot array; status:slot; counted:slot; uniforms : bytes; mutable closed : bool; mutable creations : int;
   mutable input_uploads:int; mutable input_uploaded_bytes:int;
   mutable status_reads:int; mutable readback_bytes:int;
+  mutable status_checked:bool;
   mutable generation : int; mutable table_ready:bool; domain : Domain.id;
   mutable last_epoch : int64}
-type output = {owner : t; count : int; width : int; gpu_seconds : float option; generation : int; epoch : int64}
-exception Failed of Flow.Diagnostic.t
-let diagnostic error = Flow.Diagnostic.error ~code:"E_GPU" (Ogpu.Error.to_string error)
-let get = function Ok value -> value | Error error -> raise (Failed (diagnostic error))
+type output = {owner : t; count : int; width : int; index : int; gpu_seconds : float option; generation : int; epoch : int64; check_status:bool}
+let diagnostic error = Diagnostic.error ~code:"E_GPU" (Ogpu.Error.to_string error)
+let get = function Ok value -> value | Error error -> raise (Diagnostic.Error (diagnostic error))
 let slot () = {buffer=None;capacity=0;bytes=Bytes.empty;uploaded=None}
 let nonfinite () =
-  Failed(Flow.Diagnostic.error ~code:"E_KERNEL" "GPU inputs must remain finite when represented as float32.")
+  Diagnostic.Error (Diagnostic.error ~code:"E_KERNEL" "GPU inputs must remain finite when represented as float32.")
+let kernel_status flags =
+  (* The status word is an aggregate across parallel rows, so diagnostics have a stable
+     class priority rather than claiming CPU row-order precedence. *)
+  if Int32.logand flags 4l <> 0l then
+    Diagnostic.error ~code:"E_RANGE" "Integer shift count must be within [0, 62]."
+  else if Int32.logand flags 2l <> 0l then
+    Diagnostic.error ~code:"E_RANGE" "Integer division by zero."
+  else Diagnostic.error ~code:"E_KERNEL" "GPU output contains a nonfinite value."
 let pack bytes offset value =
   let bits=Int32.bits_of_float value in
   if not(Float.is_finite(Int32.float_of_bits bits))then raise(nonfinite());
@@ -41,8 +49,8 @@ let create_owned device queue pipelines (msl : Emit.msl) =
     outputs=Array.map (fun _ -> slot ()) msl.output_widths;table=slot ();
     gathers=Array.map (fun _ -> slot ()) msl.gathers;status=slot();counted=slot();uniforms=Bytes.create msl.uniform_bytes;
     closed=false;creations=0;input_uploads=0;input_uploaded_bytes=0;
-    status_reads=0;readback_bytes=0;generation=0;table_ready=false;domain=Domain.self ();last_epoch=0L}
-let create gpu=create_owned(Rays_execution.gpu_device gpu)(Rays_execution.gpu_queue gpu)
+    status_reads=0;readback_bytes=0;status_checked=false;generation=0;table_ready=false;domain=Domain.self ();last_epoch=0L}
+let create gpu=create_owned(Renderer.gpu_device gpu)(Renderer.gpu_queue gpu)
 let ensure t slot length =
   if length>slot.capacity then begin
     let capacity = ref (max 256 slot.capacity) in
@@ -61,8 +69,8 @@ let ensure t slot length =
 (* [wait] false leaves the dispatch in flight (no completion wait, no status read): a resident fold
    chains its regions and waits once.  [bound i] / [bound_table u] name a device buffer that already
    holds input [i] / the table of uniform [u], which is then not uploaded. *)
-let dispatch ?(wait=true) ?commands ?count ?into ?(bound=fun _ -> None) ?(bound_table=fun _ -> None) t (values : P.Private.inputs) =
-  let error message = Error (Flow.Diagnostic.error ~code:"E_KERNEL" message) in
+let dispatch ?(wait=true) ?(reset_status=true) ?commands ?count ?into ?(bound=fun _ -> None) ?(bound_table=fun _ -> None) t (values : P.Private.inputs) =
+  let error message = Error (Diagnostic.error ~code:"E_KERNEL" message) in
   if t.closed || Domain.self ()<>t.domain then error "GPU program owner is closed or called from another domain."
   else if values.count<0 || values.count>Int32.to_int Int32.max_int ||
     values.count>Sys.max_string_length/4/Array.fold_left max 1 t.msl.output_widths then error "GPU count exceeds native storage bounds."
@@ -74,30 +82,30 @@ let dispatch ?(wait=true) ?commands ?count ?into ?(bound=fun _ -> None) ?(bound_
      including dispatches whose completion subsequently fails. *)
   t.generation<-t.generation+1;
   if values.count=0 then begin
-    Ok {owner=t;count=0;width=t.msl.output_widths.(0);gpu_seconds=None;generation=t.generation;epoch=t.last_epoch}
+    Ok {owner=t;count=0;width=t.msl.output_widths.(0);index=0;gpu_seconds=None;generation=t.generation;epoch=t.last_epoch;check_status=false}
   end
   else try
     let msl=t.msl in
     let compiled=match Pipelines.get t.pipelines msl with
-      | Ok compiled -> compiled | Error error -> raise (Failed error) in
+      | Ok compiled -> compiled | Error error -> raise (Diagnostic.Error error) in
     Bytes.set_int32_le t.uniforms 0 (Int32.of_int values.count);
     List.iter (fun (name,offset,width) ->
       if String.starts_with ~prefix:"uniform:" name then begin
         let index=int_of_string (String.sub name 8 (String.length name-8)) in
         if index>=Array.length values.uniforms || Array.length values.uniforms.(index)<>width then
-          raise (Failed (Flow.Diagnostic.error ~code:"E_KERNEL" "GPU uniform type changed."));
+          raise (Diagnostic.Error (Diagnostic.error ~code:"E_KERNEL" "GPU uniform type changed."));
         for component=0 to width-1 do pack t.uniforms (offset+component*4)
           values.uniforms.(index).(component) done
       end else match String.split_on_char ':' name with
         | ["gather";k;_] ->
             let u, width = msl.gathers.(int_of_string k) in
             if u>=Array.length values.tables then
-              raise (Failed (Flow.Diagnostic.error ~code:"E_KERNEL" "GPU gather table changed."));
+              raise (Diagnostic.Error (Diagnostic.error ~code:"E_KERNEL" "GPU gather table changed."));
             Bytes.set_int32_le t.uniforms offset (Int32.of_int (Array.length values.tables.(u)/width))
         | ["frame";index;_] ->
             let index=int_of_string index in
             if index>=Array.length values.frame then
-              raise (Failed (Flow.Diagnostic.error ~code:"E_KERNEL" "GPU frame uniform changed."));
+              raise (Diagnostic.Error (Diagnostic.error ~code:"E_KERNEL" "GPU frame uniform changed."));
             pack t.uniforms offset values.frame.(index)
         | _ -> assert false) msl.uniform_layout;
     (* a buffer this runner's last dispatch still reads is not rewritten under it *)
@@ -126,8 +134,11 @@ let dispatch ?(wait=true) ?commands ?count ?into ?(bound=fun _ -> None) ?(bound_
       let cell,mul,div,use=match count with Some (cell,mul,div) -> cell,mul,div,1 | None -> out,1,1,0 in
       List.iteri (fun k v -> Bytes.set_int32_le t.uniforms (offset+4*k) (Int32.of_int v)) [mul;div;use];
       cell,out) msl.counts in
-    Bytes.set_int32_le t.status.bytes 0 0l;
-    get(B.write_buffer status ~offset:0L t.status.bytes);
+    if reset_status then begin
+      Bytes.set_int32_le t.status.bytes 0 0l;
+      get(B.write_buffer status ~offset:0L t.status.bytes);
+      t.status_checked<-false
+    end;
     let table = if msl.table_seeds=[||] then None else begin
       let length=Array.length msl.table_seeds*512*4 in
       let fresh=not t.table_ready in
@@ -175,8 +186,8 @@ let dispatch ?(wait=true) ?commands ?count ?into ?(bound=fun _ -> None) ?(bound_
         get (B.dispatch_threads encoder ~threads:(values.count,1,1) ~threadgroup:(256,1,1))) in
     match commands with
     | Some commands -> encode commands;
-        Ok {owner=t;count=values.count;width=msl.output_widths.(0);gpu_seconds=None;
-          generation=t.generation;epoch=0L}
+        Ok {owner=t;count=values.count;width=msl.output_widths.(0);index=0;gpu_seconds=None;
+          generation=t.generation;epoch=0L;check_status=true}
     | None ->
     let commands=get (B.begin_commands queue) in
     let committed=ref false in
@@ -184,24 +195,47 @@ let dispatch ?(wait=true) ?commands ?count ?into ?(bound=fun _ -> None) ?(bound_
       encode commands;
       let receipt=get (B.commit commands) in committed:=true;receipt) in
     t.last_epoch<-receipt.epoch;
-    if not wait then Ok {owner=t;count=values.count;width=msl.output_widths.(0);gpu_seconds=None;
-      generation=t.generation;epoch=receipt.epoch} else begin
+    if not wait then Ok {owner=t;count=values.count;width=msl.output_widths.(0);index=0;gpu_seconds=None;
+      generation=t.generation;epoch=receipt.epoch;check_status=true} else begin
     get (B.complete_through queue receipt.epoch);
     let flags=get(B.read_buffer status ~offset:0L ~length:4)in
     t.status_reads<-t.status_reads+1;
-    if Bytes.get_int32_le flags 0<>0l then
-      raise(Failed(Flow.Diagnostic.error ~code:"E_KERNEL" "GPU output contains a nonfinite value."));
-    Ok {owner=t;count=values.count;width=msl.output_widths.(0);gpu_seconds=B.gpu_duration queue receipt;
-      generation=t.generation;epoch=receipt.epoch} end
-  with Failed error -> Error error
+    let flags=Bytes.get_int32_le flags 0 in
+    if flags<>0l then raise(Diagnostic.Error(kernel_status flags));
+    t.status_checked<-true;
+    let output={owner=t;count=values.count;width=msl.output_widths.(0);index=0;gpu_seconds=B.gpu_duration queue receipt;
+      generation=t.generation;epoch=receipt.epoch;check_status=true}in
+    Ok output end
+  with Diagnostic.Error error -> Error error
     | Out_of_memory -> error "GPU staging exceeds available memory."
   end
-let readback ?(index=0) output =
+let select_output ~index output =
+  if index<0 || index>=Array.length output.owner.outputs then None
+  else Some {output with index; width=output.owner.msl.output_widths.(index)}
+let check_status t ~epoch =
+  try
+    if epoch>B.completed_epoch t.queue then get(B.complete_through t.queue epoch);
+    if not t.status_checked then begin
+      let flags=get(B.read_buffer (Option.get t.status.buffer) ~offset:0L ~length:4)in
+      t.status_reads<-t.status_reads+1;
+      let flags=Bytes.get_int32_le flags 0 in
+      if flags<>0l then raise(Diagnostic.Error(kernel_status flags));
+      t.status_checked<-true
+    end;
+    Ok ()
+  with Diagnostic.Error error -> Error error
+let readback ?index output =
+  let index=Option.value ~default:output.index index in
   if output.owner.closed || Domain.self ()<>output.owner.domain || output.generation<>output.owner.generation then
-    Error (Flow.Diagnostic.error ~code:"E_GPU" "GPU output was closed or superseded.")
+    Error (Diagnostic.error ~code:"E_GPU" "GPU output was closed or superseded.")
+  else if index<0 || index>=Array.length output.owner.outputs then
+    Error (Diagnostic.error ~code:"E_GPU" "GPU output index is outside its producer.")
   else try
     (* a [~wait:false] dispatch is read once its queue has completed it *)
     if output.epoch>B.completed_epoch output.owner.queue then get (B.complete_through output.owner.queue output.epoch);
+    if output.check_status then
+      (match check_status output.owner ~epoch:output.epoch with
+       |Ok()->()|Error diagnostic->raise(Diagnostic.Error diagnostic));
     let width=output.owner.msl.output_widths.(index) in
     let length=output.count*width in
     let values,finite=if length=0 then [||],true else begin
@@ -210,11 +244,13 @@ let readback ?(index=0) output =
       unpack_array bytes length
     end in
     if not finite then
-      Error (Flow.Diagnostic.error ~code:"E_KERNEL" "GPU output contains a nonfinite value.")
+      Error (Diagnostic.error ~code:"E_KERNEL" "GPU output contains a nonfinite value.")
     else Ok (match width with 2 -> Flow.Eval.Vec2_array values
       | 3 -> Vec3_array values | 4 -> Vec4_array values | _ -> Float_array values)
-  with Failed error -> Error error
-let buffer ?(index=0) output = if output.owner.closed || Domain.self()<>output.owner.domain || output.generation<>output.owner.generation
+  with Diagnostic.Error error -> Error error
+let buffer ?index output =
+  let index=Option.value ~default:output.index index in
+  if index<0 || index>=Array.length output.owner.outputs || output.owner.closed || Domain.self()<>output.owner.domain || output.generation<>output.owner.generation
   then None else output.owner.outputs.(index).buffer
 (* the count record of a fast kernel's dispatch, while it is the runner's current output *)
 let count_record output = if output.owner.closed || Domain.self()<>output.owner.domain
@@ -238,6 +274,7 @@ module Private = struct
   let input_uploads t = t.input_uploads
   let input_uploaded_bytes t = t.input_uploaded_bytes
   let status_reads t = t.status_reads
+  let check_status t ~epoch = check_status t ~epoch
   let readback_bytes t = t.readback_bytes
   let create_owned = create_owned
 end
@@ -247,7 +284,7 @@ end
 let compact commands pipelines ~mask ~count ~count_in ~kept ~total =
   try
     let compiled = match Pipelines.get pipelines Emit.compaction with
-      | Ok compiled -> compiled | Error error -> raise (Failed error) in
+      | Ok compiled -> compiled | Error error -> raise (Diagnostic.Error error) in
     let bound = Bytes.create 8 in
     Bytes.set_int32_le bound 0 (Int32.of_int count); Bytes.set_int32_le bound 4 (if count_in = None then 0l else 1l);
     let encoder = get (B.compute_encoder commands) in
@@ -258,13 +295,13 @@ let compact commands pipelines ~mask ~count ~count_in ~kept ~total =
       get (B.set_buffer encoder ~index:4 (Option.value ~default:total count_in));
       get (B.dispatch_threads encoder ~threads:(1024,1,1) ~threadgroup:(1024,1,1)));
     Ok ()
-  with Failed error -> Error error
+  with Diagnostic.Error error -> Error error
 (* a count cell, once the queue has completed [epoch] *)
 let read_count queue buffer ~epoch =
   try
     if epoch > B.completed_epoch queue then get (B.complete_through queue epoch);
     Ok (Int32.to_int (Bytes.get_int32_le (get (B.read_buffer buffer ~offset:0L ~length:4)) 0) land 0xffffffff)
-  with Failed error -> Error error
+  with Diagnostic.Error error -> Error error
 (* read a device buffer the queue has finished writing *)
 let read_floats queue buffer ~epoch ~length =
   try
@@ -272,4 +309,4 @@ let read_floats queue buffer ~epoch ~length =
     let values, _ = if length = 0 then [||], true
       else unpack_array (get (B.read_buffer buffer ~offset:0L ~length:(length*4))) length in
     Ok values
-  with Failed error -> Error error
+  with Diagnostic.Error error -> Error error

@@ -36,8 +36,7 @@ type extra = { looking : string list;  (* the viewports that look through their 
                show : show; tool : tool; renderer : Renderer.state;
                renderer_request : Renderer.t option }
 
-let keymap = Leader.keymap3
-let default_camera () = Easy_camera.create ~target:Vec3.zero ~distance:7. ()
+let default_camera () = Easy_camera.create ~target:Rays_math.Vec3.zero ~distance:7. ()
 let create_control () = CC.create ()
 let ui_visible = CC.ui_visible
 let toggle_ui = CC.toggle_ui
@@ -66,15 +65,14 @@ let view_parameters easy =
   Objects.Camera.to_values ~eye ~target ~fov_y:(Easy_camera.fov_y easy)
 
 let same_view a b =
-  Vec3.nearly_equal (Camera.position a) (Camera.position b) ~eps:1e-6
-  && Vec3.nearly_equal (Camera.target a) (Camera.target b) ~eps:1e-6
+  Rays_math.Vec3.nearly_equal (Camera.position a) (Camera.position b) ~eps:1e-6
+  && Rays_math.Vec3.nearly_equal (Camera.target a) (Camera.target b) ~eps:1e-6
   && (match Camera.projection a, Camera.projection b with
     | Perspective a, Perspective b -> Float.abs (a.fov_y -. b.fov_y) < 1e-6
     | _ -> false)
 
 let active_node (core : _ Core.t) = Option.bind core.doc.active_camera
-    (fun node_id -> if Edit_graph.is_bypassed (Core.scene core) ~node_id then None
-      else Edit_graph.find (Core.scene core) ~node_id)
+    (fun node_id -> Edit_graph.find (Core.scene core) ~node_id)
 
 (* A default camera, following the viewport, when the catalog offers one. *)
 let add_default_camera ~factories document easy =
@@ -88,7 +86,7 @@ let add_default_camera ~factories document easy =
         let node = Node.relabel "camera1" node in
         let* document = Edit_graph.add_node ~factory node document in
         let* document, _ = Edit_graph.apply_parameters document ~node_id:(Node.id node)
-            (("follow_viewport", Parameter.Bool_value true)
+            (("follow_viewport", Param.Bool_value true)
              :: Objects.Camera.lens_values Camera.pinhole @ view_parameters easy) in
         Ok document)
 
@@ -148,9 +146,9 @@ let to_root = function
 let root_renderer core =
   if core.Core.doc.homes.root = None then None else Some (of_root core.doc.root.renderer)
 
-let renderer_setting core = List.find_map (fun (field : Parameter.field_view) ->
+let renderer_setting core = List.find_map (fun (field : Param.field_view) ->
   match field.name, field.current with
-  | "renderer", Parameter.Choice_value label -> Renderer.of_label label
+  | "renderer", Param.Choice_value label -> Renderer.of_label label
   | _ -> None) (Settings.fields (Core.settings core))
 
 let looks extra key = List.mem key extra.looking
@@ -180,9 +178,9 @@ let init core camera =
             ~default:Renderer.Raster;
             custom = root_renderer core = None && renderer_setting core <> None}; renderer_request = None }
 
-let begin_frame extra frame = match extra.fly with
+let begin_frame extra (frame : Frame.t) = match extra.fly with
   | None ->
-      let lost = List.exists (function Rays.Event.WindowFocusLost -> true | _ -> false) frame.Frame.events in
+      let lost = List.exists (function Input.Focus_lost -> true | _ -> false) frame.input.events in
       (if lost then release extra else extra), frame
   | Some _ ->
       let ended, frame = Editor_core.Router.fly frame in
@@ -261,19 +259,18 @@ let navigate ~area control camera extra core ~(raw_frame : Frame.t) ~(input : Fr
   else match extra.fly with
     | Some speed ->
         let camera, speed = Easy_camera.fly ~speed camera
-          { raw_frame with events = input.events; keys = input.keys;
-            mouse_buttons = input.mouse_buttons; mouse_delta = input.mouse_delta } in
+          { raw_frame with input = input.input; mouse_delta = input.mouse_delta } in
         camera, { extra with fly = Some speed }
     | None ->
         let (vx, vy, vw, vh) = area in
         let inside (x, y) = x >= float vx && x < float (vx + vw) && y >= float vy && y < float (vy + vh) in
         let pressed = List.exists (function
-          | Rays.Event.MousePressed (_, pt) -> inside pt
-          | _ -> false) input.events in
+          | Input.Pointer_pressed (_, pt) -> inside pt
+          | _ -> false) input.input.events in
         let released = List.exists (function
-          | Rays.Event.MouseReleased _ | Rays.Event.WindowFocusLost -> true
-          | _ -> false) input.events in
-        let grabbing = if pressed then true else if released || input.mouse_buttons = [] then false else extra.relative_grab in
+          | Input.Pointer_released _ | Input.Focus_lost -> true
+          | _ -> false) input.input.events in
+        let grabbing = if pressed then true else if released || input.input.buttons = [] then false else extra.relative_grab in
         if grabbing <> extra.relative_grab then set_relative grabbing;
         let camera = CC.navigate ~control_area:area control camera input in
         camera, { extra with relative_grab = grabbing }
@@ -296,7 +293,7 @@ let on_view core ~previous ~key camera extra ~stepped =
     | _ when root_renderer core <> None -> core, Option.get (root_renderer core)
     | Some mode, Some current when mode = current -> core, mode
     | Some mode, Some _ ->
-        (match Settings.apply (Core.settings core) ["renderer", Parameter.Choice_value (Renderer.label mode)] with
+        (match Settings.apply (Core.settings core) ["renderer", Param.Choice_value (Renderer.label mode)] with
          | Ok (settings, _) -> Core.set_settings core settings, mode
          | Error _ -> core, extra.renderer.mode)
     | Some mode, None -> core, mode
@@ -308,7 +305,7 @@ let on_view core ~previous ~key camera extra ~stepped =
   let core = match extra.follow_request, active_node core with
     | Some value, Some node ->
         Core.edit_node core Document.Scene (Node.id node)
-          ["follow_viewport", Parameter.Bool_value value] ~label:"Follow viewport"
+          ["follow_viewport", Param.Bool_value value] ~label:"Follow viewport"
     | _ -> core in
   let written = ref extra.written in
   let active = active_node core in
@@ -446,7 +443,7 @@ let compose ~scene ~world pieces =
   (match world with Some baked -> Scene3.with_world baked | None -> Fun.id) @@
   Scene3.create ~lights:(if lights <> [] || Objects.ids "light" scene <> [] then lights
       else P.lights base)
-    ?shadow:(P.shadow base) ~ambient:(P.ambient base)
+    ~ambient:(P.ambient base)
     ~separate_specular:(P.separate_specular base) ~samples:(P.samples base)
     (List.map (fun (matrix, ghost, scene3) ->
       let placed = Scene3.transform matrix (Scene3.nodes scene3) in
@@ -458,15 +455,15 @@ let compose ~scene ~world pieces =
 
 (* ---- guides and handles, in screen points over the view. *)
 
-let axes = [| Vec3.create 1. 0. 0.; Vec3.create 0. 1. 0.; Vec3.create 0. 0. 1. |]
+let axes = [| Rays_math.Vec3.create 1. 0. 0.; Rays_math.Vec3.create 0. 1. 0.; Rays_math.Vec3.create 0. 0. 1. |]
 let axis_names = [| "x"; "y"; "z" |]
 (* kit rev 3: the axes wear port colours (x bool, y int, z float), guides are ink-3 and the
    active camera and the lights the accent *)
-let axis_colors = Array.map Color.hex_exn [| "#b0435f"; "#3b7d4e"; "#285f77" |]
-let guide_color = Color.hex_exn "#8f9492"
-let active_color = Color.hex_exn "#f0481f"
+let axis_colors = Array.map Rays_math.Color.hex_exn [| "#b0435f"; "#3b7d4e"; "#285f77" |]
+let guide_color = Rays_math.Color.hex_exn "#8f9492"
+let active_color = Rays_math.Color.hex_exn "#f0481f"
 
-let project bounds camera point = Option.map (fun (screen : Vec3.t) ->
+let project bounds camera point = Option.map (fun (screen : Rays_math.Vec3.t) ->
   screen.x, screen.y) (Camera.world_to_screen ~viewport:bounds camera point)
 
 let screen_box view ~bounds ~world box =
@@ -491,8 +488,13 @@ let thick_line width color (x0, y0) (x1, y1) =
   if length < 1e-6 then Scene.rect ~at:(Float.to_int x0, Float.to_int y0) ~w:0 ~h:0 () else
   let nx = -. dy /. length *. width /. 2. and ny = dx /. length *. width /. 2. in
   Scene.path ~fill:color
-    (Path.empty |> Path.move_to (x0 +. nx) (y0 +. ny) |> Path.line_to (x1 +. nx) (y1 +. ny)
-     |> Path.line_to (x1 -. nx) (y1 -. ny) |> Path.line_to (x0 -. nx) (y0 -. ny) |> Path.close)
+    (Path.of_commands [|
+      Path.Move_to { x = x0 +. nx; y = y0 +. ny };
+      Path.Line_to { x = x1 +. nx; y = y1 +. ny };
+      Path.Line_to { x = x1 -. nx; y = y1 -. ny };
+      Path.Line_to { x = x0 -. nx; y = y0 -. ny };
+      Path.Close;
+    |])
 
 let segment bounds view color a b =
   match project bounds view a, project bounds view b with
@@ -502,19 +504,19 @@ let segment bounds view color a b =
 (* A pyramid half a unit deep with the view's aspect, and its aim. *)
 let frustum bounds view color camera =
   let eye = Camera.position camera and target = Camera.target camera in
-  let forward = Vec3.normalize (Vec3.sub target eye) in
-  let side = Vec3.cross forward (Camera.up camera) in
-  if Vec3.length side < 1e-6 then [] else
-  let right = Vec3.normalize side in
-  let up = Vec3.cross right forward in
+  let forward = Rays_math.Vec3.normalize (Rays_math.Vec3.sub target eye) in
+  let side = Rays_math.Vec3.cross forward (Camera.up camera) in
+  if Rays_math.Vec3.length side < 1e-6 then [] else
+  let right = Rays_math.Vec3.normalize side in
+  let up = Rays_math.Vec3.cross right forward in
   let fov_y = match Camera.projection camera with
     | Perspective { fov_y; _ } -> fov_y | _ -> 1. in
   let _, _, width, height = bounds in
   let half_h = 0.5 *. Float.tan (fov_y /. 2.) in
   let half_w = half_h *. float_of_int width /. float_of_int (max 1 height) in
-  let centre = Vec3.add eye (Vec3.scale forward 0.5) in
-  let corner sx sy = Vec3.add centre (Vec3.add (Vec3.scale right (sx *. half_w))
-      (Vec3.scale up (sy *. half_h))) in
+  let centre = Rays_math.Vec3.add eye (Rays_math.Vec3.scale forward 0.5) in
+  let corner sx sy = Rays_math.Vec3.add centre (Rays_math.Vec3.add (Rays_math.Vec3.scale right (sx *. half_w))
+      (Rays_math.Vec3.scale up (sy *. half_h))) in
   let corners = [| corner (-1.) (-1.); corner 1. (-1.); corner 1. 1.; corner (-1.) 1. |] in
   let edge = segment bounds view color in
   List.concat (List.init 4 (fun index ->
@@ -532,18 +534,18 @@ let arrow_length = 60.
    world unit along its axis on screen, so a drag maps back to a delta),
    and the parameter edits a delta makes. A rotation turns its whole soft
    range per 360 points. *)
-type arrow = { name : string; color : Color.t; tool : tool;
+type arrow = { name : string; color : Rays_math.Color.t; tool : tool;
                base : float * float; tip : float * float; unit : float * float;
-               edits : float -> (string * Parameter.value) list }
+               edits : float -> (string * Param.value) list }
 
 let arrows node view bounds space tool =
-  let project point = project bounds view (Mat4.transform_point space point) in
+  let project point = project bounds view (Rays_math.Mat4.transform_point space point) in
   let values = Node.parameter_fields node in
-  let find name = List.find_map (fun (field : Parameter.field_view) ->
+  let find name = List.find_map (fun (field : Param.field_view) ->
     match field.current with
     | Float_value value when field.name = name -> Some value
     | _ -> None) values in
-  let range name = List.find_map (fun (field : Parameter.field_view) ->
+  let range name = List.find_map (fun (field : Param.field_view) ->
     match field.kind with
     | Floating_view range when field.name = name -> Some (range.soft_max -. range.soft_min)
     | _ -> None) values in
@@ -551,7 +553,7 @@ let arrows node view bounds space tool =
     | Some x, Some y, Some z -> Some (x, y, z) | _ -> None in
   let pivot = List.find_map triple handle_prefixes in
   let arrow ~name ~color at direction ~per_pixel edits =
-    match project at, project (Vec3.add at direction) with
+    match project at, project (Rays_math.Vec3.add at direction) with
     | Some ((bx, by) as base), Some (ux, uy) ->
         let dx = ux -. bx and dy = uy -. by in
         let length = Float.hypot dx dy in
@@ -566,25 +568,25 @@ let arrows node view bounds space tool =
       let name = prefix ^ "_" ^ axis_names.(axis) and value = [| x; y; z |].(axis) in
       arrow ~name ~color:axis_colors.(axis) at axes.(axis)
         ~per_pixel:(if tool = Turn then Option.value ~default:360. (range name) /. 360. else 1.)
-        (fun delta -> [name, Parameter.Float_value (value +. delta)])) [0; 1; 2] in
-  let at = match pivot with Some (x, y, z) -> Vec3.create x y z | None -> Vec3.zero in
+        (fun delta -> [name, Param.Float_value (value +. delta)])) [0; 1; 2] in
+  let at = match pivot with Some (x, y, z) -> Rays_math.Vec3.create x y z | None -> Rays_math.Vec3.zero in
   match tool with
   | No_tool -> []
   | Move ->
       let distance = match triple "eye", triple "target" with
         | Some (ex, ey, ez), Some (tx, ty, tz) ->
-            let target = Vec3.create tx ty tz in
-            let direction = Vec3.sub target (Vec3.create ex ey ez) in
-            if Vec3.length direction < 1e-6 then [] else
-            let direction = Vec3.normalize direction in
+            let target = Rays_math.Vec3.create tx ty tz in
+            let direction = Rays_math.Vec3.sub target (Rays_math.Vec3.create ex ey ez) in
+            if Rays_math.Vec3.length direction < 1e-6 then [] else
+            let direction = Rays_math.Vec3.normalize direction in
             Option.to_list (arrow ~name:"target_distance" ~color:active_color target
               direction ~per_pixel:1. (fun delta ->
-                let p = Vec3.add target (Vec3.scale direction delta) in
-                ["target_x", Parameter.Float_value p.x; "target_y", Parameter.Float_value p.y;
-                 "target_z", Parameter.Float_value p.z]))
+                let p = Rays_math.Vec3.add target (Rays_math.Vec3.scale direction delta) in
+                ["target_x", Param.Float_value p.x; "target_y", Param.Float_value p.y;
+                 "target_z", Param.Float_value p.z]))
         | _ -> [] in
       List.concat_map (fun prefix -> match triple prefix with
-        | Some ((x, y, z) as values) -> handles prefix values (Vec3.create x y z)
+        | Some ((x, y, z) as values) -> handles prefix values (Rays_math.Vec3.create x y z)
         | None -> []) handle_prefixes @ distance
   | Turn -> Option.fold ~none:[] ~some:(fun values -> handles "rotate" values at) (triple "rotate")
   | Grow -> Option.fold ~none:[] ~some:(fun values -> handles "scale" values at) (triple "scale")
@@ -634,9 +636,9 @@ let gizmo (x, y, width, height) view =
   let cx = float_of_int x +. (if compact then 40. else 48.)
   and cy = float_of_int (y + height) -. (if compact then 36. else 44.) in
   let length = if compact then 36. else 40. in
-  let origin = Camera.world_to_camera view Vec3.zero in
+  let origin = Camera.world_to_camera view Rays_math.Vec3.zero in
   List.concat (List.init 3 (fun axis ->
-    let d = Vec3.sub (Camera.world_to_camera view axes.(axis)) origin in
+    let d = Rays_math.Vec3.sub (Camera.world_to_camera view axes.(axis)) origin in
     let tip = cx +. d.x *. length, cy -. d.y *. length in
     let dx, dy = [| 3., 4.; 6., 4.; -8., 7. |].(axis) in
     thick_line 1.5 axis_colors.(axis) (cx, cy) tip
@@ -652,19 +654,19 @@ let light_guide bounds view color (light : Light.t) =
   let inside (x, y) = let bx, by, bw, bh = bounds in x >= float bx && x <= float (bx + bw) && y >= float by && y <= float (by + bh) in
   let aim at direction = match project bounds view at with
     | Some point when inside point -> marker point @ segment bounds view color at
-        (Vec3.add at (Vec3.scale direction 1.5))
+        (Rays_math.Vec3.add at (Rays_math.Vec3.scale direction 1.5))
     | _ -> [] in
   match light.kind with
-  | Directional { direction } -> aim (Vec3.scale direction (-4.)) direction
+  | Directional { direction } -> aim (Rays_math.Vec3.scale direction (-4.)) direction
   | Point { position; _ } ->
       (match project bounds view position with Some point -> marker point | None -> [])
   | Spot { position; direction; _ } -> aim position direction
   | Area { position; direction; width; height; _ } ->
-      let side = Vec3.cross direction (Vec3.create 0. 1. 0.) in
-      let side = if Vec3.length side < 1e-6 then Vec3.create 1. 0. 0. else Vec3.normalize side in
-      let up = Vec3.normalize (Vec3.cross side direction) in
-      let corner sx sy = Vec3.add position (Vec3.add (Vec3.scale side (sx *. width /. 2.))
-          (Vec3.scale up (sy *. height /. 2.))) in
+      let side = Rays_math.Vec3.cross direction (Rays_math.Vec3.create 0. 1. 0.) in
+      let side = if Rays_math.Vec3.length side < 1e-6 then Rays_math.Vec3.create 1. 0. 0. else Rays_math.Vec3.normalize side in
+      let up = Rays_math.Vec3.normalize (Rays_math.Vec3.cross side direction) in
+      let corner sx sy = Rays_math.Vec3.add position (Rays_math.Vec3.add (Rays_math.Vec3.scale side (sx *. width /. 2.))
+          (Rays_math.Vec3.scale up (sy *. height /. 2.))) in
       let corners = [| corner (-1.) (-1.); corner 1. (-1.); corner 1. 1.; corner (-1.) 1. |] in
       aim position direction @ List.concat (List.init 4 (fun index ->
         segment bounds view color corners.(index) corners.((index + 1) mod 4)))

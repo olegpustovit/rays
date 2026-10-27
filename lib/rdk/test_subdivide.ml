@@ -1413,7 +1413,7 @@ let test_point_boundary_interpolation () =
     "Loop None did not classify the open triangle as a hole";
 
   let closed = Box_generator.box ~connectivity:Box_generator.Box_quads ~consolidate_points:true
-      ~size:(Vec3.create 2. 2. 2.) () |> get_rdk in
+      ~size:(Rays_math.Vec3.create 2. 2. 2.) () |> get_rdk in
   let closed_edge = Subdivide.subdivide
       ~boundary_interpolation:Subdivide.Subdivide_boundary_edge_only closed |> get_rdk
   and closed_corner = Subdivide.subdivide

@@ -20,7 +20,7 @@
     (if parsed.valid (str parsed.value) (gr_error (str "expected integer, got " (text/repr raw))))))
 (defn gr_float :context value [(raw : text)]
   (let* [parsed (text/to_float raw)]
-    (if parsed.valid (text/float_g17 parsed.value)
+    (if parsed.valid (text/float parsed.value)
       (gr_error (str "expected finite float, got " (text/repr raw))))))
 (defn gr_specification :context value [(row : (list text))]
   (let* [kind (text/lower (text/trim (nth row 5)))]

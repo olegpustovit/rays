@@ -5,9 +5,21 @@ module C = Core
 module Names = Map.Make (String)
 exception Unsupported of string
 let refuse name = raise (Unsupported name)
+let failure (d : Diagnostic.t) =
+  if d.span=None && d.position=None && d.cause=None && d.hints=[] && d.trace=[] then
+    C.Fail (d.code,d.message)
+  else C.Fail_diagnostic d
 let geometry_collection ty = ty=Flow.Ty.List Flow.Ty.geometry
+let state_step_candidate parent (candidate : W.term) =
+  match (E.Residual.residual_view parent).term.node with
+  | W.State {step; _} ->
+      let rec direct term = term == candidate || match term.W.node with
+        | W.If _ | Cond _ | Case _ -> false
+        | _ -> List.exists direct (W.children term) in
+      direct step
+  | _ -> false
 type cache_key = Residual_key of int | Cooked_key of Flow.Ty.t * int
-  | Cooked_list_key of E.value array
+  | Cooked_list_key of E.value array | Frame_key of C.frame_field
 type lowered = Known of E.value | Computed of int * Flow.Ty.t
   | Record_fields of (string * lowered) list
   | Record_choice of lowered * lowered * lowered
@@ -17,10 +29,39 @@ and callable =
       env : lowered Names.t; instance : int; prefix : W.path; zone : W.path; identity : int }
   | Named of { name : string; identity : int }
 
+let frame emit statements cache source ty field =
+  let key=Frame_key field in
+  match Hashtbl.find_opt cache key with
+  |Some value->value
+  |None->let value=emit statements source ty (C.Frame field)in
+      Hashtbl.add cache key value;value
+
 (* The expansions by name (noise3, color/hsl, color/gradient) are for the shipped operators only:
    a workspace operator that reuses the name keeps its own body and declines. *)
-let shipped (o : Flow.Op.t) = List.memq o Operators.all
+let shipped (o : Flow.Op.t) = List.memq o Flow.Op.all
   || List.memq o (Flow.Op.of_context Flow.Context.value)
+
+let packed_candidate (x : W.term) =
+  let text_input terms = List.exists (fun (term : W.term) -> term.ty = Flow.Ty.Array Flow.Ty.Text) terms in
+  let rec geometry_accumulator = function
+    | ty when ty = Flow.Ty.geometry -> true
+    | Flow.Ty.Record fields -> List.exists (fun (_, ty) -> geometry_accumulator ty) fields
+    | _ -> false in
+  let numeric = not (geometry_collection x.ty) && x.ty <> Flow.Ty.Array Flow.Ty.Text
+    && x.ty <> Flow.Ty.Text && (match x.node with
+      | Loop {kind=`Fold;_} when geometry_accumulator x.ty -> false
+      | W.Hof (_, _::rest) when text_input rest -> false
+      | Loop {clauses;_} when text_input (List.map snd clauses) -> false
+      | W.Hof ((`Map|`Reduce),_::rest) -> List.exists (fun (term : W.term) ->
+          match term.ty with Flow.Ty.Array _ -> true | _ -> false) rest
+      | Loop {clauses;_} -> List.exists (fun (_, (term : W.term)) ->
+          match term.ty with Flow.Ty.Array _ -> true | _ -> false) clauses
+      | Op {op="array/sum";_} -> true | _ -> false) in
+  let text = match x.node with
+  | W.Hof (`Map,_::rest) -> x.ty = Flow.Ty.Array Flow.Ty.Text || text_input rest
+  | Loop {kind=`For;clauses;_} -> x.ty = Flow.Ty.Array Flow.Ty.Text || text_input (List.map snd clauses)
+  | _ -> false in
+  numeric, text
 
 type draw_context = {
   value : C.source -> E.value -> int;  (* the local holding a constant or residual value *)
@@ -30,7 +71,8 @@ let constant_storage (program:C.program) =
   let uses=Array.make(Array.length program.locals) [] and writes=Array.make(Array.length program.locals) 0 in
   let use n consumer=uses.(n)<-consumer::uses.(n) in
   let unsafe n=use n None in
-  let rec scan (statement:C.statement)=match statement.node with
+  let rec scan (statement:C.statement) =
+    (match statement.node with
     |Assign(dst,expression)->incr_write dst; (match expression with
         |Local src when program.locals.(src)=program.locals.(dst)->use src (Some dst)
         |Host_source{ty;args;_} when Flow.Ty.is_cooked ty->List.iter(fun(_,src)->
@@ -39,19 +81,19 @@ let constant_storage (program:C.program) =
         |Local src|Field(src,_)->unsafe src
         |Prim(_,args)|Fields args|Host_source{args;_}|Source_descriptor{args;_}->List.iter(fun(_,src)->unsafe src)args
         |Vec args|Items args->List.iter unsafe args)
-    |If{condition;yes;no}->unsafe condition;List.iter scan yes;List.iter scan no
-    |Counted{first;last;count;index;item;init;body;_}->List.iter unsafe[first;last];
-        List.iter incr_write[count;index;item];List.iter scan init;List.iter scan body
-    |Iterate{sequence;index;item;body;_}->unsafe sequence;List.iter incr_write[index;item];List.iter scan body
+    |If{condition;_}->unsafe condition
+    |Counted{first;last;count;index;item;stop;_}->List.iter unsafe(first::last::Option.to_list stop);
+        List.iter incr_write[count;index;item]
+    |Iterate{sequence;index;item;_}->unsafe sequence;List.iter incr_write[index;item]
     |Store{sequence;index;value}->List.iter unsafe[sequence;index;value]
     |Invoke{args;result;_}->List.iter unsafe args;incr_write result
-    |State_read{result;initial;init;_}->unsafe initial;incr_write result;List.iter scan init
+    |State_read{result;initial;_}->unsafe initial;incr_write result
     |State_peek{found;value;_}->List.iter incr_write[found;value]
     |State_write{value;_}->unsafe value
-    |Diagnose_rows{rows;index;handler;diagnostic;result;_}->List.iter unsafe[rows;diagnostic];
-        List.iter incr_write[index;result];List.iter scan handler
-    |Protect{body;value;failure;handler;mapped;result}->List.iter unsafe[value;mapped];
-        List.iter incr_write[failure;result];List.iter scan body;List.iter scan handler
+    |Diagnose_rows{rows;index;diagnostic;result;_}->List.iter unsafe[rows;diagnostic];
+        List.iter incr_write[index;result]
+    |Protect{value;failure;mapped;result;_}->List.iter unsafe[value;mapped];
+        List.iter incr_write[failure;result]
     |Reset_call _->()
     |Draw draw->(match draw with
         |Background n->unsafe n|Point{at;ink}->List.iter unsafe[at;ink]
@@ -59,7 +101,8 @@ let constant_storage (program:C.program) =
         |Points{positions;ink}->List.iter unsafe[positions;ink]
         |Text_run{at;text;ink;size}->List.iter unsafe[at;text;ink;size]
         |Image{at;scale;angle;_}->List.iter unsafe[at;scale;angle]
-        |Push(_,n)->unsafe n|Pop->())
+        |Push(_,n)->unsafe n|Pop->()));
+    List.iter scan (C.children statement)
   and incr_write n=writes.(n)<-writes.(n)+1 in
   List.iter scan program.body;Array.iter unsafe program.results;
   Array.iter(fun(slot:C.state_slot)->List.iter(function C.Local_index n->unsafe n|Static_index _->())slot.source.iter)program.state_slots;
@@ -76,6 +119,164 @@ let constant_storage (program:C.program) =
     |State_read state->State_read{state with init=List.map rewrite state.init}
     |node->node in {statement with node} in
   {program with body=List.map rewrite program.body}
+
+let sequence_operation ~primitive ~ensure ~sequence_count ~sequence_get ~iterate ~store
+    ~hold ~update ~branch ~coerce ~local ~number ~statement statements cache source ty name args =
+  let arg key = List.assoc key args in
+  let prim ty op args = primitive statements cache source ty op args in
+  let float value = prim Flow.Ty.Float C.Float_convert ["x",value] in
+  match name with
+  | "range" ->
+      let first,last=match List.assoc_opt "end" args with
+        | Some last -> arg "count",last | None -> Known (V.Int 0),arg "count" in
+      let first=ensure statements cache source first in
+      let last=ensure statements cache source last in
+      let count=local Flow.Ty.Int and index=local Flow.Ty.Int and item=local Flow.Ty.Int
+      and id=number () in
+      let init=ref [] in
+      let result=primitive init cache source ty C.Sequence_build ["count",Computed (count,Flow.Ty.Int)] in
+      let body=ref [] in
+      store body cache source result (Computed (index,Flow.Ty.Int)) (Computed (item,Flow.Ty.Int));
+      statements:=statement id source (C.Counted {first;last;count;index;item;limit=4096;stop=None;
+        init=List.rev !init;body=List.rev !body}) :: !statements;
+      result
+  | "take" | "drop" | "rest" ->
+      let sequence=arg "list" in
+      let count=sequence_count statements cache source sequence in
+      let wanted=if name="rest" then Known (V.Int 1)
+        else coerce statements cache source Flow.Ty.Int (float (arg "n")) in
+      let retained=prim Flow.Ty.Int (C.Numeric Flow.Packed_ops.Max) ["a",Known (V.Int 0);"b",wanted] in
+      let retained=prim Flow.Ty.Int (C.Numeric Flow.Packed_ops.Min) ["a",retained;"b",count] in
+      let first,length=if name="take" then Known (V.Int 0),retained
+        else retained,prim Flow.Ty.Int (C.Numeric Flow.Packed_ops.Sub) ["a",count;"b",retained] in
+      prim ty C.Sequence_slice ["list",sequence;"first",first;"count",length]
+  | "reverse" ->
+      let sequence=arg "list" in
+      let count=sequence_count statements cache source sequence in
+      let result=prim ty C.Sequence_build ["count",count] in
+      iterate statements cache source sequence (fun body cache index item ->
+        let last=primitive body cache source Flow.Ty.Int (C.Numeric Flow.Packed_ops.Sub)
+            ["a",count;"b",Known (V.Int 1)] in
+        let reverse=primitive body cache source Flow.Ty.Int (C.Numeric Flow.Packed_ops.Sub)
+            ["a",last;"b",index] in
+        store body cache source result reverse item);
+      result
+  | "first" | "last" ->
+      let sequence=arg "list" in
+      let index=if name="first" then Known (V.Int 0)
+        else prim Flow.Ty.Int (C.Numeric Flow.Packed_ops.Sub)
+          ["a",sequence_count statements cache source sequence;"b",Known (V.Int 1)] in
+      sequence_get statements cache source sequence index
+  | "array/sum" ->
+      let zero=match ty with
+        | Flow.Ty.Int -> V.Int 0 | Vec2 -> V.Vec2 (0.,0.) | Vec3 -> V.Vec3 (0.,0.,0.)
+        | Vec4 -> V.Vec4 (0.,0.,0.,0.) | _ -> V.Float 0. in
+      let total=hold ?ty:(Some ty) statements cache source (Known zero) in
+      iterate statements cache source (arg "array") (fun body cache _ item ->
+        update body cache source total (primitive body cache source ty
+          (if ty=Flow.Ty.Int then C.Integer Flow.Packed_ops.Iadd
+           else C.Numeric Flow.Packed_ops.Add) ["a",total;"b",item]));
+      total
+  | "linspace" ->
+      let a=float (arg "from") in let b=float (arg "to") in let n=arg "count" in
+      let first=ensure statements cache source (Known (V.Int 0)) in
+      let last=ensure statements cache source n in
+      let count=local Flow.Ty.Int and index=local Flow.Ty.Int and item=local Flow.Ty.Int
+      and id=number () in
+      let init=ref [] in
+      let result=primitive init cache source ty C.Sequence_build ["count",Computed (count,Flow.Ty.Int)] in
+      let body=ref [] in
+      let single=primitive body cache source Flow.Ty.Bool (C.Numeric Flow.Packed_ops.Eq)
+          ["a",n;"b",Known (V.Int 1)] in
+      let value=branch body cache source Flow.Ty.Float single (fun _ _ -> a) (fun body cache ->
+        let p ty op args = primitive body cache source ty op args in
+        let k=p Flow.Ty.Float C.Float_convert ["x",Computed (item,Flow.Ty.Int)] in
+        let steps=p Flow.Ty.Float C.Float_convert
+            ["x",p Flow.Ty.Int (C.Numeric Flow.Packed_ops.Sub) ["a",n;"b",Known (V.Int 1)]] in
+        let span=p Flow.Ty.Float (C.Numeric Flow.Packed_ops.Sub) ["a",b;"b",a] in
+        let scaled=p Flow.Ty.Float (C.Numeric Flow.Packed_ops.Mul) ["a",span;"b",k] in
+        p Flow.Ty.Float (C.Numeric Flow.Packed_ops.Add)
+          ["a",a;"b",p Flow.Ty.Float (C.Numeric Flow.Packed_ops.Div) ["a",scaled;"b",steps]]) in
+      store body cache source result (Computed (index,Flow.Ty.Int)) value;
+      statements:=statement id source (C.Counted {first;last;count;index;item;limit=4096;stop=None;
+        init=List.rev !init;body=List.rev !body}) :: !statements;
+      result
+  | _ -> refuse name
+
+let color_operation ~primitive ~field ~branch ~emit ~ensure statements cache source ty name args =
+  let arg key = List.assoc key args in
+  let float value = primitive statements cache source Flow.Ty.Float C.Float_convert ["x",value] in
+  let vec components = emit statements source Flow.Ty.Vec3
+      (C.Vec (List.map (ensure statements cache source) components)) in
+  match name with
+  | "color/hsl" ->
+      let h=float (arg "h") in let s=float (arg "s") in let l=float (arg "l") in
+      let f x = Known (V.Float x) in
+      let c ty op args = primitive statements cache source ty op args in
+      let calc2 op a b = c Flow.Ty.Float (C.Numeric op) ["a",a;"b",b] in
+      let unit v = calc2 Flow.Packed_ops.Max (f 0.) (calc2 Flow.Packed_ops.Min (f 1.) v) in
+      let hue=calc2 Flow.Packed_ops.Div (calc2 Flow.Packed_ops.Mod h (f 360.)) (f 60.) in
+      let sat=unit s in let light=unit l in
+      let abs v = c Flow.Ty.Float (C.Math Flow.Packed_ops.Abs) ["x",v] in
+      let chroma=calc2 Flow.Packed_ops.Mul (calc2 Flow.Packed_ops.Sub (f 1.) (abs (calc2 Flow.Packed_ops.Sub (calc2 Flow.Packed_ops.Mul (f 2.) light) (f 1.)))) sat in
+      let x=calc2 Flow.Packed_ops.Mul chroma (calc2 Flow.Packed_ops.Sub (f 1.) (abs (calc2 Flow.Packed_ops.Sub (calc2 Flow.Packed_ops.Mod hue (f 2.)) (f 1.)))) in
+      let rgb body cache r g b = emit body source Flow.Ty.Vec3
+          (C.Vec (List.map (ensure body cache source) [r;g;b])) in
+      let zero=f 0. in
+      let arm limit yes no = branch statements cache source Flow.Ty.Vec3
+          (c Flow.Ty.Bool (C.Numeric Flow.Packed_ops.Lt) ["a",hue;"b",f limit]) yes no in
+      let triple=
+        arm 1. (fun b k -> rgb b k chroma x zero) (fun _ _ ->
+        arm 2. (fun b k -> rgb b k x chroma zero) (fun _ _ ->
+        arm 3. (fun b k -> rgb b k zero chroma x) (fun _ _ ->
+        arm 4. (fun b k -> rgb b k zero x chroma) (fun _ _ ->
+        arm 5. (fun b k -> rgb b k x zero chroma) (fun b k -> rgb b k chroma zero x))))) in
+      let m=calc2 Flow.Packed_ops.Sub light (calc2 Flow.Packed_ops.Div chroma (f 2.)) in
+      let channel name =
+        let byte=c Flow.Ty.Int (C.Color_byte C.Clamped)
+            ["x",calc2 Flow.Packed_ops.Add (field statements cache source Flow.Ty.Float triple name) m] in
+        calc2 Flow.Packed_ops.Div (c Flow.Ty.Float C.Float_convert ["x",byte]) (f 255.) in
+      let r=channel "x" in let g=channel "y" in let b=channel "z" in
+      vec [r;g;b]
+  | "color/gradient" ->
+      (* Constant opaque stops only; anything else keeps the walker's diagnostics. *)
+      let colors=match arg "stops" with
+        | Known (V.List xs) when Array.length xs>0 ->
+            (try Array.map Flow.Op.drawing_color xs with Diagnostic.Error _ -> refuse name)
+        | _ -> refuse name in
+      if Array.exists (fun (c : Rays_math.Color.t) -> c.a<>255) colors then refuse name;
+      let n=Array.length colors in
+      let channels (color : Rays_math.Color.t) = let r,g,b,_=Rays_math.Color.to_floats color in V.Vec3 (r,g,b) in
+      if n=1 then Known (channels colors.(0)) else begin
+        let f x = Known (V.Float x) in
+        let c ty op args = primitive statements cache source ty op args in
+        let calc2 op a b = c Flow.Ty.Float (C.Numeric op) ["a",a;"b",b] in
+        let unit v = calc2 Flow.Packed_ops.Max (f 0.) (calc2 Flow.Packed_ops.Min (f 1.) v) in
+        let position=calc2 Flow.Packed_ops.Mul (unit (float (arg "x"))) (f (float_of_int (n-1))) in
+        let left=c Flow.Ty.Int (C.Numeric Flow.Packed_ops.Min) ["a",Known (V.Int (n-2));"b",c Flow.Ty.Int C.Int_convert ["x",position]] in
+        let pct=unit (calc2 Flow.Packed_ops.Sub position (c Flow.Ty.Float C.Float_convert ["x",left])) in
+        let inverse=calc2 Flow.Packed_ops.Sub (f 1.) pct in
+        let pick body cache k =
+          let blend (c1 : Rays_math.Color.t) (c2 : Rays_math.Color.t) pick_channel =
+            let p ty op args = primitive body cache source ty op args in
+            let m op a b = p Flow.Ty.Float (C.Numeric op) ["a",a;"b",b] in
+            let a=m Flow.Packed_ops.Mul (f (float_of_int (pick_channel c1))) inverse in
+            let b=m Flow.Packed_ops.Mul (f (float_of_int (pick_channel c2))) pct in
+            let byte=p Flow.Ty.Int C.Int_convert ["x",m Flow.Packed_ops.Add (m Flow.Packed_ops.Add a b) (f 0.5)] in
+            m Flow.Packed_ops.Div (p Flow.Ty.Float C.Float_convert ["x",byte]) (f 255.) in
+          let c1=colors.(k) and c2=colors.(k+1) in
+          let r=blend c1 c2 (fun c -> c.r) in
+          let g=blend c1 c2 (fun c -> c.g) in
+          let b=blend c1 c2 (fun c -> c.b) in
+          emit body source Flow.Ty.Vec3 (C.Vec (List.map (ensure body cache source) [r;g;b])) in
+        let rec arms body cache k =
+          if k=n-2 then pick body cache k else
+          let here=primitive body cache source Flow.Ty.Bool (C.Numeric Flow.Packed_ops.Eq) ["a",left;"b",Known (V.Int k)] in
+          branch body cache source Flow.Ty.Vec3 here (fun body cache -> pick body cache k)
+            (fun body cache -> arms body cache (k+1)) in
+        arms statements cache 0
+      end
+  | _ -> refuse name
 
 (* [draw] writes the program's statements in place of lowering one residual; only a residual
    reached through [value] forces [root], which then stands for the whole evaluation. *)
@@ -196,8 +397,7 @@ let lower_with ?budget ~strict ~region_allowed ~draw (root : E.residual Lazy.t) 
         | Record_fields fields -> fields | _ -> fields)
     | Known value ->
         (try Known (V.coerce_to ty value)
-         with V.Fail (code,message,_) -> primitive statements cache source ty (Fail (code,message)) []
-           | V.Diagnostic_fail d -> primitive statements cache source ty (Fail_diagnostic d) [])
+         with Diagnostic.Error d -> primitive statements cache source ty (failure d) [])
     | Record_fields fields as v -> (match ty with
         | Flow.Ty.Any -> v
         | Record wanted -> Record_fields (List.map (fun (name,v) -> name,
@@ -208,14 +408,14 @@ let lower_with ?budget ~strict ~region_allowed ~draw (root : E.residual Lazy.t) 
     | Callable _ -> refuse "fn"
     | Computed (n,have) as v when ty=Flow.Ty.Any || have=ty && not (Hashtbl.mem mixed_numeric n) -> v
     | value -> primitive statements cache source ty (Coerce ty) ["value",value]
-  and source_of_view (view : E.Private.residual_view) : C.source =
-    {site=List.filteri (fun i _ -> i >= List.length view.prefix) view.site;
+  and source_of_view (view : E.Residual.residual_view) : C.source =
+    {site=List.drop (List.length view.prefix) view.site;
      owner=view.owner;instance=view.instance;prefix=view.prefix;
      iter=List.map (fun n -> C.Static_index n) view.iter;span=None}
   and type_of = function
     | Selected (items,_) -> Array.fold_left (fun ty v ->
         Option.value ~default:ty (Flow.Ty.join ty (type_of v))) Flow.Ty.Any items
-    | Known (V.Residual r) -> (E.Private.residual_view r).term.ty
+    | Known (V.Residual r) -> (E.Residual.residual_view r).term.ty
     | Known (V.List items) -> Flow.Ty.List (Array.fold_left (fun ty v ->
         Option.value ~default:ty (Flow.Ty.join ty (type_of (Known v)))) Flow.Ty.Any items)
     | Known v -> V.ty_of v | Computed (_,ty) -> ty | Callable _ -> Flow.Ty.Fn None
@@ -259,10 +459,10 @@ let lower_with ?budget ~strict ~region_allowed ~draw (root : E.residual Lazy.t) 
     | "array/concat" -> Some Array_concat | "value/rand" -> Some Rand | "rand/at" -> Some Rand_at | "noise3" -> Some Noise3
     | _ -> None
   and residual statements cache r =
-    let id = E.Private.residual_id r in
+    let id = E.Residual.residual_id r in
     let key=Residual_key id in
     match Hashtbl.find_opt cache key with Some value -> value | None ->
-    let view = E.Private.residual_view r in
+    let view = E.Residual.residual_view r in
     if Hashtbl.mem active id then refuse "cycle";
     Hashtbl.add active id ();
     let saved=(!plane,!geometry) in
@@ -294,26 +494,13 @@ let lower_with ?budget ~strict ~region_allowed ~draw (root : E.residual Lazy.t) 
     decr budget; if !budget < 0 then refuse "budget";
     let source = {source with C.site=Option.value x.path ~default:source.site;span=Some x.form.span} in
     let compile = term statements cache source env in
-    let text_input ts = List.exists (fun (t:W.term) -> t.ty=Flow.Ty.Array Flow.Ty.Text) ts in
-    let rec geometry_accumulator = function
-      | ty when ty=Flow.Ty.geometry -> true
-      | Flow.Ty.Record fields -> List.exists(fun(_,ty)->geometry_accumulator ty)fields
-      | _ -> false in
-    let numeric_candidate=not(geometry_collection x.ty) && x.ty<>Flow.Ty.Array Flow.Ty.Text && x.ty<>Flow.Ty.Text && (match x.node with
-      | Loop {kind=`Fold;_} when geometry_accumulator x.ty -> false
-      | W.Hof (_, _::rest) when text_input rest -> false
-      | Loop {clauses;_} when text_input (List.map snd clauses) -> false
-      | W.Hof ((`Map|`Reduce),_::rest) -> List.exists (fun (t:W.term)->match t.ty with Flow.Ty.Array _->true|_->false) rest
-      | Loop {clauses;_} -> List.exists (fun (_, (t:W.term))->match t.ty with Flow.Ty.Array _->true|_->false) clauses
-      | Op {op="array/sum";_} -> true | _ -> false) in
-    let text_candidate=match x.node with
-      | W.Hof (`Map,_::rest) -> x.ty=Flow.Ty.Array Flow.Ty.Text || text_input rest
-      | Loop {kind=`For;clauses;_} -> x.ty=Flow.Ty.Array Flow.Ty.Text || text_input(List.map snd clauses)
-      | _ -> false in
-    let candidate=numeric_candidate || text_candidate in
-    (* a drawing also offers its nested maps to Packed: a refusal falls back to the structured loop below *)
-    let packed=if not (strict || draw <> None) || not candidate then None else Option.bind !current (fun parent ->
-      let names=E.Private.free_names x in
+    let numeric_candidate, text_candidate = packed_candidate x in
+    let candidate = numeric_candidate || text_candidate in
+    (* A State step's maps are deferred past the static pass. Compile those nested kernels
+       under their state residual; other nested candidates keep the existing strict/draw gate. *)
+    let state_parent = Option.fold ~none:false ~some:(fun parent -> state_step_candidate parent x) !current in
+    let packed=if not candidate || not (strict || draw <> None || state_parent) then None else Option.bind !current (fun parent ->
+      let names=E.Residual.free_names x in
       let arguments=ref [] in
       let rec capture = function
         (* in a drawing a captured residual is lowered first and passed as an argument: the map then
@@ -328,19 +515,19 @@ let lower_with ?budget ~strict ~region_allowed ~draw (root : E.residual Lazy.t) 
               | Some index -> index | None -> let index=List.length !arguments in arguments:= !arguments @ [id];index in
             V.Source("$core/argument",ty,["index",V.Int index])
         | Record_fields fields -> V.Record(List.map(fun(name,v)->name,capture v)fields)
-        | Callable(Closure cl) -> V.Fn(E.Private.compiled_function parent
+        | Callable(Closure cl) -> V.Fn(E.Residual.compiled_function parent
             ~instance:cl.instance ~prefix:cl.prefix ~zone:cl.zone ~params:cl.params ~body:cl.body
             ~bindings:(List.map(fun(name,v)->name,capture v)(Names.bindings cl.env)))
         | _ -> refuse "packed_capture" in
       try
         let bindings=List.filter_map(fun name -> Option.map(fun v->name,capture v)(Names.find_opt name env)) names in
-        let r=E.Private.with_bindings parent ~term:x bindings in
+        let r=E.Residual.with_bindings parent ~term:x bindings in
         Option.bind (Packed.compile r x) (fun p->
-          let region=Packed.to_region p in
+          let region=p in
           if region_allowed region then Some(r,region,!arguments) else None)
       with Unsupported _ -> None) in
     match packed with
-    | Some (r,packed,args) -> region ~args statements packed (E.Private.residual_view r)
+    | Some (r,packed,args) -> region ~args statements packed (E.Residual.residual_view r)
     | None ->
     if numeric_candidate && strict then refuse "packed_kernel";
     match x.node with
@@ -381,7 +568,7 @@ let lower_with ?budget ~strict ~region_allowed ~draw (root : E.residual Lazy.t) 
         (match known_values (List.map (fun v -> "",v) texts) with
          | Some texts -> Known (V.Text (String.concat "" (List.map (fun (_,v) -> match v with V.Text s -> s | _ -> assert false) texts)))
          | None -> primitive statements cache source Flow.Ty.Text Text_concat (List.map (fun v -> "part",v) texts))
-    | Time -> emit statements source Flow.Ty.Float (Frame Time)
+    | Time -> frame emit statements cache source Flow.Ty.Float Time
     | State _ -> state_term statements cache source env x false
     | Vec ts when List.length ts >= 2 && List.length ts <= 4 ->
         let args = List.map compile ts in
@@ -394,7 +581,7 @@ let lower_with ?budget ~strict ~region_allowed ~draw (root : E.residual Lazy.t) 
         let value=List.fold_left (fun v name -> field statements cache source x.ty v name) start fields in
         if borrow then descriptor statements cache source value else value
     | Op {op;args;_} ->
-        let o = match Flow.Op.find ~extra:(E.Private.residual_ops (Lazy.force root)) op Flow.Context.value with
+        let o = match Flow.Op.find ~extra:(E.Residual.residual_ops (Lazy.force root)) op Flow.Context.value with
           | Some o -> o | _ -> refuse op in
         let args = List.map (fun (n,t) -> n,
           if Flow.Ty.is_cooked x.ty && storage_argument t.W.ty then term ~borrow:true statements cache source env t
@@ -403,11 +590,11 @@ let lower_with ?budget ~strict ~region_allowed ~draw (root : E.residual Lazy.t) 
           | V.Source _ | Struct(_,Flow.Ty.Array _,_) -> true
           | V.Record fields->List.exists(fun(_,v)->data_source v)fields
           | _->false in
-        let prototype=if o.live then None else try Some(o.body ~live:(Frame_input.at_time 0.)
+        let prototype=if o.live then None else try Some(o.body ~live:(Input.at_time 0.)
             ~node:(fun _ _->refuse op)
             (List.mapi(fun i(name,value)->name,match value with
               |Known v->v|_->V.Source("$core/argument",type_of value,["index",V.Int i]))args))
-            with Unsupported _ | V.Fail _ | V.Diagnostic_fail _ | Invalid_argument _->None in
+            with Unsupported _ | Diagnostic.Error _ | Invalid_argument _->None in
         let rec host=function
           | V.Source("$core/argument",_,["index",V.Int index])->snd(List.nth args index)
           | (V.Source(name,ty,fields)|Struct(name,(Flow.Ty.Array _ as ty),fields)) as value ->
@@ -426,9 +613,8 @@ let lower_with ?budget ~strict ~region_allowed ~draw (root : E.residual Lazy.t) 
         if o.ctx<>Flow.Context.value || o.shape<>Flow.Op.Scalar || not (shipped o) then refuse op;
         (match known_values args with
         | Some values when not o.live ->
-            (try Known (o.body ~live:(Frame_input.at_time 0.) ~node:(fun _ _ -> refuse op) values)
-             with V.Fail (code,message,_) -> primitive statements cache source x.ty (Fail (code,message)) []
-               | V.Diagnostic_fail d -> primitive statements cache source x.ty (Fail_diagnostic d) [])
+            (try Known (o.body ~live:(Input.at_time 0.) ~node:(fun _ _ -> refuse op) values)
+             with Diagnostic.Error d -> primitive statements cache source x.ty (failure d) [])
         | _ -> operation statements cache source x.ty op args))
     | Call {kind;ctx;args}->
         if not(Flow.Ty.is_cooked x.ty)then refuse "call";
@@ -560,9 +746,9 @@ let lower_with ?budget ~strict ~region_allowed ~draw (root : E.residual Lazy.t) 
     | Hof (_,[]) -> refuse "higher_order"
     | Graph_ref {graph;inputs=[]} ->
         (* The referenced graph's body in its own default instance, as the live walker re-runs it. *)
-        let g=match E.Private.residual_graph (Lazy.force root) graph with Some g -> g | None -> refuse "ref" in
+        let g=match E.Residual.residual_graph (Lazy.force root) graph with Some g -> g | None -> refuse "ref" in
         let zone=[graph] in
-        let source={source with C.instance=Option.value ~default:source.instance (E.Private.graph_instance (Lazy.force root) graph);
+        let source={source with C.instance=Option.value ~default:source.instance (E.Residual.graph_instance (Lazy.force root) graph);
           prefix=[];site=zone;owner=zone;iter=[]} in
         let saved= !plane in
         plane:=if g.context=Flow.Context.host then `Host else `Frame;
@@ -596,7 +782,7 @@ let lower_with ?budget ~strict ~region_allowed ~draw (root : E.residual Lazy.t) 
         | Vec _ -> "vector" | Lit _ -> "literal"
         | Graph_ref _ -> "ref"
         | _ -> assert false)
-  and packed_region r (view : E.Private.residual_view) : C.Region.t option =
+  and packed_region r (view : E.Residual.residual_view) : C.Region.t option =
     (* Packed-array forms run as one region through Packed.force, unchanged; list
        loops stay structured core. A refusal by Packed leaves the structured path. *)
     let packed ty = match ty with Flow.Ty.Array _ -> true | _ -> false in
@@ -608,9 +794,10 @@ let lower_with ?budget ~strict ~region_allowed ~draw (root : E.residual Lazy.t) 
     match sources with
     | Some sources when packed view.term.ty || List.exists (fun (s : W.term) -> packed s.ty) sources ->
         (try Option.bind (Packed.compile r view.term) (fun packed ->
-           let region=Packed.to_region packed in if region_allowed region then Some region else None) with _ -> None)
+           let region=packed in if region_allowed region then Some region else None) with
+         | Diagnostic.Error _ | Invalid_argument _ | Not_found | Failure _ -> None)
     | _ -> None
-  and region ?(args=[]) statements packed (view : E.Private.residual_view) =
+  and region ?(args=[]) statements packed (view : E.Residual.residual_view) =
     let index=List.length !regions in
     regions:=!regions @ [packed];
     let source={(source_of_view view) with C.span=Some view.term.form.span} in
@@ -668,10 +855,9 @@ let lower_with ?budget ~strict ~region_allowed ~draw (root : E.residual Lazy.t) 
         (fun body cache v -> sequence_get body cache source v index)
     | Known (V.List items),Known index ->
         let op=Option.get (Flow.Op.find "nth" Flow.Context.value) in
-        (try resolve statements cache (Known (op.body ~live:(Frame_input.at_time 0.)
+        (try resolve statements cache (Known (op.body ~live:(Input.at_time 0.)
             ~node:(fun _ _ -> refuse "nth") ["list",V.List items;"index",index]))
-         with V.Fail (code,message,_) -> primitive statements cache source Flow.Ty.Any (Fail (code,message)) []
-           | V.Diagnostic_fail d -> primitive statements cache source Flow.Ty.Any (Fail_diagnostic d) [])
+         with Diagnostic.Error d -> primitive statements cache source Flow.Ty.Any (failure d) [])
     | Known (V.List items),index when C.literal_of_value (V.List items)=None ->
         if Array.length items>4096 then refuse "list_limit";
         let indices=Known (V.List (Array.init (Array.length items) (fun i -> V.Int i))) in
@@ -757,12 +943,13 @@ let lower_with ?budget ~strict ~region_allowed ~draw (root : E.residual Lazy.t) 
   and increment statements cache source value =
     let next=primitive statements cache source Flow.Ty.Int (Numeric Add) ["a",value;"b",Known (V.Int 1)] in
     update statements cache source value next
-  and counted ?(limit=4096) statements cache source first last f =
+  and counted ?(limit=4096) ?stop statements cache source first last f =
     let first=ensure statements cache source first and last=ensure statements cache source last in
+    let stop=Option.map(ensure statements cache source)stop in
     let count=local Flow.Ty.Int and index=local Flow.Ty.Int and item=local Flow.Ty.Int and id=number () in
     let body=ref [] in
     f body (Hashtbl.copy cache) (Computed (item,Flow.Ty.Int));
-    statements:=statement id source (Counted {first;last;count;index;item;limit;
+    statements:=statement id source (Counted {first;last;count;index;item;limit;stop;
       init=[];body=List.rev !body}) :: !statements
   and slice statements cache source ty sequence first count =
     primitive statements cache source ty Sequence_slice ["list",sequence;"first",first;"count",count]
@@ -778,15 +965,13 @@ let lower_with ?budget ~strict ~region_allowed ~draw (root : E.residual Lazy.t) 
           update body cache source accumulator value);
         accumulator
     | `Iterate,init::count::until ->
-        (* One counted loop: the body (and any packed region in it) is lowered once and run per pass.
-           [:until] holds a finished flag; the remaining passes are only a skipped branch. *)
+        (* Lower the body once; [:until] stops the counted scope after committing its next value. *)
         let accumulator=hold ~ty statements cache source (compile init) in
         let count=compile count in
         let stop=List.map (fun g -> as_callable source (compile g)) until in
         let finished=match stop with
           | [] -> None | _ -> Some (hold statements cache source (Known (V.Bool false))) in
-        counted ~limit:max_int statements cache source (Known (V.Int 0)) count (fun body cache _ ->
-          let pass body cache =
+        counted ~limit:max_int ?stop:finished statements cache source (Known (V.Int 0)) count (fun body cache _ ->
             let value=call body cache source ty None fn [accumulator] in
             let value=widen_like body cache source accumulator value in
             (match stop,finished with
@@ -795,12 +980,7 @@ let lower_with ?budget ~strict ~region_allowed ~draw (root : E.residual Lazy.t) 
                  let reached=call body cache source Flow.Ty.Bool None g [accumulator;next] in
                  update body cache source finished reached;
                  update body cache source accumulator next
-             | _ -> update body cache source accumulator value);
-            Known (V.Int 0) in
-          match finished with
-          | None -> ignore (pass body cache)
-          | Some finished -> ignore (branch body cache source Flow.Ty.Int finished
-              (fun _ _ -> Known (V.Int 0)) pass));
+             | _ -> update body cache source accumulator value));
         accumulator
     | `Sort_by,[items] -> sort_by statements cache source ty fn (compile items)
     | (`Map|`Filter),items ->
@@ -922,7 +1102,7 @@ let lower_with ?budget ~strict ~region_allowed ~draw (root : E.residual Lazy.t) 
         match value.node with
         | Lit _ | Text _ | Nil | Time | Ref_binding _ -> true
         | Op {op;args;_} -> op<>"value/rand" &&
-            (match Flow.Op.find ~extra:(E.Private.residual_ops(Lazy.force root)) op Flow.Context.value with
+            (match Flow.Op.find ~extra:(E.Residual.residual_ops(Lazy.force root)) op Flow.Context.value with
              | Some op->shipped op | None->false) && List.for_all (fun (_,x)->invariant x) args
         | Vec xs | List_lit xs | Str xs -> all xs
         | Record xs -> List.for_all(fun (_,x)->invariant x)xs
@@ -937,7 +1117,7 @@ let lower_with ?budget ~strict ~region_allowed ~draw (root : E.residual Lazy.t) 
           | None->Option.get first
         else begin
           (match value with
-           | Some value when invariant value && List.for_all(fun name->Names.mem name env)(E.Private.free_names value)->()
+           | Some value when invariant value && List.for_all(fun name->Names.mem name env)(E.Residual.free_names value)->()
            | _->refuse "text_collect_dependent_clause");
           let empty=match source_ty with
             | Flow.Ty.Array elem->Known(V.array_init elem 0 (fun _->assert false))
@@ -1169,12 +1349,12 @@ let lower_with ?budget ~strict ~region_allowed ~draw (root : E.residual Lazy.t) 
   and as_callable source = function
     | Callable f -> f
     | Known (V.Fn f) ->
-        let identity=E.Private.function_id f in
-        (match E.Private.function_body f,E.Private.function_origin f with
+        let identity=E.Residual.function_id f in
+        (match E.Residual.function_body f,E.Residual.function_origin f with
         | Some (params,body),Some (instance,prefix,zone) ->
-            let env=Names.of_seq (List.to_seq (List.map (fun (n,v) -> n,Known v) (E.Private.function_bindings f))) in
+            let env=Names.of_seq (List.to_seq (List.map (fun (n,v) -> n,Known v) (E.Residual.function_bindings f))) in
             Closure {params;body;env;instance;prefix;zone;identity}
-        | _ -> (match E.Private.function_name f with Some name -> Named {name;identity} | None -> refuse "fn"))
+        | _ -> (match E.Residual.function_name f with Some name -> Named {name;identity} | None -> refuse "fn"))
     | _ -> ignore source; refuse "fn"
   and call ?(borrow=false) statements cache source ty specialized fn values =
     let identity=match fn with Closure cl -> cl.identity | Named n -> n.identity in
@@ -1189,19 +1369,19 @@ let lower_with ?budget ~strict ~region_allowed ~draw (root : E.residual Lazy.t) 
           bind statements cache source env pattern value) cl.env cl.params values in
         term ~borrow statements cache source env (Option.value specialized ~default:cl.body)
     | Named n ->
-        (match E.Private.residual_definition (Lazy.force root) n.name with
+        (match E.Residual.residual_definition (Lazy.force root) n.name with
         | Some _ -> definition ~borrow statements cache source n.name specialized values
         | None ->
-            let o=match Flow.Op.find ~extra:(E.Private.residual_ops (Lazy.force root)) n.name Flow.Context.value with
+            let o=match Flow.Op.find ~extra:(E.Residual.residual_ops (Lazy.force root)) n.name Flow.Context.value with
               | Some o when o.ctx=Flow.Context.value && o.shape=Flow.Op.Scalar && shipped o -> o | _ -> refuse n.name in
             let names=Array.of_list (List.map fst (o.signature.pos @ o.signature.opt)) in
             let args=List.mapi (fun i v -> (if i<Array.length names then names.(i) else
                 match o.signature.rest with Some (n,_) -> n | None -> refuse n.name),v) values in
             match known_values args with
-            | Some args when not o.live -> Known (o.body ~live:(Frame_input.at_time 0.) ~node:(fun _ _ -> refuse n.name) args)
+            | Some args when not o.live -> Known (o.body ~live:(Input.at_time 0.) ~node:(fun _ _ -> refuse n.name) args)
             | _ -> operation statements cache source ty n.name args)
   and definition ?(borrow=false) statements cache source name specialized values =
-    let declaration=match E.Private.residual_definition (Lazy.force root) name with Some d -> d | None -> refuse "call_fn" in
+    let declaration=match E.Residual.residual_definition (Lazy.force root) name with Some d -> d | None -> refuse "call_fn" in
     if List.compare_lengths declaration.inputs values <> 0 then refuse "call_fn";
     let zone=["def:"^name] in
     let source={source with C.prefix=source.prefix @ source.site;site=zone;owner=zone} in
@@ -1220,73 +1400,11 @@ let lower_with ?budget ~strict ~region_allowed ~draw (root : E.residual Lazy.t) 
       | "exact" -> arg "value"
       | "count" -> sequence_count statements cache source (arg "list")
       | "nth" -> sequence_get statements cache source (arg "list") (arg "index")
-      | "range" ->
-          let first,last=match List.assoc_opt "end" args with
-            | Some last -> arg "count",last | None -> Known (V.Int 0),arg "count" in
-          let first=ensure statements cache source first in
-          let last=ensure statements cache source last in
-          let count=local Flow.Ty.Int and index=local Flow.Ty.Int and item=local Flow.Ty.Int
-          and id=number () in
-          let init=ref [] in
-          let result=primitive init cache source ty Sequence_build ["count",Computed (count,Flow.Ty.Int)] in
-          let body=ref [] in
-          store body cache source result (Computed (index,Flow.Ty.Int)) (Computed (item,Flow.Ty.Int));
-          statements:=statement id source (Counted {first;last;count;index;item;limit=4096;
-            init=List.rev !init;body=List.rev !body}) :: !statements;
-          result
-      | "take" | "drop" | "rest" ->
-          let sequence=arg "list" in
-          let count=sequence_count statements cache source sequence in
-          let wanted=if name="rest" then Known (V.Int 1)
-            else coerce statements cache source Flow.Ty.Int (float (arg "n")) in
-          let retained=prim Flow.Ty.Int (Numeric Max) ["a",Known (V.Int 0);"b",wanted] in
-          let retained=prim Flow.Ty.Int (Numeric Min) ["a",retained;"b",count] in
-          let first,length=if name="take" then Known (V.Int 0),retained
-            else retained,prim Flow.Ty.Int (Numeric Sub) ["a",count;"b",retained] in
-          prim ty Sequence_slice ["list",sequence;"first",first;"count",length]
-      | "reverse" ->
-          let sequence=arg "list" in
-          let count=sequence_count statements cache source sequence in
-          let result=prim ty Sequence_build ["count",count] in
-          iterate statements cache source sequence (fun body cache index item ->
-            let last=primitive body cache source Flow.Ty.Int (Numeric Sub) ["a",count;"b",Known (V.Int 1)] in
-            let reverse=primitive body cache source Flow.Ty.Int (Numeric Sub) ["a",last;"b",index] in
-            store body cache source result reverse item);
-          result
-      | "first" | "last" ->
-          let sequence=arg "list" in
-          let index=if name="first" then Known (V.Int 0)
-            else prim Flow.Ty.Int (Numeric Sub) ["a",sequence_count statements cache source sequence;"b",Known (V.Int 1)] in
-          sequence_get statements cache source sequence index
-      | "array/sum" ->
-          let zero=match ty with Flow.Ty.Int -> V.Int 0 | Vec2 -> V.Vec2 (0.,0.) | Vec3 -> V.Vec3 (0.,0.,0.)
-            | Vec4 -> V.Vec4 (0.,0.,0.,0.) | _ -> V.Float 0. in
-          let total=hold ~ty statements cache source (Known zero) in
-          iterate statements cache source (arg "array") (fun body cache _ item ->
-            update body cache source total (primitive body cache source ty
-              (if ty=Flow.Ty.Int then Integer Iadd else Numeric Add) ["a",total;"b",item]));
-          total
-      | "linspace" ->
-          let a=float (arg "from") in let b=float (arg "to") in let n=arg "count" in
-          let first=ensure statements cache source (Known (V.Int 0)) in
-          let last=ensure statements cache source n in
-          let count=local Flow.Ty.Int and index=local Flow.Ty.Int and item=local Flow.Ty.Int
-          and id=number () in
-          let init=ref [] in
-          let result=primitive init cache source ty Sequence_build ["count",Computed (count,Flow.Ty.Int)] in
-          let body=ref [] in
-          let single=primitive body cache source Flow.Ty.Bool (Numeric Eq) ["a",n;"b",Known (V.Int 1)] in
-          let value=branch body cache source Flow.Ty.Float single (fun _ _ -> a) (fun body cache ->
-            let p ty op args = primitive body cache source ty op args in
-            let k=p Flow.Ty.Float Float_convert ["x",Computed (item,Flow.Ty.Int)] in
-            let steps=p Flow.Ty.Float Float_convert ["x",p Flow.Ty.Int (Numeric Sub) ["a",n;"b",Known (V.Int 1)]] in
-            let span=p Flow.Ty.Float (Numeric Sub) ["a",b;"b",a] in
-            let scaled=p Flow.Ty.Float (Numeric Mul) ["a",span;"b",k] in
-            p Flow.Ty.Float (Numeric Add) ["a",a;"b",p Flow.Ty.Float (Numeric Div) ["a",scaled;"b",steps]]) in
-          store body cache source result (Computed (index,Flow.Ty.Int)) value;
-          statements:=statement id source (Counted {first;last;count;index;item;limit=4096;
-            init=List.rev !init;body=List.rev !body}) :: !statements;
-          result
+      | "range" | "take" | "drop" | "rest" | "reverse" | "first" | "last"
+      | "array/sum" | "linspace" ->
+          sequence_operation ~primitive ~ensure ~sequence_count ~sequence_get ~iterate ~store
+            ~hold ~update ~branch ~coerce ~local ~number ~statement
+            statements cache source ty name args
       | "pointer/down" | "key/down" ->
           let wanted,names=if name="key/down" then arg "key","keys"
             else Option.value ~default:(Known (V.Text "left")) (List.assoc_opt "button" args),"buttons" in
@@ -1332,13 +1450,13 @@ let lower_with ?budget ~strict ~region_allowed ~draw (root : E.residual Lazy.t) 
             branch body cache source Flow.Ty.Vec3 is (fun body cache -> build body cache k)
               (fun body cache -> arm body cache (k+1)) in
           arm statements cache 0
-      | "frame/dt" -> emit statements source ty (Frame Dt)
-      | "frame/width" -> emit statements source ty (Frame Width)
-      | "frame/height" -> emit statements source ty (Frame Height)
-      | "frame/index" -> emit statements source ty (Frame Index)
-      | "frame/input" -> emit statements source ty (Frame Input)
-      | "pointer/x" -> emit statements source ty (Frame Pointer_x)
-      | "pointer/y" -> emit statements source ty (Frame Pointer_y)
+      | "frame/dt" -> frame emit statements cache source ty Dt
+      | "frame/width" -> frame emit statements cache source ty Width
+      | "frame/height" -> frame emit statements cache source ty Height
+      | "frame/index" -> frame emit statements cache source ty Index
+      | "frame/input" -> frame emit statements cache source ty Input
+      | "pointer/x" -> frame emit statements cache source ty Pointer_x
+      | "pointer/y" -> frame emit statements cache source ty Pointer_y
       | "value/lerp" ->
           let u = float (arg "u") in
           let inverse = calc Sub (Known (V.Float 1.)) u in
@@ -1358,69 +1476,9 @@ let lower_with ?budget ~strict ~region_allowed ~draw (root : E.residual Lazy.t) 
           let sine=prim Flow.Ty.Float (Math Sin) ["x",a] in
           let x=calc Mul r cosine in let z=calc Mul r sine in
           vec [x;Option.value ~default:(Known (V.Float 0.)) (List.assoc_opt "height" args);z]
-      | "color/hsl" ->
-          let h=float (arg "h") in let s=float (arg "s") in let l=float (arg "l") in
-          let f x = Known (V.Float x) in
-          let c ty op args = primitive statements cache source ty op args in
-          let calc2 op a b = c Flow.Ty.Float (Numeric op) ["a",a;"b",b] in
-          let unit v = calc2 Max (f 0.) (calc2 Min (f 1.) v) in
-          (* Operators.hsl_channels, step for step *)
-          let hue=calc2 Div (calc2 Mod h (f 360.)) (f 60.) in
-          let sat=unit s in let light=unit l in
-          let abs v = c Flow.Ty.Float (Math Abs) ["x",v] in
-          let chroma=calc2 Mul (calc2 Sub (f 1.) (abs (calc2 Sub (calc2 Mul (f 2.) light) (f 1.)))) sat in
-          let x=calc2 Mul chroma (calc2 Sub (f 1.) (abs (calc2 Sub (calc2 Mod hue (f 2.)) (f 1.)))) in
-          let rgb body cache r g b = emit body source Flow.Ty.Vec3 (Vec (List.map (ensure body cache source) [r;g;b])) in
-          let zero=f 0. in
-          let arm limit yes no = branch statements cache source Flow.Ty.Vec3 (c Flow.Ty.Bool (Numeric Lt) ["a",hue;"b",f limit]) yes no in
-          let triple=
-            arm 1. (fun b k -> rgb b k chroma x zero) (fun _ _ ->
-            arm 2. (fun b k -> rgb b k x chroma zero) (fun _ _ ->
-            arm 3. (fun b k -> rgb b k zero chroma x) (fun _ _ ->
-            arm 4. (fun b k -> rgb b k zero x chroma) (fun _ _ ->
-            arm 5. (fun b k -> rgb b k x zero chroma) (fun b k -> rgb b k chroma zero x))))) in
-          let m=calc2 Sub light (calc2 Div chroma (f 2.)) in
-          let channel name =
-            let byte=c Flow.Ty.Int (Color_byte Clamped) ["x",calc2 Add (field statements cache source Flow.Ty.Float triple name) m] in
-            calc2 Div (c Flow.Ty.Float Float_convert ["x",byte]) (f 255.) in
-          let r=channel "x" in let g=channel "y" in let b=channel "z" in
-          vec [r;g;b]
-      | "color/gradient" ->
-          (* Constant opaque stops only; anything else keeps the walker's diagnostics. *)
-          let colors=match arg "stops" with
-            | Known (V.List xs) when Array.length xs>0 ->
-                (try Array.map Operators.drawing_color xs with V.Fail _ -> refuse name)
-            | _ -> refuse name in
-          if Array.exists (fun (c : Rays_math.Color.t) -> c.a<>255) colors then refuse name;
-          let n=Array.length colors in
-          let channels (color : Rays_math.Color.t) = let r,g,b,_=Rays_math.Color.to_floats color in V.Vec3 (r,g,b) in
-          if n=1 then Known (channels colors.(0)) else begin
-            let f x = Known (V.Float x) in
-            let c ty op args = primitive statements cache source ty op args in
-            let calc2 op a b = c Flow.Ty.Float (Numeric op) ["a",a;"b",b] in
-            let unit v = calc2 Max (f 0.) (calc2 Min (f 1.) v) in
-            let position=calc2 Mul (unit (float (arg "x"))) (f (float_of_int (n-1))) in
-            let left=c Flow.Ty.Int (Numeric Min) ["a",Known (V.Int (n-2));"b",c Flow.Ty.Int Int_convert ["x",position]] in
-            let pct=unit (calc2 Sub position (c Flow.Ty.Float Float_convert ["x",left])) in
-            let inverse=calc2 Sub (f 1.) pct in
-            let pick body cache k =
-              let blend (c1 : Rays_math.Color.t) (c2 : Rays_math.Color.t) pick_channel =
-                let p ty op args = primitive body cache source ty op args in
-                let m op a b = p Flow.Ty.Float (Numeric op) ["a",a;"b",b] in
-                let a=m Mul (f (float_of_int (pick_channel c1))) inverse in
-                let b=m Mul (f (float_of_int (pick_channel c2))) pct in
-                let byte=p Flow.Ty.Int Int_convert ["x",m Add (m Add a b) (f 0.5)] in
-                m Div (p Flow.Ty.Float Float_convert ["x",byte]) (f 255.) in
-              let c1=colors.(k) and c2=colors.(k+1) in
-              let r=blend c1 c2 (fun c -> c.r) in let g=blend c1 c2 (fun c -> c.g) in let b=blend c1 c2 (fun c -> c.b) in
-              emit body source Flow.Ty.Vec3 (Vec (List.map (ensure body cache source) [r;g;b])) in
-            let rec arms body cache k =
-              if k=n-2 then pick body cache k else
-              let here=primitive body cache source Flow.Ty.Bool (Numeric Eq) ["a",left;"b",Known (V.Int k)] in
-              branch body cache source Flow.Ty.Vec3 here (fun body cache -> pick body cache k)
-                (fun body cache -> arms body cache (k+1)) in
-            arms statements cache 0
-          end
+      | "color/hsl" | "color/gradient" ->
+          color_operation ~primitive ~field ~branch ~emit ~ensure
+            statements cache source ty name args
       | "dot" ->
           let products=List.map (fun component ->
             let a=field statements cache source Flow.Ty.Float (arg "a") component in
@@ -1464,13 +1522,13 @@ let lower_with ?budget ~strict ~region_allowed ~draw (root : E.residual Lazy.t) 
       | None ->
           let root = Lazy.force root in
           let result = residual body cache root in
-          let view = E.Private.residual_view root in
+          let view = E.Residual.residual_view root in
           let source = { (source_of_view view) with C.span=Some view.term.form.span } in
           [|ensure body cache source result|] in
     Ok (constant_storage {C.constants=Array.of_list (List.rev !constants);locals=Array.of_list (List.rev !locals);
       body=List.rev !body;results;state_slots=Array.of_list (List.rev !slots);regions=Array.of_list !regions;call_slots= !next_call})
   with Unsupported name -> Error name
-    | V.Fail _ | V.Diagnostic_fail _ | Not_found | Invalid_argument _ | Failure _ -> Error "constant"
+    | Diagnostic.Error _ | Not_found | Invalid_argument _ | Failure _ -> Error "constant"
 
 let lower ?(strict=false) ?budget root = lower_with ?budget ~strict ~region_allowed:(fun _ -> true) ~draw:None (Lazy.from_val root)
 let lower_draw ?(region_allowed=fun _ -> true) ~root build = lower_with ~strict:false ~region_allowed ~draw:(Some build) root

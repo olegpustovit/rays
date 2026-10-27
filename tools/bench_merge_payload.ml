@@ -129,11 +129,11 @@ let measure directory recording case=
   let indices=List.filter_map(fun g->if Geometry.edge_groups g=[]then None
     else Some(Topology_index.create(Geometry.topology g)))case.sources in
   let immutable=List.map geometry_bytes case.sources in
-  let first=Rays_math.Parallel.run ~domains:1(fun()->run case|>ok)in
+  let first=Parallel.run ~domains:1(fun()->run case|>ok)in
   validate case first;
   let expected=capture directory recording case.name ".geometry-bytes"(geometry_bytes first)in
   let digest=Digest.to_hex(Digest.string expected)in
-  List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+  List.iter(fun domains->Parallel.run ~domains(fun()->
     let preflight=run case|>ok in validate case preflight;
     check(geometry_bytes preflight=expected)(case.name^": domain preflight bytes differ");
     let samples=Array.init !trials(fun trial->

@@ -1,11 +1,11 @@
 (library
  (name pxui_shell)
  (public_name rays.pxui_shell)
- (modules pxui_shell layout kit chrome which_key status_bar timeline_bar prompt tree shell inspector)
- (private_modules layout kit chrome which_key status_bar timeline_bar prompt tree shell inspector)
- (libraries rays editor_core pxui))
+ (modules pxui_shell layout kit chrome which_key status_bar timeline_bar prompt tree inspector)
+ (private_modules layout kit chrome which_key status_bar timeline_bar prompt tree inspector)
+ (libraries rays rays_math editor_core pxui))
 
 (test
  (name test_shell)
  (modules test_shell)
- (libraries rays editor_core pxui pxui_shell))
+ (libraries rays rays_math editor_core pxui pxui_shell ogpu_mock))

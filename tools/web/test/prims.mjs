@@ -1,7 +1,7 @@
 // node prims.mjs FIXTURE_DIR PRIMS_JS_PATH
 //
-// Runs the native fixtures written by tools/core_fixtures.exe through the browser primitives
-// (tools/web/runtime/prims.js). Each case is export(...static, ...args); its result must equal the
+// Runs the native fixtures written by tools/prims_fixtures.exe through the browser primitives
+// (lib/web_export/runtime/prims.js). Each case is export(...static, ...args); its result must equal the
 // native result: exact for Int, Text, Bool, structure and error code/message; floats within 1e-12
 // relative (NaN matches NaN, infinities must match exactly). Prints one "ok" line, or every
 // mismatch and exits 1. No dependencies.
@@ -169,7 +169,7 @@ for (const [type, width] of [['float', 1], ['vec2', 2], ['vec3', 3], ['vec4', 4]
   expect('E_DATA_SOURCE', () => prims.sop_topology(null));
 }
 
-// ---- decoding the JSON encoding of core_fixtures.ml ----
+// ---- decoding the JSON encoding of prims_fixtures.ml ----
 const decodeFloat = v => {
   if (typeof v === 'number') return v;
   if (v && typeof v === 'object' && 'float' in v) {

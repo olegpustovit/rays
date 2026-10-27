@@ -1,7 +1,8 @@
+open Core_model
 open Rays
 open Sop
 open Editor_document
-include Core_reduce
+open Core_reduce
 
 (* Environment-owned scene edits (camera bookkeeping, a camera following the viewport): view
    state, never an undo entry.  [`Reset] starts the history, [`Amend] folds into the present
@@ -11,7 +12,7 @@ let scene_edit value mode ?(active_camera = value.doc.active_camera) scene =
   let edited = { value.doc with scene = { value.doc.scene with graph = Result.get_ok (Flow_sop.Network.with_geometry scene value.doc.scene.graph);
       displayed = Document.displayed_of ?previous:value.doc.scene.displayed (Flow_sop.Network.of_geometry scene) None } } in
   (* a camera that follows the viewport is an edit of the text when the text declares it *)
-  match Result.bind (Doc.reconcile ~factories:value.factories ~adopt:false value.doc edited) (fun doc ->
+  match Result.bind (Editor_document.Document_edit.reconcile ~factories:value.factories ~adopt:false value.doc edited) (fun doc ->
       if active_camera = doc.active_camera then Ok doc else
       Editor_document.Scene_sync.write ~factories:value.factories doc Document.Scene (Camera active_camera)
       |> Result.map (Option.fold ~none:doc ~some:fst)) with
@@ -61,8 +62,8 @@ let syntax_edit value op =
   Result.map (fun doc -> install value doc ~label:(Flow_graph.Flow_edit.label op)
     ~merge:(Option.fold ~none:Editor_core.History.Step
       ~some:(fun key -> Editor_core.History.Gesture key) (Flow_graph.Flow_edit.gesture op)))
-    (Doc.syntax_edit_result ~factories:value.factories value.doc op)
-  |> Result.map_error Flow.Diagnostic.to_string) in
+    (Editor_document.Document_edit.syntax_edit_result ~factories:value.factories value.doc op)
+  |> Result.map_error Diagnostic.to_string) in
   Result.map (fun value -> { value with edit_phases = phases }) result
 
 (* The scene's World at timeline [time] (the day cycle advances with it). *)
@@ -75,7 +76,6 @@ let world ?(view = `Primary) value ~time =
   | Some (Some (w : Document.view_world)) -> Layers.to_world ~time w.node w.layers
   | None ->
   match List.filter (view_wants value `Primary) (Objects.ids "world" (scene value)) with
-  | id :: _ when Edit_graph.is_bypassed (scene value) ~node_id:id -> None
   | id :: _ ->
       Option.bind (Edit_graph.find (scene value) ~node_id:id) (fun node ->
         Option.bind (Document.Int_map.find_opt id value.doc.Document.networks)
@@ -96,7 +96,6 @@ let placed_pieces ?(render = false) ?(view = `Primary) value =
   List.filter_map (fun (piece : _ Cook.piece) ->
     match Edit_graph.find (scene value) ~node_id:piece.id with
     | Some node when view_wants value view piece.id && Objects.visible node
-        && not (Edit_graph.is_bypassed (scene value) ~node_id:piece.id)
         && (not render || Objects.flag "render" node) ->
         Some (Objects.world (scene value) piece.id, piece)
     | Some _ | None -> None) (pieces value)
@@ -125,7 +124,7 @@ let edit_node value level node_id values ~label =
       | Error _ -> value
       | Ok (graph, _) ->
           let edited = Document.with_network value.doc level { network with graph = Result.get_ok (Flow_sop.Network.with_geometry graph network.graph) } in
-          (match Doc.reconcile ~factories:value.factories value.doc edited with
+          (match Editor_document.Document_edit.reconcile ~factories:value.factories value.doc edited with
            | Error message -> { value with edit_error = Some message }
            | Ok doc -> written doc)
 
@@ -158,11 +157,11 @@ let pick ?view ?(alt = false) value ~origin ~direction =
     | Some key, Some shell when List.mem_assoc key shell.views -> `Only key
     | _ -> `Primary in
   let nearest_by pick = List.fold_left (fun best (matrix, piece) ->
-    match Mat4.inverse matrix with
+    match Rays_math.Mat4.inverse matrix with
     | None -> best
     | Some inverse ->
-        match pick piece ~origin:(Mat4.transform_point inverse origin)
-            ~direction:(Mat4.transform_direction inverse direction), best with
+        match pick piece ~origin:(Rays_math.Mat4.transform_point inverse origin)
+            ~direction:(Rays_math.Mat4.transform_direction inverse direction), best with
         | Some (distance, _), Some (nearer, _, _) when distance >= nearer -> best
         | Some (distance, hit), _ -> Some (distance, hit, piece.Cook.id)
         | None, _ -> best) None (placed_pieces ~view value) in
@@ -234,8 +233,8 @@ let reload_failed value ~name text diagnostics =
   let first = match diagnostics with
     | [] -> ""
     | d :: _ -> (match Text_pane.line_of text d with
-        | Some line -> Printf.sprintf ": line %d, %s" line d.Flow.Diagnostic.message
-        | None -> ": " ^ d.Flow.Diagnostic.message) in
+        | Some line -> Printf.sprintf ": line %d, %s" line d.Diagnostic.message
+        | None -> ": " ^ d.Diagnostic.message) in
   { value with notice = Some (Refusal, Printf.sprintf "%s not reloaded%s" name first);
     text = { value.text with tab = Text_pane.Document; draft = Some text; doc_base = Some (fst value.doc.workspace); doc_errors = { at = text; found = diagnostics } } }
 
@@ -249,11 +248,11 @@ let carry_over_surface ?view value ~origin ~direction =
         | Some key, Some shell when List.mem_assoc key shell.views -> `Only key
         | _ -> `Primary in
       let nearest = List.fold_left (fun best (matrix, (piece : _ Cook.piece)) ->
-        match Mat4.inverse matrix with
+        match Rays_math.Mat4.inverse matrix with
         | None -> best
         | Some inverse ->
-            match Cook.pick_material piece ~origin:(Mat4.transform_point inverse origin)
-                ~direction:(Mat4.transform_direction inverse direction), best with
+            match Cook.pick_material piece ~origin:(Rays_math.Mat4.transform_point inverse origin)
+                ~direction:(Rays_math.Mat4.transform_direction inverse direction), best with
             | Some (distance, _), Some (nearer, _, _) when distance >= nearer -> best
             | Some (distance, path), _ -> Some (distance, piece.id, path)
             | None, _ -> best) None (placed_pieces ~view { value with cook = { value.cook with Cook.pieces = c.settled } }) in

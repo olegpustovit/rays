@@ -1,5 +1,5 @@
 type color_format = Rgba8_unorm | Bgra8_unorm
-type depth_format = No_depth | Depth32_float | Stencil8 | Depth32_float_stencil8
+type depth_format = No_depth | Depth32_float
 type blend = Replace | Alpha | Add | Multiply | Screen | Subtract
 type render_descriptor =
   { backend : string; label : string option; layout : Binding.pipeline_layout

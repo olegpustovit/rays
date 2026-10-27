@@ -168,7 +168,7 @@ let signature result =
 let test_domain_exactness () =
   let left = repeated 257 [|0.,0.,0.; 4.,0.,0.; 2.,4.,0.|]
   and right = repeated 257 [|0.,3.,0.; 4.,3.,0.; 2.,-1.,0.|] in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       let constraints = Constraints.build ~grain:19 ~left ~right () |> get in
       Coplanar.build ~grain:17 constraints |> get |> signature) in
   let one = run 1 and four = run 4 in

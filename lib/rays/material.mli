@@ -1,10 +1,10 @@
 (** Surface properties for 3D lighting. *)
 
 type t = {
-  diffuse : Color.t;
-  ambient : Color.t;
-  specular : Color.t;
-  emissive : Color.t;
+  diffuse : Rays_math.Color.t;
+  ambient : Rays_math.Color.t;
+  specular : Rays_math.Color.t;
+  emissive : Rays_math.Color.t;
   shininess : float;
   round : float;
       (** Round-corners radius in scene units for the path tracer (0 = off): edges shade as a
@@ -12,15 +12,15 @@ type t = {
 }
 
 val create :
-  ?diffuse:Color.t ->
-  ?ambient:Color.t ->
-  ?specular:Color.t ->
-  ?emissive:Color.t ->
+  ?diffuse:Rays_math.Color.t ->
+  ?ambient:Rays_math.Color.t ->
+  ?specular:Rays_math.Color.t ->
+  ?emissive:Rays_math.Color.t ->
   ?shininess:float ->
   ?round:float ->
   unit ->
   t
 
 val default : t
-val matte : Color.t -> t
-val unlit : Color.t -> t
+val matte : Rays_math.Color.t -> t
+val unlit : Rays_math.Color.t -> t

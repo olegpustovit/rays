@@ -3,6 +3,25 @@ open Scene_command
 let require condition message = if not condition then failwith message
 
 let () =
+  let encoded = Render_ir.create [|
+      Clear 0x89abcdefl;
+      Geometry { vertices = [|-0.; 1.|]; indices = [||]; color = 0x10203040l }
+    |] |> Result.get_ok |> Render_ir.serialize in
+  require (Bytes.to_string encoded =
+    "\x31\x49\x32\x52\x02\x00\x00\x00\x00\x00\x00\x00\
+     \x00\xef\xcd\xab\x89\
+     \x05\x40\x30\x20\x10\x02\x00\x00\x00\x00\x00\x00\x00\
+     \x00\x00\x00\x00\x00\x00\x00\x80\
+     \x00\x00\x00\x00\x00\x00\xf0\x3f\
+     \x00\x00\x00\x00\x00\x00\x00\x00")
+    "render IR encoding must preserve the version, little-endian words and signed zero";
+  let workers = Array.init 4 (fun _ ->
+      Domain.spawn (fun () -> Array.init 4096 (fun _ -> Display_list.fresh_id ()))) in
+  let ids = Array.concat (Array.to_list (Array.map Domain.join workers)) in
+  Array.sort Int64.compare ids;
+  Array.iteri (fun index id ->
+      require (id = Int64.add ids.(0) (Int64.of_int index))
+        "display-list identities must be unique and consecutive across domains") ids;
   (* Sixteen rectangles inside one clip are 18 commands: more than the
      builder's first 16 slots, so its storage doubles once to 32. *)
   let rectangle index = { Render_ir.vertices = [|float index; 2.; float index +. 3.; 2.;

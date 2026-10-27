@@ -3,9 +3,9 @@ open Rdk
 let () =
   let count = if Array.length Sys.argv > 1 then int_of_string Sys.argv.(1) else 1_000_000 in
   if count < 2 then invalid_arg "at least two vertices required";
-  List.iter (fun domains -> Rays_math.Parallel.run ~domains (fun () ->
+  List.iter (fun domains -> Parallel.run ~domains (fun () ->
     (* Establish the cached pool before collecting constructor samples. *)
-    Rays_math.Parallel.for_ ~chunk_size:1 ~start:0 ~finish:1 (fun _ -> ());
+    Parallel.for_ ~chunk_size:1 ~start:0 ~finish:1 (fun _ -> ());
     List.iter (fun (name, bad_index) ->
       let samples = List.init 7 (fun _ ->
         let vertices = Array.init count Fun.id in

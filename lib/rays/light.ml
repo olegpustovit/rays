@@ -4,18 +4,18 @@ type attenuation = {
 }
 
 type kind =
-  | Directional of { direction : Vec3.t }
-  | Point of { position : Vec3.t; attenuation : attenuation }
+  | Directional of { direction : Rays_math.Vec3.t }
+  | Point of { position : Rays_math.Vec3.t; attenuation : attenuation }
   | Spot of {
-      position : Vec3.t;
-      direction : Vec3.t;
+      position : Rays_math.Vec3.t;
+      direction : Rays_math.Vec3.t;
       cutoff : float;
       concentration : float;
       attenuation : attenuation;
     }
   | Area of {
-      position : Vec3.t;
-      direction : Vec3.t;
+      position : Rays_math.Vec3.t;
+      direction : Rays_math.Vec3.t;
       width : float;
       height : float;
       samples : int;
@@ -24,7 +24,7 @@ type kind =
 
 type t = {
   kind : kind;
-  diffuse : Color.t;
+  diffuse : Rays_math.Color.t;
   intensity : float;
 }
 
@@ -43,14 +43,14 @@ let validate_intensity intensity =
   if not (Float.is_finite intensity) || intensity < 0. then
     invalid_arg "Light: intensity must be finite and non-negative"
 
-let make ?(diffuse = Color.white) ?(intensity = 1.) kind =
+let make ?(diffuse = Rays_math.Color.white) ?(intensity = 1.) kind =
   validate_intensity intensity;
   { kind; diffuse; intensity }
 
 let direction value =
-  if Vec3.length_sq value = 0. then
+  if Rays_math.Vec3.length_sq value = 0. then
     invalid_arg "Light: direction must be non-zero";
-  Vec3.normalize value
+  Rays_math.Vec3.normalize value
 
 let directional ?diffuse ?intensity ~direction:value () =
   make ?diffuse ?intensity

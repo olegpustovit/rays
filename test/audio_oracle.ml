@@ -5,6 +5,7 @@
 open Rays
 
 type model = {
+  audio : Audio.t;
   notes : Audio.Sample.t array;
   active : int option;
 }
@@ -12,16 +13,17 @@ type model = {
 let frequencies =
   [|261.63; 293.66; 329.63; 349.23; 392.; 440.; 493.88; 523.25|]
 
-let make_note frequency =
-  match Audio.Sample.synth ~waveform:Audio.Sample.Sine
+let make_note audio frequency =
+  match Audio.Sample.synth audio ~waveform:Audio.Sample.Sine
       ~frequency ~duration:0.25 () with
   | Ok sample -> sample
   | Error message -> failwith message
 
 let init _frame =
-  (match Audio.init () with Ok () -> () | Error message -> failwith message);
-  let notes = Array.map make_note frequencies in
+  let audio = match Audio.init () with Ok audio -> audio | Error message -> failwith message in
+  let notes = Array.map (make_note audio) frequencies in
   {
+    audio;
     notes;
     active = None;
   }
@@ -29,18 +31,18 @@ let init _frame =
 let pressed_note (frame : Frame.t) =
   List.find_map
     (function
-      | Event.KeyPressed (Input.KeyChar key) when key >= '1' && key <= '8' ->
+      | Input.Key_pressed (Input.KeyChar key) when key >= '1' && key <= '8' ->
           Some (Char.code key - Char.code '1')
-      | Event.MousePressed (Input.LeftButton, (x, y))
+      | Input.Pointer_pressed (Input.LeftButton, (x, y))
         when y >= 150. && y < 310. && x >= 40. && x < 600. ->
           Some (min 7 (int_of_float ((x -. 40.) /. 70.)))
       | _ -> None)
-    frame.events
+    frame.input.events
 
 let update model (frame : Frame.t) =
   let active = pressed_note frame in
   Option.iter (fun index ->
-    ignore (Audio.Sample.play model.notes.(index))) active;
+    ignore (Audio.Sample.play model.audio model.notes.(index))) active;
   { model with active }
 
 let view model _frame =
@@ -48,17 +50,17 @@ let view model _frame =
     Array.to_list
       (Array.mapi (fun index _ ->
         let fill =
-          if model.active = Some index then Color.hex_exn "#22d3ee"
-          else Color.hex_exn "#f8fafc"
+          if model.active = Some index then Rays_math.Color.hex_exn "#22d3ee"
+          else Rays_math.Color.hex_exn "#f8fafc"
         in
         Scene.rect ~at:(40 + (index * 70), 150) ~w:64 ~h:160
-          ~fill ~stroke:(Color.hex_exn "#0f172a") ())
+          ~fill ~stroke:(Rays_math.Color.hex_exn "#0f172a") ())
         model.notes)
   in
-  Scene.clear (Color.hex_exn "#111827")
+  Scene.clear (Rays_math.Color.hex_exn "#111827")
   :: Scene.text ~at:(40, 60) "Press 1–8 or click a key"
   :: keys
 
 let stop model =
   Array.iter Audio.Sample.destroy model.notes;
-  Audio.shutdown ()
+  ignore (Audio.shutdown model.audio)

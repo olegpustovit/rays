@@ -37,6 +37,7 @@ type batch = {
 }
 
 type t
+val marks : t -> Marks.gpu_token option
 
 val instance_bytes : int
 val instances : t -> bytes
@@ -80,7 +81,31 @@ module Builder : sig
     color:int32 -> unit
   (** One quad whose fragment stage draws a dot every [spacing] points. *)
 
+  val shape_rect : t -> x:float -> y:float -> width:float -> height:float ->
+    fill:int32 -> stroke:int32 -> unit -> unit
+
+  val circle : t -> x:float -> y:float -> radius:float ->
+    ?fill:int32 -> ?stroke:int32 -> ?stroke_width:float -> unit -> unit
+  val line : t -> x0:float -> y0:float -> x1:float -> y1:float ->
+    color:int32 -> width:float -> unit
+  type floats = float array * int
+  val circles : t -> count:int -> position:floats -> radius:floats ->
+    fill:int32 -> stroke:int32 -> stroke_width:floats -> unit
+  val rects : t -> count:int -> position:floats -> size:floats ->
+    fill:int32 -> stroke:int32 -> unit
+  val lines : t -> count:int -> from:floats -> to_:floats ->
+    color:int32 -> width:floats -> unit
+
   val publish : t -> batch_table
   (** Close the open batch and copy every instance into an immutable table.
       Call [reset] before building the next frame. *)
+end
+
+module Private : sig
+  val copy : t -> t
+  val valid_shapes : t -> bool
+  val of_marks : Marks.gpu_token -> t
+  val marks_identity : Marks.gpu_token -> int
+  val marks_count : Marks.gpu_token -> int
+  val marks_stamp : Marks.gpu_token -> int64
 end

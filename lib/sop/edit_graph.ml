@@ -8,7 +8,7 @@ type factory = {
   operation : string;
   label : string;
   category : string list;
-  fields : Parameter.field_view list;
+  fields : Param.field_view list;
 
   requirements : input_requirement array;
   slots : string array;
@@ -22,7 +22,6 @@ type entry = {
   node : Node.t;
   inputs : int option array;
   factory : factory option;
-  bypass : bool;
 }
 
 type t = {
@@ -42,7 +41,6 @@ type node_info = {
   dependencies : Context.Dependencies.t;
   inputs : int option array;
   has_parameters : bool;
-  bypass : bool;
 }
 
 (* ponytail: a trailing [Rest] slot repeats.  An entry holds any number of inputs
@@ -71,7 +69,7 @@ let of_graph graph =
   let entries = infos |> List.fold_left (fun entries info ->
     let node = Option.get (Graph.find graph ~node_id:info.Graph.id) in
     let inputs = Array.of_list (List.map Option.some info.input_ids) in
-    Id_map.add info.id { node; inputs; factory = None; bypass = false } entries) Id_map.empty in
+    Id_map.add info.id { node; inputs; factory = None } entries) Id_map.empty in
   { entries; order_rev = List.rev_map (fun info -> info.Graph.id) infos;
     root = Some (Node.id graph) }
 
@@ -89,7 +87,7 @@ let info (entry : entry) : node_info =
     operation = Node.operation node; version = Node.version node;
     parameters = Node.parameters node; facts = Node.facts node;
     dependencies = Node.dependencies node; inputs = Array.copy entry.inputs;
-    has_parameters = Node.has_parameters node; bypass = entry.bypass }
+    has_parameters = Node.has_parameters node }
 
 let inspect value = List.filter_map (fun id ->
   Option.map info (Id_map.find_opt id value.entries)) (List.rev value.order_rev)
@@ -116,9 +114,6 @@ let node_slot_names value ~node_id = Option.map (fun (entry : entry) ->
     | None -> List.init (Array.length entry.inputs) (fun index -> "in" ^ string_of_int index))
     (Id_map.find_opt node_id value.entries)
 
-let is_bypassed value ~node_id = match Id_map.find_opt node_id value.entries with
-  | Some entry -> entry.bypass | None -> false
-
 let empty_geometry = lazy (
   let geometry = Result.get_ok (Rdk.Geometry.create
     ~positions:(Rdk.Packed.Float3.Builder.freeze (Rdk.Packed.Float3.Builder.create 0))
@@ -128,7 +123,7 @@ let empty_geometry = lazy (
       (Rdk.Geometry.payload_bytes geometry))
     ~cook_mode:Node.Generator ~dependencies:Context.Dependencies.static ~inputs:[||]
     (fun ~node_id:_ _context _inputs ->
-      Ok Node.Private.{ geometry; diagnostics = []; instances = None }))
+      Ok Node.Private.{ geometry; instances = None }))
 
 (* One compiled node per document entry. [inputs] are the compiled input
    nodes it was built from, so a later compile can reuse [built] when both the
@@ -162,7 +157,7 @@ let rebuild (entry : entry) compiled_inputs =
   | Some factory when has_optional factory ->
       let node = factory.build (Array.to_list compiled_inputs) in
       let changes = Node.parameter_fields entry.node
-          |> List.map (fun field -> field.Parameter.name, field.current) in
+          |> List.map (fun field -> field.Param.name, field.current) in
       Result.map (fun (node, _) -> Node.Private.adopt_identity ~source:entry.node node)
         (Node.apply_parameters node changes)
   | _ -> Ok (Node.Private.rebuild_with_inputs entry.node
@@ -183,14 +178,13 @@ let compile_into value ~previous table =
         | None -> Error (Printf.sprintf "editable graph references missing node #%d" id)
         | Some (entry : entry) ->
             Hashtbl.add visiting id ();
-            let count = if entry.bypass then min 1 (Array.length entry.inputs)
-              else Array.length entry.inputs in
+            let count = Array.length entry.inputs in
             let compiled_inputs = Array.make count None in
             let rec build_inputs index =
               if index = count then Ok ()
               else match entry.inputs.(index) with
                 | None ->
-                    let optional = entry.bypass || match entry.factory with
+                    let optional = match entry.factory with
                       | Some factory -> requirement factory index = Optional
                       | None -> false in
                     if optional then build_inputs (index + 1)
@@ -205,13 +199,6 @@ let compile_into value ~previous table =
               | Some reused when reused.source == entry
                     && same_inputs reused.compiled_inputs compiled_inputs ->
                   reused.built
-              | _ when entry.bypass ->
-                  (* Alias the cooked input rather than a null SOP: this retains
-                     packed instances without materializing their topology. *)
-                  Ok (if count > 0 && compiled_inputs.(0) <> None
-                    then Option.get compiled_inputs.(0)
-                    else Node.Private.adopt_identity ~source:entry.node
-                      (Lazy.force empty_geometry))
               | _ -> rebuild entry compiled_inputs) in
             Hashtbl.remove visiting id;
             (* A cycle error names where the walk entered the cycle, so once one
@@ -293,7 +280,7 @@ let add_node ?inputs ?factory node value =
           "new node %S references missing node #%d" (Node.label node) source)
       | Some None -> assert false
       | None -> Ok { value with
-          entries = Id_map.add id { node; inputs; factory; bypass = false } value.entries;
+          entries = Id_map.add id { node; inputs; factory } value.entries;
           order_rev = id :: value.order_rev }
 
 let remove_nodes ids value =
@@ -404,15 +391,15 @@ let keyword_slots slots requirements fields names =
         match Array.find_index (( = ) name) slots with
         | None -> true
         | Some index -> requirements.(index) <> Required
-            || List.exists (fun (f : Parameter.field_view) ->
+            || List.exists (fun (f : Param.field_view) ->
                 f.name = name || Option.fold ~none:false ~some:(fun (group, _) -> group = name) f.vec3) fields) names then
     invalid_arg "Edit_graph factory keyword_inputs must name distinct required slots without field conflicts";
   names
 
 let share_default_values fields =
-  List.map (fun (field : Parameter.field_view) ->
+  List.map (fun (field : Param.field_view) ->
     let equal = match field.default, field.current with
-      | Parameter.Float_value left, Parameter.Float_value right ->
+      | Param.Float_value left, Param.Float_value right ->
           Int64.bits_of_float left = Int64.bits_of_float right
       | _ -> field.default = field.current in
     if field.default == field.current || not equal then field
@@ -453,7 +440,7 @@ let factory_slots ?operation ?slots ?input_types ?(keyword_inputs = []) ?(fields
     invalid_arg "Edit_graph.factory_slots names must not be blank";
   if inputs = [] then invalid_arg
       "Edit_graph.factory_slots requires at least one input slot";
-  if List.exists repeating (List.filteri (fun i _ -> i < List.length inputs - 1) inputs)
+  if List.exists repeating (List.take (List.length inputs - 1) inputs)
   then invalid_arg "Edit_graph.factory_slots: only the last input may be Rest";
   let requirements = Array.of_list inputs in
   let slots = slot_names (List.length inputs) slots in

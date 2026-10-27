@@ -105,7 +105,6 @@ type t = {
   geo : geo;
   geo_fs : int;  (* the font size point names were measured at *)
   pan_x : float; pan_y : float; zoom : float;
-  wires : [ `Rect | `Straight | `Curve ];
   selected : Path_set.t;
   selected_wire : (path * E.arg_key * S.t option) option;
   panning_grab : bool;
@@ -133,7 +132,7 @@ let font_of zoom = max 5 (int_of_float (Float.round (13. *. zoom)))
 let regeo t scope layout ~shift =
   let fs = font_of t.zoom in
   { t with geo_fs = fs;
-    geo = compute ~style:t.wires ~previous:t.geo ~name_w:(fun s -> t.measure fs s /. t.zoom) ~shown:shown_of scope layout ~shift }
+    geo = compute ~name_w:(fun s -> t.measure fs s /. t.zoom) ~shown:shown_of scope layout ~shift }
 
 let no_stats = { nodes = 0; zones = 0; rows = 0; drawn_items = 0; drawn_zones = 0 }
 let create ?(width = 640) ?(height = 360) () = {
@@ -142,7 +141,7 @@ let create ?(width = 640) ?(height = 360) () = {
   chains = Hashtbl.create 1; folds = Hashtbl.create 1; counts = Hashtbl.create 1;
   frames = (fun _ -> []); display = None; framed = true;
   layout = { P.placed = []; w = 0.; h = 0. }; geo = empty_geo; geo_fs = 13; pan_x = 12.; pan_y = 12.; zoom = 1.;
-  wires = `Curve; selected = Path_set.empty; selected_wire = None; panning_grab = false;
+  selected = Path_set.empty; selected_wire = None; panning_grab = false;
   hovered_row = None; highlighted = []; drag = None; editing = None; context = None; stats = no_stats; switches = [];
   carry_lit = []; carry_hot = None; failed = []; hinting = None; held = [], false; back = [];
   measure = (fun size s -> 0.6 *. float (size * String.length s)); tags = true; chain = ref None }
@@ -201,11 +200,6 @@ let clear_selection t =
   else { t with selected = Path_set.empty; selected_wire = None }
 let stats t = t.stats
 let zoom t = t.zoom
-let with_wires wires t =
-  if t.wires = wires then t else match t.scope with
-    | None -> { t with wires }
-    | Some scope -> regeo { t with wires } scope t.layout ~shift:(fun _ -> 0., 0.)
-
 (* a screen point as a position inside [scope], snapped to the 24-point dot lattice (where a node
    added from the menu opened there goes) *)
 let scope_point t ~scope (mx, my) =
@@ -293,8 +287,7 @@ let switch_nodes (scope : P.scope) = List.filter_map (fun (n : P.node) ->
     | _ -> 0)) scope.nodes
 
 let with_scope ?(at = fun _ -> None) ?(level = fun _ -> None) ?(pin = fun _ _ -> None) ?(collapsed = fun _ -> false) ?(probe = fun _ -> 0)
-    ?(frames = fun _ -> []) ?(imported = fun _ -> None) ?display ?wires ?(layouts = []) ~key scope t =
-  let wires = Option.value wires ~default:t.wires in
+    ?(frames = fun _ -> []) ?(imported = fun _ -> None) ?display ?(layouts = []) ~key scope t =
   let scope = if layouts = [] then scope else
     { scope with P.nodes = List.map (fun (n : P.node) ->
         let inputs = List.filter (fun (r : P.row) -> match r.key with E.Pos _ -> r.kind <> P.Add | _ -> false) n.rows in
@@ -310,7 +303,7 @@ let with_scope ?(at = fun _ -> None) ?(level = fun _ -> None) ?(pin = fun _ _ ->
   let earlier = if key = t.key then t.layout.P.placed else [] in
   let n, z, r = count_scope scope in
   let t = { t with scope = Some scope; imported; at; collapsed; probe; frames; display; layout; switches = switch_nodes scope;
-    chains = Flow_graph.Probe.chains scope; folds = fold_sources scope; wires;
+    chains = Flow_graph.Probe.chains scope; folds = fold_sources scope;
     stats = { t.stats with nodes = n; zones = z; rows = r } } in
   let t = regeo t scope layout ~shift:no_shift in
   (* a card an edit added (an unfolded call lands a column left of its owner) that falls outside the view

@@ -7,7 +7,7 @@ open Rays
 type point = int * int
 
 type stroke = {
-  color : Color.t;
+  color : Rays_math.Color.t;
   width : int;
   points : point list;
   point_count : int;
@@ -22,10 +22,10 @@ type model = {
 }
 
 let palette = [|
-  Color.hex_exn "#22d3ee";
-  Color.hex_exn "#fb7185";
-  Color.hex_exn "#fbbf24";
-  Color.hex_exn "#a78bfa";
+  Rays_math.Color.hex_exn "#22d3ee";
+  Rays_math.Color.hex_exn "#fb7185";
+  Rays_math.Color.hex_exn "#fbbf24";
+  Rays_math.Color.hex_exn "#a78bfa";
 |]
 
 let toolbar_height = 92
@@ -33,11 +33,6 @@ let maximum_strokes = 128
 let maximum_points = 4_096
 let output_png = "_out/rays-drawing.png"
 let pixel (x, y) = int_of_float x, int_of_float y
-
-let rec take count values =
-  match count, values with
-  | 0, _ | _, [] -> []
-  | count, value :: rest -> value :: take (count - 1) rest
 
 let inside ~x ~y ~w ~h (px, py) =
   px >= x && px < x + w && py >= y && py < y + h
@@ -61,7 +56,7 @@ let finish_stroke model point =
       let stroke = add_point stroke point in
       {
         model with
-        strokes = take maximum_strokes (stroke :: model.strokes);
+        strokes = List.take maximum_strokes (stroke :: model.strokes);
         active = None;
         status = "Drag to draw";
       }
@@ -72,7 +67,7 @@ let cancel_stroke model =
   | Some stroke ->
       {
         model with
-        strokes = take maximum_strokes (stroke :: model.strokes);
+        strokes = List.take maximum_strokes (stroke :: model.strokes);
         active = None;
         status = "Drag to draw";
       }
@@ -131,7 +126,7 @@ let handle_key model key =
   | _ -> model
 
 let update_event model = function
-  | Event.MousePressed (Input.LeftButton, point) ->
+  | Input.Pointer_pressed (Input.LeftButton, point) ->
       let (_, y) as point = pixel point in
       if y < toolbar_height then choose_toolbar_action model point
       else
@@ -145,12 +140,12 @@ let update_event model = function
           };
           status = "Drawing";
         }
-  | Event.MouseMoved point ->
+  | Input.Pointer_moved point ->
       { model with active = Option.map (fun stroke -> add_point stroke (pixel point)) model.active }
-  | Event.MouseReleased (Input.LeftButton, point) -> finish_stroke model (pixel point)
-  | Event.PointerCancelled Input.LeftButton | Event.WindowFocusLost ->
+  | Input.Pointer_released (Input.LeftButton, point) -> finish_stroke model (pixel point)
+  | Input.Pointer_cancelled Input.LeftButton | Input.Focus_lost ->
       cancel_stroke model
-  | Event.KeyPressed (Input.KeyChar key) -> handle_key model key
+  | Input.Key_pressed (Input.KeyChar key) -> handle_key model key
   | _ -> model
 
 let init _frame = {
@@ -162,7 +157,7 @@ let init _frame = {
 }
 
 let update model (frame : Frame.t) =
-  List.fold_left update_event model frame.events
+  List.fold_left update_event model frame.input.events
 
 let stroke_scene stroke =
   let points = List.rev stroke.points in
@@ -186,7 +181,7 @@ let stroke_scene stroke =
 let button ~at:(x, y) ~w label =
   Scene.[
     rounded_rect ~at:(x, y) ~w ~h:34 ~radius:6
-      ~fill:(Color.hex_exn "#1f2937") ~stroke:(Color.hex_exn "#475569") ();
+      ~fill:(Rays_math.Color.hex_exn "#1f2937") ~stroke:(Rays_math.Color.hex_exn "#475569") ();
     text ~at:(x + 12, y + 8) ~size:14 label;
   ]
 
@@ -203,14 +198,14 @@ let view model (frame : Frame.t) =
       (Array.mapi (fun index color ->
         let x = 230 + (index * 38) in
         Scene.circle ~at:(x, 25) ~radius:(if index = model.color_index then 12 else 9)
-          ~fill:color ~stroke:Color.white ()) palette)
+          ~fill:color ~stroke:Rays_math.Color.white ()) palette)
   in
   Scene.(
-    clear (Color.hex_exn "#0b1020")
+    clear (Rays_math.Color.hex_exn "#0b1020")
     :: stroke_nodes
     @ [
-      rect ~at:(0, 0) ~w:frame.width ~h:toolbar_height
-        ~fill:(Color.rgba 9 14 25 245) ();
+      rect ~at:(0, 0) ~w:(fst frame.input.size) ~h:toolbar_height
+        ~fill:(Rays_math.Color.rgba 9 14 25 245) ();
       group (button ~at:(8, 8) ~w:62 "Clear");
       group (button ~at:(76, 8) ~w:62 "Undo");
       group (button ~at:(144, 8) ~w:62 "Save");
@@ -221,6 +216,6 @@ let view model (frame : Frame.t) =
         ~fill:palette.(model.color_index) ();
       text ~at:(136, 58) ~size:13
         (Printf.sprintf "%d px · draw · S save" model.brush_width);
-      text ~at:(12, frame.height - 26) ~size:13
-        ~color:(Color.rgba 226 232 240 190) model.status;
+      text ~at:(12, (snd frame.input.size) - 26) ~size:13
+        ~color:(Rays_math.Color.rgba 226 232 240 190) model.status;
     ])

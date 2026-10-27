@@ -308,7 +308,7 @@ let start_hints t =
         | _ -> None) in
       let by_distance = List.sort (fun (_, (ax, ay), _) (_, (bx, by), _) ->
         compare (Float.hypot (ax -. sx) (ay -. sy)) (Float.hypot (bx -. sx) (by -. sy))) candidates in
-      let by_distance = List.filteri (fun i _ -> i < 676) by_distance in
+      let by_distance = List.take 676 by_distance in
       let labels = hint_labels (List.length by_distance) in
       let targets = List.map2 (fun label ((n : P.node), at, rows) ->
         match rows with
@@ -320,9 +320,9 @@ let start_hints t =
 
 (* a letter, Backspace or Escape while hints are up; [None] when it was not a hint key *)
 let step_hints t (frame : Frame.t) =
-  let pressed = List.filter (fun k -> not (List.mem k (fst t.held))) frame.keys in
-  let clicked = frame.mouse_buttons <> [] && not (snd t.held) in
-  let t = { t with held = (frame.keys, frame.mouse_buttons <> []) } in
+  let pressed = List.filter (fun k -> not (List.mem k (fst t.held))) frame.input.keys in
+  let clicked = frame.input.buttons <> [] && not (snd t.held) in
+  let t = { t with held = (frame.input.keys, frame.input.buttons <> []) } in
   match t.hinting with
   | None -> t, []
   | Some h when not h.armed -> { t with hinting = Some { h with armed = true } }, []  (* the key that began it *)

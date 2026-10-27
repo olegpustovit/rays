@@ -82,6 +82,11 @@ and node =
   | Bypass of term  (** [^:bypass] on a call *)
   | Expanded of { macro : string; body : term }  (** a macro call and its expansion *)
 
+val children : term -> term list
+(** Immediate checked-term children in authored traversal order. *)
+val map_children : (term -> term) -> term -> term
+(** Map immediate children, preserving all other checked-term and source-form data. *)
+
 type graph = {
   name : string;
   context : context;

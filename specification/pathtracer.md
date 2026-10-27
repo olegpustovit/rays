@@ -405,14 +405,13 @@ frame.
 
 ## SOP workflow example
 
-`sketches/voxel_wall/` is the Houdini-style network Grid → Wall Depth → Copy
-Cubes (cube prototype), hosted in the `Rays_editor.Editor` workspace with
-the tracer painted into the view pane by the overlay hook. `wall_depth` is a
-`Sop.Custom.map` node whose typed `Parameter.schema` (frequency,
-amplitude, base depth, octaves, seed) drives the inspector; it writes the
-per-point `scale` attribute, the OCaml equivalent of an Attribute Wrangle.
-`copy_cubes` is a two-input `Sop.Custom.create` node with a
-"Pack and instance" choice, Houdini's Copy to Points pack toggle. Packed, its
+`sketches/voxel_wall.rays` is the Houdini-style network Grid → Wall Depth → Copy
+Cubes (cube prototype), hosted in the `Rays_editor.Editor` workspace. Its
+`wall_depth` definition is written in Rays Lisp; its typed parameters
+(frequency, amplitude, base depth, octaves, seed) drive the inspector and it
+writes the per-point `scale` attribute, the equivalent of an Attribute
+Wrangle. `copy_cubes` uses the built-in `sop/copy_to_points` with a "Pack and
+instance" choice, Houdini's Copy to Points pack toggle. Packed, its
 cook is O(prototype + targets): the prototype polygons followed by one loose
 point per copy carrying `scale`; there are no fake packed primitives inside
 `Rdk.Geometry.t`, and `prepare` splits referenced points (prototype) from

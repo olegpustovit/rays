@@ -60,7 +60,7 @@ let render_uv ~geometry ~positions ~selected ~shared_box ~topology ~triangle_geo
   let vertex_normal = Attribute.create_key_owned
       (Attribute.normal ~owner:Attribute.Vertex) vertex_normals |> get_ok in
   let with_vertex_normals = Geometry.with_attribute vertex_normal triangle_geometry |> get_ok in
-  let scaled = Transform_ops.transform (Mat4.scaling (Vec3.create 2. 1. 1.))
+  let scaled = Transform_ops.transform (Rays_math.Mat4.scaling (Rays_math.Vec3.create 2. 1. 1.))
       with_vertex_normals in
   let scaled_n = Geometry.find_attribute ~owner:Attribute.Vertex "N" scaled
       |> Option.get |> Attribute.get (Attribute.normal ~owner:Attribute.Vertex)
@@ -72,7 +72,7 @@ let render_uv ~geometry ~positions ~selected ~shared_box ~topology ~triangle_geo
   let grid = Plane_generators.grid ~columns:8 ~rows:4 ~size:2. () |> get_ok in
   if Geometry.point_count grid <> 45 || Geometry.primitive_count grid <> 64
   then fail "grid cardinality";
-  let box = Box_generator.box ~size:(Vec3.create 2. 4. 6.) () |> get_ok in
+  let box = Box_generator.box ~size:(Rays_math.Vec3.create 2. 4. 6.) () |> get_ok in
   if Geometry.point_count box <> 24 || Geometry.primitive_count box <> 12
   then fail "box cardinality";
   let sphere = Uv_sphere.run ~segments:12 ~rings:6 ~radius:2. () |> get_ok in
@@ -124,9 +124,9 @@ let render_uv ~geometry ~positions ~selected ~shared_box ~topology ~triangle_geo
   if Mesh.index_count (Rdk_rays.Rays_mesh.to_mesh swept |> get_ok) <> 192
   then fail "circle sweep bridge";
   let planar_projection = Uv_ops.Planar {
-      origin = Vec3.create 0.5 0.5 0.;
-      u_axis = Vec3.unit_x;
-      v_axis = Vec3.unit_y;
+      origin = Rays_math.Vec3.create 0.5 0.5 0.;
+      u_axis = Rays_math.Vec3.unit_x;
+      v_axis = Rays_math.Vec3.unit_y;
     } in
   let projected_quad = Uv_ops.project ~grain:1 planar_projection geometry
       |> get_ok in
@@ -144,8 +144,8 @@ let render_uv ~geometry ~positions ~selected ~shared_box ~topology ~triangle_geo
      || Geometry.topology projected_quad != Geometry.topology geometry
   then fail "UV projection copied unchanged geometry payload";
   let skewed_quad = Uv_ops.project
-      (Uv_ops.Planar { origin = Vec3.zero; u_axis = Vec3.unit_x;
-        v_axis = Vec3.create 0.5 1. 0. }) geometry |> get_ok in
+      (Uv_ops.Planar { origin = Rays_math.Vec3.zero; u_axis = Rays_math.Vec3.unit_x;
+        v_axis = Rays_math.Vec3.create 0.5 1. 0. }) geometry |> get_ok in
   let skewed_uv = Geometry.find_attribute ~owner:Attribute.Vertex "uv"
       skewed_quad |> Option.get
       |> Attribute.get (Attribute.tex_coord ~owner:Attribute.Vertex)
@@ -176,8 +176,8 @@ let render_uv ~geometry ~positions ~selected ~shared_box ~topology ~triangle_geo
   let selected_uv = Group.init ~owner:Group.Vertex ~name:"selected_uv" 6
       (fun vertex -> vertex = 0 || vertex = 2) in
   let transformed_uv = Uv_ops.transform ~grain:1 ~owner:Attribute.Vertex
-      ~selection:selected_uv ~pivot:Vec2.zero ~scale:(Vec2.create 2. 2.)
-      ~translate:(Vec2.create 0.1 (-0.2)) restricted |> get_ok in
+      ~selection:selected_uv ~pivot:Rays_math.Vec2.zero ~scale:(Rays_math.Vec2.create 2. 2.)
+      ~translate:(Rays_math.Vec2.create 0.1 (-0.2)) restricted |> get_ok in
   let transformed_uv = Geometry.find_attribute ~owner:Attribute.Vertex "uv"
       transformed_uv |> Option.get
       |> Attribute.get (Attribute.tex_coord ~owner:Attribute.Vertex)
@@ -192,7 +192,7 @@ let render_uv ~geometry ~positions ~selected ~shared_box ~topology ~triangle_geo
   let point_uv_source = Geometry.with_attribute point_uv geometry |> get_ok in
   let point_uv_output = Uv_ops.transform ~name:"point_uv"
       ~owner:Attribute.Point ~selection:selected
-      ~scale:(Vec2.create 0.5 0.5) ~pivot:Vec2.zero point_uv_source |> get_ok in
+      ~scale:(Rays_math.Vec2.create 0.5 0.5) ~pivot:Rays_math.Vec2.zero point_uv_source |> get_ok in
   let point_uv_values = Geometry.find_attribute ~owner:Attribute.Point "point_uv"
       point_uv_output |> Option.get
       |> Attribute.get (Attribute.key ~name:"point_uv" ~owner:Attribute.Point
@@ -209,8 +209,8 @@ let render_uv ~geometry ~positions ~selected ~shared_box ~topology ~triangle_geo
       (cos angle, 0.5, sin angle);
     |] |> get_ok in
   let cylindrical = Uv_ops.project ~grain:1
-      (Uv_ops.Cylindrical { origin = Vec3.zero; axis = Vec3.unit_y;
-        seam = Vec3.unit_x; height = 1. }) cylinder_curve |> get_ok in
+      (Uv_ops.Cylindrical { origin = Rays_math.Vec3.zero; axis = Rays_math.Vec3.unit_y;
+        seam = Rays_math.Vec3.unit_x; height = 1. }) cylinder_curve |> get_ok in
   let cylindrical_uv = Geometry.find_attribute ~owner:Attribute.Vertex "uv"
       cylindrical |> Option.get
       |> Attribute.get (Attribute.tex_coord ~owner:Attribute.Vertex)
@@ -221,9 +221,9 @@ let render_uv ~geometry ~positions ~selected ~shared_box ~topology ~triangle_geo
      || cylindrical_uv.y <> [|1.; 0.; 0.; 1.|]
   then fail "cylindrical UV seam/height projection";
   let huge_frame = Uv_ops.project
-      (Uv_ops.Cylindrical { origin = Vec3.zero;
-        axis = Vec3.create 0. max_float 0.;
-        seam = Vec3.create max_float 0. 0.; height = 1. })
+      (Uv_ops.Cylindrical { origin = Rays_math.Vec3.zero;
+        axis = Rays_math.Vec3.create 0. max_float 0.;
+        seam = Rays_math.Vec3.create max_float 0. 0.; height = 1. })
       cylinder_curve |> get_ok in
   let huge_frame_uv = Geometry.find_attribute ~owner:Attribute.Vertex "uv"
       huge_frame |> Option.get
@@ -234,8 +234,8 @@ let render_uv ~geometry ~positions ~selected ~shared_box ~topology ~triangle_geo
   then fail "UV projection did not normalize an extreme finite frame safely";
   let sphere_uv = Uv_sphere.run ~segments:48 ~rings:24 ~radius:1. () |> get_ok
       |> Uv_ops.project ~grain:31
-           (Uv_ops.Spherical { origin = Vec3.zero; axis = Vec3.unit_y;
-             seam = Vec3.unit_x }) |> get_ok in
+           (Uv_ops.Spherical { origin = Rays_math.Vec3.zero; axis = Rays_math.Vec3.unit_y;
+             seam = Rays_math.Vec3.unit_x }) |> get_ok in
   let sphere_values = Geometry.find_attribute ~owner:Attribute.Vertex "uv"
       sphere_uv |> Option.get
       |> Attribute.get (Attribute.tex_coord ~owner:Attribute.Vertex)
@@ -257,8 +257,8 @@ let render_uv ~geometry ~positions ~selected ~shared_box ~topology ~triangle_geo
       fail "spherical UV primitive crosses the wrap seam"
   done;
   (match Uv_ops.project
-      (Uv_ops.Planar { origin = Vec3.zero; u_axis = Vec3.unit_x;
-        v_axis = Vec3.unit_x }) geometry with
+      (Uv_ops.Planar { origin = Rays_math.Vec3.zero; u_axis = Rays_math.Vec3.unit_x;
+        v_axis = Rays_math.Vec3.unit_x }) geometry with
    | Error error when Error.code error = "invalid_projection" -> ()
    | _ -> fail "UV Project accepted parallel planar axes");
   (match Uv_ops.project ~primitives:selected planar_projection geometry with
@@ -361,7 +361,7 @@ let render_uv ~geometry ~positions ~selected ~shared_box ~topology ~triangle_geo
       ~copies:1 quad_edge_group with
    | Error _ -> ()
    | Ok _ -> fail "exact-copy edge replication accepted reordered topology");
-  let mirrored_edge_geometry = Mirror_geometry.run ~origin:Vec3.zero ~normal:Vec3.unit_x
+  let mirrored_edge_geometry = Mirror_geometry.run ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x
       quad_edges |> get_ok in
   let mirrored_edge_group = Geometry.find_edge_group "quad_edges"
       mirrored_edge_geometry |> Option.get in
@@ -387,7 +387,7 @@ let render_uv ~geometry ~positions ~selected ~shared_box ~topology ~triangle_geo
   if Edge_group.cardinality copied_edge_group <> 8
      || Edge_group.length copied_edge_group <> 8 then
     fail "copy-to-points did not replicate native edge membership";
-  let hard_box_edges = Box_generator.box ~size:(Vec3.create 2. 2. 2.) () |> get_ok
+  let hard_box_edges = Box_generator.box ~size:(Rays_math.Vec3.create 2. 2. 2.) () |> get_ok
       |> Group_mesh.group_edges ~name:"all_box_edges" |> get_ok in
   let fused_edge_geometry = Fuse_grid.fuse ~tolerance:0.
       ~attributes:Fuse_reduce.Average_numeric hard_box_edges |> get_ok in
@@ -403,7 +403,7 @@ let render_uv ~geometry ~positions ~selected ~shared_box ~topology ~triangle_geo
   if Edge_group.cardinality subdivided_edge_group <> 16 then
     fail "subdivision did not propagate selected source-edge children";
   let clipped_edge_geometry = Plane_clip.clip ~keep:Plane_clip.Above
-      ~origin:(Vec3.create 0.5 0. 0.) ~normal:Vec3.unit_x quad_edges |> get_ok in
+      ~origin:(Rays_math.Vec3.create 0.5 0. 0.) ~normal:Rays_math.Vec3.unit_x quad_edges |> get_ok in
   let clipped_edge_group = Geometry.find_edge_group "quad_edges"
       clipped_edge_geometry |> Option.get in
   if Edge_group.cardinality clipped_edge_group <> 3

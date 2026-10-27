@@ -1,0 +1,24 @@
+(library
+ (name golden_fixtures)
+ (wrapped false)
+ (modules fixture_codec)
+ (libraries flow sop rdk))
+
+(test
+ (name test_fixture_codec)
+ (modules test_fixture_codec)
+ (libraries golden_fixtures sop rdk rdk_test_support))
+
+(executable
+ (name replay)
+ (modules replay)
+ (libraries flow flow_sop sop sop_catalog rdk rdk_test_support golden_fixtures lru unix))
+
+(rule
+ (alias runtest)
+ (action (run %{exe:replay.exe} --self-test)))
+
+(rule
+ (alias lisp-goldens)
+ (deps ports.sexp coverage.sexp (glob_files inputs/*.sexp))
+ (action (run %{exe:replay.exe})))

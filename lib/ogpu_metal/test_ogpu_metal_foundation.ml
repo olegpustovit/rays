@@ -8,6 +8,7 @@ let descriptor ?(size = 64L) usage : Ogpu.Types.buffer_descriptor =
   { label = Some "ogpu-metal-foundation"; size; usage }
 
 let run () =
+  if Ogpu.Impl.backend <> "metal" then failwith "Metal implementation tag changed";
   let unsupported = {Ogpu.Caps.minimum_m1 with limits={Ogpu.Caps.minimum_m1.limits with max_buffer_size=1_024L;max_texture_dimension_2d=1024}} in
   expect Ogpu.Error.Invalid_argument (Ogpu.Caps.validate
     {unsupported with limits={unsupported.limits with max_buffer_size=0L}});

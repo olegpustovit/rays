@@ -2,8 +2,8 @@ open Rays_math
 
 type numeric_value =
   | Scalar of float
-  | Vec2 of Vec2.t
-  | Vec3 of Vec3.t
+  | Vec2 of Rays_math.Vec2.t
+  | Vec3 of Rays_math.Vec3.t
   | Vec4 of float * float * float * float
 
 type random_operation =
@@ -85,8 +85,8 @@ type storage_kind = Position | Float | Float2 | Float3 | Float4
 
 let value_array = function
   | Scalar value -> [|value|]
-  | Vec2 value -> [|value.Vec2.x; value.y|]
-  | Vec3 value -> [|value.Vec3.x; value.y; value.z|]
+  | Vec2 value -> [|value.Rays_math.Vec2.x; value.y|]
+  | Vec3 value -> [|value.Rays_math.Vec3.x; value.y; value.z|]
   | Vec4 (x, y, z, w) -> [|x; y; z; w|]
 
 let finite_array values = Array.for_all Float.is_finite values
@@ -301,8 +301,8 @@ let prepare_distribution ~direction_bias distribution =
           let axis = Array.make dimensions 0. in
           axis.(dimensions - 1) <- 1.;
           let direction_value = match dimensions with
-            | 2 -> Vec2 (Vec2.create axis.(0) axis.(1))
-            | 3 -> Vec3 (Vec3.create axis.(0) axis.(1) axis.(2))
+            | 2 -> Vec2 (Rays_math.Vec2.create axis.(0) axis.(1))
+            | 3 -> Vec3 (Rays_math.Vec3.create axis.(0) axis.(1) axis.(2))
             | 4 -> Vec4 (axis.(0), axis.(1), axis.(2), axis.(3))
             | _ -> assert false in
           Result.map (fun direction -> Prepared_cauchy {
@@ -658,13 +658,13 @@ let[@inline] normal_quantile probability =
 let[@inline] indexed_uniform fractions seed identity element slot =
   match fractions with
   | Some planes -> planes.(slot).(element)
-  | None -> Rand.float_at seed ~index:(identity lxor
+  | None -> Rays_math.Rand.float_at seed ~index:(identity lxor
       ((slot + 1) * 0x11b54a32d192ed03))
 
 let[@inline] choice_uniform fractions seed identity element =
   match fractions with
   | Some planes -> planes.(0).(element)
-  | None -> Rand.float_at seed ~index:identity
+  | None -> Rays_math.Rand.float_at seed ~index:identity
 
 let[@inline] weighted_choice cumulative total last_positive fraction =
   let target = fraction *. total in
@@ -678,8 +678,8 @@ let[@inline] weighted_choice cumulative total last_positive fraction =
 
 let[@inline] standard_normal seed identity slot =
   let stream = identity lxor ((slot + 1) * 0x11b54a32d192ed03) in
-  let u1 = Float.max Float.min_float (Rand.float_at seed ~index:stream)
-  and u2 = Rand.float_at seed ~index:(stream lxor 0x14d049bb133111eb) in
+  let u1 = Float.max Float.min_float (Rays_math.Rand.float_at seed ~index:stream)
+  and u2 = Rays_math.Rand.float_at seed ~index:(stream lxor 0x14d049bb133111eb) in
   sqrt (-2. *. log u1) *. cos (2. *. Float.pi *. u2)
 
 let cauchy_radius_quantile dimensions fraction =
@@ -844,8 +844,8 @@ let[@inline] sample_prepared prepared fractions seed identity element scratch =
               let stream = identity lxor
                   ((component + 1) * 0x11b54a32d192ed03) in
               let u1 = Float.max Float.min_float
-                  (Rand.float_at seed ~index:stream)
-              and u2 = Rand.float_at seed
+                  (Rays_math.Rand.float_at seed ~index:stream)
+              and u2 = Rays_math.Rand.float_at seed
                   ~index:(stream lxor 0x14d049bb133111eb) in
               sqrt (-2. *. log u1) *. cos (2. *. Float.pi *. u2) in
         scratch.(component) <- middle.(component) +.
@@ -868,8 +868,8 @@ let[@inline] sample_prepared prepared fractions seed identity element scratch =
                 let stream = identity lxor
                     ((component + 1) * 0x11b54a32d192ed03) in
                 let u1 = Float.max Float.min_float
-                    (Rand.float_at seed ~index:stream)
-                and u2 = Rand.float_at seed
+                    (Rays_math.Rand.float_at seed ~index:stream)
+                and u2 = Rays_math.Rand.float_at seed
                     ~index:(stream lxor 0x14d049bb133111eb) in
                 sqrt (-2. *. log u1) *. cos (2. *. Float.pi *. u2) in
           scratch.(component) <- exp (log median.(component) +.
@@ -1058,7 +1058,7 @@ let randomize ?cancel ~grain ?selection ?element_selection ?seed_attribute
                 let stream = identity lxor
                     ((component + 1) * 0x11b54a32d192ed03) in
                 let generated = (min.(component) +.
-                    (Rand.float_at seed ~index:stream *. span.(component))) *.
+                    (Rays_math.Rand.float_at seed ~index:stream *. span.(component))) *.
                     scale
                 and previous = output.(component).(element) in
                 let value = match operation with
@@ -1211,9 +1211,9 @@ let noise ?cancel ~grain ?selection ~seed ~owner ~name ~kind ~location ~range
       "Rdk.Attribute_ops.noise: attribute name must not be empty"
   else if not (Float.is_finite blend && blend >= 0. && blend <= 1.) then Error
       "Rdk.Attribute_ops.noise: blend must be finite and in [0, 1]"
-  else if not (Float.is_finite frequency.Vec3.x
+  else if not (Float.is_finite frequency.Rays_math.Vec3.x
       && Float.is_finite frequency.y && Float.is_finite frequency.z
-      && Float.is_finite offset.Vec3.x && Float.is_finite offset.y
+      && Float.is_finite offset.Rays_math.Vec3.x && Float.is_finite offset.y
       && Float.is_finite offset.z && Float.is_finite lacunarity
       && Float.is_finite roughness) then Error
       "Rdk.Attribute_ops.noise: numeric parameters must be finite"
@@ -1259,13 +1259,13 @@ let noise ?cancel ~grain ?selection ~seed ~owner ~name ~kind ~location ~range
       in
       Result.bind target_result (fun (target_kind, output) ->
       let source = match target with None -> None | Some (_, planes) -> Some planes in
-      let generator = Noise.create seed in
+      let generator = Rays_math.Noise.create seed in
       let ranges = if count = 0 then 0 else (count + grain - 1) / grain in
       let errors = Array.make ranges (-1) in
       Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(ranges - 1) (fun range_index ->
         let first = range_index * grain
         and last = min count ((range_index + 1) * grain) in
-        let scratch = Noise.Private.create_fbm3_scratch () in
+        let scratch = Rays_math.Noise.Private.create_fbm3_scratch () in
         let generated = Array.make 4 0. in
         for element = first to last - 1 do
           if element land 4095 = 0 then Cancel.check_opt cancel;
@@ -1276,7 +1276,7 @@ let noise ?cancel ~grain ?selection ~seed ~owner ~name ~kind ~location ~range
             and z = (coordinates.nz.(element) +. offset.z) *. frequency.z in
             for component = 0 to dimension - 1 do
               let shift = float_of_int component *. 47.117 in
-              let sample = Noise.Private.fbm3_with_scratch scratch generator
+              let sample = Rays_math.Noise.Private.fbm3_with_scratch scratch generator
                   ~octaves ~lacunarity ~gain:roughness ~x:(x +. shift)
                   ~y:(y -. (shift *. 0.37)) ~z:(z +. (shift *. 0.73)) in
               generated.(component) <- minimum.(component) +.

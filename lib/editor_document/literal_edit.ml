@@ -94,8 +94,8 @@ let rec plain (form : S.t) = form.notes = [] && form.tail = []
 let patch_source source (before : S.t) (after : S.t) =
   let delta = String.length (Flow.Lisp.flat after) - (before.span.finish - before.span.start) in
   let forms = Hashtbl.create 256 in
-  let shift (span : Flow.Diagnostic.span) =
-    if span.start >= before.span.finish then {Flow.Diagnostic.start = span.start + delta; finish = span.finish + delta}
+  let shift (span : Diagnostic.span) =
+    if span.start >= before.span.finish then {Diagnostic.start = span.start + delta; finish = span.finish + delta}
     else if span.finish >= before.span.finish then {span with finish = span.finish + delta}
     else span in
   let rec replacement ~keep_notes start (old : S.t) (value : S.t) : S.t =
@@ -148,8 +148,8 @@ let patch catalog (workspace : W.t) op =
                 else {term with form} in
               let argument = map_term update argument in
               let error = ref None in
-              let report severity code message = if severity = Flow.Diagnostic.Error && !error = None then
-                error := Some (Flow.Diagnostic.error ~span:argument.form.span ~code message) in
+              let report severity code message = if severity = Diagnostic.Error_severity && !error = None then
+                error := Some (Diagnostic.error ~span:argument.form.span ~code message) in
               W.validate_parameter report parameter argument;
               Some (match !error with
                 | Some error -> Error error
@@ -192,7 +192,7 @@ let lower (lowered : L.t) change =
       Result.bind (Flow_sop.Network.parameter network Flow_sop.Port.{node = id; path = change.field}) (fun parameter ->
       Result.bind (L.changes parameter change.after) (fun changes ->
       (* a cook-level parameter rule refuses here as the full lowering does *)
-      Result.map_error (fun (d : Flow.Diagnostic.t) -> {d with code = "E_LOWER"})
+      Result.map_error (fun (d : Diagnostic.t) -> {d with code = "E_LOWER"})
         (Flow_sop.Network.apply_parameters ~node_id:id changes network))))) (Ok network) values in
   let result = List.fold_right (fun (graph : L.graph) result -> Result.bind result (fun graphs ->
     Result.map (fun network -> {graph with network} :: graphs) (patch graph.network))) lowered.graphs (Ok []) in

@@ -12,7 +12,7 @@ let frames = 120
 let size = 640, 480
 let dt = 1. /. 60.
 
-let num x = Printf.sprintf "%.17g" x
+let num x = Param.float_text x
 let list f xs = "[" ^ String.concat "," (List.map f xs) ^ "]"
 let pair (x, y) = list num [x; y]
 (* A buffer of more than 4,096 numbers is compared by its length, its first and last 256 and its sum. *)
@@ -56,25 +56,25 @@ let entry buffers = function
 let native (lowered : Web_export.lowered) =
   let prepared = C.prepare lowered.program and state = E.create_state () and buffers = C.Buffers.create () in
   let image = function E.Deferred (_, id) -> Ok (id + 1)
-    | _ -> Error (Flow.Diagnostic.error ~code:"E_IMAGE" "Expected an image plan node.") in
+    | _ -> Error (Diagnostic.error ~code:"E_IMAGE" "Expected an image plan node.") in
   List.init frames (fun k ->
     let i = k + 1 in
-    let live = { (Frame_input.at_time (float i *. dt)) with dt; frame = i; tick = i; size; pointer = (100., 100.) } in
+    let live = { (Input.at_time (float i *. dt)) with dt; frame = i; tick = i; size; pointer = (100., 100.) } in
     C.Buffers.clear buffers;
-    let drawn = ref (Error (Flow.Diagnostic.error ~code:"E_CORE" "The draw program did not run.")) in
+    let drawn = ref (Error (Diagnostic.error ~code:"E_CORE" "The draw program did not run.")) in
     (match lowered.root with
      | None -> drawn := C.draw ~image prepared ~live ~size ~buffers
      | Some root ->
-         let execute r live = drawn := C.draw ~root:r ~image prepared ~live ~size ~buffers; Some (Ok (E.Int 0)) in
-         ignore (E.Private.force_with_executor ~state ~execute (E.Residual root) ~live));
+         ignore (Result.get_ok (E.Residual.bind_live ~state root ~live));
+         drawn := C.draw ~root ~image prepared ~live ~size ~buffers);
     match !drawn with
     | Ok marks -> Printf.sprintf {|{"ok":%s}|} (list (entry buffers) (Array.to_list marks))
     | Error d -> Printf.sprintf {|{"error":"%s"}|} d.code)
 
 let node_available () = Sys.command "command -v node >/dev/null 2>&1" = 0
 
-let span_text text (d : Flow.Diagnostic.t) = match d.span with
-  | Some s -> let p = Flow.Diagnostic.position_of_offset text s.start in Printf.sprintf "%d:%d" p.line p.col
+let span_text text (d : Diagnostic.t) = match d.span with
+  | Some s -> let p = Diagnostic.position_of_offset text s.start in Printf.sprintf "%d:%d" p.line p.col
   | None -> "no span"
 
 (* One workspace: [`Ok], [`Refused text] or [`Failed text]. *)
@@ -82,7 +82,7 @@ let check ~frames_mjs ~keep directory =
   let path = directory in
   let text, doc = Web_export.load path in
   match doc with
-  | Error (d :: _) -> `Failed ("does not check: " ^ Flow.Diagnostic.to_string d)
+  | Error (d :: _) -> `Failed ("does not check: " ^ Diagnostic.to_string d)
   | Error [] -> `Failed "does not check"
   | Ok doc ->
       match Result.bind (Web_export.lower doc) (fun l -> Result.map (fun f -> l, f) (Web_export.files doc l)) with

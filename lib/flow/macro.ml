@@ -6,9 +6,8 @@ let max_forms = 5000
 let valid_name s = s <> "" && (match s.[0] with 'a' .. 'z' -> true | _ -> false)
   && String.for_all (function 'a' .. 'z' | '0' .. '9' | '_' | '-' -> true | _ -> false) s
 
-exception Fail of Diagnostic.t
 let fail (x : Syntax.t) code message =
-  raise (Fail (Diagnostic.error ~span:x.span ~code message))
+  raise (Diagnostic.Error (Diagnostic.error ~span:x.span ~code message))
 let flat = Lisp.flat
 let base s = match String.index_opt s '.' with Some i -> String.sub s 0 i | None -> s
 let fresh_name b = String.ends_with ~suffix:"#" b
@@ -37,7 +36,7 @@ let params_exn m =
         (Printf.sprintf "Macro %s: invalid or repeated parameter %s." name (flat p)) in
   go [] ps
 
-let params m = try Ok (params_exn m) with Fail d -> Error d
+let params m = try Ok (params_exn m) with Diagnostic.Error d -> Error d
 
 let quasi m = match parts m with
   | Some (_, _, {node = Quote (Quasi, body); _}) -> Some body
@@ -80,7 +79,7 @@ let check ~known m =
            | Vec xs | Map xs -> List.iter walk xs in
          walk body);
     []
-  with Fail d -> [d]
+  with Diagnostic.Error d -> [d]
 
 type state = { mutable n : int; mutable size : int }
 let state () = {n = 0; size = 0}
@@ -96,8 +95,8 @@ let step st m x =
   if (if rest <> None then nargs < nreq else nargs <> nreq) then
     fail x "E_MACRO_ARITY" (Printf.sprintf "%s expects %s%d argument%s; got %d." name
       (if rest <> None then "at least " else "") nreq (if nreq = 1 then "" else "s") nargs);
-  let env = List.combine req (List.filteri (fun i _ -> i < nreq) args) in
-  let more = List.filteri (fun i _ -> i >= nreq) args in
+  let env = List.combine req (List.take nreq args) in
+  let more = List.drop nreq args in
   match quasi m with
   | None -> fail m "E_MACRO_TEMPLATE" (Printf.sprintf "Macro %s: the template is quoted: write `(…) with ~parameters." name)
   | Some body ->
@@ -165,7 +164,7 @@ let expand macros x =
           "Macro expansion of %s exceeds 5,000 forms." h);
         go (depth + 1) y
     | None -> map_children (go depth) x in
-  try Ok (go 0 x) with Fail d -> Error d
+  try Ok (go 0 x) with Diagnostic.Error d -> Error d
 
 let expand_once ?(state = state ()) macros x =
   let tbl = table macros in
@@ -174,4 +173,4 @@ let expand_once ?(state = state ()) macros x =
     if !finished || inert y then y else match call_of tbl y with
     | Some (_, m) -> finished := true; step state m y
     | None -> map_children go y in
-  try let r = go x in Ok (if !finished then r else x) with Fail d -> Error d
+  try let r = go x in Ok (if !finished then r else x) with Diagnostic.Error d -> Error d

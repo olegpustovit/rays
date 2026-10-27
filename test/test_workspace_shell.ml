@@ -17,12 +17,12 @@ let fail message = failwith ("test_workspace_shell: " ^ message)
 let check condition message = if not condition then fail message
 let factories = Sop_catalog.Editor.factories
 let catalog = Contexts.catalog ~version:1 factories |> Result.get_ok
-let show ds = String.concat "; " (List.map Flow.Diagnostic.to_string ds)
+let show ds = String.concat "; " (List.map Diagnostic.to_string ds)
 open Test_text
 
 let of_text text = match Doc.of_text catalog text with Ok d -> d | Error ds -> fail (show ds)
 let build ?previous ws = Contexts.of_workspace ~factories ?previous ws
-let build_ok ws = match build ws with Ok d -> d | Error d -> fail (Flow.Diagnostic.to_string d)
+let build_ok ws = match build ws with Ok d -> d | Error d -> fail (Diagnostic.to_string d)
 let replace text from by =
   let n = String.length from in
   let rec at i = if i + n > String.length text then fail ("no " ^ from)
@@ -42,7 +42,7 @@ let expect_error name text needle =
   match Doc.of_text catalog text with
   | Error ds -> check (has (show ds) needle) (name ^ ": " ^ show ds)
   | Ok ws -> (match build ws with
-      | Error d -> check (has (Flow.Diagnostic.to_string d) needle) (name ^ ": " ^ Flow.Diagnostic.to_string d)
+      | Error d -> check (has (Diagnostic.to_string d) needle) (name ^ ": " ^ Diagnostic.to_string d)
       | Ok _ -> fail (name ^ " was accepted"))
 
 (* ---- lowering ---- *)
@@ -75,7 +75,7 @@ let run_lowering () =
   let more = build_ok (of_text (replace (case "variations") "(range 4)" "(range 6)")) in
   let keys6 = List.filter_map (fun (_, p) -> match p with Panels.View k -> Some k | _ -> None)
       (leaves (shell_of more).tree) in
-  check (List.filteri (fun i _ -> i < 4) keys6 = keys && List.length keys6 = 6) "panel keys follow the iteration index";
+  check (List.take 4 keys6 = keys && List.length keys6 = 6) "panel keys follow the iteration index";
   check (List.length (Editor_document.Document.scene_graph more |> Sop.Edit_graph.inspect) > 4) "more objects for more viewports";
   (* the default shell of a workspace without an editor graph, and a named graph panel *)
   let plain = build_ok (of_text (case "tree")) in
@@ -102,7 +102,7 @@ let editor ?camera ?presets text =
   E3.create ?camera ?presets ~await:true ~workspace:(of_text text)
     ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
       |> Result.map_error Rdk.Error.to_string)
-    ~scene3:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) ()
+    ~draw:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) ()
   |> function Ok e -> e | Error m -> fail m
 
 let source e = fst (Flow.Lisp.print (E3.workspace e).Doc.source)
@@ -131,14 +131,14 @@ let run_editor () =
                 || has line "skipping frames")) ("the editor is still cooking: " ^ line) in
   settle ();
   let click ?(button = Input.LeftButton) (x, y) =
-    step ~mouse:(x, y) [ Event.MouseMoved (x, y) ];
-    step ~buttons:[ button ] ~mouse:(x, y) [ Event.MousePressed (button, (x, y)) ];
-    step ~mouse:(x, y) [ Event.MouseReleased (button, (x, y)) ] in
+    step ~mouse:(x, y) [ Input.Pointer_moved (x, y) ];
+    step ~buttons:[ button ] ~mouse:(x, y) [ Input.Pointer_pressed (button, (x, y)) ];
+    step ~mouse:(x, y) [ Input.Pointer_released (button, (x, y)) ] in
   let drag ~from ~to_ =
-    step ~mouse:from [ Event.MouseMoved from ];
-    step ~buttons:[ Input.LeftButton ] ~mouse:from [ Event.MousePressed (Input.LeftButton, from) ];
-    step ~buttons:[ Input.LeftButton ] ~mouse:to_ [ Event.MouseMoved to_ ];
-    step ~mouse:to_ [ Event.MouseReleased (Input.LeftButton, to_) ];
+    step ~mouse:from [ Input.Pointer_moved from ];
+    step ~buttons:[ Input.LeftButton ] ~mouse:from [ Input.Pointer_pressed (Input.LeftButton, from) ];
+    step ~buttons:[ Input.LeftButton ] ~mouse:to_ [ Input.Pointer_moved to_ ];
+    step ~mouse:to_ [ Input.Pointer_released (Input.LeftButton, to_) ];
     step [] in
   (* drag the outline | rest gutter: one rewrite of the editor graph, one history entry.
      At 900 points the outline's 120-point minimum lifts its 13% to 169. *)
@@ -180,13 +180,13 @@ let run_panel_keys () =
     let step ?(mouse = (300., 150.)) events = incr count; e := E3.update !e (frame mouse events !count) in
     step []; step [];
     (* a press in the graph panel focuses it *)
-    step [ Event.MouseMoved (300., 150.) ];
-    step [ Event.MousePressed (Input.LeftButton, (300., 150.)) ];
-    step [ Event.MouseReleased (Input.LeftButton, (300., 150.)) ];
+    step [ Input.Pointer_moved (300., 150.) ];
+    step [ Input.Pointer_pressed (Input.LeftButton, (300., 150.)) ];
+    step [ Input.Pointer_released (Input.LeftButton, (300., 150.)) ];
     step [];
     check (dump_line !e "focus" = "Graph") ("focus is the graph panel: " ^ dump_line !e "focus");
     e, step in
-  let key k = Event.KeyPressed k and ch c = Event.KeyPressed (Input.KeyChar c) in
+  let key k = Input.Key_pressed k and ch c = Input.Key_pressed (Input.KeyChar c) in
   let e, step = started () in
   step [ key (Input.KeyChar '/'); ch 'o'; ch 'v' ]; step [];
   check (E3.undo_label !e = Some "Split panel" && has (source !e) "network_a") "/ o v split the focused panel";
@@ -198,9 +198,9 @@ let run_panel_keys () =
   step []; step [];
   let gx, gy, _, _ = (E3.panes !e (frame (0., 0.) [] 0)).graph in
   let p = float (gx + 40), float (gy + 40) in
-  step ~mouse:p [ Event.MouseMoved p ];
-  step ~mouse:p [ Event.MousePressed (Input.LeftButton, p) ];
-  step ~mouse:p [ Event.MouseReleased (Input.LeftButton, p) ];
+  step ~mouse:p [ Input.Pointer_moved p ];
+  step ~mouse:p [ Input.Pointer_pressed (Input.LeftButton, p) ];
+  step ~mouse:p [ Input.Pointer_released (Input.LeftButton, p) ];
   step ~mouse:p [];
   check (not (has (source !e) "(graph editor")) "the plain workspace has no editor graph";
   step ~mouse:p [ key (Input.KeyChar '/'); ch 'l'; ch 'i' ]; step ~mouse:p [];
@@ -215,20 +215,20 @@ let run_panel_keys () =
   let step ?(buttons = []) mouse events = incr count; e := E3.update !e (frame ~buttons mouse events !count) in
   let live () = E3.Private.live_frame !e in
   let panel = (200., 300.) and picture = (700., 300.) and held = [ Input.LeftButton ] in
-  step picture []; step picture [ Event.MouseMoved picture ];
+  step picture []; step picture [ Input.Pointer_moved picture ];
   check ((live ()).pointer = picture) "the picture has the pointer";
-  step panel [ Event.MouseMoved panel ];
-  step ~buttons:held panel [ Event.MousePressed (Input.LeftButton, panel) ];
+  step panel [ Input.Pointer_moved panel ];
+  step ~buttons:held panel [ Input.Pointer_pressed (Input.LeftButton, panel) ];
   check ((live ()).pointer = picture && (live ()).buttons = [] && (live ()).events = [])
     "a press on a panel reached the sketch";
-  step ~buttons:held picture [ Event.MouseMoved picture ];
+  step ~buttons:held picture [ Input.Pointer_moved picture ];
   check ((live ()).buttons = []) "a drag begun on a panel became the sketch's over the picture";
-  step picture [ Event.MouseReleased (Input.LeftButton, picture) ]; step picture [];
-  step ~buttons:held picture [ Event.MousePressed (Input.LeftButton, picture) ];
-  check ((live ()).buttons = [ "left" ] && (live ()).events <> []) "a press on the picture did not reach the sketch";
-  step ~buttons:held panel [ Event.MouseMoved panel ];
-  check ((live ()).buttons = [ "left" ] && (live ()).pointer = panel) "a drag begun on the picture was cut at its edge";
-  step panel [ Event.MouseReleased (Input.LeftButton, panel) ];
+  step picture [ Input.Pointer_released (Input.LeftButton, picture) ]; step picture [];
+  step ~buttons:held picture [ Input.Pointer_pressed (Input.LeftButton, picture) ];
+  check ((live ()).buttons = [ Input.LeftButton ] && (live ()).events <> []) "a press on the picture did not reach the sketch";
+  step ~buttons:held panel [ Input.Pointer_moved panel ];
+  check ((live ()).buttons = [ Input.LeftButton ] && (live ()).pointer = panel) "a drag begun on the picture was cut at its edge";
+  step panel [ Input.Pointer_released (Input.LeftButton, panel) ];
   check ((live ()).events <> []) "the sketch missed the release of its own drag";
   step panel [];
   check ((live ()).pointer = panel && (live ()).buttons = []) "the pointer left the picture where the drag ended";
@@ -239,15 +239,15 @@ let run_panel_keys () =
   let step ?(keys = []) mouse events = incr count; e := E3.update !e (Test_editor_input.frame ~keys mouse events !count) in
   let seen () = (E3.Private.live_frame !e).keys in
   let esc = [ Input.Escape ] and panel = (200., 300.) and picture = (700., 300.) in
-  let click ?keys at = step ?keys at [ Event.MousePressed (Input.LeftButton, at) ]; step ?keys at [ Event.MouseReleased (Input.LeftButton, at) ]; step ?keys at [] in
+  let click ?keys at = step ?keys at [ Input.Pointer_pressed (Input.LeftButton, at) ]; step ?keys at [ Input.Pointer_released (Input.LeftButton, at) ]; step ?keys at [] in
   click picture; step ~keys:esc picture [];
-  check (seen () = [ "escape" ]) "the focused picture did not get a held Esc";
+  check (seen () = [ Input.Escape ]) "the focused picture did not get a held Esc";
   click ~keys:esc panel; step ~keys:esc panel [];
   check (seen () = []) "a panel's Esc reached the sketch";
   click ~keys:esc picture; step ~keys:esc picture [];
   check (seen () = []) "an Esc held from the panel reached the sketch after the focus changed";
   step picture []; step ~keys:esc picture [];
-  check (seen () = [ "escape" ]) "a fresh Esc was hidden from the focused picture";
+  check (seen () = [ Input.Escape ]) "a fresh Esc was hidden from the focused picture";
   E3.close !e
 
 (* panels written in place, and panels made by a loop, are edited through the keys too: an
@@ -258,12 +258,12 @@ let run_unbound_panels () =
     let e = ref (editor text) and count = ref 0 in
     let step ?(mouse = focus_at) events = incr count; e := E3.update !e (frame mouse events !count) in
     step []; step [];
-    step [ Event.MouseMoved focus_at ];
-    step [ Event.MousePressed (Input.LeftButton, focus_at) ];
-    step [ Event.MouseReleased (Input.LeftButton, focus_at) ];
+    step [ Input.Pointer_moved focus_at ];
+    step [ Input.Pointer_pressed (Input.LeftButton, focus_at) ];
+    step [ Input.Pointer_released (Input.LeftButton, focus_at) ];
     step [];
     e, step in
-  let key k = Event.KeyPressed k and ch c = Event.KeyPressed (Input.KeyChar c) in
+  let key k = Input.Key_pressed k and ch c = Input.Key_pressed (Input.KeyChar c) in
   let inline = with_editor "    (ui/workspace (ui/split-at \"vertical\" 0.5 (ui/graph) (ui/viewport (ref scene))))" in
   let e, step = started inline (300., 100.) in
   check (dump_line !e "focus" = "Graph") ("focus is the inline graph panel: " ^ dump_line !e "focus");
@@ -297,8 +297,8 @@ let run_wire_gestures () =
     let step ?(buttons = []) mouse events = incr count; e := E3.update !e (frame ~buttons mouse events !count) in
     step (450., 300.) []; step (450., 300.) [];
     e, step in
-  let key k = Event.KeyPressed k and ch c = Event.KeyPressed (Input.KeyChar c) in
-  let pick step text = step (450., 300.) [ key (Input.KeyChar '/'); ch 'a' ]; step (450., 300.) [ Event.TextInput text ];
+  let key k = Input.Key_pressed k and ch c = Input.Key_pressed (Input.KeyChar c) in
+  let pick step text = step (450., 300.) [ key (Input.KeyChar '/'); ch 'a' ]; step (450., 300.) [ Input.Text_input text ];
     step (450., 300.) [ key Input.Enter ]; step (450., 300.) [] in
   let nested = "(workspace w (graph g :context sop (let* [m (sop/transform (sop/box))] m)))" in
   let e, step = started nested in
@@ -308,16 +308,17 @@ let run_wire_gestures () =
     && has (source !e) "(sop/box)" && has (source !e) "(sop/transform box)")
     ("a node after a nested node: " ^ source !e);
   incr count;
-  e := E3.update !e { (frame (450., 300.) [ ch 'z' ] !count) with keys = [ Input.Meta ] };
+  let undo_frame = frame (450., 300.) [ ch 'z' ] !count in
+  e := E3.update !e { undo_frame with input = { undo_frame.input with keys = [ Input.Meta ] } };
   check (has (source !e) "(sop/transform (sop/box))" && E3.undo_label !e = None)
     ("one undo took the name and the node back: " ^ source !e);
   E3.close !e;
   let e, step = started "(workspace w (graph g :context sop (let* [a (sop/box) m (sop/transform a)] m)))" in
   let gx, gy, gw, gh = (E3.panes !e (frame (0., 0.) [] 0)).graph in
   let p = float (gx + 40), float (gy + 40) in
-  step p [ Event.MouseMoved p ]; step ~buttons:[ Input.LeftButton ] p [ Event.MousePressed (Input.LeftButton, p) ];
-  step p [ Event.MouseReleased (Input.LeftButton, p) ];
-  step p [ Event.KeyPressed Input.Home ]; step p [ ch 'i' ]; step p [];
+  step p [ Input.Pointer_moved p ]; step ~buttons:[ Input.LeftButton ] p [ Input.Pointer_pressed (Input.LeftButton, p) ];
+  step p [ Input.Pointer_released (Input.LeftButton, p) ];
+  step p [ Input.Key_pressed Input.Home ]; step p [ ch 'i' ]; step p [];
   check (E3.level !e = Some "g") "the graph is open";
   let box path = Option.get (E3.node_box !e path) in
   let ax, ay, aw, _ = box [ "g"; "a" ] and mx, my, _, _ = box [ "g"; "m" ] in
@@ -327,12 +328,12 @@ let run_wire_gestures () =
   let mid = (fst from +. fst into) /. 2., (snd from +. snd into) /. 2. in
   let empty = float (gx + gw - 30), float (gy + gh - 30) in
   let held = [ Input.LeftButton ] in
-  step mid [ Event.MouseMoved mid ];
-  step ~buttons:held mid [ Event.MousePressed (Input.LeftButton, mid) ];
-  step ~buttons:held empty [ Event.MouseMoved empty ];
-  step empty [ Event.MouseReleased (Input.LeftButton, empty) ];
+  step mid [ Input.Pointer_moved mid ];
+  step ~buttons:held mid [ Input.Pointer_pressed (Input.LeftButton, mid) ];
+  step ~buttons:held empty [ Input.Pointer_moved empty ];
+  step empty [ Input.Pointer_released (Input.LeftButton, empty) ];
   step empty [];
-  step empty [ Event.TextInput "transform" ]; step empty [ key Input.Enter ]; step empty [];
+  step empty [ Input.Text_input "transform" ]; step empty [ key Input.Enter ]; step empty [];
   check (E3.undo_label !e = Some "Insert node" && has (source !e) "(sop/transform a)"
     && has (source !e) "(sop/transform transform)")
     ("a node inserted on a pulled wire: " ^ source !e);
@@ -349,20 +350,20 @@ let run_values () =
     step []; step [];
     let gx, gy, _, _ = (E3.panes !e (frame (0., 0.) [] 0)).graph in
     let p = float (gx + 40), float (gy + 40) in
-    step ~mouse:p [ Event.MouseMoved p ];
-    step ~mouse:p [ Event.MousePressed (Input.LeftButton, p) ];
-    step ~mouse:p [ Event.MouseReleased (Input.LeftButton, p) ];
+    step ~mouse:p [ Input.Pointer_moved p ];
+    step ~mouse:p [ Input.Pointer_pressed (Input.LeftButton, p) ];
+    step ~mouse:p [ Input.Pointer_released (Input.LeftButton, p) ];
     if opening then begin
-      step ~mouse:p [ Event.KeyPressed Input.Home ];
-      step ~mouse:p [ Event.KeyPressed (Input.KeyChar 'i') ]
+      step ~mouse:p [ Input.Key_pressed Input.Home ];
+      step ~mouse:p [ Input.Key_pressed (Input.KeyChar 'i') ]
     end;
     step ~mouse:p [];
     e, (fun events -> step ~mouse:p events) in
-  let key k = Event.KeyPressed k and ch c = Event.KeyPressed (Input.KeyChar c) in
+  let key k = Input.Key_pressed k and ch c = Input.Key_pressed (Input.KeyChar c) in
   let add ?workspace ?(pick=(fun _->0)) text =
     let e, step = started ?text:workspace () in
     if workspace = None then check (E3.level !e = Some "g") "the box graph is open";
-    step [ key (Input.KeyChar '/'); ch 'a' ]; step [ Event.TextInput text ];
+    step [ key (Input.KeyChar '/'); ch 'a' ]; step [ Input.Text_input text ];
     for _=1 to pick !e do step [key Input.ArrowDown] done;
     step [ key Input.Enter ]; step [];
     !e in
@@ -544,25 +545,25 @@ let run_duplicate_and_view () =
     incr count; e := E3.update !e (Test_editor_input.frame ~keys mouse events !count) in
   step []; step [];
   let centre () = Option.bind (E3.prepared !e) Mesh.centroid
-    |> Option.map (fun p -> p.Vec3.x) in
+    |> Option.map (fun p -> p.Rays_math.Vec3.x) in
   check (centre () = Some 20.) "the initial viewport did not show the graph result";
-  step ~mouse:(150., 300.) [Event.MouseMoved (150., 300.)];
-  step ~mouse:(150., 300.) [Event.MouseScrolled (0., -1.)];
+  step ~mouse:(150., 300.) [Input.Pointer_moved (150., 300.)];
+  step ~mouse:(150., 300.) [Input.Scrolled (0., -1.)];
   step [];
   let gx, gy, _, _ = (E3.panes !e (frame (0., 0.) [] 0)).graph in
   let p = float (gx + 40), float (gy + 40) in
-  step ~mouse:p [ Event.MouseMoved p ];
-  step ~mouse:p [ Event.MousePressed (Input.LeftButton, p) ];
-  step ~mouse:p [ Event.MouseReleased (Input.LeftButton, p) ];
-  step ~mouse:p [ Event.KeyPressed Input.Home ];
-  step ~mouse:p [ Event.KeyPressed (Input.KeyChar 'i') ];
+  step ~mouse:p [ Input.Pointer_moved p ];
+  step ~mouse:p [ Input.Pointer_pressed (Input.LeftButton, p) ];
+  step ~mouse:p [ Input.Pointer_released (Input.LeftButton, p) ];
+  step ~mouse:p [ Input.Key_pressed Input.Home ];
+  step ~mouse:p [ Input.Key_pressed (Input.KeyChar 'i') ];
   step ~mouse:p [];
   let selected () = dump_line !e "scope selected" in
-  step ~mouse:p [ Event.KeyPressed Input.ArrowRight ];
+  step ~mouse:p [ Input.Key_pressed Input.ArrowRight ];
   check (selected () <> "-") "a walk key selected a node";
   let node = selected () in
   let before = E3.workspace !e and label = E3.undo_label !e in
-  step ~mouse:p [ Event.KeyPressed (Input.KeyChar 'v') ];
+  step ~mouse:p [ Input.Key_pressed (Input.KeyChar 'v') ];
   check (E3.workspace !e == before && E3.undo_label !e = label)
     "v changed the workspace or history";
   check (not (has (fst (Flow.Lisp.print [ Editor_document.Layout_by_path.to_syntax (E3.workspace !e).Doc.layout ])) "(display"))
@@ -572,12 +573,12 @@ let run_duplicate_and_view () =
     ("v marked the node but did not show it in the viewport: " ^ node);
   let x, y, w, _ = Option.get (E3.node_box !e ["g"; "b"]) in
   let target = float (x + w / 2), float (y + 3) in
-  step ~mouse:target [Event.MouseMoved target];
-  step ~mouse:target [Event.MousePressed (Input.LeftButton, target); Event.MouseReleased (Input.LeftButton, target)];
-  step ~mouse:target [Event.KeyPressed (Input.KeyChar 'v')];
+  step ~mouse:target [Input.Pointer_moved target];
+  step ~mouse:target [Input.Pointer_pressed (Input.LeftButton, target); Input.Pointer_released (Input.LeftButton, target)];
+  step ~mouse:target [Input.Key_pressed (Input.KeyChar 'v')];
   step ~mouse:p [];
   check (centre () = Some 20.) "viewing the result did not restore its geometry";
-  step ~mouse:p ~keys:[ Input.Meta ] [ Event.KeyPressed (Input.KeyChar 'd') ];
+  step ~mouse:p ~keys:[ Input.Meta ] [ Input.Key_pressed (Input.KeyChar 'd') ];
   check (E3.undo_label !e = Some "Duplicate" && has (source !e) "_2") ("Command-D made no copy: " ^ source !e);
   check (selected () <> node && selected () <> "-") "the copy is the selection";
   E3.close !e) [
@@ -604,14 +605,14 @@ let run_loop_view () =
     let step ?(mouse = (450., 300.)) events =
       incr count; e := E3.update !e (frame mouse events !count) in
     let centre what expected =
-      let actual = Option.map (fun p -> p.Vec3.x) (Option.bind (E3.prepared !e) Mesh.centroid) in
+      let actual = Option.map (fun p -> p.Rays_math.Vec3.x) (Option.bind (E3.prepared !e) Mesh.centroid) in
       check (match actual with Some x -> Float.abs (x -. expected) < 1e-4 | None -> false)
         (Printf.sprintf "%s: expected the geometry at %.1f, got %s" what expected
            (Option.fold ~none:"none" ~some:string_of_float actual)) in
     let click point =
-      step ~mouse:point [Event.MouseMoved point];
-      step ~mouse:point [Event.MousePressed (Input.LeftButton, point); Event.MouseReleased (Input.LeftButton, point)] in
-    let key k = step [Event.KeyPressed k] in
+      step ~mouse:point [Input.Pointer_moved point];
+      step ~mouse:point [Input.Pointer_pressed (Input.LeftButton, point); Input.Pointer_released (Input.LeftButton, point)] in
+    let key k = step [Input.Key_pressed k] in
     step []; step []; centre "the result" 15.;
     let gx, gy, _, _ = (E3.panes !e (frame (0., 0.) [] 0)).graph in
     click (float (gx + 40), float (gy + 40));
@@ -644,18 +645,18 @@ let run_result_view () =
     let step ?(mouse = (450., 300.)) events =
       incr count; e := E3.update !e (frame mouse events !count) in
     let centre expected =
-      let actual = Option.map (fun p -> p.Vec3.x) (Option.bind (E3.prepared !e) Mesh.centroid) in
+      let actual = Option.map (fun p -> p.Rays_math.Vec3.x) (Option.bind (E3.prepared !e) Mesh.centroid) in
       check (actual = Some expected)
         (Printf.sprintf "VIEW kept stale geometry: expected %.1f, got %s" expected
            (Option.fold ~none:"none" ~some:string_of_float actual)) in
     let click point =
-      step ~mouse:point [Event.MouseMoved point];
-      step ~mouse:point [Event.MousePressed (Input.LeftButton, point); Event.MouseReleased (Input.LeftButton, point)] in
+      step ~mouse:point [Input.Pointer_moved point];
+      step ~mouse:point [Input.Pointer_pressed (Input.LeftButton, point); Input.Pointer_released (Input.LeftButton, point)] in
     let select name =
       let x, y, w, _ = Option.get (E3.node_box !e ["g"; name]) in
       click (float (x + w * (20 + 35 * (!count mod 4)) / 196), float (y + 3));  (* a different point each time: two presses on one are a double-click, which renames *)
       check (dump_line !e "scope selected" = "g/" ^ name) "the result node could not be selected" in
-    let key k = step [Event.KeyPressed k] in
+    let key k = step [Input.Key_pressed k] in
     let edit op = e := (match E3.edit !e op with Ok e -> e | Error m -> fail m); step [] in
     let parsed text = match S.parse text with Ok [e] -> e | _ -> fail "bad result-view expression" in
     step []; step []; centre 20.;
@@ -675,7 +676,7 @@ let run_result_view () =
     centre 11.;
     let vx, vy, _, _ = (E3.panes !e (frame (0., 0.) [] 0)).view in
     click (float (vx + 10), float (vy + 10)); key (Input.KeyChar 'f'); step [];
-    check (Float.abs ((Easy_camera.target (E3.camera !e)).Vec3.x -. 11.) < 1e-6)
+    check (Float.abs ((Easy_camera.target (E3.camera !e)).Rays_math.Vec3.x -. 11.) < 1e-6)
       "viewport F framed the graph result instead of the viewed node";
     let gx, gy, _, _ = (E3.panes !e (frame (0., 0.) [] 0)).graph in
     click (float (gx + 10), float (gy + 10)); key (Input.KeyChar 'u'); step [];
@@ -700,28 +701,28 @@ let run_geometry_view () =
     let count = ref 0 in
     let step ?(mouse = (450., 300.)) events =
       incr count; e := E3.update !e (frame mouse events !count) in
-    let click p = step ~mouse:p [Event.MouseMoved p];
-      step ~mouse:p [Event.MousePressed (Input.LeftButton, p); Event.MouseReleased (Input.LeftButton, p)] in
+    let click p = step ~mouse:p [Input.Pointer_moved p];
+      step ~mouse:p [Input.Pointer_pressed (Input.LeftButton, p); Input.Pointer_released (Input.LeftButton, p)] in
     let centre expected =
-      let x = Option.map (fun p -> p.Vec3.x) (Option.bind (E3.prepared !e) Mesh.centroid) in
+      let x = Option.map (fun p -> p.Rays_math.Vec3.x) (Option.bind (E3.prepared !e) Mesh.centroid) in
       check (x = Some expected) "the geometry template did not preview the selected element" in
     step []; step []; centre 10.;
     let gx, gy, _, _ = (E3.panes !e (frame (0., 0.) [] 0)).graph in
     click (float (gx + 40), float (gy + 40));
-    step [Event.KeyPressed Input.Home]; step [Event.KeyPressed (Input.KeyChar 'i')]; step [];
+    step [Input.Key_pressed Input.Home]; step [Input.Key_pressed (Input.KeyChar 'i')]; step [];
     let x, y, w, _ = Option.get (E3.node_box !e ["g";"dots";"moved"]) in
     click (float (x + w / 2), float (y + 3));
     let before = E3.workspace !e and label = E3.undo_label !e in
-    step [Event.KeyPressed (Input.KeyChar 'v')]; step []; centre 0.;
+    step [Input.Key_pressed (Input.KeyChar 'v')]; step []; centre 0.;
     e := E3.set_probe !e ["g";"dots"] 2; step []; centre 20.;
     check (E3.workspace !e == before && E3.undo_label !e = label)
       "geometry preview and its selector changed the source or history";
     let vx, vy, _, _ = (E3.panes !e (frame (0., 0.) [] 0)).view in
-    click (float (vx + 10), float (vy + 10)); step [Event.KeyPressed (Input.KeyChar 'f')]; step [];
-    check (Float.abs ((Easy_camera.target (E3.camera !e)).Vec3.x -. 20.) < 1e-6)
+    click (float (vx + 10), float (vy + 10)); step [Input.Key_pressed (Input.KeyChar 'f')]; step [];
+    check (Float.abs ((Easy_camera.target (E3.camera !e)).Rays_math.Vec3.x -. 20.) < 1e-6)
       "viewport F did not frame the geometry preview";
     let panes = E3.panes !e (frame (0., 0.) [] 0) in
-    let point = Camera.world_to_screen ~viewport:panes.view (E3.view_camera !e) (Vec3.create 20. 0. 0.) |> Option.get in
+    let point = Camera.world_to_screen ~viewport:panes.view (E3.view_camera !e) (Rays_math.Vec3.create 20. 0. 0.) |> Option.get in
     click (point.x, point.y); step [];
     check (dump_line !e "scope selected" = "g/dots/moved" && E3.probe !e ["g";"dots"] = Some 2)
       "picking a preview selected the authored result or changed its iteration")
@@ -735,24 +736,24 @@ let run_movers () =
     step []; step [];
     let gx, gy, _, _ = (E3.panes !e (frame (0., 0.) [] 0)).graph in
     let p = float (gx + 40), float (gy + 40) in
-    step ~mouse:p [ Event.MouseMoved p ];
-    step ~mouse:p [ Event.MousePressed (Input.LeftButton, p) ];
-    step ~mouse:p [ Event.MouseReleased (Input.LeftButton, p) ];
-    step ~mouse:p [ Event.KeyPressed Input.Home ];
-    step ~mouse:p [ Event.KeyPressed (Input.KeyChar 'i') ];
+    step ~mouse:p [ Input.Pointer_moved p ];
+    step ~mouse:p [ Input.Pointer_pressed (Input.LeftButton, p) ];
+    step ~mouse:p [ Input.Pointer_released (Input.LeftButton, p) ];
+    step ~mouse:p [ Input.Key_pressed Input.Home ];
+    step ~mouse:p [ Input.Key_pressed (Input.KeyChar 'i') ];
     step ~mouse:p [];
     let bx, by, bw, bh = Option.get (E3.node_box !e [ "g"; "widths" ]) in
     let c = float (bx + bw / 2), float (by + 8) in
-    step ~mouse:c [ Event.MouseMoved c ];
-    step ~mouse:c [ Event.MousePressed (Input.LeftButton, c) ];
-    step ~mouse:c [ Event.MouseReleased (Input.LeftButton, c) ];
+    step ~mouse:c [ Input.Pointer_moved c ];
+    step ~mouse:c [ Input.Pointer_pressed (Input.LeftButton, c) ];
+    step ~mouse:c [ Input.Pointer_released (Input.LeftButton, c) ];
     step ~mouse:c [];
     ignore bh;
     let ix, _, iw, _ = (E3.panes !e (frame (0., 0.) [] 0)).inspector in
     let q = float (ix + iw / 2), y in
-    step ~mouse:q [ Event.MouseMoved q ];
-    step ~mouse:q [ Event.MousePressed (Input.LeftButton, q) ];
-    step ~mouse:q [ Event.MouseReleased (Input.LeftButton, q) ];
+    step ~mouse:q [ Input.Pointer_moved q ];
+    step ~mouse:q [ Input.Pointer_pressed (Input.LeftButton, q) ];
+    step ~mouse:q [ Input.Pointer_released (Input.LeftButton, q) ];
     step ~mouse:q [];
     let label = E3.undo_label !e and moved = has (source !e) "(list 1 3 2" || has (source !e) "(list 2 1 3" in
     E3.close !e; label, moved in
@@ -763,16 +764,16 @@ let run_frame_key () =
   (* the graph pane's keys reach the document: Shift-G frames the walked-to node (layout data, one entry);
      the rosette is entered as in test_text_pane's W9 scenario *)
   let e = ref (editor (case "rosette")) in
-  let key k = Event.KeyPressed k in
+  let key k = Input.Key_pressed k in
   for n = 1 to 24 do
-    let click p = [ Event.MouseMoved p; Event.MousePressed (Input.LeftButton, p); Event.MouseReleased (Input.LeftButton, p) ] in
+    let click p = [ Input.Pointer_moved p; Input.Pointer_pressed (Input.LeftButton, p); Input.Pointer_released (Input.LeftButton, p) ] in
     let events = match n with
       | 4 -> click (900., 300.) | 6 -> [ key Input.ArrowDown ] | 8 -> [ key (Input.KeyChar 'i') ]
       | 16 -> [ key Input.ArrowRight ] | 18 -> [ key Input.Shift; key (Input.KeyChar 'g') ] | _ -> [] in
-    let f : Frame.t = { width = 1400; height = 800; size = 1400, 800;
-        pixel_scale = 1., 1.;
-      time = float n /. 60.; dt = 1. /. 60.; fps = 60.; count = n; mouse = (640., 360.);
-      mouse_delta = 0., 0.; keys = (if n = 18 then [ Input.Shift ] else []); mouse_buttons = []; events } in
+    let f : Frame.t = { input = { (Input.at_time (float n /. 60.)) with
+      dt = 1. /. 60.; frame = n; tick = n; size = 1400, 800; pointer = 640., 360.;
+      keys = (if n = 18 then [ Input.Shift ] else []); events };
+      pixel_scale = 1., 1.; fps = 60.; mouse_delta = 0., 0. } in
     e := E3.update !e f
   done;
   check (E3.undo_label !e = Some "Frame") ("g made a frame: " ^ Option.value ~default:"-" (E3.undo_label !e));
@@ -883,7 +884,7 @@ let run_restore () =
   e := bricked;
   step [];
   check (panes_graph !e = 0) "the bricked shell has no graph panel";
-  let key k = Event.KeyPressed k in
+  let key k = Input.Key_pressed k in
   step [ key (Input.KeyChar '/'); key (Input.KeyChar 'z') ]; step [];
   check (panes_graph !e > 0) "/ z restores the default layout";
   check (has (dump_line !e "cook") "Default layout") ("the status says so: " ^ dump_line !e "cook");
@@ -907,22 +908,22 @@ let run_camera_zoom () =
     "(workspace zoom (graph g :context sop (sop/box)) (graph scene :context scene (scene/merge (scene/geometry (ref g)) (scene/camera :eye [0 0 12345.123456789] :follow_viewport true :active true))))") in
   let step events count = e := E3.update !e (frame (200., 200.) events count) in
   step [] 0; step [] 1;
-  step [Event.MouseMoved (200., 200.); Event.MousePressed (Input.LeftButton, (200., 200.));
-    Event.MouseReleased (Input.LeftButton, (200., 200.))] 2;
+  step [Input.Pointer_moved (200., 200.); Input.Pointer_pressed (Input.LeftButton, (200., 200.));
+    Input.Pointer_released (Input.LeftButton, (200., 200.))] 2;
   for count = 3 to 15 do
-    step [Event.MouseScrolled (0., -1.)] (2 * count);
+    step [Input.Scrolled (0., -1.)] (2 * count);
     let viewport = Easy_camera.camera (E3.camera !e) and saved = E3.render_camera !e in
-    check (Vec3.nearly_equal (Camera.position viewport) (Camera.position saved) ~eps:1e-6)
+    check (Rays_math.Vec3.nearly_equal (Camera.position viewport) (Camera.position saved) ~eps:1e-6)
       "zooming out made the following camera lag behind the viewport";
     let eye = Camera.position viewport in
     step [] ((2 * count) + 1);
-    check (Vec3.nearly_equal eye (Camera.position (Easy_camera.camera (E3.camera !e))) ~eps:1e-6)
+    check (Rays_math.Vec3.nearly_equal eye (Camera.position (Easy_camera.camera (E3.camera !e))) ~eps:1e-6)
       "an idle frame snapped the viewport to rounded camera coordinates"
   done;
   E3.close !e
 
 let run_cameras () =
-  let e = ref (editor ~camera:(Easy_camera.with_inertia false (Easy_camera.create ~target:Vec3.zero ~distance:7. ())) (case "variations")) and count = ref 0 in
+  let e = ref (editor ~camera:(Easy_camera.with_inertia false (Easy_camera.create ~target:Rays_math.Vec3.zero ~distance:7. ())) (case "variations")) and count = ref 0 in
   let step ?(buttons = []) ?(delta = (0., 0.)) (x, y) events =
     incr count; e := E3.update !e (Test_editor_input.frame ~buttons ~delta (x, y) events !count) in
   for _ = 1 to 8 do step (450., 300.) [] done;
@@ -935,21 +936,21 @@ let run_cameras () =
   let keys = [ "v1.1.0"; "v1.1.1"; "v1.1.2"; "v1.1.3" ] in
   let click key =
     let p = center key in
-    step p [ Event.MouseMoved p ];
-    step ~buttons:[ Input.LeftButton ] p [ Event.MousePressed (Input.LeftButton, p) ];
-    step p [ Event.MouseReleased (Input.LeftButton, p) ]; step p [] in
+    step p [ Input.Pointer_moved p ];
+    step ~buttons:[ Input.LeftButton ] p [ Input.Pointer_pressed (Input.LeftButton, p) ];
+    step p [ Input.Pointer_released (Input.LeftButton, p) ]; step p [] in
   (* a press at the point of the click just before would be a double click *)
   let orbit key delta =
     let x, y = let x, y = center key in x, y +. 40. in
-    step (x, y) [ Event.MouseMoved (x, y) ];
-    step ~buttons:[ Input.LeftButton ] (x, y) [ Event.MousePressed (Input.LeftButton, (x, y)) ];
+    step (x, y) [ Input.Pointer_moved (x, y) ];
+    step ~buttons:[ Input.LeftButton ] (x, y) [ Input.Pointer_pressed (Input.LeftButton, (x, y)) ];
     for k = 1 to 6 do
       let p = x +. float k *. fst delta, y +. float k *. snd delta in
-      step ~buttons:[ Input.LeftButton ] ~delta p [ Event.MouseMoved p ]
+      step ~buttons:[ Input.LeftButton ] ~delta p [ Input.Pointer_moved p ]
     done;
     let last = x +. 6. *. fst delta, y +. 6. *. snd delta in
-    step last [ Event.MouseReleased (Input.LeftButton, last) ]; step last [] in
-  let same a b = Vec3.nearly_equal a b ~eps:1e-9 in
+    step last [ Input.Pointer_released (Input.LeftButton, last) ]; step last [] in
+  let same a b = Rays_math.Vec3.nearly_equal a b ~eps:1e-9 in
   click "v1.1.1";
   let start = List.map (fun k -> k, position k) keys in
   check (List.for_all (fun (_, p) -> same p (snd (List.hd start))) start) "viewports start from one orbit";
@@ -974,10 +975,10 @@ let run_cameras () =
         (frame (0., 0.) [] 0) in
     let x, y, _, _ = (Option.get (Layout.find geometry Layout.Graph)).body in
     float (x + 20), float (y + 200) in
-  step graph_pane [ Event.MouseMoved graph_pane ];
-  step ~buttons:[ Input.LeftButton ] graph_pane [ Event.MousePressed (Input.LeftButton, graph_pane) ];
-  step graph_pane [ Event.MouseReleased (Input.LeftButton, graph_pane) ];
-  let key k = Event.KeyPressed k and ch c = Event.KeyPressed (Input.KeyChar c) in
+  step graph_pane [ Input.Pointer_moved graph_pane ];
+  step ~buttons:[ Input.LeftButton ] graph_pane [ Input.Pointer_pressed (Input.LeftButton, graph_pane) ];
+  step graph_pane [ Input.Pointer_released (Input.LeftButton, graph_pane) ];
+  let key k = Input.Key_pressed k and ch c = Input.Key_pressed (Input.KeyChar c) in
   step graph_pane [ key (Input.KeyChar '/'); ch 'l'; ch 'g' ]; step graph_pane [];
   check (has (dump_line !e "projection") "graph") ("the pane is not showing a graph: " ^ dump_line !e "projection");
   let scope_selected () = dump_line !e "scope selected" in
@@ -1025,7 +1026,7 @@ let run_views () =
       let viewports = List.length (List.filter (function Scene.Private.Scene3_layer _ -> true | _ -> false) staged.layers) in
       check (viewports = 4) (Printf.sprintf "four viewports draw four 3D layers, got %d" viewports))
 
-(* ---- the copies of a loop are one template, through the editor (register V4) ---- *)
+(* ---- the copies of a loop are one template, through the editor ---- *)
 
 let count_of text piece =
   let n = String.length piece in
@@ -1039,9 +1040,9 @@ let select_row e count k =
   step []; step [];
   let gx, gy, _, _ = (E3.panes !e (frame (0., 0.) [] 0)).graph in
   let p = float (gx + 40), float (gy + 400) in
-  step ~mouse:p [ Event.MousePressed (Input.LeftButton, p); Event.MouseReleased (Input.LeftButton, p) ];
-  step [ Event.KeyPressed Input.Home ];
-  for _ = 1 to k do step [ Event.KeyPressed Input.ArrowDown ] done;
+  step ~mouse:p [ Input.Pointer_pressed (Input.LeftButton, p); Input.Pointer_released (Input.LeftButton, p) ];
+  step [ Input.Key_pressed Input.Home ];
+  for _ = 1 to k do step [ Input.Key_pressed Input.ArrowDown ] done;
   step []
 
 (* With RAYS_UI_PREVIEW=<dir> the editor is drawn into <dir>/<name>.png, without a window: the
@@ -1050,9 +1051,9 @@ let preview e name = match Sys.getenv_opt "RAYS_UI_PREVIEW" with
   | None -> ()
   | Some directory ->
       let canvas = Rays.Canvas.create_exn ~width:900 ~height:640 in
-      Rays.Canvas.render canvas (E3.scene !e (frame (0., 0.) [] 0));
+      Result.get_ok (Rays.Canvas.render canvas (E3.scene !e (frame (0., 0.) [] 0)));
       ignore (Rays.Canvas.save_png canvas (Filename.concat directory (name ^ ".png")));
-      Rays.Canvas.destroy canvas
+      ignore(Rays.Canvas.destroy canvas)
 
 (* a drag across the inspector's slider at [row] points under the panel's top *)
 let drag_slider e count row =
@@ -1061,13 +1062,13 @@ let drag_slider e count row =
   (* the first field of a vector row starts at the control column: 12 + 6 + 8 + 56 + 8 = 90 in a
      180-wide panel; a point 10 inside it *)
   let at x = float (ix + 100 + x), float (iy + row) in
-  step ~mouse:(at 0) ~buttons:[ Input.LeftButton ] [ Event.MousePressed (Input.LeftButton, at 0) ];
+  step ~mouse:(at 0) ~buttons:[ Input.LeftButton ] [ Input.Pointer_pressed (Input.LeftButton, at 0) ];
   List.iter (fun x -> step ~mouse:(at x) ~buttons:[ Input.LeftButton ] []) [ 4; 8; 12; 16 ];
-  step ~mouse:(at 20) [ Event.MouseReleased (Input.LeftButton, at 20) ];
+  step ~mouse:(at 20) [ Input.Pointer_released (Input.LeftButton, at 20) ];
   step []
 
 let objects e = Edit_graph.inspect (E3.scene_document e)
-let field_of (i : Edit_graph.node_info) name = List.find_map (fun (f : Parameter.field_view) ->
+let field_of (i : Edit_graph.node_info) name = List.find_map (fun (f : Param.field_view) ->
   if f.name = name then Some f.current else None) (Node.parameter_fields i.node)
 
 let run_loop_copies () =
@@ -1081,13 +1082,13 @@ let run_loop_copies () =
   select_row e count 1;
   preview e "loop-copies";
   let x () = List.map (fun i -> field_of i "translate_x") (objects !e) in
-  check (List.length (objects !e) = 3 && List.for_all (fun v -> v = Some (Parameter.Float_value 0.)) (x ()))
+  check (List.length (objects !e) = 3 && List.for_all (fun v -> v = Some (Param.Float_value 0.)) (x ()))
     "the loop did not make three objects at the origin";
   (* the head is 118 tall at the test's 11 points, then Inputs (4 + 24, 24), Geometry (16 + 24, two switch
      rows) and Transform (16 + 24): the translate row is 118 + 52 + 88 + 40 = 298 down, its middle 12 more *)
   drag_slider e count 310;
   let moved = x () in
-  check (List.for_all (fun v -> v = List.hd moved && v <> Some (Parameter.Float_value 0.)) moved)
+  check (List.for_all (fun v -> v = List.hd moved && v <> Some (Param.Float_value 0.)) moved)
     "dragging a literal field of one copy did not move all three";
   check (count_of (source !e) ":translate [" = 1) ("the template was not edited once: " ^ source !e);
   check (E3.undo_label !e = Some "Set translate_x") "the drag is not one history entry named for the field";
@@ -1098,13 +1099,14 @@ let run_loop_copies () =
   e := editor saved;
   check (x () = moved) "the saved text does not reopen with the same copies";
   (* one undo gives them all back *)
-  e := E3.update !e { (frame (450., 300.) [ Event.KeyPressed (Input.KeyChar 'z') ] (incr count; !count)) with keys = [ Input.Meta ] };
+  let undo_frame = frame (450., 300.) [ Input.Key_pressed (Input.KeyChar 'z') ] (incr count; !count) in
+  e := E3.update !e { undo_frame with input = { undo_frame.input with keys = [ Input.Meta ] } };
   E3.close !e;
   (* a rename from the list is the template's :name: every copy takes it *)
   let e = ref (editor text) and count = ref 0 in
   select_row e count 2;
   let step events = incr count; e := E3.update !e (frame (450., 300.) events !count) in
-  step [ Event.KeyPressed Input.F2 ]; step [ Event.TextInput "spot" ]; step [ Event.KeyPressed Input.Enter ]; step [];
+  step [ Input.Key_pressed Input.F2 ]; step [ Input.Text_input "spot" ]; step [ Input.Key_pressed Input.Enter ]; step [];
   check (List.for_all (fun (i : Edit_graph.node_info) -> i.label = "gspot") (objects !e)
          && count_of (source !e) ":name \"gspot\"" = 1 && E3.undo_label !e = Some "Rename")
     ("a rename of one copy did not rename the template: " ^ source !e ^ String.concat "," (List.map (fun (i : Edit_graph.node_info) -> i.label) (objects !e)));
@@ -1126,12 +1128,12 @@ let run_loop_copies () =
   check (has (dump_line !e "edit error") "computed by the loop") ("no reason for the refused edit: " ^ dump_line !e "edit error");
   (* deleting one copy skips its iteration: the others stay where they are *)
   select_row e count 2;
-  e := E3.update !e (frame (450., 300.) [ Event.KeyPressed Input.Delete ] (incr count; !count));
+  e := E3.update !e (frame (450., 300.) [ Input.Key_pressed Input.Delete ] (incr count; !count));
   let lamps () = List.filter (fun (i : Edit_graph.node_info) -> i.operation = "light") (objects !e) in
   check (List.length (lamps ()) = 2 && has (source !e) ":skip [1]" && E3.undo_label !e = Some "Delete")
     ("deleting a copy did not skip it in the loop: " ^ source !e);
   check (List.map (fun i -> field_of i "translate_x") (lamps ())
-         = [ Some (Parameter.Float_value 0.); Some (Parameter.Float_value 2.) ])
+         = [ Some (Param.Float_value 0.); Some (Param.Float_value 2.) ])
     "the copies after a deleted one moved";
   E3.close !e;
   (* a loop with two clauses: the same, one entry, and one undo gives the copy back *)
@@ -1143,12 +1145,13 @@ let run_loop_copies () =
   let e = ref (editor text) and count = ref 0 in
   select_row e count 2;
   let before = source !e in
-  e := E3.update !e (frame (450., 300.) [ Event.KeyPressed Input.Delete ] (incr count; !count));
+  e := E3.update !e (frame (450., 300.) [ Input.Key_pressed Input.Delete ] (incr count; !count));
   check (has (source !e) ":skip [1]" && List.length (objects !e) = 6 && E3.undo_label !e = Some "Delete"
          && dump_line !e "prompt" = "-")
     ("a copy of a two-clause loop was not deleted exactly: " ^ source !e);
   let saved = source !e in
-  e := E3.update !e { (frame (450., 300.) [ Event.KeyPressed (Input.KeyChar 'z') ] (incr count; !count)) with keys = [ Input.Meta ] };
+  let undo_frame = frame (450., 300.) [ Input.Key_pressed (Input.KeyChar 'z') ] (incr count; !count) in
+  e := E3.update !e { undo_frame with input = { undo_frame.input with keys = [ Input.Meta ] } };
   check (source !e = before && List.length (objects !e) = 7) "one undo did not give the deleted copy back";
   E3.close !e;
   e := editor saved;
@@ -1171,19 +1174,19 @@ let run_loop_expression () =
      the panel's left; vertically the head (118), Inputs (28, 24), Light (40, five rows) and Transform (40)
      and half the translate row (12) above it, as in the preview *)
   let label = float (ix + 100), float (iy + 118 + 28 + 24 + 40 + 120 + 40 + 12) in
-  step ~mouse:label [ Event.MouseMoved label ];
+  step ~mouse:label [ Input.Pointer_moved label ];
   let alt ?(buttons = []) events = incr count;
     e := E3.update !e (Test_editor_input.frame ~buttons ~keys:[ Input.Alt ] label events !count) in
-  alt [ Event.MousePressed (Input.LeftButton, label) ] ~buttons:[ Input.LeftButton ];
-  alt [ Event.MouseReleased (Input.LeftButton, label) ];
-  step ~mouse:label [ Event.KeyPressed (Input.KeyChar 'a') ];
-  step ~mouse:label [ Event.TextInput "=(* i 3)" ];
-  step ~mouse:label [ Event.KeyPressed Input.Enter ];
+  alt [ Input.Pointer_pressed (Input.LeftButton, label) ] ~buttons:[ Input.LeftButton ];
+  alt [ Input.Pointer_released (Input.LeftButton, label) ];
+  step ~mouse:label [ Input.Key_pressed (Input.KeyChar 'a') ];
+  step ~mouse:label [ Input.Text_input "=(* i 3)" ];
+  step ~mouse:label [ Input.Key_pressed Input.Enter ];
   step ~mouse:label [];
   let lamps () = List.filter (fun (i : Edit_graph.node_info) -> i.operation = "light") (objects !e) in
   check (has (source !e) ":translate [(* i 3) 2 0]") ("the expression did not reach the template: " ^ source !e);
   check (List.map (fun i -> field_of i "translate_x") (lamps ())
-         = List.map (fun v -> Some (Parameter.Float_value v)) [ 0.; 3.; 6. ])
+         = List.map (fun v -> Some (Param.Float_value v)) [ 0.; 3.; 6. ])
     "the copies did not follow the expression";
   check (E3.undo_label !e = Some "Edit expression" && dump_line !e "edit error" = "-"
          && has (dump_line !e "cook") "loop template") "the expression edit is not one entry with its status";
@@ -1191,7 +1194,7 @@ let run_loop_expression () =
   E3.close !e;
   e := editor saved;
   check (List.map (fun i -> field_of i "translate_x") (lamps ())
-         = List.map (fun v -> Some (Parameter.Float_value v)) [ 0.; 3.; 6. ]) "the saved text does not reopen with the same copies";
+         = List.map (fun v -> Some (Param.Float_value v)) [ 0.; 3.; 6. ]) "the saved text does not reopen with the same copies";
   E3.close !e;
   print_endline "workspace shell: an expression typed in a copy edits the template ok"
 
@@ -1201,8 +1204,8 @@ let run_panel_states () =
   and count = ref 0 in
   let step ?(buttons = []) ?(keys = []) mouse events = incr count;
     e := E3.update !e (Test_editor_input.frame ~buttons ~keys mouse events !count) in
-  let click point = step point [Event.MouseMoved point];
-    step point [Event.MousePressed (Input.LeftButton, point); Event.MouseReleased (Input.LeftButton, point)];
+  let click point = step point [Input.Pointer_moved point];
+    step point [Input.Pointer_pressed (Input.LeftButton, point); Input.Pointer_released (Input.LeftButton, point)];
     step point [] in
   step (450., 300.) []; step (450., 300.) [];
   let geometry = Layout.geometry ~hidden:[Layout.Timeline] Layout.default (frame (0., 0.) [] 0) in
@@ -1211,19 +1214,19 @@ let run_panel_states () =
   let grip = float (sx + sw / 2), float (sy + sh / 2) in
   let moved = fst grip +. 30., snd grip in
   let before_split = Doc.to_text (E3.workspace !e) in
-  step grip [Event.MouseMoved grip];
-  step ~buttons:[Input.LeftButton] grip [Event.MousePressed (Input.LeftButton, grip)];
-  step ~buttons:[Input.LeftButton] moved [Event.MouseMoved moved];
+  step grip [Input.Pointer_moved grip];
+  step ~buttons:[Input.LeftButton] grip [Input.Pointer_pressed (Input.LeftButton, grip)];
+  step ~buttons:[Input.LeftButton] moved [Input.Pointer_moved moved];
   check (Doc.to_text (E3.workspace !e) = before_split && E3.undo_label !e = None)
     "a held splitter drag committed authored state before release";
-  step moved [Event.MouseReleased (Input.LeftButton, moved)]; step moved [];
+  step moved [Input.Pointer_released (Input.LeftButton, moved)]; step moved [];
   check ((E3.workspace !e).layout.editor = None && has (source !e) "ui/split-at"
          && E3.undo_label !e = Some "Resize panel")
     "resizing the default shell did not write its editor graph";
   let saved_shell = (build_ok (E3.workspace !e)).Document.shell in
   check ((build_ok (of_text (Doc.to_text (E3.workspace !e)))).Document.shell = saved_shell)
     "the first splitter edit did not round-trip through Lisp";
-  step ~keys:[Input.Meta] moved [Event.KeyPressed (Input.KeyChar 'z')];
+  step ~keys:[Input.Meta] moved [Input.Key_pressed (Input.KeyChar 'z')];
   check ((build_ok (E3.workspace !e)).Document.shell = None)
     "undoing the first splitter edit did not restore the default shell";
   click (889., 11.);
@@ -1240,11 +1243,11 @@ let run_panel_states () =
   let gx, gy, _, _ = (E3.panes !e (frame (0., 0.) [] 0)).graph in
   let start = float (gx + 8), float (gy - 11) in
   let moved = fst start +. 30., snd start +. 70. in
-  step start [Event.MouseMoved start];
-  step ~buttons:[Input.LeftButton] start [Event.MousePressed (Input.LeftButton, start)];
-  step ~buttons:[Input.LeftButton] moved [Event.MouseMoved moved];
-  step ~buttons:[Input.LeftButton] (fst moved +. 10., snd moved) [Event.MouseMoved (fst moved +. 10., snd moved)];
-  step moved [Event.MouseReleased (Input.LeftButton, moved)]; step moved [];
+  step start [Input.Pointer_moved start];
+  step ~buttons:[Input.LeftButton] start [Input.Pointer_pressed (Input.LeftButton, start)];
+  step ~buttons:[Input.LeftButton] moved [Input.Pointer_moved moved];
+  step ~buttons:[Input.LeftButton] (fst moved +. 10., snd moved) [Input.Pointer_moved (fst moved +. 10., snd moved)];
+  step moved [Input.Pointer_released (Input.LeftButton, moved)]; step moved [];
   check ((state "network").window <> None && E3.undo_label !e = Some "Arrange panel")
     "the panel drag handle did not undock the panel";
   let window = Option.get (state "network").window in
@@ -1253,60 +1256,60 @@ let run_panel_states () =
   let to_ = fst grip +. 35., snd grip +. 30. in
   let before_move = Doc.to_text (E3.workspace !e) in
   let before_bounds = (E3.panes !e (frame (0., 0.) [] 0)).graph in
-  step grip [Event.MouseMoved grip];
-  step ~buttons:[Input.LeftButton] grip [Event.MousePressed (Input.LeftButton, grip)];
-  step ~buttons:[Input.LeftButton] to_ [Event.MouseMoved to_];
+  step grip [Input.Pointer_moved grip];
+  step ~buttons:[Input.LeftButton] grip [Input.Pointer_pressed (Input.LeftButton, grip)];
+  step ~buttons:[Input.LeftButton] to_ [Input.Pointer_moved to_];
   check (Doc.to_text (E3.workspace !e) = before_move)
     "a held floating-window drag committed authored state before release";
-  step to_ [Event.PointerCancelled Input.LeftButton];
+  step to_ [Input.Pointer_cancelled Input.LeftButton];
   check (Doc.to_text (E3.workspace !e) = before_move
     && (E3.panes !e (frame (0., 0.) [] 0)).graph = before_bounds)
     "cancelling a floating-window drag retained draft bounds or changed authored state";
-  step grip [Event.MouseMoved grip];
-  step ~buttons:[Input.LeftButton] grip [Event.MousePressed (Input.LeftButton, grip)];
-  step ~buttons:[Input.LeftButton] to_ [Event.MouseMoved to_];
-  step to_ [Event.MouseReleased (Input.LeftButton, to_)]; step to_ [];
+  step grip [Input.Pointer_moved grip];
+  step ~buttons:[Input.LeftButton] grip [Input.Pointer_pressed (Input.LeftButton, grip)];
+  step ~buttons:[Input.LeftButton] to_ [Input.Pointer_moved to_];
+  step to_ [Input.Pointer_released (Input.LeftButton, to_)]; step to_ [];
   check ((state "network").window = Some (x + 35, y + 30, w, h))
     "an underlying pane covered the floating drag handle";
-  step ~keys:[Input.Meta] to_ [Event.KeyPressed (Input.KeyChar 'z')];
+  step ~keys:[Input.Meta] to_ [Input.Key_pressed (Input.KeyChar 'z')];
   check ((state "network").window = Some window) "a second window drag merged with the previous gesture";
   let visible_h = min h (640 - y) in
   let corner = float (x + w - 4), float (y + visible_h - 4) in
   let to_ = fst corner -. 35., snd corner -. 40. in
   let before_resize = Doc.to_text (E3.workspace !e) in
-  step corner [Event.MouseMoved corner];
-  step ~buttons:[Input.LeftButton] corner [Event.MousePressed (Input.LeftButton, corner)];
-  step ~buttons:[Input.LeftButton] to_ [Event.MouseMoved to_];
+  step corner [Input.Pointer_moved corner];
+  step ~buttons:[Input.LeftButton] corner [Input.Pointer_pressed (Input.LeftButton, corner)];
+  step ~buttons:[Input.LeftButton] to_ [Input.Pointer_moved to_];
   check (Doc.to_text (E3.workspace !e) = before_resize)
     "a held floating-window resize committed authored state before release";
-  step to_ [Event.MouseReleased (Input.LeftButton, to_)]; step to_ [];
+  step to_ [Input.Pointer_released (Input.LeftButton, to_)]; step to_ [];
   check ((state "network").window = Some (x, y, w - 35, visible_h - 40))
     "the floating window resize handle did not persist its size";
-  step ~keys:[Input.Meta] to_ [Event.KeyPressed (Input.KeyChar 'z')];
-  step ~keys:[Input.Meta] moved [Event.KeyPressed (Input.KeyChar 'z')];
+  step ~keys:[Input.Meta] to_ [Input.Key_pressed (Input.KeyChar 'z')];
+  step ~keys:[Input.Meta] moved [Input.Key_pressed (Input.KeyChar 'z')];
   check ((state "network").window = None && not (state "inspector").collapsed)
     "one undo did not revert the whole window drag";
   (* Drop onto the viewport's lower edge: a docked split, preserved panel types, one undo. *)
   let before = Doc.to_text (E3.workspace !e) in
   let gx, gy, _, _ = (E3.panes !e (frame (0., 0.) [] 0)).graph in
   let start = float (gx + 8), float (gy - 11) and target = (180., 580.) in
-  step start [Event.MouseMoved start];
-  step ~buttons:[Input.LeftButton] start [Event.MousePressed (Input.LeftButton, start)];
-  step ~buttons:[Input.LeftButton] target [Event.MouseMoved target];
+  step start [Input.Pointer_moved start];
+  step ~buttons:[Input.LeftButton] start [Input.Pointer_pressed (Input.LeftButton, start)];
+  step ~buttons:[Input.LeftButton] target [Input.Pointer_moved target];
   step ~buttons:[Input.LeftButton] target [];
-  step target [Event.MouseReleased (Input.LeftButton, target)]; step target [];
+  step target [Input.Pointer_released (Input.LeftButton, target)]; step target [];
   check (has (source !e) "preview network)" && (state "network").window = None
          && dump_line !e "edit error" = "-")
     ("the edge drop did not dock the panel: " ^ dump_line !e "edit error" ^ "\n" ^ source !e);
-  step ~keys:[Input.Meta] target [Event.KeyPressed (Input.KeyChar 'z')];
+  step ~keys:[Input.Meta] target [Input.Key_pressed (Input.KeyChar 'z')];
   check (Doc.to_text (E3.workspace !e) = before) "one undo did not revert the docking gesture";
-  step target [Event.KeyPressed (Input.KeyChar '/'); Event.KeyPressed (Input.KeyChar 'g')]; step target [];
+  step target [Input.Key_pressed (Input.KeyChar '/'); Input.Key_pressed (Input.KeyChar 'g')]; step target [];
   check ((state "network").collapsed) "the leader graph toggle was not saved";
-  step target [Event.KeyPressed (Input.KeyChar '/'); Event.KeyPressed (Input.KeyChar 'a')];
+  step target [Input.Key_pressed (Input.KeyChar '/'); Input.Key_pressed (Input.KeyChar 'a')];
   check (not (state "network").collapsed) "Add did not expand the saved collapsed graph";
   step target [];
-  step target [Event.KeyPressed Input.Escape]; step target [];
-  step target [Event.KeyPressed (Input.KeyChar '/'); Event.KeyPressed (Input.KeyChar 't')]; step target [];
+  step target [Input.Key_pressed Input.Escape]; step target [];
+  step target [Input.Key_pressed (Input.KeyChar '/'); Input.Key_pressed (Input.KeyChar 't')]; step target [];
   check (Option.fold ~none:false ~some:(fun (state : Panels.state) -> not state.collapsed)
       (Editor_document.Layout_by_path.Path_map.find_opt ["editor"; "@panel"; "-1"]
         (E3.workspace !e).layout.panels))
@@ -1341,8 +1344,8 @@ let run_ref_picker () =
   step []; step [];
   let ix, iy, _, _ = (E3.panes !e (frame (0., 0.) [] 0)).inspector in
   let click point =
-    step ~mouse:point [ Event.MouseMoved point ];
-    step ~mouse:point [ Event.MousePressed (Input.LeftButton, point); Event.MouseReleased (Input.LeftButton, point) ] in
+    step ~mouse:point [ Input.Pointer_moved point ];
+    step ~mouse:point [ Input.Pointer_pressed (Input.LeftButton, point); Input.Pointer_released (Input.LeftButton, point) ] in
   let bx, by, _, _ = Option.get (E3.node_box !e [ "scene"; "geom" ]) in
   let node_pt = float (bx + 60), float (by + 12) in
   click node_pt;
@@ -1357,7 +1360,8 @@ let run_ref_picker () =
   click opt;
   step [];
   check (has (source !e) "(ref g2)") ("inspector ref picker did not change ref to g2: " ^ source !e);
-  e := E3.update !e { (frame (450., 300.) [ Event.KeyPressed (Input.KeyChar 'z') ] (incr count; !count)) with keys = [ Input.Meta ] };
+  let undo_frame = frame (450., 300.) [ Input.Key_pressed (Input.KeyChar 'z') ] (incr count; !count) in
+  e := E3.update !e { undo_frame with input = { undo_frame.input with keys = [ Input.Meta ] } };
   step [];
   check (has (source !e) "(ref g1)") ("undo did not restore ref to g1: " ^ source !e);
   E3.close !e
@@ -1371,13 +1375,13 @@ let run_compose () =
              b (scene/geometry (ref g1) :translate [3 0 0] :name "b")]
         (scene/root (scene/merge a b))))
     (graph editor :context editor (ui/workspace (ui/split "horizontal" (ui/graph "scene") (ui/inspector)))))|} in
-  let key k = Event.KeyPressed k and ch c = Event.KeyPressed (Input.KeyChar c) in
+  let key k = Input.Key_pressed k and ch c = Input.Key_pressed (Input.KeyChar c) in
   let pick typed =
     let e = ref (editor text) and count = ref 0 in
     let step ?(keys = []) events = incr count; e := E3.update !e (Test_editor_input.frame ~keys (450., 300.) events !count) in
     step []; step [];
     let before = source !e in
-    step [ key (Input.KeyChar '/'); ch 'a' ]; step [ Event.TextInput typed ]; step [ key Input.Enter ]; step [];
+    step [ key (Input.KeyChar '/'); ch 'a' ]; step [ Input.Text_input typed ]; step [ key Input.Enter ]; step [];
     let after = source !e and label = E3.undo_label !e in
     step ~keys:[ Input.Meta ] [ ch 'z' ]; step [];
     let undone = source !e in
@@ -1450,7 +1454,7 @@ let run_layouts () =
   expect_error "an active layout out of range" (replace switch_text ":active 0" ":active 3") "active layout";
   (* edits *)
   let ws = of_text switch_text in
-  let edit ws op = match Doc.edit catalog ws op with Ok ws -> ws | Error d -> fail (Flow.Diagnostic.to_string d) in
+  let edit ws op = match Doc.edit catalog ws op with Ok ws -> ws | Error d -> fail (Diagnostic.to_string d) in
   let text ws = fst (Flow.Lisp.print ws.Doc.source) in
   let switched = edit ws (E.Set_layout { graph = "editor"; index = 2 }) in
   check (has (text switched) ":active 2") "Set_layout writes :active";
@@ -1467,7 +1471,7 @@ let run_layouts () =
   let one = edit (edit (edit removed (E.Set_layout { graph = "editor"; index = 0 })) (E.Layout_remove { graph = "editor" }))
       (E.Layout_remove { graph = "editor" }) in
   (match Doc.edit catalog one (E.Layout_remove { graph = "editor" }) with
-   | Error d -> check (has d.Flow.Diagnostic.message "last layout") "the last layout stays"
+   | Error d -> check (has d.Diagnostic.message "last layout") "the last layout stays"
    | Ok _ -> fail "removed the last layout");
   (* a window joins the active layout only; it floats and docks *)
   let floated = edit ws (E.Layout_float { graph = "editor"; at = [ 1; 0 ] }) in
@@ -1504,7 +1508,7 @@ let run_layouts () =
   let e = ref (editor switch_text) and count = ref 0 in
   let step ?(keys = []) events = incr count; e := E3.update !e (Test_editor_input.frame ~keys (300., 150.) events !count) in
   step []; step [];
-  let key k = Event.KeyPressed k and ch c = Event.KeyPressed (Input.KeyChar c) in
+  let key k = Input.Key_pressed k and ch c = Input.Key_pressed (Input.KeyChar c) in
   step [ key (Input.KeyChar '/'); ch '[' ]; step [];  (* which-key lists the layouts *)
   step [ ch '1' ]; step [];
   check (has (source !e) ":active 1" && E3.undo_label !e = Some "Layout") "/ [ 1 switches the layout";
@@ -1528,8 +1532,8 @@ let run_layouts () =
   let gx, gy, gw, gh = (E3.panes !e (Test_editor_input.frame (0., 0.) [] !count)).graph in
   let at = (float gx +. float gw /. 2., float gy +. float gh /. 2.) in
   let press events = incr count; e := E3.update !e (Test_editor_input.frame at events !count) in
-  press [ Event.MouseMoved at ]; press [ Event.MousePressed (Input.LeftButton, at) ];
-  press [ Event.MouseReleased (Input.LeftButton, at) ]; press [];
+  press [ Input.Pointer_moved at ]; press [ Input.Pointer_pressed (Input.LeftButton, at) ];
+  press [ Input.Pointer_released (Input.LeftButton, at) ]; press [];
   press [ key (Input.KeyChar '/'); ch 'o'; ch 'f' ]; press [];
   check (E3.undo_label !e = Some "Float panel" && has (source !e) "(ui/floating")
     ("/ o f floats the focused panel: " ^ Option.value ~default:"-" (E3.undo_label !e) ^ "\n" ^ source !e)
@@ -1559,8 +1563,8 @@ let run_root_section () =
   (* the live-update switch sits under its own section header now: 24 more *)
   let row = iy + 90 + 24 + 4 + 24 + 40 + 96 + 40 + 24 + 40 in
   let press at =
-    step ~mouse:at [ Event.MouseMoved at ];
-    step ~mouse:at [ Event.MousePressed (Input.LeftButton, at); Event.MouseReleased (Input.LeftButton, at) ];
+    step ~mouse:at [ Input.Pointer_moved at ];
+    step ~mouse:at [ Input.Pointer_pressed (Input.LeftButton, at); Input.Pointer_released (Input.LeftButton, at) ];
     step ~mouse:at [] in
   let x = float (ix + (iw * 3 / 4)) in
   press (x, float (row + 12));
@@ -1569,7 +1573,7 @@ let run_root_section () =
   check (!hit <> None) "no control of the inspector wrote the root";
   check (E3.workspace !e != before && has (source !e) "(scene/root all") "the root stayed in the text, edited";
   incr count;
-  e := E3.update !e (Test_editor_input.frame ~keys:[ Input.Meta ] (450., 300.) [ Event.KeyPressed (Input.KeyChar 'z') ] !count);
+  e := E3.update !e (Test_editor_input.frame ~keys:[ Input.Meta ] (450., 300.) [ Input.Key_pressed (Input.KeyChar 'z') ] !count);
   check (E3.workspace !e == before) "one undo returns the root";
   E3.close !e
 
@@ -1587,14 +1591,14 @@ let run_hide_and_order () =
   let e = ref (editor text) and count = ref 0 in
   let step ?(keys = []) ?(mouse = (450., 300.)) events =
     incr count; e := E3.update !e (Test_editor_input.frame ~keys mouse events !count) in
-  let key k = Event.KeyPressed k and ch c = Event.KeyPressed (Input.KeyChar c) in
+  let key k = Input.Key_pressed k and ch c = Input.Key_pressed (Input.KeyChar c) in
   step []; step [];
   let click path =
     let bx, by, bw, bh = Option.get (E3.node_box !e path) in
     let at = float bx +. float bw /. 2., float by +. float bh -. 6. in
-    step ~mouse:at [ Event.MouseMoved at ];
-    step ~mouse:at [ Event.MousePressed (Input.LeftButton, at) ];
-    step ~mouse:at [ Event.MouseReleased (Input.LeftButton, at) ]; step ~mouse:at [] in
+    step ~mouse:at [ Input.Pointer_moved at ];
+    step ~mouse:at [ Input.Pointer_pressed (Input.LeftButton, at) ];
+    step ~mouse:at [ Input.Pointer_released (Input.LeftButton, at) ]; step ~mouse:at [] in
   click [ "scene"; "a" ];
   step [ ch 'b' ]; step [];
   check (has (source !e) "(scene/geometry (ref g1) :name \"a\" :visible false)" && E3.undo_label !e = Some "Edit value")
@@ -1612,7 +1616,7 @@ let run_hide_and_order () =
   let y = ref (by + 4) in
   while not !moved && !y < by + bh do
     let at = float (bx + bw / 2), float !y in
-    step ~mouse:at [ Event.MouseMoved at ];
+    step ~mouse:at [ Input.Pointer_moved at ];
     step ~keys:[ Input.Alt ] ~mouse:at [ key Input.ArrowDown ]; step ~mouse:at [];
     if has (source !e) "(scene/merge b a)" then moved := true;
     y := !y + 3
@@ -1628,12 +1632,12 @@ let run_copy_lisp () =
   (graph g :context sop (sop/box))
   (graph scene :context scene (scene/merge (scene/geometry (ref g)))))|}) and count = ref 0 in
   let step events = incr count; e := E3.update !e (frame (450., 300.) events !count) in
-  let key k = Event.KeyPressed k in
+  let key k = Input.Key_pressed k in
   step []; step [];
   (* whether this run has a clipboard is asked first, so each case has one outcome that passes *)
   let available = Result.is_ok (Rays.Clipboard.set_text "probe") in
-  step [ key (Input.KeyChar '/'); Event.KeyPressed (Input.KeyChar '/') ]; step [];
-  step [ Event.TextInput "copy workspace" ]; step [ key Input.Enter ]; step [];
+  step [ key (Input.KeyChar '/'); Input.Key_pressed (Input.KeyChar '/') ]; step [];
+  step [ Input.Text_input "copy workspace" ]; step [ key Input.Enter ]; step [];
   let note = dump_line !e "cook" in
   if available then begin
     check (has note "Copied the workspace as Lisp") ("the palette row did not copy: " ^ note);
@@ -1659,7 +1663,8 @@ let run_studio () =
     ("the studio tree: " ^ Panels.to_string shell.tree);
   (* the target at three window sizes: every fixed side keeps its points *)
   List.iter (fun (w, h) ->
-    let g = Layout.geometry ~hidden:[] shell.tree { (frame (0., 0.) [] 0) with width = w; height = h; size = w, h } in
+    let sample_frame = frame (0., 0.) [] 0 in
+    let g = Layout.geometry ~hidden:[] shell.tree { sample_frame with input = { sample_frame.input with size = w, h } } in
     let whole pick = match List.find_opt (fun (l : Layout.leaf) -> pick l.panel) g.leaves with
       | Some { frame; _ } -> frame
       | None -> fail "the studio lost a panel" in
@@ -1684,10 +1689,10 @@ let run_studio () =
          && again.switch = shell.switch)
     "the studio did not round-trip through its printed text";
   let apply ws op = match Doc.edit catalog ws op with
-    | Ok ws -> ws | Error d -> fail (E.label op ^ ": " ^ Flow.Diagnostic.to_string d) in
+    | Ok ws -> ws | Error d -> fail (E.label op ^ ": " ^ Diagnostic.to_string d) in
   let text_of ws = fst (Flow.Lisp.print ws.Doc.source) in
   let refused name ws op needle = match Doc.edit catalog ws op with
-    | Error d -> check (has (Flow.Diagnostic.to_string d) needle) (name ^ ": " ^ Flow.Diagnostic.to_string d)
+    | Error d -> check (has (Diagnostic.to_string d) needle) (name ^ ": " ^ Diagnostic.to_string d)
     | Ok _ -> fail (name ^ " was accepted") in
   (* a gutter drag writes what the split is sized by *)
   let sized = apply ws (E.Set_layout_size { node = [ "editor"; "studio" ]; size = `First 260 }) in
@@ -1720,17 +1725,17 @@ let run_studio () =
   (* through the editor: the start state, the points a drag writes, two graph panels *)
   let e = ref (editor text) and count = ref 0 in
   let step ?(buttons = []) mouse events = incr count; e := E3.update !e (frame ~buttons mouse events !count) in
-  let click point = step point [ Event.MouseMoved point ];
-    step ~buttons:[ Input.LeftButton ] point [ Event.MousePressed (Input.LeftButton, point) ];
-    step point [ Event.MouseReleased (Input.LeftButton, point) ]; step point [] in
+  let click point = step point [ Input.Pointer_moved point ];
+    step ~buttons:[ Input.LeftButton ] point [ Input.Pointer_pressed (Input.LeftButton, point) ];
+    step point [ Input.Pointer_released (Input.LeftButton, point) ]; step point [] in
   step (450., 100.) []; step (450., 100.) [];
   check (dump_line !e "focus" = "Graph" && dump_line !e "pane graph" = "garden") "the focus did not start in the graph panel";
   check (String.starts_with ~prefix:"graph tab" (dump_line !e "text")) ("the lisp panel's tab: " ^ dump_line !e "text");
   check (E3.look_through !e) "the viewport did not start looking through the render camera";
-  step (216.5, 100.) [ Event.MouseMoved (216.5, 100.) ];
-  step ~buttons:[ Input.LeftButton ] (216.5, 100.) [ Event.MousePressed (Input.LeftButton, (216.5, 100.)) ];
-  step ~buttons:[ Input.LeftButton ] (180.2, 100.) [ Event.MouseMoved (180.2, 100.) ];
-  step (180.2, 100.) [ Event.MouseReleased (Input.LeftButton, (180.2, 100.)) ]; step (180.2, 100.) [];
+  step (216.5, 100.) [ Input.Pointer_moved (216.5, 100.) ];
+  step ~buttons:[ Input.LeftButton ] (216.5, 100.) [ Input.Pointer_pressed (Input.LeftButton, (216.5, 100.)) ];
+  step ~buttons:[ Input.LeftButton ] (180.2, 100.) [ Input.Pointer_moved (180.2, 100.) ];
+  step (180.2, 100.) [ Input.Pointer_released (Input.LeftButton, (180.2, 100.)) ]; step (180.2, 100.) [];
   check (has (source !e) "(ui/split \"horizontal\" outline work :first_size 180)" && E3.undo_label !e = Some "Resize panel")
     ("the gutter of a fixed split did not write points: " ^ source !e);
   (* the second layout: a floating graph on the material beside the docked graph, each its own pane *)
@@ -1748,26 +1753,26 @@ let run_studio () =
   (* every panel is an instance (flow.md 11.11): at 1440x900 the second layout has an inspector
      and a text pane floating beside the docked ones; each draws, scrolls and types on its own *)
   let e = ref (editor (replace text ":active 0" ":active 1")) and count = ref 0 and probes = ref [] in
-  let big mouse events = incr count;
-    { (frame mouse events !count) with width = 1440; height = 900; size = 1440, 900;
-        } in
+  let big mouse events = incr count; let base_frame = frame mouse events !count in
+    { base_frame with input = { base_frame.input with size = 1440, 900 } } in
   (* the sketch's own rows end every inspector: a tall filler whose place says where that inspector
      has scrolled to *)
   let step ?(buttons = []) mouse events =
     probes := [];
-    e := fst (E3.update_with !e { (big mouse events) with mouse_buttons = buttons } ~inspector:(fun ui ->
+    let frame = big mouse events in
+    e := fst (E3.update_with !e { frame with input = { frame.input with buttons } } ~inspector:(fun ui ->
       let filler = Pxui.Ui.box ui ~h:(Pxui.Ui.Px 1500.) "filler" in
       let _, y, _, _ = Pxui.Ui.rect ui filler in probes := !probes @ [ y ])) in
-  let click point = step point [ Event.MouseMoved point ];
-    step ~buttons:[ Input.LeftButton ] point [ Event.MousePressed (Input.LeftButton, point) ];
-    step point [ Event.MouseReleased (Input.LeftButton, point) ]; step point [] in
+  let click point = step point [ Input.Pointer_moved point ];
+    step ~buttons:[ Input.LeftButton ] point [ Input.Pointer_pressed (Input.LeftButton, point) ];
+    step point [ Input.Pointer_released (Input.LeftButton, point) ]; step point [] in
   let rest point = step point []; step point []; step point [] in
   (* the floating inspector's labels run to x 1199 (window 1090 + 109): a point left of that is no field *)
   let docked = 1300., 530. and floating = 1110., 300. in
   rest (700., 200.);
   let at_rest = match !probes with [ a; b ] -> a, b | l -> fail (Printf.sprintf "%d inspectors drew their rows, not 2" (List.length l)) in
-  let scroll point = step point [ Event.MouseMoved point ];
-    for _ = 1 to 6 do step point [ Event.MouseScrolled (0., -8.) ] done; rest point;
+  let scroll point = step point [ Input.Pointer_moved point ];
+    for _ = 1 to 6 do step point [ Input.Scrolled (0., -8.) ] done; rest point;
     match !probes with [ a; b ] -> a, b | _ -> fail "an inspector stopped drawing" in
   let d1, f1 = scroll floating in
   check (d1 = fst at_rest && f1 <> snd at_rest)
@@ -1783,11 +1788,11 @@ let run_studio () =
   check (has (pane "code") "graph tab, draft no" && has (pane "notes") "document tab, draft no")
     ("each text pane opens on its own tab: " ^ dump_line !e "panels");
   click (800., 660.);
-  step (800., 660.) [ Event.TextInput " " ]; rest (800., 660.);
+  step (800., 660.) [ Input.Text_input " " ]; rest (800., 660.);
   check (has (pane "notes") "lisp notes*: document tab, draft yes" && has (pane "code") "graph tab, draft no")
     ("typing in one text pane reached the other: " ^ dump_line !e "panels");
   click (1280., 720.);
-  step (1280., 720.) [ Event.TextInput " " ]; rest (1280., 720.);
+  step (1280., 720.) [ Input.Text_input " " ]; rest (1280., 720.);
   check (has (pane "code") "lisp code*: graph tab, draft yes" && has (pane "notes") "document tab, draft yes")
     ("the docked text pane does not draft on its own: " ^ dump_line !e "panels");
   E3.close !e;
@@ -1798,13 +1803,13 @@ let run_studio_keywords () =
   let text = sketch "ws_layout" in
   (* the start keywords are followed again when their value in the text changes, and only then *)
   let e = ref (editor text) and count = ref 0 in
-  let big mouse events = incr count;
-    { (frame mouse events !count) with width = 1440; height = 900; size = 1440, 900;
-        } in
-  let step ?(buttons = []) mouse events = e := E3.update !e { (big mouse events) with mouse_buttons = buttons } in
-  let click point = step point [ Event.MouseMoved point ];
-    step ~buttons:[ Input.LeftButton ] point [ Event.MousePressed (Input.LeftButton, point) ];
-    step point [ Event.MouseReleased (Input.LeftButton, point) ]; step point [] in
+  let big mouse events = incr count; let base_frame = frame mouse events !count in
+    { base_frame with input = { base_frame.input with size = 1440, 900 } } in
+  let step ?(buttons = []) mouse events = let frame = big mouse events in
+    e := E3.update !e { frame with input = { frame.input with buttons } } in
+  let click point = step point [ Input.Pointer_moved point ];
+    step ~buttons:[ Input.LeftButton ] point [ Input.Pointer_pressed (Input.LeftButton, point) ];
+    step point [ Input.Pointer_released (Input.LeftButton, point) ]; step point [] in
   let at = 600., 700. in
   let rest () = step at []; step at [] in
   let set name key value =
@@ -1815,8 +1820,8 @@ let run_studio_keywords () =
   check (dump_line !e "projection" = "graph" && E3.look_through !e) "the studio opens as its keywords say";
   set "network" "view" (S.Str "list");
   check (dump_line !e "projection" = "list") "a changed :view was not followed";
-  step at [ Event.KeyPressed (Input.KeyChar '/'); Event.KeyPressed (Input.KeyChar 'l') ];
-  step at [ Event.KeyPressed (Input.KeyChar 'g') ]; rest ();
+  step at [ Input.Key_pressed (Input.KeyChar '/'); Input.Key_pressed (Input.KeyChar 'l') ];
+  step at [ Input.Key_pressed (Input.KeyChar 'g') ]; rest ();
   check (dump_line !e "projection" = "graph") "/ l g did not show the graph";
   e := (match E3.edit !e (E.Set_layout_size { node = [ "editor"; "stage" ]; size = `Ratio 0.4 }) with Ok e -> e | Error m -> fail m);
   rest ();
@@ -1825,8 +1830,8 @@ let run_studio_keywords () =
   check (not (E3.look_through !e)) "a changed :look_through was not followed";
   (* the Size row of a split's card converts it, keeping the sizes it shows: the editor graph in
      the pane, the studio card selected, the row's menu *)
-  step at [ Event.KeyPressed (Input.KeyChar '/'); Event.KeyPressed (Input.KeyChar 'j') ];
-  step at [ Event.TextInput "editor" ]; step at [ Event.KeyPressed Input.Enter ]; rest ();
+  step at [ Input.Key_pressed (Input.KeyChar '/'); Input.Key_pressed (Input.KeyChar 'j') ];
+  step at [ Input.Text_input "editor" ]; step at [ Input.Key_pressed Input.Enter ]; rest ();
   (let x, y, w, h = Option.get (E3.node_box !e [ "editor"; "studio" ]) in click (float (x + w / 2), float (y + max 1 (h / 2))));
   check (dump_line !e "scope selected" = "editor/studio") ("the studio card is not where the test clicks: " ^ dump_line !e "scope selected");
   (* the 320-wide inspector starts at y 24; the split's head is 153 tall (chips 12 + 24 + 4, the 40-point
@@ -1853,10 +1858,10 @@ let run_studio_tail () =
          && has (dump_line !e "panels") "graph 0*; graph 1: selection tab, draft no")
     ("the second graph panel does not hold its own text pane: " ^ dump_line !e "panels");
   let point = 650., 300. in
-  step point [ Event.MouseMoved point ];
-  step ~buttons:[ Input.LeftButton ] point [ Event.MousePressed (Input.LeftButton, point) ];
-  step point [ Event.MouseReleased (Input.LeftButton, point) ];
-  step point [ Event.TextInput " " ]; step point []; step point [];
+  step point [ Input.Pointer_moved point ];
+  step ~buttons:[ Input.LeftButton ] point [ Input.Pointer_pressed (Input.LeftButton, point) ];
+  step point [ Input.Pointer_released (Input.LeftButton, point) ];
+  step point [ Input.Text_input " " ]; step point []; step point [];
   check (dump_line !e "pane graph" = "scene" && has (dump_line !e "panels") "graph 1*: selection tab, draft yes")
     ("the first press in an unfocused text view did not start an edit there: " ^ dump_line !e "panels");
   E3.close !e;
@@ -1886,14 +1891,14 @@ let run_panels () =
   check (List.mem "of" rows) "the :of keyword is not a row of the inspector's card";
   let retied = match Doc.edit catalog (of_text (with_editor tied))
       (E.Connect { node = [ "editor"; "ia" ]; key = E.Kw "of"; src = "b"; iter = false }) with
-    | Ok ws -> shell_of (build_ok ws) | Error d -> fail (Flow.Diagnostic.to_string d) in
+    | Ok ws -> shell_of (build_ok ws) | Error d -> fail (Diagnostic.to_string d) in
   check (List.assoc [ 1; 0 ] retied.follows = [ 0; 1 ]) "a wire to the of row did not tie the inspector to the other graph panel";
   let e = ref (editor (with_editor tied)) and count = ref 0 and drawn = ref 0 in
   let step ?(buttons = []) mouse events = incr count; drawn := 0;
     e := fst (E3.update_with !e (frame ~buttons mouse events !count) ~inspector:(fun _ -> incr drawn)) in
-  let click point = step point [ Event.MouseMoved point ];
-    step ~buttons:[ Input.LeftButton ] point [ Event.MousePressed (Input.LeftButton, point) ];
-    step point [ Event.MouseReleased (Input.LeftButton, point) ]; step point [] in
+  let click point = step point [ Input.Pointer_moved point ];
+    step ~buttons:[ Input.LeftButton ] point [ Input.Pointer_pressed (Input.LeftButton, point) ];
+    step point [ Input.Pointer_released (Input.LeftButton, point) ]; step point [] in
   step (100., 100.) []; step (100., 100.) [];
   check (!drawn = 2) "with nothing selected both inspectors show the sketch's rows";
   (* a node selected in graph a: its inspector shows the node, b's still the sketch's rows *)
@@ -1919,9 +1924,9 @@ let run_panels () =
     "a binding used twice is not marked";
   let e = ref (editor (twice ^ "(layout (panel [\"editor\" \"g\"] :collapsed false :window [10 30 430 400])\n        (panel [\"editor\" \"@panel\" \"1\"] :collapsed false :window [450 30 430 400]))")) and count = ref 0 in
   let step ?(buttons = []) mouse events = incr count; e := E3.update !e (frame ~buttons mouse events !count) in
-  let click point = step point [ Event.MouseMoved point ];
-    step ~buttons:[ Input.LeftButton ] point [ Event.MousePressed (Input.LeftButton, point) ];
-    step point [ Event.MouseReleased (Input.LeftButton, point) ]; step point [] in
+  let click point = step point [ Input.Pointer_moved point ];
+    step ~buttons:[ Input.LeftButton ] point [ Input.Pointer_pressed (Input.LeftButton, point) ];
+    step point [ Input.Pointer_released (Input.LeftButton, point) ]; step point [] in
   step (700., 500.) []; step (700., 500.) [];
   check (dump_line !e "windows" = "graph 10 30 430 400, graph 450 30 430 400")
     ("the saved entries of a binding used twice: " ^ dump_line !e "windows");
@@ -1942,11 +1947,11 @@ let run_panels () =
   (* two lists and two outlines: each its own filter, focus row and search; a click focuses *)
   let e = ref (editor (with_editor "    (let* [oa (ui/outline) ob (ui/outline) la (ui/list) lb (ui/list)]\n      (ui/workspace (ui/split \"horizontal\" (ui/split \"vertical\" oa ob)\n        (ui/split \"horizontal\" (ui/split \"vertical\" la lb) (ui/viewport (ref scene))))))")) and count = ref 0 in
   let step ?(buttons = []) mouse events = incr count; e := E3.update !e (frame ~buttons mouse events !count) in
-  let click point = step point [ Event.MouseMoved point ];
-    step ~buttons:[ Input.LeftButton ] point [ Event.MousePressed (Input.LeftButton, point) ];
-    step point [ Event.MouseReleased (Input.LeftButton, point) ]; step point [] in
+  let click point = step point [ Input.Pointer_moved point ];
+    step ~buttons:[ Input.LeftButton ] point [ Input.Pointer_pressed (Input.LeftButton, point) ];
+    step point [ Input.Pointer_released (Input.LeftButton, point) ]; step point [] in
   step (800., 500.) []; step (800., 500.) [];
-  let typed point text = click point; step point [ Event.TextInput text ]; step point [ Event.KeyPressed Input.Enter ]; step point [] in
+  let typed point text = click point; step point [ Input.Text_input text ]; step point [ Input.Key_pressed Input.Enter ]; step point [] in
   let panels () = dump_line !e "panels" in
   typed (100., 38.) "zz";
   check (has (panels ()) "outline oa*: search \"zz\"; outline ob: search \"\"") ("the first outline's search: " ^ panels ());
@@ -1954,12 +1959,12 @@ let run_panels () =
   check (has (panels ()) "outline oa: search \"zz\"; outline ob*: search \"q\"")
     ("a search typed in one outline shows in the other: " ^ panels ());
   click (550., 60.);
-  step (550., 60.) [ Event.KeyPressed (Input.KeyChar 's') ]; step (550., 60.) [ Event.TextInput "g" ]; step (550., 60.) [];
+  step (550., 60.) [ Input.Key_pressed (Input.KeyChar 's') ]; step (550., 60.) [ Input.Text_input "g" ]; step (550., 60.) [];
   (* the focused row is a node id, which depends on how many nodes were allocated before it *)
   let any_id line = let text = panels () in List.exists (fun id -> has text (line (string_of_int id))) (List.init 65536 Fun.id) in
   check (any_id (fun id -> "list la*: focus " ^ id ^ ", 0 folded, filter \"g\"; list lb: focus -, 0 folded, filter -"))
     ("the first list's focus row and filter: " ^ panels ());
-  step (550., 60.) [ Event.KeyPressed Input.Enter ]; step (550., 60.) [];
+  step (550., 60.) [ Input.Key_pressed Input.Enter ]; step (550., 60.) [];
   click (550., 370.);
   check (any_id (fun id -> "list la: focus " ^ id ^ ", 0 folded, filter \"g\"; list lb*: focus " ^ id ^ ", 0 folded, filter -"))
     ("the second list does not keep its own filter: " ^ panels ());
@@ -1984,9 +1989,9 @@ let run_panel_chain () =
   let e = ref (editor "(workspace studio (graph g :context sop (sop/box)))") and count = ref 0 in
   let step events = incr count; e := E3.update !e (frame at events !count) in
   for _ = 1 to 6 do step [] done;
-  step [ Event.MouseMoved at ];
-  step [ Event.MousePressed (Input.LeftButton, at); Event.MouseReleased (Input.LeftButton, at) ];
-  let keys cs = List.iter (fun c -> step [ Event.KeyPressed (if c = ' ' then (Input.KeyChar '/') else Input.KeyChar c) ]; step []) cs;
+  step [ Input.Pointer_moved at ];
+  step [ Input.Pointer_pressed (Input.LeftButton, at); Input.Pointer_released (Input.LeftButton, at) ];
+  let keys cs = List.iter (fun c -> step [ Input.Key_pressed (if c = ' ' then (Input.KeyChar '/') else Input.KeyChar c) ]; step []) cs;
     step [] in
   keys [ ' '; 'o'; 'v' ];
   keys [ ' '; 'l'; 'u' ];
@@ -2006,11 +2011,11 @@ let run_undo_and_input () =
       e := E3.update !e (Test_editor_input.frame ~keys ~buttons mouse events !count) in
     for _ = 1 to 4 do step [] done;
     e, count, step in
-  let press c = Event.KeyPressed (if c = ' ' then (Input.KeyChar '/') else Input.KeyChar c) in
+  let press c = Input.Key_pressed (if c = ' ' then (Input.KeyChar '/') else Input.KeyChar c) in
   (* E12: navigation is view state.  It leaves no entry, does not swallow the next undo and does
      not drop what redo restores. *)
   let e, _, step = session (200., 300.) in
-  let orbit () = step [ Event.MouseMoved (200., 300.); Event.MouseScrolled (0., -2.) ]; for _ = 1 to 20 do step [] done in
+  let orbit () = step [ Input.Pointer_moved (200., 300.); Input.Scrolled (0., -2.) ]; for _ = 1 to 20 do step [] done in
   let eye () = Camera.position (Easy_camera.camera (E3.camera !e)) in
   let start = eye () in
   orbit ();
@@ -2034,11 +2039,11 @@ let run_undo_and_input () =
   let gx, gy, gw, _ = (E3.panes !e (frame (0., 0.) [] 0)).graph in
   let flag row = float (gx + gw - 38), float (gy + 24 + (24 * row) + 12) in
   count := !count + 30;
-  step ~mouse:(flag 0) [ Event.MouseMoved (flag 0) ];
-  step ~buttons:[ Input.LeftButton ] ~mouse:(flag 0) [ Event.MousePressed (Input.LeftButton, flag 0) ];
-  step ~buttons:[ Input.LeftButton ] ~mouse:(flag 1) [ Event.MouseMoved (flag 1) ];
-  step ~buttons:[ Input.LeftButton ] ~mouse:(flag 2) [ Event.MouseMoved (flag 2) ];
-  step ~mouse:(flag 2) [ Event.MouseReleased (Input.LeftButton, flag 2) ]; step [];
+  step ~mouse:(flag 0) [ Input.Pointer_moved (flag 0) ];
+  step ~buttons:[ Input.LeftButton ] ~mouse:(flag 0) [ Input.Pointer_pressed (Input.LeftButton, flag 0) ];
+  step ~buttons:[ Input.LeftButton ] ~mouse:(flag 1) [ Input.Pointer_moved (flag 1) ];
+  step ~buttons:[ Input.LeftButton ] ~mouse:(flag 2) [ Input.Pointer_moved (flag 2) ];
+  step ~mouse:(flag 2) [ Input.Pointer_released (Input.LeftButton, flag 2) ]; step [];
   check (count_of (source !e) ":visible false" = 3) ("the stroke did not hide three rows: " ^ source !e);
   step ~keys:[ Input.Meta ] [ press 'z' ];
   check (count_of (source !e) ":visible false" = 0) ("one undo did not restore the stroke: " ^ source !e);
@@ -2046,22 +2051,22 @@ let run_undo_and_input () =
   (* E14: a gutter drag cut short by a focus loss leaves no size for a later click to commit *)
   let e, _, step = session ~text:(case "variations") (450., 300.) in
   let gutter = 169.5, 300. and away = 300., 300. in
-  step ~mouse:gutter [ Event.MouseMoved gutter ];
-  step ~buttons:[ Input.LeftButton ] ~mouse:gutter [ Event.MousePressed (Input.LeftButton, gutter) ];
-  step ~buttons:[ Input.LeftButton ] ~mouse:away [ Event.MouseMoved away ];
-  step ~mouse:away [ Event.WindowFocusLost ]; step ~mouse:away [];
+  step ~mouse:gutter [ Input.Pointer_moved gutter ];
+  step ~buttons:[ Input.LeftButton ] ~mouse:gutter [ Input.Pointer_pressed (Input.LeftButton, gutter) ];
+  step ~buttons:[ Input.LeftButton ] ~mouse:away [ Input.Pointer_moved away ];
+  step ~mouse:away [ Input.Focus_lost ]; step ~mouse:away [];
   let before = source !e in
-  step ~mouse:gutter [ Event.MouseMoved gutter ];
-  step ~buttons:[ Input.LeftButton ] ~mouse:gutter [ Event.MousePressed (Input.LeftButton, gutter) ];
-  step ~mouse:gutter [ Event.MouseReleased (Input.LeftButton, gutter) ]; step [];
+  step ~mouse:gutter [ Input.Pointer_moved gutter ];
+  step ~buttons:[ Input.LeftButton ] ~mouse:gutter [ Input.Pointer_pressed (Input.LeftButton, gutter) ];
+  step ~mouse:gutter [ Input.Pointer_released (Input.LeftButton, gutter) ]; step [];
   check (source !e = before && E3.undo_label !e = None)
     ("a click on a gutter committed the size of an interrupted drag: " ^ Option.value ~default:"-" (E3.undo_label !e));
   E3.close !e;
   (* E19: the focus of a closed panel goes to its neighbour, so the next panel key acts *)
   let inspector = 800., 300. in
   let e, _, step = session inspector in
-  step [ Event.MouseMoved inspector ];
-  step [ Event.MousePressed (Input.LeftButton, inspector); Event.MouseReleased (Input.LeftButton, inspector) ];
+  step [ Input.Pointer_moved inspector ];
+  step [ Input.Pointer_pressed (Input.LeftButton, inspector); Input.Pointer_released (Input.LeftButton, inspector) ];
   let keys cs = List.iter (fun c -> step [ press c ]; step []) cs; step [] in
   keys [ ' '; 'o'; 'x' ];
   check (E3.undo_label !e = Some "Close panel") ("the inspector was not closed: " ^ Option.value ~default:"-" (E3.undo_label !e));
@@ -2070,8 +2075,8 @@ let run_undo_and_input () =
   E3.close !e;
   (* E21: fly mode ends when the view stops navigating (a fixed camera, looked through) *)
   let e, _, step = session (200., 300.) in
-  step [ Event.MouseMoved (200., 300.) ];
-  step [ Event.MousePressed (Input.LeftButton, (200., 300.)); Event.MouseReleased (Input.LeftButton, (200., 300.)) ];
+  step [ Input.Pointer_moved (200., 300.) ];
+  step [ Input.Pointer_pressed (Input.LeftButton, (200., 300.)); Input.Pointer_released (Input.LeftButton, (200., 300.)) ];
   List.iter (fun c -> step [ press c ]; step []) [ ' '; 'v' ];
   List.iter (fun c -> step [ press c ]; step []) [ ' '; 'w' ];
   check (E3.flying !e && E3.look_through !e) "the view is not flying through its camera";
@@ -2085,14 +2090,14 @@ let run_undo_and_input () =
   let e, count, step = session (450., 300.) in
   let gx, gy, gw, _ = (E3.panes !e (frame (0., 0.) [] 0)).graph in
   let row = float (gx + 60), float (gy + 24 + 12) in
-  let click at = step ~mouse:at [ Event.MouseMoved at ];
-    step ~mouse:at [ Event.MousePressed (Input.LeftButton, at); Event.MouseReleased (Input.LeftButton, at) ];
+  let click at = step ~mouse:at [ Input.Pointer_moved at ];
+    step ~mouse:at [ Input.Pointer_pressed (Input.LeftButton, at); Input.Pointer_released (Input.LeftButton, at) ];
     step ~mouse:at [] in
   click row; step [ press 'i' ]; step [];
   count := !count + 30;
   let x, y, w, h = Option.get (E3.node_box !e [ "g"; "a" ]) in
   click (float (x + (w / 2)), float (y + min 10 (h / 2)));
-  step [ Event.KeyPressed Input.F2 ]; step [];
+  step [ Input.Key_pressed Input.F2 ]; step [];
   step [ press 'u' ]; step [];
   check (E3.level !e <> None) "F2 opened no name field: u left the object";
   (* the header's List tab: found by trying, the tabs end 36 points from the header's right edge *)
@@ -2109,14 +2114,14 @@ let run_undo_and_input () =
   let e, count, step = session (450., 300.) in
   let gx, gy, gw, gh = (E3.panes !e (frame (0., 0.) [] 0)).graph in
   let row = float (gx + 60), float (gy + 24 + 12) in
-  step ~mouse:row [ Event.MouseMoved row ];
-  step ~mouse:row [ Event.MousePressed (Input.LeftButton, row); Event.MouseReleased (Input.LeftButton, row) ];
+  step ~mouse:row [ Input.Pointer_moved row ];
+  step ~mouse:row [ Input.Pointer_pressed (Input.LeftButton, row); Input.Pointer_released (Input.LeftButton, row) ];
   step ~mouse:row [ press 'i' ]; step [];
   count := !count + 30;
   let canvas = float (gx + gw - 40), float (gy + gh - 40) and away = float (gx + gw - 80), float (gy + gh - 60) in
-  step ~mouse:canvas [ Event.MouseMoved canvas ];
-  step ~buttons:[ Input.MiddleButton ] ~mouse:canvas [ Event.MousePressed (Input.MiddleButton, canvas) ];
-  step ~buttons:[ Input.MiddleButton ] ~mouse:away [ Event.MouseMoved away ];
+  step ~mouse:canvas [ Input.Pointer_moved canvas ];
+  step ~buttons:[ Input.MiddleButton ] ~mouse:canvas [ Input.Pointer_pressed (Input.MiddleButton, canvas) ];
+  step ~buttons:[ Input.MiddleButton ] ~mouse:away [ Input.Pointer_moved away ];
   check (dump_line !e "graph pan" = "true") "a middle drag on the canvas is not a pan";
   List.iter (fun c -> step ~buttons:[ Input.MiddleButton ] ~mouse:away [ press c ]; step ~buttons:[ Input.MiddleButton ] ~mouse:away [])
     [ ' '; 'l'; 'l' ];
@@ -2155,13 +2160,13 @@ let run_atomic_frame () =
   let at = 200., 300. in
   let e = ref (E3.create ~await:true
       ~workspace:(of_text "(workspace solo (graph g :context sop (sop/box)) (graph editor :context editor (ui/workspace (ui/graph))))")
-      ~prepare:(fun _ _ -> Ok ()) ~scene3:(fun _ () -> Scene3.empty) () |> Result.get_ok) and count = ref 0 in
+      ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ () -> Scene3.empty) () |> Result.get_ok) and count = ref 0 in
   let step events = incr count; e := E3.update !e (frame at events !count) in
   for _ = 1 to 4 do step [] done;
-  step [ Event.MouseMoved at ];
-  step [ Event.MousePressed (Input.LeftButton, at); Event.MouseReleased (Input.LeftButton, at) ];
+  step [ Input.Pointer_moved at ];
+  step [ Input.Pointer_pressed (Input.LeftButton, at); Input.Pointer_released (Input.LeftButton, at) ];
   let before = source !e and label = E3.undo_label !e in
-  List.iter (fun c -> step [ Event.KeyPressed (if c = ' ' then (Input.KeyChar '/') else Input.KeyChar c) ]; step []) [ ' '; 'o'; 'x' ];
+  List.iter (fun c -> step [ Input.Key_pressed (if c = ' ' then (Input.KeyChar '/') else Input.KeyChar c) ]; step []) [ ' '; 'o'; 'x' ];
   step [];
   check (dump_line !e "edit error" <> "-") ("closing the only panel was not refused: " ^ source !e);
   check (source !e = before && E3.undo_label !e = label)
@@ -2180,8 +2185,8 @@ let run_undo_under_pane () =
   let e = ref (editor text) and count = ref 0 in
   let step ?(keys = []) mouse events = incr count;
     e := E3.update !e (Test_editor_input.frame ~keys mouse events !count) in
-  let click point = step point [ Event.MouseMoved point ];
-    step point [ Event.MousePressed (Input.LeftButton, point); Event.MouseReleased (Input.LeftButton, point) ];
+  let click point = step point [ Input.Pointer_moved point ];
+    step point [ Input.Pointer_pressed (Input.LeftButton, point); Input.Pointer_released (Input.LeftButton, point) ];
     step point [] in
   for _ = 1 to 4 do step (200., 500.) [] done;
   let expr = match S.parse "(scene/geometry (ref h))" with Ok [ v ] -> v | _ -> fail "bad form" in
@@ -2191,12 +2196,12 @@ let run_undo_under_pane () =
   (* the second panel lists the scene: enter the object made from h, its second row *)
   count := !count + 30;
   let row = 700., float (24 + 24 + 12 + 24) in
-  click row; step row [ Event.KeyPressed (Input.KeyChar 'i') ]; step row [];
+  click row; step row [ Input.Key_pressed (Input.KeyChar 'i') ]; step row [];
   check (has (dump_line !e "graph panels") "h") ("the second graph panel did not enter the object: " ^ dump_line !e "graph panels");
   (* the first panel takes the focus and undoes the object *)
   count := !count + 30;
   click (200., 500.);
-  step ~keys:[ Input.Meta ] (200., 500.) [ Event.KeyPressed (Input.KeyChar 'z') ];
+  step ~keys:[ Input.Meta ] (200., 500.) [ Input.Key_pressed (Input.KeyChar 'z') ];
   step (200., 500.) []; step (200., 500.) [];
   check (not (has (source !e) "(ref h)") && not (has (dump_line !e "graph panels") "h"))
     ("undo left the other panel inside a removed object: " ^ dump_line !e "graph panels");
@@ -2230,7 +2235,7 @@ let run_spreadsheet () =
     let ui = Pxui.Ui.create () in
     let detail_width = Pxui.Ui.text_width ui "Detail" in Pxui.Ui.destroy ui;
     let point = float (x+w) -. 8. -. detail_width /. 2., float y +. 12. in
-    step point; step ~events:[Event.MousePressed (Input.LeftButton, point); Event.MouseReleased (Input.LeftButton, point)] point;
+    step point; step ~events:[Input.Pointer_pressed (Input.LeftButton, point); Input.Pointer_released (Input.LeftButton, point)] point;
     check (fst (Rays_editor.Reduce.spreadsheet !e [1;0]) = 3) "spreadsheet Detail tab did not route shared input";
     check (fst (Rays_editor.Reduce.spreadsheet !e [1;1]) = 0) "spreadsheet owner state leaked to another pane";
     e := E3.edit !e (E.Set_arg {node = ["g"; "@result"]; key = Kw "columns"; sub = []; value = S.make (Num "4")}) |> Result.get_ok;
@@ -2258,8 +2263,8 @@ let run_op_inspector () =
   let step ?(buttons = []) ?(mouse = (450., 300.)) events = incr count; e := E3.update !e (frame ~buttons mouse events !count) in
   step []; step [];
   let click point =
-    step ~mouse:point [ Event.MouseMoved point ];
-    step ~mouse:point [ Event.MousePressed (Input.LeftButton, point); Event.MouseReleased (Input.LeftButton, point) ] in
+    step ~mouse:point [ Input.Pointer_moved point ];
+    step ~mouse:point [ Input.Pointer_pressed (Input.LeftButton, point); Input.Pointer_released (Input.LeftButton, point) ] in
   let bx, by, _, _ = Option.get (E3.node_box !e [ "g"; "b" ]) in
   click (float (bx + 60), float (by + 12));
   step [];
@@ -2268,9 +2273,9 @@ let run_op_inspector () =
   (* the first row (a, 3.0) is a slider 186 points under the panel body's top, from 603 across in the 450 panel, press at 650 *)
   let ix, iy, _, _ = (E3.panes !e (frame (0., 0.) [] 0)).inspector in
   let at x = float (ix + 200 + x), float (iy + 186) in
-  step ~mouse:(at 0) ~buttons:[ Input.LeftButton ] [ Event.MousePressed (Input.LeftButton, at 0) ];
+  step ~mouse:(at 0) ~buttons:[ Input.LeftButton ] [ Input.Pointer_pressed (Input.LeftButton, at 0) ];
   List.iter (fun x -> step ~mouse:(at x) ~buttons:[ Input.LeftButton ] []) [ 20; 40; 60; 80 ];
-  step ~mouse:(at 90) [ Event.MouseReleased (Input.LeftButton, at 90) ];
+  step ~mouse:(at 90) [ Input.Pointer_released (Input.LeftButton, at 90) ];
   step [];
   check (source !e <> before && not (has (source !e) "(* 3.0 a)") && has (source !e) "(* ") ("the inspector showed no editable input row of a * node: " ^ source !e);
   let label = E3.undo_label !e and authored = source !e in
@@ -2290,8 +2295,8 @@ let run_nested_inspector () =
   let step ?(buttons = []) ?(mouse = (450., 300.)) events = incr count; e := E3.update !e (frame ~buttons mouse events !count) in
   step []; step [];
   let click point =
-    step ~mouse:point [ Event.MouseMoved point ];
-    step ~mouse:point [ Event.MousePressed (Input.LeftButton, point); Event.MouseReleased (Input.LeftButton, point) ] in
+    step ~mouse:point [ Input.Pointer_moved point ];
+    step ~mouse:point [ Input.Pointer_pressed (Input.LeftButton, point); Input.Pointer_released (Input.LeftButton, point) ] in
   let bx, by, _, _ = Option.get (E3.node_box !e [ "g"; "b" ]) in
   click (float (bx + 60), float (by + 12));
   step [];
@@ -2300,9 +2305,9 @@ let run_nested_inspector () =
   let ix, iy, _, _ = (E3.panes !e (frame (0., 0.) [] 0)).inspector in
   let at dy x = float (ix + 200 + x), float (iy + dy) in
   let drag dy =
-    step ~mouse:(at dy 0) ~buttons:[ Input.LeftButton ] [ Event.MousePressed (Input.LeftButton, at dy 0) ];
+    step ~mouse:(at dy 0) ~buttons:[ Input.LeftButton ] [ Input.Pointer_pressed (Input.LeftButton, at dy 0) ];
     List.iter (fun x -> step ~mouse:(at dy x) ~buttons:[ Input.LeftButton ] []) [ 20; 40; 60; 80 ];
-    step ~mouse:(at dy 90) [ Event.MouseReleased (Input.LeftButton, at dy 90) ];
+    step ~mouse:(at dy 90) [ Input.Pointer_released (Input.LeftButton, at dy 90) ];
     step [] in
   drag 281;
   let after = source !e in
@@ -2329,8 +2334,8 @@ let run_expression_chip () =
   let step ?(buttons = []) ?(mouse = (450., 300.)) events = incr count; e := E3.update !e (frame ~buttons mouse events !count) in
   step []; step [];
   let click point =
-    step ~mouse:point [ Event.MouseMoved point ];
-    step ~mouse:point [ Event.MousePressed (Input.LeftButton, point); Event.MouseReleased (Input.LeftButton, point) ] in
+    step ~mouse:point [ Input.Pointer_moved point ];
+    step ~mouse:point [ Input.Pointer_pressed (Input.LeftButton, point); Input.Pointer_released (Input.LeftButton, point) ] in
   let bx, by, bw, _ = Option.get (E3.node_box !e [ "g"; "b" ]) in
   let z = float bw /. Flow_graph.Projection.node_width in
   (* the second line of the card (2.0, then the call), at the right where its text is *)
@@ -2344,9 +2349,9 @@ let run_expression_chip () =
   let ix, iy, _, _ = (E3.panes !e (frame (0., 0.) [] 0)).inspector in
   let at dy x = float (ix + 200 + x), float (iy + dy) in
   let drag dy =
-    step ~mouse:(at dy 0) ~buttons:[ Input.LeftButton ] [ Event.MousePressed (Input.LeftButton, at dy 0) ];
+    step ~mouse:(at dy 0) ~buttons:[ Input.LeftButton ] [ Input.Pointer_pressed (Input.LeftButton, at dy 0) ];
     List.iter (fun x -> step ~mouse:(at dy x) ~buttons:[ Input.LeftButton ] []) [ 20; 40; 60; 80 ];
-    step ~mouse:(at dy 90) [ Event.MouseReleased (Input.LeftButton, at dy 90) ];
+    step ~mouse:(at dy 90) [ Input.Pointer_released (Input.LeftButton, at dy 90) ];
     step [] in
   drag 190;
   let after = source !e in
@@ -2364,11 +2369,11 @@ let run_context_menus () =
     and count = ref 0 in
     let step ?(buttons = []) point events =
       incr count; e := E3.update !e (frame ~buttons point events !count) in
-    let hover point = step point [Event.MouseMoved point] in
+    let hover point = step point [Input.Pointer_moved point] in
     let click button point =
       hover point;
-      step ~buttons:[button] point [Event.MousePressed (button, point)];
-      step point [Event.MouseReleased (button, point)] in
+      step ~buttons:[button] point [Input.Pointer_pressed (button, point)];
+      step point [Input.Pointer_released (button, point)] in
     step (450., 300.) []; step (450., 300.) [];
     Fun.protect ~finally:(fun () -> E3.close !e) (fun () -> check_menu e step hover click) in
   exercise
@@ -2398,7 +2403,7 @@ let run_context_menus () =
   exercise "(ui/workspace (ui/graph \"g\"))"
     (fun e step _hover click ->
       (* / t reveals the implicit strip when there is no authored timeline leaf. *)
-      step (450., 300.) [Event.KeyPressed (Input.KeyChar '/'); Event.KeyPressed (Input.KeyChar 't')];
+      step (450., 300.) [Input.Key_pressed (Input.KeyChar '/'); Input.Key_pressed (Input.KeyChar 't')];
       step (450., 300.) [];
       let _, y, _, _ = (E3.panes !e (frame (0., 0.) [] 0)).timeline in
       let origin = 500., float (y + 12) in
@@ -2429,17 +2434,17 @@ let run_lisp_inspector () =
     let ix, iy, _, _ = (E3.panes !e (frame (0., 0.) [] 0)).inspector in
     let at x = float (ix + 200 + x), float (iy + 186) in
     step ~mouse:(at 0) ~buttons:[Input.LeftButton]
-      [Event.MousePressed (Input.LeftButton, at 0)];
+      [Input.Pointer_pressed (Input.LeftButton, at 0)];
     List.iter (fun x -> step ~mouse:(at x) ~buttons:[Input.LeftButton] []) [20; 40; 60; 80];
-    step ~mouse:(at 90) [Event.MouseReleased (Input.LeftButton, at 90)];
+    step ~mouse:(at 90) [Input.Pointer_released (Input.LeftButton, at 90)];
     step [];
     check (has (source !e) "(sop/local_card src :distance")
       ("bypassed Lisp node lost its unset inspector parameter: " ^ source !e);
-    step ~mouse:(150., 300.) [Event.MouseMoved (150., 300.)];
+    step ~mouse:(150., 300.) [Input.Pointer_moved (150., 300.)];
     step ~mouse:(150., 300.)
-      [Event.KeyPressed (Input.KeyChar '/'); Event.KeyPressed (Input.KeyChar 'a')];
-    step ~mouse:(150., 300.) [Event.TextInput "local_card"];
-    step ~mouse:(150., 300.) [Event.KeyPressed Input.Enter];
+      [Input.Key_pressed (Input.KeyChar '/'); Input.Key_pressed (Input.KeyChar 'a')];
+    step ~mouse:(150., 300.) [Input.Text_input "local_card"];
+    step ~mouse:(150., 300.) [Input.Key_pressed Input.Enter];
     step ~mouse:(150., 300.) [];
     check (E3.undo_label !e = Some "Add node" && count_of (source !e) "(sop/local_card" = 2)
       ("local Lisp kind was absent from the add menu: " ^ source !e))
@@ -2452,9 +2457,9 @@ let run_array_capacity_menu () =
   Fun.protect ~finally:(fun()->E3.close !e)(fun()->
     let step events=incr count;e:=E3.update !e(frame(150.,300.)events !count)in
     step [];step [];
-    step[Event.MouseMoved(150.,300.)];
-    step[Event.KeyPressed(Input.KeyChar '/');Event.KeyPressed(Input.KeyChar 'a')];
-    step[Event.TextInput "array/max_length"];step[Event.KeyPressed Input.Enter];step[];
+    step[Input.Pointer_moved(150.,300.)];
+    step[Input.Key_pressed(Input.KeyChar '/');Input.Key_pressed(Input.KeyChar 'a')];
+    step[Input.Text_input "array/max_length"];step[Input.Key_pressed Input.Enter];step[];
     check(E3.undo_label !e=Some "Add node" && has(source !e)"(array/max_length)")
       ("Array capacity add menu default invalid: "^source !e);
     let ws=E3.workspace !e in
@@ -2479,7 +2484,7 @@ let run_open_defn () =
   for _ = 1 to 4 do step (200., 300.) [] done;
   e := Rays_editor.Reduce.select_path !e [ "g"; "b" ];
   let p = 200., 300. in
-  step p []; step p [ Event.KeyPressed (Input.KeyChar 'i') ]; step p [];
+  step p []; step p [ Input.Key_pressed (Input.KeyChar 'i') ]; step p [];
   check (has (dump_line !e "graph panels") "def:twice") ("i on a defn call did not open it: " ^ dump_line !e "graph panels");
   (* i on a collapsed function opens it in place (functions start open: the layout folds this one) *)
   let e = ref (editor {|(workspace z
@@ -2489,7 +2494,7 @@ let run_open_defn () =
   let step mouse events = incr count; e := E3.update !e (Test_editor_input.frame mouse events !count) in
   for _ = 1 to 4 do step (200., 300.) [] done;
   e := Rays_editor.Reduce.select_path !e [ "g"; "a#0" ];
-  step (200., 300.) []; step (200., 300.) [ Event.KeyPressed (Input.KeyChar 'i') ]; step (200., 300.) [];
+  step (200., 300.) []; step (200., 300.) [ Input.Key_pressed (Input.KeyChar 'i') ]; step (200., 300.) [];
   check (Editor_document.Layout_by_path.Path_map.find_opt [ "g"; "a#0" ] (E3.workspace !e).Doc.layout.collapsed = Some false)
     "i on a collapsed function did not open it"
 
@@ -2502,7 +2507,7 @@ let run_outline_button () =
   for _ = 1 to 4 do step (200., 300.) [] done;
   let leaf () = match Contexts.of_workspace ~factories (E3.workspace !e) with
     | Ok d -> Layout.find (Layout.geometry (Option.get d.Document.shell).tree (frame (0., 0.) [] 0)) Layout.Graph
-    | Error d -> fail (Flow.Diagnostic.to_string d) in
+    | Error d -> fail (Diagnostic.to_string d) in
   let header = (Option.get (leaf ())).header in
   let ui = Pxui.Ui.create ~font_size:11 () in
   let from = Pxui_shell.Chrome.tools_start ui ~focused:true ~floating:false ~collapsed:false
@@ -2510,8 +2515,8 @@ let run_outline_button () =
   let x, y = match Rays_editor.Private.Bars.tool_rect ~outline:true ui ~header ~from Outline with
     | Some (x, y, w, h) -> x +. w /. 2., y +. h /. 2. | None -> fail "the Outline button is cut off" in
   Pxui.Ui.destroy ui;
-  step (x, y) [ Event.MouseMoved (x, y) ];
-  step (x, y) [ Event.MousePressed (Input.LeftButton, (x, y)); Event.MouseReleased (Input.LeftButton, (x, y)) ];
+  step (x, y) [ Input.Pointer_moved (x, y) ];
+  step (x, y) [ Input.Pointer_pressed (Input.LeftButton, (x, y)); Input.Pointer_released (Input.LeftButton, (x, y)) ];
   step (x, y) []; step (x, y) [];
   check (has (source !e) "(ui/outline)")
     "the Outline button did not split an Outline in";
@@ -2538,83 +2543,86 @@ let run_view_native () =
   let text = In_channel.with_open_bin "../sketches/shattered_cube.rays" In_channel.input_all in
   let rendered = ref "" and vertices = ref [] and original = ref [] and edited = ref []
   and returned = ref false in
-  ignore (Sketch.run_state ~max_frames:37
+  ignore (Result.get_ok (Sketch.run_state ~max_frames:37
     ~config:{Sketch.default_config with width = 1200; height = 760;
       title = "Shattered Cube · VIEW regression"; domains = Some 1}
     ~init:(fun _ -> E3.create ~await:true ~workspace:(of_text text)
       ~presets:(Filename.concat directory "presets") ~seed:7349L ~grain:2
-      ~camera:(Easy_camera.create ~target:Vec3.zero ~distance:6.8 ~azimuth:0.72 ~elevation:0.42 ())
+      ~camera:(Easy_camera.create ~target:Rays_math.Vec3.zero ~distance:6.8 ~azimuth:0.72 ~elevation:0.42 ())
       ~prepare:(fun _ output ->
         match Rdk.Geometry.find_attribute ~owner:Rdk.Attribute.Primitive "piece" (Result.get_ok (Sop.Payload.geometry output.Session.payload)) with
         | Some attribute when (match Rdk.Attribute.Private.storage attribute with
             | Rdk.Attribute.Int _ | Text _ -> true | _ -> false) ->
-            Rays_editor.Packed_pieces.of_geometry ~piece_attribute:"piece" (Result.get_ok (Sop.Payload.geometry output.payload))
+            Rdk_rays.Packed_pieces.of_geometry ~piece_attribute:"piece" (Result.get_ok (Sop.Payload.geometry output.payload))
             |> Result.map (fun pieces -> `Pieces pieces)
         | _ -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.payload))
             |> Result.map (fun mesh -> `Mesh (mesh, output.instances))
             |> Result.map_error Rdk.Error.to_string)
-      ~scene3:(fun node preview ->
+      ~draw:(fun node preview ->
         rendered := Node.operation node;
         let mesh, transforms = match preview with
-          | `Pieces pieces -> Rays_editor.Packed_pieces.mesh_for_node node pieces, None
+          | `Pieces pieces ->
+              let explosion = Rdk_rays.Packed_pieces.explosion
+                  ~operation:(Node.operation node) ~fields:(Node.parameter_fields node) in
+              Rdk_rays.Packed_pieces.mesh_for_explosion explosion pieces, None
           | `Mesh (mesh, transforms) -> mesh, transforms in
         vertices := Mesh.vertices mesh;
         let shading = if Node.operation node = "box" then Scene3.Flat else Smooth in
-        let material = Material.create ~diffuse:(Color.hex_exn "#f2b36d") () in
+        let material = Material.create ~diffuse:(Rays_math.Color.hex_exn "#f2b36d") () in
         let drawing = match transforms with
           | Some transforms -> Scene3.instances_array ~cull:Scene3.Cull_none ~shading ~material mesh transforms
           | None -> Scene3.mesh ~cull:Scene3.Cull_none ~shading ~material mesh in
         Scene3.create [drawing]) () |> Result.get_ok)
     ~update:(fun e (frame : Frame.t) ->
-      let e = if frame.count = 28 then
+      let e = if frame.input.frame = 28 then
           E3.edit e (E.Set_arg {node = ["shattered"; "@result"]; key = E.Kw "amount";
             sub = []; value = S.make (S.Num "0.8")}) |> Result.get_ok
         else e in
       let gx, gy, gw, _ = (E3.panes e frame).graph in
       let graph = float (gx + 40), float (gy + 40) and view = 150., 300. in
-      let mouse = if frame.count = 24 then
+      let mouse = if frame.input.frame = 24 then
           let x, y, w, h = Option.get (E3.node_box e ["shattered"; "@result"]) in
           (* a wide graph in a narrow pane sits at the zoom floor, the last column on the pane's edge *)
           float (min (x + w / 2) (gx + gw - 6)), float (y + min 12 (max 1 (h / 2)))
-        else if List.mem frame.count [3; 4; 18; 19; 20; 21; 22] then view else graph in
-      let key k = Event.KeyPressed k in
-      let events = match frame.count with
-        | 3 | 6 | 18 | 23 -> [Event.MouseMoved mouse]
-        | 4 | 19 -> [Event.MouseScrolled (0., -1.)]
-        | 7 -> [Event.MousePressed (Input.LeftButton, mouse)]
-        | 8 -> [Event.MouseReleased (Input.LeftButton, mouse)]
+        else if List.mem frame.input.frame [3; 4; 18; 19; 20; 21; 22] then view else graph in
+      let key k = Input.Key_pressed k in
+      let events = match frame.input.frame with
+        | 3 | 6 | 18 | 23 -> [Input.Pointer_moved mouse]
+        | 4 | 19 -> [Input.Scrolled (0., -1.)]
+        | 7 -> [Input.Pointer_pressed (Input.LeftButton, mouse)]
+        | 8 -> [Input.Pointer_released (Input.LeftButton, mouse)]
         | 9 -> [key Input.Home] | 10 -> [key (Input.KeyChar 'i')]
         | 12 -> [key Input.ArrowRight] | 14 | 25 -> [key (Input.KeyChar 'v')]
-        | 24 -> [Event.MouseMoved mouse; Event.MousePressed (Input.LeftButton, mouse);
-            Event.MouseReleased (Input.LeftButton, mouse)]
+        | 24 -> [Input.Pointer_moved mouse; Input.Pointer_pressed (Input.LeftButton, mouse);
+            Input.Pointer_released (Input.LeftButton, mouse)]
         | 32 -> [key (Input.KeyChar 'u')]
         | _ -> [] in
-      E3.update e {frame with mouse; events; keys = []; mouse_buttons = []})
+      E3.update e { frame with input = { frame.input with pointer = mouse; events; keys = []; buttons = [] } })
     ~view:E3.scene
     ~after_present:(fun e (frame : Frame.t) ->
-      if List.mem frame.count [5; 16; 22; 26; 30; 36] then begin
-        let operation = if frame.count = 16 || frame.count = 22 then "box" else "exploded_view" in
+      if List.mem frame.input.frame [5; 16; 22; 26; 30; 36] then begin
+        let operation = if frame.input.frame = 16 || frame.input.frame = 22 then "box" else "exploded_view" in
         check (Node.operation (E3.displayed_node e) = operation && !rendered = operation)
-          (Printf.sprintf "Shattered Cube frame %d rendered %s instead of %s" frame.count !rendered operation);
-        check (Canvas.save_screen_png (Printf.sprintf "%s-%d.png" prefix frame.count) = Ok ())
+          (Printf.sprintf "Shattered Cube frame %d rendered %s instead of %s" frame.input.frame !rendered operation);
+        check (Canvas.save_screen_png (Printf.sprintf "%s-%d.png" prefix frame.input.frame) = Ok ())
           "VIEW screenshot failed";
-        if frame.count = 26 then begin
+        if frame.input.frame = 26 then begin
           original := !vertices;
           check (Node.operation (E3.displayed_node e) = "exploded_view")
             "native v did not preview the result node"
         end;
-        if frame.count = 30 then begin
+        if frame.input.frame = 30 then begin
           edited := !vertices;
           check (!edited <> !original) "editing the result left the rendered geometry cached"
         end;
-        if frame.count = 36 then begin
+        if frame.input.frame = 36 then begin
           check (dump_line e "level" = "scene" && !vertices = !edited)
             "returning up showed the old rendered result";
           returned := true
         end
       end;
       E3.after_present e frame)
-    ~on_stop:E3.close ());
+    ~on_stop:E3.close ()));
   check !returned "native VIEW regression stopped before returning to the scene";
   if Sys.getenv_opt "RAYS_VIEW_PNG" = None then
     List.iter (fun n -> Sys.remove (Printf.sprintf "%s-%d.png" prefix n)) [5; 16; 22; 26; 30; 36];
@@ -2645,33 +2653,34 @@ let run_renderers_native ?(authored = false) () =
   |} (if authored then "(ui/floating floating)" else "floating")
     (if authored then "" else "(layout (panel [\"layout\" \"floating\"] :collapsed false :window [450 120 320 280]))")) in
   let samples = ref [] in
-  ignore (Sketch.run_state ~max_frames:46
+  ignore (Result.get_ok (Sketch.run_state ~max_frames:46
     ~config:{Sketch.default_config with width = 900; height = 640; title = "shared renderer"}
     ~init:(fun _ -> E3.create ~await:true ~workspace ~presets:(Filename.concat directory "presets")
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
-      ~scene3:(fun _ mesh -> Scene3.create [Scene3.mesh
-        ~material:(Material.unlit (Color.rgb 200 20 200)) mesh]) () |> Result.get_ok)
+      ~draw:(fun _ mesh -> Scene3.create [Scene3.mesh
+        ~material:(Material.unlit (Rays_math.Color.rgb 200 20 200)) mesh]) () |> Result.get_ok)
     ~update:(fun e (frame : Frame.t) ->
-      let mode = if frame.count < 10 || frame.count >= 40 then Rays_editor.Renderer.Raster
-        else if frame.count < 25 then Wireframe else Path_traced in
+      let mode = if frame.input.frame < 10 || frame.input.frame >= 40 then Rays_editor.Renderer.Raster
+        else if frame.input.frame < 25 then Wireframe else Path_traced in
       let e = if E3.renderer e = mode then e else E3.set_renderer e mode in
       let e = E3.update e frame in
       check (E3.renderer e = mode) "the shared renderer did not switch";
       e)
     ~view:E3.scene
     ~after_present:(fun e (frame : Frame.t) ->
-      if List.mem frame.count [5; 15; 35; 45] then begin
-        let path = Filename.concat directory (Printf.sprintf "%d.png" frame.count) in
+      if List.mem frame.input.frame [5; 15; 35; 45] then begin
+        let path = Filename.concat directory (Printf.sprintf "%d.png" frame.input.frame) in
         check (Canvas.save_screen_png path = Ok ()) "renderer screenshot failed";
         samples := path :: !samples
       end;
       E3.after_present e frame)
-    ~on_stop:E3.close ());
+    ~on_stop:E3.close ()));
   let mesh_pixels path =
     let image = Rays.Image.load_exn path in
     let pixels = Rays.Image.Private.pixels image |> Result.get_ok in
-    let w = Rays.Image.get_width image and h = Rays.Image.get_height image in
+    let w = Result.get_ok (Rays.Image.get_width image)
+    and h = Result.get_ok (Rays.Image.get_height image) in
     let scale = float w /. 900. in
     let counts = Array.make 2 0 in
     Array.iteri (fun i (x, y, width, height) ->
@@ -2684,7 +2693,7 @@ let run_renderers_native ?(authored = false) () =
           if r > 110 && b > 110 && g < 100 && g + 40 < r then counts.(i) <- counts.(i) + 1
         done
       done) [|(0, 50, 440, 450); (450, 142, 320, 258)|];
-    Rays.Image.destroy image; counts in
+    ignore(Rays.Image.destroy image); counts in
   List.iter (fun frame ->
     let counts = mesh_pixels (Filename.concat directory (Printf.sprintf "%d.png" frame)) in
     check (counts.(0) > 30 && counts.(1) > 30)
@@ -2703,30 +2712,31 @@ let run_native () =
   let path = match Sys.getenv_opt "RAYS_SHELL_PNG" with Some p -> p | None -> Filename.concat directory "variations.png" in
   let frames = 80 in
   let rects = ref [] in
-  ignore (Sketch.run_state ~max_frames:frames
+  ignore (Result.get_ok (Sketch.run_state ~max_frames:frames
     ~config:{ Sketch.default_config with width = 900; height = 640; title = "variations" }
     ~init:(fun _ -> editor (case "variations"))
     ~update:(fun e (frame : Frame.t) -> Unix.sleepf 0.004; E3.update e frame)
     ~view:E3.scene
     ~after_present:(fun e (frame : Frame.t) ->
-      if frame.count = frames then begin
+      if frame.input.frame = frames then begin
         let tree = (shell_of (build_ok (E3.workspace e))).tree in
         rects := List.filter_map (fun (l : Layout.leaf) -> match l.panel with
-          | Layout.View _ -> let x, y, w, h = l.body in Some (x, y, w, h, frame.width)
+          | Layout.View _ -> let x, y, w, h = l.body in Some (x, y, w, h, (fst frame.input.size))
           | _ -> None) (Layout.geometry ~hidden:[ Layout.Timeline ] tree frame).leaves;
         check (Canvas.save_screen_png path = Ok ()) "the window did not save its screen"
       end;
       E3.after_present e frame)
-    ~on_stop:E3.close ());
+    ~on_stop:E3.close ()));
   let image = Rays.Image.load_exn path in
   let pixels = Result.get_ok (Rays.Image.Private.pixels image) in
-  let scale = float (Rays.Image.get_width image) /. float (match !rects with (_, _, _, _, w) :: _ -> w | [] -> fail "no viewports") in
+  let image_width = Result.get_ok (Rays.Image.get_width image) in
+  let scale = float image_width /. float (match !rects with (_, _, _, _, w) :: _ -> w | [] -> fail "no viewports") in
   check (List.length !rects = 4) "four viewport panels";
   let drawn (x, y, w, h, _) =
     let count = ref 0 and bits = Buffer.create 64 in
     for py = int_of_float (float y *. scale) to int_of_float (float (y + h) *. scale) - 1 do
       for px = int_of_float (float x *. scale) to int_of_float (float (x + w) *. scale) - 1 do
-        let o = 4 * ((py * Rays.Image.get_width image) + px) in
+        let o = 4 * (py * image_width + px) in
         let r = Char.code (Bytes.get pixels o) and g = Char.code (Bytes.get pixels (o + 1))
         and b = Char.code (Bytes.get pixels (o + 2)) in
         let hit = r < 110 && g < 110 && b < 110 in  (* the unlit garden against the pale panel *)
@@ -2766,7 +2776,7 @@ let roots_text ?(renderer = "Path traced") () = Printf.sprintf {|(workspace root
   renderer renderer
 
 let eye_of = function
-  | "day" -> Vec3.create 0. 1. 8. | _ -> Vec3.create 5. 2. 6.
+  | "day" -> Rays_math.Vec3.create 0. 1. 8. | _ -> Rays_math.Vec3.create 5. 2. 6.
 
 (* Without a GPU: looking through the camera, each viewport sees through the camera its own root
    names, at its own gate; the renderer's film steps and turns are pure. *)
@@ -2803,12 +2813,12 @@ let run_roots () =
   let film () = E3.film !e (frame (100., 100.) [] !count) in
   let fx, fy, pane_w, pane_h = film () in
   check ((fx, fy) = (0, 0) && pane_w > 0 && pane_h > 0) "a free view does not fill its pane";
-  step ~events:[ Event.KeyPressed (Input.KeyChar '/'); Event.KeyPressed (Input.KeyChar 'v') ] (); step (); step ();
+  step ~events:[ Input.Key_pressed (Input.KeyChar '/'); Input.Key_pressed (Input.KeyChar 'v') ] (); step (); step ();
   check (E3.look_through !e) "/ v did not look through the camera";
   let gx, gy, gate_w, gate_h = film () in
   check (gx > 0 && gy > 0 && gate_w < pane_w && gate_h < pane_h && abs ((gate_w * 450) - (gate_h * 800)) <= 800)
     "looking through the camera does not show the root's 800 x 450 gate inside the pane";
-  let near a b = Vec3.nearly_equal a b ~eps:1e-4 in
+  let near a b = Rays_math.Vec3.nearly_equal a b ~eps:1e-4 in
   check (near (Camera.position (E3.viewport_camera !e day)) (eye_of "day"))
     "the first viewport does not look through its own root's camera";
   (* look-through is the focused viewport's own: the other keeps its orbit until its panel says so *)
@@ -2840,8 +2850,9 @@ let run_roots_native () =
   let day, night = match List.map fst shell.preview_sources with [ d; n ] -> d, n | _ -> fail "two viewports" in
   (* At 1200 points the new viewport margins still let the half-size films fit;
      the 200-point drag then crosses only the second film's step. *)
+  let sample_frame = frame (0., 0.) [] 0 in
   let geometry = Layout.geometry ~hidden:[ Layout.Timeline ] shell.tree
-      { (frame (0., 0.) [] 0) with width; size = width, 640 } in
+      { sample_frame with input = { sample_frame.input with size = width, 640 } } in
   let pane key = List.find_map (fun (l : Layout.leaf) -> if l.panel = Layout.View key then Some l.body else None)
       geometry.leaves |> Option.get in
   let splitter = List.find (fun (s : Layout.splitter) -> s.node = Some []) geometry.splitters in
@@ -2851,43 +2862,44 @@ let run_roots_native () =
     let grip = fst grip +. from, snd grip in
     let target = fst grip +. by, snd grip in
     match c - start with
-    | 0 -> Some (grip, [], [ Event.MouseMoved grip ])
-    | 1 -> Some (grip, [ Input.LeftButton ], [ Event.MousePressed (Input.LeftButton, grip) ])
-    | 2 -> Some (target, [ Input.LeftButton ], [ Event.MouseMoved target ])
-    | 3 -> Some (target, [], [ Event.MouseReleased (Input.LeftButton, target) ])
+    | 0 -> Some (grip, [], [ Input.Pointer_moved grip ])
+    | 1 -> Some (grip, [ Input.LeftButton ], [ Input.Pointer_pressed (Input.LeftButton, grip) ])
+    | 2 -> Some (target, [ Input.LeftButton ], [ Input.Pointer_moved target ])
+    | 3 -> Some (target, [], [ Input.Pointer_released (Input.LeftButton, target) ])
     | _ -> None in
   let slots = Hashtbl.create 8 and cameras = ref [] in
   let need e key = match E3.slot e key with Some slot -> slot | None -> fail ("no tracer slot for " ^ key) in
   let edit e arg value =
     match E3.edit e (E.Set_arg { node = [ "night"; "root" ]; key = E.Kw arg; sub = []; value = S.make (S.Num value) }) with
     | Ok e -> e | Error message -> fail message in
-  ignore (Sketch.run_state ~max_frames:200
+  ignore (Result.get_ok (Sketch.run_state ~max_frames:200
     ~config:{ Sketch.default_config with width; height = 640; title = "two roots" }
     ~init:(fun _ -> E3.create ~await:true ~workspace:(of_text text)
       ~presets:(Filename.concat directory "presets")
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
-      ~scene3:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) () |> Result.get_ok)
+      ~draw:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) () |> Result.get_ok)
     ~update:(fun e (frame : Frame.t) ->
-      let c = frame.count in
+      let c = frame.input.frame in
       let e = if c = 61 then edit e "max_spp" "4096"      (* the cap rises: the film goes on *)
         else if c = 131 then edit e "bounces" "6"          (* the setting changes: the slot restarts *)
         else e in
       let mouse, buttons, events =
         match drag_at 101 ~from:0. ~by:10. c, drag_at 161 ~from:10. ~by:200. c with
         | Some move, _ | None, Some move -> move
-        | None, None -> (100., 100.), [], (if c = 2 then [ Event.KeyPressed (Input.KeyChar '/'); Event.KeyPressed (Input.KeyChar 'v') ] else []) in
-      E3.update e { frame with mouse; mouse_buttons = buttons; mouse_delta = 0., 0.; keys = []; events })
+        | None, None -> (100., 100.), [], (if c = 2 then [ Input.Key_pressed (Input.KeyChar '/'); Input.Key_pressed (Input.KeyChar 'v') ] else []) in
+      E3.update e { frame with input = { frame.input with pointer = mouse; buttons; keys = []; events };
+        mouse_delta = 0., 0. })
     ~view:E3.scene
     ~after_present:(fun e (frame : Frame.t) ->
-      if List.mem frame.count [ 60; 100; 130; 160; 195 ] then
-        Hashtbl.replace slots frame.count (need e day, need e night);
-      if frame.count = 60 then begin
+      if List.mem frame.input.frame [ 60; 100; 130; 160; 195 ] then
+        Hashtbl.replace slots frame.input.frame (need e day, need e night);
+      if frame.input.frame = 60 then begin
         cameras := [ day, Camera.position (E3.viewport_camera e day); night, Camera.position (E3.viewport_camera e night) ];
         check (Canvas.save_screen_png png = Ok ()) "the window did not save its screen"
       end;
       E3.after_present e frame)
-    ~on_stop:E3.close ());
+    ~on_stop:E3.close ()));
   let at c = Hashtbl.find slots c in
   let day60, night60 = at 60 and day100, night100 = at 100 and day130, night130 = at 130
   and day160, night160 = at 160 and day195, night195 = at 195 in
@@ -2901,9 +2913,9 @@ let run_roots_native () =
   check (day60.max_spp = 4096 && night60.max_spp = 16) "each slot carries its own root's cap";
   List.iter (fun (key, eye) ->
     let want = eye_of (if key = day then "day" else "night") in
-    check (Vec3.nearly_equal eye want ~eps:1e-4)
+    check (Rays_math.Vec3.nearly_equal eye want ~eps:1e-4)
       (Printf.sprintf "a pane's camera is not its root's authored camera (%s: %g %g %g, authored %g %g %g)"
-         key eye.Vec3.x eye.y eye.z want.Vec3.x want.y want.z)) !cameras;
+         key eye.Rays_math.Vec3.x eye.y eye.z want.Rays_math.Vec3.x want.y want.z)) !cameras;
   check (night60.samples >= 16 && day60.samples >= 16)
     (Printf.sprintf "the slots did not accumulate: %s, %s" (describe day60) (describe night60));
   (* the cap read each frame: raised, the second slot goes on from where it stopped *)
@@ -2931,7 +2943,8 @@ let run_roots_native () =
   (* what the window shows: both panes drawn, the pictures differ, dusk is darker than noon *)
   let image = Rays.Image.load_exn png in
   let pixels = Result.get_ok (Rays.Image.Private.pixels image) in
-  let scale = float (Rays.Image.get_width image) /. float width in
+  let image_width = Result.get_ok (Rays.Image.get_width image) in
+  let scale = float image_width /. float width in
   let region (x, y, w, h) (resolution_w, resolution_h) =
     (* the inner part of the gate, which is centred in the pane *)
     let aspect = float resolution_w /. float resolution_h in
@@ -2942,7 +2955,7 @@ let run_roots_native () =
     let sum = ref 0. and count = ref 0 and differing = ref 0 and bits = Buffer.create 256 in
     for py = y0 to y1 - 1 do
       for px = x0 to x1 - 1 do
-        let o = 4 * (py * Rays.Image.get_width image + px) in
+        let o = 4 * (py * image_width + px) in
         let r = Char.code (Bytes.get pixels o) and g = Char.code (Bytes.get pixels (o + 1))
         and b = Char.code (Bytes.get pixels (o + 2)) in
         sum := !sum +. (0.2126 *. float r +. 0.7152 *. float g +. 0.0722 *. float b);
@@ -2989,20 +3002,21 @@ let run_budget_native () =
   let keys = List.map fst (shell_of (build_ok (of_text text))).preview_sources in
   let a, b, c, a_again = match keys with [ a; b; c; d ] -> a, b, c, d | _ -> fail "four viewports" in
   let final = ref None in
-  ignore (Sketch.run_state ~max_frames:120
+  ignore (Result.get_ok (Sketch.run_state ~max_frames:120
     ~config:{ Sketch.default_config with width = 900; height = 640; title = "budget" }
     ~init:(fun _ -> E3.create ~await:true ~workspace:(of_text text)
       ~presets:(Filename.concat directory "presets")
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
-      ~scene3:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) () |> Result.get_ok)
+      ~draw:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) () |> Result.get_ok)
     ~update:(fun e (frame : Frame.t) ->
-      E3.update e { frame with mouse = (450., 20.); mouse_buttons = []; mouse_delta = 0., 0.; keys = []; events = [] })
+      E3.update e { frame with input = { frame.input with pointer = (450., 20.); buttons = []; keys = []; events = [] };
+        mouse_delta = 0., 0. })
     ~view:E3.scene
     ~after_present:(fun e (frame : Frame.t) ->
-      if frame.count = 120 then final := Some (List.map (fun key -> key, E3.slot e key) [ a; b; c; a_again ]);
+      if frame.input.frame = 120 then final := Some (List.map (fun key -> key, E3.slot e key) [ a; b; c; a_again ]);
       E3.after_present e frame)
-    ~on_stop:E3.close ());
+    ~on_stop:E3.close ()));
   let slot key = match Option.bind !final (List.assoc_opt key) with
     | Some (Some slot) -> slot | Some None | None -> fail ("no slot for " ^ key) in
   let sa = slot a and sb = slot b and sc = slot c and sd = slot a_again in

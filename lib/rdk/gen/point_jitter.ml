@@ -21,7 +21,7 @@ let point_int name geometry =
        | _ -> error (Printf.sprintf
            "point attribute %S must use int storage" name))
 
-let finite_vec3 value = Float.is_finite value.Vec3.x
+let finite_vec3 value = Float.is_finite value.Rays_math.Vec3.x
   && Float.is_finite value.y && Float.is_finite value.z
 
 let empty_name = function
@@ -29,7 +29,7 @@ let empty_name = function
   | Some name -> String.trim name = ""
 
 let run ?cancel ?(grain = 16_384) ?points ?mask_attribute ?id_attribute
-    ?(use_point_scale = false) ~seed ~scale ?(axis_scales = Vec3.create 1. 1. 1.)
+    ?(use_point_scale = false) ~seed ~scale ?(axis_scales = Rays_math.Vec3.create 1. 1. 1.)
     geometry =
   let selection_error = match points with
     | Some group when Group.owner group <> Group.Point ->
@@ -94,14 +94,14 @@ let run ?cancel ?(grain = 16_384) ?points ?mask_attribute ?id_attribute
             else begin
               let identity = (match ids with None -> point
                 | Some values -> values.(point)) * 0x1e3779b97f4a7c15 in
-              let sample_x = Rand.float_at seed ~index:(identity lxor
+              let sample_x = Rays_math.Rand.float_at seed ~index:(identity lxor
                   0x11b54a32d192ed03) -. 0.5
-              and sample_y = Rand.float_at seed ~index:(identity lxor
+              and sample_y = Rays_math.Rand.float_at seed ~index:(identity lxor
                   (2 * 0x11b54a32d192ed03)) -. 0.5
-              and sample_z = Rand.float_at seed ~index:(identity lxor
+              and sample_z = Rays_math.Rand.float_at seed ~index:(identity lxor
                   (3 * 0x11b54a32d192ed03)) -. 0.5 in
               let nx = source.x.(point)
-                  +. (sample_x *. amplitude *. axis_scales.Vec3.x)
+                  +. (sample_x *. amplitude *. axis_scales.Rays_math.Vec3.x)
               and ny = source.y.(point)
                   +. (sample_y *. amplitude *. axis_scales.y)
               and nz = source.z.(point)

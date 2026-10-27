@@ -1,4 +1,4 @@
-(** The kernel table tools/web/runtime/gpu.js loads (format: its header comment), as JSON text. *)
+(** The kernel table lib/web_export/runtime/gpu.js loads (format: its header comment), as JSON text. *)
 
 val json_string : string -> string
 (** A JSON (and JavaScript) string literal. Valid UTF-8 passes through; invalid

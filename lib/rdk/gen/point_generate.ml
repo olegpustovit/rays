@@ -77,7 +77,7 @@ let plan_counts ?cancel ~grain ~seed ~points ?count_ids mode geometry =
                   | Some values -> values.(point) in
                 counts.(point) <- integral +
                   if fraction > 0.
-                      && Rand.float_at seed
+                      && Rays_math.Rand.float_at seed
                            ~index:(identity lxor 0x27d4eb2d) < fraction
                   then 1 else 0
               end
@@ -115,7 +115,7 @@ let plan_counts ?cancel ~grain ~seed ~points ?count_ids mode geometry =
               else
                 let identity = match count_ids with None -> point
                   | Some values -> values.(point) in
-                if Rand.float_at seed ~index:(identity lxor 0x165667b1)
+                if Rays_math.Rand.float_at seed ~index:(identity lxor 0x165667b1)
                   < probability then counts.(point) <- 1
             end
           done);
@@ -274,7 +274,7 @@ let metadata_attribute ?cancel ~grain ~name ~prefix ~generated_values geometry =
   |> Result.get_ok
 
 let run ?cancel ?(grain = 16_384) ?points ?count_ids ?(keep_input = false)
-    ?(seed = Rand.seed 0) ?generated_group
+    ?(seed = Rays_math.Rand.seed 0) ?generated_group
     ?(source_point_attribute = "sourcepoint")
     ?(source_index_attribute = "sourceindex")
     ?(copy_point_attributes = "*") ?(copy_detail_attributes = "")

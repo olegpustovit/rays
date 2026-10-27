@@ -111,7 +111,7 @@ module Construction_table = struct
       tokens = Array.make !capacity (-1); count = 0 }
 
   let[@inline always] hash kind a b c d e f g h i =
-    let mix value key = ((value * 65_599) lxor key) land max_int in
+    let mix value key = (Rays_math.Hash.mix value key) land max_int in
     mix (mix (mix (mix (mix (mix (mix (mix (mix kind a) b) c) d) e) f) g) h) i
 
   let same table slot kind a b c d e f g h i =
@@ -187,7 +187,7 @@ let parallel_sort_indices ?cancel compare values =
     let source = ref (Array.copy values)
     and destination = ref (Array.make count values.(0)) in
     let runs = (count + run_size - 1) / run_size in
-    Rays_math.Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(runs - 1) (fun run ->
+    Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(runs - 1) (fun run ->
       Cancel.check_opt cancel;
       let first = run * run_size
       and length = min run_size (count - (run * run_size)) in
@@ -198,7 +198,7 @@ let parallel_sort_indices ?cancel compare values =
     while !width < count do
       let span = !width * 2 in
       let merges = (count + span - 1) / span in
-      Rays_math.Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(merges - 1) (fun merge ->
+      Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(merges - 1) (fun merge ->
         Cancel.check_opt cancel;
         let first = merge * span
         and middle = min count ((merge * span) + !width)

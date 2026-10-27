@@ -7,7 +7,7 @@ val run :
   ?grain:int ->
   ?owner:Attribute.owner ->
   ?translation_attribute:string ->
-  ?axis:Vec3.t ->
+  ?axis:Rays_math.Vec3.t ->
   ?gap:float ->
   mode:mode ->
   piece_attribute:string ->

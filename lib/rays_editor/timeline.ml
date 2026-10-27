@@ -33,8 +33,8 @@ let seek value ~frame =
 
 let update value (runtime_frame : Frame.t) =
   match value.mode with
-  | Playing when Float.is_finite runtime_frame.dt && runtime_frame.dt > 0. ->
-      { value with time = value.time +. runtime_frame.dt;
+  | Playing when Float.is_finite runtime_frame.input.dt && runtime_frame.input.dt > 0. ->
+      { value with time = value.time +. runtime_frame.input.dt;
         frame = Int64.succ value.frame }, [Advanced]
   | Playing | Paused | Stopped -> value, []
 

@@ -1,9 +1,9 @@
 module E = Flow.Eval
-let ok = function Ok x -> x | Error d -> failwith (Flow.Diagnostic.to_string d)
+let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let checked body =
   let forms = ok (Flow.Syntax.parse ("(workspace w (graph g :context draw " ^ body ^ "))")) in
   match Flow.Workspace.check {Flow.Check.version=1;kinds=[]} forms with
-  | Some ws,[] -> ws | _,ds -> failwith (String.concat "; " (List.map Flow.Diagnostic.to_string ds))
+  | Some ws,[] -> ws | _,ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
 let pictures = Core_fixtures.pictures
 let dump () =
   let buffer = Buffer.create 4096 in

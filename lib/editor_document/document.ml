@@ -19,7 +19,7 @@ let of_geometry ~context graph displayed =
 (* Where the text of a scene object, a World layer or the settings lives: a binding of its
    graph, an argument of another home (an inline call, written in place), a copy of a loop's
    template, or nowhere an edit can reach.  Edits to the derived objects are written back
-   through it.  The copies of a loop are instances of ONE template (register V4): [Copy]
+   through it.  The copies of a loop are instances of ONE template: [Copy]
    names the loop (its binding, or the argument holding it), the template's path inside the
    loop body ([["@result"]] or a binding of the body) and which copy this is; an edit of a
    copy is an edit of the template, so every copy changes. *)
@@ -84,7 +84,6 @@ type shell = {
   follows : (Editor_core.Panels.path * Editor_core.Panels.path) list;
   (* an inspector, list or lisp leaf with [:of]: the graph leaf it shows *)
   start : start;
-  wires : string option;
   views : (string * int list) list;
   canvases : (string * Flow.Eval.value) list;
   preview_sources : (string * preview_source) list;
@@ -149,10 +148,10 @@ let resolve_level value preferred =
    valid; compiling their display is a separate cook-time check. *)
 let validate value =
   let ( let* ) = Result.bind in
-  let finite_fields fields = List.for_all (fun (field : Parameter.field_view) ->
+  let finite_fields fields = List.for_all (fun (field : Param.field_view) ->
     match field.current with Float_value x -> Float.is_finite x | _ -> true) fields in
   let validate_network name network =
-    let* () = Result.map_error Flow.Diagnostic.to_string (Flow_sop.Network.validate network.graph) in
+    let* () = Result.map_error Diagnostic.to_string (Flow_sop.Network.validate network.graph) in
     let nodes = Edit_graph.inspect network.graph.geometry in
     let exists id = Edit_graph.find network.graph.geometry ~node_id:id <> None in
     if (match network.displayed with Some id -> not (exists id) | None -> false)
@@ -223,17 +222,17 @@ let object_network value id = Option.map (fun (network : network) ->
 let dump value =
   let b = Buffer.create 4096 in
   let line fmt = Printf.ksprintf (fun s -> Buffer.add_string b s; Buffer.add_char b '\n') fmt in
-  let pv : Editor_core.Param.value -> string = function
+  let pv : Param.value -> string = function
     | Bool_value x -> string_of_bool x | Int_value x -> string_of_int x
     | Float_value x -> Printf.sprintf "%h" x
     | Text_value x | Choice_value x -> Printf.sprintf "%S" x in
-  let fields fs = String.concat " " (List.map (fun (f : Editor_core.Param.field_view) ->
+  let fields fs = String.concat " " (List.map (fun (f : Param.field_view) ->
     f.name ^ "=" ^ pv f.current) fs) in
   let graph (n : Flow_sop.Network.t) =
     List.iter (fun (info : Edit_graph.node_info) ->
-      line "  node %d %s %S %s slots=%s inputs=%s%s %s" info.id
+      line "  node %d %s %S slots=%s inputs=%s%s %s" info.id
         (Option.value ~default:info.operation (Edit_graph.node_factory_key n.geometry ~node_id:info.id))
-        info.label (if info.bypass then "bypass" else "-")
+        info.label
         (String.concat "," (Option.value ~default:[] (Edit_graph.node_slot_names n.geometry ~node_id:info.id)))
         (String.concat "," (Array.to_list (Array.map (function Some i -> string_of_int i | None -> "_") info.inputs)))
         (match Edit_graph.root n.geometry with Some r when r = info.id -> " root" | _ -> "")
@@ -307,7 +306,7 @@ let head_text (e : S.t) = match e.node with
 let line_of source (e : S.t) =
   let text, spans = Flow.Lisp.print source in
   match List.assoc_opt e.id spans with
-  | Some { Flow.Diagnostic.start; _ } when start <= String.length text ->
+  | Some { Diagnostic.start; _ } when start <= String.length text ->
       let n = ref 1 in
       String.iteri (fun i c -> if i < start && c = '\n' then incr n) text;
       Some !n

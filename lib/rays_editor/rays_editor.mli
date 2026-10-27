@@ -5,18 +5,14 @@
     finite native execution. Overlay callbacks receive a frame and coordinates
     local to the current view pane. *)
 
-(** The v4 document a sketch can open the editor on: a checked workspace, its
+(** The workspace document a sketch can open the editor on: a checked workspace, its
     layout by path and its settings (see [Editor_document.Workspace_doc]). *)
 module Workspace_doc = Editor_document.Workspace_doc
 
-module Drawing = Drawing
-module Live_frame = Live_frame
-module Packed_pieces = Packed_pieces
-module Surface = Surface
 module Timeline = Timeline
 
 val workspace_catalog : ?factories:Sop.Edit_graph.factory list -> unit ->
-  (Flow.Check.catalog, Flow.Diagnostic.t) result
+  (Flow.Check.catalog, Diagnostic.t) result
 (** The catalog a workspace text is checked against ({!Workspace_doc.of_text}):
     the SOP factories (default [Sop_catalog.Editor.factories]) plus the scene,
     world and settings kinds generated from the editor's schemas. *)
@@ -36,7 +32,7 @@ module Source : sig
       executable and then the working directory; [None] when there is no such file. *)
 
   val file : t -> string
-  val read_imports : file:string -> string -> ((string * string) list, Flow.Diagnostic.t list) result
+  val read_imports : file:string -> string -> ((string * string) list, Diagnostic.t list) result
   (** Resolve document-level relative imports beside [file]. No transitive imports. *)
   val poll : now:float -> t -> t * string option
   (** Read content/digest at most once per half second of [now], including
@@ -53,10 +49,10 @@ end
 module Settings : sig
   type t
   val none : t
-  val make : 'record Editor_core.Param.schema -> 'record -> t
+  val make : 'record Param.schema -> 'record -> t
   (** Settings drawn in the inspector while no node is selected. *)
 
-  val get : 'record Editor_core.Param.schema -> t -> 'record
+  val get : 'record Param.schema -> t -> 'record
   (** Read the current record back; raises [Invalid_argument] when [schema]
       does not describe it. *)
 end
@@ -120,11 +116,8 @@ module Private : sig
     val keymap : command list
     (** The single table behind dispatch, which-key, and the palette. *)
 
-    val keymap3 : command list
-    (** [keymap] plus the 3D view commands ([w] fly, [v] look through). *)
-
-    val text_keys : command list
-    (** The chords the text area handles itself, listed on the key sheet and never in the keymap. *)
+    val text_keys : (string * Editor_core.Keymap.trigger) list
+    (** The text area's chords, listed on the key sheet and never in the keymap. *)
 
   end
 
@@ -165,15 +158,15 @@ module Private : sig
       view:Flow.Syntax.t -> (string, string) result
     val list : directory:string -> (string * float) list
     val delete : directory:string -> name:string -> (unit, string) result
-    val load : path:string -> factories:Sop.Edit_graph.factory list ->
-      settings:Settings.t -> (loaded, string) result
+    val load : ?gpu:Flow_ir.Gpu.config -> path:string -> factories:Sop.Edit_graph.factory list ->
+      settings:Settings.t -> unit -> (loaded, string) result
   end
 
   module Schedule : sig
     type t
     val initial : t
     val step :
-      ?live:bool -> t -> graphs:Sop.Graph.t list -> effects:Sop.Parameter.effects ->
+      ?live:bool -> t -> graphs:Sop.Graph.t list -> effects:Param.effects ->
       context_changed:bool -> force:bool -> busy:bool -> frame:Rays.Frame.t ->
       t * bool
   end
@@ -184,7 +177,7 @@ module Private : sig
     val tags : Rdk.Geometry.t -> int array option
     (** The [__flow_src] tag of every primitive, when the geometry has them. *)
     val tint : Sop.Session.output -> Set.t ->
-      (Sop.Session.output, Sop.Diagnostic.error) result
+      (Sop.Session.output, Diagnostic.t) result
     (** The primitives whose tag is in the set take the selection tint, the
         rest are dimmed (a vertex [Cd]); the empty set changes nothing. *)
   end
@@ -198,7 +191,7 @@ module Private : sig
       mark : (int * int) option;
       key : string list;
       applied : string Lazy.t;
-      body : (Flow.Syntax.t * (int * Flow.Diagnostic.span) list) option;
+      body : (Flow.Syntax.t * (int * Diagnostic.span) list) option;
       source : Flow.Syntax.t list;
       spans : Flow.Lisp.spans;
       applied_spans : Flow.Lisp.spans Lazy.t;
@@ -210,7 +203,7 @@ module Private : sig
     val definition_at : shown -> int -> string list option
     val make_shown : Flow.Syntax.t list -> string -> string list option -> tab -> shown
     val scrub_op : shown -> int * int -> string -> Flow_graph.Flow_edit.op option
-    val line_of : string -> Flow.Diagnostic.t -> int option
+    val line_of : string -> Diagnostic.t -> int option
     type find = Text_pane.find = { query : string; replace : string; case : bool; replacing : bool; at : int; grab : bool }
     type request = Text_pane.request = { select : int * int; splice : (int * int * string) list }
     val find_current : find -> (int * int) list -> (int * int) option
@@ -248,7 +241,7 @@ module Private : sig
     (** The ranked completions for the token ending at the caret. *)
     val ref_at : string -> int -> string option
     (** The graph named by the [(ref name)] form at a byte. *)
-    val color_chips : string -> (int * int * Rays.Color.t) list
+    val color_chips : string -> (int * int * Rays_math.Color.t) list
     (** The ["#rrggbb"] literals of a text, as byte ranges with their colour. *)
     val describe : vocab -> string -> int -> (int * int * string) option
     val number_at : string -> int -> (int * int) option
@@ -280,14 +273,14 @@ module Private : sig
       records : Flow_graph.Probe.t option;
       probes : string list -> int;
       selected : string list list;
-      chips : (string * Rays.Color.t) list;
+      chips : (string * Rays_math.Color.t) list;
       objects : obj list;
       root_detail : string;
       layouts : (string list * int) option;
       notes : (string * string) list;
     }
     type row
-    val chips : Flow.Eval.t -> (string * Rays.Color.t) list
+    val chips : Flow.Eval.t -> (string * Rays_math.Color.t) list
     val rows : ?wide:bool -> state -> params -> row array
     val describe : row -> string
     val row_rects : state -> params -> bounds:int * int * int * int ->
@@ -295,7 +288,7 @@ module Private : sig
   end
 
   module Cook : sig
-    type bounds = Rays.Vec3.t * Rays.Vec3.t
+    type bounds = Rays_math.Vec3.t * Rays_math.Vec3.t
     type 'prepared piece = {
       id : int;
       graph : Sop.Graph.t;
@@ -328,14 +321,15 @@ module Private : sig
     val force : 'a t -> 'a t
     val geometry : 'a t -> object_id:int -> node_id:int -> Flow_graph.Probe.geometry option
     (** The counts of a compiled node an object's last [~probes] asked for. *)
-    val pick : 'a piece -> origin:Rays.Vec3.t -> direction:Rays.Vec3.t ->
+    val pick : 'a piece -> origin:Rays_math.Vec3.t -> direction:Rays_math.Vec3.t ->
       (float * int) option
     (** The nearest displayed primitive under a ray in the piece's own space:
         its distance and provenance tag. *)
-    val update : ?input:Frame_input.t -> ?live:bool -> ?probes:(int * int) list -> ?lit:Pick.Set.t ->
+    val update : ?gpu:Flow_ir.Gpu.config -> ?input:Input.t -> ?live:bool -> ?probes:(int * int) list -> ?lit:Pick.Set.t ->
+      ?pump:(unit -> unit) ->
       'a t -> settings:Settings.t ->
       objects:(int * Flow_sop.Network.t * int) list -> edit_error:string option ->
-      effects:Sop.Parameter.effects -> timeline_changes:Timeline.change list ->
+      effects:Param.effects -> timeline_changes:Timeline.change list ->
       timeline:Timeline.t -> frame:Rays.Frame.t ->
       frame_request:(int * int) option -> 'a update
     val close : 'a t -> unit
@@ -350,16 +344,13 @@ module Renderer : sig
 
   val field :
     default:t -> get:('record -> t) -> set:(t -> 'record -> 'record) ->
-    'record Editor_core.Param.field
+    'record Param.field
   (** The ["renderer"] field labelled "Renderer". *)
-
-  val of_env : string -> t option
-  (** ["path"], ["raster"], or ["wireframe"] from an environment variable. *)
 
   val wire_mesh : Rdk.Geometry.t -> (Rays.Mesh.t, string) result
   (** Every polygon edge once, as a line mesh for the wireframe renderer. *)
 
-  val wire_color : Rays.Color.t -> Rays.Color.t
+  val wire_color : Rays_math.Color.t -> Rays_math.Color.t
   (** A contrasting blue wire color for a light or dark viewport background. *)
 end
 
@@ -370,7 +361,7 @@ module Editor : sig
     (** Explicit native benchmark selection. Production requires measured GPU costs. *)
     val status_text : 'prepared t -> string
     (** The status strip's text: a cook or edit error reads "Cook rejected: ..." in it. *)
-    val live_frame : 'prepared t -> Frame_input.t
+    val live_frame : 'prepared t -> Input.t
     (** The frame facts the sketch read last frame: the pointer only while it is the picture's. *)
     val inspector_subject : 'prepared t -> Flow.Workspace.path option
     (** The node the inspector shows for the selection, when it is exactly one. *)
@@ -381,8 +372,8 @@ module Editor : sig
     val lisp_completions : 'prepared t -> string -> Pxui.Ui.completion list
     (** Completions from the vocabulary currently used by the workspace text panes. *)
     val image_plan : 'prepared t -> Flow.Eval.plan
-    val image_payload : ?state:Flow.Eval.state -> ?live:Frame_input.t ->
-      'prepared t -> Flow.Eval.value -> (Sop.Image.t,Flow.Diagnostic.t) result
+    val image_payload : ?state:Flow.Eval.state -> ?live:Input.t ->
+      'prepared t -> Flow.Eval.value -> (Sop.Image.t,Diagnostic.t) result
     (** Inspect the owned plan and request an independent immutable CPU image cook. *)
     val image_stats : 'prepared t -> int * int
     val image_render_stats : 'prepared t -> int * int * int * int
@@ -394,11 +385,11 @@ module Editor : sig
     (** Cumulative Host totals, sinks created/closed and sink buffer/texture creations,
         including evicted runners and failed sinks; inspect outside frame measurements. *)
 
-    val image : 'prepared t -> Flow.Eval.value -> (Rays.Image.t, Flow.Diagnostic.t) result
-    val with_images : ?state:Flow.Eval.state -> ?live:Frame_input.t -> ?plan:Flow.Eval.plan ->
+    val image : 'prepared t -> Flow.Eval.value -> (Rays.Image.t, Diagnostic.t) result
+    val with_images : ?state:Flow.Eval.state -> ?live:Input.t -> ?plan:Flow.Eval.plan ->
       'prepared t ->
-      (image:(Flow.Eval.value -> (Rays.Image.t, Flow.Diagnostic.t) result) ->
-       texture:(Flow.Eval.value -> (Rays.Texture.t, Flow.Diagnostic.t) result) -> 'a) -> 'a
+      (image:(Flow.Eval.value -> (Rays.Image.t, Diagnostic.t) result) ->
+       texture:(Flow.Eval.value -> (Rays.Texture.t, Diagnostic.t) result) -> 'a) -> 'a
     (** Scoped production image ownership and initial-domain SOP snapshots for qualification. *)
     val host_stats : 'prepared t -> bool * int * int * int
     (** Quit requested, effects fired, samples created and samples destroyed. *)
@@ -408,9 +399,7 @@ module Editor : sig
     ?presets:string ->
     ?factories:Sop.Edit_graph.factory list ->
     ?settings:Settings.t ->
-    ?lights:Rays.Light.t list ->
     ?camera:Rays.Easy_camera.t ->
-    ?background:Rays.Color.t ->
     ?seed:int64 ->
     ?grain:int ->
     ?domains:int ->
@@ -421,12 +410,8 @@ module Editor : sig
     workspace:Workspace_doc.t ->
     ?source:Source.t ->
     prepare:(Settings.t -> Sop.Session.output -> ('prepared, string) result) ->
-    scene3:(Sop.Graph.t -> 'prepared -> Rays.Scene3.t) ->
-    ?overlay:(Sop.Graph.t -> 'prepared option -> Rays.Frame.t ->
-      Rays.Scene.t) ->
-    ?status:('prepared option -> string option) ->
-    unit ->
-    ('prepared t, string) result
+    draw:(Sop.Node.t -> 'prepared -> Rays.Scene3.t) ->
+    unit -> ('prepared t, string) result
   (** [factories] is the SOP catalog (default [Sop_catalog.Editor.factories]);
       passing a non-empty list replaces it (prepend custom SOPs to
       [Sop_catalog.Editor.factories] to extend).
@@ -438,7 +423,7 @@ module Editor : sig
       [prepare] runs on the cook worker domain with submission settings.
       It must only do pure CPU work on immutable/disjointly owned data;
       SDL, Metal, textures, fonts, audio, UI and runtime caches stay on the
-      initial domain. [scene3] and [overlay] run on the initial domain. *)
+      initial domain. [draw] run on the initial domain. *)
 
   val update : 'prepared t -> Rays.Frame.t -> 'prepared t
 
@@ -458,8 +443,6 @@ module Editor : sig
   (** Replace the sketch settings from code: one undo step and a fresh cook,
       since [prepare] receives them. Inspector edits do the same. *)
 
-  (* [?status] text joins the status bar under the view (cook state, then
-     the sketch's line, e.g. renderer stats); keep view overlays for pictures. *)
   (** The workspace keeps one [Editor_core.History] history of the editable document:
       graph edits and inspector commits are entries, continuous slider drags
       collapse into one, and Command/Ctrl-Z, Shift-Command/Ctrl-Z, and
@@ -539,9 +522,7 @@ module Editor : sig
   val film : 'prepared t -> Rays.Frame.t -> int * int * int * int
   (** The rect inside the view pane (pane-relative) that the render fills:
       the whole pane, or the root's aspect (its resolution, the gate) fitted and centred while
-      looking through it or while the path tracer renders. The editor paints its own 3D view into it and
-      draws the sketch [overlay] inside it, with a [Frame.t] of its size, so
-      an overlay drawing a film at the origin needs nothing else. *)
+      looking through it or while the path tracer renders. *)
 
   type slot = { film : int * int; step : int; samples : int; max_spp : int; viewports : int }
 
@@ -552,22 +533,13 @@ module Editor : sig
       accumulated, the viewport's root's cap, and how many viewports the slot serves.
       Viewports asking for the same scene, camera, film and renderer settings share one slot. *)
 
-  val take_export : 'prepared t -> 'prepared t * string option
-  (** The output path of a "Render / save PNG" request made this frame,
-      taken over by the sketch (the editor then does not capture the screen
-      in [after_present]); call it after [update] and before
-      [after_present]. A sketch renderer exports at [render_settings]. *)
-
-  val set_render_status : 'prepared t -> string option -> 'prepared t
-  (** Replaces the status bar's render text, e.g. an export's progress. *)
-
   val view_camera : 'prepared t -> Rays.Camera.t
   (** What the view pane shows this frame, for a sketch's own renderer:
       [render_camera] while looking through it, otherwise the viewport camera
       with the ACTIVE camera's lens (focused on the orbit target unless the
       camera follows the viewport). With follow viewport off, the view orbits
       freely around the camera object, whose frustum, aim line, and eye
-      marker are drawn over the sketch's overlay; clicking the eye selects
+      marker are drawn over the sketch renderer's picture; clicking the eye selects
       it, and W shows a handle sliding its target along the view direction,
       its focus distance. The Viewport section pairs the look-through toggle
       with "Camera follows viewport" (the ACTIVE camera's own parameter, one
@@ -598,8 +570,7 @@ module Editor : sig
   (** {2 Scene}
 
       The document is a scene of objects above the SOP networks. The code
-      [graph] is the geometry object [geo1]; [?lights] become light objects
-      and [?world] the World. The graph pane shows the open level as a graph
+      [graph] is the geometry object [geo1], and [?world] the World. The graph pane shows the open level as a graph
       or a list ([/ l]): [i], a double-click, or activating a list row
       enters a geometry object's SOP network or the World's layer stack, and
       [u] goes back up; [/ e] opens the World (created on first use), and
@@ -615,7 +586,7 @@ module Editor : sig
   val scene_document : 'prepared t -> Sop.Edit_graph.t
   (** Objects as nodes: input 0 is the parent, parameters the transform. *)
 
-  val objects : 'prepared t -> (Rays.Mat4.t * 'prepared) list
+  val objects : 'prepared t -> (Rays_math.Mat4.t * 'prepared) list
   (** Visible, renderable geometry objects' latest cooks at their world
       transforms, e.g. for a sketch's own path tracer. *)
 
@@ -630,7 +601,6 @@ module Editor : sig
     ?inputs:(string * (string * Flow.Eval.value) list) list ->
     ?name:string ->
     ?factories:Sop.Edit_graph.factory list ->
-    ?lights:Rays.Light.t list ->
     ?camera:Rays.Easy_camera.t ->
     ?seed:int64 ->
     ?grain:int ->
@@ -640,11 +610,8 @@ module Editor : sig
     workspace:Workspace_doc.t ->
     ?source:Source.t ->
     prepare:(Settings.t -> Sop.Session.output -> ('prepared, string) result) ->
-    scene3:(Sop.Graph.t -> 'prepared -> Rays.Scene3.t) ->
-    ?overlay:(Sop.Graph.t -> 'prepared option -> Rays.Frame.t ->
-      Rays.Scene.t) ->
-    unit ->
-    unit
+    draw:(Sop.Node.t -> 'prepared -> Rays.Scene3.t) ->
+    unit -> (unit, Rays.Sketch.error) result
 end
 
 (** The frame reducer without a UI frame: an unstable hook for tests, like {!Private}.
@@ -673,11 +640,11 @@ module Workspace : sig
       the SHA-256 of its text. *)
 
   val load : ?ops:Flow.Op.t list -> ?imports:(string * string) list -> ?factories:Sop.Edit_graph.factory list -> string ->
-    (Workspace_doc.t, Flow.Diagnostic.t list) result
+    (Workspace_doc.t, Diagnostic.t list) result
   (** Parse and check a [.rays] text against {!workspace_catalog}. *)
 
   val export : ?graph:string -> ?fps:int -> directory:string -> frames:int ->
-    Workspace_doc.t -> (unit, Flow.Diagnostic.t) result
+    Workspace_doc.t -> (unit, Diagnostic.t) result
   (** Export a draw graph (the first by default) through [Sketch.export_state].
       Each invocation starts a fresh fold and pins every frame fact. *)
 
@@ -690,8 +657,8 @@ module Workspace : sig
     Rays.Easy_camera.t -> Rays.Easy_camera.t
   (** The camera of the scene's first camera node, or the default base camera. *)
 
-  val main : ?text:string -> string -> unit
+  val main : ?text:string -> string -> (unit, Diagnostic.t list) result
   (** [main path] opens the [.rays] file at [path] and its imports beside it in the editor
       ([rays FILE.rays]); [text] opens that text instead, saved to [path] (the empty editor). On a
-      failure it prints the diagnostics and exits 1. *)
+      failure it returns diagnostics without printing or exiting. *)
 end

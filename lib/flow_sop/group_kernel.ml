@@ -4,7 +4,7 @@ module Group = Rdk.Group
 module Edge = Rdk.Edge_group
 
 type owner = Ordinary of Group.owner | Edge
-let error code message = Error (Flow.Diagnostic.error ~code message)
+let error code message = Error (Diagnostic.error ~code message)
 let owner = function
   | "point" -> Ok (Ordinary Group.Point) | "vertex" -> Ok (Ordinary Group.Vertex)
   | "primitive" -> Ok (Ordinary Group.Primitive) | "edge" -> Ok Edge
@@ -43,7 +43,7 @@ let read_points ~owner ~name geometry =
     |Edge->(match G.find_edge_group name geometry with
         |None->missing name|Some group->Ok(Rdk_core.Element_selection.Selected_edges group)) in
   Result.bind selection(fun selection->Result.map mask
-    (Result.map_error(Flow.Diagnostic.error ~code:"E_GROUP_SOURCE")
+    (Result.map_error(Diagnostic.error ~code:"E_GROUP_SOURCE")
       (Rdk_core.Element_selection.promote ~grain:4096 ~destination:Group.Point
         selection(G.topology geometry))))
 let order ~owner ~name geometry =
@@ -66,7 +66,7 @@ let names ~owner ~pattern geometry =
       Ok (E.Text_array (Array.of_list (List.filter (Rdk.Attribute_pattern.matches pattern) names)))
 let entries ~selected_owner ~pattern ~component geometry =
   Result.bind(Attribute_metadata.group_owner selected_owner)(fun selected->
-  Result.bind(Result.map_error(Flow.Diagnostic.error ~code:"E_GROUP_PATTERN")(Rdk.Attribute_pattern.compile pattern))(fun pattern->
+  Result.bind(Result.map_error(Diagnostic.error ~code:"E_GROUP_PATTERN")(Rdk.Attribute_pattern.compile pattern))(fun pattern->
     let visit f =
       List.iter(fun group->let owner=match Group.owner group with
         |Group.Point->Rdk.Group_ops.Group_points|Vertex->Group_vertices|Primitive->Group_primitives in
@@ -86,7 +86,7 @@ let write ?order ~owner ~name:group_name mask geometry =
   else if Array.exists (fun value -> value <> 0 && value <> 1) mask then
     error "E_GROUP_MASK" "Group mask values must be 0 or 1."
   else
-    let map_error result = Result.map_error (fun message -> Flow.Diagnostic.error ~code:"E_GROUP_ORDER" message) result in
+    let map_error result = Result.map_error (fun message -> Diagnostic.error ~code:"E_GROUP_ORDER" message) result in
     match owner, order with
     | Edge, Some _ -> error "E_GROUP_OWNER" "Edge groups do not have an explicit traversal order."
     | Edge, None ->

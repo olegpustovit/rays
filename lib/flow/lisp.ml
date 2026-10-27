@@ -21,37 +21,12 @@ let vis s =
 
 let sp n = String.make (max n 0) ' '
 
-let float x =
-  if Float.is_nan x then "NaN"
-  else if not (Float.is_finite x) then (if x > 0. then "Infinity" else "-Infinity")
-  else
-    let text = List.find (fun t -> float_of_string t = x)
-      (List.map (fun p -> Printf.sprintf "%.*g" p x) [ 15; 16; 17 ]) in
-    let dotted t = if String.contains t '.' then t else t ^ ".0" in
-    match String.index_opt text 'e' with
-    | None -> dotted text
-    | Some at ->
-        let negative = text.[0] = '-' in
-        let mantissa = String.sub text (if negative then 1 else 0)
-          (at - if negative then 1 else 0) in
-        let exponent = int_of_string (String.sub text (at + 1) (String.length text - at - 1)) in
-        let point = Option.value ~default:(String.length mantissa) (String.index_opt mantissa '.') in
-        let digits = String.concat "" (String.split_on_char '.' mantissa) in
-        let shifted = point + exponent and n = String.length digits in
-        (if negative then "-" else "")
-        ^ (if shifted <= 0 then "0." ^ String.make (-shifted) '0' ^ digits
-           else if shifted >= n then digits ^ String.make (shifted - n) '0' ^ ".0"
-           else String.sub digits 0 shifted ^ "." ^ String.sub digits shifted (n - shifted))
+let float = Param.float_text ~decimal:true
 
 let number raw =
   if List.mem raw ["NaN"; "Infinity"; "-Infinity"] then raw else
-  let v = float_of_string raw in
   if String.exists (fun c -> c = 'e' || c = 'E') raw then raw
-  else if Float.is_integer v then (if String.contains raw '.' then float v else raw)
-  else
-    let rec trim s = if s.[String.length s - 1] = '0' then trim (String.sub s 0 (String.length s - 1)) else s in
-    let s = trim (Printf.sprintf "%.6f" v) in
-    if float_of_string s = v then s else raw
+  else if String.contains raw '.' then float (float_of_string raw) else raw
 
 let string text =
   let buf = Buffer.create (String.length text + 2) in
@@ -178,10 +153,10 @@ and core x ind =
       let vec_at k = k < len && is_vec (nth ks k) in
       let vec_len k = match (nth ks k).node with Vec v -> List.length v | _ -> 0 in
       let tail k col = line k col in
-      let slots_plain n = no_notes (List.filteri (fun i _ -> i >= 1 && i < n) ks) in
+      let slots_plain n = no_notes (List.take (n - 1) (List.drop 1 ks)) in
       (* slots printed flat: no comment on or inside them *)
       let slots_flat n = slots_plain n
-        && not (List.exists deep_ (List.filteri (fun i _ -> i >= 1 && i < n) ks)) in
+        && not (List.exists deep_ (List.take (n - 1) (List.drop 1 ks))) in
       let special = List.mem hd ["graph"; "defn"; "defmacro"] in
       let start, steps = spine x in
       if List.length steps >= 3 then begin
@@ -194,7 +169,7 @@ and core x ind =
         "(workspace " ^ flat_ (nth ks 1)
         ^ String.concat "" (List.map (fun y ->
             "\n\n" ^ sp (ind + 2) ^ note_at y (ind + 2) ^ pp y (ind + 2))
-            (List.filteri (fun i _ -> i >= 2) ks))
+            (List.drop 2 ks))
         ^ end_n (ind + 2) ^ ")"
       else if not deep
            && (fits ind width
@@ -252,7 +227,7 @@ and core x ind =
             ^ pp s (if s.notes <> [] then col else ind + 6)
           else "(cond" in
         opening ^ String.concat "" (List.map (fun r -> "\n" ^ sp col ^ r)
-          (rows (List.filteri (fun i _ -> i >= first) ks))) ^ end_n col ^ ")"
+          (rows (List.drop first ks))) ^ end_n col ^ ")"
       else begin
         (* a call: the first positional argument on the head line, keyword
            pairs aligned below *)
@@ -310,7 +285,7 @@ let finish text =
   (Buffer.contents buf, List.sort (fun (a, _) (b, _) -> compare a b) !spans)
 
 let print forms =
-  Phase_timer.measure Print (fun () ->
+  Phase_timer.measure "print" (fun () ->
   let text = String.concat "\n\n"
     (List.map (fun x -> note_at x 0 ^ pp x 0) forms) ^ "\n" in
   finish text)

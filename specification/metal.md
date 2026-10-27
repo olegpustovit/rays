@@ -130,7 +130,7 @@ their object retained instead of autoreleased. Until 2026-10-11 the drain, the
 buffer and texture copies, the render-pass setters and the generated pool-free
 calls did not: each frame left its command buffer, encoder, pass descriptor,
 drawable and written buffers retained for the life of the process (4.0 KiB
-of footprint per frame, 0 after; `specification/web-export/results.md`).
+of footprint per frame, 0 after; see [performance.md](performance.md)).
 `runtime_autorelease` under `@runtest-native` runs lifecycles and frames with
 `OBJC_DEBUG_MISSING_POOLS` and fails on any report from the initial thread.
 

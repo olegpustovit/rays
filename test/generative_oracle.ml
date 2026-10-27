@@ -7,12 +7,12 @@ open Rays
 let update time (frame : Frame.t) =
   if Frame.has_event
       (function
-        | Event.KeyPressed Input.Escape
-        | Event.KeyPressed (Input.KeyChar 'q') -> true
+        | Input.Key_pressed Input.Escape
+        | Input.Key_pressed (Input.KeyChar 'q') -> true
         | _ -> false)
       frame
   then Sketch.quit ();
-  time +. frame.dt
+  time +. frame.input.dt
 
 let view time (frame : Frame.t) =
   let circles =
@@ -28,16 +28,16 @@ let view time (frame : Frame.t) =
         |> int_of_float
       in
       let color =
-        Color.rgb
+        Rays_math.Color.rgb
           (int_of_float (127. +. (127. *. sin (phase *. 0.01))))
           (int_of_float (127. +. (127. *. sin (phase *. 0.011))))
           (int_of_float (127. +. (127. *. sin (phase *. 0.012))))
       in
       Scene.circle ~at:(x, y) ~radius ~fill:color ())
   in
-  let center_x, center_y = frame.width / 2, frame.height / 2 in
+  let center_x, center_y = (fst frame.input.size) / 2, (snd frame.input.size) / 2 in
   Scene.([
-    clear Color.black;
+    clear Rays_math.Color.black;
     translate center_x center_y [
       rotate (Float.pi /. 2.) [
         translate (-center_x) (-center_y) [

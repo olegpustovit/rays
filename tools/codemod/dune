@@ -1,7 +1,29 @@
 (executable
  (name codemod)
- (modules codemod metal_registry result_bind open_domains split_modules)
+ (modules codemod metal_registry result_bind)
  (libraries compiler-libs.common str))
+
+(rule
+ (alias runtest)
+ (action (run %{exe:codemod.exe} history-comments --self-test)))
+
+(rule
+ (alias runtest)
+ (action (run %{exe:codemod.exe} function-lengths --self-test)))
+
+(rule
+ (alias runtest)
+ (action (run %{exe:codemod.exe} spec-links --self-test)))
+
+(rule
+ (alias history-comments)
+ (deps (source_tree ../../lib))
+ (action (run %{exe:codemod.exe} history-comments %{deps})))
+
+(rule
+ (alias function-lengths)
+ (deps function-lengths.tsv (source_tree ../../lib))
+ (action (run %{exe:codemod.exe} function-lengths %{dep:function-lengths.tsv} %{deps})))
 
 (rule
  (alias runtest)
@@ -9,16 +31,8 @@
 
 (rule
  (alias runtest)
- (action (run %{exe:codemod.exe} result-bind --self-test %{exe:../../ppx/result_bind/result_bind_ppx.exe})))
+ (action (run %{exe:codemod.exe} result-bind --self-test)))
 
 (rule
  (alias runtest)
  (action (run %{exe:codemod.exe} rename --self-test)))
-
-(rule
- (alias runtest)
- (action (run %{exe:codemod.exe} open-domains --self-test)))
-
-(rule
- (alias runtest)
- (action (run %{exe:codemod.exe} split-modules --self-test)))

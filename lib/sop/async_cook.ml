@@ -1,5 +1,5 @@
 type error =
-  | Cook_error of Diagnostic.error
+  | Cook_error of Diagnostic.t
   | Prepare_error of string
   | Uncaught_exception of string
 
@@ -132,7 +132,7 @@ let create ~max_entries ~max_payload_bytes =
     } in
     let worker = Domain.spawn (fun () ->
       Fun.protect
-        ~finally:Rays_math.Parallel.release_current_domain_pools
+        ~finally:Parallel.release_current_domain_pools
         (fun () -> worker_loop value none_volatile)) in
     value.worker <- Some worker;
     value)

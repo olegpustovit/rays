@@ -1,11 +1,15 @@
 type t
-type render_mode=Blended of Color.t
+type render_mode=Blended of Rays_math.Color.t
 type hinting=Normal_hinting|Light_hinting|Mono_hinting|None_hinting
 type alignment=Left|Center|Right
 val load:string->int->(t,[`Msg of string])result
 val system : ?size:int -> unit -> (t,[`Msg of string]) result
 val cached_text : ?wrap:int -> ?align:alignment -> ?density:int -> t -> string -> render_mode -> (Image.t,[`Msg of string]) result
 module Private : sig
+  type cache_context
+  val create_cache_context : unit -> cache_context
+  val with_cache_context : cache_context -> (unit -> 'a) -> 'a
+  val clear_cache_context : cache_context -> unit
   type automatic
   val borrow_automatic : ?wrap:int -> ?align:alignment -> ?density:int -> size:int -> string -> render_mode -> (automatic,[`Msg of string]) result
   val automatic_image : automatic -> Image.t

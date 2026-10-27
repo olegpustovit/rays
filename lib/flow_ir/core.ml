@@ -23,7 +23,7 @@ type primitive =
   | Array_segment_argmax | Next_after
   | Array_scatter_add | Array_compact | Array_scan_sum | Array_grade | Array_index_of
   | Rand | Rand_at | Fma | Checked_mul | Checked_fma | Noise3 | Color_parse | Color_byte of byte_mode
-  | Coerce of Flow.Ty.t | Truthy | Error | Fail of string * string | Fail_diagnostic of Flow.Diagnostic.t
+  | Coerce of Flow.Ty.t | Truthy | Error | Fail of string * string | Fail_diagnostic of Diagnostic.t
 
 type frame_field = Time | Dt | Index | Tick | Width | Height | Pointer_x | Pointer_y | Input
 
@@ -41,7 +41,7 @@ type iteration = Static_index of int | Local_index of int
 type source = {
   site : Flow.Workspace.path; owner : Flow.Workspace.path;
   instance : int; prefix : Flow.Workspace.path;
-  iter : iteration list; span : Flow.Diagnostic.span option;
+  iter : iteration list; span : Diagnostic.span option;
 }
 
 (* Drawing statements: operands are locals holding the operator's own inputs, with every
@@ -73,7 +73,7 @@ and statement_node =
   | If of { condition : int; yes : statement list; no : statement list }
   | Iterate of { sequence : int; index : int; item : int; limit : int; body : statement list }
   | Counted of { first : int; last : int; count : int; index : int; item : int;
-      limit : int; init : statement list; body : statement list }
+      limit : int; stop : int option; init : statement list; body : statement list }
   | Store of { sequence : int; index : int; value : int }
   | State_read of { slot : int; result : int; init : statement list; initial : int }
   | State_peek of { slot : int; found : int; value : int }
@@ -88,6 +88,8 @@ type state_slot = {
 module Region = struct
   type projection = Value | Valid
   type conversion = Flow.Packed_ops.conversion = To_float | Truncate | Floor | Ceil | Round | Coerce_int | Integer_result of string
+  type loop = {first:int; last:int; finish:int; initial:int array; limit:int option;
+    span:Diagnostic.span}
   type instruction =
     | Const of float | Input of int * int * int
     | Uniform of int * int | Frame of string | Accumulator of int
@@ -104,16 +106,22 @@ module Region = struct
     | Convert of conversion * int | Int_select of int * int * int
     | Guarded of (int * bool) list * instruction
     | Raise of Flow.Ty.t * string * string * string option
+    | Loop_begin of loop
+    | Loop_carry of int * int * Flow.Ty.t
+    | Loop_end of int * int array * int option
+    | Loop_result of int * int * Flow.Ty.t
   let rec integer_register = function
     | Int_const _ | Int_input _ | Int_uniform _ | Int_frame _ | Int_accumulator
     | Int_binary _ | Int_abs _ | Int_select _ | Int_gather _ | Raise (Flow.Ty.Int,_,_,_) -> true
     | Convert (To_float,_) -> false | Convert _ -> true
     | Guarded (_,instruction) -> integer_register instruction
+    | Loop_begin _ | Loop_carry (_,_,Flow.Ty.Int) | Loop_result (_,_,Flow.Ty.Int) -> true
     | _ -> false
   let rec text_register = function
     | Text_const _ | Text_input _ | Text_uniform _ | Text_gather _ | Text_select _
     | Raise (Flow.Ty.Text,_,_,_) -> true
     | Guarded (_,instruction) -> text_register instruction
+    | Loop_carry (_,_,Flow.Ty.Text) | Loop_result (_,_,Flow.Ty.Text) -> true
     | _ -> false
   let rec operands = function
     | Binary (_,a,b) | Int_binary (_,a,b) | Int_compare (_,a,b) | Rand_at(a,b) | Checked_mul(_,a,b)
@@ -121,6 +129,10 @@ module Region = struct
     | Unary (_,a) | Int_abs a | Convert (_,a) -> [a]
     | Noise3 (a,b,c,_,_,_,_) | Fma(a,b,c) | Select (a,b,c) | Int_select (a,b,c) | Text_select(a,b,c) | Checked_fma(_,a,b,c) -> [a;b;c]
     | Guarded (guards,instruction) -> List.map fst guards @ operands instruction
+    | Loop_begin {first;last;initial;_} -> first::last::Array.to_list initial
+    | Loop_carry (loop,_,_) -> [loop]
+    | Loop_end (loop,values,stop) -> loop::Array.to_list values @ Option.to_list stop
+    | Loop_result (loop,component,_) -> [loop;loop+1+component]
     | _ -> []
   type iteration = Zip | Product
   type result = Collect | Sum of bool | Accumulate of Flow.Workspace.term * bool
@@ -130,7 +142,7 @@ module Region = struct
     residual : Flow.Eval.residual; term : Flow.Workspace.term;
     sources : (Flow.Eval.residual * Flow.Workspace.term) array; widths : int array;
     uniforms : Flow.Eval.value array; uniform_names : (string * string list) array;
-    code : instruction array;
+    code : instruction array; dependent : bool array option Atomic.t;
     outputs : int array array; (* component registers of each output; [Collect] regions only may have several *)
     count : int option; origin : origin option;
     iteration : iteration; result : result; skip : int array;
@@ -138,6 +150,234 @@ module Region = struct
     fusion : bool; dynamic : bool; count_source : count_source;
     body : Flow.Workspace.term; binding_fn : string option;
     sites : (int * Flow.Workspace.path * int list) list }
+  let dependent_of code =
+    let dependent = Array.make (Array.length code) false in
+    let rec accumulator = function Accumulator _ | Int_accumulator -> true
+      | Guarded (_, body) -> accumulator body | _ -> false in
+    Array.iteri (fun id instruction ->
+      dependent.(id) <- accumulator instruction
+        || List.exists (fun register -> dependent.(register)) (operands instruction);
+      let rec finish = function
+        | Loop_end (loop,_,_) ->
+            let carried=ref dependent.(loop) in
+            for slot=loop+1 to id do carried:= !carried || dependent.(slot) done;
+            Array.fill dependent loop (id-loop+1) !carried
+        | Guarded (_,body) -> finish body
+        | _ -> () in
+      finish instruction) code;
+    dependent
+  let dependent_flags r = match Atomic.get r.dependent with
+    | Some flags -> flags
+    | None ->
+        let flags = dependent_of r.code in
+        if Atomic.compare_and_set r.dependent None (Some flags) then flags
+        else Option.get (Atomic.get r.dependent)
+
+  let controls_valid code outputs =
+    let n=Array.length code in
+    let scopes=Array.make n [] and closed=Array.make n false in
+    let active=ref [] and valid=ref true in
+    let rec bare=function Guarded(_,body)->bare body|body->body in
+    let rec guards=function Guarded(gs,body)->gs@guards body|_->[] in
+    let inside outer inner=List.for_all(fun scope->List.mem scope inner)outer in
+    let header id=if id<0 || id>=n then None else match bare code.(id)with
+      |Loop_begin loop->Some loop|_->None in
+    let scalar id ty=if id<0 || id>=n then false else match ty with
+      |Flow.Ty.Int->integer_register code.(id)
+      |Text->text_register code.(id)
+      |Float|Bool->not(integer_register code.(id) || text_register code.(id))
+      |_->false in
+    Array.iteri(fun slot instruction->
+      scopes.(slot)<- !active;
+      let reads=operands instruction in
+      if List.exists(fun id->id<0 || id>=slot)reads then valid:=false
+      else if (match bare instruction with Loop_result _->false|_->true) &&
+        List.exists(fun id->not(inside scopes.(id) !active))reads then valid:=false;
+      match bare instruction with
+      |Loop_begin loop->
+          if loop.finish<=slot+Array.length loop.initial || loop.finish>=n
+            || loop.initial=[||] || loop.first<0 || loop.first>=slot || loop.last<0 || loop.last>=slot
+            || not(integer_register code.(loop.first) && integer_register code.(loop.last))
+            || Option.fold ~none:false ~some:((>)0)loop.limit then valid:=false
+          else begin
+            (match bare code.(loop.finish)with
+             |Loop_end(owner,values,_)when owner=slot && Array.length values=Array.length loop.initial->()
+             |_->valid:=false);
+            Array.iteri(fun component initial->match bare code.(slot+1+component)with
+              |Loop_carry(owner,index,ty)when owner=slot && index=component && scalar initial ty->()
+              |_->valid:=false)loop.initial
+          end;
+          active:=slot:: !active;scopes.(slot)<- !active
+      |Loop_carry(loop,component,ty)->
+          (match !active,header loop with
+           |owner::_,Some control when owner=loop && component>=0 && component<Array.length control.initial
+             && slot=loop+1+component && scalar control.initial.(component)ty
+             && guards instruction=guards code.(loop)->()
+           |_->valid:=false)
+      |Loop_end(loop,values,stop)->
+          (match !active,header loop with
+           |owner::rest,Some control when owner=loop && control.finish=slot
+             && control.finish>loop+Array.length control.initial && control.finish<n
+             && Array.length values=Array.length control.initial && guards instruction=guards code.(loop)->
+               Array.iteri(fun component value->match bare code.(loop+1+component)with
+                 |Loop_carry(_,_,ty)when scalar value ty->()|_->valid:=false)values;
+               if Option.fold ~none:false ~some:(fun value->not(scalar value Flow.Ty.Bool))stop then valid:=false;
+               closed.(loop)<-true;active:=rest
+           |_->valid:=false)
+      |Loop_result(loop,component,ty)->
+          (match header loop with
+           |Some control when loop<slot && closed.(loop) && component>=0
+             && loop+1+component<n
+             && component<Array.length control.initial && inside (List.tl scopes.(loop)) !active
+             && guards instruction=guards code.(loop)->
+               (match bare code.(loop+1+component)with
+                |Loop_carry(_,_,stored)when stored=ty->()|_->valid:=false)
+           |_->valid:=false)
+      |_->())code;
+    !valid && !active=[] && Array.for_all(Array.for_all(fun id->
+      id>=0 && id<n && scopes.(id)=[] && match bare code.(id)with
+      |Loop_begin _|Loop_carry _|Loop_end _->false|_->true))outputs
+
+  let validate (r : t) =
+    let invalid message =
+      Result.Error [Diagnostic.error ~span:r.term.form.span ~code:"E_PACKED_LAYOUT" message] in
+    let ok slot id = id >= 0 && id < slot in
+    let operands_ok = ref true and controls = ref false in
+    let rec bare = function Guarded (_, body) -> bare body | body -> body in
+    let array_handle id = id >= 0 && id < Array.length r.code
+      && (match bare r.code.(id) with Array_prepare _ -> true | _ -> false) in
+    let table_type id = match bare r.code.(id) with
+      | Array_prepare (_, ty) -> ty | _ -> Flow.Ty.Any in
+    let text id = id >= 0 && id < Array.length r.code && text_register r.code.(id) in
+    let rec guards = function Guarded (gs, body) -> gs @ guards body | _ -> [] in
+    let prepared_for selected array =
+      List.for_all (fun guard -> List.mem guard selected) (guards r.code.(array)) in
+    let rec valid ?(selected = []) slot instruction =
+      if not (List.for_all (ok slot) (operands instruction)) then operands_ok := false;
+      (match instruction with
+       | Gather _ | Int_gather _ | Text_gather _ | Guarded _ -> ()
+       | _ -> if List.exists array_handle (operands instruction) then operands_ok := false);
+      (match instruction with
+       | Text_select _ | Guarded _ | Loop_begin _ | Loop_end _ | Loop_result _ -> ()
+       | _ -> if List.exists text (operands instruction) then operands_ok := false);
+      match instruction with
+      | Array_prepare (input, ty) ->
+          if input < 0 || input >= Array.length r.uniforms
+            || not (match ty with Flow.Ty.Array (Flow.Ty.Int | Text | Float | Vec2 | Vec3 | Vec4) -> true | _ -> false)
+          then operands_ok := false
+          else
+            let actual = match r.uniforms.(input) with
+              | Flow.Eval.Residual residual -> (Flow.Eval.Residual.residual_view residual).term.ty
+              | value -> Flow.Value.ty_of value in
+            if actual <> ty then operands_ok := false
+      | Gather (array, index, width, component) ->
+          if not (ok slot array && ok slot index && array_handle array)
+            || not (integer_register r.code.(index)) || component < 0 || component >= width
+          then operands_ok := false
+          else if not (prepared_for selected array) || table_type array = Flow.Ty.Array Flow.Ty.Int
+            || Flow.Packed_ops.array_width (table_type array) <> Some width then operands_ok := false
+      | Int_gather (array, index) ->
+          if not (ok slot array && ok slot index && array_handle array)
+            || not (integer_register r.code.(index)) then operands_ok := false
+          else if not (prepared_for selected array) || table_type array <> Flow.Ty.Array Flow.Ty.Int
+          then operands_ok := false
+      | Text_gather (array, index) ->
+          if not (ok slot array && ok slot index && array_handle array)
+            || not (integer_register r.code.(index)) then operands_ok := false
+          else if not (prepared_for selected array) || table_type array <> Flow.Ty.Array Flow.Ty.Text
+          then operands_ok := false
+      | Text_select (condition, yes, no) ->
+          if array_handle condition || text condition || not (text yes && text no) then operands_ok := false
+      | Text_input input ->
+          if input < 0 || input >= Array.length r.sources || input >= Array.length r.widths
+            || r.widths.(input) <> 1 || (snd r.sources.(input)).Flow.Workspace.ty <> Flow.Ty.Array Flow.Ty.Text
+          then operands_ok := false
+      | Text_uniform input ->
+          if input < 0 || input >= Array.length r.uniforms then operands_ok := false
+          else
+            let ty = match r.uniforms.(input) with
+              | Flow.Eval.Residual residual -> (Flow.Eval.Residual.residual_view residual).term.ty
+              | value -> Flow.Value.ty_of value in
+            if ty <> Flow.Ty.Text then operands_ok := false
+      | Input (input, width, component) ->
+          if input < 0 || input >= Array.length r.widths || width <> r.widths.(input)
+            || component < 0 || component >= width
+            || input < Array.length r.sources && (snd r.sources.(input)).Flow.Workspace.ty = Flow.Ty.Array Flow.Ty.Text
+          then operands_ok := false
+      | Int_input input ->
+          if input < 0 || input >= Array.length r.sources || input >= Array.length r.widths
+            || r.widths.(input) <> 1 || (snd r.sources.(input)).Flow.Workspace.ty <> Flow.Ty.Array Flow.Ty.Int
+          then operands_ok := false
+      | Uniform (input, component) ->
+          if input < 0 || input >= Array.length r.uniforms || component < 0 || component >= 4 then operands_ok := false
+          else if (match r.uniforms.(input) with
+            | Flow.Eval.Residual residual -> (Flow.Eval.Residual.residual_view residual).term.ty
+            | value -> Flow.Value.ty_of value) = Flow.Ty.Text then operands_ok := false
+      | Int_uniform input ->
+          if input < 0 || input >= Array.length r.uniforms then operands_ok := false
+          else
+            let ty = match r.uniforms.(input) with
+              | Flow.Eval.Residual residual -> (Flow.Eval.Residual.residual_view residual).term.ty
+              | value -> Flow.Value.ty_of value in
+            if ty <> Flow.Ty.Int then operands_ok := false
+      | Accumulator component -> if component < 0 || component >= 4 then operands_ok := false
+      | Loop_begin _ | Loop_carry _ | Loop_end _ | Loop_result _ -> controls:=true
+      | Guarded (guards, body) ->
+          if List.exists (fun (id, _) -> array_handle id || text id) guards then operands_ok := false;
+          valid ~selected:(selected @ guards) slot body
+      | _ -> () in
+    Array.iteri valid r.code;
+    if Array.length r.widths <> Array.length r.sources
+      || not (Array.for_all (fun width -> width >= 1 && width <= 4) r.widths) then
+      invalid "Region inputs need matching sources and widths from 1 to 4."
+    else if not !operands_ok || (!controls && not(controls_valid r.code r.outputs)) then
+      invalid "Region instruction reads an invalid input or a register defined later."
+    else if Array.length r.code > Flow.Packed_ops.register_limit then
+      invalid (Printf.sprintf "Region exceeds %d registers." Flow.Packed_ops.register_limit)
+    else if r.outputs = [||] || (Array.length r.outputs > 1 && r.result <> Collect) then
+      invalid "A region has one output, or several only when it collects."
+    else if not (Array.for_all (fun output -> Array.length output >= 1 && Array.length output <= 4
+        && Array.for_all (fun id -> ok (Array.length r.code) id && not (array_handle id)) output
+        && (not (Array.exists text output) || Array.length output = 1)) r.outputs) then
+      invalid "Region output needs 1 to 4 existing scalar registers."
+    else if r.result <> Collect && Array.exists text_register r.code then
+      invalid "Text leaves require collecting kernels."
+    else Result.Ok r
+
+  let make ~residual ~term ~sources ~widths ~uniforms ~uniform_names ~code ~outputs ~count ~origin
+      ~iteration ~result ~skip ~stages ~fusion ~dynamic ~count_source ~body ~binding_fn ~sites =
+    validate {residual; term; sources; widths; uniforms; uniform_names; code; dependent = Atomic.make None; outputs;
+      count; origin; iteration; result; skip; stages; fusion; dynamic; count_source; body; binding_fn; sites}
+
+  let rebuild t ?residual ?term ?sources ?widths ?uniforms ?uniform_names ?code ?outputs ?count ?origin
+      ?iteration ?result ?skip ?stages ?fusion ?dynamic ?count_source ?body ?binding_fn ?sites () =
+    make ~residual:(Option.value residual ~default:t.residual)
+      ~term:(Option.value term ~default:t.term) ~sources:(Option.value sources ~default:t.sources)
+      ~widths:(Option.value widths ~default:t.widths) ~uniforms:(Option.value uniforms ~default:t.uniforms)
+      ~uniform_names:(Option.value uniform_names ~default:t.uniform_names)
+      ~code:(Option.value code ~default:t.code) ~outputs:(Option.value outputs ~default:t.outputs)
+      ~count:(Option.value count ~default:t.count) ~origin:(Option.value origin ~default:t.origin)
+      ~iteration:(Option.value iteration ~default:t.iteration) ~result:(Option.value result ~default:t.result)
+      ~skip:(Option.value skip ~default:t.skip) ~stages:(Option.value stages ~default:t.stages)
+      ~fusion:(Option.value fusion ~default:t.fusion) ~dynamic:(Option.value dynamic ~default:t.dynamic)
+      ~count_source:(Option.value count_source ~default:t.count_source) ~body:(Option.value body ~default:t.body)
+      ~binding_fn:(Option.value binding_fn ~default:t.binding_fn) ~sites:(Option.value sites ~default:t.sites)
+  module Private = struct
+    let with_captures (t : t) ~residual ~uniforms ~sources ~stages ~count =
+      let diagnostic = Diagnostic.error ~span:t.term.form.span ~code:"E_CORE_ARGUMENT"
+        "A rebound region changed its validated capture layout." in
+      let ty = function
+        | Flow.Eval.Residual residual -> (Flow.Eval.Residual.residual_view residual).term.ty
+        | value -> Flow.Value.ty_of value in
+      if Array.length uniforms <> Array.length t.uniforms
+        || not (Array.for_all2 (fun before after -> ty before = ty after) t.uniforms uniforms)
+        || Array.length sources <> Array.length t.sources
+        || not (Array.for_all2 (fun (_, before) (_, after) -> before.Flow.Workspace.ty = after.Flow.Workspace.ty)
+          t.sources sources)
+        || List.length stages <> List.length t.stages
+      then Result.Error diagnostic
+      else Result.Ok {t with residual; uniforms; sources; stages; count}
+  end
 end
 type region = Region.t
 
@@ -147,6 +387,63 @@ type program = {
   state_slots : state_slot array; regions : region array;
   call_slots : int;
 }
+
+(* These describe one statement only. [iter] supplies the recursive preorder,
+   leaving passes free to keep their own branch and scope handling. *)
+let reads (s : statement) =
+  let expr = function
+    | Constant _ | Call_index _ | Frame _ | Source _ -> []
+    | Local n | Field (n, _) -> [n]
+    | Prim (_, args) | Host_source {args; _} | Source_descriptor {args; _} -> List.map snd args
+    | Vec ns | Items ns -> ns
+    | Fields xs -> List.map snd xs in
+  let draw = function
+    | Background n | Push (_, n) -> [n]
+    | Point {at; ink} -> [at; ink]
+    | Mark {args; _} | Batch {args; _} | Path {args; _} -> List.map snd args
+    | Points {positions; ink} -> [positions; ink]
+    | Text_run {at; text; ink; size} -> [at; text; ink; size]
+    | Image {at; scale; angle; _} -> [at; scale; angle]
+    | Pop -> [] in
+  match s.node with
+  | Draw d -> draw d
+  | Assign (_, e) -> expr e
+  | Reset_call _ | State_peek _ -> []
+  | Protect {value; mapped; _} -> [value; mapped]
+  | Diagnose_rows {rows; diagnostic; _} -> [rows; diagnostic]
+  | If {condition; _} -> [condition]
+  | Iterate {sequence; _} -> [sequence]
+  | Counted {first; last; stop; _} -> first::last::Option.to_list stop
+  | Store {index; value; _} -> [index; value]
+  | State_read {initial; _} -> [initial]
+  | State_write {value; _} -> [value]
+  | Invoke {args; _} -> args
+
+let writes (s : statement) = match s.node with
+  | Assign (n, _) -> [n]
+  | Reset_call _ | Draw _ | State_write _ -> []
+  | Protect {failure; result; _} -> [failure; result]
+  | Diagnose_rows {index; result; _} -> [index; result]
+  | If _ -> []
+  | Iterate {index; item; _} -> [index; item]
+  | Counted {count; index; item; _} -> [count; index; item]
+  | Store {sequence; _} -> [sequence]
+  | State_read {result; _} -> [result]
+  | State_peek {found; value; _} -> [found; value]
+  | Invoke {result; _} -> [result]
+
+let children (s : statement) = match s.node with
+  | Protect {body; handler; _} -> body @ handler
+  | Diagnose_rows {handler; _} -> handler
+  | If {yes; no; _} -> yes @ no
+  | Iterate {body; _} -> body
+  | Counted {init; body; _} -> init @ body
+  | State_read {init; _} -> init
+  | Draw _ | Assign _ | Reset_call _ | Store _ | State_peek _ | State_write _ | Invoke _ -> []
+
+let iter f statements =
+  let rec block statements = List.iter (fun s -> f s; block (children s)) statements in
+  block statements
 
 let primitive_name = function
   | Numeric op -> (match op with
@@ -271,7 +568,7 @@ let pp fmt p =
     out " @"; path s.site; out " owner="; path s.owner; out " instance=%d iter=[" s.instance;
     separated (function Static_index n -> out "%d" n | Local_index n -> local n) s.iter; out "]";
     if s.prefix <> [] then (out " prefix="; path s.prefix);
-    Option.iter (fun (s : Flow.Diagnostic.span) -> out " span=%d..%d" s.start s.finish) s.span in
+    Option.iter (fun (s : Diagnostic.span) -> out " span=%d..%d" s.start s.finish) s.span in
   let rec statements depth xs =
     List.iter (fun s ->
       out "%s#%d " (String.make (depth * 2) ' ') s.id;
@@ -291,10 +588,11 @@ let pp fmt p =
           out " "; nested "else" no
       | Iterate {sequence;index;item;limit;body} -> out "iterate "; local sequence;
           out " index="; local index; out " item="; local item; out " limit=%d " limit; nested "do" body
-      | Counted {first;last;count;index;item;limit;init;body} ->
+      | Counted {first;last;count;index;item;limit;stop;init;body} ->
           out "counted "; local first; out ".."; local last;
           out " count="; local count; out " index="; local index; out " item="; local item;
-          out " limit=%d " limit; nested "init" init; out " "; nested "do" body
+          out " limit=%d " limit;Option.iter(fun n->out "stop=";local n;out " ")stop;
+          nested "init" init; out " "; nested "do" body
       | Store {sequence;index;value} -> local sequence; out "["; local index; out "] <- "; local value
       | State_read {slot;result;init;initial} -> local result; out " = state[%d] " slot;
           nested "init" init; out " value="; local initial
@@ -352,7 +650,12 @@ let pp fmt p =
        | Guarded (guards,body) -> out "guard[";
            separated (fun (c,yes)->out "r%d=%b" c yes) guards;out "] ";instruction body
        | Raise (ty,code,message,cause) -> out "error<%s %S %S" (Flow.Ty.to_string ty) code message;
-           Option.iter(fun cause->out " cause=%S" cause)cause;out ">" in
+           Option.iter(fun cause->out " cause=%S" cause)cause;out ">"
+       | Loop_begin l -> out "loop r%d..r%d end=%d" l.first l.last l.finish
+       | Loop_carry (loop,component,ty) -> out "carry r%d.%d:%s" loop component (Flow.Ty.to_string ty)
+       | Loop_end (loop,_,stop) -> out "next r%d%s" loop
+           (Option.fold ~none:"" ~some:(Printf.sprintf " until r%d") stop)
+       | Loop_result (loop,component,ty) -> out "result r%d.%d:%s" loop component (Flow.Ty.to_string ty) in
     Array.iteri (fun i x ->out "    r%d = " i;instruction x;
       out "\n") r.code) p.regions;
   statements 1 p.body;

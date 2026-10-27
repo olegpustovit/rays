@@ -10,7 +10,8 @@ let settings mode = Settings.make Test_editor_commands.schema mode
 let mode settings = Settings.get Test_editor_commands.schema settings
 let network id graph = id,
   Flow_sop.Network.of_geometry (Edit_graph.of_graph graph), Node.id graph
-let frame = { (Test_editor_input.frame (0., 0.) [] 0) with dt = 0. }
+let frame = let frame = Test_editor_input.frame (0., 0.) [] 0 in
+  { frame with input = { frame.input with dt = 0. } }
 let stopped = fst (Timeline.stop (Timeline.create ()))
 
 let await predicate =
@@ -40,8 +41,8 @@ let with_cook ?(domains = 1) prepare run =
         ?(buttons = []) ?frame_request objects =
       let update = Cook.update ~live:false
         !current ~settings ~objects ~edit_error:None
-        ~effects:Parameter.no_effects ~timeline_changes:changes ~timeline
-        ~frame:{ frame with mouse_buttons = buttons } ~frame_request in
+        ~effects:Param.no_effects ~timeline_changes:changes ~timeline
+        ~frame:{ frame with input = { frame.input with buttons } } ~frame_request in
       current := update.cook; update in
     let finish ?settings ?timeline ?changes objects =
       let published = ref None and first = ref true in
@@ -65,8 +66,8 @@ let run () =
       ignore (finish ~settings:a objects);
       let second = List.assoc 2 (List.map (fun (piece : _ Cook.piece) -> piece.id, piece)
         (Cook.pieces !current)) in
-      let changed = network 1 (let migration_translation = Vec3.create 2. 0. 0. in
-Lisp_sop.node ~with_:["source", (source)] (Printf.sprintf {|(sop/transform (sop/ext_source) :mode "Matrix" :m03 %s :m13 %s :m23 %s)|} ((Lisp_sop.float migration_translation.Vec3.x)) ((Lisp_sop.float migration_translation.Vec3.y)) ((Lisp_sop.float migration_translation.Vec3.z)))) in
+      let changed = network 1 (let migration_translation = Rays_math.Vec3.create 2. 0. 0. in
+Lisp_sop.node ~with_:["source", (source)] (Printf.sprintf {|(sop/transform (sop/ext_source) :mode "Matrix" :m03 %s :m13 %s :m23 %s)|} ((Lisp_sop.float migration_translation.Rays_math.Vec3.x)) ((Lisp_sop.float migration_translation.Rays_math.Vec3.y)) ((Lisp_sop.float migration_translation.Rays_math.Vec3.z)))) in
       ignore (finish ~settings:a [changed; List.nth objects 1]);
       check (Atomic.get prepares = 3) "one changed object re-prepared its static sibling";
       check (List.find (fun (piece : _ Cook.piece) -> piece.id = 2)
@@ -99,10 +100,10 @@ Lisp_sop.node ~with_:["source", (source)] (Printf.sprintf {|(sop/transform (sop/
     check ((List.hd (Cook.pieces !current)).prepared = (0., 0., 0.)) "seek back kept stale context");
   (* a live drive: the box's scale is the clock *)
   let lowered = match Flow.Syntax.parse "(workspace live (graph g :context sop (sop/box :uniform_scale t)))" with
-    | Error d -> failwith (Flow.Diagnostic.to_string d)
+    | Error d -> failwith (Diagnostic.to_string d)
     | Ok forms -> (match Flow_sop.Lower.workspace ~extra:Editor_document.Contexts.descriptors
           ~factories:Sop_catalog.Editor.factories forms with
-        | Ok lowered -> lowered | Error d -> failwith (Flow.Diagnostic.to_string d)) in
+        | Ok lowered -> lowered | Error d -> failwith (Diagnostic.to_string d)) in
   let graph = List.hd lowered.graphs in
   let network = graph.network and root = Option.get graph.root in
   let target = {Flow_sop.Port.node = root; path = "uniform_scale"} in

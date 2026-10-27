@@ -4,17 +4,14 @@ let fail message = raise (Failure message)
 let checks = ref 0
 let check condition message = incr checks; if not condition then fail message
 let pointer (x, y) = float x, float y
-let mouse_press (button, point) = Event.MousePressed (button, pointer point)
-let mouse_release (button, point) = Event.MouseReleased (button, pointer point)
-let mouse_move point = Event.MouseMoved (pointer point)
+let mouse_press (button, point) = Input.Pointer_pressed (button, pointer point)
+let mouse_release (button, point) = Input.Pointer_released (button, pointer point)
+let mouse_move point = Input.Pointer_moved (pointer point)
 
 let frame ?(mouse = 0, 0) ?(keys = []) ?(events = []) () : Frame.t = {
-  width = 1000; height = 700; size = 1000, 700;
-
-   pixel_scale = 1., 1.;
-  time = 0.; dt = 1. /. 60.; fps = 60.; count = 0;
-  mouse = (float (fst mouse), float (snd mouse));
-  mouse_delta = 0., 0.; keys; mouse_buttons = []; events;
+  input = { (Input.at_time 0.) with frame = 0; tick = 0; size = 1000, 700;
+    pointer = float (fst mouse), float (snd mouse); keys; events };
+  pixel_scale = 1., 1.; fps = 60.; mouse_delta = 0., 0.;
 }
 
 (* ------------------------------------------------------- the node menu *)
@@ -26,7 +23,7 @@ module Node_menu = Pxui_graph.Node_menu
 let menu_ui = Pxui.Ui.create ~font_size:11 ()
 let bounds = 20, 30, 800, 520
 let menu_step menu (frame : Frame.t) =
-  let settle = { frame with events = [] } in
+  let settle = { frame with input = { frame.input with events = [] } } in
   match Pxui.Ui.frame menu_ui settle (fun ui -> Node_menu.update menu ui ~bounds) with
   | None, _ -> None, None
   | Some menu, _ -> Pxui.Ui.frame menu_ui frame (fun ui -> Node_menu.update menu ui ~bounds)
@@ -40,9 +37,9 @@ let opened entries = match menu_step (menu_of entries) (frame ~mouse:(400, 250) 
 let run_menu () =
   (* a SOP with an input picks like any other: typing its name and Enter *)
   let null = [ entry ~arity:1 "null" "Null" ] in
-  check (picks (opened null) [ Event.TextInput "null"; Event.KeyPressed Input.Enter ] = Some "null")
+  check (picks (opened null) [ Input.Text_input "null"; Input.Key_pressed Input.Enter ] = Some "null")
     "the menu search did not pick a node";
-  check (menu_step (opened null) (frame ~mouse:(400, 250) ~events:[ Event.KeyPressed Input.Escape ] ())
+  check (menu_step (opened null) (frame ~mouse:(400, 250) ~events:[ Input.Key_pressed Input.Escape ] ())
          = (None, None))
     "Escape did not close the menu";
   (* the kinds are listed from the start: Enter places the first row, and a click on a row picks it.
@@ -50,12 +47,12 @@ let run_menu () =
      label), the 28-point search row (a 20-point field in 4 points of padding), then half a
      24-point row. *)
   let nested = [ entry ~category:[ "Create"; "Primitive" ] "box" "Box" ] in
-  check (picks (opened nested) [ Event.KeyPressed Input.Enter ] = Some "box")
+  check (picks (opened nested) [ Input.Key_pressed Input.Enter ] = Some "box")
     "the menu did not list its kinds from the start";
   let row_y = 250 + 1 + 28 + 28 + 12 in
   let point = 420., float row_y in
   let _, picked = menu_step (opened nested) (frame ~mouse:(420, row_y)
-    ~events:[ Event.MousePressed (Input.LeftButton, point); Event.MouseReleased (Input.LeftButton, point) ] ()) in
+    ~events:[ Input.Pointer_pressed (Input.LeftButton, point); Input.Pointer_released (Input.LeftButton, point) ] ()) in
   check (picked = Some "box") "a click on a row of the menu did not pick it";
   (* after a node, the kinds that take an input come first *)
   let fitting = Node_menu.create ~after:"grid1" ~x:400 ~y:250
@@ -68,15 +65,15 @@ let run_menu () =
     "a list or a scene is not coloured as the graph pane colours it";
   (* the visual row window never makes later nodes inaccessible *)
   let many = List.init 15 (fun index -> entry (Printf.sprintf "node_%02d" index) (Printf.sprintf "Node %02d" index)) in
-  let menu = match menu_step (opened many) (frame ~mouse:(400, 250) ~events:[ Event.TextInput "node" ] ()) with
+  let menu = match menu_step (opened many) (frame ~mouse:(400, 250) ~events:[ Input.Text_input "node" ] ()) with
     | Some menu, _ -> menu | None, _ -> fail "typing closed the menu" in
-  let arrows = List.init 12 (fun _ -> Event.KeyPressed Input.ArrowDown) in
-  check (picks menu (arrows @ [ Event.KeyPressed Input.Enter ]) = Some "node_12")
+  let arrows = List.init 12 (fun _ -> Input.Key_pressed Input.ArrowDown) in
+  check (picks menu (arrows @ [ Input.Key_pressed Input.Enter ]) = Some "node_12")
     "the menu's row window made later nodes inaccessible";
   (* global search matches a category breadcrumb and uses the shared fuzzy rule *)
-  check (picks (opened nested) [ Event.TextInput "primitive"; Event.KeyPressed Input.Enter ] = Some "box")
+  check (picks (opened nested) [ Input.Text_input "primitive"; Input.Key_pressed Input.Enter ] = Some "box")
     "global search did not match a category breadcrumb";
-  check (picks (opened nested) [ Event.TextInput "prmtv"; Event.KeyPressed Input.Enter ] = Some "box")
+  check (picks (opened nested) [ Input.Text_input "prmtv"; Input.Key_pressed Input.Enter ] = Some "box")
     "node search did not use the shared fuzzy matching rule";
   (* every generated SOP can be reached by typing its key *)
   let entries = List.map (fun factory -> Node_menu.{
@@ -92,8 +89,8 @@ let run_menu () =
     let index = Node_menu.Private.keys menu ~query:e.key
       |> List.mapi (fun i key -> i, key)
       |> List.find_map (fun (i, key) -> if key = e.key then Some i else None) |> Option.get in
-    check (picks menu (Event.TextInput e.key :: List.init index (fun _ -> Event.KeyPressed Input.ArrowDown)
-                       @ [ Event.KeyPressed Input.Enter ]) = Some e.key)
+    check (picks menu (Input.Text_input e.key :: List.init index (fun _ -> Input.Key_pressed Input.ArrowDown)
+                       @ [ Input.Key_pressed Input.Enter ]) = Some e.key)
       ("the menu cannot reach generated SOP " ^ e.key)) entries;
   print_endline "pxui graph node menu tests passed"
 
@@ -107,22 +104,21 @@ let scope_catalog = Editor_document.Contexts.catalog ~version:1 Sop_catalog.Edit
 let load_workspace name =
   let text = In_channel.with_open_bin (Filename.concat cases (name ^ ".lisp")) In_channel.input_all in
   match Flow.Syntax.parse text with
-  | Error d -> fail (Flow.Diagnostic.to_string d)
+  | Error d -> fail (Diagnostic.to_string d)
   | Ok forms -> (match Flow.Workspace.check scope_catalog forms with
       | Some w, _ -> w
       | None, _ -> fail (name ^ " did not check"))
 let scope_ui = Pxui.Ui.create ~font_size:11 ()
 let scope_step view (frame : Frame.t) =
-  let settle = { frame with events = [] } in
+  let settle = { frame with input = { frame.input with events = [] } } in
   let view, _ = Pxui.Ui.frame scope_ui settle (fun ui -> Scope.update view ui settle) in
   Pxui.Ui.frame scope_ui frame (fun ui -> Scope.update view ui frame)
 let recorded ?inputs workspace =
   Flow_graph.Probe.make (Result.get_ok (Flow.Eval.static ~record:true ?inputs workspace))
-(* the routing tests read straight wires' geometry; [scope_curve] checks the default curves *)
-let scope_view ?inputs ?probe ?at ?level ?collapsed ?folded ?(wires = `Straight) workspace graph =
+let scope_view ?inputs ?probe ?at ?level ?collapsed ?folded workspace graph =
   let scope = P.of_graph ?folded scope_catalog workspace graph in
   Scope.create ~width:1000 ~height:700 ()
-  |> Scope.with_scope ?probe ?at ?level ?collapsed ~wires ~key:graph scope
+  |> Scope.with_scope ?probe ?at ?level ?collapsed ~key:graph scope
   |> Scope.with_records (recorded ?inputs workspace), scope
 let scope_paint view =
   ignore (scope_step view (frame ()));
@@ -151,7 +147,7 @@ let scope_zoom_geometry () =
     let view, _ = scope_view ~level:(level pinned) ws.checked "g" in
     let view, _ = scope_step view (frame ()) in
     let mouse = (500, 350) in
-    let view, _ = scope_step view (frame ~mouse ~events:[ mouse_move mouse; Event.MousePinched (factor /. Scope.zoom view) ] ()) in
+    let view, _ = scope_step view (frame ~mouse ~events:[ mouse_move mouse; Input.Pinched (factor /. Scope.zoom view) ] ()) in
     let view, _ = scope_step view (frame ~mouse ~events:[] ()) in
     let ports = List.concat_map (Scope.Private.ports view) paths in
     let at (x, y) = List.exists (fun (px, py) -> Float.abs (px -. x) < 0.01 && Float.abs (py -. y) < 0.01) ports in
@@ -178,7 +174,7 @@ let scope_zoom_geometry () =
     [ false, 1., (fun z -> z >= 0.5); false, 0.45, (fun z -> z < 0.5 && z >= 0.34);
       false, 0.3, (fun z -> z < 0.34); true, 0.3, (fun z -> z < 0.34); true, 0.45, (fun z -> z < 0.5) ]
 
-(* Levels, wire routing, the header's in-port and letter hints (flow.md 6.4, 7.5; graph.html). *)
+(* Levels, the header's in-port and letter hints (flow.md 6.4, 7.5; graph.html). *)
 let scope_levels () =
   let ws = Editor_document.Workspace_doc.of_text scope_catalog
     "(workspace levels (graph g :context sop (let* [a (sop/box) b (sop/box) c (sop/transform a) d (sop/transform b)] (sop/merge c d))))"
@@ -192,19 +188,6 @@ let scope_levels () =
   (* the first geometry slot is the header's in-port, never a row *)
   let node_c = Option.get (P.find scope c) in
   check (List.exists (fun (r : P.row) -> r.head) node_c.rows) "the first geometry slot is not the header's";
-  (* a wire that would pass under a card bends clear of it: a -> c crosses b *)
-  let wires = List.init (Scope.Private.wire_count view) Fun.id in
-  let crossing = List.find (fun i -> Scope.Private.wire_target view i = Some (c, Flow_graph.Flow_edit.Pos 0)) wires in
-  let pts = Scope.Private.wire_points view crossing in
-  check (List.length pts >= 3) "a wire under a card was not bent";
-  let bx, by, bw, bh = Option.get (Scope.Private.box_of view b) in
-  let rec clear = function
-    | (x0, y0) :: ((x1, y1) :: _ as rest) ->
-        let inside px py = px > bx && px < bx +. bw && py > by && py < by +. bh in
-        let samples = List.init 20 (fun k -> let u = float k /. 19. in x0 +. (x1 -. x0) *. u, y0 +. (y1 -. y0) *. u) in
-        List.for_all (fun (px, py) -> not (inside px py)) samples && clear rest
-    | _ -> true in
-  check (clear pts) "a bent wire still runs under a card";
   (* o opens the selection one level and pins it; p points it, again goes back *)
   let sel = Scope.select [ a ] view in
   let _, changes = Scope.run_command sel Scope.Open_level in
@@ -243,7 +226,10 @@ let scope_levels () =
            (List.init (Scope.Private.wire_count view) Fun.id) with
    | None -> fail "no wire into c"
    | Some i ->
-       let mx, my = Option.get (Scope.Private.wire_midpoint view i) in
+       let ax, _, aw, _ = Option.get (Scope.Private.box_of view a)
+       and bx, _, _, _ = Option.get (Scope.Private.box_of view b) in
+       let mx, my = List.find (fun (x, _) -> x > ax +. aw +. 4. && x < bx -. 4.)
+           (Scope.Private.wire_points view i) in
        let mid = int_of_float mx, int_of_float my in
        let v, _ = scope_step view (frame ~mouse:mid ~events:[ mouse_move mid; mouse_press (Input.LeftButton, mid) ] ()) in
        let v, _ = scope_step v (frame ~mouse:empty ~events:[ mouse_move empty ] ()) in
@@ -427,7 +413,8 @@ let scope_suspend () =
   let view, _ = scope_step view (frame ()) in
   let empty = 990, 690 in
   let held = { (frame ~mouse:empty ~events:[ mouse_move empty; mouse_press (Input.RightButton, empty) ] ()) with
-    mouse_buttons = [ Input.RightButton ] } in
+    input = { (frame ~mouse:empty ~events:[ mouse_move empty; mouse_press (Input.RightButton, empty) ] ()).input with
+      buttons = [ Input.RightButton ] } } in
   let panning, _ = scope_step view held in
   check (Scope.Private.grabbed panning) "a right-button press on the canvas did not begin a pan";
   let naming, _ = Scope.run_command (Scope.select [ [ "flower"; "heart" ] ] panning) Scope.Edit_name in
@@ -455,24 +442,24 @@ let scope_pinch () =
     Scope.zoom (fst (scope_step view (frame ~mouse:point ~events:(mouse_move point :: events) ()))) in
   let near a b = Float.abs (a -. b) < 1e-9 in
   check (before > 0.3 && before < 2.0) "the bloom framing leaves no room to zoom both ways";
-  check (near (zoomed [ Event.MousePinched 1.25 ]) (before *. 1.25))
+  check (near (zoomed [ Input.Pinched 1.25 ]) (before *. 1.25))
     "a pinch did not zoom the graph by its factor";
-  check (near (zoomed [ Event.MousePinched 0.8 ]) (before *. 0.8))
+  check (near (zoomed [ Input.Pinched 0.8 ]) (before *. 0.8))
     "a pinch below one did not zoom the graph out";
-  check (near (zoomed [ Event.MousePinched 1.1; Event.MousePinched 1.1 ]) (before *. 1.21))
+  check (near (zoomed [ Input.Pinched 1.1; Input.Pinched 1.1 ]) (before *. 1.21))
     "two pinches in a frame did not multiply";
-  check (zoomed [ Event.MousePinched 100. ] = 2.5) "a huge pinch escaped the zoom clamp";
-  check (zoomed [ Event.MousePinched 0.001 ] = 0.25) "a tiny pinch escaped the zoom clamp";
-  check (near (zoomed [ Event.MouseScrolled (0., 1.) ]) (before *. 1.1))
+  check (zoomed [ Input.Pinched 100. ] = 2.5) "a huge pinch escaped the zoom clamp";
+  check (zoomed [ Input.Pinched 0.001 ] = 0.25) "a tiny pinch escaped the zoom clamp";
+  check (near (zoomed [ Input.Scrolled (0., 1.) ]) (before *. 1.1))
     "the wheel no longer zooms by a tenth a step";
   (* the point under the pointer stays put, as with the wheel *)
   let anchored =
-    let view = fst (scope_step view (frame ~mouse:point ~events:[ mouse_move point; Event.MousePinched 1.5 ] ())) in
+    let view = fst (scope_step view (frame ~mouse:point ~events:[ mouse_move point; Input.Pinched 1.5 ] ())) in
     Scope.zoom view in
   check (anchored > before) "pinch-out did not enlarge";
   (* a pinch outside the pane is not the pane's *)
   let outside = 3000, 3000 in
-  let unmoved = fst (scope_step view (frame ~mouse:outside ~events:[ mouse_move outside; Event.MousePinched 1.5 ] ())) in
+  let unmoved = fst (scope_step view (frame ~mouse:outside ~events:[ mouse_move outside; Input.Pinched 1.5 ] ())) in
   check (Scope.zoom unmoved = before) "a pinch away from the pane zoomed it"
 
 (* W12b: every W3 gesture the pane can make reaches the host as its request. *)
@@ -480,8 +467,8 @@ let scope_pinch () =
    (the graph's own one-segment path), hovering and then released; it never edits. *)
 let scope_carry () =
   let frame ?mouse ?keys ?events () =
-    { (frame ?mouse ?keys ?events ()) with width = 3000; height = 2000; size = (3000, 2000);
-        } in
+    let frame = frame ?mouse ?keys ?events () in
+    { frame with input = { frame.input with size = 3000, 2000 } } in
   let w = load_workspace "bloom" in
   let scope = P.of_graph scope_catalog w "flower" in
   let view = Scope.create ~width:3000 ~height:2000 () |> Scope.with_scope ~key:"flower" scope
@@ -522,7 +509,7 @@ let scope_carry () =
 let scope_ghost_values () =
   let w = (Editor_document.Workspace_doc.of_text scope_catalog
     "(workspace w (graph g :context value (let* [k 6.0 ys (for [i (range 4)] (let* [a (* k (float i)) b (+ a 1.0)] b)) n (reduce (fn [acc x] (+ acc x)) 0.0 ys)] n)))"
-    |> function Ok d -> d | Error m -> fail (String.concat "; " (List.map Flow.Diagnostic.to_string m))).checked in
+    |> function Ok d -> d | Error m -> fail (String.concat "; " (List.map Diagnostic.to_string m))).checked in
   let scope = P.of_graph scope_catalog w "g" in
   let view index = Scope.create ~width:1000 ~height:700 ()
     |> Scope.with_scope ~probe:(fun _ -> index) ~key:"g" scope |> Scope.with_records (recorded w) in
@@ -533,13 +520,11 @@ let scope_ghost_values () =
   check (Scope.Private.ghost (fst (scope_step (Scope.create ~width:1000 ~height:700 () |> Scope.with_scope ~key:"g" scope) (frame ()))) [ "g"; "k" ] = None)
     "a ghost value without records"
 
-(* A source read by three inputs leaves as one trunk to a junction, then a branch to each; every wire
-   is still its own polyline and is selected alone *)
-(* a curve leaves and enters its ports level, and bends only between them *)
+(* The default cubic curve leaves and enters its ports level. *)
 let scope_curve () =
   let w = (Editor_document.Workspace_doc.of_text scope_catalog
     "(workspace c (graph g :context sop (let* [a (sop/box) b (sop/transform a :translate [0 3 0])] b)))" |> Result.get_ok).checked in
-  let view, _ = scope_view ~wires:`Curve w "g" in
+  let view, _ = scope_view w "g" in
   let view = fst (scope_step view (frame ())) in
   let pts = Scope.Private.wire_points view 0 in
   let level = function (_, y0) :: (_, y1) :: _ -> Float.abs (y1 -. y0) < 0.5 | _ -> false in
@@ -547,8 +532,8 @@ let scope_curve () =
   (* a loop variable's wire leaves its begin-bar port downward, clear of the name beside the port *)
   let w = (Editor_document.Workspace_doc.of_text scope_catalog
     "(workspace f (graph g :context value (let* [total (fold [acc 0.0] [k (range 4)] (+ acc (* k 2.0)))] total)))"
-    |> function Ok d -> d | Error d -> fail (String.concat "; " (List.map Flow.Diagnostic.to_string d))).checked in
-  let view = fst (scope_step (fst (scope_view ~wires:`Curve w "g")) (frame ())) in
+    |> function Ok d -> d | Error d -> fail (String.concat "; " (List.map Diagnostic.to_string d))).checked in
+  let view = fst (scope_step (fst (scope_view w "g")) (frame ())) in
   let down = function (x0, y0) :: (x1, y1) :: _ -> Float.abs (x1 -. x0) < 0.5 && y1 > y0 | _ -> false in
   check (List.exists (fun i -> down (Scope.Private.wire_points view i)) (List.init (Scope.Private.wire_count view) Fun.id))
     "no begin-bar wire leaves its port downward"
@@ -557,7 +542,7 @@ let scope_curve () =
 let scope_field_formula () =
   let w = (Editor_document.Workspace_doc.of_text scope_catalog
     "(workspace r (graph g :context value (let* [a 2.0 r {:x (+ a 1.0)}] r.x)))"
-    |> function Ok d -> d | Error d -> fail (String.concat "; " (List.map Flow.Diagnostic.to_string d))).checked in
+    |> function Ok d -> d | Error d -> fail (String.concat "; " (List.map Diagnostic.to_string d))).checked in
   let view = fst (scope_step (fst (scope_view w "g")) (frame ())) in
   let module E = Flow_graph.Flow_edit in
   let path = [ "g"; "r" ] in
@@ -574,8 +559,8 @@ let scope_field_formula () =
 let scope_spine () =
   let w = (Editor_document.Workspace_doc.of_text scope_catalog
     "(workspace s (graph g :context value (let* [ys (map (fn [i] (* i 2.0)) (array/range 3))] (array/nth ys 0))))"
-    |> function Ok d -> d | Error d -> fail (String.concat "; " (List.map Flow.Diagnostic.to_string d))).checked in
-  let view = fst (scope_step (fst (scope_view ~wires:`Curve w "g")) (frame ())) in
+    |> function Ok d -> d | Error d -> fail (String.concat "; " (List.map Diagnostic.to_string d))).checked in
+  let view = fst (scope_step (fst (scope_view w "g")) (frame ())) in
   let into_f = List.filter_map (fun i -> match Scope.Private.wire_target view i with
     | Some ([ "g"; "ys" ], Flow_graph.Flow_edit.Pos 0) -> Some (Scope.Private.wire_points view i) | _ -> None)
     (List.init (Scope.Private.wire_count view) Fun.id) in
@@ -583,84 +568,14 @@ let scope_spine () =
     | [ ((x0, y0) :: _ as pts) ] -> let x1, y1 = List.nth pts (List.length pts - 1) in Float.abs (x1 -. x0) < 0.5 && y1 > y0
     | _ -> false) "a map's stacked function is not wired straight down into its f socket"
 
-let scope_trunk () =
-  let w = (Editor_document.Workspace_doc.of_text scope_catalog
-    "(workspace w (graph g :context sop (let* [a (sop/box) b (sop/transform a) c (sop/transform a) d (sop/transform a)] (sop/merge (list b c d)))))"
-    |> function Ok d -> d | Error m -> fail (String.concat "; " (List.map Flow.Diagnostic.to_string m))).checked in
-  let view, _ = scope_view w "g" in
-  let view = fst (scope_step view (frame ())) in
-  let from_a = List.filter (fun i -> match Scope.Private.wire_target view i with
-    | Some (n, _) -> List.mem n [ [ "g"; "b" ]; [ "g"; "c" ]; [ "g"; "d" ] ] | None -> false)
-    (List.init (Scope.Private.wire_count view) Fun.id) in
-  check (List.length from_a = 3) "three wires leave a";
-  let pts = List.map (Scope.Private.wire_points view) from_a in
-  (* the one level with a (a straight line is its own trunk) stays a segment; the others branch off the junction *)
-  let bent = List.filter (fun p -> List.length p = 3) pts in
-  check (List.length bent = 2 && List.length (List.filter (fun p -> List.length p = 2) pts) = 1)
-    "a source read three times did not draw a junction";
-  check (List.length (List.sort_uniq compare (List.map (fun p -> List.nth p 1) bent)) = 1)
-    "the branches do not share one junction";
-  List.iter (fun i ->
-    let mx, my = Option.get (Scope.Private.wire_midpoint view i) in
-    let v, _ = scope_click view (int_of_float mx, int_of_float my) in
-    check (Scope.selected_wire v = Scope.Private.wire_target view i) "a branch did not select its own wire")
-    (List.filter (fun i -> List.length (Scope.Private.wire_points view i) = 3) from_a);
-  (* the shared trunk answers for the whole group: hovering it lights all three wires, pressing it
-     selects their source node rather than one wire *)
-  let (ax, ay), (jx, _) = (match List.find (fun p -> List.length p = 3) pts with
-    | a :: j :: _ -> a, j | _ -> fail "no bent wire") in
-  let mid = int_of_float ((ax +. jx) /. 2.), int_of_float ay in
-  let hov = fst (scope_step view (frame ~mouse:mid ~events:[ mouse_move mid ] ())) in
-  let lit = List.filter (fun (s, _) -> s = (ax, ay)) (Scope.Private.highlighted_connections hov) in
-  check (List.length lit = 3) (Printf.sprintf "hovering the trunk lit %d wires, not 3" (List.length lit));
-  let v, changes = scope_click view mid in
-  check (Scope.selected_wire v = None && List.length (Scope.selected v) = 1
-         && changes = [ Scope.Selected (Scope.selected v) ])
-    "pressing the trunk did not select the source node"
-
-(* A source read by near sinks and by far ones behind a chain: the wires that bend round the chain
-   leave the same junction as the straight ones, keep their own route to their sink, are still
-   selected alone, and the trunk selects the source *)
-let scope_trunk_bent () =
-  let w = (Editor_document.Workspace_doc.of_text scope_catalog
-    "(workspace w (graph g :context sop (let* [a (sop/box) b (sop/transform a) c (sop/transform b) h (sop/merge (list a b c)) i (sop/transform a) j (sop/transform a)] (sop/merge (list h i j)))))"
-    |> function Ok d -> d | Error m -> fail (String.concat "; " (List.map Flow.Diagnostic.to_string m))).checked in
-  let view, _ = scope_view w "g" in
-  let view = fst (scope_step view (frame ())) in
-  let all = List.init (Scope.Private.wire_count view) Fun.id in
-  let pts = Scope.Private.wire_points view in
-  let src i = List.hd (pts i) in
-  let a_src = src (List.hd all) in
-  let from_a = List.filter (fun i -> src i = a_src) all in
-  let joined = List.filter (fun i -> List.length (pts i) > 2 && snd (List.nth (pts i) 1) = snd a_src) from_a in
-  check (List.length from_a = 4 && List.length joined = 3) "a's wires did not bundle (one level stays straight)";
-  check (List.exists (fun i -> List.length (pts i) > 3) joined)
-    "no bent wire joined the trunk";
-  check (List.length (List.sort_uniq compare (List.map (fun i -> List.nth (pts i) 1) joined)) = 1)
-    "the bent and the straight branches do not share one junction";
-  (* each branch is still its own wire *)
-  List.iter (fun i ->
-    let mx, my = Option.get (Scope.Private.wire_midpoint view i) in
-    let v, _ = scope_click view (int_of_float mx, int_of_float my) in
-    check (Scope.selected_wire v = Scope.Private.wire_target view i) "a branch did not select its own wire")
-    joined;
-  (* the trunk selects the source and lights every wire of the group, bent ones included *)
-  let (ax, ay), (jx, _) = (match pts (List.hd joined) with a :: j :: _ -> a, j | _ -> fail "no junction") in
-  let mid = int_of_float ((ax +. jx) /. 2.), int_of_float ay in
-  let hov = fst (scope_step view (frame ~mouse:mid ~events:[ mouse_move mid ] ())) in
-  let lit = List.filter (fun (s, _) -> s = (ax, ay)) (Scope.Private.highlighted_connections hov) in
-  check (List.length lit = 4) (Printf.sprintf "hovering the trunk lit %d wires, not 4" (List.length lit));
-  let v, _ = scope_click view mid in
-  check (Scope.selected_wire v = None && List.length (Scope.selected v) = 1) "pressing the trunk did not select the source"
-
 let scope_gestures () =
   let module E = Flow_graph.Flow_edit in
   let module S = Flow.Syntax in
   let syntax op = Scope.Syntax_edit op in
   (* a large window keeps the zoom at 1, where every field is built *)
   let frame ?mouse ?keys ?events () =
-    { (frame ?mouse ?keys ?events ()) with width = 3000; height = 2000; size = (3000, 2000);
-        } in
+    let frame = frame ?mouse ?keys ?events () in
+    { frame with input = { frame.input with size = 3000, 2000 } } in
   let scope_click view point =
     scope_step view (frame ~mouse:point ~events:(mouse_move point :: click point) ()) in
   let center_of view path = let x, y, w, h = Option.get (Scope.Private.box_of view path) in x, y, w, h in
@@ -672,7 +587,7 @@ let scope_gestures () =
     |> Scope.with_records (recorded workspace), scope in
   let double_click view point = scope_click (fst (scope_click view point)) point in
   let type_text view text =
-    scope_step view (frame ~events:[ Event.TextInput text; Event.KeyPressed Input.Enter ] ()) in
+    scope_step view (frame ~events:[ Input.Text_input text; Input.Key_pressed Input.Enter ] ()) in
   (* rename: a double-click on the title opens a field, Enter commits Rename; F2 does the same *)
   let w = load_workspace "bloom" in
   let heart = [ "flower"; "heart" ] in
@@ -687,10 +602,10 @@ let scope_gestures () =
   let view, changes = Scope.run_command (Scope.select [ heart ] view) Scope.Edit_name in
   check (changes = [] && Scope.editing view) "F2 did not open the name field";
   let view = settled view in
-  let view, changes = scope_step view (frame ~events:[ Event.TextInput "two words"; Event.KeyPressed Input.Enter ] ()) in
+  let view, changes = scope_step view (frame ~events:[ Input.Text_input "two words"; Input.Key_pressed Input.Enter ] ()) in
   check (changes = [] || not (List.exists (function Scope.Syntax_edit (E.Rename _) -> true | _ -> false) changes))
     "a name with a space was accepted";
-  let view = fst (scope_step view (frame ~events:[ Event.KeyPressed Input.Escape ] ())) in
+  let view = fst (scope_step view (frame ~events:[ Input.Key_pressed Input.Escape ] ())) in
   check (not (Scope.editing view)) "Escape left the name field open";
   let _, changes = Scope.run_command (Scope.select [] view) Scope.Edit_name in
   check (match changes with [ Scope.Notice _ ] -> true | _ -> false) "F2 with nothing selected";
@@ -717,7 +632,7 @@ let scope_gestures () =
   let _, released = scope_step view (frame ~mouse:towards ~events:[ mouse_release (Input.LeftButton, towards) ] ()) in
   check (List.exists (function Scope.Syntax_edit (E.Set_arg { node; sub = [ _ ]; _ }) -> node = heart | _ -> false)
            (moved @ released)) "scrubbing a vector field did not become Set_arg";
-  (* G13: a float parameter written as an integer scrubs as a float (the kind is the row's type), a
+  (* A float parameter written as an integer scrubs as a float (the kind is the row's type), a
      long value keeps its digits, a click writes nothing and a drag is one history entry *)
   let nw = Editor_document.Workspace_doc.of_text scope_catalog
     "(workspace n (graph g :context sop (let* [a (sop/uv_sphere :radius 1) b (sop/transform a :translate [1234567.89 2 3])] b)))"
@@ -760,7 +675,7 @@ let scope_gestures () =
     let view, _ = scope_step view
       (frame ~mouse:point ~keys:[Input.Alt] ~events:(mouse_move point :: click point) ()) in
     let view, changes = type_text view text in
-    ignore (scope_step view (frame ~events:[Event.KeyPressed Input.Escape] ()));
+    ignore (scope_step view (frame ~events:[Input.Key_pressed Input.Escape] ()));
     List.filter_map (function Scope.Syntax_edit (E.Set_arg _ as op) -> Some op | _ -> None) changes in
   List.iter (fun text ->
     let ops = edit (value_field source) text in
@@ -904,7 +819,7 @@ let scope_gestures () =
   let values = (List.find (fun (n : P.node) -> n.head = "values") oscope.nodes).path in
   let naming, changes = scope_click oview (add_row oview oscope values) in
   check (changes = [] && Scope.editing naming) "the + output row did not open a name field";
-  let _, changes = scope_step naming (frame ~events:[ Event.TextInput "depth"; Event.KeyPressed Input.Enter ] ()) in
+  let _, changes = scope_step naming (frame ~events:[ Input.Text_input "depth"; Input.Key_pressed Input.Enter ] ()) in
   check (List.mem (syntax (E.Add_field { node = values; name = "depth"; value = S.make (S.Num "0") })) changes)
     "a named output did not become Add_field";
   let cw = Editor_document.Workspace_doc.of_text scope_catalog
@@ -1005,7 +920,7 @@ let scope_gestures () =
   and y1 = List.fold_left (fun a (_, y, _, h) -> Float.max a (y +. h)) neg_infinity boxes +. 8. in
   let a = int_of_float x0, int_of_float y0 and b = int_of_float x1, int_of_float y1 in
   let drag view ?(shift = false) a b =
-    let view, _ = scope_step view (frame ~mouse:a ~events:((if shift then [ Event.KeyPressed Input.Shift ] else [])
+    let view, _ = scope_step view (frame ~mouse:a ~events:((if shift then [ Input.Key_pressed Input.Shift ] else [])
       @ [ mouse_move a; mouse_press (Input.LeftButton, a) ]) ()) in
     let view, moved = scope_step view (frame ~mouse:b ~events:[ mouse_move b ] ()) in
     let view, released = scope_step view (frame ~mouse:b ~events:[ mouse_release (Input.LeftButton, b) ] ()) in
@@ -1306,8 +1221,6 @@ let run_scope () =
   scope_curve ();
   scope_field_formula ();
   scope_spine ();
-  scope_trunk ();
-  scope_trunk_bent ();
   scope_carry ();
   scope_connection_hover ();
   scope_levels ();
@@ -1351,7 +1264,7 @@ let run_sticky () =
   let moved = P.layout ~prev (P.of_graph scope_catalog ws' "g") in
   check (List.sort compare (table first) = List.sort compare (table moved)) "reordering bindings moved a card"
 
-(* G2: selecting a node lights its chain; a long wire is a tag until its chain is lit *)
+(* Selecting a node lights its chain; a long wire is a tag until its chain is lit. *)
 let run_readable () =
   let ws = Editor_document.Workspace_doc.of_text scope_catalog
     "(workspace r (graph g :context sop (let* [a (sop/box) b (sop/transform a) c (sop/transform b) d (sop/transform a) e (sop/merge c d a)] e)))"
@@ -1428,4 +1341,3 @@ let bench_scope_big () =
   time "2001 nodes: Set_arg edit" 5 (fun () ->
     Flow_graph.Flow_edit.apply_checked scope_catalog forms (Flow_graph.Flow_edit.Set_arg { node = [ "g"; "n5" ];
       key = Kw "translate"; sub = [ 0 ]; value = Flow.Syntax.make (Flow.Syntax.Num "3") }))
-

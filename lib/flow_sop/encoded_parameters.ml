@@ -11,15 +11,15 @@ let for_node checked (definition : W.node_definition) =
     let graph=W.{name="lisp_normalize_"^name;context=Flow.Context.value;
       inputs=["raw_value",Flow.Ty.Text,None];body;form} in
     let workspace={checked with W.graphs=[graph]} in
-    let evaluate raw=Result.bind(E.Private.static_with_kernels ~budget:max_int
-      ~inputs:[graph.name,["raw_value",E.Text raw]] workspace)(fun result->
+    let evaluate raw=Result.bind(E.Residual.handle (fun () -> E.Private.static_with_requests ~budget:max_int
+      ~inputs:[graph.name,["raw_value",E.Text raw]] workspace))(fun result->
       match List.assoc graph.name result.results with
       |E.Text canonical when Array.length result.plan.nodes=0->Ok canonical
-      |_->Error(Flow.Diagnostic.error ~span:form.span ~code:"E_PARAM_NORMALIZE"
+      |_->Error(Diagnostic.error ~span:form.span ~code:"E_PARAM_NORMALIZE"
           "An encoded normalizer must return concrete text without cooked effects.")) in
     let normalize raw=Flow.Phase_timer.without(fun()->Result.bind(evaluate raw)(fun canonical->
       Result.bind(evaluate canonical)(fun again->if again=canonical then Ok canonical else
-        Error(Flow.Diagnostic.error ~span:form.span ~code:"E_PARAM_NORMALIZE"
+        Error(Diagnostic.error ~span:form.span ~code:"E_PARAM_NORMALIZE"
           "An encoded normalizer must preserve its canonical output.")))) in
     name,normalize)definition.normalizers
 
@@ -31,9 +31,12 @@ let normalize_defaults workspace =
       |Some normalize,Param.Text_value raw->Result.map(fun canonical->
           let value=Param.Text_value canonical in fields@[{field with default=value;current=value}])(normalize raw)
       |_->Ok(fields@[field]))) (Ok[])node.fields in
-    Result.map(fun fields->
-      {node with fields;kind={node.kind with parameters=Flow.Check.parameters_of_fields fields @
-        List.filter(fun(p:Flow.Check.parameter)->List.mem p.name node.keyword_inputs)node.kind.parameters}})fields in
+    Result.bind fields (fun fields ->
+      Result.map (fun parameters ->
+        {node with fields;kind={node.kind with parameters=parameters @
+          List.filter(fun(p:Flow.Check.parameter)->List.mem p.name node.keyword_inputs)node.kind.parameters}})
+        (Result.map_error (Diagnostic.error ~code:"E_VEC3")
+          (Flow.Check.parameters_of_fields fields))) in
   Result.map(fun nodes->{workspace with W.nodes})
     (List.fold_left(fun result node->Result.bind result(fun nodes->
       Result.map(fun node->nodes@[node])(normalize_node node))) (Ok[])workspace.W.nodes)
@@ -57,7 +60,7 @@ let checked workspace =
     | W.Call call->Result.bind(pairs walk call.args)(fun args->
         let hooks=Option.value ~default:[](List.assoc_opt call.kind normalizers) in
         Result.bind(list(fun(name,(arg:W.term))->match List.assoc_opt name hooks,arg.node with
-            |Some normalize,W.Text raw->Result.map_error(fun(d:Flow.Diagnostic.t)->{d with span=Some arg.form.span})
+            |Some normalize,W.Text raw->Result.map_error(fun(d:Diagnostic.t)->{d with span=Some arg.form.span})
                 (Result.map(fun canonical->name,{arg with node=W.Text canonical})(normalize raw))
             |_->Ok(name,arg))args)(fun args->finish(W.Call{call with args})))
     | Op call->fields(fun args->W.Op{call with args})call.args

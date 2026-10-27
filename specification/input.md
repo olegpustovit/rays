@@ -1,7 +1,7 @@
 # Input and events
 
-Runtime translates SDL3 input into Rays's typed, ordered `Event.t` stream
-and folds held input into each `Frame.t`. Native event values never expose an
+Runtime translates SDL3 input into Rays's typed, ordered `Input.event` stream
+and folds held input into `Frame.input`. Native event values never expose an
 SDL3 pointer or structure.
 
 ## Keys and buttons
@@ -11,16 +11,16 @@ modifiers, F1–F12, and `Unknown of int` for an unmapped native code.
 `Input.mouse_button` covers left, right, middle, and the two common auxiliary
 buttons.
 
-Held input lives only in the frame: `Frame.keys`, `Frame.mouse_buttons`,
-`Frame.mouse`, the current-frame aggregate `Frame.mouse_delta`, and the
-`Frame.key_down`/`Frame.mouse_down` queries. There is no global input state or
-public setter. Pressed collections are state facts, not a replacement for
-ordered events. Use events for edges and text, and frame facts for continuous
-actions.
+Held input lives in `Frame.input`: its `keys`, `buttons`, `pointer`, and
+`events` fields are the current immutable snapshot. `Frame.mouse_delta` is the
+current-frame aggregate, and `Frame.mouse_down` queries a held button. There is
+no global query or public setter. Pressed collections are state facts,
+not a replacement for ordered events. Use events for edges and text, and frame
+facts for continuous actions.
 
 ## Event order
 
-`Frame.events` preserves poll order for:
+`Frame.input.events` preserves poll order for:
 
 - key press and release;
 - pointer motion, press, release, cancellation, and wheel motion;
@@ -38,8 +38,8 @@ frame and resets before polling the next frame.
 ## Logical coordinates
 
 Pointer positions and resize dimensions use the same logical-point coordinate
-system as `Scene`, `Frame.width`, `Frame.height`, and PXUI. Runtime obtains
-SDL3 logical coordinates directly; application code must not multiply them by
+system as `Scene`, `Frame.input.size`, and PXUI. Runtime obtains SDL3 logical
+coordinates directly; application code must not multiply them by
 `Frame.pixel_scale`. Physical drawable dimensions are a separate render
 boundary.
 
@@ -50,24 +50,24 @@ coherently; the window is not polled every frame.
 
 ## Focus and cancellation
 
-`WindowFocusLost` clears held keys and buttons so a missing release cannot
+`Focus_lost` clears held keys and buttons so a missing release cannot
 leave application state stuck. It also gives higher-level interaction systems
 a hard boundary for pointer capture and text composition.
 
-`PointerCancelled` releases the affected pointer capture without pretending
+`Pointer_cancelled` releases the affected pointer capture without pretending
 that the whole window lost focus. PXUI and camera controls must consume this
 distinction consistently.
 
 ## Text and file-drop lifetime
 
-`TextInput` carries committed UTF-8. `TextEditing` carries composition text and
+`Text_input` carries committed UTF-8. `Text_editing` carries composition text and
 its range. Pure `Scene.text_input_region` metadata tells Runtime where native
 text entry is intended; Runtime owns SDL3 text-input activation and event
 translation. Text input is active only while a focused region exists (a focused
 region starts it, none stops it), so the system input method is not engaged
 while no text field has focus.
 
-`FileDropped` owns a copied OCaml path. The native event payload is released at
+`File_dropped` owns a copied OCaml path. The native event payload is released at
 the runtime boundary and cannot escape into user code.
 
 ## Domain and reset rules

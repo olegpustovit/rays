@@ -11,20 +11,20 @@ type box_rotation_order =
   | Box_xyz | Box_xzy | Box_yxz | Box_yzx | Box_zxy | Box_zyx
 
 let box_rotation_matrix order rotation =
-  let x = Mat4.rotation_x rotation.Vec3.x
-  and y = Mat4.rotation_y rotation.y
-  and z = Mat4.rotation_z rotation.z in
+  let x = Rays_math.Mat4.rotation_x rotation.Rays_math.Vec3.x
+  and y = Rays_math.Mat4.rotation_y rotation.y
+  and z = Rays_math.Mat4.rotation_z rotation.z in
   match order with
-  | Box_xyz -> Mat4.mul z (Mat4.mul y x)
-  | Box_xzy -> Mat4.mul y (Mat4.mul z x)
-  | Box_yxz -> Mat4.mul z (Mat4.mul x y)
-  | Box_yzx -> Mat4.mul x (Mat4.mul z y)
-  | Box_zxy -> Mat4.mul y (Mat4.mul x z)
-  | Box_zyx -> Mat4.mul x (Mat4.mul y z)
+  | Box_xyz -> Rays_math.Mat4.mul z (Rays_math.Mat4.mul y x)
+  | Box_xzy -> Rays_math.Mat4.mul y (Rays_math.Mat4.mul z x)
+  | Box_yxz -> Rays_math.Mat4.mul z (Rays_math.Mat4.mul x y)
+  | Box_yzx -> Rays_math.Mat4.mul x (Rays_math.Mat4.mul z y)
+  | Box_zxy -> Rays_math.Mat4.mul y (Rays_math.Mat4.mul x z)
+  | Box_zyx -> Rays_math.Mat4.mul x (Rays_math.Mat4.mul y z)
 
 let box ?cancel ?(grain = 16_384) ?(connectivity = Box_triangles)
-    ?(consolidate_points = false) ?normals ?(center = Vec3.zero)
-    ?(rotation = Vec3.zero) ?(rotation_order = Box_xyz)
+    ?(consolidate_points = false) ?normals ?(center = Rays_math.Vec3.zero)
+    ?(rotation = Rays_math.Vec3.zero) ?(rotation_order = Box_xyz)
     ?(uniform_scale = 1.) ?(x_divisions = 1) ?(y_divisions = 1)
     ?(z_divisions = 1) ?uv_attribute ?face_groups ~size () =
   Error.guard ~operation:"box" ~code:"invalid_parameter" @@ fun () ->
@@ -34,7 +34,7 @@ let box ?cancel ?(grain = 16_384) ?(connectivity = Box_triangles)
   let normal_mode = match normals with
     | Some mode -> mode
     | None -> if polygon_mode then Box_point_normals else Box_no_normals in
-  let sx = size.Vec3.x *. uniform_scale
+  let sx = size.Rays_math.Vec3.x *. uniform_scale
   and sy = size.y *. uniform_scale
   and sz = size.z *. uniform_scale in
   if grain <= 0 then Error "Rdk.Box_generator.box: grain must be positive"
@@ -169,15 +169,15 @@ let box ?cancel ?(grain = 16_384) ?(connectivity = Box_triangles)
         let hx = sx *. 0.5 and hy = sy *. 0.5 and hz = sz *. 0.5 in
         let rotated = rotation.x <> 0. || rotation.y <> 0. || rotation.z <> 0. in
         let matrix = box_rotation_matrix rotation_order rotation in
-        let m00 = Mat4.get matrix ~row:0 ~column:0
-        and m01 = Mat4.get matrix ~row:0 ~column:1
-        and m02 = Mat4.get matrix ~row:0 ~column:2
-        and m10 = Mat4.get matrix ~row:1 ~column:0
-        and m11 = Mat4.get matrix ~row:1 ~column:1
-        and m12 = Mat4.get matrix ~row:1 ~column:2
-        and m20 = Mat4.get matrix ~row:2 ~column:0
-        and m21 = Mat4.get matrix ~row:2 ~column:1
-        and m22 = Mat4.get matrix ~row:2 ~column:2 in
+        let m00 = Rays_math.Mat4.get matrix ~row:0 ~column:0
+        and m01 = Rays_math.Mat4.get matrix ~row:0 ~column:1
+        and m02 = Rays_math.Mat4.get matrix ~row:0 ~column:2
+        and m10 = Rays_math.Mat4.get matrix ~row:1 ~column:0
+        and m11 = Rays_math.Mat4.get matrix ~row:1 ~column:1
+        and m12 = Rays_math.Mat4.get matrix ~row:1 ~column:2
+        and m20 = Rays_math.Mat4.get matrix ~row:2 ~column:0
+        and m21 = Rays_math.Mat4.get matrix ~row:2 ~column:1
+        and m22 = Rays_math.Mat4.get matrix ~row:2 ~column:2 in
         let[@inline always] rotate x y z =
           if rotated then
             (m00 *. x) +. (m01 *. y) +. (m02 *. z),

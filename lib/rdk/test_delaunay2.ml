@@ -86,7 +86,7 @@ let test_random_and_domains () =
   let count = 200 in
   let x = Array.init count (fun point -> coordinate point 3)
   and y = Array.init count (fun point -> coordinate point 11) in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       Delaunay2.build ~seed:97L ~x ~y () |> get) in
   let one = run 1 and four = run 4 in
   check (signature one = signature four) "domain count changed triangulation";

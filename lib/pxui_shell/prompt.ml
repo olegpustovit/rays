@@ -48,7 +48,7 @@
   let macro ui ~key ~title ~literals ~free (m : macro) =
     Pxui.Ui.modal ui ~width:480. key (fun () ->
       (* Enter in one of its fields creates the macro, like the button *)
-      let enter = Pxui.Ui.text_input_focused ui && Pxui.Ui.key_pressed ui Rays.Input.Enter in
+      let enter = Pxui.Ui.text_input_focused ui && Pxui.Ui.key_pressed ui Input.Enter in
       Pxui.Ui.label ui title;
       Pxui.Ui.inspector_message ui ~key:(key ^ "-hint")
         (match free with

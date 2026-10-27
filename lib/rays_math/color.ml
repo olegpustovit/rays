@@ -21,6 +21,10 @@ let rgba r g b a = {
   a = clamp_byte a
 }
 
+let of_unit_floats ?(alpha = 1.) r g b =
+  let byte value = clamp_byte (int_of_float (Float.round (value *. 255.))) in
+  rgba (byte r) (byte g) (byte b) (byte alpha)
+
 let gray x =
   let clamped = clamp_byte x in
   { r = clamped; g = clamped; b = clamped; a = 255 }
@@ -79,6 +83,45 @@ let hsl ?(alpha = 1.) hue saturation lightness =
   in
   let m = lightness -. (chroma /. 2.) in
   rgba (byte (r +. m)) (byte (g +. m)) (byte (b +. m)) (byte alpha)
+
+let hsl_channels hue saturation lightness =
+  let modulo x y = Float.rem (Float.rem x y +. y) y
+  and unit value = Float.max 0. (Float.min 1. value) in
+  let hue = modulo hue 360. /. 60. and saturation = unit saturation
+  and lightness = unit lightness in
+  let chroma = (1. -. Float.abs (2. *. lightness -. 1.)) *. saturation in
+  let x = chroma *. (1. -. Float.abs (modulo hue 2. -. 1.)) in
+  let r, g, b =
+    if hue < 1. then chroma, x, 0. else if hue < 2. then x, chroma, 0.
+    else if hue < 3. then 0., chroma, x else if hue < 4. then 0., x, chroma
+    else if hue < 5. then x, 0., chroma else chroma, 0., x in
+  let m = lightness -. chroma /. 2. in
+  let byte value = float_of_int (int_of_float (unit (value +. m) *. 255. +. 0.5)) /. 255. in
+  byte r, byte g, byte b
+
+let hsv hue saturation value =
+  let hue = Float.rem (Float.rem hue 1. +. 1.) 1. in
+  let h6 = Sys.opaque_identity (hue *. 6.) in
+  let sector = int_of_float (Float.floor h6) in
+  let fraction = h6 -. float_of_int sector in
+  let p = value *. (1. -. saturation)
+  and q = value *. (1. -. Sys.opaque_identity (fraction *. saturation))
+  and t = value *. (1. -. Sys.opaque_identity ((1. -. fraction) *. saturation)) in
+  match sector mod 6 with
+  | 0 -> value, t, p | 1 -> q, value, p | 2 -> p, value, t
+  | 3 -> p, q, value | 4 -> t, p, value | _ -> value, p, q
+
+let aces value =
+  value *. (2.51 *. value +. 0.03) /. (value *. (2.43 *. value +. 0.59) +. 0.14)
+
+let to_hex_string color =
+  if color.a = 255 then Printf.sprintf "#%02x%02x%02x" color.r color.g color.b
+  else Printf.sprintf "#%02x%02x%02x%02x" color.r color.g color.b color.a
+
+module Linear = struct
+  type t = { r : float; g : float; b : float }
+  let rgb r g b = { r; g; b }
+end
 
 (* Predefined Colors *)
 let black = { r = 0; g = 0; b = 0; a = 255 }

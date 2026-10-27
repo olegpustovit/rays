@@ -49,15 +49,6 @@ dune exec tools/codemod/codemod.exe -- prune lib/<name> [lib/<other> ...]
   `codemod.exe -- drop-c-unused lib/metal` (clang's unused-function errors as
   the oracle); unused registry entries are dropped during `prune`.
 
-- `codemod.exe -- split-modules [--dry-run | --interfaces] FILE.ml` splits a file that is a sequence of
-  top-level `module X = struct ... end` into one `x.ml` per module (bodies and the comments
-  before each module move byte for byte) and leaves `module X = X` re-exports in `FILE.ml`, so no
-  caller changes. Add the new files to the dune `modules` field, then remove the `open`s the build
-  reports unused (the leading opens are copied everywhere). The `.mli` stays the one public
-  signature, because a sibling may use values the signature hides; `--interfaces` also splits the
-  `.mli` into `x.mli` when they do not. A module naming a sibling defined after it (a capture by
-  name) is refused. `split-modules --self-test` runs in `runtest`.
-
 ## Rules
 
 - Only prune libraries whose exports are internal. For user-facing APIs
@@ -70,5 +61,5 @@ dune exec tools/codemod/codemod.exe -- prune lib/<name> [lib/<other> ...]
 - Records or variants left with only dead fields/constructors are marked
   `[@@warning "-69"]` / `[@@warning "-37"]`: delete those types by hand.
 - The loop stops on a hard error and prints it; fix it and rerun. Review the
-  diff, then `dune build @all`, window-free `runtest`, promote the API
-  manifest if a public `.mli` changed, and commit the prune on its own.
+  diff, run focused aliases through `_build/default/tools/check.exe`, then
+  run `_build/default/tools/check.exe --ship` for the shipping check.

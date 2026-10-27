@@ -9,7 +9,7 @@ let get_ok = function Ok value -> value | Error message -> fail message
 let ints indices = String.concat " " (List.map string_of_int (Array.to_list indices))
 
 let bounds_group ~name ~min ~max =
-  let open Vec3 in
+  let open Rays_math.Vec3 in
   Printf.sprintf "(sop/group_bounds :name %S :center [%s %s %s] :size [%s %s %s])" name
     (Lisp_sop.float ((min.x +. max.x) *. 0.5)) (Lisp_sop.float ((min.y +. max.y) *. 0.5))
     (Lisp_sop.float ((min.z +. max.z) *. 0.5))
@@ -479,9 +479,9 @@ let run () =
       && Geometry.vertex_count one = 100_005
       && Geometry.primitive_count one = 5)
     "advanced Spiral exactness fixture cardinality";
-  let matrix = Mat4.mul (Mat4.translation (Vec3.create 2. 3. 4.))
-      (Mat4.mul (Mat4.rotation ~axis:(Vec3.create 1. 2. 3.) 0.7)
-         (Mat4.scaling (Vec3.create 1.25 0.75 1.5))) in
+  let matrix = Rays_math.Mat4.mul (Rays_math.Mat4.translation (Rays_math.Vec3.create 2. 3. 4.))
+      (Rays_math.Mat4.mul (Rays_math.Mat4.rotation ~axis:(Rays_math.Vec3.create 1. 2. 3.) 0.7)
+         (Rays_math.Mat4.scaling (Rays_math.Vec3.create 1.25 0.75 1.5))) in
   let base =
     Lisp_sop.node {|(sop/grid :width_mode "Auto" :height_mode "Auto" :columns 320 :rows 256 :size 20.0)|}
     |> (let migration_matrix = matrix in (fun migration_input -> Lisp_sop.node ~with_:["migration_input", (migration_input)] (Printf.sprintf {|(sop/transform
@@ -502,7 +502,7 @@ let run () =
    :m30 %s
    :m31 %s
    :m32 %s
-   :m33 %s)|} ((Lisp_sop.float (Mat4.get migration_matrix ~row:0 ~column:0))) ((Lisp_sop.float (Mat4.get migration_matrix ~row:0 ~column:1))) ((Lisp_sop.float (Mat4.get migration_matrix ~row:0 ~column:2))) ((Lisp_sop.float (Mat4.get migration_matrix ~row:0 ~column:3))) ((Lisp_sop.float (Mat4.get migration_matrix ~row:1 ~column:0))) ((Lisp_sop.float (Mat4.get migration_matrix ~row:1 ~column:1))) ((Lisp_sop.float (Mat4.get migration_matrix ~row:1 ~column:2))) ((Lisp_sop.float (Mat4.get migration_matrix ~row:1 ~column:3))) ((Lisp_sop.float (Mat4.get migration_matrix ~row:2 ~column:0))) ((Lisp_sop.float (Mat4.get migration_matrix ~row:2 ~column:1))) ((Lisp_sop.float (Mat4.get migration_matrix ~row:2 ~column:2))) ((Lisp_sop.float (Mat4.get migration_matrix ~row:2 ~column:3))) ((Lisp_sop.float (Mat4.get migration_matrix ~row:3 ~column:0))) ((Lisp_sop.float (Mat4.get migration_matrix ~row:3 ~column:1))) ((Lisp_sop.float (Mat4.get migration_matrix ~row:3 ~column:2))) ((Lisp_sop.float (Mat4.get migration_matrix ~row:3 ~column:3))))))
+   :m33 %s)|} ((Lisp_sop.float (Rays_math.Mat4.get migration_matrix ~row:0 ~column:0))) ((Lisp_sop.float (Rays_math.Mat4.get migration_matrix ~row:0 ~column:1))) ((Lisp_sop.float (Rays_math.Mat4.get migration_matrix ~row:0 ~column:2))) ((Lisp_sop.float (Rays_math.Mat4.get migration_matrix ~row:0 ~column:3))) ((Lisp_sop.float (Rays_math.Mat4.get migration_matrix ~row:1 ~column:0))) ((Lisp_sop.float (Rays_math.Mat4.get migration_matrix ~row:1 ~column:1))) ((Lisp_sop.float (Rays_math.Mat4.get migration_matrix ~row:1 ~column:2))) ((Lisp_sop.float (Rays_math.Mat4.get migration_matrix ~row:1 ~column:3))) ((Lisp_sop.float (Rays_math.Mat4.get migration_matrix ~row:2 ~column:0))) ((Lisp_sop.float (Rays_math.Mat4.get migration_matrix ~row:2 ~column:1))) ((Lisp_sop.float (Rays_math.Mat4.get migration_matrix ~row:2 ~column:2))) ((Lisp_sop.float (Rays_math.Mat4.get migration_matrix ~row:2 ~column:3))) ((Lisp_sop.float (Rays_math.Mat4.get migration_matrix ~row:3 ~column:0))) ((Lisp_sop.float (Rays_math.Mat4.get migration_matrix ~row:3 ~column:1))) ((Lisp_sop.float (Rays_math.Mat4.get migration_matrix ~row:3 ~column:2))) ((Lisp_sop.float (Rays_math.Mat4.get migration_matrix ~row:3 ~column:3))))))
   in
   let graph = Lisp_sop.node ~with_:["base", base] (Printf.sprintf {|(-> (sop/ext_base)
      (sop/color_by_height :low_red 45 :low_green 36 :low_blue 114
@@ -525,8 +525,8 @@ let run () =
      (sop/group_edges :use_max_angle true :use_min_angle true :name "surface_edges"
        :angle_basis "Incident edges" :min_angle 0.1 :max_angle 2.9)
      (sop/group_unshared :owner "Edges" :name "unshared_edges"))|}
-    (bounds_group ~name:"middle" ~min:(Vec3.create (-5.) (-100.) (-5.))
-       ~max:(Vec3.create 5. 100. 5.))) in
+    (bounds_group ~name:"middle" ~min:(Rays_math.Vec3.create (-5.) (-100.) (-5.))
+       ~max:(Rays_math.Vec3.create 5. 100. 5.))) in
   let one = cook 1 graph and many = cook 4 graph in
   check (equal_geometry one many)
     "one-domain and four-domain procedural geometry differ";
@@ -639,14 +639,14 @@ let run () =
        :high_green 63
        :high_blue 94))|} in
   let projected = Lisp_sop.node {|(sop/grid :width_mode "Auto" :height_mode "Auto" :columns 320 :rows 240 :size 20.0)|}
-      |> (let migration_translation = Vec3.create 0. 3. 0. in
+      |> (let migration_translation = Rays_math.Vec3.create 0. 3. 0. in
 fun migration_input ->
   Lisp_sop.node ~with_:["migration_input", (migration_input)] (Printf.sprintf {|(sop/transform
    (sop/ext_migration_input)
    :mode "Matrix"
    :m03 %s
    :m13 %s
-   :m23 %s)|} ((Lisp_sop.float migration_translation.Vec3.x)) ((Lisp_sop.float migration_translation.Vec3.y)) ((Lisp_sop.float migration_translation.Vec3.z))))
+   :m23 %s)|} ((Lisp_sop.float migration_translation.Rays_math.Vec3.x)) ((Lisp_sop.float migration_translation.Rays_math.Vec3.y)) ((Lisp_sop.float migration_translation.Rays_math.Vec3.z))))
       |> (fun ray_source -> Lisp_sop.node ~with_:["ray_source", (ray_source); "ray_collision", (ray_collision)] (Printf.sprintf {|(sop/ray
    (sop/ext_ray_source)
    (sop/ext_ray_collision)
@@ -658,7 +658,7 @@ fun migration_input ->
    :source_vertex_numbers_attribute "source_vertices"
    :source_vertex_weights_attribute "source_weights"
    :normal_attribute "hit_N"
-   :point_pattern "Cd")|} ((Lisp_sop.vec3 (Vec3.neg Vec3.unit_y))))) in
+   :point_pattern "Cd")|} ((Lisp_sop.vec3 (Rays_math.Vec3.neg Rays_math.Vec3.unit_y))))) in
   let one = cook 1 projected and many = cook 4 projected in
   check (equal_geometry one many)
     "one-domain and four-domain Ray geometry differ";
@@ -699,8 +699,8 @@ fun migration_input ->
        :owner "Points" :group "seed")
      (sop/group_promotions :rules "point\tprimitive\tseed\tgrown_faces\ttrue\tfalse\tshared_edge\t0\tfalse\tfalse\tfalse\t\npoint\tedge\tseed\tgrown_edges\ttrue\tfalse\tall\t0\tfalse\tfalse\tfalse\t")
      (sop/group_expand :connectivity_tolerance 1e-06 :steps 3 :owner "Edges" :group "grown_edges"))|}
-    (bounds_group ~name:"seed" ~min:(Vec3.create (-0.03) (-1.) (-20.))
-       ~max:(Vec3.create 0.03 1. 20.))) in
+    (bounds_group ~name:"seed" ~min:(Rays_math.Vec3.create (-0.03) (-1.) (-20.))
+       ~max:(Rays_math.Vec3.create 0.03 1. 20.))) in
   let one = cook 1 expanded_groups and many = cook 4 expanded_groups in
   check (equal_geometry one many)
     "one-domain and four-domain Group Expand/Promote geometry differ";
@@ -767,7 +767,7 @@ fun migration_input ->
        :remove_degenerate_primitives false
        :tolerance 1e-09
        :attributes "Average numeric")
-     (sop/mirror :origin %s :normal [1.0 1.0 0.0]))|} ((Lisp_sop.vec3 Vec3.zero))) in
+     (sop/mirror :origin %s :normal [1.0 1.0 0.0]))|} ((Lisp_sop.vec3 Rays_math.Vec3.zero))) in
   let one = cook 1 mirrored and many = cook 4 mirrored in
   check (equal_geometry one many)
     "one-domain and four-domain fuse/mirror geometry differ";
@@ -1299,14 +1299,14 @@ fun migration_input ->
      (sop/group_range :owner "Primitives" :name "surface_source" :range_mode "From ends"))|}
       |> group_indices ~owner:"Vertices" ~name:"surface_vertex_patch" (Array.init 1_000 Fun.id) in
   let surface_target = Lisp_sop.node {|(sop/grid :width_mode "Auto" :height_mode "Auto" :columns 140 :rows 90 :size 9.5)|}
-      |> (let migration_translation = Vec3.create 0. 0.35 0. in
+      |> (let migration_translation = Rays_math.Vec3.create 0. 0.35 0. in
 fun migration_input ->
   Lisp_sop.node ~with_:["migration_input", (migration_input)] (Printf.sprintf {|(sop/transform
    (sop/ext_migration_input)
    :mode "Matrix"
    :m03 %s
    :m13 %s
-   :m23 %s)|} ((Lisp_sop.float migration_translation.Vec3.x)) ((Lisp_sop.float migration_translation.Vec3.y)) ((Lisp_sop.float migration_translation.Vec3.z))))
+   :m23 %s)|} ((Lisp_sop.float migration_translation.Rays_math.Vec3.x)) ((Lisp_sop.float migration_translation.Rays_math.Vec3.y)) ((Lisp_sop.float migration_translation.Rays_math.Vec3.z))))
       |> group_all ~owner:"Points" ~name:"surface_target" in
   let surface_transferred = Lisp_sop.node ~with_:["surface_source", (surface_source); "surface_target", (surface_target)] {|(sop/attribute_transfer_surface
    (sop/ext_surface_source)
@@ -1325,14 +1325,14 @@ fun migration_input ->
   check (Geometry.find_attribute ~owner:Attribute.Point "surface_distance" one
     <> None) "surface transfer distance attribute missing";
   let surface_vertex_target = Lisp_sop.node {|(sop/grid :width_mode "Auto" :height_mode "Auto" :columns 140 :rows 90 :size 9.5)|}
-      |> (let migration_translation = Vec3.create 0. 0.35 0. in
+      |> (let migration_translation = Rays_math.Vec3.create 0. 0.35 0. in
 fun migration_input ->
   Lisp_sop.node ~with_:["migration_input", (migration_input)] (Printf.sprintf {|(sop/transform
    (sop/ext_migration_input)
    :mode "Matrix"
    :m03 %s
    :m13 %s
-   :m23 %s)|} ((Lisp_sop.float migration_translation.Vec3.x)) ((Lisp_sop.float migration_translation.Vec3.y)) ((Lisp_sop.float migration_translation.Vec3.z))))
+   :m23 %s)|} ((Lisp_sop.float migration_translation.Rays_math.Vec3.x)) ((Lisp_sop.float migration_translation.Rays_math.Vec3.y)) ((Lisp_sop.float migration_translation.Rays_math.Vec3.z))))
       |> group_all ~owner:"Vertices" ~name:"surface_vertices" in
   let vertex_transferred = Lisp_sop.node ~with_:["surface_source", (surface_source); "surface_vertex_target", (surface_vertex_target)] {|(sop/attribute_transfer_surface
    (sop/ext_surface_source)
@@ -1360,8 +1360,8 @@ fun migration_input ->
   let enumerate_source = Geometry.with_attribute enumerate_piece enumerate_source
       |> get_ok in
   let enumerated = Lisp_sop.snapshot (enumerate_source)
-      |> group_in_bounds ~name:"middle" ~min:(Vec3.create (-5.) (-1.) (-10.))
-           ~max:(Vec3.create 5. 1. 10.)
+      |> group_in_bounds ~name:"middle" ~min:(Rays_math.Vec3.create (-5.) (-1.) (-10.))
+           ~max:(Rays_math.Vec3.create 5. 1. 10.)
       |> then_ {|(sop/enumerate :group "middle" :start 7 :step 3
            :piece_attribute "piece" :mode "Elements within pieces"
            :owner "Point" :name "selection_index")
@@ -1386,13 +1386,13 @@ fun migration_input ->
        :kind "Vector 4"
        :output_min %s
        :output_max [1.0 1.0 1.0]
-       :ramp "0:0,0.35:0.15,0.7:0.85,1:1"))|} ((Lisp_sop.vec3 Vec3.zero))) in
+       :ramp "0:0,0.35:0.15,0.7:0.85,1:1"))|} ((Lisp_sop.vec3 Rays_math.Vec3.zero))) in
   let one = cook 1 generated_attributes and many = cook 4 generated_attributes in
   check (equal_geometry one many)
     "one-domain and four-domain Attribute Randomize/Remap differ";
   let extended_random = Lisp_sop.node {|(sop/grid :width_mode "Auto" :height_mode "Auto" :columns 500 :rows 300 :size 20.0)|}
       |> group_indices ~owner:"Vertices" ~name:"randomize_vertices" [|0; 5; 11; 17; 23; 29|]
-      |> (let migration_value_0 = Vec2.create 1. 1. in let migration_value_1 = Vec2.zero in let migration_value_2 = Vec2.create (-12.) (-12.) in let migration_value_3 = Vec2.create 12. 12. in fun migration_input -> Lisp_sop.node ~with_:["migration_input", (migration_input)] (Printf.sprintf {|(sop/attribute_randomize
+      |> (let migration_value_0 = Rays_math.Vec2.create 1. 1. in let migration_value_1 = Rays_math.Vec2.zero in let migration_value_2 = Rays_math.Vec2.create (-12.) (-12.) in let migration_value_3 = Rays_math.Vec2.create 12. 12. in fun migration_input -> Lisp_sop.node ~with_:["migration_input", (migration_input)] (Printf.sprintf {|(sop/attribute_randomize
    (sop/ext_migration_input)
    :distribution "Cauchy"
    :kind "Vector 2"
@@ -1406,7 +1406,7 @@ fun migration_input ->
    :minimum_vector [%s %s 0.0]
    :use_maximum true
    :maximum_vector [%s %s 0.0]
-   :name "cauchy2")|} ((Lisp_sop.float (migration_value_1.Vec2.x))) ((Lisp_sop.float (migration_value_1.Vec2.y))) ((Lisp_sop.float (migration_value_0.Vec2.x))) ((Lisp_sop.float (migration_value_0.Vec2.y))) ((Lisp_sop.float (migration_value_2.Vec2.x))) ((Lisp_sop.float (migration_value_2.Vec2.y))) ((Lisp_sop.float (migration_value_3.Vec2.x))) ((Lisp_sop.float (migration_value_3.Vec2.y)))))
+   :name "cauchy2")|} ((Lisp_sop.float (migration_value_1.Rays_math.Vec2.x))) ((Lisp_sop.float (migration_value_1.Rays_math.Vec2.y))) ((Lisp_sop.float (migration_value_0.Rays_math.Vec2.x))) ((Lisp_sop.float (migration_value_0.Rays_math.Vec2.y))) ((Lisp_sop.float (migration_value_2.Rays_math.Vec2.x))) ((Lisp_sop.float (migration_value_2.Rays_math.Vec2.y))) ((Lisp_sop.float (migration_value_3.Rays_math.Vec2.x))) ((Lisp_sop.float (migration_value_3.Rays_math.Vec2.y)))))
       |> (fun migration_input -> Lisp_sop.node ~with_:["migration_input", (migration_input)] (Printf.sprintf {|(sop/attribute_randomize
    (sop/ext_migration_input)
    :distribution "Custom discrete text"
@@ -1418,8 +1418,8 @@ fun migration_input ->
   check (equal_geometry one many)
     "one-domain and four-domain extended Attribute Randomize differ";
   let deformed = Lisp_sop.node {|(sop/grid :width_mode "Auto" :height_mode "Auto" :columns 500 :rows 300 :size 20.0)|}
-      |> group_in_bounds ~name:"deform_center" ~min:(Vec3.create (-8.) (-1.) (-8.))
-           ~max:(Vec3.create 8. 1. 8.)
+      |> group_in_bounds ~name:"deform_center" ~min:(Rays_math.Vec3.create (-8.) (-1.) (-8.))
+           ~max:(Rays_math.Vec3.create 8. 1. 8.)
       |> then_ {|(sop/mountain :group "deform_center" :seed 711 :height 0.8
            :frequency [0.31 0.67 0.43]
            :offset [2.0 3.0 5.0] :octaves 6 :lacunarity 2.05
@@ -1430,8 +1430,8 @@ fun migration_input ->
   check (equal_geometry one many)
     "one-domain and four-domain Peak/Mountain geometry differ";
   let bent = Lisp_sop.node {|(sop/grid :width_mode "Auto" :height_mode "Auto" :columns 500 :rows 300 :size 20.0)|}
-      |> group_in_bounds ~name:"bend_center" ~min:(Vec3.create (-8.) (-1.) (-10.))
-           ~max:(Vec3.create 8. 1. 10.)
+      |> group_in_bounds ~name:"bend_center" ~min:(Rays_math.Vec3.create (-8.) (-1.) (-10.))
+           ~max:(Rays_math.Vec3.create 8. 1. 10.)
       |> then_ {|(sop/bend :continuous_twist true :group_owner "Point" :group "bend_center"
            :origin [0.0 0.0 -10.0] :direction [0.0 0.0 1.0]
            :up [0.0 1.0 0.0] :length 20.0 :bend_angle 1.3 :twist_angle 2.1
@@ -1495,8 +1495,8 @@ fun migration_input ->
     "one-domain and four-domain compact/match-size geometry differ";
   let blasted = Lisp_sop.node {|(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 180 :rows 120 :size 12.0)
      (sop/color_by_height :low_red 0 :low_green 0 :low_blue 255 :high_green 0 :high_blue 0))|}
-      |> group_in_bounds ~name:"left_half" ~min:(Vec3.create (-6.) (-1.) (-6.))
-           ~max:(Vec3.create 0. 1. 6.)
+      |> group_in_bounds ~name:"left_half" ~min:(Rays_math.Vec3.create (-6.) (-1.) (-6.))
+           ~max:(Rays_math.Vec3.create 0. 1. 6.)
       |> then_ {|(sop/blast :owner "Points" :group "left_half" :compact_points true)|} in
   let one = cook 1 blasted and many = cook 4 blasted in
   check (equal_geometry one many)
@@ -1651,7 +1651,7 @@ fun migration_input ->
        :up_attribute "wire_up"
        :caps true
        :cap_group "wire_caps"
-       :radius 0.02))|} ((Lisp_sop.vec3 Vec3.unit_y))) in
+       :radius 0.02))|} ((Lisp_sop.vec3 Rays_math.Vec3.unit_y))) in
   let one = cook 1 many_wires and many = cook 4 many_wires in
   check (equal_geometry one many)
     "one-domain and four-domain many-curve sweep geometry differ";
@@ -1705,8 +1705,8 @@ fun migration_input ->
   check (Geometry.primitive_count selected_one = 100
     && Geometry.primitive_count remainder_one = 300)
     "split selected/remainder cardinality";
-  let merged = Lisp_sop.node ~with_:["graph", (graph); "in1744", (let migration_translation = Vec3.create 30. 0. 0. in
-Lisp_sop.node ~with_:["graph", (graph)] (Printf.sprintf {|(sop/transform (sop/ext_graph) :mode "Matrix" :m03 %s :m13 %s :m23 %s)|} ((Lisp_sop.float migration_translation.Vec3.x)) ((Lisp_sop.float migration_translation.Vec3.y)) ((Lisp_sop.float migration_translation.Vec3.z))))] {|(sop/merge (sop/ext_graph) (sop/ext_in1744))|} in
+  let merged = Lisp_sop.node ~with_:["graph", (graph); "in1744", (let migration_translation = Rays_math.Vec3.create 30. 0. 0. in
+Lisp_sop.node ~with_:["graph", (graph)] (Printf.sprintf {|(sop/transform (sop/ext_graph) :mode "Matrix" :m03 %s :m13 %s :m23 %s)|} ((Lisp_sop.float migration_translation.Rays_math.Vec3.x)) ((Lisp_sop.float migration_translation.Rays_math.Vec3.y)) ((Lisp_sop.float migration_translation.Rays_math.Vec3.z))))] {|(sop/merge (sop/ext_graph) (sop/ext_in1744))|} in
   let one = cook 1 merged and many = cook 4 merged in
   check (equal_geometry one many)
     "one-domain and four-domain merge geometry differ";
@@ -1715,14 +1715,14 @@ Lisp_sop.node ~with_:["graph", (graph)] (Printf.sprintf {|(sop/transform (sop/ex
       |> group_indices ~owner:"Primitives" ~name:"transfer_faces" (Array.init 300 (fun index -> index * 4))
       |> then_ {|(sop/group_edges :use_min_length true :name "transfer_edges" :min_length 0.1)|} in
   let transfer_target = transfer_source
-      |> (let migration_translation = Vec3.create 0.001 0. 0.001 in
+      |> (let migration_translation = Rays_math.Vec3.create 0.001 0. 0.001 in
 fun migration_input ->
   Lisp_sop.node ~with_:["migration_input", (migration_input)] (Printf.sprintf {|(sop/transform
    (sop/ext_migration_input)
    :mode "Matrix"
    :m03 %s
    :m13 %s
-   :m23 %s)|} ((Lisp_sop.float migration_translation.Vec3.x)) ((Lisp_sop.float migration_translation.Vec3.y)) ((Lisp_sop.float migration_translation.Vec3.z)))) in
+   :m23 %s)|} ((Lisp_sop.float migration_translation.Rays_math.Vec3.x)) ((Lisp_sop.float migration_translation.Rays_math.Vec3.y)) ((Lisp_sop.float migration_translation.Rays_math.Vec3.z)))) in
   let transferred = Lisp_sop.node ~with_:["transfer_source", transfer_source; "transfer_target", transfer_target]
     {|(sop/group_transfer (sop/ext_transfer_source) (sop/ext_transfer_target)
        :use_rules true :distance 0.01 :conflict "Overwrite"
@@ -1826,7 +1826,7 @@ fun migration_input ->
        :center %s
        :size [8.0 2.0 8.0]
        :owner "Edges"
-       :name "bounded_edges"))|} ((Lisp_sop.vec3 Vec3.zero)) ((Lisp_sop.vec3 Vec3.zero))) in
+       :name "bounded_edges"))|} ((Lisp_sop.vec3 Rays_math.Vec3.zero)) ((Lisp_sop.vec3 Rays_math.Vec3.zero))) in
   let one = cook 1 bounded_groups and many = cook 4 bounded_groups in
   check (equal_geometry one many)
     "one-domain and four-domain Group Bounds geometry differ";
@@ -1850,7 +1850,7 @@ fun migration_input ->
        :owner "Edges"
        :name "vertical_edges")
      (sop/group_non_planar :tolerance 0.001 :name "warped_faces")
-     (sop/group_backface :viewpoint [4.0 3.0 5.0] :name "backfaces"))|} ((Lisp_sop.vec3 Vec3.unit_y)) ((Lisp_sop.float (Float.pi /. 3.))) ((Lisp_sop.vec3 Vec3.unit_y)) ((Lisp_sop.float (Float.pi /. 3.))) ((Lisp_sop.vec3 Vec3.unit_y)) ((Lisp_sop.float (Float.pi /. 3.)))) in
+     (sop/group_backface :viewpoint [4.0 3.0 5.0] :name "backfaces"))|} ((Lisp_sop.vec3 Rays_math.Vec3.unit_y)) ((Lisp_sop.float (Float.pi /. 3.))) ((Lisp_sop.vec3 Rays_math.Vec3.unit_y)) ((Lisp_sop.float (Float.pi /. 3.))) ((Lisp_sop.vec3 Rays_math.Vec3.unit_y)) ((Lisp_sop.float (Float.pi /. 3.)))) in
   let one = cook 1 normal_groups and many = cook 4 normal_groups in
   check (equal_geometry one many)
     "one-domain and four-domain Group Normal/Non-Planar geometry differ";

@@ -58,13 +58,6 @@ module Window : sig
   type t
 
   type flag = Hidden | High_pixel_density | Metal
-  type presentation_facts = {
-    logical_width : int; logical_height : int;
-    drawable_width : int; drawable_height : int;
-    pixel_density : float; display_scale : float;
-    refresh_rate : float option; vsync : bool;
-  }
-
   (** What SDL's window flags say about showing. SDL sends an event when a
       window becomes occluded and none when it stops, so a caller that saw
       [Event.Occluded] reads [state] to learn it is uncovered again. *)
@@ -75,6 +68,7 @@ module Window : sig
     (t, error) result
   val size : t -> (int * int, error) result
   val size_in_pixels : t -> (int * int, error) result
+  val pixel_density : t -> (float, error) result
   val position : t -> (int * int, error) result
   val title : t -> (string, error) result
   val center : t -> (unit, error) result
@@ -85,7 +79,6 @@ module Window : sig
      with its title hidden and a transparent title bar, so this is the colour
      behind the traffic lights. Nothing happens on another video driver. *)
   val set_relative_mouse : t -> bool -> (unit, error) result
-  val presentation_facts : t -> vsync:bool -> (presentation_facts, error) result
   val show : t -> (unit, error) result
   val raise_window : t -> (unit, error) result
   val hide : t -> (unit, error) result

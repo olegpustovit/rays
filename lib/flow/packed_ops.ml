@@ -1,6 +1,5 @@
 type binary = Add | Sub | Mul | Div | Mod | Pow | Min | Max | Lt | Le | Gt | Ge | Eq | And | Or | Atan2 | Hypot
 type unary = Sin | Cos | Sqrt | Abs | Not | Tan | Asin | Acos | Exp | Log | Sign
-type extension = Noise3
 type integer = Iadd | Isub | Imul | Idiv | Imod | Iand | Ior | Ixor | Ishl | Ishr
 type comparison = Ilt | Ile | Igt | Ige | Ieq
 type conversion = To_float | Truncate | Floor | Ceil | Round | Coerce_int | Integer_result of string
@@ -46,14 +45,7 @@ let integer_apply operation a b =
   with Division_by_zero -> Value.fail "E_RANGE" "Integer division by zero."
 let comparison_apply operation (a : int) (b : int) = match operation with
   | Ilt -> a<b | Ile -> a<=b | Igt -> a>b | Ige -> a>=b | Ieq -> a=b
-let rand_at seed index =
-  let value=seed lxor ((index+0x11b54a32d192ed03)*0x1e3779b97f4a7c15) in
-  let value=value lxor (value lsr 30) in
-  let value=value*0x3f58476d1ce4e5b9 in
-  let value=value lxor (value lsr 27) in
-  let value=value*0x14d049bb133111eb in
-  let value=value lxor (value lsr 31) in
-  float_of_int(value lsr 10)/.9_007_199_254_740_992.
+let rand_at seed index = Rays_math.Rand.float_at_int seed ~index
 let names = List.map fst binaries @ List.map fst unaries @ noise_names @ derived_names
   @ List.map fst integers @ List.map fst comparisons @ ["rand/at"]
 let supports name = List.mem name names

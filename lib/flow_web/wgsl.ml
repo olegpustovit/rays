@@ -71,9 +71,14 @@ fn wfbm(p: vec3<f32>, octaves: i32, o: i32) -> f32 {
   return select(sum / weights, 0.0, weights == 0.0);
 }
 |}
-exception Unsupported of string
-let fail message = raise (Unsupported message)
+let fail message = raise (Diagnostic.Error (Diagnostic.error ~code:"E_GPU_FORM" message))
 let register index = "r" ^ string_of_int index
+let integer_status operation b = match operation with
+  | Flow.Packed_ops.Idiv | Imod ->
+      Printf.sprintf "if (all(%s == vec2<u32>(0u))) { atomicOr(&status, 2u); }\n" b
+  | Ishl | Ishr -> Printf.sprintf
+      "if (%s.y != 0u || %s.x > 62u) { atomicOr(&status, 4u); }\n" b b
+  | _ -> ""
 let rec guarded guards = function
   | P.Guarded (more, body) -> guarded (guards @ more) body
   | instruction -> guards, instruction
@@ -102,27 +107,17 @@ let unary operation a = match operation with
       ^ " > 0.0)), bitcast<f32>(0x7fc00000u), " ^ a ^ " <= 0.0)"
   | Sign -> "select(" ^ a ^ ", select(-1.0, 1.0, " ^ a ^ " > 0.0), " ^ a ^ " != 0.0)"
 let kernel ?(image = false) program = try
-  let view = P.Private.view program in
-  (match P.gpu_refusals program with [] -> () | reason :: _ -> fail reason.message);
+  (match P.gpu_refusals program with [] -> () | reason :: _ -> raise (Diagnostic.Error reason));
+  let layout = Flow_ir.Kernel_layout.plan ~image program in
+  let {Flow_ir.Kernel_layout.view; used; finite_checks; uniforms; frames; image_width;
+       image_height; table_seeds; input_used; input_count = count; output_count = outputs;
+       uniform_layout; uniform_binding; status_binding; table_binding; _} = layout in
   if image && (view.widths <> [|2|] || Array.map Array.length view.outputs <> [|4|]) then
     fail "An image kernel needs one UV input and one vec4 output.";
-  let offset = ref 4 and uniform_layout = ref [] in
-  let uniform name width =
-    let first = !offset in offset := first+width*4;
-    uniform_layout := (name,first,width) :: !uniform_layout; first/4 in
-  let uniforms = Array.mapi (fun index width -> uniform ("uniform:" ^ string_of_int index) width) view.uniform_widths in
-  let frames = Array.mapi (fun index instruction -> match snd(guarded [] instruction)with
-    | P.Frame name -> uniform (Printf.sprintf "frame:%d:%s" index name) 1 | _ -> 0) view.code in
-  let image_width = if image then uniform "image:width" 1 else 0 in
-  let image_height = if image then uniform "image:height" 1 else 0 in
-  let used = P.Private.output_reachable program in
-  let finite_checks = P.Private.finite_checks program in
+  let image_width = Option.value image_width ~default:0 in
+  let image_height = Option.value image_height ~default:0 in
   let word index = Printf.sprintf "uniforms[%d].%c" (index/4) "xyzw".[index mod 4] in
   let has operation = Array.exists Fun.id (Array.mapi (fun slot instruction -> used.(slot) && operation (snd(guarded [] instruction))) view.code) in
-  let table_seeds = Array.to_list(Array.mapi(fun index instruction->index,snd(guarded [] instruction))view.code)
-    |> List.filter_map (function
-      | index,P.Noise3 (_,_,_,seed,_,_,_) when used.(index) -> Some seed | _ -> None)
-    |> List.sort_uniq Int.compare |> Array.of_list in
   let table seed = match Array.find_index ((=) seed) table_seeds with Some index -> index*512 | None -> assert false in
   let body = Buffer.create 4096 in
   Array.iteri (fun slot instruction ->
@@ -155,18 +150,14 @@ let kernel ?(image = false) program = try
       Printf.bprintf body "    r%d = %s;\n" slot expression
     end;
     if finite_checks.(slot) then
-      Printf.bprintf body "%sif (!wfinite(r%d)) { atomicStore(&status, 1u); }\n" indentation slot;
+      Printf.bprintf body "%sif (!wfinite(r%d)) { atomicOr(&status, 1u); }\n" indentation slot;
     if guards<>[] then Buffer.add_string body "  }\n"
     end) view.code;
-  let outputs = Array.length view.outputs in
   let output_name k = if outputs = 1 then "outbuf" else "outbuf" ^ string_of_int k in
   Array.iteri (fun k registers -> Array.iteri (fun component slot ->
     Printf.bprintf body "  %s[i * %du + %du] = r%d;\n"
       (output_name k) (Array.length registers) component slot) registers) view.outputs;
-  let count = if image then 0 else Array.length view.widths in
-  let input_used=Array.make count false in
-  Array.iteri(fun slot instruction->match snd(guarded [] instruction)with P.Input(input,_,_)when used.(slot) && not image->input_used.(input)<-true|_->())view.code;
-  let uniform_words = (!offset + 15) / 16 in
+  let uniform_words = Flow_ir.Kernel_layout.uniform_words layout in
   let declarations = Buffer.create 512 in
   let declare binding kind decl =
     Printf.bprintf declarations "@group(0) @binding(%d) var%s %s;\n" binding
@@ -176,9 +167,9 @@ let kernel ?(image = false) program = try
   let bind binding kind decl = interface := {group=0;binding;kind} :: !interface; declare binding kind decl in
   Array.iteri (fun index used -> if used then bind index Storage_read (Printf.sprintf "input%d: array<f32>" index)) input_used;
   for k = 0 to outputs-1 do bind (count+k) Storage_read_write (output_name k ^ ": array<f32>") done;
-  bind (count+outputs) Uniform_buffer (Printf.sprintf "uniforms: array<vec4<u32>, %d>" uniform_words);
-  bind (count+outputs+1) Storage_read_write "status: atomic<u32>";
-  if table_seeds <> [||] then bind (count+outputs+2) Storage_read "table: array<i32>";
+  bind uniform_binding Uniform_buffer (Printf.sprintf "uniforms: array<vec4<u32>, %d>" uniform_words);
+  bind status_binding Storage_read_write "status: atomic<u32>";
+  Option.iter (fun binding -> bind binding Storage_read "table: array<i32>") table_binding;
   let prefix = Buffer.contents declarations ^ finite
     ^ (if image then image_uv else "")
     ^ (if has (function P.Binary (P.Pow,_,_) -> true | _ -> false) then power else "")
@@ -189,16 +180,17 @@ let kernel ?(image = false) program = try
     ^ Buffer.contents body in
   let entry = "kernel_" ^ Digest.to_hex (Digest.string (prefix ^ signature ^ body)) in
   let source = prefix ^ "@compute @workgroup_size(64)\nfn " ^ entry ^ signature ^ " {\n" ^ body ^ "}\n" in
-  Ok {source;entry;interface=List.rev !interface;uniform_layout=List.rev !uniform_layout;
+  Ok {source;entry;interface=List.rev !interface;uniform_layout;
     uniform_bytes=uniform_words*16;table_seeds;
     output_widths=Array.map Array.length view.outputs;input_widths=(if image then [||] else view.widths);
     gathers=[||];counts=None}
-with Unsupported message -> Error (Flow.Diagnostic.error ~code:"E_GPU_FORM" message)
+with Diagnostic.Error diagnostic -> Error diagnostic
 
 (* Fast precision's 64-bit integer registers as [vec2<u32>] (low, high), as the Metal kernel's
    [long]s: wrapping add, sub and mul, truncating division ([0] for a zero divisor), logical right
    shift, shifts by [n & 63]. *)
 let int64 = {|fn i64_add(a: vec2<u32>, b: vec2<u32>) -> vec2<u32> { let lo = a.x + b.x; return vec2<u32>(lo, a.y + b.y + select(0u, 1u, lo < a.x)); }
+fn i63(a: vec2<u32>) -> vec2<u32> { return vec2<u32>(a.x, bitcast<u32>(bitcast<i32>(a.y << 1u) >> 1u)); }
 fn i64_sub(a: vec2<u32>, b: vec2<u32>) -> vec2<u32> { return vec2<u32>(a.x - b.x, a.y - b.y - select(0u, 1u, a.x < b.x)); }
 fn mulhi32(a: u32, b: u32) -> u32 {
   let a0 = a & 0xffffu; let a1 = a >> 16u; let b0 = b & 0xffffu; let b1 = b >> 16u;
@@ -268,32 +260,16 @@ fn i64_divmod(a: vec2<u32>, b: vec2<u32>, rem: bool) -> vec2<u32> {
    [count_out] {n, 6n, 1, 0, 0, 0, 6, n, 0, 0}: native's six words, then from byte 24 WebGPU's
    [drawIndirect] of n six-vertex instances, which a mark set reads. *)
 let kernel_fast program = try
-  let view = P.Private.view program in
-  (match P.gpu_refusals ~fused:true ~fast:true program with [] -> () | reason :: _ -> fail reason.message);
-  let offset = ref 4 and uniform_layout = ref [] in
-  let uniform name width =
-    let first = !offset in offset := first+width*4;
-    uniform_layout := (name,first,width) :: !uniform_layout; first/4 in
-  let tabled = Array.to_list view.code |> List.filter_map (fun instruction ->
-    match snd (guarded [] instruction) with P.Array_prepare (u, _) -> Some u | _ -> None) in
-  let uniforms = Array.mapi (fun index width ->
-    if List.mem index tabled then 0 else uniform ("uniform:" ^ string_of_int index) width) view.uniform_widths in
-  let frames = Array.mapi (fun index instruction -> match snd (guarded [] instruction) with
-    | P.Frame name -> uniform (Printf.sprintf "frame:%d:%s" index name) 1 | _ -> 0) view.code in
-  let used = P.Private.output_reachable program in
-  let finite_checks = P.Private.finite_checks program in
+  (match P.gpu_refusals ~fused:true ~fast:true program with [] -> () | reason :: _ -> raise (Diagnostic.Error reason));
+  let layout = Flow_ir.Kernel_layout.plan ~fast:true program in
+  let {Flow_ir.Kernel_layout.view; used; finite_checks; uniforms; frames; table_seeds;
+       gathers; gather_lengths; input_used; input_count = count; output_count = outputs;
+       uniform_layout; uniform_binding; status_binding; table_binding; gather_base;
+       count_base; counts} = layout in
   let word index = Printf.sprintf "uniforms[%d].%c" (index/4) "xyzw".[index mod 4] in
   let has operation = Array.exists Fun.id (Array.mapi (fun slot instruction -> used.(slot) && operation (snd(guarded [] instruction))) view.code) in
-  let table_seeds = Array.to_list(Array.mapi(fun index instruction->index,snd(guarded [] instruction))view.code)
-    |> List.filter_map (function
-      | index,P.Noise3 (_,_,_,seed,_,_,_) when used.(index) -> Some seed | _ -> None)
-    |> List.sort_uniq Int.compare |> Array.of_list in
   let table seed = match Array.find_index ((=) seed) table_seeds with Some index -> index*512 | None -> assert false in
-  let gathers = Array.to_list (Array.mapi (fun slot instruction -> slot, snd (guarded [] instruction)) view.code)
-    |> List.filter_map (function slot, P.Array_prepare (u, ty) when used.(slot) ->
-        Some (slot, (u, match ty with Flow.Ty.Array Vec2 -> 2 | Array Vec3 -> 3 | Array Vec4 -> 4 | _ -> 1)) | _ -> None) in
   let gather_index slot = match List.find_index (fun (s, _) -> s = slot) gathers with Some k -> k | None -> fail "Gather without its table." in
-  let gather_lengths = List.mapi (fun k (_, (u, _)) -> uniform (Printf.sprintf "gather:%d:%d" k u) 1) gathers |> Array.of_list in
   let integer slot = Flow_ir.Core.Region.integer_register view.code.(slot) in
   let int_of r = if integer r then register r else "i64_from_f(" ^ register r ^ ")" in
   let float_of r = if integer r then "i64_to_f(" ^ register r ^ ")" else register r in
@@ -316,7 +292,7 @@ let kernel_fast program = try
     Printf.sprintf "gather%d[u32(clamp(i32(%s), 0, max(i32(%s) - 1, 0))) * %du + %du]"
       k (float_of index) (word gather_lengths.(k)) width component in
   let body = Buffer.create 4096 in
-  Array.iteri (fun slot instruction ->
+  Flow_ir.Kernel_layout.iter layout ~instruction:(fun slot instruction ->
     if used.(slot) && (match snd (guarded [] instruction) with P.Array_prepare _ -> false | _ -> true) then begin
     let guards,instruction=guarded [] instruction in
     let expression = match instruction with
@@ -341,16 +317,17 @@ let kernel_fast program = try
       | Int_uniform index -> Printf.sprintf "i64_from_f(bitcast<f32>(%s))" (word uniforms.(index))
       | Int_frame _ -> Printf.sprintf "i64_from_f(bitcast<f32>(%s))" (word frames.(slot))
       | Int_binary (op,a,b) -> let a=int_of a and b=int_of b in
-          (match op with Flow.Packed_ops.Iadd -> "i64_add(" ^ a ^ ", " ^ b ^ ")" | Isub -> "i64_sub(" ^ a ^ ", " ^ b ^ ")"
+          "i63(" ^ (match op with Flow.Packed_ops.Iadd -> "i64_add(" ^ a ^ ", " ^ b ^ ")" | Isub -> "i64_sub(" ^ a ^ ", " ^ b ^ ")"
            | Imul -> "i64_mul(" ^ a ^ ", " ^ b ^ ")"
            | Idiv -> "i64_divmod(" ^ a ^ ", " ^ b ^ ", false)" | Imod -> "i64_divmod(" ^ a ^ ", " ^ b ^ ", true)"
            | Iand -> "(" ^ a ^ " & " ^ b ^ ")" | Ior -> "(" ^ a ^ " | " ^ b ^ ")" | Ixor -> "(" ^ a ^ " ^ " ^ b ^ ")"
-           | Ishl -> "i64_shl(" ^ a ^ ", " ^ b ^ ")" | Ishr -> "i64_shr(" ^ a ^ ", " ^ b ^ ")")
+           | Ishl -> "i64_shl(" ^ a ^ ", " ^ b ^ ")"
+           | Ishr -> "i64_shr((" ^ a ^ " & vec2<u32>(0xffffffffu, 0x7fffffffu)), " ^ b ^ ")") ^ ")"
       | Int_compare (op,a,b) -> let a=int_of a and b=int_of b in
           truth (match op with Flow.Packed_ops.Ilt -> "i64_lt(" ^ a ^ ", " ^ b ^ ")" | Igt -> "i64_lt(" ^ b ^ ", " ^ a ^ ")"
             | Ile -> "!i64_lt(" ^ b ^ ", " ^ a ^ ")" | Ige -> "!i64_lt(" ^ a ^ ", " ^ b ^ ")"
             | Ieq -> "all(" ^ a ^ " == " ^ b ^ ")")
-      | Int_abs a -> "i64_abs(" ^ int_of a ^ ")"
+      | Int_abs a -> "i63(i64_abs(" ^ int_of a ^ "))"
       | Int_select (condition,yes,no) -> Printf.sprintf "select(%s, %s, %s != 0.0)" (int_of no) (int_of yes) (float_of condition)
       | Convert (To_float,a) -> float_of a
       | Convert ((Truncate|Coerce_int|Integer_result _),a) -> int_of a
@@ -361,6 +338,7 @@ let kernel_fast program = try
       | Select (condition,yes,no) -> Printf.sprintf "select(%s, %s, %s != 0.0)" (register no) (register yes) (register condition)
       | Noise3 (x,y,z,seed,octaves,_,_) -> Printf.sprintf "wfbm(vec3<f32>(%s, %s, %s), %d, %d)"
           (register x) (register y) (register z) octaves (table seed)
+      | Loop_result(loop,component,_) -> register(loop+1+component)
       | _ -> fail "This instruction is not supported by the WGSL fast kernel target." in
     let ty, zero = if integer slot then "vec2<u32>", "vec2<u32>(0u, 0u)" else "f32", "0.0" in
     let indentation=if guards=[] then "  " else "    " in
@@ -371,21 +349,44 @@ let kernel_fast program = try
       Printf.bprintf body "    r%d = %s;\n" slot expression
     end;
     if finite_checks.(slot) && not (integer slot) then
-      Printf.bprintf body "%sif (!wfinite(r%d)) { atomicStore(&status, 1u); }\n" indentation slot;
+      Printf.bprintf body "%sif (!wfinite(r%d)) { atomicOr(&status, 1u); }\n" indentation slot;
+    (match instruction with
+     | Int_binary (operation, _, b) ->
+         Buffer.add_string body (integer_status operation (int_of b))
+     | _ -> ());
     if guards<>[] then Buffer.add_string body "  }\n"
-    end) view.code;
-  let outputs = Array.length view.outputs in
+    end) ~loop:(fun header control ~next ~stop ~body:emit_body ->if used.(header)then begin
+      let guards,_=guarded [] view.code.(header)in
+      let ty slot=if integer slot then "vec2<u32>" else "f32"in
+      let zero slot=if integer slot then "vec2<u32>(0u, 0u)" else "0.0"in
+      Printf.bprintf body "  var r%d: vec2<u32> = vec2<u32>(0u, 0u);\n" header;
+      Array.iteri(fun component _->let slot=header+1+component in
+        Printf.bprintf body "  var r%d: %s = %s;\n" slot (ty slot)(zero slot))control.initial;
+      if guards<>[]then Printf.bprintf body "  if (%s) {\n" (String.concat " && "
+        (List.map(fun(condition,selected)->Printf.sprintf "%s %s 0.0" (float_of condition)
+          (if selected then "!=" else "=="))guards));
+      Option.iter(fun limit->let bound=Int64.of_int limit in Printf.bprintf body
+        "  if (i64_lt(r%d, r%d) && i64_lt(vec2<u32>(%Luu, %Luu), i64_sub(r%d, r%d))) { atomicOr(&status, 1u); return; }\n"
+        control.first control.last (Int64.logand bound 0xffffffffL)(Int64.shift_right_logical bound 32)
+        control.last control.first)control.limit;
+      Array.iteri(fun component initial->Printf.bprintf body "  r%d = r%d;\n" (header+1+component)initial)control.initial;
+      Printf.bprintf body "  for (r%d = r%d; i64_lt(r%d, r%d); r%d = i64_add(r%d, vec2<u32>(1u, 0u))) {\n"
+        header control.first header control.last header header;
+      emit_body();
+      Option.iter(fun source->Printf.bprintf body "  let stop%d = %s != 0.0;\n" header (float_of source))stop;
+      Array.iteri(fun component source->Printf.bprintf body "  let next%d_%d: %s = r%d;\n"
+        header component (ty source)source)next;
+      Array.iteri(fun component _->Printf.bprintf body "  r%d = next%d_%d;\n" (header+1+component)header component)next;
+      Option.iter(fun _->Printf.bprintf body "  if (stop%d) { break; }\n" header)stop;
+      Buffer.add_string body "  }\n";
+      if guards<>[]then Buffer.add_string body "  }\n"
+    end);
   let output_name k = if outputs = 1 then "outbuf" else "outbuf" ^ string_of_int k in
   Array.iteri (fun k registers -> Array.iteri (fun component slot ->
     Printf.bprintf body "  %s[i * %du + %du] = %s;\n"
       (output_name k) (Array.length registers) component (float_of slot)) registers) view.outputs;
-  let count = Array.length view.widths in
-  let gather_base = count+outputs+2+(if table_seeds=[||] then 0 else 1) in
-  let counts = let o = !offset in offset := o+12; o in
-  let count_base = gather_base+List.length gathers in
-  let input_used=Array.make count false in
-  Array.iteri(fun slot instruction->match snd(guarded [] instruction)with P.Input(input,_,_)when used.(slot)->input_used.(input)<-true|_->())view.code;
-  let uniform_words = (!offset + 15) / 16 in
+  let counts = Option.get counts in
+  let uniform_words = Flow_ir.Kernel_layout.uniform_words layout in
   let declarations = Buffer.create 512 in
   let interface = ref [] in
   let bind binding kind decl = interface := {group=0;binding;kind} :: !interface;
@@ -394,9 +395,9 @@ let kernel_fast program = try
        | Storage_read_write -> "<storage, read_write>") decl in
   Array.iteri (fun index used -> if used then bind index Storage_read (Printf.sprintf "input%d: array<f32>" index)) input_used;
   for k = 0 to outputs-1 do bind (count+k) Storage_read_write (output_name k ^ ": array<f32>") done;
-  bind (count+outputs) Uniform_buffer (Printf.sprintf "uniforms: array<vec4<u32>, %d>" uniform_words);
-  bind (count+outputs+1) Storage_read_write "status: atomic<u32>";
-  if table_seeds <> [||] then bind (count+outputs+2) Storage_read "table: array<i32>";
+  bind uniform_binding Uniform_buffer (Printf.sprintf "uniforms: array<vec4<u32>, %d>" uniform_words);
+  bind status_binding Storage_read_write "status: atomic<u32>";
+  Option.iter (fun binding -> bind binding Storage_read "table: array<i32>") table_binding;
   List.iteri (fun k _ -> bind (gather_base+k) Storage_read (Printf.sprintf "gather%d: array<f32>" k)) gathers;
   bind count_base Storage_read "count_in: array<u32>";
   bind (count_base+1) Storage_read_write "count_out: array<u32>";
@@ -410,11 +411,11 @@ let kernel_fast program = try
     (word (w+2)) (word w) (word (w+1)) ^ Buffer.contents body in
   let entry = "kernel_" ^ Digest.to_hex (Digest.string (prefix ^ signature ^ body)) in
   let source = prefix ^ "@compute @workgroup_size(64)\nfn " ^ entry ^ signature ^ " {\n" ^ body ^ "}\n" in
-  Ok {source;entry;interface=List.rev !interface;uniform_layout=List.rev !uniform_layout;
+  Ok {source;entry;interface=List.rev !interface;uniform_layout;
     uniform_bytes=uniform_words*16;table_seeds;
     output_widths=Array.map Array.length view.outputs;input_widths=view.widths;
     gathers=Array.of_list (List.map snd gathers);counts=Some counts}
-with Unsupported message -> Error (Flow.Diagnostic.error ~code:"E_GPU_FORM" message)
+with Diagnostic.Error diagnostic -> Error diagnostic
 
 (* A resident fold's [array/compact] on the web: one workgroup of 256 (the WebGPU default limit),
    each thread counts a contiguous chunk of the mask, thread 0 turns the counts into offsets, each

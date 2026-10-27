@@ -19,7 +19,7 @@
   ../sdl3_ttf/sdl3_ttf_stubs.c
   ../sdl3_mixer/sdl3_mixer_stubs.c)
  (action
-  (run %{exe:../../tools/sdl3/generate.exe} emit --root ../..
+  (run %{exe:../sdl3/generate.exe} emit --root ../..
    --component sdl3_mixer --lock ../../packaging/sdl3.lock
    --abi ../sdl3/abi.sexp --output generated_abi.h)))
 
@@ -41,14 +41,14 @@
  (libraries sdl3 sdl3_mixer sdl3_lock))
 
 (rule
- (aliases runtest test_sdl3_mixer)
+ (alias test_sdl3_mixer)
  (deps ../../packaging/sdl3.lock)
  (action
   (setenv SDL_AUDIODRIVER dummy
    (run %{exe:test_main.exe} test_sdl3_mixer))))
 
 (rule
- (aliases runtest test_sdl3_mixer_device_failure)
+ (alias test_sdl3_mixer_device_failure)
  (action
   (setenv SDL_AUDIODRIVER rays_missing_audio_driver
    (run %{exe:test_main.exe} test_sdl3_mixer_device_failure))))
@@ -60,3 +60,9 @@
  (action
   (setenv SDL_AUDIODRIVER dummy
    (run %{exe:test_main.exe} test_sdl3_mixer))))
+
+(alias
+ (name runtest)
+ (deps
+  (alias test_sdl3_mixer)
+  (alias test_sdl3_mixer_device_failure)))

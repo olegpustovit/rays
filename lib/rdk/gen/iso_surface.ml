@@ -16,7 +16,7 @@ type evaluator =  Dense of Field.t | Sampled of float array
 let sample_scratch = Domain.DLS.new_key (fun () -> Array.make 3 0.)
 
 let finite_vec3 point =
-  Float.is_finite point.Vec3.x
+  Float.is_finite point.Rays_math.Vec3.x
   && Float.is_finite point.y
   && Float.is_finite point.z
 
@@ -40,7 +40,7 @@ let extract_with evaluator ?cancel ?(grain = 16_384) ?(smooth = true)
     invalid_arg "Iso3.extract: resolution is too large";
   if not (finite_vec3 min && finite_vec3 max && Float.is_finite iso) then
     invalid_arg "Iso3.extract: bounds and isovalue must be finite";
-  let extent = Vec3.sub max min in
+  let extent = Rays_math.Vec3.sub max min in
   if extent.x <= 0. || extent.y <= 0. || extent.z <= 0. then
     invalid_arg
       "Iso3.extract: every maximum bound must exceed its minimum";
@@ -194,7 +194,7 @@ let extract_with evaluator ?cancel ?(grain = 16_384) ?(smooth = true)
         let vertices = packed_vec3 output_vertex_count
         and normals = packed_vec3 output_vertex_count in
         let store (target : Packed.Float3.Private.view) index value =
-          target.x.(index) <- value.Vec3.x;
+          target.x.(index) <- value.Rays_math.Vec3.x;
           target.y.(index) <- value.y;
           target.z.(index) <- value.z
         in
@@ -333,8 +333,8 @@ let extract_with evaluator ?cancel ?(grain = 16_384) ?(smooth = true)
               if not smooth then begin
                 let length = sqrt (gx*.gx +. gy*.gy +. gz*.gz) in
                 let sign = if flip then -1. else 1. in
-                let normal = if length <= 1e-18 then Vec3.zero else
-                    Vec3.create (sign*.gx/.length) (sign*.gy/.length) (sign*.gz/.length) in
+                let normal = if length <= 1e-18 then Rays_math.Vec3.zero else
+                    Rays_math.Vec3.create (sign*.gx/.length) (sign*.gy/.length) (sign*.gz/.length) in
                 store normals !output normal; store normals (!output + 1) normal;
                 store normals (!output + 2) normal
               end;

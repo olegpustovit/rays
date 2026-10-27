@@ -5,11 +5,18 @@ let native=function Ok x->x|Error e->failwith(Ogpu.Error.to_string e)
 let () =
   let base,live=Ogpu.Impl.create_driver()in
   let reads=ref 0 in
+  let read_error=ref None in
   let bytes=Bytes.init(65*3*4)(fun i->Char.chr(i mod 256))in
   let driver=B.{create_device=(fun()->Result.map(fun raw->{raw with
     create_texture=(fun descriptor->Result.map(fun(resource:B.driver_resource)->
       if descriptor.Ogpu.Types.width=65 && descriptor.height=3 then native(resource.write 0L bytes);
-      {resource with read=(fun offset length->incr reads;resource.read offset length)})
+      {resource with
+       read=(fun offset length->incr reads;match !read_error with
+         |Some error->Error error|None->resource.read offset length);
+       read_into=(fun offset destination destination_offset length->incr reads;
+         match !read_error with
+         |Some error->Error error
+         |None->resource.read_into offset destination destination_offset length)})
       (raw.create_texture descriptor))})(base.create_device()))}in
   let device=native(B.create_device driver)in
   let descriptor:Ogpu.Types.texture_descriptor={label=None;width=65;height=3;depth=1;
@@ -59,9 +66,9 @@ let () =
      {descriptor with depth=2};{descriptor with sample_count=4};{descriptor with usage=[Texture_copy_src]};
      {descriptor with usage=[Texture_binding]}];
   assert(Domain.join(Domain.spawn(fun()->match I.Private.of_gpu ~width:65 ~height:3
-    ~source:(fun()->assert false)with Error{kind=Wrong_domain;_}->true|_->false)));
+    ~source:(fun()->assert false)with Error{kind=Ogpu.Error.Wrong_domain;_}->true|_->false)));
   assert(Domain.join(Domain.spawn(fun()->match I.Private.gpu_snapshot image with
-    |Error{kind=Wrong_domain;_}->true|_->false)));
+    |Error{kind=Ogpu.Error.Wrong_domain;_}->true|_->false)));
   let cpu=Bytes.make(17*5*4)'\x31'in
   get(I.replace image ~width:17 ~height:5 ~rgba:cpu);
   assert(get(I.Private.gpu_snapshot image)=None && get(I.pixels image)=cpu && !reads=2);
@@ -81,6 +88,20 @@ let () =
   let large_image=get(I.Private.of_gpu ~width:1024 ~height:1024 ~source:(fun()->Some large))in
   assert(Gc.allocated_bytes()-.before<4096. && I.Private.cpu_storage_bytes large_image=0 && !reads=2);
   get(I.destroy large_image);
+  let backend_error=Ogpu.Error.make "driver.read_texture" Ogpu.Error.Device_lost "injected readback failure" in
+  read_error:=Some backend_error;
+  let failed_image=get(I.Private.of_gpu ~width:1024 ~height:1024 ~source:(fun()->Some large))in
+  (match I.pixels failed_image with
+   |Error error when error=backend_error->()
+   |_->failwith"Image.pixels changed the backend readback error");
+  let failed_canvas=get(Runtime_resources.Canvas.create ~width:1024 ~height:1024)in
+  get(Runtime_resources.Canvas.Private.publish_gpu failed_canvas large);
+  (match Runtime_resources.Canvas.snapshot failed_canvas with
+   |Error error when error=backend_error->()
+   |_->failwith"Canvas.snapshot changed the backend readback error");
+  read_error:=None;
+  get(Runtime_resources.Canvas.destroy failed_canvas);
+  get(I.destroy failed_image);
   let destroyed=get(I.create ~width:1 ~height:1 ~rgba:(Bytes.make 4 '\x5a'))in
   let _,_,_,saved,lease=get(I.Private.borrow_snapshot destroyed)in
   get(I.destroy destroyed);I.Private.release_snapshot lease;I.Private.release_snapshot lease;

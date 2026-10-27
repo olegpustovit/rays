@@ -1,10 +1,5 @@
-type phase = Print | Parse | Check | Evaluate | Lower | Project | Layout | Reduce | Cook
-type entry = { phase : phase; calls : int; seconds : float }
+type entry = { phase : string; calls : int; seconds : float }
 type t = { total : float; entries : entry list }
-let phases = [Print; Parse; Check; Evaluate; Lower; Project; Layout; Reduce; Cook]
-let name = function
-  | Print -> "print" | Parse -> "parse" | Check -> "check" | Evaluate -> "evaluate"
-  | Lower -> "lower" | Project -> "project" | Layout -> "layout" | Reduce -> "reduce" | Cook -> "cook"
 let empty = { total = 0.; entries = [] }
 type scope = { mutable children : float }
 type sample = { now : unit -> float; started : float; mutable entries : entry list; mutable stack : scope list }
@@ -30,7 +25,7 @@ let measure phase run = match Domain.DLS.get current with
         sample.entries <- entry :: List.filter (fun e -> e.phase <> phase) sample.entries)
 let sample ~clock run =
   let snapshot sample = { total = sample.now () -. sample.started;
-    entries = List.filter_map (fun phase -> List.find_opt (fun e -> e.phase = phase) sample.entries) phases } in
+    entries = List.sort (fun a b -> String.compare a.phase b.phase) sample.entries } in
   match Domain.DLS.get current with
   | Some sample ->
       let value = run () in
@@ -48,4 +43,4 @@ let calls (t : t) phase = Option.fold ~none:0 ~some:(fun e -> e.calls)
 let seconds (t : t) phase = Option.fold ~none:0. ~some:(fun e -> e.seconds)
   (List.find_opt (fun e -> e.phase = phase) t.entries)
 let summary (t : t) = String.concat " · " (List.map (fun e ->
-  Printf.sprintf "%s %.1f ms" (name e.phase) (e.seconds *. 1000.)) t.entries)
+  Printf.sprintf "%s %.1f ms" e.phase (e.seconds *. 1000.)) t.entries)

@@ -7,6 +7,8 @@ type binary = Flow.Packed_ops.binary = Add | Sub | Mul | Div | Mod | Pow | Min |
 type unary = Flow.Packed_ops.unary = Sin | Cos | Sqrt | Abs | Not | Tan | Asin | Acos | Exp | Log | Sign
 type conversion = Core.Region.conversion = To_float | Truncate | Floor | Ceil | Round | Coerce_int | Integer_result of string
 type projection = Core.Region.projection = Value | Valid
+type loop = Core.Region.loop = {first:int; last:int; finish:int; initial:int array; limit:int option;
+  span:Diagnostic.span}
 type instruction = Core.Region.instruction = Const of float | Input of int * int * int
   | Uniform of int * int | Frame of string | Accumulator of int
   | Binary of binary * int * int | Unary of unary * int | Noise3 of int * int * int * int * int * float * float
@@ -23,34 +25,15 @@ type instruction = Core.Region.instruction = Const of float | Input of int * int
   | Int_compare of Flow.Packed_ops.comparison * int * int | Int_abs of int
   | Convert of conversion * int | Int_select of int * int * int
   | Guarded of (int * bool) list * instruction | Raise of Ty.t * string * string * string option
+  | Loop_begin of loop | Loop_carry of int * int * Ty.t
+  | Loop_end of int * int array * int option | Loop_result of int * int * Ty.t
 type iteration = Core.Region.iteration = Zip | Product
 type result = Core.Region.result = Collect | Sum of bool | Accumulate of W.term * bool
 type origin = W.path * int list
 type count_source = E.residual -> W.term -> origin option
 type column = {data:float array;offset:int;stride:int}
-type t = { residual : E.residual; term : W.term; sources : (E.residual * W.term) array;
-  widths : int array; uniforms : E.value array; code : instruction array;
-  dependent : bool array; outputs : int array array; count : int option;
-  iteration : iteration; result : result; skip : int array;
-  stages : (E.residual * W.term) list; fusion : bool; dynamic : bool;
-  body : W.term; binding_fn : string option; uniform_names : (string * string list) array;
-  count_source : count_source; origin : origin option;
-  sites : (int * W.path * int list) list }
-let rec operands = function
-  | Binary (_,a,b) | Int_binary (_,a,b) | Int_compare (_,a,b) | Rand_at (a,b) | Checked_mul(_,a,b)
-  | Gather(a,b,_,_) | Int_gather(a,b) | Text_gather(a,b) -> [a;b]
-  | Unary (_,a) | Int_abs a | Convert (_,a) -> [a]
-  | Noise3 (a,b,c,_,_,_,_) | Fma (a,b,c) | Select (a,b,c) | Int_select (a,b,c) | Text_select(a,b,c) | Checked_fma(_,a,b,c) -> [a;b;c]
-  | Guarded (guards,body) -> List.map fst guards @ operands body
-  | _ -> []
-
-let dependent_of code =
-  let dependent = Array.make (Array.length code) false in
-  let rec accumulator = function Accumulator _ | Int_accumulator -> true
-    | Guarded (_,body) -> accumulator body | _ -> false in
-  Array.iteri (fun id instruction -> dependent.(id) <- accumulator instruction
-    || List.exists (fun r -> dependent.(r)) (operands instruction)) code;
-  dependent
+type t = Core.Region.t
+let operands = Core.Region.operands
 
 let rec typed_instruction = function
   | Int_const _ -> false (* compile-time configuration literals may be unused *)
@@ -58,9 +41,10 @@ let rec typed_instruction = function
   | Int_abs _ | Convert _ | Int_select _ | Raise _ | Rand_at _
   | Array_prepare _ | Gather _ | Int_gather _
   | Text_const _ | Text_input _ | Text_uniform _ | Text_gather _ | Text_select _ -> true
+  | Loop_begin _ | Loop_carry _ | Loop_end _ | Loop_result _ -> true
   | Guarded (_,body) -> typed_instruction body
   | _ -> false
-let integer_program t = Array.exists typed_instruction t.code
+let integer_program (t : t) = Array.exists typed_instruction t.code
   || Array.exists (Array.exists (fun r->Core.Region.integer_register t.code.(r))) t.outputs
   || Array.exists (fun (_,term)->term.W.ty=Ty.Array Ty.Int) t.sources
 
@@ -86,133 +70,40 @@ let convert_int op x = match op with
   | Coerce_int->V.to_int "int" (Float.floor (x+.0.5))
   | Integer_result name->V.to_int name (Float.floor (x+.0.5)) | To_float->assert false
 
-let of_region (r : Core.Region.t) =
-  let invalid message = Result.Error [Flow.Diagnostic.error ~span:r.term.form.span ~code:"E_PACKED_LAYOUT" message] in
-  let ok slot id = id >= 0 && id < slot in
-  let operands_ok = ref true in
-  let rec bare = function Guarded(_,body)->bare body | body->body in
-  let array_handle id = id>=0 && id<Array.length r.code &&
-    (match bare r.code.(id) with Array_prepare _->true|_->false) in
-  let table_type id = match bare r.code.(id) with Array_prepare(_,ty)->ty|_->Ty.Any in
-  let text id=id>=0 && id<Array.length r.code && Core.Region.text_register r.code.(id) in
-  let rec guards = function Guarded(gs,body)->gs @ guards body|_->[] in
-  let prepared_for selected array = List.for_all(fun guard->List.mem guard selected)(guards r.code.(array)) in
-  let rec valid ?(selected=[]) slot instruction =
-    if not (List.for_all (ok slot) (operands instruction)) then operands_ok:=false;
-    (match instruction with Gather _|Int_gather _|Text_gather _|Guarded _->()
-      | _ -> if List.exists array_handle (operands instruction) then operands_ok:=false);
-    (match instruction with Text_select _|Guarded _->()
-      |_->if List.exists text (operands instruction) then operands_ok:=false);
-    match instruction with
-    | Array_prepare(input,ty) ->
-        if input<0 || input>=Array.length r.uniforms ||
-          not (match ty with Ty.Array(Ty.Int|Text|Float|Vec2|Vec3|Vec4)->true|_->false)
-        then operands_ok:=false
-        else let actual=match r.uniforms.(input) with E.Residual residual ->
-            (E.Private.residual_view residual).term.ty|value->V.ty_of value in
-          if actual<>ty then operands_ok:=false
-    | Gather(array,index,width,component) ->
-        if not(ok slot array && ok slot index && array_handle array)
-          || not(Core.Region.integer_register r.code.(index))
-          || component<0 || component>=width then operands_ok:=false
-        else if not(prepared_for selected array) || table_type array=Ty.Array Ty.Int || Flow.Packed_ops.array_width(table_type array)<>Some width
-          then operands_ok:=false
-    | Int_gather(array,index) ->
-        if not(ok slot array && ok slot index && array_handle array)
-          || not(Core.Region.integer_register r.code.(index)) then operands_ok:=false
-        else if not(prepared_for selected array) || table_type array<>Ty.Array Ty.Int then operands_ok:=false
-    | Text_gather(array,index) ->
-        if not(ok slot array && ok slot index && array_handle array)
-          || not(Core.Region.integer_register r.code.(index)) then operands_ok:=false
-        else if not(prepared_for selected array) || table_type array<>Ty.Array Ty.Text then operands_ok:=false
-    | Text_select(condition,yes,no) ->
-        if array_handle condition || text condition || not(text yes && text no) then operands_ok:=false
-    | Text_input input ->
-        if input<0 || input>=Array.length r.sources || input>=Array.length r.widths
-          || r.widths.(input)<>1 || (snd r.sources.(input)).W.ty<>Ty.Array Ty.Text then operands_ok:=false
-    | Text_uniform input ->
-        if input<0 || input>=Array.length r.uniforms then operands_ok:=false
-        else let ty=match r.uniforms.(input) with E.Residual residual ->
-            (E.Private.residual_view residual).term.ty | value -> V.ty_of value in
-          if ty<>Ty.Text then operands_ok:=false
-    | Input (input,width,component) ->
-        if input<0 || input>=Array.length r.widths || width<>r.widths.(input)
-          || component<0 || component>=width
-          || input<Array.length r.sources && (snd r.sources.(input)).W.ty=Ty.Array Ty.Text then operands_ok:=false
-    | Int_input input ->
-        if input<0 || input>=Array.length r.sources || input>=Array.length r.widths
-          || r.widths.(input)<>1 || (snd r.sources.(input)).W.ty<>Ty.Array Ty.Int then operands_ok:=false
-    | Uniform (input,component) ->
-        if input<0 || input>=Array.length r.uniforms || component<0 || component>=4 then operands_ok:=false
-        else if (match r.uniforms.(input) with E.Residual residual ->
-            (E.Private.residual_view residual).term.ty | value -> V.ty_of value)=Ty.Text then operands_ok:=false
-    | Int_uniform input ->
-        if input<0 || input>=Array.length r.uniforms then operands_ok:=false
-        else let ty=match r.uniforms.(input) with E.Residual residual ->
-            (E.Private.residual_view residual).term.ty | value -> V.ty_of value in
-          if ty<>Ty.Int then operands_ok:=false
-    | Accumulator component -> if component<0 || component>=4 then operands_ok:=false
-    | Guarded (guards,body) ->
-        if List.exists(fun(id,_)->array_handle id || text id)guards then operands_ok:=false;
-        valid ~selected:(selected @ guards) slot body
-    | _ -> () in
-  Array.iteri valid r.code;
-  if Array.length r.widths<>Array.length r.sources
-    || not (Array.for_all (fun width->width>=1 && width<=4) r.widths) then
-    invalid "Region inputs need matching sources and widths from 1 to 4."
-  else if not !operands_ok then invalid "Region instruction reads an invalid input or a register defined later."
-  else if Array.length r.code > Flow.Packed_ops.register_limit then
-    invalid (Printf.sprintf "Region exceeds %d registers." Flow.Packed_ops.register_limit)
-  else if r.outputs = [||] || (Array.length r.outputs > 1 && r.result <> Collect) then
-    invalid "A region has one output, or several only when it collects."
-  else if not (Array.for_all (fun output -> Array.length output>=1 && Array.length output<=4
-      && Array.for_all (fun id->ok (Array.length r.code) id && not(array_handle id)) output
-      && (not(Array.exists text output) || Array.length output=1)) r.outputs) then invalid "Region output needs 1 to 4 existing scalar registers."
-  else if r.result<>Collect && Array.exists Core.Region.text_register r.code then
-    invalid "Text leaves require collecting kernels."
-  else Ok {residual = r.residual; term = r.term; sources = r.sources; widths = r.widths;
-    uniforms = r.uniforms; code = r.code; dependent = dependent_of r.code; outputs = r.outputs;
-    count = r.count; iteration = r.iteration; result = r.result; skip = r.skip; stages = r.stages;
-    fusion = r.fusion; dynamic = r.dynamic; body = r.body; binding_fn = r.binding_fn;
-    uniform_names = r.uniform_names; count_source = r.count_source; origin = r.origin; sites = r.sites}
-
-let to_region t : Core.Region.t =
-  {residual = t.residual; term = t.term; sources = t.sources; widths = t.widths;
-   uniforms = t.uniforms; uniform_names = t.uniform_names; code = t.code; outputs = t.outputs;
-   count = t.count; origin = t.origin; iteration = t.iteration; result = t.result; skip = t.skip;
-   stages = t.stages; fusion = t.fusion; dynamic = t.dynamic; count_source = t.count_source;
-   body = t.body; binding_fn = t.binding_fn; sites = t.sites}
-
 exception Unsupported = Core_region.Unsupported
 let width_of = Core_region.width_of
 let components = Core_region.components
 
-let zipped t = t.iteration = Zip || Array.length t.sources = 1
+let zipped (t : t) = t.iteration = Zip || Array.length t.sources = 1
 
-let output_reachable t =
+let rec unguarded = function Guarded (_,body) -> unguarded body | instruction -> instruction
+
+let output_reachable (t : t) =
   let used = Array.make (Array.length t.code) false in
   let rec use slot = if not used.(slot) then begin
     used.(slot) <- true;
-    List.iter use (operands t.code.(slot))
+    List.iter use (operands t.code.(slot));
+    (match unguarded t.code.(slot) with
+     | Loop_begin loop -> for body=slot+1 to loop.finish do use body done
+     | _ -> ())
   end in
   Array.iter (Array.iter use) t.outputs;
   used
 
-let rec unguarded = function Guarded (_,body) -> unguarded body | instruction -> instruction
-
-let finite_checks t =
+let finite_checks (t : t) =
   (* GPU qualification rejects nonfinite constants. These operations cannot
      introduce a nonfinite result; their operands are checked at their source. *)
   Array.map (fun instruction -> match unguarded instruction with
     | Const _ | Select _ | Array_prepare _ | Unary ((Abs | Sqrt | Not), _)
+    | Loop_begin _ | Loop_carry _ | Loop_end _ | Loop_result _
     | Checked_mul _ | Checked_fma _
     | Binary ((Min | Max | Lt | Le | Gt | Ge | Eq | And | Or), _, _) -> false
     | body when Core.Region.text_register body -> false
     | _ -> true) t.code
 
-let gpu_refusals ?(fused=false) ?(fast=false) t =
+let gpu_refusals ?(fused=false) ?(fast=false) (t : t) =
   let reasons = ref [] in
-  let refuse message = reasons := Flow.Diagnostic.error ~code:"E_GPU_FORM" message :: !reasons in
+  let refuse message = reasons := Diagnostic.error ~code:"E_GPU_FORM" message :: !reasons in
   if Array.exists Core.Region.text_register t.code then refuse "Text kernels stay on the CPU.";
   (* fast precision (the workspace default) takes gathers and int32 on the device *)
   if not fast && Array.exists(fun instruction->match unguarded instruction with
@@ -249,28 +140,60 @@ let gpu_refusals ?(fused=false) ?(fast=false) t =
   List.rev !reasons
 
 let compile_impl ?(fusion = true) ?(dynamic = false) ?(count_source = fun _ _ -> None) residual term =
-  Result.bind (Core_region.lower ~fusion ~dynamic ~count_source residual term) (fun region ->
-    of_region (if fusion then Core_fuse.fuse region else region))
+  Result.map (fun region -> if fusion then Core_fuse.fuse region else region)
+    (Core_region.lower ~fusion ~dynamic ~count_source residual term)
 
-let static_count t = t.count
-let count_origin t = t.origin
-let trace : ((t, Flow.Diagnostic.t list) Stdlib.result -> unit) ref = ref ignore
+let static_count (t : t) = t.count
+let count_origin (t : t) = t.origin
+let trace : ((t, Diagnostic.t list) Stdlib.result -> unit) ref = ref ignore
 let traced result = !trace result; result
 let compile_result ?fusion ?count_source r term = traced (compile_impl ?fusion ?count_source r term)
 let compile ?fusion ?count_source r term = compile_result ?fusion ?count_source r term |> Result.to_option
 let compile_template ?count_source r term =
   traced (compile_impl ~dynamic:true ?count_source r term) |> Result.to_option
-let rebind t residual =
-  Option.bind (Core_region.rebind (to_region t) residual) (fun region -> Result.to_option (of_region region))
-let elementwise t = match t.result with Collect -> true | Sum _ | Accumulate _ -> false
-let provenance t = List.sort_uniq compare t.sites
-let stage_count t = List.length t.stages
-let site t = let view = E.Private.residual_view t.residual in
+let rebind (t : t) residual = Core_region.rebind t residual
+let elementwise (t : t) = match t.result with Collect -> true | Sum _ | Accumulate _ -> false
+let provenance (t : t) = List.sort_uniq compare t.sites
+let stage_count (t : t) = List.length t.stages
+let site (t : t) = let view = E.Residual.residual_view t.residual in
   view.instance, Option.value ~default:view.site t.term.path, view.iter
-let reference ?state ?elems ?resolve t ~live = E.Private.eval_term ?state ?elems ?resolve t.residual t.term ~live
-exception Failed of Flow.Diagnostic.t
-exception Nonfinite
-let get = function Ok x -> x | Error d -> raise (Failed d)
+let reference ?state ?elems ?resolve (t : t) ~live = E.Residual.eval_term ?state ?elems ?resolve t.residual t.term ~live
+let reference_observed ?state ?elems ?resolve ?on_walk (t : t) ~live =
+  E.Residual.eval_term ?state ?elems ?resolve ?on_walk t.residual t.term ~live
+let nonfinite () =
+  raise (Diagnostic.Error (Diagnostic.error ~code:"E_NONFINITE" "Packed kernel produced a nonfinite result."))
+let get = function Ok x -> x | Error d -> raise (Diagnostic.Error d)
+
+let rec force_values ?state ?elems ?resolve ~live ~residual = function
+  | value when not (E.is_live value) -> Ok value
+  | E.Residual r -> Result.bind (residual r) (force_values ?state ?elems ?resolve ~live ~residual)
+  | E.Source _ as value -> Result.bind
+      (E.Private.force_reference ?state ?elems ?resolve value ~live)
+      (force_values ?state ?elems ?resolve ~live ~residual)
+  | E.Struct (_, Ty.Array _, _) as value -> Result.bind
+      (E.Private.force_reference ?state ?elems ?resolve value ~live)
+      (force_values ?state ?elems ?resolve ~live ~residual)
+  | E.List values ->
+      let out = Array.make (Array.length values) E.No_geo in
+      let rec loop i = if i = Array.length values then Ok (E.List out) else
+        Result.bind (force_values ?state ?elems ?resolve ~live ~residual values.(i))
+          (fun value -> out.(i) <- value; loop (i + 1)) in
+      loop 0
+  | E.Record fields ->
+      let rec loop acc = function
+        | [] -> Ok (E.Record (List.rev acc))
+        | (name, value) :: rest -> Result.bind
+            (force_values ?state ?elems ?resolve ~live ~residual value)
+            (fun value -> loop ((name, value) :: acc) rest) in
+      loop [] fields
+  | E.Struct (name, ty, fields) ->
+      let rec loop acc = function
+        | [] -> Ok (E.Struct (name, ty, List.rev acc))
+        | (field, value) :: rest -> Result.bind
+            (force_values ?state ?elems ?resolve ~live ~residual value)
+            (fun value -> loop ((field, value) :: acc) rest) in
+      loop [] fields
+  | value -> Ok value
 
 let borrowed_count width columns =
   if Array.length columns<>width then V.fail "E_ARRAY_TYPE" "Borrowed columns changed the packed element width.";
@@ -285,8 +208,8 @@ let borrowed_count width columns =
 
 let rec integer_range residual (term : W.term) = match term.node with
   | W.Ref_binding(name,[]) ->
-      (match List.assoc_opt name (E.Private.residual_view residual).bindings with
-       | Some(E.Residual nested) -> integer_range nested (E.Private.residual_view nested).term
+      (match List.assoc_opt name (E.Residual.residual_view residual).bindings with
+       | Some(E.Residual nested) -> integer_range nested (E.Residual.residual_view nested).term
        | _ -> None)
   | W.Op {op="array/range";args;skip=[]} when term.ty=Ty.Array Ty.Int ->
       (match List.assoc_opt "type" args,List.assoc_opt "count" args with
@@ -295,12 +218,14 @@ let rec integer_range residual (term : W.term) = match term.node with
   | _ -> None
 
 
-let run_typed ?column_source ?plane_outputs ?expected_count ~evaluate ~uniform ~seed t ~live =
-  let gather=Array.exists(fun instruction->match unguarded instruction with
-    | Array_prepare _|Gather _|Int_gather _->true
-    | body->Core.Region.text_register body)t.code in
-  let cache_guards=t.result=Collect
-    && Array.exists(function Guarded _->true|_->false)t.code in
+let block_layout ~count ~limit =
+  let block_size = max 1 (min count limit) in
+  let blocks_per_chunk = 16 in
+  let blocks = if count = 0 then 0 else (count - 1) / block_size + 1 in
+  let chunks = if blocks = 0 then 0 else (blocks - 1) / blocks_per_chunk + 1 in
+  block_size, blocks, blocks_per_chunk, chunks
+
+let typed_inputs ?column_source ~evaluate (t:t) =
   let borrowed=Array.make (Array.length t.sources) None in
   let ranges=Array.make (Array.length t.sources) None in
   let empty_product=ref false in
@@ -320,16 +245,71 @@ let run_typed ?column_source ?plane_outputs ?expected_count ~evaluate ~uniform ~
     |None,Some columns->borrowed_count t.widths.(i) columns);
     if t.iteration=Product && lengths.(i)=0 then empty_product:=true;
     value end) t.sources in
+  inputs,borrowed,ranges,lengths
+
+type loop_scratch={floats:float array;integer:int array;texts:string array;
+  banks:bool array;text_offsets:int array;block_size:int;
+  next_float:float array;next_int:int array;next_text:string array}
+
+let copy_loop s source target lane =
+  if s.text_offsets.(target)>=0 then
+    s.texts.(s.text_offsets.(target)*s.block_size+lane)<-s.texts.(s.text_offsets.(source)*s.block_size+lane)
+  else if s.banks.(target) then
+    s.integer.(target*s.block_size+lane)<-s.integer.(source*s.block_size+lane)
+  else s.floats.(target*s.block_size+lane)<-s.floats.(source*s.block_size+lane)
+
+let execute_loop s ~(execute : ?dependent:bool -> int -> int -> int -> int -> unit)
+    ~code header (loop:loop) first last =
+  match unguarded code.(loop.finish)with
+  |Loop_end(_,next,stop)->
+  let count=Array.length loop.initial in
+  for lane=first to last-1 do
+    let lo=s.integer.(loop.first*s.block_size+lane) and hi=s.integer.(loop.last*s.block_size+lane)in
+    let length=try Flow.Op.range_length ~limit:(Option.value ~default:max_int loop.limit)lo hi
+      with Diagnostic.Error d->V.raise_diagnostic{d with span=Some loop.span}in
+    for component=0 to count-1 do copy_loop s loop.initial.(component)(header+1+component)lane done;
+    let iteration=ref 0 and finished=ref false in
+    while !iteration<length && not !finished do
+      s.integer.(header*s.block_size+lane)<-lo+ !iteration;
+      execute (header+1+count) loop.finish lane (lane+1);
+      finished:=(match stop with None->false|Some slot->s.floats.(slot*s.block_size+lane)<>0.);
+      for component=0 to count-1 do
+        let target=header+1+component and value=next.(component)in
+        if s.text_offsets.(target)>=0 then s.next_text.(component)<-s.texts.(s.text_offsets.(value)*s.block_size+lane)
+        else if s.banks.(target)then s.next_int.(component)<-s.integer.(value*s.block_size+lane)
+        else s.next_float.(component)<-s.floats.(value*s.block_size+lane)
+      done;
+      for component=0 to count-1 do let target=header+1+component in
+        if s.text_offsets.(target)>=0 then s.texts.(s.text_offsets.(target)*s.block_size+lane)<-s.next_text.(component)
+        else if s.banks.(target)then s.integer.(target*s.block_size+lane)<-s.next_int.(component)
+        else s.floats.(target*s.block_size+lane)<-s.next_float.(component)
+      done;
+      incr iteration
+    done
+  done
+  |_->assert false
+
+let rec typed_total ranges inputs = function
+  | Int_const _ | Text_const _ | Int_abs _ | Int_compare _ | Int_select _ | Text_select _ -> true
+  | Const x -> Float.is_finite x
+  | Int_input i -> ranges.(i)<>None || (match inputs.(i) with E.Int_array _->true|_->false)
+  | Text_input i -> (match inputs.(i) with E.Text_array _->true|_->false)
+  | Int_binary((Iadd|Isub|Imul|Iand|Ior|Ixor),_,_) -> true
+  | Guarded(_,body) -> typed_total ranges inputs body
+  | _ -> false
+
+let run_typed ?column_source ?plane_outputs ?expected_count ~evaluate ~uniform ~seed (t : t) ~live =
+  let carried=Array.fold_left(fun count instruction->match unguarded instruction with
+    |Loop_begin loop->max count(Array.length loop.initial)|_->count)0 t.code in
+  let gather=Array.exists(fun instruction->match unguarded instruction with
+    | Array_prepare _|Gather _|Int_gather _|Loop_begin _->true
+    | body->Core.Region.text_register body)t.code in
+  let cache_guards=carried=0 && t.result=Collect
+    && Array.exists(function Guarded _->true|_->false)t.code in
+  let inputs,borrowed,ranges,lengths=typed_inputs ?column_source ~evaluate t in
   (* A leading total prefix only writes private banks. Keep every potentially
      failing instruction and lazy capture in the existing reference lane order. *)
-  let rec total = function
-    | Int_const _ | Text_const _ | Int_abs _ | Int_compare _ | Int_select _ | Text_select _ -> true
-    | Const x -> Float.is_finite x
-    | Int_input i -> ranges.(i)<>None || (match inputs.(i) with E.Int_array _->true|_->false)
-    | Text_input i -> (match inputs.(i) with E.Text_array _->true|_->false)
-    | Int_binary((Iadd|Isub|Imul|Iand|Ior|Ixor),_,_) -> true
-    | Guarded(_,body) -> total body
-    | _ -> false in
+  let total=typed_total ranges inputs in
   let total_prefix=if gather && t.result=Collect then begin
       let length=ref 0 in
       while !length<Array.length t.code && total t.code.(!length) do incr length done;
@@ -410,13 +390,15 @@ let run_typed ?column_source ?plane_outputs ?expected_count ~evaluate ~uniform ~
   let initialized=ref(match t.result with Sum zero->zero|_->true) in
   (* a block's scratch holds every register for each of its lanes: a large kernel takes fewer lanes,
      so scratch stays near 64K slots (512 KiB a bank) *)
-  let block_size=max 64 (min 1024 (65536/max 1 (Array.length t.code))) and blocks_per_chunk=16 in
-  let blocks=if count=0 then 0 else (count-1)/block_size+1 in
-  let chunks=if blocks=0 then 0 else (blocks-1)/blocks_per_chunk+1 in
+  let block_size,blocks,blocks_per_chunk,chunks = block_layout ~count
+      ~limit:(max 64 (min 1024 (65536 / max 1 (Array.length t.code)))) in
+  let dependent_flags=if count=0 then [||] else Core.Region.dependent_flags t in
   let chunk chunk =
     let integer=Array.make (Array.length t.code*block_size) 0
     and floats=Array.make (Array.length t.code*block_size) 0. in
     let texts=Array.make (!text_count*block_size) "" in
+    let loops=if carried=0 then None else Some {floats;integer;texts;banks;text_offsets;block_size;
+      next_float=Array.make carried 0.;next_int=Array.make carried 0;next_text=Array.make carried ""} in
     let[@inline always] fill_int offset count value =
       if count=1 then integer.(offset)<-value else Array.fill integer offset count value in
     let[@inline always] fill_float offset count value =
@@ -427,7 +409,7 @@ let run_typed ?column_source ?plane_outputs ?expected_count ~evaluate ~uniform ~
     let rec selected j=function []->true|(r,yes)::rest->(numeric r j<>0.)=yes && selected j rest in
     let frame=Array.map(fun instruction->lazy(match unguarded instruction with
       | Int_frame name | Frame name ->
-          if name="t" then E.Float live.Frame_input.t else
+          if name="t" then E.Float live.Input.t else
           (match Flow.Op.find name Flow.Context.value with
            | Some op->op.body ~live ~node:(fun _ _->raise Unsupported)[]
            | None->raise Unsupported)
@@ -456,6 +438,11 @@ let run_typed ?column_source ?plane_outputs ?expected_count ~evaluate ~uniform ~
       let rec execute slot instruction first last =
         let at=slot*block_size in
         match instruction with
+        | Loop_begin loop ->
+            execute_loop (Option.get loops) ~execute:execute_range ~code:t.code slot loop first last
+        | Loop_result(loop,component,_) ->for lane=first to last-1 do
+            copy_loop (Option.get loops) (loop+1+component)slot lane done
+        | Loop_carry _ | Loop_end _ -> assert false
         | Text_const value -> fill_text (text_offsets.(slot)*block_size+first) (last-first) value
         | Text_uniform i ->
             if first<last then begin
@@ -515,7 +502,7 @@ let run_typed ?column_source ?plane_outputs ?expected_count ~evaluate ~uniform ~
             |Some cache,Some(spans,used) when Hashtbl.length cache<Array.length t.code->
                 Hashtbl.replace cache (guards,first,last) (Array.sub !spans 0 !used)
             |_->())
-        | Raise(_,code,message,cause)->if first<last then V.raise_diagnostic(Flow.Diagnostic.error ?cause ~code message)
+        | Raise(_,code,message,cause)->if first<last then V.raise_diagnostic(Diagnostic.error ?cause ~code message)
         | Array_prepare(i,ty)->if first<last then ignore(prepare i ty)
         | Int_gather(array,index)->
             let array=table array in
@@ -642,19 +629,31 @@ let run_typed ?column_source ?plane_outputs ?expected_count ~evaluate ~uniform ~
         | Unary(op,a)->for j=first to last-1 do floats.(at+j)<-finite(unary_apply op (numeric a j)) done
         | Noise3(x,y,z,seed,octaves,lacunarity,gain)->for j=first to last-1 do
             floats.(at+j)<-finite(Rays_math.Noise.Private.fbm3_with_scratch scratch (noise seed)
-              ~octaves ~lacunarity ~gain ~x:(numeric x j)~y:(numeric y j)~z:(numeric z j)) done in
+              ~octaves ~lacunarity ~gain ~x:(numeric x j)~y:(numeric y j)~z:(numeric z j)) done
+      and execute_range ?dependent first_slot last_slot first last =
+        if carried=0 then match dependent with
+          | None ->for slot=first_slot to last_slot-1 do execute slot t.code.(slot)first last done
+          | Some value ->for slot=first_slot to last_slot-1 do
+              if dependent_flags.(slot)=value then execute slot t.code.(slot)first last done
+        else begin
+          let slot=ref first_slot in
+          while !slot<last_slot do
+            let instruction=t.code.(!slot)in
+            if (match dependent with None->true|Some value->dependent_flags.(!slot)=value)then
+              execute !slot instruction first last;
+            slot:=(match unguarded instruction with Loop_begin loop->loop.finish+1|_-> !slot+1)
+          done
+        end in
       let execute_all dependent first last=
-        for slot=0 to Array.length t.code-1 do
-          if t.dependent.(slot)=dependent then execute slot t.code.(slot) first last
-        done in
+        execute_range ~dependent 0 (Array.length t.code)first last in
       if gather && t.result=Collect then begin
         (* Speculate: run the block instruction-major. Without an error the values equal
            the lane-major ones, because lanes are independent and instructions pure; on
            any exception the block is redone lane-major below, so the first error in lane
            order is the one reported. Spans cached from a failed speculation may hold
            garbage guards, so the cache is dropped for the redo. *)
-        let speculated=(try for slot=0 to Array.length t.code-1 do execute slot t.code.(slot) 0 length done; true
-          with _->false) in
+        let speculated=(try execute_range 0 (Array.length t.code) 0 length; true
+          with Diagnostic.Error _ | Invalid_argument _ | Not_found | Failure _ -> false) in
         if not speculated then begin
         guard_spans:=None;
         for slot=0 to total_prefix-1 do execute slot t.code.(slot) 0 length done;
@@ -693,7 +692,7 @@ let run_typed ?column_source ?plane_outputs ?expected_count ~evaluate ~uniform ~
           incr prefix
         done;
         for j=0 to length-1 do
-          for slot= !prefix to Array.length t.code-1 do execute slot t.code.(slot) j (j+1) done
+          execute_range !prefix (Array.length t.code) j (j+1)
         done
         end
       end
@@ -719,7 +718,7 @@ let run_typed ?column_source ?plane_outputs ?expected_count ~evaluate ~uniform ~
                 data.((output_index+j)*width+c)<-floats.(at+j)
               done)registers
         |_->assert false)t.outputs else for j=0 to length-1 do
-        if gather then for slot=0 to Array.length t.code-1 do execute slot t.code.(slot) j (j+1) done
+        if gather then execute_range 0 (Array.length t.code) j (j+1)
         else if t.result<>Collect then execute_all true j (j+1);
         let output_index=start-before+j in
         for k=0 to Array.length t.outputs-1 do
@@ -773,15 +772,15 @@ let run_typed ?column_source ?plane_outputs ?expected_count ~evaluate ~uniform ~
           |Some columns,_->columns.(0).(0)
           |None,E.Float_array data->Some data
           |_->assert false in
-        Option.iter(fun data->Rays_math.Parallel.for_ ~chunk_size:4096
+        Option.iter(fun data->Parallel.for_ ~chunk_size:4096
           ~start:0 ~finish:(outer_count-1)
           (fun i->Array.blit row 0 data (i*Array.length row) (Array.length row)))output
       end
   | None ->
   (match scaled_column with
-  |Some(E.Int_array input,factor,output)->Rays_math.Parallel.for_ ~chunk_size:4096 ~start:0 ~finish:(count-1)
+  |Some(E.Int_array input,factor,output)->Parallel.for_ ~chunk_size:4096 ~start:0 ~finish:(count-1)
       (fun i->output.(i)<-input.(i)*factor)
-  |Some(_,factor,output)->Rays_math.Parallel.for_ ~chunk_size:4096 ~start:0 ~finish:(count-1)
+  |Some(_,factor,output)->Parallel.for_ ~chunk_size:4096 ~start:0 ~finish:(count-1)
       (fun i->output.(i)<-i*factor)
   |None->
       (* Lazy captures cannot be forced from a worker domain. The first chunk runs
@@ -789,32 +788,32 @@ let run_typed ?column_source ?plane_outputs ?expected_count ~evaluate ~uniform ~
          when every capture is then a value the remaining chunks run in parallel. *)
       let settled () = Array.for_all (fun lazy_value->Lazy.is_val lazy_value) uniforms
         && (try Array.iteri (fun i lazy_value->if Lazy.is_val lazy_value then ignore (Lazy.force uniform_components.(i))) uniforms; true
-            with _->false)
+            with Diagnostic.Error _ | Invalid_argument _ | Not_found | Failure _ -> false)
         && Array.for_all (fun lazy_value->Lazy.is_val lazy_value) uniform_components in
       let first_chunk = if chunks=0 || Array.for_all concrete t.uniforms then 0 else (chunk 0; 1) in
       if t.result=Collect && count>=4096 && (first_chunk=0 || settled ()) then
       if gather then begin
         let errors=Array.make chunks None in
-        Rays_math.Parallel.for_ ~chunk_size:1 ~start:first_chunk ~finish:(chunks-1)
+        Parallel.for_ ~chunk_size:1 ~start:first_chunk ~finish:(chunks-1)
           (fun i->try chunk i with exn->errors.(i)<-Some exn);
         Array.iter(function None->()|Some exn->raise exn)errors
-      end else Rays_math.Parallel.for_ ~chunk_size:1 ~start:first_chunk ~finish:(chunks-1) chunk
+      end else Parallel.for_ ~chunk_size:1 ~start:first_chunk ~finish:(chunks-1) chunk
     else for i=first_chunk to chunks-1 do chunk i done));
   if plane_outputs<>None then [] else if collecting then Array.to_list outputs else
     [if kept=0 then match t.result,seed with Accumulate _,Some seed->seed|Sum false,_->E.Int 0|_-> !accumulator else !accumulator]
 
-let ordered_add t =
+let ordered_add (t : t) =
   let output = t.outputs.(0) in
   let width = Array.length output in
   match t.result with
   | Accumulate (_, false) when width >= 1 && width <= 4 && t.iteration = Zip
       && Array.length t.sources = 1 && t.widths = [|width|] && Array.length t.skip = 0
-      && Array.length t.code = 3 * width && Array.length t.dependent = 3 * width ->
-      let matched = ref true in
+      && Array.length t.code = 3 * width && Array.length (Core.Region.dependent_flags t) = 3 * width ->
+      let dependent = Core.Region.dependent_flags t and matched = ref true in
       for k = 0 to width - 1 do
-        if t.code.(k) <> Input (0, width, k) || t.dependent.(k)
-          || t.code.(width+k) <> Accumulator k || not t.dependent.(width+k)
-          || t.code.(2*width+k) <> Binary (Add, width+k, k) || not t.dependent.(2*width+k)
+        if t.code.(k) <> Input (0, width, k) || dependent.(k)
+          || t.code.(width+k) <> Accumulator k || not dependent.(width+k)
+          || t.code.(2*width+k) <> Binary (Add, width+k, k) || not dependent.(2*width+k)
           || output.(k) <> 2*width+k then matched := false
       done;
       !matched
@@ -826,11 +825,25 @@ let ordered_add t =
    state, so the results of one outermost run are shared between its nested evaluations when all four are
    physically the same and the term reads no state, and dropped when that run ends. *)
 module Scope = struct
-  type t = { resolve : (E.value -> (E.value, Flow.Diagnostic.t) Stdlib.result) option; live : Frame_input.t;
+  type t = { resolve : (E.value -> (E.value, Diagnostic.t) Stdlib.result) option; live : Input.t;
     state : E.state; strict : bool; mutable depth : int;
     mutable entries : (E.residual * W.term * E.value) list; mutable count : int }
   let capacity = 32
   let current : t option ref Domain.DLS.key = Domain.DLS.new_key (fun () -> ref None)
+  let active : (W.term * E.Residual.residual_view) list Domain.DLS.key = Domain.DLS.new_key (fun () -> [])
+  let requests : (W.term * E.Residual.residual_view) list Domain.DLS.key = Domain.DLS.new_key (fun () -> [])
+  let same_context (view : E.Residual.residual_view) (other : E.Residual.residual_view) =
+    view.instance = other.instance && view.site = other.site
+    && view.prefix = other.prefix && view.owner = other.owner
+    && List.equal (fun (a, x) (b, y) -> String.equal a b && x == y) view.bindings other.bindings
+  let request_active term (view : E.Residual.residual_view) =
+    List.exists (fun (other_term, (other : E.Residual.residual_view)) ->
+      term == other_term && same_context view other)
+      (Domain.DLS.get requests)
+  let with_request term view f =
+    let active = Domain.DLS.get requests in
+    Domain.DLS.set requests ((term, view) :: active);
+    Fun.protect ~finally:(fun () -> Domain.DLS.set requests active) f
   let same_resolve a b = match a, b with None, None -> true | Some a, Some b -> a == b | _ -> false
   let enter ~resolve ~live ~state ~strict =
     let current = Domain.DLS.get current in
@@ -847,8 +860,8 @@ module Scope = struct
   (* The same residual can be met as distinct records, so identity is its id with the same term, bindings
      (physically) and site; an equal id from another workspace differs in at least one of them. *)
   let same_residual a b =
-    a == b || E.Private.residual_id a = E.Private.residual_id b &&
-      (let x = E.Private.residual_view a and y = E.Private.residual_view b in
+    a == b || E.Residual.residual_id a = E.Residual.residual_id b &&
+      (let x = E.Residual.residual_view a and y = E.Residual.residual_view b in
        x.term == y.term && x.previous = y.previous && x.instance = y.instance && x.iter = y.iter
        && x.prefix = y.prefix && x.owner = y.owner && x.host = y.host && x.geometry = y.geometry
        && List.equal (fun (n, v) (m, w) -> String.equal n m && v == w) x.bindings y.bindings)
@@ -859,46 +872,167 @@ module Scope = struct
       scope.entries <- (residual, term, value) :: scope.entries; scope.count <- scope.count + 1 end
 end
 
-let rec run_all ?column_source ?plane_outputs ?expected_count ?state ?elems ?resolve ?measure ?(strict = false) t ~live =
+exception Not_streaming
+
+(* Select the narrower streaming loops only when every register belongs to the supported
+   noise/scale/output shape. Other programs stay on the general block executor. *)
+let detect_streaming (t : t) skip noise_scale collect_product =
+  let streaming = try
+    if t.result <> Collect || t.iteration <> Zip || skip <> [||] then raise Not_streaming;
+    let allowed = Array.map (function Input _ | Const _ | Uniform _ | Frame _ -> true | _ -> false) t.code in
+    let input id = match t.code.(id) with Input (source, width, component) -> source, width, component
+      | _ -> raise Not_streaming in
+    let scalar id = match t.code.(id) with Const _ | Uniform _ | Frame _ -> id | _ -> raise Not_streaming in
+    let shared = ref None in
+    let products = Array.mapi (fun k output -> Array.mapi (fun component register ->
+      let base, a, b = match collect_product.(k).(component) with Some p -> p | None -> raise Not_streaming in
+      let direction, scale = match t.code.(a), t.code.(b) with
+        | Input _, _ -> input a, b | _, Input _ -> input b, a | _ -> raise Not_streaming in
+      (match !shared with None -> shared := Some scale | Some old when old = scale -> () | _ -> raise Not_streaming);
+      allowed.(register) <- true;
+      (match t.code.(register) with Binary (Add, x, y) -> allowed.(if x = base then y else x) <- true
+       | _ -> raise Not_streaming);
+      input base, direction) output) t.outputs in
+    let scale = match !shared with Some scale -> scale | None -> raise Not_streaming in
+    let noise, amplitude = match t.code.(scale) with
+      | Binary (Mul, a, b) -> (match t.code.(a), t.code.(b) with
+          | Noise3 _, _ -> a, scalar b | _, Noise3 _ -> b, scalar a | _ -> raise Not_streaming)
+      | _ -> raise Not_streaming in
+    allowed.(scale) <- true; allowed.(noise) <- true;
+    let x, y, z, frequency = match t.code.(noise) with
+      | Noise3 (x, y, z, _, 1, _, _) -> (match noise_scale.(noise) with
+          | Some (a, b, c, f) ->
+              allowed.(x) <- true; allowed.(y) <- true; allowed.(z) <- true;
+              input a, input b, input c, Some (scalar f)
+          | None -> input x, input y, input z, None)
+      | _ -> raise Not_streaming in
+    if not (Array.for_all Fun.id allowed) then raise Not_streaming;
+    Some (noise, amplitude, x, y, z, frequency, products)
+  with Not_streaming -> None in
+  let scalar_streaming = try
+    if t.result <> Collect || t.iteration <> Zip || skip <> [||] || Option.is_some streaming then raise Not_streaming;
+    let allowed = Array.map (function Input _ | Const _ | Uniform _ | Frame _ -> true | _ -> false) t.code in
+    let input id = match t.code.(id) with Input (i, w, c) -> i, w, c | _ -> raise Not_streaming in
+    let scalar id = match t.code.(id) with Const _ | Uniform _ | Frame _ -> id | _ -> raise Not_streaming in
+    let scaled id = match t.code.(id) with
+      | Binary (Mul, a, b) -> (match t.code.(a), t.code.(b) with
+          | Input _, _ -> allowed.(id) <- true; input a, Some (scalar b)
+          | _, Input _ -> allowed.(id) <- true; input b, Some (scalar a)
+          | _ -> raise Not_streaming)
+      | Input _ -> input id, None
+      | _ -> raise Not_streaming in
+    let shared = ref None in
+    let outputs = Array.map (Array.map (fun id -> match t.code.(id) with
+      | Input _ -> input id, None
+      | Binary (Add, a, b) ->
+          let base, expression = match t.code.(a), t.code.(b) with
+            | Input _, _ -> input a, b | _, Input _ -> input b, a | _ -> raise Not_streaming in
+          (match !shared with None -> shared := Some expression
+           | Some old when old = expression -> () | _ -> raise Not_streaming);
+          allowed.(id) <- true; base, Some expression
+      | _ -> raise Not_streaming)) t.outputs in
+    let root = match !shared with Some id -> id | None -> raise Not_streaming in
+    let transform, a = match t.code.(root) with
+      | Binary (Mul, a, b) -> (match t.code.(a), t.code.(b) with
+          | Binary (Sub, _, _), _ -> a, scalar b | _, Binary (Sub, _, _) -> b, scalar a
+          | _ -> raise Not_streaming)
+      | _ -> raise Not_streaming in
+    let gain, bias = match t.code.(transform) with Binary (Sub, a, b) -> a, scalar b | _ -> raise Not_streaming in
+    let noise, g = match t.code.(gain) with
+      | Binary (Mul, a, b) -> (match t.code.(a), t.code.(b) with
+          | Noise3 _, _ -> a, scalar b | _, Noise3 _ -> b, scalar a | _ -> raise Not_streaming)
+      | _ -> raise Not_streaming in
+    allowed.(root) <- true; allowed.(transform) <- true; allowed.(gain) <- true; allowed.(noise) <- true;
+    let x, y, z, f = match t.code.(noise) with
+      | Noise3 (x, y, z, _, 1, _, _) ->
+          let x, f = scaled x and y, h = scaled y in
+          if f <> h then raise Not_streaming;
+          let z = match t.code.(z) with Const z when z = 0. -> None
+            | _ -> let z, h = scaled z in if h <> f then raise Not_streaming; Some z in
+          x, y, z, f
+      | _ -> raise Not_streaming in
+    if not (Array.for_all Fun.id allowed) then raise Not_streaming;
+    Some (noise, x, y, z, f, g, bias, a, outputs)
+  with Not_streaming -> None in
+  streaming, scalar_streaming
+
+let rec run_all ?dispatch ?column_source ?plane_outputs ?expected_count ?state ?elems ?resolve ?measure ?on_walk ?(strict = false) (t : t) ~live =
   let state = match state with Some state -> state | None -> E.create_state () in
   let scope = if elems <> None then None else Scope.enter ~resolve ~live ~state ~strict in
   Fun.protect ~finally:(fun () -> Scope.leave scope) @@ fun () ->
   let work () =
     let rec evaluate residual (term : W.term) =
-      match scope with
-      | None -> evaluate_once residual term
-      | Some scope ->
+      let view = E.Residual.residual_view residual in
+      let key = term, view in
+      let active = Scope.active and stack = Domain.DLS.get Scope.active in
+      let same_active ((t : W.term), (other : E.Residual.residual_view)) =
+        t == term && Scope.same_context view other && view.iter = other.iter in
+      let looped = match term.node with
+        | W.Lit _ | Text _ | Nil | Time | Fn_ref _ -> false
+        | _ -> List.exists same_active stack in
+      if looped then begin
+        let numeric_loop = match term.node with
+          | W.Hof ((`Map | `Reduce), _) | Loop _ | Op {op = "array/sum"; _} -> true
+          | _ -> false in
+        if strict && numeric_loop then
+          Error (Diagnostic.error ~code:"E_KERNEL_FORM"
+            "Numeric node bodies must compile to packed kernels.")
+        else (match dispatch with
+          | Some dispatch -> dispatch residual term
+          | None -> E.Residual.eval_term ~state ?elems ?resolve ?on_walk
+              ~kernel:execute_request residual term ~live)
+      end else begin
+        Domain.DLS.set active (key :: stack);
+        Fun.protect ~finally:(fun () -> Domain.DLS.set active stack) (fun () ->
+        match scope with
+        | None -> evaluate_once residual term
+        | Some scope ->
           (match Scope.find scope residual term with
            | Some value -> Ok value
            | None ->
                let result = evaluate_once residual term in
                (match result with
-                | Ok value when not (E.state_dependent (E.Residual (E.Private.with_bindings residual ~term []))) ->
+                | Ok value when not (E.state_dependent (E.Residual residual)) ->
                     Scope.add scope residual term value
                 | _ -> ());
-               result)
+               result))
+      end
     and evaluate_once residual (term : W.term) =
       let nested = match term.node with
         | W.Ref_binding (name, []) ->
-            (match List.assoc_opt name (E.Private.residual_view residual).bindings with
-             | Some (E.Residual r) -> let view = E.Private.residual_view r in Some (r, view.term)
+            (match List.assoc_opt name (E.Residual.residual_view residual).bindings with
+             | Some (E.Residual r) -> let view = E.Residual.residual_view r in Some (r, view.term)
              | _ -> None)
         | _ -> None in
       match nested with
       | Some (residual, term) -> evaluate residual term
+      | None when (match term.node with
+          | W.Lit _ | Text _ | Nil | Time | Fn_ref _ -> true | _ -> false) ->
+          E.Residual.eval_term ~state ?elems ?resolve ?on_walk ~kernel:execute_request residual term ~live
+      | None when dispatch <> None -> Option.get dispatch residual term
       | None -> (match compile_impl ~fusion:t.fusion ~dynamic:t.dynamic ~count_source:t.count_source residual term with
           | Ok program -> force ~strict ~state ?elems ?resolve ?measure program ~live
           | Error _ ->
               (match strict, term.node with
                | true, (W.Hof ((`Map | `Reduce), _) | Loop _ | Op {op = "array/sum"; _}) ->
-                   Error (Flow.Diagnostic.error ~code:"E_KERNEL_FORM"
+                   Error (Diagnostic.error ~code:"E_KERNEL_FORM"
                      "Numeric node bodies must compile to packed kernels.")
                | false, (W.Hof ((`Map | `Reduce), _) | Loop _ | Op {op = "array/sum"; _}) ->
-                   E.Private.eval_term ~state ?elems ?resolve residual term ~live
-               | _ -> uniform (E.Residual (E.Private.with_bindings residual ~term []))))
-    and uniform value = E.Private.force_with_executor ~state ?elems ?resolve
-      ~compiled:false ~strict ~execute:(fun residual _live ->
-        Some (evaluate residual (E.Private.residual_view residual).term)) value ~live in
+                   E.Residual.eval_term ~state ?elems ?resolve ?on_walk ~kernel:execute_request residual term ~live
+               | _ -> uniform (E.Residual (E.Residual.with_bindings residual ~term []))))
+    and execute_request residual =
+      let view = E.Residual.residual_view residual in
+      if Scope.request_active view.term view then
+        if strict then raise (Diagnostic.Error (Diagnostic.error ~code:"E_KERNEL_FORM"
+          "A nested numeric kernel request cannot be compiled.")) else None
+      else Scope.with_request view.term view (fun () ->
+        match evaluate residual view.term with
+        | Ok value -> Some value
+        | Error diagnostic when strict -> raise (Diagnostic.Error diagnostic)
+        | Error _ -> None)
+    and uniform value = force_values ~state ?elems ?resolve ~live
+      ~residual:(fun residual -> evaluate residual (E.Residual.residual_view residual).term) value in
+    E.Residual.handle ~kernel:execute_request ~bulk:execute_request (fun () ->
     let seed = match t.result with
       | Accumulate (seed, _) -> Some (get (evaluate t.residual seed))
       | _ -> None in
@@ -951,7 +1085,7 @@ let rec run_all ?column_source ?plane_outputs ?expected_count ?state ?elems ?res
     let uniforms = if count=0 then [||] else
       Array.map (fun value -> components (get (uniform value))) t.uniforms in
     let frame = Array.map (fun instruction -> match unguarded instruction with
-      | Frame "t" -> live.Frame_input.t
+      | Frame "t" -> live.Input.t
       | Frame name ->
           (match Flow.Op.find name Flow.Context.value with
            | Some op -> V.num (op.body ~live ~node:(fun _ _ -> raise Unsupported) [])
@@ -1028,87 +1162,9 @@ let rec run_all ?column_source ?plane_outputs ?expected_count ?state ?elems ?res
             |_->None in
           (match product a b with Some _ as p->p|None->product b a)
       |_->None)) t.outputs in
-    (* A streaming SSA path for noise followed by scalar scaling and terminal
-       vector products/additions. It depends only on register instructions;
-       other expression graphs keep the block executor below. *)
-    let exception Not_streaming in
-    let streaming=try
-      if t.result<>Collect || t.iteration<>Zip || skip<>[||] then raise Not_streaming;
-      let allowed=Array.map (function Input _|Const _|Uniform _|Frame _->true|_->false) t.code in
-      let input id=match t.code.(id) with Input (source,width,component)->source,width,component
-        |_->raise Not_streaming in
-      let scalar id=match t.code.(id) with Const _|Uniform _|Frame _->id|_->raise Not_streaming in
-      let shared=ref None in
-      let products=Array.mapi (fun k output->Array.mapi (fun component register->
-        let base,a,b=match collect_product.(k).(component) with Some p->p|None->raise Not_streaming in
-        let direction,scale=match t.code.(a),t.code.(b) with
-          |Input _,_->input a,b|_,Input _->input b,a|_->raise Not_streaming in
-        (match !shared with None->shared:=Some scale|Some old when old=scale->()|_->raise Not_streaming);
-        allowed.(register)<-true;
-        (match t.code.(register) with Binary (Add,x,y)->allowed.(if x=base then y else x)<-true|_->raise Not_streaming);
-        input base,direction) output) t.outputs in
-      let scale=match !shared with Some scale->scale|None->raise Not_streaming in
-      let noise,amplitude=match t.code.(scale) with
-        |Binary (Mul,a,b)->(match t.code.(a),t.code.(b) with
-          |Noise3 _,_->a,scalar b|_,Noise3 _->b,scalar a|_->raise Not_streaming)
-        |_->raise Not_streaming in
-      allowed.(scale)<-true;allowed.(noise)<-true;
-      let x,y,z,frequency=match t.code.(noise) with
-        |Noise3 (x,y,z,_,1,_,_)->(match noise_scale.(noise) with
-          |Some (a,b,c,f)->allowed.(x)<-true;allowed.(y)<-true;allowed.(z)<-true;
-              input a,input b,input c,Some (scalar f)
-          |None->input x,input y,input z,None)
-        |_->raise Not_streaming in
-      if not (Array.for_all Fun.id allowed) then raise Not_streaming;
-      Some (noise,amplitude,x,y,z,frequency,products)
-    with Not_streaming->None in
-    let scalar_streaming=try
-      if t.result<>Collect || t.iteration<>Zip || skip<>[||] || Option.is_some streaming then raise Not_streaming;
-      let allowed=Array.map (function Input _|Const _|Uniform _|Frame _->true|_->false) t.code in
-      let input id=match t.code.(id) with Input (i,w,c)->i,w,c|_->raise Not_streaming in
-      let scalar id=match t.code.(id) with Const _|Uniform _|Frame _->id|_->raise Not_streaming in
-      let scaled id=match t.code.(id) with
-        |Binary (Mul,a,b)->(match t.code.(a),t.code.(b) with
-          |Input _,_->allowed.(id)<-true;input a,Some (scalar b)
-          |_,Input _->allowed.(id)<-true;input b,Some (scalar a)
-          |_->raise Not_streaming)
-        |Input _->input id,None
-        |_->raise Not_streaming in
-      let shared=ref None in
-      let outputs=Array.map (Array.map (fun id->match t.code.(id) with
-        |Input _->input id,None
-        |Binary (Add,a,b)->
-          let base,expression=match t.code.(a),t.code.(b) with
-            |Input _,_->input a,b|_,Input _->input b,a|_->raise Not_streaming in
-          (match !shared with None->shared:=Some expression|Some old when old=expression->()|_->raise Not_streaming);
-          allowed.(id)<-true;base,Some expression
-        |_->raise Not_streaming)) t.outputs in
-      let root=match !shared with Some id->id|None->raise Not_streaming in
-      let transform,a=match t.code.(root) with
-        |Binary (Mul,a,b)->(match t.code.(a),t.code.(b) with
-          |Binary (Sub,_,_),_->a,scalar b|_,Binary (Sub,_,_)->b,scalar a|_->raise Not_streaming)
-        |_->raise Not_streaming in
-      let gain,bias=match t.code.(transform) with Binary (Sub,a,b)->a,scalar b|_->raise Not_streaming in
-      let noise,g=match t.code.(gain) with
-        |Binary (Mul,a,b)->(match t.code.(a),t.code.(b) with
-          |Noise3 _,_->a,scalar b|_,Noise3 _->b,scalar a|_->raise Not_streaming)
-        |_->raise Not_streaming in
-      allowed.(root)<-true;allowed.(transform)<-true;allowed.(gain)<-true;allowed.(noise)<-true;
-      let x,y,z,f=match t.code.(noise) with
-        |Noise3 (x,y,z,_,1,_,_)->
-          let x,f=scaled x and y,h=scaled y in
-          if f<>h then raise Not_streaming;
-          let z=match t.code.(z) with Const z when z=0.->None
-            |_->let z,h=scaled z in if h<>f then raise Not_streaming;Some z in
-          x,y,z,f
-        |_->raise Not_streaming in
-      if not (Array.for_all Fun.id allowed) then raise Not_streaming;
-      Some (noise,x,y,z,f,g,bias,a,outputs)
-    with Not_streaming->None in
-    let block_size = 1024 in
-    let blocks = if count = 0 then 0 else (count - 1) / block_size + 1 in
-    let blocks_per_chunk = 16 in
-    let chunks = if blocks = 0 then 0 else (blocks - 1) / blocks_per_chunk + 1 in
+    let streaming, scalar_streaming = detect_streaming t skip noise_scale collect_product in
+    let block_size, blocks, blocks_per_chunk, chunks = block_layout ~count ~limit:1024 in
+    let dependent_flags=if count=0 then [||] else Core.Region.dependent_flags t in
     let chunk chunk =
       if ordered_add then begin
         let source = inputs.(0) in
@@ -1120,13 +1176,13 @@ let rec run_all ?column_source ?plane_outputs ?expected_count ?state ?elems ?res
           for i = first to last do
             let offset = i * 3 in
             let next = !x +. source.(offset) in
-            if not (Float.is_finite next) then raise Nonfinite;
+            if not (Float.is_finite next) then nonfinite ();
             x := next;
             let next = !y +. source.(offset + 1) in
-            if not (Float.is_finite next) then raise Nonfinite;
+            if not (Float.is_finite next) then nonfinite ();
             y := next;
             let next = !z +. source.(offset + 2) in
-            if not (Float.is_finite next) then raise Nonfinite;
+            if not (Float.is_finite next) then nonfinite ();
             z := next
           done;
           accumulator.(0) <- !x;
@@ -1136,7 +1192,7 @@ let rec run_all ?column_source ?plane_outputs ?expected_count ?state ?elems ?res
         for i = first to last do
           for component = 0 to width - 1 do
             let x = accumulator.(component) +. source.(i * width + component) in
-            if not (Float.is_finite x) then raise Nonfinite;
+            if not (Float.is_finite x) then nonfinite ();
             accumulator.(component) <- x
           done
         done
@@ -1144,7 +1200,7 @@ let rec run_all ?column_source ?plane_outputs ?expected_count ?state ?elems ?res
       let scratch = Array.make ((if Option.is_some streaming then (if plane_outputs=None then 1 else 2)
         else if Option.is_some scalar_streaming then 2 else Array.length t.code) * block_size) 0. in
       let noise_scratch=Rays_math.Noise.Private.create_fbm3_scratch () in
-      let tables=Array.map(fun instruction -> match unguarded instruction with Noise3(_,_,_,seed,_,_,_)->Some(Operators.noise_table seed)
+      let tables=Array.map(fun instruction -> match unguarded instruction with Noise3(_,_,_,seed,_,_,_)->Some(Flow.Op.noise_table seed)
         |_->None)t.code in
       let contiguous = t.iteration=Zip && skip=[||] in
       let indices = if contiguous then [||] else Array.make block_size 0 in
@@ -1174,7 +1230,7 @@ let rec run_all ?column_source ?plane_outputs ?expected_count ?state ?elems ?res
             done
         | Int_const n -> Array.fill scratch (at + first) (last - first) (float n)
         | Const x -> Array.fill scratch (at + first) (last - first) x
-        | Array_prepare _|Gather _|Int_gather _ -> raise Unsupported
+        | Array_prepare _|Gather _|Int_gather _|Loop_begin _|Loop_carry _|Loop_end _|Loop_result _ -> raise Unsupported
         | Text_const _|Text_input _|Text_uniform _|Text_gather _|Text_select _->raise Unsupported
         | Input (input, width, component) ->
             let source = inputs.(input) in
@@ -1186,7 +1242,7 @@ let rec run_all ?column_source ?plane_outputs ?expected_count ?state ?elems ?res
               done
             else if t.iteration=Zip && skip=[||] then
               for j=first to last-1 do
-                (* Layouts were checked by [of_region], and Zip's count is the
+                (* Layouts were checked by [Core.Region.make], and Zip's count is the
                    shortest complete input. These spans are within both arrays. *)
                 Array.unsafe_set scratch (at+j)
                   (Array.unsafe_get source ((start+j)*width+component))
@@ -1223,28 +1279,28 @@ let rec run_all ?column_source ?plane_outputs ?expected_count ?state ?elems ?res
             done;
             if noise_scale.(slot)<>None then
               for j=first to last-1 do
-                if not (Float.is_finite scratch.(at+j)) then raise Nonfinite
+                if not (Float.is_finite scratch.(at+j)) then nonfinite ()
               done
         | Binary (operation, a, b) ->
             let a = a * block_size and b = b * block_size in
             (match operation with
-             | Add -> for j = first to last - 1 do let x = Array.unsafe_get scratch (a+j) +. Array.unsafe_get scratch (b+j) in if not (Float.is_finite x) then raise Nonfinite; Array.unsafe_set scratch (at+j) x done
-             | Sub -> for j = first to last - 1 do let x = scratch.(a+j) -. scratch.(b+j) in if not (Float.is_finite x) then raise Nonfinite; scratch.(at+j) <- x done
-             | Mul -> for j = first to last - 1 do let x = Array.unsafe_get scratch (a+j) *. Array.unsafe_get scratch (b+j) in if not (Float.is_finite x) then raise Nonfinite; Array.unsafe_set scratch (at+j) x done
+             | Add -> for j = first to last - 1 do let x = Array.unsafe_get scratch (a+j) +. Array.unsafe_get scratch (b+j) in if not (Float.is_finite x) then nonfinite (); Array.unsafe_set scratch (at+j) x done
+             | Sub -> for j = first to last - 1 do let x = scratch.(a+j) -. scratch.(b+j) in if not (Float.is_finite x) then nonfinite (); scratch.(at+j) <- x done
+             | Mul -> for j = first to last - 1 do let x = Array.unsafe_get scratch (a+j) *. Array.unsafe_get scratch (b+j) in if not (Float.is_finite x) then nonfinite (); Array.unsafe_set scratch (at+j) x done
              | Div -> for j = first to last - 1 do let y = scratch.(b+j) in
-                 let x = if y = 0. then 0. else scratch.(a+j) /. y in if not (Float.is_finite x) then raise Nonfinite; scratch.(at+j) <- x done
+                 let x = if y = 0. then 0. else scratch.(a+j) /. y in if not (Float.is_finite x) then nonfinite (); scratch.(at+j) <- x done
              | Mod -> for j = first to last - 1 do let y = scratch.(b+j) in
                  let x = if y = 0. then 0. else Float.rem (Float.rem scratch.(a+j) y +. y) y in
-                 if not (Float.is_finite x) then raise Nonfinite; scratch.(at+j) <- x done
+                 if not (Float.is_finite x) then nonfinite (); scratch.(at+j) <- x done
              | Pow -> for j = first to last - 1 do let x = Float.pow (Float.abs scratch.(a+j)) scratch.(b+j) in
-                 if not (Float.is_finite x) then raise Nonfinite; scratch.(at+j) <- x done
+                 if not (Float.is_finite x) then nonfinite (); scratch.(at+j) <- x done
              | Min -> for j = first to last - 1 do let x = Float.min scratch.(a+j) scratch.(b+j) in
-                 if not (Float.is_finite x) then raise Nonfinite; scratch.(at+j) <- x done
+                 if not (Float.is_finite x) then nonfinite (); scratch.(at+j) <- x done
              | Max -> for j = first to last - 1 do let x = Float.max scratch.(a+j) scratch.(b+j) in
-                 if not (Float.is_finite x) then raise Nonfinite; scratch.(at+j) <- x done
+                 if not (Float.is_finite x) then nonfinite (); scratch.(at+j) <- x done
              | (Atan2 | Hypot) -> for j=first to last-1 do
                  let x=binary_apply operation scratch.(a+j) scratch.(b+j) in
-                 if not(Float.is_finite x)then raise Nonfinite;scratch.(at+j)<-x done
+                 if not(Float.is_finite x)then nonfinite ();scratch.(at+j)<-x done
              | (Lt | Le | Gt | Ge | Eq | And | Or) ->
                  for j = first to last - 1 do
                    let x = scratch.(a+j) and y = scratch.(b+j) in
@@ -1258,39 +1314,39 @@ let rec run_all ?column_source ?plane_outputs ?expected_count ?state ?elems ?res
             let a=a*block_size and b=b*block_size and c=c*block_size in
             for j=first to last-1 do
               let value=Float.fma scratch.(a+j) scratch.(b+j) scratch.(c+j) in
-              if not(Float.is_finite value)then raise Nonfinite;
+              if not(Float.is_finite value)then nonfinite ();
               scratch.(at+j)<-value
             done
         | Checked_mul(p,a,b) ->
             let a=a*block_size and b=b*block_size in
             for j=first to last-1 do
               let a=scratch.(a+j) and b=scratch.(b+j) in
-              if not(Float.is_finite a && Float.is_finite b)then raise Nonfinite;
+              if not(Float.is_finite a && Float.is_finite b)then nonfinite ();
               scratch.(at+j)<-checked_projection p (Sys.opaque_identity(a *. b))
             done
         | Checked_fma(p,a,b,c) ->
             let a=a*block_size and b=b*block_size and c=c*block_size in
             for j=first to last-1 do
               let a=scratch.(a+j) and b=scratch.(b+j) and c=scratch.(c+j) in
-              if not(Float.is_finite a && Float.is_finite b && Float.is_finite c)then raise Nonfinite;
+              if not(Float.is_finite a && Float.is_finite b && Float.is_finite c)then nonfinite ();
               scratch.(at+j)<-checked_projection p (Float.fma a b c)
             done
         | Unary (operation, a) ->
             let a = a * block_size in
             (match operation with
-             | Sin -> for j = first to last - 1 do let x = sin scratch.(a+j) in if not (Float.is_finite x) then raise Nonfinite; scratch.(at+j) <- x done
-             | Cos -> for j = first to last - 1 do let x = cos scratch.(a+j) in if not (Float.is_finite x) then raise Nonfinite; scratch.(at+j) <- x done
+             | Sin -> for j = first to last - 1 do let x = sin scratch.(a+j) in if not (Float.is_finite x) then nonfinite (); scratch.(at+j) <- x done
+             | Cos -> for j = first to last - 1 do let x = cos scratch.(a+j) in if not (Float.is_finite x) then nonfinite (); scratch.(at+j) <- x done
              | Sqrt -> for j = first to last - 1 do scratch.(at+j) <- sqrt (Float.abs scratch.(a+j)) done
              | Abs -> for j = first to last - 1 do scratch.(at+j) <- Float.abs scratch.(a+j) done
              | (Tan|Asin|Acos|Exp|Log|Sign) -> for j=first to last-1 do
                  let x=unary_apply operation scratch.(a+j)in
-                 if not(Float.is_finite x)then raise Nonfinite;scratch.(at+j)<-x done
+                 if not(Float.is_finite x)then nonfinite ();scratch.(at+j)<-x done
              | Not -> for j = first to last - 1 do scratch.(at+j) <- if scratch.(a+j) = 0. then 1. else 0. done)
         | Int_input _ | Int_uniform _ | Int_frame _ | Int_accumulator | Int_binary _ | Int_compare _
         | Int_abs _ | Convert _ | Int_select _ | Raise _ | Rand_at _ -> raise Unsupported in
       let execute dependent first last =
       for slot = 0 to Array.length t.code - 1 do
-        if t.dependent.(slot) = dependent && not omitted.(slot) then
+        if dependent_flags.(slot) = dependent && not omitted.(slot) then
           execute_instruction slot t.code.(slot) first last
       done in
       match streaming with
@@ -1309,7 +1365,7 @@ let rec run_all ?column_source ?plane_outputs ?expected_count ?state ?elems ?res
             scratch.(j)<-noise*.amplitude;
             (* Multiplication cannot make NaN/infinity finite, so this check
                also rejects every nonfinite noise sample. *)
-            if not (Float.is_finite scratch.(j)) then raise Nonfinite
+            if not (Float.is_finite scratch.(j)) then nonfinite ()
           done;
           Array.iteri (fun k components->
             let width=Array.length components and output=outputs.(k) in
@@ -1320,9 +1376,9 @@ let rec run_all ?column_source ?plane_outputs ?expected_count ?state ?elems ?res
                 let destination=(Option.get plane_outputs).(k).(component) in
                 for j=0 to length-1 do
                   scratch.(block_size+j)<-Array.unsafe_get direction (doff+(start+j)*ds)*.scratch.(j);
-                  if not (Float.is_finite scratch.(block_size+j)) then raise Nonfinite;
+                  if not (Float.is_finite scratch.(block_size+j)) then nonfinite ();
                   let x=Array.unsafe_get base (bo+(start+j)*bs)+.scratch.(block_size+j) in
-                  if not (Float.is_finite x) then raise Nonfinite;
+                  if not (Float.is_finite x) then nonfinite ();
                   (match destination with Some data->Array.unsafe_set data (output_start+j) x|None->())
                 done) components
             else
@@ -1349,7 +1405,7 @@ let rec run_all ?column_source ?plane_outputs ?expected_count ?state ?elems ?res
                    the three sums therefore also rejects every invalid product. *)
                 if not (Float.is_finite (Array.unsafe_get output at)
                   && Float.is_finite (Array.unsafe_get output (at+1))
-                  && Float.is_finite (Array.unsafe_get output (at+2))) then raise Nonfinite
+                  && Float.is_finite (Array.unsafe_get output (at+2))) then nonfinite ()
               done
             |None->
             Array.iteri (fun component ((bi,bw,bc),(di,dw,dc))->
@@ -1357,9 +1413,9 @@ let rec run_all ?column_source ?plane_outputs ?expected_count ?state ?elems ?res
               for j=0 to length-1 do
                 let at=(output_start+j)*width+component in
                 Array.unsafe_set output at (Array.unsafe_get direction ((start+j)*dw+dc)*.scratch.(j));
-                if not (Float.is_finite (Array.unsafe_get output at)) then raise Nonfinite;
+                if not (Float.is_finite (Array.unsafe_get output at)) then nonfinite ();
                 Array.unsafe_set output at (Array.unsafe_get base ((start+j)*bw+bc)+.Array.unsafe_get output at);
-                if not (Float.is_finite (Array.unsafe_get output at)) then raise Nonfinite
+                if not (Float.is_finite (Array.unsafe_get output at)) then nonfinite ()
               done) components) products
       |None when Option.is_some scalar_streaming ->
           let noise,(xi,_,xc),(yi,_,yc),z,frequency,gain,bias,amplitude,products=Option.get scalar_streaming in
@@ -1380,7 +1436,7 @@ let rec run_all ?column_source ?plane_outputs ?expected_count ?state ?elems ?res
             scratch.(j)<-scratch.(j)*.amplitude;
             (* Mul/Sub/Mul propagate every invalid intermediate to the final
                scale. Stores retain each separate binary64 rounding. *)
-            if not (Float.is_finite scratch.(j)) then raise Nonfinite
+            if not (Float.is_finite scratch.(j)) then nonfinite ()
           done;
           Array.iteri (fun k components->
             let width=Array.length components and output=outputs.(k) in
@@ -1391,12 +1447,12 @@ let rec run_all ?column_source ?plane_outputs ?expected_count ?state ?elems ?res
                 match expression with
                 |None->for j=0 to length-1 do
                     let x=Array.unsafe_get base (offset+(start+j)*stride) in
-                    if not (Float.is_finite x) then raise Nonfinite;
+                    if not (Float.is_finite x) then nonfinite ();
                     (match destination with Some data->Array.unsafe_set data (output_start+j) x|None->())
                   done
                 |Some _->for j=0 to length-1 do
                     let x=Array.unsafe_get base (offset+(start+j)*stride)+.scratch.(j) in
-                    if not (Float.is_finite x) then raise Nonfinite;
+                    if not (Float.is_finite x) then nonfinite ();
                     (match destination with Some data->Array.unsafe_set data (output_start+j) x|None->())
                   done) components
             else
@@ -1405,13 +1461,13 @@ let rec run_all ?column_source ?plane_outputs ?expected_count ?state ?elems ?res
               match expression with
               |None->for j=0 to length-1 do
                   let x=Array.unsafe_get base ((start+j)*bw+bc) in
-                  if not (Float.is_finite x) then raise Nonfinite;
+                  if not (Float.is_finite x) then nonfinite ();
                   Array.unsafe_set output ((output_start+j)*width+component) x
                 done
               |Some _->for j=0 to length-1 do
                   let at=(output_start+j)*width+component in
                   Array.unsafe_set output at (Array.unsafe_get base ((start+j)*bw+bc)+.scratch.(j));
-                  if not (Float.is_finite (Array.unsafe_get output at)) then raise Nonfinite
+                  if not (Float.is_finite (Array.unsafe_get output at)) then nonfinite ()
                 done) components) products
       |None->
       execute false 0 length;
@@ -1424,12 +1480,12 @@ let rec run_all ?column_source ?plane_outputs ?expected_count ?state ?elems ?res
              let base=base*block_size and a=a*block_size and b=b*block_size in
              for j=0 to length-1 do
                scratch.(source+j)<-scratch.(a+j)*.scratch.(b+j);
-               if not (Float.is_finite scratch.(source+j)) then raise Nonfinite;
+               if not (Float.is_finite scratch.(source+j)) then nonfinite ();
                scratch.(source+j)<-scratch.(base+j)+.scratch.(source+j)
              done);
           for j=0 to length-1 do
             let x=scratch.(source+j) in
-            if not (Float.is_finite x) then raise Nonfinite;
+            if not (Float.is_finite x) then nonfinite ();
             store k component (output_start+j) x
           done) registers) t.outputs
       else if t.result = Collect then
@@ -1446,14 +1502,14 @@ let rec run_all ?column_source ?plane_outputs ?expected_count ?state ?elems ?res
                     (* Store the product before adding: the array boundary preserves
                        its binary64 rounding, including cancellation and signed zero. *)
                     Array.unsafe_set output at (Array.unsafe_get scratch (a+j)*.Array.unsafe_get scratch (b+j));
-                    if not (Float.is_finite (Array.unsafe_get output at)) then raise Nonfinite;
+                    if not (Float.is_finite (Array.unsafe_get output at)) then nonfinite ();
                     Array.unsafe_set output at (Array.unsafe_get scratch (base+j)+.Array.unsafe_get output at);
-                    if not (Float.is_finite (Array.unsafe_get output at)) then raise Nonfinite
+                    if not (Float.is_finite (Array.unsafe_get output at)) then nonfinite ()
                   done
               |None->let source=registers.(component)*block_size in
                   for j=0 to length-1 do
                     let x=scratch.(source+j) in
-                    if not (Float.is_finite x) then raise Nonfinite;
+                    if not (Float.is_finite x) then nonfinite ();
                     output.((output_start+j)*width+component)<-x
                   done) collect_product.(k)
           else if Array.length registers=3 then begin
@@ -1461,7 +1517,7 @@ let rec run_all ?column_source ?plane_outputs ?expected_count ?state ?elems ?res
             and z=registers.(2)*block_size in
             for j=0 to length-1 do
               let px=scratch.(x+j) and py=scratch.(y+j) and pz=scratch.(z+j) in
-              if not (Float.is_finite px && Float.is_finite py && Float.is_finite pz) then raise Nonfinite;
+              if not (Float.is_finite px && Float.is_finite py && Float.is_finite pz) then nonfinite ();
               let at=(output_start+j)*3 in
               output.(at)<-px;output.(at+1)<-py;output.(at+2)<-pz
             done
@@ -1470,7 +1526,7 @@ let rec run_all ?column_source ?plane_outputs ?expected_count ?state ?elems ?res
               let source=registers.(component)*block_size and width=Array.length registers in
               for j=0 to length-1 do
                 let x=scratch.(source+j) in
-                if not (Float.is_finite x) then raise Nonfinite;
+                if not (Float.is_finite x) then nonfinite ();
                 output.((output_start+j)*width+component)<-x
               done
             done) t.outputs
@@ -1482,12 +1538,12 @@ let rec run_all ?column_source ?plane_outputs ?expected_count ?state ?elems ?res
         let output = outputs.(k) and width = widths.(k) in
         for component = 0 to width - 1 do
           let x = scratch.(registers.(component) * block_size + j) in
-          if not (Float.is_finite x) then raise Nonfinite;
+          if not (Float.is_finite x) then nonfinite ();
           (match t.result with
            | Collect -> () | Accumulate _ -> accumulator.(component) <- x
            | Sum _ ->
                let total = if !initialized then accumulator.(component) +. x else x in
-               if not (Float.is_finite total) then raise Nonfinite;
+               if not (Float.is_finite total) then nonfinite ();
                accumulator.(component) <- total);
           if collecting then output.((output_start+j) * width + component) <- x
         done
@@ -1496,7 +1552,7 @@ let rec run_all ?column_source ?plane_outputs ?expected_count ?state ?elems ?res
       done
       done end in
     (match t.result with
-     | Collect -> Rays_math.Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(chunks - 1) chunk
+     | Collect -> Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(chunks - 1) chunk
      | Sum _ | Accumulate _ ->
          (* The fixed tree composes ordered chunk spans, retaining reference additions
             instead of reassociating partial sums (which changes cancellation and signed zero). *)
@@ -1518,30 +1574,27 @@ let rec run_all ?column_source ?plane_outputs ?expected_count ?state ?elems ?res
           | 4 -> E.Vec4 (accumulator.(0), accumulator.(1), accumulator.(2), accumulator.(3))
           | _ -> E.Float accumulator.(0))] in
     Option.iter (fun (clock, report) -> report t ~seconds:(max 0. (clock () -. Option.get started)) ~reference:false) measure;
-    value in
+    value) in
   let result = E.transaction state (fun () ->
     try Ok (work ()) with
-    | Failed d -> Error d
-    | Nonfinite -> Error (Flow.Diagnostic.error ~code:"E_NONFINITE" "Packed kernel produced a nonfinite result.")
-    | Unsupported -> Error (Flow.Diagnostic.error ~code:"E_KERNEL" "Kernel needs reference evaluation.")
-    | V.Fail (code, message, span) -> Error (Flow.Diagnostic.error ?span ~code message)
-    | V.Diagnostic_fail d -> Error d
-    | Invalid_argument message -> Error (Flow.Diagnostic.error ~code:"E_KERNEL" ("Kernel needs reference evaluation: " ^ message))
-    | Out_of_memory -> Error (Flow.Diagnostic.error ~code:"E_ARRAY_MEMORY" "Frame data exceeds available memory.")) in
+    | Unsupported -> Error (Diagnostic.error ~code:"E_KERNEL" "Kernel needs reference evaluation.")
+    | Diagnostic.Error d -> Error d
+    | Invalid_argument message -> Error (Diagnostic.error ~code:"E_KERNEL" ("Kernel needs reference evaluation: " ^ message))
+    | Out_of_memory -> Error (Diagnostic.error ~code:"E_ARRAY_MEMORY" "Frame data exceeds available memory.")) in
   match result with Ok _ -> result | Error _ when strict || plane_outputs<>None || Array.length t.outputs > 1 -> result | Error _ ->
     let started = Option.map (fun (clock, _) -> clock ()) measure in
-    let result = reference ~state ?elems ?resolve t ~live in
+    let result = reference_observed ~state ?elems ?resolve ?on_walk t ~live in
     Option.iter (fun (clock, report) -> report t ~seconds:(max 0. (clock () -. Option.get started)) ~reference:true) measure;
     Result.map (fun value -> [value]) result
 
-and force ?state ?elems ?resolve ?measure ?strict t ~live =
-  match run_all ?state ?elems ?resolve ?measure ?strict t ~live with
+and force ?dispatch ?state ?elems ?resolve ?measure ?on_walk ?strict t ~live =
+  match run_all ?dispatch ?state ?elems ?resolve ?measure ?on_walk ?strict t ~live with
   | Ok [value] -> Ok value
-  | Ok _ -> Error (Flow.Diagnostic.error ~code:"E_KERNEL" "Program has several outputs; use force_all.")
+  | Ok _ -> Error (Diagnostic.error ~code:"E_KERNEL" "Program has several outputs; use force_all.")
   | Error _ as error -> error
 
-let force_all ?state ?elems ?resolve ?measure ?strict t ~live =
-  run_all ?state ?elems ?resolve ?measure ?strict t ~live
+let force_all ?dispatch ?state ?elems ?resolve ?measure ?on_walk ?strict t ~live =
+  run_all ?dispatch ?state ?elems ?resolve ?measure ?on_walk ?strict t ~live
 
 let force_into ?state ?elems ?resolve ?measure ?strict ~column_source ~count ~outputs t ~live =
   Result.map (fun _->()) (run_all ~column_source ~plane_outputs:outputs ~expected_count:count ?state ?elems ?resolve ?measure ?strict t ~live)
@@ -1558,15 +1611,15 @@ module Private = struct
       | E.Source ("$core/argument",_,_) ->
           V.fail "E_CORE_ARGUMENT" "Invalid compiled argument declaration."
       | E.Residual r -> residual r
-      | Fn fn -> List.iter (fun (_,v)->value v) (E.Private.function_bindings fn)
+      | Fn fn -> List.iter (fun (_,v)->value v) (E.Residual.function_bindings fn)
       | List values -> Array.iter value values
       | Record fields | Struct(_,_,fields) | Source(_,_,fields) -> List.iter (fun (_,v)->value v) fields
       | _ -> ()
     and residual r =
-      let id=E.Private.residual_id r in
+      let id=E.Residual.residual_id r in
       if not(Hashtbl.mem visited id) then begin
         Hashtbl.add visited id ();
-        List.iter(fun(_,v)->value v)(E.Private.residual_view r).bindings
+        List.iter(fun(_,v)->value v)(E.Residual.residual_view r).bindings
       end in
     residual t.residual;
     Array.iter value t.uniforms;
@@ -1594,13 +1647,13 @@ module Private = struct
         | Source(name,ty,fields)->Source(name,ty,List.map(fun(name,v)->name,value v)fields)
         | v -> v
       and residual r =
-        let view=E.Private.residual_view r in
-        E.Private.with_bindings r ~term:view.term (List.map(fun(name,v)->name,value v)view.bindings) in
-      Ok {t with residual=residual t.residual;uniforms=Array.map value t.uniforms;
-        sources=Array.map(fun(r,term)->residual r,term)t.sources;
-        stages=List.map(fun(r,term)->residual r,term)t.stages}
-    with V.Fail(code,message,span)->Error(Flow.Diagnostic.error ?span ~code message)
-      |V.Diagnostic_fail d->Error d
+        let view=E.Residual.residual_view r in
+        E.Residual.with_bindings r ~term:view.term (List.map(fun(name,v)->name,value v)view.bindings) in
+      Core.Region.Private.with_captures t ~residual:(residual t.residual)
+        ~uniforms:(Array.map value t.uniforms)
+        ~sources:(Array.map(fun(r,term)->residual r,term)t.sources)
+        ~stages:(List.map(fun(r,term)->residual r,term)t.stages) ~count:t.count
+    with Diagnostic.Error d -> Error d
   let trace = trace
   let ordered_add = ordered_add
   let output_reachable = output_reachable
@@ -1620,12 +1673,12 @@ module Private = struct
   (* What a source or uniform reads: a value itself; [array/range] of an array's count times [mul]
      over [div]; or a term over the listed values ([None]: a form not traversed here). *)
   let shape (residual : E.residual) (term : W.term) =
-    let binding r n = List.assoc_opt n (E.Private.residual_view r).bindings in
+    let binding r n = List.assoc_opt n (E.Residual.residual_view r).bindings in
     let rec refs r (term : W.term) acc = match term.node, acc with
       | _, None -> None
       | (Lit _ | Text _ | Nil | Time | Fn_ref _), _ -> acc
       | Ref_binding (n, _), Some vs -> (match binding r n with
-          | Some (E.Residual r') -> refs r' (E.Private.residual_view r').term acc
+          | Some (E.Residual r') -> refs r' (E.Residual.residual_view r').term acc
           | Some v -> Some (v :: vs) | None -> None)
       | (Op {args; _} | Call {args; _}), _ -> List.fold_left (fun acc (_, a) -> refs r a acc) acc args
       | Vec ts, _ -> List.fold_left (fun acc a -> refs r a acc) acc ts
@@ -1653,25 +1706,25 @@ module Private = struct
     | None, _ -> Opaque (refs residual term (Some []))
   let source_shapes (t : t) = Array.map (fun (r, term) -> shape r term) t.sources
   let uniform_shapes (t : t) = Array.map (function
-    | E.Residual r -> shape r (E.Private.residual_view r).term | v -> Value v) t.uniforms
+    | E.Residual r -> shape r (E.Residual.residual_view r).term | v -> Value v) t.uniforms
   type inputs = {arrays : float array array; uniforms : float array array;
     tables : float array array; frame : float array; count : int}
   type value_inputs = {arrays : E.value array; uniforms : E.value array;
     frame : E.value array; count : int}
-  let prepare_values ?state ?resolve ?measure ?(lengths=fun _ -> None) (t : t) ~live =
+  let prepare_values ?state ?resolve ?measure ?(lengths=fun _ -> None) ?(source=fun _ _ -> None) (t : t) ~live =
     let state = match state with Some state -> state | None -> E.create_state () in
     E.transaction state (fun () -> try
       let rec evaluate residual term =
         match term.W.node with
         | W.Ref_binding (name, []) ->
-            (match List.assoc_opt name (E.Private.residual_view residual).bindings with
-             | Some (E.Residual residual) -> evaluate residual (E.Private.residual_view residual).term
+            (match List.assoc_opt name (E.Residual.residual_view residual).bindings with
+             | Some (E.Residual residual) -> evaluate residual (E.Residual.residual_view residual).term
              | _ -> materialize residual term)
         | _ -> materialize residual term
       and materialize residual term =
         match compile_impl ~fusion:t.fusion ~dynamic:t.dynamic ~count_source:t.count_source residual term with
         | Ok program -> get (force ~state ?resolve ?measure program ~live)
-        | Error _ -> get (E.Private.eval_term ~state ?resolve residual term ~live) in
+        | Error _ -> get (E.Residual.eval_term ~state ?resolve residual term ~live) in
       let empty_product=ref false in
       (* a source whose length the caller knows (a range it binds on the device) is not built *)
       let known = Array.mapi (fun i _ -> lengths i) t.sources in
@@ -1682,7 +1735,7 @@ module Private = struct
           |Ty.Array Ty.Int->E.Int_array[||]|Array Text->Text_array[||]
           |Array Float->Float_array[||]|Array Vec2->Vec2_array[||]
           |Array Vec3->Vec3_array[||]|Array Vec4->Vec4_array[||]|_->raise Unsupported)
-          else evaluate residual term in
+          else match source residual term with Some value -> value | None -> evaluate residual term in
         if t.iteration=Product && V.array_length value=0 && known.(i)=None then empty_product:=true;
         value) t.sources in
       let length i value = match known.(i) with Some n -> n | None -> V.array_length value in
@@ -1694,22 +1747,19 @@ module Private = struct
           i+1,match t.iteration with Zip->min count length|Product->
             if length<>0 && count>max_int/length then V.fail "E_ARRAY_RANGE" "Kernel iteration count exceeds native bounds.";
             count*length)(0,if t.iteration=Zip then max_int else 1)arrays) in
-      let execute residual _live = Some (Ok (evaluate residual (E.Private.residual_view residual).term)) in
-      let uniforms = match get (E.Private.force_with_executor ~state ?resolve ~compiled:false ~execute
-          (E.List t.uniforms) ~live) with E.List values -> values | _ -> assert false in
+      let uniforms = Array.map (fun value -> get (force_values ~state ?resolve ~live
+        ~residual:(fun residual -> Ok (evaluate residual (E.Residual.residual_view residual).term)) value)) t.uniforms in
       let frame = Array.map (fun instruction -> match unguarded instruction with
-        | Frame "t" -> E.Float live.Frame_input.t
+        | Frame "t" -> E.Float live.Input.t
         | Frame name | Int_frame name -> (match Flow.Op.find name Flow.Context.value with
             | Some op -> op.body ~live ~node:(fun _ _ -> raise Unsupported) []
             | None -> raise Unsupported)
         | _ -> E.Float 0.) t.code in
       Ok ({arrays; uniforms; frame; count} : value_inputs)
-    with Failed error -> Error error
-      | Unsupported -> Error (Flow.Diagnostic.error ~code:"E_KERNEL" "Kernel inputs need reference evaluation.")
-      | V.Fail (code,message,span) -> Error (Flow.Diagnostic.error ?span ~code message)
-      | V.Diagnostic_fail d -> Error d
-      | Invalid_argument message -> Error (Flow.Diagnostic.error ~code:"E_KERNEL" ("Kernel inputs need reference evaluation: " ^ message))
-      | Out_of_memory -> Error (Flow.Diagnostic.error ~code:"E_ARRAY_MEMORY" "Frame data exceeds available memory."))
+    with Unsupported -> Error (Diagnostic.error ~code:"E_KERNEL" "Kernel inputs need reference evaluation.")
+      | Diagnostic.Error d -> Error d
+      | Invalid_argument message -> Error (Diagnostic.error ~code:"E_KERNEL" ("Kernel inputs need reference evaluation: " ^ message))
+      | Out_of_memory -> Error (Diagnostic.error ~code:"E_ARRAY_MEMORY" "Frame data exceeds available memory."))
   let device_inputs (values : value_inputs) =
     let floats = function E.Float_array values | Vec2_array values
         | Vec3_array values | Vec4_array values -> Some values
@@ -1720,10 +1770,10 @@ module Private = struct
       frame=Array.map V.num values.frame;count=values.count} : inputs)
   (* A device kernel's inputs as 32-bit floats: integer arrays and scalars travel as floats (exact to
      2^24, the fast precision's contract), an array-valued uniform as the table a gather reads. *)
-  let prepare ?(fast=false) ?state ?resolve ?measure (t : t) ~live =
+  let prepare ?(fast=false) ?state ?resolve ?measure ?source (t : t) ~live =
     if Array.exists Core.Region.text_register t.code || (integer_program t && not fast)
-    then Error (Flow.Diagnostic.error ~code:"E_GPU_FORM"
+    then Error (Diagnostic.error ~code:"E_GPU_FORM"
       (if Array.exists Core.Region.text_register t.code then "Text kernels stay on the CPU."
        else "Integer sources, uniforms and instructions stay on the CPU.")) else
-    Result.map device_inputs (prepare_values ?state ?resolve ?measure t ~live)
+    Result.map device_inputs (prepare_values ?state ?resolve ?measure ?source t ~live)
 end

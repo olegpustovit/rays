@@ -1,11 +1,11 @@
 open Rays
 
-let camera=Camera.orthographic ~height:2. ~at:(Vec3.create 0. 0. 2.) ~target:Vec3.zero ()
+let camera=Camera.orthographic ~height:2. ~at:(Rays_math.Vec3.create 0. 0. 2.) ~target:Rays_math.Vec3.zero ()
 let stage mesh=
-  let scene=Scene3.create [Scene3.mesh ~material:(Material.unlit Color.white) mesh]in
+  let scene=Scene3.create [Scene3.mesh ~material:(Material.unlit Rays_math.Color.white) mesh]in
   let staged=Result.get_ok(Scene.Private.stage_native ~width:128 ~height:128 [Scene.view3d ~camera scene])in
   (List.hd staged.scene3).entries.(0)
-let attributes (entry:Scene_execution.scene3_entry)=Option.get entry.vertex_attributes|>snd
+let attributes (entry:Renderer.Scene_execution.scene3_entry)=Option.get entry.vertex_attributes|>snd
 let float bytes offset=Int32.float_of_bits(Bytes.get_int32_le bytes offset)
 let make colors=
   let vertices:Mesh.Private.vec3_view={
@@ -17,10 +17,10 @@ let mesh (vertices,normals,indices,colors)=
   Result.get_ok(Mesh.Private.create_packed_shared ~normals ~indices ~colors vertices)
 
 (* Preserve the original f64 renderer ABI as an independent native oracle. *)
-let legacy source (entry:Scene_execution.scene3_entry)=
+let legacy source (entry:Renderer.Scene_execution.scene3_entry)=
   let view=Mesh.Private.view source in
   let bytes=Bytes.make(Array.length view.vertices*68)'\000'in
-  Array.iteri(fun i(position:Vec3.t)->
+  Array.iteri(fun i(position:Rays_math.Vec3.t)->
     let normal=(Option.get view.normals).(i)in
     let put at value=Bytes.set_int64_le bytes(i*68+at)(Int64.bits_of_float value)in
     put 0 position.x;put 8 position.y;put 16 position.z;
@@ -35,13 +35,19 @@ let legacy source (entry:Scene_execution.scene3_entry)=
     state={entry.draw.state with transform_uniforms=Some uniforms}}}
 
 let native source second_source first second=
-  match Runtime.create_offscreen ~logical_width:128 ~logical_height:128 ~width:128 ~height:128 ()with
-  |Error error->failwith(Ogpu.Error.to_string error)
-  |Ok runtime->Fun.protect ~finally:(fun()->ignore(Runtime.destroy runtime))(fun()->
-      let get=function Ok value->value|Error error->failwith(Ogpu.Error.to_string error)in
+  let configuration={Renderer.default_configuration with logical_width=128;logical_height=128;
+    drawable_width=128;drawable_height=128}in
+  match Renderer.create_offscreen configuration with
+  |Error error->failwith(Format.asprintf "%a" Renderer.pp_error error)
+  |Ok runtime->Fun.protect ~finally:(fun()->ignore(Renderer.destroy runtime))(fun()->
+      let get=function Ok value->value|Error error->failwith(Format.asprintf "%a" Renderer.pp_error error)in
+      let draw (entry:Renderer.Scene_execution.sampled_draw)=
+        Renderer.prepared_draw ~family:entry.family ~blend:entry.blend
+          ?texture:entry.texture ?auxiliary:entry.auxiliary
+          ?vertex_attributes:entry.vertex_attributes ~samples:entry.samples entry.draw in
       let render entry=
-        ignore(get(Runtime.render_sampled_resources ~clear:(0.,0.,0.,1.) runtime [entry]));
-        get(Runtime.read_pixels runtime ~bytes_per_row:512)in
+        ignore(get(Renderer.draw ~clear:(0.,0.,0.,1.) runtime [draw entry]));
+        get(Renderer.read_pixels runtime ~bytes_per_row:512)in
       let old=render(legacy source first)and current=render first in
       let maximum=ref 0 in
       for i=0 to Bytes.length current-1 do
@@ -49,9 +55,9 @@ let native source second_source first second=
       done;
       Printf.printf "Scene3 f64/f32 triangle maximum channel difference: %d\n%!"!maximum;
       if !maximum>1 then failwith "float32 triangle exceeds one-channel tolerance";
-      let before=(Runtime.stats runtime).uploaded_bytes in
+      let before=(get(Renderer.stats runtime)).uploaded_bytes in
       let changed=render second in
-      let uploaded=Int64.sub(Runtime.stats runtime).uploaded_bytes before in
+      let uploaded=Int64.sub(get(Renderer.stats runtime)).uploaded_bytes before in
       if changed=current then failwith "recolour did not change visible triangle pixels";
       (* Compare the recoloured mesh with its own independent f64 oracle. *)
       let oracle=render(legacy second_source second)in
@@ -61,24 +67,26 @@ let native source second_source first second=
       done;
       if !maximum>1 then failwith "recoloured float32 triangle exceeds one-channel tolerance";
       if uploaded<>36L then failwith(Printf.sprintf "color edit reuploaded geometry (%Ld bytes)"uploaded);
-      ignore(get(Runtime.render_sampled_resources ~clear:(0.,0.,0.,1.) runtime
-        (List.init 65(fun _->second))));
-      let combined=get(Runtime.read_pixels runtime ~bytes_per_row:512)in
+      ignore(get(Renderer.draw ~clear:(0.,0.,0.,1.) runtime
+        (List.init 65(fun _->draw second))));
+      let combined=get(Renderer.read_pixels runtime ~bytes_per_row:512)in
       if combined<>changed then failwith "coalescing lost the float32 attribute stream")
 
 let pair ()=
-  let colors=[|Color.rgb 255 0 0;Color.rgb 0 255 0;Color.rgb 0 0 255|]in
+  let colors=[|Rays_math.Color.rgb 255 0 0;Rays_math.Color.rgb 0 255 0;Rays_math.Color.rgb 0 0 255|]in
   let vertices,normals,indices,_=make colors in
   let source=mesh(vertices,normals,indices,colors)
-  and changed=mesh(vertices,normals,indices,Array.make 3(Color.rgb 255 255 0))in
+  and changed=mesh(vertices,normals,indices,Array.make 3(Rays_math.Color.rgb 255 255 0))in
   source,changed,stage source,stage changed
 
-let run ()=
+let with_caches f=Scene.Private.with_cache_context
+  (Scene.Private.create_cache_context())f
+let run ()=with_caches(fun()->
   let source,_,first,second=pair()in
   let packed=first.draw.mesh.vertices and attrs=attributes first in
   assert(Bytes.length packed=72&&Bytes.length attrs=36);
   let original=Mesh.Private.view source in
-  Array.iteri(fun i(position:Vec3.t)->
+  Array.iteri(fun i(position:Rays_math.Vec3.t)->
     let normal=(Option.get original.normals).(i)in
     List.iteri(fun word expected->
       assert(Bytes.get_int32_le packed(i*24+word*4)=Int32.bits_of_float expected))
@@ -97,23 +105,23 @@ let run ()=
   let repeated=stage source in
   assert(repeated.draw.mesh.vertices==packed&&attributes repeated==attrs);
   assert(repeated.draw.mesh.indices==first.draw.mesh.indices);
-  assert(Scene3.Private.depth_clear Scene3.empty=1.&&Scene3.Private.stencil_clear Scene3.empty=0);
+  assert(Scene3.Private.depth_clear Scene3.empty=1.);
   List.iter(fun samples->
     let scene=Scene3.create~samples[Scene3.mesh source]in
-    assert(Scene3.Private.depth_clear scene=1.&&Scene3.Private.stencil_clear scene=0);
+    assert(Scene3.Private.depth_clear scene=1.);
     let staged=Result.get_ok(Scene.Private.stage_native~width:128~height:128[Scene.view3d~camera scene])in
-    Array.iter(fun(entry:Scene_execution.scene3_entry)->
-      assert(entry.samples=samples&&entry.draw.state.depth_clear=1.&&entry.draw.state.stencil_clear=0))
+    Array.iter(fun(entry:Renderer.Scene_execution.scene3_entry)->
+      assert(entry.samples=samples&&entry.draw.state.depth_clear=1.))
       (List.hd staged.scene3).entries)[1;4;9;16];
-  let vertices,normals,indices,colors=make(Array.make 3 Color.white)in
+  let vertices,normals,indices,colors=make(Array.make 3 Rays_math.Color.white)in
   vertices.x.(0)<-1e100;
   let oversized=mesh(vertices,normals,indices,colors)in
   (match Scene.Private.stage_native~width:128~height:128
       [Scene.view3d~camera(Scene3.create[Scene3.mesh oversized])]with
    |Error error->assert(error="native View3d lowering failed: mesh")
    |Ok _->failwith"non-finite float32 narrowing was accepted");
-  print_endline "Scene3 float32: 36-byte split mirror, immutable component reuse, color invalidation, finite narrowing"
+  print_endline "Scene3 float32: 36-byte split mirror, immutable component reuse, color invalidation, finite narrowing")
 
-let run_native ()=
+let run_native ()=with_caches(fun()->
   let source,changed,first,second=pair()in
-  native source changed first second
+  native source changed first second)

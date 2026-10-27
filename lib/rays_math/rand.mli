@@ -16,6 +16,8 @@ val float_at : t -> index:int -> float
     keyed by [index]. This is the
     allocation-free deterministic path for disjoint parallel element ranges;
     it does not advance or mutate the base generator. *)
+val float_at_int : int -> index:int -> float
+(** Allocation-free stateless sample for a signed OCaml integer seed. *)
 
 (* Uniform integer in [0, bound). *)
 val int : bound:int -> t -> int * t

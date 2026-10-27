@@ -1,7 +1,14 @@
+open Core_model
 open Rays
 open Sop
 open Editor_document
-include Core_text
+open Core_shell
+open Core_panes
+open Core_inspect
+open Core_status
+open Core_text
+open Core_list
+open Core_add
 
 (* A panel header's title: its type, and where a looped panel comes from (register E1). *)
 let panel_title value (leaf : Pxui_shell.Layout.leaf) =
@@ -68,7 +75,7 @@ let defn_change value paths =
         if List.mem name n.binds then Some n.ty
         else Option.bind n.zone (fun (z : Flow_graph.Projection.zone) -> find_ty name z.scope)) s.nodes in
   match Flow_graph.Flow_edit.defn_draft ws.source paths, scope with
-  | Error d, _ -> Declined d.Flow.Diagnostic.message
+  | Error d, _ -> Declined d.Diagnostic.message
   | Ok _, None -> Declined "Open a graph to make a function from its nodes"
   | Ok draft, Some scope ->
       let typed = List.map (fun n -> n, Option.bind (find_ty n scope) ty_text) draft.free in
@@ -93,14 +100,14 @@ let outline_objects value : Navigator.obj list =
       if Objects.has_flag name node then Some (Objects.flag name node) else None) in
     let lead = value.doc.Document.active_camera = Some row.id in
     (* a light says its shape, the render camera that it is active *)
-    let choice = Option.bind node (fun node -> List.find_map (fun (f : Parameter.field_view) ->
+    let choice = Option.bind node (fun node -> List.find_map (fun (f : Param.field_view) ->
       match f.name, f.current with
-      | ("shape" | "type"), Parameter.Choice_value v -> Some (String.lowercase_ascii v) | _ -> None)
+      | ("shape" | "type"), Param.Choice_value v -> Some (String.lowercase_ascii v) | _ -> None)
       (Node.parameter_fields node)) in
     let operation = Option.map Node.operation node in
-    let field name = Option.bind node (fun node -> List.find_map (fun (f : Parameter.field_view) ->
+    let field name = Option.bind node (fun node -> List.find_map (fun (f : Param.field_view) ->
       match f.name = name, f.current with
-      | true, Parameter.Float_value v -> Some v | _ -> None) (Node.parameter_fields node)) in
+      | true, Param.Float_value v -> Some v | _ -> None) (Node.parameter_fields node)) in
     (* the sheet's words: a camera its focal length, a geometry object the graph it references, the
        World a reference to its graph; a light its shape *)
     let name, detail = match operation with
@@ -311,16 +318,16 @@ let dock_panels ~factories (doc : Document.t) source target side =
   let states = (fst doc.workspace).layout.panels in
   let source_key = panel_key doc source and target_key = panel_key doc target in
   let saved key = Option.value ~default:Editor_core.Panels.default_state (Layout_by_path.Path_map.find_opt key states) in
-  let bind doc path = Doc.panel_node ~factories
+  let bind doc path = Editor_document.Document_edit.panel_node ~factories
     ~loop_message:"These panels are copies made by a loop: move their tile in the editor graph." doc path in
   let* doc, node = bind doc source in
   let* doc, target = bind doc target in
-  let* doc = Doc.syntax_edit ~factories doc (Flow_graph.Flow_edit.Dock_panel {node; target; side}) in
+  let* doc = Editor_document.Document_edit.syntax_edit ~factories doc (Flow_graph.Flow_edit.Dock_panel {node; target; side}) in
   let copy_pos = if side = `Left || side = `Top then 3 else 2 in
   let copy = match Flow_graph.Flow_edit.arg_text (fst doc.workspace).source target (Pos copy_pos) with
     | Some {Flow.Syntax.node = Sym name; _} -> List.rev (name :: List.tl (List.rev target))
     | _ -> target in
-  Ok (Doc.layout_edit doc (fun layout ->
+  Ok (Editor_document.Document_edit.layout_edit doc (fun layout ->
     let panels = layout.panels |> Layout_by_path.Path_map.remove source_key
       |> Layout_by_path.Path_map.remove target_key
       |> Layout_by_path.Path_map.add node { (saved source_key) with window = None }
@@ -331,11 +338,11 @@ let dock_panels ~factories (doc : Document.t) source target side =
    ([Syntax_edit]) are applied to the whole document afterwards. *)
 let apply_change (document, error, effects) = function
   | Set_parameter { node; path; value } ->
-      (match Doc.apply_parameters document ~node_id:node [ path, value ] with
+      (match Editor_document.Document_edit.apply_parameters document ~node_id:node [ path, value ] with
        | Error message -> document, Some message, effects
-       | Ok (document, changed) -> document, None, Parameter.union_effects effects changed)
+       | Ok (document, changed) -> document, None, Param.union_effects effects changed)
   | Rename { node; label } ->
-      (match Doc.relabel document ~node_id:node label with
+      (match Editor_document.Document_edit.relabel document ~node_id:node label with
        | Error message -> document, Some message, effects
        | Ok document -> document, None, effects)
   | Follow_source _ | Syntax_edit _ | Syntax_batch _ | Syntax_inline _ | Select_layout _ | Panel_state _ | Dock_panels _ | Object_arg _ | Pin_row _ | Notice _ | Declined _ -> document, error, effects
@@ -369,7 +376,7 @@ let paste_bindings value =
   | Some (graph, _), Ok text ->
       let ws, _ = value.doc.Document.workspace in
       let scope = match Pxui_graph.Scope.selected value.scope_view with
-        | [ path ] when List.length path >= 2 -> List.filteri (fun i _ -> i < List.length path - 1) path
+        | [ path ] when List.length path >= 2 -> List.take (List.length path - 1) path
         | _ -> [ graph ] in
       (* one gesture: every binding lands or none does *)
       (match Text_pane.paste_ops ws.source ~graph ~scope text with

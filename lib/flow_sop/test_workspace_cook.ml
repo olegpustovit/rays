@@ -18,7 +18,7 @@ let () =
     "(workspace pixels (graph g :context image [] (let* [img (image/noise :width 17 :height 9 :frequency 0.12 :seed 31)] img)))") in
   let checked = match Flow.Workspace.check catalog forms with
     | Some checked, [] -> checked
-    | _, diagnostics -> fail (String.concat "\n" (List.map Flow.Diagnostic.to_string diagnostics)) in
+    | _, diagnostics -> fail (String.concat "\n" (List.map Diagnostic.to_string diagnostics)) in
   let card = Projection.find (Projection.of_graph catalog checked "g") ["g";"img"] |> Option.get in
   List.iter (fun name -> check (List.exists (fun (row : Projection.row) -> row.key=Flow_edit.Kw name) card.rows)
     ("image/noise projects " ^ name)) ["width";"height";"frequency";"seed"];
@@ -40,10 +40,10 @@ let lowered_cache = Hashtbl.create 8
 let lower ?(edit = Fun.id) name =
   match Hashtbl.find_opt lowered_cache name with Some l -> l | None ->
   let lowered = match Flow.Syntax.parse (edit (read (Filename.concat cases (name ^ ".lisp")))) with
-  | Error d -> fail (Flow.Diagnostic.to_string d)
+  | Error d -> fail (Diagnostic.to_string d)
   | Ok forms -> (match Lower.workspace ~extra:Editor_document.Contexts.descriptors ~factories forms with
       | Ok lowered -> lowered
-      | Error d -> fail (name ^ ": " ^ Flow.Diagnostic.to_string d)) in
+      | Error d -> fail (name ^ ": " ^ Diagnostic.to_string d)) in
   Hashtbl.add lowered_cache name lowered; lowered
 
 let geometry_bytes geometry =
@@ -81,7 +81,7 @@ let cook ~domains (graph : Lower.graph) =
       Fun.protect ~finally:(fun () -> Sop.Session.close session) (fun () ->
         match Sop.Session.cook session ~context compiled with
         | Ok output -> Some (Result.get_ok (Sop.Payload.geometry output.payload))
-        | Error error -> fail (Sop.Diagnostic.error_to_string error))
+        | Error error -> fail (Diagnostic.error_to_string error))
 
 let slow = Sys.getenv_opt "RAYS_SLOW" = Some "1"
 let fixtures = ["kit"; "tree"; "tunnel"; "variations"; "wave"]
@@ -100,12 +100,12 @@ let skips () =
   let text skip = "(workspace w (graph g :context sop (sop/merge (for [i (range 4)] " ^ skip
     ^ "(sop/transform (sop/box) :translate [i 0 0])))))" in
   let lower_text ?previous source = match Flow.Syntax.parse source with
-    | Error d -> fail (Flow.Diagnostic.to_string d)
+    | Error d -> fail (Diagnostic.to_string d)
     | Ok forms ->
         let compiled_ids = Option.map (fun (l : Lower.t) -> l.compiled_ids) previous
         and sites = Option.map (fun (l : Lower.t) -> l.sites) previous in
         (match Lower.workspace ~extra:Editor_document.Contexts.descriptors ~factories ?compiled_ids ?sites forms with
-         | Ok lowered -> lowered | Error d -> fail (Flow.Diagnostic.to_string d)) in
+         | Ok lowered -> lowered | Error d -> fail (Diagnostic.to_string d)) in
   let all = lower_text (text "") in
   let some = lower_text ~previous:all (text ":skip [2] ") in
   let graph (l : Lower.t) = List.find (fun (g : Lower.graph) -> g.name = "g") l.graphs in
@@ -144,14 +144,14 @@ let optional_rest () =
     let compiled_ids,sites=match previous with None -> Instance_path.Map.empty,[]
       | Some (lowered : Lower.t) -> lowered.compiled_ids,lowered.sites in
     match Lower.workspace ~factories ~compiled_ids ~sites forms with
-      | Ok lowered -> lowered | Error diagnostic -> fail (Flow.Diagnostic.to_string diagnostic) in
+      | Ok lowered -> lowered | Error diagnostic -> fail (Diagnostic.to_string diagnostic) in
   let a=Lisp_sop.node {|(sop/box)|} and b=Lisp_sop.node {|(sop/box :center [2.0 0.0 0.0])|} in
   let cook_node nodes=
     let context=Sop.Context.create ~domains:1 ~seed:42L () |> Result.get_ok in
     let session=Sop.Session.create ~max_entries:16 ~max_payload_bytes:10_000_000 |> Result.get_ok in
     Fun.protect ~finally:(fun () -> Sop.Session.close session) (fun () ->
       match Sop.Session.cook session ~context (merge nodes) with
-        | Ok output -> (Result.get_ok (Sop.Payload.geometry output.payload)) | Error error -> fail (Sop.Diagnostic.error_to_string error)) in
+        | Ok output -> (Result.get_ok (Sop.Payload.geometry output.payload)) | Error error -> fail (Diagnostic.error_to_string error)) in
   List.iter (fun (result,nodes) ->
     let lowered=lower_text (source result) in
     let graph=List.hd lowered.graphs in
@@ -167,7 +167,7 @@ let optional_rest () =
      "(first (map sop/rest_fixture (list a) (list nil) (list (list b a))))",[a;b;a]];
   let bad_function_call = "(workspace w (defn caller :context sop [(make : fn) (a : geometry) (b : geometry)] (first (map make (list a) (list b)))) (graph g :context sop (caller sop/null (sop/box) (sop/box))))" in
   (match Lower.workspace ~factories (Flow.Syntax.parse bad_function_call |> Result.get_ok) with
-    | Error diagnostic -> check (diagnostic.code="E_EXTRA_POSITIONAL") ("kind functions retain their input bound: " ^ Flow.Diagnostic.to_string diagnostic)
+    | Error diagnostic -> check (diagnostic.code="E_EXTRA_POSITIONAL") ("kind functions retain their input bound: " ^ Diagnostic.to_string diagnostic)
     | Ok _ -> fail "fixed kind function silently ignored an extra geometry input");
   let text=source "(sop/rest_fixture a)" in
   let forms=Flow.Syntax.parse text |> Result.get_ok in
@@ -208,12 +208,12 @@ let attribute_composite () =
   let expected=Fun.protect ~finally:(fun () -> Sop.Session.close session) (fun () ->
     match Sop.Session.cook session ~context expected with
     | Ok output -> geometry_bytes (Result.get_ok (Sop.Payload.geometry output.payload))
-    | Error error -> fail (Sop.Diagnostic.error_to_string error)) in
+    | Error error -> fail (Diagnostic.error_to_string error)) in
   let catalog=Catalog.of_factories ~version:1 factories |> Result.get_ok in
   List.iter (fun result ->
     let forms=Flow.Syntax.parse (source result) |> Result.get_ok in
     let lowered=match Lower.workspace ~factories forms with
-      | Ok lowered -> lowered | Error diagnostic -> fail (Flow.Diagnostic.to_string diagnostic) in
+      | Ok lowered -> lowered | Error diagnostic -> fail (Diagnostic.to_string diagnostic) in
     List.iter (fun domains ->
       check (geometry_bytes (Option.get (cook ~domains (List.hd lowered.graphs)))=expected)
         "Attribute Composite Lisp fixed and repeated layer parity") [1;4];
@@ -226,7 +226,7 @@ let attribute_composite () =
       (Flow_edit.Set_arg {node=["g";"r"];key=Flow_edit.Kw "weights";sub=[];
         value=Flow.Syntax.parse "\"0.4\\n0.3\"" |> Result.get_ok |> List.hd}) |> Result.get_ok in
     let after=match Lower.workspace ~factories ~compiled_ids:lowered.compiled_ids ~sites:lowered.sites edited with
-      | Ok lowered -> lowered | Error diagnostic -> fail (Flow.Diagnostic.to_string diagnostic) in
+      | Ok lowered -> lowered | Error diagnostic -> fail (Diagnostic.to_string diagnostic) in
     check ((List.hd after.graphs).root=(List.hd lowered.graphs).root)
       "Attribute Composite weight edit preserves node identity";
     check (geometry_bytes (Option.get (cook ~domains:1 (List.hd after.graphs)))<>expected)
@@ -241,7 +241,7 @@ let switch () =
   let cooked result=
     let forms=Flow.Syntax.parse (source result) |> Result.get_ok in
     let lowered=match Lower.workspace ~factories forms with
-      | Ok lowered -> lowered | Error diagnostic -> fail (Flow.Diagnostic.to_string diagnostic) in
+      | Ok lowered -> lowered | Error diagnostic -> fail (Diagnostic.to_string diagnostic) in
     let workspace=match Flow.Workspace.check catalog forms with
       | Some workspace,_ -> workspace | _ -> fail "Switch did not check" in
     let node=Projection.find (Projection.of_graph catalog workspace "g") ["g";"r"] |> Option.get in
@@ -265,12 +265,12 @@ let blend_shapes () =
   let expected=Fun.protect ~finally:(fun () -> Sop.Session.close session) (fun () ->
     match Sop.Session.cook session ~context expected with
     | Ok output -> geometry_bytes (Result.get_ok (Sop.Payload.geometry output.payload))
-    | Error error -> fail (Sop.Diagnostic.error_to_string error)) in
+    | Error error -> fail (Diagnostic.error_to_string error)) in
   let catalog=Catalog.of_factories ~version:1 factories |> Result.get_ok in
   List.iter (fun result ->
     let forms=Flow.Syntax.parse (source result) |> Result.get_ok in
     let lowered=match Lower.workspace ~factories forms with
-      | Ok lowered -> lowered | Error diagnostic -> fail (Flow.Diagnostic.to_string diagnostic) in
+      | Ok lowered -> lowered | Error diagnostic -> fail (Diagnostic.to_string diagnostic) in
     List.iter (fun domains -> check (geometry_bytes (Option.get (cook ~domains (List.hd lowered.graphs)))=expected)
       "Blend Shapes positional/named rest Lisp parity") [1;4];
     let workspace=match Flow.Workspace.check catalog forms with
@@ -285,7 +285,7 @@ let blend_shapes () =
       (Flow_edit.Set_arg {node=["g";"r"];key=Flow_edit.Kw "shape_masks";sub=[];
         value=Flow.Syntax.parse "\"5\\tmask\\tfirst\"" |> Result.get_ok |> List.hd}) |> Result.get_ok in
     let after=match Lower.workspace ~factories ~compiled_ids:lowered.compiled_ids ~sites:lowered.sites edited with
-      | Ok lowered -> lowered | Error diagnostic -> fail (Flow.Diagnostic.to_string diagnostic) in
+      | Ok lowered -> lowered | Error diagnostic -> fail (Diagnostic.to_string diagnostic) in
     check ((List.hd after.graphs).root=(List.hd lowered.graphs).root) "Blend Shapes parameter edit preserves identity";
     check (geometry_bytes (Option.get (cook ~domains:1 (List.hd after.graphs)))<>expected)
       "Blend Shapes weight edit reaches the native cook";
@@ -313,8 +313,8 @@ let run () =
       | Some checked, _ -> checked | _ -> fail (name ^ " did not check") in
     let from_checked, phases = Flow.Phase_timer.sample ~clock:Unix.gettimeofday (fun () ->
       Lower.of_checked ~factories checked |> Result.get_ok) in
-    check (Flow.Phase_timer.calls phases Check = 0
-      && Flow.Phase_timer.calls phases Evaluate = 1 && Flow.Phase_timer.calls phases Lower = 1)
+    check (Flow.Phase_timer.calls phases "check" = 0
+      && Flow.Phase_timer.calls phases "evaluate" = 1 && Flow.Phase_timer.calls phases "lower" = 1)
       (name ^ ": checked lowering repeated a check or evaluation");
     check (from_checked.plan == from_checked.evaluated.plan
       && from_checked.states == from_checked.evaluated.states)
@@ -328,7 +328,7 @@ let run () =
       | _ -> Marshal.to_string a [Marshal.No_sharing] = Marshal.to_string b [Marshal.No_sharing] in
     let left_state = Flow.Eval.create_state () and right_state = Flow.Eval.create_state () in
     List.iteri (fun frame time ->
-      let live = {(Frame_input.at_time time) with frame} in
+      let live = {(Input.at_time time) with frame} in
       let same_value a b = match Flow.Eval.force ~state:left_state a ~live,
           Flow.Eval.force ~state:right_state b ~live with
         | Ok a, Ok b -> same a b | Error a, Error b -> a = b | _ -> false in

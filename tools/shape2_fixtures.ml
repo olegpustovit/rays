@@ -3,10 +3,11 @@
 module S = Scene_command.Shape2
 module R = Scene_command.Render_ir
 
-let flt x = Printf.sprintf "%.17g" x
+let flt x = Param.float_text x
 let seq f xs = "[" ^ String.concat "," (List.map f xs) ^ "]"
 let colour = function None -> "null" | Some c -> Int32.to_string c
 let points ps = seq (fun (x, y) -> Printf.sprintf "[%d,%d]" x y) ps
+let float_points ps = List.map (fun (x, y) -> float x, float y) ps
 let geometry (g : R.geometry) =
   Printf.sprintf {|{"vertices":%s,"indices":%s,"color":%ld}|} (seq flt (Array.to_list g.vertices))
     (seq string_of_int (Array.to_list g.indices)) g.color
@@ -22,16 +23,16 @@ let () =
     [(5, 5)]; [(0, 0); (9, 9)]; []; [(0, 0); (10, 0); (10, 10); (0, 10); (3, 3); (7, 3); (7, 7); (3, 7)];
     [(0, 0); (40, 0); (0, 1); (40, 1)]; [(-5, -5); (5, -5); (5, 5); (-5, 5)] ] in
   List.iter (fun p -> List.iter (fun (f, s) ->
-    add "polygon" (Printf.sprintf "[%s,%s,%s]" (points p) (colour f) (colour s)) (result (S.polygon p ~fill:f ~stroke:s)))
+    add "polygon" (Printf.sprintf "[%s,%s,%s]" (points p) (colour f) (colour s)) (result (S.polygon (float_points p) ~fill:f ~stroke:s)))
     [None, None; red, None; None, blue; red, blue]) polygons;
   List.iter (fun p -> add "polyline" (Printf.sprintf "[%s,%ld]" (points p) 0x336699ffl)
-    (result [| S.polyline p ~color:0x336699ffl |]))
+    (result [| S.polyline (float_points p) ~color:0x336699ffl |]))
     [ [(0, 0); (10, 0)]; [(0, 0); (10, 0); (10, 10)]; [(0, 0); (10, 5); (0, 10); (10, 15)]; [(0, 0); (20, 1); (0, 2)];
       [(0, 0); (5, 5); (5, 5); (10, 0)]; [(0, 0); (10, 0); (10, 10); (0, 10); (0, 0)]; [(3, 3)]; []; [(0, 0); (10, 0); (20, 0)];
       [(0, 0); (100, 0); (0, 1)] ];
   List.iter (fun (w, h, r) -> List.iter (fun (f, s) ->
     add "rounded_rect" (Printf.sprintf "[%d,%d,%d,%s,%s]" w h r (colour f) (colour s))
-      (result (S.rounded_rect ~width:w ~height:h ~radius:r ~fill:f ~stroke:s)))
+      (result (S.rounded_rect ~width:(float w) ~height:(float h) ~radius:(float r) ~fill:f ~stroke:s)))
     [None, None; red, None; None, blue; red, blue])
     [(100, 50, 10); (100, 50, 0); (30, 30, 15); (30, 30, 100); (-40, 20, 4); (7, 7, 3); (200, 120, 25); (1, 1, 1)];
   Out_channel.with_open_bin Sys.argv.(1) (fun oc -> output_string oc (seq Fun.id (List.rev !cases)));

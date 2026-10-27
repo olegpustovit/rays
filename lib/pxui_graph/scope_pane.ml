@@ -11,7 +11,6 @@ let sx t gx = float t.x +. t.pan_x +. gx *. t.zoom
 let sy t gy = float t.y +. t.pan_y +. gy *. t.zoom
 
 let left_button (s : Ui.signal) = s.button = Some Input.LeftButton
-let contains (x, y, w, h) (px, py) = px >= x && px < x +. w && py >= y && py < y +. h
 
 (* the number field of a row, the kit's ([Editor_core.Number], as [Pxui_shell.Kit.number]): the kind
    is the row's type, and only a literal with no typed row behind it is read by its spelling *)
@@ -126,7 +125,7 @@ let update t ui (frame : Frame.t) =
     let _, wheel = canvas_signal.scroll in
     let pinch = canvas_signal.pinch in
     if (wheel = 0. && pinch = 1.) || t.context <> None then t else begin
-      let mx, my = frame.mouse in
+      let mx, my = frame.input.pointer in
       (* the wheel steps by a tenth; a pinch carries its own factor *)
       let zoom = Float.max 0.25 (Float.min 2.5 (t.zoom *. (1. +. wheel *. 0.1) *. pinch)) in
       let k = zoom /. t.zoom in
@@ -168,7 +167,7 @@ let update t ui (frame : Frame.t) =
     | P.Item ({ zone = Some zn; _ } as n) when not p.collapsed -> Some (n, zn, p, ax, ay)
     | _ -> None) visible in
   let local (x, y) = x -. float t.x, y -. float t.y in
-  let mouse = frame.mouse in
+  let mouse = frame.input.pointer in
   (* Segment rectangles live in the shared hit tree, behind the cards; ports built below take
      hover precedence.  A segment is cut to [clip] (pane points) first, so what is out of view
      costs one clip; a diagonal is then a run of 16-point boxes. *)
@@ -444,7 +443,7 @@ let update t ui (frame : Frame.t) =
                     let root = List.hd (String.split_on_char '.' s) in
                     let rec target k =
                       if k < 0 then None else
-                      let cand = List.filteri (fun j _ -> j < k) n.path @ [ root ] in
+                      let cand = List.take k n.path @ [ root ] in
                       if node_of t cand <> None || input_of t cand <> None then Some cand else target (k - 1) in
                     (match target (List.length n.path - 1) with
                      | None -> []
@@ -606,21 +605,11 @@ let update t ui (frame : Frame.t) =
     | None -> false
     | Some (x, y) -> abs_float (sx t (fst point) -. x) <= 1.5 *. z +. 0.5
         && abs_float (sy t (snd point) -. y) <= 1.5 *. z +. 0.5 in
-  (* the shared trunk of a bundled fan-out: the pointer on the segment from the port to the junction.
-     It belongs to every wire of the group, so it lights all of them and a press selects their source *)
-  let on_trunk (w : wire) = match w.junction, w.pts with
-    | Some jx, (ax, ay) :: _ ->
-        let mx, my = mouse in
-        abs_float (my -. sy t ay) <= 4. && mx >= sx t ax && mx <= sx t jx
-    | _ -> false in
-  let trunk_wire = if t.context <> None then None
-    else List.find_map (fun i -> let w = t.geo.wires.(i) in if on_trunk w then Some w else None) wires_in_view in
   let highlighted = ref [] in
   List.iter (fun i ->
     let w = t.geo.wires.(i) in
     if t.context = None &&
-      (List.exists (Ui.hovered_within ui) (hits i) || same_port w.a || same_port w.b
-       || (match trunk_wire with Some tw -> tw.a = w.a | None -> false))
+      (List.exists (Ui.hovered_within ui) (hits i) || same_port w.a || same_port w.b)
     then highlighted := w :: !highlighted) wires_in_view;
   let t = { t with hovered_row; highlighted = !highlighted } in
   (* interactions *)
@@ -632,10 +621,10 @@ let update t ui (frame : Frame.t) =
   let panning = List.exists (fun (s : Ui.signal) -> non_left_held s || non_left_released s) all_signals in
   let pan_pressed = List.exists non_left_pressed all_signals in
   let pan_released = List.exists non_left_released all_signals in
-  let lost = List.exists (function Rays.Event.WindowFocusLost -> true | _ -> false) frame.events in
+  let lost = List.exists (function Input.Focus_lost -> true | _ -> false) frame.input.events in
   let panning_grab =
     if pan_pressed || panning then true
-    else if pan_released || lost || frame.mouse_buttons = [] then false
+    else if pan_released || lost || frame.input.buttons = [] then false
     else t.panning_grab in
   if panning_grab <> t.panning_grab then ignore (Rays.Sketch.set_relative_mouse panning_grab);
   let t = { t with panning_grab } in
@@ -648,15 +637,11 @@ let update t ui (frame : Frame.t) =
   let tile_pressed = List.exists (fun (_, _, _, _, (s : Ui.signal), _, _) -> s.pressed) tiles in
   let wire_pressed =
     if t.context <> None || tile_pressed || not (List.exists (function
-      | Rays.Event.MousePressed (Input.LeftButton, _) -> true | _ -> false) frame.events) then None
+      | Input.Pointer_pressed (Input.LeftButton, _) -> true | _ -> false) frame.input.events) then None
     else List.find_map (fun i ->
       if List.exists (fun b -> let s = Ui.signal ui b in s.pressed && left s) (hits i)
       then Some i else None) wires_in_view in
   let t = match wire_pressed with
-    | Some _ when (match trunk_wire with Some { from = Some _; _ } -> true | _ -> false) ->
-        let src = Option.get (Option.get trunk_wire).from in
-        emit (Selected [ src ]);
-        { t with selected = Path_set.singleton src; selected_wire = None }
     | Some i ->
         if not (Path_set.is_empty t.selected) then emit (Selected []);
         { t with selected = Path_set.empty; selected_wire = t.geo.wires.(i).target }
@@ -917,12 +902,12 @@ let update t ui (frame : Frame.t) =
                  ~carry:(match snapshot.carry_hot with Some (hp, _) -> hp = n.path | None -> false)
                  ~out_wired:(Hashtbl.mem read (out_anchor p ax ay)) ~shown:(p.shown)
                  ?failed:(List.assoc_opt n.path snapshot.failed) p n ~selected:isel ~row_hover:rh (x, y, w, h);
-               if dimmed n then Ui.Paint.fill paint ~x ~y ~w ~h (Color.with_alpha snapshot.theme.panel 150));
+               if dimmed n then Ui.Paint.fill paint ~x ~y ~w ~h (Rays_math.Color.with_alpha snapshot.theme.panel 150));
       (* the chain of the selection stays; the rest of the cards recede *)
       (match chain with
        | Some c when not (node_lit c path) &&
            (match p.item with P.Item { zone = Some _; _ } -> p.collapsed | _ -> true) ->
-           Ui.Paint.fill paint ~x ~y ~w ~h (Color.with_alpha snapshot.theme.panel 170)
+           Ui.Paint.fill paint ~x ~y ~w ~h (Rays_math.Color.with_alpha snapshot.theme.panel 170)
        | _ -> ()));
     ) tiles;
   let drawn_items = List.length tiles in
@@ -1163,8 +1148,7 @@ module Private = struct
     let rec pairs = function a :: (b :: _ as rest) -> (a, b) :: pairs rest | _ -> [] in
     let ps = pairs w.pts in
     let at ((x0, y0), (x1, y1)) k = Some (sx t (x0 +. (x1 -. x0) *. k), sy t (y0 +. (y1 -. y0) *. k)) in
-    (* a curve's samples: halfway along it, so it is picked on its body; a routed wire: the middle
-       of its longest segment, clear of a junction's trunk *)
+    (* curves are sampled, so choose halfway along their full length *)
     if List.length ps > 5 then
       let rec walk left = function
         | p :: rest when left > seg p && rest <> [] -> walk (left -. seg p) rest
@@ -1174,5 +1158,4 @@ module Private = struct
     else match List.fold_left (fun best p -> match best with Some b when seg b >= seg p -> best | _ -> Some p) None ps with
       | Some p -> at p 0.5
       | None -> None
-  let _ = contains
 end

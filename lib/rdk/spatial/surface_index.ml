@@ -1257,10 +1257,10 @@ let jittered_direction seed query sample jitter_scale dx dy dz output =
     let vx = (dy *. uz) -. (dz *. uy)
     and vy = (dz *. ux) -. (dx *. uz)
     and vz = (dx *. uy) -. (dy *. ux) in
-    let random = Rand.seed seed in
-    let radius = sqrt (Rand.float_at random
+    let random = Rays_math.Rand.seed seed in
+    let radius = sqrt (Rays_math.Rand.float_at random
         ~index:(jitter_stream query sample 0)) *. jitter_scale
-    and angle = 2. *. Float.pi *. Rand.float_at random
+    and angle = 2. *. Float.pi *. Rays_math.Rand.float_at random
         ~index:(jitter_stream query sample 1) in
     let tangent_u = radius *. cos angle
     and tangent_v = radius *. sin angle in
@@ -1694,7 +1694,7 @@ let raycast_many_into ?cancel ?selection ~grain value ~queries ~directions
 
 let raycast value ~origin ~direction =
   try
-    let queries = Packed.Float3.Private.of_owned_exn ~x:[|origin.Vec3.x|]
+    let queries = Packed.Float3.Private.of_owned_exn ~x:[|origin.Rays_math.Vec3.x|]
         ~y:[|origin.y|] ~z:[|origin.z|]
     in
     let primitive = [|-1|] and triangle = [|-1|]
@@ -1702,7 +1702,7 @@ let raycast value ~origin ~direction =
     and distance = [|Float.infinity|] in
     raycast_many_into ~grain:1 value ~queries
       ~directions:(Constant_direction {
-        x = direction.Vec3.x; y = direction.y; z = direction.z })
+        x = direction.Rays_math.Vec3.x; y = direction.y; z = direction.z })
       ~min_distance:0. ~max_distance:Float.infinity ~tolerance:0.
       ~direction_mode:Ray_forward ~surface_hit:Ray_first_surface
       ~primitives:primitive ~triangles:triangle ~barycentric_a:a

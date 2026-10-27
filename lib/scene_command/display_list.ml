@@ -7,13 +7,13 @@ type t = {
 }
 type segment = t
 
-let next_id=ref 1L
-let fresh_id()=
-  let value= !next_id in
-  if value=Int64.max_int then
+let next_id = Atomic.make 1L
+let rec fresh_id () =
+  let value = Atomic.get next_id in
+  if value = Int64.max_int then
     invalid_arg "Display_list.fresh_id: identity space exhausted";
-  next_id:=Int64.succ value;
-  value
+  if Atomic.compare_and_set next_id value (Int64.succ value) then value
+  else fresh_id ()
 
 module Builder = struct
   type published = { id : int64; version : int64; value : t }

@@ -37,7 +37,7 @@ video driver none of this does anything.
 
 ## Logical and drawable coordinates
 
-Window configuration, `Window.size`, `Frame.size`, scene coordinates, pointer
+Window configuration, `Window.size`, `Frame.input.size`, scene coordinates, pointer
 events, and PXUI layout use logical points. `Window.drawable_size` and
 `Frame.drawable_size` expose physical backing pixels; `pixel_scale` is their
 ratio to logical size and may change when the window moves between displays.
@@ -73,21 +73,21 @@ and a fixed clock to write deterministic numbered PNG sequences.
 
 Keyboard, pointer, scroll, trackpad scroll gesture, pinch, committed text, IME editing, file-drop (and
 file-drag position), file-dialog, focus, resize, and close events enter one
-ordered `Event.t` stream. Pointer movement is
+ordered `Input.event` stream in `Frame.input.events`. Pointer movement is
 summed into `Frame.mouse_delta` for the frame. Focus loss clears held input and
 cancels capture. File-drop strings are copied before SDL3 releases its payload.
 
-On macOS a trackpad scroll is two events. SDL's wheel event (`MouseScrolled`)
+On macOS a trackpad scroll is two events. SDL's wheel event (`Input.Scrolled`)
 is a tenth of the points moved and merges the fingers with the system's
 momentum; it says nothing of the gesture's phases and nothing at all when the
-fingers lift. `TrackpadScrolled { delta; phase; time }` carries those: points,
+fingers lift. `Input.Trackpad_scrolled { delta; phase; time }` carries those: points,
 `Touched`/`Moved`/`Lifted`/`Momentum`, and the event's own clock. Each one that
-moves has its `MouseScrolled` in the same frame, so a reader of `MouseScrolled`
+moves has its `Input.Scrolled` in the same frame, so a reader of `Input.Scrolled`
 alone sees what it always did.
 
 The authoritative SDL3 size-change notification (the window is not polled)
 updates logical window facts on the next frame, refreshes drawable size, resizes
-the Metal surface, and emits one `WindowResized` event. While the window is
+the Metal surface, and emits one `Input.Resized` event. While the window is
 minimized or covered the sketch loop skips drawing and idles; SDL announces the
 start of occlusion but not its end, so the loop reads the window state once a
 frame to see it end. A visible window whose scene is the same as the last one presented
@@ -101,7 +101,7 @@ window.
 
 ## Shutdown
 
-`Event.WindowClosed` or `Sketch.quit ()` requests an orderly stop. User
+`Input.Closed` or `Sketch.quit ()` requests an orderly stop. User
 `on_stop` runs while SDL3, Metal, fonts, images, canvases, and audio are still
 valid. The runtime then drains completion-owned releases, destroys children
 before parents, tears down the Metal surface/view and SDL3 window, and restores

@@ -21,7 +21,7 @@ module Field = struct
   let factory = parameters_factory build
 end
 
-let ok = function Ok x -> x | Error d -> failwith (Flow.Diagnostic.to_string d)
+let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let checked catalog args =
   let forms = Flow.Syntax.parse ("(workspace w (graph g :context sop (sop/test_field " ^ args ^ ")))" ) |> ok in
   let workspace, _ = Flow.Workspace.check catalog forms in
@@ -93,7 +93,7 @@ let () =
       let cooked node time =
         let context = Sop.Context.create ~domains ~time () |> Result.get_ok in
         let output = match S.cook session ~context node with Ok x -> x
-          | Error d -> failwith (Sop.Diagnostic.error_to_string d) in
+          | Error d -> failwith (Diagnostic.error_to_string d) in
         let geometry = Sop.Payload.geometry output.payload |> Result.get_ok in
         Array.init (Rdk.Geometry.point_count geometry)
           (fun i -> Rdk.Packed.Float3.get (Rdk.Geometry.positions geometry) i) in
@@ -101,16 +101,14 @@ let () =
       let functions = first.plan.nodes |> Array.to_list |> List.filter_map (fun (n : Flow.Eval.node) ->
         if n.kind <> "sop/test_field" then None else match List.assoc "field" n.args with
           | Flow.Eval.Fn fn -> Some fn | _ -> assert false) |> Array.of_list in
-      let converted = Rays_math.Parallel.run ~domains (fun () ->
-        Rays_math.Parallel.map_array ~grain:1 (fun fn ->
+      let converted = Parallel.run ~domains (fun () ->
+        Parallel.map_array ~grain:1 (fun fn ->
           let value = Flow.Eval.Private.map_function
               ~signature:Flow.Ty.{params = [Vec3; Float]; result = Vec3} fn
               [Flow.Eval.Vec3_array [|2.;0.;0.|]; Float_array [|0.|]] |> ok in
           let program = Flow_sop.Attribute_kernel.prepare ~sources:[] [] value |> ok in
-          let ir = Flow_ir.Executor.graph program in
-          let packed = match ir.nodes.(ir.roots.(0)).kind with
-            | Flow_ir.Kernel {body = Packed_map packed; _} -> packed | _ -> assert false in
-          let live = Frame_input.at_time 0.5 in
+          let packed = Option.get (Flow_ir.Executor.packed_region program) in
+          let live = Input.at_time 0.5 in
           let compiled = Flow_ir.Packed.force packed ~live |> ok in
           let reference = Flow_ir.Executor.force ~reference:true program ~live |> ok in
           assert (compiled = reference); compiled) functions) in
@@ -152,7 +150,7 @@ let () =
       Fun.protect ~finally:(fun () -> Sop.Session.close session) (fun () ->
         let context = Sop.Context.create ~domains () |> Result.get_ok in
         let output = match Sop.Session.cook session ~context node with
-          | Ok x -> x | Error d -> failwith (Sop.Diagnostic.error_to_string d) in
+          | Ok x -> x | Error d -> failwith (Diagnostic.error_to_string d) in
         let geometry = Sop.Payload.geometry output.payload |> Result.get_ok in
         let points = Array.init (Rdk.Geometry.point_count geometry)
             (fun i -> Rdk.Packed.Float3.get (Rdk.Geometry.positions geometry) i) in

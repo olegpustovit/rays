@@ -1,4 +1,5 @@
 open Runtime_resources
+open Ogpu.Error
 let get=function Ok x->x|Error e->failwith(Format.asprintf"%a"pp_error e)
 let u16 b o v=Bytes.set_uint8 b o(v land 255);Bytes.set_uint8 b(o+1)((v lsr 8)land 255)
 let u32 b o v=u16 b o(v land 65535);u16 b(o+2)((v lsr 16)land 65535)

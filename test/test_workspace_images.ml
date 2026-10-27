@@ -1,10 +1,10 @@
 module E=Flow.Eval
 module Editor=Rays_editor.Editor
-let ok=function Ok value->value|Error d->failwith(Flow.Diagnostic.to_string d)
+let ok=function Ok value->value|Error d->failwith(Diagnostic.to_string d)
 let load text=match Rays_editor.Workspace.load text with Ok doc->doc|Error ds->
-  failwith(String.concat "; "(List.map Flow.Diagnostic.to_string ds))
+  failwith(String.concat "; "(List.map Diagnostic.to_string ds))
 let editor doc=Result.get_ok(Editor.create ~workspace:doc ~await:true ~domains:1
-  ~prepare:(fun _ _->Ok()) ~scene3:(fun _ ()->Rays.Scene3.empty)())
+  ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)())
 let workspace producer=load("(workspace images (graph img :context image "^producer^
   ") (graph picture :context draw (draw/image (ref img) :at [1 2 0] :scale 2.0 :angle 0.1)))")
 let ()=
@@ -24,11 +24,11 @@ let ()=
     (graph mesh :context sop (let* [geo (sop/image_context)
       p (array/sum (sop/attr geo :P))
       img (image/map (fn [uv] [(+ uv.x p.x) p.y 0.5 1]) :width 65 :height 17)] geo)))|}with
-    |Ok doc->doc|Error ds->failwith(String.concat "; "(List.map Flow.Diagnostic.to_string ds))in
+    |Ok doc->doc|Error ds->failwith(String.concat "; "(List.map Diagnostic.to_string ds))in
   let run seed domains=
     let grain=257 in
     let owner=Result.get_ok(Editor.create ~workspace:doc ~factories ~seed ~grain ~await:true ~domains
-      ~prepare:(fun _ _->Ok()) ~scene3:(fun _ ()->Rays.Scene3.empty)())in
+      ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)())in
     Fun.protect ~finally:(fun()->Editor.close owner)(fun()->
       let plan=Editor.Private.image_plan owner in
       let node=Array.find_opt(fun(n:E.node)->n.kind="image/map")plan.nodes |> Option.get in
@@ -57,7 +57,7 @@ let ()=
     (graph other :context sop (ref mesh :offset 0.03125)))|}in
   let run domains=
     let owner=Result.get_ok(Editor.create ~workspace:doc ~await:true ~domains
-      ~prepare:(fun _ _->Ok()) ~scene3:(fun _ ()->Rays.Scene3.empty)())in
+      ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)())in
     Fun.protect ~finally:(fun()->Editor.close owner)(fun()->
       let plan=Editor.Private.image_plan owner in
       let instance=Array.find_index(fun(i:E.instance)->i.graph="mesh" && not i.default)plan.instances |> Option.get in
@@ -65,7 +65,7 @@ let ()=
       let image=E.Deferred(Flow.Ty.image,producer.id)in
       let fn=List.assoc "function" producer.args in
       assert(not(E.frame_dependent fn));
-      let at time=Editor.Private.image_payload ~live:(Frame_input.at_time time)owner image |> ok in
+      let at time=Editor.Private.image_payload ~live:(Input.at_time time)owner image |> ok in
       let first=at 0. in
       let bytes=Sop.Image.Private.rgba8 first |> Option.get |> Bytes.copy in
       assert(Char.code(Bytes.get bytes 0)=82);
@@ -104,11 +104,11 @@ let ()=
   let stamp=E.state_stamp state in
   let snapshot ~first domains=
     let owner=Result.get_ok(Editor.create ~workspace:doc ~await:true ~domains
-      ~prepare:(fun _ _->Ok()) ~scene3:(fun _ ()->Rays.Scene3.empty)())in
+      ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene3.empty)())in
     Fun.protect ~finally:(fun()->Editor.close owner)(fun()->
       let node=Array.find_opt(fun(n:E.node)->n.kind="image/map")(Editor.Private.image_plan owner).nodes |> Option.get in
       let image=E.Deferred(Flow.Ty.image,node.id)in
-      let at frame=Editor.Private.image_payload ~state ~live:{(Frame_input.at_time(float frame))with frame}owner image |> ok in
+      let at frame=Editor.Private.image_payload ~state ~live:{(Input.at_time(float frame))with frame}owner image |> ok in
       if first then ignore(at 0);
       let result=at 1 in
       assert(E.state_stamp state=stamp);
@@ -124,19 +124,19 @@ let () =
       let evaluated=ok(E.static doc.checked)in
       let image_value=List.assoc "img" evaluated.results in
       let image_at time=Editor.Private.with_images ~plan:evaluated.plan
-        ~live:(Frame_input.at_time time) owner (fun ~image ~texture:_ -> ok(image image_value))in
+        ~live:(Input.at_time time) owner (fun ~image ~texture:_ -> ok(image image_value))in
       let first=image_at 0. in
-      assert(Rays.Image.get_size first=(65,3));
+      assert(Result.get_ok (Rays.Image.get_size first)=(65,3));
       let pixels=Rays.Image.Private.pixels first |> Result.get_ok in
       assert(Bytes.get pixels 0=Char.chr 2 && Bytes.get pixels 1=Char.chr 42
         && Bytes.get pixels 2=Char.chr 128 && Bytes.get pixels 3=Char.chr 255);
       assert(image_at 0.==first);
       assert(image_at 1.==first);
       assert(Rays.Image.Private.pixels first |> Result.get_ok <> pixels);
-      let prepared=ok(Rays_editor.Drawing.prepare evaluated.plan(List.assoc "picture" evaluated.results))in
-      let scene=ok(Rays_editor.Drawing.render_prepared ~image:(fun v->Editor.Private.with_images
-        ~plan:evaluated.plan ~live:(Frame_input.at_time 1.) owner (fun ~image ~texture:_->image v))
-        prepared ~live:(Frame_input.at_time 1.) ~size:(65,3))in
+      let prepared=ok(Flow_native.Drawing.prepare evaluated.plan(List.assoc "picture" evaluated.results))in
+      let scene=ok(Flow_native.Drawing.render_prepared ~image:(fun v->Editor.Private.with_images
+        ~plan:evaluated.plan ~live:(Input.at_time 1.) owner (fun ~image ~texture:_->image v))
+        prepared ~live:(Input.at_time 1.) ~size:(65,3))in
       assert(Array.exists(function Scene_command.Render_ir.Image _->true|_->false)(Rays.Scene.Private.commands scene));
       assert(Editor.Private.image_stats owner=(1,0)));
     assert(Editor.Private.image_stats owner=(1,1)))
@@ -147,12 +147,12 @@ let () =
   let doc=workspace "(image/map (fn [uv] [uv.x uv.y 0.5 1]) :width 65 :height 3)"in
   let owner=editor doc in
   let resolve doc=let evaluated=ok(E.static doc.Editor_document.Workspace_doc.checked)in
-    Editor.Private.with_images ~plan:evaluated.plan ~live:(Frame_input.at_time 0.) owner
+    Editor.Private.with_images ~plan:evaluated.plan ~live:(Input.at_time 0.) owner
       (fun ~image ~texture:_->ok(image(List.assoc "img" evaluated.results)))in
   Fun.protect ~finally:(fun()->Editor.close owner)(fun()->
     let image=resolve doc in
     let resized=workspace "(image/map (fn [uv] [uv.x uv.y 0.5 1]) :width 17 :height 5)"in
-    assert(resolve resized==image && Rays.Image.get_size image=(17,5));
+    assert(resolve resized==image && Result.get_ok (Rays.Image.get_size image)=(17,5));
     let previous=Rays.Image.Private.pixels image |> Result.get_ok in
     let edited=workspace "(image/map (fn [uv] [uv.y uv.x 0.5 1]) :width 17 :height 5)"in
     assert(resolve edited==image);
@@ -167,24 +167,23 @@ let ()=
   let owner=editor doc in
   Fun.protect ~finally:(fun()->Editor.close owner)(fun()->
     let image=ok(Editor.Private.image owner value)in
-    assert(Rays.Image.get_size image=(2,2));
+    assert(Result.get_ok (Rays.Image.get_size image)=(2,2));
     assert(ok(Editor.Private.image owner value)==image);
     let oracle=Result.get_ok(Rays.Image.Private.pixels image)in
     let ui=Pxui.Ui.create()in
     Fun.protect ~finally:(fun()->Pxui.Ui.destroy ui)(fun()->
-      let frame:Rays.Frame.t={width=32;height=32;size=32,32;
-        pixel_scale=1.,1.;time=0.;dt=0.;fps=60.;count=0;
-        mouse=0.,0.;mouse_delta=0.,0.;keys=[];mouse_buttons=[];events=[]}in
+      let frame : Rays.Frame.t = { input = { (Input.at_time 0.) with size = 32, 32 };
+        pixel_scale = 1., 1.; fps = 60.; mouse_delta = 0., 0. } in
       Pxui.Ui.frame ui frame(fun ui->
         let box=Pxui.Ui.box ui ~w:(Px 16.) ~h:(Px 16.) "image"in
         Pxui.Ui.draw ui box(fun paint(x,y,w,h)->Pxui.Ui.Paint.image paint ~x ~y ~w ~h image));
       assert(Pxui.Ui.scene ui<>[]));
     assert(Result.get_ok(Rays.Image.Private.pixels image)=oracle);
-    let prepared=ok(Rays_editor.Drawing.prepare evaluated.plan(List.assoc "picture" evaluated.results))in
+    let prepared=ok(Flow_native.Drawing.prepare evaluated.plan(List.assoc "picture" evaluated.results))in
     let commands=ref None in
-    List.iter(fun domains->Rays.Parallel.run ~domains(fun()->
-      let scene=ok(Rays_editor.Drawing.render_prepared ~image:(Editor.Private.image owner)
-        prepared ~live:(Frame_input.at_time 0.) ~size:(32,32))in
+    List.iter(fun domains->Parallel.run ~domains(fun()->
+      let scene=ok(Flow_native.Drawing.render_prepared ~image:(Editor.Private.image owner)
+        prepared ~live:(Input.at_time 0.) ~size:(32,32))in
       let actual=Rays.Scene.Private.commands scene in
       assert(Array.exists(function Scene_command.Render_ir.Image _->true|_->false)actual);
       (match !commands with None->commands:=Some actual|Some expected->assert(actual=expected));
@@ -215,7 +214,7 @@ let ()=
   Fun.protect ~finally:(fun()->Editor.close owner)(fun()->
     let evaluated=ok(E.static doc.checked)in
     assert(match Editor.Private.image owner(List.assoc "img" evaluated.results)with
-      |Error d->d.Flow.Diagnostic.code="E_IMAGE"|Ok _->false);
+      |Error d->d.Diagnostic.code="E_IMAGE"|Ok _->false);
     assert(Editor.Private.image_stats owner=(0,0)));
   print_endline "images: two-pixel CPU noise, six drawing modes, one load/upload, exact ownership and missing-file diagnostic passed"
 
@@ -225,10 +224,10 @@ let ()=
   let graph=List.hd lowered.graphs in
   let lane=Flow_sop.Value_lane.create()in
   assert(match Flow_sop.Value_lane.resolve lane ~time:0. graph.network with
-    |Error d->d.Flow.Diagnostic.code="E_IMAGE"|Ok _->false);
+    |Error d->d.Diagnostic.code="E_IMAGE"|Ok _->false);
   let payload=Result.get_ok(Sop.Image.create ~width:1 ~height:1 ~rgba:[|0.2;0.3;0.4;1.|])in
   let calls=ref 0 in
-  Flow_sop.Lower.with_images(fun ?context plan ~state:_ ~live:_ _->
+  Flow_sop.Lower.with_images(fun ?gpu:_ ?context plan ~state:_ ~live:_ _->
     assert(plan==lowered.plan);
     let context=Option.get context in
     assert(context.network==graph.network && context.compiled==lowered.compiled);
@@ -245,9 +244,9 @@ let ()=
   print_endline "images: resources snapshot before worker submission, exact one/eight-domain payload identity passed"
 
 let ()=
-  let texture=Rays.Scene3.textured(Rays.Texture.init ~width:2 ~height:2(fun ~x:_ ~y:_->Rays.Color.white))in
-  let scene=Rays.Scene3.create ~samples:4 ~ambient:Rays.Color.red
-    [Rays.Scene3.translate (Rays.Vec3.create 2. 3. 4.)
+  let texture=Rays.Scene3.textured(Rays.Texture.init ~width:2 ~height:2(fun ~x:_ ~y:_->Rays_math.Color.white))in
+  let scene=Rays.Scene3.create ~samples:4 ~ambient:Rays_math.Color.red
+    [Rays.Scene3.translate (Rays_math.Vec3.create 2. 3. 4.)
       [Rays.Scene3.with_blend Add [Rays.Scene3.with_depth(Rays.Scene3.depth_state ~write:false())
         [Rays.Scene3.plane ~cull:Cull_front ~width:2. ~height:3.()]]]]in
   let textured=Rays.Scene3.Private.with_texture texture scene in
@@ -255,7 +254,7 @@ let ()=
     assert(textured.Rays.Scene3.Private.texture=Some texture);
     assert({textured with texture=None}=original))
     (Rays.Scene3.Private.drawings scene)(Rays.Scene3.Private.drawings textured);
-  assert(Rays.Scene3.Private.samples textured=4 && Rays.Scene3.Private.ambient textured=Rays.Color.red);
+  assert(Rays.Scene3.Private.samples textured=4 && Rays.Scene3.Private.ambient textured=Rays_math.Color.red);
   print_endline "Scene image textures preserve affine, cull, blend, depth and scene settings"
 
 let () =
@@ -272,7 +271,7 @@ let () =
     Fun.protect ~finally:(fun () -> Editor.close owner) (fun () ->
       let evaluated = ok (E.static document.checked) in
       let pixels time = Editor.Private.with_images ~plan:evaluated.plan
-        ~live:(Frame_input.at_time time) owner (fun ~image ~texture:_ ->
+        ~live:(Input.at_time time) owner (fun ~image ~texture:_ ->
           Rays.Image.Private.pixels (ok (image (List.assoc "image" evaluated.results))) |> Result.get_ok) in
       assert (pixels 0. <> pixels 10.));
     let created, destroyed = Editor.Private.image_stats owner in
@@ -297,10 +296,10 @@ let ()=
     let value(n:E.node)=E.Deferred(Flow.Ty.image,n.id)in
     let exact node=Editor.Private.image_payload owner(value node)in
     let retained=ok(exact(List.hd nodes))in
-    List.iter(fun node->ignore(ok(exact node)))(List.filteri(fun i _->i>0 && i<63)nodes);
+    List.iter(fun node->ignore(ok(exact node)))(List.drop 1 (List.take 63 nodes));
     assert(Editor.Private.image_stats owner=(0,0));
     let render=Array.find_opt(fun(n:E.node)->n.kind="image/render")plan.nodes |> Option.get in
-    let refused()=assert(match exact render with Error d->d.Flow.Diagnostic.code="E_IMAGE"|Ok _->false)in
+    let refused()=assert(match exact render with Error d->d.Diagnostic.code="E_IMAGE"|Ok _->false)in
     refused();
     ignore(ok(exact(List.nth nodes 63)));
     refused();

@@ -4,20 +4,20 @@ module E = Flow.Eval
 module L = Flow_sop.Lower
 module Edit = Sop.Edit_graph
 module Session = Sop.Session
-let flow_ok = function Ok x -> x | Error d -> failwith (Flow.Diagnostic.to_string d)
+let flow_ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let factories = Sop_catalog.Editor.factories
 let catalog = Flow_sop.Catalog.of_factories ~version:1 factories |> flow_ok
 let source ?(columns = 33) ?(amp = "0.8") body = Printf.sprintf
   "(workspace kernel (graph g :context sop (let* [g (sop/grid :counts \"Point counts\" :connectivity \"Points\" :columns %d :rows 2) amp %s freq 0.16 result %s] result)))"
   columns amp body
 let noise_body = "(sop/with_attr g :P (exact (map (fn [p n] (+ p (* n (* amp (noise3 (* p freq)))))) (sop/attr g :P) (sop/attr g :N))))"
-let lower ?previous text =
+let lower ?previous ?gpu text =
   let forms = Flow.Syntax.parse text |> flow_ok in
   let compiled_ids = Option.map (fun (l : L.t) -> l.compiled_ids) previous
   and sites = Option.map (fun (l : L.t) -> l.sites) previous in
-  match L.workspace ~factories ?compiled_ids ?sites forms with
+  match L.workspace ~factories ?gpu ?compiled_ids ?sites forms with
   | Ok lowered -> lowered
-  | Error d -> failwith (text ^ "\n" ^ Flow.Diagnostic.to_string d)
+  | Error d -> failwith (text ^ "\n" ^ Diagnostic.to_string d)
 let compiled (l : L.t) =
   let graph = List.hd l.graphs in
   Edit.compile_node graph.network.geometry ~node_id:(Option.get graph.root) |> get_string_ok
@@ -25,7 +25,7 @@ let context ~domains time = Sop.Context.create ~domains ~time ~grain:257 () |> g
 let session () = Session.create ~max_entries:32 ~max_payload_bytes:(64 * 1024 * 1024) |> get_string_ok
 let cook session ~domains ~time node = Session.cook session ~context:(context ~domains time) node
 let geometry = function Ok (output : Session.output) -> (Result.get_ok (Sop.Payload.geometry output.payload))
-  | Error d -> failwith (Sop.Diagnostic.error_to_string d)
+  | Error d -> failwith (Diagnostic.error_to_string d)
 let reference (l : L.t) node =
   let n = Array.find_opt (fun (n : E.node) -> n.kind = "sop/with_attr") l.plan.nodes |> Option.get in
   let values = List.assoc "values" n.args in
@@ -33,9 +33,8 @@ let reference (l : L.t) node =
     id :: List.filter ((<>) id) (Flow_sop.Attribute_kernel.sources values) | _ -> assert false in
   Flow_sop.Attribute_kernel.node ~reference:true ~source:"reference"
     ~name:"P" ~values ~sources (Sop.Node.inputs node)
-let stages program = Array.fold_left (fun count (node : Flow_ir.node) -> match node.kind with
-  | Kernel {body = Packed_map p; _} -> max count (Flow_ir.Packed.stage_count p)
-  | _ -> count) 0 (Flow_ir.Executor.graph program).nodes
+let stages program = Option.fold ~none:0 ~some:Flow_ir.Packed.stage_count
+  (Flow_ir.Executor.packed_root program)
 
 let () =
   let pack width planes=match width with
@@ -69,7 +68,7 @@ let () =
           let expected=Array.init width(fun c->Array.init count(fun i->
             if mask.(i)=1 then replacements.(i*width+c) else if mode="matching" then old.(c).(i) else defaults.(c))) in
           let expected=Geometry.with_attribute(Attribute.create_owned ~owner ~name:"selected"(pack width expected)|>get_string_ok)original|>get_string_ok in
-          List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+          List.iter(fun domains->Parallel.run ~domains(fun()->
             let output=Flow_sop.Attribute_kernel.write_selected ~grain:97 ~owner ~kind "selected"
               ~values ~selection:(E.Int_array mask) ~default original|>flow_ok in
             assert(geometry_bytes output=geometry_bytes expected);
@@ -136,7 +135,7 @@ let () =
   let forms=Flow.Syntax.parse{|(workspace selected_projection (graph g :context sop
     (let* [geo (sop/line) mask (array/int 2 1)
       result (sop/with_attr :selection mask :default -0.0 geo :weight (array/float 2 1.0) :type float)] result)))|}|>flow_ok in
-  let workspace=match checker catalog forms with Some w,[]->w|_,ds->failwith(String.concat "; "(List.map Flow.Diagnostic.to_string ds)) in
+  let workspace=match checker catalog forms with Some w,[]->w|_,ds->failwith(String.concat "; "(List.map Diagnostic.to_string ds)) in
   let card workspace=Flow_graph.Projection.find(Flow_graph.Projection.of_graph catalog workspace "g")["g";"result"]|>Option.get in
   assert((card workspace).ty=Flow.Ty.geometry);
   List.iter(fun(key,value)->ignore(Flow_graph.Flow_edit.apply_checked ~checker catalog forms
@@ -145,7 +144,7 @@ let () =
   List.iter(fun suffix->
     let source="(workspace bad_selection (graph g :context sop (sop/with_attr (sop/line) :weight (array/float 2 1.0) :type float "^suffix^")))" in
     let _,ds=checker catalog(Flow.Syntax.parse source|>flow_ok) in
-    assert(List.exists(fun(d:Flow.Diagnostic.t)->d.code="E_ATTR_SELECTION" || d.code="E_ATTR_TYPE")ds))
+    assert(List.exists(fun(d:Diagnostic.t)->d.code="E_ATTR_SELECTION" || d.code="E_ATTR_TYPE")ds))
     [":selection (array/int 2 1)";":default 1.0";":selection (array/int 2 1) :default \"wrong\""];
   print_endline "Selected writer: captured geometry masks, changing live defaults/selection and paired typed graph gestures pass"
 
@@ -201,7 +200,7 @@ let () =
     let forms=Flow.Syntax.parse ("(workspace checked_attribute (graph g :context sop [(geo : geometry nil)] "^
       "(let* [tested "^body^"] geo)))") |>flow_ok in
     let checked=match Flow.Workspace.check ~ops:Flow_sop.Operators.all Flow.Check.{version=1;kinds=[]} forms with
-      |Some checked,[]->checked|_,ds->failwith(String.concat "; "(List.map Flow.Diagnostic.to_string ds)) in
+      |Some checked,[]->checked|_,ds->failwith(String.concat "; "(List.map Diagnostic.to_string ds)) in
     E.static ~record:true ~inputs:["g",["geo",E.Deferred(Flow.Ty.geometry,7)]]checked |>flow_ok
       |>fun evaluation->List.assoc["g";"tested"]evaluation.records |>List.hd |>snd in
   let bits value=Marshal.to_string value [Marshal.No_sharing] in
@@ -238,8 +237,8 @@ let () =
       let values=match width with 1->E.Float_array values|2->Vec2_array values|3->Vec3_array values|_->Vec4_array values in
       let expected=E.Record["values",values;"valid",E.Int_array(Array.init count(fun i->i mod 2))] in
       let program=Flow_ir.Executor.compile ~strict:true value |>flow_ok in
-      let live=Frame_input.at_time 0. in
-      List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+      let live=Input.at_time 0. in
+      List.iter(fun domains->Parallel.run ~domains(fun()->
         let force reference=if reference then E.Private.force_reference ~resolve value ~live
           else Flow_ir.Executor.force ~strict:true ~resolve program ~live in
         List.iter(fun reference->
@@ -256,7 +255,7 @@ let () =
       if count>0 then begin
         let ordinary=evaluate(Printf.sprintf "(sop/attr geo :checked :owner %s :type %s)" owner_name kind) in
         let ordinary_program=Flow_ir.Executor.compile ~strict:true ordinary |>flow_ok in
-        List.iter(function Error d->assert(d.Flow.Diagnostic.code="E_NONFINITE")|Ok _->assert false)
+        List.iter(function Error d->assert(d.Diagnostic.code="E_NONFINITE")|Ok _->assert false)
           [E.Private.force_reference ~resolve ordinary ~live;
            Flow_ir.Executor.force ~strict:true ~resolve ordinary_program ~live]
       end;
@@ -284,15 +283,15 @@ let () =
       [Int64.float_of_bits 0x7ff8000000001234L;infinity;neg_infinity])
       ["float",1;"vec2",2;"vec3",3;"vec4",4])owners)fixtures;
   let resolve=Flow_sop.Attribute_kernel.resolve ~geometry:(fun id->if id=7 then Some small else None) in
-  let live=Frame_input.at_time 0. in
+  let live=Input.at_time 0. in
   let missing=evaluate "(sop/attr_checked geo :missing)" in
-  List.iter(function Error d->assert(d.Flow.Diagnostic.code="E_ATTR_TYPE")|Ok _->assert false)
+  List.iter(function Error d->assert(d.Diagnostic.code="E_ATTR_TYPE")|Ok _->assert false)
     [E.Private.force_reference ~resolve missing ~live;
      Flow_ir.Executor.force ~strict:true ~resolve(Flow_ir.Executor.compile ~strict:true missing |>flow_ok) ~live];
   let lazy_query=evaluate "(if (> t 0) (sop/attr_checked geo :missing) (sop/attr_checked geo :P))" in
   let program=Flow_ir.Executor.compile ~strict:true lazy_query |>flow_ok in
   List.iter(fun reference->
-    let force time=let live=Frame_input.at_time time in
+    let force time=let live=Input.at_time time in
       if reference then E.Private.force_reference ~resolve lazy_query ~live
       else Flow_ir.Executor.force ~strict:true ~resolve program ~live in
     ignore(force (-1.) |>flow_ok);
@@ -303,7 +302,7 @@ let () =
   List.iter(fun kind->
     let source="(workspace bad_checked (graph g :context sop (let* [geo (sop/line) data (sop/attr_checked geo :P :type "^kind^")] geo)))" in
     let _,ds=Flow.Workspace.check ~ops:Flow_sop.Operators.all Flow.Check.{version=1;kinds=[]}(Flow.Syntax.parse source |>flow_ok) in
-    assert(List.exists(fun(d:Flow.Diagnostic.t)->d.code="E_ATTR_TYPE")ds))
+    assert(List.exists(fun(d:Diagnostic.t)->d.code="E_ATTR_TYPE")ds))
     ["int";"text";"float_array";"int_array";"(if true \"float\" \"vec3\")"];
   print_endline "Checked attributes: numeric/all-owner finite classification, raw bytes, strict/reference/domain copies and ordinary nonfinite guards pass"
 
@@ -406,7 +405,7 @@ let () =
       let forms=Flow.Syntax.parse(Printf.sprintf
         "(workspace fills (graph g :context sop [(geo : geometry nil)] (let* [data %s mask (array/int (sop/count geo :points) (int (/ 1 (- t 2))))] geo)))" body) |>flow_ok in
       let checked=match Flow.Workspace.check ~ops:Flow_sop.Operators.all Flow.Check.{version=1;kinds=[]}forms with
-        |Some checked,[]->checked|_,diagnostics->fail(String.concat "; "(List.map Flow.Diagnostic.to_string diagnostics)) in
+        |Some checked,[]->checked|_,diagnostics->fail(String.concat "; "(List.map Diagnostic.to_string diagnostics)) in
       let evaluation=E.static ~record:true ~inputs:["g",["geo",E.Deferred(Flow.Ty.geometry,7)]]checked |>flow_ok in
       let values=List.assoc["g";"data"]evaluation.records |>List.hd |>snd in
       let mask=List.assoc["g";"mask"]evaluation.records |>List.hd |>snd in
@@ -585,8 +584,8 @@ let () =
 let () =
   let checker=Flow_sop.Catalog.check_workspace ~ops:Flow_sop.Operators.all in
   let check forms=match checker catalog forms with
-    |Some workspace,diagnostics when not(List.exists(fun(d:Flow.Diagnostic.t)->d.severity=Flow.Diagnostic.Error)diagnostics)->workspace
-    |_,diagnostics->failwith(String.concat "\n"(List.map Flow.Diagnostic.to_string diagnostics)) in
+    |Some workspace,diagnostics when not(List.exists(fun(d:Diagnostic.t)->d.severity=Diagnostic.Error_severity)diagnostics)->workspace
+    |_,diagnostics->failwith(String.concat "\n"(List.map Diagnostic.to_string diagnostics)) in
   let forms=Flow.Syntax.parse {|(workspace typed_projection (graph g :context sop
     (let* [geo (sop/line) typed (sop/attr :owner point geo :P :type vec3)] geo)))|}|>flow_ok in
   let card workspace=Flow_graph.Projection.find (Flow_graph.Projection.of_graph catalog workspace "g") ["g";"typed"]|>Option.get in
@@ -608,7 +607,7 @@ let () =
   let forms=Flow.Syntax.parse {|(workspace dynamic_type (graph g :context sop
     (let* [geo (sop/line) typed (sop/attr geo :P :type (if true "vec3" "float"))] geo)))|}|>flow_ok in
   let _,diagnostics=Flow_sop.Catalog.check_workspace ~ops:Flow_sop.Operators.all catalog forms in
-  assert(List.exists(fun(d:Flow.Diagnostic.t)->d.code="E_ATTR_TYPE")diagnostics);
+  assert(List.exists(fun(d:Diagnostic.t)->d.code="E_ATTR_TYPE")diagnostics);
   print_endline "Attribute/range type edits recheck graph projection; computed storage selectors are refused"
 
 let () =
@@ -746,7 +745,7 @@ let () =
     let input = Sop.Node.Private.make_geometry ~operation:"test.xyz_write" ~version:1
       ~parameters:"" ~cook_mode:Sop.Node.Generator
       ~dependencies:Sop.Context.Dependencies.static ~inputs:[||]
-      (fun ~node_id:_ _ _ -> Ok Sop.Node.Private.{geometry=original;diagnostics=[];instances=None}) in
+      (fun ~node_id:_ _ _ -> Ok Sop.Node.Private.{geometry=original;instances=None}) in
     let values = Array.init (count * 3) (fun j ->
       if j mod 17 = 0 then -0. else match j mod 3 with
       | 0 -> float_of_int (j / 3) +. 0.125
@@ -793,7 +792,7 @@ let () =
     let before=geometry_bytes original in
     let input=Sop.Node.Private.make_geometry ~operation:"test.borrowed_planes" ~version:1
       ~parameters:"" ~cook_mode:Sop.Node.Generator ~dependencies:Sop.Context.Dependencies.static ~inputs:[||]
-      (fun ~node_id:_ _ _ -> Ok Sop.Node.Private.{geometry=original;diagnostics=[];instances=None}) in
+      (fun ~node_id:_ _ _ -> Ok Sop.Node.Private.{geometry=original;instances=None}) in
     let make name body=
       let lowered=lower (source (Printf.sprintf "(sop/with_attr g :%s (exact %s))" name body)) in
       let call=Array.find_opt (fun (n:E.node)->n.kind="sop/with_attr") lowered.plan.nodes |> Option.get in
@@ -851,7 +850,7 @@ let () =
   List.iter(fun id->match L.source_context lowered ~node:id with
     |Error d->assert(d.code="E_DATA_SOURCE")|Ok _->assert false)[-1;Array.length lowered.plan.nodes;producer.id];
   let resolve time=
-    let live=Frame_input.at_time time in
+    let live=Input.at_time time in
     let lane=Flow_sop.Value_lane.create()in
     (* A whole-network resolution would call the deliberately absent image provider. *)
     let resolved=Flow_sop.Value_lane.resolve lane ~live ~time network |> flow_ok in
@@ -889,7 +888,7 @@ let () =
     let packed=Sop.Node.Private.make_geometry ~operation:"test.capture.instances" ~version:1
       ~parameters:"" ~cook_mode:Sop.Node.Generator
       ~dependencies:Sop.Context.Dependencies.static ~inputs:[||]
-      (fun ~node_id:_ _ _->Ok Sop.Node.Private.{geometry=original;diagnostics=[];instances=Some transforms})in
+      (fun ~node_id:_ _ _->Ok Sop.Node.Private.{geometry=original;instances=Some transforms})in
     let consumer=Flow_sop.Attribute_kernel.materialized_source packed in
     List.iter(fun domains->
       let output=cook session ~domains ~time:0. consumer |> Result.get_ok in
@@ -924,14 +923,12 @@ let () =
   let values = E.Private.map_function ~signature:Flow.Ty.{params = [Vec3]; result = Float}
       fn [E.Vec3_array positions] |> flow_ok in
   let program = Flow_sop.Attribute_kernel.prepare ~sources:[] [] values |> flow_ok in
-  let ir = Flow_ir.Executor.graph program in
-  let packed = match ir.nodes.(ir.roots.(0)).kind with
-    | Flow_ir.Kernel {body = Packed_map packed; _} -> packed | _ -> assert false in
+  let packed = Option.get (Flow_ir.Executor.packed_region program) in
   assert (Flow_ir.Packed.static_count packed = Some (25 * 25 * 25));
   (* Separately rounded squares, as the Lisp primitives: arm64 ocamlopt would otherwise fuse a +. b *. c. *)
   let sq v = Sys.opaque_identity (v *. v) in
   List.iter (fun time ->
-    let live = Frame_input.at_time time in
+    let live = Input.at_time time in
     let expected = Array.init (25 * 25 * 25) (fun i ->
       let x = positions.(3*i) and y = positions.(3*i+1) and z = positions.(3*i+2) in
       sqrt ((sq x +. sq y) +. sq z) -. (1. +. time)) in
@@ -943,7 +940,7 @@ let () =
           sqrt ((sq p.(0) +. sq p.(1)) +. sq p.(2)) -. (1. +. time))) ()
       |> get_ok |> geometry_bytes in
     List.iter (fun domains ->
-      let actual = Rays_math.Parallel.run ~domains (fun () ->
+      let actual = Parallel.run ~domains (fun () ->
         Flow_ir.Packed.force packed ~live |> flow_ok) in
       assert (actual = reference);
       let cook_session = session () in
@@ -965,12 +962,12 @@ let () =
     Option.fold ~none:false ~some:(fun (z : Flow_graph.Projection.zone) -> z.kind = Fn) n.zone) pane.nodes in
   assert (List.exists (fun (r : Flow_graph.Projection.rail_row) -> r.name = "p" && r.ty = Some Flow.Ty.Vec3)
     (Option.get zone.zone).rail);
-  let calls = L.field_calls ~live:(Frame_input.at_time 0.25)
+  let calls = L.field_calls ~live:(Input.at_time 0.25)
       ~resolve:(fun v -> Ok v) lowered in
   let forced_calls = ref 0 in
   let bulk_calls path outer = List.map (fun (offset, count, at) ->
     offset, count, (fun k -> incr forced_calls; at k)) (calls path outer) in
-  let probe = Flow_graph.Probe.make ~live:(Frame_input.at_time 0.25) ~bulk_calls lowered.evaluated in
+  let probe = Flow_graph.Probe.make ~live:(Input.at_time 0.25) ~bulk_calls lowered.evaluated in
   let counts = Flow_graph.Probe.counts probe pane ~probe:(fun _ -> 0) in
   let count = match List.assoc_opt zone.path counts with
     | Some count -> count
@@ -1027,10 +1024,10 @@ let () =
               i value expected.(i))) actual
     | _ -> assert false in
   List.iter (fun time ->
-    let live = Frame_input.at_time time in
+    let live = Input.at_time time in
     let expected = Flow_ir.Executor.force ~reference:true primitives ~live |> flow_ok in
     same_bits (Flow_ir.Executor.force ~reference:true derived ~live |> flow_ok) expected;
-    List.iter (fun domains -> Rays_math.Parallel.run ~domains (fun () ->
+    List.iter (fun domains -> Parallel.run ~domains (fun () ->
       List.iter (fun program ->
         same_bits (Flow_ir.Executor.force program ~live |> flow_ok) expected)
         [derived; primitives])) [1;8]) [0.;0.25];
@@ -1048,7 +1045,7 @@ let () =
   let workspace, ds = Flow.Workspace.check ~ops:Flow_sop.Operators.all catalog forms in
   assert (ds = []);
   let pane = Flow_graph.Projection.of_graph catalog (Option.get workspace) "g" in
-  let calls = L.field_calls ~live:(Frame_input.at_time 0.) ~resolve:(fun v -> Ok v) lowered in
+  let calls = L.field_calls ~live:(Input.at_time 0.) ~resolve:(fun v -> Ok v) lowered in
   let selectors = calls ["g";"field"] [] in
   assert (List.map (fun (offset,count,_) -> offset,count) selectors = [0,8; 8,12]);
   let probe = Flow_graph.Probe.make ~bulk_calls:calls lowered.evaluated in
@@ -1065,8 +1062,8 @@ let () =
       (sop/iso_surface :field field :resolution [1 1 1]))))" in
   let state = E.create_state () in
   let before = E.state_stamp state in
-  let calls = L.field_calls ~state ~live:(Frame_input.at_time 1.) ~resolve:(fun v -> Ok v) lowered in
-  let probe = Flow_graph.Probe.make ~state ~live:(Frame_input.at_time 1.) ~bulk_calls:calls lowered.evaluated in
+  let calls = L.field_calls ~state ~live:(Input.at_time 1.) ~resolve:(fun v -> Ok v) lowered in
+  let probe = Flow_graph.Probe.make ~state ~live:(Input.at_time 1.) ~bulk_calls:calls lowered.evaluated in
   assert (Flow_graph.Probe.at probe ["g";"field";"@result"] ~probes:[0] = Some (Value (E.Float (-1.))));
   assert (E.state_stamp state = before)
 
@@ -1074,20 +1071,20 @@ let () =
   (* Real Lisp lowering, not a hand-built Readback IR: GPU callbacks run before
      worker cooking, and workers receive only an owned exact CPU snapshot. *)
   let count=2048 and calls=ref 0 and reads=ref 0 and time=ref 0. in
-  let backend:Flow_ir.Gpu.backend={cost=(fun _ ~count:_->Some 0.);
-    prepare=(fun _->assert(Domain.is_main_domain());Ok {
+  let backend:Flow_ir.Gpu.backend={cost=(fun ~fast:_ _ ~count:_->Some 0.);
+    prepare=(fun ~fast:_ _->assert(Domain.is_main_domain());Ok {
       run=(fun inputs->assert(Domain.is_main_domain());assert(inputs.count=count);
-        incr calls;Ok {identity=1;count;width=3;stamp=Int64.of_int !calls;gpu_seconds=None});
+        incr calls;Ok {identity=1;count;width=3;output=0;stamp=Int64.of_int !calls;gpu_seconds=None});
       readback=(fun _->assert(Domain.is_main_domain());incr reads;
         Ok(E.Vec3_array(Array.init(count*3)(fun j->if j mod 3=0 then float(j/3)+. !time else 0.))))})} in
   let body wrap="(sop/with_attr g :P ("^wrap^
     "(map (fn [i] [(+ i t) 0 0]) (array/range 2048))))" in
-  let exact=lower(source ~columns:1024 (body "exact ")) in
+  let gpu={Flow_ir.Gpu.default with backend=Some backend} in
+  let exact=lower ~gpu (source ~columns:1024 (body "exact ")) in
   let network=(List.hd exact.graphs).network in
   let lane=Flow_sop.Value_lane.create() in
   List.iter(fun t->time:=t;
-    let resolved=Flow_ir.Gpu.with_backend backend(fun()->
-      Flow_sop.Value_lane.resolve lane ~time:t network |> flow_ok) in
+    let resolved=Flow_sop.Value_lane.resolve ~gpu lane ~time:t network |> flow_ok in
     let node=Edit.compile_node resolved.geometry ~node_id:(Option.get(List.hd exact.graphs).root)
       |>get_string_ok in
     List.iter(fun domains->let session=session()in
@@ -1095,29 +1092,36 @@ let () =
         let positions=cook session ~domains ~time:t node |> geometry |>Geometry.positions in
         for i=0 to count-1 do assert(Packed.Float3.get positions i=(float i+.t,0.,0.))done)) [1;8]) [0.;0.5];
   assert(!calls=2 && !reads=2);
-  let unmeasured={backend with cost=(fun _ ~count:_->None)}in
-  ignore(Flow_ir.Gpu.with_backend unmeasured(fun()->Flow_sop.Value_lane.resolve
-    (Flow_sop.Value_lane.create()) ~time:0.75 network)|>flow_ok);
+  let unmeasured={backend with cost=(fun ~fast:_ _ ~count:_->None)}in
+  let unmeasured_gpu={Flow_ir.Gpu.default with backend=Some unmeasured}in
+  let unmeasured_network=(List.hd(lower ~gpu:unmeasured_gpu
+    (source ~columns:1024(body "exact "))).graphs).network in
+  ignore(Flow_sop.Value_lane.resolve ~gpu:unmeasured_gpu
+    (Flow_sop.Value_lane.create()) ~time:0.75 unmeasured_network|>flow_ok);
   assert(!calls=2);
   time:=0.75;
-  ignore(Flow_ir.Gpu.with_backend ~policy:Flow_ir.Gpu.Qualification unmeasured(fun()->
-    Flow_sop.Value_lane.resolve (Flow_sop.Value_lane.create()) ~time:0.75 network)|>flow_ok);
+  let qualification_gpu={unmeasured_gpu with policy=Flow_ir.Gpu.Qualification}in
+  let qualification_network=(List.hd(lower ~gpu:qualification_gpu
+    (source ~columns:1024(body "exact "))).graphs).network in
+  ignore(Flow_sop.Value_lane.resolve ~gpu:qualification_gpu
+    (Flow_sop.Value_lane.create()) ~time:0.75 qualification_network|>flow_ok);
   assert(!calls=3 && !reads=3);
   let baseline= !calls in
   let cpu=Flow_sop.Value_lane.create()in
-  ignore(Flow_sop.Value_lane.resolve cpu ~time:1. network |>flow_ok);
+  let cpu_network=(List.hd(lower(source ~columns:1024(body "exact "))).graphs).network in
+  ignore(Flow_sop.Value_lane.resolve cpu ~time:1. cpu_network |>flow_ok);
   let reference=L.workspace ~factories ~reference:true
     (Flow.Syntax.parse(source ~columns:1024(body "exact "))|>flow_ok)|>flow_ok in
-  ignore(Flow_ir.Gpu.with_backend backend(fun()->Flow_sop.Value_lane.resolve
-    (Flow_sop.Value_lane.create()) ~time:1. (List.hd reference.graphs).network)|>flow_ok);
+  ignore(Flow_sop.Value_lane.resolve ~gpu
+    (Flow_sop.Value_lane.create()) ~time:1. (List.hd reference.graphs).network|>flow_ok);
   assert(!calls=baseline);
   (* G.1: the SOP input sink is an implicit readback, so the bare map needs no (exact x). *)
-  let implicit=lower(source ~columns:1024
+  let implicit=lower ~gpu (source ~columns:1024
     "(sop/with_attr g :P (map (fn [i] [(+ i t) 0 0]) (array/range 2048)))")in
   let before= !calls in
   time:=1.;
-  let resolved=Flow_ir.Gpu.with_backend backend(fun()->
-    Flow_sop.Value_lane.resolve (Flow_sop.Value_lane.create()) ~time:1. (List.hd implicit.graphs).network |> flow_ok)in
+  let resolved=Flow_sop.Value_lane.resolve ~gpu
+    (Flow_sop.Value_lane.create()) ~time:1. (List.hd implicit.graphs).network |> flow_ok in
   assert(!calls=before+1 && !reads=before+1);
   let node=Edit.compile_node resolved.geometry ~node_id:(Option.get(List.hd implicit.graphs).root) |>get_string_ok in
   let session=session()in
@@ -1128,7 +1132,7 @@ let () =
   (match Flow.Workspace.check ~ops:Flow_sop.Operators.all catalog
       (Flow.Syntax.parse(source ~columns:1024
         "(sop/box :size (array/sum (map (fn [i] (+ i t)) (array/range 2048))))")|> flow_ok) with
-    |None, ds->assert(List.exists(fun(d:Flow.Diagnostic.t)->d.code="E_APPROX_SINK")ds)
+    |None, ds->assert(List.exists(fun(d:Diagnostic.t)->d.code="E_APPROX_SINK")ds)
     |_->assert false)
 let () =
   assert (Result.is_error (Flow_sop.Attribute_kernel.prepare ~sources:[0] [] E.No_geo));
@@ -1156,7 +1160,7 @@ let () =
                b (map (fn [p] (* p (+ t 1))) pb)
                tested (exact (map (fn [left right] (+ left right)) a b))] 0.0)))|} |>flow_ok in
     let checked=match Flow.Workspace.check catalog forms with
-      |Some checked,[]->checked|_,diagnostics->failwith(String.concat "; " (List.map Flow.Diagnostic.to_string diagnostics)) in
+      |Some checked,[]->checked|_,diagnostics->failwith(String.concat "; " (List.map Diagnostic.to_string diagnostics)) in
     let other=Option.value ~default:main (List.find_opt ((<>) main) sources) in
     let marker id=E.Source("sop/attr",Flow.Ty.Array Flow.Ty.Vec3,
       ["geometry",E.Deferred(Flow.Ty.geometry,id);"attribute",E.Text "P"]) in
@@ -1180,9 +1184,9 @@ let () =
       let resolve = Flow_sop.Attribute_kernel.resolve ~geometry:(fun id ->
         Option.bind (List.find_index ((=) id) sources) (fun index -> List.nth_opt source_geometries index)) in
       List.iter (fun time ->
-        let live = Frame_input.at_time time in
+        let live = Input.at_time time in
         let expected = E.Private.force_reference ~resolve values ~live |> flow_ok in
-        List.iter (fun domains -> Rays_math.Parallel.run ~domains (fun () ->
+        List.iter (fun domains -> Parallel.run ~domains (fun () ->
           let actual = Flow_ir.Executor.force ~resolve program ~live |> flow_ok in
           let modern = Flow_ir.Executor.force ~strict:true ~resolve modern_program ~live |> flow_ok in
           assert (Marshal.to_string modern [Marshal.No_sharing] = Marshal.to_string expected [Marshal.No_sharing]);
@@ -1196,14 +1200,14 @@ let () =
   let empty_input = Sop.Node.Private.make_geometry ~operation:"empty_fixture" ~version:1
     ~parameters:"" ~cook_mode:Sop.Node.Generator
     ~dependencies:Sop.Context.Dependencies.static ~inputs:[||]
-    (fun ~node_id:_ _ _ -> Ok Sop.Node.Private.{geometry=empty; diagnostics=[]; instances=None}) in
+    (fun ~node_id:_ _ _ -> Ok Sop.Node.Private.{geometry=empty; instances=None}) in
   let empty_write = Flow_sop.Attribute_kernel.node ~source:"empty"
     ~name:"P" ~values:(E.Struct ("sop/attr", Flow.Ty.Array Flow.Ty.Vec3,
       ["geometry", E.Deferred (Flow.Ty.geometry,0); "attribute", E.Text "P"]))
     ~sources:[0] [empty_input] in
   let output = Sop.Node.Private.cook empty_write (context ~domains:8 0.) [|Sop.Payload.Geometry empty|] in
   (match output with Ok output -> assert (geometry_bytes (Result.get_ok (Sop.Payload.geometry output.payload)) = geometry_bytes empty)
-    | Error d -> failwith (Sop.Diagnostic.error_to_string d));
+    | Error d -> failwith (Diagnostic.error_to_string d));
   let cancel = Cancel.create () in
   Cancel.cancel cancel;
   let cancelled = Sop.Context.create ~cancel ~domains:1 () |> get_string_ok in
@@ -1221,7 +1225,7 @@ let () =
           let amplitude = if amp = "0.8" then 0.8 else 0.8 +. time *. 0.1 in
           let native = Deform.noise_displace ~mode:Deform.Normal_3d ~seed:0
             ~amplitude ~frequency:0.16 base |> get_ok in
-          List.iter (fun domains -> Rays_math.Parallel.run ~domains (fun () ->
+          List.iter (fun domains -> Parallel.run ~domains (fun () ->
             let output = cook session ~domains ~time node |> geometry in
             assert (List.exists (fun (report : Flow_ir.execution) -> report.tier = Cpu_kernel)
               (Flow_ir.Profile.executions l.profile));
@@ -1240,9 +1244,7 @@ let () =
   let named_body = "(let* [f (fn [p n] (+ p (* n (* amp (noise3 (* p freq))))))] (sop/with_attr g :P (exact (map f (sop/attr g :P) (sop/attr g :N)))))" in
   let named = lower (source ~columns:1025 named_body) in
   let call = Array.find_opt (fun (n : E.node) -> n.kind = "sop/with_attr") named.plan.nodes |> Option.get in
-  let program = Flow_ir.Executor.compile (List.assoc "values" call.args) |> flow_ok in
-  assert (Array.exists (fun (node : Flow_ir.node) -> node.tier = Cpu_kernel && node.rate = Static)
-    (Flow_ir.Executor.graph program).nodes);
+  assert (not (Flow.Eval.frame_dependent (List.assoc "values" call.args)));
   let session = session () in
   Fun.protect ~finally:(fun () -> Session.close session) (fun () ->
     let node = compiled named in
@@ -1271,7 +1273,7 @@ let () =
     let graph = List.hd l.graphs and lane = Flow_sop.Value_lane.create () in
     List.iter (fun frame ->
       let time = float frame *. 0.125 in
-      let live = { (Frame_input.at_time time) with frame } in
+      let live = { (Input.at_time time) with frame } in
       let resolved = Flow_sop.Value_lane.resolve ~live lane ~time graph.network |> flow_ok in
       let node = Edit.compile_node resolved.geometry ~node_id:(Option.get graph.root) |> get_string_ok in
       let context = Sop.Context.create ~input:live ~time ~frame:(Int64.of_int frame)
@@ -1315,8 +1317,8 @@ let () =
       Flow_sop.Attribute_kernel.resolve ~geometry:(fun id -> if id = geometry_id then Some base else None) value in
     let checked = match Flow.Workspace.check ~ops:Flow_sop.Operators.all catalog
       (Flow.Syntax.parse (source ~columns:8193 ~amp:"(+ 0.8 (* t 0.1))" noise_body) |> flow_ok) with
-      | Some checked, ds when List.for_all (fun (d : Flow.Diagnostic.t) -> d.severity <> Error) ds -> checked
-      | _, ds -> failwith (String.concat "\n" (List.map Flow.Diagnostic.to_string ds)) in
+      | Some checked, ds when List.for_all (fun (d : Diagnostic.t) -> d.severity <> Diagnostic.Error_severity) ds -> checked
+      | _, ds -> failwith (String.concat "\n" (List.map Diagnostic.to_string ds)) in
     let pane = Flow_graph.Projection.of_graph catalog checked "g" in
     let probe = Flow_graph.Probe.make ~time:1.25 ~resolve large.evaluated in
     assert (List.assoc fn.path
@@ -1362,7 +1364,7 @@ let () =
          "points",E.Int_array[||];"vertices",E.Int_array[||];"primitives",E.Int_array[||]]
       else if List.mem_assoc "name" op.signature.kw then ("name",E.Text "selected")::args else args in
     op.check args;
-    let result = op.body ~live:(Frame_input.at_time 0.)
+    let result = op.body ~live:(Input.at_time 0.)
       ~node:(fun _ _ -> E.Deferred (Flow.Ty.geometry,1)) args in
     assert (Flow.Ty.fits (Flow.Value.ty_of result) (op.out (List.map (fun (_,v) -> Flow.Value.ty_of v) args))))
     (List.filter (fun (op : Flow.Op.t) -> op.ctx = Flow.Context.sop) Flow_sop.Operators.all);
@@ -1382,11 +1384,11 @@ let () =
          |Error d->assert(d.code="E_NONFINITE")|Ok _->assert false);
         assert(geometry_bytes original=before)
       end;
-      let dense=(Option.get(Flow.Op.find name Flow.Context.value)).body ~live:(Frame_input.at_time 0.)
+      let dense=(Option.get(Flow.Op.find name Flow.Context.value)).body ~live:(Input.at_time 0.)
         ~node:(fun _ _->assert false)["count",E.Int count;"value",fill] in
       let resolved=Flow_sop.Attribute_kernel.resolve ~geometry:(fun _->None)marker|>flow_ok in
-      assert(Flow.Value.key_of ~residual:E.Private.residual_id resolved=Flow.Value.key_of ~residual:E.Private.residual_id dense);
-      List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+      assert(Flow.Value.key_of ~residual:E.Residual.residual_id resolved=Flow.Value.key_of ~residual:E.Residual.residual_id dense);
+      List.iter(fun domains->Parallel.run ~domains(fun()->
         let actual=Flow_sop.Attribute_kernel.write_constant_source ~grain:97 ~owner:Attribute.Point ~kind
           "constant" marker original|>flow_ok|>Option.get in
         let expected=Flow_sop.Attribute_kernel.write ~grain:97 ~owner:Attribute.Point ~kind "constant" dense original|>flow_ok in
@@ -1453,7 +1455,7 @@ let ()=
         else if i mod 3=1 then Float.next_after 0. 1. else float c+.float i*.0.125)) in
       let values=planar_record data in
       let expected=planar_oracle ~owner ~kind "planes" data original in
-      List.iter(fun domains->List.iter(fun grain->Rays_math.Parallel.run ~domains(fun()->
+      List.iter(fun domains->List.iter(fun grain->Parallel.run ~domains(fun()->
         let output=Flow_sop.Attribute_kernel.write ~grain ~owner ~kind "planes" values original|>flow_ok in
         assert(geometry_bytes output=geometry_bytes expected && geometry_bytes original=before);
         let storage=Geometry.find_attribute ~owner "planes" output|>Option.get|>Attribute.Private.storage in
@@ -1504,7 +1506,7 @@ let ()=
     let args ty=["type",Flow.Ty.Text,Some(Param.Text_value kind);"values",ty,None] in
     List.iter(fun fields->assert(Flow.Op.result_type op(args(Flow.Ty.Record fields))=Flow.Ty.geometry))
       [List.map(fun name->name,Flow.Ty.Array Flow.Ty.Float)names;List.map(fun name->name,Flow.Ty.Any)names];
-    List.iter(fun ty->try ignore(Flow.Op.result_type op(args ty));assert false with Flow.Value.Fail(code,_,_)->assert(code="E_ATTR_TYPE"))
+    List.iter(fun ty->try ignore(Flow.Op.result_type op(args ty));assert false with Diagnostic.Error d -> assert(d.code="E_ATTR_TYPE"))
       [Flow.Ty.Record(List.map(fun name->name,Flow.Ty.Array Flow.Ty.Int)names);
        Flow.Ty.Record(("extra",Flow.Ty.Any)::List.map(fun name->name,Flow.Ty.Array Flow.Ty.Float)names)])
     ["vec2",["x";"y"];"vec3",["x";"y";"z"];"vec4",["x";"y";"z";"w"]];
@@ -1517,7 +1519,7 @@ let ()=
   let before=geometry_bytes original and cooks=ref 0 in
   let source=Sop.Node.Private.make_geometry ~operation:"test.planar_source" ~version:1 ~parameters:""
     ~cook_mode:Sop.Node.Generator ~dependencies:Sop.Context.Dependencies.static ~inputs:[||]
-    (fun ~node_id:_ _ _->incr cooks;Ok Sop.Node.Private.{geometry=original;diagnostics=[];instances=None}) in
+    (fun ~node_id:_ _ _->incr cooks;Ok Sop.Node.Private.{geometry=original;instances=None}) in
   let factory=Edit.factory ~key:"ext_planar" ~label:"Planar" ~category:["Test"] ~arity:0(fun _->source) in
   let source_text={|(workspace planar_sources
     (defnode sop/planar_sources [(geo : geometry)]
@@ -1577,7 +1579,7 @@ let ()=
   let forms=Flow.Syntax.parse {|(workspace planar_projection (graph g :context sop
     (let* [geo (sop/line) planes_values {:x (array/float 2) :y (array/float 2) :z (array/float 2)}
       result (sop/with_attr geo :planes planes_values)] result)))|}|>flow_ok in
-  let check forms=match checker catalog forms with Some w,[]->w|_,ds->failwith(String.concat "; "(List.map Flow.Diagnostic.to_string ds)) in
+  let check forms=match checker catalog forms with Some w,[]->w|_,ds->failwith(String.concat "; "(List.map Diagnostic.to_string ds)) in
   let checked=check forms in
   let pane=Flow_graph.Projection.of_graph catalog checked "g" in
   let card=Flow_graph.Projection.find pane["g";"result"]|>Option.get in
@@ -1603,7 +1605,7 @@ let ()=
   assert((Flow_graph.Projection.find(Flow_graph.Projection.of_graph catalog inserted "g")["g";"another"]|>Option.get).ty=Flow.Ty.geometry);
   List.iter(fun name->let op=List.find(fun(op:Flow.Op.t)->op.name=name)Flow_sop.Operators.all in
     List.iter(fun attribute->op.check["geometry",E.No_geo;"attribute",E.Text attribute]) ["\194\160";"\255"];
-    try op.check["geometry",E.No_geo;"attribute",E.Text" \t\r\n"];assert false with Flow.Value.Fail(code,_,_)->assert(code="E_ATTR_NAME"))
+    try op.check["geometry",E.No_geo;"attribute",E.Text" \t\r\n"];assert false with Diagnostic.Error d -> assert(d.code="E_ATTR_NAME"))
     ["sop/attr";"sop/attr_checked";"sop/has_attr";"sop/with_attr"];
   print_endline "Full planar attributes: typed projected Record/geometry cards, field/socket/link edits, exact-key atomic refusal and native byte-blank names"
 
@@ -1691,7 +1693,7 @@ let ()=
   List.iter(fun reference->let lowered=L.workspace ~reference ~factories:(factory::factories)(Flow.Syntax.parse text|>flow_ok)|>flow_ok in
     let graph=List.hd lowered.graphs and lane=Flow_sop.Value_lane.create()in
     let s=session()in Fun.protect ~finally:(fun()->Session.close s)(fun()->List.iter(fun frame->
-      let live={(Frame_input.at_time(float frame)) with frame;tick=frame}in
+      let live={(Input.at_time(float frame)) with frame;tick=frame}in
       let network=Flow_sop.Value_lane.resolve lane ~live ~time:(float frame)graph.network|>flow_ok in
       let node=Edit.compile_node network.geometry ~node_id:(Option.get graph.root)|>get_string_ok in
       let context=Sop.Context.create ~input:live ~frame:(Int64.of_int frame) ~time:(float frame) ~domains:4()|>get_string_ok in
@@ -1744,7 +1746,7 @@ let ()=
         (sop/with_attr geo :out planes_values :owner "%s" :type vec3) geo))))|}owner in
   let checked owner=match Flow_sop.Catalog.check_workspace ~ops:Flow_sop.Operators.all catalog
       (Flow.Syntax.parse(source owner)|>flow_ok)with
-    |Some checked,[]->checked|_,ds->failwith(String.concat "; "(List.map Flow.Diagnostic.to_string ds))in
+    |Some checked,[]->checked|_,ds->failwith(String.concat "; "(List.map Diagnostic.to_string ds))in
   (* Invalid type literals are correctly rejected by ordinary checking. This
      single typed Text replacement exercises the malformed internal host-call
      boundary without loosening that authored literal rule. *)
@@ -1797,7 +1799,7 @@ let () =
   let forms=Flow.Syntax.parse text |> flow_ok in
   match Flow.Workspace.check ~ops:Flow_sop.Operators.all catalog forms with
   | Some checked, ds ->
-      assert(List.for_all(fun(d:Flow.Diagnostic.t)->d.severity<>Flow.Diagnostic.Error)ds);
+      assert(List.for_all(fun(d:Diagnostic.t)->d.severity<>Diagnostic.Error_severity)ds);
       assert(List.exists(fun(path,candidate)->List.mem "node:sop/gen_shift" path
         &&(match candidate with Flow.Workspace.Candidate _->true|_->false))checked.packed);
       let lowered=lower text in
@@ -1806,4 +1808,4 @@ let () =
         let positions=cook session ~domains:4 ~time:0. (compiled lowered) |> geometry |>Geometry.positions in
         for i=0 to 2047 do assert(Packed.Float3.get positions i=(float i+.1.,0.,0.))done);
       print_endline "SOP input sink: a bare map needs no (exact x), including inside a defnode body; catalog parameters still refuse GPU values"
-  | None, ds -> failwith(String.concat "; "(List.map Flow.Diagnostic.to_string ds))
+  | None, ds -> failwith(String.concat "; "(List.map Diagnostic.to_string ds))

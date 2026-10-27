@@ -14,20 +14,20 @@ let new_panel ui =
     ignore (Pxui.Ui.button ui "Quit"))
 
 let width = 320 and scale = 2
-let background = Color.rgb 228 139 161
+let background = Rays_math.Color.rgb 228 139 161
 
 (* The second frame of a fresh UI with the pointer parked away from every widget, rendered
    [scale] pixels a point. *)
 let render ?(height = 300) build =
   let ui = Pxui.Ui.create () in
   let frame count : Frame.t = {
-    width; height; size = width, height; pixel_scale = float scale, float scale;
-    time = float count /. 60.; dt = 1. /. 60.; fps = 60.; count;
-    mouse = (-100., -100.); mouse_delta = (0., 0.); keys = []; mouse_buttons = [];
-    events = [Event.MouseMoved (-100., -100.)] } in
+    input = { (Input.at_time (float count /. 60.)) with dt = 1. /. 60.;
+      frame = count; tick = count; size = width, height; pointer = (-100., -100.);
+      events = [Input.Pointer_moved (-100., -100.)] };
+    pixel_scale = float scale, float scale; fps = 60.; mouse_delta = (0., 0.) } in
   for count = 0 to 1 do Pxui.Ui.frame ui (frame count) build done;
   let canvas = Canvas.create_exn ~width:(width * scale) ~height:(height * scale) in
-  Canvas.render ~density:scale canvas (Scene.clear background :: Pxui.Ui.scene ui);
+  Result.get_ok(Canvas.render ~density:scale canvas (Scene.clear background :: Pxui.Ui.scene ui));
   Pxui.Ui.destroy ui;
   canvas
 
@@ -40,14 +40,14 @@ let check name golden canvas =
    | None -> ());
   let actual = Result.get_ok (Canvas.to_image canvas) in
   let golden = Image.load_exn (Filename.concat "fixtures" golden) in
-  if Image.get_size golden <> Image.get_size actual then
+  if Image.Private.dimensions golden <> Image.Private.dimensions actual then
     failwith (Printf.sprintf "PXUI %s parity: golden is %dx%d, render is %dx%d" name
-      (fst (Image.get_size golden)) (snd (Image.get_size golden))
-      (fst (Image.get_size actual)) (snd (Image.get_size actual)))
+      (fst (Image.Private.dimensions golden)) (snd (Image.Private.dimensions golden))
+      (fst (Image.Private.dimensions actual)) (snd (Image.Private.dimensions actual)))
   else if Result.get_ok (Image.Private.pixels golden) <> Result.get_ok (Image.Private.pixels actual)
   then failwith (Printf.sprintf "PXUI %s drifted from its golden" name)
   else Printf.printf "PXUI %s parity: exact\n" name;
-  Canvas.destroy canvas
+  ignore(Canvas.destroy canvas)
 
 (* The floating widgets: a modal with a picker, and a context menu. *)
 let overlays ui =
@@ -99,11 +99,10 @@ let commands () =
       Fun.protect ~finally:(fun () -> Pxui.Ui.destroy ui) (fun () ->
         for count = 0 to 1 do
           Pxui.Ui.frame ui {
-            Frame.width; height; size = width, height;
-            pixel_scale = density, density; time = float count /. 60.;
-            dt = 1. /. 60.; fps = 60.; count; mouse = (-100., -100.);
-            mouse_delta = (0., 0.); keys = []; mouse_buttons = [];
-            events = [Event.MouseMoved (-100., -100.)] } build
+            Frame.input = { (Input.at_time (float count /. 60.)) with
+              frame = count; tick = count; size = width, height; dt = 1. /. 60.;
+              pointer = (-100., -100.); events = [Input.Pointer_moved (-100., -100.)] };
+            pixel_scale = density, density; fps = 60.; mouse_delta = (0., 0.) } build
         done;
         let staged = Result.get_ok (Scene.Private.stage_native ~width ~height (Pxui.Ui.scene ui)) in
         let packets = List.filter_map (function

@@ -10,16 +10,13 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#ifdef __APPLE__
-#include <pthread.h>
-#endif
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_metal.h>
 
 #include "generated_abi.h"
 #include "sdl3_dialog.h"
-#include "sdl3_cocoa.h"
+#include "sdl3_platform.h"
 #include "../native_layer_token/native_layer_token.h"
 
 static SDL_Window *window_of_value(value raw)
@@ -57,12 +54,7 @@ CAMLprim value caml_sdl3_clear_error(value unit)
 CAMLprim value caml_sdl3_is_main_thread(value unit)
 {
   (void)unit;
-#ifdef __APPLE__
-  /* SDL accepts every thread before initialization; headless resources must
-     still run on the platform main thread. */
-  if (!pthread_main_np()) return Val_false;
-#endif
-  return Val_bool(SDL_IsMainThread());
+  return Val_bool(rays_is_main_thread());
 }
 
 /* Sdl3.Init.subsystem: OCaml names a set by bits, here are SDL's flags. */
@@ -185,22 +177,10 @@ CAMLprim value caml_sdl3_window_id(value raw)
   CAMLreturn(caml_copy_int64(SDL_GetWindowID(window_of_value(raw))));
 }
 
-CAMLprim value caml_sdl3_window_display(value raw)
-{
-  CAMLparam1(raw);
-  CAMLreturn(caml_copy_int64(SDL_GetDisplayForWindow(window_of_value(raw))));
-}
-
 CAMLprim value caml_sdl3_window_pixel_density(value raw)
 {
   CAMLparam1(raw);
   CAMLreturn(caml_copy_double(SDL_GetWindowPixelDensity(window_of_value(raw))));
-}
-
-CAMLprim value caml_sdl3_window_display_scale(value raw)
-{
-  CAMLparam1(raw);
-  CAMLreturn(caml_copy_double(SDL_GetWindowDisplayScale(window_of_value(raw))));
 }
 
 CAMLprim value caml_sdl3_window_position(value raw)
@@ -234,22 +214,6 @@ CAMLprim value caml_sdl3_set_window_relative_mouse(value raw, value enabled)
 {
   return Val_bool(SDL_SetWindowRelativeMouseMode(
       window_of_value(raw), Bool_val(enabled)));
-}
-
-CAMLprim value caml_sdl3_display_refresh_rate(value raw_id)
-{
-  const SDL_DisplayMode *mode;
-  CAMLparam1(raw_id);
-  CAMLlocal2(rate, some);
-  mode = SDL_GetCurrentDisplayMode((SDL_DisplayID)Int64_val(raw_id));
-  if (mode == NULL || !isfinite(mode->refresh_rate) ||
-      mode->refresh_rate <= 0.0f) {
-    CAMLreturn(Val_none);
-  }
-  rate = caml_copy_double(mode->refresh_rate);
-  some = caml_alloc(1, 0);
-  Store_field(some, 0, rate);
-  CAMLreturn(some);
 }
 
 /* Sdl3.Cursor.shape, in declaration order. */
@@ -371,7 +335,7 @@ CAMLprim value caml_sdl3_destroy_metal_view(value raw_view)
 }
 
 CAMLprim value caml_sdl3_metal_layer_token(value raw_view,value owner,value generation)
-{ CAMLparam3(raw_view,owner,generation);void*layer=SDL_Metal_GetLayer((SDL_MetalView)(intnat)Nativeint_val(raw_view));CAMLreturn(rays_native_layer_token_create(layer,Int64_val(owner),Int64_val(generation))); }
+{ CAMLparam3(raw_view,owner,generation);void*layer=SDL_Metal_GetLayer((SDL_MetalView)(intnat)Nativeint_val(raw_view));CAMLreturn(rays_sdl_layer_token(layer,Int64_val(owner),Int64_val(generation))); }
 CAMLprim value caml_sdl3_invalidate_metal_layer_token(value token)
 { rays_native_layer_token_invalidate(token);return Val_unit; }
 
@@ -758,7 +722,7 @@ static bool translate_event(const SDL_Event *event, value *out)
   CAMLreturnT(bool, true);
 }
 
-/* A queued trackpad scroll (sdl3_cocoa.c) as Sdl3.Event.Scroll. */
+/* A queued platform trackpad scroll as Sdl3.Event.Scroll. */
 static bool take_scroll(value *out)
 {
   CAMLparam0();

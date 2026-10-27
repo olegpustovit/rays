@@ -1,5 +1,5 @@
 // node shape2.mjs FIXTURE.json SHAPE2_JS_PATH
-// Compares tools/web/runtime/shape2.js with the native Scene_command.Shape2 tessellations written by
+// Compares lib/web_export/runtime/shape2.js with the native Scene_command.Shape2 tessellations written by
 // tools/shape2_fixtures.exe: indices and colours exactly, vertices within 1e-12 (relative to 1).
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';

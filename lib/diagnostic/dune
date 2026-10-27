@@ -1,0 +1,10 @@
+(library
+ (name rays_diagnostic)
+ (public_name rays.diagnostic)
+ (wrapped false)
+ (modules diagnostic))
+
+(test
+ (name test_diagnostic)
+ (modules test_diagnostic)
+ (libraries rays_diagnostic))

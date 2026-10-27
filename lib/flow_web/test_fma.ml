@@ -1,15 +1,15 @@
 module E = Flow.Eval
 module I = Flow_ir
-let ok = function Ok x -> x | Error d -> failwith (Flow.Diagnostic.to_string d)
+let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let bits x = Printf.sprintf "%016Lx" (Int64.bits_of_float x)
-let number x = Printf.sprintf "%.17g" x
+let number x = Param.float_text x
 let array xs = "Float64Array.from([" ^ String.concat "," (Array.to_list (Array.map number xs)) ^ "])"
 let value ?inputs body =
   let source="(workspace w (graph g :context host [(data : (array vec3) (array/vec3 0))] "^body^"))" in
   let ws=match Flow.Workspace.check {Flow.Check.version=1;kinds=[]} (ok(Flow.Syntax.parse source)) with
-    |Some ws,[] -> ws |_,ds -> failwith(String.concat ";" (List.map Flow.Diagnostic.to_string ds)) in
+    |Some ws,[] -> ws |_,ds -> failwith(String.concat ";" (List.map Diagnostic.to_string ds)) in
   List.assoc "g" (ok(E.static ?inputs ws)).results
-let live = {(Frame_input.at_time 1.) with frame=3}
+let live = {(Input.at_time 1.) with frame=3}
 let () =
   let minsub=Int64.float_of_bits 1L in
   let a=1.0000000000000002 and b=0.9999999999999998 in
@@ -35,10 +35,10 @@ let () =
   let source=value ~inputs:["g",["data",E.Vec3_array data]]
     "(map (fn [(p : vec3)] (if (> t 0.) (fma p.x p.y p.z) 0.)) data)" in
   let residual=match source with E.Residual r->r|_->failwith"FMA not live" in
-  let packed=match I.Packed.compile_result residual (E.Private.residual_view residual).term with
-    |Ok p->p|Error ds->failwith(String.concat ";"(List.map Flow.Diagnostic.to_string ds)) in
+  let packed=match I.Packed.compile_result residual (E.Residual.residual_view residual).term with
+    |Ok p->p|Error ds->failwith(String.concat ";"(List.map Diagnostic.to_string ds)) in
   let compiled=ok(I.Executor.compile ~strict:true source) in
-  List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+  List.iter(fun domains->Parallel.run ~domains(fun()->
     List.iter(fun result->match result with E.Float_array result->
       assert(Array.length result=Array.length expected);
       Array.iteri(fun i x->if bits x<>bits expected.(i) then failwith(Printf.sprintf"FMA native %d %s <> %s" i(bits x)(bits expected.(i))))result
@@ -48,7 +48,7 @@ let () =
   assert(I.Packed.gpu_refusals packed<>[]);
   let scalar=Option.get(Flow.Op.find "fma" Flow.Context.value) in
   List.iter(fun args->try ignore(scalar.body ~live ~node:(fun _ _ -> assert false) (List.combine ["a";"b";"c"] args));failwith"Nonfinite FMA accepted"
-    with Flow.Value.Fail(code,_,_)->assert(code="E_NONFINITE"))
+    with Diagnostic.Error d -> assert(d.code="E_NONFINITE"))
     [[E.Float infinity;E.Float 0.;E.Float 1.];[E.Float 1.;E.Float nan;E.Float 0.];
      [E.Float 1.;E.Float 1.;E.Float neg_infinity];[E.Float Float.max_float;E.Float 2.;E.Float 0.]];
   (* The typed bank also carries Int frame/index and Int source values into FMA. *)
@@ -63,7 +63,7 @@ let () =
    |Error d->assert(d.code="E_NONFINITE") |Ok _->failwith"Overflow FMA accepted");
   let prepared=ok(I.Packed.Private.prepare_values packed ~live) in
   let js=Buffer.create 2000000 in
-  Printf.bprintf js "import {fma} from %S;\n" ("file://"^Filename.concat(Sys.getcwd())"../../tools/web/runtime/prims.js");
+  Printf.bprintf js "import {fma} from %S;\n" ("file://"^Filename.concat(Sys.getcwd())"../web_export/runtime/prims.js");
   Buffer.add_string js (Flow_web.Js.region packed);
   Printf.bprintf js "const input=%s; const output=new Float64Array(%d);\n" (array data)(Array.length cases);
   let flatten=function E.Float x->[|x|]|Int n->[|float n|]|Vec3(a,b,c)->[|a;b;c|]|_->failwith"uniform" in
@@ -78,8 +78,8 @@ let () =
   Buffer.add_string js "for(const args of [[Infinity,0,1],[1,NaN,0],[1,1,-Infinity],[Number.MAX_VALUE,2,0]]){try{fma(...args);throw Error('accepted')}catch(e){if(e.code!=='E_NONFINITE')throw e}}\n";
   let region_test v expected =
     let r=match v with E.Residual r->r|_->assert false in
-    let p=match I.Packed.compile_result r (E.Private.residual_view r).term with
-      |Ok p->p |Error ds->failwith(String.concat ";"(List.map Flow.Diagnostic.to_string ds)) in
+    let p=match I.Packed.compile_result r (E.Residual.residual_view r).term with
+      |Ok p->p |Error ds->failwith(String.concat ";"(List.map Diagnostic.to_string ds)) in
     let inputs=ok(I.Packed.Private.prepare_values p ~live) in
     let input=function E.Int_array xs->"BigInt64Array.from(["^String.concat ","(Array.to_list(Array.map(fun n->string_of_int n^"n")xs))^"])"
       |E.Float_array xs->array xs|_->assert false in
@@ -96,9 +96,9 @@ let () =
   region_test mixed (Some "i*3+1");
   region_test (value "(map (fn [x] (if (> t 0.) 0. (fma 1.7976931348623157e308 2. x))) (array/range 5001))") (Some "0");
   region_test overflow None;
-  let bad_region={ (I.Packed.to_region packed) with I.Core.Region.code=
-    [|Const infinity;Const 0.;Const 1.;Fma(0,1,2)|];outputs=[|[|3|]|] } in
-  let bad=match I.Packed.of_region bad_region with Ok p->p|Error _->assert false in
+  let bad=match I.Core.Region.rebuild packed ~code:
+    [|Const infinity;Const 0.;Const 1.;Fma(0,1,2)|] ~outputs:[|[|3|]|] () with
+    |Ok p->p|Error _->assert false in
   assert(Result.is_error(I.Packed.force ~strict:true bad ~live));
   Buffer.add_string js "{\n";Buffer.add_string js(Flow_web.Js.region bad);
   Buffer.add_string js "if(region([new Float64Array(3)],[],[new Float64Array(1)],0,1)!==1)throw Error('nonfinite FMA input accepted');\n}\n";
@@ -126,17 +126,17 @@ let () =
   let residual=match source with E.Residual r->r|_->assert false in
   let core=Result.get_ok(I.Core_lower.lower ~strict:true residual) in
   let compiled=match I.Executor.compile ~strict:true source with Ok p->p|Error d->
-    failwith("Checked main compile: "^Flow.Diagnostic.to_string d) in
-  let packed=match I.Packed.compile_result residual (E.Private.residual_view residual).term with
+    failwith("Checked main compile: "^Diagnostic.to_string d) in
+  let packed=match I.Packed.compile_result residual (E.Residual.residual_view residual).term with
     |Ok p->p|Error _ ->
       (* The outer structural if belongs to Core; inspect its actual map region. *)
-      Result.get_ok(I.Packed.of_region core.regions.(0)) in
+      core.regions.(0) in
   let same=function E.Vec4_array values -> assert(Array.length values=Array.length expected);
       Array.iteri(fun i x->if bits x<>bits expected.(i)then
         failwith(Printf.sprintf "Checked arithmetic %d: %s <> %s" i(bits x)(bits expected.(i))))values
     |_->failwith "Checked arithmetic Vec4 array expected" in
   same(ok(E.Private.force_reference source ~live));
-  List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+  List.iter(fun domains->Parallel.run ~domains(fun()->
     same(ok(I.Executor.force ~strict:true compiled ~live));
     same(ok(I.Core_exec.run ~force:(fun p->I.Packed.force ~strict:true p ~live) core ~live));
     same(ok(I.Packed.force ~strict:true packed ~live)))) [1;8];
@@ -144,7 +144,7 @@ let () =
   (match Flow_web.Wgsl.kernel packed with Error d->assert(d.code="E_GPU_FORM")|Ok _->assert false);
   let evaluate body=let source=value body in
     let compiled=match I.Executor.compile ~strict:true source with Ok p->p|Error d->
-      failwith(body^": "^Flow.Diagnostic.to_string d) in
+      failwith(body^": "^Diagnostic.to_string d) in
     let expected=ok(E.Private.force_reference source ~live) in
     assert(ok(I.Executor.force ~strict:true compiled ~live)=expected);expected in
   List.iter(fun body->assert(evaluate body=E.Float_array(Array.make 5001 0.))) [
@@ -156,14 +156,14 @@ let () =
     let keys=List.map fst op.signature.pos in
     List.iter(fun bad->let args=List.mapi(fun i key->key,E.Float(if i=0 then bad else 1.))keys in
       try ignore(op.body ~live ~node:(fun _ _->assert false)args);failwith "Nonfinite checked input accepted"
-      with Flow.Value.Fail(code,_,_)->assert(code="E_NONFINITE")) [nan;infinity;neg_infinity])
+      with Diagnostic.Error d -> assert(d.code="E_NONFINITE")) [nan;infinity;neg_infinity])
     ["float/mul_checked";"float/fma_checked"];
   let prepared=ok(I.Packed.Private.prepare_values packed ~live) in
   let flatten=function E.Float x->[|x|]|Int n->[|float n|]|Bool b->[|if b then 1. else 0.|]
     |Vec3(a,b,c)->[|a;b;c|]|_->failwith "Checked uniform" in
   let js=Buffer.create 3_000_000 in
   Printf.bprintf js "import {float_mul_checked as mul,float_fma_checked as fma} from %S;\n"
-    ("file://"^Filename.concat(Sys.getcwd())"../../tools/web/runtime/prims.js");
+    ("file://"^Filename.concat(Sys.getcwd())"../web_export/runtime/prims.js");
   Buffer.add_string js(Flow_web.Js.region packed);
   Printf.bprintf js "const input=%s, out=new Float64Array(%d);\n" (array data)(Array.length expected);
   let uniforms=Array.to_list(Array.map(fun v->array(flatten v))prepared.uniforms)
@@ -175,18 +175,17 @@ let () =
   Buffer.add_string js "for(let i=0;i<input.length/3;i++){const a=mul(input[3*i],input[3*i+1]),b=fma(input[3*i],input[3*i+1],input[3*i+2]);const scalar=[a.get('value'),+a.get('valid'),b.get('value'),+b.get('valid')];for(let j=0;j<4;j++){const k=4*i+j;if(bits(out[k])!==expected[k]||bits(scalar[j])!==expected[k])throw Error('checked bits '+k)}}\n";
   Buffer.add_string js "for(const f of [mul,(a,b)=>fma(a,b,0)])for(const bad of [Infinity,-Infinity,NaN]){try{f(bad,1);throw Error('accepted bad input')}catch(e){if(e.code!=='E_NONFINITE')throw e}}\n";
   List.iter(fun bad->List.iter(fun instruction->
-    let malformed={ (I.Packed.to_region packed) with I.Core.Region.code=
-      [|Const bad;Const 1.;Const 0.;instruction|];outputs=[|[|3|]|] } in
-    let malformed=Result.get_ok(I.Packed.of_region malformed) in
+    let malformed=Result.get_ok(I.Core.Region.rebuild packed
+      ~code:[|Const bad;Const 1.;Const 0.;instruction|] ~outputs:[|[|3|]|] ()) in
     (match I.Packed.force ~strict:true malformed ~live with
      |Error d->assert(d.code="E_NONFINITE")|Ok _->failwith "Checked malformed input accepted");
     Buffer.add_string js "{\n";Buffer.add_string js(Flow_web.Js.region malformed);
     Buffer.add_string js "if(region([new Float64Array(3)],[],[new Float64Array(1)],0,1)!==1)throw Error('checked nonfinite input accepted');\n}\n")
     [I.Packed.Checked_mul(Value,0,1);Checked_mul(Valid,0,1);
      Checked_fma(Value,0,1,2);Checked_fma(Valid,0,1,2)]) [nan;infinity;neg_infinity];
-  let guarded={ (I.Packed.to_region packed) with I.Core.Region.code=
-    [|Const 0.;Const infinity;Const 1.;Guarded([0,true],Checked_mul(Value,1,2))|];outputs=[|[|0|]|] } in
-  let guarded=Result.get_ok(I.Packed.of_region guarded) in
+  let guarded=Result.get_ok(I.Core.Region.rebuild packed
+    ~code:[|Const 0.;Const infinity;Const 1.;Guarded([0,true],Checked_mul(Value,1,2))|]
+    ~outputs:[|[|0|]|] ()) in
   (match ok(I.Packed.force ~strict:true guarded ~live)with
    |E.Float_array values->assert(Array.for_all((=)0.)values)|_->assert false);
   Buffer.add_string js "{\n";Buffer.add_string js(Flow_web.Js.region guarded);

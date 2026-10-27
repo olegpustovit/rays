@@ -51,7 +51,7 @@ let same_int_array left right =
 
 let test_random () =
   let source = points (Array.init 32 float_of_int) in
-  let run seed domains = Rays.Parallel.run ~domains (fun () ->
+  let run seed domains = Parallel.run ~domains (fun () ->
       Ordering.sort ~grain:3 ~owner:Ordering.Points ~key:(Ordering.Random seed) source
       |> get_ok) in
   let one = run 42L 1 and four = run 42L 4 and other = run 43L 1 in
@@ -190,7 +190,7 @@ let test_topology_and_spatial_keys () =
 let test_dense_exactness () =
   let source = points (Array.init 150_001 (fun point ->
       sin (float_of_int point *. 0.001))) in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       let random = Ordering.sort ~grain:4096 ~owner:Ordering.Points
           ~key:(Ordering.Random 918273L) source |> get_ok in
       Ordering.sort ~grain:4096 ~owner:Ordering.Points ~key:Ordering.X
@@ -200,7 +200,7 @@ let test_dense_exactness () =
       && same_int_array (int_attribute "rank" one)
            (int_attribute "rank" four))
     "dense random/indirect Sort one/four-domain exactness";
-  let locality domains = Rays.Parallel.run ~domains (fun () ->
+  let locality domains = Parallel.run ~domains (fun () ->
       Ordering.sort ~grain:4096 ~owner:Ordering.Points ~key:Ordering.Spatial_locality source
       |> get_ok) in
   check (same_int_array (ids (locality 1)) (ids (locality 4)))

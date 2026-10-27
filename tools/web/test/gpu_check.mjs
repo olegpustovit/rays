@@ -1,6 +1,6 @@
 // node gpu_check.mjs KERNELS_JSON GPU_JS GOLDEN_DIR
 //
-// Compiles the four WGSL goldens in real Chrome through tools/web/runtime/gpu.js, runs each on a small
+// Compiles the four WGSL goldens in real Chrome through lib/web_export/runtime/gpu.js, runs each on a small
 // deterministic input and compares the read-back outputs with the CPU region goldens (lib/flow_web/goldens/*.js)
 // on the same f32-rounded input, plus an `ops` kernel (not a golden) for the operators they never reach. KERNELS_JSON is `test_wgsl.exe --write-kernel-table`'s output.
 // Exit: 0 pass (or skipped: no Chrome, printed), 1 mismatch or WGSL error, 2 usage, 3 WebGPU unavailable.
@@ -10,7 +10,7 @@
 // absolute, because the f32 coordinate (up to ~80 after the octave scaling) is off by ~8e-6 and the gradient
 // noise slope is <= ~3, so each octave carries ~2e-5; there is no discontinuity for rounding to jump over.
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { chromeAvailable, launch, serve } from './chrome.mjs';
 
 const [kernelsPath, gpuPath, goldenDir] = process.argv.slice(2);
@@ -20,6 +20,7 @@ if (!chromeAvailable()) { console.log('gpu_check: skipped (Google Chrome not fou
 const GOLDENS = ['arithmetic', 'noise', 'select', 'two_outputs'], NAMES = [...GOLDENS, 'ops'];   // ops: CPU region carried in the table
 const pageScript = `
 import { createGpu } from './gpu.js';
+import { noise3 } from './prims.js';
 const names = ${JSON.stringify(NAMES)}, T = 1.5;
 const tolerance = { noise: [0, 1e-4] };   // [relative, absolute]
 const text = async p => (await fetch(p)).text();
@@ -38,7 +39,7 @@ window.__result = (async () => {
     for (const [u] of k.uniform_layout) { const m = /^frame:(\\d+):/.exec(u); if (!m) throw new Error('unexpected uniform ' + u); frame[+m[1]] = T; uniforms[u] = T; }
     const x = input(n);
     const run = gpu.dispatch(name, { count: n, inputs: [x], uniforms });
-    const cpu = new Function((k.cpu || await text('golden/' + name + '.js')) + '\\nreturn region;')();
+    const cpu = new Function('noise3', (k.cpu || await text('golden/' + name + '.js')) + '\\nreturn region;')(noise3);
     const want = k.output_widths.map(w => new Float64Array(n * w));
     const status = cpu([x], [frame], want, 0, n);
     const [rel, abs] = tolerance[name] ?? [1e-5, 0];
@@ -95,6 +96,7 @@ const files = {
   '/': '<!doctype html><title>gpu check</title><script type="module" src="page.js"></script>',
   '/page.js': pageScript,
   '/gpu.js': readFileSync(gpuPath),
+  '/prims.js': readFileSync(join(dirname(gpuPath), 'prims.js')),
   '/kernels.json': readFileSync(kernelsPath),
 };
 for (const name of GOLDENS) files[`/golden/${name}.js`] = readFileSync(join(goldenDir, `${name}.js`));

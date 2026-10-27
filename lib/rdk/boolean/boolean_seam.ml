@@ -405,7 +405,7 @@ let build ?cancel ?(grain = 16_384) ?(parallel_cutoff = 200_000)
        benefits within an already pooled multi-domain run. *)
     let facet_masks =
       if facets < parallel_cutoff then Array.init facets (facet_mask complex)
-      else Rays_math.Parallel.init_array ~grain facets (facet_mask complex) in
+      else Parallel.init_array ~grain facets (facet_mask complex) in
     let constraints = Boolean_complex.Private.constraints complex in
     let left_index =
       if Boolean_constraints.Private.resolve_left_self_intersections constraints then
@@ -455,7 +455,7 @@ let build ?cancel ?(grain = 16_384) ?(parallel_cutoff = 200_000)
     else begin
         let range_count = 1 + ((edge_count - 1) / grain) in
         let range_selected = Array.make range_count 0 in
-        Rays_math.Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(range_count - 1)
+        Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(range_count - 1)
           (fun range ->
             let first_edge = range * grain
             and last_edge = min edge_count ((range + 1) * grain) in

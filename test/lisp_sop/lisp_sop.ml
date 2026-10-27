@@ -7,7 +7,7 @@ let snapshot geometry =
     ~cook_mode:Sop.Node.Generator
     ~dependencies:Sop.Context.Dependencies.static ~inputs:[||]
     (fun ~node_id:_ _context _inputs ->
-      Ok Sop.Node.Private.{geometry; diagnostics = []; instances = None})
+      Ok Sop.Node.Private.{geometry; instances = None})
 
 (* An external node may itself have inputs, but a factory node cannot: the lowering sees an
    input-free marker per external node and the real nodes are put back afterwards. *)
@@ -49,19 +49,18 @@ let workspace_node_result ?(with_ = []) source =
       (image_name name)) with_ in
   let factories = external_factories @ factories in
   match Flow.Syntax.parse source with
-  | Error d -> Error (Flow.Diagnostic.to_string d)
+  | Error d -> Error (Diagnostic.to_string d)
   | Ok forms ->
       let lowered = Result.bind
-        (Flow_sop.Catalog.of_factories ~version:Flow_sop.Manifest.version
-          ~extra:Editor_document.Contexts.descriptors factories) (fun catalog ->
+        (Flow_sop.Catalog.of_factories ~version:Flow_sop.Manifest.version factories) (fun catalog ->
         match Flow_sop.Catalog.check_workspace ~ops:(image_ops @ Flow_sop.Operators.all) catalog forms with
         | Some checked, _ -> Flow_sop.Lower.of_checked ~factories checked
         | None, diagnostics -> Error (Option.value
-            ~default:(Flow.Diagnostic.error ~code:"E_LOWER" "Workspace did not check")
-            (List.find_opt (fun (d : Flow.Diagnostic.t) ->
-              d.severity = Flow.Diagnostic.Error) diagnostics))) in
+            ~default:(Diagnostic.error ~code:"E_LOWER" "Workspace did not check")
+            (List.find_opt (fun (d : Diagnostic.t) ->
+              d.severity = Diagnostic.Error_severity) diagnostics))) in
       match lowered with
-      | Error d -> Error (Flow.Diagnostic.to_string d)
+      | Error d -> Error (Diagnostic.to_string d)
       | Ok lowered ->
           match List.find_opt (fun (graph : Flow_sop.Lower.graph) -> graph.default) lowered.graphs with
           | None -> Error "the workspace has no SOP graph"

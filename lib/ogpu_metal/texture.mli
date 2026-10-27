@@ -1,5 +1,5 @@
-type format = R8_unorm | Rgba8_unorm | Bgra8_unorm | Rgba16_float | Rgba32_float | Depth32_float | Stencil8
-type memory = Device_local | Shared
+type format = Ogpu_core.Types.texture_format = R8_unorm | Rgba8_unorm | Bgra8_unorm | Bgra8_unorm_srgb | Rgba16_float | Rgba32_float | Depth32_float
+type memory = Ogpu_core.Types.memory = Shared | Device_local
 type t
 
 val create : Device.t -> memory:memory -> format:format ->

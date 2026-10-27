@@ -51,7 +51,7 @@ reuse its window, input, image, font and audio layers as they are.
 
 ## The generator binds, it does not inventory
 
-Nothing generated is checked in. `tools/sdl3/generate.exe emit` writes
+Nothing generated is checked in. `lib/sdl3/generate.exe emit` writes
 `generated_abi.h` into `_build` for each library from the lock, the stubs and
 `lib/sdl3/abi.sexp`:
 
@@ -62,7 +62,7 @@ Nothing generated is checked in. `tools/sdl3/generate.exe emit` writes
   `surface->pitch`, ...) and the build fails when a stub reads a field the file
   does not pin or the file pins a field no stub reads. A newer SDL that leaves
   those fields alone builds without a change; one that moves them fails the
-  build and names the field. `dune exec tools/sdl3/generate.exe -- accept`
+  build and names the field. `dune exec lib/sdl3/generate.exe -- accept`
   re-probes the installed headers with clang and rewrites it for review.
 - No SDL constant is hand-copied into OCaml. The stubs map every flag, key,
   button and event kind with SDL's own macros, so the compiler checks them; the
@@ -86,7 +86,7 @@ not bypass these classifications through `Private_raw`.
 | Initial OCaml domain and SDL main thread | core `Init`, `Hint`, `Window`, `Cursor`, `Clipboard`, `Text_input`, `Dialog.show`, event polling, and `Metal_view`; all image decode, TTF init/font, and mixer init/mixer/audio/track operations | The safe entry point checks both `Domain.is_main_domain` and `SDL_IsMainThread` before its native call and returns `Wrong_domain` on failure. |
 | Any-domain deferred release | GC finalizers for windows, cursors, Metal views, fonts, mixers, audio values, and tracks | A finalizer only appends an opaque release token to an unbounded mutex-protected queue.  It never calls SDL.  The initial-domain safe boundary drains children before parents; an atomic count lets the usual empty drain skip the lock and allocate nothing. |
 | Native callback, any thread | the file-dialog callback in `sdl3_dialog.c` | It runs no OCaml, allocates no OCaml value and takes no lock: it copies the outcome into one of eight fixed native slots and publishes it with a release store. See "Callback policy". |
-| Native block, the pumping thread | the NSEvent scroll monitor in `sdl3_cocoa.c` | AppKit calls it inside `SDL_PumpEvents`, on the initial domain. It runs no OCaml and allocates nothing: it writes one entry of a 256-entry ring (the oldest is dropped), which the same poll drains. |
+| Native block, the pumping thread | the NSEvent scroll monitor in `sdl3_platform_macos.c` | AppKit calls it inside `SDL_PumpEvents`, on the initial domain. It runs no OCaml and allocates nothing: it writes one entry of a 256-entry ring (the oldest is dropped), which the same poll drains. |
 | Blocking initial-domain call | `Sdl3.Window.sync` | The stub releases the OCaml runtime system around `SDL_SyncWindow`; the synchronized window remains rooted and cannot be destroyed from another domain. The runtime is reacquired before returning to OCaml. |
 
 Extension init queries (`Init.initialized` of TTF and mixer) are result-returning
@@ -188,7 +188,13 @@ the old picture stretches during the drag. No window-free test drives it; the
 
 ## Events and translations
 
-SDL does not carry everything AppKit says, and `sdl3_cocoa.c` reads the rest
+Dune selects `sdl3_platform_macos.c` and its Objective-C/CoreFoundation link
+flags on macOS; other systems select `sdl3_platform_portable.c` with no Apple
+frameworks. The common binding calls that platform boundary for main-thread
+checks, window decorations and phased trackpad events. A compile-only check
+builds the portable C branch on the native development host as well.
+
+SDL does not carry everything AppKit says, and `sdl3_platform_macos.c` reads the rest
 through the Objective-C runtime (`objc_msgSend`; the stubs stay C and link
 `-lobjc`). Each function there does nothing unless the video driver is `cocoa`,
 and brackets its AppKit messages with `objc_autoreleasePoolPush`/`Pop`: no run

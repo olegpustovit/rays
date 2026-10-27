@@ -29,17 +29,16 @@ type node =
       * render_mode * cull * shading
   | Instances of
       Mesh.t * Material.t * texture option
-      * render_mode * cull * shading * Mat4.t array
+      * render_mode * cull * shading * Rays_math.Mat4.t array
   | Group of node list
-  | Transform of Mat4.t * node list
+  | Transform of Rays_math.Mat4.t * node list
   | Depth_state of depth_state * node list
   | Blend_state of blend * node list
 
 type t = {
   nodes : node list;
   lights : Light.t list;
-  shadow : Shadow3.t option;
-  ambient : Color.t;
+  ambient : Rays_math.Color.t;
   separate_specular : bool;
   samples : int;
   world : World.baked option;
@@ -52,14 +51,13 @@ let default_depth = depth_state ()
 let empty = {
   nodes = [];
   lights = [];
-  shadow = None;
-  ambient = Color.black;
+  ambient = Rays_math.Color.black;
   separate_specular = false;
   samples = 1;
   world = None;
 }
 
-let create ?(lights = []) ?shadow ?(ambient = Color.rgb 32 32 32)
+let create ?(lights = []) ?(ambient = Rays_math.Color.rgb 32 32 32)
     ?(separate_specular = false)
     ?(samples = 1) nodes =
   if not (List.mem samples [1; 4; 9; 16]) then
@@ -67,7 +65,6 @@ let create ?(lights = []) ?shadow ?(ambient = Color.rgb 32 32 32)
   {
     nodes;
     lights;
-    shadow;
     ambient;
     separate_specular;
     samples;
@@ -89,7 +86,7 @@ let instances_array ?(material = Material.default) ?(mode = Faces)
 let nodes scene = scene.nodes
 let group nodes = Group nodes
 let transform matrix nodes = Transform (matrix, nodes)
-let translate value nodes = transform (Mat4.translation value) nodes
+let translate value nodes = transform (Rays_math.Mat4.translation value) nodes
 let with_depth state nodes = Depth_state (state, nodes)
 let with_blend blend nodes = Blend_state (blend, nodes)
 
@@ -118,7 +115,7 @@ module Private = struct
     depth : depth_state;
 
     blend : blend;
-    transform : Mat4.t;
+    transform : Rays_math.Mat4.t;
   }
 
   let cacheable scene =
@@ -132,7 +129,7 @@ module Private = struct
       | Blend_state (_, nested) :: rest -> nodes nested && nodes rest
       | Mesh (_, _, Some _, _, _, _) :: _
       | Instances (_, _, Some _, _, _, _, _) :: _ -> false in
-    Option.is_none scene.shadow && nodes scene.nodes
+    nodes scene.nodes
 
   let drawings scene =
     let rec flatten parent depth blend acc = function
@@ -159,7 +156,7 @@ module Private = struct
                   depth;
 
                   blend;
-                  transform = Mat4.mul parent transform;
+                  transform = Rays_math.Mat4.mul parent transform;
                 }
                 :: acc)
               acc transforms
@@ -169,7 +166,7 @@ module Private = struct
           flatten parent depth blend
             (flatten parent depth blend acc nodes) rest
       | Transform (matrix, nodes) :: rest ->
-          let transform = Mat4.mul parent matrix in
+          let transform = Rays_math.Mat4.mul parent matrix in
           flatten parent depth blend
             (flatten transform depth blend acc nodes) rest
       | Depth_state (state, nodes) :: rest ->
@@ -180,7 +177,7 @@ module Private = struct
             (flatten parent depth state acc nodes) rest
     in
     List.rev
-      (flatten Mat4.identity default_depth Alpha [] scene.nodes)
+      (flatten Rays_math.Mat4.identity default_depth Alpha [] scene.nodes)
 
   let iter_batches operation scene =
     let rec visit parent depth blend = function
@@ -199,7 +196,7 @@ module Private = struct
           visit parent depth blend nodes;
           visit parent depth blend rest
       | Transform (matrix, nodes) :: rest ->
-          visit (Mat4.mul parent matrix) depth blend nodes;
+          visit (Rays_math.Mat4.mul parent matrix) depth blend nodes;
           visit parent depth blend rest
       | Depth_state (state, nodes) :: rest ->
           visit parent state blend nodes;
@@ -207,14 +204,12 @@ module Private = struct
       | Blend_state (state, nodes) :: rest ->
           visit parent depth state nodes;
           visit parent depth blend rest in
-    visit Mat4.identity default_depth Alpha scene.nodes
+    visit Rays_math.Mat4.identity default_depth Alpha scene.nodes
 
   let lights scene = scene.lights
-  let shadow scene = scene.shadow
   let ambient scene = scene.ambient
   let separate_specular scene = scene.separate_specular
   let depth_clear _ = 1.
-  let stencil_clear _ = 0
   let samples scene = scene.samples
   let world scene = scene.world
 end

@@ -1,6 +1,7 @@
 open Rays
 
 let run () =
+  Scene.Private.with_cache_context (Scene.Private.create_cache_context ()) (fun () ->
   let builder = Scene_command.Display_list.Builder.create () in
   (* The rectangle (2, 3) 8 x 9 in opaque red, as two triangles. *)
   let rectangle = { Scene_command.Render_ir.vertices = [|2.; 3.; 10.; 3.; 10.; 12.; 2.; 12.|];
@@ -32,8 +33,8 @@ let run () =
            Scene_command.Render_ir.Pop_transform] when geometry = rectangle -> ()
         | _ -> failwith "transformed display-list command order drift")
    | _ -> failwith "transformed display list bypassed retained transform lowering");
-  let equivalent () = [Scene.clear Color.black;
-    Scene.rect ~at:(3, 4) ~w:12 ~h:9 ~fill:Color.white ()] in
+  let equivalent () = [Scene.clear Rays_math.Color.black;
+    Scene.rect ~at:(3, 4) ~w:12 ~h:9 ~fill:Rays_math.Color.white ()] in
   let first_equivalent = Result.get_ok
       (Scene.Private.stage_native_render ~width:32 ~height:32 (equivalent ()))
   and second_equivalent = Result.get_ok
@@ -41,14 +42,14 @@ let run () =
   if first_equivalent != second_equivalent then
     failwith "equivalent shallow scene composition missed native stage reuse";
   let changed = Result.get_ok (Scene.Private.stage_native_render
-      ~width:32 ~height:32 [Scene.clear Color.black;
-        Scene.rect ~at:(3, 4) ~w:13 ~h:9 ~fill:Color.white ()]) in
+      ~width:32 ~height:32 [Scene.clear Rays_math.Color.black;
+        Scene.rect ~at:(3, 4) ~w:13 ~h:9 ~fill:Rays_math.Color.white ()]) in
   if changed == first_equivalent then
     failwith "changed shallow scene composition reused stale native stage";
   let layered width = [
-    Scene.rect ~at:(1, 1) ~w:8 ~h:8 ~fill:Color.white ();
+    Scene.rect ~at:(1, 1) ~w:8 ~h:8 ~fill:Rays_math.Color.white ();
     Scene.Private.layer_break;
-    Scene.rect ~at:(16, 1) ~w:width ~h:8 ~fill:Color.red ()] in
+    Scene.rect ~at:(16, 1) ~w:width ~h:8 ~fill:Rays_math.Color.red ()] in
   let first_layered = Result.get_ok (Scene.Private.stage_native_render
       ~width:32 ~height:32 (layered 8))
   and changed_layered = Result.get_ok (Scene.Private.stage_native_render
@@ -71,8 +72,8 @@ let run () =
   (match Scene.Private.display_list image_segment with
    | _ -> failwith "display list accepted an unbound image resource"
    | exception Invalid_argument _ -> ());
-  let image = Image.create ~width:1 ~height:1 ~color:Color.white () in
-  Fun.protect ~finally:(fun () -> Image.destroy image) (fun () ->
+  let image = Image.create ~width:1 ~height:1 ~color:Rays_math.Color.white () |> Result.get_ok in
+  Fun.protect ~finally:(fun () -> ignore(Image.destroy image)) (fun () ->
     (match Scene.Private.display_list ~images:[7,image;7,image] image_segment with
      | _ -> failwith "display list accepted a duplicate image resource"
      | exception Invalid_argument _ -> ());
@@ -81,20 +82,20 @@ let run () =
         (Scene.Private.stage_native ~width:32 ~height:32 [image_node]) in
     (match first.layers with
      | [Scene.Private.Scene2_segment (retained,
-         [7, Rays_execution.Image resource])]
+         [7, Renderer.Image resource])]
          when retained == image_segment
            && resource == Image.Private.resource image -> ()
      | _ -> failwith "display-list image binding lost managed identity");
-    let peer = Image.create ~width:1 ~height:1 ~color:Color.white () in
-    Fun.protect ~finally:(fun () -> Image.destroy peer) (fun () ->
+    let peer = Image.create ~width:1 ~height:1 ~color:Rays_math.Color.white () |> Result.get_ok in
+    Fun.protect ~finally:(fun () -> ignore(Image.destroy peer)) (fun () ->
       let rebound = Result.get_ok(Scene.Private.stage_native ~width:32 ~height:32
           [Scene.Private.display_list ~images:[7,peer] image_segment]) in
       if first.retained = rebound.retained then
         failwith "equal-generation image identities collided in retained replay");
-    let replacement = Image.create ~width:1 ~height:1 ~color:Color.black () in
-    Image.Private.replace image replacement;
+    let replacement = Image.create ~width:1 ~height:1 ~color:Rays_math.Color.black () |> Result.get_ok in
+    Result.get_ok(Image.Private.replace image replacement);
     let second = Result.get_ok
         (Scene.Private.stage_native ~width:32 ~height:32 [image_node]) in
     if first.retained = second.retained then
       failwith "display-list resource generation did not invalidate replay");
-  print_endline "Scene display list: direct retained layer and transformed parity"
+  print_endline "Scene display list: direct retained layer and transformed parity")

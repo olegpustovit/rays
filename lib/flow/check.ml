@@ -14,7 +14,7 @@ type kernel_facts = {
   exact : bool;
 }
 type kind = {
-  qualified : string; aliases : string list; context : Context.t;
+  qualified : string; context : Context.t;
   slots : slot list; parameters : parameter list;
   outputs : (string * Port_type.t) list;
   facts : kernel_facts option;
@@ -76,29 +76,22 @@ let suggestion word candidates =
     | (_, candidate) :: _ -> " Did you mean " ^ candidate ^ "?"
 
 let parameters_of_fields fields =
-  let rec gather reversed = function
-    | [] -> List.rev reversed
-    | (field : Param.field_view) :: rest ->
-        (match field.vec3, rest with
-         | Some (group, 0), (y : Param.field_view) :: (z : Param.field_view) :: tail
-             when y.vec3 = Some (group, 1) && z.vec3 = Some (group, 2) ->
-             gather ({name = group; label = field.label; ty = Some Port_type.Vec3;
-               fields = List.map (fun (field : Param.field_view) ->
-                 field.name, field.kind, field.default)
-                 [field;y;z]; folder = field.Param.folder; primary = field.Param.primary; unit = None} :: reversed) tail
-         | _ -> gather ({name = field.name; label = field.label;
-             ty = Port_type.of_field_kind field.kind;
-             fields = [field.name, field.kind, field.default];
-             folder = field.Param.folder; primary = field.Param.primary; unit = field.Param.unit} :: reversed) rest) in
-  gather [] fields
+  Result.map (List.map (function
+    | [] -> assert false
+    | (field : Param.field_view) :: _ as fields ->
+        let name, ty, unit = match field.vec3 with
+          | Some (group, _) -> group, Some Port_type.Vec3, None
+          | None -> field.name, Port_type.of_field_kind field.kind, field.unit in
+        {name; label = field.label; ty; unit;
+         fields = List.map (fun (field : Param.field_view) -> field.name, field.kind, field.default) fields;
+         folder = field.folder; primary = field.primary})) (Param.group_vec3 fields)
 
-exception Invalid_manifest of Diagnostic.t
 
 let catalog_of_manifest source =
   match Syntax.parse source with
   | Error diagnostic -> Error diagnostic
   | Ok forms ->
-      let bad form message = raise (Invalid_manifest (Diagnostic.error
+      let bad form message = raise (Diagnostic.Error (Diagnostic.error
         ~span:form.Syntax.span ~code:"E_CATALOG" message)) in
       let tagged tag form = match list form with
         | Some (head :: fields) when symbol head = Some tag -> fields
@@ -198,7 +191,6 @@ let catalog_of_manifest source =
             ignore (string (one "operation" (get "operation")));
             ignore (string (one "label" (get "label")));
             ignore (strings "category" (get "category"));
-            let aliases = strings "aliases" (get "aliases") in
             let facts = match List.filter (fun form -> match list form with
                 | Some (head :: _) -> symbol head = Some "facts" | _ -> false) properties with
               | [] -> None
@@ -261,7 +253,8 @@ let catalog_of_manifest source =
                   {name; label = name; ty = Some ty; fields = []; folder = []; primary = true; unit = None}
               | _ -> bad form "Keyword inputs must name required slots") keywords in
             let slots = List.filter (fun (s : slot) -> not (List.mem s.name keywords)) slots in
-            let parameters = parameters_of_fields fields in
+            let parameters = match parameters_of_fields fields with
+              | Ok parameters -> parameters | Error message -> bad form message in
             if List.exists (fun (p : parameter) -> List.mem p.name keywords) parameters then
               bad form "Keyword input clashes with a scalar parameter";
             let outputs = tagged "outputs" (get "outputs") |> List.map (fun output ->
@@ -273,7 +266,7 @@ let catalog_of_manifest source =
                 | None -> bad form "Unknown kind namespace in Flow manifest" in
             if not (String.ends_with ~suffix:("/" ^ key) qualified)
               then bad form "Kind key differs from its qualified name";
-            Option.map (fun context -> {qualified; aliases; context; slots;
+            Option.map (fun context -> {qualified; context; slots;
               parameters = parameters @ keyword_parameters; outputs; facts}) context
         | _ -> bad form "Malformed kind in Flow manifest" in
       try match forms with
@@ -304,7 +297,7 @@ let catalog_of_manifest source =
            | _ -> bad root "Flow manifest needs version, digest and kinds")
       | _ -> Error (Diagnostic.error ~code:"E_CATALOG"
           "Flow manifest needs one top-level form")
-      with Invalid_manifest diagnostic -> Error diagnostic
+      with Diagnostic.Error diagnostic -> Error diagnostic
 let known_prefix catalog name = (name = "user" || List.exists (fun ctx ->
   Context.name ctx = name || (Context.descriptor ctx).catalog_prefix = Some name) (Context.all ())) ||
   List.exists (fun kind -> String.starts_with ~prefix:(name ^ "/") kind.qualified) catalog.kinds
@@ -312,11 +305,9 @@ let allowed context (kind : kind) =
   kind.context = Context.value || kind.context = context
 let resolve_report catalog context report head =
   let all = catalog.kinds in
-  let matches name = List.filter (fun kind ->
-    kind.qualified = name || List.mem name kind.aliases) all in
+  let matches name = List.filter (fun kind -> kind.qualified = name) all in
   let candidates = if String.contains head '/' then matches head else
-    List.filter (fun kind -> short kind.qualified = head ||
-      List.exists (fun alias -> short alias = head) kind.aliases) all in
+    List.filter (fun kind -> short kind.qualified = head) all in
   let candidates = List.sort_uniq (fun a b ->
     String.compare a.qualified b.qualified) candidates in
   match candidates with
@@ -359,7 +350,7 @@ let validate_range report (parameter : parameter) field value =
       if Float.floor number <> number then ()
       else if Option.fold ~none:false ~some:(fun n -> number < float_of_int n) range.hard_min
            || Option.fold ~none:false ~some:(fun n -> number > float_of_int n) range.hard_max then
-        report Diagnostic.Error "E_HARD_RANGE"
+        report Diagnostic.Error_severity "E_HARD_RANGE"
           (Printf.sprintf ":%s is outside its hard range" parameter.name)
       else if number < float_of_int range.soft_min || number > float_of_int range.soft_max then
         report Diagnostic.Warning "W_SOFT_RANGE"
@@ -367,11 +358,11 @@ let validate_range report (parameter : parameter) field value =
             parameter.name number range.soft_min range.soft_max)
   | (_, Param.Floating_view range, _), Some number ->
       if not (Float.is_finite number) then
-        report Diagnostic.Error "E_NONFINITE"
+        report Diagnostic.Error_severity "E_NONFINITE"
           (Printf.sprintf ":%s must be finite" parameter.name)
       else if Option.fold ~none:false ~some:(fun n -> number < n) range.hard_min
            || Option.fold ~none:false ~some:(fun n -> number > n) range.hard_max then
-        report Diagnostic.Error "E_HARD_RANGE"
+        report Diagnostic.Error_severity "E_HARD_RANGE"
           (Printf.sprintf ":%s is outside its hard range" parameter.name)
       else if number < range.soft_min || number > range.soft_max then
         report Diagnostic.Warning "W_SOFT_RANGE"
@@ -392,25 +383,25 @@ let validate_parameter report (parameter : parameter) (term : term) =
     | Some target, _ -> (match ty with
         | Some source -> Port_type.can_connect ~source ~target
         | None -> false) in
-  if not good then report Diagnostic.Error "E_TYPE"
+  if not good then report Diagnostic.Error_severity "E_TYPE"
     (Printf.sprintf ":%s takes %s, but this is %s" parameter.name
       (Option.fold ~none:"text" ~some:Port_type.name parameter.ty)
       (Option.fold ~none:"nil or text" ~some:Port_type.name ty));
   (match parameter.ty, term.node with
    | Some Port_type.Int, Literal (Param.Float_value number)
        when Float.floor number <> number ->
-       report Diagnostic.Error "E_INT_LITERAL"
+       report Diagnostic.Error_severity "E_INT_LITERAL"
          (Printf.sprintf ":%s is an integer, not %g" parameter.name number)
    | Some Port_type.Int, Literal (Param.Float_value number)
        when number >= float_of_int max_int || number < float_of_int min_int ->
-       report Diagnostic.Error "E_HARD_RANGE"
+       report Diagnostic.Error_severity "E_HARD_RANGE"
          (Printf.sprintf ":%s is outside the integer range" parameter.name)
    | _ -> ());
   (match parameter.fields, term.node with
    | [(_, Param.Choice_view options, _)],
        Literal (Param.Text_value label | Param.Choice_value label)
        when not (Array.exists (( = ) label) options) ->
-       report Diagnostic.Error "E_TYPE"
+       report Diagnostic.Error_severity "E_TYPE"
          (Printf.sprintf ":%s must be one of %s" parameter.name
            (String.concat ", " (Array.to_list options)))
    | _ -> ());

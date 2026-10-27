@@ -26,7 +26,7 @@ let selected ?cancel ~grain ~primitives ~transforms geometry =
       for row = 0 to 3 do
         for column = 0 to 3 do
           if !invalid_transform < 0
-              && not (finite (Mat4.get matrix ~row ~column)) then
+              && not (finite (Rays_math.Mat4.get matrix ~row ~column)) then
             invalid_transform := copy
         done
       done) transforms;
@@ -135,7 +135,7 @@ let selected ?cancel ~grain ~primitives ~transforms geometry =
             Array.blit source_positions.x 0 x 0 source_points;
             Array.blit source_positions.y 0 y 0 source_points;
             Array.blit source_positions.z 0 z 0 source_points;
-            let transform_rows = Array.map Mat4.to_rows transforms in
+            let transform_rows = Array.map Rays_math.Mat4.to_rows transforms in
             if added_points > 0 then Parallel.for_ ~chunk_size:grain ~start:0
                 ~finish:(added_points - 1) (fun local ->
               if local land 4_095 = 0 then Cancel.check_opt cancel;
@@ -191,12 +191,12 @@ let selected ?cancel ~grain ~primitives ~transforms geometry =
                 ~point_count:output_points ~vertex_points ~primitive_offsets
                 ~primitive_kinds in
             let normal_rows =
-              let rows = Array.make copies (Mat4.to_rows Mat4.identity)
+              let rows = Array.make copies (Rays_math.Mat4.to_rows Rays_math.Mat4.identity)
               and valid = ref true in
               for copy = 0 to copies - 1 do
-                match Mat4.inverse transforms.(copy) with
+                match Rays_math.Mat4.inverse transforms.(copy) with
                 | None -> valid := false
-                | Some inverse -> rows.(copy) <- Mat4.to_rows (Mat4.transpose inverse)
+                | Some inverse -> rows.(copy) <- Rays_math.Mat4.to_rows (Rays_math.Mat4.transpose inverse)
               done;
               if !valid then Some rows else None in
             let normal_attribute mapping source_prefix selected_count attribute =
@@ -205,7 +205,7 @@ let selected ?cancel ~grain ~primitives ~transforms geometry =
               | Some rows, Attribute.Float3 values ->
                   let source = Packed.Float3.Private.view values
                   and count = Array.length mapping
-                  and identity_rows = Mat4.to_rows Mat4.identity in
+                  and identity_rows = Rays_math.Mat4.to_rows Rays_math.Mat4.identity in
                   let nx = Array.make count 0. and ny = Array.make count 0.
                   and nz = Array.make count 0. in
                   if count > 0 then Parallel.for_ ~chunk_size:grain ~start:0

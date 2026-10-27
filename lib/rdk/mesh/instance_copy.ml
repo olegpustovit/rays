@@ -484,7 +484,7 @@ let transform_single_instance ?cancel ~grain matrix geometry =
   let x = Array.make count 0. and y = Array.make count 0.
   and z = Array.make count 0. in
   let (m00,m01,m02,m03), (m10,m11,m12,m13),
-      (m20,m21,m22,m23), (m30,m31,m32,m33) = Mat4.to_rows matrix in
+      (m20,m21,m22,m23), (m30,m31,m32,m33) = Rays_math.Mat4.to_rows matrix in
   parallel_output_ranges ?cancel ~grain count (fun ~first ~last ->
     for point = first to last - 1 do
       let px = source.x.(point) and py = source.y.(point)
@@ -502,7 +502,7 @@ let transform_single_instance ?cancel ~grain matrix geometry =
     done);
   let positions = Packed.Float3.Private.of_owned_exn ~x ~y ~z in
   let output = Geometry.with_positions positions geometry |> Support.get_ok in
-  match Mat4.inverse matrix with
+  match Rays_math.Mat4.inverse matrix with
   | None ->
       List.fold_left (fun output owner ->
         match Geometry.find_attribute ~owner "N" geometry with
@@ -511,9 +511,9 @@ let transform_single_instance ?cancel ~grain matrix geometry =
         | None | Some _ -> output)
         output [Attribute.Point; Attribute.Vertex]
   | Some inverse ->
-      let normal_matrix = Mat4.transpose inverse in
+      let normal_matrix = Rays_math.Mat4.transpose inverse in
       let (m00,m01,m02,_), (m10,m11,m12,_),
-          (m20,m21,m22,_), _ = Mat4.to_rows normal_matrix in
+          (m20,m21,m22,_), _ = Rays_math.Mat4.to_rows normal_matrix in
       List.fold_left (fun output owner ->
         match Geometry.find_attribute ~owner "N" geometry with
         | None -> output
@@ -555,7 +555,7 @@ let materialize_instances ?cancel ?(grain = 16_384) ~transforms geometry =
   Array.iteri (fun instance matrix ->
       for row = 0 to 3 do for column = 0 to 3 do
         if !invalid_transform < 0
-            && not (Float.is_finite (Mat4.get matrix ~row ~column)) then
+            && not (Float.is_finite (Rays_math.Mat4.get matrix ~row ~column)) then
           invalid_transform := instance
       done done) matrices;
   let total = Array.length matrices in
@@ -563,7 +563,7 @@ let materialize_instances ?cancel ?(grain = 16_384) ~transforms geometry =
     Error (Printf.sprintf
       "Rdk.Instance_copy.materialize_instances: transform %d must be finite"
       !invalid_transform)
-  else if total = 1 && Mat4.nearly_equal matrices.(0) Mat4.identity ~eps:0. then
+  else if total = 1 && Rays_math.Mat4.nearly_equal matrices.(0) Rays_math.Mat4.identity ~eps:0. then
     Ok geometry
   else if total = 1 then
     Ok (transform_single_instance ?cancel ~grain matrices.(0) geometry)
@@ -587,7 +587,7 @@ let materialize_instances ?cancel ?(grain = 16_384) ~transforms geometry =
     else begin
       let source_positions = Packed.Float3.Private.view (Geometry.positions geometry) in
       let x, y, z =
-          let rows = Array.map Mat4.to_rows matrices in
+          let rows = Array.map Rays_math.Mat4.to_rows matrices in
           let x = Array.make output_points 0. and y = Array.make output_points 0.
           and z = Array.make output_points 0. in
           parallel_output_ranges ?cancel ~grain output_points
@@ -668,13 +668,13 @@ let materialize_instances ?cancel ?(grain = 16_384) ~transforms geometry =
           (Geometry.attributes geometry) in
       let normal_matrices = if not has_normals then None
         else
-          let output = Array.make total Mat4.identity
+          let output = Array.make total Rays_math.Mat4.identity
           and valid = ref true and instance = ref 0 in
           while !valid && !instance < total do
-            match Mat4.inverse matrices.(!instance) with
+            match Rays_math.Mat4.inverse matrices.(!instance) with
             | None -> valid := false
             | Some inverse ->
-                output.(!instance) <- Mat4.transpose inverse;
+                output.(!instance) <- Rays_math.Mat4.transpose inverse;
                 incr instance
           done;
           if !valid then Some output else None in
@@ -692,7 +692,7 @@ let materialize_instances ?cancel ?(grain = 16_384) ~transforms geometry =
             let source_at = !output_at - (copy * source_count) in
             let count = min (source_count - source_at) (last - !output_at) in
             let (m00,m01,m02,_), (m10,m11,m12,_),
-                (m20,m21,m22,_), _ = Mat4.to_rows normal_matrices.(copy) in
+                (m20,m21,m22,_), _ = Rays_math.Mat4.to_rows normal_matrices.(copy) in
             for offset = 0 to count - 1 do
               let index = source_at + offset in
               let ox = m00*.source.x.(index) +. m01*.source.y.(index)
@@ -742,7 +742,7 @@ let materialize_instances ?cancel ?(grain = 16_384) ~transforms geometry =
     end)))
 
 let duplicate ?cancel ?(grain = 16_384) ?(copies = 1) ?(cumulative = true)
-    ?(transform = Mat4.identity) ?primitives ?copy_group_prefix
+    ?(transform = Rays_math.Mat4.identity) ?primitives ?copy_group_prefix
     ?(preserve_groups = false) geometry =
   if grain <= 0 then invalid_arg "Rdk.Instance_copy.duplicate: grain must be positive";
   let selection_error = match primitives with
@@ -759,10 +759,10 @@ let duplicate ?cancel ?(grain = 16_384) ?(copies = 1) ?(cumulative = true)
     Error "Rdk.Instance_copy.duplicate: copy count is too large"
   | None -> begin
     let full_matrices () =
-      let matrices = Array.make (copies + 1) Mat4.identity in
+      let matrices = Array.make (copies + 1) Rays_math.Mat4.identity in
       for copy = 1 to copies do
         matrices.(copy) <- if cumulative
-          then Mat4.mul matrices.(copy - 1) transform else transform
+          then Rays_math.Mat4.mul matrices.(copy - 1) transform else transform
       done;
       matrices in
     match primitives, copy_group_prefix with
@@ -789,7 +789,7 @@ let duplicate ?cancel ?(grain = 16_384) ?(copies = 1) ?(cumulative = true)
           let added = Array.make copies transform in
           if cumulative then
             for copy = 1 to copies - 1 do
-              added.(copy) <- Mat4.mul added.(copy - 1) transform
+              added.(copy) <- Rays_math.Mat4.mul added.(copy - 1) transform
             done;
           Duplicate.selected ?cancel ~grain ~primitives ~transforms:added geometry
       | None ->

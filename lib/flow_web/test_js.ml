@@ -5,7 +5,7 @@ module P = Flow_ir.Packed
 module R = Flow_ir.Core.Region
 
 let node = Sys.command "command -v node >/dev/null 2>&1" = 0
-let numbers values = String.concat "," (List.map (Printf.sprintf "%.17g") (Array.to_list values))
+let numbers values = String.concat "," (List.map ((fun value -> Param.float_text value)) (Array.to_list values))
 
 let flatten = function
   | Flow.Eval.Float_array a | Vec2_array a | Vec3_array a | Vec4_array a -> a
@@ -18,8 +18,8 @@ let close a b = a = b || Float.abs (a -. b) <= 1e-12 *. Float.max (Float.abs a) 
 (* Runs the region in two ranges (to exercise the carried state) and returns
    the status and one array per output line. *)
 let run_node_raw ?(fast=false) program =
-  let live = {(Frame_input.at_time 1.) with frame=3} in
-  let region = P.to_region program and view = P.Private.view program in
+  let live = {(Input.at_time 1.) with frame=3} in
+  let region = program and view = P.Private.view program in
   let inputs = Test_program.ok (P.Private.prepare_values program ~live) in
   let count = if region.iteration = R.Product then
       Array.fold_left ( * ) 1 (Array.map Flow.Value.array_length inputs.arrays) else inputs.count in
@@ -30,10 +30,12 @@ let run_node_raw ?(fast=false) program =
   let outputs = (if collecting then Array.to_list (Array.map (fun o -> kept * Array.length o) view.outputs) else [])
     @ (if region.result = R.Collect then [] else [width + 1]) in
   let script = Buffer.create 65536 in
+  Printf.bprintf script "import {noise3} from %S;\n"
+    ("file://" ^ Filename.concat (Sys.getcwd ()) "../web_export/runtime/prims.js");
   Buffer.add_string script (Flow_web.Js.region ~fast program);
   let array values = "Float64Array.from([" ^ numbers values ^ "])" in
   let value = function Flow.Eval.Int n -> string_of_int n ^ "n"
-    | Float f -> Printf.sprintf "%.17g" f | _ -> failwith "scalar frame fact expected" in
+    | Float f -> Param.float_text f | _ -> failwith "scalar frame fact expected" in
   let packed = function Flow.Eval.Int_array values ->
       "BigInt64Array.from([" ^ String.concat "," (Array.to_list (Array.map (fun n -> string_of_int n ^ "n") values)) ^ "])"
     | v -> array (flatten v) in
@@ -55,9 +57,9 @@ let run_node_raw ?(fast=false) program =
    | R.Sum false -> Printf.bprintf script "outputs[outputs.length - 1][%d] = 0;\n" width
    | R.Sum zero -> if zero then Printf.bprintf script "outputs[outputs.length - 1][%d] = 1;\n" width
    | R.Accumulate (seed,_) ->
-       let seed=Test_program.ok (Flow.Eval.Private.eval_term region.residual seed ~live) in
+       let seed=Test_program.ok (Flow.Eval.Residual.eval_term region.residual seed ~live) in
        let values=match seed with Flow.Eval.Int _ -> [|value seed|]
-         | _ -> Array.map (Printf.sprintf "%.17g") (flatten seed) in
+         | _ -> Array.map ((fun value -> Param.float_text value)) (flatten seed) in
        Array.iteri (fun i seed -> Printf.bprintf script "outputs[outputs.length - 1][%d] = %s;\n" i seed) values;
        Printf.bprintf script "outputs[outputs.length - 1][%d] = 1;\n" width
    | R.Collect -> ());
@@ -65,7 +67,7 @@ let run_node_raw ?(fast=false) program =
   Printf.bprintf script "if (status === 0) status = region(inputs, uniforms, outputs, %d, %d);\n" (count / 2) count;
   Buffer.add_string script "const str = (x) => Object.is(x, -0) ? '-0' : String(x);\nconsole.log(status);\n";
   Buffer.add_string script "for (const o of outputs) console.log(Array.from(o).map(str).join(' '));\n";
-  let file = Filename.temp_file "region" ".js" and out = Filename.temp_file "region" ".out" in
+  let file = Filename.temp_file "region" ".mjs" and out = Filename.temp_file "region" ".out" in
   Out_channel.with_open_bin file (fun c -> output_string c (Buffer.contents script));
   assert (Sys.command (Printf.sprintf "node %s > %s" (Filename.quote file) (Filename.quote out)) = 0);
   let lines = String.split_on_char '\n' (In_channel.with_open_bin out In_channel.input_all) in
@@ -73,16 +75,16 @@ let run_node_raw ?(fast=false) program =
   match lines with
   | status :: rest ->
       int_of_string status,
-      List.filteri (fun i _ -> i < List.length outputs) rest
+      List.take (List.length outputs) rest
       |> List.map (fun l -> String.split_on_char ' ' l |> List.filter ((<>) "") |> Array.of_list)
   | [] -> assert false
 
-let run_node program = let status,outputs=run_node_raw program in
+let run_node ?fast program = let status,outputs=run_node_raw ?fast program in
   status,List.map (Array.map float_of_string) outputs
 
 let compare_integer ?fast source =
   let program=try Test_program.compile source with Failure message -> failwith (source ^ ": " ^ message) in
-  let live={(Frame_input.at_time 1.) with frame=3} in
+  let live={(Input.at_time 1.) with frame=3} in
   let status,produced=run_node_raw ?fast program in
   assert (status=0);
   let expected=Test_program.ok (P.force_all ~strict:true program ~live) in
@@ -95,12 +97,12 @@ let compare_integer ?fast source =
   let reference=P.reference program ~live |> Test_program.ok in
   assert (expected=[reference])
 
-let compare_native name program =
-  let status, produced = run_node program in
+let compare_native ?fast name program =
+  let status, produced = run_node ?fast program in
   assert (status = 0);
-  let live = {(Frame_input.at_time 1.) with frame=3} in
+  let live = {(Input.at_time 1.) with frame=3} in
   let expected = Test_program.ok (P.force_all program ~live) |> List.map flatten in
-  let region = P.to_region program in
+  let region = program in
   let compared = ref 0 and exact = ref 0 in
   let check actual wanted =
     Array.iteri (fun i w ->
@@ -136,6 +138,21 @@ let programs =
         "skip two", "(for [x " ^ range ^ "] :skip [0 700] (* x t))";
         "product", "(for [x (array/range 32) y (array/range 32)] (+ (* x y) t))"])
 
+let carried = List.map(fun(name,body)->name,Test_program.compile
+  ("(map (fn [x] "^body^") (array/range 65))"))[
+  "carried dynamic","(fold [a t] [i (range -2 (int/mod (int x) 5))] (+ a (* i 0.5)))";
+  "carried empty","(fold [a t] [i (range 0)] (error \"E_UNTAKEN\" \"empty loop\"))";
+  "carried nested","(fold [a t] [i (range 3)] (fold [b a] [j (range i)] (+ b (+ x j))))";
+  "carried record","(let* [s (fold [s {:a 1 :b 2 :v [t 1.] :flag false :text \"start\"}]
+    [i (range (int/mod (int x) 5))] {:a s.b :b s.a :v [s.v.y (+ s.v.x 1.)]
+      :flag (not s.flag) :text (if s.flag \"a\" \"b\")})]
+    [(float s.a) (float s.b) s.v.x (if s.flag 1. 0.)])";
+  "carried guarded","(if (> x t) (fold [a t] [i (range 2)] (+ a x)) x)";
+  "carried scope","(let* [a (fold [s t] [i (range 2)] (+ s (+ x 1.)))] (+ a (+ x 1.)))";
+  "iterate-empty-error","(iterate -1 t (fn [a] (error \"E_EMPTY\" \"untaken body\"))
+    :until (fn [prev next] (error \"E_EMPTY\" \"untaken predicate\")))";
+] @ List.filter(fun(name,_)->String.starts_with ~prefix:"iterate-" name)(Test_program.carried_fixtures 65)
+
 let () =
   let writing = Array.to_list Sys.argv = [Sys.argv.(0); "--write-goldens"] in
   List.iter (fun name ->
@@ -162,6 +179,12 @@ catch (e) { if (e.code !== 'E_CAUSE' || e.message !== 'selected' || e.cause !== 
       if Sys.command("node "^Filename.quote file)<>0 then failwith(In_channel.with_open_bin file In_channel.input_all));
     print_endline "JS regions under node against native Packed.force_all:";
     List.iter (fun (name, program) -> compare_native name program) programs;
+    List.iter(fun(name,program)->compare_native name program;compare_native ~fast:true (name^" fast")program)carried;
+    let uint32=List.assoc "loop-uint32" (Test_program.carried_fixtures 65)in
+    compare_native "uint32" uint32;compare_native ~fast:true "uint32 fast" uint32;
+    List.iter(fun fast->compare_integer ~fast
+      "(map (fn [x] (let* [lo (int/add 9007199254740993 (frame/index))]
+        (fold [a (frame/index)] [i (range lo (int/add lo 3))] (int/add a i)))) (array/range 65))") [false;true];
     List.iter compare_integer [
       "(map (fn [x] (int/add x (frame/index))) (array/int 32769 4611686018427387903))";
       "(map (fn [x] (int/sub x (frame/index))) (array/int 32769 -4611686018427387904))";
@@ -187,6 +210,6 @@ catch (e) { if (e.code !== 'E_CAUSE' || e.message !== 'selected' || e.cause !== 
     (* A non-finite value is a status, not an exception, and native refuses it too. *)
     let overflow = Test_program.compile "(map (fn [x] (pow (+ x t) 1000000)) (array/range 1024))" in
     assert (fst (run_node overflow) = 1);
-    assert (Result.is_error (P.force overflow ~live:(Frame_input.at_time 1.)));
+    assert (Result.is_error (P.force overflow ~live:(Input.at_time 1.)));
     print_endline "JS regions: goldens, node/native comparison and nonfinite status passed"
   end

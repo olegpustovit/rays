@@ -40,7 +40,7 @@ let embedded_sources = lazy (
         | _ -> [form]) forms in
       match List.find_opt (fun form -> not (List.mem (Flow.Syntax.head form)
         [Some "defnode"; Some "defn"; Some "defmacro"])) forms with
-      | Some form -> Error (Flow.Diagnostic.error ~span:form.span ~code:"E_FORM"
+      | Some form -> Error (Diagnostic.error ~span:form.span ~code:"E_FORM"
           (file ^ ": node sources contain only defnode, defn and defmacro forms"))
       | None -> Ok (loaded @ forms)))) (Ok []) Node_sources.files)
 
@@ -53,7 +53,9 @@ let definitions_of_sources forms =
     else Result.map (fun node -> node :: nodes) (Flow.Defnode.parse form))) (Ok []) forms
   |> Result.map List.rev
 
-let node_definitions () = Result.bind (sources ()) definitions_of_sources
+(* The embedded library never changes; custom source lists remain caller-owned and uncached. *)
+let embedded_node_definitions = lazy (Result.bind (sources ()) definitions_of_sources)
+let node_definitions () = Lazy.force embedded_node_definitions
 
 let library_descriptors = lazy (match node_definitions () with
   | Ok nodes -> List.map of_defnode nodes
@@ -74,7 +76,47 @@ let definition_name (form : Flow.Syntax.t) = match form.node with
 (* The library definitions reachable from [forms] through the names they mention, in library order.
    Syntactic and conservative: a name anywhere in a form counts, so shadowing and duplicate-name errors
    are still reported. *)
-let reachable sources forms =
+type source_index = {
+  source_list : Flow.Syntax.t list;
+  source_forms : Flow.Syntax.t array;
+  by_name : (string, int) Hashtbl.t;
+  references : string list array;
+}
+
+let prepare_source_index source_list =
+  let source_forms = Array.of_list source_list in
+  let by_name = Hashtbl.create 256 in
+  let references = Array.mapi (fun index form ->
+    Option.iter (fun name -> Hashtbl.add by_name name index) (definition_name form);
+    let names = Hashtbl.create 16 in
+    mentions names form;
+    Hashtbl.fold (fun name () names -> name :: names) names []) source_forms in
+  {source_list; source_forms; by_name; references}
+
+(* The one embedded library is immutable; keep its dependency index with its existing lazy AST,
+   and leave caller-supplied libraries on the uncached path. *)
+let embedded_source_index = lazy (match sources () with
+  | Ok source_list -> Some (prepare_source_index source_list)
+  | Error _ -> None)
+
+let reachable_index index forms =
+  let seen = Hashtbl.create 64 and queue = Queue.create () in
+  let visit name = if not (Hashtbl.mem seen name) then begin
+    Hashtbl.add seen name (); Queue.add name queue end in
+  let scan form = let names = Hashtbl.create 16 in
+    mentions names form; Hashtbl.iter (fun name () -> visit name) names in
+  List.iter scan forms;
+  let keep = Array.make (Array.length index.source_forms) false in
+  while not (Queue.is_empty queue) do
+    List.iter (fun source_index -> if not keep.(source_index) then begin
+      keep.(source_index) <- true;
+      List.iter visit index.references.(source_index)
+    end) (Hashtbl.find_all index.by_name (Queue.pop queue))
+  done;
+  Array.to_list index.source_forms |> List.filteri (fun i form ->
+    definition_name form = None || keep.(i))
+
+let reachable_uncached sources forms =
   let sources = Array.of_list sources in
   let by_name = Hashtbl.create 256 in
   Array.iteri (fun index form -> Option.iter (fun name -> Hashtbl.add by_name name index)
@@ -92,10 +134,24 @@ let reachable sources forms =
   done;
   List.filteri (fun index form -> definition_name form = None || keep.(index)) (Array.to_list sources)
 
+let reachable sources forms = match Lazy.force embedded_source_index with
+  | Some index when index.source_list == sources -> reachable_index index forms
+  | _ -> reachable_uncached sources forms
+
+module Private = struct
+  let reachable_sources = reachable
+  let definitions_of_sources = definitions_of_sources
+end
+
 let check_workspace_raw ?ops ?library ?sources:override catalog forms =
-  let sources = match override with Some sources -> Ok sources | None -> sources () in
-  match Result.bind sources (fun sources ->
-    Result.map (fun nodes -> sources, nodes) (definitions_of_sources sources)) with
+  let source_forms = match override with Some sources -> Ok sources | None -> sources () in
+  match Result.bind source_forms (fun source_forms ->
+    let nodes = match override with
+      | None -> node_definitions ()
+      | Some supplied -> (match sources () with
+          | Ok embedded when supplied == embedded -> node_definitions ()
+          | _ -> definitions_of_sources source_forms) in
+    Result.map (fun nodes -> source_forms, nodes) nodes) with
   | Error diagnostic -> None, [diagnostic]
   | Ok (sources, nodes) ->
       let sources, nodes = match override with
@@ -170,10 +226,10 @@ let of_factories ~version ?(extra = []) ?nodes factories =
     | [] -> Ok Flow.Check.{version; kinds = List.rev reversed}
     | (entry : descriptor) :: rest ->
         if entry.slot_types <> [] && List.length entry.slot_types <> List.length entry.slots then
-          Error (Flow.Diagnostic.error ~code:"E_CATALOG" ("Input type count differs in " ^ entry.qualified))
+          Error (Diagnostic.error ~code:"E_CATALOG" ("Input type count differs in " ^ entry.qualified))
         else if not (List.for_all (fun name -> match Flow.Ty.of_string name with
           | Some (Flow.Ty.Named _ | Flow.Ty.Fn (Some _)) -> true | _ -> false) entry.slot_types) then
-          Error (Flow.Diagnostic.error ~code:"E_CATALOG" ("Unknown input type in " ^ entry.qualified))
+          Error (Diagnostic.error ~code:"E_CATALOG" ("Unknown input type in " ^ entry.qualified))
         else if List.length (List.sort_uniq String.compare entry.keyword_inputs) <> List.length entry.keyword_inputs
             || List.exists (fun name ->
               match List.find_index (fun (slot, _) -> slot = name) entry.slots with
@@ -183,10 +239,10 @@ let of_factories ~version ?(extra = []) ?nodes factories =
                       | Some (Flow.Ty.Fn (Some _)) -> false
                       | Some ty when ty = Flow.Ty.image -> false
                       | _ -> true)) entry.keyword_inputs then
-          Error (Flow.Diagnostic.error ~code:"E_CATALOG" ("Keyword inputs require distinct required fn/image slots in " ^ entry.qualified))
-        else if context_of entry.qualified = None then Error (Flow.Diagnostic.error
+          Error (Diagnostic.error ~code:"E_CATALOG" ("Keyword inputs require distinct required fn/image slots in " ^ entry.qualified))
+        else if context_of entry.qualified = None then Error (Diagnostic.error
           ~code:"E_CATALOG" ("Unknown context prefix in " ^ entry.qualified))
-        else if Hashtbl.mem seen entry.qualified then Error (Flow.Diagnostic.error
+        else if Hashtbl.mem seen entry.qualified then Error (Diagnostic.error
           ~code:"E_CATALOG" ("Duplicate kind " ^ entry.qualified))
         else begin
           let types = if entry.slot_types = [] then List.map (fun _ -> None) entry.slots else
@@ -206,7 +262,7 @@ let of_factories ~version ?(extra = []) ?nodes factories =
           Hashtbl.add seen entry.qualified ();
           Result.bind (Port.parameters entry.fields) (fun ports ->
             if List.exists (fun p -> List.mem p.Port.path entry.keyword_inputs) ports then
-              Error (Flow.Diagnostic.error ~code:"E_CATALOG" ("Keyword input clashes with a scalar parameter in " ^ entry.qualified))
+              Error (Diagnostic.error ~code:"E_CATALOG" ("Keyword input clashes with a scalar parameter in " ^ entry.qualified))
             else
             let parameters = List.map (fun port ->
               let label = match port.Port.fields with
@@ -221,7 +277,7 @@ let of_factories ~version ?(extra = []) ?nodes factories =
             let context = Option.get (context_of entry.qualified) in
             let outputs = if context = Flow.Context.sop
               then ["geo", Flow.Port_type.Geometry] else [] in
-            build (Flow.Check.{qualified = entry.qualified; aliases = [];
+            build (Flow.Check.{qualified = entry.qualified;
               context; slots; parameters = parameters @ keywords; outputs;
               facts = Hashtbl.find_opt declarations entry.qualified} :: reversed) rest)
         end in
@@ -230,9 +286,9 @@ let of_factories ~version ?(extra = []) ?nodes factories =
       let rec append catalog = function
         | [] -> Ok catalog
         | (node : Flow.Defnode.t) :: rest ->
-            if List.exists (fun (kind : Flow.Check.kind) -> kind.qualified = node.kind.qualified
-                || List.mem node.kind.qualified kind.aliases) catalog.Flow.Check.kinds then
-              Error (Flow.Diagnostic.error ~code:"E_CATALOG" ("Duplicate kind " ^ node.kind.qualified))
+            if List.exists (fun (kind : Flow.Check.kind) -> kind.qualified = node.kind.qualified)
+                catalog.Flow.Check.kinds then
+              Error (Diagnostic.error ~code:"E_CATALOG" ("Duplicate kind " ^ node.kind.qualified))
             else append {catalog with kinds = catalog.kinds @ [described_kind node]} rest in
       Result.map (fun (checked:Flow.Check.catalog) ->
         let native, extra = List.partition (fun (kind:Flow.Check.kind) ->

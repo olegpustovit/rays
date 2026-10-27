@@ -2,19 +2,19 @@
  (name editor_core)
  (public_name rays.editor_core)
  (modules editor_core store panels)
- (libraries param rays flow unix))
+ (libraries param rays rays_math flow runtime_resources unix))
 
 (test
  (name test_history)
  (modules test_history)
- (libraries editor_core rays))
+ (libraries editor_core rays ogpu_mock))
 
 (test
  (name test_store)
  (modules test_store)
- (libraries editor_core rays flow unix))
+ (libraries editor_core rays flow ogpu_mock unix))
 
 (test
  (name test_panels)
  (modules test_panels)
- (libraries editor_core))
+ (libraries editor_core ogpu_mock))

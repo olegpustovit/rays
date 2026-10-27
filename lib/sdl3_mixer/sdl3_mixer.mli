@@ -37,7 +37,6 @@ module Mixer : sig
 
   val create_device : unit -> (t, error) result
   val create_memory : sample_rate:int -> channels:int -> (t, error) result
-  val set_gain : t -> float -> (unit, error) result
 
   (** Generate exactly [frames] of interleaved native-endian float32 PCM from
       a memory mixer. [mixed_bytes] excludes silence appended after tracks
@@ -51,10 +50,6 @@ module Audio : sig
   type t
 
   val load_bytes : Mixer.t -> bytes -> (t, error) result
-  (* Decode replacement bytes against the same mixer. The original remains
-      live and unchanged on both success and failure, so callers can swap
-      immutable snapshots transactionally. *)
-  val reload_bytes : t -> bytes -> (t, error) result
   val destroy : t -> (unit, error) result
 end
 
@@ -66,15 +61,10 @@ module Channels : sig
   type channel = int
 
   val create : Mixer.t -> count:int -> (t, error) result
-  val count : t -> int
   val play :
     t -> ?channel:channel -> ?loops:int -> ?fade_in_ms:int -> Audio.t ->
     (channel, error) result
   val set_volume : t -> channel -> float -> (unit, error) result
-  val pause : t -> channel -> (unit, error) result
-  val resume : t -> channel -> (unit, error) result
-  val stop : t -> channel -> ?fade_out_ms:int -> unit -> (unit, error) result
-  val playing : t -> channel -> (bool, error) result
   val destroy : t -> (unit, error) result
 end
 
@@ -84,10 +74,7 @@ module Music : sig
   type status = Stopped | Playing | Paused
   val create : Mixer.t -> (t, error) result
   val set_audio : t -> Audio.t -> (unit, error) result
-  val set_volume : t -> float -> (unit, error) result
   val play : t -> ?loops:int -> ?fade_in_ms:int -> unit -> (unit, error) result
-  val pause : t -> (unit, error) result
-  val resume : t -> (unit, error) result
   val stop : t -> ?fade_out_ms:int -> unit -> (unit, error) result
   val destroy : t -> (unit, error) result
 end

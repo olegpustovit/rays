@@ -2,16 +2,16 @@ module E = Flow.Eval
 module V = Flow.Value
 module P = Flow_graph.Projection
 module F = Flow_graph.Flow_edit
-let ok = function Ok x -> x | Error d -> failwith (Flow.Diagnostic.to_string d)
+let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let read path = In_channel.with_open_bin path In_channel.input_all
 let catalog = Result.get_ok (Rays_editor.workspace_catalog ())
 let doc text = match Rays_editor.Workspace.load text with Ok d -> d
-  | Error ds -> failwith (String.concat "; " (List.map Flow.Diagnostic.to_string ds))
+  | Error ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
 let bits = Int64.bits_of_float
 (* One frame of a drawing value: its programs prepared, then run. *)
 let render_once ?state plan value ~live ~size =
-  Result.bind (Rays_editor.Drawing.prepare plan value) (fun prepared ->
-    Rays_editor.Drawing.render_prepared ?state prepared ~live ~size)
+  Result.bind (Flow_native.Drawing.prepare plan value) (fun prepared ->
+    Flow_native.Drawing.render_prepared ?state prepared ~live ~size)
 type particle = {x : float; y : float; vx : float; vy : float}
 let initial () = Array.init 10000 (fun i -> let angle = float i *. 0.1 in
   let speed = 30. +. float (i mod 70) in
@@ -22,7 +22,7 @@ let step dt particles = Array.map (fun p ->
          vy = (if y < 0. || y >= 600. then -.p.vy else p.vy)}) particles
 let edited source op = fst (ok (F.apply_checked catalog source op))
 let checked source = match Flow.Workspace.check catalog source with
-  | Some w, _ -> w | _, ds -> failwith (String.concat "; " (List.map Flow.Diagnostic.to_string ds))
+  | Some w, _ -> w | _, ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
 
 let pure workspace =
   let all_draws = doc {|(workspace drawing (graph picture :context draw
@@ -45,49 +45,49 @@ let pure workspace =
   assert (kinds = (Flow.Op.all |> List.filter_map (fun (o : Flow.Op.t) ->
     if o.ctx = Flow.Context.draw && o.name<>"draw/image" then Some o.name else None) |> List.sort String.compare));
   assert (ok (render_once all.plan (List.assoc "picture" all.results)
-    ~live:(Frame_input.at_time 0.) ~size:(800, 600)) <> []);
+    ~live:(Input.at_time 0.) ~size:(800, 600)) <> []);
   let gpu_document = doc {|(workspace gpu_error (graph picture :context draw
     (draw/circles (map (fn [i] [(+ i t) 0 0]) (array/range 10000)))))|} in
-  let gpu_checked, gpu_evaluated = ok (Flow_ir.qualify_workspace gpu_document.checked) in
-  let gpu_prepared = ok (Rays_editor.Drawing.prepare ~approx:gpu_checked.approx
-    gpu_evaluated.plan (List.assoc "picture" gpu_evaluated.results)) in
-  let diagnostic = Flow.Diagnostic.error ~code:"E_TEST_GPU" ~cause:"原因 🐈"
-    ~span:Flow.Diagnostic.{start=3;finish=8} "A backend failure" in
-  let calls = ref 0 in
-  let backend : Flow_ir.Gpu.backend = {cost=(fun _ ~count:_ -> None);
-    prepare=(fun _ -> Ok {run=(fun (inputs:Flow_ir.Packed.Private.inputs) ->
-      Ok Flow_ir.Gpu.{identity=17;count=inputs.count;width=3;stamp=0L;gpu_seconds=None});
+  let backend : Flow_ir.Gpu.backend = {cost=(fun ~fast:_ _ ~count:_ -> None);
+    prepare=(fun ~fast:_ _ -> Ok {run=(fun (inputs:Flow_ir.Packed.Private.inputs) ->
+      Ok Flow_ir.Gpu.{identity=17;count=inputs.count;width=3;output=0;stamp=0L;gpu_seconds=None});
       readback=(fun _ -> failwith "Display-only output must remain on the device")})} in
-  let result = Flow_ir.Gpu.with_backend ~policy:Flow_ir.Gpu.Qualification backend (fun () ->
-    Rays_editor.Drawing.render_prepared gpu_prepared ~live:(Frame_input.at_time 0.25)
-      ~size:(800,600) ~gpu:(fun ~slot:_ ~kind:_ ~count:_ _ -> incr calls; Error diagnostic)) in
+  let gpu={Flow_ir.Gpu.default with backend=Some backend;policy=Flow_ir.Gpu.Qualification} in
+  let gpu_checked, gpu_evaluated = ok (Flow_ir.qualify_workspace ~gpu gpu_document.checked) in
+  let gpu_prepared = ok (Flow_native.Drawing.prepare ~gpu ~approx:gpu_checked.approx
+    gpu_evaluated.plan (List.assoc "picture" gpu_evaluated.results)) in
+  let diagnostic = Diagnostic.error ~code:"E_TEST_GPU" ~cause:"原因 🐈"
+    ~span:Diagnostic.{start=3;finish=8} "A backend failure" in
+  let calls = ref 0 in
+  let result = Flow_native.Drawing.render_prepared gpu_prepared ~live:(Input.at_time 0.25)
+      ~size:(800,600) ~gpu:(fun ~slot:_ ~kind:_ ~count:_ _ -> incr calls; Error diagnostic) in
   assert (!calls=1 && result=Error diagnostic);
   let colored=doc {|(workspace colored (graph picture :context draw
     (draw/lines (array/vec3 2 [1 2 0]) (array/vec3 2 [3 4 0])
       :color (array/vec3 2 [1 0 0]))))|}in
   let evaluated=ok(E.static colored.checked)in
   let scene=ok(render_once evaluated.plan(List.assoc "picture" evaluated.results)
-    ~live:(Frame_input.at_time 0.) ~size:(800,600))in
+    ~live:(Input.at_time 0.) ~size:(800,600))in
   assert(match Rays.Scene.Private.commands scene with
     |[|Scene_command.Render_ir.Shapes batch|]->
-      let bytes=Scene_command.Shape_batch.instances batch in
+      let bytes=Scene_command.Ui_batch.instances batch in
       Bytes.get_int32_le bytes 32=0xff0000ffl && Bytes.get_int32_le bytes 96=0xff0000ffl
     |_->false);
   List.iter(fun text->
     let ws=doc ("(workspace lengths (graph picture :context draw "^text^"))")in
     let evaluated=ok(E.static ws.checked)in
     assert(match render_once evaluated.plan (List.assoc "picture" evaluated.results)
-      ~live:(Frame_input.at_time 0.) ~size:(800,600)with
-      |Error diagnostic->diagnostic.Flow.Diagnostic.code="E_DRAW_LENGTH"|Ok _->false))
+      ~live:(Input.at_time 0.) ~size:(800,600)with
+      |Error diagnostic->diagnostic.Diagnostic.code="E_DRAW_LENGTH"|Ok _->false))
     ["(draw/circles (array/vec3 3 [1 2 0]) :radius (array/float 2 1.0))";
      "(draw/rects (array/vec3 3 [1 2 0]) (array/vec3 2 [3 4 0]))";
      "(draw/lines (array/vec3 3 [1 2 0]) (array/vec3 2 [3 4 0]))"];
   let static=doc "(workspace retained (graph picture :context draw (draw/circles (array/vec3 100000 [20 30 0]) :radius 3.0)))"in
   let evaluated=ok(E.static static.checked)in
-  let prepared=ok(Rays_editor.Drawing.prepare evaluated.plan(List.assoc "picture" evaluated.results))in
+  let prepared=ok(Flow_native.Drawing.prepare evaluated.plan(List.assoc "picture" evaluated.results))in
   let state=E.create_state()in
-  let render count=ok(Rays_editor.Drawing.render_prepared ~state prepared
-    ~live:(Frame_input.at_time(float count /. 60.)) ~size:(800,600))in
+  let render count=ok(Flow_native.Drawing.render_prepared ~state prepared
+    ~live:(Input.at_time(float count /. 60.)) ~size:(800,600))in
   let first=render 0 in
   Gc.full_major();let before=Gc.allocated_bytes()in
   for i=1 to 100 do assert(render i==first)done;
@@ -96,8 +96,8 @@ let pure workspace =
   Printf.printf "Retained 100000-circle lowering %.0f bytes/frame\n%!" allocated;
   let invalid = ok (E.static (doc "(workspace invalid (graph g :context draw (draw/background \"invalid\")))").checked) in
   assert (match render_once invalid.plan (List.assoc "g" invalid.results)
-    ~live:(Frame_input.at_time 0.) ~size:(800, 600) with
-    | Error d -> d.Flow.Diagnostic.code = "E_DRAW_COLOR" | Ok _ -> false);
+    ~live:(Input.at_time 0.) ~size:(800, 600) with
+    | Error d -> d.Diagnostic.code = "E_DRAW_COLOR" | Ok _ -> false);
   let evaluated = ok (E.static ~inputs:workspace.Editor_document.Workspace_doc.inputs workspace.checked) in
   assert (Array.length evaluated.plan.nodes = 3);
   Array.iter (fun (n : E.node) -> assert (n.ty = Flow.Ty.drawing)) evaluated.plan.nodes;
@@ -116,7 +116,7 @@ let pure workspace =
   let oracle = ref (initial ()) in
   List.iteri (fun frame dt ->
     oracle := step dt !oracle;
-    let live = {(Frame_input.at_time (float frame *. dt)) with frame; dt; size = (800, 600)} in
+    let live = {(Input.at_time (float frame *. dt)) with frame; dt; size = (800, 600)} in
     let xs = ok (E.force ~state positions ~live) in
     assert (V.array_length xs = 10000);
     Array.iteri (fun i p -> let x, y, z = V.comps (V.array_get xs i) in
@@ -155,12 +155,11 @@ let pure workspace =
   assert (Result.is_error (Editor_document.Contexts.of_workspace ~factories:Sop_catalog.Editor.factories bad));
   let module Editor = Rays_editor.Editor in
   let editor = Result.get_ok (Editor.create ~workspace ~await:true
-    ~prepare:(fun _ _ -> Ok ()) ~scene3:(fun _ () -> Rays.Scene3.create []) ()) in
+    ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ () -> Rays.Scene3.create []) ()) in
   Fun.protect ~finally:(fun () -> Editor.close editor) (fun () ->
-    let frame : Rays.Frame.t = {width = 800; height = 600; size = (800, 600);
-      
-      pixel_scale = (1., 1.); time = 0.; dt = 0.125; fps = 8.; count = 0;
-      mouse = (-100., -100.); mouse_delta = (0., 0.); mouse_buttons = []; keys = []; events = []} in
+    let frame : Rays.Frame.t = { input = { (Input.at_time 0.) with
+      size = 800, 600; dt = 0.125; pointer = -100., -100. };
+      pixel_scale = 1., 1.; fps = 8.; mouse_delta = 0., 0. } in
     let editor = Editor.update editor frame in
     match Rays.Scene.Private.stage_native ~width:800 ~height:600 (Editor.scene editor frame) with
     | Ok staged ->
@@ -170,9 +169,10 @@ let pure workspace =
             (draw/points (array/vec3 %d [20 40 0]))) \
             (graph editor :context editor (ui/workspace (ui/canvas (ref g)))))" count) in
           let editor = ref (Result.get_ok (Editor.create ~workspace ~await:true
-            ~prepare:(fun _ _ -> Ok ()) ~scene3:(fun _ () -> Rays.Scene3.create []) ())) in
+            ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ () -> Rays.Scene3.create []) ())) in
           Fun.protect ~finally:(fun () -> Editor.close !editor) (fun () ->
-            let step i = editor := Editor.update !editor {frame with count = i; time = float i /. 8.} in
+            let step i = editor := Editor.update !editor { frame with input = { frame.input with
+              frame = i; tick = i; t = float i /. 8. } } in
             for i = 0 to 4 do step i done;
             let before = Gc.allocated_bytes () in
             for i = 5 to 24 do step i done;
@@ -187,25 +187,29 @@ let native workspace directory =
   let path name = Filename.concat directory name in
   let config = {Rays.Sketch.default_config with width = 800; height = 600; fps = None} in
   let frames = 4 in
-  ignore (Rays.Sketch.export_state ~config ~directory:(path "ocaml") ~frames
+  let view particles _ =
+    let points = Array.to_list (Array.map (fun p ->
+      Rays.Scene.point ~at:(int_of_float p.x, int_of_float p.y)
+        ~color:(Rays_math.Color.rgb 0 255 255) ()) particles) in
+    Rays.Scene.clear (Rays_math.Color.rgb 8 10 16) :: points in
+  ignore (Result.get_ok (Rays.Sketch.export_state ~config ~directory:(path "ocaml") ~frames
     ~init:(fun _ -> initial ())
-    ~update:(fun particles frame -> step frame.Rays.Frame.dt particles)
-    ~view:(fun particles _ -> Rays.Scene.clear (Rays.Color.rgb 8 10 16) ::
-      Array.to_list (Array.map (fun p -> Rays.Scene.point ~at:(int_of_float p.x, int_of_float p.y)
-        ~color:(Rays.Color.rgb 0 255 255) ()) particles)) ());
+    ~update:(fun particles frame -> step frame.Rays.Frame.input.dt particles)
+    ~view (())));
   List.iter (fun name -> ignore (ok (Rays_editor.Workspace.export ~directory:(path name) ~frames workspace))) ["lisp-a"; "lisp-b"];
   let evaluated = ok (E.static ~inputs:workspace.Editor_document.Workspace_doc.inputs workspace.checked) in
-  let prepared = ok (Rays_editor.Drawing.prepare ~states:evaluated.states evaluated.plan
+  let prepared = ok (Flow_native.Drawing.prepare ~states:evaluated.states evaluated.plan
     (List.assoc "picture" evaluated.results)) in
-  List.iter (fun domains -> Rays.Parallel.run ~domains (fun () ->
+  let render_domain domains = Parallel.run ~domains (fun () ->
     let state = E.create_state () in
     let name = "cpu-" ^ string_of_int domains in
-    ignore (Rays.Sketch.export_state ~config ~directory:(path name) ~frames
+    let result = Rays.Sketch.export_state ~config ~directory:(path name) ~frames
       ~init:(fun _ -> ()) ~update:(fun () _ -> ())
       ~view:(fun () frame ->
-        let live = {(Frame_input.at_time frame.Rays.Frame.time) with dt = 1. /. 60.; frame = frame.count; size = 800, 600} in
-        ok (Rays_editor.Drawing.render_prepared ~state prepared ~live ~size:live.size)) ())))
-    [1; 8];
+        let live = {(Input.at_time frame.Rays.Frame.input.t) with dt = 1. /. 60.; frame = frame.input.frame; size = 800, 600} in
+        ok (Flow_native.Drawing.render_prepared ~state prepared ~live ~size:live.size)) () in
+    ignore (Result.get_ok result)) in
+  List.iter render_domain [1; 8];
   for i = 0 to frames - 1 do
     let file name = Filename.concat (path name) (Printf.sprintf "frame-%06d.png" i) in
     let baseline = read (file "ocaml") in
@@ -221,12 +225,11 @@ let native workspace directory =
 let benchmark workspace =
   let module Editor = Rays_editor.Editor in
   let editor = ref (Result.get_ok (Editor.create ~workspace ~await:true ~domains:1
-    ~prepare:(fun _ _ -> Ok ()) ~scene3:(fun _ () -> Rays.Scene3.empty) ())) in
+    ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ () -> Rays.Scene3.empty) ())) in
   Fun.protect ~finally:(fun () -> Editor.close !editor) (fun () ->
-    let frame count : Rays.Frame.t = {width = 800; height = 600; size = 800, 600;
-      
-      pixel_scale = 1., 1.; time = float count /. 60.; dt = 1. /. 60.; fps = 60.; count;
-      mouse = -100., -100.; mouse_delta = 0., 0.; mouse_buttons = []; keys = []; events = []} in
+    let frame count : Rays.Frame.t = { input = { (Input.at_time (float count /. 60.)) with
+      dt = 1. /. 60.; frame = count; tick = count; size = 800, 600; pointer = -100., -100. };
+      pixel_scale = 1., 1.; fps = 60.; mouse_delta = 0., 0. } in
     editor := Editor.update !editor (frame 0);
     editor := Rays_editor.Reduce.step !editor [Rays_editor.Private.Leader.Play_pause] (frame 0);
     let step i = editor := Editor.update !editor (frame i) in

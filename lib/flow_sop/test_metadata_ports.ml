@@ -3,7 +3,7 @@ open Rdk
 open Rdk_test_support
 module N = Sop.Node
 module P = Param
-let flow_ok = function Ok value->value|Error diagnostic->fail(Flow.Diagnostic.to_string diagnostic)
+let flow_ok = function Ok value->value|Error diagnostic->fail(Diagnostic.to_string diagnostic)
 let quoted value=Flow.Lisp.flat(Flow.Syntax.make(Str value))
 let sources=Flow_sop.Catalog.sources()|>flow_ok
 let keys=["rename_attributes";"swap_attributes";"delete_attributes";"group_rename";"group_delete";"delete_edge_group";"rename_edge_group"]
@@ -18,8 +18,8 @@ let node ?(reference_node=None) ~reference input key keywords =
   let forms=Printf.sprintf "(workspace metadata (graph g :context sop (sop/%s (sop/metadata_input) %s)))" key keywords
     |>Flow.Syntax.parse |>flow_ok in
   let workspace=match Flow_sop.Catalog.check_workspace ~sources ~ops:Flow_sop.Operators.all catalog forms with
-    |Some workspace,diagnostics when not(List.exists(fun(d:Flow.Diagnostic.t)->d.severity=Error)diagnostics)->workspace
-    |_,diagnostics->fail(key^": "^String.concat "\n"(List.map Flow.Diagnostic.to_string diagnostics)) in
+    |Some workspace,diagnostics when not(List.exists(fun(d:Diagnostic.t)->d.severity=Diagnostic.Error_severity)diagnostics)->workspace
+    |_,diagnostics->fail(key^": "^String.concat "\n"(List.map Diagnostic.to_string diagnostics)) in
   let lowered=Flow_sop.Lower.of_checked ~reference ~factories workspace |>flow_ok in
   let graph=List.hd lowered.graphs in
   Sop.Edit_graph.compile_node graph.network.geometry ~node_id:(Option.get graph.root)|>get_string_ok
@@ -40,8 +40,8 @@ let native ?reference input key changes =
 let cook session domains grain node =
   let context=Sop.Context.create ~domains ~grain ()|>get_string_ok in
   match Sop.Session.cook session ~context node with
-  |Ok output->Result.map_error(fun error->error.Sop.Diagnostic.code,error.message,error.cause)(Sop.Payload.geometry output.payload)
-  |Error error->Error(error.Sop.Diagnostic.code,error.message,error.cause)
+  |Ok output->Result.map_error(fun error->error.Diagnostic.code,error.message,error.cause)(Sop.Payload.geometry output.payload)
+  |Error error->Error(error.Diagnostic.code,error.message,error.cause)
 let same a b=match a,b with
   |Ok a,Ok b->geometry_bytes a=geometry_bytes b
   |Error a,Error b->a=b
@@ -258,8 +258,8 @@ let metadata_projection key changes =
   let catalog factories=Flow_sop.Catalog.of_factories ~nodes:[] ~version:Flow_sop.Manifest.version factories|>flow_ok in
   let catalog=catalog factories and native_catalog=catalog(factory key::factories) in
   let checker catalog forms=Flow_sop.Catalog.check_workspace ~sources ~ops:Flow_sop.Operators.all catalog forms in
-  let workspace=function Some workspace,ds when not(List.exists(fun(d:Flow.Diagnostic.t)->d.severity=Error)ds)->workspace
-    |_,ds->fail(String.concat "\n"(List.map Flow.Diagnostic.to_string ds)) in
+  let workspace=function Some workspace,ds when not(List.exists(fun(d:Diagnostic.t)->d.severity=Diagnostic.Error_severity)ds)->workspace
+    |_,ds->fail(String.concat "\n"(List.map Diagnostic.to_string ds)) in
   let forms=S.parse(Printf.sprintf "(workspace edges (graph g :context sop (let* [src (sop/metadata_input) card (sop/%s src)] card)))" key)|>flow_ok in
   let actual=workspace(checker catalog forms)
   and expected=workspace(Flow.Workspace.check ~ops:Flow_sop.Operators.all native_catalog forms) in
@@ -419,7 +419,7 @@ let rename_attributes_exact () =
     (factories input input)|>flow_ok in
   List.iter(fun expression->let forms=Flow.Syntax.parse(Printf.sprintf
       "(workspace invalid (graph g :context sop (sop/rename_attributes %s)))"expression)|>flow_ok in
-    let errors=function None,ds->List.filter_map(fun(d:Flow.Diagnostic.t)->if d.severity=Error then Some d.code else None)ds
+    let errors=function None,ds->List.filter_map(fun(d:Diagnostic.t)->if d.severity=Diagnostic.Error_severity then Some d.code else None)ds
       |_->fail "Rename Attributes wrong input accepted" in
     let expected=errors(Flow.Workspace.check ~ops:Flow_sop.Operators.all native_catalog forms)
     and actual=errors(Flow_sop.Catalog.check_workspace ~sources ~ops:Flow_sop.Operators.all catalog forms) in
@@ -523,7 +523,7 @@ let group_rename_exact () =
     (factories input input)|>flow_ok in
   List.iter(fun expression->let forms=Flow.Syntax.parse(Printf.sprintf
       "(workspace invalid (graph g :context sop (sop/group_rename %s)))"expression)|>flow_ok in
-    let errors=function None,ds->List.filter_map(fun(d:Flow.Diagnostic.t)->if d.severity=Error then Some d.code else None)ds
+    let errors=function None,ds->List.filter_map(fun(d:Diagnostic.t)->if d.severity=Diagnostic.Error_severity then Some d.code else None)ds
       |_->fail "Group Rename wrong input accepted" in
     let expected=errors(Flow.Workspace.check ~ops:Flow_sop.Operators.all native_catalog forms)
     and actual=errors(Flow_sop.Catalog.check_workspace ~sources ~ops:Flow_sop.Operators.all catalog forms) in
@@ -568,8 +568,8 @@ let delete_attributes_projection () =
   let catalog factories=Flow_sop.Catalog.of_factories ~nodes:[] ~version:Flow_sop.Manifest.version factories|>flow_ok in
   let catalog=catalog factories and native_catalog=catalog(factory "delete_attributes"::factories) in
   let checker catalog forms=Flow_sop.Catalog.check_workspace ~sources ~ops:Flow_sop.Operators.all catalog forms in
-  let workspace=function Some workspace,ds when not(List.exists(fun(d:Flow.Diagnostic.t)->d.severity=Error)ds)->workspace
-    |_,ds->fail(String.concat "\n"(List.map Flow.Diagnostic.to_string ds)) in
+  let workspace=function Some workspace,ds when not(List.exists(fun(d:Diagnostic.t)->d.severity=Diagnostic.Error_severity)ds)->workspace
+    |_,ds->fail(String.concat "\n"(List.map Diagnostic.to_string ds)) in
   let forms=S.parse {|(workspace deletion (graph g :context sop
     (let* [src (sop/metadata_input) reference_source (sop/metadata_reference)
       card (sop/delete_attributes src)] card)))|}|>flow_ok in

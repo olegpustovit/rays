@@ -134,7 +134,7 @@ prefix. In the view, `w`/`e`/`r` show translate, rotate, or scale handles on
 the selected node's xyz triples and Escape hides them so drags only orbit; a
 selected camera also gets a handle sliding its target along the view
 direction (its focus distance). Camera guides (frustum, aim line, eye marker)
-are drawn over the sketch overlay for every camera the view is not looking
+are drawn over the view for every camera the view is not looking
 through; clicking the eye marker selects that camera. `Editor.view_camera`
 is what the pane shows, for sketch renderers: the render camera through
 look-through, else the free viewport carrying the ACTIVE camera's lens. The
@@ -146,11 +146,8 @@ into the pane; otherwise the whole pane, whatever draws it. Solid, Wire and Trac
 same camera in the same rectangle: a path-traced free view is traced at the pane's own drawable
 pixels and replaces the raster picture in place, and only looking through the camera shows the
 gate (the tracer's film is then the root's resolution in the step that fits it). The editor
-paints its 3D view, the sketch overlay, the guides and the handles inside that rect (the axis
-gizmo keeps the pane's corner), and every mark over a view is clipped to its pane. "Render / save PNG" captures the screen
-unless the sketch takes the request (`Editor.take_export`) to render at
-`Editor.render_settings` (resolution, max samples) with progress in the
-status bar (`Editor.set_render_status`).
+paints its 3D view, guides and handles inside that rect (the axis gizmo keeps the pane's corner),
+and every mark over a view is clipped to its pane. "Render / save PNG" captures the screen.
 List rows carry a kind badge (G geometry, L light, C camera, W world, ✦ sun,
 · layer, S SOP); the status bar names the open level's keys.
 

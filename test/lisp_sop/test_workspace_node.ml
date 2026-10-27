@@ -7,7 +7,7 @@ let cook node =
   Fun.protect ~finally:(fun () -> Sop.Session.close session) (fun () ->
     match Sop.Session.cook session ~context node with
     | Ok output -> Result.get_ok (Sop.Payload.geometry output.payload)
-    | Error error -> failwith (Sop.Diagnostic.error_to_string error))
+    | Error error -> failwith (Diagnostic.error_to_string error))
 
 let () =
   let workspace = {|(workspace shared

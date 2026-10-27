@@ -1,5 +1,5 @@
+open Core_model
 open Editor_document
-include Core_model
 
 (* ---- the shell ---- *)
 
@@ -215,5 +215,4 @@ let object_rows ?(locked = false) fields =
   Result.map (List.map (fun (parameter : Flow_sop.Port.parameter) ->
     { Pxui_shell.Inspector.path = parameter.path; fields = parameter.fields; shown = false;
       locked; drive = None; live = None }))
-    (Flow_sop.Port.parameters (Editor_document.Contexts.group_triples fields))
-
+    (Flow_sop.Port.parameters ~infer:true fields)

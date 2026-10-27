@@ -329,7 +329,7 @@ let equal_geometry left right =
 
 let test_multiple_parallel_exactness () =
   let geometry, source, destination = loop_pairs ~pairs:128 ~source_points:129 () in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       Poly_bridge.run ~grain:97 ~source ~destination
         ~pairing:Poly_bridge.Bridge_by_centroid ~divisions:4
         ~output_group:"bridge" geometry

@@ -1,100 +1,94 @@
-(copy_files ../flow_ir/test_program.ml)
-
 (library
  (name flow_web)
  (public_name rays.flow_web)
  (modules flow_web wgsl js target kernel_table text_literal)
  (private_modules text_literal)
- (libraries flow flow_ir param rays_math scene_command))
+ (libraries flow flow_ir param rays_math scene_command parallel))
 
 (test
  (name test_wgsl)
- (modules test_wgsl test_program)
+ (modules test_wgsl)
  (deps (glob_files goldens/*.wgsl))
- (libraries flow_web flow flow_ir rays_math))
+ (libraries flow_web flow flow_ir flow_ir_test_support rays_math parallel))
 
 (test
  (name test_js)
- (modules test_js test_program)
+ (modules test_js)
  (deps (glob_files goldens/*.js))
- (libraries flow_web flow flow_ir frame_input))
-
-(copy_files ../flow_ir/core_fixtures.ml)
+ (libraries flow_web flow flow_ir flow_ir_test_support input parallel))
 
 (test
  (name test_js_frame)
- (modules test_js_frame core_fixtures)
+ (modules test_js_frame)
  (deps (glob_files goldens/frame_*.js)
   ../../sketches/flow_vectors.rays ../../sketches/basic.rays
   ../../tools/web/test/frame_semantics.mjs ../../tools/web/test/rt_shim.mjs
-  ../../tools/web/runtime/prims.js ../../tools/web/runtime/shape2.js ../../tools/web/runtime/runtime.js ../../tools/web/runtime/workers.js ../../tools/web/runtime/region_bindings.js)
- (libraries flow_web flow flow_ir frame_input scene_command str))
+  ../web_export/runtime/prims.js ../web_export/runtime/shape2.js ../web_export/runtime/runtime.js ../web_export/runtime/workers.js ../web_export/runtime/region_bindings.js)
+ (libraries flow_web flow flow_ir flow_ir_test_support input scene_command str parallel))
 
 (test
  (name test_target)
- (modules test_target test_program)
- (libraries flow_web flow flow_ir))
+ (modules test_target)
+ (libraries flow_web flow flow_ir flow_ir_test_support parallel))
 
 (test
  (name test_js_gpu)
- (modules test_js_gpu core_fixtures)
+ (modules test_js_gpu)
  (deps (glob_files goldens/frame_gpu_*.js))
- (libraries flow_web flow flow_ir str))
+ (libraries flow_web flow flow_ir flow_ir_test_support str parallel))
 
 (test
  (name test_fma)
  (modules test_fma)
- (deps ../../tools/web/runtime/prims.js)
- (libraries flow_web flow flow_ir rays_math))
+ (deps ../web_export/runtime/prims.js)
+ (libraries flow_web flow flow_ir rays_math parallel))
 
 (test
  (name test_gather)
  (modules test_gather)
- (deps (glob_files ../../tools/web/runtime/*.js))
- (libraries flow_web flow flow_ir rays_math str))
+ (deps (glob_files ../web_export/runtime/*.js))
+ (libraries flow_web flow flow_ir rays_math str parallel))
 
 (test
  (name test_text_bytes)
  (modules test_text_bytes)
- (deps ../../tools/web/runtime/prims.js)
- (libraries flow_web))
+ (deps ../web_export/runtime/prims.js)
+ (libraries flow_web parallel))
 
 (test
  (name test_scatter)
  (modules test_scatter)
- (deps (glob_files ../../tools/web/runtime/*.js))
- (libraries flow_web flow flow_ir rays_math))
+ (deps (glob_files ../web_export/runtime/*.js))
+ (libraries flow_web flow flow_ir rays_math parallel))
 
 (test
  (name test_compact_scan)
  (modules test_compact_scan)
- (deps (glob_files ../../tools/web/runtime/*.js))
- (libraries flow flow_ir flow_web rays_math))
+ (deps (glob_files ../web_export/runtime/*.js))
+ (libraries flow flow_ir flow_web rays_math parallel))
 
 (test
  (name test_grade_index)
  (modules test_grade_index)
- (deps (glob_files ../../tools/web/runtime/*.js))
- (libraries flow flow_ir flow_web rays_math))
+ (deps (glob_files ../web_export/runtime/*.js))
+ (libraries flow flow_ir flow_web rays_math parallel))
 
 (test
  (name test_region_arguments)
  (enabled_if (= %{env:RAYS_SLOW=0} 1))
  (modules test_region_arguments)
- (deps (glob_files ../../tools/web/runtime/*.js))
- (libraries flow_web flow flow_ir frame_input))
+ (deps (glob_files ../web_export/runtime/*.js))
+ (libraries flow_web flow flow_ir input parallel))
 
 (test
  (name test_array_max_length)
  (modules test_array_max_length)
- (deps (glob_files ../../tools/web/runtime/*.js))
- (libraries flow flow_ir flow_web rays_math))
-
-(copy_files ../flow_ir/array_composition_cases.ml)
+ (deps (glob_files ../web_export/runtime/*.js))
+ (libraries flow flow_ir flow_web rays_math parallel))
 
 (test
  (name test_array_composition_web)
  (enabled_if (= %{env:RAYS_SLOW=0} 1))
- (modules test_array_composition_web array_composition_cases)
- (deps (glob_files ../../tools/web/runtime/*.js))
- (libraries flow_web flow flow_ir rays_math))
+ (modules test_array_composition_web)
+ (deps (glob_files ../web_export/runtime/*.js))
+ (libraries flow_web flow flow_ir flow_ir_test_support rays_math parallel))

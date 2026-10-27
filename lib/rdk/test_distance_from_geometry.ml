@@ -170,7 +170,7 @@ let test_errors_cancellation_and_parallel () =
        "Distance From Geometry cancellation code"
    | Ok _ -> fail "cancelled Distance From Geometry published geometry");
   let dense = Plane_generators.grid ~columns:320 ~rows:200 ~size:20. () |> get_ok
-      |> Transform_ops.transform (Mat4.translation (Vec3.create 0. 1.5 0.)) in
+      |> Transform_ops.transform (Rays_math.Mat4.translation (Rays_math.Vec3.create 0. 1.5 0.)) in
   let surface = Uv_sphere.run ~rings:80 ~segments:120 ~radius:5. () |> get_ok in
   let count = Geometry.point_count dense in
   let affected = point_group "affected" count (fun point -> point mod 3 <> 0) in

@@ -1,0 +1,9 @@
+(library
+ (name input)
+ (modules input)
+ (public_name rays.input))
+
+(test
+ (name test_gate)
+ (modules test_gate)
+ (libraries input))

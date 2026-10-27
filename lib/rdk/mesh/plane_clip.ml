@@ -178,8 +178,8 @@ let clip ?cancel ?(grain = 16_384) ?(keep = Above)
   try
     if grain <= 0 then invalid_arg "Rdk.Plane_clip.clip: grain must be positive";
     Cancel.check_opt cancel;
-    let ox = origin.Vec3.x and oy = origin.y and oz = origin.z
-    and supplied_nx = normal.Vec3.x and supplied_ny = normal.y
+    let ox = origin.Rays_math.Vec3.x and oy = origin.y and oz = origin.z
+    and supplied_nx = normal.Rays_math.Vec3.x and supplied_ny = normal.y
     and supplied_nz = normal.z in
     if not (finite ox && finite oy && finite oz && finite supplied_nx
         && finite supplied_ny && finite supplied_nz) then

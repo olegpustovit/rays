@@ -1,17 +1,17 @@
 let glob_rewrite ~pattern ~replacement text =
-  Result.map_error(Flow.Diagnostic.error ~code:"E_METADATA_PATTERN")
+  Result.map_error(Diagnostic.error ~code:"E_METADATA_PATTERN")
     (Result.map(fun rewrite->Option.value ~default:text(Rdk.Attribute_pattern.rewrite rewrite text))
       (Rdk.Attribute_pattern.compile_rewrite ~pattern ~replacement))
 let glob_rewrite_set ~pattern ~replacement text =
-  Result.map_error(Flow.Diagnostic.error ~code:"E_METADATA_PATTERN")
+  Result.map_error(Diagnostic.error ~code:"E_METADATA_PATTERN")
     (Result.map(fun rewrite->Option.value ~default:text(Rdk.Attribute_pattern.rewrite_set rewrite text))
       (Rdk.Attribute_pattern.compile_rewrite_set ~pattern ~replacement))
 let glob_rewrite_set_matches ~pattern ~replacement text =
-  Result.map_error(Flow.Diagnostic.error ~code:"E_METADATA_PATTERN")
+  Result.map_error(Diagnostic.error ~code:"E_METADATA_PATTERN")
     (Result.map(fun rewrite->Option.is_some(Rdk.Attribute_pattern.rewrite_set rewrite text))
       (Rdk.Attribute_pattern.compile_rewrite_set ~pattern ~replacement))
 let glob_literal text =
-  if text="" then Error(Flow.Diagnostic.error ~code:"E_METADATA_PATTERN" "A literal glob must not be empty.") else
+  if text="" then Error(Diagnostic.error ~code:"E_METADATA_PATTERN" "A literal glob must not be empty.") else
   let out=Buffer.create(String.length text) in
   String.iter(fun c->(match c with '*'|'?'|'['|']'|'\\'|'^'|' '| '\t'|'\n'|'\r'|'\012'->Buffer.add_char out '\\'|_->());
     Buffer.add_char out c)text;
@@ -30,8 +30,8 @@ let delete ~owner ~pattern input =
     ~cook_mode:(Sop.Node.Duplicate_input 0) ~dependencies:Sop.Context.Dependencies.static
     ~inputs:[|input|] (fun ~node_id:_ context inputs ->
       match delete inputs.(0) (Sop.Context.cancel_token context) with
-      | Ok geometry -> Ok Sop.Node.Private.{geometry;diagnostics=[];instances=None}
-      | Error error -> Error (Sop.Diagnostic.error ~code:"E_ATTR_DELETE" (Rdk.Error.to_string error)))
+      | Ok geometry -> Ok Sop.Node.Private.{geometry;instances=None}
+      | Error error -> Error (Diagnostic.error ~code:"E_ATTR_DELETE" (Rdk.Error.to_string error)))
   |> Sop.Node.Private.with_facts Sop.Node.{cook_mode=Duplicate_input 0;elementwise=Points;
       reads=(if literal then [] else ["*"]);writes=(if literal then [pattern] else ["*"]);
       topology=Preserved;exact=true}
@@ -40,7 +40,7 @@ module E = Flow.Eval
 module A = Rdk.Attribute
 module G = Rdk.Geometry
 module N = Sop.Node
-let error code message = Error (Flow.Diagnostic.error ~code message)
+let error code message = Error (Diagnostic.error ~code message)
 let attribute_owner text = match String.lowercase_ascii (String.trim text) with
   | "point" | "points" -> Ok (Some A.Point)
   | "vertex" | "vertices" -> Ok (Some A.Vertex)
@@ -66,16 +66,16 @@ let group_conflict text = match String.lowercase_ascii (String.trim text) with
   | "overwrite" -> Ok Rdk.Group_ops.Rename_overwrite
   | "union" -> Ok Rdk.Group_ops.Rename_union
   | _ -> error "E_METADATA_CONFLICT" (Printf.sprintf "Unknown group rename conflict %S." text)
-let checked = function Ok value -> value | Error (diagnostic:Flow.Diagnostic.t) ->
+let checked = function Ok value -> value | Error (diagnostic:Diagnostic.t) ->
   Flow.Value.raise_diagnostic diagnostic
-let structured_error error = Sop.Diagnostic.error ~code:(Rdk.Error.code error)
+let structured_error error = Diagnostic.error ~code:(Rdk.Error.code error)
   ~cause:(Rdk.Error.to_string error) ~hints:(Rdk.Error.hints error)
   (Rdk.Error.operation error ^ " could not produce valid geometry")
 let node operation parameters inputs cook =
   N.Private.make_geometry ~operation ~version:1 ~parameters ~cook_mode:N.Generic
     ~dependencies:Sop.Context.Dependencies.static ~inputs:(Array.of_list inputs)
     (fun ~node_id:_ context inputs -> Result.map (fun geometry ->
-      N.Private.{geometry;diagnostics=[];instances=None}) (cook context inputs))
+      N.Private.{geometry;instances=None}) (cook context inputs))
   |> N.Private.with_facts N.{cook_mode=Generic;elementwise=None;reads=["*"];
       writes=["*"];topology=Preserved;exact=true}
 let key cells = Flow.Lisp.flat (Flow.Syntax.make (Vec (List.map (fun cell -> Flow.Syntax.make (Str cell)) cells)))
@@ -120,7 +120,7 @@ let delete_group ~owner ~pattern ~unused input =
     (fun _ inputs -> Result.map_error structured_error (Rdk.Group_ops.delete ~rules:[rule] ~delete_unused:unused inputs.(0)))
 let rename_edge ~from ~into input =
   node "flow.rename_edge" (key [from;into]) [input] (fun _ inputs ->
-    Result.map_error (fun message -> Sop.Diagnostic.error ~code:"rename_edge_group_failed" ~cause:message
+    Result.map_error (fun message -> Diagnostic.error ~code:"rename_edge_group_failed" ~cause:message
       "rename_edge_group could not produce valid geometry") (G.rename_edge_group ~from ~into inputs.(0)))
 let delete_edge ~name input =
   node "flow.delete_edge" (key [name]) [input] (fun _ inputs -> Ok (G.without_edge_group name inputs.(0)))
@@ -133,7 +133,7 @@ let type_of ~owner ~name geometry =
   match storage with Some storage->Ok (E.Text (storage_kind storage))
   |None->error "E_ATTR_TYPE" (Printf.sprintf "Attribute %S is missing." name)
 let names ~owner ~pattern geometry =
-  Result.bind (Result.map_error (Flow.Diagnostic.error ~code:"E_ATTR_PATTERN")
+  Result.bind (Result.map_error (Diagnostic.error ~code:"E_ATTR_PATTERN")
     (Rdk.Attribute_pattern.compile pattern)) (fun compiled ->
     let names=G.Private.attributes geometry |> Array.to_seq |> Seq.filter_map (fun attribute ->
       if A.owner attribute=owner && Rdk.Attribute_pattern.matches compiled (A.name attribute)

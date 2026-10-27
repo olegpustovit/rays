@@ -30,7 +30,7 @@ type preview = { path : Flow.Workspace.path; chain : Flow.Workspace.path list }
 type scope_key = {
   ws : Workspace_doc.t; probe_map : int Layout_by_path.Path_map.t; graph : string;
   evaluated : Flow.Eval.t option;
-  summaries : Cook.summary list; time : Frame_input.t option;
+  summaries : Cook.summary list; time : Input.t option;
   executions : Flow_ir.execution list;
   records : Flow_graph.Probe.t option;
   force : Flow_graph.Probe.force;
@@ -121,7 +121,7 @@ type change =
       (** a row of a node's card pinned onto it or off it ([None]: the default rule), a layout edit *)
   | Notice of string  (** an information message: the echo tip with the dot *)
   | Declined of string  (** a refusal: the echo tip in the error ink *)
-  | Set_parameter of { node : int; path : string; value : Parameter.value }
+  | Set_parameter of { node : int; path : string; value : Param.value }
   | Rename of { node : int; label : string }
 
 type 'panel frame_result = {
@@ -139,7 +139,7 @@ type 'panel frame_result = {
   outline_intents : Navigator.intent list;
   document : Flow_sop.Network.t;  (* the open network after this frame's edits *)
   edit_error : string option;
-  effects : Parameter.effects;
+  effects : Param.effects;
   timeline_intents : timeline_intent list;
   frame_request : int option;
   prompt : prompt option;
@@ -154,12 +154,12 @@ type 'panel frame_result = {
   tree_intents : Pxui_shell.Tree.intent list;
   text_intents : Text_pane.intent list;
   open_graph : int option;
-  settings_changes : (string * Parameter.value) list;
+  settings_changes : (string * Param.value) list;
   graph_panes : (string list * graph_pane) list;
   locals : (string list * local) list;
   other_texts : (string list * Text_pane.shown * Text_pane.intent list) list;
   (* the text panes that are not the one in use: what each showed and asked this frame *)
-  handle_changes : (int * (string * Parameter.value) list) option;
+  handle_changes : (int * (string * Param.value) list) option;
   bar_action : Leader.action option;  (* a header tool or an outline row that means a command *)
   view_pick : projection option;  (* a click on the graph header's Graph / List / Text *)
   drops : (Carry.place * bool) list;
@@ -213,6 +213,7 @@ type 'prepared t = {
   notice : (notice_kind * string) option;  (* the last message and what it was: information or a refusal *)
   notice_at : float;  (* when the notice last changed: the echo tip shows it for a while *)
   doc : Document.t;  (* always the history's present *)
+  gpu : Flow_ir.Gpu.config;  (* the workspace owner's immutable execution policy *)
   filed : Document.t;  (* the document as its source file has it: an external change may replace it *)
   level : Document.level;
   projections : projection Level_map.t;
@@ -245,7 +246,7 @@ type 'prepared t = {
   ui : Pxui.Ui.t;
   workspace : shell;
   timeline : Timeline.t;
-  live_frame : Frame_input.t;
+  live_frame : Input.t;
   cook : 'prepared Cook.t;
   edit_error : string option;
   status_fps : int option;
@@ -259,9 +260,8 @@ type 'prepared t = {
   pane_keys : (int * (Pxui_shell.Layout.panel * Pxui_shell.Layout.path option)) list;
   leader : Leader.state;
   held_keys : Input.key list;
-  sketch_blocked : string list;  (* keys held while the sketch had no keyboard: unseen by it until released *)
+  sketch_blocked : Input.key list;  (* keys held while the sketch had no keyboard: unseen by it until released *)
   window_focus : int;  (* frames since the window became key again (capped), -1 while it is not *)
-  keymap : Leader.command list;
   timeline_frames : int;
   queued : Leader.action list;  (* picked in the palette, run next frame *)
   graph_at : Pxui_shell.Layout.path option;  (* where [graph_pane]'s leaf was at the last frame *)
@@ -288,7 +288,7 @@ type 'prepared t = {
 
 type ('prepared, 'panel) update = {
   core : 'prepared t;
-  effects : Parameter.effects;
+  effects : Param.effects;
   prepared_changed : bool;
   scene_changed : bool;  (* objects, lights, or the World changed: recompose *)
   framed : bounds option option;

@@ -1,6 +1,7 @@
 module E = Flow.Eval
 module I = Flow_ir
-let ok = function Ok x -> x | Error d -> failwith (Flow.Diagnostic.to_string d)
+module C = I.Core
+let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let rec same (a : E.value) (b : E.value) = match a,b with
   | Float a,Float b -> Int64.bits_of_float a=Int64.bits_of_float b
   | List a,List b -> Array.length a=Array.length b && Array.for_all2 same a b
@@ -12,19 +13,25 @@ let check (name,body) =
     else "(if (> t -1000.) " ^ body ^ " " ^ body ^ ")" in
   let source="(workspace w (graph g :context value (let* [tested " ^ tested ^ "] 0.)))" in
   let ws=match Flow.Workspace.check {Flow.Check.version=1;kinds=[]} (ok (Flow.Syntax.parse source)) with
-    | Some ws,[] -> ws | _,ds -> failwith (name ^ ": " ^ String.concat "; " (List.map Flow.Diagnostic.to_string ds)) in
+    | Some ws,[] -> ws | _,ds -> failwith (name ^ ": " ^ String.concat "; " (List.map Diagnostic.to_string ds)) in
   let r=match snd (List.hd (List.assoc ["g";"tested"] (ok (E.static ~record:true ws)).records)) with
     | E.Residual r -> r | _ -> failwith (name ^ ": expected residual") in
   let core=match I.Core_lower.lower r with Ok p -> p | Error n -> failwith (name ^ ": refused " ^ n) in
+  if name="iterate-huge-until"then begin
+    let seen=ref false in
+    C.iter(fun(s:C.statement)->match s.node with
+      |Counted{stop;_}->assert(Option.is_some stop);seen:=true|_->())core.body;
+    assert(!seen)
+  end;
   assert (Format.asprintf "%a" I.Core.pp core = Format.asprintf "%a" I.Core.pp (Result.get_ok (I.Core_lower.lower r)));
   let program=ok (I.Executor.compile (E.Residual r)) in
   List.iter (fun time ->
-    let live=Frame_input.at_time time in
+    let live=Input.at_time time in
     let expected=E.Private.force_reference (E.Residual r) ~live in
     let verify actual = match actual,expected with
       | Ok actual,Ok expected when same actual expected -> ()
-      | Error a,Error b when a.Flow.Diagnostic.code=b.Flow.Diagnostic.code -> ()
-      | _ -> let show=function Ok v -> E.show v | Error d -> Flow.Diagnostic.to_string d in
+      | Error a,Error b when a.Diagnostic.code=b.Diagnostic.code -> ()
+      | _ -> let show=function Ok v -> E.show v | Error d -> Diagnostic.to_string d in
           failwith (Printf.sprintf "%s at %g: %s <> %s" name time (show actual) (show expected)) in
     verify (E.force (E.Residual r) ~live);
     verify (I.Core_exec.run core ~live);
@@ -43,7 +50,7 @@ let () =
   let init=[statement 0 (Assign (0,Constant 0));statement 1 (Assign (1,Prim (Sequence_build,["count",0])));
     statement 2 (Assign (2,Constant 1));statement 3 (Assign (3,Constant 2))] in
   let store=statement 4 (Store {sequence=1;index=2;value=3}) in
-  let live=Frame_input.at_time 0. in
+  let live=Input.at_time 0. in
   assert (I.Core_exec.run (program (init @ [store])) ~live = Ok (E.List [|Int 7;No_geo|]));
   List.iter (fun body -> match I.Core_exec.run (program body) ~live with
     | Error d -> assert (d.code="E_CORE_OWNERSHIP")
@@ -62,7 +69,7 @@ let () =
     body=[statement 0(Assign(0,Constant 0));statement 1(Assign(1,Constant 1));
       statement 2(Assign(2,Prim(Sequence_build,["count",0;"cooked",1])))];
     results=[|2|];state_slots=[||];regions=[||];call_slots=0} in
-  let live=Frame_input.at_time 0. in
+  let live=Input.at_time 0. in
   (match I.Core_exec.run ~strict:true(program 5001 true) ~live with
    |Ok(E.List xs)->assert(Array.length xs=5001 && Array.for_all((=)E.No_geo)xs)
    |_->failwith "Typed cooked collection retained an unrelated value-list cap");
@@ -79,14 +86,14 @@ let () =
     let source="(workspace captures (graph g :context host [(parts : (list "^ty^") "^default^")] "^
       "(let* [clock t tested "^body^"] 0.)))" in
     let ws=match Flow.Workspace.check {Flow.Check.version=1;kinds=[]}(ok(Flow.Syntax.parse source))with
-      |Some ws,[]->ws|_,ds->failwith(String.concat "; "(List.map Flow.Diagnostic.to_string ds))in
+      |Some ws,[]->ws|_,ds->failwith(String.concat "; "(List.map Diagnostic.to_string ds))in
     let r=match snd(List.hd(List.assoc["g";"clock"](ok(E.static ~record:true ws)).records))with
       |E.Residual r->r|_->failwith "Capture context needs a live clock"in
     let term=match (List.hd ws.graphs).body.node with
       |Flow.Workspace.Let(bindings,_)->List.find_map(function
         |Flow.Workspace.Name "tested",term->Some term|_->None)bindings|>Option.get
       |_->failwith "Missing checked capture term"in
-    E.Private.with_bindings r ~term ["parts",value] in
+    E.Residual.with_bindings r ~term ["parts",value] in
   let xs=Array.init 5001(fun i->if i mod 11=10 then E.No_geo
     else E.Deferred(Flow.Ty.geometry,if i mod 2=0 then 17 else 23))in
   let resolve=function
@@ -94,30 +101,30 @@ let () =
     |E.Source("$core/operator",ty,("$name",E.Text name)::args)
       when ty=Flow.Ty.geometry && (name="nth" || name="first")->
         let op=Option.get(Flow.Op.find name Flow.Context.host)in
-        Ok(op.body ~live:(Frame_input.at_time 0.)
+        Ok(op.body ~live:(Input.at_time 0.)
           ~node:(fun _ _->failwith "Collection selector unexpectedly constructed a node")args)
-    |E.Source(name,ty,args)->Error(Flow.Diagnostic.error ~code:"E_DATA_SOURCE"
+    |E.Source(name,ty,args)->Error(Diagnostic.error ~code:"E_DATA_SOURCE"
       ("Unexpected capture source: "^name^" : "^Flow.Ty.to_string ty^" "^
         String.concat "; "(List.map(fun(name,value)->name^"="^E.show value)args)))
-    |value->Error(Flow.Diagnostic.error ~code:"E_DATA_SOURCE" ("Unexpected capture value: "^E.show value))in
+    |value->Error(Diagnostic.error ~code:"E_DATA_SOURCE" ("Unexpected capture value: "^E.show value))in
   List.iter(fun body->
     let r=captured "geometry" body (E.List xs)in
     let core=match I.Core_lower.lower ~strict:true r with
       |Ok p->p|Error why->failwith("Known geometry HOF refused: "^why)in
     (* A homogeneous captured collection is constructed once before Counted.
        Its loop must not contain a 5001-arm selector or rebuild its input. *)
-    let rec assignments statements=List.fold_left(fun total(s:C.statement)->total+1+
-      match s.node with C.If{yes;no;_}->assignments yes+assignments no
-        |Counted{init;body;_}->assignments init+assignments body|_->0)0 statements in
+    let assignments statements =
+      let total = ref 0 in C.iter (fun _ -> incr total) statements; !total in
     let loops=List.filter_map(fun(s:C.statement)->match s.node with C.Counted{body;_}->Some body|_->None)core.body in
     if loops=[] || List.exists(fun body->assignments body>=100)loops then
       failwith(Printf.sprintf "Known collection loop shape: %s loops=%d statements=%s"
         body (List.length loops)(String.concat ","(List.map(fun body->string_of_int(assignments body))loops)));
-    let rec builds statements=List.fold_left(fun count(s:C.statement)->count+
-      match s.node with C.Assign(_,Prim(Sequence_build,_))->1
-        |If{yes;no;_}->builds yes+builds no|_->0)0 statements in
+    let builds statements =
+      let count = ref 0 in
+      C.iter (fun (s:C.statement) -> match s.node with C.Assign(_,Prim(Sequence_build,_))->incr count |_->()) statements;
+      !count in
     assert(List.for_all(fun body->builds body=0)loops);
-    List.iter(fun time->let live=Frame_input.at_time time in
+    List.iter(fun time->let live=Input.at_time time in
       let expected=ok(E.Private.force_reference ~resolve(E.Residual r) ~live)in
       let actual=ok(I.Core_exec.run ~strict:true ~resolve core ~live)in
       assert(same actual expected)) [0.;0.25;0.75;1.])
@@ -134,16 +141,17 @@ let () =
   let source="(workspace w (graph g :context value (let* [tested (iterate (int (+ 5000. (* t 0.))) (array/float 8 1.0)
     (fn [p] (exact (map (fn [(i : int)] (* 0.999 (+ (array/nth p i) (* t 0.)))) (array/range 8 :type int)))))] 0.)))" in
   let ws=match Flow.Workspace.check {Flow.Check.version=1;kinds=[]} (ok (Flow.Syntax.parse source)) with
-    | Some ws,[] -> ws | _,ds -> failwith (String.concat "; " (List.map Flow.Diagnostic.to_string ds)) in
+    | Some ws,[] -> ws | _,ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds)) in
   let r=match snd (List.hd (List.assoc ["g";"tested"] (ok (E.static ~record:true ws)).records)) with
     | E.Residual r -> r | _ -> failwith "iterate: expected residual" in
   let core=match I.Core_lower.lower ~strict:true r with Ok p -> p | Error n -> failwith ("iterate refused: " ^ n) in
-  let rec counted statements = List.fold_left (fun n (s:C.statement) -> n + match s.node with
-    | Counted {init;body;_} -> 1 + counted init + counted body
-    | If {yes;no;_} -> counted yes + counted no | _ -> 0) 0 statements in
+  let counted statements =
+    let n = ref 0 in
+    C.iter (fun (s:C.statement) -> match s.node with Counted _ -> incr n | _ -> ()) statements;
+    !n in
   assert (Array.length core.regions=1);
   assert (counted core.body=1);
-  let live=Frame_input.at_time 0. in
+  let live=Input.at_time 0. in
   let want=E.Private.force_reference (E.Residual r) ~live in
   (match I.Core_exec.run core ~live,want with
    | Ok (E.Float_array a),Ok (E.Float_array b) ->

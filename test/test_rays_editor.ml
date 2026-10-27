@@ -3,19 +3,16 @@ open Sop
 open Test_support
 
 let pointer (x, y) = float x, float y
-let mouse_press (button, point) = Event.MousePressed (button, pointer point)
-let mouse_release (button, point) = Event.MouseReleased (button, pointer point)
-let mouse_move point = Event.MouseMoved (pointer point)
+let mouse_press (button, point) = Input.Pointer_pressed (button, pointer point)
+let mouse_release (button, point) = Input.Pointer_released (button, pointer point)
+let mouse_move point = Input.Pointer_moved (pointer point)
 
 let frame ?(width = 900) ?(height = 640) ?mouse ?(events = []) count : Frame.t = {
-  width; height; size = width, height;
-
-   pixel_scale = 1., 1.;
-  time = float_of_int count /. 60.; dt = 1. /. 60.; fps = 60.; count;
-  mouse = (let x, y = Option.value ~default:(width / 2, height / 2) mouse in
-    float x, float y);
-  mouse_delta = 0., 0.;
-  keys = []; mouse_buttons = []; events;
+  input = { (Input.at_time (float_of_int count /. 60.)) with dt = 1. /. 60.;
+    frame = count; tick = count; size = width, height;
+    pointer = (let x, y = Option.value ~default:(width / 2, height / 2) mouse in
+      float x, float y); events };
+  pixel_scale = 1., 1.; fps = 60.; mouse_delta = 0., 0.;
 }
 
 let width (_, _, width, _) = width
@@ -46,7 +43,7 @@ let enter_geo1 ~update ~panes environment count =
   let click = [mouse_press (Input.LeftButton, point); mouse_release (Input.LeftButton, point)] in
   let environment = update environment (frame ~mouse:point (count + 1)) in
   let environment = update environment (frame ~mouse:point ~events:click (count + 2)) in
-  update environment (frame ~events:[Event.KeyPressed (Input.KeyChar 'i')] (count + 3))
+  update environment (frame ~events:[Input.Key_pressed (Input.KeyChar 'i')] (count + 3))
 
 (* A geometry graph of two nodes, the second the result. *)
 let text = {|(workspace inspectable
@@ -132,7 +129,7 @@ let run () =
       ~max_entries:4 ~max_payload_bytes:(16 * 1024 * 1024)
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
-      ~scene3:(fun _graph mesh -> Scene3.create [Scene3.mesh mesh]) ()
+      ~draw:(fun _graph mesh -> Scene3.create [Scene3.mesh mesh]) ()
     |> Result.get_ok in
   let deadline = Unix.gettimeofday () +. 60. in
   let rec wait count environment =
@@ -152,19 +149,19 @@ let run () =
     "entering geo1 from the scene list did not open its SOP network";
   (match Sys.getenv_opt "RAYS_UI_PREVIEW" with
    | Some directory ->
-       Sketch.export ~directory ~prefix:"workspace" ~frames:1
+       Result.get_ok(Sketch.export ~directory ~prefix:"workspace" ~frames:1
          ~config:{ Sketch.default_config with width=900; height=640 }
-         (Rays_editor.Editor.scene environment)
+         (Rays_editor.Editor.scene environment))
    | None -> ());
   let environment = Rays_editor.Editor.update environment
-      (frame ~events:[Event.KeyPressed (Input.KeyChar '/');
-        Event.KeyPressed (Input.KeyChar 'h')] 1) in
+      (frame ~events:[Input.Key_pressed (Input.KeyChar '/');
+        Input.Key_pressed (Input.KeyChar 'h')] 1) in
   let hidden_scene = Rays_editor.Editor.scene environment (frame 1) in
   check (Rays_editor.Editor.scene environment (frame 2) == hidden_scene)
     "unchanged hidden 3D scene composition was rebuilt";
   let environment = Rays_editor.Editor.update environment
-      (frame ~events:[Event.KeyPressed (Input.KeyChar '/');
-        Event.KeyPressed (Input.KeyChar 'h')] 2) in
+      (frame ~events:[Input.Key_pressed (Input.KeyChar '/');
+        Input.Key_pressed (Input.KeyChar 'h')] 2) in
   (* Graph focus shows the Flow guide; the ordinary status/FPS strip remains
      under View focus. Compare sampling in the pane that displays it. *)
   let environment = Rays_editor.Editor.update environment (frame 3) in
@@ -195,7 +192,7 @@ let run () =
   let environment = Rays_editor.Editor.update environment
       (frame ~events:[mouse_press (Input.LeftButton, blank_inspector);
         mouse_release (Input.LeftButton, blank_inspector);
-        Event.KeyPressed (Input.KeyChar '/'); Event.KeyPressed (Input.KeyChar 'w')] 10) in
+        Input.Key_pressed (Input.KeyChar '/'); Input.Key_pressed (Input.KeyChar 'w')] 10) in
   check (not (Rays_editor.Editor.flying environment))
     "same-frame inspector click routed a view-only shortcut";
   let environment = Rays_editor.Editor.update environment
@@ -224,14 +221,14 @@ let run () =
     check (ui_bytes (Rays_editor.Editor.scene environment (frame 19)) <> collapsed_scene)
     "workspace render accordion lost its armed press before the release frame";
   let environment = Rays_editor.Editor.update environment
-      (frame ~events:[Event.KeyPressed (Input.KeyChar '/');
-        Event.KeyPressed (Input.KeyChar 'w')] 19) in
+      (frame ~events:[Input.Key_pressed (Input.KeyChar '/');
+        Input.Key_pressed (Input.KeyChar 'w')] 19) in
   check (not (Rays_editor.Editor.flying environment))
     "inspector child press did not focus its pane";
   (match Sys.getenv_opt "RAYS_UI_PREVIEW" with
-   | Some directory -> Sketch.export ~directory ~prefix:"workspace-render"
+   | Some directory -> Result.get_ok(Sketch.export ~directory ~prefix:"workspace-render"
        ~frames:1 ~config:{ Sketch.default_config with width=900; height=640 }
-       (Rays_editor.Editor.scene environment)
+       (Rays_editor.Editor.scene environment))
    | None -> ());
   let box path = match Rays_editor.Editor.node_box environment path with
     | Some rect -> rect | None -> fail "the node has no box in the graph pane" in
@@ -245,15 +242,15 @@ let run () =
   check (scope_line environment = "scope selected: geo1/source")
     "graph selection did not select the clicked node";
   (match Sys.getenv_opt "RAYS_UI_PREVIEW" with
-   | Some directory -> Sketch.export ~directory ~prefix:"workspace-inspector"
+   | Some directory -> Result.get_ok(Sketch.export ~directory ~prefix:"workspace-inspector"
        ~frames:1 ~config:{ Sketch.default_config with width=900; height=640 }
-       (Rays_editor.Editor.scene environment)
+       (Rays_editor.Editor.scene environment))
    | None -> ());
   let environment = Rays_editor.Editor.update environment
-      (frame ~events:[Event.KeyPressed Input.Home] 20) in
+      (frame ~events:[Input.Key_pressed Input.Home] 20) in
   let environment = Rays_editor.Editor.update environment (frame 20) in
-  let camera_frame = frame ~events:[Event.KeyPressed (Input.KeyChar '/');
-      Event.KeyPressed (Input.KeyChar 'c')] 21 in
+  let camera_frame = frame ~events:[Input.Key_pressed (Input.KeyChar '/');
+      Input.Key_pressed (Input.KeyChar 'c')] 21 in
   let environment = Rays_editor.Editor.update environment camera_frame in
   check (scope_line environment = "scope selected: -")
     "/ c did not restore the camera/render inspector";
@@ -272,13 +269,14 @@ let run () =
       mouse_press (Input.LeftButton, source_point);
       mouse_release (Input.LeftButton, source_point)] 23) in
   let chord ?(shift = false) key count =
-    { (frame ~events:[Event.KeyPressed (Input.KeyChar key)] count) with
-      keys = Input.Meta :: (if shift then [Input.Shift] else []) } in
+    let frame = frame ~events:[Input.Key_pressed (Input.KeyChar key)] count in
+    { frame with input = { frame.input with
+        keys = Input.Meta :: (if shift then [Input.Shift] else []) } } in
   let environment = Rays_editor.Editor.update environment
-      (frame ~mouse:source_point ~events:[Event.KeyPressed (Input.KeyChar '/');
-        Event.KeyPressed (Input.KeyChar 'a')] 24) in
+      (frame ~mouse:source_point ~events:[Input.Key_pressed (Input.KeyChar '/');
+        Input.Key_pressed (Input.KeyChar 'a')] 24) in
   let environment = Rays_editor.Editor.update environment
-      (frame ~mouse:source_point ~events:[Event.TextInput "null"; Event.KeyPressed Input.Enter] 25) in
+      (frame ~mouse:source_point ~events:[Input.Text_input "null"; Input.Key_pressed Input.Enter] 25) in
   check (has (text_of environment) "(sop/null source)")
     "the leader add-node menu did not add a node wired to the selection";
   check (Rays_editor.Editor.can_undo environment) "the added node did not enter the undo stack";
@@ -293,8 +291,9 @@ let run () =
   let tile_x environment path = let x, _, _, _ = box environment path in x in
   let x0 = tile_x environment [ "geo1"; "source" ] and sx, sy = source_point in
   let environment = List.fold_left (fun environment (count, mouse, events) ->
-      Rays_editor.Editor.update environment { (frame ~mouse ~events count) with
-        mouse_buttons = if count > 30 then [Input.LeftButton] else [] })
+      let frame = frame ~mouse ~events count in
+      Rays_editor.Editor.update environment { frame with input = { frame.input with
+        buttons = if count > 30 then [Input.LeftButton] else [] } })
     environment [
       30, (sx, sy), [];  (* hover first: hit testing uses the last frame *)
       31, (sx, sy), [mouse_press (Input.LeftButton, (sx, sy))];
@@ -315,8 +314,8 @@ let run () =
   let ox, oy = card_header (box environment [ "geo1"; "output" ]) in
   let held = [Input.LeftButton] in
   let environment = List.fold_left (fun environment (count, mouse, buttons, keys, events) ->
-      Rays_editor.Editor.update environment
-        { (frame ~mouse ~events count) with mouse_buttons = buttons; keys })
+      let frame = frame ~mouse ~events count in
+      Rays_editor.Editor.update environment { frame with input = { frame.input with buttons; keys } })
     environment [
       (* well past the double-click interval of the earlier presses on these nodes *)
       140, (ox, oy), [], [], [];
@@ -338,13 +337,13 @@ let run () =
   let environment = Rays_editor.Editor.update environment (chord 'z' 151) in
   (* / c clears the selection the drag made, as before this check. *)
   let environment = Rays_editor.Editor.update environment (frame ~events:[
-      Event.KeyPressed (Input.KeyChar '/'); Event.KeyPressed (Input.KeyChar 'c')] 152) in
+      Input.Key_pressed (Input.KeyChar '/'); Input.Key_pressed (Input.KeyChar 'c')] 152) in
   let deadline = Unix.gettimeofday () +. 60. in
   let rec wait_source count environment =
     let environment = Rays_editor.Editor.update environment (frame count) in
     match Option.bind (Rays_editor.Editor.prepared environment)
         Mesh.centroid with
-    | Some center when abs_float (center.Vec3.x -. 5.) < 1. -> environment
+    | Some center when abs_float (center.Rays_math.Vec3.x -. 5.) < 1. -> environment
     | _ when Unix.gettimeofday () < deadline ->
         Unix.sleepf 0.001;
         wait_source (count + 1) environment
@@ -374,11 +373,11 @@ let run () =
   let menu_point = graph_x + (graph_width / 2), graph_y + (graph_height / 2) in
   let add environment count =
     let environment = Rays_editor.Editor.update environment
-        (frame ~mouse:menu_point ~events:[Event.KeyPressed (Input.KeyChar '/');
-          Event.KeyPressed (Input.KeyChar 'a')] count) in
+        (frame ~mouse:menu_point ~events:[Input.Key_pressed (Input.KeyChar '/');
+          Input.Key_pressed (Input.KeyChar 'a')] count) in
     Rays_editor.Editor.update environment
-      (frame ~mouse:menu_point ~events:[Event.TextInput "null";
-        Event.KeyPressed Input.Enter] (count + 1)) in
+      (frame ~mouse:menu_point ~events:[Input.Text_input "null";
+        Input.Key_pressed Input.Enter] (count + 1)) in
   let environment = add environment 230 in
   check (has (text_of environment) "(sop/null output)"
       && Node.operation (Rays_editor.Editor.displayed_node environment) = "transform")
@@ -387,24 +386,24 @@ let run () =
   check (scope_line environment = "scope selected: geo1/null")
     "the added node was not selected";
   let environment = Rays_editor.Editor.update environment
-      (frame ~events:[Event.KeyPressed Input.Backspace] 232) in
+      (frame ~events:[Input.Key_pressed Input.Backspace] 232) in
   check (not (has (text_of environment) "sop/null")) "Backspace did not delete the added node";
   let environment = add environment 234 in
   let environment = Rays_editor.Editor.update environment
-      (frame ~events:[Event.KeyPressed (Input.KeyChar '/');
-        Event.KeyPressed (Input.KeyChar 'g')] 236) in
+      (frame ~events:[Input.Key_pressed (Input.KeyChar '/');
+        Input.Key_pressed (Input.KeyChar 'g')] 236) in
   let environment = Rays_editor.Editor.update environment
-      (frame ~events:[Event.KeyPressed Input.Backspace] 237) in
+      (frame ~events:[Input.Key_pressed Input.Backspace] 237) in
   check (has (text_of environment) "sop/null")
     "hidden graph still accepted a delete shortcut";
   let environment = Rays_editor.Editor.update environment
-      (frame ~events:[Event.KeyPressed (Input.KeyChar '/');
-        Event.KeyPressed (Input.KeyChar 'g')] 238) in
+      (frame ~events:[Input.Key_pressed (Input.KeyChar '/');
+        Input.Key_pressed (Input.KeyChar 'g')] 238) in
   (* / t shows the timeline bar; dragging its scrub slider seeks and
      pauses the shared clock. *)
   let environment = Rays_editor.Editor.update environment
-      (frame ~events:[Event.KeyPressed (Input.KeyChar '/');
-        Event.KeyPressed (Input.KeyChar 't')] 240) in
+      (frame ~events:[Input.Key_pressed (Input.KeyChar '/');
+        Input.Key_pressed (Input.KeyChar 't')] 240) in
   let tx, ty, tw, th = (Rays_editor.Editor.panes environment (frame 241)).timeline in
   check (th > 0 && tw = 900) "/ t did not show the full-width timeline bar";
   let environment = Rays_editor.Editor.update environment (frame 241) in
@@ -419,14 +418,14 @@ let run () =
       && Rays_editor.Timeline.frame clock >= 200L)
     "dragging the timeline scrub did not seek and pause";
   let environment = Rays_editor.Editor.update environment
-      (frame ~events:[Event.KeyPressed (Input.KeyChar '/')] 244) in
+      (frame ~events:[Input.Key_pressed (Input.KeyChar '/')] 244) in
   (match Sys.getenv_opt "RAYS_UI_PREVIEW" with
-   | Some directory -> Sketch.export ~directory ~prefix:"workspace-leader"
+   | Some directory -> Result.get_ok(Sketch.export ~directory ~prefix:"workspace-leader"
        ~frames:1 ~config:{ Sketch.default_config with width=900; height=640 }
-       (Rays_editor.Editor.scene environment)
+       (Rays_editor.Editor.scene environment))
    | None -> ());
   let environment = Rays_editor.Editor.update environment
-      (frame ~events:[Event.KeyPressed Input.Escape] 245) in
+      (frame ~events:[Input.Key_pressed Input.Escape] 245) in
   Rays_editor.Editor.close environment;
 
   (* Camera nodes: a default camera following the viewport joins a document
@@ -446,9 +445,9 @@ let run () =
       ~max_entries:4 ~max_payload_bytes:(16 * 1024 * 1024)
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
-      ~scene3:(fun _graph mesh -> Scene3.create [Scene3.mesh mesh]) ()
+      ~draw:(fun _graph mesh -> Scene3.create [Scene3.mesh mesh]) ()
     |> Result.get_ok in
-  let near a b = Vec3.nearly_equal a b ~eps:1e-6 in
+  let near a b = Rays_math.Vec3.nearly_equal a b ~eps:1e-6 in
   let eye environment = Camera.position (Rays_editor.Editor.render_camera environment) in
   let viewport_eye environment =
     Camera.position (Easy_camera.camera (Rays_editor.Editor.camera environment)) in
@@ -475,8 +474,8 @@ let run () =
   let vx, vy, vw, vh = (Rays_editor.Editor.panes environment (frame 3)).view in
   let px, py = vx + (vw / 2), vy + (vh / 2) in
   let environment = List.fold_left (fun environment (count, events) ->
-      Rays_editor.Editor.update environment
-        { (frame ~events count) with mouse_buttons = [Input.LeftButton] })
+      let frame = frame ~events count in
+      Rays_editor.Editor.update environment { frame with input = { frame.input with buttons = [Input.LeftButton] } })
     environment [
       4, [mouse_press (Input.LeftButton, (px, py))];
       5, [mouse_move (px + 30, py)];
@@ -487,8 +486,8 @@ let run () =
   check (not (near (eye environment) start_eye)
       && near (eye environment) (viewport_eye environment))
     "the following camera did not track a viewport orbit";
-  let command key count = { (frame ~events:[Event.KeyPressed (Input.KeyChar key)] count)
-    with keys = [Input.Meta] } in
+  let command key count = let frame = frame ~events:[Input.Key_pressed (Input.KeyChar key)] count in
+    { frame with input = { frame.input with keys = [Input.Meta] } } in
   (* navigation is view state (E12): the orbit leaves no undo entry, and an undo with nothing to
      undo leaves the view where it is *)
   check (not (Rays_editor.Editor.can_undo environment)) "a viewport orbit made an undo entry";
@@ -499,7 +498,7 @@ let run () =
       && not (Rays_editor.Editor.can_undo environment))
     "an undo with nothing to undo moved the viewport";
   let environment = Rays_editor.Editor.update environment
-      (frame ~events:[Event.KeyPressed Input.Home] 10) in
+      (frame ~events:[Input.Key_pressed Input.Home] 10) in
   let environment = Rays_editor.Editor.update environment (frame 10) in
   let camera_id = List.hd (active environment) in
   (* the camera is the second row of the scene list (geo1 is the first) *)
@@ -509,7 +508,7 @@ let run () =
   let environment = Rays_editor.Editor.update environment (frame ~mouse:at ~events:[
       mouse_press (Input.LeftButton, at); mouse_release (Input.LeftButton, at)] 12) in
   let environment = Rays_editor.Editor.update environment
-      (frame ~events:[Event.KeyPressed Input.Delete] 16) in
+      (frame ~events:[Input.Key_pressed Input.Delete] 16) in
   (* the host's camera is an object like any: deleting the last one is written (a scene graph
      that declares no camera), not re-seeded, and one undo gives it back *)
   check (cameras environment = [] && active environment = []
@@ -520,7 +519,7 @@ let run () =
     "undo after deleting the camera did not restore the original in one step";
   (* Fly: / w (view focused) flies, held W moves forward, Escape exits;
      Space exits and arms the leader in the same frame. *)
-  let key k = Event.KeyPressed k in
+  let key k = Input.Key_pressed k in
   let fly_view environment = let vx, vy, _, _ = (Rays_editor.Editor.panes
       environment (frame 18)).view in vx + 20, vy + 20 in
   let environment = Rays_editor.Editor.update environment (frame ~events:[
@@ -531,7 +530,8 @@ let run () =
   check (Rays_editor.Editor.flying environment) "/ w did not enter fly mode";
   let before = viewport_eye environment in
   let environment = Rays_editor.Editor.update environment
-      { (frame ~events:[key (Input.KeyChar 'w')] 18) with keys = [Input.KeyChar 'w'] } in
+        (let frame = frame ~events:[key (Input.KeyChar 'w')] 18 in
+          { frame with input = { frame.input with keys = [Input.KeyChar 'w'] } }) in
   check (not (near (viewport_eye environment) before)
       && Rays_editor.Editor.selected_node environment = None)
     "held W did not fly the viewport";
@@ -566,18 +566,18 @@ let run () =
   (* Framing waits for bounds when the display cook is still running. *)
   let deadline = Unix.gettimeofday () +. 60. in
   let rec framed count environment =
-    if near (target environment) (Vec3.create 5. 0. 0.)
+    if near (target environment) (Rays_math.Vec3.create 5. 0. 0.)
         || Unix.gettimeofday () > deadline then environment
     else (Unix.sleepf 0.001;
       framed (count + 1) (Rays_editor.Editor.update environment (frame count))) in
   let environment = framed 409 environment in
-  check (near (target environment) (Vec3.create 5. 0. 0.))
+  check (near (target environment) (Rays_math.Vec3.create 5. 0. 0.))
     "viewport-focused F did not focus on the displayed node's cached bounds";
   Rays_editor.Editor.close environment;
 
   (* Sketch settings live in the document: [prepare] reads them, a change
      recooks, and undo restores the previous value (voxel_wall's renderer). *)
-  let mode_schema = Editor_core.Param.(schema ~name:"mode" ~default:0
+  let mode_schema = Param.(schema ~name:"mode" ~default:0
     [ field ~name:"mode" ~label:"Mode" ~kind:(integer ~min:0 ~max:3 ())
         ~default:0 ~get:Fun.id ~set:(fun mode _ -> mode) () ]) in
   let module Settings = Rays_editor.Settings in
@@ -585,7 +585,7 @@ let run () =
       ~settings:(Settings.make mode_schema 0)
       ~max_entries:4 ~max_payload_bytes:(16 * 1024 * 1024)
       ~prepare:(fun settings _ -> Ok (Settings.get mode_schema settings))
-      ~scene3:(fun _ _ -> Scene3.create []) () |> Result.get_ok in
+      ~draw:(fun _ _ -> Scene3.create []) () |> Result.get_ok in
   let deadline = Unix.gettimeofday () +. 60. in
   let rec wait_mode expected count environment =
     let environment = Rays_editor.Editor.update environment (frame count) in
@@ -596,8 +596,8 @@ let run () =
   let environment = wait_mode 0 0 environment in
   let environment = wait_mode 1 100
       (Rays_editor.Editor.set_settings environment (Settings.make mode_schema 1)) in
-  let undo count = { (frame ~events:[Event.KeyPressed (Input.KeyChar 'z')] count)
-    with keys = [Input.Meta] } in
+  let undo count = let frame = frame ~events:[Input.Key_pressed (Input.KeyChar 'z')] count in
+    { frame with input = { frame.input with keys = [Input.Meta] } } in
   let environment = wait_mode 0 200
       (Rays_editor.Editor.update environment (undo 199)) in
   check (Settings.get mode_schema (Rays_editor.Editor.settings environment) = 0)
@@ -615,9 +615,9 @@ let run () =
       ~max_entries:4 ~max_payload_bytes:(16 * 1024 * 1024)
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
-      ~scene3:(fun _graph mesh -> mesh_scene mesh) () |> Result.get_ok in
+      ~draw:(fun _graph mesh -> mesh_scene mesh) () |> Result.get_ok in
   let environment = wait 0 environment in
-  let key k = Event.KeyPressed k in
+  let key k = Input.Key_pressed k in
   let environment = Rays_editor.Editor.update environment
       (frame ~events:[key (Input.KeyChar '/'); key (Input.KeyChar 's')] 50) in
   let graph_width = width (Rays_editor.Editor.panes environment (frame 50)).graph in
@@ -639,9 +639,9 @@ let run () =
   check (Editor_document.Workspace_doc.to_text (Rays_editor.Editor.workspace environment) <> original)
     "the rename did not change the document";
   let phases = Rays_editor.Editor.edit_phases environment in
-  check (Flow.Phase_timer.calls phases Check = 1
-      && Flow.Phase_timer.calls phases Evaluate = 1
-      && Flow.Phase_timer.calls phases Lower = 1
+  check (Flow.Phase_timer.calls phases "check" = 1
+      && Flow.Phase_timer.calls phases "evaluate" = 1
+      && Flow.Phase_timer.calls phases "lower" = 1
       && List.for_all (fun (e : Flow.Phase_timer.entry) -> e.seconds >= 0.) phases.entries)
     "the editor edit did not perform exactly one check/evaluation/lowering";
   check (has (report_line Rays_editor.Editor.crash_dump environment "phases") "check")
@@ -699,19 +699,19 @@ let run () =
   let directory = Filename.temp_dir "sketch-ui-fly" "" in
   let nested_capture = Filename.concat directory "nested/capture.png" in
   (* One window: relative pointer, nested capture, and after_present. *)
-  let final = Sketch.run_state ~max_frames:2
+  let final = Result.get_ok(Sketch.run_state ~max_frames:2
       ~config:{ Sketch.default_config with width = 120; height = 80 }
       ~init:(fun _ -> 0)
       ~update:(fun value (frame : Frame.t) ->
-        toggled := Sketch.set_relative_mouse (frame.count = 1) :: !toggled;
-        if frame.count = 2 then begin
+        toggled := Sketch.set_relative_mouse (frame.input.frame = 1) :: !toggled;
+        if frame.input.frame = 2 then begin
           check (value = 11) "after_present model was not used on the next frame";
           check (Canvas.save_screen_png nested_capture = Ok ())
             "native capture did not create its output directory"
         end;
         value + 1)
-      ~view:(fun _ _ -> [Scene.clear Color.black])
-      ~after_present:(fun value _ -> value + 10) () in
+      ~view:(fun _ _ -> [Scene.clear Rays_math.Color.black])
+      ~after_present:(fun value _ -> value + 10) ()) in
   check (final = 22) "after_present model was not returned";
   check (!toggled = [Ok (); Ok ()]
       && Sketch.set_relative_mouse true <> Ok ())

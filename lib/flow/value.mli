@@ -18,8 +18,6 @@ type ('f, 'r) t =
       (** A typed host source; its fields describe resolution rather than the result. *)
   | Fn of 'f | Residual of 'r
 
-exception Fail of string * string * Diagnostic.span option
-exception Diagnostic_fail of Diagnostic.t
 val raise_diagnostic : Diagnostic.t -> 'a
 val fail : string -> string -> 'a
 val failf : string -> ('a, unit, string, 'b) format4 -> 'a

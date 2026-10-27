@@ -36,7 +36,7 @@ let () =
       let text = In_channel.with_open_bin path In_channel.input_all in
       let workspace = match Result.bind (Rays_editor.Source.read_imports ~file:path text)
           (fun imports -> Rays_editor.Workspace.load ~imports text) with Ok w -> w
-        | Error ds -> failwith (name ^ ": " ^ String.concat "\n" (List.map Flow.Diagnostic.to_string ds)) in
+        | Error ds -> failwith (name ^ ": " ^ String.concat "\n" (List.map Diagnostic.to_string ds)) in
       let directory = Option.map (fun parent ->
         if not (Sys.file_exists parent) then Unix.mkdir parent 0o755;
         Filename.concat parent (String.map (function '/' -> '-' | c -> c) name)) directory in

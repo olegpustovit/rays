@@ -292,7 +292,7 @@ let many_sections () =
 
 let test_parallel () =
   let source = many_sections () in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       Poly_loft.run ~grain:97 ~minimize:Poly_loft.Three_point_distance
         ~output_group:"loft" source |> get_rdk) in
   let one = run 1 and four = run 4 in

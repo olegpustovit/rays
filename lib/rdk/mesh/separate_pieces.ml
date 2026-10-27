@@ -28,7 +28,7 @@ let validate_name label name =
   if String.trim name = "" then fail (label ^ " must not be empty")
 
 let normalized_axis axis =
-  if not (Float.is_finite axis.Vec3.x && Float.is_finite axis.y && Float.is_finite axis.z) then
+  if not (Float.is_finite axis.Rays_math.Vec3.x && Float.is_finite axis.y && Float.is_finite axis.z) then
     fail "packing axis must be finite";
   let scale = max (abs_float axis.x)
       (max (abs_float axis.y) (abs_float axis.z)) in
@@ -36,7 +36,7 @@ let normalized_axis axis =
   let x = axis.x /. scale and y = axis.y /. scale
   and z = axis.z /. scale in
   let length = sqrt ((x *. x) +. (y *. y) +. (z *. z)) in
-  Vec3.create (x /. length) (y /. length) (z /. length)
+  Rays_math.Vec3.create (x /. length) (y /. length) (z /. length)
 
 let compile_piece_ids ?cancel owner name geometry =
   let attribute = match Geometry.find_attribute ~owner name geometry with
@@ -173,7 +173,7 @@ let validate_positions_and_project ?cancel ~grain axis point_piece geometry =
         let x = Array.unsafe_get positions.x point
         and y = Array.unsafe_get positions.y point
         and z = Array.unsafe_get positions.z point in
-        let value = (x *. axis.Vec3.x) +. (y *. axis.y) +. (z *. axis.z) in
+        let value = (x *. axis.Rays_math.Vec3.x) +. (y *. axis.y) +. (z *. axis.z) in
         if !first_error < 0
             && not (Float.is_finite x && Float.is_finite y && Float.is_finite z && Float.is_finite value) then
           first_error := point;
@@ -233,9 +233,9 @@ let piece_translations ?cancel ~axis ~gap minimum maximum =
           || (!placed && translated_low < !cursor)
           || (has_next && gap > 0. && next <= translated_high) then fail (Printf.sprintf
           "packing translation is not representable for piece %d" piece);
-      Array.unsafe_set x piece (offset *. axis.Vec3.x);
-      Array.unsafe_set y piece (offset *. axis.Vec3.y);
-      Array.unsafe_set z piece (offset *. axis.Vec3.z);
+      Array.unsafe_set x piece (offset *. axis.Rays_math.Vec3.x);
+      Array.unsafe_set y piece (offset *. axis.Rays_math.Vec3.y);
+      Array.unsafe_set z piece (offset *. axis.Rays_math.Vec3.z);
       cursor := next;
       placed := true
     end
@@ -437,7 +437,7 @@ let move_back ?cancel ~grain ~owner ~translation_attribute geometry =
   | Some positions -> Geometry.with_positions positions geometry
 
 let run ?cancel ?(grain = 16_384) ?(owner = Attribute.Primitive)
-    ?(translation_attribute = "piece_translation") ?(axis = Vec3.unit_x)
+    ?(translation_attribute = "piece_translation") ?(axis = Rays_math.Vec3.unit_x)
     ?(gap = 0.001) ~mode ~piece_attribute geometry =
   Error.guard ~operation:"separate_pieces" ~code:"invalid_separate_pieces" @@ fun () ->
   try

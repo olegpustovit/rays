@@ -23,7 +23,7 @@ let create device ~memory descriptor =
   if Device.destroyed device then
     Error (Ogpu_core.Error.make operation Ogpu_core.Error.Stale_handle "device is destroyed")
   else
-    match Ogpu_core.Types.validate_buffer (Device.capabilities device) descriptor with
+    match Ogpu_core.Validation.validate_buffer (Device.capabilities device) descriptor with
     | Error _ as failure -> failure
     | Ok () ->
         match validate_memory descriptor memory with

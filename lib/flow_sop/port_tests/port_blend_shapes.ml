@@ -42,7 +42,7 @@ let base () = polygon_polyline () |> fixture_groups |> attrs 6 0 |> vertex_n
 let shape ?skip ?scale salt = polygon_polyline () |> attrs ?skip ?scale 6 salt
 let small_grid () = Plane_generators.grid ~connectivity:Grid_quads ~columns:3 ~rows:3 ~size:4. () |> get_ok
 let idshape ?skip salt ids = let n = Array.length ids in points n |> attrs ?skip ~ids n salt
-let take n l = List.filteri (fun i _ -> i < n) l
+let take = List.take
 let shapes k = List.init k (fun i -> shape ~skip:(if i mod 3 = 1 then ["v4"; "N"] else if i mod 3 = 2 then ["f"] else []) (i + 1))
 let with_bad_mask g = match Geometry.find_attribute ~owner:Attribute.Point "mask" g with
   | Some _ -> let g = Geometry.without_attribute ~owner:Attribute.Point "mask" g in

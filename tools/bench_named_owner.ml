@@ -3,10 +3,9 @@ open Rays
 module E = Rays_editor.Editor
 
 let frame mouse events count : Frame.t = {
-  width = 900; height = 640; size = 900, 640;
-
-  pixel_scale = 1., 1.; time = float count /. 60.; dt = 1. /. 60.; fps = 60.; count;
-  mouse; mouse_delta = 0., 0.; keys = []; mouse_buttons = []; events }
+  input = { (Input.at_time (float count /. 60.)) with dt = 1. /. 60.;
+    frame = count; tick = count; size = 900, 640; pointer = mouse; events };
+  pixel_scale = 1., 1.; fps = 60.; mouse_delta = 0., 0. }
 
 let run objects =
   let source = Buffer.create (objects * 80) in
@@ -18,14 +17,14 @@ let run objects =
   let workspace = Rays_editor.Workspace.load (Buffer.contents source) |> Result.get_ok in
   let presets = Filename.temp_dir "rays-owner-bench" "" in
   let e = ref (E.create ~workspace ~presets ~domains:1 ~await:true
-    ~prepare:(fun _ _ -> Ok ()) ~scene3:(fun _ () -> Scene3.empty) () |> Result.get_ok) in
+    ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ () -> Scene3.empty) () |> Result.get_ok) in
   Fun.protect ~finally:(fun () -> E.close !e) (fun () ->
     e := E.update !e (frame (450., 300.) [] 1);
     let x, y, w, _ = E.node_box !e [Printf.sprintf "g%d" (objects - 1); "box"] |> Option.get in
     let point = float (x + w / 2), float (y + 10) in
     e := E.update !e (frame point [] 2);
-    e := E.update !e (frame point [Event.MousePressed (Input.LeftButton, point);
-      Event.MouseReleased (Input.LeftButton, point)] 3);
+    e := E.update !e (frame point [Input.Pointer_pressed (Input.LeftButton, point);
+      Input.Pointer_released (Input.LeftButton, point)] 3);
     assert (E.level !e = None);
     let expected = E.selected_node !e |> Option.get in
     assert (Sop.Node.operation expected = "box");

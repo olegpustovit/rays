@@ -2,7 +2,7 @@ open Rdk
 open Rdk_test_support
 module N = Sop.Node
 module P = Param
-let checked=function Ok x->x|Error d->fail(Flow.Diagnostic.to_string d)
+let checked=function Ok x->x|Error d->fail(Diagnostic.to_string d)
 let sources=Flow_sop.Catalog.sources() |>checked
 let node ?observe ~reference input keywords=
   let factory=Sop.Edit_graph.factory ~key:"color_input" ~label:"Color input" ~category:["Test"] ~arity:0(fun _->input) in
@@ -10,8 +10,8 @@ let node ?observe ~reference input keywords=
   let catalog=Flow_sop.Catalog.of_factories ~nodes:[] ~version:Flow_sop.Manifest.version factories |>checked in
   let forms=Flow.Syntax.parse("(workspace color (graph g :context sop (sop/set_color (sop/color_input) "^keywords^")))") |>checked in
   let ws=match Flow_sop.Catalog.check_workspace ~sources ~ops:Flow_sop.Operators.all catalog forms with
-    |Some ws,ds when not(List.exists(fun(d:Flow.Diagnostic.t)->d.severity=Error)ds)->ws
-    |_,ds->fail(String.concat "\n"(List.map Flow.Diagnostic.to_string ds)) in
+    |Some ws,ds when not(List.exists(fun(d:Diagnostic.t)->d.severity=Diagnostic.Error_severity)ds)->ws
+    |_,ds->fail(String.concat "\n"(List.map Diagnostic.to_string ds)) in
   let lowered=Flow_sop.Lower.of_checked ~reference ~factories ws |>checked in
   Option.iter(fun observe->observe lowered)observe;
   if keywords="" then begin
@@ -28,7 +28,7 @@ let result session domains grain node=
   Sop.Session.cook session ~context:(Sop.Context.create ~domains ~grain() |>get_string_ok) node
 let cook session domains grain node=match result session domains grain node with
   |Ok output->(match Sop.Payload.geometry output.payload with Ok geometry->geometry|Error e->fail e.message)
-  |Error e->fail(Sop.Diagnostic.error_to_string e)
+  |Error e->fail(Diagnostic.error_to_string e)
 let with_session f=
   let session=Sop.Session.create ~max_entries:64 ~max_payload_bytes:512_000_000 |>get_string_ok in
   Fun.protect ~finally:(fun()->Sop.Session.close session)(fun()->f session)
@@ -164,8 +164,8 @@ let projection ()=
   let catalog factories=Flow_sop.Catalog.of_factories ~nodes:[] ~version:Flow_sop.Manifest.version factories |>checked in
   let catalog=catalog factories and native_catalog=catalog native_factories in
   let checker catalog forms=Flow_sop.Catalog.check_workspace ~sources ~ops:Flow_sop.Operators.all catalog forms in
-  let workspace=function Some workspace,diagnostics when not(List.exists(fun(d:Flow.Diagnostic.t)->d.severity=Error)diagnostics)->workspace
-    |_,diagnostics->fail(String.concat"\n"(List.map Flow.Diagnostic.to_string diagnostics)) in
+  let workspace=function Some workspace,diagnostics when not(List.exists(fun(d:Diagnostic.t)->d.severity=Diagnostic.Error_severity)diagnostics)->workspace
+    |_,diagnostics->fail(String.concat"\n"(List.map Diagnostic.to_string diagnostics)) in
   let authored=Flow.Syntax.parse{|(workspace color (graph g :context sop
     (let* [src (sop/color_input)
            card (sop/set_color src :owner "Point" :group "" :color [0.2 0.4 0.6] :alpha 0.8)] card)))|} |>checked in
@@ -231,12 +231,12 @@ let trace_grouped ()=
   let previous= !(Flow_ir.Packed.Private.trace) and seen=Hashtbl.create 16 in
   let profile=ref None in
   let rec describe depth name value=
-    let key=Flow.Value.key_of ~residual:Flow.Eval.Private.residual_id value in
+    let key=Flow.Value.key_of ~residual:Flow.Eval.Residual.residual_id value in
     Printf.printf"capture name=%s type=%s key_bytes=%d key=%s\n%!" name
       (Flow.Ty.to_string(Flow.Value.ty_of value))(String.length key)
       (String.sub key 0(min 240(String.length key)));
     if depth>0 then match value with
-      |Flow.Value.Residual residual->let view=Flow.Eval.Private.residual_view residual in
+      |Flow.Value.Residual residual->let view=Flow.Eval.Residual.residual_view residual in
         Printf.printf"residual name=%s term=%s\n%!"name(Flow.Lisp.flat view.term.form);
         List.iter(fun(binding,value)->describe(depth-1)(name^"/"^binding)value)view.bindings
       |Struct(kind,_,fields)|Source(kind,_,fields)->
@@ -245,10 +245,10 @@ let trace_grouped ()=
       |Record fields->List.iter(fun(field,value)->describe(depth-1)(name^"/"^field)value)fields
       |_->() in
   let trace=function
-    |Error diagnostics->List.iter(fun(d:Flow.Diagnostic.t)->
+    |Error diagnostics->List.iter(fun(d:Diagnostic.t)->
       let key=d.code^":"^d.message in if not(Hashtbl.mem seen key)then begin
-        Hashtbl.add seen key();Printf.printf"packed refusal %s\n%!"(Flow.Diagnostic.to_string d)end)diagnostics
-    |Ok packed->let region=Flow_ir.Packed.to_region packed in
+        Hashtbl.add seen key();Printf.printf"packed refusal %s\n%!"(Diagnostic.to_string d)end)diagnostics
+    |Ok (packed:Flow_ir.Packed.t)->let region=packed in
       let key=Flow.Lisp.flat region.term.form in
       if not(Hashtbl.mem seen key)then begin Hashtbl.add seen key();
         Printf.printf"packed form=%s type=%s registers=%d outputs=%d sources=[%s]\n%!"
@@ -264,7 +264,7 @@ let trace_grouped ()=
         name(Geometry.vertex_count geo)(Unix.gettimeofday()-.started)(Gc.allocated_bytes()-.bytes);
       result in
     let constructor=Option.get(Flow.Op.find "array/vec4" Flow.Context.value) in
-    let values=measure "typed_constructor"(fun()->constructor.body ~live:(Frame_input.at_time 0.)
+    let values=measure "typed_constructor"(fun()->constructor.body ~live:(Input.at_time 0.)
       ~node:(fun _ _->assert false)["count",Flow.Value.Int(Geometry.vertex_count geo);
         "value",Flow.Value.Vec4(0.2,0.4,0.6,0.8)]) in
     let selection=measure "group_source"(fun()->Flow_sop.Attribute_kernel.resolve
@@ -283,7 +283,7 @@ let trace_grouped ()=
     Option.iter(fun profile->List.iter(fun(execution:Flow_ir.execution)->
       Printf.printf"execution tier=%s seconds=%.6f sites=[%s]\n%!"
         (match execution.tier with Cpu_kernel->"cpu_kernel"|Interp->"interp"|Gpu->"gpu"
-          |Gpu_readback->"gpu_readback"|Closure->"closure"|Gpu_compile->"gpu_compile"|Cooked->"cooked")
+          |Gpu_readback->"gpu_readback"|Core->"core"|Gpu_compile->"gpu_compile")
         execution.seconds(String.concat";"(List.map(fun(_,path,_)->String.concat"/"path)execution.sites)))
       (Flow_ir.Profile.executions profile))!profile)
 let benchmark_mask ()=
@@ -302,7 +302,7 @@ let benchmark_mask ()=
       List.iter(fun(stage,run)->
         let samples=List.init 3(fun _->Gc.full_major();
           let bytes=Gc.allocated_bytes() and start=Unix.gettimeofday() in
-          Rays_math.Parallel.run ~domains run;
+          Parallel.run ~domains run;
           Unix.gettimeofday()-.start,Gc.allocated_bytes()-.bytes) in
         let seconds,bytes=List.nth(List.sort(fun(a,_)(b,_)->Float.compare a b)samples)1 in
         Printf.printf"Color_mask elements=%d group=%s domains=%d stage=%s seconds=%.6f bytes=%.0f\n%!"
@@ -370,7 +370,7 @@ let benchmark_one_row_writer ()=
   List.iter(fun(storage,make)->let geo=match make with None->geo|Some make->
     Geometry.with_attribute(Attribute.create_owned ~owner:Attribute.Detail ~name:"Cd"(make 1)|>get_string_ok)geo|>get_string_ok in
     List.iter(fun domains->
-      let samples=List.init 3(fun _->Rays_math.Parallel.run ~domains(fun()->
+      let samples=List.init 3(fun _->Parallel.run ~domains(fun()->
         Gc.full_major();let bytes=Gc.allocated_bytes() and start=Unix.gettimeofday() in
         for _=1 to 1000 do ignore(Flow_sop.Attribute_kernel.write ~grain:4096
           ~owner:Attribute.Detail ~kind:"vec4" "Cd" values geo|>checked) done;
@@ -393,7 +393,7 @@ let benchmark_domain_defaults ()=
       Printf.printf "Domain_default operation=%s domains=%s calls=10000 seconds=%.12f bytes=%.0f\n%!"
         name label seconds bytes)
       ["Context.create",(fun()->ignore(Sop.Context.create ?domains() |>get_string_ok));
-       "Parallel.run",(fun()->Rays_math.Parallel.run ?domains(fun()->()))])
+       "Parallel.run",(fun()->Parallel.run ?domains(fun()->()))])
     ["omitted",None;"1",Some 1;"4",Some 4]
 let profile_detail ()=
   let input=Lisp_sop.snapshot(selection_groups(points 1_000_000)) in

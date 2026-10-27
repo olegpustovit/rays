@@ -12,10 +12,11 @@ let nominal_samples = [
 
 let rec sample name = function
   | Ty.Int -> Int (if name = "index" || name = "active" || name = "first" then 0 else 2)
-  | Float -> Float (if name = "ratio" then 0.5 else 1.5)
+  | Float -> Float (if name = "ratio" || name = "gain" then 0.5 else 1.5)
   | Bool -> Bool true | Vec3 -> Vec3 (1., 2., 3.)
   | Vec2 -> Vec2 (1., 2.) | Vec4 -> Vec4 (1., 2., 3., 4.)
-  | Text | Color -> Text (if name = "axis" then "horizontal" else if name = "button" then "left" else "a")
+  | Text -> Text (if name = "axis" then "horizontal" else if name = "button" then "left" else "a")
+  | Color -> Text "#336699"
   | List e -> List [|sample "" e; sample "" e|]
   | Array Ty.Int when name="offsets" -> Int_array [|0;2|]
   | Array e -> Value.array_init e 2 (fun _ -> sample "" e)
@@ -26,10 +27,9 @@ let rec sample name = function
 
 let check (o : Op.t) args =
   if o.name="error" then
-    (try ignore(o.body ~live:(Frame_input.at_time 0.) ~node:(fun _ _->assert false)args);
-      failwith "error returned" with Value.Fail(code,message,_)->
-      assert(code="a" && message="a");No_geo
-      |Value.Diagnostic_fail d->assert(d.code="a" && d.message="a" && d.cause=Some "a");No_geo)
+    (try ignore(o.body ~live:(Input.at_time 0.) ~node:(fun _ _->assert false)args);
+      failwith "error returned" with Diagnostic.Error d ->
+      assert(d.code="a" && d.message="a");No_geo)
   else
   try
     let made = ref [] in
@@ -39,15 +39,15 @@ let check (o : Op.t) args =
         | Text s -> Some (Param.Text_value s) | _ -> None in
       name, Value.ty_of v, literal) args) in
     let node name args = let id = List.length !made in made := (name,args) :: !made; Deferred (result_type args, id) in
-    let result = o.body ~live:(Frame_input.at_time 0.) ~node args in
+    let result = o.body ~live:(Input.at_time 0.) ~node args in
     assert (Ty.fits (Value.ty_of result) (result_type args));
     (match o.shape with Op.Struct _ -> assert (match result with
       | Struct _ -> true | Deferred (ty, _) -> Ty.is_cooked ty | _ -> false) | Scalar -> ());
     result
-  with Value.Fail (code, msg, _) -> failwith (o.name ^ ": " ^ code ^ ": " ^ msg)
+  with Diagnostic.Error d -> failwith (o.name ^ ": " ^ d.code ^ ": " ^ d.message)
 
 let () =
-  assert (List.length Op.all = 165);
+  assert (List.length Op.all = 170);
   let repr=Option.get(Op.find "text/repr" Context.value) in
   List.iter(fun text -> assert(check repr ["text",Text text]=Text(Printf.sprintf "%S" text)))
     [String.init 256 Char.chr;"";"é日本😀\000\b\t\n\r\\\""];
@@ -88,7 +88,7 @@ let () =
   assert (Op.packed_kind {sine with category = "Copied"} = None);
   let rejects name args =
     try (Option.get (Op.find name Context.editor)).check args; assert false
-    with Value.Fail ("E_RANGE", _, _) -> () in
+    with Diagnostic.Error d when d.code="E_RANGE" -> () in
   rejects "ui/graph" ["view",Text "invalid"];
   rejects "ui/lisp" ["tab",Text "invalid"];
   rejects "ui/split" ["axis",Text "invalid"];
@@ -99,15 +99,15 @@ let () =
   let empty = {Check.version = 1; kinds = []} in
   let forms = Result.get_ok (Syntax.parse "(workspace w (graph g :context material (material/standard)))") in
   let ws, ds = Workspace.check empty forms in
-  assert (ws <> None && not (List.exists (fun (d : Diagnostic.t) -> d.severity = Error) ds));
+  assert (ws <> None && not (List.exists (fun (d : Diagnostic.t) -> d.severity = Diagnostic.Error_severity) ds));
   let reserved, ds = Workspace.check empty (Result.get_ok (Syntax.parse
     "(workspace w (defmacro m [] `(standard)) (graph g :context material (m)))")) in
   assert (reserved <> None && ds = []);
   let known, ds = Workspace.check empty (Result.get_ok (Syntax.parse
     "(workspace w (graph g :context value (material/standard)))")) in
   assert (known = None && List.exists (fun (d : Diagnostic.t) -> d.code = "E_WRONG_CONTEXT") ds);
-  (* Context survives aliases and function-value calls; the prefix has no semantic role. *)
-  let k : Check.kind = {qualified="custom/root"; aliases=["root"]; context=Context.scene;
+  (* Context survives short-name and function-value calls; the prefix has no semantic role. *)
+  let k : Check.kind = {qualified="custom/root"; context=Context.scene;
     slots=[]; parameters=[]; outputs=[]; facts=None} in
   let ws, ds = Workspace.check {empty with kinds=[k]} (Result.get_ok (Syntax.parse
     "(workspace w (graph g :context scene (root)))")) in
@@ -145,6 +145,9 @@ let () =
   let value body = List.assoc "g" (Result.get_ok (Eval.run ~time:0. (checked body))).results in
   let high = (1 lsl 53) + 1 in
   let text = string_of_int high in
+  assert(Value.int_of (Int high)=high && Value.int_of (Int max_int)=max_int);
+  assert(value (Printf.sprintf "(range %d %d)" high (high+3))=
+    Eval.List [|Int high;Int(high+1);Int(high+2)|]);
   assert (value ("(array/int 3 " ^ text ^ ")") = Eval.Int_array [|high;high;high|]);
   assert (value "(array/range 3 :type int)" = Eval.Int_array [|0;1;2|]);
   assert (value "(array/range 3)" = Eval.Float_array [|0.;1.;2.|]);
@@ -163,8 +166,8 @@ let () =
     ^ ") 1 1) (array/int 1 0)) 0)") = Eval.Int high);
   let workspace = checked ("(map (fn [x] (int/add x 1)) (array/int 4097 " ^ text ^ "))") in
   let expected = Array.make 4097 (high+1) in
-  let run bulk = List.assoc "g" (Result.get_ok
-    (Eval.Private.static_with_kernels ~bulk workspace)).results in
+  let run bulk = List.assoc "g" (Result.get_ok (Eval.Residual.handle ~bulk (fun () ->
+    Eval.Private.static_with_requests workspace))).results in
   assert (run (fun _ -> Some (Eval.Int_array expected)) = Eval.Int_array expected);
   (* A rounded prefix or wrong kind cannot replace exact integer evaluation. *)
   assert (run (fun _ -> Some (Eval.Int_array (Array.make 4097 high))) = Eval.Int_array expected);
@@ -201,35 +204,19 @@ let () =
     | _ -> assert false in
   let marker = static "(test/present)" in
   assert (Eval.is_live marker && not (Eval.frame_dependent marker));
-  assert (Eval.Private.force_reference ~resolve marker ~live:(Frame_input.at_time 0.) = Ok (Eval.Bool false));
+  assert (Eval.Private.force_reference ~resolve marker ~live:(Input.at_time 0.) = Ok (Eval.Bool false));
   assert (Eval.Private.force_reference ~resolve
-    (static "(if (test/present) (sqrt -1) 7)") ~live:(Frame_input.at_time 0.) = Ok (Eval.Int 7));
-  (match Eval.Private.force_reference marker ~live:(Frame_input.at_time 0.) with
+    (static "(if (test/present) (sqrt -1) 7)") ~live:(Input.at_time 0.) = Ok (Eval.Int 7));
+  (match Eval.Private.force_reference marker ~live:(Input.at_time 0.) with
    | Error d -> assert (d.code="E_DATA_SOURCE") | Ok _ -> assert false);
   List.iter (fun resolved ->
     match Eval.Private.force_reference ~resolve:(fun _ -> Ok resolved) marker
-      ~live:(Frame_input.at_time 0.) with
+      ~live:(Input.at_time 0.) with
     | Error d -> assert (d.code="E_DATA_SOURCE") | Ok _ -> assert false)
     [marker; Eval.Float 1.]
 
 let () =
-  let workspace = match Workspace.check {Check.version=1;kinds=[]}
-      (Result.get_ok (Syntax.parse "(workspace strict (graph g :context value (+ t 1.)))")) with
-    | Some workspace,[] -> workspace | _ -> assert false in
-  let value=List.assoc "g" (Result.get_ok (Eval.static workspace)).results in
-  let live=Frame_input.at_time 2. in
-  let force strict execute = Eval.Private.force_with_executor ~compiled:true ~strict
-    ~state:(Eval.create_state ()) ~execute value ~live in
-  assert (force false (fun _ _ -> None)=Ok (Eval.Float 3.));
-  (match force true (fun _ _ -> None) with
-   | Error d -> assert (d.code="E_CORE_FORM") | Ok _ -> assert false);
-  let refusal=Diagnostic.error ~code:"E_TEST_EXECUTOR" "Executor refused the body." in
-  (match force true (fun _ _ -> Some (Error refusal)) with
-   | Error d -> assert (d.code=refusal.code) | Ok _ -> assert false);
-  assert (force true (fun _ _ -> Some (Ok (Eval.Float 7.)))=Ok (Eval.Float 7.))
-
-let () =
-  let live=Frame_input.at_time 2. in
+  let live=Input.at_time 2. in
   let state=Eval.create_state() in
   let marker=Eval.Source("test/array",Ty.Array Ty.Float,["count",Eval.Int 2]) in
   let legacy=Eval.Struct("test/array",Ty.Array Ty.Float,["count",Eval.Int 2]) in
@@ -299,7 +286,7 @@ let () =
 let () =
   List.iter(fun(name,ty,fill)->let op=Option.get(Op.find name Context.value) in
     List.iter(fun count->
-      let actual=op.body ~live:(Frame_input.at_time 0.) ~node:(fun _ _->assert false)
+      let actual=op.body ~live:(Input.at_time 0.) ~node:(fun _ _->assert false)
         ["count",Int count;"value",fill]
       and expected=Value.array_init ty count(fun _->fill) in
       let data=function Vec3_array data|Vec4_array data->data|_->assert false in
@@ -310,12 +297,11 @@ let () =
   print_endline "Constant vector constructor: empty/single/power tails/multi-block signed-zero bits match element builder"
 
 let () =
-  let capture f=try Ok(f()) with Value.Fail(code,message,_)->Error(code,message)
-    |Value.Diagnostic_fail d->Error(d.code,d.message) in
+  let capture f=try Ok(f()) with Diagnostic.Error d -> Error(d.code,d.message) in
   List.iter(fun(name,fill)->let op=Option.get(Op.find name Context.value) in
     List.iter(fun count->let args=["count",Int count;"value",fill] in
       let actual=capture(fun()->Op.Private.constant_array_descriptor name args) in
-      let expected=capture(fun()->op.body ~live:(Frame_input.at_time 0.) ~node:(fun _ _->assert false)args) in
+      let expected=capture(fun()->op.body ~live:(Input.at_time 0.) ~node:(fun _ _->assert false)args) in
       match actual,expected with
       |Error a,Error b->assert(a=b)
       |Ok(Source(_,ty,["count",Int actual;"value",row])),Ok data->
@@ -324,13 +310,13 @@ let () =
       |_->assert false) [0;1;7;-1];
     List.iter(fun fill->let args=["count",Int 1;"value",fill] in
       assert(capture(fun()->Op.Private.constant_array_descriptor name args)=
-        (match capture(fun()->op.body ~live:(Frame_input.at_time 0.) ~node:(fun _ _->assert false)args)with
+        (match capture(fun()->op.body ~live:(Input.at_time 0.) ~node:(fun _ _->assert false)args)with
          |Error e->Error e|Ok _->assert false))) [Text "wrong";Float nan])
     ["array/float",Float(-0.);"array/vec3",Vec3(-0.,1.,2.);"array/vec4",Vec4(-0.,1.,2.,3.)];
   List.iter(fun count->let args=["count",Int count;"value",Text "unused"] in
     let op=Option.get(Op.find "array/vec4" Context.value) in
     assert(capture(fun()->Op.Private.constant_array_descriptor "array/vec4" args)=
-      (match capture(fun()->op.body ~live:(Frame_input.at_time 0.) ~node:(fun _ _->assert false)args)with
+      (match capture(fun()->op.body ~live:(Input.at_time 0.) ~node:(fun _ _->assert false)args)with
        |Error e->Error e|Ok _->assert false))) [Sys.max_floatarray_length/4+1];
   (match Op.Private.constant_array_descriptor "array/vec4" ["count",Int 0;"value",Text "unused"]with
    |Source(_,_,["count",Int 0;"value",Vec4(0.,0.,0.,0.)])->()|_->assert false);
@@ -385,9 +371,9 @@ let ()=
      "array/scan_sum",["array",Int_array[|1;2|]];
      "array/scatter_add",["indices",Int_array[|0;0|];"values",Float_array[|1.;2.|];"size",Int 1]];
   let reject code name args=let op=Option.get(Op.find name Context.value)in
-    try ignore(op.body ~live:(Frame_input.at_time 0.) ~node:(fun _ _->assert false)args);
+    try ignore(op.body ~live:(Input.at_time 0.) ~node:(fun _ _->assert false)args);
       failwith("accepted "^name)
-    with Value.Fail(actual,_,_)->assert(actual=code)in
+    with Diagnostic.Error d -> assert(d.code=code)in
   List.iter(fun(code,name,args)->reject code name args)
     ["E_ARRAY_MASK","array/compact",["mask",Int_array[|2|]];
      "E_ARRAY_OFFSETS","array/segment_argmax",["values",Int_array[|1|];"offsets",Int_array[|0;2|]];

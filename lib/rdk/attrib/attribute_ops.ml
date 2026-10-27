@@ -126,8 +126,8 @@ type blur_mode = Attribute_blur.mode =
   | Laplacian of float | Custom_steps of { odd : float; even : float }
 type numeric_value = Attribute_generate.numeric_value =
   | Scalar of float
-  | Vec2 of Vec2.t
-  | Vec3 of Vec3.t
+  | Vec2 of Rays_math.Vec2.t
+  | Vec3 of Rays_math.Vec3.t
   | Vec4 of float * float * float * float
 type random_operation = Attribute_generate.random_operation =
   | Random_set
@@ -223,7 +223,7 @@ let randomize ?cancel ?(grain = 16_384) ?selection ?element_selection
 let noise ?cancel ?(grain = 16_384) ?selection ~seed ~owner ~name ~kind
     ?(location = Noise_position) ?(range = Noise_positive)
     ?(operation = Noise_set) ?(blend = 1.)
-    ?(frequency = Vec3.create 1. 1. 1.) ?(offset = Vec3.zero)
+    ?(frequency = Rays_math.Vec3.create 1. 1. 1.) ?(offset = Rays_math.Vec3.zero)
     ?(octaves = 1) ?(lacunarity = 2.) ?(roughness = 0.5) geometry =
   try Result.map_error
       (Error.of_string ~operation:"attribute_noise" ~code:"invalid_noise")

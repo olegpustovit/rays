@@ -9,11 +9,7 @@
 
 (** Linear floating-point RGB for materials and light. Channels are not
     quantized or clamped, so dim and HDR values survive GPU upload. *)
-module Linear_color : sig
-  type t = { r : float; g : float; b : float }
-
-  val rgb : float -> float -> float -> t
-end
+module Linear_color = Rays_math.Color.Linear
 
 type material =
   { albedo : Linear_color.t
@@ -32,7 +28,7 @@ val material :
 (** A soft rectangle of light painted on the dome around [direction]. Extents
     are angular half-sizes in radians; [softness] is the edge falloff. *)
 type panel =
-  { direction : Rays.Vec3.t
+  { direction : Rays_math.Vec3.t
   ; width : float
   ; height : float
   ; softness : float
@@ -41,7 +37,7 @@ type panel =
 
 val panel :
   ?softness:float -> intensity:float -> width:float ->
-  height:float -> Rays.Vec3.t -> panel
+  height:float -> Rays_math.Vec3.t -> panel
 
 type environment = { sky : Linear_color.t; ground : Linear_color.t; panels : panel list }
 
@@ -50,11 +46,11 @@ type environment = { sky : Linear_color.t; ground : Linear_color.t; panels : pan
     lights are analytic and, without a World ({!set_world}), never appear as
     visible geometry. *)
 type light =
-  { at : Rays.Vec3.t; target : Rays.Vec3.t; size : float * float; color : Linear_color.t; intensity : float }
+  { at : Rays_math.Vec3.t; target : Rays_math.Vec3.t; size : float * float; color : Linear_color.t; intensity : float }
 
 val rect_light :
-  intensity:float -> size:float * float -> target:Rays.Vec3.t ->
-  Rays.Vec3.t -> light
+  intensity:float -> size:float * float -> target:Rays_math.Vec3.t ->
+  Rays_math.Vec3.t -> light
 
 val light_of : Rays.Light.t -> light
 (** The rect that lights like a raster [Light.t] with physical 1/d²
@@ -74,15 +70,18 @@ val light_of : Rays.Light.t -> light
 
 (** An analytic sphere, traced through a bounding-box intersection function
     rather than tessellated. *)
-type sphere = { center : Rays.Vec3.t; radius : float; sphere_material : material }
+type sphere = { center : Rays_math.Vec3.t; radius : float; sphere_material : material }
 
 (** A round polyline of constant [thickness] (diameter), traced as linear
     curve segments. Needs [Ogpu.Caps.Ray_tracing_curves]; [create] and
     [replace_mesh] fail with a typed message otherwise. *)
-type strand = { points : Rays.Vec3.t array; thickness : float; strand_material : material }
+type strand = { points : Rays_math.Vec3.t array; thickness : float; strand_material : material }
 
+(** Scene mesh inputs are already triangle-ready [Rays.Mesh.t] values with
+    per-vertex normals. Geometry triangulation and normal generation happen
+    before entering the path tracer. *)
 type scene =
-  { objects : (Rdk.Geometry.t * material) list
+  { objects : (Rays.Mesh.t * material) list
   ; spheres : sphere list
   ; strands : strand list
   ; environment : environment
@@ -91,18 +90,20 @@ type scene =
 type t
 
 (** Pure prepared geometry: a flat triangle mesh or a prototype plus compact
-    instance transforms. A SOP cook worker may prepare it off the initial domain. *)
+    instance transforms. [mesh] packs existing triangle buffers and materials;
+    it does not triangulate geometry or generate normals. A SOP cook worker may
+    prepare it off the initial domain. *)
 type mesh
 
 val mesh :
-  ?spheres:sphere list -> ?strands:strand list -> (Rdk.Geometry.t * material) list ->
+  ?spheres:sphere list -> ?strands:strand list -> (Rays.Mesh.t * material) list ->
   (mesh, string) result
 (** Triangles, spheres, and strands together become one primitive structure
     per kind under an instance structure (Metal holds one kind per structure). *)
 
 val mesh_instanced :
-  prototype:(Rdk.Geometry.t * material) -> ?materials:material array ->
-  ?motion:Rays.Mat4.t array -> Rays.Mat4.t array -> (mesh, string) result
+  prototype:mesh -> ?materials:material array ->
+  ?motion:Rays_math.Mat4.t array -> Rays_math.Mat4.t array -> (mesh, string) result
 (** One prototype and its instance transforms, without duplicated triangles.
     For [n] instances, preparation takes O(n) time and O(n) auxiliary memory;
     the prototype's topology is stored once. [materials] (one per instance)
@@ -111,7 +112,7 @@ val mesh_instanced :
     shutter; the instance structure carries both keyframes and every sample
     picks a shutter time, so instances blur along their motion. *)
 
-val scene_mesh : (Rays.Mat4.t * mesh) list -> (mesh, string) result
+val scene_mesh : (Rays_math.Mat4.t * mesh) list -> (mesh, string) result
 (** Several prepared meshes placed at their world transforms in one
     traceable scene: an instance structure over one primitive structure per
     input. A flat input is one instance at its transform; an instanced input
@@ -156,7 +157,7 @@ val queue_mesh : t -> mesh -> (unit, string) result
     mesh supersedes one still building; at most one build and one queued mesh
     are retained. [flush] waits for the latest replacement. *)
 
-val move : t -> Rays.Mat4.t list -> (unit, string) result
+val move : t -> Rays_math.Mat4.t list -> (unit, string) result
 (** Re-places the objects of the newest mesh given to the tracer, which must
     be a {!scene_mesh} of as many objects as matrices, at new world
     transforms (in input order), without re-preparing or re-uploading

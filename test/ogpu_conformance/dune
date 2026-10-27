@@ -10,13 +10,24 @@
 
 (executable
  (name test_metal)
+ (enabled_if (= %{system} macosx))
  (modules test_metal)
  (libraries ogpu_conformance ogpu_metal metal))
 
 (rule
- (aliases runtest ogpu_conformance_mock)
+ (alias ogpu_conformance_mock)
  (action (run %{exe:test_mock.exe})))
 
 (rule
- (aliases runtest ogpu_conformance_metal)
+ (alias ogpu_conformance_metal)
+ (enabled_if (= %{system} macosx))
  (action (run %{exe:test_metal.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias ogpu_conformance_mock)))
+
+(alias
+ (name runtest)
+ (enabled_if (= %{system} macosx))
+ (deps (alias ogpu_conformance_metal)))

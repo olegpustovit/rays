@@ -10,8 +10,8 @@ module M = struct
       let run domains grain =
         let context=Sop.Context.create ~domains ~grain () |> get_string_ok in
         match Sop.Session.cook session ~context node with
-      |Ok output->Result.map_error Sop.Diagnostic.error_to_string (Sop.Payload.geometry output.payload)
-      |Error error->Error(Sop.Diagnostic.error_to_string error) in
+      |Ok output->Result.map_error Diagnostic.error_to_string (Sop.Payload.geometry output.payload)
+      |Error error->Error(Diagnostic.error_to_string error) in
       let expected=run 1 97 in
       List.iter(fun domains->List.iter(fun grain->Sop.Session.clear session;
         let actual=run domains grain in
@@ -33,18 +33,18 @@ module M = struct
       (quoted source)(quoted destination)(quoted owner)(quoted method_))
   let query owner name pattern input =
     let owner=match owner with Attribute.Point->"point"|Vertex->"vertex"|Primitive->"primitive"|Detail->"detail" in
-    let flow_ok=function Ok value->value|Error d->fail(Flow.Diagnostic.to_string d) in
+    let flow_ok=function Ok value->value|Error d->fail(Diagnostic.to_string d) in
     let forms=Printf.sprintf "(workspace metadata (graph g :context sop [(geo : geometry nil)] (let* [tested (%s geo %s :owner %s)] geo)))"
       name(quoted pattern)(quoted owner)|>Flow.Syntax.parse|>flow_ok in
     let workspace=match Flow.Workspace.check ~ops:Flow_sop.Operators.all Flow.Check.{version=1;kinds=[]}forms with
-      |Some workspace,[]->workspace|_,ds->fail(String.concat "; "(List.map Flow.Diagnostic.to_string ds)) in
+      |Some workspace,[]->workspace|_,ds->fail(String.concat "; "(List.map Diagnostic.to_string ds)) in
     let evaluation=Flow.Eval.static ~record:true ~inputs:["g",["geo",Flow.Eval.Deferred(Flow.Ty.geometry,7)]]workspace|>flow_ok in
     let value=List.assoc["g";"tested"]evaluation.records|>List.hd|>snd in
     let resolve=Flow_sop.Attribute_kernel.resolve ~geometry:(fun id->if id=7 then Some input else None) in
     let program=Flow_ir.Executor.compile ~strict:true value|>flow_ok in
-    let live=Frame_input.at_time 0. in
+    let live=Input.at_time 0. in
     let expected=Flow.Eval.Private.force_reference ~resolve value ~live in
-    List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+    List.iter(fun domains->Parallel.run ~domains(fun()->
       let actual=Flow_ir.Executor.force ~strict:true ~resolve program ~live in
       check(actual=expected) "Metadata query strict/reference/domain results differ")) [1;8];
     expected
@@ -127,7 +127,7 @@ let () =
     check (M.attr_type ~owner ~name:("b_"^kind) renamed=Ok (Flow.Eval.Text kind)) "renamed type query differs")
     ["float";"int";"vec2";"vec3";"vec4";"text";"float_array";"int_array"]) owners;
   check (geometry_bytes geometry=before) "all-storage rename mutated source";
-  (match M.attr_names ~owner:Attribute.Point ~pattern:"b_*" renamed |> (function Ok value->value|Error d->fail(Flow.Diagnostic.to_string d)) with
+  (match M.attr_names ~owner:Attribute.Point ~pattern:"b_*" renamed |> (function Ok value->value|Error d->fail(Diagnostic.to_string d)) with
    |Flow.Eval.Text_array names -> names.(0)<-"mutated copy";
      check (Geometry.find_attribute ~owner:Attribute.Point "b_float" renamed<>None) "name query shared mutable geometry state"
    |_->assert false);
@@ -164,7 +164,7 @@ let () =
   print_endline "attr_entries: parallel name/type/owner columns keep native order and owner filter"
 
 let () =
-  let flow_ok=function Ok value->value|Error d->fail(Flow.Diagnostic.to_string d) in
+  let flow_ok=function Ok value->value|Error d->fail(Diagnostic.to_string d) in
   let catalog=Flow_sop.Catalog.of_factories ~version:1 Sop_catalog.Editor.factories |>flow_ok in
   let checker=Flow_sop.Catalog.check_workspace ~ops:Flow_sop.Operators.all in
   let forms=Flow.Syntax.parse {|(workspace metadata_projection (graph g :context sop
@@ -174,7 +174,7 @@ let () =
       entries (sop/attr_entries geo :owner primitive)
       grouped (sop/rename_group swapped "old*" "new*" :owner edge :conflict union)] grouped)))|} |>flow_ok in
   let checked=match checker catalog forms with Some checked,[]->checked
-    |_,diagnostics->fail(String.concat "; "(List.map Flow.Diagnostic.to_string diagnostics)) in
+    |_,diagnostics->fail(String.concat "; "(List.map Diagnostic.to_string diagnostics)) in
   let pane=Flow_graph.Projection.of_graph catalog checked "g" in
   List.iter(fun(binding,ty)->let node=Flow_graph.Projection.find pane["g";binding] |>Option.get in
     check(node.ty=ty) "Metadata graph output type differs";

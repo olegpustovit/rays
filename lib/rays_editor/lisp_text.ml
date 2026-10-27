@@ -20,48 +20,50 @@ let number = Flow.Syntax.number
 (* the tokens in order, the matched (open, close) pairs, and the brackets still open at the end
    (innermost first) *)
 let lex_raw text =
-  let n = String.length text in
+  let raw = Flow.Syntax.Text_lexer.lex text in
   let tokens = ref [] and count = ref 0 and pairs = ref [] and stack = ref [] in
-  let tok kind start stop = tokens := { kind; start; stop } :: !tokens; incr count in
-  let head_next = ref false in
-  let rec go i =
-    if i >= n then ()
-    else match text.[i] with
-    | ' ' | '\t' | '\r' | '\n' -> go (i + 1)
-    | ';' ->
-        let j = match String.index_from_opt text i '\n' with Some j -> j | None -> n in
-        tok Comment i j; go j
-    | '"' ->
-        (* a string runs over line breaks, as the reader takes it; an open one to the end *)
-        let rec close j =
-          if j >= n then j
-          else match text.[j] with '\\' -> close (j + 2) | '"' -> j + 1 | _ -> close (j + 1) in
-        let j = min n (close (i + 1)) in
-        tok Str i j; head_next := false; go j
-    | ('(' | '[' | '{') as c ->
-        stack := (c, i, !count) :: !stack;
-        tok (Open (List.length !stack - 1)) i (i + 1);
-        head_next := c = '(';
-        go (i + 1)
-    | (')' | ']' | '}') as c ->
-        (match !stack with
-         | (o, at, _) :: rest when closer_of o = c ->
-             stack := rest; pairs := (at, i) :: !pairs; tok (Close (List.length rest)) i (i + 1)
-         | _ -> tok Unmatched i (i + 1));
-        head_next := false;
-        go (i + 1)
-    | _ ->
-        let j = ref i in
-        while !j < n && not (separator text.[!j]) do incr j done;
-        let w = String.sub text i (!j - i) in
-        let kind =
-          if !head_next then Head
-          else if w.[0] = ':' && String.length w > 1 then Kw
-          else if w.[0] = '^' then Meta
-          else if number w then Num
-          else Sym in
-        tok kind i !j; head_next := false; go !j in
-  go 0;
+  let add kind start stop =
+    let index = !count in
+    tokens := { kind; start; stop } :: !tokens;
+    incr count; index in
+  let head_next = ref false and index = ref 0 in
+  while !index < Array.length raw do
+    let token = raw.(!index) in
+    (match token.kind with
+     | Flow.Syntax.Text_lexer.Open c ->
+         let at = add (Open (List.length !stack)) token.start token.stop in
+         stack := (c, token.start, at) :: !stack;
+         head_next := c = '('; incr index
+     | Flow.Syntax.Text_lexer.Close c ->
+         (match !stack with
+          | (o, at, _) :: rest when closer_of o = c ->
+              stack := rest; pairs := (at, token.start) :: !pairs;
+              ignore (add (Close (List.length rest)) token.start token.stop)
+          | _ -> ignore (add Unmatched token.start token.stop));
+         head_next := false; incr index
+     | Flow.Syntax.Text_lexer.Comment _ -> ignore (add Comment token.start token.stop); incr index
+     | Flow.Syntax.Text_lexer.String _ -> ignore (add Str token.start token.stop); head_next := false; incr index
+     | Flow.Syntax.Text_lexer.Meta _ -> ignore (add (if !head_next then Head else Meta) token.start token.stop);
+         head_next := false; incr index
+     | Flow.Syntax.Text_lexer.Word word ->
+         let kind = if !head_next then Head else match word with
+           | Flow.Syntax.Text_lexer.Symbol _ -> Sym
+           | Flow.Syntax.Text_lexer.Keyword _ -> Kw
+           | Flow.Syntax.Text_lexer.Number _ -> Num in
+         ignore (add kind token.start token.stop); head_next := false; incr index
+     | Flow.Syntax.Text_lexer.Prefix _ ->
+         (* Reader prefixes stay visually attached to a following word, as in the old editor lexer. *)
+         let stop = if !index + 1 < Array.length raw then
+           let next = raw.(!index + 1) in
+           match next.kind with
+           | Flow.Syntax.Text_lexer.Word _ | Flow.Syntax.Text_lexer.Meta _ | Flow.Syntax.Text_lexer.Prefix _
+             when next.start = token.stop -> incr index; next.stop
+           | _ -> token.stop
+         else token.stop in
+         ignore (add (if !head_next then Head else Sym) token.start stop);
+         head_next := false; incr index
+     | Flow.Syntax.Text_lexer.End -> incr index)
+  done;
   let tokens = Array.of_list (List.rev !tokens) in
   List.iter (fun (_, _, index) -> tokens.(index) <- { (tokens.(index)) with kind = Unmatched }) !stack;
   tokens, List.rev !pairs, List.map (fun (c, at, _) -> c, at) !stack
@@ -70,15 +72,14 @@ let lex_raw text =
    several times (colours, pairs, chips, context, hover) and the next frame asks again, so a text is
    lexed once per version.  A hit moves to the front so the long text outlives the caret prefixes
    the completions lex.  ponytail: the result is shared, never mutated by readers. *)
-let lexed : (string * (token array * (int * int) list * (char * int) list)) list ref = ref []
+let lexed = Lru.Identity_list.create ~equal:String.equal 4
 
 let lex text =
-  match List.find_opt (fun (t, _) -> String.equal t text) !lexed with
-  | Some ((_, tokens) as entry) ->
-      lexed := entry :: List.filter (fun e -> e != entry) !lexed; tokens
+  match Lru.Identity_list.find lexed text with
+  | Some tokens -> tokens
   | None ->
       let tokens = lex_raw text in
-      lexed := (text, tokens) :: List.filteri (fun i _ -> i < 3) !lexed; tokens
+      Lru.Identity_list.add lexed text tokens; tokens
 
 let colorize_now (theme : Pxui.Theme.t) text =
   (* kit rev 3: forms in the float blue, a kind's namespace in the vector purple, keywords in the
@@ -105,7 +106,7 @@ let colorize_now (theme : Pxui.Theme.t) text =
     | Unmatched -> span Pxui.Theme.invalid) tokens) |> List.concat
 
 (* the colours of the last text, for the theme it was made with *)
-let coloured : (Pxui.Theme.t * string * (int * int * Rays.Color.t) list) option ref = ref None
+let coloured : (Pxui.Theme.t * string * (int * int * Rays_math.Color.t) list) option ref = ref None
 
 let colorize theme text =
   match !coloured with
@@ -146,7 +147,6 @@ let indent text caret =
 
 (* ---- what the editor knows about the language: completions, descriptions, numbers ---- *)
 
-module Param = Editor_core.Param
 
 (* One kind of the catalog as the text editor sees it: the qualified name a head writes, its
    context (the namespace), its label and category, the slots and the parameters. *)
@@ -280,17 +280,17 @@ let field_doc (f : Param.field_view) =
 (* the keyword arguments a kind takes, as (name, type, doc, primary): a vec3 group once, before
    its components *)
 let keywords_of (k : entry) =
-  let seen = Hashtbl.create 16 in
-  List.filter_map (fun (f : Param.field_view) -> match f.vec3 with
-    | Some (group, _) when Hashtbl.mem seen group -> None
+  List.map (function
+    | [] -> assert false
+    | (f : Param.field_view) :: _ -> match f.vec3 with
     | Some (group, _) ->
-        Hashtbl.add seen group ();
         (* the group is named by its first component's label without the axis *)
         let title = if String.length f.label > 2 && f.label.[String.length f.label - 2] = ' '
           then String.sub f.label 0 (String.length f.label - 2) else f.label in
-        Some (group, "vec3", title ^ (if f.folder = [] then "" else " · " ^ String.concat " / " f.folder)
-          ^ " · [x y z]" ^ (match f.description with Some d -> " · " ^ d | None -> ""), f.primary)
-    | None -> Some (f.name, kind_text f, field_doc f, f.primary)) k.fields
+        group, "vec3", title ^ (if f.folder = [] then "" else " · " ^ String.concat " / " f.folder)
+          ^ " · [x y z]" ^ (match f.description with Some d -> " · " ^ d | None -> ""), f.primary
+    | None -> f.name, kind_text f, field_doc f, f.primary)
+    (Result.get_ok (Param.group_vec3 k.fields))
   @ List.filter_map (fun (f : Param.field_view) -> match f.vec3 with
     | Some _ -> Some (f.name, kind_text f, field_doc f, false) | None -> None) k.fields
 
@@ -421,7 +421,7 @@ let rank prefix candidates =
     else if a.group <> b.group then compare a.group b.group
     else if a.uses <> b.uses then compare b.uses a.uses
     else compare a.name b.name)
-  |> List.filteri (fun i _ -> i < 48)
+  |> List.take 48
   |> List.map snd
 
 (* what the document knows beyond the text shown: every graph, the material graphs, the cameras
@@ -777,7 +777,7 @@ let color_chips text =
   let tokens, _, _ = lex text in
   Array.fold_right (fun t acc ->
     if t.kind <> Str || t.stop - t.start < 9 || text.[t.stop - 1] <> '"' then acc
-    else match Rays.Color.hex (String.sub text (t.start + 1) (t.stop - t.start - 2)) with
+    else match Rays_math.Color.hex (String.sub text (t.start + 1) (t.stop - t.start - 2)) with
       | Ok color -> (t.start, t.stop, color) :: acc
       | Error _ -> acc) tokens []
 

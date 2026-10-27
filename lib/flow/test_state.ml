@@ -7,6 +7,17 @@ let checked body =
   | _, ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
 let value r = List.assoc "g" (Result.get_ok r).Eval.results
 let () =
+  let workspace=checked "(state [n 0.0] (+ n t))" in
+  let run state frame time = Eval.run ~state
+    ~live:{(Input.at_time time) with frame} ~time workspace in
+  let initial=Eval.create_state() in
+  assert(value(run initial 0 0.25)=Eval.Float 0.25);
+  let left=Eval.fork_state initial and right=Eval.fork_state initial in
+  assert(Eval.state_stamp left=Eval.state_stamp right);
+  assert(value(run left 1 0.75)=Eval.Float 1.0);
+  assert(value(run right 1 1.25)=Eval.Float 1.5);
+  assert(Eval.state_stamp left<>Eval.state_stamp right)
+let () =
   let forms=Result.get_ok(Syntax.parse {|(workspace references
     (graph level :context value [(step : float 2)] (state [n 0.0] (+ n step)))
     (graph host :context host (state [n 0] (+ n 3)))
@@ -29,7 +40,7 @@ let () =
   List.iter(fun force->
     let caller=Eval.create_state()in
     List.iter(fun(tick,frame,level,host)->
-      let live={(Frame_input.at_time 0.)with tick;frame}in
+      let live={(Input.at_time 0.)with tick;frame}in
       List.iter(fun v->ignore(Result.get_ok(force ~state:caller v ~live)))evaluation.states;
       let stamp=Eval.state_stamp caller in
       let expected=["level",Eval.Float(float(2*level));"host",Eval.Int(3*host);
@@ -58,7 +69,7 @@ let () =
 let () =
   let w = checked "(let* [s (state [previous 0.0] (+ previous (frame/dt)))] (+ s s))" in
   let state = Eval.create_state () in
-  let run frame = Eval.run ~state ~live:{(Frame_input.at_time (float frame)) with frame; dt = 0.25} ~time:(float frame) w in
+  let run frame = Eval.run ~state ~live:{(Input.at_time (float frame)) with frame; dt = 0.25} ~time:(float frame) w in
   assert (value (run 0) = Eval.Float 0.5);
   assert (value (run 0) = Eval.Float 0.5);
   assert (value (run 1) = Eval.Float 1.);
@@ -71,18 +82,18 @@ let () =
   let export () =
     let state = Eval.create_state () in
     Array.init 8 (fun frame -> value (Eval.run ~state
-      ~live:{(Frame_input.at_time (float frame *. 0.125)) with frame; dt = 0.125}
+      ~live:{(Input.at_time (float frame *. 0.125)) with frame; dt = 0.125}
       ~time:(float frame *. 0.125) w)) in
   assert (Marshal.to_string (export ()) [] = Marshal.to_string (export ()) []);
   (* Every state reads the previous snapshot, independent of forcing order. *)
   let w = checked "(let* [a (state [x 0] (+ x 1)) b (state [y 0] (+ y a))] (+ a b))" in
   let s = Eval.create_state () in
-  let run frame = value (Eval.run ~state:s ~live:{(Frame_input.at_time 0.) with frame} ~time:0. w) in
+  let run frame = value (Eval.run ~state:s ~live:{(Input.at_time 0.) with frame} ~time:0. w) in
   assert (run 0 = Eval.Int 2 && run 1 = Eval.Int 5 && run 1 = Eval.Int 5);
   (* An error after the fold step must not commit a partial frame. *)
   let w = checked "(let* [a (state [x 0] (+ x 1))] (+ a (nth (list 0) (frame/index))))" in
   let s = Eval.create_state () in
-  let run frame = Eval.run ~state:s ~live:{(Frame_input.at_time 0.) with frame} ~time:0. w in
+  let run frame = Eval.run ~state:s ~live:{(Input.at_time 0.) with frame} ~time:0. w in
   assert (value (run 0) = Eval.Int 1);
   assert (Result.is_error (run 1));
   assert (value (run 0) = Eval.Int 1);
@@ -95,7 +106,7 @@ let () =
   let workspace=match Workspace.check {Check.version=1;kinds=[]} forms with
     |Some workspace,[]->workspace|_,ds->failwith(String.concat "; " (List.map Diagnostic.to_string ds))in
   let state=Eval.create_state()in
-  let run tick frame=Result.get_ok(Eval.run ~state ~live:{(Frame_input.at_time 0.)with tick;frame} ~time:0. workspace)in
+  let run tick frame=Result.get_ok(Eval.run ~state ~live:{(Input.at_time 0.)with tick;frame} ~time:0. workspace)in
   let result=run 0 0 in
   assert(List.assoc "host" result.results=Eval.Int 1 && List.assoc "animated" result.results=Eval.Int 1);
   let result=run 1 0 in
@@ -103,7 +114,7 @@ let () =
   assert(List.assoc "host" (run 1 0).results=Eval.Int 2);
   let snapshot=Eval.fork_state state in
   assert(List.assoc "host" (run 2 1).results=Eval.Int 3);
-  let result=Result.get_ok(Eval.run ~state:snapshot ~live:{(Frame_input.at_time 0.)with tick=2;frame=1} ~time:0. workspace)in
+  let result=Result.get_ok(Eval.run ~state:snapshot ~live:{(Input.at_time 0.)with tick=2;frame=1} ~time:0. workspace)in
   assert(List.assoc "host" result.results=Eval.Int 3 && List.assoc "animated" result.results=Eval.Int 2);
   Eval.reset_state ~host_state:false state;
   let result=run 3 0 in
@@ -157,7 +168,7 @@ let () =
         let state=Eval.create_state()in
         let stamp=Eval.state_stamp state in
         calls:=0;
-        (match force ~state residual ~live:(Frame_input.at_time 0.)with
+        (match force ~state residual ~live:(Input.at_time 0.)with
          |Error d->assert(d.Diagnostic.code="E_STATE_TYPE")|Ok _->assert false);
         assert(!calls=expected_calls && Eval.state_stamp state=stamp
           && Eval.Private.state_values state=[]))

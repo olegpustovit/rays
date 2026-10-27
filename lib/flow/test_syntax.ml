@@ -99,6 +99,18 @@ let () =
   List.iter (fun w -> assert (number w)) ["1e-14"; "2e+06"; "6.1E-17"; "-3.3e7"; "1.e2"];
   List.iter (fun w -> assert (not (number w))) ["e5"; "1e"; "1e+"; "1e5x"; "-"; "."];
   assert (get (parse "") = [] && get (parse "; only a comment") = []);
+  (* The checked reader and the editor share tolerant lexical tokens. A bad escape keeps its
+     original diagnostic span, while the editor still receives later tokens for coloring. *)
+  let source = "(a \"bad\\q\" b)" in
+  let tokens = Text_lexer.lex source in
+  let issue = Array.find_map (fun token -> token.Text_lexer.issue) tokens |> Option.get in
+  assert (issue.code = "E_UNEXPECTED" && issue.start = 7 && issue.finish = 9);
+  assert (List.exists (fun token -> match token.Text_lexer.kind with
+    | Text_lexer.Word (Text_lexer.Symbol "b") -> token.start = 11
+    | _ -> false) (Array.to_list tokens));
+  (match parse source with Error diagnostic ->
+    assert (diagnostic.code = issue.code && Option.map (fun span -> span.Diagnostic.start) diagnostic.span = Some issue.start)
+    | Ok _ -> failwith "accepted invalid string escape");
   (* the message names the opening line *)
   (match parse "(a\n(b]" with
    | Error d -> assert (d.position = Some Diagnostic.{line = 2; col = 3});

@@ -1,11 +1,38 @@
 open Runtime_resources
+open Ogpu.Error
 let get=function Ok x->x|Error e->failwith(Format.asprintf"%a"pp_error e)
 (* A canvas is written a pixel at a time: [0xRRGGBBAA] at every point. *)
 let fill canvas color=
   let width,height=get(Canvas.size canvas)in
   for y=0 to height-1 do for x=0 to width-1 do get(Canvas.set_pixel canvas~x~y color)done done
 let solid count bytes=Bytes.init(count*4)(fun i->bytes.[i mod 4])
+let test_atomic_file_writes () =
+  let root = Filename.temp_dir "rays-resources-io" "" in
+  let directory = Filename.concat (Filename.concat root "nested") "deeper" in
+  let target = Filename.concat directory "state.txt" in
+  let blocker = Filename.concat root "not-a-directory" in
+  Fun.protect ~finally:(fun () ->
+    Sys.remove target;
+    Unix.rmdir directory;
+    Unix.rmdir (Filename.dirname directory);
+    Sys.remove blocker;
+    Unix.rmdir root) (fun () ->
+    (match ensure_directory directory with Ok () -> () | Error message -> failwith message);
+    (match write_text ~filename:target "old" with Ok () -> () | Error message -> failwith message);
+    (match write_atomic ~filename:target (fun _ -> Error "writer failed") with
+     | Error "writer failed" -> () | _ -> failwith "atomic writer swallowed its error");
+    if In_channel.with_open_bin target In_channel.input_all <> "old"
+       || Array.to_list (Sys.readdir directory) <> ["state.txt"] then
+      failwith "failed atomic write replaced or leaked a temporary file";
+    (match write_text ~filename:target "new\ntext" with
+     | Ok () -> () | Error message -> failwith message);
+    if In_channel.with_open_bin target In_channel.input_all <> "new\ntext" then
+      failwith "atomic text replacement";
+    Out_channel.with_open_text blocker (fun channel -> output_string channel "file");
+    (match ensure_directory blocker with Error _ -> () | Ok () -> failwith "file accepted as directory"))
+
 let run () =
+  test_atomic_file_writes ();
   let original=Bytes.of_string"\x11\x22\x33\xff\x44\x55\x66\xff\x77\x88\x99\xff\xaa\xbb\xcc\xff"in
   let kept=Bytes.copy original in
   let image=get(Image.create~width:2~height:2~rgba:original)in Bytes.fill original 0 16 '\000';
@@ -30,6 +57,13 @@ let run () =
   let sw,sh,sg,snapshot=get(Canvas.snapshot canvas)in
   if(sw,sh,sg,snapshot)<>(4,4,Canvas.generation canvas,expected)then
     failwith"canvas atomic snapshot";
+  let bulk_bytes=Bytes.of_string"\x01\x02\x03\xff\x10\x20\x30\x40"in
+  let bulk=get(Canvas.of_rgba_bytes~width:2~height:1~rgba:bulk_bytes)in
+  let _,_,_,bulk_snapshot=get(Canvas.snapshot bulk)in
+  if bulk_snapshot<>bulk_bytes then failwith"bulk RGBA canvas changed pixel bytes";
+  (match Canvas.of_rgba_bytes~width:2~height:1~rgba:(Bytes.create 7)with
+   |Error{kind=Invalid_argument;_}->()|_->failwith"bulk RGBA accepted a short buffer");
+  get(Canvas.destroy bulk);
   let stable=get(Image.create~width:4~height:4~rgba:(Bytes.make 64 '\000'))in
   let stable_identity=Image.identity stable in
   let moved=get(Image.create~width:4~height:4~rgba:(Bytes.make 64 '\x42'))in
@@ -151,5 +185,9 @@ let run () =
   get(Image.destroy image);
   (match Image.pixels image with Error{kind=Destroyed;_}->()|_->failwith"a destroyed image was read");
   for _=1 to 100_000 do let x=get(Image.create~width:1~height:1~rgba:(Bytes.make 4 '\000'))in get(Image.destroy x)done;
-  (match Domain.spawn(fun()->Image.create~width:1~height:1~rgba:(Bytes.make 4 '\000'))|>Domain.join with Error{kind=Wrong_domain;_}->()|_->failwith"domain");
+  (match Domain.spawn(fun()->Image.create~width:1~height:1~rgba:(Bytes.make 4 '\000'))|>Domain.join with
+   |Error(error:Ogpu.Error.t) when error.operation="Image.create"
+       && error.kind=Ogpu.Error.Wrong_domain
+       && error.message="resource operation requires the initial SDL domain"->()
+   |_->failwith"resource domain error lost its shared operation, kind, or message");
   print_endline"runtime_resources: image/canvas leases, storage reuse, frame600 PNG 100k passed"

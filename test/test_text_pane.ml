@@ -20,7 +20,7 @@ let small_rosette () = List.fold_left (fun text (from, by) -> Str.global_replace
     ":segments 8", ":segments 4"; ":rings 4", ":rings 2"; "(radial j\n                         6", "(radial j\n                         1" ]
 
 let source name = match Flow.Syntax.parse (case name) with
-  | Ok forms -> forms | Error d -> fail (Flow.Diagnostic.to_string d)
+  | Ok forms -> forms | Error d -> fail (Diagnostic.to_string d)
 
 let contains text part =
   let n = String.length part in
@@ -56,7 +56,7 @@ let token_scrubs () =
       let span = List.assoc atom.id shown.spans in
       let op, phases = Flow.Phase_timer.sample ~clock:Unix.gettimeofday (fun () ->
         T.scrub_op shown (span.start, span.finish) "1234" |> Option.get) in
-      check (List.for_all (fun phase -> Flow.Phase_timer.calls phases phase = 0) Flow.Phase_timer.phases)
+      check (phases.entries = [])
         "finding a numeric token ran the workspace pipeline";
       check (match op with F.Set_arg {node; key = k; sub = s; value} ->
         node = path && k = key && s = sub && value.node = S.Num "1234" | _ -> false)
@@ -85,7 +85,7 @@ let token_scrubs () =
   check (List.length spans = List.length (List.sort_uniq Int.compare (List.map fst spans)))
     "document metadata reused source IDs after a structural edit";
   let shown = { (T.make_shown doc.source "g" None Document) with text = printed; spans } in
-  let last = List.find_map (fun (_, (span : Flow.Diagnostic.span)) ->
+  let last = List.find_map (fun (_, (span : Diagnostic.span)) ->
     if String.sub printed span.start (span.finish - span.start) = "999" then Some span else None) spans |> Option.get in
   check (T.scrub_op shown (last.start, last.finish) "1000" = None) "metadata token aliased a source literal"
 
@@ -181,7 +181,7 @@ let selection_text () =
   check (L.ref_at sample 30 = Some "cobalt" && L.ref_at sample 40 = Some "cobalt") "ref_at: inside the form";
   check (L.ref_at sample 5 = None) "ref_at: elsewhere";
   (match L.color_chips sample with
-   | [ (a, b, c) ] -> check (String.sub sample a (b - a) = "\"#ff8000\"" && Rays.Color.to_tuple c = (255, 128, 0, 255)) "color_chips: the literal"
+   | [ (a, b, c) ] -> check (String.sub sample a (b - a) = "\"#ff8000\"" && Rays_math.Color.to_tuple c = (255, 128, 0, 255)) "color_chips: the literal"
    | _ -> fail "color_chips: only the valid literal");
   let names = { L.materials = [ "cobalt"; "brass" ]; cameras = [ "cam" ]; layouts = [ "View | Graph"; "Lisp" ];
     graphs = [ "cobalt"; "brass"; "shards" ] } in
@@ -201,9 +201,9 @@ let selection_text () =
   check (detail "shards" "(ref sha" = Some "graph · lib.rays") "completion: imported graph lost its file";
   check (detail "shards" "(sha" = None) "completion: a graph was offered as a function head";
   (* an error's line: a position, else the span *)
-  let d = Flow.Diagnostic.error ~position:{ line = 4; col = 2 } ~code:"E_X" "x" in
+  let d = Diagnostic.error ~position:{ line = 4; col = 2 } ~code:"E_X" "x" in
   check (T.line_of "a\nb\nc\nd" d = Some 4) "line from position";
-  let d = Flow.Diagnostic.error ~span:{ start = 4; finish = 5 } ~code:"E_X" "x" in
+  let d = Diagnostic.error ~span:{ start = 4; finish = 5 } ~code:"E_X" "x" in
   check (T.line_of "a\nb\nc\nd" d = Some 3) "line from span"
 
 (* the pure parts of find and go to: matches, stepping, replacing, symbols, lines *)
@@ -243,10 +243,9 @@ let find_pure () =
     "anything else is refused"
 
 let frame ?(mouse = (450., 320.)) ?(keys = []) count events : Rays.Frame.t = {
-  width = 900; height = 640; size = 900, 640;
-
-  pixel_scale = 1., 1.; time = float count /. 60.; dt = 1. /. 60.;
-  fps = 60.; count; mouse; mouse_delta = 0., 0.; keys; mouse_buttons = []; events }
+  input = { (Input.at_time (float count /. 60.)) with dt = 1. /. 60.;
+    frame = count; tick = count; size = 900, 640; pointer = mouse; keys; events };
+  pixel_scale = 1., 1.; fps = 60.; mouse_delta = 0., 0. }
 
 module E = Rays_editor.Editor
 
@@ -268,7 +267,7 @@ let start_env text =
   ref (E.create ~presets ~await:true ~workspace
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
-      ~scene3:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) () |> Result.get_ok)
+      ~draw:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) () |> Result.get_ok)
 
 let dump_line env name =
   let directory = Filename.temp_dir "rays-text-pane" "" in
@@ -289,14 +288,14 @@ let editor_text () =
   let env = ref (E.create ~presets ~await:true ~workspace
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
-      ~scene3:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) () |> Result.get_ok) in
+      ~draw:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) () |> Result.get_ok) in
   let count = ref 0 in
   let step ?keys ?(at = (450., 320.)) events =
     incr count; env := E.update !env (frame ~mouse:at ?keys !count events) in
-  let click (x, y) = step ~at:(x, y) [ Event.MouseMoved (x, y) ];
-    step ~at:(x, y) [ Event.MousePressed (Input.LeftButton, (x, y));
-      Event.MouseReleased (Input.LeftButton, (x, y)) ] in
-  let key k = Event.KeyPressed k and char c = Event.KeyPressed (Input.KeyChar c) in
+  let click (x, y) = step ~at:(x, y) [ Input.Pointer_moved (x, y) ];
+    step ~at:(x, y) [ Input.Pointer_pressed (Input.LeftButton, (x, y));
+      Input.Pointer_released (Input.LeftButton, (x, y)) ] in
+  let key k = Input.Key_pressed k and char c = Input.Key_pressed (Input.KeyChar c) in
   let dump () =
     let directory = Filename.temp_dir "rays-text-pane" "" in
     Fun.protect ~finally:(fun () ->
@@ -327,7 +326,7 @@ let editor_text () =
   let type_text text =
     click area;
     step ~keys:[ Input.Meta ] [ char 'a' ];
-    step [ Event.TextInput text ] in
+    step [ Input.Text_input text ] in
   type_text (replace applied ~from:"(seeds : int 8)" ~by:"(seeds : int 7)");
   check (contains (dump ()) "draft yes") ("a draft was not kept\n" ^ dump ());
   check (ws () == original && E.undo_label !env = base) "a draft changed the document";
@@ -348,13 +347,13 @@ let editor_text () =
   check (ws () == original && E.undo_label !env = base) "an invalid apply changed the document";
   (* typing above the mark drops it (it cannot drift away from the line it named); typing below
      it keeps it, on its line *)
-  click area; step [ Event.TextInput "\n" ];
+  click area; step [ Input.Text_input "\n" ];
   check (not (contains (dump ()) ", error")) ("an edit left its stale error mark\n" ^ dump ());
   click apply;
   check (contains (dump ()) "error at line") "the next apply marks its line again";
   let marked () = List.find (String.starts_with ~prefix:"text: ") (String.split_on_char '\n' (dump ())) in
   let before = marked () in
-  click area; step ~keys:[ Input.Meta ] [ key Input.ArrowDown ]; step [ Event.TextInput "\n" ];
+  click area; step ~keys:[ Input.Meta ] [ key Input.ArrowDown ]; step [ Input.Text_input "\n" ];
   check (contains (marked ()) "error at line" && marked () = before)
     ("typing below the error cleared it or moved it\n" ^ dump ());
   (* a draft that rests is parsed: an unterminated string is reported without an apply, and
@@ -364,7 +363,7 @@ let editor_text () =
   check (not (contains (dump ()) ", error")) "a draft was parsed before it rested";
   for _ = 1 to 30 do step [] done;
   check (contains (dump ()) ", error") ("a rested draft was not parsed\n" ^ dump ());
-  step [ Event.TextInput "\"" ];
+  step [ Input.Text_input "\"" ];
   check (not (contains (dump ()) ", error")) ("the parse of an older text outlived an edit\n" ^ dump ());
   for _ = 1 to 30 do step [] done;
   check (not (contains (dump ()) ", error")) ("a balanced draft was reported\n" ^ dump ());
@@ -388,7 +387,7 @@ let editor_text () =
   check (contains graph_text "(graph sunflower") "the Graph tab does not show the graph";
   click area;
   step ~keys:[ Input.Meta ] [ char 'a' ];
-  step [ Event.TextInput (replace graph_text ~from:"(seeds : int 8)" ~by:"(seeds : int 6)") ];
+  step [ Input.Text_input (replace graph_text ~from:"(seeds : int 8)" ~by:"(seeds : int 6)") ];
   check (contains (dump ()) "graph tab, draft yes") ("the Graph tab kept no draft\n" ^ dump ());
   check (ws () == original) "a Graph draft changed the document";
   step ~keys:[ Input.Meta ] [ key Input.Enter ];
@@ -399,7 +398,7 @@ let editor_text () =
   let labelled = E.undo_label !env in
   click area;
   step ~keys:[ Input.Meta ] [ char 'a' ];
-  step [ Event.TextInput (replace graph_text ~from:"(seeds : int 8)" ~by:"(seeds : int 5)") ];
+  step [ Input.Text_input (replace graph_text ~from:"(seeds : int 8)" ~by:"(seeds : int 5)") ];
   check (contains (dump ()) "graph tab, draft yes") "the draft was not made";
   step ~keys:[ Input.Meta ] [ char 'z' ];
   step ~keys:[ Input.Meta ] [ char 'z' ];
@@ -412,7 +411,7 @@ let editor_text () =
   let applied_graph = ws () in
   click area;
   step ~keys:[ Input.Meta ] [ char 'a' ];
-  step [ Event.TextInput (replace graph_text ~from:"(sqrt i)" ~by:"(sqrt nosuch)") ];
+  step [ Input.Text_input (replace graph_text ~from:"(sqrt i)" ~by:"(sqrt nosuch)") ];
   step ~keys:[ Input.Meta ] [ key Input.Enter ];
   check (contains (dump ()) "graph tab, draft yes, error") ("a refused graph left the pane\n" ^ dump ());
   check (ws () == applied_graph) "a refused Graph apply changed the document";
@@ -477,14 +476,14 @@ let editor_binding () =
   let env = ref (E.create ~presets ~await:true ~workspace
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
-      ~scene3:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) () |> Result.get_ok) in
+      ~draw:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) () |> Result.get_ok) in
   let count = ref 0 in
   let step ?keys ?(at = (450., 320.)) events =
     incr count; env := E.update !env (frame ~mouse:at ?keys !count events) in
-  let click (x, y) = step ~at:(x, y) [ Event.MouseMoved (x, y) ];
-    step ~at:(x, y) [ Event.MousePressed (Input.LeftButton, (x, y));
-      Event.MouseReleased (Input.LeftButton, (x, y)) ] in
-  let key k = Event.KeyPressed k and char c = Event.KeyPressed (Input.KeyChar c) in
+  let click (x, y) = step ~at:(x, y) [ Input.Pointer_moved (x, y) ];
+    step ~at:(x, y) [ Input.Pointer_pressed (Input.LeftButton, (x, y));
+      Input.Pointer_released (Input.LeftButton, (x, y)) ] in
+  let key k = Input.Key_pressed k and char c = Input.Key_pressed (Input.KeyChar c) in
   let dump () =
     let directory = Filename.temp_dir "rays-text-pane" "" in
     Fun.protect ~finally:(fun () ->
@@ -502,7 +501,7 @@ let editor_binding () =
   step [ key (Input.KeyChar '/'); char 'l'; char 't' ]; step [];
   check (contains (dump ()) "projection: text") "/ l t did not reach the text pane";
   let area = float (gx + 200), float (gy + 24 + 60) and apply = float (gx + 32), float (gy + gh - (if gw < 400 then 16 else 40)) in
-  let type_closure text = click area; step ~keys:[ Input.Meta ] [ char 'a' ]; step [ Event.TextInput text ] in
+  let type_closure text = click area; step ~keys:[ Input.Meta ] [ char 'a' ]; step [ Input.Text_input text ] in
   let ws () = E.workspace !env in
   let original = ws () in
   (* a binding that does not check: refused, marked on line 1 *)
@@ -510,7 +509,7 @@ let editor_binding () =
   click apply;
   check (contains (dump ()) "error at line 1:") ("a refused closure has no line\n" ^ dump ());
   check (ws () == original) "a refused closure changed the document";
-  click area; step [ Event.TextInput " " ];
+  click area; step [ Input.Text_input " " ];
   check (not (contains (dump ()) ", error")) "typing in the closure left its error mark";
   (* a name that is not a root binding is refused with its name *)
   type_closure "(let* [nosuch 1] nosuch)";
@@ -572,7 +571,7 @@ let paste () =
       | Ok ops -> ops | Error message -> fail message in
     let after = List.fold_left (fun ws op ->
       match Rays_editor.Workspace_doc.edit catalog ws op with
-      | Ok ws -> ws | Error d -> fail ("paste of " ^ text ^ ": " ^ Flow.Diagnostic.to_string d)) workspace ops in
+      | Ok ws -> ws | Error d -> fail ("paste of " ^ text ^ ": " ^ Diagnostic.to_string d)) workspace ops in
     String.concat " " (List.filter (( <> ) "") (String.split_on_char ' '
       (String.map (function '\n' -> ' ' | c -> c) (Rays_editor.Workspace_doc.to_text after)))) in
   (* two bare forms with one head are two bindings *)
@@ -615,6 +614,10 @@ let lisp_text () =
          && L.brackets "(a b)" = [ (0, 4) ]) "a cached lexing answered for another text";
   let colors = (L.language Pxui.Theme.default).colorize "(sop/box :size 1.5 \"s\" ; c" in
   check (List.length colors = 6) (Printf.sprintf "head, keyword, number, string, comment and the paren: %d runs" (List.length colors));
+  let malformed = "(f \"bad\\q\" :next)" in
+  let later = String.index malformed ':' in
+  check (List.exists (fun (start, stop, _) -> start <= later && later < stop)
+      (lang.colorize malformed)) "the tolerant text lexer colors after a malformed escape";
   (* completions over the catalog: ranked, for the token at the caret *)
   let vocab = L.vocab (Flow_sop.Catalog.with_library
       (List.map Flow_sop.Catalog.descriptor Sop_catalog.Editor.factories)
@@ -721,7 +724,7 @@ let editor_w9 () =
   let start () = E.create ~presets ~await:true ~workspace
         ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
           |> Result.map_error Rdk.Error.to_string)
-        ~scene3:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) () |> Result.get_ok in
+        ~draw:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) () |> Result.get_ok in
   let mouse = ref (640., 360.) in
   (* Every scenario's first edit is at frame 22 or later and an edit costs a workspace lowering (1.3 s), so the
      frames before it (the zoom, the selection) run once and each scenario continues from their result (the UI handle is
@@ -734,19 +737,19 @@ let editor_w9 () =
         | Some (x, y, w, _) -> float x +. (if dx < 0. then float w +. dx else dx), float y +. dy
         | None -> failwith "the card has no box" in
       let click p =
-        [ Event.MouseMoved p; Event.MousePressed (Input.LeftButton, p); Event.MouseReleased (Input.LeftButton, p) ] in
+        [ Input.Pointer_moved p; Input.Pointer_pressed (Input.LeftButton, p); Input.Pointer_released (Input.LeftButton, p) ] in
       let events = match List.assoc_opt n script with
         | Some events -> events click head
         | None -> match n with
-          | 4 -> click (900., 304.) | 6 -> [ Event.KeyPressed Input.ArrowDown ]
-          | 8 -> [ Event.KeyPressed (Input.KeyChar 'i') ]
-          | 12 -> [ Event.MouseMoved (780., 380.); Event.MouseScrolled (0., 9.) ]
+          | 4 -> click (900., 304.) | 6 -> [ Input.Key_pressed Input.ArrowDown ]
+          | 8 -> [ Input.Key_pressed (Input.KeyChar 'i') ]
+          | 12 -> [ Input.Pointer_moved (780., 380.); Input.Scrolled (0., 9.) ]
           | 16 -> click (960., 470.)
           | _ -> [] in
-      let f : Frame.t = { width = 1400; height = 800; size = 1400, 800;
-          pixel_scale = 1., 1.;
-        time = float n /. 60.; dt = 1. /. 60.; fps = 60.; count = n; mouse = !mouse;
-        mouse_delta = 0., 0.; keys = []; mouse_buttons = []; events } in
+      let f : Frame.t = { input = { (Input.at_time (float n /. 60.)) with
+          dt = 1. /. 60.; frame = n; tick = n; size = 1400, 800; pointer = !mouse;
+          events };
+        pixel_scale = 1., 1.; fps = 60.; mouse_delta = 0., 0. } in
       env := E.update !env f
     done;
     !env in
@@ -757,7 +760,7 @@ let editor_w9 () =
   let untouched = Flow.Lisp.print (E.workspace prefix).source |> fst in
   check (contains untouched "^:bypass (sop/subdivide inner") "soft starts bypassed";
   (* the flag *)
-  let text, label = scenario [ 22, (fun click head -> click (head soft (60., 12.))); 24, (fun _ _ -> [ Event.KeyPressed (Input.KeyChar 'b') ]) ] in
+  let text, label = scenario [ 22, (fun click head -> click (head soft (60., 12.))); 24, (fun _ _ -> [ Input.Key_pressed (Input.KeyChar 'b') ]) ] in
   check (not (contains text "^:bypass") && label = Some "Bypass")
     (Printf.sprintf "the b key: %s, bypass %b" (Option.value label ~default:"-") (contains text "^:bypass"));
   (* the inspector's Bypass button is the key's request too: the 280-wide inspector starts at
@@ -770,27 +773,27 @@ let editor_w9 () =
     (Printf.sprintf "the inspector's Bypass toggle: %s" (Option.value label ~default:"-"));
   (* and its name field is the pane's rename *)
   let text, label = scenario [ 22, (fun click head -> click (head soft (60., 12.))); 26, (fun click _ -> click (1220., 92.));
-    28, (fun _ _ -> [ Event.KeyPressed (Input.KeyChar 'a') ]); 30, (fun _ _ -> [ Event.TextInput "gentle" ]);
-    32, (fun _ _ -> [ Event.KeyPressed Input.Enter ]) ] in
+    28, (fun _ _ -> [ Input.Key_pressed (Input.KeyChar 'a') ]); 30, (fun _ _ -> [ Input.Text_input "gentle" ]);
+    32, (fun _ _ -> [ Input.Key_pressed Input.Enter ]) ] in
   check (contains text "gentle ^:bypass (sop/subdivide" && not (contains text "soft ^:bypass") && label = Some "Rename")
     ("the inspector's name field: " ^ Option.value label ~default:"-");
   (* a graph input's default is edited in the inspector too: a number scrubs there as on its card, so
      typing is the kit's Option-click *)
   let text, label = scenario [ 22, (fun click head -> click (head petals (60., 12.)));
-    26, (fun click _ -> Event.KeyPressed Input.Alt :: click (1290., 165.) @ [ Event.KeyReleased Input.Alt ]);
-    28, (fun _ _ -> [ Event.KeyPressed (Input.KeyChar 'a') ]); 30, (fun _ _ -> [ Event.TextInput "3" ]);
-    32, (fun _ _ -> [ Event.KeyPressed Input.Enter ]) ] in
+    26, (fun click _ -> Input.Key_pressed Input.Alt :: click (1290., 165.) @ [ Input.Key_released Input.Alt ]);
+    28, (fun _ _ -> [ Input.Key_pressed (Input.KeyChar 'a') ]); 30, (fun _ _ -> [ Input.Text_input "3" ]);
+    32, (fun _ _ -> [ Input.Key_pressed Input.Enter ]) ] in
   check (contains text "(petals : int 3)" && label = Some "Input default")
     ("the inspector's input default: " ^ Option.value label ~default:"-");
   (* the dialog: m over the selection, then Create macro *)
   let text, label = scenario [ 22, (fun click head -> click (head soft (60., 12.)));
-    26, (fun _ _ -> [ Event.KeyPressed (Input.KeyChar 'm') ]); 30, (fun click _ -> click (500., 461.)) ] in
+    26, (fun _ _ -> [ Input.Key_pressed (Input.KeyChar 'm') ]); 30, (fun click _ -> click (500., 461.)) ] in
   check (contains text "(defmacro soft_tpl [p1 inner]" && label = Some "Make macro")
     ("the make-macro dialog: " ^ Option.value label ~default:"-");
   (* Enter in the name field creates the macro too; the dialog keeps its state in the UI handle the frames share, so it starts from a handle of its own *)
   let text, label = scenario ~prefix:(frames (start ()) 1 21 []) [ 22, (fun click head -> click (head soft (60., 12.)));
-    26, (fun _ _ -> [ Event.KeyPressed (Input.KeyChar 'm') ]); 30, (fun click _ -> click (700., 437.));
-    34, (fun _ _ -> [ Event.KeyPressed Input.Enter ]) ] in
+    26, (fun _ _ -> [ Input.Key_pressed (Input.KeyChar 'm') ]); 30, (fun click _ -> click (700., 437.));
+    34, (fun _ _ -> [ Input.Key_pressed Input.Enter ]) ] in
   check (contains text "(defmacro soft_tpl [p1 inner]" && label = Some "Make macro")
     ("Enter in the make-macro dialog: " ^ Option.value label ~default:"-");
   (* the inspector note: click the field, type, Enter *)
@@ -800,12 +803,12 @@ let editor_w9 () =
      its row there.  Two notches a frame reach the end (59 points, 83 with the note open) and go
      little past it: the inspector stretches past its end as every scroll box does, so a hard wheel
      would hold the rows off their places for the frames this script has *)
-  let wheel _ _ = [ Event.MouseMoved (1260., 405.); Event.MouseScrolled (0., -2.) ] in
+  let wheel _ _ = [ Input.Pointer_moved (1260., 405.); Input.Scrolled (0., -2.) ] in
   let text, label = scenario [ 22, (fun click head -> click (head soft (60., 12.)));
     24, wheel; 25, wheel; 26, (fun click _ -> click (1250., 763.));
     28, wheel; 29, wheel; 30, (fun click _ -> click (1290., 763.));
-    32, (fun _ _ -> [ Event.KeyPressed (Input.KeyChar 'a') ]); 34, (fun _ _ -> [ Event.TextInput "a fresh note" ]);
-    36, (fun _ _ -> [ Event.KeyPressed Input.Enter ]) ] in
+    32, (fun _ _ -> [ Input.Key_pressed (Input.KeyChar 'a') ]); 34, (fun _ _ -> [ Input.Text_input "a fresh note" ]);
+    36, (fun _ _ -> [ Input.Key_pressed Input.Enter ]) ] in
   check (contains text "; a fresh note" && label = Some "Note") ("the note edit: " ^ Option.value label ~default:"-")
 
 (* Scrubbing :active in the Document text: dragging the number after [:active] sideways switches
@@ -827,21 +830,22 @@ let editor_active_scrub () =
   let env = ref (E.create ~presets ~await:true ~workspace
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
-      ~scene3:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) () |> Result.get_ok) in
+      ~draw:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) () |> Result.get_ok) in
   let count = ref 0 and mouse = ref (450., 320.) in
   let step ?(buttons = []) ?(keys = []) events =
     incr count;
-    env := E.update !env { (frame ~mouse:!mouse ~keys !count events) with mouse_buttons = buttons } in
+    let frame = frame ~mouse:!mouse ~keys !count events in
+    env := E.update !env { frame with input = { frame.input with buttons } } in
   let at ?buttons point events = mouse := point; step ?buttons events in
-  let char c = Event.KeyPressed (Input.KeyChar c) in
+  let char c = Input.Key_pressed (Input.KeyChar c) in
   for _ = 1 to 4 do step [] done;
   let gx, gy, gw, gh = (E.panes !env (frame 0 [])).graph in
   (* the Lisp panel sits under the graph: a splitter of one point, the 4-point margin and the 24-point header *)
   let gy = gy + gh + 1 + 28 in
   (* the Document tab *)
   let tab = tab_at ~narrow:(gw < 400) ~right:(gx + gw - 36) ~top:gy 2 in
-  at tab [ Event.MouseMoved tab ];
-  at tab [ Event.MousePressed (Input.LeftButton, tab); Event.MouseReleased (Input.LeftButton, tab) ]; step [];
+  at tab [ Input.Pointer_moved tab ];
+  at tab [ Input.Pointer_pressed (Input.LeftButton, tab); Input.Pointer_released (Input.LeftButton, tab) ]; step [];
   let printed = Flow.Lisp.print (E.workspace !env).source |> fst in
   let lines = String.split_on_char '\n' printed in
   let line = Option.get (List.find_index (fun l -> contains l ":active 0") lines) in
@@ -854,12 +858,12 @@ let editor_active_scrub () =
   let number = float gx +. 36. +. float col *. char_w, float gy +. 6. +. 8. +. float line *. line_pitch in
   let before = E.workspace !env and history = E.undo_label !env in
   let nx, ny = number in
-  at number [ Event.MouseMoved number ];
-  at number ~buttons:[ Input.LeftButton ] [ Event.MousePressed (Input.LeftButton, number) ];
-  at (nx +. 10., ny) ~buttons:[ Input.LeftButton ] [ Event.MouseMoved (nx +. 10., ny) ];
+  at number [ Input.Pointer_moved number ];
+  at number ~buttons:[ Input.LeftButton ] [ Input.Pointer_pressed (Input.LeftButton, number) ];
+  at (nx +. 10., ny) ~buttons:[ Input.LeftButton ] [ Input.Pointer_moved (nx +. 10., ny) ];
   check (contains (Flow.Lisp.print (E.workspace !env).source |> fst) ":active 2")
     ("a drag of ten points did not set :active 2 live: " ^ (Flow.Lisp.print (E.workspace !env).source |> fst));
-  at (nx +. 10., ny) [ Event.MouseReleased (Input.LeftButton, (nx +. 10., ny)) ]; step [];
+  at (nx +. 10., ny) [ Input.Pointer_released (Input.LeftButton, (nx +. 10., ny)) ]; step [];
   check (E.undo_label !env = Some "Edit text") ("the drag is one Edit text entry: " ^ Option.value ~default:"-" (E.undo_label !env));
   step ~keys:[ Input.Meta ] [ char 'z' ];
   check (E.workspace !env == before && E.undo_label !env = history) "one undo returns the whole drag";
@@ -877,43 +881,44 @@ let editor_literal_scrub () =
     let workspace = Rays_editor.Workspace_doc.of_text catalog text |> Result.get_ok in
     let presets = Filename.temp_dir "rays-token-presets" "" in
     let env = ref (E.create ~presets ~await:true ~domains:1 ~workspace ~prepare:(fun _ _ -> Ok ())
-      ~scene3:(fun _ () -> Scene3.empty) () |> Result.get_ok) in
+      ~draw:(fun _ () -> Scene3.empty) () |> Result.get_ok) in
     Fun.protect ~finally:(fun () -> E.close !env) (fun () ->
       let count = ref 0 and mouse = ref (450.,320.) in
       let step ?(buttons = []) ?(keys = []) events =
-        incr count; env := E.update !env { (frame ~mouse:!mouse ~keys !count events) with mouse_buttons = buttons } in
+        incr count; let frame = frame ~mouse:!mouse ~keys !count events in
+        env := E.update !env { frame with input = { frame.input with buttons } } in
       let at ?buttons point events = mouse := point; step ?buttons events in
       for _ = 1 to 4 do step [] done;
       let x,y,w,h = E.node_box !env ["g";"a"] |> Option.get in
       let point = float (x + w / 2), float (y + min 12 (h / 2)) in
-      at point [Event.MouseMoved point];
-      at point [Event.MousePressed (Input.LeftButton, point); Event.MouseReleased (Input.LeftButton, point)]; step [];
+      at point [Input.Pointer_moved point];
+      at point [Input.Pointer_pressed (Input.LeftButton, point); Input.Pointer_released (Input.LeftButton, point)]; step [];
       let gx,gy,gw,gh = (E.panes !env (frame 0 [])).graph in
       let top = gy + gh + 1 + 28 in
       let tab_point = tab_at ~narrow:(gw < 400) ~right:(gx + gw - 36) ~top tab_index in
-      at tab_point [Event.MouseMoved tab_point];
-      at tab_point [Event.MousePressed (Input.LeftButton, tab_point); Event.MouseReleased (Input.LeftButton, tab_point)]; step [];
+      at tab_point [Input.Pointer_moved tab_point];
+      at tab_point [Input.Pointer_pressed (Input.LeftButton, tab_point); Input.Pointer_released (Input.LeftButton, tab_point)]; step [];
       let shown = T.make_shown (E.workspace !env).source "g" (Some ["g";"a"]) tab in
       let value = Flow_graph.Flow_edit.arg_text shown.source ["g";"a"] (Kw "points") |> Option.get in
       let span = List.assoc value.id shown.spans in
-      let position = Flow.Diagnostic.position_of_offset shown.text span.start in
+      let position = Diagnostic.position_of_offset shown.text span.start in
       let number = float gx +. 36. +. float (position.col - 1) *. 6.95 +. 1.,
         float top +. 14. +. float (position.line - 1) *. line_pitch in
       let nx,ny = number in
       let before = E.workspace !env and label = E.undo_label !env in
-      at number [Event.MouseMoved number];
-      at number ~buttons:[Input.LeftButton] [Event.MousePressed (Input.LeftButton, number)];
+      at number [Input.Pointer_moved number];
+      at number ~buttons:[Input.LeftButton] [Input.Pointer_pressed (Input.LeftButton, number)];
       let drag dx = Flow.Phase_timer.sample ~clock:Unix.gettimeofday (fun () ->
-        at (nx +. dx,ny) ~buttons:[Input.LeftButton] [Event.MouseMoved (nx +. dx,ny)]) |> snd in
+        at (nx +. dx,ny) ~buttons:[Input.LeftButton] [Input.Pointer_moved (nx +. dx,ny)]) |> snd in
       let first = drag 10. in
       List.iter (fun phase -> check (Flow.Phase_timer.calls first phase = 0)
-        ("text token scrub ran " ^ Flow.Phase_timer.name phase)) [Print; Parse; Check; Evaluate; Lower; Project; Layout];
+        ("text token scrub ran " ^ phase)) ["print"; "parse"; "check"; "evaluate"; "lower"; "project"; "layout"];
       let next = drag 20. in
       List.iter (fun phase -> check (Flow.Phase_timer.calls next phase = 0)
-        ("repeated text token scrub ran " ^ Flow.Phase_timer.name phase)) [Print; Parse; Check; Evaluate; Lower; Project; Layout];
+        ("repeated text token scrub ran " ^ phase)) ["print"; "parse"; "check"; "evaluate"; "lower"; "project"; "layout"];
       let wider = drag 220. in
       List.iter (fun phase -> check (Flow.Phase_timer.calls wider phase = 0)
-        ("wider text token scrub ran " ^ Flow.Phase_timer.name phase)) [Print; Parse; Check; Evaluate; Lower; Project; Layout];
+        ("wider text token scrub ran " ^ phase)) ["print"; "parse"; "check"; "evaluate"; "lower"; "project"; "layout"];
       let valid = E.workspace !env in
       check ((Flow_graph.Flow_edit.arg_text valid.source ["g";"a"] (Kw "points") |> Option.get).node = Flow.Syntax.Num "45")
         "a growing token lost its repaired span";
@@ -932,13 +937,13 @@ let editor_literal_scrub () =
         (Set_arg {node = ["g";"a"]; key = Kw "points"; sub = []; value = Flow.Syntax.make (Num "5")}) |> Result.get_ok in
       check (Rays_editor.Workspace_doc.to_text ws = Rays_editor.Workspace_doc.to_text {ws with source; checked})
         "text token scrub differs from the full syntax edit";
-      at (nx +. 20.,ny) [Event.MouseReleased (Input.LeftButton, (nx +. 20.,ny))]; step [];
+      at (nx +. 20.,ny) [Input.Pointer_released (Input.LeftButton, (nx +. 20.,ny))]; step [];
       check (E.undo_label !env = Some "Edit text") "text token scrub lost its history label";
       (* Leave the text area's own edit-undo focus before the document undo. *)
       let focus_graph = float (gx + gw - 12), float (gy + min 10 (gh - 1)) in
-      at focus_graph [Event.MouseMoved focus_graph];
-      at focus_graph [Event.MousePressed (Input.LeftButton, focus_graph); Event.MouseReleased (Input.LeftButton, focus_graph)]; step [];
-      step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar 'z')];
+      at focus_graph [Input.Pointer_moved focus_graph];
+      at focus_graph [Input.Pointer_pressed (Input.LeftButton, focus_graph); Input.Pointer_released (Input.LeftButton, focus_graph)]; step [];
+      step ~keys:[Input.Meta] [Input.Key_pressed (Input.KeyChar 'z')];
       check (E.workspace !env == before && E.undo_label !env = label)
         (Printf.sprintf "text token scrub in tab %d was not one undo entry: identity %b, label %s (was %s), redo %b, points %s"
           tab_index (E.workspace !env == before) (Option.value ~default:"-" (E.undo_label !env))
@@ -966,22 +971,23 @@ let editor_text_drop () =
   let env = ref (E.create ~presets ~await:true ~carry_budget:Float.infinity ~workspace
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
-      ~scene3:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) () |> Result.get_ok) in
+      ~draw:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) () |> Result.get_ok) in
   let count = ref 0 and mouse = ref (450., 320.) in
   let step ?(buttons = []) ?(keys = []) events =
     incr count;
-    env := E.update !env { (frame ~mouse:!mouse ~keys !count events) with mouse_buttons = buttons } in
+    let frame = frame ~mouse:!mouse ~keys !count events in
+    env := E.update !env { frame with input = { frame.input with buttons } } in
   let at ?buttons point events = mouse := point; step ?buttons events in
-  let key k = Event.KeyPressed k and char c = Event.KeyPressed (Input.KeyChar c) in
+  let key k = Input.Key_pressed k and char c = Input.Key_pressed (Input.KeyChar c) in
   let jump name =
-    step [ key (Input.KeyChar '/'); char 'j' ]; step [ Event.TextInput name ]; step [ key Input.Enter ]; step [] in
+    step [ key (Input.KeyChar '/'); char 'j' ]; step [ Input.Text_input name ]; step [ key Input.Enter ]; step [] in
   let line () = Option.value ~default:"-" (E.carry_line !env) in
   let source () = Flow.Lisp.print (E.workspace !env).source |> fst in
   for _ = 1 to 4 do step [] done;
   let gx, gy, gw, gh = (E.panes !env (frame 0 [])).graph in
   let top = gy + gh + 1 + 28 in
-  let click point = at point [ Event.MouseMoved point ];
-    at point [ Event.MousePressed (Input.LeftButton, point); Event.MouseReleased (Input.LeftButton, point) ];
+  let click point = at point [ Input.Pointer_moved point ];
+    at point [ Input.Pointer_pressed (Input.LeftButton, point); Input.Pointer_released (Input.LeftButton, point) ];
     step [] in
   (* the Graph tab, graph b open, graph a held *)
   jump "b";
@@ -1006,12 +1012,12 @@ let editor_text_drop () =
     float gx +. 36. +. float (col + after) *. char_w, float top +. 6. +. 2. +. float line *. line_pitch in
   (* hover between the call and its first argument: the text is the edit, the strip says where *)
   let over = point Rays_editor.Private.Text_pane.Graph "(sop/merge" ~after:10 in
-  at over [ Event.MouseMoved over ]; at over [];
+  at over [ Input.Pointer_moved over ]; at over [];
   check (contains (line ()) "(ref a) at line") ("the strip says where it goes: " ^ line ());
   check (contains (source ()) "(sop/merge (ref a) (sop/box)") ("the preview is the edit: " ^ source ());
   check (E.undo_label !env = history) "a preview writes nothing to the history";
   (* a release is the put: one entry named Put *)
-  at over [ Event.MousePressed (Input.LeftButton, over); Event.MouseReleased (Input.LeftButton, over) ]; step []; step [];
+  at over [ Input.Pointer_pressed (Input.LeftButton, over); Input.Pointer_released (Input.LeftButton, over) ]; step []; step [];
   check (E.carrying !env = None && E.undo_label !env = Some "Put" && contains (source ()) "(sop/merge (ref a) (sop/box)")
     ("a release writes it as one Put entry: " ^ source ());
   step ~keys:[ Input.Meta ] [ char 'z' ];
@@ -1019,7 +1025,7 @@ let editor_text_drop () =
   (* inside a keyword the text does not check: refused, nothing written *)
   jump "a"; step [ char 'y' ]; step []; jump "b";
   let inside = point Rays_editor.Private.Text_pane.Graph "(sop/merge" ~after:5 in
-  at inside [ Event.MouseMoved inside ]; at inside [];
+  at inside [ Input.Pointer_moved inside ]; at inside [];
   check (contains (line ()) "Refused") ("a put that does not check is refused: " ^ line ());
   check (E.workspace !env == original) "and the picture is the original";
   step [ key Input.Escape ]; step [];
@@ -1027,10 +1033,10 @@ let editor_text_drop () =
   (* an unapplied draft: its bytes are not the document's *)
   at (float (gx + 200), float (top + 24 + 60)) [];
   click (float (gx + 200), float (top + 24 + 60));
-  step [ Event.TextInput "x" ]; step [ key Input.Escape ]; step [];
+  step [ Input.Text_input "x" ]; step [ key Input.Escape ]; step [];
   jump "a"; step [ char 'y' ]; step []; jump "b";
   let over = point Rays_editor.Private.Text_pane.Graph "(sop/merge" ~after:10 in
-  at over [ Event.MouseMoved over ]; at over [];
+  at over [ Input.Pointer_moved over ]; at over [];
   check (contains (line ()) "unapplied draft") ("a draft refuses: " ^ line ());
   step [ key Input.Escape ]; step [];
   (* the Document tab: the whole text is checked and installed *)
@@ -1038,9 +1044,9 @@ let editor_text_drop () =
   let original = E.workspace !env in
   jump "a"; step [ char 'y' ]; step [];
   let over = point Rays_editor.Private.Text_pane.Document "(sop/merge" ~after:10 in
-  at over [ Event.MouseMoved over ]; at over [];
+  at over [ Input.Pointer_moved over ]; at over [];
   check (contains (line ()) "(ref a) at line") ("the Document text takes it too: " ^ line ());
-  at over [ Event.MousePressed (Input.LeftButton, over); Event.MouseReleased (Input.LeftButton, over) ]; step []; step [];
+  at over [ Input.Pointer_pressed (Input.LeftButton, over); Input.Pointer_released (Input.LeftButton, over) ]; step []; step [];
   check (E.undo_label !env = Some "Put" && contains (source ()) "(sop/merge (ref a) (sop/box)")
     ("a put at a caret of the Document text is one Put entry: " ^ source ());
   step ~keys:[ Input.Meta ] [ char 'z' ];
@@ -1060,15 +1066,16 @@ let editor_command_click () =
   let count = ref 0 and mouse = ref (450., 320.) in
   let step ?(buttons = []) ?(keys = []) events =
     incr count;
-    env := E.update !env { (frame ~mouse:!mouse ~keys !count events) with mouse_buttons = buttons } in
+    let frame = frame ~mouse:!mouse ~keys !count events in
+    env := E.update !env { frame with input = { frame.input with buttons } } in
   let at ?buttons ?keys point events = mouse := point; step ?buttons ?keys events in
   let dump_line = dump_line env in
   for _ = 1 to 4 do step [] done;
   let gx, gy, gw, gh = (E.panes !env (frame 0 [])).graph in
   let gy = gy + gh + 1 + 28 in
   let tab = tab_at ~narrow:(gw < 400) ~right:(gx + gw - 36) ~top:gy 2 in
-  at tab [ Event.MouseMoved tab ];
-  at tab [ Event.MousePressed (Input.LeftButton, tab); Event.MouseReleased (Input.LeftButton, tab) ]; step [];
+  at tab [ Input.Pointer_moved tab ];
+  at tab [ Input.Pointer_pressed (Input.LeftButton, tab); Input.Pointer_released (Input.LeftButton, tab) ]; step [];
   let printed = Flow.Lisp.print (E.workspace !env).source |> fst in
   let lines = String.split_on_char '\n' printed in
   let line = Option.get (List.find_index (fun l -> contains l "(+ a b)") lines) in
@@ -1076,19 +1083,19 @@ let editor_command_click () =
     let rec find i = if String.sub l i 7 = "(+ a b)" then i + 3 else find (i + 1) in find 0 in
   let char_w = 6.95 in
   let name = float gx +. 36. +. float col *. char_w +. 3., float gy +. 6. +. 2. +. float line *. line_pitch in
-  at name [ Event.MouseMoved name ];
-  at name [ Event.MousePressed (Input.LeftButton, name); Event.MouseReleased (Input.LeftButton, name) ];
+  at name [ Input.Pointer_moved name ];
+  at name [ Input.Pointer_pressed (Input.LeftButton, name); Input.Pointer_released (Input.LeftButton, name) ];
   step [];
   check (E.Private.inspector_subject !env = Some ["g"; "@result"])
     "an ordinary click in Document did not select its containing node";
-  at ~keys:[ Input.Meta ] name [ Event.MousePressed (Input.LeftButton, name); Event.MouseReleased (Input.LeftButton, name) ];
+  at ~keys:[ Input.Meta ] name [ Input.Pointer_pressed (Input.LeftButton, name); Input.Pointer_released (Input.LeftButton, name) ];
   step []; step [];
   check (dump_line "scope selected" = "scope selected: g/a")
     ("a Command-click on a name did not select its binding: " ^ dump_line "scope selected");
   check (E.Private.inspector_subject !env = Some [ "g"; "a" ]) "the inspector does not show the Command-clicked binding";
   let graph_tab = tab_at ~narrow:(gw < 400) ~right:(gx + gw - 36) ~top:gy 1 in
-  at graph_tab [Event.MouseMoved graph_tab];
-  at graph_tab [Event.MousePressed (Input.LeftButton, graph_tab); Event.MouseReleased (Input.LeftButton, graph_tab)];
+  at graph_tab [Input.Pointer_moved graph_tab];
+  at graph_tab [Input.Pointer_pressed (Input.LeftButton, graph_tab); Input.Pointer_released (Input.LeftButton, graph_tab)];
   step [];
   let graph = T.make_shown (E.workspace !env).source "g" None T.Graph in
   let lines = String.split_on_char '\n' graph.text in
@@ -1096,8 +1103,8 @@ let editor_command_click () =
   let col = let text = List.nth lines line in
     let rec find i = if String.sub text i 7 = "(ref h)" then i + 5 else find (i + 1) in find 0 in
   let reference = float gx +. 36. +. float col *. char_w +. 3., float gy +. 8. +. float line *. line_pitch in
-  at reference [Event.MouseMoved reference];
-  at ~keys:[Input.Ctrl] reference [Event.MousePressed (Input.LeftButton, reference); Event.MouseReleased (Input.LeftButton, reference)];
+  at reference [Input.Pointer_moved reference];
+  at ~keys:[Input.Ctrl] reference [Input.Pointer_pressed (Input.LeftButton, reference); Input.Pointer_released (Input.LeftButton, reference)];
   step []; step [];
   check (dump_line "pane graph" = "pane graph: h") "Ctrl-click did not open the referenced graph";
   check (contains (dump_line "text") "document tab") "an out-of-Graph definition did not switch to Document";
@@ -1116,7 +1123,7 @@ let editor_text_find () =
   let count = ref 0 and mouse = ref (450., 320.) in
   let step ?(keys = []) events = incr count; env := E.update !env (frame ~mouse:!mouse ~keys !count events) in
   let at point events = mouse := point; step events in
-  let key k = Event.KeyPressed k and char c = Event.KeyPressed (Input.KeyChar c) in
+  let key k = Input.Key_pressed k and char c = Input.Key_pressed (Input.KeyChar c) in
   let command c = step ~keys:[ Input.Meta ] [ char c ]; step [] in
   let dump_line = dump_line env in
   (* the byte the bar looks from, as the dump says it *)
@@ -1132,16 +1139,16 @@ let editor_text_find () =
   let gx, gy, gw, gh = (E.panes !env (frame 0 [])).graph in
   let gy = gy + gh + 1 + 28 in
   let tab = tab_at ~narrow:(gw < 400) ~right:(gx + gw - 36) ~top:gy 2 in
-  at tab [ Event.MouseMoved tab ];
-  at tab [ Event.MousePressed (Input.LeftButton, tab); Event.MouseReleased (Input.LeftButton, tab) ]; step [];
+  at tab [ Input.Pointer_moved tab ];
+  at tab [ Input.Pointer_pressed (Input.LeftButton, tab); Input.Pointer_released (Input.LeftButton, tab) ]; step [];
   let document () = Lazy.force (T.make_shown (E.workspace !env).source "g" None T.Document).applied in
-  let click point = at point [ Event.MouseMoved point ];
-    at point [ Event.MousePressed (Input.LeftButton, point); Event.MouseReleased (Input.LeftButton, point) ]; step [] in
+  let click point = at point [ Input.Pointer_moved point ];
+    at point [ Input.Pointer_pressed (Input.LeftButton, point); Input.Pointer_released (Input.LeftButton, point) ]; step [] in
   click (float (gx + 200), float (gy + 8));
   (* Command-F opens the bar on the query field; typing finds, Enter and Shift-Enter step *)
   command 'f';
   check (contains (dump_line "text") "find \"\"") ("Command-F did not open the bar: " ^ dump_line "text");
-  step [ Event.TextInput "(graph" ]; step [];
+  step [ Input.Text_input "(graph" ]; step [];
   check (contains (dump_line "text") "find \"(graph\"") ("typing did not set the query: " ^ dump_line "text");
   let matches = T.find_all ~case:false "(graph" (document ()) in
   check (List.length matches = 3) "the workspace has three graphs";
@@ -1163,7 +1170,7 @@ let editor_text_find () =
     "the symbols are the graphs and the let* names, in order";
   command 'p';
   check (contains (dump_line "prompt") "go to symbol") ("Command-P did not open the symbols: " ^ dump_line "prompt");
-  step [ Event.TextInput "target" ]; step [ key Input.Enter ]; step []; step [];
+  step [ Input.Text_input "target" ]; step [ key Input.Enter ]; step []; step [];
   let target = let _, _, byte = List.find (fun (n, _, _) -> n = "target") symbols in byte in
   command 'f';
   check (bar_at () = target) ("the symbol pick did not place the caret: " ^ dump_line "text");
@@ -1188,9 +1195,9 @@ let editor_text_find () =
     let rec find i = if String.sub l i 7 = "(ref h)" then i + 5 else find (i + 1) in find 0 in
   command 'l';
   check (contains (dump_line "prompt") "go to line") ("Command-L did not open the line prompt: " ^ dump_line "prompt");
-  step [ Event.TextInput (Printf.sprintf "%d:%d" (line + 1) (col + 1)) ]; step [ key Input.Enter ]; step []; step [];
+  step [ Input.Text_input (Printf.sprintf "%d:%d" (line + 1) (col + 1)) ]; step [ key Input.Enter ]; step []; step [];
   check (T.line_target (document ()) (Printf.sprintf "%d:%d" (line + 1) (col + 1))
-         = Some (List.fold_left (fun n l -> n + String.length l + 1) 0 (List.filteri (fun i _ -> i < line) lines) + col))
+         = Some (List.fold_left (fun n l -> n + String.length l + 1) 0 (List.take line lines) + col))
     "line_target counts the line and column";
   step [ key Input.F12 ]; step []; step [];
   check (dump_line "pane graph" = "pane graph: h") ("F12 did not follow the reference: " ^ dump_line "pane graph");
@@ -1210,22 +1217,22 @@ let editor_graph_drafts () =
   let count = ref 0 and mouse = ref (450., 320.) in
   let step ?(keys = []) events = incr count; env := E.update !env (frame ~mouse:!mouse ~keys !count events) in
   let at point events = mouse := point; step events in
-  let key k = Event.KeyPressed k and char c = Event.KeyPressed (Input.KeyChar c) in
+  let key k = Input.Key_pressed k and char c = Input.Key_pressed (Input.KeyChar c) in
   let jump name =
     step [ key Input.Escape ];
-    step [ key (Input.KeyChar '/'); char 'j' ]; step [ Event.TextInput name ]; step [ key Input.Enter ]; step [] in
+    step [ key (Input.KeyChar '/'); char 'j' ]; step [ Input.Text_input name ]; step [ key Input.Enter ]; step [] in
   let summary () = dump_line env "text" in
   for _ = 1 to 4 do step [] done;
   let gx, gy, gw, gh = (E.panes !env (frame 0 [])).graph in
   let top = gy + gh + 1 + 28 in
-  let click point = at point [ Event.MouseMoved point ];
-    at point [ Event.MousePressed (Input.LeftButton, point); Event.MouseReleased (Input.LeftButton, point) ];
+  let click point = at point [ Input.Pointer_moved point ];
+    at point [ Input.Pointer_pressed (Input.LeftButton, point); Input.Pointer_released (Input.LeftButton, point) ];
     step [] in
   let area = float gx +. 120., float top +. 40. in
   let draft_in name =
     jump name;
     click (tab_at ~narrow:(gw < 400) ~right:(gx + gw - 36) ~top 1);
-    click area; step ~keys:[ Input.Meta ] [ char 'a' ]; step [ Event.TextInput ("(sop/box) ; " ^ name) ] in
+    click area; step ~keys:[ Input.Meta ] [ char 'a' ]; step [ Input.Text_input ("(sop/box) ; " ^ name) ] in
   draft_in "a";
   check (contains (summary ()) "graph drafts: a") ("a draft was not kept: " ^ summary ());
   draft_in "b";
@@ -1247,9 +1254,9 @@ let editor_fn_frames () =
     let count = ref 0 in
     let step events = incr count; env := E.update !env (frame ~mouse:(450., 320.) !count events) in
     for _ = 1 to 4 do step [] done;
-    step [ Event.KeyPressed Input.Escape ];
-    step [ Event.KeyPressed (Input.KeyChar '/'); Event.KeyPressed (Input.KeyChar 'j') ];
-    step [ Event.TextInput "g" ]; step [ Event.KeyPressed Input.Enter ];
+    step [ Input.Key_pressed Input.Escape ];
+    step [ Input.Key_pressed (Input.KeyChar '/'); Input.Key_pressed (Input.KeyChar 'j') ];
+    step [ Input.Text_input "g" ]; step [ Input.Key_pressed Input.Enter ];
     for _ = 1 to 4 do step [] done;
     let box = E.node_box !env [ "g"; "a" ] in
     E.close !env;

@@ -34,10 +34,10 @@ val operation : t -> string
 val version : t -> int
 val parameters : t -> string
 (** The hand-written cache text of an unparameterized node, or, for a
-    parameterized node that has none, [Parameter.cook_text] of its schema
+    parameterized node that has none, [Param.cook_text] of its schema
     values ([name=value;...]). *)
 
-(** [Parameter.cook_key] of the attached schema values, computed once when
+(** [Param.cook_key] of the attached schema values, computed once when
     the node is parameterized, or [""] for an unparameterized node. Session
     cache identity includes it next to intrinsic operator parameters, so every
     cook-impact schema field participates in the key. Generated inspection text
@@ -48,8 +48,8 @@ val inputs : t -> t list
 val trace : t -> Diagnostic.trace
 
 (** Concrete, type-erased inspector fields owned by this node instance. Empty
-    for legacy/unexposed nodes. *)
-val parameter_fields : t -> Parameter.field_view list
+    when the node exposes no parameter fields. *)
+val parameter_fields : t -> Param.field_view list
 val has_parameters : t -> bool
 
 val relabel : string -> t -> t
@@ -61,7 +61,7 @@ val relabel : string -> t -> t
     Standard catalog SOPs use the same mechanism. The reconstruction receives
     the stable node label and current graph inputs. *)
 val parameterize :
-  schema:'parameters Parameter.schema ->
+  schema:'parameters Param.schema ->
   values:'parameters ->
   rebuild:(label:string -> inputs:t list -> 'parameters -> t) ->
   t ->
@@ -73,8 +73,8 @@ val parameterize :
     validation failures return [Error] and leave the existing node intact. *)
 val apply_parameters :
   t ->
-  (string * Parameter.value) list ->
-  (t * Parameter.effects, string) result
+  (string * Param.value) list ->
+  (t * Param.effects, string) result
 
 module Private : sig
   val fresh_id : unit -> int
@@ -88,12 +88,10 @@ module Private : sig
   type input_policy = All | Only of int
   type cooked = {
     payload : Payload.t;
-    diagnostics : Diagnostic.t list;
     instances : Rays_math.Mat4.t array option;
   }
   type geometry_cooked = {
     geometry : Rdk.Geometry.t;
-    diagnostics : Diagnostic.t list;
     instances : Rays_math.Mat4.t array option;
   }
 
@@ -105,22 +103,28 @@ module Private : sig
     cook_mode:cook_mode ->
     dependencies:Context.Dependencies.t ->
     ?input_policy:input_policy ->
-    ?expand:(Context.t -> t array -> Payload.t array -> (t array, Diagnostic.error) result) ->
+    ?expand:(Context.t -> t array -> Payload.t array -> (t array, Diagnostic.t) result) ->
     inputs:t array ->
     (node_id:int -> Context.t -> Payload.t array ->
-     (cooked, Diagnostic.error) result) ->
+     (cooked, Diagnostic.t) result) ->
     t
 
   val make_geometry :
     ?label:string -> operation:string -> version:int -> parameters:string ->
     cook_mode:cook_mode -> dependencies:Context.Dependencies.t ->
     ?input_policy:input_policy ->
-    ?expand:(Context.t -> t array -> Rdk.Geometry.t array -> (t array, Diagnostic.error) result) ->
+    ?expand:(Context.t -> t array -> Rdk.Geometry.t array -> (t array, Diagnostic.t) result) ->
     inputs:t array ->
     (node_id:int -> Context.t -> Rdk.Geometry.t array ->
-      (geometry_cooked, Diagnostic.error) result) -> t
+      (geometry_cooked, Diagnostic.t) result) -> t
   (** Geometry SOP adapter. An Image or Kernel input returns [E_PAYLOAD] before calling
       either the expansion or cook callback. *)
+
+  val parameterize_with_key :
+    ?parameter_key:string -> schema:'parameters Param.schema -> values:'parameters ->
+    rebuild:(label:string -> inputs:t list -> 'parameters -> t) -> t -> t
+  (** Attach typed parameter values while supplying their exact opaque key.
+      Use when a stable binary key avoids serializing an already-typed payload. *)
 
   val cache_parameters : t -> string
   (** Intrinsic operator identity before schema display text is attached. *)
@@ -140,10 +144,10 @@ module Private : sig
   val adopt_identity : source:t -> t -> t
   val cook :
     t -> Context.t -> Payload.t array ->
-    (cooked, Diagnostic.error) result
+    (cooked, Diagnostic.t) result
 
   val expand :
-    t -> (Context.t -> t array -> Payload.t array -> (t array, Diagnostic.error) result) option
+    t -> (Context.t -> t array -> Payload.t array -> (t array, Diagnostic.t) result) option
   (** A zone node: given its current input nodes and their cooked outputs it returns the roots of the
       sub-graphs to cook, one per element; the session cooks them (through its
       cache) and passes their outputs, in order, to [cook] in place of the

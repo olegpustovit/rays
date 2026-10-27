@@ -1,0 +1,7 @@
+(executable
+ (name rays)
+ (enabled_if (= %{system} macosx))
+ (modules rays)
+ (public_name rays)
+ (package rays)
+ (libraries flow flow_sop editor_document sop_catalog web_export rays_editor ogpu_metal))

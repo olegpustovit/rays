@@ -6,8 +6,8 @@ type t = { ids : int list; primary : int option }
 let empty = { ids = []; primary = None }
 let selected t = t.primary
 let selected_nodes t = t.ids
-let select id _ = { ids = [ id ]; primary = Some id }
-let select_nodes ids _ = match ids with
+let select id = { ids = [ id ]; primary = Some id }
+let select_nodes ids = match ids with
   | [] -> empty
   | first :: _ -> { ids = List.sort_uniq Int.compare ids; primary = Some first }
-let clear _ = empty
+let clear = empty

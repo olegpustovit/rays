@@ -21,8 +21,8 @@ open Rays
 
   let pane_root ui (frame : Frame.t) ~bounds:(x, y, width, height) label =
     Pxui.Ui.box ui ~flags:Pxui.Ui.clickable
-      ~w:(Pxui.Ui.Px (float_of_int frame.width))
-      ~h:(Pxui.Ui.Px (float_of_int frame.height)) ~at:(0., 0.)
+      ~w:(Pxui.Ui.Px (float_of_int (fst frame.input.size)))
+      ~h:(Pxui.Ui.Px (float_of_int (snd frame.input.size))) ~at:(0., 0.)
       ~hit:(fun _ -> float x, float y, float width, float height) label
 
   let key path = String.concat "." (List.map string_of_int path)
@@ -217,7 +217,7 @@ open Rays
       let ox, oy, ow, oh = drag_origin ui grip original drag in
       (* Escape puts the panel back where the drag began (a docked one stays docked) *)
       let cancelled = (Ui.state ui grip ~default:0 = 1 && not drag.pressed)
-                      || (drag.held && Ui.key_pressed ui Rays.Input.Escape) in
+                      || (drag.held && Ui.key_pressed ui Input.Escape) in
       Ui.set_state ui grip (if cancelled && not drag.released then 1 else 0);
       if drag.held || drag.released then begin
         let px, py = if drag.released then drag.release_point else drag.pointer in
@@ -229,8 +229,8 @@ open Rays
             emit (Dragging (l.path, drag.released));
             (* as far as the layout shows it ({!Layout.geometry}): a place past the edge would be
                saved and not drawn, and the next drag would start from where the window is not *)
-            let wx = max 0 (min (frame.width - min frame.width ow) (ox + int_of_float (Float.round (px -. sx))))
-            and wy = max 0 (min (frame.height - header_height) (oy + int_of_float (Float.round (py -. sy)))) in
+            let wx = max 0 (min ((fst frame.input.size) - min (fst frame.input.size) ow) (ox + int_of_float (Float.round (px -. sx))))
+            and wy = max 0 (min ((snd frame.input.size) - header_height) (oy + int_of_float (Float.round (py -. sy)))) in
             if not drag.released then (tip := Some (wx, wy, ow); moving := Some l.path);
             emit (Window_drag (l.path, (wx, wy, ow, oh), drag.released))
           end
@@ -267,7 +267,7 @@ open Rays
       let words = "release to dock \xc2\xb7 esc keeps it floating" in
       let tw = Ui.text_width ui ~size:(Kit.cap_size ui) words in
       let w = tw +. 14. in
-      let tx = Float.min (float (frame.width - 4) -. w) (float wx +. (0.625 *. float ww))
+      let tx = Float.min (float ((fst frame.input.size) - 4) -. w) (float wx +. (0.625 *. float ww))
       and ty = Float.max 4. (float wy -. 30.) in
       let box = Ui.box ui ~w:(Ui.Px w) ~h:(Ui.Px 20.) ~at:(tx, ty) "workspace-drag-tip" in
       Ui.to_front ui ~order:max_int box;
@@ -330,7 +330,7 @@ open Rays
             (* the subject follows the kind, 8 points on (windows.html's title row) *)
             let size = Kit.cap_size ui in
             Ui.Paint.text paint ~size ~at:(!tx, Kit.cap_y ui y h)
-              ~color:(Rays.Color.with_alpha ink_2 179) (cut ~size sub)
+              ~color:(Rays_math.Color.with_alpha ink_2 179) (cut ~size sub)
           end
           else if sub <> "" && not collapsed then crumbs (split_crumbs sub);
           if collapsed then put ink_3 "collapsed"

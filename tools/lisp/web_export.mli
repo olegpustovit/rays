@@ -1,21 +1,21 @@
 (** The web export: a checked workspace's draw graph, lowered to a core program and printed as the
-    files of a standalone browser application (plan P5.10). *)
+    files of a standalone browser application. *)
 
 type lowered = {
   program : Flow_ir.Core.program;
-  span : Flow.Diagnostic.span;  (** the draw graph *)
+  span : Diagnostic.span;  (** the draw graph *)
   root : Flow.Eval.residual option;  (** the residual whose state the program reads *)
   plan : Flow.Eval.plan;  (** image producers referenced by the draw program *)
 }
 
-val lower : Editor_document.Workspace_doc.t -> (lowered, Flow.Diagnostic.t) result
+val lower : Editor_document.Workspace_doc.t -> (lowered, Diagnostic.t) result
 (** Run the static stage with graph inputs at their defaults and lower the first draw graph. A draw graph
     that reaches a [sop] or [scene] graph is refused with the reference's span ([E_WEB_GRAPH]). *)
 
 type files = (string * string) list
 (** Relative path and contents, in a fixed order. *)
 
-val files : Editor_document.Workspace_doc.t -> lowered -> (files, Flow.Diagnostic.t) result
+val files : Editor_document.Workspace_doc.t -> lowered -> (files, Diagnostic.t) result
 (** The export of a lowered draw graph:
     - [program.js]: {!Flow_web.Js.frame} (packed-array constants are views into [rt.data]) followed by
       [export const regions], one object per core region: [source] ({!Flow_web.Js.region}), [count], [kept],
@@ -52,5 +52,5 @@ val files : Editor_document.Workspace_doc.t -> lowered -> (files, Flow.Diagnosti
     a region that is not a collecting single-output one
     ([E_WEB_REGION]), or one whose inputs change from frame to frame ([E_WEB_CAPTURE]), each with a span. *)
 
-val load : string -> string * (Editor_document.Workspace_doc.t, Flow.Diagnostic.t list) result
+val load : string -> string * (Editor_document.Workspace_doc.t, Diagnostic.t list) result
 (** The text of a [.rays] file and its checked document (imports read beside it). *)

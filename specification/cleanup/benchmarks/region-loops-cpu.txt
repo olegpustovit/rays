@@ -1,0 +1,6 @@
+scalar walker domains=1 cpu_seconds=0.014008 allocated_bytes=64974560
+scalar packed domains=1 cpu_seconds=0.000463 allocated_bytes=222072
+scalar packed domains=8 cpu_seconds=0.000497 allocated_bytes=222072
+record walker domains=1 cpu_seconds=0.018935 allocated_bytes=57224928
+record packed domains=1 cpu_seconds=0.000490 allocated_bytes=255024
+record packed domains=8 cpu_seconds=0.000486 allocated_bytes=255024

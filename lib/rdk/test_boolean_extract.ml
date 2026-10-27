@@ -243,7 +243,7 @@ let test_same_operand_overlapping_shells () =
     and topology = Topology.Private.view (Geometry.topology geometry) in
     Array.copy positions.x, Array.copy positions.y, Array.copy positions.z,
     Array.copy topology.vertex_points, Array.copy topology.primitive_offsets in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       pipeline ~resolve_left_self_intersections:true self far
       |> extract Extract.difference |> result_signature) in
   check (run 1 = run 4)
@@ -295,7 +295,7 @@ let validate_ancestry_positions left right ancestry =
 let test_domain_exactness () =
   let left = tetra ~origin:(0.,0.,0.) 4.
   and right = tetra ~origin:(1.,1.,1.) 0.5 in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       pipeline left right |> extract Extract.difference |> signature) in
   if run 1 <> run 4 then fail "Boolean extraction differs between domain counts"
 

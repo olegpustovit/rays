@@ -11,7 +11,6 @@
 open Sop
 module S = Flow.Syntax
 module F = Flow_graph.Flow_edit
-module Param = Editor_core.Param
 module Edit = Edit_graph
 
 exception Stop of string
@@ -38,7 +37,7 @@ let current fields name = List.find_map (fun (f : Param.field_view) ->
   if f.name = name then Some f.current else None) fields
 
 (* the keywords a node's fields say, with [keep] deciding which fields are written *)
-let ports node = match Flow_sop.Port.parameters (Contexts.group_triples (Node.parameter_fields node)) with
+let ports node = match Flow_sop.Port.parameters ~infer:true (Node.parameter_fields node) with
   | Ok ports -> ports | Error _ -> []
 
 let differing ~before node =
@@ -65,7 +64,7 @@ type state = { catalog : Flow.Check.catalog; mutable workspace : Workspace_doc.t
 
 let apply st op = match Workspace_doc.edit st.catalog st.workspace op with
   | Ok workspace -> st.workspace <- workspace
-  | Error (d : Flow.Diagnostic.t) -> stop "%s" d.message
+  | Error (d : Diagnostic.t) -> stop "%s" d.message
 
 (* The binding of a home; an inline call is unfolded into one first. *)
 let rec bind st : Document.home -> F.path = function
@@ -657,7 +656,7 @@ let write_edit st (doc : Document.t) level = function
 let write ~factories (doc : Document.t) level edit =
   if not (writes doc level edit) then Ok None else
   let ( let* ) = Result.bind in
-  let* catalog = Result.map_error Flow.Diagnostic.to_string
+  let* catalog = Result.map_error Diagnostic.to_string
       (Contexts.catalog ~version:Flow_sop.Manifest.version factories) in
   let st = { catalog; workspace = fst doc.workspace; unfolded = []; adopted = false } in
   try
@@ -682,7 +681,7 @@ let write ~factories (doc : Document.t) level edit =
     else if st.workspace.source == (fst doc.workspace).source then
       Ok (Some ({ doc with workspace = st.workspace, snd doc.workspace }, note))
     else Result.map (fun doc -> Some (doc, note)) (Contexts.of_workspace ~factories ~previous:doc st.workspace
-                                                   |> Result.map_error Flow.Diagnostic.to_string)
+                                                   |> Result.map_error Diagnostic.to_string)
   with Stop message -> Error message
 
 (* Field values of one object (an inspector row, a viewport handle) written to its text and lowered
@@ -705,7 +704,7 @@ let run ~factories ~adopt (before : Document.t) (after : Document.t) =
   if before.scene == after.scene && before.networks == after.networks then Ok after
   else
     let ( let* ) = Result.bind in
-    let* catalog = Result.map_error Flow.Diagnostic.to_string
+    let* catalog = Result.map_error Diagnostic.to_string
         (Contexts.catalog ~version:Flow_sop.Manifest.version factories) in
     let st = { catalog; workspace = fst before.workspace; unfolded = []; adopted = false } in
     try
@@ -713,7 +712,7 @@ let run ~factories ~adopt (before : Document.t) (after : Document.t) =
       if adopt && unhomed_changes before after then adopt_objects st after;
       if st.workspace == fst before.workspace then Ok after
       else Contexts.of_workspace ~factories ~previous:after st.workspace
-           |> Result.map_error Flow.Diagnostic.to_string
+           |> Result.map_error Diagnostic.to_string
     with Stop message -> Error message
 
 let reconcile ~factories ?(adopt = true) before after = run ~factories ~adopt before after
@@ -723,19 +722,19 @@ let reconcile ~factories ?(adopt = true) before after = run ~factories ~adopt be
    an object can be added to it. *)
 let adopt ~factories (doc : Document.t) =
   let ( let* ) = Result.bind in
-  let* catalog = Result.map_error Flow.Diagnostic.to_string
+  let* catalog = Result.map_error Diagnostic.to_string
       (Contexts.catalog ~version:Flow_sop.Manifest.version factories) in
   let st = { catalog; workspace = fst doc.workspace; unfolded = []; adopted = false } in
   try
     adopt_objects st doc;
-    Contexts.of_workspace ~factories ~previous:doc st.workspace |> Result.map_error Flow.Diagnostic.to_string
+    Contexts.of_workspace ~factories ~previous:doc st.workspace |> Result.map_error Diagnostic.to_string
   with Stop message -> Error message
 
 (* The binding of a home, unfolding what is written in place: the document with that edit and
    the binding's path (panels of the editor graph are edited through it). *)
 let bind_home ~factories (doc : Document.t) home =
   let ( let* ) = Result.bind in
-  let* catalog = Result.map_error Flow.Diagnostic.to_string
+  let* catalog = Result.map_error Diagnostic.to_string
       (Contexts.catalog ~version:Flow_sop.Manifest.version factories) in
   let st = { catalog; workspace = fst doc.workspace; unfolded = []; adopted = false } in
   try
@@ -744,7 +743,7 @@ let bind_home ~factories (doc : Document.t) home =
     else
       Result.map (fun doc -> doc, path)
         (Contexts.of_workspace ~factories ~previous:doc st.workspace
-         |> Result.map_error Flow.Diagnostic.to_string)
+         |> Result.map_error Diagnostic.to_string)
   with Stop message -> Error message
 
 (* ---- composition: gestures on the scene's merge ---- *)

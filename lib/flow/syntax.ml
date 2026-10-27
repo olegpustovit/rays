@@ -9,6 +9,7 @@ type kind =
   | Open of char | Close of char | Prefix of quote_kind | Meta_name of string
   | Comment of string | Word of node | End
 type token = { kind : kind; span : Diagnostic.span }
+module Text_lexer = Text_lexer
 
 let depth_limit = 256
 
@@ -21,107 +22,46 @@ let number_value text = match nonfinite text with
   | None -> Option.bind (float_of_string_opt text) (fun value ->
       if Float.is_finite value then Some value else None)
 
-let number text =
-  Option.is_some (nonfinite text) ||
-  let n = String.length text in
-  let digit c = c >= '0' && c <= '9' in
-  let i = ref (if n > 0 && text.[0] = '-' then 1 else 0) in
-  let before = ref 0 and after = ref 0 in
-  while !i < n && digit text.[!i] do incr before; incr i done;
-  if !i < n && text.[!i] = '.' then begin
-    incr i;
-    while !i < n && digit text.[!i] do incr after; incr i done
-  end;
-  let mantissa = !before + !after > 0 in
-  if mantissa && !i < n && (text.[!i] = 'e' || text.[!i] = 'E') then begin
-    incr i;
-    if !i < n && (text.[!i] = '+' || text.[!i] = '-') then incr i;
-    let exponent = !i in
-    while !i < n && digit text.[!i] do incr i done;
-    !i = n && !i > exponent
-  end else !i = n && mantissa
+let number = Text_lexer.number
 
 let fail source start finish code message = Error (Diagnostic.error
   ~span:{start; finish} ~position:(Diagnostic.position_of_offset source start)
   ~code message)
 
-let separator = function
-  | ' ' | '\t' | '\r' | '\n' | '(' | ')' | '[' | ']' | '{' | '}' | ';' | '"' -> true
-  | _ -> false
+let separator = Text_lexer.separator
 
 let tokenize source =
-  let n = String.length source in
-  (* bytes 1-3 are the printer's in-band span markers ([Lisp.wrap]) *)
-  let marker = ref (-1) in
-  String.iteri (fun i c -> if !marker < 0 && c >= '\001' && c <= '\003' then marker := i) source;
-  if !marker >= 0 then fail source !marker (!marker + 1) "E_UNEXPECTED"
-    (Printf.sprintf "Control byte %d is not allowed in a workspace" (Char.code source.[!marker]))
-  else
-  let word_end from =
-    let j = ref from in
-    while !j < n && not (separator source.[!j]) do incr j done; !j in
-  let string_end start =
-    let buf = Buffer.create 32 in
-    let unclosed () = fail source start n "E_UNCLOSED" "This string is never closed" in
-    let rec go j =
-      if j >= n then unclosed ()
-      else match source.[j] with
-      | '"' -> Ok (Buffer.contents buf, j + 1)
-      | '\\' when j + 1 >= n -> unclosed ()
-      | '\\' ->
-          let add c = Buffer.add_char buf c; go (j + 2) in
-          (match source.[j + 1] with
-           | '"' -> add '"' | '\\' -> add '\\' | 'n' -> add '\n'
-           | 't' -> add '\t' | 'r' -> add '\r'
-           | '0'..'9' when j+3<n && source.[j+2]>='0' && source.[j+2]<='9'
-               && source.[j+3]>='0' && source.[j+3]<='9' ->
-               let byte=int_of_string(String.sub source (j+1) 3)in
-               if byte>255 then fail source j (j+4) "E_UNEXPECTED" "A decimal byte escape must be 000 to 255."
-               else (Buffer.add_char buf(Char.chr byte);go(j+4))
-           | _ -> fail source j (j + 2) "E_UNEXPECTED" "Unknown string escape")
-      | c -> Buffer.add_char buf c; go (j + 1) in
-    go (start + 1) in
-  let rec read i acc =
-    let tok kind finish =
-      {kind; span = {Diagnostic.start = i; finish}} :: acc in
-    if i >= n then Ok (List.rev (tok End n))
-    else match source.[i] with
-    | ' ' | '\t' | '\r' | '\n' -> read (i + 1) acc
-    | ';' ->
-        let j = ref i in
-        while !j < n && source.[!j] <> '\n' do incr j done;
-        let k = ref i in
-        while !k < !j && source.[!k] = ';' do incr k done;
-        if !k < !j && source.[!k] = ' ' then incr k;
-        read !j (tok (Comment (String.trim (String.sub source !k (!j - !k)))) !j)
-    | ('(' | '[' | '{') as c -> read (i + 1) (tok (Open c) (i + 1))
-    | (')' | ']' | '}') as c -> read (i + 1) (tok (Close c) (i + 1))
-    | '\'' -> read (i + 1) (tok (Prefix Plain) (i + 1))
-    | '`' -> read (i + 1) (tok (Prefix Quasi) (i + 1))
-    | '~' when i + 1 < n && source.[i + 1] = '@' -> read (i + 2) (tok (Prefix Splice) (i + 2))
-    | '~' -> read (i + 1) (tok (Prefix Unquote) (i + 1))
-    | '^' ->
-        let j = word_end (i + 1) in
-        if j > i + 2 && source.[i + 1] = ':'
-        then read j (tok (Meta_name (String.sub source (i + 2) (j - i - 2))) j)
-        else fail source i (max j (i + 1)) "E_UNEXPECTED"
-          "^ is followed by a keyword, as in ^:bypass"
-    | '"' ->
-        (match string_end i with
-         | Error _ as error -> error
-         | Ok (text, j) -> read j (tok (Word (Str text)) j))
-    | _ ->
-        let j = word_end i in
-        let w = String.sub source i (j - i) in
-        let node =
-          if String.length w > 1 && w.[0] = ':'
-          then Kw (String.sub w 1 (String.length w - 1))
-          else if number w then Num w else Sym w in
-        read j (tok (Word node) j) in
-  read 0 []
+  let raw = Text_lexer.lex source in
+  (* Control bytes keep their original priority over other lexical errors. *)
+  let control_issue = Array.find_map (fun (token : Text_lexer.token) ->
+    match token.issue with
+    | Some issue when String.starts_with ~prefix:"Control byte " issue.message -> Some issue
+    | _ -> None) raw in
+  let issue = match control_issue with Some _ -> control_issue
+    | None -> Array.find_map (fun (token : Text_lexer.token) -> token.issue) raw in
+  match issue with
+  | Some issue -> fail source issue.start issue.finish issue.code issue.message
+  | None ->
+      let kind = function
+        | Text_lexer.Open c -> Open c
+        | Text_lexer.Close c -> Close c
+        | Text_lexer.Prefix '\'' -> Prefix Plain
+        | Text_lexer.Prefix '`' -> Prefix Quasi
+        | Text_lexer.Prefix '~' -> Prefix Unquote
+        | Text_lexer.Prefix '@' -> Prefix Splice
+        | Text_lexer.Prefix _ -> assert false
+        | Text_lexer.Meta name -> Meta_name name
+        | Text_lexer.Comment text -> Comment text
+        | Text_lexer.String text -> Word (Str text)
+        | Text_lexer.Word (Text_lexer.Symbol text) -> Word (Sym text)
+        | Text_lexer.Word (Text_lexer.Keyword text) -> Word (Kw text)
+        | Text_lexer.Word (Text_lexer.Number text) -> Word (Num text)
+        | Text_lexer.End -> End in
+      Ok (Array.to_list (Array.map (fun (token : Text_lexer.token) ->
+        {kind=kind token.kind;span={Diagnostic.start=token.start;finish=token.stop}}) raw))
 
 let parse source =
-  Phase_timer.measure Parse (fun () ->
+  Phase_timer.measure "parse" (fun () ->
   let ( let* ) = Result.bind in
   let* tokens = tokenize source in
   let tokens = Array.of_list tokens in

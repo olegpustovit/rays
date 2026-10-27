@@ -311,9 +311,9 @@ let measure_merge ~box ~grid ~selected ~triangle_geometry =
            fail "compact points native edge group differs by domain count"
        done
    | _ -> fail "compact points native edge-group remap");
-  let match_source = Box_generator.box ~size:(Vec3.create 1. 2. 4.) () |> get_ok
-  and match_target = Box_generator.box ~size:(Vec3.create 4. 6. 8.) () |> get_ok
-      |> Transform_ops.transform (Mat4.translation (Vec3.create (-3.) 5. 2.)) in
+  let match_source = Box_generator.box ~size:(Rays_math.Vec3.create 1. 2. 4.) () |> get_ok
+  and match_target = Box_generator.box ~size:(Rays_math.Vec3.create 4. 6. 8.) () |> get_ok
+      |> Transform_ops.transform (Rays_math.Mat4.translation (Rays_math.Vec3.create (-3.) 5. 2.)) in
   let matched domains = Parallel.run ~domains (fun () ->
       Match_size.run ~grain:1 ~fit:Match_size.Stretch ~target:match_target match_source
       |> get_ok) in
@@ -322,18 +322,18 @@ let measure_merge ~box ~grid ~selected ~triangle_geometry =
       && equal_positions matched_one match_target)
     "Match Size stretch matches target bounds/complete domain exactness";
   let axis_source = Line_geometry.points [|(1., 0., 0.); (2., 0., 0.)|] in
-  let aligned = Match_size.match_axis ~grain:1 ~from:Vec3.unit_x ~into:Vec3.unit_y
+  let aligned = Match_size.match_axis ~grain:1 ~from:Rays_math.Vec3.unit_x ~into:Rays_math.Vec3.unit_y
       axis_source |> get_ok in
   let aligned_positions = Packed.Float3.Private.view (Geometry.positions aligned) in
   if abs_float aligned_positions.x.(0) > 1e-12
      || abs_float (aligned_positions.y.(0) -. 1.) > 1e-12 then
     fail "match axis quarter turn";
-  let opposed = Match_size.match_axis ~from:Vec3.unit_x ~into:(Vec3.neg Vec3.unit_x)
+  let opposed = Match_size.match_axis ~from:Rays_math.Vec3.unit_x ~into:(Rays_math.Vec3.neg Rays_math.Vec3.unit_x)
       axis_source |> get_ok in
   let opposed_positions = Packed.Float3.Private.view (Geometry.positions opposed) in
   if abs_float (opposed_positions.x.(1) +. 2.) > 1e-12 then
     fail "match axis deterministic half turn";
-  (match Match_size.match_axis ~from:Vec3.zero ~into:Vec3.unit_y axis_source with
+  (match Match_size.match_axis ~from:Rays_math.Vec3.zero ~into:Rays_math.Vec3.unit_y axis_source with
    | Error error when Error.code error = "invalid_axis" -> ()
    | _ -> fail "match axis accepted a zero vector");
   (compact_source, match_source, match_target)

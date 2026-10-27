@@ -1,5 +1,4 @@
-(** Editor factories of the SOP nodes declared once in this library: each
-    [parameters] record derives its schema, this factory, so they never drift. *)
+(** Editor factories for parameterized SOP nodes declared in this library. *)
 module Group_non_planar : sig val factory : Edit_graph.factory end
 module Group_backface : sig val factory : Edit_graph.factory end
 module Group_unshared : sig val factory : Edit_graph.factory end

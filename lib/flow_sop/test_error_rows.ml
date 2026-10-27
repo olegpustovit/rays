@@ -1,6 +1,6 @@
 (* Actual native Peak/Mountain selection is the independent row oracle. *)
 module E=Flow.Eval
-module D=Flow.Diagnostic
+module D=Diagnostic
 let ok=function Ok value->value|Error message->failwith message
 let parse text=match Flow.Syntax.parse text with Ok forms->forms|Error d->failwith(D.to_string d)
 let count=32769
@@ -50,7 +50,7 @@ let ()=
     let before=Rdk_test_support.geometry_bytes geometry in
     List.iter(fun mountain->let nodes=List.map(fun reference->compile reference geometry mountain)[false;true]in
       List.iter(fun domains->List.iter(fun grain->
-        let expected=Rays_math.Parallel.run ~domains(fun()->native ~mountain ~grain geometry selection)in
+        let expected=Parallel.run ~domains(fun()->native ~mountain ~grain geometry selection)in
         List.iter(fun node->with_session(fun session->
           match expected,Sop.Session.cook session ~context:(context domains grain)node with
           |Ok _,Ok output->assert(Rdk_test_support.geometry_bytes(Result.get_ok(Sop.Payload.geometry output.payload))=before)

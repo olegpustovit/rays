@@ -1,10 +1,6 @@
 type resource = Buffer of Buffer.t | Texture of Texture.t
 
-let color_format (descriptor : Ogpu_core.Types.texture_descriptor) =
-  match descriptor.format with
-  | Rgba8_unorm -> Texture.Rgba8_unorm
-  | Rgba16_float -> Texture.Rgba16_float
-  | Rgba32_float -> Texture.Rgba32_float
+let color_format (descriptor : Ogpu_core.Types.texture_descriptor) = descriptor.format
 
 type icb_entry = {
   icb : Metal.Indirect_command_buffer.t;
@@ -20,7 +16,7 @@ type table_entry = {
   mutable table_destroy_requested : bool;
 }
 
-(* Plan G6 objects retained by in-flight commands: destruction while used is
+(* Objects retained by in-flight commands: destruction while used is
    deferred to the last release. *)
 
 (* Encoders reuse depth-stencil states by value; the least recently used is
@@ -64,21 +60,6 @@ let metal_compare = function
   | Ogpu_core.Render_pass.Never -> Metal.Depth_stencil.Never
   | Less -> Less | Equal -> Equal | Less_equal -> Less_equal | Greater -> Greater
   | Not_equal -> Not_equal | Greater_equal -> Greater_equal | Always -> Always
-
-let metal_cull = function
-  | Ogpu_core.Render_pass.Cull_none -> Metal.Render_encoder.No_cull
-  | Cull_front -> Cull_front
-  | Cull_back -> Cull_back
-
-let metal_operation = function
-  | Ogpu_core.Render_pass.Keep -> Metal.Depth_stencil.Keep
-  | Zero -> Zero | Replace -> Replace | Increment_clamp -> Increment_clamp
-  | Decrement_clamp -> Decrement_clamp | Invert -> Invert
-  | Increment_wrap -> Increment_wrap | Decrement_wrap -> Decrement_wrap
-
-let metal_stage = function
-  | Ogpu_core.Backend.Vertex -> Metal.Render_encoder.Vertex
-  | Fragment -> Fragment
 
 let create () =
   let c =
@@ -232,9 +213,6 @@ let create () =
           in
           let create_depth_texture descriptor =
             create_texture_format ~format:Texture.Depth32_float ~host_read:false descriptor
-          in
-          let create_stencil_texture descriptor =
-            create_texture_format ~format:Texture.Stencil8 ~host_read:false descriptor
           in
           let native_resource token = Hashtbl.find_opt c.resources token in
           let finish_table_destroy entry =
@@ -658,19 +636,10 @@ let create () =
             match Depth_state_table.find c.depth_states state with
             | native -> Ok native
             | exception Not_found ->
-                let face (f : Ogpu_core.Render_pass.stencil_face) =
-                  Metal.Depth_stencil.face ~compare:(metal_compare f.compare)
-                    ~stencil_fail:(metal_operation f.stencil_fail)
-                    ~depth_fail:(metal_operation f.depth_fail)
-                    ~pass:(metal_operation f.pass) ~read_mask:f.read_mask
-                    ~write_mask:f.write_mask ()
-                in
                 (match
                    Metal.Depth_stencil.create ~label:"ogpu-metal-depth-state"
                      ~depth_compare:(metal_compare state.depth_compare)
                      ~depth_write:state.depth_write
-                     ?front_face:(Option.map (fun (s : Ogpu_core.Render_pass.stencil_state) -> face s.front) state.stencil)
-                     ?back_face:(Option.map (fun (s : Ogpu_core.Render_pass.stencil_state) -> face s.back) state.stencil)
                      (Device.Private.metal device) ()
                  with
                  | Error e -> Error (Device.of_metal_error ~operation e)
@@ -771,137 +740,6 @@ let create () =
                           error operation Ogpu_core.Error.Invalid_state "commands are finished"
                         else Ok ()
                       in
-                      let compute_encoder () =
-                        match recording () with
-                        | Error _ as failure -> failure
-                        | Ok () -> (
-                            let created = native_of (Metal.Compute_encoder.create native) in
-                            match created with
-                            | Error _ as failure -> failure
-                            | Ok encoder ->
-                                open_encoder :=
-                                  Some (fun () -> ignore (Metal.Compute_encoder.end_encoding encoder));
-                                Ok
-                                  {
-                                    Ogpu_core.Backend.set_pipeline =
-                                      (fun token ->
-                                        match Hashtbl.find_opt c.pipeline_tokens token with
-                                        | None ->
-                                            error operation Ogpu_core.Error.Invalid_argument
-                                              "pipeline graph is incomplete"
-                                        | Some pipeline -> (
-                                            match Pipeline.Private.native pipeline with
-                                            | Render _ ->
-                                                error operation Ogpu_core.Error.Invalid_argument
-                                                  "render pipeline cannot execute compute"
-                                            | Compute compute -> (
-                                                match
-                                                  keep
-                                                    (fun () ->
-                                                      Pipeline.Private.retain_submission pipeline)
-                                                    (fun () ->
-                                                      Pipeline.Private.release_submission pipeline)
-                                                with
-                                                | Error _ as failure -> failure
-                                                | Ok () ->
-                                                    native_of
-                                                      (Metal.Compute_encoder.set_pipeline encoder
-                                                         compute))));
-                                    set_buffer =
-                                      (fun ~index ~offset token ->
-                                        match find_buffer token with
-                                        | Error _ as failure -> failure
-                                        | Ok buffer -> (
-                                            match keep_buffer buffer with
-                                            | Error _ as failure -> failure
-                                            | Ok () ->
-                                                native_of
-                                                  (Metal.Compute_encoder.set_buffer encoder ~index
-                                                     ~offset (Buffer.Private.metal buffer))));
-                                    set_bytes =
-                                      (fun ~index bytes ->
-                                        native_of (Metal.Compute_encoder.set_bytes encoder ~index bytes));
-                                    set_texture =
-                                      (fun ~index token ->
-                                        match native_resource token with
-                                        | Some (Texture texture) -> (
-                                            match
-                                              keep
-                                                (fun () -> Texture.Private.retain_submission texture)
-                                                (fun () -> Texture.Private.release_submission texture)
-                                            with
-                                            | Error _ as failure -> failure
-                                            | Ok () ->
-                                                native_of
-                                                  (Metal.Compute_encoder.set_texture encoder ~index
-                                                     (Texture.Private.metal texture)))
-                                        | _ ->
-                                            error operation Ogpu_core.Error.Invalid_argument
-                                              "texture graph is incomplete");
-                                    set_accel =
-                                      (fun ~index token ->
-                                        match find_accel token with
-                                        | Error _ as failure -> failure
-                                        | Ok structure -> (
-                                            match keep_accel structure with
-                                            | Error _ as failure -> failure
-                                            | Ok () ->
-                                                native_of
-                                                  (Metal.Compute_encoder.set_acceleration_structure
-                                                     encoder ~index
-                                                     (Some (Acceleration.Private.metal structure)))));
-                                    set_table =
-                                      (fun ~index token ->
-                                        match Hashtbl.find_opt c.tables token with
-                                        | None ->
-                                            error operation Ogpu_core.Error.Invalid_argument
-                                              "function table graph is incomplete"
-                                        | Some entry -> (
-                                            match
-                                              keep
-                                                (fun () ->
-                                                  entry.table_uses <- entry.table_uses + 1;
-                                                  Ok ())
-                                                (fun () ->
-                                                  entry.table_uses <- entry.table_uses - 1;
-                                                  if entry.table_uses = 0 && entry.table_destroy_requested
-                                                  then ignore (finish_table_destroy entry))
-                                            with
-                                            | Error _ as failure -> failure
-                                            | Ok () ->
-                                                native_of
-                                                  (Metal.Compute_encoder.set_intersection_function_table
-                                                     encoder ~index (Some entry.table))));
-                                    dispatch_threads =
-                                      (fun ~threads ~threadgroup ->
-                                        native_of
-                                          (Metal.Compute_encoder.dispatch_threads encoder ~threads
-                                             ~threadgroup));
-
-                                    compute_use_accels =
-                                      (fun tokens ->
-                                        let rec collect acc = function
-                                          | [] -> Ok (List.rev acc)
-                                          | token :: rest -> (
-                                              match find_accel token with
-                                              | Error _ as failure -> failure
-                                              | Ok structure -> (
-                                                  match keep_accel structure with
-                                                  | Error _ as failure -> failure
-                                                  | Ok () -> collect (Acceleration.Private.metal structure :: acc) rest))
-                                        in
-                                        match collect [] tokens with
-                                        | Error _ as failure -> failure
-                                        | Ok [] -> Ok ()
-                                        | Ok structures ->
-                                            native_of (Metal.Compute_encoder.use_acceleration_structures encoder structures));
-
-                                    end_compute =
-                                      (fun () ->
-                                        open_encoder := None;
-                                        native_of (Metal.Compute_encoder.end_encoding encoder));
-                                  })
-                      in
                       let accel_encoder () =
                         match recording () with
                         | Error _ as failure -> failure
@@ -970,475 +808,37 @@ let create () =
                           (fun () -> Texture.Private.retain_submission texture)
                           (fun () -> Texture.Private.release_submission texture)
                       in
-                      let region (o : Ogpu_core.Types.origin)
-                          (e : Ogpu_core.Types.extent) : Metal.Texture.region =
-                        { x = o.x; y = o.y; z = o.z; width = e.width; height = e.height; depth = e.depth }
-                      in
-                      let blit_encoder () =
-                        match recording () with
-                        | Error _ as failure -> failure
-                        | Ok () -> (
-                            let created = native_of (Metal.Blit_encoder.create native) in
-                            match created with
-                            | Error _ as failure -> failure
-                            | Ok encoder ->
-                                open_encoder :=
-                                  Some (fun () -> ignore (Metal.Blit_encoder.end_encoding encoder));
-                                Ok
-                                  {
-
-                                    Ogpu_core.Backend.buffer_to_texture =
-                                      (fun ~src ~offset ~bytes_per_row ~bytes_per_image ~dst ~mip
-                                           ~origin ~extent ->
-                                        match (find_buffer src, find_texture dst) with
-                                        | Error e, _ | _, Error e -> Error e
-                                        | Ok source, Ok destination -> (
-                                            match (keep_buffer source, keep_texture destination) with
-                                            | Error e, _ | _, Error e -> Error e
-                                            | Ok (), Ok () ->
-                                                native_of
-                                                  (Metal.Blit_encoder.copy_buffer_to_texture encoder
-                                                     ~source:(Buffer.Private.metal source)
-                                                     ~source_offset:offset
-                                                     ~source_bytes_per_row:(Int64.to_int bytes_per_row)
-                                                     ~source_bytes_per_image:
-                                                       (Int64.to_int bytes_per_image)
-                                                     ~destination:(Texture.Private.metal destination)
-                                                     ~destination_slice:0 ~destination_level:mip
-                                                     ~destination_region:(region origin extent))));
-
-                                    end_blit =
-                                      (fun () ->
-                                        open_encoder := None;
-                                        native_of (Metal.Blit_encoder.end_encoding encoder));
-                                  })
-                      in
-                      let render_encoder (target : Ogpu_core.Backend.driver_render_target) =
-                        match recording () with
-                        | Error _ as failure -> failure
-                        | Ok () -> (
-                            let color = target.target_colors.(0) in
-                            let optional f = function
-                              | None -> Ok None
-                              | Some token -> Result.map Option.some (f token)
-                            in
-                            match
-                              ( find_texture color.color,
-                                optional find_texture color.color_resolve,
-                                optional (fun (d : Ogpu_core.Backend.driver_depth_attachment) -> find_texture d.depth) target.target_depth,
-                                optional (fun (s : Ogpu_core.Backend.driver_stencil_attachment) -> find_texture s.stencil) target.target_stencil )
-                            with
-                            | Error e, _, _, _ | _, Error e, _, _ | _, _, Error e, _ | _, _, _, Error e -> Error e
-                            | Ok color_texture, Ok resolve, Ok depth, Ok stencil -> (
-                                let retained_all =
-                                  List.fold_left
-                                    (fun result texture ->
-                                      Result.bind result (fun () -> keep_texture texture))
-                                    (Ok ())
-                                    (color_texture
-                                    :: List.filter_map Fun.id [ resolve; depth; stencil ])
-                                in
-                                match retained_all with
+                      let encoder_context =
+                        { Command_control.operation; device; native; native_of; open_encoder; recording;
+                          keep; keep_buffer; find_buffer; find_accel; keep_accel; find_texture; keep_texture;
+                          resource = (fun token ->
+                            match native_resource token with
+                            | Some (Buffer buffer) -> Some (Command_control.Buffer buffer)
+                            | Some (Texture texture) -> Some (Command_control.Texture texture)
+                            | None -> None);
+                          pipeline = (fun token -> Hashtbl.find_opt c.pipeline_tokens token);
+                          sampler = (fun token -> Hashtbl.find_opt c.sampler_tokens token);
+                          table = (fun token ->
+                            match Hashtbl.find_opt c.tables token with
+                            | None -> error operation Ogpu_core.Error.Invalid_argument
+                                "function table graph is incomplete"
+                            | Some entry ->
+                                (match keep
+                                  (fun () -> entry.table_uses <- entry.table_uses + 1; Ok ())
+                                  (fun () ->
+                                    entry.table_uses <- entry.table_uses - 1;
+                                    if entry.table_uses = 0 && entry.table_destroy_requested then
+                                      ignore (finish_table_destroy entry))
+                                with
                                 | Error _ as failure -> failure
-                                | Ok () -> (
-                                    match
-                                      Metal.Render_pass_descriptor.create ~width:target.target_width
-                                        ~height:target.target_height
-                                        ~sample_count:target.target_samples ()
-                                    with
-                                    | Error e -> Error (Device.of_metal_error ~operation e)
-                                    | Ok pass -> (
-                                        let fail e =
-                                          ignore (Metal.Render_pass_descriptor.destroy pass);
-                                          Error (Device.of_metal_error ~operation e)
-                                        in
-                                        let load = function
-                                          | Ogpu_core.Render_pass.Dont_care ->
-                                              Metal.Render_pass_descriptor.Load_dont_care
-                                          | Load -> Load
-                                          | Clear -> Clear
-                                        and store = function
-                                          | Ogpu_core.Render_pass.Store | Resolve ->
-                                              Metal.Render_pass_descriptor.Store
-                                          | Discard -> Store_dont_care
-                                        in
-                                        let configured =
-                                          let ( let* ) = Result.bind in
-                                          let* () =
-                                            Metal.Render_pass_descriptor.set_attachments pass
-                                              ~color:(Texture.Private.metal color_texture)
-                                              ~clear:color.color_clear
-                                              ?depth:(Option.map Texture.Private.metal depth)
-                                              ?stencil:(Option.map Texture.Private.metal stencil)
-                                              ()
-                                          in
-                                          let* () =
-                                            Metal.Render_pass_descriptor.set_color_load_action pass
-                                              (load color.color_load)
-                                          in
-                                          let keep = color.color_store = Ogpu_core.Render_pass.Store in
-                                          let* () =
-                                            match resolve with
-                                            | None ->
-                                                Metal.Render_pass_descriptor.set_color_store_action
-                                                  pass ~store:keep ~resolve:false
-                                            | Some resolve ->
-                                                let* () =
-                                                  Metal.Render_pass_descriptor.set_resolve_texture
-                                                    pass (Some (Texture.Private.metal resolve))
-                                                in
-                                                Metal.Render_pass_descriptor.set_color_store_action
-                                                  pass ~store:keep ~resolve:true
-                                          in
-                                          let depth_actions =
-                                            match target.target_depth with
-                                            | None -> (Metal.Render_pass_descriptor.Clear, Metal.Render_pass_descriptor.Store, 1.)
-                                            | Some d -> (load d.depth_load, store d.depth_store, d.depth_clear)
-                                          and stencil_actions =
-                                            match target.target_stencil with
-                                            | None -> (Metal.Render_pass_descriptor.Clear, Metal.Render_pass_descriptor.Store, 0)
-                                            | Some s -> (load s.stencil_load, store s.stencil_store, s.stencil_clear)
-                                          in
-                                            Metal.Render_pass_descriptor.set_depth_stencil_actions pass
-                                              ~depth:depth_actions ~stencil:stencil_actions
-                                        in
-                                        match configured with
-                                        | Error e -> fail e
-                                        | Ok () -> (
-                                            match
-                                              Metal.Render_encoder.Private.create_from_pass_scoped native pass
-                                            with
-                                            | Error e -> fail e
-                                            | Ok encoder ->
-                                                let finish () =
-                                                  open_encoder := None;
-                                                  let ended = Metal.Render_encoder.end_encoding encoder in
-                                                  ignore (Metal.Render_pass_descriptor.destroy pass);
-                                                  native_of ended
-                                                in
-                                                open_encoder := Some (fun () -> ignore (finish ()));
-                                                let render_pipeline token =
-                                                  match Hashtbl.find_opt c.pipeline_tokens token with
-                                                  | None ->
-                                                      error operation Ogpu_core.Error.Invalid_argument
-                                                        "pipeline graph is incomplete"
-                                                  | Some pipeline -> (
-                                                      match Pipeline.Private.native pipeline with
-                                                      | Compute _ ->
-                                                          error operation Ogpu_core.Error.Invalid_argument
-                                                            "compute pipeline cannot draw"
-                                                      | Render native -> (
-                                                          match
-                                                            keep
-                                                              (fun () -> Pipeline.Private.retain_submission pipeline)
-                                                              (fun () -> Pipeline.Private.release_submission pipeline)
-                                                          with
-                                                          | Error _ as failure -> failure
-                                                          | Ok () -> Ok native))
-                                                in
-                                                let metal_primitive = function
-                                                  | Ogpu_core.Render_pass.Point_list -> Metal.Render_encoder.Point
-                                                  | Line_list -> Line
-                                                  | Triangle_list -> Triangle
-                                                  | Triangle_strip -> Triangle_strip
-                                                and metal_index = function
-                                                  | Ogpu_core.Render_pass.Uint16 -> Metal.Render_encoder.Uint16
-                                                  | Uint32 -> Uint32
-                                                in
-                                                Ok
-                                                  {
-                                                    Ogpu_core.Backend.render_set_pipeline =
-                                                      (fun token ->
-                                                        match render_pipeline token with
-                                                        | Error _ as failure -> failure
-                                                        | Ok native ->
-                                                            native_of (Metal.Render_encoder.set_pipeline encoder native));
-                                                    set_stage_buffer =
-                                                      (fun stage ~index ~offset token ->
-                                                        match find_buffer token with
-                                                        | Error _ as failure -> failure
-                                                        | Ok buffer -> (
-                                                            match keep_buffer buffer with
-                                                            | Error _ as failure -> failure
-                                                            | Ok () ->
-                                                                native_of
-                                                                  (match stage with
-                                                                   | Ogpu_core.Backend.Vertex -> Metal.Render_encoder.set_vertex_buffer encoder ~index ~offset (Buffer.Private.metal buffer)
-                                                                   | Fragment -> Metal.Render_encoder.set_fragment_buffer encoder ~index ~offset (Buffer.Private.metal buffer))));
-
-                                                    set_stage_texture =
-                                                      (fun stage ~index token ->
-                                                        match find_texture token with
-                                                        | Error _ as failure -> failure
-                                                        | Ok texture -> (
-                                                            match keep_texture texture with
-                                                            | Error _ as failure -> failure
-                                                            | Ok () ->
-                                                                native_of
-                                                                  (match stage with
-                                                                   | Ogpu_core.Backend.Vertex -> Metal.Render_encoder.set_vertex_texture encoder ~index (Texture.Private.metal texture)
-                                                                   | Fragment -> Metal.Render_encoder.set_fragment_texture encoder ~index (Texture.Private.metal texture))));
-                                                    set_stage_sampler =
-                                                      (fun stage ~index token ->
-                                                        match Hashtbl.find_opt c.sampler_tokens token with
-                                                        | None ->
-                                                            error operation Ogpu_core.Error.Invalid_argument
-                                                              "sampler graph is incomplete"
-                                                        | Some sampler -> (
-                                                            match
-                                                              keep
-                                                                (fun () -> Sampler.Private.retain_submission sampler)
-                                                                (fun () -> Sampler.Private.release_submission sampler)
-                                                            with
-                                                            | Error _ as failure -> failure
-                                                            | Ok () ->
-                                                                native_of
-                                                                  (match stage with
-                                                                   | Ogpu_core.Backend.Vertex -> Metal.Render_encoder.set_vertex_sampler encoder ~index (Sampler.Private.metal sampler)
-                                                                   | Fragment -> Metal.Render_encoder.set_fragment_sampler encoder ~index (Sampler.Private.metal sampler))));
-                                                    set_viewport =
-                                                      (fun (rect : Ogpu_core.Render_pass.rect) ->
-                                                        native_of
-                                                          (Metal.Render_encoder.set_viewport encoder
-                                                             { x = float rect.x; y = float rect.y; width = float rect.width;
-                                                               height = float rect.height; znear = 0.; zfar = 1. }));
-                                                    set_scissor =
-                                                      (fun (rect : Ogpu_core.Render_pass.rect) ->
-                                                        native_of
-                                                          (Metal.Render_encoder.set_scissor encoder
-                                                             { x = rect.x; y = rect.y; width = rect.width; height = rect.height }));
-                                                    set_cull =
-                                                      (fun cull ->
-                                                        native_of (Metal.Render_encoder.set_cull_mode encoder (metal_cull cull)));
-                                                    set_winding =
-                                                      (fun winding ->
-                                                        native_of
-                                                          (Metal.Render_encoder.set_front_facing_winding encoder
-                                                             (match winding with
-                                                              | Ogpu_core.Backend.Clockwise -> Metal.Render_encoder.Clockwise
-                                                              | Counter_clockwise -> Counter_clockwise)));
-                                                    set_depth_state =
-                                                      (function
-                                                        | None -> native_of (Metal.Render_encoder.set_depth_stencil_state encoder None)
-                                                        | Some state -> (
-                                                            match depth_state_for state with
-                                                            | Error _ as failure -> failure
-                                                            | Ok native ->
-                                                                native_of (Metal.Render_encoder.set_depth_stencil_state encoder (Some native))));
-                                                    set_stencil_reference =
-                                                      (fun ~front ~back ->
-                                                        native_of (Metal.Render_encoder.set_stencil_reference_values encoder ~front ~back));
-                                                    draw =
-                                                      (fun ~primitive ~first ~count ~instances ->
-                                                        native_of
-                                                          (Metal.Render_encoder.draw_primitives encoder
-                                                             ~primitive:(metal_primitive primitive) ~first ~count ~instances ()));
-                                                    draw_indexed =
-                                                      (fun ~primitive ~index_type token ~offset ~count ~instances ->
-                                                        match find_buffer token with
-                                                        | Error _ as failure -> failure
-                                                        | Ok buffer -> (
-                                                            match keep_buffer buffer with
-                                                            | Error _ as failure -> failure
-                                                            | Ok () ->
-                                                                let index_buffer = Buffer.Private.metal buffer in
-                                                                native_of
-                                                                  (if instances = 1 then
-                                                                     Metal.Render_encoder.draw_indexed_basic encoder
-                                                                       ~primitive:(metal_primitive primitive)
-                                                                       ~index_type:(metal_index index_type) ~index_buffer
-                                                                       ~index_offset:offset ~index_count:count
-                                                                   else
-                                                                     Metal.Render_encoder.draw_indexed_instances encoder
-                                                                       ~primitive:(metal_primitive primitive)
-                                                                       ~index_type:(metal_index index_type) ~index_buffer
-                                                                       ~index_offset:offset ~index_count:count
-                                                                       ~instances:(Int64.of_int instances))));
-                                                    draw_indexed_indirect =
-                                                      (fun ~primitive ~index_type token ~offset arguments_token ~arguments_offset ->
-                                                        match find_buffer token, find_buffer arguments_token with
-                                                        | (Error _ as failure), _ | _, (Error _ as failure) -> failure
-                                                        | Ok buffer, Ok arguments -> (
-                                                            match keep_buffer buffer, keep_buffer arguments with
-                                                            | (Error _ as failure), _ | _, (Error _ as failure) -> failure
-                                                            | Ok (), Ok () ->
-                                                                native_of
-                                                                  (Metal.Render_encoder.draw_indexed_indirect encoder
-                                                                     ~primitive:(metal_primitive primitive)
-                                                                     ~index_type:(metal_index index_type)
-                                                                     ~index_buffer:(Buffer.Private.metal buffer) ~index_offset:offset
-                                                                     ~arguments:(Buffer.Private.metal arguments) ~arguments_offset)));
-                                                    draw_batch =
-                                                      (fun draws ->
-                                                        (* Indexed single-instance draws run through the native
-                                                           prepared-draw loop in one call; anything else encodes
-                                                           draw by draw. *)
-                                                        let all_indexed =
-                                                          Array.for_all
-                                                            (fun (d : Ogpu_core.Backend.driver_batch_draw) ->
-                                                              Option.is_some d.batch_index && d.batch_instances = 1)
-                                                            draws
-                                                        in
-                                                        (* ogpu_core validated the batch: only resolve
-                                                           tokens to native objects, straight into arrays. *)
-                                                        let exception Unresolved of Ogpu_core.Error.t in
-                                                        let get = function Ok x -> x | Error e -> raise (Unresolved e) in
-                                                        let resolve (d : Ogpu_core.Backend.driver_batch_draw) =
-                                                          let native = get (render_pipeline d.batch_pipeline) in
-                                                          let buffers =
-                                                            Array.map
-                                                              (fun (stage, slot, token, offset) ->
-                                                                let buffer = get (find_buffer token) in
-                                                                get (keep_buffer buffer);
-                                                                (stage, slot, buffer, offset))
-                                                              d.batch_buffers
-                                                          in
-                                                          let index =
-                                                            Option.map
-                                                              (fun (kind, token, offset, count) ->
-                                                                let index_buffer = get (find_buffer token) in
-                                                                get (keep_buffer index_buffer);
-                                                                (kind, index_buffer, offset, count))
-                                                              d.batch_index
-                                                          in
-                                                          (native, buffers, index)
-                                                        in
-                                                        match Array.map resolve draws with
-                                                        | exception Unresolved e -> Error e
-                                                        | resolved ->
-                                                            if all_indexed then begin
-                                                              let prepared =
-                                                                Array.map2
-                                                                  (fun (d : Ogpu_core.Backend.driver_batch_draw) resolved ->
-                                                                    let native, buffers, index = resolved in
-                                                                    let kind, index_buffer, offset, count = Option.get index in
-                                                                    ({ Metal.Render_encoder.Private.prepared_pipeline = native;
-                                                                       prepared_bindings =
-                                                                         Array.map
-                                                                           (fun (stage, slot, buffer, offset) ->
-                                                                             { Metal.Render_encoder.Private.prepared_stage = metal_stage stage;
-                                                                               prepared_index = slot; prepared_offset = offset;
-                                                                               prepared_buffer = Buffer.Private.metal buffer })
-                                                                           buffers;
-                                                                       prepared_primitive = metal_primitive d.batch_primitive;
-                                                                       prepared_index_type = metal_index kind;
-                                                                       prepared_index_buffer = Buffer.Private.metal index_buffer;
-                                                                       prepared_index_offset = offset; prepared_index_count = count }
-                                                                     : Metal.Render_encoder.Private.prepared_indexed_draw))
-                                                                  draws resolved
-                                                              in
-                                                              match
-                                                                Metal.Render_encoder.Private.prepare_indexed_draws
-                                                                  (Device.Private.metal device) prepared
-                                                              with
-                                                              | Error e -> Error (Device.of_metal_error ~operation e)
-                                                              | Ok prepared ->
-                                                                  native_of
-                                                                    (Metal.Render_encoder.Private.execute_prepared_indexed_draws encoder prepared)
-                                                            end
-                                                            else
-                                                              (* Direct matches, no per-draw closures; the
-                                                                 pipeline is set only when it changes. *)
-                                                              let failed e = Error (Device.of_metal_error ~operation e) in
-                                                              let bind (stage, slot, buffer, offset) =
-                                                                let native = Buffer.Private.metal buffer in
-                                                                match stage with
-                                                                | Ogpu_core.Backend.Vertex -> Metal.Render_encoder.set_vertex_buffer encoder ~index:slot ~offset native
-                                                                | Fragment -> Metal.Render_encoder.set_fragment_buffer encoder ~index:slot ~offset native
-                                                              in
-                                                              let rec bind_all buffers slot =
-                                                                if slot = Array.length buffers then Ok ()
-                                                                else
-                                                                  match bind (Array.unsafe_get buffers slot) with
-                                                                  | Error e -> failed e
-                                                                  | Ok () -> bind_all buffers (slot + 1)
-                                                              in
-                                                              let rec each index previous =
-                                                                if index = Array.length draws then Ok ()
-                                                                else
-                                                                  let d = draws.(index) in
-                                                                  let native, buffers, indexed = resolved.(index) in
-                                                                  match
-                                                                    if (match previous with Some p -> p == native | None -> false) then Ok ()
-                                                                    else Metal.Render_encoder.set_pipeline encoder native
-                                                                  with
-                                                                  | Error e -> failed e
-                                                                  | Ok () -> (
-                                                                      match bind_all buffers 0 with
-                                                                      | Error _ as failure -> failure
-                                                                      | Ok () -> (
-                                                                          match
-                                                                            match indexed with
-                                                                            | None ->
-                                                                                Metal.Render_encoder.draw_primitives encoder
-                                                                                  ~primitive:(metal_primitive d.batch_primitive)
-                                                                                  ~first:d.batch_vertex_start ~count:d.batch_vertex_count
-                                                                                  ~instances:d.batch_instances ()
-                                                                            | Some (kind, index_buffer, offset, count) ->
-                                                                                Metal.Render_encoder.draw_indexed_instances encoder
-                                                                                  ~primitive:(metal_primitive d.batch_primitive)
-                                                                                  ~index_type:(metal_index kind)
-                                                                                  ~index_buffer:(Buffer.Private.metal index_buffer)
-                                                                                  ~index_offset:offset ~index_count:count
-                                                                                  ~instances:(Int64.of_int d.batch_instances)
-                                                                          with
-                                                                          | Error e -> failed e
-                                                                          | Ok () -> each (index + 1)
-                                                                              (match previous with Some p when p == native -> previous | _ -> Some native)))
-                                                              in
-                                                              each 0 None);
-                                                    use_resources =
-                                                      (fun tokens ->
-                                                        let rec split buffers textures = function
-                                                          | [] -> Ok (List.rev buffers, List.rev textures)
-                                                          | token :: rest -> (
-                                                              match native_resource token with
-                                                              | Some (Buffer buffer) -> (
-                                                                  match keep_buffer buffer with
-                                                                  | Error _ as failure -> failure
-                                                                  | Ok () ->
-                                                                      split (Metal.Render_encoder.Buffer_resource (Buffer.Private.metal buffer) :: buffers) textures rest)
-                                                              | Some (Texture texture) -> (
-                                                                  match keep_texture texture with
-                                                                  | Error _ as failure -> failure
-                                                                  | Ok () ->
-                                                                      split buffers (Metal.Render_encoder.Texture_resource (Texture.Private.metal texture) :: textures) rest)
-                                                              | None ->
-                                                                  error operation Ogpu_core.Error.Invalid_argument
-                                                                    "resource graph is incomplete")
-                                                        in
-                                                        match split [] [] tokens with
-                                                        | Error _ as failure -> failure
-                                                        | Ok (buffers, textures) ->
-                                                            let ( let* ) = Result.bind in
-                                                            let* () =
-                                                              if buffers = [] then Ok ()
-                                                              else
-                                                                native_of
-                                                                  (Metal.Render_encoder.use_resources encoder buffers
-                                                                     ~usage:[ Metal.Render_encoder.Read ]
-                                                                     ~stages:[ Metal.Render_encoder.Vertex; Fragment ])
-                                                            in
-                                                            if textures = [] then Ok ()
-                                                            else
-                                                              native_of
-                                                                (Metal.Render_encoder.use_resources encoder textures
-                                                                   ~usage:[ Metal.Render_encoder.Sample ]
-                                                                   ~stages:[ Metal.Render_encoder.Fragment ]));
-                                                    execute_icb =
-                                                      (fun token ~location ~length ->
-                                                        match Hashtbl.find_opt c.icbs token with
-                                                        | None ->
-                                                            error operation Ogpu_core.Error.Invalid_argument
-                                                              "indirect command buffer graph is incomplete"
-                                                        | Some entry ->
-                                                            native_of
-                                                              (Metal.Render_encoder.execute_indirect_commands encoder entry.icb
-                                                                 ~location ~length));
-
-                                                    end_render = finish;
-                                                  })))))
+                                | Ok () -> Ok entry.table));
+                          icb = (fun token -> Option.map (fun entry -> entry.icb) (Hashtbl.find_opt c.icbs token));
+                          depth_state = depth_state_for;
+                        }
                       in
+                      let compute_encoder () = Compute_encoder.create encoder_context in
+                      let blit_encoder () = Blit_encoder.create encoder_context in
+                      let render_encoder target = Render_encoder.create encoder_context target in
                       let commit_present ~source (frame : Ogpu_core.Backend.driver_frame) =
                         match recording () with
                         | Error _ as failure -> failure
@@ -1665,7 +1065,6 @@ let create () =
               create_buffer;
               create_texture;
               create_depth_texture;
-              create_stencil_texture;
               create_library;
               create_accel;
               instance_layout;

@@ -2,7 +2,7 @@
 
 Status: implemented. `Scene_command.Marks` (`marks.mli`) is this contract as pure
 data; `Flow_ir.Core_draw` lowers a draw graph, `Flow_ir.Core_exec.draw` produces the
-table, and `Marks_scene` adapts it to `Scene`. Defaults and error codes were taken
+table, and `Flow_native.Marks_scene` adapts it to `Scene`. Defaults and error codes were taken
 from the per-kind arms of `lib/rays_editor/drawing.ml` (removed in P3.13); the
 `test/draw_snapshots` digests of the 15 eligible workspaces pin them.
 
@@ -11,7 +11,7 @@ A draw graph, run once per frame by the core executor
 table**: an ordered array of entries. Every default is resolved and every
 check is made before the table exists. A consumer applies no default, never
 reorders, and never reads a Lisp value. The native consumer is the adapter
-`Marks_scene` (P3.8), which builds the same `Render_ir` commands `drawing.ml`
+`Flow_native.Marks_scene` (P3.8), which builds the same `Render_ir` commands `drawing.ml`
 builds today; the web consumer is the fixed runtime.
 
 ## Units and encodings
@@ -25,7 +25,7 @@ builds today; the web consumer is the fixed runtime.
 - A **colour** is packed `0xRRGGBBAA` in an `int32` (red in the top byte),
   straight alpha, 8 bits per channel, the value `Rays_math.Color` gives and
   `Scene.rgba` packs. Constants are decoded by the compiler before the table
-  (`Flow_ir.Operators.drawing_color`): hex text `#rgb`, `#rgba`, `#rrggbb`,
+  (`Flow.Op.drawing_color`): hex text `#rgb`, `#rgba`, `#rrggbb`,
   `#rrggbbaa` (`#` optional; `E_DRAW_COLOR` otherwise), a vec3 of 0..1 floats
   (alpha 255), or `(list r g b a)` of 0..1 floats. A float channel `c` becomes
   `clamp(trunc(c * 255 + 0.5), 0, 255)`; a nonfinite channel is `E_NONFINITE`.
@@ -63,7 +63,7 @@ and a `width` in floats per element. The id names a per-frame table the caller
 owns (a CPU array, or later a GPU region output); the contract never holds the
 data. Natively the table is `Flow_ir.Core_exec.Buffers` (`create`, `clear`, `find`):
 the executor registers each CPU attribute array in it under a fresh positive id,
-the caller clears it once per frame and `Marks_scene` reads it while adapting.
+the caller clears it once per frame and `Flow_native.Marks_scene` reads it while adapting.
 A colour buffer in that table is a packed vec3 array of 0..1 floats, as above. `count` is an element count, not a float count.
 
 A **device buffer** (`Device`) has the same `id`, `count` and `width` but names a GPU array the
@@ -106,7 +106,7 @@ each element (z) is ignored. A constant has width 2 for a position; there is no
 constant z. `draw/points` ignores a per-instance `color` (today it falls back to
 white), so a point's `fill` is constant only.
 
-**Style resolution** (`Shape_batch.Builder`; the compiler does this, the table
+**Style resolution** (`Ui_batch.Builder`; the compiler does this, the table
 holds the result):
 
 - Neither `fill` nor `stroke` given: fill is white `0xffffffff`, stroke is `0`.
@@ -125,12 +125,12 @@ holds the result):
   from the table; every id is positive.
 - Every constant is finite with `abs v <= 3.4028234663852886e38` (largest
   binary32), and a size, radius or width constant is `>= 0`. This is
-  `Shape_batch.Builder`'s check; buffer values are checked when read.
+  `Ui_batch.Builder`'s check; buffer values are checked when read.
 - A point set has no stroke and no stroke width.
 
 Kind meanings on the native adapter (the oracle for pixel parity):
 
-| Kind | `Shape_batch` instance (64 bytes, little-endian) |
+| Kind | `Ui_batch` instance (64 bytes, little-endian) |
 | --- | --- |
 | rect | kind word 10 = 0; words 0..3 = `x, y, x + w, y + h` |
 | circle | kind 4; words 0..3 = `x - r, y - r, x + r, y + r` |
@@ -138,15 +138,12 @@ Kind meanings on the native adapter (the oracle for pixel parity):
 | all | fill word 8, stroke word 9, stroke width word 12, anti-alias flag word 13 = `1.0`; every other word 0 |
 
 A mark set becomes one `Shapes` command (a count-0 set becomes an empty
-`Shapes`, as `drawing.ml` emits today). A **point set** is not `Shapes`: each
-position is truncated toward zero to an integer (`E_DRAW_RANGE` if it is
-nonfinite or does not fit an OCaml int), and the point is the unit square
-`(x, y), (x+1, y), (x+1, y+1), (x, y+1)` in `Ink.rect` form: 8 vertex floats and
-indices `b, b+1, b+2, b, b+2, b+3` with `b` the first vertex index. Points of one
-colour accumulate in one `Geometry`; a colour change starts a new one (a
-constant ink gives exactly one). A count-0 point set emits nothing. The cap in
-this section is the one binding `Shape_batch` limit (`1_000_000`), applied to
-point sets too.
+`Shapes`, as `drawing.ml` emits today). A **point set** is also `Shapes`: each
+position retains its finite logical subpixel coordinates and is appended as a
+unit rectangle to the same packed `Ui_batch` buffer. It uses the rect
+pipeline's analytic antialiasing on native and web. A count-0 point set emits
+nothing. The cap in this section is the one binding `Ui_batch` limit
+(`1_000_000`), applied to point sets too.
 
 ### Geometry entries
 
@@ -163,14 +160,14 @@ native output.
 
 | Statement | Helper and arguments | Entries |
 | --- | --- | --- |
-| `draw/polygon` | `Shape2.polygon points ~fill ~stroke`; points truncate to integers | fill, stroke (either may be absent; neither gives a white fill) |
-| `draw/polyline` | `Shape2.polyline points ~color:ink`; width 1 | one |
-| `draw/rounded_rect` | `Shape2.rounded_rect ~width ~height ~radius ~fill ~stroke`, local coordinates | `Push_transform` translate by the integer `at`, fill, stroke, `Pop_transform` |
-| `draw/point` | `Shape2.polygon` of the unit square at the integer `at`, fill ink | one |
+| `draw/polygon` | `Shape2.polygon points ~fill ~stroke`; point coordinates retain fractions | fill, stroke (either may be absent; neither gives a white fill) |
+| `draw/polyline` | `Shape2.polyline points ~color:ink`; fractional point coordinates, width 1 | one |
+| `draw/rounded_rect` | `Shape2.rounded_rect ~width ~height ~radius ~fill ~stroke`, local coordinates | `Push_transform` translate by fractional `at`, fill, stroke, `Pop_transform` |
+| `draw/point` | `Shape2.polygon` of the unit square at fractional `at`, fill ink | one |
 | `draw/background` | `Shape2.polygon` of `(0,0) (w,0) (w,h) (0,h)`, `w`, `h` the integer canvas size, fill the colour | one |
 
-`rounded_rect`: `at` and `size` truncate to integers; `radius` is `floor(r + 0.5)`
-(default 0) and the helper clamps it to `[0, min(abs w, abs h) / 2]`. Fill and
+`rounded_rect`: `at`, `size`, and `radius` retain fractional values (default
+radius 0); the helper clamps radius to `[0, min(abs w, abs h) / 2]`. Fill and
 stroke are colours; neither given means a white fill. Stroke width is 1.
 
 Validity: `vertices` length even, `indices` length a multiple of 3, every vertex
@@ -182,7 +179,7 @@ finite, every index in `0 .. vertices/2 - 1` (the `Render_ir` rules).
   host resource table; an absent resolver is `E_IMAGE`, never a dropped entry.
   Natively `Drawing` numbers the images a frame resolves 1, 2, 3, ... in the order
   the executor resolves them (the core's `image` callback returns the next id) and
-  keeps the images in an array, so `Marks_scene` maps `resource` to entry `resource - 1`.
+  keeps the images in an array, so `Flow_native.Marks_scene` maps `resource` to entry `resource - 1`.
   Ids are meaningful for one frame only.
   `x`, `y` are `at` truncated to integers (default `(0, 0)`). `scale` is finite
   and `> 0` (default 1) and `angle` is finite radians (default 0); otherwise
@@ -270,14 +267,14 @@ per entry: byte tag, then
   6 push clip:  float x y width height           7 pop clip
 ```
 
-`Marks_scene.scene ~buffers ?image ?gpu ?device marks` adapts a table: it runs `validate` first
-(a rejection is `E_DRAW_RANGE`), builds one `Shape_batch` per rect, circle or line set
+`Flow_native.Marks_scene.scene ~buffers ?image ?gpu ?device marks` adapts a table: it runs `validate` first
+(a rejection is `E_DRAW_RANGE`), builds one `Ui_batch` per rect, circle, line or point set
 (a colour-buffer element goes through `drawing_color`, so a nonfinite channel is
-`E_NONFINITE`), and one `Ink` batch per point set. A `Push_clip` rectangle truncates to
+`E_NONFINITE`). A `Push_clip` rectangle truncates to
 integers there. `Pop_transform` and `Pop_clip` close the innermost open push.
 
 A rect, circle or line set whose colours are constants is written whole by
-`Shape_batch.Builder.rects`, `circles` or `lines` from the attribute arrays themselves (a
+`Ui_batch.Builder.rects`, `circles` or `lines` from the attribute arrays themselves (a
 constant is one element read with stride 0): the instances, their order and the refusal are
 those of one builder call per mark, with nothing allocated per mark, and the batch takes the
 builder's storage instead of a copy of it. A set with a colour buffer goes mark by mark. The
@@ -286,10 +283,10 @@ from without copying) and once on the GPU.
 
 **Routing (P4.9).** A mark set with at least one `Device` attribute becomes one draw of the
 `Marks` family: `gpu ~slot ~kind ~count attributes` (the `slot` numbers the frame's GPU sets from
-0) registers a `Rays_execution.Private.gpu_marks` source which binds each device attribute's
+0) registers a `Renderer.Private.gpu_marks` source which binds each device attribute's
 buffer directly and uploads the others in the layout below (constants with stride 0; a CPU
 position or extent array as float32 with stride `width`; a colour buffer converted on the CPU, as
-for `Shape_batch`, to `0xRRGGBBAA` words, fill and stroke mode 0; a device colour bound with stride
+for `Ui_batch`, to `0xRRGGBBAA` words, fill and stroke mode 0; a device colour bound with stride
 3 and mode 1). The bytes of a host array are kept while the array is physically the previous
 frame's, so a static attribute beside a device one is converted and uploaded once, not per
 frame. When the positions are a fast-precision kernel's output, the set is drawn indirect: the
@@ -297,18 +294,18 @@ kernel wrote its count record `{n, 6n, 1, 0, 0, 0}` (`Flow_gpu.Run.count_record`
 that is the indexed indirect draw of `n` quads (`gpu_marks ?indirect`,
 `Scene_execution.Private.register_gpu_vertices ?indirect`, `Ogpu.Backend.draw_indexed_indirect`),
 so the instance count the draw uses is the one the device wrote, never batched into an ICB.
-`lib/rays_execution/test_marks_native.ml` draws a set registered for 100 rects whose record says
-63 and matches the 63-rect `Shape_batch` pixel for pixel. The set rides in the scene
-as a `Shape_batch` GPU token, so transform, clip, blend and painter order are the ordinary
-ones. A rect's stroke width is the constant 1, as `Shape_batch.rect`'s; a line's fill is unused.
-Every other mark set, including every set when there is no GPU host, stays a `Shape_batch`
-(and `Ink` for points): the draw snapshots hash the CPU scene and do not change. That includes a
+`lib/renderer/test_marks_native.ml` draws a set registered for 100 rects whose record says
+63 and matches the 63-rect `Ui_batch` pixel for pixel. The set rides in the scene
+as a `Marks.gpu_token` carried by `Ui_batch`, so transform, clip, blend and painter order are the ordinary
+ones. A rect's stroke width is the constant 1, as `Ui_batch.rect`'s; a line's fill is unused.
+Every other mark set, including every set when there is no GPU host, stays a `Ui_batch`:
+the draw snapshots hash the CPU scene and do not change. That includes a
 static set of any size. It could ride the `Marks` family with every attribute a host buffer
 (16 bytes of corners an instance instead of 64 twice), but not with the same pixels: the
 shader forms a circle's and a rect's corners in binary32 from binary32 inputs, where
-`Shape_batch` narrows the binary64 sum, so a position that is not a binary32 value moves a
+`Ui_batch` narrows the binary64 sum, so a position that is not a binary32 value moves a
 corner by one ulp. Measured 2026-10-11 with the static positions of `sketches/million_marks`
-as a host buffer beside a GPU radius, against the `Shape_batch` picture at 900 by 700: 85
+as a host buffer beside a GPU radius, against the `Ui_batch` picture at 900 by 700: 85
 pixels differ at 2,000 marks, 643 at 20,000, 1,676 at 200,000 and 466 at 1,000,000, each by
 one step of one channel. The route needs the corners added on the host and a layout that takes
 them (see the end of this file), and a rule for the scene a static drawing keeps, whose token
@@ -320,7 +317,7 @@ only if every use of its result is a `positions`, `from`, `to`, `sizes`, `radius
 no other offer of the same region has run this frame (a second dispatch would overwrite the
 first's output; it runs on the CPU). A host float in a device set (a CPU position, extent or
 width array) is written as binary32 and a nonfinite or over-large one is `E_DRAW_RANGE`, as
-`Shape_batch.Builder` refuses it; a device array's own non-finite values are the kernel's
+`Ui_batch.Builder` refuses it; a device array's own non-finite values are the kernel's
 status check. A token is valid while every device buffer is the one registered and the
 source has not been updated; an updated or closed source, or a released GPU lease, makes
 lowering and retained replay refuse it (`GPU shapes are stale or closed`).
@@ -334,10 +331,10 @@ checked against any table: that is the caller's.
 
 An implementer must keep these exactly or parity with the P3.1 snapshots breaks:
 
-- Positions of `draw/point`, `draw/points`, `draw/text`, `draw/image`,
-  `draw/translate`, polygon and polyline points, and rounded-rect `at` and `size`
-  **truncate** toward zero; rounded-rect `radius` and text `size` **round**
-  (`floor(x + 0.5)`). Positions of rects, circles and lines are floats.
+- `draw/point`, `draw/points`, polygon and polyline points, and rounded-rect
+  `at`, `size`, and `radius` preserve finite fractional values. Text and image
+  positions and `draw/translate` retain their integer conversion; text `size`
+  rounds with `floor(x + 0.5)`. Positions of rects, circles and lines are floats.
 - `draw/rect`, `draw/circle` and `draw/line` take the `Shapes` route (not path
   geometry), while `draw/point` and `draw/background` take the path-geometry
   route even though they look like a 1x1 rect and a full-canvas rect.
@@ -372,13 +369,13 @@ a constant and a buffer take the same code. A later WGSL port mirrors this table
 | 4 | width | float | stroke width | stroke width | line width |
 | 5 | params | 8 uint (below) | | | |
 
-`params` = `kind` (0 rect, 4 circle, 5 line, the `Shape_batch` kind words), then the strides in
+`params` = `kind` (0 rect, 4 circle, 5 line, the `Ui_batch` kind words), then the strides in
 floats or words for position, extent, fill, stroke and width (one 32-bit element each, so a
 vec3 position has stride 3 and a float radius array stride 1), then fill mode and stroke mode.
 A float colour channel `c` becomes `floor(clamp(c, 0, 1) * 255 + 0.5)`, the same 8-bit value
-`Marks_scene` writes, then is unpacked as for `Ui`. A rect or circle with stroke word 0 has
+`Flow_native.Marks_scene` writes, then is unpacked as for `Ui`. A rect or circle with stroke word 0 has
 border width 0; otherwise the border is the width attribute. Geometry is computed in binary32
-on the GPU (`x + width`, `x - r`), so pixel parity with `Shape_batch` is exact when the inputs are
+on the GPU (`x + width`, `x - r`), so pixel parity with `Ui_batch` is exact when the inputs are
 binary32 values and may differ by one ulp of the sum otherwise; a CPU writer that wants exact
 parity pre-adds in binary64 and uploads the corners (use stride 0 or a second layout for that
 only if a test shows a difference). A buffer shorter than `count * stride` elements is the

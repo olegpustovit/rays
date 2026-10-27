@@ -121,7 +121,7 @@ let write_plane_basis axis_u_x axis_u_y axis_u_z axis_v_x axis_v_y axis_v_z
   end
 
 let run ?cancel ?(grain = 16_384) ?edges ?radius
-    ?(scale = Vec3.create 1. 1. 1.) ?output_group geometry =
+    ?(scale = Rays_math.Vec3.create 1. 1. 1.) ?output_group geometry =
   Error.guard ~operation:"circle_from_edges" ~code:"invalid_circle" @@ fun () ->
   try
     if grain <= 0 then fail "Circle from Edges grain must be positive";
@@ -129,7 +129,7 @@ let run ?cancel ?(grain = 16_384) ?edges ?radius
      | Some value when not (Float.is_finite value) || value <= 0. ->
          fail "Circle from Edges radius must be finite and positive"
      | None | Some _ -> ());
-    if not (Float.is_finite scale.Vec3.x && Float.is_finite scale.y && Float.is_finite scale.z) then
+    if not (Float.is_finite scale.Rays_math.Vec3.x && Float.is_finite scale.y && Float.is_finite scale.z) then
       fail "Circle from Edges scale must be finite";
     Option.iter (fun name -> if String.trim name = "" then
       fail "Circle from Edges output edge group name must not be empty")

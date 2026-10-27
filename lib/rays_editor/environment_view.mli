@@ -15,7 +15,7 @@ type canvas_picture = {
   dynamic : bool;
   scene : Rays.Scene.t;
   plan : Flow.Eval.plan;
-  prepared : Drawing.prepared option;
+  prepared : Flow_native.Drawing.prepared option;
   preview : (Flow.Ty.t * int) option;
 }
 val bake_world :
@@ -47,8 +47,6 @@ val compose_view :
   camera_of:(string -> 'b) ->
   paint_view:(key:string ->
               Pxui_shell.Layout.bounds -> 'b -> 'a -> Rays.Scene.node list) ->
-  film:(Pxui_shell.Layout.bounds -> int * int * int * int) ->
-  overlay:(Sop.Node.t -> 'c option -> Rays.Frame.t -> Rays.Scene.t) ->
   guides:(Pxui_shell.Layout.bounds -> Rays.Scene.node list) ->
   cache:('a, 'b) hidden_scene_cache option ->
   'c Core_model.t -> Rays.Frame.t -> Rays.Scene.t

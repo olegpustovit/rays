@@ -2,7 +2,7 @@
     [Flow_gpu.Emit], with the same refusals ([Packed.gpu_refusals]), binding
     numbering and uniform layout. Nothing here is compiled by a WebGPU
     implementation in the test suite; the first real compile is the browser
-    run (plan P6.8). *)
+    run. *)
 
 type kind = Uniform_buffer | Storage_read | Storage_read_write
 type binding = {group : int; binding : int; kind : kind}
@@ -34,16 +34,17 @@ type wgsl = private {
   (** {!kernel_fast}: the byte offset of the three count words (mul, div, use) in the uniform block. *)
 }
 
-val kernel : ?image:bool -> Flow_ir.Packed.t -> (wgsl, Flow.Diagnostic.t) result
+val kernel : ?image:bool -> Flow_ir.Packed.t -> (wgsl, Diagnostic.t) result
 (** Elements are f32; dispatch [ceil(count/64)] workgroups in x. The status
-    word becomes 1 when any computed value is not finite (exponent-bits test);
-    the host zeroes it before dispatch and turns 1 into [E_KERNEL]. Dispatch is
+    word uses bit 1 for nonfinite values, bit 2 for integer division by zero,
+    and bit 4 for an invalid integer shift; the host zeroes it before dispatch
+    and maps these to [E_KERNEL] or [E_RANGE]. Dispatch is
     one-dimensional, so [count <= 64 * maxComputeWorkgroupsPerDimension].
     [image] replaces the sole vec2 source with pixel-center UV coordinates,
     using the [image:width] and [image:height] uniforms; output must be vec4.
     No UV storage buffer is allocated or uploaded. *)
 
-val kernel_fast : Flow_ir.Packed.t -> (wgsl, Flow.Diagnostic.t) result
+val kernel_fast : Flow_ir.Packed.t -> (wgsl, Diagnostic.t) result
 (** The web counterpart of [Flow_gpu.Emit.kernel ~fast] (a workspace's fast precision): the same
     refusals ([Packed.gpu_refusals ~fast:true]), bindings and uniform layout as Metal's. Integer
     registers are 64-bit ([vec2<u32>] low and high words: wrapping add, sub and mul, truncating

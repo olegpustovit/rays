@@ -1,0 +1,11 @@
+(library
+ (name web_export)
+ (modules web_export web_runtime)
+ (private_modules web_runtime)
+ (libraries flow flow_ir flow_web flow_sop editor_document sop_catalog input param scene_command sdl3_image))
+
+(rule
+ (targets web_runtime.ml)
+ (deps (glob_files runtime/*.js) (glob_files runtime/*.wgsl))
+ (action (with-stdout-to web_runtime.ml
+  (run %{exe:../flow/embed.exe} %{deps}))))

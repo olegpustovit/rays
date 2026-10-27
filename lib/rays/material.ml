@@ -1,14 +1,14 @@
 type t = {
-  diffuse : Color.t;
-  ambient : Color.t;
-  specular : Color.t;
-  emissive : Color.t;
+  diffuse : Rays_math.Color.t;
+  ambient : Rays_math.Color.t;
+  specular : Rays_math.Color.t;
+  emissive : Rays_math.Color.t;
   shininess : float;
   round : float;
 }
 
-let create ?(diffuse = Color.white) ?(ambient = Color.white)
-    ?(specular = Color.white) ?(emissive = Color.black)
+let create ?(diffuse = Rays_math.Color.white) ?(ambient = Rays_math.Color.white)
+    ?(specular = Rays_math.Color.white) ?(emissive = Rays_math.Color.black)
     ?(shininess = 32.) ?(round = 0.) () =
   if not (Float.is_finite shininess) || shininess < 0. then
     invalid_arg "Material.create: shininess must be finite and non-negative";
@@ -19,9 +19,9 @@ let create ?(diffuse = Color.white) ?(ambient = Color.white)
 let default = create ()
 
 let matte diffuse =
-  create ~diffuse ~ambient:diffuse ~specular:Color.black ~shininess:0. ()
+  create ~diffuse ~ambient:diffuse ~specular:Rays_math.Color.black ~shininess:0. ()
 
 let unlit emissive =
-  let diffuse = Color.with_alpha Color.black emissive.Color.a in
-  create ~diffuse ~ambient:Color.black ~specular:Color.black
+  let diffuse = Rays_math.Color.with_alpha Rays_math.Color.black emissive.Rays_math.Color.a in
+  create ~diffuse ~ambient:Rays_math.Color.black ~specular:Rays_math.Color.black
     ~emissive ~shininess:0. ()

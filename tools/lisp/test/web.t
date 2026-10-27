@@ -25,7 +25,7 @@ The web export: a draw graph becomes a standalone browser application. A second 
   // Rays web export: frame program. frame(input, state, rt); see lib/flow_web/js.mli.
   $ grep -c "export function frame" out/program.js
   1
-  $ cmp out/runtime/prims.js ../../web/runtime/prims.js && echo "runtime is the checked-in one"
+  $ cmp out/runtime/prims.js ../../../lib/web_export/runtime/prims.js && echo "runtime is the checked-in one"
   runtime is the checked-in one
 
 A packed-array program keeps its constants in data.bin, and the region table names them.

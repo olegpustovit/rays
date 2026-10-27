@@ -13,15 +13,14 @@ let bad ?(number=nan) value = match value with
 let args points = ["points",points;"vertex_points",E.Int_array[||];
   "primitive_offsets",E.Int_array[|0|];"kinds",E.Int_array[||]]
 let stage points =
-  try Topology_kernel.mesh_points points with
-  | Flow.Value.Fail(code,message,_) -> Error(Flow.Diagnostic.error ~code message)
-  | Flow.Value.Diagnostic_fail diagnostic -> Error diagnostic
+  try Flow_sop.Topology_kernel.mesh_points points with
+  | Diagnostic.Error d -> Error d
 let expected count fields =
   let plane name=match List.assoc name fields with E.Float_array xs->xs|_->assert false in
   Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn
     ~x:(Array.copy(plane "x")) ~y:(Array.copy(plane "y")) ~z:(Array.copy(plane "z")))
     ~topology:(Topology.empty ~point_count:count) () |>get_string_ok |>geometry_bytes
-let diagnostic code message=Flow.Diagnostic.error ~code message
+let diagnostic code message=Diagnostic.error ~code message
 let nonfinite=diagnostic "E_NONFINITE" "array input produced a nonfinite value."
 let count_error=diagnostic "E_ARRAY_COUNT" "Mesh coordinate planes need the same element count."
 let record_error=diagnostic "E_TOPOLOGY_TYPE" "Mesh planes require exactly x, y and z float arrays."
@@ -31,9 +30,9 @@ let storage_error=diagnostic "E_TOPOLOGY_TYPE"
 let checks () =
   List.iter(fun count->let input=fields count in
     let points=E.Record input and bytes=expected count input in
-    List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
-      let actual=Topology_kernel.mesh(args points)|>function
-        |Ok geometry->geometry |Error d->fail(Flow.Diagnostic.to_string d) in
+    List.iter(fun domains->Parallel.run ~domains(fun()->
+      let actual=Flow_sop.Topology_kernel.mesh(args points)|>function
+        |Ok geometry->geometry |Error d->fail(Diagnostic.to_string d) in
       check(geometry_bytes actual=bytes)"mesh-plane stage exact payload/domain bytes";
       let output=Packed.Float3.Private.view(Geometry.positions actual) in
       List.iter(fun(name,values)->match values with E.Float_array values->
@@ -68,8 +67,8 @@ let checks () =
     "topology-before-copy",["points",E.Record input;"vertex_points",E.Int_array[|count|];
       "primitive_offsets",E.Int_array[|0;1|];"kinds",E.Int_array[|1|]],
       Error(diagnostic "E_TOPOLOGY" "Topology: vertex references an invalid point")] in
-  List.iter(fun(name,values,expected)->List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
-    check(Result.map geometry_bytes(Topology_kernel.mesh values)=expected)
+  List.iter(fun(name,values,expected)->List.iter(fun domains->Parallel.run ~domains(fun()->
+    check(Result.map geometry_bytes(Flow_sop.Topology_kernel.mesh values)=expected)
       ("mesh-plane stage exact diagnostic precedence: "^name))) [1;4;8])cases;
   print_endline "mesh-plane stage authored error precedence, exact bytes and ownership at 1/4/8 domains"
 
@@ -86,12 +85,12 @@ let benchmark () =
   let cases=["valid",E.Record input,Ok count;
     "first_plane_nonfinite",E.Record first_bad,Error nonfinite;
     "multiple_planes_bad_count",E.Record multiple,Error nonfinite] in
-  List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
-    Rays_math.Parallel.for_ ~chunk_size:1 ~start:0 ~finish:1(fun _->());
+  List.iter(fun domains->Parallel.run ~domains(fun()->
+    Parallel.for_ ~chunk_size:1 ~start:0 ~finish:1(fun _->());
     List.iter(fun(name,points,expected_stage)->
       let stage_result=Result.map fst(stage points) in
       check(stage_result=expected_stage)("mesh-plane baseline stage outcome "^name);
-      let complete=Result.map geometry_bytes(Topology_kernel.mesh(args points)) in
+      let complete=Result.map geometry_bytes(Flow_sop.Topology_kernel.mesh(args points)) in
       (match complete with
        |Ok bytes->check(bytes=expected count input)"mesh-plane baseline complete bytes"
        |Error d->check(Error d=expected_stage)"mesh-plane baseline complete diagnostic");

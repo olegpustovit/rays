@@ -25,8 +25,8 @@ let workspaces = [
 
 let file_name (directory, name) = Printf.sprintf "%s_%s.txt" directory name
 
-let frame_input index =
-  { (Frame_input.at_time (float index *. dt)) with
+let input index =
+  { (Input.at_time (float index *. dt)) with
     dt; frame = index; tick = index; size = (width, height); pointer = (100., 100.) }
 
 let rendered_digest scene =
@@ -39,25 +39,25 @@ let lines (_, name) =
   let text = In_channel.with_open_bin file In_channel.input_all in
   let imports = match Rays_editor.Source.read_imports ~file text with
     | Ok imports -> imports
-    | Error ds -> failwith (file ^ ": " ^ String.concat "\n" (List.map Flow.Diagnostic.to_string ds)) in
+    | Error ds -> failwith (file ^ ": " ^ String.concat "\n" (List.map Diagnostic.to_string ds)) in
   let doc = match Rays_editor.Workspace.load ~imports text with
     | Ok doc -> doc
-    | Error ds -> failwith (file ^ ": " ^ String.concat "\n" (List.map Flow.Diagnostic.to_string ds)) in
+    | Error ds -> failwith (file ^ ": " ^ String.concat "\n" (List.map Diagnostic.to_string ds)) in
   let lowered = match Flow_sop.Lower.of_checked ~reference:true ~factories:Sop_catalog.Editor.factories
       ~inputs:doc.inputs doc.checked with
     | Ok lowered -> lowered
-    | Error d -> failwith (file ^ ": " ^ Flow.Diagnostic.to_string d) in
+    | Error d -> failwith (file ^ ": " ^ Diagnostic.to_string d) in
   let evaluated = lowered.evaluated in
   let graph = List.find (fun (g : Flow.Workspace.graph) -> g.context = Flow.Context.draw) doc.checked.graphs in
   let value = List.assoc graph.name evaluated.results in
   let state = Flow.Eval.create_state () in
-  let outcome = Rays_editor.Drawing.prepare ~states:evaluated.states evaluated.plan value in
+  let outcome = Flow_native.Drawing.prepare ~states:evaluated.states evaluated.plan value in
   let frames = List.init (last_frame + 1) (fun index ->
     let result = match outcome with
       | Error d -> Error d.code
       | Ok prepared ->
-          let live = frame_input index in
-          match Rays_editor.Drawing.render_prepared ~state prepared ~live ~size:live.size with
+          let live = input index in
+          match Flow_native.Drawing.render_prepared ~state prepared ~live ~size:live.size with
           | Error d -> Error d.code
           | Ok scene -> Ok (rendered_digest scene) in
     index, result) in

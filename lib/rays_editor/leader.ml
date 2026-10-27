@@ -194,9 +194,7 @@ let keymap = [
 @ List.map (fun (c : _ Editor_core.Command.t) ->
   { c with scope = Some graph; guide = [Editor_core.Guide_context.List];
     action = List_command c.action }) Pxui_shell.Tree.bindings
-
-(* Commands only the 3D environment has. *)
-let keymap3 = keymap @ [
+@ [
   command ~id:"view.fly" ~label:"fly (WASD, Q/E, Esc)" ~trigger:(Leader "w") ~scope:view Fly;
   command ~id:"view.look-through" ~label:"look through render camera" ~trigger:(Leader "v")
     ~scope:view Look_through;
@@ -212,14 +210,13 @@ let keymap3 = keymap @ [
 
 (* The keys the text area handles itself (Command-/, Option-Up/Down, Command-Option-Up, Command-Shift-\\):
    listed on the key sheet only.  They are not in [keymap], so the router never takes them from the
-   field.  The actions are placeholders the sheet never runs. *)
-let text_keys = let key id label (k, m) = command ~id ~label ~trigger:(Chord (k, m)) (Text_command Find) in
-  Input.[
-  key "text.comment" "toggle comment on lines" (KeyChar '/', [ Meta ]);
-  key "text.move-line" "move lines up or down" (ArrowUp, [ Alt ]);
-  key "text.duplicate-line" "duplicate lines up or down" (ArrowUp, [ Alt; Shift ]);
-  key "text.select-form" "select the enclosing form" (ArrowUp, [ Meta; Alt ]);
-  key "text.bracket" "jump to the matching bracket" (KeyChar '\\', [ Meta; Shift ])]
+   field. *)
+let text_keys =
+  [ "toggle comment on lines", Chord (Input.KeyChar '/', [Input.Meta]);
+    "move lines up or down", Chord (Input.ArrowUp, [Input.Alt]);
+    "duplicate lines up or down", Chord (Input.ArrowUp, [Input.Alt; Input.Shift]);
+    "select the enclosing form", Chord (Input.ArrowUp, [Input.Meta; Input.Alt]);
+    "jump to the matching bracket", Chord (Input.KeyChar '\\', [Input.Meta; Input.Shift]) ]
 
 (* The leader sheet's sections ([Pxui_shell.Which_key.panel]): what a command is for, from its id. *)
 let group (c : command) =

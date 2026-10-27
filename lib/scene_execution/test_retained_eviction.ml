@@ -11,7 +11,7 @@ let configuration : Ogpu.Surface.configuration =
 let state : Scene_execution.state =
   {viewport=(0,0,64,64); scissor=(0,0,64,64); cull=Cull_none;
    depth_compare=Always; depth_write=false; depth_load=Load; depth_clear=1.;
-   transform_uniforms=None; stencil_state=None; stencil_load=Load; stencil_clear=0}
+   transform_uniforms=None}
 
 let mesh index : Scene_execution.mesh =
   let indices=Bytes.make 12 '\000' in
@@ -44,10 +44,10 @@ let run_case name count entry =
     (name ^ " eviction full-image pixel drift") in
   (* First render succeeds even when resources are evicted during preparation:
      their destruction waits for completion. The next retained replay must not
-     submit those now-dead resources. Exercise both prepared entry points. *)
+     submit those now-dead resources. *)
   for frame=1 to 60 do
-    require (get (Scene_execution.render_prepared_sampled_resources ~clear
-      ~identity:name ~version:1L renderer draws)) "eviction preparation skipped";
+    require (get (Scene_execution.submit ~clear
+      ~prepared:(name,1L) renderer draws)) "eviction preparation skipped";
     if List.mem frame [1;2;60] then pixels ();
     (match get (Scene_execution.replay_prepared_sampled_resources ~clear
         ~identity:name ~version:1L renderer) with
@@ -58,7 +58,7 @@ let run_case name count entry =
   done;
   (* Automatic admission must obey the same resource lifetime rule. *)
   for _=1 to 4 do
-    require (get (Scene_execution.render_sampled_resources ~clear renderer draws))
+    require (get (Scene_execution.submit ~clear renderer draws))
       "automatic eviction submission skipped";
     pixels ()
   done;

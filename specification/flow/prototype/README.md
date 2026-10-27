@@ -1,8 +1,7 @@
 # Rays Flow prototype
 
-A browser page that behaves like the first design of the SOP network canvas. It was the
-behavioural study for `specification/flow.md` before the editor became a workspace of Lisp
-text; `specification/workspace/prototype/` is the study of that later design.
+A browser page that behaves like the first design of the SOP network canvas. It was a
+behavioral study for the editor before it became a workspace of Lisp text.
 
 This is a design artifact, not product code:
 
@@ -44,7 +43,7 @@ them from here:
 - the `.` repeat key, the zoom caps on levels, and its key table (`KEYS`, `LEADER`): the
   keys are `flow.md` §7.2;
 - its single-graph text form, printer and checker (`toLispLines`, `readSexp`,
-  `compileFlow`): the language is `specification/workspace/iteration.md`.
+  `compileFlow`): the language is `specification/flow.md` §11.
 
 Its catalog is a toy (Grid, Sphere, Noise Displace, Swirl, Transform, Merge, Output); real
 SOPs come from `Sop_catalog.Editor.factories`.

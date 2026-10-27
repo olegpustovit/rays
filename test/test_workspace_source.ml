@@ -122,7 +122,7 @@ let editor ?presets ?(imports = []) ~source text =
   E3.create ~await:true ~workspace:(Result.get_ok (Doc.of_text ~imports catalog text)) ?presets ~source
     ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
       |> Result.map_error Rdk.Error.to_string)
-    ~scene3:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) ()
+    ~draw:(fun _ mesh -> Scene3.create [ Scene3.mesh mesh ]) ()
   |> function Ok e -> e | Error m -> fail m
 
 let source_text e = fst (Flow.Lisp.print (E3.workspace e).Doc.source)
@@ -142,7 +142,7 @@ let run_editor () =
   step []; step []; settle ();
   let history = E3.undo_label !e in
   (* Command-S over the matching source *)
-  step ~keys:[ Input.Meta ] [ Event.KeyPressed (Input.KeyChar 's') ];
+  step ~keys:[ Input.Meta ] [ Input.Key_pressed (Input.KeyChar 's') ];
   settle ();
   check (has (cook_line !e) "Saved sketch.rays") ("the status says it saved: " ^ cook_line !e);
   let written = read file in
@@ -192,7 +192,7 @@ let run_editor () =
   check (E3.workspace !e == before && E3.undo_label !e = label)
     "unreadable source changed the document/history";
   check (has (cook_line !e) "Source unreadable") ("source read failure was silent: " ^ cook_line !e);
-  step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar 's')];
+  step ~keys:[Input.Meta] [Input.Key_pressed (Input.KeyChar 's')];
   check (has (cook_line !e) "Not saved:") "unreadable source was reported as an external edit";
   check (not (Sys.file_exists file)) "Save recreated an unreadable source";
   write file text1;
@@ -217,7 +217,7 @@ let run_editor () =
   count := 0;
   step []; step []; run_for 1.; settle ();
   check (has (cook_line !e) "not reloaded") ("the refused startup file says so: " ^ cook_line !e);
-  step ~keys:[ Input.Meta ] [ Event.KeyPressed (Input.KeyChar 's') ];
+  step ~keys:[ Input.Meta ] [ Input.Key_pressed (Input.KeyChar 's') ];
   settle ();
   check (has (cook_line !e) "saved as preset") ("the status says why: " ^ cook_line !e);
   check (read file = typo) "the changed source file was not overwritten";
@@ -245,7 +245,7 @@ let run_external_over_dirty () =
   check (has (source_text !e) ":segments 12" && has (source_text !e) "0.5" && E3.undo_label !e = label)
     ("an external change replaced a document with unsaved edits: " ^ source_text !e);
   check (has (cook_line !e) "changed on disk") ("the kept edits were not announced: " ^ cook_line !e);
-  step ~keys:[ Input.Meta ] [ Event.KeyPressed (Input.KeyChar 'z') ];
+  step ~keys:[ Input.Meta ] [ Input.Key_pressed (Input.KeyChar 'z') ];
   run_for 1.;
   check (has (source_text !e) "0.7" && E3.undo_label !e = Some "Reload sketch.rays")
     ("the file's text did not load once the edits were undone: " ^ source_text !e);
@@ -267,7 +267,7 @@ let run_autosave () =
   e := Result.get_ok (E3.edit !e (Flow_graph.Flow_edit.Set_arg {
     node = ["g"; "@result"]; key = Kw "radius"; sub = []; value = Flow.Syntax.make (Num "1.25") }));
   e := E3.set_renderer !e Rays_editor.Renderer.Wireframe;
-  step [Event.MouseMoved (200., 300.); Event.MouseScrolled (0., -2.)];
+  step [Input.Pointer_moved (200., 300.); Input.Scrolled (0., -2.)];
   let saved_eye = Camera.position (Easy_camera.camera (E3.camera !e)) in
   E3.close !e;
   check (has (read state) ":radius 1.25" && has (read state) "; the header"
@@ -280,30 +280,30 @@ let run_autosave () =
   check (read state = snapshot && (Unix.stat state).st_mtime = stamp)
     "an unchanged restarted sketch overwrote the last edited state";
   (* E7: orbiting in the pristine document does not write over the earlier session's unsaved work *)
-  step [Event.MouseMoved (200., 300.); Event.MouseScrolled (0., -2.)];
+  step [Input.Pointer_moved (200., 300.); Input.Scrolled (0., -2.)];
   for _ = 1 to 70 do step [] done;
   check (read state = snapshot) "orbiting after a restart overwrote the last edited state";
-  step [Event.KeyPressed (Input.KeyChar '/'); Event.KeyPressed (Input.KeyChar 'b')];
-  step [Event.KeyPressed Input.Enter];
+  step [Input.Key_pressed (Input.KeyChar '/'); Input.Key_pressed (Input.KeyChar 'b')];
+  step [Input.Key_pressed Input.Enter];
   check (has (source_text !e) ":radius 1.25" && E3.undo_label !e = Some "Restore last edited state")
     ("/ b did not restore the last edited state as one undo entry: "
       ^ Option.value ~default:"-" (E3.undo_label !e) ^ "; " ^ cook_line !e ^ "; " ^ source_text !e);
-  check (Vec3.nearly_equal saved_eye (Camera.position (Easy_camera.camera (E3.camera !e))) ~eps:1e-9)
+  check (Rays_math.Vec3.nearly_equal saved_eye (Camera.position (Easy_camera.camera (E3.camera !e))) ~eps:1e-9)
     "recovery did not restore the viewport";
   check (E3.renderer !e = Rays_editor.Renderer.Wireframe) "recovery did not restore the shared renderer choice";
-  step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar 'z')];
+  step ~keys:[Input.Meta] [Input.Key_pressed (Input.KeyChar 'z')];
   check (has (source_text !e) ":radius 0.5") "undo did not revert recovery";
   E3.close !e;
   (* A corrupt recovery file is reported without replacing the good document or the file. *)
   write state typo;
   e := create (); count := 0;
   step [];
-  step [Event.KeyPressed (Input.KeyChar '/'); Event.KeyPressed (Input.KeyChar 'b')];
-  step [Event.KeyPressed Input.Enter];
+  step [Input.Key_pressed (Input.KeyChar '/'); Input.Key_pressed (Input.KeyChar 'b')];
+  step [Input.Key_pressed Input.Enter];
   check (has (source_text !e) ":radius 0.5" && has (cook_line !e) "rejected")
     "a broken autosave replaced the live document or hid its error";
-  step [Event.KeyPressed (Input.KeyChar '/'); Event.KeyPressed (Input.KeyChar 'b')];
-  step [Event.KeyPressed Input.Delete]; step [Event.KeyPressed Input.Delete];
+  step [Input.Key_pressed (Input.KeyChar '/'); Input.Key_pressed (Input.KeyChar 'b')];
+  step [Input.Key_pressed Input.Delete]; step [Input.Key_pressed Input.Delete];
   check (not (Sys.file_exists state)) "Delete twice did not remove the recovery file";
   E3.close !e;
   check (not (Sys.file_exists state)) "closing an unchanged sketch recreated deleted recovery";
@@ -347,8 +347,8 @@ let run_start_keywords () =
   let run_for seconds = for _ = 1 to int_of_float (seconds *. 60.) do step [] done in
   let line = Test_workspace_shell.dump_line in
   let show_graph () =
-    step [ Event.KeyPressed (Input.KeyChar '/'); Event.KeyPressed (Input.KeyChar 'l') ];
-    step [ Event.KeyPressed (Input.KeyChar 'g') ]; step [] in
+    step [ Input.Key_pressed (Input.KeyChar '/'); Input.Key_pressed (Input.KeyChar 'l') ];
+    step [ Input.Key_pressed (Input.KeyChar 'g') ]; step [] in
   step []; step [];
   check (line !e "projection" = "list" && has (line !e "panels") "lisp code: graph tab")
     ("the sketch opens as its keywords say: " ^ line !e "projection" ^ " / " ^ line !e "panels");
@@ -365,8 +365,8 @@ let run_start_keywords () =
   check (line !e "projection" = "text" && has (line !e "panels") "lisp code: document tab")
     ("a reload did not follow the changed keywords: " ^ line !e "projection" ^ " / " ^ line !e "panels");
   (* a preset: saved with :view "text", loaded over a document that says "list" *)
-  step [ Event.KeyPressed (Input.KeyChar '/'); Event.KeyPressed (Input.KeyChar 's') ];
-  step [ Event.KeyPressed Input.Enter ]; step [];
+  step [ Input.Key_pressed (Input.KeyChar '/'); Input.Key_pressed (Input.KeyChar 's') ];
+  step [ Input.Key_pressed Input.Enter ]; step [];
   let name = match Editor_document.Preset.list ~directory:presets with
     | [ (name, _) ] -> name | _ -> fail "/ s did not save one preset" in
   e := Result.get_ok (E3.edit !e (Flow_graph.Flow_edit.Set_arg {
@@ -374,8 +374,8 @@ let run_start_keywords () =
   step []; step [];
   check (line !e "projection" = "list") "an edit of :view was not followed";
   let load () =
-    step [ Event.KeyPressed (Input.KeyChar '/'); Event.KeyPressed (Input.KeyChar 'b') ];
-    step [ Event.TextInput name; Event.KeyPressed Input.Enter ]; step []; step [] in
+    step [ Input.Key_pressed (Input.KeyChar '/'); Input.Key_pressed (Input.KeyChar 'b') ];
+    step [ Input.Text_input name; Input.Key_pressed Input.Enter ]; step []; step [] in
   load ();
   check (E3.undo_label !e = Some "Load preset" && line !e "projection" = "text")
     ("a preset load did not follow its :view: " ^ line !e "projection");
@@ -407,12 +407,12 @@ let run_imports () =
     poll ();
     check (E3.workspace !e == document) "import reloaded repeatedly (normalized digest)";
     let unchanged = read lib in
-    step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar 's')];
+    step ~keys:[Input.Meta] [Input.Key_pressed (Input.KeyChar 's')];
     check (read lib = unchanged && not (has (read file) "(graph shared")) "save wrote imported forms or file";
     e := Result.get_ok (E3.edit !e (Flow_graph.Flow_edit.Set_note {node = ["local"; "@result"]; text = "local edit"}));
     write lib (library "0.9"); poll ();
     check (has (source_text !e) "0.7" && has (cook_line !e) "changed on disk") "import replaced unsaved work";
-    step ~keys:[Input.Meta] [Event.KeyPressed (Input.KeyChar 'z')]; poll ();
+    step ~keys:[Input.Meta] [Input.Key_pressed (Input.KeyChar 'z')]; poll ();
     check (has (source_text !e) "0.9") "held imported change did not load after undo";
     Sys.remove lib; poll ();
     check (has (cook_line !e) "E_IMPORT" || has (cook_line !e) "not reloaded") "missing import was silent";
@@ -430,7 +430,7 @@ let run_library () =
     e := E3.update (Rays_editor.Reduce.open_import !e "lib.rays") (Test_editor_input.frame (450., 300.) [] 0);
     check ((E3.workspace !e).fragment && (E3.workspace !e).imports = []) "open library did not switch to editable definitions";
     e := E3.edit !e (Flow_graph.Flow_edit.Set_arg {node = ["def:twice"; "@result"]; key = Pos 1; sub = []; value = Flow.Syntax.make (Num "4")}) |> Result.get_ok;
-    e := E3.update !e (Test_editor_input.frame ~keys:[Input.Meta] (450., 300.) [Event.KeyPressed (Input.KeyChar 's')] 1);
+    e := E3.update !e (Test_editor_input.frame ~keys:[Input.Meta] (450., 300.) [Input.Key_pressed (Input.KeyChar 's')] 1);
     check (has (read lib) "(* x 4)" && has (read lib) "editable library" && not (has (read lib) "workspace")) "library save added a wrapper or lost edit/comment";
     check (read file = text) "open library saved over importer";
     write lib (library "5");
@@ -479,7 +479,7 @@ let run_library_navigation () =
     (graph g :context value (embedded_helper (embedded_macro (local_helper 1)))))|} in
   let workspace = match Flow_sop.Catalog.check_workspace ~sources catalog authored with
     | Some workspace, [] -> workspace
-    | _, diagnostics -> fail (String.concat "\n" (List.map Flow.Diagnostic.to_string diagnostics)) in
+    | _, diagnostics -> fail (String.concat "\n" (List.map Diagnostic.to_string diagnostics)) in
   check (List.length workspace.defs=2 && List.length workspace.macros=2)
     "library helper fixture lost checked definitions";
   let module N = Rays_editor.Private.Navigator in

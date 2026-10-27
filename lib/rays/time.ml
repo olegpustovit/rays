@@ -1,26 +1,31 @@
-(* Private: the realtime clock and frame pacing behind [Sketch]'s loop. *)
+(* Per-sketch realtime clock and frame pacing. *)
 
-let origin = ref (Unix.gettimeofday ())
-let last_frame_time = ref 0.0
-let delta_time = ref 0.0
-let target_fps = ref None
-let vsync_enabled = ref true
+type t = {
+  origin : float;
+  mutable last_frame_time : float;
+  mutable delta_time : float;
+  mutable target_fps : int option;
+  mutable vsync_enabled : bool;
+}
 
-let init () =
-  origin := Unix.gettimeofday ();
-  last_frame_time := 0.0;
-  delta_time := 0.0
-let now () = Unix.gettimeofday () -. !origin
-let delta () = !delta_time
-let set_frame_rate fps = target_fps := if fps > 0 then Some fps else None
-let set_vsync enabled = vsync_enabled := enabled
-let update () =
-  let current_time = now () in
-  delta_time := Float.min (current_time -. !last_frame_time) 0.1;
-  last_frame_time := current_time
-let limit_frame_rate () = match !target_fps with
+let create ~target_fps ~vsync_enabled = {
+  origin=Unix.gettimeofday ();
+  last_frame_time=0.;
+  delta_time=0.;
+  target_fps=(if target_fps > 0 then Some target_fps else None);
+  vsync_enabled;
+}
+
+let now state = Unix.gettimeofday () -. state.origin
+let delta state = state.delta_time
+let update state =
+  let current_time = now state in
+  state.delta_time <- Float.min (current_time -. state.last_frame_time) 0.1;
+  state.last_frame_time <- current_time
+
+let limit_frame_rate state = match state.target_fps with
   | None -> ()
-  | Some _ when !vsync_enabled -> ()
+  | Some _ when state.vsync_enabled -> ()
   | Some fps ->
-      let delay = 1.0 /. float_of_int fps -. !delta_time in
+      let delay = 1. /. float_of_int fps -. state.delta_time in
       if delay > 0. then Unix.sleepf delay

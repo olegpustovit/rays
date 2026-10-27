@@ -1,13 +1,11 @@
-type format = R8_unorm | Rgba8_unorm | Bgra8_unorm | Rgba16_float | Rgba32_float | Depth32_float
-type storage = Device_local | Shared | Upload | Readback
-type texture_usage = Binding | Storage_binding | Attachment | Copy_src | Copy_dst
 type texture_profile =
-  { format:format; storage:storage; width:int; height:int; depth:int;
-    mip_levels:int; sample_count:int; usage:texture_usage list }
+  { format:Types.texture_format; storage:Types.memory; width:int; height:int; depth:int;
+    mip_levels:int; sample_count:int; usage:Types.texture_usage list }
 
 val validate_label : operation:string -> string option -> (unit,Error.t) result
-val validate_buffer : operation:string -> max_size:int64 -> size:int64 ->
-  usage_count:int -> (unit,Error.t) result
+val validate_buffer : Caps.t -> Types.buffer_descriptor -> (unit,Error.t) result
+val validate_texture : Caps.t -> Types.texture_descriptor -> (unit,Error.t) result
+val validate_sampler : Types.sampler_descriptor -> (unit,Error.t) result
 val validate_texture_shape : operation:string -> max_dimension:int ->
   max_samples:int -> width:int -> height:int -> depth:int -> mip_levels:int ->
   sample_count:int -> usage_count:int -> (unit,Error.t) result

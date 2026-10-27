@@ -1,30 +1,44 @@
 (executable
+ (enabled_if (= %{system} macosx))
  (name runtime_native_qualification)
  (modules runtime_native_qualification)
- (libraries runtime runtime_input scene_execution ogpu sdl3 unix yojson))
+ (libraries renderer runtime runtime_input ogpu ogpu_metal sdl3 unix yojson))
 
 (rule
+ (enabled_if (= %{system} macosx))
  (alias qualification)
  (locks smoke_window)
  (action (run %{exe:runtime_native_qualification.exe})))
 
 (executable
+ (enabled_if (= %{system} macosx))
  (name runtime_autorelease)
  (modules runtime_autorelease)
  (foreign_stubs (language c) (names runtime_autorelease_stubs))
- (libraries runtime scene_execution ogpu sdl3 unix))
+ (libraries renderer runtime ogpu ogpu_metal sdl3 unix))
 
 (rule
- (aliases qualification runtest-native)
+ (enabled_if (= %{system} macosx))
+ (alias runtime_autorelease)
  (locks smoke_window)
  (action (run %{exe:runtime_autorelease.exe})))
 
 (executable
+ (enabled_if (= %{system} macosx))
  (name runtime_live_resize)
  (modules runtime_live_resize)
- (libraries runtime runtime_input ogpu sdl3 unix))
+ (libraries renderer runtime runtime_input ogpu ogpu_metal sdl3 unix))
 
 (rule
- (aliases qualification runtest-native)
+ (enabled_if (= %{system} macosx))
+ (alias runtime_live_resize)
  (locks smoke_window)
  (action (run %{exe:runtime_live_resize.exe} --auto)))
+
+(alias
+ (name qualification)
+ (deps (alias runtime_autorelease) (alias runtime_live_resize)))
+
+(alias
+ (name runtest-native)
+ (deps (alias runtime_autorelease) (alias runtime_live_resize)))

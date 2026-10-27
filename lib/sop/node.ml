@@ -24,12 +24,10 @@ module Private_types = struct
   type input_policy = All | Only of int
   type cooked = {
     payload : Payload.t;
-    diagnostics : Diagnostic.t list;
     instances : Rays_math.Mat4.t array option;
   }
   type geometry_cooked = {
     geometry : Rdk.Geometry.t;
-    diagnostics : Diagnostic.t list;
     instances : Rays_math.Mat4.t array option;
   }
 end
@@ -47,13 +45,13 @@ type t = {
   input_policy : Private_types.input_policy;
   inputs : t array;
   cook : node_id:int -> Context.t -> Payload.t array ->
-    (Private_types.cooked, Diagnostic.error) result;
-  expand : (Context.t -> t array -> Payload.t array -> (t array, Diagnostic.error) result) option;
+    (Private_types.cooked, Diagnostic.t) result;
+  expand : (Context.t -> t array -> Payload.t array -> (t array, Diagnostic.t) result) option;
   parameterization : parameterization option;
 }
 and parameterization = Parameters : {
   cache_parameters : string;
-  schema : 'parameters Parameter.schema;
+  schema : 'parameters Param.schema;
   values : 'parameters;
   rebuild : label:string -> inputs:t array -> 'parameters -> t;
 } -> parameterization
@@ -76,15 +74,15 @@ let trace value = Diagnostic.{ node_id = value.id; label = value.label;
 let parameter_fields value = match value.parameterization with
   | None -> []
   | Some (Parameters parameterization) ->
-      Parameter.view parameterization.schema parameterization.values
+      Param.view parameterization.schema parameterization.values
 
 let has_parameters value = Option.is_some value.parameterization
 
 let relabel label value =
   if String.trim label = "" then value else { value with label = String.trim label }
 
-let parameterize ~schema ~values ~rebuild value =
-  let values = match Parameter.normalize schema values with
+let parameterize_with_key ?parameter_key ~schema ~values ~rebuild value =
+  let values = match Param.normalize schema values with
     | Ok values -> values
     | Error message -> invalid_arg ("Node.parameterize: " ^ message)
   in
@@ -92,18 +90,22 @@ let parameterize ~schema ~values ~rebuild value =
     rebuild ~label ~inputs:(Array.to_list inputs) values
   in
   (* an operator with no hand key of its own reads as the schema's text *)
-  let parameters = if value.parameters = "" then Parameter.cook_text schema values
+  let parameters = if value.parameters = "" then Param.cook_text schema values
     else value.parameters in
-  { value with parameters; parameter_key = Parameter.cook_key schema values;
+  { value with parameters; parameter_key = (match parameter_key with
+      | Some key -> key | None -> Param.cook_key schema values);
                parameterization = Some (Parameters { cache_parameters = value.parameters; schema; values; rebuild }) }
 
+let parameterize ~schema ~values ~rebuild value =
+  parameterize_with_key ~schema ~values ~rebuild value
+
 let apply_parameters value changes = match value.parameterization with
-  | None when changes = [] -> Ok (value, Parameter.no_effects)
+  | None when changes = [] -> Ok (value, Param.no_effects)
   | None -> Error (Printf.sprintf "node %S has no exposed parameters" value.label)
   | Some (Parameters parameterization) ->
-      Result.bind (Parameter.apply_all parameterization.schema parameterization.values changes)
+      Result.bind (Param.apply_all parameterization.schema parameterization.values changes)
         (fun (values, effects) ->
-        try Ok (if not (Parameter.has_effects effects) then value, effects
+        try Ok (if not (Param.has_effects effects) then value, effects
         else if effects.cook then
           let rebuilt = parameterization.rebuild ~label:value.label
               ~inputs:(Array.copy value.inputs) values in
@@ -115,6 +117,8 @@ let apply_parameters value changes = match value.parameterization with
 
 module Private = struct
   include Private_types
+
+  let parameterize_with_key = parameterize_with_key
 
   let fresh_id = fresh_id
 
@@ -163,8 +167,8 @@ module Private = struct
       ?input_policy ?expand ~inputs (fun ~node_id context inputs ->
         Result.bind (geometries inputs) (fun inputs ->
           Result.map (fun (cooked : geometry_cooked) ->
-            {payload=Payload.Geometry cooked.geometry; diagnostics=cooked.diagnostics;
-             instances=cooked.instances}) (cook ~node_id context inputs)))
+            {payload=Payload.Geometry cooked.geometry; instances=cooked.instances})
+            (cook ~node_id context inputs)))
 
   let cache_parameters value = match value.parameterization with
     | None -> value.parameters

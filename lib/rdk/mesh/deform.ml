@@ -13,7 +13,7 @@ type planes = {
 }
 
 let finite_vec3 value =
-  Float.is_finite value.Vec3.x && Float.is_finite value.y
+  Float.is_finite value.Rays_math.Vec3.x && Float.is_finite value.y
   && Float.is_finite value.z
 
 let[@inline] max_abs3 x y z =
@@ -359,7 +359,7 @@ let install_point_float name values geometry =
     Geometry.with_attribute attribute geometry)
 
 let bend ?cancel ?(grain = 16_384) ?selection ?mask_attribute
-    ?(origin = Vec3.zero) ?(direction = Vec3.unit_z) ?(up = Vec3.unit_y)
+    ?(origin = Rays_math.Vec3.zero) ?(direction = Rays_math.Vec3.unit_z) ?(up = Rays_math.Vec3.unit_y)
     ~length ?(bend_angle = 0.) ?(twist_angle = 0.) ?(limit = true)
     ?(both_directions = false) ?(continuous_twist = true) ?capture_attribute
     ?(recompute_normals = false) geometry =
@@ -494,7 +494,7 @@ let initial_height_attribute name count geometry = match name with
 
 let mountain ?cancel ?(grain = 16_384) ?selection ?direction_attribute
     ?(normalize_direction = true) ?mask_attribute ?(seed = 0) ~height
-    ?(frequency = Vec3.create 1. 1. 1.) ?(offset = Vec3.zero) ?(octaves = 4)
+    ?(frequency = Rays_math.Vec3.create 1. 1. 1.) ?(offset = Rays_math.Vec3.zero) ?(octaves = 4)
     ?(lacunarity = 2.) ?(roughness = 0.5) ?height_attribute
     ?(recompute_normals = false) geometry =
   Error.guard ~operation:"mountain" ~code:"invalid_deformation" @@ fun () ->
@@ -516,12 +516,12 @@ let mountain ?cancel ?(grain = 16_384) ?selection ?direction_attribute
     Result.bind (initial_height_attribute height_attribute count geometry)
       (fun height_output ->
     let x = Array.copy source.x and y = Array.copy source.y
-    and z = Array.copy source.z and noise = Noise.create seed in
+    and z = Array.copy source.z and noise = Rays_math.Noise.create seed in
     let ranges = if count = 0 then 0 else (count + grain - 1) / grain in
     let errors = Array.make ranges (-1) and changed = Array.make ranges false in
     Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(ranges - 1) (fun range ->
       let first = range * grain and last = min count ((range + 1) * grain) in
-      let noise_scratch = Noise.Private.create_fbm3_scratch () in
+      let noise_scratch = Rays_math.Noise.Private.create_fbm3_scratch () in
       for point = first to last - 1 do
         if point land 4095 = 0 then Cancel.check_opt cancel;
         if point_selected selection index point then begin
@@ -536,7 +536,7 @@ let mountain ?cancel ?(grain = 16_384) ?selection ?direction_attribute
               && Float.is_finite sy && Float.is_finite sz) then
             errors.(range) <- point
           else begin
-            let sample = Noise.Private.fbm3_with_scratch noise_scratch noise
+            let sample = Rays_math.Noise.Private.fbm3_with_scratch noise_scratch noise
                 ~octaves ~lacunarity ~gain:roughness ~x:sx ~y:sy ~z:sz in
             let displacement = height *. ((sample *. 2.) -. 1.) *. mask in
             (match height_output with
@@ -594,7 +594,7 @@ let noise_displace ?cancel ?(grain = 16_384) ?(mode = Height_2d) ~amplitude ~fre
       | Height_2d -> Ok None
       | Normal_3d -> Result.map Option.some (point_vector_attribute "Rdk_mesh.Deform.noise_displace" "N" geometry) in
     Result.bind direction (fun direction ->
-    let noise = Noise.create seed in
+    let noise = Rays_math.Noise.create seed in
     let count = Geometry.point_count geometry in
     let source = Packed.Float3.Private.view (Geometry.positions geometry) in
     let x, y, z = match direction with
@@ -608,7 +608,7 @@ let noise_displace ?cancel ?(grain = 16_384) ?(mode = Height_2d) ~amplitude ~fre
           Cancel.check_opt cancel;
           match direction with
           | None ->
-              Noise.Private.sample2_into noise ~first ~last ~frequency
+              Rays_math.Noise.Private.sample2_into noise ~first ~last ~frequency
                 ~x:source.x ~y:source.z ~output:y;
               for index = first to last - 1 do
                 let value = source.y.(index) +. amplitude *. ((y.(index) *. 2.) -. 1.) in
@@ -616,7 +616,7 @@ let noise_displace ?cancel ?(grain = 16_384) ?(mode = Height_2d) ~amplitude ~fre
                 else if errors.(first / grain) < 0 then errors.(first / grain) <- index
               done
           | Some direction ->
-              Noise.Private.sample3_into noise ~first ~last ~frequency
+              Rays_math.Noise.Private.sample3_into noise ~first ~last ~frequency
                 ~x:source.x ~y:source.y ~z:source.z ~output:z ();
               for index = first to last - 1 do
                 let scale = amplitude *. z.(index) in

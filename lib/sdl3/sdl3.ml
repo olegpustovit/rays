@@ -167,12 +167,6 @@ module Window = struct
     mutable destroyed : bool;
     metal_views : int Atomic.t;
   }
-  type presentation_facts = {
-    logical_width : int; logical_height : int;
-    drawable_width : int; drawable_height : int;
-    pixel_density : float; display_scale : float;
-    refresh_rate : float option; vsync : bool;
-  }
 
   (* The bits stubs.c maps to SDL_WINDOW_HIDDEN, SDL_WINDOW_HIGH_PIXEL_DENSITY
      and SDL_WINDOW_METAL. *)
@@ -223,11 +217,6 @@ module Window = struct
     | Some size -> Ok size
     | None -> sdl_error operation
 
-  let display value = live "SDL3.Window.display" value (fun raw ->
-    Private_raw.clear_error ();
-    let display = Private_raw.window_display raw in
-    if display = 0L then sdl_error "SDL3.Window.display" else Ok display)
-
   let positive_scale operation call value = live operation value (fun raw ->
     Private_raw.clear_error ();
     let scale = call raw in
@@ -235,9 +224,6 @@ module Window = struct
 
   let pixel_density = positive_scale "SDL3.Window.pixel_density"
       Private_raw.window_pixel_density
-
-  let display_scale = positive_scale "SDL3.Window.display_scale"
-      Private_raw.window_display_scale
 
   let position value = live "SDL3.Window.position" value (fun raw ->
     Private_raw.clear_error ();
@@ -289,18 +275,6 @@ module Window = struct
         else error "SDL3.Window.set_relative_mouse" Unsupported
           (let message = Private_raw.get_error () in
            if message = "" then "relative mouse mode is unavailable" else message))
-
-  let presentation_facts value ~vsync =
-    match size value, size_in_pixels value, pixel_density value,
-        display_scale value, display value with
-    | Ok (logical_width, logical_height), Ok (drawable_width, drawable_height),
-      Ok pixel_density, Ok display_scale, Ok display ->
-        let refresh_rate = Private_raw.display_refresh_rate display in
-        Ok { logical_width; logical_height; drawable_width; drawable_height;
-          pixel_density; display_scale; refresh_rate; vsync }
-    | Error error, _, _, _, _ | _, Error error, _, _, _
-    | _, _, Error error, _, _ | _, _, _, Error error, _
-    | _, _, _, _, Error error -> Error error
 
   let show = bool_call "SDL3.Window.show" Private_raw.show_window
   let raise_window = bool_call "SDL3.Window.raise_window" Private_raw.raise_window

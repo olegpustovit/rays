@@ -1,4 +1,4 @@
-let point (x, y) = { Path.x = float x; y = float y }
+let point (x, y) = { Path.x = x; y }
 
 let geometry_of_mesh color (mesh : Path.mesh) =
   let vertices = Array.make (Array.length mesh.vertices * 2) 0. in
@@ -40,7 +40,7 @@ let path_of_points ~closed points =
       Path.of_commands (Array.of_list commands)
 
 let line ~from_ ~to_ ~width ~color =
-  stroke_path ~width:(float (max 1 width)) color
+  stroke_path ~width:(max 1. width) color
     (path_of_points ~closed:false [from_; to_])
 
 let polygon points ~fill ~stroke =
@@ -50,10 +50,12 @@ let polygon points ~fill ~stroke =
 let polyline points ~color =
   stroke_path color (path_of_points ~closed:false points)
 
+let path ~fill ~stroke path = styled ?fill ?stroke path
+
 let rounded_rect ~width ~height ~radius ~fill ~stroke =
   let fill = match fill, stroke with None, None -> Some 0xffffffffl | _ -> fill in
-  let radius = max 0 (min radius (min (abs width) (abs height) / 2)) in
-  let r = float radius and width = float width and height = float height in
+  let radius = max 0. (min radius (min (abs_float width) (abs_float height) /. 2.)) in
+  let r = radius in
   let k = 0.5522847498307936 *. r in
   let p x y = { Path.x; y } in
   let path = Path.of_commands [|
@@ -73,8 +75,7 @@ let rounded_rect ~width ~height ~radius ~fill ~stroke =
 let ellipse_points (cx, cy) rx ry =
   List.init 32 (fun index ->
     let angle = 2. *. Float.pi *. float index /. 32. in
-    cx + int_of_float (float rx *. cos angle),
-    cy + int_of_float (float ry *. sin angle))
+    cx +. rx *. cos angle, cy +. ry *. sin angle)
 
 let ellipse ~center ~rx ~ry ~fill ~stroke =
   polygon (ellipse_points center rx ry) ~fill ~stroke

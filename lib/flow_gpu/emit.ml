@@ -33,8 +33,7 @@ float fbm(float3 p, int octaves, device const int* table) {
   return weights==0.0f?0.0f:sum/weights;
 }
 |}
-exception Unsupported of string
-let fail message = raise (Unsupported message)
+let fail message = raise (Diagnostic.Error (Diagnostic.error ~code:"E_GPU_FORM" message))
 let register index = "r" ^ string_of_int index
 let rec guarded guards = function
   | P.Guarded (more, body) -> guarded (guards @ more) body
@@ -65,43 +64,33 @@ let unary operation a = match operation with
 let checked projection expression = match projection with
   | P.Value -> Printf.sprintf "(isfinite(%s)?%s:0.0f)" expression expression
   | Valid -> Printf.sprintf "(isfinite(%s)?1.0f:0.0f)" expression
-(* integer arithmetic in 64 bits (the CPU's 63 agree in every bit a mask below 2^62 keeps):
-   wrapping, truncating division, logical right shift *)
-let integer operation a b = match operation with
-  | Flow.Packed_ops.Iadd -> "(" ^ a ^ "+" ^ b ^ ")" | Isub -> "(" ^ a ^ "-" ^ b ^ ")" | Imul -> "(" ^ a ^ "*" ^ b ^ ")"
+let wrap_integer value = "(as_type<long>(ulong(" ^ value ^ ")<<1)>>1)"
+(* Integer registers occupy 64 bits; Int operations wrap in the signed 63-bit domain. *)
+let integer_status indentation operation b = match operation with
+  | Flow.Packed_ops.Idiv | Imod ->
+      Printf.sprintf "%sif(%s==0) atomic_fetch_or_explicit(status,2u,memory_order_relaxed);\n" indentation b
+  | Ishl | Ishr -> Printf.sprintf
+      "%sif(%s<0 || %s>62) atomic_fetch_or_explicit(status,4u,memory_order_relaxed);\n" indentation b b
+  | _ -> ""
+let integer operation a b = wrap_integer (match operation with
+  | Flow.Packed_ops.Iadd -> "(ulong(" ^ a ^ ")+ulong(" ^ b ^ "))"
+  | Isub -> "(ulong(" ^ a ^ ")-ulong(" ^ b ^ "))"
+  | Imul -> "(ulong(" ^ a ^ ")*ulong(" ^ b ^ "))"
   | Idiv -> "(" ^ b ^ "==0?0:" ^ a ^ "/" ^ b ^ ")" | Imod -> "(" ^ b ^ "==0?0:" ^ a ^ "%" ^ b ^ ")"
   | Iand -> "(" ^ a ^ "&" ^ b ^ ")" | Ior -> "(" ^ a ^ "|" ^ b ^ ")" | Ixor -> "(" ^ a ^ "^" ^ b ^ ")"
-  | Ishl -> "(" ^ a ^ "<<(" ^ b ^ "&63))" | Ishr -> "long(ulong(" ^ a ^ ")>>(" ^ b ^ "&63))"
+  | Ishl -> "(ulong(" ^ a ^ ")<<(" ^ b ^ "&63))"
+  | Ishr -> "long((ulong(" ^ a ^ ")&0x7fffffffffffffffUL)>>(" ^ b ^ "&63))")
 let comparison operation a b =
   let op = match operation with Flow.Packed_ops.Ilt -> "<" | Ile -> "<=" | Igt -> ">" | Ige -> ">=" | Ieq -> "==" in
   "(" ^ a ^ op ^ b ^ "?1.0f:0.0f)"
 let kernel ?(fast=false) program = try
-  let view = P.Private.view program in
-  (match P.gpu_refusals ~fused:true ~fast program with [] -> () | reason :: _ -> fail reason.message);
-  let offset = ref 4 and uniform_layout = ref [] in
-  let uniform name width =
-    let first = !offset in offset := first+width*4;
-    uniform_layout := (name,first,width) :: !uniform_layout; first/4 in
-  (* an array-valued uniform reaches the kernel only as a gather table, not a scalar slot *)
-  let tabled = Array.to_list view.code |> List.filter_map (fun instruction ->
-    match snd (guarded [] instruction) with P.Array_prepare (u, _) -> Some u | _ -> None) in
-  let uniforms = Array.mapi (fun index width ->
-    if List.mem index tabled then 0 else uniform ("uniform:" ^ string_of_int index) width) view.uniform_widths in
-  let frames = Array.mapi (fun index instruction -> match snd (guarded [] instruction) with
-    | P.Frame name -> uniform (Printf.sprintf "frame:%d:%s" index name) 1 | _ -> 0) view.code in
-  let used = P.Private.output_reachable program in
-  let finite_checks = P.Private.finite_checks program in
-  let table_seeds = Array.to_list(Array.mapi(fun index instruction->index,snd(guarded [] instruction))view.code)
-    |> List.filter_map (function
-      | index,P.Noise3 (_,_,_,seed,_,_,_) when used.(index) ->
-          Some seed | _ -> None) |> List.sort_uniq Int.compare |> Array.of_list in
+  (match P.gpu_refusals ~fused:true ~fast program with [] -> () | reason :: _ -> raise (Diagnostic.Error reason));
+  let layout = Flow_ir.Kernel_layout.plan ~fast program in
+  let {Flow_ir.Kernel_layout.view; used; finite_checks; uniforms; frames; table_seeds;
+       gathers; gather_lengths; input_used; uniform_layout; uniform_bytes; gather_base;
+       uniform_binding; status_binding; table_binding; count_base; counts} = layout in
   let table seed = match Array.find_index ((=) seed) table_seeds with Some index -> index*512 | None -> assert false in
-  (* the arrays gathers read: one bound table each, its element count a uniform *)
-  let gathers = Array.to_list (Array.mapi (fun slot instruction -> slot, snd (guarded [] instruction)) view.code)
-    |> List.filter_map (function slot, P.Array_prepare (u, ty) when used.(slot) ->
-        Some (slot, (u, match ty with Flow.Ty.Array Vec2 -> 2 | Array Vec3 -> 3 | Array Vec4 -> 4 | _ -> 1)) | _ -> None) in
   let gather_index slot = match List.find_index (fun (s, _) -> s = slot) gathers with Some k -> k | None -> fail "Gather without its table." in
-  let gather_lengths = List.mapi (fun k (_, (u, _)) -> uniform (Printf.sprintf "gather:%d:%d" k u) 1) gathers |> Array.of_list in
   let integer_register slot = Flow_ir.Core.Region.integer_register view.code.(slot) in
   let int_of r = if integer_register r then register r else "long(" ^ register r ^ ")" in
   (* the integer register a float operand converts, if it is one *)
@@ -122,7 +111,7 @@ let kernel ?(fast=false) program = try
     Printf.sprintf "as_type<float>(gather%d[clamp(int(%s),0,max(int(uniforms[%d])-1,0))*%d+%d])"
       k (int_of index) gather_lengths.(k) width component in
   let body = Buffer.create 4096 in
-  Array.iteri (fun slot instruction ->
+  Flow_ir.Kernel_layout.iter layout ~instruction:(fun slot instruction ->
     if used.(slot) && (match snd (guarded [] instruction) with P.Array_prepare _ -> false | _ -> true) then begin
     let guards,instruction=guarded [] instruction in
     let expression = match instruction with
@@ -149,7 +138,7 @@ let kernel ?(fast=false) program = try
       | Int_frame _ -> Printf.sprintf "long(as_type<float>(uniforms[%d]))" frames.(slot)
       | Int_binary (op,a,b) -> integer op (int_of a) (int_of b)
       | Int_compare (op,a,b) -> comparison op (int_of a) (int_of b)
-      | Int_abs a -> "abs(" ^ int_of a ^ ")"
+      | Int_abs a -> wrap_integer("abs(" ^ int_of a ^ ")")
       | Int_select (condition,yes,no) -> Printf.sprintf "(%s!=0.0f?%s:%s)" (float_of condition) (int_of yes) (int_of no)
       | Convert (To_float,a) -> float_of a
       | Convert ((Truncate|Coerce_int|Integer_result _),a) -> int_of a
@@ -160,6 +149,7 @@ let kernel ?(fast=false) program = try
       | Select (condition,yes,no) -> Printf.sprintf "(%s!=0.0f?%s:%s)" (register condition) (register yes) (register no)
       | Noise3 (x,y,z,seed,octaves,_,_) -> Printf.sprintf "fbm(float3(%s,%s,%s),%d,table+%d)"
           (register x) (register y) (register z) octaves (table seed)
+      | Loop_result (loop,component,_) -> register (loop+1+component)
       | _ -> fail "Integer instructions and conversions are not supported by the Metal kernel target." in
     let indentation=if guards=[] then "  " else "    " in
     let ty, zero = if integer_register slot then "long", "0" else "float", "0.0f" in
@@ -170,28 +160,51 @@ let kernel ?(fast=false) program = try
       Printf.bprintf body "    r%d=%s;\n" slot expression
     end;
     if finite_checks.(slot) && not (integer_register slot) then
-      Printf.bprintf body "%sif(!isfinite(r%d)) atomic_store_explicit(status,1u,memory_order_relaxed);\n" indentation slot;
+      Printf.bprintf body "%sif(!isfinite(r%d)) atomic_fetch_or_explicit(status,1u,memory_order_relaxed);\n" indentation slot;
+    (match instruction with
+     | P.Int_binary (operation, _, b) ->
+         Buffer.add_string body (integer_status indentation operation (int_of b))
+     | _ -> ());
     if guards<>[] then Buffer.add_string body "  }\n"
-    end) view.code;
+    end) ~loop:(fun header control ~next ~stop ~body:emit_body -> if used.(header)then begin
+      let guards,_=guarded [] view.code.(header)in
+      let ty slot=if integer_register slot then "long" else "float"in
+      Printf.bprintf body "  long r%d=0;\n" header;
+      Array.iteri(fun component _->let slot=header+1+component in
+        Printf.bprintf body "  %s r%d=0;\n" (ty slot)slot)control.initial;
+      if guards<>[]then Printf.bprintf body "  if(%s) {\n" (String.concat "&&"
+        (List.map(fun(condition,selected)->Printf.sprintf "%s%s0.0f" (float_of condition)
+          (if selected then "!=" else "=="))guards));
+      Option.iter(fun limit->Printf.bprintf body
+        "  if(r%d>r%d && ulong(r%d-r%d)>%duL){atomic_fetch_or_explicit(status,1u,memory_order_relaxed);return;}\n"
+        control.last control.first control.last control.first limit)control.limit;
+      Array.iteri(fun component initial->Printf.bprintf body "  r%d=r%d;\n" (header+1+component)initial)control.initial;
+      Printf.bprintf body "  for(r%d=r%d;r%d<r%d;r%d++){\n" header control.first header control.last header;
+      emit_body();
+      Option.iter(fun source->Printf.bprintf body "  bool stop%d=%s!=0.0f;\n" header (float_of source))stop;
+      Array.iteri(fun component source->Printf.bprintf body "  %s next%d_%d=r%d;\n"
+        (ty source)header component source)next;
+      Array.iteri(fun component _->Printf.bprintf body "  r%d=next%d_%d;\n" (header+1+component)header component)next;
+      Option.iter(fun _->Printf.bprintf body "  if(stop%d)break;\n" header)stop;
+      Buffer.add_string body "  }\n";
+      if guards<>[]then Buffer.add_string body "  }\n"
+    end);
   let outputs = Array.length view.outputs in
   let output_name k = if outputs = 1 then "output" else "output" ^ string_of_int k in
   Array.iteri (fun k registers -> Array.iteri (fun component slot ->
     Printf.bprintf body "  %s[i*%d+%d]=%s;\n"
       (output_name k) (Array.length registers) component (float_of slot)) registers) view.outputs;
   let count = Array.length view.widths in
-  let gather_base = count+outputs+2+(if table_seeds=[||] then 0 else 1) in
   (* fast: the element count may come from a device cell (another kernel's, times mul over div,
      when use is set) and is written to this kernel's own count record {n, 6n, 1, 0, 0, 0}: a
      resident fold never reads it, and its last five words are the indexed indirect draw of n
      quads a mark set reads *)
-  let counts = if fast then (let o = !offset in offset := o+12; Some o) else None in
-  let count_base = gather_base+List.length gathers in
   let arguments = Array.to_list (Array.mapi (fun index _ -> Printf.sprintf
     "device const float* input%d [[buffer(%d)]]" index index) view.widths)
     @ List.init outputs (fun k -> Printf.sprintf "device float* %s [[buffer(%d)]]" (output_name k) (count+k))
-    @ [Printf.sprintf "constant uint* uniforms [[buffer(%d)]]" (count+outputs);
-       Printf.sprintf "device atomic_uint* status [[buffer(%d)]]" (count+outputs+1)]
-    @ (if table_seeds=[||] then [] else [Printf.sprintf "device const int* table [[buffer(%d)]]" (count+outputs+2)])
+    @ [Printf.sprintf "constant uint* uniforms [[buffer(%d)]]" uniform_binding;
+       Printf.sprintf "device atomic_uint* status [[buffer(%d)]]" status_binding]
+    @ (match table_binding with None -> [] | Some binding -> [Printf.sprintf "device const int* table [[buffer(%d)]]" binding])
     @ List.mapi (fun k _ -> Printf.sprintf "device const uint* gather%d [[buffer(%d)]]" k (gather_base+k)) gathers
     @ (if counts=None then [] else [Printf.sprintf "device const uint* count_in [[buffer(%d)]]" count_base;
         Printf.sprintf "device uint* count_out [[buffer(%d)]]" (count_base+1)])
@@ -209,15 +222,13 @@ let kernel ?(fast=false) program = try
   let digest = Digest.to_hex (Digest.string (prefix ^ signature ^ body)) in
   let entry = "kernel_" ^ digest in
   let source = prefix ^ "kernel void " ^ entry ^ "(\n  " ^ signature ^ ") {\n" ^ body ^ "}\n" in
-  let input_used=Array.make count false in
-  Array.iteri(fun slot instruction->match snd(guarded [] instruction)with P.Input(input,_,_)when used.(slot)->input_used.(input)<-true|_->())view.code;
   let interface = List.init (count_base+(if counts=None then 0 else 2)) Fun.id
     |>List.filter(fun binding->binding>=count || input_used.(binding))
-    |>List.map(fun binding->S.{group=0;binding;kind=(if binding=count+outputs then Uniform_buffer else Storage_buffer);visibility=[Compute]})in
-  Ok {source;entry;interface;uniform_layout=List.rev !uniform_layout;uniform_bytes= !offset;
+    |>List.map(fun binding->S.{group=0;binding;kind=(if binding=uniform_binding then Uniform_buffer else Storage_buffer);visibility=[Compute]})in
+  Ok {source;entry;interface;uniform_layout;uniform_bytes;
     table_seeds;output_widths=Array.map Array.length view.outputs;input_widths=view.widths;
     gathers=Array.of_list (List.map snd gathers);counts}
-with Unsupported message -> Error (Flow.Diagnostic.error ~code:"E_GPU_FORM" message)
+with Diagnostic.Error diagnostic -> Error diagnostic
 
 (* Stream compaction for a resident fold: the indices of a mask's nonzero elements, in order, as
    floats, and their count.  One threadgroup of up to 1,024 threads: each counts a contiguous chunk,

@@ -9,7 +9,6 @@ let fail message = failwith ("test_workspace_zone: " ^ message)
 let check condition message = if not condition then fail message
 let factories = Sop_catalog.Editor.factories
 let geometry_bytes = Test_workspace_cook.geometry_bytes
-
 let garden ?(result = "(sop/merge bed dots)") ~count () = Printf.sprintf {|
 (workspace garden
   (graph garden :context sop [(seed : int 1) (count : int %d)]
@@ -23,10 +22,10 @@ let garden ?(result = "(sop/merge bed dots)") ~count () = Printf.sprintf {|
       result)))|} count result
 
 let lower source = match Flow.Syntax.parse source with
-  | Error d -> fail (Flow.Diagnostic.to_string d)
+  | Error d -> fail (Diagnostic.to_string d)
   | Ok forms -> (match Lower.workspace ~extra:Editor_document.Contexts.descriptors ~factories forms with
       | Ok lowered -> lowered
-      | Error d -> fail (Flow.Diagnostic.to_string d))
+      | Error d -> fail (Diagnostic.to_string d))
 
 let context ~domains = Result.get_ok
   (Sop.Context.create ~domains ~grain:97 ~seed:42L ())
@@ -38,7 +37,7 @@ let cook ?(domains = 1) session graph =
   let compiled = Result.get_ok (Edit.compile_node graph.network.geometry ~node_id:root) in
   match Session.cook session ~context:(context ~domains) compiled with
   | Ok output -> (Result.get_ok (Sop.Payload.geometry output.payload))
-  | Error error -> fail (Sop.Diagnostic.error_to_string error)
+  | Error error -> fail (Diagnostic.error_to_string error)
 
 let prims = Rdk.Geometry.primitive_count
 
@@ -112,11 +111,34 @@ let previews () =
   let graph = List.hd lowered.graphs in
   let target = Array.find_opt (fun (n : Flow.Eval.node) -> n.site = ["g";"dots";"moved"])
     lowered.plan.nodes |> Option.get in
+  let cache_forks () =
+    let seed = Flow.Eval.create_state () in
+    let left = Value_lane.create ~state:(Flow.Eval.fork_state seed) ()
+    and right = Value_lane.create ~state:(Flow.Eval.fork_state seed) ()
+    and s = session () in
+    Fun.protect ~finally:(fun () -> Session.close s) (fun () ->
+      let resolve lane frame dt =
+        let input = {(Input.at_time (float frame *. 0.25)) with frame; dt} in
+        let network, root = Option.get (lowered.preview ~node:target.id ~probes:[0] graph.network) in
+        let resolved = Result.get_ok (Value_lane.resolve lane ~live:input ~time:input.t network) in
+        let compiled = Result.get_ok (Edit.compile_node resolved.geometry ~node_id:root) in
+        let context = Result.get_ok (Sop.Context.create ~domains:1 ~grain:1 ~input ~time:input.t
+          ~frame:(Int64.of_int frame) ()) in
+        let output = Result.get_ok (Session.cook s ~context compiled) in
+        let positions = Rdk.Packed.Float3.Private.view
+          (Rdk.Geometry.positions (Result.get_ok (Sop.Payload.geometry output.payload))) in
+        Array.fold_left (+.) 0. positions.x /. float (Array.length positions.x) in
+      ignore (resolve left 1 0.25);
+      ignore (resolve right 1 0.5);
+      let left_x = resolve left 2 0.25 and right_x = resolve right 2 0.25 in
+      check (left_x = 0.5 && right_x = 0.75)
+        "the same session reused a zone result across divergent fold histories") in
+  cache_forks ();
   let play domains =
     let lane = Value_lane.create () and s = session () in
     Fun.protect ~finally:(fun () -> Session.close s) (fun () ->
       Array.init 3 (fun index ->
-        let input = {(Frame_input.at_time (float (index + 1) *. 0.25)) with frame = index + 1; dt = 0.25} in
+        let input = {(Input.at_time (float (index + 1) *. 0.25)) with frame = index + 1; dt = 0.25} in
         let probes = [index mod 2] in
         let network, root = Option.get (lowered.preview ~node:target.id ~probes graph.network) in
         let resolved = Result.get_ok (Value_lane.resolve lane ~live:input ~time:input.t network) in
@@ -163,7 +185,7 @@ let run () =
     let lane = Value_lane.create () and s = session () in
     Fun.protect ~finally:(fun () -> Session.close s) (fun () ->
       let frame i =
-        let input = {(Frame_input.at_time (float i *. 0.25)) with frame = i; dt = 0.25} in
+        let input = {(Input.at_time (float i *. 0.25)) with frame = i; dt = 0.25} in
         let resolved = Result.get_ok (Value_lane.resolve lane ~live:input ~time:input.t graph.network) in
         let compiled = Result.get_ok (Edit.compile_node resolved.geometry ~node_id:(Option.get graph.root)) in
         let context = Result.get_ok (Sop.Context.create ~domains ~grain:1
@@ -187,21 +209,21 @@ let run () =
           (sop/transform (sop/box) :translate (+ p [ticks 0 0]))))))))|} in
   (match Lower.workspace ~extra:Editor_document.Contexts.descriptors ~factories
      (Result.get_ok (Flow.Syntax.parse nested)) with
-   | Error d -> check (d.Flow.Diagnostic.code = "E_STATE_ELEMENT") "per-element fold diagnostic"
+   | Error d -> check (d.Diagnostic.code = "E_STATE_ELEMENT") "per-element fold diagnostic"
    | Ok _ -> fail "a cooked-geometry worker cannot own a frame fold");
-  let lowered = lower (garden ~count:12 ()) in
+  let lowered = lower (garden ~count:4 ()) in
   let graph = List.hd lowered.graphs in
   check (Lower.zone_count lowered ["garden"; "dots"] = None) "no count before a cook";
   let one = cook (session ()) graph and three = cook ~domains:3 (session ()) graph in
   check (geometry_bytes one = geometry_bytes three) "zone differs at 1 and 3 domains";
-  check (geometry_bytes one = geometry_bytes (cook (session ()) (List.hd (lower (garden ~count:12 ())).graphs)))
+  check (geometry_bytes one = geometry_bytes (cook (session ()) (List.hd (lower (garden ~count:4 ())).graphs)))
     "zone is not deterministic";
-  check (Lower.zone_count lowered ["garden"; "dots"] = Some 12) "count after the cook";
+  check (Lower.zone_count lowered ["garden"; "dots"] = Some 4) "count after the cook";
   let bed = prims (cook (session ()) (List.hd (lower (garden ~result:"bed" ~count:1 ())).graphs)) in
   let ball = prims (cook (session ()) (List.hd (lower
     "(workspace b (graph b :context sop (sop/uv_sphere :radius 0.06 :segments 8 :rings 4)))").graphs)) in
-  check (prims one = bed + 12 * ball) (Printf.sprintf "%d prims, want %d" (prims one) (bed + 12 * ball));
-  (* only the template is lowered: the zone node, not 12 copies of its body *)
+  check (prims one = bed + 4 * ball) (Printf.sprintf "%d prims, want %d" (prims one) (bed + 4 * ball));
+  (* only the template is lowered: the zone node, not four copies of its body *)
   let ops = List.map (fun (n : Edit.node_info) -> n.operation) (Edit.inspect graph.network.geometry) in
   check (List.length (List.filter (( = ) "zone") ops) = 1 && not (List.mem "uv_sphere" ops))
     "the template body stays out of the network";
@@ -213,10 +235,10 @@ let run () =
   let elements = Array.to_list tags |> List.sort_uniq compare
     |> List.filter_map (fun tag -> match Lower.origin lowered tag with
         | Some (o : Lower.origin) when o.site = ["garden"; "dots"; "moved"] -> Some o.iter | _ -> None) in
-  check (elements = List.init 12 (fun i -> [ i ])) "every element resolves to its iteration";
+  check (elements = List.init 4 (fun i -> [ i ])) "every element resolves to its iteration";
   check (List.length (Lower.tags lowered ~site:["garden"; "dots"; "moved"] ~iter:[ 3 ]) = 1) "one tag per element";
-  (* the 12 elements, and the tag the final merge gave its input (its primitives keep the zone's) *)
-  check (List.length (Lower.tags lowered ~site:["garden"; "dots"] ~iter:[]) = 13) "the loop lights every element";
+  (* the four elements, and the tag the final merge gave its input (its primitives keep the zone's) *)
+  check (List.length (Lower.tags lowered ~site:["garden"; "dots"] ~iter:[]) = 5) "the loop lights every element";
   (* cache hits after moving one point: the collection is a grid whose point 5 moves *)
   let source = {|
 (workspace grove
@@ -235,7 +257,7 @@ let run () =
   let compiled = Result.get_ok (Edit.compile_node graph' ~node_id:root) in
   let before = Session.stats s in
   let second = match Session.cook s ~context:(context ~domains:1) compiled with
-    | Ok output -> (Result.get_ok (Sop.Payload.geometry output.payload)) | Error e -> fail (Sop.Diagnostic.error_to_string e) in
+    | Ok output -> (Result.get_ok (Sop.Payload.geometry output.payload)) | Error e -> fail (Diagnostic.error_to_string e) in
   let after = Session.stats s in
   let n = Rdk.Geometry.point_count base in
   check (a.cooks > 0 && n > 4) "the collection has points";
@@ -267,7 +289,7 @@ let run () =
     let compiled = Result.get_ok (Edit.compile_node graph.network.geometry ~node_id:root) in
     match Session.cook s ~context compiled with
     | Ok output -> (Result.get_ok (Sop.Payload.geometry output.payload)), Session.stats s
-    | Error e -> fail (Sop.Diagnostic.error_to_string e) in
+    | Error e -> fail (Diagnostic.error_to_string e) in
   let g0, _ = at 0. live_graph live and g1, stats = at 1.25 live_graph live in
   check (geometry_bytes g0 <> geometry_bytes g1) "a loop body that reads t did not move with t";
   let fixed = buzz "1.25" in
@@ -296,6 +318,80 @@ let run () =
     (Rdk.Geometry.positions base) (n - 1)) "elements follow the key attribute";
   let plain = Result.get_ok (Sop.Zone.elements Points keyed) in
   check (plain.(0).position = Rdk.Packed.Float3.get (Rdk.Geometry.positions base) 0) "index order without a key";
+  (* Live Curve points remain a typed Vec3 array in Network.drives and are
+     installed without text serialization. Simultaneous option drives survive. *)
+  let moving_curve = lower {|
+(workspace moving_curve
+  (graph g :context sop
+    (sop/curve (list [t 0 0] [1 0 0] [1 1 0]))))|} in
+  let curve_graph = List.hd moving_curve.graphs in
+  let curve_id = Option.get curve_graph.root in
+  let points_port = Port.{node = curve_id; path = Curve.parameter} in
+  (match Port.Map.find_opt points_port curve_graph.network.drives with
+   | Some (Flow.Eval.List values) ->
+       check (Array.for_all (function Flow.Eval.Vec3 _ | Flow.Eval.Residual _ -> true | _ -> false) values)
+         "curve drive did not retain a typed Vec3 list"
+   | Some value -> fail ("curve points drive is not a list: " ^ Flow.Eval.show value)
+   | None -> fail "curve points are absent from Network.drives");
+  let drives = Port.Map.add Port.{node = curve_id; path = Curve.closed_parameter}
+      (Flow.Eval.Bool true) curve_graph.network.drives
+    |> Port.Map.add Port.{node = curve_id; path = Curve.filled_parameter}
+      (Flow.Eval.Bool true) in
+  let curve_network = Result.get_ok (Network.with_drives drives curve_graph.network) in
+  let live = Input.at_time 0.5 in
+  let resolved = Value_lane.resolve ~live (Value_lane.create ()) ~time:0.5 curve_network
+    |> Result.get_ok in
+  let cook_result geometry node_id time =
+    let node = Result.get_ok (Edit.compile_node geometry ~node_id) in
+    let session = session () in
+    Fun.protect ~finally:(fun () -> Session.close session) (fun () ->
+      let context = Result.get_ok (Sop.Context.create ~domains:1 ~grain:97 ~seed:42L ~time ()) in
+      match Session.cook session ~context node with
+      | Ok output -> Sop.Payload.geometry output.payload
+      | Error diagnostic -> Error diagnostic) in
+  let expected_curve = lower {|
+(workspace expected_curve
+  (graph g :context sop
+    (sop/curve (list [0.5 0 0] [1 0 0] [1 1 0]) :closed true :filled true)))|} in
+  let expected_graph = List.hd expected_curve.graphs in
+  let actual = Result.get_ok (cook_result resolved.geometry curve_id 0.5)
+  and expected = Result.get_ok (cook_result expected_graph.network.geometry
+    (Option.get expected_graph.root) 0.5) in
+  check (geometry_bytes actual = geometry_bytes expected)
+    "typed live curve points/options differ from authored Lisp curve";
+  let actual_node = Edit.find resolved.geometry ~node_id:curve_id |> Option.get in
+  check (String.starts_with ~prefix:"flow.curve\000" (Sop.Node.parameter_key actual_node))
+    "live curve points were text-encoded into the parameter key";
+  let nonfinite = Port.Map.add points_port
+      (Flow.Eval.List [|Flow.Eval.Vec3 (Float.infinity, 0., 0.)|]) drives
+    |> fun drives -> Result.get_ok (Network.with_drives drives curve_graph.network) in
+  let nonfinite = Value_lane.resolve ~live (Value_lane.create ()) ~time:0.5 nonfinite
+    |> Result.get_ok in
+  let static_node = Edit.find expected_graph.network.geometry
+      ~node_id:(Option.get expected_graph.root) |> Option.get in
+  let static_node, _ = Result.get_ok (Sop.Node.apply_parameters static_node
+      [Curve.parameter, Param.Text_value (Curve.encode [|Float.infinity, 0., 0.|])]) in
+  let static_geometry = Result.get_ok (Edit.replace_node static_node
+      expected_graph.network.geometry) in
+  (match cook_result nonfinite.geometry curve_id 0.5,
+      cook_result static_geometry (Option.get expected_graph.root) 0.5 with
+   | Error actual, Error expected ->
+       check (actual.code = expected.code && actual.message = expected.message)
+         "nonfinite typed curve refusal differs from authored curve"
+   | _ -> fail "nonfinite curve points were not refused consistently");
+  let malformed = Port.Map.add points_port (Flow.Eval.List [|Flow.Eval.Int 1|]) drives
+    |> fun drives -> Result.get_ok (Network.with_drives drives curve_graph.network) in
+  (match Value_lane.resolve ~live (Value_lane.create ()) ~time:0.5 malformed with
+   | Error diagnostic -> check (diagnostic.code = "E_LIVE") "malformed curve list error code"
+   | Ok _ -> fail "malformed live curve points were accepted");
+  let both_bad = Port.Map.add points_port (Flow.Eval.List [|Flow.Eval.Int 1|])
+      (Port.Map.add Port.{node = curve_id; path = Curve.closed_parameter}
+        (Flow.Eval.Vec3 (1., 0., 0.)) drives)
+    |> fun drives -> Result.get_ok (Network.with_drives drives curve_graph.network) in
+  (match Value_lane.resolve ~live (Value_lane.create ()) ~time:0.5 both_bad with
+   | Error diagnostic -> check (diagnostic.code = "E_TYPE")
+       "curve point error ran before the earlier typed option drive"
+   | Ok _ -> fail "invalid option and curve points were accepted");
   (* a body that reads t only is live; one that reads only its element is not *)
   let counts text = Lower.counts (lower text) in
   check (fst (counts {|

@@ -1,5 +1,4 @@
-(** The evaluator of the workspace language (port of the run pass of the
-    study's [compile]): everything that is not geometry.
+(** The evaluator of the workspace language: values outside geometry.
 
     Numbers, vectors, text, lists, records, functions, loops, [if]/[cond]/[case],
     higher-order forms, [str], list operations, [ref] with overrides and
@@ -7,8 +6,8 @@
     Packed operations budget each 1,024-element block separately; native
     storage bounds limit their counts, while expensive bodies remain bounded.
     Geometry is not built: a catalog call (and the workspace operator
-    [sop/curve]) becomes a {e plan node}, and W2's lowering turns the plan
-    into one network per graph instance.
+    [sop/curve]) becomes a plan node, lowered into one network per graph
+    instance.
 
     {2 The geometry plan}
 
@@ -19,7 +18,7 @@
       list/record/[if]/[cond] positions.  A [defn] body is prefixed by the
       site of its call, so every call site of a [defn] is a distinct subtree;
     - [iter] is the iteration tuple: the running index of each enclosing zone
-      (outermost first, counted over the whole product, as in the study) and
+      (outermost first, counted over the whole product) and
       of each enclosing [fn] call (a closure counts its own calls; a [defn] or
       operator passed to [map] counts one per element).
     Two nodes of one graph instance never share a key.
@@ -36,7 +35,7 @@
     checked here ([ui/tile] holds 1-16 panels, split axis and ratio, settings
     ranges) and geometry inside them is a [Deferred (Geometry, id)] reference.
 
-    {2 Split evaluation (W2b)}
+    {2 Split evaluation}
 
     {!static} evaluates every term that does not depend on frame facts or a fold. A term that
     does becomes a {!residual}: the term with the environment it was
@@ -78,7 +77,6 @@ type ('f, 'r) payload = ('f, 'r) Value.t =
   | Residual of 'r
 
 type value = (fn, residual) payload
-
 and fn
 and residual
 and state
@@ -92,7 +90,72 @@ and node = {
   args : (string * value) list;
 }
 
-type live = Frame_input.t
+module Residual : sig
+  (** The compiler-facing residual boundary: inspect immutable checked terms,
+      bind captures and state to an execution, and invoke the reference walker
+      only as a leaf when compiled execution declines or fails. *)
+  type _ Effect.t +=
+    | Observe_kernel : residual -> unit Effect.t
+    | Kernel_value : residual -> value option Effect.t
+    | Bulk_static : residual -> value option Effect.t
+    | Bulk_approx : residual -> value option Effect.t
+
+  val handle : ?observe:(residual -> unit) -> ?kernel:(residual -> value option) ->
+    ?bulk:(residual -> value option) ->
+    ?bulk_approx:(residual -> value option) -> (unit -> 'a) -> 'a
+  (** Handle evaluator yield points for residual observation and large static
+      maps. The handler resumes the evaluator with a decision; no dispatcher is
+      stored in evaluator state. *)
+
+  val free_names : Workspace.term -> string list
+  (** Lexically free binding names, including nested function captures. *)
+  val with_bindings : residual -> term:Workspace.term -> (string * value) list -> residual
+  val bind_live : ?state:state -> ?elems:(string * value) list ->
+    ?resolve:(value -> (value, Diagnostic.t) result) -> residual -> live:Input.t ->
+    (unit, Diagnostic.t) result
+
+  val function_bindings : fn -> (string * value) list
+  val compiled_function : residual -> instance:int -> prefix:Workspace.path ->
+    zone:Workspace.path -> params:(Workspace.pattern * Ty.t option) list ->
+    body:Workspace.term -> bindings:(string * value) list -> fn
+  val function_id : fn -> int
+  val function_body : fn -> ((Workspace.pattern * Ty.t option) list * Workspace.term) option
+  val function_origin : fn -> (int * Workspace.path * Workspace.path) option
+  val function_name : fn -> string option
+
+  val residual_definition : residual -> string -> Workspace.graph option
+  val residual_graph : residual -> string -> Workspace.graph option
+  val graph_instance : residual -> string -> int option
+  type residual_view = {
+    term : Workspace.term;
+    bindings : (string * value) list;
+    site : Workspace.path;
+    owner : Workspace.path;
+    iter : int list;
+    instance : int;
+    prefix : Workspace.path;
+    previous : bool;
+    host : bool;
+    geometry : bool;
+  }
+  val residual_view : residual -> residual_view
+  val residual_id : residual -> int
+  val checkpoint : residual -> (unit -> unit)
+  val rerun : ?on_walk:(unit -> unit) -> residual -> (value, Diagnostic.t) result
+  (** Run the reference walker for this residual only, without offering it to
+      the compiled dispatcher again. *)
+  val state_read : residual -> instance:int -> path:Workspace.path -> iter:int list -> host:bool ->
+    init:(unit -> value) -> value
+  val state_peek : residual -> instance:int -> path:Workspace.path -> iter:int list -> host:bool -> value option
+  val state_write : residual -> instance:int -> path:Workspace.path -> iter:int list -> host:bool -> value -> value
+  val residual_ops : residual -> Op.t list
+  val eval_term : ?state:state -> ?elems:(string * value) list ->
+    ?resolve:(value -> (value, Diagnostic.t) result) -> ?on_walk:(unit -> unit) ->
+    ?kernel:(residual -> value option) -> residual -> Workspace.term ->
+    live:Input.t -> (value, Diagnostic.t) result
+end
+
+type live = Input.t
 
 type instance = {
   graph : string;
@@ -128,7 +191,7 @@ val static :
   ?record:bool -> ?inputs:(string * (string * value) list) list -> Workspace.t ->
   (t, Diagnostic.t) result
 (** Evaluate every graph once.  [inputs] overrides graph inputs by graph name
-    (the OCaml-visible interface, register O2).  The first error stops the
+    (the OCaml-visible interface).  The first error stops the
     run; its code is one of [E_ITER_BOUND] (a driven [range], [linspace],
     [concat] or zone over 4,096), [E_EVAL_BUDGET], [E_LIST_RANGE]
     ([first]/[last]/[nth]), [E_PATTERN] (a destructuring pattern longer than a
@@ -144,7 +207,8 @@ val fork_state : state -> state
 (** Copy the fold snapshot for pure worker reads; data is shared immutably. *)
 
 val state_stamp : state -> string
-(** Exact content fingerprint for a prepared frame's captured fold snapshot. *)
+(** Opaque cache epoch for a fold snapshot. Forks retain the epoch; writes and
+    resets get a fresh one, while rollback restores the prior epoch. *)
 
 val transaction : state -> (unit -> ('a, Diagnostic.t) result) -> ('a, Diagnostic.t) result
 (** Keep the previous fold snapshot when a group of evaluations fails. *)
@@ -181,47 +245,25 @@ val run :
     [time]: no [Residual] is left. *)
 
 val hash : float list -> float
-(** [value/rand]: the study's pure hash.  Each key [x] becomes
+(** [value/rand]: a pure hash. Each key [x] becomes
     [k = int32(floor(x * 1000003))]; from [h = 0x9e3779b9] each key does
     [h = imul(h xor k, 0x85ebca6b); h = h xor (h >>> 13); h = imul(h, 0xc2b2ae35);
-    h = h xor (h >>> 16)] (32-bit unsigned), and the result is
+    h = h xor (h >>> 16)] (32-bit unsigned, implemented by
+    {!Rays_math.Hash.float_sequence32}), and the result is
     [(h mod 1000000) / 1000000], greater than or equal to zero and less than one. *)
 
 val show : value -> string
-(** [str] formatting (register C2); a residual shows as [?]. *)
+(** [str] formatting; a residual shows as [?]. *)
 
 module Private : sig
-  val static_with_kernels :
+  val static_with_requests :
     ?budget:int ->
     ?record:bool -> ?inputs:(string * (string * value) list) list ->
-    ?observe:(residual -> unit) -> ?bulk:(residual -> value option) ->
-    ?bulk_approx:(residual -> value option) -> Workspace.t -> (t, Diagnostic.t) result
-  (** [budget] overrides the ordinary AST-step guard for checked pure parameter
-      normalization, whose accepted input size follows its encoded schema.
-      [bulk] may shorten a static packed [map] of more than 4,096 elements. The
-      walker evaluates the first 4,096 elements as usual, so their records, call
-      indices and failures are the ordinary ones; [bulk] is then offered the
-      map as a residual (the checked term and its captures) and may return the
-      whole packed array.
-      whole packed array. It is used only when its element kind and length are
-      the map's and its first 4,096 elements equal the walked ones bit for bit;
-      in every other case the walker evaluates the rest, so the result never
-      depends on the callback. [bulk_approx] is a device-side [bulk]: an array
-      of the map's kind and length within 1e-4 (relative plus absolute) of the walked elements is
-      taken, and a miss falls back to [bulk] and then the walker. A record inside the function is then kept for
-      the first 4,096 elements only. Cleared like [observe].
-
-      Ordinary static evaluation with an observational callback before each
-      actual entry into map, reduce, loop or array/sum, including static and
-      empty forms and unsupported signatures. Handles carry the exact checked
-      term, lexical captures, instance and iteration tuple; they have distinct
-      negative IDs, separate from returned residuals. Repeated entries are not
-      deduplicated; attempted specializations remain observed when the enclosing
-      static evaluation later defers, and untaken branches are not visited.
-      This is not exhaustive execution coverage. The callback must not
-      mutate values or turn compilation refusal into a language error. It is
-      cleared on evaluation exit and in live states, including capture adapters
-      and later forcing; ordinary residual IDs and evaluation remain unchanged. *)
+    Workspace.t -> (t, Diagnostic.t) result
+  (** Run the static evaluator with residual requests unhandled. Callers that
+      need kernel observation or bulk map specialization must install a
+      {!Residual.handle}; ordinary {!static} handles requests with the reference
+      walker. [budget] overrides the ordinary AST-step guard. *)
 
   val map_function : ?site:(int * Workspace.path * int list) -> ?path:Workspace.path ->
     signature:Ty.fn_signature -> fn -> value list -> (value, Diagnostic.t) result
@@ -229,125 +271,22 @@ module Private : sig
       body and captures as a genuine residual map for downstream compilation.
       [site] identifies the runtime instance; [path] identifies its authored producer. *)
 
-  val free_names : Workspace.term -> string list
-  (** Lexically free binding names, including nested function captures. *)
-
   val free_name_walks : unit -> int
   (** Number of memo misses, for the checked-term reuse regression. *)
 
-  val with_bindings : residual -> term:Workspace.term -> (string * value) list -> residual
-  (** Specialize a checked subterm with immutable captured bindings. Retains
-      its evaluation scope and owns a fresh identity and compiled cache. *)
-
-  val force_with_executor : ?state:state -> ?elems:(string * value) list ->
-    ?resolve:(value -> (value, Diagnostic.t) result) -> ?owner:unit ref ->
-    ?compiled:bool ->
-    ?strict:bool ->
-    execute:(residual -> live -> (value, Diagnostic.t) result option) ->
-    value -> live:live -> (value, Diagnostic.t) result
-  (** Dispatch supported packed subterms inside an evaluator-owned frame fold.
-      None retains the interpreter. The callback receives the current immutable
-      bindings; the evaluator still owns cell identity and the frame transaction.
-      [compiled:false] offers it only map, reduce and loop roots, not every forced residual.
-      [strict:true] propagates executor errors and refuses an unsupported
-      forced residual instead of interpreting it.
-      Reference forcing never invokes this callback. *)
-
-  val function_bindings : fn -> (string * value) list
-  (** Captured immutable inputs of a function value, for host data dependencies. *)
-
   val map_function_bindings : (value -> value) -> fn -> fn
   (** Replace immutable closure captures, preserving callable identity and scope. *)
-
-  val compiled_function : residual -> instance:int -> prefix:Workspace.path ->
-    zone:Workspace.path -> params:(Workspace.pattern * Ty.t option) list ->
-    body:Workspace.term -> bindings:(string * value) list -> fn
-  (** Materialize an already checked compiler closure with deferred arguments.
-      The compiler supplies its original authored scope and checked body. *)
 
   val remap_function_geometry : sources:(int * int) list -> fn -> fn
   (** Remap geometry IDs through closure and residual captures when a host moves
       a callable between plans. Function identity and authored scope stay intact. *)
 
-  val function_id : fn -> int
-  (** Immutable hash hint, not equality: specialized closures may share this id. *)
-
   val state_values : state -> value list
   (** Values retained by a forked snapshot, for host payload accounting. *)
-
-  val function_body : fn -> ((Workspace.pattern * Ty.t option) list * Workspace.term) option
-  (** Checked body of a local function; named definitions remain interpreted. *)
 
   val function_scope : fn -> (Workspace.path * int list) option
   (** Authored zone and enclosing iteration tuple of an instantiated local
       function, for a host supplying selected bulk-call probes. *)
-
-  val function_origin : fn -> (int * Workspace.path * Workspace.path) option
-  (** A closure's instance, runtime prefix and authored zone, for inlining. *)
-
-  val function_name : fn -> string option
-  (** The referenced declaration/operator name of a named callable. *)
-
-  val residual_definition : residual -> string -> Workspace.graph option
-  (** Read the immutable declaration in this residual's workspace. *)
-
-  val residual_graph : residual -> string -> Workspace.graph option
-  (** A graph declaration of the residual's workspace, for inlining a [ref]. *)
-
-  val graph_instance : residual -> string -> int option
-  (** The cached default instance of a graph, where a live [(ref name)] without
-      overrides runs; [None] runs in the referencing instance. *)
-
-  type residual_view = {
-    term : Workspace.term;
-    bindings : (string * value) list;
-    site : Workspace.path;
-    owner : Workspace.path;
-        (** Evaluator lexical base, excluding runtime prefix and route. It is
-            not always the checker's cx.path for anonymous input expressions. *)
-    iter : int list;
-    instance : int;
-    prefix : Workspace.path;
-    previous : bool;
-    host : bool;
-    geometry : bool;
-  }
-  val residual_view : residual -> residual_view
-  (** Immutable specialized term and captured values for downstream IR construction. *)
-
-  val residual_id : residual -> int
-  (** Stable within one specialized evaluation; equality across evaluations is physical. *)
-
-  val checkpoint : residual -> (unit -> unit)
-  (** Snapshot the residual's evaluation state; the returned function restores it. *)
-
-  val set_core : residual -> owner:unit ref ->
-    ?fast:(live -> (value, Diagnostic.t) result) -> (live -> (value, Diagnostic.t) result) -> unit
-  (** Keep the executor's prepared program on the residual: later forces whose
-      [~owner] (passed to {!force_with_executor}) is the same ref call it directly. It must be total, restore state and
-      rerun the walker on failure ({!checkpoint}, {!rerun}). [fast] must be stateless and
-      return a concrete result; failures reenter the normal evaluator and its diagnostics. *)
-
-  val rerun : residual -> (value, Diagnostic.t) result
-  (** The tree walker over this residual's own term, in its live evaluation and
-      without offering that term to the executor again: the diagnostic the
-      walker reports. Call after [checkpoint]'s restore. *)
-
-  val state_read : residual -> instance:int -> path:Workspace.path -> iter:int list -> host:bool ->
-    init:(unit -> value) -> value
-  (** The state slot keyed by the instance, [prefix @ zone] path and iteration
-      tuple: begin the logical frame, then its before-state, else [init ()],
-      checked as stored data. Shares the walker's keys, so [fork_state] and
-      [transaction] cover it. *)
-
-  val state_peek : residual -> instance:int -> path:Workspace.path -> iter:int list -> host:bool -> value option
-  (** The slot's pending write in this frame. *)
-
-  val state_write : residual -> instance:int -> path:Workspace.path -> iter:int list -> host:bool -> value -> value
-  (** Check [value] as stored data and make it the slot's pending write. *)
-
-  val residual_ops : residual -> Op.t list
-  (** The immutable operator extension list of the captured workspace. *)
 
   val force_reference : ?state:state -> ?elems:(string * value) list ->
     ?resolve:(value -> (value, Diagnostic.t) result) -> value -> live:live ->
@@ -355,14 +294,11 @@ module Private : sig
   (** Force through the tree walker, including captured residuals, with no executor.
       Suitable for probes and parity checks. *)
 
-  val eval_term : ?state:state -> ?elems:(string * value) list ->
-    ?resolve:(value -> (value, Diagnostic.t) result) -> residual -> Workspace.term ->
-    live:live -> (value, Diagnostic.t) result
-  (** Evaluate a checked subterm in the residual's captured scope, through the
-      reference walker. IR kernels use this once for their packed inputs. *)
+  val force_reference_observed : ?state:state -> ?elems:(string * value) list ->
+    ?resolve:(value -> (value, Diagnostic.t) result) -> on_walk:(unit -> unit) -> value -> live:live ->
+    (value, Diagnostic.t) result
 
   val map_probe : ?state:state -> ?resolve:(value -> (value, Diagnostic.t) result) ->
-    ?execute:(residual -> live -> (value, Diagnostic.t) result option) ->
     ?offset:int -> residual -> live:live ->
     (int * (int -> ((Workspace.path * (int list * value) list) list, Diagnostic.t) result), Diagnostic.t) result
   (** Materialize map inputs once, optionally through [execute], then reference-record only

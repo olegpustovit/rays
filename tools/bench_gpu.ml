@@ -80,7 +80,7 @@ let permutation () =
   bytes
 
 let measure gpu compile_s (_, pipeline) count =
-  let device = Rays_execution.gpu_device gpu and queue = Rays_execution.gpu_queue gpu in
+  let device = Renderer.gpu_device gpu and queue = Renderer.gpu_queue gpu in
   let width = count*3 and length = count*12 in
   let positions = Array.init width (fun index ->
     if index mod 3=0 then float (index/3 mod 1000)*.0.1 else if index mod 3=2 then float (index/3000)*.0.1 else 0.) in
@@ -131,13 +131,13 @@ let () =
   if Array.to_list Sys.argv = [Sys.argv.(0); "--msl"] then begin
     print_string source; exit 0
   end;
-  match Rays_execution.acquire_gpu () with
-  | Error error -> Format.eprintf "%a@." Rays_execution.pp_error error; exit 2
-  | Ok gpu -> Fun.protect ~finally:(fun () -> Rays_execution.release_gpu gpu) (fun () ->
-      if not (Ogpu.Caps.has (B.capabilities (Rays_execution.gpu_device gpu)) Compute_pipeline) then
+  match Renderer.acquire_gpu () with
+  | Error error -> Format.eprintf "%a@." Renderer.pp_error error; exit 2
+  | Ok gpu -> Fun.protect ~finally:(fun () -> Renderer.release_gpu gpu) (fun () ->
+      if not (Ogpu.Caps.has (B.capabilities (Renderer.gpu_device gpu)) Compute_pipeline) then
         print_endline "SKIP: backend lacks Compute_pipeline"
       else begin
-        let device = Rays_execution.gpu_device gpu in
+        let device = Renderer.gpu_device gpu in
         let compiles = Array.init 10 (fun salt ->
           let pipeline, seconds = timed (fun () -> compile ~salt:(salt+1) device) in destroy pipeline; seconds) in
         let compile_s = median compiles in

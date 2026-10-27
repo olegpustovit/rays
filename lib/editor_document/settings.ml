@@ -1,4 +1,3 @@
-module Param = Editor_core.Param
 
 type t = Settings : 'record Param.schema * 'record -> t
 

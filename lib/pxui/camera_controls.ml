@@ -95,7 +95,7 @@ module Camera_control = struct
       control, camera, List.map (fun filename -> { filename }) saves)
 
   let navigate ?control_area (_ : t) camera (frame : Frame.t) =
-    let area = Option.value control_area ~default:(0, 0, frame.width, frame.height) in
+    let area = Option.value control_area ~default:(0, 0, (fst frame.input.size), (snd frame.input.size)) in
     camera
     |> Easy_camera.with_control_area (Some area)
     |> Fun.flip Easy_camera.update frame

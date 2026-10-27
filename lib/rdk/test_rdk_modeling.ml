@@ -48,7 +48,7 @@ let modeling ~geometry ~positions ~selected ~triangle_geometry ~weighted_triangl
   let mirror_source = Geometry.with_attribute direction_attribute
       triangle_geometry |> get_ok in
   let mirrored domains = Parallel.run ~domains (fun () ->
-      Mirror_geometry.run ~grain:1 ~origin:Vec3.zero ~normal:Vec3.unit_x mirror_source
+      Mirror_geometry.run ~grain:1 ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x mirror_source
       |> get_ok) in
   let mirrored_one = mirrored 1 and mirrored_many = mirrored 4 in
   let mirror_topology_one = Topology.Private.view (Geometry.topology mirrored_one)
@@ -65,7 +65,7 @@ let modeling ~geometry ~positions ~selected ~triangle_geometry ~weighted_triangl
   let original_nx, _, _ = Packed.Float3.get mirror_normals 0
   and reflected_nx, _, _ = Packed.Float3.get mirror_normals 4 in
   if original_nx <> 1. || reflected_nx <> -1. then fail "mirror normal reflection";
-  let shared_box = Box_generator.box ~size:(Vec3.create 2. 2. 2.) () |> get_ok
+  let shared_box = Box_generator.box ~size:(Rays_math.Vec3.create 2. 2. 2.) () |> get_ok
       |> Fuse_grid.fuse ~tolerance:0. ~attributes:Fuse_reduce.Average_numeric |> get_ok in
   let shared_positions = Packed.Float3.Private.view (Geometry.positions shared_box) in
   let clip_weight = Attribute.create_owned ~name:"weight" ~owner:Attribute.Point
@@ -73,7 +73,7 @@ let modeling ~geometry ~positions ~selected ~triangle_geometry ~weighted_triangl
   let clip_source = Geometry.with_attribute clip_weight shared_box |> get_ok in
   let clipped domains = Parallel.run ~domains (fun () ->
       Plane_clip.clip ~grain:1 ~keep:Plane_clip.Above ~fill:true ~cap_group:"cap"
-        ~clipped_group:"cut" ~origin:Vec3.zero ~normal:Vec3.unit_x
+        ~clipped_group:"cut" ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x
         clip_source |> get_ok) in
   let clipped_one = clipped 1 and clipped_many = clipped 4 in
   let cap = Geometry.find_group ~owner:Group.Primitive "cap" clipped_one
@@ -107,8 +107,8 @@ let modeling ~geometry ~positions ~selected ~triangle_geometry ~weighted_triangl
       fail "clip point attribute interpolation"
   done;
   let split = Plane_clip.clip ~keep:Plane_clip.All ~split_connectivity:true
-      ~above_group:"above" ~below_group:"below" ~origin:Vec3.zero
-      ~normal:Vec3.unit_x clip_source |> get_ok in
+      ~above_group:"above" ~below_group:"below" ~origin:Rays_math.Vec3.zero
+      ~normal:Rays_math.Vec3.unit_x clip_source |> get_ok in
   let split_topology = Geometry.topology split
   and above = Geometry.find_group ~owner:Group.Primitive "above" split |> Option.get
   and below = Geometry.find_group ~owner:Group.Primitive "below" split |> Option.get in
@@ -129,8 +129,8 @@ let modeling ~geometry ~positions ~selected ~triangle_geometry ~weighted_triangl
         fail "clip split connectivity shared a plane point"
     done) below;
   let clipped_curve = Line_geometry.polyline [|(-1.,0.,0.); (0.,1.,0.); (1.,0.,0.)|]
-      |> get_ok |> Plane_clip.clip ~keep:Plane_clip.Above ~origin:Vec3.zero
-           ~normal:Vec3.unit_x |> get_ok in
+      |> get_ok |> Plane_clip.clip ~keep:Plane_clip.Above ~origin:Rays_math.Vec3.zero
+           ~normal:Rays_math.Vec3.unit_x |> get_ok in
   if Geometry.primitive_count clipped_curve <> 1
      || Geometry.point_count clipped_curve <> 2
      || Topology.primitive_kind (Geometry.topology clipped_curve) 0
@@ -141,7 +141,7 @@ let modeling ~geometry ~positions ~selected ~triangle_geometry ~weighted_triangl
       (Attribute.Int [|10; 20; 30|]) |> get_ok in
   let point_cloud = Geometry.with_attribute point_ids point_cloud |> get_ok in
   let clipped_points = Plane_clip.clip ~snapping_tolerance:0.001
-      ~origin:Vec3.zero ~normal:Vec3.unit_x point_cloud |> get_ok in
+      ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x point_cloud |> get_ok in
   let clipped_positions = Packed.Float3.Private.view (Geometry.positions clipped_points) in
   check (clipped_positions.x = [|0.;1.|]
       && Geometry.vertex_count clipped_points = 0
@@ -158,7 +158,7 @@ let modeling ~geometry ~positions ~selected ~triangle_geometry ~weighted_triangl
   let vertex_clip_source = Geometry.create ~positions:vertex_clip_positions
       ~topology:(Tb.freeze vertex_clip_topology)
       ~attributes:[vertex_u] () |> get_ok in
-  let vertex_clipped = Plane_clip.clip ~origin:Vec3.zero ~normal:Vec3.unit_x
+  let vertex_clipped = Plane_clip.clip ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x
       vertex_clip_source |> get_ok in
   let vertex_u = Geometry.find_attribute ~owner:Attribute.Vertex "u"
       vertex_clipped |> Option.get
@@ -173,7 +173,7 @@ let modeling ~geometry ~positions ~selected ~triangle_geometry ~weighted_triangl
   if List.sort Float.compare !plane_values <> [1.; 2.] then
     fail "clip vertex attribute interpolation";
   let closed_curve = Plane_generators.circle ~segments:16 ~radius:1. () |> get_ok
-      |> Plane_clip.clip ~origin:Vec3.zero ~normal:Vec3.unit_x |> get_ok in
+      |> Plane_clip.clip ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x |> get_ok in
   if Geometry.primitive_count closed_curve <> 1
      || Topology.primitive_kind (Geometry.topology closed_curve) 0
         <> Topology.Open_polyline then
@@ -190,29 +190,29 @@ let modeling ~geometry ~positions ~selected ~triangle_geometry ~weighted_triangl
       ~primitive_kinds:(Bytes.make 1 '\000') in
   let concave = Geometry.create ~positions:(Geometry.positions concave)
       ~topology:concave_polygon () |> get_ok in
-  let concave_clipped = Plane_clip.clip ~origin:Vec3.zero ~normal:Vec3.unit_y
+  let concave_clipped = Plane_clip.clip ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_y
       concave |> get_ok in
   if Geometry.primitive_count concave_clipped <> 2
      || Geometry.vertex_count concave_clipped <> 8 then
     fail "clip did not reconstruct disconnected concave half-plane fragments";
-  (match Plane_clip.clip ~split_connectivity:true ~origin:Vec3.zero
-      ~normal:Vec3.unit_x clip_source with
+  (match Plane_clip.clip ~split_connectivity:true ~origin:Rays_math.Vec3.zero
+      ~normal:Rays_math.Vec3.unit_x clip_source with
    | Error error when Error.code error = "invalid_geometry" -> ()
    | _ -> fail "clip accepted split connectivity outside keep-all mode");
-  (match Plane_clip.clip ~cap_group:"same" ~above_group:"same" ~origin:Vec3.zero
-      ~normal:Vec3.unit_x clip_source with
+  (match Plane_clip.clip ~cap_group:"same" ~above_group:"same" ~origin:Rays_math.Vec3.zero
+      ~normal:Rays_math.Vec3.unit_x clip_source with
    | Error error when Error.code error = "invalid_geometry" -> ()
    | _ -> fail "clip accepted duplicate output group names");
-  let huge_normal_clip = Plane_clip.clip ~origin:Vec3.zero
-      ~normal:(Vec3.create 1e300 0. 0.) clip_source |> get_ok
-  and unit_normal_clip = Plane_clip.clip ~origin:Vec3.zero ~normal:Vec3.unit_x
+  let huge_normal_clip = Plane_clip.clip ~origin:Rays_math.Vec3.zero
+      ~normal:(Rays_math.Vec3.create 1e300 0. 0.) clip_source |> get_ok
+  and unit_normal_clip = Plane_clip.clip ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x
       clip_source |> get_ok in
   if not (equal_positions huge_normal_clip unit_normal_clip) then
     fail "clip normal normalization overflow";
-  (match Plane_clip.clip ~origin:Vec3.zero ~normal:Vec3.zero clip_source with
+  (match Plane_clip.clip ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.zero clip_source with
    | Error error when Error.code error = "invalid_geometry" -> ()
    | _ -> fail "clip accepted a zero plane normal");
-  (match Plane_clip.clip ~fill:true ~origin:(Vec3.create 0.5 0. 0.) ~normal:Vec3.unit_x
+  (match Plane_clip.clip ~fill:true ~origin:(Rays_math.Vec3.create 0.5 0. 0.) ~normal:Rays_math.Vec3.unit_x
       triangle_geometry with
    | Error error when Error.code error = "invalid_geometry" -> ()
    | _ -> fail "clip filled an open polygon boundary");

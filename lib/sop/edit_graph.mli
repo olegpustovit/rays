@@ -26,7 +26,6 @@ type node_info = {
   dependencies : Context.Dependencies.t;
   inputs : int option array;
   has_parameters : bool;
-  bypass : bool;
 }
 
 val of_graph : Graph.t -> t
@@ -42,10 +41,8 @@ val node_slot_names : t -> node_id:int -> string list option
 (** Input names retained by the entry's factory, or canonical [in0], [in1], …
     for a graph imported from code. *)
 
-val is_bypassed : t -> node_id:int -> bool
-
 val node_factory_key : t -> node_id:int -> string option
-val node_factory_fields : t -> node_id:int -> Parameter.field_view list
+val node_factory_fields : t -> node_id:int -> Param.field_view list
 
 (** Compile the document root, or a specific display node. Disconnected slots,
     missing references, and cycles are reported without changing the document. *)
@@ -69,8 +66,8 @@ val replace_node : Node.t -> t -> (t, string) result
 val apply_parameters :
   t ->
   node_id:int ->
-  (string * Parameter.value) list ->
-  (t * Parameter.effects, string) result
+  (string * Param.value) list ->
+  (t * Param.effects, string) result
 
 (** Add a node. By default its existing node inputs are adopted when those ids
     already belong to the document; other slots start disconnected. *)
@@ -92,7 +89,7 @@ val factory :
   ?slots:string list ->
   ?input_types:string list ->
   ?keyword_inputs:string list ->
-  ?fields:Parameter.field_view list ->
+  ?fields:Param.field_view list ->
   key:string ->
   label:string ->
   category:string list ->
@@ -104,7 +101,7 @@ val factory_slots :
   ?slots:string list ->
   ?input_types:string list ->
   ?keyword_inputs:string list ->
-  ?fields:Parameter.field_view list ->
+  ?fields:Param.field_view list ->
   key:string ->
   label:string ->
   category:string list ->
@@ -115,7 +112,7 @@ val factory_key : factory -> string
 val factory_operation : factory -> string
 val factory_label : factory -> string
 val factory_category : factory -> string list
-val factory_fields : factory -> Parameter.field_view list
+val factory_fields : factory -> Param.field_view list
 val factory_facts : factory -> Node.facts
 (** Declaration at default parameters, computed once without cooking. Instance
     facts are rebuilt with the node's parameters and may select other names. *)

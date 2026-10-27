@@ -153,7 +153,7 @@ let check_count_modes () =
       && Geometry.primitive_count point_counts = 6)
     "Grid point-count resolution";
   let singleton = Plane_generators.grid ~counts:Plane_generators.Grid_point_counts
-      ~connectivity:Plane_generators.Grid_points ~center:(Vec3.create 1. 2. 3.)
+      ~connectivity:Plane_generators.Grid_points ~center:(Rays_math.Vec3.create 1. 2. 3.)
       ~uv_attribute:"uv" ~columns:1 ~rows:1 ~size:2. () |> get_ok in
   let point = positions singleton
   and uv = float2_attribute Attribute.Point "uv" singleton in
@@ -174,15 +174,15 @@ let check_validation () =
   expect_code "invalid_parameter"
     (Plane_generators.grid ~width:(-1.) ~columns:1 ~rows:1 ~size:1. ());
   expect_code "invalid_parameter"
-    (Plane_generators.grid ~center:(Vec3.create Float.nan 0. 0.)
+    (Plane_generators.grid ~center:(Rays_math.Vec3.create Float.nan 0. 0.)
        ~columns:1 ~rows:1 ~size:1. ());
   expect_code "invalid_parameter"
     (Plane_generators.grid ~orientation:(Plane_generators.Grid_axes {
-         horizontal=Vec3.zero; vertical=Vec3.unit_z })
+         horizontal=Rays_math.Vec3.zero; vertical=Rays_math.Vec3.unit_z })
        ~columns:1 ~rows:1 ~size:1. ());
   expect_code "invalid_parameter"
     (Plane_generators.grid ~orientation:(Plane_generators.Grid_axes {
-         horizontal=Vec3.unit_x; vertical=Vec3.unit_x })
+         horizontal=Rays_math.Vec3.unit_x; vertical=Rays_math.Vec3.unit_x })
        ~columns:1 ~rows:1 ~size:1. ());
   expect_code "invalid_parameter"
     (Plane_generators.grid ~uv_attribute:"P" ~columns:1 ~rows:1 ~size:1. ());
@@ -192,7 +192,7 @@ let check_validation () =
     (Plane_generators.grid ~counts:Plane_generators.Grid_point_counts ~connectivity:Plane_generators.Grid_points
        ~columns:max_int ~rows:2 ~size:1. ());
   expect_code "invalid_parameter"
-    (Plane_generators.grid ~center:(Vec3.create max_float 0. 0.) ~width:max_float
+    (Plane_generators.grid ~center:(Rays_math.Vec3.create max_float 0. 0.) ~width:max_float
        ~columns:1 ~rows:1 ~size:1. ());
   let cancelled = Cancel.create () in
   Cancel.cancel cancelled;
@@ -208,9 +208,9 @@ let check_parallel_exact () =
     let run domains = Parallel.run ~domains (fun () ->
       Plane_generators.grid ~grain:1024 ~connectivity
         ~orientation:(Plane_generators.Grid_axes {
-          horizontal=Vec3.create 1. 2. 0.5;
-          vertical=Vec3.create (-0.25) 0.75 2. })
-        ~center:(Vec3.create 3. (-2.) 5.) ~width:40. ~height:25.
+          horizontal=Rays_math.Vec3.create 1. 2. 0.5;
+          vertical=Rays_math.Vec3.create (-0.25) 0.75 2. })
+        ~center:(Rays_math.Vec3.create 3. (-2.) 5.) ~width:40. ~height:25.
         ~rotation:0.37 ~uv_attribute:"uv"
         ~columns:700 ~rows:500 ~size:1. () |> get_ok) in
     let one = run 1 and many = run 4 in

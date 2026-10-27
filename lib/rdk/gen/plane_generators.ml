@@ -10,14 +10,14 @@ type circle_orientation =
   | Circle_xy
   | Circle_xz
   | Circle_yz
-  | Circle_axes of { horizontal : Vec3.t; vertical : Vec3.t }
+  | Circle_axes of { horizontal : Rays_math.Vec3.t; vertical : Rays_math.Vec3.t }
 
 type grid_counts = Grid_divisions | Grid_point_counts
 type grid_orientation =
   | Grid_xy
   | Grid_xz
   | Grid_yz
-  | Grid_axes of { horizontal : Vec3.t; vertical : Vec3.t }
+  | Grid_axes of { horizontal : Rays_math.Vec3.t; vertical : Rays_math.Vec3.t }
 type grid_connectivity =
   | Grid_points
   | Grid_rows
@@ -35,7 +35,7 @@ let normal_attribute owner count nx ny nz =
   Attribute.create_key_owned (Attribute.normal ~owner) values |> Support.get_ok
 
 let normalize_plane_axis operation label value =
-  if not (Float.is_finite value.Vec3.x && Float.is_finite value.y && Float.is_finite value.z) then
+  if not (Float.is_finite value.Rays_math.Vec3.x && Float.is_finite value.y && Float.is_finite value.z) then
     Error (operation ^ ": " ^ label ^ " axis must be finite")
   else
     let scale = max (abs_float value.x)
@@ -47,15 +47,15 @@ let normalize_plane_axis operation label value =
       let length = sqrt ((x *. x) +. (y *. y) +. (z *. z)) in
       if not (Float.is_finite length) || length <= 1e-15 then
         Error (operation ^ ": " ^ label ^ " axis cannot be normalized")
-      else Ok (Vec3.create (x /. length) (y /. length) (z /. length))
+      else Ok (Rays_math.Vec3.create (x /. length) (y /. length) (z /. length))
 
 let plane_frame operation ~horizontal ~vertical rotation =
   Result.bind (normalize_plane_axis operation "horizontal" horizontal)
     (fun horizontal ->
   Result.bind (normalize_plane_axis operation "vertical" vertical)
     (fun vertical ->
-  let projection = Vec3.dot vertical horizontal in
-  let vertical = Vec3.create
+  let projection = Rays_math.Vec3.dot vertical horizontal in
+  let vertical = Rays_math.Vec3.create
       (vertical.x -. (projection *. horizontal.x))
       (vertical.y -. (projection *. horizontal.y))
       (vertical.z -. (projection *. horizontal.z)) in
@@ -64,36 +64,36 @@ let plane_frame operation ~horizontal ~vertical rotation =
     let horizontal, vertical = if rotation = 0. then horizontal, vertical
       else
         let cosine = cos rotation and sine = sin rotation in
-        Vec3.create
+        Rays_math.Vec3.create
           ((cosine *. horizontal.x) +. (sine *. vertical.x))
           ((cosine *. horizontal.y) +. (sine *. vertical.y))
           ((cosine *. horizontal.z) +. (sine *. vertical.z)),
-        Vec3.create
+        Rays_math.Vec3.create
           ((-.sine *. horizontal.x) +. (cosine *. vertical.x))
           ((-.sine *. horizontal.y) +. (cosine *. vertical.y))
           ((-.sine *. horizontal.z) +. (cosine *. vertical.z)) in
     Result.map (fun normal -> horizontal, vertical, normal)
       (normalize_plane_axis operation "normal"
-         (Vec3.cross vertical horizontal)))))
+         (Rays_math.Vec3.cross vertical horizontal)))))
 
 let grid_frame orientation rotation =
   let horizontal, vertical = match orientation with
-    | Grid_xy -> Vec3.unit_x, Vec3.neg Vec3.unit_y
-    | Grid_xz -> Vec3.unit_x, Vec3.unit_z
-    | Grid_yz -> Vec3.unit_z, Vec3.unit_y
+    | Grid_xy -> Rays_math.Vec3.unit_x, Rays_math.Vec3.neg Rays_math.Vec3.unit_y
+    | Grid_xz -> Rays_math.Vec3.unit_x, Rays_math.Vec3.unit_z
+    | Grid_yz -> Rays_math.Vec3.unit_z, Rays_math.Vec3.unit_y
     | Grid_axes { horizontal; vertical } -> horizontal, vertical in
   plane_frame "Rdk.Plane_generators.grid" ~horizontal ~vertical rotation
 
 let circle_frame orientation rotation =
   let horizontal, vertical = match orientation with
-    | Circle_xy -> Vec3.unit_x, Vec3.unit_y
-    | Circle_xz -> Vec3.unit_x, Vec3.unit_z
-    | Circle_yz -> Vec3.unit_y, Vec3.unit_z
+    | Circle_xy -> Rays_math.Vec3.unit_x, Rays_math.Vec3.unit_y
+    | Circle_xz -> Rays_math.Vec3.unit_x, Rays_math.Vec3.unit_z
+    | Circle_yz -> Rays_math.Vec3.unit_y, Rays_math.Vec3.unit_z
     | Circle_axes { horizontal; vertical } -> horizontal, vertical in
   plane_frame "Rdk.Plane_generators.circle" ~horizontal ~vertical rotation
 
 let circle ?cancel ?(grain = 16_384) ?(arc = Circle_closed)
-    ?(orientation = Circle_xz) ?(reverse = false) ?(center = Vec3.zero)
+    ?(orientation = Circle_xz) ?(reverse = false) ?(center = Rays_math.Vec3.zero)
     ?radius_x ?radius_y ?(rotation = 0.) ?(uniform_scale = 1.)
     ?(segments = 64) ~radius () =
   Error.guard ~operation:"circle" ~code:"invalid_parameter" @@ fun () ->
@@ -187,7 +187,7 @@ let circle ?cancel ?(grain = 16_384) ?(arc = Circle_closed)
 
 let grid ?cancel ?(grain = 16_384) ?(counts = Grid_divisions)
     ?(connectivity = Grid_triangles) ?(orientation = Grid_xz)
-    ?(center = Vec3.zero) ?width ?height ?(rotation = 0.) ?uv_attribute
+    ?(center = Rays_math.Vec3.zero) ?width ?height ?(rotation = 0.) ?uv_attribute
     ~columns ~rows ~size () =
   Error.guard ~operation:"grid" ~code:"invalid_parameter" @@ fun () ->
   let width = Option.value ~default:size width

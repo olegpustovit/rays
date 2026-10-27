@@ -94,7 +94,7 @@ let test_batch () =
 
 let test_domain_exactness () =
   let input = constraints 257 in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       Refinement.build ~grain:17 input |> get |> signature) in
   if run 1 <> run 4 then fail "batch face refinement differs by domain count"
 
@@ -113,7 +113,7 @@ let test_coplanar_batch () =
           "coplanar batch face has the wrong CDT cardinality"
     | _ -> fail "coplanar batch omitted an affected face"
   done;
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       Refinement.build ~coplanar ~grain:13 constraints |> get |> signature) in
   if run 1 <> run 4 then
     fail "coplanar batch refinement differs by domain count"

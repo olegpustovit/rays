@@ -5,13 +5,13 @@ open Rdk_test_support
 let near ?(epsilon = 1e-9) left right = abs_float (left -. right) <= epsilon
 
 (* v + 2w (q x v) + 2 q x (q x v) for a unit quaternion. *)
-let rotate (q : Quat.t) (v : Vec3.t) =
+let rotate (q : Rays_math.Quat.t) (v : Rays_math.Vec3.t) =
   let cross (ax, ay, az) (bx, by, bz) =
     (ay *. bz) -. (az *. by), (az *. bx) -. (ax *. bz), (ax *. by) -. (ay *. bx) in
   let u = q.x, q.y, q.z in
   let tx, ty, tz = cross u (v.x, v.y, v.z) in
   let cx, cy, cz = cross u (tx, ty, tz) in
-  Vec3.create (v.x +. 2. *. ((q.w *. tx) +. cx)) (v.y +. 2. *. ((q.w *. ty) +. cy))
+  Rays_math.Vec3.create (v.x +. 2. *. ((q.w *. tx) +. cx)) (v.y +. 2. *. ((q.w *. ty) +. cy))
     (v.z +. 2. *. ((q.w *. tz) +. cz))
 
 let float_attribute geometry name =
@@ -172,11 +172,11 @@ let check_frames_and_composition () =
       && near (dot y.x.(point) y.y.(point) y.z.(point)
         z.x.(point) z.y.(point) z.z.(point)) 0.)
       "Spiral frame is not orthonormal";
-    let orient = Quat.create ~x:q.x.(point) ~y:q.y.(point)
+    let orient = Rays_math.Quat.create ~x:q.x.(point) ~y:q.y.(point)
         ~z:q.z.(point) ~w:q.w.(point) in
-    let qx = rotate orient Vec3.unit_x
-    and qy = rotate orient Vec3.unit_y
-    and qz = rotate orient Vec3.unit_z in
+    let qx = rotate orient Rays_math.Vec3.unit_x
+    and qy = rotate orient Rays_math.Vec3.unit_y
+    and qz = rotate orient Rays_math.Vec3.unit_z in
     check (near qx.x x.x.(point) && near qx.y x.y.(point)
         && near qx.z x.z.(point) && near qy.x y.x.(point)
         && near qy.y y.y.(point) && near qy.z y.z.(point)
@@ -191,30 +191,30 @@ let check_frames_and_composition () =
     "Spiral curve failed Sweep composition"
 
 let check_transform_and_validation () =
-  let rotation = Vec3.create 0.3 0.5 0.7 and center = Vec3.create 3. (-2.) 5. in
-  let source = Vec3.create 2. 0. 0. in
+  let rotation = Rays_math.Vec3.create 0.3 0.5 0.7 and center = Rays_math.Vec3.create 3. (-2.) 5. in
+  let source = Rays_math.Vec3.create 2. 0. 0. in
   let first order = make
       ~radius:(Spiral.Spiral_archimedean_change {
         start_radius = 2.; increase_per_turn = 0. })
       ~rotation ~rotation_order:order ~center
       ~divisions:(Spiral.Spiral_divisions_per_curve 2) () |> positions
-      |> fun p -> Vec3.create p.x.(0) p.y.(0) p.z.(0) in
+      |> fun p -> Rays_math.Vec3.create p.x.(0) p.y.(0) p.z.(0) in
   let cases = [
-    Spiral.Spiral_xyz, Mat4.mul (Mat4.rotation_z rotation.z)
-      (Mat4.mul (Mat4.rotation_y rotation.y) (Mat4.rotation_x rotation.x));
-    Spiral.Spiral_xzy, Mat4.mul (Mat4.rotation_y rotation.y)
-      (Mat4.mul (Mat4.rotation_z rotation.z) (Mat4.rotation_x rotation.x));
-    Spiral.Spiral_yxz, Mat4.mul (Mat4.rotation_z rotation.z)
-      (Mat4.mul (Mat4.rotation_x rotation.x) (Mat4.rotation_y rotation.y));
-    Spiral.Spiral_yzx, Mat4.mul (Mat4.rotation_x rotation.x)
-      (Mat4.mul (Mat4.rotation_z rotation.z) (Mat4.rotation_y rotation.y));
-    Spiral.Spiral_zxy, Mat4.mul (Mat4.rotation_y rotation.y)
-      (Mat4.mul (Mat4.rotation_x rotation.x) (Mat4.rotation_z rotation.z));
-    Spiral.Spiral_zyx, Mat4.mul (Mat4.rotation_x rotation.x)
-      (Mat4.mul (Mat4.rotation_y rotation.y) (Mat4.rotation_z rotation.z));
+    Spiral.Spiral_xyz, Rays_math.Mat4.mul (Rays_math.Mat4.rotation_z rotation.z)
+      (Rays_math.Mat4.mul (Rays_math.Mat4.rotation_y rotation.y) (Rays_math.Mat4.rotation_x rotation.x));
+    Spiral.Spiral_xzy, Rays_math.Mat4.mul (Rays_math.Mat4.rotation_y rotation.y)
+      (Rays_math.Mat4.mul (Rays_math.Mat4.rotation_z rotation.z) (Rays_math.Mat4.rotation_x rotation.x));
+    Spiral.Spiral_yxz, Rays_math.Mat4.mul (Rays_math.Mat4.rotation_z rotation.z)
+      (Rays_math.Mat4.mul (Rays_math.Mat4.rotation_x rotation.x) (Rays_math.Mat4.rotation_y rotation.y));
+    Spiral.Spiral_yzx, Rays_math.Mat4.mul (Rays_math.Mat4.rotation_x rotation.x)
+      (Rays_math.Mat4.mul (Rays_math.Mat4.rotation_z rotation.z) (Rays_math.Mat4.rotation_y rotation.y));
+    Spiral.Spiral_zxy, Rays_math.Mat4.mul (Rays_math.Mat4.rotation_y rotation.y)
+      (Rays_math.Mat4.mul (Rays_math.Mat4.rotation_x rotation.x) (Rays_math.Mat4.rotation_z rotation.z));
+    Spiral.Spiral_zyx, Rays_math.Mat4.mul (Rays_math.Mat4.rotation_x rotation.x)
+      (Rays_math.Mat4.mul (Rays_math.Mat4.rotation_y rotation.y) (Rays_math.Mat4.rotation_z rotation.z));
   ] in
   List.iter (fun (order, matrix) ->
-    let expected = Vec3.add (Mat4.transform_point matrix source) center
+    let expected = Rays_math.Vec3.add (Rays_math.Mat4.transform_point matrix source) center
     and actual = first order in
     check (near actual.x expected.x && near actual.y expected.y
         && near actual.z expected.z) "Spiral Euler rotation order") cases;
@@ -249,14 +249,14 @@ let check_transform_and_validation () =
     (run ~divisions:(Spiral.Spiral_divisions_per_curve 0) ());
   expect_code "invalid_parameter" (run ~spiral_count:0 ());
   expect_code "invalid_parameter"
-    (run ~orientation:(Spiral.Spiral_axis Vec3.zero) ());
+    (run ~orientation:(Spiral.Spiral_axis Rays_math.Vec3.zero) ());
   expect_code "invalid_parameter" (run ~height_ramp:[0.2, 1.; 1., 1.] ());
   expect_code "invalid_parameter" (run ~radius_ramp:[0., 1.; 0., 2.] ());
   expect_code "invalid_parameter" (run ~angle_attribute:"P" ());
   expect_code "invalid_parameter"
     (run ~angle_attribute:"same" ~distance_attribute:"same" ());
   expect_code "invalid_parameter" (run ~radius_scale:max_float
-      ~center:(Vec3.create max_float 0. 0.) ());
+      ~center:(Rays_math.Vec3.create max_float 0. 0.) ());
   expect_code "invalid_parameter" (run ~uniform_angle:false
       ~extent:(Spiral.Spiral_turns { turns = 1.; height = 0. })
       ~radius_ramp:[0.5, 0.] ~tangent_attribute:"tangent" ());
@@ -275,9 +275,9 @@ let check_parallel_exact () =
       ~direction:Spiral.Spiral_clockwise ~start_angle:(-0.7)
       ~divisions:(Spiral.Spiral_divisions_per_curve 20_000)
       ~uniform_angle:false ~spiral_count:5
-      ~orientation:(Spiral.Spiral_axis (Vec3.create 1. 2. 3.))
-      ~center:(Vec3.create 3. (-2.) 5.)
-      ~rotation:(Vec3.create 0.3 0.5 0.7)
+      ~orientation:(Spiral.Spiral_axis (Rays_math.Vec3.create 1. 2. 3.))
+      ~center:(Rays_math.Vec3.create 3. (-2.) 5.)
+      ~rotation:(Rays_math.Vec3.create 0.3 0.5 0.7)
       ~rotation_order:Spiral.Spiral_yzx ~uniform_scale:1.2
       ~angle_attribute:"angle" ~x_axis_attribute:"xaxis"
       ~y_axis_attribute:"yaxis" ~tangent_attribute:"tangent"

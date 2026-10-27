@@ -2,7 +2,11 @@ type scenario = Basic | Pxui_like | Canvas_offscreen | Scene3_builtin
 
 let get = function
   | Ok value -> value
-  | Error error -> failwith (Ogpu.Error.to_string error)
+  | Error error -> failwith (Format.asprintf "%a" Renderer.pp_error error)
+
+let create width height =
+  Renderer.create {Renderer.default_configuration with logical_width=width;logical_height=height;
+    drawable_width=width;drawable_height=height}
 
 let live_handles = snd (Ogpu.Impl.create_driver ())
 
@@ -84,32 +88,30 @@ let draws scenario extent =
         depth_write = false;
         depth_load = Ogpu.Render_pass.Clear;
         depth_clear = 1.;
-        transform_uniforms = None;
-        stencil_state = None;
-        stencil_load = Ogpu.Render_pass.Clear;
-        stencil_clear = 0 } })
+        transform_uniforms = None} })
 
 let check_pixels extent bytes =
   if Bytes.length bytes <> extent * extent * 4 then failwith "native capture size drift";
   Digest.to_hex (Digest.bytes bytes)
 
 let run scenario =
-  let runtime = get (Runtime.create ~width:4 ~height:4 ()) in
-  let initial_facts=Runtime.frame_facts runtime in
+  let runtime = get (create 4 4) in
+  let initial_facts=get(Runtime.presentation_facts (Renderer.Private.runtime runtime))in
   let clear=(0.,0.,0.,0.)in
   let checkpoints = ref [] in
   for frame = 1 to 600 do
-    ignore (get (Runtime.render ~clear runtime (draws scenario 4)));
+    let draws=List.map(Renderer.prepared_draw ~family:Renderer.Scene2)(draws scenario 4)in
+    ignore (get (Renderer.draw ~clear runtime draws));
     if List.mem frame [ 1; 2; 60; 600 ] then
-      checkpoints := (frame, check_pixels initial_facts.drawable_width (get (Runtime.read_pixels runtime ~bytes_per_row:(initial_facts.drawable_width*4)))) :: !checkpoints
+      checkpoints := (frame, check_pixels initial_facts.drawable_width (get (Renderer.read_pixels runtime ~bytes_per_row:(initial_facts.drawable_width*4)))) :: !checkpoints
   done;
-  get (Runtime.resize runtime ~width:8 ~height:8);
-  let resized_facts=Runtime.frame_facts runtime in
-  ignore (get (Runtime.render ~clear runtime (draws scenario 8)));
-  let resized_hash = check_pixels resized_facts.drawable_width (get (Runtime.read_pixels runtime ~bytes_per_row:(resized_facts.drawable_width*4))) in
-  let live_stats=Runtime.stats runtime in
-  get (Runtime.destroy runtime);
-  let dead_stats=Runtime.stats runtime in
+  get (Runtime.resize (Renderer.Private.runtime runtime) ~width:8 ~height:8);
+  let resized_facts=get(Runtime.presentation_facts (Renderer.Private.runtime runtime))in
+  ignore (get (Renderer.draw ~clear runtime (List.map(Renderer.prepared_draw ~family:Renderer.Scene2)(draws scenario 8))));
+  let resized_hash = check_pixels resized_facts.drawable_width (get (Renderer.read_pixels runtime ~bytes_per_row:(resized_facts.drawable_width*4))) in
+  let live_stats=get(Renderer.stats runtime)in
+  get (Renderer.destroy runtime);
+  let dead_stats=get(Renderer.stats runtime)in
   let expected extent = match frozen_software_hash scenario ~extent with
     | Some hash -> hash
     | None -> failwith (Printf.sprintf "native qualification %s: no frozen capture for %d pixels (measured %s resized=%s)"
@@ -130,7 +132,7 @@ let run scenario =
     "pipeline_cache_entries_live", `Int live_stats.pipeline_cache_entries;
     "pipeline_cache_entries_after_destroy", `Int dead_stats.pipeline_cache_entries;
     "initial_logical_drawable", `List[`Int initial_facts.logical_width;`Int initial_facts.logical_height;`Int initial_facts.drawable_width;`Int initial_facts.drawable_height];
-    "initial_pixel_scale", `List[`Float initial_facts.pixel_scale_x;`Float initial_facts.pixel_scale_y];
+    "initial_pixel_scale", `List[`Float initial_facts.pixel_density;`Float initial_facts.pixel_density];
     "frozen_software_hash", `String (expected initial_facts.drawable_width);
     "native_matches_frozen_software", `Bool (native_hash = expected initial_facts.drawable_width);
     "checkpoint_hashes", `List (List.rev_map (fun (frame, hash) -> `List [ `Int frame; `String hash ]) !checkpoints);
@@ -160,10 +162,11 @@ let () =
   ignore(Runtime_input_sdl3.push input(Sdl3.Event.Mouse_motion{x=3.25;y=4.5;dx=0.;dy=0.}));
   if (Runtime_input.snapshot input).pointer<>(3.25,4.5)then failwith"SDL3 logical pointer was double-scaled";
   let before = live_handles () and rss_before = rss_kib () in
-  match Runtime.create ~width:1 ~height:1 () with
-  | Error error -> failwith ("runtime-next native qualification create failed: " ^ Ogpu.Error.to_string error)
+  match create 1 1 with
+  | Error error -> failwith ("runtime-next native qualification create failed: " ^
+      Format.asprintf "%a" Renderer.pp_error error)
   | Ok probe ->
-      get (Runtime.destroy probe);
+      get (Renderer.destroy probe);
       let rss_checkpoints = ref [] in
       let scenarios = List.map (fun scenario -> let result = run scenario in Gc.full_major(); rss_checkpoints := rss_kib () :: !rss_checkpoints; result)
         [ Basic; Pxui_like; Canvas_offscreen; Scene3_builtin ] in
@@ -173,12 +176,12 @@ let () =
          then measure a settled sequence rather than treating allocator warm-up
          as a leak. *)
       for _ = 1 to 4 do
-        let runtime = get (Runtime.create ~width:2 ~height:2 ()) in
-        get (Runtime.destroy runtime);
+        let runtime = get (create 2 2) in
+        get (Renderer.destroy runtime);
         ignore (live_handles ());
         Gc.full_major ()
       done;
-      let teardown_rss=Array.init 72(fun _->let runtime=get(Runtime.create~width:2~height:2())in get(Runtime.destroy runtime);ignore(live_handles());Gc.full_major();(rss_kib(),footprint_kib()))in
+      let teardown_rss=Array.init 72(fun _->let runtime=get(create 2 2)in get(Renderer.destroy runtime);ignore(live_handles());Gc.full_major();(rss_kib(),footprint_kib()))in
       let teardown_footprint=Array.map snd teardown_rss and teardown_rss=Array.map fst teardown_rss in
             let teardown_min=Array.fold_left min max_int teardown_rss and teardown_max=Array.fold_left max 0 teardown_rss in
       (* Freed GPU memory is returned lazily, in steps (the footprint falls by

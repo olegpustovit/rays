@@ -7,8 +7,8 @@
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { PArray, TextArray } from '../runtime/prims.js';
-import { eventRecord } from '../runtime/runtime.js';
+import { PArray, TextArray } from '../../../lib/web_export/runtime/prims.js';
+import { eventRecord } from '../../../lib/web_export/runtime/runtime.js';
 import { makeRt } from './rt_shim.mjs';
 
 const hex = s => Array.from(new TextEncoder().encode(s), b => b.toString(16).padStart(2, '0')).join('');
@@ -41,7 +41,7 @@ function marks(table) {
         if (e.kind === 'line') return `${head} ${attr(e.position)} ${attr(e.end)} ${attr(e.stroke, 'i')} ${attr(e.stroke_width, 'f')}`;
         return `${head} ${attr(e.position)} i:${e.fill}`;
       }
-      case 'geometry': return 'G';
+      case 'geometry': return `G i:${e.color} ${Array.from(e.vertices, f).join(' ')} | ${Array.from(e.indices, String).join(' ')}`;
       case 'image': return `I i:${e.resource} i:${e.x} i:${e.y} ${f(e.scale)} ${f(e.angle)}`;
       case 'text': return `T i:${e.x} i:${e.y} i:${e.size} i:${e.color} t:${hex(e.text)}`;
       case 'push_transform': return `P ${[e.xx, e.xy, e.yx, e.yy, e.tx, e.ty].map(f).join(' ')}`;

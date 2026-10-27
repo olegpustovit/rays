@@ -4,7 +4,7 @@ module E = Flow.Eval
 module G = Rdk.Geometry
 module T = Rdk.Topology
 let ok = function Ok value -> value | Error message -> failwith message
-let flow_ok = function Ok value -> value | Error d -> failwith (Flow.Diagnostic.to_string d)
+let flow_ok = function Ok value -> value | Error d -> failwith (Diagnostic.to_string d)
 let ok_error = function Ok value -> value | Error e -> failwith (Rdk.Error.to_string e)
 let ints a = E.Int_array (Array.copy a)
 
@@ -29,7 +29,7 @@ let evaluate geometry decls inputs body =
   let forms = Flow.Syntax.parse source |> flow_ok in
   let checked = match Flow.Workspace.check ~ops:Flow_sop.Operators.all {Flow.Check.version=1;kinds=[]} forms with
     | Some checked, [] -> checked
-    | _, ds -> failwith (String.concat "; " (List.map Flow.Diagnostic.to_string ds)) in
+    | _, ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds)) in
   let value = Flow.Eval.static ~record:true
       ~inputs:["g",("geo",E.Deferred (Flow.Ty.geometry,7))::inputs] checked
     |> flow_ok |> fun evaluation -> List.assoc ["g";"tested"] evaluation.records |> List.hd |> snd in
@@ -39,15 +39,15 @@ let evaluate geometry decls inputs body =
    and eight domains. *)
 let agree ?(decls="") ?(inputs=[]) geometry body expected =
   let value, resolve = evaluate geometry decls inputs body in
-  let live = Frame_input.at_time 0.25 in
+  let live = Input.at_time 0.25 in
   let core = Flow_ir.Executor.compile ~strict:true value |> flow_ok in
-  List.iter (fun domains -> Rays_math.Parallel.run ~domains (fun () ->
+  List.iter (fun domains -> Parallel.run ~domains (fun () ->
     assert (flow_ok (E.Private.force_reference ~resolve value ~live) = expected);
     assert (flow_ok (Flow_ir.Executor.force ~strict:true ~resolve core ~live) = expected))) [1;8]
 
 let refused ?(decls="") ?(inputs=[]) geometry body code =
   let value, resolve = evaluate geometry decls inputs body in
-  match E.Private.force_reference ~resolve value ~live:(Frame_input.at_time 0.) with
+  match E.Private.force_reference ~resolve value ~live:(Input.at_time 0.) with
   | Error d -> assert (d.code = code)
   | Ok _ -> failwith ("expected " ^ code)
 

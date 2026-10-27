@@ -392,7 +392,7 @@ let verify_extracted_contacts ?cancel ~grain positions topology geometry =
       let candidate_count = Array.length first_candidates in
       let ranges = (candidate_count + grain - 1) / grain in
       let failures = Array.make ranges (-1) and failure_kinds = Bytes.make ranges '\000' in
-      if ranges > 0 then Rays_math.Parallel.for_ ~chunk_size:1 ~start:0
+      if ranges > 0 then Parallel.for_ ~chunk_size:1 ~start:0
           ~finish:(ranges - 1) (fun range ->
         let scratch = Array.make 4 0 in
         let first = range * grain
@@ -505,7 +505,7 @@ let verify_extracted_orientations ?cancel ~grain ancestry geometry =
     let source = Boolean_constraints.Private.source constraints in
     let ranges = (primitives + grain - 1) / grain in
     let failures = Array.make ranges (-1) in
-    if ranges > 0 then Rays_math.Parallel.for_ ~chunk_size:1 ~start:0
+    if ranges > 0 then Parallel.for_ ~chunk_size:1 ~start:0
         ~finish:(ranges - 1)
         (fun range ->
       let first = range * grain and last = min primitives ((range + 1) * grain) in
@@ -1530,7 +1530,7 @@ let split_seam_points ?cancel ~grain cleanup =
         ~primitive_offsets:(Array.copy topology.primitive_offsets)
         ~primitive_kinds:(Bytes.copy topology.primitive_kinds) in
     let source_positions = Packed.Float3.Private.view (Geometry.positions geometry) in
-    let select source = Rays_math.Parallel.init_array ~grain output_points (fun output ->
+    let select source = Parallel.init_array ~grain output_points (fun output ->
         if output land 4095 = 0 then Cancel.check_opt cancel;
         source.(point_map.(output))) in
     let positions = Packed.Float3.Private.of_owned_exn

@@ -3,7 +3,7 @@ open Rdk_test_support
 module E = Flow.Eval
 module L = Flow_sop.Lower
 module Edit = Sop.Edit_graph
-let flow = function Ok x->x|Error d->failwith(Flow.Diagnostic.to_string d)
+let flow = function Ok x->x|Error d->failwith(Diagnostic.to_string d)
 let parse s=Flow.Syntax.parse s |>flow
 let words=[|0L;Int64.min_int;1L;0x7ff0000000000000L;0xfff0000000000000L;
   0x7ff8000000000011L;0x7ff8000000000022L|]
@@ -81,7 +81,7 @@ let run ?(domains=1) ?(grain=97) ?cancel node=
   Fun.protect ~finally:(fun()->Sop.Session.close session)(fun()->
     Sop.Session.cook session ~context:(Sop.Context.create ~domains ~grain ?cancel ()|>get_string_ok) node)
 let geometry=function Ok(o:Sop.Session.output)->Sop.Payload.geometry o.payload |>Result.get_ok
-  |Error d->failwith(Sop.Diagnostic.error_to_string d)
+  |Error d->failwith(Diagnostic.error_to_string d)
 let args p v prim offsets values policy=["points",E.Int_array p;"vertices",E.Int_array v;
   "primitives",E.Int_array prim;"positions",E.Text policy;
   "edge_map",E.Record["offsets",E.Int_array offsets;"values",E.Int_array values]]
@@ -237,7 +237,7 @@ let ()=
   let catalog=Flow_sop.Catalog.of_factories ~version:1 factories|>flow in
   let forms=parse(source_text "") in
   let checker=Flow_sop.Catalog.check_workspace ~ops:Flow_sop.Operators.all in
-  let checked=match checker catalog forms with Some checked,ds when not(List.exists(fun(d:Flow.Diagnostic.t)->d.severity=Flow.Diagnostic.Error)ds)->checked
+  let checked=match checker catalog forms with Some checked,ds when not(List.exists(fun(d:Diagnostic.t)->d.severity=Diagnostic.Error_severity)ds)->checked
     |_->fail "remap projection did not check" in
   let projection=Flow_graph.Projection.of_graph catalog checked "g" in
   check(List.exists(fun(n:Flow_graph.Projection.node)->n.head="sop/remap")projection.nodes)"remap has no graph card";
@@ -326,7 +326,7 @@ let ()=
 let ()=
   (* A real failed child remains the first failure, with its diagnostic envelope
      and provenance unchanged; remap does not recast it as a mapping error. *)
-  let child=Sop.Diagnostic.error ~cause:"raw child cause" ~hints:["keep this hint"]
+  let child=Diagnostic.error ~cause:"raw child cause" ~hints:["keep this hint"]
     ~code:"E_CHILD" "child failed" in
   let bad=Sop.Node.Private.make_geometry ~label:"Child" ~operation:"test.remap_child"
     ~version:1 ~parameters:"" ~cook_mode:Sop.Node.Generator
@@ -339,7 +339,7 @@ let ()=
     |Ok _->fail "remap swallowed child error"
     |Error diagnostic->check(diagnostic.code=child.code && diagnostic.message=child.message
        && diagnostic.cause=child.cause && diagnostic.hints=child.hints
-       && List.exists(fun(trace:Sop.Diagnostic.trace)->trace.operation="test.remap_child")diagnostic.trace)
+       && List.exists(fun(trace:Diagnostic.trace)->trace.operation="test.remap_child")diagnostic.trace)
        "remap changed a failed child diagnostic") [1;4;8]
 
 let ()=
@@ -573,7 +573,7 @@ let () =
     |Ok node->(match run node with Error _->() |Ok _->fail "non-finite weight accepted"))
     [Float.nan;Float.infinity];
   List.iter(fun text->match Flow.Syntax.parse text with
-    |Error d->failwith(Flow.Diagnostic.to_string d)
+    |Error d->failwith(Diagnostic.to_string d)
     |Ok forms->
       let factories=factory "src" src::factory "dst" dst::Sop_catalog.Editor.factories in
       check(Result.is_error(L.workspace ~factories forms)) "malformed weighted remap lowered")

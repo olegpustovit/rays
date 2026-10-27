@@ -1,19 +1,19 @@
 module E = Flow.Eval
 let () = Region_snapshot.start ()
 module I = Flow_ir
-let ok = function Ok x -> x | Error d -> failwith (Flow.Diagnostic.to_string d)
+let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let checked ?(ops = []) body =
   let text = "(workspace w (graph g :context value (let* [tested " ^ body ^ "] 0.0)))" in
   let forms = ok (Flow.Syntax.parse text) in
   match Flow.Workspace.check ~ops {Flow.Check.version = 1; kinds = []} forms with
     | Some w, [] -> w
-    | _, ds -> failwith (text ^ "\n" ^ String.concat "; " (List.map Flow.Diagnostic.to_string ds))
+    | _, ds -> failwith (text ^ "\n" ^ String.concat "; " (List.map Diagnostic.to_string ds))
 let recorded ?ops body =
   let evaluation = ok (E.static ~record:true (checked ?ops body)) in
   List.assoc ["g"; "tested"] evaluation.records |> List.hd |> snd
 let same a b = match a, b with
   | Ok a, Ok b -> Marshal.to_string a [Marshal.No_sharing] = Marshal.to_string b [Marshal.No_sharing]
-  | Error a, Error b -> Flow.Diagnostic.to_string a = Flow.Diagnostic.to_string b
+  | Error a, Error b -> Diagnostic.to_string a = Diagnostic.to_string b
   | _ -> false
 let () =
   let trace = !I.Packed.Private.trace in
@@ -29,24 +29,24 @@ let () =
           (if (int/lt index 0)
             (error \"E_UNTAKEN\" \"Inactive guarded instruction ran.\")
             [-0.0 0.0 x (- 0.0 x)])))) (array/range 32769 :type int))" in
-    let region = I.Packed.to_region packed in
-    let nested = ok (Result.map_error List.hd (I.Packed.of_region
-      {region with code = Array.map (function
+    let region = packed in
+    let nested = ok (Result.map_error List.hd (I.Core.Region.rebuild region ~code:
+      (Array.map (function
         | I.Core.Region.Guarded (first :: (_ :: _ as rest), body) ->
             I.Core.Region.Guarded ([first], Guarded (rest, body))
-        | instruction -> instruction) region.code})) in
+        | instruction -> instruction) region.code) ())) in
     List.iter (fun time ->
-      let live = Frame_input.at_time time in
+      let live = Input.at_time time in
       let expected = I.Packed.reference packed ~live in
-      List.iter (fun domains -> Rays_math.Parallel.run ~domains (fun () ->
+      List.iter (fun domains -> Parallel.run ~domains (fun () ->
         List.iter (fun program -> assert (same
           (I.Packed.force ~strict:true program ~live) expected)) [packed; nested]))
         [1;4;8]) [0.;0.25;1024.5];
     print_endline "Guard reuse: changing blocks, nested/truncated spans, checked projections and untaken failure match reference at one/four/eight domains")
-let has_cpu p = Array.exists (fun (n : I.node) -> n.tier = Cpu_kernel) (I.Executor.graph p).nodes
-let stages p = Array.fold_left (fun count (n : I.node) -> match n.kind with
-  | Kernel {body = Packed_map p; _} -> max count (I.Packed.stage_count p) | _ -> count)
-  0 (I.Executor.graph p).nodes
+let has_cpu p = Option.fold ~none:false ~some:(fun packed ->
+  I.Cost.packed ~count:(Option.value ~default:0 (I.Packed.static_count packed)) = I.Cpu_kernel)
+  (I.Executor.packed_root p)
+let stages p = Option.fold ~none:0 ~some:I.Packed.stage_count (I.Executor.packed_root p)
 let compile ?fusion residual term =
   let legacy = I.Packed.compile ?fusion residual term in
   (match legacy, I.Packed.compile_result ?fusion residual term with
@@ -75,20 +75,20 @@ let () =
        else "(for [index (array/range %d :type int) component (array/range %d)] (+ component t))")
       count width) in
     if float_product then begin
-      let region=I.Packed.to_region packed in
+      let region=packed in
       assert(region.iteration=I.Core.Region.Product);
       assert(Array.for_all(fun(_,term)->term.Flow.Workspace.ty=Flow.Ty.Array Flow.Ty.Float)region.sources);
       assert(Array.for_all(function
         |I.Core.Region.Input _|Const _|Frame _|Binary _->true|_->false)region.code)
     end;
-    let live = Frame_input.at_time (-0.25) in
+    let live = Input.at_time (-0.25) in
     let row = Array.init width (fun i -> float i -. 0.25) in
     let native () =
       if integer then E.Int_array(Array.init count(fun i->i*width)) else
       let data = Array.make (count * width) 0. in
       for i = 0 to count - 1 do Array.blit row 0 data (i * width) width done;
       E.Float_array data in
-    List.iter (fun domains -> Rays_math.Parallel.run ~domains (fun () ->
+    List.iter (fun domains -> Parallel.run ~domains (fun () ->
       let actual = ok (I.Packed.force ~strict:true packed ~live) in
       assert (same (Ok actual) (Ok (native ())));
       let measure f =
@@ -114,8 +114,8 @@ let () =
       "(map (fn [x] (if (< (mod x 2.0) 1.0)\n\
          (if (< (mod x 4.0) 1.0) (+ (sin x) t) (- (cos x) t))\n\
          (+ (* x 0.5) t))) (array/range %d))" count) in
-    List.iter (fun domains -> Rays_math.Parallel.run ~domains (fun () ->
-      let live = Frame_input.at_time 0.25 in
+    List.iter (fun domains -> Parallel.run ~domains (fun () ->
+      let live = Input.at_time 0.25 in
       ignore (ok (I.Packed.force ~strict:true packed ~live));
       let trials = Array.init 3 (fun _ ->
         Gc.full_major ();
@@ -150,11 +150,11 @@ let () =
   List.iter(fun body->
     let value=recorded body in
     let residual=match value with E.Residual residual->residual|_->assert false in
-    let packed=Option.get(I.Packed.compile residual (E.Private.residual_view residual).term) in
+    let packed=Option.get(I.Packed.compile residual (E.Residual.residual_view residual).term) in
     List.iter(fun frame->
-      let live={(Frame_input.at_time 0.25)with frame} in
+      let live={(Input.at_time 0.25)with frame} in
       let expected=E.Private.force_reference value ~live in
-      List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+      List.iter(fun domains->Parallel.run ~domains(fun()->
         if not(same expected (I.Packed.force ~strict:true packed ~live))then
           failwith("Typed block parity: "^body))) [1;4;8]) [0;42]) cases;
   I.Packed.Private.trace:=trace;
@@ -165,25 +165,26 @@ let () =
   I.Packed.Private.trace := ignore;
   let base=Test_program.compile ~fusion:false
     "(for [index (array/range 32769 :type int) component (map (fn [x] (+ x t)) (array/range 7))] component)" in
-  let region=I.Packed.to_region base in
+  let region=base in
   assert(region.code=[|I.Core.Region.Int_input 0;Input(1,1,0)|]);
   let make outer row =
     let sources=Array.mapi(fun i (residual,term)->
       let name=if i=0 then "repeat_outer" else "repeat_row" in
       let term={term with Flow.Workspace.node=Ref_binding(name,[])} in
-      E.Private.with_bindings residual ~term [name,(if i=0 then outer else E.Float_array row)],term)region.sources in
-    let region={region with sources} in
-    let ordinary={region with code=Array.append region.code [|I.Core.Region.Unary(Abs,1)|]} in
-    let program region=match I.Packed.of_region region with Ok p->p
-      |Error ds->failwith(String.concat "; "(List.map Flow.Diagnostic.to_string ds)) in
+      E.Residual.with_bindings residual ~term [name,(if i=0 then outer else E.Float_array row)],term)region.sources in
+    let region=Result.get_ok(I.Core.Region.rebuild region ~sources ()) in
+    let ordinary=Result.get_ok(I.Core.Region.rebuild region
+      ~code:(Array.append region.code [|I.Core.Region.Unary(Abs,1)|]) ()) in
+    let program region=match I.Core.Region.rebuild region () with Ok p->p
+      |Error ds->failwith(String.concat "; "(List.map Diagnostic.to_string ds)) in
     program region,program ordinary in
-  let live=Frame_input.at_time 0.25 in
+  let live=Input.at_time 0.25 in
   List.iter(fun row->List.iter(fun count->
     let outer=E.Int_array(Array.init count(fun i->max_int-i)) in
     let packed,ordinary=make outer row in
     let expected=Array.make (count*Array.length row) 0. in
     for i=0 to count-1 do Array.blit row 0 expected (i*Array.length row) (Array.length row) done;
-    List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+    List.iter(fun domains->Parallel.run ~domains(fun()->
       assert(same(I.Packed.force ~strict:true packed ~live)(Ok(E.Float_array expected)));
       assert(same(I.Packed.force ~strict:true packed ~live)(I.Packed.force ~strict:true ordinary ~live));
       let data=Array.make (Array.length expected) 0. in
@@ -211,8 +212,8 @@ let () =
   let trace = !I.Packed.Private.trace in
   I.Packed.Private.trace := ignore;
   List.iter(fun body->let packed=Test_program.compile ~fusion:false body in
-    List.iter(fun time->let live=Frame_input.at_time time in
-      List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+    List.iter(fun time->let live=Input.at_time time in
+      List.iter(fun domains->Parallel.run ~domains(fun()->
         assert(same(I.Packed.force ~strict:true packed ~live)(I.Packed.reference packed ~live))))[1;4;8])
       [0.;1.;2.])
     ["(map (fn [x] (int/add x (int t))) (array/range (int/add 32769 (int t)) :type int))";
@@ -231,14 +232,14 @@ let () =
     let operation=Printf.sprintf (if reverse then "(int/mul %d x)" else "(int/mul x %d)") factor in
     let packed=Test_program.compile(Printf.sprintf
       "(map (fn [x] %s) (array/range (int/add %d (int t)) :type int))" operation count) in
-    let live=Frame_input.at_time 0.25 in
+    let live=Input.at_time 0.25 in
     let expected=E.Int_array(Array.init count(fun i->i*factor)) in
-    List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+    List.iter(fun domains->Parallel.run ~domains(fun()->
       assert(same(I.Packed.force ~strict:true packed ~live)(Ok expected));
       assert(same(I.Packed.force ~strict:true packed ~live)(I.Packed.reference packed ~live))))[1;4;8];
     if count>1 then begin
-      let region=I.Packed.to_region packed in
-      let skipped=I.Packed.of_region {region with skip=[|1|]} |>function
+      let region=packed in
+      let skipped=I.Core.Region.rebuild region ~skip:[|1|] () |>function
         |Ok value->value|Error _->assert false in
       assert(same(I.Packed.force ~strict:true skipped ~live)
         (Ok(E.Int_array(Array.init(count-1)(fun i->(if i<1 then i else i+1)*factor)))))
@@ -256,14 +257,14 @@ let () =
   let marker=E.Source("test/borrow_columns",Flow.Ty.Array Flow.Ty.Vec4,[]) in
   let value=ok(E.Private.map_function ~signature:Flow.Ty.{params=[Int;Vec4];result=Vec4}
     fn [E.Int_array mask;E.Vec4_array(Array.make(count*4)0.)]) in
-  let packed=match value with E.Residual r->Option.get(compile r(E.Private.residual_view r).term)|_->assert false in
-  let region=I.Packed.to_region packed in
+  let packed=match value with E.Residual r->Option.get(compile r(E.Residual.residual_view r).term)|_->assert false in
+  let region=packed in
   let sources=Array.map(fun(residual,(term:Flow.Workspace.term))->
     if term.ty<>Flow.Ty.Array Flow.Ty.Vec4 then residual,term else
       let term={term with node=Ref_binding("typed_borrowed_source",[])} in
-      E.Private.with_bindings residual ~term ["typed_borrowed_source",marker],term)region.sources in
-  let packed=match I.Packed.of_region {region with sources}with Ok p->p
-    |Error ds->failwith(String.concat "; "(List.map Flow.Diagnostic.to_string ds)) in
+      E.Residual.with_bindings residual ~term ["typed_borrowed_source",marker],term)region.sources in
+  let packed=match I.Core.Region.rebuild region ~sources ()with Ok p->p
+    |Error ds->failwith(String.concat "; "(List.map Diagnostic.to_string ds)) in
   let data=Array.init(count*5)(fun i->if i mod 5=4 then 99. else if i=0 then -0. else float i) in
   let before=Marshal.to_string data [] in
   let columns=Array.init 4(fun offset->I.Packed.{data;offset;stride=5}) in
@@ -271,11 +272,11 @@ let () =
   let resolve=function E.Source("test/borrow_columns",_,_)->incr resolutions;Ok(E.Vec4_array(Array.make(count*4)0.))
     |value->Ok value in
   let source _ (term:Flow.Workspace.term)=Ok(if term.ty=Flow.Ty.Array Flow.Ty.Vec4 then Some columns else None) in
-  let live=Frame_input.at_time 0.25 in
+  let live=Input.at_time 0.25 in
   let run columns outputs=I.Packed.force_into ~strict:true ~resolve
     ~column_source:(fun r term->match source r term with Ok(Some _)->Ok(Some columns)|other->other)
     ~count ~outputs packed ~live in
-  List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+  List.iter(fun domains->Parallel.run ~domains(fun()->
     let planes=Array.init 4(fun _->Array.make count 0.) in
     ignore(ok(run columns[|Array.map Option.some planes|]));
     Array.iteri(fun c plane->Array.iteri(fun i x->
@@ -307,9 +308,9 @@ let () =
     let data = Array.init (count * 2) (fun i -> if i mod 2 = 0 then -99. else float (i / 2)) in
     let source _ _ = Ok (Some [|I.Packed.{data; offset=1; stride=2}|]) in
     List.iter (fun time ->
-      let live = Frame_input.at_time time in
+      let live = Input.at_time time in
       let reference = I.Packed.reference packed ~live in
-      List.iter (fun domains -> Rays_math.Parallel.run ~domains (fun () ->
+      List.iter (fun domains -> Parallel.run ~domains (fun () ->
         assert (same (I.Packed.force ~strict:true packed ~live) reference);
         let output = Array.make count 0. in
         ignore (ok (I.Packed.force_into ~strict:true ~column_source:source ~count
@@ -320,11 +321,11 @@ let () =
   List.iter (fun body ->
     let packed = Test_program.compile (Printf.sprintf
       "(map (fn [x] %s) (array/range %d))" body count) in
-    let live = Frame_input.at_time 0.25 in
-    let nonfinite = function Error (d : Flow.Diagnostic.t) -> assert (d.code="E_NONFINITE")
+    let live = Input.at_time 0.25 in
+    let nonfinite = function Error (d : Diagnostic.t) -> assert (d.code="E_NONFINITE")
       | Ok _ -> failwith "Selected or unconditional computation hid overflow" in
     nonfinite (I.Packed.reference packed ~live);
-    List.iter (fun domains -> Rays_math.Parallel.run ~domains (fun () ->
+    List.iter (fun domains -> Parallel.run ~domains (fun () ->
       nonfinite (I.Packed.force ~strict:true packed ~live);
       nonfinite (I.Packed.force_into ~strict:true ~column_source:(fun _ _ -> Ok None) ~count
         ~outputs:[|[|None|]|] packed ~live))) [1;8])
@@ -346,45 +347,45 @@ let () =
   let positions=Array.map (fun n-> -.n) normals in
   let value=ok (E.Private.map_function ~signature:Flow.Ty.{params=[Vec3;Vec3];result=Vec3}
     fn [E.Vec3_array positions;E.Vec3_array normals]) in
-  let packed=match value with E.Residual r->Option.get (compile r (E.Private.residual_view r).term)
+  let packed=match value with E.Residual r->Option.get (compile r (E.Residual.residual_view r).term)
     |_->assert false in
   List.iter (fun time->
-    let live=Frame_input.at_time time in
+    let live=Input.at_time time in
     let expected=E.Private.force_reference value ~live in
-    List.iter (fun domains->Rays_math.Parallel.run ~domains (fun()->
+    List.iter (fun domains->Parallel.run ~domains (fun()->
       assert (same (I.Packed.force ~strict:true packed ~live) expected))) [1;8])
     [0.;-0.;1.;Float.next_after 1. infinity;0.16];
-  let fn=match recorded ~ops:I.Operators.all
+  let fn=match recorded ~ops:[]
     "(fn [(p : vec3) (n : vec3)] (+ p (* n (* t (noise3 (* p 0.16) :seed 4611686018427387903)))))"
     with E.Fn f->f|_->assert false in
   let value=ok (E.Private.map_function ~signature:Flow.Ty.{params=[Vec3;Vec3];result=Vec3}
     fn [E.Vec3_array positions;E.Vec3_array normals]) in
-  let packed=match value with E.Residual r->Option.get (compile r (E.Private.residual_view r).term)
+  let packed=match value with E.Residual r->Option.get (compile r (E.Residual.residual_view r).term)
     |_->assert false in
-  let region=I.Packed.to_region packed in
-  let ordinary=I.Packed.of_region {region with code=Array.append region.code [|I.Core.Region.Unary (Sin,0)|]}
+  let region=packed in
+  let ordinary=I.Core.Region.rebuild region ~code:(Array.append region.code [|I.Core.Region.Unary (Sin,0)|]) ()
     |> (function Ok p->p|Error _->assert false) in
   List.iter (fun time->
-    let live=Frame_input.at_time time in
+    let live=Input.at_time time in
     let expected=E.Private.force_reference value ~live in
-    List.iter (fun domains->Rays_math.Parallel.run ~domains (fun()->
+    List.iter (fun domains->Parallel.run ~domains (fun()->
       let actual=I.Packed.force ~strict:true packed ~live in
       assert (same actual expected);
       assert (same actual (I.Packed.force ~strict:true ordinary ~live)))) [1;8])
     [0.;-0.;1.;2.;Float.next_after 1. infinity;0.16];
-  let fn=match recorded ~ops:I.Operators.all
+  let fn=match recorded ~ops:[]
     "(fn [(p : vec3)] [p.z (+ p.y (* t (- (* (noise3 [(* p.x 0.16) (* p.z 0.16) 0.0] :seed -17) 2.0) 1.0))) p.x])"
     with E.Fn f->f|_->assert false in
   let value=ok (E.Private.map_function ~signature:Flow.Ty.{params=[Vec3];result=Vec3}
     fn [E.Vec3_array positions]) in
-  let packed=match value with E.Residual r->Option.get (compile r (E.Private.residual_view r).term)
+  let packed=match value with E.Residual r->Option.get (compile r (E.Residual.residual_view r).term)
     |_->assert false in
-  let region=I.Packed.to_region packed in
-  let ordinary=I.Packed.of_region {region with code=Array.append region.code [|I.Core.Region.Unary (Sin,0)|]}
+  let region=packed in
+  let ordinary=I.Core.Region.rebuild region ~code:(Array.append region.code [|I.Core.Region.Unary (Sin,0)|]) ()
     |> (function Ok p->p|Error _->assert false) in
-  List.iter (fun time->let live=Frame_input.at_time time in
+  List.iter (fun time->let live=Input.at_time time in
     let expected=E.Private.force_reference value ~live in
-    List.iter (fun domains->Rays_math.Parallel.run ~domains (fun()->
+    List.iter (fun domains->Parallel.run ~domains (fun()->
       let actual=I.Packed.force ~strict:true packed ~live in
       assert (same actual expected);
       assert (same actual (I.Packed.force ~strict:true ordinary ~live)))) [1;8])
@@ -393,8 +394,8 @@ let () =
   let borrowed=Array.init 3 (fun offset->I.Packed.{data=strided;offset;stride=4}) in
   let source _ _=Ok (Some borrowed) in
   let before=Marshal.to_string strided [] in
-  List.iter (fun domains->Rays_math.Parallel.run ~domains (fun()->
-    let live=Frame_input.at_time 0.16 in
+  List.iter (fun domains->Parallel.run ~domains (fun()->
+    let live=Input.at_time 0.16 in
     let expected=match ok (I.Packed.force ~strict:true packed ~live) with E.Vec3_array a->a|_->assert false in
     List.iter (fun packed->
       let planes=Array.init 3 (fun _->Array.make count 0.) in
@@ -405,7 +406,7 @@ let () =
       ignore (ok (I.Packed.force_into ~strict:true ~column_source:source ~count
         ~outputs:[|[|None;Some planes.(1);None|]|] packed ~live))) [packed;ordinary])) [1;8];
   assert (before=Marshal.to_string strided []);
-  let live=Frame_input.at_time 0.16 in
+  let live=Input.at_time 0.16 in
   let refusal code columns count outputs=match I.Packed.force_into ~strict:true
     ~column_source:(fun _ _->Ok (Some columns)) ~count ~outputs packed ~live with
     |Error d->assert (d.code=code)|Ok _->assert false in
@@ -424,7 +425,7 @@ let () =
   let fn=match recorded "(fn [(p : vec3)] [p.x p.y (+ p.z t)])" with E.Fn f->f|_->assert false in
   let value=ok (E.Private.map_function ~signature:Flow.Ty.{params=[Vec3];result=Vec3}
     fn [E.Vec3_array positions]) in
-  let identity=match value with E.Residual r->Option.get (compile r (E.Private.residual_view r).term)
+  let identity=match value with E.Residual r->Option.get (compile r (E.Residual.residual_view r).term)
     |_->assert false in
   let bad=Array.copy strided in bad.(0)<-nan;
   let bad_columns=Array.map (fun (c:I.Packed.column)->{c with data=bad}) borrowed in
@@ -444,9 +445,9 @@ let () =
   List.iter (fun (body,expected) ->
     let value=recorded body in
     let packed=match value with E.Residual r ->
-      Option.get (compile r (E.Private.residual_view r).term) | _ -> assert false in
+      Option.get (compile r (E.Residual.residual_view r).term) | _ -> assert false in
     List.iter (fun time ->
-      let live=Frame_input.at_time time in
+      let live=Input.at_time time in
       let output=I.Packed.force packed ~live in
       assert (same output (E.Private.force_reference value ~live));
       assert (same output (Ok (expected time)))) [0.;0.37;2.])
@@ -459,9 +460,9 @@ let () =
   let value=recorded ~ops:[rounded]
     "(map (fn [x] (float ^:bypass (test/int_result (+ x t)))) (array/range 4))" in
   let r=match value with E.Residual r -> r | _ -> assert false in
-  assert (compile r (E.Private.residual_view r).term=None);
+  assert (compile r (E.Residual.residual_view r).term=None);
   let program=ok (I.Executor.compile value) in
-  let live=Frame_input.at_time 0.7 in
+  let live=Input.at_time 0.7 in
   assert (same (I.Executor.force program ~live) (E.Private.force_reference value ~live));
   assert (same (I.Executor.force program ~live) (Ok (E.Float_array [|1.;2.;3.;4.|])))
 
@@ -475,16 +476,16 @@ let () =
   let value = recorded "(map (fn [p] (if (> t 0) (min (length p) 1.0) 0.0))
     (array/vec3 16385 [1e200 0 0]))" in
   let packed = match value with E.Residual residual ->
-    compile residual (E.Private.residual_view residual).term |> Option.get
+    compile residual (E.Residual.residual_view residual).term |> Option.get
     | _ -> failwith "length kernel did not defer" in
   List.iter (fun time ->
-    let live = Frame_input.at_time time in
+    let live = Input.at_time time in
     let reference = E.Private.force_reference value ~live in
     (match time, reference with
      | 0., Ok (E.Float_array values) -> assert (Array.for_all ((=) 0.) values)
      | 1., Error d -> assert (d.code = "E_NONFINITE")
      | _ -> assert false);
-    List.iter (fun domains -> Rays_math.Parallel.run ~domains (fun () ->
+    List.iter (fun domains -> Parallel.run ~domains (fun () ->
       assert (same (I.Packed.force packed ~live) reference))) [1;8]) [0.;1.]
 let () =
   List.iter (fun count ->
@@ -525,14 +526,14 @@ let () =
       if count >= 1024 && not (has_cpu program) then
         failwith ("No CPU kernel (" ^ Flow.Ty.to_string (Flow.Value.ty_of value) ^ "): " ^ body);
       List.iter (fun time ->
-        let live = Frame_input.at_time time in
+        let live = Input.at_time time in
         let reference = E.Private.force_reference value ~live in
-        List.iter (fun domains -> Rays_math.Parallel.run ~domains (fun () ->
+        List.iter (fun domains -> Parallel.run ~domains (fun () ->
           let output = I.Executor.force program ~live in
           if not (same output reference) then failwith (Printf.sprintf "Parity failed (%d domains, t=%g): %s" domains time body);
           (* Exercise the register executor even below the placement cutoff. *)
           match value with
-          | E.Residual r -> (match compile r (E.Private.residual_view r).term with
+          | E.Residual r -> (match compile r (E.Residual.residual_view r).term with
               | Some p ->
                   if not (same (I.Packed.force p ~live) reference) then
                     failwith (Printf.sprintf "Direct kernel parity failed (%d domains, t=%g): %s" domains time body)
@@ -542,20 +543,20 @@ let () =
   let correlated = recorded "(for [x (array/range 3) y (array/float (+ x 1))] (+ y t))" in
   let program = ok (I.Executor.compile correlated) in
   assert (not (has_cpu program));
-  assert (same (I.Executor.force program ~live:(Frame_input.at_time 0.125))
-    (E.Private.force_reference correlated ~live:(Frame_input.at_time 0.125)));
+  assert (same (I.Executor.force program ~live:(Input.at_time 0.125))
+    (E.Private.force_reference correlated ~live:(Input.at_time 0.125)));
   List.iter (fun body ->
     let value = recorded body in
     let program = ok (I.Executor.compile value) in
     if stages program < 2 then failwith ("Map chain did not fuse: " ^ body);
     let unfused = match value with E.Residual r ->
-      compile ~fusion:false r (E.Private.residual_view r).term |> Option.get
+      compile ~fusion:false r (E.Residual.residual_view r).term |> Option.get
       | _ -> failwith "live map chain did not defer" in
     assert (I.Packed.stage_count unfused = 1);
     List.iter (fun time ->
-      let live = Frame_input.at_time time in
+      let live = Input.at_time time in
       let reference = E.Private.force_reference value ~live in
-      List.iter (fun domains -> Rays_math.Parallel.run ~domains (fun () ->
+      List.iter (fun domains -> Parallel.run ~domains (fun () ->
         assert (same (I.Executor.force program ~live) reference);
         assert (same (I.Packed.force unfused ~live) reference))) [1;8]) [0.;0.125;1.25;7.])
     ["(map (fn [y] (* y y)) (map (fn [x] (sin (+ x t))) (array/range 16385)))";
@@ -568,21 +569,21 @@ let () =
   let value = recorded "(map (fn [x y] (+ x y)) (map (fn [x] (pow (+ x t) 1000000)) (array/range 2051)) (array/float 1))" in
   let program = ok (I.Executor.compile value) in
   assert (stages program = 1);
-  assert (same (I.Executor.force program ~live:(Frame_input.at_time 0.))
-    (E.Private.force_reference value ~live:(Frame_input.at_time 0.)));
+  assert (same (I.Executor.force program ~live:(Input.at_time 0.))
+    (E.Private.force_reference value ~live:(Input.at_time 0.)));
   let ticks = ref 0. in
   let profile = I.Profile.create ~clock:(fun () -> ticks := !ticks +. 0.001; !ticks) in
   let value = recorded "(map (fn [y] (* y y)) (map (fn [x] (sin (+ x t))) (array/range 2051)))" in
   let program = ok (I.Executor.compile ~profile value) in
-  ignore (ok (I.Executor.force program ~live:(Frame_input.at_time 1.25)));
+  ignore (ok (I.Executor.force program ~live:(Input.at_time 1.25)));
   let reports = I.Profile.executions profile in
   assert (List.length reports = 1);
   let report = List.hd reports in
   assert (report.tier = Cpu_kernel && report.seconds > 0.);
   assert (fst report.owner = ["g";"tested"] && List.length report.sites >= 2);
-  ignore (ok (I.Executor.force program ~live:(Frame_input.at_time 2.)));
+  ignore (ok (I.Executor.force program ~live:(Input.at_time 2.)));
   assert (List.length (I.Profile.executions profile) = 1);
-  ignore (ok (I.Executor.force ~reference:true program ~live:(Frame_input.at_time 2.)));
+  ignore (ok (I.Executor.force ~reference:true program ~live:(Input.at_time 2.)));
   assert ((List.hd (I.Profile.executions profile)).tier = Interp);
   print_endline "Packed map/for/sum/fold/scan/reduce parity, group timings and one/eight domains"
 
@@ -590,11 +591,11 @@ let () =
   List.iter (fun body ->
     let value = recorded body in
     let packed = match value with E.Residual r ->
-      compile r (E.Private.residual_view r).term | _ -> assert false in
+      compile r (E.Residual.residual_view r).term | _ -> assert false in
     assert (packed = None);
     let program = ok (I.Executor.compile value) in
     List.iter (fun time ->
-      let live = Frame_input.at_time time in
+      let live = Input.at_time time in
       assert (same (I.Executor.force program ~live)
         (E.Private.force_reference value ~live))) [0.;0.25;2.])
     ["(fold [a false] [x (array/range 1024)] (+ x t))";
@@ -606,12 +607,12 @@ let () =
   let value = ok (E.Private.map_function
     ~signature:Flow.Ty.{params = [Vec2]; result = Vec4} fn [E.Vec2_array grid]) in
   let packed = match value with E.Residual r ->
-    compile r (E.Private.residual_view r).term |> Option.get | _ -> assert false in
+    compile r (E.Residual.residual_view r).term |> Option.get | _ -> assert false in
   assert (I.Packed.static_count packed = Some 32769);
   List.iter (fun time ->
-    let live = Frame_input.at_time time in
+    let live = Input.at_time time in
     let expected = E.Private.force_reference value ~live in
-    List.iter (fun domains -> Rays_math.Parallel.run ~domains (fun () ->
+    List.iter (fun domains -> Parallel.run ~domains (fun () ->
       let output = I.Packed.force packed ~live in
       assert (same output expected);
       match ok output with E.Vec4_array xs ->
@@ -622,7 +623,7 @@ let () =
 
 let () =
   let prepare ?ops body = match recorded ?ops body with
-    | E.Residual residual -> residual, (E.Private.residual_view residual).term
+    | E.Residual residual -> residual, (E.Residual.residual_view residual).term
     | _ -> failwith ("diagnostic fixture did not defer: " ^ body) in
   let refused body code =
     let residual, term = prepare body in
@@ -630,7 +631,7 @@ let () =
     match I.Packed.compile_result residual term with
     | Error [d] ->
         assert (d.code = code && d.message <> "");
-        assert (Option.fold ~none:false ~some:(fun (span : Flow.Diagnostic.span) ->
+        assert (Option.fold ~none:false ~some:(fun (span : Diagnostic.span) ->
           span.finish > span.start) d.span);
         d
     | _ -> failwith ("expected " ^ code ^ ": " ^ body) in
@@ -642,7 +643,7 @@ let () =
      "(map sin (array/float 3 t))", "E_PACKED_FUNCTION";
      "(map (fn [x] (+ x (value/rand t 1 2))) (array/range 3))", "E_PACKED_OPERATOR";
      "(fold [a false] [x (array/range 3)] (+ x t))", "E_PACKED_TYPE"];
-  let residual, term = prepare ~ops:I.Operators.all
+  let residual, term = prepare ~ops:[]
       "(map (fn [p] (noise3 p :seed (frame/index))) (array/vec3 3 [0 1 2]))" in
   assert (compile residual term = None);
   (match I.Packed.compile_result residual term with
@@ -663,25 +664,25 @@ let () =
   assert (compile residual bad = None);
   let d = match I.Packed.compile_result residual bad with
     | Error [d] -> assert (d.code = "E_NONFINITE"); d | _ -> assert false in
-  assert (Option.fold ~none:false ~some:(fun (span : Flow.Diagnostic.span) ->
+  assert (Option.fold ~none:false ~some:(fun (span : Diagnostic.span) ->
     span.finish - span.start = String.length "(pow 1e200 2.0)") d.span);
   let parity value packed = List.iter (fun time ->
-    let live = Frame_input.at_time time in
+    let live = Input.at_time time in
     let reference = E.Private.force_reference value ~live in
-    List.iter (fun domains -> Rays_math.Parallel.run ~domains (fun () ->
+    List.iter (fun domains -> Parallel.run ~domains (fun () ->
       assert (same (I.Packed.force packed ~live) reference))) [1;8]) [0.;0.125;1.25;7.] in
   List.iter (fun vector ->
     let value = recorded ("(let* [r {:vector " ^ vector ^ "}] (map (fn [x] (+ x r.vector.x)) (array/range 2051)))") in
     match value with
     | E.Residual residual ->
-        let packed = Option.get (compile residual (E.Private.residual_view residual).term) in
+        let packed = Option.get (compile residual (E.Residual.residual_view residual).term) in
         parity value packed
     | _ -> assert false) ["[t 1]"; "[t 1 2]"; "[t 1 2 3]"];
   let value = recorded ("(map (fn [y] (- " ^ sins 40 "y" ^ " t)) (map (fn [x] (+ t "
     ^ sins 40 "x" ^ ")) (array/range 2051)))") in
   (match value with
    | E.Residual residual ->
-       let term = (E.Private.residual_view residual).term in
+       let term = (E.Residual.residual_view residual).term in
        let child = match term.node with Flow.Workspace.Hof (`Map, [_; child]) -> child | _ -> assert false in
        let child = Option.get (compile ~fusion:false residual child) in
        let packed = Option.get (compile residual term) in
@@ -697,10 +698,10 @@ let () = Region_snapshot.finish "test_packed"
 (* Several outputs per region, outside the trace above: the snapshots stay single-output. *)
 let () =
   let program = Test_program.two_outputs () in
-  let live = Frame_input.at_time 1.25 in
+  let live = Input.at_time 1.25 in
   let results = List.map (fun domains ->
     let result = ref [] in
-    Rays_math.Parallel.run ~domains (fun () -> result := ok (I.Packed.force_all program ~live));
+    Parallel.run ~domains (fun () -> result := ok (I.Packed.force_all program ~live));
     !result) [1; 8] in
   (match results with
    | [one; eight] ->
@@ -724,17 +725,17 @@ let () =
       ("(map (fn [x] " ^ repeated 5 ^ ") (array/range 16385))") in
     assert (Array.length (I.Packed.Private.view packed).code = 8);
     List.iter (fun time ->
-      let live = Frame_input.at_time time in
+      let live = Input.at_time time in
       let reference = I.Packed.reference packed ~live in
-      List.iter (fun domains -> Rays_math.Parallel.run ~domains (fun () ->
+      List.iter (fun domains -> Parallel.run ~domains (fun () ->
         assert (same (I.Packed.force packed ~live) reference))) [1;8]) [0.;0.37;2.]) [false;true];
   let signed = Test_program.compile
     "(map (fn [x] [(+ x t) 0.0 -0.0 (+ x t)]) (array/range 4))" in
   let view = I.Packed.Private.view signed in
   assert (view.outputs.(0).(0) = view.outputs.(0).(3));
   assert (view.outputs.(0).(1) <> view.outputs.(0).(2));
-  List.iter (fun domains -> Rays_math.Parallel.run ~domains (fun () ->
-    let live = Frame_input.at_time 0.37 in
+  List.iter (fun domains -> Parallel.run ~domains (fun () ->
+    let live = Input.at_time 0.37 in
     assert (same (I.Packed.force signed ~live) (I.Packed.reference signed ~live)))) [1;8];
   let guards = Test_program.compile
     "(map (fn [x] (if (and (< x t) (not (= x 0)))
@@ -746,7 +747,7 @@ let () =
   print_endline "Packed sharing: repeated expressions fit the register budget, signed zero and domain parity preserved"
 
 let () =
-  let live = Frame_input.at_time 0.25 in
+  let live = Input.at_time 0.25 in
   let profile = I.Profile.create ~clock:(fun () -> 1.) in
   let tiny = recorded "(map (fn [x] (+ x t)) (array/range 1))" in
   let program = ok (I.Executor.compile ~strict:true ~profile tiny) in
@@ -778,8 +779,8 @@ let () =
       "(for [x (array/float (int/sub (frame/index) 1)) y (array/float (if (> t 0.) -1 2))] (+ x y))" in
     let captured=Test_program.compile ~fusion:false
       "(let* [gain (exp (* t 100000.))] (for [x (array/float (int/sub (frame/index) 1)) y (array/float 2)] (+ x gain)))" in
-    let float_bank packed=
-      let region=I.Packed.to_region packed in
+    let float_bank (packed:I.Core.Region.t)=
+      let region=packed in
       assert(region.iteration=I.Core.Region.Product);
       assert(Array.for_all(fun(_,term)->term.Flow.Workspace.ty=Flow.Ty.Array Flow.Ty.Float)region.sources);
       assert(Array.for_all(function
@@ -790,39 +791,39 @@ let () =
              Compare the language's element bits and cardinality directly. *)
           assert(Array.length expected=Array.length actual);
           Array.iteri(fun i x->assert(Int64.bits_of_float x=Int64.bits_of_float actual.(i)))expected
-      |Error (expected:Flow.Diagnostic.t),Error (actual:Flow.Diagnostic.t)->
+      |Error (expected:Diagnostic.t),Error (actual:Diagnostic.t)->
           assert(expected.code=actual.code && expected.message=actual.message && expected.cause=actual.cause)
       |_->failwith "Float Product forcing differs from reference" in
     List.iter(fun packed->float_bank packed;
-      List.iter(fun(frame,time)->let live={(Frame_input.at_time time)with frame} in
+      List.iter(fun(frame,time)->let live={(Input.at_time time)with frame} in
         let expected=I.Packed.reference packed ~live in
-        List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+        List.iter(fun domains->Parallel.run ~domains(fun()->
           try equal expected(I.Packed.force ~strict:true packed ~live)
           with exn->failwith(Printf.sprintf "Float Product frame=%d time=%g domains=%d: %s"
             frame time domains(Printexc.to_string exn)))) [1;4;8])
         [0,0.25;1,0.25;2,0.25;32770,(-0.25)]) [producer;captured];
-    let region=I.Packed.to_region producer in
+      let region : I.Core.Region.t = producer in
     List.iter(fun iteration->
-      let packed=ok(Result.map_error List.hd(I.Packed.of_region{region with iteration})) in
+      let packed=ok(Result.map_error List.hd(I.Core.Region.rebuild region ~iteration ())) in
       let calls=ref 0 in
       let source _ _=incr calls;if !calls=1 then
         Ok(Some[|I.Packed.{data=[||];offset=0;stride=1}|])
-        else Error(Flow.Diagnostic.error ~code:"E_LATER_SOURCE" "Later column source was reached.") in
+        else Error(Diagnostic.error ~code:"E_LATER_SOURCE" "Later column source was reached.") in
       let actual=I.Packed.force_into ~strict:true ~column_source:source ~count:0
-        ~outputs:[|[|Some[||]|]|] packed ~live:(Frame_input.at_time 0.25) in
+        ~outputs:[|[|Some[||]|]|] packed ~live:(Input.at_time 0.25) in
       match iteration,actual with
       |I.Core.Region.Product,Ok _->assert(!calls=1)
       |Zip,Error d->assert(!calls=2 && d.code="E_LATER_SOURCE")
       |_->assert false) [I.Core.Region.Product;Zip];
     let malformed _ _=Ok(Some[||]) in
     (match I.Packed.force_into ~strict:true ~column_source:malformed ~count:0
-        ~outputs:[|[|Some[||]|]|] producer ~live:(Frame_input.at_time 0.25) with
+        ~outputs:[|[|Some[||]|]|] producer ~live:(Input.at_time 0.25) with
      |Error d->assert(d.code="E_ARRAY_TYPE")|_->assert false);
     print_endline "Float Product: empty first input suppresses later producers, borrowed sources and captures; reached errors and Zip forcing remain exact")
 
 let () =
   (* A map read by a minimum, a maximum and the map that scales by both runs once per outermost run. *)
-  let live = Frame_input.at_time 0.25 in
+  let live = Input.at_time 0.25 in
   let body = "(let* [h (map (fn [x] (* x (+ t 2.0))) (array/range 4096))
                       lo (array/min h) hi (array/max h)]
                  (map (fn [y] (/ (- y lo) (- hi lo))) h))" in

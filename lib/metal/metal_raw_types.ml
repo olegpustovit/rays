@@ -420,22 +420,6 @@ type resource_texture_snapshot =
 type resource_root_snapshot =
   | Resource_buffer_root of resource_buffer_snapshot
   | Resource_texture_root of resource_texture_snapshot
-type mesh_pipeline_descriptor_inputs =
-  {
-  object_function: handle option ;
-  mesh_function: handle ;
-  fragment_function: handle option ;
-  binary_archives: handle array ;
-  object_linked_functions: handle option ;
-  mesh_linked_functions: handle option ;
-  fragment_linked_functions: handle option }[@@ocaml.doc
-                                              " Mesh/tile105 owned descriptor inputs. Field order is the native positional\n    ABI consumed by [rays_mesh_tile_objects_from_value]. "]
-type tile_pipeline_descriptor_inputs =
-  {
-  tile_function: handle ;
-  binary_archives: handle array ;
-  preloaded_libraries: handle array ;
-  linked_functions: handle option }
 type metal4_size = (int64 * int64 * int64)
 type metal4_origin = (int64 * int64 * int64)
 type metal4_range = (int64 * int64)

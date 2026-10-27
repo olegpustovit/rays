@@ -6,7 +6,7 @@ module E = Flow.Eval
 module L = Flow_sop.Lower
 module Edit = Sop.Edit_graph
 module Session = Sop.Session
-let flow_ok = function Ok x -> x | Error d -> failwith (Flow.Diagnostic.to_string d)
+let flow_ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let factories = Sop_catalog.Editor.factories
 let columns = 1025
 let grid = Printf.sprintf "(sop/grid :counts \"Point counts\" :connectivity \"Points\" :columns %d :rows 2)" columns
@@ -21,14 +21,14 @@ let lower ?previous text =
   let compiled_ids = Option.map (fun (l : L.t) -> l.compiled_ids) previous
   and sites = Option.map (fun (l : L.t) -> l.sites) previous in
   match L.workspace ~factories ?compiled_ids ?sites forms with
-  | Ok lowered -> lowered | Error d -> failwith (text ^ "\n" ^ Flow.Diagnostic.to_string d)
+  | Ok lowered -> lowered | Error d -> failwith (text ^ "\n" ^ Diagnostic.to_string d)
 let compiled (l : L.t) =
   let graph = List.hd l.graphs in
   Edit.compile_node graph.network.geometry ~node_id:(Option.get graph.root) |> get_string_ok
 let context ~domains = Sop.Context.create ~domains ~time:0. ~grain:257 () |> get_string_ok
 let geometry = function
   | Ok (output : Session.output) -> Result.get_ok (Sop.Payload.geometry output.payload)
-  | Error d -> failwith (Sop.Diagnostic.error_to_string d)
+  | Error d -> failwith (Diagnostic.error_to_string d)
 let kernel_runs (_ : L.t) = List.fold_left (fun count profile -> count + List.length (List.filter
   (fun (e : Flow_ir.execution) -> e.tier = Cpu_kernel) (Flow_ir.Profile.executions profile))) 0 !L.Private.profiles
 let stages = [0.3, 0.7, 0; -0.2, 1.3, 3; 0.15, 2.1, 5; 0.05, 0.4, 7]

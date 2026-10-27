@@ -1,13 +1,22 @@
+open Core_model
 open Rays
 open Sop
 open Editor_document
-include Core_carry
+open Core_panes
+open Core_setup
+open Core_panels
+open Core_list
+open Core_inspect
+open Core_actions
+open Core_shell
+open Core_text
+open Core_carry
 
 (* The one reduction phase of a frame: what the panes asked for ([result]) and the keys ([actions])
    become the next model.  Nothing here builds UI: the panes have finished constructing their
    boxes, and a test can run it on a frame result it made itself. *)
-let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~leader ~frame ~hud ~actions ~guide ~copied ~steady ~status_fps ~status_fps_at ~timeline ~timeline_changes ~graph_shown ~text ~text_shown ~row_sets ~rows value (result : _ frame_result) =
-  Flow.Phase_timer.measure Reduce (fun () ->
+let reduce ?gpu ?(pump=fun()->()) ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~leader ~frame ~hud ~actions ~guide ~copied ~steady ~status_fps ~status_fps_at ~timeline ~timeline_changes ~graph_shown ~text ~text_shown ~row_sets ~rows value (result : _ frame_result) =
+  Flow.Phase_timer.measure "reduce" (fun () ->
   let result = match result.prompt_intent with
     | Some (Edit_source op) -> { result with changes = result.changes @ [ Syntax_edit op ] }
     | _ -> result in
@@ -58,7 +67,7 @@ let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~lead
      gestures); only an object the host made is edited as a derived node, for reconcile to adopt *)
   let in_text node = Editor_document.Scene_sync.in_text value.doc value.level node in
   let document, edit_error, editor_effects = List.fold_left apply_change
-      ((network value).graph, value.edit_error, Parameter.no_effects)
+      ((network value).graph, value.edit_error, Param.no_effects)
       (List.filter (function Set_parameter { node; _ } | Rename { node; _ } -> not (in_text node) | _ -> true)
          result.changes) in
   (* what a list or the inspector's name row asks of an object the text has is written to the text
@@ -68,25 +77,25 @@ let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~lead
         | Rename { node; label } when in_text node -> Some (Editor_document.Scene_sync.Rename (node, label))
         | _ -> None) result.changes in
   let document, selection, tree, opened, tree_label, _ = List.fold_left
-      (apply_tree value) (document, result.selection, result.tree, result.opened, None, rows)
+      (apply_tree value) (document, (result.selection : Selection.t), result.tree, result.opened, None, rows)
       result.tree_intents in
   let apply_changes (document, effects, error) = function
     | None -> document, effects, error
     | Some (node_id, values) ->
-        (match Doc.apply_parameters document ~node_id values with
-         | Ok (document, changed) -> document, Parameter.union_effects effects changed, error
+        (match Editor_document.Document_edit.apply_parameters document ~node_id values with
+         | Ok (document, changed) -> document, Param.union_effects effects changed, error
          | Error message -> document, effects, Some message) in
   let document, parameter_effects, edit_error =
-    apply_changes (document, Parameter.no_effects, edit_error)
+    apply_changes (document, Param.no_effects, edit_error)
       (match result.handle_changes with Some (id, _) when in_text id -> None | handle -> handle) in
   let settings, settings_effects, edit_error = match result.settings_changes with
-    | [] -> value.doc.settings, Parameter.no_effects, edit_error
+    | [] -> value.doc.settings, Param.no_effects, edit_error
     | changes -> (match Settings.apply value.doc.settings changes with
       | Ok (settings, effects) -> settings, effects, edit_error
-      | Error message -> value.doc.settings, Parameter.no_effects, Some message) in
+      | Error message -> value.doc.settings, Param.no_effects, Some message) in
   let node_effects effects = match value.level with
     | Document.Inside id when kind value id = Some "geometry" -> effects
-    | Inside _ | Scene -> { effects with Parameter.cook = false } in
+    | Inside _ | Scene -> { effects with Param.cook = false } in
   let label = match List.find_map intent_label result.changes, tree_label with
     | Some label, _ | None, Some label -> label
     | None, None when settings != value.doc.settings -> "Settings"
@@ -96,8 +105,8 @@ let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~lead
             (Edit_graph.find document.geometry ~node_id:id)
       | None -> "Edit" in
   let result = { result with document; selection; tree; opened; edit_error;
-    effects = Parameter.union_effects (node_effects
-      (Parameter.union_effects editor_effects parameter_effects)) settings_effects;
+    effects = Param.union_effects (node_effects
+      (Param.union_effects editor_effects parameter_effects)) settings_effects;
     settings; label } in
   let timeline, timeline_changes = List.fold_left (fun (timeline, changes) intent ->
     let next, emitted = match intent with
@@ -127,8 +136,8 @@ let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~lead
           | Load_preset_file name -> Preset.path ~directory:value.presets ~name, "Loaded preset " ^ name
           | _ -> state_file value, "Restored last edited state" in
         let rejected = if intent = Load_last_state then "Last edited state rejected: " else "Preset rejected: " in
-        (match Preset.load_with_ops ~ops:(fst value.doc.workspace).checked.ops ~path
-            ~factories:value.factories ~settings:value.doc.settings with
+        (match Preset.load_with_ops ~gpu:value.gpu ~ops:(fst value.doc.workspace).checked.ops ~path
+            ~factories:value.factories ~settings:value.doc.settings () with
          | Ok preset -> result.prompt, Some (Info, restored), Some preset
          | Error message -> result.prompt, Some (Refusal, rejected ^ message), None)
     | Some ((Delete_preset_file _ | Delete_last_state _) as intent) ->
@@ -151,7 +160,7 @@ let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~lead
              Some (Making_macro { nodes; draft; state = { name = draft.name;
                holes = Array.of_list (List.mapi (fun i _ -> i < 2, "p" ^ string_of_int (i + 1)) draft.literals) } }),
              notice
-         | Error d -> prompt, Some (Refusal, d.Flow.Diagnostic.message))
+         | Error d -> prompt, Some (Refusal, d.Diagnostic.message))
     | None -> prompt, notice in
   let prompt = match List.find_map (function Text_pane.References_of name -> Some name | _ -> None) result.text_intents with
     | Some name -> Some (Referencing (name, "")) | None -> prompt in
@@ -189,7 +198,7 @@ let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~lead
      the text (a refused one changes nothing) *)
   let edit_note = ref None in
   let reconciled ~before next result =
-    match Doc.reconcile ~factories:value.factories before next with
+    match Editor_document.Document_edit.reconcile ~factories:value.factories before next with
     | Ok doc -> doc, result
     | Error message ->
         before, { (result : _ frame_result) with edit_error = Some message } in
@@ -207,7 +216,7 @@ let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~lead
     | Ok (Some (doc, effects, home)) ->
         if !edit_note = None then edit_note := Editor_document.Scene_sync.template_note next home;
         doc, { result with edit_error = None;
-               effects = Parameter.union_effects result.effects (node_effects effects) }
+               effects = Param.union_effects result.effects (node_effects effects) }
     | Ok None -> next, result
     | Error message -> refused := Some message; next, result in
   let next, result = if Option.is_some loaded then next, result else
@@ -235,18 +244,18 @@ let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~lead
            | Error message -> refuse message)
       | Panel_state (path, state) ->
           let key = panel_key next path in
-          let doc = Doc.layout_edit next (fun layout ->
+          let doc = Editor_document.Document_edit.layout_edit next (fun layout ->
             { layout with panels = Layout_by_path.Path_map.add key state layout.panels }) in
           doc, { (result : _ frame_result) with label =
             (if state.collapsed then "Collapse panel" else "Arrange panel"); edit_error = None }
       | Select_layout name when Option.map (fun (g : Flow.Workspace.graph) -> g.name)
           (Workspace_doc.editor_graph (fst next.workspace)) = Some name -> next, result
       | Select_layout name ->
-          (match Doc.select_layout ~factories:value.factories next name with
+          (match Editor_document.Document_edit.select_layout ~factories:value.factories next name with
            | Ok doc -> doc, { (result : _ frame_result) with label = "Switch layout"; edit_error = None }
            | Error message -> refuse message)
       | Syntax_edit op ->
-          (match Doc.syntax_edit ~factories:value.factories next op with
+          (match Editor_document.Document_edit.syntax_edit ~factories:value.factories next op with
            | Ok doc ->
                (* a math node a wire folded into its reader opens as a card, where it was *)
                let doc = match op with
@@ -256,7 +265,7 @@ let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~lead
                      (match Flow_graph.Flow_edit.arg_text (fst doc.workspace).source node key with
                       | Some e when Flow_graph.Flow_edit.value_call e ->
                           let at = Layout_by_path.Path_map.find_opt (sp @ [ src ]) (fst next.workspace).layout.at in
-                          Doc.layout_edit doc (fun l -> { l with collapsed = Layout_by_path.Path_map.add (sp @ [ leaf ]) false l.collapsed;
+                          Editor_document.Document_edit.layout_edit doc (fun l -> { l with collapsed = Layout_by_path.Path_map.add (sp @ [ leaf ]) false l.collapsed;
                             at = (match at with Some p -> Layout_by_path.Path_map.add (sp @ [ leaf ]) p l.at | None -> l.at) })
                       | _ -> doc)
                  | _ -> doc in
@@ -269,10 +278,10 @@ let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~lead
                if !edit_note = None then
                  edit_note := Option.map (fun words -> "Wrote " ^ words) (Echo.words op);
                doc, { (result : _ frame_result) with label = Flow_graph.Flow_edit.label op; edit_error = None;
-               effects = Parameter.union_effects result.effects Doc.cook_effects }
+               effects = Param.union_effects result.effects Editor_document.Document_edit.cook_effects }
            | Error message -> refuse message)
       | Syntax_batch (label, ops) ->
-          (match Doc.syntax_batch ~factories:value.factories next ops with
+          (match Editor_document.Document_edit.syntax_batch ~factories:value.factories next ops with
            | Ok doc ->
                List.iter (function
                  | Flow_graph.Flow_edit.Add_node { scope; name; _ } -> added := [ scope @ [ name ] ]
@@ -281,12 +290,12 @@ let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~lead
                if !edit_note = None then
                  edit_note := Option.map (fun words -> "Wrote " ^ words) (Echo.batch ops);
                doc, { (result : _ frame_result) with label; edit_error = None;
-                 effects = Parameter.union_effects result.effects Doc.cook_effects }
+                 effects = Param.union_effects result.effects Editor_document.Document_edit.cook_effects }
            | Error message -> refuse message)
       | Pin_row { node; label; pin } ->
           let module PM = Layout_by_path.Path_map in
           let module SM = Layout_by_path.String_map in
-          let doc = Doc.layout_edit next (fun l ->
+          let doc = Editor_document.Document_edit.layout_edit next (fun l ->
             let rows = Option.value ~default:SM.empty (PM.find_opt node l.rows) in
             let rows = match pin with Some v -> SM.add label v rows | None -> SM.remove label rows in
             { l with rows = if SM.is_empty rows then PM.remove node l.rows else PM.add node rows l.rows }) in
@@ -304,11 +313,11 @@ let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~lead
            | Some home ->
                let op path = Flow_graph.Flow_edit.Set_arg { node = path; key = Kw key; sub; value = expr } in
                (match (let* doc, path = Editor_document.Scene_sync.bind_home ~factories:value.factories next home in
-                       Doc.syntax_edit ~factories:value.factories doc (op path)) with
+                       Editor_document.Document_edit.syntax_edit ~factories:value.factories doc (op path)) with
                 | Ok doc ->
                     edit_note := Editor_document.Scene_sync.template_note next home;
                     doc, { result with label = "Edit expression";
-                      effects = Parameter.union_effects result.effects Doc.cook_effects }
+                      effects = Param.union_effects result.effects Editor_document.Document_edit.cook_effects }
                 | Error message -> refuse message))
       | Syntax_inline { home; key; make } ->
           (* bind what is written in place (the call holding it, then the expression), then
@@ -316,18 +325,18 @@ let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~lead
           let ( let* ) = Result.bind in
           let bound =
             let* doc, node = Editor_document.Scene_sync.bind_home ~factories:value.factories next home in
-            let* doc = Doc.syntax_edit ~factories:value.factories doc
+            let* doc = Editor_document.Document_edit.syntax_edit ~factories:value.factories doc
               (Flow_graph.Flow_edit.Unfold { node; key; sub = [] }) in
             (match Flow_graph.Flow_edit.arg_text (fst doc.workspace).source node key with
              | Some { Flow.Syntax.node = Sym name; _ } ->
                  let path = List.rev (name :: List.tl (List.rev node)) in
-                 let* doc = Doc.syntax_edit ~factories:value.factories doc (make path) in
+                 let* doc = Editor_document.Document_edit.syntax_edit ~factories:value.factories doc (make path) in
                  Ok (doc, make path)
              | _ -> Error "The panel could not be named.") in
           (match bound with
            | Ok (doc, op) ->
                doc, { (result : _ frame_result) with label = Flow_graph.Flow_edit.label op;
-                 effects = Parameter.union_effects result.effects Doc.cook_effects }
+                 effects = Param.union_effects result.effects Editor_document.Document_edit.cook_effects }
            | Error message -> refuse message)
       | _ -> next, result) (next, result) result.changes in
   let next, result = match !refused with
@@ -342,7 +351,7 @@ let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~lead
   (* a node added from the menu lands where the menu was opened *)
   let scope_changes = match !added, result.menu_pick, value.menu with
     | [ path ], Some _, Some menu ->
-        let scope = List.filteri (fun i _ -> i < List.length path - 1) path in
+        let scope = List.take (max 0 (List.length path - 1)) path in
         let mx, my = Pxui_graph.Node_menu.position menu in
         (match Pxui_graph.Scope.scope_point value.scope_view ~scope (float mx, float my) with
          | Some (x, y) -> Pxui_graph.Scope.Moved [ path, x, y ] :: result.scope_changes
@@ -354,23 +363,23 @@ let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~lead
           (* opening a frame that starts collapsed is stored, so it stays open *)
           (* an expression starts folded: opening it is stored too *)
           let default = Flow_graph.Flow_edit.nested (List.nth zone (List.length zone - 1)) in
-          Doc.layout_edit next (fun l -> { l with collapsed =
+          Editor_document.Document_edit.layout_edit next (fun l -> { l with collapsed =
             if collapsed then M.add zone true l.collapsed
             else if default then M.add zone false l.collapsed else M.remove zone l.collapsed }),
           { (result : _ frame_result) with label = if collapsed then "Collapse zone" else "Expand zone" }, probes
       | Moved placed ->
-          Doc.layout_edit next (fun l -> { l with at = List.fold_left (fun at (path, x, y) ->
+          Editor_document.Document_edit.layout_edit next (fun l -> { l with at = List.fold_left (fun at (path, x, y) ->
             M.add path (x, y) at) l.at placed }),
           { result with label = (if !added = [] then "Move" else result.label) }, probes
       | Level_set changes ->
-          Doc.layout_edit next (fun l -> List.fold_left (fun (l : Layout_by_path.t) (path, level, pinned) ->
+          Editor_document.Document_edit.layout_edit next (fun l -> List.fold_left (fun (l : Layout_by_path.t) (path, level, pinned) ->
             { l with
               level = (match level with Some v -> M.add path v l.level | None -> M.remove path l.level);
               pinned = if pinned then M.add path true l.pinned else M.remove path l.pinned }) l changes),
           { result with label = "Detail level" }, probes
       | Probe_set { zone; index } -> next, result, M.add zone index probes
       | Frames_set { scope; frames } ->
-          Doc.layout_edit next (fun l -> { l with frames =
+          Editor_document.Document_edit.layout_edit next (fun l -> { l with frames =
             if frames = [] then M.remove scope l.frames
             else M.add scope (List.map (fun (title, at, size) -> { Layout_by_path.title; at; size }) frames) l.frames }),
           { result with label = "Frame" }, probes
@@ -387,7 +396,7 @@ let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~lead
   let next, world_added = match Objects.ids "world" next.scene.graph.geometry with
     | [] when List.mem Leader.Go_world actions ->
         (match Result.bind (Editor_document.Scene_sync.add_world next)
-                 (Doc.syntax_batch ~factories:value.factories next) with
+                 (Editor_document.Document_edit.syntax_batch ~factories:value.factories next) with
          | Ok doc -> doc, true | Error _ -> next, false)
     | _ -> next, false in
   let next, result = if Option.is_some loaded then next, result
@@ -407,7 +416,7 @@ let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~lead
         result.pane_keys in
   let input = Pxui.Ui.input ?owner value.ui in
   let dragging = Frame.mouse_down Input.LeftButton frame || Frame.has_event (function
-    | Event.MouseReleased (Input.LeftButton, _) -> true | _ -> false) frame in
+    | Input.Pointer_released (Input.LeftButton, _) -> true | _ -> false) frame in
   let gesture = if not dragging || Option.is_some loaded
       || world_added || world_label <> None then None else
     match List.find_map (function
@@ -441,7 +450,7 @@ let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~lead
           else if world_label <> None then Option.get world_label
           else result.label)
         ~merge:(if List.exists (function Syntax_edit (Flow_graph.Flow_edit.Set_layout _) -> true | _ -> false) result.changes
-          then Editor_core.History.Burst { key = "layout"; at = frame.Frame.time; window = 1.5 }  (* keys: no drag seals it *)
+          then Editor_core.History.Burst { key = "layout"; at = frame.input.t; window = 1.5 }  (* keys: no drag seals it *)
           else Option.fold ~none:Editor_core.History.Step
             ~some:(fun key -> Editor_core.History.Gesture key) gesture) next value.history in
   let stepped = if List.mem Leader.Redo actions then Editor_core.History.redo history
@@ -457,7 +466,7 @@ let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~lead
     | Some history -> history, Editor_core.History.present history, true
     | None -> history, (if carrying then value.doc else Editor_core.History.present history), false in
   let effects = if undone || Option.is_some loaded || carry_changed
-    then Parameter.union_effects result.effects Doc.cook_effects else result.effects in
+    then Param.union_effects result.effects Editor_document.Document_edit.cook_effects else result.effects in
   (* The open level must still exist after undo or a preset load. *)
   let level = Document.resolve_level doc
       (if Option.is_some loaded then Document.Scene else value.level) in
@@ -470,7 +479,7 @@ let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~lead
       let exists id = Edit_graph.find (network value').graph.geometry ~node_id:id <> None in
       match List.filter exists (Selection.selected_nodes result.selection) with
       | ids when ids = Selection.selected_nodes result.selection -> result.selection
-      | ids -> Selection.select_nodes ids result.selection in
+      | ids -> Selection.select_nodes ids in
   (* Entering and leaving levels: i / double-click / list activation, u. *)
   (* i also follows a reference of the node selected in the pane (a material, an object's graph) *)
   let followed = match List.find_map (function
@@ -498,12 +507,12 @@ let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~lead
     | _ -> None in
   let selection = match result.open_graph with
     | Some id when Edit_graph.find (network value').graph.geometry ~node_id:id <> None ->
-        Selection.select id selection
+        Selection.select id
     | Some _ | None -> selection in
   (* / e selects the scene's World, then enters it *)
   let selection = match target with
     | Some (Document.Inside id) when List.mem Leader.Go_world actions && level = Document.Scene ->
-        Selection.select id selection
+        Selection.select id
     | _ -> selection in
   let value' = { value' with selection; menu = result.menu; tree = result.tree; probes;
     open_import = (match List.find_map (function Pxui_graph.Scope.Open_import file -> Some file | _ -> None) scope_changes with
@@ -528,7 +537,7 @@ let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~lead
     | None -> value' in
   (* u goes back along the route taken *)
   let pops = List.fold_left (fun n -> function Leader.Up -> max n 1 | Back k -> max n k | _ -> n) 0 actions in
-  let value' = match List.filteri (fun i _ -> i >= pops - 1) value'.back with
+  let value' = match List.drop (max 0 (pops - 1)) value'.back with
     | (back_level, pane_graph) :: rest when pops > 0 && target = None && followed = None ->
         let back_level = Document.resolve_level doc back_level in
         { (open_level { value' with back = rest } back_level) with pane_graph }
@@ -610,7 +619,7 @@ let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~lead
   end;
   let probes = match value'.scope_key with Some k when scope_name value' <> None -> k.targets | _ -> [] in
   let lit, lit_cache = lit_tags value' in
-  let cooked = Cook.update ~input:value'.live_frame ~live:result.live_cook ~probes ~lit
+  let cooked = Cook.update ~gpu:(Option.value gpu ~default:value.gpu) ~input:value'.live_frame ~live:result.live_cook ~probes ~lit ~pump
       value.cook ~settings:doc.settings
       ~objects:(geometry_objects value')
       ~edit_error:result.edit_error ~effects
@@ -645,7 +654,7 @@ let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~lead
              Pxui.Ui.carry value'.ui ~kind:payload.kind ~value:payload.value ();
              Some { payload; via = `Keys; original = value'.doc; settled = value'.cook.Cook.pieces;
                     report = None; targets = None;
-                    chosen = None; anchor = Some frame.mouse; preview = None; resting = None; hint = None }, None
+                    chosen = None; anchor = Some frame.input.pointer; preview = None; resting = None; hint = None }, None
          | Error message -> None, Some message)
     | None -> None, None in
   (* a cook that gave back every piece it had (the text changed, the objects did not) leaves
@@ -658,7 +667,7 @@ let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~lead
     else if document_changed && Option.is_none loaded && not undone then Option.map (fun m -> Info, m) !edit_note
     else notice in
   { core = { value' with timeline; cook = cooked.cook; lit = lit_cache; edit_error = cooked.edit_error;
-      status_fps; status_fps_at; last_dt = frame.dt; steady; guide; hud; focus = result.focus; focus_path = result.focus_path;
+      status_fps; status_fps_at; last_dt = frame.input.dt; steady; guide; hud; focus = result.focus; focus_path = result.focus_path;
       pane_keys = result.pane_keys; graph_panes = result.graph_panes; leader; held_keys;
       prompt;
       queued = (match result.prompt_intent with Some (Run_action action) -> [action]
@@ -667,7 +676,7 @@ let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~lead
         | _ -> []);
       carry; framing = (if cooked.framed <> None then None else framing);
       notice = new_notice;
-      notice_at = if new_notice <> value'.notice then frame.time else value'.notice_at };
+      notice_at = if new_notice <> value'.notice then frame.input.t else value'.notice_at };
     effects; prepared_changed;
     scene_changed = carry_changed || doc.scene != value.doc.scene || prepared_changed;
     framed;
@@ -684,11 +693,11 @@ let reduce ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~lead
    selection is [select], and [preview] puts a payload in flight whose hot target shows that edit
    on a scratch document (as {!carry_step} leaves the model while a target is hot). *)
 let reduce_idle ?select ?preview value actions (frame : Frame.t) =
-  let value = {value with live_frame = Live_frame.of_frame frame} in
+  let value = {value with live_frame = Flow_native.Live_frame.of_frame frame} in
   let value = match preview with
     | None -> value
     | Some op ->
-        (match Doc.syntax_edit ~factories:value.factories value.doc op with
+        (match Editor_document.Document_edit.syntax_edit ~factories:value.factories value.doc op with
          | Error message -> invalid_arg message
          | Ok doc ->
              { value with doc; lisp_vocab = vocabulary_for value doc;
@@ -697,11 +706,11 @@ let reduce_idle ?select ?preview value actions (frame : Frame.t) =
                  chosen = None; anchor = None; resting = None; hint = None;
                  preview = Some (Showing { place = Carry.Graph ""; doc; what = "" }) } }) in
   let selection = match select with
-    | Some ids -> Selection.select_nodes ids value.selection | None -> value.selection in
+    | Some ids -> Selection.select_nodes ids | None -> value.selection in
   let result = { workspace = value.workspace; focus = value.focus; focus_path = value.focus_path;
     pane_keys = value.pane_keys; scope_view = value.scope_view; scope_changes = []; selection;
     menu = value.menu; menu_pick = None; tree = value.tree; outline = value.outline; outline_intents = [];
-    document = (network value).graph; edit_error = value.edit_error; effects = Parameter.no_effects;
+    document = (network value).graph; edit_error = value.edit_error; effects = Param.no_effects;
     timeline_intents = []; frame_request = None; prompt = value.prompt; prompt_intent = None;
     panel = None; grab = false; settings = value.doc.settings; opened = None; live_cook = value.live_cook;
     label = "Edit"; changes = []; tree_intents = []; text_intents = []; open_graph = None;

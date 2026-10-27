@@ -12,12 +12,12 @@ type mode =
 type t
 
 val mode : t -> mode
-val vertices : t -> Vec3.t list
+val vertices : t -> Rays_math.Vec3.t list
 val vertex_count : t -> int
 val index_count : t -> int
-val centroid : t -> Vec3.t option
+val centroid : t -> Rays_math.Vec3.t option
 
-val vertex : int -> t -> Vec3.t option
+val vertex : int -> t -> Rays_math.Vec3.t option
 
 val with_mode : mode -> t -> t
 (* [remove_vertex] preserves valid indexing and therefore returns an error
@@ -38,11 +38,11 @@ module Private : sig
 
   type view = {
     mode : mode;
-    vertices : Vec3.t array;
+    vertices : Rays_math.Vec3.t array;
 
-    normals : Vec3.t array option;
-    colors : Color.t array option;
-    tex_coords : Vec2.t array option;
+    normals : Rays_math.Vec3.t array option;
+    colors : Rays_math.Color.t array option;
+    tex_coords : Rays_math.Vec2.t array option;
   }
 
   val view : t -> view
@@ -52,15 +52,15 @@ module Private : sig
     vertices : vec3_view;
     indices : int array;
     normals : vec3_view option;
-    colors : Color.t array option;
-    tex_coords : Vec2.t array option;
+    colors : Rays_math.Color.t array option;
+    tex_coords : Rays_math.Vec2.t array option;
   }
 
   val packed_view : t -> packed_view
   val create_owned :
     ?mode:mode ->
     ?indices:int array ->
-    Vec3.t array ->
+    Rays_math.Vec3.t array ->
     (t, string) result
   (** Ownership-transfer construction for sibling-library generators.
       Position and normal records are packed into retained coordinate planes;
@@ -70,8 +70,8 @@ module Private : sig
     ?mode:mode ->
     ?indices:int array ->
     ?normals:vec3_view ->
-    ?colors:Color.t array ->
-    ?tex_coords:Vec2.t array ->
+    ?colors:Rays_math.Color.t array ->
+    ?tex_coords:Rays_math.Vec2.t array ->
     vec3_view ->
     (t, string) result
   (** Zero-copy construction from packed coordinate planes. Every supplied
@@ -82,8 +82,8 @@ module Private : sig
     ?mode:mode ->
     ?indices:int array ->
     ?normals:vec3_view ->
-    ?colors:Color.t array ->
-    ?tex_coords:Vec2.t array ->
+    ?colors:Rays_math.Color.t array ->
+    ?tex_coords:Rays_math.Vec2.t array ->
     vec3_view ->
     (t, string) result
   (** Zero-copy construction from already-published immutable packed storage.

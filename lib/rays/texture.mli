@@ -4,10 +4,10 @@ type t
 type filter = Nearest | Bilinear | Trilinear
 type wrap = Clamp | Repeat | Mirror
 
-val init : width:int -> height:int -> (x:int -> y:int -> Color.t) -> t
+val init : width:int -> height:int -> (x:int -> y:int -> Rays_math.Color.t) -> t
 
 val size : t -> int * int
-val pixels : t -> Color.t list
+val pixels : t -> Rays_math.Color.t list
 val generate_mipmaps : t -> t
 val subsection :
   x:int ->
@@ -21,7 +21,7 @@ val sample :
   t ->
   u:float ->
   v:float ->
-  Color.t
+  Rays_math.Color.t
 (** Sample normalized texture coordinates. [(0, 0)] is the upper-left texel. *)
 
 module Private : sig
@@ -34,10 +34,10 @@ module Private : sig
   (* Zero-copy construction for fresh immutable pixel arrays. The supplied
       array becomes backing storage and must not be mutated afterward. *)
   val create_owned :
-    width:int -> height:int -> Color.t array -> (t, string) result
+    width:int -> height:int -> Rays_math.Color.t array -> (t, string) result
   (* Allocation-free packed RGBA sampling for renderer-independent image
      processing and deterministic texture queries. *)
-  val levels : t -> (int * int * Color.t array) array
+  val levels : t -> (int * int * Rays_math.Color.t array) array
 
   (** Process-local identity: equal only for the same immutable texture value,
       so renderers can key uploads without hashing pixels. *)

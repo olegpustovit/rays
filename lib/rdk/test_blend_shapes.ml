@@ -217,7 +217,7 @@ let test_parallel_scale () =
       10. +. float_of_int point *. 0.02))
       |> attribute Attribute.Point "density"
         (Attribute.Float (Array.init count (fun point -> float_of_int (point mod 23)))) in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
     Blend_shapes.run ~grain:127 ~shapes:[Blend_shapes.shape ~weight:0.37 target]
       source |> get_ok) in
   let one = run 1 and four = run 4 in

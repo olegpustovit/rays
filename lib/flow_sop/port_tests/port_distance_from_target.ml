@@ -85,18 +85,18 @@ let vector_check ~dir =
           (Flow.Lisp.float x) (Flow.Lisp.float y) (Flow.Lisp.float z)) vectors) in
       let text = Printf.sprintf "(workspace port (graph g :context sop (sop/distance_from_target %s %s)))" ctx.head words in
       let build = match Flow.Syntax.parse text with
-        | Error d -> Error (Flow.Diagnostic.to_string d)
+        | Error d -> Error (Diagnostic.to_string d)
         | Ok forms -> match Flow_sop.Catalog.check_workspace ~sources:ctx.sources ~ops:Flow_sop.Operators.all ctx.catalog forms with
           | Some w, ds when errors ds = [] ->
               (try match Flow_sop.Lower.of_checked ~reference:false ~factories:ctx.factories w with
-               | Error d -> Error (Flow.Diagnostic.to_string d)
+               | Error d -> Error (Diagnostic.to_string d)
                | Ok lowered -> let g = List.hd lowered.graphs in
                    Result.map (fun n ->
                      check (Flow_sop.Catalog.descriptor (List.find (fun f -> key_of f = node.key) lowered.factories)
                        = Flow_sop.Catalog.descriptor node.native) "Catalog.descriptor differs from native";
                      n) (Sop.Edit_graph.compile_node g.network.geometry ~node_id:(Option.get g.root))
                with Invalid_argument m | Failure m -> Error m)
-          | _, ds -> Error (String.concat "\n" (List.map Flow.Diagnostic.to_string ds)) in
+          | _, ds -> Error (String.concat "\n" (List.map Diagnostic.to_string ds)) in
       match native ctx natives, build with
       | Error _, Error _ -> ()
       | Error m, Ok _ -> fail (at ("native refused (" ^ m ^ ") but the Lisp node was accepted"))
@@ -104,7 +104,7 @@ let vector_check ~dir =
       | Ok expected, Ok actual -> with_session (fun s -> match cook s 1 97 expected, cook s 1 97 actual with
           | Error e, Error g -> check (e.code = g.code) (at ("error code " ^ g.code ^ " but native " ^ e.code))
           | Error _, Ok _ -> fail (at "native error but Lisp succeeded")
-          | Ok _, Error g -> fail (at ("Lisp error " ^ Sop.Diagnostic.error_to_string g ^ " but native succeeded"))
+          | Ok _, Error g -> fail (at ("Lisp error " ^ Diagnostic.error_to_string g ^ " but native succeeded"))
           | Ok e, Ok g ->
               check (Sop.Node.parameter_fields actual = Sop.Node.parameter_fields expected) (at "parameter_fields differ");
               check (Sop.Node.parameter_key actual = Sop.Node.parameter_key expected) (at "parameter_key differs");

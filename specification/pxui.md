@@ -224,7 +224,7 @@ own. Its model and constants are NSScrollView's as `../scriptc-ui`
   by `scroll_step` (one row) per step. Past an edge, `x` points of travel show
   as `0.05 x / (1 + 0.05 |x| / h)` in a box `h` tall, and 80 ms after the last
   step the overscroll decays with tau = 0.084 s.
-- A trackpad (`Event.TrackpadScrolled`, macOS) moves the content one point per
+- A trackpad (`Input.Trackpad_scrolled`, macOS) moves the content one point per
   point while the fingers are down, in the box the gesture began over. Past an
   edge the content follows the fingers at about half their travel at first
   (`0.55 x / (1 + 0.55 |x| / h)`; the reference's 0.05 read as not following), held

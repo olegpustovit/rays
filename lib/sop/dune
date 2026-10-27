@@ -1,45 +1,44 @@
 (library
  (name sop)
  (public_name rays.sop)
- (libraries param frame_input rays_math rdk lru unix)
+ (libraries param input rays_diagnostic rays_math rdk lru unix parallel)
  (preprocess (pps rays.ppx))
- (modules context diagnostic image kernel payload parameter node session async_cook image_nodes
+ (modules context image kernel payload node session async_cook image_nodes
   support groups sop_topology attributes shapes nodes zone custom graph edit_graph)
  (private_modules support groups sop_topology attributes shapes))
 
 (test
  (name test_facts)
  (modules test_facts)
- (libraries sop rdk rays_math sop_catalog flow flow_sop lisp_sop rdk_test_support))
-
-(test
- (name test_lisp_ports)
- (modules test_lisp_ports)
- (deps ../flow_sop/nodes/noise_displace.rays ../flow_sop/nodes/set_float.rays ../flow_sop/nodes/set_int.rays ../flow_sop/nodes/set_vector.rays ../flow_sop/nodes/set_orient.rays ../flow_sop/nodes/set_transform.rays)
- (libraries sop rdk rays_math sop_catalog flow flow_sop lisp_sop rdk_test_support unix))
+ (libraries sop rdk rays_math lisp_sop rdk_test_support ogpu_mock parallel))
 
 (rule
  (alias test_lisp_ports)
- (action (run %{exe:test_lisp_ports.exe})))
+ (deps ../flow_sop/test_lisp_ports.exe)
+ (action (chdir ../flow_sop (run %{dep:../flow_sop/test_lisp_ports.exe}))))
 
 (test
  (name test_payload)
  (modules test_payload)
- (libraries sop lisp_sop))
+ (libraries sop lisp_sop parallel))
+
+(rule
+ (alias test_payload)
+ (action (run %{exe:test_payload.exe})))
 
 (test
  (name test_parallel_branches)
  (modules test_parallel_branches)
- (libraries sop rdk rays_math lisp_sop rdk_test_support unix))
+ (libraries sop rdk rays_math lisp_sop rdk_test_support ogpu_mock unix parallel))
 (test
  (name test_attr_from_image)
  (modules test_attr_from_image)
- (libraries sop rdk lisp_sop unix))
+ (libraries sop rdk lisp_sop unix parallel))
 
 (test
  (name test_subdivide_cracks)
  (modules test_subdivide_cracks)
- (libraries sop rdk rays_math lisp_sop))
+ (libraries sop rdk rays_math lisp_sop ogpu_mock parallel))
 
 ; One executable per suite: each links only its own module, so a suite builds and runs
 ; while another is being edited.
@@ -47,24 +46,41 @@
  (names run_sop run_edit_graph run_nodes run_parallel_exact run_diagnostics)
  (modules run_sop run_edit_graph run_nodes run_parallel_exact run_diagnostics
   test_sop test_edit_graph test_nodes test_parallel_exact test_diagnostics)
- (libraries sop rays rdk rdk_rays rdk_test_support lisp_sop))
+ (libraries sop rays rdk rdk_rays rdk_test_support lisp_sop rays_math ogpu_mock parallel))
 
 (rule
- (aliases qualification-scale test_sop)
+ (alias test_sop)
  (action (run %{exe:run_sop.exe})))
 
 (rule
- (aliases runtest test_edit_graph)
+ (alias test_edit_graph)
  (action (run %{exe:run_edit_graph.exe})))
 
+(alias
+ (name runtest)
+ (deps (alias test_edit_graph)))
+
 (rule
- (aliases qualification-scale test_nodes)
+ (alias test_nodes)
  (action (run %{exe:run_nodes.exe})))
 
 (rule
- (aliases qualification qualification-scale test_parallel_exact)
+ (alias test_parallel_exact)
  (action (run %{exe:run_parallel_exact.exe})))
 
 (rule
- (aliases qualification-scale test_diagnostics)
+ (alias test_diagnostics)
  (action (run %{exe:run_diagnostics.exe})))
+
+(alias
+ (name qualification-scale)
+ (deps
+  (alias test_sop)
+  (alias test_nodes)
+  (alias test_parallel_exact)
+  (alias test_diagnostics)))
+
+(alias
+ (name qualification)
+ (deps
+  (alias test_parallel_exact)))

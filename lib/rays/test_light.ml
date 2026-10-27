@@ -1,14 +1,14 @@
 open Rays
 
 let camera=Camera.perspective~fov_y:1.~near:0.1~far:100.
-  ~at:(Vec3.create 0. 0. 10.)~target:Vec3.zero()
+  ~at:(Rays_math.Vec3.create 0. 0. 10.)~target:Rays_math.Vec3.zero()
 let triangle=Result.get_ok(Mesh.Private.create_owned
-  [|Vec3.zero;Vec3.unit_x;Vec3.unit_y|]) |> Mesh.recalculate_normals
+  [|Rays_math.Vec3.zero;Rays_math.Vec3.unit_x;Rays_math.Vec3.unit_y|]) |> Mesh.recalculate_normals
 let lights samples=
   let attenuation=Light.attenuation~constant:2.~quadratic:3.()in
-  let diffuse=Color.rgb 51 102 153 and at=Vec3.create 1. 2. 3.
-  and direction=Vec3.create 0. (-2.) 0. in
-  [Light.directional~diffuse~intensity:3.~direction:Vec3.unit_y();
+  let diffuse=Rays_math.Color.rgb 51 102 153 and at=Rays_math.Vec3.create 1. 2. 3.
+  and direction=Rays_math.Vec3.create 0. (-2.) 0. in
+  [Light.directional~diffuse~intensity:3.~direction:Rays_math.Vec3.unit_y();
    Light.point~diffuse~intensity:4.~attenuation~at();
    Light.spot~diffuse~intensity:5.~attenuation~at~direction~cutoff:0.5~concentration:3.();
    Light.area~diffuse~intensity:6.~attenuation~at~direction~width:4.~height:5.~samples()]

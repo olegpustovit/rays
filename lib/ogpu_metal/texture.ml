@@ -1,5 +1,5 @@
-type format = R8_unorm | Rgba8_unorm | Bgra8_unorm | Rgba16_float | Rgba32_float | Depth32_float | Stencil8
-type memory = Device_local | Shared
+type format = Ogpu_core.Types.texture_format = R8_unorm | Rgba8_unorm | Bgra8_unorm | Bgra8_unorm_srgb | Rgba16_float | Rgba32_float | Depth32_float
+type memory = Ogpu_core.Types.memory = Shared | Device_local
 type t =
   { metal : Metal.Texture.t; handle : unit Ogpu_core.Handle.t; device : Device.t
   ; descriptor : Ogpu_core.Types.texture_descriptor; format : format
@@ -7,20 +7,16 @@ type t =
     mutable submission_uses:int;mutable destroy_requested:bool }
 
 let error operation kind message = Error (Ogpu_core.Error.make operation kind message)
-let metal_format = function R8_unorm->Metal.Texture.R8_unorm|Rgba8_unorm->Metal.Texture.Rgba8_unorm|Bgra8_unorm->Metal.Texture.Bgra8_unorm|Rgba16_float->Metal.Texture.Rgba16_float|Rgba32_float->Metal.Texture.Rgba32_float|Depth32_float->Metal.Texture.Depth32_float|Stencil8->Metal.Texture.Stencil8
-let bytes_per_pixel = function R8_unorm|Stencil8->1|Rgba8_unorm|Bgra8_unorm|Depth32_float->4|Rgba16_float->8|Rgba32_float->16
+let metal_format = function R8_unorm->Metal.Texture.R8_unorm|Rgba8_unorm->Metal.Texture.Rgba8_unorm|Bgra8_unorm->Metal.Texture.Bgra8_unorm|Bgra8_unorm_srgb->Metal.Texture.Bgra8_unorm_srgb|Rgba16_float->Metal.Texture.Rgba16_float|Rgba32_float->Metal.Texture.Rgba32_float|Depth32_float->Metal.Texture.Depth32_float
+let bytes_per_pixel = function R8_unorm->1|Rgba8_unorm|Bgra8_unorm|Bgra8_unorm_srgb|Depth32_float->4|Rgba16_float->8|Rgba32_float->16
 let add_unique x xs = if List.mem x xs then xs else x :: xs
-let validation_format=function R8_unorm|Stencil8->Ogpu_core.Validation.R8_unorm|Rgba8_unorm->Rgba8_unorm|Bgra8_unorm->Bgra8_unorm|Rgba16_float->Rgba16_float|Rgba32_float->Rgba32_float|Depth32_float->Depth32_float
-let validation_storage=function Device_local->Ogpu_core.Validation.Device_local|Shared->Shared
-let validation_usage=function Ogpu_core.Types.Texture_binding->Ogpu_core.Validation.Binding|Storage_binding->Storage_binding|Render_attachment->Attachment|Texture_copy_src->Copy_src|Texture_copy_dst->Copy_dst
-
 let validate_descriptor (value : Ogpu_core.Types.texture_descriptor) format =
   let operation="Ogpu_metal.Texture.create" in
   let max_mips = 1 + int_of_float (Float.floor (Float.log2 (float_of_int (max value.width (max value.height value.depth))))) in
   if value.mip_levels > max_mips then error operation Ogpu_core.Error.Invalid_argument "mip count exceeds texture extent"
   else if not (List.mem value.sample_count [1;4;9;16]) then error operation Ogpu_core.Error.Invalid_argument "sample count must be 1, 4, 9, or 16"
   else if value.sample_count > 1 && (value.depth <> 1 || value.mip_levels <> 1) then error operation Ogpu_core.Error.Invalid_argument "multisample textures are 2D and single-mip"
-  else if (format=Depth32_float||format=Stencil8) && List.mem Ogpu_core.Types.Texture_binding value.usage then error operation Ogpu_core.Error.Invalid_argument "depth/stencil sampling is not exposed by this foundation"
+  else if (format=Depth32_float) && List.mem Ogpu_core.Types.Texture_binding value.usage then error operation Ogpu_core.Error.Invalid_argument "depth/stencil sampling is not exposed by this foundation"
   else Ok ()
 
 let usage values =
@@ -37,10 +33,10 @@ let usage values =
    heap creation and by heap placement queries. *)
 let native_descriptor ~operation device ~memory ~format (descriptor:Ogpu_core.Types.texture_descriptor) =
   if Device.destroyed device then error operation Ogpu_core.Error.Stale_handle "device is destroyed"
-  else match Ogpu_core.Types.validate_texture (Device.capabilities device) descriptor with Error _ as e->e|Ok()->
-    let profile:Ogpu_core.Validation.texture_profile={format=validation_format format;storage=validation_storage memory;
+  else match Ogpu_core.Validation.validate_texture (Device.capabilities device) descriptor with Error _ as e->e|Ok()->
+    let profile:Ogpu_core.Validation.texture_profile={format;storage=memory;
       width=descriptor.width;height=descriptor.height;depth=descriptor.depth;mip_levels=descriptor.mip_levels;
-      sample_count=descriptor.sample_count;usage=List.map validation_usage descriptor.usage}in
+      sample_count=descriptor.sample_count;usage=descriptor.usage}in
     match Ogpu_core.Validation.validate_texture_profile(Device.capabilities device)profile with Error _ as e->e|Ok()->
     match validate_descriptor descriptor format with Error _ as e->e|Ok()->
     let storage=match memory with Device_local->Metal.Buffer.Private|Shared->Metal.Buffer.Shared in

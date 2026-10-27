@@ -48,10 +48,8 @@ type op =
   | Layout_window of { graph : string; kind : string }
   | Layout_float of { graph : string; at : int list }
 
-exception Fail of Flow.Diagnostic.t
-
 let fail ?(code = "E_EDIT") fmt =
-  Printf.ksprintf (fun message -> raise (Fail (Flow.Diagnostic.error ~code message))) fmt
+  Printf.ksprintf (fun message -> raise (Diagnostic.Error (Diagnostic.error ~code message))) fmt
 
 (* ---- syntax helpers ---- *)
 
@@ -278,7 +276,7 @@ let arg_set (e : S.t) key (v : S.t option) : S.t =
   | Kw "skip", S.List (({ S.node = S.Sym "for"; _ } as h) :: args), Some v when kw_get args "skip" = None ->
       (* the body stays last *)
       let n = List.length args in
-      { e with node = S.List (h :: List.filteri (fun i _ -> i < n - 1) args @ [ kwf "skip"; v; List.nth args (n - 1) ]) }
+      { e with node = S.List (h :: List.take (n - 1) args @ [ kwf "skip"; v; List.nth args (n - 1) ]) }
   | Pos i, S.List (h :: args), _ -> { e with node = S.List (h :: with_pos args i v) }
   | Kw k, S.List (({ S.node = S.Sym "scene/root"; _ } as h) :: args), _ ->
       { e with node = S.List (h :: root_order (with_kw args k v)) }
@@ -601,7 +599,9 @@ let body_of x =
       let others = List.filter (fun q -> q != x.out) sel in
       call "let*" [ vec (flat_pairs (others @ [ x.out ])); sym x.out_name ]
 
-let insert_at keep i extra = List.filteri (fun j _ -> j < i) keep @ extra @ List.filteri (fun j _ -> j >= i) keep
+let insert_at keep i extra =
+  let i = max 0 (min i (List.length keep)) in
+  List.take i keep @ extra @ List.drop i keep
 
 let sel_names x = List.concat_map (fun (p, _) -> pat_names p) x.sel
 let sel_declared x = List.fold_left (fun a (_, e) -> declared e a) [] x.sel

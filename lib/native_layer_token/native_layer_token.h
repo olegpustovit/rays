@@ -5,7 +5,10 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-value rays_native_layer_token_create(void *layer, uint64_t owner, uint64_t generation);
+/* The platform supplies paired ownership operations for its opaque presentation
+   handle. Two NULL operations describe a borrowed handle invalidated by its owner. */
+value rays_native_layer_token_create(void *layer, uint64_t owner, uint64_t generation,
+    void (*retain)(void *), void (*release)(void *));
 void rays_native_layer_token_invalidate(value token);
 void *rays_native_layer_token_borrow(value token, uint64_t owner, uint64_t generation);
 #ifdef __cplusplus

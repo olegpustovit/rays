@@ -39,11 +39,11 @@ let sample () = geometry
 
 let test_winding_viewpoint_and_edge_on () =
   let source = sample () in
-  let above = Group_ops.group_backface ~viewpoint:(Vec3.create 0. 0. 10.)
+  let above = Group_ops.group_backface ~viewpoint:(Rays_math.Vec3.create 0. 0. 10.)
       ~name:"above" source |> get_ok in
   expect_members [1] (group "above" above)
     "Group Backface winding, curve, and edge-on behavior";
-  let below = Group_ops.group_backface ~viewpoint:(Vec3.create 0. 0. (-10.))
+  let below = Group_ops.group_backface ~viewpoint:(Rays_math.Vec3.create 0. 0. (-10.))
       ~name:"below" source |> get_ok in
   expect_members [0] (group "below" below)
     "Group Backface viewpoint reversal"
@@ -54,11 +54,11 @@ let test_extreme_coordinates () =
       [|(magnitude, magnitude, magnitude); (-.magnitude, magnitude, magnitude);
         (magnitude, -.magnitude, magnitude)|]
       [|`Polygon, [|0; 1; 2|]|] in
-  let front = Group_ops.group_backface ~viewpoint:(Vec3.create 0. 0. max_float)
+  let front = Group_ops.group_backface ~viewpoint:(Rays_math.Vec3.create 0. 0. max_float)
       ~name:"front" source |> get_ok in
   expect_members [] (group "front" front)
     "Group Backface overflow-safe extreme front face";
-  let back = Group_ops.group_backface ~viewpoint:(Vec3.create 0. 0. (-.max_float))
+  let back = Group_ops.group_backface ~viewpoint:(Rays_math.Vec3.create 0. 0. (-.max_float))
       ~name:"back" source |> get_ok in
   expect_members [0] (group "back" back)
     "Group Backface overflow-safe extreme back face"
@@ -72,32 +72,32 @@ let test_base_merge_and_failures () =
   let source = Geometry.with_group base source |> Result.get_ok
       |> Geometry.with_group visible |> Result.get_ok in
   let based = Group_ops.group_backface ~base:"base"
-      ~viewpoint:(Vec3.create 0. 0. 10.) ~name:"based" source |> get_ok in
+      ~viewpoint:(Rays_math.Vec3.create 0. 0. 10.) ~name:"based" source |> get_ok in
   expect_members [] (group "based" based)
     "Group Backface exact primitive base restriction";
   let visible = Group_ops.group_backface ~merge:Group_ops.Group_subtract
-      ~viewpoint:(Vec3.create 0. 0. 10.) ~name:"visible" source |> get_ok in
+      ~viewpoint:(Rays_math.Vec3.create 0. 0. 10.) ~name:"visible" source |> get_ok in
   expect_members [0; 2; 3] (group "visible" visible)
     "Group Backface subtracts from an existing criteria group";
   let absent_intersection = Group_ops.group_backface ~merge:Group_ops.Group_intersection
-      ~viewpoint:(Vec3.create 0. 0. 10.) ~name:"absent_intersection" source
+      ~viewpoint:(Rays_math.Vec3.create 0. 0. 10.) ~name:"absent_intersection" source
       |> get_ok in
   check (Group.cardinality (group "absent_intersection" absent_intersection) = 0)
     "Group Backface absent destination intersection identity";
   let absent_subtract = Group_ops.group_backface ~merge:Group_ops.Group_subtract
-      ~viewpoint:(Vec3.create 0. 0. 10.) ~name:"absent_subtract" source
+      ~viewpoint:(Rays_math.Vec3.create 0. 0. 10.) ~name:"absent_subtract" source
       |> get_ok in
   check (Group.cardinality (group "absent_subtract" absent_subtract) = 0)
     "Group Backface absent destination subtraction identity";
   expect_invalid (fun () -> Group_ops.group_backface
-      ~viewpoint:(Vec3.create Float.nan 0. 0.) ~name:"bad" source)
+      ~viewpoint:(Rays_math.Vec3.create Float.nan 0. 0.) ~name:"bad" source)
     "Group Backface rejects a non-finite viewpoint";
   expect_invalid (fun () -> Group_ops.group_backface ~base:"missing"
-      ~viewpoint:Vec3.zero ~name:"bad" source)
+      ~viewpoint:Rays_math.Vec3.zero ~name:"bad" source)
     "Group Backface rejects a missing base";
   let cancelled = Cancel.create () in
   Cancel.cancel cancelled;
-  (match Group_ops.group_backface ~cancel:cancelled ~viewpoint:Vec3.zero
+  (match Group_ops.group_backface ~cancel:cancelled ~viewpoint:Rays_math.Vec3.zero
       ~name:"bad" source with
    | Error error -> check (Error.code error = "cancelled")
        "Group Backface cancellation code"
@@ -106,7 +106,7 @@ let test_base_merge_and_failures () =
 let test_scale_parallel_exactness () =
   let source = Plane_generators.grid ~columns:600 ~rows:400 ~size:20. () |> get_ok in
   let run domains = Parallel.run ~domains (fun () ->
-    Group_ops.group_backface ~grain:1_009 ~viewpoint:(Vec3.create 0. (-10.) 0.)
+    Group_ops.group_backface ~grain:1_009 ~viewpoint:(Rays_math.Vec3.create 0. (-10.) 0.)
       ~name:"backfaces" source |> get_ok) in
   let one = run 1 and four = run 4 in
   let one = group "backfaces" one and four = group "backfaces" four in

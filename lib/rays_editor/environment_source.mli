@@ -6,7 +6,7 @@ val open_import :
 val open_dialog :
   'a t ->
   ('b, 'c) Core_model.update ->
-  Rays.Event.t list -> 'a t * ('b, 'c) Core_model.update
+  Input.event list -> 'a t * ('b, 'c) Core_model.update
 val reload_source :
   'a t ->
   ('b, 'c) Core_model.update ->

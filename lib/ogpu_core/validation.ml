@@ -1,10 +1,7 @@
-type format=R8_unorm|Rgba8_unorm|Bgra8_unorm|Rgba16_float|Rgba32_float|Depth32_float
-type storage=Device_local|Shared|Upload|Readback
-type texture_usage=Binding|Storage_binding|Attachment|Copy_src|Copy_dst
-type texture_profile={format:format;storage:storage;width:int;height:int;depth:int;mip_levels:int;sample_count:int;usage:texture_usage list}
+type texture_profile={format:Types.texture_format;storage:Types.memory;width:int;height:int;depth:int;mip_levels:int;sample_count:int;usage:Types.texture_usage list}
 let invalid operation message=Error(Error.make operation Error.Invalid_argument message)
 let validate_label ~operation=function None->Ok()|Some label when String.contains label '\000'->invalid operation"label contains NUL"|Some _->Ok()
-let validate_buffer ~operation ~max_size ~size ~usage_count=
+let validate_buffer_shape ~operation ~max_size ~size ~usage_count=
   if max_size<=0L||size<=0L||size>max_size then invalid operation"buffer size is outside device limits"
   else if usage_count<=0 then invalid operation"buffer usage is empty"else Ok()
 let mul_overflows a b=a<>0L&&b>Int64.div Int64.max_int a
@@ -16,21 +13,36 @@ let validate_texture_shape ~operation ~max_dimension ~max_samples ~width ~height
     if mul_overflows w h||mul_overflows(Int64.mul w h)d then invalid operation"texture texel cardinality overflows"else
     let rec maximum_mips n levels=if n<=1 then levels else maximum_mips(n/2)(levels+1)in
     if mip_levels>maximum_mips(max width(max height depth))1 then invalid operation"texture mip cardinality exceeds its extent"else Ok()
-let formats=[R8_unorm;Rgba8_unorm;Bgra8_unorm;Rgba16_float;Rgba32_float;Depth32_float]
-let storages=[Device_local;Shared;Upload;Readback]
-let storage_supported=function Device_local|Shared->true|Upload|Readback->false
 let unique values=List.sort_uniq compare values=values
 let validate_texture_profile capabilities value=
   let operation="Ogpu.Validation.validate_texture_profile"in let limits=capabilities.Caps.limits in
   match validate_texture_shape~operation~max_dimension:limits.max_texture_dimension_2d~max_samples:limits.max_sample_count
     ~width:value.width~height:value.height~depth:value.depth~mip_levels:value.mip_levels~sample_count:value.sample_count~usage_count:(List.length value.usage)with
   |Error _ as failure->failure|Ok()->
-  if not(List.mem value.format formats)||not(List.mem value.storage storages)then invalid operation"unknown format or storage"
-  else if not(storage_supported value.storage)then Error(Error.make operation Error.Unsupported"texture storage profile is unsupported")
-  else if not(unique value.usage)then invalid operation"texture usage must be sorted and unique"
-  else if value.sample_count>1&&(value.mip_levels<>1||value.depth<>1||value.usage<>[Attachment])then invalid operation"multisample textures require one attachment-only mip and depth slice"
-  else if value.storage=Shared&&value.sample_count>1 then invalid operation"shared multisample textures are unsupported"
+  if not(unique value.usage)then invalid operation"texture usage must be sorted and unique"
+  else if value.sample_count>1&&(value.mip_levels<>1||value.depth<>1||value.usage<>[Types.Render_attachment])then invalid operation"multisample textures require one attachment-only mip and depth slice"
+  else if value.storage=Types.Shared&&value.sample_count>1 then invalid operation"shared multisample textures are unsupported"
   else Ok()
+let validate_buffer (caps:Caps.t) (value:Types.buffer_descriptor)=
+  let operation="Ogpu.Types.validate_buffer"in
+  match validate_label~operation value.label with Error _ as failure->failure|Ok()->
+  validate_buffer_shape~operation~max_size:caps.Caps.limits.max_buffer_size~size:value.size~usage_count:(List.length value.usage)
+let validate_texture (caps:Caps.t) (value:Types.texture_descriptor)=
+  let operation="Ogpu.Types.validate_texture"and limits=caps.Caps.limits in
+  match validate_label~operation value.label with Error _ as failure->failure|Ok()->
+  match validate_texture_shape~operation~max_dimension:limits.max_texture_dimension_2d~max_samples:limits.max_sample_count
+    ~width:value.width~height:value.height~depth:value.depth~mip_levels:value.mip_levels~sample_count:value.sample_count~usage_count:(List.length value.usage)with
+  |Error _ as failure->failure
+  |Ok() when value.format=Types.R8_unorm||value.format=Types.Bgra8_unorm||value.format=Types.Bgra8_unorm_srgb||value.format=Types.Depth32_float->
+    invalid operation"OGPU texture descriptors require an RGBA color format"
+  |Ok() when value.format<>Types.Rgba8_unorm&&(List.mem Types.Render_attachment value.usage||value.sample_count>1)->
+    Error(Error.make operation Error.Unsupported"float textures are not render attachments")
+  |Ok()->Ok()
+let validate_sampler (value:Types.sampler_descriptor)=
+  let operation="Ogpu.Types.validate_sampler"in
+  match validate_label~operation value.label with Error _ as failure->failure|Ok()->
+  if not(Float.is_finite value.lod_min)||not(Float.is_finite value.lod_max)||value.lod_min<0.||value.lod_max<value.lod_min||value.max_anisotropy<1||value.max_anisotropy>16
+  then Error(Error.make operation Error.Invalid_argument"sampler LOD/anisotropy limits are invalid")else Ok()
 let validate_layout ~operation entries=
   let entries=List.sort(fun(a,_)(b,_)->Int.compare a b)entries in
   let rec loop previous=function

@@ -180,7 +180,7 @@ let test_complete_primitive_payload () =
   let ancestry = make_ancestry left right in
   let output = Payload.copy_primitives ~grain:1 ancestry |> get in
   validate left right ancestry output;
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       let ancestry = make_ancestry left right in
       Payload.copy_primitives ~grain:1 ancestry |> get |> signature) in
   check (run 1 = run 4) "primitive Boolean payload differs between domain counts"
@@ -366,7 +366,7 @@ let test_corner_payload () =
   let output = Payload.copy_points_and_vertices ~grain:1
       ~point_conflict:Payload.Reject ~point_tolerance:1e-12 ancestry primitive |> get in
   validate_corner_payload ancestry output;
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       let ancestry = make_ancestry left right in
       let primitive = Payload.copy_primitives ~grain:1 ancestry |> get in
       Payload.copy_points_and_vertices ~grain:1 ~point_conflict:Payload.Reject
@@ -583,7 +583,7 @@ let test_coincident_edge_group_union_ancestry () =
       |> add_edge_group "coincident_edges" (fun _ -> false)
   and right = tetra ~origin:(0.,0.,0.) ~base:20. ~with_label:false
       |> add_edge_group "coincident_edges" (fun _ -> true) in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       let ancestry = make_ancestry left right in
       let primitive = Payload.copy_primitives ~grain:1 ancestry |> get in
       let output = Payload.copy_points_and_vertices ~grain:1
@@ -603,7 +603,7 @@ let test_same_operand_coincident_edge_group_union_ancestry () =
            (fun first second -> first >= 4 && second >= 4)
   and right = tetra ~origin:(10.,0.,0.) ~base:20. ~with_label:false
       |> add_edge_group "self_coincident_edges" (fun _ -> false) in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       let ancestry = Solid.prepare ~resolve_left_self_intersections:true
           ~grain:1 ~left ~right () |> get
         |> Solid.extract_with_ancestry ~expression:Extract.difference |> get in
@@ -625,7 +625,7 @@ let test_split_native_edge_ancestry () =
       |> add_edge_group "cut_edges" (fun _ -> false)
   and right = tetra ~origin:(0.5,0.2,0.2) ~base:20. ~with_label:false
       |> add_edge_group "cut_edges" (fun _ -> true) in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       let ancestry = make_ancestry left right in
       let primitive = Payload.copy_primitives ~grain:1 ancestry |> get in
       let output = Payload.copy_points_and_vertices ~grain:1
@@ -681,7 +681,7 @@ let test_surface_cut_payload () =
       (fun _ -> true) in
   let right = Geometry.create ~positions ~topology ~attributes:[cut_id]
       ~groups:[cut_group] () |> get_string in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
       let ancestry = Solid.prepare ~grain:1 ~left ~right
           ~right_treatment:Solid.Surface () |> get
         |> Solid.extract_product_with_ancestry ~operation:Solid.Difference |> get in

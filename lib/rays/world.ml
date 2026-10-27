@@ -1,5 +1,5 @@
-type rgb = { r : float; g : float; b : float }
-let rgb r g b = { r; g; b }
+type rgb = Rays_math.Color.Linear.t = { r : float; g : float; b : float }
+let rgb = Rays_math.Color.Linear.rgb
 type emit = Dome | Light
 type shape = Rect | Strip | Circle | Ring
 type layer =
@@ -25,9 +25,9 @@ type t = {
 }
 
 type map = { width : int; height : int; pixels : Float.Array.t }
-type light = { position : Vec3.t; normal : Vec3.t; u : Vec3.t; v : Vec3.t;
+type light = { position : Rays_math.Vec3.t; normal : Rays_math.Vec3.t; u : Rays_math.Vec3.t; v : Rays_math.Vec3.t;
                radiance : rgb }
-type sun = { direction : Vec3.t; radiance : rgb; angular_radius : float }
+type sun = { direction : Rays_math.Vec3.t; radiance : rgb; angular_radius : float }
 type cdf = { marginal : Float.Array.t; conditional : Float.Array.t }
 type baked = {
   camera : map; lighting : map; cdf : cdf; sh9 : rgb array;
@@ -46,16 +46,16 @@ let scale_rgb k c = { r = k *. c.r; g = k *. c.g; b = k *. c.b }
 let direction_of_uv u v =
   let phi = (u -. 0.5) *. two_pi and theta = v *. pi in
   let s = sin theta in
-  Vec3.create (s *. sin phi) (cos theta) (-. s *. cos phi)
+  Rays_math.Vec3.create (s *. sin phi) (cos theta) (-. s *. cos phi)
 
 let direction ~azimuth ~elevation =
   let c = cos elevation in
-  Vec3.create (c *. sin azimuth) (sin elevation) (-. c *. cos azimuth)
+  Rays_math.Vec3.create (c *. sin azimuth) (sin elevation) (-. c *. cos azimuth)
 
 (* Turns azimuth by [a] (toward +X). *)
-let rotate a (d : Vec3.t) =
+let rotate a (d : Rays_math.Vec3.t) =
   let c = cos a and s = sin a in
-  Vec3.create ((d.x *. c) -. (d.z *. s)) d.y ((d.z *. c) +. (d.x *. s))
+  Rays_math.Vec3.create ((d.x *. c) -. (d.z *. s)) d.y ((d.z *. c) +. (d.x *. s))
 
 let sun_direction ~latitude ~day_of_year ~hours =
   let dec = -0.40910518 *. cos (two_pi *. float (day_of_year + 10) /. 365.) in
@@ -63,7 +63,7 @@ let sun_direction ~latitude ~day_of_year ~hours =
   let east = -. cos dec *. sin h
   and north = (sin dec *. cos latitude) -. (cos dec *. sin latitude *. cos h)
   and up = (sin dec *. sin latitude) +. (cos dec *. cos latitude *. cos h) in
-  Vec3.create east up (-. north)
+  Rays_math.Vec3.create east up (-. north)
 
 let[@inline] smooth_edge soft dist =
   if dist <= 0. then 1.
@@ -103,7 +103,7 @@ let[@inline] exit_distance ox oy oz dx dy dz radius =
   and c = (ox *. ox) +. (oy *. oy) +. (oz *. oz) -. (radius *. radius) in
   -. b +. sqrt ((b *. b) -. c)
 
-let nishita ~turbidity ~intensity (s : Vec3.t) dx dy dz out o =
+let nishita ~turbidity ~intensity (s : Rays_math.Vec3.t) dx dy dz out o =
   let views = 12 and steps = 4 and g = 0.76 and oy = earth +. 1. in
   let seg = exit_distance 0. oy 0. dx dy dz atmosphere /. float views in
   let mu = (dx *. s.x) +. (dy *. s.y) +. (dz *. s.z) in
@@ -191,7 +191,7 @@ type prepared =
   | Sky_map of map
   | Disc of { x : float; y : float; z : float; cos_r : float; color : rgb }
   | Rounds of round array
-  | Box of { c : Vec3.t; t : Vec3.t; b : Vec3.t; hw : float; hh : float;
+  | Box of { c : Rays_math.Vec3.t; t : Rays_math.Vec3.t; b : Rays_math.Vec3.t; hw : float; hh : float;
              soft : float; cos_bound : float; color : rgb; promote : bool }
   | Band of { azimuth : float; hw : float; elevation : float; hh : float;
               soft : float; y_lo : float; y_hi : float; color : rgb;
@@ -216,9 +216,9 @@ let local_sun (world : t) =
                  ~day_of_year:world.day_of_year ~hours:world.time_of_day
   | `Manual (azimuth, elevation) -> direction ~azimuth ~elevation
 
-let tangent azimuth = Vec3.create (cos azimuth) 0. (sin azimuth)
+let tangent azimuth = Rays_math.Vec3.create (cos azimuth) 0. (sin azimuth)
 let bitangent azimuth elevation =
-  Vec3.create (-. sin elevation *. sin azimuth) (cos elevation)
+  Rays_math.Vec3.create (-. sin elevation *. sin azimuth) (cos elevation)
     (sin elevation *. cos azimuth)
 
 let round ~azimuth ~elevation ~radius ~half ~ring ~soft ~color ~promote =
@@ -230,9 +230,9 @@ let round ~azimuth ~elevation ~radius ~half ~ring ~soft ~color ~promote =
 (* Blob [k] of a scatter, keyed only by seed and index. *)
 let blobs ~seed ~count ~elevation_min ~elevation_max ~size_min ~size_max
     ~palette =
-  let rng = Rand.seed seed and palette = Array.of_list palette in
+  let rng = Rays_math.Rand.seed seed and palette = Array.of_list palette in
   List.init (max 0 count) (fun k ->
-    let at n = Rand.float_at rng ~index:((4 * k) + n) in
+    let at n = Rays_math.Rand.float_at rng ~index:((4 * k) + n) in
     let color =
       if Array.length palette = 0 then white
       else palette.(min (Array.length palette - 1)
@@ -259,7 +259,7 @@ let prepare ~height ~sun layer =
       Some (Fill rows)
   | Sky { turbidity; intensity } -> Some (Sky_map (sky_map ~turbidity ~intensity sun))
   | Sun { angular_radius; intensity; tint } ->
-      if sun.Vec3.y <= 0. then None
+      if sun.Rays_math.Vec3.y <= 0. then None
       else
         (* The camera disc is at least 1.5 texels wide so it never vanishes
            at preview resolution. *)
@@ -392,9 +392,9 @@ let eval acc j prep =
 let rect_light ~rotation ~radius ~azimuth ~elevation ~half_w ~half_h radiance =
   let c = direction ~azimuth ~elevation and cap a = Float.min a 1.4 in
   let rot = rotate rotation in
-  { position = rot (Vec3.scale c radius); normal = rot (Vec3.neg c);
-    u = rot (Vec3.scale (tangent azimuth) (radius *. tan (cap half_w)));
-    v = rot (Vec3.scale (bitangent azimuth elevation) (radius *. tan (cap half_h)));
+  { position = rot (Rays_math.Vec3.scale c radius); normal = rot (Rays_math.Vec3.neg c);
+    u = rot (Rays_math.Vec3.scale (tangent azimuth) (radius *. tan (cap half_w)));
+    v = rot (Rays_math.Vec3.scale (bitangent azimuth elevation) (radius *. tan (cap half_h)));
     radiance }
 
 (* ponytail: every emitter becomes rect lights of its angular extent; round
@@ -433,11 +433,11 @@ let extract ~rotation ~radius layer =
       let rot = rotate rotation in
       List.init (rows * columns) (fun k ->
         let i = k mod columns and j = k / columns in
-        { position = rot (Vec3.create ((-. width /. 2.) +. ((float i +. 0.5) *. cw))
+        { position = rot (Rays_math.Vec3.create ((-. width /. 2.) +. ((float i +. 0.5) *. cw))
                             (height /. 2.) ((-. depth /. 2.) +. ((float j +. 0.5) *. cd)));
-          normal = rot (Vec3.create 0. (-1.) 0.);
-          u = rot (Vec3.create (cw *. panel /. 2.) 0. 0.);
-          v = rot (Vec3.create 0. 0. (cd *. panel /. 2.));
+          normal = rot (Rays_math.Vec3.create 0. (-1.) 0.);
+          u = rot (Rays_math.Vec3.create (cw *. panel /. 2.) 0. 0.);
+          v = rot (Rays_math.Vec3.create 0. 0. (cd *. panel /. 2.));
           radiance = rgb intensity intensity intensity })
   | _ -> []
 
@@ -447,7 +447,7 @@ let texel_solid_angle ~width ~height j =
   two_pi /. float width *. (pi /. float height)
   *. sin ((float j +. 0.5) /. float height *. pi)
 
-let sh_basis (d : Vec3.t) (out : float array) =
+let sh_basis (d : Rays_math.Vec3.t) (out : float array) =
   let x = d.x and y = d.y and z = d.z in
   out.(0) <- 0.282095; out.(1) <- 0.488603 *. y; out.(2) <- 0.488603 *. z;
   out.(3) <- 0.488603 *. x; out.(4) <- 1.092548 *. x *. y;
@@ -670,18 +670,29 @@ module Key = struct
   let hash = Hashtbl.hash_param 64 256
 end
 module Cache = Lru.Make (Key)
-let caches = Domain.DLS.new_key (fun () -> Cache.create 4)
+type cache_context={cache:baked Cache.t}
+let current_cache=Domain.DLS.new_key(fun()->None)
+let create_cache_context()={cache=Cache.create 4}
+let with_cache_context context f=
+  let previous=Domain.DLS.get current_cache in
+  Domain.DLS.set current_cache(Some context);
+  Fun.protect~finally:(fun()->Domain.DLS.set current_cache previous)f
+module Private=struct
+  type nonrec cache_context=cache_context
+  let create_cache_context=create_cache_context
+  let with_cache_context=with_cache_context
+end
 
 let bake_cached ~width ~height (world : t) =
   let light_radius = 10. in
   let plain = { world with background = Environment; exposure = 0. } in
   let key = plain, width, height, light_radius in
-  let cache = Domain.DLS.get caches in
-  let baked = match Cache.find cache key with
-    | baked -> baked
-    | exception Not_found ->
-        let baked = bake ~light_radius ~width ~height plain in
-        Cache.add cache key baked; baked in
+  let baked=match Domain.DLS.get current_cache with
+    |None->bake ~light_radius ~width ~height plain
+    |Some context->(match Cache.find context.cache key with
+      |baked->baked
+      |exception Not_found->let baked=bake~light_radius~width~height plain in
+        Cache.add context.cache key baked;baked)in
   { baked with background = world.background; exposure = world.exposure }
 
 (* ---- presets ---- *)

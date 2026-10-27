@@ -18,9 +18,9 @@ let () =
     Value.key_of ~residual:Fun.id (Value.Float_array (Array.map float integers)));
   assert (Value.array_init Ty.Int 0 (fun _->assert false)=Value.Int_array [||]);
   List.iter (fun count->try ignore (Value.array_init Ty.Int count (fun _->assert false));assert false
-    with Value.Fail(code,_,_)->assert(code="E_ARRAY_RANGE")) [-1;Sys.max_array_length+1];
+    with Diagnostic.Error d -> assert(d.code="E_ARRAY_RANGE")) [-1;Sys.max_array_length+1];
   List.iter (fun index->try ignore (Value.array_get packed index);assert false
-    with Value.Fail(code,_,_)->assert(code="E_ARRAY_RANGE")) [-1;Array.length integers];
+    with Diagnostic.Error d -> assert(d.code="E_ARRAY_RANGE")) [-1;Array.length integers];
   let source=Value.Source("typed",Ty.Array Ty.Int,["values",packed]) in
   assert (Value.ty_of source=Ty.Array Ty.Int && Value.coerce_to Ty.Float source=source);
   Value.validate source;
@@ -31,8 +31,8 @@ let () =
   let rejects packed code message =
     let before = Marshal.to_string packed [Marshal.No_sharing] in
     (try Value.validate packed; failwith "invalid packed input accepted"
-     with Value.Fail (actual_code, actual_message, span) ->
-       assert (actual_code = code && actual_message = message && span = None));
+     with Diagnostic.Error d ->
+       assert (d.code = code && d.message = message && d.span = None));
     assert (Marshal.to_string packed [Marshal.No_sharing] = before) in
   List.iter (fun (width, wrap) ->
     List.iter (fun values ->
@@ -80,8 +80,8 @@ let () =
     [Ty.Vec2, Value.Vec2 (1.,-0.), 0; Ty.Vec2, Value.Vec2 (1.,-0.), 3;
      Ty.Vec4, Value.Vec4 (1.,2.,3.,4.), 0; Ty.Vec4, Value.Vec4 (1.,2.,3.,4.), 3];
   List.iter (fun packed ->
-    try Value.validate packed; assert false with Value.Fail (code,_,_) ->
-      assert (code = "E_ARRAY_TYPE" || code = "E_NONFINITE"))
+    try Value.validate packed; assert false with Diagnostic.Error d ->
+      assert (d.code = "E_ARRAY_TYPE" || d.code = "E_NONFINITE"))
     [Value.Vec2_array [|1.|]; Value.Vec4_array [|1.;2.;3.|];
      Value.Vec2_array [|nan;0.|]; Value.Vec4_array [|0.;0.;infinity;1.|]];
   assert (value ~context:"host" "(array/nth (map (fn [x] [x (+ x 1)]) (array/range 3)) 2)" = Eval.Vec2 (2.,3.));
@@ -103,7 +103,7 @@ let () =
   let export () =
     let s = Eval.create_state () in
     Array.init 5 (fun frame -> List.assoc "g" (Result.get_ok (Eval.run ~state:s
-      ~live:{(Frame_input.at_time (float frame)) with frame; dt = 0.125} ~time:(float frame) w)).results) in
+      ~live:{(Input.at_time (float frame)) with frame; dt = 0.125} ~time:(float frame) w)).results) in
   assert (export () = [|Eval.Float 1250.; Float 2500.; Float 3750.; Float 5000.; Float 6250.|]);
   assert (Marshal.to_string (export ()) [] = Marshal.to_string (export ()) []);
   assert (Ty.of_string "array:vec3" = Some (Ty.Array Ty.Vec3));
@@ -112,7 +112,7 @@ let () =
   assert (Result.is_error (Eval.static (check "(array/nth (array/float 10) 10)")));
   assert (Result.is_error (Eval.run ~time:0. (check "(sum [x (array/float 2 1e308)] x)")));
   let typed = check "(array/count (array/float (frame/index)))" in
-  assert (List.assoc "g" (Result.get_ok (Eval.run ~live:{(Frame_input.at_time 0.) with frame = 10000} ~time:0. typed)).results = Eval.Int 10000)
+  assert (List.assoc "g" (Result.get_ok (Eval.run ~live:{(Input.at_time 0.) with frame = 10000} ~time:0. typed)).results = Eval.Int 10000)
 
 let () =
   (* Packed live maps/for/scan defer instead of trying to store residual boxes. *)
@@ -176,8 +176,9 @@ let () =
      "(array/concat (array/text 0) (array/text 0))"];
   assert (value ~context:"host" "(fold [a \"seed\"] [x (array/text 0)] x)"=Eval.Text "seed");
   let bulk_calls=ref 0 in
-  ignore (Result.get_ok(Eval.Private.static_with_kernels ~bulk:(fun _->incr bulk_calls;None)
-    (check ~context:"host" "(map (fn [x] x) (array/text 5001 \"猫\"))")));
+  ignore (Eval.Residual.handle ~bulk:(fun _->incr bulk_calls;None) (fun () ->
+    Result.get_ok(Eval.Private.static_with_requests
+      (check ~context:"host" "(map (fn [x] x) (array/text 5001 \"猫\"))"))));
   assert(!bulk_calls=0);
   List.iter (fun body->assert(Result.is_error(Eval.static(check ~context:"host" body))))
     ["(array/text -1)";"(array/nth (array/text 0) 0)";

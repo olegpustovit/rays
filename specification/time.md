@@ -26,5 +26,5 @@ of the frame. The clock and pacing are private to `Sketch`.
 ```ocaml
 let update model (frame : Frame.t) =
   if model.paused then model
-  else { model with x = model.x +. model.vx *. frame.dt }
+  else { model with x = model.x +. model.vx *. frame.input.dt }
 ```

@@ -27,5 +27,4 @@ description: Add a packed geometry operation to rdk in rays with its interface, 
    the other benches; record input size, domains, and the median in your
    handoff. Never claim linear or allocation-free without that number.
 6. Export it from the `Rdk` facade (`lib/rdk/rdk.ml`), then `add-sop` if the
-   op needs a node. Finish with `@all` and `git diff --check`; a public
-   `.mli` change shows as an API manifest diff: `promote-manifests`.
+   op needs a node. Finish with `@all` and `git diff --check`.

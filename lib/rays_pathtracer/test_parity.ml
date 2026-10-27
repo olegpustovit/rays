@@ -7,8 +7,8 @@ module P = Rays_pathtracer
 
 let get = function Ok v -> v | Error e -> failwith e
 let width = 128 and height = 64
-let camera = Camera.perspective ~fov_y:0.5 ~at:(Vec3.create 0. 0. 7.) ~target:Vec3.zero ()
-let probes = [| Vec3.create (-1.3) 0. 0.; Vec3.create 1.3 0. 0. |]
+let camera = Camera.perspective ~fov_y:0.5 ~at:(Rays_math.Vec3.create 0. 0. 7.) ~target:Rays_math.Vec3.zero ()
+let probes = [| Rays_math.Vec3.create (-1.3) 0. 0.; Rays_math.Vec3.create 1.3 0. 0. |]
 
 (* Both renderers see the same surfaces: raster's Material mapping gives
    albedo = diffuse (sRGB decoded), roughness = sqrt (2 / (shininess + 2)). *)
@@ -22,7 +22,7 @@ let disc index =
   let center = Option.get (Camera.world_to_screen ~viewport:(0, 0, width, height)
       camera probes.(index)) in
   let edge = Option.get (Camera.world_to_screen ~viewport:(0, 0, width, height)
-      camera (Vec3.add probes.(index) (Vec3.create 0.9 0. 0.))) in
+      camera (Rays_math.Vec3.add probes.(index) (Rays_math.Vec3.create 0.9 0. 0.))) in
   let radius = Float.abs (edge.x -. center.x) in
   List.concat (List.init height (fun y -> List.filter_map (fun x ->
     if Float.hypot (float x +. 0.5 -. center.x) (float y +. 0.5 -. center.y) < radius
@@ -62,10 +62,12 @@ let run () =
   let live = let _, live = Ogpu.Impl.create_driver () in live in
   let baseline = live () in
   let rdk value = get (Result.map_error Rdk.Error.to_string value) in
+  let rays_mesh geometry = get (Result.map_error Rdk.Error.to_string
+    (Rdk_rays.Rays_mesh.to_trace_mesh geometry)) in
   let geometry = Array.map (fun center -> rdk (Rdk.Uv_sphere.run
     ~center ~radius:0.9 ~segments:64 ~rings:32 ())) probes in
   let objects = Array.to_list (Array.mapi (fun i geometry ->
-    geometry, P.material ~roughness:(roughness shininess.(i))
+    rays_mesh geometry, P.material ~roughness:(roughness shininess.(i))
       (P.Linear_color.rgb albedo albedo albedo)) geometry) in
   let scene = { P.objects; spheres = []; strands = [];
     environment = { sky = P.Linear_color.rgb 0. 0. 0.; ground = P.Linear_color.rgb 0. 0. 0.; panels = [] };
@@ -78,10 +80,10 @@ let run () =
       let failures = ref [] in
       Fun.protect ~finally:(fun () -> P.destroy tracer) (fun () ->
         let canvas = get (Canvas.create ~width ~height) in
-        Fun.protect ~finally:(fun () -> Canvas.destroy canvas) (fun () ->
+        Fun.protect ~finally:(fun () -> ignore(Canvas.destroy canvas)) (fun () ->
           let nodes = Array.to_list (Array.mapi (fun i geometry ->
             let mesh = rdk (Rdk_rays.Rays_mesh.to_mesh geometry) in
-            Scene3.mesh ~material:(Material.create ~diffuse:(Color.gray gray)
+            Scene3.mesh ~material:(Material.create ~diffuse:(Rays_math.Color.gray gray)
               ~shininess:shininess.(i) ()) mesh) geometry) in
           let discs = Array.init 2 disc in
           Array.iter (fun pixels -> assert (pixels <> [])) discs;
@@ -92,10 +94,10 @@ let run () =
             for _ = 1 to 256 do get (P.render tracer camera); get (P.flush tracer) done;
             assert (P.samples tracer = 1024);
             let traced = Test_pathtracer.pixels tracer in
-            Canvas.render canvas [Scene.view3d ~camera
-              (Scene3.with_world baked (Scene3.create nodes))];
+            get(Canvas.render canvas [Scene.view3d ~camera
+              (Scene3.with_world baked (Scene3.create nodes))]);
             let image = get (Canvas.to_image canvas) in
-            let raster = Fun.protect ~finally:(fun () -> Image.destroy image)
+            let raster = Fun.protect ~finally:(fun () -> ignore(Image.destroy image))
               (fun () -> Bytes.copy (get (Image.Private.pixels image))) in
             assert (Bytes.length traced = width * height * 4 &&
               Bytes.length raster = Bytes.length traced);
@@ -110,7 +112,7 @@ let run () =
               Printf.printf "parity %s probe %d: mean path %.2f raster %.2f (%.1f%%), highlight %.2f px, spread %.2f px\n%!"
                 name i traced_mean raster_mean (relative *. 100.) distance spread;
               (* Raster's SH/prefiltered approximation has a separate error
-                 allowance. Measured natively (M1, 2026-10-11): mean error
+                 allowance. Measured natively on M1: mean error
                  0.0-2.9%, highlight centroid distance 0.2-4.8 px, spread
                  0.03-2.4 px (the probe disc radius is about 16 px). *)
               if relative > 0.05 || distance > 8. || spread > 4. then

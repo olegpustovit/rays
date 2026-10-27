@@ -90,14 +90,14 @@ let measure directory recording name mode keep input=
   let source_index=if Geometry.edge_groups input=[] then None
     else Some(Topology_index.create(Geometry.topology input))in
   let immutable=geometry_bytes input in
-  let first=Rays_math.Parallel.run ~domains:1(fun()->run ~keep input)in
+  let first=Parallel.run ~domains:1(fun()->run ~keep input)in
   validate name mode keep input first;
   let bytes=geometry_bytes first in
   let path=baseline_file directory name in
   let expected=if recording then(save path bytes;bytes)else load path in
   check(bytes=expected)(name^": BEFORE/AFTER native payload bytes differ");
   let digest=Digest.to_hex(Digest.string expected)in
-  List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+  List.iter(fun domains->Parallel.run ~domains(fun()->
     (* Domain pool startup is outside timing; every output gets a fresh topology.
        The immutable source index is already warm, as required by edge groups. *)
     let preflight=run ~keep input in validate name mode keep input preflight;

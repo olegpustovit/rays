@@ -1,0 +1,40 @@
+2026-10-27, Apple M1, macOS 27, OCaml 5.3.0, Dune 3.24.2.
+Alternating baseline/current binaries; reference capture PID 88011 remained active.
+Other agents held new validation during the four runs. CPU clock, one domain,
+200,000 evaluations per sample, median of three samples. Exact walker parity
+checked before timing. These are capture-loaded measurements, not an isolated gate.
+
+Baseline: /tmp/rays-scalar-before/_build/default/tools/bench_core.exe
+SHA-256: 1a9b5642fdb087137763579cd71637f9dc0dc3c4bbde94a81a0c8969201b36b1
+Current: /tmp/rays-frame-sharing-20261027/bench_core.exe
+SHA-256: b2e698c8422deb5854ab48890c1606ba534345f6b4bf90628f8dae2cf0181906
+Current source: /tmp/rays-frame-sharing-20261027/source.tar.gz
+SHA-256: 00b292cb4f2f42eb1bfe26ef9926f37c03b9c62d0a850cd1e9500e07786cd8ef
+
+Before A, command wall 0.76 s:
+Scalar residual (+ (* (sin t) 0.5) (* t t)); 200000 evaluations per sample; domains 1; median of 3 samples
+tree walker        1177.9 wall ns/eval       1176.6 CPU ns/eval     6344.0 allocated bytes/eval
+core                 63.8 wall ns/eval         63.8 CPU ns/eval      584.0 allocated bytes/eval
+walker/core ratio 18.45
+
+After A, command wall 1.10 s:
+Scalar residual (+ (* (sin t) 0.5) (* t t)); 200000 evaluations per sample; domains 1; median of 3 samples
+tree walker        1175.9 wall ns/eval       1175.2 CPU ns/eval     6304.0 allocated bytes/eval
+core exec            88.0 wall ns/eval         87.7 CPU ns/eval      344.0 allocated bytes/eval
+core fast            86.5 wall ns/eval         86.5 CPU ns/eval      344.0 allocated bytes/eval
+core                 91.1 wall ns/eval         91.0 CPU ns/eval      360.0 allocated bytes/eval
+walker/core-exec ratio 13.36; core-fast/dispatcher ratio 0.95
+
+Before B, command wall 0.75 s:
+Scalar residual (+ (* (sin t) 0.5) (* t t)); 200000 evaluations per sample; domains 1; median of 3 samples
+tree walker        1176.8 wall ns/eval       1175.6 CPU ns/eval     6344.0 allocated bytes/eval
+core                 63.7 wall ns/eval         63.6 CPU ns/eval      584.0 allocated bytes/eval
+walker/core ratio 18.48
+
+After B, command wall 0.88 s:
+Scalar residual (+ (* (sin t) 0.5) (* t t)); 200000 evaluations per sample; domains 1; median of 3 samples
+tree walker        1180.6 wall ns/eval       1177.8 CPU ns/eval     6304.0 allocated bytes/eval
+core exec            86.8 wall ns/eval         86.7 CPU ns/eval      344.0 allocated bytes/eval
+core fast            87.0 wall ns/eval         86.9 CPU ns/eval      344.0 allocated bytes/eval
+core                 91.0 wall ns/eval         90.7 CPU ns/eval      360.0 allocated bytes/eval
+walker/core-exec ratio 13.61; core-fast/dispatcher ratio 0.96

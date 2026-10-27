@@ -10,8 +10,8 @@ let () =
     [Context.sop; Context.value; Context.scene; Context.world; Context.settings];
   assert (Context.supports_values Context.sop && not (Context.supports_values Context.world));
   assert (Result.is_error (Context.of_string "shader"));
-  assert (Symbol.to_string (Symbol.of_string "uv_sphere" |> Result.get_ok) = "uv_sphere");
-  List.iter (fun name -> assert (Result.is_error (Symbol.of_string name)))
+  assert (Symbol.valid_name "uv_sphere");
+  List.iter (fun name -> assert (not (Symbol.valid_name name)))
     [""; "9a"; "A"; "a-b"; "a.b"; "a/b"];
   List.iter (fun (target, input, expected) -> assert (coerce ~target input = Ok expected))
     [Float, Int_value 3, Float_value 3.; Int, Float_value 1.5, Int_value 2;

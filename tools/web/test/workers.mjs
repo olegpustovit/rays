@@ -14,7 +14,7 @@ const [workersPath, goldenDir] = process.argv.slice(2);
 if (!workersPath || !goldenDir) { console.error('usage: node workers.mjs WORKERS_JS GOLDEN_DIR'); process.exit(2); }
 const { createPool, checkIsolation, CHUNK } = await import(pathToFileURL(resolve(workersPath)).href);
 
-const { Fail, error_payload } = await import(new URL('./prims.js', pathToFileURL(resolve(workersPath))).href);
+const { Fail, error_payload, noise3 } = await import(new URL('./prims.js', pathToFileURL(resolve(workersPath))).href);
 
 const failures = [];
 const check = (ok, what) => { if (!ok) failures.push(what); };
@@ -29,7 +29,7 @@ const counts = [100003, 3 * CHUNK, 1000];
 const pools = { 1: await createPool({ size: 1 }), 8: await createPool({ size: 8 }) };
 for (const [name, widths] of Object.entries(GOLDENS)) {
   const source = readFileSync(join(goldenDir, `${name}.js`), 'utf8');
-  const region = new Function(`${source}\nreturn region;`)();
+  const region = new Function('noise3', `${source}\nreturn region;`)(noise3);
   for (const n of counts) {
     const inputs = [makeInput(n)];
     const expected = widths.map(w => new Float64Array(n * w));

@@ -1,7 +1,11 @@
+open Core_model
 open Rays
 open Sop
 open Editor_document
-include Core_setup
+open Core_inspect
+open Core_panes
+open Core_shell
+open Core_setup
 
 (* the open dialog, for the crash report *)
 let prompt_name value = match value.prompt with
@@ -46,7 +50,7 @@ let status_text ?(brief = false) value =
     | Idle ->
         (match value.edit_error, value.cook.error, value.cook.seconds with
          | _ when projection value = Text_view && Text_pane.first_error value.text <> None ->
-             "Text rejected: " ^ Flow.Diagnostic.to_string
+             "Text rejected: " ^ Diagnostic.to_string
                (Option.get (Text_pane.first_error value.text))
          | Some error, _, _ -> "Graph edit rejected: " ^ error
          | None, Some error, _ -> "Cook rejected: " ^ error

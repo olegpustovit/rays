@@ -121,7 +121,7 @@ let test_fit_radius_and_scale () =
   let square = Line_geometry.polyline ~closed:true
       [|-1.,-1.,0.; 1.,-1.,0.; 1.,1.,0.; -1.,1.,0.|] |> get in
   let scaled = Circle_from_edges.run ~radius:2.
-      ~scale:(Vec3.create 1. 0.5 1.) square |> get in
+      ~scale:(Rays_math.Vec3.create 1. 0.5 1.) square |> get in
   let p = positions scaled and root2 = sqrt 2. in
   check (near p.x.(0) (-.root2) && near p.y.(0) (-.root2 *. 0.5)
       && near p.x.(2) root2 && near p.y.(2) (root2 *. 0.5))
@@ -231,7 +231,7 @@ let test_validation_and_atomicity () =
   expect_code "invalid_circle" (fun () -> Circle_from_edges.run ~radius:nan source)
     "non-finite radius";
   expect_code "invalid_circle" (fun () -> Circle_from_edges.run
-      ~scale:(Vec3.create nan 1. 1.) source) "non-finite scale";
+      ~scale:(Rays_math.Vec3.create nan 1. 1.) source) "non-finite scale";
   expect_code "invalid_circle" (fun () -> Circle_from_edges.run
       ~output_group:" " source) "empty output group";
   let other = Line_geometry.polyline ~closed:true
@@ -258,7 +258,7 @@ let test_validation_and_atomicity () =
   expect_code "invalid_circle" (fun () -> Circle_from_edges.run nonfinite)
     "non-finite selected endpoint";
   let overflow = Circle_from_edges.run ~radius:max_float
-      ~scale:(Vec3.create max_float max_float max_float) source in
+      ~scale:(Rays_math.Vec3.create max_float max_float max_float) source in
   expect_code "invalid_circle" (fun () -> overflow) "unrepresentable output";
   let cancelled = Cancel.create () in
   Cancel.cancel cancelled;

@@ -21,7 +21,7 @@ a browser, never product code and never a web fallback.
 | `windows`, `docking` | 1440 x 900, 1440 x 440 | floating windows, dock targets, splitters, collapsed panes |
 
 `kit.css` is the one stylesheet (its last block, "rev 3: lighter", overrides what is above it);
-`<sheet>.html` is the markup; `<sheet>@1x.png` and `<sheet>@2x.png` are Chrome's renders of it
+`<sheet>.html` is the markup; `<sheet>@2x.png` is Chrome's Retina render of it
 (1 CSS pixel is 1 logical point). `kit.rays` is the fixture: the graph the sheets draw, in layout 0
 (the Workspace sheet, 1440 x 900) and layout 1 (the Graph sheet beside the Inspector sheet:
 render at 1581 x 784).

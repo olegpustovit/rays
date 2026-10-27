@@ -100,7 +100,7 @@ let check_arc_modes () =
 
 let check_orientation_and_ellipse () =
   let ellipse = Plane_generators.circle ~orientation:Plane_generators.Circle_xy
-      ~center:(Vec3.create 1. 2. 3.) ~radius_x:3. ~radius_y:1.
+      ~center:(Rays_math.Vec3.create 1. 2. 3.) ~radius_x:3. ~radius_y:1.
       ~uniform_scale:2. ~rotation:(Float.pi *. 0.5)
       ~segments:64 ~radius:1. () |> get_ok in
   let bounds = Analysis.bounds ellipse |> Option.get in
@@ -114,9 +114,9 @@ let check_orientation_and_ellipse () =
   check (near yz.size.x 0. && near yz.size.y 8. && near yz.size.z 4.)
     "Circle YZ orientation";
   let custom = Plane_generators.circle ~orientation:(Plane_generators.Circle_axes {
-        horizontal = Vec3.create max_float max_float 0.;
-        vertical = Vec3.create 0. 0. max_float })
-      ~center:(Vec3.create 4. 5. 6.) ~radius_x:3. ~radius_y:2.
+        horizontal = Rays_math.Vec3.create max_float max_float 0.;
+        vertical = Rays_math.Vec3.create 0. 0. max_float })
+      ~center:(Rays_math.Vec3.create 4. 5. 6.) ~radius_x:3. ~radius_y:2.
       ~segments:128 ~radius:1. () |> get_ok in
   let point = positions custom in
   let dx = point.x.(0) -. 4. and dy = point.y.(0) -. 5.
@@ -141,7 +141,7 @@ let check_validation () =
   expect_code "invalid_parameter"
     (Plane_generators.circle ~uniform_scale:(-1.) ~segments:3 ~radius:1. ());
   expect_code "invalid_parameter"
-    (Plane_generators.circle ~center:(Vec3.create Float.nan 0. 0.)
+    (Plane_generators.circle ~center:(Rays_math.Vec3.create Float.nan 0. 0.)
        ~segments:3 ~radius:1. ());
   expect_code "invalid_parameter"
     (Plane_generators.circle ~rotation:Float.infinity ~segments:3 ~radius:1. ());
@@ -157,16 +157,16 @@ let check_validation () =
        ~segments:2 ~radius:1. ());
   expect_code "invalid_parameter"
     (Plane_generators.circle ~orientation:(Plane_generators.Circle_axes {
-       horizontal=Vec3.zero; vertical=Vec3.unit_z })
+       horizontal=Rays_math.Vec3.zero; vertical=Rays_math.Vec3.unit_z })
        ~segments:3 ~radius:1. ());
   expect_code "invalid_parameter"
     (Plane_generators.circle ~orientation:(Plane_generators.Circle_axes {
-       horizontal=Vec3.unit_x; vertical=Vec3.unit_x })
+       horizontal=Rays_math.Vec3.unit_x; vertical=Rays_math.Vec3.unit_x })
        ~segments:3 ~radius:1. ());
   expect_code "invalid_parameter"
     (Plane_generators.circle ~segments:max_int ~radius:1. ());
   expect_code "invalid_parameter"
-    (Plane_generators.circle ~center:(Vec3.create max_float 0. 0.) ~radius_x:max_float
+    (Plane_generators.circle ~center:(Rays_math.Vec3.create max_float 0. 0.) ~radius_x:max_float
        ~segments:3 ~radius:1. ());
   let cancelled = Cancel.create () in
   Cancel.cancel cancelled;
@@ -183,9 +183,9 @@ let check_parallel_exact () =
     let run domains = Parallel.run ~domains (fun () ->
       Plane_generators.circle ~grain:1024 ~arc ~reverse:true
         ~orientation:(Plane_generators.Circle_axes {
-          horizontal = Vec3.create 1. 2. 0.5;
-          vertical = Vec3.create (-0.25) 0.75 2. })
-        ~center:(Vec3.create 3. (-2.) 5.) ~radius_x:40. ~radius_y:25.
+          horizontal = Rays_math.Vec3.create 1. 2. 0.5;
+          vertical = Rays_math.Vec3.create (-0.25) 0.75 2. })
+        ~center:(Rays_math.Vec3.create 3. (-2.) 5.) ~radius_x:40. ~radius_y:25.
         ~rotation:0.37 ~uniform_scale:1.2 ~segments:500_000 ~radius:1. ()
       |> get_ok) in
     let one = run 1 and many = run 4 in

@@ -7,8 +7,8 @@ let run ?cancel ?(grain = 16_384) ?primitives
     ?(revolve_type = Revolve_closed) ?(connectivity = Grid_quads)
     ?(start_angle = 0.) ?(end_angle = 2. *. Float.pi)
     ?(reverse_cross_sections = false) ?(caps = false) ?cap_group
-    ?(uv_attribute = Some "uv") ~divisions ~(origin : Vec3.t)
-    ~(axis : Vec3.t) geometry =
+    ?(uv_attribute = Some "uv") ~divisions ~(origin : Rays_math.Vec3.t)
+    ~(axis : Rays_math.Vec3.t) geometry =
   let operation = "Rdk_mesh.Revolve.revolve" in
   Cancel.check_opt cancel;
   let topology = Geometry.topology geometry in

@@ -1,8 +1,4 @@
-; Marks_scene is private to rays_editor; the test compiles its own copy.
-(copy_files ../marks_scene.ml)
-(copy_files ../marks_scene.mli)
-
 (test
  (name test_marks_scene)
- (modules test_marks_scene marks_scene)
- (libraries rays rays_editor editor_document flow flow_ir scene_command))
+ (modules test_marks_scene)
+ (libraries rays flow_native flow_ir scene_command ogpu_mock))

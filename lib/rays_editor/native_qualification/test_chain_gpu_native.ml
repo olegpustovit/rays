@@ -1,7 +1,7 @@
-(* G.2 on the real device: the fused four-deformer chain over a 1,000,000-point grid is cooked on the CPU,
+(* On the real device: the fused four-deformer chain over a 1,000,000-point grid is cooked on the CPU,
    then from a worker domain (as Async_cook does) with the interface domain serving the device. The
    positions agree within float32 tolerance; the cook times are printed. *)
-let ok = function Ok value -> value | Error d -> failwith (Flow.Diagnostic.to_string d)
+let ok = function Ok value -> value | Error d -> failwith (Diagnostic.to_string d)
 let side = try int_of_string (Sys.getenv "GRID_SIDE") with Not_found -> 1000
 let stages = [0.3, 0.7, 0; -0.2, 1.3, 3; 0.15, 2.1, 5; 0.05, 0.4, 7]
 let text = Printf.sprintf "(workspace fused (graph g :context sop (let* [g (sop/grid :counts \"Point counts\" :connectivity \"Points\" :columns %d :rows %d) %s] d4)))"
@@ -14,7 +14,7 @@ let cook node =
     let start = Unix.gettimeofday () in
     match Sop.Session.cook session ~context:(Sop.Context.create ~domains:4 ~time:0. () |> Result.get_ok) node with
     | Ok output -> Rdk.Geometry.positions (Result.get_ok (Sop.Payload.geometry output.payload)), Unix.gettimeofday () -. start
-    | Error d -> failwith (Sop.Diagnostic.error_to_string d))
+    | Error d -> failwith (Diagnostic.error_to_string d))
 let () =
   let lowered = Flow_sop.Lower.workspace ~factories:Sop_catalog.Editor.factories (Flow.Syntax.parse text |> ok) |> ok in
   let graph = List.hd lowered.graphs in
@@ -28,16 +28,17 @@ let () =
   let base_graph = List.hd base.graphs in
   let grid_seconds, _ = median (fun () -> cook (Sop.Edit_graph.compile_node base_graph.network.geometry ~node_id:(Option.get base_graph.root) |> Result.get_ok)) in
   Printf.printf "grid alone cooks in %.3f s on the CPU\n%!" grid_seconds;
-  let reads gpu = let host, _, _, _, _ = Workspace_gpu.image_stats gpu in host.readback_bytes in
+  let reads gpu = let host, _, _, _, _ = Flow_native.Workspace_gpu.image_stats gpu in host.readback_bytes in
   let run name force =
-    let gpu = Workspace_gpu.create () in
-    if force then Workspace_gpu.qualification gpu;
-    Fun.protect ~finally:(fun () -> Workspace_gpu.close gpu) (fun () ->
-      let worker () = Workspace_gpu.with_backend gpu (fun () ->
+    let gpu = Flow_native.Workspace_gpu.create () in
+    if force then Flow_native.Workspace_gpu.qualification gpu;
+    Fun.protect ~finally:(fun () -> Flow_native.Workspace_gpu.close gpu) (fun () ->
+      let worker () = Flow_native.Workspace_gpu.with_backend gpu (fun _gpu ->
         let finished = Atomic.make false in
-        let domain = Domain.spawn (fun () -> Fun.protect ~finally:Rays_math.Parallel.release_current_domain_pools (fun () ->
-          let result = cook node in Atomic.set finished true; result)) in
-        while not (Atomic.get finished) do Flow_ir.Gpu.pump (); Unix.sleepf 0.0005 done;
+        let domain = Domain.spawn (fun () -> Fun.protect ~finally:(fun () ->
+          Atomic.set finished true; Parallel.release_current_domain_pools ())
+          (fun () -> cook node)) in
+        while not (Atomic.get finished) do Flow_native.Workspace_gpu.pump gpu; Domain.cpu_relax () done;
         Domain.join domain) in
       ignore (worker ());
       let before = reads gpu in

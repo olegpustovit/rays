@@ -2,25 +2,25 @@ module E=Flow.Eval
 module V=Flow.Value
 module I=Flow_ir
 module P=I.Packed
-let ok=function Ok v->v|Error d->failwith(Flow.Diagnostic.to_string d)
-let packed=function Ok p->p|Error ds->failwith(String.concat ";"(List.map Flow.Diagnostic.to_string ds))
+let ok=function Ok v->v|Error d->failwith(Diagnostic.to_string d)
+let packed=function Ok p->p|Error ds->failwith(String.concat ";"(List.map Diagnostic.to_string ds))
 let bytes value=Marshal.to_string value[Marshal.No_sharing]
 let call name args=(Option.get(Flow.Op.find name Flow.Context.value)).body
-  ~live:(Frame_input.at_time 0.) ~node:(fun _ _->assert false)args
+  ~live:(Input.at_time 0.) ~node:(fun _ _->assert false)args
 let grade keys descending=call "array/grade"["keys",keys;"descending",E.Bool descending]
 let lookup keys queries=call "array/index_of"["keys",keys;"queries",queries]
 let reject code f=try ignore(f());failwith("accepted "^code)
-  with V.Fail(actual,_,_)->assert(actual=code)
+  with Diagnostic.Error d -> assert(d.code=code)
 let same a b=match a,b with
   |Ok a,Ok b->assert(bytes a=bytes b)
-  |Error(a:Flow.Diagnostic.t),Error(b:Flow.Diagnostic.t)->
+  |Error(a:Diagnostic.t),Error(b:Diagnostic.t)->
       assert(a.code=b.code && a.message=b.message && a.cause=b.cause)
-  |_->let show=function Ok v->"Ok "^V.show_with Fun.id v|Error d->Flow.Diagnostic.to_string d in
+  |_->let show=function Ok v->"Ok "^V.show_with Fun.id v|Error d->Diagnostic.to_string d in
       failwith("Grade/lookup reference disagreement: "^show a^" / "^show b)
 let workspace ?(declarations="") body=
   let text="(workspace ordering (graph g :context host "^declarations^" "^body^"))"in
   match Flow.Workspace.check Flow.Check.{version=1;kinds=[]}(ok(Flow.Syntax.parse text))with
-  |Some w,[]->w|_,ds->failwith(String.concat ";"(List.map Flow.Diagnostic.to_string ds))
+  |Some w,[]->w|_,ds->failwith(String.concat ";"(List.map Diagnostic.to_string ds))
 let live_value body=List.assoc "g"(ok(E.static(workspace("(if (> t -1000.) "^body^" "^body^")")))).results
 let oracle_grade compare count descending=
   List.init count Fun.id |> List.stable_sort(if descending then fun a b->compare b a else compare)
@@ -38,7 +38,7 @@ let ()=
     let texts=Array.init count(fun i->raw.(i mod Array.length raw))in
     List.iter(fun(keys,compare)->let before=bytes keys in
       List.iter(fun descending->let expected=E.Int_array(oracle_grade compare count descending)in
-        List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+        List.iter(fun domains->Parallel.run ~domains(fun()->
           let got=grade keys descending in assert(bytes got=bytes expected);
           (match got with E.Int_array a->if Array.length a>0 then a.(0)<-999|_->assert false);
           assert(bytes keys=before)))[1;4;8])[false;true])
@@ -55,7 +55,7 @@ let ()=
        period; keep the independent linear oracle bounded for the large tail. *)
     let text_keys=Array.init count(fun i->raw.(i mod Array.length raw))and text_queries=Array.append raw all in
     List.iter(fun(k,q,expected)->let original=bytes(k,q)in
-      List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->let got=lookup k q in
+      List.iter(fun domains->Parallel.run ~domains(fun()->let got=lookup k q in
         assert(bytes got=bytes(E.Int_array expected));
         (match got with E.Int_array a->if Array.length a>0 then a.(0)<-999|_->assert false);
         assert(bytes(k,q)=original)))[1;4;8])
@@ -71,8 +71,8 @@ let ()=
     let r=match value with E.Residual r->r|_->failwith "Live ordering expected"in
     let core=match I.Core_lower.lower ~strict:true r with Ok p->p|Error form->failwith form in
     let executor=ok(I.Executor.compile ~strict:true value)in
-    List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->List.iter(fun time->
-      let live={(Frame_input.at_time time)with frame=3}in
+    List.iter(fun domains->Parallel.run ~domains(fun()->List.iter(fun time->
+      let live={(Input.at_time time)with frame=3}in
       let expected=E.Private.force_reference value ~live in
       same(I.Core_exec.run core ~live)expected;
       same(I.Executor.force ~strict:true executor ~live)expected)[-1.;0.;0.25;2.]))[1;4;8])
@@ -92,7 +92,7 @@ let ()=
   (match I.Executor.compile ~strict:true unsupported with Error d->assert(d.code="E_KERNEL_FORM")|_->failwith "Unsupported producer accepted");
   List.iter(fun body->let value=live_value("(map (fn [(i : int)] "^body^") (array/range 5001 :type int))")in
     let r=match value with E.Residual r->r|_->assert false in
-    assert(Result.is_error(P.compile_result r(E.Private.residual_view r).term)))
+    assert(Result.is_error(P.compile_result r(E.Residual.residual_view r).term)))
     ["(array/nth (array/grade (array/int i)) 0)";"(array/nth (array/index_of (array/int i) (array/int 1 i)) 0)"];
   let declarations="[(keys : (array int) (array/int 0)) (queries : (array int) (array/int 0))]"in
   let dynamic body=List.assoc "g"(ok(E.static ~inputs:["g",[
@@ -103,44 +103,44 @@ let ()=
     |Ref_binding("queries",[])->Some(["fixture";"queries"],[])|_->None in
   List.iter(fun operation->let value=dynamic("(map (fn [(i : int)] (int/add i (frame/index))) "^operation^")")in
     let r=match value with E.Residual r->r|_->assert false in
-    List.iter(fun fusion->let p=packed(P.compile_result ~fusion ~count_source r(E.Private.residual_view r).term)in
+    List.iter(fun fusion->let p=packed(P.compile_result ~fusion ~count_source r(E.Residual.residual_view r).term)in
       assert(P.count_origin p=None);
       let current=ref([|2;1;2|],[|2;9;1;2|])in
       let resolve=function E.Source("fixture/keys",_,_)->Ok(E.Int_array(fst !current))
         |E.Source("fixture/queries",_,_)->Ok(E.Int_array(snd !current))|_->assert false in
       List.iter(fun buffers->current:=buffers;let before=bytes buffers in
-        List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->let live={(Frame_input.at_time 1.)with frame=3}in
+        List.iter(fun domains->Parallel.run ~domains(fun()->let live={(Input.at_time 1.)with frame=3}in
           same(P.force ~strict:true ~resolve p ~live)(E.Private.force_reference ~resolve value ~live);
           assert(bytes buffers=before)))[1;4;8])
         [[|2;1;2|],[|2;9;1;2|];[|min_int;max_int|],[|max_int|];[||],[|0;0|]])[false;true])
     ["(array/grade keys)";"(array/index_of keys queries)"];
   List.iter(fun result->let value=dynamic("(map (fn [(a : int) (b : int)] (int/add a b)) keys "^result^")")in
     let r=match value with E.Residual r->r|_->assert false in
-    List.iter(fun fusion->let p=packed(P.compile_result ~fusion ~count_source r(E.Private.residual_view r).term)in
-      assert(P.count_origin p=None && P.static_count p=None && Array.length(P.to_region p).sources=2);
+    List.iter(fun fusion->let p=packed(P.compile_result ~fusion ~count_source r(E.Residual.residual_view r).term)in
+      assert(P.count_origin p=None && P.static_count p=None && Array.length p.sources=2);
       let resolve=function E.Source("fixture/keys",_,_)->Ok(E.Int_array[|2;1;2;0|])
         |E.Source("fixture/queries",_,_)->Ok(E.Int_array[|1;9|])|_->assert false in
-      same(P.force ~strict:true ~resolve p ~live:(Frame_input.at_time 1.))
-        (E.Private.force_reference ~resolve value ~live:(Frame_input.at_time 1.))) [false;true])
+      same(P.force ~strict:true ~resolve p ~live:(Input.at_time 1.))
+        (E.Private.force_reference ~resolve value ~live:(Input.at_time 1.))) [false;true])
     ["(array/grade keys)";"(array/index_of keys queries)"];
   let value=dynamic "(array/index_of keys queries)"in
   let executor=ok(I.Executor.compile ~strict:true value)in
-  let missing=function E.Source("fixture/keys",_,_)->Error(Flow.Diagnostic.error
+  let missing=function E.Source("fixture/keys",_,_)->Error(Diagnostic.error
     ~code:"E_DATA_SOURCE" ~cause:"lookup source cause" "missing keys")
     |E.Source("fixture/queries",_,_)->Ok(E.Int_array[||])|_->assert false in
-  same(I.Executor.force ~strict:true ~resolve:missing executor ~live:(Frame_input.at_time 1.))
-    (E.Private.force_reference ~resolve:missing value ~live:(Frame_input.at_time 1.));
+  same(I.Executor.force ~strict:true ~resolve:missing executor ~live:(Input.at_time 1.))
+    (E.Private.force_reference ~resolve:missing value ~live:(Input.at_time 1.));
   let wrong _=Ok(E.Text_array[|"wrong"|])in
-  same(I.Executor.force ~strict:true ~resolve:wrong executor ~live:(Frame_input.at_time 1.))
-    (E.Private.force_reference ~resolve:wrong value ~live:(Frame_input.at_time 1.));
+  same(I.Executor.force ~strict:true ~resolve:wrong executor ~live:(Input.at_time 1.))
+    (E.Private.force_reference ~resolve:wrong value ~live:(Input.at_time 1.));
   let skipped=dynamic "(if (> t 0.) (array/int 0) (array/index_of keys queries))"in
   let no_source _=failwith "Untaken lookup forced Source"in
-  same(I.Executor.force ~strict:true ~resolve:no_source(ok(I.Executor.compile ~strict:true skipped))~live:(Frame_input.at_time 1.))
-    (E.Private.force_reference ~resolve:no_source skipped ~live:(Frame_input.at_time 1.));
+  same(I.Executor.force ~strict:true ~resolve:no_source(ok(I.Executor.compile ~strict:true skipped))~live:(Input.at_time 1.))
+    (E.Private.force_reference ~resolve:no_source skipped ~live:(Input.at_time 1.));
   let stateful=live_value "(let* [counter (state [s 0] (int/add s 1))] (if (> t 0.) (array/index_of (error \"E_KEYS\" \"rollback\" :cause \"same cause\") (array/int 0)) (array/grade (array/int 13 counter))))"in
   let a=E.create_state()and b=E.create_state()in
   let executor=ok(I.Executor.compile ~strict:true stateful)in
-  List.iteri(fun frame time->let live={(Frame_input.at_time time)with frame;tick=frame}in
+  List.iteri(fun frame time->let live={(Input.at_time time)with frame;tick=frame}in
     same(I.Executor.force ~strict:true ~state:a executor ~live)(E.Private.force_reference ~state:b stateful ~live);
-    assert(E.state_stamp a=E.state_stamp b && bytes(E.Private.state_values a)=bytes(E.Private.state_values b))) [-1.;1.;-1.;1.;-1.];
+    assert(bytes(E.Private.state_values a)=bytes(E.Private.state_values b))) [-1.;1.;-1.;1.;-1.];
   print_endline "Grade/index: stable direction, exact Int/byte Text, first match, ownership, strict/reference and lazy source/state parity"

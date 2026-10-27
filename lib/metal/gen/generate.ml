@@ -220,7 +220,7 @@ let emit_call buffer call =
     else "raw_handle" :: args in
   let rec chunks = function
     | [] -> []
-    | l -> List.filteri (fun i _ -> i < 5) l :: chunks (List.filteri (fun i _ -> i >= 5) l) in
+    | l -> List.take 5 l :: chunks (List.drop 5 l) in
   let roots = match chunks params with
     | [] -> ""
     | first :: rest ->

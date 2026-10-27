@@ -24,16 +24,16 @@ type t = { points : (float * float * float) array; closed : bool; filled : bool 
 
 let default = { points = [||]; closed = false; filled = false }
 
-let schema = Sop.Parameter.schema ~name:"flow_curve" ~default [
-  Sop.Parameter.field ~name:parameter ~label:"Points"
-    ~kind:(Sop.Parameter.encoded ~equal:( = ) ~encode ~decode)
+let schema = Param.schema ~name:"flow_curve" ~default [
+  Param.field ~name:parameter ~label:"Points"
+    ~kind:(Param.encoded ~equal:( = ) ~encode ~decode)
     ~default:default.points ~get:(fun curve -> curve.points)
     ~set:(fun points curve -> { curve with points }) ();
-  Sop.Parameter.field ~name:closed_parameter ~label:"Closed"
-    ~kind:Sop.Parameter.Toggle ~default:false ~get:(fun curve -> curve.closed)
+  Param.field ~name:closed_parameter ~label:"Closed"
+    ~kind:Param.Toggle ~default:false ~get:(fun curve -> curve.closed)
     ~set:(fun closed curve -> { curve with closed }) ();
-  Sop.Parameter.field ~name:filled_parameter ~label:"Filled"
-    ~kind:Sop.Parameter.Toggle ~default:false ~get:(fun curve -> curve.filled)
+  Param.field ~name:filled_parameter ~label:"Filled"
+    ~kind:Param.Toggle ~default:false ~get:(fun curve -> curve.filled)
     ~set:(fun filled curve -> { curve with filled }) () ]
 
 (* A filled curve is one polygon primitive (a surface), not a closed polyline. *)
@@ -50,20 +50,44 @@ let polyline ~closed ~filled points =
           Result.map_error (Rdk.Error.of_string ~operation:"polyline" ~code:"invalid_parameter")
             (Rdk.Geometry.create ~positions:(Rdk.Geometry.positions line) ~topology ()))
 
+let parameter_key {points; closed; filled} =
+  let prefix = "flow.curve\000" in
+  let bytes = Bytes.create (String.length prefix + 2 + (Array.length points * 24)) in
+  Bytes.blit_string prefix 0 bytes 0 (String.length prefix);
+  let offset = ref (String.length prefix) in
+  Bytes.set bytes !offset (if closed then '\001' else '\000'); incr offset;
+  Bytes.set bytes !offset (if filled then '\001' else '\000'); incr offset;
+  let add_float value =
+    let bits = Int64.bits_of_float value in
+    for byte = 0 to 7 do
+      let shifted = Int64.shift_right_logical bits (byte * 8) in
+      Bytes.set bytes (!offset + byte) (Char.chr (Int64.to_int (Int64.logand shifted 0xffL)))
+    done;
+    offset := !offset + 8 in
+  Array.iter (fun (x, y, z) -> add_float x; add_float y; add_float z) points;
+  Bytes.to_string bytes
+
 let node curve =
-  Sop.Custom.node ~label:"Curve" ~operation:"flow_curve" ~schema
-    ~values:curve [] (fun ~label ~inputs:_ ~parameters ->
-      let { points; closed; filled } = parameters in
-      let key = Printf.sprintf "count=%d;closed=%b;filled=%b" (Array.length points) closed filled in
-      Sop.Node.Private.make_geometry ~label ~operation:"polyline" ~version:1
-        ~parameters:key ~cook_mode:Sop.Node.Generator
-        ~dependencies:Sop.Context.Dependencies.static ~inputs:[||]
+  let rec build ~label ~inputs parameters =
+    let {points; closed; filled} = parameters in
+    let parameters_key = Printf.sprintf "count=%d;closed=%b;filled=%b"
+      (Array.length points) closed filled in
+    let node = Sop.Node.Private.make_geometry ~label ~operation:"polyline" ~version:1
+        ~parameters:parameters_key ~cook_mode:Sop.Node.Generator
+        ~dependencies:Sop.Context.Dependencies.static ~inputs:(Array.of_list inputs)
         (fun ~node_id:_ _context _inputs ->
           match polyline ~closed ~filled points with
-          | Ok geometry -> Ok Sop.Node.Private.{geometry; diagnostics = []; instances = None}
-          | Error error -> Error (Sop.Diagnostic.error ~code:(Rdk.Error.code error)
+          | Ok geometry -> Ok Sop.Node.Private.{geometry; instances = None}
+          | Error error -> Error (Diagnostic.error ~code:(Rdk.Error.code error)
               ~cause:(Rdk.Error.to_string error) ~hints:(Rdk.Error.hints error)
-              (Rdk.Error.operation error ^ " could not produce valid geometry"))))
+              (Rdk.Error.operation error ^ " could not produce valid geometry"))) in
+    Sop.Node.Private.parameterize_with_key ~parameter_key:(parameter_key parameters)
+      ~schema ~values:parameters ~rebuild:build node
+  in
+  build ~label:"Curve" ~inputs:[] curve
+
+let replace_points ~source ~closed ~filled points =
+  Sop.Node.Private.adopt_identity ~source (node {points; closed; filled})
 
 let factory = Edit.factory ~key ~label:"Curve" ~category:["Flow"] ~arity:0
   ~fields:(Sop.Node.parameter_fields (node default)) (fun _ -> node default)

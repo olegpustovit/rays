@@ -113,8 +113,8 @@ let test_plane_points_and_transforms () =
       |> add ~owner:Attribute.Point ~name:"rest" (Attribute.Float3
         (Packed.Float3.Private.of_owned_exn ~x:[|-2.;-1.;0.;0.|]
           ~y:[|1.;2.;0.;0.|] ~z:[|0.;0.;0.;0.|])) in
-  let method_ = Attribute_mirror.Mirror_by_plane { origin = Rays.Vec3.zero;
-    normal = Rays.Vec3.unit_x; distance = 0.; tolerance = 0.11 } in
+  let method_ = Attribute_mirror.Mirror_by_plane { origin = Rays_math.Vec3.zero;
+    normal = Rays_math.Vec3.unit_x; distance = 0.; tolerance = 0.11 } in
   let copied = Attribute_mirror.run ~owner:Attribute_mirror.Mirror_point_attributes ~method_
       ~attributes:"value" geometry |> get_ok in
   check (scalar Attribute.Point "value" copied = [|10.;20.;20.;10.|])
@@ -178,8 +178,8 @@ let test_vertex_primitive_and_plane_primitive () =
   check (scalar Attribute.Primitive "p" primitives = [|9.;9.|])
     "Attribute Mirror primitive explicit mapping";
   let plane = Attribute_mirror.run ~owner:Attribute_mirror.Mirror_primitive_attributes
-      ~method_:(Attribute_mirror.Mirror_by_plane { origin = Rays.Vec3.zero;
-        normal = Rays.Vec3.unit_x; distance = 0.; tolerance = 1e-12 })
+      ~method_:(Attribute_mirror.Mirror_by_plane { origin = Rays_math.Vec3.zero;
+        normal = Rays_math.Vec3.unit_x; distance = 0.; tolerance = 1e-12 })
       ~attributes:"p" geometry |> get_ok in
   check (scalar Attribute.Primitive "p" plane = [|9.;9.|])
     "Attribute Mirror primitive bounding-box correspondence"
@@ -234,16 +234,16 @@ let test_errors_and_cancellation () =
     ~owner:Attribute_mirror.Mirror_point_attributes ~method_:mapping geometry);
   expect_error (fun () -> Attribute_mirror.run
     ~owner:Attribute_mirror.Mirror_vertex_attributes
-    ~method_:(Attribute_mirror.Mirror_by_plane { origin = Rays.Vec3.zero;
-      normal = Rays.Vec3.unit_x; distance = 0.; tolerance = 1. }) geometry);
+    ~method_:(Attribute_mirror.Mirror_by_plane { origin = Rays_math.Vec3.zero;
+      normal = Rays_math.Vec3.unit_x; distance = 0.; tolerance = 1. }) geometry);
   expect_error (fun () -> Attribute_mirror.run
     ~owner:Attribute_mirror.Mirror_point_attributes
-    ~method_:(Attribute_mirror.Mirror_by_plane { origin = Rays.Vec3.zero;
-      normal = Rays.Vec3.zero; distance = 0.; tolerance = 1. }) geometry);
+    ~method_:(Attribute_mirror.Mirror_by_plane { origin = Rays_math.Vec3.zero;
+      normal = Rays_math.Vec3.zero; distance = 0.; tolerance = 1. }) geometry);
   expect_error (fun () -> Attribute_mirror.run
     ~owner:Attribute_mirror.Mirror_point_attributes
-    ~method_:(Attribute_mirror.Mirror_by_plane { origin = Rays.Vec3.zero;
-      normal = Rays.Vec3.unit_x; distance = 0.; tolerance = -1. }) geometry);
+    ~method_:(Attribute_mirror.Mirror_by_plane { origin = Rays_math.Vec3.zero;
+      normal = Rays_math.Vec3.unit_x; distance = 0.; tolerance = -1. }) geometry);
   expect_error (fun () -> Attribute_mirror.run
     ~transform:(Attribute_mirror.Mirror_uv { origin_u = 0.; origin_v = 0.;
       direction_u = 0.; direction_v = 0. })
@@ -285,7 +285,7 @@ let test_parallel_scale () =
       (List.init half (fun point -> point + half))) |> Result.get_ok in
   let destination = Geometry.find_group ~owner:Group.Point "dest" geometry
       |> Option.get in
-  let run domains = Rays.Parallel.run ~domains (fun () ->
+  let run domains = Parallel.run ~domains (fun () ->
     Attribute_mirror.run ~grain:127 ~owner:Attribute_mirror.Mirror_point_attributes
       ~method_:(Attribute_mirror.Mirror_by_mapping { mapping_attribute = "map";
         destination_group = destination }) ~attributes:"Cd"

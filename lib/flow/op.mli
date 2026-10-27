@@ -20,15 +20,23 @@ type t = {
   choices : (string * string list) list; shape : shape;
   live : bool;
   check : 'f 'r. (string * ('f, 'r) Value.t) list -> unit;
-  body : 'f 'r. live:Frame_input.t -> node:(string -> (string * ('f, 'r) Value.t) list -> ('f, 'r) Value.t) ->
+  body : 'f 'r. live:Input.t -> node:(string -> (string * ('f, 'r) Value.t) list -> ('f, 'r) Value.t) ->
     (string * ('f, 'r) Value.t) list -> ('f, 'r) Value.t;
   category : string;
   arithmetic : arithmetic option;
-  packed_extension : Packed_ops.extension option;
+  packed_extension : packed_kind option;
   (** Asserts the intrinsic's semantics, not just its signature. Clear this
-      capability when copying a declaration and changing its behavior. *)
+      capability when copying a declaration and changing its behavior.
+      Only [Noise3] supports explicit declarations; other kinds are inferred
+      from canonical built-ins. *)
 }
 val all : t list
+val noise3 : t
+val text_float : t
+val noise_table : int -> Rays_math.Noise.t
+val noise_settings : (string * ('f, 'r) Value.t) list -> int * int * float * float
+val drawing_color : ('f, 'r) Value.t -> Rays_math.Color.t
+val hsl_channels : float -> float -> float -> float * float * float
 val find : ?extra:t list -> string -> Context.t -> t option
 (** Exact head, then bare value head, then a head qualified by the given context. *)
 
@@ -56,6 +64,10 @@ val validate : t list -> Diagnostic.t option
 (** Check an immutable extension list; declarations cannot shadow built-ins. *)
 
 val max_iterations : int
+
+val range_length : ?limit:int -> int -> int -> int
+(** The checked length of [range], shared with structured region loops.
+    The default limit is 4,096; subtraction cannot overflow native Int. *)
 
 module Private : sig
   val constant_array_descriptor : string -> (string * ('f, 'r) Value.t) list -> ('f, 'r) Value.t

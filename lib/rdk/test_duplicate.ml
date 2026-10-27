@@ -67,7 +67,7 @@ let group owner name geometry =
   Geometry.find_group ~owner name geometry |> Option.get
 
 let test_restricted_payload_and_groups () =
-  let source = fixture () and move = Mat4.translation (Vec3.create 10. 0. 0.) in
+  let source = fixture () and move = Rays_math.Mat4.translation (Rays_math.Vec3.create 10. 0. 0.) in
   let right = group Group.Primitive "right" source in
   let output = Instance_copy.duplicate ~grain:1 ~copies:2 ~transform:move
       ~primitives:right ~copy_group_prefix:"copy_" source |> get in
@@ -137,14 +137,14 @@ let test_restricted_payload_and_groups () =
   check (Group.cardinality first = 2 && Group.mem 0 first && Group.mem 2 first)
     "per-copy output groups preserve collisions";
   let singular = Instance_copy.duplicate ~primitives:right
-      ~transform:(Mat4.scaling (Vec3.create 1. 0. 1.)) source |> get in
+      ~transform:(Rays_math.Mat4.scaling (Rays_math.Vec3.create 1. 0. 1.)) source |> get in
   check (Geometry.find_attribute ~owner:Attribute.Point "N" singular = None)
     "singular selected transform normal invalidation";
   let untyped_n = Geometry.with_attribute
       (attribute Attribute.Point "N" (Attribute.Int (Array.make 7 9))) source
       |> Result.get_ok in
   let untyped_n = Instance_copy.duplicate ~primitives:right
-      ~transform:(Mat4.scaling (Vec3.create 1. 0. 1.)) untyped_n |> get in
+      ~transform:(Rays_math.Mat4.scaling (Rays_math.Vec3.create 1. 0. 1.)) untyped_n |> get in
   check (int_attribute Attribute.Point "N" untyped_n
       = [|9;9;9;9;9;9;9;9;9;9;9|])
     "singular transform retained non-normal N storage";
@@ -259,7 +259,7 @@ let test_parallel_exact () =
   let cook domains = Parallel.run ~domains (fun () ->
       Instance_copy.duplicate ~grain:4_096 ~copies:4 ~primitives:selected
         ~copy_group_prefix:"copy_"
-        ~transform:(Mat4.translation (Vec3.create 0. 0.5 0.)) source |> get) in
+        ~transform:(Rays_math.Mat4.translation (Rays_math.Vec3.create 0. 0.5 0.)) source |> get) in
   let one = cook 1 and four = cook 4 in
   check (equal_geometry one four) "one/four-domain restricted output differs"
 

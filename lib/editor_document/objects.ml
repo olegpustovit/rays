@@ -85,14 +85,14 @@ module Camera = struct
 
   let of_node node =
     if Node.operation node <> "camera" then None else
-    let values = List.map (fun (field : Parameter.field_view) ->
+    let values = List.map (fun (field : Param.field_view) ->
       field.name, field.current) (Node.parameter_fields node) in
-    match Parameter.apply_all parameters_schema parameters_default values with
+    match Param.apply_all parameters_schema parameters_default values with
     | Error _ -> None
     | Ok (p, _) ->
-        let at = Rays.Vec3.create p.eye_x p.eye_y p.eye_z
-        and target = Rays.Vec3.create p.target_x p.target_y p.target_z
-        and up = Rays.Vec3.create p.up_x p.up_y p.up_z in
+        let at = Rays_math.Vec3.create p.eye_x p.eye_y p.eye_z
+        and target = Rays_math.Vec3.create p.target_x p.target_y p.target_z
+        and up = Rays_math.Vec3.create p.up_x p.up_y p.up_z in
         let lens = { Rays.Camera.aperture = p.aperture;
                      focus_distance = if p.focus_distance > 0. then Some p.focus_distance else None } in
         (match Rays.Camera.perspective ~fov_y:(p.fov *. Float.pi /. 180.)
@@ -102,11 +102,11 @@ module Camera = struct
          | exception Invalid_argument _ -> None)
 
   let lens_values (lens : Rays.Camera.lens) =
-    ["aperture", Parameter.Float_value lens.aperture;
-     "focus_distance", Parameter.Float_value (Option.value ~default:0. lens.focus_distance)]
+    ["aperture", Param.Float_value lens.aperture;
+     "focus_distance", Param.Float_value (Option.value ~default:0. lens.focus_distance)]
 
-  let to_values ~(eye : Rays.Vec3.t) ~(target : Rays.Vec3.t) ~fov_y =
-    let float name value = name, Parameter.Float_value value in
+  let to_values ~(eye : Rays_math.Vec3.t) ~(target : Rays_math.Vec3.t) ~fov_y =
+    let float name value = name, Param.Float_value value in
     [float "eye_x" eye.x; float "eye_y" eye.y; float "eye_z" eye.z;
      float "target_x" target.x; float "target_y" target.y;
      float "target_z" target.z; float "fov" (fov_y *. 180. /. Float.pi)]
@@ -118,7 +118,7 @@ end
 module Root = struct
   type renderer = Raster | Wireframe | Path_traced
 
-  let renderer_parameter = Parameter.choice ~equal:( = )
+  let renderer_parameter = Param.choice ~equal:( = )
       ["Raster", Raster; "Wireframe", Wireframe; "Path traced", Path_traced]
 
   type parameters = {
@@ -149,13 +149,13 @@ module Root = struct
   let render (p : parameters) =
     { width = max 1 p.width; height = max 1 p.height; max_spp = max 1 p.max_spp }
 
-  let fields (p : parameters) = Parameter.view parameters_schema p
+  let fields (p : parameters) = Param.view parameters_schema p
 end
 
 module Light = struct
   type shape = Point | Spot | Area | Directional
 
-  let shape_parameter = Parameter.choice ~equal:( = )
+  let shape_parameter = Param.choice ~equal:( = )
       ["Area", Area; "Point", Point; "Spot", Spot; "Directional", Directional]
 
   type parameters = {
@@ -197,8 +197,8 @@ module Light = struct
 end
 
 let read schema default node =
-  match Parameter.apply_all schema default
-      (List.map (fun (field : Parameter.field_view) -> field.name, field.current)
+  match Param.apply_all schema default
+      (List.map (fun (field : Param.field_view) -> field.name, field.current)
         (Node.parameter_fields node)) with
   | Ok (values, _) -> Some values
   | Error _ -> None
@@ -214,12 +214,12 @@ let radians degrees = degrees *. Float.pi /. 180.
    carry positions instead of a rotation, so only a translation. *)
 let local node = match geometry node, light node with
   | Some p, _ ->
-      Mat4.mul (Mat4.translation (Vec3.create p.translate_x p.translate_y p.translate_z))
-        (Mat4.mul (Mat4.rotation_z (radians p.rotate_z))
-          (Mat4.mul (Mat4.rotation_y (radians p.rotate_y))
-            (Mat4.mul (Mat4.rotation_x (radians p.rotate_x))
-              (Mat4.scaling (Vec3.create p.scale_x p.scale_y p.scale_z)))))
-  | None, _ -> Mat4.identity
+      Rays_math.Mat4.mul (Rays_math.Mat4.translation (Rays_math.Vec3.create p.translate_x p.translate_y p.translate_z))
+        (Rays_math.Mat4.mul (Rays_math.Mat4.rotation_z (radians p.rotate_z))
+          (Rays_math.Mat4.mul (Rays_math.Mat4.rotation_y (radians p.rotate_y))
+            (Rays_math.Mat4.mul (Rays_math.Mat4.rotation_x (radians p.rotate_x))
+              (Rays_math.Mat4.scaling (Rays_math.Vec3.create p.scale_x p.scale_y p.scale_z)))))
+  | None, _ -> Rays_math.Mat4.identity
 
 let parent scene id = match Edit_graph.inputs scene ~node_id:id with
   | Some inputs when Array.length inputs > 0 -> inputs.(0)
@@ -228,26 +228,26 @@ let parent scene id = match Edit_graph.inputs scene ~node_id:id with
 (* The parent chain's transforms, excluding the object's own; a cycle is
    impossible because the scene network is a DAG. *)
 let rec parent_world scene id = match parent scene id with
-  | None -> Mat4.identity
+  | None -> Rays_math.Mat4.identity
   | Some parent_id ->
       (match Edit_graph.find scene ~node_id:parent_id with
-       | Some node -> Mat4.mul (parent_world scene parent_id) (local node)
-       | None -> Mat4.identity)
+       | Some node -> Rays_math.Mat4.mul (parent_world scene parent_id) (local node)
+       | None -> Rays_math.Mat4.identity)
 
 let world scene id = match Edit_graph.find scene ~node_id:id with
-  | Some node -> Mat4.mul (parent_world scene id) (local node)
-  | None -> Mat4.identity
+  | Some node -> Rays_math.Mat4.mul (parent_world scene id) (local node)
+  | None -> Rays_math.Mat4.identity
 
 let visible node = match geometry node, light node with
   | Some p, _ -> p.visible
   | None, Some p -> p.visible
   | None, None -> true
 
-let flag name node = List.exists (fun (field : Parameter.field_view) ->
-    field.name = name && field.current = Parameter.Bool_value true)
+let flag name node = List.exists (fun (field : Param.field_view) ->
+    field.name = name && field.current = Param.Bool_value true)
     (Node.parameter_fields node)
 
-let has_flag name node = List.exists (fun (field : Parameter.field_view) ->
+let has_flag name node = List.exists (fun (field : Param.field_view) ->
     field.name = name) (Node.parameter_fields node)
 
 (* A light object as a renderer light, its positions in world space. *)
@@ -255,14 +255,14 @@ let to_light scene id =
   Option.bind (Edit_graph.find scene ~node_id:id) (fun node ->
     Option.map (fun (p : Light.parameters) ->
       let space = parent_world scene id in
-      let at = Mat4.transform_point space
-          (Vec3.create p.translate_x p.translate_y p.translate_z)
-      and target = Mat4.transform_point space
-          (Vec3.create p.target_x p.target_y p.target_z) in
-      let direction = let d = Vec3.sub target at in
-        if Vec3.length d < 1e-6 then Vec3.create 0. (-1.) 0. else Vec3.normalize d in
+      let at = Rays_math.Mat4.transform_point space
+          (Rays_math.Vec3.create p.translate_x p.translate_y p.translate_z)
+      and target = Rays_math.Mat4.transform_point space
+          (Rays_math.Vec3.create p.target_x p.target_y p.target_z) in
+      let direction = let d = Rays_math.Vec3.sub target at in
+        if Rays_math.Vec3.length d < 1e-6 then Rays_math.Vec3.create 0. (-1.) 0. else Rays_math.Vec3.normalize d in
       let channel value = int_of_float (Float.round (255. *. Float.min 1. value)) in
-      let diffuse = Color.rgb (channel p.color_r) (channel p.color_g) (channel p.color_b) in
+      let diffuse = Rays_math.Color.rgb (channel p.color_r) (channel p.color_g) (channel p.color_b) in
       let intensity = p.intensity in
       (* Physical 1/d^2 falloff, so raster and the path tracer agree. *)
       let attenuation = Rays.Light.attenuation ~constant:0. ~quadratic:1. () in
@@ -283,25 +283,24 @@ let ids operation scene = List.filter_map (fun (info : Edit_graph.node_info) ->
 
 let lights ?(render = false) scene = List.filter_map (fun id ->
     match Edit_graph.find scene ~node_id:id with
-    | Some node when visible node && not (Edit_graph.is_bypassed scene ~node_id:id)
-        && (not render || flag "render" node) -> to_light scene id
+    | Some node when visible node && (not render || flag "render" node) -> to_light scene id
     | Some _ | None -> None) (ids "light" scene)
 
 (* Parameters a light object gets from a renderer light. *)
 let light_values (light : Rays.Light.t) =
-  let float name value = name, Parameter.Float_value value in
-  let r, g, b, _ = Color.to_tuple light.diffuse in
+  let float name value = name, Param.Float_value value in
+  let r, g, b, _ = Rays_math.Color.to_tuple light.diffuse in
   let at, target, shape, extra = match light.kind with
     | Directional { direction } ->
-        Vec3.scale direction (-8.), Vec3.zero, "Directional", []
-    | Point { position; _ } -> position, Vec3.zero, "Point", []
+        Rays_math.Vec3.scale direction (-8.), Rays_math.Vec3.zero, "Directional", []
+    | Point { position; _ } -> position, Rays_math.Vec3.zero, "Point", []
     | Spot { position; direction; cutoff; _ } ->
-        position, Vec3.add position direction, "Spot",
+        position, Rays_math.Vec3.add position direction, "Spot",
         [float "cone" (cutoff *. 180. /. Float.pi)]
     | Area { position; direction; width; height; _ } ->
-        position, Vec3.add position direction, "Area",
+        position, Rays_math.Vec3.add position direction, "Area",
         [float "width" width; float "height" height] in
-  ["shape", Parameter.Choice_value shape;
+  ["shape", Param.Choice_value shape;
    float "translate_x" at.x; float "translate_y" at.y; float "translate_z" at.z;
    float "target_x" target.x; float "target_y" target.y; float "target_z" target.z;
    float "color_r" (float_of_int r /. 255.); float "color_g" (float_of_int g /. 255.);
@@ -311,13 +310,13 @@ let catalog = [Geometry.factory; Light.factory; Camera.factory]
 
 (* Object parameters for a local matrix T·Rz·Ry·Rx·S (shear is dropped). *)
 let decompose matrix =
-  let get row column = Mat4.get matrix ~row ~column in
-  let scale column = let length = Vec3.length (Vec3.create (get 0 column)
+  let get row column = Rays_math.Mat4.get matrix ~row ~column in
+  let scale column = let length = Rays_math.Vec3.length (Rays_math.Vec3.create (get 0 column)
       (get 1 column) (get 2 column)) in if length < 1e-9 then 1. else length in
   let sx = scale 0 and sy = scale 1 and sz = scale 2 in
   let r row column = get row column /. [| sx; sy; sz |].(column) in
   let degrees angle = angle *. 180. /. Float.pi in
-  let float name value = name, Parameter.Float_value value in
+  let float name value = name, Param.Float_value value in
   [float "translate_x" (get 0 3); float "translate_y" (get 1 3);
    float "translate_z" (get 2 3);
    float "rotate_x" (degrees (Float.atan2 (r 2 1) (r 2 2)));
@@ -329,16 +328,16 @@ let decompose matrix =
    changed; [before] is the old parent chain's transform. *)
 let keep_world scene id ~before =
   match Edit_graph.find scene ~node_id:id,
-      Mat4.inverse (parent_world scene id) with
+      Rays_math.Mat4.inverse (parent_world scene id) with
   | Some node, Some inverse ->
-      let change = Mat4.mul inverse before in
+      let change = Rays_math.Mat4.mul inverse before in
       (match geometry node, light node with
-       | Some _, _ -> decompose (Mat4.mul change (local node))
+       | Some _, _ -> decompose (Rays_math.Mat4.mul change (local node))
        | None, Some p ->
-           let point x y z = Mat4.transform_point change (Vec3.create x y z) in
+           let point x y z = Rays_math.Mat4.transform_point change (Rays_math.Vec3.create x y z) in
            let at = point p.translate_x p.translate_y p.translate_z
            and target = point p.target_x p.target_y p.target_z in
-           let float name value = name, Parameter.Float_value value in
+           let float name value = name, Param.Float_value value in
            [float "translate_x" at.x; float "translate_y" at.y; float "translate_z" at.z;
             float "target_x" target.x; float "target_y" target.y;
             float "target_z" target.z]

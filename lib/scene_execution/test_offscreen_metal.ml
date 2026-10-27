@@ -20,7 +20,7 @@ let run () =
         let expected = Bytes.init 64 (fun i -> Bytes.get pixel (i mod 4)) in
         let actual = get (Scene_execution.read_pixels renderer ~bytes_per_row:16) in
         if not (Bytes.equal expected actual) then failwith (label ^ " full-image pixel drift") in
-      if not(get(Scene_execution.render~clear:(0.125,0.25,0.5,1.)renderer[]))then
+      if not(get(Scene_execution_fixtures.render~clear:(0.125,0.25,0.5,1.)renderer[]))then
         failwith"layerless clear-only submission was skipped";
       expect_pixels "layerless clear-only" (Bytes.of_string "\x20\x40\x80\xff");
       let indices=Bytes.make 12 '\000' in
@@ -32,13 +32,12 @@ let run () =
         {viewport=(0,0,4,4);scissor=(0,0,4,4);
          cull=Ogpu.Render_pass.Cull_none;depth_compare=Always;
          depth_write=false;depth_load=Load;depth_clear=1.;
-         transform_uniforms=None;stencil_state=None;stencil_load=Load;
-         stencil_clear=0}
+         transform_uniforms=None}
       in
       let expected = Bytes.of_string "\xff\xff\xff\xff" in
       let clear = 0., 0., 0., 1. in
       for frame=1 to 600 do
-        if not (get (Scene_execution.render ~clear renderer [{mesh;state}])) then
+        if not (get (Scene_execution_fixtures.render ~clear renderer [{mesh;state}])) then
           failwith "layerless offscreen submission was skipped";
         if List.mem frame [1;2;60;600] then
           expect_pixels (Printf.sprintf "offscreen frame %d" frame) expected
@@ -49,8 +48,8 @@ let run () =
       let retained : Scene_execution.sampled_draw =
         {family=Scene2;blend=Ogpu.Pipeline.Replace;texture=None;auxiliary=None;
          vertex_attributes=None;samples=1;draw={mesh;state}} in
-      if not (get (Scene_execution.render_prepared_sampled_resources ~clear
-          ~identity:"offscreen-retained" ~version:1L renderer [retained])) then
+      if not (get (Scene_execution.submit ~clear
+          ~prepared:("offscreen-retained",1L) renderer [retained])) then
         failwith "offscreen retained preparation was skipped";
       let steady_uploads = ref None in
       for frame=1 to 60 do
@@ -73,8 +72,8 @@ let run () =
          draw={mesh={mesh with key=Printf.sprintf "dense-%d" index};
            state={state with scissor=(index mod 2,0,3,4)}}}) in
       for frame=1 to 60 do
-        if not (get (Scene_execution.render_prepared_sampled_resources ~clear
-          ~identity:"dense-eviction" ~version:1L renderer dense)) then
+        if not (get (Scene_execution.submit ~clear
+          ~prepared:("dense-eviction",1L) renderer dense)) then
           failwith "dense eviction submission was skipped";
         (match get (Scene_execution.replay_prepared_sampled_resources ~clear
             ~identity:"dense-eviction" ~version:1L renderer) with

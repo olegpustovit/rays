@@ -1,11 +1,11 @@
 open Rays_math
 
 type projection =
-  | Planar of { origin : Vec3.t; u_axis : Vec3.t; v_axis : Vec3.t }
+  | Planar of { origin : Rays_math.Vec3.t; u_axis : Rays_math.Vec3.t; v_axis : Rays_math.Vec3.t }
   | Cylindrical of {
-      origin : Vec3.t; axis : Vec3.t; seam : Vec3.t; height : float;
+      origin : Rays_math.Vec3.t; axis : Rays_math.Vec3.t; seam : Rays_math.Vec3.t; height : float;
     }
-  | Spherical of { origin : Vec3.t; axis : Vec3.t; seam : Vec3.t }
+  | Spherical of { origin : Rays_math.Vec3.t; axis : Rays_math.Vec3.t; seam : Rays_math.Vec3.t }
 
 type unitize_mode = Per_face | Islands
 
@@ -46,8 +46,8 @@ type prepared =
 exception Uv_error of string
 let fail message = raise (Uv_error message)
 let finite value = Float.is_finite value
-let finite3 value = finite value.Vec3.x && finite value.y && finite value.z
-let finite2 value = finite value.Vec2.x && finite value.y
+let finite3 value = finite value.Rays_math.Vec3.x && finite value.y && finite value.z
+let finite2 value = finite value.Rays_math.Vec2.x && finite value.y
 
 let run_ranges ?(grain = 16_384) count operation =
   if grain <= 0 then fail "grain must be positive";
@@ -59,7 +59,7 @@ let run_ranges ?(grain = 16_384) count operation =
 
 let normalized_with_inverse name value =
   if not (finite3 value) then fail (name ^ " must have finite components");
-  let scale = ref (abs_float value.Vec3.x) in
+  let scale = ref (abs_float value.Rays_math.Vec3.x) in
   let absolute_y = abs_float value.y and absolute_z = abs_float value.z in
   if absolute_y > !scale then scale := absolute_y;
   if absolute_z > !scale then scale := absolute_z;
@@ -354,8 +354,8 @@ let expected_group_owner = function
   | Attribute.Primitive | Attribute.Detail -> None
 
 let transform ?cancel ?grain ?(name = "uv") ?selection ~owner
-    ?(translate = Vec2.zero) ?(scale = Vec2.create 1. 1.) ?(angle = 0.)
-    ?(pivot = Vec2.create 0.5 0.5) geometry =
+    ?(translate = Rays_math.Vec2.zero) ?(scale = Rays_math.Vec2.create 1. 1.) ?(angle = 0.)
+    ?(pivot = Rays_math.Vec2.create 0.5 0.5) geometry =
   Error.guard ~operation:"uv_transform" ~code:"invalid_attribute" @@ fun () ->
   try
     if String.trim name = "" then fail "UV attribute name must not be empty";

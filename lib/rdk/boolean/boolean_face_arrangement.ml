@@ -505,7 +505,7 @@ module Split_set = struct
       count = 0 }
 
   let hash segment point =
-    ((segment * 65_599) lxor (point * 1_000_003)) land max_int
+    Rays_math.Hash.mix_with 65_599 segment (point * 1_000_003) land max_int
 
   let find_slot value segment point =
     let mask = Array.length value.segments - 1 in

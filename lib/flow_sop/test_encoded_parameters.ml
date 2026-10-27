@@ -1,12 +1,12 @@
 module S = Flow.Syntax
 module W = Flow.Workspace
 let ok = function Ok value->value|Error message->failwith message
-let flow_ok = function Ok value->value|Error d->failwith(Flow.Diagnostic.to_string d)
+let flow_ok = function Ok value->value|Error d->failwith(Diagnostic.to_string d)
 let parse text=flow_ok(S.parse text)
 let catalog=flow_ok(Flow_sop.Catalog.of_factories ~version:1 Sop_catalog.Editor.factories)
 let checker=Flow_sop.Catalog.check_workspace ~ops:Flow_sop.Operators.all
 let check forms=match checker catalog forms with
-  |Some checked,_->checked|_,ds->failwith(String.concat "\n"(List.map Flow.Diagnostic.to_string ds))
+  |Some checked,_->checked|_,ds->failwith(String.concat "\n"(List.map Diagnostic.to_string ds))
 let normalizer={|(fn [(raw : text)]
   (case (text/lower (text/trim raw)) "points" "point" "point" "point" "detail" "detail"
     :else (error "E_RULES" (str "Unknown owner: " raw))))|}
@@ -27,13 +27,13 @@ let field node=List.hd(Sop.Node.parameter_fields node)
 let cook session domains node=match Sop.Session.cook session
   ~context:(ok(Sop.Context.create ~domains ()))node with
   |Ok output->Result.get_ok(Sop.Payload.geometry output.payload)
-  |Error d->failwith(Sop.Diagnostic.error_to_string d)
+  |Error d->failwith(Diagnostic.error_to_string d)
 let tag geometry=match Rdk.Geometry.find_attribute ~owner:Rdk.Attribute.Point "tag" geometry with
   |Some attr->(match Rdk.Attribute.Private.storage attr with Text values->values|_->assert false)
   |None->assert false
 let refused code text=match checker catalog(parse text) with
-  |None,ds when List.exists(fun(d:Flow.Diagnostic.t)->d.code=code)ds->()
-  |_,ds->failwith("Expected "^code^": "^String.concat "; "(List.map Flow.Diagnostic.to_string ds))
+  |None,ds when List.exists(fun(d:Diagnostic.t)->d.code=code)ds->()
+  |_,ds->failwith("Expected "^code^": "^String.concat "; "(List.map Diagnostic.to_string ds))
 
 let native_schema=
   let decode raw=match String.lowercase_ascii(String.trim raw) with
@@ -60,7 +60,7 @@ let ()=
   assert(Sop.Node.parameter_fields explicit=Sop.Node.parameter_fields node);
   let (edited,_),phases=Flow.Phase_timer.sample ~clock:Unix.gettimeofday(fun()->
     ok(Sop.Node.apply_parameters explicit["rules",Param.Text_value " DETAIL "])) in
-  assert(Flow.Phase_timer.calls phases Evaluate=0);
+  assert(Flow.Phase_timer.calls phases "evaluate"=0);
   assert(Sop.Node.operation edited="native_encoded" && Sop.Node.id edited=Sop.Node.id explicit);
   assert(Sop.Node.parameter_fields node=Param.view native_schema "point");
   assert(Sop.Node.parameter_key node=Param.cook_key native_schema "point");
@@ -137,6 +137,22 @@ let ()=
   assert(Option.is_some(Flow_graph.Projection.find(Flow_graph.Projection.of_graph catalog checked "g")["g";"quoted"]));
   ignore(flow_ok(Flow_graph.Flow_edit.apply_checked ~checker catalog forms
     (Set_arg{node=["g";"quoted"];key=Pos 0;sub=[];value=S.make(Str "changed\n\195\169")})));
+  let forms=parse "(workspace format (graph g :context value (let* [formatted (text/float 3.141592653589793)] 0.0)))" in
+  let checked=check forms in
+  let formatted ws=let result=flow_ok(Flow.Eval.static ~record:true ws) in
+    snd(List.hd(List.assoc ["g";"formatted"] result.records)) in
+  assert(formatted checked=Flow.Eval.Text "3.141592653589793");
+  assert(Option.is_some(Flow_graph.Projection.find(Flow_graph.Projection.of_graph catalog checked "g")["g";"formatted"]));
+  let _,edited=flow_ok(Flow_graph.Flow_edit.apply_checked ~checker catalog forms
+    (Set_arg{node=["g";"formatted"];key=Pos 0;sub=[];value=S.make(Num "0.1")})) in
+  assert(formatted edited=Flow.Eval.Text "0.1");
+  let rules=Param.String_table.encode [["point";"point";"*";"out";"false";"false";"boundary";
+    "3.141592653589793";"false";"false";"false";""]] in
+  let checked=check(parse ("(workspace tolerance (graph g :context sop (sop/group_promotions nil :rules "^
+    Flow.Lisp.flat(S.make(Str rules))^")))")) in
+  let evaluated=flow_ok(Flow.Eval.static checked) in
+  let node=Array.find_opt(fun(n:Flow.Eval.node)->n.kind="sop/group_promotions")evaluated.plan.nodes |> Option.get in
+  assert(List.assoc "rules" node.args=Flow.Eval.Text rules);
   print_endline "Encoded parameters: typed hooks and transitive pure helpers; generic error projection/edit"
 
 let ()=

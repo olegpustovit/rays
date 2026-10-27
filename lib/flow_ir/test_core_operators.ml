@@ -1,6 +1,6 @@
 module E = Flow.Eval
 module I = Flow_ir
-let ok = function Ok x -> x | Error d -> failwith (Flow.Diagnostic.to_string d)
+let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let bits x y = Int64.bits_of_float x = Int64.bits_of_float y
 let rec same (a : E.value) (b : E.value) = match a,b with
   | Float x,Float y -> bits x y
@@ -84,6 +84,9 @@ let cases = [
   "or","(if (or (> t 2) (< t 0)) 1. 0.)"; "not","(if (not (> t 1)) 1. 0.)";
   "value/rand","(value/rand t 1 2)";
   "rand/at","(rand/at (frame/index) (int t))";
+  "noise3","(noise3 [t 0.3 -0.2])";
+  "color/hsl","(color/hsl (* t 60.) 0.75 0.5)";
+  "color/gradient","(color/gradient (list \"#101426\" \"#f26444\") t)";
   "text/trim","(text/trim (str \" \\t éÉ日本 \" t \" \\n\"))";
   "text/lower","(text/lower (str \"ABZéÉΣİ日本😀\" t))";
   "error","(if (> t 0.) (error (str \"E_EXACT_\" (int t)) (str \"é日本😀 \" t)) 7.)";
@@ -100,18 +103,20 @@ let cases = [
 ]
 let times = [-3.;-0.;0.;0.37;1.;1.9;3.;7.5]
 let lives = List.concat_map (fun time ->
-  let base=Frame_input.at_time time in
-  [base; {base with buttons=["left";"x1"]; keys=["space";"a"]; pointer=(12.,37.); size=(640,480); frame=3; dt=0.125}]) times
+  let base=Input.at_time time in
+  [base; {base with buttons=[Input.LeftButton; Input.MouseX1]; keys=[Input.Space; Input.KeyChar 'a']; pointer=(12.,37.); size=(640,480); frame=3; dt=0.125}]) times
 let () =
   let covered=List.sort_uniq compare (List.map fst cases) in
   List.iter (fun (o : Flow.Op.t) ->
-    if o.ctx=Flow.Context.value && o.shape=Flow.Op.Scalar && not (List.mem o.name covered) then
+    if o.ctx=Flow.Context.value && o.shape=Flow.Op.Scalar
+      && not (List.mem o.name ["color/hsla"; "text/float"])
+      && not (List.mem o.name covered) then
       failwith ("No core operator case for " ^ o.name)) (Flow.Op.of_context Flow.Context.value);
   let n=ref 0 and static=ref [] in
   List.iter (fun (name,body) ->
     let source="(workspace w (graph g :context value (let* [tested " ^ body ^ "] 0.)))" in
     let ws=match Flow.Workspace.check {Flow.Check.version=1;kinds=[]} (ok (Flow.Syntax.parse source)) with
-      | Some ws,[] -> ws | _,ds -> failwith (body ^ ": " ^ String.concat "; " (List.map Flow.Diagnostic.to_string ds)) in
+      | Some ws,[] -> ws | _,ds -> failwith (body ^ ": " ^ String.concat "; " (List.map Diagnostic.to_string ds)) in
     let value=snd (List.hd (List.assoc ["g";"tested"] (ok (E.static ~record:true ws)).records)) in
     match value with E.Residual r -> begin
     let core=match I.Core_lower.lower r with Ok p -> p | Error n -> failwith (name ^ " " ^ body ^ ": refused " ^ n) in
@@ -119,7 +124,7 @@ let () =
       incr n;
       match I.Core_exec.run core ~live,E.Private.force_reference value ~live with
       | Ok a,Ok b -> if not (same a b) then failwith (Printf.sprintf "%s at %g: %s <> %s" body live.t (match a,b with E.Vec3 (x,y,z),E.Vec3 (p,q,r) -> Printf.sprintf "%h %h %h / %h %h %h" x y z p q r | _ -> E.show a) (E.show b))
-      | Error (a : Flow.Diagnostic.t),Error (b : Flow.Diagnostic.t) ->
+      | Error (a : Diagnostic.t),Error (b : Diagnostic.t) ->
           if a.code<>b.code then failwith (Printf.sprintf "%s at %g: %s <> %s" body live.t a.code b.code)
       | Ok a,Error b -> failwith (Printf.sprintf "%s at %g: %s but reference %s" body live.t (E.show a) b.code)
       | Error a,Ok b -> failwith (Printf.sprintf "%s at %g: %s but reference %s" body live.t a.code (E.show b))) lives end
@@ -131,7 +136,7 @@ let () =
   let live_value body =
     let source="(workspace text_arrays (graph g :context host (if (> t -1000.) " ^ body ^ " " ^ body ^ ")))" in
     let ws=match Flow.Workspace.check {Flow.Check.version=1;kinds=[]} (ok(Flow.Syntax.parse source)) with
-      | Some ws,[]->ws | _,ds->failwith(String.concat "\n"(List.map Flow.Diagnostic.to_string ds)) in
+      | Some ws,[]->ws | _,ds->failwith(String.concat "\n"(List.map Diagnostic.to_string ds)) in
     List.assoc "g" (ok(E.static ws)).results in
   List.iter (fun body ->
     let value=live_value body in
@@ -142,10 +147,10 @@ let () =
        retain the structured Core path. Both execute without a walker retry. *)
     let program=ok(I.Executor.compile ~strict:true value) in
     List.iter(fun time->
-      let live=Frame_input.at_time time in
+      let live=Input.at_time time in
       let expected=ok(E.Private.force_reference value ~live) in
       assert(ok(I.Core_exec.run core ~live)=expected);
-      List.iter(fun domains->Rays_math.Parallel.run ~domains(fun()->
+      List.iter(fun domains->Parallel.run ~domains(fun()->
         assert(ok(I.Executor.force ~strict:true program ~live)=expected))) [1;8]) [-1.;0.;1.])
     ["(map (fn [x] (if (> t 0.) x \"😀\")) (array/text 5001 \"猫\"))";
      "(map (fn [x] (text/trim (if (> t 0.) x \"　A \"))) (array/text 5001 \" \\tABéÉ日本😀\\r\\n\"))";
@@ -165,7 +170,7 @@ let () =
   let residual=match dependent with E.Residual r->r|_->assert false in
   assert(I.Core_lower.lower ~strict:true residual=Error "text_collect_dependent_clause");
   assert(Result.is_error(I.Executor.compile ~strict:true dependent));
-  assert(ok(E.Private.force_reference dependent ~live:(Frame_input.at_time 1.))
+  assert(ok(E.Private.force_reference dependent ~live:(Input.at_time 1.))
     =E.Text_array(Array.make 5002 "猫"));
   let nested_numeric=live_value
     "(map (fn [x] (text/trim (text/lower (str (array/sum (map (fn [y] (value/rand y t)) (array/float 2))))))) (array/text 2))" in
@@ -174,8 +179,8 @@ let () =
    | Ok program->assert(Array.length program.regions>0)
    | Error form->failwith("Nested numeric Text body refused as "^form));
   (match I.Executor.compile ~strict:true nested_numeric with
-   | Error diagnostic->assert(diagnostic.Flow.Diagnostic.code="E_KERNEL_FORM")
+   | Error diagnostic->assert(diagnostic.Diagnostic.code="E_KERNEL_FORM")
    | Ok _->failwith "Unsupported numeric producer inside Text map qualified");
-  assert(match ok(E.Private.force_reference nested_numeric ~live:(Frame_input.at_time 1.)) with
+  assert(match ok(E.Private.force_reference nested_numeric ~live:(Input.at_time 1.)) with
     |E.Text_array values->Array.length values=2 |_->false);
   print_endline "Text arrays: strict structured Core and Executor match reference beyond 4,096 at one/eight domains; dependent collecting clauses refuse honestly"

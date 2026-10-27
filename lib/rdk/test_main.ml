@@ -1,7 +1,7 @@
 let tests = [
   "core", "test_rdk", Test_rdk.run;
-  "rdk_parts", "test_rdk_sources", Test_rdk_sources.run;
-  "rdk_parts", "test_copy_to_points", Test_copy_to_points.run;
+  "core", "test_rdk_sources", Test_rdk_sources.run;
+  "mesh", "test_copy_to_points", Test_copy_to_points.run;
   "spatial", "test_surface_index", Test_surface_index.run;
   "mesh", "test_extract_centroid", Test_extract_centroid.run;
   "curve", "test_extract_point_curve", Test_extract_point_curve.run;
@@ -31,7 +31,7 @@ let tests = [
   "attrib", "test_attribute_mirror", Test_attribute_mirror.run;
   "mesh", "test_rewire_vertices", Test_rewire_vertices.run;
   "attrib", "test_enumerate", Test_enumerate.run;
-  "core", "test_motion", Test_motion.run;
+  "mesh", "test_motion", Test_motion.run;
   "mesh", "test_dissolve", Test_dissolve.run;
   "curve", "test_poly_loft", Test_poly_loft.run;
   "curve", "test_skin", Test_skin.run;

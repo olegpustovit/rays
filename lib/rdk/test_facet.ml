@@ -584,7 +584,7 @@ let check_primitive_group_orient_polygons () =
 let check_cusp_polygons () =
   let source = Box_generator.box ~connectivity:Box_generator.Box_quads ~consolidate_points:true
       ~normals:Box_generator.Box_point_normals ~uv_attribute:"uv"
-      ~size:(Vec3.create 2. 2. 2.) () |> get_ok in
+      ~size:(Rays_math.Vec3.create 2. 2. 2.) () |> get_ok in
   let source = source |> add_attribute Attribute.Point "point_id"
       (Attribute.Int (Array.init (Geometry.point_count source) Fun.id)) in
   let corner = Group.ordered ~owner:Group.Point ~name:"corner" ~length:8
@@ -641,7 +641,7 @@ let check_cusp_polygons () =
 
 let check_primitive_group_cusp_polygons () =
   let source = Box_generator.box ~connectivity:Box_generator.Box_quads ~consolidate_points:true
-      ~size:(Vec3.create 2. 2. 2.) () |> get_ok in
+      ~size:(Rays_math.Vec3.create 2. 2. 2.) () |> get_ok in
   let selected = primitive_group source (fun primitive -> primitive = 0) in
   let output = Facet.run ~selection:(Transform_ops.Selected_primitives selected) ~cusp_angle:1. source |> get_ok in
   check (Geometry.point_count output = 12)

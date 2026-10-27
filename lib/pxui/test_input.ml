@@ -4,10 +4,9 @@ module Ui = Pxui.Ui
 let check condition message = if not condition then failwith message
 
 let frame ?(buttons = []) ?(keys = []) events : Frame.t = {
-  width = 320; height = 240; size = 320, 240;
-
-  pixel_scale = 1., 1.; time = 0.; dt = 0.; fps = 60.; count = 0;
-  mouse = 10., 10.; mouse_delta = 0., 0.; keys; mouse_buttons = buttons; events }
+  input = { (Input.at_time 0.) with frame = 0; tick = 0; size = 320, 240;
+    pointer = 10., 10.; keys; buttons; events };
+  pixel_scale = 1., 1.; fps = 60.; mouse_delta = 0., 0. }
 
 let run () =
   let ui = Ui.create ~font_size:11 () in
@@ -27,47 +26,47 @@ let run () =
       body ui) in
     Ui.input ~owner ui, control, graph in
   ignore (step (frame []));
-  let drag = [Event.MousePressed (Input.RightButton, (10., 10.));
-    Event.MouseMoved (220., 20.); Event.MouseReleased (Input.RightButton, (220., 20.))] in
+  let drag = [Input.Pointer_pressed (Input.RightButton, (10., 10.));
+    Input.Pointer_moved (220., 20.); Input.Pointer_released (Input.RightButton, (220., 20.))] in
   let input, _, graph = step (frame drag) in
-  check (input.events = drag && not graph.pressed) "viewport capture did not survive a pane crossing/release";
-  let drag = [Event.MousePressed (Input.MiddleButton, (200., 10.));
-    Event.MouseMoved (10., 10.); Event.MouseReleased (Input.MiddleButton, (10., 10.))] in
+  check (input.input.events = drag && not graph.pressed) "viewport capture did not survive a pane crossing/release";
+  let drag = [Input.Pointer_pressed (Input.MiddleButton, (200., 10.));
+    Input.Pointer_moved (10., 10.); Input.Pointer_released (Input.MiddleButton, (10., 10.))] in
   let input, _, graph = step (frame drag) in
-  check (input.events = [Event.PointerCancelled Input.MiddleButton] && graph.pressed)
+  check (input.input.events = [Input.Pointer_cancelled Input.MiddleButton] && graph.pressed)
     "graph-owned drag reached the viewport";
-  let click = [Event.MousePressed (Input.LeftButton, (40., 40.));
-    Event.MouseReleased (Input.LeftButton, (40., 40.)); Event.KeyPressed Input.Enter] in
+  let click = [Input.Pointer_pressed (Input.LeftButton, (40., 40.));
+    Input.Pointer_released (Input.LeftButton, (40., 40.)); Input.Key_pressed Input.Enter] in
   let input, control, _ = step (frame ~keys:[Input.Shift] click) in
-  check (control.clicked && input.events = [Event.PointerCancelled Input.LeftButton]
-    && input.keys = []) "child widget input escaped to its viewport root";
-  let events = click @ [Event.MouseScrolled (0., 1.)] in
+  check (control.clicked && input.input.events = [Input.Pointer_cancelled Input.LeftButton]
+    && input.input.keys = []) "child widget input escaped to its viewport root";
+  let events = click @ [Input.Scrolled (0., 1.)] in
   let input, control, _ = step ~popup:true (frame events) in
-  check (not control.clicked && input.mouse_buttons = [] && input.mouse_delta = (0., 0.)
-    && input.events = [Event.PointerCancelled Input.LeftButton])
+  check (not control.clicked && input.input.buttons = [] && input.mouse_delta = (0., 0.)
+    && input.input.events = [Input.Pointer_cancelled Input.LeftButton])
     "new popup did not shield this frame's underlying controls";
-  let input, control, _ = step ~popup:true (frame (Event.KeyPressed Input.Escape :: click)) in
-  check (not control.clicked && input.events = [Event.PointerCancelled Input.LeftButton])
+  let input, control, _ = step ~popup:true (frame (Input.Key_pressed Input.Escape :: click)) in
+  check (not control.clicked && input.input.events = [Input.Pointer_cancelled Input.LeftButton])
     "popup dismissal leaked its remaining press/release events";
   ignore (step (frame []));
   ignore (step (frame ~buttons:[Input.RightButton]
-    [Event.MousePressed (Input.RightButton, (10., 10.))]));
+    [Input.Pointer_pressed (Input.RightButton, (10., 10.))]));
   let input, _, _ = step ~popup:true (frame ~buttons:[Input.RightButton] []) in
-  check (List.mem (Event.PointerCancelled Input.RightButton) input.events)
+  check (List.mem (Input.Pointer_cancelled Input.RightButton) input.input.events)
     "popup opening did not cancel the viewport's captured gesture";
-  ignore (step (frame [Event.WindowFocusLost]));
-  let input, _, _ = step (frame [Event.WindowFocusLost; Event.PointerCancelled Input.RightButton]) in
-  check (input.events = [Event.WindowFocusLost; Event.PointerCancelled Input.RightButton])
+  ignore (step (frame [Input.Focus_lost]));
+  let input, _, _ = step (frame [Input.Focus_lost; Input.Pointer_cancelled Input.RightButton]) in
+  check (input.input.events = [Input.Focus_lost; Input.Pointer_cancelled Input.RightButton])
     "cancellation events were consumed";
   let only_view ui = Ui.key (Ui.box ui ~flags:Ui.clickable ~at:(0., 0.)
       ~w:(Ui.Px 160.) ~h:(Ui.Px 240.) "only-view") in
   ignore (Ui.frame ui (frame []) only_view);
-  let unowned_click = [Event.MousePressed (Input.LeftButton, (200., 10.));
-      Event.MouseReleased (Input.LeftButton, (200., 10.))] in
+  let unowned_click = [Input.Pointer_pressed (Input.LeftButton, (200., 10.));
+      Input.Pointer_released (Input.LeftButton, (200., 10.))] in
   let owner = Ui.frame ui (frame unowned_click) only_view in
-  check ((Ui.input ~owner ui).events = [Event.PointerCancelled Input.LeftButton])
+  check ((Ui.input ~owner ui).input.events = [Input.Pointer_cancelled Input.LeftButton])
     "unowned pointer events escaped to an explicit viewport owner";
-  check ((Ui.input ui).events = unowned_click)
+  check ((Ui.input ui).input.events = unowned_click)
     "default input lost unowned pointer events";
   let modal_y key =
     let row = Ui.frame ui (frame []) (fun ui -> Ui.modal ui key (fun () ->
@@ -88,10 +87,10 @@ let run () =
     Ui.press_keys ui box in
   ignore (Ui.frame ui (frame []) probe);
   let pressed = Ui.frame ui (frame ~keys:[Input.Shift] ~buttons:[Input.LeftButton]
-    [Event.KeyPressed Input.Shift; Event.MousePressed (Input.LeftButton, (10., 10.))]) probe in
+    [Input.Key_pressed Input.Shift; Input.Pointer_pressed (Input.LeftButton, (10., 10.))]) probe in
   let held = Ui.frame ui (frame ~buttons:[Input.LeftButton]
-    [Event.KeyReleased Input.Shift; Event.MouseMoved (20., 10.)]) probe in
-  let released = Ui.frame ui (frame [Event.MouseReleased (Input.LeftButton, (20., 10.))]) probe in
+    [Input.Key_released Input.Shift; Input.Pointer_moved (20., 10.)]) probe in
+  let released = Ui.frame ui (frame [Input.Pointer_released (Input.LeftButton, (20., 10.))]) probe in
   check (pressed = [Input.Shift] && held = pressed && released = pressed)
     "captured press keys changed during motion or release";
   print_endline "PXUI ordered input: viewport/child ownership, crossings, popup transitions and cancellation passed")

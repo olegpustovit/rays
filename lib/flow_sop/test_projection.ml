@@ -14,10 +14,10 @@ let fixtures = [ "bloom"; "facade"; "garland"; "kit"; "orrery"; "rosette";
                  "sunflower"; "tiles"; "tree"; "tunnel"; "variations"; "wave" ]
 
 let workspace_of text = match S.parse text with
-  | Error d -> fail (Flow.Diagnostic.to_string d)
+  | Error d -> fail (Diagnostic.to_string d)
   | Ok forms -> (match Flow.Workspace.check catalog forms with
       | Some w, _ -> w
-      | None, ds -> fail (String.concat "; " (List.map Flow.Diagnostic.to_string ds)))
+      | None, ds -> fail (String.concat "; " (List.map Diagnostic.to_string ds)))
 let load name = workspace_of (read (Filename.concat cases (name ^ ".lisp")))
 
 let () =
@@ -52,7 +52,7 @@ let rec counts (s : P.scope) =
 
 let snapshot = [
   "bloom", [ "flower", (12, 1, 84); "scene", (6, 0, 60); "world", (2, 0, 11); "settings", (2, 0, 7);
-             "editor", (10, 0, 30); "half", (1, 0, 2); "petal", (2, 0, 53) ];
+             "editor", (10, 0, 29); "half", (1, 0, 2); "petal", (2, 0, 53) ];
   "facade", [ "facade", (14, 2, 89) ];
   "garland", [ "garland", (19, 5, 90); "ring", (6, 1, 45) ]; (* inline functions and nested maps *)
   "kit", [ "kit", (16, 2, 112); "window", (3, 0, 30) ];
@@ -62,7 +62,7 @@ let snapshot = [
   "tiles", [ "tiles", (10, 1, 70) ];
   "tree", [ "tree", (9, 1, 184) ];
   "tunnel", [ "rings", (4, 1, 61) ];
-  "variations", [ "garden", (6, 0, 70); "scene", (1, 0, 9); "editor", (8, 0, 23) ];
+  "variations", [ "garden", (6, 0, 70); "scene", (1, 0, 9); "editor", (8, 0, 22) ];
   "wave", [ "wave", (7, 2, 46) ];
 ]
 

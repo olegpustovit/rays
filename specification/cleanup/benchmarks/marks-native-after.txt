@@ -1,0 +1,29 @@
+kind     style                 n |         ms          bytes  kernels
+circles  uniform          100000 |      0.655          22336        1
+circles  radius           100000 |      0.667          22432        1
+circles  fill             100000 |      0.676          22256        1
+circles  per-instance     100000 |      0.602          22352        1
+circles  moving radius    100000 |      0.890          25464        1
+circles  moving fill      100000 |      0.778          25280        1
+circles  moving both      100000 |      0.800          27464        1
+rects    uniform          100000 |      0.712          22248        1
+rects    radius           100000 |      0.694          22296        1
+rects    fill             100000 |      0.701          22168        1
+rects    per-instance     100000 |      0.719          22216        1
+rects    moving radius    100000 |      0.733          25344        1
+rects    moving fill      100000 |      0.760          25192        1
+rects    moving both      100000 |      0.865          27344        1
+circles  uniform         1000000 |      1.183          22264        1
+circles  radius          1000000 |      1.210          22360        1
+circles  fill            1000000 |      1.080          22184        1
+circles  per-instance    1000000 |      1.188          22280        1
+circles  moving radius   1000000 |      1.587          25392        1
+circles  moving fill     1000000 |      1.591          25208        1
+circles  moving both     1000000 |      2.393          27392        1
+rects    uniform         1000000 |      1.156          22176        1
+rects    radius          1000000 |      1.017          22224        1
+rects    fill            1000000 |      1.151          22096        1
+rects    per-instance    1000000 |      1.016          22144        1
+rects    moving radius   1000000 |      1.673          25272        1
+rects    moving fill     1000000 |      1.498          25120        1
+rects    moving both     1000000 |      2.129          27272        1

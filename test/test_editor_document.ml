@@ -8,14 +8,13 @@ module Preset = Editor_document.Preset
 module Document = Editor_document.Document
 
 let check condition message = if not condition then failwith message
-let key k = Event.KeyPressed k
+let key k = Input.Key_pressed k
 let char c = key (Input.KeyChar c)
 
 let frame ?(keys = []) ?(mouse = (450., 320.)) events count : Frame.t = {
-  width = 900; height = 640; size = 900, 640;
-
-  pixel_scale = 1., 1.; time = float count /. 60.; dt = 1. /. 60.;
-  fps = 60.; count; mouse; mouse_delta = 0., 0.; keys; mouse_buttons = []; events }
+  input = { (Input.at_time (float count /. 60.)) with dt = 1. /. 60.;
+    frame = count; tick = count; size = 900, 640; pointer = mouse; keys; events };
+  pixel_scale = 1., 1.; fps = 60.; mouse_delta = 0., 0. }
 
 let text = {|(workspace document
   (graph geo1 :context sop (sop/box :size [1 1 1]))
@@ -40,7 +39,22 @@ let run () =
   let factories = Sop_catalog.Editor.factories in
   let workspace = Ws_fixture.of_text text in
   let doc = match Editor_document.Contexts.of_workspace ~factories workspace with
-    | Ok doc -> doc | Error d -> failwith (Flow.Diagnostic.to_string d) in
+    | Ok doc -> doc | Error d -> failwith (Diagnostic.to_string d) in
+  let backend : Flow_ir.Gpu.backend = {
+    cost = (fun ~fast:_ _ ~count:_ -> None);
+    prepare = (fun ~fast:_ _ -> Error (Diagnostic.error ~code:"E_TEST_GPU" "unused test backend")) } in
+  let gpu : Flow_ir.Gpu.config = { backend = Some backend; fast = true;
+    policy = Flow_ir.Gpu.Qualification } in
+  let carries_gpu doc =
+    let lowered = (snd doc.Document.workspace).Flow_sop.Lower.gpu in
+    lowered.fast && lowered.policy = Flow_ir.Gpu.Qualification
+    && Option.fold ~none:false ~some:(fun actual -> actual == backend) lowered.backend in
+  let gpu_doc = match Editor_document.Contexts.of_workspace ~factories ~gpu workspace with
+    | Ok doc -> doc | Error d -> failwith (Diagnostic.to_string d) in
+  check (carries_gpu gpu_doc) "workspace lowering discarded its explicit GPU config";
+  let reloaded = Editor_document.Document_edit.text_edit ~factories gpu_doc
+      (Editor_document.Workspace_doc.to_text workspace) |> Result.get_ok in
+  check (carries_gpu reloaded) "a real workspace text reload discarded its GPU config";
   check (Result.is_ok (Document.validate doc)) "a lowered workspace is a valid document";
   check (Edit_graph.inspect (Document.scene_graph doc) <> []
     && Option.is_some (Document.object_network doc
@@ -59,13 +73,14 @@ let run () =
     "the document dump is not deterministic or lost an object";
   (* the preset text is the workspace text: it loads back to the same document *)
   let saved = Preset.save ~directory ~name:"round" ~doc ~view:(Flow.Syntax.make (Flow.Syntax.Map [])) |> Result.get_ok in
-  (match Preset.load ~path:saved ~factories ~settings:doc.settings with
+  (match Preset.load ~gpu ~path:saved ~factories ~settings:doc.settings () with
    | Ok loaded ->
        check (Editor_document.Workspace_doc.to_text (fst loaded.doc.workspace)
               = Editor_document.Workspace_doc.to_text workspace
               && List.length (Document.Int_map.bindings loaded.doc.networks)
                  = List.length (Document.Int_map.bindings doc.networks))
-         "a saved preset did not load back"
+         "a saved preset did not load back";
+       check (carries_gpu loaded.doc) "preset loading discarded its explicit GPU config"
    | Error message -> failwith message);
   Sys.remove saved;
   (* Deleting every scene object through real UI events empties the scene and the
@@ -89,8 +104,8 @@ let run () =
       let delete () =
         count := !count + 30; (* past the double-click interval *)
         step ~mouse [];
-        step ~mouse [Event.MousePressed (Input.LeftButton, mouse);
-          Event.MouseReleased (Input.LeftButton, mouse)];
+        step ~mouse [Input.Pointer_pressed (Input.LeftButton, mouse);
+          Input.Pointer_released (Input.LeftButton, mouse)];
         step ~mouse [key Input.Delete]; step [] in
       delete (); delete ();
       check (Edit_graph.inspect (current_document !value) = [] && prepared !value = None)
@@ -106,6 +121,6 @@ let run () =
   let module E3 = Rays_editor.Editor in
   exercise
     ~create:(fun () -> E3.create ~await:true ~workspace ~presets:directory ~factories ~prepare
-      ~scene3:(fun _ _ -> Scene3.create []) () |> Result.get_ok)
+      ~draw:(fun _ _ -> Scene3.create []) () |> Result.get_ok)
     ~update:E3.update ~close:E3.close ~document:E3.document ~prepared:E3.prepared ~panes:E3.panes;
   print_endline "editor document: validation, dump, preset round trip, delete-all passed")
