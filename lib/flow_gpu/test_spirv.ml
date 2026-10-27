@@ -50,6 +50,8 @@ let fast_cases () =
       ( "fast_convert",
         "(map (fn [x] [(float (floor (- (+ x t) 0.5))) (float (ceil (- t x))) (float (round (- x \
          t))) (float (int (+ x t)))]) (array/range 16))" );
+      ( "fast_trace",
+        "(map (fn [i] (let* [h (scene/trace 1 [(float i) 0. 5.] [0. 0. -1.] 0. 100. t)] [h.t (float h.prim) (+ h.u h.normal.z) (if h.hit 1. 0.)])) (array/range 16 :type \"int\"))" );
       ( "fast_gather",
         "(let* [table (array/float 7 0.25)] (map (fn [i] (+ t (array/nth table (int/mod i 7)))) \
          (array/range 16 :type \"int\")))" );
@@ -87,7 +89,7 @@ let () =
       let again = Flow_gpu.Spirv.kernel ~fast program |> Test_program.ok in
       assert (emitted.bytes = again.bytes);
       assert (Bytes.get_int32_le emitted.bytes 0 = 0x07230203l);
-      assert (Bytes.get_int32_le emitted.bytes 4 = 0x00010300l);
+      assert (Bytes.get_int32_le emitted.bytes 4 = (if emitted.layout.scene_binding = None then 0x00010300l else 0x00010400l));
       assert (Bytes.length emitted.bytes mod 4 = 0);
       let rec has_int64 at =
         if at = Bytes.length emitted.bytes then false
@@ -111,7 +113,7 @@ let () =
           ~finally:(fun () -> Sys.remove file)
           (fun () ->
             Out_channel.with_open_bin file (fun out -> output_bytes out emitted.bytes);
-            let code = Sys.command ("spirv-val --target-env vulkan1.1 " ^ Filename.quote file) in
+            let code = Sys.command ((if emitted.layout.scene_binding = None then "spirv-val --target-env vulkan1.1 " else "spirv-val --target-env vulkan1.2 ") ^ Filename.quote file) in
             if code <> 0 then failwith ("spirv-val refused " ^ name))
       end;
       Printf.bprintf golden "(%s %d %s)\n" name (Bytes.length emitted.bytes)

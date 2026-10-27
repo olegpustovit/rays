@@ -1039,3 +1039,16 @@ when that metadata changes. Display publishes the completed GPU texture through
 the runtime image boundary; CPU consumers have independent exact payloads.
 Native qualification exercises actual owner selection, resident publication and
 draw/image and mesh consumers, alongside explicit full-byte source comparisons.
+
+## `scene/trace` (P8.S2)
+
+`(scene/trace scene origin dir tmin tmax time)` returns `{:t :prim :u :v :normal :hit}`. `scene` is an integer id
+the host registered in `Flow.Ray_host` (a pure closure; `flow` never sees geometry). On the CPU the walker and the
+Packed executor call it (`Flow_sop.Trace_scene` answers from a `Surface_index`, distances in world units along the
+normalised direction). One region instruction, `Trace (field, registers)`, serves each field; the emitters memoise
+the query per argument tuple and block. Metal emits `intersector<triangle_data>` over a
+`primitive_acceleration_structure` plus a triangle-vertex buffer (for the normal) bound after the count bindings
+(`Kernel_layout.scene_binding`; `Run.dispatch ~scene`). SPIR-V (1.4, `RayQueryKHR`, `SPV_KHR_ray_query`, Vulkan 1.2)
+issues an opaque-flag ray query against the same two bindings. Exact precision keeps the op on the CPU; the web
+targets refuse it (`E_WEB_SOURCE` for JS, `E_GPU_FORM` for WGSL). Instancing, motion, curves and procedural spheres
+are not yet part of the op.

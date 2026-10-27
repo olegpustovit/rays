@@ -97,7 +97,9 @@ type emitter = {
   status : int;
   table : int option;
   noise : (int * int) option;
+  scene : (int * int * int * int * int * int) option;  (* acceleration structure variable and type, vertices, ray query, vec3, vec2 *)
   mutable block : int;
+  mutable trace_cache : (int list * int * int array) list;
   mutable loop_depth : int;
 }
 
@@ -449,6 +451,38 @@ let int_compare_opcode = function
   | Ige -> 175
   | Ieq -> 170
 
+
+let trace_values e float_of r =
+  let words = e.words and float = e.float and boolean = e.boolean in
+    let block = e.block and key = Array.to_list r in
+    match List.find_opt (fun (k, b, _) -> k = key && b = block) e.trace_cache with
+    | Some (_, _, values) -> values
+    | None ->
+        let accel, accel_type, vertices, query, vec3, vec2 = Option.get e.scene in
+        let v3 a b c = result e vec3 80 [ a; b; c ] and one = u e 1 in
+        let argument k = float_of r.(k) in
+        let direction = result e vec3 12 [ e.glsl; 69; v3 (argument 4) (argument 5) (argument 6) ] in
+        Words.instruction words.body 4473
+          [ query; result e accel_type 61 [ accel ]; one; u e 255; v3 (argument 1) (argument 2) (argument 3); argument 7; direction; argument 8 ];
+        ignore (result e boolean 4477 [ query ]);
+        let hit = compare e 170 (result e e.uint 4479 [ query; one ]) one in
+        let t = result e float 6018 [ query; one ] and primitive = result e e.uint 6023 [ query; one ]
+        and barycentrics = result e vec2 6024 [ query; one ] in
+        let base = result e e.uint 132 [ select e e.uint hit primitive (u e 0); u e 9 ] in
+        let vertex corner = v3 (load e vertices (result e e.uint 128 [ base; u e (3 * corner) ]))
+            (load e vertices (result e e.uint 128 [ base; u e (3 * corner + 1) ]))
+            (load e vertices (result e e.uint 128 [ base; u e (3 * corner + 2) ])) in
+        let a = vertex 0 in
+        let edge corner = result e vec3 131 [ vertex corner; a ] in
+        let normal = result e vec3 12 [ e.glsl; 69; result e vec3 12 [ e.glsl; 68; edge 1; edge 2 ] ] in
+        let pick value miss = select e float hit value (f e miss) in
+        let component vector k = result e float 81 [ vector; k ] in
+        let values = [| pick t 0.; pick (result e float 112 [ primitive ]) (-1.);
+          pick (component barycentrics 0) 0.; pick (component barycentrics 1) 0.;
+          pick (component normal 0) 0.; pick (component normal 1) 0.; pick (component normal 2) 0.; pick (f e 1.) 0. |] in
+        e.trace_cache <- (key, block, values) :: e.trace_cache;
+        values
+
 let emit_program e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers index =
   let words = e.words and float = e.float and boolean = e.boolean in
   let registers = Array.make (Array.length layout.view.code) 0 in
@@ -497,13 +531,14 @@ let emit_program e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers ind
     result e float 124 [ load_uint e gathers.(k) (offset e at width component) ]
   in
   let expression slot = function
+    | P.Trace (field, r) -> (trace_values e float_of r).(field)
     | P.Const value ->
         if e.long <> None && Float.is_integer value && Float.abs value < 9007199254740992. then
           whole.(slot) <- Some (l e (Int64.of_float value));
         f e value
     | Input (input, width, component) -> load e inputs.(input) (offset e index width component)
     | Uniform (input, component) -> uniform_float e (layout.uniforms.(input) + component)
-    | Frame _ -> assert false
+    | Frame _ | Guarded _ -> assert false
     | Binary (((Add | Sub | Mul | Mod | Min | Max) as op), a, b)
       when whole.(a) <> None && whole.(b) <> None ->
         let value = integer_float_binary e op (Option.get whole.(a)) (Option.get whole.(b)) in
@@ -562,7 +597,6 @@ let emit_program e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers ind
     | Convert (((Floor | Ceil | Round) as op), a) ->
         let value = float_of a in
         to_int (round_float e op value)
-    | Guarded _ -> assert false
     | _ -> fail "This instruction is not supported by the SPIR-V kernel target."
   in
   let rec emit slot guards = function
@@ -810,9 +844,11 @@ let kernel ?(fast = false) program =
     and uniform_pointer = Words.declare words 32 [ 2; uint ]
     and invocation_pointer = Words.declare words 32 [ 1; vector3 ] in
     let interface = ref [] in
+    let globals = ref [] in
     let variable pointer storage =
       let id = Words.id words in
       Words.instruction words.declarations 59 [ pointer; id; storage ];
+      globals := id :: !globals;
       id
     in
     let bind pointer storage binding kind =
@@ -852,6 +888,16 @@ let kernel ?(fast = false) program =
           input, output)
         layout.counts
     in
+    let scene =
+      Option.map
+        (fun binding ->
+          let accel_type = Words.declare words 5341 [] in
+          let accel = bind (Words.declare words 32 [ 0; accel_type ]) 0 binding Ogpu.Shader.Acceleration_structure in
+          let vertices = bind storage 12 (binding + 1) Ogpu.Shader.Storage_buffer in
+          let query = variable (Words.declare words 32 [ 6; Words.declare words 4472 [] ]) 6 in
+          (accel, accel_type, vertices, query, Words.declare words 23 [ float; 3 ], Words.declare words 23 [ float; 2 ]))
+        layout.scene_binding
+    in
     let noise = Option.map (fun _ -> (Words.id words, Words.id words)) table in
     let invocation = variable invocation_pointer 1 in
     Words.instruction words.annotations 71 [ invocation; 11; 28 ];
@@ -873,7 +919,9 @@ let kernel ?(fast = false) program =
         status;
         table;
         noise;
+        scene;
         block = 0;
+        trace_cache = [];
         loop_depth = 0;
       }
     in
@@ -906,13 +954,17 @@ let kernel ?(fast = false) program =
     in
     List.iter
       (Buffer.add_int32_le module_bytes)
-      [ 0x07230203l; 0x00010300l; 0l; Int32.of_int words.next; 0l ];
+      [ 0x07230203l; (if scene = None then 0x00010300l else 0x00010400l); 0l; Int32.of_int words.next; 0l ];
     Words.instruction module_bytes 17 [ 1 ];
     if long <> None then Words.instruction module_bytes 17 [ 11 ];
+    if scene <> None then begin
+      Words.instruction module_bytes 17 [ 4472 ];
+      Words.instruction module_bytes 10 (Words.string_words "SPV_KHR_ray_query")
+    end;
     Words.instruction module_bytes 11 (glsl :: Words.string_words "GLSL.std.450");
     Words.instruction module_bytes 14 [ 0; 1 ];
     let entry = "rays_kernel" in
-    Words.instruction module_bytes 15 ((5 :: main :: Words.string_words entry) @ [ invocation ]);
+    Words.instruction module_bytes 15 ((5 :: main :: Words.string_words entry) @ (if scene = None then [ invocation ] else List.rev !globals));
     Words.instruction module_bytes 16 [ main; 17; 64; 1; 1 ];
     List.iter (Buffer.add_buffer module_bytes) [ words.annotations; words.declarations; words.body ];
     Ok
