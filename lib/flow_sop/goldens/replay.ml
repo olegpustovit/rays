@@ -14,7 +14,16 @@ let path directory path =
       && Filename.basename path <> ".." && not (String.contains path '\\')
   then Filename.concat directory path
   else fail ("invalid corpus path: " ^ path)
-let read_file path = In_channel.with_open_bin path In_channel.input_all
+(* Corpus files may be stored as FILE.gz; a fixture name's digest is of the decompressed text. *)
+let resolve path = if Sys.file_exists path then path else path ^ ".gz"
+let read_file path =
+  let path = resolve path in
+  if Filename.check_suffix path ".gz" then begin
+    let channel = Unix.open_process_args_in "gzip" [|"gzip"; "-dc"; path|] in
+    let contents = In_channel.input_all channel in
+    if Unix.close_process_in channel <> Unix.WEXITED 0 then fail ("gzip failed: " ^ path);
+    contents
+  end else In_channel.with_open_bin path In_channel.input_all
 let input_location directory kind relative =
   let filename = Filename.basename relative in
   let prefix = kind ^ "-" and suffix = ".sexp" in
@@ -28,7 +37,7 @@ let input_location directory kind relative =
 
 let read_input directory kind relative =
   let expected, input_path = input_location directory kind relative in
-  if not (Sys.file_exists input_path) then fail ("missing " ^ kind ^ " fixture: " ^ relative);
+  if not (Sys.file_exists (resolve input_path)) then fail ("missing " ^ kind ^ " fixture: " ^ relative);
   let contents = read_file input_path in
   if Digest.to_hex (Digest.string contents) <> expected then
     fail ("tampered " ^ kind ^ " fixture: " ^ relative);
@@ -39,7 +48,7 @@ module Input_cache = Lru.Make (String)
 let input_payload cache directory kind relative =
   let _, filename = input_location directory kind relative in
   let stamp () =
-    let info = try Unix.stat filename with
+    let info = try Unix.stat (resolve filename) with
       | Unix.Unix_error (Unix.ENOENT, _, _) -> fail ("missing " ^ kind ^ " fixture: " ^ relative) in
     info.Unix.st_dev, info.st_ino, info.st_size, info.st_mtime, info.st_ctime in
   let before = stamp () in
@@ -99,10 +108,12 @@ let inputs ~key cache directory forms =
   List.rev values, inputs @ native_factories key, List.rev ops
 
 module Prepared_cache = Lru.Make (String)
+module Lowered_cache = Lru.Make (String)
 
 type replay_cache = {
   inputs : ((int * int * int * float * float) * Sop.Payload.t) Input_cache.t;
   prepared : prepared Prepared_cache.t;
+  lowered : Sop.Node.t Lowered_cache.t;
 }
 
 and prepared = {
@@ -115,7 +126,8 @@ and prepared = {
   diagnostics : Diagnostic.t list;
 }
 
-let create_cache () = { inputs = Input_cache.create 256; prepared = Prepared_cache.create 4 }
+let create_cache () = { inputs = Input_cache.create 256; prepared = Prepared_cache.create 4;
+  lowered = Lowered_cache.create 64 }
 
 let stable_error message =
   match String.index_opt message '[' with
@@ -317,6 +329,9 @@ let node_key (form : Flow.Syntax.t) = match form.Flow.Syntax.node with
   | _ -> fail "source must be one node call"
 
 let lower ?(reference = false) ?cache ?times ?parsed source factories ops with_ =
+  (* The lowered graph holds only named input markers (swapped for [with_] below), so rows that
+     share an expression share one lowering whatever their fixture. *)
+  let build () =
   let checked = timed times (fun times elapsed -> times.check <- times.check +. elapsed) (fun () ->
     let forms, parsed_source = match parsed with
       | Some parsed -> parsed
@@ -337,6 +352,14 @@ let lower ?(reference = false) ?cache ?times ?parsed source factories ops with_ 
       | Some graph -> graph | None -> fail "workspace has no default SOP graph" in
     let root = match graph.root with Some root -> root | None -> fail "SOP graph has no result" in
     Sop.Edit_graph.compile_node graph.network.geometry ~node_id:root |> get_string) in
+  node in
+  let node = match cache with
+    | None -> build ()
+    | Some cache ->
+        let key = string_of_bool reference ^ source in
+        (match Lowered_cache.find_opt cache.lowered key with
+         | Some node -> node
+         | None -> let node = build () in Lowered_cache.add cache.lowered key node; node) in
   let rec restore node =
     if Sop.Node.operation node = "lisp_sop_ext" then List.assoc (Sop.Node.parameters node) with_
     else match Sop.Node.inputs node with
@@ -685,9 +708,11 @@ let () = match Array.to_list Sys.argv with
       let rows, coverage = read_corpus directory in
       check_fixture ~prepared:false ~profile:true (create_cache ()) directory key fixture rows coverage;
       Printf.printf "selected fixture provenance %s\n%!" status
-  | [_] | [_; "--corpus"; _] ->
-      let directory = if Array.length Sys.argv = 3 then Sys.argv.(2)
-        else Filename.dirname Sys.executable_name in
+  | [_] | [_; "--corpus"; _] | [_; "--sample"; _; _] ->
+      let sample, directory = match Sys.argv with
+        | [|_; _; n; directory|] -> int_of_string n, directory
+        | [|_; _; directory|] -> max_int, directory
+        | _ -> max_int, Filename.dirname Sys.executable_name in
       let rows, coverage = read_corpus directory in
       check_coverage coverage rows;
       let nodes = List.fold_left (fun nodes row ->
@@ -707,7 +732,27 @@ let () = match Array.to_list Sys.argv with
           (List.length expected_nodes)
           (String.concat "," absent) (String.concat "," extra))
       end;
-      let cache = create_cache () in
-      List.iter (check_row cache directory) rows;
+      (* --sample N keeps the first N rows of every node/fixture pair. *)
+      let seen = Hashtbl.create 1024 in
+      let rows = List.filter (fun row ->
+        let key = match children "golden" row with
+          | node :: fixture :: _ -> string node, string fixture
+          | _ -> fail "malformed golden row" in
+        let count = Option.value (Hashtbl.find_opt seen key) ~default:0 in
+        Hashtbl.replace seen key (count + 1); count < sample) rows in
+      (* REPLAY_JOBS=J forks J workers, each owning the nodes that hash to it (so a node's prepared library is built once). *)
+      let jobs = match Sys.getenv_opt "REPLAY_JOBS" with Some j -> max 1 (int_of_string j) | None -> 1 in
+      let children = List.init (if jobs = 1 then 0 else jobs) (fun job ->
+        match Unix.fork () with
+        | 0 ->
+            let cache = create_cache () in
+            let code = try List.iter (fun row -> match children "golden" row with
+                | node :: _ when Hashtbl.hash (string node) mod jobs = job -> check_row cache directory row
+                | _ -> ()) rows; 0
+              with Failure message -> prerr_endline message; 1 in
+            Unix._exit code
+        | pid -> pid) in
+      List.iter (fun pid -> if snd (Unix.waitpid [] pid) <> Unix.WEXITED 0 then fail "golden replay worker failed") children;
+      if jobs = 1 then (let cache = create_cache () in List.iter (check_row cache directory) rows);
       Printf.printf "checked %d Lisp SOP golden rows without native factories\n%!" (List.length rows)
   | _ -> fail "usage: replay.exe [--corpus DIR | --keys DIR KEY... | --fixture DIR KEY FIXTURE | --fixture-ordinary DIR KEY FIXTURE | --fixture-profile DIR KEY FIXTURE | --fixture-ordinary-profile DIR KEY FIXTURE | --benchmark-inputs DIR ROUNDS | --self-test]"
