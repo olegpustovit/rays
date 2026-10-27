@@ -15,3 +15,4 @@ val kernel : ?fast:bool -> Flow_ir.Packed.t -> (msl, Diagnostic.t) result
 (* [fast] (the workspace's fast precision) also emits signed-63 integer arithmetic and gathers from
    bound tables. The shared status word uses bits 1/2/4 for nonfinite output, integer division by
    zero, and an out-of-range integer shift, respectively. *)
+val image_rgba8_source : string
