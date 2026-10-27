@@ -1050,5 +1050,6 @@ the query per argument tuple and block. Metal emits `intersector<triangle_data>`
 `primitive_acceleration_structure` plus a triangle-vertex buffer (for the normal) bound after the count bindings
 (`Kernel_layout.scene_binding`; `Run.dispatch ~scene`). SPIR-V (1.4, `RayQueryKHR`, `SPV_KHR_ray_query`, Vulkan 1.2)
 issues an opaque-flag ray query against the same two bindings. Exact precision keeps the op on the CPU; the web
-targets refuse it (`E_WEB_SOURCE` for JS, `E_GPU_FORM` for WGSL). Instancing, motion, curves and procedural spheres
-are not yet part of the op.
+targets refuse it (`E_WEB_SOURCE` for JS, `E_GPU_FORM` for WGSL). Procedural spheres are an in-loop analytic test after the ray query on every target: a `float4` (centre, radius)
+buffer bound after the vertices and a sphere-count uniform; a sphere hit reports `prim = -2 - k`, `u = v = 0`, and the
+nearer of triangle and sphere wins. Instancing, motion and curves are not yet part of the op.

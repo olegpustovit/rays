@@ -302,6 +302,8 @@ let rec typed_total ranges inputs = function
   | _ -> false
 
 let trace_field field (h:Flow.Ray_host.hit)=match field with 0->h.t|1->float h.prim|2->h.u|3->h.v|4->h.nx|5->h.ny|6->h.nz|_->if h.hit then 1. else 0.
+(* one host query per ray: the eight fields of a lane share its last (scene, query) *)
+let trace_hit traced j id q=match traced.(j) with Some(i,k,h) when i=id&&k=q->h|_->let h=Flow.Ray_host.query id q in traced.(j)<-Some(id,q,h);h
 let run_typed ?column_source ?plane_outputs ?expected_count ~evaluate ~uniform ~seed (t : t) ~live =
   let carried=Array.fold_left(fun count instruction->match unguarded instruction with
     |Loop_begin loop->max count(Array.length loop.initial)|_->count)0 t.code in
@@ -399,7 +401,7 @@ let run_typed ?column_source ?plane_outputs ?expected_count ~evaluate ~uniform ~
   let dependent_flags=if count=0 then [||] else Core.Region.dependent_flags t in
   let chunk chunk =
     let integer=Array.make (Array.length t.code*block_size) 0
-    and floats=Array.make (Array.length t.code*block_size) 0. in
+    and floats=Array.make (Array.length t.code*block_size) 0. and traced=Array.make block_size None in
     let texts=Array.make (!text_count*block_size) "" in
     let loops=if carried=0 then None else Some {floats;integer;texts;banks;text_offsets;block_size;
       next_float=Array.make carried 0.;next_int=Array.make carried 0;next_text=Array.make carried ""} in
@@ -627,7 +629,7 @@ let run_typed ?column_source ?plane_outputs ?expected_count ~evaluate ~uniform ~
         | Checked_fma(p,a,b,c)->for j=first to last-1 do
             let a=finite(numeric a j) and b=finite(numeric b j) and c=finite(numeric c j) in
             floats.(at+j)<-checked_projection p (Float.fma a b c) done
-        | Trace(field,r)->for j=first to last-1 do floats.(at+j)<-finite(trace_field field (Flow.Ray_host.query(int_of_float(numeric r.(0) j)) (Array.init 9(fun k->numeric r.(k+1) j)))) done
+        | Trace(field,r)->for j=first to last-1 do floats.(at+j)<-finite(trace_field field (trace_hit traced j (int_of_float(numeric r.(0) j)) (Array.init 9(fun k->numeric r.(k+1) j)))) done
         | Rand_at(seed,index)->let seed=seed*block_size and index=index*block_size in
             for j=first to last-1 do floats.(at+j)<-Flow.Packed_ops.rand_at integer.(seed+j) integer.(index+j) done
         | Unary(op,a)->for j=first to last-1 do floats.(at+j)<-finite(unary_apply op (numeric a j)) done

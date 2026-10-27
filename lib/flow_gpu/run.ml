@@ -104,6 +104,8 @@ let dispatch ?(wait=true) ?(reset_status=true) ?commands ?count ?into ?(bound=fu
             if u>=Array.length values.tables then
               raise (Diagnostic.Error (Diagnostic.error ~code:"E_KERNEL" "GPU gather table changed."));
             Bytes.set_int32_le t.uniforms offset (Int32.of_int (Array.length values.tables.(u)/width))
+        | ["scene";"spheres"] ->
+            Bytes.set_int32_le t.uniforms offset (Int32.of_int (match scene with Some (_,_,_,n) -> n | None -> 0))
         | ["frame";index;_] ->
             let index=int_of_string index in
             if index>=Array.length values.frame then
@@ -185,10 +187,11 @@ let dispatch ?(wait=true) ?(reset_status=true) ?commands ?count ?into ?(bound=fu
         let index=index+Array.length gathers in
         Option.iter (fun (cell,out) -> get (B.set_buffer encoder ~index cell);
           get (B.set_buffer encoder ~index:(index+1) out)) counted;
-        Option.iter (fun (accel,vertices) ->
+        Option.iter (fun (accel,vertices,spheres,_) ->
           let index=Option.get msl.scene in
           get (B.set_accel encoder ~index accel);
           get (B.set_buffer encoder ~index:(index+1) vertices);
+          get (B.set_buffer encoder ~index:(index+2) spheres);
           get (B.compute_use_accels encoder [accel])) scene;
         get (B.dispatch_threads encoder ~threads:(values.count,1,1) ~threadgroup:(256,1,1))) in
     match commands with
