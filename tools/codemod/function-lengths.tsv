@@ -65,5 +65,4 @@ lib/rdk/test_rdk_curves.ml	curves#1	967
 lib/rdk/test_rdk_misc.ml	measure_merge#1	333
 lib/rdk/test_rdk_modeling.ml	modeling#1	490
 lib/rdk/test_rdk_uv.ml	render_uv#1	634
-lib/sop/test_nodes.ml	run#1	7038
 lib/sop/test_parallel_exact.ml	run#1	1860

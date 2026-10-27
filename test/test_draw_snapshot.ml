@@ -52,7 +52,9 @@ let lines (_, name) =
   let value = List.assoc graph.name evaluated.results in
   let state = Flow.Eval.create_state () in
   let outcome = Flow_native.Drawing.prepare ~states:evaluated.states evaluated.plan value in
-  let frames = List.init (last_frame + 1) (fun index ->
+  (* the run's text cache, as Sketch.run_state installs it: one rasterization per text *)
+  let fonts = Rays.Font.Private.create_cache_context () in
+  let frames = Rays.Font.Private.with_cache_context fonts @@ fun () -> List.init (last_frame + 1) (fun index ->
     let result = match outcome with
       | Error d -> Error d.code
       | Ok prepared ->
@@ -61,6 +63,7 @@ let lines (_, name) =
           | Error d -> Error d.code
           | Ok scene -> Ok (rendered_digest scene) in
     index, result) in
+  Rays.Font.Private.clear_cache_context fonts;
   List.filter_map (fun (index, result) ->
     if not (List.mem index recorded) then None else
     Some (match result with
