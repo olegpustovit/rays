@@ -80,7 +80,7 @@
  (enabled_if (= %{system} macosx))
  (name test_lisp)
  (modules test_lisp)
- (libraries rays rays_pathtracer renderer ogpu ogpu_metal flow flow_ir flow_ir_test_support rays_diagnostic input rays_math unix parallel))
+ (libraries rays rays_pathtracer renderer ogpu ogpu_metal flow flow_ir flow_gpu flow_ir_test_support rays_diagnostic input rays_math unix parallel))
 
 (rule
  (enabled_if (= %{system} macosx))

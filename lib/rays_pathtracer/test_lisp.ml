@@ -78,21 +78,48 @@ let () =
       end
     done;
     !best);
-  let total = Array.make (width * height * 3) 0. in
   let live = Input.at_time 0. in
-  for frame = 0 to frames - 1 do
+  let program_of frame =
     let u = Printf.sprintf "{:eye %s :lens 0. :fwd %s :rgt %s :up %s :tan-half %s :aspect %s :focus 1. :width %d :height %d :spp %d :bounces %d :frame %d :sky %s :ground %s}"
       (vec e) (vec forward) (vec right) (vec up) (num (tan (0.9 /. 2.))) (num (float width /. float height)) width height spp bounces frame
       (vec (rgb environment.sky)) (vec (rgb environment.ground)) in
     let source = Printf.sprintf "(let* [%s %s] (map (fn [(pixel : int)] (let* [s (trace-pixel %s %s %s pos nrm pixel)] [s.x s.y s.z (+ 0. (* 0. t))])) (array/range %d :type int)))"
       (table "pos" positions) (table "nrm" normals) u light_lit mat_lit (width * height) in
-    let program = Test_program.compile ~declarations source in
-    match ok (Flow_ir.Packed.force program ~live) with
-    | Flow.Eval.Vec4_array v ->
-        for pixel = 0 to width * height - 1 do for c = 0 to 2 do
-          total.(3 * pixel + c) <- total.(3 * pixel + c) +. v.(4 * pixel + c) done done
-    | _ -> assert false
-  done;
+    Test_program.compile ~declarations source in
+  let vec4 = function Flow.Eval.Vec4_array v -> v | _ -> assert false in
+  let cpu program = vec4 (ok (Flow_ir.Packed.force program ~live)) in
+  let gpu_run =
+    let lease = match Renderer.acquire_gpu () with Ok l -> l | Error _ -> failwith "no GPU" in
+    let device = Renderer.gpu_device lease and queue = Renderer.gpu_queue lease in
+    let gpu r = match r with Ok v -> v | Error e -> failwith (Ogpu.Error.to_string e) in
+    let buffer ?(memory = Ogpu.Types.Shared) size = gpu (Ogpu.Backend.create_buffer ~memory device
+      { label = Some "pt"; size = Int64.of_int size; usage = [ Ogpu.Types.Storage ] }) in
+    let bytes = Bytes.create (4 * 3 * Array.length triangles) in
+    Array.iteri (fun k (x, y, z) -> List.iteri (fun c v -> Bytes.set_int32_le bytes (4 * (3 * k + c)) (Int32.bits_of_float v)) [x; y; z]) triangles;
+    let vertices = buffer (Bytes.length bytes) and spheres = buffer 16 in
+    gpu (Ogpu.Backend.write_buffer vertices ~offset:0L bytes);
+    let blas = gpu (Ogpu.Backend.create_accel device (Ogpu.Backend.Blas { geometries = [ Ogpu.Backend.Triangles
+      { vertices; offset = 0L; length = Int64.of_int (Bytes.length bytes); vertex_stride = 12; vertex_count = Array.length triangles } ] })) in
+    let scratch = buffer ~memory:Ogpu.Types.Device_local (Int64.to_int (Ogpu.Backend.accel_sizes blas).build_scratch_size) in
+    let commands = gpu (Ogpu.Backend.begin_commands queue) in
+    let encoder = gpu (Ogpu.Backend.accel_encoder commands) in
+    gpu (Ogpu.Backend.build_accel encoder blas ~scratch ());
+    gpu (Ogpu.Backend.end_accel encoder);
+    gpu (Ogpu.Backend.complete_through queue (gpu (Ogpu.Backend.commit commands)).epoch);
+    let pipelines = Flow_gpu.Pipelines.create ~clock:Unix.gettimeofday device in
+    fun program ->
+      let runner = Flow_gpu.Run.create lease pipelines (ok (Flow_gpu.Emit.kernel ~fast:true program)) in
+      let values = ok (Flow_ir.Packed.Private.prepare ~fast:true program ~live) in
+      let scene = { Flow_gpu.Run.accel = blas; vertices; spheres; sphere_count = 0; instances = None } in
+      let result = vec4 (ok (Flow_gpu.Run.readback (ok (Flow_gpu.Run.dispatch runner ~scene values)))) in
+      Flow_gpu.Run.close runner; result in
+  let compare name run =
+    let total = Array.make (width * height * 3) 0. in
+    for frame = 0 to frames - 1 do
+      let v = run (program_of frame) in
+      for pixel = 0 to width * height - 1 do for c = 0 to 2 do
+        total.(3 * pixel + c) <- total.(3 * pixel + c) +. v.(4 * pixel + c) done done
+    done;
   let aces c = let c = c *. exposure in
     let v = c *. (2.51 *. c +. 0.03) /. (c *. (2.43 *. c +. 0.59) +. 0.14) in
     Float.pow (Float.min 1. (Float.max 0. v)) (1. /. 2.2) in
@@ -107,6 +134,8 @@ let () =
   for pixel = 0 to width * height - 1 do Hashtbl.replace distinct (Bytes.get_uint8 msl (4 * pixel), Bytes.get_uint8 msl (4 * pixel + 1)) () done;
   Printf.printf "%d distinct msl colours\n" (Hashtbl.length distinct);
   let rmse = Float.sqrt (!squares /. float (width * height * 3)) in
-  Printf.printf "pathtrace.rays vs pathtrace.metal: %dx%d, %d frames x %d spp, %d of %d channels differ, RMSE %.3g\n" width height frames spp !different (width * height * 3) rmse
+  Printf.printf "pathtrace.rays (%s) vs pathtrace.metal: %dx%d, %d frames x %d spp, %d of %d channels differ, RMSE %.3g\n" name width height frames spp !different (width * height * 3) rmse
   ;
-  assert (rmse <= 1e-4)
+  assert (rmse <= 1e-4) in
+  compare "CPU walker" cpu;
+  compare "Metal" gpu_run
