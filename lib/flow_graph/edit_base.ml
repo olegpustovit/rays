@@ -32,10 +32,10 @@ type op =
   | Add_node of { scope : path; name : string; expr : S.t }
   | Delete_nodes of { nodes : path list }
   | Set_layout_size of { node : path; size : [ `Ratio of float | `First of int | `Second of int ] }
-  | Split_panel of { node : path; axis : [ `H | `V ]; ratio : float; kind : string option }
+  | Split_panel of { node : path; axis : [ `H | `V ]; ratio : float; panel : S.t }
   | Close_panel of { node : path }
   | Dock_panel of { node : path; target : path; side : [ `Left | `Right | `Top | `Bottom ] }
-  | Set_panel_kind of { node : path; kind : string }
+  | Set_panel_kind of { node : path; panel : S.t }
   | Set_graph of { name : string; form : S.t }
   | Duplicate of { nodes : path list }
   | Remove_graph of { name : string }
@@ -45,7 +45,7 @@ type op =
   | Layout_new of { graph : string }
   | Merge_layouts of { graph : string }
   | Layout_remove of { graph : string }
-  | Layout_window of { graph : string; kind : string }
+  | Layout_window of { graph : string; panel : S.t }
   | Layout_float of { graph : string; at : int list }
 
 let fail ?(code = "E_EDIT") fmt =

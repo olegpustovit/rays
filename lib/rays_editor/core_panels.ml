@@ -214,6 +214,9 @@ let layout_actions value (workspace : shell) ~(leaf : Pxui_shell.Layout.leaf opt
          | Ok [ form ] -> [ Syntax_batch (Flow_graph.Flow_edit.label (make "editor"),
              [ Flow_graph.Flow_edit.Set_graph { name = "editor"; form }; make "editor" ]) ]
          | _ -> [ Declined "The layout could not be written as an editor graph." ]) in
+  let window kind = match Panel_kinds.expr (value.doc.Document.workspace.ws).source kind with
+    | Ok panel -> edit (fun graph -> Flow_graph.Flow_edit.Layout_window { graph; panel })
+    | Error message -> [ Declined message ] in
   List.concat_map (function
     | Leader.Layout_switch index when Option.is_some (Option.bind value.doc.Document.shell (fun s -> s.switch)) ->
         edit (fun graph -> Flow_graph.Flow_edit.Set_layout { graph; index })
@@ -228,10 +231,10 @@ let layout_actions value (workspace : shell) ~(leaf : Pxui_shell.Layout.leaf opt
          | None -> [])
     | Layout_new -> edit (fun graph -> Flow_graph.Flow_edit.Layout_new { graph })
     | Layout_remove -> edit (fun graph -> Flow_graph.Flow_edit.Layout_remove { graph })
-    | Window_new panel -> edit (fun graph -> Flow_graph.Flow_edit.Layout_window { graph; kind = panel_kind panel })
+    | Window_new panel -> window (panel_kind panel)
     | Peek ->
         (match peek_target value with
-         | Some target -> edit (fun graph -> Flow_graph.Flow_edit.Layout_window { graph; kind = "graph:" ^ target })
+         | Some target -> window ("graph:" ^ target)
          | None -> [ Declined "Nothing selected to peek at" ])
     | Float_toggle ->
         (match leaf with
@@ -252,9 +255,9 @@ let layout_intents value (workspace : shell) intents =
          | Some (Loop (home, key)) ->
              (* a loop's panels are copies of its one template: retyping edits the template *)
              (match make [] with
-              | Flow_graph.Flow_edit.Set_panel_kind { kind; _ } ->
+              | Flow_graph.Flow_edit.Set_panel_kind { panel; _ } ->
                   [ Syntax_inline { home; key; make = (fun p ->
-                      Flow_graph.Flow_edit.Set_panel_kind { node = p @ [ "@result" ]; kind }) } ]
+                      Flow_graph.Flow_edit.Set_panel_kind { node = p @ [ "@result" ]; panel }) } ]
               | _ -> [ Declined ("These panels are copies made by a loop in " ^ Document.describe (value.doc.Document.workspace.ws).source home
                   ^ ": retype them (/ o), or edit the loop in the editor graph.") ])
          | None -> [ Declined "This panel is not part of the editor graph's tree." ])
@@ -271,7 +274,13 @@ let layout_intents value (workspace : shell) intents =
              [ Syntax_edit (Flow_graph.Flow_edit.Set_graph { name = "editor"; form });
                Syntax_edit (make [ "editor"; leaf ]) ]
          | _ -> [ Declined "This panel is not part of the layout." ]) in
-  let kind = panel_kind in
+  (* a panel of [kind] for [make]: the form the editor's panel table writes, or why there is none *)
+  let with_panel kind path make = match Panel_kinds.expr (value.doc.Document.workspace.ws).source kind with
+    | Ok panel -> edit path (make panel)
+    | Error message -> [ Declined message ] in
+  let beside path = match Editor_core.Panels.at path base with
+    | Some (Leaf panel) -> Panel_kinds.beside (panel_kind panel)
+    | _ -> Panel_kinds.beside "" in
   let save_state path state =
     let prefix = if editor <> None then [] else
       let scene = Option.value ~default:"scene" (List.find_map (fun (g : Flow.Workspace.graph) ->
@@ -302,15 +311,16 @@ let layout_intents value (workspace : shell) intents =
              let w = { w with live = None } in
              w, changes @ edit node (fun node -> Flow_graph.Flow_edit.Set_layout_size { node; size }))
     | Split_panel (path, axis) ->
-        w, changes @ edit path (fun node -> Flow_graph.Flow_edit.Split_panel { node; axis; ratio = 0.5; kind = None })
-    | Split_panel_at (path, axis, ratio, panel) ->
-        w, changes @ edit path (fun node ->
-          Flow_graph.Flow_edit.Split_panel { node; axis; ratio; kind = Some (kind panel) })
+        w, changes @ with_panel (beside path) path (fun panel node ->
+          Flow_graph.Flow_edit.Split_panel { node; axis; ratio = 0.5; panel })
+    | Split_panel_at (path, axis, ratio, kind) ->
+        w, changes @ with_panel (panel_kind kind) path (fun panel node ->
+          Flow_graph.Flow_edit.Split_panel { node; axis; ratio; panel })
     | Close_panel path ->
         w, changes @ edit path (fun node -> Flow_graph.Flow_edit.Close_panel { node })
-    | Retype_panel (path, panel) ->
-        w, changes @ edit path (fun node ->
-          Flow_graph.Flow_edit.Set_panel_kind { node; kind = kind panel }))
+    | Retype_panel (path, kind) ->
+        w, changes @ with_panel (panel_kind kind) path (fun panel node ->
+          Flow_graph.Flow_edit.Set_panel_kind { node; panel }))
     (workspace, []) intents
 
 let dock_panels ~factories (doc : Document.t) source target side =

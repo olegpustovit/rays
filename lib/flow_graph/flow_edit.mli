@@ -93,18 +93,17 @@ type op =
       (** the binding [node] of an editor graph is a [ui/split] or [ui/split-at]; it becomes
           [ui/split-at] with this ratio (clamped to 0.1-0.9, four decimals), or a [ui/split] with
           [:first_size] or [:second_size] in whole points (1 or more) *)
-  | Split_panel of { node : path; axis : [ `H | `V ]; ratio : float; kind : string option }
+  | Split_panel of { node : path; axis : [ `H | `V ]; ratio : float; panel : Flow.Syntax.t }
       (** the panel [node] becomes the first half, [ratio] of the extent (clamped to 0.1-0.9), of a new
-          [ui/split-at]; the second is a panel of [kind] (as {!Set_panel_kind}), by default a fresh lisp
-          panel beside it, a graph panel beside a lisp one *)
+          [ui/split-at]; the second is [panel] *)
   | Close_panel of { node : path }
       (** the split holding panel [node] becomes the other half; a panel outside a split
           does not close *)
   | Dock_panel of { node : path; target : path; side : [ `Left | `Right | `Top | `Bottom ] }
       (** Move a panel beside another in the same scope; collapse the split/tile it leaves. *)
-  | Set_panel_kind of { node : path; kind : string }
-      (** [outline], [graph], [list], [lisp], [inspector], [spreadsheet], [timeline] or [viewport] (over the first
-          scene graph) *)
+  | Set_panel_kind of { node : path; panel : Flow.Syntax.t }
+      (** the binding [node] becomes [panel].  The panel forms are the editor's
+          ([Editor_document.Panel_kinds]): this library knows no panel kind. *)
   | Set_graph of { name : string; form : Flow.Syntax.t }
       (** the whole [(graph name ...)] form, replacing the graph or appended; the scene and World
           graphs written from the editor's own objects *)
@@ -132,9 +131,8 @@ type op =
           removed. Ten layouts at most. *)
   | Layout_remove of { graph : string }
       (** the active layout leaves the switch (and the bindings only it read); the last stays *)
-  | Layout_window of { graph : string; kind : string }
-      (** a new [(ui/floating ...)] panel of [kind] (as {!Set_panel_kind}, or ["graph:name"] for
-          a graph panel showing that graph) in the active layout *)
+  | Layout_window of { graph : string; panel : Flow.Syntax.t }
+      (** [panel] in a new [(ui/floating ...)] window of the active layout *)
   | Layout_float of { graph : string; at : int list }
       (** the docked panel at tree path [at] of the active layout becomes a floating window, and a
           floating one docks beside the rest *)
