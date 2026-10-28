@@ -37,7 +37,7 @@ let run_ranges ~grain count operation =
         operation range first last);
   range_count
 
-let selected_legacy_seam group index_view edge =
+let selected_seam group index_view edge =
   let first = index_view.Topology_index.View.edge_offsets.(edge)
   and last = index_view.edge_offsets.(edge + 1) in
   let selected = ref false in
@@ -110,7 +110,7 @@ let solve ?cancel ?(grain = 16_384) ?(name = "uv") ?seams ?edge_seams
       let selected = (match edge_seams with
         | Some group -> Edge_group.mem edge group
         | None -> false) || match seams with
-        | Some group -> selected_legacy_seam group index_view edge
+        | Some group -> selected_seam group index_view edge
         | None -> false in
       if selected then Bytes.set edge_is_seam edge '\001'
     done;
