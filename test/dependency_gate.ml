@@ -545,11 +545,17 @@ let private_errors scan =
     let rec go i = match Str.search_forward re text i with
       | exception Not_found -> ()
       | _ ->
-          let m = resolve (Str.matched_string text) 0 in
+          let m = resolve (Str.matched_string text) 0 and stop = Str.match_end () in
           let first = List.hd (String.split_on_char '.' m) and dir = Option.get (owner path) in
-          if not (Hashtbl.mem defined (first, Some dir) || Hashtbl.mem submodules (first, Some dir)) then
+          (* A value reference, or a module alias; not a constructor named Private (a storage mode). *)
+          let line_start = try String.rindex_from text (Str.match_beginning ()) '\n' with Not_found -> 0 in
+          let alias_line = Str.string_match (Str.regexp "[ \t]*\\(let \\)?module ") text line_start
+            || (line_start + 1 < String.length text && Str.string_match (Str.regexp "[ \t]*\\(let \\)?module ") text (line_start + 1)) in
+          let value_ref = stop + 1 < String.length text && text.[stop] = '.' && text.[stop + 1] >= 'a' && text.[stop + 1] <= 'z' in
+          if (value_ref || alias_line)
+             && not (Hashtbl.mem defined (first, Some dir) || Hashtbl.mem submodules (first, Some dir)) then
             Hashtbl.replace found (dir, m) ();
-          go (Str.match_end ()) in
+          go stop in
     go 0 end) scan;
   let allowed = Private_allowlist.entries in
   List.filter_map (fun (d, m) -> if List.mem (d, m) allowed then None

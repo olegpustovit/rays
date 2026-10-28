@@ -12,7 +12,6 @@ let entries = [
   "flow_sop", "Flow_sop.Catalog.Private";
   "flow_sop", "Flow_sop.Lower.Private";
   "flow_sop", "Sop.Node.Private";
-  "ogpu_metal", "Metal.Buffer.Private";
   "ogpu_metal", "Metal.Drawable.Private";
   "ogpu_metal", "Metal.Render_encoder.Private";
   "pxui", "Font.Private";
