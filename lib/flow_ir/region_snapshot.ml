@@ -76,10 +76,9 @@ let record result =
   if not (Hashtbl.mem seen text) then (Hashtbl.add seen text (); Buffer.add_string buffer text)
 
 let start () =
-  Buffer.clear buffer; Hashtbl.reset seen; P.Host.trace := record
+  Buffer.clear buffer; Hashtbl.reset seen
 
 let finish name =
-  P.Host.trace := ignore;
   let text = Buffer.contents buffer in
   match Sys.getenv_opt "REGION_SNAPSHOT_DIR" with
   | Some dir -> Out_channel.with_open_text (Filename.concat dir (name ^ ".txt")) (fun c -> output_string c text)

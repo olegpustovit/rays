@@ -30,17 +30,18 @@ type count_source = Flow.Eval.residual -> Flow.Workspace.term -> origin option
 (** Hosts may prove equal source cardinality from instantiated domain facts.
     [None] retains a materialization boundary for dynamic multi-input maps. *)
 
-val compile_result : ?fusion:bool -> ?count_source:count_source ->
+val compile_result : ?trace:((t, Diagnostic.t list) Stdlib.result -> unit) -> ?fusion:bool -> ?count_source:count_source ->
   Flow.Eval.residual -> Flow.Workspace.term -> (t, Diagnostic.t list) Stdlib.result
-(** The first actual compilation refusal, with its source location. Declined
+(** [trace] sees every compilation result; tests record snapshots through it.
+    The first actual compilation refusal, with its source location. Declined
     fusion retains a valid unfused program and is not a refusal. *)
 
-val compile : ?fusion:bool -> ?count_source:count_source ->
+val compile : ?trace:((t, Diagnostic.t list) Stdlib.result -> unit) -> ?fusion:bool -> ?count_source:count_source ->
   Flow.Eval.residual -> Flow.Workspace.term -> t option
 (** Unsupported bodies remain on the reference interpreter. Fusion defaults to
     true; false retains intermediate arrays for parity checks and profiling. *)
 
-val compile_template : ?count_source:count_source -> Flow.Eval.residual -> Flow.Workspace.term -> t option
+val compile_template : ?trace:((t, Diagnostic.t list) Stdlib.result -> unit) -> ?count_source:count_source -> Flow.Eval.residual -> Flow.Workspace.term -> t option
 val rebind : t -> Flow.Eval.residual -> t option
 (** A frame-fold template keeps captures as uniforms and reuses its register
     code with the next step's immutable bindings. A changed function body or a
@@ -57,9 +58,6 @@ val gpu_refusals : ?fused:bool -> ?fast:bool -> t -> Diagnostic.t list
     the owner's device tolerance; the default keeps the binary64 forms (the web export).
     Constants/noise are checked only when reachable from outputs; ordered
     accumulators are refused even when unreachable. *)
-
-val stage_count : t -> int
-(** Number of packed stages executed in this register program without intermediate arrays. *)
 
 val provenance : t -> (int * Flow.Workspace.path * int list) list
 (** Graph instance, authored site and iteration tuple for every fused stage. *)
@@ -99,9 +97,6 @@ module Host : sig
       Refuses wrong arity/storage; rewrites closure and residual captures without
       re-evaluating their checked bodies. [~validate:false] skips the finite-value scan, for a
       device that checks what it uploads (a resident fold's placeholders are zeros). *)
-
-  val trace : ((t, Diagnostic.t list) Stdlib.result -> unit) ref
-  (** Called with every public compilation result; tests record snapshots through it. *)
 
   val ordered_add : t -> bool
   (** Recognizes the exact component-wise non-collecting ordered-add program. *)

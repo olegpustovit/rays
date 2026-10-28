@@ -6,18 +6,18 @@ let catalog = fst (Test_program.ok (Flow.Catalog.catalog_of_manifest
 let run ?(require_state_kernel = false) checked =
   let _, evaluation = Test_program.ok (Flow_ir.qualify_workspace ~observe:(fun _ residual ->
     let term = (E.Residual.residual_view residual).term in
-    List.iter (fun fusion -> ignore (Flow_ir.Packed.compile_result ~fusion residual term)) [true; false];
-    ignore (Flow_ir.Packed.compile_template residual term)) checked) in
+    List.iter (fun fusion -> ignore (Flow_ir.Packed.compile_result ~trace:Region_snapshot.record ~fusion residual term)) [true; false];
+    ignore (Flow_ir.Packed.compile_template ~trace:Region_snapshot.record residual term)) checked) in
   (* Frame folds compile their kernels as templates while they run. *)
   List.iter (fun value ->
     (match value with
      | E.Residual residual when require_state_kernel ->
-         let core = Result.get_ok (Flow_ir.Core_lower.lower residual) in
+         let core = Result.get_ok (Flow_ir.Core_lower.lower ~trace:Region_snapshot.record residual) in
          if Array.length core.Flow_ir.Core.regions = 0 then
            failwith "particle state residual did not qualify to a Core kernel"
      | _ -> ());
     let state = E.create_state () and reference_state = E.create_state () in
-    let program = Result.get_ok (Flow_ir.Executor.compile value) in
+    let program = Result.get_ok (Flow_ir.Executor.compile ~trace:Region_snapshot.record value) in
     for frame = 0 to 1 do
       let live = {(Input.at_time (float frame /. 60.)) with frame; dt = 1. /. 60.; size = 800, 600} in
       let actual = Flow_ir.Executor.force ~state program ~live in
@@ -56,7 +56,7 @@ let state_branch_laziness () =
     | _, diagnostics -> failwith (String.concat "; " (List.map Diagnostic.to_string diagnostics)) in
   let evaluation = Test_program.ok (E.static checked) in
   let value = List.hd evaluation.states in
-  let program = Test_program.ok (Flow_ir.Executor.compile value) in
+  let program = Test_program.ok (Flow_ir.Executor.compile ~trace:Region_snapshot.record value) in
   let reference_state = E.create_state () and core_state = E.create_state () in
   List.iter (fun time ->
     let live = Input.at_time time in
@@ -74,8 +74,8 @@ let state_branch_laziness () =
 let () =
   Region_snapshot.start ();
   state_branch_laziness ();
-  ignore (Test_program.fixtures 1024);
-  ignore (Test_program.vector_fixtures 1024);
+  ignore (Test_program.fixtures ~trace:Region_snapshot.record 1024);
+  ignore (Test_program.vector_fixtures ~trace:Region_snapshot.record 1024);
   Region_snapshot.finish "test_program";
   List.iter workspace ["sketches/particles"; "sketches/flow_shader"; "sketches/flow_particles_gpu";
     "sketches/flow_image_kernel"]

@@ -1,5 +1,5 @@
 let ok = function Ok value -> value | Error error -> failwith (Diagnostic.to_string error)
-let compile ?(fusion = true) ?(declarations="") body =
+let compile ?trace ?(fusion = true) ?(declarations="") body =
   let source="(workspace w " ^ declarations ^ " (graph g :context value (let* [tested " ^ body ^ "] 0.0)))" in
   let forms=ok (Flow.Syntax.parse source) in
   let workspace=match Flow.Workspace.check ~ops:[] {Flow.Catalog.version=1;kinds=[]} forms with
@@ -8,22 +8,22 @@ let compile ?(fusion = true) ?(declarations="") body =
   let evaluated=ok (Flow.Eval.static ~record:true workspace) in
   match List.assoc ["g";"tested"] evaluated.records |> List.hd |> snd with
   | Flow.Eval.Residual residual ->
-      (match Flow_ir.Packed.compile_result ~fusion residual (Flow.Eval.Residual.residual_view residual).term with
+      (match Flow_ir.Packed.compile_result ?trace ~fusion residual (Flow.Eval.Residual.residual_view residual).term with
        | Ok program -> program
        | Error errors -> failwith (String.concat "\n" (List.map Diagnostic.to_string errors)))
   | _ -> failwith "expected live packed program"
-let fixtures count =
+let fixtures ?trace count =
   let array="(array/range " ^ string_of_int count ^ ")" in
-  ["arithmetic",compile ("(map (fn [x] (+ (* x 2) t)) " ^ array ^ ")");
-   "select",compile ("(map (fn [x] (if (< x t) (+ x 1) (- x 1))) " ^ array ^ ")");
-   "noise",compile ("(map (fn [x] (noise3 [(* x 0.02) t 0.25] :seed 31 :octaves 3)) " ^ array ^ ")")]
+  ["arithmetic",compile ?trace ("(map (fn [x] (+ (* x 2) t)) " ^ array ^ ")");
+   "select",compile ?trace ("(map (fn [x] (if (< x t) (+ x 1) (- x 1))) " ^ array ^ ")");
+   "noise",compile ?trace ("(map (fn [x] (noise3 [(* x 0.02) t 0.25] :seed 31 :octaves 3)) " ^ array ^ ")")]
 
-let vector_fixtures count =
+let vector_fixtures ?trace count =
   let array = "(array/range " ^ string_of_int count ^ ")" in
-  ["vec2", compile ("(map (fn [x] [x (+ x t)]) " ^ array ^ ")");
-   "vec4", compile ~fusion:false ("(map (fn [(p : vec2)] [p.y p.x t 1])
+  ["vec2", compile ?trace ("(map (fn [x] [x (+ x t)]) " ^ array ^ ")");
+   "vec4", compile ?trace ~fusion:false ("(map (fn [(p : vec2)] [p.y p.x t 1])
      (map (fn [x] [x (+ x 1)]) " ^ array ^ "))");
-   "vec4-input", compile ~fusion:false ("(let* [offset [t 1 2 3]]
+   "vec4-input", compile ?trace ~fusion:false ("(let* [offset [t 1 2 3]]
      (map (fn [(p : vec4)] (+ p offset)) (map (fn [x] [x 1 2 3]) " ^ array ^ ")))")]
 
 let int63_checks = "(let* [n (int/add (int x) (frame/index))

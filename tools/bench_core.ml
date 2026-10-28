@@ -227,7 +227,7 @@ let loop_fusion () = Parallel.run ~domains:1(fun()->
       let force()=I.Packed.force ~strict:true packed ~live in
       if Marshal.to_string(ok(force()))[Marshal.No_sharing]<>Marshal.to_string expected[Marshal.No_sharing]then
         failwith(name^": loop fusion differs from reference");
-      assert(I.Packed.stage_count packed=(if fusion then 2 else 1));
+      assert(List.length packed.I.Core.Region.stages=(if fusion then 2 else 1));
       let cpu,bytes=measure_loop force in
       Printf.printf "%s fusion=%b rows=4096 domains=1 cpu_seconds=%.6f allocated_bytes=%.0f\n%!"
         name fusion cpu bytes)[false;true])[

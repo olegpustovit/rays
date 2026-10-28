@@ -148,16 +148,14 @@ let compile_impl ?(fusion = true) ?(dynamic = false) ?(count_source = fun _ _ ->
 
 let static_count (t : t) = t.count
 let count_origin (t : t) = t.origin
-let trace : ((t, Diagnostic.t list) Stdlib.result -> unit) ref = ref ignore
-let traced result = !trace result; result
-let compile_result ?fusion ?count_source r term = traced (compile_impl ?fusion ?count_source r term)
-let compile ?fusion ?count_source r term = compile_result ?fusion ?count_source r term |> Result.to_option
-let compile_template ?count_source r term =
-  traced (compile_impl ~dynamic:true ?count_source r term) |> Result.to_option
+let traced trace result = Option.iter (fun f -> f result) trace; result
+let compile_result ?trace ?fusion ?count_source r term = traced trace (compile_impl ?fusion ?count_source r term)
+let compile ?trace ?fusion ?count_source r term = compile_result ?trace ?fusion ?count_source r term |> Result.to_option
+let compile_template ?trace ?count_source r term =
+  traced trace (compile_impl ~dynamic:true ?count_source r term) |> Result.to_option
 let rebind (t : t) residual = Core_region.rebind t residual
 let elementwise (t : t) = match t.result with Collect -> true | Sum _ | Accumulate _ -> false
 let provenance (t : t) = List.sort_uniq compare t.sites
-let stage_count (t : t) = List.length t.stages
 let site (t : t) = let view = E.Residual.residual_view t.residual in
   view.instance, Option.value ~default:view.site t.term.path, view.iter
 let reference ?state ?elems ?resolve (t : t) ~live = E.Residual.eval_term ?state ?elems ?resolve t.residual t.term ~live
@@ -1711,7 +1709,6 @@ module Host = struct
         ~sources:(Array.map(fun(r,term)->residual r,term)t.sources)
         ~stages:(List.map(fun(r,term)->residual r,term)t.stages) ~count:t.count
     with Diagnostic.Error d -> Error d
-  let trace = trace
   let ordered_add = ordered_add
   let output_reachable = output_reachable
   let finite_checks = finite_checks
