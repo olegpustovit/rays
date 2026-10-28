@@ -4,32 +4,6 @@ open Edit_base
    [(ui/workspace (ui/switch a b :active 0))], the switch written in place or bound; a graph
    without one has a single layout, the workspace's own tree. *)
 
-let panel_expr src kind =
-  let rec context = function
-    | { S.node = S.Kw "context"; _ } :: { S.node = S.Sym c; _ } :: _ -> Some c
-    | _ :: rest -> context rest
-    | [] -> None in
-  let scene = List.find_map (fun (item : S.t) -> match item.node with
-    | S.List ({ S.node = S.Sym "graph"; _ } :: { S.node = S.Sym n; _ } :: rest)
-      when context rest = Some "scene" -> Some n
-    | _ -> None) (snd (workspace_parts src)) in
-  match kind with
-  | "outline" | "graph" | "list" | "lisp" | "inspector" | "spreadsheet" | "timeline" -> call ("ui/" ^ kind) []
-  | "viewport" ->
-      (match scene with
-       | Some n -> call "ui/viewport" [ call "ref" [ sym n ] ]
-       | None -> fail "A viewport needs a scene graph.")
-  | "canvas" ->
-      (match List.find_map (fun (item : S.t) -> match item.node with
-        | S.List ({S.node = S.Sym "graph"; _} :: {S.node = S.Sym n; _} :: rest)
-          when context rest = Some "draw" -> Some n
-        | _ -> None) (snd (workspace_parts src)) with
-       | Some n -> call "ui/canvas" [call "ref" [sym n]]
-       | None -> fail "A canvas needs a draw graph.")
-  | _ when String.starts_with ~prefix:"graph:" kind ->
-      call "ui/graph" [ mk (S.Str (String.sub kind 6 (String.length kind - 6))) ]
-  | _ -> fail "Unknown panel type %s." kind
-
 let containers = [ "ui/split"; "ui/split-at"; "ui/tile"; "ui/floating" ]
 let layout_binding (e : S.t) = match head_sym e with
   | Some h -> List.mem h containers

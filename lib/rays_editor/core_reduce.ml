@@ -60,7 +60,7 @@ let level_target ~(value : _ t) ~value' ~level ~(doc : Document.t) ~selection ~a
       | Scene -> None)
     | Some Leader.Go_world, _ ->
         Option.map (fun id -> Document.Inside id)
-          (List.find_opt (enterable value') (Objects.ids "world" doc.scene.graph.geometry))
+          (List.find_opt (enterable value') (Objects.ids "world" doc.scene))
     | Some Leader.Enter, _ | _, Some _ ->
         let candidate = match result.opened with
           | Some id -> Some id | None -> Selection.selected selection in
@@ -391,7 +391,7 @@ let framing_step ~(value : _ t) ~value' ~(doc : Document.t) ~(cooked : _ Cook.up
     ~(frame : Frame.t) (result : _ frame_result) =
   (* Framing: local bounds move into the world with their object; at the
      scene level [F] frames every cooked object. *)
-  let world_bounds id bounds = Cook.transformed (Objects.world doc.scene.graph.geometry id) bounds in
+  let world_bounds id bounds = Cook.transformed (Objects.world doc.scene id) bounds in
   (* a framing cook may finish frames after its request: the object is remembered until it does *)
   let framing = match frame_request with Some (id, _) -> Some id | None -> value.framing in
   let framed = match cooked.framed, framing with
@@ -497,7 +497,7 @@ let reduce ?gpu ?(pump=fun()->()) ~carry_changed ~all_ui_visible ~view_state ~ca
      gestures); only an object the host made is edited as a derived node, for reconcile to adopt *)
   let in_text node = Editor_document.Scene_sync.in_text value.doc value.level node in
   let document, edit_error, editor_effects = List.fold_left apply_change
-      ((network value).graph, value.edit_error, Param.no_effects)
+      (objects value, value.edit_error, Param.no_effects)
       (List.filter (function Set_parameter { node; _ } | Rename { node; _ } -> not (in_text node) | _ -> true)
          result.changes) in
   (* what a list or the inspector's name row asks of an object the text has is written to the text
@@ -512,7 +512,7 @@ let reduce ?gpu ?(pump=fun()->()) ~carry_changed ~all_ui_visible ~view_state ~ca
   let apply_changes (document, effects, error) = function
     | None -> document, effects, error
     | Some (node_id, values) ->
-        (match Editor_document.Document_edit.apply_parameters document ~node_id values with
+        (match Kind_graph.set_fields document node_id values with
          | Ok (document, changed) -> document, Param.union_effects effects changed, error
          | Error message -> document, effects, Some message) in
   let document, parameter_effects, edit_error =
@@ -531,8 +531,8 @@ let reduce ?gpu ?(pump=fun()->()) ~carry_changed ~all_ui_visible ~view_state ~ca
     | None, None when settings != value.doc.settings -> "Settings"
     | None, None -> match result.handle_changes with
       | Some (id, _) ->
-          "Edit " ^ Option.fold ~none:(string_of_int id) ~some:Node.label
-            (Edit_graph.find document.geometry ~node_id:id)
+          "Edit " ^ Option.fold ~none:(string_of_int id) ~some:(fun (node : Kind_graph.node) -> node.label)
+            (Kind_graph.find document id)
       | None -> "Edit" in
   let result = { result with document; selection; tree; opened; edit_error;
     effects = Param.union_effects (node_effects
@@ -544,17 +544,14 @@ let reduce ?gpu ?(pump=fun()->()) ~carry_changed ~all_ui_visible ~view_state ~ca
      inspector commit) becomes one history entry; Command/Ctrl-Z undoes,
      Shift-Command/Ctrl-Z or Ctrl-Y redoes. *)
   let present = value.doc in
-  let current = network value in
   let next = match loaded with
     | Some (preset : Preset.loaded) -> preset.doc
     | None ->
-        let edited = if result.document == current.graph then current
-          else { current with graph = result.document;
-            displayed = Document.displayed_of ?previous:current.displayed result.document
-              current.displayed } in
-        let doc = if edited == current then present
-          else Document.with_network present value.level edited in
-        if value.level = Document.Scene && edited != current then Document.prune doc else doc in
+        (* the host's objects or layers as this frame's derived edits leave them *)
+        if result.document == objects value || network value <> None then present
+        else
+          let doc = Document.with_kinds present value.level result.document in
+          if value.level = Document.Scene then Document.prune doc else doc in
   (* Enter and row activation share camera selection and look-through. *)
   let entered_camera = if value.level <> Document.Scene || Option.is_some loaded || carrying then None
     else
@@ -590,7 +587,7 @@ let reduce ?gpu ?(pump=fun()->()) ~carry_changed ~all_ui_visible ~view_state ~ca
   let next, world_label, world_edits = if in_world value
     then world_keys value next result.selection actions else next, None, [] in
   (* / e opens the World, writing one (a [scene/world] member and its world graph) on first use. *)
-  let next, world_added = match Objects.ids "world" next.scene.graph.geometry with
+  let next, world_added = match Objects.ids "world" next.scene with
     | [] when List.mem Leader.Go_world actions ->
         (match Result.bind (Editor_document.Scene_sync.add_world next)
                  (Editor_document.Document_edit.syntax_batch ~factories:value.factories next) with
@@ -630,13 +627,13 @@ let reduce ?gpu ?(pump=fun()->()) ~carry_changed ~all_ui_visible ~view_state ~ca
   let selection =
     if level <> value.level || Option.is_some loaded then Selection.empty
     else
-      let exists id = Edit_graph.find (network value').graph.geometry ~node_id:id <> None in
+      let exists = lists value' in
       match List.filter exists (Selection.selected_nodes result.selection) with
       | ids when ids = Selection.selected_nodes result.selection -> result.selection
       | ids -> Selection.select_nodes ids in
   let followed, target = level_target ~value ~value' ~level ~doc ~selection ~actions result in
   let selection = match result.open_graph with
-    | Some id when Edit_graph.find (network value').graph.geometry ~node_id:id <> None ->
+    | Some id when lists value' id ->
         Selection.select id
     | Some _ | None -> selection in
   (* / e selects the scene's World, then enters it *)
@@ -777,7 +774,7 @@ let reduce_idle ?select ?preview value actions (frame : Frame.t) =
   let result = { workspace = value.workspace; focus = value.focus; focus_path = value.focus_path;
     pane_keys = value.pane_keys; scope_view = value.scope_view; scope_changes = []; selection;
     menu = value.menu; menu_pick = None; tree = value.tree; outline = value.outline; outline_intents = [];
-    document = (network value).graph; edit_error = value.edit_error; effects = Param.no_effects;
+    document = objects value; edit_error = value.edit_error; effects = Param.no_effects;
     timeline_intents = []; frame_request = None; prompt = value.prompt; prompt_intent = None;
     panel = None; grab = false; settings = value.doc.settings; opened = None; live_cook = value.live_cook;
     label = "Edit"; changes = []; tree_intents = []; text_intents = []; open_graph = None;

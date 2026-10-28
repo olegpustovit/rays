@@ -24,7 +24,7 @@ let panel_title value (leaf : Pxui_shell.Layout.leaf) =
             if g.context = Flow.Context.scene then Some g.name else None)
             (value.doc.Document.workspace.ws).checked.graphs) in
         let camera = Option.bind value.doc.Document.active_camera (fun id ->
-          Option.map Node.label (Edit_graph.find (scene value) ~node_id:id)) in
+          Option.map (fun (node : Kind_graph.node) -> node.label) (Kind_graph.find (scene value) id)) in
         String.concat " / " (List.filter (( <> ) "") [ scene_name; Option.value ~default:"" camera ])
     | Graph -> "Graph", if graph = "" then "" else
         let context = List.find_map (fun (g : Flow.Workspace.graph) ->
@@ -95,7 +95,7 @@ let outline_objects value : Navigator.obj list =
   let document = scene value in
   let selected = if value.level = Document.Scene then Selection.selected_nodes value.selection else [] in
   Array.to_list (scene_rows document) |> List.map (fun (row : Pxui_shell.Tree.row) ->
-    let node = Edit_graph.find document ~node_id:row.id in
+    let node = Kind_graph.find document row.id in
     let flag name = Option.bind node (fun node ->
       if Objects.has_flag name node then Some (Objects.flag name node) else None) in
     let lead = value.doc.Document.active_camera = Some row.id in
@@ -103,11 +103,11 @@ let outline_objects value : Navigator.obj list =
     let choice = Option.bind node (fun node -> List.find_map (fun (f : Param.field_view) ->
       match f.name, f.current with
       | ("shape" | "type"), Param.Choice_value v -> Some (String.lowercase_ascii v) | _ -> None)
-      (Node.parameter_fields node)) in
-    let operation = Option.map Node.operation node in
+      (Kind_graph.fields node)) in
+    let operation = Option.map (fun (node : Kind_graph.node) -> node.kind) node in
     let field name = Option.bind node (fun node -> List.find_map (fun (f : Param.field_view) ->
       match f.name = name, f.current with
-      | true, Param.Float_value v -> Some v | _ -> None) (Node.parameter_fields node)) in
+      | true, Param.Float_value v -> Some v | _ -> None) (Kind_graph.fields node)) in
     (* the sheet's words: a camera its focal length, a geometry object the graph it references, the
        World a reference to its graph; a light its shape *)
     let name, detail = match operation with
@@ -214,6 +214,9 @@ let layout_actions value (workspace : shell) ~(leaf : Pxui_shell.Layout.leaf opt
          | Ok [ form ] -> [ Syntax_batch (Flow_graph.Flow_edit.label (make "editor"),
              [ Flow_graph.Flow_edit.Set_graph { name = "editor"; form }; make "editor" ]) ]
          | _ -> [ Declined "The layout could not be written as an editor graph." ]) in
+  let window kind = match Panel_kinds.expr (value.doc.Document.workspace.ws).source kind with
+    | Ok panel -> edit (fun graph -> Flow_graph.Flow_edit.Layout_window { graph; panel })
+    | Error message -> [ Declined message ] in
   List.concat_map (function
     | Leader.Layout_switch index when Option.is_some (Option.bind value.doc.Document.shell (fun s -> s.switch)) ->
         edit (fun graph -> Flow_graph.Flow_edit.Set_layout { graph; index })
@@ -228,10 +231,10 @@ let layout_actions value (workspace : shell) ~(leaf : Pxui_shell.Layout.leaf opt
          | None -> [])
     | Layout_new -> edit (fun graph -> Flow_graph.Flow_edit.Layout_new { graph })
     | Layout_remove -> edit (fun graph -> Flow_graph.Flow_edit.Layout_remove { graph })
-    | Window_new panel -> edit (fun graph -> Flow_graph.Flow_edit.Layout_window { graph; kind = panel_kind panel })
+    | Window_new panel -> window (panel_kind panel)
     | Peek ->
         (match peek_target value with
-         | Some target -> edit (fun graph -> Flow_graph.Flow_edit.Layout_window { graph; kind = "graph:" ^ target })
+         | Some target -> window ("graph:" ^ target)
          | None -> [ Declined "Nothing selected to peek at" ])
     | Float_toggle ->
         (match leaf with
@@ -252,9 +255,9 @@ let layout_intents value (workspace : shell) intents =
          | Some (Loop (home, key)) ->
              (* a loop's panels are copies of its one template: retyping edits the template *)
              (match make [] with
-              | Flow_graph.Flow_edit.Set_panel_kind { kind; _ } ->
+              | Flow_graph.Flow_edit.Set_panel_kind { panel; _ } ->
                   [ Syntax_inline { home; key; make = (fun p ->
-                      Flow_graph.Flow_edit.Set_panel_kind { node = p @ [ "@result" ]; kind }) } ]
+                      Flow_graph.Flow_edit.Set_panel_kind { node = p @ [ "@result" ]; panel }) } ]
               | _ -> [ Declined ("These panels are copies made by a loop in " ^ Document.describe (value.doc.Document.workspace.ws).source home
                   ^ ": retype them (/ o), or edit the loop in the editor graph.") ])
          | None -> [ Declined "This panel is not part of the editor graph's tree." ])
@@ -271,7 +274,13 @@ let layout_intents value (workspace : shell) intents =
              [ Syntax_edit (Flow_graph.Flow_edit.Set_graph { name = "editor"; form });
                Syntax_edit (make [ "editor"; leaf ]) ]
          | _ -> [ Declined "This panel is not part of the layout." ]) in
-  let kind = panel_kind in
+  (* a panel of [kind] for [make]: the form the editor's panel table writes, or why there is none *)
+  let with_panel kind path make = match Panel_kinds.expr (value.doc.Document.workspace.ws).source kind with
+    | Ok panel -> edit path (make panel)
+    | Error message -> [ Declined message ] in
+  let beside path = match Editor_core.Panels.at path base with
+    | Some (Leaf panel) -> Panel_kinds.beside (panel_kind panel)
+    | _ -> Panel_kinds.beside "" in
   let save_state path state =
     let prefix = if editor <> None then [] else
       let scene = Option.value ~default:"scene" (List.find_map (fun (g : Flow.Workspace.graph) ->
@@ -302,15 +311,16 @@ let layout_intents value (workspace : shell) intents =
              let w = { w with live = None } in
              w, changes @ edit node (fun node -> Flow_graph.Flow_edit.Set_layout_size { node; size }))
     | Split_panel (path, axis) ->
-        w, changes @ edit path (fun node -> Flow_graph.Flow_edit.Split_panel { node; axis; ratio = 0.5; kind = None })
-    | Split_panel_at (path, axis, ratio, panel) ->
-        w, changes @ edit path (fun node ->
-          Flow_graph.Flow_edit.Split_panel { node; axis; ratio; kind = Some (kind panel) })
+        w, changes @ with_panel (beside path) path (fun panel node ->
+          Flow_graph.Flow_edit.Split_panel { node; axis; ratio = 0.5; panel })
+    | Split_panel_at (path, axis, ratio, kind) ->
+        w, changes @ with_panel (panel_kind kind) path (fun panel node ->
+          Flow_graph.Flow_edit.Split_panel { node; axis; ratio; panel })
     | Close_panel path ->
         w, changes @ edit path (fun node -> Flow_graph.Flow_edit.Close_panel { node })
-    | Retype_panel (path, panel) ->
-        w, changes @ edit path (fun node ->
-          Flow_graph.Flow_edit.Set_panel_kind { node; kind = kind panel }))
+    | Retype_panel (path, kind) ->
+        w, changes @ with_panel (panel_kind kind) path (fun panel node ->
+          Flow_graph.Flow_edit.Set_panel_kind { node; panel }))
     (workspace, []) intents
 
 let dock_panels ~factories (doc : Document.t) source target side =
@@ -334,17 +344,17 @@ let dock_panels ~factories (doc : Document.t) source target side =
       |> Layout_by_path.Path_map.add copy (saved target_key) in
     { layout with panels }))
 
-(* A pane's request applied to the open network: an object's parameter or name.  Text gestures
-   ([Syntax_edit]) are applied to the whole document afterwards. *)
+(* A pane's request applied to the open level's objects or layers: a parameter or name of one the
+   host made.  Text gestures ([Syntax_edit]) are applied to the whole document afterwards. *)
 let apply_change (document, error, effects) = function
   | Set_parameter { node; path; value } ->
-      (match Editor_document.Document_edit.apply_parameters document ~node_id:node [ path, value ] with
+      (match Kind_graph.set_fields document node [ path, value ] with
        | Error message -> document, Some message, effects
        | Ok (document, changed) -> document, None, Param.union_effects effects changed)
   | Rename { node; label } ->
-      (match Editor_document.Document_edit.relabel document ~node_id:node label with
-       | Error message -> document, Some message, effects
-       | Ok document -> document, None, effects)
+      (match Kind_graph.find document node with
+       | None -> document, Some (Printf.sprintf "no object #%d" node), effects
+       | Some _ -> Kind_graph.update document node (fun n -> { n with label }), None, effects)
   | Follow_source _ | Syntax_edit _ | Syntax_batch _ | Syntax_inline _ | Select_layout _ | Panel_state _ | Dock_panels _ | Object_arg _ | Pin_row _ | Notice _ | Declined _ -> document, error, effects
 
 (* Command-C / X: the selected bindings as Lisp pairs ("name expr" per line) on the clipboard,

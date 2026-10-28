@@ -16,13 +16,12 @@ let workspace_doc ?gpu ?opened ~factories ~seed_scene workspace =
   let* doc = match opened with
     | Some doc -> Ok doc
     | None -> flow (Editor_document.Contexts.of_workspace ~factories ?gpu workspace) in
-  let declared = doc.scene.graph.geometry in
+  let declared = doc.scene in
   (* the host's camera and lights are defaults of a workspace with no scene graph; a scene
      graph is authoritative (it may say there are none) *)
   let has_scene = Editor_document.Contexts.graph_of workspace Flow.Context.scene <> None in
   let scene = if has_scene then declared else seed_scene declared in
-  let* graph = flow (Flow_sop.Network.with_geometry scene doc.scene.graph) in
-  let doc = { doc with scene = { doc.scene with graph };
+  let doc = { doc with scene;
     active_camera = if has_scene then doc.active_camera else List.nth_opt (Objects.ids "camera" scene) 0 } in
   Ok doc
 
@@ -49,16 +48,16 @@ let browse value query =
   Some (Browsing { query; presets = Preset.list ~directory:value.presets; last_state })
 
 let create ?gpu ?settings
-    ?(seed_scene = fun _ scene -> scene)
+    ?(seed_scene = fun scene -> scene)
     ?(name = "sketch") ?presets ?(state_key = name) ?(factories = [])
     ?(seed = 0L) ?(grain = 16_384)
     ?domains ?(max_entries = 512)
-    ?(max_payload_bytes = 256 * 1024 * 1024) ?await ?(carry_budget = 0.5)
+    ?(max_payload_bytes = 256 * 1024 * 1024) ?await ?(carry_budget = 0.5) ?(clock = Unix.gettimeofday)
     ?preferences ?(ui_text_size = default_text_size) ?ui_font ?opened ~workspace ~prepare () =
   let factories = if factories = [] then Sop.Nodes.factories else factories in
   let settings = Option.value settings ~default:workspace.Workspace_doc.settings in
   let gpu = Option.value ~default:Flow_ir.Gpu.default gpu in
-  let opened = workspace_doc ~gpu ?opened ~factories ~seed_scene:(seed_scene factories)
+  let opened = workspace_doc ~gpu ?opened ~factories ~seed_scene
       { workspace with Workspace_doc.settings } in
   Result.bind opened (fun doc ->
   Result.map (fun cook ->
@@ -98,7 +97,7 @@ let create ?gpu ?settings
         graph_at = None; graph_pane = None; graph_panes = [];
         list_at = None; text_at = None; outline_at = None; locals = [];
         started = { on = None; views = []; tabs = [] };
-        framing = None; carry = None; carry_budget; traces = []; view_tools = None; gates = []; selected_box = None;
+        framing = None; carry = None; carry_budget; clock; traces = []; view_tools = None; gates = []; selected_box = None;
         file = (doc.Document.workspace.ws).checked.name ^ ".rays" } in
       Cook.set_volatile cook (Flow_sop.Lower.is_volatile (doc.workspace.lowered));
       (* the panels open as their start keywords say; the first graph pane (the focused leaf, else

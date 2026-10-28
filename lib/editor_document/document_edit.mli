@@ -1,17 +1,7 @@
 (** The document reducers: every edit of a {!Document.t} is rewritten, checked and lowered
     atomically, or refused and changes nothing. *)
 
-val update_geometry :
-  (Sop.Edit_graph.t -> (Sop.Edit_graph.t, string) result) ->
-  Flow_sop.Network.t -> (Flow_sop.Network.t, string) result
-
 val cook_effects : Param.effects
-
-val apply_parameters :
-  Flow_sop.Network.t -> node_id:int -> (string * Param.value) list ->
-  (Flow_sop.Network.t * Param.effects, string) result
-
-val relabel : Flow_sop.Network.t -> node_id:int -> string -> (Flow_sop.Network.t, string) result
 
 val syntax_edit_result :
   factories:Sop.Edit_graph.factory list -> Document.t -> Flow_graph.Flow_edit.op ->

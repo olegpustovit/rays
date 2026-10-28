@@ -18,10 +18,10 @@ let workspace = match Rays_editor.Workspace.load ~imports text with
   | Ok w -> w | Error ds -> failwith (String.concat "\n" (List.map Diagnostic.to_string ds))
 let document = Contexts.of_workspace ~factories:Sop.Nodes.factories workspace
   |> Result.map_error Diagnostic.to_string |> get
-let scene = document.scene.graph.geometry
+let scene = document.scene
 let camera_node = match Objects.ids "camera" scene with
   | [] -> prerr_endline (path ^ ": the scene has no camera to render through (add a scene/camera)"); exit 1
-  | id :: _ -> Edit_graph.find scene ~node_id:id |> Option.get
+  | id :: _ -> Kind_graph.find scene id |> Option.get
 let camera = Objects.Camera.of_node camera_node |> Option.get |> fst
 let settings = Objects.Root.render document.root
 let spp = match options with value :: _ -> int_of_string value | [] -> settings.max_spp
@@ -41,7 +41,7 @@ let init _ =
   let placed = ref [] and first = ref None in
   Fun.protect ~finally:(fun () -> Session.close session) (fun () ->
     List.iter (fun id ->
-      let object_node = Edit_graph.find scene ~node_id:id |> Option.get in
+      let object_node = Kind_graph.find scene id |> Option.get in
       if Objects.visible object_node && Objects.flag "render" object_node then begin
         let network = Document.Int_map.find id document.networks in
         let resolved = Flow_sop.Value_lane.resolve (Flow_sop.Value_lane.create ())
@@ -50,7 +50,7 @@ let init _ =
             ~node_id:(Option.get network.displayed) |> get in
         let cooked = Session.cook session ~context:(Context.create ~domains:1 ~grain:2 () |> get) node
             |> Result.map_error Diagnostic.error_to_string |> get in
-        Printf.printf "%s: %d primitives, %d points\n%!" (Node.label object_node)
+        Printf.printf "%s: %d primitives, %d points\n%!" object_node.label
           (Rdk.Geometry.primitive_count (Result.get_ok (Sop.Payload.geometry cooked.payload))) (Rdk.Geometry.point_count (Result.get_ok (Sop.Payload.geometry cooked.payload)));
         let geometry = Sop.Payload.geometry cooked.payload
             |> Result.map_error Diagnostic.error_to_string |> get in
@@ -82,12 +82,12 @@ let init _ =
        lights = List.map P.light_of (Objects.lights ~render:true scene)} |> get in
   P.replace_mesh tracer mesh |> get;
   List.iter (fun id ->
-    let node = Edit_graph.find scene ~node_id:id |> Option.get in
-    match Document.Int_map.find_opt id document.networks with
+    let node = Kind_graph.find scene id |> Option.get in
+    match Document.layers document id with
     | None -> ()
-    | Some network -> Option.iter (fun world ->
+    | Some layers -> Option.iter (fun world ->
         P.set_world tracer (Some (World.bake ~domains:1 ~width:512 ~height:256 world)) |> get)
-        (Layers.to_world node network)) (Objects.ids "world" scene);
+        (Layers.to_world node layers)) (Objects.ids "world" scene);
   P.reset tracer;
   {tracer; canvas = (if benchmark then None else Some (Canvas.create_exn ~width ~height));
    setup_seconds = Unix.gettimeofday () -. started}

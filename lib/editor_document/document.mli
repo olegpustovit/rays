@@ -34,7 +34,7 @@ type preview_source = {
   scene_ref : Flow.Syntax.t option;
   instance : Flow.Eval.value;
 }
-type view_world = { node : Sop.Node.t; layers : network; }
+type view_world = { node : Kind_graph.node; layers : Kind_graph.t; }
 type view_root = {
   params : Objects.Root.parameters;
   camera : Rays.Camera.t option;
@@ -65,8 +65,9 @@ type workspace = {
   catalog : (Flow.Check.catalog, Diagnostic.t) result lazy_t;
 }
 type t = {
-  scene : network;
-  networks : network Int_map.t;
+  scene : Kind_graph.t;  (** the objects; an object's input is its parent *)
+  networks : network Int_map.t;  (** by geometry object id *)
+  layers : Kind_graph.t Int_map.t;  (** by World id: its layers, each on the one below *)
   active_camera : int option;
   root : Objects.Root.parameters;
   settings : Settings.t;
@@ -80,15 +81,22 @@ type t = {
   workspace : workspace;
 }
 type level = Scene | Inside of int
-val network : t -> level -> network option
-val with_network : t -> level -> network -> t
-val displayed_of :
-  ?previous:int -> Flow_sop.Network.t -> int option -> int option
+val network : t -> int -> network option
+(** A geometry object's SOP network. *)
+
+val layers : t -> int -> Kind_graph.t option
+(** The World's layers. *)
+
+val with_layers : t -> int -> Kind_graph.t -> t
+val kinds : t -> level -> Kind_graph.t option
+(** The objects of the scene, or the layers inside the World; none inside a geometry object. *)
+
+val with_kinds : t -> level -> Kind_graph.t -> t
 val resolve_level : t -> level -> level
 val validate : t -> (unit, string) result
 val prune : t -> t
 val object_graph : t -> int -> string option
-val scene_graph : t -> Sop.Edit_graph.t
+val scene_graph : t -> Kind_graph.t
 val object_network : t -> int -> (Flow_sop.Network.t * int option) option
 val dump : t -> string
 val syntax_of : Flow.Syntax.t list -> home -> Flow.Syntax.t option

@@ -286,7 +286,7 @@ let draw_handles ~(value : _ t) ~workspace ~selection ~selected ~lowered_level ~
      graph pane write its arguments, the list's rows of a geometry object have none *)
   let scope_target = if scope_active then scope_node value else None in
   let handle_target = match scope_target with
-    | Some (_, node) -> Some node
+    | Some (_, node) -> Some (of_sop node)
     | None -> if lowered_level then None else selected in
   let handle_edits, grab, picked = match active with
     | Some leaf when visible workspace leaf.Pxui_shell.Layout.panel ->
@@ -308,7 +308,7 @@ let draw_handles ~(value : _ t) ~workspace ~selection ~selected ~lowered_level ~
               match List.assoc_opt f.name handle_edits with
               | Some current -> { f with current } | None -> f) p.fields) }))
           else None) parameters, None
-    | _, Some node, _ :: _ -> [], Some (Node.id node, handle_edits)
+    | _, Some node, _ :: _ -> [], Some (node.id, handle_edits)
     | _ -> [], None in
   selection, grab, handle_ops, handle_changes
 
@@ -397,14 +397,14 @@ let carry_lit, carry_hot = match value.carry with
 let list_rows ~(value : _ t) ~listing ~list_drawn ~pane_of ~list_hosts =
 (* the rows of a level's list, made once per network and kept while a list shows them *)
 let rows_of sets pane =
-  let network = network pane in
-  let key = network.displayed, pane.doc.Document.active_camera in
-  let same (source, k, _) = source == network.graph && k = key in
+  let source, made = rows pane in
+  let key = displayed pane, pane.doc.Document.active_camera in
+  let same (s, k, _) = same_source s source && k = key in
   match List.find_opt same sets with
   | Some (_, _, rows) -> sets, rows
   | None ->
       let entry = match List.find_opt same value.rows with
-        | Some entry -> entry | None -> network.graph, key, rows pane network in
+        | Some entry -> entry | None -> source, key, Lazy.force made in
       let _, _, rows = entry in entry :: sets, rows in
 let row_sets, (rows, columns) = if listing || list_drawn then rows_of [] value else [], ([||], []) in
 (* the rows of every list that draws, by panel key: made here, before the frame builds *)
@@ -644,11 +644,10 @@ let update_frame ?gpu ?pump ~image ~host_events ~carry_changed value ~all_ui_vis
     | Leader.Open_camera -> Pxui_graph.Scope.clear_selection view, changes
     | _ -> view, changes) (value.scope_view, []) actions in
   let menu, command_changes = node_menu ~value ~workspace ~frame ~actions ~graph_shown in
-  let document = document value in
   let displayed = match value.level with
     | Inside id -> (match Document.Int_map.find_opt id value.viewed with
-      | Some (_, displayed) -> Some displayed | None -> (network value).displayed)
-    | Scene -> (network value).displayed in
+      | Some (_, displayed) -> Some displayed | None -> displayed value)
+    | Scene -> displayed value in
   let row_sets, rows, columns, host_rows = list_rows ~value ~listing ~list_drawn ~pane_of ~list_hosts:(hosted `List) in
   let selected () = Selection.selected_nodes selection
     |> List.sort (fun a b -> if Some a = Selection.selected selection then -1
@@ -775,7 +774,7 @@ let update_frame ?gpu ?pump ~image ~host_events ~carry_changed value ~all_ui_vis
     let selected_id = match selected_ids with
       | [_] -> Selection.selected selection | _ -> None in
     let selected = Option.bind selected_id
-        (fun node_id -> Edit_graph.find document ~node_id) in
+        (fun id -> Option.map of_object (Kind_graph.find (objects value) id)) in
     let unchanged = value.doc.settings in
     let lowered_level = match value.level with
       | Document.Inside id -> kind value id = Some "geometry" | Scene -> false in
@@ -808,7 +807,7 @@ let update_frame ?gpu ?pump ~image ~host_events ~carry_changed value ~all_ui_vis
     let workspace, drag_changes = settle_layout ~value ~vw ~workspace ~frame ~keymap ~shortcut_frame ~g ~intents
       ~strip_layout ~timeline_leaves:(of_kind Timeline) ui in
     let changes = changes @ drag_changes in
-    { workspace; focus; focus_path; pane_keys; outline; outline_intents; selection; menu; menu_pick; scope_view; scope_changes; tree; document = (network value).graph;
+    { workspace; focus; focus_path; pane_keys; outline; outline_intents; selection; menu; menu_pick; scope_view; scope_changes; tree; document = objects value;
       edit_error = value.edit_error;
       effects = Param.no_effects;
       timeline_intents; frame_request = initial_frame_request; prompt = None; prompt_intent = None;
@@ -826,7 +825,7 @@ let update_frame ?gpu ?pump ~image ~host_events ~carry_changed value ~all_ui_vis
      (Enter), and deletes (Delete twice). A load replaces the document below
      as one undo entry. *)
   let initial_prompt = List.fold_left (fun prompt -> function
-    | Leader.Save_preset -> Some (Saving (Preset.default_name ()))
+    | Leader.Save_preset -> Some (Saving (Preset.default_name ~now:(value.clock ())))
     | Browse_presets ->
         browse value ""
     | Guide_keys -> Some Keys
@@ -847,7 +846,7 @@ let update_frame ?gpu ?pump ~image ~host_events ~carry_changed value ~all_ui_vis
         { result with prompt; prompt_intent }) else None) with
     | Some result -> result
     | None ->
-      { workspace; focus; focus_path; pane_keys = []; graph_panes = value.graph_panes; locals = value.locals; other_texts = []; outline = value.outline; outline_intents = []; selection; menu; menu_pick = None; scope_view; scope_changes = scope_command_changes; tree; document = (network value).graph;
+      { workspace; focus; focus_path; pane_keys = []; graph_panes = value.graph_panes; locals = value.locals; other_texts = []; outline = value.outline; outline_intents = []; selection; menu; menu_pick = None; scope_view; scope_changes = scope_command_changes; tree; document = objects value;
         edit_error = value.edit_error;
         effects = Param.no_effects; timeline_intents = [];
         frame_request = initial_frame_request; prompt = initial_prompt;
@@ -860,7 +859,7 @@ let update_frame ?gpu ?pump ~image ~host_events ~carry_changed value ~all_ui_vis
   reduce ?gpu ?pump ~carry_changed ~all_ui_visible ~view_state ~carrying ~held_keys ~leader ~frame ~hud ~actions ~guide ~copied ~steady ~status_fps ~status_fps_at ~timeline ~timeline_changes ~graph_shown ~text ~text_shown ~row_sets ~rows value result
 let update ?gpu ?(image=fun _->None) ?(host_events=[]) ?pump value ~all_ui_visible ~text_focus ~camera_panel ~view_handles ~render_status
     ~error_status ~view_state (frame : Frame.t) =
-  let update, phases = Flow.Phase_timer.sample ~clock:Unix.gettimeofday (fun () ->
+  let update, phases = Flow.Phase_timer.sample ~clock:value.clock (fun () ->
   let value, frame, carry_changed = carry_step value ~text_focus frame in
   update_frame ?gpu ?pump ~image ~host_events ~carry_changed value ~all_ui_visible ~text_focus ~camera_panel ~view_handles
     ~render_status ~error_status ~view_state frame) in

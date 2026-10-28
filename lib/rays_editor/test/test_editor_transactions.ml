@@ -44,9 +44,9 @@ let run () =
     let node n = List.find (fun (info : Edit_graph.node_info) ->
         List.exists (fun (field : Param.field_view) -> field.name = "value"
           && field.current = Param.Int_value n) (Node.parameter_fields info.node))
-      (Edit_graph.inspect (E.document !current)) in
+      (Edit_graph.inspect (Option.get (E.network !current))) in
     let first = (node 0).id and second = (node 1).id in
-    let value id = Edit_graph.find (E.document !current) ~node_id:id |> Option.get
+    let value id = Edit_graph.find (Option.get (E.network !current)) ~node_id:id |> Option.get
       |> Node.parameter_fields |> List.find (fun (field : Param.field_view) -> field.name = "value")
       |> fun field -> field.current in
     let text () = Editor_document.Workspace_doc.to_text (E.workspace !current) in

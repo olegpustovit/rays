@@ -2,8 +2,8 @@
 
     Their Lisp spellings are generated from the schemas that exist:
     [scene/geometry], [scene/light] and [scene/camera] from the object
-    factories, [world/gradient], [world/sky], [world/sun],
-    [world/shape], [world/scatter], [world/room] from the World factories and
+    schemas, [world/gradient], [world/sky], [world/sun],
+    [world/shape], [world/scatter], [world/room] from the World schemas and
     [settings/config] from the workspace settings record.  A keyword is a
     schema field; three consecutive [_x _y _z] or [_r _g _b] floats are one
     vec3 or colour ([:translate [0 1 0]], [:color "#3b7d4e"]), and [:name] is
@@ -50,8 +50,8 @@ val of_workspace : factories:Sop.Edit_graph.factory list -> ?gpu:Flow_ir.Gpu.con
     and editor structs are refused with [E_CONTEXT_TIME], naming the graph and
     field. Geometry references with live SOP parameters are supported. *)
 
-val resolve_scene : ?previous:Sop.Edit_graph.t -> ?state:Flow.Eval.state -> ?live:Input.t -> Document.t -> time:float ->
-  Sop.Edit_graph.t * Diagnostic.t list
+val resolve_scene : ?previous:Kind_graph.t -> ?state:Flow.Eval.state -> ?live:Input.t -> Document.t -> time:float ->
+  Kind_graph.t * Diagnostic.t list
 (** Resolve recorded live light intensity/color fields for composition, without
     changing source, networks, identities or history. A failed light retains
     its previous value (or the authored zero-time value without [previous]);

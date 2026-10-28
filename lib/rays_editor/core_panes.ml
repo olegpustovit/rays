@@ -145,8 +145,8 @@ let graph_name value = match value.doc.Document.workspace.ws with
        | _, Document.Inside id when kind value id = Some "geometry" ->
            (match graph_of_object value id with
             | Some _ as name -> name
-            | None -> Option.bind (Edit_graph.find (scene value) ~node_id:id) (fun node ->
-                let name = Node.label node in if exists name then Some name else None))
+            | None -> Option.bind (Kind_graph.find (scene value) id) (fun (node : Kind_graph.node) ->
+                let name = node.label in if exists name then Some name else None))
        | _, Inside id when kind value id = Some "world" ->
            List.find_map (fun (g : Flow.Workspace.graph) ->
              if g.context = Flow.Context.world then Some g.name else None) ws.checked.graphs

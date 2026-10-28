@@ -77,13 +77,14 @@ One gesture is one undo entry (`Core.Syntax_batch`: all the rewrites or none).
 | `Alt` `Up` / `Down` on a hovered merge input | `Move_item`: the input swaps with its neighbour, so the merge order (the list order) changes. Lists and strings move the same way (`Projection.reorderable`) |
 | delete an object | the object and its merge input; its SOP or world graph goes in the same undo entry when nothing else reads it (`(ref g)` or a `(ui/graph "g")` panel) |
 
-## Objects are nodes
+## Objects are plain data
 
-The scene is itself an `Edit_graph`: every object is a node, input 0 is its
-parent, and parameters hold its transform and kind settings. The graph view,
-the list, the inspector, translate handles, copy/paste/duplicate, presets,
-and undo therefore work on objects without a second code path. The scene
-network is presentation only and never cooks.
+Scene, World and settings kinds are not SOP nodes (cleanup decision 9): each is a typed `Param`
+schema with a descriptor (`Kind_graph.Kind`), and the scene is a `Kind_graph.t` of plain
+instances: an object's input is its parent, its values the transform and kind settings. A World's
+layers are a `Kind_graph.t` too, each on the layer below. Nothing here has a `Sop.Node`, a session
+or a cook; the list, the inspector, the handles, presets and undo read these values, and every
+edit of an object the text declares is written to the text.
 
 | Kind | Operation | Parameters | Network |
 |---|---|---|---|
@@ -92,11 +93,11 @@ network is presentation only and never cooks.
 | Camera | `camera` | eye, target, up, fov, near/far, follow viewport, aperture, focus distance (0: the target) | none; never parented |
 | World | `world` | background, rotation, exposure, time of day, day cycle, latitude, day of year, sun linking | its layer stack |
 
-The root is not a node of the scene network: its settings are `Document.root`. The Camera's render
+The root is not an object of the scene: its settings are `Document.root`. The Camera's render
 resolution and samples belong to the root.
 
-`Document.t` holds the scene network, one network per geometry object and
-per World (keyed by object id), the active camera object, the root's render
+`Document.t` holds the scene's objects, one SOP network per geometry object
+and the layers of each World (keyed by object id), the active camera object, the root's render
 settings, and the sketch `Settings`. History snapshots it; the open level, selection, projection
 (graph, list, or text), and the map view are view state. A deleted object's
 network goes with it; a pasted object copies its source's network.

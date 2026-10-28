@@ -58,19 +58,11 @@ let find_graph (doc : Document.t) name =
   List.find_opt (fun (g : W.graph) -> g.name = name) (doc.workspace.ws).checked.graphs
 
 (* the lowered SOP graph a geometry object instantiates, by its network *)
-let graph_of_object (doc : Document.t) id =
-  let lowered = doc.workspace.lowered in
-  Option.bind (Document.Int_map.find_opt id doc.networks) (fun (n : Document.network) ->
-    List.find_map (fun (g : Flow_sop.Lower.graph) ->
-      if g.network == n.graph || (match g.root, Edit_graph.root n.graph.geometry with
-        | Some a, Some b -> a = b | _ -> false)
-      then Some g.name else None) lowered.graphs)
+let graph_of_object = Document.object_graph
 
 let geometry_objects (doc : Document.t) =
-  let scene = Document.scene_graph doc in
-  List.filter_map (fun id ->
-    Option.map (fun node -> id, Node.label node) (Edit_graph.find scene ~node_id:id))
-    (Objects.ids "geometry" scene)
+  List.filter_map (fun (node : Kind_graph.node) ->
+    if node.kind = "geometry" then Some (node.id, node.label) else None) (Document.scene_graph doc)
 
 
 let readers doc graph =

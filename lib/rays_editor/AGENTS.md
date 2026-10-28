@@ -128,8 +128,8 @@ capacities (64 converted meshes, 16 tracers, 64 panel states, 1 catalog).
   `Syntax_edit`; test it in `test/test_workspace_edit.ml` and through the editor.
 - **A pane request**: a field of `frame_result`, set where `build` returns, read in `reduce`.
 - **A reducer test**: `Rays_editor.Reduce.step` runs `reduce` with no UI frame.
-- **A panel kind**: a `Flow.Workspace` op, a case in `Contexts.panel_tree`, a `Panels.panel`, a
-  root in `build`.
+- **A panel kind**: a `Flow.Workspace` op, a case in `Shell_eval.panel_tree` and in
+  `Editor_document.Panel_kinds`, a `Panels.panel`, a root in `build`.
 - **Sketch state**: a `Param` schema passed as `~settings`; never a global ref.
 
 Check with `dune build @lib/editor_core/runtest @lib/pxui_shell/runtest`, then the editor tests

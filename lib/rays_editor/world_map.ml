@@ -48,9 +48,9 @@ let world_operation core area point ~shift =
   | Some world when core.Core_model.map_view && map_uv area point <> None ->
       (match Core_list.selected_node core with
        | Some node when List.exists (fun (field : Param.field_view) ->
-           field.name = "azimuth") (Node.parameter_fields node) ->
-           Some (Move_layer (world, Node.id node))
-       | Some node when Node.operation node = "sun" -> Some (Move_sun world)
+           field.name = "azimuth") node.Core_model.fields ->
+           Some (Move_layer (world, node.id))
+       | Some node when node.kind = "sun" -> Some (Move_sun world)
        | _ -> None)
   | Some world when not core.Core_model.map_view && shift -> Some (Rotate_world world)
   | _ -> None
@@ -59,11 +59,9 @@ let move_world core drag point =
   if point = drag.point then core else
   match drag.operation with
   | Rotate_world world ->
-      (match Option.bind (Edit_graph.find (Core_inspect.scene core) ~node_id:world)
-          (fun node -> List.find_map (fun (field : Param.field_view) ->
-            match field.name, field.current with
-            | "rotation", Param.Float_value value -> Some value | _ -> None)
-            (Node.parameter_fields node)) with
+      (match Option.bind (Kind_graph.find (Core_inspect.scene core) world)
+          (fun node -> match Kind_graph.field node "rotation" with
+            | Some (Param.Float_value value) -> Some value | _ -> None) with
        | Some rotation ->
            let rotation = wrap_degrees (rotation +. 0.5 *. (fst point -. fst drag.point)) in
            Core_host.edit_node core Document.Scene world ~label:"Rotate World"

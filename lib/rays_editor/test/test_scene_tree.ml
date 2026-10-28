@@ -15,6 +15,7 @@ let frame ?(mouse = 450, 320) ?(events = []) ?(keys = []) ?(buttons = []) count 
 }
 
 module E = Rays_editor.Editor
+module KG = Editor_document.Kind_graph
 
 (* geo1 (one box), two lights, a camera, a World of sky, softbox and constellation *)
 let text = {|(workspace scene_tree
@@ -40,11 +41,11 @@ let contains text piece =
 let source env = Rays_editor.Workspace_doc.to_text (E.workspace env)
 let labelled env =
   let graph = E.scene_document env in
-  List.sort compare (List.map (fun (info : Edit_graph.node_info) ->
-    info.label, info.operation,
-    Option.bind (if Array.length info.inputs > 0 then info.inputs.(0) else None) (fun id -> Option.map Node.label (Edit_graph.find graph ~node_id:id)),
-    List.map (fun (f : Param.field_view) -> f.name, f.current) (Node.parameter_fields info.node))
-    (Edit_graph.inspect graph))
+  List.sort compare (List.map (fun (info : KG.node) ->
+    info.label, info.kind,
+    Option.bind info.input (fun id -> Option.map (fun (n : KG.node) -> n.label) (KG.find graph id)),
+    List.map (fun (f : Param.field_view) -> f.name, f.current) (KG.fields info))
+    graph)
 
 let run () =
   let cooks = Atomic.make 0 in
@@ -71,19 +72,19 @@ let run () =
   let env = step ~mouse:in_list env
       [Input.Pointer_pressed (Input.LeftButton, (float (fst in_list), float (snd in_list)));
        Input.Pointer_released (Input.LeftButton, (float (fst in_list), float (snd in_list)))] in
-  let label env = Option.map Node.label (E.selected_node env) in
+  let label env = Option.map (fun (p : E.picked) -> p.label) (E.selected_node env) in
   let env = step env [key Input.Home] in
-  let first = Option.map Node.id (E.selected_node env) in
+  let first = Option.map (fun (p : E.picked) -> p.id) (E.selected_node env) in
   let env = step env [key Input.ArrowDown] in
-  check (Option.map Node.id (E.selected_node env) <> first)
+  check (Option.map (fun (p : E.picked) -> p.id) (E.selected_node env) <> first)
     "the list's down arrow did not move to the next row";
   let env = step env [key Input.ArrowUp] in
-  check (Option.map Node.id (E.selected_node env) = first)
+  check (Option.map (fun (p : E.picked) -> p.id) (E.selected_node env) = first)
     "the list's up arrow did not return to the previous row";
   let rec select name env tries =
     if label env = Some name then env
     else if tries = 0 then fail ("no list row named " ^ name ^ " among "
-      ^ String.concat "," (List.map (fun (i : Edit_graph.node_info) -> i.label) (Edit_graph.inspect (E.document env)))
+      ^ String.concat "," (List.map (fun (i : KG.node) -> i.label) (E.document env))
       ^ " at level " ^ Option.value ~default:"scene" (E.level env))
     else select name (step env [key Input.ArrowDown]) (tries - 1) in
   let env = select "camera1" env 6 in
@@ -99,8 +100,9 @@ let run () =
   check (E.level env = None) "the editor did not open at the scene level";
   let env = step env [char 'i'] in
   check (E.level env = Some "geo1") "i did not enter the focused geometry object";
-  check (E.document env |> Edit_graph.inspect |> List.exists (fun (info : Edit_graph.node_info) ->
-      info.operation = "box")) "geo1's network is not the sketch's SOP graph";
+  check (Option.fold ~none:false ~some:(fun network -> Edit_graph.inspect network |> List.exists
+      (fun (info : Edit_graph.node_info) -> info.operation = "box")) (E.network env))
+    "geo1's network is not the sketch's SOP graph";
   let env = step env [key (Input.KeyChar '/'); char 'l'; char 'l'] in
   let env = step env [] in
   let projection env =
@@ -130,7 +132,7 @@ let run () =
   let row_y index = gy + 24 + (24 * index) + 12 in
   let rec row_of name index env =
     if index > 5 then fail (name ^ " row not found among "
-      ^ String.concat "," (List.map (fun (i : Edit_graph.node_info) -> i.label) (Edit_graph.inspect (E.document env)))
+      ^ String.concat "," (List.map (fun (i : KG.node) -> i.label) (E.document env))
       ^ " at level " ^ Option.value ~default:"scene" (E.level env)) else
     let point = gx + 60, row_y index in
     let click = [Input.Pointer_pressed (Input.LeftButton, (float (fst point), float (snd point)));
@@ -150,9 +152,9 @@ let run () =
   let before = position env in
   let env = select "key" env 6 in
   let env = step ~keys:[] env [key Input.Tab] in
-  let parent env = Edit_graph.inspect (E.scene_document env)
-    |> List.find (fun (info : Edit_graph.node_info) -> info.label = "key")
-    |> fun info -> info.inputs.(0) in
+  let parent env = E.scene_document env
+    |> List.find (fun (info : KG.node) -> info.label = "key")
+    |> fun info -> info.input in
   check (parent env <> None) "Tab did not reparent the light under the row above";
   check (contains (source env) ":parent \"geo1\"") "Tab did not write the parent to the text";
   check (E.undo_label env = Some "Reparent") "reparenting is not one 'Reparent' entry";
@@ -202,7 +204,7 @@ let run () =
   let translate_x env = Option.bind (E.selected_node env) (fun node ->
       List.find_map (fun (field : Param.field_view) ->
         if field.name = "translate_x" then Some field.current else None)
-        (Node.parameter_fields node)) in
+        node.E.fields) in
   let before = translate_x env in
   let env = step ~mouse:(slider 0) ~buttons:[Input.LeftButton] env
       [Input.Pointer_pressed (Input.LeftButton, at (slider 0))] in
@@ -228,14 +230,14 @@ let run () =
       [Input.Pointer_pressed (Input.LeftButton, (float (fst in_list), float (snd in_list)));
        Input.Pointer_released (Input.LeftButton, (float (fst in_list), float (snd in_list)))] in
   let env = select "softbox" env 16 in
-  let selected = E.selected_node env |> Option.get |> Node.id in
+  let selected = (E.selected_node env |> Option.get).id in
   let parameters env id =
-    Edit_graph.find (E.document env) ~node_id:id |> Option.get |> Node.parameter_fields
+    KG.find (E.document env) id |> Option.get |> KG.fields
     |> List.map (fun (field : Param.field_view) -> field.name, field.current) in
   let original = parameters env selected in
-  let others = Edit_graph.inspect (E.document env)
-    |> List.filter (fun (info : Edit_graph.node_info) -> info.id <> selected)
-    |> List.map (fun (info : Edit_graph.node_info) -> info.id, parameters env info.id) in
+  let others = E.document env
+    |> List.filter (fun (info : KG.node) -> info.id <> selected)
+    |> List.map (fun (info : KG.node) -> info.id, parameters env info.id) in
   let press = 100., 300. and release = 800., 1000. in
   let camera = E.camera env in
   let env = step ~mouse:(100, 300) ~buttons:[Input.LeftButton] env
@@ -268,32 +270,30 @@ let run () =
     "t did not promote the selected shape to a light";
   check (contains (source env) ":emit \"Light\"") "World t did not write the emitter to the text";
   let env = select "constellation" env 16 in
-  let scatter = E.selected_node env |> Option.get |> Node.id in
+  let scatter = (E.selected_node env |> Option.get).id in
   let seed env = List.assoc "seed" (parameters env scatter) in
   let before = seed env in
   let env = step env [char 'n'] in
   check (match before, seed env with Int_value a, Int_value b -> b=a+1 | _ -> false)
     "World n did not reseed the selected scatter layer";
   let env = step env [char 'd'] in
-  let day_cycle env = List.find_map (fun (info : Edit_graph.node_info) ->
-    if info.operation <> "world" then None else List.find_map (fun (field : Param.field_view) ->
-      if field.name = "day_cycle" then Some field.current else None)
-      (Node.parameter_fields info.node)) (Edit_graph.inspect (E.scene_document env)) |> Option.get in
+  let day_cycle env = List.find_map (fun (info : KG.node) ->
+    if info.kind <> "world" then None else KG.field info "day_cycle") (E.scene_document env) |> Option.get in
   check (day_cycle env = Float_value 1.) "World d did not start its day cycle";
   check (contains (source env) ":day_cycle 1.0" && contains (source env) ":seed") "World n and d did not reach the text";
-  let hours env = List.find_map (fun (info : Edit_graph.node_info) ->
-      if info.operation <> "world" then None
+  let hours env = List.find_map (fun (info : KG.node) ->
+      if info.kind <> "world" then None
       else List.find_map (fun (field : Param.field_view) ->
         match field.name, field.current with
         | "time_of_day", Param.Float_value hours -> Some hours
-        | _ -> None) (Node.parameter_fields info.node))
-      (Edit_graph.inspect (E.scene_document env)) |> Option.get in
+        | _ -> None) (KG.fields info))
+      (E.scene_document env) |> Option.get in
   let before = hours env in
   let env = step env [char ']'] in
   check (Float.abs (hours env -. before -. 0.5) < 1e-9) "] did not step the time of day";
   let env = step env [char '3'] in
-  check (List.exists (fun (info : Edit_graph.node_info) -> info.operation = "room")
-      (Edit_graph.inspect (E.document env))) "3 did not load the white room preset";
+  check (List.exists (fun (info : KG.node) -> info.kind = "room")
+      (E.document env)) "3 did not load the white room preset";
   check (contains (source env) "world/room" && E.undo_label env = Some "Preset white room")
     "the white room preset did not replace the World graph in the text";
   let env = step env [char 'u'] in
@@ -380,14 +380,14 @@ let run_host () =
   let count = ref 0 in
   let step ?keys env events = incr count; E.update env (frame ?keys ~events !count) in
   let key k = Input.Key_pressed k in
-  let names env = List.sort compare (List.map (fun (i : Edit_graph.node_info) -> i.label)
-    (Edit_graph.inspect (E.scene_document env))) in
+  let names env = List.sort compare (List.map (fun (i : KG.node) -> i.label)
+    (E.scene_document env)) in
   let delete env name =
     let gx, gy, _, _ = (E.panes env (frame 0)).graph in
     let at = float (gx + 40), float (gy + 400) in
     let env = step env [ Input.Pointer_pressed (Input.LeftButton, at); Input.Pointer_released (Input.LeftButton, at) ] in
     let rec select env tries =
-      if Option.map Node.label (E.selected_node env) = Some name then env
+      if Option.map (fun (p : E.picked) -> p.label) (E.selected_node env) = Some name then env
       else if tries = 0 then fail ("no list row named " ^ name ^ " among " ^ String.concat "," (names env))
       else select (step env [ key Input.ArrowDown ]) (tries - 1) in
     step (select (step env [ key Input.Home ]) 8) [ key Input.Delete ] in

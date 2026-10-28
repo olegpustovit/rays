@@ -18,8 +18,8 @@ type 'prepared t = {
   rendered : V.rendered option;
   views : (string * V.rendered) list;  (* viewports over another scene instance *)
   drawn : (Node.t * 'prepared * V.rendered * Texture.t option) Document.Int_map.t;  (* per object *)
-  composed : (Edit_graph.t * Document.level * (string * int list) list) option;
-  resolved : (Document.t * Input.t * Edit_graph.t) option;
+  composed : (Kind_graph.t * Document.level * (string * int list) list) option;
+  resolved : (Document.t * Input.t * Kind_graph.t) option;
   context_error : string option;
   (* The scene, open level (ghosts), and viewport membership used by the picture. *)
   baked : World.baked option;
@@ -50,14 +50,9 @@ type 'prepared t = {
 (* Scene objects a sketch starts with: its lights as light objects. *)
 let seed_lights lights scene =
   List.fold_left (fun (scene, index) light ->
-    let added = Result.bind (Edit_graph.instantiate_optional Objects.Light.factory [None])
-        (fun node ->
-          let node = Node.relabel (Printf.sprintf "light%d" index) node in
-          Result.bind (Edit_graph.add_node ~factory:Objects.Light.factory
-              ~inputs:[|None|] node scene) (fun scene ->
-            Result.map fst (Edit_graph.apply_parameters scene ~node_id:(Node.id node)
-              (Objects.light_values light)))) in
-    (match added with Ok scene -> scene | Error _ -> scene), index + 1)
+    let light = Kind_graph.apply (Kind_graph.instance ~label:(Printf.sprintf "light%d" index)
+        Objects.Light.kind) (Objects.light_values light) in
+    (match light with Ok (node, _) -> Kind_graph.add scene node | Error _ -> scene), index + 1)
     (scene, 1) lights |> fst
 
 let create ?inputs ?name ?presets ?factories ?gpu_owner
@@ -80,8 +75,7 @@ let create ?inputs ?name ?presets ?factories ?gpu_owner
   let host=Flow_native.Workspace_host.create ?seed ?grain ?domains ?gpu:gpu_owner () in
   let gpu=Flow_native.Workspace_gpu.config host.gpu in
   let created=Core_setup.create ~gpu ?settings
-      ~seed_scene:(fun factories scene ->
-        V.seed_scene camera factories (seed_lights lights scene))
+      ~seed_scene:(fun scene -> V.seed_scene camera (seed_lights lights scene))
       ~name ~state_key ?presets ?factories ?seed ?grain ?domains
       ?max_entries ?max_payload_bytes ?await ?carry_budget ?preferences ?ui_text_size ?ui_font ?opened ~workspace ~prepare () in
   match created with
@@ -98,7 +92,8 @@ let create ?inputs ?name ?presets ?factories ?gpu_owner
       background; extra; hidden_scene_cache = None; world_drag = None; pick_press = None; source; held = None; open_dialog = None; refused = None; opened = core.doc; state_owned = false; cameras = []; viewing = None;
       state_checked = neg_infinity; saved_doc = core.doc; saved_view = V.section camera extra; state_error = None })
 
-let document value = Core_inspect.document value.core
+let document value = Core_inspect.objects value.core
+let network value = Option.map (fun (n : Document.network) -> n.graph.geometry) (Core_inspect.network value.core)
 let prepared value = Core_list.prepared value.core
 let camera value = value.camera
 let extra value = value.extra
@@ -125,11 +120,11 @@ let carrying value = Option.map (fun (c : _ Core_model.carry) -> c.payload.Carry
 let carry_line value = Option.map Core_status.carry_line value.core.Core_model.carry
 let level value = match value.core.Core_model.level with
   | Document.Scene -> None
-  | Inside id -> Some (Option.fold ~none:"" ~some:Node.label
-      (Edit_graph.find (Core_inspect.scene value.core) ~node_id:id))
+  | Inside id -> Some (Option.fold ~none:"" ~some:(fun (node : Kind_graph.node) -> node.label)
+      (Kind_graph.find (Core_inspect.scene value.core) id))
 let scene_document value = Core_inspect.scene value.core
 let same_context (a : Document.t) (b : Document.t) =
-  a.scene.graph.geometry == b.scene.graph.geometry && a.scene_drives == b.scene_drives
+  a.scene == b.scene && a.scene_drives == b.scene_drives
     && a.scene_textures == b.scene_textures
 let resolved_scene value = match value.resolved with
   | Some (doc, _, scene) when same_context doc value.core.Core_model.doc -> scene

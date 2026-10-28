@@ -1,15 +1,10 @@
 open Rays
-open Sop
 
-(* The World: a scene-level node holding its global settings, entered like a
-   geometry object to edit its layer stack. Layers are nodes chained through
-   input 0 (the layer below), so the list, inspector, undo, and presets work
-   on them unchanged; [to_world] reads the chain into a [World.t]. Angles
-   are degrees in the inspector and radians in [World]. *)
-
-let marker operation ~label _ below =
-  Custom.plain ~label ~operation (Option.to_list below) (fun ~context:_ _ ->
-    Ok Objects.empty)
+(* The World: a scene object holding its global settings, entered like a geometry object to edit
+   its layer stack.  Layers are plain instances ([Kind_graph]) whose input is the layer below;
+   [to_world] reads the chain into a [World.t].  Angles are degrees in the inspector and radians
+   in [World]. *)
+module G = Kind_graph
 
 let emit_parameter = Param.choice ~equal:( = ) ["Dome", World.Dome; "Light", World.Light]
 
@@ -47,12 +42,10 @@ module Settings = struct
       [@sop.folder "Sun"] [@sop.min (-180.)] [@sop.max 180.];
     sun_elevation : float [@sop.default 35.] [@sop.label "Sun elevation (degrees)"]
       [@sop.folder "Sun"] [@sop.min (-10.)] [@sop.max 90.];
-  } [@@sop.node_key "world"] [@@sop.node_label "World"]
-    [@@sop.node_category "Object"] [@@sop.node_inputs 0]
-    [@@deriving sop_params, sop_node]
+  } [@@deriving sop_params]
 
-  let build = parameters_build (fun ~label _ -> marker "world" ~label () None)
-  let factory = parameters_factory build
+  let kind = Kind_graph.Kind.make ~key:"world" ~label:"World" ~category:[ "Object" ] parameters_schema
+
 end
 
 module Gradient = struct
@@ -78,12 +71,10 @@ module Gradient = struct
     sharpness : float [@sop.default 2.] [@sop.label "Sharpness"]
       [@sop.min 0.1] [@sop.max 10.] [@sop.hard_min 0.01];
     visible : bool [@sop.default true] [@sop.label "Visible"];
-  } [@@sop.node_key "gradient"] [@@sop.node_label "Gradient"]
-    [@@sop.node_category "Layer"] [@@sop.node_inputs 1]
-    [@@sop.node_optional "0"] [@@deriving sop_params, sop_node]
+  } [@@deriving sop_params]
 
-  let build = parameters_build (marker "gradient")
-  let factory = parameters_factory build
+  let kind = Kind_graph.Kind.make ~key:"gradient" ~label:"Gradient" ~category:[ "Layer" ] parameters_schema
+
 end
 
 module Sky = struct
@@ -93,12 +84,10 @@ module Sky = struct
     intensity : float [@sop.default 1.] [@sop.label "Intensity"]
       [@sop.min 0.] [@sop.max 10.] [@sop.hard_min 0.];
     visible : bool [@sop.default true] [@sop.label "Visible"];
-  } [@@sop.node_key "sky"] [@@sop.node_label "Sky"]
-    [@@sop.node_category "Layer"] [@@sop.node_inputs 1]
-    [@@sop.node_optional "0"] [@@deriving sop_params, sop_node]
+  } [@@deriving sop_params]
 
-  let build = parameters_build (marker "sky")
-  let factory = parameters_factory build
+  let kind = Kind_graph.Kind.make ~key:"sky" ~label:"Sky" ~category:[ "Layer" ] parameters_schema
+
 end
 
 module Sun = struct
@@ -114,12 +103,10 @@ module Sun = struct
     tint_b : float [@sop.default 0.88] [@sop.label "Blue"] [@sop.folder "Tint"]
       [@sop.min 0.] [@sop.max 1.] [@sop.hard_min 0.];
     visible : bool [@sop.default true] [@sop.label "Visible"];
-  } [@@sop.node_key "sun"] [@@sop.node_label "Sun"]
-    [@@sop.node_category "Layer"] [@@sop.node_inputs 1]
-    [@@sop.node_optional "0"] [@@deriving sop_params, sop_node]
+  } [@@deriving sop_params]
 
-  let build = parameters_build (marker "sun")
-  let factory = parameters_factory build
+  let kind = Kind_graph.Kind.make ~key:"sun" ~label:"Sun" ~category:[ "Layer" ] parameters_schema
+
 end
 
 module Shape = struct
@@ -150,12 +137,10 @@ module Shape = struct
     emit : World.emit [@sop.default World.Dome] [@sop.label "Emit as"]
       [@sop.kind emit_parameter];
     visible : bool [@sop.default true] [@sop.label "Visible"];
-  } [@@sop.node_key "shape"] [@@sop.node_label "Shape"]
-    [@@sop.node_category "Layer"] [@@sop.node_inputs 1]
-    [@@sop.node_optional "0"] [@@deriving sop_params, sop_node]
+  } [@@deriving sop_params]
 
-  let build = parameters_build (marker "shape")
-  let factory = parameters_factory build
+  let kind = Kind_graph.Kind.make ~key:"shape" ~label:"Shape" ~category:[ "Layer" ] parameters_schema
+
 end
 
 module Scatter = struct
@@ -188,12 +173,10 @@ module Scatter = struct
     emit : World.emit [@sop.default World.Dome] [@sop.label "Emit as"]
       [@sop.kind emit_parameter];
     visible : bool [@sop.default true] [@sop.label "Visible"];
-  } [@@sop.node_key "scatter"] [@@sop.node_label "Scatter"]
-    [@@sop.node_category "Layer"] [@@sop.node_inputs 1]
-    [@@sop.node_optional "0"] [@@deriving sop_params, sop_node]
+  } [@@deriving sop_params]
 
-  let build = parameters_build (marker "scatter")
-  let factory = parameters_factory build
+  let kind = Kind_graph.Kind.make ~key:"scatter" ~label:"Scatter" ~category:[ "Layer" ] parameters_schema
+
 end
 
 module Room = struct
@@ -221,16 +204,13 @@ module Room = struct
     emit : World.emit [@sop.default World.Dome] [@sop.label "Panels emit as"]
       [@sop.kind emit_parameter];
     visible : bool [@sop.default true] [@sop.label "Visible"];
-  } [@@sop.node_key "room"] [@@sop.node_label "Room"]
-    [@@sop.node_category "Layer"] [@@sop.node_inputs 1]
-    [@@sop.node_optional "0"] [@@deriving sop_params, sop_node]
+  } [@@deriving sop_params]
 
-  let build = parameters_build (marker "room")
-  let factory = parameters_factory build
+  let kind = Kind_graph.Kind.make ~key:"room" ~label:"Room" ~category:[ "Layer" ] parameters_schema
+
 end
 
-let catalog = [Gradient.factory; Sky.factory; Sun.factory; Shape.factory;
-               Scatter.factory; Room.factory]
+let kinds = [Gradient.kind; Sky.kind; Sun.kind; Shape.kind; Scatter.kind; Room.kind]
 
 (* ---- nodes <-> World ---- *)
 
@@ -238,9 +218,9 @@ let radians degrees = degrees *. Float.pi /. 180.
 let degrees radians = radians *. 180. /. Float.pi
 let read schema default node = Objects.read schema default node
 
-let layer node : World.entry option =
-  let entry layer visible = Some { World.name = Node.label node; layer; visible } in
-  match Node.operation node with
+let layer (node : G.node) : World.entry option =
+  let entry layer visible = Some { World.name = node.label; layer; visible } in
+  match node.kind with
   | "gradient" -> Option.bind (read Gradient.parameters_schema Gradient.parameters_default node)
       (fun p -> entry (World.Gradient {
         zenith = World.rgb p.zenith_r p.zenith_g p.zenith_b;
@@ -272,25 +252,13 @@ let layer node : World.entry option =
         p.visible)
   | _ -> None
 
-(* The stack from the top (the network's display node) down input 0. *)
-let stack (network : Document.network) =
-  let rec down id acc = match Edit_graph.find network.graph.geometry ~node_id:id with
-    | None -> acc
-    | Some node ->
-        let acc = node :: acc in
-        (match Edit_graph.inputs network.graph.geometry ~node_id:id with
-         | Some inputs when Array.length inputs > 0 && inputs.(0) <> None
-             && not (List.exists (fun other -> Node.id other = Option.get inputs.(0)) acc) ->
-             down (Option.get inputs.(0)) acc
-         | _ -> acc) in
-  Option.fold ~none:[] ~some:(fun id -> down id []) network.displayed
 
-(* The World a scene-level world node and its layer network describe;
+(* The World a world object and its layers describe;
    [time] (seconds) advances the time of day by the node's day cycle. *)
-let to_world ?(time = 0.) node network =
+let to_world ?(time = 0.) node layers =
   Option.map (fun (p : Settings.parameters) ->
     let hours = Float.rem (p.time_of_day +. time *. p.day_cycle) 24. in
-    { World.layers = List.filter_map layer (stack network);
+    { World.layers = List.filter_map layer (List.rev (G.stack layers));
       background = (match p.background with
         | Environment -> World.Environment
         | Color -> World.Color (World.rgb p.background_r p.background_g p.background_b)
@@ -312,20 +280,20 @@ let of_world (world : World.t) =
   let emit = function World.Dome -> "Dome" | Light -> "Light" in
   let layer (entry : World.entry) =
     let key, values = match entry.layer with
-      | World.Gradient g -> Gradient.factory,
+      | World.Gradient g -> Gradient.kind,
           rgb "zenith" g.zenith @ rgb "horizon" g.horizon @ rgb "nadir" g.nadir
           @ [float "sharpness" g.sharpness]
-      | Sky s -> Sky.factory, [float "turbidity" s.turbidity; float "intensity" s.intensity]
-      | Sun s -> Sun.factory, [float "angular_radius" (degrees s.angular_radius);
+      | Sky s -> Sky.kind, [float "turbidity" s.turbidity; float "intensity" s.intensity]
+      | Sun s -> Sun.kind, [float "angular_radius" (degrees s.angular_radius);
           float "intensity" s.intensity] @ rgb "tint" s.tint
-      | Shape s -> Shape.factory,
+      | Shape s -> Shape.kind,
           [choice "shape" (match s.shape with
             | Rect -> "Rect" | Strip -> "Strip" | Circle -> "Circle" | Ring -> "Ring");
            float "azimuth" (degrees s.azimuth); float "elevation" (degrees s.elevation);
            float "width" (degrees s.width); float "height" (degrees s.height);
            float "softness" (degrees s.softness); float "intensity" s.intensity;
            choice "emit" (emit s.emit)] @ rgb "color" s.color
-      | Scatter s -> Scatter.factory,
+      | Scatter s -> Scatter.kind,
           ["seed", Param.Int_value s.seed; "count", Param.Int_value s.count;
            float "elevation_min" (degrees s.elevation_min);
            float "elevation_max" (degrees s.elevation_max);
@@ -336,7 +304,7 @@ let of_world (world : World.t) =
             | first :: second :: _ -> rgb "first" first @ rgb "second" second
             | [only] -> rgb "first" only @ rgb "second" only
             | [] -> [])
-      | Room r -> Room.factory,
+      | Room r -> Room.kind,
           [float "width" r.width; float "depth" r.depth; float "height" r.height;
            "rows", Param.Int_value r.rows; "columns", Param.Int_value r.columns;
            float "panel" r.panel; float "intensity" r.intensity; float "cove" r.cove;
@@ -357,24 +325,12 @@ let of_world (world : World.t) =
       | `Linked -> []) in
   List.map layer world.layers, settings
 
-(* A layer network for [world]: one node per layer chained bottom to top,
-   displaying the top. *)
-let network_of_world world =
+(* The layers of [world], each on the one below it. *)
+let graph_of_world world =
   let layers, _ = of_world world in
   let ( let* ) = Result.bind in
-  let* graph, top = List.fold_left (fun state (factory, name, values) ->
+  let* graph, _ = List.fold_left (fun state (kind, name, values) ->
       let* graph, below = state in
-      let* node = Edit_graph.instantiate_optional factory [None] in
-      let node = Node.relabel name node in
-      let* graph = Edit_graph.add_node ~factory ~inputs:[|None|] node
-          (Option.value graph ~default:Edit_graph.empty) in
-      let* graph = match below with
-        | Some below -> Edit_graph.connect ~source:below ~consumer:(Node.id node)
-            ~input_index:0 graph
-        | None -> Ok graph in
-      let* graph, _ = Edit_graph.apply_parameters graph ~node_id:(Node.id node) values in
-      Ok (Some graph, Some (Node.id node))) (Ok (None, None)) layers in
-  match graph, top with
-  | Some graph, Some top ->
-      Ok (Document.of_geometry ~context:Flow.Context.world graph (Some top))
-  | _ -> Ok (Document.of_geometry ~context:Flow.Context.world Edit_graph.empty None)
+      let* node, _ = G.apply { (G.instance ~label:name kind) with input = below } values in
+      Ok (G.add graph node, Some node.G.id)) (Ok (G.empty, None)) layers in
+  Ok graph

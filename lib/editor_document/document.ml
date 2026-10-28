@@ -6,7 +6,7 @@
 open Sop
 module Int_map = Map.Make (Int)
 
-(* One node network with its display node. *)
+(* A geometry object's SOP network with its display node. *)
 type network = {
   context : Flow.Context.t;
   graph : Flow_sop.Network.t;
@@ -54,9 +54,9 @@ type preview_source = {
   instance : Flow.Eval.value;
 }
 
-(* The World a viewport over another scene instance shows: the node holding its fields and the
-   network of its layers (they are not in the scene) *)
-type view_world = { node : Node.t; layers : network }
+(* The World a viewport over another scene instance shows: the object holding its fields and its
+   layers (they are not in the scene) *)
+type view_world = { node : Kind_graph.node; layers : Kind_graph.t }
 
 (* How a viewport over another scene instance renders: the settings of its [scene/root] and the
    view of the camera object that root's [:camera] slot names (none: the root names no camera) *)
@@ -95,8 +95,9 @@ type workspace = { ws : Workspace_doc.t; lowered : Flow_sop.Lower.t; fast : bool
                    catalog : (Flow.Check.catalog, Diagnostic.t) result Lazy.t (* the factories' kinds, built when an edit first asks *) }
 
 type t = {
-  scene : network;  (* objects: input 0 is the parent *)
-  networks : network Int_map.t;  (* by object id: SOP networks, the World's layers *)
+  scene : Kind_graph.t;  (* objects: the input is the parent *)
+  networks : network Int_map.t;  (* by geometry object id: its SOP network *)
+  layers : Kind_graph.t Int_map.t;  (* by World id: its layers, each on the one below *)
   active_camera : int option;  (* a camera object *)
   root : Objects.Root.parameters;  (* how the scene renders: the root's settings, else the defaults *)
   settings : Settings.t;
@@ -118,34 +119,29 @@ type t = {
      state so undo restores both *)
 }
 
-(* The network shown in the graph pane. *)
+(* What the list shows: the scene's objects, or inside an object its SOP network or the World's
+   layers. *)
 type level = Scene | Inside of int
 
-let network value = function
+let network value id = Int_map.find_opt id value.networks
+let layers value id = Int_map.find_opt id value.layers
+let with_layers value id layers = { value with layers = Int_map.add id layers value.layers }
+
+(* the objects or layers of a level; none inside a geometry object *)
+let kinds value = function
   | Scene -> Some value.scene
-  | Inside id -> Int_map.find_opt id value.networks
+  | Inside id -> layers value id
 
-let with_network value level network = match level with
-  | Scene -> { value with scene = network }
-  | Inside id -> { value with networks = Int_map.add id network value.networks }
-
-(* The display node, kept on a node that exists: a deleted display node
-   falls back to the previous one, else the last node in the network. *)
-let displayed_of ?previous graph viewed =
-  let graph = graph.Flow_sop.Network.geometry in
-  let exists id = Edit_graph.find graph ~node_id:id <> None in
-  if Option.fold ~none:false ~some:exists viewed then viewed
-  else match previous with
-    | Some id when exists id -> Some id
-    | _ -> (match List.rev (Edit_graph.inspect graph) with
-      | info :: _ -> Some info.Edit_graph.id | [] -> None)
+let with_kinds value level graph = match level with
+  | Scene -> { value with scene = graph }
+  | Inside id -> with_layers value id graph
 
 (* Resolve navigation after load, undo, or object removal. The scene is
    always a valid level, including an empty scene. *)
 let resolve_level value preferred =
   match preferred with
-  | Inside id when Int_map.mem id value.networks
-      && Edit_graph.find value.scene.graph.geometry ~node_id:id <> None -> Inside id
+  | Inside id when (Int_map.mem id value.networks || Int_map.mem id value.layers)
+      && Kind_graph.find value.scene id <> None -> Inside id
   | Inside _ | Scene -> Scene
 
 (* The saved/loaded document boundary. Disconnected SOPs are editable and
@@ -165,44 +161,54 @@ let validate value =
       && finite_fields (Node.parameter_fields info.node)) nodes)
     then Error (name ^ " has invalid inputs or nonfinite parameters")
     else Ok () in
-  let* () = if value.scene.context = Flow.Context.scene then Ok () else Error "scene has the wrong context" in
-  let* () = validate_network "scene" value.scene in
-  let* () = List.fold_left (fun state (info : Edit_graph.node_info) ->
+  let validate_kinds name graph =
+    let exists id = Kind_graph.find graph id <> None in
+    if List.for_all (fun (node : Kind_graph.node) ->
+      Option.fold ~none:true ~some:exists node.input && finite_fields (Kind_graph.fields node)) graph
+    then Ok () else Error (name ^ " has invalid inputs or nonfinite parameters") in
+  let* () = validate_kinds "scene" value.scene in
+  let* () = List.fold_left (fun state (node : Kind_graph.node) ->
     let* () = state in
-    match info.operation, Int_map.mem info.id value.networks with
-    | ("geometry" | "world"), true | ("camera" | "light"), false -> Ok ()
-    | ("geometry" | "world"), false ->
-        Error (Printf.sprintf "object %S (#%d) has no network" info.label info.id)
-    | ("camera" | "light"), true ->
-        Error (Printf.sprintf "object #%d cannot own a network" info.id)
-    | _ -> Error (Printf.sprintf "invalid scene object %S" info.operation))
-      (Ok ()) (Edit_graph.inspect value.scene.graph.geometry) in
+    match node.kind, Int_map.mem node.id value.networks, Int_map.mem node.id value.layers with
+    | "geometry", true, false | "world", false, true | ("camera" | "light"), false, false -> Ok ()
+    | ("geometry" | "world"), _, _ ->
+        Error (Printf.sprintf "object %S (#%d) has no network" node.label node.id)
+    | ("camera" | "light"), _, _ ->
+        Error (Printf.sprintf "object #%d cannot own a network" node.id)
+    | _ -> Error (Printf.sprintf "invalid scene object %S" node.kind))
+      (Ok ()) value.scene in
+  let owner id kind = match Kind_graph.find value.scene id with
+    | None -> Error (Printf.sprintf "network has missing owner #%d" id)
+    | Some node when node.kind <> kind -> Error (Printf.sprintf "network #%d has the wrong context" id)
+    | Some _ -> Ok () in
   let* () = Int_map.fold (fun id network state ->
     let* () = state in
-    match Edit_graph.find value.scene.graph.geometry ~node_id:id with
-    | None -> Error (Printf.sprintf "network has missing owner #%d" id)
-    | Some node ->
-        let context = if Node.operation node = "world" then Flow.Context.world else Flow.Context.sop in
-        if network.context <> context then Error (Printf.sprintf "network #%d has the wrong context" id)
-        else validate_network (Printf.sprintf "network of object #%d" id) network)
+    let* () = owner id "geometry" in
+    if network.context <> Flow.Context.sop then Error (Printf.sprintf "network #%d has the wrong context" id)
+    else validate_network (Printf.sprintf "network of object #%d" id) network)
       value.networks (Ok ()) in
+  let* () = Int_map.fold (fun id layers state ->
+    let* () = state in
+    let* () = owner id "world" in
+    validate_kinds (Printf.sprintf "layers of object #%d" id) layers) value.layers (Ok ()) in
   if not (finite_fields (Settings.fields value.settings))
   then Error "settings contain nonfinite parameters"
   else match value.active_camera with
     | None -> Ok ()
-    | Some id -> (match Edit_graph.find value.scene.graph.geometry ~node_id:id with
-      | Some node when Node.operation node = "camera" -> Ok ()
+    | Some id -> (match Kind_graph.find value.scene id with
+      | Some node when node.kind = "camera" -> Ok ()
       | _ -> Error (Printf.sprintf "active camera #%d is not a camera object" id))
 
 (* Networks follow their objects: a deleted object's network goes. *)
 let prune value =
-  let networks = Int_map.filter (fun id _ ->
-      Edit_graph.find value.scene.graph.geometry ~node_id:id <> None) value.networks in
+  let alive id _ = Kind_graph.find value.scene id <> None in
+  let networks = Int_map.filter alive value.networks and layers = Int_map.filter alive value.layers in
   let active_camera = Option.bind value.active_camera (fun id ->
-    if Edit_graph.find value.scene.graph.geometry ~node_id:id <> None then Some id else None) in
+    if alive id () then Some id else None) in
   if Int_map.cardinal networks = Int_map.cardinal value.networks
+      && Int_map.cardinal layers = Int_map.cardinal value.layers
       && active_camera = value.active_camera then value
-  else { value with networks; active_camera }
+  else { value with networks; layers; active_camera }
 
 (* The lowered sop graph a geometry object's network is.  An unchanged network is kept physically
    across lowerings while the lowering is rebuilt, so identity alone is not enough: the compiled
@@ -216,7 +222,7 @@ let object_graph value id =
       then Some g.name else None) lowered.graphs)
 
 (* Read-only views for tests and tools. *)
-let scene_graph value = value.scene.graph.geometry
+let scene_graph value = value.scene
 let object_network value id = Option.map (fun (network : network) ->
     network.graph, network.displayed) (Int_map.find_opt id value.networks)
 
@@ -247,10 +253,16 @@ let dump value =
     line "%s %s display=%s" name (Flow.Context.name n.context)
       (match n.displayed with Some d -> string_of_int d | None -> "-");
     graph n.graph in
-  net "scene" value.scene;
+  let kinds name context graph =
+    line "%s %s" name context;
+    List.iter (fun (node : Kind_graph.node) ->
+      line "  node %d %s %S input=%s %s" node.id node.kind node.label
+        (match node.input with Some i -> string_of_int i | None -> "_") (fields (Kind_graph.fields node))) graph in
+  kinds "scene" "scene" value.scene;
   Int_map.iter (fun id n -> net (Printf.sprintf "object %d" id) n) value.networks;
+  Int_map.iter (fun id l -> kinds (Printf.sprintf "object %d" id) "world" l) value.layers;
   List.iter (fun (key, world) -> line "view %s world %s" key (match world with
-    | Some (w : view_world) -> Printf.sprintf "%S" (Node.label w.node) | None -> "-")) value.view_worlds;
+    | Some (w : view_world) -> Printf.sprintf "%S" w.node.label | None -> "-")) value.view_worlds;
   List.iter (fun (key, (r : view_root)) -> line "view %s root %s%s" key (fields (Objects.Root.fields r.params))
     (match r.camera with
       | Some c -> let p = Rays.Camera.position c in Printf.sprintf " camera %g %g %g" p.x p.y p.z

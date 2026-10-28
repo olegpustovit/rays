@@ -292,7 +292,7 @@ let carry_tests () =
       records = None; probes = (fun _ -> 0); selected = []; chips;
       (* as many object rows as the panel draws: a row's place depends on them *)
       objects = (List.map (fun _ -> { N.depth = 0; letter = ""; name = ""; detail = ""; visible = None; render = None;
-        lead = false; inert = false; chosen = false; home = None }) (Sop.Edit_graph.inspect (E3.scene_document !e)));
+        lead = false; inert = false; chosen = false; home = None }) (E3.scene_document !e));
       root_detail = ""; layouts = None; notes = [] } in
     let geometry = L.geometry ~hidden:[ L.Timeline ] layout (frame (0., 0.) [] 0) in
     let bounds = (Option.get (L.find geometry L.Outline)).body in

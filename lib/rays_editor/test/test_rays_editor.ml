@@ -53,9 +53,6 @@ let text = {|(workspace inspectable
       output)))|}
 
 let fixture () = Ws_fixture.of_text text
-let nodes environment = Edit_graph.inspect (Rays_editor.Editor.document environment)
-let node_of operation environment = List.find (fun (info : Edit_graph.node_info) ->
-    info.operation = operation) (nodes environment)
 
 (* The line of the crash report's [name] (level, projection, camera, scope selected ...). *)
 let report_line dump environment name =
@@ -431,8 +428,8 @@ let run () =
   (* Camera nodes: a default camera following the viewport joins a document
      without one, exactly one is ACTIVE, deleting the last re-adds it inside
      the same undo entry, and a viewport drag is one coalesced undo entry. *)
-  let cameras environment = List.filter (fun info -> info.Edit_graph.operation = "camera")
-      (Edit_graph.inspect (Rays_editor.Editor.scene_document environment)) in
+  let cameras environment = List.filter (fun (info : Editor_document.Kind_graph.node) -> info.kind = "camera")
+      (Rays_editor.Editor.scene_document environment) in
   (* the id of the ACTIVE camera, from the crash report's "camera N" line *)
   let active environment =
     match String.split_on_char ' ' (report_line Rays_editor.Editor.crash_dump environment "camera") with
@@ -515,7 +512,7 @@ let run () =
          && has (text_of environment) "graph scene" && not (has (text_of environment) "scene/camera"))
     "deleting the last camera was not written as no camera";
   let environment = Rays_editor.Editor.update environment (command 'z' 17) in
-  check (List.map (fun info -> info.Edit_graph.id) (cameras environment) = [camera_id])
+  check (List.map (fun (info : Editor_document.Kind_graph.node) -> info.id) (cameras environment) = [camera_id])
     "undo after deleting the camera did not restore the original in one step";
   (* Fly: / w (view focused) flies, held W moves forward, Escape exits;
      Space exits and arms the leader in the same frame. *)

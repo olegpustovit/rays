@@ -1190,7 +1190,9 @@ wins for that leaf.
 **Editing.** Every layout form is a card of the editor graph and its keywords are rows of the card
 (`Set_arg`). The layout gestures (`Set_layout_size`, `Split_panel`, `Close_panel`, `Dock_panel`,
 `Set_panel_kind`, `Set_layout`, `Layout_new`, `Layout_remove`, `Layout_window`, `Layout_float`,
-`Merge_layouts`) accept a graph whose result is the `ui/workspace` call or a binding of it. The
+`Merge_layouts`) accept a graph whose result is the `ui/workspace` call or a binding of it. A gesture
+that writes a panel (`Split_panel`, `Set_panel_kind`, `Layout_window`) carries its form, which the
+editor's panel table builds (`Editor_document.Panel_kinds`): `Flow_graph` knows no panel kind. The
 printer never threads a `ui/` call (§11.3): a layout is a tree of containers, not a pipeline.
 Named layouts are panels of one editor graph selected by `(ui/switch ... :active n)`. Panel
 bindings are shared across layouts, preserving each panel's view state. The computed panel

@@ -77,7 +77,7 @@ let run_lowering () =
   let keys6 = List.filter_map (fun (_, p) -> match p with Panels.View k -> Some k | _ -> None)
       (leaves (shell_of more).tree) in
   check (List.take 4 keys6 = keys && List.length keys6 = 6) "panel keys follow the iteration index";
-  check (List.length (Editor_document.Document.scene_graph more |> Sop.Edit_graph.inspect) > 4) "more objects for more viewports";
+  check (List.length (Editor_document.Document.scene_graph more) > 4) "more objects for more viewports";
   (* the default shell of a workspace without an editor graph, and a named graph panel *)
   let plain = build_ok (of_text (case "tree")) in
   check (plain.shell = None) "no editor graph, no shell";
@@ -759,18 +759,20 @@ let run_ops () =
    | Ok p -> check (has (source p) "(ui/split-at \"horizontal\" 0.25 a b)") "ui/split gets a ratio"
    | Error m -> fail m);
   (* split, close, retype *)
-  let s = ok "Split panel" (E.Split_panel { node = [ "editor"; "network" ]; axis = `V; ratio = 0.5; kind = None }) in
+  (* the editor's panel table writes the panel forms *)
+  let panel kind = Result.get_ok (Editor_document.Panel_kinds.expr (E3.workspace e).source kind) in
+  let s = ok "Split panel" (E.Split_panel { node = [ "editor"; "network" ]; axis = `V; ratio = 0.5; panel = panel "lisp" }) in
   check (Panels.to_string (tree s) = "(h outline (h (v (v graph lisp) lisp) (tile view)))") ("split: " ^ Panels.to_string (tree s));
   check (has (source s) "(ui/split-at \"vertical\" 0.5 network_a network_b)") "the new split";
   let c = ok "Close panel" (E.Close_panel { node = [ "editor"; "network" ] }) in
   check (Panels.to_string (tree c) = "(h outline (h lisp (tile view)))") ("close: " ^ Panels.to_string (tree c));
-  let t = ok "Retype panel" (E.Set_panel_kind { node = [ "editor"; "network" ]; kind = "list" }) in
+  let t = ok "Retype panel" (E.Set_panel_kind { node = [ "editor"; "network" ]; panel = panel "list" }) in
   check (Panels.to_string (tree t) = "(h outline (h (v list lisp) (tile view)))") ("retype: " ^ Panels.to_string (tree t));
-  let sheet = ok "Retype panel" (E.Set_panel_kind { node = [ "editor"; "network" ]; kind = "spreadsheet" }) in
+  let sheet = ok "Retype panel" (E.Set_panel_kind { node = [ "editor"; "network" ]; panel = panel "spreadsheet" }) in
   check (Panels.to_string (tree sheet) = "(h outline (h (v spreadsheet lisp) (tile view)))") "retype spreadsheet";
   let saved = Doc.to_text (E3.workspace sheet) in
   check (Doc.to_text (of_text saved) = saved) "retyped spreadsheet did not round trip";
-  let v = ok "Retype panel" (E.Set_panel_kind { node = [ "editor"; "outline" ]; kind = "viewport" }) in
+  let v = ok "Retype panel" (E.Set_panel_kind { node = [ "editor"; "outline" ]; panel = panel "viewport" }) in
   check (has (source v) "outline (ui/viewport (ref scene))") "a viewport is over the first scene graph";
   let docked = ok "Dock panel" (E.Dock_panel {node = ["editor"; "network"]; target = ["editor"; "outline"]; side = `Right}) in
   check (Panels.to_string (tree docked) = "(h (h outline graph) (h lisp (tile view)))")
@@ -784,9 +786,10 @@ let run_ops () =
     | Error m -> check (has m needle) (name ^ ": " ^ m)
     | Ok _ -> fail (name ^ " was accepted") in
   refuse "close the workspace" (E.Close_panel { node = [ "editor"; "shell" ] }) "Keep at least one";
-  refuse "an unknown panel type" (E.Set_panel_kind { node = [ "editor"; "network" ]; kind = "dashboard" }) "Unknown panel type";
+  check (Editor_document.Panel_kinds.expr (E3.workspace e).source "dashboard" = Error "Unknown panel type dashboard.")
+    "an unknown panel type";
   refuse "resize a panel" (E.Set_layout_size { node = [ "editor"; "network" ]; size = `Ratio 0.4 }) "not a split";
-  refuse "no such binding" (E.Split_panel { node = [ "editor"; "nothing" ]; axis = `H; ratio = 0.5; kind = None }) "no longer exists";
+  refuse "no such binding" (E.Split_panel { node = [ "editor"; "nothing" ]; axis = `H; ratio = 0.5; panel = panel "lisp" }) "no longer exists";
   let floating = editor (with_editor
     "(let* [main (ui/graph) outline (ui/outline) window (ui/floating outline) tiles (ui/tile main window)] (ui/workspace tiles))") in
   (match E3.edit floating (E.Close_panel {node = ["editor"; "outline"]}) with
@@ -811,7 +814,7 @@ let run_ops () =
      or is closed: :of names the panel, never the split it ends up in *)
   let followed = editor (with_editor
     "(let* [network (ui/graph) inspector (ui/inspector :of network)] (ui/workspace (ui/split-at \"horizontal\" 0.5 network inspector)))") in
-  (match E3.edit followed (E.Layout_window {graph = "editor"; kind = "outline"}) with
+  (match E3.edit followed (E.Layout_window {graph = "editor"; panel = Result.get_ok (Editor_document.Panel_kinds.expr [] "outline")}) with
    | Error message -> fail ("new window: " ^ message)
    | Ok windowed ->
        (match E3.edit windowed (E.Dock_panel {node = ["editor"; "inspector"]; target = ["editor"; "network"]; side = `Left}) with
@@ -1021,9 +1024,8 @@ let drag_slider e count row =
   step ~mouse:(at 20) [ Input.Pointer_released (Input.LeftButton, at 20) ];
   step []
 
-let objects e = Edit_graph.inspect (E3.scene_document e)
-let field_of (i : Edit_graph.node_info) name = List.find_map (fun (f : Param.field_view) ->
-  if f.name = name then Some f.current else None) (Node.parameter_fields i.node)
+let objects e = E3.scene_document e
+let field_of i name = Editor_document.Kind_graph.field i name
 
 let run_loop_copies () =
   (* copies that differ only by the graph they place: every field of the template is a literal *)
@@ -1061,9 +1063,9 @@ let run_loop_copies () =
   select_row e count 2;
   let step events = incr count; e := E3.update !e (frame (450., 300.) events !count) in
   step [ Input.Key_pressed Input.F2 ]; step [ Input.Text_input "spot" ]; step [ Input.Key_pressed Input.Enter ]; step [];
-  check (List.for_all (fun (i : Edit_graph.node_info) -> i.label = "gspot") (objects !e)
+  check (List.for_all (fun (i : Editor_document.Kind_graph.node) -> i.label = "gspot") (objects !e)
          && count_of (source !e) ":name \"gspot\"" = 1 && E3.undo_label !e = Some "Rename")
-    ("a rename of one copy did not rename the template: " ^ source !e ^ String.concat "," (List.map (fun (i : Edit_graph.node_info) -> i.label) (objects !e)));
+    ("a rename of one copy did not rename the template: " ^ source !e ^ String.concat "," (List.map (fun (i : Editor_document.Kind_graph.node) -> i.label) (objects !e)));
   E3.close !e;
   (* a copy computed from its index has no value of its own *)
   let text = {|(workspace lamps
@@ -1083,7 +1085,7 @@ let run_loop_copies () =
   (* deleting one copy skips its iteration: the others stay where they are *)
   select_row e count 2;
   e := E3.update !e (frame (450., 300.) [ Input.Key_pressed Input.Delete ] (incr count; !count));
-  let lamps () = List.filter (fun (i : Edit_graph.node_info) -> i.operation = "light") (objects !e) in
+  let lamps () = List.filter (fun (i : Editor_document.Kind_graph.node) -> i.kind = "light") (objects !e) in
   check (List.length (lamps ()) = 2 && has (source !e) ":skip [1]" && E3.undo_label !e = Some "Delete")
     ("deleting a copy did not skip it in the loop: " ^ source !e);
   check (List.map (fun i -> field_of i "translate_x") (lamps ())
@@ -1137,7 +1139,7 @@ let run_loop_expression () =
   step ~mouse:label [ Input.Text_input "=(* i 3)" ];
   step ~mouse:label [ Input.Key_pressed Input.Enter ];
   step ~mouse:label [];
-  let lamps () = List.filter (fun (i : Edit_graph.node_info) -> i.operation = "light") (objects !e) in
+  let lamps () = List.filter (fun (i : Editor_document.Kind_graph.node) -> i.kind = "light") (objects !e) in
   check (has (source !e) ":translate [(* i 3) 2 0]") ("the expression did not reach the template: " ^ source !e);
   check (List.map (fun i -> field_of i "translate_x") (lamps ())
          = List.map (fun v -> Some (Param.Float_value v)) [ 0.; 3.; 6. ])
@@ -1665,7 +1667,7 @@ let run_studio () =
     "the layout keywords are not rows of their cards";
   (* the layout commands take a graph whose result is a binding of the workspace *)
   let laid = List.fold_left apply ws [
-    E.Layout_new { graph = "editor" }; E.Layout_window { graph = "editor"; kind = "inspector" };
+    E.Layout_new { graph = "editor" }; E.Layout_window { graph = "editor"; panel = Result.get_ok (Editor_document.Panel_kinds.expr [] "inspector") };
     E.Layout_float { graph = "editor"; at = [ 0; 0 ] }; E.Set_layout { graph = "editor"; index = 0 };
     E.Layout_remove { graph = "editor" } ] in
   check (has (text_of laid) "shell (ui/workspace") "the workspace binding was not kept";
@@ -2094,7 +2096,7 @@ let run_carry_reaches_no_history () =
            all (scene/merge (scene/geometry (ref g)) cam side)]
       (scene/root all :camera cam))))|x} in
   let e = E3.update (E3.update e (frame (450., 300.) [] 1)) (frame (450., 300.) [] 2) in
-  let side = (List.find (fun (i : Edit_graph.node_info) -> i.label = "side") (Edit_graph.inspect (E3.scene_document e))).id in
+  let side = (List.find (fun (i : Editor_document.Kind_graph.node) -> i.label = "side") (E3.scene_document e)).id in
   let preview = E.Set_arg { node = [ "scene"; "side" ]; key = E.Kw "fov"; sub = []; value = S.make (S.Num "40.0") } in
   let before = source e in
   let stepped = Rays_editor.Reduce.step e ~select:[ side ] ~preview

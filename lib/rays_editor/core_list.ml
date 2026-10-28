@@ -8,8 +8,8 @@ open Core_panes
 open Core_add
 
 let enterable value id = match kind value id with
-  | Some ("geometry" | "world") ->
-      Document.Int_map.mem id value.doc.Document.networks
+  | Some "geometry" -> Document.Int_map.mem id value.doc.Document.networks
+  | Some "world" -> Document.Int_map.mem id value.doc.Document.layers
   | Some _ | None -> false
 
 (* Switch the open level: nothing is selected there, and the list starts again. *)
@@ -28,10 +28,10 @@ let geometry_objects value =
      graph is one (the canvas previews its nodes) but its payload is not geometry, so the geometry
      cook never takes it (Flow_native.Workspace_images cooks images) *)
   let ws = value.doc.Document.workspace.ws in
-  let image_graph node = List.exists (fun (g : Flow.Workspace.graph) ->
-    g.name = Node.label node && Flow.Context.result g.context = Flow.Ty.image) ws.checked.graphs in
+  let image_graph (node : Kind_graph.node) = List.exists (fun (g : Flow.Workspace.graph) ->
+    g.name = node.label && Flow.Context.result g.context = Flow.Ty.image) ws.checked.graphs in
   List.filter_map (fun id ->
-    match Edit_graph.find (scene value) ~node_id:id,
+    match Kind_graph.find (scene value) id,
         Document.Int_map.find_opt id value.doc.Document.networks with
     | Some node, Some network when Objects.visible node && not (image_graph node) ->
         (match Document.Int_map.find_opt id value.viewed with
@@ -57,8 +57,8 @@ let prepared value = Option.map (fun (piece : _ Cook.piece) -> piece.prepared) (
 let selected_bounds value =
   Option.bind (piece value) (fun (piece : _ Cook.piece) ->
     Option.bind piece.bounds (fun bounds ->
-      Option.map (fun node -> Objects.world (scene value) piece.id, bounds, Node.label node)
-        (Edit_graph.find (scene value) ~node_id:piece.id)))
+      Option.map (fun (node : Kind_graph.node) -> Objects.world (scene value) piece.id, bounds, node.label)
+        (Kind_graph.find (scene value) piece.id)))
 let no_graph = Custom.plain ~operation:"points" ~parameters:"count=0" ~cook_mode:Node.Generator []
   (fun ~context:_ _ -> Ok (Rdk_rays.Geometry_view.points_of_nothing))
 let graph value = match Option.bind (focus_object value) (fun id ->
@@ -70,9 +70,9 @@ let displayed_node = graph
 let settings value = value.doc.Document.settings
 let timeline value = value.timeline
 let selected_node value = match scope_node value with
-  | Some (_, node) -> Some node
+  | Some (_, node) -> Some (of_sop node)
   | None -> Option.bind (Selection.selected value.selection)
-      (fun node_id -> Edit_graph.find (document value) ~node_id)
+      (fun id -> Option.map of_object (Kind_graph.find (objects value) id))
 (* Scoped SOP handles use their owning object's transform. Navigation
    selection uses the open object or the scene object's parent chain. *)
 let space value = match Option.bind (scope_node value) (fun (_, node) -> node_owner value (Node.id node)) with
@@ -97,24 +97,30 @@ let badge operation =
   | _ -> "S", hex "#566463"
 
 (* The objects as a tree by parent, siblings in id order. *)
-let scene_rows ?active document =
-  let infos = Edit_graph.inspect document in
+let scene_rows ?active (objects : Kind_graph.t) =
   let children = Hashtbl.create 16 in
-  List.iter (fun (info : Edit_graph.node_info) ->
-    let parent = if Array.length info.inputs > 0 then info.inputs.(0) else None in
-    Hashtbl.replace children parent
-      (info :: Option.value ~default:[] (Hashtbl.find_opt children parent))) infos;
-  let sorted parent = List.sort (fun (a : Edit_graph.node_info) b -> Int.compare a.id b.id)
+  List.iter (fun (node : Kind_graph.node) ->
+    Hashtbl.replace children node.input
+      (node :: Option.value ~default:[] (Hashtbl.find_opt children node.input))) objects;
+  let sorted parent = List.sort (fun (a : Kind_graph.node) b -> Int.compare a.id b.id)
       (Option.value ~default:[] (Hashtbl.find_opt children parent)) in
-  let rec emit depth (info : Edit_graph.node_info) =
+  let rec emit depth (node : Kind_graph.node) =
     let flags = List.filter_map (fun name ->
-        if Objects.has_flag name info.node then Some (Objects.flag name info.node) else None)
+        if Objects.has_flag name node then Some (Objects.flag name node) else None)
         ["visible"; "render"] in
-    { Pxui_shell.Tree.id = info.id; depth; label = info.label;
-      detail = (if active = Some info.id then "* render cam" else info.operation);
-      badge = badge info.operation; link = false; ghost = false; flags }
-    :: List.concat_map (emit (depth + 1)) (sorted (Some info.id)) in
+    { Pxui_shell.Tree.id = node.id; depth; label = node.label;
+      detail = (if active = Some node.id then "* render cam" else node.kind);
+      badge = badge node.kind; link = false; ghost = false; flags }
+    :: List.concat_map (emit (depth + 1)) (sorted (Some node.id)) in
   Array.of_list (List.concat_map (emit 0) (sorted None))
+
+(* The World's layers, bottom first. *)
+let layer_rows (layers : Kind_graph.t) =
+  Array.of_list (List.rev_map (fun (node : Kind_graph.node) ->
+    { Pxui_shell.Tree.id = node.id; depth = 0; link = false; ghost = false; label = node.label;
+      detail = node.kind; badge = badge node.kind;
+      flags = if Objects.has_flag "visible" node then [ Objects.flag "visible" node ] else [] })
+    (Kind_graph.stack layers))
 
 (* The network as list rows [(id, depth, link)], sources first: rows follow each node's first
    input, other inputs nest one level under the node that consumes them, and a node reached
@@ -163,40 +169,25 @@ let trunk_rows (network : Flow_sop.Network.t) ~viewed ~flags =
       badge = badge operation; flags = flags id node })
     (trunk network)
 
-let rows value (network : Document.network) = match value.level with
-  | Document.Scene -> scene_rows ?active:value.doc.active_camera network.graph.geometry,
-      ["v"; "r"]
-  | Inside id when kind value id = Some "geometry" ->
-      trunk_rows network.graph ~viewed:network.displayed ~flags:(fun node_id node ->
-        match node with Some _ -> [Some node_id = network.displayed] | None -> []), ["d"]
-  | Inside _ ->
-      trunk_rows network.graph ~viewed:None ~flags:(fun _ node ->
-        match node with
-        | Some node when Objects.has_flag "visible" node -> [Objects.flag "visible" node]
-        | _ -> []),
-      ["v"]
+(* The open level's list: what it is made from, and its rows and flag columns when asked. *)
+let rows value = match value.level, network value with
+  | Document.Scene, _ -> Objects (scene value), lazy (scene_rows ?active:value.doc.active_camera (scene value), ["v"; "r"])
+  | Inside _, Some network ->
+      Network network.graph, lazy (trunk_rows network.graph ~viewed:network.displayed ~flags:(fun node_id node ->
+        match node with Some _ -> [Some node_id = network.displayed] | None -> []), ["d"])
+  | Inside _, None -> Objects (objects value), lazy (layer_rows (objects value), ["v"])
 
-(* A layer chain in stack order, bottom first, with [ids] moved. *)
-let restack document order =
-  let document = List.fold_left (fun document id ->
-      match Edit_graph.inputs document ~node_id:id with
-      | Some inputs when Array.length inputs > 0 && inputs.(0) <> None ->
-          Result.value ~default:document
-            (Edit_graph.disconnect ~consumer:id ~input_index:0 document)
-      | _ -> document) document order in
-  let rec wire document = function
-    | below :: (above :: _ as rest) ->
-        wire (Result.value ~default:document
-          (Edit_graph.connect ~source:below ~consumer:above ~input_index:0 document)) rest
-    | [_] | [] -> document in
-  wire document order
+(* A layer chain in stack order, bottom first. *)
+let restack (layers : Kind_graph.t) order =
+  snd (List.fold_left (fun (below, layers) id ->
+    Some id, Kind_graph.update layers id (fun node -> { node with input = below })) (None, layers) order)
 
-let apply_parameter document id name value =
-  match Edit_graph.find document ~node_id:id with
+let apply_parameter objects id name value =
+  match Kind_graph.find objects id with
   | Some node when Objects.has_flag name node ->
-      (match Edit_graph.apply_parameters document ~node_id:id [name, value] with
-       | Ok (document, _) -> document | Error _ -> document)
-  | Some _ | None -> document
+      (match Kind_graph.set_fields objects id [name, value] with
+       | Ok (objects, _) -> objects | Error _ -> objects)
+  | Some _ | None -> objects
 
 (* The layer stack a World list's move asks for, in the rows' order. *)
 let restacked rows intent =
@@ -243,8 +234,7 @@ let reparented document rows intent =
 (* Tree intents become selection, an entry request, and edits of the derived network for the
    objects only the host made (reconcile adopts them): what the text has is edited as text
    ([tree_edit]). *)
-let apply_tree value (overlay, selection, tree, opened, label, rows) intent =
-  let document = overlay.Flow_sop.Network.geometry in
+let apply_tree value (document, selection, tree, opened, label, rows) intent =
   let module T = Pxui_shell.Tree in
   let in_text = Editor_document.Scene_sync.in_text value.doc value.level in
   let hosted = List.filter (fun id -> not (in_text id)) in
@@ -255,10 +245,6 @@ let apply_tree value (overlay, selection, tree, opened, label, rows) intent =
   let geometry = match value.level with
     | Document.Inside id -> kind value id = Some "geometry"
     | Scene -> false in
-  let overlay = match intent with
-    | Pxui_shell.Tree.Delete ids when not geometry ->
-        Result.get_ok (Flow_sop.Network.remove_nodes (hosted ids) overlay)
-    | _ -> overlay in
   let document, selection, tree, opened, label, rows = match intent with
   | T.Select ids ->
       document, (match ids with
@@ -286,21 +272,18 @@ let apply_tree value (overlay, selection, tree, opened, label, rows) intent =
       Objects.outdent document (hosted ids), selection, tree, opened, Some "Reparent", rows
   | Rename (id, _) when in_text id -> document, selection, tree, opened, Some "Rename", rows
   | Rename (id, name) when not geometry ->
-      (match Option.map (Node.relabel name) (Edit_graph.find document ~node_id:id) with
-       | Some node -> (match Edit_graph.replace_node node document with
-         | Ok document -> document, selection, tree, opened, Some "Rename", rows
-         | Error _ -> document, selection, tree, opened, label, rows)
+      (match Kind_graph.find document id with
+       | Some _ -> Kind_graph.update document id (fun node -> { node with label = name }),
+           selection, tree, opened, Some "Rename", rows
        | None -> document, selection, tree, opened, label, rows)
   | Activate _ when geometry -> document, selection, tree, opened, label, rows
   | Activate id -> document, selection, tree, Some id, label, rows
   | Delete ids when not geometry ->
-      let document = Edit_graph.remove_nodes (hosted ids) document in
+      let document = Kind_graph.remove (hosted ids) document in
       document, Selection.clear, tree, opened, Some "Delete", rows
   | Rename _ | Delete _ | Move _ | Indent _ | Outdent _ | Reorder _ ->
-      document, selection, tree, opened, label, rows
-
-  in Result.get_ok (Editor_document.Document_edit.update_geometry (fun _ -> Ok document) overlay),
-    selection, tree, opened, label, rows
+      document, selection, tree, opened, label, rows in
+  document, selection, tree, opened, label, rows
 
 
 (* A list intent as an edit of the text, for the objects the text has ([Scene_sync.write]). *)
@@ -311,11 +294,11 @@ let tree_edit value rows intent : Editor_document.Scene_sync.edit option =
     match List.filter in_text ids with [] -> None | ids -> Some (make ids) in
   let world = match value.level with Document.Inside id -> kind value id = Some "world" | Scene -> false in
   let lowered = match value.level with Document.Inside id -> kind value id = Some "geometry" | Scene -> false in
-  let graph = (network value).graph.geometry in
+  let graph = objects value in
   let edit = if lowered then None else match intent with
     | T.Flag { ids; column; value = on } ->
         let name = List.nth (if world then [ "visible" ] else [ "visible"; "render" ]) column in
-        some (List.filter (fun id -> match Edit_graph.find graph ~node_id:id with
+        some (List.filter (fun id -> match Kind_graph.find graph id with
           | Some node -> Objects.has_flag name node | None -> false) ids)
           (fun ids -> Fields (List.map (fun id -> id, [ name, Param.Bool_value on ]) ids))
     | Rename (id, name) -> some [ id ] (fun _ -> Rename (id, name))

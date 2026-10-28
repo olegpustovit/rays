@@ -368,7 +368,7 @@ let part11 () = (* atomic: a refused edit changes nothing; labels *)
       | Error d -> check (has d.message "not one of the switch's layouts") (E.label op ^ " :active " ^ active ^ ": " ^ d.message)
       | Ok _ -> fail (E.label op ^ " accepted :active " ^ active))
       [ E.Layout_remove { graph = "editor" }; E.Layout_new { graph = "editor" };
-        E.Layout_window { graph = "editor"; kind = "inspector" } ]) [ "5"; "-1" ];
+        E.Layout_window { graph = "editor"; panel = List.hd (Result.get_ok (Flow.Syntax.parse "(ui/inspector)")) } ]) [ "5"; "-1" ];
   List.iter (fun (op, label) -> check (E.label op = label) ("label " ^ label))
     [ E.Wrap { nodes = []; loop = For }, "Repeat"; E.Wrap { nodes = []; loop = Fold }, "Iterate";
       E.Unfold { node = []; key = Whole; sub = [] }, "Unfold";

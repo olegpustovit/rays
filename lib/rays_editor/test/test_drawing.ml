@@ -136,7 +136,8 @@ let pure workspace =
   let n = Option.get (P.find (P.of_graph catalog w "picture") ["picture"; "elapsed"]) in
   assert ((Option.get n.zone).kind = P.State);
   let panel_source = ok (Flow.Syntax.parse "(workspace canvas (graph g :context draw (draw/merge)) (graph editor :context editor (let* [pane (ui/lisp)] (ui/workspace pane))))") in
-  let panel_source = edited panel_source (F.Set_panel_kind {node = ["editor"; "pane"]; kind = "canvas"}) in
+  let panel_source = edited panel_source (F.Set_panel_kind {node = ["editor"; "pane"];
+    panel = Result.get_ok (Editor_document.Panel_kinds.expr panel_source "canvas")}) in
   let panel_workspace = doc (fst (Flow.Lisp.print panel_source)) in
   let panel_document = ok (Editor_document.Contexts.of_workspace ~factories:Sop.Nodes.factories panel_workspace) in
   assert (match (Option.get panel_document.shell).tree with Editor_core.Panels.Leaf (Canvas _) -> true | _ -> false);

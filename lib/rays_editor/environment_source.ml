@@ -85,7 +85,7 @@ let reload_source value (update : (_, _) Core_model.update) ~now = match value.s
 (* Command-S: over the source file while it is what the document came from, else a preset. *)
 let save_source core source view =
   let notice ?(kind = Core_model.Info) text = { core with Core_model.notice = Some (kind, text) } in
-  let preset why = match Preset.save ~directory:core.Core_model.presets ~name:(Preset.default_name ())
+  let preset why = match Preset.save ~directory:core.Core_model.presets ~name:(Preset.default_name ~now:(core.Core_model.clock ()))
       ~doc:core.doc ~view with
     | Ok path -> notice (why ^ "; saved as preset " ^ Filename.basename path)
     | Error message -> notice ~kind:Core_model.Refusal ("Not saved: " ^ message) in

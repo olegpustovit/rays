@@ -519,7 +519,7 @@ let rewrite ?fallback src op : (unit -> S.t list) list =
           | `Second n -> fixed "second_size" n
           | `Ratio r ->
               call "ui/split-at" [ axis; mk (S.Num (ratio_text r)); a; b ]))))
-  | Split_panel { node; axis; ratio; kind } -> one (fun () ->
+  | Split_panel { node; axis; ratio; panel } -> one (fun () ->
       let sp, leaf = split_node node in
       let used = root_used src (List.hd sp) in
       edit_scope src sp (fun s ->
@@ -530,14 +530,13 @@ let rewrite ?fallback src op : (unit -> S.t list) list =
         let a = fresh used (leaf ^ "_a") in
         let b = fresh used (leaf ^ "_b") in
         let p, orig = List.nth sc.ps j in
-        let other = if head_sym orig = Some "ui/lisp" then "ui/graph" else "ui/lisp" in
         let ratio = ratio_text ratio in
         let split = call "ui/split-at"
           [ mk (S.Str (if axis = `H then "horizontal" else "vertical")); mk (S.Num ratio);
             sym a; sym b ] in
         let before = List.take j sc.ps
         and after = List.drop (j + 1) sc.ps in
-        reorder (rebuild sc (before @ [ sym a, orig; sym b, (match kind with Some kind -> panel_expr src kind | None -> call other []); p, split ] @ after) sc.res)))
+        reorder (rebuild sc (before @ [ sym a, orig; sym b, panel; p, split ] @ after) sc.res)))
   | Close_panel { node } -> one (fun () ->
       let sp, leaf = split_node node in
       edit_scope src sp (fun s ->
@@ -628,10 +627,9 @@ let rewrite ?fallback src op : (unit -> S.t list) list =
       map_items src (fun items ->
         if exists then List.map (fun i -> if root_name i = Some name then form else i) items
         else items @ [ form ]))
-  | Set_panel_kind { node; kind } -> one (fun () ->
+  | Set_panel_kind { node; panel } -> one (fun () ->
       let sp, leaf = split_node node in
-      let expr = panel_expr src kind in
-      edit_scope src sp (fun s -> set_node s leaf expr))
+      edit_scope src sp (fun s -> set_node s leaf panel))
   | Set_layout { graph; index } -> one (fun () ->
       edit_scope src [ graph ] (fun s ->
         let sc = editor_scope s in
@@ -715,8 +713,7 @@ let rewrite ?fallback src op : (unit -> S.t list) list =
             let gone = active_layout args in
             let sw = arg_set (arg_set sw (Pos a) None) (Kw "active") (Some (num (min a (n - 2)))) in
             prune (set_switch sc sc.ps place sw) (reach sc.ps gone)))
-  | Layout_window { graph; kind } -> one (fun () ->
-      let panel = panel_expr src kind in
+  | Layout_window { graph; panel } -> one (fun () ->
       edit_layout src graph (fun _ layout ->
         call "ui/split-at" [ mk (S.Str "horizontal"); mk (S.Num "0.5"); layout; call "ui/floating" [ panel ] ]))
   | Layout_float { graph; at } -> one (fun () ->

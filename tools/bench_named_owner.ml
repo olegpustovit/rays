@@ -27,12 +27,12 @@ let run objects =
       Input.Pointer_released (Input.LeftButton, point)] 3);
     assert (E.level !e = None);
     let expected = E.selected_node !e |> Option.get in
-    assert (Sop.Node.operation expected = "box");
+    assert (expected.kind = "box");
     for sample = 1 to 5 do
       Gc.full_major ();
       let allocated = Gc.allocated_bytes () and started = Unix.gettimeofday () in
       for _ = 1 to 10000 do
-        assert (Option.map Sop.Node.id (E.selected_node !e) = Some (Sop.Node.id expected))
+        assert (Option.map (fun (p : E.picked) -> p.id) (E.selected_node !e) = Some expected.id)
       done;
       Printf.printf "%d objects, sample %d: %.6f ms/lookup, %.0f bytes/lookup\n%!"
         objects sample ((Unix.gettimeofday () -. started) *. 0.1)

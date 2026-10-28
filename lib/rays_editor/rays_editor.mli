@@ -141,7 +141,7 @@ module Private : sig
       otherwise only the latest desired cook is retained until release. *)
   module Document : sig
     type t
-    val scene_graph : t -> Sop.Edit_graph.t
+    val scene_graph : t -> Editor_document.Kind_graph.t
     val object_network : t -> int -> (Flow_sop.Network.t * int option) option
     (** An object's immutable network and optional geometry display node.
         A missing owner returns [None]; an empty geometry network has no display. *)
@@ -152,7 +152,7 @@ module Private : sig
   module Preset : sig
     type loaded = { doc : Document.t; view : Flow.Syntax.t }
     val sanitize : string -> string
-    val default_name : unit -> string
+    val default_name : now:float -> string
     val path : directory:string -> name:string -> string
     val save : directory:string -> name:string -> doc:Document.t ->
       view:Flow.Syntax.t -> (string, string) result
@@ -491,8 +491,16 @@ module Editor : sig
   val scene : 'prepared t -> Rays.Frame.t -> Rays.Scene.t
   val close : 'prepared t -> unit
   val crash_dump : 'prepared t -> string -> unit
-  val document : 'prepared t -> Sop.Edit_graph.t
-  val selected_node : 'prepared t -> Sop.Node.t option
+  val document : 'prepared t -> Editor_document.Kind_graph.t
+  (** The open level's objects or World layers; none inside a geometry object. *)
+
+  val network : 'prepared t -> Sop.Edit_graph.t option
+  (** The lowered network of the open geometry object. *)
+
+  type picked = Core_model.picked = { id : int; label : string; kind : string; fields : Param.field_view list }
+  (** A scene object or World layer of the list, or the SOP node the graph pane has selected. *)
+
+  val selected_node : 'prepared t -> picked option
   val displayed_node : 'prepared t -> Sop.Node.t
   val prepared : 'prepared t -> 'prepared option
   val camera : 'prepared t -> Rays.Easy_camera.t
@@ -586,8 +594,8 @@ module Editor : sig
   val level : 'prepared t -> string option
   (** The object whose network is open; [None] at the scene level. *)
 
-  val scene_document : 'prepared t -> Sop.Edit_graph.t
-  (** Objects as nodes: input 0 is the parent, parameters the transform. *)
+  val scene_document : 'prepared t -> Editor_document.Kind_graph.t
+  (** The scene's objects: an object's input is its parent, its values the transform. *)
 
   val objects : 'prepared t -> (Rays_math.Mat4.t * 'prepared) list
   (** Visible, renderable geometry objects' latest cooks at their world

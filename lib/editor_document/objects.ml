@@ -1,16 +1,9 @@
 open Rays
-open Sop
 
-(* Scene objects are nodes of the scene network: input 0 is the parent and
-   parameters hold the transform and each kind's settings, so the graph, the
-   list, the inspector, handles, copy/paste, and undo work on them unchanged.
-   A geometry object owns a SOP network and the World a layer stack (both in
-   [Document.networks]); the scene network itself is never cooked. *)
-
-let empty = Rdk.Line_geometry.points [||]
-
-let marker operation ~label _ parent =
-  Custom.plain ~label ~operation (Option.to_list parent) (fun ~context:_ _ -> Ok empty)
+(* Scene objects are plain instances of these kinds ([Kind_graph]): the input is the parent and
+   the values hold the transform and each kind's settings.  A geometry object owns a SOP network
+   ([Document.networks]) and the World a layer stack ([Document.layers]); nothing here cooks. *)
+module G = Kind_graph
 
 module Geometry = struct
   type parameters = {
@@ -34,12 +27,9 @@ module Geometry = struct
       [@sop.folder "Transform"] [@sop.min 0.] [@sop.max 5.];
     visible : bool [@sop.default true] [@sop.label "Visible"];
     render : bool [@sop.default true] [@sop.label "Renderable"];
-  } [@@sop.node_key "geometry"] [@@sop.node_label "Geometry"]
-    [@@sop.node_category "Object"] [@@sop.node_inputs 1]
-    [@@sop.node_optional "0"] [@@deriving sop_params, sop_node]
+  } [@@deriving sop_params]
 
-  let build = parameters_build (marker "geometry")
-  let factory = parameters_factory build
+  let kind = Kind_graph.Kind.make ~key:"geometry" ~label:"Geometry" ~category:[ "Object" ] parameters_schema
 end
 
 (* A camera looks from its eye at its target; it has no parent. *)
@@ -74,19 +64,14 @@ module Camera = struct
     up_z : float [@sop.default 0.] [@sop.label "Up Z"] [@sop.folder "Transform"]
       [@sop.min (-1.)] [@sop.max 1.];
     follow_viewport : bool [@sop.default false] [@sop.label "Follow viewport"] [@sop.folder "Transform"];
-  } [@@sop.node_key "camera"] [@@sop.node_label "Camera"]
-    [@@sop.node_category "Object"] [@@sop.node_inputs 0]
-    [@@deriving sop_params, sop_node]
+  } [@@deriving sop_params]
 
-  let build = parameters_build (fun ~label _parameters ->
-    Custom.plain ~label ~operation:"camera" [] (fun ~context:_ _ -> Ok empty))
+  let kind = Kind_graph.Kind.make ~key:"camera" ~label:"Camera" ~category:[ "Object" ] parameters_schema
 
-  let factory = parameters_factory build
-
-  let of_node node =
-    if Node.operation node <> "camera" then None else
+  let of_node (node : G.node) =
+    if node.kind <> "camera" then None else
     let values = List.map (fun (field : Param.field_view) ->
-      field.name, field.current) (Node.parameter_fields node) in
+      field.name, field.current) (G.fields node) in
     match Param.apply_all parameters_schema parameters_default values with
     | Error _ -> None
     | Ok (p, _) ->
@@ -133,13 +118,9 @@ module Root = struct
       [@sop.min 1] [@sop.max 32] [@sop.hard_min 1] [@sop.hard_max 64];
     round_samples : int [@sop.default 4] [@sop.label "Round-corner samples"] [@sop.folder "Samples"]
       [@sop.min 0] [@sop.max 16] [@sop.hard_min 0] [@sop.hard_max 64];
-  } [@@sop.node_key "root"] [@@sop.node_label "Root"]
-    [@@sop.node_category "Render"] [@@sop.node_inputs 0]
-    [@@deriving sop_params, sop_node]
+  } [@@deriving sop_params]
 
-  let build = parameters_build (fun ~label _parameters ->
-    Custom.plain ~label ~operation:"root" [] (fun ~context:_ _ -> Ok empty))
-  let factory = parameters_factory build
+  let kind = Kind_graph.Kind.make ~key:"root" ~label:"Root" ~category:[ "Render" ] parameters_schema
 
   let default = parameters_default
 
@@ -188,24 +169,20 @@ module Light = struct
       [@sop.min 1.] [@sop.max 89.] [@sop.hard_min 0.1] [@sop.hard_max 89.9];
     visible : bool [@sop.default true] [@sop.label "Visible"];
     render : bool [@sop.default true] [@sop.label "Renderable"];
-  } [@@sop.node_key "light"] [@@sop.node_label "Light"]
-    [@@sop.node_category "Object"] [@@sop.node_inputs 1]
-    [@@sop.node_optional "0"] [@@deriving sop_params, sop_node]
+  } [@@deriving sop_params]
 
-  let build = parameters_build (marker "light")
-  let factory = parameters_factory build
+  let kind = Kind_graph.Kind.make ~key:"light" ~label:"Light" ~category:[ "Object" ] parameters_schema
 end
 
-let read schema default node =
+let read schema default (node : G.node) =
   match Param.apply_all schema default
-      (List.map (fun (field : Param.field_view) -> field.name, field.current)
-        (Node.parameter_fields node)) with
+      (List.map (fun (field : Param.field_view) -> field.name, field.current) (G.fields node)) with
   | Ok (values, _) -> Some values
   | Error _ -> None
 
-let geometry node = if Node.operation node = "geometry"
+let geometry (node : G.node) = if node.kind = "geometry"
   then read Geometry.parameters_schema Geometry.parameters_default node else None
-let light node = if Node.operation node = "light"
+let light (node : G.node) = if node.kind = "light"
   then read Light.parameters_schema Light.parameters_default node else None
 
 let radians degrees = degrees *. Float.pi /. 180.
@@ -221,20 +198,22 @@ let local node = match geometry node, light node with
               (Rays_math.Mat4.scaling (Rays_math.Vec3.create p.scale_x p.scale_y p.scale_z)))))
   | None, _ -> Rays_math.Mat4.identity
 
-let parent scene id = match Edit_graph.inputs scene ~node_id:id with
-  | Some inputs when Array.length inputs > 0 -> inputs.(0)
-  | Some _ | None -> None
+let parent scene id = Option.bind (G.find scene id) (fun (node : G.node) -> node.input)
+
+(* [above] is [id] or one of its descendants: parenting [id] under it would make a cycle *)
+let rec within scene id above = above = id
+  || (match parent scene above with Some p -> within scene id p | None -> false)
 
 (* The parent chain's transforms, excluding the object's own; a cycle is
-   impossible because the scene network is a DAG. *)
+   impossible: [reparent] and the lowering refuse one ([within]). *)
 let rec parent_world scene id = match parent scene id with
   | None -> Rays_math.Mat4.identity
   | Some parent_id ->
-      (match Edit_graph.find scene ~node_id:parent_id with
+      (match G.find scene parent_id with
        | Some node -> Rays_math.Mat4.mul (parent_world scene parent_id) (local node)
        | None -> Rays_math.Mat4.identity)
 
-let world scene id = match Edit_graph.find scene ~node_id:id with
+let world scene id = match G.find scene id with
   | Some node -> Rays_math.Mat4.mul (parent_world scene id) (local node)
   | None -> Rays_math.Mat4.identity
 
@@ -243,16 +222,12 @@ let visible node = match geometry node, light node with
   | None, Some p -> p.visible
   | None, None -> true
 
-let flag name node = List.exists (fun (field : Param.field_view) ->
-    field.name = name && field.current = Param.Bool_value true)
-    (Node.parameter_fields node)
-
-let has_flag name node = List.exists (fun (field : Param.field_view) ->
-    field.name = name) (Node.parameter_fields node)
+let flag name node = G.field node name = Some (Param.Bool_value true)
+let has_flag name node = G.field node name <> None
 
 (* A light object as a renderer light, its positions in world space. *)
 let to_light scene id =
-  Option.bind (Edit_graph.find scene ~node_id:id) (fun node ->
+  Option.bind (G.find scene id) (fun node ->
     Option.map (fun (p : Light.parameters) ->
       let space = parent_world scene id in
       let at = Rays_math.Mat4.transform_point space
@@ -278,11 +253,10 @@ let to_light scene id =
       | Directional -> Rays.Light.directional ~diffuse ~intensity ~direction ())
       (light node))
 
-let ids operation scene = List.filter_map (fun (info : Edit_graph.node_info) ->
-    if info.operation = operation then Some info.id else None) (Edit_graph.inspect scene)
+let ids = G.ids
 
 let lights ?(render = false) scene = List.filter_map (fun id ->
-    match Edit_graph.find scene ~node_id:id with
+    match G.find scene id with
     | Some node when visible node && (not render || flag "render" node) -> to_light scene id
     | Some _ | None -> None) (ids "light" scene)
 
@@ -306,7 +280,7 @@ let light_values (light : Rays.Light.t) =
    float "color_r" (float_of_int r /. 255.); float "color_g" (float_of_int g /. 255.);
    float "color_b" (float_of_int b /. 255.); float "intensity" light.intensity] @ extra
 
-let catalog = [Geometry.factory; Light.factory; Camera.factory]
+let kinds = [Geometry.kind; Light.kind; Camera.kind]
 
 (* Object parameters for a local matrix T·Rz·Ry·Rx·S (shear is dropped). *)
 let decompose matrix =
@@ -327,8 +301,7 @@ let decompose matrix =
 (* Parameters that keep [id] where it was in the world after its parent
    changed; [before] is the old parent chain's transform. *)
 let keep_world scene id ~before =
-  match Edit_graph.find scene ~node_id:id,
-      Rays_math.Mat4.inverse (parent_world scene id) with
+  match G.find scene id, Rays_math.Mat4.inverse (parent_world scene id) with
   | Some node, Some inverse ->
       let change = Rays_math.Mat4.mul inverse before in
       (match geometry node, light node with
@@ -349,19 +322,14 @@ let keep_world scene id ~before =
 let reparent scene ids under =
   List.fold_left (fun scene id ->
     let before = parent_world scene id in
-    let rewired = match under with
-      | Some above when above <> id -> Edit_graph.connect ~source:above ~consumer:id ~input_index:0 scene
-      | Some _ -> Ok scene
-      | None when parent scene id <> None ->
-          Edit_graph.disconnect ~consumer:id ~input_index:0 scene
-      | None -> Ok scene in
-    match rewired with
-    | Error _ -> scene
-    | Ok scene ->
-        (match keep_world scene id ~before with
-         | [] -> scene
-         | values -> (match Edit_graph.apply_parameters scene ~node_id:id values with
-           | Ok (scene, _) -> scene | Error _ -> scene))) scene ids
+    let scene = match under with
+      | Some above when not (within scene id above) -> G.update scene id (fun n -> { n with input = Some above })
+      | Some _ -> scene
+      | None -> G.update scene id (fun n -> { n with input = None }) in
+    match keep_world scene id ~before with
+    | [] -> scene
+    | values -> (match G.set_fields scene id values with
+      | Ok (scene, _) -> scene | Error _ -> scene)) scene ids
 
 (* each of [ids] moved out to its parent's parent *)
 let outdent scene ids =

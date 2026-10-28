@@ -366,8 +366,8 @@ let crash_dump value directory =
       (Core_panes.route core)
       (Text_pane.summary core.text)
       core.map_view (Pxui_graph.Scope.Private.grabbed core.scope_view) core.guide (Option.fold ~none:"-" ~some:fst core.hud)
-      (Option.fold ~none:"none" ~some:(fun node ->
-        Printf.sprintf "%s (#%d, %s)" (Node.label node) (Node.id node) (Node.operation node))
+      (Option.fold ~none:"none" ~some:(fun (node : Core_model.picked) ->
+        Printf.sprintf "%s (#%d, %s)" node.label node.id node.kind)
         (Core_list.selected_node core))
       (match Pxui_graph.Scope.selected core.scope_view with
        | [] -> "-"

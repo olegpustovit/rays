@@ -13,6 +13,7 @@ module Layers = Editor_document.Layers
 module Workspace_doc = Editor_document.Workspace_doc
 module Sync = Editor_document.Scene_sync
 module E = Flow.Eval
+module KG = Editor_document.Kind_graph
 
 let check condition message = if not condition then failwith message
 let factories = Sop.Nodes.factories
@@ -42,28 +43,23 @@ let lower ?previous workspace =
 
 let open_text text = lower (Ws_fixture.of_text text)
 let scene (doc : Document.t) = Document.scene_graph doc
-let node_id doc label = (List.find (fun (i : Edit_graph.node_info) -> i.label = label)
-  (Edit_graph.inspect (scene doc))).id
+let node_id doc label = (List.find (fun (i : KG.node) -> i.label = label)
+  ((scene doc))).id
 
 (* a document as labels say it: ids are allowed to differ *)
 let snapshot (doc : Document.t) =
   let graph = scene doc in
-  let fields node = List.map (fun (f : Param.field_view) -> f.name, f.current) (Node.parameter_fields node) in
-  let label g id = Option.map Node.label (Edit_graph.find g ~node_id:id) in
-  let objects = List.sort compare (List.map (fun (i : Edit_graph.node_info) ->
-    i.label, i.operation, Option.bind (Objects.parent graph i.id) (label graph), fields i.node)
-    (Edit_graph.inspect graph)) in
+  let fields node = List.map (fun (f : Param.field_view) -> f.name, f.current) (KG.fields node) in
+  let label g id = Option.map (fun (n : KG.node) -> n.label) (KG.find g id) in
+  let objects = List.sort compare (List.map (fun (i : KG.node) ->
+    i.label, i.kind, Option.bind (Objects.parent graph i.id) (label graph), fields i)
+    (graph)) in
   let layers = List.concat_map (fun wid ->
-    match Document.Int_map.find_opt wid doc.networks with
+    match Document.Int_map.find_opt wid doc.layers with
     | None -> []
-    | Some n ->
-        let g = n.graph.geometry in
-        let rec down id = match Edit_graph.find g ~node_id:id with
-          | None -> []
-          | Some node -> (Node.label node, Node.operation node, fields node)
-              :: (match Edit_graph.inputs g ~node_id:id with
-                  | Some [| Some below |] -> down below | _ -> []) in
-        Option.fold ~none:[] ~some:down n.displayed) (Objects.ids "world" graph) in
+    | Some layers ->
+        List.map (fun (node : KG.node) -> node.label, node.kind, fields node) (KG.stack layers))
+    (Objects.ids "world" graph) in
   objects, layers, Option.bind doc.active_camera (label graph),
   List.map (fun (f : Param.field_view) -> f.name, f.current) (Editor_document.Settings.fields doc.settings)
   |> List.sort compare
@@ -74,11 +70,10 @@ let source (doc : Document.t) = Workspace_doc.to_text (doc.workspace.ws)
 let same_after_reload doc what =
   check (snapshot (open_text (source doc)) = snapshot doc) (what ^ ": the saved text is not the document")
 
-let with_scene (doc : Document.t) graph =
-  { doc with scene = { doc.scene with graph = Result.get_ok (Flow_sop.Network.with_geometry graph doc.scene.graph) } }
+let with_scene (doc : Document.t) graph = { doc with scene = graph }
 
 let set doc label values =
-  with_scene doc (fst (Result.get_ok (Edit_graph.apply_parameters (scene doc) ~node_id:(node_id doc label) values)))
+  with_scene doc (fst (Result.get_ok (KG.set_fields (scene doc) (node_id doc label) values)))
 
 let reconcile ?adopt before after =
   Sync.reconcile ~factories ?adopt before after
@@ -89,15 +84,13 @@ let float name x = name, Param.Float_value x
 
 let world_network (doc : Document.t) =
   let wid = List.hd (Objects.ids "world" (scene doc)) in
-  wid, Document.Int_map.find wid doc.networks
+  wid, Document.Int_map.find wid doc.layers
 
-let with_world_network (doc : Document.t) wid (network : Document.network) graph =
-  Document.with_network doc (Document.Inside wid)
-    { network with graph = Result.get_ok (Flow_sop.Network.with_geometry graph network.graph) }
+let with_world_network (doc : Document.t) wid _ graph = Document.with_layers doc wid graph
 
 let layer_id doc label =
   let _, n = world_network doc in
-  (List.find (fun (i : Edit_graph.node_info) -> i.label = label) (Edit_graph.inspect n.graph.geometry)).id
+  (List.find (fun (i : KG.node) -> i.label = label) n).id
 
 (* an edit the list, a key or a panel asks of objects of the text *)
 let write ?(level = Document.Scene) doc edit =
@@ -225,15 +218,14 @@ let run () =
            (List.filter (fun (id, _) -> id = fill) edited.homes.objects)) "the unfolded object has no binding";
   same_after_reload edited "inline object";
   (* rename keeps the id, and the children's parent names follow *)
-  let renamed = with_scene doc (Edit_graph.replace_node
-    (Node.relabel "forearm" (Option.get (Edit_graph.find (scene doc) ~node_id:arm))) (scene doc) |> Result.get_ok) in
+  let renamed = with_scene doc (KG.update (scene doc) arm (fun n -> { n with label = "forearm" })) in
   let edited = ok (reconcile doc renamed) in
   text_first "rename" doc Document.Scene (Sync.Rename (arm, "forearm")) renamed;
   check (contains (source edited) ":name \"forearm\"" && node_id edited "forearm" = arm) "a rename did not keep the id";
   same_after_reload edited "rename";
   (* reparent keeping the world placement, rename the parent, then unparent *)
   let body = node_id doc "body" in
-  let under = with_scene doc (Edit_graph.connect ~source:body ~consumer:arm ~input_index:0 (scene doc) |> Result.get_ok) in
+  let under = with_scene doc (KG.update (scene doc) arm (fun n -> { n with input = Some body })) in
   let edited = ok (reconcile doc under) in
   (* a list's reparent keeps the world placement: the transform is computed before the text is written *)
   let placed = open_text (Str.global_replace (Str.regexp_string ":name \"body\"") ":name \"body\" :translate [0 3 0] :rotate [0 90 0]" text) in
@@ -248,8 +240,7 @@ let run () =
      (with_scene saved (Objects.outdent (scene saved) [ arm ])));
   check (contains (source edited) ":parent \"body\"") "a reparent did not reach the text";
   same_after_reload edited "reparent";
-  let torso = with_scene edited (Edit_graph.replace_node
-    (Node.relabel "torso" (Option.get (Edit_graph.find (scene edited) ~node_id:body))) (scene edited) |> Result.get_ok) in
+  let torso = with_scene edited (KG.update (scene edited) body (fun n -> { n with label = "torso" })) in
   let edited' = ok (reconcile edited torso) in
   text_first "parent rename" edited Document.Scene (Sync.Rename (body, "torso")) torso;
   (match Sync.write ~factories doc Document.Scene (Sync.Rename (arm, "body")) with
@@ -257,12 +248,12 @@ let run () =
   check (contains (source edited') ":parent \"torso\"" && not (contains (source edited') ":parent \"body\""))
     "renaming a parent left its child pointing at the old name";
   same_after_reload edited' "parent rename";
-  let free = with_scene edited (Edit_graph.disconnect ~consumer:arm ~input_index:0 (scene edited) |> Result.get_ok) in
+  let free = with_scene edited (KG.update (scene edited) arm (fun n -> { n with input = None })) in
   let edited' = ok (reconcile edited free) in
   check (not (contains (source edited') ":parent")) "unparenting left the parent keyword";
   same_after_reload edited' "unparent";
   (* delete: a bound object leaves its binding and the merge; an inline one leaves the merge *)
-  let gone = with_scene doc (Edit_graph.remove_nodes [ arm; fill ] (scene doc)) in
+  let gone = with_scene doc (KG.remove [ arm; fill ] (scene doc)) in
   let edited = wrote "delete" doc (Sync.Delete [ arm; fill ]) gone in
   check (not (contains (source edited) "\"arm\"") && not (contains (source edited) "\"fill\""))
     "a deleted object stayed in the text";
@@ -277,14 +268,14 @@ let run () =
   (* the World node, a layer of an inline stack, a layer rename *)
   let wid, network = world_network doc in
   let sun = layer_id doc "sun" in
-  let world_node graph values = fst (Result.get_ok (Edit_graph.apply_parameters graph ~node_id:wid values)) in
+  let world_node graph values = fst (Result.get_ok (KG.set_fields graph wid values)) in
   let edited = wrote "World key" doc (Sync.Fields [ wid, [ float "exposure" (-1.) ] ])
     (with_scene doc (world_node (scene doc) [ float "exposure" (-1.) ])) in
   check (contains (source edited) ":exposure -1.0") "a World node edit did not reach the text";
   same_after_reload edited "world node";
   let layer_edit doc id values =
     let wid, n = world_network doc in
-    with_world_network doc wid n (fst (Result.get_ok (Edit_graph.apply_parameters n.graph.geometry ~node_id:id values))) in
+    with_world_network doc wid n (fst (Result.get_ok (KG.set_fields n id values))) in
   let edited = wrote "layer key" ~level:(Document.Inside wid) doc (Sync.Fields [ sun, [ float "intensity" 321. ] ])
     (layer_edit doc sun [ float "intensity" 321. ]) in
   check (contains (source edited) ":intensity 321.0") "a World layer edit did not reach the text";
@@ -298,27 +289,25 @@ let run () =
   same_after_reload edited "world layer delete";
   (* reorder the stack: sky above sun *)
   let sky = layer_id doc "sky" in
-  let g = network.graph.geometry in
-  let swapped = Edit_graph.disconnect ~consumer:sun ~input_index:0 g |> Result.get_ok
-    |> Edit_graph.connect ~source:sun ~consumer:sky ~input_index:0 |> Result.get_ok in
-  let swapped = Document.with_network doc (Document.Inside wid)
-    { network with graph = Result.get_ok (Flow_sop.Network.with_geometry swapped network.graph);
-                   displayed = Some sky } in
+  let g = network in
+  let swapped = KG.update g sun (fun n -> { n with input = None })
+    |> (fun g -> KG.update g sky (fun n -> { n with input = Some sun })) in
+  let swapped = Document.with_layers doc wid swapped in
   let edited = wrote "restack" ~level:(Document.Inside wid) doc (Sync.Restack [ sun; sky ]) swapped in
   same_after_reload edited "world restack";
   check (List.map (fun (l, _, _) -> l) (let _, layers, _, _ = snapshot edited in layers) = [ "sky"; "sun" ])
     "the World stack was not rewritten";
   (* a preset replaces the layers: the World graph is written whole *)
   let world = List.assoc "white room" World.presets in
-  let preset_network = Result.get_ok (Layers.network_of_world world) in
+  let preset_network = Result.get_ok (Layers.graph_of_world world) in
   let values = snd (Layers.of_world world) in
-  let preset = with_scene (Document.with_network doc (Document.Inside wid) preset_network)
+  let preset = with_scene (Document.with_layers doc wid preset_network)
       (world_node (scene doc) values) in
   let edited = wrote "World preset" ~level:(Document.Inside wid) doc (Sync.Layers (preset_network, values)) preset in
   check (contains (source edited) "world/room") "a World preset did not reach the text";
   same_after_reload edited "world preset";
   (* deleting the World takes the member out of the scene; its graph stays *)
-  let worldless = Document.prune (with_scene doc (Edit_graph.remove_nodes [ wid ] (scene doc))) in
+  let worldless = Document.prune (with_scene doc (KG.remove [ wid ] (scene doc))) in
   let edited = wrote "World delete" doc (Sync.Delete [ wid ]) worldless in
   check (not (contains (source edited) "(scene/world") && Objects.ids "world" (scene edited) = [])
     "a deleted World stayed in the scene";
@@ -341,19 +330,15 @@ let run () =
     (graph scene :context scene
       (scene/merge (scene/light :name "a") (scene/light :name "a") (scene/light :name "b"))))|} in
   let b = node_id twins "b" in
-  let first = (List.hd (List.filter (fun (i : Edit_graph.node_info) -> i.label = "a") (Edit_graph.inspect (scene twins)))).id in
-  (match reconcile twins (with_scene twins (Edit_graph.connect ~source:first ~consumer:b ~input_index:0 (scene twins) |> Result.get_ok)) with
+  let first = (List.hd (List.filter (fun (i : KG.node) -> i.label = "a") ((scene twins)))).id in
+  (match reconcile twins (with_scene twins (KG.update (scene twins) b (fun n -> { n with input = Some first }))) with
    | Error _ -> ()
    | Ok _ -> failwith "a parent named like another object was written");
   (* objects only the host made: the first explicit edit writes them *)
   let bare = open_text "(workspace bare (graph g :context sop (sop/box)))" in
   let with_light (doc : Document.t) =
-    let node = Result.get_ok (Edit_graph.instantiate_optional Objects.Light.factory [ None ]) in
-    let node = Node.relabel "light1" node in
-    let graph = Result.get_ok (Edit_graph.add_node ~factory:Objects.Light.factory ~inputs:[| None |] node (scene doc)) in
-    let camera = Result.get_ok (Edit_graph.instantiate_optional Objects.Camera.factory []) in
-    let camera = Node.relabel "camera1" camera in
-    with_scene doc (Result.get_ok (Edit_graph.add_node ~factory:Objects.Camera.factory camera graph)) in
+    let graph = KG.add (scene doc) (KG.instance ~label:"light1" Objects.Light.kind) in
+    with_scene doc (KG.add graph (KG.instance ~label:"camera1" Objects.Camera.kind)) in
   let bare = with_light bare in
   check (not (contains (source bare) "scene/")) "the host's objects were written before any edit";
   check (Sync.set_fields ~factories bare Document.Scene ~node:(node_id bare "light1") [ float "intensity" 12. ] = Ok None
@@ -370,7 +355,7 @@ let run () =
     "a follow-the-viewport move was written or lost";
   (* a scene graph is authoritative for cameras and lights: what
      it does not say is not there, and the host seeds nothing *)
-  let names doc = List.sort compare (List.map (fun (i : Edit_graph.node_info) -> i.label) (Edit_graph.inspect (scene doc))) in
+  let names doc = List.sort compare (List.map (fun (i : KG.node) -> i.label) ((scene doc))) in
   let with_graphs extra = Ws_fixture.of_text ("(workspace bare (graph g :context sop (sop/box))" ^ extra ^ ")") in
   check (names (lower ~previous:bare (with_graphs "")) = [ "camera1"; "g"; "light1" ])
     "a workspace with no scene graph lost the host's camera and light";
@@ -381,7 +366,7 @@ let run () =
   (* deleting a host-made camera or light adopts the other host objects into a scene graph and
      removes the one; the saved text has no seed to bring it back *)
   let without (doc : Document.t) label =
-    Document.prune (with_scene doc (Edit_graph.remove_nodes [ node_id doc label ] (scene doc))) in
+    Document.prune (with_scene doc (KG.remove [ node_id doc label ] (scene doc))) in
   let no_camera = ok (reconcile bare (without bare "camera1")) in
   check (contains (source no_camera) "graph scene" && contains (source no_camera) "scene/light"
          && not (contains (source no_camera) "scene/camera")) "a deleted host camera was not written as absent";
@@ -408,7 +393,7 @@ let run () =
     expr = call "scene/light" [ Flow.Syntax.make (Flow.Syntax.Kw "name"); Flow.Syntax.make (Flow.Syntax.Str "lamp") ] }) in
   check (contains (source added) "scene/merge body arm cam side (scene/light :name \"fill\") lamp"
          || contains (source added) "lamp)") "a new object did not join the scene's merge";
-  check (List.exists (fun (i : Edit_graph.node_info) -> i.label = "lamp") (Edit_graph.inspect (scene added)))
+  check (List.exists (fun (i : KG.node) -> i.label = "lamp") ((scene added)))
     "a new object is not in the scene";
   let layered = edit doc (Flow_graph.Flow_edit.Add_node { scope = [ "world" ]; name = "haze";
     expr = call "world/gradient" [] }) in
@@ -436,18 +421,18 @@ let run () =
 (* ---- the copies of a loop are one template ---- *)
 
 let lamps (doc : Document.t) =
-  List.filter_map (fun (i : Edit_graph.node_info) -> if i.operation = "light" then Some i else None)
-    (Edit_graph.inspect (scene doc))
+  List.filter_map (fun (i : KG.node) -> if i.kind = "light" then Some i else None)
+    ((scene doc))
 
-let field (i : Edit_graph.node_info) name =
+let field (i : KG.node) name =
   List.find_map (fun (f : Param.field_view) -> if f.name = name then Some f.current else None)
-    (Node.parameter_fields i.node)
+    (KG.fields i)
 
 let set_id (doc : Document.t) id values =
-  with_scene doc (fst (Result.get_ok (Edit_graph.apply_parameters (scene doc) ~node_id:id values)))
+  with_scene doc (fst (Result.get_ok (KG.set_fields (scene doc) id values)))
 
 let without_ids (doc : Document.t) ids =
-  Document.prune (with_scene doc (Edit_graph.remove_nodes ids (scene doc)))
+  Document.prune (with_scene doc (KG.remove ids (scene doc)))
 
 let refused = function Error message -> message | Ok _ -> failwith "an edit the loop cannot take was written"
 
@@ -491,16 +476,15 @@ let run_loops () =
            && List.map (fun i -> field i "translate_x") (lamps lifted) = List.map (fun i -> field i "translate_x") (lamps doc))
       (what ^ ": a literal component of a computed vector was not edited in the template: " ^ source lifted);
     (* rename: the template's :name *)
-    let renamed = with_scene doc (Result.get_ok (Edit_graph.replace_node
-      (Node.relabel "spot" (Option.get (Edit_graph.find (scene doc) ~node_id:third))) (scene doc))) in
+    let renamed = with_scene doc (KG.update (scene doc) third (fun n -> { n with label = "spot" })) in
     let renamed = ok (reconcile doc renamed) in
-    check (List.for_all (fun (i : Edit_graph.node_info) -> i.label = "spot") (lamps renamed)
+    check (List.for_all (fun (i : KG.node) -> i.label = "spot") (lamps renamed)
            && contains (source renamed) ":name \"spot\"" && not (contains (source renamed) ":name \"lamp\""))
-      (what ^ ": a rename did not reach the template :name: " ^ source renamed ^ String.concat "," (List.map (fun (i : Edit_graph.node_info) -> i.label) (lamps renamed)));
+      (what ^ ": a rename did not reach the template :name: " ^ source renamed ^ String.concat "," (List.map (fun (i : KG.node) -> i.label) (lamps renamed)));
     (* delete one copy: the loop skips that iteration, the others keep their iteration, id and place *)
     let x doc = List.map (fun i -> field i "translate_x") (lamps doc) in
     let xs = List.map (fun v -> Some (Param.Float_value v)) in
-    let ids doc = List.sort compare (List.map (fun (i : Edit_graph.node_info) -> i.id) (lamps doc)) in
+    let ids doc = List.sort compare (List.map (fun (i : KG.node) -> i.id) (lamps doc)) in
     let gone = ok (write doc (Sync.Delete ([ third ]))) in
     check (contains (source gone) ":skip [2]" && not (contains (source gone) "take") && not (contains (source gone) "drop"))
       (what ^ ": copy 3 was not skipped: " ^ source gone);
@@ -534,7 +518,7 @@ let run_loops () =
       (scene/merge (scene/geometry (ref g) :name "body")
                    (for [i (range 2) j (range 3)] (scene/light :name "lamp" :translate [i j 0])))))|} in
   check (List.length (lamps grid) = 6) "the two-clause loop did not make six lamps";
-  let ids doc = List.sort compare (List.map (fun (i : Edit_graph.node_info) -> i.id) (lamps doc)) in
+  let ids doc = List.sort compare (List.map (fun (i : KG.node) -> i.id) (lamps doc)) in
   let xy doc = List.map (fun i -> field i "translate_x", field i "translate_y") (lamps doc) in
   let cell i j = Some (Param.Float_value i), Some (Param.Float_value j) in
   let victim = (List.nth (lamps grid) 4).id in
@@ -563,7 +547,7 @@ let run_loops () =
                    (for [i (range 3)]
                      (scene/merge (scene/light :name "a" :translate [i 0 0]) (scene/light :name "b" :translate [i 1 0]))))))|} in
   check (List.length (lamps pairs) = 6) "the loop of pairs did not make six lamps";
-  let at doc label i = List.find_opt (fun (l : Edit_graph.node_info) -> l.label = label
+  let at doc label i = List.find_opt (fun (l : KG.node) -> l.label = label
     && field l "translate_x" = Some (Param.Float_value i)) (lamps doc) in
   let id_at doc label i = (Option.get (at doc label i)).id in
   let half = ok (write pairs (Sync.Delete ([ id_at pairs "a" 0. ]))) in
@@ -628,13 +612,12 @@ let run_nested_loops () =
   let message = refused (reconcile doc (set_id doc (pick 3) [ float "translate_x" 9. ])) in
   check (contains message "computed by the loop" && contains message "(now i)")
     ("a computed field of a nested copy was not refused with its expression: " ^ message);
-  let renamed = ok (reconcile doc (with_scene doc (Result.get_ok (Edit_graph.replace_node
-    (Node.relabel "spot" (Option.get (Edit_graph.find (scene doc) ~node_id:(pick 3)))) (scene doc))))) in
-  check (List.for_all (fun (i : Edit_graph.node_info) -> i.label = "spot") (lamps renamed)
+  let renamed = ok (reconcile doc (with_scene doc (KG.update (scene doc) (pick 3) (fun n -> { n with label = "spot" })))) in
+  check (List.for_all (fun (i : KG.node) -> i.label = "spot") (lamps renamed)
          && contains (source renamed) ":name \"spot\"" && not (contains (source renamed) ":name \"lamp\""))
     ("a nested rename did not reach the template: " ^ source renamed);
   same_after_reload renamed "nested rename";
-  let ids doc = List.sort compare (List.map (fun (i : Edit_graph.node_info) -> i.id) (lamps doc)) in
+  let ids doc = List.sort compare (List.map (fun (i : KG.node) -> i.id) (lamps doc)) in
   let ij doc = List.map (fun i -> field i "translate_x", field i "translate_y") (lamps doc) in
   let cell i j = Some (Param.Float_value i), Some (Param.Float_value j) in
   let all = [ 0, 0; 0, 1; 1, 0; 1, 1; 2, 0; 2, 1 ] in
@@ -756,9 +739,9 @@ let run_root () =
   check (doc.active_camera = Some (node_id doc "side")) "the root's :camera is not the active camera";
   let wid = List.hd (Objects.ids "world" (scene doc)) in
   check (List.mem_assoc wid doc.homes.objects && doc.homes.world_graph = Some "sky"
-         && Document.Int_map.mem wid doc.networks && List.length doc.homes.layers = 2)
+         && Document.Int_map.mem wid doc.layers && List.length doc.homes.layers = 2)
     "scene/world did not read its world graph's layers";
-  check (Edit_graph.find (scene doc) ~node_id:wid |> Option.get |> Node.label = "Bloom") "the World lost its name";
+  check ((KG.find (scene doc) wid |> Option.get).label = "Bloom") "the World lost its name";
   same_after_reload doc "root and World";
   (* a root edit round-trips Save, one undo entry's worth of text *)
   let edited = ok (write doc (Sync.Root { doc.root with width = 1024; bounces = 8 })) in
@@ -784,7 +767,7 @@ let run_root () =
   (* the World is a merge member: its keywords edit like an object's, its layers its graph's *)
   let wid, network = world_network doc in
   let sun = layer_id doc "sun" and sky = layer_id doc "sky" in
-  let world_node graph values = fst (Result.get_ok (Edit_graph.apply_parameters graph ~node_id:wid values)) in
+  let world_node graph values = fst (Result.get_ok (KG.set_fields graph wid values)) in
   let edited = wrote "World member" doc (Sync.Fields [ wid, [ float "exposure" 1.; float "rotation" 20. ] ])
     (with_scene doc (world_node (scene doc) [ float "exposure" 1.; float "rotation" 20. ])) in
   check (contains (flat (source edited)) "(scene/world (ref sky) :name \"Bloom\" :exposure 1.0 :rotation 20.0)")
@@ -792,7 +775,7 @@ let run_root () =
   same_after_reload edited "World member";
   let layer_edit doc id values =
     let wid, n = world_network doc in
-    with_world_network doc wid n (fst (Result.get_ok (Edit_graph.apply_parameters n.graph.geometry ~node_id:id values))) in
+    with_world_network doc wid n (fst (Result.get_ok (KG.set_fields n id values))) in
   let edited = wrote "World member layer" ~level:(Document.Inside wid) doc (Sync.Fields [ sun, [ float "intensity" 321. ] ])
     (layer_edit doc sun [ float "intensity" 321. ]) in
   check (contains (source edited) ":intensity 321.0" && layer_id edited "sun" = sun) "a layer of the World's graph was not edited";
@@ -802,21 +785,20 @@ let run_root () =
   check (not (contains (source edited) "world/sun") && contains (source edited) "world/sky"
          && Objects.ids "world" (scene edited) <> []) ("a deleted top layer: " ^ source edited);
   same_after_reload edited "World member layer delete";
-  let g = network.graph.geometry in
-  let swapped = Edit_graph.disconnect ~consumer:sun ~input_index:0 g |> Result.get_ok
-    |> Edit_graph.connect ~source:sun ~consumer:sky ~input_index:0 |> Result.get_ok in
-  let swapped = Document.with_network doc (Document.Inside wid)
-    { network with graph = Result.get_ok (Flow_sop.Network.with_geometry swapped network.graph); displayed = Some sky } in
+  let g = network in
+  let swapped = KG.update g sun (fun n -> { n with input = None })
+    |> (fun g -> KG.update g sky (fun n -> { n with input = Some sun })) in
+  let swapped = Document.with_layers doc wid swapped in
   let edited = wrote "World member restack" ~level:(Document.Inside wid) doc (Sync.Restack [ sun; sky ]) swapped in
   check (List.map (fun (l, _, _) -> l) (let _, layers, _, _ = snapshot edited in layers) = [ "sky"; "sun" ]
          && contains (source edited) "(scene/world (ref sky)") ("a restack: " ^ source edited);
   same_after_reload edited "World member restack";
   (let world = List.assoc "white room" World.presets in
-   let network = Result.get_ok (Layers.network_of_world world) and values = snd (Layers.of_world world) in
+   let network = Result.get_ok (Layers.graph_of_world world) and values = snd (Layers.of_world world) in
    ignore (wrote "World member preset" ~level:(Document.Inside wid) doc (Sync.Layers (network, values))
-     (with_scene (Document.with_network doc (Document.Inside wid) network) (world_node (scene doc) values))));
+     (with_scene (Document.with_layers doc wid network) (world_node (scene doc) values))));
   (* deleting the World leaves its merge input, its binding and its graph (nothing else reads it) *)
-  let worldless = Document.prune (with_scene doc (Edit_graph.remove_nodes [ wid ] (scene doc))) in
+  let worldless = Document.prune (with_scene doc (KG.remove [ wid ] (scene doc))) in
   let edited = wrote "World member delete" doc (Sync.Delete [ wid ]) worldless in
   check (Objects.ids "world" (scene edited) = [] && not (contains (source edited) "scene/world")
          && not (contains (source edited) "graph sky") && contains (source edited) "scene/root")
@@ -966,18 +948,17 @@ let run_compose () =
       (what ^ " rewrote the world graph: " ^ source doc) in
   let wid, network = world_network skies in
   let haze = layer_id skies "haze" and sun = layer_id skies "sun" and base = layer_id skies "base" in
-  let g = network.graph.geometry in
+  let g = network in
   let edited = ok (write ~level:(Document.Inside wid) skies (Sync.Delete [ haze ])) in
   kept "deleting a layer" edited;
   check (not (contains (source edited) "haze") && contains (flat (source edited)) "(world/sun base")
     ("a deleted layer of a World member: " ^ source edited);
   same_after_reload edited "member layer delete";
-  let swapped = Edit_graph.disconnect ~consumer:haze ~input_index:0 g |> Result.get_ok
-    |> Edit_graph.disconnect ~consumer:sun ~input_index:0 |> Result.get_ok
-    |> Edit_graph.connect ~source:sun ~consumer:haze ~input_index:0 |> Result.get_ok
-    |> Edit_graph.connect ~source:base ~consumer:sun ~input_index:0 |> Result.get_ok in
-  let swapped = Document.with_network skies (Document.Inside wid)
-    { network with graph = Result.get_ok (Flow_sop.Network.with_geometry swapped network.graph); displayed = Some haze } in
+  let swapped = KG.update g haze (fun n -> { n with input = None })
+    |> (fun g -> KG.update g sun (fun n -> { n with input = None }))
+    |> (fun g -> KG.update g haze (fun n -> { n with input = Some sun }))
+    |> (fun g -> KG.update g sun (fun n -> { n with input = Some base })) in
+  let swapped = Document.with_layers skies wid swapped in
   let edited = wrote "member layer move" ~level:(Document.Inside wid) skies (Sync.Restack [ base; sun; haze ]) swapped in
   kept "moving a layer" edited;
   check (List.map (fun (l, _, _) -> l) (let _, layers, _, _ = snapshot edited in layers) = [ "haze"; "sun"; "base" ])
@@ -994,8 +975,7 @@ let run_compose () =
     (graph scene :context scene
       (scene/merge (scene/light :name "a") (scene/light :name "b") (scene/light :name "c" :parent "b"))))|x} in
   let a = node_id family "a" in
-  (match reconcile family (with_scene family (Edit_graph.replace_node
-      (Node.relabel "b" (Option.get (Edit_graph.find (scene family) ~node_id:a))) (scene family) |> Result.get_ok)) with
+  (match reconcile family (with_scene family (KG.update (scene family) a (fun n -> { n with label = "b" }))) with
    | Error message -> check (contains message "named") message
    | Ok _ -> failwith "a rename to another object's name was written");
   (* an object the host made is still its graph's after another graph's edit lowered the text again *)
@@ -1061,11 +1041,21 @@ let run_instances () =
   check (Objects.ids "world" (scene doc) = []) "the part holds no World";
   (match doc.view_worlds with
    | [ (_, Some day); (_, Some night) ] ->
-       check (Sop.Node.label day.node = "Noon" && Sop.Node.label night.node = "Dusk")
+       check (day.node.label = "Noon" && night.node.label = "Dusk")
          "each viewport's World node is its own";
        check (Layers.to_world day.node day.layers <> None && Layers.to_world night.node night.layers <> None)
          "both Worlds bake";
        check (Layers.to_world day.node day.layers <> Layers.to_world night.node night.layers)
          "and they differ (exposure, layers)"
    | _ -> failwith "each viewport over a root names its World");
+  (* objects are plain data: an object parented under its own child is refused, in the derived
+     scene and in the text *)
+  let a = KG.instance ~label:"a" Objects.Geometry.kind in
+  let b = { (KG.instance ~label:"b" Objects.Geometry.kind) with input = Some a.id } in
+  check (List.map (fun (n : KG.node) -> n.input) (Objects.reparent [ a; b ] [ a.id ] (Some b.id)) = [ None; Some a.id ])
+    "a reparent under a child made a cycle";
+  check (Result.is_error (Contexts.of_workspace ~factories (Ws_fixture.of_text {|(workspace c
+    (graph g :context sop (sop/box))
+    (graph scene :context scene (scene/merge (scene/geometry (ref g) :name "a" :parent "b")
+      (scene/geometry (ref g) :name "b" :parent "a"))))|}))) "two objects parented under each other lowered";
   print_endline "scene instances: each viewport has its root and its World ok"
