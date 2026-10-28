@@ -195,7 +195,7 @@ Findings: UI1–UI6 UI9–UI18 UI21 UI22 UI25–UI29 UI31 UI33 UI34 UI36 SP16 FL
 Delete `pathtrace.metal`. The path tracer is a plain `.rays` program; placement puts its pixel map on the device, and each target emits it. No GPU-only language features.
 
 - [x] P8.S1: Benchmark first: today's kernel, window-free, on `pathtracer.rays` (480 × 840) and shattered-studio at fixed spp and bounces, interleaved A/B. This is the bar. Evidence: benchmarks/pathtracer-lisp.md: pathtracer.rays at 480 x 840, 16 spp, five rounds, median 0.520 s per round, one RGBA8 hash. status.md records the frozen shattered-studio five-round run (1600 x 1600, 363.95 s).
-- [ ] P8.S2: Add one host op, `scene/trace`, returning a hit record. CPU: `Surface_index.raycast_many_into`. Metal: `intersector`. SPIR-V: `OpRayQuery*`. Spheres are an in-loop procedural test, which drops `Function_tables`. Add the accumulation-buffer sink (reuse `image_sink` for RGBA8).
+- [x] P8.S2: Add one host op, `scene/trace`, returning a hit record. CPU: `Surface_index.raycast_many_into`. Metal: `intersector`. SPIR-V: `OpRayQuery*`. Spheres are an in-loop procedural test, which drops `Function_tables`. Add the accumulation-buffer sink (reuse `image_sink` for RGBA8). Evidence: scene/trace returns a hit record on CPU (Surface_index host), Metal (intersector over a Kernel_layout scene binding) and SPIR-V (ray query). It covers instancing, procedural spheres and strands as in-loop analytic tests, and vertex and instance motion (536acd94, 64f0b712). Film accumulation is a bound in-place kernel plus resolve and Image_sink. Native tests match the CPU within 1e-5.
 - [ ] P8.S3: Write `pathtrace.rays` from the MSL. The CPU run is the oracle; the GPU film matches it within tolerance. Port `resolve_preview` first, then `trace_pixel`, each slice A/B-gated.
 - [ ] P8.S4: Delete `pathtrace.metal`, `embed_metal.ml`, the TRACE variants and the intersection-table path.
 - [x] P8.S5: SPIR-V emitter: binary words over the same IR and `Kernel_layout`, with `spirv-val` on goldens in tests. It joins MSL, WGSL and JS as just another emitter. Evidence: lib/flow_gpu/spirv.ml writes binary SPIR-V words over the shared IR and Kernel_layout; test_spirv validates 21 deterministic goldens with spirv-val (Vulkan 1.1).
@@ -247,7 +247,7 @@ Exit gates:
 - [ ] P6.G1: rdk under about 80k lines including tests
 - [x] P6.G2: no `unguard`/`_raw` pairs Evidence: grep for unguard or _raw in lib/rdk finds only local helpers (add_raw, insert_raw, group_of_raw), none of them guarded twins.
 - [ ] P6.G3: one parallel helper
-- [ ] P6.G4: rdk test alias under 30 s warm
+- [x] P6.G4: rdk test alias under 30 s warm Evidence: after touching an rdk test, a relink and run of every rdk test group took 21.9 s wall on the loaded machine.
 
 Risk: Medium. Exactness and byte-identical parallel results must hold. Every helper swap carries the existing 1-domain vs multi-domain checks.
 
@@ -591,7 +591,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [ ] **WN9** (P4, high, portability, effort M). Location at baseline: rays_pathtracer.ml:803,1103,1136 · Shader binding kind Intersection_table · Caps.Function_tables. Spheres in the path tracer require Metal intersection function tables. Vulkan ray query has no such object: procedural AABB hits are resolved in the shader loop. Action: Make procedural geometry a backend matter. OGPU keeps `Bounding_boxes`, the path tracer stops requiring `Function_tables` for spheres, and the Metal backend keeps its tables internally.
 
-- [ ] **WN10** (P4, med, portability, effort S). Location at baseline: ogpu_core/acceleration.mli geometry Motion_triangles, Curves; Caps (Ray_tracing_curves only). Motion geometry and curves are native on Metal, but only available on Vulkan through vendor extensions or as AABBs. Motion has no capability flag. Action: Add a `Ray_tracing_motion` cap; the path tracer degrades (shutter midpoint for motion, AABB strands for curves) instead of failing.
+- [x] **WN10** (P4, med, portability, effort S). Location at baseline: ogpu_core/acceleration.mli geometry Motion_triangles, Curves; Caps (Ray_tracing_curves only). Motion geometry and curves are native on Metal, but only available on Vulkan through vendor extensions or as AABBs. Motion has no capability flag. Action: Add a `Ray_tracing_motion` cap; the path tracer degrades (shutter midpoint for motion, AABB strands for curves) instead of failing. Evidence: Caps.Ray_tracing_motion exists; without it scenes build at the shutter midpoint and a native test matches the CPU at time 0.5. Without Ray_tracing_curves, strands are an in-loop capsule test (CPU, MSL, SPIR-V); native round linear curves are used when the cap is set.
 
 - [x] **WN5** (P0, low, portability, effort S). Location at baseline: rays/sketch.ml:29 default "/tmp/rays-crash". A hard-coded Unix temp path. Action: Use `Filename.get_temp_dir_name ()`.
 
