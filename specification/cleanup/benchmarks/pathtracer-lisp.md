@@ -279,3 +279,7 @@ description digest equal). The span allocates the same in both (2.6 M minor, 2.5
 pre-span heap and allocation are the editor-document lowering's, not the tracer's. Output unchanged:
 render_workspace digest 54d9d203..., `test_pathtracer_exact_m1` both M1 digests, `test_lisp` films 0 of
 576 channels against the CPU walker (now also rendered from cached kernels).
+
+After merging dev (trace helpers, `~spheres`; d0ffef08), same loop, load 4.9-6.7: old 198.5 200.1 200.2 202.3
+202.5 206.9; cache warm 208.3 209.0 209.2 213.5 218.1 243.4; cache emptied 256.1-273.5. The cache key now
+also holds the scene facts: the curve and sphere facts reach the emitter outside the kernel text.
