@@ -166,7 +166,12 @@ let with_attr : Flow.Op.t =
         attr.signature with
         pos = attr.signature.pos @ [ ("values", Flow.Ty.Any) ];
         kw =
-          attr.signature.kw @ [ ("selection", Flow.Ty.Array Flow.Ty.Int); ("default", Flow.Ty.Any) ];
+          attr.signature.kw
+          @ [
+              ("selection", Flow.Ty.Array Flow.Ty.Int);
+              ("default", Flow.Ty.Any);
+              ("when", Flow.Ty.Bool);
+            ];
       };
     out = (fun _ -> Flow.Ty.geometry);
     out_args =
@@ -203,7 +208,13 @@ let with_attr : Flow.Op.t =
         validate_args args;
         if List.mem_assoc "selection" args <> List.mem_assoc "default" args then
           Flow.Value.fail "E_ATTR_SELECTION" "Selected writes require both selection and default.");
-    body = (fun ~live:_ ~node args -> node "sop/with_attr" args);
+    body =
+      (fun ~live:_ ~node args ->
+        (* [:when] guards the write: a static guard decides it here, a cooked one when it cooks *)
+        match List.assoc_opt "when" args with
+        | Some (Flow.Value.Bool false) -> List.assoc "geometry" args
+        | Some (Flow.Value.Bool true) -> node "sop/with_attr" (List.remove_assoc "when" args)
+        | _ -> node "sop/with_attr" args);
   }
 
 let has_attr : Flow.Op.t =

@@ -369,9 +369,10 @@
       (if (equal? owner "point") (sop/group geo :name name :owner "point")
         (sop/group geo :name name :owner owner :as_owner "point"))))
   (defn deform_group_missing :context sop [(geo : geometry) (owner : text) (name : text)]
-    (and (not (text/blank? name))
-         (not (fold [found false] [probe (sop/group_names geo "" :owner owner)]
-                (or found (equal? probe name))))))
+    ; an if, not and: a blank name decides it before the cooked group names are read
+    (if (text/blank? name) false
+      (not (fold [found false] [probe (sop/group_names geo "" :owner owner)]
+             (or found (equal? probe name))))))
   (defn deform_error :context value [(op : text) (code : text) (reason : text)]
     (error code (str op " could not produce valid geometry")
       :cause (str op " [" code "]: " reason)))

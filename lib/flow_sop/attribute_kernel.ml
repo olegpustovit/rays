@@ -595,6 +595,11 @@ let rec resolve ?context ~geometry value =
                 args ) ->
               Result.bind (concrete_args ?context ~geometry args) (fun args ->
                   Graph_kernel.resolve (E.Source (name, ty, args)))
+          | E.Source ("$core/cooked", ty, [ ("id", E.Int id) ]) when Flow.Ty.is_geometry ty -> (
+              (* a geometry a lowered program passes to a host source (Core_lower) *)
+              match geometry id with
+              | Some _ -> Ok (E.Deferred (ty, id))
+              | None -> error "E_DATA_SOURCE" "Attribute source has not been cooked.")
           | source -> Group_kernel.resolve ~geometry source))
 
 (* Array arguments of a pure source may still be host sources (a sop/adjacency
@@ -1427,8 +1432,8 @@ let delete_after deletes cancel geometry =
     (Ok geometry) deletes
 
 let node ?state ?(reference = false) ?(strict = false) ?elems ?profile ?approx ?gpu ?selection
-    ?default ?(owner = A.Point) ?(kind = "vec3") ?(deletes = []) ~source ~name ~values ~sources
-    inputs =
+    ?default ?guard ?(owner = A.Point) ?(kind = "vec3") ?(deletes = []) ~source ~name ~values
+    ~sources inputs =
   let selected = selection <> None || default <> None in
   let data =
     if not selected then values
@@ -1460,109 +1465,130 @@ let node ?state ?(reference = false) ?(strict = false) ?elems ?profile ?approx ?
     ^ ";"
     ^ Flow.Value.key_of ~residual:E.Residual.residual_id data
     ^ Option.fold ~none:""
+        ~some:(fun guard -> ";when " ^ Flow.Value.key_of ~residual:E.Residual.residual_id guard)
+        guard
+    ^ Option.fold ~none:""
         ~some:(fun bindings ->
           Flow.Value.key_of ~residual:E.Residual.residual_id (E.Record bindings))
         elems
     ^ Option.fold ~none:"" ~some:E.state_stamp state
   in
+  let dependencies =
+    dependencies (match guard with None -> data | Some g -> E.Record [ ("d", data); ("w", g) ])
+  in
   let node =
     N.Build.make_geometry ~label:("Write " ^ name) ~operation:"flow.with_attr" ~version:1
-      ~parameters ~cook_mode:(N.Duplicate_input 0) ~dependencies:(dependencies data)
-      ~inputs:(Array.of_list inputs) (fun ~node_id:_ context geometries ->
+      ~parameters ~cook_mode:(N.Duplicate_input 0) ~dependencies ~inputs:(Array.of_list inputs)
+      (fun ~node_id:_ context geometries ->
         let geometry id =
           Option.map (fun index -> geometries.(index)) (List.find_index (( = ) id) sources)
         in
         let resolve = resolve ~context ~geometry in
+        (* a cooked [:when] is decided before the values, which may read what it tests for *)
+        let guarded =
+          match guard with
+          | None -> Ok true
+          | Some guard ->
+              Result.bind
+                (E.Host.force_reference ?state ?elems ~resolve guard
+                   ~live:(Sop.Context.input context))
+                (function
+                  | E.Bool b -> Ok b | _ -> error "E_ATTR_TYPE" "sop/with_attr :when must be a bool")
+        in
         let result =
           if geometries = [||] then error "E_DATA_SOURCE" "Attribute write needs geometry."
           else if Sop.Context.cancelled context then
             error "E_CANCELLED" "Attribute kernel cancelled."
           else
-            Result.bind program (fun program ->
-                let live = Sop.Context.input context in
-                if selected then
-                  let force program =
-                    Flow_ir.Executor.force ?state ?elems ~reference ~strict ~resolve program ~live
-                  in
-                  let fields =
-                    match selected_constant with
-                    | None -> force program
-                    | Some ((op, count, value), rest) ->
-                        Result.bind (force count) (fun count ->
-                            Result.bind
-                              (match value with
-                              | None -> Ok []
-                              | Some value ->
-                                  Result.map (fun value -> [ ("value", value) ]) (force value))
-                              (fun value ->
-                                (* Reuse the declared constructor's count, empty-fill and
+            Result.bind guarded @@ fun guarded ->
+            if not guarded then Ok geometries.(0)
+            else
+              Result.bind program (fun program ->
+                  let live = Sop.Context.input context in
+                  if selected then
+                    let force program =
+                      Flow_ir.Executor.force ?state ?elems ~reference ~strict ~resolve program ~live
+                    in
+                    let fields =
+                      match selected_constant with
+                      | None -> force program
+                      | Some ((op, count, value), rest) ->
+                          Result.bind (force count) (fun count ->
+                              Result.bind
+                                (match value with
+                                | None -> Ok []
+                                | Some value ->
+                                    Result.map (fun value -> [ ("value", value) ]) (force value))
+                                (fun value ->
+                                  (* Reuse the declared constructor's count, empty-fill and
                            finite checks before evaluating later write arguments. *)
-                                let values =
-                                  try
-                                    Ok
-                                      (Flow.Op.constant_array_descriptor op.Flow.Op.name
-                                         (("count", count) :: value))
-                                  with Diagnostic.Error d -> Error d
-                                in
-                                Result.bind values (fun values ->
-                                    Result.bind rest (fun rest ->
-                                        Result.bind (force rest) (function
-                                          | E.Record fields ->
-                                              Ok (E.Record (("values", values) :: fields))
-                                          | _ ->
-                                              error "E_ATTR_TYPE"
-                                                "Selected write data must be a record.")))))
-                  in
-                  Result.bind fields (function
-                    | E.Record fields -> (
-                        match
-                          ( List.assoc_opt "values" fields,
-                            List.assoc_opt "selection" fields,
-                            List.assoc_opt "default" fields )
-                        with
-                        | Some values, Some selection, Some default ->
+                                  let values =
+                                    try
+                                      Ok
+                                        (Flow.Op.constant_array_descriptor op.Flow.Op.name
+                                           (("count", count) :: value))
+                                    with Diagnostic.Error d -> Error d
+                                  in
+                                  Result.bind values (fun values ->
+                                      Result.bind rest (fun rest ->
+                                          Result.bind (force rest) (function
+                                            | E.Record fields ->
+                                                Ok (E.Record (("values", values) :: fields))
+                                            | _ ->
+                                                error "E_ATTR_TYPE"
+                                                  "Selected write data must be a record.")))))
+                    in
+                    Result.bind fields (function
+                      | E.Record fields -> (
+                          match
+                            ( List.assoc_opt "values" fields,
+                              List.assoc_opt "selection" fields,
+                              List.assoc_opt "default" fields )
+                          with
+                          | Some values, Some selection, Some default ->
+                              if Sop.Context.cancelled context then
+                                error "E_CANCELLED" "Attribute kernel cancelled."
+                              else
+                                write_selected ~grain:(Sop.Context.grain context) ~owner ~kind name
+                                  ~values ~selection ~default geometries.(0)
+                          | _ ->
+                              error "E_ATTR_SELECTION"
+                                "Selected writes require both selection and default.")
+                      | _ -> error "E_ATTR_TYPE" "Selected write data must be a record.")
+                  else
+                    Result.bind
+                      (write_source ~geometry ~owner ~kind name values geometries.(0))
+                      (fun borrowed ->
+                        Result.bind
+                          (match borrowed with
+                          | Some _ -> Ok borrowed
+                          | None ->
+                              if reference then Ok None
+                              else
+                                Result.bind
+                                  (write_constant ?state ?elems ~resolve ~owner ~kind ~name constant
+                                     geometries.(0) ~live)
+                                  (function
+                                    | Some geometry -> Ok (Some geometry)
+                                    | None ->
+                                        write_planes ?state ?elems ?gpu ~strict ~resolve ~geometry
+                                          ~owner ~kind ~name program geometries.(0) ~live))
+                          (fun direct ->
                             if Sop.Context.cancelled context then
                               error "E_CANCELLED" "Attribute kernel cancelled."
                             else
-                              write_selected ~grain:(Sop.Context.grain context) ~owner ~kind name
-                                ~values ~selection ~default geometries.(0)
-                        | _ ->
-                            error "E_ATTR_SELECTION"
-                              "Selected writes require both selection and default.")
-                    | _ -> error "E_ATTR_TYPE" "Selected write data must be a record.")
-                else
-                  Result.bind
-                    (write_source ~geometry ~owner ~kind name values geometries.(0))
-                    (fun borrowed ->
-                      Result.bind
-                        (match borrowed with
-                        | Some _ -> Ok borrowed
-                        | None ->
-                            if reference then Ok None
-                            else
-                              Result.bind
-                                (write_constant ?state ?elems ~resolve ~owner ~kind ~name constant
-                                   geometries.(0) ~live)
-                                (function
-                                  | Some geometry -> Ok (Some geometry)
-                                  | None ->
-                                      write_planes ?state ?elems ?gpu ~strict ~resolve ~geometry
-                                        ~owner ~kind ~name program geometries.(0) ~live))
-                        (fun direct ->
-                          if Sop.Context.cancelled context then
-                            error "E_CANCELLED" "Attribute kernel cancelled."
-                          else
-                            match direct with
-                            | Some geometry -> Ok geometry
-                            | None ->
-                                Result.bind
-                                  (Flow_ir.Executor.force ?state ?elems ~reference ~strict ~resolve
-                                     program ~live) (fun values ->
-                                    if Sop.Context.cancelled context then
-                                      error "E_CANCELLED" "Attribute kernel cancelled."
-                                    else
-                                      write_storage ~owned_fields ~grain:(Sop.Context.grain context)
-                                        ~owner ~kind name values geometries.(0)))))
+                              match direct with
+                              | Some geometry -> Ok geometry
+                              | None ->
+                                  Result.bind
+                                    (Flow_ir.Executor.force ?state ?elems ~reference ~strict
+                                       ~resolve program ~live) (fun values ->
+                                      if Sop.Context.cancelled context then
+                                        error "E_CANCELLED" "Attribute kernel cancelled."
+                                      else
+                                        write_storage ~owned_fields
+                                          ~grain:(Sop.Context.grain context) ~owner ~kind name
+                                          values geometries.(0)))))
         in
         let result =
           if deletes = [] then result

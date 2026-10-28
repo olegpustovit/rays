@@ -182,10 +182,12 @@ let skips () =
   let all = lower_text (text "") in
   let some = lower_text ~previous:all (text ":skip [2] ") in
   let graph (l : Lower.t) = List.find (fun (g : Lower.graph) -> g.name = "g") l.graphs in
-  (* inlined, each Lisp card is a marker node over its body (the box is native) *)
+  (* inlined, each Lisp card is a marker node over its body *)
   let cards l = operations (graph l) "flow.card" in
   if Atomic.get Flow.Eval.inline_nodes then
-    check (cards some = cards all - 1) "a skipped iteration did not remove its transform card"
+    check
+      (cards some = cards all - 2)
+      "a skipped iteration did not remove its box and transform cards"
   else
     check
       (nodes (graph some) = nodes (graph all) - 2)

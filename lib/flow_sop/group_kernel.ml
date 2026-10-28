@@ -292,4 +292,5 @@ let resolve ~geometry = function
                                               "Group order component is ordered or indices.")
                                     | _ -> assert false))))
               | _ -> error "E_DATA_SOURCE" "Group source requires cooked geometry."))
+  | E.Source (name, _, _) -> error "E_DATA_SOURCE" ("Unknown group data source " ^ name ^ ".")
   | _ -> error "E_DATA_SOURCE" "Unknown group data source."

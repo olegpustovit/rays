@@ -1855,6 +1855,12 @@ nonfinite values already present in native geometry. A numeric map or other
 computed array remains checked and writes owned storage; it cannot use this
 transfer path to bypass nonfinite validation.
 
+`sop/with_attr :when b` guards the write: where `b` is false the geometry passes through and the
+values are not evaluated, so they may read what `b` tests for (`(sop/attr g "N")` under
+`:when (sop/has_attr g "N")`). A static `b` decides the call when it is evaluated; a cooked one
+(`sop/has_attr`, a count) is decided when the write cooks, so the body stays one program instead
+of a structure that follows cooked data. `and` and `or` short-circuit on a decided first operand.
+
 `sop/with_attr` also accepts paired `:selection` and `:default` keywords for
 Float/Vec2/Vec3/Vec4 attributes. The selection is an owner-sized integer array
 containing only zero or one; the explicit default is one finite value of the

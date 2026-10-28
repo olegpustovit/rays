@@ -110,6 +110,10 @@ val prepare :
     counts before dynamic multi-input fusion. CSR row offsets and flattened values use separate
     count origins. *)
 
+val delete_after :
+  (string * string) list -> Rdk.Cancel.t -> Rdk.Geometry.t -> (Rdk.Geometry.t, Diagnostic.t) result
+(** Delete each (owner, pattern) in order, as [sop/delete_attr] does. *)
+
 val node :
   ?state:Flow.Eval.state ->
   ?reference:bool ->
@@ -120,6 +124,7 @@ val node :
   ?gpu:Flow_ir.Gpu.config ->
   ?selection:Flow.Eval.value ->
   ?default:Flow.Eval.value ->
+  ?guard:Flow.Eval.value ->
   ?owner:Rdk.Attribute.owner ->
   ?kind:string ->
   ?deletes:(string * string) list ->

@@ -43,9 +43,10 @@ let cook session (lowered : Flow_sop.Lower.t) =
       match graph.root with
       | Some root when graph.default -> (
           let node = get (Edit_graph.compile_node graph.network.geometry ~node_id:root) in
-          match Session.cook session ~context node with
-          | Ok _ -> ()
-          | Error d -> failwith (Diagnostic.error_to_string d))
+          let result, seconds = time (fun () -> Session.cook session ~context node) in
+          if Sys.getenv_opt "BENCH_GRAPHS" <> None then
+            Printf.eprintf "graph %s %.4f\n" graph.name seconds;
+          match result with Ok _ -> () | Error d -> failwith (Diagnostic.error_to_string d))
       | _ -> ())
     lowered.graphs
 
@@ -64,6 +65,17 @@ let () =
     | _ -> failwith "usage: bench_sop_cook FILE.rays [FROM TO [ROUNDS]]"
   in
   let text = In_channel.with_open_bin path In_channel.input_all in
+  (* BENCH_COOK_LOOP=N: lower once and cook N fresh sessions, for a profiler *)
+  Option.iter
+    (fun n ->
+      let lowered = lower (load text) in
+      for _ = 1 to int_of_string n do
+        let session = get (Session.create ~max_entries:4096 ~max_payload_bytes:(1 lsl 30)) in
+        cook session lowered;
+        Session.close session
+      done;
+      exit 0)
+    (Sys.getenv_opt "BENCH_COOK_LOOP");
   let edited = Option.fold ~none:text ~some:(fun (from, by) -> replace text ~from ~by) edit in
   let samples = Hashtbl.create 8 in
   let note phase seconds =

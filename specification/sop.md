@@ -372,7 +372,16 @@ earlier write is not cooked, so a chain of point deformers is one region: four `
 cards over a cooked million-point grid cook in 0.13-0.17 s against 0.24 s unfolded, with the
 unfolded bytes. The intermediate cards are unchanged and cook as themselves when displayed or
 probed. Writes of different attributes, selected writes, and chains through a structural card (a
-body whose geometry follows cooked data, as `sop/transform`'s group test) do not fold yet.
+body whose geometry follows cooked data) do not fold yet.
+
+A body stays one program when its structure is decided statically: a cooked test that only
+guards a write is `sop/with_attr :when` (decided as the write cooks), `and`/`or` short-circuit on
+a decided operand, and a cooked count that only skips a write that would keep every value is not
+tested (`sop/transform` with no group, or a blank one, is a pass-through card over its point
+writes, no longer structural). A structural card's host calls of `sop/delete_attr` cook directly,
+and its other operator calls without a function argument lower without the library, so a call
+no longer requalifies every definition: sop_gallery cooks in 0.92 s inline against 1.40 s nested
+(was 2.30 against 2.18), boolean in 3.1 ms against 11.4 ms.
 
 A body reads its cook context through reserved inputs (`Context_kernel.label_context`): each
 distinct `sop/context_seed`, `context_frame` or `context_time` call, labelled with the card's

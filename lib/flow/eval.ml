@@ -1047,6 +1047,12 @@ and ev_raw c env (x : W.term) : value =
       (* register L16: the arguments at skipped tuples are not evaluated *)
       let args = List.filteri (fun p _ -> not (List.mem (c.iter @ [ p ]) skip)) args in
       apply_op c ~authored:x.form.id "scene/merge" (eval_named c env args)
+  | W.Op { op = ("and" | "or") as op; args = [ (na, a); (nb, b) ]; _ } -> (
+      (* a decided first operand short-circuits: [(and (not blank) (has_attr g name))] never asks
+         for a blank name, and a cooked second operand does not defer a decided result *)
+      match ev (sub c na) env a with
+      | Bool v when v = (op = "or") -> Bool v
+      | va -> apply_op c ~authored:x.form.id op [ (na, va); (nb, ev (sub c nb) env b) ])
   | W.Op { op; args; _ } -> apply_op c ~authored:x.form.id op (eval_named c env args)
   | W.Call_fn { fn; args; body } -> (
       let vals = evs c env "a" args in

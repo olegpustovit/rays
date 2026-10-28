@@ -548,11 +548,13 @@ let group_data args =
   E.Record (List.filter (fun (name, _) -> name = "values" || name = "order") args)
 
 let attribute_data args =
-  if not (List.mem_assoc "selection" args || List.mem_assoc "default" args) then
+  if not (List.exists (fun k -> List.mem_assoc k args) [ "selection"; "default"; "when" ]) then
     List.assoc "values" args
   else
     E.Record
-      (List.filter (fun (name, _) -> List.mem name [ "values"; "selection"; "default" ]) args)
+      (List.filter
+         (fun (name, _) -> List.mem name [ "values"; "selection"; "default"; "when" ])
+         args)
 
 let kernel_data (n : E.node) =
   match Operators.lowering n.kind with
@@ -565,21 +567,23 @@ let is_resource (n : E.node) =
   Operators.lowering n.kind = Some Operators.Resource && (n.kind <> "exact" || n.ty = Ty.image)
 
 let attribute_node ?(check = true) ~strict_body ~reference ~profile ~approx ~gpu ~kernel_source
-    ?state ?elems ?selection ?default ?(owner = Rdk.Attribute.Point) ?(kind = "vec3") ?deletes ~name
-    ~values ~sources inputs =
+    ?state ?elems ?selection ?default ?guard ?(owner = Rdk.Attribute.Point) ?(kind = "vec3")
+    ?deletes ~name ~values ~sources inputs =
   let data =
     E.Record
       ([ ("values", values) ]
       @ Option.to_list (Option.map (fun v -> ("selection", v)) selection)
-      @ Option.to_list (Option.map (fun v -> ("default", v)) default))
+      @ Option.to_list (Option.map (fun v -> ("default", v)) default)
+      @ Option.to_list (Option.map (fun v -> ("when", v)) guard))
   in
   per_context data @@ fun specialize ->
   let values = specialize values
   and selection = Option.map specialize selection
-  and default = Option.map specialize default in
+  and default = Option.map specialize default
+  and guard = Option.map specialize guard in
   if strict_body && check then
     ignore (ok (Attribute_kernel.prepare ~strict:true ~sources inputs values));
-  Attribute_kernel.node ?state ?elems ?selection ?default ~gpu ~strict:strict_body ~reference
+  Attribute_kernel.node ?state ?elems ?selection ?default ?guard ~gpu ~strict:strict_body ~reference
     ~profile ~approx ~owner ~kind ?deletes ~source:(Lazy.force kernel_source) ~name ~values ~sources
     inputs
 
@@ -1027,6 +1031,9 @@ let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
                      not (String.starts_with ~prefix:"lisp_capture_" node.operation))
                in
                let declared = definition.kind.facts in
+               (* a driven body is relowered per frame, so this lowering's nodes speak only for
+                  it: without a declaration its facts are the conservative ones *)
+               let conservative = driven && declared = None in
                (* A declared [:facts] is the node's contract, as the native factory's was: the body's
          selection root reads "*" and replaces topology on paper, which would otherwise defeat
          component caching for every node that declares it. Session still refuses an
@@ -1035,9 +1042,10 @@ let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
                  match declared with
                  | Some facts -> facts.preserves_topology
                  | None ->
-                     List.for_all
-                       (fun (node : Sop.Node.info) -> node.facts.topology = Sop.Node.Preserved)
-                       owned
+                     (not conservative)
+                     && List.for_all
+                          (fun (node : Sop.Node.info) -> node.facts.topology = Sop.Node.Preserved)
+                          owned
                in
                let input_count = List.length inputs in
                let resolve names =
@@ -1057,7 +1065,7 @@ let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
                      (List.concat_map (fun (node : Sop.Node.info) -> names node.facts) owned)
                  in
                  match declared with
-                 | None -> inferred
+                 | None -> if conservative then [ "*" ] else inferred
                  | Some declared ->
                      let declared = resolve declared in
                      if List.mem "*" inferred then
@@ -1816,190 +1824,244 @@ struct
                 if
                   (not catalog) && Option.is_none (Flow.Op.find ~extra:checked.ops name Context.sop)
                 then fail "E_DATA_SOURCE" "A host call has no checked operator.";
-                let selected = List.mem_assoc "selection" args || List.mem_assoc "default" args in
-                let args =
-                  if
-                    (not catalog) && name = "sop/with_attr"
-                    &&
-                    if selected then
-                      match List.assoc_opt "values" args with
-                      | Some (E.Float_array _ | Vec2_array _ | Vec3_array _ | Vec4_array _) -> true
-                      | Some value -> constant value
-                      | _ -> false
-                    else
-                      match (List.assoc_opt "geometry" args, List.assoc_opt "values" args) with
-                      | Some (E.Deferred (ty, _)), Some (E.Record _ as values)
-                        when ty = Ty.geometry && deferred values -> (
-                          match List.assoc_opt "type" args with
-                          | None -> true
-                          | Some (E.Text kind) -> List.mem kind [ "vec2"; "vec3"; "vec4" ]
-                          | _ -> false)
-                      | _ -> false
-                  then begin
-                    if Sop.Context.cancelled context then
-                      fail "E_CANCELLED" "Attribute kernel cancelled.";
-                    if not selected then ignore (attribute_options args);
-                    force_args ~keep_constant:true args
-                  end
-                  else args
-                in
-                let borrowed =
-                  if catalog || name <> "sop/with_attr" then Ok None
+                let guard =
+                  if catalog || name <> "sop/with_attr" then None
                   else
-                    match
-                      ( List.assoc_opt "geometry" args,
-                        List.assoc_opt "attribute" args,
-                        List.assoc_opt "values" args )
-                    with
-                    | Some (E.Deferred (actual, id)), Some (E.Text name), Some values
-                      when actual = Ty.geometry ->
-                        if Sop.Context.cancelled context then
-                          error "E_CANCELLED" "Attribute kernel cancelled."
-                        else
-                          let owner, kind = attribute_options args in
+                    Option.map
+                      (fun guard ->
+                        match force_args [ ("when", guard) ] with
+                        | [ (_, E.Bool b) ] -> b
+                        | _ -> fail "E_ATTR_TYPE" "sop/with_attr :when must be a bool")
+                      (List.assoc_opt "when" args)
+                in
+                if guard = Some false then Ok (List.assoc "geometry" args)
+                else if (not catalog) && name = "sop/delete_attr" then
+                  (* as its node cooks it: a one-call workspace would requalify the catalog *)
+                  match force_args args with
+                  | args -> (
+                      match
+                        ( List.assoc_opt "geometry" args,
+                          List.assoc_opt "attribute" args,
+                          Option.value ~default:(E.Text "point") (List.assoc_opt "owner" args) )
+                      with
+                      | Some (E.Deferred (actual, id)), Some (E.Text pattern), E.Text owner
+                        when actual = Ty.geometry ->
                           let target = Option.get (geometry id) in
-                          let materialized =
-                            match values with
-                            | E.Float_array _ | Int_array _ | Text_array _ | Vec2_array _
-                            | Vec3_array _ | Vec4_array _ ->
-                                true
-                            | Record fields -> (
-                                if (not selected) && List.mem kind [ "vec2"; "vec3"; "vec4" ] then
-                                  not (E.is_live values)
-                                else
-                                  match
-                                    (List.assoc_opt "offsets" fields, List.assoc_opt "values" fields)
-                                  with
-                                  | Some (E.Int_array _), Some (E.Float_array _ | Int_array _) ->
+                          Result.map
+                            (fun geometry ->
+                              register_output Ty.geometry
+                                { payload = Sop.Payload.Geometry geometry; instances = None })
+                            (Attribute_kernel.delete_after
+                               [ (owner, pattern) ]
+                               (Sop.Context.cancel_token context)
+                               target)
+                      | _ -> error "E_DATA_SOURCE" "sop/delete_attr needs geometry and text.")
+                else
+                  let args = List.remove_assoc "when" args in
+                  let selected = List.mem_assoc "selection" args || List.mem_assoc "default" args in
+                  let args =
+                    if
+                      (not catalog) && name = "sop/with_attr"
+                      &&
+                      if selected then
+                        match List.assoc_opt "values" args with
+                        | Some (E.Float_array _ | Vec2_array _ | Vec3_array _ | Vec4_array _) ->
+                            true
+                        | Some value -> constant value
+                        | _ -> false
+                      else
+                        match (List.assoc_opt "geometry" args, List.assoc_opt "values" args) with
+                        | Some (E.Deferred (ty, _)), Some (E.Record _ as values)
+                          when ty = Ty.geometry && deferred values -> (
+                            match List.assoc_opt "type" args with
+                            | None -> true
+                            | Some (E.Text kind) -> List.mem kind [ "vec2"; "vec3"; "vec4" ]
+                            | _ -> false)
+                        | _ -> false
+                    then begin
+                      if Sop.Context.cancelled context then
+                        fail "E_CANCELLED" "Attribute kernel cancelled.";
+                      if not selected then ignore (attribute_options args);
+                      force_args ~keep_constant:true args
+                    end
+                    else args
+                  in
+                  let borrowed =
+                    if catalog || name <> "sop/with_attr" then Ok None
+                    else
+                      match
+                        ( List.assoc_opt "geometry" args,
+                          List.assoc_opt "attribute" args,
+                          List.assoc_opt "values" args )
+                      with
+                      | Some (E.Deferred (actual, id)), Some (E.Text name), Some values
+                        when actual = Ty.geometry ->
+                          if Sop.Context.cancelled context then
+                            error "E_CANCELLED" "Attribute kernel cancelled."
+                          else
+                            let owner, kind = attribute_options args in
+                            let target = Option.get (geometry id) in
+                            let materialized =
+                              match values with
+                              | E.Float_array _ | Int_array _ | Text_array _ | Vec2_array _
+                              | Vec3_array _ | Vec4_array _ ->
+                                  true
+                              | Record fields -> (
+                                  if (not selected) && List.mem kind [ "vec2"; "vec3"; "vec4" ] then
+                                    not (E.is_live values)
+                                  else
+                                    match
+                                      ( List.assoc_opt "offsets" fields,
+                                        List.assoc_opt "values" fields )
+                                    with
+                                    | Some (E.Int_array _), Some (E.Float_array _ | Int_array _) ->
+                                        true
+                                    | _ -> false)
+                              | _ -> false
+                            in
+                            let selection = List.assoc_opt "selection" args
+                            and default = List.assoc_opt "default" args in
+                            Result.bind
+                              (if selection <> None || default <> None then Ok None
+                               else
+                                 Attribute_kernel.write_source ~geometry ~owner ~kind name values
+                                   target)
+                              (fun result ->
+                                let selected_materialized =
+                                  match (selection, default) with
+                                  | None, None -> true
+                                  | ( Some (E.Int_array _),
+                                      Some (E.Float _ | Int _ | Vec2 _ | Vec3 _ | Vec4 _) ) ->
                                       true
-                                  | _ -> false)
+                                  | _ -> false
+                                in
+                                let result =
+                                  match result with
+                                  | Some _ -> Ok result
+                                  | None when constant values && selected_materialized ->
+                                      Attribute_kernel.write_constant_source
+                                        ~grain:(Sop.Context.grain context) ~owner ~kind name
+                                        ?selection ?default values target
+                                  | None when materialized && selected_materialized ->
+                                      (* The former checked-call input boundary validated before
+                       the writer checked destination cardinality. *)
+                                      Flow.Value.validate values;
+                                      Result.map Option.some
+                                        (match (selection, default) with
+                                        | None, None ->
+                                            Attribute_kernel.write
+                                              ~grain:(Sop.Context.grain context) ~owner ~kind name
+                                              values target
+                                        | Some selection, Some default ->
+                                            Flow.Value.validate selection;
+                                            Flow.Value.validate default;
+                                            Attribute_kernel.write_selected
+                                              ~grain:(Sop.Context.grain context) ~owner ~kind name
+                                              ~values ~selection ~default target
+                                        | _ ->
+                                            error "E_ATTR_SELECTION"
+                                              "Selected writes require both selection and default.")
+                                  | None -> Ok None
+                                in
+                                Result.bind result (fun result ->
+                                    if Sop.Context.cancelled context then
+                                      error "E_CANCELLED" "Attribute kernel cancelled."
+                                    else
+                                      Ok
+                                        (Option.map
+                                           (fun geometry ->
+                                             ignore (ok (snapshot Ty.geometry id));
+                                             register_output Ty.geometry
+                                               {
+                                                 payload = Sop.Payload.Geometry geometry;
+                                                 instances = None;
+                                               })
+                                           result)))
+                      | _ -> Ok None
+                  in
+                  Result.bind borrowed (function
+                    | Some result -> Ok result
+                    | None ->
+                        let args = force_args args in
+                        if (not catalog) && is_geometry_arrays name then
+                          host_geometry_arrays ty name args
+                        else
+                          let call_context =
+                            if ty = Ty.image then Flow.Context.image else Context.sop
+                          in
+                          let form = Syntax.make (List []) in
+                          let capture_factories = ref [] and overrides = ref [] in
+                          let inputs =
+                            List.map
+                              (fun (name, value) ->
+                                let ty = Flow.Value.ty_of value in
+                                let default = cooked_term capture_factories ty value in
+                                if default = None then overrides := (name, value) :: !overrides;
+                                (name, ty, default))
+                              args
+                          in
+                          let args =
+                            List.map
+                              (fun (name, ty, _) ->
+                                ( name,
+                                  Workspace.{ path = None; ty; form; node = Ref_binding (name, []) }
+                                ))
+                              inputs
+                          in
+                          let body =
+                            Workspace.
+                              {
+                                path = None;
+                                ty;
+                                form;
+                                node =
+                                  (if catalog then Call { kind = name; ctx = call_context; args }
+                                   else Op { op = name; args; skip = [] });
+                              }
+                          in
+                          let graph =
+                            Workspace.
+                              { name = "lisp_host_call"; context = Context.sop; inputs; body; form }
+                          in
+                          (* an operator call with no function argument needs none of the library:
+                           qualifying it would walk every definition per call *)
+                          let rec callable = function
+                            | E.Fn _ -> true
+                            | E.List vs -> Array.exists callable vs
+                            | E.Record fs | E.Struct (_, _, fs) ->
+                                List.exists (fun (_, v) -> callable v) fs
                             | _ -> false
                           in
-                          let selection = List.assoc_opt "selection" args
-                          and default = List.assoc_opt "default" args in
+                          let library =
+                            if catalog || List.exists (fun (_, v) -> callable v) !overrides then
+                              checked
+                            else
+                              { checked with defs = []; nodes = []; packed = []; packed_roots = [] }
+                          in
                           Result.bind
-                            (if selection <> None || default <> None then Ok None
-                             else
-                               Attribute_kernel.write_source ~geometry ~owner ~kind name values
-                                 target)
-                            (fun result ->
-                              let selected_materialized =
-                                match (selection, default) with
-                                | None, None -> true
-                                | ( Some (E.Int_array _),
-                                    Some (E.Float _ | Int _ | Vec2 _ | Vec3 _ | Vec4 _) ) ->
-                                    true
-                                | _ -> false
-                              in
-                              let result =
-                                match result with
-                                | Some _ -> Ok result
-                                | None when constant values && selected_materialized ->
-                                    Attribute_kernel.write_constant_source
-                                      ~grain:(Sop.Context.grain context) ~owner ~kind name
-                                      ?selection ?default values target
-                                | None when materialized && selected_materialized ->
-                                    (* The former checked-call input boundary validated before
-                       the writer checked destination cardinality. *)
-                                    Flow.Value.validate values;
-                                    Result.map Option.some
-                                      (match (selection, default) with
-                                      | None, None ->
-                                          Attribute_kernel.write ~grain:(Sop.Context.grain context)
-                                            ~owner ~kind name values target
-                                      | Some selection, Some default ->
-                                          Flow.Value.validate selection;
-                                          Flow.Value.validate default;
-                                          Attribute_kernel.write_selected
-                                            ~grain:(Sop.Context.grain context) ~owner ~kind name
-                                            ~values ~selection ~default target
-                                      | _ ->
-                                          error "E_ATTR_SELECTION"
-                                            "Selected writes require both selection and default.")
-                                | None -> Ok None
-                              in
-                              Result.bind result (fun result ->
-                                  if Sop.Context.cancelled context then
-                                    error "E_CANCELLED" "Attribute kernel cancelled."
-                                  else
-                                    Ok
-                                      (Option.map
-                                         (fun geometry ->
-                                           ignore (ok (snapshot Ty.geometry id));
-                                           register_output Ty.geometry
-                                             {
-                                               payload = Sop.Payload.Geometry geometry;
-                                               instances = None;
-                                             })
-                                         result)))
-                    | _ -> Ok None
-                in
-                Result.bind borrowed (function
-                  | Some result -> Ok result
-                  | None ->
-                      let args = force_args args in
-                      if (not catalog) && is_geometry_arrays name then
-                        host_geometry_arrays ty name args
-                      else
-                        let call_context =
-                          if ty = Ty.image then Flow.Context.image else Context.sop
-                        in
-                        let form = Syntax.make (List []) in
-                        let capture_factories = ref [] and overrides = ref [] in
-                        let inputs =
-                          List.map
-                            (fun (name, value) ->
-                              let ty = Flow.Value.ty_of value in
-                              let default = cooked_term capture_factories ty value in
-                              if default = None then overrides := (name, value) :: !overrides;
-                              (name, ty, default))
-                            args
-                        in
-                        let args =
-                          List.map
-                            (fun (name, ty, _) ->
-                              ( name,
-                                Workspace.{ path = None; ty; form; node = Ref_binding (name, []) }
-                              ))
-                            inputs
-                        in
-                        let body =
-                          Workspace.
-                            {
-                              path = None;
-                              ty;
-                              form;
-                              node =
-                                (if catalog then Call { kind = name; ctx = call_context; args }
-                                 else Op { op = name; args; skip = [] });
-                            }
-                        in
-                        let graph =
-                          Workspace.
-                            { name = "lisp_host_call"; context = Context.sop; inputs; body; form }
-                        in
-                        Result.bind
-                          (lower_checked ~reference ~gpu ~strict_body:true
-                             ~factories:(!capture_factories @ factories)
-                             ~inputs:[ (graph.name, !overrides) ]
-                             { checked with graphs = [ graph ] })
-                          (fun lowered ->
-                            match lowered.graphs with
-                            | [ graph ] -> (
-                                match graph.root with
-                                | None -> error "E_DATA_SOURCE" "A cooked call returned no result."
-                                | Some root ->
-                                    Result.bind
-                                      (Result.map_error
-                                         (Diagnostic.error ~code:"E_LOWER")
-                                         (Edit.compile_node graph.network.geometry ~node_id:root))
-                                      (fun node ->
-                                        let id = !next in
-                                        decr next;
-                                        Hashtbl.add handles id (ty, Some node, ref None);
-                                        Ok (E.Deferred (ty, id))))
-                            | _ ->
-                                error "E_DATA_SOURCE" "A cooked call must return one typed result."))
+                            (lower_checked ~reference ~gpu ~strict_body:true
+                               ~factories:(!capture_factories @ factories)
+                               ~inputs:[ (graph.name, !overrides) ]
+                               { library with graphs = [ graph ] })
+                            (fun lowered ->
+                              match lowered.graphs with
+                              | [ graph ] -> (
+                                  match graph.root with
+                                  | None ->
+                                      error "E_DATA_SOURCE" "A cooked call returned no result."
+                                  | Some root ->
+                                      Result.bind
+                                        (Result.map_error
+                                           (Diagnostic.error ~code:"E_LOWER")
+                                           (Edit.compile_node graph.network.geometry ~node_id:root))
+                                        (fun node ->
+                                          let id = !next in
+                                          decr next;
+                                          Hashtbl.add handles id (ty, Some node, ref None);
+                                          Ok (E.Deferred (ty, id))))
+                              | _ ->
+                                  error "E_DATA_SOURCE"
+                                    "A cooked call must return one typed result."))
               in
               let resolve value =
                 try
@@ -2074,13 +2136,14 @@ struct
     in
     Sop.Node.Build.with_facts { (Sop.Node.facts node) with reads = [ "*" ]; writes = [ "*" ] } node
 
-  let attribute_node ?node ?state ?elems ?selection ?default ?(owner = Rdk.Attribute.Point)
+  let attribute_node ?node ?state ?elems ?selection ?default ?guard ?(owner = Rdk.Attribute.Point)
       ?(kind = "vec3") ?(deletes = []) ~name ~values ~sources inputs =
     reuse ?node ?state ?elems
       (Printf.sprintf "attribute %d %s %s %s" (Hashtbl.hash owner) kind name
          (String.concat "," (List.map (fun (o, p) -> o ^ ":" ^ p) deletes)))
       (E.Record
          ([ ("values", values) ]
+         @ Option.to_list (Option.map (fun v -> ("when", v)) guard)
          @ Option.to_list (Option.map (fun v -> ("selection", v)) selection)
          @ Option.to_list (Option.map (fun v -> ("default", v)) default)))
       inputs
@@ -2088,7 +2151,7 @@ struct
     attribute_node ~check:strict_body
       ~strict_body:(strict_body || inlined node)
       ~reference ~profile ~approx:checked.approx ~gpu ~kernel_source:(kernel_source_of node) ?state
-      ?elems ?selection ?default ~owner ~kind ~deletes ~name ~values ~sources inputs
+      ?elems ?selection ?default ?guard ~owner ~kind ~deletes ~name ~values ~sources inputs
 
   let group_data = group_data
   and attribute_data = attribute_data
@@ -2924,8 +2987,8 @@ struct
             let owner, kind = attribute_options n.args in
             attribute_node ~node:n ?state ~elems:outer
               ?selection:(List.assoc_opt "selection" n.args)
-              ?default:(List.assoc_opt "default" n.args) ~owner ~kind ~name
-              ~values:(List.assoc "values" n.args) ~sources:(deps n)
+              ?default:(List.assoc_opt "default" n.args) ?guard:(List.assoc_opt "when" n.args)
+              ~owner ~kind ~name ~values:(List.assoc "values" n.args) ~sources:(deps n)
               (List.filter_map Fun.id options)
         | None when n.kind = "sop/with_group" ->
             group_node ~node:n ?state ~elems:outer ~args:n.args ~sources:(deps n)
@@ -3085,8 +3148,8 @@ struct
             ~arity:(List.length sources)
             (Fun.compose Result.ok
                (attribute_node ~node ?selection:(List.assoc_opt "selection" args)
-                  ?default:(List.assoc_opt "default" args) ~owner ~kind ~deletes ~name ~values
-                  ~sources))
+                  ?default:(List.assoc_opt "default" args) ?guard:(List.assoc_opt "when" args)
+                  ~owner ~kind ~deletes ~name ~values ~sources))
         in
         {
           cid;

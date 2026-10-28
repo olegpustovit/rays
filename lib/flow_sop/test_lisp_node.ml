@@ -205,7 +205,9 @@ let () =
                     ok (Sop.Context.create ~time ~frame:(Int64.of_int live.frame) ~input:live ())
                   in
                   let actual =
-                    Sop.Session.cook session ~context node |> Result.get_ok
+                    Sop.Session.cook session ~context node
+                    |> Result.fold ~ok:Fun.id ~error:(fun d ->
+                        failwith (Diagnostic.error_to_string d))
                     |> fun (output : Sop.Session.output) ->
                     Result.get_ok (Sop.Payload.geometry output.payload)
                   in
