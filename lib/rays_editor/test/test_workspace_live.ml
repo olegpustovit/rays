@@ -3,7 +3,7 @@
 open Flow_sop
 module Edit = Sop.Edit_graph
 module Session = Sop.Session
-module Cook = Rays_editor.Private.Cook
+module Cook = Rays_editor__.Cook
 module Timeline = Rays_editor.Timeline
 
 let fail message = failwith ("test_workspace_live: " ^ message)

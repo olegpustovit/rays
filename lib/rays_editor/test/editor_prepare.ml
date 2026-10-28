@@ -1,7 +1,7 @@
 (* The editor model is concrete over [Cook.prepared] (the cooked geometry and its surface); tests
    that do not look at what was cooked prepare an empty one, the rest prepare as the app does. *)
 
-module Cook = Rays_editor.Private.Cook
+module Cook = Rays_editor__.Cook
 
 let of_geometry ?instances geometry =
   Result.map (fun surface -> { Cook.geometry; surface }) (Rdk_rays.Surface.of_geometry ?instances geometry)

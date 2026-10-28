@@ -216,7 +216,7 @@ let preview_of_geometry geometry =
       |> Result.map_error Rdk.Error.to_string
 
 let scene3 node (prepared : Rays_editor.Editor.prepared) =
-  let preview = Result.get_ok (preview_of_geometry prepared.Rays_editor.Private.Cook.geometry) in
+  let preview = Result.get_ok (preview_of_geometry prepared.Rays_editor__.Cook.geometry) in
   let mesh = match preview with
     | Pieces pieces -> mesh_for_node node pieces
     | Mesh mesh -> mesh in

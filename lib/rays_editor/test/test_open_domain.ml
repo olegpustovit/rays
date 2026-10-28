@@ -5,7 +5,7 @@ module W = Flow.Workspace
 module D = Editor_document.Workspace_doc
 module P = Flow_graph.Projection
 module M = Pxui_graph.Node_menu
-module L = Rays_editor.Private.Lisp_text
+module L = Rays_editor__.Lisp_text
 
 let checks = ref 0
 let check condition message = incr checks; if not condition then failwith message

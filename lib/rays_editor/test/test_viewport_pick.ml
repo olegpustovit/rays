@@ -4,8 +4,8 @@
    (`dune exec lib/rays_editor/test/test_main.exe -- bench_viewport_pick`). *)
 open Flow_sop
 module Session = Sop.Session
-module Cook = Rays_editor.Private.Cook
-module Pick = Rays_editor.Private.Pick
+module Cook = Rays_editor__.Cook
+module Pick = Rays_editor__.Pick
 module Int_map = Network.Int_map
 module Geometry = Rdk.Geometry
 

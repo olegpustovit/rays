@@ -147,19 +147,6 @@ module Reduce = struct
     { e with Loop_model.core = Editor_reduce.reduce_idle ?select ?preview e.Loop_model.core actions frame }
 end
 
-module Private = struct
-  module Spreadsheet = Spreadsheet
-  module Render_budget = struct let film = Renderer.film let next_turn = Renderer.next_turn end
-  module Editor_commands = Editor_commands module Schedule = Schedule
-  module Document = Document module Preset = Preset
-  module Pick = Pick
-  module Cook = Cook
-  module Text_pane = Text_pane
-  module Lisp_text = Lisp_text
-  module Navigator = Navigator
-  module Bars = Bars
-end
-
 module Workspace = struct
   type source = { path : string; digest : string }
   type process = { max_frames : int option; crash_dir : string option; profile : bool;

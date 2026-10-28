@@ -85,7 +85,7 @@ let run () =
   let env = E.create ~ui_text_size:11 ~await:true ~workspace:(Ws_fixture.of_text text)
       ~max_entries:4 ~max_payload_bytes:(16 * 1024 * 1024)
       ~prepare:(fun settings output -> Atomic.incr cooks; Editor_prepare.surface settings output)
-      ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor.Private.Cook.surface) () |> Result.get_ok in
+      ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface) () |> Result.get_ok in
   let count = ref 0 in
   let step ?mouse ?keys ?buttons env events =
     incr count; E.update env (frame ?mouse ?keys ?buttons ~events !count) in
@@ -353,7 +353,7 @@ let run () =
   (* what was written opens as the same scene *)
   let reopened = E.create ~ui_text_size:11 ~await:true ~workspace:(Ws_fixture.of_text (source env))
     ~prepare:Editor_prepare.surface
-    ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor.Private.Cook.surface) () |> Result.get_ok in
+    ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface) () |> Result.get_ok in
   check (labelled reopened = labelled env) "the saved text does not open as the edited scene";
   E.close reopened;
   (* The list's right-click menu enters the row under the pointer. *)
@@ -379,7 +379,7 @@ let run_host () =
   let open_text text =
     E.create ~ui_text_size:11 ~await:true ~workspace:(Ws_fixture.of_text text)
       ~prepare:Editor_prepare.surface
-      ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor.Private.Cook.surface) () |> Result.get_ok in
+      ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface) () |> Result.get_ok in
   let count = ref 0 in
   let step ?keys env events = incr count; E.update env (frame ?keys ~events !count) in
   let key k = Input.Key_pressed k in

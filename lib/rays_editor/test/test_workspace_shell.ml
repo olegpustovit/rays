@@ -102,7 +102,7 @@ let frame ?(buttons = []) mouse events count = Test_editor_input.frame ~buttons 
 let editor ?camera ?presets text =
   E3.create ~ui_text_size:11 ?camera ?presets ~await:true ~workspace:(of_text text)
     ~prepare:Editor_prepare.surface
-    ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor.Private.Cook.surface) ()
+    ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface) ()
   |> function Ok e -> e | Error m -> fail m
 
 let source e = fst (Flow.Lisp.print (E3.workspace e).Doc.source)
@@ -2099,12 +2099,12 @@ let run_carry_reaches_no_history () =
   let preview = E.Set_arg { node = [ "scene"; "side" ]; key = E.Kw "fov"; sub = []; value = S.make (S.Num "40.0") } in
   let before = source e in
   let stepped = Rays_editor.Reduce.step e ~select:[ side ] ~preview
-      [ Rays_editor.Private.Editor_commands.Enter ] (frame (450., 300.) [] 3) in
+      [ Rays_editor__.Editor_commands.Enter ] (frame (450., 300.) [] 3) in
   check (E3.carrying stepped <> None) "the reducer dropped the carry";
   check (not (E3.can_undo stepped))
     ("entering a camera during a carry reached the history: " ^ Option.value ~default:"-" (E3.undo_label stepped));
   (* without the carry the same keys do make the camera the render camera: the test reaches the path *)
-  let entered = Rays_editor.Reduce.step e ~select:[ side ] [ Rays_editor.Private.Editor_commands.Enter ] (frame (450., 300.) [] 3) in
+  let entered = Rays_editor.Reduce.step e ~select:[ side ] [ Rays_editor__.Editor_commands.Enter ] (frame (450., 300.) [] 3) in
   check (E3.can_undo entered && has (source entered) ":camera side" && source e = before)
     ("Enter on a camera did not make it the render camera: " ^ source entered);
   E3.close e
@@ -2163,7 +2163,7 @@ let run_undo_under_pane () =
   E3.close !e
 
 let run_spreadsheet () =
-  let module Sheet = Rays_editor.Private.Spreadsheet in
+  let module Sheet = Rays_editor__.Spreadsheet in
   let text = {|(workspace sheet
     (graph g :context sop (sop/grid :counts "Point counts" :rows 2 :columns 3))
     (graph h :context sop (sop/box))
@@ -2467,7 +2467,7 @@ let run_outline_button () =
   let ui = Pxui.Ui.create ~font_size:11 () in
   let from = Pxui_shell.Chrome.tools_start ui ~focused:true ~floating:false ~collapsed:false
     ("Graph\t" ^ dump_line !e "pane graph" ^ " / value") in
-  let x, y = match Rays_editor.Private.Bars.tool_rect ~outline:true ui ~header ~from Outline with
+  let x, y = match Rays_editor__.Bars.tool_rect ~outline:true ui ~header ~from Outline with
     | Some (x, y, w, h) -> x +. w /. 2., y +. h /. 2. | None -> fail "the Outline button is cut off" in
   Pxui.Ui.destroy ui;
   step (x, y) [ Input.Pointer_moved (x, y) ];
@@ -2505,7 +2505,7 @@ let run_view_native () =
       ~presets:(Filename.concat directory "presets") ~seed:7349L ~grain:2
       ~camera:(Easy_camera.create ~target:Rays_math.Vec3.zero ~distance:6.8 ~azimuth:0.72 ~elevation:0.42 ())
       ~prepare:Editor_prepare.surface
-      ~draw:(fun node (prepared : Rays_editor.Private.Cook.prepared) ->
+      ~draw:(fun node (prepared : Rays_editor__.Cook.prepared) ->
         rendered := Node.operation node;
         let explosion = Rdk_rays.Packed_pieces.explosion
             ~operation:(Node.operation node) ~fields:(Node.parameter_fields node) in
@@ -2597,7 +2597,7 @@ let run_renderers_native ?(authored = false) () =
     ~config:{Sketch.default_config with width = 900; height = 640; title = "shared renderer"}
     ~init:(fun _ -> E3.create ~ui_text_size:11 ~await:true ~workspace ~presets:(Filename.concat directory "presets")
       ~prepare:Editor_prepare.surface
-      ~draw:(fun _ (prepared : Rays_editor.Private.Cook.prepared) ->
+      ~draw:(fun _ (prepared : Rays_editor__.Cook.prepared) ->
         Scene.D3.create (List.map (fun (d : Scene.D3.Private.drawing) -> Scene.D3.mesh
           ~material:(Material.unlit (Rays_math.Color.rgb 200 20 200)) d.mesh)
           (Scene.D3.Private.drawings (Rdk_rays.Surface.scene3 prepared.surface)))) () |> Result.get_ok)
@@ -2722,7 +2722,7 @@ let eye_of = function
 (* Without a GPU: looking through the camera, each viewport sees through the camera its own root
    names, at its own gate; the renderer's film steps and turns are pure. *)
 let run_roots () =
-  let module B = Rays_editor.Private.Render_budget in
+  let module B = Rays_editor__.Renderer in
   check (B.film ~through:true ~resolution:(1600, 900) ~gate:(1700, 1000) = ((1600, 900), 1)) "a gate over the resolution is step 1";
   check (B.film ~through:true ~resolution:(1600, 900) ~gate:(1600, 900) = ((1600, 900), 1)) "a gate at the resolution is step 1";
   check (B.film ~through:true ~resolution:(1600, 900) ~gate:(1599, 899) = ((800, 450), 2)) "one pixel under is a half";
@@ -2818,7 +2818,7 @@ let run_roots_native () =
     ~init:(fun _ -> E3.create ~ui_text_size:11 ~await:true ~workspace:(of_text text)
       ~presets:(Filename.concat directory "presets")
       ~prepare:Editor_prepare.surface
-      ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor.Private.Cook.surface) () |> Result.get_ok)
+      ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface) () |> Result.get_ok)
     ~update:(fun e (frame : Frame.t) ->
       let c = frame.input.frame in
       let e = if c = 61 then edit e "max_spp" "4096"      (* the cap rises: the film goes on *)
@@ -2947,7 +2947,7 @@ let run_budget_native () =
     ~init:(fun _ -> E3.create ~ui_text_size:11 ~await:true ~workspace:(of_text text)
       ~presets:(Filename.concat directory "presets")
       ~prepare:Editor_prepare.surface
-      ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor.Private.Cook.surface) () |> Result.get_ok)
+      ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface) () |> Result.get_ok)
     ~update:(fun e (frame : Frame.t) ->
       E3.update e { frame with input = { frame.input with pointer = (450., 20.); buttons = []; keys = []; events = [] };
         mouse_delta = 0., 0. })

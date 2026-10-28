@@ -3,8 +3,8 @@
    run the commands the graph pane has keys for, and Make defn writes a reusable function. *)
 open Rays
 module E3 = Rays_editor.Editor
-module N = Rays_editor.Private.Navigator
-module Bars = Rays_editor.Private.Bars
+module N = Rays_editor__.Navigator
+module Bars = Rays_editor__.Bars
 module Layout = Pxui_shell.Layout
 module Doc = Editor_document.Workspace_doc
 module Document = Editor_document.Document
@@ -33,7 +33,7 @@ let editor () =
     | Ok d -> d | Error ds -> fail (String.concat "; " (List.map Diagnostic.to_string ds)) in
   E3.create ~ui_text_size:11 ~await:true ~workspace
     ~prepare:Editor_prepare.surface
-    ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor.Private.Cook.surface) ()
+    ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface) ()
   |> function Ok e -> e | Error m -> fail m
 
 let dump_line = Test_workspace_shell.dump_line

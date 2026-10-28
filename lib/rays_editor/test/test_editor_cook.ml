@@ -1,6 +1,6 @@
 open Rays
 open Sop
-module Cook = Rays_editor.Private.Cook
+module Cook = Rays_editor__.Cook
 module Settings = Rays_editor.Settings
 module Timeline = Rays_editor.Timeline
 module Document = Editor_document.Document

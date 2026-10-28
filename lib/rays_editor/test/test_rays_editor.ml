@@ -111,7 +111,7 @@ let camera_nodes () =
      
       ~max_entries:4 ~max_payload_bytes:(16 * 1024 * 1024)
       ~prepare:Editor_prepare.surface
-      ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor.Private.Cook.surface) ()
+      ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface) ()
     |> Result.get_ok in
   check (List.length (cameras environment) = 1 && List.length (active environment) = 1)
     "Editor did not add one ACTIVE default camera";
@@ -271,9 +271,9 @@ let sketch_settings () =
 let preset_and_look_through () =
   (* Every document is a workspace, so every document saves: the prompt owns the keyboard
      while it is open, Enter writes the workspace text, and / b loads it back. *)
-  let module Preset = Rays_editor.Private.Preset in
+  let module Preset = Editor_document.Preset in
   let presets = Filename.temp_dir "sketch-ui-workspace-presets" "" in
-  let mesh_scene (prepared : Rays_editor.Private.Cook.prepared) = Rdk_rays.Surface.scene3 prepared.surface in
+  let mesh_scene (prepared : Rays_editor__.Cook.prepared) = Rdk_rays.Surface.scene3 prepared.surface in
   let environment = Rays_editor.Editor.create ~ui_text_size:11 ~await:true ~workspace:(fixture ()) ~presets
       ~camera:(Easy_camera.create ~distance:6. ~inertia:false ())
      
@@ -386,7 +386,7 @@ let native_smoke () =
   end
 
 let layout_panes () =
-  let module Editor_commands = Rays_editor.Private.Editor_commands in
+  let module Editor_commands = Rays_editor__.Editor_commands in
   List.iter (fun (graph : _ Editor_core.Command.t) ->
     check (List.exists (fun (command : Editor_commands.command) ->
       command.id = graph.id && command.trigger = graph.trigger
@@ -445,7 +445,7 @@ let run () =
      
       ~max_entries:4 ~max_payload_bytes:(16 * 1024 * 1024)
       ~prepare:Editor_prepare.surface
-      ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor.Private.Cook.surface) ()
+      ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface) ()
     |> Result.get_ok in
   let environment = wait 0 environment in
   let environment = enter3 environment 0 in

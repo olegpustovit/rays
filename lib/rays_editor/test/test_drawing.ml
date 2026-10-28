@@ -233,7 +233,7 @@ let benchmark workspace =
       dt = 1. /. 60.; frame = count; tick = count; size = 800, 600; pointer = -100., -100. };
       pixel_scale = 1., 1.; fps = 60.; mouse_delta = 0., 0. } in
     editor := Editor.update !editor (frame 0);
-    editor := Rays_editor.Reduce.step !editor [Rays_editor.Private.Editor_commands.Play_pause] (frame 0);
+    editor := Rays_editor.Reduce.step !editor [Rays_editor__.Editor_commands.Play_pause] (frame 0);
     let step i = editor := Editor.update !editor (frame i) in
     for i = 1 to 10 do step i done;
     let times = Array.make 200 0. in

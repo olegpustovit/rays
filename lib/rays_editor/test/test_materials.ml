@@ -79,7 +79,7 @@ let face_materials_preserve_explosion () =
 
 (* ---- the editor around materials: outline, follow and back, rename, assign, pick ---- *)
 module E3 = Rays_editor.Editor
-module N = Rays_editor.Private.Navigator
+module N = Rays_editor__.Navigator
 module Edit = Flow_graph.Flow_edit
 
 let fail message = failwith ("test_materials: " ^ message)
@@ -106,7 +106,7 @@ let frame ?(buttons = []) ?(keys = []) mouse events count : Frame.t = {
 let editor () =
   E3.create ~ui_text_size:11 ~await:true ~workspace:(workspace follow_source)
     ~prepare:Editor_prepare.surface
-    ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor.Private.Cook.surface) ()
+    ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface) ()
   |> function Ok e -> e | Error m -> fail m
 
 let dump_line e key =
@@ -277,9 +277,9 @@ let carry_tests () =
   let ws = ref (E3.workspace !e) in
   step [];
   (* y is a plain key nothing else uses *)
-  check (List.length (List.filter (fun (c : Rays_editor.Private.Editor_commands.command) -> match c.trigger with
+  check (List.length (List.filter (fun (c : Rays_editor__.Editor_commands.command) -> match c.trigger with
     | Some (Editor_core.Keymap.Chord (Input.KeyChar 'y', [])) -> true | _ -> false)
-    Rays_editor.Private.Editor_commands.keymap) = 1) "y picks up and no other command takes it";
+    Rays_editor__.Editor_commands.keymap) = 1) "y picks up and no other command takes it";
   (* the outline row of a graph, in screen points, as the Navigator draws it now *)
   let catalog = get (Rays_editor.workspace_catalog ()) in
   let row_of graph =
@@ -549,7 +549,7 @@ let viewport_source = {|(workspace views
 let viewport_carry_tests () =
   let e = ref (E3.create ~ui_text_size:11 ~await:true ~workspace:(workspace viewport_source)
     ~prepare:Editor_prepare.surface
-    ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor.Private.Cook.surface) ()
+    ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface) ()
     |> function Ok e -> e | Error m -> fail m) and count = ref 0 in
   let step ?(keys = []) ?(mouse = (450., 300.)) events =
     incr count; e := E3.update !e (frame ~keys mouse events !count) in

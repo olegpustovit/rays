@@ -47,7 +47,7 @@ module Source : sig
 end
 
 module Settings : sig
-  type t
+  type t = Editor_document.Settings.t
   val none : t
   val make : 'record Param.schema -> 'record -> t
   (** Settings drawn in the inspector while no node is selected. *)
@@ -55,282 +55,6 @@ module Settings : sig
   val get : 'record Param.schema -> t -> 'record
   (** Read the current record back; raises [Invalid_argument] when [schema]
       does not describe it. *)
-end
-
-(** Editor internals exposed for tests and diagnostics.
-    Layout and chrome live in [Pxui_shell]; sketches use [Editor]. *)
-module Private : sig
-  module Spreadsheet : sig
-    val count : int -> Rdk.Geometry.t -> int
-    val columns : int -> Rdk.Geometry.t -> (string * (int -> string)) array
-    val view : Pxui.Ui.t -> bounds:int * int * int * int -> owner:int -> Rdk.Geometry.t option -> int option
-  end
-  (** Unstable test and diagnostic hooks. These are outside the supported
-      sketch API and may change without compatibility shims. *)
-  (** Helix-style leader keys. [/] (while no text field is focused) opens a
-      centered which-key panel; the next key runs a binding from the global
-      scope or from the focused pane, the one last clicked. Escape, [/], an
-      unknown key, a click, or window focus loss cancel it. *)
-  module Render_budget : sig
-    val film : through:bool -> resolution:int * int -> gate:int * int -> (int * int) * int
-    (** The path tracer's film for a root's resolution and a viewport's rectangle in drawable
-        pixels.  Looking [through] the render camera the rectangle is the gate: the resolution
-        divided by the first of 1, 2, 4, 8 that does not exceed it (the eighth when none does),
-        and that divisor.  A free view is traced as it is drawn: the rectangle itself, step 1. *)
-
-    val next_turn : order:string list -> last:string option -> string list -> string option
-    (** Of the viewports that want the shared sample budget, the one after [last] in [order],
-        cyclically. *)
-  end
-
-  module Editor_commands : sig
-    type action =
-      | Save_preset | Browse_presets | Save_source | Reload_source | Open_source
-      | Toggle_timeline | Toggle_graph | Toggle_inspector | Hide_ui | Open_camera
-      | Play_pause | Reset | Stop
-      | Add_node | Frame_tile | Frame_camera
-      | Look_through | Look_through_camera | Fly | Tool of int
-      | Render_mode of int
-      | Undo | Redo
-      | Panel_split of Pxui_shell.Layout.axis | Panel_close | Panel_retype of Pxui_shell.Layout.panel
-      | Panel_pick | Window_pick
-      | Panel_split_at of Pxui_shell.Layout.path * Pxui_shell.Layout.axis * float * Pxui_shell.Layout.panel
-      | Toggle_map | Ui_scale of int | Restore_layout | Enter | Up | Go_world | Back of int | Peek | Pick_up | Jump
-      | Text_command of Text_pane.command | Goto_symbol | Goto_line
-      | Layout_switch of int | Layout_new | Layout_remove | Window_new of Editor_core.Panels.panel | Float_toggle
-      | World_emit | World_reseed | World_time of float | World_play | World_preset of int
-      | Scope_command of Pxui_graph.Scope.command
-      | List_command of Pxui_shell.Tree.command
-      | Guide_toggle | Guide_keys
-      | Command_palette
-      | Copy_lisp
-
-    type command = (Pxui_shell.Layout.panel, action) Editor_core.Command.t
-
-    type state = Editor_core.Router.state = Idle | Pending of string
-
-    val scope : Pxui_shell.Layout.panel -> Pxui_shell.Layout.panel
-    (** The scope a focused panel's commands use: every viewport is [View ""], the list and
-        lisp panels are the graph pane's. *)
-
-    val keymap : command list
-    (** The single table behind dispatch, which-key, and the palette. *)
-
-    val text_keys : (string * Editor_core.Keymap.trigger) list
-    (** The text area's chords, listed on the key sheet and never in the keymap. *)
-
-  end
-
-  (** [timeline_frames] (default 240) is the scrub range of the timeline bar,
-      extended while playback runs past it. [name] (default the workspace name; [run]
-      uses the window title) is recorded in presets, which live in [presets]
-      (default [~/.rays/<name>]): [/ s] saves the full document under a
-      typed name (prefilled with the time), [/ b] searches, loads (Enter, one
-      undo entry), and deletes (Delete twice) them. Edits also save one recovery
-      file under [<presets>/state], at most twice a second and on close, using
-      the source file's absolute path (or workspace name) as its identity.
-      [/ b] offers it as "Last edited state". Opening an unchanged sketch
-      preserves its recovery file; autosave keeps source files untouched.
-      See {!Preset}. *)
-
-  (** Effect- and dependency-aware cook scheduler. It fires initially, after a
-      committed cook parameter change, after [force], and whenever the sketch
-      clock changed and any reachable node declares [Time] or [Frame]. While a
-      primary-pointer edit is held it cooks only when [live] (the inspector's
-      "Live update while dragging", on by default) and the worker is idle;
-      otherwise only the latest desired cook is retained until release. *)
-  module Document : sig
-    type t
-    val scene_graph : t -> Editor_document.Kind_graph.t
-    val object_network : t -> int -> (Flow_sop.Network.t * int option) option
-    (** An object's immutable network and optional geometry display node.
-        A missing owner returns [None]; an empty geometry network has no display. *)
-  end
-
-  (** Presets: the workspace as an s-expression file (source, layout,
-      settings) plus the environment view. Only workspace documents save. *)
-  module Preset : sig
-    type loaded = { doc : Document.t; view : Flow.Syntax.t }
-    val path : directory:string -> name:string -> string
-    val save : directory:string -> name:string -> doc:Document.t ->
-      view:Flow.Syntax.t -> (string, string) result
-    val list : directory:string -> (string * float) list
-    val delete : directory:string -> name:string -> (unit, string) result
-    val load : ?gpu:Flow_ir.Gpu.config -> path:string -> ?factories:Sop.Edit_graph.factory list ->
-      settings:Settings.t -> unit -> (loaded, string) result
-  end
-
-  module Schedule : sig
-    type t
-    val initial : t
-    val step :
-      ?live:bool -> t -> graphs:Sop.Node.t list -> effects:Param.effects ->
-      context_changed:bool -> force:bool -> busy:bool -> frame:Rays.Frame.t ->
-      t * bool
-  end
-
-  (** Host cook boundary, exposed for deterministic worker tests and measurements. *)
-  module Pick : sig
-    module Set : Set.S with type elt = int
-    val tags : Rdk.Geometry.t -> int array option
-    (** The [__flow_src] tag of every primitive, when the geometry has them. *)
-    val tint : Sop.Session.output -> Set.t ->
-      (Sop.Session.output, Diagnostic.t) result
-    (** The primitives whose tag is in the set take the selection tint, the
-        rest are dimmed (a vertex [Cd]); the empty set changes nothing. *)
-  end
-
-  (** The workspace text pane's pure part: the text each tab shows. *)
-  module Text_pane : sig
-    type tab = Selection | Graph | Document
-    type shown = {
-      graph : string;
-      text : string;
-      mark : (int * int) option;
-      key : string list;
-      applied : string Lazy.t;
-      body : (Flow.Syntax.t * (int * Diagnostic.span) list) option;
-      source : Flow.Syntax.t list;
-      spans : Flow.Lisp.spans;
-      applied_spans : Flow.Lisp.spans Lazy.t;
-    }
-    val binding_at : shown -> int -> string list option
-    (** The innermost binding or inline node at a byte in any tab. *)
-
-    val reference_target : Flow.Syntax.t list -> from:string list -> string -> string list option
-    val definition_at : shown -> int -> string list option
-    val make_shown : Flow.Syntax.t list -> string -> string list option -> tab -> shown
-    val scrub_op : shown -> int * int -> string -> Flow_graph.Flow_edit.op option
-    val line_of : string -> Diagnostic.t -> int option
-    type find = Text_pane.find = { query : string; replace : string; case : bool; replacing : bool; at : int; grab : bool }
-    type request = Text_pane.request = { select : int * int; splice : (int * int * string) list }
-    val find_current : find -> (int * int) list -> (int * int) option
-    val find_step : find -> (int * int) list -> [ `Next | `Previous ] -> find
-    val find_replace : find -> (int * int) list -> all:bool -> (request * find) option
-    val find_all : case:bool -> string -> string -> (int * int) list
-    (** The (start, stop) of every non-overlapping match of a query. *)
-    val symbols : string -> (string * string * int) list
-    (** The bindings of a text: (name, kind, byte of the name). *)
-    val symbol_at : string -> int -> string option
-    (** The symbol a byte touches. *)
-    val references : string -> string -> (int * string) list
-    (** The byte and line text of every use of a symbol. *)
-    val line_target : string -> string -> int option
-    (** The byte of ["line"] or ["line:column"] (1-based). *)
-    val binding : Flow.Syntax.t list -> string list -> (Flow.Syntax.t option * Flow.Syntax.t) option
-    val paste_ops : Flow.Syntax.t list -> graph:string -> scope:string list -> string ->
-      (Flow_graph.Flow_edit.op list, string) result
-    (** Pasted text as [Add_node]s with fresh names, paired by position, renamed at once. *)
-  end
-
-  (** The editor's Lisp as the text area's language (tests of its indentation and lexing). *)
-  module Lisp_text : sig
-    type vocab
-    val vocab : ?ops:Flow.Op.t list -> Flow_sop.Catalog.descriptor list -> vocab
-    val indent : string -> int -> string
-    val context_at : string -> int -> [ `Code | `String | `Comment ]
-    (** What a character typed at a byte lands in. *)
-    val brackets : string -> (int * int) list
-    type names = { graphs : string list; materials : string list; cameras : string list; layouts : string list }
-    (** What the document knows beyond the text shown: every graph, the material graphs, the
-        cameras of the scene, the layout names (the values of [:material], [:camera], [:active]). *)
-    val complete : ?names:names -> ?imports:(string * string) list -> vocab -> string -> int -> Pxui.Ui.completion list
-    (** The ranked completions for the token ending at the caret. *)
-    val ref_at : string -> int -> string option
-    (** The graph named by the [(ref name)] form at a byte. *)
-    val color_chips : string -> (int * int * Rays_math.Color.t) list
-    (** The ["#rrggbb"] literals of a text, as byte ranges with their colour. *)
-    val describe : vocab -> string -> int -> (int * int * string) option
-    val number_at : string -> int -> (int * int) option
-    (** Parinfer's indent mode: the text with its closing brackets inferred from indentation,
-        and where the caret lands. *)
-    val language : ?vocab:vocab -> ?names:names -> ?imports:(string * string) list -> ?parinfer:bool -> Pxui.Theme.t -> Pxui.Ui.language
-  end
-
-  (** The host bars: where their buttons sit. *)
-  module Bars : sig
-    type tool = Add | Repeat | Iterate | Fn | Macro | Defn | Outline
-    val tool_rect : ?outline:bool -> Pxui.Ui.t -> header:int * int * int * int -> from:float -> tool -> (float * float * float * float) option
-  end
-
-  (** The Navigator panel: its rows and where each is drawn. *)
-  module Navigator : sig
-    type state
-    val initial : state
-    val with_query : string -> state -> state
-    val open_graph : string -> state -> state
-    type obj = { depth : int; letter : string; name : string; detail : string;
-                 visible : bool option; render : bool option; lead : bool; inert : bool; chosen : bool;
-                 home : string list option }
-    type params = {
-      workspace : Flow.Workspace.t;
-      active : string option;
-      scope : Flow_graph.Projection.scope option;
-      records : Flow_graph.Probe.t option;
-      probes : string list -> int;
-      selected : string list list;
-      chips : (string * Rays_math.Color.t) list;
-      objects : obj list;
-      root_detail : string;
-      layouts : (string list * int) option;
-      notes : (string * string) list;
-    }
-    type row
-    val chips : Flow.Eval.t -> (string * Rays_math.Color.t) list
-    val rows : ?wide:bool -> state -> params -> row array
-    val describe : row -> string
-    val row_rects : state -> params -> bounds:int * int * int * int ->
-      (row * (float * float * float * float)) array
-  end
-
-  module Cook : sig
-    type bounds = Rays_math.Vec3.t * Rays_math.Vec3.t
-    type prepared = { geometry : Rdk.Geometry.t; surface : Rdk_rays.Surface.t }
-    type piece = {
-      id : int;
-      graph : Sop.Node.t;
-      prepared : prepared;
-      bounds : bounds option;
-      settings : Settings.t;
-      context : string;
-      output : Sop.Session.output;
-      lit : Pick.Set.t;
-      surface : Rdk.Surface_index.t option Lazy.t;
-    }
-    type t
-    type update = {
-      cook : t;
-      edit_error : string option;
-      prepared_changed : bool;
-      framed : bounds option option;
-    }
-    val create : prepare:(Settings.t -> Sop.Session.output -> (prepared, string) result) ->
-      seed:int64 -> grain:int -> ?domains:int -> ?await:bool -> ?clock:(unit -> float) -> max_entries:int ->
-      max_payload_bytes:int -> unit -> (t, string) result
-    (** [await] (default: false) makes [update] block on
-        the cook it submits, so a fixed-step run shows exactly frame n. *)
-    val status : t -> Sop.Async_cook.status
-    val set_volatile : t -> (int -> bool) -> unit
-    (** Pass [Flow_sop.Lower.is_volatile lowered] after each lowering (W3). *)
-    val stats : t -> Sop.Session.stats
-    val pieces : t -> piece list
-    val applied : t -> int -> Flow_sop.Value_lane.resolved option
-    val force : t -> t
-    val geometry : t -> object_id:int -> node_id:int -> Flow_graph.Probe.geometry option
-    (** The counts of a compiled node an object's last [~probes] asked for. *)
-    val pick : piece -> origin:Rays_math.Vec3.t -> direction:Rays_math.Vec3.t ->
-      (float * int) option
-    (** The nearest displayed primitive under a ray in the piece's own space:
-        its distance and provenance tag. *)
-    val update : ?gpu:Flow_ir.Gpu.config -> ?input:Input.t -> ?live:bool -> ?probes:(int * int) list -> ?lit:Pick.Set.t ->
-      ?pump:(unit -> unit) ->
-      t -> settings:Settings.t ->
-      objects:(int * Flow_sop.Network.t * int) list -> edit_error:string option ->
-      effects:Param.effects -> timeline_changes:Timeline.change list ->
-      timeline:Timeline.t -> frame:Rays.Frame.t ->
-      frame_request:(int * int) option -> update
-    val close : t -> unit
-  end
 end
 
 (** The renderer choice a sketch offers in its settings block: one shared
@@ -349,7 +73,7 @@ module Renderer : sig
 end
 
 module Editor : sig
-  type prepared = Private.Cook.prepared
+  type prepared = Cook.prepared
   val prepare : Settings.t -> Sop.Session.output -> (prepared, string) result
   (** What the app prepares of a cooked object: its geometry and its surface. *)
   val draw : Sop.Node.t -> prepared -> Rays.Scene.D3.t
@@ -639,7 +363,7 @@ module Reduce : sig
   val view : Editor.t -> string list -> Editor.t
   (** [v] on the checked lexical path, as the graph pane requests it; unstable test hook. *)
   val step : Editor.t -> ?select:int list -> ?preview:Flow_graph.Flow_edit.op ->
-    Private.Editor_commands.action list -> Rays.Frame.t -> Editor.t
+    Editor_commands.action list -> Rays.Frame.t -> Editor.t
 end
 
 (** A [.rays] sketch as a program.  Command-S rewrites the file when it is

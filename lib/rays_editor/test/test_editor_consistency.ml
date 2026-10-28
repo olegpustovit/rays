@@ -15,7 +15,7 @@ let frame n = Test_editor_input.frame (450., 300.) [] n
 let step e n = E.update e (frame n)
 let create ?camera ?settings ?presets ?source ws = E.create ~ui_text_size:11 ?camera ?settings ?presets ?source ~await:true ~workspace:ws
   ~prepare:Editor_prepare.surface
-  ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor.Private.Cook.surface) () |> Result.get_ok
+  ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface) () |> Result.get_ok
 
 let with_dir f =
   let dir = Filename.temp_dir "rays-consistency" "" in
@@ -287,12 +287,12 @@ let preview_orbits () =
     preserved ();
     edit_layout (Editor_document.Layout_edit.Dock_panel {node = ["editor"; "comparison"]; target = ["editor"; "main"]; side = `Right});
     preserved ();
-    let editor_form = Rays_editor.Private.Text_pane.make_shown (E.workspace !e).source "editor" None Graph in
+    let editor_form = Rays_editor__.Text_pane.make_shown (E.workspace !e).source "editor" None Graph in
     edit (F.Set_graph {name = "editor"; form = parse editor_form.text});
     preserved ();
     focus main;
     edit_layout (Editor_document.Layout_edit.Close_panel {node = ["editor"; "comparison"]});
-    let original_form = Rays_editor.Private.Text_pane.make_shown ws.source "editor" None Graph in
+    let original_form = Rays_editor__.Text_pane.make_shown ws.source "editor" None Graph in
     edit (F.Set_graph {name = "editor"; form = parse original_form.text});
     focus comparison;
     check (same (position comparison) initial && not (same (position comparison) orbited))
@@ -610,7 +610,7 @@ let named_handles () =
     update target [Input.Pointer_released (Input.LeftButton, target)];
     let after = E.workspace !e in
     let binding ws = Option.map (fun (_, v) -> Flow.Lisp.flat v)
-      (Rays_editor.Private.Text_pane.binding ws.D.Workspace_doc.source ["g"; "a"]) in
+      (Rays_editor__.Text_pane.binding ws.D.Workspace_doc.source ["g"; "a"]) in
     check (after != before && binding after <> binding before)
       "named SOP handle did not write its owning graph argument";
     let scene_value = List.assoc "scene" (Flow.Eval.run ~time:0. after.checked |> Result.get_ok).results in

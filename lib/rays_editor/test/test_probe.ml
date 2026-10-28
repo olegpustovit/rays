@@ -192,7 +192,7 @@ let geometry_zone () =
 (* a footer counts a node that is not upstream of the display too: the cook is asked for it, and a
    failure there never fails the display (Async_cook.submit_some) *)
 let off_display () =
-  let module Cook = Rays_editor.Private.Cook in
+  let module Cook = Rays_editor__.Cook in
   let text = "(workspace w (graph g :context sop (let* [a (sop/box) orphan (sop/uv_sphere) r (sop/transform a)] r)))" in
   let forms = match Flow.Syntax.parse text with Ok f -> f | Error d -> fail (Diagnostic.to_string d) in
   let lowered = match Lower.workspace ~extra:Editor_document.Kinds.descriptors
