@@ -8,7 +8,7 @@ Completion is **not proved**. No phase is closed. Unlisted requirements and
 finding IDs remain open. Size estimates do not substitute for behavior,
 performance, parity, and shipping evidence.
 
-Finding coverage: **226 / 248 accepted (91.1%)**. This counts individual
+Finding coverage: **227 / 248 accepted (91.5%)**. This counts individual
 findings, not weighted effort or completed phases.
 
 Individual finding checkboxes record implementation/focused evidence;
@@ -258,6 +258,9 @@ size estimate, not the phase's behavioral or shipping gates.
   deleted the superseded study documents and workspace prototype.
 
 ## In progress and remaining proof
+
+- P8.G3 (owner decision): shattered_studio differs from the old kernel by RMSE 2.70e-3 at 8 spp, falling to 4.78e-4 at 512 spp at 400². The old kernel differs from itself by 3.76e-4 when one camera-ray multiply is regrouped, so the 1e-4 bar is below the old kernel's own consistency on this chaotic scene (about 100k fracture triangles with gaps and a lens): last-bit ray differences pick different but valid paths. No bias; the error falls with spp. pathtracer.rays meets the bar (6.9e-5). One real difference: mirrored instances keep smooth normals (the old kernel rendered them flat).
+- P8.G2: Workspace.check ~call_sites and lazy preview kernels halve the check (96→49 ms). First 4-spp frame: cold Metal cache 518–550 ms Lisp vs 1,414–1,506 old; warm 275–333 vs 200–218 (+80 ms: check 49, build/print 16, library load about 20). GPU per 16 spp: pathtracer.rays −0.6%, shattered_studio 800² −9.7%. Instanced kernels have no 64-bit math in loops.
 
 - Owner decisions open: UI29 (Navigator paints nine row kinds with its own geometry and carry-drag semantics, so rebuilding it on Pxui_shell.Tree cannot keep ui_parity exact without changing its look) and UI18 (scene-object inspection by Kind_graph id, while workspace_inspector reads a lexical path from the pane projection; this needs a projection of the scene/World graph even when another graph is shown). UI21 uses dune's Rays_editor__ alias for test access, a dune naming detail.
 
