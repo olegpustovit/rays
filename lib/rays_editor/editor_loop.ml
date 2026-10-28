@@ -99,11 +99,12 @@ let preview_images value frame =
    | _ -> ());
   List.rev !errors
 
-(* The World drag of one frame, folded over the frame's events as the Ui delivered them (the
-   owned press, moves and release; no second hit path).  The operation and target are latched at
-   the press; movement and the release position are reduced before sealing its history.  Returns
-   the core, the drag still in flight, the events with the drag's taken out, and the held
-   modifiers at the end of the frame. *)
+(* The World drag of one frame, from the view pane's capture signal (the one press/capture path:
+   press point, held modifiers, motion and release point arrive per frame, a press and a far jump
+   in one frame included).  The operation is latched at the press; movement and the release
+   position are reduced before sealing its history.  Returns the core, the drag still in flight,
+   the input with the drag's pointer events taken out, and the held modifiers at the end of the
+   frame. *)
 let world_drag_frame value (update : _ Editor_model.update) core ~area =
   let seal core = { core with Editor_model.history = Editor_core.History.seal core.Editor_model.history } in
   let world_drag = if update.loaded_view <> None
@@ -113,29 +114,37 @@ let world_drag_frame value (update : _ Editor_model.update) core ~area =
     then None else value.world_drag in
   let modifiers = Input.keys_before ~previous:value.core.Editor_model.held_keys
     ~held:update.input.input.keys update.input.input.events in
-  let core, world_drag, events, consumed, modifiers = List.fold_left
-      (fun (core, drag, events, consumed, modifiers) event ->
-        let modifiers = Input.keys_after modifiers event in
-        let core, drag, events, consumed = match event, drag with
-          | Input.Pointer_pressed (Input.LeftButton, point), None ->
-              (match world_operation core area point ~shift:(List.mem Input.Shift modifiers) with
-               | Some operation -> seal core, Some { operation; point; area },
-                   Input.Pointer_cancelled Input.LeftButton :: events, true
-               | None -> core, drag, event :: events, consumed)
-          | Input.Pointer_moved point, Some drag ->
-              move_world core drag point, Some { drag with point }, events, true
-          | Input.Pointer_released (Input.LeftButton, point), Some drag ->
-              seal (move_world core drag point), None,
-                Input.Pointer_cancelled Input.LeftButton :: events, true
-          | (Input.Pointer_cancelled Input.LeftButton | Input.Focus_lost), _ ->
-              seal core, None, event :: events, consumed || drag <> None
-          | _ -> core, drag, event :: events, consumed in
-        core, drag, events, consumed, modifiers)
-      (core, world_drag, [], false, modifiers) update.input.input.events in
-  let input = { update.input with input = { update.input.input with events = List.rev events;
-    buttons = if world_drag = None then update.input.input.buttons
-      else List.filter (( <> ) Input.LeftButton) update.input.input.buttons };
-    mouse_delta = if consumed then 0., 0. else update.input.mouse_delta } in
+  let modifiers = List.fold_left Input.keys_after modifiers update.input.input.events in
+  let ui = value.core.Editor_model.ui in
+  let view = List.find_map (fun (key, (panel, _)) ->
+    if (match panel with Pxui_shell.Layout.View _ -> true | _ -> false)
+    then Pxui.Ui.box_of_key ui key else None) value.core.Editor_model.pane_keys in
+  let signal = Option.map (Pxui.Ui.signal ui) view in
+  let core, world_drag, engaged = match signal, view with
+    | Some s, Some box ->
+        let core, drag = match world_drag with
+          | None when s.pressed && s.button = Some Input.LeftButton ->
+              (match world_operation core area s.press_point
+                  ~shift:(List.mem Input.Shift (Pxui.Ui.press_keys ui box)) with
+               | Some operation -> seal core, Some { operation; point = s.press_point; area }
+               | None -> core, None)
+          | drag -> core, drag in
+        (match drag with
+         | Some drag when s.released -> seal (move_world core drag s.release_point), None, true
+         | Some drag when s.held ->
+             move_world core drag s.pointer, Some { drag with point = s.pointer }, true
+         | Some _ -> seal core, None, true
+         | None -> core, None, false)
+    | _ -> (if world_drag <> None then seal core else core), None, world_drag <> None in
+  (* the drag's pointer events are the drag's: the camera and picking see a cancelled press *)
+  let input = if not engaged then update.input else
+    { update.input with input = { update.input.input with
+        events = List.filter (function
+          | Input.Pointer_pressed (Input.LeftButton, _) | Pointer_moved _
+          | Pointer_released (Input.LeftButton, _) -> false
+          | _ -> true) update.input.input.events @ [Input.Pointer_cancelled Input.LeftButton];
+        buttons = List.filter (( <> ) Input.LeftButton) update.input.input.buttons };
+      mouse_delta = 0., 0. } in
   core, world_drag, input, modifiers
 
 (* what the panes draw over the views: header tools, the gate where a film is not the whole pane,

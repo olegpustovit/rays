@@ -93,4 +93,26 @@ let run () =
   let released = Ui.frame ui (frame [Input.Pointer_released (Input.LeftButton, (20., 10.))]) probe in
   check (pressed = [Input.Shift] && held = pressed && released = pressed)
     "captured press keys changed during motion or release";
+  (* capture_unclaimed: a blocking (non-clickable) child under the ancestor takes the press away
+     from it only where the child is clickable *)
+  let unclaimed ui =
+    let outer = Ui.box ui ~flags:Ui.(capture_unclaimed + blocking) ~at:(0., 0.)
+      ~w:(Ui.Px 200.) ~h:(Ui.Px 200.) "outer" in
+    let taker = Ui.within ui outer (fun () -> Ui.box ui ~flags:Ui.clickable ~at:(100., 0.)
+      ~w:(Ui.Px 50.) ~h:(Ui.Px 50.) "taker") in
+    let plain = Ui.within ui outer (fun () -> Ui.box ui ~flags:Ui.scroll ~at:(0., 100.)
+      ~w:(Ui.Px 50.) ~h:(Ui.Px 50.) "plain") in
+    ignore plain; Ui.signal ui outer, Ui.signal ui taker in
+  ignore (Ui.frame ui (frame []) unclaimed);
+  let outer, taker = Ui.frame ui (frame ~buttons:[Input.LeftButton]
+    [Input.Pointer_pressed (Input.LeftButton, (110., 10.)); Input.Pointer_moved (120., 10.)]) unclaimed in
+  check (taker.pressed && not outer.pressed && not outer.held) "ancestor captured a consumed press";
+  ignore (Ui.frame ui (frame [Input.Pointer_released (Input.LeftButton, (120., 10.))]) unclaimed);
+  let outer, _ = Ui.frame ui (frame ~buttons:[Input.LeftButton]
+    [Input.Pointer_pressed (Input.LeftButton, (10., 110.)); Input.Pointer_moved (30., 90.)]) unclaimed in
+  check (outer.pressed && outer.held && outer.dragging && outer.drag = (20., -20.)
+    && outer.press_point = (10., 110.)) "ancestor did not capture an unclaimed press";
+  let outer, _ = Ui.frame ui (frame [Input.Pointer_released (Input.LeftButton, (60., 90.))]) unclaimed in
+  check (outer.released && not outer.held && outer.release_point = (60., 90.))
+    "unclaimed capture did not release";
   print_endline "PXUI ordered input: viewport/child ownership, crossings, popup transitions and cancellation passed")
