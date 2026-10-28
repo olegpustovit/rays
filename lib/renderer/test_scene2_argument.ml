@@ -97,7 +97,9 @@ let run () =
         let pixels =
           get
             (Renderer.read_pixels runtime
-               ~bytes_per_row:((get (Runtime.presentation_facts (Renderer.Native.runtime runtime))).drawable_width * 4))
+               ~bytes_per_row:
+                 ((get (Runtime.presentation_facts (Renderer.Native.runtime runtime)))
+                    .drawable_width * 4))
         in
         if Bytes.sub pixels 0 4 <> Bytes.of_string "\x11\x22\x33\xff" then
           failwith "scene2 retained argument exact pixel mismatch";
@@ -138,7 +140,9 @@ let run () =
         let pixels =
           get
             (Renderer.read_pixels runtime
-               ~bytes_per_row:((get (Runtime.presentation_facts (Renderer.Native.runtime runtime))).drawable_width * 4))
+               ~bytes_per_row:
+                 ((get (Runtime.presentation_facts (Renderer.Native.runtime runtime)))
+                    .drawable_width * 4))
         in
         if Bytes.sub pixels 0 4 <> Bytes.of_string rgba then
           failwith
@@ -182,7 +186,9 @@ let run () =
       let pixels =
         get
           (Renderer.read_pixels runtime
-             ~bytes_per_row:((get (Runtime.presentation_facts (Renderer.Native.runtime runtime))).drawable_width * 4))
+             ~bytes_per_row:
+               ((get (Runtime.presentation_facts (Renderer.Native.runtime runtime))).drawable_width
+              * 4))
       in
       if Bytes.sub pixels 0 4 <> Bytes.of_string "\x11\x22\x33\xff" then
         failwith "mixed canonical Scene2 exact pixel mismatch";
@@ -197,9 +203,12 @@ let run () =
             Renderer.Scene_execution.key = Host (Printf.sprintf "scene2-plan-churn-%02d" identity);
           }
         in
-        if not (get (Renderer.draw runtime
-          [ Renderer.prepared_draw ~family:Scene2 { Renderer.Scene_execution.mesh; state } ])) then
-          failwith "80-identity retained-plan frame was not presented"
+        if
+          not
+            (get
+               (Renderer.draw runtime
+                  [ Renderer.prepared_draw ~family:Scene2 { Renderer.Scene_execution.mesh; state } ]))
+        then failwith "80-identity retained-plan frame was not presented"
       done;
       let cycled = get (Renderer.stats runtime) in
       (* Every frame differs from its predecessor, so no automatic plan is
@@ -246,7 +255,9 @@ let run () =
       let shifted =
         get
           (Renderer.read_pixels runtime
-             ~bytes_per_row:((get (Runtime.presentation_facts (Renderer.Native.runtime runtime))).drawable_width * 4))
+             ~bytes_per_row:
+               ((get (Runtime.presentation_facts (Renderer.Native.runtime runtime))).drawable_width
+              * 4))
       in
       if Bytes.sub shifted 0 4 <> Bytes.of_string "\000\000\000\000" then
         failwith "animated affine translated pixel mismatch";
@@ -254,7 +265,9 @@ let run () =
       let restored =
         get
           (Renderer.read_pixels runtime
-             ~bytes_per_row:((get (Runtime.presentation_facts (Renderer.Native.runtime runtime))).drawable_width * 4))
+             ~bytes_per_row:
+               ((get (Runtime.presentation_facts (Renderer.Native.runtime runtime))).drawable_width
+              * 4))
       in
       if Bytes.sub restored 0 4 <> Bytes.of_string "\x11\x22\x33\xff" then
         failwith "animated affine restored pixel mismatch";

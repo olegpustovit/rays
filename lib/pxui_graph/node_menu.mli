@@ -1,7 +1,7 @@
-(** The node menu (leader [/ a], the sheet's [01]): a search field over the kinds from the
-    start, the likeliest first (what takes an input after the selected node, then the rest), typed
-    search over the whole catalog by name, key or category.  Pure state plus one PXUI popup; the
-    host decides what a picked key adds. *)
+(** The node menu (leader [/ a], the sheet's [01]): a search field over the kinds from the start,
+    the likeliest first (what takes an input after the selected node, then the rest), typed search
+    over the whole catalog by name, key or category. Pure state plus one PXUI popup; the host
+    decides what a picked key adds. *)
 
 type entry = {
   key : string;
@@ -12,7 +12,8 @@ type entry = {
   output : Flow.Ty.t;  (** what the node makes: the colour of its square in the rows *)
   off : string option;
       (** why the kind cannot be placed in this graph ([Some "not in sop"]), if it cannot: such a
-          kind is listed after the others when searching, whole row in ink-3, and cannot be picked *)
+          kind is listed after the others when searching, whole row in ink-3, and cannot be picked
+      *)
 }
 
 type t
@@ -22,8 +23,8 @@ val of_ops : ?extra:Flow.Op.t list -> Flow.Context.t -> entry list
 
 val create : ?after:string -> x:int -> y:int -> entry list -> t
 (** A menu open at a screen point (clamped inside the bounds it is drawn in); [after] is the node
-    the new one goes after, which the title says.  Entries with an
-    empty key, label or category path, or a repeated key, are dropped. *)
+    the new one goes after, which the title says. Entries with an empty key, label or category path,
+    or a repeated key, are dropped. *)
 
 val port_color : Pxui.theme -> Flow.Ty.t -> Rays_math.Color.t
 (** The colour of a type's port: the square of a kind in the menu, and the ports, type squares and

@@ -1,7 +1,4 @@
-type rename_conflict =
-  | Attribute_rename_skip
-  | Attribute_rename_error
-  | Attribute_rename_overwrite
+type rename_conflict = Attribute_rename_skip | Attribute_rename_error | Attribute_rename_overwrite
 
 type rename_rule = {
   rename_attribute_owner : Attribute.owner option;
@@ -21,17 +18,9 @@ type delete_params = {
 }
 
 val delete : delete_params -> Geometry.t -> (Geometry.t, string) result
+val rename : ?cancel:Cancel.t -> rules:rename_rule list -> Geometry.t -> (Geometry.t, string) result
 
-val rename :
-  ?cancel:Cancel.t ->
-  rules:rename_rule list ->
-  Geometry.t ->
-  (Geometry.t, string) result
-
-type swap_method =
-  | Attribute_swap
-  | Attribute_move
-  | Attribute_copy
+type swap_method = Attribute_swap | Attribute_move | Attribute_copy
 
 type swap_rule = {
   swap_attribute_owner : Attribute.owner;
@@ -40,8 +29,4 @@ type swap_rule = {
   swap_attribute_method : swap_method;
 }
 
-val swap :
-  ?cancel:Cancel.t ->
-  rules:swap_rule list ->
-  Geometry.t ->
-  (Geometry.t, string) result
+val swap : ?cancel:Cancel.t -> rules:swap_rule list -> Geometry.t -> (Geometry.t, string) result

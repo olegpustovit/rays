@@ -49,13 +49,7 @@ let () =
   let arguments = Array.to_list Sys.argv |> List.tl in
   let ship = arguments = [ "--ship" ] in
   let arguments =
-    if ship then
-      [
-        "@all";
-        "@runtest";
-        "@smoke";
-        "@tools/codemod/history-comments";
-      ]
+    if ship then [ "@all"; "@runtest"; "@smoke"; "@tools/codemod/history-comments" ]
     else if arguments = [] then [ "@runtest" ]
     else arguments
   in

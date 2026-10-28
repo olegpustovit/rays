@@ -1,6 +1,7 @@
 (executable
  (name rays)
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (modules rays)
  (public_name rays)
  (package rays)

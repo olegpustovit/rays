@@ -1,5 +1,6 @@
 (cram
- (deps %{bin:rays}
+ (deps
+  %{bin:rays}
   %{exe:../../core_census.exe}
   %{exe:../../prims_fixtures.exe}
   %{exe:../../shape2_fixtures.exe}

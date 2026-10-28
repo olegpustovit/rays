@@ -5,21 +5,27 @@
 
 (rule
  (alias runtest)
- (action (run %{exe:codemod.exe} history-comments --self-test)))
+ (action
+  (run %{exe:codemod.exe} history-comments --self-test)))
 
 (rule
  (alias runtest)
- (action (run %{exe:codemod.exe} spec-links --self-test)))
+ (action
+  (run %{exe:codemod.exe} spec-links --self-test)))
 
 (rule
  (alias history-comments)
- (deps (source_tree ../../lib))
- (action (run %{exe:codemod.exe} history-comments %{deps})))
+ (deps
+  (source_tree ../../lib))
+ (action
+  (run %{exe:codemod.exe} history-comments %{deps})))
 
 (rule
  (alias runtest)
- (action (run %{exe:codemod.exe} metal-registry --self-test)))
+ (action
+  (run %{exe:codemod.exe} metal-registry --self-test)))
 
 (rule
  (alias runtest)
- (action (run %{exe:codemod.exe} rename --self-test)))
+ (action
+  (run %{exe:codemod.exe} rename --self-test)))

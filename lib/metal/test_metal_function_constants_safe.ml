@@ -67,7 +67,8 @@ let run_once device queue function_ ~initial =
 
 let buffer_binding (binding : Binding.t) =
   match binding.kind with
-  | Binding.Buffer_binding layout -> Some (binding.name, binding.index, binding.access, layout.data_type)
+  | Binding.Buffer_binding layout ->
+      Some (binding.name, binding.index, binding.access, layout.data_type)
   | _ -> None
 
 let run () =
@@ -78,64 +79,72 @@ let run () =
         expect Native_error
           (Library.compile_source ~device ~label:"invalid shader diagnostic" "not a Metal program")
       in
-      if invalid_shader.message = "" || not (contains invalid_shader.message "invalid shader diagnostic")
+      if
+        invalid_shader.message = ""
+        || not (contains invalid_shader.message "invalid shader diagnostic")
       then fail "shader compilation lost its full labeled diagnostic";
       let library =
         get (Library.compile_source ~device ~label:"Metal conformance library" shader_source)
       in
       let function_ = get (Function.find ~library "increment") in
       without_handles "invalid function lookups" (fun () ->
-        reject Invalid_argument (Function.find ~library "");
-        reject Invalid_argument (Function.find ~library "bad\000name"));
+          reject Invalid_argument (Function.find ~library "");
+          reject Invalid_argument (Function.find ~library "bad\000name"));
       without_handles "invalid function constants" (fun () ->
-        reject Invalid_argument
-          (Function.specialize ~library "specialized_increment"
-             ~constants:
-               [ "increment_amount", Function.Uint32_constant 1L
-               ; "increment_amount", Function.Uint32_constant 2L
-               ]);
-        reject Invalid_argument
-          (Function.specialize ~library "specialized_increment"
-             ~constants:[ "increment_amount", Function.Uint32_constant 0x1_0000_0000L ]);
-        reject Invalid_argument
-          (Function.specialize ~library "specialized_increment"
-             ~constants:[ "", Function.Uint32_constant 1L ]);
-        reject Invalid_argument (Function.specialize ~library "" ~constants:[]);
-        List.iter
-          (fun value ->
-            reject Invalid_argument
-              (Function.specialize ~library "scalar_constant_sum"
-                 ~constants:[ "scalar_i8", value ]))
-          [ Function.Int8_constant 128; Function.Uint8_constant (-1); Function.Int16_constant 32_768
-          ; Function.Uint16_constant 65_536
-          ]);
+          reject Invalid_argument
+            (Function.specialize ~library "specialized_increment"
+               ~constants:
+                 [
+                   ("increment_amount", Function.Uint32_constant 1L);
+                   ("increment_amount", Function.Uint32_constant 2L);
+                 ]);
+          reject Invalid_argument
+            (Function.specialize ~library "specialized_increment"
+               ~constants:[ ("increment_amount", Function.Uint32_constant 0x1_0000_0000L) ]);
+          reject Invalid_argument
+            (Function.specialize ~library "specialized_increment"
+               ~constants:[ ("", Function.Uint32_constant 1L) ]);
+          reject Invalid_argument (Function.specialize ~library "" ~constants:[]);
+          List.iter
+            (fun value ->
+              reject Invalid_argument
+                (Function.specialize ~library "scalar_constant_sum"
+                   ~constants:[ ("scalar_i8", value) ]))
+            [
+              Function.Int8_constant 128;
+              Function.Uint8_constant (-1);
+              Function.Int16_constant 32_768;
+              Function.Uint16_constant 65_536;
+            ]);
       (* A constant of the wrong type is Metal's to refuse. *)
       reject Native_error
         (Function.specialize ~library "specialized_increment"
-           ~constants:[ "increment_amount", Function.Bool_constant true ]);
+           ~constants:[ ("increment_amount", Function.Bool_constant true) ]);
       let specialized_function =
         get
           (Function.specialize ~library "specialized_increment"
              ~constants:
-               [ "increment_amount", Function.Uint32_constant 7L
-               ; "apply_twice", Function.Bool_constant true
+               [
+                 ("increment_amount", Function.Uint32_constant 7L);
+                 ("apply_twice", Function.Bool_constant true);
                ])
       in
       let scalar_constant_function =
         get
           (Function.specialize ~library "scalar_constant_sum"
              ~constants:
-               [ "scalar_i8", Function.Int8_constant (-2)
-               ; "scalar_u8", Function.Uint8_constant 3
-               ; "scalar_i16", Function.Int16_constant (-4)
-               ; "scalar_u16", Function.Uint16_constant 5
-               ; "scalar_i32", Function.Int32_constant (-6l)
-               ; "scalar_u32", Function.Uint32_constant 7L
-               ; "scalar_i64", Function.Int64_constant (-8L)
-               ; "scalar_u64", Function.Uint64_bits_constant 9L
-               ; "scalar_f16", Function.Float16_constant 10.
-               ; "scalar_f32", Function.Float32_constant 11.
-               ; "scalar_bool", Function.Bool_constant true
+               [
+                 ("scalar_i8", Function.Int8_constant (-2));
+                 ("scalar_u8", Function.Uint8_constant 3);
+                 ("scalar_i16", Function.Int16_constant (-4));
+                 ("scalar_u16", Function.Uint16_constant 5);
+                 ("scalar_i32", Function.Int32_constant (-6l));
+                 ("scalar_u32", Function.Uint32_constant 7L);
+                 ("scalar_i64", Function.Int64_constant (-8L));
+                 ("scalar_u64", Function.Uint64_bits_constant 9L);
+                 ("scalar_f16", Function.Float16_constant 10.);
+                 ("scalar_f32", Function.Float32_constant 11.);
+                 ("scalar_bool", Function.Bool_constant true);
                ])
       in
       reject Wrong_domain
@@ -145,14 +154,13 @@ let run () =
       reject Destroyed (Compute_pipeline.create stale_function);
       reject Destroyed (Function.argument_encoder stale_function ~buffer_index:0L);
       without_handles "invalid compute descriptors" (fun () ->
-        reject Invalid_argument
-          (Compute_pipeline.create ~label:"invalid\000label" specialized_function));
+          reject Invalid_argument
+            (Compute_pipeline.create ~label:"invalid\000label" specialized_function));
       reject Parent_has_dependents (Library.destroy library);
       let pipeline = get (Compute_pipeline.create function_) in
       let specialized_pipeline =
         get
-          (Compute_pipeline.create ~label:"specialized reflected pipeline"
-             ~reflection:true
+          (Compute_pipeline.create ~label:"specialized reflected pipeline" ~reflection:true
              specialized_function)
       in
       let scalar_constant_pipeline = get (Compute_pipeline.create scalar_constant_function) in
@@ -164,8 +172,8 @@ let run () =
         | None -> fail "requested compute pipeline reflection is missing"
       in
       (match List.filter_map buffer_binding reflected_bindings with
-       | [ ("values", 0L, Binding.Read_write, Shader_type.Scalar Shader_type.Uint) ] -> ()
-       | _ -> fail "compute reflection does not describe the one read-write uint buffer");
+      | [ ("values", 0L, Binding.Read_write, Shader_type.Scalar Shader_type.Uint) ] -> ()
+      | _ -> fail "compute reflection does not describe the one read-write uint buffer");
       if List.length reflected_bindings <> 1 then fail "compute reflection invented a binding";
       let buffer = get (Buffer.create ~device ~length:16L ~storage:Buffer.Shared ()) in
       get (Buffer.write_bytes buffer ~dst_offset:0L (input_values ()));
@@ -179,8 +187,8 @@ let run () =
       if not (Device.same (Command_buffer.device commands) device) then
         fail "command buffer device drift";
       (match get (Command_buffer.status commands) with
-       | Command_buffer.Not_enqueued -> ()
-       | _ -> fail "a new command buffer is already enqueued");
+      | Command_buffer.Not_enqueued -> ()
+      | _ -> fail "a new command buffer is already enqueued");
       reject Invalid_state (Command_buffer.wait_until_completed commands);
       let encoder = get (Compute_encoder.create commands) in
       reject Invalid_state (Compute_encoder.create commands);
@@ -205,8 +213,8 @@ let run () =
       reject Invalid_state (Compute_encoder.create commands);
       get (Command_buffer.wait_until_completed commands);
       (match get (Command_buffer.status commands) with
-       | Command_buffer.Completed -> ()
-       | _ -> fail "command buffer did not complete");
+      | Command_buffer.Completed -> ()
+      | _ -> fail "command buffer did not complete");
       let output = get (Buffer.read_bytes buffer ~offset:0L ~length:16) in
       Array.iteri
         (fun index expected ->
@@ -214,11 +222,13 @@ let run () =
           if actual <> expected then
             fail "compute output %d: expected %ld, got %ld" index expected actual)
         expected_values;
-      if Bytes.get_int32_le (get (Buffer.read_bytes specialized_buffer ~offset:0L ~length:4)) 0
-         <> 24l
+      if
+        Bytes.get_int32_le (get (Buffer.read_bytes specialized_buffer ~offset:0L ~length:4)) 0
+        <> 24l
       then fail "specialized function constants did not execute on the GPU";
-      if Bytes.get_int32_le (get (Buffer.read_bytes scalar_constant_buffer ~offset:0L ~length:4)) 0
-         <> 26l
+      if
+        Bytes.get_int32_le (get (Buffer.read_bytes scalar_constant_buffer ~offset:0L ~length:4)) 0
+        <> 26l
       then fail "typed scalar function constants did not round-trip to the GPU";
       get (Buffer.destroy scalar_constant_buffer);
       get (Buffer.destroy specialized_buffer);
@@ -232,7 +242,10 @@ let run () =
           get
             (Function.specialize ~library "constant_copy"
                ~constants:
-                 [ "first", Function.Int32_constant first; "second", Function.Int32_constant second ])
+                 [
+                   ("first", Function.Int32_constant first);
+                   ("second", Function.Int32_constant second);
+                 ])
         in
         let result = run_once device queue specialized ~initial:(-1l) in
         get (Function.destroy specialized);
@@ -252,7 +265,7 @@ let run () =
       reject Destroyed (Function.find ~library "increment");
       reject Destroyed
         (Function.specialize ~library "specialized_increment"
-           ~constants:[ "increment_amount", Function.Uint32_constant 1L ]);
+           ~constants:[ ("increment_amount", Function.Uint32_constant 1L) ]);
       get (Device.destroy device);
       ignore (settle_finalizers ~expected_live:0);
       print_endline "metal function constants safe: ok"

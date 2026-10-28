@@ -1,9 +1,6 @@
 type using = Least_target_point | Closest_target_point
 type match_condition = Equal_attribute_values | Unequal_attribute_values
-
-type targeting =
-  | Near_points
-  | Specified_points of string
+type targeting = Near_points | Specified_points of string
 
 val plan :
   ?cancel:Cancel.t ->
@@ -23,6 +20,6 @@ val plan :
   target:Geometry.t ->
   unit ->
   (int array, string) result
-(** Return one target point number per source point, or [-1] for no snap.
-    Only selected queries are evaluated and only selected targets are eligible.
-    Equal candidates are resolved deterministically by the requested policy. *)
+(** Return one target point number per source point, or [-1] for no snap. Only selected queries are
+    evaluated and only selected targets are eligible. Equal candidates are resolved
+    deterministically by the requested policy. *)

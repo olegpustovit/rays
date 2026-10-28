@@ -1,12 +1,17 @@
 (** The syntax-tree helpers a layout edit needs, public so the editor's own edits
-    ([Editor_document.Layout_edit]) rewrite a workspace the way {!Flow_edit} does without the
-    layout knowledge living here.  Only what those edits use: scopes ([let*] bindings and a
-    result), call arguments, fresh names, one source rewrite that is checked. *)
+    ([Editor_document.Layout_edit]) rewrite a workspace the way {!Flow_edit} does without the layout
+    knowledge living here. Only what those edits use: scopes ([let*] bindings and a result), call
+    arguments, fresh names, one source rewrite that is checked. *)
 
 module S = Flow.Syntax
 
 type arg_key = Edit_base.arg_key =
-  | Whole | Pos of int | Kw of string | Field of string | Bv of int * int | Arm of int
+  | Whole
+  | Pos of int
+  | Kw of string
+  | Field of string
+  | Bv of int * int
+  | Arm of int
 
 (** {1 Failing} *)
 
@@ -22,6 +27,7 @@ val num : int -> S.t
 val call : string -> S.t list -> S.t
 val head_sym : S.t -> string option
 val map_children : (S.t -> S.t) -> S.t -> S.t
+
 val keep_notes : S.t -> S.t -> S.t
 (** [keep_notes old v]: [v], with the notes of [old] when it has none. *)
 
@@ -31,6 +37,7 @@ val sym_list : S.t -> string list
 val dedup : string list -> string list
 val count_refs : string -> S.t -> int
 val rename_ref : string -> string -> S.t -> S.t
+
 val rename_place : string -> string -> S.t -> S.t
 (** {!rename_ref} that leaves an [:of old] following the panel itself. *)
 
@@ -52,11 +59,13 @@ type scope = Edit_base.scope = { form : S.t; vec : S.t; ps : (S.t * S.t) list; r
 (** A [let*] (or a bare expression): its bindings in order and its result. *)
 
 val scope_of : S.t -> scope option
+
 val ensure : S.t -> scope
 (** The scope of an expression, a bare one wrapped in an empty [let*]. *)
 
 val rebuild : scope -> (S.t * S.t) list -> S.t -> S.t
 val collapse : scope -> (S.t * S.t) list -> S.t -> S.t
+
 val reorder : S.t -> S.t
 (** Bindings in dependency order. *)
 
@@ -72,7 +81,6 @@ val split_node : string list -> string list * string
 
 val get_node : S.t -> string -> S.t
 val set_node : S.t -> string -> S.t -> S.t
-
 val workspace_parts : S.t list -> S.t * S.t list
 val root_name : S.t -> string option
 val map_items : S.t list -> (S.t list -> S.t list) -> S.t list
@@ -86,9 +94,11 @@ val root_used : S.t list -> string -> string list ref
 (** {1 Applying} *)
 
 val apply_rewrite :
-  ?ops:Flow.Op.t list -> ?library:bool ->
+  ?ops:Flow.Op.t list ->
+  ?library:bool ->
   ?checker:(Flow.Catalog.catalog -> S.t list -> Flow.Workspace.t option * Diagnostic.t list) ->
-  Flow.Catalog.catalog -> (unit -> S.t list) ->
+  Flow.Catalog.catalog ->
+  (unit -> S.t list) ->
   (S.t list * Flow.Workspace.t, Diagnostic.t) result
-(** The rewrite, printed and parsed again, then checked as {!Flow_edit.apply_checked} does:
-    whatever it raises is a refused edit, never a crash. *)
+(** The rewrite, printed and parsed again, then checked as {!Flow_edit.apply_checked} does: whatever
+    it raises is a refused edit, never a crash. *)

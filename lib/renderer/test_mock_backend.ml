@@ -1,5 +1,6 @@
 let () =
-  if Ogpu.Impl.backend <> "mock" then failwith "mock renderer selected the wrong OGPU implementation";
+  if Ogpu.Impl.backend <> "mock" then
+    failwith "mock renderer selected the wrong OGPU implementation";
   match Renderer.create_offscreen Renderer.default_configuration with
   | Error error when error.Ogpu.Error.kind = Ogpu.Error.Unsupported ->
       print_endline "renderer: mock backend returns typed unsupported (no shader fallback)"

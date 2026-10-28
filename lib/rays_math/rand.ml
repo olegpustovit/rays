@@ -10,12 +10,12 @@ let next state =
   let value = mul value 0xBF58476D1CE4E5B9L in
   let value = logxor value (shift_right_logical value 27) in
   let value = mul value 0x94D049BB133111EBL in
-  logxor value (shift_right_logical value 31), state
+  (logxor value (shift_right_logical value 31), state)
 
 let float state =
   let value, state = next state in
   let mantissa = Int64.shift_right_logical value 11 in
-  Int64.to_float mantissa /. 9_007_199_254_740_992., state
+  (Int64.to_float mantissa /. 9_007_199_254_740_992., state)
 
 let[@inline always] mix_index value =
   let value = value lxor (value lsr 30) in
@@ -25,17 +25,15 @@ let[@inline always] mix_index value =
   value lxor (value lsr 31)
 
 let[@inline always] float_at_int seed ~index =
-  let keyed = seed lxor
-      ((index + 0x11b54a32d192ed03) * 0x1e3779b97f4a7c15) in
-  float_of_int (mix_index keyed lsr 10)
-  *. (1. /. 9_007_199_254_740_992.)
+  let keyed = seed lxor ((index + 0x11b54a32d192ed03) * 0x1e3779b97f4a7c15) in
+  float_of_int (mix_index keyed lsr 10) *. (1. /. 9_007_199_254_740_992.)
 
 let[@inline always] float_at state ~index = float_at_int (Int64.to_int state) ~index
 
 let int ~bound state =
   if bound <= 0 then invalid_arg "Rand.int: bound must be positive";
   let value, state = next state in
-  Int64.(unsigned_rem value (of_int bound) |> to_int), state
+  (Int64.(unsigned_rem value (of_int bound) |> to_int), state)
 
 let shuffle values state =
   let values = Array.of_list values in
@@ -47,4 +45,4 @@ let shuffle values state =
     values.(index) <- values.(other);
     values.(other) <- value
   done;
-  Array.to_list values, !state
+  (Array.to_list values, !state)

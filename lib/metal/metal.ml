@@ -21,21 +21,19 @@ let native_error operation message = error operation Native_error message
 (* Adapters for generated [Metal_raw.Registry] calls, which return
    [(_, string) result]: [native] types the failure, [probe] reads an
    internal capability bit whose native failure means "unsupported". *)
-let native operation = function Ok value -> Ok value | Error message -> native_error operation message
+let native operation = function
+  | Ok value -> Ok value
+  | Error message -> native_error operation message
 
 let native_result = native
 
 (* The Metal build lowers these binds to matches without continuations. *)
 let ( let* ) = Result.bind
-
 let probe = function Ok value -> value | Error _ -> false
-
 let contains_nul value = String.contains value '\000'
 let option_exists predicate = function Some value -> predicate value | None -> false
 
-module Vertex_descriptor = struct
-
-end
+module Vertex_descriptor = struct end
 
 module Thread = struct
   let is_initial_domain = Domain.is_main_domain
@@ -140,7 +138,6 @@ let destroy_parent operation lifetime raw detach_parent =
         end)
 
 type device = { raw : Metal_raw.handle; lifetime : lifetime; registry_id : int64 }
-
 type buffer_storage_mode = Shared | Managed | Private
 
 type texture_kind =
@@ -283,12 +280,10 @@ type texture_descriptor = {
   label : string option;
 }
 
-type heap_allocation = {   active : bool Atomic.t }
+type heap_allocation = { active : bool Atomic.t }
 
 type heap = {
-
   lifetime : lifetime;
-
   purgeable : purgeable_state Atomic.t;
   active_uses : int Atomic.t;
 }
@@ -297,7 +292,6 @@ and metal_layer = {
   raw : Metal_raw.handle;
   lifetime : lifetime;
   device : device;
-
   mutable drawable_descriptor : texture_descriptor option;
 }
 
@@ -306,7 +300,6 @@ and metal_drawable = {
   lifetime : lifetime;
   layer : metal_layer;
   mutable drawable_texture : texture option;
-
   mutable presentation_scheduled : bool;
 }
 
@@ -326,16 +319,8 @@ and render_pass_descriptor = {
 }
 
 and render_pass_sample_state = { sample_buffer : resource100_sample_buffer }
-
-and resource100_sample_buffer = {
-
-  lifetime : lifetime;
-  device : device;
-
-}
-
-and resource_parent =
-  | Device_resource of device
+and resource100_sample_buffer = { lifetime : lifetime; device : device }
+and resource_parent = Device_resource of device
 
 and buffer = {
   raw : Metal_raw.handle;
@@ -343,12 +328,9 @@ and buffer = {
   device : device;
   length : int64;
   storage : buffer_storage_mode;
-
   parent : resource_parent;
-
   allocation : heap_allocation option;
   state : resource_state;
-
 }
 
 and acceleration_structure = {
@@ -366,7 +348,6 @@ and texture = {
   device : device;
   descriptor : texture_descriptor;
   parent : texture_parent;
-
   allocation : heap_allocation option;
   state : resource_state;
 }
@@ -438,20 +419,8 @@ type sampler_descriptor = {
   label : string option;
 }
 
-type sampler = {
-  raw : Metal_raw.handle;
-  lifetime : lifetime;
-  device : device;
-
-}
-
-type depth_stencil = {
-  raw : Metal_raw.handle;
-  lifetime : lifetime;
-  device : device;
-
-}
-
+type sampler = { raw : Metal_raw.handle; lifetime : lifetime; device : device }
+type depth_stencil = { raw : Metal_raw.handle; lifetime : lifetime; device : device }
 type library = { raw : Metal_raw.handle; lifetime : lifetime; device : device }
 type function_handle = { raw : Metal_raw.handle; lifetime : lifetime; library : library }
 
@@ -459,27 +428,20 @@ type shader_argument_encoder = {
   raw : Metal_raw.handle;
   lifetime : lifetime;
   function_ : function_handle option;
-
   device : device;
-
   encoded_length : int64;
   alignment : int64;
   retained : (int64, lifetime) Hashtbl.t;
   parent_encoder : shader_argument_encoder option;
 }
 
-type compiler = {
-  raw : Metal_raw.handle;
-  lifetime : lifetime;
-  device : device;
-}
+type compiler = { raw : Metal_raw.handle; lifetime : lifetime; device : device }
 
 type compute_pipeline = {
   raw : Metal_raw.handle;
   lifetime : lifetime;
   device : device;
   bindings : shader_binding array option;
-
   max_total_threads : int;
 }
 
@@ -538,18 +500,11 @@ type render_pipeline = {
   lifetime : lifetime;
   device : device;
   raster_sample_count : int;
-
   color_formats : pixel_format list;
-
   reflection : render_pipeline_reflection option;
-
 }
 
-type residency_set = {
-
-  lifetime : lifetime;
-
-}
+type residency_set = { lifetime : lifetime }
 
 type command_queue = {
   raw : Metal_raw.handle;
@@ -588,10 +543,7 @@ type indirect_command_buffer_descriptor = {
   support_color_attachment_mapping : bool;
 }
 
-type indirect_retained =
-  | Indirect_buffer of buffer
-
-  | Indirect_render_pipeline of render_pipeline
+type indirect_retained = Indirect_buffer of buffer | Indirect_render_pipeline of render_pipeline
 
 type indirect_command_buffer = {
   raw : Metal_raw.handle;
@@ -599,7 +551,6 @@ type indirect_command_buffer = {
   device : device;
   max_command_count : int;
   command_types : indirect_command_kind list;
-
   retained : indirect_retained list ref;
 }
 
@@ -612,11 +563,9 @@ type indirect_render_command = {
 }
 
 type render_encoder_prepared_resources = {
-
   lifetime : lifetime;
   prepared_buffers : buffer array;
   prepared_textures : texture array;
-
 }
 
 type prepared_command_resources = {
@@ -642,23 +591,16 @@ let empty_prepared_command_resources =
 
 type command_resource =
   | Command_buffer_buffer of buffer
-
   | Command_buffer_acceleration_structure of acceleration_structure
   | Command_buffer_texture of texture
   | Command_buffer_sampler of sampler
   | Command_buffer_depth_stencil of depth_stencil
-
   | Command_buffer_render_pipeline of render_pipeline
-
   | Command_buffer_indirect of indirect_command_buffer
-
   | Command_buffer_drawable of metal_drawable
   | Command_buffer_prepared_command of prepared_command_resources
 
-type prepared_resource_slot = {
-  mutable prepared_active : bool;
-  prepared_lifetime : lifetime;
-}
+type prepared_resource_slot = { mutable prepared_active : bool; prepared_lifetime : lifetime }
 
 type prepared_command_slot = {
   mutable prepared_command_active : bool;
@@ -669,7 +611,6 @@ type command_buffer = {
   raw : Metal_raw.handle;
   lifetime : lifetime;
   queue : command_queue;
-
   mutable phase : command_phase;
   resources : command_resource list ref;
   (* Lifetime identities already in [resources]: dedup in O(1) per bind. *)
@@ -680,7 +621,6 @@ type command_buffer = {
   scoped_prepared_lifetime : lifetime;
   callback_tokens : nativeint list ref;
   presentation_events : lifetime list ref;
-
 }
 
 type compute_encoder = {
@@ -695,7 +635,6 @@ type render_encoder = {
   lifetime : lifetime;
   command_buffer : command_buffer;
   target : texture;
-
   mutable pipeline : render_pipeline option;
 }
 
@@ -709,7 +648,9 @@ type acceleration_encoder = {
 
 (* MTLCommandBufferStatus, or -1 when Metal cannot report it *)
 let command_buffer_status raw =
-  match Metal_raw.Registry.command_buffer_status raw with Ok status -> Int64.to_int status | Error _ -> -1
+  match Metal_raw.Registry.command_buffer_status raw with
+  | Ok status -> Int64.to_int status
+  | Error _ -> -1
 
 let make_device raw =
   let* registry_id =
@@ -738,40 +679,28 @@ let attach_lifetime_finalizer ?(on_finalize = fun () -> ()) lifetime parent =
 
 let command_resource_lifetime = function
   | Command_buffer_buffer buffer -> buffer.lifetime
-
   | Command_buffer_acceleration_structure value -> value.lifetime
   | Command_buffer_texture texture -> texture.lifetime
   | Command_buffer_sampler sampler -> sampler.lifetime
   | Command_buffer_depth_stencil value -> value.lifetime
-
   | Command_buffer_render_pipeline pipeline -> pipeline.lifetime
-
   | Command_buffer_indirect value -> value.lifetime
-
   | Command_buffer_drawable value -> value.lifetime
   | Command_buffer_prepared_command _ ->
       invalid_arg "prepared command has multiple resource lifetimes"
 
 let command_texture_heap (value : texture) =
   match value.parent with
-
-  | Texture_resource (Device_resource _ )  ->
-      None
+  | Texture_resource (Device_resource _) -> None
   | Texture_drawable_resource _ -> None
 
 let command_resource_heap = function
-
-  | Command_buffer_buffer { parent = Device_resource _ ; _ } -> None
-
+  | Command_buffer_buffer { parent = Device_resource _; _ } -> None
   | Command_buffer_acceleration_structure _ -> None
   | Command_buffer_texture texture -> command_texture_heap texture
   | Command_buffer_sampler _ -> None
-  | Command_buffer_depth_stencil _ ->
-      None
-  | Command_buffer_render_pipeline _  | Command_buffer_indirect _
-   ->
-      None
-
+  | Command_buffer_depth_stencil _ -> None
+  | Command_buffer_render_pipeline _ | Command_buffer_indirect _ -> None
   | Command_buffer_drawable _ -> None
   | Command_buffer_prepared_command _ -> None
 
@@ -782,9 +711,7 @@ let release_prepared_command_resources prepared =
   for index = 0 to Array.length prepared.prepared_buffer_roots - 1 do
     let buffer = Array.unsafe_get prepared.prepared_buffer_roots index in
     detach buffer.lifetime;
-    match buffer.parent with
-    | Device_resource _  -> ()
-
+    match buffer.parent with Device_resource _ -> ()
   done;
   for index = 0 to Array.length prepared.prepared_texture_roots - 1 do
     let texture = Array.unsafe_get prepared.prepared_texture_roots index in
@@ -804,8 +731,7 @@ let release_prepared_command_resources prepared =
     let resources = Array.unsafe_get prepared.prepared_resource_roots index in
     for buffer_index = 0 to Array.length resources.prepared_buffers - 1 do
       match (Array.unsafe_get resources.prepared_buffers buffer_index).parent with
-      | Device_resource _  -> ()
-
+      | Device_resource _ -> ()
     done;
     for texture_index = 0 to Array.length resources.prepared_textures - 1 do
       Option.iter
@@ -863,16 +789,16 @@ let release_command_buffer_resources command_buffer =
    rescanning the retained list. *)
 let already_retained (command_buffer : command_buffer) (lifetime : lifetime) =
   Hashtbl.mem command_buffer.retained_identities lifetime.identity
-  || (Hashtbl.add command_buffer.retained_identities lifetime.identity (); false)
+  ||
+  (Hashtbl.add command_buffer.retained_identities lifetime.identity ();
+   false)
 
 let retain_command_buffer_buffer (command_buffer : command_buffer) (buffer : buffer) =
   if not (already_retained command_buffer buffer.lifetime) then begin
     attach buffer.lifetime;
     Option.iter
       (fun heap -> Atomic.incr heap.active_uses)
-      (match buffer.parent with
-      | Device_resource _  -> None
-      );
+      (match buffer.parent with Device_resource _ -> None);
     command_buffer.resources := Command_buffer_buffer buffer :: !(command_buffer.resources)
   end
 
@@ -888,9 +814,7 @@ let retain_prepared_command_resources prepared =
   for index = 0 to Array.length prepared.prepared_buffer_roots - 1 do
     let buffer = Array.unsafe_get prepared.prepared_buffer_roots index in
     attach buffer.lifetime;
-    match buffer.parent with
-    | Device_resource _  -> ()
-
+    match buffer.parent with Device_resource _ -> ()
   done;
   for index = 0 to Array.length prepared.prepared_texture_roots - 1 do
     let texture = Array.unsafe_get prepared.prepared_texture_roots index in
@@ -911,8 +835,7 @@ let retain_prepared_command_resources prepared =
     attach resources.lifetime;
     for buffer_index = 0 to Array.length resources.prepared_buffers - 1 do
       match (Array.unsafe_get resources.prepared_buffers buffer_index).parent with
-      | Device_resource _  -> ()
-
+      | Device_resource _ -> ()
     done;
     for texture_index = 0 to Array.length resources.prepared_textures - 1 do
       Option.iter
@@ -930,10 +853,10 @@ let retain_command_buffer_prepared_command_overflow command_buffer prepared =
 
 let retain_command_buffer_prepared_command command_buffer prepared =
   let primary = command_buffer.prepared_command_slot in
-  if primary.prepared_command_active then
-    begin if primary.prepared_command != prepared then
+  if primary.prepared_command_active then begin
+    if primary.prepared_command != prepared then
       retain_command_buffer_prepared_command_overflow command_buffer prepared
-    end
+  end
   else begin
     retain_prepared_command_resources prepared;
     primary.prepared_command <- prepared;
@@ -996,12 +919,8 @@ let release_queue_residency_sets residency_sets =
 let deactivate_allocation (value : heap_allocation option) =
   match value with None -> () | Some allocation -> Atomic.set allocation.active false
 
-let resource_parent_lifetime = function
-  | Device_resource device -> device.lifetime
-
-let resource_parent_extra_device (_device : device) = function
-
-  | Device_resource _  -> None
+let resource_parent_lifetime = function Device_resource device -> device.lifetime
+let resource_parent_extra_device (_device : device) = function Device_resource _ -> None
 
 let texture_parent_lifetime = function
   | Texture_resource parent -> resource_parent_lifetime parent
@@ -1009,18 +928,14 @@ let texture_parent_lifetime = function
 
 let texture_parent_extra_device (device : device) = function
   | Texture_resource parent -> resource_parent_extra_device device parent
-
-    | Texture_drawable_resource _ -> None
+  | Texture_drawable_resource _ -> None
 
 let resource_state () = { relinquished = Atomic.make false; purgeable = Atomic.make Nonvolatile }
-
-let parent_heap = function
-  | Device_resource _  -> None
+let parent_heap = function Device_resource _ -> None
 
 let texture_heap (value : texture) =
   match value.parent with
   | Texture_resource parent -> parent_heap parent
-
   | Texture_drawable_resource _ -> None
 
 let ensure_heap_nonvolatile operation = function
@@ -1215,23 +1130,23 @@ module Buffer = struct
 
   let validate_create operation (device : Device.t) ~length ~label =
     if length <= 0L then error operation Invalid_argument "buffer length must be positive"
-    else if (match Metal_raw.Registry.device_max_buffer_length device.raw with Ok limit -> length > limit | Error _ -> true) then
-      error operation Invalid_argument "buffer length exceeds the device limit"
+    else if
+      match Metal_raw.Registry.device_max_buffer_length device.raw with
+      | Ok limit -> length > limit
+      | Error _ -> true
+    then error operation Invalid_argument "buffer length exceeds the device limit"
     else if option_exists contains_nul label then
       error operation Invalid_argument "label contains a NUL byte"
     else Ok ()
 
-  let finish_create operation ~(device : Device.t) ~parent ~length
-      ~storage ~cpu_cache ~hazard_tracking ~heap_offset ~allocation ~label raw =
+  let finish_create operation ~(device : Device.t) ~parent ~length ~storage ~cpu_cache
+      ~hazard_tracking ~heap_offset ~allocation ~label raw =
     let actual_length, actual_storage, actual_cache, actual_hazard, actual_offset =
       Metal_raw.buffer_info raw
     in
     let expected_hazard =
       concrete_hazard_tracking
-        ~heap:
-          (match parent with
-
-          | Device_resource _  -> false)
+        ~heap:(match parent with Device_resource _ -> false)
         hazard_tracking
     in
     if
@@ -1261,12 +1176,9 @@ module Buffer = struct
               device;
               length;
               storage;
-
               parent;
-
               allocation;
               state = resource_state ();
-
             }
           in
           attach parent_lifetime;
@@ -1279,9 +1191,9 @@ module Buffer = struct
             value value.lifetime parent_lifetime;
           Ok value
 
-  let create ~(device : Device.t) ~length ~storage ?(cpu_cache = Default_cache)
-      ?label () =
-    let hazard_tracking = (Default_hazard_tracking) in on_main "Metal.Buffer.create" (fun () ->
+  let create ~(device : Device.t) ~length ~storage ?(cpu_cache = Default_cache) ?label () =
+    let hazard_tracking = Default_hazard_tracking in
+    on_main "Metal.Buffer.create" (fun () ->
         let* () = ensure_live "Metal.Buffer.create" device.lifetime in
         let* () = validate_create "Metal.Buffer.create" device ~length ~label in
         let options = resource_options_code ~storage ~cpu_cache ~hazard_tracking in
@@ -1302,7 +1214,8 @@ module Buffer = struct
       else Ok ()
 
   let write_bytes (value : t) ~dst_offset bytes =
-    let src_offset = (0) in on_main "Metal.Buffer.write_bytes" (fun () ->
+    let src_offset = 0 in
+    on_main "Metal.Buffer.write_bytes" (fun () ->
         let* () = ensure_buffer_usable "Metal.Buffer.write_bytes" value in
         if value.storage = Private then
           error "Metal.Buffer.write_bytes" Unsupported "private buffers have no CPU mapping"
@@ -1361,50 +1274,92 @@ module Acceleration_structure = struct
   module Build = struct
     type keyframe = { buffer : buffer; offset : int64 }
     type border = Clamp | Vanish
-    type motion =
-      { keyframe_count : int; start_time : float; end_time : float
-      ; start_border : border; end_border : border }
+
+    type motion = {
+      keyframe_count : int;
+      start_time : float;
+      end_time : float;
+      start_border : border;
+      end_border : border;
+    }
+
     type index = { index_buffer : buffer; index_offset : int64; index_uint16 : bool }
-    type common =
-      { opaque : bool; allow_duplicate_intersection : bool }
-    let default_common =
-      { opaque = true; allow_duplicate_intersection = false }
+    type common = { opaque : bool; allow_duplicate_intersection : bool }
+
+    let default_common = { opaque = true; allow_duplicate_intersection = false }
+
     type curve_type = Round | Flat
     type curve_basis = Bspline | Catmull_rom | Linear | Bezier
     type end_caps = No_caps | Disk | Sphere
-    type geometry =
-      | Triangles of
-          { vertices : keyframe list; vertex_stride : int64; triangle_count : int64
-          ; index : index option; common : common }
-      | Bounding_boxes of
-          { boxes : keyframe list; stride : int64; count : int64; common : common }
-      | Curves of
-          { control_points : keyframe list; control_stride : int64; control_point_count : int64
-          ; radii : keyframe list; radius_stride : int64; index : index
-          ; segment_count : int64; control_points_per_segment : int
-          ; curve_type : curve_type; basis : curve_basis; end_caps : end_caps
-          ; common : common }
-    type instance_kind = User_id_instances | Motion_instances
-    type instance_layout =
-      { size : int; transform : int; options : int; mask : int
-      ; structure_index : int; user_id : int; transforms_start : int; transforms_count : int
-      ; start_border_offset : int; end_border_offset : int; start_time_offset : int
-      ; end_time_offset : int }
-    type t =
-      { raw : Metal_raw.handle; lifetime : lifetime; device : device; buffers : buffer list
-      ; structures : structure list;  kind : instance_kind option }
 
-    let kind_code = function
-      | User_id_instances -> 1
-      | Motion_instances -> 2
+    type geometry =
+      | Triangles of {
+          vertices : keyframe list;
+          vertex_stride : int64;
+          triangle_count : int64;
+          index : index option;
+          common : common;
+        }
+      | Bounding_boxes of { boxes : keyframe list; stride : int64; count : int64; common : common }
+      | Curves of {
+          control_points : keyframe list;
+          control_stride : int64;
+          control_point_count : int64;
+          radii : keyframe list;
+          radius_stride : int64;
+          index : index;
+          segment_count : int64;
+          control_points_per_segment : int;
+          curve_type : curve_type;
+          basis : curve_basis;
+          end_caps : end_caps;
+          common : common;
+        }
+
+    type instance_kind = User_id_instances | Motion_instances
+
+    type instance_layout = {
+      size : int;
+      transform : int;
+      options : int;
+      mask : int;
+      structure_index : int;
+      user_id : int;
+      transforms_start : int;
+      transforms_count : int;
+      start_border_offset : int;
+      end_border_offset : int;
+      start_time_offset : int;
+      end_time_offset : int;
+    }
+
+    type t = {
+      raw : Metal_raw.handle;
+      lifetime : lifetime;
+      device : device;
+      buffers : buffer list;
+      structures : structure list;
+      kind : instance_kind option;
+    }
+
+    let kind_code = function User_id_instances -> 1 | Motion_instances -> 2
 
     let instance_layout kind =
       let layout = Metal_raw.accel_instance_layout (kind_code kind) in
-      { size = layout.(0); transform = layout.(1); options = layout.(2); mask = layout.(3)
-      ; structure_index = layout.(4); user_id = layout.(5)
-      ; transforms_start = layout.(6); transforms_count = layout.(7)
-      ; start_border_offset = layout.(8); end_border_offset = layout.(9)
-      ; start_time_offset = layout.(10); end_time_offset = layout.(11) }
+      {
+        size = layout.(0);
+        transform = layout.(1);
+        options = layout.(2);
+        mask = layout.(3);
+        structure_index = layout.(4);
+        user_id = layout.(5);
+        transforms_start = layout.(6);
+        transforms_count = layout.(7);
+        start_border_offset = layout.(8);
+        end_border_offset = layout.(9);
+        start_time_offset = layout.(10);
+        end_time_offset = layout.(11);
+      }
 
     let keyframe_raw (k : keyframe) : Metal_raw.accel_keyframe =
       { keyframe_buffer = k.buffer.raw; keyframe_offset = k.offset }
@@ -1413,8 +1368,7 @@ module Acceleration_structure = struct
 
     (* The element at the last index of a strided range must fit its buffer. *)
     let range_fits (buffer : buffer) offset stride count element =
-      offset >= 0L && stride >= element && element > 0L && count > 0L
-      && offset <= buffer.length
+      offset >= 0L && stride >= element && element > 0L && count > 0L && offset <= buffer.length
       && Int64.sub count 1L <= Int64.div (Int64.sub (Int64.sub buffer.length offset) element) stride
       && element <= Int64.sub buffer.length offset
 
@@ -1452,39 +1406,80 @@ module Acceleration_structure = struct
           let opaque, allow_duplicate = common_raw common in
           let first = List.hd vertices in
           Raw_triangles
-            { vertex = first.buffer.raw; vertex_offset = first.offset; vertex_stride
-            ; triangle_count
-            ; index = Option.map (fun (i : index) -> i.index_buffer.raw) index
-            ; index_offset = Option.fold ~none:0L ~some:(fun (i : index) -> i.index_offset) index
-            ; index_uint16 = Option.fold ~none:false ~some:(fun (i : index) -> i.index_uint16) index
-            ; keyframes = (match vertices with [ _ ] -> [||] | _ -> Array.of_list (List.map keyframe_raw vertices))
-            ; opaque; allow_duplicate }
+            {
+              vertex = first.buffer.raw;
+              vertex_offset = first.offset;
+              vertex_stride;
+              triangle_count;
+              index = Option.map (fun (i : index) -> i.index_buffer.raw) index;
+              index_offset = Option.fold ~none:0L ~some:(fun (i : index) -> i.index_offset) index;
+              index_uint16 = Option.fold ~none:false ~some:(fun (i : index) -> i.index_uint16) index;
+              keyframes =
+                (match vertices with
+                | [ _ ] -> [||]
+                | _ -> Array.of_list (List.map keyframe_raw vertices));
+              opaque;
+              allow_duplicate;
+            }
       | Bounding_boxes { boxes; stride; count; common } ->
           let box_opaque, box_allow_duplicate = common_raw common in
           let first = List.hd boxes in
           Raw_boxes
-            { boxes = first.buffer.raw; box_offset = first.offset; box_stride = stride
-            ; box_count = count
-            ; box_keyframes = (match boxes with [ _ ] -> [||] | _ -> Array.of_list (List.map keyframe_raw boxes))
-            ; box_opaque; box_allow_duplicate }
-      | Curves { control_points; control_stride; control_point_count; radii; radius_stride; index
-               ; segment_count; control_points_per_segment; curve_type; basis; end_caps; common } ->
+            {
+              boxes = first.buffer.raw;
+              box_offset = first.offset;
+              box_stride = stride;
+              box_count = count;
+              box_keyframes =
+                (match boxes with
+                | [ _ ] -> [||]
+                | _ -> Array.of_list (List.map keyframe_raw boxes));
+              box_opaque;
+              box_allow_duplicate;
+            }
+      | Curves
+          {
+            control_points;
+            control_stride;
+            control_point_count;
+            radii;
+            radius_stride;
+            index;
+            segment_count;
+            control_points_per_segment;
+            curve_type;
+            basis;
+            end_caps;
+            common;
+          } ->
           let curve_opaque, curve_allow_duplicate = common_raw common in
           let control = List.hd control_points and radius = List.hd radii in
           let motion = match control_points with [ _ ] -> false | _ -> true in
           Raw_curves
-            { control = control.buffer.raw; control_offset = control.offset; control_stride
-            ; control_count = control_point_count
-            ; radius = radius.buffer.raw; radius_offset = radius.offset; radius_stride
-            ; curve_index = index.index_buffer.raw; curve_index_offset = index.index_offset
-            ; curve_index_uint16 = index.index_uint16
-            ; segment_count; segment_control_points = Int64.of_int control_points_per_segment
-            ; curve_type = (match curve_type with Round -> 0 | Flat -> 1)
-            ; curve_basis = (match basis with Bspline -> 0 | Catmull_rom -> 1 | Linear -> 2 | Bezier -> 3)
-            ; end_caps = (match end_caps with No_caps -> 0 | Disk -> 1 | Sphere -> 2)
-            ; control_keyframes = (if motion then Array.of_list (List.map keyframe_raw control_points) else [||])
-            ; radius_keyframes = (if motion then Array.of_list (List.map keyframe_raw radii) else [||])
-            ; curve_opaque; curve_allow_duplicate }
+            {
+              control = control.buffer.raw;
+              control_offset = control.offset;
+              control_stride;
+              control_count = control_point_count;
+              radius = radius.buffer.raw;
+              radius_offset = radius.offset;
+              radius_stride;
+              curve_index = index.index_buffer.raw;
+              curve_index_offset = index.index_offset;
+              curve_index_uint16 = index.index_uint16;
+              segment_count;
+              segment_control_points = Int64.of_int control_points_per_segment;
+              curve_type = (match curve_type with Round -> 0 | Flat -> 1);
+              curve_basis =
+                (match basis with Bspline -> 0 | Catmull_rom -> 1 | Linear -> 2 | Bezier -> 3);
+              end_caps = (match end_caps with No_caps -> 0 | Disk -> 1 | Sphere -> 2);
+              control_keyframes =
+                (if motion then Array.of_list (List.map keyframe_raw control_points) else [||]);
+              radius_keyframes =
+                (if motion then Array.of_list (List.map keyframe_raw radii) else [||]);
+              curve_opaque;
+              curve_allow_duplicate;
+            }
 
     let validate_geometry operation (device : device) ~motion = function
       | Triangles { vertices; vertex_stride; triangle_count; index; _ } ->
@@ -1558,14 +1553,15 @@ module Acceleration_structure = struct
           @ Option.fold ~none:[] ~some:(fun (i : index) -> [ i.index_buffer ]) index
       | Bounding_boxes { boxes; _ } -> List.map (fun (k : keyframe) -> k.buffer) boxes
       | Curves { control_points; radii; index; _ } ->
-          List.map (fun (k : keyframe) -> k.buffer) (control_points @ radii) @ [ index.index_buffer ]
+          List.map (fun (k : keyframe) -> k.buffer) (control_points @ radii)
+          @ [ index.index_buffer ]
 
     (* A descriptor borrows its buffers and structures: like [Triangle.t] it
        pins nothing, and every build revalidates them and retains them on the
        command buffer for the GPU's lifetime of the work. *)
     let finish operation (device : device) raw ~buffers ~structures ~instance_count:_ ~kind =
       attach device.lifetime;
-      let value = { raw; lifetime = lifetime (); device; buffers; structures;  kind } in
+      let value = { raw; lifetime = lifetime (); device; buffers; structures; kind } in
       Gc.finalise
         (fun (value : t) ->
           if Atomic.compare_and_set value.lifetime.destroyed false true then begin
@@ -1623,10 +1619,10 @@ module Acceleration_structure = struct
               ~buffers:(List.concat_map geometry_buffers geometries)
               ~structures:[] ~instance_count:0L ~kind:None)
 
-    let instances (device : Device.t) ~(buffer : buffer) ?(offset = 0L) ~count
-        ~kind ?motion_transforms (primitives : structure array)
-        =
-      let stride = None in let operation = "Metal.Acceleration_structure.Build.instances" in
+    let instances (device : Device.t) ~(buffer : buffer) ?(offset = 0L) ~count ~kind
+        ?motion_transforms (primitives : structure array) =
+      let stride = None in
+      let operation = "Metal.Acceleration_structure.Build.instances" in
       on_main operation (fun () ->
           let layout = instance_layout kind in
           let stride = Option.value stride ~default:(Int64.of_int layout.size) in
@@ -1704,8 +1700,8 @@ module Acceleration_structure = struct
     let instance_kind (value : t) = value.kind
 
     let destroy (value : t) =
-      destroy_parent "Metal.Acceleration_structure.Build.destroy" value.lifetime value.raw (fun () ->
-          detach value.device.lifetime)
+      destroy_parent "Metal.Acceleration_structure.Build.destroy" value.lifetime value.raw
+        (fun () -> detach value.device.lifetime)
   end
 
   let create ~(device : device) ~size =
@@ -1756,6 +1752,7 @@ module Texture = struct
     | Rgba16_float
     | Rgba32_float
     | Depth32_float
+
   type format_layout = Metal_format.layout = {
     block_width : int;
     block_height : int;
@@ -1835,9 +1832,12 @@ module Texture = struct
 
   type region = { x : int; y : int; z : int; width : int; height : int; depth : int }
 
-  let descriptor_2d ?(storage = Private) ?(usage = [ Shader_read ])
-      ?label ~format ~width ~height () =
-    let compression = (Lossless) in let mipmapped = (false) in let swizzle = (default_swizzle) in let max_dimension = max width height in
+  let descriptor_2d ?(storage = Private) ?(usage = [ Shader_read ]) ?label ~format ~width ~height ()
+      =
+    let compression = Lossless in
+    let mipmapped = false in
+    let swizzle = default_swizzle in
+    let max_dimension = max width height in
     let rec mip_count dimension count =
       if dimension <= 1 then count else mip_count (dimension / 2) (count + 1)
     in
@@ -2076,15 +2076,11 @@ module Texture = struct
                  expected.(index) info.(index))
       end
 
-  let finish_create ?expected_shareable operation ~device ~descriptor
-      ~parent ~heap_offset:_ ~allocation raw =
+  let finish_create ?expected_shareable operation ~device ~descriptor ~parent ~heap_offset:_
+      ~allocation raw =
     let heap =
       match parent with
-
-      | Texture_resource (Device_resource _ )
-        | Texture_drawable_resource _ ->
-          false
-
+      | Texture_resource (Device_resource _) | Texture_drawable_resource _ -> false
     in
     match verify_info operation raw descriptor ~heap with
     | Error _ as failure ->
@@ -2101,21 +2097,10 @@ module Texture = struct
         let state =
           match parent with
           | Texture_resource _ -> resource_state ()
-
           | Texture_drawable_resource _ -> resource_state ()
-
         in
         let value : t =
-          {
-            raw;
-            lifetime = lifetime ();
-            device;
-            descriptor;
-            parent;
-
-            allocation;
-            state;
-          }
+          { raw; lifetime = lifetime (); device; descriptor; parent; allocation; state }
         in
         attach parent_lifetime;
         let extra_device = texture_parent_extra_device device parent in
@@ -2146,7 +2131,6 @@ module Texture = struct
   let device (value : t) = value.device
   let descriptor (value : t) = value.descriptor
   let destroyed (value : t) = is_destroyed value.lifetime
-
   let mip_dimension dimension level = max 1 (dimension lsr level)
 
   let total_slices (descriptor : descriptor) =
@@ -2324,15 +2308,7 @@ module Metal_layer = struct
               ignore (Metal_raw.destroy raw);
               native_error operation m
           | Ok () ->
-              let value : t =
-                {
-                  raw;
-                  lifetime = lifetime ();
-                  device;
-
-                  drawable_descriptor = None;
-                }
-              in
+              let value : t = { raw; lifetime = lifetime (); device; drawable_descriptor = None } in
               attach device.lifetime;
               attach_finalizer value value.lifetime device.lifetime;
               Ok value)
@@ -2453,7 +2429,6 @@ module Drawable = struct
                 device = value.layer.device;
                 descriptor;
                 parent = Texture_drawable_resource value;
-
                 allocation = None;
                 state = { relinquished = Atomic.make false; purgeable = Atomic.make Nonvolatile };
               }
@@ -2464,9 +2439,8 @@ module Drawable = struct
             Ok texture)
 
   let texture value = texture_owned ~finalize:true value
-
-    let acquire_scoped layer = acquire_owned ~finalize:false layer
-    let texture_scoped value = texture_owned ~finalize:false value
+  let acquire_scoped layer = acquire_owned ~finalize:false layer
+  let texture_scoped value = texture_owned ~finalize:false value
 
   let destroy (value : t) =
     destroy_parent "Metal.Drawable.destroy" value.lifetime value.raw (fun () ->
@@ -2478,7 +2452,8 @@ module Render_pass_descriptor = struct
   type t = render_pass_descriptor
 
   let create ~width ~height ?(sample_count = 1) () =
-    let array_length = (1) in let operation = "Metal.Render_pass_descriptor.create" in
+    let array_length = 1 in
+    let operation = "Metal.Render_pass_descriptor.create" in
     on_main operation (fun () ->
         if width <= 0 || height <= 0 || array_length <= 0 || sample_count <= 0 then
           error operation Invalid_argument "render pass sizes must be positive"
@@ -2550,7 +2525,13 @@ module Render_pass_descriptor = struct
     on_main operation (fun () ->
         let* () = ensure_live operation value.lifetime in
         (* MTLStoreAction: DontCare, Store, MultisampleResolve, StoreAndMultisampleResolve *)
-        let code = match store, resolve with false, false -> 0 | true, false -> 1 | false, true -> 2 | true, true -> 3 in
+        let code =
+          match (store, resolve) with
+          | false, false -> 0
+          | true, false -> 1
+          | false, true -> 2
+          | true, true -> 3
+        in
         if resolve && value.pass_sample_count = 1 then
           error operation Invalid_argument "resolve store actions require multisampling"
         else
@@ -2594,14 +2575,13 @@ module Render_pass_descriptor = struct
         Ok ())
 
   let detach_option get = Option.iter (fun value -> detach (get value))
-
   let depth_capable = function Texture.Depth32_float -> true | _ -> false
   let stencil_capable _ = false
 
   let set_attachments (value : t) ~(color : texture) ?(clear = (0., 0., 0., 1.))
-      ?(depth : texture option) ?(stencil : texture option) ()
-      =
-    let visibility_result : buffer option = None in let operation = "Metal.Render_pass_descriptor.set_attachments" in
+      ?(depth : texture option) ?(stencil : texture option) () =
+    let visibility_result : buffer option = None in
+    let operation = "Metal.Render_pass_descriptor.set_attachments" in
     on_main operation (fun () ->
         let textures = color :: List.filter_map Fun.id [ depth; stencil ] in
         let* () = ensure_live operation value.lifetime in
@@ -2964,8 +2944,7 @@ module Depth_stencil = struct
   let create ?label ?depth_compare ?depth_write ?front_face ?back_face device () =
     create_owned ~finalize:true ?label ?depth_compare ?depth_write ?front_face ?back_face device ()
 
-  module Private = struct
-  end
+  module Private = struct end
 
   let destroy (value : t) =
     destroy_parent "Metal.Depth_stencil.destroy" value.lifetime value.raw (fun () ->
@@ -3197,7 +3176,6 @@ module Binding = struct
       | code -> Unknown_binding code
     in
     { name; index; access = access_of_code access_code; used; argument; kind; reflection }
-
 end
 
 module Library = struct
@@ -3324,7 +3302,8 @@ module Function = struct
           Ok value)
 
   let specialize ~(library : Library.t) ~constants name =
-    let label = None in let operation = "Metal.Function.specialize" in
+    let label = None in
+    let operation = "Metal.Function.specialize" in
     on_main operation (fun () ->
         let* () = ensure_live operation library.lifetime in
         if name = "" || contains_nul name then
@@ -3426,7 +3405,8 @@ module Shader_argument_encoder = struct
         Hashtbl.replace value.retained index lifetime
 
   let set (value : t) ~index resource =
-    let offset = (0L) in let op = "Metal.Shader_argument_encoder.set" in
+    let offset = 0L in
+    let op = "Metal.Shader_argument_encoder.set" in
     on_main op (fun () ->
         let* () = ensure_live op value.lifetime in
         if index < 0L || offset < 0L then
@@ -3443,9 +3423,10 @@ module Shader_argument_encoder = struct
             retain_at value index lifetime;
             Ok ())
 
-  let set_argument_buffer (value : t) (buffer : buffer) ~offset
-      () =
-    let array_element = (0L) in let start_offset = (0L) in let op = "Metal.Shader_argument_encoder.set_argument_buffer" in
+  let set_argument_buffer (value : t) (buffer : buffer) ~offset () =
+    let array_element = 0L in
+    let start_offset = 0L in
+    let op = "Metal.Shader_argument_encoder.set_argument_buffer" in
     on_main op (fun () ->
         let* () = ensure_live op value.lifetime in
         let* () = ensure_buffer_usable op buffer in
@@ -3484,7 +3465,6 @@ module Compute_pipeline = struct
         lifetime = lifetime ();
         device;
         bindings;
-
         max_total_threads = Metal_raw.compute_pipeline_max_total_threads raw;
       }
     in
@@ -3492,8 +3472,7 @@ module Compute_pipeline = struct
     attach_finalizer value value.lifetime device.lifetime;
     value
 
-  let create ?label ?(reflection = false)
-      (function_value : Function.t) =
+  let create ?label ?(reflection = false) (function_value : Function.t) =
     let operation = "Metal.Compute_pipeline.create" in
     on_main operation (fun () ->
         let* () = ensure_live operation function_value.lifetime in
@@ -3506,29 +3485,29 @@ module Compute_pipeline = struct
             error operation Invalid_argument
               "the pipeline entry point must be a Metal kernel function"
           else
-                  let descriptor_required = label <> None || reflection in
-                  let creation =
-                    if not descriptor_required then
-                      Result.map
-                        (fun raw -> (raw, [||]))
-                        (Metal_raw.compute_pipeline_create device.raw function_value.raw)
-                    else
-                      let descriptor : Metal_raw.compute_pipeline_descriptor =
-                        {
-                          label;
-                          reflection;
-                          preloaded_libraries = [||];
-                          binary_archives = [||];
-                          fail_on_binary_archive_miss = false;
-                          support_indirect_command_buffers = false;
-                          buffer_mutabilities = Array.make 31 0;
-                        }
-                      in
-                      Metal_raw.compute_pipeline_create_descriptor device.raw function_value.raw
-                        descriptor
-                  in
-                  let* raw, raw_bindings = native_result operation creation in
-                  Ok (make device ~reflection raw raw_bindings))
+            let descriptor_required = label <> None || reflection in
+            let creation =
+              if not descriptor_required then
+                Result.map
+                  (fun raw -> (raw, [||]))
+                  (Metal_raw.compute_pipeline_create device.raw function_value.raw)
+              else
+                let descriptor : Metal_raw.compute_pipeline_descriptor =
+                  {
+                    label;
+                    reflection;
+                    preloaded_libraries = [||];
+                    binary_archives = [||];
+                    fail_on_binary_archive_miss = false;
+                    support_indirect_command_buffers = false;
+                    buffer_mutabilities = Array.make 31 0;
+                  }
+                in
+                Metal_raw.compute_pipeline_create_descriptor device.raw function_value.raw
+                  descriptor
+            in
+            let* raw, raw_bindings = native_result operation creation in
+            Ok (make device ~reflection raw raw_bindings))
 
   let bindings (value : t) = Option.map Array.to_list value.bindings
   let max_total_threads (value : t) = value.max_total_threads
@@ -3586,10 +3565,7 @@ module Render_pipeline = struct
     write_mask : color_write list;
   }
 
-  type reflection = {
-    vertex : Binding.t list;
-    fragment : Binding.t list;
-  }
+  type reflection = { vertex : Binding.t list; fragment : Binding.t list }
 
   let color_attachment ?(blending = Blend_disabled) ?(source_rgb = Blend_one)
       ?(destination_rgb = Blend_zero) ?(rgb_operation = Blend_add) ?(source_alpha = Blend_one)
@@ -3665,8 +3641,8 @@ module Render_pipeline = struct
 
   let make ?mesh_constraints:_ ?tile_constraints:_ ?color_attachments:_ ?vertex_descriptor:_
       ?alpha_to_coverage:_ ?alpha_to_one:_ ?max_vertex_amplification_count:_
-      ?color_attachment_mapping:_ device ~raster_sample_count ~color_formats
-      ~reflection raw (raw_reflection : Metal_raw.render_pipeline_reflection) =
+      ?color_attachment_mapping:_ device ~raster_sample_count ~color_formats ~reflection raw
+      (raw_reflection : Metal_raw.render_pipeline_reflection) =
     let map values = Array.map Binding.of_raw values in
     let reflection =
       if reflection then
@@ -3678,17 +3654,7 @@ module Render_pipeline = struct
       else None
     in
     let value : t =
-      {
-        raw;
-        lifetime = lifetime ();
-        device;
-        raster_sample_count;
-
-        color_formats;
-
-        reflection;
-
-      }
+      { raw; lifetime = lifetime (); device; raster_sample_count; color_formats; reflection }
     in
     attach device.lifetime;
     attach_finalizer value value.lifetime device.lifetime;
@@ -3791,8 +3757,12 @@ module Compiler = struct
     then error operation Invalid_argument "render color-write masks contain duplicate channels"
     else if raster_sample_count <= 0 then
       error operation Invalid_argument "render raster sample count must be positive"
-    else if not (probe (Metal_raw.Registry.device_supports_texture_sample_count device.raw (Int64.of_int raster_sample_count))) then
-      error operation Unsupported "the Metal device does not support the render sample count"
+    else if
+      not
+        (probe
+           (Metal_raw.Registry.device_supports_texture_sample_count device.raw
+              (Int64.of_int raster_sample_count)))
+    then error operation Unsupported "the Metal device does not support the render sample count"
     else
       Ok
         ( Int64.of_int raster_sample_count,
@@ -3851,10 +3821,8 @@ module Compiler = struct
           callback reflection color_attachments color_formats descriptor)
 
   let create_render_pipeline ?label ?fragment ?(reflection = false) ?(raster_sample_count = 1)
-      ?color_formats ?color_attachments
-
-      ?(primitive_topology = Render_pipeline.Triangle) ?(support_indirect_command_buffers = false)
-      (value : t) ~(library : Library.t) ~vertex =
+      ?color_formats ?color_attachments ?(primitive_topology = Render_pipeline.Triangle)
+      ?(support_indirect_command_buffers = false) (value : t) ~(library : Library.t) ~vertex =
     let operation = "Metal.Compiler.create_render_pipeline" in
     with_render_descriptor operation
       (fun reflection color_attachments color_formats descriptor ->
@@ -3862,8 +3830,8 @@ module Compiler = struct
           native_result operation (Metal_raw.compiler_create_render_pipeline value.raw descriptor)
         in
         Ok
-          (Render_pipeline.make value.device ~raster_sample_count
-             ~alpha_to_coverage:false ~alpha_to_one:false ~max_vertex_amplification_count:1
+          (Render_pipeline.make value.device ~raster_sample_count ~alpha_to_coverage:false
+             ~alpha_to_one:false ~max_vertex_amplification_count:1
              ~color_attachment_mapping:Render_pipeline.Identity ~color_formats ~color_attachments
              ~reflection raw raw_reflection))
       ?label ?fragment ~reflection ~raster_sample_count ?color_formats ?color_attachments
@@ -3886,10 +3854,22 @@ module Indirect_command_buffer = struct
   type buffer = t
 
   let descriptor ?(inherit_buffers = false) ?(inherit_pipeline_state = false)
-      ?(max_vertex_buffer_bind_count = 0) ?(max_fragment_buffer_bind_count = 0)
-
-      ~command_types () =
-    let inherit_cull_mode = (true) in let inherit_depth_bias = (true) in let inherit_depth_clip_mode = (true) in let inherit_depth_stencil_state = (true) in let inherit_front_facing_winding = (true) in let inherit_triangle_fill_mode = (true) in let max_kernel_buffer_bind_count = (0) in let max_kernel_threadgroup_memory_bind_count = (0) in let max_mesh_buffer_bind_count = (0) in let max_object_buffer_bind_count = (0) in let max_object_threadgroup_memory_bind_count = (0) in let support_color_attachment_mapping = (false) in let support_dynamic_attribute_stride = (false) in let support_ray_tracing = (false) in {
+      ?(max_vertex_buffer_bind_count = 0) ?(max_fragment_buffer_bind_count = 0) ~command_types () =
+    let inherit_cull_mode = true in
+    let inherit_depth_bias = true in
+    let inherit_depth_clip_mode = true in
+    let inherit_depth_stencil_state = true in
+    let inherit_front_facing_winding = true in
+    let inherit_triangle_fill_mode = true in
+    let max_kernel_buffer_bind_count = 0 in
+    let max_kernel_threadgroup_memory_bind_count = 0 in
+    let max_mesh_buffer_bind_count = 0 in
+    let max_object_buffer_bind_count = 0 in
+    let max_object_threadgroup_memory_bind_count = 0 in
+    let support_color_attachment_mapping = false in
+    let support_dynamic_attribute_stride = false in
+    let support_ray_tracing = false in
+    {
       command_types;
       inherit_buffers;
       inherit_pipeline_state;
@@ -3925,18 +3905,14 @@ module Indirect_command_buffer = struct
     List.iter
       (function
         | Indirect_buffer value -> detach value.lifetime
-
-        | Indirect_render_pipeline value -> detach value.lifetime
-        )
+        | Indirect_render_pipeline value -> detach value.lifetime)
       values
 
   let retain value retained =
     let lifetime =
       match retained with
       | Indirect_buffer value -> value.lifetime
-
       | Indirect_render_pipeline value -> value.lifetime
-
     in
     attach lifetime;
     value.retained := retained :: !(value.retained)
@@ -3970,10 +3946,11 @@ module Indirect_command_buffer = struct
      }
       : Metal_raw.indirect_command_buffer_descriptor)
 
-  let create ~(device : Device.t)
-      ~max_command_count
-      (descriptor : descriptor) =
-    let cpu_cache = (Buffer.Default_cache) in let hazard_tracking = (Buffer.Default_hazard_tracking) in let storage = (Buffer.Private) in let operation = "Metal.Indirect_command_buffer.create" in
+  let create ~(device : Device.t) ~max_command_count (descriptor : descriptor) =
+    let cpu_cache = Buffer.Default_cache in
+    let hazard_tracking = Buffer.Default_hazard_tracking in
+    let storage = Buffer.Private in
+    let operation = "Metal.Indirect_command_buffer.create" in
     on_main operation (fun () ->
         let counts =
           [
@@ -4108,7 +4085,9 @@ module Indirect_command_buffer = struct
 
     let draw_indexed (value : t) ~primitive ~index_type ~(index_buffer : Buffer.t) ~index_offset
         ~index_count ?(instance_count = 1L) () =
-      let base_instance = (0L) in let base_vertex = (0L) in let operation = "Metal.Indirect_command_buffer.Render_command.draw_indexed" in
+      let base_instance = 0L in
+      let base_vertex = 0L in
+      let operation = "Metal.Indirect_command_buffer.Render_command.draw_indexed" in
       let type_code, element = match index_type with Uint16 -> (0, 2L) | Uint32 -> (1, 4L) in
       on_main operation (fun () ->
           let* () = ensure_live operation value.lifetime in
@@ -4130,9 +4109,10 @@ module Indirect_command_buffer = struct
             retain value.parent (Indirect_buffer index_buffer);
             Ok ())
 
-    let draw_primitives (value : t) ~primitive ~vertex_start ~vertex_count ?(instance_count = 1)
-        () =
-      let base_instance = (0) in let operation = "Metal.Indirect_command_buffer.Render_command.draw_primitives" in
+    let draw_primitives (value : t) ~primitive ~vertex_start ~vertex_count ?(instance_count = 1) ()
+        =
+      let base_instance = 0 in
+      let operation = "Metal.Indirect_command_buffer.Render_command.draw_primitives" in
       on_main operation (fun () ->
           let* () = ensure_live operation value.lifetime in
           if vertex_start < 0 || vertex_count <= 0 || instance_count <= 0 || base_instance < 0 then
@@ -4151,7 +4131,6 @@ module Indirect_command_buffer = struct
       destroy_leaf "Metal.Indirect_command_buffer.Render_command.destroy" value.lifetime value.raw
         (fun () -> detach value.parent.lifetime)
   end
-
 end
 
 module Command_queue = struct
@@ -4267,14 +4246,16 @@ module Command_buffer = struct
                   detach queue.lifetime;
                 native_error "Metal.Command_buffer.create" message))
 
-  let create queue () = let label = None in create_owned ~finalize:true queue ?label ()
+  let create queue () =
+    let label = None in
+    create_owned ~finalize:true queue ?label ()
 
   module Private = struct
     (* Scoped callers must arrange [destroy] on every exit.  In particular a
        submitted buffer must first be brought to a terminal state with
        [wait_until_completed].  Omitting the finalizer prevents a blocking
        synchronous submission from depending on a later major collection. *)
-
+  
   end
 
   let device (value : t) = value.queue.device
@@ -4340,7 +4321,8 @@ module Command_buffer = struct
           | value -> Unknown value))
 
   let present (value : t) (drawable : metal_drawable) () =
-    let at = (Immediate) in let operation = "Metal.Command_buffer.present" in
+    let at = Immediate in
+    let operation = "Metal.Command_buffer.present" in
     let* () = before_main operation in
     let* () = ensure_live operation value.lifetime in
     if value.phase <> Recording then
@@ -4514,7 +4496,10 @@ module Acceleration_encoder = struct
   let build_with (value : t) ~(destination : Acceleration_structure.t) ~descriptor ~scratch
       ~scratch_offset =
     with_descriptor "Metal.Acceleration_encoder.build_with" value ~descriptor ~scratch
-      ~scratch_offset ~required:(fun build _ -> build) ~destinations:[ destination ] (fun () ->
+      ~scratch_offset
+      ~required:(fun build _ -> build)
+      ~destinations:[ destination ]
+      (fun () ->
         Metal_raw.accel_encoder_build_descriptor value.raw destination.raw
           descriptor.Acceleration_structure.Build.raw scratch.raw scratch_offset)
 
@@ -4582,7 +4567,6 @@ module Render_encoder = struct
   type t = render_encoder
   type cull_mode = No_cull | Cull_front | Cull_back
   type winding = Clockwise | Counter_clockwise
-
   type stage = Vertex | Fragment
   type resource_usage = Read | Write | Sample
   type resource = Buffer_resource of Buffer.t | Texture_resource of Texture.t
@@ -4603,8 +4587,7 @@ module Render_encoder = struct
   let bits code values = List.fold_left (fun mask value -> mask lor code value) 0 values
   let stage_code = function Vertex -> 1 | Fragment -> 2
   let usage_code = function Read -> 1 | Write -> 2 | Sample -> 4
-
-  let depth_attachment_formats = [Texture.Depth32_float]
+  let depth_attachment_formats = [ Texture.Depth32_float ]
   let stencil_attachment_formats = []
 
   let validate_attachment operation (command_buffer : command_buffer) (target : texture) formats
@@ -4675,7 +4658,10 @@ module Render_encoder = struct
           Ok value
 
   let create command_buffer ~target () =
-    let clear = None in let depth = None in let stencil = None in create_owned ~finalize:true command_buffer ~target ?clear ?depth ?stencil ()
+    let clear = None in
+    let depth = None in
+    let stencil = None in
+    create_owned ~finalize:true command_buffer ~target ?clear ?depth ?stencil ()
 
   let create_from_pass_owned ~finalize (command_buffer : Command_buffer.t)
       (pass : render_pass_descriptor) =
@@ -4722,281 +4708,279 @@ module Render_encoder = struct
           if finalize then attach_lifetime_finalizer value.lifetime command_buffer.lifetime;
           Ok value
 
-    type prepared_indexed_binding = {
-      prepared_stage : stage;
-      prepared_index : int;
-      prepared_offset : int64;
-      prepared_buffer : Buffer.t;
-    }
+  type prepared_indexed_binding = {
+    prepared_stage : stage;
+    prepared_index : int;
+    prepared_offset : int64;
+    prepared_buffer : Buffer.t;
+  }
 
-    type prepared_indexed_draw = {
-      prepared_pipeline : Render_pipeline.t;
-      prepared_bindings : prepared_indexed_binding array;
-      prepared_primitive : primitive;
-      prepared_index_type : index_type;
-      prepared_index_buffer : Buffer.t;
-      prepared_index_offset : int64;
-      prepared_index_count : int64;
-    }
+  type prepared_indexed_draw = {
+    prepared_pipeline : Render_pipeline.t;
+    prepared_bindings : prepared_indexed_binding array;
+    prepared_primitive : primitive;
+    prepared_index_type : index_type;
+    prepared_index_buffer : Buffer.t;
+    prepared_index_offset : int64;
+    prepared_index_count : int64;
+  }
 
-    type prepared_indexed_draws = {
-      prepared_device : device;
-      prepared_draws : prepared_indexed_draw array;
-      prepared_pipeline_raws : Metal_raw.handle array;
-      prepared_buffer_raws : Metal_raw.handle array array;
-      prepared_stages : int array array;
-      prepared_offsets : int64 array array;
-      prepared_slots : int array array;
-      prepared_primitives : int array;
-      prepared_counts : int64 array;
-      prepared_index_types : int array;
-      prepared_index_raws : Metal_raw.handle array;
-      prepared_index_offsets : int64 array;
-      prepared_command_resources : prepared_command_resources;
-    }
+  type prepared_indexed_draws = {
+    prepared_device : device;
+    prepared_draws : prepared_indexed_draw array;
+    prepared_pipeline_raws : Metal_raw.handle array;
+    prepared_buffer_raws : Metal_raw.handle array array;
+    prepared_stages : int array array;
+    prepared_offsets : int64 array array;
+    prepared_slots : int array array;
+    prepared_primitives : int array;
+    prepared_counts : int64 array;
+    prepared_index_types : int array;
+    prepared_index_raws : Metal_raw.handle array;
+    prepared_index_offsets : int64 array;
+    prepared_command_resources : prepared_command_resources;
+  }
 
-    let distinct_roots lifetime_of values =
-      let length = Array.length values in
-      if length = 0 then [||]
-      else
-        let seen = Hashtbl.create length
-        and roots = Array.make length (Array.unsafe_get values 0)
-        and root_count = ref 0 in
-        Array.iter
-          (fun value ->
-            let identity = (lifetime_of value).identity in
-            if not (Hashtbl.mem seen identity) then begin
-              Hashtbl.add seen identity ();
-              Array.unsafe_set roots !root_count value;
-              incr root_count
-            end)
-          values;
-        Array.sub roots 0 !root_count
+  let distinct_roots lifetime_of values =
+    let length = Array.length values in
+    if length = 0 then [||]
+    else
+      let seen = Hashtbl.create length
+      and roots = Array.make length (Array.unsafe_get values 0)
+      and root_count = ref 0 in
+      Array.iter
+        (fun value ->
+          let identity = (lifetime_of value).identity in
+          if not (Hashtbl.mem seen identity) then begin
+            Hashtbl.add seen identity ();
+            Array.unsafe_set roots !root_count value;
+            incr root_count
+          end)
+        values;
+      Array.sub roots 0 !root_count
 
-    let create_from_pass_scoped command_buffer pass =
-      create_from_pass_owned ~finalize:false command_buffer pass
+  let create_from_pass_scoped command_buffer pass =
+    create_from_pass_owned ~finalize:false command_buffer pass
 
-    let prepare_indexed_draws (device : Device.t) (draws : prepared_indexed_draw array) =
-      let operation = "Metal.Render_encoder.prepare_indexed_draws" in
-      let* () = before_main operation in
-      let* () = ensure_live operation device.lifetime in
-      if Array.length draws = 0 then error operation Invalid_argument "indexed draw array is empty"
-      else
-        let draws =
-          Array.map
-            (fun draw -> { draw with prepared_bindings = Array.copy draw.prepared_bindings })
-            draws
-        in
-        let duplicate_binding bindings index =
-          let candidate = Array.unsafe_get bindings index in
-          let rec scan other =
-            if other = index then false
-            else
-              let binding = Array.unsafe_get bindings other in
-              binding.prepared_stage = candidate.prepared_stage
-              && binding.prepared_index = candidate.prepared_index
-              || scan (other + 1)
-          in
-          scan 0
-        in
-        let validate_binding bindings index =
-          let binding : prepared_indexed_binding = Array.unsafe_get bindings index in
-          if binding.prepared_stage <> Vertex && binding.prepared_stage <> Fragment then
-            error operation Invalid_argument "indexed draw binding must target vertex or fragment"
-          else if binding.prepared_index < 0 || binding.prepared_index >= 31 then
-            error operation Invalid_argument "buffer index must be in [0, 31)"
-          else if duplicate_binding bindings index then
-            error operation Invalid_argument "buffer binding is duplicated"
-          else
-            let* () = ensure_buffer_usable operation binding.prepared_buffer in
-            if
-              binding.prepared_offset < 0L
-              || binding.prepared_offset > binding.prepared_buffer.length
-            then error operation Invalid_argument "buffer offset is outside the resource"
-            else ensure_same_device operation device binding.prepared_buffer.device
-        in
-        let validate_draw draw =
-          let* () = ensure_live operation draw.prepared_pipeline.lifetime in
-            let* () = ensure_same_device operation device draw.prepared_pipeline.device in
-            let rec bindings index =
-              if index = Array.length draw.prepared_bindings then Ok ()
-              else
-                let* () = validate_binding draw.prepared_bindings index in
-                bindings (index + 1)
-            in
-            let* () = bindings 0 in
-            let* () = ensure_buffer_usable operation draw.prepared_index_buffer in
-            let* () = ensure_same_device operation device draw.prepared_index_buffer.device in
-            let width = match draw.prepared_index_type with Uint16 -> 2L | Uint32 -> 4L in
-            if
-              draw.prepared_index_count <= 0L || draw.prepared_index_offset < 0L
-              || Int64.rem draw.prepared_index_offset width <> 0L
-              || width > Int64.div Int64.max_int draw.prepared_index_count
-            then error operation Invalid_argument "indexed draw range is invalid"
-            else
-              let required = Int64.mul width draw.prepared_index_count in
-              if
-                draw.prepared_index_offset > draw.prepared_index_buffer.length
-                || required > Int64.sub draw.prepared_index_buffer.length draw.prepared_index_offset
-              then error operation Invalid_argument "indexed draw exceeds the index buffer"
-              else Ok ()
-        in
-        let rec validate index =
-          if index = Array.length draws then Ok ()
-          else
-            let* () = validate_draw draws.(index) in
-            validate (index + 1)
-        in
-        let* () = validate 0 in
-        let rec count_resources draw_index count =
-          if draw_index = Array.length draws then Ok count
-          else
-            let draw = Array.unsafe_get draws draw_index in
-            let additional = Array.length draw.prepared_bindings + 2 in
-            if count > Sys.max_array_length - additional then
-              error operation Invalid_argument
-                "indexed draw resources exceed the supported array size"
-            else count_resources (draw_index + 1) (count + additional)
-        in
-        let* resource_count = count_resources 0 0 in
-        let prepared_buffer_raws =
-          Array.map
-            (fun draw ->
-              Array.map (fun binding -> binding.prepared_buffer.raw) draw.prepared_bindings)
-            draws
-        and prepared_stages =
-          Array.map
-            (fun draw ->
-              Array.map
-                (fun binding -> if binding.prepared_stage = Vertex then 0 else 1)
-                draw.prepared_bindings)
-            draws
-        and prepared_offsets =
-          Array.map
-            (fun draw -> Array.map (fun binding -> binding.prepared_offset) draw.prepared_bindings)
-            draws
-        and prepared_slots =
-          Array.map
-            (fun draw -> Array.map (fun binding -> binding.prepared_index) draw.prepared_bindings)
-            draws
-        in
-        let prepared_pipeline_roots =
-          distinct_roots
-            (fun (pipeline : render_pipeline) -> pipeline.lifetime)
-            (Array.map (fun draw -> draw.prepared_pipeline) draws)
-        and all_buffer_roots =
-          Array.make (resource_count - Array.length draws) draws.(0).prepared_index_buffer
-        in
-        let buffer_index = ref 0 in
-        let add_buffer_root buffer =
-          Array.unsafe_set all_buffer_roots !buffer_index buffer;
-          incr buffer_index
-        in
-        for draw_index = 0 to Array.length draws - 1 do
-          let draw = Array.unsafe_get draws draw_index in
-          for binding_index = 0 to Array.length draw.prepared_bindings - 1 do
-            let buffer = (Array.unsafe_get draw.prepared_bindings binding_index).prepared_buffer in
-            add_buffer_root buffer
-          done;
-          let index_buffer = draw.prepared_index_buffer in
-          add_buffer_root index_buffer
-        done;
-        let prepared_buffer_roots =
-          distinct_roots (fun (buffer : buffer) -> buffer.lifetime) all_buffer_roots
-        in
-        let prepared_command_resources =
-          {
-            prepared_pipeline_roots;
-            prepared_buffer_roots;
-            prepared_texture_roots = [||];
-            prepared_depth_stencil_roots = [||];
-            prepared_sample_roots = [||];
-            prepared_indirect_roots = [||];
-            prepared_resource_roots = [||];
-          }
-        in
-        Ok
-          {
-            prepared_device = device;
-            prepared_draws = draws;
-            prepared_pipeline_raws = Array.map (fun draw -> draw.prepared_pipeline.raw) draws;
-            prepared_buffer_raws;
-            prepared_stages;
-            prepared_offsets;
-            prepared_slots;
-            prepared_primitives =
-              Array.map
-                (fun draw ->
-                  match draw.prepared_primitive with
-                  | Point -> 0
-                  | Line -> 1
-                  | Line_strip -> 2
-                  | Triangle -> 3
-                  | Triangle_strip -> 4)
-                draws;
-            prepared_counts = Array.map (fun draw -> draw.prepared_index_count) draws;
-            prepared_index_types =
-              Array.map
-                (fun draw -> match draw.prepared_index_type with Uint16 -> 0 | Uint32 -> 1)
-                draws;
-            prepared_index_raws = Array.map (fun draw -> draw.prepared_index_buffer.raw) draws;
-            prepared_index_offsets = Array.map (fun draw -> draw.prepared_index_offset) draws;
-            prepared_command_resources;
-          }
-
-    let rec validate_prepared_bindings operation bindings index =
-      if index = Array.length bindings then Ok ()
-      else
-        let* () = ensure_buffer_usable operation bindings.(index).prepared_buffer in
-        validate_prepared_bindings operation bindings (index + 1)
-
-    let rec validate_prepared_execution operation (target : texture) draws index =
-      if index = Array.length draws then Ok ()
-      else
-        let draw = draws.(index) in
-        let* () = ensure_live operation draw.prepared_pipeline.lifetime in
-        if
-          draw.prepared_pipeline.raster_sample_count <> target.descriptor.sample_count
-          || draw.prepared_pipeline.color_formats = []
-          || List.hd draw.prepared_pipeline.color_formats <> target.descriptor.format
-        then error operation Invalid_argument "pipeline differs from the render target"
-        else
-          let* () = ensure_buffer_usable operation draw.prepared_index_buffer in
-          let* () = validate_prepared_bindings operation draw.prepared_bindings 0 in
-          validate_prepared_execution operation target draws (index + 1)
-
-    let close_failed_prepared_encoder (value : t) =
-      ignore (Metal_raw.Registry.render_encoder_end value.raw);
-      if Atomic.compare_and_set value.lifetime.destroyed false true then begin
-        ignore (Metal_raw.destroy value.raw);
-        detach value.command_buffer.lifetime
-      end;
-      value.command_buffer.phase <- Failed
-
-    let execute_prepared_indexed_draws (value : t) prepared =
-      let operation = "Metal.Render_encoder.execute_prepared_indexed_draws" in
-      let* () = before_main operation in
-      let* () = ensure_live operation value.lifetime in
-      let* () =
-        ensure_same_device operation value.command_buffer.queue.device prepared.prepared_device
+  let prepare_indexed_draws (device : Device.t) (draws : prepared_indexed_draw array) =
+    let operation = "Metal.Render_encoder.prepare_indexed_draws" in
+    let* () = before_main operation in
+    let* () = ensure_live operation device.lifetime in
+    if Array.length draws = 0 then error operation Invalid_argument "indexed draw array is empty"
+    else
+      let draws =
+        Array.map
+          (fun draw -> { draw with prepared_bindings = Array.copy draw.prepared_bindings })
+          draws
       in
-      let* () = validate_prepared_execution operation value.target prepared.prepared_draws 0 in
-      match
-        Metal_raw.render_encoder_execute_indexed_draws value.raw prepared.prepared_pipeline_raws
-          prepared.prepared_buffer_raws prepared.prepared_stages prepared.prepared_offsets
-          prepared.prepared_slots prepared.prepared_primitives prepared.prepared_counts
-          prepared.prepared_index_types prepared.prepared_index_raws prepared.prepared_index_offsets
-      with
-      | Error message ->
-          close_failed_prepared_encoder value;
-          native_error operation message
-      | Ok () ->
-          retain_command_buffer_prepared_command value.command_buffer
-            prepared.prepared_command_resources;
-          value.pipeline <-
-            Some
-              prepared.prepared_draws.(Array.length prepared.prepared_draws - 1).prepared_pipeline;
-          Ok ()
+      let duplicate_binding bindings index =
+        let candidate = Array.unsafe_get bindings index in
+        let rec scan other =
+          if other = index then false
+          else
+            let binding = Array.unsafe_get bindings other in
+            binding.prepared_stage = candidate.prepared_stage
+            && binding.prepared_index = candidate.prepared_index
+            || scan (other + 1)
+        in
+        scan 0
+      in
+      let validate_binding bindings index =
+        let binding : prepared_indexed_binding = Array.unsafe_get bindings index in
+        if binding.prepared_stage <> Vertex && binding.prepared_stage <> Fragment then
+          error operation Invalid_argument "indexed draw binding must target vertex or fragment"
+        else if binding.prepared_index < 0 || binding.prepared_index >= 31 then
+          error operation Invalid_argument "buffer index must be in [0, 31)"
+        else if duplicate_binding bindings index then
+          error operation Invalid_argument "buffer binding is duplicated"
+        else
+          let* () = ensure_buffer_usable operation binding.prepared_buffer in
+          if
+            binding.prepared_offset < 0L || binding.prepared_offset > binding.prepared_buffer.length
+          then error operation Invalid_argument "buffer offset is outside the resource"
+          else ensure_same_device operation device binding.prepared_buffer.device
+      in
+      let validate_draw draw =
+        let* () = ensure_live operation draw.prepared_pipeline.lifetime in
+        let* () = ensure_same_device operation device draw.prepared_pipeline.device in
+        let rec bindings index =
+          if index = Array.length draw.prepared_bindings then Ok ()
+          else
+            let* () = validate_binding draw.prepared_bindings index in
+            bindings (index + 1)
+        in
+        let* () = bindings 0 in
+        let* () = ensure_buffer_usable operation draw.prepared_index_buffer in
+        let* () = ensure_same_device operation device draw.prepared_index_buffer.device in
+        let width = match draw.prepared_index_type with Uint16 -> 2L | Uint32 -> 4L in
+        if
+          draw.prepared_index_count <= 0L || draw.prepared_index_offset < 0L
+          || Int64.rem draw.prepared_index_offset width <> 0L
+          || width > Int64.div Int64.max_int draw.prepared_index_count
+        then error operation Invalid_argument "indexed draw range is invalid"
+        else
+          let required = Int64.mul width draw.prepared_index_count in
+          if
+            draw.prepared_index_offset > draw.prepared_index_buffer.length
+            || required > Int64.sub draw.prepared_index_buffer.length draw.prepared_index_offset
+          then error operation Invalid_argument "indexed draw exceeds the index buffer"
+          else Ok ()
+      in
+      let rec validate index =
+        if index = Array.length draws then Ok ()
+        else
+          let* () = validate_draw draws.(index) in
+          validate (index + 1)
+      in
+      let* () = validate 0 in
+      let rec count_resources draw_index count =
+        if draw_index = Array.length draws then Ok count
+        else
+          let draw = Array.unsafe_get draws draw_index in
+          let additional = Array.length draw.prepared_bindings + 2 in
+          if count > Sys.max_array_length - additional then
+            error operation Invalid_argument
+              "indexed draw resources exceed the supported array size"
+          else count_resources (draw_index + 1) (count + additional)
+      in
+      let* resource_count = count_resources 0 0 in
+      let prepared_buffer_raws =
+        Array.map
+          (fun draw ->
+            Array.map (fun binding -> binding.prepared_buffer.raw) draw.prepared_bindings)
+          draws
+      and prepared_stages =
+        Array.map
+          (fun draw ->
+            Array.map
+              (fun binding -> if binding.prepared_stage = Vertex then 0 else 1)
+              draw.prepared_bindings)
+          draws
+      and prepared_offsets =
+        Array.map
+          (fun draw -> Array.map (fun binding -> binding.prepared_offset) draw.prepared_bindings)
+          draws
+      and prepared_slots =
+        Array.map
+          (fun draw -> Array.map (fun binding -> binding.prepared_index) draw.prepared_bindings)
+          draws
+      in
+      let prepared_pipeline_roots =
+        distinct_roots
+          (fun (pipeline : render_pipeline) -> pipeline.lifetime)
+          (Array.map (fun draw -> draw.prepared_pipeline) draws)
+      and all_buffer_roots =
+        Array.make (resource_count - Array.length draws) draws.(0).prepared_index_buffer
+      in
+      let buffer_index = ref 0 in
+      let add_buffer_root buffer =
+        Array.unsafe_set all_buffer_roots !buffer_index buffer;
+        incr buffer_index
+      in
+      for draw_index = 0 to Array.length draws - 1 do
+        let draw = Array.unsafe_get draws draw_index in
+        for binding_index = 0 to Array.length draw.prepared_bindings - 1 do
+          let buffer = (Array.unsafe_get draw.prepared_bindings binding_index).prepared_buffer in
+          add_buffer_root buffer
+        done;
+        let index_buffer = draw.prepared_index_buffer in
+        add_buffer_root index_buffer
+      done;
+      let prepared_buffer_roots =
+        distinct_roots (fun (buffer : buffer) -> buffer.lifetime) all_buffer_roots
+      in
+      let prepared_command_resources =
+        {
+          prepared_pipeline_roots;
+          prepared_buffer_roots;
+          prepared_texture_roots = [||];
+          prepared_depth_stencil_roots = [||];
+          prepared_sample_roots = [||];
+          prepared_indirect_roots = [||];
+          prepared_resource_roots = [||];
+        }
+      in
+      Ok
+        {
+          prepared_device = device;
+          prepared_draws = draws;
+          prepared_pipeline_raws = Array.map (fun draw -> draw.prepared_pipeline.raw) draws;
+          prepared_buffer_raws;
+          prepared_stages;
+          prepared_offsets;
+          prepared_slots;
+          prepared_primitives =
+            Array.map
+              (fun draw ->
+                match draw.prepared_primitive with
+                | Point -> 0
+                | Line -> 1
+                | Line_strip -> 2
+                | Triangle -> 3
+                | Triangle_strip -> 4)
+              draws;
+          prepared_counts = Array.map (fun draw -> draw.prepared_index_count) draws;
+          prepared_index_types =
+            Array.map
+              (fun draw -> match draw.prepared_index_type with Uint16 -> 0 | Uint32 -> 1)
+              draws;
+          prepared_index_raws = Array.map (fun draw -> draw.prepared_index_buffer.raw) draws;
+          prepared_index_offsets = Array.map (fun draw -> draw.prepared_index_offset) draws;
+          prepared_command_resources;
+        }
+
+  let rec validate_prepared_bindings operation bindings index =
+    if index = Array.length bindings then Ok ()
+    else
+      let* () = ensure_buffer_usable operation bindings.(index).prepared_buffer in
+      validate_prepared_bindings operation bindings (index + 1)
+
+  let rec validate_prepared_execution operation (target : texture) draws index =
+    if index = Array.length draws then Ok ()
+    else
+      let draw = draws.(index) in
+      let* () = ensure_live operation draw.prepared_pipeline.lifetime in
+      if
+        draw.prepared_pipeline.raster_sample_count <> target.descriptor.sample_count
+        || draw.prepared_pipeline.color_formats = []
+        || List.hd draw.prepared_pipeline.color_formats <> target.descriptor.format
+      then error operation Invalid_argument "pipeline differs from the render target"
+      else
+        let* () = ensure_buffer_usable operation draw.prepared_index_buffer in
+        let* () = validate_prepared_bindings operation draw.prepared_bindings 0 in
+        validate_prepared_execution operation target draws (index + 1)
+
+  let close_failed_prepared_encoder (value : t) =
+    ignore (Metal_raw.Registry.render_encoder_end value.raw);
+    if Atomic.compare_and_set value.lifetime.destroyed false true then begin
+      ignore (Metal_raw.destroy value.raw);
+      detach value.command_buffer.lifetime
+    end;
+    value.command_buffer.phase <- Failed
+
+  let execute_prepared_indexed_draws (value : t) prepared =
+    let operation = "Metal.Render_encoder.execute_prepared_indexed_draws" in
+    let* () = before_main operation in
+    let* () = ensure_live operation value.lifetime in
+    let* () =
+      ensure_same_device operation value.command_buffer.queue.device prepared.prepared_device
+    in
+    let* () = validate_prepared_execution operation value.target prepared.prepared_draws 0 in
+    match
+      Metal_raw.render_encoder_execute_indexed_draws value.raw prepared.prepared_pipeline_raws
+        prepared.prepared_buffer_raws prepared.prepared_stages prepared.prepared_offsets
+        prepared.prepared_slots prepared.prepared_primitives prepared.prepared_counts
+        prepared.prepared_index_types prepared.prepared_index_raws prepared.prepared_index_offsets
+    with
+    | Error message ->
+        close_failed_prepared_encoder value;
+        native_error operation message
+    | Ok () ->
+        retain_command_buffer_prepared_command value.command_buffer
+          prepared.prepared_command_resources;
+        value.pipeline <-
+          Some prepared.prepared_draws.(Array.length prepared.prepared_draws - 1).prepared_pipeline;
+        Ok ()
 
   let destroyed (value : t) = is_destroyed value.lifetime
 
@@ -5038,11 +5022,12 @@ module Render_encoder = struct
       Ok ()
 
   let set_vertex_buffer =
-    set_buffer "Metal.Render_encoder.set_vertex_buffer" (fun e b o i -> Metal_raw.Registry.render_encoder_set_vertex_buffer e b o (Int64.of_int i))
+    set_buffer "Metal.Render_encoder.set_vertex_buffer" (fun e b o i ->
+        Metal_raw.Registry.render_encoder_set_vertex_buffer e b o (Int64.of_int i))
 
   let set_fragment_buffer =
-    set_buffer "Metal.Render_encoder.set_fragment_buffer"
-      (fun e b o i -> Metal_raw.Registry.render_encoder_set_fragment_buffer e b o (Int64.of_int i))
+    set_buffer "Metal.Render_encoder.set_fragment_buffer" (fun e b o i ->
+        Metal_raw.Registry.render_encoder_set_fragment_buffer e b o (Int64.of_int i))
 
   let set_texture operation raw_call (value : t) ~index (texture : Texture.t) =
     on_main operation (fun () ->
@@ -5057,12 +5042,12 @@ module Render_encoder = struct
           Ok ())
 
   let set_vertex_texture =
-    set_texture "Metal.Render_encoder.set_vertex_texture"
-      (fun e t i -> Metal_raw.Registry.render_encoder_set_vertex_texture e t (Int64.of_int i))
+    set_texture "Metal.Render_encoder.set_vertex_texture" (fun e t i ->
+        Metal_raw.Registry.render_encoder_set_vertex_texture e t (Int64.of_int i))
 
   let set_fragment_texture =
-    set_texture "Metal.Render_encoder.set_fragment_texture"
-      (fun e t i -> Metal_raw.Registry.render_encoder_set_fragment_texture e t (Int64.of_int i))
+    set_texture "Metal.Render_encoder.set_fragment_texture" (fun e t i ->
+        Metal_raw.Registry.render_encoder_set_fragment_texture e t (Int64.of_int i))
 
   let set_sampler operation raw_call (value : t) ~index (sampler : Sampler.t) =
     on_main operation (fun () ->
@@ -5078,12 +5063,12 @@ module Render_encoder = struct
           Ok ())
 
   let set_vertex_sampler =
-    set_sampler "Metal.Render_encoder.set_vertex_sampler"
-      (fun e s i -> Metal_raw.Registry.render_encoder_set_vertex_sampler e s (Int64.of_int i))
+    set_sampler "Metal.Render_encoder.set_vertex_sampler" (fun e s i ->
+        Metal_raw.Registry.render_encoder_set_vertex_sampler e s (Int64.of_int i))
 
   let set_fragment_sampler =
-    set_sampler "Metal.Render_encoder.set_fragment_sampler"
-      (fun e s i -> Metal_raw.Registry.render_encoder_set_fragment_sampler e s (Int64.of_int i))
+    set_sampler "Metal.Render_encoder.set_fragment_sampler" (fun e s i ->
+        Metal_raw.Registry.render_encoder_set_fragment_sampler e s (Int64.of_int i))
 
   let set_validated operation validate raw_call (value : t) argument =
     let* () = before_main operation in
@@ -5105,9 +5090,8 @@ module Render_encoder = struct
     else if
       (* The origin and extent may leave the target: a viewport maps clip space
          and Metal rasterizes only the part on the attachment. *)
-      viewport.width <= 0. || viewport.height <= 0.
-      || viewport.znear < 0. || viewport.znear > 1. || viewport.zfar < 0. || viewport.zfar > 1.
-      || viewport.znear > viewport.zfar
+      viewport.width <= 0. || viewport.height <= 0. || viewport.znear < 0. || viewport.znear > 1.
+      || viewport.zfar < 0. || viewport.zfar > 1. || viewport.znear > viewport.zfar
     then error operation Invalid_argument "viewport is empty or outside the depth range"
     else
       let* () =
@@ -5340,8 +5324,12 @@ module Render_encoder = struct
           else if arguments_offset < 0L || Int64.rem arguments_offset 4L <> 0L then
             error operation Invalid_argument "indirect arguments offset is misaligned"
           else
-            let* () = validate_draw_buffer operation value index_buffer ~offset:index_offset ~required:width in
-            let* () = validate_draw_buffer operation value arguments ~offset:arguments_offset ~required:20L in
+            let* () =
+              validate_draw_buffer operation value index_buffer ~offset:index_offset ~required:width
+            in
+            let* () =
+              validate_draw_buffer operation value arguments ~offset:arguments_offset ~required:20L
+            in
             let* () =
               native_result operation
                 (Metal_raw.Registry.render_draw_indexed_indirect value.raw
@@ -5406,7 +5394,8 @@ module Render_encoder = struct
       Ok ()
 
   let draw_triangles (value : t) ~first ~count () =
-    let instances = (1) in let operation = "Metal.Render_encoder.draw_triangles" in
+    let instances = 1 in
+    let operation = "Metal.Render_encoder.draw_triangles" in
     let* () = before_main operation in
     let* () = ensure_live operation value.lifetime in
     if Option.is_none value.pipeline then

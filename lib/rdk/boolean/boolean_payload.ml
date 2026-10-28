@@ -23,17 +23,19 @@ type edge_group_pair = {
   mutable right_edge_group : Edge_group.t option;
 }
 
-
-
 let operation = "boolean_payload"
 let payload_error (code, message) = Error.fail_with ~operation ~code message
 let error code message = Error (Error.make ~operation ~code message)
 
 let storage_kind = function
-  | Attribute.Float _ -> 0 | Attribute.Int _ -> 1
-  | Attribute.Int_array _ -> 2 | Attribute.Float_array _ -> 3
-  | Attribute.Float2 _ -> 4 | Attribute.Float3 _ -> 5
-  | Attribute.Float4 _ -> 6 | Attribute.Text _ -> 7
+  | Attribute.Float _ -> 0
+  | Attribute.Int _ -> 1
+  | Attribute.Int_array _ -> 2
+  | Attribute.Float_array _ -> 3
+  | Attribute.Float2 _ -> 4
+  | Attribute.Float3 _ -> 5
+  | Attribute.Float4 _ -> 6
+  | Attribute.Text _ -> 7
 
 let collect_attributes owner left right =
   let table = Hashtbl.create 16 and reversed = ref [] in
@@ -43,17 +45,23 @@ let collect_attributes owner left right =
       and kind = storage_kind (Attribute.View.storage attribute) in
       match Hashtbl.find_opt table name with
       | None ->
-          let pair = { name; source_owner = owner; kind;
-                       left = None; right = None } in
+          let pair = { name; source_owner = owner; kind; left = None; right = None } in
           if side = 0 then pair.left <- Some attribute else pair.right <- Some attribute;
-          Hashtbl.add table name pair; reversed := pair :: !reversed
+          Hashtbl.add table name pair;
+          reversed := pair :: !reversed
       | Some pair ->
-          if pair.kind <> kind then (payload_error
-            ("attribute_storage_mismatch", Printf.sprintf
-              "%s attribute %S has different storage on the Boolean operands"
-              (match owner with Attribute.Point -> "point" | Attribute.Vertex -> "vertex" | _ -> "primitive") name));
+          if pair.kind <> kind then
+            payload_error
+              ( "attribute_storage_mismatch",
+                Printf.sprintf "%s attribute %S has different storage on the Boolean operands"
+                  (match owner with
+                  | Attribute.Point -> "point"
+                  | Attribute.Vertex -> "vertex"
+                  | _ -> "primitive")
+                  name );
           if side = 0 then pair.left <- Some attribute else pair.right <- Some attribute
-    end in
+    end
+  in
   Array.iter (add 0) (Geometry.View.attributes left);
   Array.iter (add 1) (Geometry.View.attributes right);
   Array.of_list (List.rev !reversed)
@@ -65,13 +73,16 @@ let collect_groups owner left right =
       let name = Group.name group in
       match Hashtbl.find_opt table name with
       | None ->
-          let pair = { group_name = name; source_group_owner = owner;
-                       left_group = None; right_group = None } in
+          let pair =
+            { group_name = name; source_group_owner = owner; left_group = None; right_group = None }
+          in
           if side = 0 then pair.left_group <- Some group else pair.right_group <- Some group;
-          Hashtbl.add table name pair; reversed := pair :: !reversed
+          Hashtbl.add table name pair;
+          reversed := pair :: !reversed
       | Some pair ->
           if side = 0 then pair.left_group <- Some group else pair.right_group <- Some group
-    end in
+    end
+  in
   List.iter (add 0) (Geometry.groups left);
   List.iter (add 1) (Geometry.groups right);
   Array.of_list (List.rev !reversed)
@@ -82,34 +93,32 @@ let collect_edge_groups left right =
     let name = Edge_group.name group in
     match Hashtbl.find_opt table name with
     | None ->
-        let pair = { edge_group_name = name; left_edge_group = None;
-                     right_edge_group = None } in
-        if side = 0 then pair.left_edge_group <- Some group
-        else pair.right_edge_group <- Some group;
+        let pair = { edge_group_name = name; left_edge_group = None; right_edge_group = None } in
+        if side = 0 then pair.left_edge_group <- Some group else pair.right_edge_group <- Some group;
         Hashtbl.add table name pair;
         reversed := pair :: !reversed
     | Some pair ->
-        if side = 0 then pair.left_edge_group <- Some group
-        else pair.right_edge_group <- Some group in
+        if side = 0 then pair.left_edge_group <- Some group else pair.right_edge_group <- Some group
+  in
   List.iter (add 0) (Geometry.edge_groups left);
   List.iter (add 1) (Geometry.edge_groups right);
   Array.of_list (List.rev !reversed)
 
 let selected view left right primitive =
-  if Bytes.unsafe_get view.Boolean_extract.View.primitive_sides primitive = '\000'
-  then left else right
+  if Bytes.unsafe_get view.Boolean_extract.View.primitive_sides primitive = '\000' then left
+  else right
 
-let source_index view owner primitive local = match owner with
-  | Attribute.Point -> view.Boolean_extract.View.primitive_source_points.
-      ((primitive * 3) + local)
-  | Attribute.Vertex -> view.Boolean_extract.View.primitive_source_vertices.
-      ((primitive * 3) + local)
+let source_index view owner primitive local =
+  match owner with
+  | Attribute.Point -> view.Boolean_extract.View.primitive_source_points.((primitive * 3) + local)
+  | Attribute.Vertex ->
+      view.Boolean_extract.View.primitive_source_vertices.((primitive * 3) + local)
   | _ -> assert false
 
-let dominant_values a b c =
-  if a >= b && a >= c then 0 else if b >= c then 1 else 2
+let dominant_values a b c = if a >= b && a >= c then 0 else if b >= c then 1 else 2
 
-let dominant_corner view corner = dominant_values
+let dominant_corner view corner =
+  dominant_values
     view.Boolean_extract.View.barycentric_a.(corner)
     view.Boolean_extract.View.barycentric_b.(corner)
     view.Boolean_extract.View.barycentric_c.(corner)
@@ -117,102 +126,115 @@ let dominant_corner view corner = dominant_values
 let float_equal tolerance left right =
   left = right
   || Int64.bits_of_float left = Int64.bits_of_float right
-  || (Float.is_finite left && Float.is_finite right
-      && abs_float (left -. right)
-         <= tolerance *. Float.max 1. (Float.max (abs_float left) (abs_float right)))
+  || Float.is_finite left && Float.is_finite right
+     && abs_float (left -. right)
+        <= tolerance *. Float.max 1. (Float.max (abs_float left) (abs_float right))
 
 let normalize3 x y z =
   let scale = Float.max (abs_float x) (Float.max (abs_float y) (abs_float z)) in
-  if scale = 0. || not (Float.is_finite scale) then x, y, z
+  if scale = 0. || not (Float.is_finite scale) then (x, y, z)
   else
     let sx = x /. scale and sy = y /. scale and sz = z /. scale in
     let length = sqrt ((sx *. sx) +. (sy *. sy) +. (sz *. sz)) in
-    if length = 0. || not (Float.is_finite length) then x, y, z
-    else sx /. length, sy /. length, sz /. length
+    if length = 0. || not (Float.is_finite length) then (x, y, z)
+    else (sx /. length, sy /. length, sz /. length)
 
 let source_storage pair =
-  Option.map Attribute.View.storage pair.left,
-  Option.map Attribute.View.storage pair.right
+  (Option.map Attribute.View.storage pair.left, Option.map Attribute.View.storage pair.right)
 
 let interpolate_fixed ?cancel ~grain ancestry view corner_count pair =
   let left, right = source_storage pair in
-  match left, right with
+  match (left, right) with
   | _ when pair.kind = 0 || (pair.kind >= 4 && pair.kind <= 6) ->
       let like = Option.get (if left <> None then left else right) in
       let planes = Option.map (fun s -> Option.get (Attribute.float_planes s)) in
       let left = planes left and right = planes right in
-      let output = Array.map (fun _ -> Array.make corner_count 0.)
-          (Option.get (Attribute.float_planes like)) in
+      let output =
+        Array.map (fun _ -> Array.make corner_count 0.) (Option.get (Attribute.float_planes like))
+      in
       Support.parallel_for ?cancel ~grain corner_count (fun corner ->
-        let primitive = corner / 3 in
-        match selected view left right primitive with
-        | None -> ()
-        | Some values ->
-            let a = source_index view pair.source_owner primitive 0
-            and b = source_index view pair.source_owner primitive 1
-            and c = source_index view pair.source_owner primitive 2
-            and wa = view.Boolean_extract.View.barycentric_a.(corner)
-            and wb = view.Boolean_extract.View.barycentric_b.(corner)
-            and wc = view.Boolean_extract.View.barycentric_c.(corner) in
-            Array.iteri (fun p plane ->
-              plane.(corner) <- wa *. values.(p).(a) +. wb *. values.(p).(b)
-                +. wc *. values.(p).(c)) output;
-            if pair.name = "N" && Array.length output = 3 then begin
-              let winding = float_of_int
-                  (Boolean_extract.primitive_winding ancestry primitive) in
-              let x, y, z = normalize3 (winding *. output.(0).(corner))
-                  (winding *. output.(1).(corner)) (winding *. output.(2).(corner)) in
-              output.(0).(corner) <- x; output.(1).(corner) <- y;
-              output.(2).(corner) <- z
-            end);
+          let primitive = corner / 3 in
+          match selected view left right primitive with
+          | None -> ()
+          | Some values ->
+              let a = source_index view pair.source_owner primitive 0
+              and b = source_index view pair.source_owner primitive 1
+              and c = source_index view pair.source_owner primitive 2
+              and wa = view.Boolean_extract.View.barycentric_a.(corner)
+              and wb = view.Boolean_extract.View.barycentric_b.(corner)
+              and wc = view.Boolean_extract.View.barycentric_c.(corner) in
+              Array.iteri
+                (fun p plane ->
+                  plane.(corner) <-
+                    (wa *. values.(p).(a)) +. (wb *. values.(p).(b)) +. (wc *. values.(p).(c)))
+                output;
+              if pair.name = "N" && Array.length output = 3 then begin
+                let winding = float_of_int (Boolean_extract.primitive_winding ancestry primitive) in
+                let x, y, z =
+                  normalize3
+                    (winding *. output.(0).(corner))
+                    (winding *. output.(1).(corner))
+                    (winding *. output.(2).(corner))
+                in
+                output.(0).(corner) <- x;
+                output.(1).(corner) <- y;
+                output.(2).(corner) <- z
+              end);
       Attribute.of_float_planes ~like output
-  | (Some (Attribute.Int _) | None), (Some (Attribute.Int _) | None)
-      when pair.kind = 1 ->
+  | (Some (Attribute.Int _) | None), (Some (Attribute.Int _) | None) when pair.kind = 1 ->
       let storage_view = function Attribute.Int value -> value | _ -> assert false in
-      let left = Option.map storage_view left and right = Option.map storage_view right
+      let left = Option.map storage_view left
+      and right = Option.map storage_view right
       and output = Array.make corner_count 0 in
       Support.parallel_for ?cancel ~grain corner_count (fun corner ->
-        let primitive = corner / 3 in
-        match selected view left right primitive with
-        | None -> ()
-        | Some values ->
-            output.(corner) <- values.(source_index view pair.source_owner
-              primitive (dominant_corner view corner)));
+          let primitive = corner / 3 in
+          match selected view left right primitive with
+          | None -> ()
+          | Some values ->
+              output.(corner) <-
+                values.(source_index view pair.source_owner primitive (dominant_corner view corner)));
       Attribute.Int output
-  | (Some (Attribute.Text _) | None), (Some (Attribute.Text _) | None)
-      when pair.kind = 7 ->
+  | (Some (Attribute.Text _) | None), (Some (Attribute.Text _) | None) when pair.kind = 7 ->
       let storage_view = function Attribute.Text value -> value | _ -> assert false in
-      let left = Option.map storage_view left and right = Option.map storage_view right
+      let left = Option.map storage_view left
+      and right = Option.map storage_view right
       and output = Array.make corner_count "" in
       Support.parallel_for ?cancel ~grain corner_count (fun corner ->
-        let primitive = corner / 3 in
-        match selected view left right primitive with
-        | None -> ()
-        | Some values ->
-            output.(corner) <- values.(source_index view pair.source_owner
-              primitive (dominant_corner view corner)));
+          let primitive = corner / 3 in
+          match selected view left right primitive with
+          | None -> ()
+          | Some values ->
+              output.(corner) <-
+                values.(source_index view pair.source_owner primitive (dominant_corner view corner)));
       Attribute.Text output
-  | _ -> (payload_error ("unsupported_storage", Printf.sprintf
-      "%s attribute %S uses CSR storage not yet handled by the fixed-width interpolator"
-      (if pair.source_owner = Attribute.Point then "point" else "vertex") pair.name))
+  | _ ->
+      payload_error
+        ( "unsupported_storage",
+          Printf.sprintf
+            "%s attribute %S uses CSR storage not yet handled by the fixed-width interpolator"
+            (if pair.source_owner = Attribute.Point then "point" else "vertex")
+            pair.name )
 
 let interpolate_csr ?cancel ~grain ancestry view corner_count pair =
   let left, right = source_storage pair in
-  match left, right with
-  | (Some (Attribute.Int_array _) | None), (Some (Attribute.Int_array _) | None)
-      when pair.kind = 2 ->
-      let storage_view = function Attribute.Int_array value -> Packed.Int_array.View.view value
-        | _ -> assert false in
-      let left = Option.map storage_view left and right = Option.map storage_view right
+  match (left, right) with
+  | (Some (Attribute.Int_array _) | None), (Some (Attribute.Int_array _) | None) when pair.kind = 2
+    ->
+      let storage_view = function
+        | Attribute.Int_array value -> Packed.Int_array.View.view value
+        | _ -> assert false
+      in
+      let left = Option.map storage_view left
+      and right = Option.map storage_view right
       and lengths = Array.make corner_count 0 in
       Support.parallel_for ?cancel ~grain corner_count (fun corner ->
-        let primitive = corner / 3 in
-        match selected view left right primitive with
-        | None -> ()
-        | Some values ->
-            let local = dominant_corner view corner in
-            let source = source_index view pair.source_owner primitive local in
-            lengths.(corner) <- values.offsets.(source + 1) - values.offsets.(source));
+          let primitive = corner / 3 in
+          match selected view left right primitive with
+          | None -> ()
+          | Some values ->
+              let local = dominant_corner view corner in
+              let source = source_index view pair.source_owner primitive local in
+              lengths.(corner) <- values.offsets.(source + 1) - values.offsets.(source));
       let offsets = Array.make (corner_count + 1) 0 in
       for corner = 0 to corner_count - 1 do
         if offsets.(corner) > Sys.max_array_length - lengths.(corner) then
@@ -221,40 +243,45 @@ let interpolate_csr ?cancel ~grain ancestry view corner_count pair =
       done;
       let values = Array.make offsets.(corner_count) 0 in
       Support.parallel_for ?cancel ~grain corner_count (fun corner ->
-        let primitive = corner / 3 in
-        match selected view left right primitive with
-        | None -> ()
-        | Some source_values ->
-            let local = dominant_corner view corner in
-            let source = source_index view pair.source_owner primitive local in
-            Array.blit source_values.values source_values.offsets.(source)
-              values offsets.(corner) lengths.(corner));
-      Attribute.Int_array
-        (Packed.Int_array.View.create_validated_owned ~offsets ~values)
-  | (Some (Attribute.Float_array _) | None), (Some (Attribute.Float_array _) | None)
-      when pair.kind = 3 ->
-      let storage_view = function Attribute.Float_array value -> Packed.Float_array.View.view value
-        | _ -> assert false in
-      let left = Option.map storage_view left and right = Option.map storage_view right
-      and lengths = Array.make corner_count 0 and interpolate = Bytes.make corner_count '\000' in
-      Support.parallel_for ?cancel ~grain corner_count (fun corner ->
-        let primitive = corner / 3 in
-        match selected view left right primitive with
-        | None -> ()
-        | Some values ->
-            let a = source_index view pair.source_owner primitive 0
-            and b = source_index view pair.source_owner primitive 1
-            and c = source_index view pair.source_owner primitive 2 in
-            let al = values.offsets.(a + 1) - values.offsets.(a)
-            and bl = values.offsets.(b + 1) - values.offsets.(b)
-            and cl = values.offsets.(c + 1) - values.offsets.(c) in
-            if al = bl && al = cl then begin
-              lengths.(corner) <- al; Bytes.unsafe_set interpolate corner '\001'
-            end else begin
+          let primitive = corner / 3 in
+          match selected view left right primitive with
+          | None -> ()
+          | Some source_values ->
               let local = dominant_corner view corner in
-              let source = if local = 0 then a else if local = 1 then b else c in
-              lengths.(corner) <- values.offsets.(source + 1) - values.offsets.(source)
-            end);
+              let source = source_index view pair.source_owner primitive local in
+              Array.blit source_values.values source_values.offsets.(source) values offsets.(corner)
+                lengths.(corner));
+      Attribute.Int_array (Packed.Int_array.View.create_validated_owned ~offsets ~values)
+  | (Some (Attribute.Float_array _) | None), (Some (Attribute.Float_array _) | None)
+    when pair.kind = 3 ->
+      let storage_view = function
+        | Attribute.Float_array value -> Packed.Float_array.View.view value
+        | _ -> assert false
+      in
+      let left = Option.map storage_view left
+      and right = Option.map storage_view right
+      and lengths = Array.make corner_count 0
+      and interpolate = Bytes.make corner_count '\000' in
+      Support.parallel_for ?cancel ~grain corner_count (fun corner ->
+          let primitive = corner / 3 in
+          match selected view left right primitive with
+          | None -> ()
+          | Some values ->
+              let a = source_index view pair.source_owner primitive 0
+              and b = source_index view pair.source_owner primitive 1
+              and c = source_index view pair.source_owner primitive 2 in
+              let al = values.offsets.(a + 1) - values.offsets.(a)
+              and bl = values.offsets.(b + 1) - values.offsets.(b)
+              and cl = values.offsets.(c + 1) - values.offsets.(c) in
+              if al = bl && al = cl then begin
+                lengths.(corner) <- al;
+                Bytes.unsafe_set interpolate corner '\001'
+              end
+              else begin
+                let local = dominant_corner view corner in
+                let source = if local = 0 then a else if local = 1 then b else c in
+                lengths.(corner) <- values.offsets.(source + 1) - values.offsets.(source)
+              end);
       let offsets = Array.make (corner_count + 1) 0 in
       for corner = 0 to corner_count - 1 do
         if offsets.(corner) > Sys.max_array_length - lengths.(corner) then
@@ -263,87 +290,106 @@ let interpolate_csr ?cancel ~grain ancestry view corner_count pair =
       done;
       let values = Array.make offsets.(corner_count) 0. in
       Support.parallel_for ?cancel ~grain corner_count (fun corner ->
-        let primitive = corner / 3 in
-        match selected view left right primitive with
-        | None -> ()
-        | Some source_values ->
-            let a = source_index view pair.source_owner primitive 0
-            and b = source_index view pair.source_owner primitive 1
-            and c = source_index view pair.source_owner primitive 2 in
-            if Bytes.unsafe_get interpolate corner <> '\000' then begin
-              let wa = view.Boolean_extract.View.barycentric_a.(corner)
-              and wb = view.Boolean_extract.View.barycentric_b.(corner)
-              and wc = view.Boolean_extract.View.barycentric_c.(corner) in
-              let ao = source_values.offsets.(a) and bo = source_values.offsets.(b)
-              and co = source_values.offsets.(c) and output = offsets.(corner) in
-              for component = 0 to lengths.(corner) - 1 do
-                values.(output + component) <-
-                  wa *. source_values.values.(ao + component)
-                  +. wb *. source_values.values.(bo + component)
-                  +. wc *. source_values.values.(co + component)
-              done
-            end else begin
-              let local = dominant_corner view corner in
-              let source = if local = 0 then a else if local = 1 then b else c in
-              Array.blit source_values.values source_values.offsets.(source)
-                values offsets.(corner) lengths.(corner)
-            end);
-      Attribute.Float_array
-        (Packed.Float_array.View.create_validated_owned ~offsets ~values)
+          let primitive = corner / 3 in
+          match selected view left right primitive with
+          | None -> ()
+          | Some source_values ->
+              let a = source_index view pair.source_owner primitive 0
+              and b = source_index view pair.source_owner primitive 1
+              and c = source_index view pair.source_owner primitive 2 in
+              if Bytes.unsafe_get interpolate corner <> '\000' then begin
+                let wa = view.Boolean_extract.View.barycentric_a.(corner)
+                and wb = view.Boolean_extract.View.barycentric_b.(corner)
+                and wc = view.Boolean_extract.View.barycentric_c.(corner) in
+                let ao = source_values.offsets.(a)
+                and bo = source_values.offsets.(b)
+                and co = source_values.offsets.(c)
+                and output = offsets.(corner) in
+                for component = 0 to lengths.(corner) - 1 do
+                  values.(output + component) <-
+                    (wa *. source_values.values.(ao + component))
+                    +. (wb *. source_values.values.(bo + component))
+                    +. (wc *. source_values.values.(co + component))
+                done
+              end
+              else begin
+                let local = dominant_corner view corner in
+                let source = if local = 0 then a else if local = 1 then b else c in
+                Array.blit source_values.values source_values.offsets.(source) values
+                  offsets.(corner) lengths.(corner)
+              end);
+      Attribute.Float_array (Packed.Float_array.View.create_validated_owned ~offsets ~values)
   | _ -> interpolate_fixed ?cancel ~grain ancestry view corner_count pair
 
 let first_corners topology point_count =
   let representatives = Array.make point_count (-1) in
-  Array.iteri (fun corner point ->
-    if representatives.(point) < 0 then representatives.(point) <- corner)
+  Array.iteri
+    (fun corner point -> if representatives.(point) < 0 then representatives.(point) <- corner)
     topology.Topology.View.vertex_points;
   representatives
 
-let conflict name point = (payload_error
-  ("point_payload_conflict", Printf.sprintf
-    "point payload %S disagrees across incident Boolean corners at output point %d; use Promote_to_vertex or split the schema"
-    name point))
+let conflict name point =
+  payload_error
+    ( "point_payload_conflict",
+      Printf.sprintf
+        "point payload %S disagrees across incident Boolean corners at output point %d; use \
+         Promote_to_vertex or split the schema"
+        name point )
 
 let consolidate_to_points ~tolerance name topology point_count representatives storage =
   let vertex_points = topology.Topology.View.vertex_points in
   match storage with
   | Attribute.Float source ->
       let output = Array.init point_count (fun point -> source.(representatives.(point))) in
-      Array.iteri (fun corner point ->
-        if not (float_equal tolerance output.(point) source.(corner)) then conflict name point)
+      Array.iteri
+        (fun corner point ->
+          if not (float_equal tolerance output.(point) source.(corner)) then conflict name point)
         vertex_points;
       Attribute.Float output
   | Attribute.Int source ->
       let output = Array.init point_count (fun point -> source.(representatives.(point))) in
-      Array.iteri (fun corner point ->
-        if output.(point) <> source.(corner) then conflict name point) vertex_points;
+      Array.iteri
+        (fun corner point -> if output.(point) <> source.(corner) then conflict name point)
+        vertex_points;
       Attribute.Int output
   | Attribute.Text source ->
       let output = Array.init point_count (fun point -> source.(representatives.(point))) in
-      Array.iteri (fun corner point ->
-        if not (String.equal output.(point) source.(corner)) then conflict name point)
+      Array.iteri
+        (fun corner point ->
+          if not (String.equal output.(point) source.(corner)) then conflict name point)
         vertex_points;
       Attribute.Text output
   | Attribute.Float2 value ->
       let source = Packed.Float2.View.view value in
       let x = Array.init point_count (fun point -> source.x.(representatives.(point)))
       and y = Array.init point_count (fun point -> source.y.(representatives.(point))) in
-      Array.iteri (fun corner point ->
-        if not (float_equal tolerance x.(point) source.x.(corner)
-            && float_equal tolerance y.(point) source.y.(corner)) then conflict name point)
+      Array.iteri
+        (fun corner point ->
+          if
+            not
+              (float_equal tolerance x.(point) source.x.(corner)
+              && float_equal tolerance y.(point) source.y.(corner))
+          then conflict name point)
         vertex_points;
-      let value = match Packed.Float2.of_owned ~x ~y with
-        | Ok value -> value | Error message -> invalid_arg message in
+      let value =
+        match Packed.Float2.of_owned ~x ~y with
+        | Ok value -> value
+        | Error message -> invalid_arg message
+      in
       Attribute.Float2 value
   | Attribute.Float3 value ->
       let source = Packed.Float3.View.view value in
       let x = Array.init point_count (fun point -> source.x.(representatives.(point)))
       and y = Array.init point_count (fun point -> source.y.(representatives.(point)))
       and z = Array.init point_count (fun point -> source.z.(representatives.(point))) in
-      Array.iteri (fun corner point ->
-        if not (float_equal tolerance x.(point) source.x.(corner)
-            && float_equal tolerance y.(point) source.y.(corner)
-            && float_equal tolerance z.(point) source.z.(corner)) then conflict name point)
+      Array.iteri
+        (fun corner point ->
+          if
+            not
+              (float_equal tolerance x.(point) source.x.(corner)
+              && float_equal tolerance y.(point) source.y.(corner)
+              && float_equal tolerance z.(point) source.z.(corner))
+          then conflict name point)
         vertex_points;
       Attribute.Float3 (Packed.Float3.View.of_owned_exn ~x ~y ~z)
   | Attribute.Float4 value ->
@@ -352,30 +398,42 @@ let consolidate_to_points ~tolerance name topology point_count representatives s
       and y = Array.init point_count (fun point -> source.y.(representatives.(point)))
       and z = Array.init point_count (fun point -> source.z.(representatives.(point)))
       and w = Array.init point_count (fun point -> source.w.(representatives.(point))) in
-      Array.iteri (fun corner point ->
-        if not (float_equal tolerance x.(point) source.x.(corner)
-            && float_equal tolerance y.(point) source.y.(corner)
-            && float_equal tolerance z.(point) source.z.(corner)
-            && float_equal tolerance w.(point) source.w.(corner)) then conflict name point)
+      Array.iteri
+        (fun corner point ->
+          if
+            not
+              (float_equal tolerance x.(point) source.x.(corner)
+              && float_equal tolerance y.(point) source.y.(corner)
+              && float_equal tolerance z.(point) source.z.(corner)
+              && float_equal tolerance w.(point) source.w.(corner))
+          then conflict name point)
         vertex_points;
-      let value = match Packed.Float4.of_owned ~x ~y ~z ~w with
-        | Ok value -> value | Error message -> invalid_arg message in
+      let value =
+        match Packed.Float4.of_owned ~x ~y ~z ~w with
+        | Ok value -> value
+        | Error message -> invalid_arg message
+      in
       Attribute.Float4 value
   | Attribute.Int_array value ->
       let source = Packed.Int_array.View.view value in
-      let lengths = Array.init point_count (fun point ->
-        let corner = representatives.(point) in
-        source.offsets.(corner + 1) - source.offsets.(corner)) in
-      Array.iteri (fun corner point ->
-        let first = source.offsets.(corner) and last = source.offsets.(corner + 1)
-        and representative = representatives.(point) in
-        let other_first = source.offsets.(representative)
-        and other_last = source.offsets.(representative + 1) in
-        if last - first <> other_last - other_first then conflict name point;
-        for slot = 0 to last - first - 1 do
-          if source.values.(first + slot) <> source.values.(other_first + slot) then
-            conflict name point
-        done) vertex_points;
+      let lengths =
+        Array.init point_count (fun point ->
+            let corner = representatives.(point) in
+            source.offsets.(corner + 1) - source.offsets.(corner))
+      in
+      Array.iteri
+        (fun corner point ->
+          let first = source.offsets.(corner)
+          and last = source.offsets.(corner + 1)
+          and representative = representatives.(point) in
+          let other_first = source.offsets.(representative)
+          and other_last = source.offsets.(representative + 1) in
+          if last - first <> other_last - other_first then conflict name point;
+          for slot = 0 to last - first - 1 do
+            if source.values.(first + slot) <> source.values.(other_first + slot) then
+              conflict name point
+          done)
+        vertex_points;
       let offsets = Array.make (point_count + 1) 0 in
       for point = 0 to point_count - 1 do
         offsets.(point + 1) <- offsets.(point) + lengths.(point)
@@ -383,93 +441,116 @@ let consolidate_to_points ~tolerance name topology point_count representatives s
       let values = Array.make offsets.(point_count) 0 in
       for point = 0 to point_count - 1 do
         let corner = representatives.(point) in
-        Array.blit source.values source.offsets.(corner) values offsets.(point)
-          lengths.(point)
+        Array.blit source.values source.offsets.(corner) values offsets.(point) lengths.(point)
       done;
-      Attribute.Int_array
-        (Packed.Int_array.View.create_validated_owned ~offsets ~values)
+      Attribute.Int_array (Packed.Int_array.View.create_validated_owned ~offsets ~values)
   | Attribute.Float_array value ->
       let source = Packed.Float_array.View.view value in
-      let lengths = Array.init point_count (fun point ->
-        let corner = representatives.(point) in
-        source.offsets.(corner + 1) - source.offsets.(corner)) in
-      Array.iteri (fun corner point ->
-        let first = source.offsets.(corner) and last = source.offsets.(corner + 1)
-        and representative = representatives.(point) in
-        let other_first = source.offsets.(representative)
-        and other_last = source.offsets.(representative + 1) in
-        if last - first <> other_last - other_first then conflict name point;
-        for slot = 0 to last - first - 1 do
-          if not (float_equal tolerance source.values.(first + slot)
-              source.values.(other_first + slot)) then conflict name point
-        done) vertex_points;
+      let lengths =
+        Array.init point_count (fun point ->
+            let corner = representatives.(point) in
+            source.offsets.(corner + 1) - source.offsets.(corner))
+      in
+      Array.iteri
+        (fun corner point ->
+          let first = source.offsets.(corner)
+          and last = source.offsets.(corner + 1)
+          and representative = representatives.(point) in
+          let other_first = source.offsets.(representative)
+          and other_last = source.offsets.(representative + 1) in
+          if last - first <> other_last - other_first then conflict name point;
+          for slot = 0 to last - first - 1 do
+            if
+              not
+                (float_equal tolerance
+                   source.values.(first + slot)
+                   source.values.(other_first + slot))
+            then conflict name point
+          done)
+        vertex_points;
       let offsets = Array.make (point_count + 1) 0 in
-      for point = 0 to point_count - 1 do offsets.(point + 1) <- offsets.(point) + lengths.(point) done;
+      for point = 0 to point_count - 1 do
+        offsets.(point + 1) <- offsets.(point) + lengths.(point)
+      done;
       let values = Array.make offsets.(point_count) 0. in
       for point = 0 to point_count - 1 do
         let corner = representatives.(point) in
-        Array.blit source.values source.offsets.(corner) values offsets.(point)
-          lengths.(point)
+        Array.blit source.values source.offsets.(corner) values offsets.(point) lengths.(point)
       done;
-      Attribute.Float_array
-        (Packed.Float_array.View.create_validated_owned ~offsets ~values)
+      Attribute.Float_array (Packed.Float_array.View.create_validated_owned ~offsets ~values)
 
 let create_attribute pair owner storage =
   match Attribute.create_owned ~name:pair.name ~owner storage with
-  | Ok value -> value | Error message -> invalid_arg message
+  | Ok value -> value
+  | Error message -> invalid_arg message
 
-let group_source_index view owner primitive local = match owner with
-  | Group.Point -> view.Boolean_extract.View.primitive_source_points.
-      ((primitive * 3) + local)
-  | Group.Vertex -> view.Boolean_extract.View.primitive_source_vertices.
-      ((primitive * 3) + local)
+let group_source_index view owner primitive local =
+  match owner with
+  | Group.Point -> view.Boolean_extract.View.primitive_source_points.((primitive * 3) + local)
+  | Group.Vertex -> view.Boolean_extract.View.primitive_source_vertices.((primitive * 3) + local)
   | Group.Primitive -> assert false
 
-let copy_group ?cancel ~grain ancestry view topology point_count representatives
-    ~point_conflict pair =
+let copy_group ?cancel ~grain ancestry view topology point_count representatives ~point_conflict
+    pair =
   let corner_count = Array.length topology.Topology.View.vertex_points in
   let membership = Bytes.make corner_count '\000' in
   Support.parallel_for ?cancel ~grain corner_count (fun corner ->
-    let primitive = corner / 3 and local = dominant_corner view corner in
-    match selected view pair.left_group pair.right_group primitive with
-    | None -> ()
-    | Some source ->
-        let source_index = group_source_index view pair.source_group_owner
-            primitive local in
-        if Group.mem source_index source then Bytes.unsafe_set membership corner '\001');
+      let primitive = corner / 3 and local = dominant_corner view corner in
+      match selected view pair.left_group pair.right_group primitive with
+      | None -> ()
+      | Some source ->
+          let source_index = group_source_index view pair.source_group_owner primitive local in
+          if Group.mem source_index source then Bytes.unsafe_set membership corner '\001');
   let target_owner, target_count, target_membership, representative =
-    match pair.source_group_owner, point_conflict with
+    match (pair.source_group_owner, point_conflict) with
     | Group.Point, Reject ->
         let points = Bytes.make point_count '\000' in
-        Array.iteri (fun corner point ->
-          let value = Bytes.unsafe_get membership corner in
-          let representative = representatives.(point) in
-          if corner = representative then Bytes.unsafe_set points point value
-          else if value <> Bytes.unsafe_get points point then
-            (payload_error ("point_group_conflict", Printf.sprintf
-              "point group %S disagrees across incident Boolean corners at output point %d; use Promote_to_vertex or split the group"
-              pair.group_name point))) topology.Topology.View.vertex_points;
-        Group.Point, point_count, points, (fun point -> representatives.(point))
-    | Group.Point, Promote_to_vertex
-    | Group.Vertex, _ ->
-        Group.Vertex, corner_count, membership, Fun.id
-    | Group.Primitive, _ -> assert false in
-  let group = Group.init ~grain ~owner:target_owner ~name:pair.group_name target_count
-      (fun element -> Bytes.unsafe_get target_membership element <> '\000') in
+        Array.iteri
+          (fun corner point ->
+            let value = Bytes.unsafe_get membership corner in
+            let representative = representatives.(point) in
+            if corner = representative then Bytes.unsafe_set points point value
+            else if value <> Bytes.unsafe_get points point then
+              payload_error
+                ( "point_group_conflict",
+                  Printf.sprintf
+                    "point group %S disagrees across incident Boolean corners at output point %d; \
+                     use Promote_to_vertex or split the group"
+                    pair.group_name point ))
+          topology.Topology.View.vertex_points;
+        (Group.Point, point_count, points, fun point -> representatives.(point))
+    | Group.Point, Promote_to_vertex | Group.Vertex, _ ->
+        (Group.Vertex, corner_count, membership, Fun.id)
+    | Group.Primitive, _ -> assert false
+  in
+  let group =
+    Group.init ~grain ~owner:target_owner ~name:pair.group_name target_count (fun element ->
+        Bytes.unsafe_get target_membership element <> '\000')
+  in
   let is_ordered =
     Option.fold ~none:false ~some:Group.is_ordered pair.left_group
-    || Option.fold ~none:false ~some:Group.is_ordered pair.right_group in
+    || Option.fold ~none:false ~some:Group.is_ordered pair.right_group
+  in
   if not is_ordered then group
   else begin
-    let source_count geometry = match pair.source_group_owner with
+    let source_count geometry =
+      match pair.source_group_owner with
       | Group.Point -> Geometry.point_count geometry
       | Group.Vertex -> Geometry.vertex_count geometry
-      | Group.Primitive -> assert false in
+      | Group.Primitive -> assert false
+    in
     let ranks count source =
       let output = Array.make count max_int and rank = ref 0 in
-      Option.iter (fun source -> Group.iter_ordered (fun element ->
-        output.(element) <- !rank; incr rank) source) source;
-      output in
+      Option.iter
+        (fun source ->
+          Group.iter_ordered
+            (fun element ->
+              output.(element) <- !rank;
+              incr rank)
+            source)
+        source;
+      output
+    in
     let left_geometry = Boolean_extract.View.left_geometry ancestry
     and right_geometry = Boolean_extract.View.right_geometry ancestry in
     let left_ranks = ranks (source_count left_geometry) pair.left_group
@@ -480,31 +561,44 @@ let copy_group ?cancel ~grain ancestry view topology point_count representatives
       let corner = representative element in
       let primitive = corner / 3 and local = dominant_corner view corner in
       let source = group_source_index view pair.source_group_owner primitive local in
-      if Bytes.unsafe_get view.Boolean_extract.View.primitive_sides primitive = '\000'
-      then 0, left_ranks.(source), element
-      else 1, right_ranks.(source), element in
-    Group.iter (fun element ->
-      keyed.(!next) <- key element; incr next) group;
+      if Bytes.unsafe_get view.Boolean_extract.View.primitive_sides primitive = '\000' then
+        (0, left_ranks.(source), element)
+      else (1, right_ranks.(source), element)
+    in
+    Group.iter
+      (fun element ->
+        keyed.(!next) <- key element;
+        incr next)
+      group;
     Array.sort Stdlib.compare keyed;
-    Group.View.with_owned_order
-      (Array.map (fun (_, _, element) -> element) keyed) group
+    Group.View.with_owned_order (Array.map (fun (_, _, element) -> element) keyed) group
   end
 
-let assert_no_promotion_collisions point_conflict point_attributes vertex_attributes
-    point_groups vertex_groups =
+let assert_no_promotion_collisions point_conflict point_attributes vertex_attributes point_groups
+    vertex_groups =
   if point_conflict = Promote_to_vertex then begin
     let attribute_names = Hashtbl.create (Array.length vertex_attributes) in
     Array.iter (fun pair -> Hashtbl.replace attribute_names pair.name ()) vertex_attributes;
-    Array.iter (fun pair -> if Hashtbl.mem attribute_names pair.name then
-      (payload_error ("promotion_collision", Printf.sprintf
-        "point attribute %S cannot be promoted because a vertex attribute has the same name"
-        pair.name))) point_attributes;
+    Array.iter
+      (fun pair ->
+        if Hashtbl.mem attribute_names pair.name then
+          payload_error
+            ( "promotion_collision",
+              Printf.sprintf
+                "point attribute %S cannot be promoted because a vertex attribute has the same name"
+                pair.name ))
+      point_attributes;
     let group_names = Hashtbl.create (Array.length vertex_groups) in
     Array.iter (fun pair -> Hashtbl.replace group_names pair.group_name ()) vertex_groups;
-    Array.iter (fun pair -> if Hashtbl.mem group_names pair.group_name then
-      (payload_error ("promotion_collision", Printf.sprintf
-        "point group %S cannot be promoted because a vertex group has the same name"
-        pair.group_name))) point_groups
+    Array.iter
+      (fun pair ->
+        if Hashtbl.mem group_names pair.group_name then
+          payload_error
+            ( "promotion_collision",
+              Printf.sprintf
+                "point group %S cannot be promoted because a vertex group has the same name"
+                pair.group_name ))
+      point_groups
   end
 
 let copy_edge_group ?cancel ~grain view topology index pair =
@@ -513,41 +607,46 @@ let copy_edge_group ?cancel ~grain view topology index pair =
     Cancel.poll cancel edge 4095;
     let first = output_index.edge_offsets.(edge)
     and last = output_index.edge_offsets.(edge + 1)
-    and incident = ref 0 and found = ref false in
+    and incident = ref 0
+    and found = ref false in
     incident := first;
-    while not !found && !incident < last do
+    while (not !found) && !incident < last do
       let corner = output_index.edge_vertices.(!incident) in
       let source = view.Boolean_extract.View.edge_source_offsets.(corner)
       and source_last = view.Boolean_extract.View.edge_source_offsets.(corner + 1)
       and entry = ref 0 in
       entry := source;
-      while not !found && !entry < source_last do
+      while (not !found) && !entry < source_last do
         let group =
-          if Bytes.unsafe_get view.Boolean_extract.View.edge_source_sides
-              !entry = '\000'
-          then pair.left_edge_group else pair.right_edge_group in
+          if Bytes.unsafe_get view.Boolean_extract.View.edge_source_sides !entry = '\000' then
+            pair.left_edge_group
+          else pair.right_edge_group
+        in
         (match group with
-         | Some group when Edge_group.mem
-             view.Boolean_extract.View.edge_source_edges.(!entry) group ->
-             found := true
-         | None | Some _ -> ());
+        | Some group when Edge_group.mem view.Boolean_extract.View.edge_source_edges.(!entry) group
+          ->
+            found := true
+        | None | Some _ -> ());
         incr entry
       done;
       incr incident
     done;
-    !found in
+    !found
+  in
   Edge_group.init ~grain ~topology ~index ~name:pair.edge_group_name member
 
 let copy_points_and_vertices ?cancel ~grain ~point_conflict ~point_tolerance ancestry base =
   try
     if grain <= 0 then error "invalid_parameter" "grain must be positive"
-    else if not (Float.is_finite point_tolerance) || point_tolerance < 0. then
+    else if (not (Float.is_finite point_tolerance)) || point_tolerance < 0. then
       error "invalid_parameter" "point_tolerance must be finite and non-negative"
     else begin
       Cancel.check_opt cancel;
       let ancestry_base = Boolean_extract.geometry ancestry in
-      if Geometry.positions base != Geometry.positions ancestry_base
-          || Geometry.topology base != Geometry.topology ancestry_base then
+      if
+        Geometry.positions base != Geometry.positions ancestry_base
+        || Geometry.topology base != Geometry.topology ancestry_base
+      then
         error "geometry_mismatch"
           "corner payload target does not share the Boolean ancestry topology"
       else begin
@@ -555,9 +654,9 @@ let copy_points_and_vertices ?cancel ~grain ~point_conflict ~point_tolerance anc
         and primitive_count = Geometry.primitive_count base
         and point_count = Geometry.point_count base
         and corner_count = Geometry.vertex_count base in
-        if corner_count <> primitive_count * 3
-            || Array.length topology.vertex_points <> corner_count then
-          invalid_arg "Boolean corner payload requires triangular extraction topology";
+        if
+          corner_count <> primitive_count * 3 || Array.length topology.vertex_points <> corner_count
+        then invalid_arg "Boolean corner payload requires triangular extraction topology";
         let representatives = first_corners topology point_count in
         if Array.exists (fun corner -> corner < 0) representatives then
           invalid_arg "Boolean corner payload found an unreferenced output point";
@@ -572,46 +671,61 @@ let copy_points_and_vertices ?cancel ~grain ~point_conflict ~point_tolerance anc
         assert_no_promotion_collisions point_conflict point_attributes vertex_attributes
           point_groups vertex_groups;
         let copy_attribute pair =
-          let corner_storage = interpolate_csr ?cancel ~grain ancestry view
-              corner_count pair in
-          match pair.source_owner, point_conflict with
+          let corner_storage = interpolate_csr ?cancel ~grain ancestry view corner_count pair in
+          match (pair.source_owner, point_conflict) with
           | Attribute.Point, Reject ->
               create_attribute pair Attribute.Point
-                (consolidate_to_points ~tolerance:point_tolerance pair.name topology
-                   point_count representatives corner_storage)
-          | Attribute.Point, Promote_to_vertex
-          | Attribute.Vertex, _ -> create_attribute pair Attribute.Vertex corner_storage
-          | _ -> assert false in
-        let attributes = Array.append
+                (consolidate_to_points ~tolerance:point_tolerance pair.name topology point_count
+                   representatives corner_storage)
+          | Attribute.Point, Promote_to_vertex | Attribute.Vertex, _ ->
+              create_attribute pair Attribute.Vertex corner_storage
+          | _ -> assert false
+        in
+        let attributes =
+          Array.append
             (Array.map copy_attribute point_attributes)
             (Array.map copy_attribute vertex_attributes)
-        and groups = Array.append
-            (Array.map (copy_group ?cancel ~grain ancestry view topology point_count
-              representatives ~point_conflict) point_groups)
-            (Array.map (copy_group ?cancel ~grain ancestry view topology point_count
-              representatives ~point_conflict) vertex_groups) in
+        and groups =
+          Array.append
+            (Array.map
+               (copy_group ?cancel ~grain ancestry view topology point_count representatives
+                  ~point_conflict)
+               point_groups)
+            (Array.map
+               (copy_group ?cancel ~grain ancestry view topology point_count representatives
+                  ~point_conflict)
+               vertex_groups)
+        in
         let topology_value = Geometry.topology base in
         let topology_index = Topology_index.create ?cancel topology_value in
-        let copied_edge_groups = Array.map
-            (copy_edge_group ?cancel ~grain view topology_value topology_index)
-            edge_groups in
+        let copied_edge_groups =
+          Array.map (copy_edge_group ?cancel ~grain view topology_value topology_index) edge_groups
+        in
         let copied_edge_names = Hashtbl.create (Array.length edge_groups) in
-        Array.iter (fun pair -> Hashtbl.replace copied_edge_names
-          pair.edge_group_name ()) edge_groups;
-        let retained_attributes = List.filter (fun attribute ->
-            match Attribute.owner attribute with
-            | Attribute.Primitive | Attribute.Detail -> true
-            | Attribute.Point | Attribute.Vertex -> false) (Geometry.attributes base)
-        and retained_groups = List.filter (fun group ->
-            Group.owner group = Group.Primitive) (Geometry.groups base)
-        and retained_edge_groups = List.filter (fun group ->
-            not (Hashtbl.mem copied_edge_names (Edge_group.name group)))
-            (Geometry.edge_groups base) in
-        match Geometry.create ~positions:(Geometry.positions base)
-            ~topology:(Geometry.topology base)
+        Array.iter
+          (fun pair -> Hashtbl.replace copied_edge_names pair.edge_group_name ())
+          edge_groups;
+        let retained_attributes =
+          List.filter
+            (fun attribute ->
+              match Attribute.owner attribute with
+              | Attribute.Primitive | Attribute.Detail -> true
+              | Attribute.Point | Attribute.Vertex -> false)
+            (Geometry.attributes base)
+        and retained_groups =
+          List.filter (fun group -> Group.owner group = Group.Primitive) (Geometry.groups base)
+        and retained_edge_groups =
+          List.filter
+            (fun group -> not (Hashtbl.mem copied_edge_names (Edge_group.name group)))
+            (Geometry.edge_groups base)
+        in
+        match
+          Geometry.create ~positions:(Geometry.positions base) ~topology:(Geometry.topology base)
             ~attributes:(retained_attributes @ Array.to_list attributes)
             ~groups:(retained_groups @ Array.to_list groups)
-            ~edge_groups:(retained_edge_groups @ Array.to_list copied_edge_groups) () with
+            ~edge_groups:(retained_edge_groups @ Array.to_list copied_edge_groups)
+            ()
+        with
         | Ok geometry -> Ok geometry
         | Error message -> error "invalid_output" message
       end
@@ -623,8 +737,8 @@ let copy_points_and_vertices ?cancel ~grain ~point_conflict ~point_tolerance anc
 
 let selected_primitive ancestry left right primitive =
   match Boolean_extract.primitive_side ancestry primitive with
-  | Boolean_constraints.Left -> left, Boolean_extract.primitive_face ancestry primitive
-  | Boolean_constraints.Right -> right, Boolean_extract.primitive_face ancestry primitive
+  | Boolean_constraints.Left -> (left, Boolean_extract.primitive_face ancestry primitive)
+  | Boolean_constraints.Right -> (right, Boolean_extract.primitive_face ancestry primitive)
 
 let make_attribute pair storage =
   match Attribute.create_owned ~name:pair.name ~owner:Attribute.Primitive storage with
@@ -633,46 +747,54 @@ let make_attribute pair storage =
 
 let copy_attribute ?cancel ~grain ancestry primitive_count pair =
   let left, right = source_storage pair in
-  match left, right with
+  match (left, right) with
   | _ when pair.kind = 0 || (pair.kind >= 4 && pair.kind <= 6) ->
       let like = Option.get (if left <> None then left else right) in
       let planes = Option.map (fun s -> Option.get (Attribute.float_planes s)) in
       let left = planes left and right = planes right in
-      let output = Array.map (fun _ -> Array.make primitive_count 0.)
-          (Option.get (Attribute.float_planes like)) in
+      let output =
+        Array.map
+          (fun _ -> Array.make primitive_count 0.)
+          (Option.get (Attribute.float_planes like))
+      in
       Support.parallel_for ?cancel ~grain primitive_count (fun primitive ->
-        let source, index = selected_primitive ancestry left right primitive in
-        match source with None -> () | Some values ->
-          Array.iteri (fun p plane -> plane.(primitive) <- values.(p).(index)) output);
+          let source, index = selected_primitive ancestry left right primitive in
+          match source with
+          | None -> ()
+          | Some values ->
+              Array.iteri (fun p plane -> plane.(primitive) <- values.(p).(index)) output);
       make_attribute pair (Attribute.of_float_planes ~like output)
-  | (Some (Attribute.Int _) | None), (Some (Attribute.Int _) | None)
-      when pair.kind = 1 ->
+  | (Some (Attribute.Int _) | None), (Some (Attribute.Int _) | None) when pair.kind = 1 ->
       let left = Option.map (function Attribute.Int value -> value | _ -> assert false) left
       and right = Option.map (function Attribute.Int value -> value | _ -> assert false) right
       and output = Array.make primitive_count 0 in
       Support.parallel_for ?cancel ~grain primitive_count (fun primitive ->
-        let source, index = selected_primitive ancestry left right primitive in
-        match source with None -> () | Some values -> output.(primitive) <- values.(index));
+          let source, index = selected_primitive ancestry left right primitive in
+          match source with None -> () | Some values -> output.(primitive) <- values.(index));
       make_attribute pair (Attribute.Int output)
-  | (Some (Attribute.Text _) | None), (Some (Attribute.Text _) | None)
-      when pair.kind = 7 ->
+  | (Some (Attribute.Text _) | None), (Some (Attribute.Text _) | None) when pair.kind = 7 ->
       let left = Option.map (function Attribute.Text value -> value | _ -> assert false) left
       and right = Option.map (function Attribute.Text value -> value | _ -> assert false) right
       and output = Array.make primitive_count "" in
       Support.parallel_for ?cancel ~grain primitive_count (fun primitive ->
-        let source, index = selected_primitive ancestry left right primitive in
-        match source with None -> () | Some values -> output.(primitive) <- values.(index));
+          let source, index = selected_primitive ancestry left right primitive in
+          match source with None -> () | Some values -> output.(primitive) <- values.(index));
       make_attribute pair (Attribute.Text output)
-  | (Some (Attribute.Int_array _) | None), (Some (Attribute.Int_array _) | None)
-      when pair.kind = 2 ->
-      let view = function Attribute.Int_array value -> Packed.Int_array.View.view value
-        | _ -> assert false in
-      let left = Option.map view left and right = Option.map view right
+  | (Some (Attribute.Int_array _) | None), (Some (Attribute.Int_array _) | None) when pair.kind = 2
+    ->
+      let view = function
+        | Attribute.Int_array value -> Packed.Int_array.View.view value
+        | _ -> assert false
+      in
+      let left = Option.map view left
+      and right = Option.map view right
       and lengths = Array.make primitive_count 0 in
       Support.parallel_for ?cancel ~grain primitive_count (fun primitive ->
-        let source, index = selected_primitive ancestry left right primitive in
-        match source with None -> () | Some values ->
-          lengths.(primitive) <- values.offsets.(index + 1) - values.offsets.(index));
+          let source, index = selected_primitive ancestry left right primitive in
+          match source with
+          | None -> ()
+          | Some values ->
+              lengths.(primitive) <- values.offsets.(index + 1) - values.offsets.(index));
       let offsets = Array.make (primitive_count + 1) 0 in
       for primitive = 0 to primitive_count - 1 do
         if offsets.(primitive) > Sys.max_array_length - lengths.(primitive) then
@@ -681,22 +803,29 @@ let copy_attribute ?cancel ~grain ancestry primitive_count pair =
       done;
       let values = Array.make offsets.(primitive_count) 0 in
       Support.parallel_for ?cancel ~grain primitive_count (fun primitive ->
-        let source, index = selected_primitive ancestry left right primitive in
-        match source with None -> () | Some source ->
-          Array.blit source.values source.offsets.(index) values offsets.(primitive)
-            lengths.(primitive));
-      make_attribute pair (Attribute.Int_array
-        (Packed.Int_array.View.create_validated_owned ~offsets ~values))
+          let source, index = selected_primitive ancestry left right primitive in
+          match source with
+          | None -> ()
+          | Some source ->
+              Array.blit source.values source.offsets.(index) values offsets.(primitive)
+                lengths.(primitive));
+      make_attribute pair
+        (Attribute.Int_array (Packed.Int_array.View.create_validated_owned ~offsets ~values))
   | (Some (Attribute.Float_array _) | None), (Some (Attribute.Float_array _) | None)
-      when pair.kind = 3 ->
-      let view = function Attribute.Float_array value -> Packed.Float_array.View.view value
-        | _ -> assert false in
-      let left = Option.map view left and right = Option.map view right
+    when pair.kind = 3 ->
+      let view = function
+        | Attribute.Float_array value -> Packed.Float_array.View.view value
+        | _ -> assert false
+      in
+      let left = Option.map view left
+      and right = Option.map view right
       and lengths = Array.make primitive_count 0 in
       Support.parallel_for ?cancel ~grain primitive_count (fun primitive ->
-        let source, index = selected_primitive ancestry left right primitive in
-        match source with None -> () | Some values ->
-          lengths.(primitive) <- values.offsets.(index + 1) - values.offsets.(index));
+          let source, index = selected_primitive ancestry left right primitive in
+          match source with
+          | None -> ()
+          | Some values ->
+              lengths.(primitive) <- values.offsets.(index + 1) - values.offsets.(index));
       let offsets = Array.make (primitive_count + 1) 0 in
       for primitive = 0 to primitive_count - 1 do
         if offsets.(primitive) > Sys.max_array_length - lengths.(primitive) then
@@ -705,14 +834,18 @@ let copy_attribute ?cancel ~grain ancestry primitive_count pair =
       done;
       let values = Array.make offsets.(primitive_count) 0. in
       Support.parallel_for ?cancel ~grain primitive_count (fun primitive ->
-        let source, index = selected_primitive ancestry left right primitive in
-        match source with None -> () | Some source ->
-          Array.blit source.values source.offsets.(index) values offsets.(primitive)
-            lengths.(primitive));
-      make_attribute pair (Attribute.Float_array
-        (Packed.Float_array.View.create_validated_owned ~offsets ~values))
-  | _ -> invalid_arg (Printf.sprintf
-      "primitive attribute %S has an inconsistent Boolean payload schema" pair.name)
+          let source, index = selected_primitive ancestry left right primitive in
+          match source with
+          | None -> ()
+          | Some source ->
+              Array.blit source.values source.offsets.(index) values offsets.(primitive)
+                lengths.(primitive));
+      make_attribute pair
+        (Attribute.Float_array (Packed.Float_array.View.create_validated_owned ~offsets ~values))
+  | _ ->
+      invalid_arg
+        (Printf.sprintf "primitive attribute %S has an inconsistent Boolean payload schema"
+           pair.name)
 
 let copy_primitives ?cancel ~grain ancestry =
   try
@@ -725,51 +858,74 @@ let copy_primitives ?cancel ~grain ancestry =
       let attribute_pairs = collect_attributes Attribute.Primitive left right
       and group_pairs = collect_groups Group.Primitive left right
       and primitive_count = Geometry.primitive_count base in
-      let attributes = Array.map
-          (copy_attribute ?cancel ~grain ancestry primitive_count) attribute_pairs in
-      let groups = Array.map (fun pair ->
-        let group = Group.init ~grain ~owner:Group.Primitive ~name:pair.group_name primitive_count
-          (fun primitive ->
-            Cancel.poll cancel primitive 4095;
-            let source, index = selected_primitive ancestry pair.left_group pair.right_group primitive in
-            match source with None -> false | Some group -> Group.mem index group) in
-        let ordered =
-          Option.fold ~none:false ~some:Group.is_ordered pair.left_group
-          || Option.fold ~none:false ~some:Group.is_ordered pair.right_group in
-        if not ordered then group
-        else begin
-          let ranks count source =
-            let output = Array.make count max_int and rank = ref 0 in
-            Option.iter (fun source -> Group.iter_ordered (fun element ->
-              output.(element) <- !rank; incr rank) source) source;
-            output in
-          let left_ranks = ranks (Geometry.primitive_count left) pair.left_group
-          and right_ranks = ranks (Geometry.primitive_count right) pair.right_group
-          and keyed = Array.make (Group.cardinality group) (0, 0, 0)
-          and next = ref 0 in
-          let key primitive =
-            let face = Boolean_extract.primitive_face ancestry primitive in
-            match Boolean_extract.primitive_side ancestry primitive with
-            | Boolean_constraints.Left -> 0, left_ranks.(face), primitive
-            | Boolean_constraints.Right -> 1, right_ranks.(face), primitive in
-          Group.iter (fun primitive ->
-            keyed.(!next) <- key primitive; incr next) group;
-          Array.sort Stdlib.compare keyed;
-          Group.View.with_owned_order
-            (Array.map (fun (_, _, primitive) -> primitive) keyed) group
-        end)
-          group_pairs in
-      let retained_attributes = List.filter
+      let attributes =
+        Array.map (copy_attribute ?cancel ~grain ancestry primitive_count) attribute_pairs
+      in
+      let groups =
+        Array.map
+          (fun pair ->
+            let group =
+              Group.init ~grain ~owner:Group.Primitive ~name:pair.group_name primitive_count
+                (fun primitive ->
+                  Cancel.poll cancel primitive 4095;
+                  let source, index =
+                    selected_primitive ancestry pair.left_group pair.right_group primitive
+                  in
+                  match source with None -> false | Some group -> Group.mem index group)
+            in
+            let ordered =
+              Option.fold ~none:false ~some:Group.is_ordered pair.left_group
+              || Option.fold ~none:false ~some:Group.is_ordered pair.right_group
+            in
+            if not ordered then group
+            else begin
+              let ranks count source =
+                let output = Array.make count max_int and rank = ref 0 in
+                Option.iter
+                  (fun source ->
+                    Group.iter_ordered
+                      (fun element ->
+                        output.(element) <- !rank;
+                        incr rank)
+                      source)
+                  source;
+                output
+              in
+              let left_ranks = ranks (Geometry.primitive_count left) pair.left_group
+              and right_ranks = ranks (Geometry.primitive_count right) pair.right_group
+              and keyed = Array.make (Group.cardinality group) (0, 0, 0)
+              and next = ref 0 in
+              let key primitive =
+                let face = Boolean_extract.primitive_face ancestry primitive in
+                match Boolean_extract.primitive_side ancestry primitive with
+                | Boolean_constraints.Left -> (0, left_ranks.(face), primitive)
+                | Boolean_constraints.Right -> (1, right_ranks.(face), primitive)
+              in
+              Group.iter
+                (fun primitive ->
+                  keyed.(!next) <- key primitive;
+                  incr next)
+                group;
+              Array.sort Stdlib.compare keyed;
+              Group.View.with_owned_order
+                (Array.map (fun (_, _, primitive) -> primitive) keyed)
+                group
+            end)
+          group_pairs
+      in
+      let retained_attributes =
+        List.filter
           (fun attribute -> Attribute.owner attribute <> Attribute.Primitive)
           (Geometry.attributes base)
-      and retained_groups = List.filter
-          (fun group -> Group.owner group <> Group.Primitive)
-          (Geometry.groups base) in
-      match Geometry.create ~positions:(Geometry.positions base)
-          ~topology:(Geometry.topology base)
+      and retained_groups =
+        List.filter (fun group -> Group.owner group <> Group.Primitive) (Geometry.groups base)
+      in
+      match
+        Geometry.create ~positions:(Geometry.positions base) ~topology:(Geometry.topology base)
           ~attributes:(retained_attributes @ Array.to_list attributes)
           ~groups:(retained_groups @ Array.to_list groups)
-          ~edge_groups:(Geometry.edge_groups base) () with
+          ~edge_groups:(Geometry.edge_groups base) ()
+      with
       | Ok geometry -> Ok geometry
       | Error message -> error "invalid_output" message
     end

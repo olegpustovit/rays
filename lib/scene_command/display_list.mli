@@ -7,15 +7,14 @@ val fresh_id : unit -> int64
 
 module Builder : sig
   type t
+
   val create : unit -> t
   val reset : t -> unit
   val push_clip : t -> x:float -> y:float -> width:float -> height:float -> unit
   val pop_clip : t -> unit
   val geometry : t -> Render_ir.geometry -> unit
-  val image : t -> resource_id:int -> source:Render_ir.rect ->
-    destination:Render_ir.rect -> unit
-  val publish : t -> id:int64 -> version:int64 ->
-    (segment, Render_ir.error) result
+  val image : t -> resource_id:int -> source:Render_ir.rect -> destination:Render_ir.rect -> unit
+  val publish : t -> id:int64 -> version:int64 -> (segment, Render_ir.error) result
 end
 
 val id : t -> int64

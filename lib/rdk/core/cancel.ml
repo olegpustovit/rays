@@ -1,4 +1,5 @@
 type t = bool Atomic.t
+
 exception Cancelled
 
 let create () = Atomic.make false

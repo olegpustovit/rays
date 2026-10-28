@@ -1,4 +1,4 @@
-(** Which parameter rows a card shows (flow.md section 5.1).  The one place the rule lives: the
+(** Which parameter rows a card shows (flow.md section 5.1). The one place the rule lives: the
     canvas, the list badges and the inspector's toggle all ask it. *)
 
 type facts = {
@@ -11,5 +11,5 @@ type facts = {
 
 val shown : facts -> bool
 (** Evaluated in order: a geometry slot shows; a driven row shows and no pin can hide it; a pin
-    decides; a written row shows; a primary row shows; the rest is hidden (the card
-    ends with a [+ N more] row). *)
+    decides; a written row shows; a primary row shows; the rest is hidden (the card ends with a
+    [+ N more] row). *)

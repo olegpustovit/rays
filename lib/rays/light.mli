@@ -1,9 +1,6 @@
 (** Immutable light sources for [Scene3]. *)
 
-type attenuation = {
-  constant : float;
-  quadratic : float;
-}
+type attenuation = { constant : float; quadratic : float }
 
 type kind =
   | Directional of { direction : Rays_math.Vec3.t }
@@ -24,24 +21,16 @@ type kind =
       attenuation : attenuation;
     }
 
-type t = {
-  kind : kind;
-  diffuse : Rays_math.Color.t;
-  intensity : float;
-}
+type t = { kind : kind; diffuse : Rays_math.Color.t; intensity : float }
 (** [diffuse] tints both the diffuse and the specular response. *)
 
-val attenuation :
-  ?constant:float -> ?quadratic:float -> unit -> attenuation
-(** Falloff divisor [constant + quadratic * distance²]. Both coefficients
-    must be finite and non-negative, with at least one non-zero. *)
+val attenuation : ?constant:float -> ?quadratic:float -> unit -> attenuation
+(** Falloff divisor [constant + quadratic * distance²]. Both coefficients must be finite and
+    non-negative, with at least one non-zero. *)
 
 val directional :
-  ?diffuse:Rays_math.Color.t ->
-  ?intensity:float ->
-  direction:Rays_math.Vec3.t ->
-  unit ->
-  t
+  ?diffuse:Rays_math.Color.t -> ?intensity:float -> direction:Rays_math.Vec3.t -> unit -> t
+
 val point :
   ?diffuse:Rays_math.Color.t ->
   ?intensity:float ->

@@ -6,7 +6,8 @@
 (rule
  (targets c_flags.sexp c_library_flags.sexp sdl3_probed.h)
  (deps (universe))
- (action (run ./discover.exe)))
+ (action
+  (run ./discover.exe)))
 
 (rule
  (targets generated_abi.h)
@@ -19,9 +20,19 @@
   ../sdl3_ttf/sdl3_ttf_stubs.c
   ../sdl3_mixer/sdl3_mixer_stubs.c)
  (action
-  (run %{exe:../sdl3/generate.exe} emit --root ../..
-   --component sdl3_image --lock ../../packaging/sdl3.lock
-   --abi ../sdl3/abi.sexp --output generated_abi.h)))
+  (run
+   %{exe:../sdl3/generate.exe}
+   emit
+   --root
+   ../..
+   --component
+   sdl3_image
+   --lock
+   ../../packaging/sdl3.lock
+   --abi
+   ../sdl3/abi.sexp
+   --output
+   generated_abi.h)))
 
 (library
  (name sdl3_image)
@@ -30,23 +41,36 @@
  (foreign_stubs
   (language c)
   (names sdl3_image_stubs)
-  (flags (:include c_flags.sexp) -Wall -Wextra -Werror)
+  (flags
+   (:include c_flags.sexp)
+   -Wall
+   -Wextra
+   -Werror)
   (extra_deps generated_abi.h sdl3_probed.h))
- (c_library_flags (:include c_library_flags.sexp))
+ (c_library_flags
+  (:include c_library_flags.sexp))
  (libraries sdl3))
 
 (test
  (name test_sdl3_image)
  (modules test_sdl3_image)
  (libraries sdl3 sdl3_image sdl3_lock)
- (deps (source_tree fixtures) ../../packaging/sdl3.lock)
+ (deps
+  (source_tree fixtures)
+  ../../packaging/sdl3.lock)
  (action
-  (setenv SDL_VIDEODRIVER dummy
+  (setenv
+   SDL_VIDEODRIVER
+   dummy
    (run %{test} %{workspace_root}/lib/sdl3_image/fixtures))))
 
 (rule
  (alias qualification)
- (deps (source_tree fixtures) ../../packaging/sdl3.lock)
+ (deps
+  (source_tree fixtures)
+  ../../packaging/sdl3.lock)
  (action
-  (setenv SDL_VIDEODRIVER dummy
+  (setenv
+   SDL_VIDEODRIVER
+   dummy
    (run %{exe:test_sdl3_image.exe} %{workspace_root}/lib/sdl3_image/fixtures))))

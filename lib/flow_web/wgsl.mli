@@ -1,48 +1,44 @@
-(** WGSL compute kernels for packed regions: the web counterpart of
-    [Flow_gpu.Emit], with the same refusals ([Packed.gpu_refusals]), binding
-    numbering and uniform layout. Nothing here is compiled by a WebGPU
-    implementation in the test suite; the first real compile is the browser
-    run. *)
+(** WGSL compute kernels for packed regions: the web counterpart of [Flow_gpu.Emit], with the same
+    refusals ([Packed.gpu_refusals]), binding numbering and uniform layout. Nothing here is compiled
+    by a WebGPU implementation in the test suite; the first real compile is the browser run. *)
 
 type kind = Uniform_buffer | Storage_read | Storage_read_write
-type binding = {group : int; binding : int; kind : kind}
+type binding = { group : int; binding : int; kind : kind }
 
 type wgsl = private {
   source : string;
   entry : string;  (** Compute entry point, [kernel_<digest>], workgroup size 64. *)
   interface : binding list;
-  (** Bindings in group 0, ascending. Input [i] is binding [i] (an input no
-      reachable instruction reads has no binding), output [k] is binding
-      [inputs + k], then the uniform block, the status word and, when the
-      kernel uses noise, the permutation table. Inputs and the table are
-      [Storage_read], outputs and the status word [Storage_read_write]. *)
+      (** Bindings in group 0, ascending. Input [i] is binding [i] (an input no reachable
+          instruction reads has no binding), output [k] is binding [inputs + k], then the uniform
+          block, the status word and, when the kernel uses noise, the permutation table. Inputs and
+          the table are [Storage_read], outputs and the status word [Storage_read_write]. *)
   uniform_layout : (string * int * int) list;
-  (** [(name, byte offset, width)] exactly as the Metal emitter lays them out:
-      word 0 is the element count (u32), then [uniform:n] and [frame:slot:name]
-      words hold f32 bit patterns. *)
+      (** [(name, byte offset, width)] exactly as the Metal emitter lays them out: word 0 is the
+          element count (u32), then [uniform:n] and [frame:slot:name] words hold f32 bit patterns.
+      *)
   uniform_bytes : int;
-  (** Metal's size rounded up to a multiple of 16: the block is an
-      [array<vec4<u32>, n>] uniform buffer. *)
+      (** Metal's size rounded up to a multiple of 16: the block is an [array<vec4<u32>, n>] uniform
+          buffer. *)
   table_seeds : int array;
-  (** Noise seeds, ascending; seed [k]'s 512-entry [i32] permutation starts at
-      table element [512*k]. *)
+      (** Noise seeds, ascending; seed [k]'s 512-entry [i32] permutation starts at table element
+          [512*k]. *)
   output_widths : int array;
   input_widths : int array;
   gathers : (int * int) array;
-  (** {!kernel_fast}: the uniform whose array gather table [k] holds, and its element width. *)
+      (** {!kernel_fast}: the uniform whose array gather table [k] holds, and its element width. *)
   counts : int option;
-  (** {!kernel_fast}: the byte offset of the three count words (mul, div, use) in the uniform block. *)
+      (** {!kernel_fast}: the byte offset of the three count words (mul, div, use) in the uniform
+          block. *)
 }
 
 val kernel : ?image:bool -> Flow_ir.Packed.t -> (wgsl, Diagnostic.t) result
-(** Elements are f32; dispatch [ceil(count/64)] workgroups in x. The status
-    word uses bit 1 for nonfinite values, bit 2 for integer division by zero,
-    and bit 4 for an invalid integer shift; the host zeroes it before dispatch
-    and maps these to [E_KERNEL] or [E_RANGE]. Dispatch is
-    one-dimensional, so [count <= 64 * maxComputeWorkgroupsPerDimension].
-    [image] replaces the sole vec2 source with pixel-center UV coordinates,
-    using the [image:width] and [image:height] uniforms; output must be vec4.
-    No UV storage buffer is allocated or uploaded. *)
+(** Elements are f32; dispatch [ceil(count/64)] workgroups in x. The status word uses bit 1 for
+    nonfinite values, bit 2 for integer division by zero, and bit 4 for an invalid integer shift;
+    the host zeroes it before dispatch and maps these to [E_KERNEL] or [E_RANGE]. Dispatch is
+    one-dimensional, so [count <= 64 * maxComputeWorkgroupsPerDimension]. [image] replaces the sole
+    vec2 source with pixel-center UV coordinates, using the [image:width] and [image:height]
+    uniforms; output must be vec4. No UV storage buffer is allocated or uploaded. *)
 
 val kernel_fast : Flow_ir.Packed.t -> (wgsl, Diagnostic.t) result
 (** The web counterpart of [Flow_gpu.Emit.kernel ~fast] (a workspace's fast precision): the same
@@ -56,7 +52,11 @@ val kernel_fast : Flow_ir.Packed.t -> (wgsl, Diagnostic.t) result
     words, then from byte 24 the arguments of WebGPU's [drawIndirect] of n six-vertex instances (the
     presenter draws a mark set from them); both follow the gathers. *)
 
-val compute : size:int -> name:string -> buffers:(int * int * bool * bool) list -> Flow_ir.Packed.t ->
+val compute :
+  size:int ->
+  name:string ->
+  buffers:(int * int * bool * bool) list ->
+  Flow_ir.Packed.t ->
   (string, Diagnostic.t) result
 (** A compute stage (Flow_gpu.Raster's) as the module of entry [name], one workgroup of [size]
     ([@builtin(local_invocation_index)] is its element): [buffers] are (array uniform, binding, u32
@@ -64,6 +64,6 @@ val compute : size:int -> name:string -> buffers:(int * int * bool * bool) list 
     [workgroupBarrier]s and [gpu/store] a statement. Its result is discarded. *)
 
 val compaction : string
-(** The WGSL of a resident fold's [array/compact] (entry [compact_mask], one workgroup of 256), generated
-    from Flow_gpu's shaders/compact.rays: bindings mask (f32), kept (f32 indices), total (the count
-    cell), bound (u32 count, use) and count_in. *)
+(** The WGSL of a resident fold's [array/compact] (entry [compact_mask], one workgroup of 256),
+    generated from Flow_gpu's shaders/compact.rays: bindings mask (f32), kept (f32 indices), total
+    (the count cell), bound (u32 count, use) and count_in. *)

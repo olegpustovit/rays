@@ -8,6 +8,8 @@ type lowered = private {
 }
 
 val lower : Editor_document.Workspace_doc.t -> (lowered, Diagnostic.t) result
-val files : Editor_document.Workspace_doc.t -> lowered ->
-  ((string * string) list, Diagnostic.t) result
+
+val files :
+  Editor_document.Workspace_doc.t -> lowered -> ((string * string) list, Diagnostic.t) result
+
 val load : string -> string * (Editor_document.Workspace_doc.t, Diagnostic.t list) result

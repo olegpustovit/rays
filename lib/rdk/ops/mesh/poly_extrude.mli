@@ -1,19 +1,22 @@
 type divide = Extrude_individual | Extrude_connected_components
-module Int_builder :
-  sig
-    type t = { mutable values : int array; mutable length : int; }
-    val add : t -> int -> int
-  end
-module Pair_table :
-  sig
-    type t = {
-      mutable components : int array;
-      mutable points : int array;
-      mutable values : int array;
-      mutable size : int;
-    }
-  end
+
+module Int_builder : sig
+  type t = { mutable values : int array; mutable length : int }
+
+  val add : t -> int -> int
+end
+
+module Pair_table : sig
+  type t = {
+    mutable components : int array;
+    mutable points : int array;
+    mutable values : int array;
+    mutable size : int;
+  }
+end
+
 module Edge_lookup = Rdk_core.Topology_edge_lookup
+
 type params = {
   cancel : Rdk_core.Cancel.t option;
   grain : int option;

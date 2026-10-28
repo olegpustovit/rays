@@ -1,8 +1,5 @@
 type version = int * int * int
-
-type sexp =
-  | Atom of string
-  | List of sexp list
+type sexp = Atom of string | List of sexp list
 
 let fail format = Printf.ksprintf failwith format
 
@@ -14,9 +11,7 @@ let read_file path =
 
 let write_file path contents =
   let output = open_out_bin path in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr output)
-    (fun () -> output_string output contents)
+  Fun.protect ~finally:(fun () -> close_out_noerr output) (fun () -> output_string output contents)
 
 let parse_sexps text =
   let length = String.length text in
@@ -27,8 +22,7 @@ let parse_sexps text =
       | ' ' | '\t' | '\n' | '\r' -> skip (index + 1)
       | ';' ->
           let rec line index =
-            if index >= length || text.[index] = '\n' then index
-            else line (index + 1)
+            if index >= length || text.[index] = '\n' then index else line (index + 1)
           in
           skip (line index)
       | _ -> index
@@ -50,11 +44,11 @@ let parse_sexps text =
     else if text.[index] = ')' then fail "unbalanced ) at offset %d" index
     else
       let stop = atom_end index in
-      Atom (String.sub text index (stop - index)), stop
+      (Atom (String.sub text index (stop - index)), stop)
   and items index acc =
     let index = skip index in
     if index >= length then fail "missing ) at end of file"
-    else if text.[index] = ')' then List (List.rev acc), index + 1
+    else if text.[index] = ')' then (List (List.rev acc), index + 1)
     else
       let value, index = expression index in
       items index (value :: acc)
@@ -70,30 +64,21 @@ let parse_sexps text =
 
 let parse_version value : version =
   match String.split_on_char '.' (String.trim value) with
-  | major :: minor :: patch :: _ ->
-      (try int_of_string major, int_of_string minor, int_of_string patch with
-       | Failure _ -> fail "non-numeric version %S" value)
+  | major :: minor :: patch :: _ -> (
+      try (int_of_string major, int_of_string minor, int_of_string patch)
+      with Failure _ -> fail "non-numeric version %S" value)
   | _ -> fail "expected a major.minor.patch version, got %S" value
 
-let version_string (major, minor, patch) =
-  Printf.sprintf "%d.%d.%d" major minor patch
-
-let version_number (major, minor, patch) =
-  (major * 1_000_000) + (minor * 1_000) + patch
-
+let version_string (major, minor, patch) = Printf.sprintf "%d.%d.%d" major minor patch
+let version_number (major, minor, patch) = (major * 1_000_000) + (minor * 1_000) + patch
 let stable (_, minor, patch) = minor mod 2 = 0 && patch mod 2 = 0
 
-type entry =
-  { floor : version
-  ; tested : version
-  }
+type entry = { floor : version; tested : version }
 
 let field name fields =
   match
     List.find_map
-      (function
-        | List [ Atom key; Atom value ] when key = name -> Some value
-        | _ -> None)
+      (function List [ Atom key; Atom value ] when key = name -> Some value | _ -> None)
       fields
   with
   | Some value -> parse_version value
@@ -105,7 +90,7 @@ let read path =
       List.map
         (function
           | List (Atom key :: fields) ->
-              key, { floor = field "floor" fields; tested = field "tested" fields }
+              (key, { floor = field "floor" fields; tested = field "tested" fields })
           | _ -> fail "%s: malformed lock entry" path)
         entries
   | _ -> fail "%s: expected one list of component entries" path
@@ -127,20 +112,16 @@ let set_tested text ~key version =
   in
   let replaced = ref false in
   let rewrite line =
-    if !replaced || not (contains line marker) || not (contains line "(tested ")
-    then line
+    if !replaced || (not (contains line marker)) || not (contains line "(tested ") then line
     else begin
       replaced := true;
       let start =
         let n = String.length "(tested " in
-        let rec go i =
-          if String.sub line i n = "(tested " then i else go (i + 1)
-        in
+        let rec go i = if String.sub line i n = "(tested " then i else go (i + 1) in
         go 0
       in
       let stop = String.index_from line start ')' in
-      String.sub line 0 start
-      ^ "(tested " ^ version_string version
+      String.sub line 0 start ^ "(tested " ^ version_string version
       ^ String.sub line stop (String.length line - stop)
     end
   in
@@ -150,21 +131,21 @@ let set_tested text ~key version =
 
 let check_installed ~lock ~key ~compiled ~linked =
   let { floor; _ } = find lock key in
-  let series (major, minor, _) = major, minor in
+  let series (major, minor, _) = (major, minor) in
   if compare compiled floor < 0 then
     Error
-      (Printf.sprintf "%s headers %s are older than the floor %s" key
-         (version_string compiled) (version_string floor))
+      (Printf.sprintf "%s headers %s are older than the floor %s" key (version_string compiled)
+         (version_string floor))
   else if compare linked floor < 0 then
     Error
-      (Printf.sprintf "linked %s %s is older than the floor %s" key
-         (version_string linked) (version_string floor))
+      (Printf.sprintf "linked %s %s is older than the floor %s" key (version_string linked)
+         (version_string floor))
   else if compare linked compiled < 0 then
     Error
-      (Printf.sprintf "linked %s %s is older than its headers %s" key
-         (version_string linked) (version_string compiled))
+      (Printf.sprintf "linked %s %s is older than its headers %s" key (version_string linked)
+         (version_string compiled))
   else if series linked <> series compiled then
     Error
-      (Printf.sprintf "linked %s %s and headers %s are different series" key
-         (version_string linked) (version_string compiled))
+      (Printf.sprintf "linked %s %s and headers %s are different series" key (version_string linked)
+         (version_string compiled))
   else Ok ()

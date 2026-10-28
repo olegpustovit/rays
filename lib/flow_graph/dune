@@ -1,7 +1,15 @@
 (library
  (name flow_graph)
  (public_name rays.flow_graph)
- (modules exposure flow_edit edit_tree edit_base edit_unfold edit_ops projection probe)
+ (modules
+  exposure
+  flow_edit
+  edit_tree
+  edit_base
+  edit_unfold
+  edit_ops
+  projection
+  probe)
  (private_modules edit_base edit_unfold edit_ops)
  (libraries flow param))
 

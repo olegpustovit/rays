@@ -1,8 +1,4 @@
-type t = {
-  primitive_of_vertex : int array;
-  point_offsets : int array;
-  point_vertices : int array;
-}
+type t = { primitive_of_vertex : int array; point_offsets : int array; point_vertices : int array }
 
 let create_uncached ?cancel topology =
   let source = Topology.View.view topology in
@@ -13,8 +9,9 @@ let create_uncached ?cancel topology =
   and point_offsets = Array.make (point_count + 1) 0 in
   for primitive = 0 to primitive_count - 1 do
     Cancel.poll cancel primitive 4095;
-    for vertex = source.primitive_offsets.(primitive)
-        to source.primitive_offsets.(primitive + 1) - 1 do
+    for
+      vertex = source.primitive_offsets.(primitive) to source.primitive_offsets.(primitive + 1) - 1
+    do
       Cancel.poll cancel vertex 16_383;
       primitive_of_vertex.(vertex) <- primitive;
       let point = source.vertex_points.(vertex) in
@@ -24,8 +21,7 @@ let create_uncached ?cancel topology =
   for point = 0 to point_count - 1 do
     point_offsets.(point + 1) <- point_offsets.(point + 1) + point_offsets.(point)
   done;
-  let point_vertices = Array.make vertex_count 0
-  and point_cursor = Array.copy point_offsets in
+  let point_vertices = Array.make vertex_count 0 and point_cursor = Array.copy point_offsets in
   for vertex = 0 to vertex_count - 1 do
     Cancel.poll cancel vertex 16_383;
     let point = source.vertex_points.(vertex) in
@@ -41,8 +37,7 @@ let cache = Support.Identity_cache.create ~id:Topology.data_id cache_capacity
 
 let create ?cancel topology =
   Cancel.check_opt cancel;
-  Support.Identity_cache.find_or_add cache topology (fun () ->
-    create_uncached ?cancel topology)
+  Support.Identity_cache.find_or_add cache topology (fun () -> create_uncached ?cancel topology)
 
 type index = t
 
@@ -53,9 +48,10 @@ module View = struct
     point_vertices : int array;
   }
 
-  let view (value : index) = {
-    primitive_of_vertex = value.primitive_of_vertex;
-    point_offsets = value.point_offsets;
-    point_vertices = value.point_vertices;
-  }
+  let view (value : index) =
+    {
+      primitive_of_vertex = value.primitive_of_vertex;
+      point_offsets = value.point_offsets;
+      point_vertices = value.point_vertices;
+    }
 end

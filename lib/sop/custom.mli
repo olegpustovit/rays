@@ -1,10 +1,9 @@
 (** Parameterized custom SOP authoring.
 
-    This is the OCaml wrangle-like extension boundary: user code receives
-    immutable exposed parameters, a declared cook context, and immutable RDK
-    inputs. The builder automatically creates stable cache identity, attaches
-    node-owned inspector metadata, and rebuilds the cook closure after edits.
-    It is deliberately typed OCaml/RDK code rather than a VEX interpreter. *)
+    This is the OCaml wrangle-like extension boundary: user code receives immutable exposed
+    parameters, a declared cook context, and immutable RDK inputs. The builder automatically creates
+    stable cache identity, attaches node-owned inspector metadata, and rebuilds the cook closure
+    after edits. It is deliberately typed OCaml/RDK code rather than a VEX interpreter. *)
 
 val node :
   ?label:string ->
@@ -12,15 +11,12 @@ val node :
   schema:'parameters Param.schema ->
   values:'parameters ->
   Node.t list ->
-  (label:string -> inputs:Node.t list -> parameters:'parameters ->
-   (Node.t, string) result) ->
+  (label:string -> inputs:Node.t list -> parameters:'parameters -> (Node.t, string) result) ->
   (Node.t, string) result
-(** Attach node-owned parameters to any existing SOP composition without
-    writing the recursive [Node.parameterize] reconstruction boilerplate;
-    values the schema refuses are an [Error]. The
-    callback builds the unparameterized local operator from its supplied
-    label, current graph inputs, and immutable parameter record, or refuses
-    them. *)
+(** Attach node-owned parameters to any existing SOP composition without writing the recursive
+    [Node.parameterize] reconstruction boilerplate; values the schema refuses are an [Error]. The
+    callback builds the unparameterized local operator from its supplied label, current graph
+    inputs, and immutable parameter record, or refuses them. *)
 
 val plain :
   ?label:string ->
@@ -30,9 +26,7 @@ val plain :
   ?dependencies:Context.Dependencies.t ->
   operation:string ->
   Node.t list ->
-  (context:Context.t -> Rdk.Geometry.t array ->
-   (Rdk.Geometry.t, string) result) ->
+  (context:Context.t -> Rdk.Geometry.t array -> (Rdk.Geometry.t, string) result) ->
   Node.t
-(** A node without inspector parameters: [parameters] is its cache key text.
-    The cook sees a copy of the input array and a cancelled context yields a
-    ["cancelled"] diagnostic before it runs. *)
+(** A node without inspector parameters: [parameters] is its cache key text. The cook sees a copy of
+    the input array and a cancelled context yields a ["cancelled"] diagnostic before it runs. *)

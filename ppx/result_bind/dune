@@ -1,6 +1,7 @@
 ; Standalone source preprocessor for lib/metal (not a ppxlib rewriter): it
 ; lowers Metal's result syntax before typing. Its migration codemod and
 ; self-test live in tools/codemod.
+
 (executable
  (name result_bind_ppx)
  (libraries compiler-libs.common))

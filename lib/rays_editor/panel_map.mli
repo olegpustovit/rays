@@ -1,9 +1,8 @@
 (** The graph panels' own state, by panel key, with the key of the one in use.
 
-    Every graph panel keeps its canvas, level, selection, graph and route here; "the pane in
-    use" is only the key the map points at, so switching the focus changes a key and copies
-    nothing.  The key [[]] is the pane of a document that shows no graph panel yet: the first
-    panel adopts it. *)
+    Every graph panel keeps its canvas, level, selection, graph and route here; "the pane in use" is
+    only the key the map points at, so switching the focus changes a key and copies nothing. The key
+    [[]] is the pane of a document that shows no graph panel yet: the first panel adopts it. *)
 
 type 'a t
 

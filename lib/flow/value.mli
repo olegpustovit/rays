@@ -1,6 +1,9 @@
 (** Pure workspace values, parameterized by the evaluator's functions and residuals. *)
 type ('f, 'r) t =
-  | Int of int | Float of float | Bool of bool | Text of string
+  | Int of int
+  | Float of float
+  | Bool of bool
+  | Text of string
   | Vec2 of float * float
   | Vec3 of float * float * float
   | Vec4 of float * float * float * float
@@ -12,11 +15,13 @@ type ('f, 'r) t =
   | Vec3_array of float array  (** interleaved xyz coordinates *)
   | Vec4_array of float array  (** interleaved xyzw coordinates *)
   | Record of (string * ('f, 'r) t) list
-  | Deferred of Ty.t * int | No_geo
+  | Deferred of Ty.t * int
+  | No_geo
   | Struct of string * Ty.t * (string * ('f, 'r) t) list
   | Source of string * Ty.t * (string * ('f, 'r) t) list
       (** A typed host source; its fields describe resolution rather than the result. *)
-  | Fn of 'f | Residual of 'r
+  | Fn of 'f
+  | Residual of 'r
 
 val raise_diagnostic : Diagnostic.t -> 'a
 val fail : string -> string -> 'a
@@ -43,14 +48,15 @@ val int_array_put : int array -> int -> ('f, 'r) t -> unit
 val array_init : Ty.t -> int -> (int -> ('f, 'r) t) -> ('f, 'r) t
 val validate : ('f, 'r) t -> unit
 
-  (** Evaluate the protected thunk once. A reached typed failure is rethrown
-      through its pure mapper, preserving provenance; cancellation bypasses it. *)
-  val with_error : protected:(unit -> ('f,'r) t) -> map:(('f,'r) t -> ('f,'r) t) -> ('f,'r) t
+val with_error : protected:(unit -> ('f, 'r) t) -> map:(('f, 'r) t -> ('f, 'r) t) -> ('f, 'r) t
+(** Evaluate the protected thunk once. A reached typed failure is rethrown through its pure mapper,
+    preserving provenance; cancellation bypasses it. *)
 
-  (** Full 0/1 validation followed by first, or last in the first failing range.
-      The optional check is invoked at entry and coarse row boundaries. *)
-  val error_row_index : ?grain:int -> ?check:(unit -> unit) -> ('f,'r) t -> int option
+val error_row_index : ?grain:int -> ?check:(unit -> unit) -> ('f, 'r) t -> int option
+(** Full 0/1 validation followed by first, or last in the first failing range. The optional check is
+    invoked at entry and coarse row boundaries. *)
 
-  (** The selected index is passed only to an always-throwing diagnostic mapper.
-      An all-valid mask returns nil without evaluating select or map. *)
-  val diagnose_rows : select:(('f,'r) t -> int -> int) -> map:(('f,'r) t -> ('f,'r) t) -> ('f,'r) t -> ('f,'r) t
+val diagnose_rows :
+  select:(('f, 'r) t -> int -> int) -> map:(('f, 'r) t -> ('f, 'r) t) -> ('f, 'r) t -> ('f, 'r) t
+(** The selected index is passed only to an always-throwing diagnostic mapper. An all-valid mask
+    returns nil without evaluating select or map. *)

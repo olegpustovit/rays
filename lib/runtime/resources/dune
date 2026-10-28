@@ -11,26 +11,36 @@
 
 (executable
  (name test_main)
- (modules test_main test_runtime_resources test_resources_font test_resources_audio test_png_rows)
+ (modules
+  test_main
+  test_runtime_resources
+  test_resources_font
+  test_resources_audio
+  test_png_rows)
  (libraries runtime_resources ogpu_mock unix))
 
 (rule
  (alias test_resources_font)
- (action (run %{exe:test_main.exe} test_resources_font)))
+ (action
+  (run %{exe:test_main.exe} test_resources_font)))
 
 (rule
  (alias test_runtime_resources)
- (action (run %{exe:test_main.exe} test_runtime_resources)))
+ (action
+  (run %{exe:test_main.exe} test_runtime_resources)))
 
 (rule
  (alias test_resources_audio)
  (action
-  (setenv SDL_AUDIODRIVER dummy
+  (setenv
+   SDL_AUDIODRIVER
+   dummy
    (run %{exe:test_main.exe} test_resources_audio))))
 
 (rule
  (alias test_png_rows)
- (action (run %{exe:test_main.exe} test_png_rows)))
+ (action
+  (run %{exe:test_main.exe} test_png_rows)))
 
 (alias
  (name runtest)

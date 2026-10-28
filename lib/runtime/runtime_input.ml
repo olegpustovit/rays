@@ -2,13 +2,7 @@ type event = Input.event
 
 open Input
 
-type snapshot = {
-  pointer : float * float;
-  mouse_delta : float * float;
-
-  visible : bool;
-
-}
+type snapshot = { pointer : float * float; mouse_delta : float * float; visible : bool }
 
 (* All-float records store their fields unboxed, so per-event updates below
    assign in place instead of allocating tuples and boxed floats. *)
@@ -53,19 +47,20 @@ let apply value = function
       value.pointer.py <- y
   | Visibility_changed visible -> value.visible <- visible
   | Text_input _ | Text_editing _ | File_dropped _ | File_drag_moved _ | File_drag_ended
-  | Pixel_size_changed _ | Pinched _ | Trackpad_scrolled _ | Focus_gained | Closed | File_dialog _ | Dialog_opened _
-  | Pointer_cancelled _ | Scrolled _ | Key_pressed _ | Key_released _ | Focus_lost | Resized _ -> ()
+  | Pixel_size_changed _ | Pinched _ | Trackpad_scrolled _ | Focus_gained | Closed | File_dialog _
+  | Dialog_opened _ | Pointer_cancelled _ | Scrolled _ | Key_pressed _ | Key_released _ | Focus_lost
+  | Resized _ ->
+      ()
 
 let push value event =
   match event with
   | File_dropped path when path = "" || String.contains path '\000' ->
       Error "file-drop path is malformed"
-  | (Resized (width, height) | Pixel_size_changed (width, height))
-    when width <= 0 || height <= 0 ->
+  | (Resized (width, height) | Pixel_size_changed (width, height)) when width <= 0 || height <= 0 ->
       Error "resize dimensions must be positive"
-  | Pinched scale when not (Float.is_finite scale) || scale <= 0. ->
+  | Pinched scale when (not (Float.is_finite scale)) || scale <= 0. ->
       Error "pinch scale must be finite and positive"
-  | Trackpad_scrolled { delta = (x, y); time = seconds; _ }
+  | Trackpad_scrolled { delta = x, y; time = seconds; _ }
     when not (Float.is_finite x && Float.is_finite y && Float.is_finite seconds) ->
       Error "scroll gesture must be finite"
   | _ ->
@@ -100,7 +95,5 @@ let snapshot value =
   {
     pointer = (value.pointer.px, value.pointer.py);
     mouse_delta = (value.mouse_delta.px, value.mouse_delta.py);
-
     visible = value.visible;
-
   }

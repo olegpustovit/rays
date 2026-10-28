@@ -1,4 +1,5 @@
 type boundary = Smooth_free | Smooth_unshared
+
 type params = {
   cancel : Rdk_core.Cancel.t option;
   grain : int option;

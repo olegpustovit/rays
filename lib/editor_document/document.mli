@@ -1,18 +1,16 @@
 (** The editor document: the scene, the SOP networks, the shell tree and the workspace they are
-    lowered from.  One immutable value is what {!Editor_core.History} snapshots. *)
+    lowered from. One immutable value is what {!Editor_core.History} snapshots. *)
 
 module Int_map : Map.S with type key = int
 
-type network = {
-  context : Flow.Context.t;
-  graph : Flow_sop.Network.t;
-  displayed : int option;
-}
+type network = { context : Flow.Context.t; graph : Flow_sop.Network.t; displayed : int option }
+
 type home =
-    Bound_at of Flow.Workspace.path
+  | Bound_at of Flow.Workspace.path
   | Inline_in of home * Flow_graph.Flow_edit.arg_key
-  | Copy of { loop : home; rel : string list; index : int; }
+  | Copy of { loop : home; rel : string list; index : int }
   | Looped
+
 type homes = {
   objects : (int * home) list;
   world : home option;
@@ -21,29 +19,32 @@ type homes = {
   root : home option;
   world_graph : string option;
 }
+
 val no_homes : homes
+
 type origin =
-    Bound of string
+  | Bound of string
   | Loop of home * Flow_graph.Flow_edit.arg_key
   | Inline of home * Flow_graph.Flow_edit.arg_key
+
 type preview_source = {
   editor_graph : string;
   panel : origin option;
   scene_ref : Flow.Syntax.t option;
   instance : Flow.Eval.value;
 }
-type view_world = { node : Kind_graph.node; layers : Kind_graph.t; }
-type view_root = {
-  params : Objects.Root.parameters;
-  camera : Rays.Camera.t option;
-}
-type switch = { layouts : Editor_core.Panels.t list; active : int; }
+
+type view_world = { node : Kind_graph.node; layers : Kind_graph.t }
+type view_root = { params : Objects.Root.parameters; camera : Rays.Camera.t option }
+type switch = { layouts : Editor_core.Panels.t list; active : int }
+
 type start = {
   focus : Editor_core.Panels.path option;
   looking : string list;
   graph_views : (Editor_core.Panels.path * string) list;
   tabs : (Editor_core.Panels.path * string) list;
 }
+
 type shell = {
   tree : Editor_core.Panels.t;
   origins : (Editor_core.Panels.path * origin) list;
@@ -56,12 +57,14 @@ type shell = {
   preview_sources : (string * preview_source) list;
   switch : switch option;
 }
+
 type workspace = {
   ws : Workspace_doc.t;
   lowered : Flow_sop.Lower.t;
   fast : bool lazy_t;
   catalog : (Flow.Catalog.catalog, Diagnostic.t) result lazy_t;
 }
+
 type t = {
   scene : Kind_graph.t;  (** the objects; an object's input is its parent *)
   networks : network Int_map.t;  (** by geometry object id *)
@@ -73,12 +76,13 @@ type t = {
   view_worlds : (string * view_world option) list;
   view_roots : (string * view_root) list;
   homes : homes;
-  scene_drives :
-    (string * (Flow_sop.Port.parameter * Flow.Eval.value) list) Int_map.t;
+  scene_drives : (string * (Flow_sop.Port.parameter * Flow.Eval.value) list) Int_map.t;
   scene_textures : Flow.Eval.value Int_map.t;
   workspace : workspace;
 }
+
 type level = Scene | Inside of int
+
 val network : t -> int -> network option
 (** A geometry object's SOP network. *)
 
@@ -86,6 +90,7 @@ val layers : t -> int -> Kind_graph.t option
 (** The World's layers. *)
 
 val with_layers : t -> int -> Kind_graph.t -> t
+
 val kinds : t -> level -> Kind_graph.t option
 (** The objects of the scene, or the layers inside the World; none inside a geometry object. *)
 

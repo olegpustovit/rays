@@ -11,36 +11,37 @@ let make_curves positions primitive_points =
   let primitive_count = Array.length primitive_points in
   let primitive_offsets = Array.make (primitive_count + 1) 0 in
   for primitive = 0 to primitive_count - 1 do
-    primitive_offsets.(primitive + 1) <- primitive_offsets.(primitive)
-      + Array.length primitive_points.(primitive)
+    primitive_offsets.(primitive + 1) <-
+      primitive_offsets.(primitive) + Array.length primitive_points.(primitive)
   done;
   let vertex_points = Array.make primitive_offsets.(primitive_count) 0 in
-  Array.iteri (fun primitive points ->
-    Array.blit points 0 vertex_points primitive_offsets.(primitive)
-      (Array.length points)) primitive_points;
-  let topology = Topology.create_owned ~point_count ~vertex_points
-      ~primitive_offsets
+  Array.iteri
+    (fun primitive points ->
+      Array.blit points 0 vertex_points primitive_offsets.(primitive) (Array.length points))
+    primitive_points;
+  let topology =
+    Topology.create_owned ~point_count ~vertex_points ~primitive_offsets
       ~primitive_kinds:(Array.make primitive_count Topology.Open_polyline)
-      |> Result.get_ok in
+    |> Result.get_ok
+  in
   let x = Array.map (fun (x, _, _) -> x) positions
   and y = Array.map (fun (_, y, _) -> y) positions
   and z = Array.map (fun (_, _, z) -> z) positions in
-  Geometry.create
-    ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
-    ~topology () |> Result.get_ok
+  Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z) ~topology ()
+  |> Result.get_ok
 
-let position_view geometry =
-  Packed.Float3.View.view (Geometry.positions geometry)
+let position_view geometry = Packed.Float3.View.view (Geometry.positions geometry)
 
 let float3_values owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
-  | Some attribute ->
-      (match Attribute.View.storage attribute with
-       | Attribute.Float3 values -> Packed.Float3.View.view values
-       | _ -> fail (name ^ " is not float3"))
+  | Some attribute -> (
+      match Attribute.View.storage attribute with
+      | Attribute.Float3 values -> Packed.Float3.View.view values
+      | _ -> fail (name ^ " is not float3"))
   | None -> fail (name ^ " is missing")
 
-let equal_storage left right = match left, right with
+let equal_storage left right =
+  match (left, right) with
   | Attribute.Float left, Attribute.Float right -> left = right
   | Attribute.Int left, Attribute.Int right -> left = right
   | Attribute.Text left, Attribute.Text right -> left = right
@@ -56,11 +57,9 @@ let equal_storage left right = match left, right with
       Packed.Float_array.View.view left = Packed.Float_array.View.view right
   | _ -> false
 
-let expect_invalid work message = match work () with
-  | Error error ->
-      check (Error.code error = "invalid_separate_pieces")
-        (message ^ ": wrong code")
+let expect_invalid work message =
+  match work () with
+  | Error error -> check (Error.code error = "invalid_separate_pieces") (message ^ ": wrong code")
   | Ok _ -> fail (message ^ ": unexpectedly accepted")
 
-let run () =
-  print_endline "rdk Separate Pieces tests passed"
+let run () = print_endline "rdk Separate Pieces tests passed"

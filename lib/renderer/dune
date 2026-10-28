@@ -2,16 +2,38 @@
  (name renderer)
  (public_name rays.renderer)
  (wrapped false)
- (modules renderer renderer_pipeline renderer_shaders renderer_retained_plans renderer_leases renderer_lowering scene_execution scene_attachment_pool
-  metal_scene2_textured_argument_source metal_ui_source metal_marks_source
-  metal_scene3_source metal_scene3_textured_source metal_scene3_world_source
-  metal_scene3_sun_depth_source metal_scene3_points_source)
- (private_modules renderer_shaders renderer_retained_plans renderer_leases renderer_lowering scene_attachment_pool
-  metal_scene2_textured_argument_source metal_ui_source metal_marks_source
-  metal_scene3_source metal_scene3_textured_source metal_scene3_world_source
-  metal_scene3_sun_depth_source metal_scene3_points_source)
- (libraries ogpu scene_command runtime lru rays_math
-  runtime_resources))
+ (modules
+  renderer
+  renderer_pipeline
+  renderer_shaders
+  renderer_retained_plans
+  renderer_leases
+  renderer_lowering
+  scene_execution
+  scene_attachment_pool
+  metal_scene2_textured_argument_source
+  metal_ui_source
+  metal_marks_source
+  metal_scene3_source
+  metal_scene3_textured_source
+  metal_scene3_world_source
+  metal_scene3_sun_depth_source
+  metal_scene3_points_source)
+ (private_modules
+  renderer_shaders
+  renderer_retained_plans
+  renderer_leases
+  renderer_lowering
+  scene_attachment_pool
+  metal_scene2_textured_argument_source
+  metal_ui_source
+  metal_marks_source
+  metal_scene3_source
+  metal_scene3_textured_source
+  metal_scene3_world_source
+  metal_scene3_sun_depth_source
+  metal_scene3_points_source)
+ (libraries ogpu scene_command runtime lru rays_math runtime_resources))
 
 (executable
  (name embed_shader)
@@ -20,50 +42,68 @@
 (rule
  (target metal_scene2_textured_argument_source.ml)
  (deps shaders/metal/scene2_textured_argument.metal)
- (action (with-stdout-to %{target}
-  (run %{exe:embed_shader.exe} %{dep:shaders/metal/scene2_textured_argument.metal}))))
+ (action
+  (with-stdout-to
+   %{target}
+   (run
+    %{exe:embed_shader.exe}
+    %{dep:shaders/metal/scene2_textured_argument.metal}))))
 
 (rule
  (target metal_ui_source.ml)
  (deps shaders/metal/ui.metal)
- (action (with-stdout-to %{target}
-  (run %{exe:embed_shader.exe} %{dep:shaders/metal/ui.metal}))))
+ (action
+  (with-stdout-to
+   %{target}
+   (run %{exe:embed_shader.exe} %{dep:shaders/metal/ui.metal}))))
 
 (rule
  (target metal_marks_source.ml)
  (deps shaders/metal/marks.metal)
- (action (with-stdout-to %{target}
-  (run %{exe:embed_shader.exe} %{dep:shaders/metal/marks.metal}))))
+ (action
+  (with-stdout-to
+   %{target}
+   (run %{exe:embed_shader.exe} %{dep:shaders/metal/marks.metal}))))
 
 (rule
  (target metal_scene3_source.ml)
  (deps shaders/metal/scene3.metal)
- (action (with-stdout-to %{target}
-  (run %{exe:embed_shader.exe} %{dep:shaders/metal/scene3.metal}))))
+ (action
+  (with-stdout-to
+   %{target}
+   (run %{exe:embed_shader.exe} %{dep:shaders/metal/scene3.metal}))))
 
 (rule
  (target metal_scene3_points_source.ml)
  (deps shaders/metal/scene3_points.metal)
- (action (with-stdout-to %{target}
-  (run %{exe:embed_shader.exe} %{dep:shaders/metal/scene3_points.metal}))))
+ (action
+  (with-stdout-to
+   %{target}
+   (run %{exe:embed_shader.exe} %{dep:shaders/metal/scene3_points.metal}))))
 
 (rule
  (target metal_scene3_textured_source.ml)
  (deps shaders/metal/scene3_textured.metal)
- (action (with-stdout-to %{target}
-  (run %{exe:embed_shader.exe} %{dep:shaders/metal/scene3_textured.metal}))))
+ (action
+  (with-stdout-to
+   %{target}
+   (run %{exe:embed_shader.exe} %{dep:shaders/metal/scene3_textured.metal}))))
 
 (rule
  (target metal_scene3_world_source.ml)
  (deps shaders/metal/scene3_world.metal)
- (action (with-stdout-to %{target}
-  (run %{exe:embed_shader.exe} %{dep:shaders/metal/scene3_world.metal}))))
+ (action
+  (with-stdout-to
+   %{target}
+   (run %{exe:embed_shader.exe} %{dep:shaders/metal/scene3_world.metal}))))
 
 (rule
  (target metal_scene3_sun_depth_source.ml)
  (deps shaders/metal/scene3_sun_depth.metal)
- (action (with-stdout-to %{target}
-  (run %{exe:embed_shader.exe} %{dep:shaders/metal/scene3_sun_depth.metal}))))
+ (action
+  (with-stdout-to
+   %{target}
+   (run %{exe:embed_shader.exe} %{dep:shaders/metal/scene3_sun_depth.metal}))))
 
 (executable
  (name test_mock_backend)
@@ -72,7 +112,8 @@
 
 (rule
  (alias runtest)
- (action (run %{exe:test_mock_backend.exe})))
+ (action
+  (run %{exe:test_mock_backend.exe})))
 
 (executable
  (name test_renderer_scaling)
@@ -81,82 +122,121 @@
 
 (rule
  (alias runtest)
- (action (run %{exe:test_renderer_scaling.exe})))
+ (action
+  (run %{exe:test_renderer_scaling.exe})))
 
 (executable
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (name test_gpu_draw)
  (modules test_gpu_draw)
  (libraries renderer scene_command ogpu ogpu_metal))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias runtest-native)
- (action (run %{exe:test_gpu_draw.exe})))
+ (action
+  (run %{exe:test_gpu_draw.exe})))
 
 (executable
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (name test_main)
- (modules test_main test_offscreen test_scene2_coordinates test_dense_scene2 test_ui_pipeline test_marks_native test_batch_merge test_shapes_lowering test_runtime_render test_scene2_argument test_scene3_instances test_scene3_lighting)
+ (modules
+  test_main
+  test_offscreen
+  test_scene2_coordinates
+  test_dense_scene2
+  test_ui_pipeline
+  test_marks_native
+  test_batch_merge
+  test_shapes_lowering
+  test_runtime_render
+  test_scene2_argument
+  test_scene3_instances
+  test_scene3_lighting)
  (libraries renderer scene_command ogpu ogpu_metal unix))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_runtime_render)
  (locks smoke_window)
- (action (run %{exe:test_main.exe} test_runtime_render)))
+ (action
+  (run %{exe:test_main.exe} test_runtime_render)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_scene2_argument)
  (locks smoke_window)
- (action (run %{exe:test_main.exe} test_scene2_argument)))
+ (action
+  (run %{exe:test_main.exe} test_scene2_argument)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_scene3_instances)
- (action (run %{exe:test_main.exe} test_scene3_instances)))
+ (action
+  (run %{exe:test_main.exe} test_scene3_instances)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_scene3_lighting)
  (locks smoke_window)
- (action (run %{exe:test_main.exe} test_scene3_lighting)))
+ (action
+  (run %{exe:test_main.exe} test_scene3_lighting)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_offscreen)
- (action (run %{exe:test_main.exe} test_offscreen)))
+ (action
+  (run %{exe:test_main.exe} test_offscreen)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_scene2_coordinates)
- (action (run %{exe:test_main.exe} test_scene2_coordinates)))
+ (action
+  (run %{exe:test_main.exe} test_scene2_coordinates)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_dense_scene2)
- (action (run %{exe:test_main.exe} test_dense_scene2)))
+ (action
+  (run %{exe:test_main.exe} test_dense_scene2)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_ui_pipeline)
- (action (run %{exe:test_main.exe} test_ui_pipeline)))
+ (action
+  (run %{exe:test_main.exe} test_ui_pipeline)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_marks_native)
- (action (run %{exe:test_main.exe} test_marks_native)))
+ (action
+  (run %{exe:test_main.exe} test_marks_native)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_batch_merge)
- (action (run %{exe:test_main.exe} test_batch_merge)))
+ (action
+  (run %{exe:test_main.exe} test_batch_merge)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_shapes_lowering)
- (action (run %{exe:test_main.exe} test_shapes_lowering)))
+ (action
+  (run %{exe:test_main.exe} test_shapes_lowering)))
 
 (alias
  (name runtest-native)

@@ -28,7 +28,6 @@ type error =
 val of_commands : command array -> t
 val tessellate : tolerance:float -> fill_rule:fill_rule -> t -> (mesh, error) result
 
-(** Tessellates the centerline. Degenerate segments are ignored. *)
 val stroke :
   tolerance:float ->
   width:float ->
@@ -37,3 +36,4 @@ val stroke :
   miter_limit:float ->
   t ->
   (mesh, error) result
+(** Tessellates the centerline. Degenerate segments are ignored. *)

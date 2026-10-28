@@ -6,7 +6,8 @@
 (rule
  (targets c_flags.sexp c_library_flags.sexp sdl3_probed.h)
  (deps (universe))
- (action (run ./discover.exe)))
+ (action
+  (run ./discover.exe)))
 
 (rule
  (targets generated_abi.h)
@@ -19,9 +20,19 @@
   ../sdl3_ttf/sdl3_ttf_stubs.c
   ../sdl3_mixer/sdl3_mixer_stubs.c)
  (action
-  (run %{exe:../sdl3/generate.exe} emit --root ../..
-   --component sdl3_mixer --lock ../../packaging/sdl3.lock
-   --abi ../sdl3/abi.sexp --output generated_abi.h)))
+  (run
+   %{exe:../sdl3/generate.exe}
+   emit
+   --root
+   ../..
+   --component
+   sdl3_mixer
+   --lock
+   ../../packaging/sdl3.lock
+   --abi
+   ../sdl3/abi.sexp
+   --output
+   generated_abi.h)))
 
 (library
  (name sdl3_mixer)
@@ -30,9 +41,14 @@
  (foreign_stubs
   (language c)
   (names sdl3_mixer_stubs)
-  (flags (:include c_flags.sexp) -Wall -Wextra -Werror)
+  (flags
+   (:include c_flags.sexp)
+   -Wall
+   -Wextra
+   -Werror)
   (extra_deps generated_abi.h sdl3_probed.h))
- (c_library_flags (:include c_library_flags.sexp))
+ (c_library_flags
+  (:include c_library_flags.sexp))
  (libraries sdl3 threads))
 
 (executable
@@ -44,21 +60,26 @@
  (alias test_sdl3_mixer)
  (deps ../../packaging/sdl3.lock)
  (action
-  (setenv SDL_AUDIODRIVER dummy
+  (setenv
+   SDL_AUDIODRIVER
+   dummy
    (run %{exe:test_main.exe} test_sdl3_mixer))))
 
 (rule
  (alias test_sdl3_mixer_device_failure)
  (action
-  (setenv SDL_AUDIODRIVER rays_missing_audio_driver
+  (setenv
+   SDL_AUDIODRIVER
+   rays_missing_audio_driver
    (run %{exe:test_main.exe} test_sdl3_mixer_device_failure))))
-
 
 (rule
  (alias qualification)
  (deps ../../packaging/sdl3.lock)
  (action
-  (setenv SDL_AUDIODRIVER dummy
+  (setenv
+   SDL_AUDIODRIVER
+   dummy
    (run %{exe:test_main.exe} test_sdl3_mixer))))
 
 (alias

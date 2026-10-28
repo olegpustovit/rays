@@ -1,18 +1,15 @@
 let fail format = Printf.ksprintf failwith format
-
-let roots =
-  [ "lib/sdl3"; "lib/sdl3_image"; "lib/sdl3_ttf"; "lib/sdl3_mixer" ]
-
+let roots = [ "lib/sdl3"; "lib/sdl3_image"; "lib/sdl3_ttf"; "lib/sdl3_mixer" ]
 let suffixes = [ ".ml"; ".mli" ]
 let forbidden = [ "Ctypes"; "Foreign.foreign"; "foreign_value" ]
-
 let has_suffix path = List.exists (Filename.check_suffix path) suffixes
 
 let rec files path =
   if Sys.is_directory path then
     Sys.readdir path |> Array.to_list
     |> List.concat_map (fun name -> files (Filename.concat path name))
-  else if has_suffix path then [ path ] else []
+  else if has_suffix path then [ path ]
+  else []
 
 let read path =
   let channel = open_in_bin path in
@@ -34,10 +31,9 @@ let () =
     roots
     |> List.concat_map (fun relative -> files (Filename.concat root relative))
     |> List.concat_map (fun path ->
-         let source = read path in
-         forbidden
-         |> List.filter_map (fun token ->
-              if contains source token then Some (path, token) else None))
+        let source = read path in
+        forbidden
+        |> List.filter_map (fun token -> if contains source token then Some (path, token) else None))
   in
   match violations with
   | [] -> print_endline "SDL3 production bindings use no Ctypes Foreign calls"

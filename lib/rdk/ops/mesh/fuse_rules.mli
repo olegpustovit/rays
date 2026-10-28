@@ -36,7 +36,8 @@ type group_rule = { group_pattern : string; group_method : group_method }
 val validate :
   attribute_rules:attribute_rule list ->
   group_rules:group_rule list ->
-  Geometry.t -> (unit, string) result
+  Geometry.t ->
+  (unit, string) result
 
 val apply :
   ?cancel:Cancel.t ->
@@ -49,8 +50,8 @@ val apply :
   Point_clusters.clusters ->
   Geometry.t ->
   Attribute.t list * Group.t list
-(** Apply point-attribute and point-group cluster policies. Internal validation
-    failures raise [Invalid_argument] for the enclosing Fuse result boundary. *)
+(** Apply point-attribute and point-group cluster policies. Internal validation failures raise
+    [Invalid_argument] for the enclosing Fuse result boundary. *)
 
 (** Shared with [Fuse_reduce]. *)
 
@@ -64,7 +65,6 @@ val compare_float_entry : float array -> int array -> int -> int -> int
 (** Order two slots by value, then by point index. *)
 
 val sort_range :
-  ('a array -> int array -> int -> int -> int) ->
-  'a array -> int array -> int -> int -> unit
-(** [sort_range compare values points first last] heap-sorts the slots
-    [first .. last - 1] of both planes together, in place. *)
+  ('a array -> int array -> int -> int -> int) -> 'a array -> int array -> int -> int -> unit
+(** [sort_range compare values points first last] heap-sorts the slots [first .. last - 1] of both
+    planes together, in place. *)

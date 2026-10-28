@@ -16,6 +16,7 @@ type active_queue = { presentations : Surface.Private.pending_presentation array
    released once more than [depth_state_capacity] distinct states exist. *)
 module Depth_state_table = Lru.Make (struct
   type t = Ogpu_core.Backend.depth_state
+
   let equal = ( = )
   let hash = Hashtbl.hash
 end)
@@ -24,7 +25,6 @@ let depth_state_capacity = 64
 
 type control = {
   resources : (int64, resource) Hashtbl.t;
-
   pipeline_tokens : (int64, Pipeline.t) Hashtbl.t;
   active_queues : (int64, active_queue) Hashtbl.t;
   libraries : (int64, Library.t) Hashtbl.t;
@@ -50,11 +50,17 @@ let pending_presentation_capacity = 3
 
 let metal_compare = function
   | Ogpu_core.Render_pass.Never -> Metal.Depth_stencil.Never
-  | Less -> Less | Equal -> Equal | Less_equal -> Less_equal | Greater -> Greater
-  | Not_equal -> Not_equal | Greater_equal -> Greater_equal | Always -> Always
+  | Less -> Less
+  | Equal -> Equal
+  | Less_equal -> Less_equal
+  | Greater -> Greater
+  | Not_equal -> Not_equal
+  | Greater_equal -> Greater_equal
+  | Always -> Always
 
 (* Metal's maxTotalThreadsPerThreadgroup of a compute pipeline; render pipelines have none (0). *)
-let max_threads pipeline = match Pipeline.Private.native pipeline with
+let max_threads pipeline =
+  match Pipeline.Private.native pipeline with
   | Pipeline.Private.Compute native -> Metal.Compute_pipeline.max_total_threads native
   | Render _ -> 0
 
@@ -62,7 +68,6 @@ let create () =
   let c =
     {
       resources = Hashtbl.create 32;
-
       pipeline_tokens = Hashtbl.create 16;
       active_queues = Hashtbl.create 4;
       libraries = Hashtbl.create 4;
@@ -70,7 +75,9 @@ let create () =
       sampler_tokens = Hashtbl.create 8;
       icbs = Hashtbl.create 8;
       arguments = Hashtbl.create 4;
-      depth_states = Depth_state_table.create depth_state_capacity ~release:(fun _ native -> ignore (Metal.Depth_stencil.destroy native));
+      depth_states =
+        Depth_state_table.create depth_state_capacity ~release:(fun _ native ->
+            ignore (Metal.Depth_stencil.destroy native));
       acquired_frames = Hashtbl.create 4;
       cleanup_error = None;
       device_live = false;
@@ -147,7 +154,8 @@ let create () =
           let texture_memory ~host_read (descriptor : Ogpu_core.Types.texture_descriptor) =
             if descriptor.sample_count = 1 && host_read then Texture.Shared else Device_local
           in
-          let register_texture ~host_read (descriptor : Ogpu_core.Types.texture_descriptor) created =
+          let register_texture ~host_read (descriptor : Ogpu_core.Types.texture_descriptor) created
+              =
             match created with
             | Error _ as e -> e
             | Ok texture ->
@@ -202,7 +210,9 @@ let create () =
           in
           let create_texture_format ~format ~host_read descriptor =
             register_texture ~host_read descriptor
-              (Texture.create device ~memory:(texture_memory ~host_read descriptor) ~format descriptor)
+              (Texture.create device
+                 ~memory:(texture_memory ~host_read descriptor)
+                 ~format descriptor)
           in
           let create_texture descriptor =
             create_texture_format ~format:(color_format descriptor) ~host_read:true descriptor
@@ -216,7 +226,8 @@ let create () =
             Hashtbl.add c.pipeline_tokens id pipeline;
             Ok
               {
-                Ogpu_core.Backend.pipeline_token = id; max_threads = max_threads pipeline;
+                Ogpu_core.Backend.pipeline_token = id;
+                max_threads = max_threads pipeline;
                 destroy_pipeline =
                   (fun () ->
                     match Pipeline.destroy pipeline with
@@ -234,7 +245,6 @@ let create () =
                 Hashtbl.add c.libraries id library;
                 Ok
                   {
-
                     Ogpu_core.Backend.create_compute_pipeline_in =
                       (fun ~entry ~constants ~interface ->
                         match
@@ -281,7 +291,6 @@ let create () =
                       {
                         structure_size = sizes.acceleration_structure_size;
                         build_scratch_size = sizes.build_scratch_buffer_size;
-
                       };
                     destroy_accel =
                       (fun () ->
@@ -296,13 +305,24 @@ let create () =
             let layout =
               Metal.Acceleration_structure.Build.instance_layout
                 (match kind with
-                 | Ogpu_core.Backend.User_id_instances -> Metal.Acceleration_structure.Build.User_id_instances
-                 | Motion_instances -> Motion_instances)
+                | Ogpu_core.Backend.User_id_instances ->
+                    Metal.Acceleration_structure.Build.User_id_instances
+                | Motion_instances -> Motion_instances)
             in
-            [| layout.size; layout.transform; layout.options; layout.mask
-             ; layout.structure_index; layout.user_id; layout.transforms_start; layout.transforms_count
-             ; layout.start_border_offset; layout.end_border_offset; layout.start_time_offset
-             ; layout.end_time_offset |]
+            [|
+              layout.size;
+              layout.transform;
+              layout.options;
+              layout.mask;
+              layout.structure_index;
+              layout.user_id;
+              layout.transforms_start;
+              layout.transforms_count;
+              layout.start_border_offset;
+              layout.end_border_offset;
+              layout.start_time_offset;
+              layout.end_time_offset;
+            |]
           in
           let create_sampler descriptor =
             match Sampler.create device descriptor with
@@ -373,8 +393,7 @@ let create () =
                   match native_resource token with
                   | Some (Buffer buffer) -> Ok buffer
                   | _ ->
-                      error operation Ogpu_core.Error.Invalid_argument
-                        "buffer graph is incomplete"
+                      error operation Ogpu_core.Error.Invalid_argument "buffer graph is incomplete"
                 in
                 let primitive = function
                   | Ogpu_core.Render_pass.Point_list ->
@@ -386,7 +405,6 @@ let create () =
                 Ok
                   {
                     Ogpu_core.Backend.icb_token = id;
-
                     icb_set_pipeline =
                       (fun ~index token ->
                         match Hashtbl.find_opt c.pipeline_tokens token with
@@ -409,21 +427,25 @@ let create () =
                       (fun ~index stage ~slot ~offset token ->
                         match (command index, buffer token) with
                         | Error e, _ | _, Error e -> Error e
-                        | Ok command, Ok buffer ->
-                            (match stage with
-                             | Ogpu_core.Backend.Vertex ->
-                                 native_of (Metal.Indirect_command_buffer.Render_command.set_vertex_buffer command ~index:slot ~offset (Buffer.Private.metal buffer))
-                             | Fragment ->
-                                 native_of (Metal.Indirect_command_buffer.Render_command.set_fragment_buffer command ~index:slot ~offset (Buffer.Private.metal buffer))));
+                        | Ok command, Ok buffer -> (
+                            match stage with
+                            | Ogpu_core.Backend.Vertex ->
+                                native_of
+                                  (Metal.Indirect_command_buffer.Render_command.set_vertex_buffer
+                                     command ~index:slot ~offset (Buffer.Private.metal buffer))
+                            | Fragment ->
+                                native_of
+                                  (Metal.Indirect_command_buffer.Render_command.set_fragment_buffer
+                                     command ~index:slot ~offset (Buffer.Private.metal buffer))));
                     icb_draw =
                       (fun ~index ~primitive:kind ~first ~count ~instances ->
                         match command index with
                         | Error _ as failure -> failure
                         | Ok command ->
                             native_of
-                              (Metal.Indirect_command_buffer.Render_command.draw_primitives
-                                 command ~primitive:(primitive kind) ~vertex_start:first
-                                 ~vertex_count:count ~instance_count:instances ()));
+                              (Metal.Indirect_command_buffer.Render_command.draw_primitives command
+                                 ~primitive:(primitive kind) ~vertex_start:first ~vertex_count:count
+                                 ~instance_count:instances ()));
                     icb_draw_indexed =
                       (fun ~index ~primitive:kind ~index_type token ~offset ~count ~instances ->
                         match (command index, buffer token) with
@@ -468,7 +490,9 @@ let create () =
                     error operation Ogpu_core.Error.Unsupported
                       "argument encoders are exposed for fragment functions"
                 | Fragment -> (
-                    match Pipeline.Private.argument_encoder pipeline ~buffer_index:(Int64.of_int index) with
+                    match
+                      Pipeline.Private.argument_encoder pipeline ~buffer_index:(Int64.of_int index)
+                    with
                     | Error _ as failure -> failure
                     | Ok encoder ->
                         let id = token c in
@@ -488,15 +512,15 @@ let create () =
                                   ~buffer_index:(Int64.of_int index)
                               with
                               | Error _ as failure -> failure
-                              | Ok scratch ->
+                              | Ok scratch -> (
                                   let finish result =
                                     ignore (Metal.Shader_argument_encoder.destroy scratch);
                                     native_of result
                                   in
-                                  (match
-                                     Metal.Shader_argument_encoder.set_argument_buffer scratch
-                                       (Buffer.Private.metal buffer) ~offset ()
-                                   with
+                                  match
+                                    Metal.Shader_argument_encoder.set_argument_buffer scratch
+                                      (Buffer.Private.metal buffer) ~offset ()
+                                  with
                                   | Error _ as failure -> finish failure
                                   | Ok () -> finish (resource scratch)))
                           | _ ->
@@ -505,7 +529,6 @@ let create () =
                         in
                         Ok
                           {
-
                             Ogpu_core.Backend.argument_length =
                               Int64.to_int (Metal.Shader_argument_encoder.encoded_length encoder);
                             argument_alignment =
@@ -547,17 +570,16 @@ let create () =
             let operation = "Ogpu_metal.Backend.depth_state" in
             match Depth_state_table.find c.depth_states state with
             | native -> Ok native
-            | exception Not_found ->
-                (match
-                   Metal.Depth_stencil.create ~label:"ogpu-metal-depth-state"
-                     ~depth_compare:(metal_compare state.depth_compare)
-                     ~depth_write:state.depth_write
-                     (Device.Private.metal device) ()
-                 with
-                 | Error e -> Error (Device.of_metal_error ~operation e)
-                 | Ok native ->
-                     Depth_state_table.add c.depth_states state native;
-                     Ok native)
+            | exception Not_found -> (
+                match
+                  Metal.Depth_stencil.create ~label:"ogpu-metal-depth-state"
+                    ~depth_compare:(metal_compare state.depth_compare)
+                    ~depth_write:state.depth_write (Device.Private.metal device) ()
+                with
+                | Error e -> Error (Device.of_metal_error ~operation e)
+                | Ok native ->
+                    Depth_state_table.add c.depth_states state native;
+                    Ok native)
           in
           let create_queue () =
             match Queue.create device with
@@ -623,7 +645,8 @@ let create () =
                         | Error _ as failure -> failure
                         | Ok false -> Ok ()
                         | Ok true ->
-                            retained := (fun () -> Buffer.Private.release_submission buffer) :: !retained;
+                            retained :=
+                              (fun () -> Buffer.Private.release_submission buffer) :: !retained;
                             Ok ()
                       in
                       let find_buffer token =
@@ -690,14 +713,15 @@ let create () =
                                 Ok
                                   {
                                     Ogpu_core.Backend.build = operate Acceleration.encode_build;
-
                                     compact = pair Acceleration.encode_compact;
                                     write_compacted_size =
                                       (fun token ~dst ~offset ->
                                         match (find_accel token, find_buffer dst) with
                                         | Error e, _ | _, Error e -> Error e
                                         | Ok structure, Ok destination -> (
-                                            match (keep_accel structure, keep_buffer destination) with
+                                            match
+                                              (keep_accel structure, keep_buffer destination)
+                                            with
                                             | Error e, _ | _, Error e -> Error e
                                             | Ok (), Ok () ->
                                                 Acceleration.encode_compacted_size encoder device
@@ -721,16 +745,31 @@ let create () =
                           (fun () -> Texture.Private.release_submission texture)
                       in
                       let encoder_context =
-                        { Command_control.operation; device; native; native_of; open_encoder; recording;
-                          keep; keep_buffer; find_buffer; find_accel; keep_accel; find_texture; keep_texture;
-                          resource = (fun token ->
-                            match native_resource token with
-                            | Some (Buffer buffer) -> Some (Command_control.Buffer buffer)
-                            | Some (Texture texture) -> Some (Command_control.Texture texture)
-                            | None -> None);
+                        {
+                          Command_control.operation;
+                          device;
+                          native;
+                          native_of;
+                          open_encoder;
+                          recording;
+                          keep;
+                          keep_buffer;
+                          find_buffer;
+                          find_accel;
+                          keep_accel;
+                          find_texture;
+                          keep_texture;
+                          resource =
+                            (fun token ->
+                              match native_resource token with
+                              | Some (Buffer buffer) -> Some (Command_control.Buffer buffer)
+                              | Some (Texture texture) -> Some (Command_control.Texture texture)
+                              | None -> None);
                           pipeline = (fun token -> Hashtbl.find_opt c.pipeline_tokens token);
                           sampler = (fun token -> Hashtbl.find_opt c.sampler_tokens token);
-                          icb = (fun token -> Option.map (fun entry -> entry.icb) (Hashtbl.find_opt c.icbs token));
+                          icb =
+                            (fun token ->
+                              Option.map (fun entry -> entry.icb) (Hashtbl.find_opt c.icbs token));
                           depth_state = depth_state_for;
                         }
                       in
@@ -741,7 +780,10 @@ let create () =
                         match recording () with
                         | Error _ as failure -> failure
                         | Ok () -> (
-                            match (find_texture source, Hashtbl.find_opt c.acquired_frames frame.frame_token) with
+                            match
+                              ( find_texture source,
+                                Hashtbl.find_opt c.acquired_frames frame.frame_token )
+                            with
                             | Error e, _ -> Error e
                             | _, None ->
                                 error operation Ogpu_core.Error.Invalid_state "frame token is stale"
@@ -754,22 +796,30 @@ let create () =
                                     error operation Ogpu_core.Error.Capacity
                                       "bounded presentation slots are all in flight"
                                 | Some pending -> (
-                                    match Surface.Private.prepare_present pending surface native_frame ~source with
+                                    match
+                                      Surface.Private.prepare_present pending surface native_frame
+                                        ~source
+                                    with
                                     | Error _ as failure -> failure
                                     | Ok () -> (
-                                        match Surface.Private.presentation_encoder pending native with
+                                        match
+                                          Surface.Private.presentation_encoder pending native
+                                        with
                                         | Error _ as failure ->
                                             Surface.Private.rollback_present pending;
                                             failure
                                         | Ok () -> (
-                                            match Queue.submit_native queue native ~retained:!retained with
+                                            match
+                                              Queue.submit_native queue native ~retained:!retained
+                                            with
                                             | Error _ as failure ->
                                                 Surface.Private.rollback_present pending;
                                                 failure
                                             | Ok (receipt : Queue.receipt) ->
                                                 finished := true;
                                                 retained := [];
-                                                Surface.Private.commit_present pending ~epoch:receipt.epoch;
+                                                Surface.Private.commit_present pending
+                                                  ~epoch:receipt.epoch;
                                                 Hashtbl.remove c.acquired_frames frame.frame_token;
                                                 Ok { Ogpu_core.Backend.epoch = receipt.epoch })))))
                       in
@@ -800,12 +850,10 @@ let create () =
                       in
                       Ok
                         {
-
                           Ogpu_core.Backend.compute_encoder;
                           accel_encoder;
                           blit_encoder;
                           render_encoder;
-
                           commit;
                           commit_present;
                           abandon;
@@ -814,8 +862,7 @@ let create () =
                 let gpu_duration epoch = Queue.gpu_duration queue epoch in
                 let gpu_timing () =
                   let timing = Queue.gpu_timing_for_device device in
-                  {
-                    Ogpu_core.Backend.gpu_seconds = timing.duration_seconds }
+                  { Ogpu_core.Backend.gpu_seconds = timing.duration_seconds }
                 in
                 let destroy_queue () =
                   if
@@ -835,12 +882,10 @@ let create () =
                 in
                 Ok
                   {
-
                     Ogpu_core.Backend.complete_through;
                     poll_through;
                     completed_epoch = (fun () -> Queue.completed_epoch queue);
                     begin_commands;
-
                     gpu_duration;
                     gpu_timing;
                     destroy_queue;
@@ -855,77 +900,80 @@ let create () =
                       (Metal.Metal_layer.default ~width:configuration.physical_width
                          ~height:configuration.physical_height)
                   with
-                  | Error e -> Error (Device.of_metal_error ~operation:"Ogpu_metal.Backend.create_surface" e)
+                  | Error e ->
+                      Error (Device.of_metal_error ~operation:"Ogpu_metal.Backend.create_surface" e)
                   | Ok layer -> Ok (Some layer))
               | None -> Ok None
             in
             match adopted with
             | Error _ as e -> e
             | Ok adopted -> (
-            match adopted with
-            | None ->
-                error "Ogpu_metal.Backend.create_surface" Ogpu_core.Error.Unsupported
-                  "surface needs a native layer token"
-            | Some layer -> (
-                let release_adopted () =
-                  Option.iter (fun layer -> ignore (Metal.Metal_layer.destroy layer)) adopted
-                in
-                match Surface.create device ~layer configuration with
-                | Error _ as e -> release_adopted (); e
-                | Ok surface ->
-                    let frames_of_surface () =
-                      Hashtbl.fold
-                        (fun _ (owner, _) count -> if owner == surface then count + 1 else count)
-                        c.acquired_frames 0
+                match adopted with
+                | None ->
+                    error "Ogpu_metal.Backend.create_surface" Ogpu_core.Error.Unsupported
+                      "surface needs a native layer token"
+                | Some layer -> (
+                    let release_adopted () =
+                      Option.iter (fun layer -> ignore (Metal.Metal_layer.destroy layer)) adopted
                     in
-                    let find_frame token =
-                      Option.map snd (Hashtbl.find_opt c.acquired_frames token)
-                    in
-                    let acquire_with acquire =
-                      match acquire surface with
-                      | Error _ as e -> e
-                      | Ok Surface.Timeout -> Ok `Timeout
-                      | Ok Occluded -> Ok `Occluded
-                      | Ok Device_lost -> Ok `Device_lost
-                      | Ok (Acquired frame) ->
-                          let frame_token = Surface.frame_id frame in
-                          Hashtbl.add c.acquired_frames frame_token (surface, frame);
-                          Ok (`Acquired { Ogpu_core.Backend.frame_token })
-                    in
-                    let _acquire () = acquire_with Surface.acquire
-                    and acquire_sync () = acquire_with Surface.Private.acquire_scoped in
-                    let take f frame =
-                      match find_frame frame.Ogpu_core.Backend.frame_token with
-                      | None ->
-                          error "Ogpu_metal.Backend.surface" Ogpu_core.Error.Invalid_state
-                            "frame token is stale"
-                      | Some native -> (
-                          match f surface native with
+                    match Surface.create device ~layer configuration with
+                    | Error _ as e ->
+                        release_adopted ();
+                        e
+                    | Ok surface ->
+                        let frames_of_surface () =
+                          Hashtbl.fold
+                            (fun _ (owner, _) count ->
+                              if owner == surface then count + 1 else count)
+                            c.acquired_frames 0
+                        in
+                        let find_frame token =
+                          Option.map snd (Hashtbl.find_opt c.acquired_frames token)
+                        in
+                        let acquire_with acquire =
+                          match acquire surface with
                           | Error _ as e -> e
-                          | Ok () ->
-                              Hashtbl.remove c.acquired_frames frame.frame_token;
-                              Ok ())
-                    in
-                    Ok
-                      {
-
-                        Ogpu_core.Backend.configure = (fun x -> Surface.configure surface x);
-
-                        acquire_sync;
-                        discard = take Surface.discard;
-                        destroy_surface =
-                          (fun () ->
-                            if frames_of_surface () <> 0 then
-                              error "Ogpu_metal.Backend.destroy_surface"
-                                Ogpu_core.Error.Invalid_state "surface has outstanding frames"
-                            else if Surface.in_flight_presentations surface <> 0 then
-                              error "Ogpu_metal.Backend.destroy_surface"
-                                Ogpu_core.Error.Invalid_state "surface has presentations in flight"
-                            else (
-                              Surface.destroy surface;
-                              release_adopted ();
-                              Ok ()));
-                      }))
+                          | Ok Surface.Timeout -> Ok `Timeout
+                          | Ok Occluded -> Ok `Occluded
+                          | Ok Device_lost -> Ok `Device_lost
+                          | Ok (Acquired frame) ->
+                              let frame_token = Surface.frame_id frame in
+                              Hashtbl.add c.acquired_frames frame_token (surface, frame);
+                              Ok (`Acquired { Ogpu_core.Backend.frame_token })
+                        in
+                        let _acquire () = acquire_with Surface.acquire
+                        and acquire_sync () = acquire_with Surface.Private.acquire_scoped in
+                        let take f frame =
+                          match find_frame frame.Ogpu_core.Backend.frame_token with
+                          | None ->
+                              error "Ogpu_metal.Backend.surface" Ogpu_core.Error.Invalid_state
+                                "frame token is stale"
+                          | Some native -> (
+                              match f surface native with
+                              | Error _ as e -> e
+                              | Ok () ->
+                                  Hashtbl.remove c.acquired_frames frame.frame_token;
+                                  Ok ())
+                        in
+                        Ok
+                          {
+                            Ogpu_core.Backend.configure = (fun x -> Surface.configure surface x);
+                            acquire_sync;
+                            discard = take Surface.discard;
+                            destroy_surface =
+                              (fun () ->
+                                if frames_of_surface () <> 0 then
+                                  error "Ogpu_metal.Backend.destroy_surface"
+                                    Ogpu_core.Error.Invalid_state "surface has outstanding frames"
+                                else if Surface.in_flight_presentations surface <> 0 then
+                                  error "Ogpu_metal.Backend.destroy_surface"
+                                    Ogpu_core.Error.Invalid_state
+                                    "surface has presentations in flight"
+                                else (
+                                  Surface.destroy surface;
+                                  release_adopted ();
+                                  Ok ()));
+                          }))
           in
           let destroy_device () =
             if Hashtbl.length c.active_queues <> 0 then
@@ -944,10 +992,7 @@ let create () =
                   | None -> ())
                 !states;
               let destroyed = if c.device_live then Device.destroy device else Ok () in
-              (match destroyed with
-              | Ok () ->
-                  c.device_live <- false
-              | Error _ -> ());
+              (match destroyed with Ok () -> c.device_live <- false | Error _ -> ());
               let cleanup = take_cleanup_error () in
               match (destroyed, cleanup) with
               | (Error _ as failure), _ -> failure
@@ -957,7 +1002,6 @@ let create () =
           in
           Ok
             {
-
               Ogpu_core.Backend.device_handle = Device.Private.handle device;
               capabilities = Device.capabilities device;
               create_buffer;
@@ -972,7 +1016,6 @@ let create () =
               create_argument;
               create_queue;
               create_surface;
-
               destroy_device;
             }
   in

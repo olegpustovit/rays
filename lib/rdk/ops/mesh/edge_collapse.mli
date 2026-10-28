@@ -1,8 +1,13 @@
 val raw :
-  ?cancel:Cancel.t -> ?grain:int -> ?edges:Edge_group.t ->
-  ?connectivity_attribute:string -> ?position:Fuse_reduce.position ->
-  ?remove_degenerate_primitives:bool -> ?recompute_point_normals:bool ->
-  Geometry.t -> (Geometry.t, string) result
+  ?cancel:Cancel.t ->
+  ?grain:int ->
+  ?edges:Edge_group.t ->
+  ?connectivity_attribute:string ->
+  ?position:Fuse_reduce.position ->
+  ?remove_degenerate_primitives:bool ->
+  ?recompute_point_normals:bool ->
+  Geometry.t ->
+  (Geometry.t, string) result
 
 type params = {
   cancel : Cancel.t option;

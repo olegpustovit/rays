@@ -12,25 +12,31 @@
  (libraries sdl3 input))
 
 (executable
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (name test_main)
  (modules test_main test_runtime_visibility test_runtime_input)
  (libraries runtime runtime_input ogpu ogpu_metal sdl3))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_runtime_visibility)
  (locks smoke_window)
- (action (run %{exe:test_main.exe} test_runtime_visibility)))
+ (action
+  (run %{exe:test_main.exe} test_runtime_visibility)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_runtime_input)
- (action (run %{exe:test_main.exe} test_runtime_input)))
+ (action
+  (run %{exe:test_main.exe} test_runtime_input)))
 
 (alias
  (name runtest-native)
- (deps (alias test_runtime_visibility)))
+ (deps
+  (alias test_runtime_visibility)))
 
 (alias
  (name runtest)

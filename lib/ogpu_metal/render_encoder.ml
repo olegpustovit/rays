@@ -97,9 +97,7 @@ let draw_batch (context : Command_control.t) encoder render_pipeline draws =
                 : Metal.Render_encoder.prepared_indexed_draw))
             draws resolved
         in
-        match
-          Metal.Render_encoder.prepare_indexed_draws (Device.Private.metal device) prepared
-        with
+        match Metal.Render_encoder.prepare_indexed_draws (Device.Private.metal device) prepared with
         | Error e -> Error (Device.of_metal_error ~operation e)
         | Ok prepared ->
             native_of (Metal.Render_encoder.execute_prepared_indexed_draws encoder prepared)

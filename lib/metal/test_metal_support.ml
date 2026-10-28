@@ -10,8 +10,7 @@ let get = function
 
 let expect kind = function
   | Error error when error.kind = kind -> error
-  | Error error ->
-      fail "expected a different error kind: %s" (Format.asprintf "%a" pp_error error)
+  | Error error -> fail "expected a different error kind: %s" (Format.asprintf "%a" pp_error error)
   | Ok _ -> fail "operation unexpectedly succeeded"
 
 let reject kind result = ignore (expect kind result)
@@ -34,8 +33,7 @@ let without_handles name operation =
   let before = stats () in
   let result = operation () in
   let after = stats () in
-  if after.total_created <> before.total_created || after.live_handles <> before.live_handles
-  then
+  if after.total_created <> before.total_created || after.live_handles <> before.live_handles then
     fail "%s allocated a native handle (created %Ld -> %Ld, live %d -> %d)" name
       before.total_created after.total_created before.live_handles after.live_handles;
   result
@@ -72,8 +70,8 @@ let complete commands =
   get (Command_buffer.commit commands);
   get (Command_buffer.wait_until_completed commands);
   (match get (Command_buffer.status commands) with
-   | Command_buffer.Completed -> ()
-   | _ -> fail "command buffer did not complete");
+  | Command_buffer.Completed -> ()
+  | _ -> fail "command buffer did not complete");
   get (Command_buffer.destroy commands)
 
 let full_region ?(depth = 1) width height : Texture.region =
@@ -104,5 +102,4 @@ let int32_bytes values =
   Array.iteri (fun index value -> Bytes.set_int32_le bytes (index * 4) value) values;
   bytes
 
-let float_bytes values =
-  int32_bytes (Array.map Int32.bits_of_float values)
+let float_bytes values = int32_bytes (Array.map Int32.bits_of_float values)

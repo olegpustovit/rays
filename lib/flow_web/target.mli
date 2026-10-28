@@ -8,7 +8,7 @@ val max_elements : int
 (** 64 * 65,535 = 4,194,240: dispatch is one-dimensional with [@workgroup_size(64)]. *)
 
 val region : Flow_ir.Packed.t -> count:int option -> Diagnostic.t list
-(** Why the region cannot run as a web kernel, each with the region's span: [E_GPU_FORM] (the printer's
-    own refusal), [E_WEB_BUFFERS] (more than {!max_storage_buffers} storage buffers in one kernel),
-    [E_WEB_ELEMENTS] (more than {!max_elements} elements in one dispatch; checked when [count] is known).
-    Empty when the region is legal. *)
+(** Why the region cannot run as a web kernel, each with the region's span: [E_GPU_FORM] (the
+    printer's own refusal), [E_WEB_BUFFERS] (more than {!max_storage_buffers} storage buffers in one
+    kernel), [E_WEB_ELEMENTS] (more than {!max_elements} elements in one dispatch; checked when
+    [count] is known). Empty when the region is legal. *)

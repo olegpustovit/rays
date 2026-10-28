@@ -13,8 +13,7 @@ type params = {
 }
 
 val run : params -> Geometry.t -> (Geometry.t, Error.t) result
-(** Emit one welded point per triangle/triangle intersection location. One
-    input performs AxA analysis; two inputs perform AxB analysis. Provenance
-    attributes are aligned point-owned CSR rows: input number, primitive
-    number, primitive barycentric triplets, and an incident source point number
-    or [-1]. Inputs are not passed through. *)
+(** Emit one welded point per triangle/triangle intersection location. One input performs AxA
+    analysis; two inputs perform AxB analysis. Provenance attributes are aligned point-owned CSR
+    rows: input number, primitive number, primitive barycentric triplets, and an incident source
+    point number or [-1]. Inputs are not passed through. *)

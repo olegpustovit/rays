@@ -1,4 +1,3 @@
-
 type group_use = Mirror_group_as_source | Mirror_group_as_destination
 
 type method_ =
@@ -8,19 +7,11 @@ type method_ =
       distance : float;
       tolerance : float;
     }
-  | Mirror_by_mapping of {
-      mapping_attribute : string;
-      destination_group : Group.t;
-    }
+  | Mirror_by_mapping of { mapping_attribute : string; destination_group : Group.t }
 
 type transform =
   | Mirror_copy
-  | Mirror_uv of {
-      origin_u : float;
-      origin_v : float;
-      direction_u : float;
-      direction_v : float;
-    }
+  | Mirror_uv of { origin_u : float; origin_v : float; direction_u : float; direction_v : float }
   | Mirror_vector
   | Mirror_point
 

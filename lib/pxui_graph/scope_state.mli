@@ -4,13 +4,16 @@ module E = Flow_graph.Flow_edit
 module S = Flow.Syntax
 module Ty = Flow.Ty
 module Ui = Pxui.Ui
+
 type path = E.path
+
 module Path_set : Set.S with type elt = path
+
 type change =
-    Syntax_edit of E.op
-  | Layout_active of { graph : string; index : int; }
-  | Probe_set of { zone : path; index : int; }
-  | Zone_collapsed of { zone : path; collapsed : bool; }
+  | Syntax_edit of E.op
+  | Layout_active of { graph : string; index : int }
+  | Probe_set of { zone : path; index : int }
+  | Zone_collapsed of { zone : path; collapsed : bool }
   | Selected of path list
   | Moved of (path * float * float) list
   | Level_set of (path * P.level option * bool) list
@@ -20,17 +23,17 @@ type change =
   | Open_import of string
   | Macro_requested of path list
   | Defn_requested of path list
-  | Frames_set of { scope : path;
-      frames : (string * (float * float) * (float * float)) list;
-    }
+  | Frames_set of { scope : path; frames : (string * (float * float) * (float * float)) list }
   | Display_set of path
   | Activated of path
-  | Drop_over of { path : path; kind : string; value : string; }
-  | Dropped of { path : path; kind : string; value : string; }
+  | Drop_over of { path : path; kind : string; value : string }
+  | Dropped of { path : path; kind : string; value : string }
   | Notice of string
+
 type direction = Left | Down | Up | Right
+
 type command =
-    Delete
+  | Delete
   | Fold_into
   | Unfold
   | Unfold_all  (** [⌥⇧U]: every call written in a row of the selected card becomes its own card *)
@@ -68,13 +71,9 @@ type command =
   | Open_all
   | Point_all
   | Show_hints
-type stats = {
-  nodes : int;
-  zones : int;
-  rows : int;
-  drawn_items : int;
-  drawn_zones : int;
-}
+
+type stats = { nodes : int; zones : int; rows : int; drawn_items : int; drawn_zones : int }
+
 type wiring = {
   src : string;
   ty : Ty.t option;
@@ -82,26 +81,18 @@ type wiring = {
   from : float * float;
   lift : (path * E.arg_key) list;  (** the inputs an Alt-drag lifted it from *)
 }
+
 type drag =
-    Moving of { paths : path list; dx : float; dy : float; moved : bool; }
+  | Moving of { paths : path list; dx : float; dy : float; moved : bool }
   | Wiring of wiring
-  | Marquee of { base : Path_set.t; }
-  | Sizing of { scope : path; index : int; dw : float; dh : float; }
-  | Carrying of { scope : path; index : int; paths : path list; dx : float;
-      dy : float;
-    }
-type editing =
-    Name of path
-  | Default of path
-  | Title of path * int
-  | Output of path
+  | Marquee of { base : Path_set.t }
+  | Sizing of { scope : path; index : int; dw : float; dh : float }
+  | Carrying of { scope : path; index : int; paths : path list; dx : float; dy : float }
+
+type editing = Name of path | Default of path | Title of path * int | Output of path
 type fr = string * (float * float) * (float * float)
-type hint_target = {
-  label : string;
-  node : path;
-  key : E.arg_key option;
-  pos : float * float;
-}
+type hint_target = { label : string; node : path; key : E.arg_key option; pos : float * float }
+
 type hinting = {
   src : string;
   src_ty : Ty.t;
@@ -110,6 +101,7 @@ type hinting = {
   stage : path option;
   armed : bool;
 }
+
 type t = {
   x : int;
   y : int;
@@ -158,6 +150,7 @@ type t = {
   tags : bool;
   chain : (Path_set.t * Scope_wires.wire array * (Path_set.t * Path_set.t)) option ref;
 }
+
 val chains_of : t -> (Path_set.t * Path_set.t) option
 val wire_lit : Path_set.t * Path_set.t -> Scope_wires.wire -> bool
 val tagged : t -> Scope_wires.wire -> bool
@@ -170,8 +163,7 @@ val suspend : t -> t
 val with_guide : bool -> t -> t
 val with_theme : Pxui.theme -> t -> t
 val with_failed : (path * string) list -> t -> t
-val with_carry :
-  lit:(path * string) list -> hot:(path * bool) option -> t -> t
+val with_carry : lit:(path * string) list -> hot:(path * bool) option -> t -> t
 val selected : t -> path list
 val editing : t -> bool
 val select : path list -> t -> t
@@ -183,6 +175,7 @@ val frame_all : t -> t
 val count_of : t -> path -> int
 val no_shift : 'a -> float * float
 val lens_of : t -> path -> int option
+
 val with_scope :
   ?at:(path -> (float * float) option) ->
   ?level:(path -> (P.level * bool) option) ->
@@ -192,7 +185,12 @@ val with_scope :
   ?frames:(path -> (string * (float * float) * (float * float)) list) ->
   ?imported:(path -> string option) ->
   ?display:path ->
-  ?layouts:string list -> key:string -> P.scope -> t -> t
+  ?layouts:string list ->
+  key:string ->
+  P.scope ->
+  t ->
+  t
+
 val relayout : ?sticky:bool -> t -> t
 
 val tidy : t -> t

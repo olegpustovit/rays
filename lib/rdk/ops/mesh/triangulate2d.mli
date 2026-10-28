@@ -8,8 +8,6 @@ type projection =
   | Plane of { origin : Rays_math.Vec3.t; normal : Rays_math.Vec3.t }
   | Point_attribute of string
 
-(** Every field is required: the SOP declaration owns the defaults and the
-    tests build values with [Rdk_test_support.triangulate2d]. *)
 type params = {
   grain : int;
   selection : Element_selection.t option;
@@ -43,5 +41,7 @@ type params = {
   remove_unused_points : bool;
   recompute_point_normals : bool;
 }
+(** Every field is required: the SOP declaration owns the defaults and the tests build values with
+    [Rdk_test_support.triangulate2d]. *)
 
 val run : ?cancel:Cancel.t -> params -> Geometry.t -> (Geometry.t, Error.t) result

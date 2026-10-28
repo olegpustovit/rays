@@ -29,6 +29,7 @@ val create :
 
 val frame : t -> int64
 val time : t -> float
+
 val input : t -> Input.t
 (** Full logical frame. Its time and index follow this context's clock. *)
 
@@ -38,6 +39,6 @@ val grain : t -> int
 val cancel_token : t -> Cancel.t
 val cancelled : t -> bool
 
-(** Exact cache-key projection for the declared facts. Static dependencies
-    always return the same projection, independent of the context. *)
 val cache_projection : Dependencies.t -> t -> string
+(** Exact cache-key projection for the declared facts. Static dependencies always return the same
+    projection, independent of the context. *)

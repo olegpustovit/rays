@@ -3,16 +3,20 @@
 
 (rule
  (alias runtest)
- (deps (glob_files sketches/*.rays))
+ (deps
+  (glob_files sketches/*.rays))
  (action
-  (system "ls sketches/*.rays | xargs -P 8 -n 1 sh -c 'out=$(%{bin:rays} check \"$0\" 2>&1) || { echo \"$out\"; exit 255; }'")))
+  (system
+   "ls sketches/*.rays | xargs -P 8 -n 1 sh -c 'out=$(%{bin:rays} check \"$0\" 2>&1) || { echo \"$out\"; exit 255; }'")))
 
 (rule
  (alias smoke)
  (locks smoke_window)
  (deps sketches/basic.rays sketches/sop_gallery.rays)
  (action
-  (setenv RAYS_MAX_FRAMES 30
+  (setenv
+   RAYS_MAX_FRAMES
+   30
    (progn
     (run %{bin:rays} sketches/basic.rays)
     (run %{bin:rays} sketches/sop_gallery.rays)))))
@@ -20,15 +24,27 @@
 (rule
  (alias smoke-all)
  (locks smoke_window)
- (deps (glob_files sketches/*.rays))
+ (deps
+  (glob_files sketches/*.rays))
  (action
-  (setenv RAYS_MAX_FRAMES 30
-   (system "for f in sketches/*.rays; do case $f in *_lib.rays) continue;; esac; %{bin:rays} $f || exit 1; done"))))
+  (setenv
+   RAYS_MAX_FRAMES
+   30
+   (system
+    "for f in sketches/*.rays; do case $f in *_lib.rays) continue;; esac; %{bin:rays} $f || exit 1; done"))))
 
 ; tools/codemod builds with --profile codemod: the dev warnings plus unused
 ; modules (60). Warnings stay fatal: dune never replays a cached success.
+
 (env
  (codemod
   (flags
-   (-w @1..3@5..8@10..28@31..32@34..37@39@43@46..47@49..57-50@61..62@67@69-40
-    -w @60 -strict-sequence -strict-formats -short-paths -keep-locs -g))))
+   (-w
+    @1..3@5..8@10..28@31..32@34..37@39@43@46..47@49..57-50@61..62@67@69-40
+    -w
+    @60
+    -strict-sequence
+    -strict-formats
+    -short-paths
+    -keep-locs
+    -g))))

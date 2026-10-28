@@ -41,4 +41,5 @@ type weld_params = {
 }
 
 val weld : weld_params -> Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result
-(** [fuse] of the points within [tolerance], averaging positions and keeping the first attributes. *)
+(** [fuse] of the points within [tolerance], averaging positions and keeping the first attributes.
+*)

@@ -1,5 +1,5 @@
 (** What an editor reads of a cooked geometry: summaries, bounds, the sheet's columns, a wire mesh,
-    picking and the probed-iteration tint.  Pure over the geometry; no UI. *)
+    picking and the probed-iteration tint. Pure over the geometry; no UI. *)
 
 type t = Rdk_core.Geometry.t
 type surface = Rdk_geom.Surface_index.t
@@ -12,7 +12,12 @@ val points_of_nothing : t
 val point_count : t -> int
 val bounds : t -> (Rays_math.Vec3.t * Rays_math.Vec3.t) option
 
-type summary = { points : int; prims : int; groups : string list; attributes : (string * string * string * int) list }
+type summary = {
+  points : int;
+  prims : int;
+  groups : string list;
+  attributes : (string * string * string * int) list;
+}
 
 val summary : t -> summary
 (** Point and primitive counts, group names and (owner, name, kind, length) of each attribute. *)
@@ -35,11 +40,20 @@ val tags : attribute:string -> t -> int array option
 val surface : t -> surface option
 (** A ray index of the geometry; [None] when it cannot be picked (degenerate polygons). *)
 
-val cast : attribute:string -> surface option -> t -> origin:Rays_math.Vec3.t -> direction:Rays_math.Vec3.t ->
+val cast :
+  attribute:string ->
+  surface option ->
+  t ->
+  origin:Rays_math.Vec3.t ->
+  direction:Rays_math.Vec3.t ->
   (float * int) option
 (** The nearest hit as (distance, tag); a geometry without tags never picks. *)
 
-val cast_material : surface option -> t -> origin:Rays_math.Vec3.t -> direction:Rays_math.Vec3.t ->
+val cast_material :
+  surface option ->
+  t ->
+  origin:Rays_math.Vec3.t ->
+  direction:Rays_math.Vec3.t ->
   (float * string option) option
 (** The nearest hit as (distance, [shop_materialpath] of that primitive). *)
 

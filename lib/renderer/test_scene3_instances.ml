@@ -36,7 +36,9 @@ let run () =
   match create_offscreen ~logical_width:4 ~logical_height:4 ~width:4 ~height:4 with
   | Error error -> failwith (Format.asprintf "%a" Renderer.pp_error error)
   | Ok runtime ->
-      let indices = Bytes.make 12 '\000' and vertices = Bytes.make (24 * 3) '\000' and attributes = Bytes.make (12 * 3) '\000' in
+      let indices = Bytes.make 12 '\000'
+      and vertices = Bytes.make (24 * 3) '\000'
+      and attributes = Bytes.make (12 * 3) '\000' in
       Bytes.set_int32_le indices 4 1l;
       Bytes.set_int32_le indices 8 2l;
       List.iteri
@@ -115,7 +117,9 @@ let run () =
       if actual <> expected then failwith "instanced Scene3 draw differs from two indexed draws";
       let primitive_mesh primitive positions =
         let count = List.length positions in
-        let vertices = Bytes.make (count * 24) '\000' and attributes = Bytes.make (count * 12) '\000' and indices = Bytes.make (count * 4) '\000' in
+        let vertices = Bytes.make (count * 24) '\000'
+        and attributes = Bytes.make (count * 12) '\000'
+        and indices = Bytes.make (count * 4) '\000' in
         List.iteri
           (fun index (x, y) ->
             let offset = index * 24 in
@@ -125,7 +129,8 @@ let run () =
             Bytes.set_int32_le attributes (index * 12) 0xffffffffl;
             Bytes.set_int32_le indices (index * 4) (Int32.of_int index))
           positions;
-        ({ mesh with vertices; indices; vertex_count = count; index_count = count; primitive }, attributes)
+        ( { mesh with vertices; indices; vertex_count = count; index_count = count; primitive },
+          attributes )
       in
       List.iter
         (fun (primitive, positions) ->

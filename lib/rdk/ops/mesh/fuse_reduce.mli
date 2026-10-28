@@ -15,11 +15,6 @@ type position =
   | Minimum_weight_position
   | Maximum_weight_position
 
-
-
-
-
-
 type params = {
   cancel : Cancel.t option;
   grain : int;

@@ -48,7 +48,7 @@ let run () =
   | Ok device ->
       if not (get (Device.supports_family device Device.Metal4)) then begin
         without_handles "Metal 4 compiler on an older device" (fun () ->
-          reject Unsupported (Compiler.create device));
+            reject Unsupported (Compiler.create device));
         get (Device.destroy device);
         print_endline "metal render pipeline: Metal 4 unsupported, typed rejection"
       end
@@ -61,45 +61,46 @@ let run () =
         let create ?label ?fragment ?reflection ?raster_sample_count ?color_formats
             ?color_attachments ?primitive_topology ?support_indirect_command_buffers vertex =
           Compiler.create_render_pipeline ?label ?fragment ?reflection ?raster_sample_count
-            ?color_formats ?color_attachments ?primitive_topology
-            ?support_indirect_command_buffers compiler ~library ~vertex
+            ?color_formats ?color_attachments ?primitive_topology ?support_indirect_command_buffers
+            compiler ~library ~vertex
         in
         without_handles "invalid Metal 4 render inputs" (fun () ->
-          reject Invalid_argument (create "");
-          reject Invalid_argument (create "missing_vertex");
-          reject Invalid_argument
-            (create ~label:"invalid\000render" ~fragment:"prismel_fragment" "prismel_vertex");
-          reject Invalid_argument (create ~fragment:"missing_fragment" "prismel_vertex");
-          (* Rasterization needs a fragment function and one to eight colours. *)
-          reject Invalid_argument (create "prismel_vertex");
-          reject Invalid_argument (create ~color_formats:[] "prismel_vertex_only");
-          reject Invalid_argument
-            (create ~color_formats:[] ~fragment:"prismel_fragment" "prismel_vertex");
-          reject Invalid_argument
-            (create ~raster_sample_count:0 ~fragment:"prismel_fragment" "prismel_vertex");
-          reject Invalid_argument
-            (create
-               ~color_formats:(List.init 9 (fun _ -> Texture.Bgra8_unorm))
-               ~fragment:"prismel_fragment" "prismel_vertex");
-          reject Invalid_argument
-            (create ~color_formats:[ Texture.Depth32_float ] ~fragment:"prismel_fragment"
-               "prismel_vertex");
-          reject Invalid_argument
-            (create ~color_formats:[ Texture.Bgra8_unorm ]
-               ~color_attachments:[ Render_pipeline.color_attachment Texture.Bgra8_unorm ]
-               ~fragment:"prismel_fragment" "prismel_vertex");
-          reject Invalid_argument
-            (create
-               ~color_attachments:
-                 [ Render_pipeline.color_attachment
-                     ~write_mask:[ Render_pipeline.Write_red; Render_pipeline.Write_red ]
-                     Texture.Bgra8_unorm
-                 ]
-               ~fragment:"prismel_fragment" "prismel_vertex");
-          (* A stage given a function of another stage is Metal's to refuse. *)
-          reject Native_error (create ~fragment:"prismel_fragment" "prismel_fragment");
-          reject Native_error (create ~fragment:"prismel_vertex" "prismel_vertex");
-          reject Native_error (create ~fragment:"prismel_fragment" "prismel_kernel"));
+            reject Invalid_argument (create "");
+            reject Invalid_argument (create "missing_vertex");
+            reject Invalid_argument
+              (create ~label:"invalid\000render" ~fragment:"prismel_fragment" "prismel_vertex");
+            reject Invalid_argument (create ~fragment:"missing_fragment" "prismel_vertex");
+            (* Rasterization needs a fragment function and one to eight colours. *)
+            reject Invalid_argument (create "prismel_vertex");
+            reject Invalid_argument (create ~color_formats:[] "prismel_vertex_only");
+            reject Invalid_argument
+              (create ~color_formats:[] ~fragment:"prismel_fragment" "prismel_vertex");
+            reject Invalid_argument
+              (create ~raster_sample_count:0 ~fragment:"prismel_fragment" "prismel_vertex");
+            reject Invalid_argument
+              (create
+                 ~color_formats:(List.init 9 (fun _ -> Texture.Bgra8_unorm))
+                 ~fragment:"prismel_fragment" "prismel_vertex");
+            reject Invalid_argument
+              (create ~color_formats:[ Texture.Depth32_float ] ~fragment:"prismel_fragment"
+                 "prismel_vertex");
+            reject Invalid_argument
+              (create ~color_formats:[ Texture.Bgra8_unorm ]
+                 ~color_attachments:[ Render_pipeline.color_attachment Texture.Bgra8_unorm ]
+                 ~fragment:"prismel_fragment" "prismel_vertex");
+            reject Invalid_argument
+              (create
+                 ~color_attachments:
+                   [
+                     Render_pipeline.color_attachment
+                       ~write_mask:[ Render_pipeline.Write_red; Render_pipeline.Write_red ]
+                       Texture.Bgra8_unorm;
+                   ]
+                 ~fragment:"prismel_fragment" "prismel_vertex");
+            (* A stage given a function of another stage is Metal's to refuse. *)
+            reject Native_error (create ~fragment:"prismel_fragment" "prismel_fragment");
+            reject Native_error (create ~fragment:"prismel_vertex" "prismel_vertex");
+            reject Native_error (create ~fragment:"prismel_fragment" "prismel_kernel"));
         let render_pipeline =
           get
             (create ~label:"metal4 reflected render" ~fragment:"prismel_fragment" ~reflection:true
@@ -109,23 +110,25 @@ let run () =
         if not (get (Render_pipeline.supports_indirect_command_buffers render_pipeline)) then
           fail "a pipeline compiled for indirect command buffers denies it";
         (match Render_pipeline.reflection render_pipeline with
-         | Some reflection ->
-             (match List.map buffer_binding reflection.vertex with
-              | [ ("offset", 0L, Binding.Read_only, Shader_type.Vector (Shader_type.Float, 2)) ] -> ()
-              | _ -> fail "Metal 4 vertex reflection is not the one float2 buffer at index 0");
-             (match List.map buffer_binding reflection.fragment with
-              | [ ("tint", 1L, Binding.Read_only, Shader_type.Vector (Shader_type.Float, 4)) ] -> ()
-              | _ -> fail "Metal 4 fragment reflection is not the one float4 buffer at index 1")
-         | None -> fail "Metal 4 render reflection is missing");
+        | Some reflection -> (
+            (match List.map buffer_binding reflection.vertex with
+            | [ ("offset", 0L, Binding.Read_only, Shader_type.Vector (Shader_type.Float, 2)) ] -> ()
+            | _ -> fail "Metal 4 vertex reflection is not the one float2 buffer at index 0");
+            match List.map buffer_binding reflection.fragment with
+            | [ ("tint", 1L, Binding.Read_only, Shader_type.Vector (Shader_type.Float, 4)) ] -> ()
+            | _ -> fail "Metal 4 fragment reflection is not the one float4 buffer at index 1")
+        | None -> fail "Metal 4 render reflection is missing");
         let plain_pipeline =
-          get (create ~fragment:"prismel_fragment" ~color_formats:[ Texture.Rgba8_unorm ] "prismel_vertex")
+          get
+            (create ~fragment:"prismel_fragment" ~color_formats:[ Texture.Rgba8_unorm ]
+               "prismel_vertex")
         in
         if Render_pipeline.reflection plain_pipeline <> None then
           fail "render reflection was kept without being asked for";
         if get (Render_pipeline.supports_indirect_command_buffers plain_pipeline) then
           fail "a pipeline compiled without indirect command buffers claims them";
         finalizer_releases "render pipeline" ~count:1 (fun () ->
-          ignore (get (create ~fragment:"prismel_fragment" "prismel_vertex")));
+            ignore (get (create ~fragment:"prismel_fragment" "prismel_vertex")));
         (* One covering triangle, the tint in a fragment buffer: the pipeline's
            output is the tint, to the byte. *)
         let queue = get (Command_queue.create device) in
@@ -150,16 +153,23 @@ let run () =
         get (Render_encoder.draw_triangles encoder ~first:0 ~count:3 ());
         (* The same triangle again, its counts read from a buffer when the draw runs (index
            count 3, one instance); a misaligned argument offset is refused before encoding. *)
-        let int_bytes values = let b = Bytes.create (4 * Array.length values) in
-          Array.iteri (fun i v -> Bytes.set_int32_le b (4 * i) (Int32.of_int v)) values; b in
+        let int_bytes values =
+          let b = Bytes.create (4 * Array.length values) in
+          Array.iteri (fun i v -> Bytes.set_int32_le b (4 * i) (Int32.of_int v)) values;
+          b
+        in
         let indices = get (Buffer.create ~device ~length:12L ~storage:Buffer.Shared ()) in
         get (Buffer.write_bytes indices ~dst_offset:0L (int_bytes [| 0; 1; 2 |]));
         let arguments = get (Buffer.create ~device ~length:24L ~storage:Buffer.Shared ()) in
         get (Buffer.write_bytes arguments ~dst_offset:0L (int_bytes [| 0; 3; 1; 0; 0; 0 |]));
-        reject Invalid_argument (Render_encoder.draw_indexed_indirect encoder ~primitive:Render_encoder.Triangle
-          ~index_type:Uint32 ~index_buffer:indices ~index_offset:0L ~arguments ~arguments_offset:2L);
-        get (Render_encoder.draw_indexed_indirect encoder ~primitive:Render_encoder.Triangle
-          ~index_type:Uint32 ~index_buffer:indices ~index_offset:0L ~arguments ~arguments_offset:4L);
+        reject Invalid_argument
+          (Render_encoder.draw_indexed_indirect encoder ~primitive:Render_encoder.Triangle
+             ~index_type:Uint32 ~index_buffer:indices ~index_offset:0L ~arguments
+             ~arguments_offset:2L);
+        get
+          (Render_encoder.draw_indexed_indirect encoder ~primitive:Render_encoder.Triangle
+             ~index_type:Uint32 ~index_buffer:indices ~index_offset:0L ~arguments
+             ~arguments_offset:4L);
         get (Render_encoder.end_encoding encoder);
         complete commands;
         get (Buffer.destroy arguments);

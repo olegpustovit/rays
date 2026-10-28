@@ -1,5 +1,6 @@
 (* Private graph-pane interface; only the pane's shared operations. *)
 open Scope_state
+
 val parents_removed : path list -> path list
 val wired : P.row -> bool
 val unwire : t -> P.node -> P.row -> E.op list

@@ -53,7 +53,9 @@ let run () =
   match create_window 4 4 with
   | Error _ -> print_endline "renderer Scene3 lighting: skipped"
   | Ok runtime ->
-      let indices = Bytes.make 12 '\000' and vertices = Bytes.make (24 * 3) '\000' and attributes = Bytes.make (12 * 3) '\000' in
+      let indices = Bytes.make 12 '\000'
+      and vertices = Bytes.make (24 * 3) '\000'
+      and attributes = Bytes.make (12 * 3) '\000' in
       Bytes.set_int32_le indices 4 1l;
       Bytes.set_int32_le indices 8 2l;
       List.iteri
@@ -106,7 +108,9 @@ let run () =
             let bytes =
               get
                 (Renderer.read_pixels runtime
-                   ~bytes_per_row:((get (Runtime.presentation_facts (Renderer.Native.runtime runtime))).drawable_width * 4))
+                   ~bytes_per_row:
+                     ((get (Runtime.presentation_facts (Renderer.Native.runtime runtime)))
+                        .drawable_width * 4))
             in
             let actual =
               ( Char.code (Bytes.get bytes 0),

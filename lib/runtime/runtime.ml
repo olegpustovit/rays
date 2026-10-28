@@ -29,7 +29,8 @@ module Change_flag = struct
     if flag.announced then begin
       flag.announced <- false;
       Some (query ())
-    end else None
+    end
+    else None
 end
 
 type cursor_shape = [ `Default | `Horizontal_resize | `Vertical_resize | `Text ]
@@ -53,7 +54,8 @@ type t = {
   mutable dead : bool;
 }
 
-let stale operation = Error (Ogpu.Error.make operation Ogpu.Error.Stale_handle "runtime is destroyed")
+let stale operation =
+  Error (Ogpu.Error.make operation Ogpu.Error.Stale_handle "runtime is destroyed")
 
 let error op text = Error (Ogpu.Error.make op Ogpu.Error.Invalid_state text)
 let sdl op = function Ok x -> Ok x | Error e -> error op (Format.asprintf "%a" Sdl3.pp_error e)
@@ -76,7 +78,7 @@ let facts window =
   | _, Error e -> sdl "Runtime.facts" (Error e)
   | _ -> error "Runtime.facts" "window dimensions are invalid"
 
- (* Every step is checked: the first failure is the result. *)
+(* Every step is checked: the first failure is the result. *)
 let reveal window =
   let ( let* ) = Result.bind in
   let* () = Sdl3.Window.show window in
@@ -85,7 +87,8 @@ let reveal window =
   let* () = Sdl3.Window.center window in
   Sdl3.Window.sync window
 
-let create ?(vsync = true) ?(hidden = true) ?(high_density = true) ?(title = "Rays") ~width ~height () =
+let create ?(vsync = true) ?(hidden = true) ?(high_density = true) ?(title = "Rays") ~width ~height
+    () =
   let op = "Runtime.create" in
   if width <= 0 || height <= 0 then
     Error (Ogpu.Error.make op Invalid_argument "dimensions must be positive")
@@ -106,14 +109,19 @@ let create ?(vsync = true) ?(hidden = true) ?(high_density = true) ?(title = "Ra
     in
     let ( let* ) = Result.bind in
     let created =
-      let* () = acquire (Sdl3.Init.init [ Sdl3.Init.Video ]) (fun () ->
-        Sdl3.Init.quit_subsystems [ Sdl3.Init.Video ]) in
+      let* () =
+        acquire (Sdl3.Init.init [ Sdl3.Init.Video ]) (fun () ->
+            Sdl3.Init.quit_subsystems [ Sdl3.Init.Video ])
+      in
       (* SDL itself turns a Control-click into the secondary click. *)
       let* () = sdl op (Sdl3.Hint.control_click_is_right_click true) in
       let flags : Sdl3.Window.flag list =
-        Sdl3.Window.Metal :: (if high_density then [ Sdl3.Window.High_pixel_density ] else []) @ (if hidden then [ Sdl3.Window.Hidden ] else [])
+        (Sdl3.Window.Metal :: (if high_density then [ Sdl3.Window.High_pixel_density ] else []))
+        @ if hidden then [ Sdl3.Window.Hidden ] else []
       in
-      let* window = acquire (Sdl3.Window.create ~title ~width ~height ~flags ()) Sdl3.Window.destroy in
+      let* window =
+        acquire (Sdl3.Window.create ~title ~width ~height ~flags ()) Sdl3.Window.destroy
+      in
       let* () = if hidden then Ok () else sdl op (reveal window) in
       let* view = acquire (Sdl3.Metal_view.create window) Sdl3.Metal_view.destroy in
       let* _token = sdl op (Sdl3.Metal_view.layer view) in
@@ -123,10 +131,16 @@ let create ?(vsync = true) ?(hidden = true) ?(high_density = true) ?(title = "Ra
       Ok
         {
           window =
-              Some
-              { handle = window; view; vsync; cursors = []; cursor_shape = None;
-                text_input = false; changed = Change_flag.create () };
-
+            Some
+              {
+                handle = window;
+                view;
+                vsync;
+                cursors = [];
+                cursor_shape = None;
+                text_input = false;
+                changed = Change_flag.create ();
+              };
           facts;
           presentation = None;
           dead = false;
@@ -225,14 +239,11 @@ let query_presentation (value : t) =
       let facts = value.facts in
       Ok
         {
-
           logical_width = facts.logical_width;
           logical_height = facts.logical_height;
           drawable_width = facts.drawable_width;
           drawable_height = facts.drawable_height;
-
           pixel_density = facts.pixel_scale_x;
-
         }
   | Some { handle = window; _ } -> (
       let op = "Runtime.presentation_facts" in
@@ -279,9 +290,7 @@ let window_changed (value : t) =
   | Some _ | None -> ()
 
 let set_resizable value enabled =
-  window_call "Runtime.set_resizable"
-    (fun window -> Sdl3.Window.set_resizable window enabled)
-    value
+  window_call "Runtime.set_resizable" (fun window -> Sdl3.Window.set_resizable window enabled) value
 
 let set_window_background value (red, green, blue) =
   window_call "Runtime.set_window_background"
@@ -370,10 +379,10 @@ let show_dialog value ?(filters = []) ?default_location kind =
         ~filters:(List.map (fun { name; pattern } -> { Sdl3.Dialog.name; pattern }) filters)
         ?default_location
         (match kind with
-         | Open_file -> Sdl3.Dialog.Open_file
-         | Open_files -> Open_files
-         | Save_file -> Save_file
-         | Open_folder -> Open_folder))
+        | Open_file -> Sdl3.Dialog.Open_file
+        | Open_files -> Open_files
+        | Save_file -> Save_file
+        | Open_folder -> Open_folder))
     value
 
 (* Shown, and neither minimized nor covered. SDL announces the start of
@@ -382,8 +391,7 @@ let show_dialog value ?(filters = []) ?default_location kind =
 let visible value =
   live_window "Runtime.visible" value (fun window ->
       Result.map
-        (fun (state : Sdl3.Window.state) ->
-          not (state.hidden || state.minimized || state.occluded))
+        (fun (state : Sdl3.Window.state) -> not (state.hidden || state.minimized || state.occluded))
         (sdl "Runtime.visible" (Sdl3.Window.state window.handle)))
 
 let destroy (value : t) =
@@ -409,20 +417,30 @@ let destroy (value : t) =
       value.window;
     match !failure with None -> Ok () | Some error -> Error error)
 
-  let is_window (value : t) = Option.is_some value.window
-  let surface_configuration (value : t) =
-    let layer = match value.window with
-      | None -> Ok None
-      | Some window -> Result.map Option.some (sdl "Runtime.surface_configuration"
-          (Sdl3.Metal_view.layer window.view)) in
-    Result.map (fun layer ->
+let is_window (value : t) = Option.is_some value.window
+
+let surface_configuration (value : t) =
+  let layer =
+    match value.window with
+    | None -> Ok None
+    | Some window ->
+        Result.map Option.some
+          (sdl "Runtime.surface_configuration" (Sdl3.Metal_view.layer window.view))
+  in
+  Result.map
+    (fun layer ->
       let facts = value.facts in
       let vsync = Option.fold ~none:false ~some:(fun window -> window.vsync) value.window in
-      { Ogpu.Surface.logical_width=facts.logical_width;
-        logical_height=facts.logical_height;
-        physical_width=facts.drawable_width;
-        physical_height=facts.drawable_height;
-        format=Ogpu.Surface.Bgra8_unorm;
-        present_mode=(if vsync then Ogpu.Surface.Fifo else Ogpu.Surface.Immediate);
-        max_acquired=2; layer }) layer
-  let window_handle (value : t) = Option.map (fun window -> window.handle) value.window
+      {
+        Ogpu.Surface.logical_width = facts.logical_width;
+        logical_height = facts.logical_height;
+        physical_width = facts.drawable_width;
+        physical_height = facts.drawable_height;
+        format = Ogpu.Surface.Bgra8_unorm;
+        present_mode = (if vsync then Ogpu.Surface.Fifo else Ogpu.Surface.Immediate);
+        max_acquired = 2;
+        layer;
+      })
+    layer
+
+let window_handle (value : t) = Option.map (fun window -> window.handle) value.window

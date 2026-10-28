@@ -1,19 +1,17 @@
-(** Concatenate geometries with matching attribute schemas. Group schemas are
-    unioned in first-seen order by default; a missing group contributes no
-    members. Pass [~pad_groups:false] to require exact group schemas. Detail
-    attributes still require an explicit merge policy.
-
-    [~source_attribute:name] also writes a primitive int attribute [name]
-    holding, per primitive, [source_base] (default 0) plus the index of the
-    input it came from.  An input that already has [name] keeps its values, so
-    a merge of merges keeps the innermost tag (give every merge its own
-    [source_base] range and a tag names one input of one merge). *)
 type run_params = {
   cancel : Cancel.t option;
   grain : int option;
   source_attribute : string option;
   source_base : int option;
 }
+(** Concatenate geometries with matching attribute schemas. Group schemas are unioned in first-seen
+    order by default; a missing group contributes no members. Pass [~pad_groups:false] to require
+    exact group schemas. Detail attributes still require an explicit merge policy.
+
+    [~source_attribute:name] also writes a primitive int attribute [name] holding, per primitive,
+    [source_base] (default 0) plus the index of the input it came from. An input that already has
+    [name] keeps its values, so a merge of merges keeps the innermost tag (give every merge its own
+    [source_base] range and a tag names one input of one merge). *)
 
 val run : run_params -> Geometry.t list -> (Geometry.t, Error.t) result
 

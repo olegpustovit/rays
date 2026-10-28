@@ -5,9 +5,7 @@ external counts : unit -> int * int = "caml_token_test_counts"
 external unpaired : unit -> Native_layer_token.t = "caml_token_test_unpaired"
 
 let () =
-  (match unpaired () with
-   | exception Invalid_argument _ -> ()
-   | _ -> assert false);
+  (match unpaired () with exception Invalid_argument _ -> () | _ -> assert false);
   let token = create 17L 23L in
   assert (counts () = (1, 0));
   assert (Native_layer_token.alive token);

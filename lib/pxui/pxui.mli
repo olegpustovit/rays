@@ -1,10 +1,8 @@
 (** PXUI: Rays's creative-coding UI kit.
 
-    {!Ui} is the immediate-mode core: build the interface every frame inside
-    [Ui.frame], read widget values straight back into the sketch model, and
-    compose [Ui.scene] into the view. {!Theme} is the design kit's palette
-    and typography; the camera modules are
-    reusable panels. *)
+    {!Ui} is the immediate-mode core: build the interface every frame inside [Ui.frame], read widget
+    values straight back into the sketch model, and compose [Ui.scene] into the view. {!Theme} is
+    the design kit's palette and typography; the camera modules are reusable panels. *)
 
 type theme = Theme.t = {
   panel : Rays_math.Color.t;

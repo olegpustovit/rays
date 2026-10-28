@@ -24,14 +24,31 @@
   ../../packaging/conf-sdl3-mixer/conf-sdl3-mixer.opam)
  (action
   (progn
-   (run %{exe:check_sdl3_conf.exe} --lock %{dep:../../packaging/sdl3.lock} sdl3)
-   (run %{exe:check_sdl3_conf.exe} --lock %{dep:../../packaging/sdl3.lock} sdl3-image)
-   (run %{exe:check_sdl3_conf.exe} --lock %{dep:../../packaging/sdl3.lock} sdl3-ttf)
-   (run %{exe:check_sdl3_conf.exe} --lock %{dep:../../packaging/sdl3.lock} sdl3-mixer))))
+   (run
+    %{exe:check_sdl3_conf.exe}
+    --lock
+    %{dep:../../packaging/sdl3.lock}
+    sdl3)
+   (run
+    %{exe:check_sdl3_conf.exe}
+    --lock
+    %{dep:../../packaging/sdl3.lock}
+    sdl3-image)
+   (run
+    %{exe:check_sdl3_conf.exe}
+    --lock
+    %{dep:../../packaging/sdl3.lock}
+    sdl3-ttf)
+   (run
+    %{exe:check_sdl3_conf.exe}
+    --lock
+    %{dep:../../packaging/sdl3.lock}
+    sdl3-mixer))))
 
 (alias
  (name runtest)
- (deps (alias check_sdl3_conf)))
+ (deps
+  (alias check_sdl3_conf)))
 
 (executable
  (name installed_consumer)
@@ -44,7 +61,8 @@
  (libraries sdl3_lock unix))
 
 (executable
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (name check_sdl3_memory)
  (modules check_sdl3_memory)
  (libraries sdl3_lock unix))
@@ -53,15 +71,22 @@
  (name check_runtime_licenses)
  (modules check_runtime_licenses)
  (libraries unix yojson)
- (deps ../../LICENSE ../../specification/licenses.md ../../specification/backend.md
+ (deps
+  ../../LICENSE
+  ../../specification/licenses.md
+  ../../specification/backend.md
   runtime_license_manifest.json
-  (source_tree ../../lib/sdl3) (source_tree ../../lib/sdl3_image)
-  (source_tree ../../lib/sdl3_ttf) (source_tree ../../lib/sdl3_mixer))
- (action (run %{test} --root %{workspace_root})))
+  (source_tree ../../lib/sdl3)
+  (source_tree ../../lib/sdl3_image)
+  (source_tree ../../lib/sdl3_ttf)
+  (source_tree ../../lib/sdl3_mixer))
+ (action
+  (run %{test} --root %{workspace_root})))
 
 (alias
  (name sdl3-memory-tests)
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (deps
   check_sdl3_memory.exe
   sdl3_asan.supp
@@ -82,7 +107,9 @@
  (libraries sdl3_lock unix)
  (deps ../../packaging/sdl3.lock)
  (action
-  (run %{test} ../../packaging/sdl3.lock
+  (run
+   %{test}
+   ../../packaging/sdl3.lock
    %{exe:../../lib/sdl3/discover.exe}
    %{exe:../../lib/sdl3_image/discover.exe}
    %{exe:../../lib/sdl3_ttf/discover.exe}
@@ -98,4 +125,5 @@
   ../../packaging/conf-sdl3-image/conf-sdl3-image.opam
   ../../packaging/conf-sdl3-ttf/conf-sdl3-ttf.opam
   ../../packaging/conf-sdl3-mixer/conf-sdl3-mixer.opam)
- (action (run %{test} --root ../..)))
+ (action
+  (run %{test} --root ../..)))

@@ -11,12 +11,14 @@ type t = {
 
 let next_power_of_two value =
   let result = ref 8 in
-  while !result < value do result := !result lsl 1 done;
+  while !result < value do
+    result := !result lsl 1
+  done;
   !result
 
 let[@inline always] integer_hash x y z =
-  let value = (x * 73_856_093) lxor (y * 19_349_663) lxor (z * 83_492_791) in
-  (value lxor (value lsr 16)) land max_int
+  let value = x * 73_856_093 lxor (y * 19_349_663) lxor (z * 83_492_791) in
+  value lxor (value lsr 16) land max_int
 
 let[@inline always] float_cell value =
   if value = 0. then 0
@@ -26,18 +28,26 @@ let[@inline always] float_cell value =
 
 let create ~cells ~points =
   let capacity = next_power_of_two (max 8 (cells * 2)) in
-  { cell_x = Array.make cells 0; cell_y = Array.make cells 0;
-    cell_z = Array.make cells 0; cell_head = Array.make cells (-1);
-    table = Array.make capacity (-1); point_next = Array.make points (-1);
-    mask = capacity - 1; cell_count = 0 }
+  {
+    cell_x = Array.make cells 0;
+    cell_y = Array.make cells 0;
+    cell_z = Array.make cells 0;
+    cell_head = Array.make cells (-1);
+    table = Array.make capacity (-1);
+    point_next = Array.make points (-1);
+    mask = capacity - 1;
+    cell_count = 0;
+  }
 
 (* The table slot holding cell (x, y, z), or the empty slot where it belongs. *)
 let slot grid x y z =
   let slot = ref (integer_hash x y z land grid.mask) in
-  while grid.table.(!slot) >= 0
-      && (let cell = grid.table.(!slot) in
-          grid.cell_x.(cell) <> x || grid.cell_y.(cell) <> y
-          || grid.cell_z.(cell) <> z) do
+  while
+    grid.table.(!slot) >= 0
+    &&
+    let cell = grid.table.(!slot) in
+    grid.cell_x.(cell) <> x || grid.cell_y.(cell) <> y || grid.cell_z.(cell) <> z
+  do
     slot := (!slot + 1) land grid.mask
   done;
   !slot
@@ -51,7 +61,9 @@ let find_or_add grid x y z =
     let cell = grid.cell_count in
     grid.cell_count <- cell + 1;
     grid.table.(slot) <- cell;
-    grid.cell_x.(cell) <- x; grid.cell_y.(cell) <- y; grid.cell_z.(cell) <- z;
+    grid.cell_x.(cell) <- x;
+    grid.cell_y.(cell) <- y;
+    grid.cell_z.(cell) <- z;
     cell
   end
 

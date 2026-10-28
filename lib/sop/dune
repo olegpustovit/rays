@@ -2,9 +2,26 @@
  (name sop)
  (public_name rays.sop)
  (libraries param input rays_diagnostic rays_math rdk lru unix parallel)
- (preprocess (pps rays.ppx -- -inside-sop))
- (modules context image kernel payload node session async_cook image_nodes
-  support groups sop_topology attributes shapes nodes zone custom edit_graph)
+ (preprocess
+  (pps rays.ppx -- -inside-sop))
+ (modules
+  context
+  image
+  kernel
+  payload
+  node
+  session
+  async_cook
+  image_nodes
+  support
+  groups
+  sop_topology
+  attributes
+  shapes
+  nodes
+  zone
+  custom
+  edit_graph)
  (private_modules support groups sop_topology attributes shapes))
 
 (test
@@ -19,39 +36,71 @@
 
 (rule
  (alias test_payload)
- (action (run %{exe:test_payload.exe})))
+ (action
+  (run %{exe:test_payload.exe})))
 
 (test
  (name test_parallel_branches)
  (modules test_parallel_branches)
- (libraries sop rdk rays_math lisp_sop rdk_test_support ogpu_mock unix parallel))
+ (libraries
+  sop
+  rdk
+  rays_math
+  lisp_sop
+  rdk_test_support
+  ogpu_mock
+  unix
+  parallel))
+
 ; One executable per suite: each links only its own module, so a suite builds and runs
 ; while another is being edited.
+
 (executables
  (names run_sop run_edit_graph run_parallel_exact run_diagnostics)
- (modules run_sop run_edit_graph run_parallel_exact run_diagnostics
-  test_sop test_edit_graph test_parallel_exact test_diagnostics)
- (libraries sop rays rdk rdk_rays rdk_test_support lisp_sop rays_math ogpu_mock parallel))
+ (modules
+  run_sop
+  run_edit_graph
+  run_parallel_exact
+  run_diagnostics
+  test_sop
+  test_edit_graph
+  test_parallel_exact
+  test_diagnostics)
+ (libraries
+  sop
+  rays
+  rdk
+  rdk_rays
+  rdk_test_support
+  lisp_sop
+  rays_math
+  ogpu_mock
+  parallel))
 
 (rule
  (alias test_sop)
- (action (run %{exe:run_sop.exe})))
+ (action
+  (run %{exe:run_sop.exe})))
 
 (rule
  (alias test_edit_graph)
- (action (run %{exe:run_edit_graph.exe})))
+ (action
+  (run %{exe:run_edit_graph.exe})))
 
 (alias
  (name runtest)
- (deps (alias test_edit_graph)))
+ (deps
+  (alias test_edit_graph)))
 
 (rule
  (alias test_parallel_exact)
- (action (run %{exe:run_parallel_exact.exe})))
+ (action
+  (run %{exe:run_parallel_exact.exe})))
 
 (rule
  (alias test_diagnostics)
- (action (run %{exe:run_diagnostics.exe})))
+ (action
+  (run %{exe:run_diagnostics.exe})))
 
 (alias
  (name qualification-scale)

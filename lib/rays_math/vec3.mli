@@ -1,4 +1,5 @@
-type t = { x : float; y : float; z : float; }
+type t = { x : float; y : float; z : float }
+
 val create : float -> float -> float -> t
 val zero : t
 val unit_x : t

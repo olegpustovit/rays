@@ -1,4 +1,11 @@
-type t = R8_unorm | Rgba8_unorm | Bgra8_unorm | Bgra8_unorm_srgb | Rgba16_float | Rgba32_float | Depth32_float
+type t =
+  | R8_unorm
+  | Rgba8_unorm
+  | Bgra8_unorm
+  | Bgra8_unorm_srgb
+  | Rgba16_float
+  | Rgba32_float
+  | Depth32_float
 
 type layout = { block_width : int; block_height : int; bytes_per_block : int }
 

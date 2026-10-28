@@ -2,15 +2,12 @@ let next_data_id = Atomic.make 0
 let fresh_data_id () = Atomic.fetch_and_add next_data_id 1
 
 module Bits = struct
-
   let[@inline always] mem bits index =
-    Char.code (Bytes.unsafe_get bits (index lsr 3))
-    land (1 lsl (index land 7)) <> 0
+    Char.code (Bytes.unsafe_get bits (index lsr 3)) land (1 lsl (index land 7)) <> 0
 
   let[@inline always] set bits index =
     let byte = index lsr 3 and mask = 1 lsl (index land 7) in
-    Bytes.unsafe_set bits byte
-      (Char.chr (Char.code (Bytes.unsafe_get bits byte) lor mask))
+    Bytes.unsafe_set bits byte (Char.chr (Char.code (Bytes.unsafe_get bits byte) lor mask))
 end
 
 module Identity_cache = struct
@@ -30,12 +27,14 @@ module Identity_cache = struct
   let find cache id key =
     let rec scan slot =
       if slot = Array.length cache.slots then None
-      else match cache.slots.(slot) with
-        | Entry (entry_id, entry) when entry_id = id ->
-            (match Ephemeron.K1.query entry key with
-             | Some _ as found -> found
-             | None -> scan (slot + 1))
-        | Empty | Entry _ -> scan (slot + 1) in
+      else
+        match cache.slots.(slot) with
+        | Entry (entry_id, entry) when entry_id = id -> (
+            match Ephemeron.K1.query entry key with
+            | Some _ as found -> found
+            | None -> scan (slot + 1))
+        | Empty | Entry _ -> scan (slot + 1)
+    in
     scan 0
 
   let find_or_add cache key build =
@@ -45,12 +44,12 @@ module Identity_cache = struct
     | None ->
         let built = build () in
         Mutex.protect cache.mutex (fun () ->
-          match find cache id key with
-          | Some existing -> existing
-          | None ->
-              cache.slots.(cache.next) <- Entry (id, Ephemeron.K1.make key built);
-              cache.next <- (cache.next + 1) mod Array.length cache.slots;
-              built)
+            match find cache id key with
+            | Some existing -> existing
+            | None ->
+                cache.slots.(cache.next) <- Entry (id, Ephemeron.K1.make key built);
+                cache.next <- (cache.next + 1) mod Array.length cache.slots;
+                built)
 end
 
 let[@inline always] compare keys left right =
@@ -60,10 +59,10 @@ let[@inline always] compare keys left right =
 let median_pivot keys order first middle last =
   let a = order.(first) and b = order.(middle) and c = order.(last) in
   if compare keys a b < 0 then
-    if compare keys b c < 0 then b
-    else if compare keys a c < 0 then c else a
+    if compare keys b c < 0 then b else if compare keys a c < 0 then c else a
   else if compare keys a c < 0 then a
-  else if compare keys b c < 0 then c else b
+  else if compare keys b c < 0 then c
+  else b
 
 let select ?cancel keys order first last selected =
   let lower = ref first and upper = ref last in
@@ -73,40 +72,46 @@ let select ?cancel keys order first last selected =
     let pivot = median_pivot keys order !lower middle !upper in
     let left = ref !lower and right = ref !upper in
     while !left <= !right do
-      while compare keys order.(!left) pivot < 0 do incr left done;
-      while compare keys order.(!right) pivot > 0 do decr right done;
+      while compare keys order.(!left) pivot < 0 do
+        incr left
+      done;
+      while compare keys order.(!right) pivot > 0 do
+        decr right
+      done;
       if !left <= !right then begin
         let value = order.(!left) in
         order.(!left) <- order.(!right);
         order.(!right) <- value;
-        incr left; decr right
+        incr left;
+        decr right
       end
     done;
     if selected <= !right then upper := !right
     else if selected >= !left then lower := !left
-    else begin lower := selected; upper := selected end
+    else begin
+      lower := selected;
+      upper := selected
+    end
   done
 
 let get_ok = function Ok value -> value | Error message -> invalid_arg message
-
-let ceiling_div value divisor =
-  (value / divisor) + if value mod divisor = 0 then 0 else 1
+let ceiling_div value divisor = (value / divisor) + if value mod divisor = 0 then 0 else 1
 
 module Parallel = Parallel
 
 let parallel_for ?cancel ~grain count work =
-  if count > 0 then Parallel.for_ ~chunk_size:(max 1 grain) ~start:0 ~finish:(count - 1)
-    (fun element ->
-      Cancel.poll cancel element 4095;
-      work element)
+  if count > 0 then
+    Parallel.for_ ~chunk_size:(max 1 grain) ~start:0 ~finish:(count - 1) (fun element ->
+        Cancel.poll cancel element 4095;
+        work element)
 
 let run_indexed_ranges ~grain count operation =
   if grain <= 0 then invalid_arg "Support.run_ranges: grain must be positive";
-  let ranges = if count = 0 then 0 else (count - 1) / grain + 1 in
+  let ranges = if count = 0 then 0 else ((count - 1) / grain) + 1 in
   if ranges > 0 then
     Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(ranges - 1) (fun range ->
-      let first = range * grain and last = min count ((range + 1) * grain) in
-      operation ~range ~first ~last)
+        let first = range * grain and last = min count ((range + 1) * grain) in
+        operation ~range ~first ~last)
 
 let run_ranges ?(grain = 16_384) count operation =
   run_indexed_ranges ~grain count (fun ~range:_ ~first ~last -> operation ~first ~last)

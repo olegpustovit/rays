@@ -1,32 +1,129 @@
 (library
  (name flow_sop)
  (public_name rays.flow_sop)
- (modules port curve network value_lane catalog manifest operators attribute_kernel attribute_metadata topology_kernel topology_kernel_impl graph_kernel group_kernel context_kernel function_kernel image_kernel lisp_node encoded_parameters node_sources lower trace_scene)
- (private_modules function_kernel lisp_node encoded_parameters node_sources attribute_metadata topology_kernel_impl graph_kernel group_kernel context_kernel)
- (libraries flow flow_ir lru param sop rays_diagnostic rays_math unix parallel))
+ (modules
+  port
+  curve
+  network
+  value_lane
+  catalog
+  manifest
+  operators
+  attribute_kernel
+  attribute_metadata
+  topology_kernel
+  topology_kernel_impl
+  graph_kernel
+  group_kernel
+  context_kernel
+  function_kernel
+  image_kernel
+  lisp_node
+  encoded_parameters
+  node_sources
+  lower
+  trace_scene)
+ (private_modules
+  function_kernel
+  lisp_node
+  encoded_parameters
+  node_sources
+  attribute_metadata
+  topology_kernel_impl
+  graph_kernel
+  group_kernel
+  context_kernel)
+ (libraries
+  flow
+  flow_ir
+  lru
+  param
+  sop
+  rays_diagnostic
+  rays_math
+  unix
+  parallel))
 
 (rule
  (targets node_sources.ml)
- (deps (glob_files nodes/*.rays))
- (action (with-stdout-to node_sources.ml
-  (run %{exe:../flow/embed.exe} %{deps}))))
+ (deps
+  (glob_files nodes/*.rays))
+ (action
+  (with-stdout-to
+   node_sources.ml
+   (run %{exe:../flow/embed.exe} %{deps}))))
 
 (test
  (name test_units)
- (modules test_units test_node_sources test_math_helpers test_math_kernel test_lisp_node test_node_facts test_encoded_parameters test_lisp_projection test_merge_source test_image_kernel test_keyword_ports test_metadata_kernel test_topology_kernel test_geometry_arrays test_group_kernel test_noise_displace_contract test_remap test_concat test_planes test_iterate test_adjacency test_graph test_lisp_fusion test_trace test_mesh_planes)
- (deps nodes/prelude.rays (env_var RAYS_SLOW))
- (libraries test_support flow flow_ir flow_ir_test_support flow_web flow_graph flow_sop sop rdk rdk_test_support lisp_sop rays_math input unix parallel)
- (preprocess (pps rays.ppx)))
+ (modules
+  test_units
+  test_node_sources
+  test_math_helpers
+  test_math_kernel
+  test_lisp_node
+  test_node_facts
+  test_encoded_parameters
+  test_lisp_projection
+  test_merge_source
+  test_image_kernel
+  test_keyword_ports
+  test_metadata_kernel
+  test_topology_kernel
+  test_geometry_arrays
+  test_group_kernel
+  test_noise_displace_contract
+  test_remap
+  test_concat
+  test_planes
+  test_iterate
+  test_adjacency
+  test_graph
+  test_lisp_fusion
+  test_trace
+  test_mesh_planes)
+ (deps
+  nodes/prelude.rays
+  (env_var RAYS_SLOW))
+ (libraries
+  test_support
+  flow
+  flow_ir
+  flow_ir_test_support
+  flow_web
+  flow_graph
+  flow_sop
+  sop
+  rdk
+  rdk_test_support
+  lisp_sop
+  rays_math
+  input
+  unix
+  parallel)
+ (preprocess
+  (pps rays.ppx)))
 
 (test
  (name test_attribute_kernel)
- (enabled_if (= %{env:RAYS_SLOW=0} 1))
+ (enabled_if
+  (= %{env:RAYS_SLOW=0} 1))
  (modules test_attribute_kernel)
- (libraries test_support flow flow_ir flow_graph flow_sop rdk rdk_test_support lisp_sop rays_math parallel))
+ (libraries
+  test_support
+  flow
+  flow_ir
+  flow_graph
+  flow_sop
+  rdk
+  rdk_test_support
+  lisp_sop
+  rays_math
+  parallel))
 
 (test
  (name test_rand_at)
- (enabled_if (= %{env:RAYS_SLOW=0} 1))
+ (enabled_if
+  (= %{env:RAYS_SLOW=0} 1))
  (modules test_rand_at)
  (deps nodes/prelude.rays)
  (libraries test_support flow flow_ir flow_sop flow_web rays_math parallel))
@@ -35,40 +132,87 @@
 ; not rays_editor. They read their fixtures relative to test/, where they ran
 ; before, so each action runs there. Each alias runs its own test only;
 ; runtest depends on all of them.
+
 (executable
  (name test_main)
- (modules test_main test_projection test_workspace_edit test_workspace_cook test_workspace_zone)
- (libraries flow flow_sop flow_graph editor_document sop rdk unix str lisp_sop ogpu_mock parallel))
+ (modules
+  test_main
+  test_projection
+  test_workspace_edit
+  test_workspace_cook
+  test_workspace_zone)
+ (libraries
+  flow
+  flow_sop
+  flow_graph
+  editor_document
+  sop
+  rdk
+  unix
+  str
+  lisp_sop
+  ogpu_mock
+  parallel))
 
 (rule
  (alias test_projection)
- (deps (glob_files ../../specification/workspace/cases/*.lisp))
- (action (chdir ../../test (run %{exe:test_main.exe} test_projection))))
+ (deps
+  (glob_files ../../specification/workspace/cases/*.lisp))
+ (action
+  (chdir
+   ../../test
+   (run %{exe:test_main.exe} test_projection))))
 
 (rule
  (alias test_workspace_edit)
- (deps (glob_files ../../specification/workspace/cases/*.lisp))
- (action (chdir ../../test (run %{exe:test_main.exe} test_workspace_edit))))
+ (deps
+  (glob_files ../../specification/workspace/cases/*.lisp))
+ (action
+  (chdir
+   ../../test
+   (run %{exe:test_main.exe} test_workspace_edit))))
 
 (rule
  (alias test_workspace_cook)
- (deps (glob_files ../../specification/workspace/cases/*.lisp) (env_var RAYS_SLOW))
- (action (chdir ../../test (run %{exe:test_main.exe} test_workspace_cook))))
+ (deps
+  (glob_files ../../specification/workspace/cases/*.lisp)
+  (env_var RAYS_SLOW))
+ (action
+  (chdir
+   ../../test
+   (run %{exe:test_main.exe} test_workspace_cook))))
 
 (rule
  (alias test_workspace_zone)
- (action (chdir ../../test (run %{exe:test_main.exe} test_workspace_zone))))
+ (action
+  (chdir
+   ../../test
+   (run %{exe:test_main.exe} test_workspace_zone))))
 
 (alias
  (name runtest)
- (deps (alias test_projection) (alias test_workspace_edit)
-  (alias test_workspace_cook) (alias test_workspace_zone)))
+ (deps
+  (alias test_projection)
+  (alias test_workspace_edit)
+  (alias test_workspace_cook)
+  (alias test_workspace_zone)))
 
 (test
  (name test_gpu_bulk)
- (enabled_if (= %{env:RAYS_SLOW=0} 1))
+ (enabled_if
+  (= %{env:RAYS_SLOW=0} 1))
  (modules test_gpu_bulk)
- (libraries test_support flow flow_ir flow_sop sop rdk rdk_test_support lisp_sop rays_math parallel))
+ (libraries
+  test_support
+  flow
+  flow_ir
+  flow_sop
+  sop
+  rdk
+  rdk_test_support
+  lisp_sop
+  rays_math
+  parallel))
 
 (executable
  (name flow_manifest)
@@ -78,9 +222,11 @@
 (rule
  (targets flow_manifest.gen.sexp)
  (action
-  (with-stdout-to %{targets}
+  (with-stdout-to
+   %{targets}
    (run %{exe:flow_manifest.exe}))))
 
 (rule
  (alias runtest)
- (action (diff flow_manifest.sexp flow_manifest.gen.sexp)))
+ (action
+  (diff flow_manifest.sexp flow_manifest.gen.sexp)))

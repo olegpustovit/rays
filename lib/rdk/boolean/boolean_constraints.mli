@@ -8,14 +8,16 @@ val build :
   ?resolve_left_self_intersections:bool ->
   ?resolve_right_self_intersections:bool ->
   ?skip_opposite_self_pairs:bool ->
-  grain:int -> left:Geometry.t -> right:Geometry.t ->
-  unit -> (t, Error.t) result
-(** Build a deterministic exact non-coplanar arrangement plan. Broad-phase
-    AABBs are followed by exact predicates; ordinary classification is
-    parallel over stable candidate ranges. Self-intersection resolution is an
-    explicit per-input policy and defaults to [false], preserving the
-    allocation-minimal clean-input path. Shared-point omission is reserved for
-    callers that separately certify the omitted local vertex fans. *)
+  grain:int ->
+  left:Geometry.t ->
+  right:Geometry.t ->
+  unit ->
+  (t, Error.t) result
+(** Build a deterministic exact non-coplanar arrangement plan. Broad-phase AABBs are followed by
+    exact predicates; ordinary classification is parallel over stable candidate ranges.
+    Self-intersection resolution is an explicit per-input policy and defaults to [false], preserving
+    the allocation-minimal clean-input path. Shared-point omission is reserved for callers that
+    separately certify the omitted local vertex fans. *)
 
 val point_count : t -> int
 val constraint_count : t -> int
@@ -25,14 +27,12 @@ val constraint_first_side : t -> int -> side
 val constraint_second_side : t -> int -> side
 val constraint_first_triangle : t -> int -> int
 val constraint_second_triangle : t -> int -> int
-
 val left_triangle_count : t -> int
 val right_triangle_count : t -> int
 val left_constraint_range : t -> int -> int * int
 val right_constraint_range : t -> int -> int * int
 val left_constraint : t -> int -> int
 val right_constraint : t -> int -> int
-
 val coplanar_pair_count : t -> int
 val coplanar_first_side : t -> int -> side
 val coplanar_second_side : t -> int -> side

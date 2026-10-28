@@ -6,6 +6,12 @@ type t =
   | Selected_edges of Edge_group.t
 
 val validate : operation:string -> Topology.t -> t option -> (unit, string) result
+
 val promote :
-  ?cancel:Cancel.t -> grain:int -> ?name:string ->
-  destination:Group.owner -> t -> Topology.t -> (Group.t, string) result
+  ?cancel:Cancel.t ->
+  grain:int ->
+  ?name:string ->
+  destination:Group.owner ->
+  t ->
+  Topology.t ->
+  (Group.t, string) result

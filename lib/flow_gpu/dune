@@ -1,36 +1,80 @@
 (library
  (name flow_gpu)
  (public_name rays.flow_gpu)
- (modules lisp_stage trace trace_source noise noise_source compact_source emit spirv pipelines run host image_sink raster image_rgba8_source)
- (private_modules lisp_stage trace trace_source noise noise_source compact_source image_rgba8_source)
+ (modules
+  lisp_stage
+  trace
+  trace_source
+  noise
+  noise_source
+  compact_source
+  emit
+  spirv
+  pipelines
+  run
+  host
+  image_sink
+  raster
+  image_rgba8_source)
+ (private_modules
+  lisp_stage
+  trace
+  trace_source
+  noise
+  noise_source
+  compact_source
+  image_rgba8_source)
  (libraries flow flow_ir ogpu renderer rays_math lru parallel))
 
 ; the device side of scene/trace, compiled once a scene variant (Trace)
+
 (rule
  (target trace_source.ml)
  (deps trace.rays)
- (action (with-stdout-to %{target}
-  (progn (echo "let source = {rays|") (cat trace.rays) (echo "|rays}\n")))))
+ (action
+  (with-stdout-to
+   %{target}
+   (progn
+    (echo "let source = {rays|")
+    (cat trace.rays)
+    (echo "|rays}\n")))))
 
 ; the device side of noise3, compiled once an octave count (Noise)
+
 (rule
  (target noise_source.ml)
  (deps noise.rays)
- (action (with-stdout-to %{target}
-  (progn (echo "let source = {rays|") (cat noise.rays) (echo "|rays}\n")))))
+ (action
+  (with-stdout-to
+   %{target}
+   (progn
+    (echo "let source = {rays|")
+    (cat noise.rays)
+    (echo "|rays}\n")))))
 
 ; the resident fold's compaction, generated from shaders/compact.rays (test_raster.exe --write lib)
+
 (rule
  (target compact_source.ml)
  (deps shaders/metal/compact.metal)
- (action (with-stdout-to %{target}
-  (progn (echo "let source = {msl|") (cat shaders/metal/compact.metal) (echo "|msl}\n")))))
+ (action
+  (with-stdout-to
+   %{target}
+   (progn
+    (echo "let source = {msl|")
+    (cat shaders/metal/compact.metal)
+    (echo "|msl}\n")))))
 
 ; the image sink's stages, generated from ../renderer/shaders/image.rays (test_raster.exe --write)
+
 (rule
  (target image_rgba8_source.ml)
- (action (with-stdout-to %{target}
-  (run %{exe:../renderer/embed_shader.exe} %{dep:../renderer/shaders/metal/image_rgba8.metal}))))
+ (action
+  (with-stdout-to
+   %{target}
+   (run
+    %{exe:../renderer/embed_shader.exe}
+    %{dep:../renderer/shaders/metal/image_rgba8.metal}))))
 
 (test
  (name test_spirv)
@@ -41,112 +85,260 @@
 (test
  (name test_emit)
  (modules test_emit)
- (deps (glob_files goldens/*.metal))
- (libraries test_support flow_gpu flow flow_ir flow_ir_test_support flow_web rays_math ogpu_mock parallel))
+ (deps
+  (glob_files goldens/*.metal))
+ (libraries
+  test_support
+  flow_gpu
+  flow
+  flow_ir
+  flow_ir_test_support
+  flow_web
+  rays_math
+  ogpu_mock
+  parallel))
 
 (executable
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (name test_run)
  (modules test_run)
- (libraries flow_gpu flow flow_ir flow_ir_test_support renderer ogpu ogpu_metal scene_command input unix parallel))
+ (libraries
+  flow_gpu
+  flow
+  flow_ir
+  flow_ir_test_support
+  renderer
+  ogpu
+  ogpu_metal
+  scene_command
+  input
+  unix
+  parallel))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_run)
- (action (run %{exe:test_run.exe})))
+ (action
+  (run %{exe:test_run.exe})))
 
 (alias
  (name runtest-native)
- (deps (alias test_run)))
+ (deps
+  (alias test_run)))
 
 (executable
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (name test_image_sink_native)
  (modules test_image_sink_native)
- (libraries flow_gpu flow flow_ir flow_ir_test_support flow_sop sop rays rays_math renderer ogpu ogpu_metal unix parallel))
+ (libraries
+  flow_gpu
+  flow
+  flow_ir
+  flow_ir_test_support
+  flow_sop
+  sop
+  rays
+  rays_math
+  renderer
+  ogpu
+  ogpu_metal
+  unix
+  parallel))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias runtest-native)
- (action (run %{exe:test_image_sink_native.exe})))
+ (action
+  (run %{exe:test_image_sink_native.exe})))
 
 (test
  (name test_pipelines)
  (modules test_pipelines)
- (libraries test_support flow_gpu flow flow_ir flow_ir_test_support ogpu_mock unix parallel))
+ (libraries
+  test_support
+  flow_gpu
+  flow
+  flow_ir
+  flow_ir_test_support
+  ogpu_mock
+  unix
+  parallel))
 
 (test
  (name test_run_lifetime)
  (modules test_run_lifetime)
- (libraries test_support flow_gpu flow flow_ir flow_ir_test_support ogpu_mock unix parallel))
+ (libraries
+  test_support
+  flow_gpu
+  flow
+  flow_ir
+  flow_ir_test_support
+  ogpu_mock
+  unix
+  parallel))
 
 (test
  (name test_image_sink)
  (modules test_image_sink)
- (libraries test_support flow_gpu flow flow_ir flow_ir_test_support ogpu_mock unix parallel))
+ (libraries
+  test_support
+  flow_gpu
+  flow
+  flow_ir
+  flow_ir_test_support
+  ogpu_mock
+  unix
+  parallel))
 
 (executable
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (name test_resolve)
  (modules test_resolve)
- (libraries flow_gpu flow flow_ir flow_ir_test_support renderer ogpu ogpu_metal input unix parallel))
+ (libraries
+  flow_gpu
+  flow
+  flow_ir
+  flow_ir_test_support
+  renderer
+  ogpu
+  ogpu_metal
+  input
+  unix
+  parallel))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias runtest-native)
  (deps ../rays_pathtracer/resolve_preview.rays)
- (action (chdir ../rays_pathtracer (run %{exe:../flow_gpu/test_resolve.exe}))))
+ (action
+  (chdir
+   ../rays_pathtracer
+   (run %{exe:../flow_gpu/test_resolve.exe}))))
 
 (executable
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (name test_trace)
  (modules test_trace)
- (libraries test_support flow_gpu flow flow_ir flow_ir_test_support flow_sop rdk rdk_test_support renderer ogpu ogpu_metal input unix parallel))
+ (libraries
+  test_support
+  flow_gpu
+  flow
+  flow_ir
+  flow_ir_test_support
+  flow_sop
+  rdk
+  rdk_test_support
+  renderer
+  ogpu
+  ogpu_metal
+  input
+  unix
+  parallel))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias runtest-native)
- (action (run %{exe:test_trace.exe})))
+ (action
+  (run %{exe:test_trace.exe})))
 
 (executable
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (name test_helpers)
  (modules test_helpers)
- (libraries flow_gpu flow flow_ir flow_ir_test_support renderer ogpu ogpu_metal input unix parallel))
+ (libraries
+  flow_gpu
+  flow
+  flow_ir
+  flow_ir_test_support
+  renderer
+  ogpu
+  ogpu_metal
+  input
+  unix
+  parallel))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias runtest-native)
  (deps ../rays_pathtracer/pathtrace_helpers.rays)
- (action (chdir ../rays_pathtracer (run %{exe:../flow_gpu/test_helpers.exe}))))
+ (action
+  (chdir
+   ../rays_pathtracer
+   (run %{exe:../flow_gpu/test_helpers.exe}))))
 
 (executable
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (name test_film)
  (modules test_film)
- (libraries flow_gpu flow flow_ir flow_ir_test_support renderer ogpu ogpu_metal input unix parallel))
+ (libraries
+  flow_gpu
+  flow
+  flow_ir
+  flow_ir_test_support
+  renderer
+  ogpu
+  ogpu_metal
+  input
+  unix
+  parallel))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias runtest-native)
- (action (run %{exe:test_film.exe})))
+ (action
+  (run %{exe:test_film.exe})))
 
 (executable
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (name test_sampling)
  (modules test_sampling)
- (libraries flow_gpu flow flow_ir flow_ir_test_support renderer ogpu ogpu_metal input unix parallel))
+ (libraries
+  flow_gpu
+  flow
+  flow_ir
+  flow_ir_test_support
+  renderer
+  ogpu
+  ogpu_metal
+  input
+  unix
+  parallel))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias runtest-native)
  (deps ../rays_pathtracer/pathtrace_helpers.rays)
- (action (chdir ../rays_pathtracer (run %{exe:../flow_gpu/test_sampling.exe}))))
+ (action
+  (chdir
+   ../rays_pathtracer
+   (run %{exe:../flow_gpu/test_sampling.exe}))))
 
 (test
  (name test_raster)
  (modules test_raster)
- (deps (glob_files ../renderer/shaders/*.rays) (glob_files ../renderer/shaders/metal/*.metal) (glob_files ../renderer/shaders/spirv/*.spv)
-  (glob_files ../ogpu_metal/shaders/*.rays) (glob_files ../ogpu_metal/shaders/metal/*.metal) (glob_files ../ogpu_metal/shaders/spirv/*.spv)
-  (glob_files shaders/*.rays) (glob_files shaders/metal/*.metal) (glob_files shaders/spirv/*.spv) ../flow_web/compact.wgsl)
+ (deps
+  (glob_files ../renderer/shaders/*.rays)
+  (glob_files ../renderer/shaders/metal/*.metal)
+  (glob_files ../renderer/shaders/spirv/*.spv)
+  (glob_files ../ogpu_metal/shaders/*.rays)
+  (glob_files ../ogpu_metal/shaders/metal/*.metal)
+  (glob_files ../ogpu_metal/shaders/spirv/*.spv)
+  (glob_files shaders/*.rays)
+  (glob_files shaders/metal/*.metal)
+  (glob_files shaders/spirv/*.spv)
+  ../flow_web/compact.wgsl)
  (libraries test_support flow_gpu flow_web ogpu_mock))

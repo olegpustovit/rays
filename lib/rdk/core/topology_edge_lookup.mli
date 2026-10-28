@@ -1,6 +1,5 @@
-(** Lightweight unique-edge lookup for topology-changing output builders.
-    Edge order exactly matches {!Topology_index}, but only endpoint and hash
-    planes are retained. *)
+(** Lightweight unique-edge lookup for topology-changing output builders. Edge order exactly matches
+    {!Topology_index}, but only endpoint and hash planes are retained. *)
 
 type t
 

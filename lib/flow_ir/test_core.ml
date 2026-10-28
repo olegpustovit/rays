@@ -1,17 +1,35 @@
 module C = Flow_ir.Core
-let source : C.source = {site=["g";"value"];owner=["g"];instance=2;prefix=[];iter=[Static_index 3];span=Some {start=10;finish=20}}
-let s id node : C.statement = {id;source;node}
+
+let source : C.source =
+  {
+    site = [ "g"; "value" ];
+    owner = [ "g" ];
+    instance = 2;
+    prefix = [];
+    iter = [ Static_index 3 ];
+    span = Some { start = 10; finish = 20 };
+  }
+
+let s id node : C.statement = { id; source; node }
+
 let program constants locals body results : C.program =
-  {constants;locals;body;results;state_slots=[||];regions=[||];call_slots=0}
+  { constants; locals; body; results; state_slots = [||]; regions = [||]; call_slots = 0 }
+
 let check p expected =
   let actual = Format.asprintf "%a" C.pp p in
   if actual <> expected then failwith ("Unexpected core print:\n" ^ actual);
   assert (actual = Format.asprintf "%a" C.pp p)
+
 let () =
-  check (program [|C.Int 2|] [|Flow.Ty.Int;Float;Float|]
-    [s 0 (Assign (0,Constant 0));s 1 (Assign (1,Frame Time));
-     s 2 (Assign (2,Prim (Numeric Mul,["a",0;"b",1])))] [|2|])
-{|core
+  check
+    (program [| C.Int 2 |] [| Flow.Ty.Int; Float; Float |]
+       [
+         s 0 (Assign (0, Constant 0));
+         s 1 (Assign (1, Frame Time));
+         s 2 (Assign (2, Prim (Numeric Mul, [ ("a", 0); ("b", 1) ])));
+       ]
+       [| 2 |])
+    {|core
   $0 = 2
   %0 : int
   %1 : float
@@ -21,10 +39,22 @@ let () =
   #2 %2 = *("a":%0 "b":%1) @["g" "value"] owner=["g"] instance=2 iter=[3] span=10..20
   return %2
 |};
-  check (program [|C.Text "yes";C.Text "no";C.Bool true|] [|Flow.Ty.Bool;Text|]
-    [s 0 (Assign (0,Constant 2));
-     s 1 (If {condition=0;yes=[s 2 (Assign (1,Constant 0))];no=[s 3 (Assign (1,Constant 1))]})] [|1|])
-{|core
+  check
+    (program
+       [| C.Text "yes"; C.Text "no"; C.Bool true |]
+       [| Flow.Ty.Bool; Text |]
+       [
+         s 0 (Assign (0, Constant 2));
+         s 1
+           (If
+              {
+                condition = 0;
+                yes = [ s 2 (Assign (1, Constant 0)) ];
+                no = [ s 3 (Assign (1, Constant 1)) ];
+              });
+       ]
+       [| 1 |])
+    {|core
   $0 = "yes"
   $1 = "no"
   $2 = true
@@ -38,15 +68,36 @@ let () =
   } @["g" "value"] owner=["g"] instance=2 iter=[3] span=10..20
   return %1
 |};
-  let p = program [|C.List [|C.Float 1.;C.Float 2.|];C.Float 0.|]
-    [|Flow.Ty.List Float;Int;Float;Float|]
-    [s 0 (Assign (0,Constant 0));
-     s 1 (State_read {slot=0;result=3;init=[s 2 (Assign (3,Constant 1))];initial=3});
-     s 3 (Iterate {sequence=0;index=1;item=2;limit=4096;
-       body=[s 4 (Assign (3,Prim (Numeric Add,["a",3;"b",2])))]});
-     s 5 (State_write {slot=0;value=3})] [|3|] in
-  check {p with state_slots=[|{source;prefix=["call"];zone=["g";"s"];plane=`Frame;ty=Flow.Ty.Float}|]}
-{|core
+  let p =
+    program
+      [| C.List [| C.Float 1.; C.Float 2. |]; C.Float 0. |]
+      [| Flow.Ty.List Float; Int; Float; Float |]
+      [
+        s 0 (Assign (0, Constant 0));
+        s 1
+          (State_read { slot = 0; result = 3; init = [ s 2 (Assign (3, Constant 1)) ]; initial = 3 });
+        s 3
+          (Iterate
+             {
+               sequence = 0;
+               index = 1;
+               item = 2;
+               limit = 4096;
+               body = [ s 4 (Assign (3, Prim (Numeric Add, [ ("a", 3); ("b", 2) ]))) ];
+             });
+        s 5 (State_write { slot = 0; value = 3 });
+      ]
+      [| 3 |]
+  in
+  check
+    {
+      p with
+      state_slots =
+        [|
+          { source; prefix = [ "call" ]; zone = [ "g"; "s" ]; plane = `Frame; ty = Flow.Ty.Float };
+        |];
+    }
+    {|core
   $0 = list[1.0 2.0]
   $1 = 0.0
   %0 : list:float
@@ -72,8 +123,9 @@ let () =
   assert (Atomic.get region.dependent = None);
   assert (Array.length (C.Region.dependent_flags region) = Array.length region.code);
   assert (Option.is_some (Atomic.get region.dependent));
-  check {(program [||] [||] [] [||]) with regions = [|region|]}
-{|core
+  check
+    { (program [||] [||] [] [||]) with regions = [| region |] }
+    {|core
   region[0] zip collect count=4 widths=[1] output=[4] uniforms=0 skip=[] stages=1
     r0 = input[0].0/1
     r1 = 2.0

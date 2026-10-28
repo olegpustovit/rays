@@ -1,14 +1,9 @@
 (** Packed projection of selected points onto collision geometry. *)
 
 type method_ = Ray_minimum_distance | Ray_project
-type direction =
-  | Ray_vector of Rays_math.Vec3.t
-  | Ray_normal
-  | Ray_attribute of string
+type direction = Ray_vector of Rays_math.Vec3.t | Ray_normal | Ray_attribute of string
 type combine = Ray_average | Ray_median | Ray_shortest | Ray_longest
 
-(** Every field is required: the SOP declaration owns the defaults and the
-    tests build values with [Rdk_test_support.ray]. *)
 type params = {
   grain : int;
   selection : Element_selection.t option;
@@ -38,7 +33,13 @@ type params = {
   detail_pattern : string option;
   match_groups : bool;
 }
+(** Every field is required: the SOP declaration owns the defaults and the tests build values with
+    [Rdk_test_support.ray]. *)
 
 val run :
-  ?cancel:Cancel.t -> params -> source:Geometry.t -> collision:Geometry.t ->
-  unit -> (Geometry.t, Error.t) result
+  ?cancel:Cancel.t ->
+  params ->
+  source:Geometry.t ->
+  collision:Geometry.t ->
+  unit ->
+  (Geometry.t, Error.t) result

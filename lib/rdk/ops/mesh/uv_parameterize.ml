@@ -1,4 +1,3 @@
-
 type boundary_mode = Circle | Preserve
 
 let fail message = raise (Error.Fail message)
@@ -21,7 +20,7 @@ let union_roots parent rank left right =
     if left_rank < right_rank then parent.(left) <- right
     else if right_rank < left_rank then parent.(right) <- left
     else begin
-      let root, child = if left < right then left, right else right, left in
+      let root, child = if left < right then (left, right) else (right, left) in
       parent.(child) <- root;
       Bytes.set rank root (Char.chr (left_rank + 1))
     end
@@ -37,20 +36,21 @@ let selected_seam group index_view edge =
   !selected
 
 let edge_endpoint_corners topology_view index_view edge local =
-  let corner = index_view.Topology_index.View.edge_vertices.
-      (index_view.edge_offsets.(edge) + local) in
+  let corner =
+    index_view.Topology_index.View.edge_vertices.(index_view.edge_offsets.(edge) + local)
+  in
   let next = index_view.next_vertex.(corner) in
   if next < 0 then fail "UV parameterization requires polygon edges";
   let a = topology_view.Topology.View.vertex_points.(corner)
   and b = topology_view.vertex_points.(next) in
   let edge_a = index_view.edge_a.(edge) in
-  if a = edge_a then corner, next
-  else if b = edge_a then next, corner
+  if a = edge_a then (corner, next)
+  else if b = edge_a then (next, corner)
   else fail "UV parameterization encountered inconsistent reverse topology"
 
 let edge_corner_variables topology_view index_view corner_to_variable edge local =
   let a, b = edge_endpoint_corners topology_view index_view edge local in
-  corner_to_variable.(a), corner_to_variable.(b)
+  (corner_to_variable.(a), corner_to_variable.(b))
 
 type params = {
   cancel : Cancel.t option;
@@ -63,15 +63,16 @@ type params = {
   tolerance : float;
 }
 
-let solve ({ cancel; grain; name; seams; edge_seams; uv_tolerance; iterations; tolerance } : params) boundary_mode geometry =
+let solve ({ cancel; grain; name; seams; edge_seams; uv_tolerance; iterations; tolerance } : params)
+    boundary_mode geometry =
   let grain = Option.value ~default:16_384 grain in
   try
     if grain <= 0 then fail "grain must be positive";
     if String.trim name = "" then fail "UV attribute name must not be empty";
     if iterations <= 0 then fail "iterations must be positive";
-    if not (finite tolerance) || tolerance < 0. then
+    if (not (finite tolerance)) || tolerance < 0. then
       fail "solver tolerance must be finite and non-negative";
-    if not (finite uv_tolerance) || uv_tolerance < 0. then
+    if (not (finite uv_tolerance)) || uv_tolerance < 0. then
       fail "UV seam tolerance must be finite and non-negative";
     let topology = Geometry.topology geometry in
     if not (Topology.all_triangles topology) then
@@ -81,25 +82,33 @@ let solve ({ cancel; grain; name; seams; edge_seams; uv_tolerance; iterations; t
     and vertex_count = Topology.vertex_count topology
     and primitive_count = Topology.primitive_count topology in
     if primitive_count = 0 then fail "UV parameterization requires at least one triangle";
-    Option.iter (fun group ->
-      if Group.owner group <> Group.Vertex || Group.length group <> vertex_count then
-        fail "UV seam group must own one outgoing-edge entry per vertex") seams;
+    Option.iter
+      (fun group ->
+        if Group.owner group <> Group.Vertex || Group.length group <> vertex_count then
+          fail "UV seam group must own one outgoing-edge entry per vertex")
+      seams;
     let index = Topology_index.create ?cancel topology in
     let index_view = Topology_index.View.view index in
-    Option.iter (fun group ->
-      if Edge_group.topology_data_id group <> Topology.data_id topology
-          || Edge_group.length group <> Topology_index.edge_count index then
-        fail "native UV seam group belongs to a different topology") edge_seams;
+    Option.iter
+      (fun group ->
+        if
+          Edge_group.topology_data_id group <> Topology.data_id topology
+          || Edge_group.length group <> Topology_index.edge_count index
+        then fail "native UV seam group belongs to a different topology")
+      edge_seams;
     Cancel.check_opt cancel;
     let positions = Packed.Float3.View.view (Geometry.positions geometry) in
     let invalid_position = Atomic.make false in
     Support.run_ranges ~grain point_count (fun ~first ~last ->
-      for point = first to last - 1 do
-        if not (finite positions.x.(point) && finite positions.y.(point)
-            && finite positions.z.(point)) then Atomic.set invalid_position true
-      done);
-    if Atomic.get invalid_position then
-      fail "UV parameterization requires finite point positions";
+        for point = first to last - 1 do
+          if
+            not
+              (finite positions.x.(point)
+              && finite positions.y.(point)
+              && finite positions.z.(point))
+          then Atomic.set invalid_position true
+        done);
+    if Atomic.get invalid_position then fail "UV parameterization requires finite point positions";
 
     let edge_count = Topology_index.edge_count index in
     let edge_is_seam = Bytes.make edge_count '\000' in
@@ -107,11 +116,10 @@ let solve ({ cancel; grain; name; seams; edge_seams; uv_tolerance; iterations; t
       Cancel.poll cancel edge 16_383;
       let incidence = Topology_index.edge_incidence_count index edge in
       if incidence > 2 then fail "UV parameterization rejects non-manifold edges";
-      let selected = (match edge_seams with
-        | Some group -> Edge_group.mem edge group
-        | None -> false) || match seams with
-        | Some group -> selected_seam group index_view edge
-        | None -> false in
+      let selected =
+        (match edge_seams with Some group -> Edge_group.mem edge group | None -> false)
+        || match seams with Some group -> selected_seam group index_view edge | None -> false
+      in
       if selected then Bytes.set edge_is_seam edge '\001'
     done;
 
@@ -121,8 +129,8 @@ let solve ({ cancel; grain; name; seams; edge_seams; uv_tolerance; iterations; t
     and corner_rank = Bytes.make vertex_count '\000' in
     for edge = 0 to edge_count - 1 do
       Cancel.poll cancel edge 16_383;
-      if Topology_index.edge_incidence_count index edge = 2
-          && Bytes.get edge_is_seam edge = '\000' then begin
+      if Topology_index.edge_incidence_count index edge = 2 && Bytes.get edge_is_seam edge = '\000'
+      then begin
         let left_a, left_b = edge_endpoint_corners topology_view index_view edge 0
         and right_a, right_b = edge_endpoint_corners topology_view index_view edge 1 in
         union_roots corner_parent corner_rank left_a right_a;
@@ -143,8 +151,7 @@ let solve ({ cancel; grain; name; seams; edge_seams; uv_tolerance; iterations; t
     let variable_count = !variable_count in
     let variable_point = Array.make variable_count (-1) in
     for corner = 0 to vertex_count - 1 do
-      let variable = corner_to_variable.(corner)
-      and point = topology_view.vertex_points.(corner) in
+      let variable = corner_to_variable.(corner) and point = topology_view.vertex_points.(corner) in
       if variable_point.(variable) < 0 then variable_point.(variable) <- point
       else if variable_point.(variable) <> point then
         fail "UV chart merged corners from distinct points"
@@ -186,25 +193,26 @@ let solve ({ cancel; grain; name; seams; edge_seams; uv_tolerance; iterations; t
         else if degree = 1 && boundary_first.(a) <> b then boundary_second.(a) <- b
         else if degree >= 2 || boundary_first.(a) = b then
           fail "UV island boundary is not a simple cycle";
-        Bytes.set boundary_degree a (Char.chr (degree + 1)) in
-      add a b; add b a in
+        Bytes.set boundary_degree a (Char.chr (degree + 1))
+      in
+      add a b;
+      add b a
+    in
     for edge = 0 to edge_count - 1 do
       let incidence = Topology_index.edge_incidence_count index edge in
       if incidence = 1 then begin
-        let a, b = edge_corner_variables topology_view index_view
-            corner_to_variable edge 0 in
+        let a, b = edge_corner_variables topology_view index_view corner_to_variable edge 0 in
         add_boundary a b
-      end else if incidence = 2 && Bytes.get edge_is_seam edge <> '\000' then
+      end
+      else if incidence = 2 && Bytes.get edge_is_seam edge <> '\000' then
         for local = 0 to 1 do
-          let a, b = edge_corner_variables topology_view index_view
-              corner_to_variable edge local in
+          let a, b = edge_corner_variables topology_view index_view corner_to_variable edge local in
           add_boundary a b
         done
     done;
     for variable = 0 to variable_count - 1 do
       let degree = Char.code (Bytes.get boundary_degree variable) in
-      if degree <> 0 && degree <> 2 then
-        fail "UV island boundary is open or branched"
+      if degree <> 0 && degree <> 2 then fail "UV island boundary is open or branched"
     done;
 
     let boundary_visited = Bytes.make variable_count '\000'
@@ -213,8 +221,7 @@ let solve ({ cancel; grain; name; seams; edge_seams; uv_tolerance; iterations; t
     and loop_size = Array.make component_count 0 in
     let loop_count = ref 0 in
     for start = 0 to variable_count - 1 do
-      if Bytes.get boundary_degree start <> '\000'
-          && Bytes.get boundary_visited start = '\000' then begin
+      if Bytes.get boundary_degree start <> '\000' && Bytes.get boundary_visited start = '\000' then begin
         let component = variable_component.(start) in
         if component_loop.(component) >= 0 then
           fail "UV parameterization currently rejects islands with holes";
@@ -222,14 +229,12 @@ let solve ({ cancel; grain; name; seams; edge_seams; uv_tolerance; iterations; t
         loop_start.(component) <- start;
         let previous = ref (-1) and current = ref start and count = ref 0 in
         while !current <> start || !count = 0 do
-          if !count > variable_count then
-            fail "UV island boundary traversal did not close";
+          if !count > variable_count then fail "UV island boundary traversal did not close";
           if Bytes.get boundary_visited !current <> '\000' then
             fail "UV island boundary self-intersects topologically";
           Bytes.set boundary_visited !current '\001';
           incr count;
-          let first = boundary_first.(!current)
-          and second = boundary_second.(!current) in
+          let first = boundary_first.(!current) and second = boundary_second.(!current) in
           let next = if first <> !previous then first else second in
           if next < 0 then fail "UV island boundary is incomplete";
           previous := !current;
@@ -240,93 +245,104 @@ let solve ({ cancel; grain; name; seams; edge_seams; uv_tolerance; iterations; t
       end
     done;
     for component = 0 to component_count - 1 do
-      if component_loop.(component) < 0 then
-        fail "closed UV island requires at least one seam"
+      if component_loop.(component) < 0 then fail "closed UV island requires at least one seam"
     done;
 
-    let source_uv = match boundary_mode with
+    let source_uv =
+      match boundary_mode with
       | Circle -> None
-      | Preserve ->
-          (match Geometry.find_attribute ~owner:Attribute.Vertex name geometry with
-           | None -> fail (Printf.sprintf
-               "UV Relax requires vertex float2 attribute %S" name)
-           | Some attribute ->
-               match Attribute.View.storage attribute with
-               | Attribute.Float2 values -> Some (Packed.Float2.View.view values)
-               | _ -> fail (Printf.sprintf
-                   "UV Relax vertex attribute %S must be float2" name)) in
+      | Preserve -> (
+          match Geometry.find_attribute ~owner:Attribute.Vertex name geometry with
+          | None -> fail (Printf.sprintf "UV Relax requires vertex float2 attribute %S" name)
+          | Some attribute -> (
+              match Attribute.View.storage attribute with
+              | Attribute.Float2 values -> Some (Packed.Float2.View.view values)
+              | _ -> fail (Printf.sprintf "UV Relax vertex attribute %S must be float2" name)))
+    in
     let u = Array.make variable_count 0. and v = Array.make variable_count 0. in
     (match source_uv with
-     | None -> ()
-     | Some source ->
-         let assigned = Bytes.make variable_count '\000' in
-         for corner = 0 to vertex_count - 1 do
-           let source_u = source.Packed.Float2.View.x.(corner)
-           and source_v = source.y.(corner) in
-           if not (finite source_u && finite source_v) then
-             fail "UV Relax requires finite input coordinates";
-           let variable = corner_to_variable.(corner) in
-           if Bytes.get assigned variable = '\000' then begin
-             Bytes.set assigned variable '\001';
-             u.(variable) <- source_u; v.(variable) <- source_v
-           end else if abs_float (u.(variable) -. source_u) > uv_tolerance
-               || abs_float (v.(variable) -. source_v) > uv_tolerance then
-             fail "UV discontinuity must be declared as a seam before relaxing"
-         done);
+    | None -> ()
+    | Some source ->
+        let assigned = Bytes.make variable_count '\000' in
+        for corner = 0 to vertex_count - 1 do
+          let source_u = source.Packed.Float2.View.x.(corner) and source_v = source.y.(corner) in
+          if not (finite source_u && finite source_v) then
+            fail "UV Relax requires finite input coordinates";
+          let variable = corner_to_variable.(corner) in
+          if Bytes.get assigned variable = '\000' then begin
+            Bytes.set assigned variable '\001';
+            u.(variable) <- source_u;
+            v.(variable) <- source_v
+          end
+          else if
+            abs_float (u.(variable) -. source_u) > uv_tolerance
+            || abs_float (v.(variable) -. source_v) > uv_tolerance
+          then fail "UV discontinuity must be declared as a seam before relaxing"
+        done);
 
     let distance left right =
       let dx = positions.x.(left) -. positions.x.(right)
       and dy = positions.y.(left) -. positions.y.(right)
       and dz = positions.z.(left) -. positions.z.(right) in
-      sqrt (dx *. dx +. dy *. dy +. dz *. dz) in
+      sqrt ((dx *. dx) +. (dy *. dy) +. (dz *. dz))
+    in
     (match boundary_mode with
-     | Preserve -> ()
-     | Circle ->
-         let columns = int_of_float (ceil (sqrt (float_of_int component_count))) in
-         let rows = (component_count + columns - 1) / columns in
-         let cell_width = 1. /. float_of_int columns
-         and cell_height = 1. /. float_of_int rows in
-         let radius = 0.45 *. min cell_width cell_height in
-         let component_center_u = Array.make component_count 0.
-         and component_center_v = Array.make component_count 0. in
-         for component = 0 to component_count - 1 do
-           let start = loop_start.(component) in
-           let perimeter = ref 0. and previous = ref (-1)
-           and current = ref start and count = ref 0 in
-           while !current <> start || !count = 0 do
-             let next = if boundary_first.(!current) <> !previous
-               then boundary_first.(!current) else boundary_second.(!current) in
-             perimeter := !perimeter +. distance variable_point.(!current)
-                 variable_point.(next);
-             previous := !current; current := next; incr count
-           done;
-           if not (finite !perimeter) || !perimeter <= 0. then
-             fail "UV island boundary has zero or non-finite length";
-           let column = component mod columns and row = component / columns in
-           let center_u = (float_of_int column +. 0.5) *. cell_width
-           and center_v = (float_of_int row +. 0.5) *. cell_height in
-           component_center_u.(component) <- center_u;
-           component_center_v.(component) <- center_v;
-           let traversed = ref 0. and previous = ref (-1)
-           and current = ref start and count = ref 0 in
-           while !current <> start || !count = 0 do
-             let angle = 2. *. Float.pi *. !traversed /. !perimeter in
-             u.(!current) <- center_u +. radius *. cos angle;
-             v.(!current) <- center_v +. radius *. sin angle;
-             let next = if boundary_first.(!current) <> !previous
-               then boundary_first.(!current) else boundary_second.(!current) in
-             traversed := !traversed +. distance variable_point.(!current)
-                 variable_point.(next);
-             previous := !current; current := next; incr count
-           done
-         done;
-         for variable = 0 to variable_count - 1 do
-           if Bytes.get boundary_degree variable = '\000' then begin
-             let component = variable_component.(variable) in
-             u.(variable) <- component_center_u.(component);
-             v.(variable) <- component_center_v.(component)
-           end
-         done);
+    | Preserve -> ()
+    | Circle ->
+        let columns = int_of_float (ceil (sqrt (float_of_int component_count))) in
+        let rows = (component_count + columns - 1) / columns in
+        let cell_width = 1. /. float_of_int columns and cell_height = 1. /. float_of_int rows in
+        let radius = 0.45 *. min cell_width cell_height in
+        let component_center_u = Array.make component_count 0.
+        and component_center_v = Array.make component_count 0. in
+        for component = 0 to component_count - 1 do
+          let start = loop_start.(component) in
+          let perimeter = ref 0.
+          and previous = ref (-1)
+          and current = ref start
+          and count = ref 0 in
+          while !current <> start || !count = 0 do
+            let next =
+              if boundary_first.(!current) <> !previous then boundary_first.(!current)
+              else boundary_second.(!current)
+            in
+            perimeter := !perimeter +. distance variable_point.(!current) variable_point.(next);
+            previous := !current;
+            current := next;
+            incr count
+          done;
+          if (not (finite !perimeter)) || !perimeter <= 0. then
+            fail "UV island boundary has zero or non-finite length";
+          let column = component mod columns and row = component / columns in
+          let center_u = (float_of_int column +. 0.5) *. cell_width
+          and center_v = (float_of_int row +. 0.5) *. cell_height in
+          component_center_u.(component) <- center_u;
+          component_center_v.(component) <- center_v;
+          let traversed = ref 0.
+          and previous = ref (-1)
+          and current = ref start
+          and count = ref 0 in
+          while !current <> start || !count = 0 do
+            let angle = 2. *. Float.pi *. !traversed /. !perimeter in
+            u.(!current) <- center_u +. (radius *. cos angle);
+            v.(!current) <- center_v +. (radius *. sin angle);
+            let next =
+              if boundary_first.(!current) <> !previous then boundary_first.(!current)
+              else boundary_second.(!current)
+            in
+            traversed := !traversed +. distance variable_point.(!current) variable_point.(next);
+            previous := !current;
+            current := next;
+            incr count
+          done
+        done;
+        for variable = 0 to variable_count - 1 do
+          if Bytes.get boundary_degree variable = '\000' then begin
+            let component = variable_component.(variable) in
+            u.(variable) <- component_center_u.(component);
+            v.(variable) <- component_center_v.(component)
+          end
+        done);
 
     (* Each triangle contributes two positive mean-value weights at every
        corner. Duplicate neighbor slots are intentional and avoid a hash/sort
@@ -337,8 +353,8 @@ let solve ({ cancel; grain; name; seams; edge_seams; uv_tolerance; iterations; t
         adjacency_offsets.(corner_to_variable.(corner) + 1) + 2
     done;
     for variable = 0 to variable_count - 1 do
-      adjacency_offsets.(variable + 1) <- adjacency_offsets.(variable + 1)
-        + adjacency_offsets.(variable)
+      adjacency_offsets.(variable + 1) <-
+        adjacency_offsets.(variable + 1) + adjacency_offsets.(variable)
     done;
     let adjacency_count = adjacency_offsets.(variable_count) in
     let adjacency = Array.make adjacency_count 0
@@ -347,35 +363,36 @@ let solve ({ cancel; grain; name; seams; edge_seams; uv_tolerance; iterations; t
     and corner_tangent = Array.make vertex_count 0. in
     let invalid_triangle = Atomic.make false in
     Support.run_ranges ~grain primitive_count (fun ~first ~last ->
-      for primitive = first to last - 1 do
-        let first_corner = topology_view.primitive_offsets.(primitive) in
-        for local = 0 to 2 do
-          let corner = first_corner + local
-          and previous = first_corner + ((local + 2) mod 3)
-          and next = first_corner + ((local + 1) mod 3) in
-          let point = topology_view.vertex_points.(corner)
-          and previous_point = topology_view.vertex_points.(previous)
-          and next_point = topology_view.vertex_points.(next) in
-          let ax = positions.x.(previous_point) -. positions.x.(point)
-          and ay = positions.y.(previous_point) -. positions.y.(point)
-          and az = positions.z.(previous_point) -. positions.z.(point)
-          and bx = positions.x.(next_point) -. positions.x.(point)
-          and by = positions.y.(next_point) -. positions.y.(point)
-          and bz = positions.z.(next_point) -. positions.z.(point) in
-          let aa = ax *. ax +. ay *. ay +. az *. az
-          and bb = bx *. bx +. by *. by +. bz *. bz
-          and dot = ax *. bx +. ay *. by +. az *. bz in
-          let cross_x = ay *. bz -. az *. by
-          and cross_y = az *. bx -. ax *. bz
-          and cross_z = ax *. by -. ay *. bx in
-          let cross = sqrt (cross_x *. cross_x +. cross_y *. cross_y
-              +. cross_z *. cross_z) in
-          let denominator = sqrt (aa *. bb) +. dot in
-          if aa <= 0. || bb <= 0. || cross <= 1e-15 *. sqrt (aa *. bb)
-              || denominator <= 0. then Atomic.set invalid_triangle true
-          else corner_tangent.(corner) <- cross /. denominator
-        done
-      done);
+        for primitive = first to last - 1 do
+          let first_corner = topology_view.primitive_offsets.(primitive) in
+          for local = 0 to 2 do
+            let corner = first_corner + local
+            and previous = first_corner + ((local + 2) mod 3)
+            and next = first_corner + ((local + 1) mod 3) in
+            let point = topology_view.vertex_points.(corner)
+            and previous_point = topology_view.vertex_points.(previous)
+            and next_point = topology_view.vertex_points.(next) in
+            let ax = positions.x.(previous_point) -. positions.x.(point)
+            and ay = positions.y.(previous_point) -. positions.y.(point)
+            and az = positions.z.(previous_point) -. positions.z.(point)
+            and bx = positions.x.(next_point) -. positions.x.(point)
+            and by = positions.y.(next_point) -. positions.y.(point)
+            and bz = positions.z.(next_point) -. positions.z.(point) in
+            let aa = (ax *. ax) +. (ay *. ay) +. (az *. az)
+            and bb = (bx *. bx) +. (by *. by) +. (bz *. bz)
+            and dot = (ax *. bx) +. (ay *. by) +. (az *. bz) in
+            let cross_x = (ay *. bz) -. (az *. by)
+            and cross_y = (az *. bx) -. (ax *. bz)
+            and cross_z = (ax *. by) -. (ay *. bx) in
+            let cross =
+              sqrt ((cross_x *. cross_x) +. (cross_y *. cross_y) +. (cross_z *. cross_z))
+            in
+            let denominator = sqrt (aa *. bb) +. dot in
+            if aa <= 0. || bb <= 0. || cross <= 1e-15 *. sqrt (aa *. bb) || denominator <= 0. then
+              Atomic.set invalid_triangle true
+            else corner_tangent.(corner) <- cross /. denominator
+          done
+        done);
     if Atomic.get invalid_triangle then
       fail "UV parameterization rejects zero-area or numerically degenerate triangles";
     for primitive = 0 to primitive_count - 1 do
@@ -391,13 +408,13 @@ let solve ({ cancel; grain; name; seams; edge_seams; uv_tolerance; iterations; t
           let slot = cursor.(variable) in
           cursor.(variable) <- slot + 1;
           let neighbor = corner_to_variable.(neighbor_corner) in
-          let edge_length = distance point
-              topology_view.vertex_points.(neighbor_corner) in
+          let edge_length = distance point topology_view.vertex_points.(neighbor_corner) in
           let weight = corner_tangent.(corner) /. edge_length in
-          if not (finite weight) || weight <= 0. then
+          if (not (finite weight)) || weight <= 0. then
             fail "UV parameterization produced an invalid mean-value weight";
           adjacency.(slot) <- neighbor;
-          weights.(slot) <- weight in
+          weights.(slot) <- weight
+        in
         install previous;
         install next
       done
@@ -407,45 +424,46 @@ let solve ({ cancel; grain; name; seams; edge_seams; uv_tolerance; iterations; t
     let range_sum = Array.make range_count 0. in
     let parallel_dot left right =
       Array.fill range_sum 0 range_count 0.;
-      Support.run_ranges ~grain variable_count (fun ~first ~last -> let range = first / grain in
-        let sum = ref 0. in
-        for variable = first to last - 1 do
-          sum := !sum +. left.(variable) *. right.(variable)
-        done;
-        range_sum.(range) <- !sum);
+      Support.run_ranges ~grain variable_count (fun ~first ~last ->
+          let range = first / grain in
+          let sum = ref 0. in
+          for variable = first to last - 1 do
+            sum := !sum +. (left.(variable) *. right.(variable))
+          done;
+          range_sum.(range) <- !sum);
       let sum = ref 0. in
       Array.iter (fun value -> sum := !sum +. value) range_sum;
-      !sum in
+      !sum
+    in
     let diagonal = Array.make variable_count 1. in
     Support.run_ranges ~grain variable_count (fun ~first ~last ->
-      for variable = first to last - 1 do
-        if Bytes.get boundary_degree variable = '\000' then begin
-          let sum = ref 0. in
-          for slot = adjacency_offsets.(variable) to
-              adjacency_offsets.(variable + 1) - 1 do
-            sum := !sum +. weights.(slot)
-          done;
-          if !sum <= 0. || not (finite !sum) then
-            fail "UV parameterization encountered an isolated chart vertex";
-          diagonal.(variable) <- !sum
-        end
-      done);
+        for variable = first to last - 1 do
+          if Bytes.get boundary_degree variable = '\000' then begin
+            let sum = ref 0. in
+            for slot = adjacency_offsets.(variable) to adjacency_offsets.(variable + 1) - 1 do
+              sum := !sum +. weights.(slot)
+            done;
+            if !sum <= 0. || not (finite !sum) then
+              fail "UV parameterization encountered an isolated chart vertex";
+            diagonal.(variable) <- !sum
+          end
+        done);
     let apply source output =
       Support.run_ranges ~grain variable_count (fun ~first ~last ->
-        for variable = first to last - 1 do
-          if Bytes.get boundary_degree variable <> '\000' then
-            output.(variable) <- source.(variable)
-          else begin
-            let value = ref (diagonal.(variable) *. source.(variable)) in
-            for slot = adjacency_offsets.(variable) to
-                adjacency_offsets.(variable + 1) - 1 do
-              let neighbor = adjacency.(slot) in
-              if Bytes.get boundary_degree neighbor = '\000' then
-                value := !value -. weights.(slot) *. source.(neighbor)
-            done;
-            output.(variable) <- !value
-          end
-        done) in
+          for variable = first to last - 1 do
+            if Bytes.get boundary_degree variable <> '\000' then
+              output.(variable) <- source.(variable)
+            else begin
+              let value = ref (diagonal.(variable) *. source.(variable)) in
+              for slot = adjacency_offsets.(variable) to adjacency_offsets.(variable + 1) - 1 do
+                let neighbor = adjacency.(slot) in
+                if Bytes.get boundary_degree neighbor = '\000' then
+                  value := !value -. (weights.(slot) *. source.(neighbor))
+              done;
+              output.(variable) <- !value
+            end
+          done)
+    in
     let solve_coordinate fixed =
       let solution = Array.copy fixed
       and rhs = Array.make variable_count 0.
@@ -454,70 +472,62 @@ let solve ({ cancel; grain; name; seams; edge_seams; uv_tolerance; iterations; t
       and preconditioned = Array.make variable_count 0.
       and applied = Array.make variable_count 0. in
       Support.run_ranges ~grain variable_count (fun ~first ~last ->
-        for variable = first to last - 1 do
-          if Bytes.get boundary_degree variable <> '\000' then
-            solution.(variable) <- 0.
-          else begin
-            let value = ref 0. in
-            for slot = adjacency_offsets.(variable) to
-                adjacency_offsets.(variable + 1) - 1 do
-              let neighbor = adjacency.(slot) in
-              if Bytes.get boundary_degree neighbor <> '\000' then
-                value := !value +. weights.(slot) *. fixed.(neighbor)
-            done;
-            rhs.(variable) <- !value
-          end
-        done);
+          for variable = first to last - 1 do
+            if Bytes.get boundary_degree variable <> '\000' then solution.(variable) <- 0.
+            else begin
+              let value = ref 0. in
+              for slot = adjacency_offsets.(variable) to adjacency_offsets.(variable + 1) - 1 do
+                let neighbor = adjacency.(slot) in
+                if Bytes.get boundary_degree neighbor <> '\000' then
+                  value := !value +. (weights.(slot) *. fixed.(neighbor))
+              done;
+              rhs.(variable) <- !value
+            end
+          done);
       apply solution applied;
       Support.run_ranges ~grain variable_count (fun ~first ~last ->
-        for variable = first to last - 1 do
-          let value = rhs.(variable) -. applied.(variable) in
-          residual.(variable) <- value;
-          preconditioned.(variable) <- value /. diagonal.(variable);
-          direction.(variable) <- preconditioned.(variable)
-        done);
+          for variable = first to last - 1 do
+            let value = rhs.(variable) -. applied.(variable) in
+            residual.(variable) <- value;
+            preconditioned.(variable) <- value /. diagonal.(variable);
+            direction.(variable) <- preconditioned.(variable)
+          done);
       let rhs_norm = sqrt (parallel_dot rhs rhs) in
       let threshold = tolerance *. max 1. rhs_norm in
       let residual_norm = ref (sqrt (parallel_dot residual residual)) in
-      let rz = ref (parallel_dot residual preconditioned)
-      and iteration = ref 0 in
+      let rz = ref (parallel_dot residual preconditioned) and iteration = ref 0 in
       while !iteration < iterations && !residual_norm > threshold do
         Cancel.check_opt cancel;
         apply direction applied;
         let denominator = parallel_dot direction applied in
-        if not (finite denominator) || denominator <= 0. then
+        if (not (finite denominator)) || denominator <= 0. then
           fail "UV parameterization solver lost positive definiteness";
         let alpha = !rz /. denominator in
         Support.run_ranges ~grain variable_count (fun ~first ~last ->
-          for variable = first to last - 1 do
-            solution.(variable) <- solution.(variable)
-              +. alpha *. direction.(variable);
-            residual.(variable) <- residual.(variable)
-              -. alpha *. applied.(variable);
-            preconditioned.(variable) <- residual.(variable)
-              /. diagonal.(variable)
-          done);
+            for variable = first to last - 1 do
+              solution.(variable) <- solution.(variable) +. (alpha *. direction.(variable));
+              residual.(variable) <- residual.(variable) -. (alpha *. applied.(variable));
+              preconditioned.(variable) <- residual.(variable) /. diagonal.(variable)
+            done);
         residual_norm := sqrt (parallel_dot residual residual);
         if !residual_norm > threshold then begin
           let next_rz = parallel_dot residual preconditioned in
           let beta = next_rz /. !rz in
           Support.run_ranges ~grain variable_count (fun ~first ~last ->
-            for variable = first to last - 1 do
-              direction.(variable) <- preconditioned.(variable)
-                +. beta *. direction.(variable)
-            done);
+              for variable = first to last - 1 do
+                direction.(variable) <- preconditioned.(variable) +. (beta *. direction.(variable))
+              done);
           rz := next_rz
         end;
         incr iteration
       done;
       if !residual_norm > threshold then
-        fail (Printf.sprintf
-          "UV parameterization did not converge in %d iterations" iterations);
+        fail (Printf.sprintf "UV parameterization did not converge in %d iterations" iterations);
       for variable = 0 to variable_count - 1 do
-        if Bytes.get boundary_degree variable <> '\000' then
-          solution.(variable) <- fixed.(variable)
+        if Bytes.get boundary_degree variable <> '\000' then solution.(variable) <- fixed.(variable)
       done;
-      solution in
+      solution
+    in
     let solved_u = solve_coordinate u and solved_v = solve_coordinate v in
     let component_winding = Array.make component_count 0. in
     for primitive = 0 to primitive_count - 1 do
@@ -525,30 +535,30 @@ let solve ({ cancel; grain; name; seams; edge_seams; uv_tolerance; iterations; t
       let a = corner_to_variable.(first)
       and b = corner_to_variable.(first + 1)
       and c = corner_to_variable.(first + 2) in
-      let area = (solved_u.(b) -. solved_u.(a))
-            *. (solved_v.(c) -. solved_v.(a))
-          -. (solved_v.(b) -. solved_v.(a))
-            *. (solved_u.(c) -. solved_u.(a)) in
-      if not (finite area) || abs_float area <= 1e-15 then
+      let area =
+        ((solved_u.(b) -. solved_u.(a)) *. (solved_v.(c) -. solved_v.(a)))
+        -. ((solved_v.(b) -. solved_v.(a)) *. (solved_u.(c) -. solved_u.(a)))
+      in
+      if (not (finite area)) || abs_float area <= 1e-15 then
         fail "UV parameterization collapsed a triangle";
-      let component = variable_component.(a)
-      and sign = if area < 0. then -1. else 1. in
+      let component = variable_component.(a) and sign = if area < 0. then -1. else 1. in
       if component_winding.(component) = 0. then component_winding.(component) <- sign
       else if component_winding.(component) <> sign then
         fail "UV parameterization produced a flipped triangle"
     done;
-    let result_u = Array.make vertex_count 0.
-    and result_v = Array.make vertex_count 0. in
+    let result_u = Array.make vertex_count 0. and result_v = Array.make vertex_count 0. in
     Support.run_ranges ~grain vertex_count (fun ~first ~last ->
-      for corner = first to last - 1 do
-        let variable = corner_to_variable.(corner) in
-        result_u.(corner) <- solved_u.(variable);
-        result_v.(corner) <- solved_v.(variable)
-      done);
-    let values = Packed.Float2.of_owned ~x:result_u ~y:result_v
-        |> Result.get_ok in
-    let attribute = Attribute.create_key_owned
-        (Attribute.key ~name ~owner:Attribute.Vertex Attribute.float2) values
-        |> Result.get_ok in
+        for corner = first to last - 1 do
+          let variable = corner_to_variable.(corner) in
+          result_u.(corner) <- solved_u.(variable);
+          result_v.(corner) <- solved_v.(variable)
+        done);
+    let values = Packed.Float2.of_owned ~x:result_u ~y:result_v |> Result.get_ok in
+    let attribute =
+      Attribute.create_key_owned
+        (Attribute.key ~name ~owner:Attribute.Vertex Attribute.float2)
+        values
+      |> Result.get_ok
+    in
     Geometry.with_attribute attribute geometry
   with Error.Fail message -> Error message

@@ -7,16 +7,8 @@ type sphere_connectivity =
   | Sphere_rows_and_columns
   | Sphere_points
 
-type sphere_normals =
-  | Sphere_no_normals
-  | Sphere_point_normals
-  | Sphere_vertex_normals
-
-type sphere_orientation =
-  | Sphere_x
-  | Sphere_y
-  | Sphere_z
-  | Sphere_axis of Rays_math.Vec3.t
+type sphere_normals = Sphere_no_normals | Sphere_point_normals | Sphere_vertex_normals
+type sphere_orientation = Sphere_x | Sphere_y | Sphere_z | Sphere_axis of Rays_math.Vec3.t
 
 type sphere_rotation_order =
   | Sphere_xyz
@@ -34,21 +26,18 @@ val run :
   radius:float ->
   unit ->
   (Geometry.t, Error.t) result
-(** Generate a latitude/longitude sphere or ellipsoid as regular/alternating
-    triangles, quads, open row/column curves, combined curves, or points. The
-    compatible default retains shared poles, triangles, +Y pole orientation,
-    and smooth point normals. Quad poles may be triangles or logically
-    degenerate quads; [unique_points_per_pole] gives every meridian its own
-    coincident endpoint.
+(** Generate a latitude/longitude sphere or ellipsoid as regular/alternating triangles, quads, open
+    row/column curves, combined curves, or points. The compatible default retains shared poles,
+    triangles, +Y pole orientation, and smooth point normals. Quad poles may be triangles or
+    logically degenerate quads; [unique_points_per_pole] gives every meridian its own coincident
+    endpoint.
 
-    Radius overrides name the local radial-X, pole-Y, and radial-Z axes before
-    pole orientation and Euler rotation. [Sphere_axis] uses a deterministic
-    scale-safe orthonormal frame. Rotation components are radians and the
-    rotation-order constructor names their application order. Optional UVs
-    are vertex-owned for topology and point-owned for point output, with a
-    non-crossing surface seam.
+    Radius overrides name the local radial-X, pole-Y, and radial-Z axes before pole orientation and
+    Euler rotation. [Sphere_axis] uses a deterministic scale-safe orthonormal frame. Rotation
+    components are radians and the rotation-order constructor names their application order.
+    Optional UVs are vertex-owned for topology and point-owned for point output, with a non-crossing
+    surface seam.
 
-    Cardinalities are checked before allocation. Positions, normals, UVs,
-    topology, offsets, and kinds use exact packed planes and deterministic
-    disjoint fills. Work/output are O(segments * rings); auxiliary storage is
-    O(segments + rings + parallel ranges). *)
+    Cardinalities are checked before allocation. Positions, normals, UVs, topology, offsets, and
+    kinds use exact packed planes and deterministic disjoint fills. Work/output are O(segments *
+    rings); auxiliary storage is O(segments + rings + parallel ranges). *)

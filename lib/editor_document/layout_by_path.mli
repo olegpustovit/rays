@@ -1,8 +1,7 @@
-(** Canvas layout keyed by {!type:Flow.Workspace.path}: the fields of
-    the workspace's active layout.  Scope consumes positions, detail levels with their pins,
-    collapsed zones and frames.  A path is the lexical identity of a binding, so a key
-    survives every text edit that keeps the path; {!Flow_graph.Flow_edit.remap}
-    rewrites keys in the same transaction as a rename or a hoist.
+(** Canvas layout keyed by {!type:Flow.Workspace.path}: the fields of the workspace's active layout.
+    Scope consumes positions, detail levels with their pins, collapsed zones and frames. A path is
+    the lexical identity of a binding, so a key survives every text edit that keeps the path;
+    {!Flow_graph.Flow_edit.remap} rewrites keys in the same transaction as a rename or a hoist.
 
     Persisted as one [(layout ...)] s-expression after the workspace:
     {[
@@ -22,7 +21,8 @@ type frame = { title : string; at : float * float; size : float * float }
 (** A titled rectangle on the canvas of the scope the frame is keyed by. *)
 
 type t = {
-  editor : string option; (** The selected editor graph (a named shell layout); first by default. *)
+  editor : string option;
+      (** The selected editor graph (a named shell layout); first by default. *)
   panels : Editor_core.Panels.state Path_map.t;
       (** Saved panel disclosure and floating window bounds, keyed by editor graph and binding. *)
   at : (float * float) Path_map.t;

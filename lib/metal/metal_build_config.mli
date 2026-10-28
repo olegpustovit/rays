@@ -1,7 +1,4 @@
-type sanitizer =
-  | Address
-  | Undefined
-  | Thread
+type sanitizer = Address | Undefined | Thread
 
 val parse_sanitizers : string -> (sanitizer list, string) result
 val compile_flags : sanitizer list -> string list

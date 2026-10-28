@@ -5,52 +5,92 @@
  (libraries rays rays_math param))
 
 (executable
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (name test_main)
- (modules test_main test_ui_parity test_ui test_input test_keyboard test_table)
+ (modules
+  test_main
+  test_ui_parity
+  test_ui
+  test_input
+  test_keyboard
+  test_table)
  (libraries rays rays_math pxui scene_command sdl3 ogpu_metal))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_ui_parity)
- (deps fixtures/kit_panel_2x.png fixtures/kit_overlays_2x.png fixtures/kit_zones_2x.png fixtures/kit_table_2x.png)
+ (deps
+  fixtures/kit_panel_2x.png
+  fixtures/kit_overlays_2x.png
+  fixtures/kit_zones_2x.png
+  fixtures/kit_table_2x.png)
  (action
-  (setenv SDL_VIDEODRIVER dummy
-  (setenv RAYS_UI_FONT %{dep:../../assets/fonts/DepartureMono-Regular.otf}
-   (run %{exe:test_main.exe} test_ui_parity)))))
+  (setenv
+   SDL_VIDEODRIVER
+   dummy
+   (setenv
+    RAYS_UI_FONT
+    %{dep:../../assets/fonts/DepartureMono-Regular.otf}
+    (run %{exe:test_main.exe} test_ui_parity)))))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_ui)
  ; pointer positions in the text tests assume the golden face's advance
- (action (setenv SDL_VIDEODRIVER dummy
-  (setenv RAYS_UI_FONT %{dep:../../assets/fonts/DepartureMono-Regular.otf}
-   (run %{exe:test_main.exe} test_ui)))))
+ (action
+  (setenv
+   SDL_VIDEODRIVER
+   dummy
+   (setenv
+    RAYS_UI_FONT
+    %{dep:../../assets/fonts/DepartureMono-Regular.otf}
+    (run %{exe:test_main.exe} test_ui)))))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_ui_commands)
- (action (setenv SDL_VIDEODRIVER dummy
-  (setenv RAYS_UI_FONT %{dep:../../assets/fonts/DepartureMono-Regular.otf}
-   (run %{exe:test_main.exe} test_ui_commands)))))
+ (action
+  (setenv
+   SDL_VIDEODRIVER
+   dummy
+   (setenv
+    RAYS_UI_FONT
+    %{dep:../../assets/fonts/DepartureMono-Regular.otf}
+    (run %{exe:test_main.exe} test_ui_commands)))))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_input)
- (action (setenv SDL_VIDEODRIVER dummy
-  (run %{exe:test_main.exe} test_input))))
+ (action
+  (setenv
+   SDL_VIDEODRIVER
+   dummy
+   (run %{exe:test_main.exe} test_input))))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_keyboard)
- (action (setenv SDL_VIDEODRIVER dummy
-  (run %{exe:test_main.exe} test_keyboard))))
+ (action
+  (setenv
+   SDL_VIDEODRIVER
+   dummy
+   (run %{exe:test_main.exe} test_keyboard))))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_table)
- (action (setenv SDL_VIDEODRIVER dummy
-  (run %{exe:test_main.exe} test_table))))
+ (action
+  (setenv
+   SDL_VIDEODRIVER
+   dummy
+   (run %{exe:test_main.exe} test_table))))
 
 (alias
  (name runtest)

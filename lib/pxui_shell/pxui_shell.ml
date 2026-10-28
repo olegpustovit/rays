@@ -1,17 +1,9 @@
 module Layout = Layout
-
 module Kit = Kit
-
 module Chrome = Chrome
-
 module Which_key = Which_key
-
 module Status_bar = Status_bar
-
 module Timeline_bar = Timeline_bar
-
 module Prompt = Prompt
-
 module Tree = Tree
-
 module Inspector = Inspector

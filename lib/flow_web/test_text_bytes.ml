@@ -8,12 +8,27 @@ let () =
     Printf.bprintf js "samples.push([%s,Uint8Array.from([%s]),%s]);\n"
       (Flow_web.Kernel_table.json_string text)
       (String.concat "," (Array.to_list bytes))
-      (Flow_web.Kernel_table.json_string (Printf.sprintf "%S" text)) in
-  List.iter sample [""; "a\000b"; "é日本😀"; "\239\187\191BOM"; "�";
-    "\192\128"; "\237\160\128"; "\244\144\128\128"; "\226\130";
-    "validé\255\000\128日本\195"; String.init 256 Char.chr];
-  for byte = 128 to 255 do sample (String.make 1 (Char.chr byte)) done;
-  Buffer.add_string js {|
+      (Flow_web.Kernel_table.json_string (Printf.sprintf "%S" text))
+  in
+  List.iter sample
+    [
+      "";
+      "a\000b";
+      "é日本😀";
+      "\239\187\191BOM";
+      "�";
+      "\192\128";
+      "\237\160\128";
+      "\244\144\128\128";
+      "\226\130";
+      "validé\255\000\128日本\195";
+      String.init 256 Char.chr;
+    ];
+  for byte = 128 to 255 do
+    sample (String.make 1 (Char.chr byte))
+  done;
+  Buffer.add_string js
+    {|
 const equal=(a,b)=>Buffer.from(a).equals(Buffer.from(b));
 for(const [text,bytes,quoted] of samples) {
   if(!equal(textBytes(text),bytes)||!equal(textBytes(textOfBytes(bytes)),bytes)
@@ -33,4 +48,5 @@ console.log('Text codec: all byte values, invalid UTF-8, NUL, Unicode, BOM, repr
   let path = Filename.temp_file "text-bytes" ".mjs" in
   Out_channel.with_open_bin path (fun out -> output_string out (Buffer.contents js));
   let status = Sys.command ("node " ^ Filename.quote path) in
-  Sys.remove path; assert (status = 0)
+  Sys.remove path;
+  assert (status = 0)

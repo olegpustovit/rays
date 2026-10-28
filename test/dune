@@ -1,38 +1,81 @@
 (test
  (name test_sdl3_no_dynamic_ffi)
  (modules test_sdl3_no_dynamic_ffi)
- (deps (glob_files ../lib/sdl3/*.ml) (glob_files ../lib/sdl3/*.mli)
-  (glob_files ../lib/sdl3_image/*.ml) (glob_files ../lib/sdl3_image/*.mli)
-  (glob_files ../lib/sdl3_ttf/*.ml) (glob_files ../lib/sdl3_ttf/*.mli)
-  (glob_files ../lib/sdl3_mixer/*.ml) (glob_files ../lib/sdl3_mixer/*.mli))
- (action (chdir %{workspace_root} (run %{test}))))
+ (deps
+  (glob_files ../lib/sdl3/*.ml)
+  (glob_files ../lib/sdl3/*.mli)
+  (glob_files ../lib/sdl3_image/*.ml)
+  (glob_files ../lib/sdl3_image/*.mli)
+  (glob_files ../lib/sdl3_ttf/*.ml)
+  (glob_files ../lib/sdl3_ttf/*.mli)
+  (glob_files ../lib/sdl3_mixer/*.ml)
+  (glob_files ../lib/sdl3_mixer/*.mli))
+ (action
+  (chdir
+   %{workspace_root}
+   (run %{test}))))
 
 (executable
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (name test_main)
  (modules test_main dependency_gate private_allowlist)
  (libraries unix str compiler-libs.common))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias dependency_gate)
- (deps (source_tree ../lib) (source_tree ../ppx)
-  (source_tree ../sketches) (source_tree ../tools) (source_tree .))
+ (deps
+  (source_tree ../lib)
+  (source_tree ../ppx)
+  (source_tree ../sketches)
+  (source_tree ../tools)
+  (source_tree .))
  (action
-  (chdir %{workspace_root} (run %{exe:test_main.exe} dependency_gate))))
+  (chdir
+   %{workspace_root}
+   (run %{exe:test_main.exe} dependency_gate))))
 
-(alias (name runtest) (deps (alias dependency_gate)))
+(alias
+ (name runtest)
+ (deps
+  (alias dependency_gate)))
 
 ; Draw-graph scene snapshots: each workspace's scene is regenerated into
 ; the build directory and diffed against the checked-in file.
+
 (executable
  (name test_draw_snapshot)
  (modules test_draw_snapshot)
- (libraries rays rays_math rays_editor flow_native editor_document flow flow_sop scene_command input ogpu_mock parallel))
+ (libraries
+  rays
+  rays_math
+  rays_editor
+  flow_native
+  editor_document
+  flow
+  flow_sop
+  scene_command
+  input
+  ogpu_mock
+  parallel))
 
 (rule
  (alias test_draw_snapshots)
- (deps (source_tree ../sketches) (source_tree draw_snapshots))
- (action (setenv SDL_VIDEODRIVER dummy (setenv SDL_AUDIODRIVER dummy (run %{exe:test_draw_snapshot.exe})))))
+ (deps
+  (source_tree ../sketches)
+  (source_tree draw_snapshots))
+ (action
+  (setenv
+   SDL_VIDEODRIVER
+   dummy
+   (setenv
+    SDL_AUDIODRIVER
+    dummy
+    (run %{exe:test_draw_snapshot.exe})))))
 
-(alias (name runtest) (deps (alias test_draw_snapshots)))
+(alias
+ (name runtest)
+ (deps
+  (alias test_draw_snapshots)))

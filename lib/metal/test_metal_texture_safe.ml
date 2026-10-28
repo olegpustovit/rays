@@ -3,14 +3,20 @@ open Test_metal_support
 
 let formats =
   Texture.
-    [ R8_unorm; Rgba8_unorm; Bgra8_unorm; Bgra8_unorm_srgb; Rgba16_float; Rgba32_float
-    ; Depth32_float ]
+    [
+      R8_unorm;
+      Rgba8_unorm;
+      Bgra8_unorm;
+      Bgra8_unorm_srgb;
+      Rgba16_float;
+      Rgba32_float;
+      Depth32_float;
+    ]
 
 let read ?(mip_level = 0) texture ~region ~bytes_per_row ~bytes_per_image =
   Texture.read_bytes texture ~region ~mip_level ~slice:0 ~bytes_per_row ~bytes_per_image
 
-let full_region ?(depth = 1) width height =
-  { Texture.x = 0; y = 0; z = 0; width; height; depth }
+let full_region ?(depth = 1) width height = { Texture.x = 0; y = 0; z = 0; width; height; depth }
 
 let test_format_matrix device _queue =
   if List.length formats <> 7 || List.length (List.sort_uniq compare formats) <> 7 then
@@ -45,8 +51,9 @@ let test_swizzle_and_compression device queue =
     { red = Texture.Red; green = Texture.One; blue = Texture.One; alpha = Texture.Green }
   in
   let swizzled ?(storage = Buffer.Shared) ?(usage = [ Texture.Shader_read ]) ~width ~height () =
-    { (Texture.descriptor_2d ~storage ~usage ~format:Texture.Rgba8_unorm ~width ~height ()) with
-      swizzle = base_swizzle
+    {
+      (Texture.descriptor_2d ~storage ~usage ~format:Texture.Rgba8_unorm ~width ~height ()) with
+      swizzle = base_swizzle;
     }
   in
   let texture = get (Texture.create ~device (swizzled ~width:1 ~height:1 ())) in
@@ -91,48 +98,51 @@ let test_swizzle_and_compression device queue =
   get (Texture.destroy plain);
   get (Texture.destroy texture);
   without_handles "invalid writable swizzles" (fun () ->
-    List.iter
-      (fun usage ->
-        reject Invalid_argument
-          (Texture.create ~device (swizzled ~storage:Buffer.Private ~usage ~width:4 ~height:4 ())))
-      [ [ Texture.Shader_write ]; [ Texture.Shader_atomic ] ]);
+      List.iter
+        (fun usage ->
+          reject Invalid_argument
+            (Texture.create ~device (swizzled ~storage:Buffer.Private ~usage ~width:4 ~height:4 ())))
+        [ [ Texture.Shader_write ]; [ Texture.Shader_atomic ] ]);
   let lossy_descriptor =
-    { (Texture.descriptor_2d ~storage:Buffer.Private ~usage:[ Texture.Render_target ]
+    {
+      (Texture.descriptor_2d ~storage:Buffer.Private ~usage:[ Texture.Render_target ]
          ~format:Texture.Rgba8_unorm ~width:64 ~height:64 ())
       with
-      compression = Texture.Lossy
+      compression = Texture.Lossy;
     }
   in
   without_handles "invalid lossy texture descriptors" (fun () ->
-    [ { lossy_descriptor with storage = Buffer.Shared }
-    ; { lossy_descriptor with allow_gpu_optimized_contents = false }
-    ; { lossy_descriptor with usage = [ Texture.Pixel_format_view ] }
-    ; { lossy_descriptor with usage = [ Texture.Shader_write ] }
-    ; { lossy_descriptor with usage = [ Texture.Shader_atomic ] }
-    ; { lossy_descriptor with kind = Texture.Texture_1d; height = 1 }
-    ]
-    |> List.iter (fun invalid -> reject Invalid_argument (Texture.create ~device invalid)));
+      [
+        { lossy_descriptor with storage = Buffer.Shared };
+        { lossy_descriptor with allow_gpu_optimized_contents = false };
+        { lossy_descriptor with usage = [ Texture.Pixel_format_view ] };
+        { lossy_descriptor with usage = [ Texture.Shader_write ] };
+        { lossy_descriptor with usage = [ Texture.Shader_atomic ] };
+        { lossy_descriptor with kind = Texture.Texture_1d; height = 1 };
+      ]
+      |> List.iter (fun invalid -> reject Invalid_argument (Texture.create ~device invalid)));
   without_handles "lossy compression is unsupported for retained formats" (fun () ->
-    reject Invalid_argument (Texture.create ~device lossy_descriptor))
+      reject Invalid_argument (Texture.create ~device lossy_descriptor))
 
 let test_transfer_and_descriptors device queue =
   let texture_descriptor =
-    { (Texture.descriptor_2d ~storage:Buffer.Shared
+    {
+      (Texture.descriptor_2d ~storage:Buffer.Shared
          ~usage:[ Texture.Shader_read; Texture.Pixel_format_view ]
          ~label:"Metal conformance texture" ~format:Texture.Rgba8_unorm ~width:4 ~height:4 ())
       with
-      mip_levels = 3
+      mip_levels = 3;
     }
   in
   finalizer_releases "texture" ~count:1 (fun () ->
-    ignore (get (Texture.create ~device texture_descriptor)));
+      ignore (get (Texture.create ~device texture_descriptor)));
   let texture = get (Texture.create ~device texture_descriptor) in
   if (Texture.descriptor texture).mip_levels <> 3 then fail "2D texture mip cardinality is wrong";
   if (Texture.descriptor texture).hazard_tracking <> Texture.Tracked then
     fail "direct texture resource properties are wrong";
   if (Texture.descriptor texture).label <> Some "Metal conformance texture" then
     fail "texture label did not round-trip";
-  if not (Device.same (Texture.device texture) device) || Texture.destroyed texture then
+  if (not (Device.same (Texture.device texture) device)) || Texture.destroyed texture then
     fail "texture identity is wrong";
   reject Parent_has_dependents (Device.destroy device);
   (* Rows of sixteen bytes carried at a pitch of twenty: the pad never reaches
@@ -170,21 +180,25 @@ let test_transfer_and_descriptors device queue =
        ~bytes_per_image:64 ~destination:(Bytes.create 63));
   reject Invalid_argument (read texture ~region:full ~bytes_per_row:15 ~bytes_per_image:60);
   reject Invalid_argument (read texture ~region:full ~bytes_per_row:20 ~bytes_per_image:79);
-  reject Invalid_argument (read texture ~region:full ~bytes_per_row:max_int ~bytes_per_image:max_int);
+  reject Invalid_argument
+    (read texture ~region:full ~bytes_per_row:max_int ~bytes_per_image:max_int);
   reject Invalid_argument
     (read texture ~region:{ full with x = 3; width = 2 } ~bytes_per_row:8 ~bytes_per_image:32);
-  reject Invalid_argument (read ~mip_level:3 texture ~region:full ~bytes_per_row:16 ~bytes_per_image:64);
+  reject Invalid_argument
+    (read ~mip_level:3 texture ~region:full ~bytes_per_row:16 ~bytes_per_image:64);
   reject Invalid_argument
     (Texture.read_bytes texture ~region:full ~mip_level:0 ~slice:1 ~bytes_per_row:16
        ~bytes_per_image:64);
   let mip_region = full_region 2 2 in
   let mip_bytes = Bytes.init 16 (fun index -> Char.chr (index + 20)) in
   upload ~device ~queue ~level:1 texture ~region:mip_region ~bytes_per_row:8 mip_bytes;
-  if get (read ~mip_level:1 texture ~region:mip_region ~bytes_per_row:8 ~bytes_per_image:16)
-     <> mip_bytes
+  if
+    get (read ~mip_level:1 texture ~region:mip_region ~bytes_per_row:8 ~bytes_per_image:16)
+    <> mip_bytes
   then fail "texture mip transfer did not round-trip";
-  if Bytes.sub (get (read texture ~region:full ~bytes_per_row:16 ~bytes_per_image:64)) 0 16
-     <> Bytes.sub texture_bytes 0 16
+  if
+    Bytes.sub (get (read texture ~region:full ~bytes_per_row:16 ~bytes_per_image:64)) 0 16
+    <> Bytes.sub texture_bytes 0 16
   then fail "a mip upload overwrote the base level";
   let private_texture =
     get
@@ -195,31 +209,33 @@ let test_transfer_and_descriptors device queue =
   reject Unsupported (read private_texture ~region:full ~bytes_per_row:16 ~bytes_per_image:64);
   get (Texture.destroy private_texture);
   without_handles "invalid texture descriptors" (fun () ->
-    [ { texture_descriptor with width = 0 }
-    ; { texture_descriptor with mip_levels = 9 }
-    ; { texture_descriptor with kind = Texture.Texture_1d; height = 2; mip_levels = 1 }
-    ; { texture_descriptor with sample_count = 2; mip_levels = 1 }
-    ; { texture_descriptor with usage = [ Texture.Shader_read; Texture.Shader_read ] }
-    ; { texture_descriptor with label = Some "invalid\000label" }
-    ; { texture_descriptor with kind = Texture.Texture_buffer; height = 1; mip_levels = 1 }
-    ; { texture_descriptor with kind = Texture.Texture_2d_array; mip_levels = 1 }
-    ; { texture_descriptor with kind = Texture.Texture_cube; height = 2; mip_levels = 1 }
-    ; { texture_descriptor with kind = Texture.Texture_3d; array_length = 2; mip_levels = 1 }
-    ]
-    |> List.iter (fun invalid -> reject Invalid_argument (Texture.create ~device invalid)));
+      [
+        { texture_descriptor with width = 0 };
+        { texture_descriptor with mip_levels = 9 };
+        { texture_descriptor with kind = Texture.Texture_1d; height = 2; mip_levels = 1 };
+        { texture_descriptor with sample_count = 2; mip_levels = 1 };
+        { texture_descriptor with usage = [ Texture.Shader_read; Texture.Shader_read ] };
+        { texture_descriptor with label = Some "invalid\000label" };
+        { texture_descriptor with kind = Texture.Texture_buffer; height = 1; mip_levels = 1 };
+        { texture_descriptor with kind = Texture.Texture_2d_array; mip_levels = 1 };
+        { texture_descriptor with kind = Texture.Texture_cube; height = 2; mip_levels = 1 };
+        { texture_descriptor with kind = Texture.Texture_3d; array_length = 2; mip_levels = 1 };
+      ]
+      |> List.iter (fun invalid -> reject Invalid_argument (Texture.create ~device invalid)));
   without_handles "texture label Metal refuses" (fun () ->
-    reject Native_error (Texture.create ~device { texture_descriptor with label = Some "\255" }));
+      reject Native_error (Texture.create ~device { texture_descriptor with label = Some "\255" }));
   if get (Device.supports_texture_sample_count device 2) then begin
     let multisample_texture =
       get
         (Texture.create ~device
-           { texture_descriptor with
-             kind = Texture.Texture_2d_multisample
-           ; mip_levels = 1
-           ; sample_count = 2
-           ; storage = Buffer.Private
-           ; usage = [ Texture.Render_target ]
-           ; label = None
+           {
+             texture_descriptor with
+             kind = Texture.Texture_2d_multisample;
+             mip_levels = 1;
+             sample_count = 2;
+             storage = Buffer.Private;
+             usage = [ Texture.Render_target ];
+             label = None;
            })
     in
     reject Unsupported (read multisample_texture ~region:full ~bytes_per_row:16 ~bytes_per_image:64);
@@ -228,10 +244,11 @@ let test_transfer_and_descriptors device queue =
   let cube =
     get
       (Texture.create ~device
-         { (Texture.descriptor_2d ~storage:Buffer.Shared ~format:Texture.Rgba8_unorm ~width:4
+         {
+           (Texture.descriptor_2d ~storage:Buffer.Shared ~format:Texture.Rgba8_unorm ~width:4
               ~height:4 ())
            with
-           kind = Texture.Texture_cube
+           kind = Texture.Texture_cube;
          })
   in
   (* A cube has six slices and no seventh. *)
@@ -261,11 +278,12 @@ let test_blit device queue =
   let volume =
     get
       (Texture.create ~device
-         { (Texture.descriptor_2d ~storage:Buffer.Private ~format:Texture.R8_unorm ~width:1
+         {
+           (Texture.descriptor_2d ~storage:Buffer.Private ~format:Texture.R8_unorm ~width:1
               ~height:1 ())
            with
-           kind = Texture.Texture_3d
-         ; depth = 2
+           kind = Texture.Texture_3d;
+           depth = 2;
          })
   in
   let staging_bytes = Bytes.make 16 '\000' in
@@ -284,16 +302,17 @@ let test_blit device queue =
       ~destination_slice:slice ~destination_level:level ~destination_region:region
   in
   without_handles "refused blits" (fun () ->
-    reject Invalid_argument (copy ~source_offset:(-1L) region);
-    reject Invalid_argument
-      (copy ~bytes_per_row:1 ~bytes_per_image:max_int ~destination:volume (full_region ~depth:2 1 1));
-    reject Invalid_argument (copy ~bytes_per_row:3 region);
-    reject Invalid_argument (copy ~bytes_per_image:15 region);
-    reject Invalid_argument (copy ~source_offset:1L region);
-    reject Invalid_argument (copy ~level:1 region);
-    reject Invalid_argument (copy ~slice:1 region);
-    reject Invalid_argument (copy { region with x = 1 });
-    reject Invalid_argument (copy { region with width = 0 }));
+      reject Invalid_argument (copy ~source_offset:(-1L) region);
+      reject Invalid_argument
+        (copy ~bytes_per_row:1 ~bytes_per_image:max_int ~destination:volume
+           (full_region ~depth:2 1 1));
+      reject Invalid_argument (copy ~bytes_per_row:3 region);
+      reject Invalid_argument (copy ~bytes_per_image:15 region);
+      reject Invalid_argument (copy ~source_offset:1L region);
+      reject Invalid_argument (copy ~level:1 region);
+      reject Invalid_argument (copy ~slice:1 region);
+      reject Invalid_argument (copy { region with x = 1 });
+      reject Invalid_argument (copy { region with width = 0 }));
   get (copy region);
   reject Parent_has_dependents (Buffer.destroy staging);
   reject Parent_has_dependents (Texture.destroy texture);

@@ -1,11 +1,18 @@
-
 type transform_order =
-  | Transform_srt | Transform_str | Transform_rst
-  | Transform_rts | Transform_tsr | Transform_trs
+  | Transform_srt
+  | Transform_str
+  | Transform_rst
+  | Transform_rts
+  | Transform_tsr
+  | Transform_trs
 
 type transform_rotation_order =
-  | Transform_xyz | Transform_xzy | Transform_yxz
-  | Transform_yzx | Transform_zxy | Transform_zyx
+  | Transform_xyz
+  | Transform_xzy
+  | Transform_yxz
+  | Transform_yzx
+  | Transform_zxy
+  | Transform_zyx
 
 type soft_transform_metric =
   | Soft_radius
@@ -13,11 +20,8 @@ type soft_transform_metric =
   | Soft_attribute of { attribute : string; apply_rolloff : bool }
 
 type soft_transform_falloff = Soft_linear | Soft_quadratic | Soft_cubic
-
 type distance_along_radius = Distance_fixed of float | Distance_maximum
-
-type distance_from_geometry_reference =
-  | Distance_reference_points | Distance_reference_primitives
+type distance_from_geometry_reference = Distance_reference_points | Distance_reference_primitives
 
 type compose_transform_params = {
   order : transform_order;
@@ -45,7 +49,8 @@ type soft_transform_params = {
   recompute_normals : bool;
 }
 
-val soft_transform : soft_transform_params -> Rays_math.Mat4.t -> Geometry.t -> (Geometry.t, Error.t) result
+val soft_transform :
+  soft_transform_params -> Rays_math.Mat4.t -> Geometry.t -> (Geometry.t, Error.t) result
 
 type distance_from_geometry_params = {
   cancel : Cancel.t option;
@@ -60,4 +65,5 @@ type distance_from_geometry_params = {
   reference : Geometry.t;
 }
 
-val distance_from_geometry : distance_from_geometry_params -> Geometry.t -> (Geometry.t, Error.t) result
+val distance_from_geometry :
+  distance_from_geometry_params -> Geometry.t -> (Geometry.t, Error.t) result

@@ -2,6 +2,7 @@ type mode =
   | Nearest
   | Inverse_distance of { neighbors : int; power : float }
   | Kernel of { neighbors : int; radius : float; kernel : kernel }
+
 and kernel = Links | RenderMan | Hart
 
 type unmatched = Keep_target | Default_value

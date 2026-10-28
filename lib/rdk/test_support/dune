@@ -1,8 +1,14 @@
 (library
  (name rdk_test_support)
- (modules rdk_test_support box_generator uv_sphere plane_generators parametric_generators)
+ (modules
+  rdk_test_support
+  box_generator
+  uv_sphere
+  plane_generators
+  parametric_generators)
  (libraries rdk rdk_core rdk_geom rdk_ops rdk_boolean rays_math parallel)
- (flags (:standard -open Rdk_core -open Rdk_geom -open Rdk_ops)))
+ (flags
+  (:standard -open Rdk_core -open Rdk_geom -open Rdk_ops)))
 
 (test
  (name test_geometry_comparison)

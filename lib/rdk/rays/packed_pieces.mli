@@ -1,19 +1,13 @@
 (** Terminal render representation for disconnected SOP pieces.
 
-    The source remains one immutable cooked RDK geometry. Piece membership and
-    centers are compiled once into compact arrays, after which explosion
-    controls only rebuild render positions; they never recook topology. This
-    is the Rays counterpart of Connectivity -> Pack by Name -> Transform
-    Pieces/Exploded View, without inventing editable packed primitives inside
-    [Rdk.Geometry.t]. *)
+    The source remains one immutable cooked RDK geometry. Piece membership and centers are compiled
+    once into compact arrays, after which explosion controls only rebuild render positions; they
+    never recook topology. This is the Rays counterpart of Connectivity -> Pack by Name -> Transform
+    Pieces/Exploded View, without inventing editable packed primitives inside [Rdk.Geometry.t]. *)
 
 type t
 
-val of_geometry :
-  piece_attribute:string ->
-  Rdk_core.Geometry.t ->
-  (t, string) result
-
+val of_geometry : piece_attribute:string -> Rdk_core.Geometry.t -> (t, string) result
 val piece_count : t -> int
 
 type explosion = {

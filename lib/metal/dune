@@ -1,43 +1,65 @@
 (library
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (name metal_build_config)
  (wrapped false)
  (modules Metal_build_config))
 
 (executable
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (name discover)
  (modules discover)
  (libraries metal_build_config unix))
 
 (executable
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (name build_bridge)
  (modules build_bridge)
  (libraries metal_build_config unix))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (targets c_library_flags.sexp)
  (action
-  (run ./discover.exe --sanitizers %{env:RAYS_METAL_SANITIZERS=}
-   --output %{targets})))
+  (run
+   ./discover.exe
+   --sanitizers
+   %{env:RAYS_METAL_SANITIZERS=}
+   --output
+   %{targets})))
 
 (rule
- (enabled_if (= %{system} macosx))
- (targets metal_gen.ml metal_gen.mli metal_gen_stubs.inc metal_gen_feature_checks.inc)
+ (enabled_if
+  (= %{system} macosx))
+ (targets
+  metal_gen.ml
+  metal_gen.mli
+  metal_gen_stubs.inc
+  metal_gen_feature_checks.inc)
  (deps metal.ml metal_raw.ml)
  (action
-  (run %{exe:gen/generate.exe} %{dep:metal.ml} %{dep:metal_raw.ml}
-   metal_gen.ml metal_gen.mli metal_gen_stubs.inc metal_gen_feature_checks.inc)))
+  (run
+   %{exe:gen/generate.exe}
+   %{dep:metal.ml}
+   %{dep:metal_raw.ml}
+   metal_gen.ml
+   metal_gen.mli
+   metal_gen_stubs.inc
+   metal_gen_feature_checks.inc)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias runtest)
- (action (run %{exe:gen/generate.exe} --self-test)))
+ (action
+  (run %{exe:gen/generate.exe} --self-test)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (targets metal_bridge.o libmetal_bridge_stubs.a dllmetal_bridge_stubs.so)
  (deps
   metal_bridge.mm
@@ -45,67 +67,123 @@
   metal_gen_feature_checks.inc
   c_library_flags.sexp)
  (action
-  (run ./build_bridge.exe
-   --sanitizers %{env:RAYS_METAL_SANITIZERS=}
-   --profile %{profile}
-   --ocaml-include %{ocaml-config:standard_library}
-   --source %{dep:metal_bridge.mm}
-   --object metal_bridge.o
-   --archive libmetal_bridge_stubs.a
-   --shared dllmetal_bridge_stubs.so)))
+  (run
+   ./build_bridge.exe
+   --sanitizers
+   %{env:RAYS_METAL_SANITIZERS=}
+   --profile
+   %{profile}
+   --ocaml-include
+   %{ocaml-config:standard_library}
+   --source
+   %{dep:metal_bridge.mm}
+   --object
+   metal_bridge.o
+   --archive
+   libmetal_bridge_stubs.a
+   --shared
+   dllmetal_bridge_stubs.so)))
 
 (library
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (name metal)
  (public_name rays.metal)
  (preprocess
   (per_module
-   ((action (run %{exe:../../ppx/result_bind/result_bind_ppx.exe} --source-dir lib/metal %{input-file})) Metal)))
- (modules Metal Metal_argument_reflection_snapshot Metal_format Metal_raw_types Metal_raw Metal_gen)
- (private_modules
+   ((action
+     (run
+      %{exe:../../ppx/result_bind/result_bind_ppx.exe}
+      --source-dir
+      lib/metal
+      %{input-file}))
+    Metal)))
+ (modules
+  Metal
+  Metal_argument_reflection_snapshot
   Metal_format
   Metal_raw_types
   Metal_raw
   Metal_gen)
+ (private_modules Metal_format Metal_raw_types Metal_raw Metal_gen)
  (libraries threads native_layer_token)
  (foreign_archives metal_bridge_stubs)
- (c_library_flags (:include c_library_flags.sexp)))
+ (c_library_flags
+  (:include c_library_flags.sexp)))
 
 (test
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (name test_metal_build_config)
  (modules test_metal_build_config)
  (libraries metal_build_config))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (targets test_presentation_lifecycle_native.exe)
  (deps test_presentation_lifecycle_native.mm)
  (action
-  (run clang++ -std=c++17 -fobjc-arc -fblocks -framework Foundation
-   -framework Metal -framework QuartzCore -framework CoreGraphics
-   %{dep:test_presentation_lifecycle_native.mm} -o %{targets})))
+  (run
+   clang++
+   -std=c++17
+   -fobjc-arc
+   -fblocks
+   -framework
+   Foundation
+   -framework
+   Metal
+   -framework
+   QuartzCore
+   -framework
+   CoreGraphics
+   %{dep:test_presentation_lifecycle_native.mm}
+   -o
+   %{targets})))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_presentation_lifecycle_native)
  (locks smoke_window)
  (deps test_presentation_lifecycle_native.exe)
- (action (run ./test_presentation_lifecycle_native.exe)))
+ (action
+  (run ./test_presentation_lifecycle_native.exe)))
 
 (executable
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (name test_main)
- (modules test_main test_metal_support test_metal_device_safe test_metal_texture_safe test_metal_sampler_safe test_metal_function_constants_safe test_metal_render_pipeline_safe test_metal_argument_reflection_snapshot test_metal_resource_bounds test_metal_blit_safe test_metal_device_library_safe test_metal_device_queue_safe test_metal_render_encoder_safe test_metal_compute_encoder_safe test_metal_command_buffer_safe test_metal_compute_pipeline_safe test_metal_render_icb_argument)
+ (modules
+  test_main
+  test_metal_support
+  test_metal_device_safe
+  test_metal_texture_safe
+  test_metal_sampler_safe
+  test_metal_function_constants_safe
+  test_metal_render_pipeline_safe
+  test_metal_argument_reflection_snapshot
+  test_metal_resource_bounds
+  test_metal_blit_safe
+  test_metal_device_library_safe
+  test_metal_device_queue_safe
+  test_metal_render_encoder_safe
+  test_metal_compute_encoder_safe
+  test_metal_command_buffer_safe
+  test_metal_compute_pipeline_safe
+  test_metal_render_icb_argument)
  (libraries metal unix))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_metal_argument_reflection_snapshot)
- (action (run %{exe:test_main.exe} test_metal_argument_reflection_snapshot)))
+ (action
+  (run %{exe:test_main.exe} test_metal_argument_reflection_snapshot)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias runtest-native)
  (action
   (progn
@@ -124,35 +202,121 @@
    (run %{exe:test_main.exe} test_metal_function_constants_safe)
    (run %{exe:test_main.exe} test_metal_render_pipeline_safe))))
 
-(rule (enabled_if (= %{system} macosx)) (alias test_metal_resource_bounds) (action (run %{exe:test_main.exe} test_metal_resource_bounds)))
-(rule (enabled_if (= %{system} macosx)) (alias test_metal_blit_safe) (action (run %{exe:test_main.exe} test_metal_blit_safe)))
-(rule (enabled_if (= %{system} macosx)) (alias test_metal_device_library_safe) (action (run %{exe:test_main.exe} test_metal_device_library_safe)))
-(rule (enabled_if (= %{system} macosx)) (alias test_metal_device_queue_safe) (action (run %{exe:test_main.exe} test_metal_device_queue_safe)))
-(rule (enabled_if (= %{system} macosx)) (alias test_metal_render_encoder_safe) (action (run %{exe:test_main.exe} test_metal_render_encoder_safe)))
-(rule (enabled_if (= %{system} macosx)) (alias test_metal_compute_encoder_safe) (action (run %{exe:test_main.exe} test_metal_compute_encoder_safe)))
-(rule (enabled_if (= %{system} macosx)) (alias test_metal_command_buffer_safe) (action (run %{exe:test_main.exe} test_metal_command_buffer_safe)))
-(rule (enabled_if (= %{system} macosx)) (alias test_metal_compute_pipeline_safe) (action (run %{exe:test_main.exe} test_metal_compute_pipeline_safe)))
-(rule (enabled_if (= %{system} macosx)) (alias test_metal_render_icb_argument) (action (run %{exe:test_main.exe} test_metal_render_icb_argument)))
-(rule (enabled_if (= %{system} macosx)) (alias test_metal_device_safe) (action (run %{exe:test_main.exe} test_metal_device_safe)))
-(rule (enabled_if (= %{system} macosx)) (alias test_metal_texture_safe) (action (run %{exe:test_main.exe} test_metal_texture_safe)))
-(rule (enabled_if (= %{system} macosx)) (alias test_metal_sampler_safe) (action (run %{exe:test_main.exe} test_metal_sampler_safe)))
-(rule (enabled_if (= %{system} macosx)) (alias test_metal_function_constants_safe) (action (run %{exe:test_main.exe} test_metal_function_constants_safe)))
-(rule (enabled_if (= %{system} macosx)) (alias test_metal_render_pipeline_safe) (action (run %{exe:test_main.exe} test_metal_render_pipeline_safe)))
+(rule
+ (enabled_if
+  (= %{system} macosx))
+ (alias test_metal_resource_bounds)
+ (action
+  (run %{exe:test_main.exe} test_metal_resource_bounds)))
+
+(rule
+ (enabled_if
+  (= %{system} macosx))
+ (alias test_metal_blit_safe)
+ (action
+  (run %{exe:test_main.exe} test_metal_blit_safe)))
+
+(rule
+ (enabled_if
+  (= %{system} macosx))
+ (alias test_metal_device_library_safe)
+ (action
+  (run %{exe:test_main.exe} test_metal_device_library_safe)))
+
+(rule
+ (enabled_if
+  (= %{system} macosx))
+ (alias test_metal_device_queue_safe)
+ (action
+  (run %{exe:test_main.exe} test_metal_device_queue_safe)))
+
+(rule
+ (enabled_if
+  (= %{system} macosx))
+ (alias test_metal_render_encoder_safe)
+ (action
+  (run %{exe:test_main.exe} test_metal_render_encoder_safe)))
+
+(rule
+ (enabled_if
+  (= %{system} macosx))
+ (alias test_metal_compute_encoder_safe)
+ (action
+  (run %{exe:test_main.exe} test_metal_compute_encoder_safe)))
+
+(rule
+ (enabled_if
+  (= %{system} macosx))
+ (alias test_metal_command_buffer_safe)
+ (action
+  (run %{exe:test_main.exe} test_metal_command_buffer_safe)))
+
+(rule
+ (enabled_if
+  (= %{system} macosx))
+ (alias test_metal_compute_pipeline_safe)
+ (action
+  (run %{exe:test_main.exe} test_metal_compute_pipeline_safe)))
+
+(rule
+ (enabled_if
+  (= %{system} macosx))
+ (alias test_metal_render_icb_argument)
+ (action
+  (run %{exe:test_main.exe} test_metal_render_icb_argument)))
+
+(rule
+ (enabled_if
+  (= %{system} macosx))
+ (alias test_metal_device_safe)
+ (action
+  (run %{exe:test_main.exe} test_metal_device_safe)))
+
+(rule
+ (enabled_if
+  (= %{system} macosx))
+ (alias test_metal_texture_safe)
+ (action
+  (run %{exe:test_main.exe} test_metal_texture_safe)))
+
+(rule
+ (enabled_if
+  (= %{system} macosx))
+ (alias test_metal_sampler_safe)
+ (action
+  (run %{exe:test_main.exe} test_metal_sampler_safe)))
+
+(rule
+ (enabled_if
+  (= %{system} macosx))
+ (alias test_metal_function_constants_safe)
+ (action
+  (run %{exe:test_main.exe} test_metal_function_constants_safe)))
+
+(rule
+ (enabled_if
+  (= %{system} macosx))
+ (alias test_metal_render_pipeline_safe)
+ (action
+  (run %{exe:test_main.exe} test_metal_render_pipeline_safe)))
 
 (alias
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (name qualification)
  (deps
   (alias test_presentation_lifecycle_native)))
 
 (alias
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (name runtest-native)
  (deps
   (alias test_presentation_lifecycle_native)))
 
 (alias
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (name runtest)
  (deps
   (alias test_metal_argument_reflection_snapshot)))

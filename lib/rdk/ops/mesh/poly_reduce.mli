@@ -1,13 +1,6 @@
-type plan = {
-  edges : Edge_group.t;
-  removed_primitives : int;
-}
-
+type plan = { edges : Edge_group.t; removed_primitives : int }
 type scratch
-
-type target =
-  | Reduce_ratio of float
-  | Reduce_primitive_count of int
+type target = Reduce_ratio of float | Reduce_primitive_count of int
 
 type params = {
   cancel : Cancel.t option;

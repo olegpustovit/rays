@@ -1,4 +1,5 @@
-type shape = Bevel_chamfer | Bevel_round of { convexity : float; }
+type shape = Bevel_chamfer | Bevel_round of { convexity : float }
+
 type params = {
   cancel : Rdk_core.Cancel.t option;
   grain : int option;

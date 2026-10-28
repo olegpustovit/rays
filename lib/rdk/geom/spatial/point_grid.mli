@@ -1,6 +1,5 @@
-(** Open-addressing uniform grid over integer cells; each cell heads a
-    linked list of points, newest first. Callers may reuse the cell arrays as
-    scratch once the grid is no longer queried. *)
+(** Open-addressing uniform grid over integer cells; each cell heads a linked list of points, newest
+    first. Callers may reuse the cell arrays as scratch once the grid is no longer queried. *)
 
 type t = {
   cell_x : int array;

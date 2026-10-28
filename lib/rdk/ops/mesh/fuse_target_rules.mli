@@ -8,6 +8,6 @@ val apply :
   target:Geometry.t ->
   unit ->
   (Geometry.t, string) result
-(** Copy rule-selected target point payload to mapped query points. Each query
-    has one stable target, so every supported heuristic reduces to that target
-    value; concatenate policies retain their required scalar-to-array shape. *)
+(** Copy rule-selected target point payload to mapped query points. Each query has one stable
+    target, so every supported heuristic reduces to that target value; concatenate policies retain
+    their required scalar-to-array shape. *)

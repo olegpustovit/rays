@@ -7,8 +7,8 @@ type t = {
   emissive : Rays_math.Color.t;
   shininess : float;
   round : float;
-      (** Round-corners radius in scene units for the path tracer (0 = off): edges shade as a
-          bevel of this radius without changing geometry. Raster ignores it. *)
+      (** Round-corners radius in scene units for the path tracer (0 = off): edges shade as a bevel
+          of this radius without changing geometry. Raster ignores it. *)
 }
 
 val create :

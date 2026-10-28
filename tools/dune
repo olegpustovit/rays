@@ -10,7 +10,8 @@
 
 (rule
  (alias runtest)
- (action (run %{exe:core_census.exe} --self-check)))
+ (action
+  (run %{exe:core_census.exe} --self-check)))
 
 (executable
  (name prims_fixtures)
@@ -18,7 +19,8 @@
  (libraries flow flow_ir flow_web input flow_sop sop rdk parallel))
 
 (executable
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (name bench_gpu)
  (modules bench_gpu)
  (libraries ogpu ogpu_metal renderer rays_math unix parallel))
@@ -41,7 +43,14 @@
 (executable
  (name bench_sdl3)
  (modules bench_sdl3)
- (libraries rays.sdl3 rays.sdl3_image rays.sdl3_ttf rays.sdl3_mixer unix yojson parallel))
+ (libraries
+  rays.sdl3
+  rays.sdl3_image
+  rays.sdl3_ttf
+  rays.sdl3_mixer
+  unix
+  yojson
+  parallel))
 
 (executable
  (name bench_world)
@@ -49,17 +58,42 @@
  (libraries rays ogpu_mock unix parallel))
 
 (executable
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (name bench_shattered_renderer)
  (modules bench_shattered_renderer)
- (libraries rays rays_math flow rdk rdk_rays sop rays_editor ogpu_metal unix parallel))
+ (libraries
+  rays
+  rays_math
+  flow
+  rdk
+  rdk_rays
+  sop
+  rays_editor
+  ogpu_metal
+  unix
+  parallel))
 
 (executable
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (name render_workspace)
  (modules render_workspace)
- (libraries rays rays_math rays_pathtracer sop rdk rdk_rays flow flow_sop
-  editor_document rays_editor ogpu_metal parallel runtime_resources unix))
+ (libraries
+  rays
+  rays_math
+  rays_pathtracer
+  sop
+  rdk
+  rdk_rays
+  flow
+  flow_sop
+  editor_document
+  rays_editor
+  ogpu_metal
+  parallel
+  runtime_resources
+  unix))
 
 (executable
  (name bench_core)
@@ -77,18 +111,21 @@
  (libraries rays rdk rdk_test_support rays_math ogpu_mock unix parallel))
 
 (executable
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (name bench_rays_editor)
  (modules bench_rays_editor)
  (libraries rays sop flow flow_graph rays_editor ogpu_metal unix parallel))
 
 (executable
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (name ui_shot)
  (modules ui_shot)
  (libraries rays rays_editor sop rdk rdk_rays flow ogpu_metal parallel))
 
 ; Keep the backend-neutral benches buildable on every host.
+
 (alias
  (name bench-build)
  (deps
@@ -104,9 +141,11 @@
   boolean_stress.exe))
 
 (alias
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (name bench-build-native)
  (deps bench_gpu.exe bench_rays_editor.exe bench_shattered_renderer.exe))
+
 (executable
  (name bench_scene3_packing)
  (modules bench_scene3_packing)
@@ -114,52 +153,94 @@
 
 ; Real-browser check of the WGSL kernels. Needs Google Chrome; not part of runtest.
 ; Exit 3 means WebGPU is unavailable in that Chrome; a missing node or Chrome is a printed skip.
+
 (rule
  (alias qualification-web)
- (deps web/test/gpu_check.mjs web/test/chrome.mjs ../lib/web_export/runtime/gpu.js ../lib/web_export/runtime/prims.js ../lib/flow_web/test_wgsl.exe
+ (deps
+  web/test/gpu_check.mjs
+  web/test/chrome.mjs
+  ../lib/web_export/runtime/gpu.js
+  ../lib/web_export/runtime/prims.js
+  ../lib/flow_web/test_wgsl.exe
   (glob_files ../lib/flow_web/goldens/*.js))
  (action
-  (system "if command -v node >/dev/null 2>&1; then mkdir -p kt && ../lib/flow_web/test_wgsl.exe --write-kernel-table kt && node web/test/gpu_check.mjs kt/kernels.json ../lib/web_export/runtime/gpu.js ../lib/flow_web/goldens; else echo 'gpu_check: skipped (node not found)'; fi")))
+  (system
+   "if command -v node >/dev/null 2>&1; then mkdir -p kt && ../lib/flow_web/test_wgsl.exe --write-kernel-table kt && node web/test/gpu_check.mjs kt/kernels.json ../lib/web_export/runtime/gpu.js ../lib/flow_web/goldens; else echo 'gpu_check: skipped (node not found)'; fi")))
 
 ; Fast precision on the web (native parity): the fast WGSL kernels (64-bit integer pairs, gathers, count records,
 ; compaction) against native outputs in real Chrome, and recursive_rectangles' resident fold and GPU display
 ; regions at a deep, moving pointer against native fast precision (the Metal resident fold). Not part of runtest.
-(rule
- (alias qualification-web)
- (deps web/test/gpu_fast_check.mjs web/test/chrome.mjs ../lib/web_export/runtime/gpu.js ../lib/flow_web/test_wgsl.exe)
- (action
-  (system "if command -v node >/dev/null 2>&1; then mkdir -p fkt && ../lib/flow_web/test_wgsl.exe --write-fast-table fkt && node web/test/gpu_fast_check.mjs fkt ../lib/web_export/runtime/gpu.js; else echo 'gpu_fast_check: skipped (node not found)'; fi")))
 
 (rule
- (enabled_if (= %{system} macosx))
  (alias qualification-web)
- (deps web/test/present_e2e.mjs web/test/chrome.mjs web/test/png.mjs
-  (glob_files ../lib/web_export/runtime/*.js) ../lib/web_export/runtime/marks.wgsl ../bin/rays.exe marks_shot.exe
+ (deps
+  web/test/gpu_fast_check.mjs
+  web/test/chrome.mjs
+  ../lib/web_export/runtime/gpu.js
+  ../lib/flow_web/test_wgsl.exe)
+ (action
+  (system
+   "if command -v node >/dev/null 2>&1; then mkdir -p fkt && ../lib/flow_web/test_wgsl.exe --write-fast-table fkt && node web/test/gpu_fast_check.mjs fkt ../lib/web_export/runtime/gpu.js; else echo 'gpu_fast_check: skipped (node not found)'; fi")))
+
+(rule
+ (enabled_if
+  (= %{system} macosx))
+ (alias qualification-web)
+ (deps
+  web/test/present_e2e.mjs
+  web/test/chrome.mjs
+  web/test/png.mjs
+  (glob_files ../lib/web_export/runtime/*.js)
+  ../lib/web_export/runtime/marks.wgsl
+  ../bin/rays.exe
+  marks_shot.exe
   ../sketches/recursive_rectangles.rays)
  (action
-  (system "if command -v node >/dev/null 2>&1; then FRAMES=12 FAST=1 POINTER='320,405;320,410;320,415;320,420;320,425;320,430;320,435;320,440;320,445;320,450;320,455;320,460' node web/test/present_e2e.mjs ../bin/rays.exe marks_shot.exe .. sketches/recursive_rectangles.rays; else echo 'fast present_e2e: skipped (node not found)'; fi")))
+  (system
+   "if command -v node >/dev/null 2>&1; then FRAMES=12 FAST=1 POINTER='320,405;320,410;320,415;320,420;320,425;320,430;320,435;320,440;320,445;320,450;320,455;320,460' node web/test/present_e2e.mjs ../bin/rays.exe marks_shot.exe .. sketches/recursive_rectangles.rays; else echo 'fast present_e2e: skipped (node not found)'; fi")))
 
 ; The live page as a person uses it: index.html's rAF loop driven by real mouse events must animate, and once the
 ; pointer rests its picture matches native at the same pointer. Not part of runtest.
+
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias qualification-web)
- (deps web/test/live_check.mjs web/test/chrome.mjs web/test/png.mjs
-  (glob_files ../lib/web_export/runtime/*.js) ../lib/web_export/runtime/marks.wgsl ../bin/rays.exe marks_shot.exe
+ (deps
+  web/test/live_check.mjs
+  web/test/chrome.mjs
+  web/test/png.mjs
+  (glob_files ../lib/web_export/runtime/*.js)
+  ../lib/web_export/runtime/marks.wgsl
+  ../bin/rays.exe
+  marks_shot.exe
   ../sketches/recursive_rectangles.rays)
  (action
-  (system "if command -v node >/dev/null 2>&1; then node web/test/live_check.mjs ../bin/rays.exe marks_shot.exe .. sketches/recursive_rectangles.rays 400 520; else echo 'live_check: skipped (node not found)'; fi")))
+  (system
+   "if command -v node >/dev/null 2>&1; then node web/test/live_check.mjs ../bin/rays.exe marks_shot.exe .. sketches/recursive_rectangles.rays 400 520; else echo 'live_check: skipped (node not found)'; fi")))
 
 ; Real-Chrome check of the presenter: hand-built mark tables with pixel probes, then
 ; flow_vectors and sketches/basic.rays exported, stepped in the browser and compared with the native picture.
+
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias qualification-web)
- (deps web/test/present_check.mjs web/test/present_e2e.mjs web/test/chrome.mjs web/test/png.mjs
-  (glob_files ../lib/web_export/runtime/*.js) ../lib/web_export/runtime/marks.wgsl ../bin/rays.exe marks_shot.exe
-  ../sketches/flow_vectors.rays ../sketches/basic.rays ../sketches/particles.rays)
+ (deps
+  web/test/present_check.mjs
+  web/test/present_e2e.mjs
+  web/test/chrome.mjs
+  web/test/png.mjs
+  (glob_files ../lib/web_export/runtime/*.js)
+  ../lib/web_export/runtime/marks.wgsl
+  ../bin/rays.exe
+  marks_shot.exe
+  ../sketches/flow_vectors.rays
+  ../sketches/basic.rays
+  ../sketches/particles.rays)
  (action
-  (system "if command -v node >/dev/null 2>&1; then node web/test/present_check.mjs ../lib/web_export/runtime && node web/test/present_e2e.mjs ../bin/rays.exe marks_shot.exe .. sketches/flow_vectors.rays sketches/basic.rays sketches/particles.rays; else echo 'present_check: skipped (node not found)'; fi")))
+  (system
+   "if command -v node >/dev/null 2>&1; then node web/test/present_check.mjs ../lib/web_export/runtime && node web/test/present_e2e.mjs ../bin/rays.exe marks_shot.exe .. sketches/flow_vectors.rays sketches/basic.rays sketches/particles.rays; else echo 'present_check: skipped (node not found)'; fi")))
 
 (executable
  (name shape2_fixtures)
@@ -169,51 +250,102 @@
 (executable
  (name web_parity)
  (modules web_parity)
- (libraries web_export flow flow_ir flow_web input scene_command ogpu_mock parallel))
+ (libraries
+  web_export
+  flow
+  flow_ir
+  flow_web
+  input
+  scene_command
+  ogpu_mock
+  parallel))
 
 (executable
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (name marks_shot)
  (modules marks_shot)
- (libraries web_export flow flow_ir flow_sop flow_gpu flow_native sop ogpu ogpu_metal renderer input rays scene_command parallel))
+ (libraries
+  web_export
+  flow
+  flow_ir
+  flow_sop
+  flow_gpu
+  flow_native
+  sop
+  ogpu
+  ogpu_metal
+  renderer
+  input
+  rays
+  scene_command
+  parallel))
 
 ; GPU attribute regions in real Chrome: the export places a mark set's regions on the GPU, one device is shared
 ; by gpu.js and present.js, and the canvas equals the native picture; window counters prove no CPU invoke ran.
+
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias qualification-web-marks)
- (deps web/test/gpu_marks_e2e.mjs web/test/png.mjs web/test/chrome.mjs
-  (glob_files ../lib/web_export/runtime/*.js) ../lib/web_export/runtime/marks.wgsl ../bin/rays.exe marks_shot.exe
+ (deps
+  web/test/gpu_marks_e2e.mjs
+  web/test/png.mjs
+  web/test/chrome.mjs
+  (glob_files ../lib/web_export/runtime/*.js)
+  ../lib/web_export/runtime/marks.wgsl
+  ../bin/rays.exe
+  marks_shot.exe
   ../sketches/flow_particles_gpu.rays)
  (action
-  (system "if command -v node >/dev/null 2>&1; then node web/test/gpu_marks_e2e.mjs ../bin/rays.exe marks_shot.exe ..; else echo 'gpu_marks_e2e: skipped (node not found)'; fi")))
+  (system
+   "if command -v node >/dev/null 2>&1; then node web/test/gpu_marks_e2e.mjs ../bin/rays.exe marks_shot.exe ..; else echo 'gpu_marks_e2e: skipped (node not found)'; fi")))
 
 (alias
  (name qualification-web)
- (deps (alias qualification-web-marks)))
+ (deps
+  (alias qualification-web-marks)))
 
 ; Generated-image pixel parity, animation, sharing, static reuse and resize (P6.4b).
+
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias qualification-web)
- (deps web/test/gpu_images_e2e.mjs web/test/png.mjs web/test/chrome.mjs
-  (glob_files ../lib/web_export/runtime/*.js) ../lib/web_export/runtime/marks.wgsl ../bin/rays.exe marks_shot.exe
-  ../sketches/flow_contours.rays ../sketches/flow_image_kernel.rays
-  ../sketches/flow_shader.rays ../sketches/flow_image.rays
+ (deps
+  web/test/gpu_images_e2e.mjs
+  web/test/png.mjs
+  web/test/chrome.mjs
+  (glob_files ../lib/web_export/runtime/*.js)
+  ../lib/web_export/runtime/marks.wgsl
+  ../bin/rays.exe
+  marks_shot.exe
+  ../sketches/flow_contours.rays
+  ../sketches/flow_image_kernel.rays
+  ../sketches/flow_shader.rays
+  ../sketches/flow_image.rays
   (source_tree ../lib/sdl3_image/fixtures))
  (action
-  (system "if command -v node >/dev/null 2>&1; then node web/test/gpu_images_e2e.mjs ../bin/rays.exe marks_shot.exe ..; else echo 'gpu_images_e2e: skipped (node not found)'; fi")))
+  (system
+   "if command -v node >/dev/null 2>&1; then node web/test/gpu_images_e2e.mjs ../bin/rays.exe marks_shot.exe ..; else echo 'gpu_images_e2e: skipped (node not found)'; fi")))
 
 ; Plan P6.R: each of the 15 workspaces with a draw graph either opens in headless Chrome (the frame loop runs, no error, a
 ; non-empty mark table) or is refused at export with its code and span. Printed per workspace.
+
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias qualification-web)
- (deps web/test/open_all.mjs web/test/chrome.mjs ../bin/rays.exe
-  (glob_files ../lib/web_export/runtime/*.js) ../lib/web_export/runtime/marks.wgsl
+ (deps
+  web/test/open_all.mjs
+  web/test/chrome.mjs
+  ../bin/rays.exe
+  (glob_files ../lib/web_export/runtime/*.js)
+  ../lib/web_export/runtime/marks.wgsl
   (source_tree ../sketches))
  (action
-  (system "if command -v node >/dev/null 2>&1; then node web/test/open_all.mjs ../bin/rays.exe .. sketches/audio.rays sketches/basic.rays sketches/drawing.rays sketches/file_dialog.rays sketches/generative.rays sketches/noise.rays sketches/particles.rays sketches/pxui.rays sketches/recursive_rectangles.rays sketches/flow_contours.rays sketches/flow_image.rays sketches/flow_image_kernel.rays sketches/flow_particles_gpu.rays sketches/flow_shader.rays sketches/flow_vectors.rays; else echo 'open_all: skipped (node not found)'; fi")))
+  (system
+   "if command -v node >/dev/null 2>&1; then node web/test/open_all.mjs ../bin/rays.exe .. sketches/audio.rays sketches/basic.rays sketches/drawing.rays sketches/file_dialog.rays sketches/generative.rays sketches/noise.rays sketches/particles.rays sketches/pxui.rays sketches/recursive_rectangles.rays sketches/flow_contours.rays sketches/flow_image.rays sketches/flow_image_kernel.rays sketches/flow_particles_gpu.rays sketches/flow_shader.rays sketches/flow_vectors.rays; else echo 'open_all: skipped (node not found)'; fi")))
 
 (executable
  (name bench_planar_attribute)
@@ -221,7 +353,8 @@
  (libraries flow flow_sop rdk rdk_test_support rays_math unix parallel))
 
 (executable
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (name bench_check)
  (modules bench_check)
  (libraries flow sop flow_sop editor_document rays_pathtracer ogpu_metal))

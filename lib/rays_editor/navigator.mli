@@ -1,8 +1,8 @@
-(** The Outline panel: a map of the document.  A search field, then a section per kind of graph
-    (the scene with its objects and their visible and render flags, geometry and materials with
-    how many graphs use each, the World, the layouts), the active graph unfolded into its loops
-    and bindings, the reusable functions and macros, the active graph's inputs as sliders and
-    the data flow around it. Its behavior is specified in [specification/flow.md].
+(** The Outline panel: a map of the document. A search field, then a section per kind of graph (the
+    scene with its objects and their visible and render flags, geometry and materials with how many
+    graphs use each, the World, the layouts), the active graph unfolded into its loops and bindings,
+    the reusable functions and macros, the active graph's inputs as sliders and the data flow around
+    it. Its behavior is specified in [specification/flow.md].
 
     Pure state and rows; {!view} draws inside [Pxui.Ui.frame] and returns intents that
     [Editor_frame] applies after the frame. *)
@@ -19,7 +19,8 @@ type intent =
   | Remove of string  (** Delete on a graph row *)
   | Layout of int  (** a row of the Layout section: show that layout *)
   | New_graph of string
-      (** the context menu's "New graph" entry: a graph of this context name (["sop"], ["scene"] ...) *)
+      (** the context menu's "New graph" entry: a graph of this context name (["sop"], ["scene"]
+          ...) *)
   | Add  (** the [+] beside the search field: the add menu *)
   | Flag of { node : path; name : string; value : bool }
       (** a press on an object's visible or render flag: that argument of its binding *)
@@ -35,16 +36,26 @@ val open_graph : string -> state -> state
 (** Unfold the node rows of a graph under its row (they are folded by default). *)
 
 val with_query : string -> state -> state
+
 val query : state -> string
 (** The search field holding this text. *)
 
-type obj = { depth : int; letter : string; name : string; detail : string;
-             visible : bool option; render : bool option; lead : bool; inert : bool; chosen : bool;
-             home : path option }
-(** A scene object's row: its kind's letter, name and detail, its visible and render flags
-    (where it has them), [lead] for the render camera, [inert] when the render mark only shows
-    (the camera's, the World's: a press on it opens the row), [chosen] when selected, and the binding
-    that places it (a click opens its graph on it). *)
+type obj = {
+  depth : int;
+  letter : string;
+  name : string;
+  detail : string;
+  visible : bool option;
+  render : bool option;
+  lead : bool;
+  inert : bool;
+  chosen : bool;
+  home : path option;
+}
+(** A scene object's row: its kind's letter, name and detail, its visible and render flags (where it
+    has them), [lead] for the render camera, [inert] when the render mark only shows (the camera's,
+    the World's: a press on it opens the row), [chosen] when selected, and the binding that places
+    it (a click opens its graph on it). *)
 
 type params = {
   workspace : Flow.Workspace.t;
@@ -63,13 +74,13 @@ type params = {
 type row
 
 val rows : ?wide:bool -> state -> params -> row array
-(** Every row in order; a search shows the matching bindings instead.  Under 300 points (not
-    [wide]) the outline is the workspace sheet's: no node rows, no Layout, no Data flow. *)
+(** Every row in order; a search shows the matching bindings instead. Under 300 points (not [wide])
+    the outline is the workspace sheet's: no node rows, no Layout, no Data flow. *)
 
-val row_rects : state -> params -> bounds:int * int * int * int ->
-  (row * (float * float * float * float)) array
-(** Every row with its rectangle when not scrolled: where {!view} draws it and where a click
-    on it lands. *)
+val row_rects :
+  state -> params -> bounds:int * int * int * int -> (row * (float * float * float * float)) array
+(** Every row with its rectangle when not scrolled: where {!view} draws it and where a click on it
+    lands. *)
 
 val describe : row -> string
 (** One line per row, for tests and crash reports. *)

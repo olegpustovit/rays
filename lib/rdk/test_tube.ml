@@ -4,18 +4,18 @@ open Rdk_test_support
 
 let float2_attribute geometry owner name =
   match Geometry.find_attribute ~owner name geometry with
-  | Some attribute ->
-      (match Attribute.View.storage attribute with
-       | Attribute.Float2 values -> Packed.Float2.View.view values
-       | _ -> fail (name ^ " has unexpected storage"))
+  | Some attribute -> (
+      match Attribute.View.storage attribute with
+      | Attribute.Float2 values -> Packed.Float2.View.view values
+      | _ -> fail (name ^ " has unexpected storage"))
   | None -> fail ("missing attribute " ^ name)
 
 let float3_attribute geometry owner name =
   match Geometry.find_attribute ~owner name geometry with
-  | Some attribute ->
-      (match Attribute.View.storage attribute with
-       | Attribute.Float3 values -> Packed.Float3.View.view values
-       | _ -> fail (name ^ " has unexpected storage"))
+  | Some attribute -> (
+      match Attribute.View.storage attribute with
+      | Attribute.Float3 values -> Packed.Float3.View.view values
+      | _ -> fail (name ^ " has unexpected storage"))
   | None -> fail ("missing attribute " ^ name)
 
 let equal_group left right =
@@ -40,21 +40,16 @@ let check_vertex_normal_winding geometry message =
     let nx = ref 0. and ny = ref 0. and nz = ref 0. in
     for vertex = first to last - 1 do
       let next = if vertex + 1 = last then first else vertex + 1 in
-      let a = topology.vertex_points.(vertex)
-      and b = topology.vertex_points.(next) in
-      nx := !nx +. ((point.y.(a) -. point.y.(b))
-          *. (point.z.(a) +. point.z.(b)));
-      ny := !ny +. ((point.z.(a) -. point.z.(b))
-          *. (point.x.(a) +. point.x.(b)));
-      nz := !nz +. ((point.x.(a) -. point.x.(b))
-          *. (point.y.(a) +. point.y.(b)))
+      let a = topology.vertex_points.(vertex) and b = topology.vertex_points.(next) in
+      nx := !nx +. ((point.y.(a) -. point.y.(b)) *. (point.z.(a) +. point.z.(b)));
+      ny := !ny +. ((point.z.(a) -. point.z.(b)) *. (point.x.(a) +. point.x.(b)));
+      nz := !nz +. ((point.x.(a) -. point.x.(b)) *. (point.y.(a) +. point.y.(b)))
     done;
-    let alignment = (!nx *. normal.x.(first)) +. (!ny *. normal.y.(first))
-        +. (!nz *. normal.z.(first)) in
+    let alignment =
+      (!nx *. normal.x.(first)) +. (!ny *. normal.y.(first)) +. (!nz *. normal.z.(first))
+    in
     check (alignment > 1e-12)
-      (Printf.sprintf "%s (primitive %d, alignment %.17g)"
-        message primitive alignment)
+      (Printf.sprintf "%s (primitive %d, alignment %.17g)" message primitive alignment)
   done
 
-let run () =
-  print_endline "Tube tests passed"
+let run () = print_endline "Tube tests passed"

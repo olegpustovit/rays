@@ -1,4 +1,3 @@
-
 type params = {
   cancel : Cancel.t option;
   grain : int option;

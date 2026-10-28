@@ -21,11 +21,11 @@ let run () =
       if info.max_buffer_length < 16L then fail "device buffer limit is invalid";
       if not (Device.same device device) then fail "a device is not itself";
       finalizer_releases "buffer" ~count:1 (fun () ->
-        ignore (get (Buffer.create ~device ~length:16L ~storage:Buffer.Shared ())));
+          ignore (get (Buffer.create ~device ~length:16L ~storage:Buffer.Shared ())));
       reject Wrong_domain (Domain.spawn (fun () -> Device.info device) |> Domain.join);
       reject Wrong_domain
         (Domain.spawn (fun () -> Buffer.create ~device ~length:16L ~storage:Buffer.Shared ())
-         |> Domain.join);
+        |> Domain.join);
       let buffer =
         get
           (Buffer.create ~device ~length:16L ~storage:Buffer.Shared
@@ -42,8 +42,8 @@ let run () =
       reject Invalid_argument (Buffer.read_bytes buffer ~offset:12L ~length:8);
       reject Invalid_argument (Buffer.read_bytes buffer ~offset:0L ~length:max_int);
       without_handles "invalid buffer labels" (fun () ->
-        reject Invalid_argument
-          (Buffer.create ~device ~length:16L ~storage:Buffer.Shared ~label:"invalid\000label" ()));
+          reject Invalid_argument
+            (Buffer.create ~device ~length:16L ~storage:Buffer.Shared ~label:"invalid\000label" ()));
       let private_buffer = get (Buffer.create ~device ~length:16L ~storage:Buffer.Private ()) in
       reject Unsupported (Buffer.read_bytes private_buffer ~offset:0L ~length:4);
       reject Unsupported (Buffer.write_bytes private_buffer ~dst_offset:0L values);
@@ -51,8 +51,8 @@ let run () =
       (* Creation reads the cache mode back from Metal and refuses a mismatch. *)
       let configured =
         get
-          (Buffer.create ~device ~length:16L ~storage:Buffer.Shared
-             ~cpu_cache:Buffer.Write_combined ())
+          (Buffer.create ~device ~length:16L ~storage:Buffer.Shared ~cpu_cache:Buffer.Write_combined
+             ())
       in
       get (Buffer.write_bytes configured ~dst_offset:0L values);
       if get (Buffer.read_bytes configured ~offset:0L ~length:16) <> values then

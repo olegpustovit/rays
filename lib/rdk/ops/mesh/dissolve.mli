@@ -1,27 +1,25 @@
 type operation = Dissolve_selected | Dissolve_non_selected
-type bridge_policy =
-    Create_bridged_polygons
-  | Create_disjoint_polygons
-  | Delete_bridge_polygons
-module Int_buffer :
-  sig
-    type t = { mutable values : int array; mutable length : int; }
-    val add : t -> int -> unit
-  end
-module Output :
-  sig
-    type t = {
-      points : Int_buffer.t;
-      vertices : Int_buffer.t;
-      offsets : Int_buffer.t;
-      primitives : Int_buffer.t;
-      kinds : Rdk_core.Topology.primitive_kind Dynarray.t;
-    }
-    val add :
-      t ->
-      source:int ->
-      kind:Rdk_core.Topology.primitive_kind -> int array -> int array -> unit
-  end
+type bridge_policy = Create_bridged_polygons | Create_disjoint_polygons | Delete_bridge_polygons
+
+module Int_buffer : sig
+  type t = { mutable values : int array; mutable length : int }
+
+  val add : t -> int -> unit
+end
+
+module Output : sig
+  type t = {
+    points : Int_buffer.t;
+    vertices : Int_buffer.t;
+    offsets : Int_buffer.t;
+    primitives : Int_buffer.t;
+    kinds : Rdk_core.Topology.primitive_kind Dynarray.t;
+  }
+
+  val add :
+    t -> source:int -> kind:Rdk_core.Topology.primitive_kind -> int array -> int array -> unit
+end
+
 type params = {
   cancel : Rdk_core.Cancel.t option;
   grain : int option;

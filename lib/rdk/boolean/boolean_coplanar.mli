@@ -3,11 +3,9 @@
 type overlap_kind = Empty | Point | Segment | Polygon
 type t
 
-val build :
-  ?cancel:Cancel.t -> grain:int -> Boolean_constraints.t ->
-  (t, Error.t) result
-(** Intersect every exact-coplanar candidate pair independently. Results keep
-    the stable pair order from {!Boolean_constraints}. *)
+val build : ?cancel:Cancel.t -> grain:int -> Boolean_constraints.t -> (t, Error.t) result
+(** Intersect every exact-coplanar candidate pair independently. Results keep the stable pair order
+    from {!Boolean_constraints}. *)
 
 val pair_count : t -> int
 val first_triangle : t -> int -> int

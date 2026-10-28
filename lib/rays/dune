@@ -1,112 +1,206 @@
 (library
  (name rays)
  (public_name rays)
- (modules light material
-  path texture input_state frame time clipboard image
-  canvas canvas_runtime font audio mesh camera easy_camera
-  scene3 scene3_native_lowering
-  scene native_scene_lowering sketch world)
- (private_modules scene3 input_state time canvas_runtime scene3_native_lowering native_scene_lowering)
- (libraries input rays_math lru runtime_resources runtime_input runtime scene_command unix
-  renderer parallel))
+ (modules
+  light
+  material
+  path
+  texture
+  input_state
+  frame
+  time
+  clipboard
+  image
+  canvas
+  canvas_runtime
+  font
+  audio
+  mesh
+  camera
+  easy_camera
+  scene3
+  scene3_native_lowering
+  scene
+  native_scene_lowering
+  sketch
+  world)
+ (private_modules
+  scene3
+  input_state
+  time
+  canvas_runtime
+  scene3_native_lowering
+  native_scene_lowering)
+ (libraries
+  input
+  rays_math
+  lru
+  runtime_resources
+  runtime_input
+  runtime
+  scene_command
+  unix
+  renderer
+  parallel))
 
 (executable
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (name test_scene_primitives)
  (modules test_scene_primitives)
  (libraries rays rays_math scene_command ogpu_metal parallel))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_scene_primitives)
- (action (run %{exe:test_scene_primitives.exe})))
+ (action
+  (run %{exe:test_scene_primitives.exe})))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_scene_primitives_native)
  (locks smoke_window)
- (action (run %{exe:test_scene_primitives.exe} native)))
+ (action
+  (run %{exe:test_scene_primitives.exe} native)))
 
 (executable
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (name test_main)
- (modules test_main test_meshes test_rays_api test_scene_rounded_cache test_automatic_text_cache test_scene3_native_lowering test_scene3_float32 test_scene_display_list test_canvas_native test_retained_view_native test_world test_world_raster test_easy_camera test_light)
- (libraries test_support rays rays_math renderer runtime runtime_resources runtime_input scene_command unix ogpu ogpu_metal threads parallel))
+ (modules
+  test_main
+  test_meshes
+  test_rays_api
+  test_scene_rounded_cache
+  test_automatic_text_cache
+  test_scene3_native_lowering
+  test_scene3_float32
+  test_scene_display_list
+  test_canvas_native
+  test_retained_view_native
+  test_world
+  test_world_raster
+  test_easy_camera
+  test_light)
+ (libraries
+  test_support
+  rays
+  rays_math
+  renderer
+  runtime
+  runtime_resources
+  runtime_input
+  scene_command
+  unix
+  ogpu
+  ogpu_metal
+  threads
+  parallel))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_rays_api)
  (action
-  (setenv SDL_AUDIODRIVER dummy
+  (setenv
+   SDL_AUDIODRIVER
+   dummy
    (run %{exe:test_main.exe} test_rays_api))))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_scene3_native_lowering)
- (action (run %{exe:test_main.exe} test_scene3_native_lowering)))
+ (action
+  (run %{exe:test_main.exe} test_scene3_native_lowering)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_scene3_native_lowering_native)
- (action (run %{exe:test_main.exe} test_scene3_native_lowering_native)))
+ (action
+  (run %{exe:test_main.exe} test_scene3_native_lowering_native)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_world_raster)
- (action (run %{exe:test_main.exe} test_world_raster)))
+ (action
+  (run %{exe:test_main.exe} test_world_raster)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_retained_view_native)
  (locks smoke_window)
- (action (run %{exe:test_main.exe} test_retained_view_native)))
+ (action
+  (run %{exe:test_main.exe} test_retained_view_native)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_easy_camera)
- (action (run %{exe:test_main.exe} test_easy_camera)))
+ (action
+  (run %{exe:test_main.exe} test_easy_camera)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_light)
- (action (run %{exe:test_main.exe} test_light)))
+ (action
+  (run %{exe:test_main.exe} test_light)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_scene3_float32)
- (action (run %{exe:test_main.exe} test_scene3_float32)))
+ (action
+  (run %{exe:test_main.exe} test_scene3_float32)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_scene3_float32_native)
- (action (run %{exe:test_main.exe} test_scene3_float32_native)))
+ (action
+  (run %{exe:test_main.exe} test_scene3_float32_native)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_scene_rounded_cache)
- (action (run %{exe:test_main.exe} test_scene_rounded_cache)))
+ (action
+  (run %{exe:test_main.exe} test_scene_rounded_cache)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_automatic_text_cache)
- (action (run %{exe:test_main.exe} test_automatic_text_cache)))
+ (action
+  (run %{exe:test_main.exe} test_automatic_text_cache)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_scene_display_list)
- (action (run %{exe:test_main.exe} test_scene_display_list)))
-
+ (action
+  (run %{exe:test_main.exe} test_scene_display_list)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_world)
- (action (run %{exe:test_main.exe} test_world)))
+ (action
+  (run %{exe:test_main.exe} test_world)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_canvas_native)
  (locks smoke_window)
- (action (run %{exe:test_main.exe} test_canvas_native)))
+ (action
+  (run %{exe:test_main.exe} test_canvas_native)))
 
 (alias
  (name runtest)

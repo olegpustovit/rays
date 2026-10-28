@@ -15,8 +15,17 @@ type t = {
 }
 
 val create :
-  ?cancel:Cancel.t -> ?extend:(int -> int -> int array -> int -> int -> unit) -> grain:int ->
-  centroid_x:float array -> centroid_y:float array -> centroid_z:float array ->
-  item_min_x:float array -> item_min_y:float array -> item_min_z:float array ->
-  item_max_x:float array -> item_max_y:float array -> item_max_z:float array ->
-  unit -> t
+  ?cancel:Cancel.t ->
+  ?extend:(int -> int -> int array -> int -> int -> unit) ->
+  grain:int ->
+  centroid_x:float array ->
+  centroid_y:float array ->
+  centroid_z:float array ->
+  item_min_x:float array ->
+  item_min_y:float array ->
+  item_min_z:float array ->
+  item_max_x:float array ->
+  item_max_y:float array ->
+  item_max_z:float array ->
+  unit ->
+  t

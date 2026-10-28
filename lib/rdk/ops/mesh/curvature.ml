@@ -1,5 +1,3 @@
-
-
 type outputs = {
   mean : string option;
   gaussian : string option;
@@ -8,4 +6,3 @@ type outputs = {
   curvedness : string option;
   shape_index : string option;
 }
-

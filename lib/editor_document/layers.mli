@@ -1,5 +1,5 @@
-(** The World's layers as plain kinds ([world/gradient], [world/sky], ...) and the stack they
-    make: a {!Rays.World.t} read from, and written to, a {!Kind_graph.t} of layers. *)
+(** The World's layers as plain kinds ([world/gradient], [world/sky], ...) and the stack they make:
+    a {!Rays.World.t} read from, and written to, a {!Kind_graph.t} of layers. *)
 
 module Settings : sig
   val kind : Kind_graph.Kind.t
@@ -10,8 +10,8 @@ val kinds : Kind_graph.Kind.t list
 (** One kind per layer. *)
 
 val to_world : ?time:float -> Kind_graph.node -> Kind_graph.t -> Rays.World.t option
-(** The World a world object and its layers describe; [time] (seconds) advances its time of day
-    by its day cycle. *)
+(** The World a world object and its layers describe; [time] (seconds) advances its time of day by
+    its day cycle. *)
 
 val of_world :
   Rays.World.t ->

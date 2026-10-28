@@ -367,9 +367,7 @@ let marks t : Marks_scene.gpu =
 let image_stats t =
   if not (Domain.is_main_domain ()) then
     invalid_arg "Workspace_gpu.image_stats: initial domain required";
-  let host =
-    Option.fold ~none:t.closed_host ~some:(fun (_, host) -> H.stats host) t.owner
-  in
+  let host = Option.fold ~none:t.closed_host ~some:(fun (_, host) -> H.stats host) t.owner in
   let buffers = ref t.image_stats.buffers and textures = ref t.image_stats.textures in
   Images.iter t.images (fun _ sink ->
       buffers := !buffers + Flow_gpu.Image_sink.buffer_creations sink;
@@ -407,4 +405,5 @@ module Private = struct
 end
 
 type policy = G.config
+
 let default_policy = G.default

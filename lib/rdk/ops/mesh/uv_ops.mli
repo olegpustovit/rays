@@ -1,20 +1,12 @@
 type projection =
-  | Planar of {
-      origin : Rays_math.Vec3.t;
-      u_axis : Rays_math.Vec3.t;
-      v_axis : Rays_math.Vec3.t;
-    }
+  | Planar of { origin : Rays_math.Vec3.t; u_axis : Rays_math.Vec3.t; v_axis : Rays_math.Vec3.t }
   | Cylindrical of {
       origin : Rays_math.Vec3.t;
       axis : Rays_math.Vec3.t;
       seam : Rays_math.Vec3.t;
       height : float;
     }
-  | Spherical of {
-      origin : Rays_math.Vec3.t;
-      axis : Rays_math.Vec3.t;
-      seam : Rays_math.Vec3.t;
-    }
+  | Spherical of { origin : Rays_math.Vec3.t; axis : Rays_math.Vec3.t; seam : Rays_math.Vec3.t }
 
 type params = Uv_parameterize.params = {
   cancel : Cancel.t option;

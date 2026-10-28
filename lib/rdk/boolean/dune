@@ -2,5 +2,21 @@
  (name rdk_boolean)
  (public_name rays.rdk.boolean)
  (libraries rdk_core rdk_geom rdk_ops rays_math parallel)
- (flags (:standard -open Rdk_core -open Rdk_geom -open Rdk_ops))
- (modules boolean boolean_cells boolean_complex boolean_constraints boolean_coplanar boolean_extract boolean_face_arrangement boolean_face_cdt boolean_materialization boolean_payload boolean_radial boolean_refinement boolean_seam boolean_solid boolean_weiler))
+ (flags
+  (:standard -open Rdk_core -open Rdk_geom -open Rdk_ops))
+ (modules
+  boolean
+  boolean_cells
+  boolean_complex
+  boolean_constraints
+  boolean_coplanar
+  boolean_extract
+  boolean_face_arrangement
+  boolean_face_cdt
+  boolean_materialization
+  boolean_payload
+  boolean_radial
+  boolean_refinement
+  boolean_seam
+  boolean_solid
+  boolean_weiler))

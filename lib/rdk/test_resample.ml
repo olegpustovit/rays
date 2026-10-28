@@ -29,13 +29,10 @@ let expect_invalid = function
   | Error error -> fail ("unexpected error " ^ Error.to_string error)
   | Ok _ -> fail "expected invalid Resample input"
 
-let x_positions geometry =
-  (Packed.Float3.View.view (Geometry.positions geometry)).x
+let x_positions geometry = (Packed.Float3.View.view (Geometry.positions geometry)).x
 
 let with_primitive_attribute name storage geometry =
-  let attribute = Attribute.create_owned ~owner:Attribute.Primitive ~name storage
-      |> get_string in
+  let attribute = Attribute.create_owned ~owner:Attribute.Primitive ~name storage |> get_string in
   Geometry.with_attribute attribute geometry |> get_string
 
-let run () =
-  print_endline "Resample tests passed"
+let run () = print_endline "Resample tests passed"

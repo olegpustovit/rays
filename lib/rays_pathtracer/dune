@@ -1,59 +1,113 @@
 ; The Lisp kernels' declarations, embedded in the order they are read.
+
 (rule
  (target pathtrace_lisp.ml)
  (deps pathtrace_helpers.rays pathtrace.rays resolve_preview.rays)
- (action (with-stdout-to %{target}
-  (progn (echo "let source = {rays|")
-   (cat pathtrace_helpers.rays) (cat pathtrace.rays) (cat resolve_preview.rays) (echo "|rays}\n")))))
+ (action
+  (with-stdout-to
+   %{target}
+   (progn
+    (echo "let source = {rays|")
+    (cat pathtrace_helpers.rays)
+    (cat pathtrace.rays)
+    (cat resolve_preview.rays)
+    (echo "|rays}\n")))))
 
 (library
  (name rays_pathtracer)
  (public_name rays.pathtracer)
- (modules rays_pathtracer pathtrace_lisp lisp_kernel mesh_data mesh_build frame_data)
+ (modules
+  rays_pathtracer
+  pathtrace_lisp
+  lisp_kernel
+  mesh_data
+  mesh_build
+  frame_data)
  (private_modules pathtrace_lisp lisp_kernel mesh_data mesh_build frame_data)
- (libraries rays ogpu renderer runtime_resources rays_math flow flow_ir flow_gpu input unix))
+ (libraries
+  rays
+  ogpu
+  renderer
+  runtime_resources
+  rays_math
+  flow
+  flow_ir
+  flow_gpu
+  input
+  unix))
 
 (executable
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (name test_main)
- (modules test_main test_pathtracer test_gpu_film test_parity test_world test_scene)
- (libraries rays rays_pathtracer renderer runtime_resources ogpu ogpu_metal rdk rdk_test_support rdk_rays rays_math unix))
+ (modules
+  test_main
+  test_pathtracer
+  test_gpu_film
+  test_parity
+  test_world
+  test_scene)
+ (libraries
+  rays
+  rays_pathtracer
+  renderer
+  runtime_resources
+  ogpu
+  ogpu_metal
+  rdk
+  rdk_test_support
+  rdk_rays
+  rays_math
+  unix))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_pathtracer)
- (action (run %{exe:test_main.exe} test_pathtracer)))
+ (action
+  (run %{exe:test_main.exe} test_pathtracer)))
 
 ; Two frames byte for byte on the Apple M1 GPU and driver. It reads no switch:
 ; another chip prints that it does not compare. Refreshing a digest:
 ; Test_pathtracer.exact_m1_digests.
+
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_pathtracer_exact_m1)
  (locks smoke_window)
- (action (run %{exe:test_main.exe} test_pathtracer_exact_m1)))
+ (action
+  (run %{exe:test_main.exe} test_pathtracer_exact_m1)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_world)
- (action (run %{exe:test_main.exe} test_world)))
+ (action
+  (run %{exe:test_main.exe} test_world)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_gpu_film)
  (locks smoke_window)
- (action (run %{exe:test_main.exe} test_gpu_film)))
+ (action
+  (run %{exe:test_main.exe} test_gpu_film)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias qualification)
  (locks smoke_window)
- (action (run %{exe:test_main.exe} test_parity)))
+ (action
+  (run %{exe:test_main.exe} test_parity)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_scene)
- (action (run %{exe:test_main.exe} test_scene)))
+ (action
+  (run %{exe:test_main.exe} test_scene)))
 
 (alias
  (name qualification)
@@ -72,12 +126,15 @@
   (alias test_scene)))
 
 (executable
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (name test_lisp)
  (modules test_lisp)
  (libraries rays rays_pathtracer flow ogpu_metal rays_math unix))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias runtest-native)
- (action (run %{exe:test_lisp.exe})))
+ (action
+  (run %{exe:test_lisp.exe})))

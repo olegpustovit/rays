@@ -11,21 +11,35 @@
 (rule
  (targets c_flags.sexp c_library_flags.sexp sdl3_probed.h)
  (deps (universe))
- (action (run ./discover.exe)))
+ (action
+  (run ./discover.exe)))
 
 (rule
- (enabled_if (= %{system} macosx))
- (targets sdl3_platform.c platform_library_flags.sexp platform_test_flags.sexp)
+ (enabled_if
+  (= %{system} macosx))
+ (targets
+  sdl3_platform.c
+  platform_library_flags.sexp
+  platform_test_flags.sexp)
  (deps sdl3_platform_macos.c)
  (action
   (progn
    (copy %{dep:sdl3_platform_macos.c} sdl3_platform.c)
-   (write-file platform_library_flags.sexp "(-lobjc -framework CoreFoundation)")
-   (write-file platform_test_flags.sexp "(-ccopt \"-framework ApplicationServices\")"))))
+   (write-file
+    platform_library_flags.sexp
+    "(-lobjc -framework CoreFoundation)")
+   (write-file
+    platform_test_flags.sexp
+    "(-ccopt \"-framework ApplicationServices\")"))))
 
 (rule
- (enabled_if (not (= %{system} macosx)))
- (targets sdl3_platform.c platform_library_flags.sexp platform_test_flags.sexp)
+ (enabled_if
+  (not
+   (= %{system} macosx)))
+ (targets
+  sdl3_platform.c
+  platform_library_flags.sexp
+  platform_test_flags.sexp)
  (deps sdl3_platform_portable.c)
  (action
   (progn
@@ -44,9 +58,19 @@
   ../sdl3_ttf/sdl3_ttf_stubs.c
   ../sdl3_mixer/sdl3_mixer_stubs.c)
  (action
-  (run %{exe:generate.exe} emit --root ../..
-   --component sdl3 --lock ../../packaging/sdl3.lock
-   --abi ../sdl3/abi.sexp --output generated_abi.h)))
+  (run
+   %{exe:generate.exe}
+   emit
+   --root
+   ../..
+   --component
+   sdl3
+   --lock
+   ../../packaging/sdl3.lock
+   --abi
+   ../sdl3/abi.sexp
+   --output
+   generated_abi.h)))
 
 (library
  (name sdl3)
@@ -56,16 +80,26 @@
  (foreign_stubs
   (language c)
   (names sdl3_stubs sdl3_dialog sdl3_platform)
-  (flags (:include c_flags.sexp) -Wall -Wextra -Werror)
+  (flags
+   (:include c_flags.sexp)
+   -Wall
+   -Wextra
+   -Werror)
   (extra_deps generated_abi.h sdl3_probed.h sdl3_dialog.h sdl3_platform.h))
- (c_library_flags (:include c_library_flags.sexp) (:include platform_library_flags.sexp))
+ (c_library_flags
+  (:include c_library_flags.sexp)
+  (:include platform_library_flags.sexp))
  (libraries threads native_layer_token))
 
 (foreign_library
  (archive_name sdl3_platform_portable_check)
  (language c)
  (names sdl3_platform_portable)
- (flags (:include c_flags.sexp) -Wall -Wextra -Werror))
+ (flags
+  (:include c_flags.sexp)
+  -Wall
+  -Wextra
+  -Werror))
 
 (alias
  (name test_portable_stubs)
@@ -73,46 +107,71 @@
 
 (executable
  (name test_main)
- (modules test_main test_sdl3 test_sdl3_metal test_sdl3_stress test_sdl3_failure test_sdl3_events)
+ (modules
+  test_main
+  test_sdl3
+  test_sdl3_metal
+  test_sdl3_stress
+  test_sdl3_failure
+  test_sdl3_events)
  (libraries sdl3 sdl3_lock)
- (link_flags (:include platform_test_flags.sexp))
+ (link_flags
+  (:include platform_test_flags.sexp))
  (foreign_stubs
   (language c)
   (names test_sdl3_events_stubs)
-  (flags (:include c_flags.sexp))))
+  (flags
+   (:include c_flags.sexp))))
 
 (rule
  (alias test_sdl3)
  (deps ../../packaging/sdl3.lock)
- (action (setenv SDL_VIDEODRIVER dummy
-  (run %{exe:test_main.exe} test_sdl3))))
+ (action
+  (setenv
+   SDL_VIDEODRIVER
+   dummy
+   (run %{exe:test_main.exe} test_sdl3))))
 
 (rule
  (alias test_sdl3_metal)
  (locks smoke_window)
- (action (run %{exe:test_main.exe} test_sdl3_metal)))
+ (action
+  (run %{exe:test_main.exe} test_sdl3_metal)))
 
 (rule
  (alias test_sdl3_stress)
- (action (setenv SDL_VIDEODRIVER dummy
-  (run %{exe:test_main.exe} test_sdl3_stress))))
+ (action
+  (setenv
+   SDL_VIDEODRIVER
+   dummy
+   (run %{exe:test_main.exe} test_sdl3_stress))))
 
 (rule
  (alias test_sdl3_failure)
- (action (setenv SDL_VIDEODRIVER rays_missing_video_driver
-  (run %{exe:test_main.exe} test_sdl3_failure))))
+ (action
+  (setenv
+   SDL_VIDEODRIVER
+   rays_missing_video_driver
+   (run %{exe:test_main.exe} test_sdl3_failure))))
 
 (rule
  (alias test_sdl3_events)
- (action (setenv SDL_VIDEODRIVER dummy
-  (run %{exe:test_main.exe} test_sdl3_events))))
+ (action
+  (setenv
+   SDL_VIDEODRIVER
+   dummy
+   (run %{exe:test_main.exe} test_sdl3_events))))
 
 (rule
  (alias qualification)
  (locks smoke_window)
  (action
-  (setenv SDL_VIDEODRIVER dummy
-   (setenv RAYS_SDL3_STRESS_CYCLES 100000
+  (setenv
+   SDL_VIDEODRIVER
+   dummy
+   (setenv
+    RAYS_SDL3_STRESS_CYCLES
+    100000
     (run %{exe:test_main.exe} test_sdl3_stress)))))
 
 (alias

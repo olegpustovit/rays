@@ -11,11 +11,15 @@ type clusters = {
 
 type t = Identity | Clusters of clusters
 
-val of_links :
-  ?cancel:Cancel.t -> operation:string -> int array -> (t, string) result
+val of_links : ?cancel:Cancel.t -> operation:string -> int array -> (t, string) result
 
 val create :
-  ?cancel:Cancel.t -> ?selection:Group.t -> ?metric:metric ->
-  ?inclusive:bool -> operation:string ->
-  tolerance:float -> compatible:(int -> int -> bool) ->
-  Geometry.t -> (t, string) result
+  ?cancel:Cancel.t ->
+  ?selection:Group.t ->
+  ?metric:metric ->
+  ?inclusive:bool ->
+  operation:string ->
+  tolerance:float ->
+  compatible:(int -> int -> bool) ->
+  Geometry.t ->
+  (t, string) result

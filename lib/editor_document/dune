@@ -1,5 +1,16 @@
 (library
  (name editor_document)
  (package rays)
- (libraries rays rays_math sop flow flow_ir flow_sop flow_graph editor_core digestif.c unix)
- (preprocess (pps rays.ppx)))
+ (libraries
+  rays
+  rays_math
+  sop
+  flow
+  flow_ir
+  flow_sop
+  flow_graph
+  editor_core
+  digestif.c
+  unix)
+ (preprocess
+  (pps rays.ppx)))

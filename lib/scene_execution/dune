@@ -1,11 +1,19 @@
 (executable
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (name test_main)
- (modules test_main test_prepared_scene3 test_automatic_scratch test_retained_eviction test_offscreen_metal test_scene_execution_metal)
+ (modules
+  test_main
+  test_prepared_scene3
+  test_automatic_scratch
+  test_retained_eviction
+  test_offscreen_metal
+  test_scene_execution_metal)
  (libraries renderer scene_execution_fixtures ogpu ogpu_metal unix))
 
 ; Minimal per-family MSL pipelines for tests and benchmarks that drive the
 ; renderer on a real device.
+
 (library
  (name scene_execution_fixtures)
  (modules scene_execution_fixtures)
@@ -17,29 +25,39 @@
  (libraries renderer scene_execution_fixtures ogpu_mock))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_prepared_scene3)
- (action (run %{exe:test_main.exe} test_prepared_scene3)))
+ (action
+  (run %{exe:test_main.exe} test_prepared_scene3)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_automatic_scratch)
- (action (run %{exe:test_main.exe} test_automatic_scratch)))
+ (action
+  (run %{exe:test_main.exe} test_automatic_scratch)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_retained_eviction)
- (action (run %{exe:test_main.exe} test_retained_eviction)))
+ (action
+  (run %{exe:test_main.exe} test_retained_eviction)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_offscreen_metal)
- (action (run %{exe:test_main.exe} test_offscreen_metal)))
+ (action
+  (run %{exe:test_main.exe} test_offscreen_metal)))
 
 (rule
- (enabled_if (= %{system} macosx))
+ (enabled_if
+  (= %{system} macosx))
  (alias test_scene_execution_metal)
- (action (run %{exe:test_main.exe} test_scene_execution_metal)))
+ (action
+  (run %{exe:test_main.exe} test_scene_execution_metal)))
 
 (alias
  (name runtest)

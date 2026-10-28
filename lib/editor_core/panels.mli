@@ -1,19 +1,27 @@
-(** The shell as data: a tree of panels.  The editor graph
-    evaluates to one; [Pxui_shell.Layout] gives it geometry.  Pure and
-    presentation-free, so the document library can lower into it. *)
+(** The shell as data: a tree of panels. The editor graph evaluates to one; [Pxui_shell.Layout]
+    gives it geometry. Pure and presentation-free, so the document library can lower into it. *)
 
-type panel = View of string | Canvas of string | Graph | List | Lisp | Inspector | Spreadsheet | Outline | Timeline
-(** [View key] identifies a viewport by its unique named binding; inline,
-    looped and repeated panels use a tree path. The default layout uses [main].
-    [Graph] shows the
-    graph/list/text views of the open network, [List] and [Lisp] force one of
-    them, [Outline] lists the workspace's graphs. *)
+type panel =
+  | View of string
+  | Canvas of string
+  | Graph
+  | List
+  | Lisp
+  | Inspector
+  | Spreadsheet
+  | Outline
+  | Timeline
+      (** [View key] identifies a viewport by its unique named binding; inline, looped and repeated
+          panels use a tree path. The default layout uses [main]. [Graph] shows the graph/list/text
+          views of the open network, [List] and [Lisp] force one of them, [Outline] lists the
+          workspace's graphs. *)
 
-type axis = [ `H | `V ]  (** [`H] puts [a] left of [b], [`V] puts [a] above [b] *)
+type axis = [ `H | `V ]
+(** [`H] puts [a] left of [b], [`V] puts [a] above [b] *)
 
 type size = [ `Ratio of float | `First of int | `Second of int ]
-(** How a split divides its extent: [a]'s share of it, or one side fixed in logical points with
-    the other side taking the rest. *)
+(** How a split divides its extent: [a]'s share of it, or one side fixed in logical points with the
+    other side taking the rest. *)
 
 type t =
   | Leaf of panel
@@ -22,8 +30,8 @@ type t =
   | Float of t  (** an overlay on its parent's rectangle, never a window *)
 
 type path = int list
-(** Child indices from the root: [a]/[b] are 0/1, a tile's cells and a float's
-    content are numbered from 0. *)
+(** Child indices from the root: [a]/[b] are 0/1, a tile's cells and a float's content are numbered
+    from 0. *)
 
 type state = { collapsed : bool; window : (int * int * int * int) option }
 (** A panel's saved disclosure and optional floating window bounds in logical points. *)
@@ -64,9 +72,9 @@ val label : t -> string
     [View ×4], and floating windows come last after [+]. *)
 
 val summary : t -> string
-(** The short name the status strip and the outline's layout rows use: one name per column
-    group, [Outline | View | Inspector] (a stack or a tile reads as its first panel, floating
-    windows are left out). *)
+(** The short name the status strip and the outline's layout rows use: one name per column group,
+    [Outline | View | Inspector] (a stack or a tile reads as its first panel, floating windows are
+    left out). *)
 
 val labels : t list -> string list
 (** {!label} of each layout; layouts that read the same add their largest panel and its share

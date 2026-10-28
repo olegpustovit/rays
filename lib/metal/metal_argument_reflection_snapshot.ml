@@ -1,27 +1,72 @@
 type limits = { max_depth : int; max_members : int }
+
 let default_limits = { max_depth = 32; max_members = 65_536 }
 
 type reflected_type =
   | Scalar of int64
-  | Array of { data_type : int64; length : int64; stride : int64; argument_index_stride : int64; element : reflected_type option }
-  | Pointer of { data_type : int64; access : int64; alignment : int64; data_size : int64; element_is_argument_buffer : bool; element : reflected_type option }
+  | Array of {
+      data_type : int64;
+      length : int64;
+      stride : int64;
+      argument_index_stride : int64;
+      element : reflected_type option;
+    }
+  | Pointer of {
+      data_type : int64;
+      access : int64;
+      alignment : int64;
+      data_size : int64;
+      element_is_argument_buffer : bool;
+      element : reflected_type option;
+    }
   | Struct of member list
   | Texture_reference of { data_type : int64; access : int64; texture_type : int64; depth : bool }
-  | Tensor_reference of { data_type : int64; access : int64; tensor_data_type : int64; index_type : int64; dimensions : int64 list option }
+  | Tensor_reference of {
+      data_type : int64;
+      access : int64;
+      tensor_data_type : int64;
+      index_type : int64;
+      dimensions : int64 list option;
+    }
 
-and member = { name : string; offset : int64; argument_index : int64; data_type : int64; reflected_type : reflected_type option }
+and member = {
+  name : string;
+  offset : int64;
+  argument_index : int64;
+  data_type : int64;
+  reflected_type : reflected_type option;
+}
 
-type argument =
-  { name : string; index : int64; active : bool; access : int64
-  ; argument_type : int64; array_length : int64; buffer_alignment : int64
-  ; buffer_data_size : int64; buffer_data_type : int64; texture_data_type : int64
-  ; texture_type : int64; depth_texture : bool
-  ; threadgroup_memory_alignment : int64; threadgroup_memory_data_size : int64
-  ; buffer_pointer_type : reflected_type option; buffer_struct_type : reflected_type option }
+type argument = {
+  name : string;
+  index : int64;
+  active : bool;
+  access : int64;
+  argument_type : int64;
+  array_length : int64;
+  buffer_alignment : int64;
+  buffer_data_size : int64;
+  buffer_data_type : int64;
+  texture_data_type : int64;
+  texture_type : int64;
+  depth_texture : bool;
+  threadgroup_memory_alignment : int64;
+  threadgroup_memory_data_size : int64;
+  buffer_pointer_type : reflected_type option;
+  buffer_struct_type : reflected_type option;
+}
 
 module type Raw = sig
   type handle
-  type kind = Scalar_kind | Array_kind | Pointer_kind | Struct_kind | Texture_reference_kind | Tensor_reference_kind
+
+  type kind =
+    | Scalar_kind
+    | Array_kind
+    | Pointer_kind
+    | Struct_kind
+    | Texture_reference_kind
+    | Tensor_reference_kind
+
   val destroy : handle -> unit
   val kind : handle -> (kind, string) result
   val data_type : handle -> (int64, string) result
@@ -64,7 +109,8 @@ module type Raw = sig
 end
 
 module Make (Raw : Raw) = struct
-  let ( let* ) value continuation = match value with Ok value -> continuation value | Error _ as error -> error
+  let ( let* ) value continuation =
+    match value with Ok value -> continuation value | Error _ as error -> error
 
   let validate_limits limits =
     if limits.max_depth < 0 then Error "Metal reflection max_depth must be nonnegative"
@@ -75,7 +121,8 @@ module Make (Raw : Raw) = struct
     match option with
     | None -> Ok None
     | Some handle ->
-        Fun.protect ~finally:(fun () -> Raw.destroy handle)
+        Fun.protect
+          ~finally:(fun () -> Raw.destroy handle)
           (fun () -> Result.map Option.some (convert handle))
 
   let destroy_all handles = List.iter Raw.destroy handles
@@ -104,24 +151,30 @@ module Make (Raw : Raw) = struct
             let* element_is_argument_buffer = Raw.element_is_argument_buffer handle in
             let* child = Raw.element handle in
             let* element = with_owned child (type_ (depth + 1)) in
-            Ok (Pointer { data_type; access; alignment; data_size; element_is_argument_buffer; element })
+            Ok
+              (Pointer
+                 { data_type; access; alignment; data_size; element_is_argument_buffer; element })
         | Raw.Struct_kind ->
             let* handles = Raw.members handle in
             if List.length handles > !remaining then begin
               destroy_all handles;
               Error "Metal reflection exceeded max_members"
-            end else begin
+            end
+            else begin
               remaining := !remaining - List.length handles;
               let rec collect output = function
                 | [] -> Ok (Struct (List.rev output))
-                | member_handle :: rest ->
+                | member_handle :: rest -> (
                     let converted =
-                      Fun.protect ~finally:(fun () -> Raw.destroy member_handle)
+                      Fun.protect
+                        ~finally:(fun () -> Raw.destroy member_handle)
                         (fun () -> member_ (depth + 1) member_handle)
                     in
-                    (match converted with
+                    match converted with
                     | Ok value -> collect (value :: output) rest
-                    | Error _ as error -> destroy_all rest; error)
+                    | Error _ as error ->
+                        destroy_all rest;
+                        error)
               and member_ depth member_handle =
                 let* name = Raw.member_name member_handle in
                 let* offset = Raw.member_offset member_handle in
@@ -168,8 +221,23 @@ module Make (Raw : Raw) = struct
     let* buffer_pointer_type = snapshot_owned pointer in
     let* struct_ = Raw.argument_buffer_struct_type handle in
     let* buffer_struct_type = snapshot_owned struct_ in
-    Ok { name; index; active; access; argument_type; array_length; buffer_alignment
-       ; buffer_data_size; buffer_data_type; texture_data_type; texture_type
-       ; depth_texture; threadgroup_memory_alignment; threadgroup_memory_data_size
-       ; buffer_pointer_type; buffer_struct_type }
+    Ok
+      {
+        name;
+        index;
+        active;
+        access;
+        argument_type;
+        array_length;
+        buffer_alignment;
+        buffer_data_size;
+        buffer_data_type;
+        texture_data_type;
+        texture_type;
+        depth_texture;
+        threadgroup_memory_alignment;
+        threadgroup_memory_data_size;
+        buffer_pointer_type;
+        buffer_struct_type;
+      }
 end

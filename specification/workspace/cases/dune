@@ -1,12 +1,32 @@
 ; Ten of the twelve fixtures are the sketches themselves: one source, copied here under the
 ; names the tests read.  bloom and variations are fixtures of their own (they differ).
-(rule (copy %{dep:../../../sketches/ws_facade.rays} facade.lisp))
-(rule (copy %{dep:../../../sketches/ws_garland.rays} garland.lisp))
-(rule (copy %{dep:../../../sketches/ws_kit.rays} kit.lisp))
-(rule (copy %{dep:../../../sketches/ws_orrery.rays} orrery.lisp))
-(rule (copy %{dep:../../../sketches/ws_rosette.rays} rosette.lisp))
-(rule (copy %{dep:../../../sketches/ws_sunflower.rays} sunflower.lisp))
-(rule (copy %{dep:../../../sketches/ws_tiles.rays} tiles.lisp))
-(rule (copy %{dep:../../../sketches/ws_tree.rays} tree.lisp))
-(rule (copy %{dep:../../../sketches/ws_tunnel.rays} tunnel.lisp))
-(rule (copy %{dep:../../../sketches/ws_wave.rays} wave.lisp))
+
+(rule
+ (copy %{dep:../../../sketches/ws_facade.rays} facade.lisp))
+
+(rule
+ (copy %{dep:../../../sketches/ws_garland.rays} garland.lisp))
+
+(rule
+ (copy %{dep:../../../sketches/ws_kit.rays} kit.lisp))
+
+(rule
+ (copy %{dep:../../../sketches/ws_orrery.rays} orrery.lisp))
+
+(rule
+ (copy %{dep:../../../sketches/ws_rosette.rays} rosette.lisp))
+
+(rule
+ (copy %{dep:../../../sketches/ws_sunflower.rays} sunflower.lisp))
+
+(rule
+ (copy %{dep:../../../sketches/ws_tiles.rays} tiles.lisp))
+
+(rule
+ (copy %{dep:../../../sketches/ws_tree.rays} tree.lisp))
+
+(rule
+ (copy %{dep:../../../sketches/ws_tunnel.rays} tunnel.lisp))
+
+(rule
+ (copy %{dep:../../../sketches/ws_wave.rays} wave.lisp))
