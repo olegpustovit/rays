@@ -1,6 +1,6 @@
 module S = Syntax
 module Smap = Map.Make (String)
-module Paths = Set.Make (struct type t = string list let compare = compare end)
+module Paths = Set.Make (struct type t = string list let compare = List.compare String.compare end)
 
 type path = string list
 type context = Context.t
@@ -116,7 +116,7 @@ let body_context_ops = ["sop/context_seed"; "sop/provenance_base"; "sop/context_
 
 (* Checked terms share subterms (expanded macros, remapped residuals): walk each node once, or a
    shared chain is visited exponentially often. *)
-module Seen_term = Hashtbl.Make (struct type t = term let equal = ( == ) let hash = Hashtbl.hash end)
+module Seen_term = Hashtbl.Make (struct type t = term let equal = ( == ) let hash (t : term) = t.form.S.id end)
 let called_names ~include_ops root =
   let seen = Seen_term.create 256 and out = ref [] in
   let rec calls (t : term) = if not (Seen_term.mem seen t) then begin
@@ -164,8 +164,17 @@ let special = [ "workspace"; "graph"; "defn"; "defnode"; "defmacro"; "let*"; "re
   "assoc"; "map"; "filter"; "reduce"; "sort-by"; "iterate"; "quote"; "quasiquote"; "unquote";
   "unquote-splicing" ]
 let special_forms = special
-let reserved s = List.mem s special || List.mem s [ "t"; "pi"; "true"; "false"; "nil" ]
-let type_names () = List.map fst (Ty.names ())
+(* String lists the checker asks of every head and symbol: typed equality, not polymorphic compare. *)
+let rec mem_s s = function [] -> false | x :: rest -> String.equal s x || mem_s s rest
+let rec assoc_s s = function [] -> None | (n, x) :: rest -> if String.equal n s then Some x else assoc_s s rest
+let rec prefix_from p s i = i = String.length p || (String.unsafe_get p i = String.unsafe_get s i && prefix_from p s (i + 1))
+let has_prefix p s = String.length s >= String.length p && prefix_from p s 0
+let index_names = Array.init 64 string_of_int
+let index_name i = if i < 64 then index_names.(i) else string_of_int i
+let has_empty l = List.exists (function [] -> true | _ :: _ -> false) l
+let opaque_head h = mem_s h ["fn"; "map"; "filter"; "reduce"; "sort-by"; "iterate"; "if"; "cond"; "case"; "with_error"; "error_rows"; "exact"]
+let reserved s = mem_s s special || mem_s s [ "t"; "pi"; "true"; "false"; "nil" ]
+let type_name s = List.exists (fun (n, _) -> String.equal s n) (Ty.names ())
 
 (* ---- helpers ---- *)
 
@@ -194,7 +203,7 @@ let rec geometry_accumulator = function
 let last_segment id = match List.rev id with s :: _ -> s | [] -> ""
 let path_text id = String.concat "/" id
 let sym_of (x : S.t) = match x.node with S.Sym s -> Some s | _ -> None
-let pattern_key (x : S.t) = Lisp.flat x
+let pattern_key (x : S.t) = match x.node with S.Sym s when x.meta = [] -> s | _ -> Lisp.flat x
 let map_seq f xs = List.rev (List.fold_left (fun acc x -> f x :: acc) [] xs)
 
 (* ---- checker state ---- *)
@@ -223,13 +232,17 @@ let leaf ?(live = false) ?(vary = []) ?(groups = []) ?len ty =
     packed_producers = Paths.empty; state_dep = false;
     vary; len; fn = None; groups; list_fields = [] }
 let union a b = List.sort_uniq compare (a @ b)
+(* the accumulator is sorted and unique already: an empty addition keeps it *)
+let add_union a b = if b = [] then a else union a b
+(* a vary list is always a union's result, sorted and unique: another one alone, or itself, is the union *)
+let add_vary a b = if b = [] || a == b then a else if a = [] then b else union a b
 let derive ty vs = { ty; live = List.exists (fun v -> v.live) vs; live_len = false; approx = false;
   approx_sources = List.fold_left (fun sources v -> Paths.union sources v.approx_sources) Paths.empty vs;
   packed_producers = List.fold_left (fun sources v -> Paths.union sources v.packed_producers) Paths.empty vs;
   state_dep = List.exists (fun v -> v.state_dep) vs;
-  vary = List.fold_left (fun a v -> union a v.vary) [] vs; len = None; fn = None;
-  groups = List.fold_left (fun a v -> union a v.groups) [] vs;
-  list_fields = List.fold_left (fun a v -> union a v.list_fields) [] vs }
+  vary = List.fold_left (fun a v -> add_vary a v.vary) [] vs; len = None; fn = None;
+  groups = List.fold_left (fun a v -> add_union a v.groups) [] vs;
+  list_fields = List.fold_left (fun a v -> add_union a v.list_fields) [] vs }
 let approximate vs = List.exists (fun (v : v) -> v.approx) vs
 let packed_array ty = Option.is_some (Packed_ops.array_width ty)
 let rec packed_body ~ops (term : term) =
@@ -442,6 +455,7 @@ end) = struct
         | Call_fn {args; body; _} -> all args; Option.iter visit body
         | _ -> ()
   let steps = ref 0 and zones = ref 0
+  let body_memo = Hashtbl.create 64
   (* The budget is per top-level definition: library node bodies are spliced into the
      workspace (all of them for the node manifest), so a fixed total grows too small. *)
   let max_steps =
@@ -506,7 +520,7 @@ end) = struct
         | None -> (match find_op s cx.ctx with
             | Some o -> `Op o
             | None -> (match kind_of cx.ctx s with Ok k -> `Kind k | Error e -> `Missing e)))
-  let known ~head s = reserved s || List.mem s (type_names ()) || s = "fn" || Hashtbl.mem names s
+  let known ~head s = reserved s || type_name s || s = "fn" || Hashtbl.mem names s
     || ((head || not (Macro.valid_name s))
         && (List.exists (fun c -> find_op s c <> None) (Context.all ())
             || (match kind_of Context.sop s with
@@ -518,18 +532,18 @@ end) = struct
   let need (a : arg) what want =
     if Ty.fits a.av.ty want || (a.av.ty = Ty.Fn None && a.av.fn = None &&
       (match want with Ty.Fn _ -> true | _ -> false)) then true
-    else (err a.aform "E_TYPE" (Printf.sprintf "%s: expected %s, got %s." what (show want) (show a.av.ty)); false)
+    else (err a.aform "E_TYPE" (Printf.sprintf "%s: expected %s, got %s." (what ()) (show want) (show a.av.ty)); false)
   let field x (v : v) f name =
     let derived ty =
       let fields = List.filter_map (function n :: path when n = f -> Some path | _ -> None) v.list_fields in
-      { v with ty; live_len = List.mem [] fields; list_fields = fields; len = None; fn = None } in
+      { v with ty; live_len = has_empty fields; list_fields = fields; len = None; fn = None } in
     match v.ty with
     | Ty.Any -> derived Ty.Any
     | Ty.Vec2 when f = "x" || f = "y" -> derived Ty.Float
     | Ty.Vec3 when f = "x" || f = "y" || f = "z" -> derived Ty.Float
-    | Ty.Vec4 when List.mem f ["x";"y";"z";"w"] -> derived Ty.Float
+    | Ty.Vec4 when mem_s f ["x";"y";"z";"w"] -> derived Ty.Float
     | Ty.Record fs ->
-        (match List.assoc_opt f fs with
+        (match assoc_s f fs with
          | Some t -> derived t
          | None ->
              err x "E_FIELD" (Printf.sprintf "%s has no field %s. Fields: %s." name f
@@ -568,23 +582,23 @@ end) = struct
     match pat.node with
     | S.Sym n -> mark (pfx @ [ marker ^ n ]) v; Smap.add n v env
     | S.Vec ps ->
-        let pk = pattern_key pat in
+        let pk () = pattern_key pat in
         let et =
           if List.mem v.ty [Ty.Vec2;Ty.Vec3;Ty.Vec4] then begin
             let width = match v.ty with Ty.Vec2 -> 2 | Ty.Vec4 -> 4 | _ -> 3 in
             if List.length ps > width then
               err pat "E_PATTERN" (Printf.sprintf "%s needs %d elements; a %s has %d."
-                pk (List.length ps) (show v.ty) width);
+                (pk ()) (List.length ps) (show v.ty) width);
             Ty.Float
           end else match Ty.elem v.ty with
             | Some e -> e
             | None ->
                 if v.ty <> Ty.Any then
-                  err pat "E_PATTERN" (Printf.sprintf "%s destructures a list or vec3; got %s." pk (show v.ty));
+                  err pat "E_PATTERN" (Printf.sprintf "%s destructures a list or vec3; got %s." (pk ()) (show v.ty));
                 Ty.Any in
         (match v.len with
          | Some n when not (List.mem v.ty [Ty.Vec2;Ty.Vec3;Ty.Vec4]) && n < List.length ps ->
-             err pat "E_PATTERN" (Printf.sprintf "%s needs %d elements; the list has %d." pk (List.length ps) n)
+             err pat "E_PATTERN" (Printf.sprintf "%s needs %d elements; the list has %d." (pk ()) (List.length ps) n)
          | _ -> ());
         let part = { v with ty = et; live_len = false; len = None; fn = None } in
         List.fold_left (fun env p -> bind_parts p part env pfx marker) env ps
@@ -652,7 +666,8 @@ end) = struct
     | "true" | "false" -> (tm x Ty.Bool (Lit (Param.Bool_value (s = "true"))), leaf Ty.Bool)
     | "nil" -> (tm x Ty.geometry Nil, leaf Ty.geometry)
     | _ ->
-        let b, fs = match String.split_on_char '.' s with b :: fs -> (b, fs) | [] -> (s, []) in
+        let b, fs = if not (String.contains s '.') then (s, []) else
+          match String.split_on_char '.' s with b :: fs -> (b, fs) | [] -> (s, []) in
         (match Smap.find_opt b cx.env with
          | None when fs <> [] && List.mem b [ "t"; "pi"; "true"; "false"; "nil" ] ->
              bad x "E_FIELD" (Printf.sprintf "%s is a constant; it has no .%s." b (String.concat "." fs))
@@ -880,7 +895,7 @@ end) = struct
         let v = derive ty [cv; av; bv] in
         let lengths = if cv.live then union v.list_fields (list_fields ty) else v.list_fields in
         (tm x ty (If (ct, at, bt)), {v with list_fields = lengths; approx = approximate [cv; av; bv];
-          live_len = av.live_len || bv.live_len || List.mem [] lengths})
+          live_len = av.live_len || bv.live_len || has_empty lengths})
     | _ -> bad x "E_NO_ELSE" "if takes a condition, a then and an else."
 
   and cond cx (x : S.t) h (args : S.t list) =
@@ -938,7 +953,7 @@ end) = struct
         let v = derive ty values in
         let lengths = if !test_live then union v.list_fields (list_fields ty) else v.list_fields in
         let v = {v with list_fields = lengths; approx = approximate values;
-          live_len = List.exists (fun v -> v.live_len) !vs || List.mem [] lengths} in
+          live_len = List.exists (fun v -> v.live_len) !vs || has_empty lengths} in
         let default = match List.rev terms with (_, _, d) :: _ -> d | [] -> assert false in
         let node = match sv with
           | Some (st, _) -> Case (st, List.filter_map (fun ((c : S.t), t, e) ->
@@ -990,7 +1005,7 @@ end) = struct
   and input cx key (x : S.t) : term * v =
     match S.head x with
     | Some h when String.contains h '/' || Hashtbl.mem macro_tbl h
-        || List.mem h ["fn"; "map"; "filter"; "reduce"; "sort-by"; "iterate"; "if"; "cond"; "case"; "with_error"; "error_rows"; "exact"] ->
+        || opaque_head h ->
         let memo = cx.path, key, x.id in
         let id = match Hashtbl.find_opt input_paths memo with
           | Some id -> id
@@ -1006,7 +1021,7 @@ end) = struct
                 | leaf :: scope -> List.rev scope @ [Printf.sprintf "%s~%d" leaf n]
                 | [] -> assert false in
               Hashtbl.add input_paths memo id; id in
-        if List.mem h ["fn"; "map"; "filter"; "reduce"; "sort-by"; "iterate"; "if"; "cond"; "case"; "with_error"; "error_rows"; "exact"] then binding cx x id
+        if opaque_head h then binding cx x id
         else let t, v = infer {cx with path = id} x in mark id v;
           (* Canvas previews need the inline result recorded at its card path.
              Scene and SOP lowering retain their operation's original site. *)
@@ -1024,7 +1039,7 @@ end) = struct
         if iv.live then err initial "E_STATE_INIT" "A state seed is static; read the frame in the step.";
         if shape_ty iv.ty then err initial "E_STATE_TYPE" "State stores data, not deferred nodes or layouts.";
         let lengths = list_fields iv.ty in
-        let env = bind_pat p {iv with live = true; state_dep = true; live_len = List.mem [] lengths; list_fields = lengths} cx.env id ":" in
+        let env = bind_pat p {iv with live = true; state_dep = true; live_len = has_empty lengths; list_fields = lengths} cx.env id ":" in
         let step, sv = body {cx with env; path = id; zbody = false} step in
         no_fn x sv.ty "A state step";
         let ty = Option.value ~default:iv.ty (Ty.unify iv.ty sv.ty) in
@@ -1033,7 +1048,7 @@ end) = struct
         let v = {sv with ty; live = true; approx = false; approx_sources = Paths.empty;
           state_dep = true; packed_producers = Paths.empty;
           fn = None; list_fields = union sv.list_fields lengths;
-          live_len = sv.live_len || List.mem [] lengths} in
+          live_len = sv.live_len || has_empty lengths} in
         (tm x ty (State {binder = pat_ir p; init; step; zone = id}), v)
     | _ -> bad x "E_STATE" "state is (state [s init] step)."
 
@@ -1051,7 +1066,7 @@ end) = struct
                 let (t, v) = mk_fn inner expr id n in
                 mark id v; ({ t with path = Some id }, v)
             | _ -> binding inner expr id in
-          if cx.zbody && not (List.mem cx.zone v.vary) then invariant := Paths.add id !invariant;
+          if cx.zbody && not (List.exists (Int.equal cx.zone) v.vary) then invariant := Paths.add id !invariant;
           binds := (pat_ir pat, t) :: !binds;
           env := if ok then bind_pat pat v !env path "" else poison_names pat !env)
           (pairs bs);
@@ -1212,7 +1227,7 @@ end) = struct
       List.iter2 (fun ((pat : S.t), ty) (a : arg) ->
         let v = match ty with
           | Some t ->
-              ignore (need a (Printf.sprintf "%s %s" c.cname (pattern_key pat)) t);
+              ignore (need a (fun () -> Printf.sprintf "%s %s" c.cname (pattern_key pat)) t);
               { a.av with ty = Ty.coerce a.av.ty t }
           | None -> a.av in
         env := bind_pat pat v !env c.cid ":") c.params args;
@@ -1253,7 +1268,7 @@ end) = struct
           | Ty.Fn (Some signature) ->
               if List.compare_lengths args signature.params <> 0 then
                 err x "E_ARITY" "Function argument count differs from its declared signature."
-              else List.iter2 (fun argument ty -> ignore (need argument "Function input" ty))
+              else List.iter2 (fun argument ty -> ignore (need argument (fun () -> "Function input") ty))
                 args signature.params;
               signature.result
           | _ -> Ty.Any in
@@ -1437,7 +1452,7 @@ end) = struct
                      let (t, v) = infer cx value in
                      exact_sink cx value ("ref " ^ g ^ " :" ^ k) v;
                      no_fn value v.ty (Printf.sprintf "Input :%s of %s" k g);
-                     ignore (need (value_arg value v) (Printf.sprintf ":%s of %s" k g) ty);
+                     ignore (need (value_arg value v) (fun () -> Printf.sprintf ":%s of %s" k g) ty);
                      overrides := (k, t) :: !overrides; vs := v :: !vs);
                 go more
             | [] -> ()
@@ -1465,7 +1480,7 @@ end) = struct
           err kf "E_MISSING_VALUE" (Printf.sprintf ":%s has no value" k); List.rev acc
       | y :: rest ->
           let (t, v) = if fn_slot (Some i) None && S.head y <> Some "fn"
-            then read_fn y else input cx (string_of_int i) y in
+            then read_fn y else input cx (index_name i) y in
           go (i + 1) ({ key = None; aform = y; aterm = t; av = v } :: acc) rest in
     go 0 [] forms
 
@@ -1541,9 +1556,10 @@ end) = struct
                   let skip, args = split args in
                   apply_op ~skip cx x o (args_of cx (fun _ _ -> false) args)
               | `Op o ->
+                  let slots = o.signature.pos @ o.signature.opt in
                   let fn_slot pos key =
                     let ty = match pos, key with
-                      | Some i, _ -> Option.map snd (List.nth_opt (o.signature.pos @ o.signature.opt) i)
+                      | Some i, _ -> Option.map snd (List.nth_opt slots i)
                       | _, Some key -> List.assoc_opt key o.signature.kw
                       | _ -> None in
                     match ty with Some (Ty.Fn _) -> true | _ -> false in
@@ -1562,17 +1578,17 @@ end) = struct
                   apply_kind cx x k (args_of cx fn_slot args)))
 
   and apply_op ?(skip = []) cx x (o : Op.t) (args : arg list) : term * v =
-    if List.mem o.name body_context_ops && not cx.in_def then
+    if mem_s o.name body_context_ops && not cx.in_def then
       err x "E_NODE_CONTEXT" "Context seed, frame and provenance base are available inside a defnode body.";
-    let position = ref 0 in
+    let position = ref 0 and slots = o.signature.pos @ o.signature.opt in
     let args = List.map (fun a ->
       let ty = match a.key with
-        | Some key -> List.assoc_opt key o.signature.kw
+        | Some key -> assoc_s key o.signature.kw
         | None -> let i = !position in incr position;
-            Option.map snd (List.nth_opt (o.signature.pos @ o.signature.opt) i) in
+            Option.map snd (List.nth_opt slots i) in
       match ty with Some (Ty.Fn (Some signature)) -> instantiate_fn cx a signature
       | _ -> a) args in
-    if o.name <> "scene/trace" && List.exists (fun prefix -> String.starts_with ~prefix o.name) ["sop/"; "settings/"; "scene/"] then begin
+    if o.name <> "scene/trace" && (has_prefix "sop/" o.name || has_prefix "settings/" o.name || has_prefix "scene/" o.name) then begin
       (* The values of an attribute write enter the geometry through the SOP input sink, an
          implicit readback: the executor reads a GPU producer back once, so no (exact x). *)
       let values_slot = List.length o.signature.pos - 1 in
@@ -1608,9 +1624,9 @@ end) = struct
         List.iteri (fun i a ->
           if i < nfix then begin
             let sname, sty = List.nth slots i in
-            if not (o.any_num && (List.mem a.av.ty [Ty.Vec3;Ty.Int;Ty.Float]
-              || Option.is_some o.arithmetic && List.mem a.av.ty [Ty.Vec2;Ty.Vec4])) then
-              ignore (need a (Printf.sprintf "%s %s" o.name sname) sty);
+            if not (o.any_num && (match a.av.ty with Ty.Vec3 | Int | Float -> true
+              | Vec2 | Vec4 -> Option.is_some o.arithmetic | _ -> false)) then
+              ignore (need a (fun () -> Printf.sprintf "%s %s" o.name sname) sty);
             named := (sname, a.aterm) :: !named
           end else begin
             let rname, rty = Option.get o.signature.rest in
@@ -1619,26 +1635,26 @@ end) = struct
                  if a.av.live_len && shape_ty rty then
                    err a.aform "E_TIME_COUNT" (Printf.sprintf
                      "The list passed to %s changes length with t. The network keeps its shape while playing; animate parameters instead, for example scale a piece to 0." o.name)
-             | _ -> ignore (need a (Printf.sprintf "%s %s" o.name rname) rty));
+             | _ -> ignore (need a (fun () -> Printf.sprintf "%s %s" o.name rname) rty));
             named := (rname, a.aterm) :: !named
           end) pos;
-        let seen = Hashtbl.create 4 in
+        let seen = ref [] in
         List.iter (fun a ->
           let k = Option.get a.key in
-          match List.assoc_opt k o.signature.kw with
+          match assoc_s k o.signature.kw with
           | None ->
               err a.aform "E_UNKNOWN_PARAM" (Printf.sprintf "%s has no parameter :%s.%s" o.name k
                 (if o.signature.kw = [] then "" else " Parameters: " ^ String.concat " " (List.map (fun (n, _) -> ":" ^ n) o.signature.kw) ^ "."))
           | Some want ->
-              if Hashtbl.mem seen k then err a.aform "E_DUPLICATE_PARAM" (Printf.sprintf ":%s is given twice" k)
+              if mem_s k !seen then err a.aform "E_DUPLICATE_PARAM" (Printf.sprintf ":%s is given twice" k)
               else begin
-                Hashtbl.add seen k ();
-                ignore (need a (Printf.sprintf "%s :%s" o.name k) want);
+                seen := k :: !seen;
+                ignore (need a (fun () -> Printf.sprintf "%s :%s" o.name k) want);
                 named := (k, a.aterm) :: !named
               end) kws;
         if o.any_num then begin
           let vectors = List.filter_map (fun a ->
-            if List.mem a.av.ty [Ty.Vec2;Ty.Vec3;Ty.Vec4] then Some a.av.ty else None) pos
+            match a.av.ty with Ty.Vec2 | Vec3 | Vec4 -> Some a.av.ty | _ -> None) pos
             |> List.sort_uniq compare in
           if List.length vectors > 1 then err x "E_TYPE"
             (Printf.sprintf "%s needs matching vector widths; got %s." o.name
@@ -1934,7 +1950,7 @@ end) = struct
           let given = match by_pos with Some a -> Some a | None -> by_key in
           let t, v = match given with
             | Some a ->
-                ignore (need a (Printf.sprintf "%s :%s" d.sname pname) pty);
+                ignore (need a (fun () -> Printf.sprintf "%s :%s" d.sname pname) pty);
                 (a.aterm, { a.av with ty = Ty.coerce a.av.ty pty })
             | None ->
                 (match def_default d pname with
@@ -1946,7 +1962,15 @@ end) = struct
           terms := t :: !terms) d.sparams;
         let inner = { env = !env; ctx = d.sctx; stack = d.sname :: cx.stack; scope = "ƒ " ^ d.sname;
                       path = [ "def:" ^ d.sname ]; in_def = true; depth = cx.depth + 1; zone = 0; zbody = false } in
-        let (bt, bv) = body inner d.sbody in
+        (* A body checked again with equal inputs (no function values) checks the same way: the first
+           call's body term is shared, as checked terms already share subterms. *)
+        let vs = List.rev_map (fun (pname, _, _) -> Smap.find pname inner.env) d.sparams in
+        let key = (d.sname, inner.stack, inner.depth, vs) in
+        let memo = List.for_all (fun v -> v.fn = None) vs in
+        let (bt, bv) = match if memo then Hashtbl.find_opt body_memo key else None with
+          | Some checked -> checked
+          | None -> let checked = body inner d.sbody in
+              if memo then Hashtbl.add body_memo key checked; checked in
         (tm x bv.ty (Call_fn { fn = d.sname; args = List.rev !terms; body = Some bt }),
          { bv with fn = None; state_dep = bv.state_dep || List.exists (fun a -> a.av.state_dep) args })
       end
@@ -2208,7 +2232,7 @@ let check ?(ops = []) ?(library = false) ?(call_sites = false) catalog forms =
 
 let name_taken s =
   reserved s || Symbol.reserved s || Op.find s Context.value <> None
-  || List.mem s (type_names ())
+  || type_name s
 
 type op_signature = Op.signature = {
   pos : (string * Ty.t) list; opt : (string * Ty.t) list;

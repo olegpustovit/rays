@@ -33,7 +33,7 @@ let linear (c : Rays_math.Color.t) = P.Linear_color.rgb (float c.r /. 255.) (flo
 let material (m : Material.t) = P.material
   ~roughness:(sqrt (2. /. (m.shininess +. 2.))) ~emission:(linear m.emissive) (linear m.diffuse)
 
-type model = { tracer : P.t; canvas : Canvas.t option; setup_seconds : float }
+type model = { tracer : P.t; canvas : Canvas.t option; setup_seconds : float; created : float }
 
 let init _ =
   let started = Unix.gettimeofday () in
@@ -73,6 +73,7 @@ let init _ =
           placed := (Rays_math.Mat4.mul (Objects.world scene id) d.transform, mesh) :: !placed) drawing
       end) (Objects.ids "geometry" scene));
   let mesh = P.scene_mesh (List.rev !placed) |> get in
+  let created = Unix.gettimeofday () in
   let tracer = P.create ~spp:4 ~profile:(Sys.getenv_opt "RAYS_PATHTRACER_PROFILE" = Some "1")
       ~bounces:(if benchmark then document.root.bounces else 6)
       ~round_samples:(if benchmark then document.root.round_samples else 4) ~width ~height
@@ -90,7 +91,7 @@ let init _ =
         (Layers.to_world node layers)) (Objects.ids "world" scene);
   P.reset tracer;
   {tracer; canvas = (if benchmark then None else Some (Canvas.create_exn ~width ~height));
-   setup_seconds = Unix.gettimeofday () -. started}
+   setup_seconds = Unix.gettimeofday () -. started; created}
 
 let render_samples tracer =
   while P.samples tracer < spp do
@@ -107,6 +108,8 @@ let run_benchmark model =
      RAYS_PATHTRACER_PROFILE=1 logs each GPU band between these markers. *)
   P.render model.tracer camera |> get;
   P.flush model.tracer |> get;
+  (* the first frame's compile gate (P8.G2): tracer creation to the first 4-spp frame's flush *)
+  Printf.eprintf "pathtracer_first_frame_ms %.1f\n%!" (1e3 *. (Unix.gettimeofday () -. model.created));
   for round = 1 to 5 do
     P.reset model.tracer;
     Printf.eprintf "pathtracer_benchmark begin %d\n%!" round;

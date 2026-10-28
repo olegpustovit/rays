@@ -132,6 +132,16 @@ let check_library () =
   | Ok syntax -> match Flow.Workspace.check ~library:true { Flow.Catalog.version = 1; kinds = [] } syntax with
     | Some _, [] -> Ok () | _, ds -> Error (diagnostics ds)
 
+(* The check of pathtracer.rays's accumulation set, alone: tools/bench_check times it. *)
+let check_sketch () =
+  let f = { spp = 1; bounces = 5; round_samples = 4; panels = 0; lights = 2; world = true; background = 0;
+            map_w = 512; map_h = 256; sun = false; bsdf_only = false; instanced = true;
+            classes = (false, false, true); motion = false; curves = None } in
+  match Flow.Syntax.parse (text f ~preview:false) with
+  | Error d -> Error (Diagnostic.to_string d)
+  | Ok syntax -> match Flow.Workspace.check ~ops ~call_sites:true { Flow.Catalog.version = 1; kinds = [] } syntax with
+    | Some _, [] -> Ok () | _, ds -> Error (diagnostics ds)
+
 let kernel t ~lease ~pipelines name =
   match List.assoc_opt name t.kernels with
   | Some k -> Ok k

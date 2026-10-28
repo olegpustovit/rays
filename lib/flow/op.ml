@@ -73,7 +73,7 @@ let elm j ts = match lst j ts with Ty.List e -> e | _ -> Ty.Any
 let binary name f =
   let arithmetic = { apply = fun a b -> Value.arith name f a b } in
   mk ~any_num:true ~arithmetic name ["a", fl; "b", fl] (fun ts ->
-    match List.find_opt (fun ty -> List.mem ty [Ty.Vec2;Ty.Vec3;Ty.Vec4]) ts with
+    match List.find_opt (function Ty.Vec2 | Vec3 | Vec4 -> true | _ -> false) ts with
     | Some ty -> ty
     | None -> if name <> "/" && name <> "pow" && List.for_all ((=) Ty.Int) ts then Ty.Int else fl)
     {run = fun ~name ~node:_ args -> match List.map snd args with
@@ -1166,7 +1166,7 @@ let result_type op args = match op.out_args with
   | None ->
       let positional = List.map fst (op.signature.pos @ op.signature.opt) in
       op.out (List.filter_map (fun (name, ty, _) ->
-        if List.mem name positional then Some ty else None) args)
+        if List.exists (String.equal name) positional then Some ty else None) args)
 let arith name = Option.bind (Hashtbl.find_opt table name) (fun o -> o.arithmetic)
 
 let valid_extension op = match op.packed_extension with
@@ -1181,9 +1181,7 @@ let valid_extension op = match op.packed_extension with
           with Diagnostic.Error _ | Invalid_argument _ -> false)
   | Some _ -> false
 
-let packed_kind op =
-  if op.ctx <> Context.value || op.shape <> Scalar then None
-  else if Option.fold ~none:false ~some:((==) op) (Hashtbl.find_opt table op.name) then
+let builtin_kind op =
     match Packed_ops.binary op.name, Packed_ops.unary op.name with
     | Some binary, _ -> Some (Binary binary)
     | _, Some unary -> Some (Unary unary)
@@ -1207,6 +1205,14 @@ let packed_kind op =
     | _ when op.name = "array/nth" -> Some Gather
     | _ when op.live -> Some Frame
     | _ -> Some Constant_only
+(* A builtin's kind, computed once at load (read-only after, so any domain may read it), not per call. *)
+let builtin_kinds =
+  let kinds = Hashtbl.create 256 in
+  Hashtbl.iter (fun name op -> Hashtbl.replace kinds name (builtin_kind op)) table; kinds
+let packed_kind op =
+  if op.ctx <> Context.value || op.shape <> Scalar then None
+  else if Option.fold ~none:false ~some:((==) op) (Hashtbl.find_opt table op.name) then
+    Hashtbl.find builtin_kinds op.name
   else match op.packed_extension with
     | Some Noise3 when valid_extension op -> Some Noise3
     | _ -> None
