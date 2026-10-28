@@ -4,14 +4,6 @@ let run ?(grain = 16_384) count operation =
   if count > 0 then
     Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(count - 1) operation
 
-let run_ranges ?(grain = 16_384) count operation =
-  if grain <= 0 then invalid_arg "Kernel: grain must be positive";
-  let ranges = if count = 0 then 0 else (count - 1) / grain + 1 in
-  if ranges > 0 then
-    Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(ranges - 1) (fun range ->
-      let first = range * grain and last = min count ((range + 1) * grain) in
-      operation ~first ~last)
-
 let geometry_of_positions positions =
   let topology = Topology.empty ~point_count:(Packed.Float3.length positions) in
   Geometry.create ~positions ~topology () |> Result.get_ok
@@ -19,13 +11,13 @@ let geometry_of_positions positions =
 let generate_point_ranges count operation =
   if count < 0 then invalid_arg "Kernel.generate_point_ranges: negative point count";
   let x = Array.make count 0. and y = Array.make count 0. and z = Array.make count 0. in
-  run_ranges count (fun ~first ~last -> operation ~first ~last ~x ~y ~z);
+  Support.run_ranges count (fun ~first ~last -> operation ~first ~last ~x ~y ~z);
   Packed.Float3.Private.of_owned_exn ~x ~y ~z |> geometry_of_positions
 
 let edit_point_ranges ?grain operation geometry =
   let source = Packed.Float3.Private.view (Geometry.positions geometry) in
   let x = Array.copy source.x and y = Array.copy source.y and z = Array.copy source.z in
-  run_ranges ?grain (Array.length x)
+  Support.run_ranges ?grain (Array.length x)
     (fun ~first ~last -> operation ~first ~last ~x ~y ~z);
   let positions = Packed.Float3.Private.of_owned_exn ~x ~y ~z in
   Geometry.with_positions positions geometry |> Result.get_ok

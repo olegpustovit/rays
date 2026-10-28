@@ -4,14 +4,6 @@ exception Poly_path_error of string
 
 let fail message = raise (Poly_path_error message)
 
-let run_ranges ?(grain = 16_384) count operation =
-  if grain <= 0 then fail "grain must be positive";
-  let ranges = (count + grain - 1) / grain in
-  if ranges > 0 then
-    Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(ranges - 1) (fun range ->
-      let first = range * grain and last = min count ((range + 1) * grain) in
-      operation first last)
-
 let next_power_of_two value =
   let result = ref 8 in
   while !result < value do
@@ -400,7 +392,7 @@ let run ?cancel ?grain ?edges ?(preserve_source_payload = true)
     let vertex_points = Array.make output_vertex_count 0
     and vertex_map = if needs_vertex_ancestry
         then Array.make output_vertex_count 0 else [||] in
-    run_ranges ?grain path_count (fun first_path last_path ->
+    Support.run_ranges ?grain path_count (fun ~first:first_path ~last:last_path ->
       Cancel.check_opt cancel;
       for path = first_path to last_path - 1 do
         let output = primitive_offsets.(path) and edge_first = path_offsets.(path)

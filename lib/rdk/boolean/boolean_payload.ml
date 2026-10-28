@@ -69,12 +69,6 @@ let collect_groups left right =
   List.iter (add 1) (Geometry.groups right);
   Array.of_list (List.rev !reversed)
 
-let parallel_for ?cancel ~grain count operation =
-  if count > 0 then Parallel.for_ ~chunk_size:(max 1 grain) ~start:0
-      ~finish:(count - 1) (fun index ->
-        if index land 4095 = 0 then Cancel.check_opt cancel;
-        operation index)
-
 let selected ancestry left right primitive =
   match Boolean_extract.primitive_side ancestry primitive with
   | Boolean_complex.Left -> left, Boolean_extract.primitive_face ancestry primitive
@@ -95,7 +89,7 @@ let copy_attribute ?cancel ~grain ancestry primitive_count pair =
       let left = Option.map (function Attribute.Float value -> value | _ -> assert false) left
       and right = Option.map (function Attribute.Float value -> value | _ -> assert false) right
       and output = Array.make primitive_count 0. in
-      parallel_for ?cancel ~grain primitive_count (fun primitive ->
+      Support.parallel_for ?cancel ~grain primitive_count (fun primitive ->
         let source, index = selected ancestry left right primitive in
         match source with None -> () | Some values -> output.(primitive) <- values.(index));
       make_attribute pair (Attribute.Float output)
@@ -104,7 +98,7 @@ let copy_attribute ?cancel ~grain ancestry primitive_count pair =
       let left = Option.map (function Attribute.Int value -> value | _ -> assert false) left
       and right = Option.map (function Attribute.Int value -> value | _ -> assert false) right
       and output = Array.make primitive_count 0 in
-      parallel_for ?cancel ~grain primitive_count (fun primitive ->
+      Support.parallel_for ?cancel ~grain primitive_count (fun primitive ->
         let source, index = selected ancestry left right primitive in
         match source with None -> () | Some values -> output.(primitive) <- values.(index));
       make_attribute pair (Attribute.Int output)
@@ -113,7 +107,7 @@ let copy_attribute ?cancel ~grain ancestry primitive_count pair =
       let left = Option.map (function Attribute.Text value -> value | _ -> assert false) left
       and right = Option.map (function Attribute.Text value -> value | _ -> assert false) right
       and output = Array.make primitive_count "" in
-      parallel_for ?cancel ~grain primitive_count (fun primitive ->
+      Support.parallel_for ?cancel ~grain primitive_count (fun primitive ->
         let source, index = selected ancestry left right primitive in
         match source with None -> () | Some values -> output.(primitive) <- values.(index));
       make_attribute pair (Attribute.Text output)
@@ -123,7 +117,7 @@ let copy_attribute ?cancel ~grain ancestry primitive_count pair =
         | _ -> assert false in
       let left = Option.map view left and right = Option.map view right
       and x = Array.make primitive_count 0. and y = Array.make primitive_count 0. in
-      parallel_for ?cancel ~grain primitive_count (fun primitive ->
+      Support.parallel_for ?cancel ~grain primitive_count (fun primitive ->
         let source, index = selected ancestry left right primitive in
         match source with None -> () | Some values ->
           x.(primitive) <- values.x.(index); y.(primitive) <- values.y.(index));
@@ -137,7 +131,7 @@ let copy_attribute ?cancel ~grain ancestry primitive_count pair =
       let left = Option.map view left and right = Option.map view right
       and x = Array.make primitive_count 0. and y = Array.make primitive_count 0.
       and z = Array.make primitive_count 0. in
-      parallel_for ?cancel ~grain primitive_count (fun primitive ->
+      Support.parallel_for ?cancel ~grain primitive_count (fun primitive ->
         let source, index = selected ancestry left right primitive in
         match source with None -> () | Some values ->
           x.(primitive) <- values.x.(index); y.(primitive) <- values.y.(index);
@@ -151,7 +145,7 @@ let copy_attribute ?cancel ~grain ancestry primitive_count pair =
       let left = Option.map view left and right = Option.map view right
       and x = Array.make primitive_count 0. and y = Array.make primitive_count 0.
       and z = Array.make primitive_count 0. and w = Array.make primitive_count 0. in
-      parallel_for ?cancel ~grain primitive_count (fun primitive ->
+      Support.parallel_for ?cancel ~grain primitive_count (fun primitive ->
         let source, index = selected ancestry left right primitive in
         match source with None -> () | Some values ->
           x.(primitive) <- values.x.(index); y.(primitive) <- values.y.(index);
@@ -165,7 +159,7 @@ let copy_attribute ?cancel ~grain ancestry primitive_count pair =
         | _ -> assert false in
       let left = Option.map view left and right = Option.map view right
       and lengths = Array.make primitive_count 0 in
-      parallel_for ?cancel ~grain primitive_count (fun primitive ->
+      Support.parallel_for ?cancel ~grain primitive_count (fun primitive ->
         let source, index = selected ancestry left right primitive in
         match source with None -> () | Some values ->
           lengths.(primitive) <- values.offsets.(index + 1) - values.offsets.(index));
@@ -176,7 +170,7 @@ let copy_attribute ?cancel ~grain ancestry primitive_count pair =
         offsets.(primitive + 1) <- offsets.(primitive) + lengths.(primitive)
       done;
       let values = Array.make offsets.(primitive_count) 0 in
-      parallel_for ?cancel ~grain primitive_count (fun primitive ->
+      Support.parallel_for ?cancel ~grain primitive_count (fun primitive ->
         let source, index = selected ancestry left right primitive in
         match source with None -> () | Some source ->
           Array.blit source.values source.offsets.(index) values offsets.(primitive)
@@ -189,7 +183,7 @@ let copy_attribute ?cancel ~grain ancestry primitive_count pair =
         | _ -> assert false in
       let left = Option.map view left and right = Option.map view right
       and lengths = Array.make primitive_count 0 in
-      parallel_for ?cancel ~grain primitive_count (fun primitive ->
+      Support.parallel_for ?cancel ~grain primitive_count (fun primitive ->
         let source, index = selected ancestry left right primitive in
         match source with None -> () | Some values ->
           lengths.(primitive) <- values.offsets.(index + 1) - values.offsets.(index));
@@ -200,7 +194,7 @@ let copy_attribute ?cancel ~grain ancestry primitive_count pair =
         offsets.(primitive + 1) <- offsets.(primitive) + lengths.(primitive)
       done;
       let values = Array.make offsets.(primitive_count) 0. in
-      parallel_for ?cancel ~grain primitive_count (fun primitive ->
+      Support.parallel_for ?cancel ~grain primitive_count (fun primitive ->
         let source, index = selected ancestry left right primitive in
         match source with None -> () | Some source ->
           Array.blit source.values source.offsets.(index) values offsets.(primitive)

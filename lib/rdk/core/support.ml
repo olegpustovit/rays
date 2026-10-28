@@ -92,7 +92,15 @@ let ceiling_div value divisor =
 module Parallel = Parallel
 
 let parallel_for ?cancel ~grain count work =
-  if count > 0 then Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(count - 1)
+  if count > 0 then Parallel.for_ ~chunk_size:(max 1 grain) ~start:0 ~finish:(count - 1)
     (fun element ->
       if element land 4095 = 0 then Cancel.check_opt cancel;
       work element)
+
+let run_ranges ?(grain = 16_384) count operation =
+  if grain <= 0 then invalid_arg "Support.run_ranges: grain must be positive";
+  let ranges = if count = 0 then 0 else (count - 1) / grain + 1 in
+  if ranges > 0 then
+    Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(ranges - 1) (fun range ->
+      let first = range * grain and last = min count ((range + 1) * grain) in
+      operation ~first ~last)

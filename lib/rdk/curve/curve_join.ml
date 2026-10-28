@@ -10,14 +10,6 @@ type curve_join_pick = {
 exception Curve_error of string
 let fail message = raise (Curve_error message)
 
-let run_ranges ?(grain = 16_384) count operation =
-  if grain <= 0 then fail "grain must be positive";
-  let ranges = (count + grain - 1) / grain in
-  if ranges > 0 then Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(ranges - 1)
-    (fun range ->
-      let first = range * grain and last = min count ((range + 1) * grain) in
-      operation first last)
-
 let validate_selection operation selection primitive_count =
   match selection with
   | None -> ()
@@ -331,7 +323,7 @@ let join ?cancel ?grain ?primitives ?picked_ends ?(orient_closest = true)
             | None -> 1
             | Some size -> 1 + ((selected_count - 1) / size) in
           chain_count := fixed_chain_count;
-          run_ranges ?grain selected_count (fun first last ->
+          Support.run_ranges ?grain selected_count (fun ~first ~last ->
             Cancel.check_opt cancel;
             for index = first to last - 1 do
               let subgroup = starts_subgroup index
@@ -358,7 +350,7 @@ let join ?cancel ?grain ?primitives ?picked_ends ?(orient_closest = true)
         let endpoint_x = Array.make endpoint_count 0.
         and endpoint_y = Array.make endpoint_count 0.
         and endpoint_z = Array.make endpoint_count 0. in
-        run_ranges ?grain endpoint_count (fun first last ->
+        Support.run_ranges ?grain endpoint_count (fun ~first ~last ->
           for endpoint_slot = first to last - 1 do
             if endpoint_slot land 16_383 = 0 then Cancel.check_opt cancel;
             let primitive = input_primitives.(endpoint_slot lsr 1) in
@@ -550,7 +542,7 @@ let join ?cancel ?grain ?primitives ?picked_ends ?(orient_closest = true)
           previous := output;
           incr output_at
         done in
-      run_ranges ?grain output_primitive_count (fun first_output last_output ->
+      Support.run_ranges ?grain output_primitive_count (fun ~first:first_output ~last:last_output ->
         Cancel.check_opt cancel;
         for output_primitive = first_output to last_output - 1 do
           let output_at = ref primitive_offsets.(output_primitive)

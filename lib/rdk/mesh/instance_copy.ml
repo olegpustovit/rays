@@ -11,14 +11,7 @@ type copy_target_attribute_rule = {
 }
 
 let parallel_output_ranges ?cancel ~grain length body =
-  if length > 0 then begin
-    let chunk_count = 1 + ((length - 1) / grain) in
-    Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(chunk_count - 1) (fun chunk ->
-      Cancel.check_opt cancel;
-      let first = chunk * grain in
-      let last = first + min grain (length - first) in
-      body ~first ~last)
-  end
+  Support.run_ranges ~grain length (fun ~first ~last -> Cancel.check_opt cancel; body ~first ~last)
 
 let repeat_array ?cancel ?(grain = 16_384) copies source =
   let length = Array.length source in

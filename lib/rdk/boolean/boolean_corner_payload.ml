@@ -94,12 +94,6 @@ let collect_edge_groups left right =
   List.iter (add 1) (Geometry.edge_groups right);
   Array.of_list (List.rev !reversed)
 
-let parallel_for ?cancel ~grain count operation =
-  if count > 0 then Parallel.for_ ~chunk_size:(max 1 grain) ~start:0
-      ~finish:(count - 1) (fun index ->
-        if index land 4095 = 0 then Cancel.check_opt cancel;
-        operation index)
-
 let selected view left right primitive =
   if Bytes.unsafe_get view.Boolean_extract.Private.primitive_sides primitive = '\000'
   then left else right
@@ -147,7 +141,7 @@ let interpolate_fixed ?cancel ~grain ancestry view corner_count pair =
       let storage_view = function Attribute.Float value -> value | _ -> assert false in
       let left = Option.map storage_view left and right = Option.map storage_view right
       and output = Array.make corner_count 0. in
-      parallel_for ?cancel ~grain corner_count (fun corner ->
+      Support.parallel_for ?cancel ~grain corner_count (fun corner ->
         let primitive = corner / 3 in
         match selected view left right primitive with
         | None -> ()
@@ -166,7 +160,7 @@ let interpolate_fixed ?cancel ~grain ancestry view corner_count pair =
       let storage_view = function Attribute.Int value -> value | _ -> assert false in
       let left = Option.map storage_view left and right = Option.map storage_view right
       and output = Array.make corner_count 0 in
-      parallel_for ?cancel ~grain corner_count (fun corner ->
+      Support.parallel_for ?cancel ~grain corner_count (fun corner ->
         let primitive = corner / 3 in
         match selected view left right primitive with
         | None -> ()
@@ -179,7 +173,7 @@ let interpolate_fixed ?cancel ~grain ancestry view corner_count pair =
       let storage_view = function Attribute.Text value -> value | _ -> assert false in
       let left = Option.map storage_view left and right = Option.map storage_view right
       and output = Array.make corner_count "" in
-      parallel_for ?cancel ~grain corner_count (fun corner ->
+      Support.parallel_for ?cancel ~grain corner_count (fun corner ->
         let primitive = corner / 3 in
         match selected view left right primitive with
         | None -> ()
@@ -193,7 +187,7 @@ let interpolate_fixed ?cancel ~grain ancestry view corner_count pair =
         | _ -> assert false in
       let left = Option.map storage_view left and right = Option.map storage_view right
       and x = Array.make corner_count 0. and y = Array.make corner_count 0. in
-      parallel_for ?cancel ~grain corner_count (fun corner ->
+      Support.parallel_for ?cancel ~grain corner_count (fun corner ->
         let primitive = corner / 3 in
         match selected view left right primitive with
         | None -> ()
@@ -216,7 +210,7 @@ let interpolate_fixed ?cancel ~grain ancestry view corner_count pair =
       let left = Option.map storage_view left and right = Option.map storage_view right
       and x = Array.make corner_count 0. and y = Array.make corner_count 0.
       and z = Array.make corner_count 0. in
-      parallel_for ?cancel ~grain corner_count (fun corner ->
+      Support.parallel_for ?cancel ~grain corner_count (fun corner ->
         let primitive = corner / 3 in
         match selected view left right primitive with
         | None -> ()
@@ -244,7 +238,7 @@ let interpolate_fixed ?cancel ~grain ancestry view corner_count pair =
       let left = Option.map storage_view left and right = Option.map storage_view right
       and x = Array.make corner_count 0. and y = Array.make corner_count 0.
       and z = Array.make corner_count 0. and w = Array.make corner_count 0. in
-      parallel_for ?cancel ~grain corner_count (fun corner ->
+      Support.parallel_for ?cancel ~grain corner_count (fun corner ->
         let primitive = corner / 3 in
         match selected view left right primitive with
         | None -> ()
@@ -275,7 +269,7 @@ let interpolate_csr ?cancel ~grain ancestry view corner_count pair =
         | _ -> assert false in
       let left = Option.map storage_view left and right = Option.map storage_view right
       and lengths = Array.make corner_count 0 in
-      parallel_for ?cancel ~grain corner_count (fun corner ->
+      Support.parallel_for ?cancel ~grain corner_count (fun corner ->
         let primitive = corner / 3 in
         match selected view left right primitive with
         | None -> ()
@@ -290,7 +284,7 @@ let interpolate_csr ?cancel ~grain ancestry view corner_count pair =
         offsets.(corner + 1) <- offsets.(corner) + lengths.(corner)
       done;
       let values = Array.make offsets.(corner_count) 0 in
-      parallel_for ?cancel ~grain corner_count (fun corner ->
+      Support.parallel_for ?cancel ~grain corner_count (fun corner ->
         let primitive = corner / 3 in
         match selected view left right primitive with
         | None -> ()
@@ -307,7 +301,7 @@ let interpolate_csr ?cancel ~grain ancestry view corner_count pair =
         | _ -> assert false in
       let left = Option.map storage_view left and right = Option.map storage_view right
       and lengths = Array.make corner_count 0 and interpolate = Bytes.make corner_count '\000' in
-      parallel_for ?cancel ~grain corner_count (fun corner ->
+      Support.parallel_for ?cancel ~grain corner_count (fun corner ->
         let primitive = corner / 3 in
         match selected view left right primitive with
         | None -> ()
@@ -332,7 +326,7 @@ let interpolate_csr ?cancel ~grain ancestry view corner_count pair =
         offsets.(corner + 1) <- offsets.(corner) + lengths.(corner)
       done;
       let values = Array.make offsets.(corner_count) 0. in
-      parallel_for ?cancel ~grain corner_count (fun corner ->
+      Support.parallel_for ?cancel ~grain corner_count (fun corner ->
         let primitive = corner / 3 in
         match selected view left right primitive with
         | None -> ()
@@ -499,7 +493,7 @@ let copy_group ?cancel ~grain ancestry view topology point_count representatives
     ~point_conflict pair =
   let corner_count = Array.length topology.Topology.Private.vertex_points in
   let membership = Bytes.make corner_count '\000' in
-  parallel_for ?cancel ~grain corner_count (fun corner ->
+  Support.parallel_for ?cancel ~grain corner_count (fun corner ->
     let primitive = corner / 3 and local = dominant_corner view corner in
     match selected view pair.left_group pair.right_group primitive with
     | None -> ()

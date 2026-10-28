@@ -39,6 +39,9 @@ val get_ok : ('a, string) result -> 'a
 val ceiling_div : int -> int -> int
 (** Quotient rounded up, for a non-negative value and a positive divisor. *)
 
+val run_ranges : ?grain:int -> int -> (first:int -> last:int -> unit) -> unit
+(** [run_ranges ~grain count work] runs [work ~first ~last] over consecutive half-open ranges of at most [grain], one task per range. Raises [Invalid_argument] when [grain <= 0]. *)
+
 val parallel_for : ?cancel:Cancel.t -> grain:int -> int -> (int -> unit) -> unit
 (** [parallel_for ~grain count work] runs [work] on [0 .. count - 1] in chunks
     of [grain] on the shared pool, checking [cancel] every 4096 elements. *)
