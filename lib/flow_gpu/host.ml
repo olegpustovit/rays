@@ -52,7 +52,7 @@ let add_run stats run =
     status_reads = stats.status_reads + Run.Private.status_reads run;
     readback_bytes = stats.readback_bytes + Run.Private.readback_bytes run;
     materialisations = stats.materialisations + Run.Private.materialisations run;
-    held_buffers = stats.held_buffers + Run.Private.held_buffers run;
+    held_buffers = stats.held_buffers;
   }
 
 type t = {
@@ -74,6 +74,7 @@ type t = {
       (* resident buffers by byte size, reused each draw *)
   mutable closed : bool;
   domain : Domain.id;
+  shared : Run.pool;  (** the kept outputs' buffers of every runner, recycled across edits *)
 }
 
 let next = Atomic.make 1
@@ -102,6 +103,7 @@ let create ~clock gpu =
         64;
     closed = false;
     domain = Domain.self ();
+    shared = Run.pool ();
   }
 
 let live t = (not t.closed) && Domain.self () = t.domain
@@ -175,7 +177,7 @@ let backend t : G.backend =
                         let runner =
                           {
                             identity = Atomic.fetch_and_add next 1;
-                            run = Run.create t.gpu t.pipelines msl;
+                            run = Run.create ~pool:t.shared t.gpu t.pipelines msl;
                             stamp = 0L;
                             output = None;
                           }
@@ -601,6 +603,7 @@ let close t =
   if Domain.self () <> t.domain then invalid_arg "Host.close: creating domain required";
   if not t.closed then begin
     Cache.clear t.runners;
+    Run.close_pool t.shared;
     Lru.Identity_list.clear t.sites;
     List.iter
       (fun b -> ignore (Ogpu.Backend.destroy_buffer b))
@@ -625,4 +628,5 @@ let stats t =
     runners_created = !(t.created);
     pipeline_compilations = Pipelines.Private.compilations t.pipelines;
     pipeline_releases = Pipelines.Private.releases t.pipelines;
+    held_buffers = (if t.closed then 0 else Run.Private.pool_held t.shared);
   }

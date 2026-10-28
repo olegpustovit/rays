@@ -36,7 +36,8 @@ module Gpu : sig
       any domain once settled, never failing) reads it as [width] owned planes of [count] floats,
       for a planar store. Until then the device owns it, and [resident] is a placeholder array (of
       one element) the same backend binds to that buffer when a later kernel's source is it, without
-      reading it. [release] hands an unread buffer back (its owner dropped the result). *)
+      reading it. [release] says its owner dropped the result: the backend may reclaim the buffer,
+      reading it first if it is still reachable; reads never fail. *)
 
   type kernel = {
     run : Packed.Host.inputs -> (value, Diagnostic.t) result;

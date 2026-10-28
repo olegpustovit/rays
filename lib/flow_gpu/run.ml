@@ -27,8 +27,31 @@ type kept = {
       (** one element of zeros: a later kernel's source that is this array reads the buffer *)
   kept_epoch : int64;
   settled : bool Atomic.t;  (** completed, its status read: CPU readers may read it *)
-  mutable revoked : bool;  (** released unread: its buffer is back with the runner *)
+  readers : int Atomic.t;  (** conversions in progress: its buffer is not reused under them *)
+  mutable thaw : unit -> unit;  (** materialise it (initial domain), so its buffer can be reused *)
 }
+
+(* Buffers runners share (a host's, across edits): those held by kept outputs, by holder; free ones
+   of any size class (capacity doubles, so a class is [length, 2 * length]), at most 8; collected
+   or read holders' ids, from any domain; retired holders, whose owner (a session) dropped them but
+   which a reader may still hold: their buffers stay theirs until they are collected or read, and
+   past 12 the oldest is read into owned planes so its buffer comes back. *)
+type pool = {
+  held : (int, B.buffer * B.floats * int * int Atomic.t) Hashtbl.t;
+  mutable free : (B.buffer * B.floats * int) list;
+  released : int list Atomic.t;
+  retiring : kept Weak.t list Atomic.t;
+  mutable retired : kept Weak.t list;  (** oldest first *)
+}
+
+let pool () =
+  {
+    held = Hashtbl.create 16;
+    free = [];
+    released = Atomic.make [];
+    retiring = Atomic.make [];
+    retired = [];
+  }
 
 (* Kept outputs a later dispatch may bind by their placeholder, on the initial domain. *)
 let bindable : (float array * kept Weak.t) list ref = ref []
@@ -44,7 +67,7 @@ let held_input array ~length =
         Option.bind (Weak.get w 0) (fun kept ->
             if
               Atomic.get kept.planes = None
-              && (not kept.destroyed) && (not kept.revoked)
+              && (not kept.destroyed)
               && kept.kept_count * kept.kept_width >= length
             then Some kept.kept_buffer
             else None))
@@ -74,11 +97,8 @@ type t = {
   domain : Domain.id;
   mutable last_epoch : int64;
   mutable kept : kept Weak.t list;  (** live holders, materialised at close *)
-  held : (int, B.buffer * B.floats * int) Hashtbl.t;
-      (** every held buffer (its view and capacity) by holder, until reused or destroyed *)
-  mutable free : (B.buffer * B.floats * int) list;
-      (** collected holders' buffers, at most 4, which output slots take before creating one *)
-  released : int list Atomic.t;  (** collected holders, pushed by their finalisers *)
+  pool : pool;
+  own_pool : bool;  (** made for this runner alone: closed with it *)
   materialised : int Atomic.t;
   mutable verdicts : (int64 * Diagnostic.t) list;
       (** failed statuses of superseded dispatches no one had settled, newest first, at most 8 *)
@@ -151,7 +171,7 @@ let unpack_array bytes length =
   done;
   (values, !finite)
 
-let create_owned device queue pipelines (msl : Emit.msl) =
+let create_owned ?pool:shared device queue pipelines (msl : Emit.msl) =
   if not (Domain.is_main_domain ()) then invalid_arg "Run.create: initial domain required";
   {
     device;
@@ -177,36 +197,75 @@ let create_owned device queue pipelines (msl : Emit.msl) =
     domain = Domain.self ();
     last_epoch = 0L;
     kept = [];
-    held = Hashtbl.create 8;
-    free = [];
-    released = Atomic.make [];
+    pool = Option.value shared ~default:(pool ());
+    own_pool = shared = None;
     materialised = Atomic.make 0;
     verdicts = [];
   }
 
-(* on the initial domain: destroy what collected holders gave back *)
-let drain t =
+let rec push cell value =
+  let old = Atomic.get cell in
+  if not (Atomic.compare_and_set cell old (value :: old)) then push cell value
+
+(* on the initial domain: recycle or destroy what collected or read holders gave back (a buffer a
+   reader is still converting waits for the next drain) *)
+let drain_pool pool =
   List.iter
     (fun id ->
-      Option.iter
-        (fun ((buffer, _, _) as held) ->
-          if List.length t.free < 4 then t.free <- held :: t.free
-          else ignore (B.destroy_buffer buffer))
-        (Hashtbl.find_opt t.held id);
-      Hashtbl.remove t.held id)
-    (Atomic.exchange t.released []);
+      match Hashtbl.find_opt pool.held id with
+      | Some (_, _, _, readers) when Atomic.get readers > 0 -> push pool.released id
+      | Some (buffer, floats, capacity, _) ->
+          Hashtbl.remove pool.held id;
+          if List.length pool.free < 8 then pool.free <- (buffer, floats, capacity) :: pool.free
+          else ignore (B.destroy_buffer buffer)
+      | None -> ())
+    (Atomic.exchange pool.released [])
+
+let drain t =
+  drain_pool t.pool;
   t.kept <- List.filter (fun w -> Weak.check w 0) t.kept
 
-let create gpu = create_owned (Renderer.gpu_device gpu) (Renderer.gpu_queue gpu)
+let take_free pool length =
+  match
+    List.find_opt (fun (_, _, capacity) -> capacity >= length && capacity <= 2 * length) pool.free
+  with
+  | Some held ->
+      pool.free <- List.filter (( != ) held) pool.free;
+      Some held
+  | None -> None
+
+(* Past 12 retired holders still unread, the oldest is read now (owned planes: its later readers
+   see the same values) and its buffer comes back, so memory stays bounded without a collection. *)
+let reclaim pool =
+  let live w =
+    match Weak.get w 0 with
+    | Some k -> Atomic.get k.planes = None && Hashtbl.mem pool.held k.id
+    | None -> false
+  in
+  pool.retired <- List.filter live (pool.retired @ List.rev (Atomic.exchange pool.retiring []));
+  if List.length pool.retired > 12 then begin
+    (match pool.retired with
+    | w :: rest ->
+        pool.retired <- rest;
+        Option.iter (fun k -> if Atomic.get k.readers = 0 then k.thaw ()) (Weak.get w 0)
+    | [] -> ());
+    drain_pool pool
+  end
+
+let create ?pool gpu = create_owned ?pool (Renderer.gpu_device gpu) (Renderer.gpu_queue gpu)
 
 let ensure ?(mapped = false) t slot length =
   (if mapped && slot.buffer = None && length > 0 then
-     (* an output slot whose last buffer a holder took: a collected holder's buffer of the size *)
-     match
-       List.find_opt (fun (_, _, capacity) -> capacity >= length && capacity <= 2 * length) t.free
-     with
-     | Some ((buffer, floats, capacity) as held) ->
-         t.free <- List.filter (( != ) held) t.free;
+     (* an output slot whose last buffer a holder took: a recycled buffer of the size class *)
+     let found =
+       match take_free t.pool length with
+       | Some _ as found -> found
+       | None ->
+           reclaim t.pool;
+           take_free t.pool length
+     in
+     match found with
+     | Some (buffer, floats, capacity) ->
          slot.buffer <- Some buffer;
          slot.floats <- Some floats;
          slot.capacity <- capacity;
@@ -747,8 +806,6 @@ let materialise t kept =
   match Atomic.get kept.planes with
   | Some planes -> planes
   | None ->
-      if kept.revoked then
-        invalid_arg "Run.materialise: a device output was read after its owner released it";
       (* a reader on the initial domain waits for the kernel itself; any other reader runs after its
          cook settled (Sop.Session settles before every CPU node and at a cook's end) *)
       if not (Atomic.get kept.settled) then
@@ -768,27 +825,32 @@ let materialise t kept =
             match B.invalidate_mapped kept.kept_buffer ~length:(length * 4) with
             | Ok () -> ()
             | Error e -> invalid_arg ("Run.materialise: " ^ Ogpu.Error.to_string e));
+      Atomic.incr kept.readers;
       let planes =
-        match
-          to_planes ~checked:true kept.kept_floats ~count:kept.kept_count ~width:kept.kept_width
-        with
-        | Ok planes -> planes
-        | Error _ -> assert false
+        Fun.protect
+          ~finally:(fun () -> Atomic.decr kept.readers)
+          (fun () ->
+            match
+              to_planes ~checked:true kept.kept_floats ~count:kept.kept_count ~width:kept.kept_width
+            with
+            | Ok planes -> planes
+            | Error _ -> assert false)
       in
       if Atomic.compare_and_set kept.planes None (Some planes) then begin
         Atomic.incr t.materialised;
-        release t.released kept.id
+        release t.pool.released kept.id
       end;
       Option.get (Atomic.get kept.planes)
 
 let next_kept = Atomic.make 0
 
-(* Its owner (a session dropping the result) no longer needs an unread output: the buffer goes back
-   to the runner at once, from any domain; a later read refuses. *)
-let revoke t kept =
+(* Its owner (a session dropping the result) no longer needs it, from any domain: it is retired,
+   still readable; its buffer comes back when it is collected or read, or when {!reclaim} reads it. *)
+let retire t kept =
   if Atomic.get kept.planes = None then begin
-    Mutex.protect kept.lock (fun () -> kept.revoked <- true);
-    release t.released kept.id
+    let w = Weak.create 1 in
+    Weak.set w 0 (Some kept);
+    push t.pool.retiring w
   end
 
 (* Hand the output's buffer to a lazy planar store: nothing is read or waited for now. *)
@@ -816,7 +878,8 @@ let keep ?index output : (Flow_ir.Gpu.planes, Diagnostic.t) result =
             placeholder = Array.make width 0.;
             kept_epoch = output.epoch;
             settled = Atomic.make false;
-            revoked = false;
+            readers = Atomic.make 0;
+            thaw = ignore;
           }
         in
         let capacity = slot.capacity in
@@ -827,9 +890,10 @@ let keep ?index output : (Flow_ir.Gpu.planes, Diagnostic.t) result =
         let weak = Weak.create 1 in
         Weak.set weak 0 (Some kept);
         t.kept <- weak :: t.kept;
-        Hashtbl.replace t.held kept.id (buffer, floats, capacity);
+        kept.thaw <- (fun () -> ignore (materialise t kept));
+        Hashtbl.replace t.pool.held kept.id (buffer, floats, capacity, kept.readers);
         (* any domain, any allocation: only name the holder; after close nothing drains it *)
-        let id = kept.id and released = t.released in
+        let id = kept.id and released = t.pool.released in
         Gc.finalise (fun _ -> release released id) kept;
         bindable := (kept.placeholder, weak) :: !bindable;
         let resident : Flow.Eval.value =
@@ -846,7 +910,7 @@ let keep ?index output : (Flow_ir.Gpu.planes, Diagnostic.t) result =
             materialise = (fun () -> materialise t kept);
             resident = Some resident;
             settle = (fun () -> settle t kept);
-            release = (fun () -> revoke t kept);
+            release = (fun () -> retire t kept);
           }
     | _ ->
         (* an empty, unmapped or caller-encoded output is read now *)
@@ -893,6 +957,17 @@ let max_total_threads t =
     (fun (compiled : Pipelines.compiled) -> B.max_total_threads compiled.pipeline)
     (Pipelines.get t.pipelines t.msl)
 
+(* on the initial domain, once its runners are closed *)
+let close_pool pool =
+  drain_pool pool;
+  ignore (Atomic.exchange pool.released []);
+  ignore (Atomic.exchange pool.retiring []);
+  pool.retired <- [];
+  Hashtbl.iter (fun _ (buffer, _, _, _) -> ignore (B.destroy_buffer buffer)) pool.held;
+  Hashtbl.reset pool.held;
+  List.iter (fun (buffer, _, _) -> ignore (B.destroy_buffer buffer)) pool.free;
+  pool.free <- []
+
 let close t =
   if Domain.self () <> t.domain then invalid_arg "Run.close: creating domain required";
   if not t.closed then begin
@@ -903,18 +978,17 @@ let close t =
       (fun weak ->
         Option.iter
           (fun kept ->
-            if Hashtbl.mem t.held kept.id then begin
-              (try ignore (materialise t kept) with Diagnostic.Error _ -> ());
-              Mutex.protect kept.lock (fun () -> kept.destroyed <- true)
-            end)
+            match Hashtbl.find_opt t.pool.held kept.id with
+            | Some (buffer, _, _, _) ->
+                (try ignore (materialise t kept) with Diagnostic.Error _ -> ());
+                Mutex.protect kept.lock (fun () -> kept.destroyed <- true);
+                Hashtbl.remove t.pool.held kept.id;
+                ignore (B.destroy_buffer buffer)
+            | None -> ())
           (Weak.get weak 0))
       t.kept;
     t.kept <- [];
-    ignore (Atomic.exchange t.released []);
-    Hashtbl.iter (fun _ (buffer, _, _) -> ignore (B.destroy_buffer buffer)) t.held;
-    Hashtbl.reset t.held;
-    List.iter (fun (buffer, _, _) -> ignore (B.destroy_buffer buffer)) t.free;
-    t.free <- [];
+    if t.own_pool then close_pool t.pool;
     Array.iter
       (fun slot ->
         Option.iter (fun buffer -> ignore (B.destroy_buffer buffer)) slot.buffer;
@@ -939,7 +1013,11 @@ module Private = struct
 
   let held_buffers t =
     drain t;
-    Hashtbl.length t.held
+    Hashtbl.length t.pool.held
+
+  let pool_held pool =
+    drain_pool pool;
+    Hashtbl.length pool.held
 
   let create_owned = create_owned
 end

@@ -1,6 +1,16 @@
 type t
 type output
 
+type pool
+(** Kept outputs' buffers that runners share: recycled by size class (at most 8 free), and bounded
+    without a collection: past 12 retired holders still unread, the oldest is read into owned planes
+    and its buffer reused. *)
+
+val pool : unit -> pool
+
+val close_pool : pool -> unit
+(** On the initial domain, after its runners are closed: destroys what it still holds. *)
+
 type scene = {
   accel : Ogpu.Backend.accel;
   vertices : Ogpu.Backend.buffer;
@@ -25,7 +35,10 @@ type extras = {
     radius) and, for native curves, their curve structure. *)
 
 val no_extras : extras
-val create : Renderer.gpu -> Pipelines.t -> Emit.msl -> t
+
+val create : ?pool:pool -> Renderer.gpu -> Pipelines.t -> Emit.msl -> t
+(** [pool] (default: its own, closed with it) is where its kept outputs' buffers come from and go.
+*)
 
 val dispatch :
   ?wait:bool ->
@@ -70,12 +83,12 @@ val keep : ?index:int -> output -> (Flow_ir.Gpu.planes, Diagnostic.t) result
 (** Hand an output, possibly still in flight, to a lazy planar store without waiting. [settle] (on
     the initial domain) waits for the dispatch and reads its status once; [materialise] reads
     {!planes} once, from any domain after [settle] succeeded (on the initial domain it waits
-    itself), with no queue work. [release] gives an unread buffer back to the runner at once (its
-    owner dropped the result; a later read raises [Invalid_argument]). The runner makes or recycles
-    a buffer for its next dispatch; a held buffer also comes back once read, when its holder is
-    collected, or at {!close}, which first materialises every holder still alive. [resident] is the
-    output's placeholder, an array of [width] zeros: a later {!dispatch} (of any runner) whose input
-    is that array binds the held buffer instead, while it is held, unread and unreleased. *)
+    itself), with no queue work. [release] retires it (its owner dropped the result): it stays
+    readable, and its buffer comes back to the pool once it is read or collected, or when the pool
+    reads it to bound memory. The runner takes a recycled or fresh buffer for its next dispatch;
+    {!close} first materialises every holder still alive. [resident] is the output's placeholder, an
+    array of [width] zeros: a later {!dispatch} (of any runner) whose input is that array binds the
+    held buffer instead, while it is held and unread. *)
 
 val buffer : ?index:int -> output -> Ogpu.Backend.buffer option
 val count_record : output -> Ogpu.Backend.buffer option
@@ -171,5 +184,9 @@ module Private : sig
   val held_buffers : t -> int
   (** Buffers kept outputs hold, after destroying those of collected holders. *)
 
-  val create_owned : Ogpu.Backend.device -> Ogpu.Backend.queue -> Pipelines.t -> Emit.msl -> t
+  val create_owned :
+    ?pool:pool -> Ogpu.Backend.device -> Ogpu.Backend.queue -> Pipelines.t -> Emit.msl -> t
+
+  val pool_held : pool -> int
+  (** Buffers its kept outputs hold now, after recycling what collected or read ones gave back. *)
 end

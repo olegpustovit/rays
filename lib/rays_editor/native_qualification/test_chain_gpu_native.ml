@@ -247,23 +247,28 @@ let () =
                   ()
               in
               let a = edit 1.0 and b = edit 2.0 in
-              let toggles = List.init 20 (fun i -> if i mod 2 = 0 then a else b) in
-              List.iter (fun n -> ignore (cook_in session n)) (List.take 4 toggles);
+              let toggles = List.init 32 (fun i -> if i mod 2 = 0 then a else b) in
+              (* warm: the pool fills until retired results are read back to bound it *)
+              List.iter (fun n -> ignore (cook_in session n)) (List.take 16 toggles);
+              Gc.full_major ();
               let before = stats () in
               dispatches := 0;
-              let seconds =
+              let cooked =
                 List.map
                   (fun n ->
                     let geometry, seconds = cook_in session n in
                     if not (Rdk.Packed.Float3.resident (Rdk.Geometry.positions geometry)) then
                       failwith "the edited chain's P is not device-resident";
-                    seconds)
-                  (List.drop 4 toggles)
+                    (geometry, seconds))
+                  (List.drop 16 toggles)
               in
               let after = stats () in
-              if !dispatches <> List.length toggles - 4 then
+              if !dispatches <> 16 then
                 failwith (Printf.sprintf "16 edited recooks took %d dispatches" !dispatches);
-              if after.buffer_creations <> before.buffer_creations then
+              (* the results are all kept (read below), so new buffers are made only until 12 are
+                 retired; then each cook reads the oldest back and reuses its buffer (48 without the
+                 pool) *)
+              if after.buffer_creations - before.buffer_creations > 12 then
                 failwith
                   (Printf.sprintf "edited recooks created %d buffers"
                      (after.buffer_creations - before.buffer_creations));
@@ -271,14 +276,45 @@ let () =
                 after.readback_bytes <> before.readback_bytes
                 || after.input_uploads <> before.input_uploads
               then failwith "edited recooks moved data";
-              (* each write's three outputs, held by its entry or recycled *)
-              if after.held_buffers > before.held_buffers then
-                failwith
-                  (Printf.sprintf "edited recooks hold %d more buffers"
-                     (after.held_buffers - before.held_buffers));
-              let sorted = List.sort compare seconds in
+              (* bounded with no collection: 12 retired, a cook's 3, two roots' and two entries' *)
+              if after.held_buffers > 30 then
+                failwith (Printf.sprintf "edited recooks hold %d buffers" after.held_buffers);
+              (* a result handed out 15 cooks ago, retired and possibly read back to bound the
+                 pool, reads every attribute as the latest cook of the same lowering does *)
+              let stale = fst (List.hd cooked) and latest = fst (List.nth cooked 14) in
+              let read g =
+                ( Array.init (Rdk.Geometry.point_count g)
+                    (Rdk.Packed.Float3.get (Rdk.Geometry.positions g)),
+                  List.map
+                    (fun at ->
+                      ( Rdk.Attribute.name at,
+                        match Rdk.Attribute.View.storage at with
+                        | Rdk.Attribute.Float v -> Array.map (fun x -> (x, 0., 0.)) v
+                        | Float3 v ->
+                            Array.init (Rdk.Packed.Float3.length v) (Rdk.Packed.Float3.get v)
+                        | _ -> failwith "unexpected storage" ))
+                    (Rdk.Geometry.attributes g) )
+              in
+              if read stale <> read latest then failwith "a stale result reads other values";
+              let sorted = List.sort compare (List.map snd cooked) in
               Printf.printf "edited chain, one session: GPU recook median %.4f s (min %.4f)\n%!"
-                (List.nth sorted 8) (List.hd sorted)));
+                (List.nth sorted 8) (List.hd sorted);
+              (* every cook a new lowering (a new runner, as an edit makes): output buffers come
+                 from the host's pool and stay bounded (a new runner makes its inputs' and at most a few) *)
+              let fresh y =
+                let creations = (stats ()).buffer_creations in
+                ignore (cook_in session (edit y));
+                (stats ()).buffer_creations - creations
+              in
+              let first = fresh 3.0 in
+              let later = List.map fresh [ 4.0; 5.0; 6.0 ] in
+              Printf.printf "new runners per edit: %d buffers created (the first %d), %d held\n%!"
+                (List.nth later 2) first (stats ()).held_buffers;
+              if List.exists (fun n -> n > 6) later || (stats ()).held_buffers > 30 then
+                failwith
+                  (Printf.sprintf "new runners created %s buffers, the first %d"
+                     (String.concat "," (List.map string_of_int later))
+                     first)));
       (* the geometries are gone: every buffer they held is back with its runner *)
       Gc.full_major ();
       let host, _, _, _, _ = Flow_native.Workspace_gpu.image_stats gpu in
