@@ -570,7 +570,8 @@ type digest_key = {
   graph_forms : Workspace.graph list;
   extra_definitions : Workspace.node_definition list;
 }
-let same_content_list left right = List.equal ( = ) left right
+(* [==] first: a nested lowering shares its forms, and structural [=] walks a whole library for every lookup. *)
+let same_content_list left right = left == right || List.equal (fun a b -> a == b || a = b) left right
 let same_digest_key a b =
   same_content_list a.source_forms b.source_forms
   && same_content_list a.macro_forms b.macro_forms
