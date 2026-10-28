@@ -110,7 +110,7 @@ let detect_pairs ?cancel ~grain ~tolerance ~include_coplanar ~self
     let scratch = Array.make 26 0. and point_info = Array.make 10 0
     and events = Array.make
         (Triangle_intersection.max_events * Triangle_intersection.event_stride) 0. in
-    
+
     for byte = first_byte to last_byte - 1 do
       let first = byte * 8 in
       let last = min candidates (first + 8) and bits = ref 0 in

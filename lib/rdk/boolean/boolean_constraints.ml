@@ -364,7 +364,7 @@ let build ?cancel ?(resolve_left_self_intersections = false)
               Support.run_indexed_ranges ~grain:chunk candidate_count (fun ~range:range ~first:first ~last:last ->
                 let scratch = Array.make 4 0 and left_triangle = Array.make 3 0
                 and right_triangle = Array.make 3 0 in
-                
+
                 for candidate = first to last - 1 do
                   Cancel.poll cancel candidate 4095;
                   let first_points = if Bytes.unsafe_get first_candidate_sides

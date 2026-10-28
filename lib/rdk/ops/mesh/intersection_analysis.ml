@@ -97,7 +97,7 @@ let event_pass ?cancel ~grain ~self ~tolerance ~include_coplanar source_index
       and events = Array.make
           (Triangle_intersection.max_events * Triangle_intersection.event_stride)
           0. in
-      
+
       for candidate = first to last - 1 do
         Cancel.poll cancel candidate 4095;
         let count = narrow scratch point_info events source_pieces.(candidate)

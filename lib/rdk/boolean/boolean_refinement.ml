@@ -26,7 +26,7 @@ let build_side ?cancel ?coplanar ~grain constraints side face_count range
   let range_size = max 8 grain in
   Support.run_indexed_ranges ~grain:range_size face_count (fun ~range:work_range ~first:first_face ~last:last_face ->
     let workspace = Boolean_face_cdt.create_workspace () in
-    
+
     for face = first_face to last_face - 1 do
       Cancel.poll cancel face 255;
       let first, last = range constraints face in

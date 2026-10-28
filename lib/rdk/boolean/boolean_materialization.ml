@@ -350,7 +350,7 @@ let verify_extracted_contacts ?cancel ~grain positions topology geometry =
       let failures = Array.make ranges (-1) and failure_kinds = Bytes.make ranges '\000' in
       Support.run_indexed_ranges ~grain:grain candidate_count (fun ~range:range ~first:first ~last:last ->
         let scratch = Array.make 4 0 in
-        
+
         let candidate = ref first in
         while failures.(range) < 0 && !candidate < last do
           Cancel.poll cancel !candidate 4095;

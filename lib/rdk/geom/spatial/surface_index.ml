@@ -582,7 +582,7 @@ let triangle_pairs_of ?cancel ?(single_pass = false)
           let node_stack = Array.make 65 0
           and left_bounds = Array.make 15 0.
           and output = builders.(range) in
-          
+
           for triangle = first to last - 1 do
             Cancel.poll cancel triangle 4095;
             ignore (scan node_stack left_bounds triangle None None 0 (Some output))
@@ -607,7 +607,7 @@ let triangle_pairs_of ?cancel ?(single_pass = false)
     Support.run_indexed_ranges ~grain:range_size left_count (fun ~range:range ~first:first ~last:last ->
         let node_stack = Array.make 65 0 in
         let left_bounds = Array.make 15 0. in
-        
+
         for triangle = first to last - 1 do
           Cancel.poll cancel triangle 4095;
           counts.(triangle) <- scan node_stack left_bounds
@@ -625,7 +625,7 @@ let triangle_pairs_of ?cancel ?(single_pass = false)
     Support.run_indexed_ranges ~grain:range_size left_count (fun ~range:range ~first:first ~last:last ->
         let node_stack = Array.make 65 0 in
         let left_bounds = Array.make 15 0. in
-        
+
         for triangle = first to last - 1 do
           Cancel.poll cancel triangle 4095;
           let written = scan node_stack left_bounds triangle

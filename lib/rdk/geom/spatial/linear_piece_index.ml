@@ -87,7 +87,7 @@ let create ?cancel ?(grain = 16_384) ?primitives geometry =
     else max 1 (Support.ceiling_div piece_count selected_count) in
   let chunk = max 1 (grain / average) in
   Support.run_indexed_ranges ~grain:chunk selected_count (fun ~range:range ~first:first_selected ~last:last_selected ->
-    
+
     for slot = first_selected to last_selected - 1 do
       Cancel.poll cancel slot 4095;
       let primitive = selected.(slot) and output = piece_offsets.(slot) in
@@ -263,7 +263,7 @@ let pairs_of ?cancel ~self ~grain ~tolerance left_index right_index =
       !found in
     Support.run_indexed_ranges ~grain:chunk left_count (fun ~range:range ~first:first ~last:last ->
       let stack = Array.make 65 0 in
-      
+
       for piece = first to last - 1 do
         Cancel.poll cancel piece 4095;
         counts.(piece) <- scan stack piece None None 0
@@ -278,7 +278,7 @@ let pairs_of ?cancel ~self ~grain ~tolerance left_index right_index =
     let left_output = Array.make total 0 and right_output = Array.make total 0 in
     Support.run_indexed_ranges ~grain:chunk left_count (fun ~range:range ~first:first ~last:last ->
       let stack = Array.make 65 0 in
-      
+
       for piece = first to last - 1 do
         Cancel.poll cancel piece 4095;
         let written = scan stack piece (Some left_output) (Some right_output)

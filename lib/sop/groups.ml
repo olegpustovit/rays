@@ -83,16 +83,3 @@ module Group_transfer = struct
         | Error error -> structured_rdk_error error))
   let factory = parameters_factory build
 end
-
-
-
-
-
-
-
-
-
-
-
-
-
