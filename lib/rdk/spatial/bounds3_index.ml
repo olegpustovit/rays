@@ -1,4 +1,3 @@
-open Rays_math
 
 type t = {
   order : int array;

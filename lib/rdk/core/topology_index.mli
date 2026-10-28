@@ -61,10 +61,4 @@ module Private : sig
   val view : t -> view
   (** Borrowed immutable planes for audited RDK kernels. *)
 
-  val polygon_manifold_boundary_points :
-    ?cancel:Cancel.t -> topology:Topology.t -> t -> (bytes, string) result
-  (** Validate a consistently wound polygon-only 2-manifold, including
-      repeated corners, edge incidence, boundary fan cardinality, and
-      disconnected point fans. The returned byte plane marks boundary points.
-      This shared topology predicate deliberately performs no metric checks. *)
 end

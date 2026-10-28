@@ -1,4 +1,3 @@
-open Rays_math
 
 
 let run ?cancel ?(grain = 16_384) ?primitives geometry =

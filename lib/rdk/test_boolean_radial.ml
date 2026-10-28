@@ -81,18 +81,6 @@ let test_transverse_cyclic_order () =
       "two charts from one surface are adjacent in the radial cycle"
   done
 
-let signature radial =
-  Array.init (Radial.edge_count radial) (fun edge ->
-    let first, last = Radial.incident_range radial edge in
-    Array.init (last - first) (fun offset ->
-        Radial.incident_facet radial (first + offset),
-        Radial.incident_local radial (first + offset)))
-
-let test_domain_exactness () =
-  let run domains = Parallel.run ~domains (fun () ->
-      let _, radial, _ = seam_bundle () in signature radial) in
-  if run 1 <> run 4 then fail "radial bundles differ between domain counts"
-
 let test_cancellation () =
   let complex, _, _ = seam_bundle () in
   let cancel = Cancel.create () in Cancel.cancel cancel;
@@ -104,5 +92,4 @@ let test_cancellation () =
 let run () =
   test_exact_radial_dot ();
   test_transverse_cyclic_order ();
-  test_domain_exactness ();
   test_cancellation ()

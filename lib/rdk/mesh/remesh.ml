@@ -1,4 +1,3 @@
-open Rays_math
 
 type projection_scratch = {
   count : int;
@@ -244,8 +243,6 @@ type local = {
   mutable scratch_count : int;
 }
 
-
-
 let capacity_for label current needed =
   if needed > Sys.max_array_length then
     invalid_arg (operation ^ ": " ^ label ^ " exceeds array limits");
@@ -405,7 +402,6 @@ let detach_triangle l tri =
   detach_edge l first; detach_edge l (first + 1); detach_edge l (first + 2);
   detach_point l first; detach_point l (first + 1); detach_point l (first + 2);
   Bytes.unsafe_set l.t_alive tri '\000'
-
 
 let point_group_index l name = let found = ref (-1) in
   Array.iteri (fun index group ->

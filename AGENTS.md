@@ -39,7 +39,7 @@ parameter or behaviour.
 The accepted architecture cleanup is tracked in
 [`specification/cleanup/status.md`](specification/cleanup/status.md), with the
 full approved requirements beside it. Accepted Lisp nodes replace their OCaml
-twins and parity code after Lisp-output goldens cover their cases; no oracle
+twins and parity code are deleted; Lisp-output goldens are the regression net; no oracle
 library is retained. The internal OCaml API has no frozen manifest.
 
 One binary, `rays` (`bin/rays.ml`), interprets `.rays` files; nothing generates OCaml from Lisp.
@@ -51,8 +51,8 @@ Web export: `dune exec rays -- web FILE.rays -o DIR` writes static files, nothin
 Its scope is the 2D canvas only (`:context draw` graphs
 and the values that feed them). PXUI and the editor are never exported; they are editor chrome and
 stay native. `scene` and `sop` graphs are a later phase. Lisp SOP bodies live in
-`lib/flow_sop/nodes/*.rays`; their OCaml twins and parity-only kernels are being
-retired after Lisp-output golden capture. Exact predicates, spatial indexes,
+`lib/flow_sop/nodes/*.rays`; their OCaml twins and parity-only kernels are deleted.
+Exact predicates, spatial indexes,
 solvers, wiring and native carriers stay OCaml. Generated `image/map`
 images run as WebGPU kernels; `image/noise` preserves native double arithmetic, `image/render` uses
 offscreen WebGPU textures, and static `image/load` files are bundled using the native decoder. The web follows

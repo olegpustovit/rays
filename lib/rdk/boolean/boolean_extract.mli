@@ -19,25 +19,8 @@ type ancestry
 val geometry : ancestry -> Geometry.t
 val primitive_side : ancestry -> int -> Boolean_complex.side
 val primitive_face : ancestry -> int -> int
-val primitive_triangle : ancestry -> int -> int
 val primitive_refined_triangle : ancestry -> int -> int
 val primitive_winding : ancestry -> int -> int
-val primitive_source_point : ancestry -> int -> int -> int
-val primitive_source_vertex : ancestry -> int -> int -> int
-val corner_barycentric : ancestry -> int -> int -> float * float * float
-(** Source ownership selected deterministically for every output triangle.
-    [primitive_winding] is the output orientation relative to that member's
-    source orientation and is always [-1] or [1]. [primitive_face] is the
-    original polygon primitive, [primitive_triangle] is its stable internal
-    triangulation member, and [primitive_refined_triangle] is [-1] for an
-    untouched triangle or the per-face refinement child. Source points and
-    exact-construction-derived barycentrics are relative to that internal
-    source triangle; source point and source vertex identities are both
-    retained because vertex attributes follow corner ownership. Corner indices
-    are 0, 1, or 2. Private directed-edge CSR additionally retains every
-    coincident member whose exact source-native edge contains an output edge;
-    it is intentionally multi-source rather than derived from the preferred
-    primitive member. *)
 
 val piece_ids :
   weiler:Boolean_weiler.t -> ancestry:ancestry ->
@@ -50,14 +33,6 @@ val build_with_ancestry :
   expression:expression ->
   Boolean_complex.t -> Boolean_weiler.t -> Boolean_cells.t ->
   (ancestry, Error.t) result
-
-val build :
-  ?cancel:Cancel.t -> expression:expression ->
-  Boolean_complex.t -> Boolean_weiler.t -> Boolean_cells.t ->
-  (Geometry.t, Error.t) result
-(** Extract a triangle boundary. Exact combinatorics choose facets and
-    orientation; coordinates round to binary64 once while materializing the
-    packed RDK geometry. *)
 
 module Private : sig
   type barycentric_cache
@@ -78,7 +53,6 @@ module Private : sig
   }
   val ancestry_view : ancestry -> ancestry_view
   val complex : ancestry -> Boolean_complex.t
-  val point_complex_vertex : ancestry -> int -> int
   (* Output point for a selected exact-complex vertex, or [-1]. Distinct exact
      vertices that round to bit-identical binary64 positions may map to the
      same output point after certified coalescing. *)

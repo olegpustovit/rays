@@ -287,15 +287,6 @@ module Audio = struct
       | Ok audio -> Ok (owned mixer audio)
       | Error message -> error operation Mixer_error message)
 
-  let live operation (value : t) callback = on_main operation (fun () ->
-    if value.destroyed then error operation Destroyed "audio handle is destroyed"
-    else if value.mixer.destroyed then
-      error operation Destroyed "audio handle's source mixer is destroyed"
-    else
-      match require_initialized operation with
-      | Error _ as failure -> failure
-      | Ok () -> callback value.raw)
-
   let load_bytes mixer bytes =
     let operation = "SDL3_mixer.Audio.load_bytes" in
     if Bytes.length bytes = 0 then

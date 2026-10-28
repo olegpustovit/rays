@@ -213,50 +213,6 @@ let speculative_independent_edges ?cancel ~grain candidates geometry =
       "Boolean speculative contraction planning was cancelled"
   | Invalid_argument message -> error "invalid_input" message
 
-let tiny_seam_edges ?cancel ~grain ~threshold ancestry seam =
-  if grain <= 0 then error "invalid_parameter" "grain must be positive"
-  else if not (Float.is_finite threshold) || threshold < 0. then
-    error "invalid_parameter" "threshold must be finite and non-negative"
-  else try
-    Cancel.check_opt cancel;
-    let complex = Boolean_extract.Private.complex ancestry in
-    if Boolean_seam.Private.complex seam != complex then
-      invalid_arg "Boolean seam and extraction belong to different exact complexes";
-    let seam_facets = Bytes.make (Boolean_complex.facet_count complex) '\000' in
-    for complex_edge = 0 to Boolean_complex.edge_count complex - 1 do
-      if complex_edge land 4095 = 0 then Cancel.check_opt cancel;
-      if Boolean_seam.Private.is_seam_edge seam complex_edge then begin
-        let first, last = Boolean_complex.edge_incident_range complex complex_edge in
-        for incident = first to last - 1 do
-          Bytes.unsafe_set seam_facets
-            (Boolean_complex.edge_incident_facet complex incident) '\001'
-        done
-      end
-    done;
-    let geometry = Boolean_extract.geometry ancestry in
-    let topology = Geometry.topology geometry in
-    let index_value = Topology_index.create ?cancel topology in
-    let index = Topology_index.Private.view index_value
-    and positions = Packed.Float3.Private.view (Geometry.positions geometry) in
-    Ok (Edge_group.init ~grain ~topology ~index:index_value
-      ~name:"__rdk_boolean_tiny_seam" (fun edge ->
-        if edge land 4095 = 0 then Cancel.check_opt cancel;
-        let a = index.edge_a.(edge) and b = index.edge_b.(edge) in
-        let first = index.edge_offsets.(edge)
-        and last = index.edge_offsets.(edge + 1) in
-        let adjacent = ref false and incident = ref first in
-        while not !adjacent && !incident < last do
-          let primitive = index.primitive_of_vertex.(index.edge_vertices.(!incident)) in
-          let facet = Boolean_extract.Private.primitive_complex_facet
-              ancestry primitive in
-          adjacent := Bytes.unsafe_get seam_facets facet <> '\000';
-          incr incident
-        done;
-        !adjacent && edge_length positions a b <= threshold))
-  with
-  | Cancel.Cancelled -> error "cancelled" "Boolean materialization was cancelled"
-  | Invalid_argument message -> error "invalid_input" message
-
 let surface_seam_edges ?cancel ~grain ancestry seam =
   if grain <= 0 then error "invalid_parameter" "grain must be positive"
   else try
@@ -629,7 +585,7 @@ type cleanup = {
   cleanup_candidate_count : int;
   cleanup_collapsed_count : int;
   cleanup_batch_count : int;
-  cleanup_remaining_candidate_count : int;
+
   cleanup_rounding_repaired_count : int;
   cleanup_point_sources : int array;
   cleanup_vertex_sources : int array;
@@ -638,15 +594,7 @@ type cleanup = {
 }
 
 let cleanup_geometry value = value.cleanup_geometry
-let cleanup_candidate_count value = value.cleanup_candidate_count
-let cleanup_collapsed_count value = value.cleanup_collapsed_count
-let cleanup_batch_count value = value.cleanup_batch_count
-let cleanup_remaining_candidate_count value = value.cleanup_remaining_candidate_count
-let cleanup_rounding_repaired_count value = value.cleanup_rounding_repaired_count
-let cleanup_point_source value point = value.cleanup_point_sources.(point)
-let cleanup_vertex_source value vertex = value.cleanup_vertex_sources.(vertex)
 let cleanup_primitive_source value primitive = value.cleanup_primitive_sources.(primitive)
-let cleanup_seam_edges value = value.cleanup_seam_edges
 
 let verify_materialized_seam_curves ?cancel ~grain seam =
   if Boolean_seam.Private.curves_materialized seam then
@@ -1006,7 +954,7 @@ let repair_rounded_slivers ?cancel ~grain ~require_closed
         cleanup_candidate_count = 0;
         cleanup_collapsed_count = 0;
         cleanup_batch_count = 0;
-        cleanup_remaining_candidate_count = 0;
+
         cleanup_rounding_repaired_count = 0;
         cleanup_point_sources = Array.init (Geometry.point_count geometry) Fun.id;
         cleanup_vertex_sources = Array.init (Geometry.vertex_count geometry) Fun.id;
@@ -1196,76 +1144,6 @@ let repair_rounded_slivers ?cancel ~grain ~require_closed
                         remaining !two_sided !other))))) in
       continue 0 initial
 
-let collapse_tiny_seam_batch ~grain ~threshold ~require_closed
-    ancestry seam geometry =
-  let base = Boolean_extract.geometry ancestry in
-  if Geometry.positions geometry != Geometry.positions base
-      || Geometry.topology geometry != Geometry.topology base then
-    error "geometry_mismatch"
-      "Boolean cleanup target does not share the extraction positions and topology"
-  else
-    match tiny_seam_edges ~grain ~threshold ancestry seam,
-        surface_seam_edges ~grain ancestry seam with
-    | Error _ as failure, _ | _, (Error _ as failure) -> failure
-    | Ok candidates, Ok exact_seams ->
-        match safe_independent_edges ~grain candidates geometry with
-        | Error _ as failure -> failure
-        | Ok selected ->
-            let candidate_count = Edge_group.cardinality candidates
-            and collapsed_count = Edge_group.cardinality selected in
-            let collapsed = if collapsed_count = 0 then
-                Ok (geometry,
-                  Array.init (Geometry.point_count geometry) Fun.id,
-                  Array.init (Geometry.vertex_count geometry) Fun.id,
-                  Array.init (Geometry.primitive_count geometry) Fun.id,
-                  exact_seams)
-              else try
-                let source_name = fresh_attribute_name geometry
-                    "__rdk_boolean_source_id"
-                and seam_name = fresh_edge_name geometry
-                    "__rdk_boolean_exact_seam" in
-                let tagged = install_source_ids geometry source_name in
-                let tagged_seams = Edge_group.with_name seam_name exact_seams in
-                let tagged = match Geometry.with_edge_group tagged_seams tagged with
-                  | Ok geometry -> geometry | Error message -> invalid_arg message in
-                match Edge_collapse.run ~grain ~edges:selected
-                    ~position:Fuse_reduce.First_position
-                    ~remove_degenerate_primitives:true
-                    ~recompute_point_normals:true tagged with
-                | Error _ as failure -> failure
-                | Ok output ->
-                    let points = source_ids Attribute.Point source_name output
-                    and vertices = source_ids Attribute.Vertex source_name output
-                    and primitives = source_ids Attribute.Primitive source_name output
-                    and seams = match Geometry.find_edge_group seam_name output with
-                      | Some group -> group
-                      | None -> invalid_arg "Boolean seam-edge scratch was lost" in
-                    let output = remove_source_ids source_name output
-                        |> Geometry.without_edge_group seam_name in
-                    Ok (output, points, vertices, primitives, seams)
-              with Invalid_argument message -> error "invalid_output" message in
-            (match collapsed with
-             | Error _ as failure -> failure
-             | Ok (output, point_sources, vertex_sources, primitive_sources,
-                 output_seams) ->
-                 match verify_materialized_seam_curves ~grain seam with
-                 | Error _ as failure -> failure
-                 | Ok () ->
-                     match verify_surface ~grain ~require_closed output with
-                     | Error _ as failure -> failure
-                     | Ok () -> Ok {
-                         cleanup_geometry = output;
-                         cleanup_candidate_count = candidate_count;
-                         cleanup_collapsed_count = collapsed_count;
-                         cleanup_batch_count = if collapsed_count = 0 then 0 else 1;
-                         cleanup_remaining_candidate_count = 0;
-                         cleanup_rounding_repaired_count = 0;
-                         cleanup_point_sources = point_sources;
-                         cleanup_vertex_sources = vertex_sources;
-                         cleanup_primitive_sources = primitive_sources;
-                         cleanup_seam_edges = output_seams;
-                       })
-
 let tiny_cleanup_edges ?cancel ~grain ~threshold ancestry seam cleanup =
   if grain <= 0 then error "invalid_parameter" "grain must be positive"
   else if not (Float.is_finite threshold) || threshold < 0. then
@@ -1355,7 +1233,7 @@ let collapse_cleanup_batch ?cancel ~grain ~require_closed
                  cleanup_collapsed_count = cleanup.cleanup_collapsed_count
                    + Edge_group.cardinality selected;
                  cleanup_batch_count = cleanup.cleanup_batch_count + 1;
-                 cleanup_remaining_candidate_count = 0;
+
                  cleanup_rounding_repaired_count =
                    cleanup.cleanup_rounding_repaired_count;
                  cleanup_point_sources = compose cleanup.cleanup_point_sources
@@ -1388,14 +1266,12 @@ let collapse_tiny_seams ?cancel ~grain ~threshold ~require_closed
               let cleanup = if cleanup.cleanup_batch_count = 0 then
                   { cleanup with cleanup_candidate_count = remaining }
                 else cleanup in
-              if remaining = 0 then Ok {
-                cleanup with cleanup_remaining_candidate_count = 0 }
+              if remaining = 0 then Ok cleanup
               else if cleanup.cleanup_batch_count >= max_batches then
                 if strict then error "unresolved_cleanup" (Printf.sprintf
                     "%d tiny seam-adjacent edge candidate(s) remain after %d batch(es)"
                     remaining max_batches)
-                else Ok { cleanup with
-                  cleanup_remaining_candidate_count = remaining }
+                else Ok cleanup
               else
                 match safe_independent_edges ?cancel ~grain candidates
                     cleanup.cleanup_geometry with
@@ -1404,8 +1280,7 @@ let collapse_tiny_seams ?cancel ~grain ~threshold ~require_closed
                     if strict then error "unresolved_cleanup" (Printf.sprintf
                         "%d tiny seam-adjacent edge candidate(s) have no certified contraction"
                         remaining)
-                    else Ok { cleanup with
-                      cleanup_remaining_candidate_count = remaining }
+                    else Ok cleanup
                 | Ok selected ->
                     (match collapse_cleanup_batch ?cancel ~grain ~require_closed
                         ~allow_opposite_duplicates seam selected cleanup with

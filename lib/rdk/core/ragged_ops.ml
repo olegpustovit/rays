@@ -1,4 +1,3 @@
-open Rays_math
 
 let validate_source_index operation source_count source =
   if source < -1 || source >= source_count then invalid_arg
@@ -102,69 +101,4 @@ let concat_float sources =
       offsets.(!output_row + 1) <- !output_value;
       incr output_row
     done) views;
-  Packed.Float_array.Private.create_validated_owned ~offsets ~values
-
-let overlay_offsets ?cancel ?(grain = 16_384) ~operation ~mapping
-    ~source_offsets ~existing_offsets () =
-  if grain <= 0 then invalid_arg (operation ^ ": grain must be positive");
-  let output_count = Array.length mapping
-  and source_count = Array.length source_offsets - 1 in
-  let lengths = Array.make output_count 0 in
-  if output_count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
-      ~finish:(output_count - 1) (fun output ->
-        if output land 4095 = 0 then Cancel.check_opt cancel;
-        let source = mapping.(output) in
-        validate_source_index operation source_count source;
-        lengths.(output) <- if source >= 0 then
-            source_offsets.(source + 1) - source_offsets.(source)
-          else existing_offsets.(output + 1) - existing_offsets.(output));
-  let offsets = Array.make (output_count + 1) 0 in
-  for output = 0 to output_count - 1 do
-    if output land 4095 = 0 then Cancel.check_opt cancel;
-    if lengths.(output) > max_int - offsets.(output) then invalid_arg
-        (operation ^ ": packed value count overflow");
-    offsets.(output + 1) <- offsets.(output) + lengths.(output)
-  done;
-  offsets
-
-let overlay_int ?cancel ?(grain = 16_384) mapping ~source ~existing =
-  let source = Packed.Int_array.Private.view source
-  and existing = Packed.Int_array.Private.view existing in
-  if Array.length existing.offsets - 1 <> Array.length mapping then invalid_arg
-      "Ragged_ops.overlay_int: existing row count differs from mapping";
-  let offsets = overlay_offsets ?cancel ~grain ~operation:"Ragged_ops.overlay_int"
-      ~mapping ~source_offsets:source.offsets
-      ~existing_offsets:existing.offsets () in
-  let output_count = Array.length mapping in
-  let values = Array.make offsets.(output_count) 0 in
-  if output_count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
-      ~finish:(output_count - 1) (fun output ->
-        if output land 4095 = 0 then Cancel.check_opt cancel;
-        let input = mapping.(output) in
-        let input_values, first, last = if input >= 0 then
-            source.values, source.offsets.(input), source.offsets.(input + 1)
-          else existing.values, existing.offsets.(output),
-            existing.offsets.(output + 1) in
-        Array.blit input_values first values offsets.(output) (last - first));
-  Packed.Int_array.Private.create_validated_owned ~offsets ~values
-
-let overlay_float ?cancel ?(grain = 16_384) mapping ~source ~existing =
-  let source = Packed.Float_array.Private.view source
-  and existing = Packed.Float_array.Private.view existing in
-  if Array.length existing.offsets - 1 <> Array.length mapping then invalid_arg
-      "Ragged_ops.overlay_float: existing row count differs from mapping";
-  let offsets = overlay_offsets ?cancel ~grain
-      ~operation:"Ragged_ops.overlay_float" ~mapping
-      ~source_offsets:source.offsets ~existing_offsets:existing.offsets () in
-  let output_count = Array.length mapping in
-  let values = Array.make offsets.(output_count) 0. in
-  if output_count > 0 then Parallel.for_ ~chunk_size:grain ~start:0
-      ~finish:(output_count - 1) (fun output ->
-        if output land 4095 = 0 then Cancel.check_opt cancel;
-        let input = mapping.(output) in
-        let input_values, first, last = if input >= 0 then
-            source.values, source.offsets.(input), source.offsets.(input + 1)
-          else existing.values, existing.offsets.(output),
-            existing.offsets.(output + 1) in
-        Array.blit input_values first values offsets.(output) (last - first));
   Packed.Float_array.Private.create_validated_owned ~offsets ~values

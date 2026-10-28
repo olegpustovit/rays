@@ -11,10 +11,6 @@ type t = {
   right_treatment : treatment;
 }
 
-let vertex_count value = Boolean_complex.vertex_count value.complex
-let facet_count value = Boolean_complex.facet_count value.complex
-let shell_count value = Boolean_cells.shell_count value.cells
-
 module Private = struct
   let weiler value = value.weiler
 end
@@ -52,10 +48,6 @@ let prepare ?cancel ?resolve_left_self_intersections
                               (fun cells ->
                                 Ok { complex; weiler; cells;
                                   left_treatment; right_treatment })))))))
-
-let extract ~expression value =
-  Boolean_extract.build ~expression
-    value.complex value.weiler value.cells
 
 let extract_with_ancestry ?cancel ?require_closed ?defer_rounded_slivers
     ?corner_payload
@@ -245,11 +237,6 @@ let extract_product_with_ancestry ?cancel ?require_closed ?defer_rounded_slivers
        | Ok () -> Ok ancestry
        | Error _ as failure -> failure)
   | result, _, _, _ -> result
-
-let extract_product ?cancel ?require_closed ~operation value =
-  match extract_product_with_ancestry ?cancel ?require_closed ~operation value with
-  | Ok ancestry -> Ok (Boolean_extract.geometry ancestry)
-  | Error _ as failure -> failure
 
 let seams ?cancel ?grain ?parallel_cutoff ?materialize value =
   Boolean_seam.build ?cancel ?grain ?parallel_cutoff ?materialize value.complex

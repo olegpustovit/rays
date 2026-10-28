@@ -37,22 +37,11 @@ val compose_transform :
   ?pivot_rotation:Rays_math.Vec3.t -> ?invert:bool -> unit ->
   (Rays_math.Mat4.t, Error.t) result
 
-val transform_selected :
-  ?cancel:Cancel.t -> ?grain:int -> ?selection:deform_selection ->
-  ?preserve_normal_length:bool -> ?recompute_normals:bool ->
-  Rays_math.Mat4.t -> Geometry.t -> (Geometry.t, Error.t) result
-
 val soft_transform :
   ?cancel:Cancel.t -> ?grain:int -> ?selection:deform_selection ->
   ?metric:soft_transform_metric -> ?falloff:soft_transform_falloff ->
   ?radius:float -> ?falloff_attribute:string -> ?recompute_normals:bool ->
   Rays_math.Mat4.t -> Geometry.t -> (Geometry.t, Error.t) result
-
-val distance_along_geometry :
-  ?cancel:Cancel.t -> ?grain:int -> ?affected:deform_selection ->
-  ?falloff:soft_transform_falloff -> ?radius:distance_along_radius ->
-  ?distance_attribute:string option -> ?mask_attribute:string ->
-  start:deform_selection -> Geometry.t -> (Geometry.t, Error.t) result
 
 val distance_from_geometry :
   ?cancel:Cancel.t -> ?grain:int -> ?affected:deform_selection ->
@@ -61,13 +50,5 @@ val distance_from_geometry :
   ?falloff:soft_transform_falloff -> ?radius:distance_along_radius ->
   ?distance_attribute:string option -> ?mask_attribute:string ->
   reference:Geometry.t -> Geometry.t -> (Geometry.t, Error.t) result
-
-val distance_from_target :
-  ?cancel:Cancel.t -> ?grain:int -> ?affected:deform_selection ->
-  ?projection:distance_from_target_projection ->
-  ?origin:Rays_math.Vec3.t -> ?direction:Rays_math.Vec3.t ->
-  ?metric:distance_from_target_metric -> ?falloff:soft_transform_falloff ->
-  ?radius:distance_along_radius -> ?distance_attribute:string option ->
-  ?mask_attribute:string -> Geometry.t -> (Geometry.t, Error.t) result
 
 val transform : ?grain:int -> Rays_math.Mat4.t -> Geometry.t -> Geometry.t

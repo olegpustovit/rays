@@ -1,4 +1,3 @@
-open Rays_math
 
 let operation = "Rdk_mesh.Convex_hull.convex_hull"
 

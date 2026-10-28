@@ -2,27 +2,12 @@
     and index quickselect. *)
 
 module Bits : sig
-  val byte_count : int -> int
-  (** Bytes needed for a bitset of the given length. *)
 
   val mem : Bytes.t -> int -> bool
   (** Unchecked bit read; the index must be in range. *)
 
   val set : Bytes.t -> int -> unit
   (** Unchecked bit set; the index must be in range. *)
-end
-
-module Key_map : sig
-  type keep = First | Last
-  (** Which index a repeated key resolves to. *)
-
-  val ints : keep -> int array -> (int -> int) option
-  (** [ints keep keys] returns a lookup from a key to the first or last index
-      holding it in [keys], or [-1]. [None] when the table would exceed array
-      limits. O(n) expected build time and O(n) memory. *)
-
-  val strings : keep -> string array -> (string -> int) option
-  (** String-keyed {!ints}. *)
 end
 
 module Identity_cache : sig

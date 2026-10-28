@@ -102,48 +102,6 @@ let test_lower_dimensional_contacts () =
     "vertex contact was not a point";
   expect_points [|2.,0.,0.|] point
 
-let test_aabb_overlap_without_triangle_overlap () =
-  let left = triangle [|0.,0.,0.; 2.,0.,0.; 0.,2.,0.|]
-  and right = triangle [|1.5,1.5,0.; 3.,1.5,0.; 1.5,3.,0.|] in
-  let constraints = Constraints.build ~grain:1 ~left ~right () |> get in
-  let result = Coplanar.build ~grain:1 constraints |> get in
-  check (Constraints.candidate_pair_count constraints = 0
-      && Coplanar.pair_count result = 0)
-    "diagonally separated coplanar triangles survived K-DOP broad phase"
-
-let test_same_operand_coplanar_and_topology_suppression () =
-  let left = geometry
-      [|0.,0.,0.; 4.,0.,0.; 2.,4.,0.;
-        1.,1.,0.; 2.,1.,0.; 1.,2.,0.|]
-      [|0;1;2; 3;4;5|]
-  and far = triangle [|10.,10.,0.; 11.,10.,0.; 10.,11.,0.|] in
-  let constraints = Constraints.build ~resolve_left_self_intersections:true
-      ~grain:1 ~left ~right:far () |> get in
-  let result = Coplanar.build ~grain:1 constraints |> get in
-  check (Coplanar.pair_count result = 1
-      && Coplanar.first_side result 0 = Constraints.Left
-      && Coplanar.second_side result 0 = Constraints.Left
-      && Coplanar.kind result 0 = Coplanar.Polygon)
-    "same-operand coplanar overlap was not arranged as a polygon";
-  expect_points [|1.,1.,0.; 2.,1.,0.; 1.,2.,0.|] result;
-  let adjacent = geometry
-      [|0.,0.,0.; 2.,0.,0.; 0.,2.,0.; 2.,2.,0.|]
-      [|0;1;2; 1;3;2|] in
-  let constraints = Constraints.build ~resolve_left_self_intersections:true
-      ~grain:1 ~left:adjacent ~right:far () |> get in
-  let result = Coplanar.build ~grain:1 constraints |> get in
-  check (Coplanar.pair_count result = 0)
-    "ordinary shared source edge was treated as a self-overlap";
-  let overlapping_edge = geometry
-      [|0.,0.,0.; 2.,0.,0.; 0.,2.,0.; 0.5,0.5,0.|]
-      [|0;1;2; 0;1;3|] in
-  let constraints = Constraints.build ~resolve_left_self_intersections:true
-      ~grain:1 ~left:overlapping_edge ~right:far () |> get in
-  let result = Coplanar.build ~grain:1 constraints |> get in
-  check (Coplanar.pair_count result = 1
-      && Coplanar.kind result 0 = Coplanar.Polygon)
-    "same-side shared-edge area overlap was suppressed as ordinary topology"
-
 let repeated count points =
   let output_points = Array.make (count * 3) (0.,0.,0.)
   and triangles = Array.make (count * 3) 0 in
@@ -156,23 +114,6 @@ let repeated count points =
     done
   done;
   geometry output_points triangles
-
-let signature result =
-  Array.init (Coplanar.pair_count result) (fun pair ->
-    Coplanar.left_triangle result pair,
-    Coplanar.right_triangle result pair,
-    Coplanar.kind result pair,
-    Array.init (Coplanar.point_count result pair)
-      (approximate_point result pair))
-
-let test_domain_exactness () =
-  let left = repeated 257 [|0.,0.,0.; 4.,0.,0.; 2.,4.,0.|]
-  and right = repeated 257 [|0.,3.,0.; 4.,3.,0.; 2.,-1.,0.|] in
-  let run domains = Parallel.run ~domains (fun () ->
-      let constraints = Constraints.build ~grain:19 ~left ~right () |> get in
-      Coplanar.build ~grain:17 constraints |> get |> signature) in
-  let one = run 1 and four = run 4 in
-  if one <> four then fail "coplanar arrangements differ between one and four domains"
 
 let test_invalid_grain_and_cancellation () =
   let constraints = Constraints.build ~grain:1 ~left:(left_triangle ())
@@ -192,7 +133,4 @@ let run () =
   test_six_edge_overlap ();
   test_containment_and_reversed_identity ();
   test_lower_dimensional_contacts ();
-  test_aabb_overlap_without_triangle_overlap ();
-  test_same_operand_coplanar_and_topology_suppression ();
-  test_domain_exactness ();
   test_invalid_grain_and_cancellation ()

@@ -1,4 +1,3 @@
-open Rays_math
 
 type weighting = Vertex_angle | Each_vertex | Face_area
 

@@ -4,11 +4,6 @@ type kind = Line_curve | Line_points
 
 val points : (float * float * float) array -> Geometry.t
 
-val line :
-  ?cancel:Cancel.t -> ?grain:int -> ?kind:kind -> ?points:int ->
-  origin:Rays_math.Vec3.t -> direction:Rays_math.Vec3.t -> length:float -> unit ->
-  (Geometry.t, Error.t) result
-
 val polyline :
   ?closed:bool -> (float * float * float) array ->
   (Geometry.t, Error.t) result

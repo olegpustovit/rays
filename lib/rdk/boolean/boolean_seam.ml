@@ -11,8 +11,7 @@ type t = {
   coincident : Geometry.t;
   edge_kinds : bytes;
   curve_kinds : bytes;
-  curve_edge_offsets : int array;
-  curve_edges : int array;
+
 }
 
 let curves value = value.curves
@@ -23,9 +22,6 @@ let kind_of_code = function
   | _ -> invalid_arg "Boolean seam kind is invalid"
 let curve_kind value curve =
   kind_of_code (Char.code (Bytes.unsafe_get value.curve_kinds curve))
-let curve_edge_range value curve =
-  value.curve_edge_offsets.(curve), value.curve_edge_offsets.(curve + 1)
-let curve_edge value slot = value.curve_edges.(slot)
 
 let side_bit = function Boolean_complex.Left -> 1 | Boolean_complex.Right -> 2
 
@@ -462,7 +458,7 @@ let build ?cancel ?(grain = 16_384) ?(parallel_cutoff = 200_000)
             range_selected.(range) <- classify_range first_edge last_edge);
         ignore (Array.fold_left ( + ) 0 range_selected)
       end;
-    let curves, curve_kinds, curve_edge_offsets, curve_edges, coincident =
+    let curves, curve_kinds, _curve_edge_offsets, _curve_edges, coincident =
       if materialize then begin
         let curves, curve_kinds, curve_edge_offsets, curve_edges,
             materialized_selected = materialize_curves ?cancel complex edge_kinds in
@@ -476,7 +472,7 @@ let build ?cancel ?(grain = 16_384) ?(parallel_cutoff = 200_000)
         empty_geometry (), Bytes.empty, [|0|], [||], empty_geometry () in
     Ok {
       complex; curves_materialized = materialize; curves; coincident; edge_kinds;
-      curve_kinds; curve_edge_offsets; curve_edges;
+      curve_kinds;
     }
   with
   | Cancel.Cancelled -> error "cancelled" "Boolean seam extraction was cancelled"

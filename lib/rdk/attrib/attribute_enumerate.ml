@@ -1,4 +1,3 @@
-open Rays_math
 
 type storage = Integer | Text of { prefix : string }
 type mode = Enumerate_piece_elements | Enumerate_pieces

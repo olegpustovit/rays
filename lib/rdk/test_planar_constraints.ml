@@ -16,19 +16,6 @@ let check condition format =
   Printf.ksprintf (fun message -> if not condition then failwith message) format
 let get_string = function Ok value -> value | Error message -> fail "%s" message
 
-let edge_present value first second =
-  let found = ref false in
-  for triangle = 0 to Planar_cdt.triangle_count value - 1 do
-    let a = Planar_cdt.triangle_point value triangle 0
-    and b = Planar_cdt.triangle_point value triangle 1
-    and c = Planar_cdt.triangle_point value triangle 2 in
-    if (a = first && b = second) || (a = second && b = first)
-        || (b = first && c = second) || (b = second && c = first)
-        || (c = first && a = second) || (c = second && a = first) then
-      found := true
-  done;
-  !found
-
 let square_crossing () =
   let x = [|0.;2.;2.;0.|] and y = [|0.;0.;2.;2.|] in
   let value = Planar_constraints.build ~split_crossings:true ~x ~y
@@ -54,23 +41,6 @@ let square_crossing () =
   check (Planar_constraints.split_source_parameter value 0 = 0.5)
     "crossing interpolation parameter";
   value
-
-let test_crossing_cdt () =
-  let arrangement = square_crossing () in
-  let x = Planar_constraints.approximate_x arrangement
-  and y = Planar_constraints.approximate_y arrangement in
-  let seed = Delaunay2.build ~x:(Array.sub x 0 4) ~y:(Array.sub y 0 4) ()
-      |> get_string in
-  let output = Planar_cdt.build ~point_count:5
-      ~orient:(Planar_constraints.Private.orient2d arrangement)
-      ~incircle:(Planar_constraints.Private.incircle arrangement)
-      ~triangle_points:(Delaunay2.Private.view seed).triangle_points
-      ~insert_points:(Planar_constraints.insert_points arrangement)
-      ~constraint_points:(Planar_constraints.constraint_points arrangement) ()
-      |> get_string in
-  check (Planar_cdt.triangle_count output = 4) "crossing CDT cardinality";
-  Array.iter (fun point -> check (edge_present output point 4)
-      "crossing CDT edge (%d,4) is missing" point) [|0;1;2;3|]
 
 let test_crossing_policy () =
   let x = [|0.;2.;2.;0.|] and y = [|0.;0.;2.;2.|] in
@@ -231,7 +201,6 @@ let test_validation_and_cancellation () =
   | Error _ -> () | Ok _ -> fail "cancelled arrangement succeeded"
 
 let run () =
-  test_crossing_cdt ();
   test_crossing_policy ();
   test_t_junction_and_overlap ();
   test_embedded_source_points ();

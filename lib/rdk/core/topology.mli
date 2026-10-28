@@ -21,7 +21,6 @@ val point_of_vertex : t -> int -> int
 val primitive_vertex_range : t -> int -> int * int
 val primitive_size : t -> int -> int
 val primitive_kind : t -> int -> primitive_kind
-val iter_primitive_vertices : t -> int -> (int -> int -> unit) -> unit
 val all_triangles : t -> bool
 
 module Builder : sig
@@ -49,7 +48,4 @@ module Private : sig
   (** Trusted ownership-transfer constructor for cardinality-first RDK
       generators that established all topology invariants while filling. *)
 
-  val extend_free_points : point_count:int -> t -> t
-  (** Return a topology with the same immutable vertex/primitive planes and a
-      larger point domain. Appended points are free. *)
 end

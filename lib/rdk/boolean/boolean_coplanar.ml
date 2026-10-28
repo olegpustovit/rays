@@ -26,16 +26,10 @@ let empty = {
 }
 
 let pair_count value = Array.length value.overlaps
-let first_side value pair = Boolean_constraints.coplanar_first_side value.constraints pair
-let second_side value pair = Boolean_constraints.coplanar_second_side value.constraints pair
 let first_triangle value pair =
   Boolean_constraints.coplanar_first_triangle value.constraints pair
 let second_triangle value pair =
   Boolean_constraints.coplanar_second_triangle value.constraints pair
-let left_triangle value pair =
-  Boolean_constraints.coplanar_left_triangle value.constraints pair
-let right_triangle value pair =
-  Boolean_constraints.coplanar_right_triangle value.constraints pair
 let kind value pair = value.overlaps.(pair).kind
 let point_count value pair = Array.length value.overlaps.(pair).points
 

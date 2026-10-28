@@ -67,7 +67,6 @@ val barycentric_source_triangle :
 (** Exact-construction barycentric weights against three explicit source
     points without retaining temporary explicit point objects. *)
 
-
 val explicit : source -> int -> (t, error) result
 
 val rounded : reference:t -> x:float -> y:float -> z:float -> (t, error) result
@@ -101,11 +100,6 @@ val centroid3 : t -> t -> t -> (t, error) result
 
 val midpoint : t -> t -> (t, error) result
 (** Construct the exact arithmetic midpoint of two implicit points. *)
-
-val circumcenter2_xy : t -> t -> t -> (t, error) result
-(** Construct the exact XY circumcenter of three non-collinear implicit
-    points. Z is their arithmetic centroid and does not participate in planar
-    predicates. *)
 
 val diametral_dot_xy : first:t -> second:t -> t -> Predicates.sign
 (** Exact sign of [(point-first) dot (point-second)] in XY. A negative result
@@ -141,27 +135,10 @@ type reference_predicate =
   | Normal_dot_symbolic of t * t * t
   | Incircle_xy of t * t * t * t | Incircle_yz of t * t * t * t
   | Incircle_zx of t * t * t * t
-val reference : reference_predicate -> int
-(** Single private differential-test hook for immutable-dyadic oracles.
-    Only the Boolean kernel's [Private] boundary re-exports it. *)
 
 val radial_dot : t -> t -> t -> t -> Predicates.sign
 (** Exact sign of the dot product between the last two vectors after
     projection perpendicular to the directed first-two-point edge. *)
-
-val ray_edge :
-  query:t -> first:t -> second:t -> dx:float -> dy:float -> dz:float ->
-  Predicates.sign
-(** Exact sign of [direction . ((first-query) x (second-query))]. *)
-
-(** Exact positive-infinitesimal ray direction [(1, epsilon, epsilon^2)].
-    The ordinary variant uses domain-local packed scratch. *)
-val ray_edge_symbolic :
-  query:t -> first:t -> second:t -> Predicates.sign
-
-val normal_dot_direction :
-  t -> t -> t -> dx:float -> dy:float -> dz:float -> Predicates.sign
-(** Exact sign of the triangle normal dotted with a finite direction. *)
 
 (** Exact positive-infinitesimal direction [(1, epsilon, epsilon^2)]. *)
 val normal_dot_symbolic : t -> t -> t -> Predicates.sign
@@ -178,13 +155,6 @@ type axis_ray_triangle =
   | Axis_boundary
   | Axis_parallel
 
-val symbolic_ray_triangle :
-  query:t -> first:t -> second:t -> third:t -> symbolic_ray_triangle
-(** Exact ray/triangle decision for direction [(1, epsilon, epsilon^2)].
-    A hit carries the oriented triangle-normal sign. [Symbolic_origin_boundary]
-    means the query lies on the closed triangle; [Symbolic_degenerate] means
-    the triangle has no exact carrier plane. *)
-
 val symbolic_ray_source_triangle :
   source -> a:int -> b:int -> c:int -> t -> symbolic_ray_triangle
 (** Allocation-minimal equivalent over one packed explicit source triangle and
@@ -197,10 +167,6 @@ val axis_ray_source_triangle :
     [0], [1], or [2]. [Axis_parallel] means the carrier has zero projected
     normal for that direction; [Axis_boundary] asks the caller to try another
     exact direction. *)
-
-val barycentric : t -> t -> t -> t -> float * float * float
-(** Round the exact projected barycentric coordinates of the fourth coplanar
-    point relative to a non-degenerate first triangle. *)
 
 val incircle_xy : t -> t -> t -> t -> Predicates.sign
 val incircle_yz : t -> t -> t -> t -> Predicates.sign

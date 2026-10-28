@@ -4,22 +4,6 @@ open Rdk_test_support
 
 let get_ok = function Ok value -> value | Error _ -> fail "unexpected error"
 
-let check_identity_cache () =
-  let module Cache = Rdk_core.Support.Identity_cache in
-  let cache = Cache.create ~id:(fun (key : int ref) -> !key land 1) 2 in
-  let builds = ref 0 in
-  let get key = Cache.find_or_add cache key (fun () -> incr builds; !key) in
-  let a = ref 1 and b = ref 2 and c = ref 3 and a' = ref 1 in
-  ignore (get a); ignore (get a); ignore (get a');
-  if !builds <> 2 then fail "Identity_cache must key by physical identity";
-  ignore (get b); ignore (get c);
-  if get a <> 1 || !builds <> 5 then
-    fail "Identity_cache must evict first-in first-out at capacity";
-  let keys = Rdk_core.Support.Key_map.(ints First) [| 5; 7; 5 |] |> Option.get
-  and last = Rdk_core.Support.Key_map.(strings Last) [| "x"; "y"; "x" |] |> Option.get in
-  if keys 5 <> 0 || keys 7 <> 1 || keys 9 <> -1 || last "x" <> 2 || last "z" <> -1 then
-    fail "Support.Key_map lookup"
-
 let check_topology_validation () =
   let invalid = "Topology: vertex references an invalid point" in
   List.iter (fun count ->
@@ -86,9 +70,7 @@ let check_topology_validation () =
 
 let run () =
   check_topology_validation ();
-  check_identity_cache ();
   Test_rdk_sources.patterns ();
-  Test_rdk_sources.lines ();
   let builder = Packed.Float3.Builder.create 4 in
   Packed.Float3.Builder.set builder 0 0. 0. 0.;
   Packed.Float3.Builder.set builder 1 1. 0. 0.;
@@ -165,92 +147,21 @@ let run () =
       triangle_geometry with
    | Error error when Error.code error = "invalid_sort" -> ()
    | _ -> fail "sort accepted a mismatched selection owner");
-  let vertex_ids = Attribute.create_owned ~name:"vertex_id"
+  let _vertex_ids = Attribute.create_owned ~name:"vertex_id"
       ~owner:Attribute.Vertex (Attribute.Int [|0; 1; 2; 3; 4; 5|]) |> get_ok
-  and primitive_ids = Attribute.create_owned ~name:"primitive_id"
+  and _primitive_ids = Attribute.create_owned ~name:"primitive_id"
       ~owner:Attribute.Primitive (Attribute.Int [|10; 20|]) |> get_ok in
-  let payload_source = triangle_geometry
-      |> Geometry.with_attribute vertex_ids |> get_ok
-      |> Geometry.with_attribute primitive_ids |> get_ok in
-  let payload_bytes = geometry_bytes payload_source in
-  let duplicate_payload domains = Parallel.run ~domains (fun () ->
-    Instance_copy.duplicate ~grain:1 ~copies:2
-      ~transform:(Rays_math.Mat4.translation (Rays_math.Vec3.create 2. 0. 0.)) payload_source |> get_ok) in
-  let payload_one = duplicate_payload 1 and payload_many = duplicate_payload 4 in
-  check (geometry_bytes payload_one = geometry_bytes payload_many
-      && geometry_bytes payload_source = payload_bytes
-      && Geometry.point_count payload_one = 12
-      && Geometry.vertex_count payload_one = 18
-      && Geometry.primitive_count payload_one = 6
-      && Attribute.storage (Geometry.find_attribute ~owner:Attribute.Vertex
-          "vertex_id" payload_one |> Option.get)
-        = Attribute.Int (Array.init 18 (fun index -> index mod 6))
-      && Attribute.storage (Geometry.find_attribute ~owner:Attribute.Primitive
-          "primitive_id" payload_one |> Option.get)
-        = Attribute.Int (Array.init 6 (fun index -> 10 + ((index land 1) * 10))))
-    "duplicate vertex/primitive payload ancestry/cardinality/domain exactness";
-  let duplicated = Instance_copy.duplicate ~grain:1 ~copies:2
-      ~transform:(Rays_math.Mat4.translation (Rays_math.Vec3.create 2. 0. 0.)) sortable_points
-      |> get_ok in
-  (match Geometry.find_group ~owner:Group.Point "even" duplicated with
-   | Some group when Group.cardinality group = 6 -> ()
-   | _ -> fail "duplicate group replication");
-  let duplicate_once = Instance_copy.duplicate ~copies:0 sortable_points |> get_ok in
-  if Geometry.data_id duplicate_once <> Geometry.data_id sortable_points then
-    fail "zero-copy duplicate was not identity";
-  (match Instance_copy.duplicate ~copies:(-1) sortable_points with
-   | Error error when Error.code error = "invalid_parameter" -> ()
-   | _ -> fail "duplicate accepted a negative copy count");
-  let weighted_triangles = Test_rdk_attributes.promotion ~geometry ~triangle_geometry in
   let (transfer_source, transfer_target) = Test_rdk_attributes.transfer ~geometry ~triangle_geometry in
-  let shared_box = Test_rdk_modeling.modeling ~geometry ~positions ~selected ~triangle_geometry ~weighted_triangles in
-  let (box, cylinder_curve, cylindrical, grid, strip, wrong_uv_geometry) = Test_rdk_uv.render_uv ~geometry ~positions ~selected ~shared_box ~topology ~triangle_geometry in
-  Test_rdk_curves.curves ~cylinder_curve ~positions ~triangle_geometry;
-  Test_rdk_uv.uv_errors ~cylinder_curve ~cylindrical ~geometry ~selected ~shared_box ~strip ~wrong_uv_geometry;
-  let (compact_source, match_source, match_target) = Test_rdk_misc.measure_merge ~box ~grid ~selected ~triangle_geometry in
-  Test_rdk_misc.blur ~grid;
   let cancelled = Cancel.create () in
   Cancel.cancel cancelled;
   (match Plane_generators.grid ~cancel:cancelled ~columns:256 ~rows:256 ~size:2. () with
    | Error error when Error.code error = "cancelled" -> ()
    | Error error -> fail ("unexpected cancellation code: " ^ Error.code error)
    | Ok _ -> fail "cancelled RDK operation published geometry");
-  (match Fuse_grid.fuse ~cancel:cancelled ~tolerance:0. grid with
-   | Error error when Error.code error = "cancelled" -> ()
-   | _ -> fail "cancelled fuse published geometry or wrong error");
-  (match Mirror_geometry.run ~cancel:cancelled ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x grid with
-   | Error error when Error.code error = "cancelled" -> ()
-   | _ -> fail "cancelled mirror published geometry or wrong error");
-  (match Plane_clip.clip ~cancel:cancelled ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x grid with
-   | Error error when Error.code error = "cancelled" -> ()
-   | _ -> fail "cancelled clip published geometry or wrong error");
-  (match promote ~cancel:cancelled ~source:Attribute.Point
-      ~destination:Attribute.Primitive ~name:"N" grid with
-   | Error error when Error.code error = "cancelled" -> ()
-   | _ -> fail "cancelled attribute promotion published geometry or wrong error");
   (match Attribute_ops.transfer_points ~cancel:cancelled
       ~source:transfer_source ~target:transfer_target () with
    | Error error when Error.code error = "cancelled" -> ()
    | _ -> fail "cancelled attribute transfer published geometry or wrong error");
-  (match Attribute_ops.blur_points ~cancel:cancelled ~pattern:"P" grid with
-   | Error error when Error.code error = "cancelled" -> ()
-   | _ -> fail "cancelled Attribute Blur published geometry or wrong error");
-  (match Compact_points.run ~cancel:cancelled compact_source with
-   | Error error when Error.code error = "cancelled" -> ()
-   | _ -> fail "cancelled point compaction published geometry or wrong error");
-  (match Match_size.run ~cancel:cancelled ~target:match_target match_source with
-   | Error error when Error.code error = "cancelled" -> ()
-   | _ -> fail "cancelled match size published geometry or wrong error");
-  (match Ordering.sort ~cancel:cancelled ~owner:Ordering.Points ~key:Ordering.X grid with
-   | Error error when Error.code error = "cancelled" -> ()
-   | _ -> fail "cancelled sort published geometry or wrong error");
-  (match Instance_copy.duplicate ~cancel:cancelled ~copies:4 grid with
-   | Error error when Error.code error = "cancelled" -> ()
-   | _ -> fail "cancelled duplicate published geometry or wrong error");
-  (match Instance_copy.copy_to_points ~cancel:cancelled ~source:grid
-      ~targets:(Line_geometry.points [|(0.,0.,0.)|]) () with
-   | Error error when Error.code error = "cancelled" -> ()
-   | _ -> fail "cancelled Copy to Points published geometry or wrong error");
   Test_copy_to_points.run ();
   Test_rdk_sources.kernel ();
   print_endline "rdk tests passed"

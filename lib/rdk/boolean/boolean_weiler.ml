@@ -2,7 +2,7 @@ type side = Negative | Positive
 
 type t = {
   complex : Boolean_complex.t;
-  neighbors : int array;
+
   shells : int array;
   shell_count : int;
   left_winding : int array;
@@ -13,11 +13,6 @@ let operation = "boolean_weiler"
 let error code message = Error (Error.make ~operation ~code message)
 
 let half_facet facet side = (facet * 2) + match side with Negative -> 0 | Positive -> 1
-let half_facet_count value = Array.length value.shells
-let neighbor value ~half_facet ~local_edge =
-  if local_edge < 0 || local_edge > 2 then
-    invalid_arg "Weiler local edge must be 0, 1, or 2";
-  value.neighbors.((half_facet * 3) + local_edge)
 let shell_count value = value.shell_count
 let half_facet_shell value half_facet = value.shells.(half_facet)
 let facet_left_winding value facet = value.left_winding.(facet)
@@ -113,7 +108,7 @@ let build ?cancel complex radial =
             right_winding.(facet) <- right_winding.(facet) + winding
       done
     done;
-    Ok { complex; neighbors; shells; shell_count = !shell_count;
+    Ok { complex;  shells; shell_count = !shell_count;
          left_winding; right_winding }
   with
   | Cancel.Cancelled -> error "cancelled" "Weiler adjacency construction was cancelled"

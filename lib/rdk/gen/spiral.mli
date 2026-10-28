@@ -42,29 +42,3 @@ type profile = {
   radius_ramp : ramp option;
   uniform_scale : float;
 }
-
-val run :
-  ?cancel:Rdk_core.Cancel.t ->
-  ?grain:int ->
-  ?extent:extent ->
-  ?radius:radius ->
-  ?height_ramp:(float * float) list ->
-  ?radius_scale:float ->
-  ?radius_ramp:(float * float) list ->
-  ?direction:direction ->
-  ?start_angle:float ->
-  ?divisions:divisions ->
-  ?uniform_angle:bool ->
-  ?spiral_count:int ->
-  ?orientation:orientation ->
-  ?center:Rays_math.Vec3.t ->
-  ?rotation:Rays_math.Vec3.t ->
-  ?rotation_order:rotation_order ->
-  ?uniform_scale:float ->
-  ?angle_attribute:String.t ->
-  ?x_axis_attribute:String.t ->
-  ?y_axis_attribute:String.t ->
-  ?tangent_attribute:String.t ->
-  ?orient_attribute:String.t ->
-  ?distance_attribute:String.t ->
-  unit -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result

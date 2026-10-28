@@ -10,12 +10,8 @@ val build :
     the stable pair order from {!Boolean_constraints}. *)
 
 val pair_count : t -> int
-val first_side : t -> int -> Boolean_constraints.side
-val second_side : t -> int -> Boolean_constraints.side
 val first_triangle : t -> int -> int
 val second_triangle : t -> int -> int
-val left_triangle : t -> int -> int
-val right_triangle : t -> int -> int
 val kind : t -> int -> overlap_kind
 val point_count : t -> int -> int
 val boundary_count : t -> int -> int

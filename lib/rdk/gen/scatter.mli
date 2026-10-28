@@ -2,7 +2,6 @@ type density = {
   density_owner : Rdk_core.Attribute.owner;
   density_attribute : string;
 }
-val density : owner:Rdk_core.Attribute.owner -> string -> density
 type density_values =
     Uniform
   | Point_density of float array
@@ -23,18 +22,3 @@ type plan = {
   triangle_b : int array;
   triangle_c : int array;
 }
-val run :
-  ?cancel:Rdk_core.Cancel.t ->
-  ?grain:int ->
-  ?primitives:Rdk_core.Group.t ->
-  ?density:density ->
-  ?point_pattern:string ->
-  ?vertex_pattern:string ->
-  ?primitive_pattern:string ->
-  ?detail_pattern:string ->
-  ?match_groups:bool ->
-  ?source_primitive_attribute:String.t ->
-  ?source_vertex_numbers_attribute:String.t ->
-  ?source_vertex_weights_attribute:String.t ->
-  count:int ->
-  seed:int -> Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Error.t) result

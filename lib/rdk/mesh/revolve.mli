@@ -1,13 +1,3 @@
 (** Packed profile revolution behind the typed [Sweep_modeling.revolve] boundary. *)
 
 type revolve_type = Revolve_closed | Revolve_open_arc
-
-val run :
-  ?cancel:Cancel.t -> ?grain:int -> ?primitives:Group.t ->
-  ?revolve_type:revolve_type ->
-  ?connectivity:Plane_generators.grid_connectivity ->
-  ?start_angle:float -> ?end_angle:float ->
-  ?reverse_cross_sections:bool -> ?caps:bool -> ?cap_group:string ->
-  ?uv_attribute:string option -> divisions:int ->
-  origin:Rays_math.Vec3.t -> axis:Rays_math.Vec3.t ->
-  Geometry.t -> (Geometry.t, string) result

@@ -1,4 +1,3 @@
-open Rays_math
 
 exception Invalid of string
 

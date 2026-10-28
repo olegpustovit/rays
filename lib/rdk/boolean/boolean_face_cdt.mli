@@ -20,9 +20,6 @@ val build :
 val point_count : t -> int
 val triangle_count : t -> int
 val triangle_point : t -> int -> int -> int
-val constraint_count : t -> int
-val constraint_first : t -> int -> int
-val constraint_second : t -> int -> int
 
 module Private : sig
   val point : t -> int -> Implicit_point.t

@@ -5,26 +5,6 @@ type t = {
 
 type result_t = t
 
-let triangle_count value = Array.length value.triangle_points / 3
-let constraint_count value = Array.length value.constraint_points / 2
-
-let triangle_point value triangle local =
-  if triangle < 0 || triangle >= triangle_count value then
-    invalid_arg "Planar_cdt.triangle_point: triangle is out of range";
-  if local < 0 || local > 2 then
-    invalid_arg "Planar_cdt.triangle_point: local corner must be 0, 1, or 2";
-  value.triangle_points.((triangle * 3) + local)
-
-let constraint_first value constraint_index =
-  if constraint_index < 0 || constraint_index >= constraint_count value then
-    invalid_arg "Planar_cdt.constraint_first: constraint is out of range";
-  value.constraint_points.(constraint_index * 2)
-
-let constraint_second value constraint_index =
-  if constraint_index < 0 || constraint_index >= constraint_count value then
-    invalid_arg "Planar_cdt.constraint_second: constraint is out of range";
-  value.constraint_points.((constraint_index * 2) + 1)
-
 let edge_key ~point_count ~key_stride first second =
   let first,second = if first < second then first,second else second,first in
   if first < 0 || second < 0 || second >= point_count then
@@ -290,8 +270,6 @@ module Private = struct
   }
 
   let create_workspace = create_workspace
-  let build_counts workspace =
-    workspace.full_build_count,workspace.incremental_build_count
 end
 
 module Key_heap = struct

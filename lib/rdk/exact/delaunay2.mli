@@ -13,11 +13,8 @@ val build :
     point number. Output triangles are counter-clockwise and lexicographically
     canonicalized by source point number. *)
 
-val unique_count : t -> int
-val triangle_count : t -> int
 val unique_source : t -> int -> int
 val source_unique : t -> int -> int
-val triangle_point : t -> int -> int -> int
 
 module Private : sig
   type view = {

@@ -1,4 +1,3 @@
-open Rays_math
 
 type scheme = Catmull_clark | Bilinear
 

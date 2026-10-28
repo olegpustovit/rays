@@ -1,4 +1,3 @@
-open Rays_math
 
 let selected selection primitive = match selection with
   | None -> true

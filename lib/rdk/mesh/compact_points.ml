@@ -1,4 +1,3 @@
-open Rays_math
 
 let compact_points ?cancel ?(grain = 16_384) geometry =
   if grain <= 0 then invalid_arg "Rdk.Compact_points.compact_points: grain must be positive";

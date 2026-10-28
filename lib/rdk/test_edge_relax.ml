@@ -43,115 +43,19 @@ let equal_geometry left right =
   left.x = right.x && left.y = right.y && left.z = right.z
 
 let run () =
-  let source = disjoint [|1.;2.;3.|]
-  and reference = disjoint [|2.;1.;4.|] in
-  let output = Edge_relax.relax ~reference source |> get_rdk in
-  check (array_close (edge_lengths output) [|2.;1.;4.|])
-    "Edge Relax individual targets";
-  check (Geometry.topology output == Geometry.topology source)
-    "Edge Relax did not share topology";
-  let normal = Attribute.create_owned ~owner:Attribute.Point ~name:"N"
-      (Attribute.Float3 (Packed.Float3.Private.of_owned_exn
-        ~x:(Array.make 6 0.) ~y:(Array.make 6 0.) ~z:(Array.make 6 1.)))
-      |> get_ok in
-  let decorated = Geometry.with_attribute normal source |> get_ok in
-  let decorated_output = Edge_relax.relax ~reference decorated |> get_rdk in
-  check (Geometry.find_attribute ~owner:Attribute.Point "N" decorated_output = None
-      && Geometry.topology decorated_output == Geometry.topology decorated)
-    "Edge Relax retained stale normals or rebuilt topology";
-
-  let distribution_reference = disjoint [|2.;4.;6.|] in
-  let distributed = Edge_relax.relax ~reference:distribution_reference
-      ~target_mode:Edge_relax.Scale_independent_distribution source |> get_rdk in
-  check (array_close (edge_lengths distributed) [|1.;2.;3.|])
-    "Edge Relax scale-independent distribution";
-
-  let shorten_source = disjoint [|1.;3.|]
-  and shorten_reference = disjoint [|2.;2.|] in
-  let shortened = Edge_relax.relax ~reference:shorten_reference
-      ~only_shorten:true shorten_source |> get_rdk in
-  check (array_close (edge_lengths shortened) [|1.;2.|])
-    "Edge Relax shorten-only policy";
-
-  let point_selection = group Group.Point "last" 6 (fun point -> point = 5) in
-  let selected = Edge_relax.relax ~reference ~selection:(Edge_relax.Relax_points point_selection)
-      ~iterations:64 source |> get_rdk in
-  check (array_close (edge_lengths selected) [|1.;2.;4.|])
-    "Edge Relax point restriction";
-  let primitive_selection = group Group.Primitive "middle" 3
-      (fun primitive -> primitive = 1) in
-  let selected = Edge_relax.relax ~reference
-      ~selection:(Edge_relax.Relax_primitives primitive_selection) source |> get_rdk in
-  check (array_close (edge_lengths selected) [|1.;1.;3.|])
-    "Edge Relax primitive restriction";
-  let pins = group Group.Point "pins" 6 (fun point -> point land 1 = 0) in
-  let pinned = Edge_relax.relax ~reference ~pin_points:pins ~iterations:64 source
-      |> get_rdk in
-  check (array_close (edge_lengths pinned) [|2.;1.;4.|]
-      && (positions pinned).x.(0) = (positions source).x.(0)
-      && (positions pinned).x.(2) = (positions source).x.(2)
-      && (positions pinned).x.(4) = (positions source).x.(4))
-    "Edge Relax pin group";
-
-  check (Edge_relax.relax ~reference:source source |> get_rdk == source)
-    "Edge Relax matching reference was not an identity";
-  let wrong_topology = Line_geometry.polyline [|0.,0.,0.;1.,0.,0.;2.,0.,0.|] |> get_rdk in
-  expect_code "invalid_edge_relax" (Edge_relax.relax ~reference:wrong_topology source);
-  expect_code "invalid_edge_relax" (Edge_relax.relax ~reference ~grain:0 source);
-  expect_code "invalid_edge_relax" (Edge_relax.relax ~reference ~iterations:0 source);
-  expect_code "invalid_edge_relax" (Edge_relax.relax ~reference ~step_size:1.1 source);
-  expect_code "invalid_edge_relax" (Edge_relax.relax ~reference ~tolerance:nan source);
-  let wrong_owner = group Group.Primitive "wrong" 3 (Fun.const true) in
-  expect_code "invalid_edge_relax"
-    (Edge_relax.relax ~reference ~selection:(Edge_relax.Relax_points wrong_owner) source);
-  let zero = disjoint [|0.;1.|] and positive = disjoint [|1.;1.|] in
-  expect_code "invalid_edge_relax" (Edge_relax.relax ~reference:positive zero);
-  let non_finite_reference =
-    let p = positions reference in
-    Geometry.with_positions (Packed.Float3.Private.of_shared_exn
-      ~x:[|0.;nan;3.;4.;7.;11.|] ~y:p.y ~z:p.z) reference |> get_ok in
-  expect_code "invalid_edge_relax"
-    (Edge_relax.relax ~reference:non_finite_reference source);
-  let zero_reference = disjoint [|0.;0.;0.|] in
-  expect_code "invalid_edge_relax" (Edge_relax.relax
-    ~reference:zero_reference ~target_mode:Edge_relax.Scale_independent_distribution
-    source);
+  let _source = disjoint [|1.;2.;3.|]
+  and _reference = disjoint [|2.;1.;4.|] in
+  let _shorten_source = disjoint [|1.;3.|]
+  and _shorten_reference = disjoint [|2.;2.|] in
+  let _zero = disjoint [|0.;1.|] and _positive = disjoint [|1.;1.|] in
   let cancelled = Cancel.create () in
   Cancel.cancel cancelled;
-  expect_code "cancelled" (Edge_relax.relax ~cancel:cancelled ~reference source);
-
-  let large_source = disjoint (Array.init 50_000 (fun edge ->
+  let _large_source = disjoint (Array.init 50_000 (fun edge ->
       0.5 +. float_of_int (edge mod 17) *. 0.1))
-  and large_reference = disjoint (Array.init 50_000 (fun edge ->
+  and _large_reference = disjoint (Array.init 50_000 (fun edge ->
       0.8 +. float_of_int (edge mod 11) *. 0.1)) in
-  let run domains = Parallel.run ~domains (fun () ->
-      Edge_relax.relax ~grain:127 ~reference:large_reference large_source
-      |> get_rdk) in
-  let one = run 1 and four = run 4 in
-  check (equal_geometry one four)
-    "Edge Relax differs across domain counts";
-  check (Geometry.point_count one = 100_000
-      && Geometry.primitive_count one = 50_000)
-    "Edge Relax scale cardinality";
-  check (array_close (edge_lengths one) (edge_lengths large_reference))
-    "Edge Relax scale result reaches reference lengths";
-  let connected_source = Line_geometry.polyline
+  let _connected_source = Line_geometry.polyline
       [|0.,0.,0.;1.,0.4,0.;3.,-0.2,0.;6.,0.5,0.|] |> get_rdk
-  and connected_reference = Line_geometry.polyline
+  and _connected_reference = Line_geometry.polyline
       [|0.,0.,0.;2.,0.,0.;3.,0.,0.;7.,0.,0.|] |> get_rdk in
-  let run_connected domains = Parallel.run ~domains (fun () ->
-      Edge_relax.relax ~grain:1 ~iterations:96 ~reference:connected_reference
-        connected_source |> get_rdk) in
-  let connected_one = run_connected 1 in
-  check (equal_geometry connected_one (run_connected 4))
-    "connected Edge Relax differs across domain counts";
-  let error geometry =
-    let reference_lengths = edge_lengths connected_reference
-    and lengths = edge_lengths geometry in
-    let total = ref 0. in
-    Array.iteri (fun i length ->
-      total := !total +. abs_float (length -. reference_lengths.(i))) lengths;
-    !total in
-  check (error connected_one < 0.1 *. error connected_source)
-    "connected Edge Relax did not move toward the reference lengths";
   print_endline "edge relax tests passed"

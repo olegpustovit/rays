@@ -19,6 +19,8 @@ its `.mli`, or add the missing `.mli` during the move. Keep module aliases in
 private. Run the family tests and a one-domain/four-domain exact comparison
 before marking a split complete.
 
+RDK has no parity-only code: a kernel exists only for a native SOP (exact predicates, spatial indexes, solvers, wiring, carriers) or a Lisp host operation. Never add an OCaml twin of a Lisp node or keep a replaced kernel as a test oracle; run `prune-dead-code` after removing a caller.
+
 `lib/rdk/test_*` and `lib/sop/test_*` open `Rdk_test_support`
 (`lib/rdk/test_support`) for `fail`, `check`, `get_ok`, the geometry
 comparisons and the like; a test file defines only helpers that differ.

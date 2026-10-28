@@ -780,17 +780,6 @@ let midpoint first second =
       (compute_homogeneous first.source construction)
   end
 
-let circumcenter2_xy first second third =
-  if first.source != second.source || first.source != third.source then
-    Error Point_source_mismatch
-  else begin
-    let construction = Circumcenter2_xy { first; second; third } in
-    match circumcenter_homogeneous (exact_homogeneous first)
-        (exact_homogeneous second) (exact_homogeneous third) with
-    | Error _ as error -> error
-    | Ok homogeneous -> make first.source construction homogeneous
-  end
-
 let approximate point =
   (point.approximate_x, point.approximate_y, point.approximate_z)
 
@@ -844,17 +833,6 @@ let compare_y = compare_component
 let compare_z = compare_component
     (fun point -> point.hz) (fun point -> point.z_lower)
     (fun point -> point.z_upper)
-
-let compare_component_reference component left right =
-  ensure_same_source left right;
-  let left_h = exact_homogeneous left and right_h = exact_homogeneous right in
-  Exact.compare_zero (Exact.subtract
-      (Exact.multiply (component left_h) right_h.hw)
-      (Exact.multiply (component right_h) left_h.hw))
-
-let compare_reference_x = compare_component_reference (fun point -> point.hx)
-let compare_reference_y = compare_component_reference (fun point -> point.hy)
-let compare_reference_z = compare_component_reference (fun point -> point.hz)
 
 let equal left right =
   left == right || (compare_x left right = 0
@@ -941,12 +919,6 @@ let barycentric_source_triangle source ~a ~b ~c point =
     ~cx:source.x.(c) ~cy:source.y.(c) ~cz:source.z.(c)
     ~px:homogeneous.hx ~py:homogeneous.hy ~pz:homogeneous.hz ~pw:homogeneous.hw
 
-let difference_numerator component left right =
-  let left_h = exact_homogeneous left and right_h = exact_homogeneous right in
-  Exact.subtract
-    (Exact.multiply (component left_h) right_h.hw)
-    (Exact.multiply (component right_h) left_h.hw)
-
 let x point = point.hx
 let y point = point.hy
 let z point = point.hz
@@ -958,51 +930,6 @@ let exact_orient2d_components first_component second_component a b c =
     ~ax:(first_component ah) ~ay:(second_component ah) ~aw:ah.hw
     ~bx:(first_component bh) ~by:(second_component bh) ~bw:bh.hw
     ~cx:(first_component ch) ~cy:(second_component ch) ~cw:ch.hw
-
-let exact_orient2d_components_reference first_component second_component a b c =
-  let ac_first = difference_numerator first_component a c
-  and bc_first = difference_numerator first_component b c
-  and ac_second = difference_numerator second_component a c
-  and bc_second = difference_numerator second_component b c in
-  Exact.compare_zero (Exact.subtract
-      (Exact.multiply ac_first bc_second)
-      (Exact.multiply ac_second bc_first))
-
-let orient2d_reference_xy a b c =
-  sign_of_comparison (exact_orient2d_components_reference x y a b c)
-let orient2d_reference_yz a b c =
-  sign_of_comparison (exact_orient2d_components_reference y z a b c)
-let orient2d_reference_zx a b c =
-  sign_of_comparison (exact_orient2d_components_reference z x a b c)
-
-let orient3d_arena_exact a b c d =
-  ensure_same_source a b; ensure_same_source a c; ensure_same_source a d;
-  let ah = exact_homogeneous a and bh = exact_homogeneous b
-  and ch = exact_homogeneous c and dh = exact_homogeneous d in
-  sign_of_comparison (Exact.Scratch.orient3d_homogeneous
-    ~ax:ah.hx ~ay:ah.hy ~az:ah.hz ~aw:ah.hw
-    ~bx:bh.hx ~by:bh.hy ~bz:bh.hz ~bw:bh.hw
-    ~cx:ch.hx ~cy:ch.hy ~cz:ch.hz ~cw:ch.hw
-    ~dx:dh.hx ~dy:dh.hy ~dz:dh.hz ~dw:dh.hw)
-
-let orient3d_reference a b c d =
-  ensure_same_source a b; ensure_same_source a c; ensure_same_source a d;
-  let adx = difference_numerator x a d
-  and ady = difference_numerator y a d
-  and adz = difference_numerator z a d
-  and bdx = difference_numerator x b d
-  and bdy = difference_numerator y b d
-  and bdz = difference_numerator z b d
-  and cdx = difference_numerator x c d
-  and cdy = difference_numerator y c d
-  and cdz = difference_numerator z c d in
-  let first = Exact.multiply adx
-      (Exact.subtract (Exact.multiply bdy cdz) (Exact.multiply bdz cdy))
-  and second = Exact.multiply ady
-      (Exact.subtract (Exact.multiply bdz cdx) (Exact.multiply bdx cdz))
-  and third = Exact.multiply adz
-      (Exact.subtract (Exact.multiply bdx cdy) (Exact.multiply bdy cdx)) in
-  sign_of_comparison (Exact.compare_zero (Exact.add (Exact.add first second) third))
 
 let radial_dot_arena_exact edge_start edge_end left right =
   ensure_same_source edge_start edge_end;
@@ -1018,24 +945,6 @@ let radial_dot_arena_exact edge_start edge_end left right =
     ~ex1:edge_end.hx ~ey1:edge_end.hy ~ez1:edge_end.hz ~ew1:edge_end.hw
     ~lx:left.hx ~ly:left.hy ~lz:left.hz ~lw:left.hw
     ~rx:right.hx ~ry:right.hy ~rz:right.hz ~rw:right.hw)
-
-let radial_dot_reference edge_start edge_end left right =
-  ensure_same_source edge_start edge_end;
-  ensure_same_source edge_start left;
-  ensure_same_source edge_start right;
-  let vector point =
-    (difference_numerator x point edge_start,
-     difference_numerator y point edge_start,
-     difference_numerator z point edge_start) in
-  let edge = vector edge_end and left = vector left and right = vector right in
-  let dot (ax, ay, az) (bx, by, bz) =
-    Exact.add
-      (Exact.add (Exact.multiply ax bx) (Exact.multiply ay by))
-      (Exact.multiply az bz) in
-  let determinant = Exact.subtract
-      (Exact.multiply (dot left right) (dot edge edge))
-      (Exact.multiply (dot left edge) (dot right edge)) in
-  sign_of_comparison (Exact.compare_zero determinant)
 
 let radial_dot edge_start edge_end left right =
   ensure_same_source edge_start edge_end;
@@ -1107,93 +1016,6 @@ let radial_dot edge_start edge_end left right =
     if determinant < 0. then Predicates.Negative else Predicates.Positive
   else radial_dot_arena_exact edge_start edge_end left right
 
-let exact_direction ~dx ~dy ~dz =
-  if not (Float.is_finite dx && Float.is_finite dy && Float.is_finite dz) then
-    invalid_arg "Rdk implicit ray direction must be finite";
-  (Exact.of_float dx, Exact.of_float dy, Exact.of_float dz)
-
-let exact_vector_from origin point =
-  (difference_numerator x point origin,
-   difference_numerator y point origin,
-   difference_numerator z point origin)
-
-let ray_edge_reference ~query ~first ~second ~dx ~dy ~dz =
-  ensure_same_source query first;
-  ensure_same_source query second;
-  let direction = exact_direction ~dx ~dy ~dz
-  and first = exact_vector_from query first
-  and second = exact_vector_from query second in
-  sign_of_comparison (Exact.compare_zero (dot direction (cross first second)))
-
-let ray_edge ~query ~first ~second ~dx ~dy ~dz =
-  ensure_same_source query first;
-  ensure_same_source query second;
-  if not (Float.is_finite dx && Float.is_finite dy && Float.is_finite dz) then
-    invalid_arg "Rdk implicit ray direction must be finite";
-  let query = exact_homogeneous query
-  and first = exact_homogeneous first
-  and second = exact_homogeneous second in
-  sign_of_comparison (Exact.Scratch.ray_edge_homogeneous
-    ~qx:query.hx ~qy:query.hy ~qz:query.hz ~qw:query.hw
-    ~fx:first.hx ~fy:first.hy ~fz:first.hz ~fw:first.hw
-    ~sx:second.hx ~sy:second.hy ~sz:second.hz ~sw:second.hw
-    ~dx ~dy ~dz)
-
-let first_nonzero_exact x y z =
-  let first = Exact.compare_zero x in
-  if first <> 0 then first else
-  let second = Exact.compare_zero y in
-  if second <> 0 then second else Exact.compare_zero z
-
-let ray_edge_symbolic_reference ~query ~first ~second =
-  ensure_same_source query first;
-  ensure_same_source query second;
-  let first = exact_vector_from query first
-  and second = exact_vector_from query second in
-  let x, y, z = cross first second in
-  sign_of_comparison (first_nonzero_exact x y z)
-
-let ray_edge_symbolic ~query ~first ~second =
-  ensure_same_source query first;
-  ensure_same_source query second;
-  let query = exact_homogeneous query
-  and first = exact_homogeneous first
-  and second = exact_homogeneous second in
-  sign_of_comparison (Exact.Scratch.ray_edge_symbolic_homogeneous
-    ~qx:query.hx ~qy:query.hy ~qz:query.hz ~qw:query.hw
-    ~fx:first.hx ~fy:first.hy ~fz:first.hz ~fw:first.hw
-    ~sx:second.hx ~sy:second.hy ~sz:second.hz ~sw:second.hw)
-
-let normal_dot_direction_reference first second third ~dx ~dy ~dz =
-  ensure_same_source first second;
-  ensure_same_source first third;
-  let direction = exact_direction ~dx ~dy ~dz
-  and second = exact_vector_from first second
-  and third = exact_vector_from first third in
-  sign_of_comparison (Exact.compare_zero (dot direction (cross second third)))
-
-let normal_dot_direction first second third ~dx ~dy ~dz =
-  ensure_same_source first second;
-  ensure_same_source first third;
-  if not (Float.is_finite dx && Float.is_finite dy && Float.is_finite dz) then
-    invalid_arg "Rdk implicit ray direction must be finite";
-  let first = exact_homogeneous first
-  and second = exact_homogeneous second
-  and third = exact_homogeneous third in
-  sign_of_comparison (Exact.Scratch.normal_dot_direction_homogeneous
-    ~fx:first.hx ~fy:first.hy ~fz:first.hz ~fw:first.hw
-    ~sx:second.hx ~sy:second.hy ~sz:second.hz ~sw:second.hw
-    ~tx:third.hx ~ty:third.hy ~tz:third.hz ~tw:third.hw
-    ~dx ~dy ~dz)
-
-let normal_dot_symbolic_reference first second third =
-  ensure_same_source first second;
-  ensure_same_source first third;
-  let second = exact_vector_from first second
-  and third = exact_vector_from first third in
-  let x, y, z = cross second third in
-  sign_of_comparison (first_nonzero_exact x y z)
-
 let normal_dot_symbolic first second third =
   ensure_same_source first second;
   ensure_same_source first third;
@@ -1216,33 +1038,6 @@ type axis_ray_triangle =
   | Axis_hit of Predicates.sign
   | Axis_boundary
   | Axis_parallel
-
-let opposite_sign left right = match left, right with
-  | Predicates.Negative, Predicates.Positive
-  | Predicates.Positive, Predicates.Negative -> true
-  | _ -> false
-
-let symbolic_ray_triangle ~query ~first ~second ~third =
-  ensure_same_source query first;
-  ensure_same_source query second;
-  ensure_same_source query third;
-  let normal = normal_dot_symbolic first second third in
-  if normal = Predicates.Zero then Symbolic_degenerate
-  else begin
-    let plane = orient3d_arena_exact first second third query
-    and first_edge = ray_edge_symbolic ~query ~first ~second
-    and second_edge = ray_edge_symbolic ~query ~first:second ~second:third
-    and third_edge = ray_edge_symbolic ~query ~first:third ~second:first in
-    let compatible = not (opposite_sign first_edge normal)
-        && not (opposite_sign second_edge normal)
-        && not (opposite_sign third_edge normal) in
-    if not compatible then Symbolic_miss
-    else if plane = Predicates.Zero || first_edge = Predicates.Zero
-        || second_edge = Predicates.Zero || third_edge = Predicates.Zero then
-      Symbolic_origin_boundary
-    else if plane = normal then Symbolic_hit normal
-    else Symbolic_miss
-  end
 
 let symbolic_ray_source_triangle source ~a ~b ~c query =
   if not (valid_index source a && valid_index source b && valid_index source c) then
@@ -1423,21 +1218,6 @@ let axis_ray_source_triangle source ~a ~b ~c ~axis ~positive query =
       else Axis_hit (if normal < 0 then Predicates.Negative else Predicates.Positive)
     end
   end
-
-let exact_orient2 first_component second_component a b c =
-  let ac_first = difference_numerator first_component a c
-  and bc_first = difference_numerator first_component b c
-  and ac_second = difference_numerator second_component a c
-  and bc_second = difference_numerator second_component b c in
-  let numerator = Exact.subtract
-      (Exact.multiply ac_first bc_second)
-      (Exact.multiply ac_second bc_first) in
-  let ah = (exact_homogeneous a).hw
-  and bh = (exact_homogeneous b).hw
-  and ch = (exact_homogeneous c).hw in
-  let denominator = Exact.multiply (Exact.multiply ah bh)
-      (Exact.multiply ch ch) in
-  numerator, denominator
 
 let minimum_subnormal = Int64.float_of_bits 1L
 
@@ -1739,56 +1519,6 @@ let orient3d a b c d =
       ~dx:dh.hx ~dy:dh.hy ~dz:dh.hz ~dw:dh.hw)
   end
 
-let barycentric a b c point =
-  ensure_same_source a b;
-  ensure_same_source a c;
-  ensure_same_source a point;
-  if orient3d a b c point <> Predicates.Zero then
-    invalid_arg "Rdk barycentric point is not coplanar with its source triangle";
-  let first_component, second_component =
-    if orient2d_xy a b c <> Predicates.Zero then x, y
-    else if orient2d_yz a b c <> Predicates.Zero then y, z
-    else if orient2d_zx a b c <> Predicates.Zero then z, x
-    else invalid_arg "Rdk barycentric source triangle is degenerate" in
-  let base_numerator, base_denominator =
-    exact_orient2 first_component second_component a b c in
-  let weight first second third =
-    let numerator, denominator =
-      exact_orient2 first_component second_component first second third in
-    approximate_ratio
-      (Exact.multiply numerator base_denominator)
-      (Exact.multiply base_numerator denominator) in
-  (weight b c point, weight c a point, weight a b point)
-
-let incircle_components_reference first_component second_component a b c d =
-  ensure_same_source a b;
-  ensure_same_source a c;
-  ensure_same_source a d;
-  let row point =
-    let first_difference = difference_numerator first_component point d
-    and second_difference = difference_numerator second_component point d in
-    let point_weight = (exact_homogeneous point).hw
-    and reference_weight = (exact_homogeneous d).hw in
-    let denominator = Exact.multiply point_weight reference_weight in
-    let first = Exact.multiply first_difference denominator
-    and second = Exact.multiply second_difference denominator
-    and lift = Exact.add
-        (Exact.multiply first_difference first_difference)
-        (Exact.multiply second_difference second_difference) in
-    (first, second, lift)
-  in
-  let ax, ay, alift = row a
-  and bx, by, blift = row b
-  and cx, cy, clift = row c in
-  let first = Exact.multiply ax
-      (Exact.subtract (Exact.multiply by clift) (Exact.multiply blift cy))
-  and second = Exact.multiply ay
-      (Exact.subtract (Exact.multiply blift cx) (Exact.multiply bx clift))
-  and third = Exact.multiply alift
-      (Exact.subtract (Exact.multiply bx cy) (Exact.multiply by cx)) in
-  sign_of_comparison
-    (Exact.compare_zero (Exact.add (Exact.add first second) third))
-
 let incircle_components first_component second_component a b c d =
   ensure_same_source a b;
   ensure_same_source a c;
@@ -1801,10 +1531,6 @@ let incircle_components first_component second_component a b c d =
     ~cx:(first_component ch) ~cy:(second_component ch) ~cw:ch.hw
     ~dx:(first_component dh) ~dy:(second_component dh) ~dw:dh.hw)
 
-let incircle_reference_xy = incircle_components_reference x y
-let incircle_reference_yz = incircle_components_reference y z
-let incircle_reference_zx = incircle_components_reference z x
-
 type reference_predicate =
   | Compare_x of t * t | Compare_y of t * t | Compare_z of t * t
   | Orient2d_xy of t * t * t | Orient2d_yz of t * t * t
@@ -1816,27 +1542,6 @@ type reference_predicate =
   | Normal_dot_symbolic of t * t * t
   | Incircle_xy of t * t * t * t | Incircle_yz of t * t * t * t
   | Incircle_zx of t * t * t * t
-
-let sign_to_int = function
-  | Predicates.Negative -> -1 | Predicates.Zero -> 0
-  | Predicates.Positive -> 1
-
-let reference = function
-  | Compare_x (a,b) -> compare_reference_x a b
-  | Compare_y (a,b) -> compare_reference_y a b
-  | Compare_z (a,b) -> compare_reference_z a b
-  | Orient2d_xy (a,b,c) -> sign_to_int (orient2d_reference_xy a b c)
-  | Orient2d_yz (a,b,c) -> sign_to_int (orient2d_reference_yz a b c)
-  | Orient2d_zx (a,b,c) -> sign_to_int (orient2d_reference_zx a b c)
-  | Orient3d (a,b,c,d) -> sign_to_int (orient3d_reference a b c d)
-  | Radial_dot (a,b,c,d) -> sign_to_int (radial_dot_reference a b c d)
-  | Ray_edge (a,b,c,dx,dy,dz) -> sign_to_int (ray_edge_reference ~query:a ~first:b ~second:c ~dx ~dy ~dz)
-  | Ray_edge_symbolic (a,b,c) -> sign_to_int (ray_edge_symbolic_reference ~query:a ~first:b ~second:c)
-  | Normal_dot_direction (a,b,c,dx,dy,dz) -> sign_to_int (normal_dot_direction_reference a b c ~dx ~dy ~dz)
-  | Normal_dot_symbolic (a,b,c) -> sign_to_int (normal_dot_symbolic_reference a b c)
-  | Incircle_xy (a,b,c,d) -> sign_to_int (incircle_reference_xy a b c d)
-  | Incircle_yz (a,b,c,d) -> sign_to_int (incircle_reference_yz a b c d)
-  | Incircle_zx (a,b,c,d) -> sign_to_int (incircle_reference_zx a b c d)
 
 let incircle_projected projection a b c d =
   ensure_same_source a b;

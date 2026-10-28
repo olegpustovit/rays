@@ -1,18 +1,17 @@
 # lib/sop_catalog rules
 
-A SOP node is declared once, either in OCaml or in Lisp. An OCaml `parameters` record with
-`[@@deriving sop_params, sop_node]` yields the inspector schema, Lisp manifest
-entry and editor factory, next to the cook that reads it. A Lisp `defnode` in
-`lib/flow_sop/nodes/<key>.rays` is the alternative declaration: its header owns
-the schema and defaults, its body owns the operation, and Flow_sop builds its
-editor factory. Do not keep an OCaml registration for a ported kind; keep the
-existing parity coverage until all its Lisp-output golden cases are captured,
-then delete the OCaml twin, parity-only RDK kernel and parity tests. Do not
-create an oracle library. There is no typed
-OCaml constructor: Lisp and `Edit_graph.instantiate` are the ways to build a
-node. Defaults come only from the declaration. Do not add a separate function
-name, argument list, typed default override or argument-presence toggle.
-OCaml declarations live in `lib/sop` (`groups.ml`, `sop_topology.ml`,
+A SOP node is declared in Lisp: a `defnode` in `lib/flow_sop/nodes/<key>.rays`
+owns the schema and defaults in its header and the operation in its body, and
+Flow_sop builds its editor factory. Only the 37 native nodes (exact predicates,
+spatial indexes, solvers, wiring, carriers) stay OCaml: an OCaml `parameters`
+record with `[@@deriving sop_params, sop_node]` yields the inspector schema,
+Lisp manifest entry and editor factory, next to the cook that reads it. Never
+add an OCaml registration for a kind that Lisp can express, and never an
+oracle or parity copy of a Lisp node. There is no typed OCaml constructor: Lisp
+and `Edit_graph.instantiate` are the ways to build a node. Defaults come only
+from the declaration. Do not add a separate function name, argument list,
+typed default override or argument-presence toggle.
+The 37 native declarations live in `lib/sop` (`groups.ml`, `sop_topology.ml`,
 `attributes.ml`, `shapes.ml`; `Support` holds shared helpers).
 `Sop.Nodes` exports their factories, and this library registers them as
 `module X = Sop.Nodes.X [@@sop.register]`.

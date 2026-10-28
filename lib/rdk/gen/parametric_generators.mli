@@ -106,38 +106,3 @@ val torus :
   minor_radius:float ->
   unit ->
   (Geometry.t, Error.t) result
-
-val tube :
-  ?cancel:Cancel.t ->
-  ?grain:int ->
-  ?connectivity:tube_connectivity ->
-  ?end_caps:bool ->
-  ?consolidate_cap_points:bool ->
-  ?normals:tube_normals ->
-  ?orientation:tube_orientation ->
-  ?center:Rays_math.Vec3.t ->
-  ?rotation:Rays_math.Vec3.t ->
-  ?rotation_order:tube_rotation_order ->
-  ?radius_scale:float ->
-  ?uv_attribute:string ->
-  ?cap_group:string ->
-  ?rows:int ->
-  ?columns:int ->
-  top_radius:float ->
-  bottom_radius:float ->
-  height:float ->
-  unit ->
-  (Geometry.t, Error.t) result
-
-val platonic :
-  ?cancel:Cancel.t ->
-  ?kind:platonic_kind ->
-  ?normals:platonic_normals ->
-  ?orientation:platonic_orientation ->
-  ?center:Rays_math.Vec3.t ->
-  ?rotation:Rays_math.Vec3.t ->
-  ?rotation_order:platonic_rotation_order ->
-  ?face_groups:string ->
-  radius:float ->
-  unit ->
-  (Geometry.t, Error.t) result

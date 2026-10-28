@@ -8,12 +8,3 @@ type outputs = {
   shape_index : string option;
 }
 exception Curvature_error of string
-val run :
-  ?cancel:Rdk_core.Cancel.t ->
-  ?grain:int ->
-  ?points:Rdk_core.Group.t ->
-  ?boundary:boundary ->
-  ?smoothing_iterations:int ->
-  ?smoothing_strength:float ->
-  ?outputs:outputs ->
-  Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Error.t) result

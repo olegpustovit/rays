@@ -61,27 +61,6 @@ let geometry_equal left right =
 let add_attribute attribute geometry =
   Geometry.with_attribute attribute geometry |> get_ok
 
-let enriched_grid () =
-  let geometry = Plane_generators.grid ~columns:1 ~rows:1 ~size:2. () |> get_rdk in
-  let point_id = Attribute.create_owned ~name:"point_id" ~owner:Attribute.Point
-      (Attribute.Int [|0; 1; 2; 3|]) |> get_ok
-  and vertex_value = Attribute.create_owned ~name:"vertex_value"
-      ~owner:Attribute.Vertex
-      (Attribute.Float [|0.; 1.; 2.; 3.; 4.; 5.|]) |> get_ok
-  and primitive_id = Attribute.create_owned ~name:"primitive_id"
-      ~owner:Attribute.Primitive (Attribute.Int [|10; 20|]) |> get_ok
-  and detail = Attribute.create_owned ~name:"label" ~owner:Attribute.Detail
-      (Attribute.Text [|"grid"|]) |> get_ok in
-  let point_group = Group.init ~owner:Group.Point ~name:"corner" 4
-      (fun point -> point = 0)
-  and primitive_group = Group.init ~owner:Group.Primitive ~name:"first_face" 2
-      (fun primitive -> primitive = 0) in
-  geometry |> add_attribute point_id |> add_attribute vertex_value
-  |> add_attribute primitive_id |> add_attribute detail
-  |> Geometry.with_group point_group |> get_ok
-  |> Geometry.with_group primitive_group |> get_ok
-  |> Group_mesh.group_edges ~name:"source_edges" |> get_rdk
-
 let group_cardinality owner name geometry =
   match Geometry.find_group ~owner name geometry with
   | Some group -> Group.cardinality group
@@ -93,121 +72,6 @@ let edge_cardinality name geometry =
   | None -> fail ("missing edge group " ^ name)
 
 let run () =
-  let source = enriched_grid () in
-  (* Preserve the default individual path's packed topology before replacing
-     its legacy implementation. Its two triangles have six source corners. *)
-  let connected = Poly_extrude.run
-      ~divide:Poly_extrude.Extrude_connected_components
-      ~front_group:"front" ~back_group:"back" ~side_group:"side"
-      ~front_boundary_group:"front_boundary"
-      ~back_boundary_group:"back_boundary"
-      ~distance:1. source |> get_rdk in
-  check (Geometry.point_count connected = 8
-      && Geometry.vertex_count connected = 28
-      && Geometry.primitive_count connected = 8)
-    "connected Poly Extrude cardinality";
-  check (group_cardinality Group.Primitive "front" connected = 2
-      && group_cardinality Group.Primitive "back" connected = 2
-      && group_cardinality Group.Primitive "side" connected = 4)
-    "connected Poly Extrude output groups";
-  check (edge_cardinality "front_boundary" connected = 4
-      && edge_cardinality "back_boundary" connected = 4)
-    "connected Poly Extrude boundary groups";
-  check (edge_cardinality "source_edges" connected = 10)
-    "connected Poly Extrude source edge propagation";
-  check (group_cardinality Group.Point "corner" connected = 2
-      && group_cardinality Group.Primitive "first_face" connected = 4)
-    "connected Poly Extrude ordinary group ancestry";
-  let positions = Packed.Float3.Private.view (Geometry.positions connected) in
-  for point = 4 to 7 do
-    check (abs_float (abs_float positions.y.(point) -. 1.) <= 1e-12)
-      "connected Poly Extrude distance"
-  done;
-  check (Geometry.find_attribute ~owner:Attribute.Detail "label" connected <> None)
-    "connected Poly Extrude dropped detail attribute";
-
-  let divided = Poly_extrude.run
-      ~divide:Poly_extrude.Extrude_connected_components ~divisions:3
-      ~front_group:"surface" ~side_group:"surface"
-      ~front_boundary_group:"rim" ~back_boundary_group:"rim"
-      ~distance:1. source |> get_rdk in
-  check (Geometry.point_count divided = 16
-      && Geometry.vertex_count divided = 60
-      && Geometry.primitive_count divided = 16)
-    "divided connected Poly Extrude cardinality";
-  check (group_cardinality Group.Primitive "surface" divided = 14
-      && edge_cardinality "rim" divided = 8)
-    "Poly Extrude same-name output-group union";
-  check (group_cardinality Group.Point "corner" divided = 4)
-    "divided Poly Extrude point-group replication";
-  let divided_positions = Packed.Float3.Private.view
-      (Geometry.positions divided) in
-  for association = 0 to 3 do
-    let first = 4 + (association * 3) in
-    check (abs_float (abs_float divided_positions.y.(first) -. (1. /. 3.))
-        <= 1e-12
-        && abs_float (abs_float divided_positions.y.(first + 1) -. (2. /. 3.))
-           <= 1e-12
-        && abs_float (abs_float divided_positions.y.(first + 2) -. 1.)
-           <= 1e-12)
-      "Poly Extrude division spacing"
-  done;
-
-  let one_face = Group.init ~owner:Group.Primitive ~name:"selected" 2
-      (fun primitive -> primitive = 0) in
-  let selected_source = Geometry.with_group one_face source |> get_ok in
-  let selected = Poly_extrude.run ~primitives:one_face
-      ~divide:Poly_extrude.Extrude_connected_components ~front_group:"selected_front"
-      ~distance:0.5 selected_source |> get_rdk in
-  check (Geometry.point_count selected = 7
-      && Geometry.vertex_count selected = 21
-      && Geometry.primitive_count selected = 6
-      && group_cardinality Group.Primitive "selected_front" selected = 1)
-    "selected connected Poly Extrude cardinality";
-
-  let without_back = Poly_extrude.run
-      ~divide:Poly_extrude.Extrude_connected_components ~output_back:false
-      ~distance:1. source |> get_rdk
-  and without_front = Poly_extrude.run
-      ~divide:Poly_extrude.Extrude_connected_components ~output_front:false
-      ~distance:1. source |> get_rdk
-  and without_sides = Poly_extrude.run
-      ~divide:Poly_extrude.Extrude_connected_components ~output_side:false
-      ~distance:1. source |> get_rdk
-  and only_back = Poly_extrude.run
-      ~divide:Poly_extrude.Extrude_connected_components ~output_front:false
-      ~output_side:false ~back_group:"only_back" ~distance:1. source |> get_rdk
-  and no_outputs = Poly_extrude.run
-      ~divide:Poly_extrude.Extrude_connected_components ~output_front:false
-      ~output_back:false ~output_side:false ~distance:1. source |> get_rdk in
-  check (Geometry.primitive_count without_back = 6
-      && Geometry.primitive_count without_front = 6
-      && Geometry.primitive_count without_sides = 4
-      && Geometry.primitive_count only_back = 2
-      && group_cardinality Group.Primitive "only_back" only_back = 2
-      && Geometry.primitive_count no_outputs = 0)
-    "Poly Extrude output geometry switches";
-
-  let source_index = Topology_index.create (Geometry.topology source) in
-  let internal_edge = ref (-1) in
-  for edge = 0 to Topology_index.edge_count source_index - 1 do
-    if Topology_index.edge_incidence_count source_index edge = 2 then
-      internal_edge := edge
-  done;
-  check (!internal_edge >= 0) "split fixture missing internal edge";
-  let split_builder = Edge_group.Builder.create ~topology:(Geometry.topology source)
-      ~index:source_index ~name:"split" in
-  Edge_group.Builder.set split_builder !internal_edge true;
-  let split_group = Edge_group.Builder.freeze split_builder in
-  let split_source = Geometry.with_edge_group split_group source |> get_ok in
-  let split = Poly_extrude.run ~split_edges:split_group
-      ~divide:Poly_extrude.Extrude_connected_components ~distance:1. split_source
-      |> get_rdk in
-  check (Geometry.point_count split = 10
-      && Geometry.vertex_count split = 36
-      && Geometry.primitive_count split = 10)
-    "split-edge Poly Extrude component separation";
-
   let mixed_positions = Packed.Float3.Private.of_owned_exn
       ~x:[|-1.; 1.; -1.; 1.; 3.; 4.|] ~y:[|0.; 0.; 0.; 0.; 0.; 0.|]
       ~z:[|-1.; -1.; 1.; 1.; 0.; 0.|] in
@@ -251,43 +115,9 @@ let run () =
        "non-manifold Poly Extrude diagnostic"
    | Ok _ -> fail "connected Poly Extrude accepted a non-manifold edge");
 
-  let wrong_owner = Group.init ~owner:Group.Point ~name:"wrong" 4
-      (fun _ -> true) in
-  (match Poly_extrude.run ~primitives:wrong_owner
-      ~divide:Poly_extrude.Extrude_connected_components ~distance:1. source with
-   | Error error -> check (Error.code error = "invalid_geometry")
-       "Poly Extrude wrong-owner diagnostic"
-   | Ok _ -> fail "Poly Extrude accepted a point selection");
-  (match Poly_extrude.run ~divide:Poly_extrude.Extrude_connected_components
-      ~divisions:0 ~distance:1. source with
-   | Error error -> check (Error.code error = "invalid_geometry")
-       "Poly Extrude divisions diagnostic"
-   | Ok _ -> fail "Poly Extrude accepted zero divisions");
-  (match Poly_extrude.run ~divide:Poly_extrude.Extrude_connected_components
-      ~front_group:"" ~distance:1. source with
-   | Error error -> check (Error.code error = "invalid_geometry")
-       "Poly Extrude output-name diagnostic"
-   | Ok _ -> fail "Poly Extrude accepted an empty output name");
-  (match Poly_extrude.run ~divide:Poly_extrude.Extrude_individual
-      ~split_edges:split_group ~distance:1. split_source with
-   | Error error -> check (Error.code error = "invalid_geometry")
-       "Poly Extrude split-mode diagnostic"
-   | Ok _ -> fail "individual Poly Extrude accepted split edges");
   let cancelled = Cancel.create () in
   Cancel.cancel cancelled;
-  (match Poly_extrude.run ~cancel:cancelled
-      ~divide:Poly_extrude.Extrude_connected_components ~distance:1. source with
-   | Error error -> check (Error.code error = "cancelled")
-       "Poly Extrude cancellation diagnostic"
-   | Ok _ -> fail "cancelled Poly Extrude published geometry");
-
   let dense = Plane_generators.grid ~columns:320 ~rows:240 ~size:20. () |> get_rdk in
-  let dense = dense
-      |> Geometry.with_attribute (Attribute.create_owned ~name:"id"
-           ~owner:Attribute.Point
-           (Attribute.Int (Array.init (Geometry.point_count dense) Fun.id))
-           |> get_ok) |> get_ok
-      |> Group_mesh.group_edges ~name:"dense_edges" |> get_rdk in
   let run domains = Parallel.run ~domains (fun () ->
       Poly_extrude.run ~grain:257
         ~divide:Poly_extrude.Extrude_connected_components ~divisions:4

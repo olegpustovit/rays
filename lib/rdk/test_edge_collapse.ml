@@ -206,10 +206,6 @@ let run () =
       && Geometry.primitive_count collapsed_curve = 0)
     "whole-curve Edge Collapse cleanup";
 
-  let other = Box_generator.box ~size:(Rays_math.Vec3.create 1. 1. 1.) () |> get_rdk
-      |> Group_mesh.group_edges ~name:"other" |> get_rdk in
-  let other_edges = Geometry.find_edge_group "other" other |> Option.get in
-  expect_code "invalid_topology" (Edge_collapse.run ~edges:other_edges source);
   expect_code "invalid_topology"
     (Edge_collapse.run ~edges:collapse ~connectivity_attribute:"missing" source);
   expect_code "invalid_topology"

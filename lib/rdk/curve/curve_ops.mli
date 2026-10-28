@@ -18,37 +18,6 @@ val interpolate_attribute :
 (** Shared packed linear interpolation for point/vertex topology generators.
     Integer, text, and ragged payload use the nearest endpoint. *)
 
-val convert_line :
-  ?cancel:Cancel.t ->
-  ?grain:int ->
-  ?edges:Edge_group.t ->
-  ?length_attribute:string ->
-  Geometry.t ->
-  (Geometry.t, string) result
-(** Replace each selected unique, non-degenerate topology edge with one open
-    two-point polygon curve. Output primitives are ordered lexicographically by
-    their canonical point pair. Point/detail attributes, point groups, and
-    native edge groups are preserved; vertex/primitive payloads are discarded
-    because the output primitives are newly constructed. *)
-
-val with_length_attribute :
-  ?cancel:Cancel.t ->
-  ?grain:int ->
-  name:string ->
-  Geometry.t ->
-  (Geometry.t, string) result
-(** Add a primitive float attribute containing the robust total arc length of
-    each polygon curve. Existing topology and payload are shared unchanged. *)
-
-val ends :
-  ?cancel:Cancel.t ->
-  ?grain:int ->
-  ?primitives:Group.t ->
-  ?allow_polygons:bool ->
-  end_mode ->
-  Geometry.t ->
-  (Geometry.t, string) result
-
 val join :
   ?cancel:Cancel.t ->
   ?grain:int ->
@@ -63,13 +32,3 @@ val join :
   ?wrap:bool ->
   Geometry.t ->
   (Geometry.t, string) result
-
-val carve_curves :
-  ?cancel:Cancel.t -> ?grain:int -> ?primitives:Group.t ->
-  ?relative_arc_length:bool -> ?first:float -> ?last:float ->
-  ?first_attribute:string -> ?last_attribute:string ->
-  ?attribute_mode:parameter_attribute_mode -> ?only_at_breakpoints:bool ->
-  ?cut_at_all_internal_breakpoints:bool -> ?keep:cut_mode ->
-  ?extract_points:bool -> ?divisions:int -> ?keep_original:bool ->
-  Geometry.t -> (Geometry.t, Error.t) result
-(** Carve (or, with [extract_points], extract points from) polygon curves. *)

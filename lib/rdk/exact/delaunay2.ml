@@ -9,7 +9,6 @@ type t = {
 type result_t = t
 
 let unique_count value = Array.length value.unique_source
-let triangle_count value = Array.length value.triangle_points / 3
 
 let check_index label count index =
   if index < 0 || index >= count then
@@ -23,12 +22,6 @@ let unique_source value unique =
 let source_unique value source =
   check_index "source_unique" value.source_count source;
   value.source_unique.(source)
-
-let triangle_point value triangle local =
-  check_index "triangle_point" (triangle_count value) triangle;
-  if local < 0 || local > 2 then
-    invalid_arg "Delaunay2.triangle_point: local corner must be 0, 1, or 2";
-  value.triangle_points.((triangle * 3) + local)
 
 module Private = struct
   type view = {

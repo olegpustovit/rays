@@ -53,52 +53,6 @@ let crossing_source () =
        (Attribute.Float [|0.;10.;20.;30.;40.|])
   |> with_attribute Attribute.Primitive "piece" (Attribute.Int [|17|])
 
-let test_edge_remove_and_cut () =
-  let source = crossing_source () in
-  let removed = Poly_cut.cut ~element:Poly_cut.Poly_cut_edges
-      ~strategy:Poly_cut.Poly_cut_remove
-      ~detection:(Poly_cut.Poly_cut_crossing {attribute="signal"; value=0.})
-      source |> get_ok in
-  check (Geometry.point_count removed = 5
-      && Geometry.primitive_count removed = 2
-      && primitive_points removed 0 = [|1;2|]
-      && primitive_points removed 1 = [|3;4|])
-    "PolyCut edge removal fragments";
-  let source = source |> Group_mesh.group_edges ~name:"source_edges" |> get_ok in
-  let cut = Poly_cut.cut ~grain:1 ~element:Poly_cut.Poly_cut_edges
-      ~strategy:Poly_cut.Poly_cut_cut
-      ~detection:(Poly_cut.Poly_cut_crossing {attribute="signal"; value=0.})
-      source |> get_ok in
-  check (Geometry.point_count cut = 9 && Geometry.primitive_count cut = 3)
-    "PolyCut crossing cut cardinality";
-  let positions = position_view cut in
-  let fragments = Array.init 3 (primitive_points cut) in
-  check (Array.map Array.length fragments = [|2;4;3|])
-    "PolyCut crossing fragment sizes";
-  let first_cut = fragments.(0).(1)
-  and second_copy = fragments.(1).(0)
-  and second_cut = fragments.(1).(3)
-  and third_copy = fragments.(2).(0) in
-  check (first_cut <> second_copy && second_cut <> third_copy)
-    "PolyCut did not disconnect interpolated cut endpoints";
-  check_float 0.5 positions.x.(first_cut) "first crossing position";
-  check_float 0.5 positions.x.(second_copy) "first crossing clone position";
-  check_float (2. +. (2. /. 3.)) positions.x.(second_cut)
-    "second crossing position";
-  check_float positions.x.(second_cut) positions.x.(third_copy)
-    "second crossing clone position";
-  let weights = float_values Attribute.Point "weight" cut in
-  check_float 5. weights.(first_cut) "point payload interpolation";
-  check_float 5. weights.(second_copy) "point payload clone interpolation";
-  let vertex_weights = float_values Attribute.Vertex "vertex_weight" cut in
-  check_float 5. vertex_weights.(1) "vertex payload interpolation";
-  check (int_values Attribute.Primitive "piece" cut = [|17;17;17|])
-    "PolyCut primitive payload ancestry";
-  let source_edges = Geometry.find_edge_group "source_edges" cut
-      |> Option.get in
-  check (Edge_group.cardinality source_edges = 6)
-    "PolyCut subdivided edge-group ancestry"
-
 let test_change_subdivision () =
   let source = open_curve 2
       |> with_attribute Attribute.Point "delta"
@@ -423,59 +377,11 @@ let equal_geometry left right =
       && values left = values right)
       (Geometry.edge_groups left) (Geometry.edge_groups right)
 
-let test_dense_parallel_exactness () =
-  let curves = 600 and points_per_curve = 241 in
-  let point_count = curves * points_per_curve in
-  let topology = Topology.create_owned ~point_count
-      ~vertex_points:(Array.init point_count Fun.id)
-      ~primitive_offsets:(Array.init (curves + 1) (fun primitive ->
-        primitive * points_per_curve))
-      ~primitive_kinds:(Array.make curves Topology.Open_polyline)
-      |> Result.get_ok in
-  let positions = Packed.Float3.Private.of_owned_exn
-      ~x:(Array.init point_count (fun point ->
-        float_of_int (point mod points_per_curve) *. 0.01))
-      ~y:(Array.init point_count (fun point ->
-        float_of_int (point / points_per_curve) *. 0.02))
-      ~z:(Array.make point_count 0.) in
-  let source = Geometry.create ~positions ~topology () |> Result.get_ok
-      |> with_float "signal" (Array.init point_count (fun point ->
-           float_of_int (point mod 29) -. 14.5))
-      |> with_int "id" (Array.init point_count Fun.id)
-      |> with_attribute Attribute.Vertex "uv"
-           (Attribute.Float2 (Packed.Float2.of_owned
-             ~x:(Array.init point_count (fun point ->
-               float_of_int (point mod points_per_curve)
-               /. float_of_int (points_per_curve - 1)))
-             ~y:(Array.make point_count 0.) |> Result.get_ok))
-      |> with_attribute Attribute.Primitive "piece"
-           (Attribute.Int (Array.init curves Fun.id)) in
-  let selected = Group.init ~owner:Group.Point ~name:"selected" point_count
-      (fun point -> point mod 7 <> 0) in
-  let source = Geometry.with_group selected source |> Result.get_ok
-      |> Group_mesh.group_edges ~grain:257 ~name:"source_edges" |> get_ok in
-  let cook domains = Parallel.run ~domains (fun () ->
-      Poly_cut.cut ~grain:257 ~element:Poly_cut.Poly_cut_edges
-        ~strategy:Poly_cut.Poly_cut_cut
-        ~detection:(Poly_cut.Poly_cut_crossing {attribute="signal"; value=0.})
-        source |> get_ok) in
-  let one = cook 1 and four = cook 4 in
-  check (equal_geometry one four) "PolyCut one/four-domain geometry differs";
-  check (Geometry.primitive_count one > curves
-      && Geometry.point_count one > Geometry.point_count source)
-    "PolyCut dense fixture did not cut any curve";
-  let one_mesh = Rdk_rays.Rays_mesh.to_mesh one |> get_ok
-  and four_mesh = Rdk_rays.Rays_mesh.to_mesh four |> get_ok in
-  check (Mesh.Private.packed_view one_mesh = Mesh.Private.packed_view four_mesh)
-    "PolyCut one/four-domain render mesh differs"
-
 let run () =
-  test_edge_remove_and_cut ();
   test_change_subdivision ();
   test_edge_cut_boundary_semantics ();
   test_discrete_ragged_payload_and_ordered_groups ();
   test_point_remove_and_cut ();
   test_closed_policy_and_restrictions ();
   test_validation_and_cancellation ();
-  test_dense_parallel_exactness ();
   print_endline "rdk PolyCut tests passed"

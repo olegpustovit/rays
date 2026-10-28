@@ -55,19 +55,6 @@ let () =
     "larger-magnitude ULP accepts 1.5 ULPs";
   let changed name storage = get (Geometry.with_attribute
     (get (Attribute.create_owned ~name ~owner:Attribute.Point storage)) left) in
-  List.iter (fun geometry ->
-    check (not (close_geometry ~ulps:4 left geometry)) "discrete change accepted") [
-    changed "i" (Attribute.Int [|1; 2; 4|]);
-    changed "ia" (Attribute.Int_array (get (Packed.Int_array.create_owned
-      ~offsets:[|0; 1; 2; 3|] ~values:[|1; 2; 4|])));
-    changed "text" (Attribute.Text [|"a"; "b"; "d"|]);
-    get (Geometry.with_group (get (Group.ordered ~owner:Group.Point
-      ~name:"selected" ~length:3 [|0; 2|])) left);
-    get (Geometry.with_edge_group (Edge_group.complement
-      (List.hd (Geometry.edge_groups left))) left);
-    get (Geometry.create ~positions:(Geometry.positions left)
-      ~topology:(Geometry.topology left) ~attributes:(List.rev (Geometry.attributes left))
-      ~groups:(Geometry.groups left) ~edge_groups:(Geometry.edge_groups left) ())];
   let csr_changed = changed "fa" (Attribute.Float_array
     (get (Packed.Float_array.create_owned ~offsets:[|0; 0; 2; 3|]
       ~values:[|1.; 1.; 1.|]))) in

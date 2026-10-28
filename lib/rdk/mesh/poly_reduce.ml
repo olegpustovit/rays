@@ -1,4 +1,3 @@
-open Rays_math
 
 type plan = {
   edges : Edge_group.t;
@@ -37,7 +36,6 @@ exception Invalid of string
 type target =
   | Reduce_ratio of float
   | Reduce_primitive_count of int
-
 
 let validate_group ~owner ~length label = function
   | None -> ()

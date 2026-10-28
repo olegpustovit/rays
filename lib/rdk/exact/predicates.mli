@@ -67,17 +67,6 @@ val orient3d_packed :
 (** Allocation-free hot-path variant of [orient3d] over packed coordinate
     planes and point indices. Exact fallback allocates bounded scratch. *)
 
-val incircle :
-  ax:float -> ay:float ->
-  bx:float -> by:float ->
-  cx:float -> cy:float ->
-  dx:float -> dy:float ->
-  sign
-(** Exact sign of the 2D incircle determinant. When [(a,b,c)] is positively
-    oriented, [Positive] means [d] is strictly inside its circumcircle,
-    [Zero] means cocircular, and [Negative] means outside. Reversing the source
-    triangle orientation reverses the sign. *)
-
 val incircle_packed :
   x:float array -> y:float array -> int -> int -> int -> int -> sign
 (** Allocation-free hot-path variant of [incircle] over packed coordinate
@@ -97,28 +86,6 @@ val segment_segment_packed :
     Point contact and positive-length collinear overlap are distinct. Skew
     segments are rejected through exact coplanarity before a stable exact 2D
     projection. Degenerate zero-length inputs are reported explicitly. *)
-
-val segment_triangle_packed :
-  x:float array -> y:float array -> z:float array ->
-  segment_start:int -> segment_end:int ->
-  triangle_a:int -> triangle_b:int -> triangle_c:int ->
-  segment_triangle
-(** Exact combinatorial classification of a closed segment against a triangle.
-    The result distinguishes a transverse face/edge/vertex hit, a segment
-    endpoint on the triangle, a coplanar segment, a degenerate triangle, and a
-    disjoint configuration. Coplanar overlap is deliberately left to the 2D
-    arrangement stage. Use [Private.segment_triangle_code_packed] inside a hot
-    kernel to avoid allocating the readable hit payload. *)
-
-val triangle_triangle_packed :
-  x:float array -> y:float array -> z:float array ->
-  left_a:int -> left_b:int -> left_c:int ->
-  right_a:int -> right_b:int -> right_c:int ->
-  triangle_triangle
-(** Exact non-coplanar intersection topology for two triangles. A point is
-    identified by the lowest-dimensional feature containing it on each input;
-    a transverse intersection is either one point or one segment. Coplanar
-    pairs are explicitly deferred to the planar arrangement stage. *)
 
 module Private : sig
   val exact_orient2d_arena :

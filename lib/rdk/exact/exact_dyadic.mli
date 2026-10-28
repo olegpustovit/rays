@@ -59,22 +59,8 @@ module Scratch : sig
   val incircle_homogeneous :
     ax:t -> ay:t -> aw:t -> bx:t -> by:t -> bw:t ->
     cx:t -> cy:t -> cw:t -> dx:t -> dy:t -> dw:t -> int
-  val ray_edge_homogeneous :
-    qx:t -> qy:t -> qz:t -> qw:t ->
-    fx:t -> fy:t -> fz:t -> fw:t ->
-    sx:t -> sy:t -> sz:t -> sw:t ->
-    dx:float -> dy:float -> dz:float -> int
   (* Exact sign for the positive-infinitesimal direction
      [(1, epsilon, epsilon^2)]. *)
-  val ray_edge_symbolic_homogeneous :
-    qx:t -> qy:t -> qz:t -> qw:t ->
-    fx:t -> fy:t -> fz:t -> fw:t ->
-    sx:t -> sy:t -> sz:t -> sw:t -> int
-  val normal_dot_direction_homogeneous :
-    fx:t -> fy:t -> fz:t -> fw:t ->
-    sx:t -> sy:t -> sz:t -> sw:t ->
-    tx:t -> ty:t -> tz:t -> tw:t ->
-    dx:float -> dy:float -> dz:float -> int
   (* Exact sign of the triangle normal dotted with the
      positive-infinitesimal direction [(1, epsilon, epsilon^2)]. *)
   val normal_dot_symbolic_homogeneous :

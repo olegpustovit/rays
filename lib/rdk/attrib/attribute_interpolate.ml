@@ -1,4 +1,3 @@
-open Rays_math
 
 type spec = {
   source_owner : Attribute.owner;

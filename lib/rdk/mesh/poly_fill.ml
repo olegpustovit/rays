@@ -1,4 +1,3 @@
-open Rays_math
 
 type mode =
   | Fill_single_polygon

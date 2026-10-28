@@ -98,56 +98,8 @@ type sample_limits =
   | Minimum_only of float array
   | Maximum_only of float array
   | Minimum_and_maximum of float array * float array
-val randomize :
-  ?cancel:Rdk_core.Cancel.t ->
-  grain:int ->
-  ?selection:Rdk_core.Group.t ->
-  ?element_selection:random_selection ->
-  ?seed_attribute:string ->
-  ?fraction_attribute:String.t ->
-  ?minimum:numeric_value ->
-  ?maximum:numeric_value ->
-  direction_bias:float ->
-  seed:Rays_math.Rand.t ->
-  owner:Rdk_core.Attribute.owner ->
-  name:String.t ->
-  operation:random_operation ->
-  scale:float ->
-  random_distribution ->
-  Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, string) result
 type noise_coordinates = {
   nx : float array;
   ny : float array;
   nz : float array;
 }
-val noise :
-  ?cancel:Rdk_core.Cancel.t ->
-  grain:int ->
-  ?selection:Rdk_core.Group.t ->
-  seed:int ->
-  owner:Rdk_core.Attribute.owner ->
-  name:String.t ->
-  kind:noise_kind ->
-  location:noise_location ->
-  range:noise_range ->
-  operation:noise_operation ->
-  blend:float ->
-  frequency:Rays_math.Vec3.t ->
-  offset:Rays_math.Vec3.t ->
-  octaves:int ->
-  lacunarity:float ->
-  roughness:float ->
-  Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, string) result
-val remap :
-  ?cancel:Rdk_core.Cancel.t ->
-  grain:int ->
-  ?selection:Rdk_core.Group.t ->
-  owner:Rdk_core.Attribute.owner ->
-  name:String.t ->
-  ?into:String.t ->
-  input:remap_input ->
-  output_min:numeric_value ->
-  output_max:numeric_value ->
-  policy:remap_policy ->
-  ramp:(float * float) list ->
-  Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, string) result

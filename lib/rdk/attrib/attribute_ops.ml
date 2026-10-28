@@ -1,7 +1,5 @@
-open Rays_math
 
 type image_channel = Attribute_image.channel = Red | Green | Blue | Alpha | Luminance
-let from_image = Attribute_image.from_image
 
 type method_ = Attribute_promote.method_ =
   | First
@@ -16,7 +14,6 @@ type method_ = Attribute_promote.method_ =
   | Root_mean_square
   | Array_all
   | Unique_values
-
 
 let promote_pattern = Attribute_promote.promote_pattern
 
@@ -203,51 +200,6 @@ let enumerate = Attribute_enumerate.run
 
 let blur_points = Attribute_blur.run
 
-let randomize ?cancel ?(grain = 16_384) ?selection ?element_selection
-    ?seed_attribute ?fraction_attribute ?minimum ?maximum
-    ?(direction_bias = 0.) ~seed ~owner ~name
-    ?(operation = Random_set) ?(scale = 1.) distribution geometry =
-  try Result.map_error
-      (Error.of_string ~operation:"attribute_randomize"
-        ~code:"invalid_randomize")
-      (Attribute_generate.randomize ?cancel ~grain ?selection
-         ?element_selection ?seed_attribute ?fraction_attribute ?minimum
-         ?maximum ~direction_bias
-         ~seed ~owner ~name ~operation ~scale distribution geometry)
-  with
-  | Cancel.Cancelled -> Error (Error.make ~operation:"attribute_randomize"
-      ~code:"cancelled" "attribute randomization was cancelled")
-  | Invalid_argument message -> Error (Error.make
-      ~operation:"attribute_randomize" ~code:"invalid_parameter" message)
-
-let noise ?cancel ?(grain = 16_384) ?selection ~seed ~owner ~name ~kind
-    ?(location = Noise_position) ?(range = Noise_positive)
-    ?(operation = Noise_set) ?(blend = 1.)
-    ?(frequency = Rays_math.Vec3.create 1. 1. 1.) ?(offset = Rays_math.Vec3.zero)
-    ?(octaves = 1) ?(lacunarity = 2.) ?(roughness = 0.5) geometry =
-  try Result.map_error
-      (Error.of_string ~operation:"attribute_noise" ~code:"invalid_noise")
-      (Attribute_generate.noise ?cancel ~grain ?selection ~seed ~owner ~name
-         ~kind ~location ~range ~operation ~blend ~frequency ~offset ~octaves
-         ~lacunarity ~roughness geometry)
-  with
-  | Cancel.Cancelled -> Error (Error.make ~operation:"attribute_noise"
-      ~code:"cancelled" "attribute noise was cancelled")
-  | Invalid_argument message -> Error (Error.make ~operation:"attribute_noise"
-      ~code:"invalid_parameter" message)
-
-let remap ?cancel ?(grain = 16_384) ?selection ~owner ~name ?into ~input
-    ~output_min ~output_max ?(policy = Remap_clamp) ?(ramp = []) geometry =
-  try Result.map_error
-      (Error.of_string ~operation:"attribute_remap" ~code:"invalid_remap")
-      (Attribute_generate.remap ?cancel ~grain ?selection ~owner ~name ?into
-         ~input ~output_min ~output_max ~policy ~ramp geometry)
-  with
-  | Cancel.Cancelled -> Error (Error.make ~operation:"attribute_remap"
-      ~code:"cancelled" "attribute remapping was cancelled")
-  | Invalid_argument message -> Error (Error.make
-      ~operation:"attribute_remap" ~code:"invalid_parameter" message)
-
 let interpolate_attribute ?into ~owner name =
   if String.trim name = "" then invalid_arg
       "Rdk.Attribute_ops.interpolate_attribute: empty source name";
@@ -376,18 +328,6 @@ let interpolate ?cancel ?grain ?selection ?driver ?compute_weights
       ~code:"cancelled" "attribute interpolation was cancelled")
   | Invalid_argument message -> Error (Error.make
       ~operation:"attribute_interpolate" ~code:"invalid_parameter" message)
-
-let copy ?cancel ?grain ?source_group ?target_group ?match_ ?allow_position
-    ~group_owner ~rules ~source ~target () =
-  try Result.map_error
-      (Error.of_string ~operation:"attribute_copy" ~code:"invalid_copy")
-      (Attribute_copy.copy ?cancel ?grain ?source_group ?target_group ?match_
-         ?allow_position ~group_owner ~rules ~source ~target ())
-  with
-  | Cancel.Cancelled -> Error (Error.make ~operation:"attribute_copy"
-      ~code:"cancelled" "attribute copy was cancelled")
-  | Invalid_argument message -> Error (Error.make ~operation:"attribute_copy"
-      ~code:"invalid_parameter" message)
 
 type surface_attribute = Attribute_transfer.surface_attribute = {
   source_owner : Attribute.owner;

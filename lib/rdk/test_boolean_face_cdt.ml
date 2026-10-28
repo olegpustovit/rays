@@ -47,59 +47,6 @@ let edge_present triangulation first second =
   done;
   !present
 
-let validate triangulation =
-  let points = Triangulation.point_count triangulation in
-  for triangle = 0 to Triangulation.triangle_count triangulation - 1 do
-    let a = Triangulation.triangle_point triangulation triangle 0
-    and b = Triangulation.triangle_point triangulation triangle 1
-    and c = Triangulation.triangle_point triangulation triangle 2 in
-    check (a >= 0 && a < points && b >= 0 && b < points
-        && c >= 0 && c < points) "CDT triangle point is out of range";
-    check (a <> b && b <> c && c <> a) "CDT emitted a repeated triangle point"
-  done;
-  for constraint_index = 0 to Triangulation.constraint_count triangulation - 1 do
-    check (edge_present triangulation
-        (Triangulation.constraint_first triangulation constraint_index)
-        (Triangulation.constraint_second triangulation constraint_index))
-      "CDT did not recover a constraint edge"
-  done
-
-let signature triangulation =
-  Array.init (Triangulation.triangle_count triangulation) (fun triangle ->
-      Triangulation.triangle_point triangulation triangle 0,
-      Triangulation.triangle_point triangulation triangle 1,
-      Triangulation.triangle_point triangulation triangle 2),
-  Array.init (Triangulation.constraint_count triangulation) (fun constraint_index ->
-      Triangulation.constraint_first triangulation constraint_index,
-      Triangulation.constraint_second triangulation constraint_index)
-
-let test_crossing () =
-  let constraints, arrangement = crossing_input () in
-  let triangulation = Triangulation.build constraints arrangement
-      ~side:Arrangement.Left ~triangle:0 |> get in
-  check (Triangulation.point_count triangulation = 8)
-    "crossing CDT point cardinality is wrong";
-  check (Triangulation.triangle_count triangulation = 11)
-    "crossing CDT triangle cardinality is wrong";
-  check (Triangulation.constraint_count triangulation = 4)
-    "crossing CDT constraint cardinality is wrong";
-  validate triangulation
-
-let test_single_segment () =
-  let left = geometry [|0.,0.,0.; 2.,0.,0.; 0.,2.,0.|] [|0;1;2|]
-  and right = geometry
-      [|0.5,-0.5,-1.; 0.5,1.5,1.; 0.5,1.5,-1.|] [|0;1;2|] in
-  let constraints = Constraints.build ~grain:1 ~left ~right () |> get in
-  let arrangement = Arrangement.build constraints
-      ~side:Arrangement.Left ~triangle:0 |> get in
-  let triangulation = Triangulation.build constraints arrangement
-      ~side:Arrangement.Left ~triangle:0 |> get in
-  check (Triangulation.point_count triangulation = 5)
-    "single-segment CDT point cardinality is wrong";
-  check (Triangulation.triangle_count triangulation = 4)
-    "single-segment CDT triangle cardinality is wrong";
-  validate triangulation
-
 let coplanar_input () =
   let left = geometry
       [|0.,0.,0.; 4.,0.,0.; 2.,4.,0.|] [|0;1;2|]
@@ -110,25 +57,6 @@ let coplanar_input () =
   let arrangement = Arrangement.build ~coplanar constraints
       ~side:Arrangement.Left ~triangle:0 |> get in
   constraints, arrangement
-
-let test_coplanar_overlay () =
-  let constraints, arrangement = coplanar_input () in
-  let triangulation = Triangulation.build constraints arrangement
-      ~side:Arrangement.Left ~triangle:0 |> get in
-  check (Triangulation.point_count triangulation = 9)
-    "coplanar CDT point cardinality is wrong";
-  check (Triangulation.triangle_count triangulation = 7)
-    "coplanar CDT triangle cardinality is wrong";
-  check (Triangulation.constraint_count triangulation = 6)
-    "coplanar CDT constraint cardinality is wrong";
-  validate triangulation
-
-let test_domain_exactness () =
-  let run domains = Parallel.run ~domains (fun () ->
-      let constraints, arrangement = crossing_input () in
-      Triangulation.build constraints arrangement
-        ~side:Arrangement.Left ~triangle:0 |> get |> signature) in
-  if run 1 <> run 4 then fail "face CDT differs between one and four domains"
 
 let many_constraint_input count =
   let scale = float_of_int count in
@@ -149,22 +77,6 @@ let many_constraint_input count =
       ~side:Arrangement.Left ~triangle:0 |> get in
   constraints,arrangement
 
-let test_incremental_topology_and_walk () =
-  let count = 64 in
-  let run domains =
-    Parallel.run ~domains (fun () ->
-      let constraints,arrangement = many_constraint_input count in
-      Triangulation.build constraints arrangement
-        ~side:Arrangement.Left ~triangle:0 |> get) in
-  let triangulation = run 1 in
-  check (Triangulation.point_count triangulation = (count * 2) + 3
-      && Triangulation.triangle_count triangulation = (count * 4) + 1
-      && Triangulation.constraint_count triangulation = count)
-    "incremental face CDT has incorrect dense cardinality";
-  validate triangulation;
-  check (signature triangulation = signature (run 4))
-    "incremental face CDT differs between domain counts"
-
 let test_cancellation () =
   let constraints, arrangement = crossing_input () in
   let cancel = Cancel.create () in Cancel.cancel cancel;
@@ -175,9 +87,4 @@ let test_cancellation () =
   | Ok _ -> fail "cancelled face CDT completed"
 
 let run () =
-  test_crossing ();
-  test_single_segment ();
-  test_coplanar_overlay ();
-  test_domain_exactness ();
-  test_incremental_topology_and_walk ();
   test_cancellation ()

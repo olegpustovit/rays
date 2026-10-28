@@ -1,9 +1,3 @@
-val edge_cusp :
-  ?cancel:Rdk_core.Cancel.t ->
-  ?grain:int ->
-  ?edges:Rdk_core.Edge_group.t ->
-  ?update_point_normals:bool ->
-  Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Error.t) result
 
 val run :
   ?cancel:Cancel.t -> ?grain:int ->

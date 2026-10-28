@@ -93,8 +93,7 @@ let run () =
         Topology.Polygon; Topology.Open_polyline|] in
   let primitive_id = Attribute.create_owned ~name:"primitive_id"
       ~owner:Attribute.Primitive (Attribute.Int [|10;20;30;40;50|]) |> get_ok in
-  let overlap_source = Geometry.with_attribute primitive_id overlap_source |> get_ok
-      |> Group_mesh.group_edges ~name:"source_edges" |> get_rdk in
+  let overlap_source = Geometry.with_attribute primitive_id overlap_source |> get_ok in
   let overlap_bytes = geometry_bytes overlap_source in
   let overlap_at domains policy = Parallel.run ~domains (fun () -> Clean.run ~grain:1
       ~remove_degenerate:false ~overlaps:policy overlap_source |> get_rdk) in
@@ -116,8 +115,6 @@ let run () =
     Clean.Delete_overlap_pairs, delete_pairs, [|40;50|], [|0;2;3;0;1;2|]
   ];
   check (geometry_bytes overlap_source = overlap_bytes) "Clean overlap repair mutated its source";
-  check (Geometry.find_edge_group "source_edges" keep_first <> None)
-    "Clean overlap repair lost native edge provenance";
 
   let duplicate_points = make_geometry ~x:[|0.;0.;1.|] ~y:[|0.;0.;0.|]
       ~z:[|0.;0.;0.|] ~vertex_points:[||] ~primitive_offsets:[|0|]
@@ -148,19 +145,16 @@ let run () =
     Group.init ~owner:Group.Primitive ~name:"keep_faces" 1 (fun _ -> true);
   ] in
   let metadata_source = Geometry.create ~positions:(Geometry.positions metadata_source)
-      ~topology:(Geometry.topology metadata_source) ~attributes ~groups () |> get_ok
-      |> Group_mesh.group_edges ~name:"drop_edges" |> get_rdk in
+      ~topology:(Geometry.topology metadata_source) ~attributes ~groups () |> get_ok in
   let cleaned_metadata = Clean.run ~remove_degenerate:false ~reverse_winding:true
       ~delete_unused_groups:true ~point_attributes:"temp*"
       ~vertex_attributes:"temp*" ~primitive_attributes:"temp*"
-      ~detail_attributes:"temp*" ~point_groups:"drop*"
-      ~edge_groups:"drop*" metadata_source |> get_rdk in
+      ~detail_attributes:"temp*" ~point_groups:"drop*" metadata_source |> get_rdk in
   check (Geometry.attributes cleaned_metadata |> List.map Attribute.name
       = ["keep_vertex"]
       && Geometry.find_group ~owner:Group.Point "drop_points" cleaned_metadata = None
       && Geometry.find_group ~owner:Group.Vertex "empty_vertices" cleaned_metadata = None
-      && Geometry.find_group ~owner:Group.Primitive "keep_faces" cleaned_metadata <> None
-      && Geometry.find_edge_group "drop_edges" cleaned_metadata = None)
+      && Geometry.find_group ~owner:Group.Primitive "keep_faces" cleaned_metadata <> None)
     "Clean attribute/group/empty-group cleanup";
 
   let valid = Plane_generators.grid ~columns:2 ~rows:2 ~size:2. () |> get_rdk in

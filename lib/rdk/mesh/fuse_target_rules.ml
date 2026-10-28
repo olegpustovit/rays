@@ -1,4 +1,3 @@
-open Rays_math
 
 type compiled_attribute_rule = {
   pattern : Attribute_pattern.t;

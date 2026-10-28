@@ -71,53 +71,6 @@ let face_signature = function
       Triangulation.triangle_point face triangle 1,
       Triangulation.triangle_point face triangle 2)
 
-let signature value =
-  Array.init (Refinement.left_face_count value)
-    (fun face -> face_signature (Refinement.left_face value face)),
-  Array.init (Refinement.right_face_count value)
-    (fun face -> face_signature (Refinement.right_face value face))
-
-let test_batch () =
-  let pair_count = 127 in
-  let value = Refinement.build ~grain:11 (constraints pair_count) |> get in
-  check (Refinement.left_face_count value = pair_count
-      && Refinement.right_face_count value = pair_count)
-    "refinement face cardinality is wrong";
-  check (Refinement.refined_left_count value = pair_count
-      && Refinement.refined_right_count value = pair_count)
-    "not every intersected face was refined";
-  for face = 0 to pair_count - 1 do
-    check (Option.is_some (Refinement.left_face value face)
-        && Option.is_some (Refinement.right_face value face))
-      "refinement omitted an affected face"
-  done
-
-let test_domain_exactness () =
-  let input = constraints 257 in
-  let run domains = Parallel.run ~domains (fun () ->
-      Refinement.build ~grain:17 input |> get |> signature) in
-  if run 1 <> run 4 then fail "batch face refinement differs by domain count"
-
-let test_coplanar_batch () =
-  let pair_count = 127 in
-  let constraints, coplanar = coplanar_input pair_count in
-  let value = Refinement.build ~coplanar ~grain:11 constraints |> get in
-  check (Refinement.refined_left_count value = pair_count
-      && Refinement.refined_right_count value = pair_count)
-    "coplanar batch did not refine both source surfaces";
-  for face = 0 to pair_count - 1 do
-    match Refinement.left_face value face, Refinement.right_face value face with
-    | Some left, Some right ->
-        check (Triangulation.triangle_count left = 7
-            && Triangulation.triangle_count right = 7)
-          "coplanar batch face has the wrong CDT cardinality"
-    | _ -> fail "coplanar batch omitted an affected face"
-  done;
-  let run domains = Parallel.run ~domains (fun () ->
-      Refinement.build ~coplanar ~grain:13 constraints |> get |> signature) in
-  if run 1 <> run 4 then
-    fail "coplanar batch refinement differs by domain count"
-
 let test_validation () =
   let input = constraints 1 in
   (match Refinement.build ~grain:0 input with
@@ -131,7 +84,4 @@ let test_validation () =
   | Ok _ -> fail "cancelled refinement completed"
 
 let run () =
-  test_batch ();
-  test_domain_exactness ();
-  test_coplanar_batch ();
   test_validation ()

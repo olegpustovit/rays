@@ -4,7 +4,6 @@ open Flow.Syntax
 let fail message = raise (Failure message)
 let get_flow = function Ok value -> value | Error error -> fail (Diagnostic.to_string error)
 let get_string = function Ok value -> value | Error error -> fail error
-let symbol = function { Flow.Syntax.node = Sym value; _ } -> value | _ -> fail "expected symbol"
 let string = function { Flow.Syntax.node = Str value; _ } -> value | _ -> fail "expected string"
 let children tag = function
   | { Flow.Syntax.node = List ({ node = Sym found; _ } :: values); _ } when found = tag -> values
@@ -572,7 +571,6 @@ let syntax node = Flow.Syntax.make node
 let sexp_tag tag values = Flow.Lisp.flat (syntax (Flow.Syntax.List
     (syntax (Flow.Syntax.Sym tag) :: values)))
 let sexp_string value = syntax (Flow.Syntax.Str value)
-let sexp_text value = Flow.Lisp.flat (sexp_string value)
 
 let write_gz path text =
   let temporary = path ^ ".tmp" in
@@ -671,8 +669,8 @@ let self_test () =
     expect_rejection "partial per-key checkpoint" (fun () -> check_key cache temporary "line" [line] coverage);
     expect_rejection "partial per-fixture checkpoint" (fun () -> check_fixture cache temporary "line" "none" [line] coverage);
     expect_rejection "changed source provenance" (fun () ->
-      validate_provenance "running" (String.make 32 '0')
-        ["node.rays", String.make 32 '1'] ["node.rays", String.make 32 '2']);
+      ignore (validate_provenance "running" (String.make 32 '0')
+        ["node.rays", String.make 32 '1'] ["node.rays", String.make 32 '2']));
     let positions = Packed.Float3.of_owned ~x:[|0.|] ~y:[|0.|] ~z:[|0.|] |> get_string in
     let topology = Topology.create_owned ~point_count:1 ~vertex_points:[||] ~primitive_offsets:[|0|]
         ~primitive_kinds:[||] |> get_string in

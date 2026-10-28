@@ -1,4 +1,3 @@
-open Rays_math
 
 type position =
   | First_position

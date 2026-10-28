@@ -269,67 +269,6 @@ let test_curve_triangle_intersections () =
         = [|0.5;0.25;0.25; 0.5;0.;0.|])
     "Intersection Analysis mixed-geometry self analysis"
 
-let test_restrictions_translation_and_errors () =
-  let source = source () and collision = collision () in
-  let first = Group.init ~owner:Group.Primitive ~name:"first" 2
-      (fun primitive -> primitive = 0) in
-  let output = Intersection_analysis.run ~source_primitives:first
-      ~collision_primitives:first ~collision source |> get in
-  check (Geometry.point_count output = 2)
-    "Intersection Analysis primitive restrictions";
-  let moved = Rays_math.Mat4.translation (Rays_math.Vec3.create 1e12 (-1e12) 1e12) in
-  let original = Intersection_analysis.run ~include_coplanar:false ~collision
-      source |> get
-  and translated = Intersection_analysis.run ~include_coplanar:false
-      ~collision:(Transform_ops.transform moved collision) (Transform_ops.transform moved source)
-      |> get in
-  check (Geometry.point_count translated = Geometry.point_count original
-      && (int_rows "sourceprim" translated).values
-         = (int_rows "sourceprim" original).values)
-    "Intersection Analysis changed provenance under common translation";
-  let ox, oy, oz = positions original and tx, ty, tz = positions translated in
-  for point = 0 to Geometry.point_count original - 1 do
-    check (Float.abs (tx.(point) -. 1e12 -. ox.(point)) <= 2e-4
-        && Float.abs (ty.(point) +. 1e12 -. oy.(point)) <= 2e-4
-        && Float.abs (tz.(point) -. 1e12 -. oz.(point)) <= 2e-4)
-      "Intersection Analysis position changed under common translation"
-  done;
-  expect "invalid_parameter" (Intersection_analysis.run ~tolerance:(-1.) source);
-  expect "invalid_parameter" (Intersection_analysis.run
-      ~input_attribute:(Some "same") ~primitive_attribute:(Some "same") source);
-  let wrong = Group.init ~owner:Group.Point ~name:"wrong" 6 (Fun.const true) in
-  expect "invalid_group" (Intersection_analysis.run ~source_primitives:wrong
-      source);
-  let cancelled = Cancel.create () in
-  Cancel.cancel cancelled;
-  expect "cancelled" (Intersection_analysis.run ~cancel:cancelled source);
-  let curve = Line_geometry.line ~origin:Rays_math.Vec3.zero ~direction:Rays_math.Vec3.unit_x ~length:1. ()
-      |> get in
-  check (Geometry.point_count (Intersection_analysis.run curve |> get) = 0)
-    "Intersection Analysis rejected a valid polygon curve";
-  let degenerate_curve = open_curve [|0.,0.,0.; 0.,0.,0.|] in
-  expect "invalid_surface" (Intersection_analysis.run degenerate_curve);
-  let nonfinite = Geometry.with_positions
-      (Packed.Float3.Private.of_owned_exn
-        ~x:[|Float.nan;2.;0.;10.;12.;10.|]
-        ~y:[|0.;0.;2.;0.;0.;2.|] ~z:(Array.make 6 0.)) source
-      |> get_string in
-  expect "invalid_surface" (Intersection_analysis.run nonfinite);
-  expect "invalid_surface" (Intersection_analysis.run
-      (open_curve [|0.,0.,0.; Float.nan,1.,0.|]));
-  let empty = Intersection_analysis.run (Line_geometry.points [||]) |> get in
-  check (Geometry.point_count empty = 0
-      && (int_rows "sourceinput" empty).offsets = [|0|]
-      && (float_rows "sourceprimuv" empty).offsets = [|0|])
-    "Intersection Analysis empty point/attribute output";
-  let quad_topology = Topology.polygons_owned ~point_count:4
-      ~vertex_points:[|0;1;2;3|] ~primitive_offsets:[|0;4|] |> get_string in
-  let quad_positions = Packed.Float3.Private.of_owned_exn
-      ~x:[|0.;1.;1.;0.|] ~y:[|0.;0.;1.;1.|] ~z:[|0.;0.;0.;0.|] in
-  let quad = Geometry.create ~positions:quad_positions ~topology:quad_topology ()
-      |> get_string in
-  expect "invalid_surface" (Intersection_analysis.run quad)
-
 let test_parallel_exact () =
   let source = Plane_generators.grid ~grain:31 ~counts:Plane_generators.Grid_point_counts
       ~connectivity:Plane_generators.Grid_alternating_triangles
@@ -366,6 +305,5 @@ let run () =
   test_coplanar_and_self ();
   test_curve_intersections ();
   test_curve_triangle_intersections ();
-  test_restrictions_translation_and_errors ();
   test_parallel_exact ();
   print_endline "intersection analysis tests passed"

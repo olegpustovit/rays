@@ -1,5 +1,4 @@
 open Rdk_core
-open Rays_math
 
 type box_connectivity =
   | Box_triangles

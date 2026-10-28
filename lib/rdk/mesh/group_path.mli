@@ -21,13 +21,3 @@ type scratch = {
   previous : int array;
   queue : int array;
 }
-val run :
-  ?cancel:Rdk_core.Cancel.t ->
-  ?grain:int ->
-  ?mode:mode ->
-  ?ending:ending ->
-  ?avoid_self_intersection:bool ->
-  ?collision:Rdk_core.Group.t ->
-  ?contain:bool ->
-  base:Rdk_core.Group.t ->
-  name:string -> Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, string) result

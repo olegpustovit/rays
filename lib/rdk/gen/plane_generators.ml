@@ -1,5 +1,4 @@
 open Rdk_core
-open Rays_math
 
 type circle_arc =
   | Circle_closed
@@ -83,107 +82,6 @@ let grid_frame orientation rotation =
     | Grid_yz -> Rays_math.Vec3.unit_z, Rays_math.Vec3.unit_y
     | Grid_axes { horizontal; vertical } -> horizontal, vertical in
   plane_frame "Rdk.Plane_generators.grid" ~horizontal ~vertical rotation
-
-let circle_frame orientation rotation =
-  let horizontal, vertical = match orientation with
-    | Circle_xy -> Rays_math.Vec3.unit_x, Rays_math.Vec3.unit_y
-    | Circle_xz -> Rays_math.Vec3.unit_x, Rays_math.Vec3.unit_z
-    | Circle_yz -> Rays_math.Vec3.unit_y, Rays_math.Vec3.unit_z
-    | Circle_axes { horizontal; vertical } -> horizontal, vertical in
-  plane_frame "Rdk.Plane_generators.circle" ~horizontal ~vertical rotation
-
-let circle ?cancel ?(grain = 16_384) ?(arc = Circle_closed)
-    ?(orientation = Circle_xz) ?(reverse = false) ?(center = Rays_math.Vec3.zero)
-    ?radius_x ?radius_y ?(rotation = 0.) ?(uniform_scale = 1.)
-    ?(segments = 64) ~radius () =
-  Error.guard ~operation:"circle" ~code:"invalid_parameter" @@ fun () ->
-  let radius_x = Option.value ~default:radius radius_x *. uniform_scale
-  and radius_y = Option.value ~default:radius radius_y *. uniform_scale in
-  let minimum_segments = match arc with
-    | Circle_closed -> 3
-    | Circle_open_arc _ -> 1
-    | Circle_closed_arc _ -> 2
-    | Circle_sliced_arc _ -> 1 in
-  let arc_angles = match arc with
-    | Circle_closed -> Ok (0., Float.pi *. 2.)
-    | Circle_open_arc { start_angle; end_angle }
-    | Circle_closed_arc { start_angle; end_angle }
-    | Circle_sliced_arc { start_angle; end_angle } ->
-        if not (Float.is_finite start_angle && Float.is_finite end_angle) then
-          Error "Rdk.Plane_generators.circle: arc angles must be finite"
-        else
-          let sweep = end_angle -. start_angle in
-          if not (Float.is_finite sweep) || sweep = 0. then
-            Error "Rdk.Plane_generators.circle: arc angles must span a finite non-zero interval"
-          else Ok (start_angle, end_angle) in
-  if grain <= 0 then Error "Rdk.Plane_generators.circle: grain must be positive"
-  else if segments < minimum_segments then Error (Printf.sprintf
-      "Rdk.Plane_generators.circle: this arc mode requires at least %d segments"
-      minimum_segments)
-  else if not (Float.is_finite radius && Float.is_finite radius_x && Float.is_finite radius_y
-      && Float.is_finite uniform_scale && radius > 0. && radius_x > 0. && radius_y > 0.
-      && uniform_scale > 0.) then
-    Error "Rdk.Plane_generators.circle: radii and uniform scale must be finite and positive"
-  else if not (Float.is_finite center.x && Float.is_finite center.y && Float.is_finite center.z
-      && Float.is_finite rotation) then
-    Error "Rdk.Plane_generators.circle: center and rotation must be finite"
-  else Result.bind arc_angles (fun (start_angle, end_angle) ->
-    Result.bind (circle_frame orientation rotation)
-      (fun (horizontal, vertical, _normal) ->
-    let arc_points, add_center, closed, full_circle = match arc with
-      | Circle_closed -> segments, false, true, true
-      | Circle_open_arc _ -> segments + 1, false, false, false
-      | Circle_closed_arc _ -> segments + 1, false, true, false
-      | Circle_sliced_arc _ -> segments + 1, true, true, false in
-    let point_limit = Sys.max_array_length in
-    if segments = max_int || arc_points > point_limit
-       || add_center && arc_points = point_limit then
-      Error "Rdk.Plane_generators.circle: point cardinality exceeds OCaml array limits"
-    else
-      let point_count = arc_points + if add_center then 1 else 0 in
-      let px = Array.make point_count 0. and py = Array.make point_count 0.
-      and pz = Array.make point_count 0.
-      and vertex_points = Array.make point_count 0 in
-      let step = (end_angle -. start_angle) /. float_of_int segments in
-      let range_count = ((arc_points - 1) / grain) + 1 in
-      let errors = Array.make range_count (-1) in
-      Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(range_count - 1)
-        (fun range ->
-          let first = range * grain
-          and last = min arc_points ((range + 1) * grain) in
-          for local = first to last - 1 do
-            if local land 4095 = 0 then Cancel.check_opt cancel;
-            let sample = if reverse then arc_points - 1 - local else local in
-            let angle = if not full_circle && sample = arc_points - 1
-                then end_angle
-              else start_angle +. (float_of_int sample *. step) in
-            let u = radius_x *. cos angle and v = radius_y *. sin angle in
-            let x = center.x +. (horizontal.x *. u) +. (vertical.x *. v)
-            and y = center.y +. (horizontal.y *. u) +. (vertical.y *. v)
-            and z = center.z +. (horizontal.z *. u) +. (vertical.z *. v) in
-            if Float.is_finite x && Float.is_finite y && Float.is_finite z then begin
-              px.(local) <- x; py.(local) <- y; pz.(local) <- z;
-              vertex_points.(local) <- local
-            end else if errors.(range) < 0 then errors.(range) <- local
-          done);
-      let invalid = Array.fold_left (fun first point ->
-          if point < 0 then first else if first < 0 then point
-          else min first point) (-1) errors in
-      if invalid >= 0 then Error (Printf.sprintf
-          "Rdk.Plane_generators.circle: generated point %d is not finite" invalid)
-      else begin
-        if add_center then begin
-          px.(arc_points) <- center.x; py.(arc_points) <- center.y;
-          pz.(arc_points) <- center.z;
-          vertex_points.(arc_points) <- arc_points
-        end;
-        let positions = Packed.Float3.Private.of_owned_exn ~x:px ~y:py ~z:pz in
-        let primitive_offsets = [|0; point_count|]
-        and primitive_kinds = Bytes.make 1 (if closed then '\002' else '\001') in
-        let topology = Topology.Private.create_validated_owned ~point_count
-            ~vertex_points ~primitive_offsets ~primitive_kinds in
-        Geometry.create ~positions ~topology ()
-      end))
 
 let grid ?cancel ?(grain = 16_384) ?(counts = Grid_divisions)
     ?(connectivity = Grid_triangles) ?(orientation = Grid_xz)

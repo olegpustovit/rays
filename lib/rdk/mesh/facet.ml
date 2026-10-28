@@ -1,4 +1,3 @@
-open Rays_math
 
 let[@inline always] max_abs3 x y z =
   let x = abs_float x and y = abs_float y and z = abs_float z in
@@ -907,84 +906,6 @@ let cusp_polygons ?cancel ?(grain = 16_384) ?primitives ~angle geometry =
           if value = '\001' then '\003' else '\000') cusp in
         split_points_on_edge_ends ?cancel ~grain ?primitives ~index ~split_ends
           geometry)
-
-let edge_cusp ?cancel ?(grain = 16_384) ?edges
-    ?(update_point_normals = true) geometry =
-  Error.guard ~operation:"edge_cusp" ~code:"invalid_topology" @@ fun () ->
-  if grain <= 0 then Error "Rdk_mesh.Facet.edge_cusp: grain must be positive"
-  else begin
-    Cancel.check_opt cancel;
-    let topology_value = Geometry.topology geometry in
-    let topology = Topology.Private.view topology_value in
-    let index = Topology_index.create ?cancel topology_value in
-    let view = Topology_index.Private.view index in
-    let edge_count = Array.length view.edge_a in
-    let selection_error = match edges with
-      | Some group when Edge_group.topology_data_id group
-          <> Topology.data_id topology_value -> Some
-          "Rdk_mesh.Facet.edge_cusp: edge selection belongs to a different topology"
-      | Some group when Edge_group.length group <> edge_count -> Some
-          "Rdk_mesh.Facet.edge_cusp: edge selection length does not match topology edge count"
-      | None | Some _ -> None in
-    match selection_error, edges with
-    | Some message, _ -> Error message
-    | None, None -> Ok geometry
-    | None, Some edges when Edge_group.cardinality edges = 0 -> Ok geometry
-    | None, Some edges ->
-      let degree = Array.make topology.point_count 0 in
-      for edge = 0 to edge_count - 1 do
-        if edge land 4095 = 0 then Cancel.check_opt cancel;
-        if Edge_group.mem edge edges then begin
-          degree.(view.edge_a.(edge)) <- degree.(view.edge_a.(edge)) + 1;
-          degree.(view.edge_b.(edge)) <- degree.(view.edge_b.(edge)) + 1
-        end
-      done;
-      let split_ends = Bytes.make edge_count '\000'
-      and first_invalid_edge = ref (-1)
-      and invalid_reason = ref "" in
-      for edge = 0 to edge_count - 1 do
-        if edge land 4095 = 0 then Cancel.check_opt cancel;
-        if Edge_group.mem edge edges then begin
-          let flags = (if degree.(view.edge_a.(edge)) >= 2 then 1 else 0)
-              lor (if degree.(view.edge_b.(edge)) >= 2 then 2 else 0) in
-          if flags <> 0 then begin
-            let first = view.edge_offsets.(edge)
-            and last = view.edge_offsets.(edge + 1) in
-            let incidence = last - first in
-            if incidence > 2 && !first_invalid_edge < 0 then begin
-              first_invalid_edge := edge;
-              invalid_reason := "effective selected edge is non-manifold"
-            end else begin
-              let at = ref first in
-              while !at < last && !first_invalid_edge < 0 do
-                let primitive =
-                  view.primitive_of_vertex.(view.edge_vertices.(!at)) in
-                if Bytes.get topology.primitive_kinds primitive <> '\000' then begin
-                  first_invalid_edge := edge;
-                  invalid_reason :=
-                    "effective selected edge must belong only to polygons"
-                end;
-                incr at
-              done;
-              if !first_invalid_edge < 0 then
-                Bytes.set split_ends edge (Char.chr flags)
-            end
-          end
-        end
-      done;
-      if !first_invalid_edge >= 0 then Error (Printf.sprintf
-          "Rdk_mesh.Facet.edge_cusp: edge %d: %s" !first_invalid_edge !invalid_reason)
-      else if not (Bytes.exists (fun value -> value <> '\000') split_ends) then
-        Ok geometry
-      else
-        Result.bind (split_points_on_edge_ends ?cancel ~grain ~index ~split_ends
-            geometry) (fun output ->
-          if output == geometry || not update_point_normals
-              || Geometry.find_attribute ~owner:Attribute.Point "N" geometry
-                 = None
-          then Ok output
-          else Deform.normals ?cancel ~grain output)
-  end
 
 let[@inline always] planar_local values point origin scale relative =
   if relative then (values.(point) -. origin) /. scale

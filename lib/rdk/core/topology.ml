@@ -96,11 +96,6 @@ let primitive_size value primitive =
   value.primitive_offsets.(primitive + 1) - value.primitive_offsets.(primitive)
 let primitive_kind value primitive =
   kind_of_code (Char.code (Bytes.get value.primitive_kinds primitive))
-let iter_primitive_vertices value primitive operation =
-  let first, last = primitive_vertex_range value primitive in
-  for vertex = first to last - 1 do
-    operation vertex value.vertex_points.(vertex)
-  done
 let all_triangles value =
   let result = ref true in
   for primitive = 0 to primitive_count value - 1 do
@@ -198,9 +193,4 @@ module Private = struct
       ~primitive_kinds =
     { point_count; vertex_points; primitive_offsets; primitive_kinds;
       data_id = Data_id.fresh () }
-  let extend_free_points ~point_count (value : topology) =
-    if point_count < value.point_count then invalid_arg
-        "Topology.Private.extend_free_points: point count cannot shrink";
-    if point_count = value.point_count then value
-    else { value with point_count; data_id = Data_id.fresh () }
 end

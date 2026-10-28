@@ -168,10 +168,3 @@ val subdivide :
   ?treat_curves_as_independent:bool ->
   ?recompute_point_normals:bool ->
   Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result
-val edge_divide :
-  ?cancel:Rdk_core.Cancel.t ->
-  ?grain:int ->
-  ?edges:Rdk_core.Edge_group.t ->
-  ?divisions:int ->
-  ?share_points:bool ->
-  Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Error.t) result

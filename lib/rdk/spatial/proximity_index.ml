@@ -1,4 +1,3 @@
-open Rays_math
 
 type features = {
   positions : Packed.Float3.Private.view;

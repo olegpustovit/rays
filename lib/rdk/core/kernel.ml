@@ -1,4 +1,3 @@
-open Rays_math
 
 let run ?(grain = 16_384) count operation =
   if grain <= 0 then invalid_arg "Kernel: grain must be positive";

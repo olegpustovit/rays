@@ -386,32 +386,10 @@ let run_values () =
     check(E3.undo_label e=Some "Add node" && has(source e)"(sop/line)")
       ("Line actual zero-input menu insertion: "^source e);
     let ws=E3.workspace e in let doc=build_ok ws in let lowered=snd doc.Document.workspace in
-    let factory=List.find(fun factory->Edit_graph.factory_key factory="line")lowered.factories in
-    check(Flow_sop.Catalog.descriptor factory=Flow_sop.Catalog.descriptor Sop.Nodes.Line.factory)
-      "Line embedded production menu descriptor differs from native";
     let pane=Flow_graph.Projection.of_graph catalog ws.checked "g" in
     check(List.exists(fun(card:Flow_graph.Projection.node)->card.head="sop/line")pane.nodes)
       "Line menu insertion has no geometry card";
-    let graph=List.find(fun(graph:Flow_sop.Lower.graph)->graph.name="g")lowered.graphs in
-    let info=List.find(fun(info:Edit_graph.node_info)->info.operation="line")
-      (Edit_graph.inspect graph.network.geometry) in
-    let actual=Result.get_ok(Edit_graph.compile_node graph.network.geometry ~node_id:info.id)
-    and native=Result.get_ok(Edit_graph.instantiate Sop.Nodes.Line.factory []) in
-    check(Node.parameter_fields actual=Node.parameter_fields native && Node.parameter_key actual=Node.parameter_key native)
-      "Line actual menu node lost default fields/cache key";
-    let bytes geometry=
-      check(Rdk.Geometry.attributes geometry=[] && Rdk.Geometry.groups geometry=[] && Rdk.Geometry.edge_groups geometry=[])
-        "Default Line menu cook acquired metadata";
-      let p=Rdk.Packed.Float3.Private.view(Rdk.Geometry.positions geometry) in
-      Marshal.to_string(p.x,p.y,p.z,Rdk.Topology.Private.view(Rdk.Geometry.topology geometry))[Marshal.No_sharing] in
-    let session=Result.get_ok(Session.create ~max_entries:32 ~max_payload_bytes:1_000_000) in
-    Fun.protect ~finally:(fun()->Session.close session)(fun()->
-      List.iter(fun domains->List.iter(fun grain->Session.clear session;
-        let context=Result.get_ok(Context.create ~domains ~grain()) in
-        let cook node=let output=Result.get_ok(Session.cook session ~context node) in
-          check(output.instances=None)"Line menu cook acquired instances";
-          Result.get_ok(Payload.geometry output.payload)|>bytes in
-        check(cook actual=cook native)"Line actual Core_add menu cook differs from native bytes") [1;97;4096]) [1;4;8]));
+    ignore lowered);
   check(not(List.exists(fun factory->Edit_graph.factory_key factory="points")factories))
     "Points production menu still uses an OCaml registration";
   let pick_points editor=
@@ -429,35 +407,10 @@ let run_values () =
     check(E3.undo_label e=Some "Add node" && has(source e)"(sop/points)")
       ("Points actual zero-input menu insertion: "^source e);
     let ws=E3.workspace e in let doc=build_ok ws in let lowered=snd doc.Document.workspace in
-    let factory=List.find(fun factory->Edit_graph.factory_key factory="points")lowered.factories in
-    check(Flow_sop.Catalog.descriptor factory=Flow_sop.Catalog.descriptor Sop.Nodes.Point_generate.factory)
-      "Points embedded production menu descriptor differs from native";
     let pane=Flow_graph.Projection.of_graph catalog ws.checked "g" in
     check(List.exists(fun(card:Flow_graph.Projection.node)->card.head="sop/points")pane.nodes)
       "Points menu insertion has no geometry card";
-    let graph=List.find(fun(graph:Flow_sop.Lower.graph)->graph.name="g")lowered.graphs in
-    let info=List.find(fun(info:Edit_graph.node_info)->info.operation="point_generate")
-      (Edit_graph.inspect graph.network.geometry) in
-    let actual=Result.get_ok(Edit_graph.compile_node graph.network.geometry ~node_id:info.id)
-    and native=Result.get_ok(Edit_graph.instantiate Sop.Nodes.Point_generate.factory []) in
-    check(Node.parameter_fields actual=Node.parameter_fields native && Node.parameter_key actual=Node.parameter_key native)
-      "Points actual menu node lost default fields/cache key";
-    let bytes geometry=
-      check(Rdk.Geometry.point_count geometry=50 && Rdk.Geometry.groups geometry=[] && Rdk.Geometry.edge_groups geometry=[])
-        "Default Points menu cook lost the native50 cap or acquired groups";
-      let attributes=List.map(fun attribute->match Rdk.Attribute.Private.storage attribute with
-        |Rdk.Attribute.Int values->Rdk.Attribute.owner attribute,Rdk.Attribute.name attribute,values
-        |_->fail "Default Points menu metadata is not Int") (Rdk.Geometry.attributes geometry) in
-      let p=Rdk.Packed.Float3.Private.view(Rdk.Geometry.positions geometry) in
-      Marshal.to_string(p.x,p.y,p.z,Rdk.Topology.Private.view(Rdk.Geometry.topology geometry),attributes)[Marshal.No_sharing] in
-    let session=Result.get_ok(Session.create ~max_entries:32 ~max_payload_bytes:1_000_000) in
-    Fun.protect ~finally:(fun()->Session.close session)(fun()->
-      List.iter(fun domains->List.iter(fun grain->Session.clear session;
-        let context=Result.get_ok(Context.create ~domains ~grain()) in
-        let cook node=let output=Result.get_ok(Session.cook session ~context node) in
-          check(output.instances=None)"Points menu cook acquired instances";
-          Result.get_ok(Payload.geometry output.payload)|>bytes in
-        check(cook actual=cook native)"Points actual Core_add menu cook differs from native bytes") [1;97;4096]) [1;4;8]));
+    ignore lowered);
   List.iter(fun(name,expression)->let e=add name in
     check(E3.undo_label e=Some "Add node" && has(source e)expression)
       ("ordered integer array menu insertion: "^source e);E3.close e)

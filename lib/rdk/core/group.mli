@@ -31,7 +31,6 @@ val difference : t -> t -> (t, string) result
 val symmetric_difference : t -> t -> (t, string) result
 (* Invert membership while keeping padding bits clear. The packed byte pass
    uses the reusable domain pool above its internal scheduling cutoff. *)
-val complement : t -> t
 (* Iterate members in increasing element-number order, preserving the legacy
    membership traversal contract. *)
 val iter : (int -> unit) -> t -> unit

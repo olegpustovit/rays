@@ -400,100 +400,6 @@ val blur_points :
     components * points). Each point sums neighbors in stable edge order and
     writes one disjoint slot, so one- and multi-domain results are exact. *)
 
-val randomize :
-  ?cancel:Cancel.t ->
-  ?grain:int ->
-  ?selection:Group.t ->
-  ?element_selection:random_selection ->
-  ?seed_attribute:string ->
-  ?fraction_attribute:string ->
-  ?minimum:numeric_value ->
-  ?maximum:numeric_value ->
-  ?direction_bias:float ->
-  seed:Rays_math.Rand.t ->
-  owner:Attribute.owner ->
-  name:string ->
-  ?operation:random_operation ->
-  ?scale:float ->
-  random_distribution ->
-  Geometry.t ->
-  (Geometry.t, Error.t) result
-(** Create or modify scalar/2D/3D/4D floating attributes, including canonical
-    point [P], or weighted-discrete text attributes, with stable per-element
-    sampling. Existing numeric values support set,
-    add, minimum, maximum, and multiply. A matching integer [seed_attribute]
-    replaces element numbers; a missing named seed follows Houdini's fallback
-    to element numbers. Unselected new values remain zero. A
-    [element_selection] accepts point, vertex, primitive, or native-edge
-    membership and promotes incident elements to [owner]; it is mutually
-    exclusive with the owner-matched compatibility [selection]. Optional
-    component-wise [minimum]/[maximum] limits clamp the raw distribution before
-    Global Scale and the requested operation. Multidimensional Cauchy output is
-    rotationally symmetric and therefore requires one shared scale value.
-    Weighted text output supports Set Value only and structurally shares its
-    immutable choice strings. A [fraction_attribute] replaces randomness with owner-matched packed
-    quantiles in the closed unit interval and is mutually exclusive with a
-    seed attribute. Ordinary component-wise distributions require one fraction
-    per output component; two-value/custom-discrete selection needs one,
-    direction needs dimensions minus one, and inside-sphere sampling needs one
-    per dimension.
-
-    Work is O(elements * (components + log ramp/discrete entries)), output
-    storage is O(elements * components), and sampling uses allocation-free
-    immutable {!Rays_math.Rand} indexed streams or borrowed fraction planes.
-    Distribution tables and range scratch are bounded independently of element
-    count. Disjoint fills are byte-identical across domain counts. *)
-
-val noise :
-  ?cancel:Cancel.t ->
-  ?grain:int ->
-  ?selection:Group.t ->
-  seed:int ->
-  owner:Attribute.owner ->
-  name:string ->
-  kind:noise_kind ->
-  ?location:noise_location ->
-  ?range:noise_range ->
-  ?operation:noise_operation ->
-  ?blend:float ->
-  ?frequency:Rays_math.Vec3.t ->
-  ?offset:Rays_math.Vec3.t ->
-  ?octaves:int ->
-  ?lacunarity:float ->
-  ?roughness:float ->
-  Geometry.t ->
-  (Geometry.t, Error.t) result
-(** Apply deterministic coherent 3D gradient noise to a floating attribute.
-    This covers Attribute Noise's common scalar/vector controls: location,
-    range, operation, blend, scale/offset, and standard fractal parameters.
-    [Noise_element_number] corresponds to overriding the sampling position
-    with the element number. [Noise_quaternion] is a Rays extension for a
-    normalized Float4 Copy-to-Points [orient] and accepts set operations only.
-
-    Work is O(elements * components * octaves), output storage is
-    O(elements * components), and disjoint parallel fills are deterministic. *)
-
-val remap :
-  ?cancel:Cancel.t ->
-  ?grain:int ->
-  ?selection:Group.t ->
-  owner:Attribute.owner ->
-  name:string ->
-  ?into:string ->
-  input:remap_input ->
-  output_min:numeric_value ->
-  output_max:numeric_value ->
-  ?policy:remap_policy ->
-  ?ramp:(float * float) list ->
-  Geometry.t ->
-  (Geometry.t, Error.t) result
-(** Remap scalar/tuple floating attributes and canonical [P] component-wise.
-    [Remap_auto] computes selected finite component bounds with deterministic
-    parallel min/max reductions. Clamp and cycle policies optionally sample a
-    strictly ordered piecewise-linear ramp; extrapolation is linear and ignores
-    the ramp. [into] preserves the source and writes another same-shape
-    attribute. O(elements * components) time and exact output storage. *)
-
 val interpolate :
   ?cancel:Cancel.t ->
   ?grain:int ->
@@ -560,37 +466,6 @@ val interpolate :
     field plus O(a). All attributes share one topology traversal;
     destination payload planes are disjoint and byte-identical across domain
     counts. Output positions and ordinary metadata commit atomically. *)
-
-val copy :
-  ?cancel:Cancel.t ->
-  ?grain:int ->
-  ?source_group:Group.t ->
-  ?target_group:Group.t ->
-  ?match_:copy_match ->
-  ?allow_position:bool ->
-  group_owner:Group.owner ->
-  rules:copy_rule list ->
-  source:Geometry.t ->
-  target:Geometry.t ->
-  unit ->
-  (Geometry.t, Error.t) result
-(** Directly copy attributes between ordered source and destination element
-    selections. [Cyclic] repeats the source selection in group traversal order.
-    [By_values] matches point or primitive integer/text values and chooses the
-    highest matching source element number. [To_element] reads source element
-    numbers from an integer destination attribute and rejects numbers outside
-    the source group.
-
-    Attribute ownership is independent of [group_owner]. Corresponding group
-    element pairs project through topology: point incidences, vertex owner and
-    referenced point, or primitive corners. Later destination-group/local
-    incidences win deterministic cross-owner conflicts. Conflict-free
-    projections and every packed payload plane fill disjoint ranges in
-    parallel. One projection is shared by every copied field of an owner and
-    ordinary metadata is committed once. [allow_position] admits canonical
-    point [P] as a source or destination; it is otherwise excluded. Expected
-    work is O(group elements + projected incidence + copied payload), with one
-    integer mapping per selected destination owner and exact output storage. *)
 
 val transfer_points :
   ?cancel:Cancel.t ->
@@ -780,12 +655,3 @@ val transfer_all :
     byte-identical to the corresponding sequence of owner-specific calls. *)
 
 type image_channel = Red | Green | Blue | Alpha | Luminance
-val from_image :
-  ?cancel:Rdk_core.Cancel.t -> ?grain:int -> ?uv:string -> attribute:string ->
-  channel:image_channel -> width:int -> height:int -> rgba:float array ->
-  Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result
-(** Bilinear normalized Point Float2/Float3 UV sampling into a Point float
-    attribute. Coordinates clamp to [0,1], and v=0 names the first image row.
-    Dimensions and finite [0,1] row-major RGBA are checked. The input storage
-    is borrowed only for this call. O(pixels + points) work, O(points) output
-    storage; disjoint point ranges preserve exact one/multi-domain values. *)
