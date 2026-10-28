@@ -73,15 +73,11 @@ let entries = [
   "rays", "Runtime_resources.Image.Private";
   "rays", "Runtime_resources.Text.Private";
   "rays", "Scene_command.Render_ir.Private";
-  "rays_editor", "A.Private";
   "rays_editor", "Flow.Eval.Private";
   "rays_editor", "Flow_gpu.Host.Private";
   "rays_editor", "Image.Private";
-  "rays_editor", "Mesh.Private";
   "rays_editor", "Pxui_graph.Scope.Private";
   "rays_editor", "Rays.Image.Private";
-  "rays_editor", "Rdk.Attribute.Private";
-  "rays_editor", "Rdk.Packed.Float4.Private";
   "rays_editor", "Scene.D3.Private";
   "rays_pathtracer", "Rays.Image.Private";
   "rays_pathtracer", "Rays.Mesh.Private";

@@ -16,19 +16,7 @@ let wire_color background =
   if lightness >= 128000 then Rays_math.Color.hex_exn "#285f77"
   else Rays_math.Color.hex_exn "#bed7e1"
 
-(* Every polygon edge once, as a line mesh. *)
-let wire_mesh geometry =
-  let topology = Rdk.Geometry.topology geometry in
-  let edges = Rdk.Topology_index.create topology in
-  let points = Rdk.Geometry.positions geometry in
-  let vertices = Array.init (Rdk.Packed.Float3.length points) (fun index ->
-    let x, y, z = Rdk.Packed.Float3.get points index in Rays_math.Vec3.create x y z) in
-  let indices = Array.make (Rdk.Topology_index.edge_count edges * 2) 0 in
-  for edge = 0 to Rdk.Topology_index.edge_count edges - 1 do
-    let a, b = Rdk.Topology_index.edge_points edges edge in
-    indices.(edge * 2) <- a; indices.(edge * 2 + 1) <- b
-  done;
-  Mesh.Private.create_owned ~mode:Mesh.Lines ~indices vertices
+let wire_mesh = Rdk_rays.Geometry_view.wire_mesh
 
 let label = function Path_traced -> "Path traced" | Raster -> "Raster" | Wireframe -> "Wireframe"
 let of_label = function "Path traced" -> Some Path_traced | "Raster" -> Some Raster
@@ -105,9 +93,9 @@ let traced_scene meshes scene =
       let* cached = match Mesh_cache.peek cache (drawing.mesh, drawing.material) with
         | Some cached -> Ok cached
         | None ->
-            let* geometry = Result.map_error Rdk.Error.to_string
+            let* geometry = Result.map_error Rdk_rays.Geometry_view.error_string
                 (Rdk_rays.Rays_mesh.of_mesh drawing.mesh) in
-            let* trace_mesh = Result.map_error Rdk.Error.to_string
+            let* trace_mesh = Result.map_error Rdk_rays.Geometry_view.error_string
                 (Rdk_rays.Rays_mesh.to_trace_mesh geometry) in
             let* traced = P.mesh [trace_mesh, traced_material drawing.material] in
             let cached = {trace_source = trace_mesh; traced} in

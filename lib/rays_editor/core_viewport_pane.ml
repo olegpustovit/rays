@@ -66,10 +66,10 @@ List.iter (fun ((leaf : Pxui_shell.Layout.leaf), _) -> match leaf.panel with
       let tris = List.fold_left (fun n (piece : _ Cook.piece) ->
         match piece.output.Sop.Session.payload with
         | Payload.Image _ | Payload.Kernel _ -> n
-        | Geometry g -> n + max 0 (Rdk.Geometry.vertex_count g - (2 * Rdk.Geometry.primitive_count g))) 0 (pieces value) in
+        | Geometry g -> n + Rdk_rays.Geometry_view.triangles g) 0 (pieces value) in
       let objects = List.length (pieces value) in
       let points = Option.bind (piece value) (fun (piece : _ Cook.piece) ->
-        Option.map Rdk.Geometry.point_count
+        Option.map Rdk_rays.Geometry_view.point_count
           (Result.to_option (Payload.geometry piece.output.Sop.Session.payload))) in
       (* the traced readout: its samples are the caption's "n/cap spp" *)
       let traced = List.assoc_opt key value.traces in
