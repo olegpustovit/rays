@@ -32,11 +32,18 @@ type t = {
   scene_spheres : int option;  (** uniform word holding the procedural sphere count *)
   scene_instances : int option;
       (** an instanced scene (a static fact): the instance table's buffer index, after the spheres *)
+  scene_motion : bool;
+      (** a moving scene (a static fact): the query's time selects instance transforms (instanced) or vertex
+          keyframes (flat) *)
+  scene_vertices_end : int option;  (** flat motion: the shutter-end triangle vertices' buffer index *)
+  scene_strands : int option;
+      (** a stranded scene (a static fact): the strand segments' buffer index, after every other scene buffer *)
+  scene_strand_count : int option;  (** uniform word holding the strand segment count *)
 }
 
 (** [fast] includes gather lengths and the count record; [image] reserves the two
     dimensions used by WGSL image kernels and has no input bindings. *)
-val plan : ?fast:bool -> ?image:bool -> ?instanced:bool -> Packed.t -> t
+val plan : ?fast:bool -> ?image:bool -> ?instanced:bool -> ?motion:bool -> ?curves:bool -> Packed.t -> t
 val uniform_words : t -> int
 
 val iter : t -> instruction:(int -> Packed.instruction -> unit) ->

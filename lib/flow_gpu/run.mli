@@ -4,12 +4,19 @@ type scene = {accel:Ogpu.Backend.accel; vertices:Ogpu.Backend.buffer; spheres:Og
   instances:Ogpu.Backend.buffer option}
 (** [scene/trace] bindings: the structure, its triangle vertices (instanced: all prototypes' concatenated), the
     procedural (centre, radius) float4s, and for an instanced scene the 16-float-per-instance table
-    [base primitive; world-to-object 3x4 row-major; 3 spare]. *)
+    [base primitive; world-to-object 3x4 row-major; 3 spare] (a moving one: 32 floats, [base primitive; start
+    object-to-world 3x4; end object-to-world 3x4; 7 spare]). *)
+type extras = {vertices_end:Ogpu.Backend.buffer option; strands:Ogpu.Backend.buffer option; strand_count:int;
+  curves:Ogpu.Backend.accel option}
+(** Bindings of a moving or stranded scene, after the instance table: a flat moving scene's shutter-end
+    triangle vertices, then the strand segments (two float4 each: end a, radius; end b, radius) and, for
+    native curves, their curve structure. *)
+val no_extras : extras
 val create : Renderer.gpu -> Pipelines.t -> Emit.msl -> t
 val dispatch : ?wait:bool -> ?reset_status:bool -> ?commands:Ogpu.Backend.commands ->
   ?count:(Ogpu.Backend.buffer * int * int) -> ?into:(Ogpu.Backend.buffer * Ogpu.Backend.buffer) -> ?bound:(int -> Ogpu.Backend.buffer option) ->
   ?bound_table:(int -> Ogpu.Backend.buffer option) ->
-  ?scene:scene -> t -> Flow_ir.Packed.Private.inputs ->
+  ?scene:scene -> ?extras:extras -> t -> Flow_ir.Packed.Private.inputs ->
   (output, Diagnostic.t) result
 (** [~wait:false] leaves the dispatch in flight, without its status read; [~commands] only encodes it
     into the caller's command buffer (epoch 0 until the caller commits it); [~reset_status:false]
@@ -49,6 +56,23 @@ val read_count : Ogpu.Backend.queue -> Ogpu.Backend.buffer -> epoch:int64 -> (in
 val read_floats : Ogpu.Backend.queue -> Ogpu.Backend.buffer -> epoch:int64 -> length:int ->
   (float array, Diagnostic.t) result
 (* [length] floats of a buffer, once the queue has completed [epoch]. *)
+type instance = {first:int; triangles:int; transform:float array; transform_end:float array option}
+(** An instance of the [triangles] triangles from [first] (in {!description}'s [triangles]), with its row-major
+    3x4 object-to-world transform and, for instance motion, its shutter-end transform. *)
+type description = {triangles:bytes; triangles_end:bytes option; instances:instance array; sphere_data:bytes;
+  strand_data:bytes}
+(** A scene for {!build_scene}: packed float3 triangle corners (nine float32 per triangle, in primitive order;
+    instanced, every prototype's), the same corners at the shutter's end (vertex motion; flat scenes only),
+    the instances ([[||]]: a flat scene), float4 (centre, radius) spheres, and strand segments, eight float32
+    each (end a, radius, end b, radius; world space, both radii equal). *)
+type built = {scene:scene; extras:extras; instanced:bool; motion:bool; curves:[`Loop | `Native] option;
+  release:unit -> unit}
+(** [instanced], [motion] and [curves] are the static facts the scene's kernel is emitted with ({!Emit.kernel}):
+    strands are native curves where [caps] has [Ray_tracing_curves], else an in-loop capsule test. *)
+val build_scene : ?caps:Ogpu.Caps.t -> Renderer.gpu -> description -> (built, Diagnostic.t) result
+(** Builds and waits for the scene's structures. Motion builds motion structures (keyframes at times 0 and 1,
+    clamped) when [caps] (default: the device's) has [Ray_tracing_motion]; otherwise the scene is built at
+    the shutter midpoint and [motion] is false. [release] destroys every structure and buffer. *)
 module Private : sig
   val diagnostic : Ogpu.Error.t -> Diagnostic.t
   val buffer_creations : t -> int
