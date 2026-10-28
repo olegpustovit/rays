@@ -13,7 +13,6 @@ type key =
   | Index_attribute of string
   | Reverse
   | Shift of int
-exception Sort_error of string
 val sort :
   ?cancel:Rdk_core.Cancel.t ->
   ?grain:int ->

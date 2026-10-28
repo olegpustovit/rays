@@ -32,7 +32,7 @@ lib/rdk/mesh/poly_reduce.ml	plan_round#1	319
 lib/rdk/mesh/ray.ml	run#1	395
 lib/rdk/mesh/subdivide.ml	fvar_refinement#1	339
 lib/rdk/mesh/uv_parameterize.ml	solve#1	490
-lib/rdk/spatial/surface_index.ml	create_raw#1	361
+lib/rdk/spatial/surface_index.ml	create_with#1	361
 lib/rdk/test_attribute_lifecycle.ml	run#1	465
 lib/rdk/test_deform.ml	run#1	314
 lib/rdk/test_rdk_attributes.ml	promotion#1	471

@@ -14,9 +14,8 @@ type key =
   | Reverse
   | Shift of int
 
-exception Sort_error of string
 
-let fail message = raise (Sort_error message)
+let fail message = raise (Error.Fail message)
 let get_ok = function Ok value -> value | Error message -> fail message
 
 let count geometry = function
@@ -424,4 +423,4 @@ let sort ?cancel ?(grain = 16_384) ?selection ?(descending = false)
         let attribute = Attribute.create_owned ~name ~owner:attribute_owner
             (Attribute.Int ranks) |> get_ok in
         Geometry.with_attribute attribute geometry
-  with Sort_error message | Invalid_argument message -> Error message
+  with Error.Fail message | Invalid_argument message -> Error message

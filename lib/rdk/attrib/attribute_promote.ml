@@ -1304,9 +1304,11 @@ let promote_bound ?cancel ~grain ~method_ ~delete_source ~source ~destination
                 Geometry.with_attribute indices geometry)
           | None, Some _ | Some _, None -> assert false)))
 
-let promote_pattern_raw ?cancel ?(grain = 16_384) ?(method_ = Average)
+let promote_pattern ?cancel ?(grain = 16_384) ?(method_ = Average)
     ?(delete_source = true) ?piece_attribute ?into_pattern ?index_pattern
     ~source ~destination ~pattern geometry =
+  Error.guard ~cancelled:"attribute promotion was cancelled" ~invalid_argument:"invalid_parameter" ~operation:"attribute_promote"
+    ~code:"invalid_attribute" @@ fun () ->
   if grain <= 0 then invalid_arg
       "Rdk.Attribute_ops.promote_pattern: grain must be positive";
   if (match piece_attribute with Some value -> String.trim value = "" | None -> false)
@@ -1388,15 +1390,3 @@ let promote_pattern_raw ?cancel ?(grain = 16_384) ?(method_ = Average)
               ?index_attribute plan geometry)
             (fun geometry -> promote geometry (index + 1)) in
       promote geometry 0))))))
-
-let promote_pattern ?cancel ?grain ?method_ ?delete_source ?piece_attribute
-    ?into_pattern ?index_pattern ~source ~destination ~pattern geometry =
-  try Result.map_error
-      (Error.of_string ~operation:"attribute_promote" ~code:"invalid_attribute")
-      (promote_pattern_raw ?cancel ?grain ?method_ ?delete_source ?piece_attribute
-         ?into_pattern ?index_pattern ~source ~destination ~pattern geometry)
-  with
-  | Cancel.Cancelled -> Error (Error.make ~operation:"attribute_promote"
-      ~code:"cancelled" "attribute promotion was cancelled")
-  | Invalid_argument message -> Error (Error.make ~operation:"attribute_promote"
-      ~code:"invalid_parameter" message)

@@ -1,8 +1,7 @@
-exception Triangulation_error of string
 
 let epsilon = 1e-12
 
-let fail message = raise (Triangulation_error message)
+let fail message = raise (Error.Fail message)
 
 let[@inline] cross x y a b c =
   ((x.(b) -. x.(a)) *. (y.(c) -. y.(a)))
@@ -227,4 +226,4 @@ let triangulate ?cancel ~point ~outer ~holes () =
     output.(base + 1) <- token.(remaining.(1));
     output.(base + 2) <- token.(remaining.(2));
     Ok output
-  with Triangulation_error message -> Error message
+  with Error.Fail message -> Error message

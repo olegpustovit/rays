@@ -4,8 +4,7 @@ type bridge_policy =
   | Create_disjoint_polygons
   | Delete_bridge_polygons
 
-exception Invalid of string
-let fail message = raise (Invalid ("Rdk.Dissolve.dissolve: " ^ message))
+let fail message = raise (Error.Fail ("Rdk.Dissolve.dissolve: " ^ message))
 let get_ok = function Ok value -> value | Error message -> fail message
 
 module Int_buffer = struct
@@ -455,5 +454,5 @@ let run ?cancel ?(grain = 16_384) ?edges ?(operation = Dissolve_selected)
       end
     end
   with
-  | Invalid message -> Error message
+  | Error.Fail message -> Error message
   | Cancel.Cancelled -> raise Cancel.Cancelled

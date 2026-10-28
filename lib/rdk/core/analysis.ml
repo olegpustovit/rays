@@ -208,12 +208,11 @@ let primitive_measure_selected ?cancel ~grain selected measure geometry =
       | None, None | Some _, _ -> ()) errors;
     match !failure with None -> Ok values | Some message -> Error message
 
-let primitive_measure_raw ?cancel ?(grain = 16_384) ?primitives measure geometry =
-  Result.bind (selected_primitives ?primitives geometry) (fun selected ->
-    primitive_measure_selected ?cancel ~grain selected measure geometry)
-
-let primitive_measure ?cancel ?grain ?primitives measure geometry =
-  try primitive_measure_raw ?cancel ?grain ?primitives measure geometry with
+let primitive_measure ?cancel ?(grain = 16_384) ?primitives measure geometry =
+  try
+    Result.bind (selected_primitives ?primitives geometry) (fun selected ->
+      primitive_measure_selected ?cancel ~grain selected measure geometry)
+  with
   | Cancel.Cancelled -> Error "Rdk.Analysis.measure: cancelled"
   | Invalid_argument message -> Error message
 
@@ -347,13 +346,18 @@ let edge_uv_equal topology reverse view left right =
       uv_vertex_equal view left right_next
       && uv_vertex_equal view left_next right
 
-let classify_connectivity_raw ?cancel ?(grain = 16_384) ?primitives ?points
+let classify_connectivity ?cancel ?(grain = 16_384) ?primitives ?points
     ?seams ?uv_attribute owner geometry =
+  Error.guard ~operation:"connectivity" ~code:"invalid_connectivity"
+    ~cancelled:"connectivity classification was cancelled" @@ fun () ->
+  try
   let point_count = Geometry.point_count geometry
   and primitive_count = Geometry.primitive_count geometry in
   let topology_value = Geometry.topology geometry in
   let validation =
-    if grain <= 0 then Error "Connectivity: grain must be positive"
+    if grain <= 0 then
+      Error.fail_with ~operation:"connectivity" ~code:"invalid_parameter"
+        "grain must be positive"
     else if owner = Connectivity_primitives && points <> None then
       Error "Connectivity: point include group is available only in point mode"
     else if owner = Connectivity_points && uv_attribute <> None then
@@ -461,18 +465,6 @@ let classify_connectivity_raw ?cancel ?(grain = 16_384) ?primitives ?points
                       end
                     done;
                     component_classes set) uv_result))
+  with Invalid_argument message ->
+    Error.fail_with ~operation:"connectivity" ~code:"invalid_parameter" message
 
-let classify_connectivity ?cancel ?grain ?primitives ?points ?seams
-    ?uv_attribute owner geometry =
-  try match grain with
-  | Some grain when grain <= 0 -> Error (Error.make ~operation:"connectivity"
-      ~code:"invalid_parameter" "grain must be positive")
-  | None | Some _ -> Result.map_error
-        (Error.of_string ~operation:"connectivity" ~code:"invalid_connectivity")
-        (classify_connectivity_raw ?cancel ?grain ?primitives ?points ?seams
-          ?uv_attribute owner geometry)
-  with
-  | Cancel.Cancelled -> Error (Error.make ~operation:"connectivity"
-      ~code:"cancelled" "connectivity classification was cancelled")
-  | Invalid_argument message -> Error (Error.make ~operation:"connectivity"
-      ~code:"invalid_parameter" message)

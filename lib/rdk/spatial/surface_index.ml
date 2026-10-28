@@ -112,11 +112,9 @@ let[@inline] selected bits index =
 let create_with ?cancel ?(grain = 16_384) ?primitives:selection ?vertices
     ?(vertex_selection = All_triangle_vertices) ?(validated_triangles = false)
     geometry =
-  Error.run ~operation:"surface_index" ~code:"invalid_parameter"
-    ~cancelled:"surface-index construction was cancelled" @@ fun () ->
+  Error.run ~operation:"surface_index" ~code:"invalid_parameter" ~cancelled:"surface-index construction was cancelled" @@ fun () ->
   if grain <= 0 then invalid_arg "Surface_index: grain must be positive";
-  if validated_triangles && (Option.is_some selection || Option.is_some vertices) then
-    invalid_arg "Surface_index: validated triangle construction cannot select elements";
+  if validated_triangles && (Option.is_some selection || Option.is_some vertices) then invalid_arg "Surface_index: validated triangle construction cannot select elements";
   Cancel.check_opt cancel;
   let positions = Packed.Float3.Private.view (Geometry.positions geometry)
   and topology = Topology.Private.view (Geometry.topology geometry) in
@@ -579,7 +577,7 @@ let triangles_share_point left_surface left_triangle right_surface right_triangl
   || triangle_has_point right_surface right_triangle
     points.(left_surface.vertex_c.(left_triangle))
 
-let overlapping_triangle_pairs_raw ?cancel ?(single_pass = false)
+let triangle_pairs_of ?cancel ?(single_pass = false)
     ~self ~exact_plane_filter
     ~skip_shared_points ~grain ~tolerance left_surface right_surface =
   if grain <= 0 then invalid_arg
@@ -716,12 +714,12 @@ let overlapping_triangle_pairs_raw ?cancel ?(single_pass = false)
 
 let overlapping_triangle_pairs ?cancel ~grain ~tolerance left_surface
     right_surface =
-  overlapping_triangle_pairs_raw ?cancel ~self:false ~exact_plane_filter:false
+  triangle_pairs_of ?cancel ~self:false ~exact_plane_filter:false
     ~skip_shared_points:false ~grain ~tolerance
     left_surface right_surface
 
 let overlapping_self_triangle_pairs ?cancel ~grain ~tolerance surface =
-  overlapping_triangle_pairs_raw ?cancel ~self:true ~exact_plane_filter:false
+  triangle_pairs_of ?cancel ~self:true ~exact_plane_filter:false
     ~skip_shared_points:false ~grain ~tolerance surface surface
 
 let overlapping_self_triangle_pairs_disjoint_topology ?cancel ~grain ~tolerance
@@ -801,7 +799,7 @@ let overlapping_self_triangle_pairs_disjoint_topology ?cancel ~grain ~tolerance
         let cross =
           if Array.length remainder.primitives = 0 then [||], [||]
           else
-            let first, second = overlapping_triangle_pairs_raw ?cancel ~self:false
+            let first, second = triangle_pairs_of ?cancel ~self:false
                 ~single_pass:true ~exact_plane_filter:false
                 ~skip_shared_points:true ~grain ~tolerance
                 incident remainder in
@@ -820,14 +818,14 @@ let overlapping_self_triangle_pairs_disjoint_topology ?cancel ~grain ~tolerance
             mapped_first, mapped_second in
         concatenate cross (gather remainder)
       end else
-        let first, second = overlapping_triangle_pairs_raw ?cancel ~self:true
+        let first, second = triangle_pairs_of ?cancel ~self:true
             ~single_pass:true ~exact_plane_filter:false
             ~skip_shared_points:true ~grain ~tolerance
             indexed indexed in
         map_pairs indexed first second
     end in
   if !eligible then gather surface
-  else overlapping_triangle_pairs_raw ?cancel ~self:true ~single_pass:true
+  else triangle_pairs_of ?cancel ~self:true ~single_pass:true
       ~exact_plane_filter:false ~skip_shared_points:true ~grain ~tolerance
       surface surface
 

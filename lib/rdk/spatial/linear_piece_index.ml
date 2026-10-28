@@ -227,7 +227,7 @@ let[@inline always] piece_bounds_overlap tolerance left left_piece right
   && left.piece_min_z.(left_piece) <= right.piece_max_z.(right_piece) +. tolerance
   && left.piece_max_z.(left_piece) >= right.piece_min_z.(right_piece) -. tolerance
 
-let overlapping_pairs_raw ?cancel ~self ~grain ~tolerance left_index right_index =
+let pairs_of ?cancel ~self ~grain ~tolerance left_index right_index =
   if grain <= 0 then invalid_arg
       "Linear_piece_index.overlapping_pairs: grain must be positive";
   if not (Float.is_finite tolerance) || tolerance < 0. then invalid_arg
@@ -295,7 +295,7 @@ let overlapping_pairs_raw ?cancel ~self ~grain ~tolerance left_index right_index
     left_output, right_output
   end
 
-let find_overlapping_self_pair_raw ?cancel ~grain ~tolerance index predicate =
+let self_pair_of ?cancel ~grain ~tolerance index predicate =
   if grain <= 0 then invalid_arg
       "Linear_piece_index.find_overlapping_self_pair: grain must be positive";
   if not (Float.is_finite tolerance) || tolerance < 0. then invalid_arg
@@ -364,9 +364,9 @@ module Private = struct
     | _ -> invalid_arg "Linear_piece_index.curve_u: invalid endpoint"
   let positions value = value.positions
   let overlapping_pairs ?cancel ~grain ~tolerance left right =
-    overlapping_pairs_raw ?cancel ~self:false ~grain ~tolerance left right
+    pairs_of ?cancel ~self:false ~grain ~tolerance left right
   let overlapping_self_pairs ?cancel ~grain ~tolerance value =
-    overlapping_pairs_raw ?cancel ~self:true ~grain ~tolerance value value
+    pairs_of ?cancel ~self:true ~grain ~tolerance value value
   let find_overlapping_self_pair ?cancel ~grain ~tolerance value predicate =
-    find_overlapping_self_pair_raw ?cancel ~grain ~tolerance value predicate
+    self_pair_of ?cancel ~grain ~tolerance value predicate
 end

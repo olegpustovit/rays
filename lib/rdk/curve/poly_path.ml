@@ -1,8 +1,7 @@
 open Rays_math
 
-exception Poly_path_error of string
 
-let fail message = raise (Poly_path_error message)
+let fail message = raise (Error.Fail message)
 
 let next_power_of_two value =
   let result = ref 8 in
@@ -176,7 +175,7 @@ let chains ?cancel ~point_count ~edge_a ~edge_b selected =
     done;
     Ok (offsets, values, Array.init traced.path_count (fun path ->
       Char.code (Bytes.get traced.isolated_loop path)))
-  with Poly_path_error message -> Error message
+  with Error.Fail message -> Error message
 
 let run ?cancel ?grain ?edges ?(preserve_source_payload = true)
     ?(connect_end_points = false)
@@ -476,4 +475,4 @@ let run ?cancel ?grain ?edges ?(preserve_source_payload = true)
       source_edge_groups in
     Geometry.create ~positions:(Geometry.positions geometry)
       ~topology:output_topology ~attributes ~groups ~edge_groups ()
-  with Poly_path_error message -> Error message
+  with Error.Fail message -> Error message
