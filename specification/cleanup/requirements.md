@@ -215,8 +215,8 @@ Findings: WN1 WN9 WN10 WN11 FL6 FL17 PL22 PL23.
 
 Delete the last handwritten shaders: the MSL strings in `runtime.ml` and `runtime_shaders.ml` (Scene3 vertex/fragment with textured, argument-buffer and sun variants, the UI pipeline, the marks pipeline) and the `image_sink` kernel. A vertex stage is a map over vertices and a fragment stage is a map over fragments. They are two more placements of the same region IR, emitted by the same MSL and SPIR-V emitters.
 
-- [ ] P9.S1: Benchmark first: editor frame time (window-free GPU timing, ui_shot scenes) and a Scene3 scene, interleaved A/B.
-- [ ] P9.S2: Region IR: stage entry points (vertex, fragment) and interpolated outputs between them, plus texture and sampler reads (the glyph atlas, material textures). Blending, depth and culling stay pipeline state in OGPU, not shader code.
+- [x] P9.S1: Benchmark first: editor frame time (window-free GPU timing, ui_shot scenes) and a Scene3 scene, interleaved A/B. Evidence: b3e5bf63: UI_SHOT_BENCH=N in tools/ui_shot.exe prints per-render GPU ms (Rays.Canvas.gpu_seconds), with medians and minima; the baseline is in specification/cleanup/benchmarks/raster-lisp.md.
+- [x] P9.S2: Region IR: stage entry points (vertex, fragment) and interpolated outputs between them, plus texture and sampler reads (the glyph atlas, material textures). Blending, depth and culling stay pipeline state in OGPU, not shader code. Evidence: 14f96583/923624a0: the region IR has fragment intrinsics (gpu/fwidth, gpu/sample, gpu/texture-size); a function returning a record of numbers gives the varyings; Emit.stage_body and Flow_gpu.Raster print vertex and fragment stages ([[stage_in]], [[position]], [[flat]], discard, textures), and the Vulkan SPIR-V modules pass spirv-val. CPU, JS and WGSL refuse the stage intrinsics with E_GPU_STAGE.
 - [ ] P9.S3: Port in order of risk: the marks pipeline, then UI (guarded pixel for pixel by `test_ui_parity`), then Scene3 and its variants (folded by static facts like the path tracer's), then sun, then the image sink.
 - [ ] P9.S4: Delete `runtime_shaders.ml`, the MSL strings in `runtime.ml` and the `renderer/shaders/metal` directory planned in P4. P4's per-backend directory then only ever holds generated output.
 
@@ -663,7 +663,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **PL2** (P0, high, dead-code, effort M). Location at baseline: Scene3_stencil / Scene3_textured_stencil / Scene3_shadow_stencil · create_stencil_texture (ogpu_core/backend.ml:148). Nothing in rays, rays_execution or rays_editor produces stencil. `stencil_state=Some` exists only in a runtime test. Action: Delete it. Pipeline families drop from 12 to 8.
 
-- [ ] **PL3** (P1, high, dead-code, effort M). Location at baseline: lib/metal/metal_bridge.mm (6,790 lines, handwritten). 53 OCaml primitives, but the bridge carries an XPC service (83-780), Metal 4 submission and argument tables, mesh/tile builders (4399, 4732) and ~50 Handle_kind cases nobody reaches. They are non-static, so `-Wunused-function` never fires. Action: Make the helpers `static`, let the compiler list them, then run `codemod dead-stubs`. Expect about 1.5k+ lines gone.
+- [x] **PL3** (P1, high, dead-code, effort M). Location at baseline: lib/metal/metal_bridge.mm (6,790 lines, handwritten). 53 OCaml primitives, but the bridge carries an XPC service (83-780), Metal 4 submission and argument tables, mesh/tile builders (4399, 4732) and ~50 Handle_kind cases nobody reaches. They are non-static, so `-Wunused-function` never fires. Action: Make the helpers `static`, let the compiler list them, then run `codemod dead-stubs`. Expect about 1.5k+ lines gone. Evidence: the Metal bridge lost its 1,023 mesh/tile pipeline lines and metal_raw_types its 243 dead descriptor types; metal.ml/.mli lost the Tile, Object and Mesh stages. dead-stubs, dead-types and metal-registry --audit are clean; the Metal 4 compiler stays because ogpu_metal uses it.
 
 - [x] **PL4** (P0, high, vibe-code, effort S). Location at baseline: metal_bridge.mm:5940-6080 · metal_raw.ml:21. 66 `/* M3: former …generated.inc */` markers, empty shards, `mechanical_id_count(){return 48;}`, and `[@@@ocaml.text]` blocks citing plan ids. Action: Delete them.
 
@@ -709,7 +709,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **PL25** (P4, med, dead-code, effort S). Location at baseline: rays_execution.mli (adopt_draws, *_for_test, retained_scene2_segment_stats) · runtime.mli Private (scale_draws, …). Test-only exports in public interfaces. Action: Delete them, or keep a single For_test module that the gate lists. Evidence: test-only exports are confined to Renderer.Private and Scene_execution.Private; rays_execution.mli is gone.
 
-- [ ] **PL26** (P1, low, api-bloat, effort S). Location at baseline: sdl3_ttf: family_name, set_kerning, set_outline, set_style, size_text(_wrapped), style_name · sdl3_mixer: reload_bytes, set_gain. No callers outside the library. Action: Prune them together with their C stubs.
+- [x] **PL26** (P1, low, api-bloat, effort S). Location at baseline: sdl3_ttf: family_name, set_kerning, set_outline, set_style, size_text(_wrapped), style_name · sdl3_mixer: reload_bytes, set_gain. No callers outside the library. Action: Prune them together with their C stubs. Evidence: the listed sdl3_ttf and sdl3_mixer exports are gone; prune on sdl3_ttf reports a fixpoint.
 
 - [x] **PL27** (P4, low, duplication, effort S). Location at baseline: ogpu_core Command_buffer.completed_epoch ≡ Backend.completed_epoch. Command_buffer has 2 functions and 1 caller. Action: Fold it into Backend. Evidence: deleted the module and public alias, moved typed receipt status to `Backend`, and migrated pathtracer and conformance callers. OGPU validation plus mock/Metal conformance pass; the pathtracer library builds.
 
@@ -843,7 +843,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **SP25** (P0, low, dead-code, effort S). Location at baseline: Flow.Catalog.kind.aliases (check.ml:316-319, workspace.ml:2034). All 177 manifest entries are `(aliases)` with an empty list. Action: Delete it until a rename needs it.
 
-- [ ] **SP26** (P1, low, api-bloat, effort M). Location at baseline: `~factories` threaded through 107 product signatures. It is always `Sop_catalog.Editor.factories` except in tests. Action: Make it an optional argument defaulting to the catalog, or a module-level constant after SP11.
+- [x] **SP26** (P1, low, api-bloat, effort M). Location at baseline: `~factories` threaded through 107 product signatures. It is always `Sop_catalog.Editor.factories` except in tests. Action: Make it an optional argument defaulting to the catalog, or a module-level constant after SP11. Evidence: factories is an optional argument defaulting to Sop.Nodes.factories in Lower, Lowering, Document_edit, Scene_sync, Preset and Workspace_parity; 50 explicit default passes are gone.
 
 - [x] **SP27** (P7, low, naming, effort S). Location at baseline: flow_sop *_kernel modules; instance_path.ml (2 lines); bench_planar_attribute.ml in library sources. The kernel naming is inconsistent and a bench sits inside the library. Action: Rename or merge them; inline instance_path; move the bench out. Evidence: Instance_path is inlined as Lower.Path_map, and the planar-attribute bench is in tools/.
 

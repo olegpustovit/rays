@@ -8,7 +8,7 @@ Completion is **not proved**. No phase is closed. Unlisted requirements and
 finding IDs remain open. Size estimates do not substitute for behavior,
 performance, parity, and shipping evidence.
 
-Finding coverage: **210 / 248 accepted (84.7%)**. This counts individual
+Finding coverage: **213 / 248 accepted (85.9%)**. This counts individual
 findings, not weighted effort or completed phases.
 
 Individual finding checkboxes record implementation/focused evidence;
@@ -258,6 +258,9 @@ size estimate, not the phase's behavioral or shipping gates.
   deleted the superseded study documents and workspace prototype.
 
 ## In progress and remaining proof
+
+- P9 (b3e5bf63..d4c9d8b3): the marks and UI pipelines come from lib/renderer/shaders/{marks,ui}.rays and are generated as MSL and SPIR-V. ui_parity is exact; the million_marks PNGs are byte-identical; ws_layout, procedural_modeling and ws_orrery match outside the status bar. GPU min ms at 2x: million_marks 27.3–27.8 handwritten vs 21.4–24.8 Lisp; ws_layout UI 3.68–3.74 vs 3.78–3.83 (still about 0.1 ms slower). A Scene3 port is parked at scratchpad p9-scene3-wip.patch: with the bindings renumbered, [[front_facing]] reads false on front faces even with the handwritten shaders. Not yet ported: Scene3 and its variants, Scene3_world, sun depth, Scene2 argument buffer and the image sink.
+- SP10 skipped: the PPX output is shared with flow_sop and the editor tests, where Sop is the real library, so lib/sop keeps its 4-line shim. P1.G1: lib/ is 254.5k lines.
 
 - Skipped with reasons (latest round): PL34 (vertex_attributes=None is the live 2D/UI/Marks path, not legacy; it moves with P9), XC17 (the Flow reader parses dune %{…} as a map), XC26 (the helpers are one-line locals; sharing needs a new library across about 10 directories), FL17 (closure-free capture resolution is a separate design change). FL21 is partial: the global trace is now ?trace and stage_count is gone, while Packed.reference stays the oracle. P5.G2: pxui/ui.ml, Flow_edit, Scope_pane and Metal_raw are re-export facades of disjoint modules; eval.ml's Residual include and rdk_test_support/sop test shims still extend a module. digestif stays because nothing else provides SHA-256. rays_editor declares 18 libraries.
 
