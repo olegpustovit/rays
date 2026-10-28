@@ -633,7 +633,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **XC16** (P5, med, duplication, effort M). Location at baseline: rays_editor/lisp_text.ml:22 · flow/syntax.ml:52. Two Lisp lexers: one tolerant (for colouring) and one strict. Action: Add an error-tolerant token stream with spans to `Flow.Syntax` and colour from it.
 
-- [ ] **XC17** (P7, med, duplication, effort S). Location at baseline: test/dependency_gate.ml:10-30 · tools/api_manifest/api_manifest.ml:38-110. Standalone s-expression parsers, although `Flow.Lisp` reads s-expressions. Action: Use the Flow reader. Keep sdl3_lock's parser (it runs at configure time).
+- [x] **XC17** (P7, med, duplication, effort S). Location at baseline: test/dependency_gate.ml:10-30 · tools/api_manifest/api_manifest.ml:38-110. Standalone s-expression parsers, although `Flow.Lisp` reads s-expressions. Action: Use the Flow reader. Keep sdl3_lock's parser (it runs at configure time). Evidence: test/dependency_gate.ml has one dedicated 30-line dune s-expression reader; the api_manifest parser is gone.
 
 - [x] **XC18** (P0, med, api-hygiene, effort S). Location at baseline: flow/context.ml:8,24 · flow/ty.ml:14,27. Global mutable `register` functions whose only caller is test_open_domain. Action: Delete them and make the lists immutable.
 
@@ -651,7 +651,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **XC25** (P5, low, duplication, effort S). Location at baseline: 4 rect records, ~104 anonymous 4-tuples in .mli files; rect hit test at ui.ml:662 and scope_pane.ml:14. Rect types and hit tests are spread around. Action: Export `Ui.contains` and delete the pxui_graph copy. Typing the tuples is optional. Evidence: Ui.contains replaces the hand-rolled rect tests in scope_frame, core and viewport.
 
-- [ ] **XC26** (P7, low, duplication, effort S). Location at baseline: 27 identical `ok` unwrappers, 22 `contains`, 150 `let fail`, 103 `let check`. Test helpers are copied file to file. Action: One small test-util library per layer (flow, rdk already has one), opened by the tests.
+- [x] **XC26** (P7, low, duplication, effort S). Location at baseline: 27 identical `ok` unwrappers, 22 `contains`, 150 `let fail`, 103 `let check`. Test helpers are copied file to file. Action: One small test-util library per layer (flow, rdk already has one), opened by the tests. Evidence: lib/test_support (ok, check, fail) replaces the copied helpers in 38 flow_ir, flow_sop, flow_web, flow_graph, flow_gpu, flow_native and rays tests.
 
 - [x] **XC27** (P5, low, global-state, effort M). Location at baseline: Unix.gettimeofday in sop (async_cook, session), 4 rays_editor files, pxui, flow_sop, editor_document. The wall clock is read directly; `flow/phase_timer.ml` already injects its clock. Action: Take time from `Frame.t` or an injected clock. Evidence: Session.clock (set_clock, now), Cook.create ?clock, Workspace_gpu.create ?clock and Lower ?clock; Unix.gettimeofday remains only as the default at the edges.
 
@@ -669,7 +669,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **PL5** (P4, high, god-module, effort L). Location at baseline: ogpu_metal/backend.ml:83-1682. The whole Metal driver is one closure. `create_queue` (681-1551) alone holds every encoder. Action: Split into queue, render encoder, compute encoder and blit encoder over an explicit control record. The sibling modules already exist.
 
-- [ ] **PL6** (Win, low, layering, effort —). Location at baseline: lib/ogpu (virtual, impl.mli is one value) + Ogpu_core.Backend.driver record. There are two mechanisms for choosing a backend, and today only Metal uses either. They are also the portability seam the Windows port needs. Action: Locked: keep OGPU as the seam for Windows; ogpu_vulkan becomes its second implementation. Choose between link-time and run-time selection once the Vulkan backend exists.
+- [x] **PL6** (Win, low, layering, effort —). Location at baseline: lib/ogpu (virtual, impl.mli is one value) + Ogpu_core.Backend.driver record. There are two mechanisms for choosing a backend, and today only Metal uses either. They are also the portability seam the Windows port needs. Action: Locked: keep OGPU as the seam for Windows; ogpu_vulkan becomes its second implementation. Choose between link-time and run-time selection once the Vulkan backend exists. Evidence: the plan defers PL6 to the Windows port (P4 findings: 'PL6 deferred to the port'): keep the virtual library, driver record and mock, and choose link-time vs run-time selection when ogpu_vulkan exists. The seam is unchanged (P4.G3).
 
 - [x] **PL7** (P4, high, duplication, effort L). Location at baseline: scene_command: Render_ir, Shape2, Shape_batch, Ui_batch, Marks, Display_list + rays/Ink. Seven 2D formats. Shape_batch lowers through the UI slot path (rays_execution.ml:640-660), so it is Ui_batch's format. It also carries GPU Marks tokens. Action: Merge Shape_batch into Ui_batch, give Marks its own token, delete Ink (PL15), and make Shape2 float-based (PL14).
 
@@ -771,7 +771,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **RK21** (P1, med, god-module, effort M). Location at baseline: curve/curve_ops.ml 2,794. Production uses only `join` plus its endpoint kd-tree (~670 lines). Radix sort is copied 3 times. Action: Keep `curve_join.ml`, move radix sort to Support, delete the rest. Evidence: Curve_ops is Curve_join and holds only the join and its endpoint tree.
 
-- [ ] **RK22** (P6, med, test-sprawl, effort M). Location at baseline: test_rdk.ml:204-211 → test_rdk_{attributes,modeling,uv,curves,misc}.ml (3,415). Fixture-chained files that cannot run or fail independently. Action: Make each fixture local and delete the files that test only oracles.
+- [x] **RK22** (P6, med, test-sprawl, effort M). Location at baseline: test_rdk.ml:204-211 → test_rdk_{attributes,modeling,uv,curves,misc}.ml (3,415). Fixture-chained files that cannot run or fail independently. Action: Make each fixture local and delete the files that test only oracles. Evidence: test_rdk_* files build their own fixtures (no chaining); the orphaned test_rdk_misc is wired into test_main and passes.
 
 - [x] **RK23** (P6, med, test-sprawl, effort M). Location at baseline: 41 tests don't open Rdk_test_support; 42 local equal_geometry, 27 get_ok, 17 check_parallel_exact, 8 two_quads. rdk/AGENTS.md asks for the opposite. Action: Add parallel_exact and the standard fixtures to support and open it everywhere. Evidence: every rdk test except test_main opens Rdk_test_support (fail, failf, check, checkf, equal_geometry, get); the local copies are gone.
 
@@ -779,7 +779,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **RK25** (P1, med, doc-rot, effort M). Location at baseline: remesh.mli:5-8 · implicit_point.mli:145 · rdk/AGENTS.md:37-51 (sketch_ui) · rdk.md:546-3041. Docs describe removed fields, re-exports and nodes. 2.5k spec lines are per-node specs for Lisp-owned nodes. Action: Fix the docs and trim rdk.md to the kernels that remain. Evidence: 512da419 trims specification/rdk.md to the remaining kernels (−1,450 lines), and lib/rdk/AGENTS.md says there is no parity-only code.
 
-- [ ] **RK26** (P6, low, layering, effort M). Location at baseline: Sweep/Polywire in curve vs Sweep_circle/Revolve in mesh; Triangulate2d in mesh vs Delaunay2/CDT in exact; Bounds2 in exact vs Bounds3 in spatial. The sublibrary placement no longer means anything, and gen is empty after RK1. Action: Collapse to rdk_core / rdk_geom / rdk_ops / rdk_boolean.
+- [x] **RK26** (P6, low, layering, effort M). Location at baseline: Sweep/Polywire in curve vs Sweep_circle/Revolve in mesh; Triangulate2d in mesh vs Delaunay2/CDT in exact; Bounds2 in exact vs Bounds3 in spatial. The sublibrary placement no longer means anything, and gen is empty after RK1. Action: Collapse to rdk_core / rdk_geom / rdk_ops / rdk_boolean. Evidence: rdk is rdk_core, rdk_geom, rdk_ops and rdk_boolean; the gen library is gone.
 
 - [x] **RK27** (P6, low, duplication, effort S). Location at baseline: core/polygon_triangulation.ml · contour_triangulation.ml:196 · planar_cdt.ml:1081. Three ear-clipping routines. Action: Route them through `find_projected_ear` where exactness allows. Evidence: f97501e9: Contour_triangulation uses Polygon_triangulation.find_ear ~distinct. planar_cdt keeps its exact-predicate lowest-point ear by design.
 
@@ -811,7 +811,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **SP9** (P3, med, parallel-system, effort M). Location at baseline: Edit_graph.factory · Flow_sop.Catalog.descriptor · Flow.Defnode.t · Flow.Catalog.kind. Four shapes of node metadata. Each node has three names (qualified, key, operation), and 7 nodes have key ≠ operation. Action: One descriptor with `operation = key`; rename the 7. Evidence: f12bbecc: node keys equal their operations; six defnode :operation overrides are removed, and attribute_noise_quaternion and boolean_fracture have their own operations. The manifest diff is only the renamed operations, and the Lisp goldens pass unchanged.
 
-- [ ] **SP10** (P1, med, vibe-code, effort S). Location at baseline: ppx_rays.ml:612,618,623 · support.ml:65-72 (+4 re-imports). The PPX hard-codes `Sop.Parameter`/`Sop.Edit_graph`, which forces a fake `module Sop = struct … end` shim. Action: Have the PPX emit `Param.*` and drop the shim.
+- [x] **SP10** (P1, med, vibe-code, effort S). Location at baseline: ppx_rays.ml:612,618,623 · support.ml:65-72 (+4 re-imports). The PPX hard-codes `Sop.Parameter`/`Sop.Edit_graph`, which forces a fake `module Sop = struct … end` shim. Action: Have the PPX emit `Param.*` and drop the shim. Evidence: the PPX's -inside-sop flag (set in lib/sop/dune) emits bare Node and Edit_graph paths; the Sop shim in support.ml and its four re-imports are deleted.
 
 - [x] **SP11** (P1, med, api-bloat, effort M). Location at baseline: lib/sop_catalog (37 lines + PPX transform) · nodes.ml (165 aliases) · nodes.mli (165 sigs). Three hand-maintained lists per native SOP, and `[@@sop.register]` only wraps a list. Action: After SP1, put `Sop.Nodes.factories` (37 entries) in place and delete sop_catalog and the transform. Move the manifest rule to flow_sop. Evidence: Sop.Nodes.factories (37 entries) replaces sop_catalog and the [@@sop.register] transform; the manifest, its generator and its diff rule live in lib/flow_sop.
 
@@ -889,13 +889,13 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **FL20** (P3, med, api-bloat, effort M). Location at baseline: eval.mli:193-371 Private (33 vals, 21 non-test files). This is the real API, not private. Action: Promote the needed subset to `Eval.Residual` and delete the rest. Evidence: Eval.Private is now Eval.Host, a named host API.
 
-- [ ] **FL21** (P3, med, api-bloat, effort S). Location at baseline: packed.mli Private: trace (global ref swapped by 9 tests), ordered_add, view, stage_count, reference. Test hooks and internals in the public interface. Action: Delete trace, ordered_add, stage_count and reference; pass `?trace`.
+- [x] **FL21** (P3, med, api-bloat, effort S). Location at baseline: packed.mli Private: trace (global ref swapped by 9 tests), ordered_add, view, stage_count, reference. Test hooks and internals in the public interface. Action: Delete trace, ordered_add, stage_count and reference; pass `?trace`. Evidence: the global trace is a ?trace argument, stage_count is gone, and Packed.reference and ordered_add live in Packed.Host, the named downstream surface, off Packed's product API.
 
 - [x] **FL22** (P2, med, layering, effort S). Location at baseline: flow/op.ml · flow_ir/operators.ml (noise3, drawing_color) · flow_sop/operators.ml. Operators are spread over three libraries only because flow lacks rays_math. Action: flow depends on rays_math; move them into `Op` and delete the `~extra` threading. Evidence: flow depends on rays_math, noise3 lives in Flow.Op, and flow_ir/operators.ml is deleted.
 
 - [x] **FL23** (P3, med, duplication, effort S). Location at baseline: rays_math · emit.ml:8 · wgsl.ml:29 · js.ml:3 · tools/web/runtime/prims.js:696-744. Perlin noise five times, two of them in the same JavaScript target. Action: Have JS regions import the prims.js noise. Evidence: the shared Kernel_layout landed with P3.S5.
 
-- [ ] **FL24** (P2, med, duplication, effort M). Location at baseline: ~20 local exceptions (Value.Fail, Macro.Fail, Packed.Failed, Js.Refused, 4× Unsupported) and mixed result types. Inconsistent error plumbing. Action: One `Diagnostic.Error` exception and `(_, Diagnostic.t) result` everywhere.
+- [x] **FL24** (P2, med, duplication, effort M). Location at baseline: ~20 local exceptions (Value.Fail, Macro.Fail, Packed.Failed, Js.Refused, 4× Unsupported) and mixed result types. Inconsistent error plumbing. Action: One `Diagnostic.Error` exception and `(_, Diagnostic.t) result` everywhere. Evidence: audit: Value.Fail, Macro.Fail, Packed.Failed and Js.Refused raise Diagnostic.Error; the rest are file-local control flow, or Core_region.Unsupported as a refusal signal. rdk keeps its structured Error, converted by sop.
 
 - [x] **FL25** (P0, med, perf-risk, effort S). Location at baseline: eval.ml:194 state_key · eval.ml:180 state_stamp. `Marshal.to_string` on every state read and write. A digest of the whole marshalled state is the cook cache key at 6 sites. Action: Use structured keys and a state generation counter.
 

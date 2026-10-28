@@ -8,7 +8,7 @@ Completion is **not proved**. No phase is closed. Unlisted requirements and
 finding IDs remain open. Size estimates do not substitute for behavior,
 performance, parity, and shipping evidence.
 
-Finding coverage: **233 / 248 accepted (94.0%)**. This counts individual
+Finding coverage: **241 / 248 accepted (97.2%)**. This counts individual
 findings, not weighted effort or completed phases.
 
 Individual finding checkboxes record implementation/focused evidence;
@@ -258,6 +258,8 @@ size estimate, not the phase's behavioral or shipping gates.
   deleted the superseded study documents and workspace prototype.
 
 ## In progress and remaining proof
+
+- Open: P6.S4 (about 313 non-cancel optional parameters across rdk_ops interfaces, 58 in attribute_ops.mli and 49 in attribute_transfer.mli), P3.S8 (state-dependent and previous-reading kernels need a persistent per-element buffer across dispatches, which Region cannot express), FL17 (Core.expr.Source holds an arbitrary Eval value that can contain closures; core.mli no longer claims Serializable), XC2 (allowlist 11 rows: the Sop.Node and Mesh construction and view APIs and a few renderer privates), RK6 (22 of 55 range loops on Support.run_indexed_ranges, 33 bespoke), RK28 (Data_id folded; kernel.ml stays for generate_point_ranges).
 
 - P9.G1/G4: handwritten MSL remains in product code in three places: the presentation blit in ogpu_metal/presentation.ml (below the renderer), Emit.compaction (threadgroup memory and barriers, which raster and compute stages cannot express yet) and the scene/trace intersection helpers spliced into traced kernels. Backend and conformance tests keep MSL fixtures.
 - Checker speed (852ac499): Workspace.check is about 3x faster (path tracer kernel set 46→16.3 ms, sop_gallery 715→215 ms; golden replay 84→68–71 user-s) with reused identical defn-call checks, packed_kind computed once, typed string equality and form-id hashing. P8.G2 warm first frame is 256–260 ms vs 200–218 handwritten; the remaining Lisp cost is about 33 ms; the rest is tracer creation (50), World bake (25) and GPU (120).
