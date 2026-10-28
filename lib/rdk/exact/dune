@@ -1,7 +1,0 @@
-(library
- (name rdk_exact)
- (public_name rays.rdk.exact)
- (libraries rdk_core rays_math parallel)
- (flags (:standard -open Rdk_core))
- (private_modules exact_dyadic bounds2_index)
- (modules bounds2_index exact_dyadic predicates implicit_point delaunay2 planar_cdt planar_constraints planar_refinement contour_triangulation))

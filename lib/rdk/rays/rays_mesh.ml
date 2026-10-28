@@ -1,5 +1,5 @@
 open Rdk_core
-open Rdk_mesh
+open Rdk_ops
 open Rays
 
 type 'a source = Point of 'a | Vertex of 'a

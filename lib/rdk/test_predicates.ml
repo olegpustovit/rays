@@ -1,7 +1,7 @@
 open Rdk
 open Rdk_test_support
 
-module Dyadic = Rdk_exact.Exact_dyadic
+module Dyadic = Rdk_geom.Exact_dyadic
 let sign_of c = if c < 0 then Predicates.Negative else if c > 0 then Predicates.Positive else Predicates.Zero
 
 let exact_orient2d_reference ~ax ~ay ~bx ~by ~cx ~cy =

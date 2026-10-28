@@ -1,10 +1,9 @@
 # lib/rdk rules
 
-`rdk_core` owns the packed storage and topology foundation. `rdk_exact` owns
-exact predicates and planar algorithms. `rdk_spatial` owns indices, proximity
-queries, and point clustering. `rdk_attrib` owns attribute and group operations and the point generators;
-`rdk_curve` owns curve
-sampling, editing, and sweeps. `rdk_mesh` owns modeling operations, and
+`rdk_core` owns the packed storage and topology foundation. `rdk_geom` owns exact
+predicates and planar algorithms, indices, proximity queries and point clustering (directories
+`exact/` and `spatial/`). `rdk_ops` owns attribute and group operations, the point generators, curve
+sampling, editing and sweeps, and the modeling operations (`attrib/`, `curve/`, `mesh/`).
 `rdk_boolean` owns Boolean stages.
 `rdk` re-exports the stable public module paths; renderer conversion is isolated in
 `rdk_rays`. `sop` wraps RDK operations as SOPs.

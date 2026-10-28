@@ -5,12 +5,12 @@ type direction =
   | Ray_vector of Rays_math.Vec3.t
   | Ray_normal
   | Ray_attribute of string
-type direction_mode = Rdk_spatial.Surface_index.ray_direction_mode =
+type direction_mode = Rdk_geom.Surface_index.ray_direction_mode =
   | Ray_forward
   | Ray_reverse
   | Ray_bidirectional_closest
   | Ray_bidirectional_farthest
-type surface_hit = Rdk_spatial.Surface_index.ray_surface_hit =
+type surface_hit = Rdk_geom.Surface_index.ray_surface_hit =
   | Ray_first_surface | Ray_last_surface
 type combine = Ray_average | Ray_median | Ray_shortest | Ray_longest
 

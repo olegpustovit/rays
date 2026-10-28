@@ -131,7 +131,7 @@ its `Input` dependency projects every field into the cook cache key. No SDL,
 runtime or renderer value crosses either pure boundary.
 
 Material graph values lower into primitive surface attributes through
-`sop` and `rdk_attrib`. `rays_editor` converts these into shared
+`sop` and `rdk_ops`. `rays_editor` converts these into shared
 render mesh batches; neither the material context nor the assignment kernel
 imports rendering code. `rdk_rays` expands primitive colors through the
 existing attribute promotion kernel, preserving face boundaries.
@@ -149,16 +149,10 @@ examples / sketches / pxui / editor / rdk_rays
                          |               rdk_boolean
                          |                  |
                          |                  v
-                         |               rdk_mesh
+                         |               rdk_ops
                          |                  |
                          |                  v
-                         |              rdk_attrib
-                         |                  |
-                         |                  v
-                         |              rdk_spatial
-                         |                  |
-                         |                  v
-                         |               rdk_exact
+                         |               rdk_geom
                          |                  |
                          |                  v
                          |               rdk_core
@@ -183,12 +177,10 @@ examples / sketches / pxui / editor / rdk_rays
 ```
 
 The RDK split currently puts packed identity, storage, topology, groups, and
-geometry in `rdk_core`; exact predicates, planar constraints, Delaunay, and
-Voronoi live in `rdk_exact`. Spatial and surface indices, proximity queries,
-and point clustering live in `rdk_spatial`. Attribute and group operations
-live in `rdk_attrib`; point generators live there too, while curve sampling and topology live in `rdk_curve`. These are
-branches above the core/exact/spatial layers. Modeling operations are in
-`rdk_mesh`; Boolean stages are in `rdk_boolean`.
+geometry in `rdk_core`; exact predicates, planar constraints, Delaunay, Voronoi, spatial and
+surface indices, proximity queries and point clustering live in `rdk_geom`. Attribute and group
+operations, point generators, curve sampling and topology, and modeling operations live in
+`rdk_ops`; Boolean stages are in `rdk_boolean`.
 `Rdk` keeps the public module paths stable, and
 the dependency gate rejects upward edges from lower to higher RDK libraries.
 
@@ -437,7 +429,7 @@ existing test data and builders without adding a product abstraction.
 "May never
 reach" rules run over the transitive closure; `rays_pathtracer` (no Metal
 backend, mock, geometry graph, catalog, UI or editor library), `rdk_rays`
-(the renderer leaf: `rdk_core`, `rdk_attrib`, `rdk_mesh` and `rays`, never the
+(the renderer leaf: `rdk_core`, `rdk_ops` and `rays`, never the
 Boolean stack, `sop` or anything above) and `scene_execution_fixtures`
 (only `renderer` and `ogpu`) have theirs. "Depends only on" whitelists
 check every direct dependency, external ones included: `param`,

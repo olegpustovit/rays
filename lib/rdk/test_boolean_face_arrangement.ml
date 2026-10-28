@@ -5,7 +5,7 @@ module Constraints = Rdk_boolean.Boolean_constraints
 module Coplanar = Rdk_boolean.Boolean_coplanar
 module Arrangement = Rdk_boolean.Boolean_face_arrangement
 let approximate_point value point =
-  Rdk_exact.Implicit_point.approximate (Arrangement.View.point value point)
+  Rdk_geom.Implicit_point.approximate (Arrangement.View.point value point)
 
 let close left right = abs_float (left -. right) <= 1e-11
 

@@ -1,7 +1,0 @@
-(library
- (name rdk_attrib)
- (public_name rays.rdk.attrib)
- (libraries rdk_core rdk_exact rdk_spatial rays_math parallel)
- (flags (:standard -open Rdk_core -open Rdk_exact -open Rdk_spatial))
- (private_modules attribute_blur attribute_copy attribute_generate attribute_image attribute_interpolate attribute_transfer)
- (modules attribute_blur attribute_copy attribute_generate attribute_image attribute_interpolate attribute_lifecycle attribute_mirror attribute_ops attribute_transfer group_ops line_geometry point_replicate scatter spiral))

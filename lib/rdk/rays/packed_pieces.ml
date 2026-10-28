@@ -1,7 +1,7 @@
 open Rays
 open Rdk_core
-open Rdk_attrib
-open Rdk_mesh
+open Rdk_ops
+open Rdk_ops
 
 type t = {
   base_mesh : Mesh.t;
