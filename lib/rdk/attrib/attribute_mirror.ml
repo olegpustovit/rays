@@ -36,8 +36,7 @@ type mapping = {
   plane : plane option;
 }
 
-exception Mirror_error of string
-let fail message = raise (Mirror_error message)
+let fail message = raise (Error.Fail message)
 
 let attribute_owner = function
   | Mirror_point_attributes -> Attribute.Point
@@ -554,4 +553,4 @@ let run ?cancel ?(grain = 16_384) ?group
               Geometry.without_attribute ~owner:Attribute.Vertex "N" output in
       Ok output
     end
-  with Mirror_error message -> Error message
+  with Error.Fail message -> Error message

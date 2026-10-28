@@ -28,9 +28,8 @@ type crack_policy =
 
 let edge_ancestry_prefix = "__rdk_subdivide_edge_ancestry_"
 
-exception Subdivide_error of string
 
-let fail message = raise (Subdivide_error ("Rdk_mesh.Subdivide.subdivide: " ^ message))
+let fail message = raise (Error.Fail ("Rdk_mesh.Subdivide.subdivide: " ^ message))
 let get_ok = function Ok value -> value | Error message -> fail message
 
 let checked_add name a b =
@@ -3692,8 +3691,8 @@ let make_boundary_weld ?cancel ~bias ~only_equal
   { old_to_output = point_map; output_source; merge_offsets; merge_members; bias }
 
 let extract_primitive_part ?cancel ?grain ~selected primitives geometry =
-  let geometry = Error.unguard (Deletion.delete ?cancel ?grain ~selected:(not selected)
-      ~compact_points:true primitives geometry) |> get_ok in
+  let geometry = Error.get (Deletion.delete ?cancel ?grain ~selected:(not selected)
+      ~compact_points:true primitives geometry) in
   if selected then split_disconnected_point_fans ?cancel ?grain geometry
   else geometry
 
@@ -3712,8 +3711,7 @@ let free_point_part ?cancel ?grain geometry =
     let referenced = Group.init ?grain ~owner:Group.Point
         ~name:"__rdk_subdivide_referenced_points" topology.point_count
         (fun point -> Bytes.get used point <> '\000') in
-    Some (Error.unguard (Deletion.delete ?cancel ?grain ~selected:true referenced geometry)
-      |> get_ok)
+    Some (Error.get (Deletion.delete ?cancel ?grain ~selected:true referenced geometry))
   end
 
 let iterate ?cancel ?grain ?edge_ancestry_attribute ?initial_edge_crease_override
@@ -4124,7 +4122,7 @@ let subdivide_polygons ?cancel ?grain ?(scheme = Catmull_clark) ?(iterations = 1
             else without_resulting_creases output)
         end
   with
-  | Subdivide_error message -> Error message
+  | Error.Fail message -> Error message
 
 let primitive_kind_counts geometry =
   let topology = Topology.View.view (Geometry.topology geometry) in
@@ -4149,8 +4147,8 @@ let primitive_kind_group ?grain ~polygon geometry =
 
 let extract_kind ?cancel ?grain ~polygon geometry =
   let selection = primitive_kind_group ?grain ~polygon geometry in
-  Error.unguard (Deletion.delete ?cancel ?grain ~selected:false ~compact_points:true
-    selection geometry) |> get_ok
+  Error.get (Deletion.delete ?cancel ?grain ~selected:false ~compact_points:true
+    selection geometry)
 
 let selection_for_kind ?grain ~polygon selection geometry =
   match selection with
@@ -4177,8 +4175,7 @@ let refine_curves ?cancel ?grain ?selection ~independent scheme iterations geome
       | Catmull_clark -> Curve_subdivide.Catmull_clark
       | Bilinear -> Curve_subdivide.Bilinear
       | Loop -> fail "Loop subdivision requires triangle polygons and cannot refine polygon curves" in
-    try Curve_subdivide.iterate ?cancel ?grain ~independent scheme iterations geometry
-    with Curve_subdivide.Error message -> fail message in
+    Curve_subdivide.iterate ?cancel ?grain ~independent scheme iterations geometry in
   match selection with
   | None -> refine geometry
   | Some selection ->
@@ -4187,10 +4184,10 @@ let refine_curves ?cancel ?grain ?selection ~independent scheme iterations geome
       if selected = 0 then geometry
       else if selected = Group.length selection then refine geometry
       else begin
-        let refined_source = Error.unguard (Deletion.delete ?cancel ?grain ~selected:false
-            ~compact_points:true selection geometry) |> get_ok in
-        let retained = Error.unguard (Deletion.delete ?cancel ?grain ~selected:true
-            ~compact_points:true selection geometry) |> get_ok in
+        let refined_source = Error.get (Deletion.delete ?cancel ?grain ~selected:false
+            ~compact_points:true selection geometry) in
+        let retained = Error.get (Deletion.delete ?cancel ?grain ~selected:true
+            ~compact_points:true selection geometry) in
         combine_parts ?cancel ?grain ~source:geometry [retained; refine refined_source]
       end
 
@@ -4327,9 +4324,9 @@ let subdivide ?cancel ?grain ?(scheme = Catmull_clark) ?(iterations = 1)
          | None -> () | Some free -> parts := free :: !parts);
         let combined = combine_parts ?cancel ?grain ~source:prepared
             (List.rev !parts) in
-        let ordered = Error.unguard (Ordering.sort ?cancel ?grain ~owner:Ordering.Primitives
+        let ordered = Error.get (Ordering.sort ?cancel ?grain ~owner:Ordering.Primitives
             ~key:(Ordering.Attribute_component
-              { name = source_order_name; component = 0 }) combined) |> get_ok in
+              { name = source_order_name; component = 0 }) combined) in
         let output = Geometry.without_attribute ~owner:Attribute.Primitive
             source_order_name ordered in
         Ok (if generate_resulting_creases then output
@@ -4337,7 +4334,7 @@ let subdivide ?cancel ?grain ?(scheme = Catmull_clark) ?(iterations = 1)
         end
       end
     with
-    | Subdivide_error message -> Error message
+    | Error.Fail message -> Error message
     | Invalid_argument message -> Error message in
   if not recompute_point_normals || not had_point_normals then result
   else Result.bind result (fun output ->

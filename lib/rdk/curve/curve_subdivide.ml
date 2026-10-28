@@ -1,9 +1,7 @@
 
 type scheme = Catmull_clark | Bilinear
 
-exception Error of string
-
-let fail message = raise (Error message)
+let fail = Error.fail
 
 let checked_add name left right =
   if right < 0 || left > max_int - right then

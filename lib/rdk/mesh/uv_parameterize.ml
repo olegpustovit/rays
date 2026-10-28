@@ -1,8 +1,7 @@
 
 type boundary_mode = Circle | Preserve
 
-exception Parameterize_error of string
-let fail message = raise (Parameterize_error message)
+let fail message = raise (Error.Fail message)
 let finite value = Float.is_finite value
 
 let rec find_root parent value =
@@ -551,4 +550,4 @@ let solve ?cancel ?(grain = 16_384) ?(name = "uv") ?seams ?edge_seams
         (Attribute.key ~name ~owner:Attribute.Vertex Attribute.float2) values
         |> Result.get_ok in
     Geometry.with_attribute attribute geometry
-  with Parameterize_error message -> Error message
+  with Error.Fail message -> Error message

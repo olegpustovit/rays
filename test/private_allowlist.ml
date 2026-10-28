@@ -58,7 +58,6 @@ let entries = [
   "rays_editor", "Flow.Eval.Private";
   "rays_editor", "Flow_gpu.Host.Private";
   "rays_editor", "Image.Private";
-  "rays_editor", "Mesh.Private";
   "rays_editor", "Pxui_graph.Scope.Private";
   "rays_editor", "Rays.Image.Private";
   "rays_editor", "Scene.D3.Private";

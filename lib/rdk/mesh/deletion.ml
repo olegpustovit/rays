@@ -1,9 +1,8 @@
 
 type topology_policy = Destroy_touched_primitives | Heal_primitives
 
-exception Delete_error of string
 
-let fail message = raise (Delete_error ("Rdk.Deletion.delete: " ^ message))
+let fail message = raise (Error.Fail ("Rdk.Deletion.delete: " ^ message))
 let get_ok = function Ok value -> value | Error message -> fail message
 
 let minimum_vertices = function
@@ -397,7 +396,7 @@ let delete ?cancel ?grain ?(selected = true) ?(compact_points = false)
     else let plan = build_plan ?cancel ~selected ~compact_points ~policy selection geometry in
     if plan.unchanged then Ok geometry
     else Ok (materialize_plan ?cancel ?grain plan geometry)
-  with Delete_error message -> Error message
+  with Error.Fail message -> Error message
 
 let delete_primitives ?cancel ?grain ?(compact_points = false)
     group geometry =

@@ -24,7 +24,6 @@ type crack_policy =
   | Subdivide_stitch_no_edge_division
   | Subdivide_stitch_divide_edges
   | Subdivide_stitch_triangulate
-exception Subdivide_error of string
 type plan = {
   scheme : scheme;
   source : Rdk_core.Geometry.t;

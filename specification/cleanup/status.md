@@ -8,7 +8,7 @@ Completion is **not proved**. No phase is closed. Unlisted requirements and
 finding IDs remain open. Size estimates do not substitute for behavior,
 performance, parity, and shipping evidence.
 
-Finding coverage: **172 / 248 accepted (69.4%)**. This counts individual
+Finding coverage: **176 / 248 accepted (71.0%)**. This counts individual
 findings, not weighted effort or completed phases.
 
 Individual finding checkboxes record implementation/focused evidence;
@@ -258,6 +258,10 @@ size estimate, not the phase's behavioral or shipping gates.
   deleted the superseded study documents and workspace prototype.
 
 ## In progress and remaining proof
+
+- P8 (4e2afcf3, 00c54c1a): with bevel on, pathtrace.metal allows 384 threads per threadgroup and the Lisp kernels 448–512, so the generated kernel has the lower register pressure. Host binding is proven in test_lisp: a closure over host placeholders, Packed.compile_template, one compile per scene (55–58 ms at 480x840) and a per-frame index patch. It is still faster at load 68 except one noisy World pair. Next: the rays_pathtracer host module, per-triangle materials, instancing, spheres, preview reprojection, motion and curves, the switch-over and P8.S4.
+
+- Decision 11 scalar gate: met. Core_exec runs float-only scalar programs on an unboxed float register file inside the one Core interpreter (scalar_program/run_scalar), falling back to the general path on any non-finite register so diagnostics stay identical; test_core_lower checks parity with overflow inputs. bench_core core row, interleaved over five rounds at load about 20: 103–120 ns before, 44/53/44/45/70 ns after (baseline 63.7), 304 → 96 B/eval. A coordinator rerun at load 55 gives 52–73 CPU ns.
 
 - P8 (1daebeb7, 7ec58656, b0aa3bd7, 12001218): pathtrace.rays adds the World map (CDF search, sun, background modes, camera-visible rects, coverage, direct/indirect split), several rect lights and bevel probe rays. 16x12 is byte-identical on CPU and Metal; 480x840 RMSE is 8.7e-6 (dome) and 1.2e-5 (World). Interleaved GPU ms at load about 24, Lisp vs metal: dome 6.4 vs 9.2, World 8.1 vs 9.9, dome+bevel 11.2 vs 13.2, World+bevel 12.7 vs 14.2. Kernel_layout.specialize folds statically known branches. OGPU Backend.max_total_threads is exposed and test_lisp gates on it (≥512 dome, ≥448 World). Open: motion and curves in scene/trace, host-side scene facts for real scenes, the switch-over and P8.S4.
 

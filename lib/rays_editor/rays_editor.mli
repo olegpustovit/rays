@@ -61,8 +61,8 @@ end
     Layout and chrome live in [Pxui_shell]; sketches use [Editor]. *)
 module Private : sig
   module Spreadsheet : sig
-    val count : Rdk.Attribute.owner -> Rdk.Geometry.t -> int
-    val columns : Rdk.Attribute.owner -> Rdk.Geometry.t -> (string * (int -> string)) array
+    val count : int -> Rdk.Geometry.t -> int
+    val columns : int -> Rdk.Geometry.t -> (string * (int -> string)) array
     val view : Pxui.Ui.t -> bounds:int * int * int * int -> owner:int -> Rdk.Geometry.t option -> int option
   end
   (** Unstable test and diagnostic hooks. These are outside the supported

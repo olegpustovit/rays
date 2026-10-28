@@ -1,5 +1,4 @@
 type scheme = Catmull_clark | Bilinear
-exception Error of string
 type plan = {
   source : Rdk_core.Geometry.t;
 

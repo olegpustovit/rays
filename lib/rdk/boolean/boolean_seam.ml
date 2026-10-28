@@ -1,6 +1,5 @@
 let operation = "boolean_seam"
 let error code message = Error (Error.make ~operation ~code message)
-exception Materialization_error of Error.t
 
 type kind = Left_self | Between | Right_self
 
@@ -129,7 +128,8 @@ let geometry ~x ~y ~z topology =
 let empty_geometry () =
   geometry ~x:[||] ~y:[||] ~z:[||] (Topology.empty ~point_count:0)
 
-let verify_curves_raw ?cancel ~grain curves =
+let verify_curves ?cancel ~grain curves =
+  try
   if grain <= 0 then error "invalid_parameter" "grain must be positive"
   else begin
     let topology = Geometry.topology curves in
@@ -186,9 +186,7 @@ let verify_curves_raw ?cancel ~grain curves =
                   "rounded seam curve %d segment %d intersects curve %d segment %d"
                   left_primitive left_local right_primitive right_local)))
   end
-
-let verify_curves ?cancel ~grain curves =
-  try verify_curves_raw ?cancel ~grain curves with
+  with
   | Cancel.Cancelled -> error "cancelled" "Boolean seam verification was cancelled"
 
 let validate_curve_ancestry ?cancel complex_edge_count selected curves curve_kinds
@@ -247,7 +245,7 @@ let materialize_coincident ?cancel complex facet_masks =
   done;
   (match Boolean_extract.View.validate_materialized ~x ~y ~z
       ~vertex_points:vertices () with
-   | Ok () -> () | Error failure -> raise (Materialization_error failure));
+   | Ok () -> () | Error failure -> raise (Error.Rdk failure));
   let topology = Topology.polygons_owned ~point_count:(Array.length x)
       ~vertex_points:vertices
       ~primitive_offsets:(Array.init (!selected + 1) (fun index -> index * 3))
@@ -301,7 +299,7 @@ let materialize_curves ?cancel complex edge_kinds =
     end
   done;
   (match Boolean_extract.View.validate_positions ~x ~y ~z with
-   | Ok () -> () | Error failure -> raise (Materialization_error failure));
+   | Ok () -> () | Error failure -> raise (Error.Rdk failure));
   let vertices = Array.make (!materialized_selected * 2) 0
   and primitive_offsets = Array.make (!materialized_selected + 1) 0
   and primitive_kinds = Bytes.make !materialized_selected '\001'
@@ -465,7 +463,7 @@ let build ?cancel ?(grain = 16_384) ?(parallel_cutoff = 200_000)
         validate_curve_ancestry ?cancel edge_count materialized_selected curves
           curve_kinds curve_edge_offsets curve_edges;
         (match verify_curves ?cancel ~grain curves with
-         | Ok () -> () | Error failure -> raise (Materialization_error failure));
+         | Ok () -> () | Error failure -> raise (Error.Rdk failure));
         curves, curve_kinds, curve_edge_offsets, curve_edges,
           materialize_coincident ?cancel complex facet_masks
       end else
@@ -476,7 +474,7 @@ let build ?cancel ?(grain = 16_384) ?(parallel_cutoff = 200_000)
     }
   with
   | Cancel.Cancelled -> error "cancelled" "Boolean seam extraction was cancelled"
-  | Materialization_error failure -> Error failure
+  | Error.Rdk failure -> Error failure
   | Invalid_argument message -> error "invalid_output" message
 
 module View = struct

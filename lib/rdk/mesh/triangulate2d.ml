@@ -949,13 +949,13 @@ let run ?cancel { grain; selection; constraint_edges; constraint_primitives;
   Error.guard ~operation:"triangulate_2d" ~code:"invalid_triangulation" @@ fun () ->
   let finish output =
     Result.bind (if remove_unused_points then
-        Error.unguard (Compact_points.run ?cancel ~grain output)
+        Ok (Error.get (Compact_points.run ?cancel ~grain output))
         else Ok output) (fun output ->
       if recompute_point_normals
           && Option.is_some (Geometry.find_attribute
             ~owner:Attribute.Point "N" geometry) then
-        Error.unguard (Normal_ops.run ?cancel ~grain ~owner:Attribute.Point
-          ~attribute:"N" output)
+        Ok (Error.get (Normal_ops.run ?cancel ~grain ~owner:Attribute.Point
+          ~attribute:"N" output))
       else Ok output) in
   Result.bind begin
   try
@@ -1197,7 +1197,7 @@ let run ?cancel { grain; selection; constraint_edges; constraint_primitives;
                 let group = Group.init ~grain ~owner:Group.Point
                     ~name:"__triangulate_2d_duplicate_points" output_point_count
                     (fun point -> Bytes.unsafe_get duplicate point <> '\000') in
-                Error.unguard (Deletion.delete ?cancel ~grain group output)
+                Ok (Error.get (Deletion.delete ?cancel ~grain group output))
             end)
           )
           )

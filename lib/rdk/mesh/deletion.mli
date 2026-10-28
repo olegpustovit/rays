@@ -1,5 +1,4 @@
 type topology_policy = Destroy_touched_primitives | Heal_primitives
-exception Delete_error of string
 type plan = {
   point_map : int array;
   vertex_map : int array;

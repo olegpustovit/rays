@@ -1,4 +1,3 @@
-exception Poly_path_error of string
 val run :
   ?cancel:Rdk_core.Cancel.t ->
   ?grain:int ->

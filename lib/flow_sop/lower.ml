@@ -119,13 +119,7 @@ let changes parameter value = try Ok (changes_of parameter value) with Diagnosti
 let at_zero value =
   if E.is_live value then ok (E.force value ~live:(Input.at_time (0.))) else value
 
-let is_zone kind = kind = "zone/points" || kind = "zone/pieces"
-let metadata_lowering_operations =
-  Operators.all
-  |> List.map (fun (operation : Op.t) -> operation.name)
-  |> List.filter (fun name ->
-    List.mem name ["sop/rename_attr"; "sop/swap_attr"; "sop/delete_attrs";
-      "sop/rename_group"; "sop/delete_group"; "sop/rename_edge"; "sop/delete_edge"])
+let is_zone kind = Operators.lowering kind = Some Operators.Zone
 
 let metadata_factory ~operation ~args sources =
   let text name default = match List.assoc_opt name args with
@@ -159,11 +153,7 @@ let metadata_factory ~operation ~args sources =
   Edit.factory ~key:operation ~label:operation ~category:["Flow"; "Metadata"]
     ~arity:(List.length sources) build
 
-let geometry_array_operations =
-  let native = ["sop/mesh"; "sop/mesh_planes"; "sop/remap"; "sop/concat"; "sop/with_planes"] in
-  Operators.all |> List.filter_map (fun (operation : Op.t) ->
-    if List.mem operation.name native then Some operation.name else None)
-let is_geometry_arrays kind = List.mem kind geometry_array_operations
+let is_geometry_arrays kind = Operators.lowering kind = Some Operators.Geometry_arrays
 let geometry_arrays_key = function
   | "sop/remap" -> "flow.remap" | "sop/concat" -> "flow.concat"
   | "sop/with_planes" -> "flow.with_planes" | _ -> "flow.mesh"
@@ -267,15 +257,13 @@ let attribute_data args =
   else E.Record (List.filter (fun (name, _) ->
     List.mem name ["values"; "selection"; "default"]) args)
 
-let kernel_data (n : E.node) = match n.kind with
-  | "sop/with_attr" -> Some (attribute_data n.args)
-  | "sop/with_group" -> Some (group_data n.args)
-  | kind when is_geometry_arrays kind -> Some (geometry_arrays_data n.args)
+let kernel_data (n : E.node) = match Operators.lowering n.kind with
+  | Some Attribute_write -> Some (attribute_data n.args)
+  | Some Group_write -> Some (group_data n.args)
+  | Some Geometry_arrays -> Some (geometry_arrays_data n.args)
   | _ -> None
-let is_resource (n : E.node) = match n.kind with
-  | "image/load" | "image/render" | "image/map" -> true
-  | "exact" -> n.ty = Ty.image
-  | _ -> false
+let is_resource (n : E.node) =
+  Operators.lowering n.kind = Some Operators.Resource && (n.kind <> "exact" || n.ty = Ty.image)
 
 let attribute_node ~strict_body ~reference ~profile ~approx ~gpu ~kernel_source
     ?state ?elems ?selection ?default ?(owner=Rdk.Attribute.Point) ?(kind="vec3")
@@ -1172,9 +1160,10 @@ end) = struct
                         !changes) args;
                 {cid; factory; arity = !arity; dynamic = List.rev !dynamic; zone = None;
                  slots = List.rev !slots; changes = List.rev !changes; kernels = List.rev !kernels}
-    let natives : (string, E.node -> (string * E.value) list -> int -> prepared) Hashtbl.t = Hashtbl.create 16
+    let natives : (Operators.lowering, E.node -> (string * E.value) list -> int -> prepared) Hashtbl.t = Hashtbl.create 16
     let native (node : E.node) =
-      if node.kind = "exact" && node.ty <> Ty.image then None else Hashtbl.find_opt natives node.kind
+      if node.kind = "exact" && node.ty <> Ty.image then None
+      else Option.bind (Operators.lowering node.kind) (Hashtbl.find_opt natives)
     let rec prepare (node : E.node) =
       match Hashtbl.find_opt prepared node.id with
       | Some p -> p
@@ -1317,32 +1306,32 @@ end) = struct
             else build ~outer bound id) z.order;
         Hashtbl.find bound z.root
     let () =
-  let reg keys lower = List.iter (fun key -> Hashtbl.replace natives key lower) keys in
-  reg geometry_array_operations (fun (node : E.node) args cid ->
+  let reg key lower = Hashtbl.replace natives key lower in
+  reg Geometry_arrays (fun (node : E.node) args cid ->
 let operation = node.kind in
                 let sources=deps node in
                 let factory=Edit.factory ~key:(geometry_arrays_key operation) ~label:(geometry_arrays_label operation) ~category:["Flow";"Topology"]
                   ~arity:(List.length sources)(geometry_arrays_node ~operation ~args ~sources)in
                 {cid;factory;arity=List.length sources;changes=[];dynamic=[];zone=None;kernels=[];
                   slots=List.mapi(fun index source->index,source)sources});
-  reg metadata_lowering_operations (fun (node : E.node) args cid ->
+  reg Metadata (fun (node : E.node) args cid ->
 let operation = node.kind in
                 let sources=geo_of args in
                 let factory=metadata_factory ~operation ~args sources in
                 {cid;factory;arity=List.length sources;changes=[];dynamic=[];zone=None;kernels=[];
                   slots=List.mapi(fun i source->i,source)sources});
-  reg ["sop/with_group"] (fun (node : E.node) args cid ->
+  reg Group_write (fun (node : E.node) args cid ->
                 let sources=deps node in
                 let factory=Edit.factory ~key:"flow.with_group" ~label:"Write group"
                   ~category:["Flow"] ~arity:(List.length sources) (group_node ~args ~sources) in
                 {cid;factory;arity=List.length sources;changes=[];dynamic=[];zone=None;kernels=[];
                   slots=List.mapi(fun i source->i,source)sources});
-  reg ["image/load"; "image/render"; "image/map"; "exact"] (fun (node : E.node) args cid ->
+  reg Resource (fun (node : E.node) args cid ->
                 let factory=Edit.factory ~key:node.kind ~label:node.kind ~category:["Image"] ~arity:0
                   (fun _->resource_image node.kind (Error(Diagnostic.error ~code:"E_IMAGE"
                     "This image needs an initial-domain image resolver.")))in
                 {cid;factory;slots=[];arity=0;changes=[];dynamic=[];zone=None;kernels=[]});
-  reg ["sop/with_attr"] (fun (node : E.node) args cid ->
+  reg Attribute_write (fun (node : E.node) args cid ->
                 let owner,kind=attribute_options args in
                 let name = match List.assoc "attribute" args with
                   | E.Text name -> name | _ -> fail "E_LOWER" "Attribute name must be static text" in
@@ -1356,7 +1345,7 @@ let operation = node.kind in
                 {cid; factory; arity = List.length sources; changes = []; dynamic = []; zone = None; kernels = [];
                   slots = List.filter_map (fun (i, source) -> if source < 0 then None else Some (i, source))
                     (List.mapi (fun i source -> i, source) sources)});
-  reg ["sop/delete_attr"] (fun (node : E.node) args cid ->
+  reg Attribute_delete (fun (node : E.node) args cid ->
                 let name = match List.assoc "attribute" args with
                   | E.Text name -> name | _ -> fail "E_ATTR_NAME" "An attribute pattern must be text" in
                 let owner = match List.assoc_opt "owner" args with
@@ -1369,7 +1358,7 @@ let operation = node.kind in
                     | _ -> invalid_arg "Attribute deletion needs one geometry") in
                 {cid;factory;arity=1;changes=[];dynamic=[];zone=None;kernels=[];
                   slots=List.mapi (fun i source -> i,source) sources});
-  reg ["sop/curve"] (fun (node : E.node) args cid ->
+  reg Curve (fun (node : E.node) args cid ->
 let dynamic = ref [] in
                 let encode points = [Curve.parameter, Param.Text_value (Curve.encode (curve_points points))] in
                 let closed = match List.assoc_opt "closed" args with
@@ -1386,7 +1375,7 @@ let dynamic = ref [] in
                   | _ -> encode args) in
                 {cid; factory = Curve.factory; arity = 0; slots = []; changes;
                  dynamic = List.rev !dynamic; zone = None; kernels = []});
-  reg ["zone/points"; "zone/pieces"] (fun (node : E.node) args cid ->
+  reg Zone (fun (node : E.node) args cid ->
                 let z = { (zinfo node) with base = !tags; count = Atomic.make (-1);
                                             positions = Atomic.make [||] } in
                 tags := z.base + Zone.max_elements;

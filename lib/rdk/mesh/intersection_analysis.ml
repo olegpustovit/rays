@@ -319,9 +319,12 @@ let create_output ~input_attribute ~primitive_attribute ~primitive_uvw_attribute
   | Ok geometry -> geometry
   | Error message -> invalid_arg message
 
-let run_raw ?cancel ~grain ?source_primitives ?collision_primitives ~tolerance
-    ~include_coplanar ~input_attribute ~primitive_attribute
-    ~primitive_uvw_attribute ~point_attribute ~collision geometry =
+let run ?cancel ?(grain = 16_384) ?source_primitives
+    ?collision_primitives ?(tolerance = 0.) ?(include_coplanar = true)
+    ?(input_attribute = Some "sourceinput")
+    ?(primitive_attribute = Some "sourceprim")
+    ?(primitive_uvw_attribute = Some "sourceprimuv")
+    ?(point_attribute = Some "sourcepoint") ?collision geometry =
   try
     if grain <= 0 then error "invalid_parameter" "grain must be positive"
     else if not (Float.is_finite tolerance) || tolerance < 0. then
@@ -357,12 +360,3 @@ let run_raw ?cancel ~grain ?source_primitives ?collision_primitives ~tolerance
   | Cancel.Cancelled -> error "cancelled" "Intersection Analysis was cancelled"
   | Invalid_argument message -> error "invalid_geometry" message
 
-let run ?cancel ?(grain = 16_384) ?source_primitives
-    ?collision_primitives ?(tolerance = 0.) ?(include_coplanar = true)
-    ?(input_attribute = Some "sourceinput")
-    ?(primitive_attribute = Some "sourceprim")
-    ?(primitive_uvw_attribute = Some "sourceprimuv")
-    ?(point_attribute = Some "sourcepoint") ?collision geometry =
-  run_raw ?cancel ~grain ?source_primitives ?collision_primitives ~tolerance
-    ~include_coplanar ~input_attribute ~primitive_attribute
-    ~primitive_uvw_attribute ~point_attribute ~collision geometry

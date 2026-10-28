@@ -127,7 +127,7 @@ Check, then static stage, then lower once to Core, then place, then execute with
 - [x] P3.S6: Add traversals: `Core.reads/writes/children/iter` and `Workspace.children/map_children`, then rewrite the roughly 10 hand-written walks. Evidence: `@check`, `@lib/flow/runtest`, `@lib/flow_ir/runtest`, `@lib/flow_web/runtest`, and `@lib/flow_graph/runtest` pass; `test_core_control` checks ordered nested `Protect`/`If`/`Counted`/`Diagnose_rows`, direct reads/writes, and immediate-only workspace mapping. `tools/web_parity.exe` passes `sketches/flow_vectors.rays` (120 frames). A native benchmark on 1,247 workspace terms (ws_layout plus workspace cases; 100 full passes, median of 9, one domain, Darwin arm64) matched call-name results exactly: legacy 0.039653 s / 12,924,096 B; shared walk 0.036493 s / 12,929,696 B.
 - [x] P3.S7: Placement in Flow_ir (device regions and attribute fusion), shared by native `Core_exec.draw` and the web exporter. This closes the native fusion gap listed in DEFERRED.md. Move `tools/lisp/web_export.ml` and the web runtime JS to `lib/web_export`, and the binary to `bin/rays`; the gate covers both. Evidence: Core_draw.device_groups shares scope/rate/precision/count and argument rebinding rules; native multi-output dispatch, original-order refusal, exact pixels and two-drawing lifetimes pass. TT12's product-owner moves and dependency gate pass. Literal Float range reuse is drawing-owned and bounded; paired warm million-mark moving-both frames measure 2.533/2.212 ms, one dispatch and about 27 KB allocation.
 - [ ] P3.S8: Widen `Core.Region` to cover the language rather than a subset: structured loops with carried registers, uint32 wraparound integers, records and vectors lowered to scalars, and inlined `defn`. CPU blocks support each one first, which removes the 'refused, runs single-threaded' path in DEFERRED.md:89. The MSL and WGSL printers follow through `Kernel_layout`.
-- [ ] P3.S9: Split the god functions: `Workspace.check`, `core_lower.lower_with`, `packed.run_all` and `flow_sop/lower.lower_checked` (into per-kind lowerings from the Operators table). One node descriptor, with `operation = key`.
+- [x] P3.S9: Split the god functions: `Workspace.check`, `core_lower.lower_with`, `packed.run_all` and `flow_sop/lower.lower_checked` (into per-kind lowerings from the Operators table). One node descriptor, with `operation = key`. Evidence: Workspace.check, Core_lower.lower_with, Packed.run_all and Lower.lower_checked are each under 300 lines; SOP lowering dispatches by Operators.lowering tag. SP9's operation=key rename stays open because it changes operation identity and golden bytes.
 - [x] P3.S10: Move the GPU mailbox out of flow_ir. Pass curve points as a typed array. Key the lower cache on content and drop the `Obj` key. Evidence: Flow_native.Workspace_gpu owns the mailbox/proxy/pump/cancellation; Flow_ir.Gpu is immutable configuration data passed through qualification, lowering, cooking and attribute execution. Lower uses bounded checked-content keys without Obj; live Curve points use typed Vec3 arrays and binary keys. Native worker/placement, attribute/bulk, content-cache and typed-curve checks pass. Startup is one evaluation at469 B/mark (<500); nondefault config survives real text reload/preset loading. Owner close is protected across exceptions.
 
 Exit gates:
@@ -807,7 +807,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **SP7** (P0, high, correctness-risk, effort S). Location at baseline: rays_editor/workspace_images.ml:462-466 → Sop.Image_nodes.noise. Re-declares image/noise defaults and a `freq` alias, and misses `hard_min 1`. It calls a typed OCaml constructor, which the rules say should not exist. Action: Cook through `noise_factory` and delete `Image_nodes.noise`.
 
-- [ ] **SP8** (P3, high, god-module, effort L). Location at baseline: flow_sop/lower.ml:166-1468 lower_checked. One ~1,300-line function with 6 optional flags and ~50 hard-coded kind strings. Action: Per-kind lowerings dispatched from the Operators table.
+- [x] **SP8** (P3, high, god-module, effort L). Location at baseline: flow_sop/lower.ml:166-1468 lower_checked. One ~1,300-line function with 6 optional flags and ~50 hard-coded kind strings. Action: Per-kind lowerings dispatched from the Operators table. Evidence: lower_checked is split under 300 lines, and Operators.lowering tags the natively lowered kinds; lower.ml's natives table is keyed by that tag, with the kind strings in operators.ml beside their builders.
 
 - [ ] **SP9** (P3, med, parallel-system, effort M). Location at baseline: Edit_graph.factory · Flow_sop.Catalog.descriptor · Flow.Defnode.t · Flow.Check.kind. Four shapes of node metadata. Each node has three names (qualified, key, operation), and 7 nodes have key ≠ operation. Action: One descriptor with `operation = key`; rename the 7.
 
@@ -923,7 +923,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **FL37** (P0, low, correctness-risk, effort S). Location at baseline: tools/lisp/rays.ml:62-67. `rays web` writes files non-atomically, so a server can read a half-written export. Action: Write to a temp file and rename (as Store already does).
 
-- [ ] **FL38** (P3, low, api-bloat, effort S). Location at baseline: core_exec.mli run, fast. Used only by tools and by the shortcut that FL3 removes. Action: Delete them.
+- [x] **FL38** (P3, low, api-bloat, effort S). Location at baseline: core_exec.mli run, fast. Used only by tools and by the shortcut that FL3 removes. Action: Delete them. Evidence: Core_exec.run and Core_exec.fast are gone; tests use Test_program.run from flow_ir_test_support.
 
 - [x] **UI1** (P5, high, god-module, effort L). Location at baseline: rays_editor/core_*.ml (17 files, ~6.1k lines), each `include`s the previous; Environment_* repeats this 4 times. One 6k-line namespace split into files by line count. File names don't match contents. Action: Use explicit modules over `Core_model.t` with no includes: Panes, Inspect, List_view, Text, Status, Reduce, Frame. Evidence: no core_*/environment_* file includes a sibling; the modules open what they use over Core_model.t (6e19965f, ffcc4a24).
 
@@ -935,7 +935,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **UI5** (P5, high, test-sprawl, effort S). Location at baseline: marks_scene_test/dune:2 · native_qualification/dune:1-9 · tools/dune:241 · gate_test/dune:2. marks_scene.ml is compiled 4 times and drawing/workspace_* twice, so one binary carries two `Marks_scene` modules. Action: UI4 removes all of the copies. Move `Gate` into `input`.
 
-- [ ] **UI6** (P5, high, layering, effort S). Location at baseline: rays_editor/surface.ml, packed_pieces.ml. SOP-to-Scene3 glue over rdk, with one editor call site. Action: Move them to rdk_rays; the editor drops its direct dependency on rdk.
+- [x] **UI6** (P5, high, layering, effort S). Location at baseline: rays_editor/surface.ml, packed_pieces.ml. SOP-to-Scene3 glue over rdk, with one editor call site. Action: Move them to rdk_rays; the editor drops its direct dependency on rdk. Evidence: the editor reads geometry through Rdk_rays.Geometry_view (probe summary, bounds, sheet columns, wire mesh, pick and cast); rays_editor no longer depends on rdk.
 
 - [x] **UI7** (P0, high, doc-rot, effort S). Location at baseline: pxui_graph/AGENTS.md:42,44 · flow.md:37 vs flow.md:356 · scope_state.ml:145. The normative docs contradict each other: 'No curves' vs curves by default. Action: Settle on one style and delete the losing styles (UI8).
 
@@ -997,7 +997,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [ ] **UI36** (P5, low, naming, effort S). Location at baseline: Core, Environment, Leader, Contexts, `core_*` prefix. Names that don't say what the module is. Action: Rename them while doing UI1 and UI14.
 
-- [ ] **UI37** (P7, low, api-bloat, effort S). Location at baseline: editor_document document/layers/objects/literal_edit (1,302 lines). No `.mli` and not private. Action: Add `.mli` files or mark them private.
+- [x] **UI37** (P7, low, api-bloat, effort S). Location at baseline: editor_document document/layers/objects/literal_edit (1,302 lines). No `.mli` and not private. Action: Add `.mli` files or mark them private. Evidence: document, document_edit, literal_edit, objects and layers have .mli files trimmed to what the repo uses.
 
 - [x] **TT1** (P0, high, process, effort S). Location at baseline: .claude/worktrees/agent-af1aa771a748d6720 (900 MB, locked). A stale agent worktree that doubles grep and skill hits. Action: `git worktree remove --force` and ignore `.claude/worktrees/`.
 

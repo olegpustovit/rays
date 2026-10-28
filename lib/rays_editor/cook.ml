@@ -15,14 +15,14 @@ type 'prepared piece = {
   context : string;  (* projection of the graph's declared context dependencies *)
   output : Session.output;  (* what [prepared] was made from, before the tint *)
   lit : Pick.Set.t;  (* the provenance tags [prepared] highlights, see {!Pick} *)
-  surface : Rdk.Surface_index.t option Lazy.t;  (* built by the first click *)
+  surface : Rdk_rays.Geometry_view.surface option Lazy.t;  (* built by the first click *)
 }
 
 (* What a footer shows of a geometry value: its object and compiled node. *)
 type summary = (int * int) * Flow_graph.Probe.geometry
 
 type 'prepared cooked =
-  | Displayed of 'prepared piece list * summary list * ((int * int) * Rdk.Geometry.t) list
+  | Displayed of 'prepared piece list * summary list * ((int * int) * Rdk_rays.Geometry_view.t) list
   | Framed of bounds option
 
 type 'prepared t = {
@@ -52,7 +52,7 @@ type 'prepared t = {
   displayed : (int * int) list;  (* the display node each graph compiles *)
   probing : (int * int) list;  (* the (object, node) pairs the last submission asked to summarise *)
   summaries : summary list;
-  sources : ((int * int) * Rdk.Geometry.t) list; (* same bounded optional cook targets as summaries *)
+  sources : ((int * int) * Rdk_rays.Geometry_view.t) list; (* same bounded optional cook targets as summaries *)
 }
 
 type 'prepared update = {
@@ -62,20 +62,7 @@ type 'prepared update = {
   framed : bounds option option;
 }
 
-let geometry_bounds geometry =
-  let points = Rdk.Geometry.positions geometry in
-  let count = Rdk.Packed.Float3.length points in
-  if count = 0 then None else begin
-    let x, y, z = Rdk.Packed.Float3.get points 0 in
-    let lo = [| x; y; z |] and hi = [| x; y; z |] in
-    for index = 1 to count - 1 do
-      let x, y, z = Rdk.Packed.Float3.get points index in
-      lo.(0) <- Float.min lo.(0) x; lo.(1) <- Float.min lo.(1) y;
-      lo.(2) <- Float.min lo.(2) z; hi.(0) <- Float.max hi.(0) x;
-      hi.(1) <- Float.max hi.(1) y; hi.(2) <- Float.max hi.(2) z
-    done;
-    Some (Rays_math.Vec3.create lo.(0) lo.(1) lo.(2), Rays_math.Vec3.create hi.(0) hi.(1) hi.(2))
-  end
+let geometry_bounds = Rdk_rays.Geometry_view.bounds
 
 (* The eight corners of a box under a transform: the one walk for every box taken to another
    space (an instance's, the world's, the screen's). *)
@@ -274,16 +261,12 @@ let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty) ?(pump=fun()
     Option.map (fun node -> key, node) (node_of key)) (List.take 64 probes) in
   let summary (key, node) (output : Session.output) =
     let g = Result.get_ok (Payload.geometry output.payload) in
-    key, { Flow_graph.Probe.seconds = Async_cook.node_seconds value.worker (Node.id node); points = Rdk.Packed.Float3.length (Rdk.Geometry.positions g);
-           prims = Rdk.Geometry.primitive_count g;
+    let v = Rdk_rays.Geometry_view.summary g in
+    key, { Flow_graph.Probe.seconds = Async_cook.node_seconds value.worker (Node.id node); points = v.points;
+           prims = v.prims;
            extent = Option.map (fun (lo, hi) ->
              hi.Rays_math.Vec3.x -. lo.Rays_math.Vec3.x, hi.y -. lo.y, hi.z -. lo.z) (geometry_bounds g);
-           groups = List.sort_uniq compare (List.map Rdk.Group.name (Rdk.Geometry.groups g));
-           attributes = List.map (fun a ->
-             let owner = match Rdk.Attribute.owner a with Point -> "point" | Vertex -> "vertex"
-               | Primitive -> "primitive" | Detail -> "detail" in
-             owner, Rdk.Attribute.name a, Rdk.Attribute.kind_name a, Rdk.Attribute.length a)
-             (Rdk.Geometry.attributes g) } in
+           groups = v.groups; attributes = v.attributes } in
   let prepare context outputs optional =
     let found = List.filter_map Fun.id (List.map2 (fun target output ->
       Option.bind output (fun (output : Session.output) -> match output.payload with

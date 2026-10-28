@@ -262,7 +262,7 @@ let primitive_barycenters ?cancel ~grain geometry =
         z.(primitive) <- !sz *. scale);
   Packed.Float3.View.of_owned_exn ~x ~y ~z
 
-let transfer_spatial_raw ?cancel ?(grain = 16_384) ?names ?pattern
+let spatial_transfer ?cancel ?(grain = 16_384) ?names ?pattern
     ?(mode = Nearest) ?max_distance ?(blend_width = 0.)
     ?(falloff = Smoothstep) ?(unmatched = Keep_target)
     ?source_elements ?target_elements
@@ -493,9 +493,11 @@ let transfer_spatial_raw ?cancel ?(grain = 16_384) ?names ?pattern
             (fun index -> make_attribute attributes.(index)))
           (install_attributes_batch target)))))))
 
-let spatial_raw ?cancel ?grain ?names ?pattern ?mode ?max_distance
+let spatial ?cancel ?grain ?names ?pattern ?mode ?max_distance
     ?blend_width ?falloff ?unmatched ?source_elements ?target_elements
     ~owner ~source ~target () =
+  Error.guard ~cancelled:"attribute transfer was cancelled" ~invalid_argument:"invalid_position" ~operation:"attribute_transfer"
+    ~code:"invalid_transfer" @@ fun () ->
   let grain = Option.value ~default:16_384 grain in
   let operation, source_positions, target_positions = match owner with
     | Attribute.Point ->
@@ -508,23 +510,9 @@ let spatial_raw ?cancel ?grain ?names ?pattern ?mode ?max_distance
         (fun () -> primitive_barycenters ?cancel ~grain target)
     | Attribute.Vertex | Attribute.Detail ->
         invalid_arg "Rdk.Attribute_ops.transfer: owner must be point or primitive" in
-  transfer_spatial_raw ?cancel ~grain ?names ?pattern ?mode ?max_distance
+  spatial_transfer ?cancel ~grain ?names ?pattern ?mode ?max_distance
     ?blend_width ?falloff ?unmatched ?source_elements ?target_elements
     ~operation ~owner ~source_positions ~target_positions ~source ~target ()
-
-let spatial ?cancel ?grain ?names ?pattern ?mode ?max_distance
-    ?blend_width ?falloff ?unmatched ?source_elements ?target_elements
-    ~owner ~source ~target () =
-  try Result.map_error
-      (Error.of_string ~operation:"attribute_transfer" ~code:"invalid_transfer")
-      (spatial_raw ?cancel ?grain ?names ?pattern ?mode ?max_distance
-         ?blend_width ?falloff ?unmatched ?source_elements ?target_elements
-         ~owner ~source ~target ())
-  with
-  | Cancel.Cancelled -> Error (Error.make ~operation:"attribute_transfer"
-      ~code:"cancelled" "attribute transfer was cancelled")
-  | Invalid_argument message -> Error (Error.make ~operation:"attribute_transfer"
-      ~code:"invalid_position" message)
 
 let transfer_points ?cancel ?grain ?names ?pattern ?mode ?max_distance
     ?blend_width ?falloff ?unmatched ?source_points ?target_points
@@ -540,18 +528,15 @@ let transfer_primitives ?cancel ?grain ?names ?pattern ?mode ?max_distance
     ?falloff ?unmatched ?source_elements:source_primitives
     ?target_elements:target_primitives ~owner:Attribute.Primitive ~source ~target ()
 
-let transfer_detail_raw ?names ?pattern ~source ~target () =
+let transfer_detail ?names ?pattern ~source ~target () =
+  Error.guard ~operation:"attribute_transfer"
+    ~code:"invalid_transfer" @@ fun () ->
   Result.bind (selected_attributes ~operation:"Rdk.Attribute_ops.transfer_detail"
       ~owner:Attribute.Detail ~names ~pattern source) (fun attributes ->
     Result.bind (validate_target_kinds
         ~operation:"Rdk.Attribute_ops.transfer_detail" ~owner:Attribute.Detail
         attributes target) (fun () ->
       install_attributes_batch target attributes))
-
-let transfer_detail ?names ?pattern ~source ~target () =
-  Result.map_error
-    (Error.of_string ~operation:"attribute_transfer" ~code:"invalid_transfer")
-    (transfer_detail_raw ?names ?pattern ~source ~target ())
 
 type surface_attribute = {
   source_owner : Attribute.owner;
@@ -571,12 +556,14 @@ let surface_attribute ?into ~owner name =
     invalid_arg "Rdk.Attribute_ops.surface_attribute: canonical P is not an ordinary attribute";
   { source_owner = owner; source_name = name; target_name }
 
-let transfer_surface_raw ?cancel ?(grain = 16_384) ?max_distance
+let transfer_surface ?cancel ?(grain = 16_384) ?max_distance
     ?(blend_width = 0.) ?(falloff = Smoothstep) ?(unmatched = Keep_target)
     ?(target_owner = Attribute.Point) ?distance_attribute ?source_primitives
     ?source_vertices ?(source_vertex_selection = All_triangle_vertices)
     ?target_elements
     ~attributes ~source ~target () =
+  Error.guard ~cancelled:"surface attribute transfer was cancelled" ~invalid_argument:"invalid_position" ~operation:"attribute_transfer_surface"
+    ~code:"invalid_transfer" @@ fun () ->
   if grain <= 0 then invalid_arg
       "Rdk.Attribute_ops.transfer_surface: grain must be positive";
   Cancel.check_opt cancel;
@@ -823,86 +810,43 @@ let transfer_surface_raw ?cancel ?(grain = 16_384) ?max_distance
             (Attribute.Float values)))
         (install_attributes_batch target))
 
-let transfer_surface ?cancel ?grain ?max_distance ?blend_width ?falloff ?unmatched
-    ?target_owner ?distance_attribute ?source_primitives ?source_vertices
-    ?source_vertex_selection ?target_elements
-    ~attributes ~source ~target () =
-  try Result.map_error
-      (Error.of_string ~operation:"attribute_transfer_surface"
-        ~code:"invalid_transfer")
-      (transfer_surface_raw ?cancel ?grain ?max_distance ?blend_width ?falloff
-         ?unmatched ?target_owner ?distance_attribute ?source_primitives
-         ?source_vertices ?source_vertex_selection
-         ?target_elements ~attributes ~source ~target ())
-  with
-  | Cancel.Cancelled -> Error (Error.make ~operation:"attribute_transfer_surface"
-      ~code:"cancelled" "surface attribute transfer was cancelled")
-  | Invalid_argument message -> Error (Error.make
-      ~operation:"attribute_transfer_surface" ~code:"invalid_position" message)
-
-let transfer_vertices_raw ?cancel ?grain ?names ?pattern ?max_distance
+let transfer_vertices ?cancel ?grain ?names ?pattern ?max_distance
     ?blend_width ?falloff ?unmatched ?source_primitives ?source_vertices
     ?source_vertex_selection ?target_vertices
     ~source ~target () =
+  Error.guard ~cancelled:"attribute transfer was cancelled" ~invalid_argument:"invalid_position" ~operation:"attribute_transfer"
+    ~code:"invalid_transfer" @@ fun () ->
   Result.bind (selected_attributes
       ~operation:"Rdk.Attribute_ops.transfer_vertices"
       ~owner:Attribute.Vertex ~names ~pattern source) (fun attributes ->
     let attributes = Array.to_list attributes |> List.map (fun attribute ->
       surface_attribute ~owner:Attribute.Vertex (Attribute.name attribute)) in
-    transfer_surface_raw ?cancel ?grain ?max_distance ?blend_width ?falloff
-      ?unmatched ~target_owner:Attribute.Vertex ?source_primitives
+    Ok (Error.get (transfer_surface ?cancel ?grain ?max_distance ?blend_width
+      ?falloff ?unmatched ~target_owner:Attribute.Vertex ?source_primitives
       ?source_vertices ?source_vertex_selection
-      ?target_elements:target_vertices ~attributes ~source ~target ())
+      ?target_elements:target_vertices ~attributes ~source ~target ())))
 
-let transfer_vertices ?cancel ?grain ?names ?pattern ?max_distance ?blend_width
-    ?falloff ?unmatched ?source_primitives ?source_vertices
-    ?source_vertex_selection ?target_vertices ~source ~target () =
-  try Result.map_error
-      (Error.of_string ~operation:"attribute_transfer" ~code:"invalid_transfer")
-      (transfer_vertices_raw ?cancel ?grain ?names ?pattern ?max_distance
-         ?blend_width ?falloff ?unmatched ?source_primitives ?source_vertices
-         ?source_vertex_selection ?target_vertices
-         ~source ~target ())
-  with
-  | Cancel.Cancelled -> Error (Error.make ~operation:"attribute_transfer"
-      ~code:"cancelled" "attribute transfer was cancelled")
-  | Invalid_argument message -> Error (Error.make ~operation:"attribute_transfer"
-      ~code:"invalid_position" message)
-
-let transfer_all_raw ?cancel ?grain ?point_pattern ?vertex_pattern
+let transfer_all ?cancel ?grain ?point_pattern ?vertex_pattern
     ?primitive_pattern ?detail_pattern ?mode ?max_distance ?blend_width ?falloff
     ?unmatched ~source ~target () =
+  Error.guard ~cancelled:"multi-owner attribute transfer was cancelled" ~invalid_argument:"invalid_position" ~operation:"attribute_transfer_all"
+    ~code:"invalid_transfer" @@ fun () ->
   let apply pattern transfer geometry = match pattern with
     | None -> Ok geometry
     | Some pattern -> transfer ~pattern geometry in
   Result.bind
     (apply point_pattern (fun ~pattern target ->
-       spatial_raw ?cancel ?grain ~pattern ?mode ?max_distance
+       Ok (Error.get (spatial ?cancel ?grain ~pattern ?mode ?max_distance
          ?blend_width ?falloff ?unmatched ~owner:Attribute.Point
-         ~source ~target ()) target)
+         ~source ~target ()))) target)
     (fun target -> Result.bind
       (apply primitive_pattern (fun ~pattern target ->
-         spatial_raw ?cancel ?grain ~pattern ?mode ?max_distance
+         Ok (Error.get (spatial ?cancel ?grain ~pattern ?mode ?max_distance
            ?blend_width ?falloff ?unmatched ~owner:Attribute.Primitive
-           ~source ~target ()) target)
+           ~source ~target ()))) target)
       (fun target -> Result.bind
         (apply vertex_pattern (fun ~pattern target ->
-           transfer_vertices_raw ?cancel ?grain ~pattern ?max_distance
-             ?blend_width ?falloff ?unmatched ~source ~target ()) target)
+           Ok (Error.get (transfer_vertices ?cancel ?grain ~pattern ?max_distance
+             ?blend_width ?falloff ?unmatched ~source ~target ()))) target)
         (fun target -> apply detail_pattern (fun ~pattern target ->
-           transfer_detail_raw ~pattern ~source ~target ()) target)))
-
-let transfer_all ?cancel ?grain ?point_pattern ?vertex_pattern
-    ?primitive_pattern ?detail_pattern ?mode ?max_distance ?blend_width ?falloff
-    ?unmatched ~source ~target () =
-  try Result.map_error
-      (Error.of_string ~operation:"attribute_transfer_all"
-        ~code:"invalid_transfer")
-      (transfer_all_raw ?cancel ?grain ?point_pattern ?vertex_pattern
-         ?primitive_pattern ?detail_pattern ?mode ?max_distance ?blend_width
-         ?falloff ?unmatched ~source ~target ())
-  with
-  | Cancel.Cancelled -> Error (Error.make ~operation:"attribute_transfer_all"
-      ~code:"cancelled" "multi-owner attribute transfer was cancelled")
-  | Invalid_argument message -> Error (Error.make
-      ~operation:"attribute_transfer_all" ~code:"invalid_position" message)
+           Ok (Error.get (transfer_detail ~pattern ~source ~target ()))) target)))

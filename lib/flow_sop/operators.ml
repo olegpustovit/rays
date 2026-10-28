@@ -558,3 +558,17 @@ let all = [attr; attr_checked; with_attr; has_attr; delete_attr; count; edges; t
   group; group_order; group_names; group_entries; with_group; context_seed; provenance_base; context_frame; context_time;
   rename_attr;swap_attr;delete_attrs;rename_group;delete_group;rename_edge;delete_edge;attr_type;attr_names;attr_entries;
   glob_error;glob_rewrite_error;glob_rewrite;glob_rewrite_set_error;glob_rewrite_set;glob_rewrite_set_matches;glob_literal;group_name_valid;group_name_forced]
+
+type lowering = Geometry_arrays | Metadata | Attribute_write | Group_write | Attribute_delete | Curve | Zone | Resource
+
+let lowering = function
+  | "sop/mesh" | "sop/mesh_planes" | "sop/remap" | "sop/concat" | "sop/with_planes" -> Some Geometry_arrays
+  | "sop/rename_attr" | "sop/swap_attr" | "sop/delete_attrs" | "sop/rename_group" | "sop/delete_group"
+  | "sop/rename_edge" | "sop/delete_edge" -> Some Metadata
+  | "sop/with_attr" -> Some Attribute_write
+  | "sop/with_group" -> Some Group_write
+  | "sop/delete_attr" -> Some Attribute_delete
+  | "sop/curve" -> Some Curve
+  | "zone/points" | "zone/pieces" -> Some Zone
+  | "image/load" | "image/render" | "image/map" | "exact" -> Some Resource
+  | _ -> None

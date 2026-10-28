@@ -5,22 +5,24 @@ type t = {
   axes : int array;
 }
 
-exception Group_error of string
+let fail code message = Error.fail_with ~operation:"spatial_index" ~code message
 
 let finite value = Float.is_finite value
 let length value = Array.length value.order
 
-let create_raw ?cancel ?(grain = 16_384) ?points:selection packed =
-  if grain <= 0 then invalid_arg "grain must be positive";
+let create ?cancel ?(grain = 16_384) ?points:selection packed =
+  Error.run ~operation:"spatial_index" ~code:"invalid_position"
+    ~cancelled:"spatial-index construction was cancelled" @@ fun () ->
+  if grain <= 0 then fail "invalid_parameter" "grain must be positive";
   let positions = Packed.Float3.View.view packed in
   let count = Packed.Float3.length packed in
   let order = match selection with
     | None -> Array.init count Fun.id
     | Some group ->
         if Group.owner group <> Group.Point then
-          raise (Group_error "source selection must be a point group");
+          fail "invalid_group" "source selection must be a point group";
         if Group.length group <> count then
-          raise (Group_error "source point group length does not match positions");
+          fail "invalid_group" "source point group length does not match positions";
         let selected = Array.make (Group.cardinality group) 0 and next = ref 0 in
         Group.iter (fun point -> selected.(!next) <- point; incr next) group;
         selected in
@@ -71,16 +73,6 @@ let create_raw ?cancel ?(grain = 16_384) ?points:selection packed =
   in
   partition 0 (Array.length order - 1) 0;
   { positions; order; axes }
-
-let create ?cancel ?grain ?points packed =
-  try Ok (create_raw ?cancel ?grain ?points packed) with
-  | Cancel.Cancelled -> Error (Error.make ~operation:"spatial_index"
-      ~code:"cancelled" "spatial-index construction was cancelled")
-  | Invalid_argument message -> Error (Error.make ~operation:"spatial_index"
-      ~code:(if String.equal message "grain must be positive"
-        then "invalid_parameter" else "invalid_position") message)
-  | Group_error message -> Error (Error.make ~operation:"spatial_index"
-      ~code:"invalid_group" message)
 
 type query_context = {
   tree : t;
