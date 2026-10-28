@@ -1,5 +1,5 @@
 (* P8.S3 film A/B: pathtrace.rays (trace-pixel, on the CPU walker and on Metal) against pathtrace.metal on a tiny
-   scene: a plane, one material, rect lights, no lens; lit by the sky/ground environment with a dome panel, or by a
+   scene, the kernel's scene arrays and camera bound as host values and its scene facts as literals: a plane, one material, rect lights, no lens; lit by the sky/ground environment with a dome panel, or by a
    baked World (camera and lighting maps, CDF, sun, a World rect light). Both accumulate the same frames with the
    same PCG draws; the resolved RGBA8 images are compared as RMSE of (byte difference / 255). *)
 module P = Rays_pathtracer
@@ -18,13 +18,6 @@ let dot (a, b, c) (x, y, z) = a *. x +. b *. y +. c *. z
 let scale k (a, b, c) = (a *. k, b *. k, c *. k)
 let triple (v : Rays_math.Vec3.t) = (v.x, v.y, v.z)
 let rgb (c : P.Linear_color.t) = (c.r, c.g, c.b)
-(* A Lisp array of literals indexed by position, as a balanced tree of selects *)
-let table name print zero rows =
-  let rows = Array.of_list rows in
-  let rec pick lo hi = if hi - lo = 1 then print rows.(lo)
-    else let mid = (lo + hi) / 2 in Printf.sprintf "(if (int/lt i %d) %s %s)" mid (pick lo mid) (pick mid hi) in
-  let body = if rows = [||] then zero else pick 0 (Array.length rows) in
-  Printf.sprintf "%s (map (fn [(i : int)] %s) (array/range %d :type int))" name body (max 1 (Array.length rows))
 let has fragment line = let n = String.length fragment in
   let rec at i = i + n <= String.length line && (String.sub line i n = fragment || at (i + 1)) in at 0
 (* the light rows of pathtrace.metal's light buffer: corner, u, v, radiance, [one-sided area 0] *)
@@ -144,49 +137,85 @@ let scenario label (world : W.baked option) =
     | _ -> (0., 0., 0.), 0., (0., 0., 0.), 0. in
   let mat_lit = Printf.sprintf "{:albedo %s :rough %s :emit %s :metal %s :round %s}" (vec (rgb material.albedo)) (num material.roughness)
     (vec (rgb material.emission)) (num material.metallic) (num material.round) in
-  let tables = String.concat " " [ table "pos" vec "[0. 0. 0.]" positions; table "nrm" vec "[0. 0. 0.]" normals;
-    table "pan" vec "[0. 0. 0.]" panels; table "lights" vec "[0. 0. 0.]" lights; table "wmap" vec "[0. 0. 0.]" maps;
-    table "cdf" num "0." cdf ] in
-  let program_of frame =
-    let u = Printf.sprintf "{:eye %s :lens 0. :fwd %s :rgt %s :up %s :tan-half %s :aspect %s :focus 1. :width %d :height %d :spp %d :bounces %d :frame %d :sky %s :ground %s :panels %d :lights %d :world %d :background %d :map-w %d :map-h %d :bg %s :sun-dir %s :sun-cos %s :sun-rad %s :sun-pdf %s :round-samples 4}"
-      (vec eye) (vec forward) (vec right) (vec up) (num (tan (0.9 /. 2.))) (num (float width /. float height)) width height spp bounces frame
-      (vec (rgb environment.sky)) (vec (rgb environment.ground)) (List.length panels / 3) (List.length lights / 5)
-      (if world = None then 0 else 1) background map_w map_h (vec bg) (vec sun_dir) (num sun_cos) (vec sun_rad) (num sun_pdf) in
-    let source = Printf.sprintf "(let* [%s] (map (fn [(pixel : int)] (let* [s (trace-pixel %s lights %s pos nrm pan wmap cdf pixel)] [s.sum.x s.sum.y s.sum.z (+ s.cov (* 0. t))])) (array/range %d :type int)))"
-      tables u mat_lit (width * height) in
-    Test_program.compile ~declarations source in
-  let cpu program = vec4 (ok (Flow_ir.Packed.force program ~live)) in
-  let gpu_run program =
-    let msl = ok (Flow_gpu.Emit.kernel ~fast:true program) in
-    Option.iter (fun path -> Out_channel.with_open_bin (path ^ "." ^ label) (fun o -> output_string o msl.Flow_gpu.Emit.source)) (Sys.getenv_opt "PT_DUMP");
-    (* static shape gates (specification/gpu-codegen.md): the kernel's one atomic, no 64-bit
-       arithmetic in the loops but their bound checks (the pixel's x/y split before them is the
-       one 64-bit division), within twice the handwritten kernel's lines *)
-    let lines text = String.split_on_char '\n' text in
-    let source = lines msl.Flow_gpu.Emit.source in
-    assert (List.length (List.filter (has "atomic_fetch_or_explicit(") source) = 1);
-    let rec loops = function [] -> [] | line :: rest -> if has "for(r" line then line :: rest else loops rest in
-    assert (List.for_all (fun line -> not (has "ulong(" line) || has "bool over" line) (loops source));
-    assert (List.length source <= 2 * List.length (lines (read "pathtrace.metal")));
-    let runner = Flow_gpu.Run.create lease pipelines msl in
-    (* register pressure: Metal lowers a pipeline's thread limit when a kernel needs more registers *)
-    let threads = ok (Flow_gpu.Run.max_total_threads runner) in
-    if Sys.getenv_opt "PT_BENCH" <> None then
-      Printf.eprintf "maxTotalThreadsPerThreadgroup %d (pathtrace.metal %d)\n%!" threads (get (P.Private.max_total_threads tracer));
-    assert (threads >= (if label = "world" then 448 else 512)); (* the recorded limits; a drop is a regression *)
-    let values = ok (Flow_ir.Packed.Private.prepare ~fast:true program ~live) in
-    let scene = { Flow_gpu.Run.accel = blas; vertices; spheres; sphere_count = 0; instances = None } in
-    let result = vec4 (ok (Flow_gpu.Run.readback (ok (Flow_gpu.Run.dispatch runner ~scene values)))) in
+  (* Host bindings: the scene's arrays and the camera are values bound to the kernel's captures
+     (uniforms and gather tables), the scene facts are literals the static stage folds. The kernel
+     compiles once per scene; a frame rebinds the camera and frame index. *)
+  let module E = Flow.Eval in
+  let host = [ "pos", Flow.Ty.Array Vec3; "nrm", Array Vec3; "pan", Array Vec3; "lights", Array Vec3;
+    "wmap", Array Vec3; "cdf", Array Float; "eye", Vec3; "fwd", Vec3; "rgt", Vec3; "up", Vec3;
+    "tanhalf", Float; "aspect", Float; "frame", Int ] in
+  let ops = List.map (fun (name, ty) -> { Flow.Op.noise3 with name = "pt/" ^ name; packed_extension = None;
+    signature = { pos = []; opt = []; rest = None; kw = [] }; out = (fun _ -> ty);
+    shape = Flow.Op.Struct { splice = false }; check = (fun _ -> ());
+    body = (fun ~live:_ ~node:_ _ -> Flow.Value.Source ("pt/" ^ name, ty, [])) }) host in
+  let facts = Printf.sprintf "{:eye eye :lens 0. :fwd fwd :rgt rgt :up up :tan-half tanhalf :aspect aspect :focus 1. :width %d :height %d :spp %d :bounces %d :frame frame :sky %s :ground %s :panels %d :lights %d :world %d :background %d :map-w %d :map-h %d :bg %s :sun-dir %s :sun-cos %s :sun-rad %s :sun-pdf %s :round-samples 4}"
+    width height spp bounces (vec (rgb environment.sky)) (vec (rgb environment.ground)) (List.length panels / 3) (List.length lights / 5)
+    (if world = None then 0 else 1) background map_w map_h (vec bg) (vec sun_dir) (num sun_cos) (vec sun_rad) (num sun_pdf) in
+  let text = Printf.sprintf "(workspace pt %s (graph g :context value (let* [%s kernel (fn [(pixel : int)] (let* [u %s s (trace-pixel u lights %s pos nrm pan wmap cdf pixel)] [s.sum.x s.sum.y s.sum.z s.cov]))] 0.0)))"
+    declarations (String.concat " " (List.map (fun (name, _) -> Printf.sprintf "%s (pt/%s)" name name) host)) facts mat_lit in
+  let kernel = match Flow.Workspace.check ~ops { Flow.Check.version = 1; kinds = [] } (ok (Flow.Syntax.parse text)) with
+    | Some ws, [] -> (match snd (List.hd (List.assoc [ "g"; "kernel" ] (ok (E.static ~record:true ws)).records)) with
+        | E.Fn fn -> fn | _ -> failwith "kernel is not a function")
+    | _, ds -> failwith (String.concat "\n" (List.map Diagnostic.to_string ds)) in
+  let vec3s rows = E.Vec3_array (Array.of_list (List.concat_map (fun (x, y, z) -> [ x; y; z ]) (if rows = [] then [ (0., 0., 0.) ] else rows))) in
+  let scene_values = [ "pos", vec3s positions; "nrm", vec3s normals; "pan", vec3s panels; "lights", vec3s lights;
+    "wmap", vec3s maps; "cdf", E.Float_array (Array.of_list (if cdf = [] then [ 0. ] else cdf));
+    "eye", (let x, y, z = eye in E.Vec3 (x, y, z)); "fwd", (let x, y, z = forward in E.Vec3 (x, y, z));
+    "rgt", (let x, y, z = right in E.Vec3 (x, y, z)); "up", (let x, y, z = up in E.Vec3 (x, y, z));
+    "tanhalf", E.Float (tan (0.9 /. 2.)); "aspect", E.Float (float width /. float height) ] in
+  let pixels = E.Int_array (Array.init (width * height) Fun.id) in
+  let residual_of dynamic =
+    let values = dynamic @ scene_values in
+    let bound = E.Private.map_function_bindings (function
+      | Flow.Value.Source (name, _, []) when String.starts_with ~prefix:"pt/" name ->
+          List.assoc (String.sub name 3 (String.length name - 3)) values
+      | value -> value) kernel in
+    match ok (E.Private.map_function ~signature:{ params = [ Int ]; result = Vec4 } bound [ pixels ]) with
+    | E.Residual r -> r | _ -> failwith "kernel did not defer" in
+  let compile r = match Flow_ir.Packed.compile_result r (E.Residual.residual_view r).term with
+    | Ok p -> p | Error ds -> failwith (String.concat "\n" (List.map Diagnostic.to_string ds)) in
+  let cpu frame = vec4 (ok (Flow_ir.Packed.force (compile (residual_of [ "frame", E.Int frame ])) ~live)) in
+  (* The device kernel compiles once: its template keeps the per-frame bindings (here the frame
+     index) as uniforms, and a frame patches their words in the prepared inputs. *)
+  let frame0 = E.Int 0 in
+  let template = let r = residual_of [ "frame", frame0 ] in
+    Option.get (Flow_ir.Packed.compile_template r (E.Residual.residual_view r).term) in
+  let start = Unix.gettimeofday () in
+  let kernel_msl = ok (Flow_gpu.Emit.kernel ~fast:true template) in
+  if Sys.getenv_opt "PT_BENCH" <> None then
+    Printf.eprintf "bind, compile and emit once: %.1f ms\n%!" ((Unix.gettimeofday () -. start) *. 1000.);
+  Option.iter (fun path -> Out_channel.with_open_bin (path ^ "." ^ label) (fun o -> output_string o kernel_msl.Flow_gpu.Emit.source)) (Sys.getenv_opt "PT_DUMP");
+  (* static shape gates (specification/gpu-codegen.md): the kernel's one atomic, no 64-bit
+     arithmetic in the loops but their bound checks (the pixel's x/y split before them is the
+     one 64-bit division), within twice the handwritten kernel's lines *)
+  let lines text = String.split_on_char '\n' text in
+  let source = lines kernel_msl.Flow_gpu.Emit.source in
+  assert (List.length (List.filter (has "atomic_fetch_or_explicit(") source) = 1);
+  let rec loops = function [] -> [] | line :: rest -> if has "for(r" line then line :: rest else loops rest in
+  assert (List.for_all (fun line -> not (has "ulong(" line) || has "bool over" line) (loops source));
+  assert (List.length source <= 2 * List.length (lines (read "pathtrace.metal")));
+  let runner = Flow_gpu.Run.create lease pipelines kernel_msl in
+  (* register pressure: Metal lowers a pipeline's thread limit when a kernel needs more registers *)
+  let threads = ok (Flow_gpu.Run.max_total_threads runner) in
+  if Sys.getenv_opt "PT_BENCH" <> None then
+    Printf.eprintf "maxTotalThreadsPerThreadgroup %d (pathtrace.metal %d)\n%!" threads (get (P.Private.max_total_threads tracer));
+  assert (threads >= (if label = "world" then 448 else 512)); (* the recorded limits; a drop is a regression *)
+  let base = ok (Flow_ir.Packed.Private.prepare ~fast:true template ~live) in
+  let shapes = Flow_ir.Packed.Private.uniform_shapes template in
+  let inputs frame = { base with uniforms = Array.mapi (fun i words -> match shapes.(i) with
+    | Flow_ir.Packed.Private.Value v when v == frame0 -> [| float frame |] | _ -> words) base.uniforms } in
+  let scene = { Flow_gpu.Run.accel = blas; vertices; spheres; sphere_count = 0; instances = None } in
+  let gpu_run frame = vec4 (ok (Flow_gpu.Run.readback (ok (Flow_gpu.Run.dispatch runner ~scene (inputs frame))))) in
+  let bench () =
     (* PT_BENCH: interleaved A/B, a pathtrace.metal frame (its bands print as gpu_ms) then the Lisp dispatch *)
-    if Sys.getenv_opt "PT_BENCH" <> None then begin prerr_endline ("bench " ^ label); for _ = 1 to 5 do
+    if Sys.getenv_opt "PT_BENCH" <> None then begin prerr_endline ("bench " ^ label); for frame = 1 to 5 do
       get (P.render tracer camera); get (P.flush tracer);
-      let again = ok (Flow_gpu.Run.dispatch runner ~scene values) in
-      Printf.eprintf "lisp kernel GPU ms: %s\n%!" (match Flow_gpu.Run.gpu_seconds again with Some s -> Printf.sprintf "%.2f" (s *. 1000.) | None -> "n/a") done end;
-    Flow_gpu.Run.close runner; result in
+      let again = ok (Flow_gpu.Run.dispatch runner ~scene (inputs frame)) in
+      Printf.eprintf "lisp kernel GPU ms: %s\n%!" (match Flow_gpu.Run.gpu_seconds again with Some s -> Printf.sprintf "%.2f" (s *. 1000.) | None -> "n/a") done end in
   let compare name run =
     let total = Array.make (width * height * 3) 0. in
     for frame = 0 to frames - 1 do
-      let v = run (program_of frame) in
+      let v = run frame in
       for pixel = 0 to width * height - 1 do for c = 0 to 2 do
         total.(3 * pixel + c) <- total.(3 * pixel + c) +. v.(4 * pixel + c) done done
     done;
@@ -208,6 +237,8 @@ let scenario label (world : W.baked option) =
     assert (Hashtbl.length distinct > 4 && rmse <= 1e-4) in
   if Sys.getenv_opt "PT_SKIP_CPU" = None then compare "CPU walker" cpu;
   compare "Metal" gpu_run;
+  bench ();
+  Flow_gpu.Run.close runner;
   P.destroy tracer
 
 let () =
