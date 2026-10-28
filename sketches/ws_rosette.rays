@@ -1,3 +1,4 @@
+; A rosette: a radial macro repeats a shape around the vertical axis.
 (workspace rosette
 
   ; radial repeats a shape n times around the vertical axis.

@@ -1,3 +1,4 @@
+; A generated noise image drawn as a picture: image and draw graphs in one workspace.
 (workspace flow_image
   (graph image :context image
     (image/noise :width 256 :height 256 :frequency 0.03 :seed 17))

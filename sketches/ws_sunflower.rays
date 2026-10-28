@@ -1,3 +1,4 @@
+; A sunflower: seeds placed by the golden angle.
 (workspace sunflower
 
   (graph sunflower :context sop [(seeds : int 240) (spread : float 0.062)]

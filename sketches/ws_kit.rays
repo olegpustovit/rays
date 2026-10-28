@@ -1,3 +1,4 @@
+; Kit: functions that return several named values as a record.
 (workspace kit
 
   ; window returns several values: a record with named fields.
