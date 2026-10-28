@@ -28,6 +28,8 @@ type stats = {
   input_uploaded_bytes : int;
   status_reads : int;
   readback_bytes : int;
+  materialisations : int;  (** kept outputs a lazy store read ({!Flow_gpu.Run.keep}) *)
+  held_buffers : int;  (** buffers kept outputs hold now *)
 }
 
 val zero : stats

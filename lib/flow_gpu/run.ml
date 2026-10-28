@@ -10,6 +10,20 @@ type slot = {
   mutable uploaded : (float array * int) option;
 }
 
+(* An output buffer a lazy planar store holds after its dispatch completed and passed its status
+   check: the runner hands the slot's buffer over and makes a fresh one for its next dispatch. The
+   holder materialises it once (from any domain: an invalidate and a conversion, no queue work);
+   collected, its buffer comes back through [released] and is destroyed on the initial domain. *)
+type kept = {
+  id : int;
+  kept_buffer : B.buffer;
+  kept_floats : B.floats;
+  kept_count : int;
+  kept_width : int;
+  lock : Mutex.t;
+  mutable planes : float array array option;
+}
+
 type t = {
   device : B.device;
   queue : B.queue;
@@ -33,6 +47,13 @@ type t = {
   mutable table_ready : bool;
   domain : Domain.id;
   mutable last_epoch : int64;
+  mutable kept : kept Weak.t list;  (** live holders, materialised at close *)
+  held : (int, B.buffer * B.floats * int) Hashtbl.t;
+      (** every held buffer (its view and capacity) by holder, until reused or destroyed *)
+  mutable free : (B.buffer * B.floats * int) list;
+      (** collected holders' buffers, at most 4, which output slots take before creating one *)
+  released : int list Atomic.t;  (** collected holders, pushed by their finalisers *)
+  materialised : int Atomic.t;
 }
 
 type scene = {
@@ -127,11 +148,41 @@ let create_owned device queue pipelines (msl : Emit.msl) =
     table_ready = false;
     domain = Domain.self ();
     last_epoch = 0L;
+    kept = [];
+    held = Hashtbl.create 8;
+    free = [];
+    released = Atomic.make [];
+    materialised = Atomic.make 0;
   }
+
+(* on the initial domain: destroy what collected holders gave back *)
+let drain t =
+  List.iter
+    (fun id ->
+      Option.iter
+        (fun ((buffer, _, _) as held) ->
+          if List.length t.free < 4 then t.free <- held :: t.free
+          else ignore (B.destroy_buffer buffer))
+        (Hashtbl.find_opt t.held id);
+      Hashtbl.remove t.held id)
+    (Atomic.exchange t.released []);
+  t.kept <- List.filter (fun w -> Weak.check w 0) t.kept
 
 let create gpu = create_owned (Renderer.gpu_device gpu) (Renderer.gpu_queue gpu)
 
 let ensure ?(mapped = false) t slot length =
+  (if mapped && slot.buffer = None && length > 0 then
+     (* an output slot whose last buffer a holder took: a collected holder's buffer of the size *)
+     match
+       List.find_opt (fun (_, _, capacity) -> capacity >= length && capacity <= 2 * length) t.free
+     with
+     | Some ((buffer, floats, capacity) as held) ->
+         t.free <- List.filter (( != ) held) t.free;
+         slot.buffer <- Some buffer;
+         slot.floats <- Some floats;
+         slot.capacity <- capacity;
+         slot.uploaded <- None
+     | None -> ());
   if length > slot.capacity then begin
     let capacity = ref (max 256 slot.capacity) in
     while !capacity < length do
@@ -210,6 +261,7 @@ let dispatch ?(wait = true) ?(reset_status = true) ?commands ?count ?into ?(boun
     (* Invalidate borrowed output before reallocating or submitting any write,
      including dispatches whose completion subsequently fails. *)
     t.generation <- t.generation + 1;
+    drain t;
     if values.count = 0 then begin
       Ok
         {
@@ -509,8 +561,8 @@ let check_status t ~epoch =
     Ok ()
   with Diagnostic.Error error -> Error error
 
-(* A completed, status-checked output's mapped contents, [count * width] floats. *)
-let completed ?index output =
+(* A completed, status-checked output's slot and width. *)
+let ready ?index output =
   let index = Option.value ~default:output.index index in
   if
     output.owner.closed
@@ -528,22 +580,26 @@ let completed ?index output =
          match check_status output.owner ~epoch:output.epoch with
          | Ok () -> ()
          | Error diagnostic -> raise (Diagnostic.Error diagnostic));
-      let width = output.owner.msl.output_widths.(index) in
-      let length = output.count * width in
-      let slot = output.owner.outputs.(index) in
-      output.owner.readback_bytes <- output.owner.readback_bytes + (length * 4);
-      match slot.floats with
-      | Some floats when length > 0 ->
-          get (B.invalidate_mapped (Option.get slot.buffer) ~length:(length * 4));
-          Ok (`Floats (floats, width))
-      | _ ->
-          if length = 0 then Ok (`Floats (Bigarray.(Array1.create float32 c_layout 0), width))
-          else
-            Ok
-              (`Bytes
-                 ( get (B.read_buffer (Option.get slot.buffer) ~offset:0L ~length:(length * 4)),
-                   width ))
+      Ok (output.owner.outputs.(index), output.owner.msl.output_widths.(index))
     with Diagnostic.Error error -> Error error
+
+(* A completed, status-checked output's mapped contents, [count * width] floats. *)
+let completed ?index output =
+  Result.bind (ready ?index output) @@ fun (slot, width) ->
+  try
+    let length = output.count * width in
+    output.owner.readback_bytes <- output.owner.readback_bytes + (length * 4);
+    match slot.floats with
+    | Some floats when length > 0 ->
+        get (B.invalidate_mapped (Option.get slot.buffer) ~length:(length * 4));
+        Ok (`Floats (floats, width))
+    | _ ->
+        if length = 0 then Ok (`Floats (Bigarray.(Array1.create float32 c_layout 0), width))
+        else
+          Ok
+            (`Bytes
+               (get (B.read_buffer (Option.get slot.buffer) ~offset:0L ~length:(length * 4)), width))
+  with Diagnostic.Error error -> Error error
 
 let nonfinite_output () =
   Error (Diagnostic.error ~code:"E_KERNEL" "GPU output contains a nonfinite value.")
@@ -579,6 +635,28 @@ let readback ?index output =
           | 4 -> Vec4_array values
           | _ -> Float_array values))
 
+(* [width] planes of [count] doubles from float32 contents, in parallel blocks *)
+let to_planes floats ~count ~width =
+  let finite = Atomic.make true in
+  let planes = Array.init width (fun _ -> Array.create_float count) in
+  (* 64K-element blocks over the shared pool; each block writes its own range of every plane *)
+  Parallel.for_ ~chunk_size:1 ~start:0
+    ~finish:(((count + 65535) / 65536) - 1)
+    (fun block ->
+      let first = block * 65536 in
+      let last = min count (first + 65536) - 1 in
+      let ok = ref true in
+      for component = 0 to width - 1 do
+        let plane = Array.unsafe_get planes component in
+        for i = first to last do
+          let value = Bigarray.Array1.unsafe_get floats ((i * width) + component) in
+          if not (Float.is_finite value) then ok := false;
+          Array.unsafe_set plane i value
+        done
+      done;
+      if not !ok then Atomic.set finite false);
+  if Atomic.get finite then Ok planes else nonfinite_output ()
+
 (* The output as [width] planes of [count] doubles, read where the kernel wrote them: what a planar
    store (an rdk attribute) owns, with no interleaved copy between. *)
 let planes ?index output =
@@ -594,25 +672,66 @@ let planes ?index output =
             done;
             (floats, width)
       in
-      let finite = Atomic.make true in
-      let planes = Array.init width (fun _ -> Array.create_float count) in
-      (* 64K-element blocks over the shared pool; each block writes its own range of every plane *)
-      Parallel.for_ ~chunk_size:1 ~start:0
-        ~finish:(((count + 65535) / 65536) - 1)
-        (fun block ->
-          let first = block * 65536 in
-          let last = min count (first + 65536) - 1 in
-          let ok = ref true in
-          for component = 0 to width - 1 do
-            let plane = Array.unsafe_get planes component in
-            for i = first to last do
-              let value = Bigarray.Array1.unsafe_get floats ((i * width) + component) in
-              if not (Float.is_finite value) then ok := false;
-              Array.unsafe_set plane i value
-            done
-          done;
-          if not !ok then Atomic.set finite false);
-      if Atomic.get finite then Ok planes else nonfinite_output ())
+      to_planes floats ~count ~width)
+
+(* under [kept.lock]: the planes, read once *)
+let materialise t kept =
+  match kept.planes with
+  | Some planes -> planes
+  | None ->
+      let length = kept.kept_count * kept.kept_width in
+      if length > 0 then get (B.invalidate_mapped kept.kept_buffer ~length:(length * 4));
+      let planes =
+        match to_planes kept.kept_floats ~count:kept.kept_count ~width:kept.kept_width with
+        | Ok planes -> planes
+        | Error d -> raise (Diagnostic.Error d)
+      in
+      Atomic.incr t.materialised;
+      kept.planes <- Some planes;
+      planes
+
+let next_kept = Atomic.make 0
+
+(* Hand the output's buffer to a lazy planar store: nothing is read now. *)
+let keep ?index output =
+  Result.bind (ready ?index output) @@ fun (slot, width) ->
+  let t = output.owner in
+  match (slot.buffer, slot.floats) with
+  | Some buffer, Some floats when output.count > 0 ->
+      let kept =
+        {
+          id = Atomic.fetch_and_add next_kept 1;
+          kept_buffer = buffer;
+          kept_floats = floats;
+          kept_count = output.count;
+          kept_width = width;
+          lock = Mutex.create ();
+          planes = None;
+        }
+      in
+      let capacity = slot.capacity in
+      slot.buffer <- None;
+      slot.floats <- None;
+      slot.capacity <- 0;
+      slot.uploaded <- None;
+      let weak = Weak.create 1 in
+      Weak.set weak 0 (Some kept);
+      t.kept <- weak :: t.kept;
+      Hashtbl.replace t.held kept.id (buffer, floats, capacity);
+      (* any domain, any allocation: only name the holder; after close nothing drains it *)
+      let id = kept.id and released = t.released in
+      Gc.finalise
+        (fun _ ->
+          let rec push () =
+            let old = Atomic.get released in
+            if not (Atomic.compare_and_set released old (id :: old)) then push ()
+          in
+          push ())
+        kept;
+      Ok (output.count, width, fun () -> Mutex.protect kept.lock (fun () -> materialise t kept))
+  | _ ->
+      (* an empty or unmapped output is read now *)
+      Result.map (fun planes -> (output.count, width, fun () -> planes)) (planes ?index output)
 
 let buffer ?index output =
   let index = Option.value ~default:output.index index in
@@ -648,6 +767,24 @@ let max_total_threads t =
 let close t =
   if Domain.self () <> t.domain then invalid_arg "Run.close: creating domain required";
   if not t.closed then begin
+    (* a holder still alive reads its planes now, while its buffer exists (a finalised holder's
+       weak entry can outlive it: only those still holding count) *)
+    drain t;
+    List.iter
+      (fun weak ->
+        Option.iter
+          (fun kept ->
+            if Hashtbl.mem t.held kept.id then
+              try ignore (Mutex.protect kept.lock (fun () -> materialise t kept))
+              with Diagnostic.Error _ -> ())
+          (Weak.get weak 0))
+      t.kept;
+    t.kept <- [];
+    ignore (Atomic.exchange t.released []);
+    Hashtbl.iter (fun _ (buffer, _, _) -> ignore (B.destroy_buffer buffer)) t.held;
+    Hashtbl.reset t.held;
+    List.iter (fun (buffer, _, _) -> ignore (B.destroy_buffer buffer)) t.free;
+    t.free <- [];
     Array.iter
       (fun slot ->
         Option.iter (fun buffer -> ignore (B.destroy_buffer buffer)) slot.buffer;
@@ -668,6 +805,12 @@ module Private = struct
   let status_reads t = t.status_reads
   let check_status t ~epoch = check_status t ~epoch
   let readback_bytes t = t.readback_bytes
+  let materialisations t = Atomic.get t.materialised
+
+  let held_buffers t =
+    drain t;
+    Hashtbl.length t.held
+
   let create_owned = create_owned
 end
 

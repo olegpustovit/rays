@@ -359,8 +359,13 @@ discrete backend (Vulkan on a PCIe GPU, a later phase) may give the view staging
 the two calls; the mock already keeps the copies apart, so a caller that skips a call reads stale
 data in tests. Over PCIe a readback costs its transfer, so readback stays explicit and lazy: a value
 is materialised on the CPU only when it is read (`Flow_gpu.Run.readback`/`planes` after the
-dispatch's completion and status check); device residency between consecutive kernels is the next
-step (specification/sop.md, Device placement).
+dispatch's completion and status check). `Run.keep` hands a completed output's buffer to a lazy
+holder (a SOP write's deferred attribute, specification/sop.md, Device placement): the holder's
+`materialise` is the only read (an `invalidate_mapped` and a conversion, callable from any domain
+because it does no queue work), the runner takes a fresh or recycled buffer for its next dispatch,
+a collected holder's buffer is recycled or destroyed on the initial domain at the runner's next
+dispatch, and `Run.close` materialises live holders before destroying their buffers. Binding a held
+buffer as a later kernel's input or a display's vertex source is the next step.
 
 Ray tracing: geometry variants are `Triangles`, `Motion_triangles` (one vertex
 buffer per keyframe), `Bounding_boxes`, and `Curves`; descriptors are `Blas`,

@@ -22,17 +22,20 @@ module Gpu : sig
   (** Borrowed output metadata; [output] selects a fused producer's buffer. [gpu_seconds] is the
       completed device dispatch duration when the backend supports timestamps. *)
 
+  type planes = { count : int; width : int; materialise : unit -> float array array }
+  (** An output kept where it was computed: [materialise] (once, from any domain, never failing: the
+      dispatch's completion and status were checked when it was kept) reads it as [width] owned
+      planes of [count] floats, for a planar store. Until then the device owns it. *)
+
   type kernel = {
     run : Packed.Host.inputs -> (value, Diagnostic.t) result;
     readback : value -> (Flow.Eval.value, Diagnostic.t) result;
-    planes : value -> (float array array, Diagnostic.t) result;
-        (** The output as [width] owned planes of [count] floats, for a planar store. *)
+    planes : value -> (planes, Diagnostic.t) result;
+        (** Keeps the output for a lazy planar store: nothing is read until it materialises. *)
   }
 
   val planes_of :
-    (value -> (Flow.Eval.value, Diagnostic.t) result) ->
-    value ->
-    (float array array, Diagnostic.t) result
+    (value -> (Flow.Eval.value, Diagnostic.t) result) -> value -> (planes, Diagnostic.t) result
   (** [planes] from a [readback], deinterleaving its array. *)
 
   type backend = {
@@ -181,12 +184,13 @@ module Executor : sig
     ?gpu:Gpu.config ->
     program ->
     live:Flow.Eval.live ->
-    ((string * float array array) list option, Diagnostic.t) result
+    ((string * Gpu.planes) list option, Diagnostic.t) result
   (** The elementwise fields of a record program (a fused SOP write's) as one region on the device,
-      in fast precision when {!Cost.sop_device} places it: one dispatch, each output read once as
-      its owned planes (a field of width [w]: [w] arrays of the count), by field name. [None] keeps
-      the record on the CPU, also when the device fails. An input array the device already holds
-      (the same array as the last dispatch's) is not uploaded again. *)
+      in fast precision when {!Cost.sop_device} places it: one dispatch, each output kept on the
+      device as its planes (a field of width [w]: [w] arrays of the count), by field name, read only
+      when they materialise. [None] keeps the record on the CPU, also when the device fails. An
+      input array the device already holds (the same array as the last dispatch's) is not uploaded
+      again. *)
 
   val force_into :
     ?state:Flow.Eval.state ->

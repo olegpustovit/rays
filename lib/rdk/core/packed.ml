@@ -104,22 +104,84 @@ module Float2 = struct
   end
 end
 
+module Deferred = struct
+  type 'a t = { lock : Mutex.t; mutable make : (unit -> 'a) option; value : 'a option Atomic.t }
+
+  let create make = { lock = Mutex.create (); make = Some make; value = Atomic.make None }
+
+  (* once, from any domain: the thunk (and what it holds, a device buffer) is dropped once forced *)
+  let force value =
+    match Atomic.get value.value with
+    | Some forced -> forced
+    | None ->
+        Mutex.protect value.lock (fun () ->
+            match Atomic.get value.value with
+            | Some forced -> forced
+            | None ->
+                let forced = (Option.get value.make) () in
+                Atomic.set value.value (Some forced);
+                value.make <- None;
+                forced)
+
+  let forced value = Option.is_some (Atomic.get value.value)
+end
+
 module Float3 = struct
-  type t = { x : float array; y : float array; z : float array; data_id : int }
+  type view = { x : float array; y : float array; z : float array }
+
+  type t = {
+    planes : view;
+    length : int;
+    data_id : int;
+    deferred : view Deferred.t option;
+        (* device-resident planes, materialised when first read; [planes] is then unused *)
+  }
+
   type buffer = t
 
-  let length value = Array.length value.x
+  let planes value = match value.deferred with None -> value.planes | Some d -> Deferred.force d
+  let length value = value.length
   let data_id value = value.data_id
   let payload_bytes value = length value * 3 * 8
-  let get value index = (value.x.(index), value.y.(index), value.z.(index))
+
+  let get value index =
+    let p = planes value in
+    (p.x.(index), p.y.(index), p.z.(index))
+
+  let make x y z =
+    {
+      planes = { x; y; z };
+      length = Array.length x;
+      data_id = Support.fresh_data_id ();
+      deferred = None;
+    }
 
   let of_owned ~x ~y ~z =
     match
       ( same_length "Float3" (Array.length x) (Array.length y),
         same_length "Float3" (Array.length x) (Array.length z) )
     with
-    | Ok (), Ok () -> Ok { x; y; z; data_id = Support.fresh_data_id () }
+    | Ok (), Ok () -> Ok (make x y z)
     | Error message, _ | _, Error message -> Error message
+
+  let deferred ~length materialise =
+    if length < 0 then invalid_arg "Packed.Float3.deferred: negative length";
+    {
+      planes = { x = [||]; y = [||]; z = [||] };
+      length;
+      data_id = Support.fresh_data_id ();
+      deferred =
+        Some
+          (Deferred.create (fun () ->
+               match materialise () with
+               | [| x; y; z |]
+                 when Array.length x = length && Array.length y = length && Array.length z = length
+                 ->
+                   { x; y; z }
+               | _ -> invalid_arg "Packed.Float3.deferred: materialised planes changed shape"));
+    }
+
+  let resident value = match value.deferred with Some d -> not (Deferred.forced d) | None -> false
 
   module Builder = struct
     type nonrec t = { x : float array; y : float array; z : float array; mutable frozen : bool }
@@ -137,13 +199,13 @@ module Float3 = struct
     let freeze value =
       if value.frozen then invalid_arg "Packed.Float3.Builder.freeze: already frozen";
       value.frozen <- true;
-      { x = value.x; y = value.y; z = value.z; data_id = Support.fresh_data_id () }
+      make value.x value.y value.z
   end
 
   module View = struct
-    type view = { x : float array; y : float array; z : float array }
+    type nonrec view = view = { x : float array; y : float array; z : float array }
 
-    let view (value : buffer) = { x = value.x; y = value.y; z = value.z }
+    let view = planes
 
     let of_owned_exn ~x ~y ~z =
       match of_owned ~x ~y ~z with Ok value -> value | Error message -> invalid_arg message

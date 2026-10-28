@@ -10,7 +10,16 @@ type storage =
   | Float4 of Packed.Float4.t
   | Text of string array
 
-type t = { name : string; owner : owner; storage : storage; data_id : int; storage_id : int }
+(* [Deferred]: storage another owner holds (a device buffer), made once when first read; [like] is
+   an empty storage of its kind *)
+type body =
+  | Ready of storage
+  | Deferred of { like : storage; length : int; value : storage Packed.Deferred.t }
+
+type t = { name : string; owner : owner; body : body; data_id : int; storage_id : int }
+
+let raw value =
+  match value.body with Ready storage -> storage | Deferred d -> Packed.Deferred.force d.value
 
 type _ kind =
   | K_float : float array kind
@@ -44,6 +53,16 @@ let storage_length = function
   | Float4 values -> Packed.Float4.length values
   | Text values -> Array.length values
 
+let kind_of = function
+  | Float _ -> 0
+  | Int _ -> 1
+  | Int_array _ -> 2
+  | Float_array _ -> 3
+  | Float2 _ -> 4
+  | Float3 _ -> 5
+  | Float4 _ -> 6
+  | Text _ -> 7
+
 let create_owned ~name ~owner storage =
   if String.trim name = "" then Error "Attribute.create_owned: empty name"
   else
@@ -51,7 +70,7 @@ let create_owned ~name ~owner storage =
       {
         name;
         owner;
-        storage;
+        body = Ready storage;
         data_id = Support.fresh_data_id ();
         storage_id = Support.fresh_data_id ();
       }
@@ -63,7 +82,7 @@ let get : type a. a key -> t -> a option =
  fun key attribute ->
   if key.key_owner <> attribute.owner || not (String.equal key.key_name attribute.name) then None
   else
-    match (key.key_kind, attribute.storage) with
+    match (key.key_kind, raw attribute) with
     | K_float, Float values -> Some (Array.copy values)
     | K_float2, Float2 values -> Some values
     | K_float3, Float3 values -> Some values
@@ -77,13 +96,15 @@ let name value = value.name
 let owner value = value.owner
 
 let storage value =
-  match value.storage with
+  match raw value with
   | Float values -> Float (Array.copy values)
   | Int values -> Int (Array.copy values)
   | Text values -> Text (Array.copy values)
   | (Int_array _ | Float_array _ | Float2 _ | Float3 _ | Float4 _) as storage -> storage
 
-let length value = storage_length value.storage
+let length value =
+  match value.body with Ready storage -> storage_length storage | Deferred d -> d.length
+
 let data_id value = value.data_id
 let storage_id value = value.storage_id
 
@@ -92,8 +113,18 @@ let with_name name value =
   else if String.equal name value.name then Ok value
   else Ok { value with name; data_id = Support.fresh_data_id () }
 
-let payload_bytes value =
-  match value.storage with
+let rec payload_bytes value =
+  match value.body with
+  | Deferred { like; length; _ } -> (
+      match like with
+      | Float _ -> length * 8
+      | Float2 _ -> length * 16
+      | Float3 _ -> length * 24
+      | Float4 _ -> length * 32
+      | _ -> length * (Sys.word_size / 8))
+  | Ready storage -> storage_payload_bytes storage
+
+and storage_payload_bytes = function
   | Float values -> Array.length values * 8
   | Int values -> Array.length values * (Sys.word_size / 8)
   | Int_array values -> Packed.Int_array.payload_bytes values
@@ -105,8 +136,32 @@ let payload_bytes value =
       Array.fold_left (fun total text -> total + String.length text) 0 values
       + (Array.length values * (Sys.word_size / 8))
 
+let create_deferred ~name ~owner ~like ~length materialise =
+  if String.trim name = "" then Error "Attribute.create_deferred: empty name"
+  else
+    match like with
+    | (Float _ | Float2 _ | Float3 _ | Float4 _ | Int _) when length >= 0 ->
+        let value =
+          Packed.Deferred.create (fun () ->
+              let storage = materialise () in
+              if storage_length storage = length && kind_of storage = kind_of like then storage
+              else invalid_arg "Attribute.create_deferred: materialised storage changed shape")
+        in
+        Ok
+          {
+            name;
+            owner;
+            body = Deferred { like; length; value };
+            data_id = Support.fresh_data_id ();
+            storage_id = Support.fresh_data_id ();
+          }
+    | _ -> Error "Attribute.create_deferred: a numeric storage of a nonnegative length"
+
+let resident value =
+  match value.body with Deferred d -> not (Packed.Deferred.forced d.value) | Ready _ -> false
+
 let kind_name value =
-  match value.storage with
+  match match value.body with Ready storage -> storage | Deferred d -> d.like with
   | Float _ -> "float"
   | Int _ -> "int"
   | Float2 _ -> "float2"
@@ -117,7 +172,7 @@ let kind_name value =
   | Text _ -> "text"
 
 module View = struct
-  let storage value = value.storage
+  let storage = raw
 end
 
 let float_planes = function

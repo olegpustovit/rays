@@ -54,6 +54,15 @@ module Float2 : sig
   end
 end
 
+(** A value made once, on first use, from any domain; the thunk is dropped once it has run. *)
+module Deferred : sig
+  type 'a t
+
+  val create : (unit -> 'a) -> 'a t
+  val force : 'a t -> 'a
+  val forced : 'a t -> bool
+end
+
 module Float3 : sig
   type t
   type buffer = t
@@ -63,6 +72,14 @@ module Float3 : sig
   val payload_bytes : t -> int
   val get : t -> int -> float * float * float
   val of_owned : x:float array -> y:float array -> z:float array -> (t, string) result
+
+  val deferred : length:int -> (unit -> float array array) -> t
+  (** Planes another owner holds (a device buffer): [materialise] runs once, from any domain, when a
+      reader first needs them ([get], [View.view]) and returns three owned planes of [length].
+      Length, identity and payload size never materialise. *)
+
+  val resident : t -> bool
+  (** Deferred and not yet materialised. *)
 
   module Builder : sig
     type t

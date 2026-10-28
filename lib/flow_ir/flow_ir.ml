@@ -21,18 +21,23 @@ module Gpu = struct
     gpu_seconds : float option;
   }
 
+  type planes = { count : int; width : int; materialise : unit -> float array array }
+
   type kernel = {
     run : Packed.Host.inputs -> (value, Diagnostic.t) result;
     readback : value -> (E.value, Diagnostic.t) result;
-    planes : value -> (float array array, Diagnostic.t) result;
+    planes : value -> (planes, Diagnostic.t) result;
   }
 
-  let planes_of readback value =
+  let planes_of readback (value : value) =
     Result.bind (readback value) (function
       | E.Float_array data | Vec2_array data | Vec3_array data | Vec4_array data ->
           let width = value.width in
           let count = Array.length data / max 1 width in
-          Ok (Array.init width (fun c -> Array.init count (fun i -> data.((i * width) + c))))
+          let planes =
+            Array.init width (fun c -> Array.init count (fun i -> data.((i * width) + c)))
+          in
+          Ok { count; width; materialise = (fun () -> planes) }
       | _ -> Error (Diagnostic.error ~code:"E_GPU" "GPU output is not a float array."))
 
   type backend = {

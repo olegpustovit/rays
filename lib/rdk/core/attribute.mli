@@ -31,6 +31,21 @@ val normal : owner:owner -> Packed.Float3.t key
 val color : owner:owner -> Packed.Float4.t key
 val tex_coord : owner:owner -> Packed.Float2.t key
 val create_owned : name:string -> owner:owner -> storage -> (t, string) result
+
+val create_deferred :
+  name:string ->
+  owner:owner ->
+  like:storage ->
+  length:int ->
+  (unit -> storage) ->
+  (t, string) result
+(** Storage another owner holds (a device buffer): [materialise] runs once, from any domain, when a
+    reader first needs the storage, and returns an owned storage of [like]'s kind (float, float2-4
+    or int) and [length]. Name, owner, length, kind and payload size never materialise. *)
+
+val resident : t -> bool
+(** Deferred and not yet materialised. *)
+
 val name : t -> string
 val owner : t -> owner
 val storage : t -> storage

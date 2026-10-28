@@ -412,7 +412,8 @@ since a port decides nothing.
 (`Flow_ir.Executor.record_on_device`): when every field of its record program is an elementwise
 region, the fields merge into one region (`Core_fuse.merge`, one output each), fused through the
 `(exact x)` boundaries inside it (`Core_fuse.fuse ~through_exact`: the sink reads the whole region
-back), so the chain is one dispatch, one upload of its sources and one readback per output. Its
+back), so the chain is one dispatch, one upload of its sources and no readback: its outputs stay
+in device buffers until a CPU reader asks (below). Its
 count must match by origin: a fill of one value per point (`array/int (sop/count g :points) v`), a
 map over arrays that share an origin and a card marker's input all count the points of the
 geometry they come from (`Attribute_kernel.prepare`'s count source). Placement: the workspace
@@ -422,9 +423,22 @@ checks, and `Flow_ir.Cost.sop_device`: at least 2^18 elements and noise in its c
 places every legal region).
 
 Data movement (`Flow_gpu.Run` over mapped buffers, specification/backend.md): sources are packed
-straight into the kernel's mapped input buffers (one float32 rounding, finite check folded in) and
-outputs are read from the mapped output buffers as owned planes (`Gpu.kernel.planes`, parallel
-blocks), which the write installs as its attribute storage with no interleaved copy or second scan.
+straight into the kernel's mapped input buffers (one float32 rounding, finite check folded in).
+Outputs are resident attributes: once the dispatch has completed and passed its status check,
+`Gpu.kernel.planes` hands each output's buffer to the write (`Run.keep`; the runner takes a fresh
+or recycled buffer for its next dispatch) as a `Gpu.planes` whose `materialise` reads it once as
+owned planes (an invalidate and a parallel-block conversion, from any domain, no queue work). The
+write installs it as deferred storage: `Rdk.Packed.Float3.deferred` for canonical P,
+`Rdk.Attribute.create_deferred` for any other numeric attribute. Both types are abstract, so every
+reader (`Float3.get`/`View.view`, `Attribute.storage`/`View.storage`/`get`) materialises on first
+use through `Rdk.Packed.Deferred` (once, any domain, the thunk and its buffer dropped after), while
+length, kind, identity and payload size never do. rdk stays GPU-free: it holds only a thunk. A
+recook whose result is only held (cached, compared by identity, counted) reads nothing back; the
+first CPU reader of P reads P alone. The buffer goes back to its runner when the holder is
+collected (a finaliser names it; the runner recycles at most 4 and destroys the rest on its next
+dispatch, on the initial domain); closing the runner first materialises every holder still alive,
+so a geometry outliving the GPU stays valid. `test_chain_gpu_native` fails if a recook reads back,
+if reading P materialises more than one output or twice, or if a buffer outlives its geometry.
 An input is resident when it is the same array as the last dispatch's, never by comparing floats:
 sources are immutable, and a recook keeps them the same arrays because the facts they come from are
 remembered by identity (`Flow.Value.remember`, weak): a static grid's point planes, an attribute's

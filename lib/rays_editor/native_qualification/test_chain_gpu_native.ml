@@ -1,8 +1,11 @@
 (* On the real device: grid 1000 x 1000 Points (GRID_SIDE; 512 in @runtest-native, the smallest
    grid the cost model places) > attribute_noise > transform, the fused write of noise,
    P and N, cooked on the CPU and with the workspace GPU in fast precision (Executor.record_on_device).
-   The device cook takes at most two dispatches, a recook uploads nothing, its noise and P agree with the CPU within float32
-   tolerance and N exactly (a translation keeps it); CPU and GPU cook times are printed, median of 5. *)
+   The device cook takes at most two dispatches, a recook uploads nothing and reads nothing back
+   (its attributes stay in device buffers), a CPU read of P materialises exactly that one output,
+   its noise and P agree with the CPU within float32 tolerance and N exactly (a translation keeps
+   it), and once the geometries are collected no buffer is held. CPU and GPU cook times are
+   printed, median of 5. *)
 let ok = function Ok value -> value | Error d -> failwith (Diagnostic.to_string d)
 let side = try int_of_string (Sys.getenv "GRID_SIDE") with Not_found -> 1000
 
@@ -89,17 +92,34 @@ let () =
           (* the first cook compiles the kernel and uploads every source *)
           let _, first_seconds = cook placed in
           dispatches := 0;
-          let uploads () =
+          let stats () =
             let host, _, _, _, _ = Flow_native.Workspace_gpu.image_stats gpu in
-            host.input_uploads
+            host
           in
-          let before = uploads () in
+          let before = stats () in
           let device, _ = cook placed in
           let per_cook = !dispatches in
+          let after = stats () in
           (* a recook over unchanged geometry finds its inputs resident: the same arrays *)
-          if uploads () <> before then
-            failwith (Printf.sprintf "the recook uploaded %d inputs" (uploads () - before));
+          if after.input_uploads <> before.input_uploads then
+            failwith
+              (Printf.sprintf "the recook uploaded %d inputs"
+                 (after.input_uploads - before.input_uploads));
+          (* and keeps its outputs on the device: nothing is read back until a CPU reader asks *)
+          if
+            after.readback_bytes <> before.readback_bytes
+            || after.materialisations <> before.materialisations
+          then failwith "the recook read its outputs back";
+          if not (Rdk.Packed.Float3.resident (Rdk.Geometry.positions device)) then
+            failwith "the recook's P is not device-resident";
           let gpu_seconds, _ = median (fun () -> cook placed) in
+          let steady = stats () in
+          ignore (Rdk.Packed.Float3.get (Rdk.Geometry.positions device) 0);
+          if (stats ()).materialisations <> steady.materialisations + 1 then
+            failwith "reading P did not materialise exactly one output";
+          ignore (Rdk.Packed.Float3.get (Rdk.Geometry.positions device) 1);
+          if (stats ()).materialisations <> steady.materialisations + 1 then
+            failwith "P materialised twice";
           if per_cook < 1 || per_cook > 2 then
             failwith (Printf.sprintf "the chain took %d dispatches, not 1 or 2" per_cook);
           let worst = ref 0. in
@@ -124,4 +144,9 @@ let () =
             "grid > attribute_noise > transform, %d points: CPU cook %.3f s, GPU cook %.3f s \
              (first %.3f s), %d dispatch(es), largest difference %.2e\n\
              %!"
-            count cpu_seconds gpu_seconds first_seconds per_cook !worst))
+            count cpu_seconds gpu_seconds first_seconds per_cook !worst);
+      (* the geometries are gone: every buffer they held is back with its runner *)
+      Gc.full_major ();
+      let host, _, _, _, _ = Flow_native.Workspace_gpu.image_stats gpu in
+      if host.held_buffers <> 0 then
+        failwith (Printf.sprintf "%d buffers outlive their geometry" host.held_buffers))

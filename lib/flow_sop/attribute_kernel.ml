@@ -684,6 +684,24 @@ let install ~owner ~kind name planes geometry =
            Result.bind (A.create_owned ~name ~owner storage) (fun attr ->
                G.with_attribute attr geometry)))
 
+(* A device output as the attribute's storage, read from the device only when a CPU reader first
+   needs it (any domain); until then the geometry holds the device's buffer. *)
+let install_deferred ~owner ~kind name ({ count; materialise; _ } : Flow_ir.Gpu.planes) geometry =
+  Result.map_error
+    (Diagnostic.error ~code:"E_ATTR_TYPE")
+    (Result.bind
+       (make_storage kind (Array.make (width kind) [||]))
+       (fun like ->
+         if owner = A.Point && name = "P" then
+           match like with
+           | A.Float3 _ -> G.with_positions (P.deferred ~length:count materialise) geometry
+           | _ -> Error "Canonical point P requires vec3 storage."
+         else
+           Result.bind
+             (A.create_deferred ~name ~owner ~like ~length:count (fun () ->
+                  Result.get_ok (make_storage kind (materialise ()))))
+             (fun attr -> G.with_attribute attr geometry)))
+
 let borrowed_storage ~geometry values =
   let descriptor = function
     | E.Struct ("sop/attr", ty, args) | E.Source ("sop/attr", ty, args) -> Some (ty, args)
@@ -1626,15 +1644,14 @@ let node ?state ?(reference = false) ?(strict = false) ?elems ?profile ?approx ?
                   in
                   Result.bind device (function
                     | Some fields ->
-                        (* the device's planes are owned and finite: installed as they are *)
+                        (* the device's planes are status-checked: kept there until read *)
                         write geometries.(0) (fun key name kind geometry ->
-                            let planes = List.assoc key fields in
+                            let kept = List.assoc key fields in
                             let count = owner_count geometry owner in
-                            if
-                              width kind = Array.length planes
-                              && Array.for_all (fun p -> Array.length p = count) planes
-                            then install ~owner ~kind name planes geometry
+                            if width kind = kept.width && kept.count = count then
+                              install_deferred ~owner ~kind name kept geometry
                             else
+                              let planes = kept.materialise () in
                               write_storage ~owned_fields:[] ~grain ~owner ~kind name
                                 (match (kind, planes) with
                                 | "int", [| p |] -> E.Int_array (Array.map int_of_float p)

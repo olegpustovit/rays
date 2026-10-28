@@ -24,6 +24,8 @@ type stats = {
   input_uploaded_bytes : int;
   status_reads : int;
   readback_bytes : int;
+  materialisations : int;
+  held_buffers : int;
 }
 
 let zero =
@@ -37,6 +39,8 @@ let zero =
     input_uploaded_bytes = 0;
     status_reads = 0;
     readback_bytes = 0;
+    materialisations = 0;
+    held_buffers = 0;
   }
 
 let add_run stats run =
@@ -47,6 +51,8 @@ let add_run stats run =
     input_uploaded_bytes = stats.input_uploaded_bytes + Run.Private.input_uploaded_bytes run;
     status_reads = stats.status_reads + Run.Private.status_reads run;
     readback_bytes = stats.readback_bytes + Run.Private.readback_bytes run;
+    materialisations = stats.materialisations + Run.Private.materialisations run;
+    held_buffers = stats.held_buffers + Run.Private.held_buffers run;
   }
 
 type t = {
@@ -89,10 +95,10 @@ let create ~clock gpu =
     runners =
       Cache.create
         ~release:(fun _ runner ->
-          retired :=
-            { (add_run !retired runner.run) with runners_released = !retired.runners_released + 1 };
           runner.output <- None;
-          Run.close runner.run)
+          Run.close runner.run;
+          retired :=
+            { (add_run !retired runner.run) with runners_released = !retired.runners_released + 1 })
         64;
     closed = false;
     domain = Domain.self ();
@@ -213,7 +219,10 @@ let backend t : G.backend =
                         match output t value with
                         | Error diagnostic -> Error diagnostic
                         | Ok None -> error "GPU output was closed or superseded."
-                        | Ok (Some output) -> Run.planes output);
+                        | Ok (Some output) ->
+                            Result.map
+                              (fun (count, width, materialise) -> { G.count; width; materialise })
+                              (Run.keep output));
                   })
                 (Pipelines.get t.pipelines msl)));
   }

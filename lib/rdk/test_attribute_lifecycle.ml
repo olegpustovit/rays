@@ -750,3 +750,45 @@ let run () =
           "dense Attribute Copy duplicated packed payload")
     (Geometry.attributes swap_one);
   print_endline "attribute lifecycle tests passed"
+
+(* Deferred storage (a device buffer): metadata never materialises; the first read does, once. *)
+let () =
+  let geometry = Plane_generators.grid ~columns:1 ~rows:1 ~size:1. () |> get_rdk in
+  let count = Geometry.point_count geometry and reads = Atomic.make 0 in
+  let planes width () =
+    Atomic.incr reads;
+    Array.init width (fun c -> Array.init count (fun i -> float_of_int ((c * 10) + i)))
+  in
+  let noise =
+    Attribute.create_deferred ~name:"noise" ~owner:Point ~like:(Attribute.Float [||]) ~length:count
+      (fun () -> Attribute.Float (planes 1 ()).(0))
+    |> get
+  in
+  let geometry = Geometry.with_attribute noise geometry |> get in
+  let geometry =
+    Geometry.with_positions (Packed.Float3.deferred ~length:count (planes 3)) geometry |> get
+  in
+  check
+    (Attribute.length noise = count
+    && Attribute.kind_name noise = "float"
+    && Attribute.payload_bytes noise = count * 8
+    && Packed.Float3.length (Geometry.positions geometry) = count
+    && Attribute.resident noise
+    && Packed.Float3.resident (Geometry.positions geometry)
+    && Atomic.get reads = 0)
+    "deferred metadata materialised";
+  let positions = Geometry.positions geometry in
+  Parallel.run ~domains:4 (fun () ->
+      Parallel.for_ ~chunk_size:1 ~start:0 ~finish:63 (fun i ->
+          ignore (Packed.Float3.get positions (i mod count))));
+  check
+    (Packed.Float3.get positions 1 = (1., 11., 21.)
+    && Packed.Float3.get positions 2 = (2., 12., 22.)
+    && Atomic.get reads = 1)
+    "deferred P read more than once";
+  check
+    (Attribute.storage noise = Attribute.Float (Array.init count float_of_int)
+    && Atomic.get reads = 2
+    && not (Attribute.resident noise))
+    "deferred attribute read more than once";
+  print_endline "deferred storage tests passed"
