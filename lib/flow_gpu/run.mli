@@ -72,7 +72,7 @@ val keep :
   (int * int * (unit -> float array array) * float array option, Diagnostic.t) result
 (** Hand a completed, status-checked output to a lazy planar store: its count, width and a
     [materialise] that reads {!planes} once, from any domain (an invalidate and a conversion, no
-    queue work). The runner makes a fresh buffer for its next dispatch; the holder's buffer is
+    queue work), and cannot fail: completion and finiteness were checked here. The runner makes a fresh buffer for its next dispatch; the holder's buffer is
     destroyed after the holder is collected (at the runner's next dispatch) or at {!close}, which
     first materialises every holder still alive. The last component is the output's placeholder, an
     array of [width] zeros: a later {!dispatch} (of any runner) whose input is that array binds the

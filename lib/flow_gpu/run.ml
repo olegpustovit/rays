@@ -668,7 +668,7 @@ let readback ?index output =
           | _ -> Float_array values))
 
 (* [width] planes of [count] doubles from float32 contents, in parallel blocks *)
-let to_planes floats ~count ~width =
+let to_planes ?(checked = false) floats ~count ~width =
   let finite = Atomic.make true in
   let planes = Array.init width (fun _ -> Array.create_float count) in
   (* 64K-element blocks over the shared pool; each block writes its own range of every plane *)
@@ -682,7 +682,7 @@ let to_planes floats ~count ~width =
         let plane = Array.unsafe_get planes component in
         for i = first to last do
           let value = Bigarray.Array1.unsafe_get floats ((i * width) + component) in
-          if not (Float.is_finite value) then ok := false;
+          if (not checked) && not (Float.is_finite value) then ok := false;
           Array.unsafe_set plane i value
         done
       done;
@@ -722,13 +722,21 @@ let materialise t kept =
   | Some planes -> planes
   | None ->
       let length = kept.kept_count * kept.kept_width in
+      (* Nothing here can fail, so no reader (an rdk accessor on any domain) ever sees an error:
+         the buffer is mapped, the range is its own, it is destroyed only under this lock after
+         [destroyed] is set (its view stays valid), and the status check at [keep] covered the
+         completion and every output's finiteness (the kernel flags a nonfinite output). *)
       Mutex.protect kept.lock (fun () ->
           if (not kept.destroyed) && length > 0 then
-            get (B.invalidate_mapped kept.kept_buffer ~length:(length * 4)));
+            match B.invalidate_mapped kept.kept_buffer ~length:(length * 4) with
+            | Ok () -> ()
+            | Error e -> invalid_arg ("Run.materialise: " ^ Ogpu.Error.to_string e));
       let planes =
-        match to_planes kept.kept_floats ~count:kept.kept_count ~width:kept.kept_width with
+        match
+          to_planes ~checked:true kept.kept_floats ~count:kept.kept_count ~width:kept.kept_width
+        with
         | Ok planes -> planes
-        | Error d -> raise (Diagnostic.Error d)
+        | Error _ -> assert false
       in
       if Atomic.compare_and_set kept.planes None (Some planes) then begin
         Atomic.incr t.materialised;
