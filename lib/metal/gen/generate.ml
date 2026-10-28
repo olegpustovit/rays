@@ -265,7 +265,7 @@ let validate_feature_map mappings =
           | _ -> fail "empty Metal SDK type in feature map")
         symbols)
     mappings;
-  if List.length mappings <> 11 then fail "OGPU feature map is incomplete"
+  if List.length mappings <> 10 then fail "OGPU feature map is incomplete"
 
 let validate entries =
   validate_feature_map feature_map;
@@ -597,7 +597,7 @@ let self_test () =
      if not (String.starts_with ~prefix:"unknown OGPU feature map entry" message) then
        fail "unexpected feature map error: %s" message);
   let checked_types = emit_feature_checks () in
-  if not (contains_token checked_types "id<MTLIntersectionFunctionTable>")
+  if not (contains_token checked_types "id<MTLCommandQueue>")
      || not (contains_token checked_types "id<MTLAccelerationStructure>")
   then fail "feature map lost SDK type checks";
   let record =

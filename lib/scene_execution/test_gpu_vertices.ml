@@ -8,7 +8,6 @@ let ()=
   (* Record native command bindings and ownership, without rasterizing. *)
   let pipelines=ref 0 and next=ref 1_000_000L in
   let indices_seen=ref[]and vertex_bindings=ref[]and producer=ref 0L and mesh_uploads=ref 0 in
-  let unavailable()=Error(Ogpu.Error.make"test"Unsupported"no function tables")in
   let encoder:Ogpu.Backend.driver_render_encoder={
     render_set_pipeline=(fun _->Ok());
     set_stage_buffer=(fun stage~index~offset:_ buffer->
@@ -36,7 +35,6 @@ let ()=
             buffer.write offset bytes)}else buffer)(raw.create_buffer memory descriptor));
       create_render_pipeline=(fun _ _->incr pipelines;next:=Int64.succ !next;
         Ok{Ogpu.Backend.pipeline_token= !next;max_threads=1024;
-          create_table=(fun~capacity:_->unavailable());
           destroy_pipeline=(fun()->decr pipelines;Ok())});
       create_queue=(fun()->Result.map(fun(queue:Ogpu.Backend.driver_queue)->{queue with
         begin_commands=(fun()->Result.map(fun(commands:Ogpu.Backend.driver_commands)->{commands with

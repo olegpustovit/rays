@@ -13,26 +13,18 @@ let texture_is_shareable raw = get (Registry.texture_is_shareable raw)
 let indirect_render_command = Registry.indirect_render_command
 let indirect_render_command_set_pipeline =
   Registry.indirect_render_command_set_pipeline
-let function_name raw = get (Registry.function_name raw)
 let function_kind raw = Int64.to_int (get (Registry.function_kind raw))
 let compute_pipeline_create = Registry.compute_pipeline_create
 let compute_pipeline_max_total_threads raw =
   Int64.to_int (get (Registry.compute_pipeline_max_total_threads raw))
 let acceleration_encoder_copy_and_compact =
   Registry.acceleration_encoder_copy_and_compact
-let compute_pipeline_function_handle =
-  Registry.compute_pipeline_function_handle
-let intersection_function_table_set_function =
-  Registry.intersection_function_table_set_function
-let intersection_function_table_set_buffer =
-  Registry.intersection_function_table_set_buffer
 let layer_next_drawable = Registry.layer_next_drawable
 let compute_encoder_set_pipeline = Registry.compute_encoder_set_pipeline
 let compute_encoder_set_buffer = Registry.compute_encoder_set_buffer
 let compute_encoder_set_texture = Registry.compute_encoder_set_texture
 let compute_encoder_dispatch = Registry.compute_encoder_dispatch
 let compute35_acceleration = Registry.compute35_acceleration
-let compute35_intersection = Registry.compute35_intersection
 let shader_function_argument_encoder raw index =
   if index < 0L
   then Error "argument buffer index must be non-negative"

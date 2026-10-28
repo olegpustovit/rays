@@ -5,17 +5,9 @@ type driver_resource = { token:token; write:int64 -> bytes -> (unit,Error.t) res
   read_into:int64 -> bytes -> int -> int -> (unit,Error.t) result;
   destroy:unit -> (unit,Error.t) result }
 
-(** An intersection function table created from a pipeline with linked
-    functions: the functions and their argument buffers. *)
-type driver_table =
-  { table_token:token
-  ; table_set_function:index:int -> string -> (unit,Error.t) result
-  ; table_set_buffer:index:int -> token -> offset:int64 -> (unit,Error.t) result
-  ; destroy_table:unit -> (unit,Error.t) result }
 type driver_pipeline =
   { pipeline_token:token
   ; max_threads:int  (** a compute pipeline's threads per threadgroup at most; 0 for render *)
-  ; create_table:capacity:int -> (driver_table,Error.t) result
   ; destroy_pipeline:unit -> (unit,Error.t) result }
 type driver_frame = { frame_token:token }
 
@@ -28,7 +20,7 @@ type driver_surface =
   ; destroy_surface:unit -> (unit,Error.t) result }
 type driver_library =
   { create_compute_pipeline_in:entry:string -> constants:(string * Shader.constant_value) list ->
-      interface:Shader.binding list -> linked:string list ->
+      interface:Shader.binding list ->
       (driver_pipeline,Error.t) result
   ; destroy_library:unit -> (unit,Error.t) result }
 type accel_sizes = { structure_size:int64; build_scratch_size:int64 }
@@ -36,7 +28,7 @@ type driver_keyframe = token * int64
 type driver_geometry =
   | Driver_triangles of { vertices:token; offset:int64; length:int64; vertex_stride:int; vertex_count:int }
   | Driver_motion_triangles of { keyframes:driver_keyframe array; vertex_stride:int; vertex_count:int }
-  | Driver_boxes of { boxes:driver_keyframe array; stride:int; count:int; opaque:bool; duplicate:bool; table_offset:int }
+  | Driver_boxes of { boxes:driver_keyframe array; stride:int; count:int; opaque:bool; duplicate:bool }
   | Driver_curves of { control:driver_keyframe array; control_stride:int; control_count:int
                      ; radii:driver_keyframe array; radius_stride:int; indices:token; index_offset:int64
                      ; segment_count:int; per_segment:int; curve_type:int; basis:int; caps:int }
@@ -61,7 +53,6 @@ type driver_compute_encoder =
   ; set_bytes:index:int -> bytes -> (unit,Error.t) result
   ; set_texture:index:int -> token -> (unit,Error.t) result
   ; set_accel:index:int -> token -> (unit,Error.t) result
-  ; set_table:index:int -> token -> (unit,Error.t) result
   ; dispatch_threads:threads:int * int * int -> threadgroup:int * int * int -> (unit,Error.t) result
   ; compute_use_accels:token list -> (unit,Error.t) result
   ; end_compute:unit -> (unit,Error.t) result }
@@ -208,14 +199,14 @@ type blit_encoder
 (** Geometry for bottom-level structures. A keyframe list holds one entry for
     a static structure and exactly the structure's motion keyframes otherwise.
     One structure holds one geometry kind (triangles, boxes, or curves).
-    Bounding boxes are 24-byte min/max float triples that an intersection
-    function resolves; curves are float3 control points with float radii and
+    Bounding boxes are 24-byte min/max float triples the kernel tests in its
+    traversal loop; curves are float3 control points with float radii and
     uint32 segment indices. *)
 type keyframe = { buffer:buffer; offset:int64 }
 type curve_type = Round_curve | Flat_curve
 type curve_basis = Bspline | Catmull_rom | Linear_basis | Bezier
 type curve_caps = No_caps | Disk_caps | Sphere_caps
-type geometry_options = { opaque:bool; duplicate_intersection:bool; table_offset:int }
+type geometry_options = { opaque:bool; duplicate_intersection:bool }
 val default_geometry_options : geometry_options
 type geometry =
   | Triangles of { vertices:buffer; offset:int64; length:int64; vertex_stride:int; vertex_count:int }
@@ -238,11 +229,10 @@ type accel_descriptor =
   | Tlas_of of { instances:buffer; offset:int64; instance_count:int; kind:instance_kind
                ; structures:accel list; motion_transforms:(buffer * int64 * int) option }
   | Sized of { size:int64; template:accel }
-type instance_record = { instance:instance; user_id:int; table_offset:int }
+type instance_record = { instance:instance; user_id:int }
 type motion_instance =
   { record:instance_record; transforms_start:int; transforms_count:int
   ; start_time:float; end_time:float; start_border:border; end_border:border }
-type function_table
 
 val buffer_size : buffer -> int64
 
@@ -251,19 +241,12 @@ val create_library : device -> Shader.t -> (library,Error.t) result
 (** Creates a compute pipeline for [entry] with optional function constants.
     [interface] is the entry point's exact binding set, checked against the
     driver's reflection. *)
-
-(** [linked] names intersection or visible functions of the library that the
-    pipeline's function tables may reference; it requires [Caps.Function_tables]. *)
 val create_compute_pipeline_from : library -> entry:string ->
   ?constants:(string * Shader.constant_value) list -> interface:Shader.binding list ->
-  ?linked:string list -> unit -> (pipeline,Error.t) result
+  unit -> (pipeline,Error.t) result
 (** The most threads one threadgroup of this compute pipeline may run (Metal's
     [maxTotalThreadsPerThreadgroup]): a kernel needing more registers gets fewer. 0 for a render pipeline. *)
 val max_total_threads : pipeline -> int
-val create_intersection_table : pipeline -> capacity:int -> (function_table,Error.t) result
-val table_set_function : function_table -> index:int -> string -> (unit,Error.t) result
-val table_set_buffer : function_table -> index:int -> buffer -> (unit,Error.t) result
-val destroy_table : function_table -> (unit,Error.t) result
 val destroy_library : library -> (unit,Error.t) result
 val pack_instance_records : device -> instance_record array -> (bytes,Error.t) result
 val pack_motion_instances : device -> motion_instance array -> (bytes,Error.t) result
@@ -281,7 +264,6 @@ val set_buffer : compute_encoder -> index:int -> buffer -> (unit,Error.t) result
 val set_bytes : compute_encoder -> index:int -> bytes -> (unit,Error.t) result
 val set_texture : compute_encoder -> index:int -> texture -> (unit,Error.t) result
 val set_accel : compute_encoder -> index:int -> accel -> (unit,Error.t) result
-val set_table : compute_encoder -> index:int -> function_table -> (unit,Error.t) result
 val dispatch_threads : compute_encoder -> threads:int * int * int -> threadgroup:int * int * int -> (unit,Error.t) result
 val end_compute : compute_encoder -> (unit,Error.t) result
 val accel_encoder : commands -> (accel_encoder,Error.t) result

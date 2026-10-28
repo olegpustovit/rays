@@ -27,9 +27,8 @@ let ()=
         let flags=Bytes.make 4 '\000'in Bytes.set_int32_le flags 0 1l;Ok flags
         else resource.read offset length)})(raw.create_buffer memory descriptor));
     create_library=(fun shader->Result.map(fun library->{library with
-      create_compute_pipeline_in=(fun ~entry:_ ~constants:_ ~interface:_ ~linked:_->
+      create_compute_pipeline_in=(fun ~entry:_ ~constants:_ ~interface:_ ->
         incr pipelines;Ok{max_threads=1024;pipeline_token=1L;
-          create_table=(fun ~capacity:_->Error(Ogpu.Error.make "test" Unsupported "no tables"));
           destroy_pipeline=(fun()->decr pipelines;Ok())})})(raw.create_library shader));
     create_queue=(fun()->Result.map(fun queue->{queue with
       complete_through=(fun epoch->if !fail then Error(Ogpu.Error.make "test" Invalid_state "injected completion")
@@ -39,7 +38,7 @@ let ()=
         compute_encoder=(fun()->Ok{
           set_pipeline=(fun _->Ok());set_buffer=(fun ~index:_ ~offset:_ _->Ok());
           set_bytes=(fun ~index:_ _->Ok());set_texture=(fun ~index:_ _->assert false);
-          set_accel=(fun ~index:_ _->assert false);set_table=(fun ~index:_ _->assert false);
+          set_accel=(fun ~index:_ _->assert false);
           compute_use_accels=(fun _->assert false);dispatch_threads=(fun ~threads:_ ~threadgroup:_->Ok());
           end_compute=(fun()->Ok())})})(queue.begin_commands()))})(raw.create_queue()))})(base.create_device()))}in
   let device=get(B.create_device driver)in

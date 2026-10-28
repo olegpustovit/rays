@@ -39,8 +39,8 @@ let build_geometry (geometry : Ogpu_core.Backend.driver_geometry)
     match Array.to_list resolved |> List.find_opt Result.is_error with
     | Some (Error e) -> Error e
     | _ -> Ok (Array.map Result.get_ok resolved) in
-  let common ~opaque ~duplicate ~table_offset : Build.common =
-    { opaque; allow_duplicate_intersection = duplicate; intersection_function_table_offset = table_offset } in
+  let common ~opaque ~duplicate : Build.common =
+    { opaque; allow_duplicate_intersection = duplicate } in
   match geometry with
   | Ogpu_core.Backend.Driver_triangles { vertices; offset; length = _; vertex_stride; vertex_count } ->
       Result.map (fun vertices ->
@@ -53,10 +53,10 @@ let build_geometry (geometry : Ogpu_core.Backend.driver_geometry)
                          ; triangle_count = Int64.of_int (vertex_count / 3); index = None
                          ; common = Build.default_common }, List.map fst (Array.to_list frames_resolved)))
         (frames frames_tokens)
-  | Driver_boxes { boxes; stride; count; opaque; duplicate; table_offset } ->
+  | Driver_boxes { boxes; stride; count; opaque; duplicate } ->
       Result.map (fun frames_resolved ->
         (Build.Bounding_boxes { boxes = keyframes frames_resolved; stride = Int64.of_int stride
-                              ; count = Int64.of_int count; common = common ~opaque ~duplicate ~table_offset }
+                              ; count = Int64.of_int count; common = common ~opaque ~duplicate }
         , List.map fst (Array.to_list frames_resolved))) (frames boxes)
   | Driver_curves { control; control_stride; control_count; radii; radius_stride; indices; index_offset
                   ; segment_count; per_segment; curve_type; basis; caps } -> (

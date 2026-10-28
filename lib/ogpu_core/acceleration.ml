@@ -60,7 +60,7 @@ let built value=match value.state with Built|Compacted->true|Empty->false
 let descriptor value=value.descriptor
 
 (* Instance records packed to a driver-reported layout: [size; transform;
-   options; mask; table_offset; structure_index; user_id; transforms_start;
+   options; mask; structure_index; user_id; transforms_start;
    transforms_count; start_border; end_border; start_time; end_time], with -1
    where the record kind lacks the field. *)
 type instance_layout=int array
@@ -76,19 +76,18 @@ let pack_records (layout:instance_layout) count fill=
   for i=0 to count-1 do fill bytes(i*size)done;bytes
 let pack_instances layout instances=
   pack_records layout(Array.length instances)(fun bytes base->
-    let transform,mask,structure_index,table_offset,user_id=instances.(base/layout.(0))in
+    let transform,mask,structure_index,user_id=instances.(base/layout.(0))in
     if layout.(1)>=0 then put_transform bytes(base+layout.(1))transform;
-    put32 bytes(base+layout.(3))mask;put32 bytes(base+layout.(4))table_offset;
-    put32 bytes(base+layout.(5))structure_index;
-    if layout.(6)>=0 then put32 bytes(base+layout.(6))user_id)
+    put32 bytes(base+layout.(3))mask;put32 bytes(base+layout.(4))structure_index;
+    if layout.(5)>=0 then put32 bytes(base+layout.(5))user_id)
 let pack_motion_instances layout instances=
   pack_records layout(Array.length instances)(fun bytes base->
-    let (mask,structure_index,table_offset,user_id),(transforms_start,transforms_count),(start_border,end_border),(start_time,end_time)=instances.(base/layout.(0))in
-    put32 bytes(base+layout.(3))mask;put32 bytes(base+layout.(4))table_offset;
-    put32 bytes(base+layout.(5))structure_index;put32 bytes(base+layout.(6))user_id;
-    put32 bytes(base+layout.(7))transforms_start;put32 bytes(base+layout.(8))transforms_count;
-    put32 bytes(base+layout.(9))start_border;put32 bytes(base+layout.(10))end_border;
-    put_float bytes(base+layout.(11))start_time;put_float bytes(base+layout.(12))end_time)
+    let (mask,structure_index,user_id),(transforms_start,transforms_count),(start_border,end_border),(start_time,end_time)=instances.(base/layout.(0))in
+    put32 bytes(base+layout.(3))mask;put32 bytes(base+layout.(4))structure_index;
+    put32 bytes(base+layout.(5))user_id;
+    put32 bytes(base+layout.(6))transforms_start;put32 bytes(base+layout.(7))transforms_count;
+    put32 bytes(base+layout.(8))start_border;put32 bytes(base+layout.(9))end_border;
+    put_float bytes(base+layout.(10))start_time;put_float bytes(base+layout.(11))end_time)
 (* Packed 4x3 column-major transforms, 48 bytes each, for motion keyframes. *)
 let pack_transforms transforms=
   let bytes=Bytes.make(Array.length transforms*48)'\000'in

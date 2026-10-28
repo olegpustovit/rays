@@ -1,5 +1,5 @@
 type feature = Buffer | Texture | Sampler | Compute_pipeline | Render_pipeline
-  | Queue | Surface | Ray_tracing | Ray_tracing_curves | Ray_tracing_motion | Function_tables
+  | Queue | Surface | Ray_tracing | Ray_tracing_curves | Ray_tracing_motion
   | Unknown of string
 
 type limits =
@@ -14,7 +14,6 @@ type t =
   ; compute_pipeline : bool
   ; render_pipeline : bool
   ; ray_tracing : bool
-  ; function_tables : bool
   ; ray_tracing_curves : bool
   ; ray_tracing_motion : bool
   }
@@ -24,7 +23,7 @@ let minimum_m1 =
              ; max_texture_dimension_2d = 16_384
              ; max_bind_groups = 4
              ; max_sample_count = 4 }
-  ; compute_pipeline = true; render_pipeline = true; ray_tracing = false; function_tables = false; ray_tracing_curves = false; ray_tracing_motion = false }
+  ; compute_pipeline = true; render_pipeline = true; ray_tracing = false; ray_tracing_curves = false; ray_tracing_motion = false }
 
 let validate value =
   let limits = value.limits in
@@ -40,7 +39,6 @@ let has value = function
   | Compute_pipeline -> value.compute_pipeline
   | Render_pipeline -> value.render_pipeline
   | Ray_tracing -> value.ray_tracing
-  | Function_tables -> value.function_tables
   | Ray_tracing_curves -> value.ray_tracing_curves
   | Ray_tracing_motion -> value.ray_tracing_motion
   | Unknown _ -> false

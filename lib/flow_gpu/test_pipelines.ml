@@ -7,10 +7,9 @@ let () =
   let driver=Ogpu.Backend.{create_device=(fun () -> Result.map (fun raw ->
     {raw with capabilities={raw.capabilities with compute_pipeline=true};
       create_library=(fun shader -> Result.map (fun library ->
-        {library with create_compute_pipeline_in=(fun ~entry:_ ~constants:_ ~interface:_ ~linked:_ ->
+        {library with create_compute_pipeline_in=(fun ~entry:_ ~constants:_ ~interface:_ ->
           incr pipelines;next:=Int64.succ !next;
           Ok {max_threads=1024;pipeline_token= !next;
-            create_table=(fun ~capacity:_ -> Error (Ogpu.Error.make "test" Unsupported "no function tables"));
             destroy_pipeline=(fun () -> decr pipelines;Ok ())})}) (raw.create_library shader))})
     (base.create_device ()))} in
   let device=get (Ogpu.Backend.create_device driver) in

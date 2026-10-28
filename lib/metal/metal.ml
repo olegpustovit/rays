@@ -113,12 +113,6 @@ let dependent_count lifetime = Atomic.get lifetime.dependents
 let attach lifetime = Atomic.incr lifetime.dependents
 let detach lifetime = Atomic.decr lifetime.dependents
 
-let finalize_child lifetime parent on_finalize =
-  if Atomic.compare_and_set lifetime.destroyed false true then begin
-    on_finalize ();
-    detach parent
-  end
-
 let ensure_live operation lifetime =
   if is_destroyed lifetime then error operation Destroyed "handle is destroyed" else Ok ()
 
@@ -489,30 +483,6 @@ type compute_pipeline = {
   max_total_threads : int;
 }
 
-type linked_function_handle = {
-  raw : Metal_raw.handle;
-  lifetime : lifetime;
-  pipeline : compute_pipeline;
-  function_ : function_handle;
-}
-
-type visible_function_table = {
-  raw : Metal_raw.handle;
-  lifetime : lifetime;
-  pipeline : compute_pipeline;
-
-}
-
-type intersection_function_table = {
-  raw : Metal_raw.handle;
-  lifetime : lifetime;
-  pipeline : compute_pipeline;
-  capacity : int;
-  functions : linked_function_handle option array;
-  buffers : buffer option array;
-  visible_tables : visible_function_table option array;
-}
-
 type render_pipeline_kind = Render | Tile | Mesh
 type render_color_attachment_mapping = Identity | Inherited
 type render_blend_state = Blend_disabled | Blend_enabled
@@ -683,7 +653,6 @@ type command_resource =
   | Command_buffer_sampler of sampler
   | Command_buffer_depth_stencil of depth_stencil
 
-  | Command_buffer_intersection_table of intersection_function_table
   | Command_buffer_render_pipeline of render_pipeline
 
   | Command_buffer_indirect of indirect_command_buffer
@@ -780,7 +749,6 @@ let command_resource_lifetime = function
   | Command_buffer_sampler sampler -> sampler.lifetime
   | Command_buffer_depth_stencil value -> value.lifetime
 
-  | Command_buffer_intersection_table value -> value.lifetime
   | Command_buffer_render_pipeline pipeline -> pipeline.lifetime
 
   | Command_buffer_indirect value -> value.lifetime
@@ -803,8 +771,7 @@ let command_resource_heap = function
   | Command_buffer_acceleration_structure _ -> None
   | Command_buffer_texture texture -> command_texture_heap texture
   | Command_buffer_sampler _ -> None
-  | Command_buffer_depth_stencil _
-  | Command_buffer_intersection_table _ ->
+  | Command_buffer_depth_stencil _ ->
       None
   | Command_buffer_render_pipeline _  | Command_buffer_indirect _
    ->
@@ -1005,13 +972,6 @@ let retain_command_buffer_depth_stencil command_buffer (value : depth_stencil) =
     command_buffer.resources := Command_buffer_depth_stencil value :: !(command_buffer.resources)
   end
 
-let retain_command_buffer_intersection_table command_buffer (value : intersection_function_table) =
-  if not (already_retained command_buffer value.lifetime) then begin
-    attach value.lifetime;
-    command_buffer.resources :=
-      Command_buffer_intersection_table value :: !(command_buffer.resources)
-  end
-
 let retain_command_buffer_indirect (command_buffer : command_buffer)
     (value : indirect_command_buffer) =
   if not (already_retained command_buffer value.lifetime) then begin
@@ -1147,7 +1107,6 @@ module Device = struct
     raytracing : bool;
     raytracing_from_render : bool;
     dynamic_libraries : bool;
-    function_pointers : bool;
   }
 
   let system_default () =
@@ -1189,9 +1148,6 @@ module Device = struct
         let* dynamic_libraries =
           native operation (Metal_raw.Registry.device_supports_dynamic_libraries value.raw)
         in
-        let* function_pointers =
-          native operation (Metal_raw.Registry.device_supports_function_pointers value.raw)
-        in
         Ok
           {
             name = (if name = "" then "Unnamed Metal device" else name);
@@ -1207,7 +1163,6 @@ module Device = struct
             raytracing;
             raytracing_from_render;
             dynamic_libraries;
-            function_pointers;
           })
 
   let family_code = function
@@ -1416,11 +1371,9 @@ module Acceleration_structure = struct
       ; start_border : border; end_border : border }
     type index = { index_buffer : buffer; index_offset : int64; index_uint16 : bool }
     type common =
-      { opaque : bool; allow_duplicate_intersection : bool
-      ; intersection_function_table_offset : int }
+      { opaque : bool; allow_duplicate_intersection : bool }
     let default_common =
-      { opaque = true; allow_duplicate_intersection = false
-      ; intersection_function_table_offset = 0 }
+      { opaque = true; allow_duplicate_intersection = false }
     type curve_type = Round | Flat
     type curve_basis = Bspline | Catmull_rom | Linear | Bezier
     type end_caps = No_caps | Disk | Sphere
@@ -1438,7 +1391,7 @@ module Acceleration_structure = struct
           ; common : common }
     type instance_kind = User_id_instances | Motion_instances
     type instance_layout =
-      { size : int; transform : int; options : int; mask : int; table_offset : int
+      { size : int; transform : int; options : int; mask : int
       ; structure_index : int; user_id : int; transforms_start : int; transforms_count : int
       ; start_border_offset : int; end_border_offset : int; start_time_offset : int
       ; end_time_offset : int }
@@ -1453,16 +1406,15 @@ module Acceleration_structure = struct
     let instance_layout kind =
       let layout = Metal_raw.accel_instance_layout (kind_code kind) in
       { size = layout.(0); transform = layout.(1); options = layout.(2); mask = layout.(3)
-      ; table_offset = layout.(4); structure_index = layout.(5); user_id = layout.(6)
-      ; transforms_start = layout.(7); transforms_count = layout.(8)
-      ; start_border_offset = layout.(9); end_border_offset = layout.(10)
-      ; start_time_offset = layout.(11); end_time_offset = layout.(12) }
+      ; structure_index = layout.(4); user_id = layout.(5)
+      ; transforms_start = layout.(6); transforms_count = layout.(7)
+      ; start_border_offset = layout.(8); end_border_offset = layout.(9)
+      ; start_time_offset = layout.(10); end_time_offset = layout.(11) }
 
     let keyframe_raw (k : keyframe) : Metal_raw.accel_keyframe =
       { keyframe_buffer = k.buffer.raw; keyframe_offset = k.offset }
 
-    let common_raw (c : common) = (c.opaque, c.allow_duplicate_intersection,
-      Int64.of_int c.intersection_function_table_offset)
+    let common_raw (c : common) = (c.opaque, c.allow_duplicate_intersection)
 
     (* The element at the last index of a strided range must fit its buffer. *)
     let range_fits (buffer : buffer) offset stride count element =
@@ -1502,7 +1454,7 @@ module Acceleration_structure = struct
     let geometry_raw (g : geometry) : Metal_raw.accel_geometry_raw =
       match g with
       | Triangles { vertices; vertex_stride; triangle_count; index; common } ->
-          let opaque, allow_duplicate, table_offset = common_raw common in
+          let opaque, allow_duplicate = common_raw common in
           let first = List.hd vertices in
           Raw_triangles
             { vertex = first.buffer.raw; vertex_offset = first.offset; vertex_stride
@@ -1511,18 +1463,18 @@ module Acceleration_structure = struct
             ; index_offset = Option.fold ~none:0L ~some:(fun (i : index) -> i.index_offset) index
             ; index_uint16 = Option.fold ~none:false ~some:(fun (i : index) -> i.index_uint16) index
             ; keyframes = (match vertices with [ _ ] -> [||] | _ -> Array.of_list (List.map keyframe_raw vertices))
-            ; opaque; allow_duplicate; table_offset }
+            ; opaque; allow_duplicate }
       | Bounding_boxes { boxes; stride; count; common } ->
-          let box_opaque, box_allow_duplicate, box_table_offset = common_raw common in
+          let box_opaque, box_allow_duplicate = common_raw common in
           let first = List.hd boxes in
           Raw_boxes
             { boxes = first.buffer.raw; box_offset = first.offset; box_stride = stride
             ; box_count = count
             ; box_keyframes = (match boxes with [ _ ] -> [||] | _ -> Array.of_list (List.map keyframe_raw boxes))
-            ; box_opaque; box_allow_duplicate; box_table_offset }
+            ; box_opaque; box_allow_duplicate }
       | Curves { control_points; control_stride; control_point_count; radii; radius_stride; index
                ; segment_count; control_points_per_segment; curve_type; basis; end_caps; common } ->
-          let curve_opaque, curve_allow_duplicate, curve_table_offset = common_raw common in
+          let curve_opaque, curve_allow_duplicate = common_raw common in
           let control = List.hd control_points and radius = List.hd radii in
           let motion = match control_points with [ _ ] -> false | _ -> true in
           Raw_curves
@@ -1537,7 +1489,7 @@ module Acceleration_structure = struct
             ; end_caps = (match end_caps with No_caps -> 0 | Disk -> 1 | Sphere -> 2)
             ; control_keyframes = (if motion then Array.of_list (List.map keyframe_raw control_points) else [||])
             ; radius_keyframes = (if motion then Array.of_list (List.map keyframe_raw radii) else [||])
-            ; curve_opaque; curve_allow_duplicate; curve_table_offset }
+            ; curve_opaque; curve_allow_duplicate }
 
     let validate_geometry operation (device : device) ~motion = function
       | Triangles { vertices; vertex_stride; triangle_count; index; _ } ->
@@ -3455,8 +3407,6 @@ module Shader_argument_encoder = struct
     | Sampler of sampler
     | Acceleration_structure of acceleration_structure
     | Indirect_command_buffer of indirect_command_buffer
-    | Visible_function_table of visible_function_table
-    | Intersection_function_table of intersection_function_table
     | Render_pipeline of render_pipeline
     | Compute_pipeline of compute_pipeline
     | Depth_stencil of depth_stencil
@@ -3470,8 +3420,6 @@ module Shader_argument_encoder = struct
     | Sampler x -> (2, x.raw, x.lifetime, x.device)
     | Acceleration_structure x -> (3, x.raw, x.lifetime, x.device)
     | Indirect_command_buffer x -> (4, x.raw, x.lifetime, x.device)
-    | Visible_function_table x -> (5, x.raw, x.lifetime, x.pipeline.device)
-    | Intersection_function_table x -> (6, x.raw, x.lifetime, x.pipeline.device)
     | Render_pipeline x -> (7, x.raw, x.lifetime, x.device)
     | Compute_pipeline x -> (8, x.raw, x.lifetime, x.device)
     | Depth_stencil x -> (9, x.raw, x.lifetime, x.device)
@@ -3532,24 +3480,6 @@ module Shader_argument_encoder = struct
             if Option.is_none value.function_ then detach value.device.lifetime)
 end
 
-let validate_linked_functions operation device linked_functions =
-  let rec loop names = function
-    | [] -> Ok ()
-    | (linked : Function.t) :: rest -> (
-        let* () = ensure_live operation linked.lifetime in
-        let* () = ensure_same_device operation device linked.library.device in
-        let name = Metal_raw.function_name linked.raw in
-        if List.mem name names then
-          error operation Invalid_argument "linked functions must have unique names"
-        else
-          match Function.kind_of_code (Metal_raw.function_kind linked.raw) with
-          | Function.Visible | Function.Intersection -> loop (name :: names) rest
-          | _ ->
-              error operation Invalid_argument
-                "linked functions must be visible or intersection Metal functions")
-  in
-  loop [] linked_functions
-
 module Compute_pipeline = struct
   type t = compute_pipeline
 
@@ -3569,9 +3499,7 @@ module Compute_pipeline = struct
     attach_finalizer value value.lifetime device.lifetime;
     value
 
-  let create ?label ?(linked_functions = [])
-
-      ?(reflection = false)
+  let create ?label ?(reflection = false)
       (function_value : Function.t) =
     let operation = "Metal.Compute_pipeline.create" in
     on_main operation (fun () ->
@@ -3585,14 +3513,7 @@ module Compute_pipeline = struct
             error operation Invalid_argument
               "the pipeline entry point must be a Metal kernel function"
           else
-            let* () = validate_linked_functions operation device linked_functions in
-            if
-              linked_functions <> []
-              && not (probe (Metal_raw.Registry.device_supports_function_pointers device.raw))
-            then
-              error operation Unsupported "linked functions require Metal function-pointer support"
-            else
-                  let descriptor_required = label <> None || linked_functions <> [] || reflection in
+                  let descriptor_required = label <> None || reflection in
                   let creation =
                     if not descriptor_required then
                       Result.map
@@ -3603,9 +3524,6 @@ module Compute_pipeline = struct
                         {
                           label;
                           reflection;
-                          linked_functions =
-                            Array.of_list
-                              (List.map (fun (value : Function.t) -> value.raw) linked_functions);
                           preloaded_libraries = [||];
                           binary_archives = [||];
                           fail_on_binary_archive_miss = false;
@@ -3625,141 +3543,6 @@ module Compute_pipeline = struct
   let destroy (value : t) =
     destroy_parent "Metal.Compute_pipeline.destroy" value.lifetime value.raw (fun () ->
         detach value.device.lifetime)
-end
-
-module Function_handle = struct
-  type t = linked_function_handle
-
-  let create ~(pipeline : compute_pipeline) ~(function_ : function_handle) =
-    let operation = "Metal.Function_handle.create" in
-    on_main operation (fun () ->
-        let* () = ensure_live operation pipeline.lifetime in
-        let* () = ensure_live operation function_.lifetime in
-        if function_.library.device.lifetime != pipeline.device.lifetime then
-          error operation Device_mismatch "function and pipeline use different devices"
-        else
-          match Metal_raw.compute_pipeline_function_handle pipeline.raw function_.raw with
-          | Error message -> error operation Unsupported message
-          | Ok raw ->
-              let value = { raw; lifetime = lifetime (); pipeline; function_ } in
-              attach pipeline.lifetime;
-              attach function_.lifetime;
-              Gc.finalise
-                (fun _ ->
-                  finalize_child value.lifetime pipeline.lifetime (fun () ->
-                      detach function_.lifetime))
-                value;
-              Ok value)
-
-  let destroy (value : t) =
-    destroy_parent "Metal.Function_handle.destroy" value.lifetime value.raw (fun () ->
-        detach value.function_.lifetime;
-        detach value.pipeline.lifetime)
-end
-
-module Intersection_function_table = struct
-  type t = intersection_function_table
-
-  let create ~(pipeline : compute_pipeline) ~capacity =
-    let operation = "Metal.Intersection_function_table.create" in
-    on_main operation (fun () ->
-        if capacity <= 0 || capacity > 1_000_000 then
-          error operation Invalid_argument "capacity must be between 1 and 1000000"
-        else
-          let* () = ensure_live operation pipeline.lifetime in
-          let* raw =
-            native_result operation
-              (Metal_raw.compute_pipeline_intersection_function_table pipeline.raw
-                 (Int64.of_int capacity))
-          in
-          let value =
-            {
-              raw;
-              lifetime = lifetime ();
-              pipeline;
-              capacity;
-              functions = Array.make capacity None;
-              buffers = Array.make capacity None;
-              visible_tables = Array.make capacity None;
-            }
-          in
-          attach pipeline.lifetime;
-          let release values lifetime =
-            Array.iter (Option.iter (fun item -> detach (lifetime item))) values
-          in
-          let functions = value.functions and buffers = value.buffers
-          and visible_tables = value.visible_tables in
-          attach_finalizer
-            ~on_finalize:(fun () ->
-              release functions (fun item -> item.lifetime);
-              release buffers (fun item -> item.lifetime);
-              release visible_tables (fun item -> item.lifetime))
-            value value.lifetime pipeline.lifetime;
-          Ok value)
-
-  let validate (value : t) operation index =
-    let* () = ensure_live operation value.lifetime in
-    if index < 0 || index >= value.capacity then
-      error operation Invalid_argument "function-table index is out of range"
-    else Ok ()
-
-  let replace values index lifetime next =
-    Option.iter (fun old -> detach (lifetime old)) values.(index);
-    Option.iter (fun item -> attach (lifetime item)) next;
-    values.(index) <- next
-
-  let set_function (value : t) ~index function_ =
-    let operation = "Metal.Intersection_function_table.set_function" in
-    on_main operation (fun () ->
-        let* () = validate value operation index in
-        match function_ with
-        | Some (item : linked_function_handle)
-          when item.pipeline.device.lifetime != value.pipeline.device.lifetime ->
-            error operation Device_mismatch "function handle belongs to another device"
-        | _ ->
-            let* () =
-              native_result operation
-                (Metal_raw.intersection_function_table_set_function value.raw
-                   (Option.map (fun (item : linked_function_handle) -> item.raw) function_)
-                   index)
-            in
-            replace value.functions index (fun item -> item.lifetime) function_;
-            Ok ())
-
-  let set_buffer (value : t) ~index ?(offset = 0L) buffer =
-    let operation = "Metal.Intersection_function_table.set_buffer" in
-    on_main operation (fun () ->
-        let* () = validate value operation index in
-        if offset < 0L then error operation Invalid_argument "buffer offset is negative"
-        else
-          match buffer with
-          | Some (item : buffer) when item.device.lifetime != value.pipeline.device.lifetime ->
-              error operation Device_mismatch "buffer belongs to another device"
-          | Some item when offset >= item.length ->
-              error operation Invalid_argument "buffer offset exceeds its length"
-          | _ ->
-              let* () =
-                native_result operation
-                  (Metal_raw.intersection_function_table_set_buffer value.raw
-                     (Option.map (fun (item : buffer) -> item.raw) buffer)
-                     offset index)
-              in
-              replace value.buffers index (fun item -> item.lifetime) buffer;
-              Ok ())
-
-  let destroy (value : t) =
-    destroy_parent "Metal.Intersection_function_table.destroy" value.lifetime value.raw (fun () ->
-        Array.iter
-          (Option.iter (fun (item : linked_function_handle) -> detach item.lifetime))
-          value.functions;
-        Array.iter (Option.iter (fun (item : buffer) -> detach item.lifetime)) value.buffers;
-        Array.iter
-          (Option.iter (fun (item : visible_function_table) -> detach item.lifetime))
-          value.visible_tables;
-        Array.fill value.functions 0 value.capacity None;
-        Array.fill value.buffers 0 value.capacity None;
-        Array.fill value.visible_tables 0 value.capacity None;
-        detach value.pipeline.lifetime)
 end
 
 module Render_pipeline = struct
@@ -5778,33 +5561,6 @@ module Compute_encoder = struct
               let* () =
                 native_result operation
                   (Metal_raw.compute35_acceleration value.raw None (Int64.of_int index))
-              in
-              Ok ())
-
-  let set_intersection_function_table (value : t) ~index (x : Intersection_function_table.t option)
-      =
-    let operation = "Metal.Compute_encoder.set_intersection_function_table" in
-    on_main operation (fun () ->
-        let* () = ensure_live operation value.lifetime in
-        if index < 0 || index >= 31 then
-          error operation Invalid_argument "buffer index is outside [0, 31)"
-        else
-          match x with
-          | Some table ->
-              let* () = ensure_live operation table.lifetime in
-              let* () =
-                ensure_same_device operation value.command_buffer.queue.device table.pipeline.device
-              in
-              let* () =
-                native_result operation
-                  (Metal_raw.compute35_intersection value.raw (Some table.raw) (Int64.of_int index))
-              in
-              retain_command_buffer_intersection_table value.command_buffer table;
-              Ok ()
-          | None ->
-              let* () =
-                native_result operation
-                  (Metal_raw.compute35_intersection value.raw None (Int64.of_int index))
               in
               Ok ())
 

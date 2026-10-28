@@ -19,10 +19,6 @@ kernel void specialized_increment(device uint *values [[buffer(0)]],
   values[index] += apply_twice ? increment_amount * 2u : increment_amount;
 }
 
-[[visible]] uint linked_identity(uint value) {
-  return value;
-}
-
 constant char scalar_i8 [[function_constant(2)]];
 constant uchar scalar_u8 [[function_constant(3)]];
 constant short scalar_i16 [[function_constant(4)]];
@@ -78,7 +74,6 @@ let run () =
   match Device.system_default () with
   | Error _ -> print_endline "metal function constants safe: skipped"
   | Ok device ->
-      let info = get (Device.info device) in
       let invalid_shader =
         expect Native_error
           (Library.compile_source ~device ~label:"invalid shader diagnostic" "not a Metal program")
@@ -143,9 +138,6 @@ let run () =
                ; "scalar_bool", Function.Bool_constant true
                ])
       in
-      let linked_function =
-        if info.function_pointers then Some (get (Function.find ~library "linked_identity")) else None
-      in
       reject Wrong_domain
         (Domain.spawn (fun () -> Function.find ~library "increment") |> Domain.join);
       let stale_function = get (Function.find ~library "increment") in
@@ -154,22 +146,13 @@ let run () =
       reject Destroyed (Function.argument_encoder stale_function ~buffer_index:0L);
       without_handles "invalid compute descriptors" (fun () ->
         reject Invalid_argument
-          (Compute_pipeline.create ~label:"invalid\000label" specialized_function);
-        (* A kernel cannot be linked, and a linked name appears once. *)
-        reject Invalid_argument
-          (Compute_pipeline.create ~linked_functions:[ function_ ] specialized_function);
-        Option.iter
-          (fun linked ->
-            reject Invalid_argument
-              (Compute_pipeline.create ~linked_functions:[ linked; linked ] specialized_function);
-            reject Invalid_argument (Compute_pipeline.create linked))
-          linked_function);
+          (Compute_pipeline.create ~label:"invalid\000label" specialized_function));
       reject Parent_has_dependents (Library.destroy library);
       let pipeline = get (Compute_pipeline.create function_) in
       let specialized_pipeline =
         get
           (Compute_pipeline.create ~label:"specialized reflected pipeline"
-             ~linked_functions:(Option.to_list linked_function) ~reflection:true
+             ~reflection:true
              specialized_function)
       in
       let scalar_constant_pipeline = get (Compute_pipeline.create scalar_constant_function) in
@@ -262,7 +245,6 @@ let run () =
       get (Compute_pipeline.destroy scalar_constant_pipeline);
       get (Compute_pipeline.destroy specialized_pipeline);
       get (Compute_pipeline.destroy pipeline);
-      Option.iter (fun value -> get (Function.destroy value)) linked_function;
       get (Function.destroy scalar_constant_function);
       get (Function.destroy specialized_function);
       get (Function.destroy function_);

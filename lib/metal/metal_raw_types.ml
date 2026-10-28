@@ -71,7 +71,6 @@ type compute_pipeline_descriptor =
   {
   label: string option ;
   reflection: bool ;
-  linked_functions: handle array ;
   preloaded_libraries: handle array ;
   binary_archives: handle array ;
   fail_on_binary_archive_miss: bool ;
@@ -340,8 +339,7 @@ type accel_geometry_raw =
   index_uint16: bool ;
   keyframes: accel_keyframe array ;
   opaque: bool ;
-  allow_duplicate: bool ;
-  table_offset: int64 }
+  allow_duplicate: bool }
   | Raw_boxes of
   {
   boxes: handle ;
@@ -350,8 +348,7 @@ type accel_geometry_raw =
   box_count: int64 ;
   box_keyframes: accel_keyframe array ;
   box_opaque: bool ;
-  box_allow_duplicate: bool ;
-  box_table_offset: int64 }
+  box_allow_duplicate: bool }
   | Raw_curves of
   {
   control: handle ;
@@ -372,8 +369,7 @@ type accel_geometry_raw =
   control_keyframes: accel_keyframe array ;
   radius_keyframes: accel_keyframe array ;
   curve_opaque: bool ;
-  curve_allow_duplicate: bool ;
-  curve_table_offset: int64 }
+  curve_allow_duplicate: bool }
 type accel_motion_raw =
   {
   keyframe_count: int64 ;

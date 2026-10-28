@@ -82,14 +82,6 @@ let create (context : Command_control.t) =
                           native_of
                             (Metal.Compute_encoder.set_acceleration_structure encoder ~index
                                (Some (Acceleration.Private.metal structure)))));
-              set_table =
-                (fun ~index token ->
-                  match context.table token with
-                  | Error _ as failure -> failure
-                  | Ok table ->
-                      native_of
-                        (Metal.Compute_encoder.set_intersection_function_table encoder ~index
-                           (Some table)));
               dispatch_threads =
                 (fun ~threads ~threadgroup ->
                   native_of (Metal.Compute_encoder.dispatch_threads encoder ~threads ~threadgroup));

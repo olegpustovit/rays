@@ -336,13 +336,12 @@ alone used (audit Q2). `Backend.create_library` compiles one MSL artifact into
 a reusable library; `create_compute_pipeline_from` makes a pipeline per entry
 point with typed function constants and an exact per-entry binding interface
 checked against Metal reflection (buffer, texture, and sampler bindings occupy
-separate index spaces, and `Acceleration_structure` and `Intersection_table`
-are binding kinds). `max_total_threads` reads a compute pipeline's
+separate index spaces, and `Acceleration_structure` is a binding kind). `max_total_threads` reads a compute pipeline's
 `maxTotalThreadsPerThreadgroup`, which Metal lowers for a kernel that needs more
 registers (the Flow kernels' register-pressure gate, `Flow_gpu.Run.max_total_threads`;
 0 for a render pipeline). `begin_commands` records one command buffer through
 compute, acceleration, blit, and render encoders (`set_pipeline`, `set_buffer`,
-`set_bytes`, `set_texture`, `set_accel`, `set_table`, `dispatch_threads`,
+`set_bytes`, `set_texture`, `set_accel`, `dispatch_threads`,
 `build_accel`, `write_compacted_size`, `compact_accel`, `buffer_to_texture`)
 and commits without blocking, so `Backend.status` and `gpu_duration`
 observe it through the queue's epochs. Buffers take a `Types.memory` class;
@@ -357,14 +356,14 @@ buffer per keyframe), `Bounding_boxes`, and `Curves`; descriptors are `Blas`,
 records packed by `pack_instance_records`/`pack_motion_instances` through the
 driver's `instance_layout`, plus a keyframe transform buffer packed by
 `pack_transforms`), and `Sized` structures that `compact_accel` fills after
-`write_compacted_size` reports the size. Pipelines link `[[intersection]]`
-functions (`create_compute_pipeline_from ~linked`), and
-`create_intersection_table` with `table_set_function`, `table_set_buffer`, and
-the compute encoder's `set_table` binds them. `compute_use_accels` declares
+`write_compacted_size` reports the size. Procedural geometry is a shader matter:
+`Bounding_boxes` primitives are resolved in the kernel's own traversal loop
+(Metal `intersection_query`, SPIR-V `OpRayQuery*`), so OGPU has no intersection
+function tables or linked functions. `compute_use_accels` declares
 the built bottom-level structures an instance structure references as read by
 a dispatch (Metal `useResource:usage:`; they are otherwise evicted over time).
 `Caps` is the live set: `Compute_pipeline`, `Render_pipeline`, `Ray_tracing`,
-`Function_tables`, and `Ray_tracing_curves` (Metal: Apple9 and later; the M1
+`Ray_tracing_motion`, and `Ray_tracing_curves` (Metal: Apple9 and later; the M1
 answers curves with typed `Unsupported`).
 A colour attachment's `store` is honoured: `Store` keeps the contents (and
 also resolves when a resolve texture is given), `Resolve` writes only the
@@ -378,7 +377,8 @@ Removed with their Metal bindings, mock arms, conformance cases, and
 capability flags, because no product code called them: placement heaps and
 aliasing, residency sets, intra-queue fences, timeline events, stage-boundary
 timestamps, mesh and tile pipelines, dynamic libraries, binary archives,
-sparse textures, the MetalFX upscaler, visible function tables, refit and
+sparse textures, the MetalFX upscaler, visible and intersection function
+tables with linked functions and the instance table offset, refit and
 structure copy, precompiled metallib shaders, the encoded buffer copy, fill,
 texture copy and texture-to-buffer blits, and the portable `Memory`, `Sync`,
 and `Diagnostics` modules. A capability returns through the
@@ -387,8 +387,8 @@ what remains on both drivers: capabilities, buffer round trips, padded and
 inset texture uploads read back by the host, the three pixel formats, linear
 mip sampling, library lifetime and function-constant specializations, exact
 compute output, abandoned commands, ray-query hits (primitive id, instance id,
-`t`), bounding boxes through an intersection table (no product caller since the path tracer's spheres
-moved to scene/trace), curves or their rejection,
+`t`), bounding boxes resolved in the kernel's traversal loop (no product
+caller since the path tracer's spheres moved to scene/trace), curves or their rejection,
 motion primitives and motion instances at three shutter times, user-id masks,
 compaction hit parity, the render path, lifetime rejection, and zero leaked
 handles; the mock rejects what it cannot execute with typed `Unsupported` and

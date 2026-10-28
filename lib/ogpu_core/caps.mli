@@ -1,5 +1,5 @@
 type feature = Buffer | Texture | Sampler | Compute_pipeline | Render_pipeline
-  | Queue | Surface | Ray_tracing | Ray_tracing_curves | Ray_tracing_motion | Function_tables
+  | Queue | Surface | Ray_tracing | Ray_tracing_curves | Ray_tracing_motion
   | Unknown of string
 
 type limits =
@@ -14,7 +14,6 @@ type t =
   ; compute_pipeline : bool
   ; render_pipeline : bool
   ; ray_tracing : bool
-  ; function_tables : bool
   ; ray_tracing_curves : bool
   ; ray_tracing_motion : bool
   }
