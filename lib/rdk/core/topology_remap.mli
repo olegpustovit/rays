@@ -74,7 +74,7 @@ val blend_attribute :
     [right.(i)] at [weight.(i)] (all in bounds). Float and vector storage: [a + (b - a) * t], or
     [a * (1 - t) + b * t] when the delta is not finite; a [Float3] named ["N"] is renormalised when
     its length exceeds [1e-20]. Int, text and ragged rows take [left] when [t < 0.5], else [right].
-    Bytes equal [Curve_ops.interpolate_attribute]'s. Raises [Invalid_argument] on a non-positive grain. *)
+    Bytes equal [Curve_join.interpolate_attribute]'s. Raises [Invalid_argument] on a non-positive grain. *)
 
 val blend_group :
   ?cancel:Cancel.t -> grain:int -> int array -> int array -> float array -> Group.t -> Group.t

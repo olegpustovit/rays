@@ -1,6 +1,52 @@
 open Rdk
 open Rdk_test_support
 
+module Dyadic = Rdk_exact.Exact_dyadic
+let sign_of c = if c < 0 then Predicates.Negative else if c > 0 then Predicates.Positive else Predicates.Zero
+
+let exact_orient2d_reference ~ax ~ay ~bx ~by ~cx ~cy =
+  let open Dyadic in
+  let ax = of_float ax and ay = of_float ay
+  and bx = of_float bx and by = of_float by
+  and cx = of_float cx and cy = of_float cy in
+  sign_of (compare_zero (subtract
+      (multiply (subtract ax cx) (subtract by cy))
+      (multiply (subtract ay cy) (subtract bx cx))))
+let exact_orient3d_reference
+    ~ax ~ay ~az ~bx ~by ~bz ~cx ~cy ~cz ~dx ~dy ~dz =
+  let open Dyadic in
+  let ax = of_float ax and ay = of_float ay and az = of_float az
+  and bx = of_float bx and by = of_float by and bz = of_float bz
+  and cx = of_float cx and cy = of_float cy and cz = of_float cz
+  and dx = of_float dx and dy = of_float dy and dz = of_float dz in
+  let adx = subtract ax dx and ady = subtract ay dy and adz = subtract az dz
+  and bdx = subtract bx dx and bdy = subtract by dy and bdz = subtract bz dz
+  and cdx = subtract cx dx and cdy = subtract cy dy and cdz = subtract cz dz in
+  let first = multiply adx
+      (subtract (multiply bdy cdz) (multiply bdz cdy))
+  and second = multiply ady
+      (subtract (multiply bdz cdx) (multiply bdx cdz))
+  and third = multiply adz
+      (subtract (multiply bdx cdy) (multiply bdy cdx)) in
+  sign_of (compare_zero (add (add first second) third))
+let exact_incircle_reference ~ax ~ay ~bx ~by ~cx ~cy ~dx ~dy =
+  let open Dyadic in
+  let ax = of_float ax and ay = of_float ay
+  and bx = of_float bx and by = of_float by
+  and cx = of_float cx and cy = of_float cy
+  and dx = of_float dx and dy = of_float dy in
+  let adx = subtract ax dx and ady = subtract ay dy
+  and bdx = subtract bx dx and bdy = subtract by dy
+  and cdx = subtract cx dx and cdy = subtract cy dy in
+  let alift = add (multiply adx adx) (multiply ady ady)
+  and blift = add (multiply bdx bdx) (multiply bdy bdy)
+  and clift = add (multiply cdx cdx) (multiply cdy cdy) in
+  let bcdet = subtract (multiply bdx cdy) (multiply cdx bdy)
+  and cadet = subtract (multiply cdx ady) (multiply adx cdy)
+  and abdet = subtract (multiply adx bdy) (multiply bdx ady) in
+  sign_of (compare_zero (add (add (multiply alift bcdet)
+      (multiply blift cadet)) (multiply clift abdet)))
+
 let opposite = function
   | Predicates.Negative -> Predicates.Positive
   | Predicates.Zero -> Predicates.Zero
@@ -280,7 +326,7 @@ let run () =
     and cx = coordinate 4 and cy = coordinate 5 in
     let arena = Predicates.Private.exact_orient2d_arena
         ~ax ~ay ~bx ~by ~cx ~cy
-    and reference = Predicates.Private.exact_orient2d_reference
+    and reference = exact_orient2d_reference
         ~ax ~ay ~bx ~by ~cx ~cy in
     check (arena = reference) "packed exact orient2d differs from reference"
   done;
@@ -292,7 +338,7 @@ let run () =
     and dx = coordinate 9 and dy = coordinate 10 and dz = coordinate 11 in
     let arena = Predicates.Private.exact_orient3d_arena
         ~ax ~ay ~az ~bx ~by ~bz ~cx ~cy ~cz ~dx ~dy ~dz
-    and reference = Predicates.Private.exact_orient3d_reference
+    and reference = exact_orient3d_reference
         ~ax ~ay ~az ~bx ~by ~bz ~cx ~cy ~cz ~dx ~dy ~dz in
     check (arena = reference) "packed exact orient3d differs from reference"
   done;
@@ -304,7 +350,7 @@ let run () =
     and dx = coordinate 6 and dy = coordinate 7 in
     let arena = Predicates.Private.exact_incircle_arena
         ~ax ~ay ~bx ~by ~cx ~cy ~dx ~dy
-    and reference = Predicates.Private.exact_incircle_reference
+    and reference = exact_incircle_reference
         ~ax ~ay ~bx ~by ~cx ~cy ~dx ~dy in
     check (arena = reference) "packed exact incircle differs from reference"
   done;

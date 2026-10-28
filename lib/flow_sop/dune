@@ -212,3 +212,8 @@
  (name test_trace)
  (modules test_trace)
  (libraries flow flow_ir flow_ir_test_support flow_web flow_sop rdk rdk_test_support rays_math input parallel))
+
+(test
+ (name test_mesh_planes)
+ (modules test_mesh_planes)
+ (libraries flow flow_sop rdk rdk_test_support rays_math unix parallel))

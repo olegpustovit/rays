@@ -72,12 +72,6 @@
  (libraries rdk rays_math unix parallel))
 
 (executable
- (enabled_if (= %{system} macosx))
- (name bench_uniforms)
- (modules bench_uniforms)
- (libraries renderer scene_execution_fixtures ogpu ogpu_metal unix parallel))
-
-(executable
  (name bench_core)
  (modules bench_core)
  (libraries flow flow_ir input rays_math unix parallel))
@@ -114,8 +108,6 @@
   bench_live_lights.exe
   bench_material_assign.exe
   bench_named_owner.exe
-  bench_rewire_payload.exe
-  bench_merge_payload.exe
   bench_scene3_packing.exe
   bench_sdl3.exe
   bench_source_poll.exe
@@ -125,7 +117,7 @@
 (alias
  (enabled_if (= %{system} macosx))
  (name bench-build-native)
- (deps bench_gpu.exe bench_rays_editor.exe bench_shattered_renderer.exe bench_uniforms.exe))
+ (deps bench_gpu.exe bench_rays_editor.exe bench_shattered_renderer.exe))
 (executable
  (name bench_scene3_packing)
  (modules bench_scene3_packing)
@@ -233,24 +225,6 @@
   (source_tree ../sketches))
  (action
   (system "if command -v node >/dev/null 2>&1; then node web/test/open_all.mjs ../bin/rays.exe .. sketches/audio.rays sketches/basic.rays sketches/drawing.rays sketches/file_dialog.rays sketches/generative.rays sketches/noise.rays sketches/particles.rays sketches/pxui.rays sketches/recursive_rectangles.rays sketches/flow_contours.rays sketches/flow_image.rays sketches/flow_image_kernel.rays sketches/flow_particles_gpu.rays sketches/flow_shader.rays sketches/flow_vectors.rays; else echo 'open_all: skipped (node not found)'; fi")))
-
-(executable
- (name bench_merge_payload)
- (modules bench_merge_payload)
- (libraries rdk rdk_test_support rays_math unix parallel))
-(executable
- (name bench_mesh_planes)
- (modules bench_mesh_planes)
- (libraries flow flow_sop rdk rdk_test_support rays_math unix parallel))
-
-(rule
- (alias mesh_plane_validation)
- (action (run %{exe:bench_mesh_planes.exe})))
-
-(alias
- (name runtest)
- (deps
-  (alias mesh_plane_validation)))
 
 (executable
  (name bench_planar_attribute)

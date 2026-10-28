@@ -95,21 +95,9 @@ module Private : sig
     bx:float -> by:float -> bz:float ->
     cx:float -> cy:float -> cz:float ->
     dx:float -> dy:float -> dz:float -> sign
-  val exact_orient2d_reference :
-    ax:float -> ay:float -> bx:float -> by:float -> cx:float -> cy:float -> sign
-  val exact_orient3d_reference :
-    ax:float -> ay:float -> az:float ->
-    bx:float -> by:float -> bz:float ->
-    cx:float -> cy:float -> cz:float ->
-    dx:float -> dy:float -> dz:float -> sign
   val exact_incircle_arena :
     ax:float -> ay:float -> bx:float -> by:float ->
     cx:float -> cy:float -> dx:float -> dy:float -> sign
-  val exact_incircle_reference :
-    ax:float -> ay:float -> bx:float -> by:float ->
-    cx:float -> cy:float -> dx:float -> dy:float -> sign
-  (** Forced exact arena and allocation-heavy immutable-dyadic reference
-      implementations retained for differential testing. *)
 
   val triangle_feature_vertex_local : int -> int
   val triangle_feature_edge_local : int -> int

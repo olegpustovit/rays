@@ -450,7 +450,7 @@ let ()=
      invoke ~grain:97 ~topology:(Geometry.topology dst)(Geometry.edge_groups unrelated),"source group affinity mismatch"]
 
 (* Weighted carry: every owner and storage against an independent reference, the shared helper's
-   bytes against Curve_ops.interpolate_attribute on point and vertex attributes, mixed plain and
+   bytes against Curve_join.interpolate_attribute on point and vertex attributes, mixed plain and
    weighted owners, reference/CPU, 1 and 8 domains, and the refusals. *)
 let () =
   let mix_of ~count ~shift n =
@@ -529,17 +529,17 @@ let () =
           ~z:(Array.map(fun i->v.z.(i))l) in
       let expected=Geometry.create ~positions ~topology:(Geometry.topology dst) ~attributes ~groups
         ~edge_groups:(Geometry.edge_groups base) ()|>get_string_ok in
-      (* the shared helper is Curve_ops' rule, byte for byte *)
+      (* the shared helper is Curve_join' rule, byte for byte *)
       if points && vertices then
         List.iter(fun a->match Attribute.owner a with
           |Attribute.Point|Vertex->
               let (pl,pr,pw)=pc and (vl,vr,vw)=vc in
-              let curve=Curve_ops.interpolate_attribute pl pr pw vl vr vw a in
+              let curve=Curve_join.interpolate_attribute pl pr pw vl vr vw a in
               let got=Option.get(Geometry.find_attribute ~owner:(Attribute.owner a)(Attribute.name a)expected) in
               let attach attribute=geometry_bytes(Geometry.create ~positions:(Geometry.positions base)
                 ~topology:(Geometry.topology base) ~attributes:[attribute] ()|>get_string_ok) in
               check(attach curve=attach got)
-                (Printf.sprintf "weighted remap differs from Curve_ops.interpolate_attribute (%s copies %d)" (Attribute.name a) copies)
+                (Printf.sprintf "weighted remap differs from Curve_join.interpolate_attribute (%s copies %d)" (Attribute.name a) copies)
           |_->())(Geometry.attributes src);
       List.iter(fun reference->
         let node=compile ~reference ~body:(Printf.sprintf "(let* [out %s] out)" (body ~points ~vertices ~primitives))
@@ -580,7 +580,7 @@ let () =
     ["(workspace w (graph g :context sop (sop/remap (sop/src) (sop/dst) :points (array/int 0) :point_mix {:a (array/int 0) :b (array/int 0) :t (array/float 0 0.0)} :vertices (array/int 0) :primitives (array/int 0))))";
      "(workspace w (graph g :context sop (sop/remap (sop/src) (sop/dst) :vertices (array/int 0) :primitives (array/int 0))))";
      "(workspace w (graph g :context sop (sop/remap (sop/src) (sop/dst) :point_mix {:a (array/int 0) :b (array/int 0)} :vertices (array/int 0) :primitives (array/int 0))))"];
-  print_endline "Weighted remap: every owner and storage, N renormalisation, Curve_ops bytes, mixed owners, reference/CPU, 1 and 8 domains, refusals"
+  print_endline "Weighted remap: every owner and storage, N renormalisation, Curve_join bytes, mixed owners, reference/CPU, 1 and 8 domains, refusals"
 
 (* [:lead_groups true] lists the target's own groups and edge groups ahead of the carried ones. *)
 let () =

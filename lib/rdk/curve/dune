@@ -4,4 +4,4 @@
  (libraries rdk_core rdk_exact rdk_spatial rays_math parallel)
  (flags (:standard -open Rdk_core -open Rdk_exact -open Rdk_spatial))
  (private_modules)
- (modules curve_ops curve_subdivide poly_path polywire sweep))
+ (modules curve_join curve_subdivide poly_path polywire sweep))
