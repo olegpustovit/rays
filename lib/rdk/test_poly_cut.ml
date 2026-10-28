@@ -12,7 +12,7 @@ let with_float name values geometry =
 let with_int name values geometry =
   with_attribute Attribute.Point name (Attribute.Int values) geometry
 
-let open_curve count = Line_geometry.polyline (Array.init count (fun point ->
+let open_curve count = Line_geometry_front.polyline (Array.init count (fun point ->
     float_of_int point, 0., 0.)) |> get_ok
 
 let topology_view geometry = Topology.View.view (Geometry.topology geometry)
@@ -200,7 +200,7 @@ let test_point_remove_and_cut () =
   check (identity == source) "PolyCut endpoint-only no-op lost identity"
 
 let test_closed_policy_and_restrictions () =
-  let source = Line_geometry.polyline ~closed:true
+  let source = Line_geometry_front.polyline ~closed:true
       [|(0.,0.,0.);(1.,0.,0.);(1.,1.,0.);(0.,1.,0.)|] |> get_ok in
   let topology = Geometry.topology source in
   let index = Topology_index.create topology in

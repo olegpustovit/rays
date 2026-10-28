@@ -57,7 +57,14 @@ let[@inline] clean_triangle_is_degenerate ~epsilon positions a b c =
         and ratio = epsilon /. scale in
         0.5 *. clean_length nx ny nz <= ratio *. ratio
 
-let delete_degenerate ?cancel ~grain ?primitives ~epsilon geometry =
+type delete_degenerate_params = {
+  cancel : Cancel.t option;
+  grain : int;
+  primitives : Group.t option;
+  epsilon : float;
+}
+
+let delete_degenerate ({ cancel; grain; primitives; epsilon } : delete_degenerate_params) geometry =
   let primitive_count = Geometry.primitive_count geometry in
   if match primitives with
     | Some group -> Group.owner group <> Group.Primitive
@@ -189,7 +196,7 @@ let delete_degenerate ?cancel ~grain ?primitives ~epsilon geometry =
       let selection = Group.init ~grain ~owner:Group.Primitive
           ~name:"__clean_degenerate" primitive_count
           (fun primitive -> Bytes.get flags primitive <> '\000') in
-      Ok (Error.get (Deletion.delete ?cancel ~grain selection geometry))
+      Ok (Error.get (Deletion.delete { cancel; grain = Some grain; selected = true; compact_points = false } selection geometry))
 
 let delete_nan_points ?cancel ~grain geometry =
   let positions = Packed.Float3.View.view (Geometry.positions geometry) in
@@ -211,7 +218,7 @@ let delete_nan_points ?cancel ~grain geometry =
       let selection = Group.init ~grain ~owner:Group.Point
           ~name:"__clean_nan_points" point_count
           (fun point -> Bytes.get flags point <> '\000') in
-      Ok (Error.get (Deletion.delete ?cancel ~grain selection geometry))
+      Ok (Error.get (Deletion.delete { cancel; grain = Some grain; selected = true; compact_points = false } selection geometry))
 
 let[@inline] clean_cycle_point topology first size start direction offset =
   let local = (start + (direction * offset)) mod size in
@@ -349,7 +356,7 @@ let delete_overlaps_general ?cancel ~grain ~delete_pairs geometry =
       let selection = Group.init ~grain ~owner:Group.Primitive
           ~name:"__clean_overlaps" primitive_count
           (fun primitive -> Bytes.get flags primitive <> '\000') in
-      Ok (Error.get (Deletion.delete ?cancel ~grain selection geometry))
+      Ok (Error.get (Deletion.delete { cancel; grain = Some grain; selected = true; compact_points = false } selection geometry))
   end
 
 let delete_triangle_overlaps ?cancel ~grain ~delete_pairs geometry =
@@ -414,7 +421,7 @@ let delete_triangle_overlaps ?cancel ~grain ~delete_pairs geometry =
       let selection = Group.init ~grain ~owner:Group.Primitive
           ~name:"__clean_overlaps" primitive_count
           (fun primitive -> Bytes.get flags primitive <> '\000') in
-      Ok (Error.get (Deletion.delete ?cancel ~grain selection geometry))
+      Ok (Error.get (Deletion.delete { cancel; grain = Some grain; selected = true; compact_points = false } selection geometry))
   end
 
 let delete_overlaps ?cancel ~grain ~delete_pairs geometry =
@@ -452,7 +459,7 @@ let run ({ cancel; grain; epsilon; remove_degenerate; consolidate_distance; over
   Error.guard ~operation:"clean" ~code:"invalid_geometry" @@ fun () ->
   let overlaps = Option.map (fun policy -> policy = Delete_overlap_pairs) overlaps in
   let consolidate tolerance geometry =
-    Ok (Error.get (Fuse_grid.weld ?cancel ~grain ~tolerance geometry))
+    Ok (Error.get (Fuse_grid.weld { cancel; grain; selection = None; tolerance } geometry))
   and compact geometry = Ok (Error.get (Compact_points.run ?cancel ~grain geometry)) in
   if grain <= 0 then invalid_arg "Rdk_mesh.Clean.clean: grain must be positive";
   if not (Float.is_finite epsilon) || epsilon < 0. then
@@ -477,7 +484,7 @@ let run ({ cancel; grain; epsilon; remove_degenerate; consolidate_distance; over
         | None -> Ok geometry
         | Some tolerance -> consolidate tolerance geometry) in
       let result = Result.bind result (fun geometry ->
-        if remove_degenerate then delete_degenerate ?cancel ~grain ~epsilon geometry
+        if remove_degenerate then delete_degenerate { cancel; grain; primitives = None; epsilon } geometry
         else Ok geometry) in
       let result = Result.bind result (fun geometry -> match overlaps with
         | None -> Ok geometry
@@ -506,5 +513,5 @@ let run ({ cancel; grain; epsilon; remove_degenerate; consolidate_distance; over
             |> add Group_ops.Group_primitives primitive_groups
             |> add Group_ops.Group_edges edge_groups |> List.rev in
         if rules = [] && not delete_unused_groups then Ok geometry
-        else Ok (Error.get (Group_ops.delete ~rules ~delete_unused:delete_unused_groups geometry))))
+        else Ok (Error.get (Group_ops.delete { rules; delete_unused = delete_unused_groups } geometry))))
   end

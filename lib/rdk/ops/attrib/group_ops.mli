@@ -90,20 +90,25 @@ val force_valid_group_name : string -> string
 val rename :
   rules:rename_rule list ->
   Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result
-val delete :
-  rules:delete_rule list ->
-  ?delete_unused:bool ->
-  Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result
+type delete_params = {
+  rules : delete_rule list;
+  delete_unused : bool;
+}
+
+val delete : delete_params -> Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result
 type element_map =
     Identity of int
   | Explicit of int array
   | Proximity of { indices : int array; distances_squared : float array; }
-val transfer :
-  ?cancel:Rdk_core.Cancel.t ->
-  ?grain:int ->
-  ?rules:transfer_rule list ->
-  ?conflict:copy_conflict ->
-  ?create_empty:bool ->
-  ?distance:float ->
-  source:Rdk_core.Geometry.t ->
-  target:Rdk_core.Geometry.t -> unit -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result
+type transfer_params = {
+  cancel : Rdk_core.Cancel.t option;
+  grain : int option;
+  rules : transfer_rule list;
+  conflict : copy_conflict;
+  create_empty : bool;
+  distance : float;
+  source : Rdk_core.Geometry.t;
+  target : Rdk_core.Geometry.t;
+}
+
+val transfer : transfer_params -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result

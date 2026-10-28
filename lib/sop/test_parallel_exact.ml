@@ -1669,7 +1669,7 @@ fun migration_input ->
   and general_profile =
     (* LISP GAP: sop/curve has no closed polyline (its lowering always writes closed=false), so
        the closed profile is an OCaml snapshot and the steps on top of it are Lisp. *)
-    Lisp_sop.node ~with_:["profile", Lisp_sop.snapshot (Rdk.Line_geometry.polyline ~closed:true (Array.init 24 (fun point ->
+    Lisp_sop.node ~with_:["profile", Lisp_sop.snapshot (Rdk_test_support.Line_geometry_front.polyline ~closed:true (Array.init 24 (fun point ->
       let angle = 2. *. Float.pi *. float_of_int point /. 24. in
       0.08 *. cos angle, 0.08 *. sin angle, 0.)) |> get_rdk)]
       {|(-> (sop/ext_profile)

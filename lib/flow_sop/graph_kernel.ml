@@ -107,8 +107,7 @@ let shortest_paths args =
         fun point -> mask.(point) = 1) (List.assoc_opt "blocked_points" args) in
     let depths = Array.make points (-1) and distances = Array.make points 0.
     and previous = Array.make points (-1) and queue = Array.make points 0 in
-    (try Rdk.Shortest_paths.hop_search ?blocked_point ?blocked_edge ~target ~depths ~distances ~previous
-           ~queue ~point_edge_offsets ~point_edges ~edge_a ~edge_b ~lengths roots
+    (try Rdk.Shortest_paths.hop_search { blocked_point = Option.value ~default:(fun _ -> false) blocked_point; blocked_edge = Option.value ~default:(fun _ -> false) blocked_edge; target; depths; distances; previous; queue; point_edge_offsets; point_edges; edge_a; edge_b; lengths } roots
      with Rdk.Shortest_paths.Hop_overflow ->
        refuse "E_GRAPH_LENGTH" "Graph accumulated path length is not representable.");
     let parent = Array.mapi (fun point depth -> if depth < 0 then -1 else previous.(point)) depths in
@@ -128,8 +127,7 @@ let shortest_paths args =
       | None -> infinity
       | Some (E.Float radius) when radius >= 0. -> radius
       | Some _ -> refuse "E_GRAPH_RADIUS" "Graph radius is a non-negative float." in
-    let distances, parents = Rdk.Shortest_paths.search ~radius ~point_edge_offsets ~point_edges
-      ~edge_a ~edge_b ~lengths roots in
+    let distances, parents = Rdk.Shortest_paths.search { cancel = None; radius; point_edge_offsets; point_edges; edge_a; edge_b; lengths } roots in
     (* Flow floats are finite: a point outside every root's reach reports -1. *)
     Array.map (fun d -> if d = infinity then -1. else d) distances, parents,
     tree_path ~parent:parents ~reached:(fun point -> distances.(point) < infinity) target, [||]
@@ -146,7 +144,7 @@ let forest args =
   let select = Option.map (fun mask point -> mask.(point) = 1) selected in
   let selected_count = match selected with
     | None -> points | Some mask -> Array.fold_left (+) 0 mask in
-  let forest = Rdk.Forest.scan ?selected:select ~selected_count parents in
+  let forest = Rdk.Forest.scan { selected = select; selected_count } parents in
   let depth, root = Rdk.Forest.labels forest in
   Array.sub forest.order 0 forest.order_count, depth, root, forest.child_offsets, forest.children
 

@@ -101,7 +101,7 @@ let run () =
   check (Array.exists2 (fun left right -> left <> right) free.y source.y)
     "free Smooth was unexpectedly an identity";
 
-  let with_normals = Normal_ops.run grid |> get_ok in
+  let with_normals = Normal_ops_front.run grid |> get_ok in
   let recomputed = Smooth_front.run ~boundary:Smooth.Smooth_unshared ~iterations:1
       ~mode:(Attribute_blur.Laplacian 0.5) ~attributes:"P" with_normals |> get_ok in
   check (Geometry.find_attribute ~owner:Attribute.Point "N" recomputed <> None)

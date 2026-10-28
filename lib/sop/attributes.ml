@@ -61,9 +61,7 @@ module Uv_flatten = struct
         match uv_parameterize_seams "uv_flatten" inputs.(0) seams with
         | Error _ as error -> error
         | Ok (edge_seams, seams) ->
-            match Rdk.Uv_ops.flatten ~cancel:(Context.cancel_token context)
-                ~grain:(Context.grain context) ~name ?seams ?edge_seams
-                ~iterations ~tolerance inputs.(0) with
+            match Rdk.Uv_ops.flatten { cancel = Some (Context.cancel_token context); grain = Some (Context.grain context); name; seams; edge_seams; uv_tolerance = 1e-9; iterations; tolerance } inputs.(0) with
             | Ok geometry -> cooked geometry
             | Error error -> structured_rdk_error error)
   )
@@ -98,9 +96,7 @@ module Uv_relax = struct
         match uv_parameterize_seams "uv_relax" inputs.(0) seams with
         | Error _ as error -> error
         | Ok (edge_seams, seams) ->
-            match Rdk.Uv_ops.relax ~cancel:(Context.cancel_token context)
-                ~grain:(Context.grain context) ~name ?seams ?edge_seams
-                ~uv_tolerance ~iterations ~tolerance inputs.(0) with
+            match Rdk.Uv_ops.relax { cancel = Some (Context.cancel_token context); grain = Some (Context.grain context); name; seams; edge_seams; uv_tolerance; iterations; tolerance } inputs.(0) with
             | Ok geometry -> cooked geometry
             | Error error -> structured_rdk_error error)
   )

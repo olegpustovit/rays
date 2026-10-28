@@ -1,8 +1,13 @@
 (** Packed mesh cleanup. *)
 
-val delete_degenerate :
-  ?cancel:Cancel.t -> grain:int -> ?primitives:Group.t -> epsilon:float ->
-  Geometry.t -> (Geometry.t, string) result
+type delete_degenerate_params = {
+  cancel : Cancel.t option;
+  grain : int;
+  primitives : Group.t option;
+  epsilon : float;
+}
+
+val delete_degenerate : delete_degenerate_params -> Geometry.t -> (Geometry.t, string) result
 
 type overlap_policy = Keep_first_overlap | Delete_overlap_pairs
 

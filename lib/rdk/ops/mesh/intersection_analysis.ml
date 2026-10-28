@@ -316,12 +316,22 @@ let create_output ~input_attribute ~primitive_attribute ~primitive_uvw_attribute
   | Ok geometry -> geometry
   | Error message -> invalid_arg message
 
-let run ?cancel ?(grain = 16_384) ?source_primitives
-    ?collision_primitives ?(tolerance = 0.) ?(include_coplanar = true)
-    ?(input_attribute = Some "sourceinput")
-    ?(primitive_attribute = Some "sourceprim")
-    ?(primitive_uvw_attribute = Some "sourceprimuv")
-    ?(point_attribute = Some "sourcepoint") ?collision geometry =
+type params = {
+  cancel : Cancel.t option;
+  grain : int option;
+  source_primitives : Group.t option;
+  collision_primitives : Group.t option;
+  tolerance : float;
+  include_coplanar : bool;
+  input_attribute : string option;
+  primitive_attribute : string option;
+  primitive_uvw_attribute : string option;
+  point_attribute : string option;
+  collision : Geometry.t option;
+}
+
+let run ({ cancel; grain; source_primitives; collision_primitives; tolerance; include_coplanar; input_attribute; primitive_attribute; primitive_uvw_attribute; point_attribute; collision } : params) geometry =
+  let grain = Option.value ~default:16_384 grain in
   try
     if grain <= 0 then error "invalid_parameter" "grain must be positive"
     else if not (Float.is_finite tolerance) || tolerance < 0. then

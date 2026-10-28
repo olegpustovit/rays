@@ -14,7 +14,7 @@ let run () =
          | _ -> fail ("unexpected storage for " ^ name))
     | None -> fail ("missing point attribute " ^ name) in
   let blur_curve values =
-    let geometry = Line_geometry.polyline [|(0.,0.,0.); (1.,0.,0.); (3.,0.,0.)|]
+    let geometry = Line_geometry_front.polyline [|(0.,0.,0.); (1.,0.,0.); (3.,0.,0.)|]
         |> get_ok in
     let attribute = Attribute.create_owned ~name:"value" ~owner:Attribute.Point
         (Attribute.Float values) |> get_ok in

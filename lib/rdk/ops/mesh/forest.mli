@@ -18,11 +18,12 @@ type t = {
   root_count : int;
 }
 
-val scan :
-  ?selected:(int -> bool) ->
-  selected_count:int ->
-  int array ->
-  t
+type params = {
+  selected : (int -> bool) option;
+  selected_count : int;
+}
+
+val scan : params -> int array -> t
 (** [scan ~selected_count parents]. A parent that is out of range, the point
     itself or (with [selected]) unselected makes the point a root.
     [selected_count] is the number of selected points, sizing [order]. *)

@@ -444,9 +444,7 @@ let run ({ cancel; grain; edges; operation; bridge_policy; remove_inline_points;
         let output = output
             |> Geometry.without_attribute ~owner:Attribute.Point "N"
             |> Geometry.without_attribute ~owner:Attribute.Vertex "N" in
-        Ok (Error.get (Normal_ops.run ?cancel ~grain
-          ~owner:(if had_point_normals then Attribute.Point else Attribute.Vertex)
-          output))
+        Ok (Error.get (Normal_ops.run { cancel; grain = Some grain; selection = None; primitives = None; owner = (if had_point_normals then Attribute.Point else Attribute.Vertex); weighting = Face_area; cusp_angle = Float.pi; attribute = "N" } output))
       end
     end
   with

@@ -1296,8 +1296,7 @@ arr1[0.;-0.;0.];arr1[1e16;1.;-1e16];
     List.iter(fun pattern->List.iter(fun unused->add_host "sop/delete_group"
       [geometry_value metadata_geometry;E.Text pattern;E.Text owner;E.Bool unused]
       (metadata_result "sop/delete_group" ["pattern",E.Text pattern;"owner",E.Text owner;"unused",E.Bool unused]
-        (fun()->Rdk.Group_ops.delete ~rules:[{delete_owner=selected;delete_pattern=pattern}]
-          ~delete_unused:unused metadata_geometry))) [false;true]) ["";"wall*";"^wall_a";"*"])
+        (fun()->Rdk.Group_ops.delete { rules = [{delete_owner=selected;delete_pattern=pattern}]; delete_unused = unused } metadata_geometry))) [false;true]) ["";"wall*";"^wall_a";"*"])
     ["point",Some Rdk.Group_ops.Group_points;"vertex",Some Group_vertices;
       "primitive",Some Group_primitives;"edge",Some Group_edges;"any",None];
   List.iter(fun(from,into)->add_host "sop/rename_edge" [geometry_value metadata_geometry;E.Text from;E.Text into]

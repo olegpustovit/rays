@@ -468,7 +468,7 @@ let run ({ cancel; grain; target; primitives; hard_points; hard_edges; preserve_
             let name = unique_edge_name "__rdk_poly_reduce_hard_edges" geometry in
             Geometry.with_edge_group (Edge_group.with_name name group) geometry
               |> Support.get_ok, Some name in
-      Result.bind (Ok (Error.get (Triangulate.run ?cancel ~grain geometry)))
+      Result.bind (Ok (Error.get (Triangulate.run { cancel; grain = Some grain; primitives = None } geometry)))
         (fun triangulated ->
         let working_count = Geometry.primitive_count triangulated in
         let working_index = Topology_index.create ?cancel
@@ -546,7 +546,7 @@ let run ({ cancel; grain; target; primitives; hard_points; hard_edges; preserve_
           let output = Geometry.without_attribute ~owner:Attribute.Point "N" output
               |> Geometry.without_attribute ~owner:Attribute.Vertex "N" in
           if recompute_point_normals && had_point_normals then
-            Deform.normals ?cancel ~grain output
+            Deform.normals { cancel; grain; primitives = None } output
           else Ok output))
     end
   with Invalid_argument message -> Error message

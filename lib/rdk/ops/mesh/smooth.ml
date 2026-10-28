@@ -86,7 +86,7 @@ let run ({ cancel; grain; constrained_points; boundary; iterations; mode; recomp
               <> source_position_id in
           if recompute_normals && (had_point_normals || had_vertex_normals)
               && positions_changed && not point_normals_smoothed then
-            (match Deform.normals ?cancel ~grain output with
+            (match Deform.normals { cancel; grain; primitives = None } output with
              | Ok output -> Ok output
              | Error message -> fail "invalid_normals" message)
           else Ok output)

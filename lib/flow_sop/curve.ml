@@ -38,7 +38,7 @@ let schema = Param.schema ~name:"flow_curve" ~default [
 
 (* A filled curve is one polygon primitive (a surface), not a closed polyline. *)
 let polyline ~closed ~filled points =
-  Result.bind (Rdk.Line_geometry.polyline ~closed:(closed || filled) (Array.copy points))
+  Result.bind (Rdk.Line_geometry.polyline { closed = (closed || filled) } (Array.copy points))
     (fun line ->
       if not filled then Ok line else
       let count = Array.length points in

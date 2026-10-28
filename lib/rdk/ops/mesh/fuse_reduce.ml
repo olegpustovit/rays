@@ -184,9 +184,20 @@ let validate_positions x y z =
         "Rdk.Fuse_reduce.fuse: position reduction is non-finite at output point %d" point))
   done
 
-let apply ?cancel ~grain ~position ?weight_attribute ~attributes
-    ~attribute_rules ~group_rules ~compact ~rewire
-    ?(remap_edge_groups = true) clusters geometry =
+type params = {
+  cancel : Cancel.t option;
+  grain : int;
+  position : position;
+  weight_attribute : string option;
+  attributes : Fuse_rules.default_attributes;
+  attribute_rules : Fuse_rules.attribute_rule list;
+  group_rules : Fuse_rules.group_rule list;
+  compact : bool;
+  rewire : bool;
+  remap_edge_groups : bool;
+}
+
+let apply ({ cancel; grain; position; weight_attribute; attributes; attribute_rules; group_rules; compact; rewire; remap_edge_groups } : params) clusters geometry =
   try
     let source_count = Geometry.point_count geometry in
     let weighted = match position with Weighted_average_position

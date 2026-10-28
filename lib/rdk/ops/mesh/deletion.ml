@@ -383,8 +383,14 @@ let primitive_partitions ~piece_count
           builders) source_groups;
       outputs
 
-let delete ?cancel ?grain ?(selected = true) ?(compact_points = false)
-    selection geometry =
+type delete_params = {
+  cancel : Rdk_core.Cancel.t option;
+  grain : int option;
+  selected : bool;
+  compact_points : bool;
+}
+
+let delete ({ cancel; grain; selected; compact_points } : delete_params) selection geometry =
   let policy = (Destroy_touched_primitives) in Error.guard ~operation:"delete" ~code:"invalid_selection" @@ fun () ->
   try
     Cancel.check_opt cancel;
@@ -397,12 +403,17 @@ let delete ?cancel ?grain ?(selected = true) ?(compact_points = false)
     else Ok (materialize_plan ?cancel ?grain plan geometry)
   with Error.Fail message -> Error message
 
-let delete_primitives ?cancel ?grain ?(compact_points = false)
-    group geometry =
+type delete_primitives_params = {
+  cancel : Rdk_core.Cancel.t option;
+  grain : int option;
+  compact_points : bool;
+}
+
+let delete_primitives ({ cancel; grain; compact_points } : delete_primitives_params) group geometry =
   if Group.owner group <> Group.Primitive then
     Error (Error.make ~operation:"delete_primitives" ~code:"invalid_selection"
       "selection must own primitives")
   else Result.map_error
       (fun error -> Error.make ~operation:"delete_primitives"
         ~code:(Error.code error) (Error.message error))
-      (delete ?cancel ?grain ~compact_points group geometry)
+      (delete { cancel; grain; selected = true; compact_points } group geometry)

@@ -964,7 +964,7 @@ let test_sweep_contract () =
   let evaluator = session () and current = context ~domains:4 ~grain:7 () in
   let backbone = Lisp_sop.node {|(sop/curve (list [0.0 0.0 0.0] [0.0 0.0 2.0]))|}
   (* Lisp gap: sop/curve is always open, so the closed section is an OCaml-built snapshot *)
-  and cross_section = Lisp_sop.snapshot (Rdk.Line_geometry.polyline ~closed:true
+  and cross_section = Lisp_sop.snapshot (Rdk_test_support.Line_geometry_front.polyline ~closed:true
       [|(-1.,-1.,0.); (1.,-1.,0.); (1.,1.,0.); (-1.,1.,0.)|] |> Result.get_ok) in
   let make () = Lisp_sop.node ~with_:["backbone", (backbone); "cross_section", (cross_section)] {|(sop/sweep
    (sop/ext_backbone)
@@ -1261,7 +1261,7 @@ let test_edge_divide_contract () =
 let test_edge_collapse_contract () =
   let evaluator = session () and current = context ~domains:4 ~grain:7 () in
   (* Lisp gap: sop/curve is always open, so the closed ring is an OCaml-built snapshot *)
-  let source = Lisp_sop.node ~with_:["ring", Lisp_sop.snapshot (Rdk.Line_geometry.polyline ~closed:true
+  let source = Lisp_sop.node ~with_:["ring", Lisp_sop.snapshot (Rdk_test_support.Line_geometry_front.polyline ~closed:true
       [|(0.,0.,0.); (1.,0.,0.); (3.,2.,0.); (0.,2.,0.)|] |> Result.get_ok)] {|(-> (sop/ext_ring)
      (sop/set_int :name "piece" :value 3)
      (sop/group_edges

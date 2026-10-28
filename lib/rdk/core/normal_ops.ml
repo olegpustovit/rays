@@ -441,9 +441,19 @@ let fast_point_area ?cancel ~grain geometry =
            operation point)
        | None -> install ~owner:Attribute.Point ~attribute:"N" { x; y; z } geometry)
 
-let run ?cancel ?(grain = 16_384) ?selection ?primitives
-    ?(owner = Attribute.Point) ?(weighting = Face_area) ?(cusp_angle = Float.pi)
-    ?(attribute = "N") geometry =
+type params = {
+  cancel : Cancel.t option;
+  grain : int option;
+  selection : Element_selection.t option;
+  primitives : Group.t option;
+  owner : Attribute.owner;
+  weighting : weighting;
+  cusp_angle : float;
+  attribute : string;
+}
+
+let run ({ cancel; grain; selection; primitives; owner; weighting; cusp_angle; attribute } : params) geometry =
+  let grain = Option.value ~default:16_384 grain in
   let keep_original_zero = (false) in let reverse = (false) in Error.guard ~operation:"normals" ~code:"invalid_topology" @@ fun () ->
   if grain <= 0 then Error (operation ^ ": grain must be positive")
   else if String.trim attribute = "" then Error

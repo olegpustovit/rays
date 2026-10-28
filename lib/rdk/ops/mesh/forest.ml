@@ -12,7 +12,12 @@ type t = {
   root_count : int;
 }
 
-let scan ?selected ~selected_count parents =
+type params = {
+  selected : (int -> bool) option;
+  selected_count : int;
+}
+
+let scan ({ selected; selected_count } : params) parents =
   let cancel = None in let grain = (16_384) in let point_count = Array.length parents in
   let tree_parent = match selected with
     | None ->

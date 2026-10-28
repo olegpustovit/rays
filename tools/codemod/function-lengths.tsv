@@ -20,7 +20,7 @@ lib/rdk/ops/mesh/poly_extrude.ml	run_general#1	463
 lib/rdk/ops/mesh/poly_reduce.ml	plan_round#1	319
 lib/rdk/ops/mesh/ray.ml	run#1	383
 lib/rdk/ops/mesh/subdivide_refine.ml	fvar_refinement#1	339
-lib/rdk/ops/mesh/uv_parameterize.ml	solve#1	490
+lib/rdk/ops/mesh/uv_parameterize.ml	solve#1	489
 lib/rdk/test_attribute_lifecycle.ml	run#1	465
 lib/rdk/test_rdk_attributes.ml	transfer#1	348
 lib/rdk/test_support/box_generator.ml	box#1	461

@@ -1,6 +1,13 @@
 
 
-let run ?cancel ?(grain = 16_384) ?primitives geometry =
+type params = {
+  cancel : Cancel.t option;
+  grain : int option;
+  primitives : Group.t option;
+}
+
+let run ({ cancel; grain; primitives } : params) geometry =
+  let grain = Option.value ~default:16_384 grain in
   Error.guard ~operation:"triangulate" ~code:"invalid_topology" @@ fun () ->
   try
   if grain <= 0 then invalid_arg "Rdk_mesh.Triangulate.triangulate: grain must be positive";

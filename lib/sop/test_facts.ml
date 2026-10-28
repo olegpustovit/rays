@@ -13,9 +13,9 @@ let scalar ~owner name count value =
 
 let fixture () =
   let geometry = Plane_generators.grid ~columns:8 ~rows:6 ~size:2. () |> get_rdk in
-  let geometry = Normal_ops.run ~owner:Attribute.Point geometry |> get_rdk in
+  let geometry = Normal_ops_front.run ~owner:Attribute.Point geometry |> get_rdk in
   let point_normal = Geometry.find_attribute ~owner:Attribute.Point "N" geometry |> Option.get in
-  let geometry = Normal_ops.run ~owner:Attribute.Vertex geometry |> get_rdk in
+  let geometry = Normal_ops_front.run ~owner:Attribute.Vertex geometry |> get_rdk in
   Geometry.with_attribute point_normal geometry |> get
 
 let with_color value geometry =

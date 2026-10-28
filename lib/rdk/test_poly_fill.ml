@@ -280,7 +280,7 @@ let test_unique_reverse_and_normals () =
 
 let test_selection_and_failures () =
   let left = open_box () and right = open_box ~offset:4. () in
-  let merged = Mesh_merge.run [left; right] |> get_rdk in
+  let merged = Mesh_merge_front.run [left; right] |> get_rdk in
   let topology = Geometry.topology merged in
   let index = Topology_index.create topology in
   let positions = Packed.Float3.View.view (Geometry.positions merged) in

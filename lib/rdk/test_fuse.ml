@@ -239,7 +239,7 @@ let check_target_parallel_exact () =
     "one/four-domain target Fuse output differs";
   let base = Plane_generators.grid ~columns:220 ~rows:160 ~size:20. () |> get_ok in
   let half = Geometry.point_count base in
-  let linked = Mesh_merge.run [base;
+  let linked = Mesh_merge_front.run [base;
       Transform_ops_front.transform (Rays_math.Mat4.translation (Rays_math.Vec3.create 0.013 (-0.017) 0.009)) base]
       |> get_ok in
   let linked_count = Geometry.point_count linked in

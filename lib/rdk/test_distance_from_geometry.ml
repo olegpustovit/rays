@@ -159,7 +159,7 @@ let test_errors_cancellation_and_parallel () =
   let nonfinite = Line_geometry.points [|Float.nan, 0., 0.|] in
   expect_invalid (fun () -> Transform_ops_front.distance_from_geometry ~reference nonfinite)
     "Distance From Geometry non-finite source position";
-  let curve = Line_geometry.polyline [|0., 0., 0.; 1., 0., 0.|] |> get_ok in
+  let curve = Line_geometry_front.polyline [|0., 0., 0.; 1., 0., 0.|] |> get_ok in
   expect_invalid (fun () -> Transform_ops_front.distance_from_geometry
       ~reference_kind:Transform_ops.Distance_reference_primitives ~reference:curve source)
     "Distance From Geometry curve surface reference";

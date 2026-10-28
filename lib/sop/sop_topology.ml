@@ -64,10 +64,7 @@ module Edge_collapse = struct
         match edges with
         | Error error -> Error error
         | Ok edges ->
-            match Rdk.Edge_collapse.run ~cancel:(Context.cancel_token context)
-                ~grain:(Context.grain context) ?edges ?connectivity_attribute
-                ~position
-                ~remove_degenerate_primitives ~recompute_point_normals geometry with
+            match Rdk.Edge_collapse.run { cancel = Some (Context.cancel_token context); grain = Some (Context.grain context); edges; connectivity_attribute; position = Some position; remove_degenerate_primitives = Some remove_degenerate_primitives; recompute_point_normals = Some recompute_point_normals } geometry with
         | Ok geometry -> cooked geometry
         | Error error -> structured_rdk_error error)
   )
@@ -171,8 +168,7 @@ module Triangulate = struct
         match primitives with
         | Error error -> Error error
         | Ok primitives ->
-            match Rdk.Triangulate.run ~cancel:(Context.cancel_token context)
-                ~grain:(Context.grain context) ?primitives geometry with
+            match Rdk.Triangulate.run { cancel = Some (Context.cancel_token context); grain = Some (Context.grain context); primitives } geometry with
             | Ok geometry -> cooked geometry
             | Error error -> structured_rdk_error error)
   )
@@ -1239,13 +1235,7 @@ module Intersection_analysis = struct
                 collision_group group_geometry with
              | Error error -> Error error
              | Ok collision_primitives ->
-                 match Rdk.Intersection_analysis.run
-                     ~cancel:(Context.cancel_token context)
-                     ~grain:(Context.grain context) ?source_primitives
-                     ?collision_primitives ~tolerance ~include_coplanar
-                     ~input_attribute ~primitive_attribute
-                     ~primitive_uvw_attribute ~point_attribute
-                     ?collision:collision_geometry inputs.(0) with
+                 match Rdk.Intersection_analysis.run { cancel = Some (Context.cancel_token context); grain = Some (Context.grain context); source_primitives; collision_primitives; tolerance; include_coplanar; input_attribute; primitive_attribute; primitive_uvw_attribute; point_attribute; collision = collision_geometry } inputs.(0) with
                  | Ok geometry -> cooked geometry
                  | Error error -> structured_rdk_error error))
   )

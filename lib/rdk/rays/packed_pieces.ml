@@ -80,7 +80,7 @@ let of_geometry ~piece_attribute geometry =
     if Topology.all_triangles (Geometry.topology geometry) then
       Ok geometry
     else Result.map_error Error.to_string
-        (Triangulate.run geometry)
+        (Triangulate.run { cancel = None; grain = None; primitives = None } geometry)
   in
   Result.bind triangulated (fun geometry ->
     Result.bind (primitive_pieces ~piece_attribute geometry)

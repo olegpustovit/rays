@@ -120,7 +120,7 @@ let delete_group ~owner ~pattern ~unused input =
   let selected=checked (group_owner owner) in
   let rule=Rdk.Group_ops.{delete_owner=selected;delete_pattern=pattern} in
   node "flow.delete_group" (key [owner;pattern;string_of_bool unused]) [input]
-    (fun _ inputs -> Result.map_error structured_error (Rdk.Group_ops.delete ~rules:[rule] ~delete_unused:unused inputs.(0)))
+    (fun _ inputs -> Result.map_error structured_error (Rdk.Group_ops.delete { rules = [rule]; delete_unused = unused } inputs.(0)))
 let rename_edge ~from ~into input =
   node "flow.rename_edge" (key [from;into]) [input] (fun _ inputs ->
     Result.map_error (fun message -> Diagnostic.error ~code:"rename_edge_group_failed" ~cause:message

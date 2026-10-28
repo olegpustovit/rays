@@ -165,8 +165,7 @@ let soft_edge_distances ?cancel ~radius selected geometry =
     if match selected with None -> true | Some group -> Group.mem point group
     then begin roots.(!filled) <- point; incr filled end
   done;
-  fst (Shortest_paths.search ?cancel ~radius ~point_edge_offsets:reverse.point_edge_offsets
-    ~point_edges:reverse.point_edges ~edge_a:reverse.edge_a ~edge_b:reverse.edge_b ~lengths roots)
+  fst (Shortest_paths.search { cancel; radius; point_edge_offsets = reverse.point_edge_offsets; point_edges = reverse.point_edges; edge_a = reverse.edge_a; edge_b = reverse.edge_b; lengths } roots)
 
 let point_float_output ~operation ~name ~default geometry =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
@@ -465,7 +464,7 @@ let soft_transform ({ cancel; grain; selection; metric; falloff; radius; falloff
                 Geometry.find_attribute ~owner "N" geometry <> None)
                 [Attribute.Point; Attribute.Vertex] in
             let output = List.fold_left (fun result owner -> Result.bind result
-                (fun output -> Ok (Error.get (Normal_ops.run ?cancel ~grain ~owner output))))
+                (fun output -> Ok (Error.get (Normal_ops.run { cancel; grain = Some grain; selection = None; primitives = None; owner; weighting = Face_area; cusp_angle = Float.pi; attribute = "N" } output))))
                 (Ok output) normal_owners in
             Result.bind output (fun output -> match falloff_attribute with
               | None -> Ok output

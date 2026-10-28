@@ -751,7 +751,7 @@ let run ({ cancel; grain; boundary; mode; reverse_patches; unique_points; update
     if update_point_normals
         && Option.is_some (Geometry.find_attribute ~owner:Attribute.Point "N" geometry)
     then begin
-      let* with_normals = Deform.normals ?cancel ~grain output in
+      let* with_normals = Deform.normals { cancel; grain; primitives = None } output in
       match Geometry.find_attribute ~owner:Attribute.Point "N" with_normals with
       | None -> Ok output
       | Some normal -> Geometry.with_attribute normal output

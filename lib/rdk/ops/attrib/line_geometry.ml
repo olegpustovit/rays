@@ -9,7 +9,11 @@ let points values =
   Geometry.create ~positions ~topology:(Topology.empty ~point_count:count) ()
   |> Support.get_ok
 
-let polyline ?(closed = false) values =
+type params = {
+  closed : bool;
+}
+
+let polyline ({ closed } : params) values =
   Error.guard ~operation:"polyline" ~code:"invalid_parameter" @@ fun () ->
   let count = Array.length values in
   let minimum = if closed then 3 else 2 in

@@ -16,12 +16,16 @@ type projection =
       seam : Rays_math.Vec3.t;
     }
 
-val flatten :
-  ?cancel:Cancel.t -> ?grain:int -> ?name:string -> ?seams:Group.t ->
-  ?edge_seams:Edge_group.t -> ?iterations:int -> ?tolerance:float ->
-  Geometry.t -> (Geometry.t, Error.t) result
+type params = Uv_parameterize.params = {
+  cancel : Cancel.t option;
+  grain : int option;
+  name : string;
+  seams : Group.t option;
+  edge_seams : Edge_group.t option;
+  uv_tolerance : float;
+  iterations : int;
+  tolerance : float;
+}
 
-val relax :
-  ?cancel:Cancel.t -> ?grain:int -> ?name:string -> ?seams:Group.t ->
-  ?edge_seams:Edge_group.t -> ?uv_tolerance:float -> ?iterations:int ->
-  ?tolerance:float -> Geometry.t -> (Geometry.t, Error.t) result
+val flatten : params -> Geometry.t -> (Geometry.t, Error.t) result
+val relax : params -> Geometry.t -> (Geometry.t, Error.t) result

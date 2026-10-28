@@ -33,7 +33,12 @@ type params = {
 
 val fuse : params -> Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result
 
-val weld :
-  ?cancel:Rdk_core.Cancel.t -> grain:int -> ?selection:Rdk_core.Group.t -> tolerance:float ->
-  Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result
+type weld_params = {
+  cancel : Rdk_core.Cancel.t option;
+  grain : int;
+  selection : Rdk_core.Group.t option;
+  tolerance : float;
+}
+
+val weld : weld_params -> Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result
 (** [fuse] of the points within [tolerance], averaging positions and keeping the first attributes. *)

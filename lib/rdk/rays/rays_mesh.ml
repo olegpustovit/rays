@@ -145,7 +145,7 @@ let rec to_mesh_raw_impl geometry =
     curve_mesh geometry
   else if Topology.primitive_count topology <> 0 && not (Topology.all_triangles topology)
   then Result.bind
-      (Result.map_error Error.to_string (Triangulate.run geometry))
+      (Result.map_error Error.to_string (Triangulate.run { cancel = None; grain = None; primitives = None } geometry))
       to_mesh_raw_impl
   else
     match standard geometry ~name:"N" ~point_kind:float3 ~vertex_kind:float3,
@@ -195,9 +195,8 @@ let protected operation work =
 let to_trace_mesh geometry =
   protected "to_trace_mesh" (fun () ->
     let ( let* ) = Result.bind in
-    let* triangles = Triangulate.run geometry |> Result.map_error Error.to_string in
-    let* triangles = Normal_ops.run ~owner:Attribute.Vertex
-        ~cusp_angle:(Float.pi /. 4.5) triangles |> Result.map_error Error.to_string in
+    let* triangles = Triangulate.run { cancel = None; grain = None; primitives = None } geometry |> Result.map_error Error.to_string in
+    let* triangles = Normal_ops.run { cancel = None; grain = None; selection = None; primitives = None; owner = Attribute.Vertex; weighting = Face_area; cusp_angle = (Float.pi /. 4.5); attribute = "N" } triangles |> Result.map_error Error.to_string in
     to_mesh_raw_impl triangles)
 
 let rdk_float3 (view : Mesh.View.vec3_view) =

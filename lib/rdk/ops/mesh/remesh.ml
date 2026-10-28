@@ -1635,7 +1635,7 @@ let run ({ cancel; grain; iterations; smoothing; project; use_input_points_only;
       Result.bind (install_feature_groups ?cancel ~grain ~hard_points ~hard_edges
           ~preserve_uv_seams ~uv_attribute ~point_name ~edge_name geometry)
         (fun prepared ->
-      Result.bind (Ok (Error.get (Triangulate.run ?cancel ~grain prepared))) (fun initial ->
+      Result.bind (Ok (Error.get (Triangulate.run { cancel; grain = Some grain; primitives = None } prepared))) (fun initial ->
       let current = ref initial in
       let failure = ref None and iteration = ref 0 in
       let projection_scratch = ref None in
@@ -1720,7 +1720,7 @@ let run ({ cancel; grain; iterations; smoothing; project; use_input_points_only;
               |> Geometry.without_attribute ~owner:Attribute.Point "N"
               |> Geometry.without_attribute ~owner:Attribute.Vertex "N" in
           let with_normals = if not recompute_point_normals then Ok output
-            else Deform.normals ?cancel ~grain output in
+            else Deform.normals { cancel; grain; primitives = None } output in
           Result.bind with_normals (fun output ->
           Result.bind (install_outputs ?cancel ~grain ~target_length
               ~target_size_attribute ~edge_name ~output_hard_edges

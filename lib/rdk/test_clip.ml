@@ -235,7 +235,7 @@ let check_selected_caps_and_edge_output () =
       ~center ~size:(Rays_math.Vec3.create 2. 2. 2.) () |> get_ok in
   let first = box Rays_math.Vec3.zero and second = box (Rays_math.Vec3.create 5. 0. 0.) in
   let first_primitives = Geometry.primitive_count first in
-  let source = Mesh_merge.run [first; second] |> get_ok in
+  let source = Mesh_merge_front.run [first; second] |> get_ok in
   let selected = Group.init ~owner:Group.Primitive ~name:"first_box"
       (Geometry.primitive_count source)
       (fun primitive -> primitive < first_primitives) in
@@ -462,7 +462,7 @@ let check_nested_cap_contours () =
       Transform_ops_front.transform (Rays_math.Mat4.translation
         (Rays_math.Vec3.create 0. ((float_of_int component -. 3.5) *. 6.) 0.))
         (hollow_square_prism ())) in
-  let components = Mesh_merge.run (Array.to_list components) |> get_ok in
+  let components = Mesh_merge_front.run (Array.to_list components) |> get_ok in
   let run_components domains = Parallel.run ~domains (fun () ->
       Plane_clip_front.clip ~grain:1 ~fill:true ~cap_group:"caps" ~origin:Rays_math.Vec3.zero
         ~normal:Rays_math.Vec3.unit_x components |> get_ok) in
@@ -503,7 +503,7 @@ let check_multiple_nested_cap_contours () =
       |> Reverse_faces.run |> get_ok
   and second_hole = box ~center:(Rays_math.Vec3.create 0. 1.5 0.) 1. 1.
       |> Reverse_faces.run |> get_ok in
-  let source = Mesh_merge.run [outer; first_hole; second_hole] |> get_ok in
+  let source = Mesh_merge_front.run [outer; first_hole; second_hole] |> get_ok in
   let run domains keep = Parallel.run ~domains (fun () ->
       Plane_clip_front.clip ~grain:1 ~keep ~fill:true ~cap_group:"caps"
         ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x source |> get_ok) in
@@ -524,7 +524,7 @@ let check_multiple_nested_cap_contours () =
     "keep-all multiple-hole Clip did not cap both sides";
   let middle = box 4. 4. |> Reverse_faces.run |> get_ok
   and island = box 2. 2. in
-  let nested = Mesh_merge.run [box 6. 6.; middle; island] |> get_ok
+  let nested = Mesh_merge_front.run [box 6. 6.; middle; island] |> get_ok
       |> Plane_clip_front.clip ~grain:1 ~fill:true ~cap_group:"caps"
            ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x |> get_ok in
   let nested_caps = Geometry.find_group ~owner:Group.Primitive "caps" nested
@@ -532,7 +532,7 @@ let check_multiple_nested_cap_contours () =
   check (Group.cardinality nested_caps = 9
       && near (cap_area_yz nested nested_caps) 24.)
     "depth-two nested Clip did not preserve the interior island";
-  let nested_solids = Mesh_merge.run [box 6. 6.; box 2. 2.] |> get_ok
+  let nested_solids = Mesh_merge_front.run [box 6. 6.; box 2. 2.] |> get_ok
       |> Plane_clip_front.clip ~grain:1 ~fill:true ~cap_group:"caps"
            ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x |> get_ok in
   let solid_caps = Geometry.find_group ~owner:Group.Primitive "caps"
@@ -554,7 +554,7 @@ let check_multiple_nested_cap_contours () =
       ~center:(Rays_math.Vec3.create (-1.5) 0. 0.5)
       ~size:(Rays_math.Vec3.create 0.5 0.5 1.) () |> get_ok
       |> Reverse_faces.run |> get_ok in
-  let concave_nested = Mesh_merge.run [concave; concave_hole] |> get_ok
+  let concave_nested = Mesh_merge_front.run [concave; concave_hole] |> get_ok
       |> Plane_clip_front.clip ~grain:1 ~fill:true ~cap_group:"caps"
            ~origin:(Rays_math.Vec3.create 0. 0. 0.5) ~normal:Rays_math.Vec3.unit_z |> get_ok in
   let concave_caps = Geometry.find_group ~owner:Group.Primitive "caps"
@@ -569,10 +569,10 @@ let check_multiple_nested_cap_contours () =
       |> Reverse_faces.run |> get_ok
   and overlap_b = box ~center:(Rays_math.Vec3.create 0. 0.3 0.) 2. 2.
       |> Reverse_faces.run |> get_ok in
-  let overlapping = Mesh_merge.run [outer; overlap_a; overlap_b] |> get_ok in
+  let overlapping = Mesh_merge_front.run [outer; overlap_a; overlap_b] |> get_ok in
   expect_code "invalid_geometry" (Plane_clip_front.clip ~grain:1 ~fill:true
       ~origin:Rays_math.Vec3.zero ~normal:Rays_math.Vec3.unit_x overlapping);
-  let same_winding_overlap = Mesh_merge.run [outer;
+  let same_winding_overlap = Mesh_merge_front.run [outer;
       box ~center:(Rays_math.Vec3.create 0. (-0.3) 0.) 2. 2.;
       box ~center:(Rays_math.Vec3.create 0. 0.3 0.) 2. 2.] |> get_ok in
   expect_code "invalid_geometry" (Plane_clip_front.clip ~grain:1 ~fill:true

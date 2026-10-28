@@ -72,11 +72,11 @@ let transforms count = Array.init count (fun instance ->
 let legacy_materialize matrices source =
   Array.to_list matrices
   |> List.map (fun matrix -> Transform_ops_front.transform ~grain:1 matrix source)
-  |> Mesh_merge.run ~grain:1
+  |> Mesh_merge_front.run ~grain:1
   |> get_rdk
 
 let run () =
-  let triangle = Line_geometry.polyline ~closed:true
+  let triangle = Line_geometry_front.polyline ~closed:true
       [|(0., 0., 0.); (1., 0., 0.); (0., 1., 0.)|] |> get_rdk in
   let scale_count = 100_000 in
   let scaled = Instance_copy.materialize_instances ~transforms:(Array.make scale_count Rays_math.Mat4.identity) triangle |> get_rdk in

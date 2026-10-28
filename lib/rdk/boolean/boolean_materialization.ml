@@ -865,7 +865,7 @@ let delete_rounding_pairs ?cancel ~grain selected cleanup =
     let tagged_seams = Edge_group.with_name seam_name cleanup.cleanup_seam_edges in
     let tagged = match Geometry.with_edge_group tagged_seams tagged with
       | Ok geometry -> geometry | Error message -> invalid_arg message in
-    match Deletion.delete_primitives ?cancel ~grain ~compact_points:true selected tagged with
+    match Deletion.delete_primitives { cancel; grain = Some grain; compact_points = true } selected tagged with
     | Error _ as failure -> failure
     | Ok output ->
         let point_current = source_ids Attribute.Point source_name output
@@ -904,11 +904,8 @@ let collapse_rounding_batch ?cancel ~grain ~keep_greatest selected cleanup =
     let tagged_seams = Edge_group.with_name seam_name cleanup.cleanup_seam_edges in
     let tagged = match Geometry.with_edge_group tagged_seams tagged with
       | Ok geometry -> geometry | Error message -> invalid_arg message in
-    match Edge_collapse.run ?cancel ~grain ~edges:selected
-        ~position:(if keep_greatest then Fuse_reduce.Greatest_point_position
-          else Fuse_reduce.Least_point_position)
-        ~remove_degenerate_primitives:true
-        ~recompute_point_normals:true tagged with
+    match Edge_collapse.run { cancel; grain = Some grain; edges = Some selected; connectivity_attribute = None; position = Some (if keep_greatest then Fuse_reduce.Greatest_point_position
+          else Fuse_reduce.Least_point_position); remove_degenerate_primitives = Some true; recompute_point_normals = Some true } tagged with
     | Error _ as failure -> failure
     | Ok output ->
         let point_current = source_ids Attribute.Point source_name output
@@ -1199,9 +1196,7 @@ let collapse_cleanup_batch ?cancel ~grain ~require_closed
     let tagged_seams = Edge_group.with_name seam_name cleanup.cleanup_seam_edges in
     let tagged = match Geometry.with_edge_group tagged_seams tagged with
       | Ok geometry -> geometry | Error message -> invalid_arg message in
-    match Edge_collapse.run ?cancel ~grain ~edges:selected
-        ~position:Fuse_reduce.First_position ~remove_degenerate_primitives:true
-        ~recompute_point_normals:true tagged with
+    match Edge_collapse.run { cancel; grain = Some grain; edges = Some selected; connectivity_attribute = None; position = Some Fuse_reduce.First_position; remove_degenerate_primitives = Some true; recompute_point_normals = Some true } tagged with
     | Error _ as failure -> failure
     | Ok output ->
         let point_current = source_ids Attribute.Point source_name output

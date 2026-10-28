@@ -104,7 +104,7 @@ let expect_code code = function
 let run () =
   let source = quad () in
   let collapse = Geometry.find_edge_group "collapse" source |> Option.get in
-  let output = Edge_collapse.run ~grain:1 ~edges:collapse source |> get_rdk in
+  let output = Edge_collapse_front.run ~grain:1 ~edges:collapse source |> get_rdk in
   let positions = Packed.Float3.View.view (Geometry.positions output)
   and topology = Topology.View.view (Geometry.topology output) in
   check (Geometry.point_count output = 3 && Geometry.vertex_count output = 3
@@ -140,7 +140,7 @@ let run () =
 
   let path = edge_group_of_pairs (Geometry.topology source) "path"
       [|0,1;1,2|] in
-  let separated = Edge_collapse.run ~grain:1 ~edges:path
+  let separated = Edge_collapse_front.run ~grain:1 ~edges:path
       ~connectivity_attribute:"piece" source |> get_rdk in
   let separated_positions = Packed.Float3.View.view
       (Geometry.positions separated) in
@@ -148,11 +148,11 @@ let run () =
       && separated_positions.x = [|1.;2.;0.|]
       && separated_positions.y = [|0.;2.;2.|])
     "Edge Collapse connectivity boundary";
-  check (Edge_collapse.run ~grain:1 ~edges:path
+  check (Edge_collapse_front.run ~grain:1 ~edges:path
       ~connectivity_attribute:"rows" source |> get_rdk == source)
     "Edge Collapse ragged connectivity boundaries were ignored";
 
-  let no_cleanup = Edge_collapse.run ~grain:1 ~edges:collapse
+  let no_cleanup = Edge_collapse_front.run ~grain:1 ~edges:collapse
       ~remove_degenerate_primitives:false ~recompute_point_normals:false source
       |> get_rdk in
   let no_cleanup_topology = Topology.View.view
@@ -165,7 +165,7 @@ let run () =
     "Edge Collapse retained stale normals";
   let without_normals = Geometry.without_attribute ~owner:Attribute.Point "N"
       source in
-  let no_invented_normals = Edge_collapse.run ~edges:collapse without_normals
+  let no_invented_normals = Edge_collapse_front.run ~edges:collapse without_normals
       |> get_rdk in
   check (Geometry.find_attribute ~owner:Attribute.Point "N"
       no_invented_normals = None)
@@ -174,21 +174,21 @@ let run () =
   let empty = Edge_group.init ~grain:1 ~topology:(Geometry.topology source)
       ~index:(Topology_index.create (Geometry.topology source)) ~name:"empty"
       (Fun.const false) in
-  check (Edge_collapse.run ~edges:empty source |> get_rdk == source)
+  check (Edge_collapse_front.run ~edges:empty source |> get_rdk == source)
     "empty Edge Collapse was not an identity";
 
-  let curve = Line_geometry.polyline [|0.,0.,0.;1.,0.,0.;2.,0.,0.;3.,0.,0.|]
+  let curve = Line_geometry_front.polyline [|0.,0.,0.;1.,0.,0.;2.,0.,0.;3.,0.,0.|]
       |> get_rdk in
-  let collapsed_curve = Edge_collapse.run curve |> get_rdk in
+  let collapsed_curve = Edge_collapse_front.run curve |> get_rdk in
   check (Geometry.point_count collapsed_curve = 0
       && Geometry.vertex_count collapsed_curve = 0
       && Geometry.primitive_count collapsed_curve = 0)
     "whole-curve Edge Collapse cleanup";
 
   expect_code "invalid_topology"
-    (Edge_collapse.run ~edges:collapse ~connectivity_attribute:"missing" source);
+    (Edge_collapse_front.run ~edges:collapse ~connectivity_attribute:"missing" source);
   expect_code "invalid_topology"
-    (Edge_collapse.run ~edges:collapse ~connectivity_attribute:" " source);
+    (Edge_collapse_front.run ~edges:collapse ~connectivity_attribute:" " source);
   let non_finite_topology = Topology.create_owned ~point_count:2
       ~vertex_points:[|0;1|] ~primitive_offsets:[|0;2|]
       ~primitive_kinds:[|Topology.Open_polyline|] |> get in
@@ -196,10 +196,10 @@ let run () =
       ~positions:(Packed.Float3.View.of_owned_exn
         ~x:[|nan;1.|] ~y:[|0.;0.|] ~z:[|0.;0.|])
       ~topology:non_finite_topology () |> get in
-  expect_code "invalid_topology" (Edge_collapse.run non_finite);
+  expect_code "invalid_topology" (Edge_collapse_front.run non_finite);
   let cancelled = Cancel.create () in
   Cancel.cancel cancelled;
-  expect_code "cancelled" (Edge_collapse.run ~cancel:cancelled source);
+  expect_code "cancelled" (Edge_collapse_front.run ~cancel:cancelled source);
 
   let large = Plane_generators.grid ~grain:127 ~connectivity:Plane_generators.Grid_quads
       ~columns:180 ~rows:140 ~size:20. () |> get_rdk in
@@ -211,7 +211,7 @@ let run () =
         let low = min a b and high = max a b in
         high = low + 1 && low mod 4 = 0) in
   let run domains = Parallel.run ~domains (fun () ->
-    Edge_collapse.run ~grain:127 ~edges:disjoint large |> get_rdk) in
+    Edge_collapse_front.run ~grain:127 ~edges:disjoint large |> get_rdk) in
   let one = run 1 and four = run 4 in
   check (equal_geometry one four)
     "Edge Collapse differs across domain counts";

@@ -2,8 +2,7 @@ include Subdivide_refine
 include Subdivide_stitch
 
 let extract_primitive_part ?cancel ?grain ~selected primitives geometry =
-  let geometry = Error.get (Deletion.delete ?cancel ?grain ~selected:(not selected)
-      ~compact_points:true primitives geometry) in
+  let geometry = Error.get (Deletion.delete { cancel; grain; selected = (not selected); compact_points = true } primitives geometry) in
   if selected then split_disconnected_point_fans ?cancel ?grain geometry
   else geometry
 
@@ -22,7 +21,7 @@ let free_point_part ?cancel ?grain geometry =
     let referenced = Group.init ?grain ~owner:Group.Point
         ~name:"__rdk_subdivide_referenced_points" topology.point_count
         (fun point -> Bytes.get used point <> '\000') in
-    Some (Error.get (Deletion.delete ?cancel ?grain ~selected:true referenced geometry))
+    Some (Error.get (Deletion.delete { cancel; grain; selected = true; compact_points = false } referenced geometry))
   end
 
 let iterate ?cancel ?grain ?edge_ancestry_attribute ?initial_edge_crease_override
@@ -458,8 +457,7 @@ let primitive_kind_group ?grain ~polygon geometry =
 
 let extract_kind ?cancel ?grain ~polygon geometry =
   let selection = primitive_kind_group ?grain ~polygon geometry in
-  Error.get (Deletion.delete ?cancel ?grain ~selected:false ~compact_points:true
-    selection geometry)
+  Error.get (Deletion.delete { cancel; grain; selected = false; compact_points = true } selection geometry)
 
 let selection_for_kind ?grain ~polygon selection geometry =
   match selection with
@@ -495,10 +493,8 @@ let refine_curves ?cancel ?grain ?selection ~independent scheme iterations geome
       if selected = 0 then geometry
       else if selected = Group.length selection then refine geometry
       else begin
-        let refined_source = Error.get (Deletion.delete ?cancel ?grain ~selected:false
-            ~compact_points:true selection geometry) in
-        let retained = Error.get (Deletion.delete ?cancel ?grain ~selected:true
-            ~compact_points:true selection geometry) in
+        let refined_source = Error.get (Deletion.delete { cancel; grain; selected = false; compact_points = true } selection geometry) in
+        let retained = Error.get (Deletion.delete { cancel; grain; selected = true; compact_points = true } selection geometry) in
         combine_parts ?cancel ?grain ~source:geometry [retained; refine refined_source]
       end
 
@@ -665,4 +661,4 @@ let subdivide ({ cancel; grain; scheme; iterations; primitives; cracks; consiste
     | Invalid_argument message -> Error message in
   if not recompute_point_normals || not had_point_normals then result
   else Result.bind result (fun output ->
-    Deform.normals ?cancel ~grain:(Option.value ~default:16_384 grain) output)
+    Deform.normals { cancel; grain = (Option.value ~default:16_384 grain); primitives = None } output)

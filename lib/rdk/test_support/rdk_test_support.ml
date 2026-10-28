@@ -370,6 +370,8 @@ module Fuse_grid_front = struct
       ?(remove_unused_points_from_degenerate_primitives = false)
       ?(remove_all_unused_points = false) ?target geometry =
     Rdk.Fuse_grid.fuse { cancel; grain; selection; target_selection; targeting; using; tolerance; position; weight_attribute; attributes; attribute_rules; group_rules; metric; inclusive; match_attributes; radius_attribute; match_attribute; match_condition; match_tolerance; modify_target; fuse_points; keep_fused_points; snapped_group; snapped_destination_attribute; remove_degenerate_primitives; remove_unused_points_from_degenerate_primitives; remove_all_unused_points; target } geometry
+  let weld ?cancel ~grain ?selection ~tolerance geometry =
+    Rdk.Fuse_grid.weld ({ cancel; grain; selection; tolerance } : Rdk.Fuse_grid.weld_params) geometry
 end
 
 module Subdivide_front = struct
@@ -419,6 +421,8 @@ module Clean_front = struct
       geometry =
     Rdk.Clean.run {
       cancel; grain; epsilon; remove_degenerate; consolidate_distance; overlaps; reverse_winding; remove_nan_points; remove_unused_points; delete_unused_groups; point_attributes; vertex_attributes; primitive_attributes; detail_attributes; point_groups; vertex_groups; primitive_groups; edge_groups } geometry
+  let delete_degenerate ?cancel ~grain ?primitives ~epsilon geometry =
+    Rdk.Clean.delete_degenerate ({ cancel; grain; primitives; epsilon } : Rdk.Clean.delete_degenerate_params) geometry
 end
 
 module Facet_front = struct
@@ -575,4 +579,100 @@ module Attribute_mirror_front = struct
   open Rdk.Attribute_mirror
   let run ?cancel ?grain ?group ?(group_use = Mirror_group_as_source) ?(attributes = "Cd") ?(transform = Mirror_copy) ?string_replace ?output_mapping ?source_group ?destination_group ~owner ~method_ geometry =
     Rdk.Attribute_mirror.run ({ cancel; grain; group; group_use; attributes; transform; string_replace; output_mapping; source_group; destination_group; owner; method_ } : Rdk.Attribute_mirror.params) geometry
+end
+
+module Uv_ops_front = struct
+  let params ?cancel ?grain ?(name = "uv") ?seams ?edge_seams ?(uv_tolerance = 1e-9)
+      ?(iterations = 500) ?(tolerance = 1e-7) () : Rdk.Uv_ops.params =
+    { cancel; grain; name; seams; edge_seams; uv_tolerance; iterations; tolerance }
+  let flatten ?cancel ?grain ?name ?seams ?edge_seams ?iterations ?tolerance geometry =
+    Rdk.Uv_ops.flatten (params ?cancel ?grain ?name ?seams ?edge_seams ?iterations ?tolerance ()) geometry
+  let relax ?cancel ?grain ?name ?seams ?edge_seams ?uv_tolerance ?iterations ?tolerance geometry =
+    Rdk.Uv_ops.relax (params ?cancel ?grain ?name ?seams ?edge_seams ?uv_tolerance ?iterations ?tolerance ()) geometry
+end
+
+module Uv_parameterize_front = struct
+  open Rdk_ops.Uv_parameterize
+  let solve ?cancel ?grain ?(name = "uv") ?seams ?edge_seams ?(uv_tolerance = 1e-9) ?(iterations = 500) ?(tolerance = 1e-7) boundary_mode geometry =
+    Rdk_ops.Uv_parameterize.solve ({ cancel; grain; name; seams; edge_seams; uv_tolerance; iterations; tolerance } : Rdk_ops.Uv_parameterize.params) boundary_mode geometry
+end
+
+module Edge_collapse_front = struct
+  open Rdk.Edge_collapse
+  let run ?cancel ?grain ?edges ?connectivity_attribute ?position ?remove_degenerate_primitives ?recompute_point_normals geometry =
+    Rdk.Edge_collapse.run ({ cancel; grain; edges; connectivity_attribute; position; remove_degenerate_primitives; recompute_point_normals } : Rdk.Edge_collapse.params) geometry
+end
+
+module Intersection_analysis_front = struct
+  open Rdk.Intersection_analysis
+  let run ?cancel ?grain ?source_primitives ?collision_primitives ?(tolerance = 0.) ?(include_coplanar = true) ?(input_attribute = Some "sourceinput") ?(primitive_attribute = Some "sourceprim") ?(primitive_uvw_attribute = Some "sourceprimuv") ?(point_attribute = Some "sourcepoint") ?collision geometry =
+    Rdk.Intersection_analysis.run ({ cancel; grain; source_primitives; collision_primitives; tolerance; include_coplanar; input_attribute; primitive_attribute; primitive_uvw_attribute; point_attribute; collision } : Rdk.Intersection_analysis.params) geometry
+end
+
+module Mesh_merge_front = struct
+  open Rdk.Mesh_merge
+  let run ?cancel ?grain ?source_attribute ?source_base geometries =
+    Rdk.Mesh_merge.run ({ cancel; grain; source_attribute; source_base } : Rdk.Mesh_merge.run_params) geometries
+  let run_tagged ?cancel ?grain ?(tag_base = -1) ?source_attribute ?(source_base = 0) geometries =
+    Rdk.Mesh_merge.run_tagged ({ cancel; grain; tag_base; source_attribute; source_base } : Rdk.Mesh_merge.run_tagged_params) geometries
+end
+
+module Deletion_front = struct
+  open Rdk.Deletion
+  let delete ?cancel ?grain ?(selected = true) ?(compact_points = false) selection geometry =
+    Rdk.Deletion.delete ({ cancel; grain; selected; compact_points } : Rdk.Deletion.delete_params) selection geometry
+  let delete_primitives ?cancel ?grain ?(compact_points = false) group geometry =
+    Rdk.Deletion.delete_primitives ({ cancel; grain; compact_points } : Rdk.Deletion.delete_primitives_params) group geometry
+end
+
+module Group_ops_front = struct
+  open Rdk.Group_ops
+  let delete ~rules ?(delete_unused = false) geometry =
+    Rdk.Group_ops.delete ({ rules; delete_unused } : Rdk.Group_ops.delete_params) geometry
+  let transfer ?cancel ?grain ?(rules = [Group_primitives; Group_points; Group_edges] |> List.map (fun transfer_owner -> { transfer_owner; transfer_pattern = "*"; transfer_prefix = "" })) ?(conflict = Copy_skip) ?(create_empty = false) ?(distance = 0.001) ~source ~target () =
+    Rdk.Group_ops.transfer ({ cancel; grain; rules; conflict; create_empty; distance; source; target } : Rdk.Group_ops.transfer_params)
+end
+
+module Shortest_paths_front = struct
+  open Rdk.Shortest_paths
+  let search ?cancel ?(radius = infinity) ~point_edge_offsets ~point_edges ~edge_a ~edge_b ~lengths roots =
+    Rdk.Shortest_paths.search ({ cancel; radius; point_edge_offsets; point_edges; edge_a; edge_b; lengths } : Rdk.Shortest_paths.search_params) roots
+  let hop_search ?(blocked_point = fun _ -> false) ?(blocked_edge = fun _ -> false) ?(target = -1) ~depths ~distances ~previous ~queue ~point_edge_offsets ~point_edges ~edge_a ~edge_b ~lengths roots =
+    Rdk.Shortest_paths.hop_search ({ blocked_point; blocked_edge; target; depths; distances; previous; queue; point_edge_offsets; point_edges; edge_a; edge_b; lengths } : Rdk.Shortest_paths.hop_search_params) roots
+end
+
+module Fuse_reduce_front = struct
+  open Rdk.Fuse_reduce
+  let apply ?cancel ~grain ~position ?weight_attribute ~attributes ~attribute_rules ~group_rules ~compact ~rewire ?(remap_edge_groups = true) clusters geometry =
+    Rdk.Fuse_reduce.apply ({ cancel; grain; position; weight_attribute; attributes; attribute_rules; group_rules; compact; rewire; remap_edge_groups } : Rdk.Fuse_reduce.params) clusters geometry
+end
+
+module Triangulate_front = struct
+  open Rdk.Triangulate
+  let run ?cancel ?grain ?primitives geometry =
+    Rdk.Triangulate.run ({ cancel; grain; primitives } : Rdk.Triangulate.params) geometry
+end
+
+module Deform_front = struct
+  open Rdk.Deform
+  let normals ?cancel ~grain ?primitives geometry =
+    Rdk.Deform.normals ({ cancel; grain; primitives } : Rdk.Deform.params) geometry
+end
+
+module Line_geometry_front = struct
+  open Rdk.Line_geometry
+  let polyline ?(closed = false) values =
+    Rdk.Line_geometry.polyline ({ closed } : Rdk.Line_geometry.params) values
+end
+
+module Forest_front = struct
+  open Rdk.Forest
+  let scan ?selected ~selected_count parents =
+    Rdk.Forest.scan ({ selected; selected_count } : Rdk.Forest.params) parents
+end
+
+module Normal_ops_front = struct
+  open Rdk.Normal_ops
+  let run ?cancel ?grain ?selection ?primitives ?(owner = Attribute.Point) ?(weighting = Face_area) ?(cusp_angle = Float.pi) ?(attribute = "N") geometry =
+    Rdk.Normal_ops.run ({ cancel; grain; selection; primitives; owner; weighting; cusp_angle; attribute } : Rdk.Normal_ops.params) geometry
 end
