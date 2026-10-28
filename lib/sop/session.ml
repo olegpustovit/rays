@@ -664,8 +664,9 @@ let close session =
     session.closed <- true
   end
 
+let set_parallel_override session value = session.parallel_override <- value
+
 module Private = struct
-  let set_parallel_override session value = session.parallel_override <- value
   let fanouts session = session.fanouts
   let cache_keys session =
     let keys=ref [] in

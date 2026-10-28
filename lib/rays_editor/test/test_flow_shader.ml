@@ -44,7 +44,7 @@ let () =
         let context = Result.get_ok (Sop.Context.create ~time ~domains:1 ()) in
         let output = Result.get_ok (Sop.Session.cook session ~context (Flow_sop.Image_kernel.node kernel)) in
         let pixels = Result.get_ok (Sop.Payload.image output.payload) in
-        Option.get (Sop.Image.Private.rgba8 pixels) |> Bytes.copy in
+        Option.get (Sop.Image.rgba8 pixels) |> Bytes.copy in
       sample 0., sample 1.) images in
     let backgrounds = List.map (fun i -> fst (List.nth samples i)) [0;4;8;12;16;21] in
     assert (List.length (List.sort_uniq Bytes.compare backgrounds) = 4);

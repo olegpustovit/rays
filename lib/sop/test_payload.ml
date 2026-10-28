@@ -2,12 +2,12 @@ open Sop
 let ok = function Ok value -> value | Error error -> failwith (Diagnostic.error_to_string error)
 let session bytes = Result.get_ok (Session.create ~max_entries:1 ~max_payload_bytes:bytes)
 let context domains = Result.get_ok (Context.create ~domains ~grain:17 ())
-let bytes image = Marshal.to_string (Image.width image, Image.height image, Image.Private.storage image) [Marshal.No_sharing]
+let bytes image = Marshal.to_string (Image.width image, Image.height image, Image.storage image) [Marshal.No_sharing]
 let () =
   let source = [|0.1;0.2;0.3;1.|] in
   let image = ok (Image.create ~width:1 ~height:1 ~rgba:source) in
   source.(0) <- 0.9;
-  assert (Image.Private.storage image = [|0.1;0.2;0.3;1.|]);
+  assert (Image.storage image = [|0.1;0.2;0.3;1.|]);
   let conversion domains =
     let context = context domains in
     let channels = [|-1.;0.;0.5/.255.;1.5/.255.;2.5/.255.;127.5/.255.;254.5/.255.;2.|] in
@@ -16,27 +16,27 @@ let () =
       ~parameters:"" ~cook_mode:Node.Generator ~dependencies:Context.Dependencies.static ~inputs:[||]
       (fun ~node_id:_ context _ -> Result.map (fun image -> Node.Private.{
         payload=Payload.Image image;instances=None})
-        (Image.Private.of_vec4 ~context ~width:257 ~height:131 rgba)) in
+        (Image.of_vec4 ~context ~width:257 ~height:131 rgba)) in
     let session = session 0 in
     Fun.protect ~finally:(fun () -> Session.close session) (fun () ->
       let output = ok (Session.cook session ~context node) in
       ok (Payload.image output.payload)) in
   let one = conversion 1 and eight = conversion 8 in
-  let converted = Option.get (Image.Private.rgba8 one) in
-  assert (converted=Option.get (Image.Private.rgba8 eight));
+  let converted = Option.get (Image.rgba8 one) in
+  assert (converted=Option.get (Image.rgba8 eight));
   let expected = [|0;0;0;2;2;128;254;255|] in
   Bytes.iteri (fun i c -> assert (Char.code c=expected.(i mod 8))) converted;
   assert (Image.payload_bytes one=Bytes.length converted);
-  let expanded = Image.Private.storage one in
+  let expanded = Image.storage one in
   assert (expanded.(3)=2./.255. && expanded.(5)=128./.255.);
-  expanded.(3)<-0.; assert ((Image.Private.storage one).(3)=2./.255.);
-  List.iter (fun bad -> assert (Result.is_error (Image.Private.of_vec4 ~context:(context 1)
+  expanded.(3)<-0.; assert ((Image.storage one).(3)=2./.255.);
+  List.iter (fun bad -> assert (Result.is_error (Image.of_vec4 ~context:(context 1)
     ~width:1 ~height:1 [|bad;0.;0.;1.|]))) [nan;infinity;neg_infinity];
-  assert (Result.is_error (Image.Private.of_owned_rgba8 ~width:max_int ~height:2 Bytes.empty));
-  assert (Result.is_error (Image.Private.of_owned_rgba8 ~width:1 ~height:1 Bytes.empty));
+  assert (Result.is_error (Image.of_owned_rgba8 ~width:max_int ~height:2 Bytes.empty));
+  assert (Result.is_error (Image.of_owned_rgba8 ~width:1 ~height:1 Bytes.empty));
   let cancel = Context.Cancel.create () in Context.Cancel.cancel cancel;
   let cancelled = Context.create ~cancel () |> Result.get_ok in
-  (match Image.Private.of_vec4 ~context:cancelled ~width:1 ~height:1 [|0.;0.;0.;1.|] with
+  (match Image.of_vec4 ~context:cancelled ~width:1 ~height:1 [|0.;0.;0.;1.|] with
    | Error d -> assert (d.code="E_CANCELLED") | Ok _ -> assert false);
   List.iter (fun (width,height,rgba) -> assert (Result.is_error (Image.create ~width ~height ~rgba)))
     [0,1,[||];max_int,2,[||];1,1,[|nan;0.;0.;1.|];1,1,[|0.;0.;0.;2.|];1,1,[||]];

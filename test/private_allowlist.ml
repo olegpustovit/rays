@@ -9,15 +9,11 @@ let entries = [
   "flow_native", "Renderer.Private";
   "flow_native", "Runtime_resources.Image.Private";
   "flow_native", "Scene.Private";
-  "flow_native", "Sop.Image.Private";
   "flow_native", "Sop.Node.Private";
   "flow_native", "Texture.Private";
   "flow_sop", "Flow_sop.Catalog.Private";
   "flow_sop", "Flow_sop.Lower.Private";
-  "flow_sop", "Sop.Image.Private";
-  "flow_sop", "Sop.Kernel.Private";
   "flow_sop", "Sop.Node.Private";
-  "flow_sop", "Sop.Session.Private";
   "ogpu_metal", "Metal.Buffer.Private";
   "ogpu_metal", "Metal.Drawable.Private";
   "ogpu_metal", "Metal.Render_encoder.Private";
@@ -45,6 +41,5 @@ let entries = [
   "runtime", "Renderer.Private";
   "tools", "Rays.Image.Private";
   "tools", "Scene.D3.Private";
-  "tools", "Sop.Image.Private";
   "tools", "Sop.Node.Private";
 ]

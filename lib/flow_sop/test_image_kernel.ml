@@ -21,7 +21,7 @@ let cook ?(time=0.) domains prepared =
     let context = P.Context.create ~domains ~time () |> Result.get_ok in
     let output = P.Session.cook session ~context (Flow_sop.Image_kernel.node prepared) |> cooked in
     P.Payload.image output.payload |> cooked)
-let bytes image = P.Image.Private.rgba8 image |> Option.get
+let bytes image = P.Image.rgba8 image |> Option.get
 let () =
   let text = "(workspace w (graph img :context image (let* [picture
     (image/map (fn [uv] [uv.x uv.y 0.5 1]) :width 387 :height 91)] picture)))" in

@@ -59,5 +59,5 @@ let node ?state t =
         (function
           | E.Vec4_array rgba -> Result.map (fun image -> P.Node.Private.{
               payload=P.Payload.Image image;instances=None})
-              (P.Image.Private.of_vec4 ~context ~width:t.width ~height:t.height rgba)
+              (P.Image.of_vec4 ~context ~width:t.width ~height:t.height rgba)
           | _ -> Error (Diagnostic.error ~code:"E_IMAGE" "Image kernel must return vec4 pixels.")))

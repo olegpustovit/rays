@@ -862,7 +862,7 @@ let () =
     Fun.protect ~finally:(fun()->Session.close session)(fun()->
       let image=cook session ~domains ~time:0. (Flow_sop.Image_kernel.node kernel)
         |> Result.get_ok |> fun output->Sop.Payload.image output.payload |> Result.get_ok in
-      Sop.Image.Private.rgba8 image |> Option.get)in
+      Sop.Image.rgba8 image |> Option.get)in
   let initial=bytes 1 kernel in
   assert(initial=bytes 8 kernel);
   if Char.code(Bytes.get initial 0)<>82 then

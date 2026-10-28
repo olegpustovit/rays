@@ -42,8 +42,8 @@ let () =
             let values=match Flow_ir.Executor.force program ~live |> get with
               |Flow.Eval.Vec4_array xs->xs|_->assert false in
             let context=P.Context.create() |> Result.get_ok in
-            let expected=P.Image.Private.of_vec4 ~context ~width:65 ~height:3 values
-              |> Result.get_ok |> P.Image.Private.rgba8 |> Option.get in
+            let expected=P.Image.of_vec4 ~context ~width:65 ~height:3 values
+              |> Result.get_ok |> P.Image.rgba8 |> Option.get in
             let maximum=ref 0 and channels=ref 0 and pixels=ref 0 in
             for pixel=0 to 194 do
               let different=ref false in
@@ -143,8 +143,8 @@ let () =
           let values=match Flow_ir.Executor.force program ~live |> get with
             |Flow.Eval.Vec4_array xs->xs|_->assert false in
           let context=P.Context.create() |> Result.get_ok in
-          let expected=P.Image.Private.of_vec4 ~context ~width:65 ~height:17 values
-            |> Result.get_ok |> P.Image.Private.rgba8 |> Option.get in
+          let expected=P.Image.of_vec4 ~context ~width:65 ~height:17 values
+            |> Result.get_ok |> P.Image.rgba8 |> Option.get in
           let maximum=ref 0 and channels=ref 0 and pixels=ref 0 in
           for pixel=0 to 65*17-1 do
             let different=ref false in

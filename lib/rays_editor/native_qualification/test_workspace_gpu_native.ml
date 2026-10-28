@@ -45,7 +45,7 @@ let ()=List.iter(fun stateful->
     Flow_native.Workspace_images.payload owner lowered.plan ~state ~live(value override kind) |> ok in
   let image (owner,_,_) state live override kind=
     Flow_native.Workspace_images.image owner lowered.plan ~state ~live(value override kind) |> ok in
-  let bytes payload=P.Image.Private.rgba8 payload |> Option.get in
+  let bytes payload=P.Image.rgba8 payload |> Option.get in
   let inspect_packed domains state current override=
     let source=(node override "sop/copy_to_points").id in
     let context=L.source_context lowered ~node:source |> ok in
@@ -68,7 +68,7 @@ let ()=List.iter(fun stateful->
       |0->(float(pixel mod 65)+.0.5)/.65.+.sum_x/.4.
       |1->(float(pixel/65)+.0.5)/.17.+.first_x+.2.*.second_x
       |2->6.*.0.0625|_->1.)in
-    P.Image.Private.of_vec4 ~context:(P.Context.create() |> Result.get_ok) ~width:65 ~height:17 rgba
+    P.Image.of_vec4 ~context:(P.Context.create() |> Result.get_ok) ~width:65 ~height:17 rgba
       |> Result.get_ok |> bytes in
   let fixed owner=
     let owner,_,_=owner in
@@ -182,7 +182,7 @@ let ()=List.iter(fun domains->
   Fun.protect ~finally:(fun()->Flow_native.Workspace_resources.close resources;Flow_native.Workspace_images.close owner;Flow_native.Workspace_gpu.close gpu)(fun()->
     advance state 0;
     let saved=payload state 0 |> ok in
-    let bytes=P.Image.Private.rgba8 saved |> Option.get |> Bytes.copy in
+    let bytes=P.Image.rgba8 saved |> Option.get |> Bytes.copy in
     retained:=Some(saved,bytes);
     let first=image state 0 |> ok in
     let original=Rays.Image.Private.pixels first |> Result.get_ok in
@@ -194,7 +194,7 @@ let ()=List.iter(fun domains->
        |Error d->if d.Diagnostic.code<>"E_ARRAY_RANGE"then failwith(Diagnostic.to_string d)
        |Ok _->failwith "Invalid source cardinality unexpectedly rendered");
       assert(E.state_stamp state=stamp && resources.images_created=2
-        && P.Image.Private.rgba8 saved=Some bytes);
+        && P.Image.rgba8 saved=Some bytes);
       assert(Result.is_error(Rays.Image.Private.pixels first))
     done;
     let fresh=E.create_state()in
@@ -204,9 +204,9 @@ let ()=List.iter(fun domains->
     assert(recovered==first && Rays.Image.Private.pixels recovered=Ok original
       && E.state_stamp fresh=fresh_stamp && E.state_stamp state=stamp
       && resources.images_created=2);
-    assert(payload fresh 1 |> ok |> P.Image.Private.rgba8 = Some bytes));
+    assert(payload fresh 1 |> ok |> P.Image.rgba8 = Some bytes));
   let saved,bytes=Option.get !retained in
-  assert(P.Image.Private.rgba8 saved=Some bytes && handles()=before
+  assert(P.Image.rgba8 saved=Some bytes && handles()=before
     && resources.images_created=resources.images_destroyed);
   Printf.printf "State capture failure domains=%d: repeated typed array refusal, caller rollback, stale parent invalidation, same-frame fork recovery and retained bytes pass\n"domains)
   [1;8]
@@ -237,7 +237,7 @@ let ()=
     ~live:(Input.at_time time)(value kind)in
   let image kind time=Flow_native.Workspace_images.image owner (!plan).plan ~state
     ~live:(Input.at_time time)(value kind)in
-  let bytes payload=Sop.Image.Private.rgba8 payload |> Option.get in
+  let bytes payload=Sop.Image.rgba8 payload |> Option.get in
   let held=ref None in
   Fun.protect ~finally:(fun()->Flow_native.Workspace_resources.close resources;Flow_native.Workspace_images.close owner;Flow_native.Workspace_gpu.close gpu)(fun()->
     let ordinary=payload "image/map" 0. |> ok in
@@ -331,7 +331,7 @@ let ()=List.iter(fun(width,height,expected_reads)->
     done;
     assert(resources.images_created=64 && Runtime_resources.Image.Private.readbacks native=expected_reads);
     Array.iteri(fun frame payload->
-      let bytes=Sop.Image.Private.rgba8 payload |> Option.get in
+      let bytes=Sop.Image.rgba8 payload |> Option.get in
       assert(Char.code(Bytes.get bytes 0)=int_of_float(Float.round(float frame*.0.0078125*.255.)))) !held);
   assert(resources.images_created=resources.images_destroyed && handles()=before);
   assert(Array.length !held=63 && Sop.Image.width (!held).(0)=width);
@@ -408,7 +408,7 @@ let ()=
     let host,_,_,_,_=Flow_native.Workspace_gpu.image_stats gpu in assert(host.status_reads=2);
     let exact=Flow_native.Workspace_images.payload owner lowered.plan ~state ~live:(Input.at_time 1.)
       (E.Deferred(Flow.Ty.image,(Array.find_opt(fun(n:E.node)->n.site=["mesh";"last"] && n.kind="image/map")lowered.plan.nodes |> Option.get).id)) |> ok in
-    let bytes=P.Image.Private.rgba8 exact |> Option.get in assert(Char.code(Bytes.get bytes 0)=38));
+    let bytes=P.Image.rgba8 exact |> Option.get in assert(Char.code(Bytes.get bytes 0)=38));
   assert(Flow_native.Workspace_images.capture_stats owner=(0,0,0,65,65));
   print_endline "Capture capacity: one image with 65 sources keeps bounded owned data, static reuse survives metadata eviction, exact cooks leave display counters unchanged"
 let ()=
@@ -449,14 +449,14 @@ let ()=
       done;
       let result=resolve graph.network |> ok in
       assert(E.state_stamp state=stamp && resources.images_created=0);
-      let saved=P.Image.Private.rgba8 result |> Option.get |> Bytes.copy in
+      let saved=P.Image.rgba8 result |> Option.get |> Bytes.copy in
       let replanned=lower 0.03125 in
       Flow_native.Workspace_images.bind owner replanned;
       let node=Array.find_opt(fun(n:E.node)->n.kind="image/map")replanned.plan.nodes |> Option.get in
       let rebuilt=Flow_native.Workspace_images.payload owner replanned.plan ~state ~live:(Input.at_time 0.)
         (E.Deferred(Flow.Ty.image,node.id)) |> ok in
-      let changed=P.Image.Private.rgba8 rebuilt |> Option.get |> Bytes.copy in
-      assert(changed<>saved && P.Image.Private.rgba8 result=Some saved
+      let changed=P.Image.rgba8 rebuilt |> Option.get |> Bytes.copy in
+      assert(changed<>saved && P.Image.rgba8 result=Some saved
         && E.state_stamp state=stamp && resources.images_created=0);
       saved,changed)in
   let expected=run 1 false in

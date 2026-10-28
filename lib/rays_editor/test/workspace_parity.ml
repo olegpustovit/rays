@@ -247,7 +247,7 @@ let check ?directory ?(commands = false) ~factories ~name (workspace : Editor_do
           let bytes = match output.payload with
             | Sop.Payload.Geometry geometry -> Rdk_test_support.geometry_bytes geometry
             | Image image -> Marshal.to_string (Sop.Image.width image, Sop.Image.height image,
-                Sop.Image.Private.storage image) [Marshal.No_sharing]
+                Sop.Image.storage image) [Marshal.No_sharing]
             | Kernel _ -> failwith "Workspace results cannot contain function payloads" in
           compare payloads ("geometry-" ^ id) (bytes ^ Marshal.to_string output.instances []);
           id, cid, output) g.root) networks in

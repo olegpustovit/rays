@@ -20,7 +20,7 @@ module Image_texels = struct
       ~cook_mode:Node.Generator ~dependencies:Context.Dependencies.static
       ~inputs:[|image|] (fun ~node_id:_ _context inputs ->
         Result.bind (Payload.image inputs.(0)) (fun image ->
-          let width = Image.width image and rgba = Image.Private.storage image in
+          let width = Image.width image and rgba = Image.storage image in
           let count = width * Image.height image in
           let geometry = Rdk.Kernel.generate_point_ranges count (fun ~first ~last ~x ~y ~z ->
             for i = first to last - 1 do

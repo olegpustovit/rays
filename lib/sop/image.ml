@@ -9,7 +9,6 @@ let float_samples image = match image.storage with
 let payload_bytes image = match image.storage with
   | Floats rgba -> Array.length rgba * 8
   | Rgba8 bytes -> Bytes.length bytes
-module Private = struct
   let storage = float_samples
   let rgba8 image = match image.storage with Rgba8 bytes -> Some bytes | Floats _ -> None
   let error message = Error (Diagnostic.error ~code:"E_IMAGE" message)
@@ -57,7 +56,6 @@ module Private = struct
       if Context.cancelled context then Error (Diagnostic.error ~code:"E_CANCELLED" "Image kernel cancelled.")
       else if Atomic.get invalid then error "Image kernel channels must be finite."
       else of_owned_rgba8 ~width ~height bytes)
-end
 let create ~width ~height ~rgba =
   Result.map (fun image -> {image with storage=Floats (Array.copy rgba)})
-    (Private.of_owned_rgba ~width ~height rgba)
+    (of_owned_rgba ~width ~height rgba)

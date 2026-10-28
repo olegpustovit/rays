@@ -120,7 +120,7 @@ let node ?(unbound_function = false) ?(geometry_inputs = []) ~operation ~version
               (* The public node owns the cache entry. The body uses Session's
                  payload/instance rules with only per-cook sharing retained. *)
               let session = Result.get_ok (Sop.Session.create ~max_entries:0 ~max_payload_bytes:0) in
-              Sop.Session.Private.set_parallel_override session (Some false);
+              Sop.Session.set_parallel_override session (Some false);
               Fun.protect ~finally:(fun () -> Sop.Session.close session) (fun () ->
                 (* The body's kernel nodes (labelled flow.xxx or lisp_xxx) are implementation: the enclosing session traces
                    the failure to this node, not through a card the author never wrote. Authored cards in

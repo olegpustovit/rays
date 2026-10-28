@@ -55,8 +55,8 @@ let ()=
     let live time=Input.at_time time in
     let exact owner time ~override kind graph=Editor.Private.image_payload ~live:(live time)owner
       (value owner ~override kind graph) |> ok in
-    let rgba payload=match P.Image.Private.rgba8 payload with Some bytes->bytes|None->
-      let values=P.Image.Private.storage payload in
+    let rgba payload=match P.Image.rgba8 payload with Some bytes->bytes|None->
+      let values=P.Image.storage payload in
       Bytes.init(Array.length values)(fun i->Char.chr(int_of_float(Float.round(values.(i)*.255.))))in
     let resolve time ~override kind graph=Editor.Private.with_images ~live:(live time)display
       (fun ~image ~texture:_->ok(image(value display ~override kind graph)))in
@@ -189,7 +189,7 @@ let ()=
     let resolve time=let _,_,value=value()in
       Editor.Private.with_images ~live:(live time) !owner(fun ~image ~texture->
         ok(image value),ok(texture value))in
-    let rgba payload=P.Image.Private.rgba8 payload |> Option.get in
+    let rgba payload=P.Image.rgba8 payload |> Option.get in
     let saved=exact 0. in let saved_bytes=Bytes.copy(rgba saved)in
     assert(Editor.Private.image_stats !owner=(0,0));
     let image,texture=resolve 0. in
@@ -307,8 +307,8 @@ let ()=
     assert(I.Private.cpu_storage_bytes resource=0);
     let generation=I.generation resource in
     let actual=Editor.Private.image_payload display(value display "image/render") |> ok in
-    let rgba image=match P.Image.Private.rgba8 image with Some bytes->bytes|None->
-      let values=P.Image.Private.storage image in
+    let rgba image=match P.Image.rgba8 image with Some bytes->bytes|None->
+      let values=P.Image.storage image in
       Bytes.init(Array.length values)(fun i->Char.chr(int_of_float(Float.round(values.(i)*.255.))))in
     let bytes=rgba actual in
     for i=0 to 320*240-1 do assert(Bytes.get bytes(i*4+2)=Char.chr 127)done;
@@ -420,8 +420,8 @@ let ()=
       (Editor.Private.image_plan !owner).instances |> Option.get).result in
     let live=Input.at_time in
     let exact time=ok(Editor.Private.image_payload ~live:(live time) !owner(value()))in
-    let rgba payload=match Sop.Image.Private.rgba8 payload with Some bytes->bytes|None->
-      let channels=Sop.Image.Private.storage payload in
+    let rgba payload=match Sop.Image.rgba8 payload with Some bytes->bytes|None->
+      let channels=Sop.Image.storage payload in
       Bytes.init(Array.length channels)(fun i->Char.chr(int_of_float(Float.round(channels.(i)*.255.))))in
     let saved=exact 0. in let saved_bytes=Bytes.copy(rgba saved)in
     assert(Editor.Private.image_stats !owner=(0,0));

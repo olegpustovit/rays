@@ -151,11 +151,11 @@ let decode source =
   Geometry.create ~positions ~topology ~attributes ~groups ~edge_groups () |> checked
 
 let encode_image image =
-  let payload = match Sop.Image.Private.rgba8 image with
+  let payload = match Sop.Image.rgba8 image with
     | Some bytes -> tagged "rgba8" [str (String.init (Bytes.length bytes * 2) (fun i ->
         let byte = Char.code (Bytes.get bytes (i / 2)) in
         "0123456789abcdef".[if i mod 2 = 0 then byte lsr 4 else byte land 15]))]
-    | None -> tagged "rgba" [floats (Sop.Image.Private.storage image)] in
+    | None -> tagged "rgba" [floats (Sop.Image.storage image)] in
   Flow.Lisp.flat (tagged "image" [num (Sop.Image.width image); num (Sop.Image.height image); payload])
 
 let decode_image source =
@@ -174,9 +174,9 @@ let decode_image source =
               try Bytes.set bytes i (Char.chr (int_of_string ("0x" ^ String.sub hex (i * 2) 2)))
               with Failure _ -> malformed "invalid rgba8 hex"
             done;
-            Sop.Image.Private.of_owned_rgba8 ~width ~height bytes
+            Sop.Image.of_owned_rgba8 ~width ~height bytes
         | List [{ node = Sym "rgba"; _ }; values] ->
-            Sop.Image.Private.of_owned_rgba ~width ~height (float_array values)
+            Sop.Image.of_owned_rgba ~width ~height (float_array values)
         | _ -> malformed "invalid image storage" in
       (match image with Ok value -> value | Error error -> malformed (Diagnostic.error_to_string error))
   | _ -> malformed "invalid image"

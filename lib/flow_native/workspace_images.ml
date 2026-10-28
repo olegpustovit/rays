@@ -227,8 +227,8 @@ let bind t (lowered:Flow_sop.Lower.t) =
     t.qualification<-Some(lowered.plan,lowered.approx,lowered.image_sites);t.plan<-None
   end
 let bytes_of_image image =
-  match CPU.Private.rgba8 image with Some bytes->bytes|None->
-    let rgba=CPU.Private.storage image in
+  match CPU.rgba8 image with Some bytes->bytes|None->
+    let rgba=CPU.storage image in
     (* clamp, scale, round ties to even: the same bytes Sop.Image.of_vec4 writes *)
     Bytes.init(Array.length rgba)(fun i->let q=Float.max 0.(Float.min 1. rgba.(i))*.255. in
       let n=int_of_float(Float.floor q)in let f=q-.float n in
@@ -237,7 +237,7 @@ let cpu_of_image image =
   let* bytes=message(Image.Private.pixels image)in
   let width,height=Image.Private.dimensions image in
   let rgba=Array.init(Bytes.length bytes)(fun i->float(Char.code(Bytes.get bytes i))/.255.)in
-  Result.map_error(fun d->error d.Diagnostic.message)(CPU.Private.of_owned_rgba ~width ~height rgba)
+  Result.map_error(fun d->error d.Diagnostic.message)(CPU.of_owned_rgba ~width ~height rgba)
 let texture payload=lazy(
   let bytes=bytes_of_image payload in
   Texture.Private.create_owned ~width:(CPU.width payload) ~height:(CPU.height payload)
@@ -325,7 +325,7 @@ let rec resolve ?gpu ?context t ~display ~state ~live (plan:E.plan) value =
                     let ( let* )=Result.bind in
                     let* bytes=Image.Private.pixels source in
                     let* cpu=Result.map_error(fun d->d.Diagnostic.message)
-                      (CPU.Private.of_owned_rgba8 ~width ~height bytes)in
+                      (CPU.of_owned_rgba8 ~width ~height bytes)in
                     let* image=Image.upload_rgba ~width ~height ~rgba:bytes()in
                     payload:=Some cpu;Ok image)in
                   let payload=Option.get !payload in

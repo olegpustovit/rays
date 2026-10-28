@@ -43,8 +43,8 @@ let ()=
         let context=P.Context.create ~seed ~grain ~domains() |> Result.get_ok in
         let expected=P.Session.cook session ~context(Flow_sop.Image_kernel.node kernel)
           |> Result.get_ok |> fun output->P.Payload.image output.payload |> Result.get_ok in
-        let bytes=P.Image.Private.rgba8 payload |> Option.get |> Bytes.copy in
-        assert(P.Image.Private.rgba8 expected=Some bytes && Char.code(Bytes.get bytes 1)=64);
+        let bytes=P.Image.rgba8 payload |> Option.get |> Bytes.copy in
+        assert(P.Image.rgba8 expected=Some bytes && Char.code(Bytes.get bytes 1)=64);
         bytes))in
   assert(run 17L 1=run 17L 8 && run 49L 1=run 49L 8 && run 17L 1<>run 49L 1);
   print_endline "Image captures: effective owner seed/grain/domains match independent cooks and exact domain bytes"
@@ -67,12 +67,12 @@ let ()=
       assert(not(E.frame_dependent fn));
       let at time=Editor.Private.image_payload ~live:(Input.at_time time)owner image |> ok in
       let first=at 0. in
-      let bytes=Sop.Image.Private.rgba8 first |> Option.get |> Bytes.copy in
+      let bytes=Sop.Image.rgba8 first |> Option.get |> Bytes.copy in
       assert(Char.code(Bytes.get bytes 0)=82);
       assert(at 0.==first);
       let later=at 1. in
-      let changed=Sop.Image.Private.rgba8 later |> Option.get |> Bytes.copy in
-      assert(changed<>bytes && Sop.Image.Private.rgba8 first=Some bytes);
+      let changed=Sop.Image.rgba8 later |> Option.get |> Bytes.copy in
+      assert(changed<>bytes && Sop.Image.rgba8 first=Some bytes);
       assert(at 1.==later && Editor.Private.image_stats owner=(0,0));
       bytes,changed)in
   assert(run 1=run 8);
@@ -112,7 +112,7 @@ let ()=
       if first then ignore(at 0);
       let result=at 1 in
       assert(E.state_stamp state=stamp);
-      Sop.Image.Private.rgba8 result |> Option.get |> Bytes.copy)in
+      Sop.Image.rgba8 result |> Option.get |> Bytes.copy)in
   let sequential=snapshot ~first:true 1 in
   assert(sequential=snapshot ~first:false 1 && sequential=snapshot ~first:true 8);
   print_endline "image captures: direct nested resource resolution and stateful source snapshot parity without mutating caller state pass"

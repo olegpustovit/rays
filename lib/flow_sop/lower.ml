@@ -343,7 +343,7 @@ let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
           (fun ~node_id:_ _ _ -> Result.map (fun payload ->
             let payload = match payload, List.assoc_opt index aliases with
               | Sop.Payload.Kernel kernel, Some sources ->
-                  Sop.Payload.Kernel (Sop.Kernel.Private.remap_geometry_captures ~sources kernel)
+                  Sop.Payload.Kernel (Sop.Kernel.remap_geometry_captures ~sources kernel)
               | _ -> payload in
             Sop.Node.Private.{payload;instances=None}) (Lisp_node.input index))) in
       key, factory) inputs in
@@ -380,7 +380,7 @@ let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
             ~inputs:[||] (fun ~node_id:_ _ _ ->
               Result.bind (Lisp_node.input index) (fun payload ->
               Result.bind (Sop.Payload.kernel payload) (fun kernel ->
-                match Sop.Kernel.Private.geometry_capture kernel source with
+                match Sop.Kernel.geometry_capture kernel source with
                 | Some geometry -> Ok Sop.Node.Private.{geometry;instances=None}
                 | None -> Error (Diagnostic.error ~code:"E_DATA_SOURCE"
                     "A forwarded function geometry capture is unavailable"))))) in
@@ -652,7 +652,7 @@ end) = struct
           else Sop.Context.Dependencies.static)
         (fun ~node_id:_ context payloads->
           let session=lazy(let session=Result.get_ok(Sop.Session.create ~max_entries:0 ~max_payload_bytes:0) in
-            Sop.Session.Private.set_parallel_override session (Some false);session) in
+            Sop.Session.set_parallel_override session (Some false);session) in
           Fun.protect ~finally:(fun()->if Lazy.is_val session then Sop.Session.close(Lazy.force session))(fun()->
           let handles=Hashtbl.create 16 and geometries=Hashtbl.create 16 and next=ref(-1) in
           List.iteri(fun index(id,ty,_)->
