@@ -18,7 +18,7 @@ let () =
   let batch = Ui_batch.Builder.publish builder in
   let scene dx = [| Render_ir.Push_transform {xx = 1.; xy = 0.; yx = 0.; yy = 1.; tx = dx; ty = 0.};
     Render_ir.Shapes batch; Render_ir.Pop_transform |] in
-  let create dx = match Render_ir.Private.create_owned (scene dx) with
+  let create dx = match Render_ir.create_owned (scene dx) with
     | Ok _ -> () | Error _ -> assert false in
   let first_before = Gc.allocated_bytes () in
   create 0.;
@@ -31,11 +31,11 @@ let () =
   assert (per_scene < 4096.);
   (* a tampered copy is still refused: the mark belongs to the batch that passed, not to its bytes *)
   let good = Ui_batch.Builder.publish builder in
-  assert (Ui_batch.Private.valid_shapes good);
+  assert (Ui_batch.valid_shapes good);
   let reject_copy name offset value =
-    let bad = Ui_batch.Private.copy good in
+    let bad = Ui_batch.copy good in
     Bytes.set_int32_le (Ui_batch.instances bad) offset value;
-    if Ui_batch.Private.valid_shapes bad then failwith (name ^ " packed copy accepted")
+    if Ui_batch.valid_shapes bad then failwith (name ^ " packed copy accepted")
   in
   reject_copy "nonfinite coordinate" 0 0x7fc00000l;
   reject_copy "invalid shape tag" 40 1l;
@@ -44,9 +44,9 @@ let () =
   Ui_batch.Builder.shape_rect rect_builder ~x:1. ~y:1. ~width:2. ~height:2.
     ~fill:0xffffffffl ~stroke:0l ();
   let rect = Ui_batch.Builder.publish rect_builder in
-  let bad_rect = Ui_batch.Private.copy rect in
+  let bad_rect = Ui_batch.copy rect in
   Bytes.set_int32_le (Ui_batch.instances bad_rect) 8 (Int32.bits_of_float 0.);
-  assert (not (Ui_batch.Private.valid_shapes bad_rect));
+  assert (not (Ui_batch.valid_shapes bad_rect));
   print_endline "Ui_batch validation is remembered per published batch"
 
 (* A builder filled to its capacity publishes its own storage (no second copy of every instance),

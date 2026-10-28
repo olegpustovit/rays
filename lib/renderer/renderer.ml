@@ -418,11 +418,11 @@ let lower_scene2_uncached value ~lease_policy ~density ~resource:resolve ir =
       let resolve_gpu shapes = match Scene_command.Ui_batch.marks shapes with
         | None -> Ok None
         | Some token ->
-            let identity=Scene_command.Marks.Private.gpu_identity token in
+            let identity=Scene_command.Marks.gpu_identity token in
             (match Hashtbl.find_opt value.gpu_owner.marks_registry identity with
              | Some source when valid_gpu_marks source &&
-                 source.marks_stamp=Scene_command.Marks.Private.gpu_stamp token &&
-                 source.marks_count=Scene_command.Marks.Private.gpu_count token ->
+                 source.marks_stamp=Scene_command.Marks.gpu_stamp token &&
+                 source.marks_count=Scene_command.Marks.gpu_count token ->
                  if source.marks_gpu.gpu_device == Scene_execution.device value.renderer
                  then Ok (Some (gpu_marks_key source))
                  else Error "GPU shapes belong to another device"
@@ -432,7 +432,7 @@ let lower_scene2_uncached value ~lease_policy ~density ~resource:resolve ir =
         ~snapshot:(fun ~density source ->
           snapshot value ~lease_policy ~density source)
         ~resolve_gpu ~rollback
-        (Scene_command.Render_ir.Private.commands_readonly ir)
+        (Scene_command.Render_ir.commands_readonly ir)
 (* A plan holding a GPU shape token is lowered again every time: the token's
    source can go stale, and only lowering checks that. *)
 let has_gpu_shapes commands=Array.exists(function
@@ -440,8 +440,8 @@ let has_gpu_shapes commands=Array.exists(function
   |_->false)commands
 let lower_scene2_with_policy value ~lease_policy ~density ~resource:resolve ir =
   if value.dead then lower_scene2_uncached value~lease_policy~density~resource:resolve ir else
-  let commands=Scene_command.Render_ir.Private.commands_readonly ir in
-  let ir_id=Scene_command.Render_ir.Private.identity ir in
+  let commands=Scene_command.Render_ir.commands_readonly ir in
+  let ir_id=Scene_command.Render_ir.identity ir in
   let facts=presentation_facts value|>Result.get_ok in
   let extent=facts.logical_width,facts.logical_height,
     facts.drawable_width,facts.drawable_height in
@@ -467,7 +467,7 @@ let lower_scene2_with_policy value ~lease_policy ~density ~resource:resolve ir =
     let exact (plan:cached_scene2_plan)=
       plan.plan_command_count=command_count&&same_context plan&&
       Renderer_retained_plans.same_resources plan.plan_resources resources&&
-      Scene_command.Render_ir.Private.commands_readonly plan.plan_ir=commands in
+      Scene_command.Render_ir.commands_readonly plan.plan_ir=commands in
     let rebind (plan:cached_scene2_plan)=
       Renderer_retained_plans.rebind value.retained_plans plan ~ir_id ~ir in
     let hit=match Renderer_retained_plans.find value.retained_plans fingerprint with
@@ -922,7 +922,7 @@ module Private=struct
           let device=List.rev !device in
           if not !changed&&valid_gpu_marks value&&List.length device=List.length value.marks_device
              &&List.for_all2(fun(_,a)(_,b)->a==b)device value.marks_device then
-            Ok(Scene_command.Marks.Private.gpu_token~identity:value.marks_id~count
+            Ok(Scene_command.Marks.gpu_token~identity:value.marks_id~count
               ~stamp:value.marks_stamp)
           else begin
             unregister_marks value;
@@ -934,7 +934,7 @@ module Private=struct
               ~vertex_count:(4*count)~valid:(fun()->valid_gpu_marks value)()with
             |Error e->value.marks_device<-[];backend operation e
             |Ok registration->value.marks_registration<-Some registration;
-                Ok(Scene_command.Marks.Private.gpu_token~identity:value.marks_id~count
+                Ok(Scene_command.Marks.gpu_token~identity:value.marks_id~count
                   ~stamp:value.marks_stamp)
           end)))
     end

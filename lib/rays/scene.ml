@@ -121,7 +121,7 @@ let display_list ?(images=[]) segment=
     |Glyphs glyphs->
         if not(Hashtbl.mem bound glyphs.resource_id)then
           invalid_arg"Scene.display_list: unbound glyph resource"
-    |_->())(Scene_command.Render_ir.Private.commands_readonly
+    |_->())(Scene_command.Render_ir.commands_readonly
       (Scene_command.Display_list.render_ir segment));
   let resources=Array.fold_right(fun(id,image) rest->
     (id,Renderer.Image(Image.Private.resource image))::rest)
@@ -248,7 +248,7 @@ module Private=struct
    |Geometry g::xs->emit builder(Scene_command.Render_ir.Geometry g);nodes xs
    |Shapes s::xs->emit builder(Scene_command.Render_ir.Shapes s);nodes xs
    |Display_list node::xs->
-       Array.iter (emit builder) (Scene_command.Render_ir.Private.commands_readonly
+       Array.iter (emit builder) (Scene_command.Render_ir.commands_readonly
          (Scene_command.Display_list.render_ir node.segment));
        nodes xs
    |Image node::xs->image_command builder node.image node.x node.y node.scale node.angle;nodes xs
@@ -284,7 +284,7 @@ module Private=struct
    |_->
       try
         let commands=commands ~density scene in
-        let created=Scene_command.Render_ir.Private.create_owned commands in
+        let created=Scene_command.Render_ir.create_owned commands in
         match created with
         |Error e->Error("invalid scene description: "^Scene_command.Render_ir.(match e with
           |Non_finite->"non-finite value"|Invalid_extent->"negative extent"
@@ -430,7 +430,7 @@ module Private=struct
    |Scene_command.Render_ir.Geometry geometry->total+
        Array.length geometry.vertices*(Sys.word_size/8)+
        Array.length geometry.indices*(Sys.word_size/8)
-   |_->total+32)0(Scene_command.Render_ir.Private.commands_readonly ir)
+   |_->total+32)0(Scene_command.Render_ir.commands_readonly ir)
  let stage_scene2_layer ~density nodes=
    let resources=image_resources~density nodes in
    let versions=List.map(function
@@ -449,7 +449,7 @@ module Private=struct
            Option.iter(fun cache->Layer_table.add cache~bytes(nodes,density)(ir,versions))cache;
            result
 
- let empty_ir=Result.get_ok(Scene_command.Render_ir.Private.create_owned[||])
+ let empty_ir=Result.get_ok(Scene_command.Render_ir.create_owned[||])
  let rec validate_native_resources=function
    |[]->Ok()
    |(_,Renderer.Image image)::rest->
@@ -533,7 +533,7 @@ module Private=struct
                else clear:=unpack_clear color
            |Geometry _|Shapes _|Image _|Glyphs _->seen_draw:=true
            |Set_blend _|Push_clip _|Pop_clip|Push_transform _|Pop_transform->())
-           (Scene_command.Render_ir.Private.commands_readonly
+           (Scene_command.Render_ir.commands_readonly
              (Scene_command.Display_list.render_ir segment))
      |Scene2_layer(ir,_)->Array.iter(function
        |Scene_command.Render_ir.Clear color->
@@ -541,7 +541,7 @@ module Private=struct
           else clear:=unpack_clear color
        |Geometry _|Shapes _|Image _|Glyphs _->seen_draw:=true
        |Set_blend _|Push_clip _|Pop_clip|Push_transform _|Pop_transform->())
-       (Scene_command.Render_ir.Private.commands_readonly ir))layers;
+       (Scene_command.Render_ir.commands_readonly ir))layers;
    match!failure with Some message->Error message|None->
    let scene3=List.filter_map(function Scene3_layer prepared->Some prepared|_->None)layers in
    let retained=match layers with
@@ -597,7 +597,7 @@ module Private=struct
    |Scene_command.Render_ir.Geometry geometry->total+
            Array.length geometry.vertices*(Sys.word_size/8)+
            Array.length geometry.indices*(Sys.word_size/8)
-       |_->total+32)0(Scene_command.Render_ir.Private.commands_readonly ir)
+       |_->total+32)0(Scene_command.Render_ir.commands_readonly ir)
    |Ui_layer(ui,_)->total+Bytes.length(Scene_command.Ui_batch.instances ui)
    |Scene3_layer prepared->total+Array.fold_left(fun total entry->
        total+Bytes.length entry.Renderer.Scene_execution.draw.mesh.vertices+

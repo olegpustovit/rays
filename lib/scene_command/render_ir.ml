@@ -27,14 +27,14 @@ let valid_indices ~vertex_count values=
     incr index
   done;
   !invalid
-let copy_command=function Clear c->Clear c|Set_blend b->Set_blend b|Push_clip r->Push_clip r|Pop_clip->Pop_clip|Push_transform t->Push_transform t|Pop_transform->Pop_transform|Geometry g->Geometry{g with vertices=Array.copy g.vertices;indices=Array.copy g.indices}|Shapes s->Shapes(Ui_batch.Private.copy s)|Image i->Image i|Glyphs g->Glyphs{g with glyphs=Array.copy g.glyphs}
+let copy_command=function Clear c->Clear c|Set_blend b->Set_blend b|Push_clip r->Push_clip r|Pop_clip->Pop_clip|Push_transform t->Push_transform t|Pop_transform->Pop_transform|Geometry g->Geometry{g with vertices=Array.copy g.vertices;indices=Array.copy g.indices}|Shapes s->Shapes(Ui_batch.copy s)|Image i->Image i|Glyphs g->Glyphs{g with glyphs=Array.copy g.glyphs}
 let create_internal ~copy input=
   if Array.length input>1_048_576 then Error Complexity_limit else
   let clip=ref 0 and transform=ref 0 and failure=ref None in
   let fail e=if !failure=None then failure:=Some e in
   Array.iter(fun command->match command with
   |Clear _|Set_blend _->()
-  |Shapes s->if not(Ui_batch.Private.valid_shapes s)then fail Invalid_cardinality
+  |Shapes s->if not(Ui_batch.valid_shapes s)then fail Invalid_cardinality
   |Push_clip r->if valid_rect r then incr clip else fail(if finite_rect r then Invalid_extent else Non_finite)
   |Pop_clip->if !clip=0 then fail Unbalanced_clip else decr clip
   |Push_transform t->if finite_transform t then incr transform else fail Non_finite
@@ -49,11 +49,9 @@ let create_internal ~copy input=
     Ok{id=Atomic.fetch_and_add next_id 1;
       commands}
 let create input=create_internal~copy:true input
-module Private=struct
-  let identity t=t.id
-  let commands_readonly t=t.commands
-  let create_owned input=create_internal~copy:false input
-end
+let identity t=t.id
+let commands_readonly t=t.commands
+let create_owned input=create_internal~copy:false input
 let serialize value =
   let buffer = Buffer.create 256 in
   let byte = Buffer.add_uint8 buffer
@@ -89,8 +87,8 @@ let serialize value =
          | None -> byte 0
          | Some gpu ->
              byte 1;
-             int (Marks.Private.gpu_identity gpu);
-             i64 (Marks.Private.gpu_stamp gpu));
+             int (Marks.gpu_identity gpu);
+             i64 (Marks.gpu_stamp gpu));
         let bytes = Ui_batch.instances shapes in
         int (Bytes.length bytes);
         Buffer.add_bytes buffer bytes

@@ -85,7 +85,7 @@ let gpu_set buffers ~device ~gpu ~converted ~slot count (kind : M.kind) =
         5, [| vec 0 position; vec 1 end_; host (word_bytes 1 (fun _ -> 0l)) 0; word 3 stroke; one 4 stroke_width |]
     | Point _ -> assert false in
   match gpu ~slot ~kind:kind_word ~count attributes with
-  | Ok token -> Scene.Private.shapes (Scene_command.Ui_batch.Private.of_marks token)
+  | Ok token -> Scene.Private.shapes (Scene_command.Ui_batch.of_marks token)
   | Error (d : Diagnostic.t) -> V.raise_diagnostic d
 
 let has_device (kind : M.kind) =

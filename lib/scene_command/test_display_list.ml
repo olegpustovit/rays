@@ -45,10 +45,10 @@ let () =
   require (first == same && Display_list.id first = 7L
     && Display_list.version first = 1L)
     "display-list stable publication identity drift";
-  require (Render_ir.Private.identity (Display_list.render_ir first) =
-    Render_ir.Private.identity (Display_list.render_ir same))
+  require (Render_ir.identity (Display_list.render_ir first) =
+    Render_ir.identity (Display_list.render_ir same))
     "unchanged display-list IR lost its identity";
-  let commands = Render_ir.Private.commands_readonly (Display_list.render_ir first) in
+  let commands = Render_ir.commands_readonly (Display_list.render_ir first) in
   require (Array.length commands = 18)
     "display-list command cardinality drift";
   (match commands.(0), commands.(17) with
@@ -67,10 +67,10 @@ let () =
       (Display_list.Builder.publish builder ~id:7L ~version:1L) in
   require (reset != first
     && Array.length
-         (Render_ir.Private.commands_readonly (Display_list.render_ir reset)) = 0)
+         (Render_ir.commands_readonly (Display_list.render_ir reset)) = 0)
     "display-list reset reused a stale publication";
-  require (Render_ir.Private.identity (Display_list.render_ir reset) <>
-    Render_ir.Private.identity (Display_list.render_ir first))
+  require (Render_ir.identity (Display_list.render_ir reset) <>
+    Render_ir.identity (Display_list.render_ir first))
     "changed display-list IR reused its old identity";
   require (Display_list.source_bytes reset = source_bytes ~capacity:32 [])
     "display-list reset released capacity";
@@ -78,7 +78,7 @@ let () =
   let second = Result.get_ok
       (Display_list.Builder.publish builder ~id:7L ~version:2L) in
   require (second != first && second != reset && Display_list.version second = 2L
-    && Render_ir.Private.commands_readonly (Display_list.render_ir second)
+    && Render_ir.commands_readonly (Display_list.render_ir second)
        = [|Render_ir.Geometry (rectangle 3)|]
     && Display_list.source_bytes second = source_bytes ~capacity:32 [rectangle 3])
     "display-list reset released capacity or failed to republish";
@@ -99,7 +99,7 @@ let () =
   let complete = Result.get_ok
       (Display_list.Builder.publish complete ~id:9L ~version:4L) in
   (match Array.to_list
-      (Render_ir.Private.commands_readonly (Display_list.render_ir complete)) with
+      (Render_ir.commands_readonly (Display_list.render_ir complete)) with
    | [ Geometry owned;
        Image { resource_id = 17;
          source = { x = 1.; y = 2.; width = 3.; height = 4. };

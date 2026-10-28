@@ -42,7 +42,7 @@ let run () =
     let found=ref None in
     Array.iter(function
       |Scene_command.Render_ir.Image image->found:=Some image.destination
-      |_->())(Scene_command.Render_ir.Private.commands_readonly ir);
+      |_->())(Scene_command.Render_ir.commands_readonly ir);
     match !found with Some rect->rect|None->failwith"density text destination"in
   let d1=dest one and d2=dest two in
   require(abs_float(d1.width-.d2.width)<3.&&abs_float(d1.height-.d2.height)<2.)

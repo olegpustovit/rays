@@ -127,7 +127,7 @@ let frame_and_scene () =
   let scene = [ Scene.clear Rays_math.Color.black; Scene.rect ~at:(0, 0) ~w:4 ~h:3 ~fill:Rays_math.Color.red ();
     Scene.text_input_region ~at:(1, 1) ~w:2 ~h:1 ~focused:true ~cursor:1 () ] in
   let ir = Result.get_ok (Scene.Private.to_ir scene) in
-  check (Array.length (Scene_command.Render_ir.Private.commands_readonly ir) = 2
+  check (Array.length (Scene_command.Render_ir.commands_readonly ir) = 2
          && Scene.Private.text_regions scene = [ 1, 1, 2, 1, true, 1 ]) "scene lowering";
   (match Scene.text_input_region ~at:(0, 0) ~w:1 ~h:1 ~cursor:(-1) () with
    | _ -> failwith "negative IME cursor accepted"
@@ -171,7 +171,7 @@ let scene_parity () =
         [ Scene.text ~at:(2, 3) ~size:12 "staged text";
           Scene.view3d ~viewport:(8, 4, 16, 12) ~camera scene3 ];
       Scene.rect ~at:(1, 1) ~w:3 ~h:2 ~fill:Rays_math.Color.red () ] in
-  let commands ir = Scene_command.Render_ir.Private.commands_readonly ir in
+  let commands ir = Scene_command.Render_ir.commands_readonly ir in
   let first = Result.get_ok (Scene.Private.stage_native ~width:32 ~height:24 scene) in
   let first_ir, first_resources = first.scene2, first.resources in
   let automatic_text_id = ref None in

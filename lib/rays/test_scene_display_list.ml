@@ -27,7 +27,7 @@ let run () =
   (match transformed.layers, transformed.retained with
    | [Scene.Private.Scene2_layer (ir, [])], Some (identity, 1L)
        when String.starts_with ~prefix:"scene-stage:" identity ->
-       (match Array.to_list (Scene_command.Render_ir.Private.commands_readonly ir) with
+       (match Array.to_list (Scene_command.Render_ir.commands_readonly ir) with
         | [Scene_command.Render_ir.Push_transform _;
            Scene_command.Render_ir.Geometry geometry;
            Scene_command.Render_ir.Pop_transform] when geometry = rectangle -> ()

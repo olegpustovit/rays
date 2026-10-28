@@ -10,7 +10,7 @@ let first_geometry scene =
   let ir = Result.get_ok (Scene.Private.to_ir scene) in
   Array.find_map
     (function Scene_command.Render_ir.Geometry geometry -> Some geometry | _ -> None)
-    (Scene_command.Render_ir.Private.commands_readonly ir)
+    (Scene_command.Render_ir.commands_readonly ir)
   |> Option.get
 
 let require_geometry_reuse label make =

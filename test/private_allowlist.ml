@@ -15,7 +15,6 @@ let entries = [
   "flow_native", "Renderer.Private";
   "flow_native", "Runtime_resources.Image.Private";
   "flow_native", "Scene.Private";
-  "flow_native", "Scene_command.Ui_batch.Private";
   "flow_native", "Sop.Image.Private";
   "flow_native", "Sop.Node.Private";
   "flow_native", "Texture.Private";
@@ -41,7 +40,6 @@ let entries = [
   "rays", "Runtime_resources.Canvas.Private";
   "rays", "Runtime_resources.Image.Private";
   "rays", "Runtime_resources.Text.Private";
-  "rays", "Scene_command.Render_ir.Private";
   "rays_editor", "Flow.Eval.Private";
   "rays_editor", "Flow_gpu.Host.Private";
   "rays_editor", "Pxui_graph.Scope.Private";
@@ -56,8 +54,6 @@ let entries = [
   "renderer", "Runtime_resources.Canvas.Private";
   "renderer", "Runtime_resources.Image.Private";
   "renderer", "Runtime_resources.Text.Private";
-  "renderer", "Scene_command.Marks.Private";
-  "renderer", "Scene_command.Render_ir.Private";
   "runtime", "Ogpu.Backend.Private";
   "runtime", "Renderer.Private";
   "tools", "Flow.Op.Private";

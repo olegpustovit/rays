@@ -36,12 +36,10 @@ type t = entry array
 
 type gpu_token
 
-module Private : sig
-  val gpu_token : identity:int -> count:int -> stamp:int64 -> gpu_token
-  val gpu_identity : gpu_token -> int
-  val gpu_count : gpu_token -> int
-  val gpu_stamp : gpu_token -> int64
-end
+val gpu_token : identity:int -> count:int -> stamp:int64 -> gpu_token
+val gpu_identity : gpu_token -> int
+val gpu_count : gpu_token -> int
+val gpu_stamp : gpu_token -> int64
 
 val max_count : int
 val max_entries : int

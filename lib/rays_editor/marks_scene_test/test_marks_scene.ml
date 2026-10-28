@@ -149,7 +149,7 @@ let () =
   let device = {Flow_ir.Gpu.identity = 1; count = 2; width = 1; output = 0; stamp = 1L; gpu_seconds = None} in
   let registered = ref 0 in
   let gpu ~slot:_ ~kind:_ ~count:_ _ =
-    incr registered; Ok (Scene_command.Marks.Private.gpu_token ~identity:1 ~count:2 ~stamp:1L) in
+    incr registered; Ok (Scene_command.Marks.gpu_token ~identity:1 ~count:2 ~stamp:1L) in
   let scene x =
     let evaluation = ok (E.static (checked (Printf.sprintf
       "(draw/circles (map (fn [i] [(+ %s i) 0 0]) (array/range 2)) :radius (map (fn [i] 1.0) (array/range 2)))" x))) in

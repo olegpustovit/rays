@@ -56,7 +56,7 @@ let run () =
             done
           done) [63;64;65;1024];
         let colored ?(barrier=false) color = scene ~reference:false ~count:63 ~phase:0.
-          |> Private.commands_readonly
+          |> commands_readonly
           |> Array.map (function Geometry g->Geometry {g with color}|c->c)
           |> (fun commands->if barrier then Array.append [|Set_blend Alpha|] commands
               else commands)
