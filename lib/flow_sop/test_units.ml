@@ -21,5 +21,6 @@ module _ = Test_iterate
 module _ = Test_adjacency
 module _ = Test_graph
 module _ = Test_lisp_fusion
+module _ = Test_lisp_inline
 module _ = Test_trace
 module _ = Test_mesh_planes

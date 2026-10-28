@@ -203,6 +203,8 @@ and st = {
   graphs : (string, W.graph) Hashtbl.t;
   defs : (string, W.graph) Hashtbl.t;
   kind_fns : (string * (string * Context.t * Catalog.slot list)) list;
+  node_defs : (string, W.node_definition) Hashtbl.t;
+      (* Lisp nodes whose bodies evaluate inline in the calling program *)
   ops : Op.t list;
   find_op : string -> Context.t -> Op.t option;
       (* [Op.finder ops]: [ops] is a list, the whole SOP catalog in the editor *)
@@ -749,7 +751,7 @@ and ev_raw c env (x : W.term) : value =
       match Smap.find_opt b env with
       | None -> failf "E_UNBOUND" "%s is not bound." b
       | Some v -> fst (List.fold_left (fun (v, p) f -> (field c v f p, p ^ "." ^ f)) (v, b) fs))
-  | W.Call { kind; ctx; args } ->
+  | W.Call { kind; ctx; args } -> (
       let vals = eval_named c env args in
       let vals =
         if kind = "sop/merge" then
@@ -762,7 +764,9 @@ and ev_raw c env (x : W.term) : value =
           |> List.filter (fun (_, v) -> match v with No_geo -> false | _ -> true)
         else vals
       in
-      catalog_call c ~authored:x.form.id kind ctx vals
+      match Hashtbl.find_opt c.st.node_defs kind with
+      | Some d -> inline_node c d vals
+      | None -> catalog_call c ~authored:x.form.id kind ctx vals)
   | W.Op { op = "scene/merge"; args; skip = _ :: _ as skip } ->
       (* register L16: the arguments at skipped tuples are not evaluated *)
       let args = List.filteri (fun p _ -> not (List.mem (c.iter @ [ p ]) skip)) args in
@@ -1048,6 +1052,24 @@ and apply_op c ?(authored = 0) name (vals : (string * value) list) : value =
     Op.result_type o (List.map (fun (name, value) -> (name, Value.ty_of value, scalar value)) vals)
   in
   o.body ~live ~node:(mk_node c ~authored ~ty) vals
+
+and inline_node c (d : W.node_definition) vals =
+  if c.depth > max_depth then fail "E_DEPTH" "Call depth exceeds 64.";
+  let base = [ "node:" ^ d.kind.qualified ] in
+  let c' = { c with prefix = site c; base; route = []; depth = c.depth + 1 } in
+  let env =
+    List.fold_left
+      (fun env (pname, ty, default) ->
+        let v =
+          match (List.assoc_opt pname vals, default) with
+          | Some v, _ -> coerce_to ty v
+          | None, Some t -> coerce_to ty (ev (sub c' pname) env t)
+          | None, None -> No_geo
+        in
+        Smap.add pname v env)
+      Smap.empty d.body.inputs
+  in
+  ev c' env d.body.body
 
 and apply_def ?body c name (vals : value list) : value =
   let d =
@@ -1739,6 +1761,43 @@ and graph_value ?(rec_ = true) c name over =
 
 let diagnostic code msg span = Diagnostic.error ?span ~code msg
 
+(* ponytail: step A of the single-program design; a node with validators, normalizers or
+   callable slots still lowers as its own nested workspace. *)
+let reads_context defs (t : W.term) =
+  let seen = Hashtbl.create 8 in
+  let rec scan (t : W.term) =
+    (match t.node with
+    | W.Op { op; _ } when List.mem op W.body_context_ops -> raise Exit
+    | W.Call_fn { fn; body; _ } -> (
+        Option.iter scan body;
+        match Hashtbl.find_opt defs fn with
+        | Some (g : W.graph) when not (Hashtbl.mem seen fn) ->
+            Hashtbl.add seen fn ();
+            scan g.body;
+            List.iter (fun (_, _, df) -> Option.iter scan df) g.inputs
+        | _ -> ())
+    | _ -> ());
+    ignore
+      (W.map_children
+         (fun t ->
+           scan t;
+           t)
+         t)
+  in
+  match scan t with () -> false | exception Exit -> true
+
+let inline_nodes = Atomic.make false
+
+let inline_simple defs (d : W.node_definition) =
+  d.validations = [] && d.normalizers = []
+  && (not (reads_context defs d.body.body))
+  && List.for_all
+       (fun (_, _, df) -> not (Option.fold ~none:false ~some:(reads_context defs) df))
+       d.body.inputs
+  && List.for_all
+       (fun (s : Catalog.slot) -> match s.ty with Some (Ty.Fn _) -> false | _ -> true)
+       d.slots
+
 let new_state ?(budget = max_steps) ~record ws =
   let graphs = Hashtbl.create 8 and defs = Hashtbl.create 8 in
   List.iter (fun (g : W.graph) -> Hashtbl.replace graphs g.name g) ws.W.graphs;
@@ -1766,6 +1825,14 @@ let new_state ?(budget = max_steps) ~record ws =
     graphs;
     defs;
     kind_fns = ws.W.kind_fns;
+    node_defs =
+      (let t = Hashtbl.create 8 in
+       if Atomic.get inline_nodes then
+         List.iter
+           (fun (d : W.node_definition) ->
+             if inline_simple defs d then Hashtbl.replace t d.kind.qualified d)
+           ws.W.nodes;
+       t);
     ops = ws.ops;
     find_op = Op.finder ws.ops;
   }

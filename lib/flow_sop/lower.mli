@@ -231,5 +231,9 @@ val status : t -> seconds:float -> string option
 
 module Private : sig
   val cache_hits : int Atomic.t
+
+  val nested_lowerings : int Atomic.t
+  (** Lisp node bodies lowered as their own workspace; the single-program design drives it to 0. *)
+
   val clear_cache : unit -> unit
 end
