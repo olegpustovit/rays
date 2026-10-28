@@ -235,7 +235,7 @@ Findings: WN1 WN11 PL8.
 
 After P1, rdk holds only live kernels. Give it one error model, one parallel and cancel helper, one storage map, and a three-library structure.
 
-- [ ] P6.S1: Errors: one internal `Rdk_error of Error.t`, converted to `result` once at the boundary. Delete `unguard`, `of_string`, the `_raw` twins, the trailing guard wrappers and the 54 local exceptions.
+- [x] P6.S1: Errors: one internal `Rdk_error of Error.t`, converted to `result` once at the boundary. Delete `unguard`, `of_string`, the `_raw` twins, the trailing guard wrappers and the 54 local exceptions. Evidence: see RK3.
 - [ ] P6.S2: One `Support.parallel_for/parallel_ranges` and `Cancel.poll` with a single cadence, applied by codemod to the 886 sites.
 - [ ] P6.S3: `Attribute.map_float_planes`/`planes` to collapse the per-storage arms. One generic median BVH and one `Point_grid`. Merge the two boolean payload modules.
 - [ ] P6.S4: Kernel parameters become required records with no defaults, so the declaration is the single source of defaults.
@@ -245,7 +245,7 @@ After P1, rdk holds only live kernels. Give it one error model, one parallel and
 Exit gates:
 
 - [ ] P6.G1: rdk under about 80k lines including tests
-- [ ] P6.G2: no `unguard`/`_raw` pairs
+- [x] P6.G2: no `unguard`/`_raw` pairs Evidence: grep for unguard or _raw in lib/rdk finds only local helpers (add_raw, insert_raw, group_of_raw), none of them guarded twins.
 - [ ] P6.G3: one parallel helper
 - [ ] P6.G4: rdk test alias under 30 s warm
 
@@ -733,7 +733,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **RK2** (P0, high, correctness-risk, effort S). Location at baseline: lib/rdk/test_main.ml:3-4. `test_rdk_sources` and `test_copy_to_points` are in group 'rdk_parts', which no dune rule selects. 751 lines never run, including a GC-stress regression. Action: Move them into 'core' and 'mesh'. The guardrail (§07) stops this from happening again. Evidence: rdk_parts is gone; test_rdk_sources runs under core and test_copy_to_points under mesh in lib/rdk/test_main.ml.
 
-- [ ] **RK3** (P6, high, vibe-code, effort L). Location at baseline: core/error.ml:13-21 + 54 local exceptions, 114 string-result + 209 Error.t signatures, ~30 `unguard`. Each error passes through three forms (local exception, string result, Error.t), with 36 `_raw`/guarded twin functions. Action: Use one internal `Rdk_error of Error.t` and convert to `result` once at the rdk boundary. Delete unguard, of_string, the twins and the local exceptions.
+- [x] **RK3** (P6, high, vibe-code, effort L). Location at baseline: core/error.ml:13-21 + 54 local exceptions, 114 string-result + 209 Error.t signatures, ~30 `unguard`. Each error passes through three forms (local exception, string result, Error.t), with 36 `_raw`/guarded twin functions. Action: Use one internal `Rdk_error of Error.t` and convert to `result` once at the rdk boundary. Delete unguard, of_string, the twins and the local exceptions. Evidence: 91cf8472 and c559ac0c: one Error.Rdk of Error.t (operation, code, message) and Error.Fail, converted once by Error.guard/Error.run (with ?invalid_argument and ?cancelled code mapping). unguard 26→0, real _raw twins about 18→0, local exceptions 55→10 (the remaining 10 are control flow and infrastructure); public messages and codes unchanged.
 
 - [ ] **RK4** (P6, high, duplication, effort M). Location at baseline: attrib/group_ops.ml:4207-4313 (+ Attribute_ops, Curve_topology, Group_mesh, Point_replication, Sweep_modeling). Each operation is re-declared at the end of the file with 10–15 optional arguments, only to wrap it in `Error.guard`. Action: This goes away with RK3.
 
