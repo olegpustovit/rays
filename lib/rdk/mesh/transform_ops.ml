@@ -59,11 +59,12 @@ let transform_rotation_matrix order angles =
     | Transform_zxy -> z, x, y | Transform_zyx -> z, y, x in
   Rays_math.Mat4.mul third (Rays_math.Mat4.mul second first)
 
-let compose_transform_raw ?(order = Transform_srt)
+let compose_transform ?(order = Transform_srt)
     ?(rotation_order = Transform_xyz) ?(translate = Rays_math.Vec3.zero)
     ?(rotate = Rays_math.Vec3.zero) ?(scale = Rays_math.Vec3.create 1. 1. 1.) ?(shear = Rays_math.Vec3.zero)
     ?(uniform_scale = 1.) ?(pivot = Rays_math.Vec3.zero)
     ?(pivot_rotation = Rays_math.Vec3.zero) ?(invert = false) () =
+  Error.guard ~operation:"compose_transform" ~code:"invalid_transform" @@ fun () ->
   let vectors = ["translate", translate; "rotate", rotate; "scale", scale;
     "shear", shear; "pivot", pivot; "pivot_rotation", pivot_rotation] in
   match List.find_opt (fun (_, value) -> not (Float.is_finite value.Rays_math.Vec3.x
@@ -202,10 +203,11 @@ let valid_output_attribute_name = function
       let name = String.trim name in
       name <> "" && name <> "P"
 
-let distance_from_geometry_raw ?cancel ?(grain = 16_384) ?affected
+let distance_from_geometry ?cancel ?(grain = 16_384) ?affected
     ?reference_selection ?(reference_kind = Distance_reference_primitives)
     ?(falloff = Soft_linear) ?(radius = Distance_maximum)
     ?(distance_attribute = Some "distance") ?mask_attribute ~reference source =
+  Error.guard ~operation:"distance_from_geometry" ~code:"invalid_distance" @@ fun () ->
   let operation = "Rdk.Transform_ops.distance_from_geometry" in
   if grain <= 0 then Error (operation ^ ": grain must be positive")
   else if not (valid_output_attribute_name distance_attribute) then Error
@@ -372,9 +374,10 @@ let soft_attribute_weights ?cancel ~grain ~radius ~falloff ~apply_rolloff
       | _ -> Error (Printf.sprintf
           "Rdk.Transform_ops.soft_transform: point distance attribute %S must be float" name)
 
-let soft_transform_raw ?cancel ?(grain = 16_384) ?selection
+let soft_transform ?cancel ?(grain = 16_384) ?selection
     ?(metric = Soft_radius) ?(falloff = Soft_cubic) ?(radius = 1.)
     ?falloff_attribute ?(recompute_normals = true) matrix geometry =
+  Error.guard ~operation:"soft_transform" ~code:"invalid_transform" @@ fun () ->
   if grain <= 0 then Error "Rdk.Transform_ops.soft_transform: grain must be positive"
   else if not (Float.is_finite radius) || radius < 0. then
     Error "Rdk.Transform_ops.soft_transform: radius must be finite and non-negative"
@@ -486,24 +489,3 @@ let transform ?grain matrix geometry =
                      (Attribute.normal ~owner) normals |> Support.get_ok in
                  Geometry.with_attribute attribute output |> Support.get_ok))
         transformed [Attribute.Point; Attribute.Vertex]
-
-let compose_transform ?order ?rotation_order ?translate ?rotate ?scale ?shear
-    ?uniform_scale ?pivot ?pivot_rotation ?invert () =
-  Result.map_error (Error.of_string ~operation:"compose_transform"
-      ~code:"invalid_transform")
-    (compose_transform_raw ?order ?rotation_order ?translate ?rotate ?scale
-      ?shear ?uniform_scale ?pivot ?pivot_rotation ?invert ())
-
-let soft_transform ?cancel ?grain ?selection ?metric ?falloff ?radius
-    ?falloff_attribute ?recompute_normals matrix geometry =
-  Error.guard ~operation:"soft_transform" ~code:"invalid_transform"
-    (fun () -> soft_transform_raw ?cancel ?grain ?selection ?metric ?falloff
-      ?radius ?falloff_attribute ?recompute_normals matrix geometry)
-
-let distance_from_geometry ?cancel ?grain ?affected ?reference_selection
-    ?reference_kind ?falloff ?radius ?distance_attribute ?mask_attribute
-    ~reference source =
-  Error.guard ~operation:"distance_from_geometry" ~code:"invalid_distance"
-    (fun () -> distance_from_geometry_raw ?cancel ?grain ?affected
-      ?reference_selection ?reference_kind ?falloff ?radius
-      ?distance_attribute ?mask_attribute ~reference source)

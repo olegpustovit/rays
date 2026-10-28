@@ -35,10 +35,12 @@ let blur_edge_lengths ?cancel ~grain positions topology =
    | None -> ());
   lengths
 
-let blur_points_raw ?cancel ?(grain = 16_384) ?selection ?(iterations = 1)
+let run ?cancel ?(grain = 16_384) ?selection ?(iterations = 1)
     ?(method_ = Uniform) ?(mode = Laplacian 0.5) ?weight_attribute
     ?alpha_attribute ?(pin_borders = false) ?(original_blend = 0.)
     ?(blurred_blend = 1.) ~pattern geometry =
+  Error.guard ~cancelled:"attribute blur was cancelled" ~invalid_argument:"invalid_parameter" ~operation:"attribute_blur"
+    ~code:"invalid_blur" @@ fun () ->
   if grain <= 0 then invalid_arg
       "Rdk.Attribute_ops.blur_points: grain must be positive";
   if iterations < 0 then Error
@@ -318,17 +320,3 @@ let blur_points_raw ?cancel ?(grain = 16_384) ?selection ?(iterations = 1)
               install geometry 0)
         )))))
       end))
-
-let run ?cancel ?grain ?selection ?iterations ?method_ ?mode
-    ?weight_attribute ?alpha_attribute ?pin_borders ?original_blend
-    ?blurred_blend ~pattern geometry =
-  try Result.map_error
-      (Error.of_string ~operation:"attribute_blur" ~code:"invalid_blur")
-      (blur_points_raw ?cancel ?grain ?selection ?iterations ?method_ ?mode
-         ?weight_attribute ?alpha_attribute ?pin_borders ?original_blend
-         ?blurred_blend ~pattern geometry)
-  with
-  | Cancel.Cancelled -> Error (Error.make ~operation:"attribute_blur"
-      ~code:"cancelled" "attribute blur was cancelled")
-  | Invalid_argument message -> Error (Error.make ~operation:"attribute_blur"
-      ~code:"invalid_parameter" message)

@@ -23,9 +23,9 @@ type edge_group_pair = {
   mutable right_edge_group : Edge_group.t option;
 }
 
-exception Payload_error of string * string
 
 let operation = "boolean_corner_payload"
+let payload_error (code, message) = Error.fail_with ~operation ~code message
 let error code message = Error (Error.make ~operation ~code message)
 
 let storage_kind = function
@@ -47,7 +47,7 @@ let collect_attributes owner left right =
           if side = 0 then pair.left <- Some attribute else pair.right <- Some attribute;
           Hashtbl.add table name pair; reversed := pair :: !reversed
       | Some pair ->
-          if pair.kind <> kind then raise (Payload_error
+          if pair.kind <> kind then (payload_error
             ("attribute_storage_mismatch", Printf.sprintf
               "%s attribute %S has different storage on the Boolean operands"
               (if owner = Attribute.Point then "point" else "vertex") name));
@@ -256,7 +256,7 @@ let interpolate_fixed ?cancel ~grain ancestry view corner_count pair =
       let value = match Packed.Float4.of_owned ~x ~y ~z ~w with
         | Ok value -> value | Error message -> invalid_arg message in
       Attribute.Float4 value
-  | _ -> raise (Payload_error ("unsupported_storage", Printf.sprintf
+  | _ -> (payload_error ("unsupported_storage", Printf.sprintf
       "%s attribute %S uses CSR storage not yet handled by the fixed-width interpolator"
       (if pair.source_owner = Attribute.Point then "point" else "vertex") pair.name))
 
@@ -363,7 +363,7 @@ let first_corners topology point_count =
     topology.Topology.Private.vertex_points;
   representatives
 
-let conflict name point = raise (Payload_error
+let conflict name point = (payload_error
   ("point_payload_conflict", Printf.sprintf
     "point payload %S disagrees across incident Boolean corners at output point %d; use Promote_to_vertex or split the schema"
     name point))
@@ -510,7 +510,7 @@ let copy_group ?cancel ~grain ancestry view topology point_count representatives
           let representative = representatives.(point) in
           if corner = representative then Bytes.unsafe_set points point value
           else if value <> Bytes.unsafe_get points point then
-            raise (Payload_error ("point_group_conflict", Printf.sprintf
+            (payload_error ("point_group_conflict", Printf.sprintf
               "point group %S disagrees across incident Boolean corners at output point %d; use Promote_to_vertex or split the group"
               pair.group_name point))) topology.Topology.Private.vertex_points;
         Group.Point, point_count, points, (fun point -> representatives.(point))
@@ -560,13 +560,13 @@ let assert_no_promotion_collisions point_conflict point_attributes vertex_attrib
     let attribute_names = Hashtbl.create (Array.length vertex_attributes) in
     Array.iter (fun pair -> Hashtbl.replace attribute_names pair.name ()) vertex_attributes;
     Array.iter (fun pair -> if Hashtbl.mem attribute_names pair.name then
-      raise (Payload_error ("promotion_collision", Printf.sprintf
+      (payload_error ("promotion_collision", Printf.sprintf
         "point attribute %S cannot be promoted because a vertex attribute has the same name"
         pair.name))) point_attributes;
     let group_names = Hashtbl.create (Array.length vertex_groups) in
     Array.iter (fun pair -> Hashtbl.replace group_names pair.group_name ()) vertex_groups;
     Array.iter (fun pair -> if Hashtbl.mem group_names pair.group_name then
-      raise (Payload_error ("promotion_collision", Printf.sprintf
+      (payload_error ("promotion_collision", Printf.sprintf
         "point group %S cannot be promoted because a vertex group has the same name"
         pair.group_name))) point_groups
   end
@@ -682,5 +682,5 @@ let copy ?cancel ~grain ~point_conflict ~point_tolerance ancestry base =
     end
   with
   | Cancel.Cancelled -> error "cancelled" "Boolean corner payload transfer was cancelled"
-  | Payload_error (code, message) -> error code message
+  | Error.Rdk failure -> Error failure
   | Invalid_argument message -> error "invalid_payload" message

@@ -12,16 +12,24 @@ let make ?(hints = []) ~operation ~code message =
 
 let of_string ~operation ~code message = make ~operation ~code message
 exception Fail of string
+exception Rdk of t
 let fail message = raise (Fail message)
-let guard ~operation ~code work =
+let fail_with ~operation ~code message = raise (Rdk (make ~operation ~code message))
+let guard ?(cancelled = "geometry operation was cancelled") ?invalid_argument
+    ~operation ~code work =
   try Result.map_error (of_string ~operation ~code) (work ()) with
+  | Rdk error -> Error error
   | Fail message -> Error (make ~operation ~code message)
-  | Cancel.Cancelled -> Error (make ~operation ~code:"cancelled"
-      "geometry operation was cancelled")
+  | Cancel.Cancelled -> Error (make ~operation ~code:"cancelled" cancelled)
+  | Invalid_argument message as exn -> (match invalid_argument with
+      | Some code -> Error (make ~operation ~code message)
+      | None -> raise exn)
 let get = function
   | Ok value -> value
   | Error value when value.code = "cancelled" -> raise Cancel.Cancelled
   | Error value -> raise (Fail value.message)
+let run ?cancelled ~operation ~code work =
+  guard ?cancelled ~invalid_argument:code ~operation ~code (fun () -> Ok (work ()))
 let operation value = value.operation
 let code value = value.code
 let message value = value.message

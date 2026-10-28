@@ -28,9 +28,8 @@ type crack_policy =
 
 let edge_ancestry_prefix = "__rdk_subdivide_edge_ancestry_"
 
-exception Subdivide_error of string
 
-let fail message = raise (Subdivide_error ("Rdk_mesh.Subdivide.subdivide: " ^ message))
+let fail message = raise (Error.Fail ("Rdk_mesh.Subdivide.subdivide: " ^ message))
 let get_ok = function Ok value -> value | Error message -> fail message
 
 let checked_add name a b =
@@ -4123,7 +4122,7 @@ let subdivide_polygons ?cancel ?grain ?(scheme = Catmull_clark) ?(iterations = 1
             else without_resulting_creases output)
         end
   with
-  | Subdivide_error message -> Error message
+  | Error.Fail message -> Error message
 
 let primitive_kind_counts geometry =
   let topology = Topology.Private.view (Geometry.topology geometry) in
@@ -4176,8 +4175,7 @@ let refine_curves ?cancel ?grain ?selection ~independent scheme iterations geome
       | Catmull_clark -> Curve_subdivide.Catmull_clark
       | Bilinear -> Curve_subdivide.Bilinear
       | Loop -> fail "Loop subdivision requires triangle polygons and cannot refine polygon curves" in
-    try Curve_subdivide.iterate ?cancel ?grain ~independent scheme iterations geometry
-    with Curve_subdivide.Error message -> fail message in
+    Curve_subdivide.iterate ?cancel ?grain ~independent scheme iterations geometry in
   match selection with
   | None -> refine geometry
   | Some selection ->
@@ -4336,7 +4334,7 @@ let subdivide ?cancel ?grain ?(scheme = Catmull_clark) ?(iterations = 1)
         end
       end
     with
-    | Subdivide_error message -> Error message
+    | Error.Fail message -> Error message
     | Invalid_argument message -> Error message in
   if not recompute_point_normals || not had_point_normals then result
   else Result.bind result (fun output ->

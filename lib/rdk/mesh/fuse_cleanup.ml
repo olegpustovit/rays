@@ -1,7 +1,6 @@
 
-exception Invalid of string
 
-let fail message = raise (Invalid ("Rdk_mesh.Fuse_cleanup.fuse: " ^ message))
+let fail message = raise (Error.Fail ("Rdk_mesh.Fuse_cleanup.fuse: " ^ message))
 let get_ok = function Ok value -> value | Error message -> fail message
 
 let run ?cancel ~grain count operation =
@@ -208,7 +207,7 @@ let apply_with_mapping ?cancel ~grain ~remove_degenerate_primitives
         |> Result.map (fun geometry -> geometry, old_to_new)
       end
     end
-  with Invalid message -> Error message
+  with Error.Fail message -> Error message
 
 let apply ?cancel ~grain ~remove_degenerate_primitives
     ~remove_unused_points_from_degenerate_primitives

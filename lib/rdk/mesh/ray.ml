@@ -22,12 +22,9 @@ type combine =
   | Ray_shortest
   | Ray_longest
 
-exception Ray_error of string * string
-exception Ray_rdk_error of Error.t
-
-let fail code message = raise (Ray_error (code, message))
+let fail code message = Error.fail_with ~operation:"ray" ~code message
 let get_string = function Ok value -> value | Error message -> fail "invalid_output" message
-let get_rdk = function Ok value -> value | Error error -> raise (Ray_rdk_error error)
+let get_rdk = function Ok value -> value | Error error -> raise (Error.Rdk error)
 
 let validate_name label = function
   | None -> ()
@@ -497,8 +494,7 @@ let run ?cancel ?(grain = 16_384) ?selection ?collision_primitives
   with
   | Cancel.Cancelled -> Error (Error.make ~operation:"ray" ~code:"cancelled"
       "ray projection was cancelled")
-  | Ray_error (code, message) -> Error (Error.make ~operation:"ray" ~code message)
-  | Ray_rdk_error error -> Error (Error.make ~hints:(Error.hints error)
+  | Error.Rdk error -> Error (Error.make ~hints:(Error.hints error)
       ~operation:"ray" ~code:(Error.code error) (Error.message error))
   | Invalid_argument message ->
       let code =

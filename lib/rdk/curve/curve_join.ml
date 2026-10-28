@@ -7,8 +7,7 @@ type curve_join_pick = {
   end_ : curve_join_end;
 }
 
-exception Curve_error of string
-let fail message = raise (Curve_error message)
+let fail message = raise (Error.Fail message)
 
 let validate_selection operation selection primitive_count =
   match selection with
@@ -680,4 +679,4 @@ let join ?cancel ?grain ?primitives ?picked_ends ?(orient_closest = true)
       Geometry.create ~positions:(Geometry.positions geometry)
         ~topology:output_topology ~attributes ~groups ~edge_groups ()
     end
-  with Curve_error message -> Error message
+  with Error.Fail message -> Error message

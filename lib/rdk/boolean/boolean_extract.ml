@@ -14,7 +14,6 @@ let xor = Xor (Left, Right)
 
 let operation = "boolean_extract"
 let error code message = Error (Error.make ~operation ~code message)
-exception Materialization_error of Error.t
 
 type ancestry = {
   complex : Boolean_complex.t;
@@ -732,7 +731,7 @@ let build_internal ?cancel ?(require_closed = true)
       edge_source_offsets.(!selected_count * 3) <- !edge_source_count;
     (match validate_materialized ~allow_degenerate:defer_rounded_slivers
         ~x ~y ~z ~vertex_points () with
-     | Error failure -> raise (Materialization_error (Error.make ~operation
+     | Error failure -> raise (Error.Rdk (Error.make ~operation
          ~code:(Error.code failure)
          ("post-coalescing extraction validation failed: "
           ^ Error.to_string failure)))
@@ -745,7 +744,7 @@ let build_internal ?cancel ?(require_closed = true)
      | Error message -> error "invalid_output" message
      | Ok topology ->
          (match if require_closed then validate_closed_topology topology else Ok () with
-          | Error failure -> raise (Materialization_error failure)
+          | Error failure -> raise (Error.Rdk failure)
           | Ok () -> ());
          match Geometry.create
              ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
@@ -766,7 +765,7 @@ let build_internal ?cancel ?(require_closed = true)
          | Error message -> error "invalid_output" message)
   with
   | Cancel.Cancelled -> error "cancelled" "Boolean extraction was cancelled"
-  | Materialization_error failure -> Error failure
+  | Error.Rdk failure -> Error failure
   | Invalid_argument message -> error "invalid_output" message
 
 let build_with_ancestry ?cancel ?require_closed ?defer_rounded_slivers

@@ -18,4 +18,3 @@ let relax ?cancel ?grain ?name ?seams ?edge_seams ?uv_tolerance ?iterations
   Uv_parameterize.solve ?cancel ?grain ?name ?seams ?edge_seams ?uv_tolerance
     ?iterations ?tolerance Uv_parameterize.Preserve geometry
 
-exception Uv_error of string

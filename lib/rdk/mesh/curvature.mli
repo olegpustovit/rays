@@ -6,4 +6,3 @@ type outputs = {
   curvedness : string option;
   shape_index : string option;
 }
-exception Curvature_error of string

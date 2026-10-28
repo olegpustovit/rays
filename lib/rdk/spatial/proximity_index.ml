@@ -25,7 +25,6 @@ type t = {
   count : int array;
 }
 
-exception Invalid of string
 
 let segment = '\000'
 let triangle = '\001'
@@ -36,7 +35,7 @@ let validate_point positions point label =
   let x = positions.Packed.Float3.Private.x.(point)
   and y = positions.y.(point) and z = positions.z.(point) in
   if not (Float.is_finite x && Float.is_finite y && Float.is_finite z) then
-    raise (Invalid (Printf.sprintf "%s references non-finite point %d" label point))
+    raise (Error.Fail (Printf.sprintf "%s references non-finite point %d" label point))
 
 let primitive_features ?cancel ?(grain = 16_384) geometry =
   try
@@ -52,7 +51,7 @@ let primitive_features ?cancel ?(grain = 16_384) geometry =
       let count = match Char.code (Bytes.unsafe_get topology.primitive_kinds primitive) with
         | 0 -> corners - 2 | 1 -> corners - 1 | _ -> corners in
       if count > Sys.max_array_length - offsets.(primitive) then
-        raise (Invalid "primitive feature count exceeds array limits");
+        raise (Error.Fail "primitive feature count exceeds array limits");
       offsets.(primitive + 1) <- offsets.(primitive) + count
     done;
     let total = offsets.(entity_count) in
@@ -105,7 +104,7 @@ let primitive_features ?cancel ?(grain = 16_384) geometry =
     Array.iter (fun item -> match !failure, item with
       | None, Some message -> failure := Some message
       | None, None | Some _, _ -> ()) failures;
-    Option.iter (fun message -> raise (Invalid message)) !failure;
+    Option.iter (fun message -> raise (Error.Fail message)) !failure;
     for feature = 0 to total - 1 do
       if feature land 4095 = 0 then Cancel.check_opt cancel;
       validate_point positions a.(feature) "primitive";
@@ -124,13 +123,13 @@ let primitive_features ?cancel ?(grain = 16_384) geometry =
         and nz = (abx *. acy) -. (aby *. acx) in
         let area_squared = (nx *. nx) +. (ny *. ny) +. (nz *. nz) in
         if not (Float.is_finite area_squared) || area_squared <= 1e-30 then
-          raise (Invalid (Printf.sprintf
+          raise (Error.Fail (Printf.sprintf
             "primitive feature %d is degenerate" feature))
       end
     done;
     Ok { positions; entity_count; offsets; entities; kinds; a; b; c }
   with
-  | Invalid message -> Error message
+  | Error.Fail message -> Error message
   | Invalid_argument message -> Error message
 
 let edge_features ?cancel ?(grain = 16_384) geometry =
@@ -152,7 +151,7 @@ let edge_features ?cancel ?(grain = 16_384) geometry =
     done;
     Ok { positions; entity_count; offsets; entities; kinds; a; b; c }
   with
-  | Invalid message -> Error message
+  | Error.Fail message -> Error message
   | Invalid_argument message -> Error message
 
 let create ?cancel ?(grain = 16_384) features =
@@ -420,7 +419,7 @@ let query_feature index queries query best_distance best_ids stack bounds =
             let entity = index.features.entities.(feature) in
             let distance = feature_distance_squared index.features feature
                 queries query in
-            if not (Float.is_finite distance) then raise (Invalid
+            if not (Float.is_finite distance) then raise (Error.Fail
               "feature distance overflowed for finite input coordinates");
             if distance < best_distance.(0)
                || (distance = best_distance.(0)
@@ -483,5 +482,5 @@ let nearest_entities_with_distances ?cancel ?(grain = 16_384) ~max_distance
           done);
     Ok (output, distances)
   with
-  | Invalid message -> Error message
+  | Error.Fail message -> Error message
   | Invalid_argument message -> Error message

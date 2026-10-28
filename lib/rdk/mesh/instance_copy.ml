@@ -160,7 +160,7 @@ let transform_single_instance ?cancel ~grain matrix geometry =
                  Geometry.with_attribute attribute output |> Support.get_ok))
         output [Attribute.Point; Attribute.Vertex]
 
-let materialize_instances ?cancel ?(grain = 16_384) ~transforms geometry =
+let materialize ?cancel ?(grain = 16_384) ~transforms geometry =
   if grain <= 0 then
     invalid_arg "Rdk.Instance_copy.materialize_instances: grain must be positive";
   Cancel.check_opt cancel;
@@ -360,11 +360,9 @@ let materialize_instances ?cancel ?(grain = 16_384) ~transforms geometry =
    N/v with up), rot, then translation (P, trans, transform, pivot). [affine]
    records a [transform] attribute, whose normals need the inverse transpose. *)
 
-let materialize_instances_raw = materialize_instances
-
 (* Each (selected) target's copy transform, from the frames
    [copy_to_points] places copies with: rows R·diag(s) and translation t. *)
 
 let materialize_instances ~transforms geometry =
   Error.guard ~operation:"materialize_instances" ~code:"invalid_parameter"
-    (fun () -> materialize_instances_raw ~transforms geometry)
+    (fun () -> materialize ~transforms geometry)

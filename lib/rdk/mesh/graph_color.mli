@@ -22,7 +22,5 @@ val greedy : offsets:int array -> neighbors:int array -> int array -> int array
 (** [greedy ~offsets ~neighbors order] first-fit colors a graph given as neighbour
     rows (CSR). Elements are colored in [order]; each takes the smallest color
     unused by its already colored neighbours. Elements outside [order] stay [-1].
-    This is the rule [run] applies per component. Raises [Graph_color_error]
+    This is the rule [run] applies per component. Raises [Error.Fail]
     on an internal color-bound failure. *)
-
-exception Graph_color_error of string

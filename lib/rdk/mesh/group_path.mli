@@ -1,4 +1,3 @@
-exception Invalid of string
 type dual = {
   offsets : int array;
   edges : int array;

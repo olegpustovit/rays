@@ -14,8 +14,7 @@ type numeric =
   | Tuple3 of Packed.Float3.Private.view
   | Tuple4 of Packed.Float4.Private.view
 
-exception Poly_cut_error of string
-let fail message = raise (Poly_cut_error message)
+let fail message = raise (Error.Fail message)
 
 let block_count length grain =
   if length = 0 then 0 else 1 + ((length - 1) / grain)
@@ -966,4 +965,4 @@ let cut ?cancel ?(grain = 16_384) ?primitives ?cut_points ?cut_edges
         ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
         ~topology:output_topology ~attributes ~groups ~edge_groups ()
     end
-  with Poly_cut_error message -> Error message
+  with Error.Fail message -> Error message

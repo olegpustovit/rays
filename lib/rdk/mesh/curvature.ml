@@ -9,4 +9,3 @@ type outputs = {
   shape_index : string option;
 }
 
-exception Curvature_error of string

@@ -31,10 +31,11 @@ type t = {
   count : int array;
 }
 
-exception Piece_error of string
-exception Group_error of string
+let fail code message = Error.fail_with ~operation:"linear_piece_index" ~code message
 
-let create_raw ?cancel ?(grain = 16_384) ?primitives geometry =
+let create ?cancel ?(grain = 16_384) ?primitives geometry =
+  Error.run ~operation:"linear_piece_index" ~code:"invalid_parameter"
+    ~cancelled:"linear-piece index construction was cancelled" @@ fun () ->
   if grain <= 0 then invalid_arg "Linear_piece_index: grain must be positive";
   Cancel.check_opt cancel;
   let positions = Packed.Float3.Private.view (Geometry.positions geometry)
@@ -44,9 +45,9 @@ let create_raw ?cancel ?(grain = 16_384) ?primitives geometry =
     | None -> Array.init primitive_count Fun.id
     | Some group ->
         if Group.owner group <> Group.Primitive then
-          raise (Group_error "selection must be a primitive group");
+          fail "invalid_group" "selection must be a primitive group";
         if Group.length group <> primitive_count then
-          raise (Group_error "primitive group length does not match geometry");
+          fail "invalid_group" "primitive group length does not match geometry";
         let output = Array.make (Group.cardinality group) 0 and next = ref 0 in
         Group.iter (fun primitive -> output.(!next) <- primitive; incr next) group;
         output in
@@ -61,16 +62,16 @@ let create_raw ?cancel ?(grain = 16_384) ?primitives geometry =
     let pieces = match
         Char.code (Bytes.unsafe_get topology.primitive_kinds primitive) with
       | 0 ->
-          if size <> 3 then raise (Piece_error (Printf.sprintf
+          if size <> 3 then fail "invalid_surface" (Printf.sprintf
             "primitive %d is a polygon with %d corners, not a triangle"
-            primitive size));
+            primitive size);
           1
       | 1 -> size - 1
       | 2 -> size
-      | _ -> raise (Piece_error (Printf.sprintf
-          "primitive %d has an invalid kind" primitive)) in
+      | _ -> fail "invalid_surface" (Printf.sprintf
+          "primitive %d has an invalid kind" primitive) in
     if pieces > Sys.max_array_length - piece_offsets.(slot) then
-      raise (Piece_error "piece cardinality exceeds array limits");
+      fail "invalid_surface" "piece cardinality exceeds array limits";
     piece_offsets.(slot + 1) <- piece_offsets.(slot) + pieces
   done;
   let piece_count = piece_offsets.(selected_count) in
@@ -194,7 +195,7 @@ let create_raw ?cancel ?(grain = 16_384) ?primitives geometry =
   Array.iter (fun value -> match !failure, value with
     | None, Some message -> failure := Some message
     | None, None | Some _, _ -> ()) errors;
-  Option.iter (fun message -> raise (Piece_error message)) !failure;
+  Option.iter (fun message -> fail "invalid_surface" message) !failure;
   let bounds = Bounds3_index.create ?cancel ~grain ~centroid_x ~centroid_y
       ~centroid_z ~item_min_x:piece_min_x ~item_min_y:piece_min_y
       ~item_min_z:piece_min_z ~item_max_x:piece_max_x ~item_max_y:piece_max_y
@@ -206,17 +207,6 @@ let create_raw ?cancel ?(grain = 16_384) ?primitives geometry =
     min_z = bounds.min_z; max_x = bounds.max_x; max_y = bounds.max_y;
     max_z = bounds.max_z; left = bounds.left; right = bounds.right;
     first = bounds.first; count = bounds.count }
-
-let create ?cancel ?grain ?primitives geometry =
-  try Ok (create_raw ?cancel ?grain ?primitives geometry) with
-  | Cancel.Cancelled -> Error (Error.make ~operation:"linear_piece_index"
-      ~code:"cancelled" "linear-piece index construction was cancelled")
-  | Piece_error message -> Error (Error.make ~operation:"linear_piece_index"
-      ~code:"invalid_surface" message)
-  | Group_error message -> Error (Error.make ~operation:"linear_piece_index"
-      ~code:"invalid_group" message)
-  | Invalid_argument message -> Error (Error.make ~operation:"linear_piece_index"
-      ~code:"invalid_parameter" message)
 
 let piece_count value = Array.length value.primitives
 
@@ -237,7 +227,7 @@ let[@inline always] piece_bounds_overlap tolerance left left_piece right
   && left.piece_min_z.(left_piece) <= right.piece_max_z.(right_piece) +. tolerance
   && left.piece_max_z.(left_piece) >= right.piece_min_z.(right_piece) -. tolerance
 
-let overlapping_pairs_raw ?cancel ~self ~grain ~tolerance left_index right_index =
+let pairs_of ?cancel ~self ~grain ~tolerance left_index right_index =
   if grain <= 0 then invalid_arg
       "Linear_piece_index.overlapping_pairs: grain must be positive";
   if not (Float.is_finite tolerance) || tolerance < 0. then invalid_arg
@@ -305,7 +295,7 @@ let overlapping_pairs_raw ?cancel ~self ~grain ~tolerance left_index right_index
     left_output, right_output
   end
 
-let find_overlapping_self_pair_raw ?cancel ~grain ~tolerance index predicate =
+let self_pair_of ?cancel ~grain ~tolerance index predicate =
   if grain <= 0 then invalid_arg
       "Linear_piece_index.find_overlapping_self_pair: grain must be positive";
   if not (Float.is_finite tolerance) || tolerance < 0. then invalid_arg
@@ -374,9 +364,9 @@ module Private = struct
     | _ -> invalid_arg "Linear_piece_index.curve_u: invalid endpoint"
   let positions value = value.positions
   let overlapping_pairs ?cancel ~grain ~tolerance left right =
-    overlapping_pairs_raw ?cancel ~self:false ~grain ~tolerance left right
+    pairs_of ?cancel ~self:false ~grain ~tolerance left right
   let overlapping_self_pairs ?cancel ~grain ~tolerance value =
-    overlapping_pairs_raw ?cancel ~self:true ~grain ~tolerance value value
+    pairs_of ?cancel ~self:true ~grain ~tolerance value value
   let find_overlapping_self_pair ?cancel ~grain ~tolerance value predicate =
-    find_overlapping_self_pair_raw ?cancel ~grain ~tolerance value predicate
+    self_pair_of ?cancel ~grain ~tolerance value predicate
 end
