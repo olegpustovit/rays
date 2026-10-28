@@ -113,6 +113,17 @@ let () =
     fun program ->
       let msl = ok (Flow_gpu.Emit.kernel ~fast:true program) in
       Option.iter (fun path -> Out_channel.with_open_bin path (fun o -> output_string o msl.Flow_gpu.Emit.source)) (Sys.getenv_opt "PT_DUMP");
+      (* static shape gates (specification/gpu-codegen.md): the kernel's one atomic, no 64-bit
+         arithmetic in the loops but their bound checks (the pixel's x/y split before them is the
+         one 64-bit division), within twice the handwritten kernel's lines *)
+      let lines text = String.split_on_char '\n' text in
+      let has fragment line = let n = String.length fragment in
+        let rec at i = i + n <= String.length line && (String.sub line i n = fragment || at (i + 1)) in at 0 in
+      let source = lines msl.Flow_gpu.Emit.source in
+      assert (List.length (List.filter (has "atomic_fetch_or_explicit(") source) = 1);
+      let rec loops = function [] -> [] | line :: rest -> if has "for(r" line then line :: rest else loops rest in
+      assert (List.for_all (fun line -> not (has "ulong(" line) || has "bool over" line) (loops source));
+      assert (List.length source <= 2 * List.length (lines (read "pathtrace.metal")));
       let runner = Flow_gpu.Run.create lease pipelines msl in
       let values = ok (Flow_ir.Packed.Private.prepare ~fast:true program ~live) in
       let scene = { Flow_gpu.Run.accel = blas; vertices; spheres; sphere_count = 0; instances = None } in

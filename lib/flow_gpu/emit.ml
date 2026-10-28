@@ -118,13 +118,15 @@ let checked projection expression = match projection with
   | Valid -> Printf.sprintf "(isfinite(%s)?1.0f:0.0f)" expression
 let wrap_integer value = "(as_type<long>(ulong(" ^ value ^ ")<<1)>>1)"
 (* Integer registers occupy 64 bits; Int operations wrap in the signed 63-bit domain. *)
-let integer_status indentation operation b = match operation with
+let integer_status ?(unsigned=false) indentation operation b = match operation with
   | Flow.Packed_ops.Idiv | Imod -> Printf.sprintf "%ssb|=(%s==0)?2u:0u;\n" indentation b
+  | Ishl | Ishr when unsigned -> Printf.sprintf "%ssb|=(%s>62u)?4u:0u;\n" indentation b
   | Ishl | Ishr -> Printf.sprintf "%ssb|=(%s<0 || %s>62)?4u:0u;\n" indentation b b
   | _ -> ""
-(* The status bits gather in the thread's [sb] and reach the shared word once, at the end or an early
-   return: an atomic per operation serializes the kernel and stops the compiler moving arithmetic. *)
-let flush_status = "if(sb!=0u) atomic_fetch_or_explicit(status,sb,memory_order_relaxed);"
+(* The status bits gather in the thread's [sb] and reach the shared word with the kernel's one atomic,
+   at its end: an atomic per operation serializes the kernel and stops the compiler moving arithmetic.
+   Thread 0 always publishes, so the status binding stays referenced. *)
+let flush_status = "if(sb!=0u||i==0) atomic_fetch_or_explicit(status,sb,memory_order_relaxed);"
 module Scope = Flow_ir.Kernel_layout.Scope
 let scope = Scope.create and indent = Scope.indent
 let enter = Scope.enter ~opening:(fun condition selected ->
@@ -137,6 +139,16 @@ let integer operation a b = wrap_integer (match operation with
   | Iand -> "(" ^ a ^ "&" ^ b ^ ")" | Ior -> "(" ^ a ^ "|" ^ b ^ ")" | Ixor -> "(" ^ a ^ "^" ^ b ^ ")"
   | Ishl -> "(ulong(" ^ a ^ ")<<(" ^ b ^ "&63))"
   | Ishr -> "long((ulong(" ^ a ^ ")&0x7fffffffffffffffUL)>>(" ^ b ^ "&63))")
+(* A narrow (32-bit unsigned) Int register's operation: the low 32 bits of the signed-63 result.
+   Shifts by [b & 63] of 32 or more leave none of them (or, right, none of a fitting operand). *)
+let narrow_integer operation a b =
+  let shift operator = Printf.sprintf "((%s&63)>31?0u:(%s%suint(%s&63)))" b a operator b in
+  match operation with
+  | Flow.Packed_ops.Iadd -> "(" ^ a ^ "+" ^ b ^ ")" | Isub -> "(" ^ a ^ "-" ^ b ^ ")"
+  | Imul -> "(" ^ a ^ "*" ^ b ^ ")" | Iand -> "(" ^ a ^ "&" ^ b ^ ")"
+  | Ior -> "(" ^ a ^ "|" ^ b ^ ")" | Ixor -> "(" ^ a ^ "^" ^ b ^ ")"
+  | Ishl -> shift "<<" | Ishr -> shift ">>"
+  | Idiv -> "(" ^ b ^ "==0u?0u:" ^ a ^ "/" ^ b ^ ")" | Imod -> "(" ^ b ^ "==0u?0u:" ^ a ^ "%" ^ b ^ ")"
 let comparison operation a b =
   let op = match operation with Flow.Packed_ops.Ilt -> "<" | Ile -> "<=" | Igt -> ">" | Ige -> ">=" | Ieq -> "==" in
   "(" ^ a ^ op ^ b ^ "?1.0f:0.0f)"
@@ -149,12 +161,33 @@ let kernel ?(fast=false) ?(instanced=false) program = try
   let table seed = match Array.find_index ((=) seed) table_seeds with Some index -> index*512 | None -> assert false in
   let gather_index slot = match List.find_index (fun (s, _) -> s = slot) gathers with Some k -> k | None -> fail "Gather without its table." in
   let integer_register slot = Flow_ir.Core.Region.integer_register view.code.(slot) in
-  let int_of r = if integer_register r then register r else "long(" ^ register r ^ ")" in
+  (* The kernel prints twice. The first pass counts each register's references and where they are;
+     the second prints a register read once, in its own scope under its own guards or deeper ones, as
+     an expression inside its reader instead of a named local (naga's baking rule). *)
+  let size = Array.length view.code in
+  let references = Array.make size 0 and referenced = Array.make size (-1, []) and defined = Array.make size (-1, []) in
+  let inlined = Array.make size None and counting = ref true and context = ref (0, []) in
+  let named = Array.make size false in
+  Array.iter (Array.iter (fun slot -> named.(slot) <- true)) view.outputs;
+  Array.iteri (fun slot instruction -> if used.(slot) then List.iter (fun (c, _) -> named.(c) <- true) (fst (guarded [] instruction))) view.code;
+  let register r = match inlined.(r) with
+    | Some text -> "(" ^ text ^ ")"
+    | None ->
+        if !counting then (references.(r) <- references.(r) + 1; referenced.(r) <- !context);
+        register r in
+  let rec prefix = function [], _ -> true | x :: a, y :: b -> x = y && prefix (a, b) | _ -> false in
+  let inline slot instruction = not !counting && references.(slot) = 1 && not named.(slot) && not finite_checks.(slot)
+    && (match instruction with P.Trace _ | Int_binary ((Idiv | Imod | Ishl | Ishr), _, _) -> false | _ -> true)
+    && fst defined.(slot) = fst referenced.(slot) && prefix (snd defined.(slot), snd referenced.(slot)) in
+  let narrow = layout.narrow in
+  let int_of r = if integer_register r && not narrow.(r) then register r else "long(" ^ register r ^ ")" in
+  (* a register's low 32 bits as a uint *)
+  let low r = if narrow.(r) then register r else "uint(" ^ int_of r ^ ")" in
   (* the integer register a float operand converts, if it is one *)
   (* an integer-valued register as a 64-bit expression: an integer register, its conversion to float,
      an integral constant, or +, -, *, mod, min, max of two such; [None] for any other *)
-  let rec whole r = if integer_register r then Some (register r) else match snd (guarded [] view.code.(r)) with
-    | P.Convert (To_float, x) when integer_register x -> Some (register x)
+  let rec whole r = if integer_register r then Some (int_of r) else match snd (guarded [] view.code.(r)) with
+    | P.Convert (To_float, x) when integer_register x -> Some (int_of x)
     | P.Const c when Float.is_integer c && Float.abs c < 9007199254740992. -> Some (Printf.sprintf "%.0fL" c)
     | P.Binary ((Add|Sub|Mul|Mod|Min|Max) as op, a, b) when fast ->
         (match whole a, whole b with
@@ -166,7 +199,7 @@ let kernel ?(fast=false) ?(instanced=false) program = try
   let element prepared index width component =
     let k = gather_index prepared in
     Printf.sprintf "as_type<float>(gather%d[clamp(int(%s),0,max(int(uniforms[%d])-1,0))*%d+%d])"
-      k (int_of index) gather_lengths.(k) width component in
+      k (if narrow.(index) then register index else int_of index) gather_lengths.(k) width component in
   let hits = Hashtbl.create 4 in
   (* a ray whose only read field is [hit] is an occlusion test: any intersection answers it *)
   let fields = Hashtbl.create 4 in
@@ -174,18 +207,31 @@ let kernel ?(fast=false) ?(instanced=false) program = try
     | P.Trace (field, r) when used.(slot) -> Hashtbl.replace fields (Array.to_list r)
         (field = 7 && Option.value (Hashtbl.find_opt fields (Array.to_list r)) ~default:true)
     | _ -> ()) view.code;
+  let outputs = Array.length view.outputs in
+  let output_name k = if outputs = 1 then "output" else "output" ^ string_of_int k in
+  let print () =
+  Hashtbl.reset hits;
   let root = scope 0 in
   let scopes = ref [root] in
   Flow_ir.Kernel_layout.iter layout ~instruction:(fun slot instruction ->
     if used.(slot) && (match snd (guarded [] instruction) with P.Array_prepare _ -> false | _ -> true) then begin
     let current = List.hd !scopes in
     let guards,instruction=guarded [] instruction in
-    let ty, zero = if integer_register slot then "long", "0" else "float", "0.0f" in
+    context := (current.Scope.id, guards);
+    if !counting then defined.(slot) <- !context;
+    let inline = inline slot instruction in
+    let ty, zero = if narrow.(slot) then "uint", "0u" else if integer_register slot then "long", "0" else "float", "0.0f" in
     let constant = match instruction with P.Const _ | Int_const _ -> not finite_checks.(slot) | _ -> false in
     (* a guarded constant is declared with its value: consumers fold it, and an unselected value is never read *)
-    if not constant then enter current guards;
+    if not (constant || inline) then enter current guards;
     let body = current.Scope.code and indentation = indent current in
-    let expression = match instruction with
+    let expression = if narrow.(slot) then match instruction with
+      | P.Int_const n -> Printf.sprintf "%du" (n land 0xffffffff)
+      | Int_binary (op,a,b) -> narrow_integer op (low a) (if (op = Ishl || op = Ishr) && not narrow.(b) then int_of b else low b)
+      | Int_select (condition,yes,no) -> Printf.sprintf "(%s!=0.0f?%s:%s)" (float_of condition) (low yes) (low no)
+      | Loop_result (loop,component,_) -> register (loop+1+component)
+      | _ -> assert false
+    else match instruction with
       | P.Const value ->
           Printf.sprintf "as_type<float>(0x%lxu)" (Int32.bits_of_float value)
       | Input (input,width,component) -> Printf.sprintf "input%d[i*%d+%d]" input width component
@@ -233,7 +279,8 @@ let kernel ?(fast=false) ?(instanced=false) program = try
           (register x) (register y) (register z) octaves (table seed)
       | Loop_result (loop,component,_) -> register (loop+1+component)
       | _ -> fail "Integer instructions and conversions are not supported by the Metal kernel target." in
-    if constant then Printf.bprintf current.Scope.decls "  %s r%d=%s;\n" ty slot expression
+    if inline then inlined.(slot) <- Some expression
+    else if constant then Printf.bprintf current.Scope.decls "  %s r%d=%s;\n" ty slot expression
     else if current.Scope.opened=[] then Printf.bprintf body "%s%s r%d=%s;\n" indentation ty slot expression else begin
       Printf.bprintf current.Scope.decls "  %s r%d=%s;\n" ty slot zero;
       Printf.bprintf body "%sr%d=%s;\n" indentation slot expression
@@ -242,48 +289,60 @@ let kernel ?(fast=false) ?(instanced=false) program = try
       Printf.bprintf body "%ssb|=!isfinite(r%d);\n" indentation slot;
     (match instruction with
      | P.Int_binary (operation, _, b) ->
-         Buffer.add_string body (integer_status indentation operation (int_of b))
+         Buffer.add_string body (if narrow.(b) then integer_status ~unsigned:true indentation operation (low b)
+           else integer_status indentation operation (int_of b))
      | _ -> ())
     end) ~loop:(fun header control ~next ~stop ~body:emit_body -> if used.(header)then begin
       let outer = List.hd !scopes in
       let guards,_=guarded [] view.code.(header)in
-      let ty slot=if integer_register slot then "long" else "float"in
-      Printf.bprintf outer.Scope.decls "  long r%d=0;\n" header;
+      context := (outer.Scope.id, guards);
+      let ty slot=if narrow.(slot) then "uint" else if integer_register slot then "long" else "float"in
+      let carried slot source = if narrow.(slot) then low source else if integer_register slot then int_of source else register source in
+      Printf.bprintf outer.Scope.decls "  %s r%d=0;\n" (ty header) header;
       Array.iteri(fun component _->let slot=header+1+component in
         Printf.bprintf outer.Scope.decls "  %s r%d=0;\n" (ty slot)slot)control.initial;
       enter outer guards;
       let body = outer.Scope.code and indentation = indent outer in
+      (* a pass count over the limit flags the status and runs no pass *)
       Option.iter(fun limit->Printf.bprintf body
-        "%sif(r%d>r%d && ulong(r%d-r%d)>%duL){sb|=1u;%sreturn;}\n" indentation
-        control.last control.first control.last control.first limit flush_status)control.limit;
-      Array.iteri(fun component initial->Printf.bprintf body "%sr%d=r%d;\n" indentation (header+1+component)initial)control.initial;
-      Printf.bprintf body "%sfor(r%d=r%d;r%d<r%d;r%d++){\n" indentation header control.first header control.last header;
+        "%sbool over%d=%s>%s && ulong(%s-%s)>%duL;\n%ssb|=over%d?1u:0u;\n" indentation header
+        (int_of control.last) (int_of control.first) (int_of control.last) (int_of control.first) limit indentation header)control.limit;
+      Array.iteri(fun component initial->let slot=header+1+component in
+        Printf.bprintf body "%sr%d=%s;\n" indentation slot (carried slot initial))control.initial;
+      let bound r = if narrow.(header) then low r else int_of r in
+      let last = if control.limit = None then bound control.last
+        else Printf.sprintf "(over%d?%s:%s)" header (bound control.first) (bound control.last) in
+      Printf.bprintf body "%sfor(r%d=%s;r%d<%s;r%d++){\n" indentation header (bound control.first) header last header;
       let inner = scope header in
       scopes := inner :: !scopes;
       emit_body();
       enter inner [];
+      context := (inner.Scope.id, []);
       scopes := List.tl !scopes;
       Buffer.add_buffer body inner.Scope.decls;
       Buffer.add_buffer body inner.Scope.code;
       Option.iter(fun source->Printf.bprintf body "  bool stop%d=%s!=0.0f;\n" header (float_of source))stop;
-      Array.iteri(fun component source->Printf.bprintf body "  %s next%d_%d=r%d;\n"
-        (ty source)header component source)next;
+      Array.iteri(fun component source->let slot=header+1+component in
+        Printf.bprintf body "  %s next%d_%d=%s;\n" (ty slot)header component (carried slot source))next;
       Array.iteri(fun component _->Printf.bprintf body "  r%d=next%d_%d;\n" (header+1+component)header component)next;
       Option.iter(fun _->Printf.bprintf body "  if(stop%d)break;\n" header)stop;
       Printf.bprintf body "%s}\n" indentation
     end);
   enter root [];
+  context := (0, []);
   let body = Buffer.create 4096 in
   Buffer.add_buffer body root.Scope.decls;
   Buffer.add_buffer body root.Scope.code;
   if layout.output_checks then Array.iter (Array.iter (fun slot -> if not (integer_register slot) then
     Printf.bprintf body "  sb|=!isfinite(r%d);\n" slot)) view.outputs;
   Printf.bprintf body "  %s\n" flush_status;
-  let outputs = Array.length view.outputs in
-  let output_name k = if outputs = 1 then "output" else "output" ^ string_of_int k in
   Array.iteri (fun k registers -> Array.iteri (fun component slot ->
     Printf.bprintf body "  %s[i*%d+%d]=%s;\n"
       (output_name k) (Array.length registers) component (float_of slot)) registers) view.outputs;
+  body in
+  ignore (print ());
+  counting := false;
+  let body = print () in
   let count = Array.length view.widths in
   (* fast: the element count may come from a device cell (another kernel's, times mul over div,
      when use is set) and is written to this kernel's own count record {n, 6n, 1, 0, 0, 0}: a
@@ -313,7 +372,7 @@ let kernel ?(fast=false) ?(instanced=false) program = try
     | Some o -> let w = o/4 in Printf.sprintf
         "  uint n=uniforms[0];\n  if(uniforms[%d]!=0u) n=min(n,count_in[0]*uniforms[%d]/uniforms[%d]);\n  if(i==0){count_out[0]=n;count_out[1]=6u*n;count_out[2]=1u;count_out[3]=0u;count_out[4]=0u;count_out[5]=0u;}\n  if(i>=n) return;\n"
         (w+2) w (w+1) in
-  let body = guard ^ "  if(i==0) atomic_fetch_or_explicit(status,0u,memory_order_relaxed);\n  uint sb=0u;\n" ^ Buffer.contents body in
+  let body = guard ^ "  uint sb=0u;\n" ^ Buffer.contents body in
   let digest = Digest.to_hex (Digest.string (prefix ^ signature ^ body)) in
   let entry = "kernel_" ^ digest in
   let source = prefix ^ "kernel void " ^ entry ^ "(\n  " ^ signature ^ ") {\n" ^ body ^ "}\n" in

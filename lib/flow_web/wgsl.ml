@@ -281,11 +281,25 @@ let kernel_fast program = try
   let table seed = match Array.find_index ((=) seed) table_seeds with Some index -> index*512 | None -> assert false in
   let gather_index slot = match List.find_index (fun (s, _) -> s = slot) gathers with Some k -> k | None -> fail "Gather without its table." in
   let integer slot = Flow_ir.Core.Region.integer_register view.code.(slot) in
-  let int_of r = if integer r then register r else "i64_from_f(" ^ register r ^ ")" in
-  let float_of r = if integer r then "i64_to_f(" ^ register r ^ ")" else register r in
+  let narrow = layout.narrow in
+  let int_of r = if narrow.(r) then "vec2<u32>(" ^ register r ^ ", 0u)"
+    else if integer r then register r else "i64_from_f(" ^ register r ^ ")" in
+  let float_of r = if integer r then "i64_to_f(" ^ int_of r ^ ")" else register r in
+  (* a register's low 32 bits as a u32 (as [Flow_gpu.Emit]'s narrow registers) *)
+  let low r = if narrow.(r) then register r else "(" ^ int_of r ^ ").x" in
+  let narrow_integer operation a b =
+    let shift operator = let k = "(" ^ int_of b ^ ")" in
+      Printf.sprintf "select(%s %s (%s.x & 31u), 0u, (%s.x & 63u) > 31u)" a operator k k in
+    match operation with
+    | Flow.Packed_ops.Iadd -> "(" ^ a ^ " + " ^ low b ^ ")" | Isub -> "(" ^ a ^ " - " ^ low b ^ ")"
+    | Imul -> "(" ^ a ^ " * " ^ low b ^ ")" | Iand -> "(" ^ a ^ " & " ^ low b ^ ")"
+    | Ior -> "(" ^ a ^ " | " ^ low b ^ ")" | Ixor -> "(" ^ a ^ " ^ " ^ low b ^ ")"
+    | Ishl -> shift "<<" | Ishr -> shift ">>"
+    | Idiv -> Printf.sprintf "select(%s / %s, 0u, %s == 0u)" a (low b) (low b)
+    | Imod -> Printf.sprintf "select(%s %% %s, 0u, %s == 0u)" a (low b) (low b) in
   (* an integer-valued register as a 64-bit expression (as [Flow_gpu.Emit]'s) *)
-  let rec whole r = if integer r then Some (register r) else match snd (guarded [] view.code.(r)) with
-    | P.Convert (To_float, x) when integer x -> Some (register x)
+  let rec whole r = if integer r then Some (int_of r) else match snd (guarded [] view.code.(r)) with
+    | P.Convert (To_float, x) when integer x -> Some (int_of x)
     | P.Const c when Float.is_integer c && Float.abs c < 9007199254740992. ->
         let n = Int64.of_float c in
         Some (Printf.sprintf "vec2<u32>(%Luu, %Luu)" (Int64.logand n 0xffffffffL) (Int64.logand (Int64.shift_right_logical n 32) 0xffffffffL))
@@ -300,7 +314,7 @@ let kernel_fast program = try
   let element prepared index width component =
     let k = gather_index prepared in
     Printf.sprintf "gather%d[u32(clamp(i32(%s), 0, max(i32(%s) - 1, 0))) * %du + %du]"
-      k (float_of index) (word gather_lengths.(k)) width component in
+      k (if narrow.(index) then "bitcast<i32>(" ^ register index ^ ")" else float_of index) (word gather_lengths.(k)) width component in
   let root = Scope.create 0 in
   let scopes = ref [root] in
   Flow_ir.Kernel_layout.iter layout ~instruction:(fun slot instruction ->
@@ -310,7 +324,13 @@ let kernel_fast program = try
     let constant = match instruction with P.Const _ | Int_const _ -> not finite_checks.(slot) | _ -> false in
     if not constant then enter float_of current guards;
     let body = current.code and indentation = Scope.indent current in
-    let expression = match instruction with
+    let expression = if narrow.(slot) then match instruction with
+      | P.Int_const n -> Printf.sprintf "%du" (n land 0xffffffff)
+      | Int_binary (op,a,b) -> narrow_integer op (low a) b
+      | Int_select (condition,yes,no) -> Printf.sprintf "select(%s, %s, %s != 0.0)" (low no) (low yes) (float_of condition)
+      | Loop_result (loop,component,_) -> register (loop+1+component)
+      | _ -> assert false
+    else match instruction with
       | P.Const value -> Printf.sprintf "bitcast<f32>(0x%lxu)" (Int32.bits_of_float value)
       | Input (input,width,component) -> Printf.sprintf "input%d[i * %du + %du]" input width component
       | Uniform (index,component) -> Printf.sprintf "bitcast<f32>(%s)" (word (uniforms.(index)+component))
@@ -356,7 +376,7 @@ let kernel_fast program = try
           (register x) (register y) (register z) octaves (table seed)
       | Loop_result(loop,component,_) -> register(loop+1+component)
       | _ -> fail "This instruction is not supported by the WGSL fast kernel target." in
-    let ty, zero = if integer slot then "vec2<u32>", "vec2<u32>(0u, 0u)" else "f32", "0.0" in
+    let ty, zero = if narrow.(slot) then "u32", "0u" else if integer slot then "vec2<u32>", "vec2<u32>(0u, 0u)" else "f32", "0.0" in
     if constant then Printf.bprintf current.decls "  let r%d: %s = %s;\n" slot ty expression
     else if current.opened=[] then Printf.bprintf body "%slet r%d: %s = %s;\n" indentation slot ty expression else begin
       Printf.bprintf current.decls "  var r%d: %s = %s;\n" slot ty zero;
@@ -371,20 +391,27 @@ let kernel_fast program = try
     end) ~loop:(fun header control ~next ~stop ~body:emit_body ->if used.(header)then begin
       let outer = List.hd !scopes in
       let guards,_=guarded [] view.code.(header)in
-      let ty slot=if integer slot then "vec2<u32>" else "f32"in
-      let zero slot=if integer slot then "vec2<u32>(0u, 0u)" else "0.0"in
-      Printf.bprintf outer.decls "  var r%d: vec2<u32> = vec2<u32>(0u, 0u);\n" header;
+      let ty slot=if narrow.(slot) then "u32" else if integer slot then "vec2<u32>" else "f32"in
+      let zero slot=if narrow.(slot) then "0u" else if integer slot then "vec2<u32>(0u, 0u)" else "0.0"in
+      let carried slot source = if narrow.(slot) then low source else if integer slot then int_of source else register source in
+      Printf.bprintf outer.decls "  var r%d: %s = %s;\n" header (ty header) (zero header);
       Array.iteri(fun component _->let slot=header+1+component in
         Printf.bprintf outer.decls "  var r%d: %s = %s;\n" slot (ty slot)(zero slot))control.initial;
       enter float_of outer guards;
       let body = outer.code and indentation = Scope.indent outer in
+      (* a pass count over the limit flags the status and runs no pass (as the Metal printer) *)
       Option.iter(fun limit->let bound=Int64.of_int limit in Printf.bprintf body
-        "%sif (i64_lt(r%d, r%d) && i64_lt(vec2<u32>(%Luu, %Luu), i64_sub(r%d, r%d))) { sb |= 1u; %s return; }\n"
-        indentation control.first control.last (Int64.logand bound 0xffffffffL)(Int64.shift_right_logical bound 32)
-        control.last control.first flush_status)control.limit;
-      Array.iteri(fun component initial->Printf.bprintf body "%sr%d = r%d;\n" indentation (header+1+component)initial)control.initial;
-      Printf.bprintf body "%sfor (r%d = r%d; i64_lt(r%d, r%d); r%d = i64_add(r%d, vec2<u32>(1u, 0u))) {\n"
-        indentation header control.first header control.last header header;
+        "%slet over%d = i64_lt(%s, %s) && i64_lt(vec2<u32>(%Luu, %Luu), i64_sub(%s, %s));\n%sif (over%d) { sb |= 1u; }\n"
+        indentation header (int_of control.first) (int_of control.last) (Int64.logand bound 0xffffffffL)(Int64.shift_right_logical bound 32)
+        (int_of control.last) (int_of control.first) indentation header)control.limit;
+      Array.iteri(fun component initial->let slot=header+1+component in
+        Printf.bprintf body "%sr%d = %s;\n" indentation slot (carried slot initial))control.initial;
+      let last bound = if control.limit = None then bound control.last
+        else Printf.sprintf "select(%s, %s, over%d)" (bound control.last) (bound control.first) header in
+      if narrow.(header) then Printf.bprintf body "%sfor (r%d = %s; r%d < %s; r%d = r%d + 1u) {\n"
+        indentation header (low control.first) header (last low) header header
+      else Printf.bprintf body "%sfor (r%d = %s; i64_lt(r%d, %s); r%d = i64_add(r%d, vec2<u32>(1u, 0u))) {\n"
+        indentation header (int_of control.first) header (last int_of) header header;
       let inner = Scope.create header in
       scopes := inner :: !scopes;
       emit_body();
@@ -393,8 +420,8 @@ let kernel_fast program = try
       Buffer.add_buffer body inner.decls;
       Buffer.add_buffer body inner.code;
       Option.iter(fun source->Printf.bprintf body "  let stop%d = %s != 0.0;\n" header (float_of source))stop;
-      Array.iteri(fun component source->Printf.bprintf body "  let next%d_%d: %s = r%d;\n"
-        header component (ty source)source)next;
+      Array.iteri(fun component source->let slot=header+1+component in
+        Printf.bprintf body "  let next%d_%d: %s = %s;\n" header component (ty slot) (carried slot source))next;
       Array.iteri(fun component _->Printf.bprintf body "  r%d = next%d_%d;\n" (header+1+component)header component)next;
       Option.iter(fun _->Printf.bprintf body "  if (stop%d) { break; }\n" header)stop;
       Printf.bprintf body "%s}\n" indentation
