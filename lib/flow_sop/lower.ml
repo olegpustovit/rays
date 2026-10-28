@@ -1198,9 +1198,9 @@ type digest_key = {
   extra_definitions : Workspace.node_definition list;
 }
 
-(* [==] first: a nested lowering shares its forms, and structural [=] walks a whole library for every lookup. *)
-let same_content_list left right =
-  left == right || List.equal (fun a b -> a == b || a = b) left right
+(* Physical, elementwise: a nested lowering shares its forms. A structural [=] walks the whole
+   library for every lookup, seconds per lowering of a freshly loaded workspace. *)
+let same_content_list left right = left == right || List.equal ( == ) left right
 
 let same_digest_key a b =
   same_content_list a.source_forms b.source_forms
