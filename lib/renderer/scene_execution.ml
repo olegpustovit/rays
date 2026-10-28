@@ -88,7 +88,7 @@ type batch_plan={batch_family:pipeline_family;batch_samples:int;batch_state:stat
   (* [batch_draws] as the backend batch, built once with the plan. *)
   batch_driver_draws:Ogpu.Backend.batch_draw array;
   batch_resources:[`Buffer of Ogpu.Backend.buffer|`Texture of Ogpu.Backend.texture]list;
-  batch_winding:bool;mutable batch_icb:Ogpu.Backend.icb option}
+  mutable batch_icb:Ogpu.Backend.icb option}
 type replay_plan={replay_clear:float*float*float*float;
   replay_payloads:automatic_signature list;replay_batches:batch_plan list;
   replay_gpu_vertices:gpu_vertices list}
@@ -936,7 +936,7 @@ let argument_page_bytes=256*1024
 let argument_encoder variant=
   match variant.argument with
   |Some argument->Ok argument
-  |None->match Ogpu.Backend.create_argument variant.pipeline Fragment~index:1 with
+  |None->match Ogpu.Backend.create_argument variant.pipeline Fragment~index:2 with
     |Error _ as e->e
     |Ok argument->variant.argument<-Some argument;Ok argument
 (* Canonical Scene2 binds its texture and sampler through one argument slice
@@ -1005,7 +1005,8 @@ let encode_batch value commands ~clear (batch:batch_plan)=
   let* ()=Ogpu.Backend.set_viewport encoder{x;y;width;height}in
   let* ()=Ogpu.Backend.set_scissor encoder{x=sx;y=sy;width=sw;height=sh}in
   let* ()=Ogpu.Backend.set_cull encoder batch.batch_state.cull in
-  let* ()=if batch.batch_winding then Ogpu.Backend.set_winding encoder Counter_clockwise else Ok()in
+  (* 3D meshes wind counter-clockwise: a fact of the family, never of a bound slot *)
+  let* ()=if has_depth batch.batch_family then Ogpu.Backend.set_winding encoder Counter_clockwise else Ok()in
   let* ()=if has_depth batch.batch_family then
       Ogpu.Backend.set_depth_state encoder(Some{depth_compare=batch.batch_state.depth_compare;
         depth_write=batch.batch_state.depth_write})
@@ -1143,10 +1144,12 @@ let render_sun value scratch=
             |None,Some offset->Some(item.buffer,offset,offset)
             |None,None->None in
           (match uniforms with None->draw(index+1)|Some(buffer,offset,instances_offset)->
+          (* scene.rays sun-vertex: records as floats 0 and words 1, the World block 2, surface 3, instances 4 *)
           let* ()=Ogpu.Backend.set_stage_buffer encoder Vertex~index:0 item.buffer in
-          let* ()=Ogpu.Backend.set_stage_buffer encoder Vertex~index:3 world.auxiliary_buffer in
-          let* ()=Ogpu.Backend.set_stage_buffer encoder Vertex~index:6~offset buffer in
-          let* ()=Ogpu.Backend.set_stage_buffer encoder Vertex~index:7~offset:instances_offset buffer in
+          let* ()=Ogpu.Backend.set_stage_buffer encoder Vertex~index:1 item.buffer in
+          let* ()=Ogpu.Backend.set_stage_buffer encoder Vertex~index:2 world.auxiliary_buffer in
+          let* ()=Ogpu.Backend.set_stage_buffer encoder Vertex~index:3~offset buffer in
+          let* ()=Ogpu.Backend.set_stage_buffer encoder Vertex~index:4~offset:instances_offset buffer in
           let* ()=Ogpu.Backend.draw_indexed encoder~primitive:Triangle_list~index_type:Uint32
               item.buffer~offset:item.index_offset~count:(Int64.of_int item.index_count)
               ~instances:(if bytes>5456 then(bytes-5456)/192 else 1)()in
@@ -1223,7 +1226,7 @@ let finish_prepared_frame value frame ~clear ~prepared_key ~draws ~scratch
         |Some(source,cached)->
             if scene2 then
               let* page,offset=argument_slice value variant cached.texture source.sampler in
-              Ok([Ogpu.Backend.Fragment,1,page,offset],[],[],[cached.texture])
+              Ok([Ogpu.Backend.Fragment,2,page,offset],[],[],[cached.texture])
             else
               let* sampler=sampler_for value source.sampler in
               Ok([],[Ogpu.Backend.Fragment,1,cached.texture],[Ogpu.Backend.Fragment,2,sampler],[])in
@@ -1271,14 +1274,23 @@ let finish_prepared_frame value frame ~clear ~prepared_key ~draws ~scratch
               [Ogpu.Backend.Vertex,7,item.buffer,offset])@
             (Ogpu.Backend.Fragment,6,item.buffer,offset)::buffers
         |None,None->buffers in
-      (* ui.rays reads its records as floats (0) and words (1), its affine at 2 and its atlas at 3 (sampler 4) *)
-      let buffers,textures,samplers=if family<>Ui then buffers,textures,samplers else
-        List.concat_map(function
-          |Ogpu.Backend.Vertex,0,b,o->[Ogpu.Backend.Vertex,0,b,o;Ogpu.Backend.Vertex,1,b,o]
-          |Ogpu.Backend.Vertex,6,b,o->[Ogpu.Backend.Vertex,2,b,o]
-          |binding->[binding])buffers,
-        List.map(fun(stage,slot,t)->stage,(if slot=1 then 3 else slot),t)textures,
-        List.map(fun(stage,slot,s)->stage,(if slot=2 then 4 else slot),s)samplers in
+      (* The generated pipelines bind in their Lisp declaration order (shaders/*.rays): ui.rays its records
+         as floats 0 and words 1, the affine 2, the atlas 3 (sampler 4); scene.rays its records 0 and 1,
+         surface 2, instances 3, attributes 4 and 5, the texture 6 (sampler 7), and for World its block 6,
+         image 7 (8), specular map 9 (10), camera map 11 (12) and sun map 13; Scene2 its records 0, the
+         affine 1 and the texture's argument buffer 2. *)
+      let rebind slots stage slot=match List.assoc_opt(stage,slot)slots with Some s->s|None->[slot] in
+      let regenerated buffers_to textures_to samplers_to=
+        List.concat_map(fun(stage,slot,b,o)->List.map(fun s->stage,s,b,o)(rebind buffers_to stage slot))buffers,
+        List.map(fun(stage,slot,t)->stage,Option.value(List.assoc_opt slot textures_to)~default:slot,t)textures,
+        List.map(fun(stage,slot,s)->stage,Option.value(List.assoc_opt slot samplers_to)~default:slot,s)samplers in
+      let scene3=[(Ogpu.Backend.Vertex,0),[0;1];(Vertex,6),[2];(Fragment,6),[2];(Vertex,7),[3];(Vertex,11),[4;5]] in
+      let buffers,textures,samplers=match family with
+        |Ui->regenerated[(Ogpu.Backend.Vertex,0),[0;1];(Vertex,6),[2]][1,3][2,4]
+        |Scene2|Scene2_textured->regenerated[(Ogpu.Backend.Vertex,6),[1]][][]
+        |Scene3|Scene3_points|Scene3_textured->regenerated scene3[1,6][2,7]
+        |Scene3_world->regenerated(((Ogpu.Backend.Fragment,3),[6])::scene3)[1,7;4,9;8,13;9,11][2,8;5,10;10,12]
+        |Marks->buffers,textures,samplers in
       let index=if scene2 then None
         else Some(Ogpu.Render_pass.Uint32,item.buffer,item.index_offset,Int64.of_int item.index_count)in
       let instances=match family,(slot_state slot).transform_uniforms with
@@ -1325,7 +1337,7 @@ let finish_prepared_frame value frame ~clear ~prepared_key ~draws ~scratch
           depth_write=false;depth_load=Ogpu.Render_pass.Load;depth_clear=1.;
           transform_uniforms=None}in
         Ok[{batch_family=Scene2;batch_samples=1;batch_state=state;batch_first=true;batch_draws=[||];batch_driver_draws=[||];
-            batch_resources=[];batch_winding=false;batch_icb=None},[]]
+            batch_resources=[];batch_icb=None},[]]
       else
       let slot=Array.unsafe_get scratch.scratch_slots index in
       let family=slot.slot_family and samples=slot.slot_samples
@@ -1336,9 +1348,8 @@ let finish_prepared_frame value frame ~clear ~prepared_key ~draws ~scratch
       |Error _ as e->e
       |Ok entries->
           let draws=Array.of_list(List.map snd entries)in
-          let winding=Array.exists(fun draw->Array.exists(fun(stage,slot,_,_)->stage=Ogpu.Backend.Vertex&&slot=7)draw.plan_draw.buffers)draws in
           let batch={batch_family=family;batch_samples=samples;batch_state=state;batch_first=first;
-            batch_draws=draws;batch_driver_draws=Array.map(fun draw->draw.plan_draw)draws;batch_resources=batch_resources draws;batch_winding=winding;batch_icb=None}in
+            batch_draws=draws;batch_driver_draws=Array.map(fun draw->draw.plan_draw)draws;batch_resources=batch_resources draws;batch_icb=None}in
           batches false next((batch,List.map fst entries)::reversed)in
     match batches true 0[]with
     |Error _ as result->discard frame;finish result

@@ -816,15 +816,17 @@ let stage_intrinsics =
   let stage name params out = { (mk ~category:"Raster" name params (fun _ -> out)
     {run=fun ~name ~node:_ _ -> fail "E_GPU_STAGE" (name ^ " runs only in a fragment stage.")}) with live = true } in
   [ stage "gpu/fwidth" ["x",fl] fl; stage "gpu/sample" ["texture",Ty.Int;"uv",Ty.Vec2] Ty.Vec4;
-    stage "gpu/texture-size" ["texture",Ty.Int] Ty.Vec2 ]
+    stage "gpu/sample-level" ["texture",Ty.Int;"uv",Ty.Vec2;"level",fl] Ty.Vec4; stage "gpu/read" ["texture",Ty.Int;"texel",Ty.Vec2] Ty.Vec4;
+    stage "gpu/texture-size" ["texture",Ty.Int] Ty.Vec2;
+    (* built-in facts of a raster element, read like frame facts: the vertex's instance, the fragment's facing, window depth and pixel position *)
+    stage "gpu/instance-id" [] Ty.Int; stage "gpu/front-facing" [] Ty.Bool; stage "gpu/depth" [] fl;
+    stage "gpu/fragment-x" [] fl; stage "gpu/fragment-y" [] fl ]
 let all = scene_trace :: stage_intrinsics @ frame @ arrays @ reductions @ draw @ host @ integers @ images @ [
-  float_unary "tan" tan;
-  float_unary "asin" asin;
-  float_unary "acos" acos;
-  float_unary "log" log;
+  float_unary "tan" tan; float_unary "asin" asin; float_unary "acos" acos; float_unary "log" log;
   float_unary "sign" (fun x -> if x > 0. then 1. else if x < 0. then -1. else x);
+  float_unary "rsqrt" (fun x -> 1. /. sqrt (Float.abs x)) (* the GPUs' rsqrt (normalize's), of |x| as sqrt *);
   float_binary "atan2" atan2;
-  float_binary "hypot" Float.hypot;
+  float_binary "hypot" Float.hypot; float_binary "ldexp" (fun x e -> Float.ldexp x (int_of_float e));
   mk ~category:"Vector" "dot" ["a",Ty.Vec3;"b",Ty.Vec3] (fun _ -> fl)
     {run=fun ~name ~node:_ args ->
       Float (fin name (dot3 (comps (List.assoc "a" args)) (comps (List.assoc "b" args))))};

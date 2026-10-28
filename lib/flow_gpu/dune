@@ -1,8 +1,15 @@
 (library
  (name flow_gpu)
  (public_name rays.flow_gpu)
- (modules emit spirv pipelines run host image_sink raster)
+ (modules emit spirv pipelines run host image_sink raster image_rgba8_source)
+ (private_modules image_rgba8_source)
  (libraries flow flow_ir ogpu renderer rays_math lru parallel))
+
+; the image sink's stages, generated from ../renderer/shaders/image.rays (test_raster.exe --write)
+(rule
+ (target image_rgba8_source.ml)
+ (action (with-stdout-to %{target}
+  (run %{exe:../renderer/embed_shader.exe} %{dep:../renderer/shaders/metal/image_rgba8.metal}))))
 
 (test
  (name test_spirv)

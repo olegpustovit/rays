@@ -11,7 +11,7 @@ let buffer ?(memory = Shared) ?(usage = [ Storage ]) device ~label size =
 
 (* The Lisp kernels map over [pixels], the image's pixel indices in 16 x 16 tiles (the tracing kernels, whose
    films hold pixel p at [order.(p)]) or over [linear] ones (the resolves, writing [resolved], their RGBA in
-   [0, 1]); [rgba] holds its RGBA8 rows padded to 256 bytes, copied into an output texture. *)
+   [0, 1]), drawn into an output texture by Flow's image sink pass. *)
 type film = {
   accum : B.buffer;
   history_color : B.buffer array;
@@ -21,10 +21,7 @@ type film = {
   linear : B.buffer;
   order : B.buffer;
   resolved : B.buffer;
-  rgba : B.buffer;
 }
-
-let row_pitch width = (width * 4 + 255) / 256 * 256
 
 (* ponytail: a failure midway leaks the earlier allocations to the device's
    leak report, like [create]; allocation failures are out-of-memory only. *)
@@ -42,7 +39,7 @@ let allocate_film device ~width ~height =
            mip_levels = 1;
            sample_count = 1;
            format = Rgba8_unorm;
-           usage = [ Texture_binding; Storage_binding; Texture_copy_src; Texture_copy_dst ];
+           usage = [ Texture_binding; Storage_binding; Render_attachment; Texture_copy_src; Texture_copy_dst ];
          })
   in
   let* accum = history "pathtracer-accum" in
@@ -73,15 +70,13 @@ let allocate_film device ~width ~height =
   let* linear = upload "pathtracer-linear" linear in
   let* order = upload "pathtracer-order" order in
   let* resolved = history "pathtracer-resolved" in
-  let* rgba = buffer ~memory:Ogpu.Types.Device_local ~usage:[ Storage; Copy_src ] device ~label:"pathtracer-rgba"
-      (row_pitch width * height) in
   Ok { accum; history_color = [| color0; color1 |];
        history_geometry = [| geometry0; geometry1 |]; outputs = [| output0; output1; output2 |];
-       pixels; linear; order; resolved; rgba }
+       pixels; linear; order; resolved }
 
 let destroy_film film =
   List.iter (fun value -> ignore (B.destroy_buffer value))
-    (film.accum :: film.pixels :: film.linear :: film.order :: film.resolved :: film.rgba
+    (film.accum :: film.pixels :: film.linear :: film.order :: film.resolved
      :: Array.to_list film.history_color @ Array.to_list film.history_geometry);
   Array.iter (fun texture -> ignore (B.destroy_texture texture)) film.outputs
 

@@ -306,8 +306,9 @@ let operation ~emit ~as_float ~as_int ~literal ~is_table ~component ~guards
     let stage s={registers=[|emit(Stage(s,operands))|];constant=None;fields=[]} in
     match op with
     | "gpu/fwidth" -> stage Fwidth
-    | "gpu/sample" -> let t=texture() in
-        {registers=Array.init 4(fun c->emit(Stage(Sample(t,c),operands)));constant=None;fields=[]}
+    | "gpu/sample" | "gpu/sample-level" | "gpu/read" -> let t=texture() in
+        let s c=match op with "gpu/sample" -> Sample(t,c) | "gpu/read" -> Read(t,c) | _ -> Sample_level(t,c) in
+        {registers=Array.init 4(fun c->emit(Stage(s c,operands)));constant=None;fields=[]}
     | _ -> let t=texture() in
         {registers=Array.init 2(fun c->emit(Stage(Texture_size(t,c),operands)));constant=None;fields=[]}
   end

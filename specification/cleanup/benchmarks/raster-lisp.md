@@ -69,14 +69,50 @@ million_marks at 2x (marks pipeline, minimum of 9; PNGs byte-identical in every 
 |---|---|---|
 | 19 | 27.77 27.34 27.35 27.31 27.46 | 21.43 21.84 21.96 24.83 22.82 |
 
+## Every raster pipeline from Lisp (P9.S3, S4)
+
+`shaders/scene.rays` prints Scene3 (plain, points, textured), the sun's depth map, Scene3_world and
+Scene2's argument-buffer pipeline; `shaders/image.rays` prints the Flow image sink (and the path
+tracer's film resolve), which replaces its RGBA8 compute kernel and padded-buffer blit with one
+full-screen triangle into the texture. `shaders/metal` holds only generated output.
+
+Facing: the parked port's dark scenes were the renumbering, not the shaders. The batch's
+counter-clockwise winding was inferred from "a draw binds vertex buffer 7" (Scene3's instance
+transforms); renumbered, no draw bound 7, Metal kept its clockwise default and `[[front_facing]]`
+read false on front faces. Winding is now pipeline state of the 3D families.
+
+Pixels: the generated stages reproduce the MSL intrinsics' rounding (`gpu-codegen.md`): `dot` as
+its fused chain, `normalize` by `rsqrt`, `cross`, `reflect` and `mix` in their fused forms, every
+`a + b*c` the compiler contracted as an `fma`, `ldexp` for the double decode (GPU `pow(2, e)` is not
+exact), `1.0f/2.2f` as the float the compiler folded. The image sink rounds to nearest-even in the
+shader (k/255 survives the unorm store exactly; the store's own rounding is not ties-to-even).
+Checked: `test_ui_parity` exact, renderer native goldens, `test_draw_snapshots`, the image sink's
+native ties/clipping/gradient pixels (0 differing), and editor `ui_shot` frames identical outside
+the status bar at 1x and 2x against the handwritten build for ws_layout, ws_facade, ws_orrery,
+ws_bloom (World, sky, sun shadow), shattered_studio, shattered_cube, sop_gallery,
+procedural_modeling, drawing, basic, generative, flow_image, flow_contours, ws_kit, pxui and
+million_marks (each also identical base against base; voxel_wall is not deterministic run to run).
+
+GPU minimum of 9 renders at 2x, base (handwritten) and Lisp alternated:
+
+Load 3.4-6.9 (`uptime`), five alternated rounds each, minimum of 9 renders a round:
+
+| scene (pipelines) | base (handwritten) | Lisp |
+|---|---|---|
+| ws_bloom (Scene3_world, sky, sun map) | 6.008 6.061 6.008 5.863 6.148 | 6.010 5.978 6.017 5.946 5.983 |
+| shattered_studio (Scene3 lit, area lights) | 13.061 12.963 12.849 12.889 12.961 | 12.244 12.225 12.118 12.337 12.626 |
+| ws_layout (UI, Scene3 viewport) | 3.838 5.351 5.278 5.976 3.843 | 3.834 3.845 3.884 4.321 3.898 |
+| drawing (Scene2 argument buffer) | 0.798 0.746 0.746 0.786 0.742 | 0.747 0.741 0.774 0.744 0.747 |
+| flow_image_kernel (image sink) | 2.304 2.293 2.401 2.308 2.295 | 2.286 2.295 2.300 2.290 2.289 |
+
+What it took: shadow and area-light loops nested (rows, columns) instead of one counter split by
+64-bit `div`/`mod` (shattered_studio 13.8 to 13.1 ms), a raster loop counting a capped pass from a
+small constant in 32 bits (13.1 to 12.2 ms: faster than the handwritten 12.9), and `ldexp` for the
+double decode (Scene2 0.745 to 0.741 ms).
+
 ## Open
 
-Scene3 (plain, points, textured), Scene3_world, sun depth, Scene2's argument-buffer pipeline and the
-image sink still run their handwritten MSL. A Scene3 port (scene3.rays: double-word vertex decoding,
-the light loop with area-light samples, `gpu/instance-id` and `gpu/front-facing` built-ins, a
-`:point-size` output, fragment buffers sharing the vertex stage's bindings) printed, validated with
-spirv-val and passed `test_scene3_lighting` (ambient, directional, point, spot, area, ±1) and
-`test_scene3_instances`, but editor scenes rendered dark: with the Scene3 bindings renumbered to the
-Lisp declaration order (0-5, texture 6), `[[front_facing]]` reads false on front faces even with
-the handwritten shaders, so double-sided surfaces flip their normals. The renumbering, not the
-generated code, changes facing; it was not landed. The UI pipeline's last 0.1 ms is open too.
+The UI pipeline's last 0.1 ms (above). Handwritten MSL left in product code: the presentation blit
+(`ogpu_metal/presentation.ml`, a backend detail below the renderer), the resident fold's stream
+compaction (`Emit.compaction`: threadgroup memory and barriers, which stages cannot say) and the
+`scene/trace` intersection helpers `Emit` splices into traced kernels.

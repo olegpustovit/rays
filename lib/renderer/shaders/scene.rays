@@ -1,0 +1,298 @@
+; The scene pipelines: Scene3 (plain, points and textured), the sun's depth map and Scene2.
+;
+; Scene3: a vertex is a 24-byte packed record (position,
+; normal as floats, colour and uv in the 12-byte attribute record) or a 68-byte one of doubles
+; (position 0, normal 24, colour word 48, uv 52); surface[82] says which, surface[83] whether the draw
+; is instanced (48 floats an instance). surface holds the transforms (0 clip, 16 world, 32 normal) and
+; the material and lights (from 48). The record and attribute buffers are read as floats and as words,
+; so each is bound twice; the texture is 6 (sampler 7), the binding after the six buffers.
+;
+; Vector arithmetic is written in the GPU's own rounding so the pipelines draw the pixels the Metal
+; intrinsics drew: dot is a fused chain from x, normalize scales by rsqrt, and a sum of a product is
+; one fma (the MSL compiler contracts a + b*c).
+
+(defn dot3 :context value [(a : vec3) (b : vec3)] (fma a.z b.z (fma a.y b.y (* a.x b.x))))
+(defn len3 :context value [(v : vec3)] (sqrt (dot3 v v)))
+(defn unit3 :context value [(v : vec3)] (* v (rsqrt (dot3 v v))))
+(defn neg3 :context value [(v : vec3)] (* v -1.))
+(defn cross3 :context value [(a : vec3) (b : vec3)]
+  [(fma a.y b.z (* -1. (* a.z b.y))) (fma a.z b.x (* -1. (* a.x b.z))) (fma a.x b.y (* -1. (* a.y b.x)))])
+; a + b*c per component
+(defn fma3 :context value [(b : vec3) (c : vec3) (a : vec3)] [(fma b.x c.x a.x) (fma b.y c.y a.y) (fma b.z c.z a.z)])
+
+(defn unpack :context value [(w : int)]
+  [(/ (float (int/and (int/shr w 24) 255)) 255.) (/ (float (int/and (int/shr w 16) 255)) 255.)
+   (/ (float (int/and (int/shr w 8) 255)) 255.) (/ (float (int/and w 255)) 255.)])
+; an IEEE double from its two little-endian words, to float
+(defn double-at :context value [(w : (array int)) (at : int)]
+  (let* [lo (array/nth w at) hi (array/nth w (int/add at 1))
+         sign (if (int/eq (int/shr hi 31) 0) 1. -1.)
+         exponent (int/and (int/shr hi 20) 2047)
+         fraction (/ (float (int/or (int/shl (int/and hi 1048575) 32) lo)) 4503599627370496.)]
+    (if (int/eq exponent 0)
+      (* sign (ldexp fraction -1022.))
+      (* sign (ldexp (+ 1. fraction) (float (int/sub exponent 1023)))))))
+; row [base] of a row-major 4x4 dotted with v, as MSL's dot(float4)
+(defn row :context value [(m : (array float)) (base : int) (v : vec4)]
+  (fma v.w (array/nth m (int/add base 3)) (fma v.z (array/nth m (int/add base 2))
+    (fma v.y (array/nth m (int/add base 1)) (* v.x (array/nth m base))))))
+(defn transform :context value [(m : (array float)) (base : int) (v : vec4)]
+  [(row m base v) (row m (int/add base 4) v) (row m (int/add base 8) v) (row m (int/add base 12) v)])
+(defn xyz :context value [(v : vec4)] [v.x v.y v.z])
+
+(defn scene3-vertex :context value
+  [(vid : int) (input : (array float)) (input-words : (array int)) (surface : (array float))
+   (instances : (array float)) (attributes : (array float)) (attribute-words : (array int))]
+  (let* [packed (> (array/nth surface 82) 0.5)
+         at (int/mul vid (if packed 6 17))
+         local (if packed [(array/nth input at) (array/nth input (int/add at 1)) (array/nth input (int/add at 2)) 1.]
+                 [(double-at input-words at) (double-at input-words (int/add at 2)) (double-at input-words (int/add at 4)) 1.])
+         normal (if packed [(array/nth input (int/add at 3)) (array/nth input (int/add at 4)) (array/nth input (int/add at 5)) 0.]
+                  [(double-at input-words (int/add at 6)) (double-at input-words (int/add at 8)) (double-at input-words (int/add at 10)) 0.])
+         instanced (> (array/nth surface 83) 0.5)
+         base (int/mul (gpu/instance-id) 48)
+         clip (if instanced (transform instances base local) (transform surface 0 local))
+         world (if instanced (transform instances (int/add base 16) local) (transform surface 16 local))
+         turned (if instanced (transform instances (int/add base 32) normal) (transform surface 32 normal))
+         a (int/mul vid 3)]
+    {:position clip
+     :color (unpack (if packed (array/nth attribute-words a) (array/nth input-words (int/add at 12))))
+     :uv (if packed [(array/nth attributes (int/add a 1)) (array/nth attributes (int/add a 2))]
+           [(double-at input-words (int/add at 13)) (double-at input-words (int/add at 15))])
+     :world (xyz world) :normal (unit3 (xyz turned))}))
+
+(defn scene3-points-vertex :context value
+  [(vid : int) (input : (array float)) (input-words : (array int)) (surface : (array float))
+   (instances : (array float)) (attributes : (array float)) (attribute-words : (array int))]
+  (let* [v (scene3-vertex vid input input-words surface instances attributes attribute-words)]
+    {:position v.position :point-size 1. :color v.color :uv v.uv :world v.world :normal v.normal}))
+
+(defn at3 :context value [(p : (array float)) (k : int)]
+  [(array/nth p k) (array/nth p (int/add k 1)) (array/nth p (int/add k 2))])
+; l[k] + l[k+1] d + l[k+2] d d
+(defn attenuate :context value [(l : (array float)) (k : int) (d : float)]
+  (fma (* (array/nth l (int/add k 2)) d) d (fma (array/nth l (int/add k 1)) d (array/nth l k))))
+; light [base] (20 floats: kind, position 1, colour 4, strength 8, then per kind) seen from [world]:
+; its direction and strength
+(defn scene-light :context value [(l : (array float)) (base : int) (world : vec3)]
+  (let* [kind (array/nth l base) strength (array/nth l (int/add base 8)) origin (at3 l (int/add base 1))]
+    (cond
+      (< kind 0.5) {:direction (unit3 (neg3 origin)) :strength strength}
+      (< kind 2.5)
+        (let* [delta (- origin world) distance (len3 delta)
+               direction (if (> distance 0.) (/ delta distance) [0. 0. 0.])
+               attenuation (attenuate l (int/add base (if (< kind 1.5) 9 15)) distance)
+               falloff (if (> attenuation 0.) (/ strength attenuation) 0.)
+               cosine (dot3 (neg3 direction) (unit3 (at3 l (int/add base 9))))]
+          {:direction direction
+           :strength (if (>= kind 1.5)
+                       (* falloff (if (< cosine (array/nth l (int/add base 13))) 0. (pow (max cosine 0.) (array/nth l (int/add base 14)))))
+                       falloff)})
+      :else
+        (let* [axis (unit3 (at3 l (int/add base 9)))
+               reference (if (< (abs axis.z) 0.999) [0. 0. 1.] [0. 1. 0.])
+               u (unit3 (cross3 reference axis)) w (cross3 axis u)
+               side (let* [s (int (round (sqrt (array/nth l (int/add base 14)))))] (if (int/lt s 1) 1 s))
+               cells (float (int/mul side side))
+               ; rows outer, columns inner, the samples' sum order
+               area (fold [rows {:weighted [0. 0. 0.] :total 0.}] [row (range side)]
+                     (fold [acc rows] [column (range side)]
+                       (let* [a (- (/ (+ (float column) 0.5) (float side)) 0.5)
+                              b (- (/ (+ (float row) 0.5) (float side)) 0.5)
+                              sa (* a (array/nth l (int/add base 12))) sb (* b (array/nth l (int/add base 13)))
+                              delta (- (fma3 [sb sb sb] w (fma3 [sa sa sa] u origin)) world)
+                              distance (len3 delta)]
+                         (if (> distance 0.)
+                           (let* [ray (/ delta distance) facing (max (dot3 axis (neg3 ray)) 0.)
+                                  attenuation (attenuate l (int/add base 15) distance)
+                                  weight (if (> attenuation 0.) (/ (* strength facing) (* cells attenuation)) 0.)]
+                             {:weighted (fma3 ray [weight weight weight] acc.weighted) :total (+ acc.total weight)})
+                           acc))))]
+          {:direction (if (> (len3 area.weighted) 0.) (unit3 area.weighted) [0. 0. 0.]) :strength area.total}))))
+
+; Blinn-Phong over the lights: p is the surface buffer, tex the sampled texel (white when untextured)
+(defn scene-surface :context value
+  [(p : (array float)) (color : vec4) (world : vec3) (normal : vec3) (tex : vec4)]
+  (let* [n0 (unit3 normal)
+         n (if (and (> (array/nth p 74) 0.5) (not (gpu/front-facing))) (neg3 n0) n0)
+         view (unit3 (- (at3 p 48) world))
+         count (let* [c (int (array/nth p 73))] (if (int/lt c 64) c 64))
+         lit (fold [acc {:primary (fma3 (at3 p 52) (at3 p 69) (at3 p 64)) :spec [0. 0. 0.]}] [i (range count)]
+               (let* [base (int/add 84 (int/mul i 20))
+                      light (scene-light p base world)
+                      tint (at3 p (int/add base 4))
+                      diffuse (* (max (dot3 n light.direction) 0.) light.strength)
+                      shine (* (pow (max (dot3 n (unit3 (+ light.direction view))) 0.) (array/nth p 68)) light.strength)]
+                 {:primary (fma3 (* (at3 p 56) tint) [diffuse diffuse diffuse] acc.primary)
+                  :spec (if (> diffuse 0.) (fma3 (* (at3 p 60) tint) [shine shine shine] acc.spec) acc.spec)}))
+         modulation (* [color.x color.y color.z] [tex.x tex.y tex.z])
+         rgb (if (> (array/nth p 75) 0.5) (fma3 lit.primary modulation lit.spec) (* (+ lit.primary lit.spec) modulation))]
+    [rgb.x rgb.y rgb.z (* (* (array/nth p 59) color.w) tex.w)]))
+
+(defn scene3-fragment :context value
+  [(color : vec4) (uv : vec2) (world : vec3) (normal : vec3) (surface : (array float))]
+  (scene-surface surface color world normal [1. 1. 1. 1.]))
+
+(defn scene3-textured-fragment :context value
+  [(color : vec4) (uv : vec2) (world : vec3) (normal : vec3) (surface : (array float))]
+  (scene-surface surface color world normal (gpu/sample 6 uv)))
+
+; The sun's shadow map (Scene3_world): the depth of each surface seen from the sun, its transform at
+; sun[40], as 24-bit depth in RGB.
+(defn sun-vertex :context value
+  [(vid : int) (input : (array float)) (input-words : (array int)) (sun : (array float))
+   (surface : (array float)) (instances : (array float))]
+  (let* [packed (> (array/nth surface 82) 0.5)
+         at (int/mul vid (if packed 6 17))
+         local (if packed [(array/nth input at) (array/nth input (int/add at 1)) (array/nth input (int/add at 2)) 1.]
+                 [(double-at input-words at) (double-at input-words (int/add at 2)) (double-at input-words (int/add at 4)) 1.])
+         base (int/mul (gpu/instance-id) 48)
+         world (if (> (array/nth surface 83) 0.5) (transform instances (int/add base 16) local) (transform surface 16 local))]
+    {:position (transform sun 40 world)}))
+(defn byte-at :context value [(d : int) (k : int)] (/ (float (int/and (int/shr d k) 255)) 255.))
+(defn sun-fragment :context value []
+  (let* [d (int (fma (min (max (gpu/depth) 0.) 1.) 16777215. 0.5))]
+    [(byte-at d 16) (byte-at d 8) (byte-at d 0) 1.]))
+
+; Scene2: 68-byte records of doubles (position 0, colour word 48, uv 52) under the 2D affine, coloured
+; by texture 2 (its sampler beside it in the argument buffer at 2)
+(defn scene2-vertex :context value [(vid : int) (input-words : (array int)) (affine : (array float))]
+  (let* [at (int/mul vid 17) x (double-at input-words at) y (double-at input-words (int/add at 2))]
+    {:position [(+ (fma (array/nth affine 0) x (* (array/nth affine 1) y)) (array/nth affine 2))
+                (+ (fma (array/nth affine 3) x (* (array/nth affine 4) y)) (array/nth affine 5)) 0. 1.]
+     :color (unpack (array/nth input-words (int/add at 12)))
+     :uv [(double-at input-words (int/add at 13)) (double-at input-words (int/add at 15))]}))
+(defn scene2-fragment :context value [(color : vec4) (uv : vec2)] (* color (gpu/sample 2 uv)))
+
+; Scene3_world: the World pipeline's physically based fragment over the Scene3 vertex. The surface
+; buffer as Scene3's, the World block w (sun 28, sky 35, shadow 39-64, exposure 27, irradiance 0-26)
+; after the vertex buffers at 6; the base image is texture 7 (sampler 8), the prefiltered specular map
+; 9 (10), the camera environment 11 (12) and the sun's depth map 13 (read by texel).
+(defn pow3 :context value [(v : vec3) (e : float)] [(pow v.x e) (pow v.y e) (pow v.z e)])
+(defn unit-clamp3 :context value [(v : vec3)] [(min (max v.x 0.) 1.) (min (max v.y 0.) 1.) (min (max v.z 0.) 1.)])
+(defn mix3 :context value [(x : vec3) (y : vec3) (a : float)] (fma3 [a a a] y (fma3 [(* -1. a) (* -1. a) (* -1. a)] x x)))
+(defn rgb :context value [(c : vec4)] [c.x c.y c.z])
+(defn world-uv :context value [(d : vec3)]
+  [(+ (/ (atan2 d.x (* d.z -1.)) 6.283185307179586) 0.5) (/ (acos (min (max d.y -1.) 1.)) 3.141592653589793)])
+(defn tone-byte :context value [(c : float)] (/ (float (int (fma c 255. 0.5))) 255.))
+; ACES (Narkowicz) of linear * exposure, display gamma, through RGBA8 as the World image stores it
+(defn world-output :context value [(linear : vec3) (exposure : float) (alpha : float)]
+  (let* [c (* linear exposure)
+         mapped (/ (* c (fma3 [2.51 2.51 2.51] c [0.03 0.03 0.03]))
+                   (fma3 c (fma3 [2.43 2.43 2.43] c [0.59 0.59 0.59]) [0.14 0.14 0.14]))
+         g (pow3 (unit-clamp3 mapped) 0.45454543828964233)]
+    [(tone-byte g.x) (tone-byte g.y) (tone-byte g.z) alpha]))
+(defn world-irradiance :context value [(w : (array float)) (n : vec3)]
+  (let* [x n.x y n.y z n.z
+         e0 (fma3 (at3 w 0) [0.282095 0.282095 0.282095] [0. 0. 0.])
+         e1 (fma3 (at3 w 3) (let* [b (* 0.488603 y)] [b b b]) e0)
+         e2 (fma3 (at3 w 6) (let* [b (* 0.488603 z)] [b b b]) e1)
+         e3 (fma3 (at3 w 9) (let* [b (* 0.488603 x)] [b b b]) e2)
+         e4 (fma3 (at3 w 12) (let* [b (* (* 1.092548 x) y)] [b b b]) e3)
+         e5 (fma3 (at3 w 15) (let* [b (* (* 1.092548 y) z)] [b b b]) e4)
+         e6 (fma3 (at3 w 18) (let* [b (* 0.315392 (fma (* 3. z) z -1.))] [b b b]) e5)
+         e7 (fma3 (at3 w 21) (let* [b (* (* 1.092548 x) z)] [b b b]) e6)
+         e8 (fma3 (at3 w 24) (let* [b (* 0.546274 (fma x x (* -1. (* y y))))] [b b b]) e7)]
+    [(max e8.x 0.) (max e8.y 0.) (max e8.z 0.)]))
+; Karis' analytic split-sum environment BRDF (mobile approximation)
+(defn env-brdf :context value [(f0 : float) (roughness : float) (nov : float)]
+  (let* [rx (fma roughness -1. 1.) ry (fma roughness -0.0275 0.0425) rz (fma roughness -0.572 1.04) rw (fma roughness 0.022 -0.04)
+         a004 (fma (min (* rx rx) (pow 2. (* -9.28 nov))) rx ry)
+         abx (fma -1.04 a004 rz) aby (fma 1.04 a004 rw)
+         s (fma f0 abx aby)]
+    [s s s]))
+(defn d-ggx :context value [(noh : float) (a2 : float)]
+  (let* [d (fma (* noh noh) (- a2 1.) 1.)] (/ a2 (* (* 3.141592653589793 d) d))))
+(defn v-smith :context value [(nov : float) (nol : float) (a2 : float)]
+  (let* [gv (* nol (sqrt (fma (* nov nov) (- 1. a2) a2))) gl (* nov (sqrt (fma (* nol nol) (- 1. a2) a2)))]
+    (/ 0.5 (max (+ gv gl) 0.000001))))
+; ks scales the specular lobe (the mirror blend in world-fragment)
+(defn eval-brdf :context value [(ns : vec3) (v : vec3) (l : vec3) (diffuse : vec3) (f0 : float) (a2 : float) (ks : float)]
+  (let* [h (unit3 (+ l v))
+         nol (max (dot3 ns l) 0.0001) nov (max (dot3 ns v) 0.0001) noh (max (dot3 ns h) 0.) voh (max (dot3 v h) 0.0001)
+         f (pow (- 1. voh) 5.) fresnel (fma3 (- [1. 1. 1.] [f0 f0 f0]) [f f f] [f0 f0 f0])
+         lobe (* (* ks (d-ggx noh a2)) (v-smith nov nol a2))]
+    (fma3 [lobe lobe lobe] fresnel (/ (* diffuse (- [1. 1. 1.] fresnel)) 3.141592653589793))))
+(defn map-depth :context value [(c : vec4)]
+  (let* [b [(float (round (* c.x 255.))) (float (round (* c.y 255.))) (float (round (* c.z 255.)))]] (/ (+ (fma b.x 65536. (* b.y 256.)) b.z) 16777215.)))
+; the sun's percentage-closer visibility at world: its map in w (inline, from w[64]) or texture 13
+(defn world-shadow :context value [(w : (array float)) (world : vec3) (normal : vec3)]
+  (let* [clip (transform w 40 [world.x world.y world.z 1.])
+         x (/ clip.x clip.w) y (/ clip.y clip.w) z (/ clip.z clip.w)
+         u (fma x 0.5 0.5) v (fma (* -1. y) 0.5 0.5)]
+    (if (or (or (< (array/nth w 39) 0.5) (<= clip.w 0.))
+            (or (or (or (< u 0.) (< v 0.)) (or (> u 1.) (> v 1.))) (or (< z 0.) (> z 1.))))
+      1.
+      (let* [facing (min (max (dot3 (unit3 normal) (at3 w 28)) 0.) 1.)
+             compare (- z (fma (array/nth w 57) (- 1. facing) (array/nth w 56)))
+             width (int (array/nth w 60)) height (int (array/nth w 61)) radius (int (array/nth w 59))
+             cx (int (floor (* u (float width)))) cy (int (floor (* v (float height))))
+             side (int/add (int/mul radius 2) 1)
+             visible (fold [rows 0.] [ty (range side)]
+                       (fold [acc rows] [tx (range side)]
+                         (let* [qx (int/add cx (int/sub tx radius)) qy (int/add cy (int/sub ty radius))]
+                           (+ acc (if (or (or (int/lt qx 0) (int/lt qy 0)) (or (int/ge qx width) (int/ge qy height)))
+                                    1.
+                                    (if (<= compare (if (> (array/nth w 39) 1.5)
+                                                      (map-depth (gpu/read 13 [(float qx) (float qy)]))
+                                                      (array/nth w (int/add 64 (int/add (int/mul qy width) qx)))))
+                                      1. 0.))))))]
+        (+ (- 1. (array/nth w 58)) (/ (* (array/nth w 58) visible) (float (int/mul side side))))))))
+; kind 4: an extracted World rect, centre 1..3, half-extent axes 9..11 and 12..14, emitting normal
+; 15..17, 2x2 samples, inverse-square falloff; the other kinds are Scene3's
+(defn world-light :context value [(l : (array float)) (base : int) (world : vec3)]
+  (if (< (array/nth l base) 3.5)
+    (scene-light l base world)
+    (let* [u (at3 l (int/add base 9)) w (at3 l (int/add base 12)) axis (at3 l (int/add base 15))
+           strength (array/nth l (int/add base 8)) origin (at3 l (int/add base 1))
+           area (fold [rows {:weighted [0. 0. 0.] :total 0.}] [row (range 2)]
+                  (fold [acc rows] [column (range 2)]
+                    (let* [a (- (float column) 0.5) b (- (float row) 0.5)
+                           delta (- (fma3 [b b b] w (fma3 [a a a] u origin)) world)
+                           d2 (dot3 delta delta)]
+                      (if (> d2 0.)
+                        (let* [ray (* delta (rsqrt d2))
+                               weight (/ (* strength (max (dot3 axis (neg3 ray)) 0.)) (* 4. d2))]
+                          {:weighted (fma3 ray [weight weight weight] acc.weighted) :total (+ acc.total weight)})
+                        acc))))]
+      {:direction (if (> (len3 area.weighted) 0.) (unit3 area.weighted) [0. 0. 0.]) :strength area.total})))
+
+(defn world-fragment :context value
+  [(color : vec4) (uv : vec2) (world : vec3) (normal : vec3) (surface : (array float)) (w : (array float))]
+  (let* [p surface exposure (array/nth w 27)
+         tex (gpu/sample 7 uv) modulation (* (rgb color) (rgb tex)) alpha (* (* (array/nth p 59) color.w) tex.w)]
+    (cond
+      (> (array/nth p 76) 1.5)
+        (let* [a (transform p 84 [world.x world.y 0. 1.]) b (transform p 84 [world.x world.y 1. 1.])
+               d (unit3 (- (/ (xyz b) b.w) (/ (xyz a) a.w)))]
+          (world-output (if (> (array/nth w 35) 0.5) (at3 w 36) (rgb (gpu/sample 7 (world-uv d)))) exposure 1.))
+      (> (array/nth p 76) 0.5) (let* [c (* (at3 p 64) modulation)] [c.x c.y c.z alpha])
+      :else
+        (let* [n0 (unit3 normal)
+               n (if (and (> (array/nth p 74) 0.5) (not (gpu/front-facing))) (neg3 n0) n0)
+               v (unit3 (- (at3 p 48) world))
+               albedo (pow3 (* (at3 p 56) modulation) 2.2)
+               rough (max (array/nth p 77) 0.03) a (* rough rough) a2 (* a a) f0 (array/nth p 78)
+               nov (max (dot3 n v) 0.0001) spec (env-brdf f0 rough nov)
+               ; below roughness 0.2 the reflection blends toward the full-resolution camera map
+               ; (emitters and sun disc included), so the analytic highlights fade by the same weight
+               ks (min (max (/ (array/nth p 77) 0.2) 0.) 1.)
+               i (neg3 v) r (world-uv (fma3 (let* [k (* -2. (dot3 n i))] [k k k]) n i))
+               sharp (rgb (gpu/sample-level 9 r (* (max rough 0.2) 5.)))
+               reflection (if (< ks 1.) (mix3 (rgb (gpu/sample 11 r)) sharp ks) sharp)
+               base (+ (fma3 (* (/ albedo 3.141592653589793) (world-irradiance w n)) (- [1. 1. 1.] spec) (* reflection spec))
+                       (pow3 (* (at3 p 64) modulation) 2.2))
+               sun (at3 w 28) sun-nol (dot3 n sun)
+               lit (if (and (> (array/nth w 31) 0.5) (> sun-nol 0.))
+                     (let* [s (world-shadow w world normal)]
+                       (fma3 (* (* (eval-brdf n v sun albedo f0 a2 ks) (at3 w 32)) [sun-nol sun-nol sun-nol]) [s s s] base))
+                     base)
+               count (let* [c (int (array/nth p 73))] (if (int/lt c 64) c 64))
+               total (fold [acc lit] [k (range count)]
+                       (let* [at (int/add 84 (int/mul k 20)) light (world-light p at world) nol (dot3 n light.direction)]
+                         (if (and (> nol 0.) (> light.strength 0.))
+                           (fma3 (* (* (* (eval-brdf n v light.direction albedo f0 a2 ks) (at3 p (int/add at 4)))
+                                       [light.strength light.strength light.strength]) [3.141592653589793 3.141592653589793 3.141592653589793])
+                                 [nol nol nol] acc)
+                           acc)))]
+          (world-output total exposure alpha)))))

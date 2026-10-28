@@ -11,10 +11,10 @@ let rec instruction : P.instruction -> string = function
   | Binary (op, a, b) -> Printf.sprintf "Binary %s %d %d" (Flow.Packed_ops.(match op with
       | Add -> "Add" | Sub -> "Sub" | Mul -> "Mul" | Div -> "Div" | Mod -> "Mod" | Pow -> "Pow"
       | Min -> "Min" | Max -> "Max" | Lt -> "Lt" | Le -> "Le" | Gt -> "Gt" | Ge -> "Ge"
-      | Eq -> "Eq" | And -> "And" | Or -> "Or" | Atan2->"Atan2" | Hypot->"Hypot")) a b
+      | Eq -> "Eq" | And -> "And" | Or -> "Or" | Atan2->"Atan2" | Hypot->"Hypot" | Ldexp->"Ldexp")) a b
   | Unary (op, a) -> Printf.sprintf "Unary %s %d" (Flow.Packed_ops.(match op with
       | Sin -> "Sin" | Cos -> "Cos" | Sqrt -> "Sqrt" | Abs -> "Abs" | Not -> "Not"
-      |Tan->"Tan"|Asin->"Asin"|Acos->"Acos"|Exp->"Exp"|Log->"Log"|Sign->"Sign")) a
+      |Tan->"Tan"|Asin->"Asin"|Acos->"Acos"|Exp->"Exp"|Log->"Log"|Sign->"Sign"|Rsqrt->"Rsqrt")) a
   | Noise3 (x, y, z, seed, octaves, lacunarity, gain) -> Printf.sprintf "Noise3 %d %d %d seed=%d octaves=%d%s" x y z seed octaves (if lacunarity = 2. && gain = 0.5 then "" else Printf.sprintf " lacunarity=%h gain=%h" lacunarity gain)
   | Stage (_, r) -> "Stage" ^ String.concat "" (List.map (Printf.sprintf " %d") (Array.to_list r))
   | Trace (field, r) -> Printf.sprintf "Trace %d%s" field (String.concat "" (List.map (Printf.sprintf " %d") (Array.to_list r)))

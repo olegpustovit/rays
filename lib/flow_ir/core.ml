@@ -90,7 +90,7 @@ module Region = struct
   type conversion = Flow.Packed_ops.conversion = To_float | Truncate | Floor | Ceil | Round | Coerce_int | Integer_result of string
   type loop = {first:int; last:int; finish:int; initial:int array; limit:int option;
     span:Diagnostic.span}
-  type stage = Fwidth | Sample of int * int | Texture_size of int * int
+  type stage = Fwidth | Sample of int * int | Sample_level of int * int | Read of int * int | Texture_size of int * int
     (** [fwidth x]; component c of texture t sampled at (u, v) (its sampler at t + 1); axis c of
         texture t's size in texels *)
   type instruction =
@@ -457,9 +457,9 @@ let primitive_name = function
   | Numeric op -> (match op with
       | Add -> "+" | Sub -> "-" | Mul -> "*" | Div -> "/" | Mod -> "mod" | Pow -> "pow"
       | Min -> "min" | Max -> "max" | Lt -> "<" | Le -> "<=" | Gt -> ">" | Ge -> ">="
-      | Eq -> "=" | And -> "and" | Or -> "or" | Atan2 -> "atan2" | Hypot -> "hypot")
+      | Eq -> "=" | And -> "and" | Or -> "or" | Atan2 -> "atan2" | Hypot -> "hypot" | Ldexp -> "ldexp")
   | Math op -> (match op with Sin -> "sin" | Cos -> "cos" | Sqrt -> "sqrt" | Abs -> "abs" | Not -> "not"
-      | Tan -> "tan" | Asin -> "asin" | Acos -> "acos" | Exp -> "exp" | Log -> "log" | Sign -> "sign")
+      | Tan -> "tan" | Asin -> "asin" | Acos -> "acos" | Exp -> "exp" | Log -> "log" | Sign -> "sign" | Rsqrt -> "rsqrt")
   | Remainder -> "remainder" | Exp -> "exp" | Floor -> "floor" | Ceil -> "ceil" | Round -> "round"
   | Int_convert -> "int" | Float_convert -> "float"
   | Integer op -> Flow.Packed_ops.integer_name op

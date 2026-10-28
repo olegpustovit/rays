@@ -1,0 +1,14 @@
+; The Flow image sink (Flow_gpu.Image_sink): a packed vec4 a pixel, row-major, drawn by one full-screen
+; triangle into the image's RGBA8 texture. Each channel clamps to [0, 1] and rounds to nearest, ties to
+; even, in the shader: the target's unorm store then keeps the byte k of k/255 exactly (its own
+; rounding is not ties-to-even). size[0] is the image width.
+(defn image-vertex :context value [(vid : int)]
+  {:position [(if (int/eq vid 1) 3. -1.) (if (int/eq vid 2) 3. -1.) 0. 1.]})
+(defn unorm8 :context value [(c : float)]
+  (let* [x (* (min (max c 0.) 1.) 255.) r (float (floor x)) f (- x r)
+         k (if (> f 0.5) (+ r 1.) (if (< f 0.5) r (+ r (float (int/and (int r) 1)))))]
+    (/ k 255.)))
+(defn image-fragment :context value [(colors : (array float)) (size : (array float))]
+  (let* [at (int/mul (int/add (int/mul (int (gpu/fragment-y)) (int (array/nth size 0))) (int (gpu/fragment-x))) 4)]
+    [(unorm8 (array/nth colors at)) (unorm8 (array/nth colors (int/add at 1)))
+     (unorm8 (array/nth colors (int/add at 2))) (unorm8 (array/nth colors (int/add at 3)))]))

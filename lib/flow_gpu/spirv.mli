@@ -11,7 +11,7 @@ val kernel : ?fast:bool -> ?instanced:bool -> ?motion:bool -> ?curves:bool -> Fl
 (** A moving scene ([motion]) is refused ([E_GPU_FORM]): SPIR-V ray queries have no motion form. [curves]
     strands are the in-loop capsule test of {!Emit.kernel}'s [`Loop]. *)
 
-type output = Position | Varying of int * bool | Colour | Discard
+type output = Position | Point_size | Varying of int * bool | Colour | Discard
 type stage = { vertex : bool; inputs : (int * int * bool) array; outputs : output array;
   buffers : (int * int * bool) list }
 (** A raster stage's interface: [inputs.(k)] is element [k]'s (location, width, flat); [outputs.(k)] is

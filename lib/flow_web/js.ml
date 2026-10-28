@@ -13,11 +13,13 @@ let binary operation a b = match operation with
   | Ge -> flag (a ^ " >= " ^ b) | Eq -> flag (a ^ " === " ^ b)
   | And -> flag (a ^ " !== 0 && " ^ b ^ " !== 0") | Or -> flag (a ^ " !== 0 || " ^ b ^ " !== 0")
   | Atan2 -> "Math.atan2("^a^", "^b^")" | Hypot -> "Math.hypot("^a^", "^b^")"
+  | Ldexp -> "("^a^" * 2 ** Math.trunc("^b^"))"
 let unary operation a = match operation with
   | P.Sin -> "Math.sin(" ^ a ^ ")" | Cos -> "Math.cos(" ^ a ^ ")"
   | Sqrt -> "Math.sqrt(Math.abs(" ^ a ^ "))" | Abs -> "Math.abs(" ^ a ^ ")" | Not -> flag (a ^ " === 0")
   | Tan -> "Math.tan("^a^")" | Asin -> "Math.asin("^a^")" | Acos -> "Math.acos("^a^")"
   | Exp -> "Math.exp("^a^")" | Log -> "Math.log("^a^")" | Sign -> "Math.sign("^a^")"
+  | Rsqrt -> "(1 / Math.sqrt(Math.abs("^a^")))"
 let fused = {|  const fmaBytes = new DataView(new ArrayBuffer(8));
   const fmaDecode = x => {
     fmaBytes.setFloat64(0, x, false);

@@ -41,17 +41,23 @@ let is_buffer (_, ty) = match ty with Flow.Ty.Array _ -> true | _ -> false
 (* A stage output: a leaf of the entry's result, in field order (the program's outputs), [flat] when
    it sits under [:flat]. *)
 type leaf = { path : string list; ty : Flow.Ty.t; flat : bool }
-type stage = { params : (string * Flow.Ty.t) list; leaves : leaf list; program : Flow_ir.Packed.t }
+type stage = { params : (string * Flow.Ty.t) list; leaves : leaf list; program : Flow_ir.Packed.t;
+  bindings : (string * int) list }
 
 let rec leaves ?(flat = false) path = function
   | Flow.Ty.Record fields -> List.concat_map (fun (name, ty) ->
       leaves ~flat:(flat || name = "flat") (path @ [ name ]) ty) fields
   | ty -> [ { path; ty; flat } ]
 
-let compile ~declarations entry =
+(* A vertex stage's buffers bind in their order; a fragment buffer named like a vertex one shares its
+   binding, any other follows the vertex stage's. *)
+let compile ?(shared = []) ~declarations entry =
   let* forms = Flow.Syntax.parse declarations in
   let* params = parameters forms entry in
   let buffers = List.filter is_buffer params and elements = List.filter (fun p -> not (is_buffer p)) params in
+  let next = ref (List.length shared) in
+  let bindings = List.map (fun (name, _) -> name, match List.assoc_opt name shared with
+    | Some slot -> slot | None -> let slot = !next in incr next; slot) buffers in
   let ops = List.mapi (fun index (_, ty) -> let name = "raster/buffer" ^ string_of_int index in
     { Flow.Op.noise3 with name; packed_extension = None; signature = { pos = []; opt = []; rest = None; kw = [] };
       out = (fun _ -> ty); shape = Flow.Op.Struct { splice = false }; check = (fun _ -> ());
@@ -68,7 +74,7 @@ let compile ~declarations entry =
          | E.Fn fn -> Ok fn | _ -> fail (entry ^ ": the stage is not a function"))
     | _, d :: _ -> Error d | _, [] -> fail (entry ^ ": unchecked") in
   let result = match E.Residual.function_body fn with Some (_, body) -> body.W.ty | None -> Flow.Ty.Any in
-  let* bound = all (List.mapi (fun index (_, ty) -> dummy index ty) buffers) in
+  let* bound = all (List.map (fun (name, ty) -> dummy (List.assoc name bindings) ty) buffers) in
   let fn = E.bind_captures (function
     | Flow.Value.Source (source, _, []) when String.starts_with ~prefix:"raster/buffer" source ->
         List.nth bound (int_of_string (String.sub source 13 (String.length source - 13)))
@@ -77,7 +83,7 @@ let compile ~declarations entry =
     (List.map (fun (_, ty) -> column ty) elements) in
   match residual with
   | E.Residual r -> (match Flow_ir.Packed.compile_template r (E.Residual.residual_view r).term with
-      | Some program -> Ok { params; leaves = leaves [] result; program }
+      | Some program -> Ok { params; leaves = leaves [] result; program; bindings }
       | None -> (match Flow_ir.Packed.compile_result r (E.Residual.residual_view r).term with
           | Error (d :: _) -> Error d | _ -> fail (entry ^ " does not compile to a packed program")))
   | _ -> fail (entry ^ ": the stage did not defer")
@@ -96,27 +102,46 @@ let buffer (program : Flow_ir.Packed.t) u = match program.uniforms.(u) with
 
 let body ~input ~int_input ~store stage =
   Emit.stage_body ~raster:{ Emit.input; int_input; buffer = buffer stage.program;
-    output = (fun k c value -> store (List.nth stage.leaves k) c value) } stage.program
+    output = (fun k c value -> store (List.nth stage.leaves k) c value);
+    builtin = (function "gpu/instance-id" -> "iid" | "gpu/front-facing" -> "(front?1.0f:0.0f)" | "gpu/depth" -> "in.position.z"
+      | "gpu/fragment-x" -> "in.position.x" | "gpu/fragment-y" -> "in.position.y"
+      | name -> invalid_arg ("Raster: no built-in " ^ name)) } stage.program
 
-(* The textures a fragment's intrinsics read, texture t with its sampler at t + 1. *)
+(* The textures a fragment's intrinsics read: texture t with its sampler at t + 1 (none when it is only
+   read by texel), or (an argument-buffer
+   pipeline) both in the argument buffer at buffer t, held in locals of the same names. *)
 let textures stage =
   let rec unguarded = function Flow_ir.Packed.Guarded (_, i) -> unguarded i | i -> i in
   List.filter_map (fun i -> match unguarded i with
-    | Flow_ir.Packed.Stage ((Sample (t, _) | Texture_size (t, _)), _) -> Some t | _ -> None)
-    (Array.to_list stage.program.Flow_ir.Core.Region.code) |> List.sort_uniq compare
-  |> List.concat_map (fun t -> [ Printf.sprintf "texture2d<float> texture%d [[texture(%d)]]" t t;
-    Printf.sprintf "sampler sampler%d [[sampler(%d)]]" (t + 1) (t + 1) ])
+    | Flow_ir.Packed.Stage ((Sample (t, _) | Sample_level (t, _) | Texture_size (t, _)), _) -> Some (t, true)
+    | Flow_ir.Packed.Stage (Read (t, _), _) -> Some (t, false) | _ -> None)
+    (Array.to_list stage.program.Flow_ir.Core.Region.code)
+  |> fun used -> List.sort_uniq compare (List.map (fun (t, _) -> t, List.mem (t, true) used) used)
+let texture_arguments ~arguments stage = List.concat_map (fun (t, sampled) -> if arguments
+  then [ Printf.sprintf "constant raster_texture& arguments%d [[buffer(%d)]]" t t ]
+  else Printf.sprintf "texture2d<float> texture%d [[texture(%d)]]" t t
+    :: (if sampled then [ Printf.sprintf "sampler sampler%d [[sampler(%d)]]" (t + 1) (t + 1) ] else [])) (textures stage)
+let texture_locals ~arguments stage = if not arguments then "" else String.concat "" (List.map (fun (t, _) ->
+  Printf.sprintf "  texture2d<float> texture%d=arguments%d.image;\n  sampler sampler%d=arguments%d.sampling;\n" t t (t + 1) t)
+  (textures stage))
 
-let buffer_arguments params =
-  List.mapi (fun index (_, ty) -> Printf.sprintf "device const %s* buffer%d [[buffer(%d)]]"
-    (if ty = Flow.Ty.Array Int then "uint" else "float") index index) (List.filter is_buffer params)
+(* A built-in argument, only when the stage reads its fact (Frame or Int_frame [name]). *)
+let builtin stage name argument =
+  let rec unguarded = function Flow_ir.Packed.Guarded (_, i) -> unguarded i | i -> i in
+  if Array.exists (fun i -> match unguarded i with Flow_ir.Packed.Frame n | Int_frame n -> n = name | _ -> false)
+       stage.program.Flow_ir.Core.Region.code then [ argument ] else []
+
+let buffer_arguments stage =
+  List.map (fun (name, ty) -> let slot = List.assoc name stage.bindings in
+    Printf.sprintf "device const %s* buffer%d [[buffer(%d)]]" (if ty = Flow.Ty.Array Int then "uint" else "float") slot slot)
+    (List.filter is_buffer stage.params)
 
 (* A vertex entry's first parameter is the vertex id; its result has [:position] (clip space) and the
    varyings, those under [:flat] not interpolated. A fragment entry's elements are varyings by name
    and its result is the colour, or [{:color :discard}]. *)
-let msl ~declarations ~vertex ~fragment =
+let msl ?(arguments = false) ~declarations ~vertex ~fragment () =
   let* v = compile ~declarations vertex in
-  let* f = compile ~declarations fragment in
+  let* f = compile ~shared:v.bindings ~declarations fragment in
   (* the discard test after the colour stores: measured faster on Apple GPUs than before them *)
   let last = List.partition (fun (leaf, _) -> leaf.path <> [ "discard" ]) (List.combine f.leaves (Array.to_list f.program.outputs)) in
   let* f = match last with
@@ -127,6 +152,7 @@ let msl ~declarations ~vertex ~fragment =
   let name leaf = identifier (List.nth leaf.path (List.length leaf.path - 1)) in
   let* fields = all (List.map (fun leaf -> Result.map (fun ty ->
     if leaf.path = [ "position" ] then "  float4 position [[position]];\n"
+    else if leaf.path = [ "point-size" ] then "  float point_size [[point_size]];\n"
     else Printf.sprintf "  %s %s%s;\n" ty (name leaf) (if leaf.flat then " [[flat]]" else "")) (msl_type leaf.ty)) v.leaves) in
   let* vertex_body = body v ~input:(fun _ _ -> "0.0f") ~int_input:(fun _ -> "long(vid)")
     ~store:(fun leaf c value -> component ("o." ^ name leaf) leaf.ty c ^ "=" ^ value ^ ";") in
@@ -135,24 +161,26 @@ let msl ~declarations ~vertex ~fragment =
   let* fragment_body = body f ~input ~int_input:(fun _ -> "0") ~store:(fun leaf c value ->
     if leaf.path = [ "discard" ] then "if(" ^ value ^ "!=0.0f) discard_fragment();"
     else component "colour" Flow.Ty.Vec4 c ^ "=" ^ value ^ ";") in
-  let signature params extra = String.concat ",\n    " (extra @ buffer_arguments params) in
+  let signature stage extra = String.concat ",\n    " (extra @ buffer_arguments stage) in
   Ok (String.concat "" ([ "#include <metal_stdlib>\nusing namespace metal;\n";
     "long fmod64(long a,long b){if(b==0)return 0;long r=a%b;return (r!=0&&((r<0)!=(b<0)))?r+b:r;}\n";
+    (if arguments then "struct raster_texture { texture2d<float, access::sample> image [[id(0)]]; sampler sampling [[id(1)]]; };\n" else "");
     "struct "; out; " {\n" ] @ fields @ [ "};\n";
     Printf.sprintf "vertex %s %s(\n    %s) {\n  %s o;\n" out (identifier vertex)
-      (signature (List.tl v.params) [ "uint vid [[vertex_id]]" ]) out; vertex_body; "  return o;\n}\n";
+      (signature v ("uint vid [[vertex_id]]" :: builtin v "gpu/instance-id" "uint iid [[instance_id]]")) out; vertex_body; "  return o;\n}\n";
     Printf.sprintf "fragment float4 %s(\n    %s) {\n  float4 colour;\n" (identifier fragment)
-      (signature f.params ((out ^ " in [[stage_in]]") :: textures f)); fragment_body; "  return colour;\n}\n" ]))
+      (signature f (((out ^ " in [[stage_in]]") :: builtin f "gpu/front-facing" "bool front [[front_facing]]") @ texture_arguments ~arguments f));
+      texture_locals ~arguments f; fragment_body; "  return colour;\n}\n" ]))
 
 (* The same stages as Vulkan SPIR-V modules (entry [main]): varyings at locations in the vertex
    result's leaf order, the fragment's inputs at their names' locations. *)
 let spirv ~declarations ~vertex ~fragment =
   let* v = compile ~declarations vertex in
-  let* f = compile ~declarations fragment in
+  let* f = compile ~shared:v.bindings ~declarations fragment in
   let buffers (s : stage) = List.filter_map Fun.id (Array.to_list (Array.mapi (fun u value -> match value with
     | E.Int_array a -> Some (u, Array.length a - 1, true) | E.Float_array a -> Some (u, Array.length a - 1, false)
     | _ -> None) s.program.uniforms)) in
-  let varyings = List.filter (fun leaf -> leaf.path <> [ "position" ]) v.leaves in
+  let varyings = List.filter (fun leaf -> leaf.path <> [ "position" ] && leaf.path <> [ "point-size" ]) v.leaves in
   let location leaf = Option.get (List.find_index (( == ) leaf) varyings) in
   let width = function Flow.Ty.Vec2 -> 2 | Vec3 -> 3 | Vec4 -> 4 | _ -> 1 in
   let* inputs = all (List.map (fun (name, ty) ->
@@ -161,6 +189,7 @@ let spirv ~declarations ~vertex ~fragment =
     | None -> fail (fragment ^ ": no varying " ^ name)) (List.filter (fun p -> not (is_buffer p)) f.params)) in
   let* vertex_module = Spirv.stage { vertex = true; inputs = [||]; buffers = buffers v;
     outputs = Array.of_list (List.map (fun leaf -> if leaf.path = [ "position" ] then Spirv.Position
+      else if leaf.path = [ "point-size" ] then Point_size
       else Varying (location leaf, leaf.flat)) v.leaves) } v.program in
   let* fragment_module = Spirv.stage { vertex = false; inputs = Array.of_list inputs; buffers = buffers f;
     outputs = Array.of_list (List.map (fun leaf -> if leaf.path = [ "discard" ] then Spirv.Discard else Colour) f.leaves) } f.program in

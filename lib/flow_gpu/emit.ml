@@ -173,10 +173,13 @@ float trace_occluded(|} ^ parameters ^ {|) {
   return 0.0f;
 }
 |}
-(* A raster-stage intrinsic (Flow_ir.Core.Region.stage); texture t is sampled with sampler t + 1. *)
+(* A raster-stage intrinsic (Flow_ir.Core.Region.stage); texture t is sampled with sampler t + 1 and read
+   (whole texels, no sampler) at integer coordinates. *)
 let stage_intrinsic stage operands = match stage with
   | Flow_ir.Core.Region.Fwidth -> "fwidth(" ^ operands.(0) ^ ")"
   | Sample (t, c) -> Printf.sprintf "texture%d.sample(sampler%d,float2(%s,%s)).%c" t (t + 1) operands.(0) operands.(1) "xyzw".[c]
+  | Sample_level (t, c) -> Printf.sprintf "texture%d.sample(sampler%d,float2(%s,%s),level(%s)).%c" t (t + 1) operands.(0) operands.(1) operands.(2) "xyzw".[c]
+  | Read (t, c) -> Printf.sprintf "texture%d.read(uint2(%s,%s)).%c" t operands.(0) operands.(1) "xyzw".[c]
   | Texture_size (t, c) -> Printf.sprintf "float(texture%d.get_%s())" t (if c = 0 then "width" else "height")
 let fail message = raise (Diagnostic.Error (Diagnostic.error ~code:"E_GPU_FORM" message))
 let register index = "r" ^ string_of_int index
@@ -196,6 +199,7 @@ let binary operation a b =
   | Or -> "(" ^ a ^ "!=0.0f||" ^ b ^ "!=0.0f)"
   | Atan2 -> "atan2(" ^ a ^ "," ^ b ^ ")"
   | Hypot -> fail "Native-safe hypot is not supported by the Metal kernel target."
+  | Ldexp -> "ldexp(" ^ a ^ ",int(" ^ b ^ "))"
 let unary operation a = match operation with
   | P.Sin -> "sin(" ^ a ^ ")" | Cos -> "cos(" ^ a ^ ")"
   | Sqrt -> "sqrt(fabs(" ^ a ^ "))" | Abs -> "fabs(" ^ a ^ ")" | Not -> "(" ^ a ^ "==0.0f)"
@@ -204,6 +208,7 @@ let unary operation a = match operation with
       ^ (if operation=P.Asin then "asin" else "acos") ^ "(" ^ a ^ "))"
   | Exp -> "exp(" ^ a ^ ")"
   | Log -> "(" ^ a ^ "<=0.0f?as_type<float>(0x7fc00000u):log(" ^ a ^ "))"
+  | Rsqrt -> "rsqrt(fabs(" ^ a ^ "))"
   | Sign -> "(" ^ a ^ ">0.0f?1.0f:(" ^ a ^ "<0.0f?-1.0f:" ^ a ^ "))"
 (* The 32-bit lowering of checked arithmetic: the value or zero, or the finite flag. *)
 let checked projection expression = match projection with
@@ -267,7 +272,7 @@ let comparison operation a b =
 (* A raster placement (Raster): elements are vertex ids or interpolated fragment inputs, gathers read the
    renderer's bound buffers, and outputs are stage results; the stage function around the body is Raster's. *)
 type raster = { input : int -> int -> string; int_input : int -> string; buffer : int -> string;
-  output : int -> int -> string -> string }
+  output : int -> int -> string -> string; builtin : string -> string }
 let rec kernel ?fast ?instanced ?motion ?curves program = generate ?fast ?instanced ?motion ?curves program
 and stage_body ~raster program = Result.map (fun msl -> msl.source) (generate ~fast:true ~raster program)
 and generate ?(fast=false) ?(instanced=false) ?(motion=false) ?curves ?raster program = try
@@ -369,6 +374,7 @@ and generate ?(fast=false) ?(instanced=false) ?(motion=false) ?curves ?raster pr
       | Input (input,_,component) when raster <> None -> (Option.get raster).input input component
       | Input (input,width,component) -> Printf.sprintf "input%d[i*%d+%d]" input width component
       | Uniform (index,component) -> Printf.sprintf "as_type<float>(uniforms[%d])" (uniforms.(index)+component)
+      | Frame name when raster <> None -> (Option.get raster).builtin name
       | Frame _ -> Printf.sprintf "as_type<float>(uniforms[%d])" frames.(slot)
       | Accumulator _ -> assert false
       (* arithmetic on two integers stays in 64 bits (fast): a float register would round them first *)
@@ -386,6 +392,7 @@ and generate ?(fast=false) ?(instanced=false) ?(motion=false) ?curves ?raster pr
       | Int_input input when raster <> None -> (Option.get raster).int_input input
       | Int_input input -> Printf.sprintf "long(input%d[i])" input
       | Int_uniform index -> Printf.sprintf "long(as_type<float>(uniforms[%d]))" uniforms.(index)
+      | Int_frame name when raster <> None -> "long(" ^ (Option.get raster).builtin name ^ ")"
       | Int_frame _ -> Printf.sprintf "long(as_type<float>(uniforms[%d]))" frames.(slot)
       | Int_binary (op,a,b) -> integer op (int_of a) (int_of b)
       | Int_compare (op,a,b) -> comparison op (int_of a) (int_of b)
@@ -449,7 +456,12 @@ and generate ?(fast=false) ?(instanced=false) ?(motion=false) ?curves ?raster pr
       context := (outer.Scope.id, guards);
       let ty slot=if narrow.(slot) then "uint" else if integer_register slot then "long" else "float"in
       let carried slot source = if narrow.(slot) then low source else if integer_register slot then int_of source else register source in
-      Printf.bprintf outer.Scope.decls "  %s r%d=0;\n" (ty header) header;
+      (* a raster stage counts a capped pass from a small constant in 32 bits (64-bit counters cost a lit
+         Scene3 frame about 7%) *)
+      let counter = match raster, control.limit, snd (guarded [] view.code.(control.first)) with
+        | Some _, Some limit, P.Int_const v when not narrow.(header) && abs v + limit < 1 lsl 30 -> "int"
+        | _ -> ty header in
+      Printf.bprintf outer.Scope.decls "  %s r%d=0;\n" counter header;
       Array.iteri(fun component _->let slot=header+1+component in
         Printf.bprintf outer.Scope.decls "  %s r%d=0;\n" (ty slot)slot)control.initial;
       enter outer guards;
@@ -582,18 +594,3 @@ kernel void flow_compact_mask(device const float* mask [[buffer(0)]], device flo
    interface = List.map (fun binding -> S.{group = 0; binding;
      kind = (if binding = 3 then Uniform_buffer else Storage_buffer); visibility = [Compute]}) [0; 1; 2; 3; 4]}
 
-(* The image sink's RGBA8 packing kernel: all flow_gpu MSL lives in this printer. *)
-let image_rgba8_source = {|#include <metal_stdlib>
-using namespace metal;
-struct ImageSize { uint count; uint width; uint row_words; };
-uint rgba8_channel(float c) { return uint(rint(clamp(c,0.0f,1.0f)*255.0f)); }
-kernel void rays_flow_image_rgba8(device const float4 *colors [[buffer(0)]],
-    device uint *pixels [[buffer(1)]], constant ImageSize &size [[buffer(2)]],
-    uint i [[thread_position_in_grid]]) {
-  if (i>=size.count) return;
-  float4 c=colors[i];
-  uint rgba=rgba8_channel(c.x)|(rgba8_channel(c.y)<<8)
-    |(rgba8_channel(c.z)<<16)|(rgba8_channel(c.w)<<24);
-  pixels[(i/size.width)*size.row_words+i%size.width]=rgba;
-}
-|}
