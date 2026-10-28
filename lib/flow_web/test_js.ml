@@ -94,7 +94,7 @@ let compare_integer ?fast source =
     assert (Array.length output>=Array.length values);
     Array.iteri (fun i n -> if output.(i)<>string_of_int n then
       failwith (Printf.sprintf "Integer JS mismatch at %d: %s <> %d" i output.(i) n)) values) expected;
-  let reference=P.reference program ~live |> Test_program.ok in
+  let reference=P.Host.reference program ~live |> Test_program.ok in
   assert (expected=[reference])
 
 let compare_native ?fast name program =

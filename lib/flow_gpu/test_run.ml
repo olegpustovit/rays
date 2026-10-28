@@ -55,7 +55,7 @@ let () = match Renderer.acquire_gpu () with
           let runner=Flow_gpu.Run.create gpu pipelines (Test_program.ok(Flow_gpu.Emit.kernel ~fast:true program))in
           Fun.protect ~finally:(fun()->Flow_gpu.Run.close runner)(fun()->
             let live=Input.at_time 1. in
-            let expected=Test_program.ok(Flow_ir.Packed.reference program ~live)|>array in
+            let expected=Test_program.ok(Flow_ir.Packed.Host.reference program ~live)|>array in
             let cpu=Test_program.ok(Flow_ir.Packed.force ~strict:true program ~live)|>array in
             assert(cpu=expected);
             let values=Test_program.ok(Flow_ir.Packed.Host.prepare ~fast:true program ~live)in

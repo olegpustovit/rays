@@ -118,7 +118,7 @@ let scratch () =
       let residual = kernel_residual (Printf.sprintf
         "(map (fn [x] %s) (array/range %d%s))" (body op initial passes) count type_suffix) in
       let packed = Option.get (I.Packed.compile residual (E.Residual.residual_view residual).term) in
-      let reference = I.Packed.reference packed ~live in
+      let reference = I.Packed.Host.reference packed ~live in
       List.iter (fun domains -> Parallel.run ~domains (fun () ->
         let actual = I.Packed.force ~strict:true packed ~live in
         if Marshal.to_string actual [Marshal.No_sharing] <> Marshal.to_string reference [Marshal.No_sharing] then

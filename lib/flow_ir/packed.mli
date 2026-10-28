@@ -85,11 +85,11 @@ val force_all : ?dispatch:(Flow.Eval.residual -> Flow.Workspace.term -> (Flow.Ev
     accessor and refuses such a program. [strict:true] returns kernel errors
     directly instead of rerunning the reference interpreter. *)
 
-val reference : ?state:Flow.Eval.state -> ?elems:(string * Flow.Eval.value) list ->
+module Host : sig
+  val reference : ?state:Flow.Eval.state -> ?elems:(string * Flow.Eval.value) list ->
   ?resolve:(Flow.Eval.value -> (Flow.Eval.value, Diagnostic.t) result) ->
   t -> live:Flow.Eval.live -> (Flow.Eval.value, Diagnostic.t) result
 
-module Host : sig
   val argument_types : t -> Flow.Ty.t array
   (** Declared types of the structured Core arguments captured by this region. *)
 

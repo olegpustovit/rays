@@ -124,7 +124,7 @@ let () =
     let prepared = Test_program.ok (Flow_ir.Packed.Host.prepare program ~live:(Input.at_time 1.)) in
     assert (prepared.count = 1024);
     assert (Marshal.to_string (Flow_ir.Packed.force program ~live:(Input.at_time 1.)) [Marshal.No_sharing]
-      = Marshal.to_string (Flow_ir.Packed.reference program ~live:(Input.at_time 1.)) [Marshal.No_sharing]))
+      = Marshal.to_string (Flow_ir.Packed.Host.reference program ~live:(Input.at_time 1.)) [Marshal.No_sharing]))
     [2, "(map (fn [x] [x t]) (array/range 1024))";
      4, "(map (fn [x] [x t (+ x t) 1]) (array/range 1024))";
      4, "(map (fn [(uv : vec2)] [uv.x uv.y t 1]) (map (fn [x] [x 1]) (array/range 1024)))";
@@ -140,7 +140,7 @@ let () =
       List.iter (fun time ->
         let live = Input.at_time time in
         assert (Marshal.to_string (Flow_ir.Packed.force program ~live) [Marshal.No_sharing]
-          = Marshal.to_string (Flow_ir.Packed.reference program ~live) [Marshal.No_sharing]))
+          = Marshal.to_string (Flow_ir.Packed.Host.reference program ~live) [Marshal.No_sharing]))
         [0.; 0.125; 1.25; 7.])) [1;8])
     ["(cond (< x t) (+ x 1) (> x 5) (- x 1) :else (* x t))";
      "(case x 0 t 1 (+ t 1) :else (+ x t))";

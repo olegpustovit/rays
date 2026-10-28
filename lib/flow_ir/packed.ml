@@ -1714,6 +1714,7 @@ module Host = struct
         ~stages:(List.map(fun(r,term)->residual r,term)t.stages) ~count:t.count
     with Diagnostic.Error d -> Error d
   let ordered_add = ordered_add
+  let reference = reference
   let output_reachable = output_reachable
   let finite_checks = finite_checks
   type view = {code : instruction array; widths : int array; outputs : int array array;

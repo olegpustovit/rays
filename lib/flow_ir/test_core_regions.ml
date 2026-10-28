@@ -74,7 +74,7 @@ let carried_loops () =
     assert(Array.exists(fun instruction->match bare instruction with R.Loop_begin _->true|_->false)program.R.code);
     List.iter(fun time->
       let live=Input.at_time time in
-      let expected=I.Packed.reference program ~live in
+      let expected=I.Packed.Host.reference program ~live in
       List.iter(fun domains->
         let actual=Parallel.run ~domains(fun()->I.Packed.force ~strict:true program ~live)in
         (match actual,expected with
@@ -173,7 +173,7 @@ let () =
     if List.length program.I.Core.Region.stages<>2 then failwith(name^": expected two fused stages");
     List.iter(fun time->
       let live=Input.at_time time in
-      let expected=I.Packed.reference program ~live in
+      let expected=I.Packed.Host.reference program ~live in
       List.iter(fun domains->Parallel.run ~domains(fun()->
         if not(same_result(I.Packed.force ~strict:true program ~live)expected)then
           failwith(name^": fused loop parity")))[1;8])[-1.;0.37;5.])fused;
@@ -181,7 +181,7 @@ let () =
   let merged=Option.get(I.Core_fuse.merge(List.map snd siblings))in
   List.iter(fun time->
     let live=Input.at_time time in
-    let expected=List.map(fun(_,program)->ok(I.Packed.reference program ~live))siblings in
+    let expected=List.map(fun(_,program)->ok(I.Packed.Host.reference program ~live))siblings in
     List.iter(fun domains->Parallel.run ~domains(fun()->
       let actual=ok(I.Packed.force_all ~strict:true merged ~live)in
       assert(List.for_all2 same actual expected)))[1;8])[-1.;0.37;5.];
@@ -201,11 +201,11 @@ let () =
   assert(List.length reduction.I.Core.Region.stages=2);
   List.iter(fun program->List.iter(fun time->
     let live=Input.at_time time in
-    assert(same_result(I.Packed.force ~strict:true program ~live)(I.Packed.reference program ~live)))
+    assert(same_result(I.Packed.force ~strict:true program ~live)(I.Packed.Host.reference program ~live)))
     [-1.;0.37;5.])[text;independent;reduction];
   let parallel=List.assoc "iterate-fused-both"(Test_program.carried_fixtures 32769)in
   let live=Input.at_time 0.37 in
-  let expected=I.Packed.reference parallel ~live in
+  let expected=I.Packed.Host.reference parallel ~live in
   List.iter(fun domains->Parallel.run ~domains(fun()->
     assert(same_result(I.Packed.force ~strict:true parallel ~live)expected)))[1;8];
   let shortened=Test_program.compile
@@ -213,7 +213,7 @@ let () =
       (map (fn [x] (iterate 1 t (fn [a] (if (> x 1.)
         (error \"E_TAIL\" \"producer tail\") a)))) (array/range 3)) (array/float 1))"in
   assert(List.length shortened.I.Core.Region.stages=1);
-  assert(same_result(I.Packed.force ~strict:true shortened ~live)(I.Packed.reference shortened ~live));
+  assert(same_result(I.Packed.force ~strict:true shortened ~live)(I.Packed.Host.reference shortened ~live));
   print_endline "Loop fusion: producer/consumer scopes, guards, integer/text aliases and sibling outputs agree"
 
 let () =
