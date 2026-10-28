@@ -63,12 +63,12 @@ List.iter (fun ((leaf : Pxui_shell.Layout.leaf), _) -> match leaf.panel with
       let camera = Option.bind value.doc.Document.active_camera (Kind_graph.find (scene value)) in
       (* the triangles the scene draws: a polygon of n corners fans into n - 2 (exact for polygons, a
          count of corners and faces, not a walk of every face, for a frame's cost) *)
-      let tris = List.fold_left (fun n (piece : _ Cook.piece) ->
+      let tris = List.fold_left (fun n (piece : Cook.piece) ->
         match piece.output.Sop.Session.payload with
         | Payload.Image _ | Payload.Kernel _ -> n
         | Geometry g -> n + Rdk_rays.Geometry_view.triangles g) 0 (pieces value) in
       let objects = List.length (pieces value) in
-      let points = Option.bind (piece value) (fun (piece : _ Cook.piece) ->
+      let points = Option.bind (piece value) (fun (piece : Cook.piece) ->
         Option.map Rdk_rays.Geometry_view.point_count
           (Result.to_option (Payload.geometry piece.output.Sop.Session.payload))) in
       (* the traced readout: its samples are the caption's "n/cap spp" *)

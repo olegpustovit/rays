@@ -32,9 +32,8 @@ let editor () =
   let workspace = match Doc.of_text catalog (bloom ()) with
     | Ok d -> d | Error ds -> fail (String.concat "; " (List.map Diagnostic.to_string ds)) in
   E3.create ~ui_text_size:11 ~await:true ~workspace
-    ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
-      |> Result.map_error Rdk.Error.to_string)
-    ~draw:(fun _ mesh -> Scene.D3.create [ Scene.D3.mesh mesh ]) ()
+    ~prepare:Editor_prepare.surface
+    ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor.Private.Cook.surface) ()
   |> function Ok e -> e | Error m -> fail m
 
 let dump_line = Test_workspace_shell.dump_line

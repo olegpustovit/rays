@@ -86,7 +86,7 @@ module Allocation_profile = struct
 end
 
 type model = {
-  environment : preview Rays_editor.Editor.t;
+  environment : Rays_editor.Editor.t;
   launched_at : float;
   hidden_toggled : bool;
   ready_at : float option;
@@ -200,23 +200,23 @@ let lights = [
     ~diffuse:(Rays_math.Color.hex_exn "#7dd3fc") ~intensity:0.55 ();
 ]
 
-let prepare output =
-  match Rdk.Geometry.find_attribute ~owner:Rdk.Attribute.Primitive "piece"
-      (Result.get_ok (Sop.Payload.geometry output.Session.payload)) with
+let preview_of_geometry geometry =
+  match Rdk.Geometry.find_attribute ~owner:Rdk.Attribute.Primitive "piece" geometry with
   | Some attribute ->
       (match Rdk.Attribute.View.storage attribute with
        | Rdk.Attribute.Int _ | Text _ ->
            Rdk_rays.Packed_pieces.of_geometry ~piece_attribute:"piece"
-             (Result.get_ok (Sop.Payload.geometry output.payload))
+             geometry
            |> Result.map (fun pieces -> Pieces pieces)
-       | _ -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.payload))
+       | _ -> Rdk_rays.Rays_mesh.to_mesh geometry
            |> Result.map (fun mesh -> Mesh mesh)
            |> Result.map_error Rdk.Error.to_string)
-  | None -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.payload))
+  | None -> Rdk_rays.Rays_mesh.to_mesh geometry
       |> Result.map (fun mesh -> Mesh mesh)
       |> Result.map_error Rdk.Error.to_string
 
-let scene3 node preview =
+let scene3 node (prepared : Rays_editor.Editor.prepared) =
+  let preview = Result.get_ok (preview_of_geometry prepared.Rays_editor.Private.Cook.geometry) in
   let mesh = match preview with
     | Pieces pieces -> mesh_for_node node pieces
     | Mesh mesh -> mesh in
@@ -252,7 +252,7 @@ let overlay graph preview (frame : Frame.t) =
   ]
 
 let cardinality environment =
-  match Rays_editor.Editor.prepared environment with
+  match Option.map (fun geometry -> Result.get_ok (preview_of_geometry geometry)) (Rays_editor.Editor.prepared environment) with
   | None -> None
   | Some (Mesh _) -> failwith "shattered-cube fixture lost its piece attribute"
   | Some (Pieces pieces) ->
@@ -274,7 +274,7 @@ let init (frame : Frame.t) =
         ~azimuth:0.72 ~elevation:0.42 ())
       ~seed:7349L ~grain ~domains ~max_entries:24
       ~max_payload_bytes:(256 * 1024 * 1024)
-      ~workspace:(workspace ()) ~prepare:(fun _ -> prepare)
+      ~workspace:(workspace ()) ~prepare:Rays_editor.Editor.prepare
       ~draw:scene3 () |> result_exn in
   let now = Unix.gettimeofday () in
   {

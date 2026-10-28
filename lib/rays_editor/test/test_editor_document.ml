@@ -117,7 +117,7 @@ let run () =
     check (List.length (Preset.list ~directory) = 1) "the document did not save a preset";
     List.iter (fun (name, _) -> Sys.remove (Preset.path ~directory ~name)) (Preset.list ~directory)) in
   let prepares = Atomic.make 0 in
-  let prepare _ _ = Atomic.incr prepares; Ok (Atomic.get prepares) in
+  let prepare settings output = Atomic.incr prepares; Editor_prepare.empty settings output in
   let module E3 = Rays_editor.Editor in
   exercise
     ~create:(fun () -> E3.create ~ui_text_size:11 ~await:true ~workspace ~presets:directory ~factories ~prepare

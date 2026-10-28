@@ -2,7 +2,7 @@
  (enabled_if (= %{system} macosx))
  (name test_workspace_ir)
  (modules test_workspace_ir)
- (libraries workspace_parity rays_editor ogpu_metal unix parallel))
+ (libraries editor_prepare workspace_parity rays_editor ogpu_metal unix parallel))
 
 (rule
  (enabled_if (= %{system} macosx))
@@ -42,7 +42,7 @@
  (enabled_if (= %{system} macosx))
  (name test_main)
  (modules test_main test_support test_text sop_params_fixture test_rays test_sop_ui test_custom_sop test_rays_editor test_editor_document test_editor_input test_editor_commands ws_fixture test_editor_cook test_editor_transactions test_editor_consistency test_scene_tree test_scene_sync test_sop_catalog test_packed_pieces test_terminal_boolean_normals test_workspace_live test_workspace_doc test_probe test_viewport_pick test_text_pane test_workspace_shell test_workspace_source test_bloom_studio sop_render_parity)
- (libraries rays rays_math pxui pxui_shell runtime_input sop rdk rdk_test_support rdk_rays flow_native flow_ir flow_sop pxui_graph
+ (libraries editor_prepare rays rays_math pxui pxui_shell runtime_input sop rdk rdk_test_support rdk_rays flow_native flow_ir flow_sop pxui_graph
     scene_command rays_editor editor_document flow_graph unix str compiler-libs.common rays.sdl3 lisp_sop parallel ogpu_metal)
  (preprocess (pps rays.ppx))
  (link_flags -linkall))
@@ -51,7 +51,7 @@
  (name test_host_effects)
  (enabled_if (= %{system} macosx))
  (modules test_host_effects)
- (libraries rays rays_math rays_editor editor_document flow ogpu_metal parallel)
+ (libraries editor_prepare rays rays_math rays_editor editor_document flow ogpu_metal parallel)
  (action (setenv SDL_AUDIODRIVER dummy (run %{test}))))
 
 (executable
@@ -80,7 +80,7 @@
  (name test_workspace_images)
  (modules test_workspace_images)
  (deps ../../sdl3_image/fixtures/sample.png)
- (libraries rays rays_math rays_editor flow_native editor_document flow flow_sop scene_command sop pxui workspace_parity lisp_sop ogpu_mock parallel))
+ (libraries rays rays_math rays_editor flow_native editor_document flow flow_sop scene_command sop pxui workspace_parity editor_prepare lisp_sop ogpu_mock parallel))
 
 (rule
  (alias test_workspace_images)
@@ -91,12 +91,12 @@
  (enabled_if (= %{system} macosx))
  (name test_workspace_images_native)
  (modules test_workspace_images_native)
- (libraries rays rays_math rays_editor editor_document flow flow_sop sop ogpu ogpu_metal runtime_resources unix parallel))
+ (libraries editor_prepare rays rays_math rays_editor editor_document flow flow_sop sop ogpu ogpu_metal runtime_resources unix parallel))
 
 (executable
  (name test_flow_shader)
  (modules test_flow_shader)
- (libraries rays_editor editor_document flow flow_graph flow_sop sop ogpu_mock parallel))
+ (libraries editor_prepare rays_editor editor_document flow flow_graph flow_sop sop ogpu_mock parallel))
 
 (rule
  (alias test_flow_shader)
@@ -112,7 +112,7 @@
 (test
  (name test_open_domain)
  (modules test_open_domain)
- (libraries rays rays_math flow flow_graph pxui pxui_graph rays_editor editor_document scene_command ogpu_mock parallel))
+ (libraries editor_prepare rays rays_math flow flow_graph pxui pxui_graph rays_editor editor_document scene_command ogpu_mock parallel))
 
 (rule
  (alias test_open_domain)
@@ -121,13 +121,13 @@
 (test
  (name test_materials)
  (modules test_materials)
- (libraries rays rays_math sop rdk rdk_rays rays_editor flow
+ (libraries editor_prepare rays rays_math sop rdk rdk_rays rays_editor flow
   flow_sop editor_document pxui_shell editor_core unix lisp_sop ogpu_mock parallel))
 
 (executable
  (name test_shattered_studio)
  (modules test_shattered_studio)
- (libraries rays rays_math sop rdk rdk_test_support rdk_rays rays_editor flow ogpu_mock parallel))
+ (libraries editor_prepare rays rays_math sop rdk rdk_test_support rdk_rays rays_editor flow ogpu_mock parallel))
 
 (rule
  (alias test_shattered_studio)
@@ -374,7 +374,7 @@
 
 (executable (enabled_if (= %{system} macosx)) (name test_2d_ports)
  (modules test_2d_ports)
- (libraries rays rays_math pxui rays_editor flow_native flow editor_document scene_command ogpu_metal unix parallel))
+ (libraries editor_prepare rays rays_math pxui rays_editor flow_native flow editor_document scene_command ogpu_metal unix parallel))
 
 (rule (enabled_if (= %{system} macosx)) (alias test_2d_ports) (deps)
  (action (setenv SDL_AUDIODRIVER dummy (run %{exe:test_2d_ports.exe}))))
@@ -391,7 +391,7 @@
  (enabled_if (= %{system} macosx))
  (name test_drawing)
  (modules test_drawing)
- (libraries rays rays_math flow flow_ir flow_graph editor_document rays_editor flow_native scene_command input editor_core unix ogpu_metal parallel))
+ (libraries editor_prepare rays rays_math flow flow_ir flow_graph editor_document rays_editor flow_native scene_command input editor_core unix ogpu_metal parallel))
 
 (rule
  (enabled_if (= %{system} macosx))
@@ -415,7 +415,7 @@
  (enabled_if (= %{system} macosx))
  (name test_workspace_start)
  (modules test_workspace_start)
- (libraries rays_editor editor_document flow ogpu_metal unix parallel))
+ (libraries editor_prepare rays_editor editor_document flow ogpu_metal unix parallel))
 
 (rule
  (enabled_if (= %{system} macosx))
@@ -462,4 +462,9 @@
 (library
  (name workspace_parity)
  (modules workspace_parity)
- (libraries rays rays_math rays_editor flow_native renderer runtime ogpu flow_ir flow_gpu flow_sop editor_document rdk_rays rdk_test_support unix parallel))
+ (libraries editor_prepare rays rays_math rays_editor flow_native renderer runtime ogpu flow_ir flow_gpu flow_sop editor_document rdk_rays rdk_test_support unix parallel))
+
+(library
+ (name editor_prepare)
+ (modules editor_prepare)
+ (libraries rdk rdk_rays sop rays_editor rays_diagnostic))

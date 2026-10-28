@@ -26,8 +26,8 @@ let canvas_preview () =
   let workspace = match Rays_editor.Workspace.load text with
     | Ok workspace -> workspace
     | Error ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds)) in
-  let editor = Result.get_ok (E3.create ~ui_text_size:11 ~workspace ~await:true ~domains:1 ~prepare:(fun _ _ -> Ok ())
-    ~draw:(fun _ () -> Rays.Scene.D3.empty) ()) in
+  let editor = Result.get_ok (E3.create ~ui_text_size:11 ~workspace ~await:true ~domains:1 ~prepare:Editor_prepare.empty
+    ~draw:(fun _ _ -> Rays.Scene.D3.empty) ()) in
   Fun.protect ~finally:(fun () -> E3.close editor) (fun () ->
     let count = ref 0 in
     let step e = incr count; E3.update e (Test_editor_input.frame (450., 300.) [] !count) in
@@ -69,8 +69,8 @@ let canvas_frame_size () =
   let workspace = match Rays_editor.Workspace.load text with
     | Ok workspace -> workspace
     | Error ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds)) in
-  let editor = Result.get_ok (E3.create ~ui_text_size:11 ~workspace ~await:true ~domains:1 ~prepare:(fun _ _ -> Ok ())
-    ~draw:(fun _ () -> Rays.Scene.D3.empty) ()) in
+  let editor = Result.get_ok (E3.create ~ui_text_size:11 ~workspace ~await:true ~domains:1 ~prepare:Editor_prepare.empty
+    ~draw:(fun _ _ -> Rays.Scene.D3.empty) ()) in
   Fun.protect ~finally:(fun () -> E3.close editor) (fun () ->
     let step e count = E3.update e (Test_editor_input.frame (450., 300.) [] count) in
     let e = step (step (step editor 1) 2) 3 in
@@ -104,8 +104,8 @@ let with_editor text f =
   let workspace = match Rays_editor.Workspace.load text with
     | Ok workspace -> workspace
     | Error ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds)) in
-  let editor = Result.get_ok (E3.create ~ui_text_size:11 ~workspace ~await:true ~domains:1 ~prepare:(fun _ _ -> Ok ())
-    ~draw:(fun _ () -> Rays.Scene.D3.empty) ()) in
+  let editor = Result.get_ok (E3.create ~ui_text_size:11 ~workspace ~await:true ~domains:1 ~prepare:Editor_prepare.empty
+    ~draw:(fun _ _ -> Rays.Scene.D3.empty) ()) in
   Fun.protect ~finally:(fun () -> E3.close editor) (fun () -> f editor)
 
 let world_command () =
@@ -323,7 +323,7 @@ let run () =
   let module E3 = Rays_editor.Editor in
   let directory = Filename.temp_dir "rays-guide" "" in
   let filename = Filename.concat directory "preferences.rays" in
-  let create () = E3.create ~ui_text_size:11 ~preferences:filename ~workspace ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ _ -> Scene.D3.empty) ()
+  let create () = E3.create ~ui_text_size:11 ~preferences:filename ~workspace ~prepare:Editor_prepare.empty ~draw:(fun _ _ -> Scene.D3.empty) ()
     |> Result.get_ok in
   let current = ref (create ()) in
   Fun.protect ~finally:(fun () ->

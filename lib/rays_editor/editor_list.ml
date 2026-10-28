@@ -48,14 +48,14 @@ let focus_object value = match pane_level value with
 
 let pieces value = value.cook.Cook.pieces
 let piece value = Option.bind (focus_object value) (fun id ->
-    List.find_opt (fun (piece : _ Cook.piece) -> piece.id = id) (pieces value))
+    List.find_opt (fun (piece : Cook.piece) -> piece.id = id) (pieces value))
 
-let prepared value = Option.map (fun (piece : _ Cook.piece) -> piece.prepared) (piece value)
+let prepared value = Option.map (fun (piece : Cook.piece) -> piece.prepared) (piece value)
 
 (* The object in focus (the selected scene object, or the one whose network is open): its world
    transform, its cooked bounds in its own space, and its name. *)
 let selected_bounds value =
-  Option.bind (piece value) (fun (piece : _ Cook.piece) ->
+  Option.bind (piece value) (fun (piece : Cook.piece) ->
     Option.bind piece.bounds (fun bounds ->
       Option.map (fun (node : Kind_graph.node) -> Objects.world (scene value) piece.id, bounds, node.label)
         (Kind_graph.find (scene value) piece.id)))

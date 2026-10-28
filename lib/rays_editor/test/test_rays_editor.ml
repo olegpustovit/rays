@@ -110,9 +110,8 @@ let camera_nodes () =
       ~camera:(Easy_camera.create ~distance:6. ~inertia:false ())
      
       ~max_entries:4 ~max_payload_bytes:(16 * 1024 * 1024)
-      ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
-        |> Result.map_error Rdk.Error.to_string)
-      ~draw:(fun _graph mesh -> Scene.D3.create [Scene.D3.mesh mesh]) ()
+      ~prepare:Editor_prepare.surface
+      ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor.Private.Cook.surface) ()
     |> Result.get_ok in
   check (List.length (cameras environment) = 1 && List.length (active environment) = 1)
     "Editor did not add one ACTIVE default camera";
@@ -245,15 +244,16 @@ let sketch_settings () =
     [ field ~name:"mode" ~label:"Mode" ~kind:(integer ~min:0 ~max:3 ())
         ~default:0 ~get:Fun.id ~set:(fun mode _ -> mode) () ]) in
   let module Settings = Rays_editor.Settings in
+  let seen = Atomic.make (-1) in
   let environment = Rays_editor.Editor.create ~ui_text_size:11 ~await:true ~workspace:(fixture ())
       ~settings:(Settings.make mode_schema 0)
       ~max_entries:4 ~max_payload_bytes:(16 * 1024 * 1024)
-      ~prepare:(fun settings _ -> Ok (Settings.get mode_schema settings))
+      ~prepare:(fun settings output -> Atomic.set seen (Settings.get mode_schema settings); Editor_prepare.empty settings output)
       ~draw:(fun _ _ -> Scene.D3.create []) () |> Result.get_ok in
   let deadline = Unix.gettimeofday () +. 60. in
   let rec wait_mode expected count environment =
     let environment = Rays_editor.Editor.update environment (frame count) in
-    if Rays_editor.Editor.prepared environment = Some expected then environment
+    if Atomic.get seen = expected && Rays_editor.Editor.prepared environment <> None then environment
     else if Unix.gettimeofday () < deadline then
       (Unix.sleepf 0.001; wait_mode expected (count + 1) environment)
     else fail "a settings change did not re-run prepare" in
@@ -273,13 +273,12 @@ let preset_and_look_through () =
      while it is open, Enter writes the workspace text, and / b loads it back. *)
   let module Preset = Rays_editor.Private.Preset in
   let presets = Filename.temp_dir "sketch-ui-workspace-presets" "" in
-  let mesh_scene mesh = Scene.D3.create [Scene.D3.mesh mesh] in
+  let mesh_scene (prepared : Rays_editor.Private.Cook.prepared) = Rdk_rays.Surface.scene3 prepared.surface in
   let environment = Rays_editor.Editor.create ~ui_text_size:11 ~await:true ~workspace:(fixture ()) ~presets
       ~camera:(Easy_camera.create ~distance:6. ~inertia:false ())
      
       ~max_entries:4 ~max_payload_bytes:(16 * 1024 * 1024)
-      ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
-        |> Result.map_error Rdk.Error.to_string)
+      ~prepare:Editor_prepare.surface
       ~draw:(fun _graph mesh -> mesh_scene mesh) () |> Result.get_ok in
   let environment = wait 0 environment in
   let key k = Input.Key_pressed k in
@@ -445,9 +444,8 @@ let run () =
   let environment = Rays_editor.Editor.create ~ui_text_size:11 ~await:true ~workspace:(fixture ())
      
       ~max_entries:4 ~max_payload_bytes:(16 * 1024 * 1024)
-      ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
-        |> Result.map_error Rdk.Error.to_string)
-      ~draw:(fun _graph mesh -> Scene.D3.create [Scene.D3.mesh mesh]) ()
+      ~prepare:Editor_prepare.surface
+      ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor.Private.Cook.surface) ()
     |> Result.get_ok in
   let environment = wait 0 environment in
   let environment = enter3 environment 0 in
@@ -642,7 +640,7 @@ let run () =
   let rec wait_source count environment =
     let environment = Rays_editor.Editor.update environment (frame count) in
     match Option.bind (Rays_editor.Editor.prepared environment)
-        Mesh.centroid with
+        Editor_prepare.centroid with
     | Some center when abs_float (center.Rays_math.Vec3.x -. 5.) < 1. -> environment
     | _ when Unix.gettimeofday () < deadline ->
         Unix.sleepf 0.001;

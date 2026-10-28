@@ -68,8 +68,8 @@ let measure nodes =
   let environment = E.create ~workspace
       ~domains:1 ~presets:(Filename.temp_dir "rays-editor-bench" "")
       ~max_entries:4 ~max_payload_bytes:(1024 * 1024)
-      ~prepare:(fun _ _ -> Ok ())
-      ~draw:(fun _ () -> Rays.Scene.D3.create []) () |> Result.get_ok in
+      ~prepare:E.prepare
+      ~draw:(fun _ _ -> Rays.Scene.D3.create []) () |> Result.get_ok in
   let environment = ref (E.update environment (frame 0)) and count = ref 1 in
   let step ?mouse ?buttons ?events () =
     environment := E.update !environment (frame ?mouse ?buttons ?events !count);
@@ -169,8 +169,8 @@ let measure_panels nodes =
     let environment = ref (E.create ~workspace ~await:true
         ~domains:1 ~presets:(Filename.temp_dir "rays-editor-bench" "")
         ~max_entries:4 ~max_payload_bytes:(1024 * 1024)
-        ~prepare:(fun _ _ -> Ok ())
-        ~draw:(fun _ () -> Rays.Scene.D3.create []) () |> Result.get_ok) in
+        ~prepare:E.prepare
+        ~draw:(fun _ _ -> Rays.Scene.D3.create []) () |> Result.get_ok) in
     let count = ref 0 in
     let step mouse =
       environment := E.update !environment (frame ~mouse ~events:[Input.Pointer_moved (pointer mouse)] !count);
@@ -196,7 +196,7 @@ let measure_spreadsheet () =
       (ui/workspace (ui/split "horizontal" gpanel (ui/spreadsheet :of gpanel))))))|} in
   let environment = ref (E.create ~workspace ~await:true ~domains:1
     ~presets:(Filename.temp_dir "rays-sheet-bench" "")
-    ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ () -> Rays.Scene.D3.empty) () |> Result.get_ok) in
+    ~prepare:E.prepare ~draw:(fun _ _ -> Rays.Scene.D3.empty) () |> Result.get_ok) in
   Fun.protect ~finally:(fun () -> E.close !environment) (fun () ->
     environment := Rays_editor.Reduce.select_path !environment ["g"; "@result"];
     let step ?(events = []) count = environment := E.update !environment (frame ~mouse:(900,300) ~events count) in
@@ -227,7 +227,7 @@ let measure_world () =
       | Ok workspace -> workspace | Error _ -> failwith "the World fixture does not check" in
     let environment = ref (E.create ~domains:1 ~workspace
       ~camera:(Easy_camera.create ~inertia:false ())
-      ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ () -> Scene.D3.empty) () |> Result.get_ok) in
+      ~prepare:E.prepare ~draw:(fun _ _ -> Scene.D3.empty) () |> Result.get_ok) in
     Fun.protect ~finally:(fun () -> E.close !environment) (fun () ->
       let input count x events =
         let frame = frame ~mouse:(100, 300) ~buttons:[Input.LeftButton] ~events count in
@@ -284,7 +284,7 @@ let measure_particles ?(window=false) ?(toggle=false) samples_count =
       | _ -> form) source |> Flow.Lisp.print |> fst in
     let create () = E.create ~workspace:(load source) ~await:true ~domains:1
       ~presets:(Filename.temp_dir "rays-particles-panel-bench" "")
-      ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ () -> Rays.Scene.D3.empty) () |> Result.get_ok in
+      ~prepare:E.prepare ~draw:(fun _ _ -> Rays.Scene.D3.empty) () |> Result.get_ok in
     if window then begin
       let phases = if toggle then List.length layouts else 1 in
       let periods = Array.make (samples_count * phases) 0. and updates = Array.make (samples_count * phases) 0.

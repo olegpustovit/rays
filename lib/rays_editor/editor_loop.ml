@@ -8,7 +8,7 @@ open Loop_model
 open Loop_view
 
 (* each canvas panel's picture: reused while its plan, size and preview stand, else rendered *)
-let canvas_pictures ~context_error ~value ~input ~(raw_frame : Frame.t) ~(core : _ Editor_model.t) ~control () =
+let canvas_pictures ~context_error ~value ~input ~(raw_frame : Frame.t) ~(core : Editor_model.t) ~control () =
   let canvases, context_error = List.fold_left (fun (pictures, error) (leaf : Pxui_shell.Layout.leaf) ->
     match leaf.panel with
     | Canvas key ->

@@ -21,7 +21,7 @@ let level_name value = match pane_level value with
 
 (* The strip while a payload is carried: what it is, then (a target hot) what putting it writes in
    the words of the text, or why the place refuses it. *)
-let carry_line (c : _ carry) =
+let carry_line (c : carry) =
   let held = c.payload.value in
   let put = match c.via with `Keys -> "Enter" | `Pointer -> "release" in
   match c.preview with

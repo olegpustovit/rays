@@ -201,7 +201,7 @@ let off_display () =
     if n.site = site then Network.Int_map.find_opt n.id lowered.compiled else None)
     (Array.to_list lowered.plan.nodes) in
   let orphan = Option.get (compiled [ "g"; "orphan" ]) and shown = Option.get (compiled [ "g"; "r" ]) in
-  let cook = Result.get_ok (Cook.create ~await:true ~prepare:(fun _ output -> Ok (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload)))
+  let cook = Result.get_ok (Cook.create ~await:true ~prepare:Editor_prepare.surface
     ~seed:1L ~grain:97 ~domains:1 ~max_entries:512 ~max_payload_bytes:(256 * 1024 * 1024) ()) in
   let update probes = Cook.update ~live:false ~probes cook ~settings:Rays_editor.Settings.none
     ~objects:(Lower.objects lowered) ~edit_error:None ~effects:Param.no_effects

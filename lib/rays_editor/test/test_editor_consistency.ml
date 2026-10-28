@@ -14,9 +14,8 @@ let build ?previous ws = D.Lowering.of_workspace ~factories ?previous ws |> Resu
 let frame n = Test_editor_input.frame (450., 300.) [] n
 let step e n = E.update e (frame n)
 let create ?camera ?settings ?presets ?source ws = E.create ~ui_text_size:11 ?camera ?settings ?presets ?source ~await:true ~workspace:ws
-  ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
-    |> Result.map_error Rdk.Error.to_string)
-  ~draw:(fun _ mesh -> Scene.D3.create [Scene.D3.mesh mesh]) () |> Result.get_ok
+  ~prepare:Editor_prepare.surface
+  ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor.Private.Cook.surface) () |> Result.get_ok
 
 let with_dir f =
   let dir = Filename.temp_dir "rays-consistency" "" in
@@ -95,6 +94,8 @@ let startup_settings () =
       check (E.workspace !e == before) ("startup setting undo did not restore its source: " ^ name))
       ["title", "\"Changed title\""; "width", "900"; "height", "640"; "fps", "90"; "seed", "42"])
 
+let geometry_bytes e = Option.map Test_support.Workspace_cook.geometry_bytes (E.prepared e)
+
 let layers e =
   match Scene.Private.stage_native ~width:900 ~height:640 (E.scene e (frame 1)) with
   | Error m -> failwith m
@@ -156,11 +157,11 @@ let frozen_context_time () =
     check (E.workspace !e == before) "literal replacement did not undo in one entry")
 
 let scene_picture () = with_editor (workspace scene_text) (fun e ->
-  let before = layers !e and prepared = E.prepared !e in
+  let before = layers !e and prepared = geometry_bytes !e in
   e := E.edit !e (F.Set_arg {node = ["scene"; "object"]; key = Kw "translate"; sub = [];
     value = parse "[3 0 0]"}) |> Result.get_ok;
   e := step !e 2;
-  check (E.prepared !e = prepared) "moving an object changed its SOP output";
+  check (geometry_bytes !e = prepared) "moving an object changed its SOP output";
   check (layers !e <> before) "a scene-only host edit left the picture stale";
   let after = layers !e in
   e := step !e 3;
@@ -430,14 +431,13 @@ let live_light_determinism () =
   let replay domains = with_dir (fun presets ->
     let prepares = ref 0 and drawings = ref 0 in
     let e = ref (E.create ~ui_text_size:11 ~workspace:ws ~presets ~await:true ~domains ~seed:42L
-      ~prepare:(fun _ output -> incr prepares;
-        Ok (Test_support.Workspace_cook.geometry_bytes (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))))
+      ~prepare:(fun settings output -> incr prepares; Editor_prepare.surface settings output)
       ~draw:(fun _ _ -> incr drawings; Scene.D3.empty) () |> Result.get_ok) in
     Fun.protect ~finally:(fun () -> E.close !e) (fun () ->
       let samples = List.mapi (fun i dt ->
         let frame = frame (i + 1) in
         e := E.update !e { frame with input = { frame.input with dt } };
-        Option.get (E.prepared !e), Marshal.to_string (E.lights !e) [Marshal.No_sharing])
+        Test_support.Workspace_cook.geometry_bytes (Option.get (E.prepared !e)), Marshal.to_string (E.lights !e) [Marshal.No_sharing])
         [0.; 1. /. 60.; 0.5; 2.] in
       check (!prepares = 1) "live lighting recooked or re-prepared unchanged seeded geometry";
       check (!drawings = 1) "live lighting rebuilt unchanged geometry drawings";
@@ -505,10 +505,10 @@ let lisp_apply () =
     run ~keys:[Input.Meta] [Input.Key_pressed (Input.KeyChar 'a')];
     run [Input.Text_input (Test_text_pane.replace (D.Workspace_doc.to_text ws)
       ~from:"(sop/box)" ~by:"(sop/box :size [2 2 2])")];
-    let before = E.prepared !e and picture = layers !e in
+    let before = geometry_bytes !e and picture = layers !e in
     click (float (x + 32), float (y + h - 40));
     check (E.undo_label !e = Some "Edit text") "Lisp apply made no document edit";
-    check (E.prepared !e <> before && layers !e <> picture)
+    check (geometry_bytes !e <> before && layers !e <> picture)
       "Lisp applied after the frame's cook or composition";
     check ((E.workspace !e).layout = ws.layout
       && D.Settings.get settings_schema (E.workspace !e).settings = (3., "kept"))
@@ -554,7 +554,7 @@ let named_inspector () = with_dir (fun presets ->
     (graph g :context sop (let* [a (sop/test_source :value 1)] a))
     (graph editor :context editor
       (ui/workspace (ui/split-at "horizontal" 0.6 (ui/graph "g") (ui/inspector)))))|} in
-  let e = ref (E.create ~ui_text_size:11 ~presets ~await:true ~workspace:ws ~factories ~prepare:(fun _ _ -> Ok ())
+  let e = ref (E.create ~ui_text_size:11 ~presets ~await:true ~workspace:ws ~factories ~prepare:Editor_prepare.empty
     ~draw:(fun _ _ -> Scene.D3.empty) () |> Result.get_ok) in
   Fun.protect ~finally:(fun () -> E.close !e) (fun () ->
     e := step !e 1;
@@ -663,7 +663,7 @@ let stale_inspector_draft () = with_dir (fun presets ->
     (graph editor :context editor (ui/workspace
       (ui/split-at "horizontal" 0.6
         (ui/split-at "vertical" 0.5 (ui/graph "g") (ui/lisp)) (ui/inspector)))))|} in
-  let e = ref (E.create ~ui_text_size:11 ~presets ~await:true ~workspace:ws ~factories ~prepare:(fun _ _ -> Ok ())
+  let e = ref (E.create ~ui_text_size:11 ~presets ~await:true ~workspace:ws ~factories ~prepare:Editor_prepare.empty
     ~draw:(fun _ _ -> Scene.D3.empty) () |> Result.get_ok) in
   let count = ref 0 in
   let update ?(keys = []) ?(buttons = []) p events =
@@ -705,9 +705,8 @@ let failed_renderer_modes () = with_dir (fun presets ->
     (graph editor :context editor (ui/workspace
       (ui/tile (ui/viewport (ref scene)) (ui/viewport (ref scene :size 2))))))|} in
   let e = ref (E.create ~ui_text_size:11 ~await:true ~presets ~workspace:ws
-    ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
-      |> Result.map_error Rdk.Error.to_string)
-    ~draw:(fun _ mesh -> Scene.D3.create [Scene.D3.mesh (Mesh.with_mode Mesh.Lines mesh)]) () |> Result.get_ok) in
+    ~prepare:Editor_prepare.surface
+    ~draw:(fun _ prepared -> Scene.D3.create (List.map (fun mesh -> Scene.D3.mesh (Mesh.with_mode Mesh.Lines mesh)) (Editor_prepare.meshes prepared))) () |> Result.get_ok) in
   let report () = E.crash_dump !e presets;
     In_channel.with_open_bin (Filename.concat presets "editor.txt") In_channel.input_all in
   Fun.protect ~finally:(fun () -> E.close !e) (fun () ->
@@ -746,9 +745,9 @@ let run_native () = with_dir (fun directory ->
       title = "Preview failure isolation"}
     ~init:(fun _ -> E.create ~ui_text_size:11 ~await:true ~workspace:ws
       ~presets:(Filename.concat directory "presets")
-      ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
-        |> Result.map_error Rdk.Error.to_string)
-      ~draw:(fun _ mesh ->
+      ~prepare:Editor_prepare.surface
+      ~draw:(fun _ prepared ->
+        let mesh = List.hd (Editor_prepare.meshes prepared) in
         let size = abs_float (Option.get (Mesh.vertex 0 mesh)).Rays_math.Vec3.x *. 2. in
         if size > 2.5 then Scene.D3.create [Scene.D3.group []]
         else Scene.D3.create [Scene.D3.mesh ~material:(Material.unlit (Rays_math.Color.rgb 200 30 20))

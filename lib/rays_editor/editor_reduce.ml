@@ -42,7 +42,7 @@ let outline_step ~created ~(result : _ frame_result) value' =
   value', outlined
 
 (* Entering and leaving levels: the graph a reference follows, the level i / u / list activation open *)
-let level_target ~(value : _ t) ~value' ~level ~(doc : Document.t) ~selection ~actions (result : _ frame_result) =
+let level_target ~(value : t) ~value' ~level ~(doc : Document.t) ~selection ~actions (result : _ frame_result) =
   (* Entering and leaving levels: i / double-click / list activation, u. *)
   (* i also follows a reference of the node selected in the pane (a material, an object's graph) *)
   let followed = match List.find_map (function
@@ -71,7 +71,7 @@ let level_target ~(value : _ t) ~value' ~level ~(doc : Document.t) ~selection ~a
   followed, target
 
 (* the history key of a gesture still in progress, if the frame's change belongs to one *)
-let gesture_key ~(value : _ t) ~(frame : Frame.t) ~loaded ~world_added ~world_label (result : _ frame_result) =
+let gesture_key ~(value : t) ~(frame : Frame.t) ~loaded ~world_added ~world_label (result : _ frame_result) =
   let dragging = Frame.mouse_down Input.LeftButton frame || Frame.has_event (function
     | Input.Pointer_released (Input.LeftButton, _) -> true | _ -> false) frame in
   let gesture = if not dragging || Option.is_some loaded
@@ -103,7 +103,7 @@ let gesture_key ~(value : _ t) ~(frame : Frame.t) ~loaded ~world_added ~world_la
   gesture
 
 (* the graph pane's layout gestures: moving, collapsing, levels, frames, probes *)
-let layout_gestures ~(value : _ t) ~loaded ~added next result scope_changes =
+let layout_gestures ~(value : t) ~loaded ~added next result scope_changes =
   let module M = Layout_by_path.Path_map in
   let next, result, probes = if Option.is_some loaded then next, result, value.probes else
     List.fold_left (fun (next, result, probes) -> function
@@ -140,7 +140,7 @@ let layout_gestures ~(value : _ t) ~loaded ~added next result scope_changes =
 
 (* the scene and World edits act on derived objects: each difference is written to
    the text (a refused one changes nothing) *)
-let reconciled ~(value : _ t) ~before next (result : _ frame_result) =
+let reconciled ~(value : t) ~before next (result : _ frame_result) =
   match Editor_document.Document_edit.reconcile ~factories:value.factories before next with
   | Ok doc -> doc, result
   | Error message ->
@@ -154,7 +154,7 @@ type gesture_log = {
 (* the frame's changes and gestures written to the document, text first: the first refusal leaves
    none applied.  Returns the document, the result, the nodes added, a graph made, a graph renamed
    and the note the echo shows *)
-let write_gestures ~(value : _ t) ~loaded ~present ~tree_edits ~in_text ~node_effects next (result : _ frame_result) =
+let write_gestures ~(value : t) ~loaded ~present ~tree_edits ~in_text ~node_effects next (result : _ frame_result) =
   let next, result = if Option.is_some loaded then next, result else
     reconciled ~value ~before:present next result in
   (* Workspace gestures: one rewrite of the source per gesture, lowered into
@@ -307,7 +307,7 @@ let write_gestures ~(value : _ t) ~loaded ~present ~tree_edits ~in_text ~node_ef
   next, result, g.added, g.created, g.renamed, g.note
 
 (* the prompt a frame leaves open, the notice, and a preset it loaded *)
-let prompt_step ~(value : _ t) ~view_state (result : _ frame_result) =
+let prompt_step ~(value : t) ~view_state (result : _ frame_result) =
   let prompt, notice, loaded = match result.prompt_intent with
     | None -> result.prompt, (match List.find_map (function
         | Notice message -> Some (Info, message) | Declined message -> Some (Refusal, message)
@@ -355,7 +355,7 @@ let prompt_step ~(value : _ t) ~view_state (result : _ frame_result) =
     | Some name -> Some (Referencing (name, "")) | None -> prompt in
   prompt, notice, loaded
 
-let carry_report_of ~(value : _ t) ~carrying ~text ~text_shown (result : _ frame_result) =
+let carry_report_of ~(value : t) ~carrying ~text ~text_shown (result : _ frame_result) =
   (* A payload in flight: what the panes saw under the pointer becomes the carry's report, and
      nothing else edits the document until the put (navigation and selection only). *)
   let carry_report = if not carrying then None else begin
@@ -383,7 +383,7 @@ let carry_report_of ~(value : _ t) ~carrying ~text ~text_shown (result : _ frame
   end in
   carry_report
 
-let pick_up ~(value : _ t) ~(value' : _ t) ~actions ~(frame : Frame.t) ~carry_report =
+let pick_up ~(value : t) ~(value' : t) ~actions ~(frame : Frame.t) ~carry_report =
   (* [y]: the payload is held by the handle (no pointer capture); a press or Enter puts it *)
   let carry, pick_error = match value.carry with
     | Some c -> Some { c with report = carry_report }, None
@@ -399,7 +399,7 @@ let pick_up ~(value : _ t) ~(value' : _ t) ~actions ~(frame : Frame.t) ~carry_re
   carry, pick_error
 
 (* what the camera is asked to frame: the object a [F] in a graph names, or every cooked object *)
-let framing_step ~(value : _ t) ~value' ~(doc : Document.t) ~(cooked : _ Cook.update) ~frame_request ~actions
+let framing_step ~(value : t) ~value' ~(doc : Document.t) ~(cooked : Cook.update) ~frame_request ~actions
     ~(frame : Frame.t) (result : _ frame_result) =
   (* Framing: local bounds move into the world with their object; at the
      scene level [F] frames every cooked object. *)
@@ -414,7 +414,7 @@ let framing_step ~(value : _ t) ~value' ~(doc : Document.t) ~(cooked : _ Cook.up
           | Some { panel = View key; _ } when Option.fold ~none:false
               ~some:(fun shell -> List.mem_assoc key shell.Document.views) doc.shell -> `Only key
           | _ -> `Primary in
-        Some (List.fold_left (fun union (piece : _ Cook.piece) ->
+        Some (List.fold_left (fun union (piece : Cook.piece) ->
           if not (view_wants value' view piece.id) then union else
           match piece.bounds, union with
           | None, union -> union
@@ -423,7 +423,7 @@ let framing_step ~(value : _ t) ~value' ~(doc : Document.t) ~(cooked : _ Cook.up
     | framed, _ -> framed in
   framing, framed
 
-let projections_of ~outlined ~actions (result : _ frame_result) (value' : _ t) =
+let projections_of ~outlined ~actions (result : _ frame_result) (value' : t) =
   (* the graph panel's own projection: list and text views are panels of their own now (/ l
      retypes), so opening a graph is the only thing that changes it *)
   let projections = if result.open_graph <> None || outlined <> None then
@@ -441,7 +441,7 @@ let projections_of ~outlined ~actions (result : _ frame_result) (value' : _ t) =
   projections
 
 (* Command-Z / Shift-Command-Z: the history step, its notice and the document it leaves *)
-let undo_step ~(value : _ t) ~carrying ~actions ~notice history =
+let undo_step ~(value : t) ~carrying ~actions ~notice history =
   let stepped = if List.mem Editor_commands.Redo actions then Editor_core.History.redo history
     else if List.mem Editor_commands.Undo actions then Editor_core.History.undo history else None in
   let notice = match stepped with
@@ -457,7 +457,7 @@ let undo_step ~(value : _ t) ~carrying ~actions ~notice history =
   history, doc, undone, notice
 
 (* the pointer and keys of the sketch go to the pane in focus, else the first viewer *)
-let view_input ~(value : _ t) (result : _ frame_result) =
+let view_input ~(value : t) (result : _ frame_result) =
   let is_view = function Pxui_shell.Layout.View _ -> true | _ -> false in
   let owner = match List.find_opt (fun (_, (panel, _)) -> panel = result.focus && is_view panel)
       result.pane_keys with
@@ -467,7 +467,7 @@ let view_input ~(value : _ t) (result : _ frame_result) =
   let input = Pxui.Ui.input ?owner value.ui in
   input
 
-let timeline_step ~(value : _ t) ~timeline ~timeline_changes (result : _ frame_result) =
+let timeline_step ~(value : t) ~timeline ~timeline_changes (result : _ frame_result) =
   let timeline, timeline_changes = List.fold_left (fun (timeline, changes) intent ->
     let next, emitted = match intent with
       | Pause_toggle -> Timeline.toggle_pause timeline
@@ -809,7 +809,7 @@ let reduce_idle ?select ?preview value actions (frame : Frame.t) =
     label = "Edit"; changes = []; tree_intents = []; text_intents = []; open_graph = None;
     settings_changes = []; graph_panes = Panel_map.others value.panes; locals = value.locals; other_texts = [];
     handle_changes = None; bar_action = None; view_pick = None; drops = [] } in
-  let update : (_, unit) update = reduce Frame_input.{ carry_changed = false; all_ui_visible = false;
+  let update : unit update = reduce Frame_input.{ carry_changed = false; all_ui_visible = false;
       view_state = (fun _ -> Flow.Syntax.make (Flow.Syntax.Map [])); carrying = value.carry <> None;
       held_keys = value.held_keys; leader = value.leader; frame; hud = value.hud; actions; guide = value.guide;
       copied = None; steady = value.steady; status_fps = value.status_fps; status_fps_at = value.status_fps_at;

@@ -25,7 +25,7 @@ let is_picture : Pxui_shell.Layout.panel -> bool = function
   | _ -> false
 
 (* the open prompt of a frame: draws it and returns (next prompt, intent) *)
-let prompt_panel ~(value : _ t) ~focus ~keymap ~(frame : Frame.t) ~workspace ~text ~text_shown ui prompt =
+let prompt_panel ~(value : t) ~focus ~keymap ~(frame : Frame.t) ~workspace ~text ~text_shown ui prompt =
   let module Ui = Pxui.Ui in
   (* a search prompt over [all] rows of (name, detail, payload): fuzzy-filtered, a pick is
      [pick payload], any other query change keeps the prompt open as [again query] *)
@@ -214,7 +214,7 @@ let prompt_panel ~(value : _ t) ~focus ~keymap ~(frame : Frame.t) ~workspace ~te
   next
 
 (* the gutters, last over every pane's hit area, and the layout the frame asks for through them *)
-let settle_layout ~(value : _ t) ~vw ~workspace ~(frame : Frame.t) ~keymap ~shortcut_frame ~g ~intents
+let settle_layout ~(value : t) ~vw ~workspace ~(frame : Frame.t) ~keymap ~shortcut_frame ~g ~intents
     ~strip_layout ~timeline_leaves ui =
   (* The gutters last, on top of every pane's hit area: a drag applies from the next frame. *)
   let grips = Pxui_shell.Chrome.splitters ~state:(panel_state value) ~hidden:workspace.hidden (shell_tree value workspace) ui
@@ -245,7 +245,7 @@ let settle_layout ~(value : _ t) ~vw ~workspace ~(frame : Frame.t) ~keymap ~shor
   workspace, drag_changes
 
 (* the pane the last press landed in takes the focus; the panes' PXUI keys name them *)
-let follow_press ~(value : _ t) ~workspace ~(frame : Frame.t) ~roots ~timeline_root ~focus ~focus_path ui =
+let follow_press ~(value : t) ~workspace ~(frame : Frame.t) ~roots ~timeline_root ~focus ~focus_path ui =
   let pane_roots = List.map (fun ((l : Pxui_shell.Layout.leaf), box) -> (l.panel, Some l.path), box) roots
     @ Option.to_list (Option.map (fun (panel, box) -> (panel, None), box) timeline_root) in
   let focus, focus_path = List.fold_left (fun (latest, focus) (target, box) ->
@@ -262,7 +262,7 @@ let follow_press ~(value : _ t) ~workspace ~(frame : Frame.t) ~roots ~timeline_r
   let pane_keys = List.map (fun (target, box) -> Pxui.Ui.key box, target) pane_roots in
   focus, focus_path, pane_keys
 
-let draw_notice ~(value : _ t) ~(frame : Frame.t) ~roots ~header_focus ~graph_body ~scope_view ~scope_active ui =
+let draw_notice ~(value : t) ~(frame : Frame.t) ~roots ~header_focus ~graph_body ~scope_view ~scope_active ui =
   (* echo, the sheet's [08]: messages only (saved, undo and redo results, refusals), never a key
      press; the last one fades after 3 seconds.  It stands at the bottom-left of the focused pane,
      above the strip. *)
@@ -280,7 +280,7 @@ let draw_notice ~(value : _ t) ~(frame : Frame.t) ~roots ~header_focus ~graph_bo
    | _ -> ())
 
 (* the viewport handles: their edits, a pick, and the changes they write *)
-let draw_handles ~(value : _ t) ~workspace ~selection ~selected ~lowered_level ~scope_active ~active ~view_root
+let draw_handles ~(value : t) ~workspace ~selection ~selected ~lowered_level ~scope_active ~active ~view_root
     ~view_handles ui =
   (* a lowered node is edited through its text: the handles of the node selected in the
      graph pane write its arguments, the list's rows of a geometry object have none *)
@@ -313,7 +313,7 @@ let draw_handles ~(value : _ t) ~workspace ~selection ~selected ~lowered_level ~
   selection, grab, handle_ops, handle_changes
 
 (* what the graph pane and the outline asked for, as document changes *)
-let pane_changes ~(value : _ t) ~vw ~command_changes ~scope_changes ~menu_pick ~outline_intents =
+let pane_changes ~(value : t) ~vw ~command_changes ~scope_changes ~menu_pick ~outline_intents =
   let changes = command_changes
     @ List.concat_map (function
       | Pxui_graph.Scope.Syntax_edit op -> [ Syntax_edit op ]
@@ -340,7 +340,7 @@ let pane_changes ~(value : _ t) ~vw ~command_changes ~scope_changes ~menu_pick ~
   changes
 
 (* every inspector leaf: the one in use over the frame's state, the others over their own pane *)
-let draw_inspectors ~(value : _ t) ~workspace ~image ~camera_panel ~inspector_visible ~unchanged ~(g :
+let draw_inspectors ~(value : t) ~workspace ~image ~camera_panel ~inspector_visible ~unchanged ~(g :
   Pxui_shell.Layout.geometry) ~scope_view
     ~selection ~scope_active ~graph_shown ~focus ~focus_path ~pane_of ~in_use ~roots ui =
   (* the split a card of the editor graph is, sized another way from what it shows now *)
@@ -375,7 +375,7 @@ let draw_inspectors ~(value : _ t) ~workspace ~image ~camera_panel ~inspector_vi
     (List.find_map (fun (_, (_, _, _, live, _, _)) -> if live <> value.live_cook then Some live else None) inspectors) in
   panel, inspector_changes, settings_changes, workspace_moves, inspector_drops, live_cook
 
-let carry_marks (value : _ t) =
+let carry_marks (value : t) =
 (* what the graph pane marks while a payload is carried: the places that take it (the key
    route's letters) and the one under the pointer *)
 let carry_lit, carry_hot = match value.carry with
@@ -398,7 +398,7 @@ let carry_lit, carry_hot = match value.carry with
   carry_lit, carry_hot
 
 (* the rows of a level's list and of every list that draws, by panel key *)
-let list_rows ~(value : _ t) ~listing ~list_drawn ~pane_of ~list_hosts =
+let list_rows ~(value : t) ~listing ~list_drawn ~pane_of ~list_hosts =
 (* the rows of a level's list, made once per network and kept while a list shows them *)
 let rows_of sets pane =
   let source, made = rows pane in
@@ -417,7 +417,7 @@ let row_sets, host_rows = List.fold_left (fun (sets, by_host) ((key, _, _, _) as
   sets, (key, rows) :: by_host) (row_sets, []) list_hosts in
   row_sets, rows, columns, host_rows
 
-let node_menu ~(value : _ t) ~workspace ~(frame : Frame.t) ~actions ~graph_shown =
+let node_menu ~(value : t) ~workspace ~(frame : Frame.t) ~actions ~graph_shown =
 (* / a: the node menu of the graph the pane shows *)
 let menu, command_changes =
   if List.mem Editor_commands.Add_node actions && graph_shown then begin
@@ -433,7 +433,7 @@ let menu, command_changes =
   menu, command_changes
 
 (* what each text pane shows: its state and what it is showing *)
-let text_state ~(value : _ t) ~actions ~pane_of ~text_hosts =
+let text_state ~(value : t) ~actions ~pane_of ~text_hosts =
   let ws = value.doc.Document.workspace.ws in
 let text_of state ((_, _, panel, _) as host) =
   let pane = pane_of host in
@@ -463,7 +463,7 @@ let other_texts = List.filter_map (fun ((key, path, _, _) as host) ->
   text_hosts in
   text_host, text, text_shown, other_texts
 
-let set_text_size (value : _ t) actions =
+let set_text_size (value : t) actions =
 (* Command +/-/0: the kit text of the panels (the graph pane zooms, viewports have no text) *)
 List.iter (function
   | Editor_commands.Ui_scale delta ->
@@ -476,7 +476,7 @@ List.iter (function
   ()
 
 (* what the hosted sketch sees of this frame, and the window focus it tracks *)
-let gated ~(value : _ t) ~(frame : Frame.t) ~text_focus ~host_events =
+let gated ~(value : t) ~(frame : Frame.t) ~text_focus ~host_events =
 let window_focus = List.fold_left (fun f -> function
   | Input.Focus_lost -> -1 | Input.Focus_gained -> 0 | _ -> f) value.window_focus frame.input.events in
 let window_focus = if window_focus >= 0 then min 2 (window_focus + 1) else -1 in
@@ -501,7 +501,7 @@ let value = {value with live_frame; sketch_blocked; window_focus} in
 
 (* the header intents the frame's actions stand for: panel toggles, and the focused panel's
    split, close and retype *)
-let panel_intents ~(value : _ t) ~(leaves : (_ * Pxui_shell.Layout.panel) list) ~workspace ~frame ~focus ~focus_path actions =
+let panel_intents ~(value : t) ~(leaves : (_ * Pxui_shell.Layout.panel) list) ~workspace ~frame ~focus ~focus_path actions =
   let intents = [] in
   let panel_paths panel = List.filter_map (fun (path, p) -> if p = panel then Some path else None) leaves in
   let toggle panel = List.map (fun path -> Pxui_shell.Chrome.Toggle path) (panel_paths panel) in
@@ -529,7 +529,7 @@ let panel_intents ~(value : _ t) ~(leaves : (_ * Pxui_shell.Layout.panel) list) 
   intents
 
 (* the status bar's fps, sampled once a second *)
-let fps_sample ~(value : _ t) ~(frame : Frame.t) =
+let fps_sample ~(value : t) ~(frame : Frame.t) =
 let sample_fps = frame.input.t < value.status_fps_at
   || frame.input.t -. value.status_fps_at >= 1. in
 let status_fps, status_fps_at = if not sample_fps then
@@ -538,7 +538,7 @@ let status_fps, status_fps_at = if not sample_fps then
     then Some (int_of_float (Float.round frame.fps)) else None), frame.input.t in
   status_fps, status_fps_at
 
-let undo_passed ~(value : _ t) ~text_focus ~modal =
+let undo_passed ~(value : t) ~text_focus ~modal =
 (* Command-Z in a text whose own undo stack is empty (a dragged number applies as it goes)
    reaches the document history, unless a prompt, menu or rename owns the keys, or a text pane
    holds an unapplied draft: an extra Command-Z after the draft is undone must not change the
@@ -550,7 +550,7 @@ let passed = if text_focus && not modal && not (has_draft value) then
   passed
 
 (* the last command's label, or the leader's pending prefix, for 1.5 seconds *)
-let hud_of ~(value : _ t) ~leader ~(frame : Frame.t) (commands : Editor_commands.command list) =
+let hud_of ~(value : t) ~leader ~(frame : Frame.t) (commands : Editor_commands.command list) =
 let hud = match List.rev commands with
   | command :: _ -> Some (Editor_core.Keymap.label (Option.get command.trigger)
       ^ " · " ^ command.label, frame.input.t +. 1.5)

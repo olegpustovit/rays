@@ -103,7 +103,7 @@ let scene_for_view ?scene:override ?(view = `Primary) value =
   if unwanted = [] then scene else Kind_graph.remove unwanted scene
 
 let placed_pieces ?(render = false) ?(view = `Primary) value =
-  List.filter_map (fun (piece : _ Cook.piece) ->
+  List.filter_map (fun (piece : Cook.piece) ->
     match Kind_graph.find (scene value) piece.id with
     | Some node when view_wants value view piece.id && Objects.visible node
         && (not render || Objects.flag "render" node) ->
@@ -257,7 +257,7 @@ let carry_over_surface ?view value ~origin ~direction =
       let view = match view, value.doc.Document.shell with
         | Some key, Some shell when List.mem_assoc key shell.views -> `Only key
         | _ -> `Primary in
-      let nearest = List.fold_left (fun best (matrix, (piece : _ Cook.piece)) ->
+      let nearest = List.fold_left (fun best (matrix, (piece : Cook.piece)) ->
         match Rays_math.Mat4.inverse matrix with
         | None -> best
         | Some inverse ->

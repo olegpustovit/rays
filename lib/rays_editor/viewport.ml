@@ -173,7 +173,7 @@ let same_view a b =
     | Perspective a, Perspective b -> Float.abs (a.fov_y -. b.fov_y) < 1e-6
     | _ -> false)
 
-let active_node (core : _ Editor_model.t) = Option.bind core.doc.active_camera
+let active_node (core : Editor_model.t) = Option.bind core.doc.active_camera
     (Kind_graph.find (Editor_inspect.scene core))
 
 (* A default camera, following the viewport. *)
@@ -190,7 +190,7 @@ let seed_scene easy scene =
 (* One ACTIVE camera whenever any exists; a nonempty scene of a workspace with no scene graph
    losing the last camera re-adds the default within the same undo entry. An intentionally
    empty scene stays empty. *)
-let sync_cameras ~mode (core : _ Editor_model.t) easy =
+let sync_cameras ~mode (core : Editor_model.t) easy =
   let core = if camera_ids (Editor_inspect.scene core) <> []
       || Editor_inspect.scene core = []
       (* a scene graph is authoritative: no camera object is a camera it does not declare *)

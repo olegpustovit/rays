@@ -38,7 +38,7 @@ let bake_world ?view ~previous core ~live =
 
 (* the viewports over another scene instance: those that draw objects of their own and those that
    show another World *)
-let view_keys (core : _ Editor_model.t) =
+let view_keys (core : Editor_model.t) =
   let own = match core.Editor_model.doc.Document.shell with Some shell -> List.map fst shell.views | None -> [] in
   own @ List.filter (fun key -> not (List.mem key own)) (List.map fst core.Editor_model.doc.Document.view_worlds)
 

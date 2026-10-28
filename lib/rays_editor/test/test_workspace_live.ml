@@ -195,7 +195,7 @@ let run () =
   let objects = Lower.objects orrery in
   let digest geometry = Digest.string (geometry_bytes geometry) in
   let cook = ref (Result.get_ok (Cook.create ~await:true
-    ~prepare:(fun _ output -> Ok (digest (Result.get_ok (Sop.Payload.geometry output.Session.payload))))
+    ~prepare:Editor_prepare.surface
     ~seed:42L ~grain:97 ~domains:1 ~max_entries:512
     ~max_payload_bytes:(256 * 1024 * 1024) ())) in
   Cook.set_volatile !cook (Lower.is_volatile orrery);
@@ -216,7 +216,7 @@ let run () =
       "await: the cook of frame n is published in frame n";
     let expected = digest (snd (frame reference ~time:(Timeline.time next))) in
     match Cook.pieces !cook with
-    | [piece] -> check (piece.prepared = expected)
+    | [piece] -> check (digest piece.prepared.Cook.geometry = expected)
         (Printf.sprintf "editor cook at frame %d shows another frame's geometry" n)
     | _ -> fail "editor cook: one piece") [0; 1; 2; 30; 7];
   let stats = Cook.stats !cook in

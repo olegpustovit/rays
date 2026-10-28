@@ -26,7 +26,7 @@ let cooked ?(lit = Pick.Set.empty) ?cook lowered ~prepared =
     | Some cook -> cook
     | None ->
         let cook = Result.get_ok (Cook.create ~await:true
-          ~prepare:(fun _ output -> incr prepared; Ok (Result.get_ok (Sop.Payload.geometry output.Session.payload)))
+          ~prepare:(fun settings output -> incr prepared; Editor_prepare.surface settings output)
           ~seed:42L ~grain:97 ~domains:1 ~max_entries:512
           ~max_payload_bytes:(256 * 1024 * 1024) ()) in
         Cook.set_volatile cook (Lower.is_volatile lowered); cook in
@@ -111,10 +111,10 @@ let pick_run () =
   check (!prepared = before + 1) "a new highlight prepares the piece once";
   check ((Cook.stats cook).misses = misses) "the highlight does not recook";
   let lit_piece = List.hd (Cook.pieces cook) in
-  let colours = Geometry.find_attribute ~owner:Rdk.Attribute.Vertex "Cd" lit_piece.prepared in
+  let colours = Geometry.find_attribute ~owner:Rdk.Attribute.Vertex "Cd" lit_piece.prepared.Cook.geometry in
   (match Option.map Rdk.Attribute.View.storage colours with
    | Some (Rdk.Attribute.Float4 c) ->
-       let c = Rdk.Packed.Float4.View.view c and topology = Geometry.topology lit_piece.prepared in
+       let c = Rdk.Packed.Float4.View.view c and topology = Geometry.topology lit_piece.prepared.Cook.geometry in
        let corner primitive = fst (Rdk.Topology.primitive_vertex_range topology primitive) in
        let seed = List.hd (primitives_of tags tag83)
        and other = List.hd (primitives_of tags (List.hd (of_iteration sunflower 0))) in
@@ -125,7 +125,7 @@ let pick_run () =
   check (!prepared = before + 1) "an unchanged highlight prepares nothing";
   let cook = cooked ~cook sunflower ~prepared in
   check (!prepared = before + 2) "deselecting prepares once";
-  check ((List.hd (Cook.pieces cook)).prepared == (Result.get_ok (Sop.Payload.geometry piece.output.payload))) "deselect restores the geometry";
+  check ((List.hd (Cook.pieces cook)).prepared.Cook.geometry == (Result.get_ok (Sop.Payload.geometry piece.output.payload))) "deselect restores the geometry";
   Cook.close cook;
   (* --- bloom: petals sit inside a merge of merges; the tag is the innermost --- *)
   let bloom = lower "bloom" in
@@ -154,8 +154,7 @@ let flat text clicks =
   let workspace = Ws_fixture.of_text text in
   (* the cook is awaited, not waited for: the editor blocks on the job each frame submits *)
   let env = ref (E3.create ~ui_text_size:11 ~await:true ~workspace ~camera:(Easy_camera.create ~inertia:false ())
-      ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
-        |> Result.map_error Rdk.Error.to_string)
+      ~prepare:Editor_prepare.surface
       ~draw:(fun _ _ -> Scene.D3.empty) () |> Result.get_ok) in
   let count = ref 0 in
   let step ?(buttons = []) mouse events =

@@ -129,7 +129,7 @@ let char c = key (Input.KeyChar c)
 let editor ?presets text =
   let workspace = of_text text in
   Rays_editor.Editor.create ~ui_text_size:11 ~await:true ~workspace ?presets
-    ~prepare:(fun _ output -> Ok (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload)))
+    ~prepare:Editor_prepare.surface
     ~draw:(fun _ _ -> Scene.D3.create []) () |> function
   | Ok e -> e | Error m -> fail m
 

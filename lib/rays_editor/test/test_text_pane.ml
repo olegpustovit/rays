@@ -265,9 +265,8 @@ let start_env text =
   let workspace = Rays_editor.Workspace_doc.of_text catalog text |> Result.get_ok in
   let presets = Filename.temp_dir "rays-text-presets" "" in
   ref (E.create ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true ~workspace
-      ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
-        |> Result.map_error Rdk.Error.to_string)
-      ~draw:(fun _ mesh -> Scene.D3.create [ Scene.D3.mesh mesh ]) () |> Result.get_ok)
+      ~prepare:Editor_prepare.surface
+      ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor.Private.Cook.surface) () |> Result.get_ok)
 
 let dump_line env name =
   let directory = Filename.temp_dir "rays-text-pane" "" in
@@ -286,9 +285,8 @@ let editor_text () =
   let workspace = Rays_editor.Workspace_doc.of_text catalog (small_sunflower ()) |> Result.get_ok in
   let presets = Filename.temp_dir "rays-text-presets" "" in
   let env = ref (E.create ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true ~workspace
-      ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
-        |> Result.map_error Rdk.Error.to_string)
-      ~draw:(fun _ mesh -> Scene.D3.create [ Scene.D3.mesh mesh ]) () |> Result.get_ok) in
+      ~prepare:Editor_prepare.surface
+      ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor.Private.Cook.surface) () |> Result.get_ok) in
   let count = ref 0 in
   let step ?keys ?(at = (450., 320.)) events =
     incr count; env := E.update !env (frame ~mouse:at ?keys !count events) in
@@ -474,9 +472,8 @@ let editor_binding () =
   let workspace = Rays_editor.Workspace_doc.of_text catalog (small_sunflower ()) |> Result.get_ok in
   let presets = Filename.temp_dir "rays-text-presets" "" in
   let env = ref (E.create ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true ~workspace
-      ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
-        |> Result.map_error Rdk.Error.to_string)
-      ~draw:(fun _ mesh -> Scene.D3.create [ Scene.D3.mesh mesh ]) () |> Result.get_ok) in
+      ~prepare:Editor_prepare.surface
+      ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor.Private.Cook.surface) () |> Result.get_ok) in
   let count = ref 0 in
   let step ?keys ?(at = (450., 320.)) events =
     incr count; env := E.update !env (frame ~mouse:at ?keys !count events) in
@@ -722,9 +719,8 @@ let editor_w9 () =
   let workspace = Rays_editor.Workspace_doc.of_text catalog (small_rosette ()) |> Result.get_ok in
   let presets = Filename.temp_dir "rays-text-presets" "" in
   let start () = E.create ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true ~workspace
-        ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
-          |> Result.map_error Rdk.Error.to_string)
-        ~draw:(fun _ mesh -> Scene.D3.create [ Scene.D3.mesh mesh ]) () |> Result.get_ok in
+        ~prepare:Editor_prepare.surface
+        ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor.Private.Cook.surface) () |> Result.get_ok in
   let mouse = ref (640., 360.) in
   (* Every scenario's first edit is at frame 22 or later and an edit costs a workspace lowering (1.3 s), so the
      frames before it (the zoom, the selection) run once and each scenario continues from their result (the UI handle is
@@ -828,9 +824,8 @@ let editor_active_scrub () =
   let workspace = Rays_editor.Workspace_doc.of_text catalog text |> Result.get_ok in
   let presets = Filename.temp_dir "rays-text-presets" "" in
   let env = ref (E.create ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true ~workspace
-      ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
-        |> Result.map_error Rdk.Error.to_string)
-      ~draw:(fun _ mesh -> Scene.D3.create [ Scene.D3.mesh mesh ]) () |> Result.get_ok) in
+      ~prepare:Editor_prepare.surface
+      ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor.Private.Cook.surface) () |> Result.get_ok) in
   let count = ref 0 and mouse = ref (450., 320.) in
   let step ?(buttons = []) ?(keys = []) events =
     incr count;
@@ -880,8 +875,8 @@ let editor_literal_scrub () =
   List.iter (fun (tab_index, tab) ->
     let workspace = Rays_editor.Workspace_doc.of_text catalog text |> Result.get_ok in
     let presets = Filename.temp_dir "rays-token-presets" "" in
-    let env = ref (E.create ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true ~domains:1 ~workspace ~prepare:(fun _ _ -> Ok ())
-      ~draw:(fun _ () -> Scene.D3.empty) () |> Result.get_ok) in
+    let env = ref (E.create ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true ~domains:1 ~workspace ~prepare:Editor_prepare.empty
+      ~draw:(fun _ _ -> Scene.D3.empty) () |> Result.get_ok) in
     Fun.protect ~finally:(fun () -> E.close !env) (fun () ->
       let count = ref 0 and mouse = ref (450.,320.) in
       let step ?(buttons = []) ?(keys = []) events =
@@ -969,9 +964,8 @@ let editor_text_drop () =
   let workspace = Rays_editor.Workspace_doc.of_text catalog text |> Result.get_ok in
   let presets = Filename.temp_dir "rays-text-presets" "" in
   let env = ref (E.create ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true ~carry_budget:Float.infinity ~workspace
-      ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
-        |> Result.map_error Rdk.Error.to_string)
-      ~draw:(fun _ mesh -> Scene.D3.create [ Scene.D3.mesh mesh ]) () |> Result.get_ok) in
+      ~prepare:Editor_prepare.surface
+      ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor.Private.Cook.surface) () |> Result.get_ok) in
   let count = ref 0 and mouse = ref (450., 320.) in
   let step ?(buttons = []) ?(keys = []) events =
     incr count;
