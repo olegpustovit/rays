@@ -1,17 +1,5 @@
 (** Circle and grid generators over packed geometry. *)
 
-type circle_arc =
-    Circle_closed
-  | Circle_open_arc of { start_angle : float; end_angle : float; }
-  | Circle_closed_arc of { start_angle : float; end_angle : float; }
-  | Circle_sliced_arc of { start_angle : float; end_angle : float; }
-type circle_orientation =
-    Circle_xy
-  | Circle_xz
-  | Circle_yz
-  | Circle_axes of { horizontal : Rays_math.Vec3.t;
-      vertical : Rays_math.Vec3.t;
-    }
 type grid_counts = Grid_divisions | Grid_point_counts
 type grid_orientation =
     Grid_xy

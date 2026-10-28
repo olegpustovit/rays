@@ -1,6 +1,5 @@
 (** Private exact triangle-pair classification and per-face constraint plans. *)
 
-type constraint_kind = Point | Segment
 type side = Left | Right
 type t
 

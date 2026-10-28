@@ -26,61 +26,6 @@ type torus_rotation_order =
   | Torus_zxy
   | Torus_zyx
 
-type tube_connectivity =
-  | Tube_triangles
-  | Tube_alternating_triangles
-  | Tube_quads
-  | Tube_rows
-  | Tube_columns
-  | Tube_rows_and_columns
-  | Tube_points
-
-type tube_normals =
-  | Tube_no_normals
-  | Tube_point_normals
-  | Tube_vertex_normals
-
-type tube_orientation =
-  | Tube_x
-  | Tube_y
-  | Tube_z
-  | Tube_axis of Rays_math.Vec3.t
-
-type tube_rotation_order =
-  | Tube_xyz
-  | Tube_xzy
-  | Tube_yxz
-  | Tube_yzx
-  | Tube_zxy
-  | Tube_zyx
-
-type platonic_kind =
-  | Platonic_tetrahedron
-  | Platonic_cube
-  | Platonic_octahedron
-  | Platonic_icosahedron
-  | Platonic_dodecahedron
-  | Platonic_soccer_ball
-
-type platonic_normals =
-  | Platonic_no_normals
-  | Platonic_point_normals
-  | Platonic_vertex_normals
-
-type platonic_orientation =
-  | Platonic_x
-  | Platonic_y
-  | Platonic_z
-  | Platonic_axis of Rays_math.Vec3.t
-
-type platonic_rotation_order =
-  | Platonic_xyz
-  | Platonic_xzy
-  | Platonic_yxz
-  | Platonic_yzx
-  | Platonic_zxy
-  | Platonic_zyx
-
 val torus :
   ?cancel:Cancel.t ->
   ?grain:int ->

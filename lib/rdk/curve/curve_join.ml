@@ -1,7 +1,4 @@
 
-type end_mode = Open | Close | Close_straight | Unroll | Unroll_new
-type cut_mode = Inside | Outside | Inside_and_outside
-type parameter_attribute_mode = Replace | Scale
 
 type curve_join_end = Join_curve_start | Join_curve_end
 

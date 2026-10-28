@@ -35,9 +35,7 @@ let bounds ?cancel geometry =
   end
 
 type measure = Perimeter | Area | Signed_volume
-type accumulation = Per_element | Throughout
 type connectivity_owner = Connectivity_points | Connectivity_primitives
-type connectivity_attribute = Connectivity_integer | Connectivity_text of string
 
 let measure_label = function
   | Perimeter -> "perimeter"

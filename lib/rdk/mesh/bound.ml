@@ -5,10 +5,6 @@ type deform_selection = Deform.selection =
   | Selected_primitives of Group.t
   | Selected_edges of Edge_group.t
 
-type bound_shape =
-  | Bound_box of { divisions : int * int * int }
-  | Bound_sphere of { segments : int; rings : int; minimum_radius : float }
-
 let selected_bounds ?cancel ~grain ~operation selection geometry =
   let topology = Geometry.topology geometry in
   match Deform.validate_selection topology selection with

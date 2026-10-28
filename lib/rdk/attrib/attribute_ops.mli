@@ -202,11 +202,6 @@ type surface_vertex_selection = Surface_index.vertex_selection =
   | All_triangle_vertices
   | Any_triangle_vertex
 
-type copy_match =
-  | Cyclic
-  | By_values of { source_attribute : string; target_attribute : string }
-  | To_element of { target_attribute : string }
-
 type copy_rule = {
   copy_owner : Attribute.owner;
   copy_pattern : string;
@@ -257,13 +252,6 @@ type numeric_value =
   | Vec2 of Rays_math.Vec2.t
   | Vec3 of Rays_math.Vec3.t
   | Vec4 of float * float * float * float
-type random_operation =
-  | Random_set
-  | Random_add
-  | Random_minimum
-  | Random_maximum
-  | Random_multiply
-type noise_kind = Noise_float | Noise_vector | Noise_quaternion
 type noise_location =
   | Noise_position
   | Noise_element_number
@@ -272,19 +260,6 @@ type noise_range =
   | Noise_positive
   | Noise_zero_centered
   | Noise_min_max of numeric_value * numeric_value
-type noise_operation =
-  | Noise_set_initial
-  | Noise_set
-  | Noise_add
-  | Noise_subtract
-  | Noise_multiply
-  | Noise_minimum
-  | Noise_maximum
-type random_selection =
-  | Random_points of Group.t
-  | Random_vertices of Group.t
-  | Random_primitives of Group.t
-  | Random_edges of Edge_group.t
 type random_distribution =
   | Random_constant of numeric_value
   | Random_two_values of {
@@ -333,10 +308,6 @@ type random_distribution =
     [Random_custom_discrete_text] applies the same stable weighted selection to
     immutable strings. Multidimensional [Random_cauchy] is the rotationally
     symmetric multivariate distribution and requires equal scale components. *)
-type remap_input =
-  | Remap_explicit of { min : numeric_value; max : numeric_value }
-  | Remap_auto
-type remap_policy = Remap_clamp | Remap_cycle | Remap_extrapolate
 
 val enumerate :
   ?cancel:Cancel.t ->
@@ -654,4 +625,3 @@ val transfer_all :
     oversubscription. Detail payloads are structurally shared last. Output is
     byte-identical to the corresponding sequence of owner-specific calls. *)
 
-type image_channel = Red | Green | Blue | Alpha | Luminance

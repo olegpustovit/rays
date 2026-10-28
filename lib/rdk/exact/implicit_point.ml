@@ -1531,18 +1531,6 @@ let incircle_components first_component second_component a b c d =
     ~cx:(first_component ch) ~cy:(second_component ch) ~cw:ch.hw
     ~dx:(first_component dh) ~dy:(second_component dh) ~dw:dh.hw)
 
-type reference_predicate =
-  | Compare_x of t * t | Compare_y of t * t | Compare_z of t * t
-  | Orient2d_xy of t * t * t | Orient2d_yz of t * t * t
-  | Orient2d_zx of t * t * t | Orient3d of t * t * t * t
-  | Radial_dot of t * t * t * t
-  | Ray_edge of t * t * t * float * float * float
-  | Ray_edge_symbolic of t * t * t
-  | Normal_dot_direction of t * t * t * float * float * float
-  | Normal_dot_symbolic of t * t * t
-  | Incircle_xy of t * t * t * t | Incircle_yz of t * t * t * t
-  | Incircle_zx of t * t * t * t
-
 let incircle_projected projection a b c d =
   ensure_same_source a b;
   ensure_same_source a c;

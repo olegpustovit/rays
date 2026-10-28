@@ -1,7 +1,5 @@
 open Rdk_core
 
-type kind = Line_curve | Line_points
-
 let points values =
   let count = Array.length values in
   let builder = Packed.Float3.Builder.create count in

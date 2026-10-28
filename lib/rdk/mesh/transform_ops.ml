@@ -28,15 +28,6 @@ type distance_from_geometry_reference =
   | Distance_reference_points
   | Distance_reference_primitives
 
-type distance_from_target_projection =
-  | Distance_target_spherical
-  | Distance_target_cylindrical
-  | Distance_target_planar
-
-type distance_from_target_metric =
-  | Distance_target_absolute
-  | Distance_target_signed
-
 let normalized_direction ?(grain = 16_384) matrix values =
   let source = Packed.Float3.Private.view values in
   let count = Array.length source.x in

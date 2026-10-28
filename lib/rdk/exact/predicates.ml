@@ -1,31 +1,5 @@
 type sign = Negative | Zero | Positive
 
-type segment_location = Start | End | Interior
-type triangle_location =
-  | Face
-  | Edge_ab | Edge_bc | Edge_ca
-  | Vertex_a | Vertex_b | Vertex_c
-
-type segment_triangle =
-  | Segment_disjoint
-  | Segment_coplanar
-  | Segment_degenerate_triangle
-  | Segment_hit of segment_location * triangle_location
-
-type triangle_feature =
-  | Triangle_vertex of int
-  | Triangle_edge of int
-  | Triangle_face
-
-type triangle_triangle =
-  | Triangle_disjoint
-  | Triangle_coplanar
-  | Triangle_degenerate
-  | Triangle_point of triangle_feature * triangle_feature
-  | Triangle_segment of
-      (triangle_feature * triangle_feature) *
-      (triangle_feature * triangle_feature)
-
 type segment_segment =
   | Segments_disjoint
   | Segments_point
@@ -38,7 +12,6 @@ let sign_of_comparison comparison =
   if comparison < 0 then Negative
   else if comparison > 0 then Positive
   else Zero
-
 
 let exact_orient2d ~ax ~ay ~bx ~by ~cx ~cy =
   sign_of_comparison
@@ -77,7 +50,6 @@ let[@inline] orient2d_packed ~x ~y a b c =
       && abs_float determinant > error_bound *. permanent
   then if determinant < 0. then Negative else Positive
   else exact_orient2d ~ax ~ay ~bx ~by ~cx ~cy
-
 
 let exact_orient3d ~ax ~ay ~az ~bx ~by ~bz ~cx ~cy ~cz ~dx ~dy ~dz =
   sign_of_comparison (Dyadic.Scratch.orient3d
@@ -138,7 +110,6 @@ let orient3d_packed ~x ~y ~z a b c d =
       && abs_float determinant > error_bound *. permanent
   then if determinant < 0. then Negative else Positive
   else exact_orient3d ~ax ~ay ~az ~bx ~by ~bz ~cx ~cy ~cz ~dx ~dy ~dz
-
 
 let exact_incircle ~ax ~ay ~bx ~by ~cx ~cy ~dx ~dy =
   sign_of_comparison (Dyadic.Scratch.incircle

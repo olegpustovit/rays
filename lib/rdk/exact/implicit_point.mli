@@ -124,18 +124,6 @@ val orient3d : t -> t -> t -> t -> Predicates.sign
 (** Exact predicates supporting any mixture of explicit, LPI, and TPI points
     created from the same packed source. *)
 
-type reference_predicate =
-  | Compare_x of t * t | Compare_y of t * t | Compare_z of t * t
-  | Orient2d_xy of t * t * t | Orient2d_yz of t * t * t
-  | Orient2d_zx of t * t * t | Orient3d of t * t * t * t
-  | Radial_dot of t * t * t * t
-  | Ray_edge of t * t * t * float * float * float
-  | Ray_edge_symbolic of t * t * t
-  | Normal_dot_direction of t * t * t * float * float * float
-  | Normal_dot_symbolic of t * t * t
-  | Incircle_xy of t * t * t * t | Incircle_yz of t * t * t * t
-  | Incircle_zx of t * t * t * t
-
 val radial_dot : t -> t -> t -> t -> Predicates.sign
 (** Exact sign of the dot product between the last two vectors after
     projection perpendicular to the directed first-two-point edge. *)

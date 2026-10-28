@@ -1,5 +1,4 @@
 
-type boundary = Curvature_boundary_zero | Curvature_boundary_one_sided
 
 type outputs = {
   mean : string option;

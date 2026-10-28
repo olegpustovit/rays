@@ -24,11 +24,6 @@ type distance_along_radius = Distance_fixed of float | Distance_maximum
 type distance_from_geometry_reference =
   | Distance_reference_points | Distance_reference_primitives
 
-type distance_from_target_projection =
-  | Distance_target_spherical | Distance_target_cylindrical | Distance_target_planar
-
-type distance_from_target_metric = Distance_target_absolute | Distance_target_signed
-
 val compose_transform :
   ?order:transform_order -> ?rotation_order:transform_rotation_order ->
   ?translate:Rays_math.Vec3.t -> ?rotate:Rays_math.Vec3.t ->

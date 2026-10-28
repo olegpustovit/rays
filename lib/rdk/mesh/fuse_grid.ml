@@ -12,7 +12,6 @@ type fuse_match_condition = Point_snap.match_condition =
 type fuse_targeting = Point_snap.targeting =
   | Near_points
   | Specified_points of string
-type grid_rounding = Grid_nearest | Grid_down | Grid_up
 
 type fuse_attribute_view =
   | Fuse_float of float array

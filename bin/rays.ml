@@ -9,7 +9,7 @@ let read path = In_channel.with_open_bin path In_channel.input_all
 let die fmt = Printf.ksprintf (fun m -> prerr_endline m; exit 1) fmt
 
 let catalog () =
-  match Editor_document.Contexts.catalog ~version:Flow_sop.Manifest.version Sop_catalog.Editor.factories with
+  match Editor_document.Contexts.catalog ~version:Flow_sop.Manifest.version Sop.Nodes.factories with
   | Ok c -> c
   | Error d -> die "rays: catalog: %s" (D.to_string d)
 
@@ -23,7 +23,7 @@ let check_text ?(imports = []) text =
   match Doc.check_text ~imports (catalog ()) text with
   | Error ds -> None, ds, allow
   | Ok (doc, warnings) ->
-      (match Editor_document.Contexts.of_workspace ~factories:Sop_catalog.Editor.factories doc with
+      (match Editor_document.Contexts.of_workspace ~factories:Sop.Nodes.factories doc with
        | Ok _ -> Some doc, warnings, allow
        | Error d -> None, warnings @ [ d ], allow)
 

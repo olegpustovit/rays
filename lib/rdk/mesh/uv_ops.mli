@@ -16,8 +16,6 @@ type projection =
       seam : Rays_math.Vec3.t;
     }
 
-type unitize_mode = Per_face | Islands
-
 val flatten :
   ?cancel:Cancel.t -> ?grain:int -> ?name:string -> ?seams:Group.t ->
   ?edge_seams:Edge_group.t -> ?iterations:int -> ?tolerance:float ->
