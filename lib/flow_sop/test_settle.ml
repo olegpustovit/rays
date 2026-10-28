@@ -1,6 +1,7 @@
 (* A fused write placed on a mock device leaves its dispatch in flight: the session settles it at a
    cook's end, a failed status recooks that write on the CPU (the result is the CPU cook's), and a
-   result the session drops (evicted by a later cook) releases its device outputs at once. *)
+   result the session drops (evicted by a later cook) releases its device outputs at the end of
+   the first cook whose root, and the previous cook's, do not hold them. *)
 let ok = function Ok v -> v | Error d -> failwith (Diagnostic.to_string d)
 
 let text y =
@@ -80,8 +81,11 @@ let () =
   let placed = cook s (node ~gpu 1.0) in
   assert (!settles = 1 && Rdk.Packed.Float3.resident (Rdk.Geometry.positions placed));
   assert (Array.for_all (fun p -> p = (42., 42., 42.)) (positions placed));
-  (* a toggled edit evicts the other write: its outputs are released by the cook that dropped it *)
+  (* a toggled edit evicts the other write: its outputs are released once neither the cook's root
+     nor the previous cook's holds them *)
   ignore (cook s (node ~gpu 2.0));
+  assert (!releases = 0);
+  ignore (cook s (node ~gpu 1.0));
   assert (!releases > 0);
   (* a failed status: the write recooks on the CPU, settled once, never released twice *)
   fail := true;

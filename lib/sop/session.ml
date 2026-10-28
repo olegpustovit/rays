@@ -72,6 +72,9 @@ type t = {
   mutable journal : cache_event list option;
   mutable parallel_override : bool option;
   mutable fanouts : int;
+  mutable previous_root : int list;
+      (* the resident components of the root the last cook returned: its caller may still read it
+         until it has taken this cook's *)
   mutable written : (string, int) Either.t list;
       (* cache keys and volatile slots this cook attempt wrote, dropped if it settles a failure *)
 }
@@ -131,6 +134,7 @@ let create ~max_entries ~max_payload_bytes =
         journal = None;
         parallel_override = None;
         fanouts = 0;
+        previous_root = [];
         written = [];
       }
 
@@ -894,12 +898,14 @@ and evaluate_uncached memo session context node =
                   else insert session key entry;
                 Ok output))
 
-(* At a cook's end, on the cooking domain: what entries dropped and the root does not hold goes back
-   to its device now, not when it is collected. *)
+(* At a cook's end, on the cooking domain: what entries dropped and neither this cook's root nor the
+   previous one holds goes back to its device now, not when it is collected. *)
 let release_dropped session (result : (output, Diagnostic.t) result) =
   let payload = session.payload in
+  let root = match result with Ok output -> List.map fst (releasers output) | Error _ -> [] in
+  let held = root @ session.previous_root in
+  session.previous_root <- root;
   if payload.dropped <> [] then begin
-    let held = match result with Ok output -> List.map fst (releasers output) | Error _ -> [] in
     let slots =
       Hashtbl.fold
         (fun _ (_, entry) ids -> List.map fst (releasers entry.output) @ ids)
@@ -966,6 +972,7 @@ let stats session =
 
 (* what a clear or close drops is left to its holders' collection: results handed out stay valid *)
 let forget_resident session =
+  session.previous_root <- [];
   Hashtbl.reset session.payload.resident;
   session.payload.dropped <- []
 

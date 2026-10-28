@@ -445,10 +445,11 @@ release (`Deferred.create ?release`, `Geometry.releasers`). A recook whose resul
 (cached, compared by identity, counted) reads nothing back; the first CPU reader of P reads P alone.
 Buffers come back deterministically: when the session drops a result (an LRU or payload eviction,
 a volatile slot replaced) the resident components no retained entry shares are released at the end
-of that cook, unless the cook's root output holds them; the runner recycles at most 4 and destroys
-the rest on its next dispatch, on the initial domain. A released output that was never read cannot
-be read afterwards (`Invalid_argument`): a caller reads the session's latest results, as the editor
-does (its display is prepared on the cook worker). A clear or a close leaves results handed out
+of the first cook whose root output, and the previous cook's, do not hold them (a caller still
+showing the previous result until it takes the new one keeps it); the runner recycles at most 4 and
+destroys the rest on its next dispatch, on the initial domain. A released output that was never
+read cannot be read afterwards (`Invalid_argument`): a caller reads the session's two latest
+results, as the editor does (its display is prepared on the cook worker). A clear or a close leaves results handed out
 valid, their buffers returned when the holder is collected or read (a finaliser names it); closing
 the runner first materialises every holder still alive, so a geometry outliving the GPU stays valid. `test_chain_gpu_native` fails if a recook reads back,
 if reading P materialises more than one output or twice, or if a buffer outlives its geometry.
