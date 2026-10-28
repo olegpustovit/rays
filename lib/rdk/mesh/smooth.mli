@@ -9,9 +9,6 @@ val run :
   ?method_:Rdk_attrib.Attribute_ops.blur_method ->
   ?mode:Rdk_attrib.Attribute_ops.blur_mode ->
   ?weight_attribute:string ->
-  ?alpha_attribute:string ->
   ?recompute_normals:bool ->
-  ?original_blend:float ->
-  ?smoothed_blend:float ->
   attributes:string ->
   Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result

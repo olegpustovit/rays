@@ -24,7 +24,7 @@ val group :
   ?cancel:Cancel.t -> grain:int -> int array -> Group.t -> Group.t
 
 val mapped_group :
-  ?cancel:Cancel.t -> grain:int -> point_map:int array ->
+  grain:int -> point_map:int array ->
   vertex_map:int array -> primitive_map:int array -> Group.t -> Group.t
 
 val attributes :

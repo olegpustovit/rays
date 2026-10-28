@@ -19,8 +19,6 @@ type t = {
 }
 
 val scan :
-  ?cancel:Cancel.t ->
-  ?grain:int ->
   ?selected:(int -> bool) ->
   selected_count:int ->
   int array ->

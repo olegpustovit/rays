@@ -317,11 +317,11 @@ let initial_height_attribute name count geometry = match name with
                 name)))
 
 let mountain ?cancel ?(grain = 16_384) ?selection ?direction_attribute
-    ?(normalize_direction = true) ?mask_attribute ?(seed = 0) ~height
+    ?mask_attribute ?(seed = 0) ~height
     ?(frequency = Rays_math.Vec3.create 1. 1. 1.) ?(offset = Rays_math.Vec3.zero) ?(octaves = 4)
     ?(lacunarity = 2.) ?(roughness = 0.5) ?height_attribute
     ?(recompute_normals = false) geometry =
-  Error.guard ~operation:"mountain" ~code:"invalid_deformation" @@ fun () ->
+  let normalize_direction = (true) in Error.guard ~operation:"mountain" ~code:"invalid_deformation" @@ fun () ->
   if grain <= 0 then Error "Rdk_mesh.Deform.mountain: grain must be positive"
   else if not (Float.is_finite height && finite_vec3 frequency
       && finite_vec3 offset && Float.is_finite lacunarity

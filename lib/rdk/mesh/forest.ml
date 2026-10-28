@@ -12,8 +12,8 @@ type t = {
   root_count : int;
 }
 
-let scan ?cancel ?(grain = 16_384) ?selected ~selected_count parents =
-  let point_count = Array.length parents in
+let scan ?selected ~selected_count parents =
+  let cancel = None in let grain = (16_384) in let point_count = Array.length parents in
   let tree_parent = match selected with
     | None ->
         let needs_normalization = Atomic.make false in

@@ -22,7 +22,6 @@ exception Hop_overflow
 (** An accumulated length was not finite. *)
 
 val hop_search :
-  ?cancel:Cancel.t ->
   ?blocked_point:(int -> bool) ->
   ?blocked_edge:(int -> bool) ->
   ?target:int ->
@@ -59,8 +58,6 @@ type forest = {
 }
 
 val forest_search :
-  ?cancel:Cancel.t ->
-  ?drain_each:bool ->
   valid_edge:(int -> bool) ->
   capacity:int ->
   point_edge_offsets:int array ->

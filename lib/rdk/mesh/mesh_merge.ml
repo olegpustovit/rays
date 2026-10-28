@@ -234,8 +234,8 @@ let tag_inputs name base geometries =
     Result.map (fun g -> g :: tagged) (tag (List.length tagged) geometry)))
     (Ok []) geometries |> Result.map List.rev
 
-let merge ?cancel ?grain ?pad_groups ?source_attribute ?(source_base = 0) geometries =
-  match source_attribute with
+let merge ?cancel ?grain ?source_attribute ?(source_base = 0) geometries =
+  let pad_groups = None in match source_attribute with
   | None -> merge_plain ?cancel ?grain ?pad_groups geometries
   | Some name when geometries <> [] && String.trim name <> ""
       && List.for_all (fun geometry ->

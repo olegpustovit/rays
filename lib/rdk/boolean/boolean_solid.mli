@@ -27,7 +27,7 @@ val extract_product_with_ancestry :
     paired opposite-facing walls for a solid-minus-surface cut. *)
 
 val seams :
-  ?cancel:Cancel.t -> ?grain:int -> ?parallel_cutoff:int -> ?materialize:bool ->
+  ?cancel:Cancel.t -> ?grain:int -> ?materialize:bool ->
   t -> (Boolean_seam.t, Error.t) result
 (** Materialize deterministic self/intersection curves and coincident facets
     from the already prepared exact complex without repeating arrangement. *)

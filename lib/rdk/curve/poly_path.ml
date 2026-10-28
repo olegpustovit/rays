@@ -1,6 +1,5 @@
 open Rays_math
 
-
 let fail message = raise (Error.Fail message)
 
 let next_power_of_two value =
@@ -141,8 +140,8 @@ let trace_paths ~cancel ~point_count ~graph_count ~graph_a ~graph_b =
 (* Point chains of the selected non-self edges of a unique-edge graph, as the
    open polylines [run] emits: an isolated loop repeats its start point last
    and is flagged in [closed]. *)
-let chains ?cancel ~point_count ~edge_a ~edge_b selected =
-  try
+let chains ~point_count ~edge_a ~edge_b selected =
+  let cancel = None in try
     let total = Array.length edge_a in
     let graph_count = ref 0 in
     for edge = 0 to total - 1 do
@@ -177,11 +176,10 @@ let chains ?cancel ~point_count ~edge_a ~edge_b selected =
       Char.code (Bytes.get traced.isolated_loop path)))
   with Error.Fail message -> Error message
 
-let run ?cancel ?grain ?edges ?(preserve_source_payload = true)
-    ?(connect_end_points = false)
-    ?(maximum_distance = 0.001) ?(connect_only_to_other_end_points = false)
+let run ?edges
+
     ?(make_isolated_loops_closed = false) geometry =
-  try
+  let cancel = None in let connect_end_points = (false) in let connect_only_to_other_end_points = (false) in let grain = None in let maximum_distance = (0.001) in let preserve_source_payload = (true) in try
     (match grain with Some value when value <= 0 -> fail "grain must be positive"
      | _ -> ());
     if not (Float.is_finite maximum_distance) || maximum_distance < 0. then
