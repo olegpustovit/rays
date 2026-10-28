@@ -525,8 +525,7 @@ relowering.
 Not yet, in order of value: (1) runners shared by equal programs: an edit relowers the workspace, so
 each fused write gets a new program, a new runner (fresh buffers, every input uploaded once) and
 its emission; deterministic return only recycles within a runner, so a host-wide pool of released
-buffers by capacity is the next step, and a frame-driven argument (`(get (frame/input) :t)` in a
-noise offset) leaves the write on the CPU today; (2) a display binding a resident P as
+buffers by capacity is the next step; (2) a display binding a resident P as
 its vertex buffer (`Workspace_gpu.marks`/`Renderer` already bind device buffers for marks; SOP
 display converts through `rdk_rays` meshes and reads P; the held buffer is packed float3, so the
 vertex layout must read it packed); (3) grid planes and `array/range` generated from the thread
@@ -542,8 +541,23 @@ noise seed stays a region constant and seeds equal the specialized node's. `sop/
 is a sentinel the lowering of the body's `sop/concat` replaces by the base it allocates. A
 per-frame argument is passed to the body as it is (a drive inside it, a frame uniform) when its
 field has nothing to canonicalize, and so is a cooked-data argument (`(sop/count g :points)`), a
-source the cook resolves once; a body whose structure follows a per-frame argument and a
-validation that reads one keep the card a node of its own.
+source the cook resolves once. A live vec3 group (`:offset [(get (frame/input) :t) 0 0]`) is its
+three components, each such an input. A validation that reads a per-frame argument, and an
+`if`/`cond` test in the body that reads only frame facts and picks an arm that fails statically
+(an `error`, a helper that refuses), are deferred checks (`Flow.Eval.card_kind`'s `guards`): the
+body goes on as if the check passed, and the card cooks them with its cook's input, failing with
+the diagnostic the written-out call refuses or fails with (a refusal is `E_LOWER`, at cook rather
+than lowering). A write folded through a card with checks takes them (`$guards`), so they still
+run when the card itself is not cooked. A body whose structure follows a per-frame argument
+otherwise (transform's identity and singular-matrix branches on a live shear), or whose live
+argument a strict kernel cannot take as data (a noise lacunarity or gain, a region constant;
+`Flow.Eval.live_kernels` asks the host), keeps the card a node of its own, rebuilt per frame.
+
+Measured (`test_chain_frames_native`, M1, 2026-10-29): `grid > attribute_noise :offset [(get
+(frame/input) :t) 0 0] > transform` stays one fused write: after the first frame each frame is one
+dispatch with nothing compiled, uploaded or read back and P resident, 0.0028 s per frame for 1M
+points (0.0015 s for 512 squared) against 0.122 s on the CPU (was about 0.1 s every frame, a card
+relowered and cooked on the CPU), largest difference from the CPU 3.8e-7.
 
 That node (and every factory node, for menus and inspection: `Lower.t.card_node` builds a card's,
 with the card's id, parameters, functions and provenance base) owns one ordinary session cache
