@@ -726,9 +726,14 @@ let with_group : Flow.Op.t =
 (* Inside an inlined defnode body (the host adds the card's cook label as [$label]) a context
    operator is a cook-time source the kernel resolves from its cook context; elsewhere it is refused. *)
 let context_label = Attribute_kernel.context_label
+let provenance_sentinel = min_int
 
 let context_source what ~live:_ ~node:_ (args : (string * (_, _) Flow.Value.t) list) =
   match List.assoc_opt context_label args with
+  | Some (Flow.Value.Text _) when what = "Provenance base" ->
+      (* a lowering fact: the sentinel the lowering of the body's sop/concat replaces by the base it
+         allocates (Lower), as it did for the card *)
+      Flow.Value.Int provenance_sentinel
   | Some (Flow.Value.Text _) ->
       let name, ty =
         match what with

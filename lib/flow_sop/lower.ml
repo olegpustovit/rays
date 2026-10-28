@@ -228,7 +228,16 @@ let () =
                     true
                 | _ -> false)
           in
-          if not (List.for_all raw live) then None
+          (* ponytail: cooked data as an argument keeps the card a node: a body would resolve the source
+           per element where it reads it; bind it once per cook to inline those too *)
+          let rec cooked = function
+            | E.Source _ | E.Struct (_, Ty.Array _, _) -> true
+            | E.List values -> Array.exists cooked values
+            | E.Record fields | E.Struct (_, _, fields) ->
+                List.exists (fun (_, v) -> cooked v) fields
+            | _ -> false
+          in
+          if List.exists (fun (_, v) -> cooked v) live || not (List.for_all raw live) then None
           else
             let live_names = List.map fst live in
             let override arguments =
@@ -354,23 +363,23 @@ let per_context value (build : (E.value -> E.value) -> Sop.Node.t) =
         Sop.Node.Build.cook node context payloads)
     |> Sop.Node.Build.with_facts (Sop.Node.facts base)
 
-let rec geometry_arrays_node ~profile ~strict_body ~reference ~approx ~kernel_source ?host ?state
-    ?elems ~operation ~args ~sources inputs =
+let rec geometry_arrays_node ?check ~profile ~strict_body ~reference ~approx ~kernel_source ?host
+    ?state ?elems ~operation ~args ~sources inputs =
   per_context (E.Record args) (fun specialize ->
       let args =
         match specialize (E.Record args) with E.Record args -> args | _ -> assert false
       in
-      geometry_arrays_node_in ~profile ~strict_body ~reference ~approx ~kernel_source ?host ?state
-        ?elems ~operation ~args ~sources inputs)
+      geometry_arrays_node_in ?check ~profile ~strict_body ~reference ~approx ~kernel_source ?host
+        ?state ?elems ~operation ~args ~sources inputs)
 
-and geometry_arrays_node_in ~profile ~strict_body ~reference ~approx ~kernel_source ?(host = false)
-    ?state ?elems ~operation ~args ~sources inputs =
+and geometry_arrays_node_in ?(check = true) ~profile ~strict_body ~reference ~approx ~kernel_source
+    ?(host = false) ?state ?elems ~operation ~args ~sources inputs =
   let data = geometry_arrays_data args in
   let program =
     Attribute_kernel.prepare ~profile ~strict:strict_body ~approx ~sink:Flow_ir.Sop_input ~sources
       inputs data
   in
-  if strict_body then ignore (ok program);
+  if strict_body && check then ignore (ok program);
   let parameters =
     Lazy.force kernel_source
     ^ (match operation with
@@ -525,9 +534,9 @@ let kernel_data (n : E.node) =
 let is_resource (n : E.node) =
   Operators.lowering n.kind = Some Operators.Resource && (n.kind <> "exact" || n.ty = Ty.image)
 
-let attribute_node ~strict_body ~reference ~profile ~approx ~gpu ~kernel_source ?state ?elems
-    ?selection ?default ?(owner = Rdk.Attribute.Point) ?(kind = "vec3") ~name ~values ~sources
-    inputs =
+let attribute_node ?(check = true) ~strict_body ~reference ~profile ~approx ~gpu ~kernel_source
+    ?state ?elems ?selection ?default ?(owner = Rdk.Attribute.Point) ?(kind = "vec3") ~name ~values
+    ~sources inputs =
   let data =
     E.Record
       ([ ("values", values) ]
@@ -538,12 +547,13 @@ let attribute_node ~strict_body ~reference ~profile ~approx ~gpu ~kernel_source 
   let values = specialize values
   and selection = Option.map specialize selection
   and default = Option.map specialize default in
-  if strict_body then ignore (ok (Attribute_kernel.prepare ~strict:true ~sources inputs values));
+  if strict_body && check then
+    ignore (ok (Attribute_kernel.prepare ~strict:true ~sources inputs values));
   Attribute_kernel.node ?state ?elems ?selection ?default ~gpu ~strict:strict_body ~reference
     ~profile ~approx ~owner ~kind ~source:(Lazy.force kernel_source) ~name ~values ~sources inputs
 
-let group_node ~strict_body ~reference ~profile ~approx ~kernel_source ?state ?elems ~args ~sources
-    inputs =
+let group_node ?(check = true) ~strict_body ~reference ~profile ~approx ~kernel_source ?state ?elems
+    ~args ~sources inputs =
   per_context (E.Record args) @@ fun specialize ->
   let args = match specialize (E.Record args) with E.Record args -> args | _ -> assert false in
   let text key default =
@@ -555,7 +565,7 @@ let group_node ~strict_body ~reference ~profile ~approx ~kernel_source ?state ?e
   let owner_name = text "owner" "point" and name = text "name" "" in
   let owner = ok (Group_kernel.owner owner_name) and values = group_data args in
   let program = Attribute_kernel.prepare ~profile ~strict:strict_body ~sources inputs values in
-  if strict_body then ignore (ok program);
+  if strict_body && check then ignore (ok program);
   let node =
     Sop.Node.Build.make_geometry ~label:("Write group " ^ name) ~operation:"flow.with_group"
       ~version:1
@@ -1235,10 +1245,18 @@ struct
   and geometry_arrays_label = geometry_arrays_label
   and geometry_arrays_data = geometry_arrays_data
 
-  let geometry_arrays_node ?(strict_body = strict_body) ?host ?state ?elems ~operation ~args
+  (* A node of an inlined body (its site is under a card's [node:kind]) compiles strictly, as the
+     nested body did; its refusals cook as errors rather than refusing the program. *)
+  let inlined = function
+    | Some (n : E.node) -> List.exists (String.starts_with ~prefix:"node:") n.site
+    | None -> false
+
+  let geometry_arrays_node ?node ?(strict_body = strict_body) ?host ?state ?elems ~operation ~args
       ~sources inputs =
-    geometry_arrays_node ~profile ~strict_body ~reference ~approx:checked.approx ~kernel_source
-      ?host ?state ?elems ~operation ~args ~sources inputs
+    geometry_arrays_node ~check:strict_body ~profile
+      ~strict_body:(strict_body || inlined node)
+      ~reference ~approx:checked.approx ~kernel_source ?host ?state ?elems ~operation ~args ~sources
+      inputs
 
   let structural_node residual captures =
     per_context (E.Residual residual) @@ fun specialize ->
@@ -1745,17 +1763,20 @@ struct
     in
     Sop.Node.Build.with_facts { (Sop.Node.facts node) with reads = [ "*" ]; writes = [ "*" ] } node
 
-  let attribute_node ?state ?elems ?selection ?default ?(owner = Rdk.Attribute.Point)
+  let attribute_node ?node ?state ?elems ?selection ?default ?(owner = Rdk.Attribute.Point)
       ?(kind = "vec3") ~name ~values ~sources inputs =
-    attribute_node ~strict_body ~reference ~profile ~approx:checked.approx ~gpu ~kernel_source
-      ?state ?elems ?selection ?default ~owner ~kind ~name ~values ~sources inputs
+    attribute_node ~check:strict_body
+      ~strict_body:(strict_body || inlined node)
+      ~reference ~profile ~approx:checked.approx ~gpu ~kernel_source ?state ?elems ?selection
+      ?default ~owner ~kind ~name ~values ~sources inputs
 
   let group_data = group_data
   and attribute_data = attribute_data
 
-  let group_node ?state ?elems ~args ~sources inputs =
-    group_node ~strict_body ~reference ~profile ~approx:checked.approx ~kernel_source ?state ?elems
-      ~args ~sources inputs
+  let group_node ?node ?state ?elems ~args ~sources inputs =
+    group_node ~check:strict_body
+      ~strict_body:(strict_body || inlined node)
+      ~reference ~profile ~approx:checked.approx ~kernel_source ?state ?elems ~args ~sources inputs
 
   let plan = evaluated.plan
 
@@ -1846,6 +1867,7 @@ struct
           (fun id -> Some id <> root)
           (Attribute_kernel.sources
              (if n.kind = "sop/with_group" then group_data n.args else attribute_data n.args))
+    else if n.kind = E.card_kind then Attribute_kernel.sources (List.assoc "value" n.args)
     else
       let direct = geo_of n.args in
       let rec captures = function
@@ -2322,8 +2344,56 @@ struct
       =
     Hashtbl.create 16
 
+  (* An inlined card's marker: a pass-through of the body's result, or the structural node of a
+     body whose geometry is decided by cooked data. *)
+  let lower_card (node : E.node) args cid =
+    let kind = match List.assoc "kind" args with E.Text kind -> kind | _ -> "" in
+    let key =
+      match String.index_opt kind '/' with
+      | Some i -> String.sub kind (i + 1) (String.length kind - i - 1)
+      | None -> kind
+    in
+    let sources = deps node in
+    let build inputs =
+      match List.assoc "value" args with
+      | E.Residual residual ->
+          structural_node residual
+            (List.map2 (fun id input -> (id, plan.nodes.(id).ty, input)) sources inputs)
+          |> Sop.Node.relabel key
+      | _ ->
+          Sop.Node.Build.make ~label:key ~operation:"flow.card" ~version:1 ~parameters:kind
+            ~cook_mode:(Sop.Node.Passthrough 0) ~dependencies:Sop.Context.Dependencies.static
+            ~inputs:(Array.of_list inputs) (fun ~node_id:_ _ payloads ->
+              Ok Sop.Node.Build.{ payload = payloads.(0); instances = None })
+          |> Sop.Node.Build.with_facts
+               Sop.Node.
+                 {
+                   cook_mode = Passthrough 0;
+                   elementwise = None;
+                   reads = [];
+                   writes = [];
+                   topology = Preserved;
+                   exact = true;
+                 }
+    in
+    let factory =
+      Edit.factory ~key:"flow_card" ~label:key ~category:[ "Flow" ] ~arity:(List.length sources)
+        (fun inputs -> Ok (build inputs))
+    in
+    {
+      cid;
+      factory;
+      arity = List.length sources;
+      changes = [];
+      dynamic = [];
+      zone = None;
+      kernels = [];
+      slots = List.mapi (fun index source -> (index, source)) sources;
+    }
+
   let native (node : E.node) =
-    if node.kind = "exact" && node.ty <> Ty.image then None
+    if node.kind = E.card_kind then Some lower_card
+    else if node.kind = "exact" && node.ty <> Ty.image then None
     else Option.bind (Operators.lowering node.kind) (Hashtbl.find_opt natives)
 
   let rec prepare (node : E.node) =
@@ -2332,11 +2402,32 @@ struct
     | None ->
         let template = templ.(node.id) in
         let cid = compiled.(node.id) in
+        (* an inlined merge body's provenance base (its sop/concat), allocated here as its card was *)
+        let node =
+          if
+            List.exists
+              (function "tag_base", E.Int n -> n = Operators.provenance_sentinel | _ -> false)
+              node.args
+          then
+            let base = if provenance_tags then tag_sources cid node.args else -1 in
+            {
+              node with
+              args =
+                List.map
+                  (function
+                    | "tag_base", E.Int n when n = Operators.provenance_sentinel ->
+                        ("tag_base", E.Int base)
+                    | arg -> arg)
+                  node.args;
+            }
+          else node
+        in
         let live = List.filter (fun (_, v) -> E.is_live v) node.args in
         let resource = is_resource node in
         (* a template node keeps its live arguments: each element forces them *)
         let args =
-          if template || kernel_data node <> None || resource then node.args
+          if template || kernel_data node <> None || resource || node.kind = E.card_kind then
+            node.args
           else List.map (fun (n, v) -> (n, at_zero v)) node.args
         in
         let args =
@@ -2485,16 +2576,16 @@ struct
               | _ -> fail "E_LOWER" "Attribute name must be static text"
             in
             let owner, kind = attribute_options n.args in
-            attribute_node ?state ~elems:outer
+            attribute_node ~node:n ?state ~elems:outer
               ?selection:(List.assoc_opt "selection" n.args)
               ?default:(List.assoc_opt "default" n.args) ~owner ~kind ~name
               ~values:(List.assoc "values" n.args) ~sources:(deps n)
               (List.filter_map Fun.id options)
         | None when n.kind = "sop/with_group" ->
-            group_node ?state ~elems:outer ~args:n.args ~sources:(deps n)
+            group_node ~node:n ?state ~elems:outer ~args:n.args ~sources:(deps n)
               (List.filter_map Fun.id options)
         | None when is_geometry_arrays n.kind ->
-            geometry_arrays_node ?state ~elems:outer ~operation:n.kind ~args:n.args
+            geometry_arrays_node ~node:n ?state ~elems:outer ~operation:n.kind ~args:n.args
               ~sources:(deps n) (List.filter_map Fun.id options)
         | None ->
             edit
@@ -2555,21 +2646,11 @@ struct
     let reg key lower = Hashtbl.replace natives key lower in
     reg Geometry_arrays (fun (node : E.node) args cid ->
         let operation = node.kind in
-        (* an inlined merge body's provenance base, allocated here as its card was *)
-        let args =
-          List.map
-            (fun (name, value) ->
-              match value with
-              | E.Source ("sop/provenance_base", _, _) ->
-                  (name, E.Int (if provenance_tags then tag_sources cid args else -1))
-              | value -> (name, value))
-            args
-        in
         let sources = deps node in
         let factory =
           Edit.factory ~key:(geometry_arrays_key operation) ~label:(geometry_arrays_label operation)
             ~category:[ "Flow"; "Topology" ] ~arity:(List.length sources) (fun inputs ->
-              Ok (geometry_arrays_node ~operation ~args ~sources inputs))
+              Ok (geometry_arrays_node ~node ~operation ~args ~sources inputs))
         in
         {
           cid;
@@ -2600,7 +2681,7 @@ struct
         let factory =
           Edit.factory ~key:"flow.with_group" ~label:"Write group" ~category:[ "Flow" ]
             ~arity:(List.length sources)
-            (Fun.compose Result.ok (group_node ~args ~sources))
+            (Fun.compose Result.ok (group_node ~node ~args ~sources))
         in
         {
           cid;
@@ -2646,7 +2727,7 @@ struct
           Edit.factory ~key:"flow.with_attr" ~label:"Write attribute" ~category:[ "Flow" ]
             ~arity:(List.length sources)
             (Fun.compose Result.ok
-               (attribute_node ?selection:(List.assoc_opt "selection" args)
+               (attribute_node ~node ?selection:(List.assoc_opt "selection" args)
                   ?default:(List.assoc_opt "default" args) ~owner ~kind ~name ~values ~sources))
         in
         {
@@ -2805,8 +2886,8 @@ struct
              || (not (is_zone node.kind))
                 && List.exists
                      (fun (_, v) ->
-                       if templ.(node.id) || kernel_data node <> None then
-                         reads_t v || E.state_dependent v
+                       if templ.(node.id) || kernel_data node <> None || node.kind = E.card_kind
+                       then reads_t v || E.state_dependent v
                        else
                          E.is_live v
                          || match v with E.Fn _ -> reads_t v || E.state_dependent v | _ -> false)

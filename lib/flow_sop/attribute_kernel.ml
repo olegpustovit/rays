@@ -404,7 +404,7 @@ let seed_for ?(salt = 0) ~seed ~namespace ~label () =
   let mixed = Int64.logxor seed (Int64.mul (Int64.logxor identity salt) 0x9e3779b97f4a7c15L) in
   Int64.to_int (Int64.logxor mixed (Int64.shift_right_logical mixed 32))
 
-let context_label = "$label"
+let context_label = E.context_label
 
 (* The cook context an inlined body reads (Operators.context_source): a kernel node declares it
    ([dependencies]) and resolves it from its cook context, as the nested card specialized it. *)

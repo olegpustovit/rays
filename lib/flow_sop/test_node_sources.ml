@@ -68,9 +68,11 @@ let () =
 
 let () =
   let factories = [] in
-  let source =
-    parse
-      {|(workspace helper_seed
+  (* a parameter change is an edit of the call's text *)
+  let lower enabled =
+    let source =
+      parse
+        ({|(workspace helper_seed
     (defn helper_seed :context value [(enabled : bool)]
       (let* [selected enabled] (if selected (sop/context_seed "helper_fixture") 0)))
     (defn forward_seed :context value [(enabled : bool)] (helper_seed enabled))
@@ -78,22 +80,21 @@ let () =
       (let* [shift (forward_seed (not enabled))]
         (sop/with_attr geo :P (exact
           (map (fn [p] (+ p [shift 0.0 0.0])) (sop/attr geo :P))))))
-    (graph g :context sop (sop/helper_seed (sop/line :kind "Points" :points 2))))|}
-  in
-  let catalog = Flow_sop.Catalog.of_factories ~version:1 ~nodes:(line_nodes ()) factories |> ok in
-  let workspace =
-    Flow_sop.Catalog.check_workspace ~ops:Flow_sop.Operators.all catalog source |> checked
-  in
-  let lowered = Flow_sop.Lower.of_checked ~factories workspace |> ok in
-  let graph = List.hd lowered.graphs in
-  let node =
+    (graph g :context sop (sop/helper_seed (sop/line :kind "Points" :points 2) :enabled |}
+       ^ enabled ^ ")))")
+    in
+    let catalog = Flow_sop.Catalog.of_factories ~version:1 ~nodes:(line_nodes ()) factories |> ok in
+    let workspace =
+      Flow_sop.Catalog.check_workspace ~ops:Flow_sop.Operators.all catalog source |> checked
+    in
+    let lowered = Flow_sop.Lower.of_checked ~factories workspace |> ok in
+    let graph = List.hd lowered.graphs in
     Sop.Edit_graph.compile_node graph.network.geometry ~node_id:(Option.get graph.root)
     |> Result.get_ok
   in
+  let node = lower "false" in
   assert (Sop.Context.Dependencies.mem Seed (Sop.Node.dependencies node));
-  let inactive, _ =
-    Sop.Node.apply_parameters node [ ("enabled", Param.Bool_value true) ] |> Result.get_ok
-  in
+  let inactive = lower "true" in
   assert (not (Sop.Context.Dependencies.mem Seed (Sop.Node.dependencies inactive)));
   let session = Sop.Session.create ~max_entries:16 ~max_payload_bytes:1_000_000 |> Result.get_ok in
   Fun.protect
@@ -101,7 +102,11 @@ let () =
     (fun () ->
       let cook node seed =
         let context = Sop.Context.create ~seed () |> Result.get_ok in
-        let output = Sop.Session.cook session ~context node |> Result.get_ok in
+        let output =
+          match Sop.Session.cook session ~context node with
+          | Ok output -> output
+          | Error d -> failwith (Diagnostic.error_to_string d)
+        in
         let geometry = Sop.Payload.geometry output.payload |> Result.get_ok in
         Rdk.Packed.Float3.get (Rdk.Geometry.positions geometry) 0
       in

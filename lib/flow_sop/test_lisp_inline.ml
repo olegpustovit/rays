@@ -18,6 +18,9 @@ let chains =
        :rows 33)) :low_red 7)" );
   ]
 
+(* the switch's value outside these checks, restored after each *)
+let default = Atomic.get Flow.Eval.inline_nodes
+
 let run inline body =
   Atomic.set Flow.Eval.inline_nodes inline;
   let profiles = ref [] in
@@ -57,11 +60,13 @@ let () =
       let inline_bytes, inline_runs, inlined = run true body in
       Printf.printf "inline %s: region runs %d -> %d, nested lowerings %d -> %d, bytes equal\n" name
         nested_runs inline_runs nested inlined;
-      (* the chained bodies are one program with the grid's (its validations inline too): fewer
-         region runs, no nested lowering *)
-      assert (nested = 3 && inlined = 0 && inline_runs < nested_runs))
+      (* the chained bodies are one program with the grid's (its validations inline too): no nested
+         lowering, no more region runs (inlined nodes compile strictly, as the nested bodies did;
+         fusing the chained regions is step E) *)
+      assert (nested_bytes = inline_bytes);
+      assert (nested = 3 && inlined = 0 && inline_runs <= nested_runs))
     chains;
-  Atomic.set Flow.Eval.inline_nodes false
+  Atomic.set Flow.Eval.inline_nodes default
 
 (* Step B: an inlined card keeps the node's boundaries. A body error is that card's cook error, a
    refused parameter (validation, normalizer) refuses the lowering, as a node build did; canonical
@@ -97,7 +102,7 @@ let outcome ?(seed = 0L) inline text =
         | Ok o -> Ok (geometry_bytes (Result.get_ok (Sop.Payload.geometry o.payload)))
         | Error d -> Error ("cook", d.code, d.message, d.cause))
   in
-  Atomic.set Flow.Eval.inline_nodes false;
+  Atomic.set Flow.Eval.inline_nodes default;
   result
 
 let () =
@@ -176,12 +181,4 @@ let () =
       ("(sop/attribute_fade (sop/line :points 9) :frame_offset (* t 8.0))", false);
       ("(sop/b_live (sop/line :points 9) :on (> t 0.1))", false);
     ];
-  (* cooked data as an argument: the nested card refused it (E_DATA_SOURCE); inline it is an input *)
-  (match
-     outcome true
-       "(workspace c (graph g :context sop (let* [g (sop/line :points 9)] (sop/noise_displace g \
-        :amplitude (float (sop/count g :points))))))"
-   with
-  | Ok _ -> ()
-  | Error (_, code, message, _) -> failwith ("step C: cooked argument " ^ code ^ " " ^ message));
   print_endline "inline cards: context-reaching bodies and live arguments inline"

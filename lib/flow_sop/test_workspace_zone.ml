@@ -232,10 +232,18 @@ let previews () =
 (* the graph with its zero-input node [operation] replaced by a snapshot of its cook whose
    point [index] is lifted by [by] *)
 let move_point session (graph : Lower.graph) operation ~index ~by =
+  (* an inlined card: its body's result, behind its marker, or the structural marker itself *)
+  let nodes = Edit.inspect graph.network.geometry in
   let field =
     List.find
-      (fun (n : Edit.node_info) -> n.operation = operation)
-      (Edit.inspect graph.network.geometry)
+      (fun (n : Edit.node_info) ->
+        n.operation = operation
+        || (n.label = operation && List.mem n.operation [ "flow.card"; "flow.geometry_select" ]))
+      nodes
+  in
+  let field =
+    if field.operation <> "flow.card" then field
+    else List.find (fun (n : Edit.node_info) -> Some n.id = field.inputs.(0)) nodes
   in
   let base =
     Result.get_ok

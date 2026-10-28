@@ -10,7 +10,7 @@ end)
 
 (* Checked terms share subterms; rewrite each once (keeping the sharing), or a shared chain is
    walked exponentially often. [transform] is pure per term, so the memo changes nothing else. *)
-let map ?(select = Fun.id) transform (graph : W.graph) =
+let map ?(select = Fun.id) ?(helpers = true) transform (graph : W.graph) =
   let memo = Memo.create 256 in
   let rec term (t : W.term) =
     match t.node with
@@ -31,7 +31,13 @@ let map ?(select = Fun.id) transform (graph : W.graph) =
       match t.node with
       | W.Call c -> W.Call { c with args = fields c.args }
       | Op c -> Op { c with args = fields c.args }
-      | Call_fn c -> Call_fn { c with args = List.map term c.args; body = Option.map term c.body }
+      | Call_fn c ->
+          Call_fn
+            {
+              c with
+              args = List.map term c.args;
+              body = (if helpers then Option.map term c.body else c.body);
+            }
       | Graph_ref g -> Graph_ref { g with inputs = fields g.inputs }
       | Let (bindings, body) -> Let (patterns bindings, term body)
       | State s -> State { s with init = term s.init; step = term s.step }
@@ -664,8 +670,9 @@ let label_context ~label graph =
         | _ -> name ^ "=?")
       args
   in
+  (* a helper's body has its own scope: its operators read the card's label from the evaluation *)
   let graph =
-    map
+    map ~helpers:false
       (fun t ->
         match t.W.node with
         | W.Op ({ op; args; _ } as o) when List.mem op context_ops ->

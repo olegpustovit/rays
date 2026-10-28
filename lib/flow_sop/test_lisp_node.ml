@@ -1,3 +1,6 @@
+(* These checks are the Lisp node's own protocol (its factory node, as the inspector and node menu
+   build it: parameters, rebuilds, cook identity), so this module lowers calls as that node. *)
+let inline = Atomic.exchange Flow.Eval.inline_nodes false
 let ok = function Ok value -> value | Error message -> failwith message
 let check = Test_support.check
 
@@ -1494,3 +1497,5 @@ let () =
   check (hits () = h3) "a changed GPU policy returned a stale entry";
   check (hits () = h2) "a new GPU backend returned a stale entry";
   print_endline "Lower build cache: hits match uncached bytes; parameter, backend and policy miss"
+
+let () = Atomic.set Flow.Eval.inline_nodes inline

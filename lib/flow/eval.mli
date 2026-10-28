@@ -234,6 +234,14 @@ val inline_parameters :
     cook context, say). Applied once per workspace and definition, then per call; the default
     inlines every call with its arguments. *)
 
+val context_label : string
+(** The argument an inlined card's context operators carry: its cook label (the kind key). *)
+
+val card_kind : string
+(** The kind of an inlined card's marker node: [value] is the body's geometry (a cooked node, or a
+    residual the host cooks behind the marker), [kind] the card's qualified kind. The marker sits at
+    the call's site. *)
+
 val node_error : string
 (** The reserved argument of a card whose inlined body failed: its diagnostic, marshalled. The host
     lowers the card as a node that returns it when cooked. *)

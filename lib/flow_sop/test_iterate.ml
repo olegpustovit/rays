@@ -115,11 +115,11 @@ let () =
        (with_session (fun s -> cook s (lower (text "sop/smooth_loop" (-3)))))
     = expected 0)
     "a negative count changed the seed";
-  (* a parameter change reruns the same prepared node *)
+  (* a parameter change is an edit of the call's text: the card relowers *)
   let node = lower (text "sop/smooth_loop" 1) in
   with_session (fun s ->
       check (Rdk_test_support.geometry_bytes (cook s node) = expected 1) "one pass";
-      let changed, _ = ok (Sop.Node.apply_parameters node [ ("passes", Param.Int_value 7) ]) in
+      let changed = lower (text "sop/smooth_loop" 7) in
       check
         (Rdk_test_support.geometry_bytes (cook s changed) = expected 7)
         "parameter change to seven passes");

@@ -1,3 +1,6 @@
+(* The node's parameter contract, checked on its factory node: this module lowers calls as that node. *)
+let inline = Atomic.exchange Flow.Eval.inline_nodes false
+
 open Rdk
 open Rdk_test_support
 module N = Sop.Node
@@ -136,3 +139,5 @@ let () =
           assert ((Sop.Session.stats session).misses = misses))
         [ (c42, seeded42); (c999, seeded999) ]);
   print_endline "Lisp noise_displace SOP cache, context-seed dependency and relabel identity pass"
+
+let () = Atomic.set Flow.Eval.inline_nodes inline

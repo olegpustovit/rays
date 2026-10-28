@@ -7,6 +7,10 @@ val seed_for : ?salt:int -> seed:int64 -> namespace:string -> label:string -> un
     are hashed as UTF-8 bytes. *)
 
 val context_label : string
+
+val provenance_sentinel : int
+(** What [sop/provenance_base] is in an inlined body: the lowering of its [sop/concat] replaces it
+    with the provenance base it allocates. *)
 (** The reserved argument naming the card whose inlined body reads its cook context: a context
     operator carrying it is a cook-time source. *)
 

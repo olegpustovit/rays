@@ -33,7 +33,14 @@ let source ?hook ?default ?operation ?version ?(argument = "") () =
   ^ " (graph g :context sop (let* [card (sop/test_encoded (sop/line :points 3) " ^ argument
   ^ ")] card)))"
 
-let lower forms = flow_ok (Flow_sop.Lower.workspace forms)
+(* The card's factory node: these checks are its parameter protocol (the inspector's), so the call
+   lowers as that node rather than inline. *)
+let as_node f =
+  let inline = Atomic.exchange Flow.Eval.inline_nodes false in
+  Fun.protect ~finally:(fun () -> Atomic.set Flow.Eval.inline_nodes inline) f
+
+let lower forms = as_node (fun () -> flow_ok (Flow_sop.Lower.workspace forms))
+let of_checked ?factories checked = as_node (fun () -> Flow_sop.Lower.of_checked ?factories checked)
 
 let root lowered =
   let graph =
@@ -141,9 +148,7 @@ let () =
   in
   let direct =
     flow_ok
-      (Flow_sop.Lower.of_checked
-         ~factories:((lower forms).Flow_sop.Lower.factories @ Sop.Nodes.factories)
-         raw)
+      (of_checked ~factories:((lower forms).Flow_sop.Lower.factories @ Sop.Nodes.factories) raw)
     |> root
   in
   assert ((field direct).default = Param.Text_value "point");
@@ -158,7 +163,7 @@ let () =
   in
   let authored, changed = flow_ok (edit " DETAIL ") in
   assert (String.contains (Flow.Lisp.flat (List.hd authored)) 'D');
-  let changed_node = root (flow_ok (Flow_sop.Lower.of_checked changed)) in
+  let changed_node = root (flow_ok (of_checked changed)) in
   assert ((field changed_node).current = Param.Text_value "detail");
   assert (Result.is_error (edit "bad"));
   assert ((field node).current = Param.Text_value "point");
@@ -391,7 +396,7 @@ let () =
   assert (version rechecked = 2);
   let restored = check (parse (Flow.Lisp.flat (List.hd saved))) in
   assert (version restored = 2);
-  let edited = root (flow_ok (Flow_sop.Lower.of_checked restored)) in
+  let edited = root (flow_ok (of_checked restored)) in
   assert (Sop.Node.version edited = 2 && (field edited).current = Param.Text_value "detail");
   let header version = flow_ok (Flow.Defnode.parse (List.hd (parse (declaration ~version ())))) in
   let manifest version =

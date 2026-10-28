@@ -18,15 +18,24 @@ let marker name =
 
 let restore with_ root =
   let module Node = Sop.Node in
+  (* a DAG (an inlined body reads its input many times): each node is rebuilt once *)
+  let restored = Hashtbl.create 64 in
   let rec go node =
-    if Node.operation node = "lisp_sop_ext" then List.assoc (Node.parameters node) with_
-    else
-      match Node.inputs node with
-      | [] -> node
-      | inputs ->
-          let rebuilt = List.map go inputs in
-          if List.for_all2 ( == ) inputs rebuilt then node
-          else Node.Build.rebuild_with_inputs node (Array.of_list rebuilt)
+    match Hashtbl.find_opt restored (Node.id node) with
+    | Some node -> node
+    | None ->
+        let result =
+          if Node.operation node = "lisp_sop_ext" then List.assoc (Node.parameters node) with_
+          else
+            match Node.inputs node with
+            | [] -> node
+            | inputs ->
+                let rebuilt = List.map go inputs in
+                if List.for_all2 ( == ) inputs rebuilt then node
+                else Node.Build.rebuild_with_inputs node (Array.of_list rebuilt)
+        in
+        Hashtbl.add restored (Node.id node) result;
+        result
   in
   go root
 

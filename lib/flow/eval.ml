@@ -178,6 +178,8 @@ and ctx = {
   geometry : bool;
   host : bool;
   kernel_requests : bool;
+  card : string option;
+      (* the cook label of the inlined card whose body this is: its context operators read it *)
 }
 
 and st = {
@@ -566,6 +568,10 @@ let rec is_live = function
 
 (* the reserved argument of a card whose inlined body failed: its marshalled diagnostic *)
 let node_error = "$node_error"
+let card_kind = "$card"
+
+(* the argument naming an inlined card's cook label on its context operators *)
+let context_label = "$label"
 
 exception Refused of Diagnostic.t
 
@@ -785,7 +791,7 @@ and ev_raw c env (x : W.term) : value =
       | Some inlined -> (
           let d, canonical = Lazy.force inlined in
           match canonical vals with
-          | Some parameters -> inline_node c d parameters ~call vals
+          | Some parameters -> inline_node c ~form:x.form.id d parameters ~call vals
           | None -> call vals)
       | _ -> call vals)
   | W.Op { op = "scene/merge"; args; skip = _ :: _ as skip } ->
@@ -1019,6 +1025,12 @@ and apply_op c ?(authored = 0) name (vals : (string * value) list) : value =
     | None -> failf "E_UNKNOWN" "Unknown operator %s." name
   in
   let vals =
+    match c.card with
+    | Some label when List.mem name W.body_context_ops && not (List.mem_assoc context_label vals) ->
+        vals @ [ (context_label, Text label) ]
+    | _ -> vals
+  in
+  let vals =
     match o.shape with
     | Op.Struct { splice = true } ->
         List.concat_map
@@ -1079,10 +1091,15 @@ and apply_op c ?(authored = 0) name (vals : (string * value) list) : value =
    body itself is that card's cook error: the body's nodes are dropped and the card lowers as a node
    that fails with the diagnostic when cooked. Each body has its own step budget, as before. A
    call with live arguments, or one the host keeps as its own node, lowers as before. *)
-and inline_node c (d : W.node_definition) parameters ~call vals =
+and inline_node c ~form (d : W.node_definition) parameters ~call vals =
   if c.depth > max_depth then fail "E_DEPTH" "Call depth exceeds 64.";
   let base = [ "node:" ^ d.kind.qualified ] in
-  let c' = { c with prefix = site c; base; route = []; depth = c.depth + 1 } in
+  let label =
+    match String.index_opt d.kind.qualified '/' with
+    | Some i -> String.sub d.kind.qualified (i + 1) (String.length d.kind.qualified - i - 1)
+    | None -> d.kind.qualified
+  in
+  let c' = { c with prefix = site c; base; route = []; depth = c.depth + 1; card = Some label } in
   let rec flat = function
     | List xs -> List.concat_map flat (Array.to_list xs)
     | No_geo -> []
@@ -1134,7 +1151,7 @@ and inline_node c (d : W.node_definition) parameters ~call vals =
       call vals
   | v ->
       st.steps <- steps;
-      v
+      card c ~form d v
   | exception Needs_t ->
       (* a validation that reads a live argument *)
       st.steps <- steps;
@@ -1151,6 +1168,39 @@ and inline_node c (d : W.node_definition) parameters ~call vals =
   | exception x ->
       st.steps <- steps;
       raise x
+
+(* The card marker: a plan node at the call site naming the card (its path, kind), what the host
+   keys per-card ids, probes, provenance, facts and caching by. A body whose geometry is decided by
+   cooked data (a residual) cooks behind it, one card's structure as before; the call is the marker.
+   Otherwise the marker is a side node and the call is the body's own result, so the program
+   continues through it. *)
+and card c ~form (d : W.node_definition) v =
+  let marker () =
+    let st = c.st in
+    let n =
+      {
+        id = st.nnodes;
+        inst = c.inst;
+        site = site c;
+        iter = c.iter;
+        kind = card_kind;
+        ty = Ty.geometry;
+        args = [ ("value", v); ("kind", Text d.kind.qualified) ];
+      }
+    in
+    st.nodes <- n :: st.nodes;
+    st.authored <- form :: st.authored;
+    st.nnodes <- st.nnodes + 1;
+    Deferred (Ty.geometry, n.id)
+  in
+  if c.st.time <> None || c.data then v
+  else
+    match v with
+    | Residual r when r.rterm.W.ty = Ty.geometry -> marker ()
+    | Deferred (ty, _) when ty = Ty.geometry ->
+        ignore (marker ());
+        v
+    | _ -> v
 
 and apply_def ?body c name (vals : value list) : value =
   let d =
@@ -1798,6 +1848,7 @@ and graph_value ?(rec_ = true) c name over =
         geometry = c.geometry;
         host = g.context = Context.host;
         kernel_requests = c.kernel_requests;
+        card = c.card;
       }
     in
     let env, ins =
@@ -1916,6 +1967,7 @@ let root st =
     geometry = false;
     host = false;
     kernel_requests = false;
+    card = None;
   }
 
 let protect f =
