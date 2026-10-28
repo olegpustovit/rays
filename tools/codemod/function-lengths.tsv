@@ -5,8 +5,6 @@ lib/flow_ir/packed.ml	run_typed#1	503
 lib/metal/gen/registry.ml	entries#1	428
 lib/ogpu/conformance/conformance.ml	run#1	952
 lib/ogpu_metal/backend.ml	create#1	1018
-lib/pxui/test_ui.ml	run#1	811
-lib/pxui/test_ui.ml	with_scale#1	476
 lib/pxui_graph/test_pxui_graph.ml	scope_gestures#1	389
 lib/rays_editor/test/test_rays_editor.ml	run#1	650
 lib/rays_editor/test/test_scene_sync.ml	run#1	303
