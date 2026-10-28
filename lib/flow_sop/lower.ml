@@ -239,6 +239,42 @@ let () =
         fun vals ->
           let vals = material_args d.kind.qualified vals in
           let live, vals = List.partition (fun (_, value) -> E.is_live value) vals in
+          (* a live vec3 group is its three components, each a program input of its field *)
+          let live =
+            List.concat_map
+              (fun (name, value) ->
+                let components =
+                  List.filter_map
+                    (fun (f : Param.field_view) ->
+                      match f.vec3 with
+                      | Some (group, axis) when group = name -> Some (axis, f.name)
+                      | _ -> None)
+                    d.fields
+                in
+                let component axis =
+                  match value with
+                  | E.List ([| _; _; _ |] as xs) -> Some xs.(axis)
+                  | E.Residual r ->
+                      let view = E.Residual.residual_view r in
+                      let term =
+                        {
+                          Workspace.path = None;
+                          ty = Ty.Float;
+                          node = Workspace.Ref_binding ("$vec3", [ List.nth [ "x"; "y"; "z" ] axis ]);
+                          form = view.term.form;
+                        }
+                      in
+                      Some (E.Residual (E.Residual.with_bindings r ~term [ ("$vec3", value) ]))
+                  | _ -> None
+                in
+                if List.length components <> 3 then [ (name, value) ]
+                else
+                  match List.map (fun (axis, field) -> (field, component axis)) components with
+                  | parts when List.for_all (fun (_, v) -> Option.is_some v) parts ->
+                      (name, value) :: List.map (fun (field, v) -> (field, Option.get v)) parts
+                  | _ -> [ (name, value) ])
+              live
+          in
           let changes =
             List.concat_map
               (fun (name, value) ->
@@ -251,6 +287,13 @@ let () =
            field must have nothing to canonicalize *)
           let raw (name, _) =
             match List.find_opt (fun (f : Param.field_view) -> f.name = name) d.fields with
+            | None
+              when List.exists
+                     (fun (f : Param.field_view) ->
+                       List.mem_assoc f.name live && f.vec3 <> None
+                       && Option.map fst f.vec3 = Some name)
+                     d.fields ->
+                true
             | None ->
                 not
                   (List.exists
@@ -258,8 +301,7 @@ let () =
                        f.vec3 <> None && Option.map fst f.vec3 = Some name)
                      d.fields)
             | Some f -> (
-                f.vec3 = None
-                && (not (List.mem_assoc name (Lazy.force normalizers)))
+                (not (List.mem_assoc name (Lazy.force normalizers)))
                 &&
                 match f.kind with
                 | Param.Toggle_view -> true
@@ -552,6 +594,41 @@ let group_data args =
 let fused_deletes = "$deletes"
 and fused_writes = "$writes"
 and fused_chain = "$chain"
+and fused_guards = "$guards"
+
+(* A card's deferred checks ([Flow.Eval.card_kind]'s [guards]): a write folded through the card
+   checks them as it cooks, so the card still fails as it would *)
+let guards_of key args =
+  match List.assoc_opt key args with Some (E.List guards) -> Array.to_list guards | _ -> []
+
+let check_guards guards context =
+  let live = Sop.Context.input context in
+  List.fold_left
+    (fun result guard ->
+      Result.bind result (fun () ->
+          match guard with
+          | E.Record [ ("test", test); ("fails", E.Bool fails); ("error", E.Text error) ] -> (
+              match E.force test ~live with
+              | Ok (E.Bool b) when b = fails -> Error (Marshal.from_string error 0 : Diagnostic.t)
+              | Ok _ -> Ok ()
+              | Error d -> Error d)
+          | _ -> Error (Diagnostic.error ~code:"E_LOWER" "A card's deferred check is malformed")))
+    (Ok ()) guards
+
+(* [node] checking [guards] before it cooks *)
+let guarded guards node =
+  if guards = [] then node
+  else
+    Sop.Node.Build.make ~label:(Sop.Node.label node) ~operation:(Sop.Node.operation node)
+      ~version:(Sop.Node.version node) ~parameters:(Sop.Node.parameters node)
+      ~cook_mode:(Sop.Node.facts node).cook_mode
+      ~dependencies:Sop.Context.Dependencies.(union (Sop.Node.dependencies node) (one Input))
+      ~input_policy:(Sop.Node.Build.input_policy node)
+      ~inputs:(Sop.Node.Build.input_array node)
+      (fun ~node_id:_ context payloads ->
+        Result.bind (check_guards guards context) (fun () ->
+            Sop.Node.Build.cook node context payloads))
+    |> Sop.Node.Build.with_facts (Sop.Node.facts node)
 
 let attribute_data args =
   let data = [ "selection"; "default"; "when"; fused_writes ] in
@@ -564,6 +641,16 @@ let kernel_data (n : E.node) =
   | Some Group_write -> Some (group_data n.args)
   | Some Geometry_arrays -> Some (geometry_arrays_data n.args)
   | _ -> None
+
+(* an inlined call's live arguments stay its kernels' data only where a strict kernel takes them:
+   a noise's lacunarity or gain is a region constant, so such a call stays a node of its own *)
+let () =
+  Atomic.set E.live_kernels
+    (List.for_all (fun (n : E.node) ->
+         match kernel_data n with
+         | Some data when E.frame_dependent data ->
+             Result.is_ok (Flow_ir.Executor.compile ~strict:true ~sink:Flow_ir.Sop_input data)
+         | _ -> true))
 
 let is_resource (n : E.node) =
   Operators.lowering n.kind = Some Operators.Resource && (n.kind <> "exact" || n.ty = Ty.image)
@@ -1422,6 +1509,7 @@ let fold_writes (plan : E.plan) =
                fused_deletes;
                fused_writes;
                fused_chain;
+               fused_guards;
              ])
          n.args
     && Option.fold ~none:true ~some:(( = ) "point") (text n "owner")
@@ -1611,6 +1699,14 @@ let fold_writes (plan : E.plan) =
                   | _ -> [])
                 @ [ E.Int u.id ]
               in
+              (* the deferred checks of the folded writes and of the cards passed *)
+              let guards =
+                guards_of fused_guards w.args @ guards_of fused_guards u.args
+                @ List.concat_map
+                    (fun i ->
+                      if nodes.(i).kind = E.card_kind then guards_of "guards" nodes.(i).args else [])
+                    chain
+              in
               if !fits then
                 nodes.(id) <-
                   {
@@ -1620,14 +1716,19 @@ let fold_writes (plan : E.plan) =
                          (fun (k, v) ->
                            if k = "geometry" then Some (k, E.Deferred (Flow.Ty.geometry, base))
                            else if k = "values" then Some (k, values)
-                           else if k = fused_deletes || k = fused_writes || k = fused_chain then
-                             None
+                           else if
+                             k = fused_deletes || k = fused_writes || k = fused_chain
+                             || k = fused_guards
+                           then None
                            else Some (k, v))
                          w.args
                       @ [ (fused_chain, E.List (Array.of_list chain_ids)) ]
                       @ (if earlier = [] then []
                          else [ (fused_writes, E.List (Array.of_list earlier)) ])
-                      @ if dels = [] then [] else [ (fused_deletes, E.List (Array.of_list dels)) ]);
+                      @ (if dels = [] then [] else [ (fused_deletes, E.List (Array.of_list dels)) ])
+                      @
+                      if guards = [] then [] else [ (fused_guards, E.List (Array.of_list guards)) ]
+                      );
                   }
             end)
     | _ -> ()
@@ -2459,17 +2560,18 @@ struct
   let attribute_node ?node ?state ?elems ?selection ?default ?guard ?(prior = [])
       ?(owner = Rdk.Attribute.Point) ?(kind = "vec3") ?(deletes = []) ~name ~values ~sources inputs
       =
-    reuse ?node ?state ?elems
-      (Printf.sprintf "attribute %d %s %s %s %s" (Hashtbl.hash owner) kind name
-         (String.concat "," (List.map (fun (o, p) -> o ^ ":" ^ p) deletes))
-         (String.concat "," (List.map (fun (n, k, _) -> n ^ ":" ^ k) prior)))
-      (E.Record
-         ([ ("values", values) ]
-         @ List.map (fun (_, _, v) -> ("prior", v)) prior
-         @ Option.to_list (Option.map (fun v -> ("when", v)) guard)
-         @ Option.to_list (Option.map (fun v -> ("selection", v)) selection)
-         @ Option.to_list (Option.map (fun v -> ("default", v)) default)))
-      inputs
+    guarded (match node with Some (n : E.node) -> guards_of fused_guards n.args | None -> [])
+    @@ reuse ?node ?state ?elems
+         (Printf.sprintf "attribute %d %s %s %s %s" (Hashtbl.hash owner) kind name
+            (String.concat "," (List.map (fun (o, p) -> o ^ ":" ^ p) deletes))
+            (String.concat "," (List.map (fun (n, k, _) -> n ^ ":" ^ k) prior)))
+         (E.Record
+            ([ ("values", values) ]
+            @ List.map (fun (_, _, v) -> ("prior", v)) prior
+            @ Option.to_list (Option.map (fun v -> ("when", v)) guard)
+            @ Option.to_list (Option.map (fun v -> ("selection", v)) selection)
+            @ Option.to_list (Option.map (fun v -> ("default", v)) default)))
+         inputs
     @@ fun () ->
     attribute_node ~check:strict_body
       ~strict_body:(strict_body || inlined node)
@@ -3003,6 +3105,8 @@ struct
                 (List.map2 (fun id input -> (id, plan.nodes.(id).ty, input)) sources inputs))
           |> Sop.Node.relabel key
       | _ ->
+          (* a deferred check of a live argument fails the card's cook as the inlined call would
+             have refused or failed *)
           Sop.Node.Build.make ~label:key ~operation:"flow.card" ~version:1 ~parameters:kind
             ~cook_mode:(Sop.Node.Passthrough 0) ~dependencies:Sop.Context.Dependencies.static
             ~inputs:(Array.of_list inputs) (fun ~node_id:_ _ payloads ->
@@ -3017,6 +3121,7 @@ struct
                    topology = Preserved;
                    exact = true;
                  }
+          |> guarded (guards_of "guards" args)
     in
     (* the card's fields, for the inspector, handles and display; an edit goes through its text *)
     let schema node =
@@ -3691,10 +3796,11 @@ struct
                         Ok
                           (Sop.Node.Build.adopt_identity ~source:node
                              (let owner, kind = attribute_options n.args in
-                              attribute_node ~state:(E.fork_state state)
-                                ?selection:(List.assoc_opt "selection" n.args)
-                                ?default:(List.assoc_opt "default" n.args) ~owner ~kind ~name
-                                ~values ~sources:(deps n) (Sop.Node.inputs node)))))
+                              guarded (guards_of fused_guards n.args)
+                              @@ attribute_node ~state:(E.fork_state state)
+                                   ?selection:(List.assoc_opt "selection" n.args)
+                                   ?default:(List.assoc_opt "default" n.args) ~owner ~kind ~name
+                                   ~values ~sources:(deps n) (Sop.Node.inputs node)))))
                 nodes)
         frame_nodes plan.nodes
     in

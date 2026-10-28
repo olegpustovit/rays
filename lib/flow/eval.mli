@@ -229,6 +229,11 @@ val static_facts : ((int -> node option) -> int -> string) Atomic.t
 (** What the host decides statically about a plan node's output, as text: part of an inlined body's
     key, so a body replayed for another producer answers {!static_source} as that producer would. *)
 
+val live_kernels : (node list -> bool) Atomic.t
+(** Whether the host's kernels take the nodes an inlined call with live arguments made (its body's
+    nodes) with those arguments as data; [false] keeps the call a node of its own, rebuilt per
+    frame. The default takes every node. *)
+
 val inline_parameters :
   (Workspace.t ->
   Workspace.node_definition ->
@@ -251,7 +256,11 @@ val card_kind : string
 (** The kind of an inlined card's marker node: [value] is the body's geometry (a cooked node, or a
     residual the host cooks behind the marker), [kind] the card's qualified kind, [parameters] its
     canonical parameters, and each function argument of the call under its name. The marker sits at
-    the call's site. *)
+    the call's site. [guards], when present, lists its deferred checks of live arguments (records of
+    [test], a frame-dependent bool, [fails], the value that fails the card, and [error], the
+    marshalled diagnostic): a validation, or a test choosing an arm that fails statically, that
+    reads a per-frame argument is made as the card cooks, refusing or failing as the call would
+    have. *)
 
 val static :
   ?record:bool ->

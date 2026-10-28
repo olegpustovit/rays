@@ -220,6 +220,10 @@ and st = {
          replay), and the node kinds indexed *)
   mutable inlined : string list; (* the node kinds inlined so far, newest first *)
   mutable watching : (string, unit) Hashtbl.t list; (* the helpers each body being kept calls *)
+  mutable guards : (value * bool * Diagnostic.t) list option;
+      (* while an inlined body evaluates: its deferred checks, newest first. A test that reads only
+         frame facts and selects an arm that fails statically is checked when the card cooks: the
+         card fails with that diagnostic when the test is [bool] *)
 }
 
 and node = {
@@ -507,6 +511,7 @@ let static_source : ((int -> node option) -> value -> value option) Atomic.t =
   Atomic.make (fun _ _ -> None)
 
 let static_facts : ((int -> node option) -> int -> string) Atomic.t = Atomic.make (fun _ _ -> "")
+let live_kernels : (node list -> bool) Atomic.t = Atomic.make (fun _ -> true)
 
 (* plan nodes are numbered in order, newest first in [st.nodes] *)
 let plan_node (st : st) id =
@@ -835,6 +840,86 @@ let replay_inline c (e : inline_entry) inputs =
       List.iter (fun r -> Effect.perform (Residual_effect.Observe_kernel r)) observed;
       Some v
 
+(* Residuals are shared and immutable: each remembers its answer, or a let-bound array read by many later
+   bindings is walked once per reader and the walk is exponential in the depth of the sharing, and the
+   executor asks the same question of every region pair while fusing (Carve's plans). *)
+let rec dependent frame = function
+  | Residual r ->
+      let known = if frame then r.dep_frame else r.dep_state in
+      if known <> 0 then known = 2
+      else begin
+        let answer = term_dependent frame r.rc.st r.renv r.rterm in
+        if frame then r.dep_frame <- (if answer then 2 else 1)
+        else r.dep_state <- (if answer then 2 else 1);
+        answer
+      end
+  | List xs -> Array.exists (dependent frame) xs
+  | Record fs | Struct (_, _, fs) | Source (_, _, fs) ->
+      List.exists (fun (_, v) -> dependent frame v) fs
+  | Fn (Closure cl) -> term_dependent frame cl.at.st cl.env cl.body
+  | _ -> false
+
+and term_dependent frame st env (term : W.term) =
+  let term_dep = term_dependent frame st env in
+  let any = List.exists term_dep in
+  let fields fs = any (List.map snd fs) in
+  let definition name =
+    match Hashtbl.find_opt st.defs name with
+    | Some g -> term_dep g.body
+    | None -> Option.fold ~none:false ~some:(dependent frame) (Smap.find_opt name env)
+  in
+  match term.node with
+  | W.Time -> frame
+  | W.State _ -> true
+  | W.Ref_binding (name, _) ->
+      Option.fold ~none:false ~some:(dependent frame) (Smap.find_opt name env)
+  | W.Op { op; args; _ } -> (frame && (Option.get (find_op st op)).live) || fields args
+  | W.Call { args; _ } | W.Record args -> fields args
+  | W.Call_fn { fn; args; body } ->
+      definition fn || Option.fold ~none:false ~some:term_dep body || any args
+  | W.Fn_ref name -> definition name
+  | W.Graph_ref { graph; inputs } -> (
+      fields inputs
+      ||
+      match Hashtbl.find_opt st.graphs graph with
+      | Some g ->
+          term_dep g.body
+          || List.exists (fun (_, _, d) -> Option.fold ~none:false ~some:term_dep d) g.inputs
+      | None -> false)
+  | W.Vec ts | W.List_lit ts | W.Str ts | W.List_op (_, ts) | W.Hof (_, ts) -> any ts
+  | W.Let (bindings, body) -> any (List.map snd bindings) || term_dep body
+  | W.Loop { accs; clauses; body; _ } -> any (List.map snd (accs @ clauses)) || term_dep body
+  | W.With_error (a, b) -> any [ a; b ]
+  | W.Error_rows { rows = a; mapper = b; _ } -> any [ a; b ]
+  | W.If (c, a, b) -> any [ c; a; b ]
+  | W.Cond (arms, d) -> any (d :: List.concat_map (fun (a, b) -> [ a; b ]) arms)
+  | W.Case (s, arms, d) -> any (s :: d :: List.map snd arms)
+  | W.Fn { capture = Some original; _ } -> term_dep original
+  | W.Fn { body; _ } | W.Expanded { body; _ } | W.Get (body, _) -> term_dep body
+  | W.Bypass call -> Option.fold ~none:false ~some:term_dep (W.bypass_input call)
+  | W.Assoc (r, args) -> term_dep r || fields args
+  | W.Lit _ | W.Text _ | W.Nil -> false
+
+let frame_dependent = dependent true
+let state_dependent = dependent false
+
+(* A deferred check's test reads frame facts only: no cooked data, fold state or zone element, so
+   the card forces it with its cook's input alone *)
+let guardable v =
+  let rec free = function
+    | Residual r -> Smap.for_all (fun _ v -> free v) r.renv && not (reads_elem r.rterm)
+    | Source _ | Struct (_, Ty.Array _, _) -> false
+    | Deferred (ty, _) -> not (Ty.is_cooked ty)
+    | List xs -> Array.for_all free xs
+    | Record fs | Struct (_, _, fs) -> List.for_all (fun (_, v) -> free v) fs
+    | Fn (Closure cl) -> Smap.for_all (fun _ v -> free v) cl.env && not (reads_elem cl.body)
+    | _ -> true
+  and reads_elem (t : W.term) =
+    (match t.node with W.Ref_binding (b, _) -> String.starts_with ~prefix:"$elem:" b | _ -> false)
+    || List.exists reads_elem (W.children t)
+  in
+  frame_dependent v && (not (state_dependent v)) && free v
+
 exception Refused of Diagnostic.t
 
 let rec concrete c v =
@@ -946,6 +1031,36 @@ and ev c env (x : W.term) : value =
           v)
 
 and evs c env prefix ts = List.mapi (fun i t -> ev (sub c (prefix ^ string_of_int i)) env t) ts
+
+(* a test of an inlined body's [if]/[cond]: its value, or the deferred check it can be *)
+and guard_test c v =
+  match v with
+  | Residual _ when Option.is_some c.st.guards && guardable v -> `Live v
+  | v -> `Known (concrete c v)
+
+and add_guard c test fails d =
+  c.st.guards <- Option.map (fun guards -> (test, fails, d) :: guards) c.st.guards
+
+(* the diagnostic an arm fails with whatever the frame, or [None]: what it made is dropped *)
+and arm_error c env c' arm =
+  let st = c.st in
+  let nodes = st.nodes and authored = st.authored and nnodes = st.nnodes in
+  let drop () =
+    st.nodes <- nodes;
+    st.authored <- authored;
+    st.nnodes <- nnodes
+  in
+  match ev c' env arm with
+  | _ ->
+      drop ();
+      None
+  | exception Diagnostic.Error d
+    when not (List.mem d.code [ "cancelled"; "E_CANCELLED"; "E_EVAL_BUDGET"; "E_DEPTH" ]) ->
+      drop ();
+      Some d
+  | exception Refused _ ->
+      drop ();
+      None
 
 and eval_named c env args =
   (* ponytail: O(n²) uniqueness scan bounded to 16 slots; wider/repeated
@@ -1177,16 +1292,33 @@ and ev_raw c env (x : W.term) : value =
           match concrete c (ev (sub c "1") env mapper) with
           | Fn fn -> concrete_data c (call_fn c fn [ diagnostic ])
           | _ -> fail "E_DIAGNOSTIC_MAP" "An error mapper is a function.")
-  | W.If (cnd, a, b) ->
-      if truthy (concrete c (ev (sub c "if") env cnd)) then ev (sub c "then") env a
-      else ev (sub c "else") env b
+  | W.If (cnd, a, b) -> (
+      match guard_test c (ev (sub c "if") env cnd) with
+      | `Known v -> if truthy v then ev (sub c "then") env a else ev (sub c "else") env b
+      | `Live test -> (
+          match arm_error c env (sub c "then") a with
+          | Some d ->
+              add_guard c test true d;
+              ev (sub c "else") env b
+          | None -> (
+              match arm_error c env (sub c "else") b with
+              | Some d ->
+                  add_guard c test false d;
+                  ev (sub c "then") env a
+              | None -> raise Needs_t)))
   | W.Cond (arms, default) ->
       let rec go i = function
         | [] -> ev (sub c "else") env default
-        | (t, e) :: rest ->
-            if truthy (concrete c (ev (sub c ("test" ^ string_of_int i)) env t)) then
-              ev (sub c ("arm" ^ string_of_int i)) env e
-            else go (i + 1) rest
+        | (t, e) :: rest -> (
+            let arm = sub c ("arm" ^ string_of_int i) in
+            match guard_test c (ev (sub c ("test" ^ string_of_int i)) env t) with
+            | `Known v -> if truthy v then ev arm env e else go (i + 1) rest
+            | `Live test -> (
+                match arm_error c env arm e with
+                | Some d ->
+                    add_guard c test true d;
+                    go (i + 1) rest
+                | None -> raise Needs_t))
       in
       go 0 arms
   | W.Case (scrut, arms, default) ->
@@ -1439,15 +1571,39 @@ and inline_node c ~form ~key (d : W.node_definition) parameters ~call vals =
       st.inlined <- d.kind.qualified :: st.inlined;
       let rids = st.rids and fids = st.nfns and states = st.states and cells = st.cells in
       let observed = ref [] and cacheable = ref (key <> None) in
+      let refused code message =
+        match refusal code message with Refused d -> d | _ -> assert false
+      in
       let body () =
         let env = List.fold_left bind Smap.empty d.body.inputs in
         List.iter
           (fun (predicate, code, message) ->
-            match concrete c' (ev (sub c' "validate") env predicate) with
-            | Bool true -> ()
-            | Bool false -> raise (refusal code message)
-            | exception Diagnostic.Error e -> raise (refusal e.code e.message)
-            | _ -> invalid_arg "A Lisp node validation must return bool")
+            (* a validation of a live argument is checked as the card cooks, refusing as here *)
+            let before = Option.value ~default:[] st.guards in
+            let refuse_later () =
+              st.guards <-
+                Option.map
+                  (fun guards ->
+                    let rec added = function
+                      | l when l == before -> l
+                      | (t, f, (e : Diagnostic.t)) :: rest ->
+                          (t, f, refused e.code e.message) :: added rest
+                      | [] -> []
+                    in
+                    added guards)
+                  st.guards
+            in
+            match ev (sub c' "validate") env predicate with
+            | Residual _ as v when Option.is_some st.guards && guardable v ->
+                refuse_later ();
+                st.guards <- Option.map (List.cons (v, false, refused code message)) st.guards
+            | v -> (
+                match concrete c' v with
+                | Bool true -> refuse_later ()
+                | Bool false -> raise (refusal code message)
+                | exception Diagnostic.Error e -> raise (refusal e.code e.message)
+                | _ -> invalid_arg "A Lisp node validation must return bool")
+            | exception Diagnostic.Error e -> raise (refusal e.code e.message))
           d.validations;
         ev c' env d.body.body
       in
@@ -1481,17 +1637,31 @@ and inline_node c ~form ~key (d : W.node_definition) parameters ~call vals =
             }
         end
       in
-      match watched () with
-      | Residual _
-        when List.exists (fun (_, v) -> match v with Residual _ -> true | _ -> false) vals ->
+      let live = List.exists (fun (_, v) -> match v with Residual _ -> true | _ -> false) vals in
+      let outer = st.guards in
+      st.guards <- (if live then Some [] else None);
+      let result = try Ok (watched ()) with x -> Error x in
+      let guards = Option.value ~default:[] st.guards in
+      st.guards <- outer;
+      match match result with Ok v -> v | Error x -> raise x with
+      | Residual _ when live ->
           (* a structure that follows a per-frame argument: the card is rebuilt per frame, as before *)
+          st.steps <- steps;
+          drop ();
+          call vals
+      | _
+        when live
+             && not
+                  (let rec take n l = if n = 0 then [] else List.hd l :: take (n - 1) (List.tl l) in
+                   Atomic.get live_kernels (take (st.nnodes - nnodes) st.nodes)) ->
+          (* a live argument the host's kernels cannot take as data (a noise lacunarity) *)
           st.steps <- steps;
           drop ();
           call vals
       | v ->
           st.steps <- steps;
           (match key with
-          | Some key when !cacheable && st.states == states && st.cells == cells ->
+          | Some key when !cacheable && st.states == states && st.cells == cells && guards = [] ->
               let count = st.nnodes - nnodes in
               let rec take n l = if n = 0 then [] else List.hd l :: take (n - 1) (List.tl l) in
               let entry =
@@ -1523,7 +1693,7 @@ and inline_node c ~form ~key (d : W.node_definition) parameters ~call vals =
                   if Hashtbl.length inline_memo >= 256 then Hashtbl.reset inline_memo;
                   Hashtbl.replace inline_memo key entry)
           | _ -> ());
-          card c ~form d parameters ~vals v
+          card c ~form d parameters ~vals ~guards v
       | exception Needs_t ->
           (* a validation that reads a live argument *)
           st.steps <- steps;
@@ -1549,7 +1719,7 @@ and inline_node c ~form ~key (d : W.node_definition) parameters ~call vals =
    parameters), what the host keys per-card ids, display, probes, provenance, facts and caching by;
    the call's value is the marker. A body whose geometry is decided by cooked data (a residual)
    cooks behind it, one card's structure as before; otherwise it passes the body's result through. *)
-and card c ~form (d : W.node_definition) parameters ~vals v =
+and card c ~form (d : W.node_definition) parameters ~vals ?(guards = []) v =
   let marker () =
     let st = c.st in
     let n =
@@ -1584,6 +1754,24 @@ and card c ~form (d : W.node_definition) parameters ~vals v =
                      ))
                    d.slots) );
           ]
+          (* its deferred checks, oldest first: [test], [fails] (the test's failing value) and
+             [error] (the marshalled diagnostic) *)
+          @ (if guards = [] then []
+             else
+               [
+                 ( "guards",
+                   List
+                     (Array.of_list
+                        (List.rev_map
+                           (fun (test, fails, d) ->
+                             Record
+                               [
+                                 ("test", test);
+                                 ("fails", Bool fails);
+                                 ("error", Text (Marshal.to_string (d : Diagnostic.t) []));
+                               ])
+                           guards)) );
+               ])
           (* the call's functions, which the host's field probes sample *)
           @ List.filter
               (fun (_, v) ->
@@ -2343,6 +2531,7 @@ let new_state ?(budget = max_steps) ~record ws =
     terms = None;
     inlined = [];
     watching = [];
+    guards = None;
   }
 
 let live_state (st : st) ~state ?(elems = Smap.empty) (l : live) =
@@ -2426,69 +2615,6 @@ let static_impl ?budget ?(record = false) ?(inputs = []) ws =
           }))
 
 let static ?record ?inputs ws = Residual_effect.handle (fun () -> static_impl ?record ?inputs ws)
-
-(* Residuals are shared and immutable: each remembers its answer, or a let-bound array read by many later
-   bindings is walked once per reader and the walk is exponential in the depth of the sharing, and the
-   executor asks the same question of every region pair while fusing (Carve's plans). *)
-let rec dependent frame = function
-  | Residual r ->
-      let known = if frame then r.dep_frame else r.dep_state in
-      if known <> 0 then known = 2
-      else begin
-        let answer = term_dependent frame r.rc.st r.renv r.rterm in
-        if frame then r.dep_frame <- (if answer then 2 else 1)
-        else r.dep_state <- (if answer then 2 else 1);
-        answer
-      end
-  | List xs -> Array.exists (dependent frame) xs
-  | Record fs | Struct (_, _, fs) | Source (_, _, fs) ->
-      List.exists (fun (_, v) -> dependent frame v) fs
-  | Fn (Closure cl) -> term_dependent frame cl.at.st cl.env cl.body
-  | _ -> false
-
-and term_dependent frame st env (term : W.term) =
-  let term_dep = term_dependent frame st env in
-  let any = List.exists term_dep in
-  let fields fs = any (List.map snd fs) in
-  let definition name =
-    match Hashtbl.find_opt st.defs name with
-    | Some g -> term_dep g.body
-    | None -> Option.fold ~none:false ~some:(dependent frame) (Smap.find_opt name env)
-  in
-  match term.node with
-  | W.Time -> frame
-  | W.State _ -> true
-  | W.Ref_binding (name, _) ->
-      Option.fold ~none:false ~some:(dependent frame) (Smap.find_opt name env)
-  | W.Op { op; args; _ } -> (frame && (Option.get (find_op st op)).live) || fields args
-  | W.Call { args; _ } | W.Record args -> fields args
-  | W.Call_fn { fn; args; body } ->
-      definition fn || Option.fold ~none:false ~some:term_dep body || any args
-  | W.Fn_ref name -> definition name
-  | W.Graph_ref { graph; inputs } -> (
-      fields inputs
-      ||
-      match Hashtbl.find_opt st.graphs graph with
-      | Some g ->
-          term_dep g.body
-          || List.exists (fun (_, _, d) -> Option.fold ~none:false ~some:term_dep d) g.inputs
-      | None -> false)
-  | W.Vec ts | W.List_lit ts | W.Str ts | W.List_op (_, ts) | W.Hof (_, ts) -> any ts
-  | W.Let (bindings, body) -> any (List.map snd bindings) || term_dep body
-  | W.Loop { accs; clauses; body; _ } -> any (List.map snd (accs @ clauses)) || term_dep body
-  | W.With_error (a, b) -> any [ a; b ]
-  | W.Error_rows { rows = a; mapper = b; _ } -> any [ a; b ]
-  | W.If (c, a, b) -> any [ c; a; b ]
-  | W.Cond (arms, d) -> any (d :: List.concat_map (fun (a, b) -> [ a; b ]) arms)
-  | W.Case (s, arms, d) -> any (s :: d :: List.map snd arms)
-  | W.Fn { capture = Some original; _ } -> term_dep original
-  | W.Fn { body; _ } | W.Expanded { body; _ } | W.Get (body, _) -> term_dep body
-  | W.Bypass call -> Option.fold ~none:false ~some:term_dep (W.bypass_input call)
-  | W.Assoc (r, args) -> term_dep r || fields args
-  | W.Lit _ | W.Text _ | W.Nil -> false
-
-let frame_dependent = dependent true
-let state_dependent = dependent false
 
 (* one live state per call, made from the first residual met *)
 let with_live ?state ?elems ?resolve ?(kernel_requests = false) (l : live)

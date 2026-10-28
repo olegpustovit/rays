@@ -169,6 +169,50 @@ let () =
     ];
   print_endline "inline cards: context-reaching bodies and live arguments inline"
 
+(* Frame-driven arguments inline: a live vec3 group is its components, and a check of a live value
+   (a validation, a test choosing an arm that fails) is made as the card cooks, with the
+   diagnostic the written-out call refuses or fails with. Bytes equal the written-out call's. *)
+let () =
+  let text call =
+    Printf.sprintf
+      "(workspace f (graph g :context sop (sop/attribute_noise (sop/grid :rows 5 :columns 7) %s)))"
+      call
+  in
+  List.iter
+    (fun (live, written, inlines) ->
+      let inline = ref false in
+      let live_outcome = outcome ~inline (text live) in
+      if !inline <> inlines then failwith ("frame arguments: " ^ live ^ " inlined wrongly");
+      match (live_outcome, outcome (text written)) with
+      | Ok a, Ok b when a = b -> ()
+      | Error (_, _, a, _), Error (_, _, b, _) when a = b -> ()
+      | a, b ->
+          let show = function
+            | Ok _ -> "ok"
+            | Error (stage, code, message, _) -> stage ^ " " ^ code ^ " " ^ message
+          in
+          failwith
+            ("frame arguments: " ^ live ^ " (" ^ show a ^ ") differs from " ^ written ^ " ("
+           ^ show b ^ ")"))
+    [
+      (":offset [(* t 2.0) 0.5 (- 0.0 t)]", ":offset [0.25 0.5 -0.125]", true);
+      ( ":frequency [1.0 (+ 1.0 t) 2.0] :name \"n\" :kind \"Vector\"",
+        ":frequency [1.0 1.125 2.0] :name \"n\" :kind \"Vector\"",
+        true );
+      (":blend (* t 4.0)", ":blend 0.5", true);
+      (* a validation and the body's own check, deferred to the cook *)
+      (":blend (* t 16.0)", ":blend 2.0", true);
+      ( ":max [(+ t 1.0) 1.0 1.0] :range \"Minimum / maximum\"",
+        ":max [1.125 1.0 1.0] :range \"Minimum / maximum\"",
+        true );
+      (* a noise's lacunarity is a region constant: the card stays a node *)
+      (":lacunarity (+ t 1.0) :octaves 3", ":lacunarity 1.125 :octaves 3", false);
+    ];
+  (match outcome (text ":blend (* t 16.0)") with
+  | Error ("cook", "E_LOWER", "sop/attribute_noise: blend must be in [0,1]", _) -> ()
+  | _ -> failwith "frame arguments: a deferred validation does not fail the cook as refused");
+  print_endline "inline cards: frame-driven vec3 groups and checks inline, failing as the call"
+
 (* Step E2: a cooked-data argument (a count of the cooked input) inlines; the body reads it as a
    value resolved once per cook, so the card cooks as the same call with that value written out
    (nested refused it, E_DATA_SOURCE), in time linear in the points. *)
