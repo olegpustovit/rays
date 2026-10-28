@@ -40,8 +40,18 @@ let reference_names = function
           (Attribute.name attribute) ()) (Geometry.View.attributes geometry);
       tables
 
-let delete ?cancel ?reference ?(delete_non_selected = false)
-    ?point_pattern ?vertex_pattern ?primitive_pattern ?detail_pattern geometry =
+type delete_params = {
+  cancel : Cancel.t option;
+  reference : Geometry.t option;
+  delete_non_selected : bool;
+  point_pattern : string option;
+  vertex_pattern : string option;
+  primitive_pattern : string option;
+  detail_pattern : string option;
+}
+
+let delete { cancel; reference; delete_non_selected; point_pattern;
+             vertex_pattern; primitive_pattern; detail_pattern } geometry =
   Result.bind (compile_optional "Attribute Delete point pattern" point_pattern)
     (fun point ->
   Result.bind (compile_optional "Attribute Delete vertex pattern" vertex_pattern)

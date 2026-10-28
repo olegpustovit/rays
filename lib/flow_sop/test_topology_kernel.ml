@@ -163,8 +163,8 @@ let () =
     let source=Lisp_sop.snapshot changed in
     ignore(cooked session source);
     let before=Sop.Session.stats session in
-    let rebuilt source=Sop.Node.Private.adopt_identity ~source:node
-      (Sop.Node.Private.rebuild_with_inputs node [|source|]) in
+    let rebuilt source=Sop.Node.Build.adopt_identity ~source:node
+      (Sop.Node.Build.rebuild_with_inputs node [|source|]) in
     let output=cooked session(rebuilt source) in
     let after=Sop.Session.stats session in
     assert(after.misses=before.misses && after.hits=before.hits+2);

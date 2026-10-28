@@ -96,7 +96,7 @@ let check_pixels extent bytes =
 
 let run scenario =
   let runtime = get (create 4 4) in
-  let initial_facts=get(Runtime.presentation_facts (Renderer.Private.runtime runtime))in
+  let initial_facts=get(Runtime.presentation_facts (Renderer.Native.runtime runtime))in
   let clear=(0.,0.,0.,0.)in
   let checkpoints = ref [] in
   for frame = 1 to 600 do
@@ -105,8 +105,8 @@ let run scenario =
     if List.mem frame [ 1; 2; 60; 600 ] then
       checkpoints := (frame, check_pixels initial_facts.drawable_width (get (Renderer.read_pixels runtime ~bytes_per_row:(initial_facts.drawable_width*4)))) :: !checkpoints
   done;
-  get (Runtime.resize (Renderer.Private.runtime runtime) ~width:8 ~height:8);
-  let resized_facts=get(Runtime.presentation_facts (Renderer.Private.runtime runtime))in
+  get (Runtime.resize (Renderer.Native.runtime runtime) ~width:8 ~height:8);
+  let resized_facts=get(Runtime.presentation_facts (Renderer.Native.runtime runtime))in
   ignore (get (Renderer.draw ~clear runtime (List.map(Renderer.prepared_draw ~family:Renderer.Scene2)(draws scenario 8))));
   let resized_hash = check_pixels resized_facts.drawable_width (get (Renderer.read_pixels runtime ~bytes_per_row:(resized_facts.drawable_width*4))) in
   let live_stats=get(Renderer.stats runtime)in

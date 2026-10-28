@@ -26,7 +26,7 @@ let with_float name values geometry =
 let test_point_distance () =
   let source = Line_geometry.points [|0., 0., 0.; 1., 0., 0.; 3., 0., 0.|]
   and reference = Line_geometry.points [|0., 1., 0.|] in
-  let fixed = Transform_ops.distance_from_geometry ~grain:1
+  let fixed = Transform_ops_front.distance_from_geometry ~grain:1
       ~reference_kind:Transform_ops.Distance_reference_points
       ~radius:(Transform_ops.Distance_fixed 2.) ~mask_attribute:"mask"
       ~reference source |> get_ok in
@@ -38,14 +38,14 @@ let test_point_distance () =
   check (close mask.(0) 0.5 && close mask.(1) (1. -. sqrt 2. /. 2.)
       && close mask.(2) 0.)
     "Distance From Geometry point fixed mask";
-  let maximum = Transform_ops.distance_from_geometry ~grain:1
+  let maximum = Transform_ops_front.distance_from_geometry ~grain:1
       ~reference_kind:Transform_ops.Distance_reference_points
       ~falloff:Transform_ops.Soft_quadratic ~mask_attribute:"mask"
       ~reference source |> get_ok in
   let mask = float_attribute "mask" maximum in
   check (close mask.(0) 0.9 && close mask.(1) 0.8 && close mask.(2) 0.)
     "Distance From Geometry point maximum mask";
-  let mask_only = Transform_ops.distance_from_geometry ~grain:1
+  let mask_only = Transform_ops_front.distance_from_geometry ~grain:1
       ~reference_kind:Transform_ops.Distance_reference_points
       ~distance_attribute:None ~radius:(Transform_ops.Distance_fixed 2.)
       ~mask_attribute:"mask" ~reference source |> get_ok in
@@ -60,7 +60,7 @@ let test_surface_and_affected () =
       |> with_float "mask" [|80.; 81.; 82.|] in
   let reference = Plane_generators.grid ~columns:2 ~rows:2 ~size:10. () |> get_ok in
   let affected = point_group "affected" 3 (fun point -> point <> 1) in
-  let output = Transform_ops.distance_from_geometry ~grain:1
+  let output = Transform_ops_front.distance_from_geometry ~grain:1
       ~affected:(Element_selection.Selected_points affected)
       ~reference_kind:Transform_ops.Distance_reference_primitives
       ~radius:Transform_ops.Distance_maximum ~mask_attribute:"mask"
@@ -72,14 +72,14 @@ let test_surface_and_affected () =
     "Distance From Geometry affected maximum mask preservation";
   let all_primitives = primitive_group "surface"
       (Geometry.primitive_count reference) (fun _ -> true) in
-  let selected = Transform_ops.distance_from_geometry ~grain:1
+  let selected = Transform_ops_front.distance_from_geometry ~grain:1
       ~reference_selection:(Element_selection.Selected_primitives all_primitives)
       ~reference_kind:Transform_ops.Distance_reference_primitives
       ~reference source |> get_ok in
   check (same_float_array (float_attribute "distance" selected) [|1.; 2.; 3.|])
     "Distance From Geometry primitive reference selection";
   let empty = point_group "empty" (Geometry.point_count reference) (fun _ -> false) in
-  let missed = Transform_ops.distance_from_geometry ~grain:1
+  let missed = Transform_ops_front.distance_from_geometry ~grain:1
       ~reference_selection:(Element_selection.Selected_points empty)
       ~reference_kind:Transform_ops.Distance_reference_points ~mask_attribute:"mask"
       ~reference source |> get_ok in
@@ -135,37 +135,37 @@ let expect_invalid work message = match work () with
 let test_errors_cancellation_and_parallel () =
   let source = Line_geometry.points [|0., 0., 0.; 1., 0., 0.|]
   and reference = Line_geometry.points [|0., 1., 0.|] in
-  expect_invalid (fun () -> Transform_ops.distance_from_geometry
+  expect_invalid (fun () -> Transform_ops_front.distance_from_geometry
       ~distance_attribute:None ~reference source)
     "Distance From Geometry no outputs";
-  expect_invalid (fun () -> Transform_ops.distance_from_geometry
+  expect_invalid (fun () -> Transform_ops_front.distance_from_geometry
       ~distance_attribute:(Some " P ") ~reference source)
     "Distance From Geometry reserved output";
-  expect_invalid (fun () -> Transform_ops.distance_from_geometry
+  expect_invalid (fun () -> Transform_ops_front.distance_from_geometry
       ~distance_attribute:(Some "same") ~mask_attribute:"same"
       ~reference source) "Distance From Geometry duplicate outputs";
-  expect_invalid (fun () -> Transform_ops.distance_from_geometry
+  expect_invalid (fun () -> Transform_ops_front.distance_from_geometry
       ~radius:(Transform_ops.Distance_fixed 0.) ~reference source)
     "Distance From Geometry zero radius";
   let wrong = Attribute.create_owned ~owner:Attribute.Point ~name:"distance"
       (Attribute.Int [|1; 2|]) |> Result.get_ok in
   let wrong = Geometry.with_attribute wrong source |> Result.get_ok in
-  expect_invalid (fun () -> Transform_ops.distance_from_geometry ~reference wrong)
+  expect_invalid (fun () -> Transform_ops_front.distance_from_geometry ~reference wrong)
     "Distance From Geometry wrong output storage";
   let malformed = point_group "malformed" 3 (fun point -> point = 0) in
-  expect_invalid (fun () -> Transform_ops.distance_from_geometry
+  expect_invalid (fun () -> Transform_ops_front.distance_from_geometry
       ~affected:(Element_selection.Selected_points malformed) ~reference source)
     "Distance From Geometry malformed source selection";
   let nonfinite = Line_geometry.points [|Float.nan, 0., 0.|] in
-  expect_invalid (fun () -> Transform_ops.distance_from_geometry ~reference nonfinite)
+  expect_invalid (fun () -> Transform_ops_front.distance_from_geometry ~reference nonfinite)
     "Distance From Geometry non-finite source position";
-  let curve = Line_geometry.polyline [|0., 0., 0.; 1., 0., 0.|] |> get_ok in
-  expect_invalid (fun () -> Transform_ops.distance_from_geometry
+  let curve = Line_geometry_front.polyline [|0., 0., 0.; 1., 0., 0.|] |> get_ok in
+  expect_invalid (fun () -> Transform_ops_front.distance_from_geometry
       ~reference_kind:Transform_ops.Distance_reference_primitives ~reference:curve source)
     "Distance From Geometry curve surface reference";
   let cancelled = Cancel.create () in
   Cancel.cancel cancelled;
-  (match Transform_ops.distance_from_geometry ~cancel:cancelled ~reference source with
+  (match Transform_ops_front.distance_from_geometry ~cancel:cancelled ~reference source with
    | Error error -> check (Error.code error = "cancelled")
        "Distance From Geometry cancellation code"
    | Ok _ -> fail "cancelled Distance From Geometry published geometry");
@@ -175,7 +175,7 @@ let test_errors_cancellation_and_parallel () =
   let count = Geometry.point_count dense in
   let affected = point_group "affected" count (fun point -> point mod 3 <> 0) in
   let run kind domains = Parallel.run ~domains (fun () ->
-      Transform_ops.distance_from_geometry ~grain:257
+      Transform_ops_front.distance_from_geometry ~grain:257
         ~affected:(Element_selection.Selected_points affected) ~reference_kind:kind
         ~falloff:Transform_ops.Soft_cubic ~radius:(Transform_ops.Distance_fixed 4.)
         ~mask_attribute:"mask" ~reference:surface dense |> get_ok) in

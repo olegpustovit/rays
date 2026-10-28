@@ -48,7 +48,7 @@ module Edge_collapse = struct
     let position = parameters.position in
     let remove_degenerate_primitives = parameters.remove_degenerate_primitives in
     let recompute_point_normals = parameters.recompute_point_normals in
-    Node.Private.make_geometry ?label ~operation:"edge_collapse" ~version:1
+    Node.Build.make_geometry ?label ~operation:"edge_collapse" ~version:1
       ~parameters:""
       ~cook_mode:(Node.Duplicate_input 0) ~dependencies:Context.Dependencies.static
       ~inputs:[|input|] (fun ~node_id:_ context inputs ->
@@ -64,10 +64,7 @@ module Edge_collapse = struct
         match edges with
         | Error error -> Error error
         | Ok edges ->
-            match Rdk.Edge_collapse.run ~cancel:(Context.cancel_token context)
-                ~grain:(Context.grain context) ?edges ?connectivity_attribute
-                ~position
-                ~remove_degenerate_primitives ~recompute_point_normals geometry with
+            match Rdk.Edge_collapse.run { cancel = Some (Context.cancel_token context); grain = Some (Context.grain context); edges; connectivity_attribute; position = Some position; remove_degenerate_primitives = Some remove_degenerate_primitives; recompute_point_normals = Some recompute_point_normals } geometry with
         | Ok geometry -> cooked geometry
         | Error error -> structured_rdk_error error)
   )
@@ -121,7 +118,7 @@ module Dissolve = struct
     let remove_unused_points = parameters.remove_unused_points in
     let create_boundary_curves = parameters.create_boundary_curves in
     let recompute_normals = parameters.recompute_normals in
-    Node.Private.make_geometry ?label ~operation:"dissolve" ~version:1
+    Node.Build.make_geometry ?label ~operation:"dissolve" ~version:1
       ~parameters:""
       ~cook_mode:(Node.Duplicate_input 0)
       ~dependencies:Context.Dependencies.static ~inputs:[|input|]
@@ -136,11 +133,7 @@ module Dissolve = struct
         match edges with
         | Error error -> Error error
         | Ok edges ->
-            match Rdk.Dissolve.run ~cancel:(Context.cancel_token context)
-                ~grain:(Context.grain context) ?edges ~operation ~bridge_policy
-                ~remove_inline_points ~collinearity_tolerance
-                ~remove_unused_points ~create_boundary_curves ~recompute_normals
-                inputs.(0) with
+            match Rdk.Dissolve.run { cancel = Some (Context.cancel_token context); grain = Some (Context.grain context); edges; operation; bridge_policy; remove_inline_points; collinearity_tolerance; remove_unused_points; create_boundary_curves; recompute_normals } inputs.(0) with
             | Ok geometry -> cooked geometry
             | Error error -> structured_rdk_error error)
   )
@@ -159,7 +152,7 @@ module Triangulate = struct
   let build = parameters_build (fun ~label parameters input ->
     let label = Some label in
     let group = optional_text parameters.group in
-    Node.Private.make_geometry ?label ~operation:"triangulate" ~version:2
+    Node.Build.make_geometry ?label ~operation:"triangulate" ~version:2
       ~parameters:""
       ~cook_mode:(Node.Duplicate_input 0) ~dependencies:Context.Dependencies.static
       ~inputs:[|input|] (fun ~node_id:_ context inputs ->
@@ -175,8 +168,7 @@ module Triangulate = struct
         match primitives with
         | Error error -> Error error
         | Ok primitives ->
-            match Rdk.Triangulate.run ~cancel:(Context.cancel_token context)
-                ~grain:(Context.grain context) ?primitives geometry with
+            match Rdk.Triangulate.run { cancel = Some (Context.cancel_token context); grain = Some (Context.grain context); primitives } geometry with
             | Ok geometry -> cooked geometry
             | Error error -> structured_rdk_error error)
   )
@@ -240,7 +232,7 @@ module Poly_extrude = struct
     let front_boundary_group = optional_text parameters.front_boundary_group in
     let back_boundary_group = optional_text parameters.back_boundary_group in
     let distance = parameters.distance in
-    Node.Private.make_geometry ?label ~operation:"poly_extrude" ~version:2
+    Node.Build.make_geometry ?label ~operation:"poly_extrude" ~version:2
       ~parameters:""
       ~cook_mode:(Node.Duplicate_input 0)
       ~dependencies:Context.Dependencies.static ~inputs:[|input|]
@@ -265,11 +257,7 @@ module Poly_extrude = struct
         match primitives, split with
         | Error error, _ | _, Error error -> Error error
         | Ok primitives, Ok split_edges ->
-            match Rdk.Poly_extrude.run ~cancel:(Context.cancel_token context)
-                ~grain:(Context.grain context) ?primitives ?split_edges ~divide
-                ~divisions ~output_front ~output_back ~output_side ?front_group
-                ?back_group ?side_group ?front_boundary_group
-                ?back_boundary_group ~distance geometry with
+            match Rdk.Poly_extrude.run { cancel = Some (Context.cancel_token context); grain = Some (Context.grain context); primitives; split_edges; divide; divisions; output_front; output_back; output_side; front_group; back_group; side_group; front_boundary_group; back_boundary_group; distance } geometry with
             | Ok geometry -> cooked geometry
             | Error error -> structured_rdk_error error)
   )
@@ -307,7 +295,7 @@ module Poly_fill = struct
     let unique_points = parameters.unique_points in
     let update_point_normals = parameters.update_point_normals in
     let patch_group = optional_text parameters.patch_group in
-    Node.Private.make_geometry ?label ~operation:"poly_fill" ~version:1
+    Node.Build.make_geometry ?label ~operation:"poly_fill" ~version:1
       ~parameters:""
       ~cook_mode:(Node.Duplicate_input 0)
       ~dependencies:Context.Dependencies.static ~inputs:[|input|]
@@ -324,9 +312,7 @@ module Poly_fill = struct
         match boundary with
         | Error error -> Error error
         | Ok boundary ->
-            match Rdk.Poly_fill.run ~cancel:(Context.cancel_token context)
-                ~grain:(Context.grain context) ?boundary ~mode ~reverse_patches
-                ~unique_points ~update_point_normals ?patch_group geometry with
+            match Rdk.Poly_fill.run { cancel = Some (Context.cancel_token context); grain = Some (Context.grain context); boundary; mode; reverse_patches; unique_points; update_point_normals; patch_group } geometry with
             | Ok geometry -> cooked geometry
             | Error error -> structured_rdk_error error)
   )
@@ -399,7 +385,7 @@ module Remesh = struct
     let output_quality = optional_text parameters.output_quality in
     let recompute_point_normals = parameters.recompute_point_normals in
     let target_length = parameters.target_length in
-    Node.Private.make_geometry ?label ~operation:"remesh" ~version:1
+    Node.Build.make_geometry ?label ~operation:"remesh" ~version:1
       ~parameters:""
       ~cook_mode:(Node.Duplicate_input 0) ~dependencies:Context.Dependencies.static
       ~inputs:[|input|] (fun ~node_id:_ context inputs ->
@@ -456,15 +442,13 @@ module Convex_hull = struct
     let selection = optional_element_group group_owner group in
     let source_point_attribute = optional_text source_point_attribute in
     let hull_group = optional_text hull_group in
-    Node.Private.make_geometry ?label ~operation:"convex_hull" ~version:1 ~parameters:""
+    Node.Build.make_geometry ?label ~operation:"convex_hull" ~version:1 ~parameters:""
       ~cook_mode:Node.Generic ~dependencies:Context.Dependencies.static
       ~inputs:[|input|] (fun ~node_id:_ context inputs ->
         match resolve_element_group ~operation:"convex_hull" selection inputs.(0) with
         | Error error -> Error error
         | Ok selection ->
-            match Rdk.Convex_hull.run ~cancel:(Context.cancel_token context)
-                ~grain:(Context.grain context) ?selection ~preserve_point_payload
-                ?source_point_attribute ?hull_group inputs.(0) with
+            match Rdk.Convex_hull.run { cancel = Some (Context.cancel_token context); grain = Some (Context.grain context); selection; preserve_point_payload; source_point_attribute; hull_group } inputs.(0) with
             | Ok geometry -> cooked geometry
             | Error error -> structured_rdk_error error)
   )
@@ -565,7 +549,7 @@ module Clean = struct
       | Clean_overlap_auto -> None
       | Clean_keep_first -> Some Rdk.Clean.Keep_first_overlap
       | Clean_delete_pairs -> Some Rdk.Clean.Delete_overlap_pairs in
-    Node.Private.make_geometry ?label ~operation:"clean" ~version:2
+    Node.Build.make_geometry ?label ~operation:"clean" ~version:2
       ~parameters:""
       ~cook_mode:(Node.Duplicate_input 0)
       ~dependencies:Context.Dependencies.static ~inputs:[|input|]
@@ -631,7 +615,7 @@ module Join_curves = struct
     let group = optional_text group in
     let picked_ends = validated (decode_curve_join_picks picked_ends) in
     let group_size = if use_group_size then Some group_size else None in
-    Node.Private.make_geometry ?label ~operation:"join_curves" ~version:4
+    Node.Build.make_geometry ?label ~operation:"join_curves" ~version:4
       ~parameters:""
       ~cook_mode:(Node.Duplicate_input 0) ~dependencies:Context.Dependencies.static
       ~inputs:[|input|] (fun ~node_id:_ context inputs ->
@@ -648,10 +632,7 @@ module Join_curves = struct
         match primitives with
         | Error _ as error -> error
         | Ok primitives ->
-            match Rdk.Curve_topology.join_curves ~cancel:(Context.cancel_token context)
-                ~grain:(Context.grain context) ?primitives ?picked_ends ~orient_closest
-                ~connect_closest_ends ~only_connected ?group_size ~keep_originals
-                ~tolerance ~wrap inputs.(0) with
+            match Rdk.Curve_topology.join_curves { cancel = Some (Context.cancel_token context); grain = Some (Context.grain context); primitives; picked_ends; orient_closest = Some orient_closest; connect_closest_ends = Some connect_closest_ends; only_connected = Some only_connected; group_size; keep_originals = Some keep_originals; tolerance = Some tolerance; wrap = Some wrap } inputs.(0) with
             | Ok geometry -> cooked geometry
             | Error error -> structured_rdk_error error)
   )
@@ -735,7 +716,7 @@ module Facet = struct
     let consolidate_distance = match consolidation with Consolidation_points -> Some consolidate_distance | _ -> None in
     let consolidate_normals_distance = match consolidation with Consolidation_normals -> Some consolidate_normals_distance | _ -> None in
     let cusp_angle = match cusp_mode with Kernel_explicit -> Some cusp_angle | Kernel_auto -> None in
-    Node.Private.make_geometry ?label ~operation:"facet" ~version:4
+    Node.Build.make_geometry ?label ~operation:"facet" ~version:4
       ~parameters:""
       ~cook_mode:(Node.Duplicate_input 0) ~dependencies:Context.Dependencies.static
       ~inputs:[|input|] (fun ~node_id:_ context inputs ->
@@ -817,7 +798,7 @@ module Poly_cut = struct
       | Cut_all -> Rdk.Poly_cut.Poly_cut_all
       | Cut_crossing -> Rdk.Poly_cut.Poly_cut_crossing {attribute;value}
       | Cut_change -> Rdk.Poly_cut.Poly_cut_change {attribute;threshold} in
-    Node.Private.make_geometry ?label ~operation:"poly_cut" ~version:1
+    Node.Build.make_geometry ?label ~operation:"poly_cut" ~version:1
       ~parameters:""
       ~cook_mode:(Node.Duplicate_input 0)
       ~dependencies:Context.Dependencies.static ~inputs:[|input|]
@@ -836,15 +817,11 @@ module Poly_cut = struct
             match cut_selection with
             | Error error -> Error error
             | Ok (`Points cut_points) ->
-                (match Rdk.Poly_cut.cut ~cancel:(Context.cancel_token context)
-                    ~grain:(Context.grain context) ?primitives ?cut_points
-                    ~element ~strategy ~detection ~keep_closed geometry with
+                (match Rdk.Poly_cut.cut { cancel = Some (Context.cancel_token context); grain = Some (Context.grain context); primitives; cut_points; cut_edges = None; element; strategy; detection; keep_closed } geometry with
                  | Ok geometry -> cooked geometry
                  | Error error -> structured_rdk_error error)
             | Ok (`Edges cut_edges) ->
-                (match Rdk.Poly_cut.cut ~cancel:(Context.cancel_token context)
-                    ~grain:(Context.grain context) ?primitives ?cut_edges
-                    ~element ~strategy ~detection ~keep_closed geometry with
+                (match Rdk.Poly_cut.cut { cancel = Some (Context.cancel_token context); grain = Some (Context.grain context); primitives; cut_points = None; cut_edges; element; strategy; detection; keep_closed } geometry with
                  | Ok geometry -> cooked geometry
                  | Error error -> structured_rdk_error error))
   )
@@ -919,7 +896,7 @@ module Poly_reduce = struct
       | Reduce_ratio -> Rdk.Poly_reduce.Reduce_ratio ratio
       | Reduce_primitive_count -> Rdk.Poly_reduce.Reduce_primitive_count primitive_count in
     let max_normal_deviation = if limit_normal_deviation then Some max_normal_deviation else None in
-    Node.Private.make_geometry ?label ~operation:"poly_reduce" ~version:1
+    Node.Build.make_geometry ?label ~operation:"poly_reduce" ~version:1
       ~parameters:""
       ~cook_mode:(Node.Duplicate_input 0) ~dependencies:Context.Dependencies.static
       ~inputs:[|input|] (fun ~node_id:_ context inputs ->
@@ -951,11 +928,7 @@ module Poly_reduce = struct
         match primitives, hard_points, hard_edges with
         | Error error, _, _ | _, Error error, _ | _, _, Error error -> Error error
         | Ok primitives, Ok hard_points, Ok hard_edges ->
-            match Rdk.Poly_reduce.run ~cancel:(Context.cancel_token context)
-                ~grain:(Context.grain context) ~target ?primitives ?hard_points
-                ?hard_edges ~preserve_boundary ~only_original_positions
-                ~equalize_lengths ?max_normal_deviation ?output_group
-                ~recompute_point_normals geometry with
+            match Rdk.Poly_reduce.run { cancel = Some (Context.cancel_token context); grain = Some (Context.grain context); target; primitives; hard_points; hard_edges; preserve_boundary; only_original_positions; equalize_lengths; max_normal_deviation; output_group; recompute_point_normals } geometry with
             | Ok geometry -> cooked geometry
             | Error error -> structured_rdk_error error)
   )
@@ -1019,7 +992,7 @@ module Boolean_seam = struct
     let coincident_group = parameters.coincident_group in
     let left_self_group = optional_text left_self_group and between_group = optional_text between_group
     and right_self_group = optional_text right_self_group and coincident_group = optional_text coincident_group in
-    Node.Private.make_geometry ?label ~operation:"boolean_seam" ~version:1
+    Node.Build.make_geometry ?label ~operation:"boolean_seam" ~version:1
       ~parameters:""
       ~cook_mode:Node.Generic ~dependencies:Context.Dependencies.static
       ~inputs:[|left;right|] (fun ~node_id:_ context inputs ->
@@ -1099,7 +1072,7 @@ module Poly_bevel = struct
     and edge_group = optional_text edge_group and corner_group = optional_text corner_group
     and offset_group = optional_text offset_group in
     let ignore_flat_angle = if ignore_flat_angle > 0. then Some ignore_flat_angle else None in
-    Node.Private.make_geometry ?label ~operation:"poly_bevel" ~version:1
+    Node.Build.make_geometry ?label ~operation:"poly_bevel" ~version:1
       ~parameters:""
       ~cook_mode:(Node.Duplicate_input 0)
       ~dependencies:Context.Dependencies.static ~inputs:[|input|]
@@ -1115,11 +1088,7 @@ module Poly_bevel = struct
         match edges with
         | Error error -> Error error
         | Ok edges ->
-            match Rdk.Poly_bevel.run ~cancel:(Context.cancel_token context)
-                ~grain:(Context.grain context) ?edges ~shape ~divisions
-                ?point_scale_attribute ?ignore_flat_angle ~clamp_overlap
-                ?edge_group ?corner_group ?offset_group ~recompute_point_normals
-                ~distance geometry with
+            match Rdk.Poly_bevel.run { cancel = Some (Context.cancel_token context); grain = Some (Context.grain context); edges; shape; divisions; point_scale_attribute; ignore_flat_angle; clamp_overlap; edge_group; corner_group; offset_group; recompute_point_normals; distance } geometry with
             | Ok geometry -> cooked geometry
             | Error error -> structured_rdk_error error)
   )
@@ -1184,7 +1153,7 @@ module Boolean_fracture = struct
     let assume_flat = parameters.assume_flat in
     let require_closed = parameters.require_closed in
     let piece_attribute = parameters.piece_attribute in
-    Node.Private.make_geometry ?label ~operation:"boolean_fracture" ~version:1 ~parameters:""
+    Node.Build.make_geometry ?label ~operation:"boolean_fracture" ~version:1 ~parameters:""
       ~cook_mode:Node.Generic ~dependencies:Context.Dependencies.static ~inputs:[|source;cutters|]
       (fun ~node_id:_ context inputs ->
         match Rdk.Boolean.run { cancel = Some (Context.cancel_token context); grain = (Context.grain context);
@@ -1250,7 +1219,7 @@ module Intersection_analysis = struct
     and primitive_uvw_attribute = optional_text primitive_uvw_attribute and point_attribute = optional_text point_attribute in
     let inputs = match collision with None -> [|input|]
       | Some collision -> [|input; collision|] in
-    Node.Private.make_geometry ?label ~operation:"intersection_analysis" ~version:1
+    Node.Build.make_geometry ?label ~operation:"intersection_analysis" ~version:1
       ~parameters:""
       ~cook_mode:Node.Generic ~dependencies:Context.Dependencies.static ~inputs
       (fun ~node_id:_ context inputs ->
@@ -1266,13 +1235,7 @@ module Intersection_analysis = struct
                 collision_group group_geometry with
              | Error error -> Error error
              | Ok collision_primitives ->
-                 match Rdk.Intersection_analysis.run
-                     ~cancel:(Context.cancel_token context)
-                     ~grain:(Context.grain context) ?source_primitives
-                     ?collision_primitives ~tolerance ~include_coplanar
-                     ~input_attribute ~primitive_attribute
-                     ~primitive_uvw_attribute ~point_attribute
-                     ?collision:collision_geometry inputs.(0) with
+                 match Rdk.Intersection_analysis.run { cancel = Some (Context.cancel_token context); grain = Some (Context.grain context); source_primitives; collision_primitives; tolerance; include_coplanar; input_attribute; primitive_attribute; primitive_uvw_attribute; point_attribute; collision = collision_geometry } inputs.(0) with
                  | Ok geometry -> cooked geometry
                  | Error error -> structured_rdk_error error))
   )
@@ -1435,7 +1398,7 @@ module Fuse = struct
     let attribute_rules = validated (decode_fuse_attribute_rules "sop/fuse" attribute_rules)
     and group_rules = validated (decode_fuse_group_rules "sop/fuse" group_rules) in
     let inputs = match target with None -> [|input|] | Some node -> [|input;node|] in
-    Node.Private.make_geometry ?label ~operation:"fuse" ~version:6
+    Node.Build.make_geometry ?label ~operation:"fuse" ~version:6
       ~parameters:""
       ~cook_mode:(Node.Duplicate_input 0)
       ~dependencies:Context.Dependencies.static ~inputs
@@ -1611,7 +1574,7 @@ module Subdivide_cracks = struct
     and resulting_crease_group = optional_text resulting_crease_group and hole_group = optional_text hole_group in
     let crease_weight = match crease_weight_mode with Kernel_auto -> None | Kernel_explicit -> Some crease_weight in
     let inputs = match creases with None -> [|input|] | Some creases -> [|input; creases|] in
-    Node.Private.make_geometry ?label ~operation:"subdivide_cracks" ~version:13
+    Node.Build.make_geometry ?label ~operation:"subdivide_cracks" ~version:13
       ~parameters:""
       ~cook_mode:(match creases with None -> Node.Duplicate_input 0 | Some _ -> Node.Generic)
       ~dependencies:Context.Dependencies.static ~inputs
@@ -1781,7 +1744,7 @@ module Boolean = struct
     let require_closed = match require_closed with Closed_default -> None | Closed_required -> Some true | Closed_not_required -> Some false in
     let piece_attribute = optional_text piece_attribute and left_piece_group = optional_text left_piece_group
     and overlap_piece_group = optional_text overlap_piece_group and right_piece_group = optional_text right_piece_group in
-    Node.Private.make_geometry ?label ~operation:"boolean" ~version:1
+    Node.Build.make_geometry ?label ~operation:"boolean" ~version:1
       ~parameters:""
       ~cook_mode:Node.Generic ~dependencies:Context.Dependencies.static
       ~inputs:[|left; right|] (fun ~node_id:_ context inputs ->
@@ -1858,7 +1821,7 @@ module Boolean_detect = struct
     if List.length groups <> List.length (List.sort_uniq String.compare groups) then refuse "group outputs must have distinct names" else
     let inputs = match collision with None -> [|input|]
       | Some collision -> [|input; collision|] in
-    Ok (Node.Private.make_geometry ?label ~operation:"boolean_detect" ~version:1
+    Ok (Node.Build.make_geometry ?label ~operation:"boolean_detect" ~version:1
       ~parameters:""
       ~cook_mode:(Node.Duplicate_input 0) ~dependencies:Context.Dependencies.static
       ~inputs (fun ~node_id:_ context inputs ->
@@ -2042,7 +2005,7 @@ module Triangulate_2d = struct
     and constraint_primitive_group = optional_text constraint_primitive_group and split_point_group = optional_text split_point_group
     and refinement_point_group = optional_text refinement_point_group and triangle_group = optional_text triangle_group
     and constraint_group = optional_text constraint_group in
-    Node.Private.make_geometry ?label ~operation:"triangulate_2d" ~version:12
+    Node.Build.make_geometry ?label ~operation:"triangulate_2d" ~version:12
       ~parameters:""
       ~cook_mode:(Node.Duplicate_input 0) ~dependencies:Context.Dependencies.static
       ~inputs:[|input|] (fun ~node_id:_ context inputs ->

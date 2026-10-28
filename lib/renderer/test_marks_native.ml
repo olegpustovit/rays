@@ -123,14 +123,14 @@ let run () =
       List.iter (fun kind -> List.iter (fun styled -> List.iter (fun rgb -> List.iter (fun n ->
         let a = attributes kind ~styled ~rgb n in
         let reference = Test_ui_pipeline.capture ~clear execution (fun submission ->
-          Renderer.Private.lower_scene2 submission ~density ~resource:(fun _ -> None)
+          Renderer.Native.lower_scene2 submission ~density ~resource:(fun _ -> None)
             (Result.get_ok (Scene_command.Render_ir.create
                [| Scene_command.Render_ir.Set_blend Alpha; Shapes (batch kind a n) |]))) in
-        let draw, release = marks_draw (Renderer.Private.gpu_vertices_owner execution)
+        let draw, release = marks_draw (Renderer.Native.gpu_vertices_owner execution)
           (Renderer.gpu_device gpu) a n in
         let marks = Fun.protect ~finally:release (fun () ->
           Test_ui_pipeline.capture ~clear execution (fun submission ->
-            Renderer.Private.adopt_draws submission [draw])) in
+            Renderer.Native.adopt_draws submission [draw])) in
         let painted = ref 0 in
         Bytes.iteri (fun i v -> if i mod 4 <> 3 && v <> '\000' then incr painted) reference;
         if !painted < 50 && n >= 63 then failwith "marks parity scene is empty";
@@ -144,17 +144,17 @@ let run () =
          as the host batch of 63 does. *)
       let a = attributes Rect ~styled:true ~rgb:false 100 in
       let reference = Test_ui_pipeline.capture ~clear execution (fun submission ->
-        Renderer.Private.lower_scene2 submission ~density ~resource:(fun _ -> None)
+        Renderer.Native.lower_scene2 submission ~density ~resource:(fun _ -> None)
           (Result.get_ok (Scene_command.Render_ir.create
              [| Scene_command.Render_ir.Set_blend Alpha; Shapes (batch Rect a 63) |]))) in
       let draw, release = marks_draw ~drawn:63
-        (Renderer.Private.gpu_vertices_owner execution)(Renderer.gpu_device gpu) a 100 in
+        (Renderer.Native.gpu_vertices_owner execution)(Renderer.gpu_device gpu) a 100 in
       let marks = Fun.protect ~finally:release (fun () ->
         Test_ui_pipeline.capture ~clear execution (fun submission ->
-          Renderer.Private.adopt_draws submission [draw])) in
+          Renderer.Native.adopt_draws submission [draw])) in
       if reference <> marks then failwith (Printf.sprintf "indirect marks differ from the 63-rect batch at density %d" density);
       assert(Scene_execution.Private.gpu_vertex_count_for_test
-        (Renderer.Private.gpu_vertices_owner execution)=0));
+        (Renderer.Native.gpu_vertices_owner execution)=0));
     ) [1; 2];
   if live_handles () <> baseline then failwith "marks native handle delta";
   print_endline "Marks family: pixel parity with Ui_batch for rect, circle and line, with and without stroke, 63/64/65/100000 instances, 1x/2x, a device-count indirect draw, zero handles"

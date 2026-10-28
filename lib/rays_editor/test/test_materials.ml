@@ -65,12 +65,12 @@ let face_materials_preserve_explosion () =
        :emission [0.0 0.0 0.0])
      (sop/exploded_view :amount 1.0))|} in
   let surface = cook 1 node |> surface in
-  let drawings = surface_scene node surface |> Scene.D3.Private.drawings in
+  let drawings = surface_scene node surface |> Scene.D3.Walk.drawings in
   assert (List.length drawings = 2);
   (* Centers ±2 move to ±4. Painting just one face must leave every face of
      each cube at exactly the same rigid displacement. *)
-  List.iter (fun (d : Scene.D3.Private.drawing) ->
-    let v = Mesh.Private.packed_view d.mesh in
+  List.iter (fun (d : Scene.D3.Walk.drawing) ->
+    let v = Mesh.View.packed_view d.mesh in
     Array.iter (fun index ->
       let x = abs_float v.vertices.x.(index) in
       assert (x >= 3.5 && x <= 4.5);
@@ -632,10 +632,10 @@ let () =
        assert (Array.sub rough 1 5 = Array.make 5 0.3)
    | _ -> assert false);
   let surface = surface one in
-  let drawings = surface_scene node surface |> Scene.D3.Private.drawings in
+  let drawings = surface_scene node surface |> Scene.D3.Walk.drawings in
   assert (List.length drawings = 2);
-  assert (List.fold_left (fun n (d : Scene.D3.Private.drawing) -> n + Mesh.index_count d.mesh) 0 drawings = 36);
-  assert (List.exists (fun (d : Scene.D3.Private.drawing) -> d.material.diffuse = Rays_math.Color.hex_exn "#2670f5") drawings);
+  assert (List.fold_left (fun n (d : Scene.D3.Walk.drawing) -> n + Mesh.index_count d.mesh) 0 drawings = 36);
+  assert (List.exists (fun (d : Scene.D3.Walk.drawing) -> d.material.diffuse = Rays_math.Color.hex_exn "#2670f5") drawings);
   assert (signature (Result.get_ok (Sop.Payload.geometry one.payload)) = signature (Result.get_ok (Sop.Payload.geometry (cook 1 node).payload)));
   List.iter (fun text -> assert (Result.is_error (Rays_editor.Workspace.load text)))
     ["(workspace x (graph m :context material (material/standard :roughness 2)))";

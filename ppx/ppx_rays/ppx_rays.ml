@@ -447,7 +447,7 @@ let build_expression ~loc ~validate ~fallible ~facts ~rest type_name label input
           (ident ~loc (sop_path ["Node"; "facts"])) [Nolabel, var "node"])) in
         pexp_let ~loc Nonrecursive
           [Ast_builder.Default.value_binding ~loc ~pat:(pvar "node") ~expr:operator_call]
-          (apply ~loc (ident ~loc (sop_path ["Node"; "Private"; "with_facts"]))
+          (apply ~loc (ident ~loc (sop_path ["Node"; "Build"; "with_facts"]))
             [Nolabel, facts; Nolabel, var "node"]) in
   let parameterize dynamic_schema rebuild =
     let node = if dynamic_schema then var "node" else operator_call in

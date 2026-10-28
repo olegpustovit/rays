@@ -60,10 +60,7 @@ let primitive_features ?cancel ?(grain = 16_384) geometry =
     and b = Array.make total 0 and c = Array.make total (-1) in
     let ranges = Support.ceiling_div entity_count grain in
     let failures = Array.make ranges None in
-    if ranges > 0 then Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(ranges - 1)
-        (fun range ->
-          let first_primitive = range * grain
-          and last_primitive = min entity_count ((range + 1) * grain) in
+    Support.run_indexed_ranges ~grain entity_count (fun ~range ~first:first_primitive ~last:last_primitive ->
           let scratch = Polygon_triangulation.create_scratch () in
           for primitive = first_primitive to last_primitive - 1 do
             Cancel.poll cancel primitive 4095;
@@ -460,11 +457,7 @@ let nearest_entities_with_distances ?cancel ?(grain = 16_384) ~max_distance
     let maximum = max_distance *. max_distance in
     let output = Array.make queries.entity_count (-1)
     and distances = Array.make queries.entity_count Float.infinity in
-    let ranges = Support.ceiling_div queries.entity_count grain in
-    if ranges > 0 then Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(ranges - 1)
-        (fun range ->
-          let first_entity = range * grain
-          and last_entity = min queries.entity_count ((range + 1) * grain) in
+    Support.run_indexed_ranges ~grain queries.entity_count (fun ~range ~first:first_entity ~last:last_entity ->
           let best_distance = [|maximum|] and best_ids = [|-1; -1|]
           and stack = Array.make 128 0 and bounds = Array.make 6 0. in
           for entity = first_entity to last_entity - 1 do

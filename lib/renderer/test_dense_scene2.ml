@@ -37,7 +37,7 @@ let run () =
       (fun () ->
         let render ir =
           let pixels = Test_ui_pipeline.capture ~clear:(0.,0.,0.,1.) execution
-            (fun submission -> Renderer.Private.lower_scene2 submission
+            (fun submission -> Renderer.Native.lower_scene2 submission
               ~density:scale ~resource:(fun _ -> None) ir) in
           if Bytes.length pixels <> 64 * 48 * scale * scale * 4 then
             failwith "dense scene2 readback length";
@@ -65,10 +65,10 @@ let run () =
           |> get in
         let white=colored 0xffffffffl and dark=colored 0x101010ffl in
         let retained identity draws =
-          let submission=get (Renderer.Private.begin_submission execution) in
-          Fun.protect ~finally:(fun () -> Renderer.Private.cancel submission) (fun () ->
-            let batch=get (Renderer.Private.adopt_draws submission draws) in
-            ignore (get (Renderer.Private.step ~identity ~version:1L
+          let submission=get (Renderer.Native.begin_submission execution) in
+          Fun.protect ~finally:(fun () -> Renderer.Native.cancel submission) (fun () ->
+            let batch=get (Renderer.Native.adopt_draws submission draws) in
+            ignore (get (Renderer.Native.step ~identity ~version:1L
               ~clear:(0.,0.,0.,1.) submission [batch]));
             get (Renderer.capture execution)) in
         let expected=retained "retained-white" white in
@@ -93,7 +93,7 @@ let run () =
           |> get in
         let render_draws draws =
           Test_ui_pipeline.capture ~clear:(0.,0.,0.,1.) execution
-            (fun submission -> Renderer.Private.adopt_draws submission draws) in
+            (fun submission -> Renderer.Native.adopt_draws submission draws) in
         ignore (shifted 1.);
         let first=shifted 2. in
         let expected=render_draws first in

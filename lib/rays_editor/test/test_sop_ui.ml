@@ -57,12 +57,12 @@ let dynamic_schema () =
   let edited=fst (Node.apply_parameters typed ["input",Param.Int_value 0] |> Result.get_ok) in
   assert (Node.id edited=Node.id typed);
   assert (choices edited=([|"0 · Base";"1 · Extra"|],0));
-  let renamed=Node.Private.rebuild_with_inputs typed
+  let renamed=Node.Build.rebuild_with_inputs typed
     [|base;Node.relabel "Renamed" extra|] in
   assert (Node.id renamed=Node.id typed);
   assert (choices renamed=([|"0 · Base";"1 · Renamed"|],1));
   assert (Node.parameter_key renamed=Node.parameter_key typed);
-  let grown=Node.Private.rebuild_with_inputs edited [|base;extra;base|] in
+  let grown=Node.Build.rebuild_with_inputs edited [|base;extra;base|] in
   assert (choices grown=([|"0 · Base";"1 · Extra";"2 · Base"|],0));
   assert (Node.id grown=Node.id edited);
   let grown_typed=instance [base;extra;base] in
@@ -70,7 +70,7 @@ let dynamic_schema () =
   assert (Result.is_error (Node.apply_parameters typed ["input",Param.Int_value 2]));
   assert (Result.is_error (Edit_graph.instantiate Dynamic.factory []));
   assert (Result.is_error (Node.apply_parameters typed ["input",Param.Int_value (-1)]));
-  assert (match Node.Private.rebuild_with_inputs typed [|base|] with
+  assert (match Node.Build.rebuild_with_inputs typed [|base|] with
     | _ -> false | exception Invalid_argument _ -> true);
   let bad=Sop.Custom.plain ~label:"Bad" ~operation:"test_error" []
     (fun ~context:_ _ -> Error "unselected branch was cooked") in

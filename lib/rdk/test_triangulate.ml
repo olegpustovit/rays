@@ -33,7 +33,7 @@ let test_collapsed_quad_and_deterministic_failure () =
       ~topology:collapsed_topology
       ~attributes:[attribute Attribute.Vertex "corner"
         (Attribute.Int [|10;11;12;13|])] () |> get_string
-      |> Triangulate.run |> get_rdk in
+      |> Triangulate_front.run |> get_rdk in
   let collapsed_view = Topology.View.view (Geometry.topology collapsed) in
   check (collapsed_view.vertex_points = [|0;1;3|]
       && int_values Attribute.Vertex "corner" collapsed = [|10;11;13|])
@@ -47,7 +47,7 @@ let test_collapsed_quad_and_deterministic_failure () =
   let degenerate = Geometry.create ~positions:degenerate_positions
       ~topology:degenerate_topology () |> get_string in
   let run domains = Parallel.run ~domains (fun () ->
-    match Triangulate.run ~grain:1 degenerate with
+    match Triangulate_front.run ~grain:1 degenerate with
     | Error error -> Error.message error
     | Ok _ -> fail "Triangulate accepted degenerate polygons") in
   let one = run 1 and four = run 4 in

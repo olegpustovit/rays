@@ -19,8 +19,8 @@ let cook ?cancel domains node =
 (* The original two-merge implementation is the oracle, including existing tags
    and attribute order. Only its redundant geometry copy is being removed. *)
 let reference attribute geometries =
-  let tagged = Mesh_merge.run ~source_attribute:tag ~source_base:0 geometries
-  and named = Mesh_merge.run ~source_attribute:attribute ~source_base:10 geometries in
+  let tagged = Mesh_merge_front.run ~source_attribute:tag ~source_base:0 geometries
+  and named = Mesh_merge_front.run ~source_attribute:attribute ~source_base:10 geometries in
   match tagged, named with
   | Error error, _ | _, Error error -> Error error
   | Ok tagged, Ok named ->

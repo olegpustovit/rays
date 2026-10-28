@@ -166,10 +166,24 @@ let add_empty_outputs ~grain ?edge_group ?corner_group ?offset_group geometry =
     ~topology:(Geometry.topology geometry) ~attributes:(Geometry.attributes geometry)
     ~groups ~edge_groups ()
 
-let run ?cancel ?(grain = 16_384) ?edges ?(shape = Bevel_chamfer)
-    ?(divisions = 1) ?point_scale_attribute ?ignore_flat_angle
-    ?(clamp_overlap = true) ?edge_group ?corner_group ?offset_group
-    ?(recompute_point_normals = true) ~distance geometry =
+type params = {
+  cancel : Rdk_core.Cancel.t option;
+  grain : int option;
+  edges : Rdk_core.Edge_group.t option;
+  shape : shape;
+  divisions : int;
+  point_scale_attribute : string option;
+  ignore_flat_angle : float option;
+  clamp_overlap : bool;
+  edge_group : string option;
+  corner_group : string option;
+  offset_group : string option;
+  recompute_point_normals : bool;
+  distance : float;
+}
+
+let run ({ cancel; grain; edges; shape; divisions; point_scale_attribute; ignore_flat_angle; clamp_overlap; edge_group; corner_group; offset_group; recompute_point_normals; distance } : params) geometry =
+  let grain = Option.value ~default:16_384 grain in
   Error.guard ~operation:"poly_bevel" ~code:"invalid_topology" @@ fun () ->
   if grain <= 0 then invalid_arg "Rdk_mesh.Poly_bevel.poly_bevel: grain must be positive";
   if not (Float.is_finite distance) || distance < 0. then
@@ -976,14 +990,9 @@ let run ?cancel ?(grain = 16_384) ?edges ?(shape = Bevel_chamfer)
           let byte_count = (target_edge_count + 7) / 8 in
           let bits = Bytes.make byte_count '\000' in
           let bytes_per_range = max 1 (grain / 8) in
-          let range_count = if byte_count = 0 then 0
-            else ((byte_count - 1) / bytes_per_range) + 1 in
-          if range_count > 0 then
-            Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(range_count - 1)
-              (fun range ->
+          Support.run_indexed_ranges ~grain:bytes_per_range byte_count (fun ~range:range ~first:first ~last:last ->
                 Cancel.check_opt cancel;
-                let first = range * bytes_per_range
-                and last = min byte_count ((range + 1) * bytes_per_range) in
+
                 for byte = first to last - 1 do
                   let base = byte * 8 and value = ref 0 in
                   for bit = 0 to min 7 (target_edge_count - base - 1) do
@@ -1032,7 +1041,7 @@ let run ?cancel ?(grain = 16_384) ?edges ?(shape = Bevel_chamfer)
             && Option.is_some
               (Geometry.find_attribute ~owner:Attribute.Point "N" geometry)
         then begin
-          let* with_normals = Deform.normals ?cancel ~grain output in
+          let* with_normals = Deform.normals { cancel; grain; primitives = None } output in
           match Geometry.find_attribute ~owner:Attribute.Point "N" with_normals with
           | None -> Ok output
           | Some normal -> Geometry.with_attribute normal output

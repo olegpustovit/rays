@@ -115,11 +115,11 @@ let test_transfer () =
   let source = Transform_ops_front.transform (Rays_math.Mat4.scaling (Rays_math.Vec3.create 10. 1. 1.)) source in
   let target = Line_geometry.points [|(0.1, 0., 0.); (9.9, 0., 0.); (5., 0., 0.)|] in
   let rules = [transfer_rule Group_ops.Group_points "picked" "near_"] in
-  let transferred = Group_ops.transfer ~grain:1 ~distance:0.2 ~rules
+  let transferred = Group_ops_front.transfer ~grain:1 ~distance:0.2 ~rules
       ~source ~target () |> get_ok in
   expect_members [0] (ordinary Group.Point "near_picked" transferred)
     "Group Transfer point proximity/threshold";
-  let tied = Group_ops.transfer ~grain:1 ~distance:5. ~rules
+  let tied = Group_ops_front.transfer ~grain:1 ~distance:5. ~rules
       ~source ~target () |> get_ok in
   expect_members [0; 2] (ordinary Group.Point "near_picked" tied)
     "Group Transfer point equal-distance lower-index tie";
@@ -127,7 +127,7 @@ let test_transfer () =
       |> with_ordered_group Group.Point "path" [|1; 0|] in
   let ordered_target = Line_geometry.points
       [|(0.9, 0., 0.); (0.1, 0., 0.); (9.8, 0., 0.); (10.5, 0., 0.)|] in
-  let ordered_transfer = Group_ops.transfer ~grain:1 ~distance:1.
+  let ordered_transfer = Group_ops_front.transfer ~grain:1 ~distance:1.
       ~rules:[transfer_rule Group_ops.Group_points "path" "mapped_"]
       ~source:ordered_source ~target:ordered_target () |> get_ok in
   check (ordered_group_members
@@ -135,30 +135,30 @@ let test_transfer () =
     "Group Transfer orders destinations by source sequence then proximity";
   let conflict_target = target
       |> with_group Group.Point "near_picked" (fun point -> point = 2) in
-  let skipped = Group_ops.transfer ~grain:1 ~distance:0.2 ~rules
+  let skipped = Group_ops_front.transfer ~grain:1 ~distance:0.2 ~rules
       ~source ~target:conflict_target () |> get_ok in
   expect_members [2] (ordinary Group.Point "near_picked" skipped)
     "Group Transfer skip conflict";
-  let overwritten = Group_ops.transfer ~grain:1 ~distance:0.2 ~rules
+  let overwritten = Group_ops_front.transfer ~grain:1 ~distance:0.2 ~rules
       ~conflict:Group_ops.Copy_overwrite ~source ~target:conflict_target () |> get_ok in
   expect_members [0] (ordinary Group.Point "near_picked" overwritten)
     "Group Transfer overwrite conflict";
-  let suffixed = Group_ops.transfer ~grain:1 ~distance:0.2 ~rules
+  let suffixed = Group_ops_front.transfer ~grain:1 ~distance:0.2 ~rules
       ~conflict:Group_ops.Copy_add_suffix ~source ~target:conflict_target () |> get_ok in
   expect_members [2] (ordinary Group.Point "near_picked" suffixed)
     "Group Transfer suffix preserves destination";
   expect_members [0] (ordinary Group.Point "near_picked2" suffixed)
     "Group Transfer suffix begins at two";
   let empty_rule = [transfer_rule Group_ops.Group_points "unused" "near_"] in
-  let omitted = Group_ops.transfer ~grain:1 ~distance:0.05 ~rules:empty_rule
+  let omitted = Group_ops_front.transfer ~grain:1 ~distance:0.05 ~rules:empty_rule
       ~source ~target () |> get_ok in
   check (Geometry.find_group ~owner:Group.Point "near_unused" omitted = None)
     "Group Transfer created an empty group by default";
-  let retained = Group_ops.transfer ~grain:1 ~distance:0.05 ~rules:empty_rule
+  let retained = Group_ops_front.transfer ~grain:1 ~distance:0.05 ~rules:empty_rule
       ~create_empty:true ~source ~target () |> get_ok in
   check (Group.cardinality (ordinary Group.Point "near_unused" retained) = 0)
     "Group Transfer create-empty policy";
-  let no_op = Group_ops.transfer ~rules:[transfer_rule Group_ops.Group_points
+  let no_op = Group_ops_front.transfer ~rules:[transfer_rule Group_ops.Group_points
       "missing*" "mapped_"] ~source ~target () |> get_ok in
   check (no_op == target) "Group Transfer unmatched pattern rebuilt target";
   let curve_source = curve_mesh
@@ -167,7 +167,7 @@ let test_transfer () =
       |> with_group Group.Primitive "crossing_curve" (fun primitive -> primitive = 0)
       |> with_edge_group "crossing_edge" (fun edge -> edge = 0) in
   let curve_target = curve_mesh [|(0.,-1.,0.); (0.,1.,0.)|] [|[|0; 1|]|] in
-  let curve_transferred = Group_ops.transfer ~grain:1 ~distance:0.
+  let curve_transferred = Group_ops_front.transfer ~grain:1 ~distance:0.
       ~rules:[transfer_rule Group_ops.Group_primitives "crossing_curve" "mapped_";
         transfer_rule Group_ops.Group_edges "crossing_edge" "mapped_"]
       ~source:curve_source ~target:curve_target () |> get_ok in
@@ -191,23 +191,23 @@ let test_transfer () =
       ~z:[|0.; 0.; 0.|] in
   let triangle_target = Geometry.with_positions target_positions triangle_target
       |> function Ok geometry -> geometry | Error message -> fail message in
-  let triangle_transferred = Group_ops.transfer ~grain:1 ~distance:0.
+  let triangle_transferred = Group_ops_front.transfer ~grain:1 ~distance:0.
       ~rules:[transfer_rule Group_ops.Group_primitives "intersecting" "mapped_"]
       ~source:triangle_source ~target:triangle_target () |> get_ok in
   expect_members [0] (ordinary Group.Primitive "mapped_intersecting"
       triangle_transferred) "Group Transfer triangle intersection proximity";
-  (match Group_ops.transfer ~distance:(-1.) ~source ~target () with
+  (match Group_ops_front.transfer ~distance:(-1.) ~source ~target () with
    | Error error -> check (Error.code error = "invalid_group")
        "Group Transfer invalid distance code"
    | Ok _ -> fail "Group Transfer accepted a negative distance");
-  (match Group_ops.transfer ~rules:[transfer_rule Group_ops.Group_vertices "*" ""]
+  (match Group_ops_front.transfer ~rules:[transfer_rule Group_ops.Group_vertices "*" ""]
       ~source ~target () with
    | Error error -> check (Error.code error = "invalid_group")
        "Group Transfer vertex-owner rejection code"
    | Ok _ -> fail "Group Transfer accepted vertex groups");
   let degenerate = mesh [|[|0; 1; 2|]|] 3
       |> with_group Group.Primitive "bad" (fun _ -> true) in
-  (match Group_ops.transfer ~distance:1.
+  (match Group_ops_front.transfer ~distance:1.
       ~rules:[transfer_rule Group_ops.Group_primitives "bad" ""]
       ~source:degenerate ~target:triangle_target () with
    | Error error -> check (Error.code error = "invalid_group")
@@ -215,7 +215,7 @@ let test_transfer () =
    | Ok _ -> fail "Group Transfer accepted a degenerate polygon");
   let nonfinite = Line_geometry.points [|(Float.nan, 0., 0.)|]
       |> with_group Group.Point "bad" (fun _ -> true) in
-  (match Group_ops.transfer ~distance:1.
+  (match Group_ops_front.transfer ~distance:1.
       ~rules:[transfer_rule Group_ops.Group_points "bad" ""]
       ~source:nonfinite ~target () with
    | Error error -> check (Error.code error = "invalid_group")
@@ -224,7 +224,7 @@ let test_transfer () =
   let huge_curve = curve_mesh
       [|(-.max_float, 0., 0.); (max_float, 0., 0.)|] [|[|0; 1|]|]
       |> with_group Group.Primitive "huge" (fun _ -> true) in
-  (match Group_ops.transfer ~distance:1.
+  (match Group_ops_front.transfer ~distance:1.
       ~rules:[transfer_rule Group_ops.Group_primitives "huge" ""]
       ~source:huge_curve ~target:huge_curve () with
    | Error error -> check (Error.code error = "invalid_group")
@@ -245,7 +245,7 @@ let test_transfer_parallel_exactness () =
     transfer_rule Group_ops.Group_primitives "face_band" "mapped_";
     transfer_rule Group_ops.Group_edges "edge_band" "mapped_"] in
   let run domains = Parallel.run ~domains (fun () ->
-    Group_ops.transfer ~grain:257 ~distance:0.01 ~rules
+    Group_ops_front.transfer ~grain:257 ~distance:0.01 ~rules
       ~conflict:Group_ops.Copy_overwrite ~source ~target () |> get_ok) in
   let one = run 1 and four = run 4 in
   check (same_group (ordinary Group.Point "mapped_point_band" one)
@@ -262,7 +262,7 @@ let test_transfer_parallel_exactness () =
     "Group Transfer edge one/four-domain exactness";
   let cancelled = Cancel.create () in
   Cancel.cancel cancelled;
-  (match Group_ops.transfer ~cancel:cancelled ~rules ~source ~target () with
+  (match Group_ops_front.transfer ~cancel:cancelled ~rules ~source ~target () with
    | Error error -> check (Error.code error = "cancelled")
        "Group Transfer cancellation code"
    | Ok _ -> fail "cancelled Group Transfer published geometry")

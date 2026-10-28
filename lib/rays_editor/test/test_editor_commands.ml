@@ -32,7 +32,7 @@ let canvas_preview () =
     let count = ref 0 in
     let step e = incr count; E3.update e (Test_editor_input.frame (450., 300.) [] !count) in
     (* the widths of the images a picture draws: the default draws its image at 64, the preview fits the pane *)
-    let widths scene = Array.to_list (Scene.Private.commands scene) |> List.filter_map (function
+    let widths scene = Array.to_list (Scene.Layer.commands scene) |> List.filter_map (function
       | Scene_command.Render_ir.Image i -> Some i.destination.width | _ -> None) in
     let e = ref (step (step (step editor))) in
     let shown () = List.map widths (E3.Private.canvas_scenes !e) in
@@ -74,7 +74,7 @@ let canvas_frame_size () =
   Fun.protect ~finally:(fun () -> E3.close editor) (fun () ->
     let step e count = E3.update e (Test_editor_input.frame (450., 300.) [] count) in
     let e = step (step (step editor 1) 2) 3 in
-    let sizes = List.concat_map (fun scene -> Array.to_list (Scene.Private.commands scene)
+    let sizes = List.concat_map (fun scene -> Array.to_list (Scene.Layer.commands scene)
       |> List.filter_map (function
         | Scene_command.Render_ir.Image i -> Some (i.destination.width, i.destination.height) | _ -> None))
       (E3.Private.canvas_scenes e) in

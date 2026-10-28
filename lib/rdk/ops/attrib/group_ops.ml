@@ -308,7 +308,12 @@ let rename ~rules geometry =
           (Ok ()) snapshot))) (Ok ()) rules in
   Result.bind result (fun () -> store_commit store geometry)
 
-let delete ~rules ?(delete_unused = false) geometry =
+type delete_params = {
+  rules : delete_rule list;
+  delete_unused : bool;
+}
+
+let delete ({ rules; delete_unused } : delete_params) geometry =
   Error.guard ~operation:"group_delete" ~code:"invalid_group" @@ fun () ->
   let store = store_of_geometry geometry in
   let compiled = List.fold_left (fun result rule -> Result.bind result
@@ -409,15 +414,6 @@ let unique_suffix store owner base =
   done;
   !candidate
 
-let default_transfer_rules = [
-  { transfer_owner = Group_primitives; transfer_pattern = "*";
-    transfer_prefix = "" };
-  { transfer_owner = Group_points; transfer_pattern = "*";
-    transfer_prefix = "" };
-  { transfer_owner = Group_edges; transfer_pattern = "*";
-    transfer_prefix = "" };
-]
-
 let point_proximity_map ?cancel ~grain ~maximum_squared source target =
   Result.bind (Spatial_index.create ?cancel ~grain (Geometry.positions source)
       |> Result.map_error Error.to_string) (fun index ->
@@ -456,9 +452,19 @@ let transfer_mapping ?cancel ~grain ~distance ~maximum_squared owner source targ
         Proximity_index.edge_features ?cancel ~grain target) ()
   | Group_vertices -> Error "Group Transfer: vertex groups are not supported"
 
-let transfer ?cancel ?(grain = 16_384) ?(rules = default_transfer_rules)
-    ?(conflict = Copy_skip) ?(create_empty = false) ?(distance = 0.001)
-    ~source ~target () =
+type transfer_params = {
+  cancel : Rdk_core.Cancel.t option;
+  grain : int option;
+  rules : transfer_rule list;
+  conflict : copy_conflict;
+  create_empty : bool;
+  distance : float;
+  source : Rdk_core.Geometry.t;
+  target : Rdk_core.Geometry.t;
+}
+
+let transfer ({ cancel; grain; rules; conflict; create_empty; distance; source; target } : transfer_params) =
+  let grain = Option.value ~default:16_384 grain in
   Error.guard ~operation:"group_transfer" ~code:"invalid_group" @@ fun () ->
   if grain <= 0 then Error "Group Transfer: grain must be positive"
   else if not (Float.is_finite distance) || distance < 0.

@@ -137,7 +137,7 @@ let validate_closed_manifold geometry =
 let test_all_edges_and_profiles () =
   let source = with_payload (box ()) in
   let edges = Geometry.find_edge_group "source_edges" source |> Option.get in
-  let chamfer = Poly_bevel.run ~grain:3 ~edges ~distance:0.2
+  let chamfer = Poly_bevel_front.run ~grain:3 ~edges ~distance:0.2
       ~edge_group:"edge_fillets" ~corner_group:"corner_fillets"
       ~offset_group:"offset_edges" source |> get_rdk in
   check (Geometry.point_count chamfer = 24
@@ -161,7 +161,7 @@ let test_all_edges_and_profiles () =
   and detail_output = Geometry.find_attribute ~owner:Attribute.Detail "tag" chamfer
       |> Option.get in
   check (detail_source == detail_output) "PolyBevel did not share detail payload";
-  let round = Poly_bevel.run ~grain:2 ~edges
+  let round = Poly_bevel_front.run ~grain:2 ~edges
       ~shape:(Poly_bevel.Bevel_round { convexity = 1. }) ~divisions:3
       ~point_scale_attribute:"pscale" ~distance:0.3
       ~edge_group:"edge_fillets" ~corner_group:"corner_fillets"
@@ -189,14 +189,14 @@ let test_all_edges_and_profiles () =
 let test_partial_network_and_clamping () =
   let source = box () in
   let selected = edge_pair source "one" 0 1 in
-  let one = Poly_bevel.run ~grain:1 ~edges:selected ~distance:0.25 source
+  let one = Poly_bevel_front.run ~grain:1 ~edges:selected ~distance:0.25 source
       |> get_rdk in
   check (Geometry.point_count one = 12
       && Geometry.primitive_count one = 9
       && Geometry.vertex_count one = 38)
     "PolyBevel single-edge endpoint patches";
   validate_closed_manifold one;
-  let huge = Poly_bevel.run ~grain:1 ~edges:selected ~distance:1e200 source
+  let huge = Poly_bevel_front.run ~grain:1 ~edges:selected ~distance:1e200 source
       |> get_rdk in
   let positions = Packed.Float3.View.view (Geometry.positions huge) in
   for point = 0 to Geometry.point_count huge - 1 do
@@ -215,7 +215,7 @@ let test_connected_network_flat_filter_and_normals () =
   let selected = edge_ids source "corner_pair"
       [|Topology_index.point_edge index ~point:0 ~local:0;
         Topology_index.point_edge index ~point:0 ~local:1|] in
-  let connected = Poly_bevel.run ~grain:2 ~edges:selected ~divisions:2
+  let connected = Poly_bevel_front.run ~grain:2 ~edges:selected ~divisions:2
       ~shape:(Poly_bevel.Bevel_round { convexity = 0.5 }) ~distance:0.18
       ~edge_group:"edges" ~corner_group:"corners" source |> get_rdk in
   validate_closed_manifold connected;
@@ -228,7 +228,7 @@ let test_connected_network_flat_filter_and_normals () =
       ~normals:Box_generator.Box_point_normals ~x_divisions:3 ~y_divisions:2 ~z_divisions:2
       ~size:(Rays_math.Vec3.create 2. 2. 2.) () |> get_rdk in
   let all = all_edges divided "all" in
-  let output = Poly_bevel.run ~grain:7 ~edges:all ~ignore_flat_angle:0.
+  let output = Poly_bevel_front.run ~grain:7 ~edges:all ~ignore_flat_angle:0.
       ~distance:0.12 divided |> get_rdk in
   validate_closed_manifold output;
   (match Geometry.find_attribute ~owner:Attribute.Point "N" output with
@@ -238,12 +238,12 @@ let test_connected_network_flat_filter_and_normals () =
 let test_exclusions_identity_and_validation () =
   let source = box () in
   let all = all_edges source "all" in
-  check (Poly_bevel.run ~edges:all ~distance:0. source |> get_rdk == source)
+  check (Poly_bevel_front.run ~edges:all ~distance:0. source |> get_rdk == source)
     "PolyBevel zero distance did not preserve identity";
   let open_grid = Plane_generators.grid ~counts:Plane_generators.Grid_point_counts
       ~connectivity:Plane_generators.Grid_quads ~columns:2 ~rows:2 ~size:2. () |> get_rdk in
   let boundary = edge_pair open_grid "boundary" 0 1 in
-  check (Poly_bevel.run ~edges:boundary ~distance:0.2 open_grid |> get_rdk
+  check (Poly_bevel_front.run ~edges:boundary ~distance:0.2 open_grid |> get_rdk
       == open_grid) "PolyBevel did not ignore a boundary edge";
   let flat = Plane_generators.grid ~counts:Plane_generators.Grid_point_counts
       ~connectivity:Plane_generators.Grid_alternating_triangles ~columns:2 ~rows:2 ~size:2. ()
@@ -255,19 +255,19 @@ let test_exclusions_identity_and_validation () =
   done;
   let flat_group = Edge_group.init ~topology:(Geometry.topology flat)
       ~index:flat_index ~name:"flat" (fun edge -> edge = !interior) in
-  check (Poly_bevel.run ~edges:flat_group ~ignore_flat_angle:0.
+  check (Poly_bevel_front.run ~edges:flat_group ~ignore_flat_angle:0.
       ~distance:0.2 flat |> get_rdk == flat)
     "PolyBevel flat-edge exclusion did not preserve identity";
   let expect code = function
     | Error error when String.equal (Error.code error) code -> ()
     | Error error -> fail ("unexpected PolyBevel error: " ^ Error.to_string error)
     | Ok _ -> fail ("expected PolyBevel error " ^ code) in
-  expect "invalid_topology" (Poly_bevel.run ~divisions:0 ~distance:0.1 source);
-  expect "invalid_topology" (Poly_bevel.run
+  expect "invalid_topology" (Poly_bevel_front.run ~divisions:0 ~distance:0.1 source);
+  expect "invalid_topology" (Poly_bevel_front.run
     ~shape:(Poly_bevel.Bevel_round { convexity = 2. }) ~distance:0.1 source);
-  expect "invalid_topology" (Poly_bevel.run ~ignore_flat_angle:(-0.1)
+  expect "invalid_topology" (Poly_bevel_front.run ~ignore_flat_angle:(-0.1)
     ~distance:0.1 source);
-  expect "invalid_topology" (Poly_bevel.run ~edges:flat_group
+  expect "invalid_topology" (Poly_bevel_front.run ~edges:flat_group
     ~distance:0.1 source);
   let negative_scale = Attribute.create_owned ~owner:Attribute.Point
       ~name:"bad_scale" (Attribute.Float
@@ -275,25 +275,25 @@ let test_exclusions_identity_and_validation () =
           if point = 3 then -1. else 1.))) |> Result.get_ok in
   let negative_source = Geometry.with_attribute negative_scale source
       |> Result.get_ok in
-  expect "invalid_topology" (Poly_bevel.run ~point_scale_attribute:"bad_scale"
+  expect "invalid_topology" (Poly_bevel_front.run ~point_scale_attribute:"bad_scale"
     ~distance:0.1 negative_source);
   let zero_scale = Attribute.create_owned ~owner:Attribute.Point
       ~name:"zero_scale" (Attribute.Float
         (Array.init (Geometry.point_count source) (fun point ->
           if point = 0 then 0. else 1.))) |> Result.get_ok in
   let zero_source = Geometry.with_attribute zero_scale source |> Result.get_ok in
-  let zero = Poly_bevel.run ~point_scale_attribute:"zero_scale"
+  let zero = Poly_bevel_front.run ~point_scale_attribute:"zero_scale"
       ~distance:0.1 zero_source |> get_rdk in
   validate_closed_manifold zero;
   let cancelled = Cancel.create () in
   Cancel.cancel cancelled;
-  expect "cancelled" (Poly_bevel.run ~cancel:cancelled ~distance:0.1 source)
+  expect "cancelled" (Poly_bevel_front.run ~cancel:cancelled ~distance:0.1 source)
 
 let test_parallel_exact () =
   let source = with_payload (box ()) in
   let edges = Geometry.find_edge_group "source_edges" source |> Option.get in
   let cook domains = Parallel.run ~domains (fun () ->
-    Poly_bevel.run ~grain:1 ~edges ~shape:(Poly_bevel.Bevel_round { convexity = 0.8 })
+    Poly_bevel_front.run ~grain:1 ~edges ~shape:(Poly_bevel.Bevel_round { convexity = 0.8 })
       ~divisions:5 ~point_scale_attribute:"pscale" ~distance:0.24
       ~edge_group:"edge_fillets" ~corner_group:"corner_fillets"
       ~offset_group:"offset_edges" source |> get_rdk) in
@@ -305,7 +305,7 @@ let test_parallel_exact () =
    volume. *)
 let test_outward_winding () =
   List.iter (fun (shape, divisions) ->
-    let output = Poly_bevel.run ~grain:1 ~shape ~divisions ~distance:0.1 (box ()) |> get_rdk in
+    let output = Poly_bevel_front.run ~grain:1 ~shape ~divisions ~distance:0.1 (box ()) |> get_rdk in
     let topology = Geometry.topology output and positions = Geometry.positions output in
     let volume = ref 0. in
     for primitive = 0 to Geometry.primitive_count output - 1 do

@@ -61,7 +61,7 @@ let test_explicit_mapping_all_storage () =
   let source = point_fixture () in
   let destination = Geometry.find_group ~owner:Group.Point "destination" source
       |> Option.get in
-  let output = Attribute_mirror.run ~owner:Attribute.Point
+  let output = Attribute_mirror_front.run ~owner:Attribute.Point
       ~method_:(Attribute_mirror.Mirror_by_mapping {
         mapping_attribute = "map"; destination_group = destination })
       ~attributes:"value id label uv Cd rows" ~string_replace:("left", "right")
@@ -112,11 +112,11 @@ let test_plane_points_and_transforms () =
           ~y:[|1.;2.;0.;0.|] ~z:[|0.;0.;0.;0.|])) in
   let method_ = Attribute_mirror.Mirror_by_plane { origin = Rays_math.Vec3.zero;
     normal = Rays_math.Vec3.unit_x; distance = 0.; tolerance = 0.11 } in
-  let copied = Attribute_mirror.run ~owner:Attribute.Point ~method_
+  let copied = Attribute_mirror_front.run ~owner:Attribute.Point ~method_
       ~attributes:"value" geometry |> get_ok in
   check (scalar Attribute.Point "value" copied = [|10.;20.;20.;10.|])
     "Attribute Mirror plane point correspondence";
-  let vector = Attribute_mirror.run ~owner:Attribute.Point ~method_
+  let vector = Attribute_mirror_front.run ~owner:Attribute.Point ~method_
       ~attributes:"N" ~transform:Attribute_mirror.Mirror_vector geometry |> get_ok in
   let normal = Geometry.find_attribute ~owner:Attribute.Point "N" vector
       |> Option.get |> Attribute.View.storage |> function
@@ -124,7 +124,7 @@ let test_plane_points_and_transforms () =
     | _ -> assert false in
   check (normal.x = [|1.;2.;-2.;-1.|])
     "Attribute Mirror vector transformation";
-  let points_output = Attribute_mirror.run ~owner:Attribute.Point
+  let points_output = Attribute_mirror_front.run ~owner:Attribute.Point
       ~method_ ~attributes:"P rest" ~transform:Attribute_mirror.Mirror_point geometry
     |> get_ok in
   let positions = Packed.Float3.View.view (Geometry.positions points_output)
@@ -164,17 +164,17 @@ let test_vertex_primitive_and_plane_primitive () =
       |> Option.get
   and primitive_dest = Geometry.find_group ~owner:Group.Primitive
       "primitive_dest" geometry |> Option.get in
-  let vertices = Attribute_mirror.run ~owner:Attribute.Vertex
+  let vertices = Attribute_mirror_front.run ~owner:Attribute.Vertex
       ~method_:(Attribute_mirror.Mirror_by_mapping { mapping_attribute = "vertex_map";
         destination_group = vertex_dest }) ~attributes:"v" geometry |> get_ok in
   check (scalar Attribute.Vertex "v" vertices = [|1.;2.;3.;3.;2.;1.|])
     "Attribute Mirror vertex explicit mapping";
-  let primitives = Attribute_mirror.run ~owner:Attribute.Primitive
+  let primitives = Attribute_mirror_front.run ~owner:Attribute.Primitive
       ~method_:(Attribute_mirror.Mirror_by_mapping { mapping_attribute = "primitive_map";
         destination_group = primitive_dest }) ~attributes:"p" geometry |> get_ok in
   check (scalar Attribute.Primitive "p" primitives = [|9.;9.|])
     "Attribute Mirror primitive explicit mapping";
-  let plane = Attribute_mirror.run ~owner:Attribute.Primitive
+  let plane = Attribute_mirror_front.run ~owner:Attribute.Primitive
       ~method_:(Attribute_mirror.Mirror_by_plane { origin = Rays_math.Vec3.zero;
         normal = Rays_math.Vec3.unit_x; distance = 0.; tolerance = 1e-12 })
       ~attributes:"p" geometry |> get_ok in
@@ -188,21 +188,21 @@ let test_group_policies_and_noop () =
   let method_ = Attribute_mirror.Mirror_by_mapping { mapping_attribute = "map";
     destination_group = destination } in
   let source_selection = group Group.Point "only_source" 4 [0] in
-  let source = Attribute_mirror.run ~group:source_selection
+  let source = Attribute_mirror_front.run ~group:source_selection
       ~group_use:Attribute_mirror.Mirror_group_as_source
       ~owner:Attribute.Point ~method_ ~attributes:"value" geometry
     |> get_ok in
   check (scalar Attribute.Point "value" source = [|10.;20.;0.;10.|])
     "Attribute Mirror source restriction";
   let destination_selection = group Group.Point "only_destination" 4 [2] in
-  let destination = Attribute_mirror.run ~group:destination_selection
+  let destination = Attribute_mirror_front.run ~group:destination_selection
       ~group_use:Attribute_mirror.Mirror_group_as_destination
       ~owner:Attribute.Point ~method_ ~attributes:"value" geometry
     |> get_ok in
   check (scalar Attribute.Point "value" destination = [|10.;20.;20.;0.|])
     "Attribute Mirror destination restriction";
   let empty = group Group.Point "empty" 4 [] in
-  let unchanged = Attribute_mirror.run ~group:empty
+  let unchanged = Attribute_mirror_front.run ~group:empty
       ~group_use:Attribute_mirror.Mirror_group_as_destination
       ~owner:Attribute.Point ~method_ ~attributes:"*" geometry
     |> get_ok in
@@ -221,47 +221,47 @@ let test_errors_and_cancellation () =
       |> Option.get in
   let mapping = Attribute_mirror.Mirror_by_mapping { mapping_attribute = "map";
     destination_group = destination } in
-  expect_error (fun () -> Attribute_mirror.run ~grain:0
+  expect_error (fun () -> Attribute_mirror_front.run ~grain:0
     ~owner:Attribute.Point ~method_:mapping geometry);
-  expect_error (fun () -> Attribute_mirror.run ~attributes:"["
+  expect_error (fun () -> Attribute_mirror_front.run ~attributes:"["
     ~owner:Attribute.Point ~method_:mapping geometry);
-  expect_error (fun () -> Attribute_mirror.run ~transform:Attribute_mirror.Mirror_vector
+  expect_error (fun () -> Attribute_mirror_front.run ~transform:Attribute_mirror.Mirror_vector
     ~owner:Attribute.Point ~method_:mapping geometry);
-  expect_error (fun () -> Attribute_mirror.run ~string_replace:("", "x")
+  expect_error (fun () -> Attribute_mirror_front.run ~string_replace:("", "x")
     ~owner:Attribute.Point ~method_:mapping geometry);
-  expect_error (fun () -> Attribute_mirror.run
+  expect_error (fun () -> Attribute_mirror_front.run
     ~owner:Attribute.Vertex
     ~method_:(Attribute_mirror.Mirror_by_plane { origin = Rays_math.Vec3.zero;
       normal = Rays_math.Vec3.unit_x; distance = 0.; tolerance = 1. }) geometry);
-  expect_error (fun () -> Attribute_mirror.run
+  expect_error (fun () -> Attribute_mirror_front.run
     ~owner:Attribute.Point
     ~method_:(Attribute_mirror.Mirror_by_plane { origin = Rays_math.Vec3.zero;
       normal = Rays_math.Vec3.zero; distance = 0.; tolerance = 1. }) geometry);
-  expect_error (fun () -> Attribute_mirror.run
+  expect_error (fun () -> Attribute_mirror_front.run
     ~owner:Attribute.Point
     ~method_:(Attribute_mirror.Mirror_by_plane { origin = Rays_math.Vec3.zero;
       normal = Rays_math.Vec3.unit_x; distance = 0.; tolerance = -1. }) geometry);
-  expect_error (fun () -> Attribute_mirror.run
+  expect_error (fun () -> Attribute_mirror_front.run
     ~transform:(Attribute_mirror.Mirror_uv { origin_u = 0.; origin_v = 0.;
       direction_u = 0.; direction_v = 0. })
     ~owner:Attribute.Point ~method_:mapping geometry);
-  expect_error (fun () -> Attribute_mirror.run ~source_group:"same"
+  expect_error (fun () -> Attribute_mirror_front.run ~source_group:"same"
     ~destination_group:"same" ~owner:Attribute.Point
     ~method_:mapping geometry);
   let wrong_group = group Group.Primitive "wrong" 0 [] in
-  expect_error (fun () -> Attribute_mirror.run ~group:wrong_group
+  expect_error (fun () -> Attribute_mirror_front.run ~group:wrong_group
     ~owner:Attribute.Point ~method_:mapping geometry);
   let bad = geometry |> add ~owner:Attribute.Point ~name:"value"
       (Attribute.Float [|1.;nan;0.;0.|]) in
-  expect_error (fun () -> Attribute_mirror.run ~attributes:"value"
+  expect_error (fun () -> Attribute_mirror_front.run ~attributes:"value"
     ~owner:Attribute.Point ~method_:mapping bad);
   let wrong_mapping = geometry |> add ~owner:Attribute.Point ~name:"map"
       (Attribute.Float [|-1.;-1.;1.;0.|]) in
-  expect_error (fun () -> Attribute_mirror.run
+  expect_error (fun () -> Attribute_mirror_front.run
     ~owner:Attribute.Point ~method_:(Attribute_mirror.Mirror_by_mapping {
       mapping_attribute = "map"; destination_group = destination }) wrong_mapping);
   let cancel = Cancel.create () in Cancel.cancel cancel;
-  expect_error ~code:"cancelled" (fun () -> Attribute_mirror.run ~cancel
+  expect_error ~code:"cancelled" (fun () -> Attribute_mirror_front.run ~cancel
     ~owner:Attribute.Point ~method_:mapping geometry)
 
 let test_parallel_scale () =
@@ -283,7 +283,7 @@ let test_parallel_scale () =
   let destination = Geometry.find_group ~owner:Group.Point "dest" geometry
       |> Option.get in
   let run domains = Parallel.run ~domains (fun () ->
-    Attribute_mirror.run ~grain:127 ~owner:Attribute.Point
+    Attribute_mirror_front.run ~grain:127 ~owner:Attribute.Point
       ~method_:(Attribute_mirror.Mirror_by_mapping { mapping_attribute = "map";
         destination_group = destination }) ~attributes:"Cd"
       ~output_mapping:"pair" geometry |> get_ok) in

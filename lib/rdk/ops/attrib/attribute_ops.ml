@@ -2,13 +2,10 @@
 
 
 
-let delete ?cancel ?reference ?delete_non_selected ?point_pattern
-    ?vertex_pattern ?primitive_pattern ?detail_pattern geometry =
+let delete (params : Attribute_lifecycle.delete_params) geometry =
   try Result.map_error
       (Error.make ~operation:"attribute_delete" ~code:"invalid_attribute")
-      (Attribute_lifecycle.delete ?cancel ?reference ?delete_non_selected
-         ?point_pattern ?vertex_pattern ?primitive_pattern ?detail_pattern
-         geometry)
+      (Attribute_lifecycle.delete params geometry)
   with Cancel.Cancelled -> Error (Error.make ~operation:"attribute_delete"
       ~code:"cancelled" "attribute deletion was cancelled")
 

@@ -104,9 +104,9 @@ let commands () =
               pointer = (-100., -100.); events = [Input.Pointer_moved (-100., -100.)] };
             pixel_scale = density, density; fps = 60.; mouse_delta = (0., 0.) } build
         done;
-        let staged = Result.get_ok (Scene.Private.stage_native ~width ~height (Pxui.Ui.scene ui)) in
+        let staged = Result.get_ok (Scene.Layer.stage_native ~width ~height (Pxui.Ui.scene ui)) in
         let packets = List.filter_map (function
-          | Scene.Private.Ui_layer (batch, _) ->
+          | Scene.Layer.Ui_layer (batch, _) ->
               assert (Scene_command.Ui_batch.count batch > 0);
               let batches = Scene_command.Ui_batch.batches batch in
               Array.iter (fun (batch:Scene_command.Ui_batch.batch) ->

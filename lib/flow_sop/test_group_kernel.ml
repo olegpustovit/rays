@@ -182,7 +182,7 @@ let () =
     assert((Sop.Session.stats session).misses=before.misses);
     let inputs=Array.of_list(Sop.Node.inputs node) in
     inputs.(1)<-Lisp_sop.snapshot second;
-    let changed=Sop.Node.Private.adopt_identity ~source:node(Sop.Node.Private.rebuild_with_inputs node inputs) in
+    let changed=Sop.Node.Build.adopt_identity ~source:node(Sop.Node.Build.rebuild_with_inputs node inputs) in
     let expected=native_write ~owner:(Some Group.Point) ~name:"copy"(Array.make n 0)geometry in
     assert(bytes(cook session 8 changed)=bytes expected);
     assert((Sop.Session.stats session).misses>before.misses));
@@ -196,8 +196,8 @@ let () =
       |Int data->assert(data=mask)|_->assert false in
     assert_mask(cook session 1 read)(Array.make n 1);
     let before=Sop.Session.stats session in
-    let changed=Sop.Node.Private.adopt_identity ~source:read
-      (Sop.Node.Private.rebuild_with_inputs read [|Lisp_sop.snapshot second|]) in
+    let changed=Sop.Node.Build.adopt_identity ~source:read
+      (Sop.Node.Build.rebuild_with_inputs read [|Lisp_sop.snapshot second|]) in
     assert_mask(cook session 8 changed)(Array.make n 0);
     assert((Sop.Session.stats session).misses>before.misses));
   let n=5001 in

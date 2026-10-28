@@ -95,7 +95,7 @@ let plane ?cull ~width ~height () =
 
 let with_world baked scene = { scene with world = Some baked }
 
-module Private = struct
+module Walk = struct
   let with_texture texture scene =
     let rec node=function
       |Mesh(mesh,material,_,mode,cull,shading)->Mesh(mesh,material,Some texture,mode,cull,shading)

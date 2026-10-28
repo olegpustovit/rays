@@ -410,7 +410,7 @@ let crash_dump value directory =
       (Editor_panes.graph_panels core) (Editor_panes.windows core) (Editor_panes.panels_line core)
       (Editor_panes.route core)
       (Text_pane.summary core.text)
-      core.map_view (Pxui_graph.Scope.Private.grabbed (Editor_model.pane_view core)) core.guide (Option.fold ~none:"-" ~some:fst core.hud)
+      core.map_view (Pxui_graph.Scope.Inspect.grabbed (Editor_model.pane_view core)) core.guide (Option.fold ~none:"-" ~some:fst core.hud)
       (Option.fold ~none:"none" ~some:(fun (node : Editor_model.picked) ->
         Printf.sprintf "%s (#%d, %s)" node.label node.id node.kind)
         (Editor_list.selected_node core))

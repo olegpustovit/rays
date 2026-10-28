@@ -11,11 +11,11 @@ let cook session domains node =
   | Error error -> fail (Diagnostic.error_to_string error)
 
 let node ?(inputs=[||]) ?(run=fun _ -> ()) label geometry =
-  Node.Private.make_geometry ~label ~operation:"branch_test" ~version:1 ~parameters:label
+  Node.Build.make_geometry ~label ~operation:"branch_test" ~version:1 ~parameters:label
     ~cook_mode:Node.Generic ~dependencies:Context.Dependencies.static ~inputs
     (fun ~node_id:_ context _ ->
       run context;
-      Ok Node.Private.{geometry;instances=None})
+      Ok Node.Build.{geometry;instances=None})
 
 let counters session =
   let s=Session.stats session in
@@ -81,7 +81,7 @@ let run () =
   ignore(cook cached 8 root);
   check (Session.Private.fanouts cached=before) "warm cache hits were forked";
   Session.close cached;
-  let reused=Node.Private.restore_id (Node.id a) b |> ok in
+  let reused=Node.Build.restore_id (Node.id a) b |> ok in
   ignore(exact(node ~inputs:[|a;reused|] "reused_id_join" geometry));
   ignore(exact ~entries:0 (node ~inputs:[|a;reused|] "zero_reused_id_join" geometry));
 
@@ -107,8 +107,8 @@ let run () =
   ignore(cook refreshing 8 (Lisp_sop.node ~with_:["a", (a); "b", (b)] {|(sop/merge (sop/ext_a) (sop/ext_b))|}));
   let source=Lisp_sop.snapshot ((with_color 2.)) in
   ignore(cook refreshing 8 source);
-  let a=Node.Private.rebuild_with_inputs a [|source|]
-  and b=Node.Private.rebuild_with_inputs b [|source|] in
+  let a=Node.Build.rebuild_with_inputs a [|source|]
+  and b=Node.Build.rebuild_with_inputs b [|source|] in
   let before=Session.Private.fanouts refreshing in
   ignore(cook refreshing 8 (Lisp_sop.node ~with_:["a", (a); "b", (b)] {|(sop/merge (sop/ext_a) (sop/ext_b))|}));
   check (Session.Private.fanouts refreshing=before)
@@ -129,7 +129,7 @@ let run () =
       node ~run:rendezvous "barrier_b" geometry|] "barrier_join" geometry));
   Session.close parallel;
 
-  let broken label=Node.Private.make_geometry ~label ~operation:"broken" ~version:1
+  let broken label=Node.Build.make_geometry ~label ~operation:"broken" ~version:1
     ~parameters:label ~cook_mode:Node.Generator ~dependencies:Context.Dependencies.static
     ~inputs:[||] (fun ~node_id:_ _ _ -> Error(Diagnostic.error ~code:label label)) in
   let errors=node ~inputs:[|broken "first";broken "second"|] "errors" geometry in
@@ -154,7 +154,7 @@ let run () =
   Session.close cancelled_session;
 
   let cancel=Context.Cancel.create () and entered=Atomic.make false in
-  let first=Node.Private.make_geometry ~operation:"first_error" ~version:1 ~parameters:""
+  let first=Node.Build.make_geometry ~operation:"first_error" ~version:1 ~parameters:""
       ~cook_mode:Node.Generator ~dependencies:Context.Dependencies.static ~inputs:[||]
       (fun ~node_id:_ _ _ -> Atomic.set entered true;
         Error(Diagnostic.error ~code:"first_error" "first error")) in
@@ -185,14 +185,14 @@ let run () =
   check (counters one=counters eight) "two-chain cache accounting differs";
   Session.close one;Session.close eight;
 
-  let packed=Node.Private.make_geometry ~operation:"packed_source" ~version:1 ~parameters:""
+  let packed=Node.Build.make_geometry ~operation:"packed_source" ~version:1 ~parameters:""
     ~cook_mode:Node.Generator ~dependencies:Context.Dependencies.static ~inputs:[||]
-    (fun ~node_id:_ _ _ -> Ok Node.Private.{geometry;      instances=Some[|Rays_math.Mat4.identity;
+    (fun ~node_id:_ _ _ -> Ok Node.Build.{geometry;      instances=Some[|Rays_math.Mat4.identity;
         Rays_math.Mat4.translation(Rays_math.Vec3.create 2. 0. 0.)|]}) in
-  let consume label=Node.Private.make_geometry ~label ~operation:"consume_packed" ~version:1
+  let consume label=Node.Build.make_geometry ~label ~operation:"consume_packed" ~version:1
     ~parameters:label ~cook_mode:Node.Generic ~dependencies:Context.Dependencies.static
     ~inputs:[|packed|] (fun ~node_id:_ _ inputs ->
-      Ok Node.Private.{geometry=inputs.(0);instances=None}) in
+      Ok Node.Build.{geometry=inputs.(0);instances=None}) in
   let graph=Lisp_sop.node ~with_:["in1798", (consume "packed_a"); "in1799", (consume "packed_b")] {|(sop/merge (sop/ext_in1798) (sop/ext_in1799))|} in
   let one=session () and eight=session () in
   Session.set_parallel_override eight (Some true);

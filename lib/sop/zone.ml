@@ -68,11 +68,11 @@ let elements kind ?key geometry =
 
 let element_node element =
   let geometry = Option.get element.piece in
-  Node.Private.make_geometry ~operation:"zone_element" ~version:1
+  Node.Build.make_geometry ~operation:"zone_element" ~version:1
     ~parameters:("content=" ^ Digest.to_hex element.digest)
     ~cook_mode:Node.Generator ~dependencies:Context.Dependencies.static
     ~inputs:[||] (fun ~node_id:_ _ _ ->
-      Ok Node.Private.{ geometry; instances = None })
+      Ok Node.Build.{ geometry; instances = None })
 
 let node ?(report : element array -> unit = ignore) ?(live = false) ?(stamp = "") ~kind ?key ?select ~source_attribute ~source_base ~body
     ~inputs () =
@@ -81,7 +81,7 @@ let node ?(report : element array -> unit = ignore) ?(live = false) ?(stamp = ""
       (Option.value key ~default:"") source_attribute source_base (Array.length inputs) live in
   let parameters = parameters ^ Option.fold ~none:"" ~some:(fun i -> ";select=" ^ string_of_int i) select in
   let parameters = if stamp = "" then parameters else parameters ^ ";frame-state=" ^ stamp in
-  Node.Private.make_geometry ~operation:"zone" ~version:1 ~parameters
+  Node.Build.make_geometry ~operation:"zone" ~version:1 ~parameters
     ~cook_mode:Node.Generic
     ~dependencies:(if live then Context.Dependencies.one Context.Dependencies.Input
                    else Context.Dependencies.static) ~inputs
@@ -98,10 +98,7 @@ let node ?(report : element array -> unit = ignore) ?(live = false) ?(stamp = ""
           let element = body ~inputs:nodes ~context in
           Ok (Array.map element elements))
     (fun ~node_id:_ context parts ->
-      match Rdk.Mesh_merge.run ~cancel:(Context.cancel_token context)
-          ~grain:(Context.grain context) ~source_attribute
-          ~source_base:(source_base + Option.value ~default:0 select)
-          (Array.to_list parts) with
-      | Ok geometry -> Ok Node.Private.{ geometry; instances = None }
+      match Rdk.Mesh_merge.run { cancel = Some (Context.cancel_token context); grain = Some (Context.grain context); source_attribute = Some source_attribute; source_base = Some (source_base + Option.value ~default:0 select) } (Array.to_list parts) with
+      | Ok geometry -> Ok Node.Build.{ geometry; instances = None }
       | Error e -> Error (Diagnostic.error ~code:(Rdk.Error.code e)
           ~cause:(Rdk.Error.to_string e) "zone could not merge its elements"))

@@ -2,8 +2,17 @@
    distance are broken by the lower point index, so the pop order, the
    distances and the parents are a pure function of the inputs. *)
 
-let search ?cancel ?(radius = infinity) ~point_edge_offsets ~point_edges
-    ~edge_a ~edge_b ~lengths roots =
+type search_params = {
+  cancel : Cancel.t option;
+  radius : float;
+  point_edge_offsets : int array;
+  point_edges : int array;
+  edge_a : int array;
+  edge_b : int array;
+  lengths : float array;
+}
+
+let search ({ cancel; radius; point_edge_offsets; point_edges; edge_a; edge_b; lengths } : search_params) roots =
   let count = Array.length point_edge_offsets - 1 in
   let distances = Array.make count infinity and parents = Array.make count (-1) in
   (* An indexed decrease-key heap admits each point at most once. [positions]
@@ -82,9 +91,22 @@ let search ?cancel ?(radius = infinity) ~point_edge_offsets ~point_edges
    [Group_path] and the Lisp [graph/shortest_paths :hops true]. *)
 exception Hop_overflow
 
-let hop_search ?(blocked_point = fun _ -> false)
-    ?(blocked_edge = fun _ -> false) ?(target = -1) ~depths ~distances ~previous
-    ~queue ~point_edge_offsets ~point_edges ~edge_a ~edge_b ~lengths roots =
+type hop_search_params = {
+  blocked_point : (int -> bool);
+  blocked_edge : (int -> bool);
+  target : int;
+  depths : int array;
+  distances : float array;
+  previous : int array;
+  queue : int array;
+  point_edge_offsets : int array;
+  point_edges : int array;
+  edge_a : int array;
+  edge_b : int array;
+  lengths : float array;
+}
+
+let hop_search ({ blocked_point; blocked_edge; target; depths; distances; previous; queue; point_edge_offsets; point_edges; edge_a; edge_b; lengths } : hop_search_params) roots =
   let cancel = None in let count = Array.length point_edge_offsets - 1 in
   Array.fill depths 0 count (-1);
   let head = ref 0 and tail = ref 0 and overflow = ref false in

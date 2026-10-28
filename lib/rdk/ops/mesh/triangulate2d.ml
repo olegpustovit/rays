@@ -954,8 +954,7 @@ let run ?cancel { grain; selection; constraint_edges; constraint_primitives;
       if recompute_point_normals
           && Option.is_some (Geometry.find_attribute
             ~owner:Attribute.Point "N" geometry) then
-        Ok (Error.get (Normal_ops.run ?cancel ~grain ~owner:Attribute.Point
-          ~attribute:"N" output))
+        Ok (Error.get (Normal_ops.run { cancel; grain = Some grain; selection = None; primitives = None; owner = Attribute.Point; weighting = Face_area; cusp_angle = Float.pi; attribute = "N" } output))
       else Ok output) in
   Result.bind begin
   try
@@ -1197,7 +1196,7 @@ let run ?cancel { grain; selection; constraint_edges; constraint_primitives;
                 let group = Group.init ~grain ~owner:Group.Point
                     ~name:"__triangulate_2d_duplicate_points" output_point_count
                     (fun point -> Bytes.unsafe_get duplicate point <> '\000') in
-                Ok (Error.get (Deletion.delete ?cancel ~grain group output))
+                Ok (Error.get (Deletion.delete { cancel; grain = Some grain; selected = true; compact_points = false } group output))
             end)
           )
           )

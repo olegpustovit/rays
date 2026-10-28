@@ -86,7 +86,7 @@ let node ?(unbound_function = false) ?(geometry_inputs = []) ~operation ~version
   Sop.Custom.node ~label ~operation ~schema ~values inputs
     (fun ~label ~inputs ~parameters ->
       if unbound_function then
-        Ok (N.Private.make ~label ~operation ~version ~parameters:source
+        Ok (N.Build.make ~label ~operation ~version ~parameters:source
           ~cook_mode:N.Generic ~dependencies:Sop.Context.Dependencies.static
           ~inputs:(Array.of_list inputs) (fun ~node_id:_ _ _ ->
             Error (Diagnostic.error ~code:"disconnected_input"
@@ -99,7 +99,7 @@ let node ?(unbound_function = false) ?(geometry_inputs = []) ~operation ~version
       let context_seeded = Sop.Context.Dependencies.mem Seed dependencies in
       let framed = Sop.Context.Dependencies.mem Frame dependencies in
       let timed = Sop.Context.Dependencies.mem Time dependencies in
-      N.Private.make ~label ~operation ~version ~parameters:source
+      N.Build.make ~label ~operation ~version ~parameters:source
         ~cook_mode:facts.N.cook_mode ~dependencies ~inputs:(Array.of_list inputs)
         (fun ~node_id:_ context payloads ->
           let wrong = List.find_mapi (fun i geometry ->
@@ -134,6 +134,6 @@ let node ?(unbound_function = false) ?(geometry_inputs = []) ~operation ~version
                     not (String.starts_with ~prefix:"flow." frame.label || String.starts_with ~prefix:"lisp_" frame.label))
                     error.trace})
                   (Result.map (fun (output : Sop.Session.output) ->
-                    N.Private.{payload=output.payload;instances=output.instances})
+                    N.Build.{payload=output.payload;instances=output.instances})
                     (Sop.Session.cook session ~context body))))))
-      |> N.Private.with_facts facts) (build ~label ~context inputs arguments)))
+      |> N.Build.with_facts facts) (build ~label ~context inputs arguments)))

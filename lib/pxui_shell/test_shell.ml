@@ -13,10 +13,10 @@ let instances focus =
   let ui = Pxui.Ui.create ~font_size:11 () in
   ignore (Pxui.Ui.frame ui frame (fun ui ->
     Pxui_shell.Which_key.panel ui bindings ~prefix:"" ~focus ~focus_name:"View"));
-  match Scene.Private.stage_native ~width:400 ~height:300 (Pxui.Ui.scene ui) with
+  match Scene.Layer.stage_native ~width:400 ~height:300 (Pxui.Ui.scene ui) with
   | Error message -> failwith message
   | Ok staged -> List.fold_left (fun total -> function
-      | Scene.Private.Ui_layer (batch, _) ->
+      | Scene.Layer.Ui_layer (batch, _) ->
           total + Scene_command.Ui_batch.count batch
       | _ -> total) 0 staged.layers
 
@@ -25,10 +25,10 @@ let status_instances height =
   ignore (Pxui.Ui.frame ui frame (fun ui ->
     Pxui_shell.Status_bar.draw ui ~bounds:(0, 272, 400, height)
       ~text:"Cook complete" ~fps:(Some 60) ()));
-  match Scene.Private.stage_native ~width:400 ~height:300 (Pxui.Ui.scene ui) with
+  match Scene.Layer.stage_native ~width:400 ~height:300 (Pxui.Ui.scene ui) with
   | Error message -> failwith message
   | Ok staged -> List.fold_left (fun total -> function
-      | Scene.Private.Ui_layer (batch, _) ->
+      | Scene.Layer.Ui_layer (batch, _) ->
           total + Scene_command.Ui_batch.count batch
       | _ -> total) 0 staged.layers
 
@@ -589,10 +589,10 @@ let () =
     let ui = Pxui.Ui.create ~font_size:11 () in
     ignore (Pxui.Ui.frame ui frame (fun ui ->
       Pxui_shell.Status_bar.tips ui ~bounds:(0, 0, 400, 300) ?avoid tips));
-    match Scene.Private.stage_native ~width:400 ~height:300 (Pxui.Ui.scene ui) with
+    match Scene.Layer.stage_native ~width:400 ~height:300 (Pxui.Ui.scene ui) with
     | Error message -> failwith message
     | Ok staged -> List.fold_left (fun total -> function
-        | Scene.Private.Ui_layer (batch, _) -> total + Scene_command.Ui_batch.count batch
+        | Scene.Layer.Ui_layer (batch, _) -> total + Scene_command.Ui_batch.count batch
         | _ -> total) 0 staged.layers in
   let refusal = [ "Cannot delete the root", `Refusal ] and info = [ "Saved", `Info ] in
   if tip_instances [] <> 0 then failwith "no tips drew something";

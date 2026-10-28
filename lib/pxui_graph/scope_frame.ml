@@ -1103,7 +1103,7 @@ let update ?(pressed = []) t ui (frame : Frame.t) =
 
 let selected_wire t = Option.map (fun (path, key, _) -> path, key) t.selected_wire
 
-module Private = struct
+module Inspect = struct
   let ghost t path = match t.records, node_of t path, item_at t path with
     | Some records, Some ({ zone = None; _ } as n), Some (p, _, _) when p.shown <> P.Full ->
         Some (footer_of t records n).value

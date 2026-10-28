@@ -1,15 +1,16 @@
 (** Shortest paths over the unique-edge graph of a {!Topology_index}. *)
 
-val search :
-  ?cancel:Cancel.t ->
-  ?radius:float ->
-  point_edge_offsets:int array ->
-  point_edges:int array ->
-  edge_a:int array ->
-  edge_b:int array ->
-  lengths:float array ->
-  int array ->
-  float array * int array
+type search_params = {
+  cancel : Cancel.t option;
+  radius : float;
+  point_edge_offsets : int array;
+  point_edges : int array;
+  edge_a : int array;
+  edge_b : int array;
+  lengths : float array;
+}
+
+val search : search_params -> int array -> float array * int array
 (** [search ~point_edge_offsets ~point_edges ~edge_a ~edge_b ~lengths roots]
     returns [(distances, parents)], one entry per point. [lengths] holds one
     non-negative length per edge. Roots have distance [0.] and parent [-1];
@@ -21,21 +22,22 @@ val search :
 exception Hop_overflow
 (** An accumulated length was not finite. *)
 
-val hop_search :
-  ?blocked_point:(int -> bool) ->
-  ?blocked_edge:(int -> bool) ->
-  ?target:int ->
-  depths:int array ->
-  distances:float array ->
-  previous:int array ->
-  queue:int array ->
-  point_edge_offsets:int array ->
-  point_edges:int array ->
-  edge_a:int array ->
-  edge_b:int array ->
-  lengths:float array ->
-  int array ->
-  unit
+type hop_search_params = {
+  blocked_point : (int -> bool);
+  blocked_edge : (int -> bool);
+  target : int;
+  depths : int array;
+  distances : float array;
+  previous : int array;
+  queue : int array;
+  point_edge_offsets : int array;
+  point_edges : int array;
+  edge_a : int array;
+  edge_b : int array;
+  lengths : float array;
+}
+
+val hop_search : hop_search_params -> int array -> unit
 (** [hop_search ~depths ~distances ~previous ~queue ... roots] fills the
     caller-owned scratch arrays (each one entry per point; [queue] at least
     that long). Order is (hop count from the nearest root, accumulated length,

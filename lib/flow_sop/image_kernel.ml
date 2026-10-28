@@ -42,7 +42,7 @@ let with_inputs t inputs =
     Error (Diagnostic.error ~code:"E_DATA_SOURCE" "Image source point-origin proof changed; prepare the kernel again.")
   else Ok {t with inputs}
 let node ?state t =
-  P.Node.Private.make ~operation:"image/map" ~version:1
+  P.Node.Build.make ~operation:"image/map" ~version:1
     ~parameters:(Printf.sprintf "%d:%d:%d" t.identity t.width t.height
       ^ Option.fold ~none:"" ~some:E.state_stamp state)
     ~cook_mode:P.Node.Generator
@@ -57,7 +57,7 @@ let node ?state t =
         else Flow_ir.Packed.force ?state ~resolve t.packed ~live:(P.Context.input context) in
       Result.bind result
         (function
-          | E.Vec4_array rgba -> Result.map (fun image -> P.Node.Private.{
+          | E.Vec4_array rgba -> Result.map (fun image -> P.Node.Build.{
               payload=P.Payload.Image image;instances=None})
               (P.Image.of_vec4 ~context ~width:t.width ~height:t.height rgba)
           | _ -> Error (Diagnostic.error ~code:"E_IMAGE" "Image kernel must return vec4 pixels.")))

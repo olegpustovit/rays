@@ -348,11 +348,9 @@ let verify_extracted_contacts ?cancel ~grain positions topology geometry =
       let candidate_count = Array.length first_candidates in
       let ranges = (candidate_count + grain - 1) / grain in
       let failures = Array.make ranges (-1) and failure_kinds = Bytes.make ranges '\000' in
-      if ranges > 0 then Parallel.for_ ~chunk_size:1 ~start:0
-          ~finish:(ranges - 1) (fun range ->
+      Support.run_indexed_ranges ~grain:grain candidate_count (fun ~range:range ~first:first ~last:last ->
         let scratch = Array.make 4 0 in
-        let first = range * grain
-        and last = min candidate_count ((range + 1) * grain) in
+
         let candidate = ref first in
         while failures.(range) < 0 && !candidate < last do
           Cancel.poll cancel !candidate 4095;
@@ -461,10 +459,7 @@ let verify_extracted_orientations ?cancel ~grain ancestry geometry =
     let source = Boolean_constraints.View.source constraints in
     let ranges = (primitives + grain - 1) / grain in
     let failures = Array.make ranges (-1) in
-    if ranges > 0 then Parallel.for_ ~chunk_size:1 ~start:0
-        ~finish:(ranges - 1)
-        (fun range ->
-      let first = range * grain and last = min primitives ((range + 1) * grain) in
+    Support.run_indexed_ranges ~grain primitives (fun ~range ~first:first ~last:last ->
       let primitive = ref first in
       while failures.(range) < 0 && !primitive < last do
         Cancel.poll cancel !primitive 4095;
@@ -870,7 +865,7 @@ let delete_rounding_pairs ?cancel ~grain selected cleanup =
     let tagged_seams = Edge_group.with_name seam_name cleanup.cleanup_seam_edges in
     let tagged = match Geometry.with_edge_group tagged_seams tagged with
       | Ok geometry -> geometry | Error message -> invalid_arg message in
-    match Deletion.delete_primitives ?cancel ~grain ~compact_points:true selected tagged with
+    match Deletion.delete_primitives { cancel; grain = Some grain; compact_points = true } selected tagged with
     | Error _ as failure -> failure
     | Ok output ->
         let point_current = source_ids Attribute.Point source_name output
@@ -909,11 +904,8 @@ let collapse_rounding_batch ?cancel ~grain ~keep_greatest selected cleanup =
     let tagged_seams = Edge_group.with_name seam_name cleanup.cleanup_seam_edges in
     let tagged = match Geometry.with_edge_group tagged_seams tagged with
       | Ok geometry -> geometry | Error message -> invalid_arg message in
-    match Edge_collapse.run ?cancel ~grain ~edges:selected
-        ~position:(if keep_greatest then Fuse_reduce.Greatest_point_position
-          else Fuse_reduce.Least_point_position)
-        ~remove_degenerate_primitives:true
-        ~recompute_point_normals:true tagged with
+    match Edge_collapse.run { cancel; grain = Some grain; edges = Some selected; connectivity_attribute = None; position = Some (if keep_greatest then Fuse_reduce.Greatest_point_position
+          else Fuse_reduce.Least_point_position); remove_degenerate_primitives = Some true; recompute_point_normals = Some true } tagged with
     | Error _ as failure -> failure
     | Ok output ->
         let point_current = source_ids Attribute.Point source_name output
@@ -1204,9 +1196,7 @@ let collapse_cleanup_batch ?cancel ~grain ~require_closed
     let tagged_seams = Edge_group.with_name seam_name cleanup.cleanup_seam_edges in
     let tagged = match Geometry.with_edge_group tagged_seams tagged with
       | Ok geometry -> geometry | Error message -> invalid_arg message in
-    match Edge_collapse.run ?cancel ~grain ~edges:selected
-        ~position:Fuse_reduce.First_position ~remove_degenerate_primitives:true
-        ~recompute_point_normals:true tagged with
+    match Edge_collapse.run { cancel; grain = Some grain; edges = Some selected; connectivity_attribute = None; position = Some Fuse_reduce.First_position; remove_degenerate_primitives = Some true; recompute_point_normals = Some true } tagged with
     | Error _ as failure -> failure
     | Ok output ->
         let point_current = source_ids Attribute.Point source_name output
@@ -1622,11 +1612,7 @@ let detriangulate ?cancel ~grain ~assume_flat ~mode ancestry cleanup =
       let tagged_seams = Edge_group.with_name seam_name cleanup.cleanup_seam_edges in
       let tagged = match Geometry.with_edge_group tagged_seams tagged with
         | Ok geometry -> geometry | Error message -> invalid_arg message in
-      match Dissolve.run ?cancel ~grain ~edges:selected
-          ~operation:Dissolve.Dissolve_selected
-          ~bridge_policy:Dissolve.Create_bridged_polygons
-          ~remove_inline_points:false ~remove_unused_points:false
-          ~create_boundary_curves:false ~recompute_normals:false tagged with
+      match Dissolve.run { cancel; grain = Some grain; edges = Some selected; operation = Dissolve.Dissolve_selected; bridge_policy = Dissolve.Create_bridged_polygons; remove_inline_points = false; collinearity_tolerance = 0.; remove_unused_points = false; create_boundary_curves = false; recompute_normals = false } tagged with
       | Error _ as failure -> failure
       | Ok output ->
           let point_current = source_ids Attribute.Point source_name output

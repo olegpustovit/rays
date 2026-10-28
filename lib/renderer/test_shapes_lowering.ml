@@ -25,7 +25,7 @@ let run () =
     let ir = match R.create_owned [|R.Set_blend Alpha; R.Shapes (Sb.publish builder)|] with
       | Ok ir -> ir | Error _ -> failwith "the batch is not a scene" in
     let frame () = Test_ui_pipeline.capture ~clear:(0., 0., 0., 1.) execution (fun submission ->
-      Renderer.Private.lower_scene2 submission ~density:1 ~resource:(fun _ -> None) ir) in
+      Renderer.Native.lower_scene2 submission ~density:1 ~resource:(fun _ -> None) ir) in
     let before = Gc.allocated_bytes () in
     let pixels = frame () in
     let first = (Gc.allocated_bytes () -. before) /. float count in

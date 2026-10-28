@@ -60,7 +60,7 @@ let ()=
       same what expected (geometry (cook ~reference ~domains ~grain named extra));
       check (before = List.map (fun (_,g)->geometry_bytes g) named) (what^": inputs mutated"))
       [1;97;4096]) [1;4]) [false;true] in
-  let native ?source_attribute ?source_base gs = Mesh_merge.run ?source_attribute ?source_base gs in
+  let native ?source_attribute ?source_base gs = Mesh_merge_front.run ?source_attribute ?source_base gs in
   List.iter (fun (what,gs) -> case what gs "" (native gs))
     ["one", [a ()]; "two", [a (); b ()]; "three-padded", [a (); b (); c ()]; "empty", [];
      "reordered", [c (); b (); a ()]];

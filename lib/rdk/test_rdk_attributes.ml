@@ -37,7 +37,7 @@ let transfer ~geometry ~triangle_geometry =
   let transfer_target = Geometry.with_attribute existing_weight transfer_target
       |> get_ok in
   let transferred domains = Parallel.run ~domains (fun () ->
-      Attribute_ops.transfer_points ~grain:1 ~max_distance:3.
+      Attribute_ops_front.transfer_points ~grain:1 ~max_distance:3.
         ~mode:(Attribute_transfer.Inverse_distance { neighbors = 2; power = 1. })
         ~source:transfer_source ~target:transfer_target () |> get_ok) in
   let transfer_one = transferred 1 and transfer_many = transferred 4 in
@@ -47,11 +47,11 @@ let transfer ~geometry ~triangle_geometry =
       && Attribute.storage (Geometry.find_attribute ~owner:Attribute.Point
           "id" transfer_one |> Option.get) = Attribute.Int [|5;5;0|])
     "point transfer exact match/interpolation/ties/miss/domain exactness";
-  (match Attribute_ops.transfer_points ~names:["weight"] ~pattern:"*"
+  (match Attribute_ops_front.transfer_points ~names:["weight"] ~pattern:"*"
       ~source:transfer_source ~target:transfer_target () with
    | Error error when Error.code error = "invalid_transfer" -> ()
    | _ -> fail "point transfer accepted both exact names and a pattern");
-  (match Attribute_ops.transfer_points ~pattern:"bad["
+  (match Attribute_ops_front.transfer_points ~pattern:"bad["
       ~source:transfer_source ~target:transfer_target () with
    | Error error when Error.code error = "invalid_transfer" -> ()
    | _ -> fail "point transfer accepted a malformed pattern");
@@ -60,7 +60,7 @@ let transfer ~geometry ~triangle_geometry =
   and target_outer = Group.init ~owner:Group.Point ~name:"target_outer" 3
       (fun point -> point <> 1) in
   let restricted_transfer domains = Parallel.run ~domains (fun () ->
-    Attribute_ops.transfer_points ~grain:1 ~max_distance:3.
+    Attribute_ops_front.transfer_points ~grain:1 ~max_distance:3.
       ~source_points:source_second ~target_points:target_outer
       ~source:transfer_source ~target:transfer_target () |> get_ok) in
   let restricted_one = restricted_transfer 1
@@ -87,7 +87,7 @@ let transfer ~geometry ~triangle_geometry =
       ~positions:primitive_target_positions
       ~topology:(Tb.freeze primitive_target_topology) () |> get_ok in
   let primitive_transferred domains = Parallel.run ~domains (fun () ->
-      Attribute_ops.transfer_primitives ~grain:1
+      Attribute_ops_front.transfer_primitives ~grain:1
         ~mode:(Attribute_transfer.Inverse_distance { neighbors = 2; power = 1. })
         ~source:primitive_source ~target:primitive_target_geometry () |> get_ok) in
   let primitive_one = primitive_transferred 1
@@ -104,7 +104,7 @@ let transfer ~geometry ~triangle_geometry =
    | Attribute.Float [|value|] -> check (near value 15.)
        "primitive transfer barycenter interpolation"
    | _ -> fail "primitive transfer floating storage/cardinality");
-  (match Attribute_ops.transfer_primitives ~source_primitives:source_second
+  (match Attribute_ops_front.transfer_primitives ~source_primitives:source_second
       ~source:primitive_source ~target:primitive_target_geometry () with
    | Error error when Error.code error = "invalid_transfer" -> ()
    | _ -> fail "primitive transfer accepted a point-owned source group");
@@ -112,7 +112,7 @@ let transfer ~geometry ~triangle_geometry =
       ~owner:Attribute.Detail (Attribute.Text [|"oak"|]) |> get_ok in
   let detail_source = Geometry.with_attribute source_detail primitive_source
       |> get_ok in
-  let detail_target = Attribute_ops.transfer_detail ~source:detail_source
+  let detail_target = Attribute_ops_front.transfer_detail ~source:detail_source
       ~target:primitive_target_geometry () |> get_ok in
   (match Geometry.find_attribute ~owner:Attribute.Detail "asset" detail_target with
    | Some attribute when Attribute.storage_id attribute
@@ -124,14 +124,14 @@ let transfer ~geometry ~triangle_geometry =
   let detail_p = Attribute.create_owned ~name:"P" ~owner:Attribute.Detail
       (Attribute.Int [|23|]) |> get_ok in
   let detail_p_source = Geometry.with_attribute detail_p detail_source |> get_ok in
-  let detail_pattern_target = Attribute_ops.transfer_detail ~pattern:"^P"
+  let detail_pattern_target = Attribute_ops_front.transfer_detail ~pattern:"^P"
       ~source:detail_p_source ~target:primitive_target_geometry () |> get_ok in
   if Geometry.find_attribute ~owner:Attribute.Detail "asset"
        detail_pattern_target = None
      || Geometry.find_attribute ~owner:Attribute.Detail "P"
           detail_pattern_target <> None then
     fail "detail transfer leading-exclusion pattern";
-  (match Attribute_ops.transfer_detail ~names:["P"] ~source:detail_p_source
+  (match Attribute_ops_front.transfer_detail ~names:["P"] ~source:detail_p_source
       ~target:primitive_target_geometry () with
    | Ok geometry ->
        (match Geometry.find_attribute ~owner:Attribute.Detail "P" geometry with
@@ -189,7 +189,7 @@ let transfer ~geometry ~triangle_geometry =
       ~topology:(Tb.freeze surface_topology)
       ~attributes:[surface_weight; surface_vertex; surface_piece] () |> get_ok in
   let vertex_owned_transfer domains = Parallel.run ~domains (fun () ->
-      Attribute_ops.transfer_vertices ~grain:1 ~pattern:"corner*"
+      Attribute_ops_front.transfer_vertices ~grain:1 ~pattern:"corner*"
         ~source:surface_source ~target:triangle_geometry () |> get_ok) in
   let vertex_owned_one = vertex_owned_transfer 1
   and vertex_owned_many = vertex_owned_transfer 4 in
@@ -244,7 +244,7 @@ let transfer ~geometry ~triangle_geometry =
       Vertex,"corner_value","sampled_corner";
       Primitive,"piece","sampled_piece"] in
   let sampled domains = Parallel.run ~domains (fun () ->
-    Attribute_ops.transfer_surface ~grain:1 ~target_elements:target_first
+    Attribute_ops_front.transfer_surface ~grain:1 ~target_elements:target_first
       ~distance_attribute:"surface_distance" ~attributes:surface_attributes
       ~source:surface_source ~target:restricted_target () |> get_ok) in
   let sampled_one = sampled 1 and sampled_many = sampled 4 in
@@ -262,7 +262,7 @@ let transfer ~geometry ~triangle_geometry =
   let source_second = Group.init ~owner:Group.Primitive ~name:"second" 2
       (fun primitive -> primitive = 1) in
   let restricted_sample domains = Parallel.run ~domains (fun () ->
-    Attribute_ops.transfer_surface ~grain:1 ~source_primitives:source_second
+    Attribute_ops_front.transfer_surface ~grain:1 ~source_primitives:source_second
       ~target_elements:target_first
       ~attributes:[Attribute_transfer.{source_owner=Attribute.Primitive;
         source_name="piece";target_name="sampled_piece"}]
@@ -312,7 +312,7 @@ let transfer ~geometry ~triangle_geometry =
   if Surface_index.triangle_count quad_index <> 2 then
     fail "surface index did not triangulate a quad exactly";
   let quad_target = Line_geometry.points [|(0.2, 0.7, 1.); (0.8, 0.7, 1.)|] in
-  let quad_transfer = Attribute_ops.transfer_surface ~grain:1
+  let quad_transfer = Attribute_ops_front.transfer_surface ~grain:1
       ~attributes:Attribute_ops.[
         {source_owner = Attribute.Point; source_name = "quad_weight";
          target_name = "quad_weight"};
@@ -359,11 +359,11 @@ let transfer ~geometry ~triangle_geometry =
       (Attribute.Float (Array.make 3 0.)) |> get_ok in
   let conflicting_target = Geometry.with_attribute conflicting_id
       transfer_target |> get_ok in
-  (match Attribute_ops.transfer_points ~names:["id"] ~source:transfer_source
+  (match Attribute_ops_front.transfer_points ~names:["id"] ~source:transfer_source
       ~target:conflicting_target () with
    | Error error when Error.code error = "invalid_transfer" -> ()
    | _ -> fail "attribute transfer accepted incompatible target storage");
-  (match Attribute_ops.transfer_points
+  (match Attribute_ops_front.transfer_points
       ~mode:(Attribute_transfer.Inverse_distance { neighbors = 0; power = 1. })
       ~source:transfer_source ~target:transfer_target () with
    | Error error when Error.code error = "invalid_transfer" -> ()
@@ -375,7 +375,7 @@ let run () =
   let transfer_source, transfer_target = transfer ~geometry ~triangle_geometry in
   let cancelled = Cancel.create () in
   Cancel.cancel cancelled;
-  match Attribute_ops.transfer_points ~cancel:cancelled
+  match Attribute_ops_front.transfer_points ~cancel:cancelled
       ~source:transfer_source ~target:transfer_target () with
   | Error error when Error.code error = "cancelled" -> ()
   | _ -> fail "cancelled attribute transfer published geometry or wrong error"

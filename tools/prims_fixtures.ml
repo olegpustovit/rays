@@ -579,8 +579,9 @@ arr1[0.;-0.;0.];arr1[1e16;1.;-1e16];
     let result=try
       delete.check args;
       let for_owner key=if key=owner then pattern else "" in
-      match Rdk.Attribute_ops.delete ~point_pattern:(for_owner "point") ~vertex_pattern:(for_owner "vertex")
-        ~primitive_pattern:(for_owner "primitive") ~detail_pattern:(for_owner "detail") geometry with
+      match Rdk.Attribute_ops.delete { cancel = None; reference = None; delete_non_selected = false;
+        point_pattern = Some (for_owner "point"); vertex_pattern = Some (for_owner "vertex");
+        primitive_pattern = Some (for_owner "primitive"); detail_pattern = Some (for_owner "detail") } geometry with
       |Ok g->json (geometry_value g)
       |Error e->Printf.sprintf {|{"error":{"code":"E_ATTR_DELETE","message":%s}}|} (str (Rdk.Error.to_string e))
       with Diagnostic.Error d -> Printf.sprintf {|{"error":{"code":%s,"message":%s}}|} (str d.code) (str d.message) in
@@ -659,9 +660,9 @@ arr1[0.;-0.;0.];arr1[1e16;1.;-1e16];
     (op "sop/with_attr").check ["geometry",E.No_geo;"attribute",E.Text name;
       "owner",E.Text owner;"type",E.Text kind;"values",values];
     Result.bind(Flow_sop.Attribute_kernel.owner owner)(fun owner->
-      let input=Sop.Node.Private.make_geometry ~operation:"core_fixture.attribute" ~version:1
+      let input=Sop.Node.Build.make_geometry ~operation:"core_fixture.attribute" ~version:1
         ~parameters:"" ~cook_mode:Sop.Node.Generator ~dependencies:Sop.Context.Dependencies.static ~inputs:[||]
-        (fun ~node_id:_ _ _->Ok Sop.Node.Private.{geometry;instances=None}) in
+        (fun ~node_id:_ _ _->Ok Sop.Node.Build.{geometry;instances=None}) in
       let node=Flow_sop.Attribute_kernel.node ~owner ~kind ~reference:true ~source:"host_fixture"
         ~name ~values ~sources:[0] [input] in
       let session=Sop.Session.create ~max_entries:8 ~max_payload_bytes:1_000_000|>Result.get_ok in
@@ -1109,9 +1110,9 @@ arr1[0.;-0.;0.];arr1[1e16;1.;-1e16];
     let constant name ty value={base with Flow.Op.name=name;ctx=Flow.Context.value;
       signature={pos=[];opt=[];rest=None;kw=[]};out=(fun _->ty);out_args=None;
       choices=[];check=(fun _->());body=(fun ~live:_ ~node:_ _->payload value)} in
-    let input=Sop.Node.Private.make_geometry ~operation:"core_fixture.groups" ~version:1
+    let input=Sop.Node.Build.make_geometry ~operation:"core_fixture.groups" ~version:1
       ~parameters:"" ~cook_mode:Sop.Node.Generator ~dependencies:Sop.Context.Dependencies.static ~inputs:[||]
-      (fun ~node_id:_ _ _->Ok Sop.Node.Private.{geometry;instances=None}) in
+      (fun ~node_id:_ _ _->Ok Sop.Node.Build.{geometry;instances=None}) in
     let factory=Sop.Edit_graph.factory ~key:"fixture" ~label:"Fixture" ~category:["Test"] ~arity:0 (fun _->Ok input) in
     let geometry_op={base with Flow.Op.name="sop/fixture";
       signature={pos=[];opt=[];rest=None;kw=[]};out_args=None;choices=[];check=(fun _->());
@@ -1280,8 +1281,9 @@ arr1[0.;-0.;0.];arr1[1e16;1.;-1e16];
     add_host "sop/delete_attrs" [geometry_value metadata_geometry;reference_value;E.Bool inverse;E.Text point;E.Text"";E.Text"N";E.Text"*"]
       (metadata_result "sop/delete_attrs" ["inverse",E.Bool inverse;"point",E.Text point;"vertex",E.Text"";
         "primitive",E.Text"N";"detail",E.Text"*"]
-        (fun()->Rdk.Attribute_ops.delete ?reference ~delete_non_selected:inverse
-          ~point_pattern:point ~vertex_pattern:"" ~primitive_pattern:"N" ~detail_pattern:"*" metadata_geometry)))
+        (fun()->Rdk.Attribute_ops.delete { cancel = None; reference; delete_non_selected = inverse;
+          point_pattern = Some point; vertex_pattern = Some ""; primitive_pattern = Some "N";
+          detail_pattern = Some "*" } metadata_geometry)))
     ["";"*";"^N";"mask_* ^mask_1";"["]) [false;true]) [None;Some metadata_geometry];
   List.iter(fun(owner,selected)->
     List.iter(fun(pattern,replacement)->List.iter(fun(conflict,policy)->
@@ -1294,8 +1296,7 @@ arr1[0.;-0.;0.];arr1[1e16;1.;-1e16];
     List.iter(fun pattern->List.iter(fun unused->add_host "sop/delete_group"
       [geometry_value metadata_geometry;E.Text pattern;E.Text owner;E.Bool unused]
       (metadata_result "sop/delete_group" ["pattern",E.Text pattern;"owner",E.Text owner;"unused",E.Bool unused]
-        (fun()->Rdk.Group_ops.delete ~rules:[{delete_owner=selected;delete_pattern=pattern}]
-          ~delete_unused:unused metadata_geometry))) [false;true]) ["";"wall*";"^wall_a";"*"])
+        (fun()->Rdk.Group_ops.delete { rules = [{delete_owner=selected;delete_pattern=pattern}]; delete_unused = unused } metadata_geometry))) [false;true]) ["";"wall*";"^wall_a";"*"])
     ["point",Some Rdk.Group_ops.Group_points;"vertex",Some Group_vertices;
       "primitive",Some Group_primitives;"edge",Some Group_edges;"any",None];
   List.iter(fun(from,into)->add_host "sop/rename_edge" [geometry_value metadata_geometry;E.Text from;E.Text into]
@@ -1398,10 +1399,10 @@ let remap_geometry geometry = match geometry_value geometry with
       ("rdk-topology:"^string_of_int(Rdk.Topology.data_id(Rdk.Geometry.topology geometry)))])
   |_->assert false in
 let remap source target fields =
-  let snapshot geometry = Sop.Node.Private.make_geometry ~operation:"fixture.remap_source"
+  let snapshot geometry = Sop.Node.Build.make_geometry ~operation:"fixture.remap_source"
     ~version:1 ~parameters:"" ~cook_mode:Sop.Node.Generator
     ~dependencies:Sop.Context.Dependencies.static ~inputs:[||]
-    (fun ~node_id:_ _ _->Ok Sop.Node.Private.{geometry;instances=None}) in
+    (fun ~node_id:_ _ _->Ok Sop.Node.Build.{geometry;instances=None}) in
   let factory key geometry=Sop.Edit_graph.factory ~key ~label:key ~category:["Test"] ~arity:0
     (fun _->Ok (snapshot geometry)) in
   let text=Printf.sprintf {|(workspace fixture_remap (graph g :context sop

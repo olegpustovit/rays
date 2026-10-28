@@ -126,9 +126,9 @@ let frame_and_scene () =
     "frame facts";
   let scene = [ Scene.clear Rays_math.Color.black; Scene.rect ~at:(0, 0) ~w:4 ~h:3 ~fill:Rays_math.Color.red ();
     Scene.text_input_region ~at:(1, 1) ~w:2 ~h:1 ~focused:true ~cursor:1 () ] in
-  let ir = Result.get_ok (Scene.Private.to_ir scene) in
+  let ir = Result.get_ok (Scene.Layer.to_ir scene) in
   check (Array.length (Scene_command.Render_ir.commands_readonly ir) = 2
-         && Scene.Private.text_regions scene = [ 1, 1, 2, 1, true, 1 ]) "scene lowering";
+         && Scene.Layer.text_regions scene = [ 1, 1, 2, 1, true, 1 ]) "scene lowering";
   (match Scene.text_input_region ~at:(0, 0) ~w:1 ~h:1 ~cursor:(-1) () with
    | _ -> failwith "negative IME cursor accepted"
    | exception Invalid_argument _ -> ());
@@ -162,7 +162,7 @@ let frame_and_scene () =
 (* Text, a 3D view and overlay geometry stage as ordered layers; the order,
    the retained resources and the released ones are exact. *)
 let scene_parity () =
-  Scene.Private.with_cache_context (Scene.Private.create_cache_context ()) (fun () ->
+  Scene.Layer.with_cache_context (Scene.Layer.create_cache_context ()) (fun () ->
   let camera = Camera.perspective ~at:(Rays_math.Vec3.create 0. 0. 3.) ~target:Rays_math.Vec3.zero () in
   let scene3 = Scene.D3.create [] in
   let scene =
@@ -172,14 +172,14 @@ let scene_parity () =
           Scene.view3d ~viewport:(8, 4, 16, 12) ~camera scene3 ];
       Scene.rect ~at:(1, 1) ~w:3 ~h:2 ~fill:Rays_math.Color.red () ] in
   let commands ir = Scene_command.Render_ir.commands_readonly ir in
-  let first = Result.get_ok (Scene.Private.stage_native ~width:32 ~height:24 scene) in
+  let first = Result.get_ok (Scene.Layer.stage_native ~width:32 ~height:24 scene) in
   let first_ir, first_resources = first.scene2, first.resources in
   let automatic_text_id = ref None in
   check (List.length first.scene3 = 1) "View3d native staging";
   check (first.clear = (0., 0., 0., 1.)) "native clear staging";
   (match first.layers with
-   | [ Scene.Private.Scene2_layer _; Scene.Private.Scene3_layer _;
-       Scene.Private.Scene2_layer _ ] -> ()
+   | [ Scene.Layer.Scene2_layer _; Scene.Layer.Scene3_layer _;
+       Scene.Layer.Scene2_layer _ ] -> ()
    | _ -> failwith "Scene2/View3d/overlay layer ordering");
   (match Array.to_list (commands first_ir) with
    | [ Scene_command.Render_ir.Clear _; Push_clip _; Image text; Pop_clip; Geometry _ ] ->
@@ -198,9 +198,9 @@ let scene_parity () =
     rect ~at:(1, 2) ~w:8 ~h:6 ~fill:Rays_math.Color.red ();
     rect ~at:(2, 3) ~w:1 ~h:1 ~fill:Rays_math.Color.white () ] in
   let staged_scene2_only = Result.get_ok
-      (Scene.Private.stage_native ~width:16 ~height:12 scene2_only) in
+      (Scene.Layer.stage_native ~width:16 ~height:12 scene2_only) in
   (match staged_scene2_only.layers with
-   | [ Scene.Private.Scene2_layer (ir, resources) ] ->
+   | [ Scene.Layer.Scene2_layer (ir, resources) ] ->
        check (ir == staged_scene2_only.scene2)
          "Scene2-only native staging duplicated its render IR";
        check (resources == staged_scene2_only.resources)
@@ -208,12 +208,12 @@ let scene_parity () =
    | _ -> failwith "Scene2-only native staging split one ordered layer");
   let split_scene2 = Scene.[
     rect ~at:(1, 2) ~w:8 ~h:6 ~fill:Rays_math.Color.red ();
-    Private.layer_break;
+    Layer.layer_break;
     rect ~at:(2, 3) ~w:1 ~h:1 ~fill:Rays_math.Color.white () ] in
   let staged_split = Result.get_ok
-      (Scene.Private.stage_native ~width:16 ~height:12 split_scene2) in
+      (Scene.Layer.stage_native ~width:16 ~height:12 split_scene2) in
   (match staged_split.layers with
-   | [ Scene.Private.Scene2_layer (first, _); Scene.Private.Scene2_layer (second, _) ] ->
+   | [ Scene.Layer.Scene2_layer (first, _); Scene.Layer.Scene2_layer (second, _) ] ->
        (match Array.to_list (commands first), Array.to_list (commands second) with
         | [ Geometry _ ], [ Geometry _ ] -> ()
         | _ -> failwith "Scene2 layer break changed command ordering")
@@ -221,12 +221,12 @@ let scene_parity () =
   check (Array.length (commands staged_split.scene2) = 2)
     "Scene2 layer break leaked into compatibility IR";
   let styled = Scene.[ polygon [ 0, 0; 8, 0; 8, 8 ] ~fill:Rays_math.Color.red ~stroke:Rays_math.Color.white () ] in
-  let styled_ir, _ = Result.get_ok (Scene.Private.stage ~width:16 ~height:16 styled) in
+  let styled_ir, _ = Result.get_ok (Scene.Layer.stage ~width:16 ~height:16 styled) in
   (match Array.to_list (commands styled_ir) with
    | [ Geometry _; Geometry _ ] -> ()
    | _ -> failwith "polygon fill/stroke did not stage two meshes");
   List.iter (fun frame ->
-    let staged = Result.get_ok (Scene.Private.stage_native ~width:32 ~height:24 scene) in
+    let staged = Result.get_ok (Scene.Layer.stage_native ~width:32 ~height:24 scene) in
     check (Scene_command.Render_ir.serialize staged.scene2
            = Scene_command.Render_ir.serialize first_ir)
       (Printf.sprintf "frame %d deterministic IR" frame);
@@ -235,7 +235,7 @@ let scene_parity () =
     check (List.length staged.scene3 = 1)
       (Printf.sprintf "frame %d native View3d drift" frame))
     [ 2; 60; 600 ];
-  Scene.Private.release scene;
+  Scene.Layer.release scene;
   List.iter (function
     | identity, Renderer.Image image when Some identity = !automatic_text_id ->
         check (Result.is_ok (Runtime_resources.Image.pixels image))
@@ -246,11 +246,11 @@ let scene_parity () =
     | _, Renderer.Text _ | _, Renderer.Canvas _ ->
         failwith "unexpected staged resource")
     first_resources;
-  let _, _, references = Font.Private.automatic_counts () in
+  let _, _, references = Font.Raster.automatic_counts () in
   check (references = 0) "released scene kept an automatic text reference")
 
 let resources () =
-  Scene.Private.with_cache_context (Scene.Private.create_cache_context ()) (fun () ->
+  Scene.Layer.with_cache_context (Scene.Layer.create_cache_context ()) (fun () ->
   let image = Image.create ~width:2 ~height:2 ~color:(Rays_math.Color.rgba 1 2 3 4) () |> Result.get_ok in
   check (Result.get_ok(Image.get_size image) = (2, 2)
          && Result.get_ok (Image.pixels image)

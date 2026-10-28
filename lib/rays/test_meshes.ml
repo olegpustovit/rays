@@ -4,11 +4,11 @@
 open Rays
 
 let packed ?mode ?colors ~indices ~(normals : Rays_math.Vec3.t array) (positions : Rays_math.Vec3.t array) =
-  let planes (values : Rays_math.Vec3.t array) : Mesh.Private.vec3_view =
+  let planes (values : Rays_math.Vec3.t array) : Mesh.View.vec3_view =
     { x = Array.map (fun (p : Rays_math.Vec3.t) -> p.x) values;
       y = Array.map (fun (p : Rays_math.Vec3.t) -> p.y) values;
       z = Array.map (fun (p : Rays_math.Vec3.t) -> p.z) values } in
-  match Mesh.Private.create_packed_owned ?mode ~indices ~normals:(planes normals) ?colors
+  match Mesh.View.create_packed_owned ?mode ~indices ~normals:(planes normals) ?colors
           (planes positions) with
   | Ok mesh -> mesh
   | Error message -> failwith message

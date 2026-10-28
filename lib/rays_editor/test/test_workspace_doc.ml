@@ -515,11 +515,11 @@ let part_literals () =
     let updated = Pane.with_arguments arguments pane in
     check (Pane.selected updated = Pane.selected pane
       && List.for_all (fun (node : Projection.node) ->
-        Pane.Private.box_of pane node.path = Pane.Private.box_of updated node.path
-        && Pane.Private.ports pane node.path = Pane.Private.ports updated node.path) scope.nodes
-      && Pane.Private.wire_count pane = Pane.Private.wire_count updated
-      && List.for_all (fun i -> Pane.Private.wire_points pane i = Pane.Private.wire_points updated i)
-        (List.init (Pane.Private.wire_count pane) Fun.id))
+        Pane.Inspect.box_of pane node.path = Pane.Inspect.box_of updated node.path
+        && Pane.Inspect.ports pane node.path = Pane.Inspect.ports updated node.path) scope.nodes
+      && Pane.Inspect.wire_count pane = Pane.Inspect.wire_count updated
+      && List.for_all (fun i -> Pane.Inspect.wire_points pane i = Pane.Inspect.wire_points updated i)
+        (List.init (Pane.Inspect.wire_count pane) Fun.id))
       "literal pane update changed selection, boxes, ports or wire routes";
     doc := next; lowered := patched)
     [op ["g";"a"] "size" [] "[3 4 5]";

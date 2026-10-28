@@ -186,13 +186,13 @@ let () =
           Fun.protect ~finally:(fun()->ignore(Rays.Image.destroy image))(fun()->
             Rays.Image.pixels image |> Result.get_ok)in
         List.iteri(fun index scene->
-        let rendering=Rays.Scene.Private.stage_native_render ~width:65 ~height:17 scene |> Result.get_ok in
+        let rendering=Rays.Scene.Layer.stage_native_render ~width:65 ~height:17 scene |> Result.get_ok in
         if List.length scene>1 || (match rendering.layers with [Scene2_segment _]->true|_->false)
         then assert(rendering.resources=[]);
         let coordinator=execution(Renderer.create_offscreen {Renderer.default_configuration with
           logical_width=65;logical_height=17;drawable_width=65;drawable_height=17})in
         Fun.protect ~finally:(fun()->execution(Renderer.destroy coordinator))(fun()->
-          let staged=Rays.Scene.Private.stage_native ~width:65 ~height:17 scene |> Result.get_ok in
+          let staged=Rays.Scene.Layer.stage_native ~width:65 ~height:17 scene |> Result.get_ok in
           let lower()=Renderer.lower_scene2 coordinator ~density:1
             ~resource:(fun id->List.assoc_opt id staged.resources) staged.scene2 in
           ignore(execution(lower()));ignore(execution(lower()));
@@ -216,8 +216,8 @@ let () =
           let fresh=Rays.Canvas.create ~width:65 ~height:17 |> Result.get_ok in
           Fun.protect ~finally:(fun()->ignore(Rays.Canvas.destroy fresh))(fun()->
             render fresh scene;assert(snapshot fresh=pixels))))
-          [[node];[Rays.Scene.Private.display_list ~images:[1,image] segment];
-           [node;Rays.Scene.Private.layer_break;node]]);
+          [[node];[Rays.Scene.Layer.display_list ~images:[1,image] segment];
+           [node;Rays.Scene.Layer.layer_break;node]]);
       let p,_=packed ~width:17 ~height:5 "[uv.x uv.y t 1]"in
       let cache=G.Pipelines.create ~clock:Unix.gettimeofday (Renderer.gpu_device gpu)in
       let run=G.Run.create gpu cache (G.Emit.kernel p |> get)in
@@ -281,7 +281,7 @@ let ()=
         let displayed=image_scene(Rays.Image.of_resource current|>Result.get_ok)
         and meshed=mesh_scene view in
         let mixed source_image texture=Rays.Scene.[clear Rays_math.Color.black;
-          group[image source_image ~at:(0,0)()];Private.layer_break;
+          group[image source_image ~at:(0,0)()];Layer.layer_break;
           group(List.tl(mesh_scene ~viewport:(33,0,32,17) texture))]in
         let mixed_scene=mixed(Rays.Image.of_resource current|>Result.get_ok)view in
         let scenes=ref[displayed;meshed;mixed_scene]in
@@ -313,7 +313,7 @@ let ()=
               Printf.printf "image_sink,resident_%s_source%dx%d,65,17,%.2f,0,0,0\n%!"
                 [|"image";"mesh";"mixed"|].(index) width height time)
               (List.combine !scenes references))in
-        let staged=Rays.Scene.Private.stage_native_render_checked ~width:65 ~height:17
+        let staged=Rays.Scene.Layer.stage_native_render_checked ~width:65 ~height:17
           (List.nth !scenes 1) |> Result.get_ok in
         assert(match staged.mesh_images with [image]->image==current|_->false);
         let sampled=(List.hd staged.scene3).entries.(0).texture |> Option.get in
@@ -323,11 +323,11 @@ let ()=
         let _,_,_,saved,lease=resource(I.borrow_snapshot current)in
         leases:=[saved,Bytes.copy saved,lease];
         let expire()=List.iter(fun scene->
-          (match Rays.Scene.Private.stage_native_render_checked ~width:65 ~height:17 scene with
+          (match Rays.Scene.Layer.stage_native_render_checked ~width:65 ~height:17 scene with
            |Error(Resource error)->assert(error.kind=Destroyed)
            |Ok _->()
           |Error error->failwith(Format.asprintf "resident expiry staging: %a"
-               Rays.Scene.Private.pp_native_error error));
+               Rays.Scene.Layer.pp_native_error error));
           let reads=I.readbacks current in
           assert(Result.is_error(Rays.Canvas.render canvas scene));
           assert(I.readbacks current=reads)) !scenes in
@@ -344,7 +344,7 @@ let ()=
           ~source:(fun()->G.Image_sink.texture resized));
         resource(I.replace current ~width:17 ~height:5 ~rgba:(Bytes.make(17*5*4)'\255'));
         assert(Result.is_error(Rays.Texture.of_image current));
-        assert(match Rays.Scene.Private.stage_native_render_checked ~width:65 ~height:17 meshed with
+        assert(match Rays.Scene.Layer.stage_native_render_checked ~width:65 ~height:17 meshed with
           |Error(Message message)->String.ends_with ~suffix:"borrowed GPU texture needs an explicit CPU snapshot" message
           |_->false);
         assert(I.readbacks current=1);

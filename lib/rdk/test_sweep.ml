@@ -46,8 +46,8 @@ let check_attribute_storage geometry owner name expected =
       check (equal_storage actual expected) ("Sweep attribute ancestry: " ^ name)
   | None -> fail ("Sweep attribute missing: " ^ name)
 
-let backbone () = Line_geometry.polyline [|(0., 0., 0.); (0., 0., 2.)|] |> get_ok
-let profile () = Line_geometry.polyline ~closed:true
+let backbone () = Line_geometry_front.polyline [|(0., 0., 0.); (0., 0., 2.)|] |> get_ok
+let profile () = Line_geometry_front.polyline ~closed:true
     [|(-1., -1., 0.); (1., -1., 0.); (1., 1., 0.); (-1., 1., 0.)|]
     |> get_ok
 

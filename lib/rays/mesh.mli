@@ -29,7 +29,7 @@ val recalculate_normals : t -> t
 
 val plane : width:float -> height:float -> unit -> t
 
-module Private : sig
+module View : sig
   type vec3_view = {
     x : float array;
     y : float array;

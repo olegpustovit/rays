@@ -156,9 +156,14 @@ let resolve_directions ?cancel ~grain geometry =
 
 let with_point_normals ?cancel ~grain ?primitives geometry =
   let selection = Option.map (fun group -> Element_selection.Selected_primitives group) primitives in
-  Ok (Error.get (Normal_ops.run ?cancel ~grain ?selection ?primitives
-    ~owner:Attribute.Point ~weighting:Normal_ops.Face_area geometry))
+  Ok (Error.get (Normal_ops.run { cancel; grain = Some grain; selection; primitives; owner = Attribute.Point; weighting = Normal_ops.Face_area; cusp_angle = Float.pi; attribute = "N" } geometry))
 
-let normals ?cancel ~grain ?primitives geometry =
+type params = {
+  cancel : Rdk_core.Cancel.t option;
+  grain : int;
+  primitives : Rdk_core.Group.t option;
+}
+
+let normals ({ cancel; grain; primitives } : params) geometry =
   if grain <= 0 then Error "Rdk_mesh.Deform.normals: grain must be positive"
   else with_point_normals ?cancel ~grain ?primitives geometry

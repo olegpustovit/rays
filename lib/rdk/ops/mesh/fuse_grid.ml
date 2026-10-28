@@ -98,9 +98,7 @@ let fuse_clusters ?cancel ?(grain = 16_384) ?selection ?(tolerance = 1e-6)
       (function
       | Point_clusters.Identity -> Ok geometry
       | Point_clusters.Clusters clusters ->
-          Fuse_reduce.apply ?cancel ~grain ~position ?weight_attribute ~attributes
-            ~attribute_rules ~group_rules
-            ~compact:(not keep_fused_points) ~rewire:true clusters geometry)
+          Fuse_reduce.apply { cancel; grain; position; weight_attribute; attributes; attribute_rules; group_rules; compact = (not keep_fused_points); rewire = true; remap_edge_groups = true } clusters geometry)
 
 type params = {
   cancel : Rdk_core.Cancel.t option;
@@ -274,9 +272,7 @@ let fuse ({ cancel; grain; selection; target_selection; targeting; using; tolera
                 | Point_clusters.Clusters clusters ->
                     let compact = fuse_points && not keep_fused_points in
                     Result.map (install_reduced_outputs clusters ~compact)
-                      (Fuse_reduce.apply ?cancel ~grain ~position ?weight_attribute
-                        ~attributes ~attribute_rules ~group_rules ~compact
-                        ~rewire:fuse_points clusters geometry))
+                      (Fuse_reduce.apply { cancel; grain; position; weight_attribute; attributes; attribute_rules; group_rules; compact; rewire = fuse_points; remap_edge_groups = true } clusters geometry))
             else
             let output = if !moved = 0 then geometry else begin
               let x = Array.copy source.x and y = Array.copy source.y
@@ -318,7 +314,14 @@ let fuse ({ cancel; grain; selection; target_selection; targeting; using; tolera
             ))
   end)
 
-let weld ?cancel ~grain ?selection ~tolerance geometry =
+type weld_params = {
+  cancel : Rdk_core.Cancel.t option;
+  grain : int;
+  selection : Rdk_core.Group.t option;
+  tolerance : float;
+}
+
+let weld ({ cancel; grain; selection; tolerance } : weld_params) geometry =
   fuse { cancel; grain; selection; target_selection = None; targeting = Point_snap.Near_points;
     using = Point_snap.Least_target_point; tolerance; position = Average_position; weight_attribute = None;
     attributes = Fuse_rules.Keep_first; attribute_rules = []; group_rules = []; metric = Euclidean;

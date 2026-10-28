@@ -52,9 +52,19 @@ let edge_corner_variables topology_view index_view corner_to_variable edge local
   let a, b = edge_endpoint_corners topology_view index_view edge local in
   corner_to_variable.(a), corner_to_variable.(b)
 
-let solve ?cancel ?(grain = 16_384) ?(name = "uv") ?seams ?edge_seams
-    ?(uv_tolerance = 1e-9) ?(iterations = 500) ?(tolerance = 1e-7)
-    boundary_mode geometry =
+type params = {
+  cancel : Cancel.t option;
+  grain : int option;
+  name : string;
+  seams : Group.t option;
+  edge_seams : Edge_group.t option;
+  uv_tolerance : float;
+  iterations : int;
+  tolerance : float;
+}
+
+let solve ({ cancel; grain; name; seams; edge_seams; uv_tolerance; iterations; tolerance } : params) boundary_mode geometry =
+  let grain = Option.value ~default:16_384 grain in
   try
     if grain <= 0 then fail "grain must be positive";
     if String.trim name = "" then fail "UV attribute name must not be empty";

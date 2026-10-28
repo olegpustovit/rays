@@ -663,8 +663,17 @@ let materialize ?cancel ~grain ~preserve_point_payload ?source_point_attribute
       remap_output ?cancel ~grain ~preserve_point_payload ?source_point_attribute
         ?hull_group geometry point_map topology
 
-let run ?cancel ?(grain = 16_384) ?selection
-    ?(preserve_point_payload = true) ?source_point_attribute ?hull_group geometry =
+type params = {
+  cancel : Cancel.t option;
+  grain : int option;
+  selection : Element_selection.t option;
+  preserve_point_payload : bool;
+  source_point_attribute : string option;
+  hull_group : string option;
+}
+
+let run ({ cancel; grain; selection; preserve_point_payload; source_point_attribute; hull_group } : params) geometry =
+  let grain = Option.value ~default:16_384 grain in
   Error.guard ~operation:"convex_hull" ~code:"invalid_geometry" @@ fun () ->
   try
     if grain <= 0 then invalid_arg (operation ^ ": grain must be positive");

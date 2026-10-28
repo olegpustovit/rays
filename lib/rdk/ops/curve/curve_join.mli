@@ -15,17 +15,18 @@ val interpolate_attribute :
 (** Shared packed linear interpolation for point/vertex topology generators.
     Integer, text, and ragged payload use the nearest endpoint. *)
 
-val join :
-  ?cancel:Cancel.t ->
-  ?grain:int ->
-  ?primitives:Group.t ->
-  ?picked_ends:curve_join_pick array ->
-  ?orient_closest:bool ->
-  ?connect_closest_ends:bool ->
-  ?only_connected:bool ->
-  ?group_size:int ->
-  ?keep_originals:bool ->
-  ?tolerance:float ->
-  ?wrap:bool ->
-  Geometry.t ->
-  (Geometry.t, string) result
+type params = {
+  cancel : Cancel.t option;
+  grain : int option;
+  primitives : Group.t option;
+  picked_ends : curve_join_pick array option;
+  orient_closest : bool;
+  connect_closest_ends : bool;
+  only_connected : bool;
+  group_size : int option;
+  keep_originals : bool;
+  tolerance : float;
+  wrap : bool;
+}
+
+val join : params -> Geometry.t -> (Geometry.t, string) result

@@ -66,7 +66,7 @@ let expect_code code = function
   | Ok _ -> fail ("expected error " ^ code)
 
 let decorated_bend () =
-  let base = Line_geometry.polyline [|-1.,0.,0.; 0.,1.,0.; 1.,0.,0.|] |> get_rdk in
+  let base = Line_geometry_front.polyline [|-1.,0.,0.; 0.,1.,0.; 1.,0.,0.|] |> get_rdk in
   let topology = Geometry.topology base in
   let bend = edge_group_of_pairs topology "bend" [|0,1;1,2|]
   and first = edge_group_of_pairs topology "first" [|0,1|] in

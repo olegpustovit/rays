@@ -22,15 +22,17 @@ module Output :
       source:int ->
       kind:Rdk_core.Topology.primitive_kind -> int array -> int array -> unit
   end
-val run :
-  ?cancel:Rdk_core.Cancel.t ->
-  ?grain:int ->
-  ?edges:Rdk_core.Edge_group.t ->
-  ?operation:operation ->
-  ?bridge_policy:bridge_policy ->
-  ?remove_inline_points:bool ->
-  ?collinearity_tolerance:float ->
-  ?remove_unused_points:bool ->
-  ?create_boundary_curves:bool ->
-  ?recompute_normals:bool ->
-  Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result
+type params = {
+  cancel : Rdk_core.Cancel.t option;
+  grain : int option;
+  edges : Rdk_core.Edge_group.t option;
+  operation : operation;
+  bridge_policy : bridge_policy;
+  remove_inline_points : bool;
+  collinearity_tolerance : float;
+  remove_unused_points : bool;
+  create_boundary_curves : bool;
+  recompute_normals : bool;
+}
+
+val run : params -> Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result

@@ -28,7 +28,7 @@ val geometry : Scene_command.Render_ir.geometry -> node
 val transform : Scene_command.Render_ir.transform -> t -> node
 (* An exact affine view transform: the six coefficients are the command's own. *)
 
-module Private : sig
+module Layer : sig
   type cache_context
   val create_cache_context : unit -> cache_context
   val with_cache_context : cache_context -> (unit -> 'a) -> 'a

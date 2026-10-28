@@ -6,7 +6,7 @@ let plain ?label ?(version = 1) ?(parameters = "")
     ?(cook_mode = Node.Generic) ?(dependencies = Context.Dependencies.static)
     ~operation inputs cook =
   let inputs = Array.of_list inputs in
-  Node.Private.make_geometry ?label ~operation ~version ~parameters ~cook_mode
+  Node.Build.make_geometry ?label ~operation ~version ~parameters ~cook_mode
     ~dependencies ~inputs (fun ~node_id:_ context geometries ->
       if Context.cancelled context then
         Error (Diagnostic.error ~code:"cancelled"

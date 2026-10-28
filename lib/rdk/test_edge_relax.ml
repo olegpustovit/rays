@@ -49,8 +49,8 @@ let run () =
       0.5 +. float_of_int (edge mod 17) *. 0.1))
   and _large_reference = disjoint (Array.init 50_000 (fun edge ->
       0.8 +. float_of_int (edge mod 11) *. 0.1)) in
-  let _connected_source = Line_geometry.polyline
+  let _connected_source = Line_geometry_front.polyline
       [|0.,0.,0.;1.,0.4,0.;3.,-0.2,0.;6.,0.5,0.|] |> get_rdk
-  and _connected_reference = Line_geometry.polyline
+  and _connected_reference = Line_geometry_front.polyline
       [|0.,0.,0.;2.,0.,0.;3.,0.,0.;7.,0.,0.|] |> get_rdk in
   print_endline "edge relax tests passed"

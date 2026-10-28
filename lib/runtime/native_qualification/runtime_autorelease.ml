@@ -42,19 +42,19 @@ let draws extent =
 let lifecycle () =
   let runtime = get (create 4 4) in
   let clear = (0., 0., 0., 0.) in
-  get (Runtime.set_window_background (Renderer.Private.runtime runtime) (0.1, 0.2, 0.3));
-  get (Runtime.set_cursor (Renderer.Private.runtime runtime) `Text);
-  get (Runtime.set_text_input (Renderer.Private.runtime runtime) (Some ((0, 0, 4, 4), 0)));
+  get (Runtime.set_window_background (Renderer.Native.runtime runtime) (0.1, 0.2, 0.3));
+  get (Runtime.set_cursor (Renderer.Native.runtime runtime) `Text);
+  get (Runtime.set_text_input (Renderer.Native.runtime runtime) (Some ((0, 0, 4, 4), 0)));
   for _ = 1 to 8 do
     ignore (Sdl3.Event.poll_coalesced ());
     ignore (get (Renderer.draw ~clear runtime (adopt_draws(draws 4))))
   done;
-  let facts = get (Runtime.presentation_facts (Renderer.Private.runtime runtime)) in
+  let facts = get (Runtime.presentation_facts (Renderer.Native.runtime runtime)) in
   ignore (get (Renderer.read_pixels runtime ~bytes_per_row:(facts.drawable_width * 4)));
-  get (Runtime.resize (Renderer.Private.runtime runtime) ~width:8 ~height:8);
+  get (Runtime.resize (Renderer.Native.runtime runtime) ~width:8 ~height:8);
   ignore (get (Renderer.draw ~clear runtime (adopt_draws(draws 8))));
-  ignore (get (Runtime.presentation_facts (Renderer.Private.runtime runtime)));
-  get (Runtime.set_text_input (Renderer.Private.runtime runtime) None);
+  ignore (get (Runtime.presentation_facts (Renderer.Native.runtime runtime)));
+  get (Runtime.set_text_input (Renderer.Native.runtime runtime) None);
   get (Renderer.destroy runtime)
 
 let offscreen () =

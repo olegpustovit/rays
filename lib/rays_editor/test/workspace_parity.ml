@@ -31,11 +31,11 @@ let signature (e : E.t) =
 (* Native qualification oracle: original CPU doubles, original 68-byte ABI.
    The production mirror never feeds this packing path. *)
 let legacy_vertices mesh =
-  let view = Rays.Mesh.Private.view mesh in
+  let view = Rays.Mesh.View.view mesh in
   let mesh = match view.normals, view.mode with
     | None, (Rays.Mesh.Triangles | Triangle_strip | Triangle_fan) -> Rays.Mesh.recalculate_normals mesh
     | _ -> mesh in
-  let view = Rays.Mesh.Private.view mesh in
+  let view = Rays.Mesh.View.view mesh in
   let bytes = Bytes.make (Array.length view.vertices * 68) '\000' in
   Array.iteri (fun index (position : Rays_math.Vec3.t) ->
     let normal = Option.fold ~none:(Rays_math.Vec3.create 0. 0. 1.)
@@ -52,7 +52,7 @@ let legacy_vertices mesh =
 
 let compare_float32 runtime id mesh scene =
   let native result = Result.map_error (Format.asprintf "%a" Renderer.pp_error) result |> string_ok in
-  let staged = Rays.Scene.Private.stage_native ~width:320 ~height:240 scene
+  let staged = Rays.Scene.Layer.stage_native ~width:320 ~height:240 scene
     |> string_ok in
   let current = List.concat_map (fun (prepared : Renderer.Scene_execution.prepared_scene3) ->
     Array.to_list prepared.entries) staged.scene3 in
@@ -103,7 +103,7 @@ let picture ?compare ?texture (output : S.output) =
     | Some transforms -> Rays.Scene.D3.instances_array ~material ~cull:Rays.Scene.D3.Cull_none mesh transforms in
   let rendered = Rays.Scene.D3.create [node] in
   let rendered = Option.fold ~none:rendered
-    ~some:(fun texture -> Rays.Scene.D3.Private.with_texture (Rays.Scene.D3.textured texture) rendered) texture in
+    ~some:(fun texture -> Rays.Scene.D3.Walk.with_texture (Rays.Scene.D3.textured texture) rendered) texture in
   let scene = [Rays.Scene.clear Rays_math.Color.black; Rays.Scene.view3d ~camera rendered] in
   Option.iter (fun compare -> compare mesh scene) compare;
   scene
@@ -188,7 +188,7 @@ let check ?directory ?(commands = false) ?(factories = Sop.Nodes.factories) ~nam
       (Format.asprintf "%a" Renderer.pp_error) |> string_ok in
     let configuration={Renderer.default_configuration with logical_width=320;logical_height=240;
       drawable_width=320;drawable_height=240}in
-    match Renderer.Private.create_offscreen_with_gpu gpu configuration with
+    match Renderer.Native.create_offscreen_with_gpu gpu configuration with
     | Ok runtime -> Some (gpu, runtime)
     | Error error -> Renderer.release_gpu gpu; failwith (Format.asprintf "%a" Renderer.pp_error error))
     with exn -> Option.iter (fun canvas->ignore(Rays.Canvas.destroy canvas)) pixels; raise exn in
@@ -259,7 +259,7 @@ let check ?directory ?(commands = false) ?(factories = Sop.Nodes.factories) ~nam
                 Rays.Image.pixels image |> string_ok) [Marshal.No_sharing]);
             image in
           let render id scene =
-            if Rays.Scene.Private.commands scene = [||] then failwith (name ^ ": empty image oracle commands");
+            if Rays.Scene.Layer.commands scene = [||] then failwith (name ^ ": empty image oracle commands");
             match pixels, directory with
             | Some canvas, Some directory ->
                 Rays.Canvas.render canvas scene |> string_ok;

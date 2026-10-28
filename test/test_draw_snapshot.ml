@@ -30,7 +30,7 @@ let input index =
     dt; frame = index; tick = index; size = (width, height); pointer = (100., 100.) }
 
 let rendered_digest scene =
-  match Scene_command.Render_ir.create (Rays.Scene.Private.commands scene) with
+  match Scene_command.Render_ir.create (Rays.Scene.Layer.commands scene) with
   | Error _ -> failwith "Render_ir.create rejected a scene that Drawing built"
   | Ok ir -> Editor_document.Lowering.sha256 (Bytes.to_string (Scene_command.Render_ir.serialize ir))
 
@@ -53,8 +53,8 @@ let lines (_, name) =
   let state = Flow.Eval.create_state () in
   let outcome = Flow_native.Drawing.prepare ~states:evaluated.states evaluated.plan value in
   (* the run's text cache, as Sketch.run_state installs it: one rasterization per text *)
-  let fonts = Rays.Font.Private.create_cache_context () in
-  let frames = Rays.Font.Private.with_cache_context fonts @@ fun () -> List.init (last_frame + 1) (fun index ->
+  let fonts = Rays.Font.Raster.create_cache_context () in
+  let frames = Rays.Font.Raster.with_cache_context fonts @@ fun () -> List.init (last_frame + 1) (fun index ->
     let result = match outcome with
       | Error d -> Error d.code
       | Ok prepared ->
@@ -63,7 +63,7 @@ let lines (_, name) =
           | Error d -> Error d.code
           | Ok scene -> Ok (rendered_digest scene) in
     index, result) in
-  Rays.Font.Private.clear_cache_context fonts;
+  Rays.Font.Raster.clear_cache_context fonts;
   List.filter_map (fun (index, result) ->
     if not (List.mem index recorded) then None else
     Some (match result with

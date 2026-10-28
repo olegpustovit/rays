@@ -258,7 +258,7 @@ let close_submission submission=
       List.filter((!=)submission)submission.owner.submissions
   end
 let begin_submission value=
-  match ensure"Renderer.Private.begin_submission"value with
+  match ensure"Renderer.Native.begin_submission"value with
   |Error _ as e->e
   |Ok()->
       let submission={owner=value;submission_state=Open;
@@ -499,14 +499,14 @@ let lower_scene2 value ~density ~resource ir=
   lower_scene2_with_policy value~lease_policy:Copy_image_snapshots
     ~density~resource ir
 let replay_step ?clear ~identity ~version value=
-  match ensure"Renderer.Private.replay"value with
+  match ensure"Renderer.Native.replay"value with
   |Error _ as error->error
   |Ok()->
-      match sync_runtime_facts "Renderer.Private.replay" value with
+      match sync_runtime_facts "Renderer.Native.replay" value with
       |Error _ as error->error
       |Ok()->match Scene_execution.replay_prepared_sampled_resources ?clear
           ~identity ~version (value.renderer) with
-      |Error error->backend"Renderer.Private.replay"error
+      |Error error->backend"Renderer.Native.replay"error
       |Ok None->Ok None
       |Ok(Some(_presented,draw_count))->
           count_draws value.counters draw_count;
@@ -553,7 +553,7 @@ let step_core ?after_prepare ?clear ?identity ?version value draws=
 let step ?clear value draws=Result.map (fun _->()) (step_core ?clear value draws)
 let draw ?clear value draws=step_core ?clear value draws
 let lower_scene2_submission submission ~density ~resource ir=
-  match ensure_submission"Renderer.Private.lower_scene2"submission with
+  match ensure_submission"Renderer.Native.lower_scene2"submission with
   |Error _ as e->close_submission submission;e
   |Ok()->
       let protected_resource id=try resource id with
@@ -566,7 +566,7 @@ let lower_scene2_submission submission ~density ~resource ir=
        |Error _ as error->close_submission submission;error
        with Resource_resolver_raised exn->
          close_submission submission;
-         fail"Renderer.Private.lower_scene2"Ogpu.Error.Invalid_state
+         fail"Renderer.Native.lower_scene2"Ogpu.Error.Invalid_state
            ("resource resolver raised: "^Printexc.to_string exn)
        |exn->close_submission submission;raise exn)
 let retained_scene2_segment_bytes draws=List.fold_left(fun total draw->
@@ -580,7 +580,7 @@ let retained_scene2_segment_bytes draws=List.fold_left(fun total draw->
       sampled_texture_bytes auxiliary.texture)draw.auxiliary)0 draws
 let lower_scene2_segment submission ~identity ~version ~cacheable ~density
     ~resource ir=
-  let operation="Renderer.Private.lower_scene2_segment"in
+  let operation="Renderer.Native.lower_scene2_segment"in
   if identity<=0L||version<0L then begin
     close_submission submission;
     fail operation Ogpu.Error.Invalid_argument"segment identity/version is invalid"
@@ -618,7 +618,7 @@ let lower_scene2_segment submission ~identity ~version ~cacheable ~density
             end;
             Ok batch
 let lower_ui submission ~density ~resource ui=
-  let operation="Renderer.Private.lower_ui"in
+  let operation="Renderer.Native.lower_ui"in
   match ensure_submission operation submission with
   |Error _ as error->close_submission submission;error
   |Ok()->
@@ -687,16 +687,16 @@ let lower_ui submission ~density ~resource ui=
   |Error _ as error->close_submission submission;error
   |Ok draws->Ok{batch_owner=submission;batch_draws=draws}
 let adopt_draws submission draws=
-  match ensure_submission"Renderer.Private.adopt_draws"submission with
+  match ensure_submission"Renderer.Native.adopt_draws"submission with
   |Error _ as error->close_submission submission;error
   |Ok()->Ok{batch_owner=submission;batch_draws=draws}
 let step_submission ?clear ?identity ?version submission batches=
-  match ensure_submission"Renderer.Private.step"submission with
+  match ensure_submission"Renderer.Native.step"submission with
   |Error _ as e->close_submission submission;e
   |Ok()->Fun.protect~finally:(fun()->close_submission submission)
       (fun()->
         if List.exists(fun batch->batch.batch_owner!=submission)batches then
-          fail"Renderer.Private.step"Ogpu.Error.Invalid_argument
+          fail"Renderer.Native.step"Ogpu.Error.Invalid_argument
             "draw batch belongs to another submission"
         else
           let draws=match batches with
@@ -827,7 +827,7 @@ let release_gpu gpu=if not gpu.gpu_released then begin
   ignore(Ogpu.Backend.destroy_queue gpu.gpu_queue);
   release_device gpu.gpu_shared gpu.gpu_owner
 end
-module Private=struct
+module Native=struct
   let runtime value = value.runtime
   let gpu_vertices_owner value=value.gpu_owner.scene_vertices
   type nonrec scaled_cache=scaled_cache
@@ -838,7 +838,7 @@ module Private=struct
   type nonrec gpu_marks=gpu_marks
   type nonrec marks_source=marks_source=Host of bytes*int|Device of (unit->Ogpu.Backend.buffer option)*int
   let create_offscreen_with_gpu gpu (configuration:configuration)=
-    let operation="Renderer.Private.create_offscreen_with_gpu"in
+    let operation="Renderer.Native.create_offscreen_with_gpu"in
     if gpu.gpu_released then fail operation Ogpu.Error.Stale_handle"GPU lease is released"
     else match valid_configuration operation configuration with
       |Error _ as error->error
@@ -959,5 +959,5 @@ module Private=struct
     Renderer_retained_plans.segment_count value.retained_plans,
     value.retained_scene2_segment_hits,value.retained_scene2_segment_misses
 end
-let create_gpu_marks=Private.create_gpu_marks
-let gpu_marks=Private.gpu_marks
+let create_gpu_marks=Native.create_gpu_marks
+let gpu_marks=Native.gpu_marks

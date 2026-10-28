@@ -118,12 +118,12 @@ let empty_geometry = lazy (
   let geometry = Result.get_ok (Rdk.Geometry.create
     ~positions:(Rdk.Packed.Float3.Builder.freeze (Rdk.Packed.Float3.Builder.create 0))
     ~topology:(Rdk.Topology.empty ~point_count:0) ()) in
-  Node.Private.make_geometry ~operation:"snapshot" ~version:1
+  Node.Build.make_geometry ~operation:"snapshot" ~version:1
     ~parameters:(Printf.sprintf "data_id=%d;bytes=%d" (Rdk.Geometry.data_id geometry)
       (Rdk.Geometry.payload_bytes geometry))
     ~cook_mode:Node.Generator ~dependencies:Context.Dependencies.static ~inputs:[||]
     (fun ~node_id:_ _context _inputs ->
-      Ok Node.Private.{ geometry; instances = None }))
+      Ok Node.Build.{ geometry; instances = None }))
 
 (* One compiled node per document entry. [inputs] are the compiled input
    nodes it was built from, so a later compile can reuse [built] when both the
@@ -158,9 +158,9 @@ let rebuild (entry : entry) compiled_inputs =
       Result.bind (factory.build (Array.to_list compiled_inputs)) (fun node ->
       let changes = Node.parameter_fields entry.node
           |> List.map (fun field -> field.Param.name, field.current) in
-      Result.map (fun (node, _) -> Node.Private.adopt_identity ~source:entry.node node)
+      Result.map (fun (node, _) -> Node.Build.adopt_identity ~source:entry.node node)
         (Node.apply_parameters node changes))
-  | _ -> Ok (Node.Private.rebuild_with_inputs entry.node
+  | _ -> Ok (Node.Build.rebuild_with_inputs entry.node
                (Array.map Option.get compiled_inputs))
 
 (* Compile [id] and its inputs into [table], reusing [previous] entries whose
@@ -328,7 +328,7 @@ let rebuild_if_connected entries (entry : entry) inputs =
         (match Id_map.find_opt id entries with
          | None -> complete := false
          | Some (source : entry) -> nodes.(index) <- source.node)) inputs;
-  if !complete then Node.Private.rebuild_with_inputs entry.node nodes
+  if !complete then Node.Build.rebuild_with_inputs entry.node nodes
   else entry.node
 
 let connect ~source ~consumer ~input_index value =
@@ -473,7 +473,7 @@ let instantiate (value : factory) inputs =
   else value.build (List.map Option.some inputs)
 
 let disconnected_placeholder () =
-  Node.Private.make_geometry ~label:"disconnected input"
+  Node.Build.make_geometry ~label:"disconnected input"
     ~operation:"disconnected_input" ~version:1 ~parameters:""
     ~cook_mode:Node.Generator ~dependencies:Context.Dependencies.static
     ~inputs:[||] (fun ~node_id:_ _ _ -> Error (Diagnostic.error

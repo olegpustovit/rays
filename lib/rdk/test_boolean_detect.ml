@@ -207,7 +207,7 @@ let test_parallel_exact () =
     "Boolean Detect one/four-domain output drift";
   check (Group.cardinality (group "intersections" one) > 0)
     "Boolean Detect scale fixture found no intersections";
-  let combined = Mesh_merge.run [source; collision] |> get in
+  let combined = Mesh_merge_front.run [source; collision] |> get in
   let run_self domains = Parallel.run ~domains (fun () -> self_detect combined) in
   let self_signature geometry =
     let rows = int_array "self_hits" geometry in

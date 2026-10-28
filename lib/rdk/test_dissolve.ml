@@ -63,7 +63,7 @@ let two_quads () =
 let test_interior () =
   let source = two_quads () in
   let edges = manifold_edges source in
-  let output = Dissolve.run ~edges ~remove_unused_points:false source |> get_rdk in
+  let output = Dissolve_front.run ~edges ~remove_unused_points:false source |> get_rdk in
   check (Geometry.point_count output = 6 && Geometry.vertex_count output = 6
       && Geometry.primitive_count output = 1) "two-quad cardinality";
   check (int_attribute Attribute.Primitive "face" output = [|10|])
@@ -84,12 +84,12 @@ let test_interior () =
       ~owner:Attribute.Point "weight" output |> Option.get in
   check (Attribute.storage_id source_weight = Attribute.storage_id output_weight)
     "point payload was copied without point compaction";
-  let cleaned = Dissolve.run ~edges ~remove_inline_points:true
+  let cleaned = Dissolve_front.run ~edges ~remove_inline_points:true
       ~collinearity_tolerance:1e-10 source |> get_rdk in
   check (Geometry.point_count cleaned = 4 && Geometry.vertex_count cleaned = 4
       && Geometry.primitive_count cleaned = 1) "inline cleanup rectangle";
   let boundary = boundary_edges source in
-  let inverted = Dissolve.run ~edges:boundary
+  let inverted = Dissolve_front.run ~edges:boundary
       ~operation:Dissolve.Dissolve_non_selected ~remove_unused_points:false source
       |> get_rdk in
   check (Geometry.primitive_count inverted = 1 && Geometry.vertex_count inverted = 6)
@@ -101,10 +101,10 @@ let test_boundary () =
   let index = Topology_index.create (Geometry.topology source) in
   let selected = edge_group source "one" (fun edge -> edge = 0) in
   check (Topology_index.edge_incidence_count index 0 = 1) "fixture boundary edge";
-  let deleted = Dissolve.run ~edges:selected source |> get_rdk in
+  let deleted = Dissolve_front.run ~edges:selected source |> get_rdk in
   check (Geometry.point_count deleted = 0 && Geometry.primitive_count deleted = 0)
     "boundary dissolve deletion";
-  let curve = Dissolve.run ~edges:selected ~create_boundary_curves:true source
+  let curve = Dissolve_front.run ~edges:selected ~create_boundary_curves:true source
       |> get_rdk in
   check (Geometry.point_count curve = 4 && Geometry.vertex_count curve = 4
       && Geometry.primitive_count curve = 1
@@ -124,35 +124,35 @@ let ring () =
 let test_bridges () =
   let source = ring () in
   let edges = manifold_edges source in
-  let disjoint = Dissolve.run ~edges
+  let disjoint = Dissolve_front.run ~edges
       ~bridge_policy:Dissolve.Create_disjoint_polygons ~remove_unused_points:false source
       |> get_rdk in
   check (Geometry.primitive_count disjoint = 2
       && Geometry.vertex_count disjoint = 8) "disjoint bridge loops";
-  let bridged = Dissolve.run ~edges
+  let bridged = Dissolve_front.run ~edges
       ~bridge_policy:Dissolve.Create_bridged_polygons ~remove_unused_points:false source
       |> get_rdk in
   check (Geometry.primitive_count bridged = 1
       && Geometry.vertex_count bridged = 10) "bridged polygon loop";
-  let deleted = Dissolve.run ~edges
+  let deleted = Dissolve_front.run ~edges
       ~bridge_policy:Dissolve.Delete_bridge_polygons source |> get_rdk in
   check (Geometry.primitive_count deleted = 0 && Geometry.point_count deleted = 0)
     "delete bridge component"
 
 let test_errors_and_curves () =
-  let curve = Line_geometry.polyline [|0.,0.,0.;1.,0.,0.;2.,0.,0.|] |> get_rdk in
+  let curve = Line_geometry_front.polyline [|0.,0.,0.;1.,0.,0.;2.,0.,0.|] |> get_rdk in
   let all = edge_group curve "all" (fun _ -> true) in
-  check (Dissolve.run ~edges:all curve |> get_rdk == curve)
+  check (Dissolve_front.run ~edges:all curve |> get_rdk == curve)
     "polygon-curve edges were not ignored";
   let cancel = Cancel.create () in Cancel.cancel cancel;
   let cancelled_source = two_quads () in
-  (match Dissolve.run ~cancel ~edges:(manifold_edges cancelled_source)
+  (match Dissolve_front.run ~cancel ~edges:(manifold_edges cancelled_source)
       cancelled_source with
    | Error error -> check (Error.code error = "cancelled") "cancellation code"
    | Ok _ -> fail "cancelled dissolve succeeded");
   let source = two_quads () in
   let foreign = manifold_edges (ring ()) in
-  (match Dissolve.run ~edges:foreign source with
+  (match Dissolve_front.run ~edges:foreign source with
    | Error error -> check (Error.code error = "invalid_topology")
        "foreign topology diagnostic"
    | Ok _ -> fail "foreign edge group accepted");
@@ -171,13 +171,13 @@ let test_errors_and_curves () =
     check (edge >= 0) (label ^ " fixture edge");
     let selected = Edge_group.init ~grain:1 ~topology ~index ~name:"bad"
         (fun candidate -> candidate = edge) in
-    match Dissolve.run ~edges:selected geometry with
+    match Dissolve_front.run ~edges:selected geometry with
     | Error error -> check (Error.code error = "invalid_topology")
         (label ^ " diagnostic")
     | Ok _ -> fail (label ^ " accepted") in
   expect_invalid "non-manifold" (malformed [|0;1;2; 1;0;3; 0;1;4|]);
   expect_invalid "inconsistent winding" (malformed [|0;1;2; 0;1;3|]);
-  (match Dissolve.run ~collinearity_tolerance:nan source with
+  (match Dissolve_front.run ~collinearity_tolerance:nan source with
    | Error error -> check (Error.code error = "invalid_topology")
        "non-finite tolerance diagnostic"
    | Ok _ -> fail "non-finite tolerance accepted")
@@ -190,7 +190,7 @@ let test_normals () =
         ~y:(Array.make (Geometry.point_count source) 0.)
         ~z:(Array.make (Geometry.point_count source) 0.))) |> get in
   let source = Geometry.with_attribute normals source |> get in
-  let output = Dissolve.run ~edges:(manifold_edges source)
+  let output = Dissolve_front.run ~edges:(manifold_edges source)
       ~remove_inline_points:true source |> get_rdk in
   let normal = Geometry.find_attribute ~owner:Attribute.Point "N" output
       |> Option.get in
@@ -216,7 +216,7 @@ let test_parallel () =
       ~columns:300 ~rows:220 ~size:20. () |> get_rdk |> add_payload in
   let edges = manifold_edges source in
   let run domains = Parallel.run ~domains (fun () ->
-      Dissolve.run ~grain:257 ~edges ~remove_inline_points:true
+      Dissolve_front.run ~grain:257 ~edges ~remove_inline_points:true
         ~collinearity_tolerance:1e-10 source |> get_rdk) in
   let one = run 1 and four = run 4 in
   check (equal_geometry one four) "one/four-domain output differs";

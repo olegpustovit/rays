@@ -133,7 +133,7 @@ let run_scene2 () =
     Path.Line_to { x = 20.; y = 0. };
   |] in
   List.iter (fun (name, node) ->
-    match Scene.Private.to_ir [node] with
+    match Scene.Layer.to_ir [node] with
     | Ok _ -> ()
     | Error message -> fail (name ^ " did not lower: " ^ message))
     [ "point", Scene.point ~at:(3, 4) ();

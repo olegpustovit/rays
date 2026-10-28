@@ -1,6 +1,6 @@
 module D3=Scene3
 type blend=Replace|Alpha|Add|Multiply
-type text_node={x:int;y:int;value:string;color:Rays_math.Color.t;size:int;wrap:int option;align:Font.alignment;provided_font:Font.t option;mutable automatic:Font.Private.automatic option;mutable rendered:Image.t option}
+type text_node={x:int;y:int;value:string;color:Rays_math.Color.t;size:int;wrap:int option;align:Font.alignment;provided_font:Font.t option;mutable automatic:Font.Raster.automatic option;mutable rendered:Image.t option}
 and view3d_node={viewport:(int*int*int*int)option;camera:Camera.t;scene:Scene3.t;mutable rendered3d:Image.t option}
 and image_node={image:Image.t;x:int;y:int;scale:float;angle:float}
 and display_list_node={segment:Scene_command.Display_list.t;
@@ -41,11 +41,11 @@ module Ellipse_table=Lru.Make(Structural_key(struct
   type t=int*int*int*int*int32 option*int32 option end))
 let ellipse_cache_capacity=256
 type shape_cache_context={path_geometry:node Path_geometry_table.t;rounded:t Rounded_table.t;
-  ellipse:node Ellipse_table.t;fonts:Font.Private.cache_context}
+  ellipse:node Ellipse_table.t;fonts:Font.Raster.cache_context}
 let current_shape_cache_context=Domain.DLS.new_key(fun()->None)
 let create_shape_cache_context()={path_geometry=Path_geometry_table.create path_geometry_cache_capacity;
   rounded=Rounded_table.create rounded_cache_capacity;ellipse=Ellipse_table.create ellipse_cache_capacity;
-  fonts=Font.Private.create_cache_context()}
+  fonts=Font.Raster.create_cache_context()}
 let path_geometry_cached key make=match Domain.DLS.get current_shape_cache_context with
   |None->make()
   |Some context->(match Path_geometry_table.find context.path_geometry key with
@@ -162,7 +162,7 @@ and same_node a b =
   | Blend (m,t),Blend (m',t') -> m=m' && same t t'
   | _ -> false
 
-module Private=struct
+module Layer=struct
   let same=same
  let display_list=display_list
  let shapes batch=Shapes batch
@@ -173,7 +173,7 @@ module Private=struct
  let ui ?(images=[]) batch=
    List.iter(fun id->
      if not(List.mem_assoc id images)then
-       invalid_arg"Scene.Private.ui: unbound texture resource")
+       invalid_arg"Scene.Layer.ui: unbound texture resource")
      (Scene_command.Ui_batch.textures batch);
    Ui{ui=batch;ui_resources=List.map(fun(id,image)->
      id,Renderer.Image(Image.resource image))images}
@@ -216,8 +216,8 @@ module Private=struct
    | None ->
        let image=match node.provided_font with
        |Some font->Result.get_ok(Font.cached_text?wrap:node.wrap~align:node.align~density font node.value(Font.Blended node.color))
-       |None->let automatic=Result.get_ok(Font.Private.borrow_automatic?wrap:node.wrap~align:node.align~density~size:node.size node.value(Font.Blended node.color))in
-         node.automatic<-Some automatic;Font.Private.automatic_image automatic in
+       |None->let automatic=Result.get_ok(Font.Raster.borrow_automatic?wrap:node.wrap~align:node.align~density~size:node.size node.value(Font.Blended node.color))in
+         node.automatic<-Some automatic;Font.Raster.automatic_image automatic in
        node.rendered <- Some image;
        image
 
@@ -588,8 +588,8 @@ module Private=struct
      Domain.DLS.set current_lower_cache previous_lower;
      Domain.DLS.set current_cache_context previous)
      (fun()->Scene3_native_lowering.with_cache_context context.scene3(fun()->
-       Font.Private.with_cache_context context.shapes.fonts f))
- let clear_cache_context context=Font.Private.clear_cache_context context.shapes.fonts
+       Font.Raster.with_cache_context context.shapes.fonts f))
+ let clear_cache_context context=Font.Raster.clear_cache_context context.shapes.fonts
  let native_stage_bytes stage=List.fold_left(fun total->function
    |Scene2_segment(segment,_)->total+Scene_command.Display_list.source_bytes segment
    |Scene2_layer(ir,_)->total+Array.fold_left(fun total->function
@@ -632,7 +632,7 @@ module Private=struct
  let native_scene_cacheable scene=
    let rec nodes=function
     |[]->true
-    |View3d view::rest->Scene3.Private.cacheable view.scene&&nodes rest
+    |View3d view::rest->Scene3.Walk.cacheable view.scene&&nodes rest
     |Group nested::rest|Translate(_,_,nested)::rest|Rotate(_,nested)::rest
     |Scale(_,_,nested)::rest|Affine(_,nested)::rest|Clip(_,_,_,_,nested)::rest|Blend(_,nested)::rest->
         nodes nested&&nodes rest
@@ -642,7 +642,7 @@ module Private=struct
    nodes scene
  let stage_native_internal ~aggregate ?(density=1) ~width ~height scene =
    let cacheable=match scene with
-   |[Clear _;View3d view]->Scene3.Private.cacheable view.scene
+   |[Clear _;View3d view]->Scene3.Walk.cacheable view.scene
    |_->native_scene_cacheable scene in
    let uncached=if aggregate then stage_native_uncached
      else stage_native_render_uncached in
@@ -685,7 +685,7 @@ module Private=struct
    List.iter
      (function
        | Text node ->
-           Option.iter Font.Private.release_automatic node.automatic;
+           Option.iter Font.Raster.release_automatic node.automatic;
            node.automatic <- None;
            node.rendered <- None
        | View3d node ->
@@ -699,7 +699,7 @@ module Private=struct
        | Layer_break -> ())
      scene
 end
-let shapes=Private.shapes
-let geometry=Private.geometry
-let transform=Private.transform
-let render scene=Option.iter(fun callback->callback scene)(Domain.DLS.get Private.renderer)
+let shapes=Layer.shapes
+let geometry=Layer.geometry
+let transform=Layer.transform
+let render scene=Option.iter(fun callback->callback scene)(Domain.DLS.get Layer.renderer)

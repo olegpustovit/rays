@@ -10,7 +10,7 @@ type run_context={
   stopped:bool ref;
   input:Input_state.t;
   time:Time.t;
-  caches:Scene.Private.cache_context;
+  caches:Scene.Layer.cache_context;
   world_caches:World.Private.cache_context;
   native_caches:Native_scene_lowering.cache_context;
   mutable relative:(bool->(unit,string)result)option;
@@ -135,17 +135,17 @@ let run_state_internal ?(config=default_config)?max_frames ?crash_dir ?(profile=
   let input=match Input_state.create()with
     |Ok input->input|Error message->startup_error"Sketch.run_state"Ogpu.Error.Invalid_state("input: "^message)in
   let time=Time.create~target_fps:(Option.value config.fps~default:0)~vsync_enabled:vsync in
-  let caches=Scene.Private.create_cache_context()in
+  let caches=Scene.Layer.create_cache_context()in
   let world_caches=World.Private.create_cache_context()in
   let native_caches=Native_scene_lowering.create_cache_context()in
   let state={stopped=ref false;input;time;caches;world_caches;native_caches;relative=None;cursor=None;background=None;dialog=None}in
-  let with_run_caches f=Scene.Private.with_cache_context caches(fun()->
+  let with_run_caches f=Scene.Layer.with_cache_context caches(fun()->
     World.Private.with_cache_context world_caches f)in
   let first=frame config input 0 0. 0.[]in
   let configuration={Renderer.logical_width=config.width;logical_height=config.height;drawable_width=config.width;drawable_height=config.height;title=config.title;vsync;high_density}in
   let get=function Ok x->x|Error e->raise(Startup_error e)in
   let coordinator=get(Renderer.create configuration)in
-  let runtime=Renderer.Private.runtime coordinator in
+  let runtime=Renderer.Native.runtime coordinator in
   (match Runtime.show runtime with
    |Ok()->()
    |Error error->ignore(Renderer.destroy coordinator);raise(Startup_error error));
@@ -191,7 +191,7 @@ let run_state_internal ?(config=default_config)?max_frames ?crash_dir ?(profile=
   let render_scene scene=
     (* ponytail: scan scene metadata each frame; move the focused region into
        staged scene facts if large retained scenes make this measurable. *)
-    let area=Scene.Private.text_regions scene
+    let area=Scene.Layer.text_regions scene
       |>List.find_opt(fun(_,_,_,_,focused,_)->focused)
       |>Option.map(fun(x,y,w,h,_,cursor)->(x,y,w,h),cursor)in
     get(Runtime.set_text_input runtime area);
@@ -215,7 +215,7 @@ let run_state_internal ?(config=default_config)?max_frames ?crash_dir ?(profile=
       |>List.filter(fun(f:Frame.t)->f.input.frame>0)in
     exn,backtrace,frames in
   let release_after_failed_init () =
-    (try Scene.Private.clear_cache_context caches with error ->
+    (try Scene.Layer.clear_cache_context caches with error ->
       Printf.eprintf "Sketch initialization cache cleanup failed: %s\n%!"
         (Printexc.to_string error));
     (try ignore (Renderer.destroy coordinator) with error ->
@@ -233,11 +233,11 @@ let run_state_internal ?(config=default_config)?max_frames ?crash_dir ?(profile=
       (* Never leave the pointer captured after the sketch stops. *)
       Option.iter(fun set->ignore(set false))state.relative;
       state.relative<-None;state.cursor<-None;state.background<-None;state.dialog<-None;
-      Option.iter Scene.Private.release !last_scene;last_scene:=None;
-      Scene.Private.clear_cache_context state.caches;
+      Option.iter Scene.Layer.release !last_scene;last_scene:=None;
+      Scene.Layer.clear_cache_context state.caches;
       ignore(Renderer.destroy coordinator))(fun()->on_stop!model)in
   let previous=current_run()in
-  Scene.Private.with_renderer render_scene(fun()->Canvas_runtime.with_save save (fun()->Fun.protect~finally:(fun()->Domain.DLS.set active_run previous;cleanup())(fun()->
+  Scene.Layer.with_renderer render_scene(fun()->Canvas_runtime.with_save save (fun()->Fun.protect~finally:(fun()->Domain.DLS.set active_run previous;cleanup())(fun()->
     Domain.DLS.set active_run(Some state);
     let limit=max_frames in let count=ref 0 in
     let shown=ref None and quiet=ref 0 in
@@ -281,7 +281,7 @@ let run_state_internal ?(config=default_config)?max_frames ?crash_dir ?(profile=
         if limit<>None then Scene.render scene
         else if not visible then(shown:=None;Unix.sleepf 0.033)
         else if polled.window_changed||(match !shown with
-            |Some last->not(Scene.Private.same last scene)|None->true)
+            |Some last->not(Scene.Layer.same last scene)|None->true)
         then(Scene.render scene;shown:=Some scene;quiet:=0)
         else incr quiet;
         model:=after_present !model facts;

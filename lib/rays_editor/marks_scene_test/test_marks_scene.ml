@@ -9,7 +9,7 @@ let checked body =
   let forms = ok (Flow.Syntax.parse ("(workspace w (graph g :context draw " ^ body ^ "))")) in
   match Flow.Workspace.check {Flow.Catalog.version=1;kinds=[]} forms with
   | Some ws,[] -> ws | _,ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
-let serialize scene = Scene_command.Render_ir.serialize (Result.get_ok (Scene.Private.to_ir scene))
+let serialize scene = Scene_command.Render_ir.serialize (Result.get_ok (Scene.Layer.to_ir scene))
 let array3 = "(map (fn [i] [(* i 7.5) (+ 3 (* (* i t) 9)) 0]) (array/range 5))"
 let pictures = [
   "(draw/background \"#14161c\")";
@@ -235,7 +235,7 @@ let () =
   let before = Gc.allocated_bytes () in
   let scene = ok (Flow_native.Marks_scene.scene ~buffers marks) in
   let per_mark = (Gc.allocated_bytes () -. before) /. float n in
-  (match Rays.Scene.Private.commands scene with
+  (match Rays.Scene.Layer.commands scene with
    | [| Scene_command.Render_ir.Shapes batch |] -> assert (Scene_command.Ui_batch.count batch = n)
    | _ -> failwith "a circle set is one Shapes command");
   if per_mark > 72. then failwith (Printf.sprintf "a static circle set allocates %.0f bytes a mark, over its 64-byte instance" per_mark);

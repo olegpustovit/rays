@@ -6,16 +6,17 @@ type detection =
   | Poly_cut_crossing of { attribute : string; value : float }
   | Poly_cut_change of { attribute : string; threshold : float }
 
-val cut :
-  ?cancel:Cancel.t ->
-  ?grain:int ->
-  ?primitives:Group.t ->
-  ?cut_points:Group.t ->
-  ?cut_edges:Edge_group.t ->
-  ?element:element ->
-  ?strategy:strategy ->
-  ?detection:detection ->
-  ?keep_closed:bool ->
-  Geometry.t ->
-  (Geometry.t, Error.t) result
+type params = {
+  cancel : Cancel.t option;
+  grain : int option;
+  primitives : Group.t option;
+  cut_points : Group.t option;
+  cut_edges : Edge_group.t option;
+  element : element;
+  strategy : strategy;
+  detection : detection;
+  keep_closed : bool;
+}
+
+val cut : params -> Geometry.t -> (Geometry.t, Error.t) result
 (** Packed polygon-curve cutting kernel. *)

@@ -97,10 +97,10 @@ let startup_settings () =
 let geometry_bytes e = Option.map Test_support.Workspace_cook.geometry_bytes (E.prepared e)
 
 let layers e =
-  match Scene.Private.stage_native ~width:900 ~height:640 (E.scene e (frame 1)) with
+  match Scene.Layer.stage_native ~width:900 ~height:640 (E.scene e (frame 1)) with
   | Error m -> failwith m
   | Ok staged -> List.filter_map (function
-      | Scene.Private.Scene3_layer s -> Some (Array.to_list s.entries |> List.map (fun entry ->
+      | Scene.Layer.Scene3_layer s -> Some (Array.to_list s.entries |> List.map (fun entry ->
           entry.Scene_execution.draw.state.transform_uniforms, entry.draw.mesh.vertices))
       | _ -> None) staged.layers
 
@@ -863,7 +863,7 @@ let compiled_probe_panels () =
       (ui/workspace (ui/split "horizontal" (ui/canvas (ref picture))
         (ui/split "vertical" (ui/graph "picture") (ui/lisp :tab "graph"))))))|} in
   with_editor (workspace text) (fun e ->
-    let first_x () = E.Private.canvas_scenes !e |> List.hd |> Scene.Private.commands
+    let first_x () = E.Private.canvas_scenes !e |> List.hd |> Scene.Layer.commands
       |> Array.to_list |> List.find_map (function
         | Scene_command.Render_ir.Shapes shapes when Scene_command.Ui_batch.count shapes > 1 ->
             Some (Scene_command.Ui_batch.count shapes,

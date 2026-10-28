@@ -571,17 +571,17 @@ let source_origins ~sources inputs =
           | _ -> None in
         let origin = match facts.topology, facts.elementwise, input with
           | N.Preserved, (N.Points | Primitives), Some i ->
-              let inputs = N.Private.input_array node in
+              let inputs = N.Build.input_array node in
               if i >= 0 && i < Array.length inputs then point_origin inputs.(i) else N.id node
           | _ -> N.id node in
         Hashtbl.add origins (N.id node) origin; origin in
   Ok (List.combine sources inputs |> List.map (fun (id, node) -> id, point_origin node))
 
 let materialized_source source =
-  N.Private.make_geometry ~operation:"flow.capture" ~version:1 ~parameters:""
+  N.Build.make_geometry ~operation:"flow.capture" ~version:1 ~parameters:""
     ~cook_mode:N.Generic ~dependencies:Sop.Context.Dependencies.static
     ~inputs:[|source|] (fun ~node_id:_ _ geometries ->
-      Ok N.Private.{geometry=geometries.(0);instances=None})
+      Ok N.Build.{geometry=geometries.(0);instances=None})
 
 let rec captured bindings (term : Flow.Workspace.term) = match term.node with
     | Ref_binding (name, fields) ->
@@ -777,7 +777,7 @@ let node ?state ?(reference = false) ?(strict = false) ?elems ?profile ?approx ?
     ^ Option.fold ~none:"" ~some:(fun bindings -> Flow.Value.key_of
         ~residual:E.Residual.residual_id (E.Record bindings)) elems
     ^ Option.fold ~none:"" ~some:E.state_stamp state in
-  let node = N.Private.make_geometry ~label:("Write " ^ name) ~operation:"flow.with_attr" ~version:1
+  let node = N.Build.make_geometry ~label:("Write " ^ name) ~operation:"flow.with_attr" ~version:1
     ~parameters ~cook_mode:(N.Duplicate_input 0)
     ~dependencies:(if E.frame_dependent data then
         Sop.Context.Dependencies.one Sop.Context.Dependencies.Input
@@ -825,6 +825,6 @@ let node ?state ?(reference = false) ?(strict = false) ?elems ?profile ?approx ?
                   (fun values -> if Sop.Context.cancelled context then
                       error "E_CANCELLED" "Attribute kernel cancelled."
                     else write_storage ~owned_fields ~grain:(Sop.Context.grain context) ~owner ~kind name values geometries.(0))))) in
-      (Result.map (fun geometry -> N.Private.{geometry; instances = None}) result)) in
-  N.Private.with_facts { (N.facts node) with elementwise = (match owner with A.Point->N.Points|Primitive->Primitives|_->None);
+      (Result.map (fun geometry -> N.Build.{geometry; instances = None}) result)) in
+  N.Build.with_facts { (N.facts node) with elementwise = (match owner with A.Point->N.Points|Primitive->Primitives|_->None);
     topology = N.Preserved; reads = (if selected then List.sort_uniq String.compare(name::reads data) else reads data); writes = [name] } node

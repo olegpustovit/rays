@@ -14,7 +14,7 @@ let fn text =
   let producer = Array.find_opt (fun (n:E.node) -> n.kind="image/map") evaluated.plan.nodes |> Option.get in
   match List.assoc "function" producer.args with E.Fn f -> f | _ -> assert false
 let prepare ?(width=387) ?(height=91) fn =
-  Flow_sop.Image_kernel.prepare ~identity:(P.Node.Private.fresh_id ()) ~width ~height ~fn ~sources:[] [] |> ok
+  Flow_sop.Image_kernel.prepare ~identity:(P.Node.Build.fresh_id ()) ~width ~height ~fn ~sources:[] [] |> ok
 let cook ?(time=0.) domains prepared =
   let session = P.Session.create ~max_entries:0 ~max_payload_bytes:0 |> Result.get_ok in
   Fun.protect ~finally:(fun () -> P.Session.close session) (fun () ->

@@ -5,7 +5,7 @@ open Rdk_ops
 
 type t = {
   base_mesh : Mesh.t;
-  base : Mesh.Private.packed_view;
+  base : Mesh.View.packed_view;
   piece_of_vertex : int array;
   center_x : float array;
   center_y : float array;
@@ -56,20 +56,20 @@ let primitive_pieces ~piece_attribute geometry =
            piece_attribute))
 
 let expand_triangles_preserving_attributes mesh =
-  let source = Mesh.Private.packed_view mesh in
+  let source = Mesh.View.packed_view mesh in
   if source.mode <> Mesh.Triangles then
     invalid_arg "Packed_pieces: expected a triangulated render mesh";
   let count = Array.length source.indices in
   let select plane = Array.init count (fun vertex ->
       plane.(source.indices.(vertex))) in
-  let select3 (values : Mesh.Private.vec3_view) : Mesh.Private.vec3_view = {
+  let select3 (values : Mesh.View.vec3_view) : Mesh.View.vec3_view = {
     x = select values.x; y = select values.y; z = select values.z;
   } in
   let vertices = select3 source.vertices
   and normals = Option.map select3 source.normals
   and colors = Option.map select source.colors
   and tex_coords = Option.map select source.tex_coords in
-  Mesh.Private.create_packed_owned ~mode:Mesh.Triangles
+  Mesh.View.create_packed_owned ~mode:Mesh.Triangles
     ~indices:(Array.init count Fun.id) ?normals ?colors ?tex_coords vertices
   |> Result.get_ok
 
@@ -80,7 +80,7 @@ let of_geometry ~piece_attribute geometry =
     if Topology.all_triangles (Geometry.topology geometry) then
       Ok geometry
     else Result.map_error Error.to_string
-        (Triangulate.run geometry)
+        (Triangulate.run { cancel = None; grain = None; primitives = None } geometry)
   in
   Result.bind triangulated (fun geometry ->
     Result.bind (primitive_pieces ~piece_attribute geometry)
@@ -92,7 +92,7 @@ let of_geometry ~piece_attribute geometry =
                (Rays_mesh.to_mesh geometry))
             (fun mesh ->
               let expanded = expand_triangles_preserving_attributes mesh in
-              let base = Mesh.Private.packed_view expanded in
+              let base = Mesh.View.packed_view expanded in
               let expected = Geometry.primitive_count geometry * 3 in
               if base.mode <> Mesh.Triangles
                   || Array.length base.vertices.x <> expected then
@@ -165,14 +165,14 @@ let mesh ?(noise_amount = 0.) ?(noise_frequency = 1.) ?(noise_seed = 0)
       amount *. scale.(piece) *. offset.(piece) in
     let count = vertex_count value in
     let positions = {
-      Mesh.Private.x = Array.init count (fun vertex ->
+      Mesh.View.x = Array.init count (fun vertex ->
         value.base.vertices.x.(vertex) +. displaced value.offset_x vertex);
       y = Array.init count (fun vertex ->
         value.base.vertices.y.(vertex) +. displaced value.offset_y vertex);
       z = Array.init count (fun vertex ->
         value.base.vertices.z.(vertex) +. displaced value.offset_z vertex);
     } in
-    Mesh.Private.create_packed_shared ~mode:value.base.mode
+    Mesh.View.create_packed_shared ~mode:value.base.mode
       ~indices:value.base.indices ?normals:value.base.normals
       ?colors:value.base.colors ?tex_coords:value.base.tex_coords positions
     |> Result.get_ok
