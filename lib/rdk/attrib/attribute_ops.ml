@@ -1,21 +1,5 @@
 
 
-type method_ = Attribute_promote.method_ =
-  | First
-  | Last
-  | Average
-  | Minimum
-  | Maximum
-  | Mode
-  | Median
-  | Sum
-  | Sum_squares
-  | Root_mean_square
-  | Array_all
-  | Unique_values
-
-let promote_pattern = Attribute_promote.promote_pattern
-
 type rename_conflict = Attribute_lifecycle.rename_conflict =
   | Attribute_rename_skip
   | Attribute_rename_error

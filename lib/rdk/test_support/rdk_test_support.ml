@@ -213,12 +213,6 @@ let float_array_values ~owner ~name geometry =
 
 
 
-(* One attribute by exact name: [promote_pattern] with a literal pattern. *)
-let promote ?cancel ?grain ?into ?method_ ?delete_source ?piece_attribute ?index_attribute
-    ~source ~destination ~name geometry =
-  Attribute_ops.promote_pattern ?cancel ?grain ?into_pattern:into ?method_ ?delete_source
-    ?piece_attribute ?index_pattern:index_attribute ~source ~destination ~pattern:name geometry
-
 (* [Triangulate2d.run] with the defaults tests rely on; the SOP declaration owns the real ones. *)
 let triangulate2d ?cancel ?(grain = 16_384) ?selection ?constraint_edges
     ?constraint_primitives ?(projection = Triangulate2d.Best_fit) ?(seed = 0L)

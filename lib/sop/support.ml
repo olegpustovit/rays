@@ -481,21 +481,6 @@ let set_attribute_cook ~operation ~owner ~name make geometry =
               | Ok geometry -> cooked geometry
               | Error message -> rdk_error operation message
 
-let attribute_promotion_method_parameter = Param.choice ~equal:( = ) [
-    "First", Rdk.Attribute_ops.First;
-    "Last", Rdk.Attribute_ops.Last;
-    "Average", Rdk.Attribute_ops.Average;
-    "Minimum", Rdk.Attribute_ops.Minimum;
-    "Maximum", Rdk.Attribute_ops.Maximum;
-    "Mode", Rdk.Attribute_ops.Mode;
-    "Median", Rdk.Attribute_ops.Median;
-    "Sum", Rdk.Attribute_ops.Sum;
-    "Sum of squares", Rdk.Attribute_ops.Sum_squares;
-    "Root mean square", Rdk.Attribute_ops.Root_mean_square;
-    "Array of all", Rdk.Attribute_ops.Array_all;
-    "Unique values", Rdk.Attribute_ops.Unique_values;
-  ]
-
 let soft_falloff_parameter = Param.choice ~equal:( = ) [
     "Linear", Rdk.Transform_ops.Soft_linear; "Quadratic", Rdk.Transform_ops.Soft_quadratic;
     "Cubic", Rdk.Transform_ops.Soft_cubic;
