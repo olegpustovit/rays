@@ -70,7 +70,6 @@ let check_topology_validation () =
 
 let run () =
   check_topology_validation ();
-  Test_rdk_sources.patterns ();
   let builder = Packed.Float3.Builder.create 4 in
   Packed.Float3.Builder.set builder 0 0. 0. 0.;
   Packed.Float3.Builder.set builder 1 1. 0. 0.;
@@ -107,26 +106,10 @@ let run () =
   (match Topology.polygons_owned ~point_count:2 ~vertex_points:[|0; 1|]
            ~primitive_offsets:[|0; 2|] with
    | Error _ -> () | Ok _ -> fail "undersized polygon was accepted");
-  let triangle_builder = Tb.create ~point_count:4 () in
-  Tb.add_triangle triangle_builder 0 1 2;
-  Tb.add_triangle triangle_builder 0 2 3;
-  let triangle_geometry = Geometry.create ~positions
-      ~topology:(Tb.freeze triangle_builder) () |> get_ok in
-  let _vertex_ids = Attribute.create_owned ~name:"vertex_id"
-      ~owner:Attribute.Vertex (Attribute.Int [|0; 1; 2; 3; 4; 5|]) |> get_ok
-  and _primitive_ids = Attribute.create_owned ~name:"primitive_id"
-      ~owner:Attribute.Primitive (Attribute.Int [|10; 20|]) |> get_ok in
-  let (transfer_source, transfer_target) = Test_rdk_attributes.transfer ~geometry ~triangle_geometry in
   let cancelled = Cancel.create () in
   Cancel.cancel cancelled;
   (match Plane_generators.grid ~cancel:cancelled ~columns:256 ~rows:256 ~size:2. () with
    | Error error when Error.code error = "cancelled" -> ()
    | Error error -> fail ("unexpected cancellation code: " ^ Error.code error)
    | Ok _ -> fail "cancelled RDK operation published geometry");
-  (match Attribute_ops.transfer_points ~cancel:cancelled
-      ~source:transfer_source ~target:transfer_target () with
-   | Error error when Error.code error = "cancelled" -> ()
-   | _ -> fail "cancelled attribute transfer published geometry or wrong error");
-  Test_copy_to_points.run ();
-  Test_rdk_sources.kernel ();
   print_endline "rdk tests passed"

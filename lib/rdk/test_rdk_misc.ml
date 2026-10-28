@@ -4,7 +4,8 @@ open Rdk_test_support
 
 let get_ok = function Ok value -> value | Error _ -> fail "unexpected error"
 
-let blur ~grid =
+let run () =
+  let grid = Plane_generators.grid ~columns:4 ~rows:4 ~size:2. () |> get_ok in
   let float_values name geometry =
     match Geometry.find_attribute ~owner:Attribute.Point name geometry with
     | Some attribute ->
