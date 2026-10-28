@@ -1,8 +1,6 @@
 open Rdk_test_support
 open Rdk
 
-let get_ok = function Ok value -> value | Error error ->
-  fail (Error.to_string error)
 
 let points xs =
   let count = Array.length xs in

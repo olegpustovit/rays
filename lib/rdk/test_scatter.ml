@@ -1,9 +1,8 @@
+open Rdk_test_support
 open Rays
 open Rdk
 
 let fail message = failwith message
-let get_ok = function Ok value -> value | Error error ->
-  fail (Error.to_string error)
 let get_string_ok = function Ok value -> value | Error message -> fail message
 let near ?(epsilon = 1e-11) left right = abs_float (left -. right) <= epsilon
 

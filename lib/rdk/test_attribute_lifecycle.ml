@@ -2,7 +2,7 @@ open Rays
 open Rdk
 open Rdk_test_support
 
-let get_ok = function Ok value -> value | Error message -> fail message
+let get_ok = get
 
 let owner_count geometry = function
   | Attribute.Point -> Geometry.point_count geometry

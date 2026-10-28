@@ -2,7 +2,7 @@ open Rays
 open Rdk
 open Rdk_test_support
 
-let get_ok = function Ok value -> value | Error message -> fail message
+let get_ok = get
 
 let add_attribute owner name storage geometry =
   let attribute = Attribute.create_owned ~owner ~name storage |> get_ok in

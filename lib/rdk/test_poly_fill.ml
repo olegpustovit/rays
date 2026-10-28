@@ -2,7 +2,7 @@ open Rays
 open Rdk
 open Rdk_test_support
 
-let get_ok = function Ok value -> value | Error message -> fail message
+let get_ok = get
 let near ?(epsilon = 1e-12) left right = abs_float (left -. right) <= epsilon
 
 let equal_storage left right =

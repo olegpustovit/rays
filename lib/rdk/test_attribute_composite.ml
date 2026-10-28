@@ -1,8 +1,6 @@
 open Rdk_test_support
 open Rdk
 
-let get_ok = function Ok value -> value | Error error ->
-  fail (Error.to_string error)
 
 let close left right = Float.abs (left -. right) <= 1e-12
 let array_close left right =

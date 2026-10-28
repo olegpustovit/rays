@@ -2,7 +2,7 @@ open Rays
 open Rdk
 open Rdk_test_support
 
-let get_ok = function Ok value -> value | Error message -> fail message
+let get_ok = get
 
 let attribute_storage_equal left right =
   match Attribute.Private.storage left, Attribute.Private.storage right with

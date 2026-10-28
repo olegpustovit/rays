@@ -2,7 +2,7 @@ open Rays
 open Rdk
 open Rdk_test_support
 
-let get_ok = function Ok value -> value | Error message -> fail message
+let get_ok = get
 
 let geometry_owned ~kinds positions vertex_points primitive_offsets =
   let positions = Array.of_list positions in
