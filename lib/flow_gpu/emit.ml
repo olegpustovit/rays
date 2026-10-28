@@ -5,34 +5,6 @@ type msl = {source : string; entry : string; interface : S.binding list;
   table_seeds : int array; output_widths : int array; input_widths : int array;
   gathers : (int * int) array; counts : int option; scene : int option}
 let names = Flow.Packed_ops.names
-let perlin = {|float fade(float t) { return t*t*t*(t*(t*6.0f-15.0f)+10.0f); }
-float blend(float a, float b, float t) { return a+t*(b-a); }
-float gradient(int h, float x, float y, float z) {
-  h &= 15;
-  float u=h<8?x:y, v=h<4?y:((h==12||h==14)?x:z);
-  return ((h&1)==0?u:-u)+((h&2)==0?v:-v);
-}
-float noise(float3 p, device const int* table) {
-  if(!all(isfinite(p))) return as_type<float>(0x7fc00000u);
-  float3 base=floor(p), q=p-base, f=float3(fade(q.x),fade(q.y),fade(q.z));
-  int x=int(fmod(base.x,256.0f))&255, y=int(fmod(base.y,256.0f))&255, z=int(fmod(base.z,256.0f))&255;
-  int a=table[x]+y, b=table[x+1]+y;
-  int aa=table[a]+z, ab=table[a+1]+z, ba=table[b]+z, bb=table[b+1]+z;
-  float x00=blend(gradient(table[aa],q.x,q.y,q.z),gradient(table[ba],q.x-1,q.y,q.z),f.x);
-  float x10=blend(gradient(table[ab],q.x,q.y-1,q.z),gradient(table[bb],q.x-1,q.y-1,q.z),f.x);
-  float x01=blend(gradient(table[aa+1],q.x,q.y,q.z-1),gradient(table[ba+1],q.x-1,q.y,q.z-1),f.x);
-  float x11=blend(gradient(table[ab+1],q.x,q.y-1,q.z-1),gradient(table[bb+1],q.x-1,q.y-1,q.z-1),f.x);
-  return clamp((blend(blend(x00,x10,f.y),blend(x01,x11,f.y),f.z)+1.0f)*0.5f,0.0f,1.0f);
-}
-float fbm(float3 p, int octaves, device const int* table) {
-  float frequency=1.0f, amplitude=1.0f, sum=0.0f, weights=0.0f;
-  for(int octave=0;octave<octaves;octave++) {
-    sum+=noise(p*frequency,table)*amplitude; weights+=amplitude;
-    frequency*=2.0f; amplitude*=0.5f;
-  }
-  return weights==0.0f?0.0f:sum/weights;
-}
-|}
 (* The trace helpers, specialised by two static scene facts: [instanced] (an instance structure and its table)
    and [motion] (the query's time: instance transforms, or vertex keyframes in a flat scene). The static text
    is unchanged by the motion insertions, which print only for a moving scene. *)
@@ -213,8 +185,8 @@ and stage_body ~raster program = Result.map (fun msl -> msl.source) (generate ~f
 and generate ?(fast=false) ?(instanced=false) ?(motion=false) ?curves ?(spheres=true) ?raster program = try
   (match P.gpu_refusals ~fused:true ~fast program with [] -> () | reason :: _ -> raise (Diagnostic.Error reason));
   let program, back = if raster <> None then program, Fun.id
-    else match Trace.expand ~instanced ~motion ~curves ~spheres program with Ok x -> x | Error d -> raise (Diagnostic.Error d) in
-  let layout = Flow_ir.Kernel_layout.plan ~fast ~instanced ~motion ~curves:(curves <> None) program in
+    else match Noise.helpers ~instanced ~motion ~curves ~spheres program with Ok x -> x | Error d -> raise (Diagnostic.Error d) in
+  let layout = Noise.checked back (Flow_ir.Kernel_layout.plan ~fast ~instanced ~motion ~curves:(curves <> None) program) in
   let native = curves = Some `Native && layout.scene_strands <> None in
   let {Flow_ir.Kernel_layout.view; used; finite_checks; uniforms; frames; table_seeds;
        gathers; gather_lengths; input_used; uniform_layout; uniform_bytes; gather_base;
@@ -262,7 +234,7 @@ and generate ?(fast=false) ?(instanced=false) ?(motion=false) ?curves ?(spheres=
     | P.Binary ((Add|Sub|Mul|Mod|Min|Max) as op, a, b) when fast ->
         (match whole a, whole b with
          | Some a, Some b -> Some ("(" ^ (match op with P.Add -> a ^ "+" ^ b | Sub -> a ^ "-" ^ b | Mul -> a ^ "*" ^ b
-             | Mod -> "fmod64(" ^ a ^ "," ^ b ^ ")" | Min -> "min(" ^ a ^ "," ^ b ^ ")" | _ -> "max(" ^ a ^ "," ^ b ^ ")") ^ ")")
+             | Mod -> b ^ "==0?0:(" ^ a ^ "%" ^ b ^ "+" ^ b ^ ")%" ^ b | Min -> "min(" ^ a ^ "," ^ b ^ ")" | _ -> "max(" ^ a ^ "," ^ b ^ ")") ^ ")")
          | _ -> None)
     | _ -> None in
   let float_of r = if integer_register r then "float(" ^ register r ^ ")" else register r in
@@ -309,6 +281,7 @@ and generate ?(fast=false) ?(instanced=false) ?(motion=false) ?curves ?(spheres=
       | Int_select (_,yes,no) when yes = no -> low yes
       | Int_select (condition,yes,no) -> Printf.sprintf "(%s!=0.0f?%s:%s)" (float_of condition) (low yes) (low no)
       | Loop_result (loop,component,_) -> register (loop+1+component)
+      | Stage (Noise_table seed,r) -> Printf.sprintf "uint(table[%d+%s])" (table seed) (low r.(0))
       | Stage (stage,r) -> (match raster with Some x -> group x current guards stage r | None -> query current guards slot stage r)
       | Int_frame name -> (match raster with Some x -> x.builtin name | None -> scene_count name)
       | _ -> assert false
@@ -344,8 +317,9 @@ and generate ?(fast=false) ?(instanced=false) ?(motion=false) ?curves ?(spheres=
       | Int_abs a -> wrap_integer("abs(" ^ int_of a ^ ")")
       | Int_select (_,yes,no) when yes = no -> int_of yes
       | Int_select (condition,yes,no) -> Printf.sprintf "(%s!=0.0f?%s:%s)" (float_of condition) (int_of yes) (int_of no)
-      (* a raster stage rounds a float to a whole float in float arithmetic, never through 64 bits *)
-      | Convert (To_float,a) when raster <> None && (match snd (guarded [] view.code.(a)) with
+      (* a rounded float as a float is rounded in float arithmetic, never through 64 bits (one value
+         wherever the 64-bit integer holds it) *)
+      | Convert (To_float,a) when (match snd (guarded [] view.code.(a)) with
           | P.Convert ((Floor|Ceil|Round|Truncate),x) -> not (integer_register x) | _ -> false) ->
           (match snd (guarded [] view.code.(a)) with
            | P.Convert (op,x) -> (match op with P.Floor -> "floor(" | Ceil -> "ceil(" | Round -> "round(" | _ -> "trunc(") ^ float_of x ^ ")"
@@ -361,12 +335,11 @@ and generate ?(fast=false) ?(instanced=false) ?(motion=false) ?curves ?(spheres=
       | Stage ((Trace_triangles _ | Trace_any | Trace_curves _ | Trace_curves_any) as stage,r) when raster = None ->
           let value = query current guards slot stage r in
           if integer_register slot then "long(" ^ value ^ ")" else value
+      | Stage (Noise_table seed,r) -> Printf.sprintf "long(table[%d+%s])" (table seed) (low r.(0))
       | Stage (stage,r) when raster = None -> scene_read stage r
       | Stage ((Group_scan _ | Store) as stage,r) when raster <> None -> "long(" ^ group (Option.get raster) current guards stage r ^ ")"
       | Stage (stage,r) when raster <> None -> stage_intrinsic stage (Array.map float_of r)
       | Stage _ -> fail "A raster-stage intrinsic runs only in a fragment stage."
-      | Noise3 (x,y,z,seed,octaves,_,_) -> Printf.sprintf "fbm(float3(%s,%s,%s),%d,table+%d)"
-          (register x) (register y) (register z) octaves (table seed)
       | Loop_result (loop,component,_) -> register (loop+1+component)
       | _ -> fail "Integer instructions and conversions are not supported by the Metal kernel target." in
     if inline then inlined.(slot) <- Some expression
@@ -479,8 +452,7 @@ and generate ?(fast=false) ?(instanced=false) ?(motion=false) ?curves ?(spheres=
     @ List.map (fun (_, declaration, binding) -> Printf.sprintf "%s [[buffer(%d)]]" declaration binding) scene_tables
     @ ["uint i [[thread_position_in_grid]]"] in
   let prefix = "#include <metal_stdlib>\nusing namespace metal;\n" ^
-    (if fast then "long fmod64(long a,long b){if(b==0)return 0;long r=a%b;return (r!=0&&((r<0)!=(b<0)))?r+b:r;}\n" else "") ^
-    (if scene_binding=None then "" else "#include <metal_raytracing>\nusing namespace metal::raytracing;\n") ^ (if table_seeds=[||] then "" else perlin) in
+    (if scene_binding=None then "" else "#include <metal_raytracing>\nusing namespace metal::raytracing;\n") in
   let signature = String.concat ",\n  " arguments in
   let guard = match counts with
     | None -> "  if(i>=uniforms[0]) return;\n"

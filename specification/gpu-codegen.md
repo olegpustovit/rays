@@ -137,8 +137,15 @@ that the checked-in output is the printers'.
   folds their tests (`Emit.kernel ?spheres`). Metal reflects only the tables a kernel reads, so its
   interface lists those.
 
-The Perlin `noise3` helpers are still printer text (`Emit.perlin`, `Spirv.noise_functions`,
-`Wgsl.perlin`), as are the WGSL 64-bit integer helpers; they are the next to move into Lisp.
+- `noise3` on Metal and SPIR-V inlines `lib/flow_gpu/noise.rays` (`Flow_gpu.Noise`): `noise-fbm`,
+  compiled once an octave count and spliced at each `Noise3` after the GPU refusals, its permutation
+  reads the seed's 512 entries of the table binding (`Region.Noise_table`, an Int in [0, 255] that
+  narrows). An exact kernel does not check the helper's operations finite, only the register that
+  replaces the `Noise3` (a nonfinite coordinate makes it NaN), so the helper prints as it does in a fast
+  kernel; the outputs are bit-identical to the former handwritten `fbm`. A float rounded with `floor`,
+  `ceil`, `round` or `trunc` and read as a float prints in float arithmetic, not through a 64-bit integer.
+  An integer-valued `mod` prints inline (`b==0?0:(a%b+b)%b`), so no MSL prelude remains in `lib/`.
+  WGSL still prints its `wfbm` and 64-bit integer helpers (outside P9.G1).
 
 ## Gates
 

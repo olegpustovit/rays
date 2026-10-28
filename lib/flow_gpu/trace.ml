@@ -28,6 +28,22 @@ let rec remap f = function
   | Guarded (guards, body) -> Guarded (List.map (fun (c, yes) -> f c, yes) guards, remap f body)
   | instruction -> instruction
 
+(* The spliced [code] (in order) as [program]'s region, each loop closed at its Loop_end, with [back]:
+   each new register's original slot (-1 for a helper's), and [map]: each original slot's register. *)
+let rebuild (program : P.t) code back map =
+  let code = Array.of_list code in
+  Array.iteri (fun slot i -> match flat [] i with
+    | _, P.Loop_end (owner, _, _) ->
+        let rec close = function
+          | P.Loop_begin loop -> P.Loop_begin { loop with finish = slot }
+          | P.Guarded (g, body) -> P.Guarded (g, close body) | other -> other in
+        code.(owner) <- close code.(owner)
+    | _ -> ()) code;
+  match Flow_ir.Core.Region.rebuild program ~code ~outputs:(Array.map (Array.map (fun x -> map.(x))) program.outputs) () with
+  | Ok expanded -> Ok (expanded, fun slot -> back.(slot))
+  | Error (d :: _) -> Error d
+  | Error [] -> fail "the kernel with its spliced helpers did not rebuild"
+
 (* The helper of one scene variant: trace-hit's fields t, prim, u, v, normal, hit and instance (the
    host's Trace fields 0 to 8), or trace-occluded's hit, as (output, component) of its program. *)
 let variants = Hashtbl.create 8 and lock = Mutex.create ()
@@ -108,20 +124,7 @@ let expand ~instanced ~motion ~curves ~spheres (program : P.t) =
         | guards, P.Trace (field, r) -> map.(slot) <- Hashtbl.find field_of (scope.(slot), guards, Array.to_list r) field
         | _ -> map.(slot) <- push slot (remap (fun x -> map.(x)) code.(slot))
       done;
-      let code = Array.of_list (List.rev !out) in
-      (* each loop's closing register *)
-      Array.iteri (fun slot i -> match flat [] i with
-        | _, P.Loop_end (owner, _, _) ->
-            let rec close = function
-              | P.Loop_begin loop -> P.Loop_begin { loop with finish = slot }
-              | P.Guarded (g, body) -> P.Guarded (g, close body) | other -> other in
-            code.(owner) <- close code.(owner)
-        | _ -> ()) code;
-      let back = Array.of_list (List.rev !back) in
-      match Flow_ir.Core.Region.rebuild program ~code ~outputs:(Array.map (Array.map (fun x -> map.(x))) program.outputs) () with
-      | Ok expanded -> Ok (expanded, fun slot -> back.(slot))
-      | Error (d :: _) -> Error d
-      | Error [] -> fail "scene/trace: the expanded kernel did not rebuild"
+      rebuild program (List.rev !out) (Array.of_list (List.rev !back)) map
     with Diagnostic.Error d -> Error d
 
 (* a frame fact's uniform word named by its slot in the host's program, before the trace helpers *)

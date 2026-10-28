@@ -1,7 +1,6 @@
 // Generated from marks.rays by Flow_gpu.Raster (lib/flow_gpu/test_raster.exe --write); do not edit.
 #include <metal_stdlib>
 using namespace metal;
-long fmod64(long a,long b){if(b==0)return 0;long r=a%b;return (r!=0&&((r<0)!=(b<0)))?r+b:r;}
 struct marks_vertex_out {
   float4 position [[position]];
   float4 color;

@@ -1,0 +1,38 @@
+; noise3 on the device. Flow_gpu.Noise inlines noise-fbm at each noise3 of a kernel, compiled once an
+; octave count, over the seed's 512-entry permutation table (Rays_math.Noise.create, the kernel's table
+; binding): Perlin's improved noise in float32, as Rays_math.Noise.fbm3, its CPU reference. A coordinate
+; that is not finite gives NaN; lacunarity is 2 and gain 0.5 (the GPU refuses any other).
+(defn noise-fade :context value [(s : float)] (* (* (* s s) s) (+ (* s (- (* s 6.) 15.)) 10.)))
+(defn noise-lerp :context value [(a : float) (b : float) (s : float)] (+ a (* s (- b a))))
+; Every branch is a value already computed, so each if is a select, never a guarded block.
+(defn noise-grad :context value [(hash : int) (x : float) (y : float) (z : float)]
+  (let* [h (int/and hash 15)
+         u (if (int/lt h 8) x y)
+         xz (if (or (int/eq h 12) (int/eq h 14)) x z)
+         v (if (int/lt h 4) y xz)
+         nu (* -1. u) nv (* -1. v)]
+    (+ (if (int/eq (int/and h 1) 0) u nu) (if (int/eq (int/and h 2) 0) v nv))))
+(defn noise-sample :context value [(table : (array int)) (p : vec3)]
+  (if (and (< (abs p.x) Infinity) (and (< (abs p.y) Infinity) (< (abs p.z) Infinity)))
+    (let* [x (- p.x (float (floor p.x))) y (- p.y (float (floor p.y))) z (- p.z (float (floor p.z)))
+           xi (int/and (floor p.x) 255) yi (int/and (floor p.y) 255) zi (int/and (floor p.z) 255)
+           a (int/add (array/nth table xi) yi) b (int/add (array/nth table (int/add xi 1)) yi)
+           aa (int/add (array/nth table a) zi) ab (int/add (array/nth table (int/add a 1)) zi)
+           ba (int/add (array/nth table b) zi) bb (int/add (array/nth table (int/add b 1)) zi)
+           u (noise-fade x) v (noise-fade y) w (noise-fade z)
+           xm (- x 1.) ym (- y 1.) zm (- z 1.)
+           x00 (noise-lerp (noise-grad (array/nth table aa) x y z) (noise-grad (array/nth table ba) xm y z) u)
+           x10 (noise-lerp (noise-grad (array/nth table ab) x ym z) (noise-grad (array/nth table bb) xm ym z) u)
+           x01 (noise-lerp (noise-grad (array/nth table (int/add aa 1)) x y zm)
+                           (noise-grad (array/nth table (int/add ba 1)) xm y zm) u)
+           x11 (noise-lerp (noise-grad (array/nth table (int/add ab 1)) x ym zm)
+                           (noise-grad (array/nth table (int/add bb 1)) xm ym zm) u)]
+      (min (max (* (+ (noise-lerp (noise-lerp x00 x10 v) (noise-lerp x01 x11 v) w) 1.) 0.5) 0.) 1.))
+    NaN))
+; The octaves' weighted mean: each at twice the last's frequency and half its amplitude.
+(defn noise-fbm :context value [(table : (array int)) (p : vec3) (octaves : int)]
+  (let* [r (fold [acc {:sum 0. :weights 0. :frequency 1. :amplitude 1.}] [k (range octaves)]
+             {:sum (+ acc.sum (* (noise-sample table (* p acc.frequency)) acc.amplitude))
+              :weights (+ acc.weights acc.amplitude)
+              :frequency (* acc.frequency 2.) :amplitude (* acc.amplitude 0.5)})]
+    (/ r.sum r.weights)))
