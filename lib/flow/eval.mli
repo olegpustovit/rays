@@ -365,6 +365,10 @@ module Host : sig
   val map_function_bindings : (value -> value) -> fn -> fn
   (** Replace immutable closure captures, preserving callable identity and scope. *)
 
+  val rewrite : (value -> value option) -> value -> value
+  (** A copy of the value with what the function replaces replaced, through closure and residual
+      captures and aggregates (each shared residual copied once, with a fresh id). *)
+
   val remap_function_geometry : sources:(int * int) list -> fn -> fn
   (** Remap geometry IDs through closure and residual captures when a host moves a callable between
       plans. Function identity and authored scope stay intact. *)

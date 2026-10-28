@@ -2635,8 +2635,10 @@ module Host = struct
     | Closure cl -> Closure { cl with env = Smap.map f cl.env }
     | Named _ as fn -> fn
 
-  let remap_function_geometry ~sources fn =
-    (* Residuals are shared: each is rewritten once, or the copy is exponential in the depth of the sharing. *)
+  (* [f] replaces a value outright; otherwise captures are rewritten through closures, residuals and
+     aggregates. Residuals are shared: each is rewritten once, or the copy is exponential in the
+     depth of the sharing. *)
+  let rewriter f =
     let module Seen = Hashtbl.Make (struct
       type t = residual
 
@@ -2644,38 +2646,52 @@ module Host = struct
       let hash (r : residual) = Hashtbl.hash r.rid
     end) in
     let seen = Seen.create 64 in
-    let rec value = function
-      | Deferred (ty, id) when Ty.is_geometry ty ->
-          Deferred (ty, Option.value ~default:id (List.assoc_opt id sources))
-      | Fn fn -> Fn (function_value fn)
-      | Residual r -> (
-          match Seen.find_opt seen r with
-          | Some copy -> Residual copy
-          | None ->
-              let copy =
-                {
-                  r with
-                  rid = Atomic.fetch_and_add bulk_ids (-1);
-                  renv = Smap.map value r.renv;
-                  live = None;
-                  dep_frame = 0;
-                  dep_state = 0;
-                }
-              in
-              Seen.add seen r copy;
-              Residual copy)
-      | List values -> List (Array.map value values)
-      | Record fields -> Record (List.map (fun (name, v) -> (name, value v)) fields)
-      | Struct (name, ty, fields) ->
-          Struct (name, ty, List.map (fun (name, v) -> (name, value v)) fields)
-      | Source (name, ty, fields) ->
-          Source (name, ty, List.map (fun (name, v) -> (name, value v)) fields)
-      | v -> v
+    let rec value v =
+      match f v with
+      | Some v -> v
+      | None -> (
+          match v with
+          | Fn fn -> Fn (function_value fn)
+          | Residual r -> (
+              match Seen.find_opt seen r with
+              | Some copy -> Residual copy
+              | None ->
+                  let copy =
+                    {
+                      r with
+                      rid = Atomic.fetch_and_add bulk_ids (-1);
+                      renv = Smap.map value r.renv;
+                      live = None;
+                      dep_frame = 0;
+                      dep_state = 0;
+                    }
+                  in
+                  Seen.add seen r copy;
+                  Residual copy)
+          | List values -> List (Array.map value values)
+          | Record fields -> Record (List.map (fun (name, v) -> (name, value v)) fields)
+          | Struct (name, ty, fields) ->
+              Struct (name, ty, List.map (fun (name, v) -> (name, value v)) fields)
+          | Source (name, ty, fields) ->
+              Source (name, ty, List.map (fun (name, v) -> (name, value v)) fields)
+          | v -> v)
     and function_value = function
       | Closure cl -> Closure { cl with env = Smap.map value cl.env }
       | Named _ as fn -> fn
     in
-    if sources = [] then fn else function_value fn
+    (value, function_value)
+
+  let rewrite f = fst (rewriter f)
+
+  let remap_function_geometry ~sources fn =
+    if sources = [] then fn
+    else
+      snd
+        (rewriter (function
+          | Deferred (ty, id) when Ty.is_geometry ty ->
+              Some (Deferred (ty, Option.value ~default:id (List.assoc_opt id sources)))
+          | _ -> None))
+        fn
 
   let state_values state =
     List.map snd (State_map.bindings state.before) @ List.map snd (State_map.bindings state.next)

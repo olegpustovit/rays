@@ -363,6 +363,17 @@ and canonical parameters), not on the whole authored source, so an edit elsewher
 cached; a card with a live argument keys on the source. A network is unchanged for the editor
 only when every node's key is.
 
+Writes fuse across cards (`Lower.fold_writes`, outside the reference lowering): a point write
+whose geometry is, through card markers and literal deletions of other attributes, a write of the
+same attribute that nothing else reads writes over that write's input instead. Its reads of the
+attribute become the earlier values, its other attribute reads and counts of the chain read the
+input, and the chain's deletions run after it in the same node (they commute with the write). The
+earlier write is not cooked, so a chain of point deformers is one region: four `noise_displace`
+cards over a cooked million-point grid cook in 0.13-0.17 s against 0.24 s unfolded, with the
+unfolded bytes. The intermediate cards are unchanged and cook as themselves when displayed or
+probed. Writes of different attributes, selected writes, and chains through a structural card (a
+body whose geometry follows cooked data, as `sop/transform`'s group test) do not fold yet.
+
 A body reads its cook context through reserved inputs (`Context_kernel.label_context`): each
 distinct `sop/context_seed`, `context_frame` or `context_time` call, labelled with the card's
 cook label (its kind key; helpers read it from the evaluation), is a cook-time source that
