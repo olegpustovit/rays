@@ -66,3 +66,21 @@ Not done: `maxTotalThreadsPerThreadgroup` is not readable through OGPU yet (need
 backends); the GPU printers still read Packed's guarded instruction list, rebuilt into blocks, rather than a
 structured kernel IR (specification/gpu-codegen.md); pixel x/y split and the float-to-int index conversions keep
 64-bit integers.
+
+## World, bevel and static folding (2026-10-28)
+
+Same command and machine; two scenes now (`PT_SCENE=dome|world`, both by default), the material round (0.3, four
+bevel probes at the camera hit, one after). `world` is a 16 x 8 baked World with a gradient, a dome disc, a World
+rect light and a sun, plus the scene's rect light. Film at 16 x 12 x 4 frames: byte-identical on the CPU walker
+and Metal in both scenes; 480 x 840: RMSE 8.7e-6 (dome), 1.2e-5 (World).
+
+| scene | load | pathtrace.metal ms (pairs 2-5) | Lisp kernel ms (pairs 2-5) | emitted lines | maxTotalThreadsPerThreadgroup |
+|---|---|---|---|---|---|
+| dome, no bevel (1daebeb7) | 23 | 9.47 9.05 9.23 9.03 | 6.47 6.33 6.35 6.42 | 1,796 | - |
+| World, no bevel (1daebeb7) | 23 | 9.94 9.78 9.80 9.80 | 7.96 8.35 7.82 7.86 | 1,659 | - |
+| dome, bevel (b0aa3bd7) | 24 | 13.15 13.19 13.23 13.18 | 11.39 11.40 11.54 11.02 | 1,309 | 512 |
+| World, bevel (b0aa3bd7) | 24 | 13.96 14.38 14.09 14.16 | 12.92 12.62 12.51 12.56 | 1,534 | 448 |
+
+The World terms of the kernel fold away in the dome scene and the dome panels in the World scene:
+`Kernel_layout.specialize` decides guards on known conditions (here `u.world`, the light, panel and sun counts,
+which the test passes as Lisp constants) and drops loops of no passes. The thread limits are the gate's floor.
