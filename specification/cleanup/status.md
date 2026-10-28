@@ -8,7 +8,7 @@ Completion is **not proved**. No phase is closed. Unlisted requirements and
 finding IDs remain open. Size estimates do not substitute for behavior,
 performance, parity, and shipping evidence.
 
-Finding coverage: **242 / 248 accepted (97.6%)**. This counts individual
+Finding coverage: **245 / 248 accepted (98.8%)**. This counts individual
 findings, not weighted effort or completed phases.
 
 Individual finding checkboxes record implementation/focused evidence;
@@ -258,6 +258,8 @@ size estimate, not the phase's behavioral or shipping gates.
   deleted the superseded study documents and workspace prototype.
 
 ## In progress and remaining proof
+
+- P6.S4: rdk optional parameters went from 431 to 121. The rest are boolean pipeline-stage builders (record fields clash with stage arguments), internal helpers behind converted entry points, and general constructors and indexes. Some converted fields are options whose None means the kernel default. RK28: Kernel.generate_point_ranges has about 8 users, so Kernel stays.
 
 - P9 last sites (734064ab, 45f53e85, 96c57fa5): the presentation blit (ogpu_metal/shaders/present.rays, embedded as generated MSL), stream compaction (flow_gpu/shaders/compact.rays as a compute stage with gpu/group-scan; MSL, SPIR-V and WGSL; byte-equal outputs; 1K 0.133→0.009 ms, 1M 4.35→4.23, 4M equal) and the scene/trace helpers (trace.rays defns spliced per variant; film byte-identical; instanced 147→124 ms) are Lisp. Remaining handwritten: the Perlin noise3 helpers (Emit.perlin MSL, Spirv.noise_functions) and fmod64, in progress.
 - Test time (68183f85): test_workspace_shell 34→22 s, test_workspace_live 32→8 s, the golden replay 37→7 s (one row per node by default; REPLAY_ALL=1 runs all 819 under qualification-scale), flow_sop CPU 63→36 s.
