@@ -69,7 +69,7 @@ let pure workspace =
   let evaluated=ok(E.static colored.checked)in
   let scene=ok(render_once evaluated.plan(List.assoc "picture" evaluated.results)
     ~live:(Input.at_time 0.) ~size:(800,600))in
-  assert(match Rays.Scene.Private.commands scene with
+  assert(match Rays.Scene.Layer.commands scene with
     |[|Scene_command.Render_ir.Shapes batch|]->
       let bytes=Scene_command.Ui_batch.instances batch in
       Bytes.get_int32_le bytes 32=0xff0000ffl && Bytes.get_int32_le bytes 96=0xff0000ffl
@@ -163,9 +163,9 @@ let pure workspace =
       size = 800, 600; dt = 0.125; pointer = -100., -100. };
       pixel_scale = 1., 1.; fps = 8.; mouse_delta = 0., 0. } in
     let editor = Editor.update editor frame in
-    match Rays.Scene.Private.stage_native ~width:800 ~height:600 (Editor.scene editor frame) with
+    match Rays.Scene.Layer.stage_native ~width:800 ~height:600 (Editor.scene editor frame) with
     | Ok staged ->
-        assert (List.exists (function Rays.Scene.Private.Scene2_layer _ -> true | _ -> false) staged.layers);
+        assert (List.exists (function Rays.Scene.Layer.Scene2_layer _ -> true | _ -> false) staged.layers);
         let allocation count =
           let workspace = doc (Printf.sprintf "(workspace static (graph g :context draw \
             (draw/points (array/vec3 %d [20 40 0]))) \

@@ -6,7 +6,7 @@ module Field = struct
     [@@sop.node_types ["fn(vec3,float)->float"; "image"]]
     [@@deriving sop_params, sop_node]
   let build = parameters_build (fun ~label _ field picture ->
-    Sop.Node.Private.make ~label ~operation:"test_field" ~version:1
+    Sop.Node.Build.make ~label ~operation:"test_field" ~version:1
       ~parameters:"" ~cook_mode:Sop.Node.Generic
       ~dependencies:Sop.Context.Dependencies.static ~inputs:[|field; picture|]
       (fun ~node_id:_ context inputs ->
@@ -16,7 +16,7 @@ module Field = struct
           [Vec3s [|2.; 0.; 0.|]; Floats [|0.|]]) (fun run ->
         Result.bind (run context) (function
           | Sop.Kernel.Floats values ->
-              Sop.Node.Private.cook (Lisp_sop.snapshot (Rdk.Line_geometry.points (Array.map (fun x -> x, 0., 0.) values))) context [||]
+              Sop.Node.Build.cook (Lisp_sop.snapshot (Rdk.Line_geometry.points (Array.map (fun x -> x, 0., 0.) values))) context [||]
           | _ -> assert false))))))
   let factory = parameters_factory build
 end

@@ -173,7 +173,7 @@ val selected_wire : t -> (path * Flow_graph.Flow_edit.arg_key) option
 (** The wire a click selected: the node and input it ends at.  A wire pulled into empty canvas keeps it
     while the add menu is open, and the node picked is inserted on it. *)
 
-module Private : sig
+module Inspect : sig
   val ghost : t -> path -> string option
   (* the value drawn beside a card's out-port where it has no footer (below Full), at the pinned iterations *)
   val grabbed : t -> bool

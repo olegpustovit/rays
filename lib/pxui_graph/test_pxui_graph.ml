@@ -122,10 +122,10 @@ let scope_view ?inputs ?probe ?at ?level ?collapsed ?folded workspace graph =
   |> Scope.with_records (recorded ?inputs workspace), scope
 let scope_paint view =
   ignore (scope_step view (frame ()));
-  match Scene.Private.stage_native ~width:1000 ~height:700 (Pxui.Ui.scene scope_ui) with
+  match Scene.Layer.stage_native ~width:1000 ~height:700 (Pxui.Ui.scene scope_ui) with
   | Error message -> fail message
   | Ok staged -> List.fold_left (fun total -> function
-      | Scene.Private.Ui_layer (batch, _) -> total + Scene_command.Ui_batch.count batch
+      | Scene.Layer.Ui_layer (batch, _) -> total + Scene_command.Ui_batch.count batch
       | _ -> total) 0 staged.layers
 let click point = [mouse_press (Input.LeftButton, point); mouse_release (Input.LeftButton, point)]
 let scope_click view point =
@@ -149,12 +149,12 @@ let scope_zoom_geometry () =
     let mouse = (500, 350) in
     let view, _ = scope_step view (frame ~mouse ~events:[ mouse_move mouse; Input.Pinched (factor /. Scope.zoom view) ] ()) in
     let view, _ = scope_step view (frame ~mouse ~events:[] ()) in
-    let ports = List.concat_map (Scope.Private.ports view) paths in
+    let ports = List.concat_map (Scope.Inspect.ports view) paths in
     let at (x, y) = List.exists (fun (px, py) -> Float.abs (px -. x) < 0.01 && Float.abs (py -. y) < 0.01) ports in
-    let count = Scope.Private.wire_count view in
+    let count = Scope.Inspect.wire_count view in
     check (count > 0) "no wires to check";
     for i = 0 to count - 1 do
-      match Scope.Private.wire_points view i with
+      match Scope.Inspect.wire_points view i with
       | first :: _ as pts ->
           let last = List.nth pts (List.length pts - 1) in
           check (at first && at last)
@@ -163,12 +163,12 @@ let scope_zoom_geometry () =
     done;
     check (expect (Scope.zoom view)) "the pinch did not reach the zoom under test";
     (* the zoom never reduces a card: b has a written row at every zoom *)
-    let _, _, _, bh = Option.get (Scope.Private.box_of view [ "g"; "b" ]) in
+    let _, _, _, bh = Option.get (Scope.Inspect.box_of view [ "g"; "b" ]) in
     check (bh > (P.head_height +. P.row_height) *. Scope.zoom view -. 0.01)
       (Printf.sprintf "zoom %.2f: a card lost its rows" (Scope.zoom view));
     (* a click on a node's box, at whatever level it is shown, selects it *)
     if Scope.zoom view < 0.5 then List.iter (fun path ->
-      let x, y, w, h = Option.get (Scope.Private.box_of view path) in
+      let x, y, w, h = Option.get (Scope.Inspect.box_of view path) in
       let view, _ = scope_click view (int_of_float (x +. w /. 2.), int_of_float (y +. Float.min (h /. 2.) (11. *. Scope.zoom view))) in
       check (Scope.selected view = [ path ]) ("a click on " ^ String.concat "/" path ^ " did not select it")) paths)
     [ false, 1., (fun z -> z >= 0.5); false, 0.45, (fun z -> z < 0.5 && z >= 0.34);
@@ -198,15 +198,15 @@ let scope_levels () =
   let pview, _ = scope_view ~at:(fun p -> if p = a then Some (24., 24.) else None)
     ~level:(fun p -> if p = a then Some (P.Point, false) else None) ws.checked "g" in
   let pview, _ = scope_step pview (frame ()) in
-  let _, _, pw, ph = Option.get (Scope.Private.box_of pview a) in
+  let _, _, pw, ph = Option.get (Scope.Inspect.box_of pview a) in
   check (ph = P.point_size *. Scope.zoom pview && pw < 100. *. Scope.zoom pview) "a point is the 14-point disc and its name";
   let back, changes = Scope.run_command (Scope.select [ a ] pview) Scope.Point_level in
   ignore back;
   check (match changes with [ Scope.Level_set [ p, l, false ] ] -> p = a && l = None | _ -> false)
     "p on a point does not go back to the card";
   (* the header's in-port takes a wire: dropped anywhere on the header it is Connect on the first slot *)
-  let sx, sy = Option.get (Scope.Private.output_socket view b) in
-  let tx, ty = Option.get (Scope.Private.row_center view c 0) in
+  let sx, sy = Option.get (Scope.Inspect.output_socket view b) in
+  let tx, ty = Option.get (Scope.Inspect.row_center view c 0) in
   let start = int_of_float sx, int_of_float sy and stop = int_of_float tx, int_of_float ty in
   let v, _ = scope_step view (frame ~mouse:start ~events:[ mouse_move start; mouse_press (Input.LeftButton, start) ] ()) in
   let v, _ = scope_step v (frame ~mouse:stop ~events:[ mouse_move stop ] ()) in
@@ -222,14 +222,14 @@ let scope_levels () =
   check (List.mem (Scope.Selected [ b ]) changes && List.exists (function Scope.Menu_requested _ -> true | _ -> false) changes
     && Scope.selected v = [ b ]) "a wire let go on empty canvas did not ask for the node menu after its source";
   (* a wire itself pulled into empty canvas does the same, and stays selected: the host inserts on it *)
-  (match List.find_opt (fun i -> match Scope.Private.wire_target view i with Some (n, _) -> n = c | None -> false)
-           (List.init (Scope.Private.wire_count view) Fun.id) with
+  (match List.find_opt (fun i -> match Scope.Inspect.wire_target view i with Some (n, _) -> n = c | None -> false)
+           (List.init (Scope.Inspect.wire_count view) Fun.id) with
    | None -> fail "no wire into c"
    | Some i ->
-       let ax, _, aw, _ = Option.get (Scope.Private.box_of view a)
-       and bx, _, _, _ = Option.get (Scope.Private.box_of view b) in
+       let ax, _, aw, _ = Option.get (Scope.Inspect.box_of view a)
+       and bx, _, _, _ = Option.get (Scope.Inspect.box_of view b) in
        let mx, my = List.find (fun (x, _) -> x > ax +. aw +. 4. && x < bx -. 4.)
-           (Scope.Private.wire_points view i) in
+           (Scope.Inspect.wire_points view i) in
        let mid = int_of_float mx, int_of_float my in
        let v, _ = scope_step view (frame ~mouse:mid ~events:[ mouse_move mid; mouse_press (Input.LeftButton, mid) ] ()) in
        let v, _ = scope_step v (frame ~mouse:empty ~events:[ mouse_move empty ] ()) in
@@ -261,14 +261,14 @@ let scope_levels () =
     |> Result.get_ok in
   let mview, _ = scope_view mw.checked "g" in
   let mview, _ = scope_step mview (frame ()) in
-  let zx, zy, zw, _ = Option.get (Scope.Private.box_of mview [ "g"; "ys#0" ]) in
+  let zx, zy, zw, _ = Option.get (Scope.Inspect.box_of mview [ "g"; "ys#0" ]) in
   let z = Scope.zoom mview in
-  let from_i = List.filter (fun i -> match Scope.Private.wire_points mview i with
-    | (x, _) :: _ -> x > zx && x <= zx +. 24. *. z | [] -> false) (List.init (Scope.Private.wire_count mview) Fun.id) in
+  let from_i = List.filter (fun i -> match Scope.Inspect.wire_points mview i with
+    | (x, _) :: _ -> x > zx && x <= zx +. 24. *. z | [] -> false) (List.init (Scope.Inspect.wire_count mview) Fun.id) in
   check (from_i <> []) "the frame's variable has no wire from its begin bar";
   List.iter (fun i -> List.iter (fun (x, y) ->
     check (x >= zx && x <= zx +. zw -. 3. *. z && y > zy +. P.head_height *. z)
-      "a frame's variable wire left the frame or crossed its label row") (Scope.Private.wire_points mview i)) from_i;
+      "a frame's variable wire left the frame or crossed its label row") (Scope.Inspect.wire_points mview i)) from_i;
   (* f: letter hints; a letter connects the selected output *)
   let hint_view, notices = Scope.run_command (Scope.select [ b ] view) Scope.Show_hints in
   check (notices = [] && Scope.editing hint_view) "f did not start the hints";
@@ -300,8 +300,8 @@ let scope_levels () =
     |> Result.get_ok in
   let sview, _ = scope_view sw.checked "scene" in
   let sview, _ = scope_step sview (frame ()) in
-  check (List.for_all (fun i -> match Scope.Private.wire_target sview i with
-    | Some (path, _) -> path <> [ "scene"; "g" ] | None -> true) (List.init (Scope.Private.wire_count sview) Fun.id))
+  check (List.for_all (fun i -> match Scope.Inspect.wire_target sview i with
+    | Some (path, _) -> path <> [ "scene"; "g" ] | None -> true) (List.init (Scope.Inspect.wire_count sview) Fun.id))
     "a node that refers to a graph of its own name is wired to itself";
   (* v on a node inside a loop asks for it too: the host shows it at the probed iteration *)
   let lw = Editor_document.Workspace_doc.of_text scope_catalog
@@ -317,14 +317,14 @@ let scope_levels () =
   let sphere = [ "g"; "a" ] in
   let rows = (Option.get (P.find lscope sphere)).rows in
   let row label = Option.get (List.find_index (fun (r : P.row) -> r.label = label) rows) in
-  check (Scope.Private.fold_button lview sphere (row "segments") = None) "a row wired from an input has a fold button";
-  let fx, fy = match Scope.Private.fold_button lview sphere (row "radius") with
+  check (Scope.Inspect.fold_button lview sphere (row "segments") = None) "a row wired from an input has a fold button";
+  let fx, fy = match Scope.Inspect.fold_button lview sphere (row "radius") with
     | Some at -> at | None -> fail "a row wired from a single-use node has no fold button" in
   let _, changes = scope_click lview (int_of_float fx, int_of_float fy) in
   check (List.mem (Scope.Syntax_edit (Flow_graph.Flow_edit.Fold_into { node = [ "g"; "k" ] })) changes)
     "a click on the fold button did not fold the source into the row";
   (* taking the wire off a named argument writes the value it carried (k is 0.4): the row stays on the card *)
-  let rx, ry = Option.get (Scope.Private.row_center lview sphere (row "radius")) in
+  let rx, ry = Option.get (Scope.Inspect.row_center lview sphere (row "radius")) in
   let at = int_of_float rx, int_of_float ry in
   let hovered, _ = scope_step lview (frame ~mouse:at ~events:[ mouse_move at ] ()) in
   (match snd (Scope.run_command hovered Scope.Delete) with
@@ -345,13 +345,13 @@ let scope_connection_hover () =
     let point = int_of_float (fst point), int_of_float (snd point) in
     let hovered, changes = scope_step view (frame ~mouse:point ~events:[mouse_move point] ()) in
     check (changes = []) "hover edited the graph";
-    Scope.Private.highlighted_connections hovered in
-  let source = Option.get (Scope.Private.output_socket view ["g"; "a"]) in
+    Scope.Inspect.highlighted_connections hovered in
+  let source = Option.get (Scope.Inspect.output_socket view ["g"; "a"]) in
   let fanout = highlight source in
   check (List.length fanout = 2) "an output hover did not highlight its two connections";
   let ax, ay = source in
-  let bx, _, _, _ = Option.get (Scope.Private.box_of view ["g"; "c"]) in
-  let _, by = Option.get (Scope.Private.row_center view ["g"; "c"] 0) in
+  let bx, _, _, _ = Option.get (Scope.Inspect.box_of view ["g"; "c"]) in
+  let _, by = Option.get (Scope.Inspect.row_center view ["g"; "c"] 0) in
   let wire_hover = highlight ((ax +. bx) /. 2., (ay +. by) /. 2.) in
   check (List.length wire_hover = 1)
     (Printf.sprintf "hover on a wire did not isolate its connection: %d at %.1f %.1f; %s"
@@ -370,10 +370,10 @@ let scope_connection_hover () =
   let view, _ = scope_view ws.checked "g" in
   let view, _ = scope_step view (frame ()) in
   (* a captured value is wired straight across the zone's edge from the node that makes it *)
-  let ax, ay = Option.get (Scope.Private.output_socket view [ "g"; "a" ]) in
+  let ax, ay = Option.get (Scope.Inspect.output_socket view [ "g"; "a" ]) in
   let point = int_of_float ax, int_of_float ay in
   let hovered, changes = scope_step view (frame ~mouse:point ~events:[mouse_move point] ()) in
-  check (changes = [] && List.length (Scope.Private.highlighted_connections hovered) = 1)
+  check (changes = [] && List.length (Scope.Inspect.highlighted_connections hovered) = 1)
     "hover on a captured value's socket missed its outer connection"
 
 (* [n] nodes in one scope: a chain with a long wire back at every seventh node *)
@@ -416,17 +416,17 @@ let scope_suspend () =
     input = { (frame ~mouse:empty ~events:[ mouse_move empty; mouse_press (Input.RightButton, empty) ] ()).input with
       buttons = [ Input.RightButton ] } } in
   let panning, _ = scope_step view held in
-  check (Scope.Private.grabbed panning) "a right-button press on the canvas did not begin a pan";
+  check (Scope.Inspect.grabbed panning) "a right-button press on the canvas did not begin a pan";
   let naming, _ = Scope.run_command (Scope.select [ [ "flower"; "heart" ] ] panning) Scope.Edit_name in
-  check (Scope.editing naming && Scope.Private.grabbed naming) "the name field did not open during the pan";
+  check (Scope.editing naming && Scope.Inspect.grabbed naming) "the name field did not open during the pan";
   let idle = Scope.suspend naming in
-  check (not (Scope.Private.grabbed idle) && not (Scope.editing idle)) "suspend left the grab or the field";
+  check (not (Scope.Inspect.grabbed idle) && not (Scope.editing idle)) "suspend left the grab or the field";
   check (Scope.suspend idle == idle) "suspending an idle pane made a new value";
   (* drawn again as the button comes up: no grab, no field, no edit *)
   let after, changes = scope_step idle (frame ~mouse:empty ~events:[ mouse_release (Input.RightButton, empty) ] ()) in
   let after, later = scope_step after (frame ~mouse:empty ()) in
   let changes = changes @ later in
-  check (not (Scope.Private.grabbed after) && not (Scope.editing after)
+  check (not (Scope.Inspect.grabbed after) && not (Scope.editing after)
          && not (List.exists (function Scope.Syntax_edit _ | Scope.Moved _ -> true | _ -> false) changes))
     "the pane woke with a grab, a field or an edit"
 
@@ -475,7 +475,7 @@ let scope_carry () =
     |> Scope.with_records (recorded w) in
   let heart = [ "flower"; "heart" ] in
   let view = fst (scope_step view (frame ())) in
-  let x, y, bw, bh = Option.get (Scope.Private.box_of view heart) in
+  let x, y, bw, bh = Option.get (Scope.Inspect.box_of view heart) in
   let over = int_of_float (x +. bw /. 2.), int_of_float (y +. bh -. 4.) in
   let nothing = 2900, 1900 in
   let drops changes = List.filter_map (function
@@ -513,11 +513,11 @@ let scope_ghost_values () =
   let scope = P.of_graph scope_catalog w "g" in
   let view index = Scope.create ~width:1000 ~height:700 ()
     |> Scope.with_scope ~probe:(fun _ -> index) ~key:"g" scope |> Scope.with_records (recorded w) in
-  let ghost index path = Scope.Private.ghost (fst (scope_step (view index) (frame ()))) path in
+  let ghost index path = Scope.Inspect.ghost (fst (scope_step (view index) (frame ()))) path in
   check (ghost 0 [ "g"; "k" ] = Some "6") "a card below Full showed no value beside its out-port";
   check (ghost 0 [ "g"; "ys"; "b" ] = Some "1" && ghost 3 [ "g"; "ys"; "b" ] = Some "19")
     "the ghost value did not follow the pinned iteration";
-  check (Scope.Private.ghost (fst (scope_step (Scope.create ~width:1000 ~height:700 () |> Scope.with_scope ~key:"g" scope) (frame ()))) [ "g"; "k" ] = None)
+  check (Scope.Inspect.ghost (fst (scope_step (Scope.create ~width:1000 ~height:700 () |> Scope.with_scope ~key:"g" scope) (frame ()))) [ "g"; "k" ] = None)
     "a ghost value without records"
 
 (* The default cubic curve leaves and enters its ports level. *)
@@ -526,7 +526,7 @@ let scope_curve () =
     "(workspace c (graph g :context sop (let* [a (sop/box) b (sop/transform a :translate [0 3 0])] b)))" |> Result.get_ok).checked in
   let view, _ = scope_view w "g" in
   let view = fst (scope_step view (frame ())) in
-  let pts = Scope.Private.wire_points view 0 in
+  let pts = Scope.Inspect.wire_points view 0 in
   let level = function (_, y0) :: (_, y1) :: _ -> Float.abs (y1 -. y0) < 0.5 | _ -> false in
   check (List.length pts > 2 && level pts && level (List.rev pts)) "a curve wire does not leave and enter level";
   (* a loop variable's wire leaves its begin-bar port downward, clear of the name beside the port *)
@@ -535,7 +535,7 @@ let scope_curve () =
     |> function Ok d -> d | Error d -> fail (String.concat "; " (List.map Diagnostic.to_string d))).checked in
   let view = fst (scope_step (fst (scope_view w "g")) (frame ())) in
   let down = function (x0, y0) :: (x1, y1) :: _ -> Float.abs (x1 -. x0) < 0.5 && y1 > y0 | _ -> false in
-  check (List.exists (fun i -> down (Scope.Private.wire_points view i)) (List.init (Scope.Private.wire_count view) Fun.id))
+  check (List.exists (fun i -> down (Scope.Inspect.wire_points view i)) (List.init (Scope.Inspect.wire_count view) Fun.id))
     "no begin-bar wire leaves its port downward"
 
 (* a formula in a record field opens as a binding: a field holds no nested card (it raised before) *)
@@ -547,7 +547,7 @@ let scope_field_formula () =
   let module E = Flow_graph.Flow_edit in
   let path = [ "g"; "r" ] in
   let row = Option.get (List.find_index (fun (r : P.row) -> r.key = E.Field "x") (Option.get (P.find (P.of_graph scope_catalog w "g") path)).rows) in
-  let x, y = Option.get (Scope.Private.expr_chip view path row) in
+  let x, y = Option.get (Scope.Inspect.expr_chip view path row) in
   (* a double click on the formula opens it, as its glyph does *)
   let at = int_of_float x, int_of_float y in
   let unfolded = List.exists (function Scope.Syntax_edit (E.Unfold { key = E.Field "x"; _ }) -> true | _ -> false)
@@ -561,9 +561,9 @@ let scope_spine () =
     "(workspace s (graph g :context value (let* [ys (map (fn [i] (* i 2.0)) (array/range 3))] (array/nth ys 0))))"
     |> function Ok d -> d | Error d -> fail (String.concat "; " (List.map Diagnostic.to_string d))).checked in
   let view = fst (scope_step (fst (scope_view w "g")) (frame ())) in
-  let into_f = List.filter_map (fun i -> match Scope.Private.wire_target view i with
-    | Some ([ "g"; "ys" ], Flow_graph.Flow_edit.Pos 0) -> Some (Scope.Private.wire_points view i) | _ -> None)
-    (List.init (Scope.Private.wire_count view) Fun.id) in
+  let into_f = List.filter_map (fun i -> match Scope.Inspect.wire_target view i with
+    | Some ([ "g"; "ys" ], Flow_graph.Flow_edit.Pos 0) -> Some (Scope.Inspect.wire_points view i) | _ -> None)
+    (List.init (Scope.Inspect.wire_count view) Fun.id) in
   check (match into_f with
     | [ ((x0, y0) :: _ as pts) ] -> let x1, y1 = List.nth pts (List.length pts - 1) in Float.abs (x1 -. x0) < 0.5 && y1 > y0
     | _ -> false) "a map's stacked function is not wired straight down into its f socket"
@@ -578,7 +578,7 @@ module G = struct
     { frame with input = { frame.input with size = 3000, 2000 } }
   let scope_click view point =
     scope_step view (frame ~mouse:point ~events:(mouse_move point :: click point) ())
-  let center_of view path = let x, y, w, h = Option.get (Scope.Private.box_of view path) in x, y, w, h
+  let center_of view path = let x, y, w, h = Option.get (Scope.Inspect.box_of view path) in x, y, w, h
   let settled view = fst (scope_step view (frame ()))
   let scope_view ?inputs ?probe ?at ?collapsed workspace graph =
     ignore (inputs, probe, at, collapsed);
@@ -630,7 +630,7 @@ let scope_gestures_1 () =
   let view = settled (fst (scope_view w "flower")) in
   let node = Option.get (P.find (P.of_graph scope_catalog w "flower") heart) in
   let i = Option.get (List.find_index (fun (r : P.row) -> r.label = "radius") node.rows) in
-  let fx, fy = Option.get (Scope.Private.row_center view heart i) in
+  let fx, fy = Option.get (Scope.Inspect.row_center view heart i) in
   let from = int_of_float fx, int_of_float fy in
   let view, _ = scope_step view (frame ~mouse:from ~events:[ mouse_move from; mouse_press (Input.LeftButton, from) ] ()) in
   let towards = fst from + 40, snd from in
@@ -647,8 +647,8 @@ let scope_gestures_1 () =
     let view = settled (fst (scope_view nw.checked "g")) in
     let node = Option.get (P.find (P.of_graph scope_catalog nw.checked "g") path) in
     let i = Option.get (List.find_index (fun (r : P.row) -> r.label = label) node.rows) in
-    let bx, _, bw, _ = Option.get (Scope.Private.box_of view path) in
-    view, (int_of_float (bx +. bw -. inset), int_of_float (snd (Option.get (Scope.Private.row_center view path i)))) in
+    let bx, _, bw, _ = Option.get (Scope.Inspect.box_of view path) in
+    view, (int_of_float (bx +. bw -. inset), int_of_float (snd (Option.get (Scope.Inspect.row_center view path i)))) in
   let scrub (view, from) by =
     let view, _ = scope_step view (frame ~mouse:from ~events:[ mouse_move from; mouse_press (Input.LeftButton, from) ] ()) in
     let towards = fst from + by, snd from in
@@ -768,16 +768,16 @@ let scope_gestures_3 () =
   let widths = [ "kit"; "widths" ] in
   let node = Option.get (P.find kit_scope widths) in
   let add = Option.get (List.find_index (fun (r : P.row) -> r.kind = P.Add) node.rows) in
-  let ax, ay = Option.get (Scope.Private.row_center view widths add) in
+  let ax, ay = Option.get (Scope.Inspect.row_center view widths add) in
   let _, changes = scope_click view (int_of_float ax, int_of_float ay) in
   check (List.mem (syntax (E.Add_item { node = widths })) changes) "the + item row did not become Add_item";
   let bx, by, bw, _ = center_of view widths in
   let second = Option.get (List.find_index (fun (r : P.row) -> r.key = E.Pos 1) node.rows) in
-  let ux = bx +. bw -. 14. *. Scope.zoom view and uy = snd (Option.get (Scope.Private.row_center view widths second)) in
+  let ux = bx +. bw -. 14. *. Scope.zoom view and uy = snd (Option.get (Scope.Inspect.row_center view widths second)) in
   ignore by;
   let _, changes = scope_click view (int_of_float ux, int_of_float uy) in
   check (List.mem (syntax (E.Move_item { node = widths; pos = 1 })) changes) "the row arrow did not become Move_item";
-  let hover = int_of_float (fst (Option.get (Scope.Private.row_center view widths second))), int_of_float uy in
+  let hover = int_of_float (fst (Option.get (Scope.Inspect.row_center view widths second))), int_of_float uy in
   let hovered, _ = scope_step view (frame ~mouse:hover ~events:[ mouse_move hover ] ()) in
   check (snd (Scope.run_command hovered Scope.Item_up) = [ syntax (E.Move_item { node = widths; pos = 1 }) ]) "Alt-Up: Move_item";
   check (snd (Scope.run_command hovered Scope.Item_down) = [ syntax (E.Move_item { node = widths; pos = 2 }) ]) "Alt-Down: Move_item";
@@ -792,7 +792,7 @@ let scope_gestures_3 () =
   (match records kit_scope.nodes with
    | record :: _ ->
        let add = Option.get (List.find_index (fun (r : P.row) -> r.kind = P.Add) record.rows) in
-       (match Scope.Private.row_center view record.path add with
+       (match Scope.Inspect.row_center view record.path add with
         | Some (rx, ry) ->
             let _, changes = scope_click view (int_of_float rx, int_of_float ry) in
             check (List.exists (function Scope.Syntax_edit (E.Add_field { node; _ }) -> node = record.path | _ -> false) changes)
@@ -804,7 +804,7 @@ let scope_gestures_3 () =
     "(workspace r (graph g :context sop (let* [r {:f2 5} a (sop/uv_sphere :radius r.f2)] a)))" |> Result.get_ok in
   let rview, rscope = scope_view rw.checked "g" in
   let rview, _ = scope_step rview (frame ()) in
-  let rx, ry = Option.get (Scope.Private.row_center rview [ "g"; "r" ]
+  let rx, ry = Option.get (Scope.Inspect.row_center rview [ "g"; "r" ]
     (Option.get (List.find_index (fun (r : P.row) -> r.kind = P.Add) (Option.get (P.find rscope [ "g"; "r" ])).rows))) in
   let _, changes = scope_click rview (int_of_float rx, int_of_float ry) in
   check (List.exists (function Scope.Syntax_edit (E.Add_field { name = "f1"; _ }) -> true | _ -> false) changes)
@@ -813,9 +813,9 @@ let scope_gestures_3 () =
   let mw = Editor_document.Workspace_doc.of_text scope_catalog
     "(workspace m (graph g :context sop (let* [a (sop/box) b (sop/box) m (sop/merge a b)] m)))" |> Result.get_ok in
   let mview = settled (fst (scope_view mw.checked "g")) in
-  let wi = Option.get (List.find_index (fun i -> Scope.Private.wire_target mview i = Some ([ "g"; "m" ], E.Pos 1))
-    (List.init (Scope.Private.wire_count mview) Fun.id)) in
-  let wx, wy = Option.get (Scope.Private.wire_midpoint mview wi) in
+  let wi = Option.get (List.find_index (fun i -> Scope.Inspect.wire_target mview i = Some ([ "g"; "m" ], E.Pos 1))
+    (List.init (Scope.Inspect.wire_count mview) Fun.id)) in
+  let wx, wy = Option.get (Scope.Inspect.wire_midpoint mview wi) in
   let picked, _ = scope_click mview (int_of_float wx, int_of_float wy) in
   check (snd (Scope.run_command picked Scope.Delete) = [ syntax (E.Disconnect { node = [ "g"; "m" ]; key = E.Pos 1; fallback = None }) ])
     "a wire off a variadic input did not remove the item";
@@ -824,7 +824,7 @@ let scope_gestures_3 () =
     let rec find (nodes : P.node list) = List.find_map (fun (n : P.node) ->
       if n.path = path then Some n else Option.bind n.zone (fun (z : P.zone) -> find z.scope.nodes)) nodes in
     let n = Option.get (find scope.nodes) in
-    let x, y = Option.get (Scope.Private.row_center view path
+    let x, y = Option.get (Scope.Inspect.row_center view path
       (Option.get (List.find_index (fun (r : P.row) -> r.kind = P.Add) n.rows))) in
     int_of_float x, int_of_float y in
   let oview, oscope = scope_view kw "def:window" in
@@ -844,7 +844,7 @@ let scope_gestures_3 () =
   (* a click on the name a row reads selects that binding, so the inspector follows it *)
   let ys = Option.get (P.find cscope [ "g"; "ys" ]) in
   let ri = Option.get (List.find_index (fun (r : P.row) -> r.chip = P.Name "xs") ys.rows) in
-  let _, changes = scope_click cview (let x, y = Option.get (Scope.Private.ref_chip cview [ "g"; "ys" ] ri) in
+  let _, changes = scope_click cview (let x, y = Option.get (Scope.Inspect.ref_chip cview [ "g"; "ys" ] ri) in
     int_of_float x, int_of_float y) in
   check (List.mem (Scope.Selected [ [ "g"; "xs" ] ]) changes) "a click on a read name did not select its binding";
   (* a click on an expression chip selects its card and the row, [holder @ [":" ^ label]] *)
@@ -855,7 +855,7 @@ let scope_gestures_3 () =
   let eb = Option.get (P.find escope [ "g"; "b" ]) in
   let ei = Option.get (List.find_index (fun (r : P.row) -> match r.chip with P.Inline _ -> true | _ -> false) eb.rows) in
   let label = (List.nth eb.rows ei).label in
-  let eview, changes = scope_click eview (let x, y = Option.get (Scope.Private.expr_chip eview [ "g"; "b" ] ei) in
+  let eview, changes = scope_click eview (let x, y = Option.get (Scope.Inspect.expr_chip eview [ "g"; "b" ] ei) in
     int_of_float x, int_of_float y) in
   check (List.mem (Scope.Selected [ [ "g"; "b" ]; [ "g"; "b"; ":" ^ label ] ]) changes)
     "a click on an expression chip did not select its row";
@@ -907,7 +907,7 @@ let scope_gestures_4 () =
   let carried, _ = scope_step framed (frame ~mouse:title_at ~events:[ mouse_move title_at; mouse_press (Input.LeftButton, title_at) ] ()) in
   let carried, _ = scope_step carried (frame ~mouse:towards ~events:[ mouse_move towards ] ()) in
   let carried, _ = scope_step carried (frame ~mouse:towards ~events:[] ()) in
-  let moved_box = Scope.Private.box_of carried heart and still_box = Scope.Private.box_of framed heart in
+  let moved_box = Scope.Inspect.box_of carried heart and still_box = Scope.Inspect.box_of framed heart in
   check (match moved_box, still_box with Some (x, _, _, _), Some (x0, _, _, _) -> x > x0 +. 10. | _ -> false)
     "the nodes did not travel with the frame while it was dragged";
   let _, changes = scope_step carried (frame ~mouse:towards ~events:[ mouse_release (Input.LeftButton, towards) ] ()) in
@@ -921,7 +921,7 @@ let scope_gestures_4 () =
   (* f frames the selection, with nothing selected all of it *)
   let far = Scope.with_bounds ~x:0 ~y:0 ~width:400 ~height:300 framed in
   let zoomed = Scope.select [ heart ] far |> fun v -> fst (Scope.run_command v Scope.Frame_selection) in
-  (match Scope.Private.box_of zoomed heart with
+  (match Scope.Inspect.box_of zoomed heart with
    | Some (x, y, w, h) -> check (x >= 0. && y >= 0. && x +. w <= 400. && y +. h <= 300. && w *. h > 0.)
        "framing the selection left the node out of view"
    | None -> fail "the framed node has no box");
@@ -930,7 +930,7 @@ let scope_gestures_4 () =
   (* marquee: a drag on empty canvas selects the nodes of one scope it covers; Shift adds *)
   let view = settled (fst (scope_view w "flower")) in
   let sc = P.of_graph scope_catalog w "flower" in
-  let boxes = List.map (fun (n : P.node) -> Option.get (Scope.Private.box_of view n.path)) sc.nodes in
+  let boxes = List.map (fun (n : P.node) -> Option.get (Scope.Inspect.box_of view n.path)) sc.nodes in
   let x0 = List.fold_left (fun a (x, _, _, _) -> Float.min a x) infinity boxes -. 8.
   and y0 = List.fold_left (fun a (_, y, _, _) -> Float.min a y) infinity boxes -. 8.
   and x1 = List.fold_left (fun a (x, _, w, _) -> Float.max a (x +. w)) neg_infinity boxes +. 8.
@@ -947,7 +947,7 @@ let scope_gestures_4 () =
   check (List.length covered >= 4 && List.mem heart covered) "a marquee over the graph did not select its nodes";
   check (List.exists (function Scope.Selected l -> List.mem heart l | _ -> false) changes) "a marquee did not emit Selected";
   let view = settled (Scope.select [ heart ] (fst (scope_view w "flower"))) in
-  let rx, ry, rw, rh = Option.get (Scope.Private.box_of view [ "flower"; "result" ]) in
+  let rx, ry, rw, rh = Option.get (Scope.Inspect.box_of view [ "flower"; "result" ]) in
   let view, _ = drag view ~shift:true (int_of_float (rx -. 4.), int_of_float (ry -. 4.)) (int_of_float (rx +. rw +. 4.), int_of_float (ry +. rh +. 4.)) in
   check (List.mem heart (Scope.selected view) && List.mem [ "flower"; "result" ] (Scope.selected view))
     "Shift marquee did not add to the selection";
@@ -963,7 +963,7 @@ let scope_gestures_4 () =
   List.iter (fun level ->
     let view = Scope.create ~width:3000 ~height:2000 ()
       |> Scope.with_scope ~key:"g" ~level:(fun _ -> Some (level, true)) scope |> settled in
-    let x, y, w, h = Option.get (Scope.Private.box_of view result) in
+    let x, y, w, h = Option.get (Scope.Inspect.box_of view result) in
     let a = int_of_float (x +. w /. 2. -. 6.), int_of_float (y -. 12.)
     and b = int_of_float (x +. w /. 2. +. 6.), int_of_float (y +. h +. 12.) in
     List.iter (fun (a, b) ->
@@ -992,7 +992,7 @@ let run_scope () =
   let view, _ = scope_view ~folded:(fun _ -> false) conditional "g" in
   let view, _ = scope_step view (frame ()) in
   let arm = ["g"; "x#then~2"] in
-  check (Scope.Private.selector view arm = None) "conditional arm incorrectly has an iteration selector";
+  check (Scope.Inspect.selector view arm = None) "conditional arm incorrectly has an iteration selector";
   let _, changes = Scope.run_command (Scope.select [arm] view) Scope.Add_arm in
   check (List.mem (Scope.Syntax_edit (E.Add_arm {node = ["g"; "x"]; after = 1})) changes) "arm Add uses wrong holder/index";
   let _, changes = Scope.run_command (Scope.select [arm] view) Scope.Delete_arm in
@@ -1001,7 +1001,7 @@ let run_scope () =
   check (List.mem (Scope.Syntax_edit (E.Unfold {node = ["g"; "x"]; key = Arm 1; sub = []})) changes) "arm unfold did not address conditional body";
   let view, _ = scope_step (fst (scope_view conditional "g")) (frame ()) in
   let path = ["g"; "x"] in
-  let x, y, _, _ = Option.get (Scope.Private.box_of view path) in
+  let x, y, _, _ = Option.get (Scope.Inspect.box_of view path) in
   let at = int_of_float x + 20, int_of_float y + 8 in
   let menu, _ = scope_step view (frame ~mouse:at ~events:[mouse_move at; mouse_press (Input.RightButton, at); mouse_release (Input.RightButton, at)] ()) in
   let menu, _ = scope_step menu (frame ~mouse:at ()) in
@@ -1034,7 +1034,7 @@ let run_scope () =
   let zone = [ "sunflower"; "seeds_each" ] in
   let view, _ = scope_view ~probe:(fun _ -> 5) w "sunflower" in
   let view, _ = scope_step view (frame ()) in
-  let prev, track, next = Option.get (Scope.Private.selector view zone) in
+  let prev, track, next = Option.get (Scope.Inspect.selector view zone) in
   let _, changes = scope_click view (rect_center next) in
   check (List.mem (Scope.Probe_set { zone; index = 6 }) changes) "the next button did not step the probe";
   let _, changes = scope_click view (rect_center prev) in
@@ -1051,7 +1051,7 @@ let run_scope () =
   let _, inline_keys = Scope.run_command (Scope.select [inline_zone] inline_view) (Scope.Probe_step 1) in
   check (List.mem (Scope.Probe_set {zone = inline_zone; index = 10000}) inline_keys)
     "inline function keyboard selector did not step beyond the recording cap";
-  let _, _, inline_next = Option.get (Scope.Private.selector inline_view inline_zone) in
+  let _, _, inline_next = Option.get (Scope.Inspect.selector inline_view inline_zone) in
   let ix, iy, iw, ih = inline_next in
   check (ix >= 0. && iy >= 0. && ix +. iw <= 1000. && iy +. ih <= 700.)
     (Printf.sprintf "inline selector outside viewport: %.1f %.1f %.1f %.1f" ix iy iw ih);
@@ -1074,7 +1074,7 @@ let run_scope () =
   check (changes = [] || List.for_all (function Scope.Selected _ -> true | _ -> false) changes)
     "a blank click made an edit";
   (* the toggle collapses the zone; a collapsed zone has no selector *)
-  let tx, ty, _, _ = Option.get (Scope.Private.box_of view zone) in
+  let tx, ty, _, _ = Option.get (Scope.Inspect.box_of view zone) in
   let _, changes = scope_click view (int_of_float tx + 10, int_of_float ty + 10) in
   check (List.mem (Scope.Zone_collapsed { zone; collapsed = true }) changes) "the toggle did not collapse the zone";
   (* only visible zones draw: 1,000 iterations draw what 3 do *)
@@ -1099,10 +1099,10 @@ let run_scope () =
     "the inspector lost its execution tier";
   let paint_hash view =
     ignore (scope_step view (frame ()));
-    match Scene.Private.stage_native ~width:1000 ~height:700 (Pxui.Ui.scene scope_ui) with
+    match Scene.Layer.stage_native ~width:1000 ~height:700 (Pxui.Ui.scene scope_ui) with
     | Error message -> fail message
     | Ok staged -> staged.layers |> List.filter_map (function
-        | Scene.Private.Ui_layer (batch, _) -> Some (Scene_command.Ui_batch.instances batch) | _ -> None)
+        | Scene.Layer.Ui_layer (batch, _) -> Some (Scene_command.Ui_batch.instances batch) | _ -> None)
       |> fun batches -> Digest.string (Marshal.to_string batches [Marshal.No_sharing]) in
   check (paint_hash base <> paint_hash (Scope.with_records reports base))
     "execution badges did not change the graph's paint";
@@ -1116,15 +1116,15 @@ let run_scope () =
   let heart = [ "flower"; "heart" ] in
   let node = Option.get (P.find scope heart) in
   let i = Option.get (List.find_index (fun (r : P.row) -> r.label = "radius") node.rows) in
-  let fx, fy = Option.get (Scope.Private.row_center view heart i) in
+  let fx, fy = Option.get (Scope.Inspect.row_center view heart i) in
   ignore (fx, fy);
   (* wire: a node's output socket dropped on another node's geometry row *)
   let source = [ "flower"; "bloom" ] and target = [ "flower"; "result" ] in
-  let sx, sy = Option.get (Scope.Private.output_socket view source) in
+  let sx, sy = Option.get (Scope.Inspect.output_socket view source) in
   let start = int_of_float sx, int_of_float sy in
   let tnode = Option.get (P.find scope target) in
   let row = Option.get (List.find_index (fun (r : P.row) -> r.socket && r.kind = P.Rest) tnode.rows) in
-  let rx, ry = Option.get (Scope.Private.row_center view target row) in
+  let rx, ry = Option.get (Scope.Inspect.row_center view target row) in
   let stop = int_of_float rx, int_of_float ry in
   let view, _ = scope_step view (frame ~mouse:start ~events:[mouse_move start; mouse_press (Input.LeftButton, start)] ()) in
   let view, _ = scope_step view (frame ~mouse:stop ~events:[mouse_move stop] ()) in
@@ -1139,25 +1139,25 @@ let run_scope () =
   check (changes = [ Scope.Syntax_edit (Flow_graph.Flow_edit.Delete_nodes { nodes = [ heart ] }) ])
     "Delete did not become Delete_nodes";
   (* wire selection and deletion *)
-  check (Scope.Private.wire_count view > 0) "there are wires in the graph";
-  let wire_idx = Option.get (List.find_index (fun i -> Scope.Private.wire_target view i <> None)
-    (List.init (Scope.Private.wire_count view) (fun i -> i))) in
+  check (Scope.Inspect.wire_count view > 0) "there are wires in the graph";
+  let wire_idx = Option.get (List.find_index (fun i -> Scope.Inspect.wire_target view i <> None)
+    (List.init (Scope.Inspect.wire_count view) (fun i -> i))) in
   ignore wire_idx;
   let view0 = Scope.select [ heart ] view in
   check (Scope.selected view0 = [ heart ]) "heart is selected";
   (* some wire of the graph (not under a card) is hit at its longest segment's middle *)
   let view = List.fold_left (fun found i ->
-    if Scope.selected_wire found <> None || Scope.Private.wire_target view0 i = None then found else
-    let wpt = Option.get (Scope.Private.wire_midpoint view0 i) in
+    if Scope.selected_wire found <> None || Scope.Inspect.wire_target view0 i = None then found else
+    let wpt = Option.get (Scope.Inspect.wire_midpoint view0 i) in
     fst (scope_click view0 (int_of_float (fst wpt), int_of_float (snd wpt))))
-    view0 (List.init (Scope.Private.wire_count view0) Fun.id) in
+    view0 (List.init (Scope.Inspect.wire_count view0) Fun.id) in
   check (Scope.selected_wire view <> None) "clicking wire selected it";
   check (Scope.selected view = []) "clicking wire cleared node selection";
   let _, changes = Scope.run_command view Scope.Delete in
   check (match changes with [ Scope.Syntax_edit (Flow_graph.Flow_edit.Disconnect _) ] -> true | _ -> false)
     "Delete on selected wire emitted Disconnect";
   (* a right-click on a node makes the nodes the selection again: Delete then removes the node *)
-  let hx, hy, _, _ = Option.get (Scope.Private.box_of view heart) in
+  let hx, hy, _, _ = Option.get (Scope.Inspect.box_of view heart) in
   let at = int_of_float hx + 60, int_of_float hy + 8 in
   let menu, changes = scope_step view (frame ~mouse:at ~events:[ mouse_move at; mouse_press (Input.RightButton, at);
     mouse_release (Input.RightButton, at) ] ()) in
@@ -1172,12 +1172,12 @@ let run_scope () =
     | [ "g"; "ring"; "u" ] -> Some (0., 0.) | [ "g"; "ring"; "v" ] -> Some (480., 240.) | _ -> None) lw.checked "g" in
   let lview, _ = scope_step lview (frame ()) in
   let inner = [ "g"; "ring"; "v" ] in
-  let wi = Option.get (List.find_index (fun i -> match Scope.Private.wire_target lview i with
-    | Some (path, _) -> path = inner | None -> false) (List.init (Scope.Private.wire_count lview) Fun.id)) in
-  let mx, my = Option.get (Scope.Private.wire_midpoint lview wi) in
+  let wi = Option.get (List.find_index (fun i -> match Scope.Inspect.wire_target lview i with
+    | Some (path, _) -> path = inner | None -> false) (List.init (Scope.Inspect.wire_count lview) Fun.id)) in
+  let mx, my = Option.get (Scope.Inspect.wire_midpoint lview wi) in
   let mid = int_of_float mx, int_of_float my in
   let hovered, _ = scope_step lview (frame ~mouse:mid ~events:[ mouse_move mid ] ()) in
-  check (List.length (Scope.Private.highlighted_connections hovered) = 1) "a wire inside a loop is not hovered";
+  check (List.length (Scope.Inspect.highlighted_connections hovered) = 1) "a wire inside a loop is not hovered";
   let picked, _ = scope_click lview mid in
   check (match snd (Scope.run_command picked Scope.Delete) with
     | Scope.Syntax_edit (Flow_graph.Flow_edit.Disconnect { node; _ }) :: _ -> node = inner | _ -> false)
@@ -1199,37 +1199,37 @@ let run_scope () =
   check (Array.length lens.steps >= 2 && lens.error = None
          && String.starts_with ~prefix:"(radial" lens.steps.(0)
          && String.starts_with ~prefix:"(sop/merge" lens.steps.(1)) "the lens steps are the call, then its expansions";
-  check (Scope.Private.macro_step view outer = None) "the lens starts closed";
-  let toggle = Scope.Private.lens_toggle view outer |> Option.get in
+  check (Scope.Inspect.macro_step view outer = None) "the lens starts closed";
+  let toggle = Scope.Inspect.lens_toggle view outer |> Option.get in
   let view, _ = scope_click view (int_of_float (fst toggle), int_of_float (snd toggle)) in
-  check (Scope.Private.macro_step view outer = Some (Array.length lens.steps - 1)) "the toggle opens the last step";
+  check (Scope.Inspect.macro_step view outer = Some (Array.length lens.steps - 1)) "the toggle opens the last step";
   let view, _ = scope_step view (frame ()) in
-  let button i = let x, y = Option.get (Scope.Private.lens_step_button view outer i) in int_of_float x, int_of_float y in
+  let button i = let x, y = Option.get (Scope.Inspect.lens_step_button view outer i) in int_of_float x, int_of_float y in
   let view, changes = scope_click view (button 0) in
-  check (Scope.Private.macro_step view outer = Some 0 && changes = []) "the call button shows the call, no edit";
+  check (Scope.Inspect.macro_step view outer = Some 0 && changes = []) "the call button shows the call, no edit";
   let view, _ = scope_step view (frame ()) in
   let view, _ = scope_click view (button 1) in
-  check (Scope.Private.macro_step view outer = Some 1) "a step button chooses the step";
+  check (Scope.Inspect.macro_step view outer = Some 1) "a step button chooses the step";
   let view, _ = scope_step view (frame ()) in
   (* the Template button shows the macro's definition, one step past the expansions *)
   check (List.exists (String.starts_with ~prefix:"(defmacro radial") (String.split_on_char '\n' lens.template))
     "the lens carries the macro's template";
   let view, changes = scope_click view (button (Array.length lens.steps)) in
-  check (Scope.Private.macro_step view outer = Some (Array.length lens.steps) && changes = []) "the Template button shows the definition, no edit";
+  check (Scope.Inspect.macro_step view outer = Some (Array.length lens.steps) && changes = []) "the Template button shows the definition, no edit";
   let view, _ = scope_step view (frame ()) in
   let view, _ = scope_click view (button 1) in
   let view, _ = scope_step view (frame ()) in
-  let bx, by, bw, bh = Option.get (Scope.Private.box_of view outer) in
-  check (bh > (let _, _, _, h0 = Option.get (Scope.Private.box_of (fst (scope_view w "rosette")) outer) in h0)
+  let bx, by, bw, bh = Option.get (Scope.Inspect.box_of view outer) in
+  check (bh > (let _, _, _, h0 = Option.get (Scope.Inspect.box_of (fst (scope_view w "rosette")) outer) in h0)
          && bw >= Flow_graph.Projection.lens_width *. Scope.zoom view -. 1.) "an open panel grows its card";
   ignore (bx, by);
-  let rx, ry = Option.get (Scope.Private.lens_replace view outer) in
+  let rx, ry = Option.get (Scope.Inspect.lens_replace view outer) in
   let _, changes = scope_click view (int_of_float rx, int_of_float ry) in
   check (List.mem (Scope.Syntax_edit (Flow_graph.Flow_edit.Inline_macro { node = outer })) changes)
     "the replace button did not become Inline_macro";
-  let tx, ty = Option.get (Scope.Private.lens_toggle view outer) in
+  let tx, ty = Option.get (Scope.Inspect.lens_toggle view outer) in
   let view, _ = scope_click view (int_of_float tx, int_of_float ty) in
-  check (Scope.Private.macro_step view outer = None) "the toggle closes the panel";
+  check (Scope.Inspect.macro_step view outer = None) "the toggle closes the panel";
   (* bypass is the b key (and the context menu): the same request, and a card with nothing to pass
      through has none *)
   let _, changes = Scope.run_command (Scope.select [ soft ] view) Scope.Bypass in
@@ -1299,10 +1299,10 @@ let run_readable () =
     | ["g"; "d"] -> Some (288., 240.) | ["g"; "@result"] -> Some (4000., 0.) | ["g"; "e"] -> Some (864., 0.)
     | _ -> None) ws.checked "g" in
   let view, _ = scope_step view (frame ()) in
-  check (Scope.Private.chain view = None) "a chain was lit with nothing selected";
-  check (Scope.Private.tagged_wires view = 0) "a short graph drew a tag";
+  check (Scope.Inspect.chain view = None) "a chain was lit with nothing selected";
+  check (Scope.Inspect.tagged_wires view = 0) "a short graph drew a tag";
   let view = Scope.select [ [ "g"; "b" ] ] view in
-  (match Scope.Private.chain view with
+  (match Scope.Inspect.chain view with
    | Some (up, down) ->
        let has l p = List.mem [ "g"; p ] l in
        check (has up "a" && has up "b" && not (has up "c") && not (has up "d")) "upstream of b is not a and b";
@@ -1314,11 +1314,11 @@ let run_readable () =
     | ["g"; "e"] -> Some (4000., 0.) | ["g"; "a"] -> Some (0., 0.) | ["g"; "b"] -> Some (288., 0.)
     | ["g"; "c"] -> Some (576., 0.) | ["g"; "d"] -> Some (288., 240.) | _ -> None) ws.checked "g" in
   let far, _ = scope_step far (frame ()) in
-  check (Scope.Private.tagged_wires far >= 1) "a wire four thousand points long was not a tag";
+  check (Scope.Inspect.tagged_wires far >= 1) "a wire four thousand points long was not a tag";
   let lit = Scope.select [ [ "g"; "a" ] ] far in
-  check (Scope.Private.tagged_wires lit = 0) "selecting the source did not show the real wire";
+  check (Scope.Inspect.tagged_wires lit = 0) "selecting the source did not show the real wire";
   let off, _ = Scope.run_command far Scope.Toggle_tags in
-  check (Scope.Private.tagged_wires off = 0) "the tags toggle left a tag";
+  check (Scope.Inspect.tagged_wires off = 0) "the tags toggle left a tag";
   (* Unfold all: one Unfold per call written in a row of the card *)
   let ws = Editor_document.Workspace_doc.of_text scope_catalog
     "(workspace u (graph g :context sop (let* [a (sop/merge (sop/box) (sop/box))] a)))" |> Result.get_ok in

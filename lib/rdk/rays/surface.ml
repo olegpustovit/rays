@@ -82,10 +82,10 @@ let scene3 ?explosion surface =
   let drawings = match surface.batches with
     | [] -> [draw Material.default mesh]
     | batches ->
-        let view = Mesh.Private.packed_view mesh in
+        let view = Mesh.View.packed_view mesh in
         List.map (fun (material, offsets) ->
           let indices = Array.map (Array.get view.indices) offsets in
-          let mesh = Mesh.Private.create_packed_shared ~mode:view.mode ~indices
+          let mesh = Mesh.View.create_packed_shared ~mode:view.mode ~indices
               ?normals:view.normals ?colors:view.colors ?tex_coords:view.tex_coords view.vertices
             |> Result.get_ok in
           draw material mesh) batches in

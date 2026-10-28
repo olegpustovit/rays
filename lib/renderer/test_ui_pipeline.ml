@@ -34,10 +34,10 @@ let new_batch () =
   Scene_command.Ui_batch.Builder.publish builder
 
 let capture ?(clear = (1., 1., 1., 1.)) execution lower =
-  let submission = get (Renderer.Private.begin_submission execution) in
-  Fun.protect ~finally:(fun () -> Renderer.Private.cancel submission) (fun () ->
+  let submission = get (Renderer.Native.begin_submission execution) in
+  Fun.protect ~finally:(fun () -> Renderer.Native.cancel submission) (fun () ->
     let batch = get (lower submission) in
-    ignore (get (Renderer.Private.step ~clear
+    ignore (get (Renderer.Native.step ~clear
       submission [ batch ]));
     get (Renderer.capture execution))
 
@@ -88,10 +88,10 @@ let run () =
         Fun.protect ~finally:(fun () ->
           ignore (Renderer.destroy execution)) (fun () ->
           let old = capture execution (fun submission ->
-            Renderer.Private.lower_scene2 submission ~density
+            Renderer.Native.lower_scene2 submission ~density
               ~resource:(fun _ -> None) scene)
           and current = capture execution (fun submission ->
-            Renderer.Private.lower_ui submission ~density
+            Renderer.Native.lower_ui submission ~density
               ~resource:(fun _ -> None) ui) in
           let width = configuration.drawable_width in
           let length = width * configuration.drawable_height * 4 in

@@ -3,22 +3,22 @@ open Rays
 let camera=Camera.orthographic ~height:2. ~at:(Rays_math.Vec3.create 0. 0. 2.) ~target:Rays_math.Vec3.zero ()
 let stage mesh=
   let scene=Scene.D3.create [Scene.D3.mesh ~material:(Material.unlit Rays_math.Color.white) mesh]in
-  let staged=Result.get_ok(Scene.Private.stage_native ~width:128 ~height:128 [Scene.view3d ~camera scene])in
+  let staged=Result.get_ok(Scene.Layer.stage_native ~width:128 ~height:128 [Scene.view3d ~camera scene])in
   (List.hd staged.scene3).entries.(0)
 let attributes (entry:Renderer.Scene_execution.scene3_entry)=Option.get entry.vertex_attributes|>snd
 let float bytes offset=Int32.float_of_bits(Bytes.get_int32_le bytes offset)
 let make colors=
-  let vertices:Mesh.Private.vec3_view={
+  let vertices:Mesh.View.vec3_view={
     x=[|-.0.70000001;0.60000001;0.10000001|];
     y=[|-.0.60000001;-.0.50000001;0.80000001|];z=[|0.;0.;0.|]}in
-  let normals:Mesh.Private.vec3_view={x=[|0.;0.;0.|];y=[|0.;0.;0.|];z=[|1.;1.;1.|]}in
+  let normals:Mesh.View.vec3_view={x=[|0.;0.;0.|];y=[|0.;0.;0.|];z=[|1.;1.;1.|]}in
   vertices,normals,[|0;1;2|],colors
 let mesh (vertices,normals,indices,colors)=
-  Result.get_ok(Mesh.Private.create_packed_shared ~normals ~indices ~colors vertices)
+  Result.get_ok(Mesh.View.create_packed_shared ~normals ~indices ~colors vertices)
 
 (* Preserve the original f64 renderer ABI as an independent native oracle. *)
 let legacy source (entry:Renderer.Scene_execution.scene3_entry)=
-  let view=Mesh.Private.view source in
+  let view=Mesh.View.view source in
   let bytes=Bytes.make(Array.length view.vertices*68)'\000'in
   Array.iteri(fun i(position:Rays_math.Vec3.t)->
     let normal=(Option.get view.normals).(i)in
@@ -79,13 +79,13 @@ let pair ()=
   and changed=mesh(vertices,normals,indices,Array.make 3(Rays_math.Color.rgb 255 255 0))in
   source,changed,stage source,stage changed
 
-let with_caches f=Scene.Private.with_cache_context
-  (Scene.Private.create_cache_context())f
+let with_caches f=Scene.Layer.with_cache_context
+  (Scene.Layer.create_cache_context())f
 let run ()=with_caches(fun()->
   let source,_,first,second=pair()in
   let packed=first.draw.mesh.vertices and attrs=attributes first in
   assert(Bytes.length packed=72&&Bytes.length attrs=36);
-  let original=Mesh.Private.view source in
+  let original=Mesh.View.view source in
   Array.iteri(fun i(position:Rays_math.Vec3.t)->
     let normal=(Option.get original.normals).(i)in
     List.iteri(fun word expected->
@@ -105,18 +105,18 @@ let run ()=with_caches(fun()->
   let repeated=stage source in
   assert(repeated.draw.mesh.vertices==packed&&attributes repeated==attrs);
   assert(repeated.draw.mesh.indices==first.draw.mesh.indices);
-  assert(Scene.D3.Private.depth_clear Scene.D3.empty=1.);
+  assert(Scene.D3.Walk.depth_clear Scene.D3.empty=1.);
   List.iter(fun samples->
     let scene=Scene.D3.create~samples[Scene.D3.mesh source]in
-    assert(Scene.D3.Private.depth_clear scene=1.);
-    let staged=Result.get_ok(Scene.Private.stage_native~width:128~height:128[Scene.view3d~camera scene])in
+    assert(Scene.D3.Walk.depth_clear scene=1.);
+    let staged=Result.get_ok(Scene.Layer.stage_native~width:128~height:128[Scene.view3d~camera scene])in
     Array.iter(fun(entry:Renderer.Scene_execution.scene3_entry)->
       assert(entry.samples=samples&&entry.draw.state.depth_clear=1.))
       (List.hd staged.scene3).entries)[1;4;9;16];
   let vertices,normals,indices,colors=make(Array.make 3 Rays_math.Color.white)in
   vertices.x.(0)<-1e100;
   let oversized=mesh(vertices,normals,indices,colors)in
-  (match Scene.Private.stage_native~width:128~height:128
+  (match Scene.Layer.stage_native~width:128~height:128
       [Scene.view3d~camera(Scene.D3.create[Scene.D3.mesh oversized])]with
    |Error error->assert(error="native View3d lowering failed: mesh")
    |Ok _->failwith"non-finite float32 narrowing was accepted");

@@ -109,7 +109,7 @@ let prepare_source ?gpu t request ~state ~live plan id=with_active request plan 
     Sources.remove t.capture_cache id;
     source.materializer<-Some(match source.materializer with
       |None->Flow_sop.Attribute_kernel.materialized_source root
-      |Some consumer->P.Node.Private.rebuild_with_inputs consumer [|root|])
+      |Some consumer->P.Node.Build.rebuild_with_inputs consumer [|root|])
   end;
   source.compiled<-Some compiled;source.root<-Some root;source.geometry<-Some resolved.geometry;source.live<-live;
   source.dependencies<-dependencies;source.projection<-projection;
@@ -380,7 +380,7 @@ let rec resolve ?gpu ?context t ~display ~state ~live (plan:E.plan) value =
                     |_->None,Flow.Workspace.Paths.empty in
                   Result.map(fun p->t.maps.(id)<-Some(width,height,fn,p);p)
                     (Flow_sop.Image_kernel.prepare ?path ~approx ~site:(node.inst,node.site,node.iter)
-                      ~identity:(Sop.Node.Private.fresh_id()) ~width ~height ~fn ~sources:ids inputs)in
+                      ~identity:(Sop.Node.Build.fresh_id()) ~width ~height ~fn ~sources:ids inputs)in
             let* prepared=match t.maps.(id)with
               |Some(w,h,f,p)when w=width && h=height && f==fn->
                   (match Flow_sop.Image_kernel.with_inputs p inputs with
@@ -478,7 +478,7 @@ let rec resolve ?gpu ?context t ~display ~state ~live (plan:E.plan) value =
               let* source,_=Result.map_error error(Sop.Node.apply_parameters source changes)in
               let* context=Result.map_error error(Sop.Context.create ())in
               let* cooked=Result.map_error(fun d->error d.Diagnostic.message)
-                (Sop.Node.Private.cook source context [||])in
+                (Sop.Node.Build.cook source context [||])in
               let* payload=Result.map_error(fun d->error d.Diagnostic.message)(Sop.Payload.image cooked.payload)in
               let width=Sop.Image.width payload and height=Sop.Image.height payload in
               let* image=upload ~width ~height payload in

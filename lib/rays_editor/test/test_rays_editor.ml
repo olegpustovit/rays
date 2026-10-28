@@ -29,10 +29,10 @@ let native = ref true
 (* The packed PXUI instances of a composed scene, for exact comparisons. *)
 let ui_bytes scene =
   if not !native then "" else
-  match Scene.Private.stage_native_render ~width:900 ~height:640 scene with
+  match Scene.Layer.stage_native_render ~width:900 ~height:640 scene with
   | Error message -> fail message
   | Ok staged -> String.concat "" (List.filter_map (function
-      | Scene.Private.Ui_layer (batch, _) ->
+      | Scene.Layer.Ui_layer (batch, _) ->
           Some (Bytes.to_string (Scene_command.Ui_batch.instances batch))
       | _ -> None) staged.layers)
 
@@ -652,10 +652,10 @@ let run () =
     "sketch environment produced an empty composed scene";
   (* The whole workspace paints in batch groups, not one draw per label. *)
   if !native then begin
-    let batches = match Scene.Private.stage_native_render ~width:900 ~height:640
+    let batches = match Scene.Layer.stage_native_render ~width:900 ~height:640
         (Rays_editor.Editor.scene environment current_frame) with
       | Ok staged -> List.fold_left (fun total -> function
-          | Scene.Private.Ui_layer (batch, _) ->
+          | Scene.Layer.Ui_layer (batch, _) ->
               total + Array.length (Scene_command.Ui_batch.batches batch)
           | _ -> total) 0 staged.layers
       | Error message -> fail message in

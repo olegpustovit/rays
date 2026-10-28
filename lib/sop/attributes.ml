@@ -14,7 +14,7 @@ module Image_texels = struct
     [@@sop.node_slots "image"] [@@sop.node_types "image"]
     [@@deriving sop_params, sop_node]
   let build = parameters_build (fun ~label _parameters image ->
-    Node.Private.make ~label ~operation:"image_texels" ~version:1 ~parameters:""
+    Node.Build.make ~label ~operation:"image_texels" ~version:1 ~parameters:""
       ~cook_mode:Node.Generator ~dependencies:Context.Dependencies.static
       ~inputs:[|image|] (fun ~node_id:_ _context inputs ->
         Result.bind (Payload.image inputs.(0)) (fun image ->
@@ -32,7 +32,7 @@ module Image_texels = struct
               | Error message -> Error (Diagnostic.error ~code:"invalid_image_texels" message)
               | Ok attribute -> (match Rdk.Geometry.with_attribute attribute geometry with
                   | Error message -> Error (Diagnostic.error ~code:"invalid_image_texels" message)
-                  | Ok geometry -> Ok Node.Private.{payload = Payload.Geometry geometry; instances = None}))))
+                  | Ok geometry -> Ok Node.Build.{payload = Payload.Geometry geometry; instances = None}))))
   let factory = parameters_factory build
 end
 
@@ -54,7 +54,7 @@ module Uv_flatten = struct
     let seams = optional_text parameters.seams in
     let iterations = parameters.iterations in
     let tolerance = parameters.tolerance in
-    Node.Private.make_geometry ?label ~operation:"uv_flatten" ~version:1
+    Node.Build.make_geometry ?label ~operation:"uv_flatten" ~version:1
       ~parameters:""
       ~cook_mode:(Node.Duplicate_input 0) ~dependencies:Context.Dependencies.static
       ~inputs:[|input|] (fun ~node_id:_ context inputs ->
@@ -91,7 +91,7 @@ module Uv_relax = struct
     let uv_tolerance = parameters.uv_tolerance in
     let iterations = parameters.iterations in
     let tolerance = parameters.tolerance in
-    Node.Private.make_geometry ?label ~operation:"uv_relax" ~version:1
+    Node.Build.make_geometry ?label ~operation:"uv_relax" ~version:1
       ~parameters:""
       ~cook_mode:(Node.Duplicate_input 0) ~dependencies:Context.Dependencies.static
       ~inputs:[|input|] (fun ~node_id:_ context inputs ->
@@ -198,7 +198,7 @@ module Distance_from_geometry = struct
     and radius = match radius_mode with Radius_fixed -> Rdk.Transform_ops.Distance_fixed radius
       | Radius_maximum -> Rdk.Transform_ops.Distance_maximum in
     let distance_attribute = optional_text distance_attribute in
-    Node.Private.make_geometry ?label ~operation:"distance_from_geometry" ~version:1
+    Node.Build.make_geometry ?label ~operation:"distance_from_geometry" ~version:1
       ~parameters:""
       ~cook_mode:(Node.Duplicate_input 0)
       ~dependencies:Context.Dependencies.static ~inputs:[|source; reference|]
@@ -374,7 +374,7 @@ module Attribute_mirror = struct
       | Mirror_vector -> Rdk.Attribute_mirror.Mirror_vector
       | Mirror_point -> Rdk.Attribute_mirror.Mirror_point in
     let string_replace = if replace_strings then Some (string_search, string_replacement) else None in
-    Node.Private.make_geometry ?label ~operation:"attribute_mirror" ~version:1
+    Node.Build.make_geometry ?label ~operation:"attribute_mirror" ~version:1
       ~parameters:""
       ~cook_mode:(Node.Duplicate_input 0)
       ~dependencies:Context.Dependencies.static ~inputs:[|input|]
@@ -501,7 +501,7 @@ module Attribute_transfer_all = struct
     let mode = Support.transfer_mode mode neighbors power kernel_radius in
     let falloff = Support.transfer_falloff falloff uniform_bias in
     let max_distance = match distance_mode with Kernel_explicit -> Some max_distance | Kernel_auto -> None in
-    Node.Private.make_geometry ?label ~operation:"attribute_transfer_all" ~version:1
+    Node.Build.make_geometry ?label ~operation:"attribute_transfer_all" ~version:1
       ~parameters:""
       ~cook_mode:Node.Generic ~dependencies:Context.Dependencies.static
       ~inputs:[|source; target|]
@@ -620,7 +620,7 @@ module Attribute_transfer_surface = struct
         "attribute_transfer_surface" "target" target_group_pattern)
     and source_vertex_group_pattern_compiled = validated (compile_transfer_group_pattern
         "attribute_transfer_surface" "source vertex" source_vertex_group_pattern) in
-    Node.Private.make_geometry ?label ~operation:"attribute_transfer_surface" ~version:5
+    Node.Build.make_geometry ?label ~operation:"attribute_transfer_surface" ~version:5
       ~parameters:"" ~cook_mode:Node.Generic ~dependencies:Context.Dependencies.static
       ~inputs:[|source; target|]
       (fun ~node_id:_ context inputs ->
@@ -783,7 +783,7 @@ module Attribute_transfer = struct
     let source_group_pattern_compiled=validated (compile_transfer_group_pattern "attribute_transfer" "source" source_group_pattern)
     and source_vertex_group_pattern_compiled=validated (compile_transfer_group_pattern "attribute_transfer" "source vertex" source_vertex_group_pattern)
     and target_group_pattern_compiled=validated (compile_transfer_group_pattern "attribute_transfer" "target" target_group_pattern) in
-    Node.Private.make_geometry ~label ~operation:"attribute_transfer" ~version:6
+    Node.Build.make_geometry ~label ~operation:"attribute_transfer" ~version:6
       ~parameters:""
       ~cook_mode:Node.Generic ~dependencies:Context.Dependencies.static ~inputs:[|source;target|]
     (fun ~node_id:_ context inputs ->

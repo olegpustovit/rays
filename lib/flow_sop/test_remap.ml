@@ -226,8 +226,8 @@ let ()=
     check((Sop.Session.stats session).misses=first.misses)"unchanged remap cache missed";
     let payload=Geometry.with_attribute(Attribute.create_owned ~owner:Attribute.Point ~name:"fresh"
       (Attribute.Int[|1;2;3|])|>get_string_ok)src|>get_string_ok in
-    let rebuild=Sop.Node.Private.rebuild_with_inputs node[|Lisp_sop.snapshot payload;Lisp_sop.snapshot dst|]
-      |>Sop.Node.Private.adopt_identity ~source:node in
+    let rebuild=Sop.Node.Build.rebuild_with_inputs node[|Lisp_sop.snapshot payload;Lisp_sop.snapshot dst|]
+      |>Sop.Node.Build.adopt_identity ~source:node in
     let actual=Sop.Session.cook session ~context rebuild |>geometry in
     check(Option.is_some(Geometry.find_attribute ~owner:Attribute.Point "fresh" actual))"cached remap stale source payload";
     check((Sop.Session.stats session).misses>first.misses)"metadata-only source update did not miss")
@@ -328,13 +328,13 @@ let ()=
      and provenance unchanged; remap does not recast it as a mapping error. *)
   let child=Diagnostic.error ~cause:"raw child cause" ~hints:["keep this hint"]
     ~code:"E_CHILD" "child failed" in
-  let bad=Sop.Node.Private.make_geometry ~label:"Child" ~operation:"test.remap_child"
+  let bad=Sop.Node.Build.make_geometry ~label:"Child" ~operation:"test.remap_child"
     ~version:1 ~parameters:"" ~cook_mode:Sop.Node.Generator
     ~dependencies:Sop.Context.Dependencies.static ~inputs:[||]
     (fun ~node_id:_ _ _->Error child) in
   let src=source 3 and dst=target 1(source 3) in
   let node=compile src dst(args [|0;1;2|][|0;1;2|][|0|][|0;1;2;3|][|0;1;2|]"target") in
-  let node=Sop.Node.Private.rebuild_with_inputs node [|bad;Lisp_sop.snapshot dst|] in
+  let node=Sop.Node.Build.rebuild_with_inputs node [|bad;Lisp_sop.snapshot dst|] in
   List.iter(fun domains->match run ~domains node with
     |Ok _->fail "remap swallowed child error"
     |Error diagnostic->check(diagnostic.code=child.code && diagnostic.message=child.message
@@ -386,7 +386,7 @@ let ()=
     let context=Sop.Context.create()|>get_string_ok in
     ignore(Sop.Session.cook session ~context node);
     List.iter(fun(source,target,values)->
-      let changed=compile source target values|>Sop.Node.Private.adopt_identity ~source:node in
+      let changed=compile source target values|>Sop.Node.Build.adopt_identity ~source:node in
       let before=Sop.Session.stats session in
       let output=Sop.Session.cook session ~context changed|>geometry in
       check((Sop.Session.stats session).misses>before.misses)"changed remap semantic input hit stale cache";
@@ -422,7 +422,7 @@ let ()=
     let node=compile src dst base in
     let context=Sop.Context.create()|>get_string_ok in
     ignore(Sop.Session.cook session ~context node);let before=Sop.Session.stats session in
-    let node=compile src dst permuted|>Sop.Node.Private.adopt_identity ~source:node in
+    let node=compile src dst permuted|>Sop.Node.Build.adopt_identity ~source:node in
     let actual=Sop.Session.cook session ~context node|>geometry in
     check((Sop.Session.stats session).misses>before.misses)"primitive ancestry cache input ignored";
     check(geometry_bytes actual=geometry_bytes expected)"primitive NaN payload/order permutation differs");

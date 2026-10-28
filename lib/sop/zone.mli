@@ -1,7 +1,7 @@
 (** The zone cook step: a loop over the elements of cooked geometry.
 
     A zone node has the collection as input 0 (and any outer geometry its body
-    reads as further inputs).  When the session cooks it, {!Node.Private.expand}
+    reads as further inputs).  When the session cooks it, {!Node.Build.expand}
     derives the elements of the collection, asks [body] for the sub-graph of
     each one, cooks those through the same session (so an element whose
     sub-graph is unchanged is a cache hit) and merges the results, writing

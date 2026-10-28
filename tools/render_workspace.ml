@@ -58,7 +58,7 @@ let init _ =
         let explosion = Rdk_rays.Packed_pieces.explosion
             ~operation:(Node.operation node) ~fields:(Node.parameter_fields node) in
         let drawing = Rdk_rays.Surface.scene3 ?explosion surface in
-        Scene.D3.Private.iter_batches (fun (d : Scene.D3.Private.drawing) transforms ->
+        Scene.D3.Walk.iter_batches (fun (d : Scene.D3.Walk.drawing) transforms ->
           let material = material d.material in
           let geometry = Rdk_rays.Rays_mesh.of_mesh d.mesh
               |> Result.map_error Rdk.Error.to_string |> get in

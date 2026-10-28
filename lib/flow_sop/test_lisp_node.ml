@@ -131,9 +131,9 @@ let () =
   let before=Rdk_test_support.geometry_bytes original in
   let transforms=[|Rays_math.Mat4.translation(Rays_math.Vec3.create 1. 0. 0.);
     Rays_math.Mat4.translation(Rays_math.Vec3.create 3. 0. 0.)|] in
-  let input=Sop.Node.Private.make_geometry ~operation:"test.materialized_input" ~version:1
+  let input=Sop.Node.Build.make_geometry ~operation:"test.materialized_input" ~version:1
     ~parameters:"" ~cook_mode:Sop.Node.Generator ~dependencies:Sop.Context.Dependencies.static ~inputs:[||]
-    (fun ~node_id:_ _ _->Ok Sop.Node.Private.{geometry=original;instances=Some transforms}) in
+    (fun ~node_id:_ _ _->Ok Sop.Node.Build.{geometry=original;instances=Some transforms}) in
   let body={|(let* [data (exact (map (fn [p] (+ p [0.5 -0.0 0.0])) (sop/attr geo :P)))
                       copied (sop/with_attr geo :copied data)
                       rows {:offsets (array/range (int/add (sop/count copied :points) 1) :type int)
@@ -725,7 +725,7 @@ let ()=
   let child_error={ (Diagnostic.error ~cause:"\255 raw 日本😀" ~hints:["retained hint"]
     ~code:"E_CHILD" "child cook failed") with trace=retained }in
   let factory=Sop.Edit_graph.factory ~key:"failing_child" ~label:"Failing child" ~category:["Test"] ~arity:1
-    (fun inputs->Result.ok @@ Sop.Node.Private.make ~operation:"native.failing_child" ~version:1 ~parameters:""
+    (fun inputs->Result.ok @@ Sop.Node.Build.make ~operation:"native.failing_child" ~version:1 ~parameters:""
       ~cook_mode:Sop.Node.Generic ~inputs:(Array.of_list inputs) ~dependencies:Sop.Context.Dependencies.static
       (fun ~node_id:_ _context _inputs->incr calls;Error child_error))in
   let source= {|(workspace boundary

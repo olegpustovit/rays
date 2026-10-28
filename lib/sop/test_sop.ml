@@ -20,13 +20,13 @@ end
 let custom ?label ?(version = 1) ?(parameters = "")
     ?(cook_mode = Node.Generic) ?(dependencies = Context.Dependencies.static)
     ~operation inputs cook =
-  Node.Private.make_geometry ?label ~operation ~version ~parameters ~cook_mode
+  Node.Build.make_geometry ?label ~operation ~version ~parameters ~cook_mode
     ~dependencies ~inputs:(Array.of_list inputs) (fun ~node_id:_ context geometries ->
       if Context.cancelled context then
         Error (Diagnostic.error ~code:"cancelled"
           "custom procedural node was cancelled before cooking")
       else match cook ~context (Array.copy geometries) with
-        | Ok geometry -> Ok Node.Private.{ geometry; instances = None }
+        | Ok geometry -> Ok Node.Build.{ geometry; instances = None }
         | Error message ->
           Error (Diagnostic.error ~code:(operation ^ "_failed") ~cause:message ~hints:[]
             (operation ^ " could not produce valid geometry")))
@@ -1931,7 +1931,7 @@ let test_volatile_slots () =
   let c = context () in
   ignore (cook_ok evaluator c static);
   for step = 0 to 19 do
-    let node = Node.Private.adopt_identity ~source:first (live_node (float step)) in
+    let node = Node.Build.adopt_identity ~source:first (live_node (float step)) in
     ignore (cook_ok evaluator c node)
   done;
   let stats = Session.stats evaluator in
@@ -1941,7 +1941,7 @@ let test_volatile_slots () =
   ignore (cook_ok evaluator c static);
   let stats = Session.stats evaluator in
   check (stats.hits = 21 && stats.misses = 21) "the static entry was evicted by a volatile node";
-  let same = Node.Private.adopt_identity ~source:first (live_node 19.) in
+  let same = Node.Build.adopt_identity ~source:first (live_node 19.) in
   ignore (cook_ok evaluator c same);
   check ((Session.stats evaluator).volatile_hits = 1) "the latest volatile entry did not hit";
   Session.set_volatile evaluator (fun _ -> false);
@@ -1960,7 +1960,7 @@ let test_async_volatile_on_worker () =
         Atomic.set entered true;
         while not (Atomic.get release) do Unix.sleepf 0.001 done;
         Ok inputs.(0)) in
-  let again () = Node.Private.adopt_identity ~source:node
+  let again () = Node.Build.adopt_identity ~source:node
       (custom ~operation:"async_volatile_test" ~version:1 ~parameters:"again"
         [Lisp_sop.snapshot (Rdk.Line_geometry.points [|0., 0., 0.|])] (fun ~context:_ inputs ->
           Atomic.set entered true;

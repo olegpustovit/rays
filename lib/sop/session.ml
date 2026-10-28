@@ -164,14 +164,14 @@ let set_volatile session predicate =
 let selective node inputs =
   let facts = Node.facts node in
   Array.length inputs = 1 && (match inputs.(0) with Payload.Geometry _ -> true | Image _ | Kernel _ -> false)
-  && Node.Private.expand node = None
+  && Node.Build.expand node = None
   && facts.topology = Node.Preserved && not (List.mem "*" facts.reads || List.mem "*" facts.writes)
   && (facts.cook_mode = Node.Duplicate_input 0 || facts.cook_mode = Node.Passthrough 0)
 
 let cache_key node context inputs =
-  let parameters = Node.Private.cache_parameters node
+  let parameters = Node.Build.cache_parameters node
   and parameter_key = Node.parameter_key node
-  and facts_key = Node.Private.cache_facts node in
+  and facts_key = Node.Build.cache_facts node in
   let buffer = Buffer.create (64 + String.length parameters
       + String.length parameter_key + String.length facts_key + (8 * Array.length inputs)) in
   let add_int value = Buffer.add_int64_le buffer (Int64.of_int value) in
@@ -223,7 +223,7 @@ let node_result f =
       ~cause:(Printexc.to_string exn)
       "a procedural node raised an exception while cooking")
 
-let delta node inputs (cooked : Node.Private.cooked) =
+let delta node inputs (cooked : Node.Build.cooked) =
   if not (selective node inputs) then None else
   let source = Result.get_ok (Payload.geometry inputs.(0)) in
   let geometry = match cooked.payload with Geometry geometry -> geometry
@@ -376,8 +376,8 @@ let replay_event session = function
   | Time sample -> record_time session sample; true
 
 let selected_inputs node =
-  let inputs=Node.Private.input_array node in
-  match Node.Private.input_policy node with All -> inputs | Only i -> [|inputs.(i)|]
+  let inputs=Node.Build.input_array node in
+  match Node.Build.input_policy node with All -> inputs | Only i -> [|inputs.(i)|]
 
 let branch_min_seconds = 0.002
 let branch_min_points = 10_000
@@ -459,7 +459,7 @@ and shared_prefix memo session context roots =
         (match memo_find counts node with
          | Some (_, count) -> incr count
          | None -> Hashtbl.add counts (Node.id node) (node, ref 1));
-        if Option.is_some (Node.Private.expand node) then opaque := true;
+        if Option.is_some (Node.Build.expand node) then opaque := true;
         Array.iter visit (selected_inputs node)
       end in
     visit root) roots;
@@ -569,15 +569,15 @@ and evaluate_many memo session context roots =
 (* A zone expands on its caller; its concrete element roots use the same
    input-order join as ordinary independent branches. *)
 and cook_node memo session context node geometries =
-  match Node.Private.expand node with
-  | None -> Node.Private.cook node context geometries
+  match Node.Build.expand node with
+  | None -> Node.Build.cook node context geometries
   | Some expand ->
-      match expand context (Node.Private.input_array node) geometries with
+      match expand context (Node.Build.input_array node) geometries with
       | Error _ as error -> error
       | Ok roots ->
           (match evaluate_many memo session context roots with
            | Error error -> Error (Diagnostic.prepend_trace (Node.trace node) error)
-           | Ok outputs -> Node.Private.cook node context (Array.map snd outputs))
+           | Ok outputs -> Node.Build.cook node context (Array.map snd outputs))
 
 and evaluate_uncached memo session context node =
   if Context.cancelled context then Error (cancellation_error node)

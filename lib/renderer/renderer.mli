@@ -82,7 +82,7 @@ val create_gpu_marks : gpu -> (gpu_marks,error) result
 val gpu_marks : ?indirect:((unit->Ogpu.Backend.buffer option)*int64) -> gpu_marks -> kind:int -> count:int -> marks_source array ->
   (Scene_command.Marks.gpu_token,error) result
 val close_gpu_marks : gpu_marks -> unit
-module Private : sig
+module Native : sig
   (** The borrowed SDL/runtime shell; its lifetime remains owned by [t]. *)
   val runtime : t -> Runtime.t
   type scaled_cache

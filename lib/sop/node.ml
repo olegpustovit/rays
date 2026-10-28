@@ -112,7 +112,7 @@ let apply_parameters value changes = match value.parameterization with
           Ok ({ value with parameterization = Some (Parameters {
               parameterization with values }) }, effects))
 
-module Private = struct
+module Build = struct
   type input_policy = Private_types.input_policy = All | Only of int
   type cooked = Private_types.cooked = {
     payload : Payload.t;

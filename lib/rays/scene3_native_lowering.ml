@@ -112,8 +112,8 @@ type caster={caster_mesh:Mesh.t;caster_transform:Rays_math.Mat4.t;caster_instanc
 type sun_fit={casters:caster list;direction:Rays_math.Vec3.t;fit:(Rays_math.Mat4.t*string)option}
 let casters scene=
   let casters=ref[]in
-  Scene3.Private.iter_batches(fun(drawing:Scene3.Private.drawing)transforms->
-    let triangles=match(Mesh.Private.view drawing.mesh).mode with
+  Scene3.Walk.iter_batches(fun(drawing:Scene3.Walk.drawing)transforms->
+    let triangles=match(Mesh.View.view drawing.mesh).mode with
       |Triangles|Triangle_strip|Triangle_fan->true|_->false in
     if triangles&&drawing.mode=Faces&&(drawing.blend=Replace||drawing.blend=Alpha)&&drawing.depth.write then
       casters:={caster_mesh=drawing.mesh;caster_transform=drawing.transform;
@@ -139,7 +139,7 @@ let sun_fit scene(sun:World.sun)=
         lo.(axis)<-Float.min lo.(axis)d;hi.(axis)<-Float.max hi.(axis)d)[side;up;f]in
       let pick op(a:Rays_math.Vec3.t)(b:Rays_math.Vec3.t)=Rays_math.Vec3.create(op a.x b.x)(op a.y b.y)(op a.z b.z)in
       List.iter(fun c->
-        let vertices=(Mesh.Private.view c.caster_mesh).vertices in
+        let vertices=(Mesh.View.view c.caster_mesh).vertices in
         if Array.length vertices>0 then
         let a=Array.fold_left(pick Float.min)vertices.(0)vertices
         and b=Array.fold_left(pick Float.max)vertices.(0)vertices in
@@ -234,7 +234,7 @@ let background_uniforms ~camera ~viewport=
       let bytes=Bytes.make 5456 '\000' in
       matrix bytes 0 Rays_math.Mat4.identity;matrix bytes 16 Rays_math.Mat4.identity;matrix bytes 32 Rays_math.Mat4.identity;
       put32 bytes 76 2.;put32 bytes 82 1.;matrix bytes 84 inverse;Some bytes
-let uniforms_blinn_phong ~camera ~viewport scene(drawing:Scene3.Private.drawing)=
+let uniforms_blinn_phong ~camera ~viewport scene(drawing:Scene3.Walk.drawing)=
   let bytes=Bytes.make 5456 '\000'and material=drawing.material in
   put32 bytes 82 1.;
   let projection=native_clip_projection(Camera.view_projection_matrix~viewport camera)in
@@ -242,17 +242,17 @@ let uniforms_blinn_phong ~camera ~viewport scene(drawing:Scene3.Private.drawing)
   let normal=match Rays_math.Mat4.inverse drawing.transform with None->Rays_math.Mat4.identity|Some value->Rays_math.Mat4.transpose value in matrix bytes 32 normal;
   let eye=Camera.position camera in put32 bytes 48 eye.x;put32 bytes 49 eye.y;put32 bytes 50 eye.z;
   color bytes 52 material.ambient;color bytes 56 material.diffuse;color bytes 60 material.specular;color bytes 64 material.emissive;put32 bytes 68 material.shininess;
-  let ambient=Scene3.Private.ambient scene in color bytes 69 ambient;
-  let lights=Array.of_list(Scene3.Private.lights scene)in
+  let ambient=Scene3.Walk.ambient scene in color bytes 69 ambient;
+  let lights=Array.of_list(Scene3.Walk.lights scene)in
   (* The native light ABI reserves linear slots; the zero-filled buffer
      keeps them zero while preserving the shared twenty-word layout. *)
-  put32 bytes 73(float(Array.length lights));put32 bytes 74(if drawing.cull=Cull_none then 1. else 0.);put32 bytes 75(if Scene3.Private.separate_specular scene then 1. else 0.);
+  put32 bytes 73(float(Array.length lights));put32 bytes 74(if drawing.cull=Cull_none then 1. else 0.);put32 bytes 75(if Scene3.Walk.separate_specular scene then 1. else 0.);
   Array.iteri(fun index(light:Light.t)->let o=84+index*20 in let vector p=put32 bytes(o+1)p.Rays_math.Vec3.x;put32 bytes(o+2)p.y;put32 bytes(o+3)p.z in color bytes(o+4)light.diffuse;put32 bytes(o+8)light.intensity;match light.kind with
     |Directional{direction}->put32 bytes o 0.;vector direction
     |Point{position;attenuation}->put32 bytes o 1.;vector position;put32 bytes(o+9)attenuation.constant;put32 bytes(o+11)attenuation.quadratic
     |Spot{position;direction;cutoff;concentration;attenuation}->put32 bytes o 2.;vector position;put32 bytes(o+9)direction.x;put32 bytes(o+10)direction.y;put32 bytes(o+11)direction.z;put32 bytes(o+12)(cos cutoff);put32 bytes(o+13)(cos cutoff);put32 bytes(o+14)concentration;put32 bytes(o+15)attenuation.constant;put32 bytes(o+17)attenuation.quadratic
     |Area{position;direction;width;height;samples;attenuation}->put32 bytes o 3.;vector position;put32 bytes(o+9)direction.x;put32 bytes(o+10)direction.y;put32 bytes(o+11)direction.z;put32 bytes(o+12)width;put32 bytes(o+13)height;put32 bytes(o+14)(float samples);put32 bytes(o+15)attenuation.constant;put32 bytes(o+17)attenuation.quadratic)lights;bytes
-let uniforms ?world ~camera ~viewport scene(drawing:Scene3.Private.drawing)=
+let uniforms ?world ~camera ~viewport scene(drawing:Scene3.Walk.drawing)=
   let bytes=uniforms_blinn_phong ~camera ~viewport scene drawing in
   Option.iter(fun world->world_uniforms bytes world drawing.material)world;bytes
 (* Each instance's world and normal matrices depend only on its batch, not
@@ -270,8 +270,8 @@ let instance_frames parent transforms=
       worlds,normals
 let instance_uniforms ?world ~camera ~viewport scene drawing all ~first ~count =
   let transforms=Array.sub all first count in
-  let parent=drawing.Scene3.Private.transform in
-  let drawing={drawing with Scene3.Private.transform=Rays_math.Mat4.mul drawing.transform transforms.(0)} in
+  let parent=drawing.Scene3.Walk.transform in
+  let drawing={drawing with Scene3.Walk.transform=Rays_math.Mat4.mul drawing.transform transforms.(0)} in
   let base=uniforms ?world ~camera ~viewport scene drawing in
   if count=1 then base else
   let bytes=Bytes.make (5456+count*192) '\000' in
@@ -290,7 +290,7 @@ let instance_uniforms ?world ~camera ~viewport scene drawing all ~first ~count =
   bytes
 type packed_mesh={
   mesh:Mesh.t;
-  source:Mesh.Private.packed_view;
+  source:Mesh.View.packed_view;
   mode:Scene3.render_mode;
   primitive:Ogpu.Render_pass.primitive;
   key:string;
@@ -356,7 +356,7 @@ let trim_prepared_cache (prepared_cache:(Scene3.t*Camera.t*(int*int*int*int),pre
        && size<=retained_payload_byte_capacity- !bytes then begin
       incr count;bytes:=!bytes+size;true
     end else false)
-let pack_vertices ~allow_missing_normals (view:Mesh.Private.packed_view)=
+let pack_vertices ~allow_missing_normals (view:Mesh.View.packed_view)=
   let count=Array.length view.vertices.x in
   let normals=match view.normals with
     |Some values when Array.length values.x=count->Some(Some values)
@@ -378,7 +378,7 @@ let pack_vertices ~allow_missing_normals (view:Mesh.Private.packed_view)=
          put(offset+20)normals.z.(index))
   done;
   if !finite then Ok bytes else Error Invalid_mesh
-let pack_attributes(view:Mesh.Private.packed_view)=
+let pack_attributes(view:Mesh.View.packed_view)=
   let count=Array.length view.vertices.x in
   let bytes=Bytes.make(count*12)'\000'and finite=ref true in
   for index=0 to count-1 do
@@ -419,11 +419,11 @@ let unique_triangle_edges triangles=
       [a,b;b,c;c,a]
   done;
   Array.of_list(List.rev !edges)
-let same_planes(a:Mesh.Private.vec3_view)(b:Mesh.Private.vec3_view)=
+let same_planes(a:Mesh.View.vec3_view)(b:Mesh.View.vec3_view)=
   a.x==b.x&&a.y==b.y&&a.z==b.z
 let same_normals a b=match a,b with
   |None,None->true|Some a,Some b->same_planes a b|_->false
-let same_geometry(a:Mesh.Private.packed_view)(b:Mesh.Private.packed_view)=
+let same_geometry(a:Mesh.View.packed_view)(b:Mesh.View.packed_view)=
   a.mode=b.mode&&same_planes a.vertices b.vertices&&
   same_normals a.normals b.normals&&a.indices==b.indices
 let same_attributes a b=match a,b with None,None->true|Some a,Some b->a==b|_->false
@@ -434,7 +434,7 @@ let find_packed predicate =
     (Domain.DLS.get current_packed_cache);
   !found
 let packed_of_mesh mode mesh=
-  let source=Mesh.Private.packed_view mesh in
+  let source=Mesh.View.packed_view mesh in
   let cache=Domain.DLS.get current_packed_cache in
   let exact=match Option.bind cache(fun context->Packed_meshes.peek context.packed_meshes (mesh,mode)) with
     |Some packed when same_geometry packed.source source&&
@@ -455,7 +455,7 @@ let packed_of_mesh mode mesh=
          mesh identity) rather than rejecting procedural meshes without N. *)
       let view=match mode,view.mode,view.normals with
         |Faces,(Mesh.Triangles|Triangle_strip|Triangle_fan),None->
-            (match reused with Some _->view|None->Mesh.Private.packed_view(Mesh.recalculate_normals mesh))
+            (match reused with Some _->view|None->Mesh.View.packed_view(Mesh.recalculate_normals mesh))
         |_->view in
       let native=match mode with
         |Scene3.Vertices->Some(Ogpu.Render_pass.Point_list,
@@ -493,9 +493,9 @@ let prepare ~resources ~camera ~viewport:(x,y,width,height as viewport) scene =
   match Option.bind cache(fun context->Prepared_cache.peek context.prepared_cache (scene,camera,viewport)) with
   |Some prepared->Ok prepared.prepared
   |None->
-  if List.compare_length_with(Scene3.Private.lights scene)max_lights>0 then Error Too_many_lights else
+  if List.compare_length_with(Scene3.Walk.lights scene)max_lights>0 then Error Too_many_lights else
   let world=Option.map(fun(baked:World.baked)->
-    world_of baked (Option.bind baked.sun (sun_fit scene)))(Scene3.Private.world scene)in
+    world_of baked (Option.bind baked.sun (sun_fit scene)))(Scene3.Walk.world scene)in
   let cacheable=ref true
     and failure=ref None and entries=ref[]in
   (match world with
@@ -503,15 +503,15 @@ let prepare ~resources ~camera ~viewport:(x,y,width,height as viewport) scene =
        Option.iter(fun uniforms->
          let state:Renderer.Scene_execution.state={viewport;scissor=viewport;cull=Cull_none;
            depth_compare=Always;depth_write=false;depth_load=Clear;
-           depth_clear=Scene3.Private.depth_clear scene;transform_uniforms=Some uniforms;
+           depth_clear=Scene3.Walk.depth_clear scene;transform_uniforms=Some uniforms;
            }in
          entries:=[{Renderer.Scene_execution.family=Scene3_world;blend=Ogpu.Pipeline.Replace;
            texture=Some w.camera_map;auxiliary=Some w.auxiliary;
            vertex_attributes=Some background_attributes;
-           samples=Scene3.Private.samples scene;draw={mesh=background_mesh;state}}])
+           samples=Scene3.Walk.samples scene;draw={mesh=background_mesh;state}}])
          (background_uniforms~camera~viewport)
    |_->());
-  Scene3.Private.iter_batches (fun (drawing:Scene3.Private.drawing) transforms->
+  Scene3.Walk.iter_batches (fun (drawing:Scene3.Walk.drawing) transforms->
     if Option.is_some drawing.texture then cacheable:=false;
     if !failure=None && (match transforms with Some values->Array.length values>0|None->true)
     then match packed_of_mesh drawing.mode drawing.mesh with
@@ -531,7 +531,7 @@ let prepare ~resources ~camera ~viewport:(x,y,width,height as viewport) scene =
             |Some w->Renderer.Scene_execution.Scene3_world,Some(Option.value texture~default:world_white),Some w.auxiliary
             |None->family,texture,None in
           let add transform_uniforms=
-            let state:Renderer.Scene_execution.state={viewport=(x,y,width,height);scissor=(x,y,width,height);cull=cull drawing.cull;depth_compare=comparison drawing.depth.comparison;depth_write=drawing.depth.write;depth_load=Ogpu.Render_pass.Clear;depth_clear=Scene3.Private.depth_clear scene;transform_uniforms=Some transform_uniforms} in
+            let state:Renderer.Scene_execution.state={viewport=(x,y,width,height);scissor=(x,y,width,height);cull=cull drawing.cull;depth_compare=comparison drawing.depth.comparison;depth_write=drawing.depth.write;depth_load=Ogpu.Render_pass.Clear;depth_clear=Scene3.Walk.depth_clear scene;transform_uniforms=Some transform_uniforms} in
             (* The default blend is Alpha.  A draw whose every fragment has alpha 1 (opaque
                material and vertex colors, no texture) writes the same pixels with Replace, and
                only an unblended pipeline lets a tile-based GPU drop hidden fragments before
@@ -539,7 +539,7 @@ let prepare ~resources ~camera ~viewport:(x,y,width,height as viewport) scene =
             let blend=match drawing.blend with
               |Alpha when drawing.texture=None&&drawing.material.diffuse.a=255&&packed.opaque->Ogpu.Pipeline.Replace
               |other->blend other in
-            entries:={Renderer.Scene_execution.family;blend;texture;auxiliary;vertex_attributes=Some packed.vertex_attributes;samples=Scene3.Private.samples scene;draw={mesh;state}}::!entries in
+            entries:={Renderer.Scene_execution.family;blend;texture;auxiliary;vertex_attributes=Some packed.vertex_attributes;samples=Scene3.Walk.samples scene;draw={mesh;state}}::!entries in
           match transforms with
           |None->add(uniforms ?world ~camera ~viewport scene drawing)
           |Some transforms->
@@ -558,7 +558,7 @@ let prepare ~resources ~camera ~viewport:(x,y,width,height as viewport) scene =
         ||(Mesh.index_count drawing.mesh<3&&Mesh.mode drawing.mesh<>Mesh.Points)->()
     |_->failure:=Some Invalid_mesh)scene;
     match!failure with Some error->Error error|None->match Renderer.Scene_execution.prepare_scene3 ~clear:(0.,0.,0.,0.)
-      ~clear_depth:(Scene3.Private.depth_clear scene)(Array.of_list(List.rev!entries))with
+      ~clear_depth:(Scene3.Walk.depth_clear scene)(Array.of_list(List.rev!entries))with
     |Ok prepared->
         if !cacheable then begin
           Option.iter(fun context->

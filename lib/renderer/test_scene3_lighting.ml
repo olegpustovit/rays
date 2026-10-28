@@ -106,7 +106,7 @@ let run () =
             let bytes =
               get
                 (Renderer.read_pixels runtime
-                   ~bytes_per_row:((get (Runtime.presentation_facts (Renderer.Private.runtime runtime))).drawable_width * 4))
+                   ~bytes_per_row:((get (Runtime.presentation_facts (Renderer.Native.runtime runtime))).drawable_width * 4))
             in
             let actual =
               ( Char.code (Bytes.get bytes 0),
@@ -152,7 +152,7 @@ let run () =
      world (x,y,0) with x=-1+1/width, which differs between 1x and Retina
      backing. Expected channels follow the shader for that centre with the
      light at (0,0,1), unit attenuation and normal +z (specular is black). *)
-      let facts = get (Runtime.presentation_facts (Renderer.Private.runtime runtime)) in
+      let facts = get (Runtime.presentation_facts (Renderer.Native.runtime runtime)) in
       let x = -1. +. (1. /. float facts.drawable_width)
       and y = 1. -. (1. /. float facts.drawable_height) in
       let byte value = int_of_float (Float.round (255. *. Float.min 1. (Float.max 0. value))) in

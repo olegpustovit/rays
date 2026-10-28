@@ -12,11 +12,11 @@ let ()=
   let observed=Atomic.make 0 in
   let dependencies=List.fold_left P.Context.Dependencies.union P.Context.Dependencies.static
     (List.map P.Context.Dependencies.one[Seed;Grain;Domains])in
-  let source()=P.Node.Private.make ~operation:"image_context" ~version:1 ~parameters:""
+  let source()=P.Node.Build.make ~operation:"image_context" ~version:1 ~parameters:""
     ~cook_mode:Generator ~dependencies ~inputs:[||](fun ~node_id:_ context _->
       Atomic.set observed(P.Context.domains context);
       let point=Int64.to_float(P.Context.seed context)/.256.,float(P.Context.grain context)/.1024.,0. in
-      P.Node.Private.cook(Lisp_sop.snapshot(Rdk.Line_geometry.points[|point|]))context[||])in
+      P.Node.Build.cook(Lisp_sop.snapshot(Rdk.Line_geometry.points[|point|]))context[||])in
   let factory=P.Edit_graph.factory ~key:"image_context" ~label:"Image context" ~category:["Test"]
     ~arity:0(function []->Ok(source())|_->assert false)in
   let factories=factory::Sop.Nodes.factories in
@@ -137,7 +137,7 @@ let () =
       let scene=ok(Flow_native.Drawing.render_prepared ~image:(fun v->Editor.Private.with_images
         ~plan:evaluated.plan ~live:(Input.at_time 1.) owner (fun ~image ~texture:_->image v))
         prepared ~live:(Input.at_time 1.) ~size:(65,3))in
-      assert(Array.exists(function Scene_command.Render_ir.Image _->true|_->false)(Rays.Scene.Private.commands scene));
+      assert(Array.exists(function Scene_command.Render_ir.Image _->true|_->false)(Rays.Scene.Layer.commands scene));
       assert(Editor.Private.image_stats owner=(1,0)));
     assert(Editor.Private.image_stats owner=(1,1)))
     ["(image/map (fn [uv] [(+ uv.x (* t 0.25)) uv.y 0.5 1]) :width 65 :height 3)";
@@ -184,7 +184,7 @@ let ()=
     List.iter(fun domains->Parallel.run ~domains(fun()->
       let scene=ok(Flow_native.Drawing.render_prepared ~image:(Editor.Private.image owner)
         prepared ~live:(Input.at_time 0.) ~size:(32,32))in
-      let actual=Rays.Scene.Private.commands scene in
+      let actual=Rays.Scene.Layer.commands scene in
       assert(Array.exists(function Scene_command.Render_ir.Image _->true|_->false)actual);
       (match !commands with None->commands:=Some actual|Some expected->assert(actual=expected));
       assert(Result.get_ok(Rays.Image.pixels image)=oracle);
@@ -249,12 +249,12 @@ let ()=
     [Rays.Scene.D3.translate (Rays_math.Vec3.create 2. 3. 4.)
       [Rays.Scene.D3.with_blend Add [Rays.Scene.D3.with_depth(Rays.Scene.D3.depth_state ~write:false())
         [Rays.Scene.D3.plane ~cull:Cull_front ~width:2. ~height:3.()]]]]in
-  let textured=Rays.Scene.D3.Private.with_texture texture scene in
+  let textured=Rays.Scene.D3.Walk.with_texture texture scene in
   List.iter2(fun original textured->
-    assert(textured.Rays.Scene.D3.Private.texture=Some texture);
+    assert(textured.Rays.Scene.D3.Walk.texture=Some texture);
     assert({textured with texture=None}=original))
-    (Rays.Scene.D3.Private.drawings scene)(Rays.Scene.D3.Private.drawings textured);
-  assert(Rays.Scene.D3.Private.samples textured=4 && Rays.Scene.D3.Private.ambient textured=Rays_math.Color.red);
+    (Rays.Scene.D3.Walk.drawings scene)(Rays.Scene.D3.Walk.drawings textured);
+  assert(Rays.Scene.D3.Walk.samples textured=4 && Rays.Scene.D3.Walk.ambient textured=Rays_math.Color.red);
   print_endline "Scene image textures preserve affine, cull, blend, depth and scene settings"
 
 let () =

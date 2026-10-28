@@ -17,7 +17,7 @@ let geometry () =
 let mesh geometry=Result.map_error Rdk.Error.to_string(Rdk_rays.Rays_mesh.to_mesh geometry)
 
 let snapshot domains = Parallel.run~domains(fun()->
-  let view=Rays.Mesh.Private.packed_view(get(mesh(geometry())))in
+  let view=Rays.Mesh.View.packed_view(get(mesh(geometry())))in
   let normals=Option.get view.normals in
   if normals.x<>[|0.;0.;0.|]||normals.y<>[|0.;0.;0.|]||normals.z<>[|-1.;-1.;-1.|]then
     failwith"reversed authored N was overwritten";

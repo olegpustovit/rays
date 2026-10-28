@@ -3,11 +3,11 @@ open Rays
 let require condition message = if not condition then failwith message
 
 let serialize scene =
-  let ir = Result.get_ok (Scene.Private.to_ir scene) in
+  let ir = Result.get_ok (Scene.Layer.to_ir scene) in
   Scene_command.Render_ir.serialize ir
 
 let first_geometry scene =
-  let ir = Result.get_ok (Scene.Private.to_ir scene) in
+  let ir = Result.get_ok (Scene.Layer.to_ir scene) in
   Array.find_map
     (function Scene_command.Render_ir.Geometry geometry -> Some geometry | _ -> None)
     (Scene_command.Render_ir.commands_readonly ir)
@@ -33,11 +33,11 @@ let measure calls make =
 (* a window presents only a picture that is not the same as the last one *)
 let same_picture () =
   let picture label = Scene.[ clear Rays_math.Color.black; translate 4 8 [ text label ~at:(1, 2) ] ] in
-  require (Scene.Private.same (picture "a") (picture "a")) "an equal picture rebuilt counts as changed";
-  require (not (Scene.Private.same (picture "a") (picture "b"))) "a changed label counts as the same picture"
+  require (Scene.Layer.same (picture "a") (picture "a")) "an equal picture rebuilt counts as changed";
+  require (not (Scene.Layer.same (picture "a") (picture "b"))) "a changed label counts as the same picture"
 
 let run () =
-  Scene.Private.with_cache_context (Scene.Private.create_cache_context ()) (fun () ->
+  Scene.Layer.with_cache_context (Scene.Layer.create_cache_context ()) (fun () ->
   same_picture ();
   let make x y =
     Scene.[rounded_rect ~at:(x, y) ~w:84 ~h:31 ~radius:7

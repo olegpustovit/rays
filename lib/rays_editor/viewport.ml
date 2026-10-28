@@ -530,7 +530,7 @@ let paint extra ~key viewport camera rendered = Renderer.paint extra.renderer ~k
 let compose ~scene ~world pieces =
   let lights = Objects.lights scene in
   let base = match pieces with (_, _, first) :: _ -> first | [] -> Scene.D3.empty in
-  let module P = Scene.D3.Private in
+  let module P = Scene.D3.Walk in
   (match world with Some baked -> Scene.D3.with_world baked | None -> Fun.id) @@
   Scene.D3.create ~lights:(if lights <> [] || Objects.ids "light" scene <> [] then lights
       else P.lights base)

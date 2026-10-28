@@ -12,9 +12,9 @@ let () =
     let context = context domains in
     let channels = [|-1.;0.;0.5/.255.;1.5/.255.;2.5/.255.;127.5/.255.;254.5/.255.;2.|] in
     let rgba = Array.init (257*131*4) (fun i -> channels.(i mod Array.length channels)) in
-    let node = Node.Private.make ~operation:"image/conversion-test" ~version:1
+    let node = Node.Build.make ~operation:"image/conversion-test" ~version:1
       ~parameters:"" ~cook_mode:Node.Generator ~dependencies:Context.Dependencies.static ~inputs:[||]
-      (fun ~node_id:_ context _ -> Result.map (fun image -> Node.Private.{
+      (fun ~node_id:_ context _ -> Result.map (fun image -> Node.Build.{
         payload=Payload.Image image;instances=None})
         (Image.of_vec4 ~context ~width:257 ~height:131 rgba)) in
     let session = session 0 in
@@ -71,12 +71,12 @@ let () =
   Fun.protect ~finally:(fun () -> Session.close tiny) (fun () ->
     ignore (ok (Session.cook tiny ~context:(context 1) node));
     assert ((Session.stats tiny).retained_entries = 0 && (Session.stats tiny).retained_payload_bytes = 0));
-  let image_input = Node.Private.make ~operation:"image/instances-test" ~version:1
+  let image_input = Node.Build.make ~operation:"image/instances-test" ~version:1
     ~parameters:"" ~cook_mode:Node.Generator ~dependencies:Context.Dependencies.static ~inputs:[||]
-    (fun ~node_id:_ _ _ -> Ok Node.Private.{payload=Payload.Image image;       instances=Some [|Rays_math.Mat4.identity|]}) in
-  let passthrough = Node.Private.make ~operation:"image/pass-test" ~version:1
+    (fun ~node_id:_ _ _ -> Ok Node.Build.{payload=Payload.Image image;       instances=Some [|Rays_math.Mat4.identity|]}) in
+  let passthrough = Node.Build.make ~operation:"image/pass-test" ~version:1
     ~parameters:"" ~cook_mode:Node.Generic ~dependencies:Context.Dependencies.static ~inputs:[|image_input|]
-    (fun ~node_id:_ _ inputs -> Ok Node.Private.{payload=inputs.(0); instances=None}) in
+    (fun ~node_id:_ _ inputs -> Ok Node.Build.{payload=inputs.(0); instances=None}) in
   let passing = session 65536 in
   Fun.protect ~finally:(fun () -> Session.close passing) (fun () ->
     let output = ok (Session.cook passing ~context:(context 1) passthrough) in

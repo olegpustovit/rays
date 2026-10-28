@@ -55,8 +55,8 @@ let run () =
       let ir = Result.get_ok (R.create (Array.of_list (R.Set_blend Alpha :: commands))) in
       let encoded = ref 0 in
       let pixels = Test_ui_pipeline.capture ~clear execution (fun submission ->
-        let batch = Renderer.Private.lower_scene2 submission ~density:1 ~resource:(fun _ -> None) ir in
-        Result.iter (fun batch -> encoded := Renderer.Private.encoded_draws_for_test batch) batch; batch) in
+        let batch = Renderer.Native.lower_scene2 submission ~density:1 ~resource:(fun _ -> None) ir in
+        Result.iter (fun batch -> encoded := Renderer.Native.encoded_draws_for_test batch) batch; batch) in
       pixels, !encoded in
     let check name sets shapes expected_draws =
       let reference, one = capture [R.Shapes (all_sets sets)] in
@@ -85,6 +85,6 @@ let run () =
     let pixels, count = capture apart in
     assert (pixels = reference && count = 3));
   assert (Scene_execution.Private.gpu_vertex_count_for_test
-    (Renderer.Private.gpu_vertices_owner execution) = 0);
+    (Renderer.Native.gpu_vertices_owner execution) = 0);
   if live_handles () <> baseline then failwith "batch merge handle delta";
   print_endline "Batch merging: more than 64 neighbouring CPU sets are one draw, Marks sets keep their place, a clip separates, pixels equal one batch"

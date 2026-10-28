@@ -76,7 +76,7 @@ val apply_parameters :
   (string * Param.value) list ->
   (t * Param.effects, string) result
 
-module Private : sig
+module Build : sig
   val fresh_id : unit -> int
 
   val with_facts : facts -> t -> t

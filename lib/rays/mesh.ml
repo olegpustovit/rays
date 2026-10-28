@@ -193,7 +193,7 @@ let plane ~width ~height () =
   match create_owned ~indices ~normals ~tex_coords vertices with
   | Ok mesh -> mesh | Error message -> invalid_arg message
 
-module Private = struct
+module View = struct
   type vec3_view = Vec3_buffer.t = {
     x : float array;
     y : float array;

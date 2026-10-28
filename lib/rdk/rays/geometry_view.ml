@@ -52,7 +52,7 @@ let wire_mesh geometry =
     let a, b = Rdk_core.Topology_index.edge_points edges edge in
     indices.(edge * 2) <- a; indices.(edge * 2 + 1) <- b
   done;
-  Mesh.Private.create_owned ~mode:Mesh.Lines ~indices vertices
+  Mesh.View.create_owned ~mode:Mesh.Lines ~indices vertices
 
 (* ---- the sheet ---- *)
 

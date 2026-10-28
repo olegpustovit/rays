@@ -13,42 +13,42 @@ let run () =
   let retina:Runtime.frame_facts={logical_width=4;logical_height=4;
     drawable_width=8;drawable_height=12;pixel_scale_x=2.;pixel_scale_y=3.}in
   let draws=[draw]in
-  if Renderer.Private.scale_draws one draws!=draws then
+  if Renderer.Native.scale_draws one draws!=draws then
     failwith"1x draw graph was copied";
   let sampled=[{Scene_execution.family=Scene2;blend=Ogpu.Pipeline.Replace;
     texture=None;auxiliary=None;vertex_attributes=None;samples=1;draw}]in
-  if Renderer.Private.scale_sampled_resources one sampled!=sampled then
+  if Renderer.Native.scale_sampled_resources one sampled!=sampled then
     failwith"1x sampled graph was copied";
-  let scaled=List.hd(Renderer.Private.scale_draws retina draws)in
+  let scaled=List.hd(Renderer.Native.scale_draws retina draws)in
   if scaled==draw||scaled.state.viewport<>(2,6,6,12)||
      scaled.state.scissor<>(0,0,8,12)then
     failwith"Retina draw edges were not scaled exactly";
   let unchanged={draw with state=state(0,0,0,0)(0,0,0,0)}in
-  if List.hd(Renderer.Private.scale_draws retina[unchanged])!=unchanged then
+  if List.hd(Renderer.Native.scale_draws retina[unchanged])!=unchanged then
     failwith"unchanged Retina draw was copied";
   let resized={retina with Runtime.drawable_width=12;drawable_height=8}in
-  let changed=List.hd(Renderer.Private.scale_draws resized draws)in
+  let changed=List.hd(Renderer.Native.scale_draws resized draws)in
   if changed.state.viewport<>(3,4,9,8)||changed.state.scissor<>(0,0,12,8)then
     failwith"resized nonuniform edges were not recomputed";
   (* The per-frame path memoizes on list identity: the same list and facts
      return the same scaled list without allocating; a new list rescales. *)
-  let cache=Renderer.Private.new_scaled_cache()in
+  let cache=Renderer.Native.new_scaled_cache()in
   let many=List.init 1000(fun _->List.hd sampled)in
-  let first=Renderer.Private.scale_sampled_cached cache retina many in
+  let first=Renderer.Native.scale_sampled_cached cache retina many in
   if first==many||List.length first<>1000 then failwith"cached Retina list was not scaled";
-  if Renderer.Private.scale_sampled_cached cache retina many!=first then
+  if Renderer.Native.scale_sampled_cached cache retina many!=first then
     failwith"unchanged draw list was rescaled";
   let words=(Gc.quick_stat()).minor_words in
   for _=1 to 1000 do
-    ignore(Renderer.Private.scale_sampled_cached cache retina many)done;
+    ignore(Renderer.Native.scale_sampled_cached cache retina many)done;
   let per_call=((Gc.quick_stat()).minor_words-.words)/.1000. in
   if per_call>8. then failwith(Printf.sprintf"cached scaling allocated %.0f words per call"per_call);
   let words=(Gc.quick_stat()).minor_words in
-  for _=1 to 1000 do ignore(Renderer.Private.scale_sampled_resources retina many)done;
+  for _=1 to 1000 do ignore(Renderer.Native.scale_sampled_resources retina many)done;
   let uncached=((Gc.quick_stat()).minor_words-.words)/.1000. in
-  if Renderer.Private.scale_sampled_cached cache retina(List.tl many)==first then
+  if Renderer.Native.scale_sampled_cached cache retina(List.tl many)==first then
     failwith"a different draw list reused the cached scaling";
-  if Renderer.Private.scale_sampled_cached cache one many!=many then
+  if Renderer.Native.scale_sampled_cached cache one many!=many then
     failwith"1x facts did not bypass the cache";
   (* A window is not asked for its size every frame: SDL announces a change,
      and one announcement costs exactly one query however many arrive. *)

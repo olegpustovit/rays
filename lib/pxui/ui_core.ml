@@ -1,7 +1,7 @@
 open Rays
 
 module Int_table = Hashtbl.Make (Int)
-module Batch = Scene.Private.Ui_batch
+module Batch = Scene.Layer.Ui_batch
 
 (* ---------------------------------------------------------------- keys *)
 
@@ -340,7 +340,7 @@ let create_atlas () = {
   dirty = false; image = None; fonts = []; next_font = 1 }
 
 let font_id atlas font =
-  let generation = Font.Private.generation font in
+  let generation = Font.Raster.generation font in
   match List.find_opt (fun (candidate, _, _) -> candidate == font) atlas.fonts with
   | Some (_, id, known) when known = generation -> id
   | Some (_, id, _) ->
@@ -393,7 +393,7 @@ let glyph atlas font ~id ~density code =
   match Int_table.find_opt atlas.glyphs key with
   | Some _ as found -> found
   | None ->
-      match Font.Private.glyph ~density font code with
+      match Font.Raster.glyph ~density font code with
       | Error _ -> None
       | Ok raster ->
           let glyph = if raster.glyph_width = 0 || raster.glyph_height = 0 then
@@ -1904,7 +1904,7 @@ let frame ui (frame : Frame.t) f =
       | Some _ | None -> [] in
     let images=images@List.filter(fun(id,_)->List.mem id(Batch.textures batch))ui.borrowed_images in
     let batch = if images = [] && Batch.textures batch <> [] then Batch.empty else batch in
-    key, (if Batch.count batch = 0 then [] else [Scene.Private.ui ~images batch])) layers;
+    key, (if Batch.count batch = 0 then [] else [Scene.Layer.ui ~images batch])) layers;
   ui.scene <- List.concat_map snd ui.scene_layers @ List.rev ui.regions;
   result
 

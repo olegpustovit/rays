@@ -138,14 +138,14 @@ let hoist () =
   let view, _ = Test_support.Graph_pane.scope_view ~probe:(fun _ -> 5) w "sunflower" in
   let view, _ = Test_support.Graph_pane.step view (Test_support.Graph_pane.frame ()) in
   let turn = [ "sunflower"; "seeds_each"; "turn" ] in
-  let x, y, tw, th = Option.get (Scope.Private.box_of view turn) in
+  let x, y, tw, th = Option.get (Scope.Inspect.box_of view turn) in
   let z = Scope.zoom view in
   let point = int_of_float (x +. tw -. 30. *. z), int_of_float (y +. th -. 10. *. z) in
   let _, changes = Test_support.Graph_pane.click view point in
   ignore changes;  (* the footer's hoist button moved to the context menu *)
   (* a node that varies has none *)
   let r = [ "sunflower"; "seeds_each"; "r" ] in
-  let x, y, tw, th = Option.get (Scope.Private.box_of view r) in
+  let x, y, tw, th = Option.get (Scope.Inspect.box_of view r) in
   let _, changes = Test_support.Graph_pane.click view (int_of_float (x +. tw -. 30. *. z), int_of_float (y +. th -. 10. *. z)) in
   check (not (List.exists (function Scope.Syntax_edit (E.Hoist _) -> true | _ -> false) changes)) "r offered a hoist"
 

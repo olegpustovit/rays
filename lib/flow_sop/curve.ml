@@ -72,22 +72,22 @@ let node curve =
     let {points; closed; filled} = parameters in
     let parameters_key = Printf.sprintf "count=%d;closed=%b;filled=%b"
       (Array.length points) closed filled in
-    let node = Sop.Node.Private.make_geometry ~label ~operation:"polyline" ~version:1
+    let node = Sop.Node.Build.make_geometry ~label ~operation:"polyline" ~version:1
         ~parameters:parameters_key ~cook_mode:Sop.Node.Generator
         ~dependencies:Sop.Context.Dependencies.static ~inputs:(Array.of_list inputs)
         (fun ~node_id:_ _context _inputs ->
           match polyline ~closed ~filled points with
-          | Ok geometry -> Ok Sop.Node.Private.{geometry; instances = None}
+          | Ok geometry -> Ok Sop.Node.Build.{geometry; instances = None}
           | Error error -> Error (Diagnostic.error ~code:(Rdk.Error.code error)
               ~cause:(Rdk.Error.to_string error) ~hints:(Rdk.Error.hints error)
               (Rdk.Error.operation error ^ " could not produce valid geometry"))) in
-    Sop.Node.Private.parameterize_with_key ~parameter_key:(parameter_key parameters)
+    Sop.Node.Build.parameterize_with_key ~parameter_key:(parameter_key parameters)
       ~schema ~values:parameters ~rebuild:build node
   in
   Result.get_ok (build ~label:"Curve" ~inputs:[] curve)
 
 let replace_points ~source ~closed ~filled points =
-  Sop.Node.Private.adopt_identity ~source (node {points; closed; filled})
+  Sop.Node.Build.adopt_identity ~source (node {points; closed; filled})
 
 let factory = Edit.factory ~key ~label:"Curve" ~category:["Flow"] ~arity:0
   ~fields:(Sop.Node.parameter_fields (node default)) (fun _ -> Ok (node default))

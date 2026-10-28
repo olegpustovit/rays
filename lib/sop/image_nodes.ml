@@ -11,7 +11,7 @@ let schema = Param.schema ~name:"image/noise" ~default:defaults [
     ~default:defaults.seed ~get:(fun p -> p.seed) ~set:(fun seed p -> {p with seed}) ()]
 exception Cancelled
 let rec build ~label ~inputs:_ parameters =
-  Node.Private.make ~label ~operation:"image/noise" ~version:1
+  Node.Build.make ~label ~operation:"image/noise" ~version:1
     ~parameters:(Param.key schema parameters) ~cook_mode:Node.Generator
     ~dependencies:Context.Dependencies.static ~inputs:[||]
     (fun ~node_id:_ context _ ->
@@ -31,7 +31,7 @@ let rec build ~label ~inputs:_ parameters =
             let offset = pixel * 4 in
             rgba.(offset) <- value; rgba.(offset+1) <- value; rgba.(offset+2) <- value; rgba.(offset+3) <- 1.);
         if Context.cancelled context then cancel () else
-        Result.map (fun image -> Node.Private.{payload=Payload.Image image; instances=None})
+        Result.map (fun image -> Node.Build.{payload=Payload.Image image; instances=None})
           (Image.of_owned_rgba ~width ~height rgba)
       with Cancelled -> cancel ())
   |> Node.parameterize ~schema ~values:parameters ~rebuild:build

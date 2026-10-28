@@ -64,7 +64,7 @@ module Group_transfer = struct
       { Rdk.Group_ops.transfer_owner = rule.transfer_owner;
         transfer_pattern = rule.transfer_pattern;
         transfer_prefix = rule.transfer_prefix })) rules in
-    Node.Private.make_geometry ?label ~operation:"group_transfer" ~version:1
+    Node.Build.make_geometry ?label ~operation:"group_transfer" ~version:1
       ~parameters:""
       ~cook_mode:Node.Generic ~dependencies:Context.Dependencies.static
       ~inputs:[|source; target|] (fun ~node_id:_ context inputs ->

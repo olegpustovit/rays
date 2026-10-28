@@ -76,7 +76,7 @@ let () =
             | Floating_view _ -> Param.Float_value (match value with E.Float f -> f | E.Int n -> float n | _ -> assert false)
             | _ -> assert false) (List.assoc_opt field.name args)) in
         let source, _ = Sop.Node.apply_parameters source changes |> message in
-        let cooked = match Sop.Node.Private.cook source context [||] with Ok v -> v | Error d -> fail d.Diagnostic.message in
+        let cooked = match Sop.Node.Build.cook source context [||] with Ok v -> v | Error d -> fail d.Diagnostic.message in
         let pixels = match Sop.Payload.image cooked.payload with Ok v -> v | Error d -> fail d.Diagnostic.message in
         let width = Sop.Image.width pixels and height = Sop.Image.height pixels in
         let rgba = match Sop.Image.rgba8 pixels with Some b -> b | None ->
@@ -103,7 +103,7 @@ let () =
             | Ok b -> b | Error e -> fail (Ogpu.Error.to_string e))
       | _ ->
           let context = match Sop.Context.create ~input:live () with Ok c -> c | Error e -> fail e in
-          let cooked = match Sop.Node.Private.cook (Flow_sop.Image_kernel.node ~state kernel) context [||] with
+          let cooked = match Sop.Node.Build.cook (Flow_sop.Image_kernel.node ~state kernel) context [||] with
             | Ok c -> c | Error d -> fail d.Diagnostic.message in
           let pixels = match Sop.Payload.image cooked.payload with Ok p -> p | Error d -> fail d.Diagnostic.message in
           Option.get (Sop.Image.rgba8 pixels) in

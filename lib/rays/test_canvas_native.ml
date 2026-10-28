@@ -168,7 +168,7 @@ let run () =
       "Canvas native drawn foreground";
     require(region_has_pixel_other_than canvas~x0:12~y0:2~x1:55~y1:18
       (0,0,255,255))"Canvas native automatic text was not visible";
-    let _,_,references=Font.Private.automatic_counts()in
+    let _,_,references=Font.Raster.automatic_counts()in
     require(references=0)"Canvas retained automatic text through capture";
     Gc.full_major();let gc_before=Gc.quick_stat()in
     for frame=3 to 600 do
@@ -192,14 +192,14 @@ let run () =
     let stage_failed=Result.is_error(Canvas.render canvas Scene.[image borrowed~at:(3,3)();
       text~at:(12,2)~size:12"stage failure";clear Rays_math.Color.red])in
     require stage_failed"Canvas accepted a late native Clear";
-    let _,_,references=Font.Private.automatic_counts()in
+    let _,_,references=Font.Raster.automatic_counts()in
     require(references=0)"stage failure retained automatic text";
     require(Result.is_ok(Image.pixels borrowed))
       "stage failure shortened explicit Image ownership";
     let font=Result.get_ok(Font.system~size:12())in
     let camera=Camera.orthographic~height:2.~at:(Rays_math.Vec3.create 0. 0. 2.)
       ~target:Rays_math.Vec3.zero()in
-    let mesh=Result.get_ok(Mesh.Private.create_owned~indices:[|0;1;2|]
+    let mesh=Result.get_ok(Mesh.View.create_owned~indices:[|0;1;2|]
       [|Rays_math.Vec3.create(-0.8)(-0.8)0.;Rays_math.Vec3.create 0.8(-0.8)0.;Rays_math.Vec3.create 0. 0.8 0.|])in
     let scene3=Scene.D3.create[Scene.D3.mesh~material:(Material.unlit Rays_math.Color.red)mesh]in
     let reusable=Scene.[clear(Rays_math.Color.rgba 9 17 31 255);
@@ -207,7 +207,7 @@ let run () =
       view3d~viewport:(32,32,32,32)~camera scene3;
       rect~at:(46,46)~w:4~h:4~fill:green()]in
     render reusable;let first=snapshot canvas in
-    let _,_,references=Font.Private.automatic_counts()in
+    let _,_,references=Font.Raster.automatic_counts()in
     require(references=0)"reusable Scene retained automatic text after lowering";
     require(Result.is_ok(Image.pixels borrowed))
       "Scene release shortened explicit Image ownership";

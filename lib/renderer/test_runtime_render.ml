@@ -36,14 +36,14 @@ let run () =
       for frame = 1 to 600 do
         ignore (get (Renderer.draw renderer (if frame = 2 then [ draw; draw ] else [ draw ])));
         if List.mem frame [ 1; 2; 60; 600 ] then begin
-          let facts = get (Runtime.presentation_facts (Renderer.Private.runtime renderer)) in
+          let facts = get (Runtime.presentation_facts (Renderer.Native.runtime renderer)) in
           let row_bytes = facts.drawable_width * 4 in
           let bytes = get (Renderer.read_pixels renderer ~bytes_per_row:row_bytes) in
           if Char.code (Bytes.get bytes 0) <> 64 || Char.code (Bytes.get bytes 1) <> 128
              || Char.code (Bytes.get bytes 2) <> 191 then failwith "renderer exact pixel"
         end
       done;
-      get (Runtime.resize (Renderer.Private.runtime renderer) ~width:8 ~height:8);
+      get (Runtime.resize (Renderer.Native.runtime renderer) ~width:8 ~height:8);
       let resized_state = { state with viewport = (0, 0, 8, 8); scissor = (0, 0, 8, 8) } in
       ignore (get (Renderer.draw renderer [ Renderer.prepared_draw ~family:Renderer.Scene2
         { mesh; state = resized_state } ]));

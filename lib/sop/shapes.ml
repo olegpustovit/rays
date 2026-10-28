@@ -21,7 +21,7 @@ module Null = struct
     [@@deriving sop_params, sop_node]
   let build = parameters_build (fun ~label _parameters input ->
     let label = Some label in
-    Node.Private.make_geometry ?label ~operation:"null" ~version:1 ~parameters:""
+    Node.Build.make_geometry ?label ~operation:"null" ~version:1 ~parameters:""
       ~cook_mode:(Node.Passthrough 0) ~dependencies:Context.Dependencies.static
       ~inputs:[|input|] (fun ~node_id:_ _context inputs -> cooked inputs.(0))
   )
@@ -55,9 +55,9 @@ module Switch = struct
     let inputs = Array.of_list (a :: b :: inputs) and index = parameters.input in
     if index < 0 || index >= Array.length inputs then
       Error "sop/switch: input is outside the connected branches" else
-    Ok (Node.Private.make_geometry ~label ~operation:"switch" ~version:1 ~parameters:""
+    Ok (Node.Build.make_geometry ~label ~operation:"switch" ~version:1 ~parameters:""
       ~cook_mode:(Node.Passthrough index)
-      ~dependencies:Context.Dependencies.static ~input_policy:(Node.Private.Only index)
+      ~dependencies:Context.Dependencies.static ~input_policy:(Node.Build.Only index)
       ~inputs (fun ~node_id:_ _context selected -> cooked selected.(0))))
 
   let factory = parameters_factory build
@@ -155,7 +155,7 @@ module Clip = struct
     let selection = optional_element_group group_owner group in
     let clip_attribute = Option.value ~default:"P" (optional_text clip_attribute) in
     let origin = vec3_copy origin and normal = vec3_copy normal in
-    Node.Private.make_geometry ?label ~operation:"clip" ~version:5
+    Node.Build.make_geometry ?label ~operation:"clip" ~version:5
       ~parameters:"" ~cook_mode:(Node.Duplicate_input 0)
       ~dependencies:Context.Dependencies.static ~inputs:[|input|]
       (fun ~node_id:_ context inputs ->
@@ -219,7 +219,7 @@ module Exploded_view = struct
 
   let build = parameters_build (fun ~label _parameters input ->
     let label = Some label in
-    Node.Private.make_geometry ?label ~operation:"exploded_view" ~version:1 ~parameters:""
+    Node.Build.make_geometry ?label ~operation:"exploded_view" ~version:1 ~parameters:""
       ~cook_mode:(Node.Passthrough 0) ~dependencies:Context.Dependencies.static
       ~inputs:[|input|] (fun ~node_id:_ _context inputs -> cooked inputs.(0))
   )
@@ -238,7 +238,7 @@ module Pack_instances = struct
     [@@deriving sop_params, sop_node]
 
   let build = parameters_build (fun ~label _parameters source instances ->
-    Node.Private.make_geometry ~label ~operation:"pack_instances" ~version:1 ~parameters:""
+    Node.Build.make_geometry ~label ~operation:"pack_instances" ~version:1 ~parameters:""
       ~cook_mode:Node.Generic ~dependencies:Context.Dependencies.static
       ~inputs:[|source; instances|]
       (fun ~node_id:_ _context inputs ->
@@ -254,7 +254,7 @@ module Pack_instances = struct
             Rays_math.Mat4.of_rows (r0.x.(i), r0.y.(i), r0.z.(i), r0.w.(i))
               (r1.x.(i), r1.y.(i), r1.z.(i), r1.w.(i)) (r2.x.(i), r2.y.(i), r2.z.(i), r2.w.(i))
               (0., 0., 0., 1.)) in
-          Ok Node.Private.{ geometry = inputs.(0); instances = Some transforms })))))
+          Ok Node.Build.{ geometry = inputs.(0); instances = Some transforms })))))
 
   let factory = parameters_factory build
 
@@ -424,7 +424,7 @@ module Soft_transform = struct
     let matrix = Rdk.Transform_ops.compose_transform ~order ~rotation_order ~translate ~rotate ~scale
         ~shear:(Rays_math.Vec3.create shear_xy shear_xz shear_yz) ~uniform_scale ~pivot ~pivot_rotation ~invert ()
         |> Result.get_ok in
-    Node.Private.make_geometry ?label ~operation:"soft_transform" ~version:1
+    Node.Build.make_geometry ?label ~operation:"soft_transform" ~version:1
       ~parameters:""
       ~cook_mode:(Node.Duplicate_input 0)
       ~dependencies:Context.Dependencies.static ~inputs:[|input|]
@@ -615,7 +615,7 @@ module Ray = struct
     and hit_group = optional_text hit_group and normal_attribute = optional_text normal_attribute
     and point_pattern = optional_text point_pattern and vertex_pattern = optional_text vertex_pattern
     and primitive_pattern = optional_text primitive_pattern and detail_pattern = optional_text detail_pattern in
-    Node.Private.make_geometry ?label ~operation:"ray" ~version:2 ~parameters:""
+    Node.Build.make_geometry ?label ~operation:"ray" ~version:2 ~parameters:""
       ~cook_mode:(Node.Duplicate_input 0) ~dependencies:Context.Dependencies.static
       ~inputs:[|source; collision|] (fun ~node_id:_ context inputs ->
         match resolve_element_group ~operation:"ray" selection inputs.(0) with

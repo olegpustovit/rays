@@ -204,7 +204,7 @@ let ()=
       let mesh=Rays.Mesh.plane ~width:(2.*.65./.17.) ~height:2.()in
       let camera=Rays.Camera.orthographic ~height:2. ~at:(Rays_math.Vec3.create 0. 0. 2.) ~target:Rays_math.Vec3.zero()in
       let scene source_image texture=Rays.Scene.[clear Rays_math.Color.black;
-        image source_image ~at:(0,0)();Private.layer_break;
+        image source_image ~at:(0,0)();Layer.layer_break;
         view3d ~viewport:(33,0,32,17) ~camera(Rays.Scene.D3.create ~ambient:Rays_math.Color.white
           [Rays.Scene.D3.mesh ~material:(Rays.Material.matte Rays_math.Color.white) ~cull:Cull_none
             ~texture:(Rays.Scene.D3.textured ~filter:Nearest texture) mesh])]in
@@ -440,7 +440,7 @@ let ()=
     assert(I.cpu_storage_bytes resource=0 && I.readbacks resource=0);
     let mesh=Rays.Mesh.plane ~width:(2.*.65./.17.) ~height:2.()in
     let camera=Rays.Camera.orthographic ~height:2. ~at:(Rays_math.Vec3.create 0. 0. 2.) ~target:Rays_math.Vec3.zero()in
-    let scene source_image texture=Rays.Scene.[clear Rays_math.Color.black;image source_image ~at:(0,0)();Private.layer_break;
+    let scene source_image texture=Rays.Scene.[clear Rays_math.Color.black;image source_image ~at:(0,0)();Layer.layer_break;
       view3d ~viewport:(33,0,32,17) ~camera(Rays.Scene.D3.create ~ambient:Rays_math.Color.white
         [Rays.Scene.D3.mesh ~material:(Rays.Material.matte Rays_math.Color.white) ~cull:Cull_none
           ~texture:(Rays.Scene.D3.textured ~filter:Nearest texture) mesh])]in

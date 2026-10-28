@@ -61,7 +61,7 @@ let scene geometry =
   Scene.D3.create [Scene.D3.mesh ~cull:Cull_none ~material:(Material.unlit Rays_math.Color.white) mesh]
 let packed geometry =
   let camera=Camera.orthographic ~height:4. ~at:(Rays_math.Vec3.create 0. 0. 4.) ~target:Rays_math.Vec3.zero () in
-  let staged=Scene.Private.stage_native ~width:128 ~height:128 [Scene.view3d ~camera (scene geometry)]
+  let staged=Scene.Layer.stage_native ~width:128 ~height:128 [Scene.view3d ~camera (scene geometry)]
     |> Result.get_ok in
   (List.hd staged.scene3).entries.(0)
 let geometry_check name actual expected =

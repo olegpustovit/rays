@@ -25,14 +25,14 @@ let delete ~owner ~pattern input =
     Rdk.Attribute_ops.delete ~cancel
       ~point_pattern:(pattern_for "point") ~vertex_pattern:(pattern_for "vertex")
       ~primitive_pattern:(pattern_for "primitive") ~detail_pattern:(pattern_for "detail") geometry in
-  Sop.Node.Private.make_geometry ~operation:"flow.delete_attr" ~version:1
+  Sop.Node.Build.make_geometry ~operation:"flow.delete_attr" ~version:1
     ~parameters:(Flow.Lisp.flat (Flow.Syntax.make (Vec [Flow.Syntax.make (Str owner);Flow.Syntax.make (Str pattern)])))
     ~cook_mode:(Sop.Node.Duplicate_input 0) ~dependencies:Sop.Context.Dependencies.static
     ~inputs:[|input|] (fun ~node_id:_ context inputs ->
       match delete inputs.(0) (Sop.Context.cancel_token context) with
-      | Ok geometry -> Ok Sop.Node.Private.{geometry;instances=None}
+      | Ok geometry -> Ok Sop.Node.Build.{geometry;instances=None}
       | Error error -> Error (Diagnostic.error ~code:"E_ATTR_DELETE" (Rdk.Error.to_string error)))
-  |> Sop.Node.Private.with_facts Sop.Node.{cook_mode=Duplicate_input 0;elementwise=Points;
+  |> Sop.Node.Build.with_facts Sop.Node.{cook_mode=Duplicate_input 0;elementwise=Points;
       reads=(if literal then [] else ["*"]);writes=(if literal then [pattern] else ["*"]);
       topology=Preserved;exact=true}
 
@@ -72,11 +72,11 @@ let structured_error error = Diagnostic.error ~code:(Rdk.Error.code error)
   ~cause:(Rdk.Error.to_string error) ~hints:(Rdk.Error.hints error)
   (Rdk.Error.operation error ^ " could not produce valid geometry")
 let node operation parameters inputs cook =
-  N.Private.make_geometry ~operation ~version:1 ~parameters ~cook_mode:N.Generic
+  N.Build.make_geometry ~operation ~version:1 ~parameters ~cook_mode:N.Generic
     ~dependencies:Sop.Context.Dependencies.static ~inputs:(Array.of_list inputs)
     (fun ~node_id:_ context inputs -> Result.map (fun geometry ->
-      N.Private.{geometry;instances=None}) (cook context inputs))
-  |> N.Private.with_facts N.{cook_mode=Generic;elementwise=None;reads=["*"];
+      N.Build.{geometry;instances=None}) (cook context inputs))
+  |> N.Build.with_facts N.{cook_mode=Generic;elementwise=None;reads=["*"];
       writes=["*"];topology=Preserved;exact=true}
 let key cells = Flow.Lisp.flat (Flow.Syntax.make (Vec (List.map (fun cell -> Flow.Syntax.make (Str cell)) cells)))
 let rename ~owner ~pattern ~replacement ~conflict input =

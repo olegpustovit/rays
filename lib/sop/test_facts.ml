@@ -21,19 +21,19 @@ let fixture () =
 let with_color value geometry =
   Geometry.with_attribute (scalar ~owner:Attribute.Point "Cd" (Geometry.point_count geometry) value) geometry |> get
 
-let facts node reads writes = Node.Private.with_facts
+let facts node reads writes = Node.Build.with_facts
   {(Node.facts node) with elementwise = Node.Points; topology = Node.Preserved;
     exact = false; reads; writes} node
 
 let counted source calls reads writes transform =
-  Node.Private.make_geometry ~label:"counted" ~operation:"facts_test" ~version:1 ~parameters:""
+  Node.Build.make_geometry ~label:"counted" ~operation:"facts_test" ~version:1 ~parameters:""
     ~cook_mode:(Node.Duplicate_input 0) ~dependencies:Context.Dependencies.static
     ~inputs:[|source|] (fun ~node_id:_ _ inputs ->
       incr calls;
-      Ok Node.Private.{geometry = transform inputs.(0); instances = None})
+      Ok Node.Build.{geometry = transform inputs.(0); instances = None})
   |> fun node -> facts node reads writes
 
-let rewire node geometry = Node.Private.rebuild_with_inputs node [|(Lisp_sop.snapshot (geometry))|]
+let rewire node geometry = Node.Build.rebuild_with_inputs node [|(Lisp_sop.snapshot (geometry))|]
 
 let test_reuse volatile =
   let original = fixture () |> with_color 1. in
@@ -111,10 +111,10 @@ let test_dependencies () =
     ~name:"edges" (fun _ -> true) in
   ignore (cook evaluator 1 (rewire node (Geometry.with_edge_group edges changed_group |> get)));
   check (!calls = 6) "edge group did not invalidate";
-  let opaque = Node.Private.make_geometry ~operation:"opaque" ~version:1 ~parameters:""
+  let opaque = Node.Build.make_geometry ~operation:"opaque" ~version:1 ~parameters:""
     ~cook_mode:(Node.Duplicate_input 0) ~dependencies:Context.Dependencies.static
     ~inputs:[|(Lisp_sop.snapshot (geometry))|] (fun ~node_id:_ _ inputs ->
-      incr calls; Ok Node.Private.{geometry = inputs.(0); instances = None}) in
+      incr calls; Ok Node.Build.{geometry = inputs.(0); instances = None}) in
   check ((Node.facts opaque).elementwise = Node.None && (Node.facts opaque).topology = Node.Changed
       && (Node.facts opaque).exact) "opaque declaration is not conservative";
   ignore (cook evaluator 1 opaque);
@@ -169,10 +169,10 @@ let test_refusals ?(entries=64) () =
   rejects (node (fun _ -> fixture ()));
   rejects (node (fun geometry -> Geometry.with_group
     (Group.init ~owner:Group.Point ~name:"added" (Geometry.point_count geometry) (fun _ -> true)) geometry |> get));
-  let packed = Node.Private.make_geometry ~operation:"packed" ~version:1 ~parameters:""
+  let packed = Node.Build.make_geometry ~operation:"packed" ~version:1 ~parameters:""
     ~cook_mode:(Node.Duplicate_input 0) ~dependencies:Context.Dependencies.static
     ~inputs:[|(Lisp_sop.snapshot (geometry))|] (fun ~node_id:_ _ inputs ->
-      Ok Node.Private.{geometry = inputs.(0); instances = Some [|Rays_math.Mat4.identity|]})
+      Ok Node.Build.{geometry = inputs.(0); instances = Some [|Rays_math.Mat4.identity|]})
     |> fun node -> facts node ["P"] [] in
   rejects packed;
   Session.close evaluator
@@ -180,16 +180,16 @@ let test_refusals ?(entries=64) () =
 let test_normals_cache_refresh () =
   let geometry = fixture () |> with_color 1. in
   let source_node geometry =
-    Node.Private.make_geometry ~operation:"source" ~version:1
+    Node.Build.make_geometry ~operation:"source" ~version:1
       ~parameters:(string_of_int (Geometry.data_id geometry))
       ~cook_mode:Node.Generator ~dependencies:Context.Dependencies.static ~inputs:[||]
-      (fun ~node_id:_ _ _ -> Ok Node.Private.{geometry; instances = None}) in
+      (fun ~node_id:_ _ _ -> Ok Node.Build.{geometry; instances = None}) in
   let original = source_node geometry in
   let node = Lisp_sop.node ~with_:["original", (original)] {|(sop/normals (sop/ext_original))|} in
   let evaluator = session () in
   ignore (cook evaluator 1 node);
   let source = source_node (with_color 2. geometry) in
-  let node = Node.Private.rebuild_with_inputs node [|source|] in
+  let node = Node.Build.rebuild_with_inputs node [|source|] in
   let before = Session.stats evaluator in
   let output = cook evaluator 1 node in
   check ((Session.stats evaluator).hits = before.hits + 1) "normals recooked after a color payload edit";
@@ -206,7 +206,7 @@ let test_payload_budget () =
   let output = cook evaluator 1 node in
   let fresh = with_color 2. geometry in
   let fresh_source = Lisp_sop.snapshot (fresh) in
-  let next = Node.Private.rebuild_with_inputs node [|fresh_source|] in
+  let next = Node.Build.rebuild_with_inputs node [|fresh_source|] in
   let updated = cook evaluator 1 next in
   check (Geometry.positions (Result.get_ok (Sop.Payload.geometry updated.payload)) == Geometry.positions (Result.get_ok (Sop.Payload.geometry output.payload))) "budget test missed reuse";
   let components = Hashtbl.create 8 in
