@@ -1598,8 +1598,7 @@ let facet ?cancel ?(grain = 16_384) ?primitives
       | None -> None
       | Some name -> Geometry.find_group ~owner:Group.Primitive name geometry in
     let result = if pre_compute_normals then
-        Deform.normals ?cancel ~grain
-          ?primitives:(current_selection geometry) geometry
+        Deform.normals { cancel; grain; primitives = (current_selection geometry) } geometry
       else Ok geometry in
     let result = Result.bind result (fun geometry ->
       adjust_normals ?cancel ~grain
@@ -1617,7 +1616,7 @@ let facet ?cancel ?(grain = 16_384) ?primitives
           let selection = Option.map (fun primitives ->
             facet_point_selection ?cancel ~grain primitives geometry)
               (current_selection geometry) in
-          Ok (Error.get (Fuse_grid.weld ?cancel ~grain ?selection ~tolerance geometry))
+          Ok (Error.get (Fuse_grid.weld { cancel; grain; selection; tolerance } geometry))
       | None, Some distance ->
           consolidate_normals ?cancel ~grain
             ?primitives:(current_selection geometry) ~distance geometry
@@ -1637,16 +1636,15 @@ let facet ?cancel ?(grain = 16_384) ?primitives
           ?primitives:(current_selection geometry) ~angle geometry) in
     let result = Result.bind result (fun geometry ->
       if remove_degenerate then
-        Clean.delete_degenerate ?cancel ~grain
-          ?primitives:(current_selection geometry) ~epsilon:1e-12 geometry
+        Clean.delete_degenerate { cancel; grain;
+          primitives = current_selection geometry; epsilon = 1e-12 } geometry
       else Ok geometry) in
     let result = Result.bind result (fun geometry ->
       if make_planar then Kernels.make_planar ?cancel ~grain
           ?primitives:(current_selection geometry) geometry
       else Ok geometry) in
     let result = Result.bind result (fun geometry ->
-      if post_compute_normals then Deform.normals ?cancel ~grain
-          ?primitives:(current_selection geometry) geometry
+      if post_compute_normals then Deform.normals { cancel; grain; primitives = (current_selection geometry) } geometry
       else Ok geometry) in
     let result = Result.bind result (fun geometry ->
       adjust_normals ?cancel ~grain ~unit_length:false

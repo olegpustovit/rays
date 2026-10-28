@@ -16,6 +16,7 @@ let dump () =
       | Residual r ->
           (match Flow_ir.Core_lower.lower r with
           | Ok program ->
+              Test_program.plain_roundtrip program;
               let printed = Format.asprintf "%a" C.pp program in
               assert (printed = Format.asprintf "%a" C.pp (Result.get_ok (Flow_ir.Core_lower.lower r)));
               Format.fprintf fmt "%s" printed
@@ -185,3 +186,20 @@ let () =
           [0.; 0.37; 1e154; 1e200]
     | _ -> assert false)
     ["(+ (* (sin t) 0.5) (* t t))"; "(- (cos t) (* t (* t 1e10)))"]
+
+(* A capture inside a host source lowers to Host_source arguments: the program holds plain data. *)
+let () =
+  match List.assoc "g" (ok (E.static (checked "(let* [s (+ t 1.)] (+ s 1.))"))).results with
+  | E.Residual r ->
+      let inner = match List.assoc "s" (E.Residual.residual_view r).bindings with
+        | E.Residual inner -> inner | _ -> assert false in
+      let r = E.Residual.with_bindings r ~term:(E.Residual.residual_view r).term
+        ["s", E.Source ("test/source", Flow.Ty.Float, ["value", E.Residual inner])] in
+      let program = Result.get_ok (Flow_ir.Core_lower.lower r) in
+      Test_program.plain_roundtrip program;
+      let host = ref false in
+      C.iter (fun s -> match s.node with C.Assign (_, Host_source {name = "test/source"; _}) -> host := true
+        | Assign (_, Source _) -> assert false | _ -> ()) program.body;
+      assert !host;
+      print_endline "Core sources: a captured residual inside a host source lowers to plain Host_source arguments"
+  | _ -> assert false

@@ -63,10 +63,10 @@ let input_payload cache directory kind relative =
       Input_cache.add cache filename (before, payload);
       payload
 
-let marker ~name payload = Sop.Node.Private.make ~operation:"lisp_sop_ext" ~version:1
+let marker ~name payload = Sop.Node.Build.make ~operation:"lisp_sop_ext" ~version:1
   ~parameters:name ~cook_mode:Sop.Node.Generator ~dependencies:Sop.Context.Dependencies.static
   ~inputs:[||] (fun ~node_id:_ _ _ ->
-    Ok Sop.Node.Private.{payload; instances=None})
+    Ok Sop.Node.Build.{payload; instances=None})
 
 let external_input name node =
   let image_name = if String.starts_with ~prefix:"image/" name
@@ -366,7 +366,7 @@ let lower ?(reference = false) ?cache ?times ?parsed source factories ops with_ 
       | children ->
           let rebuilt = List.map restore children in
           if List.for_all2 (==) children rebuilt then node
-          else Sop.Node.Private.rebuild_with_inputs node (Array.of_list rebuilt) in
+          else Sop.Node.Build.rebuild_with_inputs node (Array.of_list rebuilt) in
   restore node
 
 let output node =
@@ -777,6 +777,12 @@ let () = match Array.to_list Sys.argv with
           (List.length expected_nodes)
           (String.concat "," absent) (String.concat "," extra))
       end;
+      (* runtest replays the first row of each node; REPLAY_ALL=1 (@qualification-scale) replays every row *)
+      let rows = if Sys.getenv_opt "REPLAY_ALL" = Some "1" then rows else
+          let seen = Hashtbl.create 128 in
+          List.filter (fun row -> match children "golden" row with
+            | node :: _ when not (Hashtbl.mem seen (string node)) -> Hashtbl.add seen (string node) (); true
+            | _ -> false) rows in
       (* REPLAY_JOBS=J forks J workers, each owning the nodes that hash to it (so a node's prepared library is built once). *)
       let jobs = match Sys.getenv_opt "REPLAY_JOBS" with Some j -> max 1 (int_of_string j) | None -> 1 in
       let children = List.init (if jobs = 1 then 0 else jobs) (fun job ->

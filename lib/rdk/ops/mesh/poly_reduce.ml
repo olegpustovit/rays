@@ -378,11 +378,23 @@ let plan_round ?cancel ~scratch ~grain ~primitive_selection ~hard_points ~hard_e
     Ok { edges; removed_primitives = !removed }
   with
   | Error.Fail message | Invalid_argument message -> Error message
-let run ?cancel ?(grain = 16_384) ?(target = Reduce_ratio 0.5)
-    ?primitives ?hard_points ?hard_edges ?(preserve_boundary = true)
-    ?(only_original_positions = false) ?(equalize_lengths = 1e-10)
-    ?max_normal_deviation ?output_group ?(recompute_point_normals = true)
-    geometry =
+type params = {
+  cancel : Cancel.t option;
+  grain : int option;
+  target : target;
+  primitives : Group.t option;
+  hard_points : Group.t option;
+  hard_edges : Edge_group.t option;
+  preserve_boundary : bool;
+  only_original_positions : bool;
+  equalize_lengths : float;
+  max_normal_deviation : float option;
+  output_group : string option;
+  recompute_point_normals : bool;
+}
+
+let run ({ cancel; grain; target; primitives; hard_points; hard_edges; preserve_boundary; only_original_positions; equalize_lengths; max_normal_deviation; output_group; recompute_point_normals } : params) geometry =
+  let grain = Option.value ~default:16_384 grain in
   Error.guard ~operation:"poly_reduce" ~code:"invalid_topology" @@ fun () ->
   try
     let original_geometry = geometry in
@@ -456,7 +468,7 @@ let run ?cancel ?(grain = 16_384) ?(target = Reduce_ratio 0.5)
             let name = unique_edge_name "__rdk_poly_reduce_hard_edges" geometry in
             Geometry.with_edge_group (Edge_group.with_name name group) geometry
               |> Support.get_ok, Some name in
-      Result.bind (Ok (Error.get (Triangulate.run ?cancel ~grain geometry)))
+      Result.bind (Ok (Error.get (Triangulate.run { cancel; grain = Some grain; primitives = None } geometry)))
         (fun triangulated ->
         let working_count = Geometry.primitive_count triangulated in
         let working_index = Topology_index.create ?cancel
@@ -534,7 +546,7 @@ let run ?cancel ?(grain = 16_384) ?(target = Reduce_ratio 0.5)
           let output = Geometry.without_attribute ~owner:Attribute.Point "N" output
               |> Geometry.without_attribute ~owner:Attribute.Vertex "N" in
           if recompute_point_normals && had_point_normals then
-            Deform.normals ?cancel ~grain output
+            Deform.normals { cancel; grain; primitives = None } output
           else Ok output))
     end
   with Invalid_argument message -> Error message

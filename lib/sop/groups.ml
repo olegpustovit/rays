@@ -18,6 +18,16 @@ open Support
 
 
 
+(* the declared default of the transfer node's rules *)
+let default_transfer_rules = [
+  { Rdk.Group_ops.transfer_owner = Rdk.Group_ops.Group_primitives; transfer_pattern = "*";
+    transfer_prefix = "" };
+  { Rdk.Group_ops.transfer_owner = Rdk.Group_ops.Group_points; transfer_pattern = "*";
+    transfer_prefix = "" };
+  { Rdk.Group_ops.transfer_owner = Rdk.Group_ops.Group_edges; transfer_pattern = "*";
+    transfer_prefix = "" };
+]
+
 module Group_transfer = struct
   let encode_rule (rule : Rdk.Group_ops.transfer_rule) = [
       group_owner_token rule.transfer_owner; rule.transfer_pattern;
@@ -64,26 +74,12 @@ module Group_transfer = struct
       { Rdk.Group_ops.transfer_owner = rule.transfer_owner;
         transfer_pattern = rule.transfer_pattern;
         transfer_prefix = rule.transfer_prefix })) rules in
-    Node.Private.make_geometry ?label ~operation:"group_transfer" ~version:1
+    Node.Build.make_geometry ?label ~operation:"group_transfer" ~version:1
       ~parameters:""
       ~cook_mode:Node.Generic ~dependencies:Context.Dependencies.static
       ~inputs:[|source; target|] (fun ~node_id:_ context inputs ->
-        match Rdk.Group_ops.transfer ~cancel:(Context.cancel_token context)
-            ~grain:(Context.grain context) ?rules ~conflict ~create_empty ~distance
-            ~source:inputs.(0) ~target:inputs.(1) () with
+        match Rdk.Group_ops.transfer { cancel = Some (Context.cancel_token context); grain = Some (Context.grain context); rules = Option.value ~default:(default_transfer_rules) rules; conflict; create_empty; distance; source = inputs.(0); target = inputs.(1) } with
         | Ok geometry -> cooked geometry
         | Error error -> structured_rdk_error error))
   let factory = parameters_factory build
 end
-
-
-
-
-
-
-
-
-
-
-
-

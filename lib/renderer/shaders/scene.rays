@@ -1,8 +1,7 @@
 ; The scene pipelines: Scene3 (plain, points and textured), the sun's depth map and Scene2.
 ;
 ; Scene3: a vertex is a 24-byte packed record (position,
-; normal as floats, colour and uv in the 12-byte attribute record) or a 68-byte one of doubles
-; (position 0, normal 24, colour word 48, uv 52); surface[82] says which, surface[83] whether the draw
+; normal as floats, colour and uv in the 12-byte attribute record); surface[83] says whether the draw
 ; is instanced (48 floats an instance). surface holds the transforms (0 clip, 16 world, 32 normal) and
 ; the material and lights (from 48). The record and attribute buffers are read as floats and as words,
 ; so each is bound twice; the texture is 6 (sampler 7), the binding after the six buffers.
@@ -43,12 +42,9 @@
 (defn scene3-vertex :context value
   [(vid : int) (input : (array float)) (input-words : (array int)) (surface : (array float))
    (instances : (array float)) (attributes : (array float)) (attribute-words : (array int))]
-  (let* [packed (> (array/nth surface 82) 0.5)
-         at (int/mul vid (if packed 6 17))
-         local (if packed [(array/nth input at) (array/nth input (int/add at 1)) (array/nth input (int/add at 2)) 1.]
-                 [(double-at input-words at) (double-at input-words (int/add at 2)) (double-at input-words (int/add at 4)) 1.])
-         normal (if packed [(array/nth input (int/add at 3)) (array/nth input (int/add at 4)) (array/nth input (int/add at 5)) 0.]
-                  [(double-at input-words (int/add at 6)) (double-at input-words (int/add at 8)) (double-at input-words (int/add at 10)) 0.])
+  (let* [at (int/mul vid 6)
+         local [(array/nth input at) (array/nth input (int/add at 1)) (array/nth input (int/add at 2)) 1.]
+         normal [(array/nth input (int/add at 3)) (array/nth input (int/add at 4)) (array/nth input (int/add at 5)) 0.]
          instanced (> (array/nth surface 83) 0.5)
          base (int/mul (gpu/instance-id) 48)
          clip (if instanced (transform instances base local) (transform surface 0 local))
@@ -56,9 +52,8 @@
          turned (if instanced (transform instances (int/add base 32) normal) (transform surface 32 normal))
          a (int/mul vid 3)]
     {:position clip
-     :color (unpack (if packed (array/nth attribute-words a) (array/nth input-words (int/add at 12))))
-     :uv (if packed [(array/nth attributes (int/add a 1)) (array/nth attributes (int/add a 2))]
-           [(double-at input-words (int/add at 13)) (double-at input-words (int/add at 15))])
+     :color (unpack (array/nth attribute-words a))
+     :uv [(array/nth attributes (int/add a 1)) (array/nth attributes (int/add a 2))]
      :world (xyz world) :normal (unit3 (xyz turned))}))
 
 (defn scene3-points-vertex :context value
@@ -142,10 +137,8 @@
 (defn sun-vertex :context value
   [(vid : int) (input : (array float)) (input-words : (array int)) (sun : (array float))
    (surface : (array float)) (instances : (array float))]
-  (let* [packed (> (array/nth surface 82) 0.5)
-         at (int/mul vid (if packed 6 17))
-         local (if packed [(array/nth input at) (array/nth input (int/add at 1)) (array/nth input (int/add at 2)) 1.]
-                 [(double-at input-words at) (double-at input-words (int/add at 2)) (double-at input-words (int/add at 4)) 1.])
+  (let* [at (int/mul vid 6)
+         local [(array/nth input at) (array/nth input (int/add at 1)) (array/nth input (int/add at 2)) 1.]
          base (int/mul (gpu/instance-id) 48)
          world (if (> (array/nth surface 83) 0.5) (transform instances (int/add base 16) local) (transform surface 16 local))]
     {:position (transform sun 40 world)}))

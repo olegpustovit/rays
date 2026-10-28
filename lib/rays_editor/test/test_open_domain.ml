@@ -23,9 +23,9 @@ let frame : Frame.t = {
 
 let painted_color ui (color : Rays_math.Color.t) =
   let rgba = Int32.of_int ((color.r lsl 24) lor (color.g lsl 16) lor (color.b lsl 8) lor color.a) in
-  let staged = Scene.Private.stage_native ~width:1000 ~height:700 (Pxui.Ui.scene ui) |> Result.get_ok in
+  let staged = Scene.Layer.stage_native ~width:1000 ~height:700 (Pxui.Ui.scene ui) |> Result.get_ok in
   List.exists (function
-    | Scene.Private.Ui_layer (batch, _) ->
+    | Scene.Layer.Ui_layer (batch, _) ->
         let bytes = Scene_command.Ui_batch.instances batch in
         let rec find i = i < Scene_command.Ui_batch.count batch
           && (Bytes.get_int32_le bytes (i * Scene_command.Ui_batch.instance_bytes + 32) = rgba || find (i + 1)) in

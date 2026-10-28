@@ -79,3 +79,12 @@ module View : sig
       one geometry rebuild. Both payloads must already match the unchanged
       topology; ownership of the attribute array transfers to the result. *)
 end
+
+val generate_point_ranges :
+  int ->
+  (first:int -> last:int ->
+   x:float array -> y:float array -> z:float array -> unit) ->
+  t
+(** High-throughput O(n) point generator. The callback runs once per stable
+    disjoint half-open range and may mutate only indices from [first] inclusive
+    to [last] exclusive in the owned output planes; it must not retain them. *)

@@ -181,8 +181,8 @@ let ()=
       (Float(Array.make(Geometry.point_count input)1.)) |>get_string_ok)changed |>get_string_ok in
     let source=Lisp_sop.snapshot changed in ignore(geometry(cook session source));
     let before=Sop.Session.stats session in
-    let rebuilt source=Sop.Node.Private.adopt_identity ~source:node
-      (Sop.Node.Private.rebuild_with_inputs node[|source|]) in
+    let rebuilt source=Sop.Node.Build.adopt_identity ~source:node
+      (Sop.Node.Build.rebuild_with_inputs node[|source|]) in
     let output=geometry(cook session(rebuilt source)) in
     check((Sop.Session.stats session).misses=before.misses)"C1 topology capture missed for position/attribute-only change";
     check(Packed.Float3.data_id(Geometry.positions output)=Packed.Float3.data_id positions)

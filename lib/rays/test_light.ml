@@ -2,7 +2,7 @@ open Rays
 
 let camera=Camera.perspective~fov_y:1.~near:0.1~far:100.
   ~at:(Rays_math.Vec3.create 0. 0. 10.)~target:Rays_math.Vec3.zero()
-let triangle=Result.get_ok(Mesh.Private.create_owned
+let triangle=Result.get_ok(Mesh.View.create_owned
   [|Rays_math.Vec3.zero;Rays_math.Vec3.unit_x;Rays_math.Vec3.unit_y|]) |> Mesh.recalculate_normals
 let lights samples=
   let attenuation=Light.attenuation~constant:2.~quadratic:3.()in
@@ -14,7 +14,7 @@ let lights samples=
    Light.area~diffuse~intensity:6.~attenuation~at~direction~width:4.~height:5.~samples()]
 let stage lights=
   let scene=Scene.D3.create~lights[Scene.D3.mesh triangle]in
-  let staged=Result.get_ok(Scene.Private.stage_native~width:320~height:240
+  let staged=Result.get_ok(Scene.Layer.stage_native~width:320~height:240
     [Scene.view3d~camera scene])in
   Option.get (List.hd staged.scene3).entries.(0).draw.state.transform_uniforms
 

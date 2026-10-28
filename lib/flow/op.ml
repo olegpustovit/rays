@@ -820,7 +820,26 @@ let stage_intrinsics =
     stage "gpu/texture-size" ["texture",Ty.Int] Ty.Vec2;
     (* built-in facts of a raster element, read like frame facts: the vertex's instance, the fragment's facing, window depth and pixel position *)
     stage "gpu/instance-id" [] Ty.Int; stage "gpu/front-facing" [] Ty.Bool; stage "gpu/depth" [] fl;
-    stage "gpu/fragment-x" [] fl; stage "gpu/fragment-y" [] fl ]
+    stage "gpu/fragment-x" [] fl; stage "gpu/fragment-y" [] fl;
+    (* the device side of scene/trace (Flow_gpu.Trace, trace.rays): the ray queries over the bound
+       structures (the direction as given) and the scene's tables; an index is an instance, a primitive,
+       a triangle corner, a sphere, a strand segment and its end, or an instance-table row *)
+    stage "gpu/trace-triangles" ["origin",Ty.Vec3;"dir",Ty.Vec3;"tmin",fl;"tmax",fl;"time",fl]
+      (Ty.Record ["t",fl;"prim",Ty.Int;"u",fl;"v",fl;"hit",Ty.Bool;"instance",Ty.Int]);
+    stage "gpu/trace-any" ["origin",Ty.Vec3;"dir",Ty.Vec3;"tmin",fl;"tmax",fl;"time",fl] Ty.Bool;
+    stage "gpu/trace-curves" ["origin",Ty.Vec3;"dir",Ty.Vec3;"tmin",fl;"tmax",fl]
+      (Ty.Record ["t",fl;"prim",Ty.Int;"u",fl;"hit",Ty.Bool]);
+    stage "gpu/trace-curves-any" ["origin",Ty.Vec3;"dir",Ty.Vec3;"tmin",fl;"tmax",fl] Ty.Bool;
+    stage "gpu/scene-vertex" ["instance",Ty.Int;"prim",Ty.Int;"corner",Ty.Int] Ty.Vec3;
+    stage "gpu/scene-vertex-end" ["instance",Ty.Int;"prim",Ty.Int;"corner",Ty.Int] Ty.Vec3;
+    stage "gpu/scene-instance" ["instance",Ty.Int;"row",Ty.Int] fl;
+    stage "gpu/scene-sphere" ["sphere",Ty.Int] Ty.Vec4; stage "gpu/scene-strand" ["strand",Ty.Int;"end",Ty.Int] Ty.Vec4;
+    stage "gpu/scene-spheres" [] Ty.Int; stage "gpu/scene-strands" [] Ty.Int;
+    (* a compute stage's workgroup (Flow_gpu.Raster.compute): the exclusive prefix sum of x over its
+       threads in thread order with the total, and a store into a bound buffer (it returns 1) *)
+    stage "gpu/group-scan" ["x",Ty.Int] (Ty.Record ["before",Ty.Int;"total",Ty.Int]);
+    stage "gpu/store" ["buffer",Ty.Array fl;"index",Ty.Int;"value",fl] Ty.Int;
+    stage "gpu/store-int" ["buffer",Ty.Array Ty.Int;"index",Ty.Int;"value",Ty.Int] Ty.Int ]
 let all = scene_trace :: stage_intrinsics @ frame @ arrays @ reductions @ draw @ host @ integers @ images @ [
   float_unary "tan" tan; float_unary "asin" asin; float_unary "acos" acos; float_unary "log" log;
   float_unary "sign" (fun x -> if x > 0. then 1. else if x < 0. then -1. else x);

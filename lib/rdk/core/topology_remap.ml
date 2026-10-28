@@ -7,10 +7,7 @@ let select ?cancel ~grain ?missing mapping source =
   else begin
     let output = Array.make count (match missing with
       | Some value -> value | None -> source.(mapping.(0))) in
-    let ranges = ((count - 1) / grain) + 1 in
-    Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(ranges - 1) (fun range ->
-      let first = range * grain in
-      let last = min count (first + grain) in
+    Support.run_ranges ~grain count (fun ~first ~last ->
       for index = first to last - 1 do
         Cancel.poll cancel index 4095;
         let from = mapping.(index) in
@@ -72,10 +69,9 @@ let attribute ?cancel ~grain ?defaults mapping value =
    (Int, Text, ragged rows, group membership) takes [left] when [t < 0.5] and [right] otherwise. *)
 let blend_ranges ?cancel ~grain count operation =
   if grain <= 0 then invalid_arg "Topology_remap.blend: grain must be positive";
-  let ranges = (count + grain - 1) / grain in
-  if ranges > 0 then Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(ranges - 1) (fun range ->
+  Support.run_ranges ~grain count (fun ~first ~last ->
     Cancel.check_opt cancel;
-    operation (range * grain) (min count ((range + 1) * grain)))
+    operation first last)
 
 let blend_float ?cancel ~grain left right weight source =
   let output = Array.make (Array.length weight) 0. in

@@ -44,7 +44,7 @@ let frame runtime ~clear =
   let delivered = Runtime_input.drain events in
   if List.exists (function
       | Input.Resized _ | Pixel_size_changed _ -> true | _ -> false) delivered
-  then Runtime.window_changed (Renderer.Private.runtime runtime);
+  then Runtime.window_changed (Renderer.Native.runtime runtime);
   ignore (get (Renderer.draw ~clear runtime []));
   delivered
 
@@ -58,7 +58,7 @@ let auto () =
     let last = ref (seconds_now ()) in
     let sizes = [ 400, 300; 480, 360; 360, 270; 320, 240 ] in
     List.iter (fun (width, height) ->
-      get (Runtime.resize (Renderer.Private.runtime runtime) ~width ~height);
+      get (Runtime.resize (Renderer.Native.runtime runtime) ~width ~height);
       for step = 1 to 12 do
         let delivered = frame runtime ~clear:(float step /. 12., 0.2, 0.3, 1.) in
         size_events := !size_events + List.length (List.filter (function
@@ -67,7 +67,7 @@ let auto () =
         longest_gap := Float.max !longest_gap (now -. !last);
         last := now
       done;
-      let facts = get (Runtime.presentation_facts (Renderer.Private.runtime runtime)) in
+      let facts = get (Runtime.presentation_facts (Renderer.Native.runtime runtime)) in
       if facts.logical_width <> width || facts.logical_height <> height then
         failwith (Printf.sprintf "the runtime's size %dx%d did not follow the window's %dx%d"
           facts.logical_width facts.logical_height width height))
@@ -77,7 +77,7 @@ let auto () =
     (* A size changed behind the runtime's back (what a drag does) reaches it
        through SDL's event alone: the frame pumps, sees Resized and
        Pixel_size_changed, announces, and renders at the new size. *)
-    let window = Option.get (Renderer.Private.window_handle runtime) in
+    let window = Option.get (Renderer.Native.window_handle runtime) in
     (match Sdl3.Window.set_size window ~width:500 ~height:400 with
      | Ok () -> () | Error error -> failwith (Format.asprintf "%a" Sdl3.pp_error error));
     (match Sdl3.Window.sync window with
@@ -87,7 +87,7 @@ let auto () =
        || not (List.exists (function Input.Pixel_size_changed _ -> true | _ -> false) announced)
     then failwith "SDL did not announce the new size as Resized and Pixel_size_changed";
     ignore (frame runtime ~clear:(0.4, 0.4, 0.4, 1.));
-    let after = get (Runtime.presentation_facts (Renderer.Private.runtime runtime)) in
+    let after = get (Runtime.presentation_facts (Renderer.Native.runtime runtime)) in
     if after.logical_width <> 500 || after.logical_height <> 400 then
       failwith "SDL's size event did not bring the new size to the runtime";
     if !longest_gap > 0.25 then

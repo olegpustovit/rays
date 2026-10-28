@@ -271,7 +271,7 @@ let draw_notice ~(value : t) ~(frame : Frame.t) ~roots ~header_focus ~graph_body
        let bounds = match List.find_opt (fun ((l : Pxui_shell.Layout.leaf), _) -> Some l.path = header_focus) roots with
          | Some (l, _) -> l.body | None -> graph_body in
        let rec cards (s : Flow_graph.Projection.scope) = List.concat_map (fun (n : Flow_graph.Projection.node) ->
-         Option.to_list (Pxui_graph.Scope.Private.box_of scope_view n.path)
+         Option.to_list (Pxui_graph.Scope.Inspect.box_of scope_view n.path)
          @ (match n.zone with Some z -> cards z.scope | None -> [])) s.nodes in
        let avoid = match pane_laid value with
          | Some k when scope_active -> cards k.scope | _ -> [] in

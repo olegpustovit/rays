@@ -164,7 +164,7 @@ let move_point session (graph : Lower.graph) operation ~index ~by =
     (Rdk.Packed.Float3.of_owned ~x:(Array.copy view.x)
        ~y:(Array.mapi (fun i v -> if i = index then v +. by else v) view.y)
        ~z:(Array.copy view.z) |> Result.get_ok) base) in
-  let replaced = Result.get_ok (Sop.Node.Private.restore_id field.id
+  let replaced = Result.get_ok (Sop.Node.Build.restore_id field.id
     (Lisp_sop.snapshot (moved))) in
   base, Result.get_ok (Edit.replace_node replaced graph.network.geometry)
 

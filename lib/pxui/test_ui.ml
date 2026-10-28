@@ -402,7 +402,7 @@ let scale_10 scale =
     Input.Text_editing { text = "e"; start = 0; length = 1 };
     Input.Text_input "hé"; Input.Key_pressed Input.Backspace] build;
   if !title <> "h" then fail (label "text field did not accept UTF-8 input and backspace");
-  let ime_cursor () = match Scene.Private.text_regions (Ui.scene ui) with
+  let ime_cursor () = match Scene.Layer.text_regions (Ui.scene ui) with
     | [(_, _, _, _, true, cursor)] -> cursor
     | _ -> fail (label "focused text field lost its IME region") in
   let cursor_after_h = ime_cursor () in
@@ -504,7 +504,7 @@ let scale_11 scale =
     ignore (Ui.frame ui (frame ~keys ~scale ~time:!field_time events) build) in
   field_step [];
   field_step [press (40, 30); release (40, 30)];
-  let cursor () = match Scene.Private.text_regions (Ui.scene ui) with
+  let cursor () = match Scene.Layer.text_regions (Ui.scene ui) with
     | [(_, _, _, _, true, cursor)] -> cursor
     | regions -> fail (label (Printf.sprintf "long field lost its IME region (%d)"
         (List.length regions))) in
@@ -653,10 +653,10 @@ let batches () =
       ignore (Ui.toggle ui "Animate" true);
       ignore (Ui.text_field ui "Caption" "Functional UI");
       ignore (Ui.button ui "Quit")));
-  (match Scene.Private.stage_native ~width:320 ~height:240 (Ui.scene ui) with
+  (match Scene.Layer.stage_native ~width:320 ~height:240 (Ui.scene ui) with
    | Ok staged ->
        let batches = List.fold_left (fun total -> function
-         | Scene.Private.Ui_layer (batch, _) ->
+         | Scene.Layer.Ui_layer (batch, _) ->
              total + Array.length (Scene_command.Ui_batch.batches batch)
          | _ -> total) 0 staged.layers in
        if batches = 0 || batches > 4 then
@@ -797,7 +797,7 @@ let text_area_start () =
         ~on_scrub:(fun p -> scrubs := p :: !scrubs)
         ~on_scrub_edit:(fun range value -> scrub_edits := (range, value) :: !scrub_edits) "area" !area in
       area := text; submitted := submit)) in
-  let region () = match Scene.Private.text_regions (Ui.scene ui) with
+  let region () = match Scene.Layer.text_regions (Ui.scene ui) with
     | [(_, y, _, _, true, cursor)] -> y, cursor
     | _ -> fail "text area lost its IME region" in
   let expect what want = if !area <> want then
@@ -1296,7 +1296,7 @@ let modal_4 () =
     fail "a later body covered a raised floating control";
   let scene = Ui.scene ui ~under:(fun key -> if key = !front_key then
     [Scene.rect ~at:(0, 0) ~w:100 ~h:60 ~fill:Rays_math.Color.black ()] else []) in
-  (match Scene.Private.stage_native ~width:320 ~height:240 scene with
+  (match Scene.Layer.stage_native ~width:320 ~height:240 scene with
    | Ok {layers = [Ui_layer _; Scene2_layer _; Ui_layer _]; _} -> ()
    | _ -> fail "native content was not between the background and floating controls");
   Ui.destroy ui

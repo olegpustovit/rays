@@ -33,7 +33,7 @@ let storage values =
 let node ?state ?(reference = false) ?elems ~identity ~signature ~fn ~sources inputs =
   (* ponytail: fresh binding identity recooks after equivalent re-lowering;
      structural body/capture keys can replace it if this becomes measurable. *)
-  Sop.Node.Private.make ~operation:"flow.function" ~version:1
+  Sop.Node.Build.make ~operation:"flow.function" ~version:1
     ~parameters:(string_of_int identity
       ^ Option.fold ~none:"" ~some:(fun bindings -> Flow.Value.key_of
           ~residual:E.Residual.residual_id (E.Record bindings)) elems
@@ -72,5 +72,5 @@ let node ?state ?(reference = false) ?elems ~identity ~signature ~fn ~sources in
           (Option.fold ~none:[] ~some:(List.map snd) elems)
           @ (Option.fold ~none:[] ~some:E.Host.state_values state))) payloads in
       let kernel = K.create ~geometry_capture ~payload_bytes:bytes prepare in
-      Ok Sop.Node.Private.{payload = Sop.Payload.Kernel kernel;
+      Ok Sop.Node.Build.{payload = Sop.Payload.Kernel kernel;
         instances = None})

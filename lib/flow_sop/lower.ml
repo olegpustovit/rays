@@ -61,11 +61,11 @@ let with_images ?gpu ?(metadata=fun _ _->None) resolver run =
 let image_metadata plan = match Domain.DLS.get image_provider with
   |None->(fun _->None)|Some images->images.metadata plan
 let resource_image operation result =
-  Sop.Node.Private.make ~operation ~version:1
+  Sop.Node.Build.make ~operation ~version:1
     ~parameters:(match result with Ok image->string_of_int(Sop.Image.data_id image)|Error _->"unbound")
     ~cook_mode:Sop.Node.Generator ~dependencies:Sop.Context.Dependencies.static ~inputs:[||]
     (fun ~node_id:_ _ _->match result with
-      |Ok image->Ok Sop.Node.Private.{payload=Sop.Payload.Image image;instances=None}
+      |Ok image->Ok Sop.Node.Build.{payload=Sop.Payload.Image image;instances=None}
       |Error diagnostic->Error diagnostic)
 
 type kernel_input = {index : int; cid : int; identity : int;
@@ -182,7 +182,7 @@ let geometry_arrays_node ~profile ~strict_body ~reference ~approx ~kernel_source
     Option.fold ~none:"" ~some:E.state_stamp state ^
     Option.fold ~none:"" ~some:(fun fields ->
       Flow.Value.key_of ~residual:E.Residual.residual_id (E.Record fields)) elems in
-  let node = Sop.Node.Private.make_geometry ~label:(geometry_arrays_label operation)
+  let node = Sop.Node.Build.make_geometry ~label:(geometry_arrays_label operation)
     ~operation:(geometry_arrays_key operation) ~version:1 ~parameters
     ~cook_mode:(if List.mem operation ["sop/remap"; "sop/concat"; "sop/with_planes"]
       then Sop.Node.Generic else Sop.Node.Generator)
@@ -240,8 +240,8 @@ let geometry_arrays_node ~profile ~strict_body ~reference ~approx ~kernel_source
                 Result.bind result (fun geometry ->
                   if cancelled () then error () else Ok geometry)
             | _ -> Error (Diagnostic.error ~code:"E_TOPOLOGY_TYPE" "Mesh data must be a record."))) in
-      Result.map (fun geometry -> Sop.Node.Private.{geometry; instances=None}) result) in
-  Sop.Node.Private.with_facts {(Sop.Node.facts node) with
+      Result.map (fun geometry -> Sop.Node.Build.{geometry; instances=None}) result) in
+  Sop.Node.Build.with_facts {(Sop.Node.facts node) with
     reads=(if List.mem operation ["sop/remap"; "sop/concat"; "sop/with_planes"]
       then ["*"] else Attribute_kernel.reads data);
     writes=["*"]; topology=Changed; elementwise=None} node
@@ -285,7 +285,7 @@ let group_node ~strict_body ~reference ~profile ~approx ~kernel_source
   let owner = ok (Group_kernel.owner owner_name) and values = group_data args in
   let program = Attribute_kernel.prepare ~profile ~strict:strict_body ~sources inputs values in
   if strict_body then ignore (ok program);
-  let node = Sop.Node.Private.make_geometry ~label:("Write group " ^ name)
+  let node = Sop.Node.Build.make_geometry ~label:("Write group " ^ name)
     ~operation:"flow.with_group" ~version:1
     ~parameters:(Lazy.force kernel_source ^ owner_name ^ ":" ^ name ^
       Flow.Value.key_of ~residual:E.Residual.residual_id values ^
@@ -322,8 +322,8 @@ let group_node ~strict_body ~reference ~profile ~approx ~kernel_source
                     | _ -> Error (Diagnostic.error ~code:"E_GROUP_MASK"
                         "Group mask requires an integer array."))
               | _ -> assert false)) in
-      Result.map (fun geometry -> Sop.Node.Private.{geometry; instances=None}) result) in
-  Sop.Node.Private.with_facts {(Sop.Node.facts node) with
+      Result.map (fun geometry -> Sop.Node.Build.{geometry; instances=None}) result) in
+  Sop.Node.Build.with_facts {(Sop.Node.facts node) with
     topology=Preserved; reads=["*"]; writes=["*"]} node
 
 let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
@@ -337,7 +337,7 @@ let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
     let make_capture_factories aliases = List.mapi (fun index input ->
       let key = "lisp_capture_" ^ string_of_int index in
       let factory = Edit.factory ~key ~label:key ~category:["Flow"] ~arity:0
-        (fun _ -> Result.ok @@ Sop.Node.Private.make ~operation:key ~version:1
+        (fun _ -> Result.ok @@ Sop.Node.Build.make ~operation:key ~version:1
           ~parameters:(string_of_int (Sop.Node.id input)) ~cook_mode:Sop.Node.Generator
           ~dependencies:Sop.Context.Dependencies.static ~inputs:[||]
           (fun ~node_id:_ _ _ -> Result.map (fun payload ->
@@ -345,7 +345,7 @@ let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
               | Sop.Payload.Kernel kernel, Some sources ->
                   Sop.Payload.Kernel (Sop.Kernel.remap_geometry_captures ~sources kernel)
               | _ -> payload in
-            Sop.Node.Private.{payload;instances=None}) (Lisp_node.input index))) in
+            Sop.Node.Build.{payload;instances=None}) (Lisp_node.input index))) in
       key, factory) inputs in
     let capture_factories = make_capture_factories [] in
     let body = Context_kernel.specialize ?provenance ~label ~context definition.body in
@@ -374,14 +374,14 @@ let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
       Attribute_kernel.sources (E.Fn fn) |> List.map (fun source ->
         let key = Printf.sprintf "lisp_capture_geometry_%d_%d" index source in
         let factory = Edit.factory ~key ~label:key ~category:["Flow"] ~arity:0
-          (fun _ -> Result.ok @@ Sop.Node.Private.make_geometry ~operation:key ~version:1
+          (fun _ -> Result.ok @@ Sop.Node.Build.make_geometry ~operation:key ~version:1
             ~parameters:(string_of_int (Sop.Node.id (List.nth inputs index)))
             ~cook_mode:Sop.Node.Generator ~dependencies:Sop.Context.Dependencies.static
             ~inputs:[||] (fun ~node_id:_ _ _ ->
               Result.bind (Lisp_node.input index) (fun payload ->
               Result.bind (Sop.Payload.kernel payload) (fun kernel ->
                 match Sop.Kernel.geometry_capture kernel source with
-                | Some geometry -> Ok Sop.Node.Private.{geometry;instances=None}
+                | Some geometry -> Ok Sop.Node.Build.{geometry;instances=None}
                 | None -> Error (Diagnostic.error ~code:"E_DATA_SOURCE"
                     "A forwarded function geometry capture is unavailable"))))) in
         key, source, index, factory)) forwarded in
@@ -652,7 +652,7 @@ end) = struct
         |Ok program->program|Error name->fail "E_PACKED_FORM" ("Cooked selection cannot compile "^name^".") in
       let prepared=Flow_ir.Core_exec.prepare program in
       let inputs=Array.of_list(List.map(fun(_,_,node)->node)captures) in
-      let node=Sop.Node.Private.make ~operation:"flow.geometry_select" ~version:1
+      let node=Sop.Node.Build.make ~operation:"flow.geometry_select" ~version:1
         ~parameters:(Lazy.force kernel_source)
         ~cook_mode:Sop.Node.Generic ~inputs
         ~dependencies:(if E.frame_dependent(E.Residual residual) then Sop.Context.Dependencies.one Input
@@ -703,10 +703,10 @@ end) = struct
                 (* Editable zero-input factories must return zero-input nodes:
                    compiling a borrowed source directly would disconnect it. *)
                 let factory=Edit.factory ~key ~label:key ~category:["Lisp"] ~arity:0(fun _-> Result.ok @@
-                  Sop.Node.Private.make ~operation:key ~version:1 ~parameters:(string_of_int id)
+                  Sop.Node.Build.make ~operation:key ~version:1 ~parameters:(string_of_int id)
                     ~cook_mode:Sop.Node.Generator ~inputs:[||] ~dependencies:Sop.Context.Dependencies.static
                     (fun ~node_id:_ _context _inputs->
-                      (Result.map(fun(output:Sop.Session.output)->Sop.Node.Private.{payload=output.payload;
+                      (Result.map(fun(output:Sop.Session.output)->Sop.Node.Build.{payload=output.payload;
                           instances=output.instances})(snapshot actual id)))) in
                 factories:=factory::!factories;
                 Some Workspace.{path=None;ty;form=Syntax.make(List[]);
@@ -744,10 +744,10 @@ end) = struct
               let actual=match Hashtbl.find_opt handles id with Some(actual,_,_)->actual
                 |None->fail "E_DATA_SOURCE" "A cooked handle is missing from this execution." in
               ignore(ok(handle actual id));
-              Sop.Node.Private.make ~operation:"lisp_host_capture" ~version:1 ~parameters:(string_of_int id)
+              Sop.Node.Build.make ~operation:"lisp_host_capture" ~version:1 ~parameters:(string_of_int id)
                 ~cook_mode:Sop.Node.Generator ~inputs:[||] ~dependencies:Sop.Context.Dependencies.static
                 (fun ~node_id:_ _context _inputs->
-                  (Result.map(fun(output:Sop.Session.output)->Sop.Node.Private.{payload=output.payload;
+                  (Result.map(fun(output:Sop.Session.output)->Sop.Node.Build.{payload=output.payload;
                           instances=output.instances})(snapshot actual id))))sources in
             let node=geometry_arrays_node ~strict_body:true ~host:true ~operation:name ~args ~sources inputs in
             let id= !next in decr next;
@@ -868,9 +868,9 @@ end) = struct
             |E.Deferred(ty,id) when ty=Ty.geometry->snapshot ty id
             |E.No_geo->error "E_LOWER" "Cooked selection returned empty geometry."
             |_->error "E_DATA_SOURCE" "Cooked selection must return a geometry handle.") in
-          (Result.map(fun(output:Sop.Session.output)->Sop.Node.Private.{payload=output.payload;
+          (Result.map(fun(output:Sop.Session.output)->Sop.Node.Build.{payload=output.payload;
               instances=output.instances})result))) in
-      Sop.Node.Private.with_facts {(Sop.Node.facts node) with reads=["*"];writes=["*"]} node
+      Sop.Node.Build.with_facts {(Sop.Node.facts node) with reads=["*"];writes=["*"]} node
     let attribute_node ?state ?elems ?selection ?default ?(owner=Rdk.Attribute.Point)
         ?(kind="vec3") ~name ~values ~sources inputs =
       attribute_node ~strict_body ~reference ~profile ~approx:checked.approx ~gpu ~kernel_source
@@ -900,7 +900,7 @@ end) = struct
       match Path_map.find_opt key !ids with
       | Some id -> id
       | None ->
-          let id = Sop.Node.Private.fresh_id () in
+          let id = Sop.Node.Build.fresh_id () in
           ids := Path_map.add key id !ids; id
     let compiled = Array.make (Array.length plan.nodes) 0
     let int_arg (n : E.node) k = match List.assoc_opt k n.args with
@@ -1142,7 +1142,7 @@ end) = struct
                         | _ -> fail "E_LOWER" ("Input " ^ name ^ " does not declare a function signature") in
                       let cid = compiled_id {node with site = node.site @ [Printf.sprintf "~kernel:%s:%d" name index]} in
                       kernels := {index; cid; signature; fn;
-                        identity = Sop.Node.Private.fresh_id ();
+                        identity = Sop.Node.Build.fresh_id ();
                         sources = Attribute_kernel.sources (E.Fn fn)} :: !kernels in
                 let rec add_rest name = function
                   | E.No_geo -> ()
@@ -1209,7 +1209,7 @@ end) = struct
     and kernel_node ?state ?elems (k : kernel_input) inputs =
       Function_kernel.node ?state ~reference ?elems ~identity:k.identity
         ~signature:k.signature ~fn:k.fn ~sources:k.sources inputs
-      |> Sop.Node.Private.restore_id k.cid |> edit
+      |> Sop.Node.Build.restore_id k.cid |> edit
     and make_zone ?state ~outer z inputs =
       let stamp = Option.fold ~none:"" ~some:E.state_stamp state in
       let stamp = match z.preview with
@@ -1284,7 +1284,7 @@ end) = struct
           | None when is_geometry_arrays n.kind ->
               geometry_arrays_node ?state ~elems:outer ~operation:n.kind ~args:n.args ~sources:(deps n) (List.filter_map Fun.id options)
           | None -> edit (Lisp_node.with_initial_changes ~operation:(Edit.factory_operation p.factory) p.changes (fun () -> Edit.instantiate_optional p.factory options)) in
-        let node = edit (Sop.Node.Private.restore_id p.cid node) in
+        let node = edit (Sop.Node.Build.restore_id p.cid node) in
         let changes = p.changes @ List.concat_map (fun (v, changes) ->
           changes (match E.force ?state:(Option.map E.fork_state state) ~elems:outer v ~live with
             | Ok v -> v | Error d -> failwith (Diagnostic.to_string d))) p.dynamic in
@@ -1440,8 +1440,8 @@ let dynamic = ref [] in
         | Some z when z.stateful && Edit.find graph ~node_id:p.cid <> None ->
             Network.Int_map.add p.cid (fun ~network:_ state _live node ->
               let snapshot = E.fork_state state in
-              Ok(Sop.Node.Private.adopt_identity ~source:node
-                (make_zone ~state:snapshot ~outer:[] z (Sop.Node.Private.input_array node)))) nodes
+              Ok(Sop.Node.Build.adopt_identity ~source:node
+                (make_zone ~state:snapshot ~outer:[] z (Sop.Node.Build.input_array node)))) nodes
         | _ -> nodes) prepared Network.Int_map.empty in
       let frame_nodes = Hashtbl.fold (fun _ (p : prepared) nodes ->
         List.fold_left (fun nodes (k : kernel_input) ->
@@ -1453,14 +1453,14 @@ let dynamic = ref [] in
         if not(is_geometry_arrays n.kind) || Edit.find graph ~node_id:compiled.(n.id)=None
           || not(E.state_dependent(geometry_arrays_data n.args))then nodes
         else Network.Int_map.add compiled.(n.id)(fun ~network:_ state _live node->
-          Ok(Sop.Node.Private.adopt_identity ~source:node
+          Ok(Sop.Node.Build.adopt_identity ~source:node
             (geometry_arrays_node ~state:(E.fork_state state) ~operation:n.kind ~args:n.args ~sources:(deps n)(Sop.Node.inputs node))))nodes)
         frame_nodes plan.nodes in
       let frame_nodes=Array.fold_left(fun nodes (n:E.node)->
         if n.kind<>"sop/with_group" || Edit.find graph ~node_id:compiled.(n.id)=None
           || not(E.state_dependent(group_data n.args)) then nodes
         else Network.Int_map.add compiled.(n.id) (fun ~network:_ state _live node->
-          Ok(Sop.Node.Private.adopt_identity ~source:node
+          Ok(Sop.Node.Build.adopt_identity ~source:node
             (group_node ~state:(E.fork_state state) ~args:n.args ~sources:(deps n) (Sop.Node.inputs node))))nodes)
         frame_nodes plan.nodes in
       let frame_nodes = Array.fold_left (fun nodes (n : E.node) ->
@@ -1483,7 +1483,7 @@ let dynamic = ref [] in
             |None->values
             |Some(Flow_ir.Executor.Gpu _)->assert false in
           if selected=None && not(E.state_dependent(attribute_data n.args)) then Ok node else
-          Ok(Sop.Node.Private.adopt_identity ~source:node
+          Ok(Sop.Node.Build.adopt_identity ~source:node
             (let owner,kind=attribute_options n.args in
              attribute_node ~state:(E.fork_state state) ?selection:(List.assoc_opt "selection" n.args) ?default:(List.assoc_opt "default" n.args) ~owner ~kind ~name
               ~values ~sources:(deps n) (Sop.Node.inputs node))))) nodes)
@@ -1495,7 +1495,7 @@ let dynamic = ref [] in
             |None->Error(Diagnostic.error ~code:"E_IMAGE" "Image resources need an initial-domain resolver.")
             |Some images->Result.map(fun image->
                 if Sop.Node.parameters node=string_of_int(Sop.Image.data_id image) then node else
-                Sop.Node.Private.adopt_identity ~source:node (resource_image n.kind (Ok image)))
+                Sop.Node.Build.adopt_identity ~source:node (resource_image n.kind (Ok image)))
               (images.resolve ~gpu ~context:{compiled=compiled_context;network} plan ~state ~live (E.Deferred(Ty.image,n.id))))nodes)
         frame_nodes plan.nodes in
       let network = Network.with_frame_nodes frame_nodes network in
@@ -1531,7 +1531,7 @@ let dynamic = ref [] in
           | Some source -> Edit.find graph ~node_id:compiled.(source)
           | None -> None) in
         let node = edit (Lisp_node.with_initial_changes ~operation:(Edit.factory_operation p.factory) p.changes (fun () -> Edit.instantiate_optional p.factory options)) in
-        let node = edit (Sop.Node.Private.restore_id p.cid node) in
+        let node = edit (Sop.Node.Build.restore_id p.cid node) in
         let inputs = Array.of_list (List.map (Option.map Sop.Node.id)
           options) in
         let graph = edit (Edit.add_node ~factory:p.factory ~inputs node graph) in
@@ -1601,8 +1601,8 @@ let dynamic = ref [] in
           let network = ok (Network.with_geometry geometry network) in
           let frames = if not z.stateful then network.frame_nodes else
             Network.Int_map.add root (fun ~network:_ state _live node ->
-              Ok(Sop.Node.Private.adopt_identity ~source:node
-                (make_zone ~state:(E.fork_state state) ~outer:[] z (Sop.Node.Private.input_array node))))
+              Ok(Sop.Node.Build.adopt_identity ~source:node
+                (make_zone ~state:(E.fork_state state) ~outer:[] z (Sop.Node.Build.input_array node))))
               network.frame_nodes in
           Network.with_frame_nodes frames network, root) outer
     let result = {gpu; graphs; factories=lisp_factories; compiled_ids = !ids; sites = List.rev !site_list;

@@ -15,27 +15,26 @@ let pixel bytes offset expected message=
   require(Bytes.sub bytes offset 4=expected)message
 let putf bytes offset value=Bytes.set_int64_le bytes offset(Int64.bits_of_float value)
 let scene3_draw key red=
-  let vertices=Bytes.make(3*68)'\000'and indices=Bytes.create 12 in
-  List.iteri(fun index(x,y)->let offset=index*68 in
-    putf vertices offset x;putf vertices(offset+8)y;
-    putf vertices(offset+16)0.;putf vertices(offset+24)1.;
-    putf vertices(offset+28)red;putf vertices(offset+36)0.;
-    putf vertices(offset+44)0.;putf vertices(offset+52)0.;
-    putf vertices(offset+60)0.)[-1.,1.;1.,1.;-1.,-1.];
+  let vertices=Bytes.make(3*24)'\000'and attributes=Bytes.make(3*12)'\000'and indices=Bytes.create 12 in
+  List.iteri(fun index(x,y)->let offset=index*24 in
+    Bytes.set_int32_le vertices offset(Int32.bits_of_float x);
+    Bytes.set_int32_le vertices(offset+4)(Int32.bits_of_float y);
+    Bytes.set_int32_le vertices(offset+20)(Int32.bits_of_float 1.);
+    Bytes.set_int32_le attributes(index*12)(if red>0. then 0xff0000ffl else 0l))[-1.,1.;1.,1.;-1.,-1.];
   List.iteri(fun index value->Bytes.set_int32_le indices(index*4)value)[0l;1l;2l];
   let mesh:Scene_execution.mesh={key=Host key;vertices;vertex_count=3;indices;index_count=3; primitive=Ogpu.Render_pass.Triangle_list}
   and state:Scene_execution.state={viewport=(0,0,5,4);scissor=(0,0,5,4);
     cull=Ogpu.Render_pass.Cull_none;depth_compare=Ogpu.Render_pass.Always;
     depth_write=false;depth_load=Ogpu.Render_pass.Clear;depth_clear=1.;
     transform_uniforms=None}in
-  Renderer.prepared_draw~family:Scene3
+  Renderer.prepared_draw~family:Scene3~vertex_attributes:(key^":attributes",attributes)
     {Scene_execution.mesh;state}
 
 let test_retained execution red=
   let render_retained version draw=
-    let submission=get(Renderer.Private.begin_submission execution)in
-    let batch=get(Renderer.Private.adopt_draws submission[draw])in
-    ignore(get(Renderer.Private.step~identity:"offscreen-retained"
+    let submission=get(Renderer.Native.begin_submission execution)in
+    let batch=get(Renderer.Native.adopt_draws submission[draw])in
+    ignore(get(Renderer.Native.step~identity:"offscreen-retained"
       ~version submission[batch]))in
   render_retained 1L red;
   let uploaded=(get(Renderer.stats execution)).uploaded_bytes in
@@ -49,29 +48,29 @@ let test_retained execution red=
     Scene_command.Render_ir.Geometry{vertices=[|0.;0.;1.;0.;0.;1.|];
       indices=[|0;1;2|];color=Int32.minus_one}|])in
   let lower_segment version=
-    let submission=get(Renderer.Private.begin_submission execution)in
-    ignore(get(Renderer.Private.lower_scene2_segment submission
+    let submission=get(Renderer.Native.begin_submission execution)in
+    ignore(get(Renderer.Native.lower_scene2_segment submission
       ~identity:77L~version~cacheable:true~density:1~resource:(fun _->None)
       segment_ir));
-    Renderer.Private.cancel submission in
+    Renderer.Native.cancel submission in
   lower_segment 1L;
   lower_segment 1L;
-  let entries,hits,misses=Renderer.Private.retained_scene2_segment_stats execution in
+  let entries,hits,misses=Renderer.Native.retained_scene2_segment_stats execution in
   require(entries=1&&hits=1L&&misses=1L)
     "same retained Scene2 segment did not bypass lowering";
   lower_segment 2L;
-  let entries,hits,misses=Renderer.Private.retained_scene2_segment_stats execution in
+  let entries,hits,misses=Renderer.Native.retained_scene2_segment_stats execution in
   require(entries=1&&hits=1L&&misses=2L)
     "retained Scene2 generation did not replace only its prior entry";
-  let invalid=get(Renderer.Private.begin_submission execution)in
+  let invalid=get(Renderer.Native.begin_submission execution)in
   expect_error"invalid retained Scene2 identity was accepted"
-    (Renderer.Private.lower_scene2_segment invalid
+    (Renderer.Native.lower_scene2_segment invalid
       ~identity:0L~version:1L~cacheable:true~density:1
       ~resource:(fun _->None)segment_ir);
-  let incomplete=get(Renderer.Private.begin_submission execution)in
-  let incomplete_batch=get(Renderer.Private.adopt_draws incomplete[red])in
+  let incomplete=get(Renderer.Native.begin_submission execution)in
+  let incomplete_batch=get(Renderer.Native.adopt_draws incomplete[red])in
   expect_error"retained identity without version was accepted"
-    (Renderer.Private.step~identity:"incomplete"incomplete[incomplete_batch])
+    (Renderer.Native.step~identity:"incomplete"incomplete[incomplete_batch])
 
 let run () =
   let baseline=live_handles()in
@@ -83,13 +82,13 @@ let run () =
   |Ok execution->
       try
         expect_error "offscreen execution accepted a native IME area"
-          (Runtime.set_text_input (Renderer.Private.runtime execution)
+          (Runtime.set_text_input (Renderer.Native.runtime execution)
             (Some ((1, 1, 2, 1), 1)));
         expect_error "offscreen execution accepted a native cursor"
-          (Runtime.set_cursor (Renderer.Private.runtime execution) `Horizontal_resize);
+          (Runtime.set_cursor (Renderer.Native.runtime execution) `Horizontal_resize);
         let clear_to execution colour=
-          let submission=get(Renderer.Private.begin_submission execution)in
-          get(Renderer.Private.step~clear:colour submission[])in
+          let submission=get(Renderer.Native.begin_submission execution)in
+          get(Renderer.Native.step~clear:colour submission[])in
         clear_to execution(1.,0.,0.,1.);
         let first=get(Renderer.capture execution)in
         require(Bytes.length first=3*2*4)"offscreen initial extent";
@@ -102,7 +101,7 @@ let run () =
             {configuration with logical_width=5;logical_height=4;
               drawable_width=5;drawable_height=4})in
           clear_to bigger(0.,0.,1.,1.);
-          let facts=get(Runtime.presentation_facts (Renderer.Private.runtime bigger))in
+          let facts=get(Runtime.presentation_facts (Renderer.Native.runtime bigger))in
           require(facts.logical_width=5&&facts.logical_height=4&&
             facts.drawable_width=5&&facts.drawable_height=4&&facts.pixel_density=1.)
             "offscreen resized facts";
@@ -136,48 +135,48 @@ let run () =
             ignore(get(Renderer.lower_scene2 execution~density:1
               ~resource:resolve image_ir));
             ignore(get_resource(replace image));
-            let first=get(Renderer.Private.begin_submission execution)in
-            ignore(get(Renderer.Private.lower_scene2 first~density:1
+            let first=get(Renderer.Native.begin_submission execution)in
+            ignore(get(Renderer.Native.lower_scene2 first~density:1
               ~resource:resolve image_ir));
             ignore(get_resource(replace image));
-            let failed=get(Renderer.Private.begin_submission execution)in
-            ignore(get(Renderer.Private.lower_scene2 failed~density:1
+            let failed=get(Renderer.Native.begin_submission execution)in
+            ignore(get(Renderer.Native.lower_scene2 failed~density:1
               ~resource:resolve image_ir));
             ignore(get_resource(replace image));
             expect_error"later lowering failure was accepted"
-              (Renderer.Private.lower_scene2 failed~density:1
+              (Renderer.Native.lower_scene2 failed~density:1
                 ~resource:resolve missing_ir);
-            let overlap=get(Renderer.Private.begin_submission execution)in
-            ignore(get(Renderer.Private.lower_scene2 overlap~density:1
+            let overlap=get(Renderer.Native.begin_submission execution)in
+            ignore(get(Renderer.Native.lower_scene2 overlap~density:1
               ~resource:resolve image_ir));
             ignore(get_resource(replace image));
-            Renderer.Private.cancel first;
+            Renderer.Native.cancel first;
             ignore(get_resource(replace image));
-            Renderer.Private.cancel first;
-            Renderer.Private.cancel overlap;
-            let step_failed=get(Renderer.Private.begin_submission execution)in
-            let step_draws=get(Renderer.Private.lower_scene2 step_failed
+            Renderer.Native.cancel first;
+            Renderer.Native.cancel overlap;
+            let step_failed=get(Renderer.Native.begin_submission execution)in
+            let step_draws=get(Renderer.Native.lower_scene2 step_failed
               ~density:1~resource:resolve image_ir)in
             ignore(get_resource(replace image));
-            let step_overlap=get(Renderer.Private.begin_submission execution)in
-            ignore(get(Renderer.Private.lower_scene2 step_overlap
+            let step_overlap=get(Renderer.Native.begin_submission execution)in
+            ignore(get(Renderer.Native.lower_scene2 step_overlap
               ~density:1~resource:resolve image_ir));
             ignore(get_resource(replace image));
             expect_error"non-finite clear unexpectedly submitted"
-              (Renderer.Private.step~clear:(Float.nan,0.,0.,1.)
+              (Renderer.Native.step~clear:(Float.nan,0.,0.,1.)
                 step_failed[step_draws]);
             ignore(get_resource(replace image));
             expect_error"consumed failed submission was reusable"
-              (Renderer.Private.step step_failed[]);
-            Renderer.Private.cancel step_failed;
-            Renderer.Private.cancel step_overlap;
-            let cross_first=get(Renderer.Private.begin_submission execution)in
-            let cross_batch=get(Renderer.Private.lower_scene2 cross_first
+              (Renderer.Native.step step_failed[]);
+            Renderer.Native.cancel step_failed;
+            Renderer.Native.cancel step_overlap;
+            let cross_first=get(Renderer.Native.begin_submission execution)in
+            let cross_batch=get(Renderer.Native.lower_scene2 cross_first
               ~density:1~resource:resolve image_ir)in
-            let cross_second=get(Renderer.Private.begin_submission execution)in
+            let cross_second=get(Renderer.Native.begin_submission execution)in
             expect_error"cross-submission draw batch was accepted"
-              (Renderer.Private.step cross_second[cross_batch]);
-            Renderer.Private.cancel cross_first;
+              (Renderer.Native.step cross_second[cross_batch]);
+            Renderer.Native.cancel cross_first;
             let two_image_ir=get_ir(Scene_command.Render_ir.create[|
               Scene_command.Render_ir.Image
                 {resource_id=1;source=rect;destination=rect};
@@ -190,30 +189,30 @@ let run () =
                   if !second_lookups>1 then raise Exit
                   else Some(Renderer.Image image)
               |_->None in
-            let exceptional=get(Renderer.Private.begin_submission execution)in
+            let exceptional=get(Renderer.Native.begin_submission execution)in
             expect_error"raising resolver escaped the typed boundary"
-              (Renderer.Private.lower_scene2 exceptional
+              (Renderer.Native.lower_scene2 exceptional
                 ~density:1~resource:raising_resolver two_image_ir);
-            let exception_probe=get(Renderer.Private.begin_submission execution)in
-            ignore(get(Renderer.Private.lower_scene2 exception_probe
+            let exception_probe=get(Renderer.Native.begin_submission execution)in
+            ignore(get(Renderer.Native.lower_scene2 exception_probe
               ~density:1~resource:resolve image_ir));
             ignore(get_resource(replace image));
-            Renderer.Private.cancel exception_probe;
-            let succeeded=get(Renderer.Private.begin_submission execution)in
-            let succeeded_batch=get(Renderer.Private.lower_scene2 succeeded
+            Renderer.Native.cancel exception_probe;
+            let succeeded=get(Renderer.Native.begin_submission execution)in
+            let succeeded_batch=get(Renderer.Native.lower_scene2 succeeded
               ~density:1~resource:resolve image_ir)in
             let expected=get_resource(Runtime_resources.Image.pixels image)in
-            ignore(get(Renderer.Private.step succeeded[succeeded_batch]));
+            ignore(get(Renderer.Native.step succeeded[succeeded_batch]));
             let submitted=get(Renderer.capture execution)in
             pixel submitted 0 expected"successful transaction changed snapshot pixels";
             (* Replacing pixels behind a stable identity must reach the GPU
                texture instead of the static-image reuse path. *)
             ignore(get_resource(replace image));
-            let replaced=get(Renderer.Private.begin_submission execution)in
-            let replaced_batch=get(Renderer.Private.lower_scene2 replaced
+            let replaced=get(Renderer.Native.begin_submission execution)in
+            let replaced_batch=get(Renderer.Native.lower_scene2 replaced
               ~density:1~resource:resolve image_ir)in
             let expected=get_resource(Runtime_resources.Image.pixels image)in
-            ignore(get(Renderer.Private.step replaced[replaced_batch]));
+            ignore(get(Renderer.Native.step replaced[replaced_batch]));
             pixel(get(Renderer.capture execution))0 expected
               "replaced image pixels did not reach the presented frame";
             ignore(get_resource(replace image));
@@ -234,8 +233,8 @@ let run () =
                     Some(Renderer.Image labels.(id-100))
                   else None in
                 let open_submission()=
-                  let submission=get(Renderer.Private.begin_submission execution)in
-                  ignore(get(Renderer.Private.lower_scene2 submission
+                  let submission=get(Renderer.Native.begin_submission execution)in
+                  ignore(get(Renderer.Native.lower_scene2 submission
                     ~density:1~resource:resolve_label labels_ir));
                   submission in
                 let no_lease=open_submission()in
@@ -246,13 +245,13 @@ let run () =
                     ~width:1~height:1~rgba:(rgba((index+1)land 255))));
                   ignore(get_resource(Runtime_resources.Image.replace label
                     ~width:1~height:1~rgba:(rgba((index+2)land 255)))))labels;
-                Renderer.Private.cancel no_lease;
+                Renderer.Native.cancel no_lease;
                 let warm=open_submission()in
-                Renderer.Private.cancel warm;
+                Renderer.Native.cancel warm;
                 let before=Gc.quick_stat()and allocated_before=Gc.allocated_bytes()in
                 for _frame=1 to 600 do
                   let submission=open_submission()in
-                  Renderer.Private.cancel submission
+                  Renderer.Native.cancel submission
                 done;
                 let after=Gc.quick_stat()and allocated_after=Gc.allocated_bytes()in
                 let allocated_per_frame=(allocated_after-.allocated_before)/.600.
@@ -262,16 +261,16 @@ let run () =
                   "45-image cached lowering allocation ceiling";
                 require(promoted_per_frame<16384.)
                   "45-image cached lowering promotion ceiling";
-                require(Renderer.Private.snapshot_count_for_test execution<=256)
+                require(Renderer.Native.snapshot_count_for_test execution<=256)
                   "image snapshot cache exceeded entry capacity";
                 let last=labels.(44)in
                 let blue=Bytes.of_string"\000\000\xff\xff"in
                 ignore(get_resource(Runtime_resources.Image.replace last
                   ~width:1~height:1~rgba:blue));
-                let mutation=get(Renderer.Private.begin_submission execution)in
-                let batch=get(Renderer.Private.lower_scene2 mutation
+                let mutation=get(Renderer.Native.begin_submission execution)in
+                let batch=get(Renderer.Native.lower_scene2 mutation
                   ~density:1~resource:resolve_label labels_ir)in
-                ignore(get(Renderer.Private.step mutation[batch]));
+                ignore(get(Renderer.Native.step mutation[batch]));
                 pixel(get(Renderer.capture execution))0 blue
                   "image snapshot cache did not invalidate mutated pixels");
             let large_a=Bytes.make(640*480*4)'\000'
@@ -285,17 +284,17 @@ let run () =
               (fun()->
                 let resolve_large=function
                   |1->Some(Renderer.Image large)|_->None in
-                let cache_before=Renderer.Private.snapshot_count_for_test execution in
+                let cache_before=Renderer.Native.snapshot_count_for_test execution in
                 Gc.full_major();
                 let rss_before=rss_kib()and allocated_before=Gc.allocated_bytes()in
                 let rss_middle=ref rss_before in
                 for frame=1 to 600 do
                   ignore(get_resource(Runtime_resources.Image.replace large
                     ~width:640~height:480~rgba:(if frame land 1=0 then large_a else large_b)));
-                  let submission=get(Renderer.Private.begin_submission execution)in
-                  ignore(get(Renderer.Private.lower_scene2 submission
+                  let submission=get(Renderer.Native.begin_submission execution)in
+                  ignore(get(Renderer.Native.lower_scene2 submission
                     ~density:1~resource:resolve_large image_ir));
-                  Renderer.Private.cancel submission;
+                  Renderer.Native.cancel submission;
                   (* Two immediate mutations require both resource buffers to be
                      unleased, rather than merely finding one spare buffer. *)
                   ignore(get_resource(Runtime_resources.Image.replace large
@@ -314,14 +313,14 @@ let run () =
                   "large transient image: %.0f bytes/frame, RSS %d/%d/%d KiB\n%!"
                   ((allocated_after-.allocated_before)/.600.)rss_before
                   !rss_middle rss_after;
-                require(Renderer.Private.snapshot_count_for_test execution=cache_before)
+                require(Renderer.Native.snapshot_count_for_test execution=cache_before)
                   "large transient image entered the immutable snapshot cache";
                 ignore(get_resource(Runtime_resources.Image.replace large
                   ~width:640~height:480~rgba:large_b));
-                let submission=get(Renderer.Private.begin_submission execution)in
-                let batch=get(Renderer.Private.lower_scene2 submission
+                let submission=get(Renderer.Native.begin_submission execution)in
+                let batch=get(Renderer.Native.lower_scene2 submission
                   ~density:1~resource:resolve_large image_ir)in
-                ignore(get(Renderer.Private.step submission[batch]));
+                ignore(get(Renderer.Native.step submission[batch]));
                 pixel(get(Renderer.capture execution))0
                   (Bytes.of_string"\000\000\xff\xff")
                   "large transient image changed submitted snapshot pixels";
@@ -342,22 +341,22 @@ let run () =
                 ignore(get(Renderer.lower_scene2 execution~density:1
                   ~resource:(function 1->Some(Renderer.Image cached)|_->None)
                   image_ir)))eviction_images;
-                require(Renderer.Private.snapshot_count_for_test execution=256)
+                require(Renderer.Native.snapshot_count_for_test execution=256)
                   "image snapshot cache did not evict to its exact entry capacity");
-            let destroy_first=get(Renderer.Private.begin_submission execution)in
-            ignore(get(Renderer.Private.lower_scene2 destroy_first
+            let destroy_first=get(Renderer.Native.begin_submission execution)in
+            ignore(get(Renderer.Native.lower_scene2 destroy_first
               ~density:1~resource:resolve image_ir));
             ignore(get_resource(replace image));
-            let destroy_second=get(Renderer.Private.begin_submission execution)in
-            ignore(get(Renderer.Private.lower_scene2 destroy_second
+            let destroy_second=get(Renderer.Native.begin_submission execution)in
+            ignore(get(Renderer.Native.lower_scene2 destroy_second
               ~density:1~resource:resolve image_ir));
             ignore(get_resource(replace image));
             ignore(get(Renderer.destroy execution));
             ignore(get_resource(replace image));
             expect_error"destroyed coordinator began a submission"
-              (Renderer.Private.begin_submission execution);
-            Renderer.Private.cancel destroy_first;
-            Renderer.Private.cancel destroy_second);
+              (Renderer.Native.begin_submission execution);
+            Renderer.Native.cancel destroy_first;
+            Renderer.Native.cancel destroy_second);
         ignore(get(Renderer.destroy execution));
         require(live_handles()=baseline)"offscreen resize Metal live-handle delta";
         print_endline"Rays offscreen: clear/readback/resize, no present, zero delta"

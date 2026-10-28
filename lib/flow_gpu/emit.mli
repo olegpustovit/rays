@@ -9,12 +9,15 @@ type msl = private {source : string; entry : string; interface : Ogpu.Shader.bin
    gathers): from byte 4 it is the indexed indirect draw of n six-index quads. *)
 val names : string list
 val compaction : msl
-(* The kernel of a resident fold's [array/compact]: buffers mask, kept (float indices), total (uint),
-   uniform (n, use) and count_in: the mask's count is n, or its minimum with [count_in[0]] when use is set. *)
-val kernel : ?fast:bool -> ?instanced:bool -> ?motion:bool -> ?curves:[ `Loop | `Native ] -> Flow_ir.Packed.t ->
-  (msl, Diagnostic.t) result
-(* [instanced], [motion] and [curves] are static scene facts of a [scene/trace] kernel ({!Run.build_scene}
-   reports them): [`Native] strands are Metal curve primitives, [`Loop] an in-loop capsule test. *)
+(* The kernel of a resident fold's [array/compact] (shaders/compact.rays, one threadgroup of 1,024):
+   buffers mask, kept (float indices), total (uint), (n, use) and count_in: the mask's count is n, or its
+   minimum with [count_in[0]] when use is set. *)
+val kernel : ?fast:bool -> ?instanced:bool -> ?motion:bool -> ?curves:[ `Loop | `Native ] -> ?spheres:bool ->
+  Flow_ir.Packed.t -> (msl, Diagnostic.t) result
+(* [instanced], [motion], [curves] and [spheres] are static scene facts of a [scene/trace] kernel
+   ({!Run.build_scene} reports the first three): [`Native] strands are Metal curve primitives, [`Loop] an
+   in-loop capsule test; [spheres] false (default true) folds the sphere tests away. Each scene/trace is
+   trace.rays' helper (Trace), inlined; only its ray queries and table reads are printed here. *)
 (* [fast] (the workspace's fast precision) also emits signed-63 integer arithmetic and gathers from
    bound tables. The shared status word uses bits 1/2/4 for nonfinite output, integer division by
    zero, and an out-of-range integer shift, respectively. *)

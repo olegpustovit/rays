@@ -93,7 +93,7 @@ val with_world : World.baked -> t -> t
     GGX BRDF and ACES tone map. [specification/environment.md] documents the
     material mapping and the light cap. *)
 
-module Private : sig
+module Walk : sig
   val with_texture : texture -> t -> t
 
   type drawing = {

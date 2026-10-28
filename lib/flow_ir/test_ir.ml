@@ -61,9 +61,8 @@ let () =
   let state=check "(workspace pixels (graph img :context image
     (let* [bias (state [n 0.0] (+ n 0.1)) picture (image/map (fn [uv] [uv.x uv.y bias 1]))] picture)))" in
   let qualified,_,_=qualify state in
-  assert (not(W.Paths.mem path qualified.approx));
-  assert(List.exists(fun(d:Diagnostic.t)->d.code="E_PACKED_STATE")
-    (List.assoc path qualified.approx_reasons));
+  (* a state value is a uniform the host steps with its own state each frame *)
+  assert (W.Paths.mem path qualified.approx);
   let counterfeit=Option.get(Flow.Op.find "image/map" Flow.Context.image) in
   let counterfeit={counterfeit with category="Counterfeit image map"} in
   let qualified,_,_=qualify {shared with ops=counterfeit::shared.ops} in
@@ -444,7 +443,7 @@ let () =
     assert (W.Paths.mem path qualified.approx = accepted))
     [1e39,7.,false;7.,1e39,false;2.,7.,true];
   ignore (expect (text "(let* [s (state [a 0.0] (+ a (frame/dt)))
-    mapped (map (fn [x] (+ x s)) (array/range 4))] 0.0)") false "E_PACKED_STATE");
+    mapped (map (fn [x] (+ x s)) (array/range 4))] 0.0)") true "");
   let independent = check (text "(state [s 0.0] (let* [mapped
     (map (fn [x] (+ x t)) (array/range 4))] (+ s (array/sum (exact mapped)))))") in
   let qualified = qualify independent in

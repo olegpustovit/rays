@@ -114,7 +114,7 @@ let set_probe value zone index =
   { value with core = { value.core with Editor_model.probes = Layout_by_path.Path_map.add zone index value.core.Editor_model.probes } }
 let node_box value path =
   Option.map (fun (x, y, w, h) -> int_of_float x, int_of_float y, int_of_float w, int_of_float h)
-    (Pxui_graph.Scope.Private.box_of (Editor_model.pane_view value.core) path)
+    (Pxui_graph.Scope.Inspect.box_of (Editor_model.pane_view value.core) path)
 let edit value op = Result.map (fun core -> { value with core }) (Editor_host.syntax_edit value.core op)
 let edit_layout value op = Result.map (fun core -> { value with core }) (Editor_host.layout_edit value.core op)
 
@@ -243,7 +243,7 @@ let compose value (update : _ Editor_model.update) ~baked ~baked_views ~scene =
             Document.Int_map.add piece.id (graph, prepared, rendered,texture) drawn
         | Some _ | None ->
             let scene=value.draw piece.graph piece.prepared in
-            let scene=Option.fold ~none:scene ~some:(fun texture->Scene.D3.Private.with_texture(Scene.D3.textured texture)scene)texture in
+            let scene=Option.fold ~none:scene ~some:(fun texture->Scene.D3.Walk.with_texture(Scene.D3.textured texture)scene)texture in
             Document.Int_map.add piece.id (piece.graph, piece.prepared, scene,texture) drawn)
         Document.Int_map.empty placed in
     let waiting = placed = [] && Editor_list.geometry_objects update.core <> []

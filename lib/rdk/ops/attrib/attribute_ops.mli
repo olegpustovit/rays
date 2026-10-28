@@ -3,13 +3,7 @@
 
 
 val delete :
-  ?cancel:Cancel.t ->
-  ?reference:Geometry.t ->
-  ?delete_non_selected:bool ->
-  ?point_pattern:string ->
-  ?vertex_pattern:string ->
-  ?primitive_pattern:string ->
-  ?detail_pattern:string ->
+  Attribute_lifecycle.delete_params ->
   Geometry.t ->
   (Geometry.t, Error.t) result
 (** Delete ordinary attribute metadata selected independently for each owner.
@@ -104,12 +98,7 @@ type interpolate_computed = {
 
 
 val blur_points :
-  ?cancel:Cancel.t ->
-  ?grain:int ->
-  ?selection:Group.t ->
-  ?iterations:int ->
-  ?mode:Attribute_blur.mode ->
-  pattern:string ->
+  Attribute_blur.params ->
   Geometry.t ->
   (Geometry.t, Error.t) result
 (** Blur canonical [P] and matching point-owned floating scalar/tuple
@@ -190,22 +179,7 @@ val interpolate : params -> unit -> (Geometry.t, Error.t) result
     destination payload planes are disjoint and byte-identical across domain
     counts. Output positions and ordinary metadata commit atomically. *)
 
-val transfer_points :
-  ?cancel:Cancel.t ->
-  ?grain:int ->
-  ?names:string list ->
-  ?pattern:string ->
-  ?mode:Attribute_transfer.mode ->
-  ?max_distance:float ->
-  ?blend_width:float ->
-  ?falloff:Attribute_transfer.falloff ->
-  ?unmatched:Attribute_transfer.unmatched ->
-  ?source_points:Group.t ->
-  ?target_points:Group.t ->
-  source:Geometry.t ->
-  target:Geometry.t ->
-  unit ->
-  (Geometry.t, Error.t) result
+val transfer_points : Attribute_transfer.spatial_params -> (Geometry.t, Error.t) result
 (** Transfer point attributes from a spatial source onto target points.
     [Nearest] copies from the closest source point. [Inverse_distance] and
     [Kernel] blend numeric scalar/tuple values from up to [neighbors] nearest
@@ -239,22 +213,7 @@ val transfer_points :
     numeric payload component. Degenerate
     search distributions can visit all source points per target. *)
 
-val transfer_primitives :
-  ?cancel:Cancel.t ->
-  ?grain:int ->
-  ?names:string list ->
-  ?pattern:string ->
-  ?mode:Attribute_transfer.mode ->
-  ?max_distance:float ->
-  ?blend_width:float ->
-  ?falloff:Attribute_transfer.falloff ->
-  ?unmatched:Attribute_transfer.unmatched ->
-  ?source_primitives:Group.t ->
-  ?target_primitives:Group.t ->
-  source:Geometry.t ->
-  target:Geometry.t ->
-  unit ->
-  (Geometry.t, Error.t) result
+val transfer_primitives : Attribute_transfer.spatial_params -> (Geometry.t, Error.t) result
 (** Transfer primitive attributes by arithmetic primitive-barycenter
     proximity. Numeric and discrete storage, groups, miss policy, stable ties,
     determinism, and inverse-distance behavior match {!transfer_points}.
@@ -262,13 +221,7 @@ val transfer_primitives :
     complexity and storage are otherwise the same with primitive counts in
     place of point counts. *)
 
-val transfer_detail :
-  ?names:string list ->
-  ?pattern:string ->
-  source:Geometry.t ->
-  target:Geometry.t ->
-  unit ->
-  (Geometry.t, Error.t) result
+val transfer_detail : Attribute_transfer.detail_params -> (Geometry.t, Error.t) result
 (** Structurally share selected source detail attributes onto the target.
     [names] selects exact names; [pattern] selects {!Attribute_pattern} globs
     and is mutually exclusive with [names]. Both absent defaults to every
@@ -278,24 +231,7 @@ val transfer_detail :
     committed in one immutable table rebuild. *)
 
 
-val transfer_surface :
-  ?cancel:Cancel.t ->
-  ?grain:int ->
-  ?max_distance:float ->
-  ?blend_width:float ->
-  ?falloff:Attribute_transfer.falloff ->
-  ?unmatched:Attribute_transfer.unmatched ->
-  ?target_owner:Attribute.owner ->
-  ?distance_attribute:string ->
-  ?source_primitives:Group.t ->
-  ?source_vertices:Group.t ->
-  ?source_vertex_selection:Surface_index.vertex_selection ->
-  ?target_elements:Group.t ->
-  attributes:Attribute_transfer.surface_attribute list ->
-  source:Geometry.t ->
-  target:Geometry.t ->
-  unit ->
-  (Geometry.t, Error.t) result
+val transfer_surface : Attribute_transfer.surface_params -> (Geometry.t, Error.t) result
 (** Transfer selected source point, vertex, and primitive attributes to target
     point, vertex, or primitive elements at the closest position on a polygon
     surface. Target vertices query their referenced point positions; target
@@ -325,45 +261,14 @@ val transfer_surface :
     Expected query time is O(t log s), with O(t + output) query-plan storage.
     Payload planes fill stable disjoint ranges in parallel. *)
 
-val transfer_vertices :
-  ?cancel:Cancel.t ->
-  ?grain:int ->
-  ?names:string list ->
-  ?pattern:string ->
-  ?max_distance:float ->
-  ?blend_width:float ->
-  ?falloff:Attribute_transfer.falloff ->
-  ?unmatched:Attribute_transfer.unmatched ->
-  ?source_primitives:Group.t ->
-  ?source_vertices:Group.t ->
-  ?source_vertex_selection:Surface_index.vertex_selection ->
-  ?target_vertices:Group.t ->
-  source:Geometry.t ->
-  target:Geometry.t ->
-  unit ->
-  (Geometry.t, Error.t) result
+val transfer_vertices : Attribute_transfer.vertices_params -> (Geometry.t, Error.t) result
 (** Transfer source vertex attributes onto target vertices by closest-polygon
     lookup and barycentric interpolation. Source primitive and partial vertex
     surface restrictions compose as described by {!transfer_surface};
     destination restriction is vertex owned. Complexity and deterministic tie
     behavior follow {!transfer_surface}. *)
 
-val transfer_all :
-  ?cancel:Cancel.t ->
-  ?grain:int ->
-  ?point_pattern:string ->
-  ?vertex_pattern:string ->
-  ?primitive_pattern:string ->
-  ?detail_pattern:string ->
-  ?mode:Attribute_transfer.mode ->
-  ?max_distance:float ->
-  ?blend_width:float ->
-  ?falloff:Attribute_transfer.falloff ->
-  ?unmatched:Attribute_transfer.unmatched ->
-  source:Geometry.t ->
-  target:Geometry.t ->
-  unit ->
-  (Geometry.t, Error.t) result
+val transfer_all : Attribute_transfer.all_params -> (Geometry.t, Error.t) result
 (** Transfer any requested point, primitive, vertex, and detail attribute tabs
     in one operation. An omitted owner pattern skips that owner. Each spatial
     owner constructs exactly one shared query plan for all attributes matching

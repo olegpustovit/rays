@@ -61,7 +61,8 @@ let run () =
   let stable=[{Scene_execution.family=Scene2;blend=Ogpu.Pipeline.Replace;
     texture=None;auxiliary=None;vertex_attributes=None;samples=1;draw=first};
     {Scene_execution.family=Scene3;blend=Ogpu.Pipeline.Replace;
-    texture=None;auxiliary=None;vertex_attributes=None;samples=1;draw=second}]in
+    texture=None;auxiliary=None;vertex_attributes=Some("scratch-attributes",Bytes.make 36 '\000');samples=1;
+    draw={second with mesh={second.mesh with vertices=Bytes.make 72 '\000'}}}]in
   let render ~border draws=
     require(get(Scene_execution.submit renderer draws))
       "mixed Scene2/Scene3 frame was skipped";

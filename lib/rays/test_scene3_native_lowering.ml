@@ -5,16 +5,16 @@ let stats canvas=Result.get_ok(Canvas.Private.native_stats canvas)
 let mesh_of=Test_meshes.facing_z
 
 let run () =
-  Scene.Private.with_cache_context (Scene.Private.create_cache_context ()) (fun () ->
+  Scene.Layer.with_cache_context (Scene.Layer.create_cache_context ()) (fun () ->
   let camera=Camera.orthographic~height:2.~at:(Rays_math.Vec3.create 0. 0. 2.)
     ~target:Rays_math.Vec3.zero()in
   let prepare ~width ~height scene =
-    match Scene.Private.stage_native ~width ~height [Scene.view3d~camera scene] with
+    match Scene.Layer.stage_native ~width ~height [Scene.view3d~camera scene] with
     | Ok { scene3 = [ prepared ]; _ } -> prepared
     | Ok _ -> failwith "native Scene3 staging cardinality"
     | Error message -> failwith message
   in
-  begin match Scene.Private.stage_native ~width:0 ~height:16
+  begin match Scene.Layer.stage_native ~width:0 ~height:16
     [Scene.view3d~camera Scene.D3.empty] with
   |Error _->print_endline"native Scene3 lowering: typed viewport rejection"
   |_->failwith"native Scene3 accepted empty viewport" end;
@@ -25,14 +25,14 @@ let run () =
   let lights n=List.init n(fun _->Light.directional~direction:Rays_math.Vec3.unit_z())in
   ignore(prepare~width:16~height:16
     (Scene.D3.create~lights:(lights 64)[Scene.D3.mesh mesh]));
-  (match Scene.Private.stage_native~width:16~height:16
+  (match Scene.Layer.stage_native~width:16~height:16
     [Scene.view3d~camera(Scene.D3.create~lights:(lights 65)[Scene.D3.mesh mesh])]with
    |Error message when message="native View3d lowering failed: more than 64 lights"->()
    |_->failwith"native Scene3 accepted more than 64 lights");
   let retained_frame=Scene.[clear Rays_math.Color.black;view3d~camera scene]in
-  let retained_first=Result.get_ok(Scene.Private.stage_native~width:16~height:16
+  let retained_first=Result.get_ok(Scene.Layer.stage_native~width:16~height:16
     retained_frame)in
-  let retained_second=Result.get_ok(Scene.Private.stage_native~width:16~height:16
+  let retained_second=Result.get_ok(Scene.Layer.stage_native~width:16~height:16
     retained_frame)in
   if retained_first != retained_second then
     failwith"resource-free retained frame did not reuse native staging";
@@ -40,10 +40,10 @@ let run () =
    |Some(identity,1L)when identity<>""->()
    |_->failwith"resource-free retained frame has no stable submission identity");
   let reusable_view=Scene.[view3d~camera scene]in
-  let before_release=Result.get_ok(Scene.Private.stage_native~width:16~height:16
+  let before_release=Result.get_ok(Scene.Layer.stage_native~width:16~height:16
     reusable_view)in
-  Scene.Private.release reusable_view;
-  let after_release=Result.get_ok(Scene.Private.stage_native~width:16~height:16
+  Scene.Layer.release reusable_view;
+  let after_release=Result.get_ok(Scene.Layer.stage_native~width:16~height:16
     reusable_view)in
   if before_release.scene3<>after_release.scene3 then
     failwith"released reusable View3d changed prepared native data";
@@ -67,20 +67,20 @@ let run () =
     (Scene.D3.create[Scene.D3.instances_array mesh [|Rays_math.Mat4.identity;Rays_math.Mat4.identity|]])in
   check_clip_depth "instance MVP" 1364
     (Option.get instanced.entries.(0).draw.state.transform_uniforms);
-  let staged=Result.get_ok(Scene.Private.stage_native~width:16~height:16
+  let staged=Result.get_ok(Scene.Layer.stage_native~width:16~height:16
     [Scene.view3d~camera scene])in
   if List.length staged.scene3<>1||Array.length(List.hd staged.scene3).entries<>1 then
     failwith"View3d did not reach structured native staging";
   let texture=Texture.init~width:2~height:2(fun~x~y->if x=y then Rays_math.Color.red else Rays_math.Color.rgb 0 0 255)|>Texture.generate_mipmaps in
   let textured=Scene.D3.create[Scene.D3.mesh~texture:(Scene.D3.textured~filter:Texture.Trilinear texture)mesh]in
   let textured_frame=Scene.[clear Rays_math.Color.black;view3d~camera textured]in
-  let textured_first=Result.get_ok(Scene.Private.stage_native~width:16~height:16
-    textured_frame)and textured_second=Result.get_ok(Scene.Private.stage_native
+  let textured_first=Result.get_ok(Scene.Layer.stage_native~width:16~height:16
+    textured_frame)and textured_second=Result.get_ok(Scene.Layer.stage_native
       ~width:16~height:16 textured_frame)in
   if textured_first==textured_second||textured_first.retained<>None||
       textured_second.retained<>None then
     failwith"resource-bearing retained frame reused stale native staging";
-  let textured_stage=Result.get_ok(Scene.Private.stage_native~width:16~height:16[Scene.view3d~camera textured])in
+  let textured_stage=Result.get_ok(Scene.Layer.stage_native~width:16~height:16[Scene.view3d~camera textured])in
   let textured_entry=(List.hd textured_stage.scene3).entries.(0)in
   (match textured_entry.family,textured_entry.texture with Renderer.Scene_execution.Scene3_textured,Some value when Array.length value.levels=2&&Bytes.length value.levels.(0).bytes=16->()|_->failwith"native texture mip/sampler staging");
   let light=Light.directional~direction:(Rays_math.Vec3.create 0. 0.(-1.))()in

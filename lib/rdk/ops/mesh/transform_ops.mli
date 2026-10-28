@@ -19,24 +19,45 @@ type distance_along_radius = Distance_fixed of float | Distance_maximum
 type distance_from_geometry_reference =
   | Distance_reference_points | Distance_reference_primitives
 
-val compose_transform :
-  ?order:transform_order -> ?rotation_order:transform_rotation_order ->
-  ?translate:Rays_math.Vec3.t -> ?rotate:Rays_math.Vec3.t ->
-  ?scale:Rays_math.Vec3.t -> ?shear:Rays_math.Vec3.t ->
-  ?uniform_scale:float -> ?pivot:Rays_math.Vec3.t ->
-  ?pivot_rotation:Rays_math.Vec3.t -> ?invert:bool -> unit ->
-  (Rays_math.Mat4.t, Error.t) result
+type compose_transform_params = {
+  order : transform_order;
+  rotation_order : transform_rotation_order;
+  translate : Rays_math.Vec3.t;
+  rotate : Rays_math.Vec3.t;
+  scale : Rays_math.Vec3.t;
+  shear : Rays_math.Vec3.t;
+  uniform_scale : float;
+  pivot : Rays_math.Vec3.t;
+  pivot_rotation : Rays_math.Vec3.t;
+  invert : bool;
+}
 
-val soft_transform :
-  ?cancel:Cancel.t -> ?grain:int -> ?selection:Element_selection.t ->
-  ?metric:soft_transform_metric -> ?falloff:soft_transform_falloff ->
-  ?radius:float -> ?falloff_attribute:string -> ?recompute_normals:bool ->
-  Rays_math.Mat4.t -> Geometry.t -> (Geometry.t, Error.t) result
+val compose_transform : compose_transform_params -> (Rays_math.Mat4.t, Error.t) result
 
-val distance_from_geometry :
-  ?cancel:Cancel.t -> ?grain:int -> ?affected:Element_selection.t ->
-  ?reference_selection:Element_selection.t ->
-  ?reference_kind:distance_from_geometry_reference ->
-  ?falloff:soft_transform_falloff -> ?radius:distance_along_radius ->
-  ?distance_attribute:string option -> ?mask_attribute:string ->
-  reference:Geometry.t -> Geometry.t -> (Geometry.t, Error.t) result
+type soft_transform_params = {
+  cancel : Cancel.t option;
+  grain : int option;
+  selection : Element_selection.t option;
+  metric : soft_transform_metric;
+  falloff : soft_transform_falloff;
+  radius : float;
+  falloff_attribute : string option;
+  recompute_normals : bool;
+}
+
+val soft_transform : soft_transform_params -> Rays_math.Mat4.t -> Geometry.t -> (Geometry.t, Error.t) result
+
+type distance_from_geometry_params = {
+  cancel : Cancel.t option;
+  grain : int option;
+  affected : Element_selection.t option;
+  reference_selection : Element_selection.t option;
+  reference_kind : distance_from_geometry_reference;
+  falloff : soft_transform_falloff;
+  radius : distance_along_radius;
+  distance_attribute : string option;
+  mask_attribute : string option;
+  reference : Geometry.t;
+}
+
+val distance_from_geometry : distance_from_geometry_params -> Geometry.t -> (Geometry.t, Error.t) result

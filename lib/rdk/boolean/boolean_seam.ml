@@ -449,10 +449,7 @@ let build ?cancel ?(grain = 16_384) ?(parallel_cutoff = 200_000)
     else begin
         let range_count = 1 + ((edge_count - 1) / grain) in
         let range_selected = Array.make range_count 0 in
-        Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(range_count - 1)
-          (fun range ->
-            let first_edge = range * grain
-            and last_edge = min edge_count ((range + 1) * grain) in
+        Support.run_indexed_ranges ~grain edge_count (fun ~range ~first:first_edge ~last:last_edge ->
             range_selected.(range) <- classify_range first_edge last_edge);
         ignore (Array.fold_left ( + ) 0 range_selected)
       end;

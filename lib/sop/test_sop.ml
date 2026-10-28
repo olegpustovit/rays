@@ -20,13 +20,13 @@ end
 let custom ?label ?(version = 1) ?(parameters = "")
     ?(cook_mode = Node.Generic) ?(dependencies = Context.Dependencies.static)
     ~operation inputs cook =
-  Node.Private.make_geometry ?label ~operation ~version ~parameters ~cook_mode
+  Node.Build.make_geometry ?label ~operation ~version ~parameters ~cook_mode
     ~dependencies ~inputs:(Array.of_list inputs) (fun ~node_id:_ context geometries ->
       if Context.cancelled context then
         Error (Diagnostic.error ~code:"cancelled"
           "custom procedural node was cancelled before cooking")
       else match cook ~context (Array.copy geometries) with
-        | Ok geometry -> Ok Node.Private.{ geometry; instances = None }
+        | Ok geometry -> Ok Node.Build.{ geometry; instances = None }
         | Error message ->
           Error (Diagnostic.error ~code:(operation ^ "_failed") ~cause:message ~hints:[]
             (operation ^ " could not produce valid geometry")))
@@ -964,7 +964,7 @@ let test_sweep_contract () =
   let evaluator = session () and current = context ~domains:4 ~grain:7 () in
   let backbone = Lisp_sop.node {|(sop/curve (list [0.0 0.0 0.0] [0.0 0.0 2.0]))|}
   (* Lisp gap: sop/curve is always open, so the closed section is an OCaml-built snapshot *)
-  and cross_section = Lisp_sop.snapshot (Rdk.Line_geometry.polyline ~closed:true
+  and cross_section = Lisp_sop.snapshot (Rdk_test_support.Line_geometry_front.polyline ~closed:true
       [|(-1.,-1.,0.); (1.,-1.,0.); (1.,1.,0.); (-1.,1.,0.)|] |> Result.get_ok) in
   let make () = Lisp_sop.node ~with_:["backbone", (backbone); "cross_section", (cross_section)] {|(sop/sweep
    (sop/ext_backbone)
@@ -1261,7 +1261,7 @@ let test_edge_divide_contract () =
 let test_edge_collapse_contract () =
   let evaluator = session () and current = context ~domains:4 ~grain:7 () in
   (* Lisp gap: sop/curve is always open, so the closed ring is an OCaml-built snapshot *)
-  let source = Lisp_sop.node ~with_:["ring", Lisp_sop.snapshot (Rdk.Line_geometry.polyline ~closed:true
+  let source = Lisp_sop.node ~with_:["ring", Lisp_sop.snapshot (Rdk_test_support.Line_geometry_front.polyline ~closed:true
       [|(0.,0.,0.); (1.,0.,0.); (3.,2.,0.); (0.,2.,0.)|] |> Result.get_ok)] {|(-> (sop/ext_ring)
      (sop/set_int :name "piece" :value 3)
      (sop/group_edges
@@ -1931,7 +1931,7 @@ let test_volatile_slots () =
   let c = context () in
   ignore (cook_ok evaluator c static);
   for step = 0 to 19 do
-    let node = Node.Private.adopt_identity ~source:first (live_node (float step)) in
+    let node = Node.Build.adopt_identity ~source:first (live_node (float step)) in
     ignore (cook_ok evaluator c node)
   done;
   let stats = Session.stats evaluator in
@@ -1941,7 +1941,7 @@ let test_volatile_slots () =
   ignore (cook_ok evaluator c static);
   let stats = Session.stats evaluator in
   check (stats.hits = 21 && stats.misses = 21) "the static entry was evicted by a volatile node";
-  let same = Node.Private.adopt_identity ~source:first (live_node 19.) in
+  let same = Node.Build.adopt_identity ~source:first (live_node 19.) in
   ignore (cook_ok evaluator c same);
   check ((Session.stats evaluator).volatile_hits = 1) "the latest volatile entry did not hit";
   Session.set_volatile evaluator (fun _ -> false);
@@ -1960,7 +1960,7 @@ let test_async_volatile_on_worker () =
         Atomic.set entered true;
         while not (Atomic.get release) do Unix.sleepf 0.001 done;
         Ok inputs.(0)) in
-  let again () = Node.Private.adopt_identity ~source:node
+  let again () = Node.Build.adopt_identity ~source:node
       (custom ~operation:"async_volatile_test" ~version:1 ~parameters:"again"
         [Lisp_sop.snapshot (Rdk.Line_geometry.points [|0., 0., 0.|])] (fun ~context:_ inputs ->
           Atomic.set entered true;

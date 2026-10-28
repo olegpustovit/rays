@@ -34,7 +34,7 @@ let pure ()=
   List.iter(fun count->let b=batch count in
     require(B.count b=count)"shape count";
     require(Bytes.length(B.instances b)=64*count)"shape layout";
-    let commands=Scene.Private.commands [Scene.shapes b]in
+    let commands=Scene.Layer.commands [Scene.shapes b]in
     require(Array.length commands=1)"one packed command";
     require(B.valid_shapes b)"packed validation") [0;1;63;64;65;100000];
   let line ()=

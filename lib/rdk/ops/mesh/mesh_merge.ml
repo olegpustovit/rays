@@ -255,7 +255,14 @@ let merge ?cancel ?grain ?source_attribute ?(source_base = 0) geometries =
       Result.bind (tag_inputs name source_base geometries)
         (merge_plain ?cancel ?grain ?pad_groups)
 
-let run ?cancel ?grain ?source_attribute ?source_base geometries =
+type run_params = {
+  cancel : Cancel.t option;
+  grain : int option;
+  source_attribute : string option;
+  source_base : int option;
+}
+
+let run ({ cancel; grain; source_attribute; source_base } : run_params) geometries =
   Error.guard ~operation:"merge" ~code:"schema_mismatch"
     (fun () -> merge ?cancel ?grain ?source_attribute ?source_base geometries)
 
@@ -264,15 +271,23 @@ let provenance_attribute = "__flow_src"
 (* The editor's provenance tag (numbered from [tag_base]) beside an authored [source_attribute]
    (numbered from [source_base]). An input that already has the authored attribute keeps it; mixed
    presence of the tag is refused as a schema mismatch. *)
-let run_tagged ?cancel ?grain ?(tag_base = -1) ?source_attribute ?(source_base = 0) geometries =
+type run_tagged_params = {
+  cancel : Cancel.t option;
+  grain : int option;
+  tag_base : int;
+  source_attribute : string option;
+  source_base : int;
+}
+
+let run_tagged ({ cancel; grain; tag_base; source_attribute; source_base } : run_tagged_params) geometries =
   let authored = match source_attribute with
     | Some name when String.trim name <> "" -> Some (String.trim name) | _ -> None in
   match tag_base, authored with
-  | tag_base, _ when tag_base < 0 -> run ?cancel ?grain ?source_attribute ~source_base geometries
-  | _, None -> run ?cancel ?grain ~source_attribute:provenance_attribute ~source_base:tag_base geometries
+  | tag_base, _ when tag_base < 0 -> run { cancel; grain; source_attribute; source_base = Some source_base } geometries
+  | _, None -> run { cancel; grain; source_attribute = Some provenance_attribute; source_base = Some tag_base } geometries
   | _, Some attribute ->
       let tag = provenance_attribute in
-      Result.bind (run ?cancel ?grain ~source_attribute:tag ~source_base:tag_base geometries)
+      Result.bind (run { cancel; grain; source_attribute = Some tag; source_base = Some tag_base } geometries)
         (fun tagged -> Error.guard ~operation:"merge" ~code:"schema_mismatch" (fun () ->
           Cancel.check_opt cancel;
           let owner = Attribute.Primitive in

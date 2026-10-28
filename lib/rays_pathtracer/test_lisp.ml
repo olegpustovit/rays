@@ -34,7 +34,7 @@ let handwritten_lines = 908
 
 (* the CPU walker's scene: brute-force Moller-Trumbore over the plane's triangles, as scene/trace reports a hit *)
 let triangles =
-  let view = Rays.Mesh.Private.packed_view mesh in
+  let view = Rays.Mesh.View.packed_view mesh in
   Array.map (fun k -> (view.vertices.x.(k), view.vertices.y.(k), view.vertices.z.(k))) view.indices
 let () =
   let sub (a, b, c) (x, y, z) = (a -. x, b -. y, c -. z) and dot (a, b, c) (x, y, z) = a *. x +. b *. y +. c *. z in

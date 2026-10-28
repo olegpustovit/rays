@@ -71,7 +71,7 @@ let measure name input =
       Gc.full_major ();
       let before = Gc.quick_stat () and allocated = Gc.allocated_bytes ()
       and started = Unix.gettimeofday () in
-      let output = Convex_hull.run ~grain input |> get in
+      let output = Convex_hull.run { cancel = None; grain = Some grain; selection = None; preserve_point_payload = true; source_point_attribute = None; hull_group = None } input |> get in
       times.(repeat) <- Unix.gettimeofday () -. started;
       allocations.(repeat) <- Gc.allocated_bytes () -. allocated;
       let after = Gc.quick_stat () in

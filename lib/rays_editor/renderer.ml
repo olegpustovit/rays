@@ -71,8 +71,8 @@ let traced_material (material : Material.t) =
 
 let wire_scene scene =
   let nodes = ref [] in
-  Scene.D3.Private.iter_batches (fun (drawing : Scene.D3.Private.drawing) transforms ->
-    let material = Material.unlit (wire_color (Scene.D3.Private.ambient scene)) in
+  Scene.D3.Walk.iter_batches (fun (drawing : Scene.D3.Walk.drawing) transforms ->
+    let material = Material.unlit (wire_color (Scene.D3.Walk.ambient scene)) in
     let drawing_node = match transforms with
       | None -> Scene.D3.mesh ~material ~mode:Scene.D3.Wireframe ~cull:Scene.D3.Cull_none drawing.mesh
       | Some transforms -> Scene.D3.instances_array ~material ~mode:Scene.D3.Wireframe
@@ -85,7 +85,7 @@ let wire_scene scene =
 let traced_scene meshes scene =
   let ( let* ) = Result.bind in
   let cache = Mesh_cache.copy ~release:(fun _ _ -> ()) meshes and result = ref (Ok []) in
-  Scene.D3.Private.iter_batches (fun (drawing : Scene.D3.Private.drawing) transforms ->
+  Scene.D3.Walk.iter_batches (fun (drawing : Scene.D3.Walk.drawing) transforms ->
     result := let* placed = !result in
       let* () = if drawing.texture = None then Ok ()
         else Error "Path tracing textured meshes is not supported." in
@@ -130,7 +130,7 @@ type plan = { view : view; names : string list; limit : int; previous : slot opt
 
 let no_batches scene =
   let found = ref false in
-  Scene.D3.Private.iter_batches (fun _ _ -> found := true) scene; not !found
+  Scene.D3.Walk.iter_batches (fun _ _ -> found := true) scene; not !found
 
 (* Of the viewports that want a turn, the one after [last] in [order], cyclically: each takes its
    turn before any takes a second one. *)
@@ -220,9 +220,9 @@ let update state ~mode ~custom ~focus views =
               let submitted = match mesh with None -> Ok () | Some mesh -> P.queue_mesh tracer mesh in
               let* () = submitted in
               let* () = P.resize tracer ~width ~height in
-              let* () = if prior.tracer = None || Scene.D3.Private.lights prior.scene <> Scene.D3.Private.lights scene
-                then P.set_lights tracer (List.map P.light_of (Scene.D3.Private.lights scene)) else Ok () in
-              let* () = P.set_world tracer (Scene.D3.Private.world scene) in
+              let* () = if prior.tracer = None || Scene.D3.Walk.lights prior.scene <> Scene.D3.Walk.lights scene
+                then P.set_lights tracer (List.map P.light_of (Scene.D3.Walk.lights scene)) else Ok () in
+              let* () = P.set_world tracer (Scene.D3.Walk.world scene) in
               let* () = P.render tracer camera in
               Ok {blank with scene; camera = Some camera; tracer = Some tracer} in
             match render () with

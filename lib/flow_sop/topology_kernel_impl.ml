@@ -328,5 +328,4 @@ let concat ?cancel ~grain ~sources args =
     else Result.map_error (fun e -> Diagnostic.error ~code:(Rdk.Error.code e)
         ~cause:(Rdk.Error.to_string e) ~hints:(Rdk.Error.hints e)
         (Rdk.Error.operation e ^ " could not produce valid geometry"))
-      (Rdk.Mesh_merge.run_tagged ?cancel ~grain ~tag_base
-        ?source_attribute:(if attribute = "" then None else Some attribute) ~source_base sources))))
+      (Rdk.Mesh_merge.run_tagged { cancel; grain = Some grain; tag_base; source_attribute = (if attribute = "" then None else Some attribute); source_base } sources))))

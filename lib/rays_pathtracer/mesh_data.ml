@@ -70,7 +70,7 @@ let flat_mesh ~extras ~materials source_meshes =
       List.fold_left
         (fun acc (source_mesh, material_index) ->
           let* () = acc in
-          let view = Rays.Mesh.Private.packed_view source_mesh in
+          let view = Rays.Mesh.View.packed_view source_mesh in
           if view.mode <> Rays.Mesh.Triangles then
             Error "path tracer meshes must be triangle-ready" else
           let* normals_view = match view.normals with
@@ -79,7 +79,7 @@ let flat_mesh ~extras ~materials source_meshes =
           if Array.length view.indices mod 3 <> 0 then
             Error "path tracer mesh indices must contain complete triangles" else
           let positions_view = view.vertices in
-          let component (plane : Rays.Mesh.Private.vec3_view) index =
+          let component (plane : Rays.Mesh.View.vec3_view) index =
             plane.x.(index), plane.y.(index), plane.z.(index) in
           let id_bytes = Bytes.create 4 in
           put_u32 id_bytes 0 material_index;

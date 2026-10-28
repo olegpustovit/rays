@@ -865,11 +865,10 @@ module Scope = struct
     | None -> ()
     | Some scope -> scope.depth <- scope.depth - 1;
         if scope.depth = 0 then (Domain.DLS.get current) := None
-  (* The same residual can be met as distinct records, so identity is its id with the same term, bindings
-     (physically) and site; an equal id from another workspace differs in at least one of them. *)
+  (* The same residual can be met as distinct records, under distinct ids (a walker's kernel request
+     numbers each one afresh), so identity is the same term, bindings (physically) and site. *)
   let same_residual a b =
-    a == b || E.Residual.residual_id a = E.Residual.residual_id b &&
-      (let x = E.Residual.residual_view a and y = E.Residual.residual_view b in
+    a == b || (let x = E.Residual.residual_view a and y = E.Residual.residual_view b in
        x.term == y.term && x.previous = y.previous && x.instance = y.instance && x.iter = y.iter
        && x.prefix = y.prefix && x.owner = y.owner && x.host = y.host && x.geometry = y.geometry
        && List.equal (fun (n, v) (m, w) -> String.equal n m && v == w) x.bindings y.bindings)

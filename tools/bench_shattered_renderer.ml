@@ -259,7 +259,7 @@ let cardinality environment =
       let mesh = mesh_for_node
           (Rays_editor.Editor.displayed_node environment) pieces in
       let piece_count = Rdk_rays.Packed_pieces.piece_count pieces
-      and triangles = Mesh.Private.triangle_count mesh
+      and triangles = Mesh.View.triangle_count mesh
       and render_vertices = Mesh.vertex_count mesh in
       if piece_count <> 18_278 || triangles <> 278_368
           || render_vertices <> 835_104 then

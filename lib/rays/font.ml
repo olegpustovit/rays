@@ -44,7 +44,7 @@ let resource_hinting=function
 let set_hinting font value=match Runtime_resources.Font.set_hinting font.resource(resource_hinting value)with Ok()->clear_cache font;();font.generation<-font.generation+1;Ok()|Error e->Error(message"Font.set_hinting"e)
 let destroy font=
   clear_cache font;ignore(Runtime_resources.Font.destroy font.resource)
-module Private=struct
+module Raster=struct
  type automatic_entry={image:Image.t;mutable references:int;mutable cached:bool}
  module Font_cache=Lru.Make(Int)
  type cache_context={automatic_cache:automatic_entry Text_cache.t;

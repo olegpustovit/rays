@@ -34,9 +34,11 @@ type t = {
 let rec guarded = function
   | Packed.Guarded (_, instruction) -> guarded instruction
   | instruction -> instruction
+(* the scene's sphere and strand counts, read like frame facts from the scene's uniform words *)
+let scene_fact name = name = "gpu/scene-spheres" || name = "gpu/scene-strands"
 
-(* Fast kernels print an Int register as a 32-bit unsigned word when that keeps its observable
-   value: it always lies in [0, 2^32) ([fits]), or every use reads only its low 32 bits (wrapping
+(* Kernels (an exact one's Int registers are its spliced helpers') print an Int register as a 32-bit
+   unsigned word when that keeps its observable value: it always lies in [0, 2^32) ([fits]), or every use reads only its low 32 bits (wrapping
    +, -, *, and, or, xor, the shifted operand of a left shift, a select, a carried next value).
    The low 32 bits of signed-63 wrapping arithmetic are the uint32 results, so CPU bits are kept.
    Both are greatest fixpoints over the loop-carried registers. *)
@@ -98,6 +100,11 @@ let narrow_registers (view : Packed.Host.view) used =
          | Some d, `Max i, `Max trips when d = 0 || trips <= limit / d -> at_most (i + d * trips)
          | _ -> join bound.(initial) bound.(next))
     | Loop_begin {first; last; _} -> both (fun _ last -> `Max last) first last
+    (* a scene count, a primitive and an instance index are 32-bit words *)
+    | Int_frame name when scene_fact name -> `Max limit
+    | Stage ((Trace_triangles (1 | 5) | Trace_curves 1 | Group_scan _), _) -> `Max limit
+    | Stage (Store, _) -> `Max 1
+    | Stage (Noise_table _, _) -> `Max 255
     | Loop_result (loop, c, _) -> bound.(loop + 1 + c)
     | _ -> `Top in
   let changed = ref true and passes = ref 0 in
@@ -125,8 +132,12 @@ let narrow_registers (view : Packed.Host.view) used =
     | Int_select (condition, yes, no) -> add `Exact condition; add (`Low slot) yes; add (`Low slot) no
     (* a device gather clamps int(index), the low 32 bits *)
     | Gather (table, index, _, _) | Int_gather (table, index) -> add `Exact table; add `Bits index
+    (* a store's index and Int value, a group scan's operand and a noise table index are uint words on every target *)
+    | Stage ((Store | Group_scan _ | Noise_table _), r) -> Array.iter (add `Bits) r
     | instruction -> List.iter (add `Exact) (Core.Region.operands instruction)) code;
-  Array.iter (Array.iter (add `Exact)) view.outputs;
+  (* a compute stage's result is discarded: its stores are its effect *)
+  if not (Array.exists (fun i -> match i with Packed.Stage (Store, _) -> true | _ -> false) code) then
+    Array.iter (Array.iter (add `Exact)) view.outputs;
   Array.iteri (fun slot instruction -> match instruction with
     | Packed.Guarded _ when used.(slot) ->
         let rec conditions = function Packed.Guarded (gs, body) -> List.map fst gs @ conditions body | _ -> [] in
@@ -134,7 +145,8 @@ let narrow_registers (view : Packed.Host.view) used =
     | _ -> ()) view.code;
   let narrow = Array.init size (fun slot -> integer slot && match code.(slot) with
     | Packed.Int_const _ | Int_binary ((Iadd | Isub | Imul | Iand | Ior | Ixor | Ishl), _, _)
-    | Int_select _ | Loop_carry _ -> true
+    | Int_select _ | Loop_carry _ | Stage _ -> true
+    | Int_frame name -> scene_fact name
     | Int_binary (Ishr, a, _) -> fits.(a)
     | Int_binary ((Idiv | Imod), a, b) -> fits.(a) && fits.(b)
     | Loop_begin _ -> fits.(slot)
@@ -250,6 +262,7 @@ let plan ?(fast = false) ?(image = false) ?(instanced = false) ?(motion = false)
     Array.mapi
       (fun index instruction ->
         match guarded instruction with
+        | Packed.Int_frame name when scene_fact name -> 0
         | Packed.Frame name | Packed.Int_frame name -> uniform (Printf.sprintf "frame:%d:%s" index name) 1
         | _ -> 0)
       view.code
@@ -265,7 +278,7 @@ let plan ?(fast = false) ?(image = false) ?(instanced = false) ?(motion = false)
   let table_seeds =
     Array.to_list (Array.mapi (fun index instruction -> index, guarded instruction) view.code)
     |> List.filter_map (function
-         | index, Packed.Noise3 (_, _, _, seed, _, _, _) when used.(index) -> Some seed
+         | index, (Packed.Noise3 (_, _, _, seed, _, _, _) | Stage (Noise_table seed, _)) when used.(index) -> Some seed
          | _ -> None)
     |> List.sort_uniq Int.compare |> Array.of_list
   in
@@ -286,7 +299,10 @@ let plan ?(fast = false) ?(image = false) ?(instanced = false) ?(motion = false)
     List.mapi (fun k (_, (u, _)) -> uniform (Printf.sprintf "gather:%d:%d" k u) 1) gathers
     |> Array.of_list
   in
-  let traced = Array.exists (fun i -> match guarded i with Packed.Trace _ -> true | _ -> false) view.code in
+  let traced = Array.exists (fun i -> match guarded i with
+    | Packed.Trace _ | Stage ((Trace_triangles _ | Trace_any | Trace_curves _ | Trace_curves_any | Scene_vertex _
+      | Scene_instance | Scene_sphere _ | Scene_strand _), _) -> true
+    | Int_frame name -> scene_fact name | _ -> false) view.code in
   let scene_spheres = if traced then Some (uniform "scene:spheres" 1) else None in
   let scene_strand_count = if traced && curves then Some (uniform "scene:strands" 1) else None in
   let counts = if fast then (let first = !offset in offset := first + 12; Some first) else None in
@@ -306,7 +322,7 @@ let plan ?(fast = false) ?(image = false) ?(instanced = false) ?(motion = false)
       | _ -> ())
     view.code;
   { view; used; finite_checks; output_checks = fast;
-    narrow = (if fast then narrow_registers view used else Array.make (Array.length view.code) false); uniforms; frames; image_width; image_height; table_seeds; gathers; gather_lengths;
+    narrow = narrow_registers view used; uniforms; frames; image_width; image_height; table_seeds; gathers; gather_lengths;
     input_count = count; output_count = outputs;
     input_used; uniform_layout = List.rev !uniform_layout; uniform_bytes = !offset;
     uniform_binding; status_binding; table_binding;

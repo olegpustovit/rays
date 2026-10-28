@@ -154,11 +154,7 @@ let raw ?cancel ?(grain = 16_384) ?edges
           let had_point_normals = Geometry.find_attribute
               ~owner:Attribute.Point "N" geometry <> None in
           let source_edge_groups = Geometry.edge_groups geometry in
-          let result = Fuse_reduce.apply ?cancel ~grain
-              ~position ~attributes:Keep_first
-              ~attribute_rules:[] ~group_rules:[] ~compact:true ~rewire:true
-              ~remap_edge_groups:false
-              clusters geometry
+          let result = Fuse_reduce.apply { cancel; grain; position; weight_attribute = None; attributes = Keep_first; attribute_rules = []; group_rules = []; compact = true; rewire = true; remap_edge_groups = false } clusters geometry
             |> fun reduced -> Result.bind reduced (fun output ->
                  Fuse_cleanup.apply_with_mapping ?cancel ~grain
                    ~remove_degenerate_primitives
@@ -191,12 +187,21 @@ let raw ?cancel ?(grain = 16_384) ?edges
                  |> Geometry.without_attribute ~owner:Attribute.Vertex "N") in
           if not recompute_point_normals || not had_point_normals then result
           else Result.bind result (fun output ->
-            Deform.normals ?cancel ~grain output)
+            Deform.normals { cancel; grain; primitives = None } output)
         end)
 
 
-let run ?cancel ?grain ?edges ?connectivity_attribute ?position
-    ?remove_degenerate_primitives ?recompute_point_normals geometry =
+type params = {
+  cancel : Cancel.t option;
+  grain : int option;
+  edges : Edge_group.t option;
+  connectivity_attribute : string option;
+  position : Fuse_reduce.position option;
+  remove_degenerate_primitives : bool option;
+  recompute_point_normals : bool option;
+}
+
+let run ({ cancel; grain; edges; connectivity_attribute; position; remove_degenerate_primitives; recompute_point_normals } : params) geometry =
   Error.guard ~operation:"edge_collapse" ~code:"invalid_topology" (fun () ->
     raw ?cancel ?grain ?edges ?connectivity_attribute ?position
       ?remove_degenerate_primitives ?recompute_point_normals geometry)

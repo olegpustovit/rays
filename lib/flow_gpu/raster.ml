@@ -2,91 +2,8 @@
    fragments. A stage is one Packed program of its Lisp entry with an output per leaf of its result
    record, printed by Emit's instruction printer in a raster placement (Emit.stage_body). *)
 module E = Flow.Eval
-module W = Flow.Workspace
 
-let fail message = Error (Diagnostic.error ~code:"E_RASTER" message)
-let ( let* ) = Result.bind
-let all results = List.fold_right (fun r acc -> Result.bind acc (fun acc -> Result.map (fun x -> x :: acc) r)) results (Ok [])
-
-(* The entry's parameters, read from its authored [defn]. *)
-let parameters forms entry =
-  let rec find = function
-    | [] -> None
-    | ({ Flow.Syntax.node = List ({ node = Sym "defn"; _ } :: { node = Sym name; _ } :: rest); _ } : Flow.Syntax.t) :: _
-      when name = entry ->
-        List.find_map (fun (x : Flow.Syntax.t) -> match x.node with Vec params -> Some params | _ -> None) rest
-    | { node = List items; _ } :: more -> (match find items with Some _ as found -> found | None -> find more)
-    | _ :: more -> find more in
-  match find forms with
-  | None -> fail ("no defn " ^ entry)
-  | Some params -> all (List.map (fun (p : Flow.Syntax.t) -> match p.node with
-      | List [ { node = Sym name; _ }; { node = Sym ":"; _ }; ty ] ->
-          (match Flow.Ty.of_syntax ty with Some ty -> Ok (name, ty)
-           | None -> fail (entry ^ ": parameter " ^ name ^ " has no stage type"))
-      | _ -> fail (entry ^ ": every stage parameter is typed: " ^ fst (Flow.Lisp.print [ p ]))) params)
-
-(* The [index]th array parameter is a host buffer bound at [buffer(index)]. Before compiling, its
-   placeholder becomes a distinct (index + 1)-element array, so the template keeps it a gather table
-   (never a folded constant) and a gather's uniform names its buffer by length. *)
-let dummy index = function
-  | Flow.Ty.Array Int -> Ok (E.Int_array (Array.make (index + 1) 0))
-  | Array Float -> Ok (E.Float_array (Array.make (index + 1) 0.))
-  | ty -> fail ("a stage buffer is (array int) or (array float), not " ^ Flow.Ty.to_string ty)
-let column = function
-  | Flow.Ty.Int -> E.Int_array [| 0 |] | Float -> E.Float_array [| 0. |]
-  | Vec2 -> E.Vec2_array [| 0.; 0. |] | Vec3 -> E.Vec3_array [| 0.; 0.; 0. |]
-  | Vec4 -> E.Vec4_array [| 0.; 0.; 0.; 0. |] | _ -> invalid_arg "Raster.column"
-let is_buffer (_, ty) = match ty with Flow.Ty.Array _ -> true | _ -> false
-
-(* A stage output: a leaf of the entry's result, in field order (the program's outputs), [flat] when
-   it sits under [:flat]. *)
-type leaf = { path : string list; ty : Flow.Ty.t; flat : bool }
-type stage = { params : (string * Flow.Ty.t) list; leaves : leaf list; program : Flow_ir.Packed.t;
-  bindings : (string * int) list }
-
-let rec leaves ?(flat = false) path = function
-  | Flow.Ty.Record fields -> List.concat_map (fun (name, ty) ->
-      leaves ~flat:(flat || name = "flat") (path @ [ name ]) ty) fields
-  | ty -> [ { path; ty; flat } ]
-
-(* A vertex stage's buffers bind in their order; a fragment buffer named like a vertex one shares its
-   binding, any other follows the vertex stage's. *)
-let compile ?(shared = []) ~declarations entry =
-  let* forms = Flow.Syntax.parse declarations in
-  let* params = parameters forms entry in
-  let buffers = List.filter is_buffer params and elements = List.filter (fun p -> not (is_buffer p)) params in
-  let next = ref (List.length shared) in
-  let bindings = List.map (fun (name, _) -> name, match List.assoc_opt name shared with
-    | Some slot -> slot | None -> let slot = !next in incr next; slot) buffers in
-  let ops = List.mapi (fun index (_, ty) -> let name = "raster/buffer" ^ string_of_int index in
-    { Flow.Op.noise3 with name; packed_extension = None; signature = { pos = []; opt = []; rest = None; kw = [] };
-      out = (fun _ -> ty); shape = Flow.Op.Struct { splice = false }; check = (fun _ -> ());
-      body = (fun ~live:_ ~node:_ _ -> Flow.Value.Source (name, ty, [])) }) buffers in
-  let text = Printf.sprintf "(workspace raster %s (graph g :context value (let* [%s kernel (fn [%s] (%s %s))] 0.0)))"
-    declarations (String.concat " " (List.mapi (fun index (name, _) -> Printf.sprintf "%s (raster/buffer%d)" name index) buffers))
-    (String.concat " " (List.map (fun (name, ty) -> Printf.sprintf "(%s : %s)" name (Flow.Ty.to_string ty)) elements))
-    entry (String.concat " " (List.map fst params)) in
-  let* forms = Flow.Syntax.parse text in
-  let* fn = match Flow.Workspace.check ~ops { Flow.Catalog.version = 1; kinds = [] } forms with
-    | Some ws, [] ->
-        let* evaluated = E.static ~record:true ws in
-        (match snd (List.hd (List.assoc [ "g"; "kernel" ] evaluated.records)) with
-         | E.Fn fn -> Ok fn | _ -> fail (entry ^ ": the stage is not a function"))
-    | _, d :: _ -> Error d | _, [] -> fail (entry ^ ": unchecked") in
-  let result = match E.Residual.function_body fn with Some (_, body) -> body.W.ty | None -> Flow.Ty.Any in
-  let* bound = all (List.map (fun (name, ty) -> dummy (List.assoc name bindings) ty) buffers) in
-  let fn = E.bind_captures (function
-    | Flow.Value.Source (source, _, []) when String.starts_with ~prefix:"raster/buffer" source ->
-        List.nth bound (int_of_string (String.sub source 13 (String.length source - 13)))
-    | value -> value) fn in
-  let* residual = E.map_kernel ~signature:{ params = List.map snd elements; result } fn
-    (List.map (fun (_, ty) -> column ty) elements) in
-  match residual with
-  | E.Residual r -> (match Flow_ir.Packed.compile_template r (E.Residual.residual_view r).term with
-      | Some program -> Ok { params; leaves = leaves [] result; program; bindings }
-      | None -> (match Flow_ir.Packed.compile_result r (E.Residual.residual_view r).term with
-          | Error (d :: _) -> Error d | _ -> fail (entry ^ " does not compile to a packed program")))
-  | _ -> fail (entry ^ ": the stage did not defer")
+open Lisp_stage
 
 let identifier name = String.map (fun c -> if c = '-' then '_' else c) name
 let msl_type = function
@@ -95,10 +12,11 @@ let msl_type = function
 let component target ty k = match ty with Flow.Ty.Float | Bool -> target | _ -> target ^ "." ^ String.make 1 "xyzw".[k]
 
 (* The bound buffer behind a gather's array uniform: the placeholders' lengths number them. *)
-let buffer (program : Flow_ir.Packed.t) u = match program.uniforms.(u) with
-  | E.Int_array a -> "buffer" ^ string_of_int (Array.length a - 1)
-  | E.Float_array a -> "buffer" ^ string_of_int (Array.length a - 1)
+let slot (program : Flow_ir.Packed.t) u = match program.uniforms.(u) with
+  | E.Int_array a -> Array.length a - 1
+  | E.Float_array a -> Array.length a - 1
   | _ -> invalid_arg "Raster.buffer"
+let buffer program u = "buffer" ^ string_of_int (slot program u)
 
 let body ~input ~int_input ~store stage =
   Emit.stage_body ~raster:{ Emit.input; int_input; buffer = buffer stage.program;
@@ -163,7 +81,6 @@ let msl ?(arguments = false) ~declarations ~vertex ~fragment () =
     else component "colour" Flow.Ty.Vec4 c ^ "=" ^ value ^ ";") in
   let signature stage extra = String.concat ",\n    " (extra @ buffer_arguments stage) in
   Ok (String.concat "" ([ "#include <metal_stdlib>\nusing namespace metal;\n";
-    "long fmod64(long a,long b){if(b==0)return 0;long r=a%b;return (r!=0&&((r<0)!=(b<0)))?r+b:r;}\n";
     (if arguments then "struct raster_texture { texture2d<float, access::sample> image [[id(0)]]; sampler sampling [[id(1)]]; };\n" else "");
     "struct "; out; " {\n" ] @ fields @ [ "};\n";
     Printf.sprintf "vertex %s %s(\n    %s) {\n  %s o;\n" out (identifier vertex)
@@ -187,10 +104,49 @@ let spirv ~declarations ~vertex ~fragment =
     match List.find_opt (fun leaf -> List.nth leaf.path (List.length leaf.path - 1) = name) varyings with
     | Some leaf -> Ok (location leaf, width ty, leaf.flat)
     | None -> fail (fragment ^ ": no varying " ^ name)) (List.filter (fun p -> not (is_buffer p)) f.params)) in
-  let* vertex_module = Spirv.stage { vertex = true; inputs = [||]; buffers = buffers v;
+  let* vertex_module = Spirv.stage { vertex = true; inputs = [||]; buffers = buffers v; workgroup = None;
     outputs = Array.of_list (List.map (fun leaf -> if leaf.path = [ "position" ] then Spirv.Position
       else if leaf.path = [ "point-size" ] then Point_size
       else Varying (location leaf, leaf.flat)) v.leaves) } v.program in
-  let* fragment_module = Spirv.stage { vertex = false; inputs = Array.of_list inputs; buffers = buffers f;
+  let* fragment_module = Spirv.stage { vertex = false; inputs = Array.of_list inputs; buffers = buffers f; workgroup = None;
     outputs = Array.of_list (List.map (fun leaf -> if leaf.path = [ "discard" ] then Spirv.Discard else Colour) f.leaves) } f.program in
   Ok (vertex_module, fragment_module)
+
+(* A compute stage: one workgroup of [size] threads. The entry's first parameter is the thread's index in
+   the group, its array parameters are the bound buffers, in order (a buffer it stores into is
+   writable), and its last is the group size. Its result is discarded: its stores are its effect. *)
+let stored (c : stage) = List.sort_uniq compare (List.filter_map (fun i -> match snd (Trace.flat [] i) with
+  | Flow_ir.Packed.Stage (Store, r) -> (match snd (Trace.flat [] c.program.code.(r.(0))) with
+      | Flow_ir.Packed.Array_prepare (u, _) -> Some (slot c.program u) | _ -> None)
+  | _ -> None) (Array.to_list c.program.code))
+(* the entry's last parameter is the group size, given as a constant *)
+let compute_stage ~size ~declarations ~entry =
+  let* forms = Flow.Syntax.parse declarations in
+  let* params = parameters forms entry in
+  let given = List.filteri (fun k _ -> k < List.length params - 1) params in
+  compile ~declarations:(declarations ^ Printf.sprintf "(defn compute-entry :context value [%s] (%s %s %d))"
+    (String.concat " " (List.map (fun (name, ty) -> Printf.sprintf "(%s : %s)" name (match ty with
+      | Flow.Ty.Array t -> "(array " ^ Flow.Ty.to_string t ^ ")" | t -> Flow.Ty.to_string t)) given))
+    entry (String.concat " " (List.map fst given)) size) "compute-entry"
+let compute_msl ~size ~declarations ~entry =
+  let* c = compute_stage ~size ~declarations ~entry in
+  let* body = Emit.stage_body ~raster:{ Emit.input = (fun _ _ -> "0.0f"); int_input = (fun _ -> "long(lid)");
+    buffer = buffer c.program; output = (fun _ _ value -> "(void)" ^ value ^ ";");
+    builtin = (function "gpu/group-size" -> string_of_int size | name -> invalid_arg ("Raster: no built-in " ^ name)) } c.program in
+  let arguments = List.map (fun (name, ty) -> let slot = List.assoc name c.bindings in
+    Printf.sprintf "device %s%s* buffer%d [[buffer(%d)]]" (if List.mem slot (stored c) then "" else "const ")
+      (if ty = Flow.Ty.Array Int then "uint" else "float") slot slot) (List.filter is_buffer c.params) in
+  Ok (String.concat "" [ "#include <metal_stdlib>\nusing namespace metal;\n";
+    Printf.sprintf "kernel void %s(\n    %s) {\n" (identifier entry)
+      (String.concat ",\n    " (arguments @ [ "uint lid [[thread_position_in_threadgroup]]" ])); body; "}\n" ])
+let compute_program ~size ~declarations ~entry =
+  let* c = compute_stage ~size ~declarations ~entry in
+  let written = stored c in
+  Ok (c.program, List.filter_map Fun.id (Array.to_list (Array.mapi (fun u value -> match value with
+    | E.Int_array a -> Some (u, Array.length a - 1, true, List.mem (Array.length a - 1) written)
+    | E.Float_array a -> Some (u, Array.length a - 1, false, List.mem (Array.length a - 1) written)
+    | _ -> None) c.program.uniforms)))
+let compute_spirv ~size ~declarations ~entry =
+  let* program, buffers = compute_program ~size ~declarations ~entry in
+  Spirv.stage { vertex = false; inputs = [||]; outputs = [||]; workgroup = Some size;
+    buffers = List.map (fun (u, binding, words, _) -> u, binding, words) buffers } program

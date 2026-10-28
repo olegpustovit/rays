@@ -57,7 +57,7 @@ type element_group = Point_group of string | Vertex_group of string
 
 let vec3_copy value = Rays_math.Vec3.create value.Rays_math.Vec3.x value.y value.z
 
-let cooked geometry = Ok Node.Private.{ geometry; instances = None }
+let cooked geometry = Ok Node.Build.{ geometry; instances = None }
 let rdk_error ?(hints = []) operation message =
   Error (Diagnostic.error ~code:(operation ^ "_failed") ~cause:message ~hints
     (operation ^ " could not produce valid geometry"))

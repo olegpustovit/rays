@@ -1,6 +1,6 @@
 type t={resource:Runtime_resources.Canvas.t;
   mutable execution:Renderer.t option;mutable destroyed:bool;
-  caches:Scene.Private.cache_context;
+  caches:Scene.Layer.cache_context;
   world_caches:World.Private.cache_context;
   native_caches:Native_scene_lowering.cache_context;
   mutable epoch:int;mutable completed:bool}
@@ -8,7 +8,7 @@ type t={resource:Runtime_resources.Canvas.t;
 let message operation error=Format.asprintf"%s: %a"operation Runtime_resources.pp_error error
 let renderer_message operation error=Format.asprintf"%s: %a"operation Renderer.pp_error error
 let create ~width ~height=match Runtime_resources.Canvas.create ~width ~height with
-  |Ok resource->Ok{resource;execution=None;destroyed=false;caches=Scene.Private.create_cache_context();
+  |Ok resource->Ok{resource;execution=None;destroyed=false;caches=Scene.Layer.create_cache_context();
       world_caches=World.Private.create_cache_context();
       native_caches=Native_scene_lowering.create_cache_context();epoch=0;completed=false}
   |Error error->Error(message"Canvas.create"error)
@@ -30,7 +30,7 @@ let execution ?(density=1) value=
       |>Result.map_error(renderer_message"Canvas.render")
       |>Result.map(fun execution->value.execution<-Some execution;execution))
 let rec render ?(density=1) value scene=
-  Scene.Private.with_cache_context value.caches(fun()->
+  Scene.Layer.with_cache_context value.caches(fun()->
     World.Private.with_cache_context value.world_caches(fun()->
       Native_scene_lowering.with_cache_context value.native_caches(fun()->render_uncached~density value scene)))
 and render_uncached ~density value scene=
@@ -98,7 +98,7 @@ let destroy value=if value.destroyed then Ok()else
     Result.bind destroy_renderer(fun()->
       value.execution<-None;
       Result.map(fun()->
-        Scene.Private.clear_cache_context value.caches;
+        Scene.Layer.clear_cache_context value.caches;
         value.destroyed<-true)
         (Runtime_resources.Canvas.destroy value.resource
           |>Result.map_error(message"Canvas.destroy"))))

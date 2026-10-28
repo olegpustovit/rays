@@ -97,7 +97,7 @@ let run () =
         let pixels =
           get
             (Renderer.read_pixels runtime
-               ~bytes_per_row:((get (Runtime.presentation_facts (Renderer.Private.runtime runtime))).drawable_width * 4))
+               ~bytes_per_row:((get (Runtime.presentation_facts (Renderer.Native.runtime runtime))).drawable_width * 4))
         in
         if Bytes.sub pixels 0 4 <> Bytes.of_string "\x11\x22\x33\xff" then
           failwith "scene2 retained argument exact pixel mismatch";
@@ -138,7 +138,7 @@ let run () =
         let pixels =
           get
             (Renderer.read_pixels runtime
-               ~bytes_per_row:((get (Runtime.presentation_facts (Renderer.Private.runtime runtime))).drawable_width * 4))
+               ~bytes_per_row:((get (Runtime.presentation_facts (Renderer.Native.runtime runtime))).drawable_width * 4))
         in
         if Bytes.sub pixels 0 4 <> Bytes.of_string rgba then
           failwith
@@ -182,7 +182,7 @@ let run () =
       let pixels =
         get
           (Renderer.read_pixels runtime
-             ~bytes_per_row:((get (Runtime.presentation_facts (Renderer.Private.runtime runtime))).drawable_width * 4))
+             ~bytes_per_row:((get (Runtime.presentation_facts (Renderer.Native.runtime runtime))).drawable_width * 4))
       in
       if Bytes.sub pixels 0 4 <> Bytes.of_string "\x11\x22\x33\xff" then
         failwith "mixed canonical Scene2 exact pixel mismatch";
@@ -246,7 +246,7 @@ let run () =
       let shifted =
         get
           (Renderer.read_pixels runtime
-             ~bytes_per_row:((get (Runtime.presentation_facts (Renderer.Private.runtime runtime))).drawable_width * 4))
+             ~bytes_per_row:((get (Runtime.presentation_facts (Renderer.Native.runtime runtime))).drawable_width * 4))
       in
       if Bytes.sub shifted 0 4 <> Bytes.of_string "\000\000\000\000" then
         failwith "animated affine translated pixel mismatch";
@@ -254,7 +254,7 @@ let run () =
       let restored =
         get
           (Renderer.read_pixels runtime
-             ~bytes_per_row:((get (Runtime.presentation_facts (Renderer.Private.runtime runtime))).drawable_width * 4))
+             ~bytes_per_row:((get (Runtime.presentation_facts (Renderer.Native.runtime runtime))).drawable_width * 4))
       in
       if Bytes.sub restored 0 4 <> Bytes.of_string "\x11\x22\x33\xff" then
         failwith "animated affine restored pixel mismatch";

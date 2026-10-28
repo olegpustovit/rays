@@ -34,7 +34,7 @@ let () =
   let capture scene = pixels canvas scene in
   let token_sets scene = Array.fold_left (fun n -> function
     | Scene_command.Render_ir.Shapes s when Scene_command.Ui_batch.marks s <> None -> n + 1 | _ -> n)
-    0 (Rays.Scene.Private.commands scene) in
+    0 (Rays.Scene.Layer.commands scene) in
   Fun.protect ~finally:(fun () -> ignore(Rays.Canvas.destroy canvas)) (fun () ->
     List.iter (fun time ->
       let live = {(Input.at_time time) with size = (160, 96)} in

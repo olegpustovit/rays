@@ -1,5 +1,5 @@
 module B=Ogpu.Backend
-module P=Renderer.Private
+module P=Renderer.Native
 let get=function Ok value->value|Error error->failwith(Format.asprintf"%a"Renderer.pp_error error)
 let native_get=function Ok value->value|Error error->failwith(Ogpu.Error.to_string error)
 let words a=let b=Bytes.create(4*Array.length a)in
@@ -106,7 +106,7 @@ let ()=
       Renderer.release_gpu gpu;
       refuse_replay third;refuse_lower third;
       assert(Scene_execution.Private.gpu_vertex_count_for_test
-        (Renderer.Private.gpu_vertices_owner execution)=0)))
+        (Renderer.Native.gpu_vertices_owner execution)=0)))
     [1;2];
   assert(live()=baseline);
   print_endline"GPU marks: exact native parity under transform, clip, six blends, Retina and stale output/update/lease guards"

@@ -64,7 +64,7 @@ let furnace () =
      mesh (a cook with no triangles), a zero-length line, a zero circle. *)
   let canvas = Canvas.create_exn ~width:32 ~height:32 in
   Fun.protect ~finally:(fun () -> ignore(Canvas.destroy canvas)) (fun () ->
-    let empty = Result.get_ok (Mesh.Private.create_owned ~mode:Mesh.Triangles ~indices:[||] [||]) in
+    let empty = Result.get_ok (Mesh.View.create_owned ~mode:Mesh.Triangles ~indices:[||] [||]) in
     render canvas [Scene.view3d ~camera (Scene.D3.create [Scene.D3.mesh empty; sphere])];
     render canvas [Scene.line ~from_:(4, 4) ~to_:(4, 4) ~color:Rays_math.Color.white ~width:1 ();
       Scene.circle ~at:(8, 8) ~radius:0 ~fill:Rays_math.Color.white ()]);

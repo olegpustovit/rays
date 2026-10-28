@@ -138,7 +138,7 @@ let check_basic_projection () =
 
 let check_direction_policies () =
   let source = source_points [|(0., 0., 0.)|] in
-  let collision = Mesh_merge.run [plane 1.; plane 3.; plane (-2.)] |> get_ok in
+  let collision = Mesh_merge_front.run [plane 1.; plane 3.; plane (-2.)] |> get_ok in
   let project ?(mode = Surface_index.Ray_forward) ?(surface = Surface_index.Ray_first_surface) () =
     ray ~direction:(Ray.Ray_vector Rays_math.Vec3.unit_y) ~direction_mode:mode
       ~surface_hit:surface ~source ~collision () |> get_ok |> positions in
@@ -352,7 +352,7 @@ let check_validation () =
       (Geometry.point_count collision) (fun _ -> true) in
   expect_code "invalid_group" (ray ~collision_primitives:wrong_collision_group
       ~source ~collision ());
-  let curve = Line_geometry.polyline [|(-1.,0.,0.); (1.,0.,0.)|] |> get_ok in
+  let curve = Line_geometry_front.polyline [|(-1.,0.,0.); (1.,0.,0.)|] |> get_ok in
   expect_code "invalid_surface" (ray ~source ~collision:curve ());
   let bad_direction = Packed.Float3.View.of_owned_exn ~x:[|0.|]
       ~y:[|Float.nan|] ~z:[|0.|] in

@@ -20,17 +20,17 @@ type position =
 
 
 
-val apply :
-  ?cancel:Cancel.t ->
-  grain:int ->
-  position:position ->
-  ?weight_attribute:string ->
-  attributes:Fuse_rules.default_attributes ->
-  attribute_rules:Fuse_rules.attribute_rule list ->
-  group_rules:Fuse_rules.group_rule list ->
-  compact:bool ->
-  rewire:bool ->
-  ?remap_edge_groups:bool ->
-  Point_clusters.clusters ->
-  Geometry.t ->
-  (Geometry.t, string) result
+type params = {
+  cancel : Cancel.t option;
+  grain : int;
+  position : position;
+  weight_attribute : string option;
+  attributes : Fuse_rules.default_attributes;
+  attribute_rules : Fuse_rules.attribute_rule list;
+  group_rules : Fuse_rules.group_rule list;
+  compact : bool;
+  rewire : bool;
+  remap_edge_groups : bool;
+}
+
+val apply : params -> Point_clusters.clusters -> Geometry.t -> (Geometry.t, string) result

@@ -5,7 +5,7 @@ type alignment=Left|Center|Right
 val load:string->int->(t,[`Msg of string])result
 val system : ?size:int -> unit -> (t,[`Msg of string]) result
 val cached_text : ?wrap:int -> ?align:alignment -> ?density:int -> t -> string -> render_mode -> (Image.t,[`Msg of string]) result
-module Private : sig
+module Raster : sig
   type cache_context
   val create_cache_context : unit -> cache_context
   val with_cache_context : cache_context -> (unit -> 'a) -> 'a

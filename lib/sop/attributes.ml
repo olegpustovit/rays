@@ -14,13 +14,13 @@ module Image_texels = struct
     [@@sop.node_slots "image"] [@@sop.node_types "image"]
     [@@deriving sop_params, sop_node]
   let build = parameters_build (fun ~label _parameters image ->
-    Node.Private.make ~label ~operation:"image_texels" ~version:1 ~parameters:""
+    Node.Build.make ~label ~operation:"image_texels" ~version:1 ~parameters:""
       ~cook_mode:Node.Generator ~dependencies:Context.Dependencies.static
       ~inputs:[|image|] (fun ~node_id:_ _context inputs ->
         Result.bind (Payload.image inputs.(0)) (fun image ->
           let width = Image.width image and rgba = Image.storage image in
           let count = width * Image.height image in
-          let geometry = Rdk.Kernel.generate_point_ranges count (fun ~first ~last ~x ~y ~z ->
+          let geometry = Rdk.Geometry.generate_point_ranges count (fun ~first ~last ~x ~y ~z ->
             for i = first to last - 1 do
               x.(i) <- float (i mod width); y.(i) <- float (i / width); z.(i) <- float width
             done) in
@@ -32,7 +32,7 @@ module Image_texels = struct
               | Error message -> Error (Diagnostic.error ~code:"invalid_image_texels" message)
               | Ok attribute -> (match Rdk.Geometry.with_attribute attribute geometry with
                   | Error message -> Error (Diagnostic.error ~code:"invalid_image_texels" message)
-                  | Ok geometry -> Ok Node.Private.{payload = Payload.Geometry geometry; instances = None}))))
+                  | Ok geometry -> Ok Node.Build.{payload = Payload.Geometry geometry; instances = None}))))
   let factory = parameters_factory build
 end
 
@@ -54,16 +54,14 @@ module Uv_flatten = struct
     let seams = optional_text parameters.seams in
     let iterations = parameters.iterations in
     let tolerance = parameters.tolerance in
-    Node.Private.make_geometry ?label ~operation:"uv_flatten" ~version:1
+    Node.Build.make_geometry ?label ~operation:"uv_flatten" ~version:1
       ~parameters:""
       ~cook_mode:(Node.Duplicate_input 0) ~dependencies:Context.Dependencies.static
       ~inputs:[|input|] (fun ~node_id:_ context inputs ->
         match uv_parameterize_seams "uv_flatten" inputs.(0) seams with
         | Error _ as error -> error
         | Ok (edge_seams, seams) ->
-            match Rdk.Uv_ops.flatten ~cancel:(Context.cancel_token context)
-                ~grain:(Context.grain context) ~name ?seams ?edge_seams
-                ~iterations ~tolerance inputs.(0) with
+            match Rdk.Uv_ops.flatten { cancel = Some (Context.cancel_token context); grain = Some (Context.grain context); name; seams; edge_seams; uv_tolerance = 1e-9; iterations; tolerance } inputs.(0) with
             | Ok geometry -> cooked geometry
             | Error error -> structured_rdk_error error)
   )
@@ -91,16 +89,14 @@ module Uv_relax = struct
     let uv_tolerance = parameters.uv_tolerance in
     let iterations = parameters.iterations in
     let tolerance = parameters.tolerance in
-    Node.Private.make_geometry ?label ~operation:"uv_relax" ~version:1
+    Node.Build.make_geometry ?label ~operation:"uv_relax" ~version:1
       ~parameters:""
       ~cook_mode:(Node.Duplicate_input 0) ~dependencies:Context.Dependencies.static
       ~inputs:[|input|] (fun ~node_id:_ context inputs ->
         match uv_parameterize_seams "uv_relax" inputs.(0) seams with
         | Error _ as error -> error
         | Ok (edge_seams, seams) ->
-            match Rdk.Uv_ops.relax ~cancel:(Context.cancel_token context)
-                ~grain:(Context.grain context) ~name ?seams ?edge_seams
-                ~uv_tolerance ~iterations ~tolerance inputs.(0) with
+            match Rdk.Uv_ops.relax { cancel = Some (Context.cancel_token context); grain = Some (Context.grain context); name; seams; edge_seams; uv_tolerance; iterations; tolerance } inputs.(0) with
             | Ok geometry -> cooked geometry
             | Error error -> structured_rdk_error error)
   )
@@ -198,7 +194,7 @@ module Distance_from_geometry = struct
     and radius = match radius_mode with Radius_fixed -> Rdk.Transform_ops.Distance_fixed radius
       | Radius_maximum -> Rdk.Transform_ops.Distance_maximum in
     let distance_attribute = optional_text distance_attribute in
-    Node.Private.make_geometry ?label ~operation:"distance_from_geometry" ~version:1
+    Node.Build.make_geometry ?label ~operation:"distance_from_geometry" ~version:1
       ~parameters:""
       ~cook_mode:(Node.Duplicate_input 0)
       ~dependencies:Context.Dependencies.static ~inputs:[|source; reference|]
@@ -213,10 +209,11 @@ module Distance_from_geometry = struct
              | Error error -> Error error
              | Ok reference_selection ->
                  match Rdk.Transform_ops.distance_from_geometry
-                     ~cancel:(Context.cancel_token context)
-                     ~grain:(Context.grain context) ?affected ?reference_selection
-                     ~reference_kind ~falloff ~radius ~distance_attribute
-                     ?mask_attribute ~reference:inputs.(1) inputs.(0) with
+                     { cancel = Some (Context.cancel_token context);
+                       grain = Some (Context.grain context); affected;
+                       reference_selection; reference_kind; falloff; radius;
+                       distance_attribute; mask_attribute;
+                       reference = inputs.(1) } inputs.(0) with
                  | Ok geometry -> cooked geometry
                  | Error error -> structured_rdk_error error))
   )
@@ -374,7 +371,7 @@ module Attribute_mirror = struct
       | Mirror_vector -> Rdk.Attribute_mirror.Mirror_vector
       | Mirror_point -> Rdk.Attribute_mirror.Mirror_point in
     let string_replace = if replace_strings then Some (string_search, string_replacement) else None in
-    Node.Private.make_geometry ?label ~operation:"attribute_mirror" ~version:1
+    Node.Build.make_geometry ?label ~operation:"attribute_mirror" ~version:1
       ~parameters:""
       ~cook_mode:(Node.Duplicate_input 0)
       ~dependencies:Context.Dependencies.static ~inputs:[|input|]
@@ -407,11 +404,7 @@ module Attribute_mirror = struct
             match resolved_method with
             | Error error -> Error error
             | Ok method_ ->
-                match Rdk.Attribute_mirror.run
-                    ~cancel:(Context.cancel_token context)
-                    ~grain:(Context.grain context) ?group:resolved_group ~group_use
-                    ~attributes ~transform ?string_replace ?output_mapping
-                    ?source_group ?destination_group ~owner ~method_ geometry with
+                match Rdk.Attribute_mirror.run { cancel = Some (Context.cancel_token context); grain = Some (Context.grain context); group = resolved_group; group_use; attributes; transform; string_replace; output_mapping; source_group; destination_group; owner; method_ } geometry with
                 | Ok geometry -> cooked geometry
                 | Error error -> structured_rdk_error error)
   )
@@ -501,16 +494,17 @@ module Attribute_transfer_all = struct
     let mode = Support.transfer_mode mode neighbors power kernel_radius in
     let falloff = Support.transfer_falloff falloff uniform_bias in
     let max_distance = match distance_mode with Kernel_explicit -> Some max_distance | Kernel_auto -> None in
-    Node.Private.make_geometry ?label ~operation:"attribute_transfer_all" ~version:1
+    Node.Build.make_geometry ?label ~operation:"attribute_transfer_all" ~version:1
       ~parameters:""
       ~cook_mode:Node.Generic ~dependencies:Context.Dependencies.static
       ~inputs:[|source; target|]
       (fun ~node_id:_ context inputs ->
         match Rdk.Attribute_ops.transfer_all
-            ~cancel:(Context.cancel_token context) ~grain:(Context.grain context)
-            ?point_pattern ?vertex_pattern ?primitive_pattern ?detail_pattern
-            ~mode ?max_distance ~blend_width ~falloff ~unmatched
-            ~source:inputs.(0) ~target:inputs.(1) () with
+            { cancel = Some (Context.cancel_token context);
+              grain = Some (Context.grain context);
+              point_pattern; vertex_pattern; primitive_pattern; detail_pattern;
+              mode; max_distance; blend_width; falloff; unmatched;
+              source = inputs.(0); target = inputs.(1) } with
         | Ok geometry -> cooked geometry
         | Error error -> structured_rdk_error error)
   )
@@ -620,7 +614,7 @@ module Attribute_transfer_surface = struct
         "attribute_transfer_surface" "target" target_group_pattern)
     and source_vertex_group_pattern_compiled = validated (compile_transfer_group_pattern
         "attribute_transfer_surface" "source vertex" source_vertex_group_pattern) in
-    Node.Private.make_geometry ?label ~operation:"attribute_transfer_surface" ~version:5
+    Node.Build.make_geometry ?label ~operation:"attribute_transfer_surface" ~version:5
       ~parameters:"" ~cook_mode:Node.Generic ~dependencies:Context.Dependencies.static
       ~inputs:[|source; target|]
       (fun ~node_id:_ context inputs ->
@@ -652,12 +646,11 @@ module Attribute_transfer_surface = struct
              | Error error -> Error error
              | Ok target_points ->
                  match Rdk.Attribute_ops.transfer_surface
-                     ~cancel ~grain ?max_distance ~blend_width
-                     ~falloff ~unmatched ~target_owner ?distance_attribute
-                     ?source_primitives ?source_vertices ~source_vertex_selection
-                     ?target_elements:target_points
-                     ~attributes ~source:inputs.(0)
-                     ~target:inputs.(1) () with
+                     { cancel = Some cancel; grain = Some grain; max_distance;
+                       blend_width; falloff; unmatched; target_owner;
+                       distance_attribute; source_primitives; source_vertices;
+                       source_vertex_selection; target_elements = target_points;
+                       attributes; source = inputs.(0); target = inputs.(1) } with
                  | Ok geometry -> cooked geometry
                  | Error error -> structured_rdk_error error)))
   )
@@ -783,7 +776,7 @@ module Attribute_transfer = struct
     let source_group_pattern_compiled=validated (compile_transfer_group_pattern "attribute_transfer" "source" source_group_pattern)
     and source_vertex_group_pattern_compiled=validated (compile_transfer_group_pattern "attribute_transfer" "source vertex" source_vertex_group_pattern)
     and target_group_pattern_compiled=validated (compile_transfer_group_pattern "attribute_transfer" "target" target_group_pattern) in
-    Node.Private.make_geometry ~label ~operation:"attribute_transfer" ~version:6
+    Node.Build.make_geometry ~label ~operation:"attribute_transfer" ~version:6
       ~parameters:""
       ~cook_mode:Node.Generic ~dependencies:Context.Dependencies.static ~inputs:[|source;target|]
     (fun ~node_id:_ context inputs ->
@@ -820,29 +813,27 @@ module Attribute_transfer = struct
                let result = match owner with
                  | Rdk.Attribute.Point ->
                      Rdk.Attribute_ops.transfer_points
-                       ~cancel ~grain ?names ?pattern ~mode ?max_distance
-                       ~blend_width ~falloff
-                       ~unmatched ?source_points:source_elements
-                       ?target_points:target_elements ~source:inputs.(0)
-                       ~target:inputs.(1) ()
+                       { cancel = Some cancel; grain = Some grain; names; pattern;
+                         mode; max_distance; blend_width; falloff; unmatched;
+                         source_elements; target_elements;
+                         source = inputs.(0); target = inputs.(1) }
                  | Rdk.Attribute.Vertex ->
                      Rdk.Attribute_ops.transfer_vertices
-                       ~cancel ~grain ?names ?pattern ?max_distance
-                       ~blend_width ~falloff
-                       ~unmatched ?source_primitives:source_elements
-                       ?source_vertices ~source_vertex_selection
-                       ?target_vertices:target_elements ~source:inputs.(0)
-                       ~target:inputs.(1) ()
+                       { cancel = Some cancel; grain = Some grain; names; pattern;
+                         max_distance; blend_width; falloff; unmatched;
+                         source_primitives = source_elements; source_vertices;
+                         source_vertex_selection;
+                         target_vertices = target_elements;
+                         source = inputs.(0); target = inputs.(1) }
                  | Rdk.Attribute.Primitive ->
                      Rdk.Attribute_ops.transfer_primitives
-                       ~cancel ~grain ?names ?pattern ~mode ?max_distance
-                       ~blend_width ~falloff
-                       ~unmatched ?source_primitives:source_elements
-                       ?target_primitives:target_elements ~source:inputs.(0)
-                       ~target:inputs.(1) ()
+                       { cancel = Some cancel; grain = Some grain; names; pattern;
+                         mode; max_distance; blend_width; falloff; unmatched;
+                         source_elements; target_elements;
+                         source = inputs.(0); target = inputs.(1) }
                  | Rdk.Attribute.Detail ->
-                     Rdk.Attribute_ops.transfer_detail ?names ?pattern
-                       ~source:inputs.(0) ~target:inputs.(1) () in
+                     Rdk.Attribute_ops.transfer_detail { names; pattern;
+                       source = inputs.(0); target = inputs.(1) } in
                match result with
                | Ok geometry -> cooked geometry
                | Error error -> structured_rdk_error error)))

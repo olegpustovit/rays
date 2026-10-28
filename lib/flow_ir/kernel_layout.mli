@@ -7,7 +7,7 @@ type t = {
   output_checks : bool;
       (** fast: the approximate tier guarantees valid outputs (specification/gpu-codegen.md) *)
   narrow : bool array;
-      (** fast: Int registers printed as 32-bit unsigned words, with the CPU's bits: each always lies
+      (** Int registers printed as 32-bit unsigned words, with the CPU's bits: each always lies
           in [0, 2^32) or is read only through its low 32 bits ([Loop_result] follows its carry) *)
   uniforms : int array;
   frames : int array;
@@ -43,6 +43,8 @@ type t = {
 
 (** [fast] includes gather lengths and the count record; [image] reserves the two
     dimensions used by WGSL image kernels and has no input bindings. *)
+val scene_fact : string -> bool
+(** [gpu/scene-spheres] and [gpu/scene-strands]: built-in counts read from the scene's uniform words, not frame facts. *)
 val plan : ?fast:bool -> ?image:bool -> ?instanced:bool -> ?motion:bool -> ?curves:bool -> Packed.t -> t
 val uniform_words : t -> int
 

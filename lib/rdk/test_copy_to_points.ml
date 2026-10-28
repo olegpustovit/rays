@@ -30,9 +30,9 @@ let run () =
         ~x:[|1.|] ~y:[|0.|] ~z:[|0.|])) |> get_ok
   and _target_pscale = Attribute.create_owned ~name:"pscale" ~owner:Attribute.Point
       (Attribute.Float [|2.|]) |> get_ok in
-  let restricted_source = Mesh_merge.run [
-      Line_geometry.polyline [|(0.,0.,0.); (1.,0.,0.)|] |> get_ok;
-      Line_geometry.polyline [|(10.,0.,0.); (12.,0.,0.)|] |> get_ok]
+  let restricted_source = Mesh_merge_front.run [
+      Line_geometry_front.polyline [|(0.,0.,0.); (1.,0.,0.)|] |> get_ok;
+      Line_geometry_front.polyline [|(10.,0.,0.); (12.,0.,0.)|] |> get_ok]
       |> get_ok in
   let _restricted_weight = Attribute.create_owned ~name:"weight"
       ~owner:Attribute.Point (Attribute.Float [|0.;1.;10.;12.|]) |> get_ok
@@ -58,7 +58,7 @@ let run () =
       (fun _ -> true)
   and _wrong_target_owner = Group.init ~owner:Group.Primitive ~name:"wrong" 0
       (fun _ -> false) in
-  let transfer_source = Line_geometry.polyline [|(0.,0.,0.); (1.,0.,0.)|] |> get_ok in
+  let transfer_source = Line_geometry_front.polyline [|(0.,0.,0.); (1.,0.,0.)|] |> get_ok in
   let source_weight = Attribute.create_owned ~name:"weight" ~owner:Attribute.Point
       (Attribute.Float [|10.;20.|]) |> get_ok
   and source_corner = Attribute.create_owned ~name:"corner" ~owner:Attribute.Vertex

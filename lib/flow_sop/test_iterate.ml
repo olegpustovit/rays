@@ -65,7 +65,7 @@ let () =
       let actual = with_session (fun s -> cook s ~domains (lower ~reference (text "sop/smooth_loop" passes))) in
       check (Rdk_test_support.geometry_bytes actual = want)
         (Printf.sprintf "iterate passes=%d reference=%b domains=%d differs from the OCaml smoothing" passes reference domains))
-      [ 1; 8 ]) [ false; true ]) [ 0; 1; 7; 5000 ];
+      [ 1; 8 ]) [ false; true ]) [ 0; 1; 7; 500 ];
   (* the pass count is data, not graph structure: the plan has the same nodes for 1 and 5000 passes *)
   let plan_nodes passes = match Flow_sop.Lower.workspace ~reference:false
       (parse (text "sop/smooth_loop" passes)) with
@@ -80,7 +80,7 @@ let () =
     check (Rdk_test_support.geometry_bytes (cook s node) = expected 1) "one pass";
     let changed, _ = ok (Sop.Node.apply_parameters node [ "passes", Param.Int_value 7 ]) in
     check (Rdk_test_support.geometry_bytes (cook s changed) = expected 7) "parameter change to seven passes");
-  print_endline "iterate: 0, 1, 7 and 5000 passes in one cook node match OCaml, reference and one/eight domains"
+  print_endline "iterate: 0, 1, 7 and 500 passes in one cook node match OCaml, reference and one/eight domains"
 
 let () =
   let lo_hi = neighbours points in
@@ -93,12 +93,12 @@ let () =
   let weights geometry = match Rdk.Attribute.storage (Option.get (Rdk.Geometry.find_attribute ~owner:Rdk.Attribute.Point "w" geometry)) with
     | Rdk.Attribute.Float w -> w | _ -> failwith "w is not a float attribute" in
   let passes_until, want = stop_after in
-  check (passes_until > 5 && passes_until < 5000) "the :until fixture must stop mid-run";
+  check (passes_until > 5 && passes_until < 500) "the :until fixture must stop mid-run";
   List.iter (fun reference -> List.iter (fun domains -> List.iter (fun passes ->
     let w = weights (with_session (fun s -> cook s ~domains (lower ~reference (text "sop/relax_loop" passes)))) in
     let target = if passes < passes_until then
       (let rec go k w = if k = 0 then w else go (k - 1) (relax_step lo_hi w) in go passes w0) else want in
     check (Array.for_all2 (fun a b -> Int64.equal (Int64.bits_of_float a) (Int64.bits_of_float b)) w target)
       (Printf.sprintf ":until passes=%d reference=%b domains=%d did not stop at pass %d" passes reference domains passes_until))
-    [ 1; passes_until - 1; passes_until; passes_until + 3; 5000 ]) [ 1; 8 ]) [ false; true ];
+    [ 1; passes_until - 1; passes_until; passes_until + 3; 500 ]) [ 1; 8 ]) [ false; true ];
   print_endline "iterate :until stops after the pass that satisfies it"

@@ -25,11 +25,10 @@
 ; - Its height moves the coast by `swing` levels: up is more land.
 ; - Its side zooms about the middle of the viewport, `reach` times in at the left and out at the
 ;   right.
-; - The left button multiplies time by ten.
+; - The left button runs the clock ten times faster.
 ;
-; A kernel cannot read a `(state ...)` value (`E_PACKED_STATE`), so nothing accumulates: there is
-; no scrolled pan or wheel zoom, and the fast clock is `t` times ten, which jumps to another part
-; of the drift when the button goes down and back when it comes up.
+; The clock is a `(state ...)` the kernels read: it runs ten times faster while the button is
+; down and carries on from there when it comes up. There is no scrolled pan or wheel zoom.
 ;
 ; ## Kernels
 ;
@@ -54,9 +53,8 @@
   ; in the signal ink.
   ; Each layer is its own kernel: all of them in one would not fit the 64 registers.
   ; The pointer drives it: its height moves the coast, its side zooms about the middle of the
-  ; viewport, and the left button multiplies time by ten.  A kernel cannot read a (state ...)
-  ; value (E_PACKED_STATE), so nothing here accumulates: no scrolled pan, and the fast clock is
-  ; t times ten, which jumps when the button goes down or up.
+  ; viewport, and the left button runs the clock, a (state ...) the kernels read, ten times
+  ; faster. There is no scrolled pan.
   ; Dataflow: pointer, controls -> field, ping, inks -> layers -> result.
   ; A glyph in `share` of the cells whose height sits in contour band `level` (0 is the
   ; outermost: the middle of band 0 is the height field.middle).  A cell is chosen by its own
@@ -191,7 +189,7 @@
            across (/ (max 0 (min (frame/width) (pointer/x))) (max 1 (frame/width)))
            down (/ (max 0 (min (frame/height) (pointer/y))) (max 1 (frame/height)))
            ; time, ten times faster while the left button is down
-           clock (* t (if (pointer/down) 10 1))
+           clock (state [previous 0.0] (+ previous (* (max 0 (frame/dt)) (if (pointer/down) 10 1))))
            ; contours from the coast to the summit
            summit 5.0
            ; the contour lines fade to nothing this many levels inland of the coast

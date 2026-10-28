@@ -398,7 +398,7 @@ let () =
 
 let () =
   List.iter(fun count->
-    let original=Kernel.generate_point_ranges count(fun ~first ~last ~x ~y ~z->
+    let original=Rdk.Geometry.generate_point_ranges count(fun ~first ~last ~x ~y ~z->
       for i=first to last-1 do x.(i)<-float i;y.(i)<- -0.;z.(i)<-0. done) in
     let before=geometry_bytes original and input=Lisp_sop.snapshot original in
     List.iter(fun(kind,body)->
@@ -722,16 +722,16 @@ let () =
       ignore (cook session ~domains ~time:0. source |> geometry);
       let before = Session.stats session in
       let result = cook session ~domains ~time:0.
-        (Sop.Node.Private.rebuild_with_inputs node [|source|]) |> geometry in
+        (Sop.Node.Build.rebuild_with_inputs node [|source|]) |> geometry in
       assert ((Session.stats session).misses=before.misses && (Session.stats session).hits=before.hits+2);
-      let expected = Attribute_ops.delete ~point_pattern:"N" changed |> get_ok in
+      let expected = Attribute_ops_front.delete ~point_pattern:"N" changed |> get_ok in
       assert (geometry_bytes result=geometry_bytes expected);
       List.iter (fun pattern ->
         let node = Lisp_sop.node ~with_:["source", source]
           (Printf.sprintf "(sop/delete_attr (sop/ext_source) %S :owner \"point\")" pattern) in
         assert ((Sop.Node.facts node).reads=["*"] && (Sop.Node.facts node).writes=["*"]);
         let result = cook session ~domains ~time:0. node |> geometry in
-        let expected = Attribute_ops.delete ~point_pattern:pattern changed |> get_ok in
+        let expected = Attribute_ops_front.delete ~point_pattern:pattern changed |> get_ok in
         assert (geometry_bytes result=geometry_bytes expected)) ["N*"; "N Cd"; "^Cd"])) [1;8];
   print_endline "Attribute deletion: selective refresh carries same-name owners; patterns stay conservative at one/eight domains"
 
@@ -742,10 +742,10 @@ let () =
     let original = Geometry.create ~positions ~topology:(Topology.empty ~point_count:count) ()
       |> get_string_ok in
     let before = geometry_bytes original in
-    let input = Sop.Node.Private.make_geometry ~operation:"test.xyz_write" ~version:1
+    let input = Sop.Node.Build.make_geometry ~operation:"test.xyz_write" ~version:1
       ~parameters:"" ~cook_mode:Sop.Node.Generator
       ~dependencies:Sop.Context.Dependencies.static ~inputs:[||]
-      (fun ~node_id:_ _ _ -> Ok Sop.Node.Private.{geometry=original;instances=None}) in
+      (fun ~node_id:_ _ _ -> Ok Sop.Node.Build.{geometry=original;instances=None}) in
     let values = Array.init (count * 3) (fun j ->
       if j mod 17 = 0 then -0. else match j mod 3 with
       | 0 -> float_of_int (j / 3) +. 0.125
@@ -790,9 +790,9 @@ let () =
     let positions=Packed.Float3.View.of_owned_exn ~x:(plane 0) ~y:(plane 1) ~z:(plane 2) in
     let original=Geometry.create ~positions ~topology:(Topology.empty ~point_count:count) () |> get_string_ok in
     let before=geometry_bytes original in
-    let input=Sop.Node.Private.make_geometry ~operation:"test.borrowed_planes" ~version:1
+    let input=Sop.Node.Build.make_geometry ~operation:"test.borrowed_planes" ~version:1
       ~parameters:"" ~cook_mode:Sop.Node.Generator ~dependencies:Sop.Context.Dependencies.static ~inputs:[||]
-      (fun ~node_id:_ _ _ -> Ok Sop.Node.Private.{geometry=original;instances=None}) in
+      (fun ~node_id:_ _ _ -> Ok Sop.Node.Build.{geometry=original;instances=None}) in
     let make name body=
       let lowered=lower (source (Printf.sprintf "(sop/with_attr g :%s (exact %s))" name body)) in
       let call=Array.find_opt (fun (n:E.node)->n.kind="sop/with_attr") lowered.plan.nodes |> Option.get in
@@ -846,7 +846,7 @@ let () =
   List.iter(fun context->match L.source_cone context ~node:source with
     |Error d->assert(d.code="E_DATA_SOURCE")|Ok _->assert false)
     [L.{context with compiled=Flow_sop.Network.Int_map.empty};
-     L.{context with compiled=Flow_sop.Network.Int_map.singleton source (Sop.Node.Private.fresh_id())}];
+     L.{context with compiled=Flow_sop.Network.Int_map.singleton source (Sop.Node.Build.fresh_id())}];
   List.iter(fun id->match L.source_context lowered ~node:id with
     |Error d->assert(d.code="E_DATA_SOURCE")|Ok _->assert false)[-1;Array.length lowered.plan.nodes;producer.id];
   let resolve time=
@@ -885,10 +885,10 @@ let () =
     let original=cook session ~domains:1 ~time:0. input |> geometry in
     let transforms=[|Rays_math.Mat4.translation(Rays_math.Vec3.create 1. 0. 0.);
       Rays_math.Mat4.translation(Rays_math.Vec3.create 3. 0. 0.)|]in
-    let packed=Sop.Node.Private.make_geometry ~operation:"test.capture.instances" ~version:1
+    let packed=Sop.Node.Build.make_geometry ~operation:"test.capture.instances" ~version:1
       ~parameters:"" ~cook_mode:Sop.Node.Generator
       ~dependencies:Sop.Context.Dependencies.static ~inputs:[||]
-      (fun ~node_id:_ _ _->Ok Sop.Node.Private.{geometry=original;instances=Some transforms})in
+      (fun ~node_id:_ _ _->Ok Sop.Node.Build.{geometry=original;instances=Some transforms})in
     let consumer=Flow_sop.Attribute_kernel.materialized_source packed in
     List.iter(fun domains->
       let output=cook session ~domains ~time:0. consumer |> Result.get_ok in
@@ -1171,7 +1171,7 @@ let () =
     assert ((Sop.Node.facts modern_node).reads = ["P"]);
     if expected_stages = 3 && List.length inputs > 1 then begin
       let change field = List.mapi (fun i node -> if i = 0 then node else
-        Sop.Node.Private.with_facts (field (Sop.Node.facts node)) node) inputs in
+        Sop.Node.Build.with_facts (field (Sop.Node.facts node)) node) inputs in
       assert (stages (prepare (change (fun facts -> {facts with topology = Changed}))) = 1);
       assert (stages (prepare (change (fun facts -> {facts with elementwise = None}))) = 1);
       assert (stages (prepare (change (fun facts -> {facts with elementwise = Primitives}))) = 3)
@@ -1194,22 +1194,22 @@ let () =
      "(sop/grid :counts \"Point counts\" :connectivity \"Points\" :columns 1025 :rows 2)", 1;
      "(sop/scatter (sop/grid) :count 2050 :seed 9)", 1]
 let () =
-  let empty = Kernel.generate_point_ranges 0 (fun ~first:_ ~last:_ ~x:_ ~y:_ ~z:_ -> ()) in
-  let empty_input = Sop.Node.Private.make_geometry ~operation:"empty_fixture" ~version:1
+  let empty = Rdk.Geometry.generate_point_ranges 0 (fun ~first:_ ~last:_ ~x:_ ~y:_ ~z:_ -> ()) in
+  let empty_input = Sop.Node.Build.make_geometry ~operation:"empty_fixture" ~version:1
     ~parameters:"" ~cook_mode:Sop.Node.Generator
     ~dependencies:Sop.Context.Dependencies.static ~inputs:[||]
-    (fun ~node_id:_ _ _ -> Ok Sop.Node.Private.{geometry=empty; instances=None}) in
+    (fun ~node_id:_ _ _ -> Ok Sop.Node.Build.{geometry=empty; instances=None}) in
   let empty_write = Flow_sop.Attribute_kernel.node ~source:"empty"
     ~name:"P" ~values:(E.Struct ("sop/attr", Flow.Ty.Array Flow.Ty.Vec3,
       ["geometry", E.Deferred (Flow.Ty.geometry,0); "attribute", E.Text "P"]))
     ~sources:[0] [empty_input] in
-  let output = Sop.Node.Private.cook empty_write (context ~domains:8 0.) [|Sop.Payload.Geometry empty|] in
+  let output = Sop.Node.Build.cook empty_write (context ~domains:8 0.) [|Sop.Payload.Geometry empty|] in
   (match output with Ok output -> assert (geometry_bytes (Result.get_ok (Sop.Payload.geometry output.payload)) = geometry_bytes empty)
     | Error d -> failwith (Diagnostic.error_to_string d));
   let cancel = Cancel.create () in
   Cancel.cancel cancel;
   let cancelled = Sop.Context.create ~cancel ~domains:1 () |> get_string_ok in
-  (match Sop.Node.Private.cook empty_write cancelled [|Sop.Payload.Geometry empty|] with
+  (match Sop.Node.Build.cook empty_write cancelled [|Sop.Payload.Geometry empty|] with
    | Error d -> assert (d.code = "E_CANCELLED") | Ok _ -> assert false);
   List.iter (fun columns ->
     List.iter (fun amp ->
@@ -1504,9 +1504,9 @@ let ()=
   let data=Array.init 65537(fun i->float i*.0.125) in
   let original=Geometry.with_attribute(Attribute.create_owned ~owner:Attribute.Point ~name:"scalar"(Float data)|>get_string_ok)original|>get_string_ok in
   let before=geometry_bytes original and cooks=ref 0 in
-  let source=Sop.Node.Private.make_geometry ~operation:"test.planar_source" ~version:1 ~parameters:""
+  let source=Sop.Node.Build.make_geometry ~operation:"test.planar_source" ~version:1 ~parameters:""
     ~cook_mode:Sop.Node.Generator ~dependencies:Sop.Context.Dependencies.static ~inputs:[||]
-    (fun ~node_id:_ _ _->incr cooks;Ok Sop.Node.Private.{geometry=original;instances=None}) in
+    (fun ~node_id:_ _ _->incr cooks;Ok Sop.Node.Build.{geometry=original;instances=None}) in
   let factory=Edit.factory ~key:"ext_planar" ~label:"Planar" ~category:["Test"] ~arity:0(fun _->Ok source) in
   let source_text={|(workspace planar_sources
     (defnode sop/planar_sources [(geo : geometry)]
@@ -1540,7 +1540,7 @@ let ()=
       let small=Line_geometry.points[|0.,-0.,0.;1.,-0.,0.|] in
       let small=Geometry.with_attribute(Attribute.create_owned ~owner:Point ~name:"scalar"(Float[|0.5;1.5|])|>get_string_ok)small|>get_string_ok in
       let node=Edit.compile_node graph.network.geometry ~node_id:(Option.get graph.root)|>get_string_ok in
-      let node=Sop.Node.Private.rebuild_with_inputs node[|Lisp_sop.snapshot small|] in
+      let node=Sop.Node.Build.rebuild_with_inputs node[|Lisp_sop.snapshot small|] in
       let expected=planar_oracle ~owner:Point ~kind:"vec3" "planar"[|[|0.5;1.5|];[|0.5;1.5|];[|-0.;-0.|]|]small in
       assert(geometry_bytes(cook session ~domains:4 ~time:0. node|>geometry)=geometry_bytes expected))) [false;true];
   (* Both sources hydrate in authored Record order only in the reached arm. *)
@@ -1556,7 +1556,7 @@ let ()=
       assert(geometry_bytes(cook session ~domains:4 ~time:(-1.) node|>geometry)=before);
       let enabled=Geometry.with_attribute(Attribute.create_owned ~owner:Detail ~name:"enabled"(Int[|1|])
         |>get_string_ok)original|>get_string_ok in
-      let selected=Sop.Node.Private.rebuild_with_inputs node[|Lisp_sop.snapshot enabled|]in
+      let selected=Sop.Node.Build.rebuild_with_inputs node[|Lisp_sop.snapshot enabled|]in
       (match cook session ~domains:4 ~time:1. selected with Error d->assert(d.code="E_ATTR_TYPE")|Ok _->assert false);
       assert(geometry_bytes(cook session ~domains:4 ~time:(-1.) node|>geometry)=before))) [false;true];
   print_endline "Full planar attributes: real strict/reference cooked-source/Fn/alias hydration, live rebinding, repeated-child sharing, lazy failures and cancellation"
@@ -1665,7 +1665,7 @@ let ()=
     ignore(cook s ~domains:1 ~time:0. node|>geometry);
     let input=Lisp_sop.snapshot changed in ignore(cook s ~domains:1 ~time:0. input|>geometry);
     let stats=Session.stats s in
-    let output=cook s ~domains:4 ~time:0.(Sop.Node.Private.rebuild_with_inputs node[|input|])|>geometry in
+    let output=cook s ~domains:4 ~time:0.(Sop.Node.Build.rebuild_with_inputs node[|input|])|>geometry in
     assert((Session.stats s).misses=stats.misses && (Session.stats s).hits=stats.hits+2);
     let expected=planar_oracle ~owner:Point ~kind:"vec3" "planes"[|[|-0.;0.25|];[|1.;2.|];[|3.;4.|]|]changed in
     assert(geometry_bytes output=geometry_bytes expected));
@@ -1766,11 +1766,11 @@ let ()=
     let payloads=[|Sop.Payload.Geometry original|]in
     List.iter(fun domains->
       let context=Sop.Context.create ~domains ~grain:97()|>get_string_ok in
-      (match Sop.Node.Private.cook node context payloads with
+      (match Sop.Node.Build.cook node context payloads with
        |Error d->assert(d.code=code && d.message=message)|Ok _->assert false);
       let token=Sop.Context.Cancel.create()in Sop.Context.Cancel.cancel token;
       let cancelled=Sop.Context.create ~domains ~grain:97 ~cancel:token()|>get_string_ok in
-      (match Sop.Node.Private.cook node cancelled payloads with
+      (match Sop.Node.Build.cook node cancelled payloads with
        |Error d->assert(d.code="E_CANCELLED" && d.message="Attribute kernel cancelled.")|Ok _->assert false)) [1;4;8]
   )cases) [false;true];
   print_endline "Full planar host mixed failures: actual Lower call cancellation before invalid options before failing Record source hydration"

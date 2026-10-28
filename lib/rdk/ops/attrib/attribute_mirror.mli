@@ -24,18 +24,19 @@ type transform =
   | Mirror_vector
   | Mirror_point
 
-val run :
-  ?cancel:Cancel.t ->
-  ?grain:int ->
-  ?group:Group.t ->
-  ?group_use:group_use ->
-  ?attributes:string ->
-  ?transform:transform ->
-  ?string_replace:(string * string) ->
-  ?output_mapping:string ->
-  ?source_group:string ->
-  ?destination_group:string ->
-  owner:Attribute.owner ->
-  method_:method_ ->
-  Geometry.t ->
-  (Geometry.t, Error.t) result
+type params = {
+  cancel : Cancel.t option;
+  grain : int option;
+  group : Group.t option;
+  group_use : group_use;
+  attributes : string;
+  transform : transform;
+  string_replace : (string * string) option;
+  output_mapping : string option;
+  source_group : string option;
+  destination_group : string option;
+  owner : Attribute.owner;
+  method_ : method_;
+}
+
+val run : params -> Geometry.t -> (Geometry.t, Error.t) result

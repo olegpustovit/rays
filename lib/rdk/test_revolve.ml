@@ -16,7 +16,7 @@ let with_attribute owner name storage geometry =
 let with_group group geometry = Geometry.with_group group geometry |> get_string
 
 let base_profile () =
-  Line_geometry.polyline [|(1., -1., 0.); (1., 1., 0.)|] |> get_ok
+  Line_geometry_front.polyline [|(1., -1., 0.); (1., 1., 0.)|] |> get_ok
 
 let run () =
   print_endline "Revolve tests passed"

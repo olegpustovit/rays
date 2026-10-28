@@ -3,6 +3,10 @@ open Rdk_test_support
 module E = Flow.Eval
 module L = Flow_sop.Lower
 module Edit = Sop.Edit_graph
+(* default: grains 1 and 4096, 1 and 8 domains; RAYS_SLOW=1 adds grain 97 and 4 domains *)
+let slow = Sys.getenv_opt "RAYS_SLOW" = Some "1"
+let grains = if slow then [1;97;4096] else [1;4096]
+let domains = if slow then [1;4;8] else [1;8]
 let flow = function Ok x->x|Error d->failwith(Diagnostic.to_string d)
 let parse s=Flow.Syntax.parse s |>flow
 let words=[|0L;Int64.min_int;1L;0x7ff0000000000000L;0xfff0000000000000L;
@@ -115,7 +119,7 @@ let ()=
             check(geometry_bytes src=before && geometry_bytes dst=target_before)"remap mutated inputs";
             List.iter(fun a->if Attribute.owner a=Detail then
               check((Geometry.find_attribute ~owner:Detail(Attribute.name a)actual |>Option.get)==a)"Detail payload changed")
-              (Geometry.attributes src)) [1;97;4096]) [1;4;8]) [false;true]) ["target";"mapped"])
+              (Geometry.attributes src)) grains) domains) [false;true]) ["target";"mapped"])
       [0;1;2]) [0;3];
   print_endline "C3 all owner/storage raw bytes, ordinary order and edge copies across reference/CPU/domains/grains"
 let ()=
@@ -226,8 +230,8 @@ let ()=
     check((Sop.Session.stats session).misses=first.misses)"unchanged remap cache missed";
     let payload=Geometry.with_attribute(Attribute.create_owned ~owner:Attribute.Point ~name:"fresh"
       (Attribute.Int[|1;2;3|])|>get_string_ok)src|>get_string_ok in
-    let rebuild=Sop.Node.Private.rebuild_with_inputs node[|Lisp_sop.snapshot payload;Lisp_sop.snapshot dst|]
-      |>Sop.Node.Private.adopt_identity ~source:node in
+    let rebuild=Sop.Node.Build.rebuild_with_inputs node[|Lisp_sop.snapshot payload;Lisp_sop.snapshot dst|]
+      |>Sop.Node.Build.adopt_identity ~source:node in
     let actual=Sop.Session.cook session ~context rebuild |>geometry in
     check(Option.is_some(Geometry.find_attribute ~owner:Attribute.Point "fresh" actual))"cached remap stale source payload";
     check((Sop.Session.stats session).misses>first.misses)"metadata-only source update did not miss")
@@ -260,7 +264,7 @@ let ()=
   List.iter(fun reference->let node=compile ~reference src dst(args p v prim offsets ancestors "mapped") in
     List.iter(fun domains->List.iter(fun grain->check
       (geometry_bytes(geometry(run ~domains ~grain node))=geometry_bytes expected)
-      "32769-row all-storage remap differs across CPU/reference/domains/grains") [1;97;4096]) [1;4;8]) [false;true]
+      "32769-row all-storage remap differs across CPU/reference/domains/grains") grains) domains) [false;true]
 let ()=
   let src=source 3 and dst=target 2(source 3) in
   let inputs=args [|0;1;2;0;1;2|][|0;1;2;0;1;2|][|0;0|]
@@ -321,20 +325,20 @@ let ()=
     let node=Edit.compile_node graph.network.geometry ~node_id:(Option.get graph.root)|>get_string_ok in
     List.iter(fun domains->List.iter(fun grain->check
       (geometry_bytes(geometry(run ~domains ~grain node))=geometry_bytes expected)
-      "strict generated maps/raw payload differ from native oracle") [1;97;4096]) [1;4;8]) [false;true]
+      "strict generated maps/raw payload differ from native oracle") grains) domains) [false;true]
 
 let ()=
   (* A real failed child remains the first failure, with its diagnostic envelope
      and provenance unchanged; remap does not recast it as a mapping error. *)
   let child=Diagnostic.error ~cause:"raw child cause" ~hints:["keep this hint"]
     ~code:"E_CHILD" "child failed" in
-  let bad=Sop.Node.Private.make_geometry ~label:"Child" ~operation:"test.remap_child"
+  let bad=Sop.Node.Build.make_geometry ~label:"Child" ~operation:"test.remap_child"
     ~version:1 ~parameters:"" ~cook_mode:Sop.Node.Generator
     ~dependencies:Sop.Context.Dependencies.static ~inputs:[||]
     (fun ~node_id:_ _ _->Error child) in
   let src=source 3 and dst=target 1(source 3) in
   let node=compile src dst(args [|0;1;2|][|0;1;2|][|0|][|0;1;2;3|][|0;1;2|]"target") in
-  let node=Sop.Node.Private.rebuild_with_inputs node [|bad;Lisp_sop.snapshot dst|] in
+  let node=Sop.Node.Build.rebuild_with_inputs node [|bad;Lisp_sop.snapshot dst|] in
   List.iter(fun domains->match run ~domains node with
     |Ok _->fail "remap swallowed child error"
     |Error diagnostic->check(diagnostic.code=child.code && diagnostic.message=child.message
@@ -357,7 +361,7 @@ let ()=
     List.iter(fun reference->let node=compile ~reference src dst(args p v prim offsets ancestors policy) in
       List.iter(fun domains->List.iter(fun grain->check
         (geometry_bytes(geometry(run ~domains ~grain node))=geometry_bytes expected)
-        "explicit authored target topology or raw P policy differs") [1;97;4096]) [1;4;8]) [false;true])
+        "explicit authored target topology or raw P policy differs") grains) domains) [false;true])
     ["target";"mapped"]
 
 let ()=
@@ -386,7 +390,7 @@ let ()=
     let context=Sop.Context.create()|>get_string_ok in
     ignore(Sop.Session.cook session ~context node);
     List.iter(fun(source,target,values)->
-      let changed=compile source target values|>Sop.Node.Private.adopt_identity ~source:node in
+      let changed=compile source target values|>Sop.Node.Build.adopt_identity ~source:node in
       let before=Sop.Session.stats session in
       let output=Sop.Session.cook session ~context changed|>geometry in
       check((Sop.Session.stats session).misses>before.misses)"changed remap semantic input hit stale cache";
@@ -422,14 +426,14 @@ let ()=
     let node=compile src dst base in
     let context=Sop.Context.create()|>get_string_ok in
     ignore(Sop.Session.cook session ~context node);let before=Sop.Session.stats session in
-    let node=compile src dst permuted|>Sop.Node.Private.adopt_identity ~source:node in
+    let node=compile src dst permuted|>Sop.Node.Build.adopt_identity ~source:node in
     let actual=Sop.Session.cook session ~context node|>geometry in
     check((Sop.Session.stats session).misses>before.misses)"primitive ancestry cache input ignored";
     check(geometry_bytes actual=geometry_bytes expected)"primitive NaN payload/order permutation differs");
   List.iter(fun reference->let node=compile ~reference src dst permuted in
     List.iter(fun domains->List.iter(fun grain->check
       (geometry_bytes(geometry(run ~domains ~grain node))=geometry_bytes expected)
-      "primitive permutation differs by domain/grain/reference") [1;97;4096]) [1;4;8]) [false;true]
+      "primitive permutation differs by domain/grain/reference") grains) domains) [false;true]
 
 let ()=
   (* Valid geometry-host values cannot reach these native helper trust guards. *)

@@ -4,7 +4,7 @@ open Rays
 
 type 'a source = Point of 'a | Vertex of 'a
 
-let mesh_vec3 (view : Packed.Float3.View.view) : Mesh.Private.vec3_view =
+let mesh_vec3 (view : Packed.Float3.View.view) : Mesh.View.vec3_view =
   { x = view.x; y = view.y; z = view.z }
 
 let standard geometry ~name ~point_kind ~vertex_kind =
@@ -125,7 +125,7 @@ let curve_mesh geometry =
         let colors = Option.map (color_array ~expanded:true topology count) colors
         and tex_coords = Option.map
             (tex_coord_array ~expanded:true topology count) tex_coords in
-        Mesh.Private.create_packed_owned ~mode:Mesh.Lines ~indices
+        Mesh.View.create_packed_owned ~mode:Mesh.Lines ~indices
           ?normals ?colors ?tex_coords positions
       else
         let positions = Geometry.positions geometry
@@ -136,7 +136,7 @@ let curve_mesh geometry =
         let colors = Option.map (color_array ~expanded:false topology count) colors
         and tex_coords = Option.map
             (tex_coord_array ~expanded:false topology count) tex_coords in
-        Mesh.Private.create_packed_shared ~mode:Mesh.Lines ~indices
+        Mesh.View.create_packed_shared ~mode:Mesh.Lines ~indices
           ?normals ?colors ?tex_coords positions
 
 let rec to_mesh_raw_impl geometry =
@@ -145,7 +145,7 @@ let rec to_mesh_raw_impl geometry =
     curve_mesh geometry
   else if Topology.primitive_count topology <> 0 && not (Topology.all_triangles topology)
   then Result.bind
-      (Result.map_error Error.to_string (Triangulate.run geometry))
+      (Result.map_error Error.to_string (Triangulate.run { cancel = None; grain = None; primitives = None } geometry))
       to_mesh_raw_impl
   else
     match standard geometry ~name:"N" ~point_kind:float3 ~vertex_kind:float3,
@@ -169,7 +169,7 @@ let rec to_mesh_raw_impl geometry =
           and tex_coords = Option.map
               (tex_coord_array ~expanded:true topology count) tex_coords in
           let indices = Array.init count Fun.id in
-          Mesh.Private.create_packed_owned ~mode:Mesh.Triangles ~indices
+          Mesh.View.create_packed_owned ~mode:Mesh.Triangles ~indices
             ?normals ?colors ?tex_coords positions
         else
           let positions = Geometry.positions geometry
@@ -182,11 +182,11 @@ let rec to_mesh_raw_impl geometry =
           and tex_coords = Option.map
               (tex_coord_array ~expanded:false topology count) tex_coords in
           if not has_primitives then
-            Mesh.Private.create_packed_shared ~mode:Mesh.Points ?normals ?colors
+            Mesh.View.create_packed_shared ~mode:Mesh.Points ?normals ?colors
               ?tex_coords positions
           else
             let view = Topology.View.view topology in
-            Mesh.Private.create_packed_shared ~mode:Mesh.Triangles
+            Mesh.View.create_packed_shared ~mode:Mesh.Triangles
               ~indices:view.vertex_points ?normals ?colors ?tex_coords positions
 
 let protected operation work =
@@ -195,12 +195,11 @@ let protected operation work =
 let to_trace_mesh geometry =
   protected "to_trace_mesh" (fun () ->
     let ( let* ) = Result.bind in
-    let* triangles = Triangulate.run geometry |> Result.map_error Error.to_string in
-    let* triangles = Normal_ops.run ~owner:Attribute.Vertex
-        ~cusp_angle:(Float.pi /. 4.5) triangles |> Result.map_error Error.to_string in
+    let* triangles = Triangulate.run { cancel = None; grain = None; primitives = None } geometry |> Result.map_error Error.to_string in
+    let* triangles = Normal_ops.run { cancel = None; grain = None; selection = None; primitives = None; owner = Attribute.Vertex; weighting = Face_area; cusp_angle = (Float.pi /. 4.5); attribute = "N" } triangles |> Result.map_error Error.to_string in
     to_mesh_raw_impl triangles)
 
-let rdk_float3 (view : Mesh.Private.vec3_view) =
+let rdk_float3 (view : Mesh.View.vec3_view) =
   Packed.Float3.View.of_shared_exn ~x:view.x ~y:view.y ~z:view.z
 
 let color_attribute colors =
@@ -225,7 +224,7 @@ let tex_coord_attribute tex_coords =
   |> Result.get_ok
 
 let of_mesh_raw_impl mesh =
-  let view = Mesh.Private.packed_view mesh in
+  let view = Mesh.View.packed_view mesh in
   match view.mode with
   | Mesh.Points | Mesh.Triangles ->
       let positions = rdk_float3 view.vertices in

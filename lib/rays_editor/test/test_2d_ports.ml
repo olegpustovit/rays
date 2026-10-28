@@ -63,13 +63,13 @@ let pictures ?(synthetic=true) ?(first=0) name workspace domains = Parallel.run 
   Array.init 4(fun count->let frame=frame ~synthetic name (first+count) in
     let live=Flow_native.Live_frame.of_frame frame in
     ok(Flow_native.Drawing.render_prepared ~state prepared ~live ~size:frame.input.size)))
-let serialize scene=Scene.Private.commands scene |> Scene_command.Render_ir.create |> Result.get_ok
+let serialize scene=Scene.Layer.commands scene |> Scene_command.Render_ir.create |> Result.get_ok
   |> Scene_command.Render_ir.serialize
 let mode_parity ()=List.iter(fun name->
   let workspace=load name in
   (* One text cache for all modes, as Sketch.run_state installs: a fresh cache re-rasterizes text under a new image identity. *)
-  let fonts=Font.Private.create_cache_context()in
-  Fun.protect~finally:(fun()->Font.Private.clear_cache_context fonts)(fun()->Font.Private.with_cache_context fonts(fun()->
+  let fonts=Font.Raster.create_cache_context()in
+  Fun.protect~finally:(fun()->Font.Raster.clear_cache_context fonts)(fun()->Font.Raster.with_cache_context fonts(fun()->
   let expected=Array.map serialize(pictures name workspace 1)in
   List.iter(fun(_,domains)->
     let actual=Array.map serialize(pictures name workspace domains)in

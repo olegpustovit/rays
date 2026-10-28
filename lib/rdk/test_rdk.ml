@@ -89,7 +89,7 @@ let run () =
   if Group.cardinality selected <> 2 then fail "packed group cardinality";
   let quad_mesh = Rdk_rays.Rays_mesh.to_mesh geometry |> get_ok in
   if Mesh.index_count quad_mesh <> 6 then fail "quad bridge triangulation";
-  let extruded = Poly_extrude.run ~distance:2. geometry |> get_ok in
+  let extruded = Poly_extrude_front.run ~distance:2. geometry |> get_ok in
   if Geometry.point_count extruded <> 8
      || Geometry.primitive_count extruded <> 6
      || Geometry.vertex_count extruded <> 24

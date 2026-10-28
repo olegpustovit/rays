@@ -61,7 +61,7 @@ let with_point_weight value geometry =
   Geometry.with_attribute attribute geometry |> get_string
 
 let with_vertex_normals ?(cusp_angle = Float.pi) geometry =
-  Normal_ops.run ~grain:1 ~owner:Attribute.Vertex ~cusp_angle geometry |> get
+  Normal_ops_front.run ~grain:1 ~owner:Attribute.Vertex ~cusp_angle geometry |> get
 
 let test_solid_products () =
   let left = tetra ~origin:(0.,0.,0.) 2.
@@ -284,7 +284,7 @@ let test_output_policies () =
       ~connectivity:Box_generator.Box_quads ~consolidate_points:true () |> get in
   let cut = Boolean_front.run ~grain:1 ~operation:Boolean_solid.Difference
       ~detriangulation:Boolean_materialization.All_polygons ~right:cutter host |> get in
-  ignore (Triangulate.run ~grain:1 cut |> get)
+  ignore (Triangulate_front.run ~grain:1 cut |> get)
 
 let test_errors () =
   let left = tetra ~origin:(0.,0.,0.) 1.

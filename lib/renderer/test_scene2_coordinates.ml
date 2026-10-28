@@ -80,7 +80,7 @@ let run () =
   let run ~logical_width ~logical_height ~drawable_width ~drawable_height ~scale =
     with_target ~logical_width ~logical_height ~drawable_width ~drawable_height
       (fun execution ->
-        let facts = get (Runtime.presentation_facts (Renderer.Private.runtime execution)) in
+        let facts = get (Runtime.presentation_facts (Renderer.Native.runtime execution)) in
         require (facts.logical_width = logical_width
           && facts.logical_height = logical_height
           && facts.drawable_width = drawable_width
@@ -89,7 +89,7 @@ let run () =
         let render commands =
           let ir = get_ir (Scene_command.Render_ir.create commands) in
           let pixels = Test_ui_pipeline.capture ~clear:(0.,0.,0.,1.) execution
-            (fun submission -> Renderer.Private.lower_scene2 submission
+            (fun submission -> Renderer.Native.lower_scene2 submission
               ~density:scale ~resource:(fun _ -> None) ir) in
           require (Bytes.length pixels = drawable_width * drawable_height * 4)
             "coordinate readback length";

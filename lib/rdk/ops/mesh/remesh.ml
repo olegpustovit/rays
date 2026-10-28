@@ -1635,7 +1635,7 @@ let run ({ cancel; grain; iterations; smoothing; project; use_input_points_only;
       Result.bind (install_feature_groups ?cancel ~grain ~hard_points ~hard_edges
           ~preserve_uv_seams ~uv_attribute ~point_name ~edge_name geometry)
         (fun prepared ->
-      Result.bind (Ok (Error.get (Triangulate.run ?cancel ~grain prepared))) (fun initial ->
+      Result.bind (Ok (Error.get (Triangulate.run { cancel; grain = Some grain; primitives = None } prepared))) (fun initial ->
       let current = ref initial in
       let failure = ref None and iteration = ref 0 in
       let projection_scratch = ref None in
@@ -1697,10 +1697,7 @@ let run ({ cancel; grain; iterations; smoothing; project; use_input_points_only;
                let constrained = constraint_group l point_map ~hard ~feature
                    ~name:"__rdk_remesh_constraints"
                    (Geometry.point_count !current) in
-               (match Smooth.run ?cancel ~grain ~constrained_points:constrained
-                   ~boundary:Smooth.Smooth_unshared ~iterations:1
-                   ~mode:(Attribute_blur.Laplacian smoothing)
-                   ~recompute_normals:false ~attributes:"P" !current with
+               (match Smooth.run { cancel; grain = Some grain; constrained_points = Some constrained; boundary = Smooth.Smooth_unshared; iterations = 1; mode = (Attribute_blur.Laplacian smoothing); recompute_normals = false; attributes = "P" } !current with
                 | Error error when Error.code error = "cancelled" ->
                     raise Cancel.Cancelled
                 | Error error -> failure := Some (Error.to_string error)
@@ -1723,7 +1720,7 @@ let run ({ cancel; grain; iterations; smoothing; project; use_input_points_only;
               |> Geometry.without_attribute ~owner:Attribute.Point "N"
               |> Geometry.without_attribute ~owner:Attribute.Vertex "N" in
           let with_normals = if not recompute_point_normals then Ok output
-            else Deform.normals ?cancel ~grain output in
+            else Deform.normals { cancel; grain; primitives = None } output in
           Result.bind with_normals (fun output ->
           Result.bind (install_outputs ?cancel ~grain ~target_length
               ~target_size_attribute ~edge_name ~output_hard_edges

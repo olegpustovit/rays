@@ -704,7 +704,8 @@ let lisp_facts t =
     sun = (match t.world with Some { sun = Some sun; _ } -> sun.angular_radius > 0. | _ -> false);
     bsdf_only = t.bsdf_only; instanced = t.gpu.shape.instanced; classes = t.gpu.tables.classes;
     motion = t.gpu.shape.motion;
-    curves = (if t.gpu.tables.strand_count = 0 then None else if t.gpu.curves = None then Some `Loop else Some `Native) }
+    curves = (if t.gpu.tables.strand_count = 0 then None else if t.gpu.curves = None then Some `Loop else Some `Native);
+    spheres = t.gpu.tables.sphere_count > 0 }
 
 (* ponytail: four specializations kept, the oldest closed once no frame reads it; an LRU would keep the
    shapes an editor toggles between. *)

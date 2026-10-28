@@ -47,7 +47,7 @@ let check (o : Op.t) args =
   with Diagnostic.Error d -> failwith (o.name ^ ": " ^ d.code ^ ": " ^ d.message)
 
 let () =
-  assert (List.length Op.all = 183);
+  assert (List.length Op.all = 197);
   for id = 0 to 9 do Ray_host.register id (fun _ -> Ray_host.miss) done;
   let repr=Option.get(Op.find "text/repr" Context.value) in
   List.iter(fun text -> assert(check repr ["text",Text text]=Text(Printf.sprintf "%S" text)))
@@ -88,7 +88,7 @@ let () =
     match o.body ~live:(Input.at_time 0.) ~node:(fun _ _ -> assert false)
       (List.map (fun (n, t) -> n, sample n t) o.signature.pos) with
     | exception Diagnostic.Error d -> assert (d.code = "E_GPU_STAGE")
-    | _ -> assert false) ["gpu/fwidth"; "gpu/sample"; "gpu/sample-level"; "gpu/read"; "gpu/texture-size"; "gpu/instance-id"; "gpu/front-facing"; "gpu/depth"; "gpu/fragment-x"; "gpu/fragment-y"];
+    | _ -> assert false) ["gpu/fwidth"; "gpu/sample"; "gpu/sample-level"; "gpu/read"; "gpu/texture-size"; "gpu/instance-id"; "gpu/front-facing"; "gpu/depth"; "gpu/fragment-x"; "gpu/fragment-y"; "gpu/trace-triangles"; "gpu/trace-any"; "gpu/trace-curves"; "gpu/trace-curves-any"; "gpu/scene-vertex"; "gpu/scene-vertex-end"; "gpu/scene-instance"; "gpu/scene-sphere"; "gpu/scene-strand"; "gpu/scene-spheres"; "gpu/scene-strands"; "gpu/group-scan"; "gpu/store"; "gpu/store-int"];
   List.iter (fun ctx ->
     List.iter (fun (o : Op.t) -> assert (o.ctx = ctx || o.ctx = Context.value)) (Op.of_context ctx)) (Context.all ());
   assert ((Option.get (Op.find "rand" Context.scene)).name = "value/rand");

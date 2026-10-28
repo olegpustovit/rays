@@ -508,7 +508,7 @@ index. A builder is single-domain owned. Parallel work may fill only
 preallocated disjoint ranges and may not grow topology or mutate the attribute
 schema concurrently.
 
-`Rdk.Kernel` is the expert VEX-like surface. Bindings are validated once, then
+`Rdk.Geometry.generate_point_ranges` is the expert VEX-like surface. Bindings are validated once, then
 the same native OCaml loop runs through stable chunks using the process-wide
 `Parallel` pool. It never creates a pool per operation, task, or frame.
 Topology mutation is not permitted inside an element kernel. Reductions use a

@@ -206,10 +206,21 @@ let endpoint_tree_nearest ?cancel tree query_endpoint =
   in
   visit tree.root
 
-let join ?cancel ?grain ?primitives ?picked_ends ?(orient_closest = true)
-    ?(connect_closest_ends = false) ?(only_connected = false)
-    ?group_size ?(keep_originals = false) ?(tolerance = 0.)
-    ?(wrap = false) geometry =
+type params = {
+  cancel : Cancel.t option;
+  grain : int option;
+  primitives : Group.t option;
+  picked_ends : curve_join_pick array option;
+  orient_closest : bool;
+  connect_closest_ends : bool;
+  only_connected : bool;
+  group_size : int option;
+  keep_originals : bool;
+  tolerance : float;
+  wrap : bool;
+}
+
+let join ({ cancel; grain; primitives; picked_ends; orient_closest; connect_closest_ends; only_connected; group_size; keep_originals; tolerance; wrap } : params) geometry =
   try
     if not (Float.is_finite tolerance) || tolerance < 0. then
       fail "Curve Join tolerance must be finite and non-negative";

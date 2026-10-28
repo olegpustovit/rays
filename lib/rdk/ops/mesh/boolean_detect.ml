@@ -106,15 +106,11 @@ let detect_pairs ?cancel ~grain ~tolerance ~include_coplanar ~self
       collision_geometry in
   let byte_count = Bytes.length keep in
   let byte_grain = max 1 (grain / 8) in
-  let range_count = (byte_count / byte_grain)
-      + if byte_count mod byte_grain = 0 then 0 else 1 in
-  if range_count > 0 then Parallel.for_ ~chunk_size:1
-      ~start:0 ~finish:(range_count - 1) (fun range ->
+  Support.run_indexed_ranges ~grain:byte_grain byte_count (fun ~range:range ~first:first_byte ~last:last_byte ->
     let scratch = Array.make 26 0. and point_info = Array.make 10 0
     and events = Array.make
         (Triangle_intersection.max_events * Triangle_intersection.event_stride) 0. in
-    let first_byte = range * byte_grain
-    and last_byte = min byte_count ((range + 1) * byte_grain) in
+
     for byte = first_byte to last_byte - 1 do
       let first = byte * 8 in
       let last = min candidates (first + 8) and bits = ref 0 in

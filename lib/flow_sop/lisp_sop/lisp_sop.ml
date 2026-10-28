@@ -3,16 +3,16 @@ let factories = Sop.Nodes.factories
 let snapshot geometry =
   let parameters = Printf.sprintf "data_id=%d;bytes=%d"
       (Rdk.Geometry.data_id geometry) (Rdk.Geometry.payload_bytes geometry) in
-  Sop.Node.Private.make_geometry ~operation:"snapshot" ~version:1 ~parameters
+  Sop.Node.Build.make_geometry ~operation:"snapshot" ~version:1 ~parameters
     ~cook_mode:Sop.Node.Generator
     ~dependencies:Sop.Context.Dependencies.static ~inputs:[||]
     (fun ~node_id:_ _context _inputs ->
-      Ok Sop.Node.Private.{geometry; instances = None})
+      Ok Sop.Node.Build.{geometry; instances = None})
 
 (* An external node may itself have inputs, but a factory node cannot: the lowering sees an
    input-free marker per external node and the real nodes are put back afterwards. *)
 let marker name =
-  Sop.Node.Private.make_geometry ~operation:"lisp_sop_ext" ~version:1
+  Sop.Node.Build.make_geometry ~operation:"lisp_sop_ext" ~version:1
     ~parameters:name ~cook_mode:Sop.Node.Generator
     ~dependencies:Sop.Context.Dependencies.static ~inputs:[||]
     (fun ~node_id:_ _context _inputs -> failwith "Lisp_sop: marker cooked")
@@ -26,7 +26,7 @@ let restore with_ root =
       | inputs ->
           let rebuilt = List.map go inputs in
           if List.for_all2 (==) inputs rebuilt then node
-          else Node.Private.rebuild_with_inputs node (Array.of_list rebuilt) in
+          else Node.Build.rebuild_with_inputs node (Array.of_list rebuilt) in
   go root
 
 let workspace_node_result ?(with_ = []) source =

@@ -22,7 +22,7 @@ let geometry () =
       ~owner:Rdk.Attribute.Primitive (Rdk.Attribute.Int [|0; 1|]) |> string_ok in
   Rdk.Geometry.with_attribute pieces geometry |> string_ok
 
-let positions mesh = (Rays.Mesh.Private.packed_view mesh).vertices
+let positions mesh = (Rays.Mesh.View.packed_view mesh).vertices
 
 let frame mouse_buttons = {
   Rays.Frame.input = { (Input.at_time 0.) with frame = 0; tick = 0; size = 100, 100;
@@ -131,7 +131,7 @@ let run () =
   if positions (Rdk_rays.Packed_pieces.mesh_for_explosion None pieces) <> base then
     fail "a zero explosion moved the pieces";
   let base_normals = (exploded pieces ":amount 0.0"
-      |> Rays.Mesh.Private.packed_view).normals |> Option.get in
+      |> Rays.Mesh.View.packed_view).normals |> Option.get in
   if not (Array.for_all (( = ) 0.) base_normals.x
       && Array.for_all (( = ) 1.) base_normals.y
       && Array.for_all (( = ) 0.) base_normals.z) then

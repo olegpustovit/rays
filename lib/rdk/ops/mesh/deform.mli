@@ -9,8 +9,10 @@ val resolve_directions :
   ?cancel:Rdk_core.Cancel.t ->
   grain:int ->
   Rdk_core.Geometry.t -> (planes, string) result
-val normals :
-  ?cancel:Rdk_core.Cancel.t ->
-  grain:int ->
-  ?primitives:Rdk_core.Group.t ->
-  Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, string) result
+type params = {
+  cancel : Rdk_core.Cancel.t option;
+  grain : int;
+  primitives : Rdk_core.Group.t option;
+}
+
+val normals : params -> Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, string) result

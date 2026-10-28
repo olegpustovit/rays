@@ -14,7 +14,7 @@ let of_geometry ?instances geometry =
     ["piece"; "material_color"; "material_roughness"; "material_emission"; "material_round"] in
   let* geometry = if not needs_triangles || Topology.all_triangles (Geometry.topology geometry)
       || Geometry.primitive_count geometry = 0 then Ok geometry
-    else Triangulate.run geometry |> Result.map_error Error.to_string in
+    else Triangulate.run { cancel = None; grain = None; primitives = None } geometry |> Result.map_error Error.to_string in
   let* preview = match Geometry.find_attribute ~owner:Attribute.Primitive "piece" geometry with
     | Some _ when Geometry.primitive_count geometry > 0 -> Packed_pieces.of_geometry ~piece_attribute:"piece" geometry
         |> Result.map (fun p -> Pieces p)
@@ -82,10 +82,10 @@ let scene3 ?explosion surface =
   let drawings = match surface.batches with
     | [] -> [draw Material.default mesh]
     | batches ->
-        let view = Mesh.Private.packed_view mesh in
+        let view = Mesh.View.packed_view mesh in
         List.map (fun (material, offsets) ->
           let indices = Array.map (Array.get view.indices) offsets in
-          let mesh = Mesh.Private.create_packed_shared ~mode:view.mode ~indices
+          let mesh = Mesh.View.create_packed_shared ~mode:view.mode ~indices
               ?normals:view.normals ?colors:view.colors ?tex_coords:view.tex_coords view.vertices
             |> Result.get_ok in
           draw material mesh) batches in

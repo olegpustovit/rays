@@ -37,5 +37,5 @@ let x_of prepared = let x, _, _ = first_point prepared in x
 
 (* the meshes a prepared surface draws *)
 let meshes (prepared : Cook.prepared) =
-  List.map (fun (d : Rays.Scene.D3.Private.drawing) -> d.mesh)
-    (Rays.Scene.D3.Private.drawings (Rdk_rays.Surface.scene3 prepared.surface))
+  List.map (fun (d : Rays.Scene.D3.Walk.drawing) -> d.mesh)
+    (Rays.Scene.D3.Walk.drawings (Rdk_rays.Surface.scene3 prepared.surface))

@@ -21,6 +21,12 @@ let catalog = Kinds.catalog ~version:1 factories |> Result.get_ok
 let show ds = String.concat "; " (List.map Diagnostic.to_string ds)
 open Test_text
 
+(* a small garden: the shell tests look at panels and edits, not at 40 scattered spheres a cook *)
+let case name =
+  let text = case name in
+  if name <> "variations" then text
+  else Str.replace_first (Str.regexp_string "(count : int 40)") "(count : int 3)" text
+
 let of_text text = match Doc.of_text catalog text with Ok d -> d | Error ds -> fail (show ds)
 let build ?previous ws = Lowering.of_workspace ~factories ?previous ws
 let build_ok ws = match build ws with Ok d -> d | Error d -> fail (Diagnostic.to_string d)
@@ -976,10 +982,10 @@ let run_views () =
   for c = 200 to 230 do e := E3.update !e (frame (450., 300.) [] c) done;
   let scene = E3.scene !e (frame (450., 300.) [] 231) in
   Fun.protect ~finally:(fun () -> E3.close !e) (fun () ->
-  match Scene.Private.stage_native ~width:900 ~height:640 scene with
+  match Scene.Layer.stage_native ~width:900 ~height:640 scene with
   | Error m -> fail m
   | Ok staged ->
-      let viewports = List.length (List.filter (function Scene.Private.Scene3_layer _ -> true | _ -> false) staged.layers) in
+      let viewports = List.length (List.filter (function Scene.Layer.Scene3_layer _ -> true | _ -> false) staged.layers) in
       check (viewports = 4) (Printf.sprintf "four viewports draw four 3D layers, got %d" viewports))
 
 (* ---- the copies of a loop are one template, through the editor ---- *)
@@ -2510,8 +2516,8 @@ let run_view_native () =
         let explosion = Rdk_rays.Packed_pieces.explosion
             ~operation:(Node.operation node) ~fields:(Node.parameter_fields node) in
         let scene = Rdk_rays.Surface.scene3 ?explosion prepared.surface in
-        vertices := List.concat_map (fun (d : Scene.D3.Private.drawing) -> Mesh.vertices d.mesh)
-          (Scene.D3.Private.drawings scene);
+        vertices := List.concat_map (fun (d : Scene.D3.Walk.drawing) -> Mesh.vertices d.mesh)
+          (Scene.D3.Walk.drawings scene);
         scene) () |> Result.get_ok)
     ~update:(fun e (frame : Frame.t) ->
       let e = if frame.input.frame = 28 then
@@ -2598,9 +2604,9 @@ let run_renderers_native ?(authored = false) () =
     ~init:(fun _ -> E3.create ~ui_text_size:11 ~await:true ~workspace ~presets:(Filename.concat directory "presets")
       ~prepare:Editor_prepare.surface
       ~draw:(fun _ (prepared : Rays_editor__.Cook.prepared) ->
-        Scene.D3.create (List.map (fun (d : Scene.D3.Private.drawing) -> Scene.D3.mesh
+        Scene.D3.create (List.map (fun (d : Scene.D3.Walk.drawing) -> Scene.D3.mesh
           ~material:(Material.unlit (Rays_math.Color.rgb 200 20 200)) d.mesh)
-          (Scene.D3.Private.drawings (Rdk_rays.Surface.scene3 prepared.surface)))) () |> Result.get_ok)
+          (Scene.D3.Walk.drawings (Rdk_rays.Surface.scene3 prepared.surface)))) () |> Result.get_ok)
     ~update:(fun e (frame : Frame.t) ->
       let mode = if frame.input.frame < 10 || frame.input.frame >= 40 then Rays_editor.Renderer.Raster
         else if frame.input.frame < 25 then Wireframe else Path_traced in
