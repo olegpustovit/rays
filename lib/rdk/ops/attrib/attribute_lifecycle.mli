@@ -10,16 +10,17 @@ type rename_rule = {
   rename_attribute_conflict : rename_conflict;
 }
 
-val delete :
-  ?cancel:Cancel.t ->
-  ?reference:Geometry.t ->
-  ?delete_non_selected:bool ->
-  ?point_pattern:string ->
-  ?vertex_pattern:string ->
-  ?primitive_pattern:string ->
-  ?detail_pattern:string ->
-  Geometry.t ->
-  (Geometry.t, string) result
+type delete_params = {
+  cancel : Cancel.t option;
+  reference : Geometry.t option;
+  delete_non_selected : bool;
+  point_pattern : string option;
+  vertex_pattern : string option;
+  primitive_pattern : string option;
+  detail_pattern : string option;
+}
+
+val delete : delete_params -> Geometry.t -> (Geometry.t, string) result
 
 val rename :
   ?cancel:Cancel.t ->

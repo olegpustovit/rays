@@ -579,8 +579,9 @@ arr1[0.;-0.;0.];arr1[1e16;1.;-1e16];
     let result=try
       delete.check args;
       let for_owner key=if key=owner then pattern else "" in
-      match Rdk.Attribute_ops.delete ~point_pattern:(for_owner "point") ~vertex_pattern:(for_owner "vertex")
-        ~primitive_pattern:(for_owner "primitive") ~detail_pattern:(for_owner "detail") geometry with
+      match Rdk.Attribute_ops.delete { cancel = None; reference = None; delete_non_selected = false;
+        point_pattern = Some (for_owner "point"); vertex_pattern = Some (for_owner "vertex");
+        primitive_pattern = Some (for_owner "primitive"); detail_pattern = Some (for_owner "detail") } geometry with
       |Ok g->json (geometry_value g)
       |Error e->Printf.sprintf {|{"error":{"code":"E_ATTR_DELETE","message":%s}}|} (str (Rdk.Error.to_string e))
       with Diagnostic.Error d -> Printf.sprintf {|{"error":{"code":%s,"message":%s}}|} (str d.code) (str d.message) in
@@ -1280,8 +1281,9 @@ arr1[0.;-0.;0.];arr1[1e16;1.;-1e16];
     add_host "sop/delete_attrs" [geometry_value metadata_geometry;reference_value;E.Bool inverse;E.Text point;E.Text"";E.Text"N";E.Text"*"]
       (metadata_result "sop/delete_attrs" ["inverse",E.Bool inverse;"point",E.Text point;"vertex",E.Text"";
         "primitive",E.Text"N";"detail",E.Text"*"]
-        (fun()->Rdk.Attribute_ops.delete ?reference ~delete_non_selected:inverse
-          ~point_pattern:point ~vertex_pattern:"" ~primitive_pattern:"N" ~detail_pattern:"*" metadata_geometry)))
+        (fun()->Rdk.Attribute_ops.delete { cancel = None; reference; delete_non_selected = inverse;
+          point_pattern = Some point; vertex_pattern = Some ""; primitive_pattern = Some "N";
+          detail_pattern = Some "*" } metadata_geometry)))
     ["";"*";"^N";"mask_* ^mask_1";"["]) [false;true]) [None;Some metadata_geometry];
   List.iter(fun(owner,selected)->
     List.iter(fun(pattern,replacement)->List.iter(fun(conflict,policy)->

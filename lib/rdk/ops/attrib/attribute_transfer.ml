@@ -259,9 +259,8 @@ let primitive_barycenters ?cancel ~grain geometry =
         z.(primitive) <- !sz *. scale);
   Packed.Float3.View.of_owned_exn ~x ~y ~z
 
-let spatial_transfer ?cancel ?(grain = 16_384) ?names ?pattern
-    ?(mode = Nearest) ?max_distance ?(blend_width = 0.)
-    ?(falloff = Smoothstep) ?(unmatched = Keep_target)
+let spatial_transfer ?cancel ~grain ?names ?pattern
+    ~mode ?max_distance ~blend_width ~falloff ~unmatched
     ?source_elements ?target_elements
     ~operation ~owner ~source_positions ~target_positions ~source ~target () =
   if owner = Attribute.Detail || owner = Attribute.Vertex then invalid_arg
@@ -490,9 +489,25 @@ let spatial_transfer ?cancel ?(grain = 16_384) ?names ?pattern
             (fun index -> make_attribute attributes.(index)))
           (install_attributes_batch target)))))))
 
-let spatial ?cancel ?grain ?names ?pattern ?mode ?max_distance
-    ?blend_width ?falloff ?unmatched ?source_elements ?target_elements
-    ~owner ~source ~target () =
+type spatial_params = {
+  cancel : Cancel.t option;
+  grain : int option;
+  names : string list option;
+  pattern : string option;
+  mode : mode;
+  max_distance : float option;
+  blend_width : float;
+  falloff : falloff;
+  unmatched : unmatched;
+  source_elements : Group.t option;
+  target_elements : Group.t option;
+  source : Geometry.t;
+  target : Geometry.t;
+}
+
+let spatial ~owner ({ cancel; grain; names; pattern; mode; max_distance;
+    blend_width; falloff; unmatched; source_elements; target_elements;
+    source; target } : spatial_params) =
   Error.guard ~cancelled:"attribute transfer was cancelled" ~invalid_argument:"invalid_position" ~operation:"attribute_transfer"
     ~code:"invalid_transfer" @@ fun () ->
   let grain = Option.value ~default:16_384 grain in
@@ -507,25 +522,21 @@ let spatial ?cancel ?grain ?names ?pattern ?mode ?max_distance
         (fun () -> primitive_barycenters ?cancel ~grain target)
     | Attribute.Vertex | Attribute.Detail ->
         invalid_arg "Rdk.Attribute_ops.transfer: owner must be point or primitive" in
-  spatial_transfer ?cancel ~grain ?names ?pattern ?mode ?max_distance
-    ?blend_width ?falloff ?unmatched ?source_elements ?target_elements
+  spatial_transfer ?cancel ~grain ?names ?pattern ~mode ?max_distance
+    ~blend_width ~falloff ~unmatched ?source_elements ?target_elements
     ~operation ~owner ~source_positions ~target_positions ~source ~target ()
 
-let transfer_points ?cancel ?grain ?names ?pattern ?mode ?max_distance
-    ?blend_width ?falloff ?unmatched ?source_points ?target_points
-    ~source ~target () =
-  spatial ?cancel ?grain ?names ?pattern ?mode ?max_distance ?blend_width
-    ?falloff ?unmatched ?source_elements:source_points
-    ?target_elements:target_points ~owner:Attribute.Point ~source ~target ()
+let transfer_points = spatial ~owner:Attribute.Point
+let transfer_primitives = spatial ~owner:Attribute.Primitive
 
-let transfer_primitives ?cancel ?grain ?names ?pattern ?mode ?max_distance
-    ?blend_width ?falloff ?unmatched ?source_primitives ?target_primitives
-    ~source ~target () =
-  spatial ?cancel ?grain ?names ?pattern ?mode ?max_distance ?blend_width
-    ?falloff ?unmatched ?source_elements:source_primitives
-    ?target_elements:target_primitives ~owner:Attribute.Primitive ~source ~target ()
+type detail_params = {
+  names : string list option;
+  pattern : string option;
+  source : Geometry.t;
+  target : Geometry.t;
+}
 
-let transfer_detail ?names ?pattern ~source ~target () =
+let transfer_detail ({ names; pattern; source; target } : detail_params) =
   Error.guard ~operation:"attribute_transfer"
     ~code:"invalid_transfer" @@ fun () ->
   Result.bind (selected_attributes ~operation:"Rdk.Attribute_ops.transfer_detail"
@@ -553,12 +564,29 @@ let surface_attribute ?into ~owner name =
     invalid_arg "Rdk.Attribute_ops.surface_attribute: canonical P is not an ordinary attribute";
   { source_owner = owner; source_name = name; target_name }
 
-let transfer_surface ?cancel ?(grain = 16_384) ?max_distance
-    ?(blend_width = 0.) ?(falloff = Smoothstep) ?(unmatched = Keep_target)
-    ?(target_owner = Attribute.Point) ?distance_attribute ?source_primitives
-    ?source_vertices ?(source_vertex_selection = Surface_index.All_triangle_vertices)
-    ?target_elements
-    ~attributes ~source ~target () =
+type surface_params = {
+  cancel : Cancel.t option;
+  grain : int option;
+  max_distance : float option;
+  blend_width : float;
+  falloff : surface_falloff;
+  unmatched : unmatched;
+  target_owner : Attribute.owner;
+  distance_attribute : string option;
+  source_primitives : Group.t option;
+  source_vertices : Group.t option;
+  source_vertex_selection : Surface_index.vertex_selection;
+  target_elements : Group.t option;
+  attributes : surface_attribute list;
+  source : Geometry.t;
+  target : Geometry.t;
+}
+
+let transfer_surface ({ cancel; grain; max_distance; blend_width; falloff;
+    unmatched; target_owner; distance_attribute; source_primitives;
+    source_vertices; source_vertex_selection; target_elements; attributes;
+    source; target } : surface_params) =
+  let grain = Option.value ~default:16_384 grain in
   Error.guard ~cancelled:"surface attribute transfer was cancelled" ~invalid_argument:"invalid_position" ~operation:"attribute_transfer_surface"
     ~code:"invalid_transfer" @@ fun () ->
   if grain <= 0 then invalid_arg
@@ -807,10 +835,26 @@ let transfer_surface ?cancel ?(grain = 16_384) ?max_distance
             (Attribute.Float values)))
         (install_attributes_batch target))
 
-let transfer_vertices ?cancel ?grain ?names ?pattern ?max_distance
-    ?blend_width ?falloff ?unmatched ?source_primitives ?source_vertices
-    ?source_vertex_selection ?target_vertices
-    ~source ~target () =
+type vertices_params = {
+  cancel : Cancel.t option;
+  grain : int option;
+  names : string list option;
+  pattern : string option;
+  max_distance : float option;
+  blend_width : float;
+  falloff : falloff;
+  unmatched : unmatched;
+  source_primitives : Group.t option;
+  source_vertices : Group.t option;
+  source_vertex_selection : Surface_index.vertex_selection;
+  target_vertices : Group.t option;
+  source : Geometry.t;
+  target : Geometry.t;
+}
+
+let transfer_vertices ({ cancel; grain; names; pattern; max_distance;
+    blend_width; falloff; unmatched; source_primitives; source_vertices;
+    source_vertex_selection; target_vertices; source; target } : vertices_params) =
   Error.guard ~cancelled:"attribute transfer was cancelled" ~invalid_argument:"invalid_position" ~operation:"attribute_transfer"
     ~code:"invalid_transfer" @@ fun () ->
   Result.bind (selected_attributes
@@ -818,32 +862,51 @@ let transfer_vertices ?cancel ?grain ?names ?pattern ?max_distance
       ~owner:Attribute.Vertex ~names ~pattern source) (fun attributes ->
     let attributes = Array.to_list attributes |> List.map (fun attribute ->
       surface_attribute ~owner:Attribute.Vertex (Attribute.name attribute)) in
-    Ok (Error.get (transfer_surface ?cancel ?grain ?max_distance ?blend_width
-      ?falloff ?unmatched ~target_owner:Attribute.Vertex ?source_primitives
-      ?source_vertices ?source_vertex_selection
-      ?target_elements:target_vertices ~attributes ~source ~target ())))
+    Ok (Error.get (transfer_surface { cancel; grain; max_distance; blend_width;
+      falloff; unmatched; target_owner = Attribute.Vertex;
+      distance_attribute = None; source_primitives; source_vertices;
+      source_vertex_selection; target_elements = target_vertices; attributes;
+      source; target })))
 
-let transfer_all ?cancel ?grain ?point_pattern ?vertex_pattern
-    ?primitive_pattern ?detail_pattern ?mode ?max_distance ?blend_width ?falloff
-    ?unmatched ~source ~target () =
+type all_params = {
+  cancel : Cancel.t option;
+  grain : int option;
+  point_pattern : string option;
+  vertex_pattern : string option;
+  primitive_pattern : string option;
+  detail_pattern : string option;
+  mode : mode;
+  max_distance : float option;
+  blend_width : float;
+  falloff : falloff;
+  unmatched : unmatched;
+  source : Geometry.t;
+  target : Geometry.t;
+}
+
+let transfer_all ({ cancel; grain; point_pattern; vertex_pattern;
+    primitive_pattern; detail_pattern; mode; max_distance; blend_width;
+    falloff; unmatched; source; target } : all_params) =
   Error.guard ~cancelled:"multi-owner attribute transfer was cancelled" ~invalid_argument:"invalid_position" ~operation:"attribute_transfer_all"
     ~code:"invalid_transfer" @@ fun () ->
   let apply pattern transfer geometry = match pattern with
     | None -> Ok geometry
     | Some pattern -> transfer ~pattern geometry in
-  Result.bind
-    (apply point_pattern (fun ~pattern target ->
-       Ok (Error.get (spatial ?cancel ?grain ~pattern ?mode ?max_distance
-         ?blend_width ?falloff ?unmatched ~owner:Attribute.Point
-         ~source ~target ()))) target)
+  let spatial_step owner ~pattern target =
+    Ok (Error.get (spatial ~owner { cancel; grain; names = None;
+      pattern = Some pattern; mode; max_distance; blend_width; falloff;
+      unmatched; source_elements = None; target_elements = None; source;
+      target })) in
+  Result.bind (apply point_pattern (spatial_step Attribute.Point) target)
     (fun target -> Result.bind
-      (apply primitive_pattern (fun ~pattern target ->
-         Ok (Error.get (spatial ?cancel ?grain ~pattern ?mode ?max_distance
-           ?blend_width ?falloff ?unmatched ~owner:Attribute.Primitive
-           ~source ~target ()))) target)
+      (apply primitive_pattern (spatial_step Attribute.Primitive) target)
       (fun target -> Result.bind
         (apply vertex_pattern (fun ~pattern target ->
-           Ok (Error.get (transfer_vertices ?cancel ?grain ~pattern ?max_distance
-             ?blend_width ?falloff ?unmatched ~source ~target ()))) target)
+           Ok (Error.get (transfer_vertices { cancel; grain; names = None;
+             pattern = Some pattern; max_distance; blend_width; falloff;
+             unmatched; source_primitives = None; source_vertices = None;
+             source_vertex_selection = Surface_index.All_triangle_vertices;
+             target_vertices = None; source; target }))) target)
         (fun target -> apply detail_pattern (fun ~pattern target ->
-           Ok (Error.get (transfer_detail ~pattern ~source ~target ()))) target)))
+           Ok (Error.get (transfer_detail { names = None;
+             pattern = Some pattern; source; target }))) target)))

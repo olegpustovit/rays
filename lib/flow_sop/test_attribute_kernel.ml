@@ -724,14 +724,14 @@ let () =
       let result = cook session ~domains ~time:0.
         (Sop.Node.Build.rebuild_with_inputs node [|source|]) |> geometry in
       assert ((Session.stats session).misses=before.misses && (Session.stats session).hits=before.hits+2);
-      let expected = Attribute_ops.delete ~point_pattern:"N" changed |> get_ok in
+      let expected = Attribute_ops_front.delete ~point_pattern:"N" changed |> get_ok in
       assert (geometry_bytes result=geometry_bytes expected);
       List.iter (fun pattern ->
         let node = Lisp_sop.node ~with_:["source", source]
           (Printf.sprintf "(sop/delete_attr (sop/ext_source) %S :owner \"point\")" pattern) in
         assert ((Sop.Node.facts node).reads=["*"] && (Sop.Node.facts node).writes=["*"]);
         let result = cook session ~domains ~time:0. node |> geometry in
-        let expected = Attribute_ops.delete ~point_pattern:pattern changed |> get_ok in
+        let expected = Attribute_ops_front.delete ~point_pattern:pattern changed |> get_ok in
         assert (geometry_bytes result=geometry_bytes expected)) ["N*"; "N Cd"; "^Cd"])) [1;8];
   print_endline "Attribute deletion: selective refresh carries same-name owners; patterns stay conservative at one/eight domains"
 

@@ -507,10 +507,11 @@ module Attribute_transfer_all = struct
       ~inputs:[|source; target|]
       (fun ~node_id:_ context inputs ->
         match Rdk.Attribute_ops.transfer_all
-            ~cancel:(Context.cancel_token context) ~grain:(Context.grain context)
-            ?point_pattern ?vertex_pattern ?primitive_pattern ?detail_pattern
-            ~mode ?max_distance ~blend_width ~falloff ~unmatched
-            ~source:inputs.(0) ~target:inputs.(1) () with
+            { cancel = Some (Context.cancel_token context);
+              grain = Some (Context.grain context);
+              point_pattern; vertex_pattern; primitive_pattern; detail_pattern;
+              mode; max_distance; blend_width; falloff; unmatched;
+              source = inputs.(0); target = inputs.(1) } with
         | Ok geometry -> cooked geometry
         | Error error -> structured_rdk_error error)
   )
@@ -652,12 +653,11 @@ module Attribute_transfer_surface = struct
              | Error error -> Error error
              | Ok target_points ->
                  match Rdk.Attribute_ops.transfer_surface
-                     ~cancel ~grain ?max_distance ~blend_width
-                     ~falloff ~unmatched ~target_owner ?distance_attribute
-                     ?source_primitives ?source_vertices ~source_vertex_selection
-                     ?target_elements:target_points
-                     ~attributes ~source:inputs.(0)
-                     ~target:inputs.(1) () with
+                     { cancel = Some cancel; grain = Some grain; max_distance;
+                       blend_width; falloff; unmatched; target_owner;
+                       distance_attribute; source_primitives; source_vertices;
+                       source_vertex_selection; target_elements = target_points;
+                       attributes; source = inputs.(0); target = inputs.(1) } with
                  | Ok geometry -> cooked geometry
                  | Error error -> structured_rdk_error error)))
   )
@@ -820,29 +820,27 @@ module Attribute_transfer = struct
                let result = match owner with
                  | Rdk.Attribute.Point ->
                      Rdk.Attribute_ops.transfer_points
-                       ~cancel ~grain ?names ?pattern ~mode ?max_distance
-                       ~blend_width ~falloff
-                       ~unmatched ?source_points:source_elements
-                       ?target_points:target_elements ~source:inputs.(0)
-                       ~target:inputs.(1) ()
+                       { cancel = Some cancel; grain = Some grain; names; pattern;
+                         mode; max_distance; blend_width; falloff; unmatched;
+                         source_elements; target_elements;
+                         source = inputs.(0); target = inputs.(1) }
                  | Rdk.Attribute.Vertex ->
                      Rdk.Attribute_ops.transfer_vertices
-                       ~cancel ~grain ?names ?pattern ?max_distance
-                       ~blend_width ~falloff
-                       ~unmatched ?source_primitives:source_elements
-                       ?source_vertices ~source_vertex_selection
-                       ?target_vertices:target_elements ~source:inputs.(0)
-                       ~target:inputs.(1) ()
+                       { cancel = Some cancel; grain = Some grain; names; pattern;
+                         max_distance; blend_width; falloff; unmatched;
+                         source_primitives = source_elements; source_vertices;
+                         source_vertex_selection;
+                         target_vertices = target_elements;
+                         source = inputs.(0); target = inputs.(1) }
                  | Rdk.Attribute.Primitive ->
                      Rdk.Attribute_ops.transfer_primitives
-                       ~cancel ~grain ?names ?pattern ~mode ?max_distance
-                       ~blend_width ~falloff
-                       ~unmatched ?source_primitives:source_elements
-                       ?target_primitives:target_elements ~source:inputs.(0)
-                       ~target:inputs.(1) ()
+                       { cancel = Some cancel; grain = Some grain; names; pattern;
+                         mode; max_distance; blend_width; falloff; unmatched;
+                         source_elements; target_elements;
+                         source = inputs.(0); target = inputs.(1) }
                  | Rdk.Attribute.Detail ->
-                     Rdk.Attribute_ops.transfer_detail ?names ?pattern
-                       ~source:inputs.(0) ~target:inputs.(1) () in
+                     Rdk.Attribute_ops.transfer_detail { names; pattern;
+                       source = inputs.(0); target = inputs.(1) } in
                match result with
                | Ok geometry -> cooked geometry
                | Error error -> structured_rdk_error error)))

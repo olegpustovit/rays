@@ -489,9 +489,11 @@ let run ({ cancel; grain; epsilon; remove_degenerate; consolidate_distance; over
         if remove_unused_points then compact geometry
         else Ok geometry) in
       let result = Result.bind result (fun geometry ->
-        Attribute_lifecycle.delete ?cancel ?point_pattern:point_attributes
-          ?vertex_pattern:vertex_attributes ?primitive_pattern:primitive_attributes
-          ?detail_pattern:detail_attributes geometry) in
+        Attribute_lifecycle.delete { cancel; reference = None;
+          delete_non_selected = false; point_pattern = point_attributes;
+          vertex_pattern = vertex_attributes;
+          primitive_pattern = primitive_attributes;
+          detail_pattern = detail_attributes } geometry) in
       Result.bind result (fun geometry ->
         let add owner pattern rules = match pattern with
           | None -> rules

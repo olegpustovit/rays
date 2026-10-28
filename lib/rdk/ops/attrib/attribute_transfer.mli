@@ -14,98 +14,83 @@ type surface_attribute = {
   target_name : string;
 }
 
-val transfer_points :
-  ?cancel:Cancel.t ->
-  ?grain:int ->
-  ?names:string list ->
-  ?pattern:string ->
-  ?mode:mode ->
-  ?max_distance:float ->
-  ?blend_width:float ->
-  ?falloff:falloff ->
-  ?unmatched:unmatched ->
-  ?source_points:Group.t ->
-  ?target_points:Group.t ->
-  source:Geometry.t ->
-  target:Geometry.t ->
-  unit ->
-  (Geometry.t, Error.t) result
+type spatial_params = {
+  cancel : Cancel.t option;
+  grain : int option;
+  names : string list option;
+  pattern : string option;
+  mode : mode;
+  max_distance : float option;
+  blend_width : float;
+  falloff : falloff;
+  unmatched : unmatched;
+  source_elements : Group.t option;
+  target_elements : Group.t option;
+  source : Geometry.t;
+  target : Geometry.t;
+}
 
-val transfer_primitives :
-  ?cancel:Cancel.t ->
-  ?grain:int ->
-  ?names:string list ->
-  ?pattern:string ->
-  ?mode:mode ->
-  ?max_distance:float ->
-  ?blend_width:float ->
-  ?falloff:falloff ->
-  ?unmatched:unmatched ->
-  ?source_primitives:Group.t ->
-  ?target_primitives:Group.t ->
-  source:Geometry.t ->
-  target:Geometry.t ->
-  unit ->
-  (Geometry.t, Error.t) result
+type detail_params = {
+  names : string list option;
+  pattern : string option;
+  source : Geometry.t;
+  target : Geometry.t;
+}
 
-val transfer_detail :
-  ?names:string list ->
-  ?pattern:string ->
-  source:Geometry.t ->
-  target:Geometry.t ->
-  unit ->
-  (Geometry.t, Error.t) result
+type surface_params = {
+  cancel : Cancel.t option;
+  grain : int option;
+  max_distance : float option;
+  blend_width : float;
+  falloff : surface_falloff;
+  unmatched : unmatched;
+  target_owner : Attribute.owner;
+  distance_attribute : string option;
+  source_primitives : Group.t option;
+  source_vertices : Group.t option;
+  source_vertex_selection : Surface_index.vertex_selection;
+  target_elements : Group.t option;
+  attributes : surface_attribute list;
+  source : Geometry.t;
+  target : Geometry.t;
+}
 
-val transfer_surface :
-  ?cancel:Cancel.t ->
-  ?grain:int ->
-  ?max_distance:float ->
-  ?blend_width:float ->
-  ?falloff:surface_falloff ->
-  ?unmatched:unmatched ->
-  ?target_owner:Attribute.owner ->
-  ?distance_attribute:string ->
-  ?source_primitives:Group.t ->
-  ?source_vertices:Group.t ->
-  ?source_vertex_selection:Surface_index.vertex_selection ->
-  ?target_elements:Group.t ->
-  attributes:surface_attribute list ->
-  source:Geometry.t ->
-  target:Geometry.t ->
-  unit ->
-  (Geometry.t, Error.t) result
+type vertices_params = {
+  cancel : Cancel.t option;
+  grain : int option;
+  names : string list option;
+  pattern : string option;
+  max_distance : float option;
+  blend_width : float;
+  falloff : falloff;
+  unmatched : unmatched;
+  source_primitives : Group.t option;
+  source_vertices : Group.t option;
+  source_vertex_selection : Surface_index.vertex_selection;
+  target_vertices : Group.t option;
+  source : Geometry.t;
+  target : Geometry.t;
+}
 
-val transfer_vertices :
-  ?cancel:Cancel.t ->
-  ?grain:int ->
-  ?names:string list ->
-  ?pattern:string ->
-  ?max_distance:float ->
-  ?blend_width:float ->
-  ?falloff:falloff ->
-  ?unmatched:unmatched ->
-  ?source_primitives:Group.t ->
-  ?source_vertices:Group.t ->
-  ?source_vertex_selection:Surface_index.vertex_selection ->
-  ?target_vertices:Group.t ->
-  source:Geometry.t ->
-  target:Geometry.t ->
-  unit ->
-  (Geometry.t, Error.t) result
+type all_params = {
+  cancel : Cancel.t option;
+  grain : int option;
+  point_pattern : string option;
+  vertex_pattern : string option;
+  primitive_pattern : string option;
+  detail_pattern : string option;
+  mode : mode;
+  max_distance : float option;
+  blend_width : float;
+  falloff : falloff;
+  unmatched : unmatched;
+  source : Geometry.t;
+  target : Geometry.t;
+}
 
-val transfer_all :
-  ?cancel:Cancel.t ->
-  ?grain:int ->
-  ?point_pattern:string ->
-  ?vertex_pattern:string ->
-  ?primitive_pattern:string ->
-  ?detail_pattern:string ->
-  ?mode:mode ->
-  ?max_distance:float ->
-  ?blend_width:float ->
-  ?falloff:falloff ->
-  ?unmatched:unmatched ->
-  source:Geometry.t ->
-  target:Geometry.t ->
-  unit ->
-  (Geometry.t, Error.t) result
+val transfer_points : spatial_params -> (Geometry.t, Error.t) result
+val transfer_primitives : spatial_params -> (Geometry.t, Error.t) result
+val transfer_detail : detail_params -> (Geometry.t, Error.t) result
+val transfer_surface : surface_params -> (Geometry.t, Error.t) result
+val transfer_vertices : vertices_params -> (Geometry.t, Error.t) result
+val transfer_all : all_params -> (Geometry.t, Error.t) result

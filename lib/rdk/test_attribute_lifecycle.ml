@@ -54,19 +54,19 @@ let run () =
 
   let source = fixture () in
   let source_id = Geometry.data_id source in
-  let no_rules = Attribute_ops.delete source |> get_rdk in
+  let no_rules = Attribute_ops_front.delete source |> get_rdk in
   check (Geometry.data_id no_rules = source_id)
     "empty Attribute Delete did not preserve geometry identity";
-  let blank = Attribute_ops.delete ~point_pattern:"  " source |> get_rdk in
+  let blank = Attribute_ops_front.delete ~point_pattern:"  " source |> get_rdk in
   check (Geometry.data_id blank = source_id)
     "blank Attribute Delete did not preserve geometry identity";
-  let keep_nothing = Attribute_ops.delete ~delete_non_selected:true source
+  let keep_nothing = Attribute_ops_front.delete ~delete_non_selected:true source
       |> get_rdk in
   check (Geometry.attributes keep_nothing = [])
     "empty Attribute Delete keep mode did not remove ordinary metadata";
 
   let survivor_before = attribute Attribute.Point "keep_point" source in
-  let deleted = Attribute_ops.delete
+  let deleted = Attribute_ops_front.delete
       ~point_pattern:"temporary_* ^temporary_keep"
       ~vertex_pattern:"temporary_*"
       ~primitive_pattern:"temporary_*"
@@ -87,7 +87,7 @@ let run () =
          = Topology.data_id (Geometry.topology deleted))
     "Attribute Delete copied positions or topology";
 
-  let kept = Attribute_ops.delete ~delete_non_selected:true
+  let kept = Attribute_ops_front.delete ~delete_non_selected:true
       ~point_pattern:"keep_*"
       ~vertex_pattern:"keep_*"
       ~primitive_pattern:"keep_*"
@@ -107,21 +107,21 @@ let run () =
       |> add_float Attribute.Point "foo" 2.
       |> add_float Attribute.Point "score" 3.
       |> add_float Attribute.Point "weight" 4. in
-  let reference_deleted = Attribute_ops.delete ~reference
+  let reference_deleted = Attribute_ops_front.delete ~reference
       ~point_pattern:"^bar score" reference_source |> get_rdk in
   check (has Attribute.Point "bar" reference_deleted
       && not (has Attribute.Point "foo" reference_deleted)
       && not (has Attribute.Point "score" reference_deleted)
       && has Attribute.Point "weight" reference_deleted)
     "Attribute Delete reference prepend/exclusion semantics";
-  let reference_kept = Attribute_ops.delete ~reference
+  let reference_kept = Attribute_ops_front.delete ~reference
       ~delete_non_selected:true ~point_pattern:"^bar" reference_source
       |> get_rdk in
   check (not (has Attribute.Point "bar" reference_kept)
       && has Attribute.Point "foo" reference_kept
       && not (has Attribute.Point "score" reference_kept))
     "Attribute Delete reference keep semantics";
-  let exclusion = Attribute_ops.delete ~point_pattern:"^keep_point" source
+  let exclusion = Attribute_ops_front.delete ~point_pattern:"^keep_point" source
       |> get_rdk in
   check (has Attribute.Point "keep_point" exclusion
       && not (has Attribute.Point "target" exclusion)
@@ -130,13 +130,13 @@ let run () =
   check (Geometry.point_count deleted = Geometry.point_count source)
     "Attribute Delete changed canonical P/cardinality";
 
-  (match Attribute_ops.delete ~point_pattern:"[bad" source with
+  (match Attribute_ops_front.delete ~point_pattern:"[bad" source with
    | Error error -> check (Error.code error = "invalid_attribute")
        "malformed Attribute Delete pattern diagnostic"
    | Ok _ -> fail "Attribute Delete accepted malformed pattern");
   let delete_cancel = Cancel.create () in
   Cancel.cancel delete_cancel;
-  (match Attribute_ops.delete ~cancel:delete_cancel ~point_pattern:"*" source with
+  (match Attribute_ops_front.delete ~cancel:delete_cancel ~point_pattern:"*" source with
    | Error error -> check (Error.code error = "cancelled")
        "Attribute Delete cancellation diagnostic"
    | Ok _ -> fail "cancelled Attribute Delete published geometry");
@@ -480,7 +480,7 @@ let run () =
           rename_attribute_replacement = "final_*";
           rename_attribute_conflict = Attribute_lifecycle.Attribute_rename_error;
         }] |> get_rdk
-      |> Attribute_ops.delete ~detail_pattern:"keep_*" |> get_rdk) in
+      |> Attribute_ops_front.delete ~detail_pattern:"keep_*" |> get_rdk) in
   let one = run 1 and many = run 4 in
   check (names one = names many
       && List.length (Geometry.attributes one) = 5_000)

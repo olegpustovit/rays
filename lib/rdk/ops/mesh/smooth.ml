@@ -70,8 +70,8 @@ let run ?cancel ?(grain = 16_384) ?constrained_points
           geometry <> None in
       let point_normals_smoothed = had_point_normals
           && Attribute_pattern.matches attribute_pattern "N" in
-      match Attribute_ops.blur_points ?cancel ~grain ?selection ~iterations
-          ~mode ~pattern:attributes geometry with
+      match Attribute_ops.blur_points { cancel; grain = Some grain; selection;
+          iterations; mode; pattern = attributes } geometry with
       | Error error -> Error (remap_error error)
       | Ok output ->
           let positions_changed = Packed.Float3.data_id (Geometry.positions output)

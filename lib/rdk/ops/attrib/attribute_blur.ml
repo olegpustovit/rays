@@ -8,8 +8,17 @@ type blur_target =
   | Blur_float3 of Attribute.t * int
   | Blur_float4 of Attribute.t * int
 
-let run ?cancel ?(grain = 16_384) ?selection ?(iterations = 1)
-    ?(mode = Laplacian 0.5) ~pattern geometry =
+type params = {
+  cancel : Cancel.t option;
+  grain : int option;
+  selection : Group.t option;
+  iterations : int;
+  mode : mode;
+  pattern : string;
+}
+
+let run { cancel; grain; selection; iterations; mode; pattern } geometry =
+  let grain = Option.value ~default:16_384 grain in
   Error.guard ~cancelled:"attribute blur was cancelled" ~invalid_argument:"invalid_parameter" ~operation:"attribute_blur"
     ~code:"invalid_blur" @@ fun () ->
   if grain <= 0 then invalid_arg

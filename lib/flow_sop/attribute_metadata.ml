@@ -22,9 +22,10 @@ let delete ~owner ~pattern input =
     | _ -> false) pattern) in
   let delete geometry cancel =
     let pattern_for selected = if owner=selected then pattern else "" in
-    Rdk.Attribute_ops.delete ~cancel
-      ~point_pattern:(pattern_for "point") ~vertex_pattern:(pattern_for "vertex")
-      ~primitive_pattern:(pattern_for "primitive") ~detail_pattern:(pattern_for "detail") geometry in
+    Rdk.Attribute_ops.delete
+      { cancel = Some cancel; reference = None; delete_non_selected = false;
+        point_pattern = Some (pattern_for "point"); vertex_pattern = Some (pattern_for "vertex");
+        primitive_pattern = Some (pattern_for "primitive"); detail_pattern = Some (pattern_for "detail") } geometry in
   Sop.Node.Build.make_geometry ~operation:"flow.delete_attr" ~version:1
     ~parameters:(Flow.Lisp.flat (Flow.Syntax.make (Vec [Flow.Syntax.make (Str owner);Flow.Syntax.make (Str pattern)])))
     ~cook_mode:(Sop.Node.Duplicate_input 0) ~dependencies:Sop.Context.Dependencies.static
@@ -103,10 +104,12 @@ let delete_attributes ?reference ~inverse ~point ~vertex ~primitive ~detail inpu
   let inputs=input::Option.to_list reference in
   node "flow.delete_attrs" (key [string_of_bool inverse;point;vertex;primitive;detail]) inputs
     (fun context inputs -> Result.map_error structured_error
-      (Rdk.Attribute_ops.delete ~cancel:(Sop.Context.cancel_token context)
-        ?reference:(if Array.length inputs=2 then Some inputs.(1) else None)
-        ~delete_non_selected:inverse ~point_pattern:point ~vertex_pattern:vertex
-        ~primitive_pattern:primitive ~detail_pattern:detail inputs.(0)))
+      (Rdk.Attribute_ops.delete
+        { cancel = Some (Sop.Context.cancel_token context);
+          reference = (if Array.length inputs=2 then Some inputs.(1) else None);
+          delete_non_selected = inverse; point_pattern = Some point;
+          vertex_pattern = Some vertex; primitive_pattern = Some primitive;
+          detail_pattern = Some detail } inputs.(0)))
 let rename_group ~owner ~pattern ~replacement ~conflict input =
   let selected=checked (group_owner owner) and policy=checked (group_conflict conflict) in
   let rule=Rdk.Group_ops.{rename_owner=selected;rename_pattern=pattern;

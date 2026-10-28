@@ -450,6 +450,52 @@ end
 
 module Attribute_ops_front = struct
   open Rdk.Attribute_ops
+  module T = Rdk.Attribute_transfer
+  let delete ?cancel ?reference ?(delete_non_selected = false) ?point_pattern
+      ?vertex_pattern ?primitive_pattern ?detail_pattern geometry =
+    Rdk.Attribute_ops.delete { cancel; reference; delete_non_selected; point_pattern;
+      vertex_pattern; primitive_pattern; detail_pattern } geometry
+  let blur_points ?cancel ?grain ?selection ?(iterations = 1)
+      ?(mode = Rdk.Attribute_blur.Laplacian 0.5) ~pattern geometry =
+    Rdk.Attribute_ops.blur_points { cancel; grain; selection; iterations; mode; pattern } geometry
+  let spatial_params ?cancel ?grain ?names ?pattern ?(mode = T.Nearest) ?max_distance
+      ?(blend_width = 0.) ?(falloff = T.Smoothstep) ?(unmatched = T.Keep_target)
+      ?source_elements ?target_elements ~source ~target () : T.spatial_params =
+    { cancel; grain; names; pattern; mode; max_distance; blend_width; falloff; unmatched;
+      source_elements; target_elements; source; target }
+  let transfer_points ?cancel ?grain ?names ?pattern ?mode ?max_distance ?blend_width
+      ?falloff ?unmatched ?source_points ?target_points ~source ~target () =
+    Rdk.Attribute_ops.transfer_points (spatial_params ?cancel ?grain ?names ?pattern ?mode
+      ?max_distance ?blend_width ?falloff ?unmatched ?source_elements:source_points
+      ?target_elements:target_points ~source ~target ())
+  let transfer_primitives ?cancel ?grain ?names ?pattern ?mode ?max_distance ?blend_width
+      ?falloff ?unmatched ?source_primitives ?target_primitives ~source ~target () =
+    Rdk.Attribute_ops.transfer_primitives (spatial_params ?cancel ?grain ?names ?pattern ?mode
+      ?max_distance ?blend_width ?falloff ?unmatched ?source_elements:source_primitives
+      ?target_elements:target_primitives ~source ~target ())
+  let transfer_detail ?names ?pattern ~source ~target () =
+    Rdk.Attribute_ops.transfer_detail ({ names; pattern; source; target } : T.detail_params)
+  let transfer_surface ?cancel ?grain ?max_distance ?(blend_width = 0.)
+      ?(falloff = T.Smoothstep) ?(unmatched = T.Keep_target)
+      ?(target_owner = Rdk.Attribute.Point) ?distance_attribute ?source_primitives
+      ?source_vertices ?(source_vertex_selection = Rdk.Surface_index.All_triangle_vertices)
+      ?target_elements ~attributes ~source ~target () =
+    Rdk.Attribute_ops.transfer_surface ({ cancel; grain; max_distance; blend_width; falloff;
+      unmatched; target_owner; distance_attribute; source_primitives; source_vertices;
+      source_vertex_selection; target_elements; attributes; source; target } : T.surface_params)
+  let transfer_vertices ?cancel ?grain ?names ?pattern ?max_distance ?(blend_width = 0.)
+      ?(falloff = T.Smoothstep) ?(unmatched = T.Keep_target) ?source_primitives
+      ?source_vertices ?(source_vertex_selection = Rdk.Surface_index.All_triangle_vertices)
+      ?target_vertices ~source ~target () =
+    Rdk.Attribute_ops.transfer_vertices ({ cancel; grain; names; pattern; max_distance;
+      blend_width; falloff; unmatched; source_primitives; source_vertices;
+      source_vertex_selection; target_vertices; source; target } : T.vertices_params)
+  let transfer_all ?cancel ?grain ?point_pattern ?vertex_pattern ?primitive_pattern
+      ?detail_pattern ?(mode = T.Nearest) ?max_distance ?(blend_width = 0.)
+      ?(falloff = T.Smoothstep) ?(unmatched = T.Keep_target) ~source ~target () =
+    Rdk.Attribute_ops.transfer_all ({ cancel; grain; point_pattern; vertex_pattern;
+      primitive_pattern; detail_pattern; mode; max_distance; blend_width; falloff;
+      unmatched; source; target } : T.all_params)
   let interpolate ?cancel ?grain ?selection ?driver ?compute_weights
       ?point_pattern ?vertex_pattern ?primitive_pattern ?detail_pattern
       ?(match_groups = false)
