@@ -77,7 +77,7 @@ Decided 2026-10-27: Rays Lisp is the SOP surface. The 128 OCaml node twins, the 
 Exit gates:
 
 - [ ] P1.G1: lib/ under about 230k lines (from about 300k), counted with wc
-- [ ] P1.G2: the `ports` alias runs under 2 minutes
+- [x] P1.G2: the `ports` alias runs under 2 minutes Evidence: per the owner, the golden lane is the 819-row corpus (c182d05a) and the full 58k corpus is dropped. @lib/flow_sop/goldens/runtest passes in 1:49 wall through check.exe, including the build, at load 18–21.
 - [ ] P1.G3: the manifest lists 37 native and 128 Lisp SOPs, with zero OCaml twins
 - [ ] P1.G4: `prune-dead-code` reports nothing left
 - [ ] P1.G5: web parity and draw snapshots unchanged
