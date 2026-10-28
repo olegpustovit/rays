@@ -4,6 +4,23 @@ open Rdk_test_support
 
 let get_ok = function Ok value -> value | Error _ -> fail "unexpected error"
 
+let fixtures () =
+  let builder = Packed.Float3.Builder.create 4 in
+  Packed.Float3.Builder.set builder 0 0. 0. 0.;
+  Packed.Float3.Builder.set builder 1 1. 0. 0.;
+  Packed.Float3.Builder.set builder 2 1. 1. 0.;
+  Packed.Float3.Builder.set builder 3 0. 1. 0.;
+  let positions = Packed.Float3.Builder.freeze builder in
+  let topology = Topology.polygons_owned ~point_count:4 ~vertex_points:[|0; 1; 2; 3|]
+    ~primitive_offsets:[|0; 4|] |> get_ok in
+  let geometry = Geometry.create ~positions ~topology () |> get_ok in
+  let triangle_builder = Tb.create ~point_count:4 () in
+  Tb.add_triangle triangle_builder 0 1 2;
+  Tb.add_triangle triangle_builder 0 2 3;
+  let triangle_geometry = Geometry.create ~positions
+      ~topology:(Tb.freeze triangle_builder) () |> get_ok in
+  geometry, triangle_geometry
+
 let transfer ~geometry ~triangle_geometry =
   let transfer_source = Line_geometry.points [|(0., 0., 0.); (2., 0., 0.)|] in
   let transfer_weight = Attribute.create_owned ~name:"weight"
@@ -352,3 +369,13 @@ let transfer ~geometry ~triangle_geometry =
    | Error error when Error.code error = "invalid_transfer" -> ()
    | _ -> fail "attribute transfer accepted invalid neighbor count");
   (transfer_source, transfer_target)
+
+let run () =
+  let geometry, triangle_geometry = fixtures () in
+  let transfer_source, transfer_target = transfer ~geometry ~triangle_geometry in
+  let cancelled = Cancel.create () in
+  Cancel.cancel cancelled;
+  match Attribute_ops.transfer_points ~cancel:cancelled
+      ~source:transfer_source ~target:transfer_target () with
+  | Error error when Error.code error = "cancelled" -> ()
+  | _ -> fail "cancelled attribute transfer published geometry or wrong error"

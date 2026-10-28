@@ -20,7 +20,7 @@ let data_id value = value.data_id
 let with_name name value =
   require_name name;
   if String.equal name value.name then value
-  else { value with name; data_id = Data_id.fresh () }
+  else { value with name; data_id = Support.fresh_data_id () }
 let payload_bytes value =
   Bytes.length value.bits
   + match value.order with
@@ -43,7 +43,7 @@ let init ?(grain = 4096) ~owner ~name length predicate =
           if predicate (base + bit) then value := !value lor (1 lsl bit)
         done;
         Bytes.set bits byte (Char.chr !value));
-  { owner; name; length; bits; order = None; data_id = Data_id.fresh () }
+  { owner; name; length; bits; order = None; data_id = Support.fresh_data_id () }
 
 let ordered ~owner ~name ~length elements =
   if String.trim name = "" then Error "Group: empty name"
@@ -58,7 +58,7 @@ let ordered ~owner ~name ~length elements =
           length;
           bits;
           order = Some (Array.copy elements);
-          data_id = Data_id.fresh ();
+          data_id = Support.fresh_data_id ();
         }
       else
         let element = Array.unsafe_get elements index in
@@ -123,7 +123,7 @@ let combine order_kind operation left right =
       length = left.length;
       bits;
       order = None;
-      data_id = Data_id.fresh ();
+      data_id = Support.fresh_data_id ();
     } in
     let order =
       match order_kind with
@@ -202,7 +202,7 @@ let union_many ?cancel ?(grain = 32_768) ~name groups =
           length = first.length;
           bits;
           order = None;
-          data_id = Data_id.fresh ();
+          data_id = Support.fresh_data_id ();
         }
       end
 
@@ -237,7 +237,7 @@ module Builder = struct
     if value.frozen then invalid_arg "Group.Builder.freeze: already frozen";
     value.frozen <- true;
     { owner = value.owner; name = value.name; length = value.length;
-      bits = value.bits; order = None; data_id = Data_id.fresh () }
+      bits = value.bits; order = None; data_id = Support.fresh_data_id () }
 end
 
 module View = struct
@@ -256,7 +256,7 @@ module View = struct
       if Char.code (Bytes.get bits last) land lnot valid_mask <> 0 then
         invalid_arg "Group.View.of_owned_bits: set padding bits"
     end;
-    { owner; name; length; bits; order = None; data_id = Data_id.fresh () }
+    { owner; name; length; bits; order = None; data_id = Support.fresh_data_id () }
 
   let order_view value = value.order
 
@@ -273,7 +273,7 @@ module View = struct
       if current land mask <> 0 then
         invalid_arg "Group.View.with_owned_order: duplicate element";
       Bytes.unsafe_set seen byte (Char.chr (current lor mask))) order;
-    { value with order = Some order; data_id = Data_id.fresh () }
+    { value with order = Some order; data_id = Support.fresh_data_id () }
 
   let remap_order ~source ~source_of_target target =
     match source.order with

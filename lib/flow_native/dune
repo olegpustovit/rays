@@ -8,4 +8,4 @@
 (test
  (name test_workspace_gpu_service)
  (modules test_workspace_gpu_service)
- (libraries flow_native flow_sop flow_ir flow sop rdk ogpu_mock parallel unix))
+ (libraries test_support flow_native flow_sop flow_ir flow sop rdk ogpu_mock parallel unix))

@@ -223,14 +223,13 @@ let sample_lod ?filter ?wrap_u ?wrap_v texture ~lod ~u ~v =
 
 let sample texture ~u ~v = sample_lod texture ~lod:0. ~u ~v
 
-module Private = struct
-  let identity texture = texture.id
-  let create_owned = create_owned
-  let image texture=match texture.backing with Cpu _->None|Borrowed image->Some image
-  let of_image image=match Runtime_resources.Image.gpu_snapshot image with
+let of_image image=match Runtime_resources.Image.gpu_snapshot image with
     | Error error -> Error(Format.asprintf "Texture.Private.of_image: %a" Runtime_resources.pp_error error)
     | Ok None -> Error "Texture.Private.of_image: resident GPU image required"
     | Ok(Some _) -> Ok{backing=Borrowed image;id=fresh_id()}
+module Private = struct
+  let identity texture = texture.id
+  let image texture=match texture.backing with Cpu _->None|Borrowed image->Some image
   let levels texture =
     let texture=cpu "Texture.Private.levels" texture in
     Array.append [|texture.width,texture.height,Array.copy texture.pixels|]

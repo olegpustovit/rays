@@ -6,7 +6,7 @@ module I = Flow_ir
 module C = I.Core
 module M = Scene_command.Marks
 
-let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
+open Test_support
 let writing = Array.to_list Sys.argv = [Sys.argv.(0); "--write-goldens"]
 let node = Sys.command "command -v node >/dev/null 2>&1" = 0
 

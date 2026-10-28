@@ -21,7 +21,7 @@ let data_id value = value.data_id
 let with_name name value =
   require_name name;
   if String.equal name value.name then value
-  else { value with name; data_id = Data_id.fresh () }
+  else { value with name; data_id = Support.fresh_data_id () }
 let payload_bytes value = Bytes.length value.bits
 let mem edge value =
   edge >= 0 && edge < value.length
@@ -44,7 +44,7 @@ let init ?(grain = 4096) ~topology ~index ~name predicate =
         done;
         Bytes.set bits byte (Char.chr !value));
   { topology_id = Topology.data_id topology; name; length; bits;
-    data_id = Data_id.fresh () }
+    data_id = Support.fresh_data_id () }
 
 let cardinality value =
   let popcount byte =
@@ -70,7 +70,7 @@ let combine operation left right =
           (Char.chr (operation
             (Char.code (Bytes.unsafe_get left.bits index))
             (Char.code (Bytes.unsafe_get right.bits index)))));
-    Ok { left with bits; data_id = Data_id.fresh () }
+    Ok { left with bits; data_id = Support.fresh_data_id () }
 let union = combine (lor)
 let intersection = combine (land)
 let difference = combine (fun left right -> left land lnot right)
@@ -107,7 +107,7 @@ module Builder = struct
     if value.frozen then invalid_arg "Edge_group.Builder.freeze: already frozen";
     value.frozen <- true;
     { topology_id = value.topology_id; name = value.name; length = value.length;
-      bits = value.bits; data_id = Data_id.fresh () }
+      bits = value.bits; data_id = Support.fresh_data_id () }
 end
 
 module View = struct
@@ -122,7 +122,7 @@ module View = struct
         invalid_arg "Edge_group.View.of_owned_bits: set padding bits"
     end;
     { topology_id = Topology.data_id topology; name; length = edge_count; bits;
-      data_id = Data_id.fresh () }
+      data_id = Support.fresh_data_id () }
 
 end
 
@@ -226,7 +226,7 @@ let replicate_exact_copies ?cancel ~source_topology ~source_index
                 done
             done;
             Ok { topology_id = Topology.data_id target_topology;
-              name = value.name; length; bits; data_id = Data_id.fresh () }
+              name = value.name; length; bits; data_id = Support.fresh_data_id () }
           end
       end
     end

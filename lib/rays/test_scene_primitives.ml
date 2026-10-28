@@ -34,7 +34,7 @@ let pure ()=
   List.iter(fun count->let b=batch count in
     require(B.count b=count)"shape count";
     require(Bytes.length(B.instances b)=64*count)"shape layout";
-    let commands=Scene.Private.commands [Scene.Private.shapes b]in
+    let commands=Scene.Private.commands [Scene.shapes b]in
     require(Array.length commands=1)"one packed command";
     require(B.valid_shapes b)"packed validation") [0;1;63;64;65;100000];
   let line ()=
@@ -68,7 +68,7 @@ let native ()=
   Fun.protect ~finally:(fun()->ignore(Canvas.destroy canvas))(fun()->
     let b=B.Builder.create ()in
     B.Builder.circle b ~x:32. ~y:32. ~radius:12. ~fill:(rgba cyan) ();
-    let packed=Scene.Private.shapes(B.Builder.publish b)in
+    let packed=Scene.shapes(B.Builder.publish b)in
     render canvas [Scene.clear Rays_math.Color.black;Scene.circle ~at:(32,32) ~radius:12 ~fill:cyan ()];
     let polygon=pixels canvas in
     render canvas [Scene.clear Rays_math.Color.black;packed];
@@ -121,26 +121,26 @@ let native ()=
       let b=B.Builder.create ()in
       B.Builder.circle b ~x:32. ~y:32. ~radius:12. ~fill:(rgba fill) ~stroke:(rgba stroke) ();
       compare (Scene.circle ~at:(32,32) ~radius:12 ~fill ~stroke ())
-        (Scene.Private.shapes(B.Builder.publish b));
+        (Scene.shapes(B.Builder.publish b));
       let b=B.Builder.create ()in
       B.Builder.shape_rect b ~x:12. ~y:14. ~width:26. ~height:21. ~fill:(rgba fill) ~stroke:(rgba stroke) ();
       compare (Scene.rect ~at:(12,14) ~w:26 ~h:21 ~fill ~stroke ())
-        (Scene.Private.shapes(B.Builder.publish b));
+        (Scene.shapes(B.Builder.publish b));
       let b=B.Builder.create ()in
       B.Builder.line b ~x0:12. ~y0:14. ~x1:41. ~y1:39. ~width:5. ~color:(rgba fill);
       compare (Scene.line ~from_:(12,14) ~to_:(41,39) ~width:5 ~color:fill ())
-        (Scene.Private.shapes(B.Builder.publish b))) [70;255];
+        (Scene.shapes(B.Builder.publish b))) [70;255];
     let wrap nodes=Scene.clip ~at:(7,9) ~w:43 ~h:37 [Scene.translate 27 23
       [Scene.rotate 0.37 [Scene.scale 1.7 0.8 nodes]]]in
     List.iter(fun count->
       let b=batch count in
-      render canvas [Scene.clear Rays_math.Color.black;wrap [Scene.Private.shapes b]];
+      render canvas [Scene.clear Rays_math.Color.black;wrap [Scene.shapes b]];
       let expected=pixels canvas in
       require(Array.exists(fun pixel->pixel<>Rays_math.Color.black)expected)"packed circles drew nothing";
       let single=Array.init count(fun i->let one=B.Builder.create ~capacity:1 ()in
         B.Builder.circle one ~x:(8.+.float(i mod 19)*.2.) ~y:(8.+.float(i mod 13)*.2.)
           ~radius:3. ~fill:(rgba(Rays_math.Color.rgba 40 120 180 70)) ();
-        Scene.Private.shapes(B.Builder.publish one))in
+        Scene.shapes(B.Builder.publish one))in
       render canvas [Scene.clear Rays_math.Color.black;wrap(Array.to_list single)];
       require(pixels canvas=expected)"packed/singular transform clip alpha parity") [63;64;65];
     (* Independently construct legacy Scene geometry at all packer thresholds.
@@ -156,13 +156,13 @@ let native ()=
         Scene.rect ~at:(x,y) ~w:2 ~h:2 ~fill:cyan ())in
       render canvas(Scene.clear Rays_math.Color.black::reference);
       let expected=pixels canvas in
-      render canvas [Scene.clear Rays_math.Color.black;Scene.Private.shapes(B.Builder.publish builder)];
+      render canvas [Scene.clear Rays_math.Color.black;Scene.shapes(B.Builder.publish builder)];
       require(pixels canvas=expected)
         (Printf.sprintf "legacy/packed rectangle pixels at %d instances" count)) [63;64;65;100000];
     let dense=batch 100000 in
-    render canvas [Scene.clear Rays_math.Color.black;Scene.Private.shapes dense];
+    render canvas [Scene.clear Rays_math.Color.black;Scene.shapes dense];
     let before=stats canvas in
-    render canvas [Scene.clear Rays_math.Color.black;Scene.Private.shapes dense];
+    render canvas [Scene.clear Rays_math.Color.black;Scene.shapes dense];
     let after=stats canvas in
     require(Int64.sub after.logical_draws before.logical_draws=1L)"100000 instances one draw";
     require(after.uploaded_bytes=before.uploaded_bytes)"static shapes reuploaded";

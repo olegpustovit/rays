@@ -16,7 +16,7 @@ let cook session ?(domains = 1) node =
       | Ok geometry -> geometry | Error d -> failwith (Diagnostic.error_to_string d))
   | Error d -> failwith (Diagnostic.error_to_string d)
 
-let check condition message = if not condition then failwith message
+let check = Test_support.check
 let points = 40
 let template = {|(workspace iterate
   (defnode sop/smooth_loop [(geo : geometry) (passes : int 1 :min 0 :max 100000000)]

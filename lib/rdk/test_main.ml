@@ -1,6 +1,8 @@
 let tests = [
   "core", "test_rdk", Test_rdk.run;
   "core", "test_rdk_sources", Test_rdk_sources.run;
+  "core", "test_rdk_attributes", Test_rdk_attributes.run;
+  "core", "test_rdk_misc", Test_rdk_misc.run;
   "mesh", "test_copy_to_points", Test_copy_to_points.run;
   "spatial", "test_surface_index", Test_surface_index.run;
   "mesh", "test_extract_centroid", Test_extract_centroid.run;

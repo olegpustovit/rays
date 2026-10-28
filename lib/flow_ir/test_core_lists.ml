@@ -1,7 +1,7 @@
 module E = Flow.Eval
 module I = Flow_ir
 module C = I.Core
-let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
+open Test_support
 let rec same (a : E.value) (b : E.value) = match a,b with
   | Float a,Float b -> Int64.bits_of_float a=Int64.bits_of_float b
   | List a,List b -> Array.length a=Array.length b && Array.for_all2 same a b

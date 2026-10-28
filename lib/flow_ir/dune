@@ -11,13 +11,13 @@
  (deps core_lower.expected core_control.expected core_draw.expected core_marks.expected
   ../flow_sop/flow_manifest.sexp
   (glob_files ../../specification/workspace/cases/*.lisp))
- (libraries flow_ir flow flow_ir_test_support scene_command rays_math parallel))
+ (libraries test_support flow_ir flow flow_ir_test_support scene_command rays_math parallel))
 
 (test
  (name test_core_records)
  (modules test_core_records)
  (deps core_records.expected)
- (libraries flow_ir flow flow_ir_test_support unix parallel))
+ (libraries test_support flow_ir flow flow_ir_test_support unix parallel))
 
 (tests
  (names test_ir test_noise test_uniforms test_frame_kernel test_static_map)
@@ -25,24 +25,24 @@
  (deps ../flow_sop/flow_manifest.sexp
   (glob_files ../../specification/workspace/cases/*.lisp)
   ../../sketches/particles.rays)
- (libraries flow_ir flow rays_math parallel))
+ (libraries test_support flow_ir flow rays_math parallel))
 
 (tests
  (names test_gather test_reductions test_scatter test_compact_scan test_grade_index test_array_max_length)
  (modules test_gather test_reductions test_scatter test_compact_scan test_grade_index test_array_max_length)
- (libraries flow_ir flow flow_ir_test_support rays_math unix parallel))
+ (libraries test_support flow_ir flow flow_ir_test_support rays_math unix parallel))
 
 (tests
  (names test_with_error test_error_rows)
  (modules test_with_error test_error_rows)
- (libraries flow_ir flow flow_graph flow_ir_test_support parallel))
+ (libraries test_support flow_ir flow flow_graph flow_ir_test_support parallel))
 
 (test
  (name test_packed)
  (enabled_if (= %{env:RAYS_SLOW=0} 1))
  (modules test_packed region_snapshot)
  (deps (glob_files snapshots/*.txt))
- (libraries flow_ir flow flow_ir_test_support rays_math unix parallel))
+ (libraries test_support flow_ir flow flow_ir_test_support rays_math unix parallel))
 
 (test
  (name test_region_snapshot)
@@ -52,10 +52,10 @@
   ../../sketches/flow_shader.rays
   ../../sketches/flow_particles_gpu.rays
   ../../sketches/flow_image_kernel.rays)
- (libraries flow_ir flow flow_ir_test_support rays_math parallel))
+ (libraries test_support flow_ir flow flow_ir_test_support rays_math parallel))
 
 (test
  (name test_array_composition)
  (enabled_if (= %{env:RAYS_SLOW=0} 1))
  (modules test_array_composition)
- (libraries flow_ir flow flow_ir_test_support rays_math parallel))
+ (libraries test_support flow_ir flow flow_ir_test_support rays_math parallel))

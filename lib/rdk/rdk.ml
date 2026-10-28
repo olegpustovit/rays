@@ -14,7 +14,6 @@ module Attribute_pattern = Rdk_core.Attribute_pattern
 module Group = Rdk_core.Group
 module Edge_group = Rdk_core.Edge_group
 module Geometry = Rdk_core.Geometry
-module Data_id = Rdk_core.Data_id
 module Kernel = Rdk_core.Kernel
 module Normal_ops = Rdk_core.Normal_ops
 module Compact_points = Rdk_ops.Compact_points

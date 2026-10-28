@@ -21,6 +21,13 @@ val rotate : float -> t -> node
 val scale : float -> float -> t -> node
 val clip : at:(int*int) -> w:int -> h:int -> t -> node
 val render : t -> unit
+val shapes : Scene_command.Ui_batch.t -> node
+(* Packed primitives share the enclosing Scene transform, clip and blend. *)
+val geometry : Scene_command.Render_ir.geometry -> node
+(* Indexed path geometry as the shared tessellation produced it. *)
+val transform : Scene_command.Render_ir.transform -> t -> node
+(* An exact affine view transform: the six coefficients are the command's own. *)
+
 module Private : sig
   type cache_context
   val create_cache_context : unit -> cache_context
@@ -29,12 +36,6 @@ module Private : sig
   (** The same picture: what the nodes draw, ignoring render caches; resources and images
       compare by identity.  A sketch window presents only a picture that is not the same. *)
   val same : t -> t -> bool
-  val shapes : Scene_command.Ui_batch.t -> node
-  (* Packed primitives share the enclosing Scene transform, clip and blend. *)
-  val geometry : Scene_command.Render_ir.geometry -> node
-  (* Indexed path geometry as the shared tessellation produced it. *)
-  val transform : Scene_command.Render_ir.transform -> t -> node
-  (* An exact affine view transform: the six coefficients are the command's own. *)
   module Ui_batch = Scene_command.Ui_batch
   val layer_break : node
 

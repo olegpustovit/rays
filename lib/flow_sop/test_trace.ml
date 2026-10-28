@@ -4,7 +4,7 @@
 open Rdk
 open Rdk_test_support
 module P = Flow_ir.Packed
-let ok = function Ok v -> v | Error d -> failwith (Diagnostic.to_string d)
+open Test_support
 let id = 7
 let count = 256
 let x i = (0.15 *. float (i mod 16)) -. 1.2 and y i = (0.15 *. float (i / 16)) -. 1.2
@@ -17,7 +17,7 @@ let () =
       [h.t (float h.prim) (+ h.u h.v) (if h.hit (+ 1. (* h.normal.z h.normal.z)) 0.)])) (array/range %d :type int))" id count) in
   let live = Input.at_time 1. in
   let bytes v = Marshal.to_string v [Marshal.No_sharing] in
-  let reference = ok (P.reference program ~live) in
+  let reference = ok (P.Host.reference program ~live) in
   List.iter (fun domains -> Parallel.run ~domains (fun () ->
     assert (bytes (ok (P.force ~strict:true program ~live)) = bytes reference))) [1; 8];
   let values = match reference with Flow.Eval.Vec4_array v -> v | _ -> assert false in

@@ -1,5 +1,5 @@
 let ok = function Ok value -> value | Error message -> failwith message
-let check condition message = if not condition then failwith message
+let check = Test_support.check
 
 let parse text = match Flow.Syntax.parse text with
   | Ok forms -> forms | Error d -> failwith (Diagnostic.to_string d)

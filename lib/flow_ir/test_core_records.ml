@@ -1,6 +1,6 @@
 module E = Flow.Eval
 module I = Flow_ir
-let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
+open Test_support
 let residual ?(inputs="") body =
   let source="(workspace w (graph g :context value " ^ inputs ^ " (let* [tested " ^ body ^ "] 0.)))" in
   let ws=match Flow.Workspace.check {Flow.Catalog.version=1;kinds=[]} (ok (Flow.Syntax.parse source)) with

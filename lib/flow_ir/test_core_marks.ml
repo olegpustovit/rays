@@ -1,7 +1,7 @@
 module E = Flow.Eval
 module M = Scene_command.Marks
 module Buffers = Flow_ir.Core_exec.Buffers
-let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
+open Test_support
 let checked body =
   let forms = ok (Flow.Syntax.parse ("(workspace w (graph g :context draw " ^ body ^ "))")) in
   match Flow.Workspace.check {Flow.Catalog.version=1;kinds=[]} forms with

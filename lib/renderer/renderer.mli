@@ -69,6 +69,19 @@ val gpu_queue : gpu -> Ogpu.Backend.queue
 (** True when the device is the presenting window's. *)
 val gpu_shared : gpu -> bool
 val release_gpu : gpu -> unit
+type gpu_marks
+type marks_source = Host of bytes*int | Device of (unit->Ogpu.Backend.buffer option)*int
+val create_gpu_marks : gpu -> (gpu_marks,error) result
+(** A [Marks]-family source for one mark set (specification/marks.md): [gpu_marks] makes a token
+    for a [Shapes] command drawing [count] instances through the five attribute buffers
+    (position, extent, fill, stroke, width; [kind] is the [Ui_batch] kind word). Each is
+    [Host (bytes, stride)], borrowed and unchanged, or [Device (source, stride)], another
+    producer's buffer. The token stays valid while every device source returns the same buffer;
+    any change gives a new stamp. With [indirect (source, offset)] the set is drawn by an indexed
+    indirect draw from five uints at [offset]. Close the source before releasing its GPU lease. *)
+val gpu_marks : ?indirect:((unit->Ogpu.Backend.buffer option)*int64) -> gpu_marks -> kind:int -> count:int -> marks_source array ->
+  (Scene_command.Marks.gpu_token,error) result
+val close_gpu_marks : gpu_marks -> unit
 module Private : sig
   (** The borrowed SDL/runtime shell; its lifetime remains owned by [t]. *)
   val runtime : t -> Runtime.t
@@ -77,28 +90,8 @@ module Private : sig
   val scale_draws : Runtime.frame_facts -> Scene_execution.geometry_draw list -> Scene_execution.geometry_draw list
   val scale_sampled_resources : Runtime.frame_facts -> Scene_execution.sampled_draw list -> Scene_execution.sampled_draw list
   val scale_sampled_cached : scaled_cache -> Runtime.frame_facts -> Scene_execution.sampled_draw list -> Scene_execution.sampled_draw list
-  (** A [Marks]-family source for one mark set ([specification/marks.md]): a token for a
-      [Shapes] command that draws [count] instances through the six attribute buffers. Each
-      attribute is [Host (bytes, stride)], uploaded to a buffer the source owns (float32
-      positions, extents and widths, [0xRRGGBBAA] words for fill and stroke; stride 0 is one
-      constant), or [Device (source, stride)], another producer's buffer bound directly. The
-      attributes, in order, are position, extent, fill, stroke and width; [kind] is the
-      [Ui_batch] kind word (rect 0, circle 4, line 5). Host bytes are borrowed and must not
-      change. The token stays valid while every device [source] returns the buffer it returned
-      here, and the same token comes back while nothing changed; any change gives a new stamp
-      that invalidates the previous token. Close the source before releasing its GPU lease.
-      With [indirect (source, offset)] the set is drawn by an indexed indirect draw from the
-      five uints the producer's device wrote at [offset] of [source]'s buffer (index count
-      six per drawn instance, at most [6 * count]); [source] joins the device inputs the
-      token's validity follows. *)
-  type gpu_marks
   val gpu_vertices_owner : t -> Scene_execution.Private.gpu_vertices_owner
   val create_offscreen_with_gpu : gpu -> configuration -> (t,error) result
-  type marks_source=Host of bytes*int|Device of (unit->Ogpu.Backend.buffer option)*int
-  val create_gpu_marks : gpu -> (gpu_marks,error) result
-  val gpu_marks : ?indirect:((unit->Ogpu.Backend.buffer option)*int64) -> gpu_marks -> kind:int -> count:int -> marks_source array ->
-    (Scene_command.Marks.gpu_token,error) result
-  val close_gpu_marks : gpu_marks -> unit
   val snapshot_count_for_test : t -> int
   val window_handle : t -> Sdl3.Window.t option
   type submission

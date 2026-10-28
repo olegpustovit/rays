@@ -3,8 +3,6 @@
 
 open Support
 
-(* ocamldep must see the PPX's [Sop.X] resolve inside this library. *)
-module Sop = Support.Sop
 
 
 (* The decoded RGBA floats of an image as a carrier geometry, so a Lisp body can sample pixels:

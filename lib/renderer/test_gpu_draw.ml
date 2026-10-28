@@ -13,10 +13,10 @@ let ()=
       logical_width=32;logical_height=24;drawable_width=32*density;drawable_height=24*density;
       title="GPU drawing parity";vsync=false;high_density=true})in
     let gpu=get(Renderer.acquire_gpu())in
-    let sink=get(P.create_gpu_marks gpu)in
+    let sink=get(Renderer.create_gpu_marks gpu)in
     let positions=native_get(B.create_buffer(Renderer.gpu_device gpu)
       {label=Some"GPU parity points";size=24L;usage=[Vertex;Storage;Copy_dst]})in
-    Fun.protect~finally:(fun()->P.close_gpu_marks sink;
+    Fun.protect~finally:(fun()->Renderer.close_gpu_marks sink;
       ignore(B.destroy_buffer positions);Renderer.release_gpu gpu;
       ignore(get(Renderer.destroy execution)))(fun()->
       let points=[|8.;8.;0.;20.;14.;0.|]in
@@ -24,8 +24,8 @@ let ()=
       let generation=ref 1 in
       (* A device source is current only while its producer's output is. *)
       let source stamp()=if !generation=stamp then Some positions else None in
-      let marks ?(fill=0x12345678l) stamp=P.gpu_marks sink~kind:4~count:2
-        [|P.Device(source stamp,3);Host(floats[|2.5|],0);Host(words[|fill|],0);
+      let marks ?(fill=0x12345678l) stamp=Renderer.gpu_marks sink~kind:4~count:2
+        [|Renderer.Device(source stamp,3);Host(floats[|2.5|],0);Host(words[|fill|],0);
           Host(words[|0xff00ff80l|],0);Host(floats[|3.|],0)|]in
       let expected fill=
         let b=Scene_command.Ui_batch.Builder.create()in
@@ -83,8 +83,8 @@ let ()=
          new registration refuses until the source is current again. *)
       incr generation;
       refuse_replay first;refuse_lower first;
-      (match P.gpu_marks sink~kind:4~count:2
-         [|P.Device(source 1,3);Host(floats[|2.5|],0);Host(words[|0x12345678l|],0);
+      (match Renderer.gpu_marks sink~kind:4~count:2
+         [|Renderer.Device(source 1,3);Host(floats[|2.5|],0);Host(words[|0x12345678l|],0);
            Host(words[|0xff00ff80l|],0);Host(floats[|3.|],0)|]with
        |Error{Ogpu.Error.kind=Ogpu.Error.Stale_handle;_}->()
        |_->failwith"a stale device source was registered");
@@ -99,7 +99,7 @@ let ()=
       assert(retained third=capture(ir Replace(expected 0x87654321l)));
       assert(retained third<>reference);
       (* A mark set that is not a valid description is refused before it registers. *)
-      (match P.gpu_marks sink~kind:4~count:0[|P.Host(floats[|0.|],0);Host(floats[|0.|],0);Host(words[|0l|],0);
+      (match Renderer.gpu_marks sink~kind:4~count:0[|Renderer.Host(floats[|0.|],0);Host(floats[|0.|],0);Host(words[|0l|],0);
          Host(words[|0l|],0);Host(floats[|0.|],0)|]with
        |Error{Ogpu.Error.kind=Ogpu.Error.Invalid_argument;_}->()
        |_->failwith"an empty mark set was registered");

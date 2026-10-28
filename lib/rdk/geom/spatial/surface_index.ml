@@ -142,11 +142,8 @@ let create_with ?cancel ?(grain = 16_384) ?primitives:selection ?vertices
         let range_count = Support.ceiling_div candidate_count chunk in
         let keep = Bytes.make candidate_count '\000'
         and range_counts = Array.make range_count 0 in
-        if range_count > 0 then Parallel.for_ ~chunk_size:1 ~start:0
-            ~finish:(range_count - 1) (fun range ->
-              let first = range * chunk
-              and last = min candidate_count ((range + 1) * chunk)
-              and retained = ref 0 in
+        if range_count > 0 then Support.run_indexed_ranges ~grain:chunk candidate_count (fun ~range ~first ~last ->
+              let retained = ref 0 in
               for selected_index = first to last - 1 do
                 Cancel.poll cancel selected_index 4095;
                 let primitive = selected_primitives.(selected_index) in
@@ -169,11 +166,8 @@ let create_with ?cancel ?(grain = 16_384) ?primitives:selection ?vertices
               + range_counts.(range)
         done;
         let output = Array.make range_offsets.(range_count) 0 in
-        if range_count > 0 then Parallel.for_ ~chunk_size:1 ~start:0
-            ~finish:(range_count - 1) (fun range ->
-              let first = range * chunk
-              and last = min candidate_count ((range + 1) * chunk)
-              and next = ref range_offsets.(range) in
+        if range_count > 0 then Support.run_indexed_ranges ~grain:chunk candidate_count (fun ~range ~first ~last ->
+              let next = ref range_offsets.(range) in
               for selected_index = first to last - 1 do
                 Cancel.poll cancel selected_index 4095;
                 if Bytes.unsafe_get keep selected_index <> '\000' then begin
@@ -220,10 +214,7 @@ let create_with ?cancel ?(grain = 16_384) ?primitives:selection ?vertices
   let primitive_ranges = Support.ceiling_div selected_count primitive_chunk in
   let triangulation_errors = Array.make primitive_ranges None in
   if not validated_triangles && primitive_ranges > 0 then
-    Parallel.for_ ~chunk_size:1 ~start:0
-      ~finish:(primitive_ranges - 1) (fun range ->
-        let first_selected = range * primitive_chunk
-        and last_selected = min selected_count ((range + 1) * primitive_chunk) in
+    Support.run_indexed_ranges ~grain:primitive_chunk selected_count (fun ~range ~first:first_selected ~last:last_selected ->
         let scratch = Polygon_triangulation.create_scratch () in
         for selected = first_selected to last_selected - 1 do
           Cancel.poll cancel selected 4095;
@@ -254,11 +245,8 @@ let create_with ?cancel ?(grain = 16_384) ?primitives:selection ?vertices
         let range_count = Support.ceiling_div triangles grain in
         let keep = Bytes.make triangles '\000'
         and range_counts = Array.make range_count 0 in
-        if range_count > 0 then Parallel.for_ ~chunk_size:1 ~start:0
-            ~finish:(range_count - 1) (fun range ->
-              let first = range * grain
-              and last = min triangles ((range + 1) * grain)
-              and retained = ref 0 in
+        if range_count > 0 then Support.run_indexed_ranges ~grain triangles (fun ~range ~first ~last ->
+              let retained = ref 0 in
               for triangle = first to last - 1 do
                 Cancel.poll cancel triangle 4095;
                 let a = selected selected_vertex_bits vertex_a.(triangle)
@@ -283,11 +271,8 @@ let create_with ?cancel ?(grain = 16_384) ?primitives:selection ?vertices
         and output_a = Array.make retained 0
         and output_b = Array.make retained 0
         and output_c = Array.make retained 0 in
-        if range_count > 0 then Parallel.for_ ~chunk_size:1 ~start:0
-            ~finish:(range_count - 1) (fun range ->
-              let first = range * grain
-              and last = min triangles ((range + 1) * grain)
-              and output = ref range_offsets.(range) in
+        if range_count > 0 then Support.run_indexed_ranges ~grain triangles (fun ~range ~first ~last ->
+              let output = ref range_offsets.(range) in
               for triangle = first to last - 1 do
                 Cancel.poll cancel triangle 4095;
                 if Bytes.unsafe_get keep triangle <> '\000' then begin
@@ -311,9 +296,7 @@ let create_with ?cancel ?(grain = 16_384) ?primitives:selection ?vertices
   and triangle_max_d = Array.init diagonal_count (fun _ -> Array.make triangles 0.) in
   let triangle_ranges = Support.ceiling_div triangles grain in
   let triangle_errors = Array.make triangle_ranges None in
-  if triangle_ranges > 0 then Parallel.for_ ~chunk_size:1 ~start:0
-      ~finish:(triangle_ranges - 1) (fun range ->
-    let first_slot = range * grain and last_slot = min triangles ((range + 1) * grain) in
+  if triangle_ranges > 0 then Support.run_indexed_ranges ~grain triangles (fun ~range ~first:first_slot ~last:last_slot ->
     for slot = first_slot to last_slot - 1 do
     Cancel.poll cancel slot 4095;
     if triangle_errors.(range) = None then begin
@@ -920,9 +903,7 @@ let closest_many_into ?cancel ?selection ?position_indices ~grain value ~queries
     invalid_arg "Surface_index: output arrays are too short";
   let queries = Packed.Float3.View.view queries in
   let range_count = (query_count + grain - 1) / grain in
-  if range_count > 0 then Parallel.for_ ~chunk_size:1 ~start:0
-      ~finish:(range_count - 1) (fun range ->
-    let first = range * grain and last = min query_count ((range + 1) * grain) in
+  if range_count > 0 then Support.run_indexed_ranges ~grain query_count (fun ~range ~first ~last ->
     let scratch = Array.make 8 0. and best_primitive = [|-1|]
     and best_triangle = [|-1|] in
     for query = first to last - 1 do
@@ -979,9 +960,7 @@ let closest_distances_many_into ?cancel ?selection ~grain value
     invalid_arg "Surface_index: output array is too short";
   let queries = Packed.Float3.View.view queries in
   let range_count = (query_count + grain - 1) / grain in
-  if range_count > 0 then Parallel.for_ ~chunk_size:1 ~start:0
-      ~finish:(range_count - 1) (fun range ->
-    let first = range * grain and last = min query_count ((range + 1) * grain) in
+  if range_count > 0 then Support.run_indexed_ranges ~grain query_count (fun ~range ~first ~last ->
     let scratch = Array.make 8 0. in
     for query = first to last - 1 do
       Cancel.poll cancel query 4095;
@@ -1229,9 +1208,7 @@ let raycast_many_into ?cancel ?selection ~grain value ~queries ~directions
     invalid_arg "Surface_index: ray output arrays are too short";
   let queries = Packed.Float3.View.view queries in
   let range_count = Support.ceiling_div query_count grain in
-  if range_count > 0 then Parallel.for_ ~chunk_size:1 ~start:0
-      ~finish:(range_count - 1) (fun range ->
-    let first = range * grain and last = min query_count ((range + 1) * grain) in
+  if range_count > 0 then Support.run_indexed_ranges ~grain query_count (fun ~range ~first ~last ->
     let scratch = Array.make 8 0.
     and node_stack = Array.make 65 0
     and integer_results = Array.make 4 (-1)

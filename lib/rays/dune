@@ -31,7 +31,7 @@
  (enabled_if (= %{system} macosx))
  (name test_main)
  (modules test_main test_meshes test_rays_api test_scene_rounded_cache test_automatic_text_cache test_scene3_native_lowering test_scene3_float32 test_scene_display_list test_canvas_native test_retained_view_native test_world test_world_raster test_easy_camera test_light)
- (libraries rays rays_math renderer runtime runtime_resources runtime_input scene_command unix ogpu ogpu_metal threads parallel))
+ (libraries test_support rays rays_math renderer runtime runtime_resources runtime_input scene_command unix ogpu ogpu_metal threads parallel))
 
 (rule
  (enabled_if (= %{system} macosx))

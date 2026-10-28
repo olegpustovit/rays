@@ -256,10 +256,10 @@ let ()=
       let current=resource(I.of_gpu ~width:65 ~height:17
         ~source:(fun()->G.Image_sink.texture first))in
       image:=Some current;
-      let view=Rays.Texture.Private.of_image current |> Result.get_ok in
+      let view=Rays.Texture.of_image current |> Result.get_ok in
       let identity=Rays.Texture.Private.identity view in
       assert(Rays.Texture.size view=(65,17));
-      let wrong=Domain.spawn(fun()->Rays.Texture.Private.of_image current)in
+      let wrong=Domain.spawn(fun()->Rays.Texture.of_image current)in
       assert(Result.is_error(Domain.join wrong));
       let refuses operation=try operation();false with Invalid_argument _->true in
       assert(refuses(fun()->ignore(Rays.Texture.pixels view)));
@@ -293,7 +293,7 @@ let ()=
             ~bytes_per_row:(width*4) |> native in
           let reference_image=Rays.Image.upload_rgba ~width ~height ~rgba:bytes() |> Result.get_ok in
           Fun.protect ~finally:(fun()->ignore(Rays.Image.destroy reference_image))(fun()->
-            let reference_texture=Rays.Texture.Private.create_owned ~width ~height
+            let reference_texture=Rays.Texture.create_owned ~width ~height
               (Array.init(width*height)(fun i->let o=i*4 in Rays_math.Color.rgba
                 (Char.code(Bytes.get bytes o))(Char.code(Bytes.get bytes(o+1)))
                 (Char.code(Bytes.get bytes(o+2)))(Char.code(Bytes.get bytes(o+3))))) |> Result.get_ok in
@@ -343,7 +343,7 @@ let ()=
         resource(I.replace_gpu_source current ~width:17 ~height:5
           ~source:(fun()->G.Image_sink.texture resized));
         resource(I.replace current ~width:17 ~height:5 ~rgba:(Bytes.make(17*5*4)'\255'));
-        assert(Result.is_error(Rays.Texture.Private.of_image current));
+        assert(Result.is_error(Rays.Texture.of_image current));
         assert(match Rays.Scene.Private.stage_native_render_checked ~width:65 ~height:17 meshed with
           |Error(Message message)->String.ends_with ~suffix:"borrowed GPU texture needs an explicit CPU snapshot" message
           |_->false);

@@ -2,7 +2,7 @@ module E = Flow.Eval
 module V = Flow.Value
 module O = Flow.Op
 module I = Flow_ir
-let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
+open Test_support
 let same a b = Marshal.to_string a [Marshal.No_sharing] = Marshal.to_string b [Marshal.No_sharing]
 let reject code f = try ignore(f());failwith("accepted "^code)
   with Diagnostic.Error d -> assert(d.code=code)

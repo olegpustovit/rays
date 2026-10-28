@@ -1,7 +1,7 @@
 module E = Flow.Eval
 let () = Region_snapshot.start ()
 module I = Flow_ir
-let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
+open Test_support
 let checked ?(ops = []) body =
   let text = "(workspace w (graph g :context value (let* [tested " ^ body ^ "] 0.0)))" in
   let forms = ok (Flow.Syntax.parse text) in
@@ -35,7 +35,7 @@ let () =
         | instruction -> instruction) region.code) ())) in
     List.iter (fun time ->
       let live = Input.at_time time in
-      let expected = I.Packed.reference packed ~live in
+      let expected = I.Packed.Host.reference packed ~live in
       List.iter (fun domains -> Parallel.run ~domains (fun () ->
         List.iter (fun program -> assert (same
           (I.Packed.force ~strict:true program ~live) expected)) [packed; nested]))
@@ -202,7 +202,7 @@ let () =
   List.iter(fun body->let packed=Test_program.compile ~fusion:false body in
     List.iter(fun time->let live=Input.at_time time in
       List.iter(fun domains->Parallel.run ~domains(fun()->
-        assert(same(I.Packed.force ~strict:true packed ~live)(I.Packed.reference packed ~live))))[1;4;8])
+        assert(same(I.Packed.force ~strict:true packed ~live)(I.Packed.Host.reference packed ~live))))[1;4;8])
       [0.;1.;2.])
     ["(map (fn [x] (int/add x (int t))) (array/range (int/add 32769 (int t)) :type int))";
      "(let* [n (int/add 32769 (int t)) xs (array/range n :type int)] (map (fn [x] (int/sub x (int t))) xs))";
@@ -221,7 +221,7 @@ let () =
     let expected=E.Int_array(Array.init count(fun i->i*factor)) in
     List.iter(fun domains->Parallel.run ~domains(fun()->
       assert(same(I.Packed.force ~strict:true packed ~live)(Ok expected));
-      assert(same(I.Packed.force ~strict:true packed ~live)(I.Packed.reference packed ~live))))[1;4;8];
+      assert(same(I.Packed.force ~strict:true packed ~live)(I.Packed.Host.reference packed ~live))))[1;4;8];
     if count>1 then begin
       let region=packed in
       let skipped=I.Core.Region.rebuild region ~skip:[|1|] () |>function
@@ -288,7 +288,7 @@ let () =
     let source _ _ = Ok (Some [|I.Packed.{data; offset=1; stride=2}|]) in
     List.iter (fun time ->
       let live = Input.at_time time in
-      let reference = I.Packed.reference packed ~live in
+      let reference = I.Packed.Host.reference packed ~live in
       List.iter (fun domains -> Parallel.run ~domains (fun () ->
         assert (same (I.Packed.force ~strict:true packed ~live) reference);
         let output = Array.make count 0. in
@@ -303,7 +303,7 @@ let () =
     let live = Input.at_time 0.25 in
     let nonfinite = function Error (d : Diagnostic.t) -> assert (d.code="E_NONFINITE")
       | Ok _ -> failwith "Selected or unconditional computation hid overflow" in
-    nonfinite (I.Packed.reference packed ~live);
+    nonfinite (I.Packed.Host.reference packed ~live);
     List.iter (fun domains -> Parallel.run ~domains (fun () ->
       nonfinite (I.Packed.force ~strict:true packed ~live);
       nonfinite (I.Packed.force_into ~strict:true ~column_source:(fun _ _ -> Ok None) ~count
@@ -701,7 +701,7 @@ let () =
     assert (Array.length (I.Packed.Host.view packed).code = 8);
     List.iter (fun time ->
       let live = Input.at_time time in
-      let reference = I.Packed.reference packed ~live in
+      let reference = I.Packed.Host.reference packed ~live in
       List.iter (fun domains -> Parallel.run ~domains (fun () ->
         assert (same (I.Packed.force packed ~live) reference))) [1;8]) [0.;0.37;2.]) [false;true];
   let signed = Test_program.compile
@@ -711,7 +711,7 @@ let () =
   assert (view.outputs.(0).(1) <> view.outputs.(0).(2));
   List.iter (fun domains -> Parallel.run ~domains (fun () ->
     let live = Input.at_time 0.37 in
-    assert (same (I.Packed.force signed ~live) (I.Packed.reference signed ~live)))) [1;8];
+    assert (same (I.Packed.force signed ~live) (I.Packed.Host.reference signed ~live)))) [1;8];
   let guards = Test_program.compile
     "(map (fn [x] (if (and (< x t) (not (= x 0)))
       (max (min (sqrt (abs (* x x))) 1) 0) (sin (cos (/ (pow (mod x 7) 2) t)))))
@@ -769,7 +769,7 @@ let () =
       |_->failwith "Float Product forcing differs from reference" in
     List.iter(fun packed->float_bank packed;
       List.iter(fun(frame,time)->let live={(Input.at_time time)with frame} in
-        let expected=I.Packed.reference packed ~live in
+        let expected=I.Packed.Host.reference packed ~live in
         List.iter(fun domains->Parallel.run ~domains(fun()->
           try equal expected(I.Packed.force ~strict:true packed ~live)
           with exn->failwith(Printf.sprintf "Float Product frame=%d time=%g domains=%d: %s"

@@ -153,17 +153,17 @@ let resolve_capture t request ~live sources value=match value with
 let create_canvas t ~width ~height=Result.map(fun canvas->
   t.canvases_created<-t.canvases_created+1;canvas)(message(Canvas.create ~width ~height))
 let destroy_canvas t canvas=
-  let captures,readbacks=Canvas.Private.pixel_stats canvas in
+  let captures,readbacks=Canvas.pixel_stats canvas in
   ignore(Canvas.destroy canvas);
   t.canvases_destroyed<-t.canvases_destroyed+1;
   t.captures<-t.captures+captures;t.readbacks<-t.readbacks+readbacks
 let render_stats t=
   let captures,readbacks=List.fold_left(fun(c,r)(_,entry)->match entry.canvas with
-    |None->c,r|Some canvas->let captures,readbacks=Canvas.Private.pixel_stats canvas in
+    |None->c,r|Some canvas->let captures,readbacks=Canvas.pixel_stats canvas in
         c+captures,r+readbacks)(t.captures,t.readbacks)t.entries in
   t.canvases_created,t.canvases_destroyed,captures,readbacks
 let authored_key prefix (node:E.node)=prefix^Marshal.to_string(node.inst,node.site,node.iter)[Marshal.No_sharing]
-let invalidate_display entry=entry.display<-None;Option.iter(fun canvas->ignore(Canvas.Private.invalidate canvas))entry.canvas
+let invalidate_display entry=entry.display<-None;Option.iter(fun canvas->ignore(Canvas.invalidate canvas))entry.canvas
 module Functions=Hashtbl.Make(struct type t=E.fn let equal=(==) let hash=E.Residual.function_id end)
 module Residuals=Hashtbl.Make(struct type t=E.residual let equal=(==) let hash=E.Residual.residual_id end)
 let size_dependencies plan root=
@@ -240,7 +240,7 @@ let cpu_of_image image =
   Result.map_error(fun d->error d.Diagnostic.message)(CPU.of_owned_rgba ~width ~height rgba)
 let texture payload=lazy(
   let bytes=bytes_of_image payload in
-  Texture.Private.create_owned ~width:(CPU.width payload) ~height:(CPU.height payload)
+  Texture.create_owned ~width:(CPU.width payload) ~height:(CPU.height payload)
     (Array.init(Bytes.length bytes/4)(fun i->let o=4*i in
       Rays_math.Color.rgba(Char.code(Bytes.get bytes o))(Char.code(Bytes.get bytes(o+1)))
         (Char.code(Bytes.get bytes(o+2)))(Char.code(Bytes.get bytes(o+3))))))
@@ -251,7 +251,7 @@ let publish t key entry ~width ~height ~source=
           |Error error->Error(Format.asprintf "%a" Runtime_resources.pp_error error)
         |Ok image->let accepted=ref false in
           Fun.protect ~finally:(fun()->if not !accepted then ignore(Runtime_resources.Image.destroy image))(fun()->
-            Result.bind(Texture.Private.of_image image)(fun view->
+            Result.bind(Texture.of_image image)(fun view->
               Result.map(fun public_image->entry.borrowed<-Some view;accepted:=true;public_image)
                 (Image.of_resource image))))
     |Some image->Result.map(fun()->image)
@@ -259,7 +259,7 @@ let publish t key entry ~width ~height ~source=
           (Runtime_resources.Image.replace_gpu_source (Image.resource image)
             ~width ~height ~source))in
   let* borrowed=match entry.borrowed with Some view->Ok view|None->
-    message(Texture.Private.of_image(Image.resource image))in
+    message(Texture.of_image(Image.resource image))in
   entry.image<-Some image;entry.borrowed<-Some borrowed;
   entry.texture<-Some(lazy(Ok borrowed));Ok()
 let prepare t plan =
@@ -449,7 +449,7 @@ let rec resolve ?gpu ?context t ~display ~state ~live (plan:E.plan) value =
                 let accepted=ref false in
                 Fun.protect ~finally:(fun()->if created && not !accepted then destroy_canvas t canvas)(fun()->
                   let* ()=message(Canvas.render canvas scene)in
-                  let* width,height,source=message(Canvas.Private.gpu_source canvas)in
+                  let* width,height,source=message(Canvas.gpu_source canvas)in
                   let* ()=publish t key entry ~width ~height ~source in
                   entry.canvas<-Some canvas;accepted:=true;
                   if created then Option.iter(destroy_canvas t)previous;

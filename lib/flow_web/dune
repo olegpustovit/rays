@@ -9,13 +9,13 @@
  (name test_wgsl)
  (modules test_wgsl)
  (deps (glob_files goldens/*.wgsl))
- (libraries flow_web flow flow_ir flow_ir_test_support rays_math parallel))
+ (libraries test_support flow_web flow flow_ir flow_ir_test_support rays_math parallel))
 
 (test
  (name test_js)
  (modules test_js)
  (deps (glob_files goldens/*.js))
- (libraries flow_web flow flow_ir flow_ir_test_support input parallel))
+ (libraries test_support flow_web flow flow_ir flow_ir_test_support input parallel))
 
 (test
  (name test_js_frame)
@@ -24,71 +24,71 @@
   ../../sketches/flow_vectors.rays ../../sketches/basic.rays
   ../../tools/web/test/frame_semantics.mjs ../../tools/web/test/rt_shim.mjs
   ../web_export/runtime/prims.js ../web_export/runtime/shape2.js ../web_export/runtime/runtime.js ../web_export/runtime/workers.js ../web_export/runtime/region_bindings.js)
- (libraries flow_web flow flow_ir flow_ir_test_support input scene_command str parallel))
+ (libraries test_support flow_web flow flow_ir flow_ir_test_support input scene_command str parallel))
 
 (test
  (name test_target)
  (modules test_target)
- (libraries flow_web flow flow_ir flow_ir_test_support parallel))
+ (libraries test_support flow_web flow flow_ir flow_ir_test_support parallel))
 
 (test
  (name test_js_gpu)
  (modules test_js_gpu)
  (deps (glob_files goldens/frame_gpu_*.js))
- (libraries flow_web flow flow_ir flow_ir_test_support str parallel))
+ (libraries test_support flow_web flow flow_ir flow_ir_test_support str parallel))
 
 (test
  (name test_fma)
  (modules test_fma)
  (deps ../web_export/runtime/prims.js)
- (libraries flow_web flow flow_ir flow_ir_test_support rays_math parallel))
+ (libraries test_support flow_web flow flow_ir flow_ir_test_support rays_math parallel))
 
 (test
  (name test_gather)
  (modules test_gather)
  (deps (glob_files ../web_export/runtime/*.js))
- (libraries flow_web flow flow_ir rays_math str parallel))
+ (libraries test_support flow_web flow flow_ir rays_math str parallel))
 
 (test
  (name test_text_bytes)
  (modules test_text_bytes)
  (deps ../web_export/runtime/prims.js)
- (libraries flow_web parallel))
+ (libraries test_support flow_web parallel))
 
 (test
  (name test_scatter)
  (modules test_scatter)
  (deps (glob_files ../web_export/runtime/*.js))
- (libraries flow_web flow flow_ir rays_math parallel))
+ (libraries test_support flow_web flow flow_ir rays_math parallel))
 
 (test
  (name test_compact_scan)
  (modules test_compact_scan)
  (deps (glob_files ../web_export/runtime/*.js))
- (libraries flow flow_ir flow_web rays_math parallel))
+ (libraries test_support flow flow_ir flow_web rays_math parallel))
 
 (test
  (name test_grade_index)
  (modules test_grade_index)
  (deps (glob_files ../web_export/runtime/*.js))
- (libraries flow flow_ir flow_web rays_math parallel))
+ (libraries test_support flow flow_ir flow_web rays_math parallel))
 
 (test
  (name test_region_arguments)
  (enabled_if (= %{env:RAYS_SLOW=0} 1))
  (modules test_region_arguments)
  (deps (glob_files ../web_export/runtime/*.js))
- (libraries flow_web flow flow_ir flow_ir_test_support input parallel))
+ (libraries test_support flow_web flow flow_ir flow_ir_test_support input parallel))
 
 (test
  (name test_array_max_length)
  (modules test_array_max_length)
  (deps (glob_files ../web_export/runtime/*.js))
- (libraries flow flow_ir flow_web rays_math parallel))
+ (libraries test_support flow flow_ir flow_web rays_math parallel))
 
 (test
  (name test_array_composition_web)
  (enabled_if (= %{env:RAYS_SLOW=0} 1))
  (modules test_array_composition_web)
  (deps (glob_files ../web_export/runtime/*.js))
- (libraries flow_web flow flow_ir flow_ir_test_support rays_math parallel))
+ (libraries test_support flow_web flow flow_ir flow_ir_test_support rays_math parallel))

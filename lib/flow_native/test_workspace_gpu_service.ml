@@ -1,6 +1,6 @@
 (* A worker cook reaches the workspace-owned packed-attribute GPU proxy only while the initial
    domain pumps it. *)
-let ok = function Ok value -> value | Error d -> failwith (Diagnostic.to_string d)
+open Test_support
 let graph_ok = function Ok value -> value | Error message -> failwith message
 let count = 2048
 let text = Printf.sprintf

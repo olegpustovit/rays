@@ -3,7 +3,7 @@ open Rdk_test_support
 
 module N = Sop.Node
 
-let ok = function Ok value -> value | Error error -> failwith (Diagnostic.to_string error)
+open Test_support
 let ok_string = function Ok value -> value | Error error -> failwith error
 
 let geometry () =

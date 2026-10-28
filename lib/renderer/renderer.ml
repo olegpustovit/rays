@@ -959,3 +959,5 @@ module Private=struct
     Renderer_retained_plans.segment_count value.retained_plans,
     value.retained_scene2_segment_hits,value.retained_scene2_segment_misses
 end
+let create_gpu_marks=Private.create_gpu_marks
+let gpu_marks=Private.gpu_marks

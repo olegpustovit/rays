@@ -1,7 +1,7 @@
 open Flow
 open Flow_graph
 
-let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
+open Test_support
 let catalog = Catalog.{version = 1; kinds = []}
 let checked source = match Workspace.check catalog source with
   | Some w, [] -> w

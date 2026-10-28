@@ -51,8 +51,8 @@ let storage_length = function
 
 let create_owned ~name ~owner storage =
   if String.trim name = "" then Error "Attribute.create_owned: empty name"
-  else Ok { name; owner; storage; data_id = Data_id.fresh ();
-            storage_id = Data_id.fresh () }
+  else Ok { name; owner; storage; data_id = Support.fresh_data_id ();
+            storage_id = Support.fresh_data_id () }
 let create_key_owned key value =
   create_owned ~name:key.key_name ~owner:key.key_owner
     (storage_of_kind key.key_kind value)
@@ -86,7 +86,7 @@ let storage_id value = value.storage_id
 let with_name name value =
   if String.trim name = "" then Error "Attribute.with_name: empty name"
   else if String.equal name value.name then Ok value
-  else Ok { value with name; data_id = Data_id.fresh () }
+  else Ok { value with name; data_id = Support.fresh_data_id () }
 let payload_bytes value = match value.storage with
   | Float values -> Array.length values * 8
   | Int values -> Array.length values * (Sys.word_size / 8)

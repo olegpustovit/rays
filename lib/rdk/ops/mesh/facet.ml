@@ -1159,9 +1159,7 @@ let validate_normal_view ?cancel ~grain owner values =
   let count = Array.length values.x in
   let ranges = if count = 0 then 0 else (count + grain - 1) / grain in
   let failures = Array.make ranges (-1) in
-  if ranges > 0 then Parallel.for_ ~chunk_size:1 ~start:0
-      ~finish:(ranges - 1) (fun range ->
-    let first = range * grain and last = min count ((range + 1) * grain) in
+  if ranges > 0 then Support.run_indexed_ranges ~grain count (fun ~range ~first ~last ->
     let element = ref first in
     while failures.(range) < 0 && !element < last do
       Cancel.poll cancel !element 4095;
@@ -1387,9 +1385,7 @@ let adjust_normal_attribute ?cancel ~grain ?selected ~unit_length ~reverse attri
         and z = Array.copy values.z in
         let ranges = if count = 0 then 0 else (count + grain - 1) / grain in
         let failures = Bytes.make ranges '\000' in
-        if ranges > 0 then Parallel.for_ ~chunk_size:1 ~start:0
-            ~finish:(ranges - 1) (fun range ->
-          let first = range * grain and last = min count ((range + 1) * grain) in
+        if ranges > 0 then Support.run_indexed_ranges ~grain count (fun ~range ~first ~last ->
           for element = first to last - 1 do
             Cancel.poll cancel element 4095;
             if match selected with None -> true | Some predicate -> predicate element

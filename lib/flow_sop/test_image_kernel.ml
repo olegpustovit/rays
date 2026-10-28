@@ -1,6 +1,6 @@
 module E = Flow.Eval
 module P = Sop
-let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
+open Test_support
 let cooked = function Ok x -> x | Error d -> failwith (Diagnostic.error_to_string d)
 let parse text = Flow.Syntax.parse text |> ok
 let catalog = Flow.Catalog.{version=1;kinds=[]}
