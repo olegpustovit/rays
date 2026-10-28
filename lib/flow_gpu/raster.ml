@@ -143,3 +143,25 @@ let msl ~declarations ~vertex ~fragment =
       (signature (List.tl v.params) [ "uint vid [[vertex_id]]" ]) out; vertex_body; "  return o;\n}\n";
     Printf.sprintf "fragment float4 %s(\n    %s) {\n  float4 colour;\n" (identifier fragment)
       (signature f.params ((out ^ " in [[stage_in]]") :: textures f)); fragment_body; "  return colour;\n}\n" ]))
+
+(* The same stages as Vulkan SPIR-V modules (entry [main]): varyings at locations in the vertex
+   result's leaf order, the fragment's inputs at their names' locations. *)
+let spirv ~declarations ~vertex ~fragment =
+  let* v = compile ~declarations vertex in
+  let* f = compile ~declarations fragment in
+  let buffers (s : stage) = List.filter_map Fun.id (Array.to_list (Array.mapi (fun u value -> match value with
+    | E.Int_array a -> Some (u, Array.length a - 1, true) | E.Float_array a -> Some (u, Array.length a - 1, false)
+    | _ -> None) s.program.uniforms)) in
+  let varyings = List.filter (fun leaf -> leaf.path <> [ "position" ]) v.leaves in
+  let location leaf = Option.get (List.find_index (( == ) leaf) varyings) in
+  let width = function Flow.Ty.Vec2 -> 2 | Vec3 -> 3 | Vec4 -> 4 | _ -> 1 in
+  let* inputs = all (List.map (fun (name, ty) ->
+    match List.find_opt (fun leaf -> List.nth leaf.path (List.length leaf.path - 1) = name) varyings with
+    | Some leaf -> Ok (location leaf, width ty, leaf.flat)
+    | None -> fail (fragment ^ ": no varying " ^ name)) (List.filter (fun p -> not (is_buffer p)) f.params)) in
+  let* vertex_module = Spirv.stage { vertex = true; inputs = [||]; buffers = buffers v;
+    outputs = Array.of_list (List.map (fun leaf -> if leaf.path = [ "position" ] then Spirv.Position
+      else Varying (location leaf, leaf.flat)) v.leaves) } v.program in
+  let* fragment_module = Spirv.stage { vertex = false; inputs = Array.of_list inputs; buffers = buffers f;
+    outputs = Array.of_list (List.map (fun leaf -> if leaf.path = [ "discard" ] then Spirv.Discard else Colour) f.leaves) } f.program in
+  Ok (vertex_module, fragment_module)

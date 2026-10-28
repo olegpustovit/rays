@@ -7,3 +7,7 @@ val msl : declarations:string -> vertex:string -> fragment:string -> (string, Di
     position among the array parameters; the vertex entry's first parameter is the vertex id, and it
     returns [:position] (clip space) beside the varyings, those under [:flat] not interpolated. The
     fragment entry takes varyings by name and returns the colour. *)
+
+val spirv : declarations:string -> vertex:string -> fragment:string -> (bytes * bytes, Diagnostic.t) result
+(** The same pipeline as Vulkan SPIR-V vertex and fragment modules (entry [main]); varyings are at
+    locations in the vertex result's leaf order. *)

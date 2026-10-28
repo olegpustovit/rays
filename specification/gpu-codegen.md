@@ -87,6 +87,12 @@ gathers read the bound buffers without clamps, and there is no status word.
 - Fragment intrinsics are `gpu/fwidth`, `gpu/sample` and `gpu/texture-size` (Region `Stage`); texture
   `t` is sampled with sampler `t + 1`. The CPU and every other target refuse them (`E_GPU_STAGE`).
 - Blending, depth and culling are OGPU pipeline state, never shader code.
+- The same programs print as Vulkan SPIR-V (`Spirv.stage`, `Raster.spirv`): one module per stage,
+  entry `main`, varyings at `Location`s in the vertex result's leaf order (`Flat` under `:flat`),
+  `VertexIndex`/`Position` built-ins, buffers as storage runtime arrays at their bindings, texture `t`
+  and sampler `t + 1` as separate descriptors, `OpFwidth`, `OpImageSampleImplicitLod`,
+  `OpImageQuerySizeLod`, and `OpKill` after the stores for a discard. They are checked in as
+  `shaders/spirv/NAME.{vert,frag}.spv` and validated with `spirv-val --target-env vulkan1.1`.
 
 ## Gates
 
