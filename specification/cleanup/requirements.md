@@ -935,7 +935,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **UI5** (P5, high, test-sprawl, effort S). Location at baseline: marks_scene_test/dune:2 · native_qualification/dune:1-9 · tools/dune:241 · gate_test/dune:2. marks_scene.ml is compiled 4 times and drawing/workspace_* twice, so one binary carries two `Marks_scene` modules. Action: UI4 removes all of the copies. Move `Gate` into `input`.
 
-- [ ] **UI6** (P5, high, layering, effort S). Location at baseline: rays_editor/surface.ml, packed_pieces.ml. SOP-to-Scene3 glue over rdk, with one editor call site. Action: Move them to rdk_rays; the editor drops its direct dependency on rdk.
+- [x] **UI6** (P5, high, layering, effort S). Location at baseline: rays_editor/surface.ml, packed_pieces.ml. SOP-to-Scene3 glue over rdk, with one editor call site. Action: Move them to rdk_rays; the editor drops its direct dependency on rdk. Evidence: the editor reads geometry through Rdk_rays.Geometry_view (probe summary, bounds, sheet columns, wire mesh, pick and cast); rays_editor no longer depends on rdk.
 
 - [x] **UI7** (P0, high, doc-rot, effort S). Location at baseline: pxui_graph/AGENTS.md:42,44 · flow.md:37 vs flow.md:356 · scope_state.ml:145. The normative docs contradict each other: 'No curves' vs curves by default. Action: Settle on one style and delete the losing styles (UI8).
 
@@ -997,7 +997,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [ ] **UI36** (P5, low, naming, effort S). Location at baseline: Core, Environment, Leader, Contexts, `core_*` prefix. Names that don't say what the module is. Action: Rename them while doing UI1 and UI14.
 
-- [ ] **UI37** (P7, low, api-bloat, effort S). Location at baseline: editor_document document/layers/objects/literal_edit (1,302 lines). No `.mli` and not private. Action: Add `.mli` files or mark them private.
+- [x] **UI37** (P7, low, api-bloat, effort S). Location at baseline: editor_document document/layers/objects/literal_edit (1,302 lines). No `.mli` and not private. Action: Add `.mli` files or mark them private. Evidence: document, document_edit, literal_edit, objects and layers have .mli files trimmed to what the repo uses.
 
 - [x] **TT1** (P0, high, process, effort S). Location at baseline: .claude/worktrees/agent-af1aa771a748d6720 (900 MB, locked). A stale agent worktree that doubles grep and skill hits. Action: `git worktree remove --force` and ignore `.claude/worktrees/`.
 
