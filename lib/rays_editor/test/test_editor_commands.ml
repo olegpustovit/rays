@@ -130,6 +130,37 @@ let world_command () =
       let undone = step repeated [L.Undo] 3 in
       check (E3.workspace undone == before) "one undo did not restore the World-free document")
 
+(* A Shift-drag in the view rotates the World: the press latches the operation, the moves edit
+   the text, the release seals; the whole drag is one undo step. *)
+let world_drag () =
+  let module E3 = Rays_editor.Editor in
+  let module L = Rays_editor.Private.Leader in
+  with_editor {|(workspace world_drag
+    (graph g :context sop (sop/box))
+    (graph sky :context world (world/sun (world/sky)))
+    (graph scene :context scene (scene/root (scene/merge (scene/geometry (ref g)) (scene/world (ref sky))))))|}
+    (fun editor ->
+      let count = ref 0 in
+      let editor = ref (E3.update editor (Test_editor_input.frame (450., 300.) [] 0)) in
+      let step ?(keys = []) ?(buttons = []) mouse events =
+        incr count; editor := E3.update !editor (Test_editor_input.frame ~keys ~buttons mouse events !count) in
+      let text () = Editor_document.Workspace_doc.to_text (E3.workspace !editor) in
+      let before = text () in
+      let x, y, w, h = (E3.panes !editor (Test_editor_input.frame (450., 300.) [] 0)).Pxui_shell.Layout.view in
+      let p = float (x + w / 2), float (y + h / 2) in
+      let at dx = fst p +. dx, snd p in
+      let shift = [Input.Shift] and left = [Input.LeftButton] in
+      step ~keys:shift (at 0.) [Input.Pointer_moved (at 0.)];
+      step ~keys:shift ~buttons:left (at 0.) [Input.Pointer_pressed (Input.LeftButton, at 0.)];
+      step ~keys:shift ~buttons:left (at 20.) [Input.Pointer_moved (at 20.)];
+      step ~keys:shift ~buttons:left (at 40.) [Input.Pointer_moved (at 40.)];
+      step ~keys:shift (at 40.) [Input.Pointer_released (Input.LeftButton, at 40.)];
+      check (text () <> before) "a Shift-drag in the view did not rotate the World";
+      check (E3.undo_label !editor = Some "Rotate World") "the drag's undo entry is not Rotate World";
+      let undone = Rays_editor.Reduce.step !editor [L.Undo] (Test_editor_input.frame (450., 300.) [] (!count + 1)) in
+      check (Editor_document.Workspace_doc.to_text (E3.workspace undone) = before)
+        "one undo did not undo the whole World drag")
+
 (* an image-context workspace is not a geometry object: the cook has nothing to reject *)
 let image_cook () =
   let module E3 = Rays_editor.Editor in
@@ -348,4 +379,5 @@ let run () =
   image_cook ();
   new_graphs ();
   world_command ();
+  world_drag ();
   print_endline "editor commands: the host guide and key routing"
