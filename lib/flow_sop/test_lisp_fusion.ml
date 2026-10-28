@@ -243,3 +243,32 @@ let () =
   print_endline
     "Lisp fusion: color_by_height > noise_displace > transform write Cd and P in one region, as \
      the unfolded bytes"
+
+(* a map that reads the chain inside its term (no let* binding) folds too: its read of the
+   written Cd takes the values, its read of P the input *)
+let () =
+  let text =
+    Printf.sprintf
+      "(workspace lazy (graph g :context sop (let* [g (sop/soft_transform %s) c \
+       (sop/color_by_height g)] (sop/with_attr c :P (exact (map (fn [(p : vec3) (k : vec4)] (+ p \
+       [k.x k.y 0.0])) (sop/attr c :P) (sop/attr c \"Cd\" :type vec4)))))))"
+      grid
+  in
+  let cook ~reference =
+    let l = L.workspace ~reference (Flow.Syntax.parse text |> flow_ok) |> flow_ok in
+    let session =
+      Session.create ~max_entries:32 ~max_payload_bytes:(64 * 1024 * 1024) |> get_string_ok
+    in
+    let root = compiled l in
+    let bytes = Session.cook session ~context:(context ~domains:4) root |> geometry in
+    Session.close session;
+    ( geometry_bytes bytes,
+      List.length
+        (List.filter
+           (fun (n : Sop.Node.info) -> n.operation = "flow.with_attr")
+           (Sop.Node.inspect root)) )
+  in
+  let expected, unfolded = cook ~reference:true and bytes, writes = cook ~reference:false in
+  assert (bytes = expected);
+  if writes <> 1 then failwith (Printf.sprintf "lazy reads: %d writes, %d unfolded" writes unfolded);
+  print_endline "Lisp fusion: a map reading the chain in its term folds, as the unfolded bytes"

@@ -365,11 +365,19 @@ module Host : sig
   val map_function_bindings : (value -> value) -> fn -> fn
   (** Replace immutable closure captures, preserving callable identity and scope. *)
 
-  val rewrite : ?fresh:(unit -> int) -> (value -> value option) -> value -> value
+  val rewrite :
+    ?fresh:(unit -> int) ->
+    ?retarget:
+      (Workspace.term -> (string * value) list -> (Workspace.term * (string * value) list) option) ->
+    (value -> value option) ->
+    value ->
+    value
   (** A copy of the value with what the function replaces replaced, through closure and residual
       captures and aggregates (each shared residual copied once, with a fresh id). [fresh] supplies
       the ids, by default from the evaluator's bulk counter; a host that keys caches on them passes
-      a deterministic one. *)
+      a deterministic one. [retarget], given a residual's term and captures, may give its copy
+      another term and captures (the named ones replace the copied captures as they are, the others
+      are rewritten). *)
 
   val remap_function_geometry : sources:(int * int) list -> fn -> fn
   (** Remap geometry IDs through closure and residual captures when a host moves a callable between

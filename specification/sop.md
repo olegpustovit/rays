@@ -377,9 +377,11 @@ so a reader of counts keeps no chain alive. The fused node keys on every card it
 and its copied residuals take deterministic ids, so an edit elsewhere keeps it cached (edit to
 recook 0.018 s, as nested). The intermediate cards are unchanged and cook as themselves when
 displayed or probed. Selected and guarded writes and chains through a structural card (a body
-whose geometry follows cooked data) do not fold. A read of the chain inside a lazy term (a map over
-`(sop/attr in0 :P)` written in the map, not bound by `let*`) captures the geometry itself and
-stops the fold; bodies bind the read (`sop/transform` does).
+whose geometry follows cooked data) do not fold. A lazy term that reads the chain itself (a map
+over `(sop/attr in0 :P)` written in the map, not bound by `let*`) folds as a bound read would: the
+copy's term reads a written attribute through a capture of the values written (`Host.rewrite
+~retarget`) and its geometry capture is the input; any other use of that capture (a field, a
+rebinding, a call) refuses the fold.
 
 A body stays one program when its structure is decided statically: a cooked test that only
 guards a write is `sop/with_attr :when` (decided as the write cooks), `and`/`or` short-circuit on

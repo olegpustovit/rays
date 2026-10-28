@@ -1358,8 +1358,81 @@ let fold_writes (plan : E.plan) =
                 ("geometry", E.Deferred (Flow.Ty.geometry, base))
                 :: List.remove_assoc "geometry" fields
               in
+              (* A lazy term that reads the chain itself ([(map f (sop/attr in0 :P))]): its
+                 reads of a written attribute become captures of the values written, and the
+                 geometry it captures is the input. Any other use of the capture refuses. *)
+              let retarget (term : Workspace.term) bindings =
+                let chained =
+                  List.filter_map
+                    (function
+                      | name, E.Deferred (ty, x) when Flow.Ty.is_geometry ty && List.mem x chain ->
+                          Some name
+                      | _ -> None)
+                    bindings
+                in
+                if chained = [] then None
+                else
+                  let extra = ref [] in
+                  let rec binds = function
+                    | Workspace.Name n -> List.mem n chained
+                    | Seq ps -> List.exists binds ps
+                    | Keys ns -> List.exists (fun n -> List.mem n chained) ns
+                  in
+                  let literal (t : Workspace.term) =
+                    match t.node with Text s -> Some s | _ -> None
+                  in
+                  let rec map (t : Workspace.term) =
+                    match t.node with
+                    | Ref_binding (x, _) when List.mem x chained -> raise Exit
+                    | Op { op = "sop/count"; args; _ }
+                      when match List.assoc_opt "geometry" args with
+                           | Some { node = Ref_binding (x, []); _ } -> List.mem x chained
+                           | _ -> false ->
+                        t
+                    | Op { op = "sop/attr"; args; _ }
+                      when match List.assoc_opt "geometry" args with
+                           | Some { node = Ref_binding (x, []); _ } -> List.mem x chained
+                           | _ -> false -> (
+                        let attribute =
+                          match List.assoc_opt "attribute" args with
+                          | Some a -> literal a
+                          | None -> None
+                        in
+                        match Option.map written attribute with
+                        | (None | Some None) when attribute <> None -> t
+                        | Some (Some (_, kind, earlier))
+                          when List.for_all
+                                 (fun (k, v) ->
+                                   match k with
+                                   | "geometry" | "attribute" -> true
+                                   | "owner" -> literal v = Some "point"
+                                   | "type" -> literal v = Some kind
+                                   | _ -> false)
+                                 args ->
+                            let name = "$fold" ^ string_of_int (List.length !extra) in
+                            extra := (name, E.Host.rewrite ~fresh (fun _ -> None) earlier) :: !extra;
+                            { t with node = Ref_binding (name, []) }
+                        | _ -> raise Exit)
+                    | Let (steps, _) when List.exists (fun (p, _) -> binds p) steps -> raise Exit
+                    | Loop { accs; clauses; _ }
+                      when List.exists (fun (p, _) -> binds p) (accs @ clauses) ->
+                        raise Exit
+                    | Fn { params; _ } when List.exists (fun (p, _) -> binds p) params -> raise Exit
+                    | State { binder; _ } when binds binder -> raise Exit
+                    | _ -> Workspace.map_children map t
+                  in
+                  match map term with
+                  | term ->
+                      Some
+                        ( term,
+                          List.map (fun name -> (name, E.Deferred (Flow.Ty.geometry, base))) chained
+                          @ !extra )
+                  | exception Exit ->
+                      fits := false;
+                      None
+              in
               let values =
-                E.Host.rewrite ~fresh
+                E.Host.rewrite ~fresh ~retarget
                   (function
                     | (E.Struct (op, ty, fields) | E.Source (op, ty, fields)) as read -> (
                         let chained =

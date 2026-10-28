@@ -2644,7 +2644,8 @@ module Host = struct
   (* [f] replaces a value outright; otherwise captures are rewritten through closures, residuals and
      aggregates. Residuals are shared: each is rewritten once, or the copy is exponential in the
      depth of the sharing. *)
-  let rewriter ?(fresh = fun () -> Atomic.fetch_and_add bulk_ids (-1)) f =
+  let rewriter ?(fresh = fun () -> Atomic.fetch_and_add bulk_ids (-1)) ?(retarget = fun _ _ -> None)
+      f =
     let module Seen = Hashtbl.Make (struct
       type t = residual
 
@@ -2662,11 +2663,25 @@ module Host = struct
               match Seen.find_opt seen r with
               | Some copy -> Residual copy
               | None ->
+                  let rterm, overrides =
+                    match retarget r.rterm (Smap.bindings r.renv) with
+                    | Some (term, overrides) -> (term, overrides)
+                    | None -> (r.rterm, [])
+                  in
+                  let renv =
+                    List.fold_left
+                      (fun env (name, v) -> Smap.add name v env)
+                      (Smap.mapi
+                         (fun name v -> if List.mem_assoc name overrides then v else value v)
+                         r.renv)
+                      overrides
+                  in
                   let copy =
                     {
                       r with
                       rid = fresh ();
-                      renv = Smap.map value r.renv;
+                      rterm;
+                      renv;
                       live = None;
                       dep_frame = 0;
                       dep_state = 0;
@@ -2687,7 +2702,7 @@ module Host = struct
     in
     (value, function_value)
 
-  let rewrite ?fresh f = fst (rewriter ?fresh f)
+  let rewrite ?fresh ?retarget f = fst (rewriter ?fresh ?retarget f)
 
   let remap_function_geometry ~sources fn =
     if sources = [] then fn
