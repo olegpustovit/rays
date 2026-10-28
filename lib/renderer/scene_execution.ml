@@ -88,7 +88,7 @@ type batch_plan={batch_family:pipeline_family;batch_samples:int;batch_state:stat
   (* [batch_draws] as the backend batch, built once with the plan. *)
   batch_driver_draws:Ogpu.Backend.batch_draw array;
   batch_resources:[`Buffer of Ogpu.Backend.buffer|`Texture of Ogpu.Backend.texture]list;
-  batch_winding:bool;mutable batch_icb:Ogpu.Backend.icb option}
+  mutable batch_icb:Ogpu.Backend.icb option}
 type replay_plan={replay_clear:float*float*float*float;
   replay_payloads:automatic_signature list;replay_batches:batch_plan list;
   replay_gpu_vertices:gpu_vertices list}
@@ -1005,7 +1005,8 @@ let encode_batch value commands ~clear (batch:batch_plan)=
   let* ()=Ogpu.Backend.set_viewport encoder{x;y;width;height}in
   let* ()=Ogpu.Backend.set_scissor encoder{x=sx;y=sy;width=sw;height=sh}in
   let* ()=Ogpu.Backend.set_cull encoder batch.batch_state.cull in
-  let* ()=if batch.batch_winding then Ogpu.Backend.set_winding encoder Counter_clockwise else Ok()in
+  (* 3D meshes wind counter-clockwise: a fact of the family, never of a bound slot *)
+  let* ()=if has_depth batch.batch_family then Ogpu.Backend.set_winding encoder Counter_clockwise else Ok()in
   let* ()=if has_depth batch.batch_family then
       Ogpu.Backend.set_depth_state encoder(Some{depth_compare=batch.batch_state.depth_compare;
         depth_write=batch.batch_state.depth_write})
@@ -1325,7 +1326,7 @@ let finish_prepared_frame value frame ~clear ~prepared_key ~draws ~scratch
           depth_write=false;depth_load=Ogpu.Render_pass.Load;depth_clear=1.;
           transform_uniforms=None}in
         Ok[{batch_family=Scene2;batch_samples=1;batch_state=state;batch_first=true;batch_draws=[||];batch_driver_draws=[||];
-            batch_resources=[];batch_winding=false;batch_icb=None},[]]
+            batch_resources=[];batch_icb=None},[]]
       else
       let slot=Array.unsafe_get scratch.scratch_slots index in
       let family=slot.slot_family and samples=slot.slot_samples
@@ -1336,9 +1337,8 @@ let finish_prepared_frame value frame ~clear ~prepared_key ~draws ~scratch
       |Error _ as e->e
       |Ok entries->
           let draws=Array.of_list(List.map snd entries)in
-          let winding=Array.exists(fun draw->Array.exists(fun(stage,slot,_,_)->stage=Ogpu.Backend.Vertex&&slot=7)draw.plan_draw.buffers)draws in
           let batch={batch_family=family;batch_samples=samples;batch_state=state;batch_first=first;
-            batch_draws=draws;batch_driver_draws=Array.map(fun draw->draw.plan_draw)draws;batch_resources=batch_resources draws;batch_winding=winding;batch_icb=None}in
+            batch_draws=draws;batch_driver_draws=Array.map(fun draw->draw.plan_draw)draws;batch_resources=batch_resources draws;batch_icb=None}in
           batches false next((batch,List.map fst entries)::reversed)in
     match batches true 0[]with
     |Error _ as result->discard frame;finish result
