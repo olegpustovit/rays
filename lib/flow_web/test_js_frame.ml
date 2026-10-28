@@ -206,7 +206,7 @@ let outcome render = function Ok v -> "ok\t" ^ render v | Error (d : Diagnostic.
 let value_case name (_, program) =
   let lives = List.mapi (fun i t -> live i t) [-3.; -0.; 0.37; 1.9; 100.25] in
   { name; program; mode = `Value; lives;
-    expected = List.map (fun l -> outcome canon_value (I.Core_exec.run program ~live:l)) lives }
+    expected = List.map (fun l -> outcome canon_value (Test_program.run program ~live:l)) lives }
 (* The evaluator hands the executor the residuals of a state fixture each frame, in call order;
    the case replays exactly those calls (one program) through the emitted module. *)
 let state_case name fixture =
@@ -218,7 +218,7 @@ let state_case name fixture =
       (match I.Core_lower.lower r with
        | Ok p when Array.length p.state_slots > 0 ->
            ignore (E.Residual.bind_live ~state:st r ~live:lv);
-           let result = I.Core_exec.run ~root:r p ~live:lv in
+           let result = Test_program.run ~root:r p ~live:lv in
            calls := (p, lv, outcome canon_value result) :: !calls;
            ignore v
        | _ -> ())
@@ -297,7 +297,7 @@ let () =
        test_gather runs the strict Text region through the actual runtime/pool. *)
     let frame_program=match I.Core_lower.lower r with Ok p->p|Error form->failwith form in
     let case=value_case name (r,frame_program) in
-    List.iter(fun live->match I.Core_exec.run program ~live,E.Private.force_reference(E.Residual r)~live with
+    List.iter(fun live->match Test_program.run program ~live,E.Private.force_reference(E.Residual r)~live with
       |Ok actual,Ok expected->assert(actual=expected)
       |Error actual,Error expected->assert(actual.code=expected.code && actual.message=expected.message)
       |_->assert false) case.lives;
@@ -418,7 +418,7 @@ let ()=if node then begin
     "ordinary_collection_5001",program 5001 false;"geometry_collection_negative",program (-1) true] in
   let lives=[Input.at_time 0.] in
   let cases=List.map(fun(name,program)->{name;program;mode=`Value;lives;
-    expected=List.map(fun live->outcome canon_value(I.Core_exec.run ~strict:true program ~live))lives})programs in
+    expected=List.map(fun live->outcome canon_value(Test_program.run ~strict:true program ~live))lives})programs in
   let actual=run_node cases in
   List.iter(fun c->assert(List.assoc(c.name,0)actual=List.hd c.expected))cases
 end

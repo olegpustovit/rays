@@ -99,7 +99,7 @@ let dump () = String.concat "" (List.map (fun (name,r) ->
      if not (equal_result actual expected) then
        let show = function Ok v -> E.show v | Error d -> Diagnostic.to_string d in
        failwith (Printf.sprintf "%s at %g: %s <> %s" name time (show actual) (show expected)));
-    match I.Core_exec.run core ~live,expected with
+    match Test_program.run core ~live,expected with
     | Ok actual,Ok expected -> if not (same actual expected) then
         failwith (Printf.sprintf "%s at %.17g: %s <> %s" name time (E.show actual) (E.show expected))
     | Error a,Error b -> assert (a.code=b.code)
@@ -118,7 +118,7 @@ let () =
         | Ok a,Ok b->assert(same a b)
         | Error a,Error b->assert(a.Diagnostic.code=b.code && a.message=b.message && a.cause=b.cause)
         | _->failwith "Lazy record accumulator error changed")
-        [I.Core_exec.run core ~live;I.Executor.force program ~live]) [0.;1.])
+        [Test_program.run core ~live;I.Executor.force program ~live]) [0.;1.])
     [ {|(fold [state {:n 0}] [i (range 3)]
           (if (> t 0.) (error "E_RECORD" "selected record error" :cause "record cause")
             (assoc state :n (int/add state.n 1))))|};

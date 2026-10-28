@@ -31,7 +31,7 @@ let compare value =
     assert (same (I.Executor.force program ~live) reference);
     match value with
     | E.Residual r -> (match I.Core_lower.lower r with
-        | Ok core -> ((match I.Core_exec.run core ~live,reference with
+        | Ok core -> ((match Test_program.run core ~live,reference with
             | Ok actual,Ok expected -> incr direct;assert (same_bits actual expected)
             | Error _,Error _ -> () | _ -> assert false);
             ())

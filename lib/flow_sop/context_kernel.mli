@@ -1,5 +1,7 @@
 (** Cook-context constants available to Lisp node bodies. [depends ~op] is whether a reachable,
     unpruned call of the zero-state operator [op] (default [sop/context_seed]) remains. *)
+(** The context operators a reachable branch names; [depends ~op] is membership. *)
+val context_ops_reached : ?inputs:(string * Flow.Eval.value) list -> ?defs:Flow.Workspace.graph list -> Flow.Workspace.graph -> string list
 val depends : ?op:string -> ?inputs:(string * Flow.Eval.value) list -> ?defs:Flow.Workspace.graph list -> Flow.Workspace.graph -> bool
 val specialize : ?provenance:int -> context:Sop.Context.t -> label:string -> Flow.Workspace.graph -> Flow.Workspace.graph
 

@@ -18,7 +18,7 @@ let evaluate ?resolve flags body =
   let residual=match value with E.Residual r->r|_->failwith "row diagnosis was eager" in
   let program=match I.Core_lower.lower ~strict:true residual with Ok p->p|Error form->failwith form in
   let live=Input.at_time 0. in
-  let native=I.Core_exec.run ?resolve program ~live in
+  let native=Test_program.run ?resolve program ~live in
   let reference=E.Private.force_reference ?resolve value ~live in
   (match native,reference with
    |Ok a,Ok b->assert(a=b)

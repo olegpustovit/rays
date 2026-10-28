@@ -30,7 +30,7 @@ let ()=
     List.iter(fun time->let live=Input.at_time time in
       let expected=ok(E.Private.force_reference v ~live)in
       assert(expected=E.Int(if time>0. then limit else limit-1));
-      assert(ok(I.Core_exec.run ~root:r ~strict:true core ~live)=expected);
+      assert(ok(Test_program.run ~root:r ~strict:true core ~live)=expected);
       List.iter(fun domains->Parallel.run ~domains(fun()->
         assert(ok(I.Executor.force ~strict:true compiled ~live)=expected))) [1;4;8]) [-1.;1.];
     (* Symbolic cap-minus-extra validation; no constructor or huge allocation. *)

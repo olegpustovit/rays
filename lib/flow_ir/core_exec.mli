@@ -34,11 +34,6 @@ val execute : ?root:Flow.Eval.residual -> ?strict:bool ->
   ?force:(Packed.t -> (Flow.Eval.value, Diagnostic.t) result) ->
   ?resolve:(Flow.Eval.value -> (Flow.Eval.value, Diagnostic.t) result) -> prepared -> live:Input.t ->
   (Flow.Eval.value, Diagnostic.t) result
-val run : ?root:Flow.Eval.residual -> ?strict:bool ->
-  ?force:(Packed.t -> (Flow.Eval.value, Diagnostic.t) result) ->
-  ?resolve:(Flow.Eval.value -> (Flow.Eval.value, Diagnostic.t) result) -> Core.program -> live:Input.t ->
-  (Flow.Eval.value, Diagnostic.t) result
-(** [prepare] then [execute]. *)
 
 module Buffers = Core_marks.Buffers
 type resident = {

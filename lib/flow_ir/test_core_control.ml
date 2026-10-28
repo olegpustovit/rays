@@ -27,7 +27,7 @@ let dump () =
     List.iter (fun time ->
       let live=Input.at_time time in
       let expected=E.Private.force_reference (E.Residual r) ~live in
-      match I.Core_exec.run core ~live,expected with
+      match Test_program.run core ~live,expected with
       | Ok actual,Ok expected ->
           if name="bypass" || name="bypass-keyword" then assert (same actual (E.Float time));
           if not (same actual expected) then failwith (name ^ ": value mismatch")
@@ -51,8 +51,8 @@ let () =
   let counts={core with C.results=[|index|]} in
   List.iter (fun (time,count) ->
     let live=Input.at_time time in
-    assert (ok (I.Core_exec.run counts ~live) = E.Int count);
-    assert (ok (I.Core_exec.run counts ~live) = E.Int count)) [1.,1; -1.,0];
+    assert (ok (Test_program.run counts ~live) = E.Int count);
+    assert (ok (Test_program.run counts ~live) = E.Int count)) [1.,1; -1.,0];
   let template = List.hd core.body in
   let stmt id node = {template with C.id = id; node} in
   let leaf id = stmt id (C.Assign (id, C.Constant id)) in
@@ -91,6 +91,6 @@ let () =
     List.iter (fun time ->
       let live=Input.at_time time in
       assert (ok (I.Executor.force program ~live) = E.Float time);
-      assert (ok (I.Core_exec.run core ~live) = E.Float time)) [0.;0.37;2.])
+      assert (ok (Test_program.run core ~live) = E.Float time)) [0.;0.37;2.])
     ["^:bypass (+ t 5.)";"^:bypass (+ t (exp 10000.))";
      "^:bypass (test/offset :offset (exp 10000.) t)"]

@@ -122,7 +122,7 @@ let () =
     let core=match I.Core_lower.lower r with Ok p -> p | Error n -> failwith (name ^ " " ^ body ^ ": refused " ^ n) in
     List.iter (fun live ->
       incr n;
-      match I.Core_exec.run core ~live,E.Private.force_reference value ~live with
+      match Test_program.run core ~live,E.Private.force_reference value ~live with
       | Ok a,Ok b -> if not (same a b) then failwith (Printf.sprintf "%s at %g: %s <> %s" body live.t (match a,b with E.Vec3 (x,y,z),E.Vec3 (p,q,r) -> Printf.sprintf "%h %h %h / %h %h %h" x y z p q r | _ -> E.show a) (E.show b))
       | Error (a : Diagnostic.t),Error (b : Diagnostic.t) ->
           if a.code<>b.code then failwith (Printf.sprintf "%s at %g: %s <> %s" body live.t a.code b.code)
@@ -149,7 +149,7 @@ let () =
     List.iter(fun time->
       let live=Input.at_time time in
       let expected=ok(E.Private.force_reference value ~live) in
-      assert(ok(I.Core_exec.run core ~live)=expected);
+      assert(ok(Test_program.run core ~live)=expected);
       List.iter(fun domains->Parallel.run ~domains(fun()->
         assert(ok(I.Executor.force ~strict:true program ~live)=expected))) [1;8]) [-1.;0.;1.])
     ["(map (fn [x] (if (> t 0.) x \"😀\")) (array/text 5001 \"猫\"))";

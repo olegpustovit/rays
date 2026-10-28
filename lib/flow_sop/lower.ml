@@ -458,15 +458,12 @@ let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
       let dependencies = if driven then
         Sop.Context.Dependencies.union dependencies (Sop.Context.Dependencies.one Input)
         else dependencies in
-      let dependencies = if Context_kernel.depends ~inputs:parameters ~defs:checked.defs definition.body then
-        Sop.Context.Dependencies.union dependencies (Sop.Context.Dependencies.one Seed)
-        else dependencies in
-      let dependencies = if Context_kernel.depends ~op:"sop/context_frame" ~inputs:parameters ~defs:checked.defs definition.body then
-        Sop.Context.Dependencies.union dependencies (Sop.Context.Dependencies.one Frame)
-        else dependencies in
-      let dependencies = if Context_kernel.depends ~op:"sop/context_time" ~inputs:parameters ~defs:checked.defs definition.body then
-        Sop.Context.Dependencies.union dependencies (Sop.Context.Dependencies.one Time)
-        else dependencies in
+      let reached = Context_kernel.context_ops_reached ~inputs:parameters ~defs:checked.defs definition.body in
+      let dependencies = List.fold_left (fun dependencies (op, fact) ->
+        if List.mem op reached then Sop.Context.Dependencies.union dependencies (Sop.Context.Dependencies.one fact)
+        else dependencies) dependencies
+        ["sop/context_seed", Sop.Context.Dependencies.Seed; "sop/context_frame", Frame;
+         "sop/context_time", Time] in
       let owned = Sop.Graph.inspect compiled |> List.filter (fun (node : Sop.Graph.info) ->
         not (String.starts_with ~prefix:"lisp_capture_" node.operation)) in
       let declared = definition.kind.facts in
@@ -1081,9 +1078,8 @@ end) = struct
                if List.exists (fun (_, v) -> E.is_live v) u.args then own else
                (match fused_view u with
                 | Some (du, uargs) ->
-                    let context_free = List.for_all (fun op ->
-                      not (Context_kernel.depends ~op ~inputs:u.args ~defs:checked.defs du.body))
-                      ["sop/context_seed"; "sop/context_frame"; "sop/context_time"] in
+                    let context_free = List.for_all (fun op -> op = "sop/provenance_base")
+                      (Context_kernel.context_ops_reached ~inputs:u.args ~defs:checked.defs du.body) in
                     (match if context_free then Context_kernel.fuse d du ~baked:u.args else None with
                      | Some fused -> Some (fused, List.map (fun (name, v) ->
                          if name = slot then name, List.assoc slot uargs else name, v) n.args)

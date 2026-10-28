@@ -699,8 +699,6 @@ let execute ?root ?(strict=false) ?(rerun_on_error=true) ?on_walk ?force ?resolv
        | Error _ as error when strict || resolve<>None || not rerun_on_error -> restore (); error
        | Error _ -> restore (); E.Residual.rerun ?on_walk r)
 
-let run ?root ?strict ?force ?resolve program ~live = execute ?root ?strict ?force ?resolve (prepare program) ~live
-
 module Buffers = Core_marks.Buffers
 
 (* A draw program (Core_draw.lower) fills a mark table. A failure is the core's own

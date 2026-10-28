@@ -69,7 +69,7 @@ let ()=
   List.iter(fun count->List.iter(fun time->let live={(Input.at_time time)with frame=count;tick=count}in
    let reference=E.Private.force_reference value ~live in
    List.iter(fun domains->Parallel.run ~domains(fun()->
-    C.same(I.Core_exec.run ~root:residual ~strict:true core ~live)reference;
+    C.same(Test_program.run ~root:residual ~strict:true core ~live)reference;
     C.same(I.Executor.force ~strict:true executor ~live)reference))[1;4;8])[-0.25;0.25]) [0;13;5001;32769];
   if String.ends_with ~suffix:"inline-concat" name || String.ends_with ~suffix:"inline-slice" name then
    assert(Array.exists(fun(r:I.Core.Region.t)->Array.exists(function
@@ -151,7 +151,7 @@ let ()=
      assert(C.bytes(C.ok reference)=C.bytes(E.Int_array(Array.make count(expected time))));
      List.iter(fun domains->Parallel.run ~domains(fun()->
        C.same(P.force ~strict:true p ~live)reference;
-       C.same(I.Core_exec.run ~root:r ~strict:true core ~live)reference;
+       C.same(Test_program.run ~root:r ~strict:true core ~live)reference;
        C.same(I.Executor.force ~strict:true executor ~live)reference)) [1;8]) [-0.25;0.25]) [false;true]) [0;13;32769])
   ["(array/nth (array/concat data data) j)",(fun _->9);
    "(array/nth (if (> t 0.) data (array/int 1 11)) 0)",(fun time->if time>0. then 9 else 11);

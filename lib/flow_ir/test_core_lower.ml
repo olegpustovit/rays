@@ -51,7 +51,7 @@ let () =
         let program=Result.get_ok (Flow_ir.Core_lower.lower r) in
         List.iter (fun time ->
           let live=Input.at_time time in
-          assert (Flow_ir.Core_exec.run program ~live = E.Private.force_reference (E.Residual r) ~live))
+          assert (Test_program.run program ~live = E.Private.force_reference (E.Residual r) ~live))
           [0.;0.37;2.]
     | _ -> ()) (fun () -> E.Private.static_with_requests
       (checked "(fold [s 0.] [i (range 2)] (+ s (+ t i)))"))));
@@ -131,7 +131,7 @@ let () =
     let resolve=function
       |E.Source("$core/operator",_,args)->received:=List.assoc_opt "values" args;Ok(E.Deferred(Flow.Ty.geometry,1))
       |_->assert false in
-    let result=Flow_ir.Core_exec.run ~resolve program ~live:(Input.at_time time) in
+    let result=Test_program.run ~resolve program ~live:(Input.at_time time) in
     result, !received in
   let only=program "(let* [colors (array/vec4 (int t) [-0.0 1.0 2.0 3.0]) alias colors] (test/storage (exact alias)))" in
   assert(count_descriptors only=1);

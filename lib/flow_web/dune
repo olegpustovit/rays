@@ -41,7 +41,7 @@
  (name test_fma)
  (modules test_fma)
  (deps ../web_export/runtime/prims.js)
- (libraries flow_web flow flow_ir rays_math parallel))
+ (libraries flow_web flow flow_ir flow_ir_test_support rays_math parallel))
 
 (test
  (name test_gather)
@@ -78,7 +78,7 @@
  (enabled_if (= %{env:RAYS_SLOW=0} 1))
  (modules test_region_arguments)
  (deps (glob_files ../web_export/runtime/*.js))
- (libraries flow_web flow flow_ir input parallel))
+ (libraries flow_web flow flow_ir flow_ir_test_support input parallel))
 
 (test
  (name test_array_max_length)
