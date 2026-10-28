@@ -134,7 +134,7 @@ Exit gates:
 
 - [x] P3.G1: executors go from 7 to 3 (walker oracle, Core plus Packed, device) Evidence: 90d282eb deletes the Fast candidate and Core_exec.fast; the executors are the walker oracle, Core plus Packed, and the device. The root shortcut is Core_exec.direct into the same Core_exec.execute (scalar 106–115 vs 109–111 ns interleaved).
 - [x] P3.G2: the walker runs at most once per residual, checked by a test counter. Evidence: `test_core_errors` counts actual reference-walker entry points, including nested Packed/Core routes; shared refusal reports one walk, compiled failure reports one, and successful compiled state steps report zero.
-- [ ] P3.G3: `test_workspace_ir` back under 5 minutes (from 20–25 min)
+- [x] P3.G3: `test_workspace_ir` back under 5 minutes (from 20–25 min) Evidence: @lib/rays_editor/test/test_workspace_ir runs in 25 s wall (from 20–25 min).
 - [x] P3.G4: web parity is green and native fusion is measured on bench_marks_gpu ('moving both', 14.3 ms → target ≤ 6 ms). Evidence: 91 JS goldens and 82 programs / 364 native/web frames pass; real Chrome fused marks and million particles retain max channel difference one with zero CPU invokes. Frozen paired native moving-both runs measure circles 16.018 → 2.533 ms and rectangles 15.386 → 2.212 ms on M1; all 28 cases and background-load limits are recorded in benchmarks/marks-native.md.
 - [x] P3.G5: flow_ir test executables go from 30 to about 6 Evidence: ec2d7266 merges lib/flow_ir from 28 test stanzas to 7: four merged runners plus three that must stay standalone (benchmark exit mode, region snapshot, two RAYS_SLOW tests share one).
 
