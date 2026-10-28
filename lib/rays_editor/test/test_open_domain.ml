@@ -370,7 +370,13 @@ let () =
       step [ Input.Text_input "sop/toy_box" ];
       step [ Input.Key_pressed Input.Enter ];
       let after = E.workspace !host in
-      let count = Array.length (ok (Flow.Eval.static after.checked)).plan.nodes in
+      (* authored cards: an inlined body's own nodes sit under its card's node:kind site *)
+      let count =
+        Array.to_list (ok (Flow.Eval.static after.checked)).plan.nodes
+        |> List.filter (fun (n : Flow.Eval.node) ->
+            not (List.exists (String.starts_with ~prefix:"node:") n.site))
+        |> List.length
+      in
       check
         (contains (D.to_text after) "sop/toy_box" && count = 3)
         (Printf.sprintf "host menu did not insert custom operator (%d nodes): %s" count

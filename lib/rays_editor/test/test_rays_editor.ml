@@ -1002,7 +1002,7 @@ let run () =
   let environment = add environment 230 in
   check
     (has (text_of environment) "(sop/null output)"
-    && Node.operation (Rays_editor.Editor.displayed_node environment) = "transform")
+    && Node.label (Rays_editor.Editor.displayed_node environment) = "transform")
     ("workspace could not add a node reading the result without moving the display: "
     ^ Node.operation (Rays_editor.Editor.displayed_node environment)
     ^ "\n" ^ text_of environment);
