@@ -237,7 +237,7 @@ After P1, rdk holds only live kernels. Give it one error model, one parallel and
 
 - [x] P6.S1: Errors: one internal `Rdk_error of Error.t`, converted to `result` once at the boundary. Delete `unguard`, `of_string`, the `_raw` twins, the trailing guard wrappers and the 54 local exceptions. Evidence: see RK3.
 - [ ] P6.S2: One `Support.parallel_for/parallel_ranges` and `Cancel.poll` with a single cadence, applied by codemod to the 886 sites.
-- [ ] P6.S3: `Attribute.map_float_planes`/`planes` to collapse the per-storage arms. One generic median BVH and one `Point_grid`. Merge the two boolean payload modules.
+- [x] P6.S3: `Attribute.map_float_planes`/`planes` to collapse the per-storage arms. One generic median BVH and one `Point_grid`. Merge the two boolean payload modules. Evidence: see RK8, RK9, RK10 and RK15.
 - [ ] P6.S4: Kernel parameters become required records with no defaults, so the declaration is the single source of defaults.
 - [ ] P6.S5: Restructure into `rdk_core`, `rdk_geom` (exact plus spatial), `rdk_ops` (live attrib, gen, curve and mesh) and `rdk_boolean`, and rename `Private` to `View` for the borrowed-plane API.
 - [ ] P6.S6: Tests: local fixtures, one support library opened everywhere, and `parallel_exact` shared.
@@ -743,11 +743,11 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [ ] **RK7** (P6, high, duplication, effort M). Location at baseline: 886 inline `if i land MASK = 0 then Cancel.check_opt` sites with 11 different masks. The cancellation cadence is copied by hand everywhere. Action: Add `Cancel.poll cancel i`, or put the check inside the parallel helper. The change is mechanical.
 
-- [ ] **RK8** (P6, high, duplication, effort M). Location at baseline: 209 `match storage with`; Float4 arms ×85 in 40 files; planes_of_storage at attribute_composite.ml:77 and attribute_generate.ml:504. The same code is copied for each storage type. Action: Add `Attribute.map_float_planes`/`planes` to core.
+- [x] **RK8** (P6, high, duplication, effort M). Location at baseline: 209 `match storage with`; Float4 arms ×85 in 40 files; planes_of_storage at attribute_composite.ml:77 and attribute_generate.ml:504. The same code is copied for each storage type. Action: Add `Attribute.map_float_planes`/`planes` to core. Evidence: Attribute.float_planes and of_float_planes collapse the Float..Float4 arms in Attribute_transfer and both Boolean_payload interpolators.
 
-- [ ] **RK9** (P6, med, duplication, effort M). Location at baseline: surface_index.ml:393 · bounds3_index.ml:35 · bounds2_index.ml:57. Three median-split BVH builders. Action: One generic builder (dimension plus extra planes).
+- [x] **RK9** (P6, med, duplication, effort M). Location at baseline: surface_index.ml:393 · bounds3_index.ml:35 · bounds2_index.ml:57. Three median-split BVH builders. Action: One generic builder (dimension plus extra planes). Evidence: Surface_index builds on Bounds3_index through ?extend; Bounds2_index keeps its own split scheme to preserve tree shape and exactness.
 
-- [ ] **RK10** (P6, med, duplication, effort S). Location at baseline: point_clusters.ml:91 · point_snap.ml:100. Two open-addressing uniform grids. Action: Extract one `Point_grid`.
+- [x] **RK10** (P6, med, duplication, effort S). Location at baseline: point_clusters.ml:91 · point_snap.ml:100. Two open-addressing uniform grids. Action: Extract one `Point_grid`. Evidence: one Point_grid module serves Point_clusters and Point_snap.
 
 - [ ] **RK11** (P6, med, layering, effort S). Location at baseline: surface_index.ml:1219-1232 → mesh/ray.ml:221 via Private. Ray-SOP policy (sample average/median, directions) lives inside the spatial index. Action: Move it into `Ray`; the index keeps only hit queries.
 
@@ -757,11 +757,11 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **RK14** (P1, med, oracle-only, effort S). Location at baseline: implicit_point.ml:848-1189,1763,1808 · predicates.ml:42,89,167 (Private). About 200 lines of `*_reference` twins kept only for differential tests. Action: Move them to test support. Evidence: the exact_*_reference predicate twins live in lib/rdk/test_predicates.ml.
 
-- [ ] **RK15** (P6, med, duplication, effort S). Location at baseline: boolean_payload.ml vs boolean_corner_payload.ml. storage_kind, collect_attributes, collect_groups, parallel_for, selected and source_storage are written twice; `copy` is re-exported. Action: Merge them into one module.
+- [x] **RK15** (P6, med, duplication, effort S). Location at baseline: boolean_payload.ml vs boolean_corner_payload.ml. storage_kind, collect_attributes, collect_groups, parallel_for, selected and source_storage are written twice; `copy` is re-exported. Action: Merge them into one module. Evidence: Boolean_corner_payload is folded into Boolean_payload, with one storage_kind, collect_* and source_storage.
 
 - [ ] **RK16** (P6, med, api-bloat, effort L). Location at baseline: 174 `?(grain = 16_384)`; 15 functions with 15–32 optional arguments (triangulate2d run 32, point_replicate 31, ray 28). SOPs pass every argument explicitly, so rdk's defaults are a second source of defaults that only tests use. Action: Use required parameter records with no defaults; tests build them with one helper.
 
-- [ ] **RK17** (P7, med, naming, effort M). Location at baseline: 32 .mli with `module Private`; Attribute.Private.storage ×46, Topology.Private.view ×21 used by sop, flow_sop, rays_editor. Production code depends on the borrowed-plane API that lives in `Private`. Action: Rename it `View` and document it as that API.
+- [x] **RK17** (P7, med, naming, effort M). Location at baseline: 32 .mli with `module Private`; Attribute.Private.storage ×46, Topology.Private.view ×21 used by sop, flow_sop, rays_editor. Production code depends on the borrowed-plane API that lives in `Private`. Action: Rename it `View` and document it as that API. Evidence: rdk's borrowed-plane Private is renamed View across rdk and every caller; the stale allowlist rows are gone.
 
 - [ ] **RK18** (P6, med, vibe-code, effort S). Location at baseline: 13 `owner_count`, 42 local `fail`, 13 `get_ok`, 14 `checked_add`, 5 union-find. Shared definitions already exist in core. Action: `tools/dedupe --qualify Support`, then delete the tool (TT11).
 
