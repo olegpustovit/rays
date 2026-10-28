@@ -71,7 +71,7 @@ let ensure t slot length =
   Option.get slot.buffer
 (* [wait] false leaves the dispatch in flight (no completion wait, no status read): a resident fold
    chains its regions and waits once.  [bound i] / [bound_table u] name a device buffer that already
-   holds input [i] / the table of uniform [u], which is then not uploaded. *)
+   holds input [i] / the table of uniform [u] (and its length in floats), which is then not uploaded. *)
 let msl_scene t = t.msl.Emit.scene
 let dispatch ?(wait=true) ?(reset_status=true) ?commands ?count ?into ?(bound=fun _ -> None) ?(bound_table=fun _ -> None) ?scene ?(extras=no_extras) ?(resident=[]) t (values : P.Host.inputs) =
   (* the scene's buffers after its spheres, in Kernel_layout's order; the kernel's interface names at most
@@ -87,7 +87,7 @@ let dispatch ?(wait=true) ?(reset_status=true) ?commands ?count ?into ?(bound=fu
       List.length (List.filter (fun (x : Ogpu.Shader.binding) -> x.binding > b+2) t.msl.interface) > List.length scene_tail)
   then error "GPU scene binding changed."
   else if Array.length values.arrays<>Array.length t.inputs then error "GPU input arity changed."
-  else if Array.exists (fun index -> Array.length values.arrays.(index)<values.count*t.msl.input_widths.(index))
+  else if Array.exists (fun index -> bound index=None && Array.length values.arrays.(index)<values.count*t.msl.input_widths.(index))
       (Array.init (Array.length t.inputs) Fun.id) then error "GPU input count changed."
   else begin
   (* Invalidate borrowed output before reallocating or submitting any write,
@@ -113,7 +113,8 @@ let dispatch ?(wait=true) ?(reset_status=true) ?commands ?count ?into ?(bound=fu
             let u, width = msl.gathers.(int_of_string k) in
             if u>=Array.length values.tables then
               raise (Diagnostic.Error (Diagnostic.error ~code:"E_KERNEL" "GPU gather table changed."));
-            Bytes.set_int32_le t.uniforms offset (Int32.of_int (Array.length values.tables.(u)/width))
+            let length=match bound_table u with Some (_,length) -> length | None -> Array.length values.tables.(u) in
+            Bytes.set_int32_le t.uniforms offset (Int32.of_int (length/width))
         | ["scene";"strands"] -> Bytes.set_int32_le t.uniforms offset (Int32.of_int extras.strand_count)
         | ["scene";"spheres"] ->
             Bytes.set_int32_le t.uniforms offset (Int32.of_int (match scene with Some s -> s.sphere_count | None -> 0))
@@ -168,7 +169,7 @@ let dispatch ?(wait=true) ?(reset_status=true) ?commands ?count ?into ?(bound=fu
       end;Some buffer
     end in
     (* the tables gathers read, uploaded when their array changed *)
-    let gathers=Array.mapi (fun k slot -> match bound_table (fst msl.gathers.(k)) with Some buffer -> buffer | None ->
+    let gathers=Array.mapi (fun k slot -> match bound_table (fst msl.gathers.(k)) with Some (buffer,_) -> buffer | None ->
       let source=values.tables.(fst msl.gathers.(k)) in
       let length=max 4 (Array.length source*4) in
       let buffer=ensure t slot length in

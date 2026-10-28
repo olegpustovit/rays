@@ -110,5 +110,17 @@ let () =
   (* the tracer types its declarations only at their call sites: here they are checked whole *)
   get (P.Private.check_library ());
   let only = Sys.getenv_opt "PT_SCENE" in
+  (* the kernel cache: a first tracer stores the dome's three kernels, the dome scenario then renders from them
+     (its film checked against the CPU walker), and torn entries are recompiled to the same kernel *)
+  let cache = Filename.temp_dir "rays-kernels" "" in
+  P.Private.kernel_cache := Some cache;
+  let dome = { P.objects = [ (mesh, material) ]; spheres = []; strands = []; environment; lights = [ light ] } in
+  let trace () = let t = get (P.create ~spp:2 ~bounces:4 ~width ~height dome) in
+    get (P.render t camera); get (P.flush t); let _, source = get (P.Private.lisp_kernel t "trace") in P.destroy t; source in
+  let stored = trace () and entries () = Array.map (Filename.concat cache) (Sys.readdir cache) in
+  assert (Array.length (entries ()) = 3);
+  Array.iter (fun file -> Out_channel.with_open_bin file (fun out -> output_string out "torn")) (entries ());
+  assert (trace () = stored && Array.for_all (fun f -> (Unix.stat f).st_size > 16) (entries ()));
   if only <> Some "world" then (scenario "dome" None; scenario ~instanced:true "dome, instanced" None);
-  if only <> Some "dome" then scenario "world" (Some (Lazy.force baked))
+  if only <> Some "dome" then scenario "world" (Some (Lazy.force baked));
+  Array.iter Sys.remove (entries ()); Sys.rmdir cache

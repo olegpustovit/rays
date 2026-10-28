@@ -385,7 +385,7 @@ let create ?(spp = 1) ?(bounces = 6) ?(exposure = 1.) ?(round_samples = 4) ?(bsd
       let* resource =
         Result.map_error
           (Format.asprintf "%a" Runtime_resources.pp_error)
-          (Runtime_resources.Image.create ~width ~height ~rgba:(Bytes.copy pixels))
+          (Runtime_resources.Image.create ~width ~height ~rgba:pixels)
       in
       let* image = Rays.Image.of_resource resource in
       Ok
@@ -669,7 +669,7 @@ let resize t ~width ~height =
     let pixels = Bytes.make (width * height * 4) '\000' in
     (* The image stops sampling the old film before that film is destroyed. *)
     let* () = Result.map_error (Format.asprintf "%a" Runtime_resources.pp_error)
-        (Runtime_resources.Image.replace t.resource ~width ~height ~rgba:(Bytes.copy pixels)) in
+        (Runtime_resources.Image.replace t.resource ~width ~height ~rgba:pixels) in
     destroy_film t.film;
     t.film <- film;
     t.width <- width;
@@ -982,6 +982,7 @@ module Private = struct
     let* threads = Lisp_kernel.max_total_threads kernels ~lease:t.lease ~pipelines:t.flow_pipelines name in
     let* source = Lisp_kernel.source kernels ~lease:t.lease ~pipelines:t.flow_pipelines name in
     Ok (threads, source)
+  let kernel_cache = Lisp_kernel.cache_dir
   let check_library = Lisp_kernel.check_library
   let check_sketch = Lisp_kernel.check_sketch
 end

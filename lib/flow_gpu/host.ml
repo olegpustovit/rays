@@ -18,7 +18,6 @@ type t={gpu:Renderer.gpu;pipelines:Pipelines.t;runners:runner Cache.t;
   pool:(int*int,Obj.t list)Hashtbl.t;  (* resident placeholders by (kind, length), reused each draw *)
   mutable iota:(Ogpu.Backend.buffer*int)option;  (* 0., 1., 2., ... on the device, for range sources *)
   mutable retired_buffers:Ogpu.Backend.buffer list;  (* outgrown index buffers, destroyed at close *)
-  mutable zeros:float array;  (* stands in for bound inputs, which are never read *)
   buffers:(int,Ogpu.Backend.buffer list)Hashtbl.t;  (* resident buffers by byte size, reused each draw *)
   mutable closed:bool;domain:Domain.id}
 let next=Atomic.make 1
@@ -27,7 +26,7 @@ let create ~clock gpu =
   let created=ref 0 and retired=ref zero in
   {gpu;pipelines=Pipelines.create ~clock(Renderer.gpu_device gpu);
     created;retired;sites=Lru.Identity_list.create ~equal:(==) ~release:(fun _->Option.iter Run.close)32;
-    flight=[];pool=Hashtbl.create 16;iota=None;retired_buffers=[];zeros=[||];buffers=Hashtbl.create 16;
+    flight=[];pool=Hashtbl.create 16;iota=None;retired_buffers=[];buffers=Hashtbl.create 16;
     runners=Cache.create ~release:(fun _ runner->
       retired:={(add_run !retired runner.run) with runners_released=(!retired).runners_released+1};
       runner.output<-None;Run.close runner.run)64;
@@ -206,11 +205,6 @@ let resident ~fast t : Flow_ir.Core_exec.resident =
         let bound_inputs=Array.mapi(fun i _->input i)values.arrays in
         let inputs=P.device_inputs{values with arrays=Array.mapi(fun i v->
           if bound_inputs.(i)=None then v else E.Float_array[||])values.arrays}in
-        let widths=(P.view packed).widths in
-        Array.iteri(fun i b->if b<>None then begin
-          let needed=values.count*widths.(i) in
-          if Array.length t.zeros<needed then t.zeros<-Array.make(max needed(2*Array.length t.zeros))0.;
-          inputs.arrays.(i)<-t.zeros end)bound_inputs;
         let input i=bound_inputs.(i) in
         let ty=packed.term.ty in
         let width=match ty with Flow.Ty.Array(Vec2)->2|Array Vec3->3|Array Vec4->4|_->1 in
@@ -219,7 +213,7 @@ let resident ~fast t : Flow_ir.Core_exec.resident =
         |Ok output,Ok cell->
           let reset_status=not(List.exists((==)run)!status_runs)in
           match Run.dispatch ~commands ~reset_status ?count ~into:(fst output,fst cell) ~bound:input
-              ~bound_table:(fun u->bound values.uniforms.(u)) run inputs with
+              ~bound_table:(fun u->Option.map(fun b->b,Array.length inputs.tables.(u))(bound values.uniforms.(u))) run inputs with
           |Error diagnostic->give_back output;give_back cell;Flow.Value.raise_diagnostic diagnostic
           |Ok _->if reset_status then status_runs:=run::!status_runs;
               Some(placeholder ty output(Some cell)values.count) in
