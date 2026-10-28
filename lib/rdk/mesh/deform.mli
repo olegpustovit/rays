@@ -14,7 +14,6 @@ val point_vector_attribute :
 val resolve_directions :
   ?cancel:Rdk_core.Cancel.t ->
   grain:int ->
-  ?direction_attribute:String.t ->
   Rdk_core.Geometry.t -> (planes, string) result
 val normals :
   ?cancel:Rdk_core.Cancel.t ->

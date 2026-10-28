@@ -638,14 +638,6 @@ let () =
   assert (List.length drawings = 2);
   assert (List.fold_left (fun n (d : Scene.D3.Private.drawing) -> n + Mesh.index_count d.mesh) 0 drawings = 36);
   assert (List.exists (fun (d : Scene.D3.Private.drawing) -> d.material.diffuse = Rays_math.Color.hex_exn "#2670f5") drawings);
-  let assign ?cancel ?group ?(roughness = 0.2) geometry =
-    Rdk.Material_assign.run ?cancel ?group ~name:"red" ~color:(1.,0.,0.)
-      ~roughness ~emission:(0.,0.,0.) geometry in
-  assert (Result.is_error (assign ~group:"missing" (Result.get_ok (Sop.Payload.geometry one.payload))));
-  assert (Result.is_error (assign ~roughness:Float.nan (Result.get_ok (Sop.Payload.geometry one.payload))));
-  let cancelled = Rdk.Cancel.create () in Rdk.Cancel.cancel cancelled;
-  (match assign ~cancel:cancelled (Result.get_ok (Sop.Payload.geometry one.payload)) with
-   | Error e -> assert (Rdk.Error.code e = "cancelled") | _ -> assert false);
   assert (signature (Result.get_ok (Sop.Payload.geometry one.payload)) = signature (Result.get_ok (Sop.Payload.geometry (cook 1 node).payload)));
   List.iter (fun text -> assert (Result.is_error (Rays_editor.Workspace.load text)))
     ["(workspace x (graph m :context material (material/standard :roughness 2)))";

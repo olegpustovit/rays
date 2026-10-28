@@ -145,13 +145,8 @@ let geometric_point_vectors ?cancel ~grain geometry =
     done;
     { x; y; z }) (face_vectors ?cancel ~grain geometry)
 
-let resolve_directions ?cancel ~grain ?direction_attribute geometry =
-  match direction_attribute with
-  | Some name when String.trim name = "" -> Error
-      "Rdk.Deform: direction attribute name must not be empty"
-  | Some name -> point_vector_attribute "Rdk.Deform" name geometry
-  | None ->
-      (match Geometry.find_attribute ~owner:Attribute.Point "N" geometry with
+let resolve_directions ?cancel ~grain geometry =
+  (match Geometry.find_attribute ~owner:Attribute.Point "N" geometry with
        | Some attribute ->
            (match Attribute.View.storage attribute with
             | Attribute.Float3 values ->

@@ -16,6 +16,6 @@ val of_links :
 
 val create :
   ?cancel:Cancel.t -> ?selection:Group.t -> ?metric:metric ->
-  ?inclusive:bool -> ?transitive:bool -> operation:string ->
+  ?inclusive:bool -> operation:string ->
   tolerance:float -> compatible:(int -> int -> bool) ->
   Geometry.t -> (t, string) result

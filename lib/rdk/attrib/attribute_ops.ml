@@ -93,7 +93,6 @@ type interpolate_computed = {
   computed_numbers_attribute : string;
   computed_weights_attribute : string;
 }
-type blur_method = Attribute_blur.method_ = Uniform | Edge_length
 type blur_mode = Attribute_blur.mode =
   | Laplacian of float | Custom_steps of { odd : float; even : float }
 type numeric_value = Attribute_generate.numeric_value =

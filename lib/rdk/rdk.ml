@@ -4,7 +4,6 @@ module Delaunay2 = Rdk_exact.Delaunay2
 module Planar_constraints = Rdk_exact.Planar_constraints
 module Planar_cdt = Rdk_exact.Planar_cdt
 module Error = Rdk_core.Error
-module Material_assign = Rdk_attrib.Material_assign
 module Cancel = Rdk_core.Cancel
 module Packed = Rdk_core.Packed
 module Topology = Rdk_core.Topology

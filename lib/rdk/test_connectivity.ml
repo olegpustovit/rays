@@ -30,16 +30,6 @@ let shared_edge geometry =
       Edge_group.init ~grain:1 ~topology ~index ~name:"seam"
         (fun edge -> edge = shared)
 
-let with_uv name values geometry =
-  let packed = Packed.Float2.of_owned
-      ~x:(Array.map fst values) ~y:(Array.map snd values)
-    |> function Ok packed -> packed | Error message -> fail message in
-  let attribute = Attribute.create_owned ~name ~owner:Attribute.Vertex
-      (Attribute.Float2 packed)
-    |> function Ok attribute -> attribute | Error message -> fail message in
-  Geometry.with_attribute attribute geometry
-  |> function Ok geometry -> geometry | Error message -> fail message
-
 let int_attribute owner name geometry =
   Geometry.find_attribute ~owner name geometry |> Option.get
   |> Attribute.View.storage |> (function Attribute.Int values -> values | _ -> fail "wrong int storage")
@@ -80,29 +70,15 @@ let test_point_and_primitive_modes () =
   check (classes = [|-1; 0|] && count = 1)
     "excluded primitives retain the minus-one sentinel"
 
-let test_seams_and_uv_islands () =
+let test_seams () =
   let geometry = two_quads () in
   let seam = shared_edge geometry in
   let classes, count = Analysis.classify_connectivity ~seams:seam
       Analysis.Connectivity_primitives geometry |> get_ok in
   check (classes = [|0; 1|] && count = 2)
-    "native shared-edge seam did not split primitive islands";
-  let continuous = with_uv "uv" [|
-      0., 0.; 1., 0.; 1., 1.; 0., 1.;
-      1., 0.; 2., 0.; 2., 1.; 1., 1.|] geometry in
-  let classes, count = Analysis.classify_connectivity ~uv_attribute:"uv"
-      Analysis.Connectivity_primitives continuous |> get_ok in
-  check (classes = [|0; 0|] && count = 1)
-    "equal endpoint UVs split a continuous island";
-  let discontinuous = with_uv "uv" [|
-      0., 0.; 1., 0.; 1., 1.; 0., 1.;
-      3., 0.; 4., 0.; 4., 1.; 3., 1.|] geometry in
-  let classes, count = Analysis.classify_connectivity ~uv_attribute:"uv"
-      Analysis.Connectivity_primitives discontinuous |> get_ok in
-  check (classes = [|0; 1|] && count = 2)
-    "UV discontinuity did not split primitive islands"
+    "native shared-edge seam did not split primitive islands"
 
-let test_validation_and_cancellation () =
+let test_validation () =
   let geometry = two_quads () in
   let point_group = Group.init ~owner:Group.Point ~name:"points" 6 (fun _ -> true)
   and wrong_length = Group.init ~owner:Group.Primitive ~name:"bad" 1 (fun _ -> true)
@@ -116,37 +92,15 @@ let test_validation_and_cancellation () =
       && point_count = 1)
     "point seam classification did not preserve the connected remainder";
   expect_error "invalid_connectivity"
-    (Analysis.classify_connectivity ~seams:seam ~uv_attribute:"uv"
-       Analysis.Connectivity_primitives geometry);
-  expect_error "invalid_connectivity"
     (Analysis.classify_connectivity ~primitives:wrong_length
-       Analysis.Connectivity_primitives geometry);
-  expect_error "invalid_connectivity"
-    (Analysis.classify_connectivity ~uv_attribute:"missing"
-       Analysis.Connectivity_primitives geometry);
-  expect_error "invalid_parameter"
-    (Analysis.classify_connectivity ~grain:0
        Analysis.Connectivity_primitives geometry);
   let unrelated = two_quads () in
   expect_error "invalid_connectivity"
     (Analysis.classify_connectivity ~seams:(shared_edge unrelated)
-       Analysis.Connectivity_primitives geometry);
-  let bad_uv = Attribute.create_owned ~name:"bad_uv" ~owner:Attribute.Vertex
-      (Attribute.Int (Array.make 8 0))
-    |> function Ok attribute -> attribute | Error message -> fail message in
-  let bad_uv_geometry = Geometry.with_attribute bad_uv geometry
-      |> function Ok value -> value | Error message -> fail message in
-  expect_error "invalid_connectivity"
-    (Analysis.classify_connectivity ~uv_attribute:"bad_uv"
-       Analysis.Connectivity_primitives bad_uv_geometry);
-  let cancel = Cancel.create () in
-  Cancel.cancel cancel;
-  expect_error "cancelled"
-    (Analysis.classify_connectivity ~cancel
        Analysis.Connectivity_primitives geometry)
 
 let run () =
   test_point_and_primitive_modes ();
-  test_seams_and_uv_islands ();
-  test_validation_and_cancellation ();
+  test_seams ();
+  test_validation ();
   print_endline "connectivity tests passed"

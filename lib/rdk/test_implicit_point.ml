@@ -1,21 +1,21 @@
+open Rdk_test_support
 
-let fail format = Printf.ksprintf failwith format
 
 let expect_ok = function
   | Ok value -> value
-  | Error _ -> fail "expected exact point construction to succeed"
+  | Error _ -> failf "expected exact point construction to succeed"
 
 let expect_error expected = function
   | Error actual when actual = expected -> ()
-  | Error _ -> fail "unexpected exact point construction error"
-  | Ok _ -> fail "expected exact point construction to fail"
+  | Error _ -> failf "unexpected exact point construction error"
+  | Ok _ -> failf "expected exact point construction to failf"
 
 let assert_close expected actual =
   if abs_float (expected -. actual) > 1e-14 then
-    fail "expected %.17g, got %.17g" expected actual
+    failf "expected %.17g, got %.17g" expected actual
 
 let assert_sign expected actual =
-  if actual <> expected then fail "unexpected predicate sign"
+  if actual <> expected then failf "unexpected predicate sign"
 
 let coordinates = [|
   (0., 0., 0.);       (* 0 *)

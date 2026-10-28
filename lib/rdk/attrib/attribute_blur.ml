@@ -1,5 +1,4 @@
 
-type method_ = Uniform | Edge_length
 type mode = Laplacian of float | Custom_steps of { odd : float; even : float }
 
 type blur_target =
@@ -9,44 +8,14 @@ type blur_target =
   | Blur_float3 of Attribute.t * int
   | Blur_float4 of Attribute.t * int
 
-let blur_edge_lengths ?cancel ~grain positions topology =
-  let edge_count = Array.length topology.Topology_index.View.edge_a in
-  let lengths = Array.make edge_count 0. in
-  let range_count = if edge_count = 0 then 0 else
-      (edge_count + grain - 1) / grain in
-  let errors = Array.make range_count (-1) in
-  Parallel.for_ ~chunk_size:1 ~start:0 ~finish:(range_count - 1) (fun range ->
-    let first = range * grain and last = min edge_count ((range + 1) * grain) in
-    for edge = first to last - 1 do
-      if edge land 16_383 = 0 then Cancel.check_opt cancel;
-      let a = topology.edge_a.(edge) and b = topology.edge_b.(edge) in
-      let dx = positions.Packed.Float3.View.x.(b) -. positions.x.(a)
-      and dy = positions.y.(b) -. positions.y.(a)
-      and dz = positions.z.(b) -. positions.z.(a) in
-      let length = Float.hypot dx (Float.hypot dy dz) in
-      if errors.(range) < 0 && not (Float.is_finite length) then
-        errors.(range) <- edge;
-      lengths.(edge) <- length
-    done);
-  let invalid = Array.find_opt (fun edge -> edge >= 0) errors in
-  (match invalid with
-   | Some edge -> invalid_arg (Printf.sprintf
-       "Rdk.Attribute_ops.blur_points: edge %d has non-finite length" edge)
-   | None -> ());
-  lengths
-
 let run ?cancel ?(grain = 16_384) ?selection ?(iterations = 1)
-    ?(method_ = Uniform) ?(mode = Laplacian 0.5) ?weight_attribute
-    ?alpha_attribute ?(pin_borders = false) ?(original_blend = 0.)
-    ?(blurred_blend = 1.) ~pattern geometry =
+    ?(mode = Laplacian 0.5) ~pattern geometry =
   Error.guard ~cancelled:"attribute blur was cancelled" ~invalid_argument:"invalid_parameter" ~operation:"attribute_blur"
     ~code:"invalid_blur" @@ fun () ->
   if grain <= 0 then invalid_arg
       "Rdk.Attribute_ops.blur_points: grain must be positive";
   if iterations < 0 then Error
       "Rdk.Attribute_ops.blur_points: iterations must be non-negative"
-  else if not (Float.is_finite original_blend && Float.is_finite blurred_blend)
-  then Error "Rdk.Attribute_ops.blur_points: blend amounts must be finite"
   else
     let steps_valid = match mode with
       | Laplacian step -> Float.is_finite step
@@ -113,61 +82,12 @@ let run ?cancel ?(grain = 16_384) ?selection ?(iterations = 1)
                   plane !point);
             incr point
           done) original;
-        let control name = match name with
-          | None -> Ok None
-          | Some name when String.trim name = "" -> Error
-              "Rdk.Attribute_ops.blur_points: control attribute name must not be empty"
-          | Some name ->
-              (match Geometry.find_attribute ~owner:Attribute.Point name geometry with
-               | None -> Error (Printf.sprintf
-                   "Rdk.Attribute_ops.blur_points: missing point float attribute %s" name)
-               | Some attribute ->
-                   (match Attribute.View.storage attribute with
-                    | Attribute.Float values -> Ok (Some values)
-                    | Attribute.Int _ | Attribute.Float2 _ | Attribute.Float3 _
-                    | Attribute.Float4 _ | Attribute.Text _
-                    | Attribute.Int_array _ | Attribute.Float_array _ ->
-                        Error (Printf.sprintf
-                        "Rdk.Attribute_ops.blur_points: control attribute %s must be scalar float"
-                        name))) in
         Result.bind (match !failure with None -> Ok () | Some message -> Error message)
-          (fun () -> Result.bind (control weight_attribute) (fun weights ->
-        Result.bind (control alpha_attribute) (fun alpha ->
-        let validate_control label = function
-          | None -> Ok ()
-          | Some values ->
-              let invalid = ref (-1) and point = ref 0 in
-              while !point < point_count && !invalid < 0 do
-                if !point land 16_383 = 0 then Cancel.check_opt cancel;
-                if not (Float.is_finite values.(!point)) then invalid := !point;
-                incr point
-              done;
-              if !invalid < 0 then Ok () else Error (Printf.sprintf
-                  "Rdk.Attribute_ops.blur_points: %s attribute is non-finite at point %d"
-                  label !invalid) in
-        Result.bind (validate_control "weight" weights) (fun () ->
-        Result.bind (validate_control "alpha" alpha) (fun () ->
+          (fun () ->
         let topology_index = Topology_index.create ?cancel (Geometry.topology geometry)
         and current = ref (Array.map Array.copy original)
         and next = ref (Array.map Array.copy original) in
         let topology = Topology_index.View.view topology_index in
-        let edge_lengths = match method_ with
-          | Uniform -> None
-          | Edge_length -> Some (blur_edge_lengths ?cancel ~grain positions topology) in
-        let pinned = if not pin_borders then None else begin
-            let pinned = Parallel.init_array ~grain point_count (fun point ->
-              let first = topology.point_edge_offsets.(point)
-              and last = topology.point_edge_offsets.(point + 1) in
-              let boundary = ref false and local = ref first in
-              while !local < last && not !boundary do
-                let edge = topology.point_edges.(!local) in
-                boundary := topology.edge_offsets.(edge + 1)
-                    - topology.edge_offsets.(edge) = 1;
-                incr local
-              done;
-              !boundary) in
-            Some pinned
-          end in
         for iteration = 0 to iterations - 1 do
           Cancel.check_opt cancel;
           let step = match mode with
@@ -179,14 +99,12 @@ let run ?cancel ?(grain = 16_384) ?selection ?(iterations = 1)
             (fun range ->
               let first_point = range * grain
               and last_point = min point_count ((range + 1) * grain) in
-              let zero_sum = ref 0. and zero_weight = ref 0.
-              and regular_sum = ref 0. and regular_weight = ref 0. in
+              let sum = ref 0. and total = ref 0. in
               for point = first_point to last_point - 1 do
                 if point land 4095 = 0 then Cancel.check_opt cancel;
                 let update = (match selection with
                       | None -> true | Some group -> Group.mem point group)
-                    && not (match pinned with
-                      | Some values -> values.(point) | None -> false) in
+                    in
                 for plane = 0 to Array.length !current - 1 do
                   let source = (!current).(plane)
                   and destination = (!next).(plane) in
@@ -194,58 +112,27 @@ let run ?cancel ?(grain = 16_384) ?selection ?(iterations = 1)
                   else begin
                   let first = topology.point_edge_offsets.(point)
                   and last = topology.point_edge_offsets.(point + 1) in
-                  zero_sum := 0.; zero_weight := 0.;
-                  regular_sum := 0.; regular_weight := 0.;
+                  sum := 0.; total := 0.;
                   for local = first to last - 1 do
                     let edge = topology.point_edges.(local) in
                     let a = topology.edge_a.(edge) and b = topology.edge_b.(edge) in
                     let neighbor = if a = point then b else a in
                     if neighbor <> point then begin
-                      let influence = match alpha with
-                        | None -> 1.
-                        | Some values ->
-                            Float.max 0. (Float.min 1. values.(neighbor)) in
-                      if influence > 0. then match edge_lengths with
-                        | None ->
-                            regular_sum := !regular_sum +. (influence *. source.(neighbor));
-                            regular_weight := !regular_weight +. influence
-                        | Some lengths when lengths.(edge) = 0. ->
-                            zero_sum := !zero_sum +. (influence *. source.(neighbor));
-                            zero_weight := !zero_weight +. influence
-                        | Some lengths ->
-                            let influence = influence /. lengths.(edge) in
-                            regular_sum := !regular_sum +. (influence *. source.(neighbor));
-                            regular_weight := !regular_weight +. influence
+                      sum := !sum +. source.(neighbor);
+                      total := !total +. 1.
                     end
                   done;
-                  let sum, total = if !zero_weight > 0.
-                      then !zero_sum, !zero_weight
-                      else !regular_sum, !regular_weight in
-                  if total = 0. then destination.(point) <- source.(point)
+                  if !total = 0. then destination.(point) <- source.(point)
                   else
-                    let local_weight = match weights with
-                      | None -> 1. | Some values -> values.(point) in
-                    let average = sum /. total in
+                    let average = !sum /. !total in
                     destination.(point) <- source.(point)
-                      +. ((step *. local_weight) *. (average -. source.(point)))
+                      +. (step *. (average -. source.(point)))
                   end
                 done
               done);
           let swap = !current in current := !next; next := swap
         done;
-        let output = if original_blend = 0. && blurred_blend = 1. then !current
-          else begin
-            let values = Array.init (Array.length !current)
-                (fun _ -> Array.make point_count 0.) in
-            Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(point_count - 1)
-              (fun point ->
-                for plane = 0 to Array.length values - 1 do
-                  values.(plane).(point) <-
-                    (original_blend *. original.(plane).(point))
-                    +. (blurred_blend *. (!current).(plane).(point))
-                done);
-            values
-          end in
+        let output = !current in
         let invalid = ref None in
         Array.iteri (fun plane values ->
           let point = ref 0 in
@@ -318,5 +205,5 @@ let run ?cancel ?(grain = 16_384) ?selection ?(iterations = 1)
                           (Geometry.with_attribute attribute geometry)
                           (fun geometry -> install geometry (target + 1)))) in
               install geometry 0)
-        )))))
+        )
       end))

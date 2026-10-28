@@ -9,6 +9,7 @@ open Rdk
 
 let fail message = raise (Failure message)
 let failf format = Printf.ksprintf failwith format
+let checkf condition = Printf.ksprintf (fun message -> if not condition then failwith message)
 let check condition message = if not condition then fail message
 let get_ok = function Ok value -> value | Error error -> fail (Error.to_string error)
 let get_rdk = function Ok value -> value | Error error -> fail (Error.to_string error)

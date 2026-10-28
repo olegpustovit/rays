@@ -1,231 +1,24 @@
-
-type bounds = {
-  min : Rays_math.Vec3.t;
-  max : Rays_math.Vec3.t;
-  center : Rays_math.Vec3.t;
-  size : Rays_math.Vec3.t;
-}
-
-let bounds ?cancel geometry =
-  Cancel.check_opt cancel;
-  let positions = Packed.Float3.View.view (Geometry.positions geometry) in
-  let count = Array.length positions.x in
-  if count = 0 then None
-  else begin
-    let min_x = ref positions.x.(0) and min_y = ref positions.y.(0)
-    and min_z = ref positions.z.(0) and max_x = ref positions.x.(0)
-    and max_y = ref positions.y.(0) and max_z = ref positions.z.(0) in
-    for index = 1 to count - 1 do
-      if index land 16_383 = 0 then Cancel.check_opt cancel;
-      let x = positions.x.(index) and y = positions.y.(index)
-      and z = positions.z.(index) in
-      if x < !min_x then min_x := x; if x > !max_x then max_x := x;
-      if y < !min_y then min_y := y; if y > !max_y then max_y := y;
-      if z < !min_z then min_z := z; if z > !max_z then max_z := z
-    done;
-    let min = Rays_math.Vec3.create !min_x !min_y !min_z
-    and max = Rays_math.Vec3.create !max_x !max_y !max_z in
-    Some {
-      min; max;
-      center = Rays_math.Vec3.create ((!min_x +. !max_x) *. 0.5)
-          ((!min_y +. !max_y) *. 0.5) ((!min_z +. !max_z) *. 0.5);
-      size = Rays_math.Vec3.create (!max_x -. !min_x) (!max_y -. !min_y)
-          (!max_z -. !min_z);
-    }
-  end
-
-type measure = Perimeter | Area | Signed_volume
 type connectivity_owner = Connectivity_points | Connectivity_primitives
 
-let measure_label = function
-  | Perimeter -> "perimeter"
-  | Area -> "area"
-  | Signed_volume -> "volume"
-
-type primitive_selection = All_primitives of int | Selected_primitives of int array
-
-let selected_primitives ?primitives geometry =
-  let count = Geometry.primitive_count geometry in
-  match primitives with
-  | None -> Ok (All_primitives count)
-  | Some group when Group.owner group <> Group.Primitive -> Error
-      "Rdk.Analysis.measure: selection must be primitive-owned"
-  | Some group when Group.length group <> count -> Error
-      "Rdk.Analysis.measure: primitive selection length does not match geometry"
-  | Some group ->
-      let selected = Array.make (Group.cardinality group) 0 and next = ref 0 in
-      Group.iter (fun primitive -> selected.(!next) <- primitive; incr next) group;
-      Ok (Selected_primitives selected)
-
-let selection_count = function
-  | All_primitives count -> count
-  | Selected_primitives selected -> Array.length selected
-
-let selected_primitive selection index = match selection with
-  | All_primitives _ -> index
-  | Selected_primitives selected -> selected.(index)
-
-let iter_selected selection f = match selection with
-  | All_primitives count -> for primitive = 0 to count - 1 do f primitive done
-  | Selected_primitives selected -> Array.iter f selected
-
-let measurement_anchor ?cancel measure geometry = match measure with
-  | Perimeter | Area -> 0., 0., 0.
-  | Signed_volume ->
-      (match bounds ?cancel geometry with
-       | None -> 0., 0., 0.
-       | Some bounds -> bounds.center.x, bounds.center.y, bounds.center.z)
-
-let triangle_measure measure anchor positions topology a_vertex b_vertex c_vertex =
-  let a = topology.Topology.View.vertex_points.(a_vertex)
-  and b = topology.vertex_points.(b_vertex)
-  and c = topology.vertex_points.(c_vertex) in
-  let ax = positions.Packed.Float3.View.x.(a)
-  and ay = positions.y.(a) and az = positions.z.(a)
-  and bx = positions.x.(b) and by = positions.y.(b) and bz = positions.z.(b)
-  and cx = positions.x.(c) and cy = positions.y.(c) and cz = positions.z.(c) in
-  if not (Float.is_finite ax && Float.is_finite ay && Float.is_finite az
-      && Float.is_finite bx && Float.is_finite by && Float.is_finite bz
-      && Float.is_finite cx && Float.is_finite cy && Float.is_finite cz)
-  then Float.nan
-  else match measure with
-    | Perimeter -> assert false
-    | Area ->
-        let abx = bx -. ax and aby = by -. ay and abz = bz -. az
-        and acx = cx -. ax and acy = cy -. ay and acz = cz -. az in
-        let nx = (aby *. acz) -. (abz *. acy)
-        and ny = (abz *. acx) -. (abx *. acz)
-        and nz = (abx *. acy) -. (aby *. acx) in
-        let value = 0.5 *. sqrt ((nx *. nx) +. (ny *. ny) +. (nz *. nz)) in
-        value
-    | Signed_volume ->
-        let ox, oy, oz = anchor in
-        let ax = ax -. ox and ay = ay -. oy and az = az -. oz
-        and bx = bx -. ox and by = by -. oy and bz = bz -. oz
-        and cx = cx -. ox and cy = cy -. oy and cz = cz -. oz in
-        let cross_x = (by *. cz) -. (bz *. cy)
-        and cross_y = (bz *. cx) -. (bx *. cz)
-        and cross_z = (bx *. cy) -. (by *. cx) in
-        let value = ((ax *. cross_x) +. (ay *. cross_y) +. (az *. cross_z)) /. 6. in
-        value
-
-let perimeter_measure positions topology primitive =
-  let first = topology.Topology.View.primitive_offsets.(primitive)
-  and last = topology.primitive_offsets.(primitive + 1) in
-  let size = last - first in
-  let closed = Bytes.get topology.primitive_kinds primitive <> '\001' in
-  let edges = if closed then size else max 0 (size - 1) in
-  let total = ref 0. and valid = ref true in
-  for local = 0 to edges - 1 do
-    if !valid then begin
-      let next = if local + 1 = size then 0 else local + 1 in
-      let a = topology.vertex_points.(first + local)
-      and b = topology.vertex_points.(first + next) in
-      let ax = positions.Packed.Float3.View.x.(a)
-      and ay = positions.y.(a) and az = positions.z.(a)
-      and bx = positions.x.(b) and by = positions.y.(b) and bz = positions.z.(b) in
-      let dx = bx -. ax and dy = by -. ay and dz = bz -. az in
-      let length = sqrt ((dx *. dx) +. (dy *. dy) +. (dz *. dz)) in
-      if not (Float.is_finite length) then valid := false
-      else total := !total +. length
-    end
+(* Signed volume of a closed polygon shell: the divergence-theorem fan sum,
+   exact for non-convex faces. *)
+let signed_volume geometry =
+  let t = Topology.View.view (Geometry.topology geometry)
+  and p = Packed.Float3.View.view (Geometry.positions geometry) in
+  let volume = ref 0. in
+  for primitive = 0 to Bytes.length t.primitive_kinds - 1 do
+    let first = t.primitive_offsets.(primitive) and last = t.primitive_offsets.(primitive + 1) in
+    let a = t.vertex_points.(first) in
+    for k = first + 1 to last - 2 do
+      let b = t.vertex_points.(k) and c = t.vertex_points.(k + 1) in
+      let bx = p.x.(b) and by = p.y.(b) and bz = p.z.(b)
+      and cx = p.x.(c) and cy = p.y.(c) and cz = p.z.(c) in
+      volume := !volume +. (p.x.(a) *. ((by *. cz) -. (bz *. cy))
+        +. p.y.(a) *. ((bz *. cx) -. (bx *. cz))
+        +. p.z.(a) *. ((bx *. cy) -. (by *. cx)))
+    done
   done;
-  if !valid && Float.is_finite !total then !total else Float.nan
-
-let primitive_measure_selected ?cancel ~grain selected measure geometry =
-  if grain <= 0 then invalid_arg "Rdk.Analysis.measure: grain must be positive";
-    let positions = Packed.Float3.View.view (Geometry.positions geometry)
-    and topology = Topology.View.view (Geometry.topology geometry) in
-    let primitive_count = Geometry.primitive_count geometry
-    and selected_count = selection_count selected in
-    let values = Array.make primitive_count 0. in
-    let selected_vertices = ref 0 in
-    iter_selected selected (fun primitive ->
-      selected_vertices := !selected_vertices
-        + topology.primitive_offsets.(primitive + 1)
-        - topology.primitive_offsets.(primitive));
-    let average_vertices = if selected_count = 0 then 1 else
-        max 1 ((!selected_vertices + selected_count - 1) / selected_count) in
-    let primitive_chunk = max 1 (grain / average_vertices) in
-    let range_count = if selected_count = 0 then 0 else
-        (selected_count + primitive_chunk - 1) / primitive_chunk in
-    let errors = Array.make range_count None
-    and anchor = measurement_anchor ?cancel measure geometry in
-    if range_count > 0 then Parallel.for_ ~chunk_size:1 ~start:0
-        ~finish:(range_count - 1) (fun range ->
-      let first_selected = range * primitive_chunk
-      and last_selected = min selected_count ((range + 1) * primitive_chunk) in
-      let scratch = Polygon_triangulation.create_scratch () in
-      for selected_index = first_selected to last_selected - 1 do
-        if selected_index land 4095 = 0 then Cancel.check_opt cancel;
-        if errors.(range) = None then begin
-          let primitive = selected_primitive selected selected_index in
-          match measure with
-          | Perimeter ->
-              let value = perimeter_measure positions topology primitive in
-              if Float.is_finite value then values.(primitive) <- value
-              else errors.(range) <- Some (Printf.sprintf
-                  "primitive %d produced a non-finite perimeter" primitive)
-          | Area | Signed_volume ->
-              if Bytes.get topology.primitive_kinds primitive <> '\000' then
-                errors.(range) <- Some (Printf.sprintf
-                    "primitive %d is a curve, not a polygon" primitive)
-              else begin
-                let first = topology.primitive_offsets.(primitive)
-                and last = topology.primitive_offsets.(primitive + 1) in
-                if last - first = 3 then
-                  let value = triangle_measure measure anchor positions topology
-                      first (first + 1) (first + 2) in
-                  if Float.is_finite value then values.(primitive) <- value
-                  else errors.(range) <- Some (Printf.sprintf
-                      "primitive %d produced a non-finite %s" primitive
-                      (measure_label measure))
-                else begin
-                  let value = ref 0. and failure = ref None in
-                  let emit _ a b c = if !failure = None then
-                    let triangle = triangle_measure measure anchor positions
-                        topology a b c in
-                    if Float.is_finite triangle then value := !value +. triangle
-                    else failure := Some "non-finite triangle measurement" in
-                  match Polygon_triangulation.primitive ?cancel ~positions ~topology
-                      ~scratch primitive ~emit with
-                  | Error message -> errors.(range) <- Some message
-                  | Ok () ->
-                      (match !failure with
-                       | Some message -> errors.(range) <- Some (Printf.sprintf
-                           "primitive %d: %s" primitive message)
-                       | None when Float.is_finite !value ->
-                           values.(primitive) <- !value
-                       | None -> errors.(range) <- Some (Printf.sprintf
-                           "primitive %d produced a non-finite measurement" primitive))
-                end
-              end
-        end
-      done);
-    let failure = ref None in
-    Array.iter (fun error -> match !failure, error with
-      | None, Some message -> failure := Some message
-      | None, None | Some _, _ -> ()) errors;
-    match !failure with None -> Ok values | Some message -> Error message
-
-let primitive_measure ?cancel ?(grain = 16_384) ?primitives measure geometry =
-  try
-    Result.bind (selected_primitives ?primitives geometry) (fun selected ->
-      primitive_measure_selected ?cancel ~grain selected measure geometry)
-  with
-  | Cancel.Cancelled -> Error "Rdk.Analysis.measure: cancelled"
-  | Invalid_argument message -> Error message
-
-let total values =
-  let result = ref 0. in
-  for primitive = 0 to Array.length values - 1 do
-    result := !result +. values.(primitive)
-  done;
-  !result
-
-let signed_volume ?cancel ?grain ?primitives geometry =
-  Result.map total
-    (primitive_measure ?cancel ?grain ?primitives Signed_volume geometry)
+  !volume /. 6.
 
 type disjoint_set = { parent : int array; rank : bytes }
 
@@ -307,44 +100,7 @@ let require_connectivity_group label owner count = function
       "Connectivity: %s length does not match geometry" label)
   | Some _ -> Ok ()
 
-type uv_view = Uv2 of Packed.Float2.View.view | Uv3 of Packed.Float3.View.view
-
-let uv_view name geometry =
-  match Geometry.find_attribute ~owner:Attribute.Vertex name geometry with
-  | None -> Error (Printf.sprintf
-      "Connectivity: missing vertex UV attribute %S" name)
-  | Some attribute ->
-      (match Attribute.View.storage attribute with
-       | Attribute.Float2 values -> Ok (Uv2 (Packed.Float2.View.view values))
-       | Attribute.Float3 values -> Ok (Uv3 (Packed.Float3.View.view values))
-       | Attribute.Float _ | Attribute.Int _ | Attribute.Int_array _
-       | Attribute.Float_array _ | Attribute.Float4 _ | Attribute.Text _ ->
-           Error (Printf.sprintf
-           "Connectivity: vertex UV attribute %S must be float2 or float3" name))
-
-let uv_vertex_equal view left right = match view with
-  | Uv2 values -> values.x.(left) = values.x.(right)
-      && values.y.(left) = values.y.(right)
-  | Uv3 values -> values.x.(left) = values.x.(right)
-      && values.y.(left) = values.y.(right)
-      && values.z.(left) = values.z.(right)
-
-let edge_uv_equal topology reverse view left right =
-  let left_next = reverse.Topology_index.View.next_vertex.(left)
-  and right_next = reverse.next_vertex.(right) in
-  if left_next < 0 || right_next < 0 then false
-  else
-    let left_point = topology.Topology.View.vertex_points.(left)
-    and right_point = topology.vertex_points.(right) in
-    if left_point = right_point then
-      uv_vertex_equal view left right
-      && uv_vertex_equal view left_next right_next
-    else
-      uv_vertex_equal view left right_next
-      && uv_vertex_equal view left_next right
-
-let classify_connectivity ?cancel ?(grain = 16_384) ?primitives ?points
-    ?seams ?uv_attribute owner geometry =
+let classify_connectivity ?primitives ?points ?seams owner geometry =
   Error.guard ~operation:"connectivity" ~code:"invalid_connectivity"
     ~cancelled:"connectivity classification was cancelled" @@ fun () ->
   try
@@ -352,15 +108,8 @@ let classify_connectivity ?cancel ?(grain = 16_384) ?primitives ?points
   and primitive_count = Geometry.primitive_count geometry in
   let topology_value = Geometry.topology geometry in
   let validation =
-    if grain <= 0 then
-      Error.fail_with ~operation:"connectivity" ~code:"invalid_parameter"
-        "grain must be positive"
-    else if owner = Connectivity_primitives && points <> None then
+    if owner = Connectivity_primitives && points <> None then
       Error "Connectivity: point include group is available only in point mode"
-    else if owner = Connectivity_points && uv_attribute <> None then
-      Error "Connectivity: UV connectivity is available only in primitive mode"
-    else if seams <> None && uv_attribute <> None then
-      Error "Connectivity: seam and UV connectivity modes are mutually exclusive"
     else Result.bind
         (require_connectivity_group "primitive include group" Group.Primitive
            primitive_count primitives)
@@ -373,7 +122,6 @@ let classify_connectivity ?cancel ?(grain = 16_384) ?primitives ?points
         <> Topology.data_id topology_value ->
         Error "Connectivity: seam group belongs to a different topology"
     | None | Some _ ->
-        Cancel.check_opt cancel;
         let topology = Topology.View.view topology_value in
         let primitive_allowed primitive = match primitives with
           | None -> true | Some group -> Group.mem primitive group in
@@ -382,7 +130,7 @@ let classify_connectivity ?cancel ?(grain = 16_384) ?primitives ?points
         match owner with
         | Connectivity_points ->
             let set = disjoint_set point_count point_allowed in
-            let index_value = Topology_index.create ?cancel topology_value in
+            let index_value = Topology_index.create topology_value in
             let reverse = Topology_index.View.view index_value in
             let edge_validation = match seams with
               | Some group when Edge_group.length group
@@ -391,7 +139,6 @@ let classify_connectivity ?cancel ?(grain = 16_384) ?primitives ?points
               | None | Some _ -> Ok () in
             Result.map (fun () ->
               for primitive = 0 to primitive_count - 1 do
-                if primitive land 16_383 = 0 then Cancel.check_opt cancel;
                 if primitive_allowed primitive then begin
                   let first = topology.primitive_offsets.(primitive)
                   and last = topology.primitive_offsets.(primitive + 1) in
@@ -407,11 +154,10 @@ let classify_connectivity ?cancel ?(grain = 16_384) ?primitives ?points
               component_classes set) edge_validation
         | Connectivity_primitives ->
             let set = disjoint_set primitive_count primitive_allowed in
-            match seams, uv_attribute with
-            | None, None ->
+            match seams with
+            | None ->
                 let first_primitive = Array.make point_count (-1) in
                 for primitive = 0 to primitive_count - 1 do
-                  if primitive land 16_383 = 0 then Cancel.check_opt cancel;
                   if primitive_allowed primitive then begin
                     let first = topology.primitive_offsets.(primitive)
                     and last = topology.primitive_offsets.(primitive + 1) in
@@ -424,44 +170,28 @@ let classify_connectivity ?cancel ?(grain = 16_384) ?primitives ?points
                   end
                 done;
                 Ok (component_classes set)
-            | seam_group, uv_name ->
-                let index = Topology_index.create ?cancel topology_value in
+            | Some group ->
+                let index = Topology_index.create topology_value in
                 let reverse = Topology_index.View.view index in
-                let edge_validation = match seam_group with
-                  | Some group when Edge_group.length group
-                      <> Topology_index.edge_count index ->
-                      Error "Connectivity: seam group length does not match topology"
-                  | None | Some _ -> Ok () in
-                Result.bind edge_validation (fun () ->
-                  let uv_result = match uv_name with
-                    | None -> Ok None
-                    | Some name -> Result.map Option.some (uv_view name geometry) in
-                  Result.map (fun uv ->
-                    for edge = 0 to Topology_index.edge_count index - 1 do
-                      if edge land 16_383 = 0 then Cancel.check_opt cancel;
-                      let is_seam = match seam_group with
-                        | None -> false | Some group -> Edge_group.mem edge group in
-                      if not is_seam then begin
-                        let first = reverse.edge_offsets.(edge)
-                        and last = reverse.edge_offsets.(edge + 1) in
-                        for left_slot = first to last - 2 do
-                          let left_vertex = reverse.edge_vertices.(left_slot) in
-                          let left = reverse.primitive_of_vertex.(left_vertex) in
-                          if primitive_allowed left then
-                            for right_slot = left_slot + 1 to last - 1 do
-                              let right_vertex = reverse.edge_vertices.(right_slot) in
-                              let right = reverse.primitive_of_vertex.(right_vertex) in
-                              let uv_matches = match uv with
-                                | None -> true
-                                | Some uv -> edge_uv_equal topology reverse uv
-                                    left_vertex right_vertex in
-                              if primitive_allowed right && uv_matches then
-                                union set left right
-                            done
-                        done
-                      end
-                    done;
-                    component_classes set) uv_result))
+                if Edge_group.length group <> Topology_index.edge_count index then
+                  Error "Connectivity: seam group length does not match topology"
+                else begin
+                  for edge = 0 to Topology_index.edge_count index - 1 do
+                    if not (Edge_group.mem edge group) then begin
+                      let first = reverse.edge_offsets.(edge)
+                      and last = reverse.edge_offsets.(edge + 1) in
+                      for left_slot = first to last - 2 do
+                        let left = reverse.primitive_of_vertex.(reverse.edge_vertices.(left_slot)) in
+                        if primitive_allowed left then
+                          for right_slot = left_slot + 1 to last - 1 do
+                            let right = reverse.primitive_of_vertex.(reverse.edge_vertices.(right_slot)) in
+                            if primitive_allowed right then union set left right
+                          done
+                      done
+                    end
+                  done;
+                  Ok (component_classes set)
+                end)
   with Invalid_argument message ->
     Error.fail_with ~operation:"connectivity" ~code:"invalid_parameter" message
 

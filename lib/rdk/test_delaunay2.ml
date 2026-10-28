@@ -1,9 +1,6 @@
 open Rdk
+open Rdk_test_support
 
-let fail format = Printf.ksprintf failwith format
-let check condition =
-  Printf.ksprintf (fun message -> if not condition then failwith message)
-let get = function Ok value -> value | Error message -> fail "%s" message
 
 let sign_positive = function Predicates.Positive -> true | _ -> false
 
@@ -13,13 +10,13 @@ let coordinate index salt =
 
 let test_failures_and_cancellation () =
   (match Delaunay2.build ~x:[|0.|] ~y:[||] () with
-   | Error _ -> () | Ok _ -> fail "mismatched coordinates succeeded");
+   | Error _ -> () | Ok _ -> failf "mismatched coordinates succeeded");
   (match Delaunay2.build ~x:[|Float.nan|] ~y:[|0.|] () with
-   | Error _ -> () | Ok _ -> fail "non-finite coordinate succeeded");
+   | Error _ -> () | Ok _ -> failf "non-finite coordinate succeeded");
   let cancel = Cancel.create () in
   Cancel.cancel cancel;
   match Delaunay2.build ~cancel ~x:[|0.;1.;0.|] ~y:[|0.;0.;1.|] () with
-  | Error _ -> () | Ok _ -> fail "cancelled triangulation succeeded"
+  | Error _ -> () | Ok _ -> failf "cancelled triangulation succeeded"
 
 let run () =
   test_failures_and_cancellation ()

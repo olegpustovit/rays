@@ -81,9 +81,7 @@ let geometry_check name actual expected =
        || actual.draw.state.transform_uniforms<>expected.draw.state.transform_uniforms then
       failwith (name ^ " gallery packed GPU inputs differ")
   end
-  else List.iter (fun measure ->
-    let actual = measure actual |> Result.get_ok and expected = measure expected |> Result.get_ok in
-    assert (abs_float (actual-.expected)<1e-9)) [Rdk.Analysis.signed_volume]
+  else assert (abs_float (Rdk.Analysis.signed_volume actual -. Rdk.Analysis.signed_volume expected)<1e-9)
 let pixels canvas camera geometry =
   Result.get_ok (Canvas.render canvas [Scene.clear Rays_math.Color.black;Scene.view3d ~camera (scene geometry)]);
   Result.get_ok (Canvas.pixels canvas)

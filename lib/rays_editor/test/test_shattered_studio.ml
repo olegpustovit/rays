@@ -45,8 +45,8 @@ let () = with_cook 1 (fun cook ->
     assert (Rdk_test_support.Topology_index.boundary_edge_count index = 0);
     assert (Rdk_test_support.Topology_index.non_manifold_edge_count index = 0)) parts;
   let source = Node.inputs fracture |> List.hd |> cook in
-  let original_volume = Rdk.Analysis.signed_volume (Result.get_ok (Sop.Payload.geometry source.payload)) |> get
-  and fractured_volume = Rdk.Analysis.signed_volume g |> get in
+  let original_volume = Rdk.Analysis.signed_volume (Result.get_ok (Sop.Payload.geometry source.payload))
+  and fractured_volume = Rdk.Analysis.signed_volume g in
   assert (abs_float (original_volume -. fractured_volume) < 1e-7 *. abs_float original_volume);
   let colored = cook graph in
   let geometry = Sop.Payload.geometry colored.payload |> Result.map_error Diagnostic.to_string |> get in

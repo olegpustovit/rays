@@ -150,7 +150,6 @@ type interpolate_computed = {
     coordinates. The resulting pair can drive a later weighted interpolation
     with equivalent coefficients. *)
 
-type blur_method = Uniform | Edge_length
 type blur_mode = Laplacian of float | Custom_steps of { odd : float; even : float }
 type numeric_value =
   | Scalar of float
@@ -219,25 +218,14 @@ val blur_points :
   ?grain:int ->
   ?selection:Group.t ->
   ?iterations:int ->
-  ?method_:blur_method ->
   ?mode:blur_mode ->
-  ?weight_attribute:string ->
-  ?alpha_attribute:string ->
-  ?pin_borders:bool ->
-  ?original_blend:float ->
-  ?blurred_blend:float ->
   pattern:string ->
   Geometry.t ->
   (Geometry.t, Error.t) result
 (** Blur canonical [P] and matching point-owned floating scalar/tuple
     attributes over topology connectivity. Blank [pattern] is an identity.
-    [Uniform] weights every unique neighboring point equally; [Edge_length]
-    uses inverse original edge length, with coincident neighbors taking
-    exclusive precedence. [Laplacian] uses one step size and [Custom_steps]
-    alternates odd/even sizes. Optional scalar point weight and alpha
-    attributes control receiver displacement and neighbor influence;
-    [pin_borders] fixes points incident to one-sided polygon/curve edges.
-    Final output is [original_blend * original + blurred_blend * blurred].
+    Every unique neighboring point weighs equally. [Laplacian] uses one
+    step size and [Custom_steps] alternates odd/even sizes.
 
     The cached {!Topology_index} is built once. Work is O(iterations *
     components * (points + edges)); auxiliary/output storage is O(edges +
