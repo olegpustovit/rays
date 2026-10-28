@@ -516,18 +516,39 @@ let private_errors scan =
   let product path = (Filename.check_suffix path ".ml" || Filename.check_suffix path ".mli")
     && owner path <> None && not (contains path "/test/" || contains path "/conformance/")
     && not (List.exists (fun p -> String.starts_with ~prefix:p (Filename.basename path)) ["test_"; "bench_"]) in
-  let defined = Hashtbl.create 512 in
-  List.iter (fun (path, _) -> if product path && Filename.check_suffix path ".ml" then
-    Hashtbl.replace defined (String.capitalize_ascii (Filename.remove_extension (Filename.basename path)), owner path) ()) scan;
+  let defined = Hashtbl.create 512 and submodules = Hashtbl.create 512 in
+  let declared = Str.regexp "\\bmodule\\( type\\)? +\\([A-Z][A-Za-z_0-9]*\\)" in
+  List.iter (fun (path, text) -> if product path then begin
+    if Filename.check_suffix path ".ml" then
+      Hashtbl.replace defined (String.capitalize_ascii (Filename.remove_extension (Filename.basename path)), owner path) ();
+    let rec go i = match Str.search_forward declared text i with
+      | exception Not_found -> ()
+      | _ -> Hashtbl.replace submodules (Str.matched_group 2 text, owner path) (); go (Str.match_end ()) in
+    go 0 end) scan;
+  (* [module A = B.C] in a file makes [A.Private] mean [B.C.Private]. *)
+  let alias_re = Str.regexp "\\bmodule +\\([A-Z][A-Za-z_0-9]*\\) *= *\\([A-Z][A-Za-z_0-9]*\\(\\.[A-Z][A-Za-z_0-9]*\\)*\\) *\\($\\|[^.A-Za-z_(]\\)" in
+  let aliases text =
+    let table = Hashtbl.create 16 in
+    let rec go i = match Str.search_forward alias_re text i with
+      | exception Not_found -> table
+      | _ -> Hashtbl.replace table (Str.matched_group 1 text) (Str.matched_group 2 text); go (Str.match_end ()) in
+    go 0 in
   let re = Str.regexp "\\b\\([A-Z][A-Za-z_0-9]*\\)\\(\\.[A-Z][A-Za-z_0-9]*\\)*\\.Private\\b" in
   let found = Hashtbl.create 128 in
   List.iter (fun (path, text) -> if product path then begin
+    let table = aliases text in
+    let rec resolve m depth = match String.index_opt m '.' with
+      | Some k when depth < 4 -> (match Hashtbl.find_opt table (String.sub m 0 k) with
+          | Some target -> resolve (target ^ String.sub m k (String.length m - k)) (depth + 1)
+          | None -> m)
+      | _ -> m in
     let rec go i = match Str.search_forward re text i with
       | exception Not_found -> ()
       | _ ->
-          let m = Str.matched_string text and first = Str.matched_group 1 text in
-          if not (Hashtbl.mem defined (first, owner path)) then
-            Hashtbl.replace found (Option.get (owner path), m) ();
+          let m = resolve (Str.matched_string text) 0 in
+          let first = List.hd (String.split_on_char '.' m) and dir = Option.get (owner path) in
+          if not (Hashtbl.mem defined (first, Some dir) || Hashtbl.mem submodules (first, Some dir)) then
+            Hashtbl.replace found (dir, m) ();
           go (Str.match_end ()) in
     go 0 end) scan;
   let allowed = Private_allowlist.entries in
