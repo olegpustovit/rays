@@ -1,7 +1,6 @@
 
 type topology_policy = Destroy_touched_primitives | Heal_primitives
 
-
 let fail message = raise (Error.Fail ("Rdk.Deletion.delete: " ^ message))
 let get_ok = function Ok value -> value | Error message -> fail message
 
@@ -217,9 +216,9 @@ let lower_bound values needle =
   done;
   !first
 
-let primitive_partitions ?cancel ?grain ~piece_count ?point_pieces
+let primitive_partitions ~piece_count
     ~primitive_pieces geometry =
-  if piece_count < 0 then invalid_arg
+  let cancel = None in let grain = None in let point_pieces = None in if piece_count < 0 then invalid_arg
       "Rdk.Deletion.primitive_partitions: negative piece count";
   let topology = Topology.View.view (Geometry.topology geometry) in
   let source_points = topology.point_count
@@ -385,8 +384,8 @@ let primitive_partitions ?cancel ?grain ~piece_count ?point_pieces
       outputs
 
 let delete ?cancel ?grain ?(selected = true) ?(compact_points = false)
-    ?(policy = Destroy_touched_primitives) selection geometry =
-  Error.guard ~operation:"delete" ~code:"invalid_selection" @@ fun () ->
+    selection geometry =
+  let policy = (Destroy_touched_primitives) in Error.guard ~operation:"delete" ~code:"invalid_selection" @@ fun () ->
   try
     Cancel.check_opt cancel;
     validate_selection selection geometry;

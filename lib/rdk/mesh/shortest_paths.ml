@@ -82,10 +82,10 @@ let search ?cancel ?(radius = infinity) ~point_edge_offsets ~point_edges
    [Group_path] and the Lisp [graph/shortest_paths :hops true]. *)
 exception Hop_overflow
 
-let hop_search ?cancel ?(blocked_point = fun _ -> false)
+let hop_search ?(blocked_point = fun _ -> false)
     ?(blocked_edge = fun _ -> false) ?(target = -1) ~depths ~distances ~previous
     ~queue ~point_edge_offsets ~point_edges ~edge_a ~edge_b ~lengths roots =
-  let count = Array.length point_edge_offsets - 1 in
+  let cancel = None in let count = Array.length point_edge_offsets - 1 in
   Array.fill depths 0 count (-1);
   let head = ref 0 and tail = ref 0 and overflow = ref false in
   Array.iter (fun root ->
@@ -144,9 +144,9 @@ type forest = {
   order_count : int;
 }
 
-let forest_search ?cancel ?(drain_each = false) ~valid_edge ~capacity
+let forest_search ~valid_edge ~capacity
     ~point_edge_offsets ~point_edges ~edge_a ~edge_b ~lengths roots =
-  let point_count = Array.length point_edge_offsets - 1 in
+  let cancel = None in let drain_each = (false) in let point_count = Array.length point_edge_offsets - 1 in
   let distance = Array.make point_count infinity
   and tree_parent = Array.make point_count (-1)
   and tree_edge = Array.make point_count (-1)

@@ -14,9 +14,9 @@ type operation =
   | Reverse_vertices
   | Shift_vertices of int
 
-let run ?cancel ?(grain = 16_384) ?primitives
-    ?(operation = Reverse_vertices) geometry =
-  Error.guard ~operation:"reverse" ~code:"invalid_topology" @@ fun () ->
+let run ?cancel
+    geometry =
+  let grain = (16_384) in let operation = (Reverse_vertices) in let primitives = None in Error.guard ~operation:"reverse" ~code:"invalid_topology" @@ fun () ->
   try
   if grain <= 0 then invalid_arg "Rdk_mesh.Reverse_faces.reverse: grain must be positive";
   Cancel.check_opt cancel;

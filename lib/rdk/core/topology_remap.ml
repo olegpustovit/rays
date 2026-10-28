@@ -164,8 +164,8 @@ let blend_positions ?cancel ~grain left right weight positions =
   let blend = blend_float ?cancel ~grain left right weight in
   Packed.Float3.View.of_owned_exn ~x:(blend p.x) ~y:(blend p.y) ~z:(blend p.z)
 
-let mapped_group ?cancel ~grain ~point_map ~vertex_map ~primitive_map value =
-  let mapping = match Group.owner value with
+let mapped_group ~grain ~point_map ~vertex_map ~primitive_map value =
+  let cancel = None in let mapping = match Group.owner value with
     | Group.Point -> point_map
     | Group.Vertex -> vertex_map
     | Group.Primitive -> primitive_map in

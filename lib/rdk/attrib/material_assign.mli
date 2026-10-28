@@ -3,6 +3,5 @@
     across domain counts. Cancellation is checked every 4096 primitives. *)
 val run :
   ?cancel:Rdk_core.Cancel.t -> ?group:string ->
-  name:string -> color:(float * float * float) -> roughness:float -> ?round:float ->
-  emission:(float * float * float) -> Rdk_core.Geometry.t ->
+  name:string -> color:(float * float * float) -> roughness:float -> emission:(float * float * float) -> Rdk_core.Geometry.t ->
   (Rdk_core.Geometry.t, Rdk_core.Error.t) result

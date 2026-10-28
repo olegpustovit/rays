@@ -1,8 +1,8 @@
-let run ?cancel ?group ~name ~color:(r, g, b) ~roughness ?(round = 0.)
+let run ?cancel ?group ~name ~color:(r, g, b) ~roughness
     ~emission:(er, eg, eb) geometry =
   (* ponytail: sequential assignment costs ~10 ms at 100k primitives on the
      measured arm64 host; parallelize the disjoint fill if larger cooks need it. *)
-  let error code message = Error (Error.make ~operation:"material" ~code message) in
+  let round = (0.) in let error code message = Error (Error.make ~operation:"material" ~code message) in
   let channel x = Float.is_finite x && x >= 0. && x <= 1. in
   if not (List.for_all channel [r; g; b; roughness; er; eg; eb]) then
     error "invalid_material" "material channels and roughness must be finite and in [0,1]"

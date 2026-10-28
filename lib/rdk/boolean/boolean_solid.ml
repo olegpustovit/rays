@@ -238,8 +238,8 @@ let extract_product_with_ancestry ?cancel ?require_closed ?defer_rounded_slivers
        | Error _ as failure -> failure)
   | result, _, _, _ -> result
 
-let seams ?cancel ?grain ?parallel_cutoff ?materialize value =
-  Boolean_seam.build ?cancel ?grain ?parallel_cutoff ?materialize value.complex
+let seams ?cancel ?grain ?materialize value =
+  let parallel_cutoff = None in Boolean_seam.build ?cancel ?grain ?parallel_cutoff ?materialize value.complex
 
 let shatter_with_ancestry ?cancel ?require_closed ?defer_rounded_slivers
     ?corner_payload value =

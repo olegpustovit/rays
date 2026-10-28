@@ -106,9 +106,9 @@ let run ?cancel ?(grain = 16_384) ?primitives ?constrained_points
     ?(boundary = Smooth_free) ?(iterations = 1)
     ?(method_ = Attribute_ops.Uniform)
     ?(mode = Attribute_ops.Laplacian 0.5) ?weight_attribute
-    ?alpha_attribute ?(recompute_normals = true) ?(original_blend = 0.)
-    ?(smoothed_blend = 1.) ~attributes geometry =
-  try
+    ?(recompute_normals = true)
+    ~attributes geometry =
+  let alpha_attribute = None in let original_blend = (0.) in let smoothed_blend = (1.) in try
     if grain <= 0 then fail "invalid_parameter" "grain must be positive"
     else Result.bind (validate_primitive_group geometry primitives) (fun () ->
       Result.bind (validate_point_group "constrained point group" geometry

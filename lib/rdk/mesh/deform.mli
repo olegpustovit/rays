@@ -30,8 +30,7 @@ val peak :
 
 val mountain :
   ?cancel:Cancel.t -> ?grain:int -> ?selection:selection ->
-  ?direction_attribute:string -> ?normalize_direction:bool ->
-  ?mask_attribute:string -> ?seed:int -> height:float ->
+  ?direction_attribute:string -> ?mask_attribute:string -> ?seed:int -> height:float ->
   ?frequency:Rays_math.Vec3.t -> ?offset:Rays_math.Vec3.t ->
   ?octaves:int -> ?lacunarity:float -> ?roughness:float ->
   ?height_attribute:string -> ?recompute_normals:bool ->
