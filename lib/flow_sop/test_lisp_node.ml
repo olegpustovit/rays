@@ -4,7 +4,7 @@ let check condition message = if not condition then failwith message
 let parse text = match Flow.Syntax.parse text with
   | Ok forms -> forms | Error d -> failwith (Diagnostic.to_string d)
 let lower ?(reference = false) text =
-  match Flow_sop.Lower.workspace ~reference ~factories:Sop_catalog.Editor.factories (parse text) with
+  match Flow_sop.Lower.workspace ~reference ~factories:Sop.Nodes.factories (parse text) with
   | Error d -> failwith (Diagnostic.to_string d)
   | Ok lowered ->
       let graph = List.find (fun (graph : Flow_sop.Lower.graph) -> graph.default) lowered.graphs in
@@ -38,7 +38,7 @@ let () =
   let factory=Sop.Edit_graph.factory ~key:"ext_src" ~label:"Source" ~category:["Test"] ~arity:0
     (fun _->Lisp_sop.snapshot geometry) in
   let compile reference=match Flow_sop.Lower.workspace ~reference
-      ~factories:(factory::Sop_catalog.Editor.factories)(parse source) with
+      ~factories:(factory::Sop.Nodes.factories)(parse source) with
     |Error d->failwith(Diagnostic.to_string d)
     |Ok lowered->let graph=List.hd lowered.graphs in
         ok(Sop.Edit_graph.compile_node graph.network.geometry ~node_id:(Option.get graph.root)) in
@@ -201,7 +201,7 @@ let () =
       let geometry=Rdk.Line_geometry.points (Array.make count (0.,0.,0.)) in
       let factory=Sop.Edit_graph.factory ~key:"handle_source" ~label:"Source" ~category:["Test"] ~arity:0
         (fun _->Lisp_sop.snapshot geometry) in
-      let factories=factory::Sop_catalog.Editor.factories in
+      let factories=factory::Sop.Nodes.factories in
       let catalog=match Flow_sop.Catalog.of_factories ~version:1 factories with
         |Ok catalog->catalog|Error d->failwith(Diagnostic.to_string d) in
       let forms=parse {|(workspace handles
@@ -512,7 +512,7 @@ let () =
           (sop/attr geo :P)))))
     (graph g :context sop (sop/unsupported_map (sop/grid :columns 2 :rows 2))))|} in
   (* Projection and graph compilation retain the body; cooking is where strict kernel preparation must refuse it. *)
-  match Flow_sop.Lower.workspace ~factories:Sop_catalog.Editor.factories (parse source) with
+  match Flow_sop.Lower.workspace ~factories:Sop.Nodes.factories (parse source) with
   | Error diagnostic ->
       check (diagnostic.code = "E_KERNEL_FORM"
         && diagnostic.message = "Numeric node bodies must compile to packed kernels."
@@ -613,7 +613,7 @@ let () =
   let lower ?previous text =
     let compiled_ids,sites=match previous with None->None,None
       |Some(lowered:Flow_sop.Lower.t)->Some lowered.compiled_ids,Some lowered.sites in
-    match Flow_sop.Lower.workspace ?compiled_ids ?sites ~factories:Sop_catalog.Editor.factories(parse text) with
+    match Flow_sop.Lower.workspace ?compiled_ids ?sites ~factories:Sop.Nodes.factories(parse text) with
     |Ok lowered->let graph=List.hd lowered.graphs in
         lowered,ok(Sop.Edit_graph.compile_node graph.network.geometry ~node_id:(Option.get graph.root))
     |Error d->failwith(Diagnostic.to_string d) in
@@ -672,7 +672,7 @@ let ()=
     let compiled_ids,sites=match previous with None->None,None
       |Some(lowered:Flow_sop.Lower.t)->Some lowered.compiled_ids,Some lowered.sites in
     let lowered=match Flow_sop.Lower.workspace ?compiled_ids ?sites
-      ~factories:Sop_catalog.Editor.factories (parse(source ?extra values))with
+      ~factories:Sop.Nodes.factories (parse(source ?extra values))with
       |Ok lowered->lowered|Error d->failwith(Diagnostic.to_string d) in
     let graph=List.hd lowered.graphs in
     lowered,ok(Sop.Edit_graph.compile_node graph.network.geometry ~node_id:(Option.get graph.root)) in
@@ -743,7 +743,7 @@ let ()=
         nil)] geo))
     (graph g :context sop (sop/error_boundary (sop/line :points 2))))|}in
   let compile reference text=match Flow_sop.Lower.workspace ~reference
-      ~factories:(factory::Sop_catalog.Editor.factories)(parse text)with
+      ~factories:(factory::Sop.Nodes.factories)(parse text)with
     |Error d->failwith(Diagnostic.to_string d)
     |Ok lowered->let graph=List.hd lowered.graphs in
       ok(Sop.Edit_graph.compile_node graph.network.geometry ~node_id:(Option.get graph.root)) in
@@ -800,7 +800,7 @@ let () =
       (Sop.Node.dependencies (lower ~reference (source "1.0")))))
       "a constant body gained a Frame dependency")
     [false; true];
-  (match Flow_sop.Lower.workspace ~factories:Sop_catalog.Editor.factories
+  (match Flow_sop.Lower.workspace ~factories:Sop.Nodes.factories
     (parse "(workspace w (graph g :context sop (sop/line :points (int (sop/context_frame)))))") with
    | Error d -> check (d.code = "E_NODE_CONTEXT") "context frame outside a body has the wrong code"
    | Ok _ -> failwith "context frame outside a defnode body was accepted");
@@ -831,7 +831,7 @@ let () =
       (Sop.Node.dependencies (lower ~reference (source "1.0")))))
       "a constant body gained a Time dependency")
     [false; true];
-  (match Flow_sop.Lower.workspace ~factories:Sop_catalog.Editor.factories
+  (match Flow_sop.Lower.workspace ~factories:Sop.Nodes.factories
     (parse "(workspace w (graph g :context sop (sop/line :points (int (sop/context_time)))))") with
    | Error d -> check (d.code = "E_NODE_CONTEXT") "context time outside a body has the wrong code"
    | Ok _ -> failwith "context time outside a defnode body was accepted");
@@ -843,7 +843,7 @@ let () =
   let source = {|(workspace cache
     (defnode sop/lisp_line [(n : int 3 :min 2 :max 9)] (sop/line :points n))
     (graph g :context sop (sop/lisp_line)))|} in
-  let factories = Sop_catalog.Editor.factories in
+  let factories = Sop.Nodes.factories in
   let build ?(gpu=Flow_ir.Gpu.default) () =
     let node = match Flow_sop.Lower.workspace ~gpu ~factories (parse source) with
       | Error d -> failwith (Diagnostic.to_string d)

@@ -273,7 +273,7 @@ let () =
        Array.iteri (fun i x -> assert (Int64.bits_of_float x = Int64.bits_of_float (sin (float i *. 0.25 +. 1.25)))) xs
    | _ -> failwith "CPU map did not return a packed array")
 let () =
-  let catalog, _ = ok (Flow.Check.catalog_of_manifest (read "../sop_catalog/flow_manifest.sexp")) in
+  let catalog, _ = ok (Flow.Check.catalog_of_manifest (read "../flow_sop/flow_manifest.sexp")) in
   List.iter (fun name ->
     let ws = check ~catalog (read ("../../specification/workspace/cases/" ^ name ^ ".lisp")) in
     let evaluated = ok (E.static ~record:true ws) in

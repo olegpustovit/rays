@@ -14,7 +14,7 @@ module Sync = Editor_document.Scene_sync
 module E = Flow.Eval
 
 let check condition message = if not condition then failwith message
-let factories = Sop_catalog.Editor.factories
+let factories = Sop.Nodes.factories
 
 let contains text piece =
   let n = String.length piece in

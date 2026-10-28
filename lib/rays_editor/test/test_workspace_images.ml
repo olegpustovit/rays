@@ -19,7 +19,7 @@ let ()=
       P.Node.Private.cook(Lisp_sop.snapshot(Rdk.Line_geometry.points[|point|]))context[||])in
   let factory=P.Edit_graph.factory ~key:"image_context" ~label:"Image context" ~category:["Test"]
     ~arity:0(function []->source()|_->assert false)in
-  let factories=factory::Sop_catalog.Editor.factories in
+  let factories=factory::Sop.Nodes.factories in
   let doc=match Rays_editor.Workspace.load ~factories {|(workspace context
     (graph mesh :context sop (let* [geo (sop/image_context)
       p (array/sum (sop/attr geo :P))
@@ -220,7 +220,7 @@ let ()=
 
 let ()=
   let doc=workspace "(image/load \"unused.png\")"in
-  let lowered=ok(Flow_sop.Lower.of_checked ~factories:Sop_catalog.Editor.factories doc.checked)in
+  let lowered=ok(Flow_sop.Lower.of_checked ~factories:Sop.Nodes.factories doc.checked)in
   let graph=List.hd lowered.graphs in
   let lane=Flow_sop.Value_lane.create()in
   assert(match Flow_sop.Value_lane.resolve lane ~time:0. graph.network with
@@ -264,7 +264,7 @@ let () =
       (sop/attr_from_image (sop/grid :rows 2 :columns 2 :uv_attribute "uv") (ref image)))
     (graph picture :context draw (draw/image (ref image)))
     (graph scene :context scene (scene/geometry (ref grid) :texture (ref image))))|}) in
-  Workspace_parity.check ~commands:true ~factories:Sop_catalog.Editor.factories
+  Workspace_parity.check ~commands:true ~factories:Sop.Nodes.factories
     ~name:"image_oracle" document;
   if String.starts_with ~prefix:"(image/noise" producer then begin
     let owner = editor document in

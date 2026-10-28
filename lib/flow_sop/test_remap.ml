@@ -72,7 +72,7 @@ let source_text ?(edge=true) body=Printf.sprintf {|(workspace remap_test
     (if body="" then "(sop/remap source target :points points :vertices vertices :primitives primitives :positions positions"^
       (if edge then " :edges edge_map)" else ")") else body)
 let compile ?(reference=false) ?(edge=true) ?(body="") source target args=
-  let factories=factory "src" source::factory "dst" target::Sop_catalog.Editor.factories in
+  let factories=factory "src" source::factory "dst" target::Sop.Nodes.factories in
   let lowered=L.workspace ~reference ~factories ~inputs:["g",args](parse(source_text ~edge body)) |>flow in
   let graph=List.hd lowered.graphs in
   Edit.compile_node graph.network.geometry ~node_id:(Option.get graph.root)|>get_string_ok
@@ -233,7 +233,7 @@ let ()=
     check((Sop.Session.stats session).misses>first.misses)"metadata-only source update did not miss")
 let ()=
   let src=source 3 and dst=target 1(source 3) in
-  let factories=factory "src" src::factory "dst" dst::Sop_catalog.Editor.factories in
+  let factories=factory "src" src::factory "dst" dst::Sop.Nodes.factories in
   let catalog=Flow_sop.Catalog.of_factories ~version:1 factories|>flow in
   let forms=parse(source_text "") in
   let checker=Flow_sop.Catalog.check_workspace ~ops:Flow_sop.Operators.all in
@@ -284,7 +284,7 @@ let ()=
   List.iter(fun reference->ignore(geometry(run(compile ~reference ~body src dst inputs)))) [false;true];
   let body={|(let* [chosen (if (< t 1.0) points (exact (map (fn [(i : int)] (int/mod (int/add i 1) 3)) points)))]
     (sop/remap source target :points chosen :vertices vertices :primitives primitives :edges edge_map :positions "mapped"))|} in
-  let factories=factory "src" src::factory "dst" dst::Sop_catalog.Editor.factories in
+  let factories=factory "src" src::factory "dst" dst::Sop.Nodes.factories in
   let lowered=L.workspace ~factories ~inputs:["g",inputs](parse(source_text body))|>flow in
   let graph=List.hd lowered.graphs in
   let session=Sop.Session.create ~max_entries:32 ~max_payload_bytes:64_000_000|>get_string_ok in
@@ -316,7 +316,7 @@ let ()=
   and offsets=Array.init 32770 Fun.id in
   let expected=oracle src dst p p prim offsets p true in
   List.iter(fun reference->let lowered=L.workspace ~reference
-    ~factories:(factory "src" src::factory "dst" dst::Sop_catalog.Editor.factories)(parse text)|>flow in
+    ~factories:(factory "src" src::factory "dst" dst::Sop.Nodes.factories)(parse text)|>flow in
     let graph=List.hd lowered.graphs in
     let node=Edit.compile_node graph.network.geometry ~node_id:(Option.get graph.root)|>get_string_ok in
     List.iter(fun domains->List.iter(fun grain->check
@@ -450,7 +450,7 @@ let ()=
      invoke ~grain:97 ~topology:(Geometry.topology dst)(Geometry.edge_groups unrelated),"source group affinity mismatch"]
 
 (* Weighted carry: every owner and storage against an independent reference, the shared helper's
-   bytes against Curve_ops.interpolate_attribute on point and vertex attributes, mixed plain and
+   bytes against Curve_join.interpolate_attribute on point and vertex attributes, mixed plain and
    weighted owners, reference/CPU, 1 and 8 domains, and the refusals. *)
 let () =
   let mix_of ~count ~shift n =
@@ -529,17 +529,17 @@ let () =
           ~z:(Array.map(fun i->v.z.(i))l) in
       let expected=Geometry.create ~positions ~topology:(Geometry.topology dst) ~attributes ~groups
         ~edge_groups:(Geometry.edge_groups base) ()|>get_string_ok in
-      (* the shared helper is Curve_ops' rule, byte for byte *)
+      (* the shared helper is Curve_join' rule, byte for byte *)
       if points && vertices then
         List.iter(fun a->match Attribute.owner a with
           |Attribute.Point|Vertex->
               let (pl,pr,pw)=pc and (vl,vr,vw)=vc in
-              let curve=Curve_ops.interpolate_attribute pl pr pw vl vr vw a in
+              let curve=Curve_join.interpolate_attribute pl pr pw vl vr vw a in
               let got=Option.get(Geometry.find_attribute ~owner:(Attribute.owner a)(Attribute.name a)expected) in
               let attach attribute=geometry_bytes(Geometry.create ~positions:(Geometry.positions base)
                 ~topology:(Geometry.topology base) ~attributes:[attribute] ()|>get_string_ok) in
               check(attach curve=attach got)
-                (Printf.sprintf "weighted remap differs from Curve_ops.interpolate_attribute (%s copies %d)" (Attribute.name a) copies)
+                (Printf.sprintf "weighted remap differs from Curve_join.interpolate_attribute (%s copies %d)" (Attribute.name a) copies)
           |_->())(Geometry.attributes src);
       List.iter(fun reference->
         let node=compile ~reference ~body:(Printf.sprintf "(let* [out %s] out)" (body ~points ~vertices ~primitives))
@@ -575,12 +575,12 @@ let () =
   List.iter(fun text->match Flow.Syntax.parse text with
     |Error d->failwith(Diagnostic.to_string d)
     |Ok forms->
-      let factories=factory "src" src::factory "dst" dst::Sop_catalog.Editor.factories in
+      let factories=factory "src" src::factory "dst" dst::Sop.Nodes.factories in
       check(Result.is_error(L.workspace ~factories forms)) "malformed weighted remap lowered")
     ["(workspace w (graph g :context sop (sop/remap (sop/src) (sop/dst) :points (array/int 0) :point_mix {:a (array/int 0) :b (array/int 0) :t (array/float 0 0.0)} :vertices (array/int 0) :primitives (array/int 0))))";
      "(workspace w (graph g :context sop (sop/remap (sop/src) (sop/dst) :vertices (array/int 0) :primitives (array/int 0))))";
      "(workspace w (graph g :context sop (sop/remap (sop/src) (sop/dst) :point_mix {:a (array/int 0) :b (array/int 0)} :vertices (array/int 0) :primitives (array/int 0))))"];
-  print_endline "Weighted remap: every owner and storage, N renormalisation, Curve_ops bytes, mixed owners, reference/CPU, 1 and 8 domains, refusals"
+  print_endline "Weighted remap: every owner and storage, N renormalisation, Curve_join bytes, mixed owners, reference/CPU, 1 and 8 domains, refusals"
 
 (* [:lead_groups true] lists the target's own groups and edge groups ahead of the carried ones. *)
 let () =

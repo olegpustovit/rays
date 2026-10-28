@@ -81,8 +81,8 @@ let run_menu () =
     label = Sop.Edit_graph.factory_label factory;
     category = Sop.Edit_graph.factory_category factory;
     arity = Sop.Edit_graph.factory_arity factory;
-    context = "sop"; output = Flow.Ty.geometry; off = None }) Sop_catalog.Editor.factories in
-  check (List.length entries = List.length Sop_catalog.Editor.factories)
+    context = "sop"; output = Flow.Ty.geometry; off = None }) Sop.Nodes.factories in
+  check (List.length entries = List.length Sop.Nodes.factories)
     "the menu conversion dropped a generated SOP descriptor";
   List.iter (fun (e : Node_menu.entry) ->
     let menu = opened entries in
@@ -100,7 +100,7 @@ module Scope = Pxui_graph.Scope
 module P = Flow_graph.Projection
 
 let cases = "../specification/workspace/cases"
-let scope_catalog = Editor_document.Contexts.catalog ~version:1 Sop_catalog.Editor.factories |> Result.get_ok
+let scope_catalog = Editor_document.Contexts.catalog ~version:1 Sop.Nodes.factories |> Result.get_ok
 let load_workspace name =
   let text = In_channel.with_open_bin (Filename.concat cases (name ^ ".lisp")) In_channel.input_all in
   match Flow.Syntax.parse text with

@@ -14,10 +14,10 @@ type 'prepared t = {
   cameras : (string * V.camera) list;  (* the orbits of the other viewports, by key *)
   viewing : string option;  (* the viewport [camera] belongs to *)
   control : V.control;
-  draw : Graph.t -> 'prepared -> V.rendered;
+  draw : Node.t -> 'prepared -> V.rendered;
   rendered : V.rendered option;
   views : (string * V.rendered) list;  (* viewports over another scene instance *)
-  drawn : (Graph.t * 'prepared * V.rendered * Texture.t option) Document.Int_map.t;  (* per object *)
+  drawn : (Node.t * 'prepared * V.rendered * Texture.t option) Document.Int_map.t;  (* per object *)
   composed : (Edit_graph.t * Document.level * (string * int list) list) option;
   resolved : (Document.t * Input.t * Edit_graph.t) option;
   context_error : string option;

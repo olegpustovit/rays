@@ -65,12 +65,12 @@ let slot_names_of (f : factory) n =
     else f.slots.(len - 1) ^ "_" ^ string_of_int (i - len + 2))
 
 let of_graph graph =
-  let infos = Graph.inspect graph in
+  let infos = Node.inspect graph in
   let entries = infos |> List.fold_left (fun entries info ->
-    let node = Option.get (Graph.find graph ~node_id:info.Graph.id) in
+    let node = Option.get (Node.find graph ~node_id:info.Node.id) in
     let inputs = Array.of_list (List.map Option.some info.input_ids) in
     Id_map.add info.id { node; inputs; factory = None } entries) Id_map.empty in
-  { entries; order_rev = List.rev_map (fun info -> info.Graph.id) infos;
+  { entries; order_rev = List.rev_map (fun info -> info.Node.id) infos;
     root = Some (Node.id graph) }
 
 let empty = { entries = Id_map.empty; order_rev = []; root = None }
@@ -131,7 +131,7 @@ let empty_geometry = lazy (
 type compiled_entry = {
   source : entry;
   compiled_inputs : Node.t option array;
-  built : (Graph.t, string) result;
+  built : (Node.t, string) result;
 }
 
 type compiled = compiled_entry Id_map.t

@@ -3,7 +3,7 @@ module W = Flow.Workspace
 let ok = function Ok value->value|Error message->failwith message
 let flow_ok = function Ok value->value|Error d->failwith(Diagnostic.to_string d)
 let parse text=flow_ok(S.parse text)
-let catalog=flow_ok(Flow_sop.Catalog.of_factories ~version:1 Sop_catalog.Editor.factories)
+let catalog=flow_ok(Flow_sop.Catalog.of_factories ~version:1 Sop.Nodes.factories)
 let checker=Flow_sop.Catalog.check_workspace ~ops:Flow_sop.Operators.all
 let check forms=match checker catalog forms with
   |Some checked,_->checked|_,ds->failwith(String.concat "\n"(List.map Diagnostic.to_string ds))
@@ -19,7 +19,7 @@ let declaration ?(hook=normalizer) ?(default=" POINTS ") ?(operation="test_encod
 let source ?hook ?default ?operation ?version ?(argument="") ()=
   "(workspace encoded "^declaration ?hook ?default ?operation ?version ()^
   " (graph g :context sop (let* [card (sop/test_encoded (sop/line :points 3) "^argument^")] card)))"
-let lower forms=flow_ok(Flow_sop.Lower.workspace ~factories:Sop_catalog.Editor.factories forms)
+let lower forms=flow_ok(Flow_sop.Lower.workspace ~factories:Sop.Nodes.factories forms)
 let root lowered=
   let graph=List.find(fun(g:Flow_sop.Lower.graph)->g.default)lowered.Flow_sop.Lower.graphs in
   ok(Sop.Edit_graph.compile_node graph.network.geometry ~node_id:(Option.get graph.root))
@@ -49,7 +49,7 @@ let ()=
   assert((List.hd definition.fields).default=Param.Text_value "point");
   assert(Flow.Lisp.flat(List.hd checked.source)=Flow.Lisp.flat(List.hd forms));
   let header=flow_ok(Flow.Defnode.parse(List.hd(parse(declaration())))) in
-  let manifest,_=flow_ok(Flow_sop.Manifest.generate ~nodes:[header] Sop_catalog.Editor.factories) in
+  let manifest,_=flow_ok(Flow_sop.Manifest.generate ~nodes:[header] Sop.Nodes.factories) in
   let restored,_=flow_ok(Flow.Check.catalog_of_manifest manifest) in
   let restored_kind=List.find(fun(k:Flow.Check.kind)->k.qualified="sop/test_encoded")restored.kinds in
   assert(restored_kind.parameters=definition.kind.parameters);
@@ -82,7 +82,7 @@ let ()=
   (* Direct checked-workspace integrations use the same trust boundary. *)
   let raw=match W.check ~ops:Flow_sop.Operators.all catalog forms with Some w,_->w|_->assert false in
   let direct=flow_ok(Flow_sop.Lower.of_checked
-    ~factories:((lower forms).Flow_sop.Lower.factories @ Sop_catalog.Editor.factories) raw) |>root in
+    ~factories:((lower forms).Flow_sop.Lower.factories @ Sop.Nodes.factories) raw) |>root in
   assert((field direct).default=Param.Text_value "point");
   let pane=Flow_graph.Projection.of_graph catalog checked "g" in
   let card=Option.get(Flow_graph.Projection.find pane["g";"card"]) in
@@ -93,7 +93,7 @@ let ()=
     (Set_arg{node=card.path;key=Kw "rules";sub=[];value=S.make(Str text)}) in
   let authored,changed=flow_ok(edit " DETAIL ") in
   assert(String.contains(Flow.Lisp.flat(List.hd authored)) 'D');
-  let changed_node=root(flow_ok(Flow_sop.Lower.of_checked ~factories:Sop_catalog.Editor.factories changed)) in
+  let changed_node=root(flow_ok(Flow_sop.Lower.of_checked ~factories:Sop.Nodes.factories changed)) in
   assert((field changed_node).current=Param.Text_value "detail");
   assert(Result.is_error(edit "bad"));
   assert((field node).current=Param.Text_value "point");
@@ -203,10 +203,10 @@ let () =
   assert(version rechecked=2);
   let restored=check(parse(Flow.Lisp.flat(List.hd saved))) in
   assert(version restored=2);
-  let edited=root(flow_ok(Flow_sop.Lower.of_checked ~factories:Sop_catalog.Editor.factories restored)) in
+  let edited=root(flow_ok(Flow_sop.Lower.of_checked ~factories:Sop.Nodes.factories restored)) in
   assert(Sop.Node.version edited=2 && (field edited).current=Param.Text_value "detail");
   let header version=flow_ok(Flow.Defnode.parse(List.hd(parse(declaration ~version ())))) in
-  let manifest version=fst(flow_ok(Flow_sop.Manifest.generate ~nodes:[header version] Sop_catalog.Editor.factories)) in
+  let manifest version=fst(flow_ok(Flow_sop.Manifest.generate ~nodes:[header version] Sop.Nodes.factories)) in
   assert(manifest 1=manifest 2); (* Runtime version is intentionally not a manifest row. *)
   let session=ok(Sop.Session.create ~max_entries:32 ~max_payload_bytes:1_000_000) in
   Fun.protect ~finally:(fun()->Sop.Session.close session)(fun()->

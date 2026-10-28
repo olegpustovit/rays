@@ -15,7 +15,7 @@ lib/rays_editor/test/test_sop_catalog.ml	run#1	482
 lib/rdk/boolean/boolean_complex.ml	build#1	309
 lib/rdk/boolean/boolean_extract.ml	build_internal#1	410
 lib/rdk/boolean/boolean_face_arrangement.ml	build#3	446
-lib/rdk/curve/curve_ops.ml	join#1	474
+lib/rdk/curve/curve_join.ml	join#1	474
 lib/rdk/exact/delaunay2.ml	build#1	301
 lib/rdk/exact/planar_cdt.ml	build#1	976
 lib/rdk/exact/planar_constraints.ml	build#1	373

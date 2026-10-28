@@ -6,8 +6,6 @@ type projection =
     }
   | Spherical of { origin : Rays_math.Vec3.t; axis : Rays_math.Vec3.t; seam : Rays_math.Vec3.t }
 
-type unitize_mode = Per_face | Islands
-
 let flatten ?cancel ?grain ?name ?seams ?edge_seams ?iterations ?tolerance
     geometry =
   Error.guard ~operation:"uv_flatten" ~code:"invalid_uv" @@ fun () ->

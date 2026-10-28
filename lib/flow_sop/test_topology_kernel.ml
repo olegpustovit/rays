@@ -95,7 +95,7 @@ let () =
   print_endline "Strict authored topology counts build exact integer attributes for every element owner at one/eight domains"
 
 let () =
-  let catalog=Flow_sop.Catalog.of_factories ~version:1 Sop_catalog.Editor.factories |> flow_ok in
+  let catalog=Flow_sop.Catalog.of_factories ~version:1 Sop.Nodes.factories |> flow_ok in
   let checker=Flow_sop.Catalog.check_workspace ~ops:Flow_sop.Operators.all in
   let forms=Flow.Syntax.parse {|(workspace topology_projection (graph g :context sop
     (let* [geo (sop/line) n (sop/count geo :points) edges (sop/edges geo)] geo)))|} |> flow_ok in

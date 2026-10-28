@@ -22,9 +22,9 @@ let text = {|(workspace transactions
       (sop/merge first second))))|}
 
 let run () =
-  let workspace = Ws_fixture.of_text ~factories:(factory :: Sop_catalog.Editor.factories) text in
+  let workspace = Ws_fixture.of_text ~factories:(factory :: Sop.Nodes.factories) text in
   let draws = Atomic.make 0 in
-  let current = ref (E.create ~ui_text_size:11 ~workspace ~factories:(factory :: Sop_catalog.Editor.factories)
+  let current = ref (E.create ~ui_text_size:11 ~workspace ~factories:(factory :: Sop.Nodes.factories)
     ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ () -> Atomic.incr draws; Scene.D3.empty) () |> Result.get_ok)
   and count = ref 0 in
   Fun.protect ~finally:(fun () -> E.close !current) (fun () ->

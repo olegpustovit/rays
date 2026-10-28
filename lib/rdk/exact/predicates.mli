@@ -2,32 +2,6 @@
 
 type sign = Negative | Zero | Positive
 
-type segment_location = Start | End | Interior
-type triangle_location =
-  | Face
-  | Edge_ab | Edge_bc | Edge_ca
-  | Vertex_a | Vertex_b | Vertex_c
-
-type segment_triangle =
-  | Segment_disjoint
-  | Segment_coplanar
-  | Segment_degenerate_triangle
-  | Segment_hit of segment_location * triangle_location
-
-type triangle_feature =
-  | Triangle_vertex of int
-  | Triangle_edge of int
-  | Triangle_face
-
-type triangle_triangle =
-  | Triangle_disjoint
-  | Triangle_coplanar
-  | Triangle_degenerate
-  | Triangle_point of triangle_feature * triangle_feature
-  | Triangle_segment of
-      (triangle_feature * triangle_feature) *
-      (triangle_feature * triangle_feature)
-
 type segment_segment =
   | Segments_disjoint
   | Segments_point
@@ -95,21 +69,9 @@ module Private : sig
     bx:float -> by:float -> bz:float ->
     cx:float -> cy:float -> cz:float ->
     dx:float -> dy:float -> dz:float -> sign
-  val exact_orient2d_reference :
-    ax:float -> ay:float -> bx:float -> by:float -> cx:float -> cy:float -> sign
-  val exact_orient3d_reference :
-    ax:float -> ay:float -> az:float ->
-    bx:float -> by:float -> bz:float ->
-    cx:float -> cy:float -> cz:float ->
-    dx:float -> dy:float -> dz:float -> sign
   val exact_incircle_arena :
     ax:float -> ay:float -> bx:float -> by:float ->
     cx:float -> cy:float -> dx:float -> dy:float -> sign
-  val exact_incircle_reference :
-    ax:float -> ay:float -> bx:float -> by:float ->
-    cx:float -> cy:float -> dx:float -> dy:float -> sign
-  (** Forced exact arena and allocation-heavy immutable-dyadic reference
-      implementations retained for differential testing. *)
 
   val triangle_feature_vertex_local : int -> int
   val triangle_feature_edge_local : int -> int

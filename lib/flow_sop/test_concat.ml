@@ -37,7 +37,7 @@ let mismatched = [ "float-vs-vec3", (fun () -> grid 2 2 |> with_float "h" Attrib
 let factory key geometry = Edit.factory ~key ~label:key ~category:["Test"] ~arity:0 (fun _->Lisp_sop.snapshot geometry)
 let cook ?(reference=false) ?(domains=1) ?(grain=97) names extra=
   let geometries = List.map (fun (k,g)->k,g) names in
-  let factories = List.map (fun (k,g)->factory k g) geometries @ Sop_catalog.Editor.factories in
+  let factories = List.map (fun (k,g)->factory k g) geometries @ Sop.Nodes.factories in
   let calls = String.concat " " (List.map (fun (k,_)->"(sop/"^k^")") geometries) in
   let text = Printf.sprintf "(workspace concat_test (graph g :context sop (sop/concat (list %s)%s)))" calls extra in
   let lowered = L.workspace ~reference ~factories ~inputs:["g",[]] (Flow.Syntax.parse text |> flow) |> flow in

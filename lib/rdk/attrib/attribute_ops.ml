@@ -1,5 +1,4 @@
 
-type image_channel = Attribute_image.channel = Red | Green | Blue | Alpha | Luminance
 
 type method_ = Attribute_promote.method_ =
   | First
@@ -78,10 +77,6 @@ type surface_falloff = transfer_falloff
 type surface_vertex_selection = Surface_index.vertex_selection =
   | All_triangle_vertices | Any_triangle_vertex
 
-type copy_match = Attribute_copy.match_mode =
-  | Cyclic
-  | By_values of { source_attribute : string; target_attribute : string }
-  | To_element of { target_attribute : string }
 type copy_rule = Attribute_copy.rule = {
   copy_owner : Attribute.owner;
   copy_pattern : string;
@@ -126,14 +121,6 @@ type numeric_value = Attribute_generate.numeric_value =
   | Vec2 of Rays_math.Vec2.t
   | Vec3 of Rays_math.Vec3.t
   | Vec4 of float * float * float * float
-type random_operation = Attribute_generate.random_operation =
-  | Random_set
-  | Random_add
-  | Random_minimum
-  | Random_maximum
-  | Random_multiply
-type noise_kind = Attribute_generate.noise_kind =
-  | Noise_float | Noise_vector | Noise_quaternion
 type noise_location = Attribute_generate.noise_location =
   | Noise_position
   | Noise_element_number
@@ -142,19 +129,6 @@ type noise_range = Attribute_generate.noise_range =
   | Noise_positive
   | Noise_zero_centered
   | Noise_min_max of numeric_value * numeric_value
-type noise_operation = Attribute_generate.noise_operation =
-  | Noise_set_initial
-  | Noise_set
-  | Noise_add
-  | Noise_subtract
-  | Noise_multiply
-  | Noise_minimum
-  | Noise_maximum
-type random_selection = Attribute_generate.random_selection =
-  | Random_points of Group.t
-  | Random_vertices of Group.t
-  | Random_primitives of Group.t
-  | Random_edges of Edge_group.t
 type random_distribution = Attribute_generate.random_distribution =
   | Random_constant of numeric_value
   | Random_two_values of {
@@ -188,13 +162,6 @@ type random_distribution = Attribute_generate.random_distribution =
     }
   | Random_custom_discrete of (numeric_value * float) list
   | Random_custom_discrete_text of (string * float) list
-type remap_input = Attribute_generate.remap_input =
-  | Remap_explicit of { min : numeric_value; max : numeric_value }
-  | Remap_auto
-type remap_policy = Attribute_generate.remap_policy =
-  | Remap_clamp
-  | Remap_cycle
-  | Remap_extrapolate
 
 let enumerate = Attribute_enumerate.run
 

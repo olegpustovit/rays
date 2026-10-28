@@ -165,7 +165,7 @@ let () =
 
 let () =
   let flow_ok=function Ok value->value|Error d->fail(Diagnostic.to_string d) in
-  let catalog=Flow_sop.Catalog.of_factories ~version:1 Sop_catalog.Editor.factories |>flow_ok in
+  let catalog=Flow_sop.Catalog.of_factories ~version:1 Sop.Nodes.factories |>flow_ok in
   let checker=Flow_sop.Catalog.check_workspace ~ops:Flow_sop.Operators.all in
   let forms=Flow.Syntax.parse {|(workspace metadata_projection (graph g :context sop
     (let* [geo (sop/line) renamed (sop/rename_attr geo "N" "normal" :owner point :conflict skip)

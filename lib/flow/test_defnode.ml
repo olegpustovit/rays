@@ -1,6 +1,6 @@
 open Flow
 
-let catalog = match Check.catalog_of_manifest (In_channel.with_open_bin "../sop_catalog/flow_manifest.sexp" In_channel.input_all) with
+let catalog = match Check.catalog_of_manifest (In_channel.with_open_bin "../flow_sop/flow_manifest.sexp" In_channel.input_all) with
   | Ok (c,_) -> c | Error d -> failwith (Diagnostic.to_string d)
 let parse text = Result.get_ok (Syntax.parse text)
 let source node call = "(workspace w "^node^" (graph g :context sop "^call^"))"

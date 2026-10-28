@@ -938,10 +938,10 @@ let cut ?cancel ?(grain = 16_384) ?primitives ?cut_points ?cut_edges
       let output_topology = Topology.create_owned ~point_count:output_point_count
           ~vertex_points ~primitive_offsets ~primitive_kinds |> Result.get_ok in
       let attributes = List.map (fun attribute -> match Attribute.owner attribute with
-        | Attribute.Point -> Curve_ops.interpolate_attribute ?cancel ~grain
+        | Attribute.Point -> Curve_join.interpolate_attribute ?cancel ~grain
             output_point_left output_point_right output_point_weight
             [||] [||] [||] attribute
-        | Attribute.Vertex -> Curve_ops.interpolate_attribute ?cancel ~grain
+        | Attribute.Vertex -> Curve_join.interpolate_attribute ?cancel ~grain
             [||] [||] [||] vertex_left vertex_right weights attribute
         | Attribute.Primitive ->
             Topology_remap.attribute ?cancel ~grain primitive_map attribute

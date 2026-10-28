@@ -9,7 +9,7 @@
  (modules test_core test_core_lower test_core_control test_core_lists test_core_state
   test_core_regions test_core_operators test_core_errors test_core_draw test_core_marks test_core_parity)
  (deps core_lower.expected core_control.expected core_draw.expected core_marks.expected
-  ../sop_catalog/flow_manifest.sexp
+  ../flow_sop/flow_manifest.sexp
   (glob_files ../../specification/workspace/cases/*.lisp))
  (libraries flow_ir flow flow_ir_test_support scene_command rays_math parallel))
 
@@ -22,7 +22,7 @@
 (tests
  (names test_ir test_noise test_uniforms test_frame_kernel test_static_map)
  (modules test_ir test_noise test_uniforms test_frame_kernel test_static_map)
- (deps ../sop_catalog/flow_manifest.sexp
+ (deps ../flow_sop/flow_manifest.sexp
   (glob_files ../../specification/workspace/cases/*.lisp)
   ../../sketches/particles.rays)
  (libraries flow_ir flow rays_math parallel))
@@ -47,7 +47,7 @@
 (test
  (name test_region_snapshot)
  (modules test_region_snapshot region_snapshot)
- (deps (glob_files snapshots/*.txt) ../sop_catalog/flow_manifest.sexp
+ (deps (glob_files snapshots/*.txt) ../flow_sop/flow_manifest.sexp
   ../../sketches/particles.rays
   ../../sketches/flow_shader.rays
   ../../sketches/flow_particles_gpu.rays

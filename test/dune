@@ -28,7 +28,7 @@
 (executable
  (name test_draw_snapshot)
  (modules test_draw_snapshot)
- (libraries rays rays_math rays_editor flow_native editor_document flow flow_sop sop_catalog scene_command input ogpu_mock parallel))
+ (libraries rays rays_math rays_editor flow_native editor_document flow flow_sop scene_command input ogpu_mock parallel))
 
 (rule
  (alias test_draw_snapshots)

@@ -205,3 +205,59 @@ module Private = struct
   let cook value context inputs = value.cook ~node_id:value.id context inputs
   let expand value = value.expand
 end
+
+type info = {
+  id : int;
+  label : string;
+  operation : string;
+  version : int;
+  parameters : string;
+  facts : facts;
+  dependencies : Context.Dependencies.t;
+  input_ids : int list;
+  has_parameters : bool;
+}
+
+let inspect root =
+  let seen = Hashtbl.create 32 and result = ref [] in
+  let rec visit node =
+    if not (Hashtbl.mem seen (id node)) then begin
+      Hashtbl.add seen (id node) ();
+      List.iter visit (inputs node);
+      result := {
+        id = id node;
+        label = label node;
+        operation = operation node;
+        version = version node;
+        parameters = parameters node;
+        facts = facts node;
+        dependencies = dependencies node;
+        input_ids = List.map id (inputs node);
+        has_parameters = has_parameters node;
+      } :: !result
+    end
+  in
+  visit root;
+  List.rev !result
+
+let find root ~node_id : t option =
+  let seen = Hashtbl.create 32 in
+  let rec visit node : t option =
+    if id node = node_id then Some node
+    else if Hashtbl.mem seen (id node) then None
+    else begin
+      Hashtbl.add seen (id node) ();
+      let rec visit_inputs : t list -> t option = function
+        | [] -> None
+        | input :: rest ->
+            (match visit input with Some _ as found -> found | None -> visit_inputs rest)
+      in
+      visit_inputs (inputs node)
+    end
+  in
+  visit root
+
+let graph_dependencies root =
+  inspect root |> List.fold_left (fun dependencies info ->
+    Context.Dependencies.union dependencies info.dependencies)
+    Context.Dependencies.static

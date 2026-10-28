@@ -1,39 +1,40 @@
-(* The editor factories of the nodes declared in this library. [Sop_catalog]
-   registers each one under its stable key. *)
-module Group_transfer = Groups.Group_transfer
-module Edge_collapse = Sop_topology.Edge_collapse
-module Dissolve = Sop_topology.Dissolve
-module Triangulate = Sop_topology.Triangulate
-module Poly_extrude = Sop_topology.Poly_extrude
-module Poly_fill = Sop_topology.Poly_fill
-module Uv_flatten = Attributes.Uv_flatten
-module Image_texels = Attributes.Image_texels
-module Uv_relax = Attributes.Uv_relax
-module Null = Shapes.Null
-module Switch = Shapes.Switch
-module Remesh = Sop_topology.Remesh
-module Convex_hull = Sop_topology.Convex_hull
-module Clip = Shapes.Clip
-module Distance_from_geometry = Attributes.Distance_from_geometry
-module Clean = Sop_topology.Clean
-module Join_curves = Sop_topology.Join_curves
-module Exploded_view = Shapes.Exploded_view
-module Pack_instances = Shapes.Pack_instances
-module Attribute_mirror = Attributes.Attribute_mirror
-module Facet = Sop_topology.Facet
-module Attribute_transfer_all = Attributes.Attribute_transfer_all
-module Poly_cut = Sop_topology.Poly_cut
-module Poly_reduce = Sop_topology.Poly_reduce
-module Soft_transform = Shapes.Soft_transform
-module Boolean_seam = Sop_topology.Boolean_seam
-module Attribute_transfer_surface = Attributes.Attribute_transfer_surface
-module Ray = Shapes.Ray
-module Poly_bevel = Sop_topology.Poly_bevel
-module Boolean_fracture = Sop_topology.Boolean_fracture
-module Intersection_analysis = Sop_topology.Intersection_analysis
-module Fuse = Sop_topology.Fuse
-module Subdivide_cracks = Sop_topology.Subdivide_cracks
-module Boolean = Sop_topology.Boolean
-module Boolean_detect = Sop_topology.Boolean_detect
-module Triangulate_2d = Sop_topology.Triangulate_2d
-module Attribute_transfer = Attributes.Attribute_transfer
+(* The native SOPs (exact predicates, spatial indexes, solvers, wiring, carriers); every other kind is a Lisp [defnode]. *)
+let factories = [
+  Shapes.Switch.factory;
+  Attributes.Image_texels.factory;
+  Shapes.Clip.factory;
+  Sop_topology.Edge_collapse.factory;
+  Sop_topology.Dissolve.factory;
+  Sop_topology.Poly_bevel.factory;
+  Sop_topology.Triangulate.factory;
+  Shapes.Pack_instances.factory;
+  Sop_topology.Subdivide_cracks.factory;
+  Sop_topology.Clean.factory;
+  Sop_topology.Facet.factory;
+  Sop_topology.Remesh.factory;
+  Sop_topology.Poly_extrude.factory;
+  Sop_topology.Poly_fill.factory;
+  Sop_topology.Join_curves.factory;
+  Sop_topology.Boolean_fracture.factory;
+  Sop_topology.Boolean.factory;
+  Sop_topology.Boolean_seam.factory;
+  Sop_topology.Boolean_detect.factory;
+  Sop_topology.Intersection_analysis.factory;
+  Sop_topology.Poly_reduce.factory;
+  Sop_topology.Convex_hull.factory;
+  Sop_topology.Fuse.factory;
+  Shapes.Ray.factory;
+  Attributes.Distance_from_geometry.factory;
+  Attributes.Uv_flatten.factory;
+  Attributes.Uv_relax.factory;
+  Groups.Group_transfer.factory;
+  Sop_topology.Poly_cut.factory;
+  Attributes.Attribute_mirror.factory;
+  Sop_topology.Triangulate_2d.factory;
+  Shapes.Soft_transform.factory;
+  Attributes.Attribute_transfer.factory;
+  Attributes.Attribute_transfer_surface.factory;
+  Attributes.Attribute_transfer_all.factory;
+  Shapes.Null.factory;
+  Shapes.Exploded_view.factory
+]

@@ -43,7 +43,7 @@ let lines (_, name) =
   let doc = match Rays_editor.Workspace.load ~imports text with
     | Ok doc -> doc
     | Error ds -> failwith (file ^ ": " ^ String.concat "\n" (List.map Diagnostic.to_string ds)) in
-  let lowered = match Flow_sop.Lower.of_checked ~reference:true ~factories:Sop_catalog.Editor.factories
+  let lowered = match Flow_sop.Lower.of_checked ~reference:true ~factories:Sop.Nodes.factories
       ~inputs:doc.inputs doc.checked with
     | Ok lowered -> lowered
     | Error d -> failwith (file ^ ": " ^ Diagnostic.to_string d) in

@@ -1,7 +1,7 @@
 (* The kernel register programs of the shared fixtures and four workspaces. *)
 module E = Flow.Eval
 let catalog = fst (Test_program.ok (Flow.Check.catalog_of_manifest
-  (In_channel.with_open_bin "../sop_catalog/flow_manifest.sexp" In_channel.input_all)))
+  (In_channel.with_open_bin "../flow_sop/flow_manifest.sexp" In_channel.input_all)))
 
 let run ?(require_state_kernel = false) checked =
   let _, evaluation = Test_program.ok (Flow_ir.qualify_workspace ~observe:(fun _ residual ->

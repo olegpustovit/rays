@@ -72,13 +72,13 @@
  (modules test_workspace)
  (deps
   (glob_files ../../specification/workspace/cases/*.lisp)
-  ../sop_catalog/flow_manifest.sexp)
+  ../flow_sop/flow_manifest.sexp)
  (libraries flow param))
 
 (test
  (name test_defnode)
  (modules test_defnode)
- (deps ../sop_catalog/flow_manifest.sexp)
+ (deps ../flow_sop/flow_manifest.sexp)
  (libraries flow param))
 
 (test
@@ -86,5 +86,5 @@
  (modules test_workspace_eval)
  (deps
   (glob_files ../../specification/workspace/cases/*.lisp)
-  ../sop_catalog/flow_manifest.sexp)
+  ../flow_sop/flow_manifest.sexp)
  (libraries flow param unix))

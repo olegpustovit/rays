@@ -1,4 +1,4 @@
-let factories = Sop_catalog.Editor.factories
+let factories = Sop.Nodes.factories
 
 let snapshot geometry =
   let parameters = Printf.sprintf "data_id=%d;bytes=%d"

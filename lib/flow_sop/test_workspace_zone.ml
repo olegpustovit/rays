@@ -7,7 +7,7 @@ module Session = Sop.Session
 
 let fail message = failwith ("test_workspace_zone: " ^ message)
 let check condition message = if not condition then fail message
-let factories = Sop_catalog.Editor.factories
+let factories = Sop.Nodes.factories
 let geometry_bytes = Test_workspace_cook.geometry_bytes
 let garden ?(result = "(sop/merge bed dots)") ~count () = Printf.sprintf {|
 (workspace garden

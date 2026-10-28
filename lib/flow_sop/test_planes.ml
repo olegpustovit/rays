@@ -24,7 +24,7 @@ let src = lazy (make ())
 let factory key geometry = Edit.factory ~key ~label:key ~category:["Test"] ~arity:0 (fun _->Lisp_sop.snapshot geometry)
 let cook ?(reference=false) ?(domains=1) ?(grain=97) body =
   let text = Printf.sprintf "(workspace planes_test (graph g :context sop (let* [src (sop/src)] %s)))" body in
-  let lowered = L.workspace ~reference ~factories:(factory "src" (Lazy.force src) :: Sop_catalog.Editor.factories)
+  let lowered = L.workspace ~reference ~factories:(factory "src" (Lazy.force src) :: Sop.Nodes.factories)
     ~inputs:["g",[]] (Flow.Syntax.parse text |> flow) |> flow in
   let graph = List.hd lowered.graphs in
   let node = Edit.compile_node graph.network.geometry ~node_id:(Option.get graph.root) |> get_string_ok in

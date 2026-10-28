@@ -4,8 +4,6 @@ let operation = "boolean_constraints"
 
 type side = Left | Right
 
-type constraint_kind = Point | Segment
-
 type t = {
   left_geometry : Geometry.t;
   right_geometry : Geometry.t;

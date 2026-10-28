@@ -2,7 +2,7 @@ let ok = function Ok value -> value | Error message -> failwith message
 let parse text = match Flow.Syntax.parse text with
   | Ok forms -> forms | Error d -> failwith (Diagnostic.to_string d)
 let lower ?(reference = false) text =
-  match Flow_sop.Lower.workspace ~reference ~factories:Sop_catalog.Editor.factories (parse text) with
+  match Flow_sop.Lower.workspace ~reference ~factories:Sop.Nodes.factories (parse text) with
   | Error d -> failwith (Diagnostic.to_string d)
   | Ok lowered ->
       let graph = List.find (fun (graph : Flow_sop.Lower.graph) -> graph.default) lowered.graphs in
@@ -67,7 +67,7 @@ let () =
         (Printf.sprintf "iterate passes=%d reference=%b domains=%d differs from the OCaml smoothing" passes reference domains))
       [ 1; 8 ]) [ false; true ]) [ 0; 1; 7; 5000 ];
   (* the pass count is data, not graph structure: the plan has the same nodes for 1 and 5000 passes *)
-  let plan_nodes passes = match Flow_sop.Lower.workspace ~reference:false ~factories:Sop_catalog.Editor.factories
+  let plan_nodes passes = match Flow_sop.Lower.workspace ~reference:false ~factories:Sop.Nodes.factories
       (parse (text "sop/smooth_loop" passes)) with
     | Ok lowered -> Array.length lowered.plan.nodes | Error d -> failwith (Diagnostic.to_string d) in
   check (plan_nodes 1 = plan_nodes 5000) "the pass count changed the number of cook nodes";

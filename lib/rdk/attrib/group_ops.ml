@@ -37,39 +37,12 @@ and promotion_rule = {
   promotion_operation : promote_operation;
 }
 
-type primitive_connectivity =
-  | Primitive_share_points
-  | Primitive_share_edges
-
-type expand_normal_attribute = {
-  expand_normal_owner : Attribute.owner;
-  expand_normal_name : string;
-}
-
-type expand_collision = {
-  expand_collision_owner : owner;
-  expand_collision_group : string;
-  expand_collision_contain : bool;
-  expand_collision_allow_boundary : bool;
-}
-
 type boolean_operation =
   | Group_replace
   | Group_union
   | Group_intersection
   | Group_subtract
   | Group_xor
-
-type operand = { pattern : string; inverted : bool }
-type combine_step = { operation : boolean_operation; operand : operand }
-
-type range =
-  | Range_start_end of { start : int; end_ : int }
-  | Range_from_ends of { start : int; end_offset : int }
-  | Range_start_length of { start : int; length : int }
-  | Range_partition of { partition : int; partitions : int }
-
-type range_filter = { select : int; of_ : int; offset : int }
 
 type range_collision = {
   collision_owner : owner;
@@ -86,17 +59,6 @@ type range_connectivity =
       region : int option;
       remove_other_regions : bool;
     }
-
-type range_rule = {
-  range_owner : owner;
-  range_name : string;
-  range_base : string option;
-  range_invert : bool;
-  range_filter : range_filter option;
-  range_connectivity : range_connectivity option;
-  range_merge : boolean_operation;
-  range_specification : range;
-}
 
 type rename_conflict =
   | Rename_skip
@@ -118,28 +80,15 @@ type delete_rule = {
 
 type copy_conflict = Copy_skip | Copy_overwrite | Copy_add_suffix
 
-type copy_rule = {
-  copy_owner : owner;
-  copy_pattern : string;
-  copy_prefix : string;
-  match_attribute : string option;
-}
-
 type transfer_rule = {
   transfer_owner : owner;
   transfer_pattern : string;
   transfer_prefix : string;
 }
 
-type name_conflict = Name_replace | Name_union
-type invalid_name_policy = Ignore_invalid | Force_valid
-type name_overlap = First_group | Last_group | Error_on_overlap
-
 type bounds =
   | Bounds_box of { minimum : Rays_math.Vec3.t; maximum : Rays_math.Vec3.t }
   | Bounds_sphere of { center : Rays_math.Vec3.t; radius : float }
-
-type containment = Fully_contained | Partially_contained
 
 type selection =
   | Ordinary of Group.t
@@ -164,39 +113,6 @@ let selection_mem selection index = match selection with
 let selection_cardinality = function
   | Ordinary group -> Group.cardinality group
   | Native_edges group -> Edge_group.cardinality group
-
-type boundary_storage =
-  | Boundary_selection of selection
-  | Boundary_position of Packed.Float3.Private.view
-  | Boundary_float of float array
-  | Boundary_int of int array
-  | Boundary_int_array of Packed.Int_array.Private.view
-  | Boundary_float_array of Packed.Float_array.Private.view
-  | Boundary_float2 of Packed.Float2.Private.view
-  | Boundary_float3 of Packed.Float3.Private.view
-  | Boundary_float4 of Packed.Float4.Private.view
-  | Boundary_text of string array
-
-type boundary_plane = {
-  boundary_owner : Attribute.owner;
-  boundary_name : string;
-  boundary_storage : boundary_storage;
-}
-
-type expand_normals = {
-  expand_nx : float array;
-  expand_ny : float array;
-  expand_nz : float array;
-  expand_minimum_dot : float;
-}
-
-type expand_constraints = {
-  expand_seams : Edge_group.t option;
-  expand_containment : selection option;
-  expand_collision_boundary : selection option;
-  expand_shrink_boundary : selection option;
-  expand_normals : expand_normals option;
-}
 
 (* Named-group metadata and boolean operations intentionally share one mutable
    table local to a cook. Public geometry and group values remain immutable;
@@ -344,14 +260,6 @@ let selection_boolean operation left right = match left, right with
       Result.map (fun group -> Native_edges group) result
   | Ordinary _, Native_edges _ | Native_edges _, Ordinary _ ->
       Error "Group operation: cannot combine ordinary and native-edge groups"
-
-type range_connectivity_configuration = {
-  range_attributes : string option;
-  range_tolerance : float;
-  range_collision : range_collision option;
-  range_region : int option;
-  range_remove_other_regions : bool;
-}
 
 let owner_selected selected owner = match selected with
   | None -> true | Some expected -> expected = owner

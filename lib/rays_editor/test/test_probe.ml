@@ -107,14 +107,14 @@ let live () =
   check (Probe.readouts (recorded ~time:1. w) spin ~probes:[] = [ "value", "0.8"; "cook", "live, recooks every frame" ])
     "live inspector rows";
   (* the viewport header *)
-  let lowered = match Lower.workspace ~extra:Editor_document.Contexts.descriptors ~factories:Sop_catalog.Editor.factories
+  let lowered = match Lower.workspace ~extra:Editor_document.Contexts.descriptors ~factories:Sop.Nodes.factories
       (Result.get_ok (Flow.Syntax.parse (T.read (Filename.concat T.cases "orrery.lisp")))) with
     | Ok l -> l | Error d -> fail (Diagnostic.to_string d) in
   let live_count, cached = Lower.counts lowered in
   check (live_count > 0 && cached > 0) "orrery has live and cached nodes";
   check (Lower.status lowered ~seconds:0.0013 = Some (Printf.sprintf "t %d live · %d cached · cook 1.3 ms" live_count cached))
     "viewport header text";
-  let lowered = Result.get_ok (Lower.workspace ~extra:Editor_document.Contexts.descriptors ~factories:Sop_catalog.Editor.factories
+  let lowered = Result.get_ok (Lower.workspace ~extra:Editor_document.Contexts.descriptors ~factories:Sop.Nodes.factories
       (Result.get_ok (Flow.Syntax.parse (T.read (Filename.concat T.cases "sunflower.lisp"))))) in
   check (Lower.status lowered ~seconds:0.001 = None) "a static document has no live header"
 
@@ -196,7 +196,7 @@ let off_display () =
   let text = "(workspace w (graph g :context sop (let* [a (sop/box) orphan (sop/uv_sphere) r (sop/transform a)] r)))" in
   let forms = match Flow.Syntax.parse text with Ok f -> f | Error d -> fail (Diagnostic.to_string d) in
   let lowered = match Lower.workspace ~extra:Editor_document.Contexts.descriptors
-      ~factories:Sop_catalog.Editor.factories forms with Ok l -> l | Error d -> fail (Diagnostic.to_string d) in
+      ~factories:Sop.Nodes.factories forms with Ok l -> l | Error d -> fail (Diagnostic.to_string d) in
   let compiled site = List.find_map (fun (n : Flow.Eval.node) ->
     if n.site = site then Network.Int_map.find_opt n.id lowered.compiled else None)
     (Array.to_list lowered.plan.nodes) in

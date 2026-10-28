@@ -2,7 +2,7 @@
  (enabled_if (= %{system} macosx))
  (names test_workspace_gpu_native test_workspace_gpu_marks bench_marks_gpu test_grid_gpu_native test_chain_gpu_native)
  (modules test_workspace_gpu_native test_workspace_gpu_marks bench_marks_gpu test_grid_gpu_native test_chain_gpu_native)
- (libraries rays rays_math flow flow_ir flow_sop flow_gpu flow_native renderer scene_command lru runtime_resources ogpu ogpu_metal sop_catalog sop rdk parallel))
+ (libraries rays rays_math flow flow_ir flow_sop flow_gpu flow_native renderer scene_command lru runtime_resources ogpu ogpu_metal sop rdk parallel))
 
 (rule
  (enabled_if (= %{system} macosx))

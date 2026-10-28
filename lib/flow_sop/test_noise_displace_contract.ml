@@ -19,7 +19,7 @@ let node input keywords =
       ~category:["Test"] ~arity:0 (fun _ -> input) in
   let factories = factory :: List.filter
       (fun factory -> Sop.Edit_graph.factory_key factory <> "noise_displace")
-      Sop_catalog.Editor.factories in
+      Sop.Nodes.factories in
   let catalog = Flow_sop.Catalog.of_factories ~nodes:[] ~version:Flow_sop.Manifest.version factories |> ok in
   let forms = Printf.sprintf
       "(workspace noise-contract (graph g :context sop (sop/noise_displace (sop/contract_input) %s)))"

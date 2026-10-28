@@ -101,7 +101,7 @@ let prepare_source ?gpu t request ~state ~live plan id=with_active request plan 
   let* root=Result.map_error(Diagnostic.error ~code:"E_DATA_SOURCE")
     (P.Edit_graph.compiled_node compiled ~node_id:source.id)in
   let unchanged=Option.fold ~none:false ~some:((==)root)source.root in
-  let dependencies=if unchanged then source.dependencies else P.Graph.dependencies root in
+  let dependencies=if unchanged then source.dependencies else P.Node.graph_dependencies root in
   let* context=cook_context t live in
   let projection=P.Context.cache_projection dependencies context in
   if not unchanged || source.projection<>projection then begin

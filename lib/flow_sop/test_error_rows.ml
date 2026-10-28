@@ -37,7 +37,7 @@ let compile reference geometry mountain=
   let factory=Sop.Edit_graph.factory ~key:"ext_src" ~label:"Source" ~category:["Test"] ~arity:0
     (fun _->Lisp_sop.snapshot geometry)in
   let lowered=match Flow_sop.Lower.workspace ~reference
-    ~factories:(factory::Sop_catalog.Editor.factories)(parse(source mountain))with
+    ~factories:(factory::Sop.Nodes.factories)(parse(source mountain))with
     |Ok lowered->lowered|Error d->failwith(D.to_string d)in
   let graph=List.hd lowered.graphs in
   ok(Sop.Edit_graph.compile_node graph.network.geometry ~node_id:(Option.get graph.root))

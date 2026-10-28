@@ -26,7 +26,7 @@ let picture kind ~radius ~fill ~moving n =
 let median a = let a = Array.copy a in Array.sort Float.compare a; a.(Array.length a / 2)
 let measure kind (radius, fill, moving) n =
   let lowered = Flow.Syntax.parse (Printf.sprintf "(workspace w (graph g :context draw %s))" (picture kind ~radius ~fill ~moving n))
-    |> ok |> L.workspace ~factories:Sop_catalog.Editor.factories |> ok in
+    |> ok |> L.workspace ~factories:Sop.Nodes.factories |> ok in
   let prepared = Flow_native.Drawing.prepare ~approx:lowered.approx ~states:lowered.states lowered.plan
     (List.assoc "g" lowered.evaluated.results) |> ok in
   let gpu = Flow_native.Workspace_gpu.create () in

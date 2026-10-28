@@ -8,7 +8,7 @@ let text = Printf.sprintf
   (count / 2) count
 
 let () =
-  let lowered = Flow_sop.Lower.workspace ~factories:Sop_catalog.Editor.factories
+  let lowered = Flow_sop.Lower.workspace ~factories:Sop.Nodes.factories
       (Flow.Syntax.parse text |> ok) |> ok in
   let cpu_graph = List.hd lowered.graphs in
   assert (not (Flow_sop.Network.Int_map.is_empty cpu_graph.network.frame_nodes));
@@ -55,7 +55,7 @@ let () =
       else work (Flow_native.Workspace_gpu.config owner) in
     Flow_native.Workspace_gpu.Private.install_test_backend owner (backend ~cost:(Some 1.0));
     let gpu=Flow_native.Workspace_gpu.config owner in
-    let gpu_lowered=Flow_sop.Lower.workspace ~gpu ~factories:Sop_catalog.Editor.factories
+    let gpu_lowered=Flow_sop.Lower.workspace ~gpu ~factories:Sop.Nodes.factories
         (Flow.Syntax.parse text |> ok) |> ok in
     let graph=List.hd gpu_lowered.graphs in
     let slower = on_worker graph () in
@@ -66,7 +66,7 @@ let () =
     (* The lowered graph captures its immutable backend config. Re-lower after replacing the
        test backend instead of expecting an old graph to observe the replacement. *)
     let cheap_gpu = Flow_native.Workspace_gpu.config owner in
-    let cheap_lowered = Flow_sop.Lower.workspace ~gpu:cheap_gpu ~factories:Sop_catalog.Editor.factories
+    let cheap_lowered = Flow_sop.Lower.workspace ~gpu:cheap_gpu ~factories:Sop.Nodes.factories
         (Flow.Syntax.parse text |> ok) |> ok in
     let cheap_graph = List.hd cheap_lowered.graphs in
     let placed = on_worker ~scope:false cheap_graph () in
