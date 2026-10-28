@@ -32,7 +32,7 @@ let input index =
 let rendered_digest scene =
   match Scene_command.Render_ir.create (Rays.Scene.Private.commands scene) with
   | Error _ -> failwith "Render_ir.create rejected a scene that Drawing built"
-  | Ok ir -> Editor_document.Contexts.sha256 (Bytes.to_string (Scene_command.Render_ir.serialize ir))
+  | Ok ir -> Editor_document.Lowering.sha256 (Bytes.to_string (Scene_command.Render_ir.serialize ir))
 
 let lines (_, name) =
   let file = Printf.sprintf "../sketches/%s.rays" name in

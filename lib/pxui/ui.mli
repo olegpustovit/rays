@@ -188,6 +188,9 @@ type drop =
   | Hover of payload  (** the pointer is over the box while a payload is held *)
   | Dropped of payload  (** the payload was released over the box, this frame only *)
 
+val drag_threshold : float
+(** Points a pressed pointer travels before the press is a drag (a carry starts) and no longer a click. *)
+
 val carry : t -> ?from:box -> kind:string -> value:string -> unit -> unit
 (** Hold a payload.  With [from], the box that owns the pressed left button: it is held once
     the pointer has moved 4 points from the press, so a widget calls it every frame while

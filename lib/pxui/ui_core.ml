@@ -133,8 +133,8 @@ type payload = { kind : string; value : string }
 type origin = From_pointer of int | From_key
 type drop = Hover of payload | Dropped of payload
 
-(* The dead zone of a carry started by the pointer, in points. *)
-let carry_dead_zone = 4.
+(* Points a pressed pointer travels before a press is a drag: a carry starts, a click ends. *)
+let drag_threshold = 4.
 
 type paint = {
   owner : ui;
@@ -1243,7 +1243,7 @@ let carry ui ?from ~kind ~value () =
       if ui.payload = None && ui.active = Some box.box_key && ui.carry_latch <> ui.active
          && ui.active_button = Input.LeftButton then begin
         let px, py = ui.active_press and x, y = ui.pointer in
-        if Float.hypot (x -. px) (y -. py) >= carry_dead_zone then
+        if Float.hypot (x -. px) (y -. py) >= drag_threshold then
           ui.payload <- Some ({ kind; value }, From_pointer box.box_key)
       end
 

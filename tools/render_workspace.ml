@@ -16,7 +16,7 @@ let imports = match Rays_editor.Source.read_imports ~file:path text with
   | Ok imports -> imports | Error ds -> failwith (String.concat "\n" (List.map Diagnostic.to_string ds))
 let workspace = match Rays_editor.Workspace.load ~imports text with
   | Ok w -> w | Error ds -> failwith (String.concat "\n" (List.map Diagnostic.to_string ds))
-let document = Contexts.of_workspace ~factories:Sop.Nodes.factories workspace
+let document = Lowering.of_workspace ~factories:Sop.Nodes.factories workspace
   |> Result.map_error Diagnostic.to_string |> get
 let scene = document.scene
 let camera_node = match Objects.ids "camera" scene with
@@ -118,7 +118,7 @@ let run_benchmark model =
     and allocated_bytes = Gc.allocated_bytes () -. allocated in
     Printf.eprintf "pathtracer_benchmark end %d\n%!" round;
     let rgba = Rays.Image.pixels (P.image model.tracer) |> get in
-    let digest = Contexts.sha256 (Bytes.to_string rgba) in
+    let digest = Lowering.sha256 (Bytes.to_string rgba) in
     let row = Printf.sprintf "%d,%d,%.9f,%.9f,%.0f,%s\n"
       round (P.samples model.tracer) seconds cpu_seconds allocated_bytes digest in
     Buffer.add_string report row;

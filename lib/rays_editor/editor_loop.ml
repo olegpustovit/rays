@@ -180,12 +180,12 @@ let update_with value frame ~inspector =
     buttons = if world_drag = None then update.input.input.buttons
       else List.filter (( <> ) Input.LeftButton) update.input.input.buttons };
     mouse_delta = if consumed then 0., 0. else update.input.mouse_delta } in
-  (* A press and release within 4 points is a click: the view picks. *)
+  (* A press and release within the drag threshold is a click: the view picks. *)
   let pick_press, clicks = List.fold_left (fun (press, clicks) -> function
     | Input.Pointer_pressed (Input.LeftButton, point) -> Some point, clicks
     | Pointer_released (Input.LeftButton, (qx, qy)) ->
         (match press with
-         | Some (px, py) when Float.hypot (qx -. px) (qy -. py) < 4. ->
+         | Some (px, py) when Float.hypot (qx -. px) (qy -. py) < Pxui.Ui.drag_threshold ->
              None, (qx, qy) :: clicks
          | _ -> None, clicks)
     | Pointer_cancelled Input.LeftButton | Focus_lost -> None, clicks

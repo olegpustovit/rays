@@ -23,7 +23,7 @@ let check_text ?(imports = []) text =
   match Doc.check_text ~imports (catalog ()) text with
   | Error ds -> None, ds, allow
   | Ok (doc, warnings) ->
-      (match Editor_document.Contexts.of_workspace ~factories:Sop.Nodes.factories doc with
+      (match Editor_document.Lowering.of_workspace ~factories:Sop.Nodes.factories doc with
        | Ok _ -> Some doc, warnings, allow
        | Error d -> None, warnings @ [ d ], allow)
 
