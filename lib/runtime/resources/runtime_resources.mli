@@ -21,7 +21,6 @@ module Image : sig
   val destroyed : t -> bool
   val size : t -> ((int*int),error) result
   val pixels : t -> (bytes,error) result
-  module Private : sig
     val of_gpu : width:int -> height:int -> source:(unit -> Ogpu.Backend.texture option) -> (t,error) result
     val replace_gpu_source : t -> width:int -> height:int ->
       source:(unit -> Ogpu.Backend.texture option) -> (unit,error) result
@@ -48,7 +47,6 @@ module Image : sig
     val borrow_snapshot : t ->
       ((int * int * int * bytes * lease),error) result
     val release_snapshot : lease -> unit
-  end
   val replace : t -> width:int -> height:int -> rgba:bytes -> (unit,error) result
   (* Atomically transfer the source's owned pixel storage. On success the
      source is destroyed and the target retains its identity. A source with an
@@ -72,7 +70,6 @@ module Canvas : sig
   val snapshot : t -> ((int * int * int * bytes),error) result
   val capture : t -> (Image.t,error) result
   val save_png : t -> string -> (unit,error) result
-  module Private : sig
     (** [publish_gpu] adopts the canvas execution's completed frame texture
         (borrowed; the execution owns it) as the authoritative pixels and
         bumps the generation. CPU readers read it back lazily; CPU writers
@@ -83,7 +80,6 @@ module Canvas : sig
     (** Successful captures and actual successful GPU pixel readbacks. *)
 
     val identity : t -> int
-  end
   val destroy : t -> (unit,error) result
 end
 
@@ -94,14 +90,12 @@ module Text : sig
   val size : t -> ((int*int),error) result
   val pixels : t -> (bytes,error) result
   val destroy : t -> (unit,error) result
-  module Private : sig
     val identity : t -> int
     (* The owned RGBA storage, borrowed without a copy. Do not mutate or retain
        it: [into_image] may later hand it to an image. *)
     val borrow_pixels : t -> (bytes,error) result
     (* Consume the text and transfer its owned RGBA storage to an image. *)
     val into_image : t -> (Image.t,error) result
-  end
 end
 
 module Font : sig

@@ -227,7 +227,7 @@ module Private = struct
   let identity texture = texture.id
   let create_owned = create_owned
   let image texture=match texture.backing with Cpu _->None|Borrowed image->Some image
-  let of_image image=match Runtime_resources.Image.Private.gpu_snapshot image with
+  let of_image image=match Runtime_resources.Image.gpu_snapshot image with
     | Error error -> Error(Format.asprintf "Texture.Private.of_image: %a" Runtime_resources.pp_error error)
     | Ok None -> Error "Texture.Private.of_image: resident GPU image required"
     | Ok(Some _) -> Ok{backing=Borrowed image;id=fresh_id()}

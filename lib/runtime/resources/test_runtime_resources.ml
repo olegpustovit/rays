@@ -96,7 +96,7 @@ let run () =
   (* Leased bytes stay as they were lent: a replacement goes to a second
      buffer, at most two are lent at once, and a leased source cannot be moved. *)
   let leased_image=get(Image.create~width:8~height:8~rgba:(solid 64"\x10\x20\x30\xff"))in
-  let _,_,_,leased_pixels,lease1=get(Image.Private.borrow_snapshot leased_image)in
+  let _,_,_,leased_pixels,lease1=get(Image.borrow_snapshot leased_image)in
   let leased_copy=Bytes.copy leased_pixels in
   let lease_target=get(Image.create~width:1~height:1~rgba:(Bytes.make 4 '\x5c'))in
   let lease_target_before=get(Image.pixels lease_target)in
@@ -108,28 +108,28 @@ let run () =
   get(Image.destroy lease_target);
   get(Image.replace leased_image~width:8~height:8~rgba:(solid 64"\xaa\xbb\xcc\xff"));
   if leased_pixels<>leased_copy then failwith"image mutation changed leased snapshot";
-  let _,_,_,second_pixels,lease2=get(Image.Private.borrow_snapshot leased_image)in
+  let _,_,_,second_pixels,lease2=get(Image.borrow_snapshot leased_image)in
   if second_pixels<>solid 64"\xaa\xbb\xcc\xff"then failwith"second lease is not the replacement";
   (match Image.replace leased_image~width:8~height:8~rgba:(solid 64"\x11\x22\x33\xff")with
    |Error{kind=Invalid_argument;_}->()
    |_->failwith"bounded image snapshot buffers were exceeded");
   if get(Image.pixels leased_image)<>solid 64"\xaa\xbb\xcc\xff"then
     failwith"a refused replacement changed the image";
-  Image.Private.release_snapshot lease1;
+  Image.release_snapshot lease1;
   get(Image.replace leased_image~width:8~height:8~rgba:(solid 64"\x11\x22\x33\xff"));
   if second_pixels<>solid 64"\xaa\xbb\xcc\xff"then failwith"image mutation changed the second lease";
-  Image.Private.release_snapshot lease2;
-  Image.Private.release_snapshot lease2;
+  Image.release_snapshot lease2;
+  Image.release_snapshot lease2;
   get(Image.destroy leased_image);
   let destroy_leased=get(Image.create~width:1~height:1~rgba:(Bytes.of_string"\x12\x34\x56\x78"))in
-  let _,_,_,destroy_bytes,destroy_lease=get(Image.Private.borrow_snapshot destroy_leased)in
+  let _,_,_,destroy_bytes,destroy_lease=get(Image.borrow_snapshot destroy_leased)in
   get(Image.destroy destroy_leased);
   if destroy_bytes<>Bytes.of_string"\x12\x34\x56\x78"then
     failwith"destroy invalidated leased image bytes";
-  Image.Private.release_snapshot destroy_lease;
-  Image.Private.release_snapshot destroy_lease;
+  Image.release_snapshot destroy_lease;
+  Image.release_snapshot destroy_lease;
   let direct=get(Canvas.create~width:640~height:480)in
-  if Canvas.Private.gpu_snapshot direct<>None then failwith"fresh Canvas reports a GPU frame";
+  if Canvas.gpu_snapshot direct<>None then failwith"fresh Canvas reports a GPU frame";
   (* A canvas published every frame: a capture lends the canvas storage, the
      next write moves the canvas to its spare, and destroying the previous
      capture returns that storage. 600 frames allocate less than one frame. *)
@@ -171,11 +171,11 @@ let run () =
   let _,_,_,canvas_pixels=get(Canvas.snapshot bank_canvas)in
   if canvas_pixels<>solid 16"\x01\x02\x03\xff"then failwith"external image replacement changed canvas";
   get(Image.destroy bank_image);get(Image.destroy second);get(Canvas.destroy bank_canvas);
-  let captures_before,_=Canvas.Private.pixel_stats canvas in
+  let captures_before,_=Canvas.pixel_stats canvas in
   List.iter(fun _frame->let capture=get(Canvas.capture canvas)in
     if get(Image.size capture)<>(4,4)||get(Image.pixels capture)<>expected then failwith"capture";
     get(Image.destroy capture))[1;2;60;600];
-  if Canvas.Private.pixel_stats canvas<>(captures_before+4,0)then
+  if Canvas.pixel_stats canvas<>(captures_before+4,0)then
     failwith"CPU Canvas successful capture/readback counters";
   let png=Filename.temp_file"rays-next-"".png"in get(Canvas.save_png canvas png);let input=open_in_bin png in let signature=really_input_string input 8 in close_in input;Sys.remove png;if signature<>"\x89PNG\r\n\x1a\n"then failwith"PNG";
   get(Canvas.destroy canvas);get(Canvas.destroy canvas);

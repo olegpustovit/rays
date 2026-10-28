@@ -199,10 +199,10 @@ module Private=struct
          mix(mix stamp(Runtime_resources.Image.identity image))
            (Runtime_resources.Image.generation image)
      |_,Text text->
-         mix(mix stamp(Runtime_resources.Text.Private.identity text))
+         mix(mix stamp(Runtime_resources.Text.identity text))
            (Runtime_resources.Text.generation text)
      |_,Canvas canvas->
-         mix(mix stamp(Runtime_resources.Canvas.Private.identity canvas))
+         mix(mix stamp(Runtime_resources.Canvas.identity canvas))
            (Runtime_resources.Canvas.generation canvas))
      (Scene_command.Display_list.version segment)resources)
  let renderer=Domain.DLS.new_key(fun()->None)
@@ -435,8 +435,8 @@ module Private=struct
    let resources=image_resources~density nodes in
    let versions=List.map(function
      |id,Renderer.Image image->id,Runtime_resources.Image.identity image,Runtime_resources.Image.generation image
-     |id,Text text->id,Runtime_resources.Text.Private.identity text,Runtime_resources.Text.generation text
-     |id,Canvas canvas->id,Runtime_resources.Canvas.Private.identity canvas,Runtime_resources.Canvas.generation canvas)resources in
+     |id,Text text->id,Runtime_resources.Text.identity text,Runtime_resources.Text.generation text
+     |id,Canvas canvas->id,Runtime_resources.Canvas.identity canvas,Runtime_resources.Canvas.generation canvas)resources in
    let cache=Option.map(fun context->context.scene2_layers)(Domain.DLS.get current_lower_cache)in
    match Option.bind cache(fun cache->try Some(Layer_table.find cache(nodes,density))with Not_found->None)with
    |Some(ir,old)when old=versions->Ok(ir,resources)
@@ -453,13 +453,13 @@ module Private=struct
  let rec validate_native_resources=function
    |[]->Ok()
    |(_,Renderer.Image image)::rest->
-       Result.bind(Runtime_resources.Image.Private.gpu_snapshot image)
+       Result.bind(Runtime_resources.Image.gpu_snapshot image)
          (fun _->validate_native_resources rest)
    |_::rest->validate_native_resources rest
  let rec validate_native_images=function
    |[]->Ok()
    |Image node::rest->
-       Result.bind(Runtime_resources.Image.Private.gpu_snapshot
+       Result.bind(Runtime_resources.Image.gpu_snapshot
          (Image.Private.resource node.image))(fun _->validate_native_images rest)
    |(Group nested|Translate(_,_,nested)|Rotate(_,nested)|Scale(_,_,nested)|Affine(_,nested)
      |Clip(_,_,_,_,nested)|Blend(_,nested))::rest->
@@ -484,7 +484,7 @@ module Private=struct
        let key="texture:"^string_of_int(Texture.Private.identity value.Scene3.value)in
        let source=match Texture.Private.image value.Scene3.value with
        |None->Ok(key,texture_levels value.Scene3.value,None)
-       |Some image->(match Runtime_resources.Image.Private.gpu_snapshot image with
+       |Some image->(match Runtime_resources.Image.gpu_snapshot image with
          |Error error->Error(Scene3_native_lowering.Resource error)
          |Ok None->Error Scene3_native_lowering.Unsupported_texture
          |Ok(Some(width,height,generation,gpu))->
@@ -615,12 +615,12 @@ module Private=struct
   |(id,Text text)::rest->resource_stamp_loop
       (Rays_math.Hash.mix
         (Rays_math.Hash.mix
-          (Rays_math.Hash.mix stamp id) (Runtime_resources.Text.Private.identity text))
+          (Rays_math.Hash.mix stamp id) (Runtime_resources.Text.identity text))
         (Runtime_resources.Text.generation text)) rest
   |(id,Canvas canvas)::rest->resource_stamp_loop
       (Rays_math.Hash.mix
         (Rays_math.Hash.mix
-          (Rays_math.Hash.mix stamp id) (Runtime_resources.Canvas.Private.identity canvas))
+          (Rays_math.Hash.mix stamp id) (Runtime_resources.Canvas.identity canvas))
         (Runtime_resources.Canvas.generation canvas)) rest
  let native_resource_stamp stage=List.fold_left(fun stamp->function
    |Scene2_layer(_,resources)|Scene2_segment(_,resources)|Ui_layer(_,resources)->

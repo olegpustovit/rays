@@ -620,7 +620,7 @@ let publish t (pending : pending) =
       if t.shared_film then
         Result.map_error
           (Format.asprintf "%a" Runtime_resources.pp_error)
-          (Runtime_resources.Image.Private.replace_gpu t.resource film)
+          (Runtime_resources.Image.replace_gpu t.resource film)
       else
         let* rgba = gpu (B.read_texture film ~bytes_per_row:(t.width * 4)) in
         ();

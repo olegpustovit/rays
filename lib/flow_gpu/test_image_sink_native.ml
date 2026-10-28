@@ -112,7 +112,7 @@ let () =
     let image=ref None and snapshots=ref []in
     Fun.protect ~finally:(fun()->
       Option.iter(fun image->resource(I.destroy image)) !image;
-      List.iter(fun(_,_,lease)->I.Private.release_snapshot lease) !snapshots;
+      List.iter(fun(_,_,lease)->I.release_snapshot lease) !snapshots;
       G.Image_sink.close sink;G.Host.close host)(fun()->
       let gpu_config={Flow_ir.Gpu.default with backend=Some(G.Host.backend host);policy=Qualification} in
         List.iter(fun time->
@@ -124,18 +124,18 @@ let () =
           let source()=G.Image_sink.texture converted in
           let current=match !image with
             |None->let before=Gc.allocated_bytes()in
-                let current=resource(I.Private.of_gpu ~width:65 ~height:17 ~source)in
+                let current=resource(I.of_gpu ~width:65 ~height:17 ~source)in
                 assert(Gc.allocated_bytes()-.before<4096.);
                 image:=Some current;current
             |Some current->
-                assert(Result.is_error(I.Private.gpu_snapshot current));
+                assert(Result.is_error(I.gpu_snapshot current));
                 let identity=I.identity current and generation=I.generation current
-                and readbacks=I.Private.readbacks current in
-                resource(I.Private.replace_gpu_source current ~width:65 ~height:17 ~source);
+                and readbacks=I.readbacks current in
+                resource(I.replace_gpu_source current ~width:65 ~height:17 ~source);
                 assert(I.identity current=identity && I.generation current=generation+1);
-                assert(I.Private.readbacks current=readbacks);current in
-          assert(I.Private.cpu_storage_bytes current=0);
-          (match resource(I.Private.gpu_snapshot current)with
+                assert(I.readbacks current=readbacks);current in
+          assert(I.cpu_storage_bytes current=0);
+          (match resource(I.gpu_snapshot current)with
            |Some(w,h,_,texture)->assert((w,h)=(65,17)
               && Option.fold ~none:false ~some:((==)texture)(source()))
            |None->assert false);
@@ -159,13 +159,13 @@ let () =
           Printf.printf "image_sink,qualified_named,65,17,%.2f,%d,%d,%d\n%!"
             time !maximum !channels !pixels;
           assert(!maximum<=1);
-          let before=I.Private.readbacks current in
+          let before=I.readbacks current in
           let published=resource(I.pixels current)in
-          assert(published=actual && I.Private.readbacks current=before+1);
-          let _,_,_,bytes,lease=resource(I.Private.borrow_snapshot current)in
-          assert(bytes=actual && I.Private.readbacks current=before+2);
+          assert(published=actual && I.readbacks current=before+1);
+          let _,_,_,bytes,lease=resource(I.borrow_snapshot current)in
+          assert(bytes=actual && I.readbacks current=before+2);
           snapshots:=(bytes,Bytes.copy bytes,lease):: !snapshots;
-          assert(I.Private.cpu_storage_bytes current=0);
+          assert(I.cpu_storage_bytes current=0);
           List.iter(fun(bytes,saved,_)->assert(bytes=saved)) !snapshots;
           Printf.printf "image_sink,published_named,65,17,%.2f,%d,%d,%d\n%!"
             time !maximum !channels !pixels) [0.;0.5;1.];
@@ -198,7 +198,7 @@ let () =
           ignore(execution(lower()));ignore(execution(lower()));
           render canvas scene;render canvas scene;
           let old_pixels=snapshot canvas in
-          let before=I.Private.readbacks current and generation=I.generation current in
+          let before=I.readbacks current and generation=I.generation current in
           let output=match Flow_ir.Executor.try_display ~gpu:gpu_config program
               ~live:(Input.at_time(0.25+.float index*.0.125)) |> get with
             |Some(Gpu output)->output|_->assert false in
@@ -207,8 +207,8 @@ let () =
           assert(I.generation current=generation);
           assert(match lower()with Error{Ogpu.Error.kind=Ogpu.Error.Invalid_state;_}->true|_->false);
           let failed=Result.is_error(Rays.Canvas.render canvas scene)in
-          assert(failed && I.Private.readbacks current=before);
-          resource(I.Private.replace_gpu_source current ~width:65 ~height:17
+          assert(failed && I.readbacks current=before);
+          resource(I.replace_gpu_source current ~width:65 ~height:17
             ~source:(fun()->G.Image_sink.texture converted));
           assert(I.generation current=generation+1);
           ignore(execution(lower()));render canvas scene;
@@ -225,12 +225,12 @@ let () =
         let output=G.Run.dispatch run (Flow_ir.Packed.Host.prepare p ~live:(Input.at_time 0.25) |> get) |> get in
         let converted=G.Image_sink.convert sink ~width:17 ~height:5 output |> get in
         let identity=I.identity current in
-        resource(I.Private.replace_gpu_source current ~width:17 ~height:5
+        resource(I.replace_gpu_source current ~width:17 ~height:5
           ~source:(fun()->G.Image_sink.texture converted));
         assert(I.identity current=identity && resource(I.size current)=(17,5));
-        assert(I.Private.cpu_storage_bytes current=0);
+        assert(I.cpu_storage_bytes current=0);
         G.Image_sink.close sink;
-        assert(Result.is_error(I.Private.gpu_snapshot current) && Result.is_error(I.pixels current)))));
+        assert(Result.is_error(I.gpu_snapshot current) && Result.is_error(I.pixels current)))));
   Printf.eprintf "GPU image qualification/publication: named-call selection, exact channel parity, zero publication CPU storage/reads and retained snapshots pass\n%!"
 
 let ()=
@@ -243,7 +243,7 @@ let ()=
     let image=ref None and leases=ref[]in
     Fun.protect ~finally:(fun()->
       Option.iter(fun image->resource(I.destroy image)) !image;
-      List.iter(fun(_,_,lease)->I.Private.release_snapshot lease) !leases;
+      List.iter(fun(_,_,lease)->I.release_snapshot lease) !leases;
       G.Image_sink.close sink;G.Pipelines.close cache)(fun()->
       let produce width height time=
         let p,_=packed ~width ~height "[uv.x uv.y t 1]"in
@@ -253,7 +253,7 @@ let ()=
             ~live:(Input.at_time time) |> get) |> get in
           G.Image_sink.convert sink ~width ~height output |> get)in
       let first=produce 65 17 0.25 in
-      let current=resource(I.Private.of_gpu ~width:65 ~height:17
+      let current=resource(I.of_gpu ~width:65 ~height:17
         ~source:(fun()->G.Image_sink.texture first))in
       image:=Some current;
       let view=Rays.Texture.Private.of_image current |> Result.get_ok in
@@ -267,7 +267,7 @@ let ()=
       assert(refuses(fun()->ignore(Rays.Texture.generate_mipmaps view)));
       assert(refuses(fun()->ignore(Rays.Texture.Private.levels view)));
       assert(Result.is_error(Rays.Texture.subsection ~x:0 ~y:0 ~width:1 ~height:1 view));
-      assert(I.Private.cpu_storage_bytes current=0 && I.Private.readbacks current=0);
+      assert(I.cpu_storage_bytes current=0 && I.readbacks current=0);
       let canvas=Rays.Canvas.create ~width:65 ~height:17 |> Result.get_ok in
       Fun.protect ~finally:(fun()->ignore(Rays.Canvas.destroy canvas))(fun()->
         let mesh=Rays.Mesh.plane ~width:(2.*.65./.17.) ~height:2.()in
@@ -300,12 +300,12 @@ let ()=
             let references=[image_scene reference_image;mesh_scene reference_texture;
               mixed reference_image reference_texture]in
             List.iteri(fun index(scene,reference)->
-              let reads=I.Private.readbacks current in
+              let reads=I.readbacks current in
               render canvas scene;render canvas scene;
               let uploaded=(canvas_stats canvas).uploaded_bytes in
               render canvas scene;
               assert((canvas_stats canvas).uploaded_bytes=uploaded);
-              assert(I.Private.readbacks current=reads);
+              assert(I.readbacks current=reads);
               let actual=snapshot canvas in
               let fresh=Rays.Canvas.create ~width:65 ~height:17 |> Result.get_ok in
               Fun.protect ~finally:(fun()->ignore(Rays.Canvas.destroy fresh))(fun()->
@@ -319,8 +319,8 @@ let ()=
         let sampled=(List.hd staged.scene3).entries.(0).texture |> Option.get in
         assert(Option.is_some sampled.gpu && sampled.levels.(0).bytes=Bytes.empty);
         verify first 65 17 0.25;
-        assert(I.Private.readbacks current=0);
-        let _,_,_,saved,lease=resource(I.Private.borrow_snapshot current)in
+        assert(I.readbacks current=0);
+        let _,_,_,saved,lease=resource(I.borrow_snapshot current)in
         leases:=[saved,Bytes.copy saved,lease];
         let expire()=List.iter(fun scene->
           (match Rays.Scene.Private.stage_native_render_checked ~width:65 ~height:17 scene with
@@ -328,27 +328,27 @@ let ()=
            |Ok _->()
           |Error error->failwith(Format.asprintf "resident expiry staging: %a"
                Rays.Scene.Private.pp_native_error error));
-          let reads=I.Private.readbacks current in
+          let reads=I.readbacks current in
           assert(Result.is_error(Rays.Canvas.render canvas scene));
-          assert(I.Private.readbacks current=reads)) !scenes in
+          assert(I.readbacks current=reads)) !scenes in
         let generation=I.generation current in
         let second=produce 65 17 0.75 in
         assert(I.generation current=generation);
         expire();
-        resource(I.Private.replace_gpu_source current ~width:65 ~height:17
+        resource(I.replace_gpu_source current ~width:65 ~height:17
           ~source:(fun()->G.Image_sink.texture second));
         verify second 65 17 0.75;
         let resized=produce 17 5 0.5 in
         expire();
-        resource(I.Private.replace_gpu_source current ~width:17 ~height:5
+        resource(I.replace_gpu_source current ~width:17 ~height:5
           ~source:(fun()->G.Image_sink.texture resized));
         resource(I.replace current ~width:17 ~height:5 ~rgba:(Bytes.make(17*5*4)'\255'));
         assert(Result.is_error(Rays.Texture.Private.of_image current));
         assert(match Rays.Scene.Private.stage_native_render_checked ~width:65 ~height:17 meshed with
           |Error(Message message)->String.ends_with ~suffix:"borrowed GPU texture needs an explicit CPU snapshot" message
           |_->false);
-        assert(I.Private.readbacks current=1);
-        resource(I.Private.replace_gpu_source current ~width:17 ~height:5
+        assert(I.readbacks current=1);
+        resource(I.replace_gpu_source current ~width:17 ~height:5
           ~source:(fun()->G.Image_sink.texture resized));
         assert(Rays.Texture.Private.identity view=identity && Rays.Texture.size view=(17,5));
         let resized_image=Rays.Image.Private.of_resource current |> Result.get_ok in
@@ -362,13 +362,13 @@ let ()=
             width=17;height=5;depth=1;mip_levels=1;sample_count=1;format=Rgba8_unorm;
             usage=[Texture_binding;Texture_copy_src]})in
           Fun.protect ~finally:(fun()->native(B.destroy_texture texture))(fun()->
-            resource(I.Private.replace_gpu_source current ~width:17 ~height:5 ~source:(fun()->Some texture));
+            resource(I.replace_gpu_source current ~width:17 ~height:5 ~source:(fun()->Some texture));
             List.iter(fun scene->
               assert(match Rays.Canvas.render canvas scene with
                 |Error message->String.ends_with ~suffix:"GPU image belongs to another renderer" message
                 |Ok()->false)) !scenes;
-            assert(I.Private.readbacks current=1)));
-        resource(I.Private.replace_gpu_source current ~width:17 ~height:5
+            assert(I.readbacks current=1)));
+        resource(I.replace_gpu_source current ~width:17 ~height:5
           ~source:(fun()->G.Image_sink.texture resized));
         let texture=G.Image_sink.texture resized |> Option.get in
         resource(I.destroy current);

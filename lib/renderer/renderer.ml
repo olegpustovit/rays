@@ -333,7 +333,7 @@ let snapshot value ~lease_policy ~density source =
         fail operation Ogpu.Error.Stale_handle"image snapshot is destroyed"
       else let key="image:"^string_of_int(Runtime_resources.Image.identity image)
       and generation=Runtime_resources.Image.generation image in
-      (match Runtime_resources.Image.Private.gpu_snapshot image with
+      (match Runtime_resources.Image.gpu_snapshot image with
       |Error e->resource operation e
       |Ok(Some(width,height,generation,gpu))->
           let sampler:Ogpu.Types.sampler_descriptor={label=Some"scene-image";
@@ -346,14 +346,14 @@ let snapshot value ~lease_policy ~density source =
       |Ok None->
       (match find key generation with
       |Some cached->Ok cached
-      |None->match Runtime_resources.Image.Private.borrow_snapshot image with
+      |None->match Runtime_resources.Image.borrow_snapshot image with
       |Ok(width,height,borrowed_generation,pixels,lease)->
           let sampler:Ogpu.Types.sampler_descriptor={label=Some"scene-image";min_filter=Linear;mag_filter=Linear;
             mip_filter=No_mip;address_u=Clamp_to_edge;address_v=Clamp_to_edge;lod_min=0.;lod_max=0.;max_anisotropy=1}in
           let cacheable=Bytes.length pixels<=snapshot_cache_entry_byte_capacity in
           let bytes=if cacheable then
             Fun.protect
-              ~finally:(fun()->Runtime_resources.Image.Private.release_snapshot lease)
+              ~finally:(fun()->Runtime_resources.Image.release_snapshot lease)
               (fun()->Bytes.copy pixels)
           else match lease_policy with
             |Retain_image_snapshots leases->
@@ -361,7 +361,7 @@ let snapshot value ~lease_policy ~density source =
                 pixels
             |Copy_image_snapshots->
                 Fun.protect
-                  ~finally:(fun()->Runtime_resources.Image.Private.release_snapshot lease)
+                  ~finally:(fun()->Runtime_resources.Image.release_snapshot lease)
                   (fun()->Bytes.copy pixels)in
           (* The generation is part of the GPU texture key: a replaced image
              (same identity, new pixels) then misses the executor's static
@@ -376,19 +376,19 @@ let snapshot value ~lease_policy ~density source =
   |Text text->
       (* Text snapshots are immutable and uniquely identified, like images:
          a hit touches no pixels, a miss copies them once. *)
-      let key="text:"^string_of_int(Runtime_resources.Text.Private.identity text)
+      let key="text:"^string_of_int(Runtime_resources.Text.identity text)
       and generation=Runtime_resources.Text.generation text in
       (match if Runtime_resources.Text.destroyed text then None
          else find key generation with
        |Some cached->Ok cached
        |None->match Runtime_resources.Text.size text,
-           Runtime_resources.Text.Private.borrow_pixels text with
+           Runtime_resources.Text.borrow_pixels text with
         |Ok(width,height),Ok pixels->finish key generation width height pixels
         |Error e,_|_,Error e->resource operation e)
   |Canvas canvas->
-      let key="canvas:"^string_of_int(Runtime_resources.Canvas.Private.identity canvas)in
+      let key="canvas:"^string_of_int(Runtime_resources.Canvas.identity canvas)in
       (* A canvas rendered on this window's device is sampled in place. *)
-      let gpu=match Runtime_resources.Canvas.Private.gpu_snapshot canvas with
+      let gpu=match Runtime_resources.Canvas.gpu_snapshot canvas with
         |Some(width,height,generation,texture) when Runtime.Private.is_window value.runtime->
             let device_id,_=Ogpu.Backend.Private.texture_driver_token texture in
             (match Ok (Scene_execution.device value.renderer) with
@@ -768,7 +768,7 @@ let make_retained_target (f:presentation_facts) draws=
       match step~clear:(0.,0.,0.,0.)exec draws,offscreen_target exec,
           Runtime_resources.Canvas.create~width:dw~height:dh with
       |Ok(),Ok texture,Ok canvas->
-          (match Runtime_resources.Canvas.Private.publish_gpu canvas texture,
+          (match Runtime_resources.Canvas.publish_gpu canvas texture,
               Scene_command.Render_ir.create[|Scene_command.Render_ir.Image{resource_id=1;
                 source={x=0.;y=0.;width=float dw;height=float dh};
                 destination={x=0.;y=0.;width=float f.logical_width;height=float f.logical_height}}|]with

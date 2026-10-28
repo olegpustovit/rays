@@ -73,7 +73,7 @@ let ()=
         let override=i=1 in
         assert(resolve time ~override "image/map" "mesh"==image);
         let resource=Rays.Image.Private.resource image in
-        assert(I.Private.cpu_storage_bytes resource=0);
+        assert(I.cpu_storage_bytes resource=0);
         let expected=rgba(exact cpu1 time ~override "image/map" "mesh")in
         assert(expected=rgba(exact cpu8 time ~override "image/map" "mesh"));
         let actual=Rays.Image.Private.pixels image |> Result.get_ok in
@@ -195,7 +195,7 @@ let ()=
     let image,texture=resolve 0. in
     let identity=Rays.Texture.Private.identity texture in
     let resource=Rays.Image.Private.resource image in
-    assert(I.Private.cpu_storage_bytes resource=0 && I.Private.readbacks resource=0);
+    assert(I.cpu_storage_bytes resource=0 && I.readbacks resource=0);
     let generation=I.generation resource in
     assert(exact 0.==saved && I.generation resource=generation);
     print_endline "test,width,height,time,max_channel_difference,differing_channels,differing_pixels";
@@ -213,10 +213,10 @@ let ()=
       let verify time=
         let actual_image,actual_texture=resolve time in
         assert(actual_image==image && Rays.Texture.Private.identity actual_texture=identity);
-        assert(I.Private.cpu_storage_bytes resource=0 && I.Private.readbacks resource=0);
+        assert(I.cpu_storage_bytes resource=0 && I.readbacks resource=0);
         let generation=I.generation resource in
         let payload=exact time in
-        assert(I.generation resource=generation && I.Private.readbacks resource=0);
+        assert(I.generation resource=generation && I.readbacks resource=0);
         assert(rgba saved=saved_bytes);
         let _,node,_=value()in
         let width,height=Result.get_ok (Rays.Image.get_size image) in
@@ -251,7 +251,7 @@ let ()=
           Printf.printf "workspace_gpu_image,%d,%d,%.2f,%d,%d,%d\n%!"
             width height time !maximum !channels !pixels;
           assert(!maximum<=1));
-        assert(I.Private.readbacks resource=0)in
+        assert(I.readbacks resource=0)in
       verify 0.;verify 1.;
       let frame time = { Rays.Frame.input = { (Input.at_time time) with size = 65, 17;
         frame = int_of_float time; tick = int_of_float time };
@@ -266,7 +266,7 @@ let ()=
       reload 20.(text 65 3 "[uv.x uv.y 0.5 1]");
       let cpu_image,cpu_texture=resolve 0. in
       assert(cpu_image==image && Rays.Texture.Private.image cpu_texture=None);
-      assert(Result.get_ok(I.Private.gpu_snapshot resource)=None);
+      assert(Result.get_ok(I.gpu_snapshot resource)=None);
       reload 30.(text 65 17 "[uv.x uv.y (* t 0.5) 1]");
       verify 0.5;
       reload 40.(text 65 17 "[(if (> uv.x 0) 0 (* (* uv.x 1e20) (* uv.x 1e20))) uv.y 0.5 1]");
@@ -276,7 +276,7 @@ let ()=
       List.iter(fun time->
         let failed=Editor.Private.with_images ~live:(live time) !owner(fun ~image ~texture:_->image value)in
         assert(match failed with Error d->d.Diagnostic.code="E_KERNEL"|Ok _->false))[0.;0.];
-      assert(I.Private.readbacks resource=0);
+      assert(I.readbacks resource=0);
       reload 50.(text 65 17 "[uv.x uv.y 0.5 1]");
       verify 0.5;
       assert(rgba saved=saved_bytes)));
@@ -304,7 +304,7 @@ let ()=
       E.Deferred(Flow.Ty.image,node.id)in
     let image=Editor.Private.with_images display(fun ~image ~texture:_->ok(image(value display "image/map")))in
     let resource=Rays.Image.Private.resource image in
-    assert(I.Private.cpu_storage_bytes resource=0);
+    assert(I.cpu_storage_bytes resource=0);
     let generation=I.generation resource in
     let actual=Editor.Private.image_payload display(value display "image/render") |> ok in
     let rgba image=match P.Image.rgba8 image with Some bytes->bytes|None->
@@ -316,8 +316,8 @@ let ()=
       Fun.protect ~finally:(fun()->Editor.close oracle)(fun()->
         let expected=Editor.Private.image_payload oracle(value oracle "image/render") |> ok in
         assert(rgba expected=bytes)))[1;8];
-    assert(I.generation resource=generation && I.Private.readbacks resource=0
-      && I.Private.cpu_storage_bytes resource=0);bytes)in
+    assert(I.generation resource=generation && I.readbacks resource=0
+      && I.cpu_storage_bytes resource=0);bytes)in
   let directory=Filename.temp_dir "rays-export-exact-image-" ""in
   Fun.protect ~finally:(fun()->Array.iter(fun name->Sys.remove(Filename.concat directory name))
     (Sys.readdir directory);Unix.rmdir directory)(fun()->
@@ -437,7 +437,7 @@ let ()=
     done;
     assert(Editor.Private.image_render_stats !owner=(2,1,1,1));
     assert(I.generation resource>initial_generation);
-    assert(I.Private.cpu_storage_bytes resource=0 && I.Private.readbacks resource=0);
+    assert(I.cpu_storage_bytes resource=0 && I.readbacks resource=0);
     let mesh=Rays.Mesh.plane ~width:(2.*.65./.17.) ~height:2.()in
     let camera=Rays.Camera.orthographic ~height:2. ~at:(Rays_math.Vec3.create 0. 0. 2.) ~target:Rays_math.Vec3.zero()in
     let scene source_image texture=Rays.Scene.[clear Rays_math.Color.black;image source_image ~at:(0,0)();Private.layer_break;
@@ -451,7 +451,7 @@ let ()=
       assert(actual==image && Rays.Texture.Private.identity view=identity);
       let generation=I.generation resource in
       let payload=exact time in
-      assert(I.generation resource=generation && I.Private.readbacks resource=0);
+      assert(I.generation resource=generation && I.readbacks resource=0);
       assert(rgba saved=saved_bytes);
       let displayed=scene actual view in
       Result.get_ok (Rays.Canvas.render destination displayed);Result.get_ok (Rays.Canvas.render destination displayed);
@@ -484,7 +484,7 @@ let ()=
     List.iter(fun _->assert(Editor.Private.with_images ~live:(live 2.) !owner
       (fun ~image ~texture:_->image(value())) |> Result.is_error))[0;1];
     assert(I.generation resource=generation && Editor.Private.image_render_stats !owner=stats);
-    assert(match I.Private.gpu_snapshot resource with Error{kind=Ogpu.Error.Destroyed;_}->true|_->false);
+    assert(match I.gpu_snapshot resource with Error{kind=Ogpu.Error.Destroyed;_}->true|_->false);
     verify 0.;
     reload 30.(text ~width_expression:"(+ 35 (int (* t 1e19)))" 35 33 "(* t 16)");
     ignore(resolve 0.);
@@ -492,9 +492,9 @@ let ()=
     List.iter(fun _->assert(Editor.Private.with_images ~live:(live 2.) !owner
       (fun ~image ~texture:_->image(value())) |> Result.is_error))[0;1];
     assert(I.generation resource=generation && Editor.Private.image_render_stats !owner=stats);
-    assert(match I.Private.gpu_snapshot resource with Error{kind=Ogpu.Error.Destroyed;_}->true|_->false);
+    assert(match I.gpu_snapshot resource with Error{kind=Ogpu.Error.Destroyed;_}->true|_->false);
     verify 0.;
-    assert(I.Private.cpu_storage_bytes resource=0 && I.Private.readbacks resource=0);
+    assert(I.cpu_storage_bytes resource=0 && I.readbacks resource=0);
     let _,_,captures,readbacks=Editor.Private.image_render_stats !owner in
     Editor.close !owner;
     let created,destroyed,captures_after,readbacks_after=Editor.Private.image_render_stats !owner in

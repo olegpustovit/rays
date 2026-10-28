@@ -39,7 +39,7 @@ let run () =
       Fun.protect ~finally:(fun()->P.destroy tracer)(fun()->
         get(P.render tracer camera);get(P.flush tracer);
         let image=Rays.Image.Private.resource(P.image tracer)in
-        let texture=match Runtime_resources.Image.Private.gpu_snapshot image with
+        let texture=match Runtime_resources.Image.gpu_snapshot image with
           |Ok(Some(_,_,_,texture))->texture
           |_->failwith"traced film was published through CPU image storage"in
         let direct=match Ogpu.Backend.read_texture texture ~bytes_per_row:(48*4)with
@@ -63,7 +63,7 @@ let run () =
         Hashtbl.add textures (Ogpu.Backend.texture_id texture) ();
         for _=1 to 30 do
           get(P.render tracer camera);get(P.flush tracer);
-          match Runtime_resources.Image.Private.gpu_snapshot image with
+          match Runtime_resources.Image.gpu_snapshot image with
           |Ok(Some(_,_,_,texture))->Hashtbl.replace textures
               (Ogpu.Backend.texture_id texture)()
           |_->failwith"GPU film reverted to CPU storage"

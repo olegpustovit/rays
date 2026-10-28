@@ -1,5 +1,5 @@
-type t = { mutable leases : Runtime_resources.Image.Private.lease list }
-type checkpoint = Runtime_resources.Image.Private.lease list
+type t = { mutable leases : Runtime_resources.Image.lease list }
+type checkpoint = Runtime_resources.Image.lease list
 type policy = Copy_image_snapshots | Retain_image_snapshots of t
 
 let create () = { leases = [] }
@@ -10,7 +10,7 @@ let checkpoint = function
 let retain value lease = value.leases <- lease :: value.leases
 
 let release value =
-  List.iter Runtime_resources.Image.Private.release_snapshot value.leases;
+  List.iter Runtime_resources.Image.release_snapshot value.leases;
   value.leases <- []
 
 let rollback policy checkpoint = match policy, checkpoint with
@@ -19,7 +19,7 @@ let rollback policy checkpoint = match policy, checkpoint with
       let rec release_to = function
         | leases when leases == before -> ()
         | lease :: rest ->
-            Runtime_resources.Image.Private.release_snapshot lease;
+            Runtime_resources.Image.release_snapshot lease;
             release_to rest
         | [] -> assert false
       in

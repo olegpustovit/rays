@@ -63,12 +63,12 @@ let completed_source ()=
     let borrow()=
       let width,height,source=Result.get_ok(Canvas.Private.gpu_source canvas)in
       require((width,height)=(65,3))"Canvas borrow extent";
-      let resource=Result.get_ok(Runtime_resources.Image.Private.of_gpu ~width ~height ~source)in
+      let resource=Result.get_ok(Runtime_resources.Image.of_gpu ~width ~height ~source)in
       let image=Result.get_ok(Image.Private.of_resource resource)in images:=image:: !images;
       source,image in
     let expires source image=
       require(Option.is_none(source()))"old Canvas source remains current";
-      match Runtime_resources.Image.Private.gpu_snapshot(Image.Private.resource image)with
+      match Runtime_resources.Image.gpu_snapshot(Image.Private.resource image)with
       |Error{kind=Ogpu.Error.Destroyed;_}->()
       |_->failwith"expired Canvas image did not report Destroyed"in
     render Rays_math.Color.red;
@@ -115,9 +115,9 @@ let completed_source ()=
     ignore(Result.get_ok(Canvas.Private.invalidate canvas));expires source image;
     render green;
     let captured=Result.get_ok(Canvas.to_image canvas)in images:=captured:: !images;
-    let _,_,_,bytes,lease=Result.get_ok(Runtime_resources.Image.Private.borrow_snapshot
+    let _,_,_,bytes,lease=Result.get_ok(Runtime_resources.Image.borrow_snapshot
       (Image.Private.resource captured))in
-    Fun.protect ~finally:(fun()->Runtime_resources.Image.Private.release_snapshot lease)(fun()->
+    Fun.protect ~finally:(fun()->Runtime_resources.Image.release_snapshot lease)(fun()->
       let saved=Bytes.copy bytes in
       require(Bytes.sub saved 0 4=Bytes.of_string "\x00\xff\x00\xff")"Canvas CPU snapshot pixel";
       require(Canvas.Private.pixel_stats canvas=(1,1))"Canvas capture actual readback count";

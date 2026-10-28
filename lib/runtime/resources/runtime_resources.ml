@@ -190,18 +190,9 @@ module Image=struct
     List.iter(fun(bytes,_)->if not(leased x bytes)then
       ignore(return_canvas_storage x bytes))x.canvas_returns;
     x.rgba<-Bytes.empty;x.spare<-None;x.canvas_owner<-None;x.gpu<-None;Ok()))
-  module Private=struct
-    type nonrec lease=lease
     let of_owned_rgba=owned
-    let of_gpu=of_gpu
-    let replace_gpu_source=replace_gpu_source
-    let replace_gpu=replace_gpu
-    let gpu_snapshot=gpu_snapshot
-    let borrow_snapshot=borrow_snapshot
-    let release_snapshot=release_snapshot
     let readbacks x=x.readbacks
     let cpu_storage_bytes x=Bytes.length x.rgba+Option.fold ~none:0 ~some:Bytes.length x.spare
-  end
 end
 
 module Png=struct
@@ -290,20 +281,18 @@ module Canvas=struct
       Image.create~width:x.width~height:x.height~rgba:x.rgba in
     Result.map(fun image->x.captures<-x.captures+1;image)result)
   let save_png x path=live"Canvas.save_png"x(fun()->match sync_cpu"Canvas.save_png"x with Error _ as e->e|Ok()->try let bytes=Png.encode~width:x.width~height:x.height x.rgba in let out=open_out_bin path in Fun.protect~finally:(fun()->close_out_noerr out)(fun()->output_bytes out bytes);Ok()with Sys_error m->error"Canvas.save_png"Io m)
-  module Private=struct
     let identity x=x.identity
     let pixel_stats x=x.captures,x.readbacks
-    let publish_gpu x texture=live"Canvas.Private.publish_gpu"x(fun()->
+    let publish_gpu x texture=live"Canvas.publish_gpu"x(fun()->
       let descriptor=Ogpu.Backend.Private.texture_descriptor texture in
       if Ogpu.Backend.Private.texture_destroyed texture||
          descriptor.width<>x.width||descriptor.height<>x.height||
          not(List.mem Ogpu.Types.Texture_binding descriptor.usage) then
-        error"Canvas.Private.publish_gpu"Invalid_argument"GPU texture shape or usage is invalid"
+        error"Canvas.publish_gpu"Invalid_argument"GPU texture shape or usage is invalid"
       else(x.gpu<-Some texture;x.cpu_stale<-true;x.generation<-x.generation+1;Ok()))
-    let gpu_snapshot x=match live "Canvas.Private.gpu_snapshot" x(fun()->
+    let gpu_snapshot x=match live "Canvas.gpu_snapshot" x(fun()->
       Ok(Option.map(fun texture->x.width,x.height,x.generation,texture)x.gpu))with
       |Ok snapshot->snapshot|Error _->None
-  end
   let destroy x=main"Canvas.destroy"(fun()->if x.dead then Ok()else(x.gpu<-None;x.cpu_stale<-false;detach_mirror x;x.blocked<-None;x.spare<-None;x.rgba<-Bytes.empty;x.dead<-true;Ok()))
 end
 
@@ -315,13 +304,11 @@ module Text=struct
   let size x=live"Text.size"x(fun()->Ok(x.width,x.height))
   let pixels x=live"Text.pixels"x(fun()->Ok(Bytes.copy x.rgba))
   let destroy x=main"Text.destroy"(fun()->if x.dead then Ok()else(x.dead<-true;x.rgba<-Bytes.empty;Ok()))
-  module Private=struct
     let identity x=x.generation
-    let borrow_pixels x=live"Text.Private.borrow_pixels"x(fun()->Ok x.rgba)
-    let into_image x=live"Text.Private.into_image"x(fun()->
-      let image=Image.Private.of_owned_rgba ~width:x.width ~height:x.height ~rgba:x.rgba in
+    let borrow_pixels x=live"Text.borrow_pixels"x(fun()->Ok x.rgba)
+    let into_image x=live"Text.into_image"x(fun()->
+      let image=Image.of_owned_rgba ~width:x.width ~height:x.height ~rgba:x.rgba in
       x.dead<-true;x.rgba<-Bytes.empty;Ok image)
-  end
 end
 
 module Font=struct

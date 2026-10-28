@@ -94,7 +94,7 @@ let ()=List.iter(fun stateful->
           List.iteri(fun index ((owner,_,gpu)as owned)->
             let child=image owned state current override "image/map"in
             let native=Rays.Image.Private.resource child in
-            assert(Native.Private.cpu_storage_bytes native=0);
+            assert(Native.cpu_storage_bytes native=0);
             let actual=Rays.Image.Private.pixels child |> Result.get_ok in
             let maximum=ref 0 in
             Bytes.iteri(fun i c->maximum:=max !maximum(abs(Char.code c-Char.code(Bytes.get expected i))))actual;
@@ -106,17 +106,17 @@ let ()=List.iter(fun stateful->
             let host,_,_,_,_=Flow_native.Workspace_gpu.image_stats gpu in
             let reads=host.status_reads in
             let parent_native=Rays.Image.Private.resource parent in
-            let child_reads=Native.Private.readbacks native
-            and parent_reads=Native.Private.readbacks parent_native in
+            let child_reads=Native.readbacks native
+            and parent_reads=Native.readbacks parent_native in
             assert(image owned state current override "image/map"==child
               && image owned state current override "image/render"==parent
               && Flow_native.Workspace_images.capture_stats owner=stats
-              && Native.Private.readbacks native=child_reads
-              && Native.Private.readbacks parent_native=parent_reads);
+              && Native.readbacks native=child_reads
+              && Native.readbacks parent_native=parent_reads);
             let host,_,_,_,_=Flow_native.Workspace_gpu.image_stats gpu in
             assert(host.status_reads=reads && host.readback_bytes=0);
             let cpu=payload owned state current override "image/map"in
-            assert(bytes cpu=expected && Native.Private.cpu_storage_bytes native=0);
+            assert(bytes cpu=expected && Native.cpu_storage_bytes native=0);
             if frame=0 then begin
               let frozen=payload owned state current override "exact"in
               assert(bytes frozen=actual);
@@ -248,10 +248,10 @@ let ()=
     let frozen=image "exact" 0. |> ok and child=image "image/map" 0. |> ok in
     let native=Image.Private.resource child in
     assert(Char.code(Bytes.get saved_bytes 2)=128 && Image.Private.identity frozen<>Image.Private.identity child
-      && Native.Private.readbacks native=1 && resources.images_created=2);
+      && Native.readbacks native=1 && resources.images_created=2);
     assert(payload "exact" 0. |> ok == first);
     assert(payload "image/map" 0. |> ok == ordinary);
-    assert(Native.Private.readbacks native=1);
+    assert(Native.readbacks native=1);
     let drawing=Flow_native.Drawing.prepare (!plan).plan
       (List.assoc "composed" (!plan).evaluated.results) |> ok in
     let scene=Flow_native.Drawing.render_prepared ~state
@@ -268,25 +268,25 @@ let ()=
     let second=payload "exact" 1. |> ok in
     assert(second!=first && bytes second<>saved_bytes && bytes first=saved_bytes);
     assert(Image.Private.identity(image "exact" 1. |> ok)<>Image.Private.identity frozen
-      && Native.Private.readbacks native=2 && render_saved()=saved_scene);
+      && Native.readbacks native=2 && render_saved()=saved_scene);
     (* Expire a borrowed source without changing its published generation.
        Even a frozen-key hit must validate it before returning the payload. *)
-    let texture=match Native.Private.gpu_snapshot native |> Result.get_ok with
+    let texture=match Native.gpu_snapshot native |> Result.get_ok with
       |Some(_,_,_,texture)->texture|None->assert false in
     let available=ref true in
-    Native.Private.replace_gpu_source native ~width:65 ~height:17
+    Native.replace_gpu_source native ~width:65 ~height:17
       ~source:(fun()->if !available then Some texture else None) |> Result.get_ok;
     let third=payload "exact" 1. |> ok in
-    let reads=Native.Private.readbacks native and created=resources.images_created
+    let reads=Native.readbacks native and created=resources.images_created
     and generation=Native.generation native in
     available:=false;
     for _=1 to 2 do
       assert(match payload "exact" 1. with Error d->d.Diagnostic.code="E_IMAGE"|Ok _->false)
     done;
-    assert(Native.Private.readbacks native=reads && resources.images_created=created
+    assert(Native.readbacks native=reads && resources.images_created=created
       && Native.generation native=generation && E.state_stamp state=original_stamp);
     available:=true;
-    assert(payload "exact" 1. |> ok == third && Native.Private.readbacks native=reads);
+    assert(payload "exact" 1. |> ok == third && Native.readbacks native=reads);
     assert(Result.is_error(payload "exact" Float.infinity));
     assert(E.state_stamp state=original_stamp && bytes first=saved_bytes);
     let recovered=payload "exact" 2. |> ok in
@@ -325,11 +325,11 @@ let ()=List.iter(fun(width,height,expected_reads)->
     let source=Flow_native.Workspace_images.image owner lowered.plan ~state
       ~live:{(Input.at_time 62.)with frame=62}(E.Deferred(Flow.Ty.image,child.id)) |> ok in
     let native=Rays.Image.Private.resource source in
-    assert(resources.images_created=64 && Runtime_resources.Image.Private.readbacks native=expected_reads);
+    assert(resources.images_created=64 && Runtime_resources.Image.readbacks native=expected_reads);
     for _=1 to 2 do
       assert(match resolve 63 with Error d->d.Diagnostic.code="E_IMAGE"|Ok _->false)
     done;
-    assert(resources.images_created=64 && Runtime_resources.Image.Private.readbacks native=expected_reads);
+    assert(resources.images_created=64 && Runtime_resources.Image.readbacks native=expected_reads);
     Array.iteri(fun frame payload->
       let bytes=Sop.Image.rgba8 payload |> Option.get in
       assert(Char.code(Bytes.get bytes 0)=int_of_float(Float.round(float frame*.0.0078125*.255.)))) !held);

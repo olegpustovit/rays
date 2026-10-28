@@ -247,7 +247,7 @@ let texture payload=lazy(
 let publish t key entry ~width ~height ~source=
   let* image=match entry.image with
     |None->Workspace_resources.image t.resources key(fun()->
-        match Runtime_resources.Image.Private.of_gpu ~width ~height ~source with
+        match Runtime_resources.Image.of_gpu ~width ~height ~source with
           |Error error->Error(Format.asprintf "%a" Runtime_resources.pp_error error)
         |Ok image->let accepted=ref false in
           Fun.protect ~finally:(fun()->if not !accepted then ignore(Runtime_resources.Image.destroy image))(fun()->
@@ -256,7 +256,7 @@ let publish t key entry ~width ~height ~source=
                 (Image.Private.of_resource image))))
     |Some image->Result.map(fun()->image)
         (Result.map_error(fun e->error(Format.asprintf "%a" Runtime_resources.pp_error e))
-          (Runtime_resources.Image.Private.replace_gpu_source (Image.Private.resource image)
+          (Runtime_resources.Image.replace_gpu_source (Image.Private.resource image)
             ~width ~height ~source))in
   let* borrowed=match entry.borrowed with Some view->Ok view|None->
     message(Texture.Private.of_image(Image.Private.resource image))in
@@ -307,7 +307,7 @@ let rec resolve ?gpu ?context t ~display ~state ~live (plan:E.plan) value =
           let width,height=Image.Private.dimensions source in
           let resource=Image.Private.resource source in
           let* _=Result.map_error(fun e->error(Format.asprintf "%a" Runtime_resources.pp_error e))
-            (Runtime_resources.Image.Private.gpu_snapshot resource)in
+            (Runtime_resources.Image.gpu_snapshot resource)in
           let key=authored_key "exact:" node ^ Marshal.to_string
             (t.serial,Image.Private.identity source,Runtime_resources.Image.generation resource,width,height)
             [Marshal.No_sharing]in
@@ -425,7 +425,7 @@ let rec resolve ?gpu ?context t ~display ~state ~live (plan:E.plan) value =
                   let width=CPU.width payload and height=CPU.height payload in
                   if Option.fold ~none:false ~some:((==)(Option.get child.cpu).stamp)child.display then
                     Ok(Option.get child.image)else match child.image with
-                  |Some image when Runtime_resources.Image.Private.gpu_snapshot
+                  |Some image when Runtime_resources.Image.gpu_snapshot
                       (Image.Private.resource image)=Ok None->
                       child.display<-None;
                       message(Image.upload_rgba ~into:image ~width ~height ~rgba:(bytes_of_image payload)())

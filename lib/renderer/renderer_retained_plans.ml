@@ -115,7 +115,7 @@ let resource_stamps ~resolve commands =
       match resolve id with
       | None -> missing := true; None
       | Some (Image image) ->
-          if Result.is_error (Runtime_resources.Image.Private.gpu_snapshot image) then (
+          if Result.is_error (Runtime_resources.Image.gpu_snapshot image) then (
             missing := true; None)
           else Some (Image_stamp (id, image, Runtime_resources.Image.generation image))
       | Some (Text text) ->
