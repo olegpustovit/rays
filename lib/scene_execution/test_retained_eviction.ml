@@ -13,10 +13,10 @@ let state : Scene_execution.state =
    depth_compare=Always; depth_write=false; depth_load=Load; depth_clear=1.;
    transform_uniforms=None}
 
-let mesh index : Scene_execution.mesh =
+let mesh ?(plain=true) index : Scene_execution.mesh =
   let indices=Bytes.make 12 '\000' in
   Bytes.set_int32_le indices 4 1l; Bytes.set_int32_le indices 8 2l;
-  {key=Host(Printf.sprintf "eviction-%d" index); vertices=Bytes.make 48 '\000';
+  {key=Host(Printf.sprintf "eviction-%d" index); vertices=(if plain then Scene_execution_fixtures.scene2_plain_vertices () else Scene_execution_fixtures.scene2_vertices ());
    vertex_count=3; indices; index_count=3; primitive=Ogpu.Render_pass.Triangle_list}
 
 let texture index : Scene_execution.sampled_texture =
@@ -75,6 +75,6 @@ let run () =
   let textured = run_case "textured-300" 300 (fun index ->
     {Scene_execution.family=Scene2_textured; blend=Ogpu.Pipeline.Replace;
      texture=Some (texture index); auxiliary=None;vertex_attributes=None; samples=1;
-     draw={mesh=mesh index; state}}) in
+     draw={mesh=mesh ~plain:false index; state}}) in
   if plain && textured then
     print_endline "retained eviction: full-image prepared/automatic draws, stale replay refusal, zero delta"

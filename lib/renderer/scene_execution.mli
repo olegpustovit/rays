@@ -83,7 +83,7 @@ val prepare_scene3 : clear:(float * float * float * float) ->
     OGPU render pipelines (see [Ogpu.Backend.create_render_pipeline]); the
     renderer destroys them. Scene2 and Scene2_textured draws both run through
     the Scene2_textured pipeline, which binds its texture and sampler through a
-    fragment argument buffer at index 1 and must be created with
+    fragment argument buffer at index 2 and must be created with
     [~indirect:true].
 
     With [~offscreen:true] the renderer owns a texture target without creating,
