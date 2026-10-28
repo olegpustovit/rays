@@ -162,23 +162,28 @@ let kernel ?(fast=false) ?(instanced=false) program = try
   let gather_index slot = match List.find_index (fun (s, _) -> s = slot) gathers with Some k -> k | None -> fail "Gather without its table." in
   let integer_register slot = Flow_ir.Core.Region.integer_register view.code.(slot) in
   (* The kernel prints twice. The first pass counts each register's references and where they are;
-     the second prints a register read once, in its own scope under its own guards or deeper ones, as
-     an expression inside its reader instead of a named local (naga's baking rule). *)
+     the second prints a register read once, in its own scope inside the blocks it is computed in, as
+     an expression inside its reader instead of a named local (naga's baking rule), and declares a
+     guarded register in its block when every read is inside that block. *)
   let size = Array.length view.code in
   let references = Array.make size 0 and referenced = Array.make size (-1, []) and defined = Array.make size (-1, []) in
   let inlined = Array.make size None and counting = ref true and context = ref (0, []) in
+  let blocks = ref [] and defined_in = Array.make size [] and read_in = Array.make size [] and local = Array.make size true in
   let named = Array.make size false in
   Array.iter (Array.iter (fun slot -> named.(slot) <- true)) view.outputs;
   Array.iteri (fun slot instruction -> if used.(slot) then List.iter (fun (c, _) -> named.(c) <- true) (fst (guarded [] instruction))) view.code;
+  let rec prefix = function [], _ -> true | x :: a, y :: b -> x = y && prefix (a, b) | _ -> false in
   let register r = match inlined.(r) with
     | Some text -> "(" ^ text ^ ")"
     | None ->
-        if !counting then (references.(r) <- references.(r) + 1; referenced.(r) <- !context);
+        if !counting then begin
+          references.(r) <- references.(r) + 1; referenced.(r) <- !context; read_in.(r) <- !blocks;
+          if not (prefix (defined_in.(r), !blocks)) then local.(r) <- false
+        end;
         register r in
-  let rec prefix = function [], _ -> true | x :: a, y :: b -> x = y && prefix (a, b) | _ -> false in
   let inline slot instruction = not !counting && references.(slot) = 1 && not named.(slot) && not finite_checks.(slot)
     && (match instruction with P.Trace _ | Int_binary ((Idiv | Imod | Ishl | Ishr), _, _) -> false | _ -> true)
-    && fst defined.(slot) = fst referenced.(slot) && prefix (snd defined.(slot), snd referenced.(slot)) in
+    && fst defined.(slot) = fst referenced.(slot) && prefix (defined_in.(slot), read_in.(slot)) in
   let narrow = layout.narrow in
   let int_of r = if integer_register r && not narrow.(r) then register r else "long(" ^ register r ^ ")" in
   (* a register's low 32 bits as a uint *)
@@ -211,7 +216,7 @@ let kernel ?(fast=false) ?(instanced=false) program = try
   let output_name k = if outputs = 1 then "output" else "output" ^ string_of_int k in
   let print () =
   Hashtbl.reset hits;
-  let root = scope 0 in
+  let root = scope ~next:(ref 0) 0 in
   let scopes = ref [root] in
   Flow_ir.Kernel_layout.iter layout ~instruction:(fun slot instruction ->
     if used.(slot) && (match snd (guarded [] instruction) with P.Array_prepare _ -> false | _ -> true) then begin
@@ -224,6 +229,8 @@ let kernel ?(fast=false) ?(instanced=false) program = try
     let constant = match instruction with P.Const _ | Int_const _ -> not finite_checks.(slot) | _ -> false in
     (* a guarded constant is declared with its value: consumers fold it, and an unselected value is never read *)
     if not (constant || inline) then enter current guards;
+    blocks := if constant then current.Scope.outer else Scope.stack current;
+    if !counting then defined_in.(slot) <- !blocks;
     let body = current.Scope.code and indentation = indent current in
     let expression = if narrow.(slot) then match instruction with
       | P.Int_const n -> Printf.sprintf "%du" (n land 0xffffffff)
@@ -281,7 +288,9 @@ let kernel ?(fast=false) ?(instanced=false) program = try
       | _ -> fail "Integer instructions and conversions are not supported by the Metal kernel target." in
     if inline then inlined.(slot) <- Some expression
     else if constant then Printf.bprintf current.Scope.decls "  %s r%d=%s;\n" ty slot expression
-    else if current.Scope.opened=[] then Printf.bprintf body "%s%s r%d=%s;\n" indentation ty slot expression else begin
+    else if current.Scope.opened=[] || (local.(slot) && not named.(slot) && not !counting) then
+      Printf.bprintf body "%s%s r%d=%s;\n" indentation ty slot expression
+    else begin
       Printf.bprintf current.Scope.decls "  %s r%d=%s;\n" ty slot zero;
       Printf.bprintf body "%sr%d=%s;\n" indentation slot expression
     end;
@@ -302,6 +311,7 @@ let kernel ?(fast=false) ?(instanced=false) program = try
       Array.iteri(fun component _->let slot=header+1+component in
         Printf.bprintf outer.Scope.decls "  %s r%d=0;\n" (ty slot)slot)control.initial;
       enter outer guards;
+      blocks := Scope.stack outer;
       let body = outer.Scope.code and indentation = indent outer in
       (* a pass count over the limit flags the status and runs no pass *)
       Option.iter(fun limit->Printf.bprintf body
@@ -313,11 +323,12 @@ let kernel ?(fast=false) ?(instanced=false) program = try
       let last = if control.limit = None then bound control.last
         else Printf.sprintf "(over%d?%s:%s)" header (bound control.first) (bound control.last) in
       Printf.bprintf body "%sfor(r%d=%s;r%d<%s;r%d++){\n" indentation header (bound control.first) header last header;
-      let inner = scope header in
+      let inner = scope ~outer:(Scope.stack outer) ~next:outer.Scope.next header in
       scopes := inner :: !scopes;
       emit_body();
       enter inner [];
       context := (inner.Scope.id, []);
+      blocks := Scope.stack inner;
       scopes := List.tl !scopes;
       Buffer.add_buffer body inner.Scope.decls;
       Buffer.add_buffer body inner.Scope.code;
@@ -330,6 +341,7 @@ let kernel ?(fast=false) ?(instanced=false) program = try
     end);
   enter root [];
   context := (0, []);
+  blocks := [];
   let body = Buffer.create 4096 in
   Buffer.add_buffer body root.Scope.decls;
   Buffer.add_buffer body root.Scope.code;

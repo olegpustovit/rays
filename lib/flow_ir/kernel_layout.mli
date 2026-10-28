@@ -50,10 +50,16 @@ val iter : t -> instruction:(int -> Packed.instruction -> unit) ->
     guards share one nest of blocks ([opened], outermost first) instead of testing their
     conditions instruction by instruction. *)
 module Scope : sig
-  type t = { id : int; decls : Buffer.t; code : Buffer.t; mutable opened : (int * bool) list }
+  type t = { id : int; decls : Buffer.t; code : Buffer.t; mutable opened : (int * bool) list;
+             mutable blocks : int list; outer : int list; next : int ref }
+  (** [blocks] numbers the open blocks of [opened] (from [next], shared by a kernel's scopes); [outer] is
+      the block stack around a loop body. *)
 
-  val create : int -> t
+  val create : ?outer:int list -> ?next:int ref -> int -> t
   val indent : t -> string
+  val stack : t -> int list
+  (** The blocks around the scope's current position, outermost first: a local declared there is
+      visible wherever the stack extends this one. *)
 
   val enter : t -> opening:(int -> bool -> string) -> (int * bool) list -> unit
   (** Close the blocks [guards] leave and open, with [opening condition selected], the ones it adds. *)
