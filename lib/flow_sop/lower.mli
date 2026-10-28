@@ -159,7 +159,7 @@ val objects : t -> (int * Network.t * int) list
 val changes : Port.parameter -> Flow.Eval.value -> ((string * Param.value) list, Diagnostic.t) result
 (** The field values a catalog parameter takes from an evaluated argument (colour text,
     number, vec3, choice or text), hard bounds applied.  Scene, world and settings
-    lowering ([Editor_document.Contexts]) reads its structs through it. *)
+    lowering ([Editor_document.Lowering]) reads its structs through it. *)
 
 val workspace :
   factories:Sop.Edit_graph.factory list -> ?extra:Catalog.descriptor list ->

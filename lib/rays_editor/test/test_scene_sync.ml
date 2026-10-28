@@ -6,7 +6,7 @@ open Rays
 open Sop
 
 module Document = Editor_document.Document
-module Contexts = Editor_document.Contexts
+module Lowering = Editor_document.Lowering
 module Kinds = Editor_document.Kinds
 module Objects = Editor_document.Objects
 module Layers = Editor_document.Layers
@@ -38,7 +38,7 @@ let text = {|(workspace sync
   (graph settings :context settings (settings/config :title "t" :width 640)))|}
 
 let lower ?previous workspace =
-  match Contexts.of_workspace ~factories ?previous workspace with
+  match Lowering.of_workspace ~factories ?previous workspace with
   | Ok doc -> doc | Error d -> failwith (Diagnostic.to_string d)
 
 let open_text text = lower (Ws_fixture.of_text text)
@@ -681,7 +681,7 @@ let run_nested_loops () =
 
 (* ---- the root and the World as a merge member ---- *)
 
-let diagnostic text = match Contexts.of_workspace ~factories (Ws_fixture.of_text text) with
+let diagnostic text = match Lowering.of_workspace ~factories (Ws_fixture.of_text text) with
   | Error d -> Some (d.Diagnostic.code, d.message)
   | Ok _ -> None
 
@@ -727,7 +727,7 @@ let run_root () =
       | Error ds when List.exists (fun (d : Diagnostic.t) -> d.code = "E_UNKNOWN_KIND") ds -> n
       | Error ds -> failwith (file ^ ": " ^ String.concat "; " (List.map Diagnostic.to_string ds))
       | Ok workspace ->
-          (match Contexts.of_workspace ~factories workspace with
+          (match Lowering.of_workspace ~factories workspace with
            | Ok _ -> n + 1 | Error d -> failwith (file ^ ": " ^ Diagnostic.to_string d))
     end) 0 (Sys.readdir sketches |> Array.to_list |> List.sort compare |> List.filteri (fun i _ -> i mod 2 = 0)) in
   check (loaded >= 4) (Printf.sprintf "only %d sketches were found to load" loaded);
@@ -838,7 +838,7 @@ let apply_ops (doc : Document.t) ops =
     Result.bind doc (fun (doc : Document.t) ->
       match Workspace_doc.edit catalog (doc.workspace.ws) op with
       | Error d -> Error (Diagnostic.to_string d)
-      | Ok workspace -> Contexts.of_workspace ~factories ~previous:doc workspace
+      | Ok workspace -> Lowering.of_workspace ~factories ~previous:doc workspace
           |> Result.map_error Diagnostic.to_string)) (Ok doc) ops
 
 let okx = function Ok d -> d | Error m -> failwith m
@@ -1016,7 +1016,7 @@ let run_instances () =
   let doc = open_text instances_text in
   let shell = Option.get doc.shell in
   check (List.length shell.preview_sources = 2) "two viewports, two scene instances";
-  let root_of (_, (source : Document.preview_source)) = Contexts.instance_root source.instance in
+  let root_of (_, (source : Document.preview_source)) = Lowering.instance_root source.instance in
   (* each instance's root, its size and its own camera object: the two differ *)
   (match List.map root_of shell.preview_sources with
    | [ Some day; Some night ] ->
@@ -1039,7 +1039,7 @@ let run_instances () =
               && day.params.width = 800 && night.params.width = 1600)
          "the document holds each viewport's root and camera"
    | _ -> failwith "each viewport over a root has an entry in the document");
-  check (Contexts.instance_root (E.Struct ("scene/merge", Flow.Ty.scene, [])) = None) "a part has no root of its own";
+  check (Lowering.instance_root (E.Struct ("scene/merge", Flow.Ty.scene, [])) = None) "a part has no root of its own";
   (* each viewport draws its own World: the document's scene (a part) has none, the two roots do *)
   check (Objects.ids "world" (scene doc) = []) "the part holds no World";
   (match doc.view_worlds with
@@ -1057,7 +1057,7 @@ let run_instances () =
   let b = { (KG.instance ~label:"b" Objects.Geometry.kind) with input = Some a.id } in
   check (List.map (fun (n : KG.node) -> n.input) (Objects.reparent [ a; b ] [ a.id ] (Some b.id)) = [ None; Some a.id ])
     "a reparent under a child made a cycle";
-  check (Result.is_error (Contexts.of_workspace ~factories (Ws_fixture.of_text {|(workspace c
+  check (Result.is_error (Lowering.of_workspace ~factories (Ws_fixture.of_text {|(workspace c
     (graph g :context sop (sop/box))
     (graph scene :context scene (scene/merge (scene/geometry (ref g) :name "a" :parent "b")
       (scene/geometry (ref g) :name "b" :parent "a"))))|}))) "two objects parented under each other lowered";

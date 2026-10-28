@@ -1,5 +1,5 @@
 (* Private editor environment interface. *)
-open Environment_view
+open Loop_view
 
 module V = Viewport
 type layout = Pxui_shell.Layout.t

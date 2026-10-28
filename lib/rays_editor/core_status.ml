@@ -95,7 +95,7 @@ let probe_caption value = match pane_laid value, Pxui_graph.Scope.selected (pane
 let status_box value ui (frame : Frame.t) ~render_status ~error_status ~context =
   let g = geometry value value.workspace frame in
   (* the pane really in use: the focus when a leaf of its kind is open, else the first leaf *)
-  let focus = match List.exists (fun (l : Pxui_shell.Layout.leaf) -> Leader.scope l.panel = Leader.scope value.focus) g.leaves, g.leaves with
+  let focus = match List.exists (fun (l : Pxui_shell.Layout.leaf) -> Editor_commands.scope l.panel = Editor_commands.scope value.focus) g.leaves, g.leaves with
     | false, l :: _ -> l.panel | _ -> value.focus in
   let value = { value with focus } in
   let x, y, width, height = g.status_at in
@@ -143,8 +143,8 @@ let status_box value ui (frame : Frame.t) ~render_status ~error_status ~context 
       | _ -> [] in
   let layout, status_fps = if floating > 0 || alone then "", None else layout, value.status_fps in
   (* the keys each pane's sheet lists, as short labels; Lisp, Timeline and Inspector have none *)
-  let jump = List.find_map (fun (c : Leader.command) ->
-    if c.id = "scene.jump" then Option.map (fun t -> Editor_core.Keymap.label t, "jump") c.trigger else None) Leader.keymap in
+  let jump = List.find_map (fun (c : Editor_commands.command) ->
+    if c.id = "scene.jump" then Option.map (fun t -> Editor_core.Keymap.label t, "jump") c.trigger else None) Editor_commands.keymap in
   let extra = match value.focus with
     | Pxui_shell.Layout.Outline -> [ "s", "filter"; "i", "enter" ] @ Option.to_list jump
     | Graph -> [ "Tab", "add after"; "o", "open"; "v", "view"; "b", "bypass"; "i", "enter"; "f", "frame"; "w", "hints";
@@ -152,9 +152,9 @@ let status_box value ui (frame : Frame.t) ~render_status ~error_status ~context 
     | View _ -> [ "w", "move"; "e", "rotate"; "r", "scale"; "i", "enter object"; "\xe2\x8c\xa5 drag", "orbit" ]
     | _ -> [] in
   if height <= 0 then ()
-  else if (match value.leader with Leader.Pending _ -> true | Idle -> false) then begin
+  else if (match value.leader with Editor_commands.Pending _ -> true | Idle -> false) then begin
     (* an open leader: the pending prefix in the accent and what the strip waits for *)
-    let prefix = match value.leader with Leader.Pending p when p <> "" -> "/ " ^ p | _ -> "/" in
+    let prefix = match value.leader with Editor_commands.Pending p when p <> "" -> "/ " ^ p | _ -> "/" in
     Pxui_shell.Status_bar.guide ui ~bounds:(x, y, width, height) ~file ~state ~layout ~readout ~text:line
       ?fps:status_fps ~notes ~leader:prefix ~context:Editor_core.Guide_context.Leader ()
   end

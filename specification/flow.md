@@ -11,7 +11,7 @@ What is normative, and where:
 | Subject | Specified in | Implemented by |
 |---|---|---|
 | The language's forms, types, loops, functions, macros, and time rules | §11–§13 of this file | `Flow.Syntax`, `Flow.Macro`, `Flow.Workspace`, `Flow.Eval` |
-| The reader, the printer, argument rules, metadata, the editor graph's layout forms | this file, §11 | `Flow.Syntax`, `Flow.Lisp`, `Flow.Workspace`, `Editor_document.Contexts` |
+| The reader, the printer, argument rules, metadata, the editor graph's layout forms | this file, §11 | `Flow.Syntax`, `Flow.Lisp`, `Flow.Workspace`, `Editor_document.Lowering` |
 | The document, layout, exposure, the graph pane, its gestures and keys, carry, the views | this file, §3 to §10 | `Editor_document`, `Flow_graph.Flow_edit`, `Flow_graph.Projection`, `Pxui_graph.Scope`, `Rays_editor` |
 | Lowering and live values | this file, §13 | `Flow_sop.Lower`, `Flow_sop.Value_lane` |
 | Materials | `workspace/materials.md` | |
@@ -42,7 +42,7 @@ per-element fields; zoom-driven detail; any Python or JavaScript in the build.
 | workspace | The one `(workspace name ...)` form of a `.rays` text: graphs, `defn`s and `defmacro`s |
 | graph | `(graph name :context c [inputs] body)`; a `defn` is a function with the same body shape |
 | context | What a graph is about: `sop`, `value`, `scene`, `world`, `settings`, `editor`, `material` (`Flow.Context`) |
-| kind | A catalog node type, `namespace/key`: a SOP factory (`sop/box`) or a kind `Editor_document.Contexts` generates from the scene, World and settings schemas |
+| kind | A catalog node type, `namespace/key`: a SOP factory (`sop/box`) or a kind `Editor_document.Lowering` generates from the scene, World and settings schemas |
 | operator | A built-in call the checker types itself (`+`, `range`, `value/rand`, `scene/object`, `ui/split`); `Flow.Workspace.op_signature` |
 | path | The lexical identity of a binding, `["flower"; "ring"; "u"]` (§3.4) |
 | node | A call of a kind or operator drawn as a card: bound in a `let*`, or written in an input (a nested node) |
@@ -148,7 +148,7 @@ parameter is coerced by `Port_type.coerce`, then normalised to the field's hard 
   `noise_displace`). The PPX rejects a key or slot name that does not match
   `[a-z][a-z0-9_]*`. `Flow_sop.Catalog.of_factories` turns them into the checker's
   `Flow.Catalog.catalog`.
-- **Scene, World and settings kinds** are descriptors `Editor_document.Contexts`
+- **Scene, World and settings kinds** are descriptors `Editor_document.Lowering`
   builds from the editor's own schemas and passes as `~extra`.
 - **Operators** are built into the checker and the evaluator. The value operators any graph
   may call are `Flow.Workspace.value_ops` (arithmetic, comparisons, `range`, `linspace`,
@@ -1094,7 +1094,7 @@ These rules settle language and editor cases that would otherwise admit two read
 ### 11.11 Editor context: the layout forms
 
 An `editor` graph returns `(ui/workspace root)`, written in place or bound to a name the graph
-returns. `Contexts.editor` lowers it to an `Editor_core.Panels.t` tree; `Pxui_shell.Layout.geometry`
+returns. `Lowering.editor` lowers it to an `Editor_core.Panels.t` tree; `Pxui_shell.Layout.geometry`
 places it. All sizes are logical points.
 
 | Form | Meaning |
@@ -1244,14 +1244,14 @@ file is checked in; `dune build @lib/sop_catalog/runtest` regenerates it and dif
 intended change is accepted with `dune promote`. `Flow.Catalog.catalog_of_manifest` reads it:
 `lib/flow`'s own tests check against it (the library cannot link the catalog), and
 `lib/rays_editor/test/test_sop_catalog.ml` proves it equals the live catalog. The editor and `rays`
-check against the live catalog (`Editor_document.Contexts.catalog`): `rays` interprets a `.rays` file,
+check against the live catalog (`Editor_document.Lowering.catalog`): `rays` interprets a `.rays` file,
 so nothing is generated and nothing can be stale.
 
 `bin/rays.ml` is `rays`:
 
 | Command | Does |
 |---|---|
-| `check FILE...` | parses, checks, then evaluates and lowers the document as a window opens it (`Contexts.of_workspace`), so a file that passes opens. Diagnostics print in the compiler's format. A warning fails the file unless the workspace form carries `^:allow-warnings` |
+| `check FILE...` | parses, checks, then evaluates and lowers the document as a window opens it (`Lowering.of_workspace`), so a file that passes opens. Diagnostics print in the compiler's format. A warning fails the file unless the workspace form carries `^:allow-warnings` |
 | (none) | an empty editor; Command-S writes `./untitled.rays`, which a later bare `rays` reopens |
 | `FILE.rays` | opens the workspace in the native editor (`Rays_editor.Workspace.main`); an edit of the file reloads it |
 | `fmt FILE` | prints the canonical text; a file with warnings still formats |
@@ -1508,7 +1508,7 @@ the same paths with the same setting (`specification/web-export/plan.md`, "Nativ
 fast paths"). State, exports,
 cache keys and catalog parameters stay exact (kept for now, 2026-10-26). `:precision "exact"`
 keeps every value bit-identical on the CPU. The editor sets `Gpu.fast` from the setting
-(`Contexts.fast`). recursive_rectangles while its picture changes, median per draw at 600x560
+(`Lowering.fast`). recursive_rectangles while its picture changes, median per draw at 600x560
 (M-series, 2026-10-26, interleaved A/B, 5 rounds): 242 ms before, 82 ms exact, 6.8-7.4 ms with
 the resident fold and 6.7-7.0 ms with per-region readback (equal on this sketch). A display
 region's kernel entry is kept by its site's code (`Workspace_gpu.measure`), a range source is not
@@ -1532,7 +1532,7 @@ dominates successes; unobserved producers remain explicitly pending.
 `approx_reasons` retains structural, actual compilation/emission or pending
 reasons. Inputs/captures changing rebuild conclusions from candidates, with
 no retained residual/program proof cache and no per-frame qualification.
-`Lower.of_checked` publishes this derived metadata, which `Contexts` copies
+`Lower.of_checked` publishes this derived metadata, which `Lowering` copies
 into the current document without replacing edited source.
 
 `image/map` is an authored packed producer too. Its static observation
@@ -2073,7 +2073,7 @@ in [core.md](core.md); its implementation sequence is [web-export/plan.md](web-e
 | `input` | immutable logical frame facts, validation and exact cache equality |
 | `flow_graph` | `Flow_edit`, `Projection`, `Exposure`, `Probe`, independent of geometry |
 | `flow_sop` | `Catalog`, `Manifest`, `Lower`, `Network`, `Port`, `Value_lane`, `Curve` |
-| `editor_document` | `Workspace_doc`, `Layout_by_path`, `Contexts` (scene, World, settings and editor lowering), `Scene_sync`, `Preset` |
+| `editor_document` | `Workspace_doc`, `Layout_by_path`, `Lowering` (scene, World, settings and editor lowering), `Scene_sync`, `Preset` |
 | `pxui_graph` | `Scope` (the pane) and `Node_menu` |
 | `pxui_shell` | the inspector, the list (`Tree`), the status strip and guide |
 | `rays_editor` | the keymap, carry, the text pane, cook scheduling |

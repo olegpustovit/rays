@@ -39,11 +39,11 @@ let prompt_panel ~(value : _ t) ~focus ~keymap ~(frame : Frame.t) ~workspace ~te
   let next = match prompt with
   | None -> None, None
       | Some Keys ->
-      let commands = List.filter (fun (command : Leader.command) -> match command.action with
-        | List_command _ | Frame_tile -> false | _ -> true) Leader.keymap in
-      let context = String.lowercase_ascii (Leader.pane_name focus) ^ " focused" in
-      (if Pxui_shell.Which_key.sheet ui ~context ~category:Leader.sheet_group
-          ~text_keys:Leader.text_keys commands then Some Keys else None), None
+      let commands = List.filter (fun (command : Editor_commands.command) -> match command.action with
+        | List_command _ | Frame_tile -> false | _ -> true) Editor_commands.keymap in
+      let context = String.lowercase_ascii (Editor_commands.pane_name focus) ^ " focused" in
+      (if Pxui_shell.Which_key.sheet ui ~context ~category:Editor_commands.sheet_group
+          ~text_keys:Editor_commands.text_keys commands then Some Keys else None), None
   | Some (Saving name) ->
       (match Pxui_shell.Prompt.name ui ~key:"preset-save"
           ~title:"Save preset" ~description:"Name for the current state of the document"
@@ -202,12 +202,12 @@ let prompt_panel ~(value : _ t) ~focus ~keymap ~(frame : Frame.t) ~workspace ~te
         | _ -> Some (Splitting { panel; axis }), None)
   | Some (Palette query) ->
       (* Every keymap command once per id (undo has several chords). *)
-      let commands = List.fold_left (fun seen (command : Leader.command) ->
-          if command.scope <> None && command.scope <> Some (Leader.scope focus) then seen else
-          if List.exists (fun (c : Leader.command) -> c.id = command.id) seen then seen
+      let commands = List.fold_left (fun seen (command : Editor_commands.command) ->
+          if command.scope <> None && command.scope <> Some (Editor_commands.scope focus) then seen else
+          if List.exists (fun (c : Editor_commands.command) -> c.id = command.id) seen then seen
           else command :: seen) [] keymap |> List.rev in
       search_prompt ~key:"command-palette" ~title:"Commands" ~label:"Search commands" ~query
-        (List.map (fun (c : Leader.command) -> c.label, "", c.action) commands)
+        (List.map (fun (c : Editor_commands.command) -> c.label, "", c.action) commands)
         ~again:(fun q -> Palette q) ~pick:(fun action -> Run_action action) in
   (* A closed prompt must not keep keyboard focus into the next frame. *)
   if fst next = None && prompt <> None then Ui.dismiss_popup ui;
@@ -225,7 +225,7 @@ let settle_layout ~(value : _ t) ~vw ~workspace ~(frame : Frame.t) ~keymap ~shor
     if leaf.panel <> Timeline || leaf.body = (0, 0, 0, 0) then [] else
     Pxui.Ui.within ui box (fun () ->
       Pxui_shell.Chrome.panel_menu ~state:(panel_state value)
-        ~key_of:(fun id -> match List.find_opt (fun (c : Leader.command) -> c.id = id) keymap with
+        ~key_of:(fun id -> match List.find_opt (fun (c : Editor_commands.command) -> c.id = id) keymap with
           | Some {trigger = Some trigger; _} -> Editor_core.Keymap.label trigger | _ -> "")
         ui leaf box ~at:(Pxui.Ui.context_at ui box))) timeline_leaves in
   let workspace, drag_changes = layout_intents vw workspace (grips @ drops @ timeline_menus @ strip_layout) in
@@ -417,7 +417,7 @@ let row_sets, host_rows = List.fold_left (fun (sets, by_host) ((key, _, _, _) as
 let node_menu ~(value : _ t) ~workspace ~(frame : Frame.t) ~actions ~graph_shown =
 (* / a: the node menu of the graph the pane shows *)
 let menu, command_changes =
-  if List.mem Leader.Add_node actions && graph_shown then begin
+  if List.mem Editor_commands.Add_node actions && graph_shown then begin
     let gx, gy, gw, gh = match graph_leaf value (geometry value workspace frame) with
       | Some leaf -> leaf.body | None -> 0, 0, 0, 0 in
     let mx, my = frame.input.pointer in
@@ -452,7 +452,7 @@ let text, text_shown = match Option.bind text_host (text_of value.text) with
   | None -> value.text, None in
 (* the keys of the text (find, go to) wait in the pane's state for its view; nothing without one *)
 let text = if text_shown = None then text else List.fold_left (fun text -> function
-  | Leader.Text_command command -> Text_pane.command text command
+  | Editor_commands.Text_command command -> Text_pane.command text command
   | _ -> text) text actions in
 let other_texts = List.filter_map (fun ((key, path, _, _) as host) ->
   if Some key = value.text_at then None
@@ -463,7 +463,7 @@ let other_texts = List.filter_map (fun ((key, path, _, _) as host) ->
 let set_text_size (value : _ t) actions =
 (* Command +/-/0: the kit text of the panels (the graph pane zooms, viewports have no text) *)
 List.iter (function
-  | Leader.Ui_scale delta ->
+  | Editor_commands.Ui_scale delta ->
       let sizes = [ 8; 9; 10; 11; 12; 13; 14; 16; 18 ] in
       let default = Option.value ~default:5 (List.find_index (( = ) value.text_size) sizes) in
       let here = Option.value ~default (List.find_index (( = ) (Pxui.Ui.font_size value.ui)) sizes) in
@@ -483,7 +483,7 @@ let live_frame, sketch_blocked =
     | Some key -> (match List.assoc_opt key value.pane_keys with
         | Some (panel, _) -> is_picture panel
         | None -> false) in
-  Input.Gate.gate { prompt = value.prompt <> None; menu = value.menu <> None; leader = value.leader <> Leader.Idle;
+  Input.Gate.gate { prompt = value.prompt <> None; menu = value.menu <> None; leader = value.leader <> Editor_commands.Idle;
     text_focus;
     focus_on_picture = is_picture value.focus;
     pointer_on_picture = pane_is_picture;
@@ -505,7 +505,7 @@ let panel_intents ~(value : _ t) ~(leaves : (_ * Pxui_shell.Layout.panel) list) 
   let expand panel = List.filter_map (fun path ->
     if (panel_state value path).collapsed then Some (Pxui_shell.Chrome.Toggle path) else None) (panel_paths panel) in
   let intents = intents @ List.concat_map (function
-    | Leader.Toggle_graph -> toggle Graph
+    | Editor_commands.Toggle_graph -> toggle Graph
     | Toggle_inspector -> toggle Inspector
     | Toggle_timeline -> if panel_paths Timeline = [] then [Pxui_shell.Chrome.Toggle [-1]] else toggle Timeline
     | Open_camera -> expand Inspector
@@ -515,13 +515,13 @@ let panel_intents ~(value : _ t) ~(leaves : (_ * Pxui_shell.Layout.panel) list) 
   let intents = intents @ (match focused_leaf (geometry value workspace frame) focus focus_path with
     | None -> []
     | Some leaf -> List.filter_map (function
-        | Leader.Panel_split axis -> Some (Pxui_shell.Chrome.Split_panel (leaf.path, axis))
+        | Editor_commands.Panel_split axis -> Some (Pxui_shell.Chrome.Split_panel (leaf.path, axis))
         | Panel_close -> Some (Pxui_shell.Chrome.Close_panel leaf.path)
         | Panel_retype (Graph | List | Lisp) when leaf.panel = Graph -> None  (* a view switch, below *)
         | Panel_retype panel -> Some (Pxui_shell.Chrome.Retype_panel (leaf.path, panel))
         | _ -> None) actions) in
   let intents = intents @ List.filter_map (function
-    | Leader.Panel_split_at (path, axis, ratio, panel) -> Some (Pxui_shell.Chrome.Split_panel_at (path, axis, ratio, panel))
+    | Editor_commands.Panel_split_at (path, axis, ratio, panel) -> Some (Pxui_shell.Chrome.Split_panel_at (path, axis, ratio, panel))
     | _ -> None) actions in
   intents
 
@@ -542,17 +542,17 @@ let undo_passed ~(value : _ t) ~text_focus ~modal =
    document under it *)
 let passed = if text_focus && not modal && not (has_draft value) then
     match Pxui.Ui.passed_undo value.ui with
-    | Some `Undo -> [ Leader.Undo ] | Some `Redo -> [ Leader.Redo ] | None -> []
+    | Some `Undo -> [ Editor_commands.Undo ] | Some `Redo -> [ Editor_commands.Redo ] | None -> []
   else [] in
   passed
 
 (* the last command's label, or the leader's pending prefix, for 1.5 seconds *)
-let hud_of ~(value : _ t) ~leader ~(frame : Frame.t) (commands : Leader.command list) =
+let hud_of ~(value : _ t) ~leader ~(frame : Frame.t) (commands : Editor_commands.command list) =
 let hud = match List.rev commands with
   | command :: _ -> Some (Editor_core.Keymap.label (Option.get command.trigger)
       ^ " · " ^ command.label, frame.input.t +. 1.5)
   | [] -> (match leader with
-      | Leader.Pending prefix when leader <> value.leader ->
+      | Editor_commands.Pending prefix when leader <> value.leader ->
           Some ((if prefix = "" then "Space" else "/ " ^ prefix) ^ " · leader", frame.input.t +. 1.5)
       | _ -> value.hud) in
   hud
@@ -561,7 +561,7 @@ let hud = match List.rev commands with
 let live_keymap ~all_ui_visible keymap =
 let keymap = if all_ui_visible then keymap else List.filter (fun command ->
     match command.Editor_core.Command.action with
-    | Leader.List_command _ | Leader.Frame_camera -> false
+    | Editor_commands.List_command _ | Editor_commands.Frame_camera -> false
     | _ -> true) keymap in
   keymap
 
@@ -594,16 +594,16 @@ let update_frame ?gpu ?pump ~image ~host_events ~carry_changed value ~all_ui_vis
   let keymap = live_keymap ~all_ui_visible keymap in
   let held_keys = frame.input.keys in
   let leader, commands, frame = Editor_core.Router.step ~previous_keys:value.held_keys
-      keymap ~focus:(Leader.scope focus) ~text_focus ~frame value.leader in
+      keymap ~focus:(Editor_commands.scope focus) ~text_focus ~frame value.leader in
   let hud = hud_of ~value ~leader ~frame commands in
-  let actions = List.map (fun (command : Leader.command) -> command.action) commands in
+  let actions = List.map (fun (command : Editor_commands.command) -> command.action) commands in
   let hud = match hud with Some (_, until) when frame.input.t >= until -> None | _ -> hud in
-  let guide = List.fold_left (fun guide -> function Leader.Guide_toggle -> not guide
+  let guide = List.fold_left (fun guide -> function Editor_commands.Guide_toggle -> not guide
     | _ -> guide) value.guide actions in
   let passed = undo_passed ~value ~text_focus ~modal in
   let actions = passed @ value.queued @ actions in
   let actions = if carrying then List.filter carry_allowed actions else actions in
-  let copied = if List.mem Leader.Copy_lisp actions then Some (copy_workspace value) else None in
+  let copied = if List.mem Editor_commands.Copy_lisp actions then Some (copy_workspace value) else None in
   set_text_size value actions;
   let steady = if frame.input.dt > 0. && frame.input.dt = value.last_dt then value.steady + 1 else 0 in
   let status_fps, status_fps_at = fps_sample ~value ~frame in
@@ -639,10 +639,10 @@ let update_frame ?gpu ?pump ~image ~host_events ~carry_changed value ~all_ui_vis
   let text_host, text, text_shown, other_texts = text_state ~value ~actions ~pane_of ~text_hosts:(hosted `Text) in
   let scope_active = graph_shown && scope_name value <> None in
   let scope_view, scope_command_changes = List.fold_left (fun (view, changes) -> function
-    | Leader.Scope_command command when scope_active ->
+    | Editor_commands.Scope_command command when scope_active ->
         let view, emitted = Pxui_graph.Scope.run_command view command in
         view, changes @ emitted
-    | Leader.Open_camera -> Pxui_graph.Scope.clear_selection view, changes
+    | Editor_commands.Open_camera -> Pxui_graph.Scope.clear_selection view, changes
     | _ -> view, changes) ((pane_view value), []) actions in
   let menu, command_changes = node_menu ~value ~workspace ~frame ~actions ~graph_shown in
   let displayed = match pane_level value with
@@ -654,19 +654,19 @@ let update_frame ?gpu ?pump ~image ~host_events ~carry_changed value ~all_ui_vis
     |> List.sort (fun a b -> if Some a = Selection.selected selection then -1
       else if Some b = Selection.selected selection then 1 else Int.compare a b) in
   let tree, list_intents = List.fold_left (fun (tree, intents) -> function
-    | Leader.List_command Pxui_shell.Tree.Activate_row -> tree, intents
-    | Leader.List_command command when graph_shown ->
+    | Editor_commands.List_command Pxui_shell.Tree.Activate_row -> tree, intents
+    | Editor_commands.List_command command when graph_shown ->
         let tree, emitted = Pxui_shell.Tree.run_command tree rows
             ~selected:(selected ()) command in
         tree, intents @ emitted
     | _ -> tree, intents) (tree, []) actions in
   let open_graph = if not graph_shown then None else
     List.find_map (function
-      | Leader.List_command Pxui_shell.Tree.Activate_row when listing ->
+      | Editor_commands.List_command Pxui_shell.Tree.Activate_row when listing ->
           (match Pxui_shell.Tree.focused tree with
            | Some id -> Some id | None -> Selection.selected selection)
       | _ -> None) actions in
-  let initial_frame_request = if not (List.mem Leader.Frame_camera actions) then None else displayed in
+  let initial_frame_request = if not (List.mem Editor_commands.Frame_camera actions) then None else displayed in
     let carry_lit, carry_hot = carry_marks value in
   let build ui =
     (* Chrome first: panel backgrounds, splitters and headers.  Its intents fold into the
@@ -691,7 +691,7 @@ let update_frame ?gpu ?pump ~image ~host_events ~carry_changed value ~all_ui_vis
       fst (Pxui_shell.Chrome.header_slots leaf (header_groups leaf)) in
     let intents = Pxui_shell.Chrome.update ~state:(panel_state value) ~hidden:workspace.hidden ~title:(panel_title vw)
         ~groups:header_groups
-        ~key_of:(fun id -> match List.find_opt (fun (c : Leader.command) -> c.id = id) keymap with
+        ~key_of:(fun id -> match List.find_opt (fun (c : Editor_commands.command) -> c.id = id) keymap with
           | Some { trigger = Some trigger; _ } -> Editor_core.Keymap.label trigger | _ -> "")
         ?focus:header_focus (shell_tree value workspace) ui shortcut_frame in
     (* where a header's tools begin: after its title as the chrome laid it out *)
@@ -711,7 +711,7 @@ let update_frame ?gpu ?pump ~image ~host_events ~carry_changed value ~all_ui_vis
       draw_graph_header ~ui ~value:vw ~geometry:g ~graph_host ~header_slots ~tools_from in
     let root order (leaf : Pxui_shell.Layout.leaf) =
       let box = Pxui_shell.Chrome.pane_root ui frame ~bounds:leaf.body
-        ("workspace-pane-" ^ Leader.pane_name leaf.panel ^ Pxui_shell.Chrome.key leaf.path) in
+        ("workspace-pane-" ^ Editor_commands.pane_name leaf.panel ^ Pxui_shell.Chrome.key leaf.path) in
       if leaf.floating then Pxui.Ui.to_front ui ~order box;
       box in
     let roots = List.mapi (fun order leaf -> leaf, root order leaf) g.leaves in
@@ -752,14 +752,14 @@ let update_frame ?gpu ?pump ~image ~host_events ~carry_changed value ~all_ui_vis
     let changes = pane_changes ~value ~vw ~command_changes ~scope_changes ~menu_pick ~outline_intents in
     (* a layout row and the add button are commands: they run like a toolbar click *)
     let outline_action = List.fold_left (fun action -> function
-      | Navigator.Layout index -> Some (Leader.Layout_switch index)
-      | Add -> Some Leader.Add_node
+      | Navigator.Layout index -> Some (Editor_commands.Layout_switch index)
+      | Add -> Some Editor_commands.Add_node
       | _ -> action) None outline_intents in
     (* a click on an earlier part of the graph header's route goes back that far *)
     let crumb_action = List.find_map (function
       | Pxui_shell.Chrome.Crumb (path, index) when (pane_route value) <> [] && List.mem (path, Pxui_shell.Layout.Graph) leaves ->
           let steps = min 3 (List.length (pane_route value) + 1) - 1 - index in
-          if steps > 0 then Some (Leader.Back steps) else None
+          if steps > 0 then Some (Editor_commands.Back steps) else None
       | _ -> None) intents in
     (* the latest of the four is the command, as when each overwrote the one before *)
     let bar_action = List.fold_left (fun latest action -> if action = None then latest else action) None
@@ -794,7 +794,7 @@ let update_frame ?gpu ?pump ~image ~host_events ~carry_changed value ~all_ui_vis
       ~lowered_level ~scope_active ~active ~view_root ~view_handles ui in
     let changes = changes @ handle_ops in
     let context = match leader with
-      | Leader.Pending _ -> Editor_core.Guide_context.Leader
+      | Editor_commands.Pending _ -> Editor_core.Guide_context.Leader
       | Idle when value.prompt <> None || menu <> None
           || Pxui_graph.Scope.editing scope_view -> Search
       | Idle when listing -> List
@@ -818,15 +818,15 @@ let update_frame ?gpu ?pump ~image ~host_events ~carry_changed value ~all_ui_vis
       settings_changes; graph_panes; locals; other_texts;
       handle_changes; bar_action; view_pick; drops = inspector_drops @ viewport_drops } in
   let leader_panel = match leader with
-    | Leader.Pending prefix -> Some (fun ui ->
-        Pxui_shell.Which_key.panel ui ~category:Leader.group ~describe:Leader.describe_prefix ~order:Leader.order keymap ~prefix
-          ~focus:(Leader.scope focus) ~focus_name:(Leader.pane_name focus))
+    | Editor_commands.Pending prefix -> Some (fun ui ->
+        Pxui_shell.Which_key.panel ui ~category:Editor_commands.group ~describe:Editor_commands.describe_prefix ~order:Editor_commands.order keymap ~prefix
+          ~focus:(Editor_commands.scope focus) ~focus_name:(Editor_commands.pane_name focus))
     | Idle -> None in
   (* Presets: / s names and saves the document, / b browses, loads
      (Enter), and deletes (Delete twice). A load replaces the document below
      as one undo entry. *)
   let initial_prompt = List.fold_left (fun prompt -> function
-    | Leader.Save_preset -> Some (Saving (Preset.default_name ~now:(value.clock ())))
+    | Editor_commands.Save_preset -> Some (Saving (Preset.default_name ~now:(value.clock ())))
     | Browse_presets ->
         browse value ""
     | Guide_keys -> Some Keys

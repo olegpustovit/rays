@@ -152,7 +152,7 @@ let keymap = [
   command ~id:"scene.jump" ~label:"jump to graph" ~trigger:(Leader "j") Jump;
   command ~id:"text.definition" ~label:"go to definition" ~trigger:(Chord (Input.F12, [])) (Text_command Definition);
   command ~id:"text.references" ~label:"find references" ~trigger:(Chord (Input.F12, [Input.Shift])) (Text_command References);
-  (* carry: y picks up; the target letters, Enter and Escape are read by [Core] while it lasts *)
+  (* carry: y picks up; the target letters, Enter and Escape are read by [Editor_frame] while it lasts *)
   command ~guide:Editor_core.Guide_context.[Canvas; Node; Multi; List] ~id:"carry.pick-up"
     ~label:"pick up (carry it onto a place)" ~trigger:(Chord (Input.KeyChar 'y', [])) Pick_up;
   command ~guide:Editor_core.Guide_context.[Canvas; Node; Multi; List] ~id:"scene.up" ~label:"back (up a level)"

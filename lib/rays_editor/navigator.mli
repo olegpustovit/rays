@@ -5,7 +5,7 @@
     the data flow around it. Its behavior is specified in [specification/flow.md].
 
     Pure state and rows; {!view} draws inside [Pxui.Ui.frame] and returns intents that
-    [Core] applies after the frame. *)
+    [Editor_frame] applies after the frame. *)
 
 type path = Flow.Workspace.path
 

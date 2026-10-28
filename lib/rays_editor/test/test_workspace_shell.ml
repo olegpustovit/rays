@@ -6,7 +6,7 @@ open Rays
 open Sop
 module Doc = Editor_document.Workspace_doc
 module Document = Editor_document.Document
-module Contexts = Editor_document.Contexts
+module Lowering = Editor_document.Lowering
 module Kinds = Editor_document.Kinds
 module Panels = Editor_core.Panels
 module Layout = Pxui_shell.Layout
@@ -22,7 +22,7 @@ let show ds = String.concat "; " (List.map Diagnostic.to_string ds)
 open Test_text
 
 let of_text text = match Doc.of_text catalog text with Ok d -> d | Error ds -> fail (show ds)
-let build ?previous ws = Contexts.of_workspace ~factories ?previous ws
+let build ?previous ws = Lowering.of_workspace ~factories ?previous ws
 let build_ok ws = match build ws with Ok d -> d | Error d -> fail (Diagnostic.to_string d)
 let replace text from by =
   let n = String.length from in
@@ -2100,12 +2100,12 @@ let run_carry_reaches_no_history () =
   let preview = E.Set_arg { node = [ "scene"; "side" ]; key = E.Kw "fov"; sub = []; value = S.make (S.Num "40.0") } in
   let before = source e in
   let stepped = Rays_editor.Reduce.step e ~select:[ side ] ~preview
-      [ Rays_editor.Private.Leader.Enter ] (frame (450., 300.) [] 3) in
+      [ Rays_editor.Private.Editor_commands.Enter ] (frame (450., 300.) [] 3) in
   check (E3.carrying stepped <> None) "the reducer dropped the carry";
   check (not (E3.can_undo stepped))
     ("entering a camera during a carry reached the history: " ^ Option.value ~default:"-" (E3.undo_label stepped));
   (* without the carry the same keys do make the camera the render camera: the test reaches the path *)
-  let entered = Rays_editor.Reduce.step e ~select:[ side ] [ Rays_editor.Private.Leader.Enter ] (frame (450., 300.) [] 3) in
+  let entered = Rays_editor.Reduce.step e ~select:[ side ] [ Rays_editor.Private.Editor_commands.Enter ] (frame (450., 300.) [] 3) in
   check (E3.can_undo entered && has (source entered) ":camera side" && source e = before)
     ("Enter on a camera did not make it the render camera: " ^ source entered);
   E3.close e
@@ -2461,7 +2461,7 @@ let run_outline_button () =
   (graph editor :context editor (ui/workspace (ui/graph "g" :focus true))))|}) and count = ref 0 in
   let step mouse events = incr count; e := E3.update !e (frame mouse events !count) in
   for _ = 1 to 4 do step (200., 300.) [] done;
-  let leaf () = match Contexts.of_workspace ~factories (E3.workspace !e) with
+  let leaf () = match Lowering.of_workspace ~factories (E3.workspace !e) with
     | Ok d -> Layout.find (Layout.geometry (Option.get d.Document.shell).tree (frame (0., 0.) [] 0)) Layout.Graph
     | Error d -> fail (Diagnostic.to_string d) in
   let header = (Option.get (leaf ())).header in

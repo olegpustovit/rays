@@ -1,6 +1,6 @@
 open Rays
 open Editor_document
-open Environment_model
+open Loop_model
 
 (* The source file, at most every half second: a changed text reloads the document.  Unsaved work
    is never replaced: while the document differs from the file's last text or a text pane holds a
@@ -33,7 +33,7 @@ let open_import value (update : (_, _) Core_model.update) = match update.core.Co
 let open_dialog value (update : (_, _) Core_model.update) events =
   let notice kind text = { update with core = { update.core with Core_model.notice = Some (kind, text) } } in
   let value, update = match value.source with
-    | _ when not (List.mem Leader.Open_source update.actions) -> value, update
+    | _ when not (List.mem Editor_commands.Open_source update.actions) -> value, update
     | None -> value, notice Core_model.Refusal "This editor was not opened from a .rays file."
     | Some source ->
         (match Sketch.show_file_dialog ~filters:[ "Rays sketch", [ "rays" ] ]
@@ -57,7 +57,7 @@ let reload_source value (update : (_, _) Core_model.update) ~now = match value.s
         { update.core with Core_model.notice = Some (match file.error with
           | Some message -> Core_model.Refusal, "Source unreadable: " ^ message
           | None -> Core_model.Info, "Source readable again: " ^ name) } in
-      let forced = List.mem Leader.Reload_source update.actions in
+      let forced = List.mem Editor_commands.Reload_source update.actions in
       let text = match read, value.held with
         | Some _, _ -> read
         | None, None when forced -> Result.to_option (Editor_core.Store.read_text ~filename:(Source_file.file file))

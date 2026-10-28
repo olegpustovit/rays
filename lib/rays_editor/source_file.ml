@@ -6,7 +6,7 @@
 type t = { file : string; digest : string; observed : string option; polled : float;
            error : string option; imports : (string * t) list }
 
-let sha = Editor_document.Contexts.sha256
+let sha = Editor_document.Lowering.sha256
 let stat file = try Some (Unix.stat file) with Unix.Unix_error _ -> None
 let read file = Editor_core.Store.read_text ~filename:file
 

@@ -278,9 +278,9 @@ let carry_tests () =
   let ws = ref (E3.workspace !e) in
   step [];
   (* y is a plain key nothing else uses *)
-  check (List.length (List.filter (fun (c : Rays_editor.Private.Leader.command) -> match c.trigger with
+  check (List.length (List.filter (fun (c : Rays_editor.Private.Editor_commands.command) -> match c.trigger with
     | Some (Editor_core.Keymap.Chord (Input.KeyChar 'y', [])) -> true | _ -> false)
-    Rays_editor.Private.Leader.keymap) = 1) "y picks up and no other command takes it";
+    Rays_editor.Private.Editor_commands.keymap) = 1) "y picks up and no other command takes it";
   (* the outline row of a graph, in screen points, as the Navigator draws it now *)
   let catalog = get (Rays_editor.workspace_catalog ()) in
   let row_of graph =

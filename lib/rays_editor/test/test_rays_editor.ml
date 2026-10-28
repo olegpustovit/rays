@@ -387,17 +387,17 @@ let native_smoke () =
   end
 
 let layout_panes () =
-  let module Leader = Rays_editor.Private.Leader in
+  let module Editor_commands = Rays_editor.Private.Editor_commands in
   List.iter (fun (graph : _ Editor_core.Command.t) ->
-    check (List.exists (fun (command : Leader.command) ->
+    check (List.exists (fun (command : Editor_commands.command) ->
       command.id = graph.id && command.trigger = graph.trigger
-      && command.action = Leader.Scope_command graph.action) Leader.keymap)
+      && command.action = Editor_commands.Scope_command graph.action) Editor_commands.keymap)
       "graph command missing from the host keymap") Pxui_graph.Scope.bindings;
-  let camera_binding key action = List.exists (fun (command : Leader.command) ->
+  let camera_binding key action = List.exists (fun (command : Editor_commands.command) ->
     command.trigger = Some (Editor_core.Keymap.Leader key)
-    && command.action = action) Leader.keymap in
-  check (camera_binding "h" Leader.Hide_ui
-      && camera_binding "c" Leader.Open_camera)
+    && command.action = action) Editor_commands.keymap in
+  check (camera_binding "h" Editor_commands.Hide_ui
+      && camera_binding "c" Editor_commands.Open_camera)
     "camera visibility commands missing from the host keymap";
   let module Layout = Pxui_shell.Layout in
   let workspace = Pxui_shell.Layout.default in

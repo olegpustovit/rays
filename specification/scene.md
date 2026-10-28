@@ -213,7 +213,7 @@ so playback and `Sketch.export` with `Fixed dt` are deterministic. See
 - Ghosting is a blend, not a material override.
 - Reparenting drops shear (a non-uniformly scaled parent).
 - A scene has one World (`E_SCENE_WORLD`). A viewport over another scene instance renders as that
-  instance's own root (`Contexts.instance_root`: renderer, resolution, `max_spp`, bounces, round
+  instance's own root (`Lowering.instance_root`: renderer, resolution, `max_spp`, bounces, round
   samples, and the camera object its `:camera` names; `Document.view_roots`, `Core.view_root_opt`,
   `Renderer.setting` per viewport slot, so a raster and a path-traced viewport can sit side by side)
   and shows that instance's own World (`Document.view_worlds`: the node and the layers of the

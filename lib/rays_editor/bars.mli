@@ -1,5 +1,5 @@
 (** The host bar of the workspace: the graph panel's toolbar (Add, Repeat, Iterate, function, macro, defn, Outline).  Buttons only
-    report a click; [Core] maps it to the one command or edit it means. *)
+    report a click; [Editor_frame] maps it to the one command or edit it means. *)
 
 type tool = Add | Repeat | Iterate | Fn | Macro | Defn | Outline
 

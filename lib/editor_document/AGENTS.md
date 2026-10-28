@@ -12,7 +12,7 @@ it. Selection, navigation, cooking and history policy belong to the host. Root r
 | `Workspace_doc`, `Layout_by_path` | The authored truth: source, checked workspace, layout by path, settings. `edit` applies one `Flow_edit.op` atomically and remaps layout keys |
 | `Document` | The document: `workspace` (the text and its `Lower.t`), and what lowering derives (`scene`, `networks`, `layers`, `shell`, `root`, `homes`, `view_worlds`, `view_roots`) |
 | `Kind_graph` | The scene's objects and a World's layers as plain data: kinds (a `Param` schema and descriptor) and their instances, each with at most one input. No SOP node, session or cook |
-| `Contexts` | The scene, world, settings and editor kinds generated from the schemas, and `of_workspace`, which builds a document |
+| `Lowering` | The scene, world, settings and editor kinds generated from the schemas, and `of_workspace`, which builds a document |
 | `Scene_sync` | Derived scene and World edits written back to the text |
 | `Objects`, `Layers`, `Settings` | The schemas and their kinds |
 | `Panel_kinds` | The editor's panel table: the form each panel kind writes in a layout gesture |
@@ -25,7 +25,7 @@ it. Selection, navigation, cooking and history policy belong to the host. Root r
 - **Levels** are `Scene | Inside of int`. `Document.resolve_level` is total: a level that is gone
   is the scene.
 - **Kinds come from schemas.** Add a field to a schema and it is a keyword; do not hand-write
-  per-kind Lisp glue in `Contexts`. The catalog is kept for the last factories list (capacity 1).
+  per-kind Lisp glue in `Lowering`. The catalog is kept for the last factories list (capacity 1).
 - **Homes.** `Document.homes` says where each derived object is written: `Bound_at` a binding,
   `Inline_in` an argument (unfolded into a binding before an edit), `Copy` of a loop's template,
   `Looped`. Ids are claimed by home, then by operation and label, so a rename keeps the id.
@@ -52,7 +52,7 @@ it. Selection, navigation, cooking and history policy belong to the host. Root r
   once by `Flow_edit.fresh_among`.
 - **Not SOP nodes.** Scene, World and settings kinds are `Kind_graph` instances, never a
   `Sop.Node`: they do not cook. Their ids are their own, apart from any SOP node id.
-- **The root.** `scene/root` is not an object of the scene: `Contexts` reads it into
+- **The root.** `scene/root` is not an object of the scene: `Lowering` reads it into
   `Document.root` and `homes.root`. The first edit of a render setting writes one. `E_SCENE_ROOT`,
   `E_SCENE_WORLD` and `E_SCENE_CAMERA` are raised while lowering, so a gesture that would cause
   one is refused whole.
@@ -61,7 +61,7 @@ it. Selection, navigation, cooking and history policy belong to the host. Root r
 - **Physical identity.** `of_workspace ~previous` keeps an unchanged scene, object network,
   World layers and settings physically, so an edit elsewhere recomposes nothing. Find an object's
   graph with `Document.object_graph`, which does not rely on identity alone.
-- **The shell.** `Contexts.editor` evaluates the editor graph named by `layout.editor` (default:
+- **The shell.** `Lowering.editor` evaluates the editor graph named by `layout.editor` (default:
   the first) into `Document.shell`. Origins come from walking the checked terms, never from
   string search. An evaluation or tree error refuses the whole document. Panel disclosure and
   window bounds are `Layout_by_path.panels`.

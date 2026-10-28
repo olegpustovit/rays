@@ -176,7 +176,7 @@ let ()=
   Out_channel.with_open_bin source(fun ch->output_string ch initial);
   let doc=load initial in
   let owner=ref(Result.get_ok(Editor.create ~ui_text_size:11 ~workspace:doc ~await:true ~domains:1
-    ~source:(Rays_editor.Source.at ~file:source ~digest:(Editor_document.Contexts.sha256 initial))
+    ~source:(Rays_editor.Source.at ~file:source ~digest:(Editor_document.Lowering.sha256 initial))
     ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene.D3.empty)()))in
   Fun.protect ~finally:(fun()->Editor.close !owner;Sys.remove source)(fun()->
     Editor.Private.gpu_qualification !owner;
@@ -412,7 +412,7 @@ let ()=
   let initial=text 65 17 "(* t 16)"in
   Out_channel.with_open_bin source(fun ch->output_string ch initial);
   let owner=ref(Result.get_ok(Editor.create ~ui_text_size:11 ~workspace:(load initial) ~await:true ~domains:1
-    ~source:(Rays_editor.Source.at ~file:source ~digest:(Editor_document.Contexts.sha256 initial))
+    ~source:(Rays_editor.Source.at ~file:source ~digest:(Editor_document.Lowering.sha256 initial))
     ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene.D3.empty)()))in
   let destination=Rays.Canvas.create_exn ~width:65 ~height:17 in
   Fun.protect ~finally:(fun()->ignore(Rays.Canvas.destroy destination);Editor.close !owner;Sys.remove source)(fun()->

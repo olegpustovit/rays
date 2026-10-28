@@ -3,9 +3,9 @@ open Rays
 open Editor_document
 open Sop
 open World_map
-open Environment_source
-open Environment_model
-open Environment_view
+open Loop_source
+open Loop_model
+open Loop_view
 
 (* each canvas panel's picture: reused while its plan, size and preview stand, else rendered *)
 let canvas_pictures ~context_error ~value ~input ~(raw_frame : Frame.t) ~(core : _ Core_model.t) ~control () =
@@ -47,13 +47,13 @@ let canvas_pictures ~context_error ~value ~input ~(raw_frame : Frame.t) ~(core :
              ~some:(fun picture -> picture.size = (w, h) && picture.preview = preview) previous ->
              (key, Option.get previous) :: pictures, error
          | Some drawing ->
-             let gpu=Flow_native.Workspace_gpu.config ~fast:(Editor_document.Contexts.fast core.doc) value.host.gpu in
+             let gpu=Flow_native.Workspace_gpu.config ~fast:(Editor_document.Lowering.fast core.doc) value.host.gpu in
              let prepared = match previous with
                | Some {prepared = Some p; preview = held; _} when same_plan && held = preview -> Ok p
                | _ -> Flow_native.Drawing.prepare ~gpu ~profile:lowered.profile
                    ~approx:(core.doc.workspace.ws).checked.approx ~states:lowered.states lowered.plan drawing in
              (match Result.bind prepared (fun p -> Result.map (fun scene -> p, scene)
-                 (Flow_native.Workspace_gpu.with_backend ~fast:(Editor_document.Contexts.fast core.doc) value.host.gpu(fun gpu->Flow_native.Drawing.render_prepared ~state:core.cook.state
+                 (Flow_native.Workspace_gpu.with_backend ~fast:(Editor_document.Lowering.fast core.doc) value.host.gpu(fun gpu->Flow_native.Drawing.render_prepared ~state:core.cook.state
                    ~gpu:(Flow_native.Workspace_gpu.marks value.host.gpu) ?resident:(Flow_native.Workspace_gpu.resident gpu value.host.gpu)
                    ~image:(Flow_native.Workspace_images.image ~gpu value.host.images ~state:core.cook.state ~live:input lowered.plan)
                    p ~live:input ~size:(w, h)))) with
@@ -83,7 +83,7 @@ let update_with value frame ~inspector =
       extra ~bounds:(V.film extra ~key:(focus_key value) bounds) in
   let lowered = value.core.doc.workspace.lowered in
   Flow_native.Workspace_images.bind value.host.images lowered;
-  let image_gpu=Flow_native.Workspace_gpu.config ~fast:(Editor_document.Contexts.fast value.core.doc) value.host.gpu and live={(Flow_native.Live_frame.of_frame frame) with t=Timeline.time(Core_list.timeline value.core)}in
+  let image_gpu=Flow_native.Workspace_gpu.config ~fast:(Editor_document.Lowering.fast value.core.doc) value.host.gpu and live={(Flow_native.Live_frame.of_frame frame) with t=Timeline.time(Core_list.timeline value.core)}in
   let image_errors=ref [] in
   let preview image=match Flow_native.Workspace_images.image ~gpu:image_gpu value.host.images ~state:value.core.cook.state ~live lowered.plan image with
     |Ok _->()|Error diagnostic->image_errors:=Diagnostic.to_string diagnostic:: !image_errors in
@@ -101,7 +101,7 @@ let update_with value frame ~inspector =
    |_->());
   let update = Flow_native.Workspace_gpu.with_backend value.host.gpu (fun gpu -> Flow_sop.Lower.with_images ~gpu
     ~metadata:(fun plan id->Option.map Rays.Image.dimensions(Flow_native.Workspace_images.peek value.host.images plan id))
-    (Flow_native.Workspace_images.payload value.host.images)(fun()->Core.update ~gpu
+    (Flow_native.Workspace_images.payload value.host.images)(fun()->Editor_frame.update ~gpu
       ~pump:(fun()->Flow_native.Workspace_gpu.pump value.host.gpu) ~image:(Flow_native.Workspace_images.peek value.host.images lowered.plan)
       ~host_events:(Flow_native.Workspace_host.take_events value.host) value.core ~all_ui_visible:visible
       ~text_focus:(Pxui.Ui.text_input_focused ui) ~camera_panel ~view_handles
@@ -130,7 +130,7 @@ let update_with value frame ~inspector =
   let previous_camera = if update.loaded_view = None then focused.camera else camera in
   let control, extra, render_status = List.fold_left
       (fun (control, extra, status) -> function
-        | Leader.Hide_ui -> V.toggle_ui control, extra, status
+        | Editor_commands.Hide_ui -> V.toggle_ui control, extra, status
         | Open_camera -> V.open_camera control, extra, status
         | action ->
             let extra, notice = V.apply_action camera extra action in
@@ -139,7 +139,7 @@ let update_with value frame ~inspector =
   let core = V.on_doc ~previous:value.core core camera in
   (* Command-S with a draft in a text pane applies it first; one that does not check keeps the
      save waiting, since the file would not have what the pane shows *)
-  let core, source = if not (List.mem Leader.Save_source update.actions) then core, value.source else
+  let core, source = if not (List.mem Editor_commands.Save_source update.actions) then core, value.source else
     match Core_text.apply_drafts ?except:value.refused core with
     | Ok core -> save_source core value.source (V.section camera extra)
     | Error core ->
@@ -154,7 +154,7 @@ let update_with value frame ~inspector =
   let world_drag = if update.loaded_view <> None
       || (Core_model.pane_level core) <> (Core_model.pane_level value.core)
       || core.Core_model.map_view <> value.core.Core_model.map_view
-      || List.exists (function Leader.Undo | Redo | Hide_ui -> true | _ -> false) update.actions
+      || List.exists (function Editor_commands.Undo | Redo | Hide_ui -> true | _ -> false) update.actions
     then None else value.world_drag in
   let modifiers = ref (Input.keys_before ~previous:value.core.Core_model.held_keys
     ~held:update.input.input.keys update.input.input.events) in
@@ -224,7 +224,7 @@ let update_with value frame ~inspector =
     | Some None -> camera, Some "Nothing to frame: no cooked points"
     | None -> camera, render_status in
   let core, camera, extra = V.on_view core ~previous:previous_camera ~key:(focus_key focused) camera extra
-      ~stepped:(List.exists (function Leader.Undo | Redo -> true | _ -> false) update.actions) in
+      ~stepped:(List.exists (function Editor_commands.Undo | Redo -> true | _ -> false) update.actions) in
   let ends_pointer = function
       | Input.Pointer_released (Input.LeftButton, _) | Pointer_cancelled Input.LeftButton
       | Focus_lost -> true | _ -> false in
@@ -253,7 +253,7 @@ let update_with value frame ~inspector =
         let previous = match value.resolved with
           | Some (doc, _, scene) when same_context doc core.doc -> Some scene
           | _ -> None in
-        let scene, errors = Contexts.resolve_scene ?previous ~state:core.cook.state ~live:input
+        let scene, errors = Lowering.resolve_scene ?previous ~state:core.cook.state ~live:input
           core.doc ~time in
         scene, (if errors = [] then None else Some (String.concat "; "
           (List.map Diagnostic.to_string errors))) in
@@ -372,7 +372,7 @@ let crash_dump value directory =
       (match Pxui_graph.Scope.selected (Core_model.pane_view core) with
        | [] -> "-"
        | paths -> String.concat ", " (List.map (String.concat "/") paths))
-      (Leader.pane_name core.focus) (Core_status.prompt_name core)
+      (Editor_commands.pane_name core.focus) (Core_status.prompt_name core)
       (Editor_core.History.label history) (Editor_core.History.depth history)
       (Option.value ~default:"-" (Editor_core.History.redo_label history))
       (Core_status.status_text core)

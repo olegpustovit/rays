@@ -14,7 +14,7 @@ let carry_rest = 0.6  (* seconds the pointer rests on a node before the carry en
 
 (* While a payload is carried the document only navigates: the keys that walk, follow, go back and
    jump work; every edit waits for the put. *)
-let carry_allowed : Leader.action -> bool = function
+let carry_allowed : Editor_commands.action -> bool = function
   | Enter | Up | Back _ | Jump | Guide_toggle | Guide_keys | Frame_tile | Pick_up
   | Scope_command (Pxui_graph.Scope.Walk _ | Frame_all | Frame_selection) -> true
   | _ -> false
@@ -138,7 +138,7 @@ let carry_step value ~text_focus (frame : Frame.t) =
        | None -> value, frame, false)
   | Some c ->
       let pressed = List.filter_map (function Input.Key_pressed k -> Some k | _ -> None) frame.input.events in
-      let idle = value.leader = Leader.Idle in
+      let idle = value.leader = Editor_commands.Idle in
       let escape = idle && List.mem Input.Escape pressed
       and lost = List.exists (function Input.Focus_lost -> true | _ -> false) frame.input.events in
       let typing = (not text_focus) && idle && value.prompt = None && value.menu = None in

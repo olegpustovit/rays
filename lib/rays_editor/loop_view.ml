@@ -63,7 +63,7 @@ let worlds ~paint_view ~camera ~rendered ~views ~view_visible bodies =
       bounds) bodies
 
 let hidden_only ~ui_visible core =
-  not ui_visible && core.Core_model.leader = Leader.Idle
+  not ui_visible && core.Core_model.leader = Editor_commands.Idle
 
 (* The fully hidden scene, reused while its inputs are physically unchanged
    so the renderer sees the same [Scene.t]. *)

@@ -175,7 +175,7 @@ let focused_leaf (g : Pxui_shell.Layout.geometry) focus path =
       (* the tree changed under the focus: a split moves the leaf a level down (and a viewport's
          key follows its path), a retype leaves another kind at the path.  The leaf of that kind
          under the old path, else the leaf now at the path, else the first of the kind. *)
-      let kind (l : Pxui_shell.Layout.leaf) = Leader.scope l.panel = Leader.scope focus in
+      let kind (l : Pxui_shell.Layout.leaf) = Editor_commands.scope l.panel = Editor_commands.scope focus in
       let rec under prefix path = match prefix, path with
         | [], _ -> true | a :: p, b :: q -> a = b && under p q | _ :: _, [] -> false in
       let first f = List.find_opt f g.leaves in
@@ -218,7 +218,7 @@ let layout_actions value (workspace : shell) ~(leaf : Pxui_shell.Layout.leaf opt
     | Ok panel -> edit (fun graph -> Layout_edit.Layout_window { graph; panel })
     | Error message -> [ Declined message ] in
   List.concat_map (function
-    | Leader.Layout_switch index when Option.is_some (Option.bind value.doc.Document.shell (fun s -> s.switch)) ->
+    | Editor_commands.Layout_switch index when Option.is_some (Option.bind value.doc.Document.shell (fun s -> s.switch)) ->
         edit (fun graph -> Layout_edit.Set_layout { graph; index })
     | Layout_switch index -> (* an older file: several editor graphs *)
         (match List.nth_opt (layouts value) index with Some (name, _) -> [ Select_layout name ] | None -> [])

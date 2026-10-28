@@ -206,7 +206,7 @@ let object_edits ~before ~after id (nb : G.node) (na : G.node) =
   name @ under @ differing ~before:nb na
 
 let homed (doc : Document.t) id = match List.assoc_opt id doc.homes.objects with
-  | Some Document.Looped -> Contexts.graph_of (doc.workspace.ws) Flow.Context.scene <> None
+  | Some Document.Looped -> Lowering.graph_of (doc.workspace.ws) Flow.Context.scene <> None
   | Some _ -> true
   | None -> false
 
@@ -359,12 +359,12 @@ let adopt_objects st (doc : Document.t) =
   let graph = Document.scene_graph doc in
   let unhomed = List.filter (fun (i : G.node) ->
     i.kind <> "world" && not (homed doc i.id)) graph in
-  if unhomed = [] && Contexts.graph_of st.workspace Flow.Context.scene = None then
+  if unhomed = [] && Lowering.graph_of st.workspace Flow.Context.scene = None then
     apply st (F.Set_graph { name = "scene"; form = graph_form "scene" "scene" (mk (S.List [ sym "scene/merge" ])) });
   if unhomed <> [] then begin
     let used = ref (owned st.workspace) in
     let bindings = List.map (fun (i : G.node) -> object_binding doc used i.id i) unhomed in
-    match Contexts.graph_of st.workspace Flow.Context.scene with
+    match Lowering.graph_of st.workspace Flow.Context.scene with
     | None ->
         let names = List.map (fun (n, _) -> sym n) bindings in
         let body = let_star bindings (mk (S.List (sym "scene/merge" :: names))) in
@@ -451,8 +451,8 @@ let root_edits ~before ~after =
 (* a scene with no [scene/root] writes one over its result on the first edit of a render setting
    (only what differs from the defaults), the scene graph made first when there is none *)
 let adopt_root st (doc : Document.t) root =
-  if Contexts.graph_of st.workspace Flow.Context.scene = None then adopt_objects st doc;
-  let scene = (Option.get (Contexts.graph_of st.workspace Flow.Context.scene)).name in
+  if Lowering.graph_of st.workspace Flow.Context.scene = None then adopt_objects st doc;
+  let scene = (Option.get (Lowering.graph_of st.workspace Flow.Context.scene)).name in
   let changed = root_edits ~before:Objects.Root.default ~after:root in
   let expr = mk (S.List (sym "scene/root" :: List.concat_map (fun (key, value) ->
     [ mk (S.Kw key); Option.get value ]) changed)) in
@@ -657,7 +657,7 @@ let write ~factories (doc : Document.t) level edit =
     if st.workspace == doc.workspace.ws then Ok (Some (doc, note))
     else if st.workspace.source == (doc.workspace.ws).source then
       Ok (Some ({ doc with workspace = { doc.workspace with ws = st.workspace } }, note))
-    else Result.map (fun doc -> Some (doc, note)) (Contexts.of_workspace ~factories ~previous:doc st.workspace
+    else Result.map (fun doc -> Some (doc, note)) (Lowering.of_workspace ~factories ~previous:doc st.workspace
                                                    |> Result.map_error Diagnostic.to_string)
   with Stop message -> Error message
 
@@ -689,7 +689,7 @@ let run ~factories ~adopt (before : Document.t) (after : Document.t) =
       object_changes st before (Document.scene_graph after);
       if adopt && unhomed_changes before after then adopt_objects st after;
       if st.workspace == before.workspace.ws then Ok after
-      else Contexts.of_workspace ~factories ~previous:after st.workspace
+      else Lowering.of_workspace ~factories ~previous:after st.workspace
            |> Result.map_error Diagnostic.to_string
     with Stop message -> Error message
 
@@ -705,7 +705,7 @@ let adopt ~factories (doc : Document.t) =
   let st = { catalog; workspace = doc.workspace.ws; unfolded = []; adopted = false } in
   try
     adopt_objects st doc;
-    Contexts.of_workspace ~factories ~previous:doc st.workspace |> Result.map_error Diagnostic.to_string
+    Lowering.of_workspace ~factories ~previous:doc st.workspace |> Result.map_error Diagnostic.to_string
   with Stop message -> Error message
 
 (* The binding of a home, unfolding what is written in place: the document with that edit and
@@ -720,14 +720,14 @@ let bind_home ~factories (doc : Document.t) home =
     if st.workspace == doc.workspace.ws then Ok (doc, path)
     else
       Result.map (fun doc -> doc, path)
-        (Contexts.of_workspace ~factories ~previous:doc st.workspace
+        (Lowering.of_workspace ~factories ~previous:doc st.workspace
          |> Result.map_error Diagnostic.to_string)
   with Stop message -> Error message
 
 (* ---- composition: gestures on the scene's merge ---- *)
 
 let scene_name (workspace : Workspace_doc.t) =
-  match Contexts.graph_of workspace Flow.Context.scene with Some g -> g.name | None -> "scene"
+  match Lowering.graph_of workspace Flow.Context.scene with Some g -> g.name | None -> "scene"
 
 (* A new geometry object: its own SOP graph (a box), a [scene/geometry] binding and one more merge
    input; [~existing] reuses a SOP graph (two objects share it and it cooks once).  The ops make

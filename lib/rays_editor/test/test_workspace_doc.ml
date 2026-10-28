@@ -278,7 +278,7 @@ let part_view () =
   Fun.protect ~finally:(fun () ->
     Array.iter (fun f -> Sys.remove (Filename.concat directory f)) (Sys.readdir directory);
     Unix.rmdir directory) (fun () ->
-    let doc = match Editor_document.Contexts.of_workspace ~factories (of_text still) with
+    let doc = match Editor_document.Lowering.of_workspace ~factories (of_text still) with
       | Ok d -> d | Error d -> fail (Diagnostic.to_string d) in
     let view = match Flow.Syntax.parse "{:eye [1.5 -2.0 3] :look_through true :name \"a \\\"b\\\"\"}" with
       | Ok [ v ] -> v | _ -> fail "view text" in
@@ -292,7 +292,7 @@ let part_view () =
 let part_pane_layout () =
   let module M = Layout.Path_map in
   let doc = of_text still in
-  let opened = Editor_document.Contexts.of_workspace ~factories doc |> function Ok d -> d | Error m -> fail (Diagnostic.to_string m) in
+  let opened = Editor_document.Lowering.of_workspace ~factories doc |> function Ok d -> d | Error m -> fail (Diagnostic.to_string m) in
   let ws = opened.workspace.ws in
   let ws = { ws with layout = { ws.layout with at = M.add [ "g"; "a" ] (40., 60.) ws.layout.at;
                                                collapsed = M.add [ "g"; "b" ] true ws.layout.collapsed;
@@ -325,9 +325,9 @@ let part_pane_layout () =
 let part_contexts () =
   let module Objects = Editor_document.Objects in
   let module Layers = Editor_document.Layers in
-  let module Contexts = Editor_document.Contexts in
+  let module Lowering = Editor_document.Lowering in
   let module KG = Editor_document.Kind_graph in
-  let build ?previous ws = match Contexts.of_workspace ~factories ?previous ws with
+  let build ?previous ws = match Lowering.of_workspace ~factories ?previous ws with
     | Ok d -> d | Error d -> fail (Diagnostic.to_string d) in
   let bloom = of_text (small_bloom ()) in
   let doc = build bloom in
@@ -370,18 +370,18 @@ let part_contexts () =
          | _ -> false) "World layers, bottom first"
    | None -> fail "the World does not read");
   (* settings: the window the host opens *)
-  let window = match Contexts.window bloom with Ok w -> w | Error d -> fail (Diagnostic.to_string d) in
-  check (window = { Contexts.title = "Bloom study"; width = 1400; height = 800; fps = 60; seed = 42; fast = true })
+  let window = match Lowering.window bloom with Ok w -> w | Error d -> fail (Diagnostic.to_string d) in
+  check (window = { Lowering.title = "Bloom study"; width = 1400; height = 800; fps = 60; seed = 42; fast = true })
     "settings graph: window title, size, fps (a macro call) and seed";
-  (match Contexts.window (of_text (case "tree")) with
+  (match Lowering.window (of_text (case "tree")) with
    | Ok w -> check (w.title = "Rays" && w.fps = 60 && w.fast) "no settings graph: defaults, fast precision"
    | Error d -> fail (Diagnostic.to_string d));
-  (* :precision "exact" keeps the CPU; Contexts.fast reads it from a document every frame *)
+  (* :precision "exact" keeps the CPU; Lowering.fast reads it from a document every frame *)
   let exact = of_text "(workspace e (graph g :context value 1.0) (graph s :context settings (settings/config :precision \"exact\")))" in
-  (match Contexts.window exact with
+  (match Lowering.window exact with
    | Ok w -> check (not w.fast) "settings :precision \"exact\" is not fast"
    | Error d -> fail (Diagnostic.to_string d));
-  check (Contexts.fast doc) "a document without :precision is fast";
+  check (Lowering.fast doc) "a document without :precision is fast";
   check (List.exists (fun (f : Param.field_view) -> f.name = "title" && f.current = Text_value "Bloom study")
     (Editor_document.Settings.fields doc.settings)) "the settings graph is the document's settings";
   (* determinism, print/parse and preset round trips *)
@@ -416,11 +416,11 @@ let part_contexts () =
   check (has (Doc.to_text edited) ":translate [4 0 1]") "the source carries the edit";
   (* negative lowering: computed arguments outside a schema bound, and a wrong result *)
   let settings_of body = of_text ("(workspace w (graph c :context settings [(f : int 60)] " ^ body ^ "))") in
-  check (Result.is_ok (Contexts.window (settings_of "(settings/config :fps f)"))) "a settings graph with an input";
+  check (Result.is_ok (Lowering.window (settings_of "(settings/config :fps f)"))) "a settings graph with an input";
   (* a literal past a hard bound is a check error; a computed one is clamped like any write *)
-  check ((Result.get_ok (Contexts.window (settings_of "(settings/config :fps (* f 100))"))).fps = 240)
+  check ((Result.get_ok (Lowering.window (settings_of "(settings/config :fps (* f 100))"))).fps = 240)
     "a computed fps above the hard bound is clamped when lowered";
-  check (match Contexts.of_workspace ~factories (of_text "(workspace w (graph x :context world (world/sky)))") with
+  check (match Lowering.of_workspace ~factories (of_text "(workspace w (graph x :context world (world/sky)))") with
     | Ok doc -> Objects.ids "world" (Document.scene_graph doc) = [] | Error _ -> false)
     "a world graph no scene/world references is no World";
   (* the implicit scene: without a scene graph, one geometry object per sop graph *)
@@ -643,10 +643,10 @@ let part_files () =
     | Ok doc ->
     (* a start reads its window from the document it opens: the same answer as the settings
        graph evaluated for the window alone, for every file *)
-    (match Editor_document.Contexts.of_workspace ~factories doc with
+    (match Editor_document.Lowering.of_workspace ~factories doc with
      | Ok document ->
          incr windows;
-         check (Editor_document.Contexts.document_window document = Editor_document.Contexts.window doc)
+         check (Editor_document.Lowering.document_window document = Editor_document.Lowering.window doc)
            (file ^ ": the opened document's window is not the workspace's")
      | Error _ -> ());
     let lowered = lazy (L.of_checked ~factories ~inputs:doc.inputs doc.checked |> Result.get_ok) in

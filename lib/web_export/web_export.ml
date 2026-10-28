@@ -257,7 +257,7 @@ let map_entry (lowered : lowered) id =
 
 let files (doc : Doc.t) (lowered : lowered) : (files, D.t) result =
   (* the workspace's precision, as the editor reads it: fast unless (settings/config :precision "exact") *)
-  let fast = match Editor_document.Contexts.plan_window doc lowered.plan with Ok w -> w.fast | Error _ -> true in
+  let fast = match Editor_document.Lowering.plan_window doc lowered.plan with Ok w -> w.fast | Error _ -> true in
   let data = Buffer.create 4096 in
   let stored = Hashtbl.create 16 in
   let store values =

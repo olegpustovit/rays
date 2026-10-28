@@ -194,7 +194,7 @@ let sync_cameras ~mode (core : _ Core_model.t) easy =
   let core = if camera_ids (Core_inspect.scene core) <> []
       || Core_inspect.scene core = []
       (* a scene graph is authoritative: no camera object is a camera it does not declare *)
-      || Contexts.graph_of (core.doc.workspace.ws) Flow.Context.scene <> None then core
+      || Lowering.graph_of (core.doc.workspace.ws) Flow.Context.scene <> None then core
     else match add_default_camera (Core_inspect.scene core) easy with
       | Some scene -> Core_host.scene_edit core mode scene
       | None -> core in
@@ -321,14 +321,14 @@ let restore camera extra json =
   camera, { (set_look extra look_through) with renderer_request = mode }
 
 let apply_action camera extra = function
-  | Leader.Tool 0 -> { extra with tool = No_tool }, Some "Orbit (handles hidden)"
-  | Leader.Tool 1 -> { extra with tool = Move }, Some "Translate (W)"
+  | Editor_commands.Tool 0 -> { extra with tool = No_tool }, Some "Orbit (handles hidden)"
+  | Editor_commands.Tool 1 -> { extra with tool = Move }, Some "Translate (W)"
   | Tool 2 -> { extra with tool = Turn }, Some "Rotate (E)"
   | Tool 3 -> { extra with tool = Grow }, Some "Scale (R)"
-  | Leader.Look_through -> set_look extra (not (look_through extra)), None
-  | Leader.Look_through_camera -> set_look extra true, None
+  | Editor_commands.Look_through -> set_look extra (not (look_through extra)), None
+  | Editor_commands.Look_through_camera -> set_look extra true, None
   (* the header's tabs: the same request as the Scene root section's renderer row *)
-  | Leader.Render_mode index ->
+  | Editor_commands.Render_mode index ->
       { extra with root_request = Some { extra.root with renderer = List.nth [ Objects.Root.Raster; Wireframe; Path_traced ] (max 0 (min 2 index)) } }, None
   | Fly when extra.fly = None ->
       set_relative true;

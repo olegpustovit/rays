@@ -29,7 +29,7 @@ let flow_catalog factories = Kinds.catalog ~version:1 factories
    sketch's, saved beside the text *)
 let text (doc : Document.t) =
   let workspace = doc.workspace.ws in
-  Workspace_doc.to_text (if Contexts.has_settings workspace then workspace
+  Workspace_doc.to_text (if Lowering.has_settings workspace then workspace
     else { workspace with settings = doc.settings })
 
 let save ~directory ~name ~(doc : Document.t) ~view =
@@ -73,7 +73,7 @@ let load_with_ops ?gpu ~ops ~path ~factories ~settings () =
          | Some { S.node = S.List [ _; v ]; _ } -> Ok v
          | Some _ -> Error "view: expected one value"
          | None -> Ok (mk (S.Map []))) in
-  let* doc = Result.map_error Diagnostic.to_string (Contexts.of_workspace ?gpu ~factories workspace) in
+  let* doc = Result.map_error Diagnostic.to_string (Lowering.of_workspace ?gpu ~factories workspace) in
   let* () = Document.validate doc in
   Ok { doc; view }
 

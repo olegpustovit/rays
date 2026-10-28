@@ -3,7 +3,7 @@
    closure and marks the selection; Graph prints the active graph; Document is
    the whole workspace, an editable draft with an atomic Check and apply.
 
-   Pure state and text here; [view] draws it and returns intents, [Core]
+   Pure state and text here; [view] draws it and returns intents, [Editor_frame]
    applies them (the model is never touched inside [Ui.frame]). *)
 module S = Flow.Syntax
 

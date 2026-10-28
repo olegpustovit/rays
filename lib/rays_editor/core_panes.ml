@@ -378,13 +378,13 @@ let draw_graph_header ~ui ~value ~geometry:g
             ~header:leaf.header ~from:(tools_from leaf)
             ~enabled:(fun tool -> tool = Bars.Outline || scope_name value <> None
               && (tool = Bars.Add || Pxui_graph.Scope.selected (pane_view value) <> [])) with
-         | Some Add -> Some Leader.Add_node
-         | Some Repeat -> Some (Leader.Scope_command Pxui_graph.Scope.Wrap_repeat)
-         | Some Iterate -> Some (Leader.Scope_command Pxui_graph.Scope.Wrap_iterate)
-         | Some Fn -> Some (Leader.Scope_command Pxui_graph.Scope.Make_fn)
-         | Some Macro -> Some (Leader.Scope_command Pxui_graph.Scope.Make_macro)
-         | Some Defn -> Some (Leader.Scope_command Pxui_graph.Scope.Make_defn)
-         | Some Outline -> Some (Leader.Panel_split_at (leaf.path, `H, 0.7, Pxui_shell.Layout.Outline))
+         | Some Add -> Some Editor_commands.Add_node
+         | Some Repeat -> Some (Editor_commands.Scope_command Pxui_graph.Scope.Wrap_repeat)
+         | Some Iterate -> Some (Editor_commands.Scope_command Pxui_graph.Scope.Wrap_iterate)
+         | Some Fn -> Some (Editor_commands.Scope_command Pxui_graph.Scope.Make_fn)
+         | Some Macro -> Some (Editor_commands.Scope_command Pxui_graph.Scope.Make_macro)
+         | Some Defn -> Some (Editor_commands.Scope_command Pxui_graph.Scope.Make_defn)
+         | Some Outline -> Some (Editor_commands.Panel_split_at (leaf.path, `H, 0.7, Pxui_shell.Layout.Outline))
          | None -> None)
     | _ -> None in
   let view_pick = match graph_host with
@@ -409,13 +409,13 @@ let draw_graph_header ~ui ~value ~geometry:g
           Bars.rule ui ~key:"workspace-view-rule" ~header:leaf.header ~from:(from -. float hx);
           let render = match fst (Pxui_shell.Kit.segments ui ~key:"workspace-render"
             ~right:(from +. seg_w) ~y:ty modes mode) with
-            | Some i when i <> mode -> Some (Leader.Render_mode i)
+            | Some i when i <> mode -> Some (Editor_commands.Render_mode i)
             | _ -> None in
           let look = Pxui_shell.Kit.button ui ~key:"workspace-look" ~at:(from +. seg_w +. 8., ty)
               ~w:look_w ~active:looks ~hint:"C" "Look through" in
           let framed = Pxui_shell.Kit.button ui ~key:"workspace-frame"
               ~at:(from +. seg_w +. 8. +. look_w +. 8., ty) ~w:frame_w ~hint:"F" "Frame" in
-          if framed then Some Leader.Frame_camera else if look then Some Leader.Look_through else render
+          if framed then Some Editor_commands.Frame_camera else if look then Some Editor_commands.Look_through else render
         end else None
     | _ -> None in
   tool_action, view_action, view_pick

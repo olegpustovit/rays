@@ -84,7 +84,7 @@ search, and the inspector uses the same schema for pins and vector rows.
 Value operators (`+`, `range`, `value/rand`, ...) are built into `lib/flow`, never here.
 `lib/flow_sop/flow_manifest.sexp` is generated from the registered OCaml factories,
 embedded Lisp declarations (with `(body lisp)` and checked `(calls ...)`),
-and the scene, World and settings kinds of `Editor_document.Contexts`. Its runtest rule diffs the live catalog; accept an
+and the scene, World and settings kinds of `Editor_document.Lowering`. Its runtest rule diffs the live catalog; accept an
 intended metadata change with `dune promote`.
 `lib/flow`'s tests read this snapshot (`Flow.Catalog.catalog_of_manifest`); `rays` checks and opens a
 `.rays` sketch against the live catalog it runs with; nothing is generated, so nothing is stale.

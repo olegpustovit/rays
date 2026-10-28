@@ -17,7 +17,7 @@ val workspace_catalog : ?factories:Sop.Edit_graph.factory list -> unit ->
     the SOP factories (default [Sop.Nodes.factories]) plus the scene,
     world and settings kinds generated from the editor's schemas. *)
 
-type window = Editor_document.Contexts.window =
+type window = Editor_document.Lowering.window =
   { title : string; width : int; height : int; fps : int; seed : int; fast : bool }
 
 (** Sketch-owned settings in the editor document. *)
@@ -83,7 +83,7 @@ module Private : sig
         cyclically. *)
   end
 
-  module Leader : sig
+  module Editor_commands : sig
     type action =
       | Save_preset | Browse_presets | Save_source | Reload_source | Open_source
       | Toggle_timeline | Toggle_graph | Toggle_inspector | Hide_ui | Open_camera
@@ -640,7 +640,7 @@ module Reduce : sig
   val view : 'a Editor.t -> string list -> 'a Editor.t
   (** [v] on the checked lexical path, as the graph pane requests it; unstable test hook. *)
   val step : 'prepared Editor.t -> ?select:int list -> ?preview:Flow_graph.Flow_edit.op ->
-    Private.Leader.action list -> Rays.Frame.t -> 'prepared Editor.t
+    Private.Editor_commands.action list -> Rays.Frame.t -> 'prepared Editor.t
 end
 
 (** A [.rays] sketch as a program.  Command-S rewrites the file when it is

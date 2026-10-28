@@ -8,89 +8,89 @@ module Timeline = Timeline
 let workspace_catalog ?(factories = Sop.Nodes.factories) () =
   Kinds.catalog ~version:Flow_sop.Manifest.version factories
 
-type window = Contexts.window =
+type window = Lowering.window =
   { title : string; width : int; height : int; fps : int; seed : int; fast : bool }
-let workspace_window = Contexts.window
+let workspace_window = Lowering.window
 
 module Renderer = Renderer
 
 module Editor = struct
-  open Environment_view
-  open Environment_model
-  open Environment_source
-  let update_with = Environment.update_with
-  let update = Environment.update
-  let after_present = Environment.after_present
-  let scene = Environment.scene
-  let crash_dump = Environment.crash_dump
-  let close = Environment.close
-  let run = Environment.run
-  type 'prepared t = 'prepared Environment_model.t
-  let camera = Environment_model.camera
-  let can_redo = Environment_model.can_redo
-  let can_undo = Environment_model.can_undo
-  let carry_line = Environment_model.carry_line
-  let carrying = Environment_model.carrying
-  let displayed_node = Environment_model.displayed_node
-  let document = Environment_model.document
-  let edit = Environment_model.edit
-  let edit_layout = Environment_model.edit_layout
-  let edit_phases = Environment_model.edit_phases
-  let level = Environment_model.level
-  let lights = Environment_model.lights
-  let node_box = Environment_model.node_box
-  let objects = Environment_model.objects
-  let panes = Environment_model.panes
-  let prepared = Environment_model.prepared
-  let probe = Environment_model.probe
-  let redo_label = Environment_model.redo_label
-  let scene_document = Environment_model.scene_document
-  let network = Environment_model.network
+  open Loop_view
+  open Loop_model
+  open Loop_source
+  let update_with = Editor_loop.update_with
+  let update = Editor_loop.update
+  let after_present = Editor_loop.after_present
+  let scene = Editor_loop.scene
+  let crash_dump = Editor_loop.crash_dump
+  let close = Editor_loop.close
+  let run = Editor_loop.run
+  type 'prepared t = 'prepared Loop_model.t
+  let camera = Loop_model.camera
+  let can_redo = Loop_model.can_redo
+  let can_undo = Loop_model.can_undo
+  let carry_line = Loop_model.carry_line
+  let carrying = Loop_model.carrying
+  let displayed_node = Loop_model.displayed_node
+  let document = Loop_model.document
+  let edit = Loop_model.edit
+  let edit_layout = Loop_model.edit_layout
+  let edit_phases = Loop_model.edit_phases
+  let level = Loop_model.level
+  let lights = Loop_model.lights
+  let node_box = Loop_model.node_box
+  let objects = Loop_model.objects
+  let panes = Loop_model.panes
+  let prepared = Loop_model.prepared
+  let probe = Loop_model.probe
+  let redo_label = Loop_model.redo_label
+  let scene_document = Loop_model.scene_document
+  let network = Loop_model.network
   type picked = Core_model.picked = { id : int; label : string; kind : string; fields : Param.field_view list }
-  let selected_node = Environment_model.selected_node
-  let set_probe = Environment_model.set_probe
-  let set_settings = Environment_model.set_settings
-  let settings = Environment_model.settings
-  let timeline = Environment_model.timeline
-  let undo_label = Environment_model.undo_label
-  let viewport_camera = Environment_model.viewport_camera
-  let workspace = Environment_model.workspace
-  let world = Environment_model.world
+  let selected_node = Loop_model.selected_node
+  let set_probe = Loop_model.set_probe
+  let set_settings = Loop_model.set_settings
+  let settings = Loop_model.settings
+  let timeline = Loop_model.timeline
+  let undo_label = Loop_model.undo_label
+  let viewport_camera = Loop_model.viewport_camera
+  let workspace = Loop_model.workspace
+  let world = Loop_model.world
   module Private = struct
-    let gpu_qualification value=Flow_native.Workspace_gpu.qualification value.Environment_model.host.gpu
-    let image_plan value=(value.Environment_model.core.doc.workspace.lowered).plan
+    let gpu_qualification value=Flow_native.Workspace_gpu.qualification value.Loop_model.host.gpu
+    let image_plan value=(value.Loop_model.core.doc.workspace.lowered).plan
     let image_payload ?state ?live value image=
-      let core=value.Environment_model.core in
+      let core=value.Loop_model.core in
       Flow_native.Workspace_images.bind value.host.images (core.doc.workspace.lowered);
       Flow_native.Workspace_images.payload value.host.images (image_plan value)
         ~state:(Option.value ~default:core.cook.state state)
         ~live:(Option.value ~default:core.live_frame live) image
-    let image_stats value = let resources=value.Environment_model.host.resources in
+    let image_stats value = let resources=value.Loop_model.host.resources in
       resources.images_created,resources.images_destroyed
-    let status_text value=Core_status.status_text value.Environment_model.core
-    let live_frame value=value.Environment_model.core.live_frame
-    let inspector_subject value=Core_panels.inspector_subject value.Environment_model.core
-    let new_graph value context=snd (Core_inspect.new_graph value.Environment_model.core context)
+    let status_text value=Core_status.status_text value.Loop_model.core
+    let live_frame value=value.Loop_model.core.live_frame
+    let inspector_subject value=Core_panels.inspector_subject value.Loop_model.core
+    let new_graph value context=snd (Core_inspect.new_graph value.Loop_model.core context)
     let menu_forms = List.map (fun (_, form, text, _) -> form, text) Core_add.forms
     let lisp_completions value text =
-      Lisp_text.complete (Lazy.force value.Environment_model.core.lisp_vocab) text (String.length text)
-    let image_render_stats value=Flow_native.Workspace_images.render_stats value.Environment_model.host.images
-    let canvas_scenes value=List.map (fun (_,(p:Environment_view.canvas_picture))->p.scene) value.Environment_model.canvases
-    let image_gpu_stats value=Flow_native.Workspace_gpu.image_stats value.Environment_model.host.gpu
-    let host_stats value = let host=value.Environment_model.host in
+      Lisp_text.complete (Lazy.force value.Loop_model.core.lisp_vocab) text (String.length text)
+    let image_render_stats value=Flow_native.Workspace_images.render_stats value.Loop_model.host.images
+    let canvas_scenes value=List.map (fun (_,(p:Loop_view.canvas_picture))->p.scene) value.Loop_model.canvases
+    let image_gpu_stats value=Flow_native.Workspace_gpu.image_stats value.Loop_model.host.gpu
+    let host_stats value = let host=value.Loop_model.host in
       host.quit_requested,host.fired,host.resources.samples_created,host.resources.samples_destroyed
-    let image value image = let core=value.Environment_model.core in
+    let image value image = let core=value.Loop_model.core in
       Flow_native.Workspace_images.bind value.host.images (core.doc.workspace.lowered);
-      let gpu=Flow_native.Workspace_gpu.config ~fast:(Editor_document.Contexts.fast core.doc) value.host.gpu in
+      let gpu=Flow_native.Workspace_gpu.config ~fast:(Editor_document.Lowering.fast core.doc) value.host.gpu in
       Flow_native.Workspace_images.image ~gpu value.host.images ~state:core.cook.state ~live:core.live_frame
         (core.doc.workspace.lowered).plan image
     let with_images ?state ?live ?plan value run =
-      let core = value.Environment_model.core in
+      let core = value.Loop_model.core in
       let state = Option.value ~default:core.cook.state state
       and live = Option.value ~default:core.live_frame live
       and plan = Option.value ~default:(core.doc.workspace.lowered).plan plan in
       Flow_native.Workspace_images.bind value.host.images (core.doc.workspace.lowered);
-      Flow_native.Workspace_gpu.with_backend ~fast:(Editor_document.Contexts.fast core.doc) value.host.gpu (fun gpu ->
+      Flow_native.Workspace_gpu.with_backend ~fast:(Editor_document.Lowering.fast core.doc) value.host.gpu (fun gpu ->
         Flow_sop.Lower.with_images ~gpu
           ~metadata:(fun plan id -> Option.map Rays.Image.dimensions (Flow_native.Workspace_images.peek value.host.images plan id))
           (Flow_native.Workspace_images.payload value.host.images) (fun () ->
@@ -118,36 +118,36 @@ module Editor = struct
 
   let create ?name ?presets ?factories ?settings ?camera ?seed ?grain ?domains
       ?max_entries ?max_payload_bytes ?await ?carry_budget ?preferences ?ui_text_size ?ui_font ~workspace ?source ~prepare ~draw () =
-    Environment_model.create ?name ?presets ?factories ?settings ?camera ?seed ?grain ?domains
+    Loop_model.create ?name ?presets ?factories ?settings ?camera ?seed ?grain ?domains
       ?max_entries ?max_payload_bytes ?await ?carry_budget ?preferences ?ui_text_size ?ui_font ~workspace ?source ~prepare ~draw ()
 
   let run ?inputs ?name ?factories ?camera ?seed ?grain ?max_entries
       ?max_payload_bytes ~config ~workspace ?source ~prepare ~draw () =
-    Environment.run ?inputs ?name ?factories ?camera ?seed ?grain ?max_entries
+    Editor_loop.run ?inputs ?name ?factories ?camera ?seed ?grain ?max_entries
       ?max_payload_bytes ~config ~workspace ?source ~prepare ~draw ()
 
 end
 
 module Reduce = struct
   let open_import (editor : _ Editor.t) file =
-    {editor with Environment_model.core = {editor.core with Core_model.open_import = Some file}}
+    {editor with Loop_model.core = {editor.core with Core_model.open_import = Some file}}
   let spreadsheet (editor : _ Editor.t) path =
     let key = Core_shell.panel_key editor.core.doc path in
     let pane = Core_panes.shown_as editor.core (key, path, Pxui_shell.Layout.Spreadsheet) in
     (Core_panes.local_of editor.core key).sheet_owner, Core_inspect.spreadsheet_source pane
   let select_path (editor : _ Editor.t) path = match path with
-    | graph :: _ -> {editor with Environment_model.core = { (Core_panes.go editor.core graph) with Core_model.select_later = [path] }}
+    | graph :: _ -> {editor with Loop_model.core = { (Core_panes.go editor.core graph) with Core_model.select_later = [path] }}
     | [] -> editor
   let view (editor : _ Editor.t) path =
-    {editor with Environment_model.core = Core_scope.view_node editor.core path}
+    {editor with Loop_model.core = Core_scope.view_node editor.core path}
   let step (e : _ Editor.t) ?select ?preview actions frame =
-    { e with Environment_model.core = Core_reduce.reduce_idle ?select ?preview e.Environment_model.core actions frame }
+    { e with Loop_model.core = Core_reduce.reduce_idle ?select ?preview e.Loop_model.core actions frame }
 end
 
 module Private = struct
   module Spreadsheet = Spreadsheet
   module Render_budget = struct let film = Renderer.film let next_turn = Renderer.next_turn end
-  module Leader = Leader module Schedule = Schedule
+  module Editor_commands = Editor_commands module Schedule = Schedule
   module Document = Document module Preset = Preset
   module Pick = Pick
   module Cook = Cook
@@ -170,7 +170,7 @@ module Workspace = struct
 
   (* A hand-written host: the checked document and its file, or diagnostics. *)
   (* The viewport starts where the scene's first camera is (else the default orbit); the host's
-     light below is a default of a workspace with no scene graph (Contexts.of_workspace).
+     light below is a default of a workspace with no scene graph (Lowering.of_workspace).
      Piece preparation is shared with the hand-written shattered-cube host. *)
   (* Every [sop] graph of the document, lowered and compiled, for headless cooking. *)
   let sop_graphs ?(factories = Sop.Nodes.factories) (doc : Workspace_doc.t) =
@@ -194,7 +194,7 @@ module Workspace = struct
     | None -> base
 
   let declared_camera ?(factories = Sop.Nodes.factories) doc base =
-    match Contexts.of_workspace ~factories doc with
+    match Lowering.of_workspace ~factories doc with
     | Error _ -> base
     | Ok document -> document_camera document base
 
@@ -212,9 +212,9 @@ module Workspace = struct
         |> Option.map (fun source -> Source_file.with_imports source (Workspace_doc.import_texts doc)) in
       let opened = match factories with
         | Some [] -> None
-        | _ -> Result.to_option (Contexts.of_workspace
+        | _ -> Result.to_option (Lowering.of_workspace
             ~gpu ~factories:(Option.value factories ~default:Sop.Nodes.factories) doc) in
-      let window=match opened with Some document->Contexts.document_window document
+      let window=match opened with Some document->Lowering.document_window document
         |None->workspace_window doc in
       Result.bind window (fun window ->
         let config = { Rays.Sketch.default_config with width = window.width; height = window.height;
@@ -235,7 +235,7 @@ module Workspace = struct
           | Some document, _ -> document_camera document base
           | None, Some [] -> declared_camera ~factories:[] doc base
           | None, _ -> base in
-        Environment.run ?inputs ~gpu_owner ?max_frames:process.max_frames ?crash_dir:process.crash_dir ~profile:process.profile ?preferences:process.preferences ?ui_font:process.ui_font ~config ~lights ~camera ?factories ~seed:(Int64.of_int window.seed) ?opened
+        Editor_loop.run ?inputs ~gpu_owner ?max_frames:process.max_frames ?crash_dir:process.crash_dir ~profile:process.profile ?preferences:process.preferences ?ui_font:process.ui_font ~config ~lights ~camera ?factories ~seed:(Int64.of_int window.seed) ?opened
           ~workspace:doc ?source ~prepare ~draw:scene3 ()
           |> Result.map_error (fun error -> Diagnostic.error ~code:"E_RUNTIME"
             (Rays.Sketch.error_to_string error))))
@@ -287,5 +287,5 @@ module Workspace = struct
     let* imports = Source_file.read_imports ~file:path text in
     let* doc = load ~imports text in
     Result.map_error(fun diagnostic->[diagnostic])
-      (run ?process ~source:{ path; digest = Contexts.sha256 text } doc)
+      (run ?process ~source:{ path; digest = Lowering.sha256 text } doc)
 end

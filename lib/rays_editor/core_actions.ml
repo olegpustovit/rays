@@ -16,7 +16,7 @@ let apply_action value (workspace, selection, tree, timeline, changes) action =
   let expand panel (workspace : shell) =
     { workspace with hidden = Pxui_shell.Layout.expand panel workspace.hidden } in
   match action with
-  | Leader.Toggle_timeline | Toggle_graph | Toggle_inspector -> workspace, selection, tree, timeline, changes
+  | Editor_commands.Toggle_timeline | Toggle_graph | Toggle_inspector -> workspace, selection, tree, timeline, changes
   | Restore_layout ->
       (if workspace.restored then { workspace with restored = false; live = None; window_live = None }
        else { tree = Pxui_shell.Layout.default; hidden = [ Pxui_shell.Layout.Timeline ]; live = None; window_live = None;
@@ -94,7 +94,7 @@ let world_keys value (doc : Document.t) selection actions =
     | Rename _ | Delete _ | Restack _ | Camera _ | Root _ | Settings _ | Reparent _ | Outdent _ -> doc in
   let field name node = Kind_graph.field node name in
   List.filter_map (function
-    | Leader.World_emit -> edit_layer (fun node -> match field "emit" node with
+    | Editor_commands.World_emit -> edit_layer (fun node -> match field "emit" node with
         | Some (Param.Choice_value "Light") -> Some ["emit", Param.Choice_value "Dome"]
         | Some (Param.Choice_value _) -> Some ["emit", Param.Choice_value "Light"]
         | _ -> None) "Dome / light"
@@ -124,8 +124,8 @@ let world_keys value (doc : Document.t) selection actions =
 (* The ten digit commands take their labels from the layouts when which-key or the palette draws. *)
 let layout_labels value keymap =
   let names = layouts value in
-  List.filter_map (fun (command : Leader.command) -> match command.action with
-    | Leader.Layout_switch i ->
+  List.filter_map (fun (command : Editor_commands.command) -> match command.action with
+    | Editor_commands.Layout_switch i ->
         Option.map (fun (name, active) -> { command with Editor_core.Command.label =
           if active then name ^ " (active)" else name }) (List.nth_opt names i)
     | _ -> Some command) keymap
@@ -134,7 +134,7 @@ let layout_labels value keymap =
 let routed value =
   let graph_shown = graph_family value in
   let listing = listing value and texting = texting value in
-  List.filter (fun (command : Leader.command) -> match command.action with
+  List.filter (fun (command : Editor_commands.command) -> match command.action with
     | List_command _ -> listing && graph_shown
     | Scope_command _ -> scope_name value <> None && graph_shown && not texting
     | Frame_tile -> not texting && graph_shown
@@ -147,4 +147,4 @@ let routed value =
         (Editor_core.Panels.leaves (shell_tree value value.workspace))
     | World_emit | World_reseed | World_time _ | World_play | World_preset _ ->
         in_world value
-    | _ -> true) Leader.keymap |> layout_labels value
+    | _ -> true) Editor_commands.keymap |> layout_labels value

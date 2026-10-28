@@ -38,7 +38,7 @@ let run () =
     Unix.rmdir directory) (fun () ->
   let factories = Sop.Nodes.factories in
   let workspace = Ws_fixture.of_text text in
-  let doc = match Editor_document.Contexts.of_workspace ~factories workspace with
+  let doc = match Editor_document.Lowering.of_workspace ~factories workspace with
     | Ok doc -> doc | Error d -> failwith (Diagnostic.to_string d) in
   let backend : Flow_ir.Gpu.backend = {
     cost = (fun ~fast:_ _ ~count:_ -> None);
@@ -49,7 +49,7 @@ let run () =
     let lowered = (doc.Document.workspace.lowered).Flow_sop.Lower.gpu in
     lowered.fast && lowered.policy = Flow_ir.Gpu.Qualification
     && Option.fold ~none:false ~some:(fun actual -> actual == backend) lowered.backend in
-  let gpu_doc = match Editor_document.Contexts.of_workspace ~factories ~gpu workspace with
+  let gpu_doc = match Editor_document.Lowering.of_workspace ~factories ~gpu workspace with
     | Ok doc -> doc | Error d -> failwith (Diagnostic.to_string d) in
   check (carries_gpu gpu_doc) "workspace lowering discarded its explicit GPU config";
   let reloaded = Editor_document.Document_edit.text_edit ~factories gpu_doc

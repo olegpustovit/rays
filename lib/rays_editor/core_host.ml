@@ -8,7 +8,7 @@ open Core_inspect
 open Core_list
 open Core_panes
 
-(* Environment-owned scene edits (camera bookkeeping, a camera following the viewport): view
+(* Editor_loop-owned scene edits (camera bookkeeping, a camera following the viewport): view
    state, never an undo entry.  [`Reset] starts the history, [`Amend] folds into the present
    entry and keeps what redo would restore. *)
 let scene_edit value mode ?(active_camera = value.doc.active_camera) scene =
@@ -28,7 +28,7 @@ let scene_edit value mode ?(active_camera = value.doc.active_camera) scene =
   { value with doc; history; filed = if same_text value.doc value.filed then doc else value.filed }
 
 let machinery ?under value ~all_ui_visible =
-  if all_ui_visible || value.leader <> Leader.Idle then Pxui.Ui.scene ?under value.ui
+  if all_ui_visible || value.leader <> Editor_commands.Idle then Pxui.Ui.scene ?under value.ui
   else []
 
 let close value =

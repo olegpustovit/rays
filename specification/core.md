@@ -32,9 +32,9 @@ branch had 4,096 of its own. At 1,000,000 elements the walker costs about 22
 microseconds and 79 KB an element; the region about 20 nanoseconds.
 
 A program start runs the static stage once. `Rays_editor.Workspace.run` builds
-the document the editor opens (`Contexts.of_workspace`) and reads the window
-(`Contexts.document_window`: the settings graph's result in that document's
-plan, the value `Contexts.window` evaluates for) and the declared camera from
+the document the editor opens (`Lowering.of_workspace`) and reads the window
+(`Lowering.document_window`: the settings graph's result in that document's
+plan, the value `Lowering.window` evaluates for) and the declared camera from
 it; the editor takes that document instead of lowering the workspace again.
 The document is handed over, not cached: an edit, a save and a reload of the
 file each lower the new text as before.

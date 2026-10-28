@@ -1,6 +1,6 @@
 (** The workspace text pane: Selection, Graph and Document tabs over
     the Lisp text.  Pure state and text plus [view], which draws and returns
-    intents for [Core] to apply after the frame. *)
+    intents for [Editor_frame] to apply after the frame. *)
 
 type tab = Selection | Graph | Document
 type path = Flow.Workspace.path

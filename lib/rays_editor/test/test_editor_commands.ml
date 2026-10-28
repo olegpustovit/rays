@@ -110,7 +110,7 @@ let with_editor text f =
 
 let world_command () =
   let module E3 = Rays_editor.Editor in
-  let module L = Rays_editor.Private.Leader in
+  let module L = Rays_editor.Private.Editor_commands in
   with_editor {|(workspace world_command
     (graph g :context sop (sop/box))
     (graph scene :context scene (scene/root (scene/merge (scene/geometry (ref g))))))|}
@@ -134,7 +134,7 @@ let world_command () =
    the text, the release seals; the whole drag is one undo step. *)
 let world_drag () =
   let module E3 = Rays_editor.Editor in
-  let module L = Rays_editor.Private.Leader in
+  let module L = Rays_editor.Private.Editor_commands in
   with_editor {|(workspace world_drag
     (graph g :context sop (sop/box))
     (graph sky :context world (world/sun (world/sky)))
@@ -209,7 +209,7 @@ let new_graphs () =
 (* Every chord the key sheet lists as the text area's own must change the text, selection or caret of a
    real [Ui.text_area_submit] with the editor's Lisp language: the sheet cannot list a key nothing handles. *)
 let text_keys_are_handled () =
-  let module L = Rays_editor.Private.Leader in
+  let module L = Rays_editor.Private.Editor_commands in
   let language = Rays_editor.Private.Lisp_text.language Pxui.Theme.default in
   check (L.text_keys <> []) "no text keys";
   List.iter (fun (label, trigger) ->
@@ -236,7 +236,7 @@ let text_keys_are_handled () =
 let run () =
   text_keys_are_handled ();
   let open Editor_core.Guide_context in
-  let module L = Rays_editor.Private.Leader in
+  let module L = Rays_editor.Private.Editor_commands in
   List.iter (fun focus ->
     List.iter (fun (events, expected) ->
       let _, actions, _ = Editor_core.Router.step L.keymap ~focus ~text_focus:false

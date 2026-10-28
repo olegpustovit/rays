@@ -8,18 +8,18 @@ open Core_list
 
 (* The document a workspace starts from: one geometry object per [sop] graph
    beside the sketch's own scene objects ([seed_scene]). [opened] is the caller's
-   [Contexts.of_workspace ~factories workspace], when it already built it to read the window
+   [Lowering.of_workspace ~factories workspace], when it already built it to read the window
    and the camera (Workspace.run): the workspace is evaluated once a start. *)
 let workspace_doc ?gpu ?opened ~factories ~seed_scene workspace =
   let ( let* ) = Result.bind in
   let flow r = Result.map_error Diagnostic.to_string r in
   let* doc = match opened with
     | Some doc -> Ok doc
-    | None -> flow (Editor_document.Contexts.of_workspace ~factories ?gpu workspace) in
+    | None -> flow (Editor_document.Lowering.of_workspace ~factories ?gpu workspace) in
   let declared = doc.scene in
   (* the host's camera and lights are defaults of a workspace with no scene graph; a scene
      graph is authoritative (it may say there are none) *)
-  let has_scene = Editor_document.Contexts.graph_of workspace Flow.Context.scene <> None in
+  let has_scene = Editor_document.Lowering.graph_of workspace Flow.Context.scene <> None in
   let scene = if has_scene then declared else seed_scene declared in
   let doc = { doc with scene;
     active_camera = if has_scene then doc.active_camera else List.nth_opt (Objects.ids "camera" scene) 0 } in
@@ -73,7 +73,7 @@ let create ?gpu ?settings
       let guide = match read_preferences preferences with
         | Ok values -> Option.value ~default:true (Editor_core.Store.Settings.bool values "guide")
         | Error _ -> true in
-      let state_name = Contexts.sha256 state_key in
+      let state_name = Lowering.sha256 state_key in
       let value = { preferences; text_size = ui_text_size; guide; hud = None; presets; state_name; name; prompt = None; notice = None; notice_at = 0.;
         doc; gpu; filed = doc;
         panes = Panel_map.make { view = Pxui_graph.Scope.create (); laid = None; shown = None; route = [];
@@ -94,7 +94,7 @@ let create ?gpu ?settings
         edit_error = None; status_fps = None;
         status_fps_at = Float.neg_infinity; last_dt = 0.; steady = 0;
         history = Editor_core.History.create doc;
-        focus = Editor_core.Panels.main; focus_path = None; pane_keys = []; leader = Leader.Idle;
+        focus = Editor_core.Panels.main; focus_path = None; pane_keys = []; leader = Editor_commands.Idle;
         timeline_frames = 240; queued = [];
         list_at = None; text_at = None; outline_at = None; locals = [];
         started = { on = None; views = []; tabs = [] };

@@ -53,7 +53,7 @@ let run () =
   (* the sketch opens on flower's network,  *)
   check (dump_line !e "projection" = "graph" && dump_line !e "pane graph" = "flower")
     ("the sketch opens on the network of flower: " ^ dump_line !e "projection" ^ " / " ^ dump_line !e "pane graph");
-  let shell () = match (E3.workspace !e |> fun w -> Editor_document.Contexts.of_workspace ~factories w) with
+  let shell () = match (E3.workspace !e |> fun w -> Editor_document.Lowering.of_workspace ~factories w) with
     | Ok d -> Option.get d.Document.shell | Error d -> fail (Diagnostic.to_string d) in
   let geometry () = Layout.geometry ~hidden:[ Layout.Timeline ] (shell ()).tree (frame (0., 0.) [] 0) in
   let outline () = (Option.get (Layout.find (geometry ()) Layout.Outline)).body in

@@ -72,7 +72,7 @@ type prompt_intent = Save_preset_file of string | Load_preset_file of string | L
   | Edit_source of Flow_graph.Flow_edit.op  (* the dialog's answer: one workspace gesture *)
   | Delete_preset_file of { name : string; query : string }
   | Delete_last_state of string
-  | Run_action of Leader.action
+  | Run_action of Editor_commands.action
   | Go of string  (* / j picked a graph *)
   | Find_node of Flow.Workspace.path  (* / j picked a node of the graph shown: select it and frame it *)
 
@@ -184,7 +184,7 @@ type 'panel frame_result = {
   other_texts : (string list * Text_pane.shown * Text_pane.intent list) list;
   (* the text panes that are not the one in use: what each showed and asked this frame *)
   handle_changes : (int * (string * Param.value) list) option;
-  bar_action : Leader.action option;  (* a header tool or an outline row that means a command *)
+  bar_action : Editor_commands.action option;  (* a header tool or an outline row that means a command *)
   view_pick : projection option;  (* a click on the graph header's Graph / List / Text *)
   drops : (Carry.place * bool) list;
   (* where a carried payload is hovered or released ([true]), from panes that are not the graph's *)
@@ -279,12 +279,12 @@ type 'prepared t = {
   focus_path : Pxui_shell.Layout.path option;  (* which leaf of that kind: every leaf is an
     instance, and / o and / l act on the one clicked, not the first *)
   pane_keys : (int * (Pxui_shell.Layout.panel * Pxui_shell.Layout.path option)) list;
-  leader : Leader.state;
+  leader : Editor_commands.state;
   held_keys : Input.key list;
   sketch_blocked : Input.key list;  (* keys held while the sketch had no keyboard: unseen by it until released *)
   window_focus : int;  (* frames since the window became key again (capped), -1 while it is not *)
   timeline_frames : int;
-  queued : Leader.action list;  (* picked in the palette, run next frame *)
+  queued : Editor_commands.action list;  (* picked in the palette, run next frame *)
   list_at : string list option;  (* the panel [tree] belongs to: a list panel, or a graph panel in list view *)
   text_at : string list option;  (* the panel [text] belongs to: a lisp panel, or a graph panel in text view *)
   outline_at : string list option;  (* the panel [outline] belongs to *)
@@ -324,7 +324,7 @@ type ('prepared, 'panel) update = {
   (** A framing request finished: [Some None] had no geometry. *)
   loaded_view : Flow.Syntax.t option;
   (** A preset loaded this frame; its environment view settings. *)
-  actions : Leader.action list;
+  actions : Editor_commands.action list;
   panel : 'panel option;
   (* The frame without leader-consumed events, for the environment's own
      input handling. *)

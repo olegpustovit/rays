@@ -2,9 +2,9 @@ open Rays
 open Editor_document
 open Sop
 open World_map
-open Environment_view
+open Loop_view
 
-(* The one environment: [Core] plus the 3D viewport. *)
+(* The one environment: [Editor_frame] plus the 3D viewport. *)
 module V = Viewport
 type layout = Pxui_shell.Layout.t
 

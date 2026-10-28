@@ -9,7 +9,7 @@ let edit_result ~apply ~factories (doc : Document.t) op =
   let run (doc : Document.t) =
     let* catalog = Kinds.catalog ~version:Flow_sop.Manifest.version factories in
     let* workspace = apply catalog (doc.workspace.ws) op in
-    Contexts.of_workspace ~factories ~previous:doc workspace in
+    Lowering.of_workspace ~factories ~previous:doc workspace in
   (* a gesture on the scene the host composes (the text has no such graph yet, so the edit finds
      nothing to change): the host's own objects are written out first, and the gesture is tried
      on that text.  Kept only when it then checks. *)
@@ -54,7 +54,7 @@ let text_edit ?imports ~factories (doc : Document.t) text =
       ~default:(Workspace_doc.import_texts workspace))
       ~ops:workspace.checked.ops ~settings:workspace.settings
       ~layout:workspace.layout ~inputs:workspace.inputs catalog text in
-  one (Contexts.of_workspace ~factories ~previous:doc edited)
+  one (Lowering.of_workspace ~factories ~previous:doc edited)
 
 (* A change to the workspace's layout keys (a moved item, a collapsed zone):
    the source and the lowering are untouched, so nothing recooks. *)
@@ -67,7 +67,7 @@ let select_layout ~factories (doc : Document.t) name =
   let workspace = { workspace with layout = { workspace.layout with editor = Some name } } in
   match Workspace_doc.editor_graph workspace with
   | None -> Error ("Unknown editor layout " ^ name ^ ".")
-  | Some _ -> Contexts.of_workspace ~factories ~previous:doc workspace
+  | Some _ -> Lowering.of_workspace ~factories ~previous:doc workspace
       |> Result.map_error Diagnostic.to_string
 
 (* A derived edit (an object's field, a reparent, a World layer) written to the text. *)

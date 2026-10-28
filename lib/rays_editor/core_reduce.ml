@@ -48,20 +48,20 @@ let level_target ~(value : _ t) ~value' ~level ~(doc : Document.t) ~selection ~a
   let followed = match List.find_map (function
       | Pxui_graph.Scope.Activated path -> Some path | _ -> None) result.scope_changes with
     | Some path -> follow_target ~path value
-    | None when List.mem Leader.Enter actions ->
+    | None when List.mem Editor_commands.Enter actions ->
         (match follow_target value with Some _ as found -> found | None -> viewport_target value)
     | None -> None in
   let target = match List.find_opt (function
-      | Leader.Enter | Up | Go_world -> true | _ -> false) actions, result.opened with
+      | Editor_commands.Enter | Up | Go_world -> true | _ -> false) actions, result.opened with
     | _ when followed <> None -> None
-    | Some Leader.Up, _ when (pane_route value) <> [] -> None
-    | Some Leader.Up, _ -> (match level with
+    | Some Editor_commands.Up, _ when (pane_route value) <> [] -> None
+    | Some Editor_commands.Up, _ -> (match level with
       | Document.Inside _ -> Some Document.Scene
       | Scene -> None)
-    | Some Leader.Go_world, _ ->
+    | Some Editor_commands.Go_world, _ ->
         Option.map (fun id -> Document.Inside id)
           (List.find_opt (enterable value') (Objects.ids "world" doc.scene))
-    | Some Leader.Enter, _ | _, Some _ ->
+    | Some Editor_commands.Enter, _ | _, Some _ ->
         let candidate = match result.opened with
           | Some id -> Some id | None -> Selection.selected selection in
         (match level, candidate with
@@ -388,7 +388,7 @@ let pick_up ~(value : _ t) ~(value' : _ t) ~actions ~(frame : Frame.t) ~carry_re
   (* [y]: the payload is held by the handle (no pointer capture); a press or Enter puts it *)
   let carry, pick_error = match value.carry with
     | Some c -> Some { c with report = carry_report }, None
-    | None when List.mem Leader.Pick_up actions ->
+    | None when List.mem Editor_commands.Pick_up actions ->
         (match carry_payload value' with
          | Ok payload ->
              Pxui.Ui.carry value'.ui ~kind:payload.kind ~value:payload.value ();
@@ -409,7 +409,7 @@ let framing_step ~(value : _ t) ~value' ~(doc : Document.t) ~(cooked : _ Cook.up
   let framing = match frame_request with Some (id, _) -> Some id | None -> value.framing in
   let framed = match cooked.framed, framing with
     | Some (Some bounds), Some id -> Some (Some (world_bounds id bounds))
-    | framed, _ when List.mem Leader.Frame_camera actions && (pane_level value') = Document.Scene ->
+    | framed, _ when List.mem Editor_commands.Frame_camera actions && (pane_level value') = Document.Scene ->
         ignore framed;
         let view = match active_view value' (geometry value' result.workspace frame) with
           | Some { panel = View key; _ } when Option.fold ~none:false
@@ -433,7 +433,7 @@ let projections_of ~outlined ~actions (result : _ frame_result) (value' : _ t) =
     | Some view when view <> Text_view || graph_name value' <> None -> Level_map.add (pane_level value') view (pane_views value')
     | Some _ -> (pane_views value')
     | None -> match List.find_map (function
-        | Leader.Panel_retype (Pxui_shell.Layout.Graph | List | Lisp as p) when value'.focus = Graph -> Some p
+        | Editor_commands.Panel_retype (Pxui_shell.Layout.Graph | List | Lisp as p) when value'.focus = Graph -> Some p
         | _ -> None) actions with
       | Some Pxui_shell.Layout.Graph -> Level_map.add (pane_level value') Graph_view (pane_views value')
       | Some List -> Level_map.add (pane_level value') List_view (pane_views value')
@@ -443,13 +443,13 @@ let projections_of ~outlined ~actions (result : _ frame_result) (value' : _ t) =
 
 (* Command-Z / Shift-Command-Z: the history step, its notice and the document it leaves *)
 let undo_step ~(value : _ t) ~carrying ~actions ~notice history =
-  let stepped = if List.mem Leader.Redo actions then Editor_core.History.redo history
-    else if List.mem Leader.Undo actions then Editor_core.History.undo history else None in
+  let stepped = if List.mem Editor_commands.Redo actions then Editor_core.History.redo history
+    else if List.mem Editor_commands.Undo actions then Editor_core.History.undo history else None in
   let notice = match stepped with
-    | None when List.mem Leader.Redo actions -> Some (Refusal, "Redo: nothing to redo")
-    | None when List.mem Leader.Undo actions -> Some (Refusal, "Undo: nothing to undo")
+    | None when List.mem Editor_commands.Redo actions -> Some (Refusal, "Redo: nothing to redo")
+    | None when List.mem Editor_commands.Undo actions -> Some (Refusal, "Undo: nothing to undo")
     | None -> notice
-    | Some _ when List.mem Leader.Redo actions ->
+    | Some _ when List.mem Editor_commands.Redo actions ->
         Option.map (fun label -> Info, "Redo " ^ label) (Editor_core.History.redo_label history)
     | Some _ -> Some (Info, "Undo " ^ Editor_core.History.label history) in
   let history, doc, undone = match stepped with
@@ -489,9 +489,9 @@ let reduce ?gpu ?(pump=fun()->()) ~carry_changed ~all_ui_visible ~view_state ~ca
     | _ -> result in
   (* i on a collapsed function or loop opens it in place, as a double click does *)
   let result, actions = match Pxui_graph.Scope.selected (pane_view value) with
-    | [ zone ] when List.mem Leader.Enter actions && Pxui_graph.Scope.collapsed_zone (pane_view value) zone ->
+    | [ zone ] when List.mem Editor_commands.Enter actions && Pxui_graph.Scope.collapsed_zone (pane_view value) zone ->
         { result with scope_changes = result.scope_changes @ [ Pxui_graph.Scope.Zone_collapsed { zone; collapsed = false } ] },
-        List.filter (( <> ) Leader.Enter) actions
+        List.filter (( <> ) Editor_commands.Enter) actions
     | _ -> result, actions in
   let carry_report = carry_report_of ~value ~carrying ~text ~text_shown result in
   let result = if not carrying then result else
@@ -570,7 +570,7 @@ let reduce ?gpu ?(pump=fun()->()) ~carry_changed ~all_ui_visible ~view_state ~ca
     else
       let candidate = match result.opened with
         | Some _ as id -> id
-        | None when List.mem Leader.Enter actions -> Selection.selected result.selection
+        | None when List.mem Editor_commands.Enter actions -> Selection.selected result.selection
         | None -> None in
       match candidate with
       | Some id when kind value id = Some "camera" && view_wants value `Primary id -> Some id
@@ -601,7 +601,7 @@ let reduce ?gpu ?(pump=fun()->()) ~carry_changed ~all_ui_visible ~view_state ~ca
     then world_keys value next result.selection actions else next, None, [] in
   (* / e opens the World, writing one (a [scene/world] member and its world graph) on first use. *)
   let next, world_added = match Objects.ids "world" next.scene with
-    | [] when List.mem Leader.Go_world actions ->
+    | [] when List.mem Editor_commands.Go_world actions ->
         (match Result.bind (Editor_document.Scene_sync.add_world next)
                  (Editor_document.Document_edit.syntax_batch ~factories:value.factories next) with
          | Ok doc -> doc, true | Error _ -> next, false)
@@ -651,7 +651,7 @@ let reduce ?gpu ?(pump=fun()->()) ~carry_changed ~all_ui_visible ~view_state ~ca
     | Some _ | None -> selection in
   (* / e selects the scene's World, then enters it *)
   let selection = match target with
-    | Some (Document.Inside id) when List.mem Leader.Go_world actions && level = Document.Scene ->
+    | Some (Document.Inside id) when List.mem Editor_commands.Go_world actions && level = Document.Scene ->
         Selection.select id
     | _ -> selection in
   let value' = with_pane { value' with menu = result.menu; tree = result.tree; probes;
@@ -676,7 +676,7 @@ let reduce ?gpu ?(pump=fun()->()) ~carry_changed ~all_ui_visible ~view_state ~ca
     | Some level -> open_level value' level
     | None -> value' in
   (* u goes back along the route taken *)
-  let pops = List.fold_left (fun n -> function Leader.Up -> max n 1 | Back k -> max n k | _ -> n) 0 actions in
+  let pops = List.fold_left (fun n -> function Editor_commands.Up -> max n 1 | Back k -> max n k | _ -> n) 0 actions in
   let value' = match List.drop (max 0 (pops - 1)) (pane_route value') with
     | (back_level, pane_graph) :: rest when pops > 0 && target = None && followed = None ->
         let back_level = Document.resolve_level doc back_level in
@@ -685,7 +685,7 @@ let reduce ?gpu ?(pump=fun()->()) ~carry_changed ~all_ui_visible ~view_state ~ca
     | _ -> value' in
   let value' = match followed with Some graph -> go value' graph | None -> value' in
   (* In the World, / m flips the view pane to the lat-long map. *)
-  let map_view = if List.mem Leader.Toggle_map actions && in_world value'
+  let map_view = if List.mem Editor_commands.Toggle_map actions && in_world value'
     then not value'.map_view else value'.map_view && in_world value' in
   let value' = { value' with map_view } in
   (* a renamed graph keeps being the one shown, and the one [u] returns to *)
@@ -749,8 +749,8 @@ let reduce ?gpu ?(pump=fun()->()) ~carry_changed ~all_ui_visible ~view_state ~ca
       pane_keys = result.pane_keys; panes = Panel_map.with_others result.graph_panes value'.panes; leader; held_keys;
       prompt;
       queued = (match result.prompt_intent with Some (Run_action action) -> [action]
-        | _ when all_ui_visible && List.mem Leader.Add_node actions && not graph_shown
-            && has_panel value' Pxui_shell.Layout.Graph -> [Leader.Add_node]
+        | _ when all_ui_visible && List.mem Editor_commands.Add_node actions && not graph_shown
+            && has_panel value' Pxui_shell.Layout.Graph -> [Editor_commands.Add_node]
         | _ -> []);
       carry; framing = (if cooked.framed <> None then None else framing);
       notice = new_notice;
@@ -760,7 +760,7 @@ let reduce ?gpu ?(pump=fun()->()) ~carry_changed ~all_ui_visible ~view_state ~ca
     framed;
     loaded_view = Option.map (fun (preset : Preset.loaded) -> preset.view) loaded;
     actions = (if Option.is_some entered_camera && entered_camera = doc.active_camera
-      then actions @ [Leader.Look_through_camera] else actions); panel = result.panel;
+      then actions @ [Editor_commands.Look_through_camera] else actions); panel = result.panel;
     input })
 
 (* One frame of the editor.  A carry takes its turn first (its keys, the ends of the gesture, the

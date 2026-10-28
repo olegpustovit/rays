@@ -1,5 +1,5 @@
 (* Private editor environment interface. *)
-open Environment_model
+open Loop_model
 
 val open_import :
   'a t -> ('b, 'c) Core_model.update -> 'a t * ('b, 'c) Core_model.update

@@ -1,5 +1,5 @@
 (* The host bars of the workspace: the graph panel's toolbar (Add, Repeat, Iterate, fn, macro, defn: graph.html's list; the narrower workspace.html header drops macro).  Buttons only report a
-   click: [Core] maps it to the one command or edit it means. *)
+   click: [Editor_frame] maps it to the one command or edit it means. *)
 module Ui = Pxui.Ui
 
 type tool = Add | Repeat | Iterate | Fn | Macro | Defn | Outline

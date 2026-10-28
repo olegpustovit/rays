@@ -16,7 +16,7 @@ type descriptor = {
 }
 (** One catalog kind: a SOP factory, or a scene, world or settings kind that
     the editor document generates from its own schemas
-    ([Editor_document.Contexts]).  The namespace of [qualified] gives the
+    ([Editor_document.Lowering]).  The namespace of [qualified] gives the
     context. *)
 
 val descriptor : Sop.Edit_graph.factory -> descriptor

@@ -11,7 +11,7 @@ let fail message = failwith ("test_workspace_source: " ^ message)
 let check condition message = if not condition then fail message
 open Test_text
 
-let sha = Editor_document.Contexts.sha256
+let sha = Editor_document.Lowering.sha256
 let catalog = Editor_document.Kinds.catalog ~version:1 Sop.Nodes.factories |> Result.get_ok
 
 let sketch radius = Printf.sprintf {|;; the header
@@ -518,9 +518,9 @@ let run_vocabulary_refresh () =
     write file (text (Some "distance")); poll ();
     check (head () && List.mem ":distance" (labels "sop/vocab_card geo :dis"))
       "reload did not add local kind and parameter completions";
-    e := Rays_editor.Reduce.step !e [Rays_editor.Private.Leader.Undo] (frame ());
+    e := Rays_editor.Reduce.step !e [Rays_editor.Private.Editor_commands.Undo] (frame ());
     check (not (head ())) "undo retained removed declaration completion";
-    e := Rays_editor.Reduce.step !e [Rays_editor.Private.Leader.Redo] (frame ());
+    e := Rays_editor.Reduce.step !e [Rays_editor.Private.Editor_commands.Redo] (frame ());
     check (head ()) "redo did not restore declaration completion";
     write file (text (Some "amount")); poll ();
     check (List.mem ":amount" (labels "sop/vocab_card geo :am")
@@ -530,7 +530,7 @@ let run_vocabulary_refresh () =
       node=["g";"@result"]; key=Kw "amount"; sub=[]; value=Flow.Syntax.make (Num "0.75")}));
     check (head () && List.mem ":amount" (labels "sop/vocab_card geo :am"))
       "scalar scrub lost declaration vocabulary";
-    e := Rays_editor.Reduce.step !e [Rays_editor.Private.Leader.Undo] (frame ());
+    e := Rays_editor.Reduce.step !e [Rays_editor.Private.Editor_commands.Undo] (frame ());
     write file (text None); poll ();
     check (not (head ())) "reload retained removed local kind completion")
 

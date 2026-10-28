@@ -10,7 +10,7 @@ let factories = Sop.Nodes.factories
 let catalog = D.Kinds.catalog ~version:1 factories |> Result.get_ok
 let parse text = match S.parse text with Ok [form] -> form | _ -> failwith text
 let workspace ?settings text = D.Workspace_doc.of_text ?settings catalog text |> Result.get_ok
-let build ?previous ws = D.Contexts.of_workspace ~factories ?previous ws |> Result.get_ok
+let build ?previous ws = D.Lowering.of_workspace ~factories ?previous ws |> Result.get_ok
 let frame n = Test_editor_input.frame (450., 300.) [] n
 let step e n = E.update e (frame n)
 let create ?camera ?settings ?presets ?source ws = E.create ~ui_text_size:11 ?camera ?settings ?presets ?source ~await:true ~workspace:ws
@@ -86,9 +86,9 @@ let startup_settings () =
         value = parse literal}) |> Result.get_ok;
       let after = E.workspace !e in
       let reloaded = workspace (D.Workspace_doc.to_text after) in
-      check (D.Contexts.window reloaded = D.Contexts.window after)
+      check (D.Lowering.window reloaded = D.Lowering.window after)
         ("startup setting did not survive reload: " ^ name);
-      check (D.Contexts.window after <> D.Contexts.window before)
+      check (D.Lowering.window after <> D.Lowering.window before)
         ("startup setting did not update saved configuration: " ^ name);
       e := E.update !e (Test_editor_input.frame ~keys:[Input.Meta] (450., 300.)
         [Input.Key_pressed (Input.KeyChar 'z')] (i + 2));
@@ -123,18 +123,18 @@ let frozen_context_time () =
       context body) in
     let at time = (Flow.Eval.run ~time ws.checked |> Result.get_ok).results |> List.assoc "target" in
     check (at 0. <> at 2.) ("fixture did not vary at two times: " ^ field);
-    let diagnostic = match D.Contexts.of_workspace ~factories ws with
+    let diagnostic = match D.Lowering.of_workspace ~factories ws with
       | Error d -> d | Ok _ -> failwith ("frozen field was accepted: " ^ field) in
     check (diagnostic.code = "E_CONTEXT_TIME" && Test_text_pane.contains diagnostic.message field)
       ("frozen-time refusal did not identify the field: " ^ Diagnostic.to_string diagnostic);
-    check (Result.is_error (D.Contexts.window ws)) "startup window checking ignored a frozen context";
+    check (Result.is_error (D.Lowering.window ws)) "startup window checking ignored a frozen context";
     let reloaded = workspace (D.Workspace_doc.to_text ws) in
-    check (Result.is_error (D.Contexts.of_workspace ~factories reloaded))
+    check (Result.is_error (D.Lowering.of_workspace ~factories reloaded))
       "serialized reload bypassed frozen-time refusal") cases;
   let driven = workspace {|(workspace driven
     (graph g :context sop (sop/box :size [(+ 1 t) 1 1]))
     (graph scene :context scene (scene/geometry (ref g))))|} in
-  check (Result.is_ok (D.Contexts.of_workspace ~factories driven))
+  check (Result.is_ok (D.Lowering.of_workspace ~factories driven))
     "a live SOP reference was mistaken for a frozen scene field";
   with_editor (workspace scene_text) (fun e ->
     let before = E.workspace !e and label = E.undo_label !e in
@@ -148,7 +148,7 @@ let frozen_context_time () =
        ["scene"; "lamp"], "width", "(+ 1 t)"];
     e := E.edit !e (F.Set_arg {node = ["scene"; "object"]; key = Kw "translate";
       sub = []; value = parse "[2 0 0]"}) |> Result.get_ok;
-    check (Result.is_ok (D.Contexts.of_workspace ~factories
+    check (Result.is_ok (D.Lowering.of_workspace ~factories
       (workspace (D.Workspace_doc.to_text (E.workspace !e)))))
       "literal replacement did not survive reload";
     e := E.update !e (Test_editor_input.frame ~keys:[Input.Meta] (450., 300.)
@@ -193,10 +193,10 @@ let preview_identity () =
     (function _, Editor_core.Panels.View key -> Some key | _ -> None) in
   let edit doc op =
     let ws = D.Workspace_doc.edit catalog (doc.D.Document.workspace.ws) op |> Result.get_ok in
-    D.Contexts.of_workspace ~factories ~previous:doc ws |> Result.get_ok in
+    D.Lowering.of_workspace ~factories ~previous:doc ws |> Result.get_ok in
   let edit_layout doc op =
     let ws = D.Workspace_doc.edit_layout catalog (doc.D.Document.workspace.ws) op |> Result.get_ok in
-    D.Contexts.of_workspace ~factories ~previous:doc ws |> Result.get_ok in
+    D.Lowering.of_workspace ~factories ~previous:doc ws |> Result.get_ok in
   let names = keys doc in
   check (List.length names = 3 && List.length (List.sort_uniq String.compare names) = 3)
     "named viewport keys are not unique";
@@ -360,7 +360,7 @@ let live_lights () =
   check (not (List.mem_assoc main (Option.get doc.shell).views)
     && D.Document.Int_map.cardinal doc.scene_drives = 2)
     "live residuals turned the primary viewport into a duplicate read-only preview";
-  let resolve doc time = let scene, errors = D.Contexts.resolve_scene doc ~time in
+  let resolve doc time = let scene, errors = D.Lowering.resolve_scene doc ~time in
     check (errors = []) "valid live fields produced diagnostics"; scene in
   let zero = resolve doc 0. and two = resolve doc 2. in
   let intensities graph = D.Objects.lights ~render:true graph |> List.map (fun light -> light.Light.intensity) in
@@ -564,7 +564,7 @@ let named_inspector () = with_dir (fun presets ->
       [Input.Pointer_pressed (Input.LeftButton, p); Input.Pointer_released (Input.LeftButton, p)] 2);
     e := step !e 3;
     check (E.level !e = None) "fixture left the scene level";
-    let doc = D.Contexts.of_workspace ~factories (E.workspace !e) |> Result.get_ok in
+    let doc = D.Lowering.of_workspace ~factories (E.workspace !e) |> Result.get_ok in
     let tree = (Option.get doc.shell).tree in
     let leaf = Pxui_shell.Layout.find
       (Pxui_shell.Layout.geometry ~hidden:[Timeline] tree (frame 1)) Inspector |> Option.get in
@@ -673,7 +673,7 @@ let stale_inspector_draft () = with_dir (fun presets ->
     e := step !e 1;
     let x, y, w, _ = E.node_box !e ["g"; "a"] |> Option.get in
     click (float (x + w / 2), float (y + 10));
-    let tree = (Option.get (D.Contexts.of_workspace ~factories (E.workspace !e)
+    let tree = (Option.get (D.Lowering.of_workspace ~factories (E.workspace !e)
       |> Result.get_ok).shell).tree in
     let panes = Pxui_shell.Layout.geometry ~hidden:[Timeline] tree (frame 1) in
     let lx, ly, _, lh = (Pxui_shell.Layout.find panes Lisp |> Option.get).body in
