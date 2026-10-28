@@ -1354,22 +1354,21 @@ let part_imports () =
     "local edit changed imported source";
   print_endline "workspace imports: splice, provenance, saves, edit refusal and diagnostics passed"
 
-let run () =
-  List.iter
-    (fun f -> f ())
+(* Three groups of about equal cost, each its own dune action: the alias waits for the longest. *)
+let run ?part () =
+  let a = [ part_text; part_edit; part_view; part_contexts; part_editor_contexts ]
+  and b = [ part_literals; part_files ]
+  and c =
     [
-      part_text;
-      part_edit;
-      part_view;
       part_editor;
       part_conditional_history;
       part_live;
       part_preset;
       part_pane_layout;
-      part_contexts;
-      part_editor_contexts;
-      part_literals;
-      part_files;
       part_projection_reuse;
       part_imports;
     ]
+  in
+  List.iter
+    (fun f -> f ())
+    (match part with None -> a @ b @ c | Some `A -> a | Some `B -> b | Some `C -> c)

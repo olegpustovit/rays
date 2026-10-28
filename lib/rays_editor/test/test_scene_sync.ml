@@ -1136,7 +1136,11 @@ let run_root () =
     List.fold_left
       (fun n name ->
         let file = Filename.concat sketches name in
-        if (not (Filename.check_suffix file ".rays")) || (Unix.stat file).st_size > 1500 then n
+        if
+          (not (Filename.check_suffix file ".rays"))
+          || (Unix.stat file).st_size > 1500
+          || name = "ws_sunflower.rays" (* 5.5 s to lower; test_workspace_ir loads it *)
+        then n
         else begin
           let text = In_channel.with_open_bin file In_channel.input_all in
           (* a sketch that brings its own SOPs is not loaded here *)

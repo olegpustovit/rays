@@ -21,11 +21,15 @@ let tests =
         Test_scene_sync.run ();
         Test_scene_sync.run_loops ();
         Test_scene_sync.run_nested_loops ();
-        Test_scene_sync.run_root ();
         Test_scene_sync.run_compose ();
         Test_scene_sync.run_instances () );
+    ("test_scene_sync_root", Test_scene_sync.run_root);
     ("test_sop_catalog", fun () -> Test_sop_catalog.run ());
-    ("test_sop_catalog_exhaustive", fun () -> Test_sop_catalog.run ~exhaustive:true ());
+    ("test_sop_catalog_inputs", Test_sop_catalog.run_inputs);
+    ( "test_sop_catalog_exhaustive",
+      fun () ->
+        Test_sop_catalog.run ~exhaustive:true ();
+        Test_sop_catalog.run_inputs () );
     ("test_packed_pieces", Test_packed_pieces.run);
     ("test_terminal_boolean_normals", Test_terminal_boolean_normals.run);
     ("test_workspace_live", Test_workspace_live.run);
@@ -34,10 +38,18 @@ let tests =
     ("test_editor_consistency_native", Test_editor_consistency.run_native);
     ("test_probe", Test_probe.run);
     ("test_viewport_pick", Test_viewport_pick.run);
-    ("test_workspace_doc", Test_workspace_doc.run);
+    ("test_workspace_doc_a", Test_workspace_doc.run ~part:`A);
+    ("test_workspace_doc_b", Test_workspace_doc.run ~part:`B);
+    ("test_workspace_doc_c", Test_workspace_doc.run ~part:`C);
     ( "test_workspace_shell",
       fun () ->
         Test_workspace_shell.run ();
+        Test_workspace_shell.run_roots () );
+    ("test_workspace_shell_a", Test_workspace_shell.run ~part:`A);
+    ("test_workspace_shell_b", Test_workspace_shell.run ~part:`B);
+    ( "test_workspace_shell_rest",
+      fun () ->
+        Test_workspace_shell.run ~part:`Rest ();
         Test_workspace_shell.run_roots () );
     ("test_workspace_shell_native", Test_workspace_shell.run_native);
     ("test_workspace_view_native", Test_workspace_shell.run_view_native);

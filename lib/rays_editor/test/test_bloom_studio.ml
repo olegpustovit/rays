@@ -69,10 +69,20 @@ let run () =
     (dump_line !e "projection" = "graph" && dump_line !e "pane graph" = "flower")
     ("the sketch opens on the network of flower: " ^ dump_line !e "projection" ^ " / "
    ^ dump_line !e "pane graph");
+  (* the lowering is the cost of a call: keep it per workspace value *)
+  let memo = ref None in
   let shell () =
-    match E3.workspace !e |> fun w -> Editor_document.Lowering.of_workspace ~factories w with
-    | Ok d -> Option.get d.Document.shell
-    | Error d -> fail (Diagnostic.to_string d)
+    let w = E3.workspace !e in
+    match !memo with
+    | Some (w', s) when w' == w -> s
+    | _ ->
+        let s =
+          match Editor_document.Lowering.of_workspace ~factories w with
+          | Ok d -> Option.get d.Document.shell
+          | Error d -> fail (Diagnostic.to_string d)
+        in
+        memo := Some (w, s);
+        s
   in
   let geometry () =
     Layout.geometry ~hidden:[ Layout.Timeline ] (shell ()).tree (frame (0., 0.) [] 0)
