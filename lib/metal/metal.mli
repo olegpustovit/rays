@@ -338,7 +338,6 @@ module Drawable : sig
   val acquire : Metal_layer.t -> ((t,loss) result,error) result
   val texture : t -> (Texture.t,error) result
   val destroy : t -> (unit,error) result
-  module Private : sig
     (** Acquires an explicitly-owned drawable without an OCaml finalizer.
         Destroy it on every exit, after destroying its texture wrapper.  A
         drawable scheduled on a retained-reference command buffer remains
@@ -348,7 +347,6 @@ module Drawable : sig
         finalizer.  Use this with [acquire_scoped], and destroy the texture
         before destroying its drawable. *)
     val texture_scoped : t -> (Texture.t,error) result
-  end
 end
 
 module Render_pass_descriptor : sig
@@ -952,7 +950,6 @@ module Render_encoder : sig
   val end_encoding : t -> (unit, error) result
   val destroyed : t -> bool
 
-  module Private : sig
     type prepared_indexed_binding=
       { prepared_stage:stage
       ; prepared_index:int
@@ -976,7 +973,6 @@ module Render_encoder : sig
       (prepared_indexed_draws,error) result
     val execute_prepared_indexed_draws :
       t -> prepared_indexed_draws -> (unit,error) result
-  end
 end
 
 module Blit_encoder : sig
