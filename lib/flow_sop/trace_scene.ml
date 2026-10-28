@@ -42,7 +42,7 @@ let moving_prototype geometry ending =
       let nearest = ref H.miss in
       for triangle = 0 to S.triangle_count index - 1 do
         let point corner =
-          let k = S.Private.triangle_point index triangle corner in
+          let k = S.View.triangle_point index triangle corner in
           let x0, y0, z0 = Rdk.Packed.Float3.get positions k and x1, y1, z1 = Rdk.Packed.Float3.get ends k in
           x0 +. ((x1 -. x0) *. time), y0 +. ((y1 -. y0) *. time), z0 +. ((z1 -. z0) *. time) in
         let x0, y0, z0 = point 0 and x1, y1, z1 = point 1 and x2, y2, z2 = point 2 in
@@ -58,7 +58,7 @@ let moving_prototype geometry ending =
           if b >= 0. && c >= 0. && b +. c <= 1. && t >= q.(6) && t <= q.(7) && ((not !nearest.H.hit) || t < !nearest.H.t) then begin
             let nx = (uy *. vz) -. (uz *. vy) and ny = (uz *. vx) -. (ux *. vz) and nz = (ux *. vy) -. (uy *. vx) in
             let n = Float.sqrt ((nx *. nx) +. (ny *. ny) +. (nz *. nz)) in
-            nearest := { H.t; prim = S.Private.triangle_primitive index triangle; u = b; v = c; nx = nx /. n;
+            nearest := { H.t; prim = S.View.triangle_primitive index triangle; u = b; v = c; nx = nx /. n;
                          ny = ny /. n; nz = nz /. n; hit = true; instance = 0 }
           end
         end
