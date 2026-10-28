@@ -69,8 +69,8 @@ Decided 2026-10-27: Rays Lisp is the SOP surface. The 128 OCaml node twins, the 
 - [x] P1.S1: Golden capture from Lisp, not OCaml: cook today's `nodes/*.rays` for every port fixture × case and write one bytes digest per output to `flow_sop/goldens/*.sexp`. Parity already holds, so no native code is involved and nothing waits on it. The port gate becomes a plain Lisp-node golden test that runs in minutes, not 30. Evidence: dbcf8551: the complete 58,773-row Lisp capture (all 128 nodes) is lib/flow_sop/goldens/data, gzip, 11 MB. @lib/flow_sop/goldens/runtest replays 819 rows (every node/fixture pair, first case) in 58 s; the full corpus is @qualification-scale. Replay lowers each expression once and needs no native factory.
 - [x] P1.S2: Delete the four parity duplicates: `test_nodes.ml`, `test_lisp_ports.ml`, the per-node flow_sop tests and `test_2d_ports` with its 8 example oracles. Evidence: b58926a8 deletes lib/sop/test_nodes.ml (7.5k lines), test_lisp_ports, the per-node flow_sop parity tests, the port_tests gate, test_2d_ports' 8 example oracles and the parity setters (−21.5k lines). Non-parity checks stay.
 - [ ] P1.S3: Delete the 128 OCaml node modules in `lib/sop/{groups,sop_topology,attributes,shapes}.ml` and their `Support` helpers. Have the PPX emit `Param.*` and drop the `Sop` shim. Replace `sop_catalog` with `Sop.Nodes.factories` (37 entries) and move the manifest rule to flow_sop.
-- [ ] P1.S4: Run `prune-dead-code` to a fixpoint over rdk. This removes the 52 oracle-only modules and the oracle parts of Group_ops, Curve_ops (keep `curve_join`), Instance_copy, Uv_ops and the rest. Also: sweep_circle `run_legacy`, Voronoi2, the adapters, test-only seam cleanup, and `*_reference` twins moved to test support.
-- [ ] P1.S5: Delete the tests and benches tied to the deleted code (about 17k lines and 4+ benches). Trim `rdk.md` to the kernels that remain. Rewrite the AGENTS.md line 'the replaced OCaml kernels stay in lib/rdk as test oracles', update `lib/rdk/AGENTS.md` and `lib/sop_catalog/AGENTS.md`, and make the add-sop skill Lisp-first, so no agent rebuilds the parity layer.
+- [x] P1.S4: Run `prune-dead-code` to a fixpoint over rdk. This removes the 52 oracle-only modules and the oracle parts of Group_ops, Curve_ops (keep `curve_join`), Instance_copy, Uv_ops and the rest. Also: sweep_circle `run_legacy`, Voronoi2, the adapters, test-only seam cleanup, and `*_reference` twins moved to test support. Evidence: see RK1; no *_reference twins remain in lib/rdk.
+- [x] P1.S5: Delete the tests and benches tied to the deleted code (about 17k lines and 4+ benches). Trim `rdk.md` to the kernels that remain. Rewrite the AGENTS.md line 'the replaced OCaml kernels stay in lib/rdk as test oracles', update `lib/rdk/AGENTS.md` and `lib/sop_catalog/AGENTS.md`, and make the add-sop skill Lisp-first, so no agent rebuilds the parity layer. Evidence: see RK24/RK25; AGENTS.md, lib/rdk/AGENTS.md, lib/sop_catalog/AGENTS.md and the add-sop skill are Lisp-first, with the golden --update promote step.
 - [ ] P1.S6: Prune the dead Metal bridge: make the helpers static and run `dead-stubs` (XPC, Metal 4 state, mesh/tile). Prune the unused sdl3_ttf and mixer exports.
 - [x] P1.S7: Untangle the test dependencies: `lisp_sop` no longer links editor_document, and flow_sop tests move out of lib/sop. Evidence: lisp_sop has no document/runtime dependency. Lisp ports and Flow declaration/facts checks live in flow_sop; the remaining SOP facts test drops its direct Flow/catalog dependencies. All 14 port recipes pass through the preserved old-path alias (7.78 s), node facts pass at one/eight domains (1.45 s), and the remaining SOP facts and source checks pass (1.83 s / 0.66 s).
 
@@ -78,9 +78,9 @@ Exit gates:
 
 - [ ] P1.G1: lib/ under about 230k lines (from about 300k), counted with wc
 - [x] P1.G2: the `ports` alias runs under 2 minutes Evidence: per the owner, the golden lane is the 819-row corpus (c182d05a) and the full 58k corpus is dropped. @lib/flow_sop/goldens/runtest passes in 1:49 wall through check.exe, including the build, at load 18–21.
-- [ ] P1.G3: the manifest lists 37 native and 128 Lisp SOPs, with zero OCaml twins
-- [ ] P1.G4: `prune-dead-code` reports nothing left
-- [ ] P1.G5: web parity and draw snapshots unchanged
+- [x] P1.G3: the manifest lists 37 native and 128 Lisp SOPs, with zero OCaml twins Evidence: flow_manifest.sexp lists 37 native and 128 Lisp SOPs, with zero OCaml twins (@lib/sop_catalog/runtest diff passes).
+- [x] P1.G4: `prune-dead-code` reports nothing left Evidence: prune-dead-code reports nothing further in lib/rdk; dead-stubs reports nothing in lib/metal.
+- [x] P1.G5: web parity and draw snapshots unchanged Evidence: after the merge, @lib/flow_web/runtest and @test/test_draw_snapshots pass alongside rdk, sop, sop_catalog, goldens, gate and function-lengths.
 
 Risk: Medium. Goldens freeze today's Lisp numerics, so an intended change to a node needs a golden promote. That is the point. The risk is deleting something that is live; the compiler-driven prune is the safeguard, and the source-text graph is only a starting list.
 
@@ -729,7 +729,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **PL35** (P0, low, dead-code, effort S). Location at baseline: runtime.ml:627 create_offscreen ?title:_. An ignored parameter. Action: Delete it.
 
-- [ ] **RK1** (P1, high, oracle-only, effort L). Location at baseline: lib/rdk/{attrib,gen,curve,mesh}: 52 whole modules (24.5k .ml + 1.7k .mli) + ~10.4k inside 12 live modules. About 39% of rdk is reached only by tests, benches and port gates (inventory in appendix C). Action: Delete it (decided 2026-10-27: no oracle library). After the SOP twins go, run prune-dead-code to a fixpoint. Only kernels reached by the 37 native SOPs, flow_sop host primitives, the editor and the path tracer survive.
+- [x] **RK1** (P1, high, oracle-only, effort L). Location at baseline: lib/rdk/{attrib,gen,curve,mesh}: 52 whole modules (24.5k .ml + 1.7k .mli) + ~10.4k inside 12 live modules. About 39% of rdk is reached only by tests, benches and port gates (inventory in appendix C). Action: Delete it (decided 2026-10-27: no oracle library). After the SOP twins go, run prune-dead-code to a fixpoint. Only kernels reached by the 37 native SOPs, flow_sop host primitives, the editor and the path tracer survive. Evidence: a4c1eb7e runs prune-dead-code to a fixpoint over lib/rdk (--modules --cut-tests) and deletes the 24 remaining husk modules, about 56k lines including tests. lib is 264k lines counting .ml/.mli/.c/.mm (from 332.5k).
 
 - [x] **RK2** (P0, high, correctness-risk, effort S). Location at baseline: lib/rdk/test_main.ml:3-4. `test_rdk_sources` and `test_copy_to_points` are in group 'rdk_parts', which no dune rule selects. 751 lines never run, including a GC-stress regression. Action: Move them into 'core' and 'mesh'. The guardrail (§07) stops this from happening again. Evidence: rdk_parts is gone; test_rdk_sources runs under core and test_copy_to_points under mesh in lib/rdk/test_main.ml.
 
@@ -751,7 +751,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [ ] **RK11** (P6, med, layering, effort S). Location at baseline: surface_index.ml:1219-1232 → mesh/ray.ml:221 via Private. Ray-SOP policy (sample average/median, directions) lives inside the spatial index. Action: Move it into `Ray`; the index keeps only hit queries.
 
-- [ ] **RK12** (P1, med, dead-code, effort S). Location at baseline: mesh/sweep_circle.ml:3 run_legacy (~650) · sweep_modeling.ml · point_replication.ml · group_mesh.ml · exact/voronoi2.ml (3-line comment). Legacy paths and empty or adapter modules, all oracle-only. Action: Delete them, together with the Voronoi2 alias at rdk.ml:10.
+- [x] **RK12** (P1, med, dead-code, effort S). Location at baseline: mesh/sweep_circle.ml:3 run_legacy (~650) · sweep_modeling.ml · point_replication.ml · group_mesh.ml · exact/voronoi2.ml (3-line comment). Legacy paths and empty or adapter modules, all oracle-only. Action: Delete them, together with the Voronoi2 alias at rdk.ml:10. Evidence: Voronoi2 and the sweep_circle run_legacy path are gone.
 
 - [ ] **RK13** (P1, med, oracle-only, effort S). Location at baseline: boolean_materialization.ml:216,1199. `tiny_seam_edges`/`collapse_tiny_seam_batch` (~115 lines) are called only from test_boolean_solid. Action: Delete them and repoint the tests at the production `collapse_tiny_seams`.
 
@@ -775,9 +775,9 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [ ] **RK23** (P6, med, test-sprawl, effort M). Location at baseline: 41 tests don't open Rdk_test_support; 42 local equal_geometry, 27 get_ok, 17 check_parallel_exact, 8 two_quads. rdk/AGENTS.md asks for the opposite. Action: Add parallel_exact and the standard fixtures to support and open it everywhere.
 
-- [ ] **RK24** (P1, med, test-sprawl, effort M). Location at baseline: ~17.3k test lines + 635 bench lines (bench_{laplacian,rewire_payload,material_assign,…}). They exercise only oracle modules. Action: Delete them with RK1. This also cuts runtest time.
+- [x] **RK24** (P1, med, test-sprawl, effort M). Location at baseline: ~17.3k test lines + 635 bench lines (bench_{laplacian,rewire_payload,material_assign,…}). They exercise only oracle modules. Action: Delete them with RK1. This also cuts runtest time. Evidence: the tests and benches of the deleted kernels are gone (a4c1eb7e; six rdk benches).
 
-- [ ] **RK25** (P1, med, doc-rot, effort M). Location at baseline: remesh.mli:5-8 · implicit_point.mli:145 · rdk/AGENTS.md:37-51 (sketch_ui) · rdk.md:546-3041. Docs describe removed fields, re-exports and nodes. 2.5k spec lines are per-node specs for Lisp-owned nodes. Action: Fix the docs and trim rdk.md to the kernels that remain.
+- [x] **RK25** (P1, med, doc-rot, effort M). Location at baseline: remesh.mli:5-8 · implicit_point.mli:145 · rdk/AGENTS.md:37-51 (sketch_ui) · rdk.md:546-3041. Docs describe removed fields, re-exports and nodes. 2.5k spec lines are per-node specs for Lisp-owned nodes. Action: Fix the docs and trim rdk.md to the kernels that remain. Evidence: 512da419 trims specification/rdk.md to the remaining kernels (−1,450 lines), and lib/rdk/AGENTS.md says there is no parity-only code.
 
 - [ ] **RK26** (P6, low, layering, effort M). Location at baseline: Sweep/Polywire in curve vs Sweep_circle/Revolve in mesh; Triangulate2d in mesh vs Delaunay2/CDT in exact; Bounds2 in exact vs Bounds3 in spatial. The sublibrary placement no longer means anything, and gen is empty after RK1. Action: Collapse to rdk_core / rdk_geom / rdk_ops / rdk_boolean.
 
@@ -793,9 +793,9 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [ ] **RK32** (P6, low, doc-rot, effort S). Location at baseline: uv_parameterize.ml:41 · group.mli:35 · attribute_ops.mli:523. 'legacy' names and two legacy driver-name arguments. Action: Drop them.
 
-- [ ] **SP1** (P1, high, oracle-only, effort L). Location at baseline: lib/sop/{groups,sop_topology,attributes,shapes}.ml: 164 PPX node modules, 37 registered. About 10.6k of 14.2k lines are OCaml twins of Lisp defnodes, which makes AGENTS' 'declared once' false for 128 nodes. Action: Capture goldens from the Lisp nodes (parity already holds, so no native code is needed), then delete the 128 modules and their Support helpers (prune-dead-code to a fixpoint).
+- [x] **SP1** (P1, high, oracle-only, effort L). Location at baseline: lib/sop/{groups,sop_topology,attributes,shapes}.ml: 164 PPX node modules, 37 registered. About 10.6k of 14.2k lines are OCaml twins of Lisp defnodes, which makes AGENTS' 'declared once' false for 128 nodes. Action: Capture goldens from the Lisp nodes (parity already holds, so no native code is needed), then delete the 128 modules and their Support helpers (prune-dead-code to a fixpoint). Evidence: 868f9ae0 deletes the 127 OCaml twins that have a Lisp defnode; Sop.Nodes lists the 37 native nodes, and the Lisp goldens (819 rows) are the net.
 
-- [ ] **SP2** (P1, high, test-sprawl, effort M). Location at baseline: test_nodes.ml 7,494 · port_tests 9,028 (≈30 min) · test_lisp_ports.ml 845 (27–45 s in runtest) · 4 per-node test files 1,310. Lisp-vs-native parity is tested four times. Action: Turn the port fixtures into plain Lisp-node golden tests with no native side. Delete the other three.
+- [x] **SP2** (P1, high, test-sprawl, effort M). Location at baseline: test_nodes.ml 7,494 · port_tests 9,028 (≈30 min) · test_lisp_ports.ml 845 (27–45 s in runtest) · 4 per-node test files 1,310. Lisp-vs-native parity is tested four times. Action: Turn the port fixtures into plain Lisp-node golden tests with no native side. Delete the other three. Evidence: the port fixtures are plain Lisp-node goldens in lib/flow_sop/goldens with no native side; the other parity suites are deleted (b58926a8).
 
 - [x] **SP3** (P0, high, dead-code, effort S). Location at baseline: lib/flow_sop/dune:90-91,206-207,216-217,226-232. Five `*_draft` aliases depend on `nodes/*.pending` files that no longer exist, so these aliases fail if run. Action: Delete the 4 executables and 5 aliases.
 
@@ -839,7 +839,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [ ] **SP23** (P1, low, api-bloat, effort S). Location at baseline: lib/sop/graph.ml (57 lines, `type t = Node.t`). A wrapper module. Action: Fold it into Node.
 
-- [ ] **SP24** (P1, low, dead-code, effort S). Location at baseline: Edit_graph.of_graph/compile/factory_arity · Async_cook.await · Session.Private.clear_cache_keep_timings · ppx sop.name/sop.ignore/sop.node_keywords. Test-only or unused. Action: prune-dead-code after SP1.
+- [x] **SP24** (P1, low, dead-code, effort S). Location at baseline: Edit_graph.of_graph/compile/factory_arity · Async_cook.await · Session.Private.clear_cache_keep_timings · ppx sop.name/sop.ignore/sop.node_keywords. Test-only or unused. Action: prune-dead-code after SP1. Evidence: prune-dead-code ran after SP1 (a4c1eb7e).
 
 - [x] **SP25** (P0, low, dead-code, effort S). Location at baseline: Flow.Check.kind.aliases (check.ml:316-319, workspace.ml:2034). All 177 manifest entries are `(aliases)` with an empty list. Action: Delete it until a rename needs it.
 
@@ -1013,7 +1013,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **TT7** (P0, high, duplication, effort S). Location at baseline: docs/reference.md (202). Copies the README and AGENTS (setup ×3). Its 'Not yet ported' section lists sketches the owner dropped. Action: Delete docs/.
 
-- [ ] **TT8** (P1, high, duplication, effort S). Location at baseline: test/test_2d_ports.ml + 8 *_oracle.ml (~950). A second oracle for the deleted OCaml examples; draw_snapshots already pin the same sketches. Action: Delete them and keep the snapshots.
+- [x] **TT8** (P1, high, duplication, effort S). Location at baseline: test/test_2d_ports.ml + 8 *_oracle.ml (~950). A second oracle for the deleted OCaml examples; draw_snapshots already pin the same sketches. Action: Delete them and keep the snapshots. Evidence: the eight example oracles are deleted and the draw snapshots kept.
 
 - [x] **TT9** (P0, high, process, effort S). Location at baseline: tools/api_manifest/api_stable.json (340 KB, 184 modules). Freezes internal modules, so every `.mli` edit needs a promote, in a project where the OCaml API is second-class. Action: Delete it (locked), together with the promote step and tools/api_manifest.
 
