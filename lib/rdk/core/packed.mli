@@ -54,7 +54,8 @@ module Float2 : sig
   end
 end
 
-(** A value made once, on first use, from any domain; the thunk is dropped once it has run. *)
+(** A value made on first use, from any domain, without a lock: racing readers may each run the
+    thunk, and all see the first result. The thunk is dropped once it has run. *)
 module Deferred : sig
   type 'a t
 

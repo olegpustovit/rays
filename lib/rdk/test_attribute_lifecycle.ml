@@ -784,11 +784,16 @@ let () =
   check
     (Packed.Float3.get positions 1 = (1., 11., 21.)
     && Packed.Float3.get positions 2 = (2., 12., 22.)
-    && Atomic.get reads = 1)
-    "deferred P read more than once";
+    && Atomic.get reads >= 1)
+    "deferred P unread";
+  (* racing first readers may each run the thunk; once forced, never again *)
+  let raced = Atomic.get reads in
+  ignore (Packed.Float3.get positions 0);
+  check (Atomic.get reads = raced) "deferred P read after it was forced";
   check
     (Attribute.storage noise = Attribute.Float (Array.init count float_of_int)
-    && Atomic.get reads = 2
+    && ignore (Attribute.storage noise) = ()
+    && Atomic.get reads = raced + 1
     && not (Attribute.resident noise))
     "deferred attribute read more than once";
   print_endline "deferred storage tests passed"

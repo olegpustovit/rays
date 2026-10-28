@@ -105,23 +105,24 @@ module Float2 = struct
 end
 
 module Deferred = struct
-  type 'a t = { lock : Mutex.t; mutable make : (unit -> 'a) option; value : 'a option Atomic.t }
+  type 'a t = { make : (unit -> 'a) option Atomic.t; value : 'a option Atomic.t }
 
-  let create make = { lock = Mutex.create (); make = Some make; value = Atomic.make None }
+  let create make = { make = Atomic.make (Some make); value = Atomic.make None }
 
-  (* once, from any domain: the thunk (and what it holds, a device buffer) is dropped once forced *)
+  (* From any domain, holding no lock (the thunk may run parallel work whose tasks force the same
+     value): domains that race may each run the thunk, the first result wins and every reader sees
+     it; the thunk (and what it holds, a device buffer) is dropped once forced. *)
   let force value =
     match Atomic.get value.value with
     | Some forced -> forced
-    | None ->
-        Mutex.protect value.lock (fun () ->
-            match Atomic.get value.value with
-            | Some forced -> forced
-            | None ->
-                let forced = (Option.get value.make) () in
-                Atomic.set value.value (Some forced);
-                value.make <- None;
-                forced)
+    | None -> (
+        match Atomic.get value.make with
+        | None -> Option.get (Atomic.get value.value)
+        | Some make ->
+            let forced = make () in
+            ignore (Atomic.compare_and_set value.value None (Some forced));
+            Atomic.set value.make None;
+            Option.get (Atomic.get value.value))
 
   let forced value = Option.is_some (Atomic.get value.value)
 end

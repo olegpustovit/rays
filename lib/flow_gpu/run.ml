@@ -20,8 +20,9 @@ type kept = {
   kept_floats : B.floats;
   kept_count : int;
   kept_width : int;
-  lock : Mutex.t;
-  mutable planes : float array array option;
+  lock : Mutex.t;  (** orders an invalidate against close's destroy; never held while converting *)
+  planes : float array array option Atomic.t;
+  mutable destroyed : bool;
 }
 
 type t = {
@@ -674,21 +675,35 @@ let planes ?index output =
       in
       to_planes floats ~count ~width)
 
-(* under [kept.lock]: the planes, read once *)
+(* a holder that no longer needs its buffer names it (a finaliser or a first read, any domain); the
+   runner recycles or destroys it on its next dispatch *)
+let release released id =
+  let rec push () =
+    let old = Atomic.get released in
+    if not (Atomic.compare_and_set released old (id :: old)) then push ()
+  in
+  push ()
+
+(* The planes, from any domain; racing readers may both convert, the first result wins. Once read,
+   the holder no longer needs the buffer: it goes back to the runner at once, not at collection. *)
 let materialise t kept =
-  match kept.planes with
+  match Atomic.get kept.planes with
   | Some planes -> planes
   | None ->
       let length = kept.kept_count * kept.kept_width in
-      if length > 0 then get (B.invalidate_mapped kept.kept_buffer ~length:(length * 4));
+      Mutex.protect kept.lock (fun () ->
+          if (not kept.destroyed) && length > 0 then
+            get (B.invalidate_mapped kept.kept_buffer ~length:(length * 4)));
       let planes =
         match to_planes kept.kept_floats ~count:kept.kept_count ~width:kept.kept_width with
         | Ok planes -> planes
         | Error d -> raise (Diagnostic.Error d)
       in
-      Atomic.incr t.materialised;
-      kept.planes <- Some planes;
-      planes
+      if Atomic.compare_and_set kept.planes None (Some planes) then begin
+        Atomic.incr t.materialised;
+        release t.released kept.id
+      end;
+      Option.get (Atomic.get kept.planes)
 
 let next_kept = Atomic.make 0
 
@@ -706,7 +721,8 @@ let keep ?index output =
           kept_count = output.count;
           kept_width = width;
           lock = Mutex.create ();
-          planes = None;
+          planes = Atomic.make None;
+          destroyed = false;
         }
       in
       let capacity = slot.capacity in
@@ -720,15 +736,8 @@ let keep ?index output =
       Hashtbl.replace t.held kept.id (buffer, floats, capacity);
       (* any domain, any allocation: only name the holder; after close nothing drains it *)
       let id = kept.id and released = t.released in
-      Gc.finalise
-        (fun _ ->
-          let rec push () =
-            let old = Atomic.get released in
-            if not (Atomic.compare_and_set released old (id :: old)) then push ()
-          in
-          push ())
-        kept;
-      Ok (output.count, width, fun () -> Mutex.protect kept.lock (fun () -> materialise t kept))
+      Gc.finalise (fun _ -> release released id) kept;
+      Ok (output.count, width, fun () -> materialise t kept)
   | _ ->
       (* an empty or unmapped output is read now *)
       Result.map (fun planes -> (output.count, width, fun () -> planes)) (planes ?index output)
@@ -774,9 +783,10 @@ let close t =
       (fun weak ->
         Option.iter
           (fun kept ->
-            if Hashtbl.mem t.held kept.id then
-              try ignore (Mutex.protect kept.lock (fun () -> materialise t kept))
-              with Diagnostic.Error _ -> ())
+            if Hashtbl.mem t.held kept.id then begin
+              (try ignore (materialise t kept) with Diagnostic.Error _ -> ());
+              Mutex.protect kept.lock (fun () -> kept.destroyed <- true)
+            end)
           (Weak.get weak 0))
       t.kept;
     t.kept <- [];
