@@ -1180,5 +1180,7 @@ let run ?(exhaustive = false) () =
     "standard Exploded View node lost its operation or PPX defaults";
   set_color_test ();
   test_morph_sketch ();
-  test_node_inputs ();
   print_endline "SOP catalog tests passed"
+
+(* 5 s on its own: its own dune action, so the alias waits for the longer of the two *)
+let run_inputs () = test_node_inputs ()

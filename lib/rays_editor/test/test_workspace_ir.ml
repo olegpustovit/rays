@@ -83,6 +83,14 @@ let () =
   let fixtures =
     if slow then fixtures else List.filter (fun p -> not (List.exists (has p) heavy)) fixtures
   in
+  (* RAYS_WORKSPACE_SHARD=i/n runs every n-th file from i: the dune rule runs the shards as parallel actions *)
+  let shard =
+    Option.map
+      (fun s -> Scanf.sscanf s "%d/%d" (fun i n -> fun k -> k mod n = i))
+      (Sys.getenv_opt "RAYS_WORKSPACE_SHARD")
+  in
+  let all = paths @ fixtures in
+  let all = match shard with None -> all | Some keep -> List.filteri (fun k _ -> keep k) all in
   let count = ref 0 in
   List.iter
     (fun path ->
@@ -110,8 +118,7 @@ let () =
         Workspace_parity.check ?directory ~name workspace;
         incr count
       end)
-    (paths @ fixtures);
-  if !count <> List.length paths + List.length fixtures then
-    failwith "incomplete workspace coverage";
-  Printf.printf "Workspace IR sweep: %d files, %d fixtures\n%!" (List.length paths)
-    (List.length fixtures)
+    all;
+  if !count <> List.length all then failwith "incomplete workspace coverage";
+  Printf.printf "Workspace IR sweep: %d files and fixtures of %d\n%!" (List.length all)
+    (List.length paths + List.length fixtures)
