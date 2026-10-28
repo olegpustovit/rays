@@ -443,16 +443,25 @@ use through `Rdk.Packed.Deferred` (once, any domain, the thunk and its buffer dr
 length, kind, identity and payload size never do. rdk stays GPU-free: it holds only a thunk and a
 release (`Deferred.create ?release`, `Geometry.releasers`). A recook whose result is only held
 (cached, compared by identity, counted) reads nothing back; the first CPU reader of P reads P alone.
-A dropped result is retired, never invalidated: when the session drops it (an LRU or payload
-eviction, a volatile slot replaced) the resident components no retained entry shares are retired at
-the end of the first cook whose root output, and the previous cook's, do not hold them. A retired
-output stays readable from any domain; its buffer returns to the host's pool (`Run.pool`, shared by
-every runner, so a new runner after an edit reuses buffers by size class, at most 8 free) when it
-is read or collected, and past 12 retired outputs still unread the oldest is read into owned
-planes first (same values) and its buffer reused: memory is bounded without a collection, and a
-reader of a stale result (spreadsheet, pick, crash dump) never fails. The cost: a caller keeping
-every result alive pays that read per recook (`test_chain_gpu_native` keeps 16 and reads one 15
-cooks old: median 0.04 s; 1.2 ms when a drop invalidated the buffer at once, which a stale reader could crash on).
+When the session drops a result (an LRU or payload eviction, a volatile slot replaced), the
+resident components no retained entry shares are released at the end of the first cook whose root
+output, and the previous cook's, do not hold them (`release ~held`). A component some cook's root
+held was handed out, so it is retired, never invalidated: it stays readable from any domain, and a
+reader of a stale result (spreadsheet, pick, crash dump) never fails. A component no root ever held
+(an intermediate write the cache evicted) is freed: its buffer is reused at once (`Host.stats.freed`;
+`test_chain_gpu_native` drops the first of two consecutive writes and fails unless its P and N are
+freed without a read). Retired buffers return to the host's pool (`Run.pool`, shared by every runner,
+so a new runner after an edit reuses buffers by size class: any 8 free, more within 256 MiB) when
+they are read or collected. Each holder carries a custom block that tells the GC its buffer's size
+(`flow_gpu_stubs.c`, one major cycle per 64 MiB, as a Bigarray's data), so a dead result is
+collected within a few cooks and its buffer comes back without a read; past 2 GiB of retired outputs
+still unread (all alive), the oldest is read into owned planes (same values) and its buffer reused,
+which bounds device memory. The pool never `Weak.get`s a retired holder it does not read: a get
+while the GC marks keeps the holder alive another cycle, which had kept every dead result alive.
+Measured (`bench_chain_recook.exe`, 1M points, one session toggling an edit, 32 warm and 32
+measured cooks, medians of three interleaved rounds, loaded M1, 2026-10-28): results that die, 1.5-3.2
+ms against dev's 6.0-12.1 ms (and 42-69 ms for the earlier read-the-oldest pool); the last 16 results
+kept alive, 2.0-2.6 ms against 8.9-11.0 ms (39-63 ms), with no output read back in either.
 A clear or a close leaves results to their holders' collection; closing
 the runner first materialises every holder still alive, so a geometry outliving the GPU stays valid. `test_chain_gpu_native` fails if a recook reads back,
 if reading P materialises more than one output or twice, or if a buffer outlives its geometry.

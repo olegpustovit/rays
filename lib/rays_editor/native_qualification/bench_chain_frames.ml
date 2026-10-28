@@ -1,15 +1,21 @@
 (* An animated chain: grid > attribute_noise (offset driven by frame/input's t) > transform, 1M
    points (GRID_SIDE), cooked frame after frame as the editor does (Value_lane.resolve, then one
-   session cook). Prints per frame: seconds, dispatches, uploads, pipelines compiled, P resident. *)
+   session cook). DRIVE and XDRIVE replace the noise's and add to the transform's arguments. Prints
+   per frame: seconds, dispatches, uploads, pipelines compiled, whether P is resident, and noise[1]
+   (a read back). *)
 let ok = function Ok value -> value | Error d -> failwith (Diagnostic.to_string d)
 let side = try int_of_string (Sys.getenv "GRID_SIDE") with Not_found -> 1000
+
+let drive =
+  Option.value (Sys.getenv_opt "DRIVE") ~default:":offset [(get (frame/input) :t) 0.0 0.0]"
 
 let text =
   Printf.sprintf
     "(workspace chain (graph g :context sop (-> (sop/grid :counts \"Point counts\" :connectivity \
-     \"Points\" :columns %d :rows %d) (sop/attribute_noise :name \"noise\" :seed 7 :offset [(get \
-     (frame/input) :t) 0.0 0.0]) (sop/transform :translate [0.0 1.0 0.0]))))"
-    side side
+     \"Points\" :columns %d :rows %d) (sop/attribute_noise :name \"noise\" :seed 7 %s) \
+     (sop/transform :translate [0.0 1.0 0.0] %s))))"
+    side side drive
+    (Option.value (Sys.getenv_opt "XDRIVE") ~default:"")
 
 let () =
   let gpu = Flow_native.Workspace_gpu.create () in
@@ -43,15 +49,6 @@ let () =
           in
           let lowered = Flow_sop.Lower.workspace ~gpu:config (Flow.Syntax.parse text |> ok) |> ok in
           let graph = List.hd lowered.graphs in
-          Flow_sop.Port.Map.iter
-            (fun (port : Flow_sop.Port.t) _ ->
-              Printf.printf "drive node %d %s (%s)\n" port.node port.path
-                (Option.value ~default:"?"
-                   (Sop.Edit_graph.node_factory_key graph.network.geometry ~node_id:port.node)))
-            graph.network.drives;
-          List.iter
-            (fun (info : Sop.Edit_graph.node_info) -> Printf.printf "node %d %s %s\n" info.id info.operation (String.sub info.parameters 0 (min 300 (String.length info.parameters))))
-            (Sop.Edit_graph.inspect graph.network.geometry);
           let lane = Flow_sop.Value_lane.create () in
           let session =
             Sop.Session.create ~max_entries:64 ~max_payload_bytes:(1 lsl 30) |> Result.get_ok

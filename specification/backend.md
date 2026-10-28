@@ -364,11 +364,15 @@ a lazy holder (a SOP write's deferred attribute, specification/sop.md, Device pl
 waiting: the holder's `settle` (initial domain, once per dispatch) waits for the epoch and reads the
 status, which is explicit synchronisation a discrete backend needs anyway; its `materialise` is the
 only read (an `invalidate_mapped` and a conversion, callable from any domain once settled because it
-does no queue work; on the initial domain it waits itself); its `release` hands an unread buffer
-back at once when its owner (a `Sop.Session` dropping the result) no longer needs it, and a later
-read raises. The runner takes a recycled or fresh buffer for its next dispatch; a released, read
-or collected holder's buffer is recycled (at most 4) or destroyed on the initial domain at the
-runner's next dispatch, and `Run.close` materialises live holders before destroying their buffers.
+does no queue work; on the initial domain it waits itself); its `release ~held` says its owner (a
+`Sop.Session` dropping the result) no longer needs it: handed out (`held`), it is retired and stays
+readable until read or collected; otherwise its buffer comes back at once and a later read raises.
+A holder tells the GC its buffer's size (a custom block, `caml_alloc_custom`, in `flow_gpu`'s stub),
+so device memory a dead holder pins drives collection as a Bigarray's data does; nothing assumes the
+GC sees device memory otherwise. The runner takes a recycled or fresh buffer for its next dispatch; a
+freed, read or collected holder's buffer is recycled into the shared pool (`Run.pool`, any 8 or
+within 256 MiB) or destroyed on the initial domain at the next dispatch, and `Run.close` materialises
+live holders before destroying their buffers.
 A dispatch that resets the status word first reads an unsettled predecessor's status into a short
 verdict list, so a late `settle` still sees its own failure. `materialise` cannot fail: `settle`
 covered completion and every output's finiteness, the range is the buffer's own and the buffer is
