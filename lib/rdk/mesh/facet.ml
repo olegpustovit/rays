@@ -1478,12 +1478,6 @@ let adjust_normals ?cancel ?(grain = 16_384) ?primitives ~unit_length ~reverse
 
 (* The Facet SOP: composes the kernels above over an optional selection. *)
 
-type deform_selection = Deform.selection =
-  | Selected_points of Group.t
-  | Selected_vertices of Group.t
-  | Selected_primitives of Group.t
-  | Selected_edges of Edge_group.t
-
 let facet_point_selection ?cancel ~grain primitives geometry =
   let topology = Geometry.topology geometry in
   let index = Topology_index.create ?cancel topology in

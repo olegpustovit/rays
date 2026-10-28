@@ -1708,9 +1708,3 @@ let clip ({ cancel; grain; keep; snapping_tolerance; fill; split_connectivity; c
                 (fun output -> install below_group
                   (fun p -> primitive_side.(p) = 1 && not primitive_cap.(p)) output))))))
   with Error.Fail message -> Error message
-
-type selection = Deform.selection =
-  | Selected_points of Group.t
-  | Selected_vertices of Group.t
-  | Selected_primitives of Group.t
-  | Selected_edges of Edge_group.t

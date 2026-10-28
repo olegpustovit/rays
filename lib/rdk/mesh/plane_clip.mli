@@ -1,11 +1,5 @@
 type keep = Above | Below | All
 
-type selection = Deform.selection =
-  | Selected_points of Rdk_core.Group.t
-  | Selected_vertices of Rdk_core.Group.t
-  | Selected_primitives of Rdk_core.Group.t
-  | Selected_edges of Rdk_core.Edge_group.t
-
 type params = {
   cancel : Rdk_core.Cancel.t option;
   grain : int;
@@ -15,7 +9,7 @@ type params = {
   split_connectivity : bool;
   clip_attribute : string;
   distance : float;
-  selection : selection option;
+  selection : Deform.selection option;
   replace_existing_groups : bool;
   clipped_edge_group : string option;
   cap_group : string option;
