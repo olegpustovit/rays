@@ -164,7 +164,6 @@ val tagged : t -> Scope_wires.wire -> bool
 val node_lit : Path_set.t * Path_set.t -> path -> bool
 val font_of : float -> int
 val regeo : t -> P.scope -> P.layout -> shift:(path -> float * float) -> t
-val no_stats : stats
 val create : ?width:int -> ?height:int -> unit -> t
 val with_bounds : x:int -> y:int -> width:int -> height:int -> t -> t
 val suspend : t -> t
@@ -180,18 +179,10 @@ val clear_selection : t -> t
 val stats : t -> stats
 val zoom : t -> float
 val scope_point : t -> scope:path -> float * float -> (float * float) option
-val count_scope : P.scope -> int * int * int
 val frame_all : t -> t
 val count_of : t -> path -> int
-val refresh : t -> t
 val no_shift : 'a -> float * float
 val lens_of : t -> path -> int option
-val lay :
-  ?sticky:bool -> t ->
-  P.scope ->
-  at:(path -> (float * float) option) -> collapsed:(path -> bool) -> P.layout
-val fold_sources : P.scope -> (path * int, string list) Hashtbl.t
-val switch_nodes : P.scope -> (path * int) list
 val with_scope :
   ?at:(path -> (float * float) option) ->
   ?level:(path -> (P.level * bool) option) ->

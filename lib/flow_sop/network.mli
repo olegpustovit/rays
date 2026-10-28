@@ -32,7 +32,6 @@ val with_frame_nodes : (network:t -> Flow.Eval.state -> Input.t -> Sop.Node.t ->
 val with_drives : Flow.Eval.value Port.Map.t -> t -> (t, Diagnostic.t) result
 val validate : t -> (unit, Diagnostic.t) result
 val parameter : t -> Port.t -> (Port.parameter, Diagnostic.t) result
-val relabel : node_id:int -> string -> t -> (t, Diagnostic.t) result
 val with_geometry : Sop.Edit_graph.t -> t -> (t, Diagnostic.t) result
 
 val apply_parameters : node_id:int -> (string * Param.value) list -> t -> (t, Diagnostic.t) result

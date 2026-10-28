@@ -24,9 +24,6 @@ let of_marks token =
   let count = Marks.gpu_count token in
   { bytes = Bytes.empty; count; marks = Some token;
     batches = [| { first = 0; count; clip = None; texture = 0 } |]; shapes_checked = false }
-let marks_identity = Marks.gpu_identity
-let marks_count = Marks.gpu_count
-let marks_stamp = Marks.gpu_stamp
 let valid_shapes value =
   match value.marks with
   | Some token -> value.count = Marks.gpu_count token && Bytes.length value.bytes = 0

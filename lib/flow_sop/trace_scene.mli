@@ -1,8 +1,3 @@
-(** The CPU host for [scene/trace]: a polygon geometry's {!Rdk.Surface_index} answers the ray queries of a
-    [Flow.Ray_host] scene id. Distances are world units along the normalised direction; [normal] is the
-    geometric triangle normal; [u] and [v] are the barycentric weights of triangle corners 1 and 2. *)
-val sphere_prim : int -> int
-(** A sphere hit reports [prim = -2 - k] for the k-th sphere; a miss reports -1. *)
 type strand = float * float * float * float * float * float * float
 (** A strand segment (ax, ay, az, bx, by, bz, radius): a linear round curve with sphere caps. A hit reports
     [prim] = its index, [u] = the curve parameter in [0, 1], [v] = 0, [instance] = -2, and pathtrace.metal's
