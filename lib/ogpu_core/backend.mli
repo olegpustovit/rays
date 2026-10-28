@@ -1,5 +1,6 @@
 type token = int64
 type receipt = { epoch : int64 }
+type floats = (float, Bigarray.float32_elt, Bigarray.c_layout) Bigarray.Array1.t
 
 type driver_resource = {
   token : token;
@@ -7,6 +8,16 @@ type driver_resource = {
   read : int64 -> int -> (bytes, Error.t) result;
   read_into : int64 -> bytes -> int -> int -> (unit, Error.t) result;
   destroy : unit -> (unit, Error.t) result;
+}
+
+(* A host-visible buffer and its host view. [flush n] makes the view's first [n] bytes the device
+   copy's; [invalidate n] the reverse. A unified-memory backend aliases the two (both are
+   bookkeeping); a discrete one copies through staging. *)
+type driver_mapped = {
+  mapped_resource : driver_resource;
+  view : floats;
+  flush : int -> (unit, Error.t) result;
+  invalidate : int -> (unit, Error.t) result;
 }
 
 type driver_pipeline = {
@@ -280,6 +291,7 @@ type driver_device = {
   device_handle : Handle.device;
   capabilities : Caps.t;
   create_buffer : Types.memory -> Types.buffer_descriptor -> (driver_resource, Error.t) result;
+  create_mapped_buffer : Types.buffer_descriptor -> (driver_mapped, Error.t) result;
   create_texture : Types.texture_descriptor -> (driver_resource, Error.t) result;
   create_depth_texture : Types.texture_descriptor -> (driver_resource, Error.t) result;
   create_library : Shader.t -> (driver_library, Error.t) result;
@@ -311,6 +323,24 @@ val device_handle : device -> Handle.device
 
 val create_buffer :
   ?memory:Types.memory -> device -> Types.buffer_descriptor -> (buffer, Error.t) result
+
+val create_mapped_buffer : device -> Types.buffer_descriptor -> (buffer * floats, Error.t) result
+(** A host-visible buffer and its host view, [size / 4] zeroed float32s ([size] a multiple of 4):
+    the host fills and reads the view in place, with no byte staging and no conversion pass. The
+    view is the host copy; the device copy is the buffer. Synchronisation is explicit and the same
+    on every backend: {!flush_mapped} after host writes and before encoding GPU work that reads
+    them; {!invalidate_mapped} after the GPU work writing the buffer has completed and before the
+    host reads the view. A unified-memory backend (Metal on Apple silicon) aliases the two copies
+    and both calls only check their range; a discrete one copies, and the mock keeps them apart, so
+    a missing call reads stale data in tests. The view is owned memory, valid after
+    {!destroy_buffer}. {!write_buffer} and {!read_buffer} address the device copy. *)
+
+val flush_mapped : buffer -> length:int -> (unit, Error.t) result
+(** Host writes to the view's first [length] bytes become the device copy. *)
+
+val invalidate_mapped : buffer -> length:int -> (unit, Error.t) result
+(** The device copy's first [length] bytes become the view's; call once the writing work completed.
+*)
 
 val create_texture : device -> Types.texture_descriptor -> (texture, Error.t) result
 val create_depth_texture : device -> Types.texture_descriptor -> (texture, Error.t) result

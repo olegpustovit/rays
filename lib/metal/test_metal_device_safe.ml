@@ -58,6 +58,20 @@ let run () =
       if get (Buffer.read_bytes configured ~offset:0L ~length:16) <> values then
         fail "write-combined buffer bytes did not round-trip";
       get (Buffer.destroy configured);
+      (* a mapped buffer: the host view is the memory the buffer reads, kept alive past destroy *)
+      let mapped, floats = get (Buffer.create_mapped ~device ~length:16L ()) in
+      if Bigarray.Array1.dim floats <> 4 || Buffer.length mapped < 16L then
+        fail "mapped buffer has the wrong size";
+      Bigarray.Array1.set floats 1 2.5;
+      if
+        get (Buffer.read_bytes mapped ~offset:4L ~length:4)
+        <> int32_bytes [| Int32.bits_of_float 2.5 |]
+      then fail "mapped buffer view is not its contents";
+      get (Buffer.write_bytes mapped ~dst_offset:8L (int32_bytes [| Int32.bits_of_float 7. |]));
+      if Bigarray.Array1.get floats 2 <> 7. then fail "mapped buffer write is not in its view";
+      get (Buffer.destroy mapped);
+      if Bigarray.Array1.get floats 1 <> 2.5 then fail "mapped view changed after destroy";
+      reject Invalid_argument (Buffer.create_mapped ~device ~length:6L ());
       reject Invalid_argument (Device.supports_texture_sample_count device 0);
       if not (get (Device.supports_texture_sample_count device 1)) then
         fail "device refuses single-sample textures";

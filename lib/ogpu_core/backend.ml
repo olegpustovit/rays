@@ -1,5 +1,6 @@
 type token = int64
 type receipt = { epoch : int64 }
+type floats = (float, Bigarray.float32_elt, Bigarray.c_layout) Bigarray.Array1.t
 
 type driver_resource = {
   token : token;
@@ -7,6 +8,16 @@ type driver_resource = {
   read : int64 -> int -> (bytes, Error.t) result;
   read_into : int64 -> bytes -> int -> int -> (unit, Error.t) result;
   destroy : unit -> (unit, Error.t) result;
+}
+
+(* A host-visible buffer and its host view. [flush n] makes the view's first [n] bytes the device
+   copy's; [invalidate n] the reverse. A unified-memory backend aliases the two (both are
+   bookkeeping); a discrete one copies through staging. *)
+type driver_mapped = {
+  mapped_resource : driver_resource;
+  view : floats;
+  flush : int -> (unit, Error.t) result;
+  invalidate : int -> (unit, Error.t) result;
 }
 
 type driver_pipeline = {
@@ -275,6 +286,7 @@ type driver_device = {
   device_handle : Handle.device;
   capabilities : Caps.t;
   create_buffer : Types.memory -> Types.buffer_descriptor -> (driver_resource, Error.t) result;
+  create_mapped_buffer : Types.buffer_descriptor -> (driver_mapped, Error.t) result;
   create_texture : Types.texture_descriptor -> (driver_resource, Error.t) result;
   create_depth_texture : Types.texture_descriptor -> (driver_resource, Error.t) result;
   create_library : Shader.t -> (driver_library, Error.t) result;
@@ -312,6 +324,7 @@ and buffer = {
   resource : resource;
   buffer_descriptor : Types.buffer_descriptor;
   memory : Types.memory;
+  mapping : driver_mapped option;
 }
 
 and texture = { resource : resource; texture_descriptor : Types.texture_descriptor }
@@ -377,8 +390,47 @@ let create_buffer ?(memory = Types.Shared) device descriptor =
           | Error _ as e -> e
           | Ok raw ->
               device.children <- device.children + 1;
-              Ok { resource = make_resource device raw; buffer_descriptor = descriptor; memory }))
+              Ok
+                {
+                  resource = make_resource device raw;
+                  buffer_descriptor = descriptor;
+                  memory;
+                  mapping = None;
+                }))
 
+let create_mapped_buffer device (descriptor : Types.buffer_descriptor) =
+  match live "Backend.create_mapped_buffer" device with
+  | Error _ as e -> e
+  | Ok () -> (
+      match Validation.validate_buffer device.raw.capabilities descriptor with
+      | Error _ as e -> e
+      | Ok () when Int64.rem descriptor.size 4L <> 0L ->
+          error "Backend.create_mapped_buffer" Error.Invalid_argument
+            "mapped buffer size must be a multiple of 4"
+      | Ok () -> (
+          match device.raw.create_mapped_buffer descriptor with
+          | Error _ as e -> e
+          | Ok mapped ->
+              device.children <- device.children + 1;
+              Ok
+                ( {
+                    resource = make_resource device mapped.mapped_resource;
+                    buffer_descriptor = descriptor;
+                    memory = Types.Shared;
+                    mapping = Some mapped;
+                  },
+                  mapped.view )))
+
+let sync operation f (value : buffer) ~length =
+  match value.mapping with
+  | _ when value.resource.dead -> error operation Error.Stale_handle "buffer is destroyed"
+  | None -> error operation Error.Invalid_argument "buffer is not mapped"
+  | Some _ when length < 0 || Int64.of_int length > value.buffer_descriptor.size ->
+      error operation Error.Invalid_argument "range exceeds the buffer"
+  | Some mapped -> f mapped length
+
+let flush_mapped = sync "Backend.flush_mapped" (fun m -> m.flush)
+let invalidate_mapped = sync "Backend.invalidate_mapped" (fun m -> m.invalidate)
 let buffer_size (value : buffer) = value.buffer_descriptor.size
 
 let create_texture device descriptor =

@@ -272,6 +272,57 @@ let ranges ~grain count f =
       let first = chunk * grain in
       f ~first ~last:(min count (first + grain)))
 
+let interleave ~count planes =
+  let width = Array.length planes in
+  let values = Array.create_float (count * width) in
+  ranges ~grain:16_384 count (fun ~first ~last ->
+      (* Interleave the planes with one loop per width: no inner component loop. *)
+      match planes with
+      | [| x; y; z |] ->
+          for i = first to last - 1 do
+            values.(3 * i) <- x.(i);
+            values.((3 * i) + 1) <- y.(i);
+            values.((3 * i) + 2) <- z.(i)
+          done
+      | [| x; y |] ->
+          for i = first to last - 1 do
+            values.(2 * i) <- x.(i);
+            values.((2 * i) + 1) <- y.(i)
+          done
+      | [| x; y; z; w |] ->
+          for i = first to last - 1 do
+            values.(4 * i) <- x.(i);
+            values.((4 * i) + 1) <- y.(i);
+            values.((4 * i) + 2) <- z.(i);
+            values.((4 * i) + 3) <- w.(i)
+          done
+      | _ ->
+          for i = first to last - 1 do
+            for component = 0 to width - 1 do
+              values.((i * width) + component) <- planes.(component).(i)
+            done
+          done);
+  match width with
+  | 1 -> E.Float_array values
+  | 2 -> E.Vec2_array values
+  | 3 -> E.Vec3_array values
+  | _ -> E.Vec4_array values
+
+(* An attribute's interleaved array, remembered by its storage's identity (storage is immutable): a
+   recook over unchanged geometry reads the same array, which a device already holding it does not
+   upload again, and which needs no new finite scan.
+   ponytail: the ring keeps up to 32 interleaved copies alive while their geometry lives. *)
+let interleaved :
+    float array -> (unit -> float array array * E.value) -> float array array * E.value =
+  Flow.Value.remember ()
+
+(* keyed by the first plane; a hit whose other planes differ (a new attribute sharing a plane) is
+   rebuilt *)
+let interleave_remembered ~count planes =
+  match interleaved planes.(0) (fun () -> (planes, interleave ~count planes)) with
+  | seen, value when Array.for_all2 ( == ) seen planes -> value
+  | _ -> interleave ~count planes
+
 let read ?component ~owner ~kind name geometry =
   Result.bind (typed_storage ~owner ~name ~kind geometry) (fun storage ->
       match columns storage with
@@ -292,41 +343,9 @@ let read ?component ~owner ~kind name geometry =
           let count = owner_count geometry owner and width = Array.length planes in
           if count > Sys.max_floatarray_length / width then
             error "E_ATTR_COUNT" "Attribute buffer exceeds array limits."
-          else
-            let values = Array.make (count * width) 0. in
-            ranges ~grain:16_384 count (fun ~first ~last ->
-                (* Interleave the planes with one loop per width: no inner component loop. *)
-                match planes with
-                | [| x; y; z |] ->
-                    for i = first to last - 1 do
-                      values.(3 * i) <- x.(i);
-                      values.((3 * i) + 1) <- y.(i);
-                      values.((3 * i) + 2) <- z.(i)
-                    done
-                | [| x; y |] ->
-                    for i = first to last - 1 do
-                      values.(2 * i) <- x.(i);
-                      values.((2 * i) + 1) <- y.(i)
-                    done
-                | [| x; y; z; w |] ->
-                    for i = first to last - 1 do
-                      values.(4 * i) <- x.(i);
-                      values.((4 * i) + 1) <- y.(i);
-                      values.((4 * i) + 2) <- z.(i);
-                      values.((4 * i) + 3) <- w.(i)
-                    done
-                | _ ->
-                    for i = first to last - 1 do
-                      for component = 0 to width - 1 do
-                        values.((i * width) + component) <- planes.(component).(i)
-                      done
-                    done);
-            Ok
-              (match width with
-              | 1 -> E.Float_array values
-              | 2 -> E.Vec2_array values
-              | 3 -> E.Vec3_array values
-              | _ -> E.Vec4_array values))
+          else if count * width > 4096 && Array.for_all (fun p -> Array.length p = count) planes
+          then Ok (interleave_remembered ~count planes)
+          else Ok (interleave ~count planes))
 
 let read_checked ~component ~owner ~kind name geometry =
   Result.bind (typed_storage ~owner ~name ~kind geometry) (fun storage ->
@@ -1557,26 +1576,44 @@ let node ?state ?(reference = false) ?(strict = false) ?elems ?profile ?approx ?
                     if reference || elems <> None then Ok None
                     else Flow_ir.Executor.record_on_device ?state ~resolve ?gpu program ~live
                   in
-                  Result.bind
-                    (Result.bind device (function
-                      | Some fields -> Ok (E.Record fields)
-                      | None ->
-                          Flow_ir.Executor.force ?state ?elems ~reference ~strict ~resolve program
-                            ~live))
-                    (function
-                      | E.Record fields ->
-                          let grain = Sop.Context.grain context in
-                          List.fold_left
-                            (fun geometry (i, (name, kind, _)) ->
-                              Result.bind geometry
-                                (write_storage ~owned_fields:[] ~grain ~owner ~kind name
-                                   (List.assoc ("w" ^ string_of_int i) fields)))
-                            (Ok geometries.(0))
-                            (List.mapi (fun i e -> (i, e)) prior)
-                          |> Fun.flip Result.bind
-                               (write_storage ~owned_fields ~grain ~owner ~kind name
-                                  (List.assoc "values" fields))
-                      | _ -> error "E_ATTR_TYPE" "A fused write's data must be a record."))
+                  let grain = Sop.Context.grain context in
+                  let writes =
+                    List.mapi (fun i (name, kind, _) -> ("w" ^ string_of_int i, name, kind)) prior
+                    @ [ ("values", name, kind) ]
+                  in
+                  let write geometry install =
+                    List.fold_left
+                      (fun geometry (key, name, kind) ->
+                        Result.bind geometry (install key name kind))
+                      (Ok geometry) writes
+                  in
+                  Result.bind device (function
+                    | Some fields ->
+                        (* the device's planes are owned and finite: installed as they are *)
+                        write geometries.(0) (fun key name kind geometry ->
+                            let planes = List.assoc key fields in
+                            let count = owner_count geometry owner in
+                            if
+                              width kind = Array.length planes
+                              && Array.for_all (fun p -> Array.length p = count) planes
+                            then install ~owner ~kind name planes geometry
+                            else
+                              write_storage ~owned_fields:[] ~grain ~owner ~kind name
+                                (match (kind, planes) with
+                                | "int", [| p |] -> E.Int_array (Array.map int_of_float p)
+                                | _, [| p |] -> E.Float_array p
+                                | _ -> E.Record [])
+                                geometry)
+                    | None ->
+                        Result.bind
+                          (Flow_ir.Executor.force ?state ?elems ~reference ~strict ~resolve program
+                             ~live) (function
+                          | E.Record fields ->
+                              write geometries.(0) (fun key name kind ->
+                                  write_storage
+                                    ~owned_fields:(if key = "values" then owned_fields else [])
+                                    ~grain ~owner ~kind name (List.assoc key fields))
+                          | _ -> error "E_ATTR_TYPE" "A fused write's data must be a record.")))
             else
               Result.bind program (fun program ->
                   let live = Sop.Context.input context in

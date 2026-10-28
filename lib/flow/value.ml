@@ -151,32 +151,45 @@ let rec show_with conc v =
   | Residual _ -> "?"
   | v -> Ty.to_string (ty_of v)
 
+(* A fact about an immutable value remembered by its physical identity, weakly: a ring of 32
+   ephemerons, so an entry never keeps its key alive. [f] runs outside the lock; a raise is not
+   remembered.
+   ponytail: a linear scan of 32 slots under a lock; a table if callers remember many values. *)
+let remember () =
+  let slots = Array.make 32 None and next = ref 0 and lock = Mutex.create () in
+  fun key f ->
+    let found =
+      Mutex.protect lock (fun () ->
+          Array.fold_left
+            (fun found slot ->
+              match (found, slot) with
+              | None, Some e -> Ephemeron.K1.query e key
+              | found, _ -> found)
+            None slots)
+    in
+    match found with
+    | Some value -> value
+    | None ->
+        let value = f () in
+        Mutex.protect lock (fun () ->
+            slots.(!next) <- Some (Ephemeron.K1.make key value);
+            next := (!next + 1) mod Array.length slots);
+        value
+
 (* A packed array of more than 4,096 elements keys by its digest, not its bytes: a key is hashed and
    compared, and a million-point grid's planes are 8 MB each. Arrays are immutable values, so the
-   digest is remembered by physical identity: a replayed evaluation hands a lowering the same
-   arrays, which then cost a lookup.
-   ponytail: 32 slots, a linear scan under a lock; a table if lowerings key many large arrays. *)
-let digests = Array.make 32 (Obj.repr 0, "")
-and next_digest = ref 0
-and digests_lock = Mutex.create ()
+   digest is remembered by identity: a replayed evaluation hands a lowering the same arrays, which
+   then cost a lookup. *)
+let digests = remember ()
 
 let array_key tag (xs : 'a array) =
   if Array.length xs <= 4096 then tag ^ Marshal.to_string xs []
   else
-    let key = Obj.repr xs in
-    Mutex.protect digests_lock (fun () ->
-        match Array.find_opt (fun (k, _) -> k == key) digests with
-        | Some (_, digest) -> digest
-        | None ->
-            let digest =
-              tag ^ "#"
-              ^ string_of_int (Array.length xs)
-              ^ ":"
-              ^ Digest.to_hex (Digest.string (Marshal.to_string xs []))
-            in
-            digests.(!next_digest) <- (key, digest);
-            next_digest := (!next_digest + 1) mod Array.length digests;
-            digest)
+    digests (Obj.repr xs) (fun () ->
+        tag ^ "#"
+        ^ string_of_int (Array.length xs)
+        ^ ":"
+        ^ Digest.to_hex (Digest.string (Marshal.to_string xs [])))
 
 let rec key_of ~residual = function
   | Int n -> "i" ^ string_of_int n
@@ -341,6 +354,8 @@ let array_init ty count f =
     | _ -> Float_array data
   end
 
+let finite_arrays : float array -> (unit -> unit) -> unit = remember ()
+
 let rec validate = function
   | Float f -> ignore (fin "input" f)
   | Vec2 (x, y) -> List.iter (fun x -> ignore (fin "input" x)) [ x; y ]
@@ -348,12 +363,16 @@ let rec validate = function
   | Vec4 (x, y, z, w) -> List.iter (fun x -> ignore (fin "input" x)) [ x; y; z; w ]
   | (Float_array xs | Vec2_array xs | Vec3_array xs | Vec4_array xs) as v ->
       ignore (array_length v);
-      let length = Array.length xs in
-      let i = ref 0 in
-      while !i < length && Float.is_finite xs.(!i) do
-        incr i
-      done;
-      if !i < length then ignore (fin "array input" xs.(!i))
+      let check () =
+        let length = Array.length xs in
+        let i = ref 0 in
+        while !i < length && Float.is_finite xs.(!i) do
+          incr i
+        done;
+        if !i < length then ignore (fin "array input" xs.(!i))
+      in
+      (* an immutable array once found finite stays so: a source a cook binds again is not rescanned *)
+      if Array.length xs <= 4096 then check () else finite_arrays xs check
   | List xs -> Array.iter validate xs
   | Record fs | Struct (_, _, fs) | Source (_, _, fs) -> List.iter (fun (_, v) -> validate v) fs
   | _ -> ()

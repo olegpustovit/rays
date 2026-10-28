@@ -1070,6 +1070,15 @@ let entries : entry list =
       };
     Native
       {
+        ocaml = "buffer_create_mapped";
+        signature = "handle -> int64 -> int64 -> (handle * floats, string) result";
+        primitives = [ "caml_rays_metal_buffer_create_mapped" ];
+        reason =
+          "ownership transfer: page-aligned memory a GC-managed float32 Bigarray owns, wrapped \
+           with newBufferWithBytesNoCopy (a pointer argument the registry cannot express)";
+      };
+    Native
+      {
         ocaml = "buffer_read";
         signature = "handle -> int64 -> int -> (bytes, string) result";
         primitives = [ "caml_rays_metal_buffer_read" ];

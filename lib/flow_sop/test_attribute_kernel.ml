@@ -2272,7 +2272,7 @@ let () =
       prepare =
         (fun ~fast:_ _ ->
           assert (Domain.is_main_domain ());
-          Ok
+          let rec kernel : Flow_ir.Gpu.kernel =
             {
               run =
                 (fun inputs ->
@@ -2296,7 +2296,10 @@ let () =
                     (E.Vec3_array
                        (Array.init (count * 3) (fun j ->
                             if j mod 3 = 0 then float (j / 3) +. !time else 0.))));
-            });
+              planes = (fun v -> Flow_ir.Gpu.planes_of kernel.readback v);
+            }
+          in
+          Ok kernel);
     }
   in
   let body wrap =

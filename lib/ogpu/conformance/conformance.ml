@@ -31,6 +31,39 @@ let run driver =
   require
     (get (Backend.read_buffer source ~offset:0L ~length:16) = bytes)
     "buffer round trip differs";
+  (* a mapped buffer: host view and device copy meet only at flush and invalidate (the mock keeps
+     them apart as a discrete device does); the view outlives the buffer *)
+  let mapped, floats =
+    get
+      (Backend.create_mapped_buffer device
+         { label = Some "mapped"; size = 16L; usage = [ Storage; Copy_src; Copy_dst ] })
+  in
+  require (Bigarray.Array1.dim floats = 4 && floats.{3} = 0.) "mapped view is not 4 zeroed floats";
+  floats.{1} <- 1.5;
+  get (Backend.flush_mapped mapped ~length:16);
+  require
+    (Bytes.get_int32_le (get (Backend.read_buffer mapped ~offset:4L ~length:4)) 0
+    = Int32.bits_of_float 1.5)
+    "a flushed view write is not in the buffer";
+  let three = Bytes.create 4 in
+  Bytes.set_int32_le three 0 (Int32.bits_of_float 3.);
+  get (Backend.write_buffer mapped ~offset:8L three);
+  get (Backend.invalidate_mapped mapped ~length:16);
+  require (floats.{2} = 3. && floats.{1} = 1.5) "an invalidated view lacks the buffer's contents";
+  (match Backend.flush_mapped mapped ~length:20 with
+  | Error { Error.kind = Invalid_argument; _ } -> ()
+  | _ -> failwith "a flush past the buffer was accepted");
+  (match Backend.flush_mapped source ~length:4 with
+  | Error { Error.kind = Invalid_argument; _ } -> ()
+  | _ -> failwith "an unmapped buffer was flushed");
+  get (Backend.destroy_buffer mapped);
+  require (floats.{1} = 1.5) "mapped view changed after destroy";
+  (match Backend.invalidate_mapped mapped ~length:4 with
+  | Error { Error.kind = Stale_handle; _ } -> ()
+  | _ -> failwith "a destroyed mapped buffer was invalidated");
+  (match Backend.create_mapped_buffer device { label = None; size = 6L; usage = [ Storage ] } with
+  | Error { Error.kind = Invalid_argument; _ } -> ()
+  | _ -> failwith "a mapped buffer of 6 bytes was accepted");
   (* Blit encoder: texture upload with padded rows, read back by the host,
      and the same at an inset origin. *)
   let rec poll receipt attempts =

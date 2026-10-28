@@ -5,6 +5,8 @@ type slot = {
   mutable buffer : B.buffer option;
   mutable capacity : int;
   mutable bytes : bytes;
+  mutable floats : B.floats option;
+      (** a mapped slot's contents (inputs, gathers, outputs): written and read in place *)
   mutable uploaded : (float array * int) option;
 }
 
@@ -63,7 +65,7 @@ type output = {
 
 let diagnostic error = Diagnostic.error ~code:"E_GPU" (Ogpu.Error.to_string error)
 let get = function Ok value -> value | Error error -> raise (Diagnostic.Error (diagnostic error))
-let slot () = { buffer = None; capacity = 0; bytes = Bytes.empty; uploaded = None }
+let slot () = { buffer = None; capacity = 0; bytes = Bytes.empty; floats = None; uploaded = None }
 
 let nonfinite () =
   Diagnostic.Error
@@ -83,17 +85,16 @@ let pack bytes offset value =
   if not (Float.is_finite (Int32.float_of_bits bits)) then raise (nonfinite ());
   Bytes.set_int32_le bytes offset bits
 
-(* One loop body keeps the float and its int32 bits unboxed; calling [pack]
-   per element boxed both (96 MB/frame at one million vec3 inputs). *)
-let pack_array bytes (values : float array) length =
+(* Straight into the mapped buffer the kernel reads: one float32 rounding per element, no staging
+   bytes and no copy. A finite double past float32's range rounds to infinity and is refused. *)
+let pack_floats (floats : B.floats) (values : float array) length =
   for index = 0 to length - 1 do
-    let bits = Int32.bits_of_float (Array.unsafe_get values index) in
-    if not (Float.is_finite (Int32.float_of_bits bits)) then raise (nonfinite ());
-    Bytes.set_int32_le bytes (index * 4) bits
+    Bigarray.Array1.unsafe_set floats index (Array.unsafe_get values index);
+    if not (Float.is_finite (Bigarray.Array1.unsafe_get floats index)) then raise (nonfinite ())
   done
 
 let unpack_array bytes length =
-  let values = Array.make length 0. and finite = ref true in
+  let values = Array.create_float length and finite = ref true in
   for index = 0 to length - 1 do
     let value = Int32.float_of_bits (Bytes.get_int32_le bytes (index * 4)) in
     if not (Float.is_finite value) then finite := false;
@@ -130,28 +131,32 @@ let create_owned device queue pipelines (msl : Emit.msl) =
 
 let create gpu = create_owned (Renderer.gpu_device gpu) (Renderer.gpu_queue gpu)
 
-let ensure t slot length =
+let ensure ?(mapped = false) t slot length =
   if length > slot.capacity then begin
     let capacity = ref (max 256 slot.capacity) in
     while !capacity < length do
       if !capacity > Sys.max_string_length / 2 then capacity := length
       else capacity := !capacity * 2
     done;
-    let bytes = Bytes.create !capacity in
-    let fresh =
-      get
-        (B.create_buffer t.device
-           {
-             label = Some "Flow packed compute";
-             size = Int64.of_int !capacity;
-             usage = [ Storage; Copy_src; Copy_dst ];
-           })
+    let descriptor : Ogpu.Types.buffer_descriptor =
+      {
+        label = Some "Flow packed compute";
+        size = Int64.of_int !capacity;
+        usage = [ Storage; Copy_src; Copy_dst ];
+      }
+    in
+    let fresh, floats =
+      if mapped then
+        let buffer, floats = get (B.create_mapped_buffer t.device descriptor) in
+        (buffer, Some floats)
+      else (get (B.create_buffer t.device descriptor), None)
     in
     Option.iter (fun buffer -> ignore (B.destroy_buffer buffer)) slot.buffer;
     slot.uploaded <- None;
     slot.buffer <- Some fresh;
     slot.capacity <- !capacity;
-    slot.bytes <- bytes;
+    slot.bytes <- (if mapped then Bytes.empty else Bytes.create !capacity);
+    slot.floats <- floats;
     t.creations <- t.creations + 1
   end;
   Option.get slot.buffer
@@ -279,7 +284,7 @@ let dispatch ?(wait = true) ?(reset_status = true) ?commands ?count ?into ?(boun
               | Some buffer -> buffer
               | None ->
                   let length = values.count * msl.input_widths.(index) * 4 in
-                  let buffer = ensure t slot length in
+                  let buffer = ensure ~mapped:true t slot length in
                   let source = values.arrays.(index) in
                   if
                     not
@@ -289,11 +294,11 @@ let dispatch ?(wait = true) ?(reset_status = true) ?commands ?count ?into ?(boun
                   then begin
                     (* A failed write may have partially replaced the previous source. *)
                     slot.uploaded <- None;
-                    pack_array slot.bytes source (length / 4);
-                    get (B.write_buffer buffer ~offset:0L slot.bytes);
+                    pack_floats (Option.get slot.floats) source (length / 4);
+                    get (B.flush_mapped buffer ~length);
                     slot.uploaded <- Some (source, length);
                     t.input_uploads <- t.input_uploads + 1;
-                    t.input_uploaded_bytes <- t.input_uploaded_bytes + Bytes.length slot.bytes
+                    t.input_uploaded_bytes <- t.input_uploaded_bytes + length
                   end;
                   buffer)
             t.inputs
@@ -303,7 +308,8 @@ let dispatch ?(wait = true) ?(reset_status = true) ?commands ?count ?into ?(boun
           | Some (output, _) when Array.length t.outputs = 1 -> [| output |]
           | _ ->
               Array.mapi
-                (fun k slot -> ensure t slot (values.count * msl.output_widths.(k) * 4))
+                (fun k slot ->
+                  ensure ~mapped:true t slot (values.count * msl.output_widths.(k) * 4))
                 t.outputs
         in
         let status = ensure t t.status 4 in
@@ -360,7 +366,7 @@ let dispatch ?(wait = true) ?(reset_status = true) ?commands ?count ?into ?(boun
               | None ->
                   let source = values.tables.(fst msl.gathers.(k)) in
                   let length = max 4 (Array.length source * 4) in
-                  let buffer = ensure t slot length in
+                  let buffer = ensure ~mapped:true t slot length in
                   if
                     not
                       (match slot.uploaded with
@@ -368,11 +374,11 @@ let dispatch ?(wait = true) ?(reset_status = true) ?commands ?count ?into ?(boun
                       | None -> false)
                   then begin
                     slot.uploaded <- None;
-                    pack_array slot.bytes source (Array.length source);
-                    get (B.write_buffer buffer ~offset:0L slot.bytes);
+                    pack_floats (Option.get slot.floats) source (Array.length source);
+                    get (B.flush_mapped buffer ~length:(Array.length source * 4));
                     slot.uploaded <- Some (source, length);
                     t.input_uploads <- t.input_uploads + 1;
-                    t.input_uploaded_bytes <- t.input_uploaded_bytes + Bytes.length slot.bytes
+                    t.input_uploaded_bytes <- t.input_uploaded_bytes + length
                   end;
                   buffer)
             t.gathers
@@ -503,7 +509,8 @@ let check_status t ~epoch =
     Ok ()
   with Diagnostic.Error error -> Error error
 
-let readback ?index output =
+(* A completed, status-checked output's mapped contents, [count * width] floats. *)
+let completed ?index output =
   let index = Option.value ~default:output.index index in
   if
     output.owner.closed
@@ -523,29 +530,89 @@ let readback ?index output =
          | Error diagnostic -> raise (Diagnostic.Error diagnostic));
       let width = output.owner.msl.output_widths.(index) in
       let length = output.count * width in
-      let values, finite =
-        if length = 0 then ([||], true)
-        else begin
-          let bytes =
-            get
-              (B.read_buffer
-                 (Option.get output.owner.outputs.(index).buffer)
-                 ~offset:0L ~length:(length * 4))
-          in
-          output.owner.readback_bytes <- output.owner.readback_bytes + (length * 4);
-          unpack_array bytes length
-        end
+      let slot = output.owner.outputs.(index) in
+      output.owner.readback_bytes <- output.owner.readback_bytes + (length * 4);
+      match slot.floats with
+      | Some floats when length > 0 ->
+          get (B.invalidate_mapped (Option.get slot.buffer) ~length:(length * 4));
+          Ok (`Floats (floats, width))
+      | _ ->
+          if length = 0 then Ok (`Floats (Bigarray.(Array1.create float32 c_layout 0), width))
+          else
+            Ok
+              (`Bytes
+                 ( get (B.read_buffer (Option.get slot.buffer) ~offset:0L ~length:(length * 4)),
+                   width ))
+    with Diagnostic.Error error -> Error error
+
+let nonfinite_output () =
+  Error (Diagnostic.error ~code:"E_KERNEL" "GPU output contains a nonfinite value.")
+
+(* One pass from the float32 contents into doubles, the finite check folded in. *)
+let unpack_floats (floats : B.floats) length =
+  let values = Array.create_float length and finite = ref true in
+  for index = 0 to length - 1 do
+    let value = Bigarray.Array1.unsafe_get floats index in
+    if not (Float.is_finite value) then finite := false;
+    Array.unsafe_set values index value
+  done;
+  (values, !finite)
+
+let readback ?index output =
+  Result.bind (completed ?index output) (fun contents ->
+      let count = output.count in
+      let values, finite, width =
+        match contents with
+        | `Floats (floats, width) ->
+            let values, finite = unpack_floats floats (count * width) in
+            (values, finite, width)
+        | `Bytes (bytes, width) ->
+            let values, finite = unpack_array bytes (count * width) in
+            (values, finite, width)
       in
-      if not finite then
-        Error (Diagnostic.error ~code:"E_KERNEL" "GPU output contains a nonfinite value.")
+      if not finite then nonfinite_output ()
       else
         Ok
           (match width with
           | 2 -> Flow.Eval.Vec2_array values
           | 3 -> Vec3_array values
           | 4 -> Vec4_array values
-          | _ -> Float_array values)
-    with Diagnostic.Error error -> Error error
+          | _ -> Float_array values))
+
+(* The output as [width] planes of [count] doubles, read where the kernel wrote them: what a planar
+   store (an rdk attribute) owns, with no interleaved copy between. *)
+let planes ?index output =
+  Result.bind (completed ?index output) (fun contents ->
+      let count = output.count in
+      let floats, width =
+        match contents with
+        | `Floats (floats, width) -> (floats, width)
+        | `Bytes (bytes, width) ->
+            let floats = Bigarray.(Array1.create float32 c_layout (count * width)) in
+            for i = 0 to (count * width) - 1 do
+              floats.{i} <- Int32.float_of_bits (Bytes.get_int32_le bytes (4 * i))
+            done;
+            (floats, width)
+      in
+      let finite = Atomic.make true in
+      let planes = Array.init width (fun _ -> Array.create_float count) in
+      (* 64K-element blocks over the shared pool; each block writes its own range of every plane *)
+      Parallel.for_ ~chunk_size:1 ~start:0
+        ~finish:(((count + 65535) / 65536) - 1)
+        (fun block ->
+          let first = block * 65536 in
+          let last = min count (first + 65536) - 1 in
+          let ok = ref true in
+          for component = 0 to width - 1 do
+            let plane = Array.unsafe_get planes component in
+            for i = first to last do
+              let value = Bigarray.Array1.unsafe_get floats ((i * width) + component) in
+              if not (Float.is_finite value) then ok := false;
+              Array.unsafe_set plane i value
+            done
+          done;
+          if not !ok then Atomic.set finite false);
+      if Atomic.get finite then Ok planes else nonfinite_output ())
 
 let buffer ?index output =
   let index = Option.value ~default:output.index index in
@@ -586,6 +653,7 @@ let close t =
         Option.iter (fun buffer -> ignore (B.destroy_buffer buffer)) slot.buffer;
         slot.buffer <- None;
         slot.bytes <- Bytes.empty;
+        slot.floats <- None;
         slot.capacity <- 0;
         slot.uploaded <- None)
       (Array.concat [ t.inputs; t.outputs; t.gathers; [| t.table; t.status; t.counted |] ]);

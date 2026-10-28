@@ -208,6 +208,12 @@ let backend t : G.backend =
                         | Error diagnostic -> Error diagnostic
                         | Ok None -> error "GPU output was closed or superseded."
                         | Ok (Some output) -> Run.readback output);
+                    planes =
+                      (fun value ->
+                        match output t value with
+                        | Error diagnostic -> Error diagnostic
+                        | Ok None -> error "GPU output was closed or superseded."
+                        | Ok (Some output) -> Run.planes output);
                   })
                 (Pipelines.get t.pipelines msl)));
   }

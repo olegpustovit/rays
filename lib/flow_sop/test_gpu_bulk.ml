@@ -48,7 +48,7 @@ let () =
         (fun ~fast:_ packed ->
           assert (Domain.is_main_domain ());
           let result = ref None in
-          Ok
+          let rec kernel : Flow_ir.Gpu.kernel =
             {
               run =
                 (fun inputs ->
@@ -72,7 +72,10 @@ let () =
                         (Flow.Eval.Float_array
                            (Array.map (fun x -> Int32.float_of_bits (Int32.bits_of_float x)) d))
                   | _ -> assert false);
-            });
+              planes = (fun v -> Flow_ir.Gpu.planes_of kernel.readback v);
+            }
+          in
+          Ok kernel);
     }
   in
   let cpu = positions None in

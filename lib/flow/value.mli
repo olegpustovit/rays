@@ -46,7 +46,15 @@ val array_get : ('f, 'r) t -> int -> ('f, 'r) t
 val array_put : float array -> int -> int -> ('f, 'r) t -> unit
 val int_array_put : int array -> int -> ('f, 'r) t -> unit
 val array_init : Ty.t -> int -> (int -> ('f, 'r) t) -> ('f, 'r) t
+
 val validate : ('f, 'r) t -> unit
+(** Raises on a nonfinite number. A float array over 4,096 elements found finite is remembered by
+    identity (arrays are immutable), so validating it again is a lookup. *)
+
+val remember : unit -> 'k -> (unit -> 'v) -> 'v
+(** [remember ()] is a memo by the key's physical identity, weak in its keys (32 ephemerons, oldest
+    replaced): [f] answers a key not remembered; a raise is not remembered. Keys must be immutable
+    values, such as packed arrays, whose facts cannot change. *)
 
 val with_error : protected:(unit -> ('f, 'r) t) -> map:(('f, 'r) t -> ('f, 'r) t) -> ('f, 'r) t
 (** Evaluate the protected thunk once. A reached typed failure is rethrown through its pure mapper,

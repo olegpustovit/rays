@@ -61,6 +61,11 @@ val select_output : index:int -> output -> output option
 val readback : ?index:int -> output -> (Flow.Eval.value, Diagnostic.t) result
 (** [index] overrides the selected output (initially the first). *)
 
+val planes : ?index:int -> output -> (float array array, Diagnostic.t) result
+(** The output as [width] owned planes of [count] doubles (component [c] of element [i] at
+    [planes.(c).(i)]), converted once from the mapped float32 contents in parallel blocks, with the
+    finite check folded in. *)
+
 val buffer : ?index:int -> output -> Ogpu.Backend.buffer option
 val count_record : output -> Ogpu.Backend.buffer option
 

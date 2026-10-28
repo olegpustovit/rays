@@ -25,7 +25,15 @@ module Gpu : sig
   type kernel = {
     run : Packed.Host.inputs -> (value, Diagnostic.t) result;
     readback : value -> (Flow.Eval.value, Diagnostic.t) result;
+    planes : value -> (float array array, Diagnostic.t) result;
+        (** The output as [width] owned planes of [count] floats, for a planar store. *)
   }
+
+  val planes_of :
+    (value -> (Flow.Eval.value, Diagnostic.t) result) ->
+    value ->
+    (float array array, Diagnostic.t) result
+  (** [planes] from a [readback], deinterleaving its array. *)
 
   type backend = {
     cost : fast:bool -> Packed.t -> count:int -> float option;
@@ -173,10 +181,12 @@ module Executor : sig
     ?gpu:Gpu.config ->
     program ->
     live:Flow.Eval.live ->
-    ((string * Flow.Eval.value) list option, Diagnostic.t) result
+    ((string * float array array) list option, Diagnostic.t) result
   (** The elementwise fields of a record program (a fused SOP write's) as one region on the device,
-      in fast precision when {!Cost.sop_device} places it: one dispatch, read back once per output,
-      by field name. [None] keeps the record on the CPU, also when the device fails. *)
+      in fast precision when {!Cost.sop_device} places it: one dispatch, each output read once as
+      its owned planes (a field of width [w]: [w] arrays of the count), by field name. [None] keeps
+      the record on the CPU, also when the device fails. An input array the device already holds
+      (the same array as the last dispatch's) is not uploaded again. *)
 
   val force_into :
     ?state:Flow.Eval.state ->
