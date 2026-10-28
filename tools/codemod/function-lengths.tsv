@@ -9,8 +9,8 @@ lib/pxui/test_ui.ml	run#1	811
 lib/pxui/test_ui.ml	with_scale#1	476
 lib/pxui_graph/test_pxui_graph.ml	scope_gestures#1	389
 lib/rays_editor/test/test_rays_editor.ml	run#1	650
-lib/rays_editor/test/test_scene_sync.ml	run#1	311
-lib/rays_editor/test/test_scene_tree.ml	run#1	322
+lib/rays_editor/test/test_scene_sync.ml	run#1	303
+lib/rays_editor/test/test_scene_tree.ml	run#1	321
 lib/rays_editor/test/test_sop_catalog.ml	run#1	482
 lib/rdk/boolean/boolean_complex.ml	build#1	309
 lib/rdk/boolean/boolean_extract.ml	build_internal#1	410

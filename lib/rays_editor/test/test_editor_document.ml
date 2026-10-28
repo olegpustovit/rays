@@ -56,7 +56,7 @@ let run () =
       (Editor_document.Workspace_doc.to_text workspace) |> Result.get_ok in
   check (carries_gpu reloaded) "a real workspace text reload discarded its GPU config";
   check (Result.is_ok (Document.validate doc)) "a lowered workspace is a valid document";
-  check (Edit_graph.inspect (Document.scene_graph doc) <> []
+  check (Document.scene_graph doc <> []
     && Option.is_some (Document.object_network doc
       (List.hd (Editor_document.Objects.ids "geometry" (Document.scene_graph doc)))))
     "the lowering has no geometry object with a network";
@@ -108,10 +108,10 @@ let run () =
           Input.Pointer_released (Input.LeftButton, mouse)];
         step ~mouse [key Input.Delete]; step [] in
       delete (); delete ();
-      check (Edit_graph.inspect (current_document !value) = [] && prepared !value = None)
+      check (current_document !value = [] && prepared !value = None)
         (Printf.sprintf "delete-all did not clear the scene and preview: %s, prepared %b"
-          (String.concat "," (List.map (fun (i : Edit_graph.node_info) -> i.label)
-            (Edit_graph.inspect (current_document !value)))) (prepared !value <> None))
+          (String.concat "," (List.map (fun (i : Editor_document.Kind_graph.node) -> i.label)
+            (current_document !value))) (prepared !value <> None))
     end;
     step [key (Input.KeyChar '/'); char 's']; step [key Input.Enter]; step [];
     check (List.length (Preset.list ~directory) = 1) "the document did not save a preset";

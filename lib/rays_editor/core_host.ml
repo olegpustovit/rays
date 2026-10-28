@@ -13,8 +13,7 @@ open Core_panes
    entry and keeps what redo would restore. *)
 let scene_edit value mode ?(active_camera = value.doc.active_camera) scene =
   if value.carry <> None then value else
-  let edited = { value.doc with scene = { value.doc.scene with graph = Result.get_ok (Flow_sop.Network.with_geometry scene value.doc.scene.graph);
-      displayed = Document.displayed_of ?previous:value.doc.scene.displayed (Flow_sop.Network.of_geometry scene) None } } in
+  let edited = { value.doc with scene } in
   (* a camera that follows the viewport is an edit of the text when the text declares it *)
   match Result.bind (Editor_document.Document_edit.reconcile ~factories:value.factories ~adopt:false value.doc edited) (fun doc ->
       if active_camera = doc.active_camera then Ok doc else
@@ -81,9 +80,8 @@ let world ?(view = `Primary) value ~time =
   | None ->
   match List.filter (view_wants value `Primary) (Objects.ids "world" (scene value)) with
   | id :: _ ->
-      Option.bind (Edit_graph.find (scene value) ~node_id:id) (fun node ->
-        Option.bind (Document.Int_map.find_opt id value.doc.Document.networks)
-          (fun network -> Layers.to_world ~time node network))
+      Option.bind (Kind_graph.find (scene value) id) (fun node ->
+        Option.bind (Document.layers value.doc id) (Layers.to_world ~time node))
   | [] -> None
 
 (* Visible objects' world transforms with their latest cook.  Objects that only a viewport
@@ -92,13 +90,13 @@ let world ?(view = `Primary) value ~time =
 (* Lights and cameras follow the same instance membership as the geometry. *)
 let scene_for_view ?scene:override ?(view = `Primary) value =
   let scene = Option.value override ~default:(scene value) in
-  let unwanted = List.filter_map (fun (i : Edit_graph.node_info) ->
-    if view_wants value view i.id then None else Some i.id) (Edit_graph.inspect scene) in
-  if unwanted = [] then scene else Edit_graph.remove_nodes unwanted scene
+  let unwanted = List.filter_map (fun (node : Kind_graph.node) ->
+    if view_wants value view node.id then None else Some node.id) scene in
+  if unwanted = [] then scene else Kind_graph.remove unwanted scene
 
 let placed_pieces ?(render = false) ?(view = `Primary) value =
   List.filter_map (fun (piece : _ Cook.piece) ->
-    match Edit_graph.find (scene value) ~node_id:piece.id with
+    match Kind_graph.find (scene value) piece.id with
     | Some node when view_wants value view piece.id && Objects.visible node
         && (not render || Objects.flag "render" node) ->
         Some (Objects.world (scene value) piece.id, piece)
@@ -121,13 +119,13 @@ let edit_node value level node_id values ~label =
   | Ok (Some (doc, _, _)) -> written doc
   | Error message -> { value with edit_error = Some message }
   | Ok None ->
-  match Document.network value.doc level with
+  match Document.kinds value.doc level with
   | None -> value
-  | Some network ->
-      match Edit_graph.apply_parameters network.graph.geometry ~node_id values with
+  | Some graph ->
+      match Kind_graph.set_fields graph node_id values with
       | Error _ -> value
       | Ok (graph, _) ->
-          let edited = Document.with_network value.doc level { network with graph = Result.get_ok (Flow_sop.Network.with_geometry graph network.graph) } in
+          let edited = Document.with_kinds value.doc level graph in
           (match Editor_document.Document_edit.reconcile ~factories:value.factories value.doc edited with
            | Error message -> { value with edit_error = Some message }
            | Ok doc -> written doc)

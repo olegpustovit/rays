@@ -69,32 +69,28 @@ let world_keys value (doc : Document.t) selection actions =
   (* what a key asks, as an edit of the text at a level *)
   let edit_layer f label = match world_id, Selection.selected selection with
     | Some id, Some layer ->
-        Option.bind (Document.network doc (Inside id)) (fun network ->
-          Option.bind (Edit_graph.find network.graph.geometry ~node_id:layer) f)
+        Option.bind (Document.layers doc id) (fun layers -> Option.bind (Kind_graph.find layers layer) f)
         |> Option.map (fun values -> Document.Inside id, Sync.Fields [ layer, values ], label)
     | _ -> None in
   let edit_world f label = Option.bind world_id (fun id ->
-    Option.bind (Edit_graph.find doc.Document.scene.graph.geometry ~node_id:id) f
+    Option.bind (Kind_graph.find doc.Document.scene id) f
     |> Option.map (fun values -> Document.Scene, Sync.Fields [ id, values ], label)) in
   (* a World the text does not have is edited as a derived object, for reconcile to adopt *)
   let with_fields (doc : Document.t) level edits =
-    match Document.network doc level with
+    match Document.kinds doc level with
     | None -> doc
-    | Some network ->
-        let graph = List.fold_left (fun graph (id, values) ->
-          match Edit_graph.apply_parameters graph ~node_id:id values with
-          | Ok (graph, _) -> graph | Error _ -> graph) network.graph.geometry edits in
-        Document.with_network doc level
-          { network with graph = Result.get_ok (Flow_sop.Network.with_geometry graph network.graph) } in
+    | Some graph ->
+        Document.with_kinds doc level (List.fold_left (fun graph (id, values) ->
+          match Kind_graph.set_fields graph id values with
+          | Ok (graph, _) -> graph | Error _ -> graph) graph edits) in
   let derived (doc : Document.t) level : Sync.edit -> Document.t = function
     | Fields edits -> with_fields doc level edits
-    | Layers (network, values) ->
+    | Layers (layers, values) ->
         (match level with
-         | Inside id -> with_fields (Document.with_network doc level network) Document.Scene [ id, values ]
+         | Inside id -> with_fields (Document.with_layers doc id layers) Document.Scene [ id, values ]
          | Scene -> doc)
     | Rename _ | Delete _ | Restack _ | Camera _ | Root _ | Settings _ | Reparent _ | Outdent _ -> doc in
-  let field name node = List.find_map (fun (field : Param.field_view) ->
-      if field.name = name then Some field.current else None) (Node.parameter_fields node) in
+  let field name node = Kind_graph.field node name in
   List.filter_map (function
     | Leader.World_emit -> edit_layer (fun node -> match field "emit" node with
         | Some (Param.Choice_value "Light") -> Some ["emit", Param.Choice_value "Dome"]
@@ -114,8 +110,8 @@ let world_keys value (doc : Document.t) selection actions =
     | World_preset index ->
         (match world_id, List.nth_opt World.presets index with
          | Some id, Some (name, world) ->
-             (match Layers.network_of_world world with
-              | Ok network -> Some (Document.Inside id, Sync.Layers (network, snd (Layers.of_world world)), "Preset " ^ name)
+             (match Layers.graph_of_world world with
+              | Ok layers -> Some (Document.Inside id, Sync.Layers (layers, snd (Layers.of_world world)), "Preset " ^ name)
               | Error _ -> None)
          | _ -> None)
     | _ -> None) actions

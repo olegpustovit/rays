@@ -1,13 +1,13 @@
-(** The scene, world and settings kinds of a workspace: one Lisp kind per object factory
+(** The scene, world and settings kinds of a workspace: one Lisp kind per object schema
     ([scene/geometry], [scene/light], ...), per World layer ([world/gradient], ...) and the
-    workspace settings record ([settings/config]).  Their spellings are generated from the
+    workspace settings record ([settings/config]): plain schemas, not SOP factories.  Their spellings are generated from the
     schemas: a new field in a schema is a new keyword. *)
 
-val scene_kinds : (string * Sop.Edit_graph.factory) list
-(** The qualified scene kinds with their factories ([scene/world] and [scene/root] included). *)
+val scene_kinds : (string * Kind_graph.Kind.t) list
+(** The qualified scene kinds with their schemas ([scene/world] and [scene/root] included). *)
 
-val world_kinds : (string * Sop.Edit_graph.factory) list
-(** The qualified World kinds ([world/sky], ...) with their factories. *)
+val world_kinds : (string * Kind_graph.Kind.t) list
+(** The qualified World kinds ([world/sky], ...) with their schemas. *)
 
 type window = { title : string; width : int; height : int; fps : int; seed : int; fast : bool }
 (** What [(settings/config :title :width :height :fps :seed)] asks of the host when it starts.

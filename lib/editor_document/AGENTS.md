@@ -10,15 +10,16 @@ it. Selection, navigation, cooking and history policy belong to the host. Root r
 | Module | Owns |
 |---|---|
 | `Workspace_doc`, `Layout_by_path` | The authored truth: source, checked workspace, layout by path, settings. `edit` applies one `Flow_edit.op` atomically and remaps layout keys |
-| `Document` | The document: `workspace` (the text and its `Lower.t`), and what lowering derives (`scene`, `networks`, `shell`, `root`, `homes`, `view_worlds`, `view_roots`) |
+| `Document` | The document: `workspace` (the text and its `Lower.t`), and what lowering derives (`scene`, `networks`, `layers`, `shell`, `root`, `homes`, `view_worlds`, `view_roots`) |
+| `Kind_graph` | The scene's objects and a World's layers as plain data: kinds (a `Param` schema and descriptor) and their instances, each with at most one input. No SOP node, session or cook |
 | `Contexts` | The scene, world, settings and editor kinds generated from the schemas, and `of_workspace`, which builds a document |
 | `Scene_sync` | Derived scene and World edits written back to the text |
-| `Objects`, `Layers`, `Settings` | The schemas |
+| `Objects`, `Layers`, `Settings` | The schemas and their kinds |
 | `Preset` | The one persisted form: an s-expression `.rays` file, no version, no older reader |
 
 ## What must stay true
 
-- **The text is the truth.** Never edit `scene`, `networks` or `shell` to change the document:
+- **The text is the truth.** Never edit `scene`, `networks`, `layers` or `shell` to change the document:
   edit the text and lower again. `Document.dump` is for crash reports and tests, not loadable.
 - **Levels** are `Scene | Inside of int`. `Document.resolve_level` is total: a level that is gone
   is the scene.
@@ -48,14 +49,16 @@ it. Selection, navigation, cooking and history policy belong to the host. Root r
   layers it did not have. A name two objects would share is refused (`:parent` reads names).
 - **Names.** A binding added to an existing graph is named by `Flow_edit.fresh_name`; several at
   once by `Flow_edit.fresh_among`.
-- **The root.** `scene/root` is not a node of the scene network: `Contexts` reads it into
+- **Not SOP nodes.** Scene, World and settings kinds are `Kind_graph` instances, never a
+  `Sop.Node`: they do not cook. Their ids are their own, apart from any SOP node id.
+- **The root.** `scene/root` is not an object of the scene: `Contexts` reads it into
   `Document.root` and `homes.root`. The first edit of a render setting writes one. `E_SCENE_ROOT`,
   `E_SCENE_WORLD` and `E_SCENE_CAMERA` are raised while lowering, so a gesture that would cause
   one is refused whole.
 - **The World.** `scene/world (ref g)` is an object like the others, its layers the world graph
   `g`.
-- **Physical identity.** `of_workspace ~previous` keeps an unchanged scene network, object
-  network and settings physically, so an edit elsewhere recomposes nothing. Find an object's
+- **Physical identity.** `of_workspace ~previous` keeps an unchanged scene, object network,
+  World layers and settings physically, so an edit elsewhere recomposes nothing. Find an object's
   graph with `Document.object_graph`, which does not rely on identity alone.
 - **The shell.** `Contexts.editor` evaluates the editor graph named by `layout.editor` (default:
   the first) into `Document.shell`. Origins come from walking the checked terms, never from

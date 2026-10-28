@@ -24,7 +24,7 @@ let panel_title value (leaf : Pxui_shell.Layout.leaf) =
             if g.context = Flow.Context.scene then Some g.name else None)
             (value.doc.Document.workspace.ws).checked.graphs) in
         let camera = Option.bind value.doc.Document.active_camera (fun id ->
-          Option.map Node.label (Edit_graph.find (scene value) ~node_id:id)) in
+          Option.map (fun (node : Kind_graph.node) -> node.label) (Kind_graph.find (scene value) id)) in
         String.concat " / " (List.filter (( <> ) "") [ scene_name; Option.value ~default:"" camera ])
     | Graph -> "Graph", if graph = "" then "" else
         let context = List.find_map (fun (g : Flow.Workspace.graph) ->
@@ -95,7 +95,7 @@ let outline_objects value : Navigator.obj list =
   let document = scene value in
   let selected = if value.level = Document.Scene then Selection.selected_nodes value.selection else [] in
   Array.to_list (scene_rows document) |> List.map (fun (row : Pxui_shell.Tree.row) ->
-    let node = Edit_graph.find document ~node_id:row.id in
+    let node = Kind_graph.find document row.id in
     let flag name = Option.bind node (fun node ->
       if Objects.has_flag name node then Some (Objects.flag name node) else None) in
     let lead = value.doc.Document.active_camera = Some row.id in
@@ -103,11 +103,11 @@ let outline_objects value : Navigator.obj list =
     let choice = Option.bind node (fun node -> List.find_map (fun (f : Param.field_view) ->
       match f.name, f.current with
       | ("shape" | "type"), Param.Choice_value v -> Some (String.lowercase_ascii v) | _ -> None)
-      (Node.parameter_fields node)) in
-    let operation = Option.map Node.operation node in
+      (Kind_graph.fields node)) in
+    let operation = Option.map (fun (node : Kind_graph.node) -> node.kind) node in
     let field name = Option.bind node (fun node -> List.find_map (fun (f : Param.field_view) ->
       match f.name = name, f.current with
-      | true, Param.Float_value v -> Some v | _ -> None) (Node.parameter_fields node)) in
+      | true, Param.Float_value v -> Some v | _ -> None) (Kind_graph.fields node)) in
     (* the sheet's words: a camera its focal length, a geometry object the graph it references, the
        World a reference to its graph; a light its shape *)
     let name, detail = match operation with
@@ -334,17 +334,17 @@ let dock_panels ~factories (doc : Document.t) source target side =
       |> Layout_by_path.Path_map.add copy (saved target_key) in
     { layout with panels }))
 
-(* A pane's request applied to the open network: an object's parameter or name.  Text gestures
-   ([Syntax_edit]) are applied to the whole document afterwards. *)
+(* A pane's request applied to the open level's objects or layers: a parameter or name of one the
+   host made.  Text gestures ([Syntax_edit]) are applied to the whole document afterwards. *)
 let apply_change (document, error, effects) = function
   | Set_parameter { node; path; value } ->
-      (match Editor_document.Document_edit.apply_parameters document ~node_id:node [ path, value ] with
+      (match Kind_graph.set_fields document node [ path, value ] with
        | Error message -> document, Some message, effects
        | Ok (document, changed) -> document, None, Param.union_effects effects changed)
   | Rename { node; label } ->
-      (match Editor_document.Document_edit.relabel document ~node_id:node label with
-       | Error message -> document, Some message, effects
-       | Ok document -> document, None, effects)
+      (match Kind_graph.find document node with
+       | None -> document, Some (Printf.sprintf "no object #%d" node), effects
+       | Some _ -> Kind_graph.update document node (fun n -> { n with label }), None, effects)
   | Follow_source _ | Syntax_edit _ | Syntax_batch _ | Syntax_inline _ | Select_layout _ | Panel_state _ | Dock_panels _ | Object_arg _ | Pin_row _ | Notice _ | Declined _ -> document, error, effects
 
 (* Command-C / X: the selected bindings as Lisp pairs ("name expr" per line) on the clipboard,

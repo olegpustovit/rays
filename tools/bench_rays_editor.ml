@@ -81,7 +81,7 @@ let measure nodes =
   step ~mouse:inside ~events:[Input.Pointer_pressed (Input.LeftButton, pointer inside);
     Input.Pointer_released (Input.LeftButton, pointer inside)] ();
   let key k = Input.Key_pressed k in
-  while Option.map Node.label (E.selected_node !environment) <> Some "g" do
+  while Option.map (fun (p : E.picked) -> p.label) (E.selected_node !environment) <> Some "g" do
     step ~events:[key Input.ArrowDown] ()
   done;
   step ~events:[key (Input.KeyChar 'i')] ();
@@ -251,9 +251,9 @@ let measure_world () =
         environment := E.update !environment input;
         samples.(index) <- Unix.gettimeofday () -. started) samples;
       let bytes = Gc.allocated_bytes () -. allocated in
-      let rotation = E.scene_document !environment |> Edit_graph.inspect
-        |> List.find_map (fun (info : Edit_graph.node_info) ->
-          if info.operation <> "world" then None else Node.parameter_fields info.node
+      let rotation = E.scene_document !environment
+        |> List.find_map (fun (info : Editor_document.Kind_graph.node) ->
+          if info.kind <> "world" then None else Editor_document.Kind_graph.fields info
           |> List.find_map (fun (field : Param.field_view) -> match field.name, field.current with
             | "rotation", Param.Float_value value -> Some value | _ -> None)) |> Option.get in
       if abs_float (rotation -. 0.16) > 1e-9 then failwith "World input benchmark did not rotate 0.16 degrees";

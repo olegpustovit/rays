@@ -150,8 +150,8 @@ let settle ?(from = 0) e ok =
 let part_editor () =
   let module E3 = Rays_editor.Editor in
   let e = editor still in
-  let objects e = List.map (fun (i : Sop.Edit_graph.node_info) -> i.label, i.operation)
-    (Sop.Edit_graph.inspect (E3.document e)) in
+  let objects e = List.map (fun (i : Editor_document.Kind_graph.node) -> i.label, i.kind)
+    (E3.document e) in
   check (List.mem ("g", "geometry") (objects e)) "one geometry object per sop graph";
   let e, count = settle e (fun e -> E3.prepared e <> None) in
   let before = Option.get (E3.prepared e) in
@@ -326,28 +326,28 @@ let part_contexts () =
   let module Objects = Editor_document.Objects in
   let module Layers = Editor_document.Layers in
   let module Contexts = Editor_document.Contexts in
-  let module Edit = Sop.Edit_graph in
+  let module KG = Editor_document.Kind_graph in
   let build ?previous ws = match Contexts.of_workspace ~factories ?previous ws with
     | Ok d -> d | Error d -> fail (Diagnostic.to_string d) in
   let bloom = of_text (small_bloom ()) in
   let doc = build bloom in
   let scene = Document.scene_graph doc in
-  let infos = Edit.inspect scene in
-  let ops op = List.filter (fun (i : Edit.node_info) -> i.operation = op) infos in
-  let label (i : Edit.node_info) = i.label in
+  let infos = scene in
+  let ops op = List.filter (fun (i : KG.node) -> i.kind = op) infos in
+  let label (i : KG.node) = i.label in
   check (List.map label (ops "geometry") = [ "flower"; "accent" ]) "the scene graph's geometry objects, by :name";
   check (List.length (ops "camera") = 1 && List.length (ops "light") = 1 && List.length (ops "world") = 1)
     "camera, light and World come from the workspace";
   check (Document.validate doc = Ok ()) "the document validates";
-  let accent = (List.nth (ops "geometry") 1).node in
+  let accent = (List.nth (ops "geometry") 1) in
   (match Objects.geometry accent with
    | Some p -> check (p.translate_x = 2.2 && p.translate_z = -1.2 && p.scale_x = 0.55 && p.scale_y = 0.55
                       && p.rotate_y = 0.) "a vec3 keyword sets its three fields"
    | None -> fail "accent is not a geometry object");
-  (match Objects.Camera.of_node (List.hd (ops "camera")).node with
+  (match Objects.Camera.of_node (List.hd (ops "camera")) with
    | Some (camera, _) -> check (Rays.Camera.position camera = Rays_math.Vec3.create 0.5 1.8 6.) "camera eye"
    | None -> fail "no camera");
-  (match Objects.light (List.hd (ops "light")).node with
+  (match Objects.light (List.hd (ops "light")) with
    | Some p -> check (p.intensity = 60. && p.translate_x = 4.) "light fields"
    | None -> fail "no light");
   check (doc.active_camera = Some (List.hd (ops "camera")).id) "the workspace's camera is the active one";
@@ -359,9 +359,9 @@ let part_contexts () =
     "two refs of one graph with different inputs are two networks";
   (* the World: a node and its layer stack, bottom first *)
   let world_id = (List.hd (ops "world")).id in
-  let world_node = (List.hd (ops "world")).node in
-  check (Sop.Node.label world_node = "Bloom study") "the World's name";
-  (match Layers.to_world world_node (network world_id) with
+  let world_node = (List.hd (ops "world")) in
+  check (world_node.label = "Bloom study") "the World's name";
+  (match Layers.to_world world_node (Option.get (Document.layers doc world_id)) with
    | Some w ->
        check (w.exposure = -0.5) "World exposure";
        check (match w.layers with
@@ -387,10 +387,10 @@ let part_contexts () =
   (* determinism, print/parse and preset round trips *)
   (* ids are fresh per build; everything else is a function of the source *)
   let shape (d : Document.t) =
-    List.map (fun (i : Edit.node_info) -> i.operation, i.label, i.parameters) (Edit.inspect (Document.scene_graph d)),
-    List.filter_map (fun (i : Edit.node_info) -> if i.operation <> "world" then None else
-      Option.bind (Document.Int_map.find_opt i.id d.networks) (fun n -> Layers.to_world i.node n))
-      (Edit.inspect (Document.scene_graph d)),
+    List.map (fun (i : KG.node) -> i.kind, i.label, List.map (fun (f : Param.field_view) -> f.name, f.current) (KG.fields i)) ((Document.scene_graph d)),
+    List.filter_map (fun (i : KG.node) -> if i.kind <> "world" then None else
+      Option.bind (Document.layers d i.id) (Layers.to_world i))
+      ((Document.scene_graph d)),
     Editor_document.Settings.fields d.settings in
   check (shape (build bloom) = shape doc) "the same source builds the same document twice";
   check (Document.dump (build ~previous:doc bloom) = Document.dump doc) "rebuilding over the previous document changes nothing";
@@ -409,10 +409,10 @@ let part_contexts () =
       sub = []; value = Flow.Syntax.make (S.Vec (List.map (fun n -> S.make (S.Num n)) [ "4"; "0"; "1" ])) }) with
     | Ok d -> d | Error d -> fail (Diagnostic.to_string d) in
   let doc2 = build ~previous:doc edited in
-  let accent2 = List.nth (List.filter (fun (i : Edit.node_info) -> i.operation = "geometry")
-    (Edit.inspect (Document.scene_graph doc2))) 1 in
+  let accent2 = List.nth (List.filter (fun (i : KG.node) -> i.kind = "geometry")
+    ((Document.scene_graph doc2))) 1 in
   check (accent2.id = accent_id) "an edit keeps the object's id";
-  check ((Option.get (Objects.geometry accent2.node)).translate_x = 4.) "the edit reaches the object";
+  check ((Option.get (Objects.geometry accent2)).translate_x = 4.) "the edit reaches the object";
   check (has (Doc.to_text edited) ":translate [4 0 1]") "the source carries the edit";
   (* negative lowering: computed arguments outside a schema bound, and a wrong result *)
   let settings_of body = of_text ("(workspace w (graph c :context settings [(f : int 60)] " ^ body ^ "))") in
@@ -425,11 +425,11 @@ let part_contexts () =
     "a world graph no scene/world references is no World";
   (* the implicit scene: without a scene graph, one geometry object per sop graph *)
   let plain = build (of_text still) in
-  check (List.map label (List.filter (fun (i : Edit.node_info) -> i.operation = "geometry")
-    (Edit.inspect (Document.scene_graph plain))) = [ "g" ]) "no scene graph: one object per sop graph";
+  check (List.map label (List.filter (fun (i : KG.node) -> i.kind = "geometry")
+    ((Document.scene_graph plain))) = [ "g" ]) "no scene graph: one object per sop graph";
   (* Variations: one garden object, the graph opened for a viewport *)
   let variations = build (of_text (case "variations")) in
-  check (List.map label (Edit.inspect (Document.scene_graph variations))
+  check (List.map label ((Document.scene_graph variations))
          = [ "garden"; "garden (v1.1.1)"; "garden (v1.1.2)"; "garden (v1.1.3)" ]) "variations scene";
   ()
 
@@ -447,8 +447,8 @@ let part_editor_contexts () =
       Unix.rmdir directory) (fun () ->
       E3.crash_dump !e directory;
       In_channel.with_open_bin (Filename.concat directory "editor.txt") In_channel.input_all) in
-  let objects () = List.map (fun (i : Sop.Edit_graph.node_info) -> i.label, i.operation)
-    (Sop.Edit_graph.inspect (E3.document !e)) in
+  let objects () = List.map (fun (i : Editor_document.Kind_graph.node) -> i.label, i.kind)
+    (E3.document !e) in
   check (List.mem ("accent", "geometry") (objects ()) && List.mem ("Bloom study", "world") (objects ()))
     "the editor opens the workspace's objects and World";
   check (List.length (List.filter (fun (_, op) -> op = "camera") (objects ())) = 1
@@ -459,8 +459,8 @@ let part_editor_contexts () =
   let e' = E3.edit !e (E.Set_arg { node = [ "scene"; "accent" ]; key = Kw "scale"; sub = [];
     value = S.make (S.Vec (List.map (fun n -> S.make (S.Num n)) [ "1"; "1"; "1" ])) }) |> Result.get_ok in
   check (E3.undo_label e' = Some "Edit value") "one history entry";
-  check (List.exists (fun (i : Sop.Edit_graph.node_info) -> i.label = "accent"
-    && (Option.get (Editor_document.Objects.geometry i.node)).scale_x = 1.) (Sop.Edit_graph.inspect (E3.document e')))
+  check (List.exists (fun (i : Editor_document.Kind_graph.node) -> i.label = "accent"
+    && (Option.get (Editor_document.Objects.geometry i)).scale_x = 1.) (E3.document e'))
     "the scene edit reached the object"
 
 let part_literals () =

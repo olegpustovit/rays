@@ -1,18 +1,4 @@
-open Sop
-
-let flow_result result = Result.map_error Diagnostic.to_string result
-let update_geometry edit document =
-  Result.bind (edit document.Flow_sop.Network.geometry) (fun geometry ->
-    flow_result (Flow_sop.Network.with_geometry geometry document))
 let cook_effects = Param.add_impact Param.Cook Param.no_effects
-
-(* Set parameters of one node (a scene object or World layer, or a lowered node). *)
-let apply_parameters document ~node_id values =
-  Result.bind (Edit_graph.apply_parameters document.Flow_sop.Network.geometry ~node_id values)
-    (fun (geometry, effects) -> Result.map (fun document -> document, effects)
-      (update_geometry (fun _ -> Ok geometry) document))
-
-let relabel document ~node_id label = flow_result (Flow_sop.Network.relabel ~node_id label document)
 
 (* One gesture on a workspace document: rewrite and re-check the source, then
    lower it into the document's objects.  Atomic: an error changes nothing. *)

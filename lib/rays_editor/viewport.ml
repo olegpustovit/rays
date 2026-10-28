@@ -174,40 +174,28 @@ let same_view a b =
     | _ -> false)
 
 let active_node (core : _ Core_model.t) = Option.bind core.doc.active_camera
-    (fun node_id -> Edit_graph.find (Core_inspect.scene core) ~node_id)
+    (Kind_graph.find (Core_inspect.scene core))
 
-(* A default camera, following the viewport, when the catalog offers one. *)
-let add_default_camera ~factories document easy =
-  let ( let* ) = Result.bind in
-  match List.find_opt (fun factory -> Edit_graph.factory_key factory = "camera")
-      factories with
-  | None -> None
-  | Some factory ->
-      Result.to_option (
-        let* node = Edit_graph.instantiate factory [] in
-        let node = Node.relabel "camera1" node in
-        let* document = Edit_graph.add_node ~factory node document in
-        let* document, _ = Edit_graph.apply_parameters document ~node_id:(Node.id node)
-            (("follow_viewport", Param.Bool_value true)
-             :: Objects.Camera.lens_values Camera.pinhole @ view_parameters easy) in
-        Ok document)
+(* A default camera, following the viewport. *)
+let add_default_camera scene easy =
+  Result.to_option (Result.map (fun (node, _) -> Kind_graph.add scene node)
+    (Kind_graph.apply (Kind_graph.instance ~label:"camera1" Objects.Camera.kind)
+      (("follow_viewport", Param.Bool_value true)
+       :: Objects.Camera.lens_values Camera.pinhole @ view_parameters easy)))
 
-let camera_factories = [Objects.Camera.factory]
-
-let seed_scene easy _ scene =
+let seed_scene easy scene =
   if camera_ids scene <> [] then scene
-  else Option.value ~default:scene
-      (add_default_camera ~factories:camera_factories scene easy)
+  else Option.value ~default:scene (add_default_camera scene easy)
 
 (* One ACTIVE camera whenever any exists; a nonempty scene of a workspace with no scene graph
    losing the last camera re-adds the default within the same undo entry. An intentionally
    empty scene stays empty. *)
 let sync_cameras ~mode (core : _ Core_model.t) easy =
   let core = if camera_ids (Core_inspect.scene core) <> []
-      || Edit_graph.inspect (Core_inspect.scene core) = []
+      || Core_inspect.scene core = []
       (* a scene graph is authoritative: no camera object is a camera it does not declare *)
       || Contexts.graph_of (core.doc.workspace.ws) Flow.Context.scene <> None then core
-    else match add_default_camera ~factories:camera_factories (Core_inspect.scene core) easy with
+    else match add_default_camera (Core_inspect.scene core) easy with
       | Some scene -> Core_host.scene_edit core mode scene
       | None -> core in
   let ids = List.filter (Core_inspect.view_wants core `Primary) (camera_ids (Core_inspect.scene core)) in
@@ -406,7 +394,7 @@ let on_view core ~previous ~key camera extra ~stepped =
     renderer_request = None; root = { core.Core_model.doc.root with renderer = to_root mode } } in
   let core = match extra.follow_request, active_node core with
     | Some value, Some node ->
-        Core_host.edit_node core Document.Scene (Node.id node)
+        Core_host.edit_node core Document.Scene node.Kind_graph.id
           ["follow_viewport", Param.Bool_value value] ~label:"Follow viewport"
     | _ -> core in
   let written = ref extra.written in
@@ -418,7 +406,7 @@ let on_view core ~previous ~key camera extra ~stepped =
             (Easy_camera.camera camera)) in
         if moved || not (same_view node_view (Easy_camera.camera camera)) then
           if moved then
-            match Edit_graph.apply_parameters (Core_inspect.scene core) ~node_id:(Node.id node)
+            match Kind_graph.set_fields (Core_inspect.scene core) node.Kind_graph.id
                 (view_parameters camera) with
             | Ok (scene, _) ->
                 written := Some (Easy_camera.camera camera);
@@ -642,7 +630,7 @@ type arrow = { name : string; color : Rays_math.Color.t; tool : tool;
 
 let arrows node view bounds space tool =
   let project point = project bounds view (Rays_math.Mat4.transform_point space point) in
-  let values = Node.parameter_fields node in
+  let values = node.Core_model.fields in
   let find name = List.find_map (fun (field : Param.field_view) ->
     match field.current with
     | Float_value value when field.name = name -> Some value
@@ -715,7 +703,7 @@ let handles ui ~selected ~scene ~space view extra ~bounds =
     | Some _ | None -> [], false in
   let grab, picked = if not extra.show.cameras then grab, None else
     List.fold_left (fun (grab, picked) node_id ->
-      match Option.bind (Edit_graph.find scene ~node_id) node_camera with
+      match Option.bind (Kind_graph.find scene node_id) node_camera with
       | Some camera when not (same_view camera view) ->
           (match project bounds view (Camera.position camera) with
            | Some (x, y) ->
@@ -778,7 +766,7 @@ let light_guide bounds view color (light : Light.t) =
 let guides ~scene ~selected ~space view extra ~pane ~bounds =
   let cameras = if not extra.show.cameras then [] else
     List.concat_map (fun node_id ->
-      match Option.bind (Edit_graph.find scene ~node_id) node_camera with
+      match Option.bind (Kind_graph.find scene node_id) node_camera with
       | Some camera when not (same_view camera view) ->
           let active = Camera.position camera = Camera.position extra.document_camera
             && Camera.target camera = Camera.target extra.document_camera in

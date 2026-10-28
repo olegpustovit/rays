@@ -95,6 +95,26 @@ type shell = {
   restored : bool;
 }
 
+(* What a level's list rows are made from: a geometry object's network, or the scene's objects or
+   the World's layers; a cached row set is kept while its source is physically the same. *)
+type row_source = Network of Flow_sop.Network.t | Objects of Kind_graph.t
+
+let same_source a b = match a, b with
+  | Network a, Network b -> a == b
+  | Objects a, Objects b -> a == b
+  | _ -> false
+
+(* What a selection names: a scene object or World layer of the list, or the lowered SOP node the
+   graph pane has selected.  Handles and the World map read its fields. *)
+type picked = { id : int; label : string; kind : string; fields : Param.field_view list }
+
+let of_object (node : Kind_graph.node) =
+  { id = node.id; label = node.label; kind = node.kind; fields = Kind_graph.fields node }
+
+let of_sop node =
+  { id = Sop.Node.id node; label = Sop.Node.label node; kind = Sop.Node.operation node;
+    fields = Sop.Node.parameter_fields node }
+
 (* What a pane asks of the document: a gesture on the workspace text, a parameter or the name
    of a scene object or World layer (the inspector), a message. *)
 type change =
@@ -134,7 +154,9 @@ type 'panel frame_result = {
   tree : Pxui_shell.Tree.t;
   outline : Navigator.state;
   outline_intents : Navigator.intent list;
-  document : Flow_sop.Network.t;  (* the open network after this frame's edits *)
+  document : Kind_graph.t;
+  (* the open level's objects or layers after this frame's derived edits; none inside a geometry
+     object *)
   edit_error : string option;
   effects : Param.effects;
   timeline_intents : timeline_intent list;
@@ -218,7 +240,7 @@ type 'prepared t = {
   text : Text_pane.state;  (* the workspace text pane: tab, drafts, errors (view state) *)
   map_view : bool;  (* in the World, the view pane shows the lat-long map *)
   live_cook : bool;  (* cook while a drag holds the pointer *)
-  rows : (Flow_sop.Network.t * (int option * int option) * (Pxui_shell.Tree.row array * string list)) list;
+  rows : (row_source * (int option * int option) * (Pxui_shell.Tree.row array * string list)) list;
   (* the rows of the lists drawn last frame, cached by network, display node and active camera *)
   factories : Edit_graph.factory list;  (* the SOP catalog *)
   selection : Selection.t;

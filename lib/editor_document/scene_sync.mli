@@ -39,7 +39,7 @@ type edit =
           [scene/merge] that holds it) is added to a [:skip] list (register L16), and every other
           copy keeps its iteration tuple. *)
   | Restack of int list  (** the World's layers, bottom first *)
-  | Layers of Document.network * (string * Param.value) list
+  | Layers of Kind_graph.t * (string * Param.value) list
       (** a preset: the World's layers replaced and its own fields set (the level is the World) *)
   | Camera of int option
       (** the render camera: the root's [:camera], else [:active]; the document's alone when the

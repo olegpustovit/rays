@@ -12,7 +12,7 @@ let inspect_panel ~image ~camera_panel ~inspector_visible ~unchanged ~resized
     ~geometry:(g : Pxui_shell.Layout.geometry) ~ui
     (value, scope_view, selection, scope_active) inspector_root bounds =
   let ws = value.doc.Document.workspace.ws in
-  let document = (network value).graph.geometry in
+  let document = objects value in
   let selected_ids = Selection.selected_nodes selection in
   let lowered_level = match value.level with
     | Document.Inside id -> kind value id = Some "geometry" | Scene -> false in
@@ -20,7 +20,6 @@ let inspect_panel ~image ~camera_panel ~inspector_visible ~unchanged ~resized
   let scope_selected = if (match value.scope_key with Some k -> Some k.graph = graph_name value | None -> false)
       || (lowered_level && value.scope_key <> None)
     then inspector_paths (Pxui_graph.Scope.selected scope_view) else [] in
-  let open_network = network value in
   let window = List.exists (fun (l : Pxui_shell.Layout.leaf) -> l.floating && l.panel = Inspector && l.body = bounds) g.leaves in
   (* a window keeps its 1-point border on the left, right and bottom: its panel lies inside *)
   let bounds = if window then (let x, y, w, h = bounds in x, y, max 1 w, max 1 (h - 1)) else bounds in
@@ -50,10 +49,13 @@ let inspect_panel ~image ~camera_panel ~inspector_visible ~unchanged ~resized
   | [] ->
       (* Sketch settings above the environment's camera/render panel. *)
       let changes, live, panel = inspector_panel ui bounds (fun () ->
-        let node_count = List.length (Edit_graph.inspect document) in
+        let node_count, label = match network value with
+          | Some network -> List.length (Edit_graph.inspect network.graph.geometry),
+              (fun id -> Option.map Node.label (Edit_graph.find network.graph.geometry ~node_id:id))
+          | None -> List.length document,
+              (fun id -> Option.map (fun (node : Kind_graph.node) -> node.label) (Kind_graph.find document id)) in
         let display = Option.fold ~none:"none" ~some:(fun id ->
-          Option.fold ~none:("#" ^ string_of_int id) ~some:Node.label
-            (Edit_graph.find document ~node_id:id)) open_network.displayed in
+          Option.value ~default:("#" ^ string_of_int id) (label id)) (displayed value) in
         let title, detail = match value.scope_key with
           | Some k when scope_active && Some k.graph = graph_name value ->
               let rec count (s : Flow_graph.Projection.scope) = List.fold_left
@@ -88,13 +90,23 @@ let inspect_panel ~image ~camera_panel ~inspector_visible ~unchanged ~resized
           ~title:(Printf.sprintf "%d nodes" (List.length selected_ids))
           ~detail:"Selected" ())) in
       None, [], [], value.live_cook, [], []
+  | [node_id] when lowered_level ->
+      (* the nodes of a geometry object are the lowering of its graph: the graph pane's node is the
+         one to edit (its arguments are the text), and its inspector is the graph pane's *)
+      let drops = ref [] in
+      let requests, moves = inspector_panel ui bounds (fun () ->
+        match node_path value node_id with
+        | Some path ->
+            workspace_inspector ~image ~window value ui ~width:(float (let _, _, w, _ = bounds in max 1 w)) path ~resized
+              ~follows:(fun path -> follow_target ~path value)
+        | None ->
+            Pxui.Ui.inspector_message ui ~key:"flow-derived"
+              "Made from the graph's text. Select the node in the graph pane to edit its arguments.";
+            [], []) in
+      None, requests, [], value.live_cook, moves, List.rev !drops
   | [node_id] ->
-      (* the nodes of a geometry object are the lowering of its graph: the graph pane's node
-         is the one to edit (its arguments are the text) *)
-      let derived = match value.level with
-        | Document.Inside id -> kind value id = Some "geometry" | Scene -> false in
-      let fields, label, kind = match Edit_graph.find document ~node_id with
-        | Some node -> Node.parameter_fields node, Node.label node, Node.operation node
+      let fields, label, kind = match Kind_graph.find document node_id with
+        | Some node -> Kind_graph.fields node, node.label, node.kind
         | None -> [], "#" ^ string_of_int node_id, "unknown" in
       let preview = value.level = Document.Scene && Option.fold ~none:false
         ~some:(fun shell -> List.exists (fun (_, ids) -> List.mem node_id ids) shell.Document.views)
@@ -103,7 +115,8 @@ let inspect_panel ~image ~camera_panel ~inspector_visible ~unchanged ~resized
         Pxui.Ui.scope ui (Printf.sprintf "node.%d" node_id) (fun () ->
           let _, _, inspector_width, _ = bounds in
           let inspector_width = float (max 1 inspector_width) in
-          let input_count = Array.length (Option.value ~default:[||] (Edit_graph.inputs document ~node_id)) in
+          let input = Option.bind (Kind_graph.find document node_id) (fun (node : Kind_graph.node) -> node.input) in
+          let input_count = if kind = "camera" || kind = "root" || kind = "world" then 0 else 1 in
           (* the head: the kind as the sheet writes it (scene/camera), VIEW while displayed,
              the node's number; the name edited in place; what is true of the node *)
           let facts = List.filter_map Fun.id [
@@ -113,43 +126,33 @@ let inspect_panel ~image ~camera_panel ~inspector_visible ~unchanged ~resized
             if preview then Some "preview instance" else None ] in
           let head = Pxui.Ui.inspector_header ui
               ~key:"flow-inspector-header"
-              ~kind:(Printf.sprintf "%s/%s" (Flow.Context.name open_network.context) kind)
-              ?badge:(if open_network.displayed = Some node_id then Some "view" else None)
+              ~kind:(Printf.sprintf "%s/%s" (if value.level = Document.Scene then "scene" else "world") kind)
+              ?badge:(if displayed value = Some node_id then Some "view" else None)
               ~index:(Printf.sprintf "NO. %04d" node_id)
-              ?rename:(if derived || preview then None else Some (fun text -> String.trim text <> ""))
+              ?rename:(if preview then None else Some (fun text -> String.trim text <> ""))
               ~title:label
               ~detail:(match facts with
                 | [] -> Printf.sprintf "%d parameter%s" (List.length fields) (if List.length fields = 1 then "" else "s")
                 | facts -> String.concat " · " facts) () in
           let renamed = head.renamed in
-          let rename = if renamed = label || derived || preview then [] else
+          let rename = if renamed = label || preview then [] else
             [Rename {node = node_id; label = renamed}] in
           rename @ Pxui.Ui.inspector_body ui (fun () ->
-          let names = Option.value ~default:[]
-            (Edit_graph.node_slot_names document ~node_id) in
-          let inputs = Option.value ~default:[||]
-            (Edit_graph.inputs document ~node_id) in
-          if Array.length inputs > 0 then
+          if input_count > 0 then
             ignore (Pxui.Ui.inspector_section ui
               ~key:"flow-input-heading" ~expanded:true "Inputs"
-              (fun () -> Array.iteri (fun index input ->
-                let name = Option.value
-                    ~default:("in" ^ string_of_int index)
-                    (List.nth_opt names index) in
+              (fun () ->
                 let source = match input with
                   | None -> "empty"
                   | Some id -> Option.fold
                       ~none:("#" ^ string_of_int id)
-                      ~some:Node.label
-                      (Edit_graph.find document ~node_id:id) in
+                      ~some:(fun (node : Kind_graph.node) -> node.label)
+                      (Kind_graph.find document id) in
                 Pxui.Ui.inspector_readout ui ~width:inspector_width
-                  ~key:("flow-input-" ^ string_of_int index)
-                  ~label:name ("← " ^ source)) inputs));
-          if derived then Pxui.Ui.inspector_message ui ~key:"flow-derived"
-            "Made from the graph's text. Select the node in the graph pane to edit its arguments.";
+                  ~key:"flow-input-0" ~label:"in0" ("← " ^ source)));
           if preview then Pxui.Ui.inspector_message ui ~key:"flow-preview"
             "Preview instance. Edit its viewport scene reference or source graph.";
-          let edits = match object_rows ~locked:(derived || preview) fields with
+          let edits = match object_rows ~locked:preview fields with
             | Error diagnostic ->
                 Pxui.Ui.inspector_message ui ~key:"flow-diagnostic"
                   (Diagnostic.to_string diagnostic); []

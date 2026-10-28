@@ -15,28 +15,48 @@ let view_wants value view id =
     | `Primary -> not (List.exists (fun (_, ids) -> List.mem id ids) views)
     | `Only key -> (match List.assoc_opt key views with Some ids -> List.mem id ids | None -> false)
 
-let kind value id = Option.map Node.operation (Edit_graph.find (scene value) ~node_id:id)
+let kind value id = Option.map (fun (node : Kind_graph.node) -> node.kind) (Kind_graph.find (scene value) id)
 
 let level_key = function
   | Document.Scene -> "scene"
   | Inside id -> "object:" ^ string_of_int id
 
-(* The kinds the node menu offers where the pane shows a graph of [context]. *)
-let catalog value context =
-  if context = Flow.Context.scene then Objects.catalog
-  else if context = Flow.Context.world then Layers.catalog
-  else if context = Flow.Context.sop then value.factories @ (value.doc.workspace.lowered).factories else []
-
-(* [catalog] as descriptors, plus the library nodes this document does not use yet: a workspace
-   lowers only the library definitions it reaches. *)
+(* The kinds the node menu offers where the pane shows a graph of [context]: the object kinds of a
+   scene, the layers of a World, the SOP factories plus the library nodes this document does not
+   use yet (a workspace lowers only the library definitions it reaches). *)
 let kinds value context =
-  let present = List.map Flow_sop.Catalog.descriptor (catalog value context) in
-  if context = Flow.Context.sop then Flow_sop.Catalog.with_library present else present
+  let generated keep = List.filter (fun (d : Flow_sop.Catalog.descriptor) -> keep d.qualified)
+      Kinds.descriptors in
+  if context = Flow.Context.scene then
+    generated (fun q -> List.mem q [ "scene/geometry"; "scene/light"; "scene/camera" ])
+  else if context = Flow.Context.world then generated (String.starts_with ~prefix:"world/")
+  else if context = Flow.Context.sop then
+    Flow_sop.Catalog.with_library (List.map Flow_sop.Catalog.descriptor
+      (value.factories @ (value.doc.workspace.lowered).factories))
+  else []
 
-(* the open level's network; the scene's if the level is gone (every path resolves the level first) *)
-let network value =
-  Option.value ~default:value.doc.Document.scene (Document.network value.doc value.level)
-let document value = (network value).graph.geometry
+(* the open level's objects or layers (the scene's if the level is gone: every path resolves the
+   level first); none inside a geometry object *)
+let objects value = match value.level with
+  | Document.Scene -> scene value
+  | Inside id -> Option.value ~default:Kind_graph.empty (Document.layers value.doc id)
+
+(* the SOP network of the open geometry object *)
+let network value = match value.level with
+  | Document.Inside id -> Document.network value.doc id
+  | Scene -> None
+
+(* the open level lists a node of this id: an object, a layer, a node of a geometry network *)
+let lists value id = match network value with
+  | Some network -> Sop.Edit_graph.find network.graph.geometry ~node_id:id <> None
+  | None -> Kind_graph.find (objects value) id <> None
+
+(* the node the open level shows as its view: a geometry network's display node, the scene's first
+   object, the World's top layer *)
+let displayed value = match value.level, network value with
+  | Inside _, Some network -> network.displayed
+  | Scene, _ -> Option.map (fun (node : Kind_graph.node) -> node.id) (List.nth_opt (objects value) 0)
+  | Inside _, None -> Option.map (fun (node : Kind_graph.node) -> node.id) (List.nth_opt (Kind_graph.stack (objects value)) 0)
 
 let viewed_path value (scope : Flow_graph.Projection.scope) =
   let valid (preview : preview) = match preview.path, scope.path with

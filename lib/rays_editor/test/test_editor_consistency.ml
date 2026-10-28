@@ -229,9 +229,8 @@ let preview_identity () =
     && List.for_all (fun (key, _) -> List.mem key (keys closed)) (shell closed).views)
     "closed preview left orphan membership/provenance";
   let id = List.hd (List.assoc comparison (shell doc).views) in
-  let graph, _ = Sop.Edit_graph.apply_parameters doc.scene.graph.geometry ~node_id:id
-    ["translate_x", Param.Float_value 3.] |> Result.get_ok in
-  let after = {doc with scene = {doc.scene with graph = Flow_sop.Network.with_geometry graph doc.scene.graph |> Result.get_ok}} in
+  let scene, _ = D.Kind_graph.set_fields doc.scene id ["translate_x", Param.Float_value 3.] |> Result.get_ok in
+  let after = {doc with scene} in
   check (match D.Scene_sync.reconcile ~factories doc after with
     | Error message -> Test_text_pane.contains message "viewport scene reference"
     | Ok _ -> false) "derived preview edit was not explicitly refused";
@@ -314,7 +313,7 @@ let preview_camera_world () =
     let doc = build (E.workspace !e) in
     let ids = List.assoc key (Option.get doc.shell).views in
     let comparison = List.find_map (fun id ->
-      Option.bind (Sop.Edit_graph.find doc.scene.graph.geometry ~node_id:id)
+      Option.bind (D.Kind_graph.find doc.scene id)
         (fun node -> Option.map fst (D.Objects.Camera.of_node node))) ids |> Option.get in
     check (Rays_math.Vec3.nearly_equal (Camera.position comparison) (Rays_math.Vec3.create 6. 0. 0.) ~eps:1e-6)
       "the comparison instance lost its independently authored camera";
@@ -808,7 +807,7 @@ let enter_camera () =
     let key k = Input.Key_pressed k in
     step [key Input.Home];
     let rec select name index =
-      if Option.map Sop.Node.label (E.selected_node !e) = Some name then index
+      if Option.map (fun (p : E.picked) -> p.label) (E.selected_node !e) = Some name then index
       else (check (index < 4) ("no camera row " ^ name);
         step [key Input.ArrowDown]; select name (index + 1)) in
     let row = select "telephoto" 0 in

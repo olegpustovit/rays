@@ -1,7 +1,6 @@
-(** The scene's objects as scene-graph kinds ([scene/geometry], [scene/camera], [scene/light],
-    [scene/root]) and the reads and edits of a network of them. *)
+(** The scene's objects as plain kinds ([scene/geometry], [scene/camera], [scene/light],
+    [scene/root]): typed schemas, and the reads and edits of a {!Kind_graph.t} of them. *)
 
-val empty : Rdk_core.Geometry.t
 module Geometry :
   sig
     type parameters = {
@@ -19,19 +18,7 @@ module Geometry :
     }
     val parameters_default : parameters
     val parameters_schema : parameters Param.schema
-    val parameters_factory :
-      (label:string ->
-       inputs:Sop.Node.t option list -> parameters -> Sop.Node.t) ->
-      Sop.Edit_graph.factory
-    val parameters_build :
-      ?schema:(parameters -> Sop.Node.t -> parameters Param.schema) ->
-      (label:string -> parameters -> Sop.Node.t option -> Sop.Node.t) ->
-      label:string ->
-      inputs:Sop.Node.t option list -> parameters -> Sop.Node.t
-    val build :
-      label:string ->
-      inputs:Sop.Node.t option list -> parameters -> Sop.Node.t
-    val factory : Sop.Edit_graph.factory
+    val kind : Kind_graph.Kind.t
   end
 module Camera :
   sig
@@ -54,17 +41,8 @@ module Camera :
     }
     val parameters_default : parameters
     val parameters_schema : parameters Param.schema
-    val parameters_factory :
-      (label:string -> inputs:Sop.Node.t list -> parameters -> Sop.Node.t) ->
-      Sop.Edit_graph.factory
-    val parameters_build :
-      ?schema:(parameters -> Sop.Node.t -> parameters Param.schema) ->
-      (label:string -> parameters -> Sop.Node.t) ->
-      label:string -> inputs:Sop.Node.t list -> parameters -> Sop.Node.t
-    val build :
-      label:string -> inputs:Sop.Node.t list -> parameters -> Sop.Node.t
-    val factory : Sop.Edit_graph.factory
-    val of_node : Sop.Node.t -> (Rays.Camera.t * bool) option
+    val kind : Kind_graph.Kind.t
+    val of_node : Kind_graph.node -> (Rays.Camera.t * bool) option
     val lens_values : Rays.Camera.lens -> (string * Param.value) list
     val to_values :
       eye:Rays_math.Vec3.t ->
@@ -84,16 +62,7 @@ module Root :
     }
     val parameters_default : parameters
     val parameters_schema : parameters Param.schema
-    val parameters_factory :
-      (label:string -> inputs:Sop.Node.t list -> parameters -> Sop.Node.t) ->
-      Sop.Edit_graph.factory
-    val parameters_build :
-      ?schema:(parameters -> Sop.Node.t -> parameters Param.schema) ->
-      (label:string -> parameters -> Sop.Node.t) ->
-      label:string -> inputs:Sop.Node.t list -> parameters -> Sop.Node.t
-    val build :
-      label:string -> inputs:Sop.Node.t list -> parameters -> Sop.Node.t
-    val factory : Sop.Edit_graph.factory
+    val kind : Kind_graph.Kind.t
     val default : parameters
     type render = { width : int; height : int; max_spp : int; }
     val render : parameters -> render
@@ -123,32 +92,23 @@ module Light :
     }
     val parameters_default : parameters
     val parameters_schema : parameters Param.schema
-    val parameters_factory :
-      (label:string ->
-       inputs:Sop.Node.t option list -> parameters -> Sop.Node.t) ->
-      Sop.Edit_graph.factory
-    val parameters_build :
-      ?schema:(parameters -> Sop.Node.t -> parameters Param.schema) ->
-      (label:string -> parameters -> Sop.Node.t option -> Sop.Node.t) ->
-      label:string ->
-      inputs:Sop.Node.t option list -> parameters -> Sop.Node.t
-    val build :
-      label:string ->
-      inputs:Sop.Node.t option list -> parameters -> Sop.Node.t
-    val factory : Sop.Edit_graph.factory
+    val kind : Kind_graph.Kind.t
   end
-val read : 'a Param.schema -> 'a -> Sop.Node.t -> 'a option
-val geometry : Sop.Node.t -> Geometry.parameters option
-val light : Sop.Node.t -> Light.parameters option
-val parent : Sop.Edit_graph.t -> int -> int option
-val parent_world : Sop.Edit_graph.t -> int -> Rays_math.Mat4.t
-val world : Sop.Edit_graph.t -> int -> Rays_math.Mat4.t
-val visible : Sop.Node.t -> bool
-val flag : string -> Sop.Node.t -> bool
-val has_flag : string -> Sop.Node.t -> bool
-val ids : string -> Sop.Edit_graph.t -> int list
-val lights : ?render:bool -> Sop.Edit_graph.t -> Rays.Light.t list
+val read : 'a Param.schema -> 'a -> Kind_graph.node -> 'a option
+val geometry : Kind_graph.node -> Geometry.parameters option
+val light : Kind_graph.node -> Light.parameters option
+val parent : Kind_graph.t -> int -> int option
+val within : Kind_graph.t -> int -> int -> bool
+(** [within scene id above]: [above] is [id] or below it, so [id] cannot be parented under it. *)
+val parent_world : Kind_graph.t -> int -> Rays_math.Mat4.t
+val world : Kind_graph.t -> int -> Rays_math.Mat4.t
+val visible : Kind_graph.node -> bool
+val flag : string -> Kind_graph.node -> bool
+val has_flag : string -> Kind_graph.node -> bool
+val ids : string -> Kind_graph.t -> int list
+val lights : ?render:bool -> Kind_graph.t -> Rays.Light.t list
 val light_values : Rays.Light.t -> (string * Param.value) list
-val catalog : Sop.Edit_graph.factory list
-val reparent : Sop.Edit_graph.t -> int list -> int option -> Sop.Edit_graph.t
-val outdent : Sop.Edit_graph.t -> int list -> Sop.Edit_graph.t
+val kinds : Kind_graph.Kind.t list
+(** The object kinds a scene adds: geometry, light, camera. *)
+val reparent : Kind_graph.t -> int list -> int option -> Kind_graph.t
+val outdent : Kind_graph.t -> int list -> Kind_graph.t

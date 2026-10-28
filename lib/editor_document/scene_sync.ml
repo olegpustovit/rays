@@ -8,10 +8,9 @@
    object per [sop] graph, a World given by [?world]) have no text: those are edited as derived
    objects, and [reconcile] writes their kind as a graph on the first explicit edit, once.  It
    also writes the fields of a camera that follows the viewport. *)
-open Sop
 module S = Flow.Syntax
 module F = Flow_graph.Flow_edit
-module Edit = Edit_graph
+module G = Kind_graph
 
 exception Stop of string
 let stop fmt = Printf.ksprintf (fun message -> raise (Stop message)) fmt
@@ -37,11 +36,11 @@ let current fields name = List.find_map (fun (f : Param.field_view) ->
   if f.name = name then Some f.current else None) fields
 
 (* the keywords a node's fields say, with [keep] deciding which fields are written *)
-let ports node = match Flow_sop.Port.parameters ~infer:true (Node.parameter_fields node) with
+let ports node = match Flow_sop.Port.parameters ~infer:true (G.fields node) with
   | Ok ports -> ports | Error _ -> []
 
 let differing ~before node =
-  let before = Node.parameter_fields before in
+  let before = G.fields before in
   List.filter_map (fun (p : Flow_sop.Port.parameter) ->
     if List.exists (fun (f : Param.field_view) -> current before f.name <> Some f.current) p.fields
     then Some (p.path, Some (value_syntax p.fields)) else None) (ports node)
@@ -197,11 +196,11 @@ let delete_loops st (before : Document.t) gone =
 
 (* ---- the scene ---- *)
 
-let label graph id = Option.map Node.label (Edit.find graph ~node_id:id)
+let label graph id = Option.map (fun (node : G.node) -> node.label) (G.find graph id)
 
-let object_edits ~before ~after id nb na =
+let object_edits ~before ~after id (nb : G.node) (na : G.node) =
   let parent graph = Option.bind (Objects.parent graph id) (label graph) in
-  let name = if Node.label nb <> Node.label na then [ "name", Some (mk (S.Str (Node.label na))) ] else [] in
+  let name = if nb.label <> na.label then [ "name", Some (mk (S.Str na.label)) ] else [] in
   let under = if parent before = parent after then []
     else [ "parent", Option.map (fun p -> mk (S.Str p)) (parent after) ] in
   name @ under @ differing ~before:nb na
@@ -213,8 +212,7 @@ let homed (doc : Document.t) id = match List.assoc_opt id doc.homes.objects with
 
 let unique graph id =
   match Option.bind (label graph id) (fun l ->
-      List.find_opt (fun (i : Edit.node_info) -> i.id <> id && i.label = l && i.operation <> "world")
-        (Edit.inspect graph)) with
+      List.find_opt (fun (i : G.node) -> i.id <> id && i.label = l && i.kind <> "world") graph) with
   | Some _ -> stop "Two objects are named %S. Rename one of them first." (Option.value ~default:"" (label graph id))
   | None -> ()
 
@@ -291,7 +289,7 @@ let object_changes st (before : Document.t) a =
   let b = Document.scene_graph before in
   let refuse_preview = refuse_preview before in
   List.iter (fun (id, home) -> if homed before id then
-    match Edit.find b ~node_id:id, Edit.find a ~node_id:id with
+    match G.find b id, G.find a id with
     | Some nb, Some na ->
         let edits = object_edits ~before:b ~after:a id nb na in
         if edits <> [] then refuse_preview id;
@@ -306,20 +304,7 @@ let object_changes st (before : Document.t) a =
 let world_id (doc : Document.t) = List.nth_opt (Objects.ids "world" (Document.scene_graph doc)) 0
 
 (* layer ids from the top down *)
-let order (network : Document.network) =
-  let graph = network.graph.geometry in
-  let infos = Edit.inspect graph in
-  let consumed = List.concat_map (fun (i : Edit.node_info) ->
-    List.filter_map Fun.id (Array.to_list i.inputs)) infos in
-  let rec down id acc =
-    let acc = id :: acc in
-    match Edit.inputs graph ~node_id:id with
-    | Some inputs when Array.length inputs > 0 && inputs.(0) <> None
-        && not (List.mem (Option.get inputs.(0)) acc) -> down (Option.get inputs.(0)) acc
-    | _ -> acc in
-  match List.filter (fun (i : Edit.node_info) -> not (List.mem i.id consumed)) infos with
-  | top :: _ -> List.rev (down top.id [])
-  | [] -> []
+let order layers = List.map (fun (node : G.node) -> node.id) (G.stack layers)
 
 (* ---- objects the text does not have ---- *)
 
@@ -344,26 +329,26 @@ let graph_form name context body =
 let let_star bindings result =
   mk (S.List [ sym "let*"; mk (S.Vec (List.concat_map (fun (n, e) -> [ sym n; e ]) bindings)); result ])
 
-let default_label node = String.lowercase_ascii (Node.operation node)
+let default_label (node : G.node) = String.lowercase_ascii node.kind
 
-let object_binding (doc : Document.t) used id (info : Edit.node_info) =
+let object_binding (doc : Document.t) used id (info : G.node) =
   let graph = Document.scene_graph doc in
   let parent = Objects.parent graph id in
-  let slots = if info.operation = "geometry" then
+  let slots = if info.kind = "geometry" then
       (match Document.object_graph doc id with
        | Some g -> [ mk (S.List [ sym "ref"; sym g ]) ]
        | None -> stop "%s has no graph of its own to place." info.label)
     else [] in
   let parent = match Option.bind parent (label graph) with
     | Some p -> [ mk (S.Kw "parent"); mk (S.Str p) ] | None -> [] in
-  let active = if doc.active_camera = Some id && info.operation = "camera"
+  let active = if doc.active_camera = Some id && info.kind = "camera"
     then [ mk (S.Kw "active"); sym "true" ] else [] in
-  let default_label = match info.operation, slots with
+  let default_label = match info.kind, slots with
     | "geometry", [ { S.node = S.List [ _; { S.node = S.Sym g; _ } ]; _ } ] -> g
-    | _ -> default_label info.node in
+    | _ -> default_label info in
   F.fresh_among used info.label,
-  call_of ~kind:("scene/" ^ info.operation) ~label:info.label ~default_label ~slots
-    ~extra:(parent @ active) info.node
+  call_of ~kind:("scene/" ^ info.kind) ~label:info.label ~default_label ~slots
+    ~extra:(parent @ active) info
 
 (* the text of every object no binding holds, into the scene graph (made when there is none,
    even with nothing to write: the graph is what says "no camera, no lights").  The scene graph
@@ -372,13 +357,13 @@ let adopt_objects st (doc : Document.t) =
   if not st.adopted then begin
   st.adopted <- true;
   let graph = Document.scene_graph doc in
-  let unhomed = List.filter (fun (i : Edit.node_info) ->
-    i.operation <> "world" && not (homed doc i.id)) (Edit.inspect graph) in
+  let unhomed = List.filter (fun (i : G.node) ->
+    i.kind <> "world" && not (homed doc i.id)) graph in
   if unhomed = [] && Contexts.graph_of st.workspace Flow.Context.scene = None then
     apply st (F.Set_graph { name = "scene"; form = graph_form "scene" "scene" (mk (S.List [ sym "scene/merge" ])) });
   if unhomed <> [] then begin
     let used = ref (owned st.workspace) in
-    let bindings = List.map (fun (i : Edit.node_info) -> object_binding doc used i.id i) unhomed in
+    let bindings = List.map (fun (i : G.node) -> object_binding doc used i.id i) unhomed in
     match Contexts.graph_of st.workspace Flow.Context.scene with
     | None ->
         let names = List.map (fun (n, _) -> sym n) bindings in
@@ -386,7 +371,7 @@ let adopt_objects st (doc : Document.t) =
         apply st (F.Set_graph { name = "scene"; form = graph_form "scene" "scene" body })
     | Some g ->
         (* into a graph the text has: each name is free of what the graph binds by then *)
-        List.iter2 (fun (_, expr) (i : Edit.node_info) ->
+        List.iter2 (fun (_, expr) (i : G.node) ->
           apply st (F.Add_node { scope = [ g.name ]; expr;
                                  name = F.fresh_name st.workspace.source ~root:g.name i.label })) bindings unhomed
   end
@@ -399,13 +384,13 @@ let none_world = mk (S.List [ sym "world/none" ])
 let write_stack st g bottom_first name =
   let used = ref (owned st.workspace) in
   let bindings = List.map (fun id ->
-    let info = List.find (fun (i : Edit.node_info) -> i.id = id) (Edit.inspect g) in
+    let info = List.find (fun (i : G.node) -> i.id = id) g in
     id, F.fresh_among used info.label, info) bottom_first in
-  let layers = List.mapi (fun i (_, name, (info : Edit.node_info)) ->
+  let layers = List.mapi (fun i (_, name, (info : G.node)) ->
     let below = if i = 0 then [] else [ sym (let _, n, _ = List.nth bindings (i - 1) in n) ] in
-    name, call_of ~kind:("world/" ^ info.operation) ~label:info.label
-      ~default_label:(Edit.factory_label (List.assoc ("world/" ^ info.operation) Kinds.world_kinds))
-      ~slots:below info.node) bindings in
+    name, call_of ~kind:("world/" ^ info.kind) ~label:info.label
+      ~default_label:(List.assoc ("world/" ^ info.kind) Kinds.world_kinds).label
+      ~slots:below info) bindings in
   let body = match List.rev layers with
     | [] -> none_world
     | (top, _) :: _ -> let_star layers (sym top) in
@@ -418,7 +403,7 @@ let write_stack st g bottom_first name =
 let stack_layers st (before : Document.t) wid ~graph ~removed ~stack =
   let member = List.mem_assoc wid before.homes.objects in
   let known = List.map fst before.homes.layers in
-  let was = List.filter (fun id -> List.mem id stack) (order (Document.Int_map.find wid before.networks)) in
+  let was = List.filter (fun id -> List.mem id stack) (order (Document.Int_map.find wid before.layers)) in
   let reordered = was <> stack in
   (* a World member whose top layer is its graph's result written in place has no name to
      delete or rewire by *)
@@ -494,14 +479,14 @@ let settings st (before : Document.t) now =
 
 let unhomed_changes (before : Document.t) (after : Document.t) =
   let b = Document.scene_graph before and a = Document.scene_graph after in
-  List.exists (fun (i : Edit.node_info) ->
-    i.operation <> "world" && not (homed before i.id)
-    && (match Edit.find b ~node_id:i.id with
-        | Some nb -> object_edits ~before:b ~after:a i.id nb i.node <> []
+  List.exists (fun (i : G.node) ->
+    i.kind <> "world" && not (homed before i.id)
+    && (match G.find b i.id with
+        | Some nb -> object_edits ~before:b ~after:a i.id nb i <> []
                      || Objects.parent b i.id <> Objects.parent a i.id
-        | None -> false)) (Edit.inspect a)
-  || List.exists (fun (i : Edit.node_info) ->
-       i.operation <> "world" && not (homed before i.id) && Edit.find a ~node_id:i.id = None) (Edit.inspect b)
+        | None -> false)) a
+  || List.exists (fun (i : G.node) ->
+       i.kind <> "world" && not (homed before i.id) && G.find a i.id = None) b
 
 (* ---- one object's fields, text first ---- *)
 
@@ -536,17 +521,14 @@ type edit =
   | Rename of int * string
   | Delete of int list
   | Restack of int list  (* the World's layers, bottom first *)
-  | Layers of Document.network * (string * Param.value) list  (* a preset: the layers and the World's fields *)
+  | Layers of G.t * (string * Param.value) list  (* a preset: the layers and the World's fields *)
   | Camera of int option  (* the render camera *)
   | Root of Objects.Root.parameters  (* the render settings *)
   | Settings of Settings.t
   | Reparent of int list * int option  (* objects under a parent (none: the root), their places kept *)
   | Outdent of int list  (* each out to its parent's parent *)
 
-let graph_at (doc : Document.t) = function
-  | Document.Scene -> Some (Document.scene_graph doc)
-  | Inside id -> Option.map (fun (n : Document.network) -> n.graph.geometry)
-      (Document.Int_map.find_opt id doc.networks)
+let graph_at = Document.kinds
 
 (* every object the edit names has text of its own; else the caller edits the derived document and
    {!reconcile} adopts it *)
@@ -561,29 +543,28 @@ let writes (doc : Document.t) level = function
     | Inside wid -> world_id doc = Some wid && doc.homes.world <> None
     | Scene -> false)
 
-let node_at doc level id = match Option.bind (graph_at doc level) (fun g -> Edit.find g ~node_id:id) with
+let node_at doc level id = match Option.bind (graph_at doc level) (fun g -> G.find g id) with
   | Some node -> node | None -> stop "That object is gone."
 
 let write_edit st (doc : Document.t) level = function
   | Fields edits ->
       List.map (fun (node, values) ->
         let was = node_at doc level node in
-        match field_home doc level node, Node.apply_parameters was values with
+        match field_home doc level node, G.apply was values with
         | _, Error message -> stop "%s" message
         | None, _ -> stop "That object is not in the text."
         | Some home, Ok (now, _) ->
             if level = Document.Scene then refuse_preview doc node;
             set ~before:(current_syntax was) st home (differing ~before:was now);
             template_note doc home) edits |> first
-  | Rename (id, name) when Node.label (node_at doc level id) = name -> None
+  | Rename (id, name) when (node_at doc level id).label = name -> None
   | Rename (id, name) ->
       let value = Some (mk (S.Str name)) in
       if level = Document.Scene && List.mem_assoc id doc.homes.objects then begin
         (* a name is what [:parent] reads: the children's follow, and one two objects share would
            move the other's children *)
         let graph = Document.scene_graph doc in
-        if List.exists (fun (i : Edit.node_info) -> i.id <> id && i.label = name && i.operation <> "world")
-            (Edit.inspect graph)
+        if List.exists (fun (i : G.node) -> i.id <> id && i.label = name && i.kind <> "world") graph
         then stop "Two objects are named %S. Rename one of them first." name;
         List.iter (fun (o, home) ->
           let key = if o = id then Some "name" else if Objects.parent graph o = Some id then Some "parent" else None in
@@ -607,17 +588,17 @@ let write_edit st (doc : Document.t) level = function
       List.find_map (fun (_, home) -> Option.map (fun loop ->
         Printf.sprintf "Removed a copy from the loop (%s)." (Document.describe (doc.workspace.ws).source loop))
         (Document.loop_of home)) (List.rev gone)
-  | Layers (network, values) ->
+  | Layers (layers, values) ->
       (match level with
        | Inside wid ->
            let was = node_at doc Document.Scene wid in
-           let now = match Node.apply_parameters was values with
+           let now = match G.apply was values with
              | Ok (now, _) -> now | Error message -> stop "%s" message in
            let edits = differing ~before:was now in
            if edits <> [] then refuse_preview doc wid;
            Option.iter (fun home -> set ~before:(current_syntax was) st home edits) (field_home doc Document.Scene wid);
            (match doc.homes.world_graph with
-             | Some name -> write_stack st network.graph.geometry (List.rev (order network)) name
+             | Some name -> write_stack st layers (List.rev (order layers)) name
              | None -> stop "The World's graph is not named; edit the text.")
        | Scene -> ());
       None
@@ -638,17 +619,17 @@ let write_edit st (doc : Document.t) level = function
   | Restack bottom_first ->
       (match level, world_id doc with
        | Inside wid, Some w when w = wid ->
-           stack_layers st doc wid ~graph:(Document.Int_map.find wid doc.networks).graph.geometry ~removed:[]
+           stack_layers st doc wid ~graph:(Document.Int_map.find wid doc.layers) ~removed:[]
              ~stack:(List.rev bottom_first)
        | _ -> ());
       None
   | Delete ids ->
       (match level, world_id doc with
        | Inside wid, Some w when w = wid ->
-           let network = Document.Int_map.find wid doc.networks in
+           let layers = Document.Int_map.find wid doc.layers in
            let removed = List.filter (fun id -> List.mem id ids) (List.map fst doc.homes.layers) in
-           stack_layers st doc wid ~graph:network.graph.geometry ~removed
-             ~stack:(List.filter (fun id -> not (List.mem id ids)) (order network))
+           stack_layers st doc wid ~graph:layers ~removed
+             ~stack:(List.filter (fun id -> not (List.mem id ids)) (order layers))
        | _ -> ());
       None
 
@@ -669,12 +650,8 @@ let write ~factories (doc : Document.t) level edit =
       | Delete ids ->
           (* the lowering finds an object of the text by its home, else by kind and label: the
              deleted ones are not there to be taken for the copies of a loop that stay *)
-          let without (graph : Flow_sop.Network.t) = match Flow_sop.Network.remove_nodes ids graph with
-            | Ok graph -> Result.value ~default:graph
-                (Flow_sop.Network.with_geometry (Edit.remove_nodes ids graph.geometry) graph)
-            | Error _ -> graph in
-          (match Document.network doc level with
-           | Some network -> Document.prune (Document.with_network doc level { network with graph = without network.graph })
+          (match Document.kinds doc level with
+           | Some graph -> Document.prune (Document.with_kinds doc level (G.remove ids graph))
            | None -> doc)
       | Fields _ | Rename _ | Restack _ | Layers _ | Reparent _ | Outdent _ -> doc in
     if st.workspace == doc.workspace.ws then Ok (Some (doc, note))
@@ -689,9 +666,9 @@ let write ~factories (doc : Document.t) level edit =
    effects they have.  [None]: the object has no text (the caller edits the derived object and
    {!reconcile} adopts it). *)
 let set_fields ~factories (doc : Document.t) level ~node values =
-  match field_home doc level node, Option.bind (graph_at doc level) (fun g -> Edit.find g ~node_id:node) with
+  match field_home doc level node, Option.bind (graph_at doc level) (fun g -> G.find g node) with
   | Some home, Some was ->
-      Result.bind (Node.apply_parameters was values) (fun (_, effects) ->
+      Result.bind (G.apply was values) (fun (_, effects) ->
         Result.map (Option.map (fun (doc, _) -> doc, effects, home))
           (write ~factories doc level (Fields [ node, values ])))
   | _ -> Ok None
@@ -701,7 +678,8 @@ let set_fields ~factories (doc : Document.t) level ~node values =
    explicit edit of an object the text lacks writes it (a follow-the-viewport camera move is
    not one, so it stays the host's). *)
 let run ~factories ~adopt (before : Document.t) (after : Document.t) =
-  if before.scene == after.scene && before.networks == after.networks then Ok after
+  if before.scene == after.scene && before.networks == after.networks && before.layers == after.layers
+  then Ok after
   else
     let ( let* ) = Result.bind in
     let* catalog = Result.map_error Diagnostic.to_string
@@ -762,7 +740,7 @@ let add_geometry (doc : Document.t) ~existing =
     | None ->
         let g = F.fresh_among used "shape" in
         [ F.Set_graph { name = g; form = graph_form g "sop" (mk (S.List [ sym "sop/box" ])) } ], g in
-  let labels = List.map (fun (i : Edit.node_info) -> i.label) (Edit.inspect (Document.scene_graph doc)) in
+  let labels = List.map (fun (i : G.node) -> i.label) (Document.scene_graph doc) in
   let name = if not (List.mem graph labels) then []
     else
       let rec free n = let l = Printf.sprintf "%s %d" graph n in if List.mem l labels then free (n + 1) else l in

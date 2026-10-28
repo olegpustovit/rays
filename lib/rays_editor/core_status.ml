@@ -14,8 +14,8 @@ let prompt_name value = match value.prompt with
 
 let level_name value = match value.level with
   | Document.Scene -> "scene"
-  | Inside id -> "scene › " ^ Option.fold ~none:"?" ~some:Node.label
-      (Edit_graph.find (scene value) ~node_id:id)
+  | Inside id -> "scene › " ^ Option.fold ~none:"?" ~some:(fun (node : Kind_graph.node) -> node.label)
+      (Kind_graph.find (scene value) id)
 
 (* The strip while a payload is carried: what it is, then (a target hot) what putting it writes in
    the words of the text, or why the place refuses it. *)

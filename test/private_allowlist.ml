@@ -2,7 +2,6 @@
    The gate rejects a reference not listed here and a listed one that is gone, so
    this list only shrinks. Give the use a public name instead of adding a row. *)
 let entries = [
-  "editor_document", "Node.Private";
   "flow", "Rays_math.Noise.Private";
   "flow_gpu", "Flow_ir.Packed.Private";
   "flow_gpu", "P.Private";

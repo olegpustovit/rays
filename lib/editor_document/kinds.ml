@@ -1,8 +1,7 @@
-(* The scene, world and settings kinds: one Lisp kind per object factory ([scene/light]), per World
+(* The scene, world and settings kinds: one Lisp kind per object schema ([scene/light]), per World
    layer ([world/sky]) and the workspace settings record ([settings/config]), generated from their
    schemas, with the window the settings graph asks of the host. *)
-open Sop
-module Edit = Edit_graph
+module Edit = Sop.Edit_graph
 
 let name_field : Param.field_view = {
   name = "name"; label = "Name"; description = None; folder = []; impact = Param.Cook;
@@ -17,10 +16,9 @@ let active_field = { name_field with name = "active"; label = "Active camera";
 
 (* The World and the root are scene kinds too: [scene/world] is a merge member that references a
    world graph, [scene/root] ends the scene graph. *)
-let scene_kinds = List.map (fun f -> "scene/" ^ Edit.factory_key f, f)
-    (Objects.catalog @ [ Layers.Settings.factory; Objects.Root.factory ])
-let world_kinds = List.map (fun f -> "world/" ^ Edit.factory_key f, f)
-    Layers.catalog
+let scene_kinds = List.map (fun (k : Kind_graph.Kind.t) -> "scene/" ^ k.key, k)
+    (Objects.kinds @ [ Layers.Settings.kind; Objects.Root.kind ])
+let world_kinds = List.map (fun (k : Kind_graph.Kind.t) -> "world/" ^ k.key, k) Layers.kinds
 
 (* Workspace settings: what the host needs to open the window. *)
 type window = { title : string; width : int; height : int; fps : int; seed : int; fast : bool }
@@ -61,14 +59,13 @@ let extra_fields = function
   | _ -> []
 
 let descriptors : Flow_sop.Catalog.descriptor list =
-  List.map (fun (qualified, factory) ->
-    { Flow_sop.Catalog.qualified; key = Edit.factory_key factory;
-      operation = Edit.factory_operation factory; label = Edit.factory_label factory;
-      category = Edit.factory_category factory; slots = kind_slots qualified;
+  List.map (fun (qualified, (kind : Kind_graph.Kind.t)) ->
+    { Flow_sop.Catalog.qualified; key = kind.key; operation = kind.key; label = kind.label;
+      category = kind.category; slots = kind_slots qualified;
       slot_types = (if qualified="scene/geometry" then ["geometry";"image"] else []);
       keyword_inputs = [];
       fields = name_field :: extra_fields qualified @
-        List.concat (Result.get_ok (Param.group_vec3 ~infer:true (Edit.factory_fields factory))) })
+        List.concat (Result.get_ok (Param.group_vec3 ~infer:true (Kind_graph.Kind.fields kind))) })
     (scene_kinds @ world_kinds)
   @ [ { Flow_sop.Catalog.qualified = "settings/config"; key = "config"; operation = "config";
         label = "Settings"; category = [ "Workspace" ]; slots = []; slot_types = [];

@@ -42,7 +42,7 @@ List.iter (fun ((leaf : Pxui_shell.Layout.leaf), _) -> match leaf.panel, value.v
   | View key, Some (_, mode) when leaf.floating && (let _, _, w, h = leaf.body in w > 120 && h > 60) ->
       let bx, by, _, _ = leaf.body in
       let camera = Option.bind value.doc.Document.active_camera (fun id ->
-        Option.map Node.label (Edit_graph.find (scene value) ~node_id:id)) in
+        Option.map (fun (node : Kind_graph.node) -> node.label) (Kind_graph.find (scene value) id)) in
       let text = String.concat " \xc2\xb7 " ([ List.nth [ "Solid"; "Wire"; "Traced" ] (max 0 (min 2 mode)) ]
         @ Option.to_list camera) in
       let w = Pxui_shell.Kit.cap_width ui text +. 8. in
@@ -60,7 +60,7 @@ List.iter (fun ((leaf : Pxui_shell.Layout.leaf), _) -> match leaf.panel with
       let box = match value.selected_box with Some (k, rect, name) when k = key -> Some (rect, name) | _ -> None in
       let root : Objects.Root.parameters = Option.fold ~none:value.doc.Document.root
           ~some:(fun (r : Document.view_root) -> r.params) (List.assoc_opt key value.doc.Document.view_roots) in
-      let camera = Option.bind value.doc.Document.active_camera (fun id -> Edit_graph.find (scene value) ~node_id:id) in
+      let camera = Option.bind value.doc.Document.active_camera (Kind_graph.find (scene value)) in
       (* the triangles the scene draws: a polygon of n corners fans into n - 2 (exact for polygons, a
          count of corners and faces, not a walk of every face, for a frame's cost) *)
       let tris = List.fold_left (fun n (piece : _ Cook.piece) ->
@@ -137,8 +137,8 @@ List.iter (fun ((leaf : Pxui_shell.Layout.leaf), _) -> match leaf.panel with
         if not narrow then Option.iter (fun node ->
           let field name = List.find_map (fun (f : Param.field_view) ->
             match f.name = name, f.current with
-            | true, Param.Float_value v -> Some v | _ -> None) (Node.parameter_fields node) in
-          let rows = [ "Camera", Node.label node ]
+            | true, Param.Float_value v -> Some v | _ -> None) (Kind_graph.fields node) in
+          let rows = [ "Camera", node.Kind_graph.label ]
             @ (match field "fov" with
                | Some fov when fov > 0. && fov < 180. ->
                    (* the focal length that gives this vertical angle on a 24 mm gate *)

@@ -77,7 +77,7 @@ let run_lowering () =
   let keys6 = List.filter_map (fun (_, p) -> match p with Panels.View k -> Some k | _ -> None)
       (leaves (shell_of more).tree) in
   check (List.take 4 keys6 = keys && List.length keys6 = 6) "panel keys follow the iteration index";
-  check (List.length (Editor_document.Document.scene_graph more |> Sop.Edit_graph.inspect) > 4) "more objects for more viewports";
+  check (List.length (Editor_document.Document.scene_graph more) > 4) "more objects for more viewports";
   (* the default shell of a workspace without an editor graph, and a named graph panel *)
   let plain = build_ok (of_text (case "tree")) in
   check (plain.shell = None) "no editor graph, no shell";
@@ -1021,9 +1021,8 @@ let drag_slider e count row =
   step ~mouse:(at 20) [ Input.Pointer_released (Input.LeftButton, at 20) ];
   step []
 
-let objects e = Edit_graph.inspect (E3.scene_document e)
-let field_of (i : Edit_graph.node_info) name = List.find_map (fun (f : Param.field_view) ->
-  if f.name = name then Some f.current else None) (Node.parameter_fields i.node)
+let objects e = E3.scene_document e
+let field_of i name = Editor_document.Kind_graph.field i name
 
 let run_loop_copies () =
   (* copies that differ only by the graph they place: every field of the template is a literal *)
@@ -1061,9 +1060,9 @@ let run_loop_copies () =
   select_row e count 2;
   let step events = incr count; e := E3.update !e (frame (450., 300.) events !count) in
   step [ Input.Key_pressed Input.F2 ]; step [ Input.Text_input "spot" ]; step [ Input.Key_pressed Input.Enter ]; step [];
-  check (List.for_all (fun (i : Edit_graph.node_info) -> i.label = "gspot") (objects !e)
+  check (List.for_all (fun (i : Editor_document.Kind_graph.node) -> i.label = "gspot") (objects !e)
          && count_of (source !e) ":name \"gspot\"" = 1 && E3.undo_label !e = Some "Rename")
-    ("a rename of one copy did not rename the template: " ^ source !e ^ String.concat "," (List.map (fun (i : Edit_graph.node_info) -> i.label) (objects !e)));
+    ("a rename of one copy did not rename the template: " ^ source !e ^ String.concat "," (List.map (fun (i : Editor_document.Kind_graph.node) -> i.label) (objects !e)));
   E3.close !e;
   (* a copy computed from its index has no value of its own *)
   let text = {|(workspace lamps
@@ -1083,7 +1082,7 @@ let run_loop_copies () =
   (* deleting one copy skips its iteration: the others stay where they are *)
   select_row e count 2;
   e := E3.update !e (frame (450., 300.) [ Input.Key_pressed Input.Delete ] (incr count; !count));
-  let lamps () = List.filter (fun (i : Edit_graph.node_info) -> i.operation = "light") (objects !e) in
+  let lamps () = List.filter (fun (i : Editor_document.Kind_graph.node) -> i.kind = "light") (objects !e) in
   check (List.length (lamps ()) = 2 && has (source !e) ":skip [1]" && E3.undo_label !e = Some "Delete")
     ("deleting a copy did not skip it in the loop: " ^ source !e);
   check (List.map (fun i -> field_of i "translate_x") (lamps ())
@@ -1137,7 +1136,7 @@ let run_loop_expression () =
   step ~mouse:label [ Input.Text_input "=(* i 3)" ];
   step ~mouse:label [ Input.Key_pressed Input.Enter ];
   step ~mouse:label [];
-  let lamps () = List.filter (fun (i : Edit_graph.node_info) -> i.operation = "light") (objects !e) in
+  let lamps () = List.filter (fun (i : Editor_document.Kind_graph.node) -> i.kind = "light") (objects !e) in
   check (has (source !e) ":translate [(* i 3) 2 0]") ("the expression did not reach the template: " ^ source !e);
   check (List.map (fun i -> field_of i "translate_x") (lamps ())
          = List.map (fun v -> Some (Param.Float_value v)) [ 0.; 3.; 6. ])
@@ -2094,7 +2093,7 @@ let run_carry_reaches_no_history () =
            all (scene/merge (scene/geometry (ref g)) cam side)]
       (scene/root all :camera cam))))|x} in
   let e = E3.update (E3.update e (frame (450., 300.) [] 1)) (frame (450., 300.) [] 2) in
-  let side = (List.find (fun (i : Edit_graph.node_info) -> i.label = "side") (Edit_graph.inspect (E3.scene_document e))).id in
+  let side = (List.find (fun (i : Editor_document.Kind_graph.node) -> i.label = "side") (E3.scene_document e)).id in
   let preview = E.Set_arg { node = [ "scene"; "side" ]; key = E.Kw "fov"; sub = []; value = S.make (S.Num "40.0") } in
   let before = source e in
   let stepped = Rays_editor.Reduce.step e ~select:[ side ] ~preview

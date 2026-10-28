@@ -44,6 +44,8 @@ module Editor = struct
   let probe = Environment_model.probe
   let redo_label = Environment_model.redo_label
   let scene_document = Environment_model.scene_document
+  let network = Environment_model.network
+  type picked = Core_model.picked = { id : int; label : string; kind : string; fields : Param.field_view list }
   let selected_node = Environment_model.selected_node
   let set_probe = Environment_model.set_probe
   let set_settings = Environment_model.set_settings
@@ -183,9 +185,9 @@ module Workspace = struct
           Ok ((g.name, graph) :: rest)) lowered.graphs (Ok [])
 
   let document_camera (document : Document.t) base =
-    let scene = document.scene.graph.Flow_sop.Network.geometry in
+    let scene = document.scene in
     match Option.bind (List.nth_opt (Objects.ids "camera" scene) 0) (fun node_id ->
-        Option.bind (Sop.Edit_graph.find scene ~node_id) Objects.Camera.of_node) with
+        Option.bind (Kind_graph.find scene node_id) Objects.Camera.of_node) with
     | Some (view, _) -> Rays.Easy_camera.of_view ~eye:(Rays.Camera.position view)
         ~target:(Rays.Camera.target view) base
     | None -> base
