@@ -110,7 +110,13 @@ inventory below with explicit operands and result layout. An intrinsic is a
 closed effect/resource operation with target legality. Captures are constants,
 locals, state reads or uniforms. Native compilation to closures is permitted
 as an execution optimization after the core has been built; those closures
-never become the representation consumed by another target.
+never become the representation consumed by another target. A program but for
+its regions is plain data: a capture inside a host source lowers to
+`Host_source` arguments, so the statements marshal without closures. A region
+keeps the host residual its sources are evaluated from each frame. A kernel that
+reads a state value takes it as an argument after the state's own statements; a
+region compiled directly from a residual resolves it as a uniform with the
+caller's state.
 
 Every eligible pure numeric map is lowered once to a validated `Core.Region`;
 the frame program invokes it with the current inputs. `Packed.t` is an alias of

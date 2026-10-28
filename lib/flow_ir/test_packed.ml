@@ -611,8 +611,7 @@ let () =
         d
     | _ -> failwith ("expected " ^ code ^ ": " ^ body) in
   List.iter (fun (body, code) -> ignore (refused body code))
-    ["(let* [s (state [a 0.0] (+ a (frame/dt)))] (map (fn [x] (+ x s)) (array/range 3)))", "E_PACKED_STATE";
-     "(for [x (array/range 3) y (array/float (+ x 1))] (+ y t))", "E_PACKED_FORM";
+    ["(for [x (array/range 3) y (array/float (+ x 1))] (+ y t))", "E_PACKED_FORM";
      "(let* [bad (list 1 2)] (map (fn [x] (+ (+ x t) (first bad))) (array/range 3)))", "E_PACKED_CAPTURE";
      "(map (fn [x] (+ t (first (list x 1)))) (array/range 3))", "E_PACKED_FORM";
      "(map sin (array/float 3 t))", "E_PACKED_FUNCTION";
@@ -623,13 +622,17 @@ let () =
   assert (compile residual term = None);
   (match I.Packed.compile_result ~trace:Region_snapshot.record residual term with
    | Error [d] -> assert (d.code = "E_PACKED_CONSTANT") | _ -> assert false);
-  let sins n name = List.init n (fun _ -> "(sin ") |> String.concat ""
-    |> fun prefix -> prefix ^ name ^ String.make n ')' in
-  let kernel n = "(map (fn [x] (+ t " ^ sins n "x" ^ ")) (array/range 3))" in
-  let residual, term = prepare (kernel 61) in
-  let packed = Option.get (compile residual term) in
+  (* a chain of n sines as bindings, not nested forms: the reader stops at 256 levels *)
+  let chain n prefix input result = Printf.sprintf "(let* [%s0 (sin %s) " prefix input ^ String.concat " "
+    (List.init (n - 1) (fun i -> Printf.sprintf "%s%d (sin %s%d)" prefix (i + 1) prefix i))
+    ^ "] " ^ result (Printf.sprintf "%s%d" prefix (n - 1)) ^ ")" in
+  let kernel n = "(map (fn [x] " ^ chain n "a" "x" (fun last -> "(+ t " ^ last ^ ")") ^ ") (array/range 3))" in
+  let most = Flow.Packed_ops.register_limit - 3 in
+  let residual, term = prepare (kernel most) in
+  (* untraced: the snapshot keeps small programs *)
+  let packed = Option.get (I.Packed.compile residual term) in
   assert (Array.length (I.Packed.Host.view packed).code = Flow.Packed_ops.register_limit);
-  ignore (refused (kernel 62) "E_PACKED_LIMIT");
+  ignore (refused (kernel (most + 1)) "E_PACKED_LIMIT");
   let constant = "(map (fn [x] (+ (+ x t) (pow 1e200 2.0))) (array/range 3))" in
   (* Ordinary static evaluation also rejects this constant. Compile its
      checked term in the compatible empty scope before materialization. *)
@@ -653,20 +656,21 @@ let () =
         let packed = Option.get (compile residual (E.Residual.residual_view residual).term) in
         parity value packed
     | _ -> assert false) ["[t 1]"; "[t 1 2]"; "[t 1 2 3]"];
-  let value = recorded ("(map (fn [y] (- " ^ sins 40 "y" ^ " t)) (map (fn [x] (+ t "
-    ^ sins 40 "x" ^ ")) (array/range 2051)))") in
+  let half = Flow.Packed_ops.register_limit / 2 in
+  let value = recorded ("(map (fn [y] " ^ chain half "b" "y" (fun last -> "(- " ^ last ^ " t)")
+    ^ ") (map (fn [x] " ^ chain half "a" "x" (fun last -> "(+ t " ^ last ^ ")") ^ ") (array/range 3)))") in
   (match value with
    | E.Residual residual ->
        let term = (E.Residual.residual_view residual).term in
        let child = match term.node with Flow.Workspace.Hof (`Map, [_; child]) -> child | _ -> assert false in
-       let child = Option.get (compile ~fusion:false residual child) in
-       let packed = Option.get (compile residual term) in
+       let child = Option.get (I.Packed.compile ~fusion:false residual child) in
+       let packed = Option.get (I.Packed.compile residual term) in
        assert (Array.length (I.Packed.Host.view packed).code
          + Array.length (I.Packed.Host.view child).code > Flow.Packed_ops.register_limit);
        assert (List.length packed.I.Core.Region.stages = 1);
        parity value packed
    | _ -> assert false);
-  print_endline "Packed diagnostics: refusal reasons/spans, 64-register boundary, captures and unfused fallback passed"
+  print_endline "Packed diagnostics: refusal reasons/spans, register-limit boundary, captures and unfused fallback passed"
 
 let () = Region_snapshot.finish "test_packed"
 

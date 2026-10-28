@@ -13,6 +13,7 @@ let dump () =
     let evaluation = ok (E.static (checked body)) in
     (match Flow_ir.Core_draw.lower evaluation.plan (List.assoc "g" evaluation.results) with
      | Ok (program, root) ->
+         Test_program.plain_roundtrip program;
          Format.fprintf fmt "%a" Flow_ir.Core.pp program;
          Format.fprintf fmt "root %b\n" (Option.is_some root)
      | Error name -> Format.fprintf fmt "refused %s\n" name)) pictures;

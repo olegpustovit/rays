@@ -9,6 +9,11 @@ let failure (d : Diagnostic.t) =
   if d.span=None && d.position=None && d.cause=None && d.hints=[] && d.trace=[] then
     C.Fail (d.code,d.message)
   else C.Fail_diagnostic d
+let rec closure_free : E.value -> bool = function
+  | V.Fn _ | Residual _ -> false
+  | List values -> Array.for_all closure_free values
+  | Record fields | Struct (_,_,fields) | Source (_,_,fields) -> List.for_all (fun (_,v) -> closure_free v) fields
+  | _ -> true
 let geometry_collection ty = ty=Flow.Ty.List Flow.Ty.geometry
 let state_step_candidate parent (candidate : W.term) =
   match (E.Residual.residual_view parent).term.node with
@@ -313,8 +318,13 @@ end) = struct
     | Selected (items,index) -> ensure statements cache source
         (select statements cache source (type_of (Selected (items,index))) items index (fun _ _ v -> v))
     | Known (V.Residual r) -> ensure statements cache source (residual statements cache r)
-    | Known ((V.Source _ | Struct (_, Flow.Ty.Array _, _)) as value) ->
+    | Known ((V.Source _ | Struct (_, Flow.Ty.Array _, _)) as value) when closure_free value ->
         (match emit statements source (V.ty_of value) (Source value) with
+         | Computed (n,_) -> n | _ -> assert false)
+    | Known ((V.Source (name,ty,fields) | Struct (name,(Flow.Ty.Array _ as ty),fields))) ->
+        (* a capture inside a source is lowered here, so the program holds plain data only *)
+        let args=List.map (fun (field,v) -> field,ensure statements cache source (Known v)) fields in
+        (match emit statements source ty (Host_source {name;ty;args}) with
          | Computed (n,_) -> n | _ -> assert false)
     | Known (V.Deferred(ty,id)) when Flow.Ty.is_cooked ty ->
         let key=Cooked_key(ty,id) in
@@ -504,13 +514,17 @@ end) = struct
     (* A State step's maps are deferred past the static pass. Compile those nested kernels
        under their state residual; other nested candidates keep the existing strict/draw gate. *)
     let state_parent = Option.fold ~none:false ~some:(fun parent -> state_step_candidate parent x) !current in
-    let packed=if not candidate || not (strict || draw <> None || state_parent) then None else Option.bind !current (fun parent ->
+    (* a kernel reading a state value takes it as an argument, lowered once before the region *)
+    let reads_state () = candidate && List.exists (fun name -> match Names.find_opt name env with
+      | Some (Known (V.Residual r)) -> E.state_dependent (V.Residual r) | _ -> false) (E.Residual.free_names x) in
+    let packed=if not candidate || not (strict || draw <> None || state_parent || reads_state ()) then None else Option.bind !current (fun parent ->
       let names=E.Residual.free_names x in
       let arguments=ref [] in
       let rec capture = function
-        (* in a drawing a captured residual is lowered first and passed as an argument: the map then
-           reads no state itself, even when the value it was handed did *)
-        | Known (V.Residual r) when draw <> None -> capture (residual statements cache r)
+        (* in a drawing, and for any state-dependent capture, a captured residual is lowered first and
+           passed as an argument: the map then reads no state itself, even when the value it was handed did *)
+        | Known (V.Residual r) when draw <> None || E.state_dependent (V.Residual r) ->
+            capture (residual statements cache r)
         (* a record local is passed field by field: Packed takes scalars, not a record argument *)
         | Computed (id, Flow.Ty.Record fields) when draw <> None ->
             capture (Record_fields (List.map (fun (name, ty) -> name, emit statements source ty (Field (id, name))) fields))
@@ -527,6 +541,7 @@ end) = struct
       try
         let bindings=List.filter_map(fun name -> Option.map(fun v->name,capture v)(Names.find_opt name env)) names in
         let r=E.Residual.with_bindings parent ~term:x bindings in
+        if E.state_dependent (V.Residual r) then None else
         Option.bind (Packed.compile ?trace r x) (fun p->
           let region=p in
           if region_allowed region then Some(r,region,!arguments) else None)
@@ -797,6 +812,8 @@ end) = struct
       | Op {op="array/sum";args;_} -> Some (List.map snd args)
       | _ -> None in
     match sources with
+    (* Core keeps state in its own statements: a region over a state-reading residual stays structured *)
+    | Some _ when E.state_dependent (V.Residual r) -> None
     | Some sources when packed view.term.ty || List.exists (fun (s : W.term) -> packed s.ty) sources ->
         (try Option.bind (Packed.compile ?trace r view.term) (fun packed ->
            let region=packed in if region_allowed region then Some region else None) with

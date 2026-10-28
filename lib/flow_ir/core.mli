@@ -1,7 +1,9 @@
 (** Structured frame programs. Locals and constants are numbered in
-    authored traversal order. Values are immutable after publication. A program is
-    not serializable: [Source] holds a host-owned [Flow.Eval.value], which may contain
-    closures or residuals, so the web exporter refuses programs that carry one. *)
+    authored traversal order. Values are immutable after publication. A program but
+    for its regions is plain data, with no closures or residuals: lowering turns a
+    capture inside a [Source] into [Host_source] arguments, so it marshals and reads
+    back equal. A region keeps the host residual its sources are evaluated from each
+    frame. The web exporter refuses host sources. *)
 type literal =
   | Int of int | Float of float | Bool of bool | Text of string
   | Vector of float array | List of literal array
@@ -33,7 +35,7 @@ type expr =
   | Constant of int | Local of int | Frame of frame_field
   | Call_index of int
   | Source of Flow.Eval.value
-      (** Immutable host-owned source capture, materialized only when this
+      (** Immutable closure-free host source, materialized only when this
           expression executes. Native hosts supply the resolver; the current
           2D web exporter refuses these captures. *)
   | Host_source of { name : string; ty : Flow.Ty.t; args : (string * int) list }
