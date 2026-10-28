@@ -369,8 +369,9 @@ dependency and is built per cook context from its specialized data (`Lower.per_c
 noise seed stays a region constant and seeds equal the specialized node's. `sop/provenance_base`
 is a sentinel the lowering of the body's `sop/concat` replaces by the base it allocates. A
 per-frame argument is passed to the body as it is (a drive inside it, a frame uniform) when its
-field has nothing to canonicalize; a body whose structure follows a per-frame argument, a
-validation that reads one, and a cooked-data argument keep the card a node of its own.
+field has nothing to canonicalize, and so is a cooked-data argument (`(sop/count g :points)`), a
+source the cook resolves once; a body whose structure follows a per-frame argument and a
+validation that reads one keep the card a node of its own.
 
 That node (and every factory node, for menus and inspection) owns one ordinary session cache
 entry and schema-derived parameter identity. Its internal graph uses the existing `Session`

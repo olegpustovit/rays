@@ -267,16 +267,7 @@ let () =
                     true
                 | _ -> false)
           in
-          (* ponytail: cooked data as an argument keeps the card a node: a body would resolve the source
-           per element where it reads it; bind it once per cook to inline those too *)
-          let rec cooked = function
-            | E.Source _ | E.Struct (_, Ty.Array _, _) -> true
-            | E.List values -> Array.exists cooked values
-            | E.Record fields | E.Struct (_, _, fields) ->
-                List.exists (fun (_, v) -> cooked v) fields
-            | _ -> false
-          in
-          if List.exists (fun (_, v) -> cooked v) live || not (List.for_all raw live) then None
+          if not (List.for_all raw live) then None
           else
             let live_names = List.map fst live in
             let override arguments =
