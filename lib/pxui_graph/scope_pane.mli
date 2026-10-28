@@ -162,8 +162,9 @@ val num_field :
 
 val bindings : ('scope, command) Editor_core.Command.t list
 val run_command : t -> command -> t * change list
-val update : t -> Pxui.Ui.t -> Rays.Frame.t -> t * change list
-(** Build the pane inside [Pxui.Ui.frame].  Hidden iterations are never
+val update : ?pressed:Input.key list -> t -> Pxui.Ui.t -> Rays.Frame.t -> t * change list
+(** Build the pane inside [Pxui.Ui.frame].  [pressed] is the keys that went down this frame (the
+    host's edges: the pane never matches key events itself).  Hidden iterations are never
     built: a zone draws its body once, whatever its iteration count. *)
 
 val selected_wire : t -> (path * Flow_graph.Flow_edit.arg_key) option

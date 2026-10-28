@@ -801,12 +801,12 @@ let wire_boxes (t : t) ui ~wire_hits ?(origin = (0., 0.)) name (cx, cy, cw, ch) 
     | _ -> () in
   if w.target <> None && not (tagged t w) then segments 0 w.pts
 
-let update t ui (frame : Frame.t) =
+let update ?(pressed = []) t ui (frame : Frame.t) =
   (* the first view shows the whole graph, at zoom 1 when it fits (Home frames everything) *)
   let t = if t.framed then t else { (frame_all t) with framed = true } in
   let changes = ref [] in
   let emit c = changes := c :: !changes in
-  let t, hint_changes = step_hints t frame in
+  let t, hint_changes = step_hints t ~pressed frame in
   List.iter emit hint_changes;
   let canvas = Ui.box ui ~flags:Ui.(clickable + scroll + clip + blocking)
       ~w:(Ui.Px (float t.width)) ~h:(Ui.Px (float t.height))

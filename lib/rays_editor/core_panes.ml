@@ -349,6 +349,10 @@ let draw_spreadsheet_panes ~ui ~value ~panes ~locals =
     | Some sheet_owner -> put_local key (fun local -> { local with sheet_owner }) locals)
     locals panes
 
+(* the keys down this frame that were not down in the last: the edges panes act on *)
+let pressed_keys value (frame : Frame.t) =
+  List.filter (fun k -> not (List.mem k value.held_keys)) frame.input.keys
+
 let draw_other_graph_panes ~ui ~shortcut_frame ~value ~other_panes ~roots ~stash =
   List.filter_map (fun (key, path, (pane : _ t)) ->
     match List.find_opt (fun ((leaf : Pxui_shell.Layout.leaf), _) -> leaf.path = path) roots with
@@ -361,7 +365,7 @@ let draw_other_graph_panes ~ui ~shortcut_frame ~value ~other_panes ~roots ~stash
               |> Pxui_graph.Scope.with_theme (let theme = Pxui.Ui.theme ui in
                    if leaf.floating then sheet_theme theme else theme)
               |> Pxui_graph.Scope.with_bounds ~x ~y ~width:(max 1 width) ~height:(max 1 height)
-              |> fun view -> fst (Pxui_graph.Scope.update view ui shortcut_frame))
+              |> fun view -> fst (Pxui_graph.Scope.update ~pressed:(pressed_keys value shortcut_frame) view ui shortcut_frame))
           else pane.scope_view in
         Some (key, { (stash pane) with view })
     | _ -> Some (key, stash pane)) other_panes
@@ -432,7 +436,7 @@ let draw_graph_pane ~ui ~frame ~value ~shortcut_frame ~scope_view ~scope_active 
            match graph_host with Some { floating = true; _ } -> sheet_theme theme | _ -> theme)
       |> Pxui_graph.Scope.with_bounds ~x:gx ~y:gy ~width:(max 1 gw) ~height:(max 1 gh)
       |> Pxui_graph.Scope.with_carry ~lit:carry_lit ~hot:carry_hot
-      |> fun view -> Pxui_graph.Scope.update view ui shortcut_frame) in
+      |> fun view -> Pxui_graph.Scope.update ~pressed:(pressed_keys value shortcut_frame) view ui shortcut_frame) in
   let menu = match menu, List.find_map (function
       | Pxui_graph.Scope.Menu_requested (x, y) -> Some (int_of_float x, int_of_float y)
       | _ -> None) scope_frame_changes with
