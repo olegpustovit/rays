@@ -103,7 +103,11 @@ frames of 4 spp), wall the median round. M1; load averages are the shared machin
 | shattered_studio.rays, tiled (e19 binary) | 6-66 | 34514 33932 35156 29337 30371 | 38657 38843 33580 35294 34577 | 33932 vs 35294 (-3.9%) | 34.4 vs 34.8 |
 
 Film: pathtracer.rays at 64 spp, Lisp (HEAD) against pathtrace.metal, RMSE 6.9e-5 (36 of 1,209,600 channels
-differ). The two M1 exact digests (`test_pathtracer_exact_m1`) still match byte for byte: no re-baseline.
+differ). shattered_studio at 8 spp: RMSE 2.75e-3 (2,670 of 7,680,000 channels, about 37 levels each) against
+pathtrace.metal, where two Lisp runs differ by 3.1e-4 (the cooked fracture is not run-to-run identical): above
+the 1e-4 bar, in a few pixels, not yet explained (candidates: geometric normals from scene/trace's instance
+transform instead of transformed vertices, mirrored instances, visible rect lights in the primary-hit pass). The
+two M1 exact digests (`test_pathtracer_exact_m1`) still match byte for byte: no re-baseline.
 `test_lisp` now compares the device film with the CPU walker: byte-identical at 16x12 (dome and World, flat and
 `PT_INSTANCED=1`).
 
