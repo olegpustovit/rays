@@ -272,7 +272,37 @@ fn i64_divmod(a: vec2<u32>, b: vec2<u32>, rem: bool) -> vec2<u32> {
    with [count_in[0] * mul / div] when use is set, and is written to the 40-byte count record
    [count_out] {n, 6n, 1, 0, 0, 0, 6, n, 0, 0}: native's six words, then from byte 24 WebGPU's
    [drawIndirect] of n six-vertex instances, which a mark set reads. *)
-let kernel_fast program = try
+(* A compute stage (Flow_gpu.Raster's): one workgroup of [size] threads ([lid], the entry's element), its
+   buffers [(array uniform, binding, u32 words, stored)], its result discarded. *)
+type compute = { size : int; name : string; buffers : (int * int * bool * bool) list }
+let compute_buffer (c : compute) u =
+  match List.find_opt (fun (v, _, _, _) -> v = u) c.buffers with
+  | Some (_, binding, _, _) -> "buffer" ^ string_of_int binding | None -> fail "A compute stage reads an unbound table."
+(* A compute stage's group scan (Hillis-Steele in workgroup memory between barriers, once a scanned
+   register, in uniform control flow) and store (a statement before its register's 1), as the Metal
+   printer's. *)
+let workgroup_intrinsic ~scans ~workgroup ~(compute : compute)
+    ~(current : Scope.t) ~guards ~body ~indentation ~table ~low ~float_of stage (r : int array) =
+  match stage with
+  | Flow_ir.Core.Region.Group_scan field ->
+      if current.Scope.id <> 0 || guards <> [] then fail "A group scan runs in uniform control flow, outside loops and branches.";
+      let name = Printf.sprintf "scan%d" r.(0) and x = low r.(0) and size = compute.size in
+      if not (Hashtbl.mem scans r.(0)) then begin
+        Hashtbl.add scans r.(0) ();
+        Printf.bprintf workgroup "var<workgroup> %s: array<u32, %d>;\n" name size;
+        Printf.bprintf current.Scope.decls "  var %s_before: u32 = 0u;\n  var %s_total: u32 = 0u;\n" name name;
+        Printf.bprintf body "  { var v: u32 = %s; %s[lid] = v; for (var d = 1u; d < %du; d = d << 1u) { workgroupBarrier(); var w = 0u; if (lid >= d) { w = %s[lid - d]; } workgroupBarrier(); v = v + w; %s[lid] = v; } workgroupBarrier(); %s_before = v - %s; %s_total = %s[%du]; }\n"
+          x name size name name name x name name (size - 1)
+      end;
+      name ^ (if field = 0 then "_before" else "_total")
+  | Store -> let u, ty = table r.(0) in
+      Printf.bprintf body "%s%s[%s] = %s;\n" indentation (compute_buffer compute u) (low r.(1))
+        (if ty = Flow.Ty.Array Flow.Ty.Int then low r.(2) else float_of r.(2));
+      "1u"
+  | _ -> fail "A raster-stage intrinsic runs only in a fragment stage."
+let rec kernel_fast program = fast_kernel program
+and compute ~size ~name ~buffers program = Result.map (fun w -> w.source) (fast_kernel ~compute:{ size; name; buffers } program)
+and fast_kernel ?compute program = try
   (match P.gpu_refusals ~fused:true ~fast:true program with [] -> () | reason :: _ -> raise (Diagnostic.Error reason));
   let layout = Flow_ir.Kernel_layout.plan ~fast:true program in
   let {Flow_ir.Kernel_layout.view; used; finite_checks; uniforms; frames; table_seeds;
@@ -318,6 +348,11 @@ let kernel_fast program = try
     let k = gather_index prepared in
     Printf.sprintf "gather%d[u32(clamp(i32(%s), 0, max(i32(%s) - 1, 0))) * %du + %du]"
       k (if narrow.(index) then "bitcast<i32>(" ^ register index ^ ")" else float_of index) (word gather_lengths.(k)) width component in
+  (* a compute stage reads its bound buffers unclamped, as the Metal raster placement *)
+  let read prepared index width component = match snd (guarded [] view.code.(prepared)) with
+    | P.Array_prepare (u, _) -> Printf.sprintf "%s[%s * %du + %du]" (compute_buffer (Option.get compute) u) (low index) width component
+    | _ -> fail "Gather without its table." in
+  let scans = Hashtbl.create 1 and workgroup = Buffer.create 64 in
   let root = Scope.create 0 in
   let scopes = ref [root] in
   Flow_ir.Kernel_layout.iter layout ~instruction:(fun slot instruction ->
@@ -327,14 +362,22 @@ let kernel_fast program = try
     let constant = match instruction with P.Const _ | Int_const _ -> not finite_checks.(slot) | _ -> false in
     if not constant then enter float_of current guards;
     let body = current.code and indentation = Scope.indent current in
+    let group stage r = workgroup_intrinsic ~scans ~workgroup ~compute:(Option.get compute) ~current ~guards ~body ~indentation
+      ~table:(fun x -> match snd (guarded [] view.code.(x)) with P.Array_prepare (u, ty) -> u, ty | _ -> fail "A store names a bound buffer.")
+      ~low ~float_of stage r in
     let expression = if narrow.(slot) then match instruction with
       | P.Int_const n -> Printf.sprintf "%du" (n land 0xffffffff)
       | Int_binary (op,a,b) -> narrow_integer op (low a) b
       | Int_select (condition,yes,no) -> Printf.sprintf "select(%s, %s, %s != 0.0)" (low no) (low yes) (float_of condition)
       | Loop_result (loop,component,_) -> register (loop+1+component)
+      | Stage (stage,r) when compute <> None -> group stage r
       | _ -> assert false
     else match instruction with
       | P.Const value -> Printf.sprintf "bitcast<f32>(0x%lxu)" (Int32.bits_of_float value)
+      | Int_input _ when compute <> None -> "vec2<u32>(lid, 0u)"
+      | Stage (stage,r) when compute <> None -> "vec2<u32>(" ^ group stage r ^ ", 0u)"
+      | Gather (prepared,index,width,component) when compute <> None -> read prepared index width component
+      | Int_gather (prepared,index) when compute <> None -> "vec2<u32>(" ^ read prepared index 1 0 ^ ", 0u)"
       | Input (input,width,component) -> Printf.sprintf "input%d[i * %du + %du]" input width component
       | Uniform (index,component) -> Printf.sprintf "bitcast<f32>(%s)" (word (uniforms.(index)+component))
       | Frame _ -> Printf.sprintf "bitcast<f32>(%s)" (word frames.(slot))
@@ -434,6 +477,15 @@ let kernel_fast program = try
   let body = Buffer.create 4096 in
   Buffer.add_buffer body root.decls;
   Buffer.add_buffer body root.code;
+  match compute with
+  | Some { size; name; buffers } ->
+      let declarations = String.concat "" (List.map (fun (_, binding, words, stored) ->
+        Printf.sprintf "@group(0) @binding(%d) var<storage, %s> buffer%d: array<%s>;\n" binding
+          (if stored then "read_write" else "read") binding (if words then "u32" else "f32")) buffers) in
+      let source = declarations ^ Buffer.contents workgroup ^ int64 ^ Printf.sprintf
+        "@compute @workgroup_size(%d)\nfn %s(@builtin(local_invocation_index) lid: u32) {\n  var sb: u32 = 0u;\n%s}\n" size name (Buffer.contents body) in
+      Ok {source;entry=name;interface=[];uniform_layout=[];uniform_bytes=0;table_seeds=[||];output_widths=[||];input_widths=[||];gathers=[||];counts=None}
+  | None ->
   if layout.output_checks then Array.iter (Array.iter (fun slot -> if not (integer slot) then
     Printf.bprintf body "  if (!wfinite(r%d)) { sb |= 1u; }\n" slot)) view.outputs;
   Printf.bprintf body "  %s\n" flush_status;
@@ -473,34 +525,7 @@ let kernel_fast program = try
     gathers=Array.of_list (List.map snd gathers);counts=Some counts}
 with Diagnostic.Error diagnostic -> Error diagnostic
 
-(* A resident fold's [array/compact] on the web: one workgroup of 256 (the WebGPU default limit),
-   each thread counts a contiguous chunk of the mask, thread 0 turns the counts into offsets, each
-   writes its chunk's indices as floats; the total is the count cell. The mask's count is [bound.x],
-   or at most [count_in[0]] when [bound.y] is set. *)
-let compaction = {|@group(0) @binding(0) var<storage, read> mask: array<f32>;
-@group(0) @binding(1) var<storage, read_write> kept: array<f32>;
-@group(0) @binding(2) var<storage, read_write> total: array<u32>;
-@group(0) @binding(3) var<uniform> bound: vec4<u32>;
-@group(0) @binding(4) var<storage, read> count_in: array<u32>;
-var<workgroup> offsets: array<u32, 256>;
-@compute @workgroup_size(256)
-fn flow_compact_mask(@builtin(local_invocation_index) t: u32) {
-  var n = bound.x;
-  if (bound.y != 0u) { n = min(n, count_in[0]); }
-  let chunk = (n + 255u) / 256u;
-  let first = min(n, t * chunk);
-  let last = min(n, first + chunk);
-  var count = 0u;
-  for (var i = first; i < last; i++) { if (mask[i] != 0.0) { count++; } }
-  offsets[t] = count;
-  workgroupBarrier();
-  if (t == 0u) {
-    var sum = 0u;
-    for (var k = 0u; k < 256u; k++) { let v = offsets[k]; offsets[k] = sum; sum += v; }
-    total[0] = sum;
-  }
-  workgroupBarrier();
-  var at = offsets[t];
-  for (var i = first; i < last; i++) { if (mask[i] != 0.0) { kept[at] = f32(i); at++; } }
-}
-|}
+(* A resident fold's [array/compact] on the web: Flow_gpu's shaders/compact.rays as a compute stage of
+   one workgroup of 256 (the WebGPU default limit), generated into compact.wgsl by
+   lib/flow_gpu/test_raster.exe --write lib. *)
+let compaction = Compact_wgsl.source

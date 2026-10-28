@@ -102,7 +102,8 @@ let narrow_registers (view : Packed.Host.view) used =
     | Loop_begin {first; last; _} -> both (fun _ last -> `Max last) first last
     (* a scene count, a primitive and an instance index are 32-bit words *)
     | Int_frame name when scene_fact name -> `Max limit
-    | Stage ((Trace_triangles (1 | 5) | Trace_curves 1), _) -> `Max limit
+    | Stage ((Trace_triangles (1 | 5) | Trace_curves 1 | Group_scan _), _) -> `Max limit
+    | Stage (Store, _) -> `Max 1
     | Loop_result (loop, c, _) -> bound.(loop + 1 + c)
     | _ -> `Top in
   let changed = ref true and passes = ref 0 in
@@ -130,8 +131,12 @@ let narrow_registers (view : Packed.Host.view) used =
     | Int_select (condition, yes, no) -> add `Exact condition; add (`Low slot) yes; add (`Low slot) no
     (* a device gather clamps int(index), the low 32 bits *)
     | Gather (table, index, _, _) | Int_gather (table, index) -> add `Exact table; add `Bits index
+    (* a store's index and Int value and a group scan's operand are uint words on every target *)
+    | Stage ((Store | Group_scan _), r) -> Array.iter (add `Bits) r
     | instruction -> List.iter (add `Exact) (Core.Region.operands instruction)) code;
-  Array.iter (Array.iter (add `Exact)) view.outputs;
+  (* a compute stage's result is discarded: its stores are its effect *)
+  if not (Array.exists (fun i -> match i with Packed.Stage (Store, _) -> true | _ -> false) code) then
+    Array.iter (Array.iter (add `Exact)) view.outputs;
   Array.iteri (fun slot instruction -> match instruction with
     | Packed.Guarded _ when used.(slot) ->
         let rec conditions = function Packed.Guarded (gs, body) -> List.map fst gs @ conditions body | _ -> [] in
@@ -139,7 +144,8 @@ let narrow_registers (view : Packed.Host.view) used =
     | _ -> ()) view.code;
   let narrow = Array.init size (fun slot -> integer slot && match code.(slot) with
     | Packed.Int_const _ | Int_binary ((Iadd | Isub | Imul | Iand | Ior | Ixor | Ishl), _, _)
-    | Int_select _ | Loop_carry _ -> true
+    | Int_select _ | Loop_carry _ | Stage _ -> true
+    | Int_frame name -> scene_fact name
     | Int_binary (Ishr, a, _) -> fits.(a)
     | Int_binary ((Idiv | Imod), a, b) -> fits.(a) && fits.(b)
     | Loop_begin _ -> fits.(slot)

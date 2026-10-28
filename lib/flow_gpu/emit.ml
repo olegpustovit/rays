@@ -190,6 +190,24 @@ let scene_read ~instancing ~stride stage index =
    renderer's bound buffers, and outputs are stage results; the stage function around the body is Raster's. *)
 type raster = { input : int -> int -> string; int_input : int -> string; buffer : int -> string;
   output : int -> int -> string -> string; builtin : string -> string }
+(* A compute stage's workgroup intrinsics (Raster.compute): a group scan of x is a Hillis-Steele scan in
+   threadgroup memory between barriers, printed once a scanned register where its first field is read
+   (in uniform control flow: the root scope); a store writes a bound buffer's element and is 1. *)
+let group_intrinsic ~scans ~(raster : raster) (current : Scope.t) guards stage (r : int array) ~table ~low ~float_of =
+  match stage with
+  | Flow_ir.Core.Region.Group_scan field ->
+      if current.Scope.id <> 0 || guards <> [] then fail "A group scan runs in uniform control flow, outside loops and branches.";
+      let name = Printf.sprintf "scan%d" r.(0) and size = raster.builtin "gpu/group-size" and x = low r.(0) in
+      if not (Hashtbl.mem scans r.(0)) then begin
+        Hashtbl.add scans r.(0) ();
+        Printf.bprintf current.Scope.decls "  uint %s_before=0u;\n  uint %s_total=0u;\n" name name;
+        Printf.bprintf current.Scope.code "  threadgroup uint %s[%s];\n  {uint v=%s;%s[lid]=v;for(uint d=1u;d<%su;d<<=1u){threadgroup_barrier(mem_flags::mem_threadgroup);uint w=lid>=d?%s[lid-d]:0u;threadgroup_barrier(mem_flags::mem_threadgroup);v+=w;%s[lid]=v;}threadgroup_barrier(mem_flags::mem_threadgroup);%s_before=v-%s;%s_total=%s[%s-1];}\n"
+          name size x name size name name name x name name size
+      end;
+      name ^ (if field = 0 then "_before" else "_total")
+  | Store -> let u, ty = table r.(0) in
+      Printf.sprintf "(%s[%s]=%s,1u)" (raster.buffer u) (low r.(1)) (if ty = Flow.Ty.Array Flow.Ty.Int then low r.(2) else float_of r.(2))
+  | _ -> fail "Not a workgroup intrinsic."
 let rec kernel ?fast ?instanced ?motion ?curves ?spheres program = generate ?fast ?instanced ?motion ?curves ?spheres program
 and stage_body ~raster program = Result.map (fun msl -> msl.source) (generate ~fast:true ~raster program)
 and generate ?(fast=false) ?(instanced=false) ?(motion=false) ?curves ?(spheres=true) ?raster program = try
@@ -229,7 +247,7 @@ and generate ?(fast=false) ?(instanced=false) ?(motion=false) ?curves ?(spheres=
   let inline slot instruction = not !counting && raster <> None && not named.(slot) && (match instruction with P.Input _ -> true | _ -> false)
     || not !counting && references.(slot) = 1 && not named.(slot) && not finite_checks.(slot)
     && (match instruction with P.Trace _ | Int_binary ((Idiv | Imod | Ishl | Ishr), _, _)
-        | Stage ((Trace_triangles _ | Trace_any | Trace_curves _ | Trace_curves_any), _) -> false | _ -> true)
+        | Stage ((Trace_triangles _ | Trace_any | Trace_curves _ | Trace_curves_any | Group_scan _ | Store), _) -> false | _ -> true)
     && fst defined.(slot) = fst referenced.(slot) && prefix (defined_in.(slot), read_in.(slot)) in
   let narrow = layout.narrow in
   let int_of r = if integer_register r && not narrow.(r) then register r else "long(" ^ register r ^ ")" in
@@ -259,12 +277,16 @@ and generate ?(fast=false) ?(instanced=false) ?(motion=false) ?curves ?(spheres=
   let query current guards slot stage r =
     trace_query ~hits ~instancing ~moving current guards slot stage r (fun k -> float_of r.(k)) in
   let scene_read stage r = scene_read ~instancing ~stride:(if moving then 32 else 16) stage (fun k -> low r.(k)) in
+  let scans = Hashtbl.create 1 in
+  let group raster current guards stage r = group_intrinsic ~scans ~raster current guards stage r
+    ~table:(fun x -> match snd (guarded [] view.code.(x)) with P.Array_prepare (u, ty) -> u, ty | _ -> fail "A store names a bound buffer.")
+    ~low ~float_of in
   let scene_count name = Printf.sprintf "uniforms[%d]"
     (Option.get (if name = "gpu/scene-spheres" then scene_spheres else layout.scene_strand_count)) in
   let outputs = Array.length view.outputs in
   let output_name k = if outputs = 1 then "output" else "output" ^ string_of_int k in
   let print () =
-  Hashtbl.reset hits;
+  Hashtbl.reset hits; Hashtbl.reset scans;
   let root = scope ~next:(ref 0) 0 in
   let scopes = ref [root] in
   Flow_ir.Kernel_layout.iter layout ~instruction:(fun slot instruction ->
@@ -287,8 +309,8 @@ and generate ?(fast=false) ?(instanced=false) ?(motion=false) ?curves ?(spheres=
       | Int_select (_,yes,no) when yes = no -> low yes
       | Int_select (condition,yes,no) -> Printf.sprintf "(%s!=0.0f?%s:%s)" (float_of condition) (low yes) (low no)
       | Loop_result (loop,component,_) -> register (loop+1+component)
-      | Stage (stage,r) -> query current guards slot stage r
-      | Int_frame name -> scene_count name
+      | Stage (stage,r) -> (match raster with Some x -> group x current guards stage r | None -> query current guards slot stage r)
+      | Int_frame name -> (match raster with Some x -> x.builtin name | None -> scene_count name)
       | _ -> assert false
     else match instruction with
       | P.Const value ->
@@ -340,6 +362,7 @@ and generate ?(fast=false) ?(instanced=false) ?(motion=false) ?curves ?(spheres=
           let value = query current guards slot stage r in
           if integer_register slot then "long(" ^ value ^ ")" else value
       | Stage (stage,r) when raster = None -> scene_read stage r
+      | Stage ((Group_scan _ | Store) as stage,r) when raster <> None -> "long(" ^ group (Option.get raster) current guards stage r ^ ")"
       | Stage (stage,r) when raster <> None -> stage_intrinsic stage (Array.map float_of r)
       | Stage _ -> fail "A raster-stage intrinsic runs only in a fragment stage."
       | Noise3 (x,y,z,seed,octaves,_,_) -> Printf.sprintf "fbm(float3(%s,%s,%s),%d,table+%d)"
@@ -480,29 +503,10 @@ and generate ?(fast=false) ?(instanced=false) ?(motion=false) ?curves ?(spheres=
 with Diagnostic.Error diagnostic -> Error diagnostic
 
 (* Stream compaction for a resident fold: the indices of a mask's nonzero elements, in order, as
-   floats, and their count.  One threadgroup of up to 1,024 threads: each counts a contiguous chunk,
-   thread 0 turns the counts into offsets, each writes its chunk's indices. *)
+   floats, and their count; one threadgroup of 1,024 threads. The kernel is shaders/compact.rays, a
+   compute stage printed by Raster.compute_msl (lib/flow_gpu/test_raster.exe --write lib). *)
 let compaction =
-  let entry = "flow_compact_mask" in
-  let source = {|#include <metal_stdlib>
-using namespace metal;
-kernel void flow_compact_mask(device const float* mask [[buffer(0)]], device float* kept [[buffer(1)]],
-  device uint* total [[buffer(2)]], constant uint2& bound [[buffer(3)]], device const uint* count_in [[buffer(4)]],
-  uint t [[thread_position_in_threadgroup]], uint size [[threads_per_threadgroup]]) {
-  threadgroup uint offsets[1024];
-  uint n = bound.y != 0u ? min(bound.x, count_in[0]) : bound.x;
-  uint chunk = (n + size - 1) / size, first = min(n, t * chunk), last = min(n, first + chunk), count = 0;
-  for (uint i = first; i < last; i++) if (mask[i] != 0.0f) count++;
-  offsets[t] = count;
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-  if (t == 0) { uint sum = 0; for (uint k = 0; k < size; k++) { uint v = offsets[k]; offsets[k] = sum; sum += v; } total[0] = sum; }
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-  uint at = offsets[t];
-  for (uint i = first; i < last; i++) if (mask[i] != 0.0f) kept[at++] = float(i);
-}
-|} in
-  {source; entry; uniform_layout = []; uniform_bytes = 8; table_seeds = [||];
+  {source = Compact_source.source; entry = "compact_mask"; uniform_layout = []; uniform_bytes = 8; table_seeds = [||];
    output_widths = [|1|]; input_widths = [|1|]; gathers = [||]; counts = None; scene = None;
    interface = List.map (fun binding -> S.{group = 0; binding;
      kind = (if binding = 3 then Uniform_buffer else Storage_buffer); visibility = [Compute]}) [0; 1; 2; 3; 4]}
-

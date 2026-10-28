@@ -12,3 +12,19 @@ val msl : ?arguments:bool -> declarations:string -> vertex:string -> fragment:st
 val spirv : declarations:string -> vertex:string -> fragment:string -> (bytes * bytes, Diagnostic.t) result
 (** The same pipeline as Vulkan SPIR-V vertex and fragment modules (entry [main]); varyings are at
     locations in the vertex result's leaf order. *)
+
+val compute_msl : size:int -> declarations:string -> entry:string -> (string, Diagnostic.t) result
+(** The Metal kernel of a compute stage, the [entry] defn of [declarations] run by one threadgroup of
+    [size] threads ([lid]): its first parameter is the thread's index in the group, its array parameters
+    the bound buffers in order (writable when it stores into them with [gpu/store]) and its last the
+    group size, given as the constant [size]; [gpu/group-scan] is a threadgroup scan between barriers.
+    Its result is discarded. *)
+
+val compute_spirv : size:int -> declarations:string -> entry:string -> (bytes, Diagnostic.t) result
+(** The same stage as a Vulkan GLCompute module (entry [main], LocalSize [size]): Workgroup memory and
+    OpControlBarrier for the scan. *)
+
+val compute_program : size:int -> declarations:string -> entry:string ->
+  (Flow_ir.Packed.t * (int * int * bool * bool) list, Diagnostic.t) result
+(** The compute stage's program and its buffers (array uniform, binding, uint words, stored), for
+    another target's printer ([Flow_web.Wgsl.compute]). *)

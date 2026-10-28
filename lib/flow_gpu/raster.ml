@@ -12,10 +12,11 @@ let msl_type = function
 let component target ty k = match ty with Flow.Ty.Float | Bool -> target | _ -> target ^ "." ^ String.make 1 "xyzw".[k]
 
 (* The bound buffer behind a gather's array uniform: the placeholders' lengths number them. *)
-let buffer (program : Flow_ir.Packed.t) u = match program.uniforms.(u) with
-  | E.Int_array a -> "buffer" ^ string_of_int (Array.length a - 1)
-  | E.Float_array a -> "buffer" ^ string_of_int (Array.length a - 1)
+let slot (program : Flow_ir.Packed.t) u = match program.uniforms.(u) with
+  | E.Int_array a -> Array.length a - 1
+  | E.Float_array a -> Array.length a - 1
   | _ -> invalid_arg "Raster.buffer"
+let buffer program u = "buffer" ^ string_of_int (slot program u)
 
 let body ~input ~int_input ~store stage =
   Emit.stage_body ~raster:{ Emit.input; int_input; buffer = buffer stage.program;
@@ -104,10 +105,50 @@ let spirv ~declarations ~vertex ~fragment =
     match List.find_opt (fun leaf -> List.nth leaf.path (List.length leaf.path - 1) = name) varyings with
     | Some leaf -> Ok (location leaf, width ty, leaf.flat)
     | None -> fail (fragment ^ ": no varying " ^ name)) (List.filter (fun p -> not (is_buffer p)) f.params)) in
-  let* vertex_module = Spirv.stage { vertex = true; inputs = [||]; buffers = buffers v;
+  let* vertex_module = Spirv.stage { vertex = true; inputs = [||]; buffers = buffers v; workgroup = None;
     outputs = Array.of_list (List.map (fun leaf -> if leaf.path = [ "position" ] then Spirv.Position
       else if leaf.path = [ "point-size" ] then Point_size
       else Varying (location leaf, leaf.flat)) v.leaves) } v.program in
-  let* fragment_module = Spirv.stage { vertex = false; inputs = Array.of_list inputs; buffers = buffers f;
+  let* fragment_module = Spirv.stage { vertex = false; inputs = Array.of_list inputs; buffers = buffers f; workgroup = None;
     outputs = Array.of_list (List.map (fun leaf -> if leaf.path = [ "discard" ] then Spirv.Discard else Colour) f.leaves) } f.program in
   Ok (vertex_module, fragment_module)
+
+(* A compute stage: one workgroup of [size] threads. The entry's first parameter is the thread's index in
+   the group, its array parameters are the bound buffers, in order (a buffer it stores into is
+   writable), and its last is the group size. Its result is discarded: its stores are its effect. *)
+let stored (c : stage) = List.sort_uniq compare (List.filter_map (fun i -> match snd (Trace.flat [] i) with
+  | Flow_ir.Packed.Stage (Store, r) -> (match snd (Trace.flat [] c.program.code.(r.(0))) with
+      | Flow_ir.Packed.Array_prepare (u, _) -> Some (slot c.program u) | _ -> None)
+  | _ -> None) (Array.to_list c.program.code))
+(* the entry's last parameter is the group size, given as a constant *)
+let compute_stage ~size ~declarations ~entry =
+  let* forms = Flow.Syntax.parse declarations in
+  let* params = parameters forms entry in
+  let given = List.filteri (fun k _ -> k < List.length params - 1) params in
+  compile ~declarations:(declarations ^ Printf.sprintf "(defn compute-entry :context value [%s] (%s %s %d))"
+    (String.concat " " (List.map (fun (name, ty) -> Printf.sprintf "(%s : %s)" name (match ty with
+      | Flow.Ty.Array t -> "(array " ^ Flow.Ty.to_string t ^ ")" | t -> Flow.Ty.to_string t)) given))
+    entry (String.concat " " (List.map fst given)) size) "compute-entry"
+let compute_msl ~size ~declarations ~entry =
+  let* c = compute_stage ~size ~declarations ~entry in
+  let* body = Emit.stage_body ~raster:{ Emit.input = (fun _ _ -> "0.0f"); int_input = (fun _ -> "long(lid)");
+    buffer = buffer c.program; output = (fun _ _ value -> "(void)" ^ value ^ ";");
+    builtin = (function "gpu/group-size" -> string_of_int size | name -> invalid_arg ("Raster: no built-in " ^ name)) } c.program in
+  let arguments = List.map (fun (name, ty) -> let slot = List.assoc name c.bindings in
+    Printf.sprintf "device %s%s* buffer%d [[buffer(%d)]]" (if List.mem slot (stored c) then "" else "const ")
+      (if ty = Flow.Ty.Array Int then "uint" else "float") slot slot) (List.filter is_buffer c.params) in
+  Ok (String.concat "" [ "#include <metal_stdlib>\nusing namespace metal;\n";
+    "long fmod64(long a,long b){if(b==0)return 0;long r=a%b;return (r!=0&&((r<0)!=(b<0)))?r+b:r;}\n";
+    Printf.sprintf "kernel void %s(\n    %s) {\n" (identifier entry)
+      (String.concat ",\n    " (arguments @ [ "uint lid [[thread_position_in_threadgroup]]" ])); body; "}\n" ])
+let compute_program ~size ~declarations ~entry =
+  let* c = compute_stage ~size ~declarations ~entry in
+  let written = stored c in
+  Ok (c.program, List.filter_map Fun.id (Array.to_list (Array.mapi (fun u value -> match value with
+    | E.Int_array a -> Some (u, Array.length a - 1, true, List.mem (Array.length a - 1) written)
+    | E.Float_array a -> Some (u, Array.length a - 1, false, List.mem (Array.length a - 1) written)
+    | _ -> None) c.program.uniforms)))
+let compute_spirv ~size ~declarations ~entry =
+  let* program, buffers = compute_program ~size ~declarations ~entry in
+  Spirv.stage { vertex = false; inputs = [||]; outputs = [||]; workgroup = Some size;
+    buffers = List.map (fun (u, binding, words, _) -> u, binding, words) buffers } program

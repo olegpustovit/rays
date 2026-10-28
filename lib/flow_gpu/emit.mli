@@ -9,8 +9,9 @@ type msl = private {source : string; entry : string; interface : Ogpu.Shader.bin
    gathers): from byte 4 it is the indexed indirect draw of n six-index quads. *)
 val names : string list
 val compaction : msl
-(* The kernel of a resident fold's [array/compact]: buffers mask, kept (float indices), total (uint),
-   uniform (n, use) and count_in: the mask's count is n, or its minimum with [count_in[0]] when use is set. *)
+(* The kernel of a resident fold's [array/compact] (shaders/compact.rays, one threadgroup of 1,024):
+   buffers mask, kept (float indices), total (uint), (n, use) and count_in: the mask's count is n, or its
+   minimum with [count_in[0]] when use is set. *)
 val kernel : ?fast:bool -> ?instanced:bool -> ?motion:bool -> ?curves:[ `Loop | `Native ] -> ?spheres:bool ->
   Flow_ir.Packed.t -> (msl, Diagnostic.t) result
 (* [instanced], [motion], [curves] and [spheres] are static scene facts of a [scene/trace] kernel

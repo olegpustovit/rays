@@ -1,0 +1,35 @@
+; A resident fold's array/compact (Flow_gpu.Run.compact): one workgroup. Each lane counts the nonzero
+; elements of its contiguous chunk of the mask, the group's exclusive scan of the counts is each chunk's
+; first slot, and each lane writes its chunk's kept indices there, as floats; lane 0 writes the total,
+; the kept array's count cell. The mask's count is bound[0], or at most count-in[0] when bound[1] is set.
+; Counts and lanes are masked to their ranges (a fold's arrays stay below 2^30 elements, a group at
+; most 1,024 lanes), so the device counts in 32-bit words. size is the group's, a constant of the target.
+(defn imin :context value [(a : int) (b : int)] (if (int/lt a b) a b))
+(defn word :context value [(words : (array int)) (k : int)] (int/and (array/nth words k) 1073741823))
+; the nonzero elements of mask in [lo, hi), at most passes of them
+(defn chunk-count :context value [(mask : (array float)) (lo : int) (hi : int) (passes : int)]
+  (if (int/lt lo hi)
+    (let* [walk (iterate passes {:i lo :n 0}
+                  (fn [w] {:i (int/add w.i 1) :n (if (= (array/nth mask w.i) 0.) w.n (int/add w.n 1))})
+                  :until (fn [prev next] (int/ge next.i hi)))]
+      walk.n)
+    0))
+; the indices of those elements stored into kept from slot at; the slot after them
+(defn chunk-store :context value [(mask : (array float)) (kept : (array float)) (lo : int) (hi : int) (passes : int) (at : int)]
+  (if (int/lt lo hi)
+    (let* [walk (iterate passes {:i lo :at at}
+                  (fn [w] {:i (int/add w.i 1)
+                           :at (if (= (array/nth mask w.i) 0.) w.at (int/add w.at (gpu/store kept w.at (float w.i))))})
+                  :until (fn [prev next] (int/ge next.i hi)))]
+      walk.at)
+    at))
+(defn compact-mask :context value [(id : int) (mask : (array float)) (kept : (array float)) (total : (array int))
+                                   (bound : (array int)) (count-in : (array int)) (size : int)]
+  (let* [lane (int/and id 1023)
+         n (if (int/eq (word bound 1) 0) (word bound 0) (imin (word bound 0) (word count-in 0)))
+         chunk (int/div (int/add n (int/sub size 1)) size)
+         lo (imin n (int/mul lane chunk))
+         hi (imin n (int/add lo chunk))
+         prefix (gpu/group-scan (chunk-count mask lo hi chunk))
+         written (chunk-store mask kept lo hi chunk prefix.before)]
+    (int/add written (if (int/eq lane 0) (gpu/store-int total 0 prefix.total) 0))))

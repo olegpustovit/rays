@@ -834,7 +834,12 @@ let stage_intrinsics =
     stage "gpu/scene-vertex-end" ["instance",Ty.Int;"prim",Ty.Int;"corner",Ty.Int] Ty.Vec3;
     stage "gpu/scene-instance" ["instance",Ty.Int;"row",Ty.Int] fl;
     stage "gpu/scene-sphere" ["sphere",Ty.Int] Ty.Vec4; stage "gpu/scene-strand" ["strand",Ty.Int;"end",Ty.Int] Ty.Vec4;
-    stage "gpu/scene-spheres" [] Ty.Int; stage "gpu/scene-strands" [] Ty.Int ]
+    stage "gpu/scene-spheres" [] Ty.Int; stage "gpu/scene-strands" [] Ty.Int;
+    (* a compute stage's workgroup (Flow_gpu.Raster.compute): the exclusive prefix sum of x over its
+       threads in thread order with the total, and a store into a bound buffer (it returns 1) *)
+    stage "gpu/group-scan" ["x",Ty.Int] (Ty.Record ["before",Ty.Int;"total",Ty.Int]);
+    stage "gpu/store" ["buffer",Ty.Array fl;"index",Ty.Int;"value",fl] Ty.Int;
+    stage "gpu/store-int" ["buffer",Ty.Array Ty.Int;"index",Ty.Int;"value",Ty.Int] Ty.Int ]
 let all = scene_trace :: stage_intrinsics @ frame @ arrays @ reductions @ draw @ host @ integers @ images @ [
   float_unary "tan" tan; float_unary "asin" asin; float_unary "acos" acos; float_unary "log" log;
   float_unary "sign" (fun x -> if x > 0. then 1. else if x < 0. then -1. else x);

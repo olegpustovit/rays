@@ -546,11 +546,23 @@ let element e (layout : Flow_ir.Kernel_layout.t) gathers prepared at width compo
   let at = result e e.uint 113 [ at ] in
   result e e.float 124 [ load_uint e gathers.(k) (offset e at width component) ]
 
+(* A raster-stage intrinsic's operands: floats, but a store's table (its array uniform), a store's index
+   and Int value and a group scan's operand as uint words *)
+let stage_operands ~table_of ~low ~float_of ~integer stage a = Array.mapi (fun k x -> match stage with
+  | Flow_ir.Core.Region.Store when k = 0 -> table_of x
+  | (Store | Group_scan _) when integer x -> low x | _ -> float_of x) a
+
 (* A raster placement of the instruction printer (Raster): element inputs, gathers from the bound
    buffers (uniform, uint index, width, component), raster-stage intrinsics and output stores. *)
 type raster = { input : int -> int -> int; int_input : int -> int; gather : int -> int -> int -> int -> int;
   int_gather : int -> int -> int; intrinsic : Flow_ir.Core.Region.stage -> int array -> int;
   output : int -> int -> int -> unit; builtin : string -> int }
+
+let frame_word e (raster : raster option) layout name = match raster with Some x -> x.builtin name | None -> scene_count e layout name ~wide:false
+(* a stage instruction's value: the placement's intrinsic, or a ray query field or scene table read *)
+let stage_value e raster ~table_of ~low ~float_of ~integer ~wide stage r = match raster with
+  | Some x -> x.intrinsic stage (stage_operands ~table_of ~low ~float_of ~integer stage r)
+  | None -> trace_stage e stage (fun () -> Array.map float_of r) (fun () -> Array.map low r) ~wide
 
 let emit_program ?raster e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers index =
   let words = e.words and float = e.float and boolean = e.boolean in
@@ -598,18 +610,18 @@ let emit_program ?raster e (layout : Flow_ir.Kernel_layout.t) inputs outputs gat
     | Int_binary (op, a, b) -> integer_status e op (int_of b); narrow_binary e op (low a) (low b)
     | Int_select (condition, yes, no) -> if yes = no then low yes else select e e.uint (truth e (float_of condition)) (low yes) (low no)
     | Loop_result (loop, component, _) -> registers.(loop + 1 + component)
-    | Stage (stage, r) -> trace_stage e stage (fun () -> Array.map float_of r) (fun () -> Array.map low r) ~wide:false | Int_frame name -> scene_count e layout name ~wide:false
+    | Stage (stage, r) -> stage_value e raster ~table_of ~low ~float_of ~integer ~wide:false stage r | Int_frame name -> frame_word e raster layout name
     | _ -> assert false
     else wide_expression slot instruction
   and wide_expression slot = function
-    | P.Stage (stage, r) when raster = None -> trace_stage e stage (fun () -> Array.map float_of r) (fun () -> Array.map low r) ~wide:(integer slot)
+    | P.Stage (stage, r) when raster = None -> stage_value e raster ~table_of ~low ~float_of ~integer ~wide:(integer slot) stage r
     | P.Int_frame name when Flow_ir.Kernel_layout.scene_fact name -> scene_count e layout name ~wide:true
     | P.Const value ->
         if e.long <> None && Float.is_integer value && Float.abs value < 9007199254740992. then
           whole.(slot) <- Some (l e (Int64.of_float value));
         f e value
     | (Input _ | Int_input _ | Gather _ | Int_gather _ | Stage _) as i when raster <> None -> let r = Option.get raster in (match i with
-      | Input (k, _, c) -> r.input k c | Int_input k -> r.int_input k | Stage (s, a) -> r.intrinsic s (Array.map float_of a)
+      | Input (k, _, c) -> r.input k c | Int_input k -> r.int_input k | Stage (s, a) -> r.intrinsic s (stage_operands ~table_of ~low ~float_of ~integer s a)
       | Gather (p, at, w, c) -> r.gather (table_of p) (low at) w c | Int_gather (p, at) -> r.int_gather (table_of p) (low at) | _ -> assert false)
     | Input (input, width, component) -> load e inputs.(input) (offset e index width component)
     | Uniform (input, component) -> uniform_float e (layout.uniforms.(input) + component)
@@ -1067,7 +1079,7 @@ let kernel ?(fast = false) ?(instanced = false) ?(motion = false) ?(curves = fal
 
 type output = Position | Point_size | Varying of int * bool | Colour | Discard
 type stage = { vertex : bool; inputs : (int * int * bool) array; outputs : output array;
-  buffers : (int * int * bool) list }
+  buffers : (int * int * bool) list; workgroup : int option }
 
 (* A raster stage as a Vulkan vertex or fragment module, entry [main] (Raster's placement of
    [emit_program]): element [k] of a fragment is the interpolated input at location [k]'s
@@ -1132,11 +1144,32 @@ let stage (s : stage) program =
       let id = variable (pointer 1 ty) 1 in decorate id 11 [ decoration ]; interface := id :: !interface;
       Hashtbl.add builtins decoration id; id in
     let discard = ref None in
+    (* a group scan of x over the workgroup: Hillis-Steele in Workgroup memory between barriers, once a
+       scanned value; the exclusive prefix and the total *)
+    let scans = Hashtbl.create 1 in
+    let scan x = match Hashtbl.find_opt scans x with Some values -> values | None ->
+      let n = Option.get s.workgroup in
+      let shared = variable (pointer 4 (typ 28 [ uint; u e n ])) 4 and lid = result e uint 61 [ builtin uint 29 ] in
+      let at index = result e (pointer 4 uint) 65 [ shared; index ] in
+      let barrier () = Words.instruction words.body 224 [ u e 2; u e 2; u e 0x108 ] in
+      Words.instruction words.body 62 [ at lid; x ];
+      let rec step d v = if d >= n then v else begin
+        barrier ();
+        let reach = result e boolean 174 [ lid; u e d ] in
+        let w = result e uint 61 [ at (select e uint reach (result e uint 130 [ lid; u e d ]) (u e 0)) ] in
+        barrier ();
+        let v = result e uint 128 [ v; select e uint reach w (u e 0) ] in
+        Words.instruction words.body 62 [ at lid; v ];
+        step (2 * d) v end in
+      let v = step 1 x in
+      barrier ();
+      let values = [| result e uint 130 [ v; x ]; result e uint 61 [ at (u e (n - 1)) ] |] in
+      Hashtbl.add scans x values; values in
     let raster = {
       input = (fun k c -> let _, width, _ = s.inputs.(k) in
         let value = result e (vector width) 61 [ inputs.(k) ] in
         if width = 1 then value else result e float 81 [ value; c ]);
-      int_input = (fun _ -> to_long (result e uint 61 [ Option.get vertex_index ]));
+      int_input = (fun _ -> to_long (result e uint 61 [ match vertex_index with Some id -> id | None -> builtin uint 29 ]));
       gather = (fun u at width component -> let var, w = List.assoc u buffers in
         if w then result e float 124 [ load_uint e var (offset e at width component) ] else load e var (offset e at width component));
       int_gather = (fun u at -> to_long (load_uint e (fst (List.assoc u buffers)) at));
@@ -1156,8 +1189,11 @@ let stage (s : stage) program =
         | Texture_size (t, c) -> sizes := true; let i = texture t in
             let size = result e (typ 23 [ sint; 2 ]) 103 [ result e image 61 [ i ]; Words.constant words sint 0l ] in
             result e float 111 [ result e sint 81 [ size; c ] ]
+        | Group_scan field -> (scan operands.(0)).(field)
+        | Store -> let var, w = List.assoc operands.(0) buffers in
+            (if w then store_uint e var operands.(1) operands.(2) else store e var operands.(1) operands.(2)); u e 1
         | _ -> fail "A ray query or scene table read runs only in a compute kernel.");
-      output = (fun k c value -> match s.outputs.(k) with
+      output = (fun k c value -> if s.workgroup = None then match s.outputs.(k) with
         | Discard -> discard := Some value
         | _ -> let width = Array.length layout.view.outputs.(k) in
             let target = if width = 1 then outputs.(k) else result e (pointer 3 float) 65 [ outputs.(k); u e c ] in
@@ -1188,8 +1224,9 @@ let stage (s : stage) program =
     if !sizes then Words.instruction bytes 17 [ 50 ];
     Words.instruction bytes 11 (glsl :: Words.string_words "GLSL.std.450");
     Words.instruction bytes 14 [ 0; 1 ];
-    Words.instruction bytes 15 (((if s.vertex then 0 else 4) :: main :: Words.string_words "main") @ List.rev !interface);
-    if not s.vertex then Words.instruction bytes 16 [ main; 7 ];
+    Words.instruction bytes 15 (((if s.workgroup <> None then 5 else if s.vertex then 0 else 4) :: main :: Words.string_words "main") @ List.rev !interface);
+    (match s.workgroup with Some n -> Words.instruction bytes 16 [ main; 17; n; 1; 1 ]
+     | None -> if not s.vertex then Words.instruction bytes 16 [ main; 7 ]);
     List.iter (Buffer.add_buffer bytes) [ words.annotations; words.declarations; words.body ];
     Ok (Buffer.to_bytes bytes)
   with Diagnostic.Error diagnostic -> Error diagnostic

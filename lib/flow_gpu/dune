@@ -1,8 +1,8 @@
 (library
  (name flow_gpu)
  (public_name rays.flow_gpu)
- (modules lisp_stage trace trace_source emit spirv pipelines run host image_sink raster image_rgba8_source)
- (private_modules lisp_stage trace trace_source image_rgba8_source)
+ (modules lisp_stage trace trace_source compact_source emit spirv pipelines run host image_sink raster image_rgba8_source)
+ (private_modules lisp_stage trace trace_source compact_source image_rgba8_source)
  (libraries flow flow_ir ogpu renderer rays_math lru parallel))
 
 ; the device side of scene/trace, compiled once a scene variant (Trace)
@@ -11,6 +11,13 @@
  (deps trace.rays)
  (action (with-stdout-to %{target}
   (progn (echo "let source = {rays|") (cat trace.rays) (echo "|rays}\n")))))
+
+; the resident fold's compaction, generated from shaders/compact.rays (test_raster.exe --write lib)
+(rule
+ (target compact_source.ml)
+ (deps shaders/metal/compact.metal)
+ (action (with-stdout-to %{target}
+  (progn (echo "let source = {msl|") (cat shaders/metal/compact.metal) (echo "|msl}\n")))))
 
 ; the image sink's stages, generated from ../renderer/shaders/image.rays (test_raster.exe --write)
 (rule
@@ -133,5 +140,6 @@
  (name test_raster)
  (modules test_raster)
  (deps (glob_files ../renderer/shaders/*.rays) (glob_files ../renderer/shaders/metal/*.metal) (glob_files ../renderer/shaders/spirv/*.spv)
-  (glob_files ../ogpu_metal/shaders/*.rays) (glob_files ../ogpu_metal/shaders/metal/*.metal) (glob_files ../ogpu_metal/shaders/spirv/*.spv))
- (libraries flow_gpu ogpu_mock))
+  (glob_files ../ogpu_metal/shaders/*.rays) (glob_files ../ogpu_metal/shaders/metal/*.metal) (glob_files ../ogpu_metal/shaders/spirv/*.spv)
+  (glob_files shaders/*.rays) (glob_files shaders/metal/*.metal) (glob_files shaders/spirv/*.spv) ../flow_web/compact.wgsl)
+ (libraries flow_gpu flow_web ogpu_mock))

@@ -300,7 +300,7 @@ let operation ~emit ~as_float ~as_int ~literal ~is_table ~component ~guards
   end
   else if kind=Flow.Op.Stage then begin
     let operands=Array.concat(List.map2(fun(name,(a:W.term))e->if name="texture"then[||]
-      else (if a.ty=Ty.Int then as_int e else as_float e).registers)args expressions)in
+      else match a.ty with Ty.Array _ -> e.registers | Ty.Int -> (as_int e).registers | _ -> (as_float e).registers)args expressions)in
     let texture()=match List.assoc_opt "texture" args with
       | Some {W.node=W.Lit(Param.Int_value n);_} -> n
       | _ -> refuse ~at:t "E_PACKED_TYPE" (op ^ " names its texture slot with an integer literal.") in
@@ -315,6 +315,8 @@ let operation ~emit ~as_float ~as_int ~literal ~is_table ~component ~guards
     | "gpu/scene-vertex" | "gpu/scene-vertex-end" ->
         {registers=Array.init 3(fun c->emit(Stage(Scene_vertex(op="gpu/scene-vertex-end",c),operands)));constant=None;fields=[]}
     | "gpu/scene-instance" -> stage Scene_instance
+    | "gpu/group-scan" -> {registers=[||];constant=None;fields=["before",stage(Group_scan 0);"total",stage(Group_scan 1)]}
+    | "gpu/store" | "gpu/store-int" -> stage Store
     | "gpu/scene-sphere" | "gpu/scene-strand" ->
         {registers=Array.init 4(fun c->emit(Stage((if op="gpu/scene-sphere" then Scene_sphere c else Scene_strand c),operands)));constant=None;fields=[]}
     | "gpu/sample" | "gpu/sample-level" | "gpu/read" -> let t=texture() in

@@ -109,7 +109,7 @@ let () =
   let covered=List.sort_uniq compare (List.map fst cases) in
   List.iter (fun (o : Flow.Op.t) ->
     if o.ctx=Flow.Context.value && o.shape=Flow.Op.Scalar
-      && not (List.mem o.name ["color/hsla"; "text/float"; "scene/trace"; "gpu/fwidth"; "gpu/sample"; "gpu/sample-level"; "gpu/read"; "gpu/texture-size"; "gpu/instance-id"; "gpu/front-facing"; "gpu/depth"; "gpu/fragment-x"; "gpu/fragment-y"; "gpu/trace-triangles"; "gpu/trace-any"; "gpu/trace-curves"; "gpu/trace-curves-any"; "gpu/scene-vertex"; "gpu/scene-vertex-end"; "gpu/scene-instance"; "gpu/scene-sphere"; "gpu/scene-strand"; "gpu/scene-spheres"; "gpu/scene-strands"])
+      && not (List.mem o.name ["color/hsla"; "text/float"; "scene/trace"; "gpu/fwidth"; "gpu/sample"; "gpu/sample-level"; "gpu/read"; "gpu/texture-size"; "gpu/instance-id"; "gpu/front-facing"; "gpu/depth"; "gpu/fragment-x"; "gpu/fragment-y"; "gpu/trace-triangles"; "gpu/trace-any"; "gpu/trace-curves"; "gpu/trace-curves-any"; "gpu/scene-vertex"; "gpu/scene-vertex-end"; "gpu/scene-instance"; "gpu/scene-sphere"; "gpu/scene-strand"; "gpu/scene-spheres"; "gpu/scene-strands"; "gpu/group-scan"; "gpu/store"; "gpu/store-int"])
       && not (List.mem o.name covered) then
       failwith ("No core operator case for " ^ o.name)) (Flow.Op.of_context Flow.Context.value);
   let n=ref 0 and static=ref [] in
