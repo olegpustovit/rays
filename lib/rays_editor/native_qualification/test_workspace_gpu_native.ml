@@ -33,7 +33,7 @@ let ()=List.iter(fun stateful->
     Flow_native.Workspace_images.bind owner lowered;owner,resources,gpu in
   let cpu1=create 1 and cpu8=create 8 and gpu1=create 1 and gpu8=create 8 in
   List.iter(fun(_,_,gpu)->Flow_native.Workspace_gpu.qualification gpu)[gpu1;gpu8];
-  let _,handles=Ogpu.Impl.create_driver()in let before=handles()in
+  let handles = Ogpu.Impl.live_handles in let before=handles()in
   let state=E.create_state()in
   let live frame={(Input.at_time(float frame))with frame}in
   let advance state frame=List.iter(fun value->ignore(E.force ~state value ~live:(live frame) |> ok))lowered.states in
@@ -177,7 +177,7 @@ let ()=List.iter(fun domains->
     (value "image/render")in
   let payload state frame=Flow_native.Workspace_images.payload owner lowered.plan ~state ~live:(live frame)
     (value "image/map")in
-  let _,handles=Ogpu.Impl.create_driver()in let before=handles()in
+  let handles = Ogpu.Impl.live_handles in let before=handles()in
   let retained=ref None in
   Fun.protect ~finally:(fun()->Flow_native.Workspace_resources.close resources;Flow_native.Workspace_images.close owner;Flow_native.Workspace_gpu.close gpu)(fun()->
     advance state 0;
@@ -227,7 +227,7 @@ let ()=
   let owner=Flow_native.Workspace_images.create ~domains:1 ~gpu resources in
   Flow_native.Workspace_gpu.qualification gpu;
   let state=E.create_state()in let original_stamp=E.state_stamp state in
-  let _,handles=Ogpu.Impl.create_driver()in let before=handles()in
+  let handles = Ogpu.Impl.live_handles in let before=handles()in
   let plan=ref(lower 65 17)in
   let bind lowered=plan:=lowered;Flow_native.Workspace_images.bind owner lowered in
   bind !plan;
@@ -316,7 +316,7 @@ let ()=List.iter(fun(width,height,expected_reads)->
   let n=Array.find_opt(fun(n:E.node)->n.kind="exact")lowered.plan.nodes |> Option.get in
   let child=Array.find_opt(fun(n:E.node)->n.kind="image/map")lowered.plan.nodes |> Option.get in
   let state=E.create_state()in
-  let _,handles=Ogpu.Impl.create_driver()in let before=handles()in
+  let handles = Ogpu.Impl.live_handles in let before=handles()in
   let held=ref [||]in
   Fun.protect ~finally:(fun()->Flow_native.Workspace_resources.close resources;Flow_native.Workspace_images.close owner;Flow_native.Workspace_gpu.close gpu)(fun()->
     let resolve frame=Flow_native.Workspace_images.payload owner lowered.plan ~state
@@ -360,7 +360,7 @@ let ()=if Array.mem "--capture-budget" Sys.argv then begin
   let resources=Flow_native.Workspace_resources.create()and gpu=Flow_native.Workspace_gpu.create()in
   let owner=Flow_native.Workspace_images.create ~domains:1 ~gpu resources in
   Flow_native.Workspace_gpu.qualification gpu;
-  let _,handles=Ogpu.Impl.create_driver()in let before=handles()in
+  let handles = Ogpu.Impl.live_handles in let before=handles()in
   Fun.protect ~finally:(fun()->Flow_native.Workspace_resources.close resources;Flow_native.Workspace_images.close owner;Flow_native.Workspace_gpu.close gpu)(fun()->
     let run lowered time=
       Flow_native.Workspace_images.bind owner lowered;
@@ -434,7 +434,7 @@ let ()=
   let cyclic=N.with_frame_nodes frames graph.network in
   let state=E.create_state()in
   let stamp=E.state_stamp state in
-  let _,handles=Ogpu.Impl.create_driver()in
+  let handles = Ogpu.Impl.live_handles in
   let before=handles()in
   let run domains fail=
     let resources=Flow_native.Workspace_resources.create()and gpu=Flow_native.Workspace_gpu.create()in
@@ -463,7 +463,7 @@ let ()=
   assert(run 1 true=expected && run 8 false=expected && run 8 true=expected && handles()=before);
   print_endline "Workspace capture cycles: typed repeated resolver re-entry, unchanged caller state, same-owner acyclic and changed-plan recovery, CPU domains and clean close pass"
 let ()=
-  let _,handles=Ogpu.Impl.create_driver()in
+  let handles = Ogpu.Impl.live_handles in
   let before=handles()in
   let owner=Flow_native.Workspace_gpu.create()in
   let rejects_worker()=Domain.join(Domain.spawn(fun()->

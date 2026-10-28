@@ -175,7 +175,7 @@ let acquire_device operation=
   |Some(Error e)->backend operation e
   |None->(match !headless_gpu with
     |Some(device,owner,count)->incr count;Ok(device,false,owner)
-    |None->let driver,_=Ogpu.Impl.create_driver()in
+    |None->let driver = Ogpu.Impl.create_driver () in
         match Ogpu.Backend.create_device driver with
         |Error e->backend operation e
         |Ok device->let owner=create_gpu_owner()in headless_gpu:=Some(device,owner,ref 1);Ok(device,false,owner))
@@ -212,7 +212,7 @@ let create (configuration:configuration) =
       |Ok()->
         (match Runtime.Private.surface_configuration runtime with
          |Error error->ignore(Runtime.destroy runtime);backend operation error
-         |Ok surface->let driver,_=Ogpu.Impl.create_driver() in
+         |Ok surface->let driver = Ogpu.Impl.create_driver () in
              let gpu_owner=create_gpu_owner()in
              (match Renderer_pipeline.create_renderer ~backend:Ogpu.Impl.backend
                  ~gpu_vertices:gpu_owner.scene_vertices
@@ -233,7 +233,7 @@ let create_offscreen (configuration:configuration)=
   |Ok runtime->
       (match Runtime.Private.surface_configuration runtime with
        |Error error->ignore(Runtime.destroy runtime);release_device lease_shared gpu_owner;backend operation error
-       |Ok surface->let driver,_=Ogpu.Impl.create_driver() in
+       |Ok surface->let driver = Ogpu.Impl.create_driver () in
          (match Renderer_pipeline.create_renderer ~backend:Ogpu.Impl.backend
              ~device ~gpu_vertices:gpu_owner.scene_vertices ~offscreen:true ~driver ~configuration:surface () with
           |Error error->ignore(Runtime.destroy runtime);release_device lease_shared gpu_owner;backend operation error
@@ -848,7 +848,7 @@ module Private=struct
         |Error error->backend operation error
         |Ok runtime->(match Runtime.Private.surface_configuration runtime with
           |Error error->ignore(Runtime.destroy runtime);backend operation error
-          |Ok surface->let driver,_=Ogpu.Impl.create_driver() in
+          |Ok surface->let driver = Ogpu.Impl.create_driver () in
             match Renderer_pipeline.create_renderer ~backend:Ogpu.Impl.backend
                 ~device:gpu.gpu_device ~gpu_vertices:gpu.gpu_owner.scene_vertices
                 ~offscreen:true ~driver ~configuration:surface () with

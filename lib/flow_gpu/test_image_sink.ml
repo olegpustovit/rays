@@ -4,7 +4,7 @@ let get=Test_program.ok
 let native=function Ok x->x|Error e->failwith(Ogpu.Error.to_string e)
 let injected ()=Error(Ogpu.Error.make "test" Invalid_state "injected image sink failure")
 let ()=
-  let base,live=Ogpu.Impl.create_driver()in
+  let base = Ogpu.Impl.create_driver () in let live = Ogpu.Impl.live_handles in
   let device=native(B.create_device base)in
   let queue=native(B.create_queue device)in
   assert(Result.is_error(S.Private.create_owned device queue));

@@ -276,7 +276,7 @@ let resident_fold gpu ~count:range =
 
 let ()=
   let module H=Flow_gpu.Host in
-  let _,handles=Ogpu.Impl.create_driver()in
+  let handles = Ogpu.Impl.live_handles in
   let baseline=handles()in
   let gpu=match Renderer.acquire_gpu()with Ok gpu->gpu|Error e->
     failwith(Format.asprintf "%a" Renderer.pp_error e)in

@@ -27,7 +27,7 @@ let ()=
   let module Editor=Rays_editor.Editor in
   let module P=Sop in
   let module I=Runtime_resources.Image in
-  let _,handles=Ogpu.Impl.create_driver()in
+  let handles = Ogpu.Impl.live_handles in
   let before=handles()in
   let doc=load {|(workspace captured
     (graph drawing :context draw [(image : image (image/noise :width 65 :height 17))] (draw/image image))
@@ -166,7 +166,7 @@ let ()=
   let module Editor=Rays_editor.Editor in
   let module P=Sop in
   let module I=Runtime_resources.Image in
-  let _,handles=Ogpu.Impl.create_driver()in
+  let handles = Ogpu.Impl.live_handles in
   let before=handles()in
   let source=Filename.temp_file "rays-workspace-gpu-image-" ".rays"in
   let text width height body=Printf.sprintf
@@ -349,7 +349,7 @@ let ()=
 let ()=
   let module Editor=Rays_editor.Editor in
   let module I=Runtime_resources.Image in
-  let _,handles=Ogpu.Impl.create_driver()in
+  let handles = Ogpu.Impl.live_handles in
   let baseline=handles()in
   let doc=load "(workspace dimensions
     (graph drawing :context draw (draw/background \"#102030\"))
@@ -401,7 +401,7 @@ let ()=
 let ()=
   let module Editor=Rays_editor.Editor in
   let module I=Runtime_resources.Image in
-  let _,handles=Ogpu.Impl.create_driver()in
+  let handles = Ogpu.Impl.live_handles in
   let baseline=handles()in
   let source=Filename.temp_file "rays-retained-canvas-" ".rays"in
   let text ?width_expression width height position=Printf.sprintf "(workspace retained
@@ -505,7 +505,7 @@ let ()=
 
 let ()=
   let module Editor=Rays_editor.Editor in
-  let _,handles=Ogpu.Impl.create_driver()in
+  let handles = Ogpu.Impl.live_handles in
   let baseline=handles()in
   let doc width=load(Printf.sprintf "(workspace failed_publication
     (graph drawing :context draw (draw/background \"#102030\"))

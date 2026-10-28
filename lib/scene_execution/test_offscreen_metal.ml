@@ -3,7 +3,7 @@ let get = function
   | Error error -> failwith (Ogpu.Error.to_string error)
 
 let run () =
-  let driver, live_handles = Ogpu.Impl.create_driver () in
+  let driver = Ogpu.Impl.create_driver () in let live_handles = Ogpu.Impl.live_handles in
   let before = live_handles () in
   let configuration : Ogpu.Surface.configuration =
     { logical_width=4; logical_height=4; physical_width=4;

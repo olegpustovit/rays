@@ -5,7 +5,7 @@ let get_resource=function Ok value->value|Error error->
   failwith(Format.asprintf"%a"Runtime_resources.pp_error error)
 let get_ir=function Ok value->value|Error _->failwith"render IR fixture"
 let expect_error message=function Error _->()|Ok _->failwith message
-let live_handles=snd(Ogpu.Impl.create_driver())
+let live_handles=Ogpu.Impl.live_handles
 let rss_kib()=
   let argv=[|"/bin/ps";"-o";"rss=";"-p";string_of_int(Unix.getpid())|]in
   let input=Unix.open_process_args_in argv.(0)argv in

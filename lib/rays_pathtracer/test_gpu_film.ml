@@ -5,7 +5,7 @@ let rays_mesh geometry = get (Result.map_error Rdk.Error.to_string
   (Rdk_rays.Rays_mesh.to_trace_mesh geometry))
 let execution=function Ok value->value|Error error->
   failwith(Format.asprintf"%a"Renderer.pp_error error)
-let live_handles=let _,live=Ogpu.Impl.create_driver()in live
+let live_handles=Ogpu.Impl.live_handles
 
 let run () =
   let baseline=live_handles()in

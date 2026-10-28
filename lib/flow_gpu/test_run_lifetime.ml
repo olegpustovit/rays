@@ -3,7 +3,7 @@ module R=Flow_gpu.Run
 let get=function Ok value->value|Error error->failwith(Ogpu.Error.to_string error)
 let wrong_domain f=Domain.join(Domain.spawn(fun()->try f();false with Invalid_argument _->true))
 let ()=
-  let base,live=Ogpu.Impl.create_driver() in
+  let base = Ogpu.Impl.create_driver () in let live = Ogpu.Impl.live_handles in
   let fail=ref false and pipelines=ref 0 and submitted=ref 0 and invalid_output=ref false in
   let fail_table=ref false and table_writes=ref 0 in
   let fail_input=ref false and input_writes=ref 0 in

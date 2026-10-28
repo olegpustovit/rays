@@ -4,7 +4,7 @@ let get = function
 
 let () =
   let before = get (Metal.Release_queue.stats ()) in
-  let driver, live_handles = Ogpu.Impl.create_driver () in
+  let driver = Ogpu.Impl.create_driver () in let live_handles = Ogpu.Impl.live_handles in
   (match driver.Ogpu.Backend.create_device () with
    | Error { Ogpu.Error.kind = No_adapter; _ } ->
        print_endline "OGPU conformance (Metal): skipped (no device)"

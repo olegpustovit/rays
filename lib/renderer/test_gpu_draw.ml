@@ -6,7 +6,7 @@ let words a=let b=Bytes.create(4*Array.length a)in
   Array.iteri(fun i v->Bytes.set_int32_le b(i*4)v)a;b
 let floats a=words(Array.map Int32.bits_of_float a)
 let ()=
-  let live=snd(Ogpu.Impl.create_driver())in
+  let live=Ogpu.Impl.live_handles in
   let baseline=live()in
   List.iter(fun density->
     let execution=get(Renderer.create_offscreen{Renderer.

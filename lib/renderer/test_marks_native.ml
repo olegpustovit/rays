@@ -110,7 +110,7 @@ let marks_draw ?drawn gpu_vertices_owner device a n =
 let name = function Rect -> "rect" | Circle -> "circle" | Line -> "line"
 
 let run () =
-  let live_handles = snd (Ogpu.Impl.create_driver ()) in
+  let live_handles = Ogpu.Impl.live_handles in
   let baseline = live_handles () in
   List.iter (fun density ->
     let execution = get (Renderer.create_offscreen {Renderer.

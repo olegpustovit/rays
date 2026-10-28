@@ -42,7 +42,7 @@ let marks_token gpu s =
   sink, token
 
 let run () =
-  let live_handles = snd (Ogpu.Impl.create_driver ()) in
+  let live_handles = Ogpu.Impl.live_handles in
   let baseline = live_handles () in
   let execution = get (Renderer.create_offscreen {Renderer.
     logical_width = width; logical_height = height; drawable_width = width; drawable_height = height;

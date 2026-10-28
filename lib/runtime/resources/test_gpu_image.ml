@@ -3,7 +3,7 @@ module I=Runtime_resources.Image
 let get=function Ok x->x|Error e->failwith(Format.asprintf "%a" Runtime_resources.pp_error e)
 let native=function Ok x->x|Error e->failwith(Ogpu.Error.to_string e)
 let () =
-  let base,live=Ogpu.Impl.create_driver()in
+  let base = Ogpu.Impl.create_driver () in let live = Ogpu.Impl.live_handles in
   let reads=ref 0 in
   let read_error=ref None in
   let bytes=Bytes.init(65*3*4)(fun i->Char.chr(i mod 256))in

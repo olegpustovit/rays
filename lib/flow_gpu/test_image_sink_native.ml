@@ -234,7 +234,7 @@ let () =
   Printf.eprintf "GPU image qualification/publication: named-call selection, exact channel parity, zero publication CPU storage/reads and retained snapshots pass\n%!"
 
 let ()=
-  let _,handles=Ogpu.Impl.create_driver()in
+  let handles = Ogpu.Impl.live_handles in
   let before=handles()in
   let gpu=execution(Renderer.acquire_gpu())in
   Fun.protect ~finally:(fun()->Renderer.release_gpu gpu)(fun()->
@@ -355,7 +355,7 @@ let ()=
         scenes:=[image_scene resized_image;meshed;mixed resized_image view];
         verify resized 17 5 0.5;
         List.iter(fun(bytes,saved,_)->assert(bytes=saved)) !leases;
-        let foreign_driver,_=Ogpu.Impl.create_driver()in
+        let foreign_driver = Ogpu.Impl.create_driver () in
         let device=native(B.create_device foreign_driver)in
         Fun.protect ~finally:(fun()->native(B.destroy_device device))(fun()->
           let texture=native(B.create_texture device {Ogpu.Types.label=None;

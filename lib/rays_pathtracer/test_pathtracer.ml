@@ -9,7 +9,7 @@ let rays_mesh geometry = get (Result.map_error Rdk.Error.to_string
   (Rdk_rays.Rays_mesh.to_trace_mesh geometry))
 let prepared geometry material = get (P.mesh [rays_mesh geometry, material])
 let pixels tracer = Bytes.copy (get (Rays.Image.Private.pixels (P.image tracer)))
-let live_handles = let _, live = Ogpu.Impl.create_driver () in live
+let live_handles = Ogpu.Impl.live_handles
 
 let check_instance_residency floor =
   (* An instance structure only references its BLAS: without declaring it
@@ -282,7 +282,7 @@ let run ?(frame = fun _ _ -> ()) () =
       print_endline "pathtracer: spheres, instance materials, motion ok";
       (* Every kernel specialization compiles and matches its declared
          interface, including the curve variants a device may never trace. *)
-      let driver, _ = Ogpu.Impl.create_driver () in
+      let driver = Ogpu.Impl.create_driver () in
       let device = get (Result.map_error Ogpu.Error.to_string (Ogpu.Backend.create_device driver)) in
       let source = In_channel.with_open_bin "pathtrace.metal" In_channel.input_all in
       let shader = get (Result.map_error Ogpu.Error.to_string (Ogpu.Shader.create

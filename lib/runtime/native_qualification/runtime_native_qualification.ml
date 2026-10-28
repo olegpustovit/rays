@@ -8,7 +8,7 @@ let create width height =
   Renderer.create {Renderer.default_configuration with logical_width=width;logical_height=height;
     drawable_width=width;drawable_height=height}
 
-let live_handles = snd (Ogpu.Impl.create_driver ())
+let live_handles = Ogpu.Impl.live_handles
 
 let rss_kib () =
   let argv = [| "/bin/ps"; "-o"; "rss="; "-p"; string_of_int (Unix.getpid ()) |] in

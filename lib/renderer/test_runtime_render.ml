@@ -3,7 +3,7 @@ let get = function
   | Error error -> failwith (Format.asprintf "%a" Renderer.pp_error error)
 
 let run () =
-  let live_handles = snd (Ogpu.Impl.create_driver ()) in
+  let live_handles = Ogpu.Impl.live_handles in
   let before = live_handles () in
   let configuration =
     { Renderer.default_configuration with

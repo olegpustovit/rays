@@ -59,7 +59,7 @@ let spread a b =
   Float.max (one a b) (one b a)
 
 let run () =
-  let live = let _, live = Ogpu.Impl.create_driver () in live in
+  let live = Ogpu.Impl.live_handles in
   let baseline = live () in
   let rdk value = get (Result.map_error Rdk.Error.to_string value) in
   let rays_mesh geometry = get (Result.map_error Rdk.Error.to_string

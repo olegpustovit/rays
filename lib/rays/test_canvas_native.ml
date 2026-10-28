@@ -10,7 +10,7 @@ let channel canvas ~x ~y=
   match Result.get_ok(Canvas.pixel canvas~x~y) with
   |Some color->Rays_math.Color.to_tuple color
   |None->failwith"Canvas native pixel is out of bounds"
-let live_handles=snd(Ogpu.Impl.create_driver())
+let live_handles=Ogpu.Impl.live_handles
 let snapshot canvas=
   let image=Result.get_ok(Canvas.to_image canvas)in
   Fun.protect~finally:(fun()->ignore(Image.destroy image))(fun()->

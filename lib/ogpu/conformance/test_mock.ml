@@ -1,5 +1,5 @@
 let () =
-  let driver, live_handles = Ogpu.Impl.create_driver () in
+  let driver = Ogpu.Impl.create_driver () in let live_handles = Ogpu.Impl.live_handles in
   Ogpu_conformance.Conformance.run driver;
   if live_handles () <> 0 then
     failwith "mock backend leaked handles";

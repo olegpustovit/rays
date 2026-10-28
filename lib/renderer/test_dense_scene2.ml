@@ -26,7 +26,7 @@ let scene ~reference ~count ~phase =
   Result.get_ok (create (Array.of_list (List.rev !commands)))
 
 let run () =
-  let live_handles=snd(Ogpu.Impl.create_driver()) in
+  let live_handles=Ogpu.Impl.live_handles in
   let baseline=live_handles() in
   List.iter (fun scale ->
     let execution=get (Renderer.create_offscreen

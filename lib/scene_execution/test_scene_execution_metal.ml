@@ -36,7 +36,7 @@ vertex Out scene_vertex(uint i [[vertex_id]],const device uchar *input [[buffer(
 fragment float4 scene_fragment(Out value [[stage_in]],texture2d<float> image [[texture(1)]],sampler sampling [[sampler(2)]]){return image.sample(sampling,value.uv);}
 |}
 let run () =
-  let driver,live_handles=Ogpu.Impl.create_driver()in
+  let driver = Ogpu.Impl.create_driver () in let live_handles = Ogpu.Impl.live_handles in
   let before=live_handles()in
   let configuration:Ogpu.Surface.configuration={logical_width=4;logical_height=4;physical_width=4;physical_height=4;format=Bgra8_unorm;present_mode=Fifo;max_acquired=2;layer=None}in
   let renderer=get(Scene_execution.create~offscreen:true driver configuration(fun device family blend samples->let bytes,vertex_bindings,fragment_bindings,groups=match family with
@@ -110,7 +110,7 @@ let run () =
       Ogpu.Pipeline.Replace,Some bad_film,{mesh=mesh_uv 0.1 0.1;state}]with
    |Error error when error.Ogpu.Error.kind=Invalid_argument->()
    |_->failwith"mismatched GPU film extent was accepted");
-  let foreign_driver,_=Ogpu.Impl.create_driver()in
+  let foreign_driver = Ogpu.Impl.create_driver () in
   let foreign_device=get(Ogpu.Backend.create_device foreign_driver)in
   let foreign=get(Ogpu.Backend.create_texture foreign_device
     {Ogpu.Types.label=None;width=1;height=1;depth=1;mip_levels=1;
