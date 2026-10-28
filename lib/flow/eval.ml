@@ -1032,11 +1032,8 @@ and ev c env (x : W.term) : value =
 
 and evs c env prefix ts = List.mapi (fun i t -> ev (sub c (prefix ^ string_of_int i)) env t) ts
 
-(* a test of an inlined body's [if]/[cond]: its value, or the deferred check it can be *)
-and guard_test c v =
-  match v with
-  | Residual _ when Option.is_some c.st.guards && guardable v -> `Live v
-  | v -> `Known (concrete c v)
+(* a live test of an inlined body's [if]/[cond] that can be a deferred check *)
+and guarding c v = Option.is_some c.st.guards && guardable v
 
 and add_guard c test fails d =
   c.st.guards <- Option.map (fun guards -> (test, fails, d) :: guards) c.st.guards
@@ -1293,9 +1290,8 @@ and ev_raw c env (x : W.term) : value =
           | Fn fn -> concrete_data c (call_fn c fn [ diagnostic ])
           | _ -> fail "E_DIAGNOSTIC_MAP" "An error mapper is a function.")
   | W.If (cnd, a, b) -> (
-      match guard_test c (ev (sub c "if") env cnd) with
-      | `Known v -> if truthy v then ev (sub c "then") env a else ev (sub c "else") env b
-      | `Live test -> (
+      match ev (sub c "if") env cnd with
+      | Residual _ as test when guarding c test -> (
           match arm_error c env (sub c "then") a with
           | Some d ->
               add_guard c test true d;
@@ -1305,20 +1301,22 @@ and ev_raw c env (x : W.term) : value =
               | Some d ->
                   add_guard c test false d;
                   ev (sub c "then") env a
-              | None -> raise Needs_t)))
+              | None -> raise Needs_t))
+      | v -> if truthy (concrete c v) then ev (sub c "then") env a else ev (sub c "else") env b)
   | W.Cond (arms, default) ->
       let rec go i = function
         | [] -> ev (sub c "else") env default
         | (t, e) :: rest -> (
-            let arm = sub c ("arm" ^ string_of_int i) in
-            match guard_test c (ev (sub c ("test" ^ string_of_int i)) env t) with
-            | `Known v -> if truthy v then ev arm env e else go (i + 1) rest
-            | `Live test -> (
-                match arm_error c env arm e with
+            match ev (sub c ("test" ^ string_of_int i)) env t with
+            | Residual _ as test when guarding c test -> (
+                match arm_error c env (sub c ("arm" ^ string_of_int i)) e with
                 | Some d ->
                     add_guard c test true d;
                     go (i + 1) rest
-                | None -> raise Needs_t))
+                | None -> raise Needs_t)
+            | v ->
+                if truthy (concrete c v) then ev (sub c ("arm" ^ string_of_int i)) env e
+                else go (i + 1) rest)
       in
       go 0 arms
   | W.Case (scrut, arms, default) ->
