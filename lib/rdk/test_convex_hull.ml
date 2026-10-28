@@ -139,7 +139,7 @@ let test_solid_payload_and_selection () =
       && Geometry.primitive_count hull = 12) "cube hull cardinality";
   check_closed hull "cube hull is not closed two-manifold";
   check_contains source hull "cube hull containment";
-  check (Analysis.signed_volume hull |> get > 0.) "cube hull winding";
+  check (Analysis.signed_volume hull > 0.) "cube hull winding";
   check (Geometry.find_attribute ~owner:Attribute.Point "N" hull = None)
     "stale point normal survived";
   check (Geometry.find_attribute ~owner:Attribute.Detail "tag" hull <> None)

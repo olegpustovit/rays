@@ -80,7 +80,7 @@ let reverse_winding source =
   Geometry.create ~positions ~topology () |> get_string
 
 let outward source =
-  let volume = Analysis.signed_volume source |> get_string in
+  let volume = Analysis.signed_volume source in
   if volume < 0. then reverse_winding source else source
 
 let rotate (rx, ry, rz) (x, y, z) =
@@ -326,7 +326,7 @@ let validate_shatter_groups name geometry =
         name primitive count
   done
 
-let volume geometry = abs_float (Analysis.signed_volume geometry |> get_string)
+let volume geometry = abs_float (Analysis.signed_volume geometry)
 
 let expected_volume operation ~left ~right ~intersection = match operation with
   | Boolean.Union | Boolean.Shatter -> left +. right -. intersection

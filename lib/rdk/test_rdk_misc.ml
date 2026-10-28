@@ -23,30 +23,6 @@ let blur ~grid =
       (blur_curve [|0.; 10.; 0.|]) |> get_ok in
   if float_values "value" uniform_blur <> [|10.; 0.; 10.|] then
     fail "uniform Attribute Blur";
-  let edge_blur = Attribute_ops.blur_points ~iterations:1
-      ~method_:Attribute_ops.Edge_length ~mode:(Attribute_ops.Laplacian 1.)
-      ~pattern:"value" (blur_curve [|0.; 0.; 12.|]) |> get_ok in
-  if abs_float ((float_values "value" edge_blur).(1) -. 4.) > 1e-12 then
-    fail "edge-length Attribute Blur";
-  let controls = blur_curve [|0.; 10.; 0.|] in
-  let weight = Attribute.create_owned ~name:"weight" ~owner:Attribute.Point
-      (Attribute.Float [|1.; 0.5; 1.|]) |> get_ok
-  and alpha = Attribute.create_owned ~name:"alpha" ~owner:Attribute.Point
-      (Attribute.Float [|1.; 1.; 0.|]) |> get_ok in
-  let controls = controls |> Geometry.with_attribute weight |> get_ok
-      |> Geometry.with_attribute alpha |> get_ok in
-  let center = Group.init ~owner:Group.Point ~name:"center" 3
-      (fun point -> point = 1) in
-  let controlled = Attribute_ops.blur_points ~selection:center
-      ~weight_attribute:"weight" ~alpha_attribute:"alpha"
-      ~mode:(Attribute_ops.Laplacian 1.) ~pattern:"value" controls |> get_ok in
-  if float_values "value" controlled <> [|0.; 5.; 0.|] then
-    fail "selected weighted/alpha Attribute Blur";
-  let blended = Attribute_ops.blur_points ~original_blend:1. ~blurred_blend:1.
-      ~mode:(Attribute_ops.Laplacian 1.) ~pattern:"value"
-      (blur_curve [|0.; 10.; 0.|]) |> get_ok in
-  if float_values "value" blended <> [|10.; 10.; 10.|] then
-    fail "Attribute Blur output blending";
   let custom = Attribute_ops.blur_points ~iterations:2
       ~mode:(Attribute_ops.Custom_steps { odd = 1.; even = 0. })
       ~pattern:"value" (blur_curve [|0.; 10.; 0.|]) |> get_ok in
@@ -77,11 +53,6 @@ let blur ~grid =
            || color.z <> [|3.; 0.; 3.|] || color.w <> [|1.; 1.; 1.|]
        then fail "Attribute Blur tuple planes"
    | _ -> fail "Attribute Blur dropped tuple attributes");
-  let pinned = Attribute_ops.blur_points ~pin_borders:true
-      ~mode:(Attribute_ops.Laplacian 1.) ~pattern:"value"
-      (blur_curve [|0.; 10.; 0.|]) |> get_ok in
-  if float_values "value" pinned <> [|0.; 10.; 0.|] then
-    fail "Attribute Blur border pins";
   let smoothed_grid = Attribute_ops.blur_points ~iterations:1
       ~mode:(Attribute_ops.Laplacian 0.25) ~pattern:"P" grid |> get_ok in
   if Geometry.find_attribute ~owner:Attribute.Point "N" smoothed_grid <> None
@@ -90,20 +61,8 @@ let blur ~grid =
   (match Attribute_ops.blur_points ~iterations:(-1) ~pattern:"P" grid with
    | Error error when Error.code error = "invalid_blur" -> ()
    | _ -> fail "Attribute Blur accepted negative iterations");
-  (match Attribute_ops.blur_points ~weight_attribute:"missing" ~pattern:"P" grid with
-   | Error error when Error.code error = "invalid_blur" -> ()
-   | _ -> fail "Attribute Blur accepted a missing weight attribute");
   (match Attribute_ops.blur_points ~pattern:"value"
       (blur_curve [|Float.nan; 1.; 2.|]) with
    | Error error when Error.code error = "invalid_blur" -> ()
    | _ -> fail "Attribute Blur accepted non-finite source data");
-  let extreme_curve = Line_geometry.polyline
-      [|(max_float,0.,0.); (-.max_float,0.,0.)|] |> get_ok in
-  let extreme_value = Attribute.create_owned ~name:"value"
-      ~owner:Attribute.Point (Attribute.Float [|0.; 1.|]) |> get_ok in
-  let extreme_curve = Geometry.with_attribute extreme_value extreme_curve |> get_ok in
-  (match Attribute_ops.blur_points ~method_:Attribute_ops.Edge_length
-      ~pattern:"value" extreme_curve with
-   | Error error when Error.code error = "invalid_parameter" -> ()
-   | _ -> fail "Attribute Blur accepted a non-finite edge metric");
   ()

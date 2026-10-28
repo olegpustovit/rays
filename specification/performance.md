@@ -627,7 +627,6 @@ the release profile and are repeated with `RAYS_BENCH_DOMAINS=4`.
 | Extract Point from Curve | `RAYS_EXTRACT_REPEATS=5 RAYS_BENCH_DOMAINS=1 dune exec --profile release tools/bench_rdk/bench_rdk.exe -- extract_point_curve` |
 | Cold Scene3 display packing | `dune exec tools/bench_scene3_packing.exe -- 1000000 7` (mesh construction excluded; cold coordinate planes, median/p95 and allocated bytes) |
 | Scene3 float64/float32 gallery pixels | `_build/default/tools/check.exe @test/test_scene3_float32_gallery` (native device required; records each scene's maximum channel difference and changed-pixel count) |
-| Material assignment | `dune exec tools/bench_material_assign.exe -- 100000 1` |
 | Editor held drag and undo | `dune exec tools/bench_rays_editor.exe -- 200 1000 2000` |
 | SOP graph scale smoke | `dune build lib/rays_editor/test/test_main.exe`, then `_build/default/lib/rays_editor/test/test_main.exe test_pxui_graph_smoke` |
 | Source digest polling | `dune exec tools/bench_source_poll.exe -- sketches/sop_gallery.rays` |

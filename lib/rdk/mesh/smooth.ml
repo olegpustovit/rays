@@ -51,7 +51,7 @@ let run ?cancel ?(grain = 16_384) ?constrained_points
     ?(mode = Attribute_ops.Laplacian 0.5)
     ?(recompute_normals = true)
     ~attributes geometry =
-  let alpha_attribute = None in let original_blend = (0.) in let smoothed_blend = (1.) in try
+  try
     if grain <= 0 then fail "invalid_parameter" "grain must be positive"
     else
       Result.bind (validate_point_group "constrained point group" geometry
@@ -71,8 +71,7 @@ let run ?cancel ?(grain = 16_384) ?constrained_points
       let point_normals_smoothed = had_point_normals
           && Attribute_pattern.matches attribute_pattern "N" in
       match Attribute_ops.blur_points ?cancel ~grain ?selection ~iterations
-          ~mode ?alpha_attribute
-          ~original_blend ~blurred_blend:smoothed_blend ~pattern:attributes geometry with
+          ~mode ~pattern:attributes geometry with
       | Error error -> Error (remap_error error)
       | Ok output ->
           let positions_changed = Packed.Float3.data_id (Geometry.positions output)

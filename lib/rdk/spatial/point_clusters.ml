@@ -75,7 +75,6 @@ let of_links ?cancel ~operation destinations =
 
 
 let create ?cancel ?selection ?(metric = Euclidean) ?(inclusive = true)
-    ?(transitive = false)
     ~operation ~tolerance ~compatible geometry =
   try
     let count = Geometry.point_count geometry in
@@ -135,24 +134,6 @@ let create ?cancel ?selection ?(metric = Euclidean) ?(inclusive = true)
           let { Point_grid.cell_x; cell_y; cell_z; cell_head; point_next; _ } = grid in
           let find_cell = Point_grid.find grid in
           let representative = Array.init count Fun.id in
-          let root point =
-            let current = ref point in
-            while representative.(!current) <> !current do
-              current := representative.(!current)
-            done;
-            let result = !current in
-            current := point;
-            while representative.(!current) <> !current do
-              let parent = representative.(!current) in
-              representative.(!current) <- result;
-              current := parent
-            done;
-            result in
-          let union left right =
-            let left = root left and right = root right in
-            if left <> right then
-              if left < right then representative.(right) <- left
-              else representative.(left) <- right in
           let neighbor_delta = if exact then 0 else 1 in
           let[@inline always] cell_coord value minimum =
             if exact then Point_grid.float_cell value
@@ -201,8 +182,7 @@ let create ?cancel ?selection ?(metric = Euclidean) ?(inclusive = true)
                                 && abs_float py < tolerance
                                 && abs_float pz < tolerance in
                         if position_matches && compatible point other then
-                          if transitive then union point other
-                          else if !nearest < 0 || other < !nearest then
+                          if !nearest < 0 || other < !nearest then
                             nearest := other;
                         candidate := point_next.(other)
                       done
@@ -210,17 +190,13 @@ let create ?cancel ?selection ?(metric = Euclidean) ?(inclusive = true)
                   done
                 done
               done;
-              if not transitive && !nearest >= 0 then
+              if !nearest >= 0 then
                 representative.(point) <- !nearest
               else begin
                 Point_grid.insert grid cx cy cz point
               end
             end
           done;
-          if transitive then
-            for point = 0 to count - 1 do
-              representative.(point) <- root point
-            done;
           let of_point = representative
           and representative_to_cluster = cell_x
           and cluster_count = ref 0 in

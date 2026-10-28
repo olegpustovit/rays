@@ -1,9 +1,6 @@
 open Rdk
+open Rdk_test_support
 
-let fail format = Printf.ksprintf failwith format
-let check condition format =
-  Printf.ksprintf (fun message -> if not condition then failwith message) format
-let get_string = function Ok value -> value | Error message -> fail "%s" message
 
 let triangulate x y = Delaunay2.build ~seed:17L ~x ~y () |> get_string
 
@@ -27,7 +24,7 @@ let test_crossing_rejected () =
   let x = [|0.;1.;1.;0.|] and y = [|0.;0.;1.;1.|] in
   match cdt x y [|0;2; 1;3|] with
   | Error _ -> ()
-  | Ok _ -> fail "crossing constraints succeeded without splitting"
+  | Ok _ -> failf "crossing constraints succeeded without splitting"
 
 let run () =
   test_crossing_rejected ()
