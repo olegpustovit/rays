@@ -518,8 +518,7 @@ let pointer_step (t : t) ui (frame : Frame.t) ~canvas ~(canvas_signal : Ui.signa
     end in
   let tile_pressed = List.exists (fun (_, _, _, _, (s : Ui.signal), _, _) -> s.pressed) tiles in
   let wire_pressed =
-    if t.context <> None || tile_pressed || not (List.exists (function
-      | Input.Pointer_pressed (Input.LeftButton, _) -> true | _ -> false) frame.input.events) then None
+    if t.context <> None || tile_pressed || canvas_signal.subtree_press = None then None
     else List.find_map (fun i ->
       if List.exists (fun b -> let s = Ui.signal ui b in s.pressed && left s) (hits i)
       then Some i else None) wires_in_view in
@@ -995,12 +994,12 @@ let update ?(pressed = []) t ui (frame : Frame.t) =
   let t = if t.framed then t else { (frame_all t) with framed = true } in
   let changes = ref [] in
   let emit c = changes := c :: !changes in
-  let t, hint_changes = step_hints t ~pressed frame in
-  List.iter emit hint_changes;
   let canvas = Ui.box ui ~flags:Ui.(clickable + scroll + clip + blocking)
       ~w:(Ui.Px (float t.width)) ~h:(Ui.Px (float t.height))
       ~at:(float t.x, float t.y) "pxui-scope" in
   let canvas_signal = Ui.signal ui canvas in
+  let t, hint_changes = step_hints t ~pressed ~clicked:(canvas_signal.subtree_press <> None) in
+  List.iter emit hint_changes;
   (* the grid, zones and wires paint in a child, so the canvas's clip holds them too *)
   let layer = Ui.within ui canvas (fun () ->
     Ui.box ui ~w:(Ui.Px (float t.width)) ~h:(Ui.Px (float t.height)) ~at:(0., 0.) "pxui-scope-layer") in

@@ -103,8 +103,8 @@ let preview_images value frame =
    press point, held modifiers, motion and release point arrive per frame, a press and a far jump
    in one frame included).  The operation is latched at the press; movement and the release
    position are reduced before sealing its history.  Returns the core, the drag still in flight,
-   the input with the drag's pointer events taken out, and the held modifiers at the end of the
-   frame. *)
+   the input with the drag's pointer events taken out, the held modifiers at the end of the
+   frame, and the pane's press and release for the camera's pointer grab. *)
 let world_drag_frame value (update : _ Editor_model.update) core ~area =
   let seal core = { core with Editor_model.history = Editor_core.History.seal core.Editor_model.history } in
   let world_drag = if update.loaded_view <> None
@@ -133,7 +133,7 @@ let world_drag_frame value (update : _ Editor_model.update) core ~area =
          | Some drag when s.released -> seal (move_world core drag s.release_point), None, true
          | Some drag when s.held ->
              move_world core drag s.pointer, Some { drag with point = s.pointer }, true
-         | Some _ -> seal core, None, true
+         | Some drag -> seal (move_world core drag s.pointer), None, true  (* cancelled: the motion before it stands *)
          | None -> core, None, false)
     | _ -> (if world_drag <> None then seal core else core), None, world_drag <> None in
   (* the drag's pointer events are the drag's: the camera and picking see a cancelled press *)
@@ -145,7 +145,9 @@ let world_drag_frame value (update : _ Editor_model.update) core ~area =
           | _ -> true) update.input.input.events @ [Input.Pointer_cancelled Input.LeftButton];
         buttons = List.filter (( <> ) Input.LeftButton) update.input.input.buttons };
       mouse_delta = 0., 0. } in
-  core, world_drag, input, modifiers
+  let grab = match signal with
+    | Some s -> s.pressed && not engaged, s.released && not engaged | None -> false, false in
+  core, world_drag, input, modifiers, grab
 
 (* what the panes draw over the views: header tools, the gate where a film is not the whole pane,
    the selected object box in the focused view, and the render clock *)
@@ -274,10 +276,10 @@ let update_with value frame ~inspector =
   let value = if source != value.source then { value with held = None } else value in
   let area = if visible then panes.view
     else 0, 0, (fst frame.input.size), (snd frame.input.size) in
-  let core, world_drag, input, modifiers = world_drag_frame value update core ~area in
+  let core, world_drag, input, modifiers, grab = world_drag_frame value update core ~area in
   let core, pick_press = pick_in_views value focused ~core ~camera ~extra ~area ~modifiers ~input ~raw_frame in
   let camera, extra = if core.Editor_model.map_view then camera, V.release extra
-    else V.navigate ~area control camera extra core ~raw_frame ~input in
+    else V.navigate ~area ~grab control camera extra core ~raw_frame ~input in
   let camera, render_status = match update.framed with
     | Some (Some (min, max)) ->
         let _, _, w, h = panes.view in
