@@ -215,6 +215,11 @@ and st = {
   ops : Op.t list;
   find_op : string -> Context.t -> Op.t option;
       (* [Op.finder ops]: [ops] is a list, the whole SOP catalog in the editor *)
+  mutable terms : ((int, W.term) Hashtbl.t * (string, unit) Hashtbl.t) option;
+      (* helper and inlined node terms by form id, for a replayed body (built on its first
+         replay), and the node kinds indexed *)
+  mutable inlined : string list; (* the node kinds inlined so far, newest first *)
+  mutable watching : (string, unit) Hashtbl.t list; (* the helpers each body being kept calls *)
 }
 
 and node = {
@@ -252,6 +257,7 @@ type inline_entry = {
   e_nfids : int;
   e_site : W.path;
   e_iter : int list;
+  e_kinds : string list; (* the node kinds the body inlined, itself included *)
 }
 
 (* ponytail: a whole-table clear at 256 entries; an entry retains its evaluation's state *)
@@ -634,6 +640,44 @@ let inline_key c ~key parameters vals =
              (Lazy.force key ^ "\000" ^ k ^ string_of_bool c.geometry ^ string_of_bool c.host))
     | exception _ -> None
 
+(* The terms of the workspace's definitions (helpers and inlined node bodies, as evaluated) by
+   form id, built once per evaluation. *)
+let term_index st kinds =
+  let index, indexed =
+    match st.terms with
+    | Some terms -> terms
+    | None ->
+        let terms = (Hashtbl.create 4096, Hashtbl.create 16) in
+        st.terms <- Some terms;
+        terms
+  in
+  let rec walk (x : W.term) =
+    if x.form.id <> 0 && not (List.memq x (Hashtbl.find_all index x.form.id)) then begin
+      Hashtbl.add index x.form.id x;
+      List.iter walk (W.children x)
+    end
+    else if x.form.id = 0 then List.iter walk (W.children x)
+  in
+  let graph (g : W.graph) =
+    walk g.body;
+    List.iter (fun (_, _, d) -> Option.iter walk d) g.inputs
+  in
+  List.iter
+    (fun kind ->
+      if not (Hashtbl.mem indexed kind) then begin
+        Hashtbl.add indexed kind ();
+        if String.starts_with ~prefix:"def:" kind then
+          Option.iter graph (Hashtbl.find_opt st.defs (String.sub kind 4 (String.length kind - 4)))
+        else
+          Option.iter
+            (fun inlined ->
+              let (d : W.node_definition), _, _ = Lazy.force inlined in
+              graph d.body)
+            (Hashtbl.find_opt st.node_defs kind)
+      end)
+    kinds;
+  index
+
 (* An inline body's kept evaluation, in this evaluation: its nodes at the next ids over these
    inputs, its residuals and functions at the next ids, its sites and iterations under this
    call's, its kernels offered again. The value equals what evaluating the body here gives. *)
@@ -675,6 +719,21 @@ let replay_inline c (e : inline_entry) inputs =
   let path p = match rest e.e_site p with Some tail -> site' @ tail | None -> p in
   let iter i = match rest e.e_iter i with Some tail -> iter' @ tail | None -> i in
   let ctx (x : ctx) = { x with st; inst = c.inst; prefix = path x.prefix; iter = iter x.iter } in
+  (* a body's terms in this evaluation: its definitions check to the same form ids (library forms
+     have fixed ids, an authored definition's are part of the key) *)
+  let index = term_index st e.e_kinds in
+  let term (t : W.term) =
+    if t.form.id = 0 then t
+    else
+      match
+        List.find_opt
+          (fun (n : W.term) ->
+            n.path = t.path && Obj.tag (Obj.repr n.node) = Obj.tag (Obj.repr t.node))
+          (Hashtbl.find_all index t.form.id)
+      with
+      | Some n -> n
+      | None -> raise Exit
+  in
   let residuals = Hashtbl.create 16 and functions = Hashtbl.create 16 in
   let rec value = function
     | Deferred (ty, n) -> Deferred (ty, id n)
@@ -691,7 +750,14 @@ let replay_inline c (e : inline_entry) inputs =
     | Some (_, m) -> m
     | None ->
         let m =
-          { r with rid = rid r.rid; renv = Smap.map value r.renv; rc = ctx r.rc; live = None }
+          {
+            r with
+            rid = rid r.rid;
+            rterm = term r.rterm;
+            renv = Smap.map value r.renv;
+            rc = ctx r.rc;
+            live = None;
+          }
         in
         Hashtbl.add residuals r.rid (r, m);
         m
@@ -706,6 +772,7 @@ let replay_inline c (e : inline_entry) inputs =
               Closure
                 {
                   cl with
+                  body = term cl.body;
                   env = Smap.map value cl.env;
                   zone = path cl.zone;
                   calls = ref !(cl.calls);
@@ -717,25 +784,43 @@ let replay_inline c (e : inline_entry) inputs =
         Hashtbl.add functions key (f, m);
         m
   in
-  List.iter2
-    (fun (n : node) form ->
-      st.nodes <-
-        {
-          n with
-          id = id n.id;
-          inst = c.inst;
-          site = path n.site;
-          iter = iter n.iter;
-          args = fields n.args;
-        }
-        :: st.nodes;
-      st.authored <- form :: st.authored)
-    e.e_nodes e.e_authored;
-  st.nnodes <- st.nnodes + e.e_count;
-  st.rids <- st.rids + e.e_nrids;
-  st.nfns <- st.nfns + e.e_nfids;
-  List.iter (fun r -> Effect.perform (Residual_effect.Observe_kernel (residual r))) e.e_observed;
-  value e.e_value
+  (* everything is relocated before the evaluation changes: a term no longer found is no replay *)
+  match
+    let nodes =
+      List.map
+        (fun (n : node) ->
+          {
+            n with
+            id = id n.id;
+            inst = c.inst;
+            site = path n.site;
+            iter = iter n.iter;
+            args = fields n.args;
+          })
+        e.e_nodes
+    in
+    (nodes, List.map residual e.e_observed, value e.e_value)
+  with
+  | exception Exit -> None
+  | nodes, observed, v ->
+      List.iter2
+        (fun n form ->
+          st.nodes <- n :: st.nodes;
+          st.authored <- form :: st.authored)
+        nodes e.e_authored;
+      st.nnodes <- st.nnodes + e.e_count;
+      st.rids <- st.rids + e.e_nrids;
+      st.nfns <- st.nfns + e.e_nfids;
+      st.inlined <- e.e_kinds @ st.inlined;
+      List.iter
+        (fun kind ->
+          if String.starts_with ~prefix:"def:" kind then
+            List.iter
+              (fun t -> Hashtbl.replace t (String.sub kind 4 (String.length kind - 4)) ())
+              st.watching)
+        e.e_kinds;
+      List.iter (fun r -> Effect.perform (Residual_effect.Observe_kernel r)) observed;
+      Some v
 
 exception Refused of Diagnostic.t
 
@@ -1308,16 +1393,20 @@ and inline_node c ~form ~key (d : W.node_definition) parameters ~call vals =
     st.nnodes <- nnodes
   in
   st.steps <- 0;
-  let key = inline_key c ~key parameters vals in
+  let key =
+    inline_key c ~key:(lazy (Lazy.force key ^ string_of_int d.body.body.form.id)) parameters vals
+  in
   let replay =
     Option.bind key (fun key ->
         Mutex.protect inline_lock (fun () -> Hashtbl.find_opt inline_memo key))
   in
-  match replay with
-  | Some entry ->
+  match Option.bind replay (fun entry -> replay_inline c entry (inline_inputs parameters vals)) with
+  | Some v ->
       st.steps <- steps;
-      card c ~form d parameters (replay_inline c entry (inline_inputs parameters vals))
+      card c ~form d parameters v
   | None -> (
+      let inlined0 = st.inlined in
+      st.inlined <- d.kind.qualified :: st.inlined;
       let rids = st.rids and fids = st.nfns and states = st.states and cells = st.cells in
       let observed = ref [] and cacheable = ref (key <> None) in
       let body () =
@@ -1334,9 +1423,12 @@ and inline_node c ~form ~key (d : W.node_definition) parameters ~call vals =
       in
       (* the kernels the body offers are offered again on a replay; a device approximation makes the
      body's value depend on the device, so it is not kept *)
+      let helpers = Hashtbl.create 8 in
       let watched () =
         if key = None then body ()
-        else
+        else begin
+          st.watching <- helpers :: st.watching;
+          Fun.protect ~finally:(fun () -> st.watching <- List.tl st.watching) @@ fun () ->
           Effect.Deep.match_with body ()
             {
               retc = Fun.id;
@@ -1357,6 +1449,7 @@ and inline_node c ~form ~key (d : W.node_definition) parameters ~call vals =
                           Effect.Deep.continue k v)
                   | _ -> None);
             }
+        end
       in
       match watched () with
       | Residual _
@@ -1368,8 +1461,7 @@ and inline_node c ~form ~key (d : W.node_definition) parameters ~call vals =
       | v ->
           st.steps <- steps;
           (match key with
-          | Some key when !cacheable && !observed = [] && st.states == states && st.cells == cells
-            ->
+          | Some key when !cacheable && st.states == states && st.cells == cells ->
               let count = st.nnodes - nnodes in
               let rec take n l = if n = 0 then [] else List.hd l :: take (n - 1) (List.tl l) in
               let entry =
@@ -1387,6 +1479,14 @@ and inline_node c ~form ~key (d : W.node_definition) parameters ~call vals =
                   e_nfids = st.nfns - fids;
                   e_site = site c;
                   e_iter = c.iter;
+                  e_kinds =
+                    (let rec since = function
+                       | l when l == inlined0 -> []
+                       | kind :: rest -> kind :: since rest
+                       | [] -> []
+                     in
+                     since st.inlined
+                     @ Hashtbl.fold (fun name () kinds -> ("def:" ^ name) :: kinds) helpers []);
                 }
               in
               Mutex.protect inline_lock (fun () ->
@@ -1448,6 +1548,7 @@ and apply_def ?body c name (vals : value list) : value =
     | None -> failf "E_UNKNOWN" "Unknown function %s." name
   in
   if c.depth > max_depth then fail "E_DEPTH" "Call depth exceeds 64.";
+  List.iter (fun t -> Hashtbl.replace t name ()) c.st.watching;
   let base = [ "def:" ^ name ] in
   let c' = { c with prefix = site c; base; route = []; depth = c.depth + 1 } in
   let env, _ =
@@ -2181,6 +2282,9 @@ let new_state ?(budget = max_steps) ~record ws =
        t);
     ops = ws.ops;
     find_op = Op.finder ws.ops;
+    terms = None;
+    inlined = [];
+    watching = [];
   }
 
 let live_state (st : st) ~state ?(elems = Smap.empty) (l : live) =

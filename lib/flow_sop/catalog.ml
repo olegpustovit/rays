@@ -221,9 +221,25 @@ let reachable sources forms =
   | Some index when index.source_list == sources -> reachable_index index forms
   | _ -> reachable_uncached sources forms
 
+(* Each library form has a fixed id, from its position in the whole library above any authored id:
+   a library definition checks to the same form ids whatever the authored text or the reachable
+   subset, so a kept evaluation of its body (Flow.Eval) finds its terms again. *)
+let library_base = 1 lsl 40
+
+let library_bases sources =
+  let rec size (form : Flow.Syntax.t) =
+    List.fold_left (fun n child -> n + size child) 1 (Flow.Syntax.children form)
+  in
+  let rec go next = function
+    | [] -> []
+    | source :: rest -> (source, next) :: go (next + size source) rest
+  in
+  go library_base sources
+
 module Private = struct
   let reachable_sources = reachable
   let definitions_of_sources = definitions_of_sources
+  let library_bases = library_bases
 end
 
 let check_workspace_raw ?ops ?library ?sources:override catalog forms =
@@ -242,6 +258,7 @@ let check_workspace_raw ?ops ?library ?sources:override catalog forms =
   with
   | Error diagnostic -> (None, [ diagnostic ])
   | Ok (sources, nodes) ->
+      let bases = library_bases sources in
       let sources, nodes =
         match override with
         | Some _ when library = Some true -> (sources, nodes)
@@ -296,20 +313,11 @@ let check_workspace_raw ?ops ?library ?sources:override catalog forms =
       if sources = [] then Flow.Workspace.check ?ops ?library catalog forms
       else
         let authored = forms in
-        let rec next_id (form : Flow.Syntax.t) =
-          List.fold_left
-            (fun highest child -> max highest (next_id child))
-            (form.id + 1) (Flow.Syntax.children form)
+        let sources =
+          List.map
+            (fun source -> fst (Flow.Syntax.renumber (List.assq source bases) source))
+            sources
         in
-        let first = List.fold_left (fun highest form -> max highest (next_id form)) 0 forms in
-        let sources, _ =
-          List.fold_left
-            (fun (reversed, next) source ->
-              let source, next = Flow.Syntax.renumber next source in
-              (source :: reversed, next))
-            ([], first) sources
-        in
-        let sources = List.rev sources in
         let forms =
           List.map
             (fun (form : Flow.Syntax.t) ->

@@ -326,14 +326,14 @@ let prepare_library cache key schema base sources factories ops =
         Flow_sop.Catalog.of_factories ~nodes ~version:Flow_sop.Manifest.version factories
         |> get_flow
       in
-      let renamed, _ =
-        List.fold_left
-          (fun (renamed, next) source ->
-            let source, next = Flow.Syntax.renumber next source in
-            (source :: renamed, next))
-          ([], base) sources
+      (* the library forms' fixed ids, as Catalog.check_workspace splices them *)
+      let bases =
+        Flow_sop.Catalog.Private.library_bases (Flow_sop.Catalog.sources () |> get_flow)
       in
-      let library_forms = workspace_with_children "golden_library" (List.rev renamed) in
+      let renamed =
+        List.map (fun source -> fst (Flow.Syntax.renumber (List.assq source bases) source)) sources
+      in
+      let library_forms = workspace_with_children "golden_library" renamed in
       let library, diagnostics =
         Flow.Workspace.check ~ops ~library:true base_catalog library_forms
       in

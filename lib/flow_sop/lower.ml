@@ -200,6 +200,26 @@ let material_args kind args =
         | arg -> [ arg ])
       args
 
+(* A library definition's cone digest is kept by kind and first form id: library forms have fixed
+   ids (Catalog) and the library is part of the binary. An authored one is digested afresh. *)
+let library_keys = Hashtbl.create 64
+let library_lock = Mutex.create ()
+
+let declaration_key checked (d : Workspace.node_definition) =
+  let compute () = Digest.string (Context_kernel.declaration_source checked d) in
+  let id = d.body.body.form.id in
+  if id < Flow_catalog.library_base then compute ()
+  else
+    match
+      Mutex.protect library_lock (fun () -> Hashtbl.find_opt library_keys (d.kind.qualified, id))
+    with
+    | Some key -> key
+    | None ->
+        let key = compute () in
+        Mutex.protect library_lock (fun () ->
+            Hashtbl.replace library_keys (d.kind.qualified, id) key);
+        key
+
 (* An inlined Lisp call's parameters take the node path: the call's changes over the schema
    defaults (ranges, choices, encoded text through the declared normalizers), then the node's
    arguments. A refusal is the lowering error the node's construction raised. The body's context
@@ -214,7 +234,7 @@ let () =
       let key = String.sub d.kind.qualified 4 (String.length d.kind.qualified - 4) in
       let body, context_inputs = Context_kernel.label_context ~label:key d.body in
       ( { d with body },
-        lazy (Digest.string (Context_kernel.declaration_source checked d)),
+        lazy (declaration_key checked d),
         fun vals ->
           let vals = material_args d.kind.qualified vals in
           let live, vals = List.partition (fun (_, value) -> E.is_live value) vals in

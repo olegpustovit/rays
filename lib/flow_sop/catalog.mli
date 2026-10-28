@@ -40,6 +40,9 @@ val node_definitions : unit -> (Flow.Defnode.t list, Diagnostic.t) result
 module Private : sig
   val reachable_sources : Flow.Syntax.t list -> Flow.Syntax.t list -> Flow.Syntax.t list
   val definitions_of_sources : Flow.Syntax.t list -> (Flow.Defnode.t list, Diagnostic.t) result
+
+  val library_bases : Flow.Syntax.t list -> (Flow.Syntax.t * int) list
+  (** Each source's fixed first form id ({!library_base}), in the whole library given. *)
 end
 
 val check_workspace :
@@ -53,3 +56,7 @@ val check_workspace :
     intact; library forms receive a disjoint ID space and stay out of [Workspace.source]. [sources]
     overrides the embedded definitions for callers providing their own node library, regardless of
     catalog membership. *)
+
+val library_base : int
+(** The first form id of the library forms a check splices in: each library form has a fixed id from
+    its position in the whole library, above any authored id. *)
