@@ -26,6 +26,7 @@ type stats = {
   readback_bytes : int;
   materialisations : int;
   held_buffers : int;
+  freed : int;
 }
 
 let zero =
@@ -41,6 +42,7 @@ let zero =
     readback_bytes = 0;
     materialisations = 0;
     held_buffers = 0;
+    freed = 0;
   }
 
 let add_run stats run =
@@ -629,4 +631,5 @@ let stats t =
     pipeline_compilations = Pipelines.Private.compilations t.pipelines;
     pipeline_releases = Pipelines.Private.releases t.pipelines;
     held_buffers = (if t.closed then 0 else Run.Private.pool_held t.shared);
+    freed = Run.Private.pool_freed t.shared;
   }

@@ -24,6 +24,9 @@
   noise_source
   compact_source
   image_rgba8_source)
+ (foreign_stubs
+  (language c)
+  (names flow_gpu_stubs))
  (libraries flow flow_ir ogpu renderer rays_math lru parallel))
 
 ; the device side of scene/trace, compiled once a scene variant (Trace)

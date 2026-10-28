@@ -6,13 +6,17 @@
   test_workspace_gpu_marks
   bench_marks_gpu
   test_grid_gpu_native
-  test_chain_gpu_native)
+  test_chain_gpu_native
+  bench_chain_recook
+  bench_chain_frames)
  (modules
   test_workspace_gpu_native
   test_workspace_gpu_marks
   bench_marks_gpu
   test_grid_gpu_native
-  test_chain_gpu_native)
+  test_chain_gpu_native
+  bench_chain_recook
+  bench_chain_frames)
  (libraries
   rays
   rays_math

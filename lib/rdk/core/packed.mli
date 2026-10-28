@@ -63,9 +63,10 @@ module Deferred : sig
   (** What holds the value until it is made (a device buffer), for a reader that can use it there;
       rdk never looks inside. *)
 
-  val create : ?holder:holder -> ?release:(unit -> unit) -> (unit -> 'a) -> 'a t
-  (** [release] gives the holder back before the value is made: its owner no longer needs it. A
-      value made after its release is the holder's to refuse. *)
+  val create : ?holder:holder -> ?release:(held:bool -> unit) -> (unit -> 'a) -> 'a t
+  (** [release ~held] gives the holder back before the value is made: its owner no longer needs it.
+      [held]: a reader the owner handed it to may still read it, so it stays readable; otherwise
+      nothing reads it again, and a value made after that is the holder's to refuse. *)
 
   val force : 'a t -> 'a
   val forced : 'a t -> bool
@@ -73,7 +74,7 @@ module Deferred : sig
   val holder : 'a t -> holder option
   (** [None] once forced: the holder is dropped with the thunk. *)
 
-  val releaser : 'a t -> (unit -> unit) option
+  val releaser : 'a t -> (held:bool -> unit) option
   (** [release], while the value is not yet made. *)
 end
 
@@ -89,7 +90,7 @@ module Float3 : sig
 
   val deferred :
     ?holder:Deferred.holder ->
-    ?release:(unit -> unit) ->
+    ?release:(held:bool -> unit) ->
     length:int ->
     (unit -> float array array) ->
     t
@@ -103,7 +104,7 @@ module Float3 : sig
   val holder : t -> Deferred.holder option
   (** A resident value's holder. *)
 
-  val releaser : t -> (unit -> unit) option
+  val releaser : t -> (held:bool -> unit) option
   (** A resident value's [release] ({!Deferred.create}). *)
 
   module Builder : sig

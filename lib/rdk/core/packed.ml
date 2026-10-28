@@ -111,7 +111,7 @@ module Deferred = struct
   type 'a t = {
     make : ((unit -> 'a) * holder option) option Atomic.t;
     value : 'a option Atomic.t;
-    release : (unit -> unit) option;
+    release : (held:bool -> unit) option;
   }
 
   let create ?holder ?release make =

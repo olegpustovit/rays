@@ -27,7 +27,7 @@ module Gpu = struct
     materialise : unit -> float array array;
     resident : E.value option;
     settle : unit -> (unit, Diagnostic.t) result;
-    release : unit -> unit;
+    release : held:bool -> unit;
   }
 
   type kernel = {
@@ -51,7 +51,7 @@ module Gpu = struct
               materialise = (fun () -> planes);
               resident = None;
               settle = (fun () -> Ok ());
-              release = ignore;
+              release = (fun ~held:_ -> ());
             }
       | _ -> Error (Diagnostic.error ~code:"E_GPU" "GPU output is not a float array."))
 

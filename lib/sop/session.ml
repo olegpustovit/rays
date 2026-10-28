@@ -46,8 +46,10 @@ module Entry_cache = Lru.Make (String)
 type payload_pool = {
   refs : (int, int * int) Hashtbl.t;
   mutable bytes : int;
-  resident : (int, unit -> unit) Hashtbl.t;
+  resident : (int, held:bool -> unit) Hashtbl.t;
   mutable dropped : int list;
+  handed : (int, unit) Hashtbl.t;
+      (** resident ids a cook's root held: a caller may read them, so they are only retired *)
 }
 
 type t = {
@@ -107,6 +109,7 @@ let create ~max_entries ~max_payload_bytes =
         bytes = 0;
         resident = Hashtbl.create 16;
         dropped = [];
+        handed = Hashtbl.create 16;
       }
     in
     Ok
@@ -476,6 +479,7 @@ let snapshot session =
       bytes = session.payload.bytes;
       resident = Hashtbl.create 1;
       dropped = [];
+      handed = Hashtbl.create 1;
     }
   in
   {
@@ -899,10 +903,14 @@ and evaluate_uncached memo session context node =
                 Ok output))
 
 (* At a cook's end, on the cooking domain: what entries dropped and neither this cook's root nor the
-   previous one holds goes back to its device now, not when it is collected. *)
+   previous one holds goes back to its device now, not when it is collected: retired (still
+   readable) if a root ever held it, else reused at once, since nothing outside the session saw it. *)
 let release_dropped session (result : (output, Diagnostic.t) result) =
   let payload = session.payload in
   let root = match result with Ok output -> List.map fst (releasers output) | Error _ -> [] in
+  List.iter
+    (fun id -> if Hashtbl.mem payload.resident id then Hashtbl.replace payload.handed id ())
+    root;
   let held = root @ session.previous_root in
   session.previous_root <- root;
   if payload.dropped <> [] then begin
@@ -921,7 +929,8 @@ let release_dropped session (result : (output, Diagnostic.t) result) =
           match Hashtbl.find_opt payload.resident id with
           | Some release ->
               Hashtbl.remove payload.resident id;
-              release ()
+              release ~held:(Hashtbl.mem payload.handed id);
+              Hashtbl.remove payload.handed id
           | None -> ())
       (List.sort_uniq Int.compare dropped)
   end
@@ -974,6 +983,7 @@ let stats session =
 let forget_resident session =
   session.previous_root <- [];
   Hashtbl.reset session.payload.resident;
+  Hashtbl.reset session.payload.handed;
   session.payload.dropped <- []
 
 let clear session =

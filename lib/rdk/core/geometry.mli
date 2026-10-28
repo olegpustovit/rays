@@ -34,7 +34,7 @@ val payload_components : t -> (int * int) list
 (** Globally unique data ID and packed byte size for each structurally shared position, topology,
     attribute, and group component. *)
 
-val releasers : t -> (int * (unit -> unit)) list
+val releasers : t -> (int * (held:bool -> unit)) list
 (** The resident components' releases ({!Packed.Deferred.releaser}), by {!payload_components} id. *)
 
 val attributes : t -> Attribute.t list

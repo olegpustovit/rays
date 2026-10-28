@@ -14,6 +14,12 @@ type slot = {
    check: the runner hands the slot's buffer over and makes a fresh one for its next dispatch. The
    holder materialises it once (from any domain: an invalidate and a conversion, no queue work);
    collected, its buffer comes back through [released] and is destroyed on the initial domain. *)
+type device_pressure
+
+(* a block the GC counts as [bytes] of memory, as a Bigarray its data: a dead holder is collected as
+   promptly as an array of its buffer's size *)
+external device_pressure : int -> device_pressure = "rays_flow_gpu_device_pressure"
+
 type kept = {
   id : int;
   kept_buffer : B.buffer;
@@ -22,26 +28,31 @@ type kept = {
   kept_width : int;
   lock : Mutex.t;  (** orders an invalidate against close's destroy; never held while converting *)
   planes : float array array option Atomic.t;
-  mutable destroyed : bool;
+  mutable destroyed : bool;  (** its buffer is gone: closed (read first) or freed (never read) *)
+  mutable retired : bool;  (** handed out once: it stays readable from then on *)
   placeholder : float array;
       (** one element of zeros: a later kernel's source that is this array reads the buffer *)
   kept_epoch : int64;
   settled : bool Atomic.t;  (** completed, its status read: CPU readers may read it *)
   readers : int Atomic.t;  (** conversions in progress: its buffer is not reused under them *)
   mutable thaw : unit -> unit;  (** materialise it (initial domain), so its buffer can be reused *)
+  pressure : device_pressure; [@warning "-69"]  (** the buffer's size, told to the GC; never read *)
 }
 
 (* Buffers runners share (a host's, across edits): those held by kept outputs, by holder; free ones
-   of any size class (capacity doubles, so a class is [length, 2 * length]), at most 8; collected
+   of any size class (capacity doubles, so a class is [length, 2 * length]), {!free_budget}; collected
    or read holders' ids, from any domain; retired holders, whose owner (a session) dropped them but
    which a reader may still hold: their buffers stay theirs until they are collected or read, and
-   past 12 the oldest is read into owned planes so its buffer comes back. *)
+   past {!retired_budget} bytes the oldest is read into owned planes so its buffer comes back. *)
 type pool = {
   held : (int, B.buffer * B.floats * int * int Atomic.t) Hashtbl.t;
   mutable free : (B.buffer * B.floats * int) list;
   released : int list Atomic.t;
-  retiring : kept Weak.t list Atomic.t;
-  mutable retired : kept Weak.t list;  (** oldest first *)
+  retiring : (int * kept Weak.t) list Atomic.t;
+  freed : int Atomic.t;  (** holders freed unread *)
+  mutable retired : (int * kept Weak.t) list;
+      (** oldest first, by id: only the one {!reclaim} reads is ever [Weak.get], since a get while
+          the GC marks keeps the holder alive another cycle *)
 }
 
 let pool () =
@@ -50,6 +61,7 @@ let pool () =
     free = [];
     released = Atomic.make [];
     retiring = Atomic.make [];
+    freed = Atomic.make 0;
     retired = [];
   }
 
@@ -207,6 +219,10 @@ let rec push cell value =
   let old = Atomic.get cell in
   if not (Atomic.compare_and_set cell old (value :: old)) then push cell value
 
+(* Free buffers kept for reuse: any 8, or more while their bytes stay under this. A collection returns
+   several dead holders' buffers at once, which the next cooks take. *)
+let free_budget = 256 lsl 20
+
 (* on the initial domain: recycle or destroy what collected or read holders gave back (a buffer a
    reader is still converting waits for the next drain) *)
 let drain_pool pool =
@@ -216,7 +232,9 @@ let drain_pool pool =
       | Some (_, _, _, readers) when Atomic.get readers > 0 -> push pool.released id
       | Some (buffer, floats, capacity, _) ->
           Hashtbl.remove pool.held id;
-          if List.length pool.free < 8 then pool.free <- (buffer, floats, capacity) :: pool.free
+          let free = List.fold_left (fun sum (_, _, c) -> sum + c) 0 pool.free in
+          if List.length pool.free < 8 || free + capacity <= free_budget then
+            pool.free <- (buffer, floats, capacity) :: pool.free
           else ignore (B.destroy_buffer buffer)
       | None -> ())
     (Atomic.exchange pool.released [])
@@ -234,18 +252,24 @@ let take_free pool length =
       Some held
   | None -> None
 
-(* Past 12 retired holders still unread, the oldest is read now (owned planes: its later readers
-   see the same values) and its buffer comes back, so memory stays bounded without a collection. *)
+(* Past this many bytes of retired holders still unread (alive: the GC is told each one's size, so a
+   dead one is collected first), the oldest is read now (owned planes: its later readers see the same
+   values) and its buffer comes back, so device memory stays bounded. ponytail: a constant, the
+   device's working-set size if a smaller GPU needs it. *)
+let retired_budget = 2 lsl 30
+
 let reclaim pool =
-  let live w =
-    match Weak.get w 0 with
-    | Some k -> Atomic.get k.planes = None && Hashtbl.mem pool.held k.id
-    | None -> false
+  drain_pool pool;
+  let held (id, w) = Weak.check w 0 && Hashtbl.mem pool.held id in
+  pool.retired <- List.filter held (pool.retired @ List.rev (Atomic.exchange pool.retiring []));
+  let bytes sum (id, _) =
+    match Hashtbl.find_opt pool.held id with
+    | Some (_, _, capacity, _) -> sum + capacity
+    | None -> sum
   in
-  pool.retired <- List.filter live (pool.retired @ List.rev (Atomic.exchange pool.retiring []));
-  if List.length pool.retired > 12 then begin
+  if List.fold_left bytes 0 pool.retired > retired_budget then begin
     (match pool.retired with
-    | w :: rest ->
+    | (_, w) :: rest ->
         pool.retired <- rest;
         Option.iter (fun k -> if Atomic.get k.readers = 0 then k.thaw ()) (Weak.get w 0)
     | [] -> ());
@@ -815,6 +839,7 @@ let materialise t kept =
           Atomic.set kept.settled true
         end
         else invalid_arg "Run.materialise: a device output was read before its cook settled";
+      if kept.destroyed then invalid_arg "Run.materialise: a device output was read after its free";
       let length = kept.kept_count * kept.kept_width in
       (* Nothing here can fail, so no reader (an rdk accessor on any domain) ever sees an error:
          the buffer is mapped, the range is its own, it is destroyed only under this lock after
@@ -844,14 +869,29 @@ let materialise t kept =
 
 let next_kept = Atomic.make 0
 
-(* Its owner (a session dropping the result) no longer needs it, from any domain: it is retired,
-   still readable; its buffer comes back when it is collected or read, or when {!reclaim} reads it. *)
-let retire t kept =
-  if Atomic.get kept.planes = None then begin
-    let w = Weak.create 1 in
-    Weak.set w 0 (Some kept);
-    push t.pool.retiring w
-  end
+(* Its owner (a session dropping the result) no longer needs it, from any domain. [held] (it was
+   handed out, now or before): it is retired, still readable; its buffer comes back when it is
+   collected or read, or when {!reclaim} reads it. Otherwise no one reads it again: its buffer comes
+   back at once. *)
+let release_kept t kept ~held =
+  if Atomic.get kept.planes = None then
+    let retire =
+      Mutex.protect kept.lock (fun () ->
+          if kept.destroyed then false
+          else if held || kept.retired then (
+            kept.retired <- true;
+            true)
+          else (
+            kept.destroyed <- true;
+            Atomic.incr t.pool.freed;
+            release t.pool.released kept.id;
+            false))
+    in
+    if retire then begin
+      let w = Weak.create 1 in
+      Weak.set w 0 (Some kept);
+      push t.pool.retiring (kept.id, w)
+    end
 
 (* Hand the output's buffer to a lazy planar store: nothing is read or waited for now. *)
 let keep ?index output : (Flow_ir.Gpu.planes, Diagnostic.t) result =
@@ -875,11 +915,13 @@ let keep ?index output : (Flow_ir.Gpu.planes, Diagnostic.t) result =
             lock = Mutex.create ();
             planes = Atomic.make None;
             destroyed = false;
+            retired = false;
             placeholder = Array.make width 0.;
             kept_epoch = output.epoch;
             settled = Atomic.make false;
             readers = Atomic.make 0;
             thaw = ignore;
+            pressure = device_pressure slot.capacity;
           }
         in
         let capacity = slot.capacity in
@@ -910,7 +952,7 @@ let keep ?index output : (Flow_ir.Gpu.planes, Diagnostic.t) result =
             materialise = (fun () -> materialise t kept);
             resident = Some resident;
             settle = (fun () -> settle t kept);
-            release = (fun () -> retire t kept);
+            release = (fun ~held -> release_kept t kept ~held);
           }
     | _ ->
         (* an empty, unmapped or caller-encoded output is read now *)
@@ -922,7 +964,7 @@ let keep ?index output : (Flow_ir.Gpu.planes, Diagnostic.t) result =
               materialise = (fun () -> planes);
               resident = None;
               settle = (fun () -> Ok ());
-              release = ignore;
+              release = (fun ~held:_ -> ());
             })
           (planes ~index output)
 
@@ -1014,6 +1056,8 @@ module Private = struct
   let held_buffers t =
     drain t;
     Hashtbl.length t.pool.held
+
+  let pool_freed pool = Atomic.get pool.freed
 
   let pool_held pool =
     drain_pool pool;

@@ -7,9 +7,10 @@
    it). Two consecutive fused writes run on the device with nothing uploaded or read back on a
    recook (the second binds the first's resident P), and reading the second's P materialises one
    output. Once the geometries are collected no buffer is held. CPU and GPU cook times are
-   printed, median of 5. One session toggles an edit 20 times (two lowerings): what the session
-   drops goes back to the device at once (held buffers stay bounded and no buffer is created once
-   warm, with no collection), nothing is uploaded or read back, and the median recook is printed. *)
+   printed, median of 5. A session that drops the first write (one entry) frees its unread outputs
+   at once, since it never handed them out. One session toggles an edit (two lowerings) with every
+   result kept: nothing is uploaded or read back, a result 15 cooks old reads as the latest, and
+   the median recook is printed. *)
 let ok = function Ok value -> value | Error d -> failwith (Diagnostic.to_string d)
 let side = try int_of_string (Sys.getenv "GRID_SIDE") with Not_found -> 1000
 
@@ -227,6 +228,26 @@ let () =
           Printf.printf
             "two consecutive fused writes: GPU recook %.3f s, largest difference %.2e\n%!"
             chained_seconds !worst;
+          (* one entry: the second write evicts the first, whose P and N no one was handed (the
+             second keeps its noise), so they are freed at the cook's end, not collected *)
+          let session =
+            Sop.Session.create ~max_entries:1 ~max_payload_bytes:(1 lsl 30) |> Result.get_ok
+          in
+          Fun.protect
+            ~finally:(fun () -> Sop.Session.close session)
+            (fun () ->
+              ignore (cook_in session second);
+              let before = stats () in
+              let freed, _ = cook_in session second in
+              let after = stats () in
+              if after.freed - before.freed < 2 then
+                failwith
+                  (Printf.sprintf "the dropped first write freed %d outputs, not 2"
+                     (after.freed - before.freed));
+              if after.materialisations <> before.materialisations then
+                failwith "freeing the first write read it back";
+              if Rdk.Packed.Float3.get (Rdk.Geometry.positions freed) 7 <> Rdk.Packed.Float3.get q 7
+              then failwith "the second write reads other values once the first is freed");
           (* one session toggling an edit (two lowerings, translations 1 and 2): the grid hits,
              each cook evicts the other write, whose buffers come back without a collection *)
           let session =
@@ -265,22 +286,19 @@ let () =
               let after = stats () in
               if !dispatches <> 16 then
                 failwith (Printf.sprintf "16 edited recooks took %d dispatches" !dispatches);
-              (* the results are all kept (read below), so new buffers are made only until 12 are
-                 retired; then each cook reads the oldest back and reuses its buffer (48 without the
-                 pool) *)
-              if after.buffer_creations - before.buffer_creations > 12 then
+              (* the results are all kept (read below): retired, never read back (the pool's budget
+                 is far above 16 results), at most a cook's 3 buffers made per cook *)
+              if after.buffer_creations - before.buffer_creations > 48 then
                 failwith
                   (Printf.sprintf "edited recooks created %d buffers"
                      (after.buffer_creations - before.buffer_creations));
               if
                 after.readback_bytes <> before.readback_bytes
                 || after.input_uploads <> before.input_uploads
+                || after.materialisations <> before.materialisations
               then failwith "edited recooks moved data";
-              (* bounded with no collection: 12 retired, a cook's 3, two roots' and two entries' *)
-              if after.held_buffers > 30 then
-                failwith (Printf.sprintf "edited recooks hold %d buffers" after.held_buffers);
-              (* a result handed out 15 cooks ago, retired and possibly read back to bound the
-                 pool, reads every attribute as the latest cook of the same lowering does *)
+              (* a result handed out 15 cooks ago, retired, reads every attribute as the latest
+                 cook of the same lowering does *)
               let stale = fst (List.hd cooked) and latest = fst (List.nth cooked 14) in
               let read g =
                 ( Array.init (Rdk.Geometry.point_count g)
@@ -306,6 +324,8 @@ let () =
                 ignore (cook_in session (edit y));
                 (stats ()).buffer_creations - creations
               in
+              (* the kept results are dead now: collected, their buffers are back in the pool *)
+              Gc.full_major ();
               let first = fresh 3.0 in
               let later = List.map fresh [ 4.0; 5.0; 6.0 ] in
               Printf.printf "new runners per edit: %d buffers created (the first %d), %d held\n%!"

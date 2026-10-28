@@ -523,7 +523,7 @@ let () =
                       materialise = (fun () -> [||]);
                       resident = None;
                       settle = (fun () -> Ok ());
-                      release = ignore;
+                      release = (fun ~held:_ -> ());
                     });
             });
     }

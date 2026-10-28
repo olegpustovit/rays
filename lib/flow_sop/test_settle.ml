@@ -48,7 +48,7 @@ let backend : Flow_ir.Gpu.backend =
                         incr settles;
                         if !fail then Error (Diagnostic.error ~code:"E_KERNEL" "mock status")
                         else Ok ());
-                    release = (fun () -> incr releases);
+                    release = (fun ~held:_ -> incr releases);
                   });
           });
   }

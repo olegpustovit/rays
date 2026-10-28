@@ -2,9 +2,10 @@ type t
 type output
 
 type pool
-(** Kept outputs' buffers that runners share: recycled by size class (at most 8 free), and bounded
-    without a collection: past 12 retired holders still unread, the oldest is read into owned planes
-    and its buffer reused. *)
+(** Kept outputs' buffers that runners share, recycled by size class (any 8 free, more within 256
+    MiB). Each holder tells the GC its buffer's size, so a dead one is collected and its buffer
+    returns without a read; past 2 GiB of retired holders still unread, the oldest is read into
+    owned planes and its buffer reused. *)
 
 val pool : unit -> pool
 
@@ -83,12 +84,14 @@ val keep : ?index:int -> output -> (Flow_ir.Gpu.planes, Diagnostic.t) result
 (** Hand an output, possibly still in flight, to a lazy planar store without waiting. [settle] (on
     the initial domain) waits for the dispatch and reads its status once; [materialise] reads
     {!planes} once, from any domain after [settle] succeeded (on the initial domain it waits
-    itself), with no queue work. [release] retires it (its owner dropped the result): it stays
-    readable, and its buffer comes back to the pool once it is read or collected, or when the pool
-    reads it to bound memory. The runner takes a recycled or fresh buffer for its next dispatch;
-    {!close} first materialises every holder still alive. [resident] is the output's placeholder, an
-    array of [width] zeros: a later {!dispatch} (of any runner) whose input is that array binds the
-    held buffer instead, while it is held and unread. *)
+    itself), with no queue work. [release ~held:true] retires it (its owner dropped a result it
+    handed out): it stays readable, and its buffer comes back to the pool once it is read or
+    collected, or when the pool reads it to bound memory. [release ~held:false] (never handed out,
+    and not retired before) frees it: its buffer comes back at once and a later read raises. The
+    runner takes a recycled or fresh buffer for its next dispatch; {!close} first materialises every
+    holder still alive. [resident] is the output's placeholder, an array of [width] zeros: a later
+    {!dispatch} (of any runner) whose input is that array binds the held buffer instead, while it is
+    held and unread. *)
 
 val buffer : ?index:int -> output -> Ogpu.Backend.buffer option
 val count_record : output -> Ogpu.Backend.buffer option
@@ -186,6 +189,9 @@ module Private : sig
 
   val create_owned :
     ?pool:pool -> Ogpu.Backend.device -> Ogpu.Backend.queue -> Pipelines.t -> Emit.msl -> t
+
+  val pool_freed : pool -> int
+  (** Holders freed unread ([release ~held:false]). *)
 
   val pool_held : pool -> int
   (** Buffers its kept outputs hold now, after recycling what collected or read ones gave back. *)
