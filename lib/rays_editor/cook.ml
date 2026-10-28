@@ -8,7 +8,7 @@ type bounds = Rays_math.Vec3.t * Rays_math.Vec3.t
    prepared value, and bounds in the object's own space. *)
 type 'prepared piece = {
   id : int;
-  graph : Graph.t;
+  graph : Node.t;
   prepared : 'prepared;
   bounds : bounds option;
   settings : Settings.t;
@@ -48,7 +48,7 @@ type 'prepared t = {
   value_lanes : Flow_sop.Value_lane.t Document.Int_map.t;
   state : Flow.Eval.state;
   applied : Flow_sop.Value_lane.resolved Document.Int_map.t;
-  graphs : (int * Graph.t) list;
+  graphs : (int * Node.t) list;
   displayed : (int * int) list;  (* the display node each graph compiles *)
   probing : (int * int) list;  (* the (object, node) pairs the last submission asked to summarise *)
   summaries : summary list;
@@ -269,7 +269,7 @@ let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty) ?(pump=fun()
     match Option.bind (Document.Int_map.find_opt object_id compiled) (fun (_, c) ->
         Result.to_option (Edit_graph.compiled_node c ~node_id)) with
     | Some _ as node -> node
-    | None -> Option.bind (List.assoc_opt object_id graphs) (fun graph -> Graph.find graph ~node_id) in
+    | None -> Option.bind (List.assoc_opt object_id graphs) (fun graph -> Node.find graph ~node_id) in
   let probed = if not submit then [] else List.filter_map (fun key ->
     Option.map (fun node -> key, node) (node_of key)) (List.take 64 probes) in
   let summary (key, node) (output : Session.output) =
@@ -294,7 +294,7 @@ let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty) ?(pump=fun()
     let rec loop reversed graphs outputs = match graphs, outputs with
       | [], [] -> Ok (Displayed (List.rev reversed, found, data))
       | (id, graph) :: graphs, (output : Session.output) :: outputs ->
-          let projection = Context.cache_projection (Graph.dependencies graph) context in
+          let projection = Context.cache_projection (Node.graph_dependencies graph) context in
           let reused = List.find_opt (fun piece -> piece.id = id && piece.graph == graph
               && piece.settings == settings && piece.context = projection
               && Pick.same_set piece.lit lit) previous in
@@ -359,7 +359,7 @@ let update ?gpu ?input ?live ?(probes = []) ?(lit = Pick.Set.empty) ?(pump=fun()
             List.assoc_opt object_id graphs with
         | Some piece, Some graph when Node.id graph = node_id && piece.graph == graph
             && Result.fold ~ok:(fun context -> piece.context =
-                Context.cache_projection (Graph.dependencies graph) context)
+                Context.cache_projection (Node.graph_dependencies graph) context)
               ~error:(fun _ -> false) (context value timeline frame) ->
             Some piece.bounds, framing
         | _ ->

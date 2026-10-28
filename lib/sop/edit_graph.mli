@@ -1,8 +1,8 @@
 (** Immutable editable representation of a procedural network.
 
-    [Graph.t] remains the compiled, cookable DAG. This document can also hold
+    [Node.t] remains the compiled, cookable DAG. This document can also hold
     disconnected input slots and nodes outside the current display path, then
-    compile any valid node back to an ordinary [Graph.t]. It owns topology
+    compile any valid node back to an ordinary [Node.t]. It owns topology
     only; editor positions, selection, menus, and cooking belong to UI layers. *)
 
 type t
@@ -28,7 +28,7 @@ type node_info = {
   has_parameters : bool;
 }
 
-val of_graph : Graph.t -> t
+val of_graph : Node.t -> t
 val empty : t
 (** No nodes; build it up with [add_node] so every node keeps its factory. *)
 
@@ -46,15 +46,15 @@ val node_factory_fields : t -> node_id:int -> Param.field_view list
 
 (** Compile the document root, or a specific display node. Disconnected slots,
     missing references, and cycles are reported without changing the document. *)
-val compile : t -> (Graph.t, string) result
-val compile_node : t -> node_id:int -> (Graph.t, string) result
+val compile : t -> (Node.t, string) result
+val compile_node : t -> node_id:int -> (Node.t, string) result
 
 (** Every node of the document compiled once. Pass the previous result to
     reuse each node whose entry and compiled inputs are physically unchanged,
     so a parameter edit rebuilds only the edited node and its consumers. *)
 type compiled
 val compile_all : ?previous:compiled -> t -> compiled
-val compiled_node : compiled -> node_id:int -> (Graph.t, string) result
+val compiled_node : compiled -> node_id:int -> (Node.t, string) result
 
 (** Replace only the node payload. Its logical id and input arity must match. *)
 val replace_node : Node.t -> t -> (t, string) result

@@ -246,7 +246,7 @@ let overlay graph preview (frame : Frame.t) =
   Scene.[
     text ~at:(20, 18) "SOP Shattered Cube";
     text ~at:(20, 43) (Printf.sprintf "%d nodes · %s"
-      (List.length (Graph.inspect graph)) pieces);
+      (List.length (Node.inspect graph)) pieces);
     text ~at:(20, (snd frame.input.size) - 82)
       "Select source-switch for Cube / Dodecahedron · VIEW displays any SOP";
   ]

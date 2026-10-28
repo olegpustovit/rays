@@ -166,7 +166,7 @@ module Private : sig
     type t
     val initial : t
     val step :
-      ?live:bool -> t -> graphs:Sop.Graph.t list -> effects:Param.effects ->
+      ?live:bool -> t -> graphs:Sop.Node.t list -> effects:Param.effects ->
       context_changed:bool -> force:bool -> busy:bool -> frame:Rays.Frame.t ->
       t * bool
   end
@@ -291,7 +291,7 @@ module Private : sig
     type bounds = Rays_math.Vec3.t * Rays_math.Vec3.t
     type 'prepared piece = {
       id : int;
-      graph : Sop.Graph.t;
+      graph : Sop.Node.t;
       prepared : 'prepared;
       bounds : bounds option;
       settings : Settings.t;
@@ -658,7 +658,7 @@ module Workspace : sig
       Each invocation starts a fresh fold and pins every frame fact. *)
 
   val sop_graphs : ?factories:Sop.Edit_graph.factory list -> Workspace_doc.t ->
-    ((string * Sop.Graph.t) list, string) result
+    ((string * Sop.Node.t) list, string) result
   (** Every [sop] graph of the document with its result compiled, by name, for cooking without
       an editor (a check, a batch). A graph without a result node is left out. *)
 

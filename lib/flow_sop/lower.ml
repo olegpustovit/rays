@@ -452,7 +452,7 @@ let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
       let root = match graph.root with Some root -> root
         | None -> fail "E_LOWER" "A Lisp node body must return geometry" in
       let compiled = edit (Edit.compile_node graph.network.geometry ~node_id:root) in
-      let dependencies = Sop.Graph.dependencies compiled in
+      let dependencies = Sop.Node.graph_dependencies compiled in
       let driven = graph.network.states<>[] || not(Port.Map.is_empty graph.network.drives)
           || not(Network.Int_map.is_empty graph.network.frame_nodes) in
       let dependencies = if driven then
@@ -467,7 +467,7 @@ let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
       let dependencies = if Context_kernel.depends ~op:"sop/context_time" ~inputs:parameters ~defs:checked.defs definition.body then
         Sop.Context.Dependencies.union dependencies (Sop.Context.Dependencies.one Time)
         else dependencies in
-      let owned = Sop.Graph.inspect compiled |> List.filter (fun (node : Sop.Graph.info) ->
+      let owned = Sop.Node.inspect compiled |> List.filter (fun (node : Sop.Node.info) ->
         not (String.starts_with ~prefix:"lisp_capture_" node.operation)) in
       let declared = definition.kind.facts in
       (* A declared [:facts] is the node's contract, as the native factory's was: the body's
@@ -476,7 +476,7 @@ let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
          undeclared write or a replaced topology at cook time. *)
       let preserved = match declared with
         | Some facts -> facts.preserves_topology
-        | None -> List.for_all (fun (node : Sop.Graph.info) ->
+        | None -> List.for_all (fun (node : Sop.Node.info) ->
             node.facts.topology=Sop.Node.Preserved) owned in
       let input_count = List.length inputs in
       let resolve names = Check.resolve_component_names (fun name ->
@@ -486,7 +486,7 @@ let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
          otherwise only what the body reads counts. *)
       let components declared names =
         let inferred = List.sort_uniq String.compare
-          (List.concat_map (fun (node : Sop.Graph.info) -> names node.facts) owned) in
+          (List.concat_map (fun (node : Sop.Node.info) -> names node.facts) owned) in
         match declared with
         | None -> inferred
         | Some declared ->
@@ -507,7 +507,7 @@ let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
         writes=components (Option.map (fun (f : Check.kernel_facts) -> f.writes) declared) (fun f -> f.writes);
         topology=(if preserved then Preserved else Changed);
         exact=Option.fold ~none:true ~some:(fun (facts : Check.kernel_facts) -> facts.exact)
-          definition.kind.facts && List.for_all (fun (node : Sop.Graph.info) -> node.facts.exact) owned} in
+          definition.kind.facts && List.for_all (fun (node : Sop.Node.info) -> node.facts.exact) owned} in
       let body context =
         if not driven then Ok compiled else
         let lane = Value_lane.create () in

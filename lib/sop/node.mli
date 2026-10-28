@@ -153,3 +153,24 @@ module Private : sig
       cache) and passes their outputs, in order, to [cook] in place of the
       inputs. *)
 end
+
+type info = {
+  id : int;
+  label : string;
+  operation : string;
+  version : int;
+  parameters : string;
+  facts : facts;
+  dependencies : Context.Dependencies.t;
+  input_ids : int list;
+  has_parameters : bool;
+}
+
+(** Deterministic input-before-consumer order. Shared nodes appear once.
+    [Session.inspect] caches repeated queries when a session owns the work. *)
+val inspect : t -> info list
+val find : t -> node_id:int -> t option
+
+(** Union of context facts consumed anywhere in the reachable DAG. Sketch
+    runtimes use this to schedule external-effect recooks. *)
+val graph_dependencies : t -> Context.Dependencies.t

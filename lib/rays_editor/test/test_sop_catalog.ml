@@ -391,7 +391,7 @@ let run ?(exhaustive = false) () =
       ~node_id:(Node.id orient)
       ["location", (field custom_noise "location").current;
        "range", (field custom_noise "range").current] |> Result.get_ok in
-  let changed = Graph.find changed_graph ~node_id:(Node.id orient)
+  let changed = Node.find changed_graph ~node_id:(Node.id orient)
       |> Option.get in
   check (effects.cook && Node.id changed = Node.id orient
       && (field changed "location").current
@@ -413,18 +413,18 @@ let run ?(exhaustive = false) () =
       ("catalog field did not rebuild: " ^ field))
     [plane, "height_attribute", ""; targets, "id_attribute", "";
      orient, "name", "orient"; fracture, "piece_attribute", "piece"];
-  let parameterized = Graph.inspect graph
-      |> List.filter (fun info -> info.Graph.has_parameters)
-      |> List.map (fun info -> info.Graph.label) in
+  let parameterized = Node.inspect graph
+      |> List.filter (fun info -> info.Node.has_parameters)
+      |> List.map (fun info -> info.Node.label) in
   List.iter (fun label -> check (List.mem label parameterized)
       ("catalog node has no PPX inspector metadata: " ^ label))
     ["box"; "grid"; "mountain"; "points"; "orient"; "jitter"; "copy";
      "fracture"; "exploded-view"];
-  let point_node = Graph.inspect graph
-      |> List.find (fun info -> info.Graph.label = "points") in
+  let point_node = Node.inspect graph
+      |> List.find (fun info -> info.Node.label = "points") in
   let edited, effects = edit_parameters graph ~node_id:point_node.id
       ["points", Param.Int_value 999] |> Result.get_ok in
-  let edited_points = Graph.find edited ~node_id:point_node.id |> Option.get in
+  let edited_points = Node.find edited ~node_id:point_node.id |> Option.get in
   let value = Node.parameter_fields edited_points
       |> List.find (fun field -> field.Param.name = "points") in
   check (effects.cook && value.current = Param.Int_value 50)

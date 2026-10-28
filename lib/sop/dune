@@ -4,7 +4,7 @@
  (libraries param input rays_diagnostic rays_math rdk lru unix parallel)
  (preprocess (pps rays.ppx))
  (modules context image kernel payload node session async_cook image_nodes
-  support groups sop_topology attributes shapes nodes zone custom graph edit_graph)
+  support groups sop_topology attributes shapes nodes zone custom edit_graph)
  (private_modules support groups sop_topology attributes shapes))
 
 (test

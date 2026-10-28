@@ -154,16 +154,16 @@ let test_node_owned_parameters_and_graph_edit () =
   check (List.length (Node.parameter_fields editable) = 2
       && Node.has_parameters editable)
     "node-owned parameter metadata was not exposed";
-  let original_infos = Graph.inspect graph in
+  let original_infos = Node.inspect graph in
   let translated, effects = edit_parameters graph
       ~node_id:(Node.id editable)
       ["translate_x", Param.Float_value 1.5] |> get_ok in
   check (effects.cook && not effects.view && not effects.export)
     "graph edit lost cook impact";
-  let edited = Option.get (Graph.find translated ~node_id:(Node.id editable)) in
+  let edited = Option.get (Node.find translated ~node_id:(Node.id editable)) in
   check (Node.id edited = Node.id editable
-      && List.map (fun info -> info.Graph.id) (Graph.inspect translated)
-         = List.map (fun info -> info.Graph.id) original_infos)
+      && List.map (fun info -> info.Node.id) (Node.inspect translated)
+         = List.map (fun info -> info.Node.id) original_infos)
     "graph edit did not preserve logical node identities";
   (match Node.inputs translated with
    | [left; right] -> check (left == right && Node.id left = Node.id editable)
@@ -189,7 +189,7 @@ let test_node_owned_parameters_and_graph_edit () =
   ignore (cook_ok evaluator current view_only);
   check ((Session.stats evaluator).cooks = before_view.cooks)
     "view-only metadata invalidated cooked geometry";
-  let view_node = Option.get (Graph.find view_only ~node_id:(Node.id editable)) in
+  let view_node = Option.get (Node.find view_only ~node_id:(Node.id editable)) in
   let display = List.find (fun field -> field.Param.name = "display_gain")
       (Node.parameter_fields view_node) in
   check (display.current = Param.Float_value 1.75)
@@ -773,7 +773,7 @@ let test_error_trace_and_cancellation () =
 let test_inspection_sharing_and_bridge () =
   let shared = Lisp_sop.node {|(sop/box :normals "Auto" :connectivity "Triangles")|} |> Node.relabel "prototype" in
   let graph = Lisp_sop.node ~with_:["shared", (shared)] {|(sop/merge (sop/ext_shared) (sop/ext_shared))|} in
-  let infos = Graph.inspect graph in
+  let infos = Node.inspect graph in
   check (List.length infos = 2) "graph inspection duplicated shared subgraph";
   check (Node.id shared > 0 && Node.label shared = "prototype") "node identity/label";
   let evaluator = session () in

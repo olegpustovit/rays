@@ -7,8 +7,8 @@ let workspace = In_channel.with_open_bin path In_channel.input_all
   |> Rays_editor.Workspace.load |> Result.map_error (fun ds ->
       String.concat "\n" (List.map Diagnostic.to_string ds)) |> get
 let graph = Rays_editor.Workspace.sop_graphs workspace |> get |> List.assoc "shards"
-let fracture = Graph.inspect graph |> List.find (fun (i : Graph.info) -> i.operation = "boolean")
-  |> fun i -> Graph.find graph ~node_id:i.id |> Option.get
+let fracture = Node.inspect graph |> List.find (fun (i : Node.info) -> i.operation = "boolean")
+  |> fun i -> Node.find graph ~node_id:i.id |> Option.get
 
 let with_cook domains f =
   let session = Session.create ~max_entries:32 ~max_payload_bytes:(256 * 1024 * 1024) |> get in

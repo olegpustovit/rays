@@ -9,7 +9,7 @@ open Sop
 type t = {
   initialized : bool;
   dirty : bool;
-  graphs : Graph.t list;
+  graphs : Node.t list;
   dependencies : Context.Dependencies.t;
 }
 
@@ -20,7 +20,7 @@ let step ?(live = false) value ~graphs ~effects ~context_changed ~force ~busy ~f
   let dirty = value.dirty || effects.Param.cook || force in
   let dependencies = if List.equal ( == ) graphs value.graphs then value.dependencies
     else List.fold_left (fun union graph ->
-      Context.Dependencies.union union (Graph.dependencies graph))
+      Context.Dependencies.union union (Node.graph_dependencies graph))
       Context.Dependencies.static graphs in
   let dynamic = Context.Dependencies.mem Context.Dependencies.Input dependencies
       || (context_changed && (Context.Dependencies.mem Context.Dependencies.Time dependencies
