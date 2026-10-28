@@ -801,94 +801,9 @@ let wire_boxes (t : t) ui ~wire_hits ?(origin = (0., 0.)) name (cx, cy, cw, ch) 
     | _ -> () in
   if w.target <> None && not (tagged t w) then segments 0 w.pts
 
-let update ?(pressed = []) t ui (frame : Frame.t) =
-  (* the first view shows the whole graph, at zoom 1 when it fits (Home frames everything) *)
-  let t = if t.framed then t else { (frame_all t) with framed = true } in
-  let changes = ref [] in
-  let emit c = changes := c :: !changes in
-  let t, hint_changes = step_hints t ~pressed frame in
-  List.iter emit hint_changes;
-  let canvas = Ui.box ui ~flags:Ui.(clickable + scroll + clip + blocking)
-      ~w:(Ui.Px (float t.width)) ~h:(Ui.Px (float t.height))
-      ~at:(float t.x, float t.y) "pxui-scope" in
-  let canvas_signal = Ui.signal ui canvas in
-  (* the grid, zones and wires paint in a child, so the canvas's clip holds them too *)
-  let layer = Ui.within ui canvas (fun () ->
-    Ui.box ui ~w:(Ui.Px (float t.width)) ~h:(Ui.Px (float t.height)) ~at:(0., 0.) "pxui-scope-layer") in
-  let t =
-    let _, wheel = canvas_signal.scroll in
-    let pinch = canvas_signal.pinch in
-    if (wheel = 0. && pinch = 1.) || t.context <> None then t else begin
-      let mx, my = frame.input.pointer in
-      (* the wheel steps by a tenth; a pinch carries its own factor *)
-      let zoom = Float.max 0.25 (Float.min 2.5 (t.zoom *. (1. +. wheel *. 0.1) *. pinch)) in
-      let k = zoom /. t.zoom in
-      { t with zoom; pan_x = (mx -. float t.x) -. ((mx -. float t.x) -. t.pan_x) *. k;
-        pan_y = (my -. float t.y) -. ((my -. float t.y) -. t.pan_y) *. k }
-    end in
-  let t = { t with measure = (fun size s -> Ui.text_width ui ~size s) } in
-  let t = match t.scope with
-    | Some scope when font_of t.zoom <> t.geo_fs ->
-        (* a point's box is as wide as its name, drawn at the zoom's font *)
-        if Array.exists (fun ((p : P.placed), _, _) -> p.shown = P.Point) t.geo.items
-        then regeo t scope t.layout ~shift:no_shift else { t with geo_fs = font_of t.zoom }
-    | _ -> t in
-  (* a drag in progress moves its items in a fresh geometry *)
-  let t = match t.drag, t.scope with
-    | Some (Moving m), Some scope when m.moved ->
-        let moving = Path_set.of_list m.paths in
-        regeo t scope t.layout ~shift:(fun p -> if Path_set.mem p moving then m.dx, m.dy else 0., 0.)
-    | Some (Carrying c), Some scope when Float.hypot c.dx c.dy > 0. ->
-        let moving = Path_set.of_list c.paths in
-        regeo t scope t.layout ~shift:(fun p -> if Path_set.mem p moving then c.dx, c.dy else 0., 0.)
-    | _ -> t in
-  let z = t.zoom in
-  (* text follows the zoom down to 5 points (a 6-point row at zoom 0.25 holds it) *)
-  let fs = font_of z in
-  let viewport = (float t.x, float t.y, float t.width, float t.height) in
-  (* what the pane shows, grown by [margin] screen points, in graph units: the indices answer it *)
-  let in_view margin =
-    (-. t.pan_x -. margin) /. z, (-. t.pan_y -. margin) /. z,
-    (float t.width -. t.pan_x +. margin) /. z, (float t.height -. t.pan_y +. margin) /. z in
-  let visible = List.filter_map (fun i ->
-    let ((p : P.placed), ax, ay) as item = t.geo.items.(i) in
-    let x = sx t ax -. 20. and y = sy t ay -. 20. and w = p.w *. z +. 40. and h = p.h *. z +. 40. in
-    let vx, vy, vw, vh = viewport in
-    if x < vx +. vw && x +. w > vx && y < vy +. vh && y +. h > vy then Some item else None)
-    (index_query t.geo.tiles (in_view 20.)) in
-  let wires_in_view = index_query t.geo.reach (in_view 4.) in
-  let zones = List.filter_map (fun ((p : P.placed), ax, ay) -> match p.item with
-    | P.Item ({ zone = Some zn; _ } as n) when not p.collapsed -> Some (n, zn, p, ax, ay)
-    | _ -> None) visible in
+(* one visible node: its tile box, its ports and the live widgets of its rows *)
+let build_tile (t : t) ui ~z ~fs ~(wire_boxes : ?origin:float * float -> string -> float * float * float * float -> int -> unit) ~edit_field ~finished ~opened ((p : P.placed), ax, ay) =
   let local (x, y) = x -. float t.x, y -. float t.y in
-  let mouse = frame.input.pointer in
-  (* Segment rectangles live in the shared hit tree, behind the cards; ports built below take
-     hover precedence.  A segment is cut to [clip] (pane points) first, so what is out of view
-     costs one clip; a diagonal is then a run of 16-point boxes. *)
-  let chain = chains_of t in
-  let wire_hits = Cells.create 16 in
-  let hits i = Option.value ~default:[] (Cells.find_opt wire_hits i) in
-  let wire_boxes = wire_boxes t ui ~wire_hits in
-  Ui.within ui canvas (fun () ->
-    List.iter (wire_boxes "wire" (0., 0., float t.width, float t.height)) wires_in_view);
-  (* footers: only for what is in view, and not when too small to read *)
-  let footers = Hashtbl.create 16 in
-  (match t.records with
-   | Some records when z >= 0.4 ->
-       List.iter (fun ((p : P.placed), _, _) -> match p.item with
-         | P.Item n when (match n.zone with Some _ -> p.collapsed | None -> true) ->
-             Hashtbl.replace footers n.path (footer_of t records n)
-         | _ -> ()) visible
-   | _ -> ());
-  let finished = ref false and opened = ref None in
-  let edit_field ~at ~w ~h key current valid commit =
-    let v, open_ = Ui.value_field ui ~at ~w ~h ~size:fs ~edit:true
-      ~left:(float_of_string_opt current = None) ~valid key current in
-    if not open_ then finished := true;
-    if (not open_) && v <> current && valid v then [ commit v ] else [] in
-  (* tiles *)
-  let tiles = Ui.within ui canvas (fun () ->
-    List.map (fun ((p : P.placed), ax, ay) ->
       let bx, by = sx t ax, sy t ay in
       let key = "t:" ^ String.concat "/" p.path in
       let w = p.w *. z and h = p.h *. z in
@@ -1040,26 +955,117 @@ let update ?(pressed = []) t ui (frame : Frame.t) =
                     if (Ui.signal ui b).clicked then [ Layout_active { graph = t.key; index = j } ] else []
                 | _ -> []) (Array.to_list p.lines)))
         | _ -> [] in
-      p, ax, ay, tile, Ui.signal ui tile, sub, fields @ add_clicks @ editors @ movers @ switchers) visible) in
+      p, ax, ay, tile, Ui.signal ui tile, sub, fields @ add_clicks @ editors @ movers @ switchers
+
+(* a payload in flight: the innermost node under the pointer (a zone's tile covers its body),
+   else the canvas, is where it would be put; the host decides whether it takes it *)
+let drop_change (t : t) ui canvas tiles =
+  match Ui.drop_target ui canvas with
+  | None -> None
+  | Some _ ->
+      let area (p : P.placed) = p.w *. p.h in
+      let found = List.fold_left (fun best ((p : P.placed), _, _, tile, _, _, _) ->
+        match Ui.drop_target ui tile, best with
+        | Some _, Some (q, _) when area q <= area p -> best
+        | Some d, _ -> Some (p, d)
+        | None, _ -> best) None tiles in
+      let path, drop = match found, Ui.drop_target ui canvas with
+        | Some ((p : P.placed), d), _ -> p.path, d
+        | None, Some d -> [ t.key ], d
+        | None, None -> [ t.key ], Ui.Hover { Ui.kind = ""; value = "" } in
+      Some (match drop with
+        | Ui.Hover { kind; value } -> Drop_over { path; kind; value }
+        | Dropped { kind; value } -> Dropped { path; kind; value })
+
+let update ?(pressed = []) t ui (frame : Frame.t) =
+  (* the first view shows the whole graph, at zoom 1 when it fits (Home frames everything) *)
+  let t = if t.framed then t else { (frame_all t) with framed = true } in
+  let changes = ref [] in
+  let emit c = changes := c :: !changes in
+  let t, hint_changes = step_hints t ~pressed frame in
+  List.iter emit hint_changes;
+  let canvas = Ui.box ui ~flags:Ui.(clickable + scroll + clip + blocking)
+      ~w:(Ui.Px (float t.width)) ~h:(Ui.Px (float t.height))
+      ~at:(float t.x, float t.y) "pxui-scope" in
+  let canvas_signal = Ui.signal ui canvas in
+  (* the grid, zones and wires paint in a child, so the canvas's clip holds them too *)
+  let layer = Ui.within ui canvas (fun () ->
+    Ui.box ui ~w:(Ui.Px (float t.width)) ~h:(Ui.Px (float t.height)) ~at:(0., 0.) "pxui-scope-layer") in
+  let t =
+    let _, wheel = canvas_signal.scroll in
+    let pinch = canvas_signal.pinch in
+    if (wheel = 0. && pinch = 1.) || t.context <> None then t else begin
+      let mx, my = frame.input.pointer in
+      (* the wheel steps by a tenth; a pinch carries its own factor *)
+      let zoom = Float.max 0.25 (Float.min 2.5 (t.zoom *. (1. +. wheel *. 0.1) *. pinch)) in
+      let k = zoom /. t.zoom in
+      { t with zoom; pan_x = (mx -. float t.x) -. ((mx -. float t.x) -. t.pan_x) *. k;
+        pan_y = (my -. float t.y) -. ((my -. float t.y) -. t.pan_y) *. k }
+    end in
+  let t = { t with measure = (fun size s -> Ui.text_width ui ~size s) } in
+  let t = match t.scope with
+    | Some scope when font_of t.zoom <> t.geo_fs ->
+        (* a point's box is as wide as its name, drawn at the zoom's font *)
+        if Array.exists (fun ((p : P.placed), _, _) -> p.shown = P.Point) t.geo.items
+        then regeo t scope t.layout ~shift:no_shift else { t with geo_fs = font_of t.zoom }
+    | _ -> t in
+  (* a drag in progress moves its items in a fresh geometry *)
+  let t = match t.drag, t.scope with
+    | Some (Moving m), Some scope when m.moved ->
+        let moving = Path_set.of_list m.paths in
+        regeo t scope t.layout ~shift:(fun p -> if Path_set.mem p moving then m.dx, m.dy else 0., 0.)
+    | Some (Carrying c), Some scope when Float.hypot c.dx c.dy > 0. ->
+        let moving = Path_set.of_list c.paths in
+        regeo t scope t.layout ~shift:(fun p -> if Path_set.mem p moving then c.dx, c.dy else 0., 0.)
+    | _ -> t in
+  let z = t.zoom in
+  (* text follows the zoom down to 5 points (a 6-point row at zoom 0.25 holds it) *)
+  let fs = font_of z in
+  let viewport = (float t.x, float t.y, float t.width, float t.height) in
+  (* what the pane shows, grown by [margin] screen points, in graph units: the indices answer it *)
+  let in_view margin =
+    (-. t.pan_x -. margin) /. z, (-. t.pan_y -. margin) /. z,
+    (float t.width -. t.pan_x +. margin) /. z, (float t.height -. t.pan_y +. margin) /. z in
+  let visible = List.filter_map (fun i ->
+    let ((p : P.placed), ax, ay) as item = t.geo.items.(i) in
+    let x = sx t ax -. 20. and y = sy t ay -. 20. and w = p.w *. z +. 40. and h = p.h *. z +. 40. in
+    let vx, vy, vw, vh = viewport in
+    if x < vx +. vw && x +. w > vx && y < vy +. vh && y +. h > vy then Some item else None)
+    (index_query t.geo.tiles (in_view 20.)) in
+  let wires_in_view = index_query t.geo.reach (in_view 4.) in
+  let zones = List.filter_map (fun ((p : P.placed), ax, ay) -> match p.item with
+    | P.Item ({ zone = Some zn; _ } as n) when not p.collapsed -> Some (n, zn, p, ax, ay)
+    | _ -> None) visible in
+  let mouse = frame.input.pointer in
+  (* Segment rectangles live in the shared hit tree, behind the cards; ports built below take
+     hover precedence.  A segment is cut to [clip] (pane points) first, so what is out of view
+     costs one clip; a diagonal is then a run of 16-point boxes. *)
+  let chain = chains_of t in
+  let wire_hits = Cells.create 16 in
+  let hits i = Option.value ~default:[] (Cells.find_opt wire_hits i) in
+  let wire_boxes = wire_boxes t ui ~wire_hits in
+  Ui.within ui canvas (fun () ->
+    List.iter (wire_boxes "wire" (0., 0., float t.width, float t.height)) wires_in_view);
+  (* footers: only for what is in view, and not when too small to read *)
+  let footers = Hashtbl.create 16 in
+  (match t.records with
+   | Some records when z >= 0.4 ->
+       List.iter (fun ((p : P.placed), _, _) -> match p.item with
+         | P.Item n when (match n.zone with Some _ -> p.collapsed | None -> true) ->
+             Hashtbl.replace footers n.path (footer_of t records n)
+         | _ -> ()) visible
+   | _ -> ());
+  let finished = ref false and opened = ref None in
+  let edit_field ~at ~w ~h key current valid commit =
+    let v, open_ = Ui.value_field ui ~at ~w ~h ~size:fs ~edit:true
+      ~left:(float_of_string_opt current = None) ~valid key current in
+    if not open_ then finished := true;
+    if (not open_) && v <> current && valid v then [ commit v ] else [] in
+  (* tiles *)
+  let tiles = Ui.within ui canvas (fun () ->
+    List.map (build_tile t ui ~z ~fs ~wire_boxes ~edit_field ~finished ~opened) visible) in
   let t = if !finished then { t with editing = None } else t in
-  (* a payload in flight: the innermost node under the pointer (a zone's tile covers its body),
-     else the canvas, is where it would be put; the host decides whether it takes it *)
-  (match Ui.drop_target ui canvas with
-   | None -> ()
-   | Some _ ->
-       let area (p : P.placed) = p.w *. p.h in
-       let found = List.fold_left (fun best ((p : P.placed), _, _, tile, _, _, _) ->
-         match Ui.drop_target ui tile, best with
-         | Some _, Some (q, _) when area q <= area p -> best
-         | Some d, _ -> Some (p, d)
-         | None, _ -> best) None tiles in
-       let path, drop = match found, Ui.drop_target ui canvas with
-         | Some ((p : P.placed), d), _ -> p.path, d
-         | None, Some d -> [ t.key ], d
-         | None, None -> [ t.key ], Ui.Hover { Ui.kind = ""; value = "" } in
-       emit (match drop with
-         | Ui.Hover { kind; value } -> Drop_over { path; kind; value }
-         | Dropped { kind; value } -> Dropped { path; kind; value }));
+  Option.iter emit (drop_change t ui canvas tiles);
   let t = frames_step t ui ~z ~emit ~edit_field ~canvas in
   let t = if !finished then { t with editing = None } else t in
   let t = match !opened with Some _ as editing -> { t with editing } | None -> t in
