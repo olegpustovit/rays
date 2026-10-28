@@ -27,7 +27,7 @@ float fbm(float3 p, int octaves, device const int* table) {
   }
   return weights==0.0f?0.0f:sum/weights;
 }
-kernel void kernel_6d653cc9aa2a06b1491e90ac984c8a9a(
+kernel void kernel_27273fd871c3de55fcf1d3f270adef74(
   device const float* input0 [[buffer(0)]],
   device float* output [[buffer(1)]],
   constant uint* uniforms [[buffer(2)]],
@@ -35,16 +35,15 @@ kernel void kernel_6d653cc9aa2a06b1491e90ac984c8a9a(
   device const int* table [[buffer(4)]],
   uint i [[thread_position_in_grid]]) {
   if(i>=uniforms[0]) return;
-  if(i==0) atomic_fetch_or_explicit(status,0u,memory_order_relaxed);
+  uint sb=0u;
   float r0=input0[i*1+0];
-  if(!isfinite(r0)) atomic_fetch_or_explicit(status,1u,memory_order_relaxed);
-  float r1=as_type<float>(0x3ca3d70au);
-  float r2=(r0*r1);
-  if(!isfinite(r2)) atomic_fetch_or_explicit(status,1u,memory_order_relaxed);
+  sb|=!isfinite(r0);
+  float r2=(r0*(as_type<float>(0x3ca3d70au)));
+  sb|=!isfinite(r2);
   float r3=as_type<float>(uniforms[1]);
-  if(!isfinite(r3)) atomic_fetch_or_explicit(status,1u,memory_order_relaxed);
-  float r4=as_type<float>(0x3e800000u);
-  float r5=fbm(float3(r2,r3,r4),3,table+0);
-  if(!isfinite(r5)) atomic_fetch_or_explicit(status,1u,memory_order_relaxed);
+  sb|=!isfinite(r3);
+  float r5=fbm(float3(r2,r3,(as_type<float>(0x3e800000u))),3,table+0);
+  sb|=!isfinite(r5);
+  if(sb!=0u||i==0) atomic_fetch_or_explicit(status,sb,memory_order_relaxed);
   output[i*1+0]=r5;
 }

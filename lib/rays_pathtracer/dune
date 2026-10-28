@@ -85,5 +85,5 @@
 (rule
  (enabled_if (= %{system} macosx))
  (alias runtest-native)
- (deps pathtrace_helpers.rays pathtrace.rays)
+ (deps pathtrace_helpers.rays pathtrace.rays pathtrace.metal)
  (action (run %{exe:test_lisp.exe})))

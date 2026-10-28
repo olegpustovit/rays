@@ -35,7 +35,6 @@ let () =
   let tracer = get (P.create ~spp ~bounces ~exposure ~profile:(Sys.getenv_opt "PT_BENCH" <> None) ~width ~height scene) in
   for _ = 1 to frames do get (P.render tracer camera); get (P.flush tracer) done;
   let msl = Bytes.copy (get (Rays.Image.Private.pixels (P.image tracer))) in
-  P.destroy tracer;
   (* the Lisp side: the same uniforms *)
   let e = (0.3, -3., 2.5) in
   let forward = normalize (sub (0., 0., 0.) e) in
@@ -114,16 +113,26 @@ let () =
     fun program ->
       let msl = ok (Flow_gpu.Emit.kernel ~fast:true program) in
       Option.iter (fun path -> Out_channel.with_open_bin path (fun o -> output_string o msl.Flow_gpu.Emit.source)) (Sys.getenv_opt "PT_DUMP");
+      (* static shape gates (specification/gpu-codegen.md): the kernel's one atomic, no 64-bit
+         arithmetic in the loops but their bound checks (the pixel's x/y split before them is the
+         one 64-bit division), within twice the handwritten kernel's lines *)
+      let lines text = String.split_on_char '\n' text in
+      let has fragment line = let n = String.length fragment in
+        let rec at i = i + n <= String.length line && (String.sub line i n = fragment || at (i + 1)) in at 0 in
+      let source = lines msl.Flow_gpu.Emit.source in
+      assert (List.length (List.filter (has "atomic_fetch_or_explicit(") source) = 1);
+      let rec loops = function [] -> [] | line :: rest -> if has "for(r" line then line :: rest else loops rest in
+      assert (List.for_all (fun line -> not (has "ulong(" line) || has "bool over" line) (loops source));
+      assert (List.length source <= 2 * List.length (lines (read "pathtrace.metal")));
       let runner = Flow_gpu.Run.create lease pipelines msl in
       let values = ok (Flow_ir.Packed.Private.prepare ~fast:true program ~live) in
       let scene = { Flow_gpu.Run.accel = blas; vertices; spheres; sphere_count = 0; instances = None } in
-      let dispatched = ok (Flow_gpu.Run.dispatch runner ~scene values) in
-      (match Sys.getenv_opt "PT_BENCH" with
-       | Some _ -> for _ = 1 to 5 do
-           let again = ok (Flow_gpu.Run.dispatch runner ~scene values) in
-           Printf.printf "lisp kernel GPU ms: %s\n%!" (match Flow_gpu.Run.gpu_seconds again with Some s -> Printf.sprintf "%.2f" (s *. 1000.) | None -> "n/a") done
-       | None -> ());
-      let result = vec4 (ok (Flow_gpu.Run.readback dispatched)) in
+      let result = vec4 (ok (Flow_gpu.Run.readback (ok (Flow_gpu.Run.dispatch runner ~scene values)))) in
+      (* PT_BENCH: interleaved A/B, a pathtrace.metal frame (its bands print as gpu_ms) then the Lisp dispatch *)
+      if Sys.getenv_opt "PT_BENCH" <> None then begin prerr_endline "bench"; for _ = 1 to 5 do
+        get (P.render tracer camera); get (P.flush tracer);
+        let again = ok (Flow_gpu.Run.dispatch runner ~scene values) in
+        Printf.eprintf "lisp kernel GPU ms: %s\n%!" (match Flow_gpu.Run.gpu_seconds again with Some s -> Printf.sprintf "%.2f" (s *. 1000.) | None -> "n/a") done end;
       Flow_gpu.Run.close runner; result in
   let compare name run =
     let total = Array.make (width * height * 3) 0. in
@@ -149,5 +158,6 @@ let () =
   Printf.printf "pathtrace.rays (%s) vs pathtrace.metal: %dx%d, %d frames x %d spp, %d of %d channels differ, RMSE %.3g\n" name width height frames spp !different (width * height * 3) rmse
   ;
   assert (rmse <= 1e-4) in
-  compare "CPU walker" cpu;
-  compare "Metal" gpu_run
+  if Sys.getenv_opt "PT_SKIP_CPU" = None then compare "CPU walker" cpu;
+  compare "Metal" gpu_run;
+  P.destroy tracer

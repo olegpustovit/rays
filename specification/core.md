@@ -828,7 +828,7 @@ new collection of shader operations:
 | `Gather(table,index,width,component)`, `Int_gather(table,index)` | Read one component or exact signed63 integer from a prepared immutable table. Check the integer element index against native bounds and row count before component address multiplication. GPU targets refuse table preparation and indexed reads, including Float-output kernels. |
 | `Text_const(text)`, `Text_input(source)`, `Text_uniform(capture)`, `Text_gather(table,index)`, `Text_select(condition,yes,no)` | Immutable Text leaves in Collect regions: constants, source/capture reads, exact indexed lookup and selected copying. Text has a separate register bank, not a numeric width. Outputs allocate a fresh string array while sharing immutable strings. Text arithmetic, transformations and reductions remain unsupported in regions and use structured Core where eligible. GPU targets refuse all Text registers. |
 | `Select(condition,yes,no)` | Selects by condition unequal to zero; branch instructions carry their execution guards. |
-| `Guarded(conditions,instruction)` | Executes the instruction and its finite checks only when every condition selects this branch. Metal and WGSL declare the result outside the conditional and assign it inside, so later selections retain the same lazy behavior. An unselected overflow is unevaluated; `min` and `max` still evaluate both arguments. |
+| `Guarded(conditions,instruction)` | Executes the instruction and its finite checks only when every condition selects this branch. Metal and WGSL declare the result at the top of its scope (the kernel or loop body) and assign it inside one block shared by consecutive instructions with the same guards (`Kernel_layout.Scope`), so later selections retain the same lazy behavior. An unselected overflow is unevaluated; `min` and `max` still evaluate both arguments. |
 | `Loop_begin(first,last,finish,initial,limit,span)` | Starts an end-exclusive counted scope. Its register is the Int index. Bounds and initial values precede the scope; an empty or reversed range returns those initial values. The optional bound is checked before the body, with the authored source span. |
 | `Loop_carry(header,component,type)` | One scalar carried register, contiguous after its header. Records and vectors flatten to Int, Float, Bool or Text leaves. |
 | `Loop_end(header,next,stop)` | Ends the scope and reads all next values and the optional Bool stop register before updating every carried register simultaneously. A true stop commits the next state and exits immediately. Nested loops finish before the enclosing update. |
@@ -858,14 +858,19 @@ The shared typed CPU block engine runs them with its existing chunk pool and
 reference lane-error ordering; an untaken or empty body is unevaluated.
 JavaScript supports the same controls, including exact Int bounds above 2^53.
 Metal and fast WGSL visit their scopes through `Kernel_layout.iter`, keeping
-their existing 64-bit integer representations and finite-status checks.
+their existing 64-bit integer representations.
 Int operations and abs normalize those representations to signed63 results;
 logical right shifts first retain the native 63-bit input representation.
 This applies to the Metal, fast WGSL/JavaScript and SPIR-V printers. Their
 separate whole-Float arithmetic helpers retain 64-bit intermediate storage.
-Device kernels atomically OR one shared status word: bit 0 records nonfinite
-output, bit 1 a zero integer divisor, and bit 2 an integer shift count outside
-`[0,62]`. Guards and empty loops retain lazy errors. Native readback and buffer
+Device kernels OR their status bits into a thread-local word and publish it to
+the shared status word with the kernel's one atomic, at its end (a loop over its
+pass limit flags bit 0 and runs no pass): bit 0
+records nonfinite output, bit 1 a zero integer divisor, and bit 2 an integer
+shift count outside `[0,62]`. Fast (approximate-tier) kernels check their inputs
+and outputs only, not each operation, and keep only the loop-body instructions
+that reach an output, a next value or a stop (`specification/gpu-codegen.md`);
+the other tiers check every operation that can introduce a nonfinite value. Guards and empty loops retain lazy errors. Native readback and buffer
 borrowing check completion and status before publishing a result; a resident
 transaction retains all participating runners' flags until its final read.
 An empty dispatch publishes a typed empty output without reading a status
@@ -875,6 +880,11 @@ stable class priority (invalid shift, zero divisor, nonfinite); it does not
 identify the CPU's earliest failing row. Integer failures retain `E_RANGE`,
 while nonfinite device output retains `E_KERNEL`.
 Existing `int/*` operations and explicit masks express uint32 wraparound;
+fast device kernels print such registers as 32-bit unsigned words (`uint`,
+`u32`, `OpTypeInt 32 0`) when `Kernel_layout.narrow` proves the value lies in
+`[0, 2^32)` or only its low 32 bits are read (wrapping arithmetic, bitwise
+operations, selects, carried next values, clamped gather indices), which keeps
+the CPU's bits; other Int registers keep the 64-bit representation.
 the shared fixture exercises a carried uint32 permutation without another
 integer language or executor. Text-carried loops stay on the CPU/JavaScript.
 Carried Int/Float widening stays in structured Core: converting the seed to

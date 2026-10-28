@@ -95,6 +95,8 @@ type emitter = {
   storage_pointer : int;
   uint_storage_pointer : int;
   status : int;
+  uint_function_pointer : int;
+  mutable status_bits : int;  (* the thread's Function-storage status word *)
   table : int option;
   noise : (int * int) option;
   scene : (int * int * int * int * int option * int * int * int) option;  (* acceleration structure variable and type, vertices, spheres, ray query, vec3, vec2 *)
@@ -159,15 +161,12 @@ let label e id =
 
 let jump e id = Words.instruction e.words.body 249 [ id ]
 
+(* Status bits gather in the thread's word and reach the shared status with the kernel's one atomic,
+   at its end (as the Metal and WGSL printers). *)
 let record_status e condition bits =
-  let yes = Words.id e.words and after = Words.id e.words in
-  Words.instruction e.words.body 247 [ after; 0 ];
-  Words.instruction e.words.body 250 [ condition; yes; after ];
-  label e yes;
-  let pointer = result e e.uint_storage_pointer 65 [ e.status; u e 0; u e 0 ] in
-  ignore (result e e.uint 241 [ pointer; u e 1; u e 0; u e bits ]);
-  jump e after;
-  label e after
+  let old = result e e.uint 61 [ e.status_bits ] in
+  let bit = result e e.uint 169 [ condition; u e bits; u e 0 ] in
+  Words.instruction e.words.body 62 [ e.status_bits; result e e.uint 197 [ old; bit ] ]
 
 let mark_invalid e invalid condition =
   if e.loop_depth > 0 then record_status e condition 1
@@ -553,12 +552,57 @@ let trace_values e (layout : Flow_ir.Kernel_layout.t) float_of r =
         e.trace_cache <- (key, e.block, values) :: e.trace_cache;
         values
 
+(* The status bits of a zero divisor or a shift count outside [0, 62], from the exact count. *)
+let integer_status e operation b =
+  match operation with
+  | Flow.Packed_ops.Idiv | Imod -> record_status e (compare e 170 b (l e 0L)) 2
+  | Ishl | Ishr ->
+      record_status e (result e e.boolean 166 [ compare e 177 b (l e 0L); compare e 173 b (l e 62L) ]) 4
+  | _ -> ()
+
+(* A narrow (32-bit unsigned) register's operation on the operands' low words (as [Emit.narrow_integer]). *)
+let narrow_binary e operation a b =
+  let op code operands = result e e.uint code operands in
+  match operation with
+  | Flow.Packed_ops.Iadd -> op 128 [ a; b ]
+  | Isub -> op 130 [ a; b ]
+  | Imul -> op 132 [ a; b ]
+  | Iand -> op 199 [ a; b ]
+  | Ior -> op 197 [ a; b ]
+  | Ixor -> op 198 [ a; b ]
+  | Ishl | Ishr ->
+      let k = op 199 [ b; u e 63 ] in
+      let shifted = op (if operation = Ishl then 196 else 194) [ a; op 199 [ k; u e 31 ] ] in
+      select e e.uint (compare e 172 k (u e 31)) (u e 0) shifted
+  | Idiv | Imod ->
+      let zero = compare e 170 b (u e 0) in
+      select e e.uint zero (u e 0) (op (if operation = Idiv then 134 else 137) [ a; select e e.uint zero (u e 1) b ])
+
+(* One component of a prepared table's row [at] (a long), clamped into the table. *)
+let element e (layout : Flow_ir.Kernel_layout.t) gathers prepared at width component =
+  let k = Option.get (List.find_index (fun (slot, _) -> slot = prepared) layout.gathers) in
+  let size = result e (Option.get e.ulong) 113 [ uniform e layout.gather_lengths.(k) ] in
+  let size = result e (long e) 124 [ size ] in
+  let last = integer_binary e Isub size (l e 1L) in
+  let last = select e (long e) (compare e 177 last (l e 0L)) (l e 0L) last in
+  let at = select e (long e) (compare e 177 at (l e 0L)) (l e 0L) at in
+  let at = select e (long e) (compare e 173 at last) last at in
+  let at = result e e.uint 113 [ at ] in
+  result e e.float 124 [ load_uint e gathers.(k) (offset e at width component) ]
+
 let emit_program e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers index =
   let words = e.words and float = e.float and boolean = e.boolean in
   let registers = Array.make (Array.length layout.view.code) 0 in
   let whole = Array.make (Array.length layout.view.code) None in
   let integer slot = Flow_ir.Core.Region.integer_register layout.view.code.(slot) in
-  let float_of slot = if integer slot then from_long e registers.(slot) else registers.(slot) in
+  (* narrow Int registers (Kernel_layout.narrow) hold a 32-bit unsigned word *)
+  let narrow = layout.narrow in
+  let widen slot = result e (long e) 124 [ result e (Option.get e.ulong) 113 [ registers.(slot) ] ] in
+  let known slot = narrow.(slot) || whole.(slot) <> None in
+  let whole_of slot = if narrow.(slot) then widen slot else Option.get whole.(slot) in
+  let float_of slot =
+    if narrow.(slot) then from_long e (widen slot)
+    else if integer slot then from_long e registers.(slot) else registers.(slot) in
   let invalid = ref (compare e 171 (u e 0) (u e 0)) in
   let to_int value =
     let valid =
@@ -572,9 +616,11 @@ let emit_program e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers ind
     result e (long e) 110 [ select e float valid value (f e 0.) ]
   in
   let int_of slot =
-    if integer slot then registers.(slot)
+    if narrow.(slot) then widen slot
+    else if integer slot then registers.(slot)
     else match whole.(slot) with Some value -> value | None -> to_int (float_of slot)
   in
+  let low slot = if narrow.(slot) then registers.(slot) else result e e.uint 113 [ int_of slot ] in
   let guard_condition guards =
     List.map
       (fun (slot, selected) ->
@@ -588,19 +634,17 @@ let emit_program e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers ind
            | Some left -> Some (result e boolean 167 [ left; value ]))
          None
   in
-  let element prepared at width component =
-    let k = Option.get (List.find_index (fun (slot, _) -> slot = prepared) layout.gathers) in
-    let size = result e (Option.get e.ulong) 113 [ uniform e layout.gather_lengths.(k) ] in
-    let size = result e (long e) 124 [ size ] in
-    let last = integer_binary e Isub size (l e 1L) in
-    let last = select e (long e) (compare e 177 last (l e 0L)) (l e 0L) last in
-    let at = int_of at in
-    let at = select e (long e) (compare e 177 at (l e 0L)) (l e 0L) at in
-    let at = select e (long e) (compare e 173 at last) last at in
-    let at = result e e.uint 113 [ at ] in
-    result e float 124 [ load_uint e gathers.(k) (offset e at width component) ]
-  in
-  let expression slot = function
+  (* a narrow index is its low word read signed, as Metal's and WGSL's int(index) *)
+  let element prepared at = element e layout gathers prepared
+      (if narrow.(at) then result e (long e) 114 [ result e e.sint 124 [ registers.(at) ] ] else int_of at) in
+  let rec expression slot instruction = if narrow.(slot) then match instruction with
+    | P.Int_const n -> u e (n land 0xffffffff)
+    | Int_binary (op, a, b) -> integer_status e op (int_of b); narrow_binary e op (low a) (low b)
+    | Int_select (condition, yes, no) -> select e e.uint (truth e (float_of condition)) (low yes) (low no)
+    | Loop_result (loop, component, _) -> registers.(loop + 1 + component)
+    | _ -> assert false
+    else wide_expression slot instruction
+  and wide_expression slot = function
     | P.Trace (field, r) -> (trace_values e layout float_of r).(field)
     | P.Const value ->
         if e.long <> None && Float.is_integer value && Float.abs value < 9007199254740992. then
@@ -610,8 +654,8 @@ let emit_program e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers ind
     | Uniform (input, component) -> uniform_float e (layout.uniforms.(input) + component)
     | Frame _ | Guarded _ -> assert false
     | Binary (((Add | Sub | Mul | Mod | Min | Max) as op), a, b)
-      when whole.(a) <> None && whole.(b) <> None ->
-        let value = integer_float_binary e op (Option.get whole.(a)) (Option.get whole.(b)) in
+      when known a && known b ->
+        let value = integer_float_binary e op (whole_of a) (whole_of b) in
         whole.(slot) <- Some value;
         from_long e value
     | Binary (op, a, b) -> binary e op (float_of a) (float_of b)
@@ -642,13 +686,7 @@ let emit_program e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers ind
     | Int_frame _ -> to_int (uniform_float e layout.frames.(slot))
     | Int_binary (op, a, b) ->
         let a=int_of a and b=int_of b in
-        (match op with
-         | Flow.Packed_ops.Idiv | Imod ->
-             record_status e (compare e 170 b (l e 0L)) 2
-         | Ishl | Ishr ->
-             let below=compare e 177 b (l e 0L) and above=compare e 173 b (l e 62L) in
-             record_status e (result e boolean 166 [below;above]) 4
-         | _ -> ());
+        integer_status e op b;
         wrap_integer e (integer_binary e op a b)
     | Int_compare (op, a, b) ->
         numeric_truth e (compare e (int_compare_opcode op) (int_of a) (int_of b))
@@ -660,9 +698,9 @@ let emit_program e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers ind
     | Gather (prepared, at, width, component) -> element prepared at width component
     | Int_gather (prepared, at) -> to_int (element prepared at 1 0)
     | Convert (To_float, a) ->
-        whole.(slot) <- whole.(a);
+        whole.(slot) <- if known a then Some (whole_of a) else None;
         float_of a
-    | Convert (_, a) when whole.(a) <> None -> Option.get whole.(a)
+    | Convert (_, a) when known a -> whole_of a
     | Convert ((Truncate | Coerce_int | Integer_result _), a) -> to_int (float_of a)
     | Convert (((Floor | Ceil | Round) as op), a) ->
         let value = float_of a in
@@ -684,7 +722,7 @@ let emit_program e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers ind
         in
         if guards = [] then begin
           registers.(slot) <- compute ();
-          if integer slot then whole.(slot) <- Some registers.(slot)
+          if integer slot && not narrow.(slot) then whole.(slot) <- Some registers.(slot)
         end
         else begin
           let before = e.block and before_invalid = !invalid in
@@ -698,11 +736,12 @@ let emit_program e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers ind
           let last = e.block in
           jump e after;
           label e after;
-          let ty, zero = if integer slot then (long e, l e 0L) else (float, f e 0.) in
+          let ty, zero = if narrow.(slot) then (e.uint, u e 0) else if integer slot then (long e, l e 0L) else (float, f e 0.) in
           registers.(slot) <- result e ty 245 [ value; last; zero; before ];
           if e.loop_depth = 0 then
             invalid := result e boolean 245 [ yes_invalid; last; before_invalid; before ];
-          if integer slot then whole.(slot) <- Some registers.(slot)
+          if narrow.(slot) then ()
+          else if integer slot then whole.(slot) <- Some registers.(slot)
           else
             whole.(slot) <-
               Option.map
@@ -740,12 +779,10 @@ let emit_program e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers ind
         label e preheader
       end;
       let first = int_of control.first and last = int_of control.last in
-      let initial =
-        Array.mapi
-          (fun component source ->
-            if integer (header + 1 + component) then int_of source else registers.(source))
-          control.initial
-      in
+      let carried slot source = if narrow.(slot) then low source else if integer slot then int_of source else registers.(source) in
+      let initial = Array.mapi (fun component source -> carried (header + 1 + component) source) control.initial in
+      let index_type = if narrow.(header) then e.uint else long e in
+      let index_first, index_last = if narrow.(header) then low control.first, low control.last else first, last in
       let too_long =
         match control.limit with
         | None -> compare e 171 (u e 0) (u e 0)
@@ -764,12 +801,12 @@ let emit_program e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers ind
       let carry_phis = Array.map (fun _ -> Words.id words) control.initial in
       let stop_phi = Option.map (fun _ -> Words.id words) stop in
       registers.(header) <- index_phi;
-      whole.(header) <- Some index_phi;
+      whole.(header) <- if narrow.(header) then None else Some index_phi;
       Array.iteri
         (fun component phi ->
           let slot = header + 1 + component in
           registers.(slot) <- phi;
-          whole.(slot) <- if integer slot then Some phi else None)
+          whole.(slot) <- if integer slot && not narrow.(slot) then Some phi else None)
         carry_phis;
 
       let outer_body = words.body in
@@ -782,7 +819,7 @@ let emit_program e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers ind
         Array.mapi
           (fun component source ->
             let slot = header + 1 + component in
-            if integer slot then int_of source else float_of source)
+            if integer slot then carried slot source else float_of source)
           next
       in
       let stop_value = Option.map (fun source -> truth e (float_of source)) stop in
@@ -792,7 +829,8 @@ let emit_program e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers ind
       let continuing_words = Buffer.create 128 in
       words.body <- continuing_words;
       label e continuing;
-      let next_index = integer_binary e Flow.Packed_ops.Iadd index_phi (l e 1L) in
+      let next_index = if narrow.(header) then result e e.uint 128 [ index_phi; u e 1 ]
+        else integer_binary e Flow.Packed_ops.Iadd index_phi (l e 1L) in
       jump e loop_header;
       words.body <- outer_body;
 
@@ -800,11 +838,11 @@ let emit_program e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers ind
       e.block <- preheader_pred;
       jump e loop_header;
       label e loop_header;
-      Words.instruction words.body 245 [ long e; index_phi; first; preheader_pred; next_index; continuing ];
+      Words.instruction words.body 245 [ index_type; index_phi; index_first; preheader_pred; next_index; continuing ];
       Array.iteri
         (fun component phi ->
           let slot = header + 1 + component in
-          let ty, start = if integer slot then (long e, initial.(component)) else (float, initial.(component)) in
+          let ty, start = if narrow.(slot) then (e.uint, initial.(component)) else if integer slot then (long e, initial.(component)) else (float, initial.(component)) in
           Words.instruction words.body 245 [ ty; phi; start; preheader_pred; next_values.(component); continuing ])
         carry_phis;
       Option.iter
@@ -812,7 +850,7 @@ let emit_program e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers ind
           Words.instruction words.body 245
             [ boolean; phi; initial_stop; preheader_pred; Option.get stop_value; continuing ])
         stop_phi;
-      let in_range = compare e 177 index_phi last in
+      let in_range = compare e (if narrow.(header) then 176 else 177) index_phi index_last in
       let not_stopped = Option.fold ~none:(compare e 171 (u e 0) (u e 0))
           ~some:(fun phi -> result e boolean 168 [ phi ]) stop_phi in
       let condition = result e boolean 167 [ result e boolean 167 [ in_range; not_stopped ]; result e boolean 168 [ too_long ] ] in
@@ -824,13 +862,13 @@ let emit_program e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers ind
       if guarded then begin
         jump e after_guard;
         label e after_guard;
-        registers.(header) <- result e (long e) 245 [ index_phi; finished; l e 0L; skipped ];
+        registers.(header) <- result e index_type 245 [ index_phi; finished; (if narrow.(header) then u e 0 else l e 0L); skipped ];
         Array.iteri
           (fun component phi ->
             let slot = header + 1 + component in
-            let ty, zero = if integer slot then (long e, l e 0L) else (float, f e 0.) in
+            let ty, zero = if narrow.(slot) then (e.uint, u e 0) else if integer slot then (long e, l e 0L) else (float, f e 0.) in
             registers.(slot) <- result e ty 245 [ phi; finished; zero; skipped ];
-            whole.(slot) <- if integer slot then Some registers.(slot) else None)
+            whole.(slot) <- if integer slot && not narrow.(slot) then Some registers.(slot) else None)
           carry_phis
       end;
     end
@@ -844,6 +882,8 @@ let emit_program e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers ind
     (fun output values ->
       Array.iteri
         (fun component register ->
+          if layout.output_checks && not (integer register) then
+            mark_invalid e invalid (non_finite e (float_of register));
           store e outputs.(output)
             (offset e index (Array.length values) component)
             (float_of register))
@@ -902,6 +942,7 @@ let kernel ?(fast = false) ?(instanced = false) program =
     let function_type = Words.declare words 33 [ void ] in
     let storage, storage_pointer = storage_type words float
     and uint_storage, uint_storage_pointer = storage_type words uint in
+    let uint_function_pointer = Words.declare words 32 [ 7; uint ] in
     let uniform_length =
       Words.constant words uint (Int32.of_int (Flow_ir.Kernel_layout.uniform_words layout))
     in
@@ -989,6 +1030,8 @@ let kernel ?(fast = false) ?(instanced = false) program =
         storage_pointer;
         uint_storage_pointer;
         status;
+        uint_function_pointer;
+        status_bits = 0;
         table;
         noise;
         scene;
@@ -999,6 +1042,7 @@ let kernel ?(fast = false) ?(instanced = false) program =
     in
     Words.instruction words.body 54 [ void; main; 0; function_type ];
     label e (Words.id words);
+    e.status_bits <- result e uint_function_pointer 59 [ 7; u e 0 ];
     let gid = result e vector3 61 [ invocation ] in
     let index = result e uint 81 [ gid; 0 ] in
     let body = Words.id words and finish = Words.id words in
@@ -1008,12 +1052,15 @@ let kernel ?(fast = false) ?(instanced = false) program =
     Words.instruction words.body 250 [ within; body; finish ];
     label e body;
     let invalid = emit_program e layout inputs outputs gathers index in
+    record_status e invalid 1;
+    let bits = result e uint 61 [ e.status_bits ] in
+    let flagged = compare e 171 bits (u e 0) in
     let bad = Words.id words and after = Words.id words in
     Words.instruction words.body 247 [ after; 0 ];
-    Words.instruction words.body 250 [ invalid; bad; after ];
+    Words.instruction words.body 250 [ flagged; bad; after ];
     label e bad;
     let status_pointer = result e uint_storage_pointer 65 [ status; u e 0; u e 0 ] in
-    ignore (result e uint 241 [ status_pointer; u e 1; u e 0; u e 1 ]);
+    ignore (result e uint 241 [ status_pointer; u e 1; u e 0; bits ]);
     jump e after;
     label e after;
     jump e finish;

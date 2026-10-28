@@ -3,6 +3,12 @@ type t = {
   view : Packed.Private.view;
   used : bool array;
   finite_checks : bool array;
+      (** per-instruction finite checks: a fast kernel checks only its inputs, and its outputs *)
+  output_checks : bool;
+      (** fast: the approximate tier guarantees valid outputs (specification/gpu-codegen.md) *)
+  narrow : bool array;
+      (** fast: Int registers printed as 32-bit unsigned words, with the CPU's bits: each always lies
+          in [0, 2^32) or is read only through its low 32 bits ([Loop_result] follows its carry) *)
   uniforms : int array;
   frames : int array;
   image_width : int option;
@@ -38,3 +44,17 @@ val iter : t -> instruction:(int -> Packed.instruction -> unit) ->
 (** Visit validated control scopes in authored order. The loop printer owns its
     carried declarations, simultaneous update and optional early exit; [body]
     visits only its body. *)
+
+(** A printed scope (the kernel body or one loop body) of the text printers: its registers are
+    declared first ([decls]), then its code runs, where consecutive instructions under the same
+    guards share one nest of blocks ([opened], outermost first) instead of testing their
+    conditions instruction by instruction. *)
+module Scope : sig
+  type t = { id : int; decls : Buffer.t; code : Buffer.t; mutable opened : (int * bool) list }
+
+  val create : int -> t
+  val indent : t -> string
+
+  val enter : t -> opening:(int -> bool -> string) -> (int * bool) list -> unit
+  (** Close the blocks [guards] leave and open, with [opening condition selected], the ones it adds. *)
+end

@@ -40,7 +40,7 @@ let () =
         let assignment=Printf.sprintf "    r%d ="slot in
         let rec check=function
           |line::next::_ when String.starts_with ~prefix:assignment line->
-              assert(next=Printf.sprintf "    if (!wfinite(r%d)) { atomicOr(&status, 1u); }"slot)
+              assert(next=Printf.sprintf "    if (!wfinite(r%d)) { sb |= 1u; }"slot)
           |_::rest->check rest|[]->assert false in check lines
     |_->())view.code;
   assert !guarded;
@@ -194,6 +194,6 @@ let () =
   let checks = Flow_ir.Packed.Private.finite_checks hidden in
   List.iteri (fun index line -> if String.starts_with ~prefix:"  let r" line then
     let slot = Scanf.sscanf line "  let r%d:" Fun.id in
-    let guard = Printf.sprintf "  if (!wfinite(r%d)) { atomicOr(&status, 1u); }" slot in
+    let guard = Printf.sprintf "  if (!wfinite(r%d)) { sb |= 1u; }" slot in
     assert ((List.nth lines (index + 1) = guard) = checks.(slot))) lines;
   print_endline "WGSL printer: goldens and shared refusals passed"
