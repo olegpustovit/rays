@@ -1,7 +1,5 @@
 (** Deterministic, target-independent geometry analysis. *)
 
-type connectivity_owner = Connectivity_points | Connectivity_primitives
-
 val signed_volume : Geometry.t -> float
 (** Divergence-theorem sum over polygon fans: meaningful for consistently
     wound closed shells, exact for non-convex faces. *)
@@ -10,7 +8,7 @@ val classify_connectivity :
   ?primitives:Group.t ->
   ?points:Group.t ->
   ?seams:Edge_group.t ->
-  connectivity_owner ->
+  Attribute.owner ->
   Geometry.t ->
   (int array * int, Error.t) result
 (** Classify point or primitive connected components. Primitive and point

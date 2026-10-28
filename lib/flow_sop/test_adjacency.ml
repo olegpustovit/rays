@@ -66,7 +66,7 @@ let () =
       let classify mask =
         let group = Option.map (fun mask -> Rdk.Group.init ~owner:group_owner ~name:"m" count
           (fun i -> mask.(i) = 1)) mask in
-        let primitives, points = if owner = Rdk.Analysis.Connectivity_primitives then group, None else None, group in
+        let primitives, points = if owner = Rdk.Attribute.Primitive then group, None else None, group in
         let ids, n = Rdk.Analysis.classify_connectivity ?primitives ?points owner geometry |> ok_error in
         E.Record ["id", ints ids; "count", E.Int n] in
       agree geometry (Printf.sprintf "(sop/components geo :over \"%s\")" over) (classify None);
@@ -79,8 +79,8 @@ let () =
           "(sop/components geo :over \"%s\" :mask (exact (map (fn [(i : int)] (if (int/eq (int/mod i 3) 1) 0 1)) (array/range %d :type int))))"
           over count) (classify (Some mask));
       ignore literal)
-      [ "edges", Rdk.Analysis.Connectivity_points, Rdk.Group.Point, G.point_count geometry;
-        "points", Rdk.Analysis.Connectivity_primitives, Rdk.Group.Primitive, G.primitive_count geometry ])
+      [ "edges", Rdk.Attribute.Point, Rdk.Group.Point, G.point_count geometry;
+        "points", Rdk.Attribute.Primitive, Rdk.Group.Primitive, G.primitive_count geometry ])
     (fixtures ())
 
 (* sop/components :seams, a 0/1 edge mask: ids and count equal Analysis.classify_connectivity with the
@@ -98,7 +98,7 @@ let () =
       let classify mask =
         let group = Option.map (fun mask -> Rdk.Group.init ~owner:group_owner ~name:"m" count
           (fun i -> mask.(i) = 1)) mask in
-        let primitives, points = if owner = Rdk.Analysis.Connectivity_primitives then group, None else None, group in
+        let primitives, points = if owner = Rdk.Attribute.Primitive then group, None else None, group in
         let ids, n = Rdk.Analysis.classify_connectivity ?primitives ?points ~seams owner geometry |> ok_error in
         E.Record ["id", ints ids; "count", E.Int n] in
       if edges > 0 then begin
@@ -109,8 +109,8 @@ let () =
             "(sop/components geo :over \"%s\" :seams %s :mask (exact (map (fn [(i : int)] (if (int/eq (int/mod i 4) 2) 0 1)) (array/range %d :type int))))"
             over seam_text count) (classify (Some mask))
       end)
-      [ "edges", Rdk.Analysis.Connectivity_points, Rdk.Group.Point, G.point_count geometry;
-        "points", Rdk.Analysis.Connectivity_primitives, Rdk.Group.Primitive, G.primitive_count geometry ];
+      [ "edges", Rdk.Attribute.Point, Rdk.Group.Point, G.point_count geometry;
+        "points", Rdk.Attribute.Primitive, Rdk.Group.Primitive, G.primitive_count geometry ];
     let refused body code =
       let value, resolve = evaluate geometry body in
       match E.Host.force_reference ~resolve value ~live:(Input.at_time 0.25) with

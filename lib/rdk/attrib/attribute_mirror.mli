@@ -1,5 +1,3 @@
-type owner = Mirror_point_attributes | Mirror_vertex_attributes
-  | Mirror_primitive_attributes
 
 type group_use = Mirror_group_as_source | Mirror_group_as_destination
 
@@ -37,7 +35,7 @@ val run :
   ?output_mapping:string ->
   ?source_group:string ->
   ?destination_group:string ->
-  owner:owner ->
+  owner:Attribute.owner ->
   method_:method_ ->
   Geometry.t ->
   (Geometry.t, Error.t) result

@@ -76,7 +76,7 @@ module Clip = struct
     ]
 
   type parameters = {
-    group_owner : element_owner [@sop.default Element_point]
+    group_owner : Rdk.Group_ops.owner [@sop.default Rdk.Group_ops.Group_points]
       [@sop.label "Group type"] [@sop.folder "Selection"] [@sop.kind element_owner_parameter];
     group : string [@sop.default ""] [@sop.label "Group"] [@sop.folder "Selection"];
     keep : Rdk.Plane_clip.keep [@sop.default Rdk.Plane_clip.Above]
@@ -286,7 +286,7 @@ module Soft_transform = struct
       "Radius", Soft_radius; "Edge distance", Soft_edge; "Attribute", Soft_attribute;
     ]
   type parameters = {
-    group_owner : element_owner [@sop.default Element_point]
+    group_owner : Rdk.Group_ops.owner [@sop.default Rdk.Group_ops.Group_points]
       [@sop.label "Group type"] [@sop.folder "Selection"]
       [@sop.kind element_owner_parameter];
     group : string [@sop.default ""] [@sop.label "Group"]
@@ -468,7 +468,7 @@ module Ray = struct
     ]
 
   type parameters = {
-    group_owner : element_owner [@sop.default Element_point]
+    group_owner : Rdk.Group_ops.owner [@sop.default Rdk.Group_ops.Group_points]
       [@sop.label "Group type"] [@sop.kind element_owner_parameter];
     group : string [@sop.default ""] [@sop.label "Group"];
     collision_group : string [@sop.default ""]

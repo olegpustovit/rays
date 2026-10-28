@@ -32,7 +32,6 @@ module Graph_color = Rdk_mesh.Graph_color
 module Poly_path = Rdk_curve.Poly_path
 module Shortest_paths = Rdk_mesh.Shortest_paths
 module Forest = Rdk_mesh.Forest
-module Blast_by_attribute = Rdk_mesh.Blast_by_attribute
 module Deletion = Rdk_mesh.Deletion
 module Attribute_mirror = Rdk_attrib.Attribute_mirror
 module Motion = Rdk_mesh.Motion

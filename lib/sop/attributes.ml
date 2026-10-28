@@ -145,12 +145,12 @@ module Distance_from_geometry = struct
     ]
 
   type parameters = {
-    affected_owner : element_owner [@sop.default Element_point]
+    affected_owner : Rdk.Group_ops.owner [@sop.default Rdk.Group_ops.Group_points]
       [@sop.label "Affected group type"] [@sop.folder "Source"]
       [@sop.kind element_owner_parameter];
     affected_group : string [@sop.default ""] [@sop.label "Affected group"]
       [@sop.folder "Source"];
-    reference_owner : element_owner [@sop.default Element_primitive]
+    reference_owner : Rdk.Group_ops.owner [@sop.default Rdk.Group_ops.Group_primitives]
       [@sop.label "Reference group type"] [@sop.folder "Reference"]
       [@sop.kind element_owner_parameter];
     reference_group : string [@sop.default ""] [@sop.label "Reference group"]
@@ -230,9 +230,9 @@ end
 module Attribute_mirror = struct
   open Rays_math
   let owner_parameter = Param.choice ~equal:( = ) [
-      "Point", Rdk.Attribute_mirror.Mirror_point_attributes;
-      "Vertex", Rdk.Attribute_mirror.Mirror_vertex_attributes;
-      "Primitive", Rdk.Attribute_mirror.Mirror_primitive_attributes;
+      "Point", Rdk.Attribute.Point;
+      "Vertex", Rdk.Attribute.Vertex;
+      "Primitive", Rdk.Attribute.Primitive;
     ]
   let group_use_parameter = Param.choice ~equal:( = ) [
       "Group is source", Rdk.Attribute_mirror.Mirror_group_as_source;
@@ -245,8 +245,8 @@ module Attribute_mirror = struct
       "Copy", Mirror_copy; "UV", Mirror_uv; "Vector", Mirror_vector; "Point", Mirror_point;
     ]
   type parameters = {
-    owner : Rdk.Attribute_mirror.owner
-      [@sop.default Rdk.Attribute_mirror.Mirror_point_attributes]
+    owner : Rdk.Attribute.owner
+      [@sop.default Rdk.Attribute.Point]
       [@sop.label "Attribute owner"] [@sop.kind owner_parameter];
     attributes : string [@sop.default "Cd"] [@sop.label "Attributes"];
     group : string [@sop.default ""] [@sop.label "Selection group"];
@@ -329,7 +329,7 @@ module Attribute_mirror = struct
           if parameters.transform = Mirror_vector || parameters.transform = Mirror_point then
             invalid_arg "sop/attribute_mirror: vector/point transforms require a plane"
       | Mirror_plane ->
-          if parameters.owner = Rdk.Attribute_mirror.Mirror_vertex_attributes then
+          if parameters.owner = Rdk.Attribute.Vertex then
             invalid_arg "sop/attribute_mirror: vertex owner requires mapping";
           let nx = parameters.normal_x and ny = parameters.normal_y and nz = parameters.normal_z in
           let scale = Float.max (Float.abs nx) (Float.max (Float.abs ny) (Float.abs nz)) in

@@ -1,6 +1,4 @@
 
-type owner = Mirror_point_attributes | Mirror_vertex_attributes
-  | Mirror_primitive_attributes
 
 type group_use = Mirror_group_as_source | Mirror_group_as_destination
 
@@ -38,25 +36,29 @@ type mapping = {
 
 let fail message = raise (Error.Fail message)
 
-let attribute_owner = function
-  | Mirror_point_attributes -> Attribute.Point
-  | Mirror_vertex_attributes -> Attribute.Vertex
-  | Mirror_primitive_attributes -> Attribute.Primitive
+let detail_refused () = fail "Attribute Mirror owner must be point, vertex or primitive"
+
+let attribute_owner : Attribute.owner -> Attribute.owner = function
+  | Detail -> detail_refused ()
+  | owner -> owner
 
 let group_owner = function
-  | Mirror_point_attributes -> Group.Point
-  | Mirror_vertex_attributes -> Group.Vertex
-  | Mirror_primitive_attributes -> Group.Primitive
+  | Attribute.Point -> Group.Point
+  | Vertex -> Group.Vertex
+  | Primitive -> Group.Primitive
+  | Detail -> detail_refused ()
 
 let owner_name = function
-  | Mirror_point_attributes -> "point"
-  | Mirror_vertex_attributes -> "vertex"
-  | Mirror_primitive_attributes -> "primitive"
+  | Attribute.Point -> "point"
+  | Vertex -> "vertex"
+  | Primitive -> "primitive"
+  | Detail -> detail_refused ()
 
 let owner_count owner geometry = match owner with
-  | Mirror_point_attributes -> Geometry.point_count geometry
-  | Mirror_vertex_attributes -> Geometry.vertex_count geometry
-  | Mirror_primitive_attributes -> Geometry.primitive_count geometry
+  | Attribute.Point -> Geometry.point_count geometry
+  | Vertex -> Geometry.vertex_count geometry
+  | Primitive -> Geometry.primitive_count geometry
+  | Detail -> detail_refused ()
 
 let record_first_bad bad element =
   let current = ref (Atomic.get bad) in
@@ -137,10 +139,11 @@ let primitive_locations ?cancel ~grain geometry =
   Packed.Float3.View.of_owned_exn ~x ~y ~z
 
 let locations ?cancel ~grain owner geometry = match owner with
-  | Mirror_point_attributes -> point_locations geometry
-  | Mirror_primitive_attributes -> primitive_locations ?cancel ~grain geometry
-  | Mirror_vertex_attributes ->
+  | Attribute.Point -> point_locations geometry
+  | Primitive -> primitive_locations ?cancel ~grain geometry
+  | Vertex ->
       fail "Attribute Mirror plane correspondence does not yet support vertex attributes"
+  | Detail -> detail_refused ()
 
 let plane_distance plane x y z =
   ((x -. plane.ox) *. plane.nx) +. ((y -. plane.oy) *. plane.ny)
@@ -508,7 +511,7 @@ let run ?cancel ?(grain = 16_384) ?group
             mapping_attribute destination_group geometry in
     let attribute_owner = attribute_owner owner in
     let changed = mapping_changed mapping in
-    let mirror_position = owner = Mirror_point_attributes
+    let mirror_position = owner = Attribute.Point
         && changed && Attribute_pattern.matches pattern "P" in
     let selected = Geometry.attributes geometry |> List.filter (fun attribute ->
       Attribute.owner attribute = attribute_owner

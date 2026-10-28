@@ -58,7 +58,6 @@ type polyframe_style = Style_first_edge | Style_two_edges | Style_centroid
 type group_range_mode = Start_end | From_ends | Start_length | Partition
 type group_range_connectivity = No_connectivity | Disconnected | Connected
 type centroid_run_mode = Detail | Primitives | Point_pieces | Primitive_pieces
-type element_owner = Element_point | Element_vertex | Element_primitive | Element_edge
 type element_group = Point_group of string | Vertex_group of string
   | Primitive_group of string | Edge_group of string
 
@@ -91,15 +90,15 @@ let transport_roots mode group = match mode with
   | Transport_group -> optional_text group, Rdk.Edge_transport.Transport_first_point
 
 let element_owner_parameter = Param.choice ~equal:( = ) [
-    "Point", Element_point; "Vertex", Element_vertex;
-    "Primitive", Element_primitive; "Edge", Element_edge;
+    "Point", Rdk.Group_ops.Group_points; "Vertex", Rdk.Group_ops.Group_vertices;
+    "Primitive", Rdk.Group_ops.Group_primitives; "Edge", Rdk.Group_ops.Group_edges;
   ]
 
 let optional_element_group owner name = match optional_text name with
   | None -> None
   | Some name -> Some (match owner with
-      | Element_point -> Point_group name | Element_vertex -> Vertex_group name
-      | Element_primitive -> Primitive_group name | Element_edge -> Edge_group name)
+      | Rdk.Group_ops.Group_points -> Point_group name | Rdk.Group_ops.Group_vertices -> Vertex_group name
+      | Rdk.Group_ops.Group_primitives -> Primitive_group name | Rdk.Group_ops.Group_edges -> Edge_group name)
 
 let resolve_element_group ~operation selection geometry = match selection with
   | None -> Ok None
@@ -262,22 +261,6 @@ let decode_curve_join_picks text =
       |> Array.of_list in
   Some picks
 
-let decode_copy_target_rules text = List.map (function
-  | [copy_target_pattern; owner; operation] ->
-      validate_parameter_pattern "sop/copy_to_points" copy_target_pattern;
-      let copy_target_owner = match owner with
-        | "points" -> Rdk.Instance_copy.Copy_target_points
-        | "vertices" -> Copy_target_vertices
-        | "primitives" -> Copy_target_primitives
-        | _ -> invalid_arg "sop/copy_to_points: unknown target owner" in
-      let copy_target_operation = match operation with
-        | "nothing" -> Rdk.Instance_copy.Copy_target_nothing
-        | "copy" -> Copy_target_copy | "add" -> Copy_target_add
-        | "subtract" -> Copy_target_subtract | "multiply" -> Copy_target_multiply
-        | _ -> invalid_arg "sop/copy_to_points: unknown target operation" in
-      { Rdk.Instance_copy.copy_target_pattern; copy_target_owner; copy_target_operation }
-  | _ -> invalid_arg "sop/copy_to_points: target rule needs pattern, owner and operation columns")
-    (parameter_table_rows "sop/copy_to_points" text)
 
 let element_attribute_owner_parameter = Param.choice ~equal:( = ) [
     "Point", Rdk.Attribute.Point; "Vertex", Rdk.Attribute.Vertex;
@@ -514,9 +497,10 @@ type mirror_method = Mirror_plane | Mirror_mapping
 type mirror_transform = Mirror_copy | Mirror_uv | Mirror_vector | Mirror_point
 
 let attribute_mirror_group_owner = function
-  | Rdk.Attribute_mirror.Mirror_point_attributes -> Rdk.Group.Point
-  | Rdk.Attribute_mirror.Mirror_vertex_attributes -> Rdk.Group.Vertex
-  | Rdk.Attribute_mirror.Mirror_primitive_attributes -> Rdk.Group.Primitive
+  | Rdk.Attribute.Point -> Rdk.Group.Point
+  | Rdk.Attribute.Vertex -> Rdk.Group.Vertex
+  | Rdk.Attribute.Primitive -> Rdk.Group.Primitive
+  | Rdk.Attribute.Detail -> invalid_arg "Attribute Mirror: detail attributes cannot be mirrored"
 
 type velocity_initialization = Velocity_compute | Velocity_keep | Velocity_set | Velocity_from_attribute
 
@@ -541,9 +525,6 @@ let validate_plane_axes operation horizontal vertical =
 type blast_attribute_mode = Blast_below | Blast_range | Blast_width
 type blast_attribute_output = Blast_delete | Blast_group
 
-let blast_attribute_owner_key = function
-  | Rdk.Blast_by_attribute.Blast_points -> "points"
-  | Rdk.Blast_by_attribute.Blast_primitives -> "primitives"
 
 type facet_consolidation = Consolidation_none | Consolidation_points | Consolidation_normals
 let facet_consolidation_parameter = Param.choice ~equal:( = ) [

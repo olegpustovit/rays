@@ -1,14 +1,5 @@
 
 
-type copy_target_owner = Copy_target_points | Copy_target_vertices
-  | Copy_target_primitives
-type copy_target_operation = Copy_target_nothing | Copy_target_copy
-  | Copy_target_add | Copy_target_subtract | Copy_target_multiply
-type copy_target_attribute_rule = {
-  copy_target_pattern : string;
-  copy_target_owner : copy_target_owner;
-  copy_target_operation : copy_target_operation;
-}
 
 let parallel_output_ranges ?cancel ~grain length body =
   Support.run_ranges ~grain length (fun ~first ~last -> Cancel.check_opt cancel; body ~first ~last)
