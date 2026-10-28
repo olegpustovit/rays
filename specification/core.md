@@ -864,7 +864,8 @@ logical right shifts first retain the native 63-bit input representation.
 This applies to the Metal, fast WGSL/JavaScript and SPIR-V printers. Their
 separate whole-Float arithmetic helpers retain 64-bit intermediate storage.
 Device kernels OR their status bits into a thread-local word and publish it to
-the shared status word with one atomic, at the end or an early return: bit 0
+the shared status word with the kernel's one atomic, at its end (a loop over its
+pass limit flags bit 0 and runs no pass): bit 0
 records nonfinite output, bit 1 a zero integer divisor, and bit 2 an integer
 shift count outside `[0,62]`. Fast (approximate-tier) kernels check their inputs
 and outputs only, not each operation, and keep only the loop-body instructions
@@ -879,6 +880,11 @@ stable class priority (invalid shift, zero divisor, nonfinite); it does not
 identify the CPU's earliest failing row. Integer failures retain `E_RANGE`,
 while nonfinite device output retains `E_KERNEL`.
 Existing `int/*` operations and explicit masks express uint32 wraparound;
+fast device kernels print such registers as 32-bit unsigned words (`uint`,
+`u32`, `OpTypeInt 32 0`) when `Kernel_layout.narrow` proves the value lies in
+`[0, 2^32)` or only its low 32 bits are read (wrapping arithmetic, bitwise
+operations, selects, carried next values, clamped gather indices), which keeps
+the CPU's bits; other Int registers keep the 64-bit representation.
 the shared fixture exercises a carried uint32 permutation without another
 integer language or executor. Text-carried loops stay on the CPU/JavaScript.
 Carried Int/Float widening stays in structured Core: converting the seed to
