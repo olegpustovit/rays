@@ -16,11 +16,12 @@ let chain_text stages = Printf.sprintf
     Printf.sprintf "d%d (sop/noise_displace %s :amplitude %g :frequency %g :seed %d)" (i + 1)
       (if i = 0 then "g" else Printf.sprintf "d%d" i) amplitude frequency seed) stages))
   (Printf.sprintf "d%d" (List.length stages))
+let profiles : Flow_ir.Profile.t list ref = ref []
 let lower ?previous text =
   let forms = Flow.Syntax.parse text |> flow_ok in
   let compiled_ids = Option.map (fun (l : L.t) -> l.compiled_ids) previous
   and sites = Option.map (fun (l : L.t) -> l.sites) previous in
-  match L.workspace ~factories ?compiled_ids ?sites forms with
+  match L.workspace ~factories ~on_profile:(fun p -> profiles := p :: !profiles) ?compiled_ids ?sites forms with
   | Ok lowered -> lowered | Error d -> failwith (text ^ "\n" ^ Diagnostic.to_string d)
 let compiled (l : L.t) =
   let graph = List.hd l.graphs in
@@ -30,14 +31,13 @@ let geometry = function
   | Ok (output : Session.output) -> Result.get_ok (Sop.Payload.geometry output.payload)
   | Error d -> failwith (Diagnostic.error_to_string d)
 let kernel_runs (_ : L.t) = List.fold_left (fun count profile -> count + List.length (List.filter
-  (fun (e : Flow_ir.execution) -> e.tier = Cpu_kernel) (Flow_ir.Profile.executions profile))) 0 !L.Private.profiles
+  (fun (e : Flow_ir.execution) -> e.tier = Cpu_kernel) (Flow_ir.Profile.executions profile))) 0 !profiles
 let stages = [0.3, 0.7, 0; -0.2, 1.3, 3; 0.15, 2.1, 5; 0.05, 0.4, 7]
 let native stages base = List.fold_left (fun geometry (amplitude, frequency, seed) ->
   Deform.noise_displace ~mode:Deform.Height_2d ~seed ~amplitude ~frequency geometry |> get_ok) base stages
   |> Geometry.without_attribute ~owner:Attribute.Point "N"
   |> Geometry.without_attribute ~owner:Attribute.Vertex "N"
 let () =
-  L.Private.record := true;
   let session = Session.create ~max_entries:32 ~max_payload_bytes:(64 * 1024 * 1024) |> get_string_ok in
   Fun.protect ~finally:(fun () -> Session.close session) (fun () ->
     let base_l = lower (Printf.sprintf "(workspace b (graph g :context sop %s))" grid) in
@@ -45,7 +45,7 @@ let () =
     let cook l domains = Session.cook session ~context:(context ~domains) (compiled l) |> geometry in
     let run stages =
       List.iter (fun domains ->
-        L.Private.profiles := [];
+        profiles := [];
         let l = lower (chain_text stages) in
         let fresh = Session.create ~max_entries:32 ~max_payload_bytes:(64 * 1024 * 1024) |> get_string_ok in
         let output = Session.cook fresh ~context:(context ~domains) (compiled l) |> geometry in
@@ -63,7 +63,7 @@ let () =
     assert (first <> second);
     assert (second = geometry_bytes (native edited base)));
   (* an intermediate with a second reader is not folded away: it still cooks for that reader *)
-  L.Private.profiles := [];
+  profiles := [];
   let text = chain_text stages in
   let split = lower (String.sub text 0 (String.length text - 5) ^ "(sop/merge d4 d2))))") in
   let session = Session.create ~max_entries:32 ~max_payload_bytes:(64 * 1024 * 1024) |> get_string_ok in

@@ -543,7 +543,7 @@ let build_lock = Mutex.create ()
 let same_gpu (a : Flow_ir.Gpu.config) (b : Flow_ir.Gpu.config) =
   a.fast = b.fast && a.policy = b.policy &&
   match a.backend, b.backend with None, None -> true | Some a, Some b -> a == b | _ -> false
-module Private = struct let record = ref false let profiles : Flow_ir.Profile.t list ref = ref []
+module Private = struct
   let cache_hits = Atomic.make 0
   let clear_cache () = Mutex.protect build_lock (fun () -> Build_cache.clear build_cache) end
 let geo_of args =
@@ -610,6 +610,7 @@ module Lowerer (P : sig
   val strict_body : bool
   val defer_body_errors : bool
   val kernel_bindings : (E.fn * int) list
+  val on_profile : (Flow_ir.Profile.t -> unit) option
   val compiled_ids : int Instance_path.Map.t
   val sites : Workspace.path list
   val inputs : (string * (string * Eval.value) list) list option
@@ -617,7 +618,7 @@ module Lowerer (P : sig
   val lower_checked :
     factories:Edit.factory list -> ?provenance_tags:bool -> ?reference:bool -> ?gpu:Flow_ir.Gpu.config ->
     ?strict_body:bool -> ?defer_body_errors:bool -> ?kernel_bindings:(E.fn * int) list ->
-    ?compiled_ids:int Instance_path.Map.t -> ?sites:Workspace.path list ->
+    ?on_profile:(Flow_ir.Profile.t -> unit) -> ?compiled_ids:int Instance_path.Map.t -> ?sites:Workspace.path list ->
     ?inputs:(string * (string * Eval.value) list) list -> Workspace.t -> (t, Diagnostic.t) result
 end) = struct
   open P
@@ -986,9 +987,9 @@ end) = struct
       let key = String.sub definition.kind.qualified 4
         (String.length definition.kind.qualified - 4) in
       let record_profile profile =
-        if !Private.record then Private.profiles := profile :: !Private.profiles in
+        Option.iter (fun record -> record profile) on_profile in
       let lower_nested ~gpu ~kernel_bindings ~factories ~inputs checked =
-        lower_checked ~reference ~gpu ~strict_body:true ~defer_body_errors:true ~kernel_bindings
+        lower_checked ~reference ~gpu ~strict_body:true ~defer_body_errors:true ~kernel_bindings ?on_profile
           ~factories ~inputs checked in
       let build_body bindings ~label ~context inputs parameters =
         build_lisp_body ~gpu ~lower_nested ~record_profile ~checked ~definition ~provenance ~label
@@ -999,7 +1000,7 @@ end) = struct
          lowerings, kernel bindings, recorded profiles, non-data parameters (key_of raises). *)
       let build bindings ~label ~context inputs parameters =
         let uncached () = build_body bindings ~label ~context inputs parameters in
-        if functions<>[] || strict_body || kernel_bindings<>[] || !Private.record then uncached () else
+        if functions<>[] || strict_body || kernel_bindings<>[] || on_profile <> None then uncached () else
         match String.concat "\000" [Lazy.force declaration_source; label; string_of_bool reference;
             Marshal.to_string (Workspace.Paths.elements checked.approx, provenance, bindings, Sop.Context.seed context,
               Sop.Context.frame context, Int64.bits_of_float (Sop.Context.time context),
@@ -1612,27 +1613,27 @@ let dynamic = ref [] in
         approx = checked.approx; approx_reasons = checked.approx_reasons; profile; preview}
 end
 
-let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) ?(gpu=Flow_ir.Gpu.default) ?(strict_body = false) ?(defer_body_errors = false) ?(kernel_bindings = []) ?(compiled_ids = Instance_path.Map.empty)
+let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) ?(gpu=Flow_ir.Gpu.default) ?(strict_body = false) ?(defer_body_errors = false) ?(kernel_bindings = []) ?on_profile ?(compiled_ids = Instance_path.Map.empty)
     ?(sites = []) ?inputs checked =
   Phase_timer.measure "lower" (fun () ->
   try
     let module L = Lowerer (struct
       let factories = factories let provenance_tags = provenance_tags let reference = reference let gpu = gpu
-      let strict_body = strict_body let defer_body_errors = defer_body_errors let kernel_bindings = kernel_bindings
+      let strict_body = strict_body let defer_body_errors = defer_body_errors let kernel_bindings = kernel_bindings let on_profile = on_profile
       let compiled_ids = compiled_ids let sites = sites let inputs = inputs let checked = checked
       let lower_checked = lower_checked
     end) in
     Ok L.result
   with Diagnostic.Error diagnostic -> Error diagnostic)
 
-let of_checked ~factories ?provenance_tags ?reference ?gpu ?compiled_ids ?sites ?inputs checked =
+let of_checked ~factories ?provenance_tags ?reference ?gpu ?on_profile ?compiled_ids ?sites ?inputs checked =
   Result.bind (Encoded_parameters.checked checked)
-    (lower_checked ~factories ?provenance_tags ?reference ?gpu ?compiled_ids ?sites ?inputs)
+    (lower_checked ~factories ?provenance_tags ?reference ?gpu ?on_profile ?compiled_ids ?sites ?inputs)
 
-let workspace ~factories ?extra ?reference ?gpu ?compiled_ids ?sites ?inputs source =
+let workspace ~factories ?extra ?reference ?gpu ?on_profile ?compiled_ids ?sites ?inputs source =
   Result.bind (Catalog.of_factories ~version:Manifest.version ?extra factories) (fun catalog ->
     match Catalog.check_workspace ~ops:Operators.all catalog source with
-    | Some checked, _ -> of_checked ~factories ?reference ?gpu ?compiled_ids ?sites ?inputs checked
+    | Some checked, _ -> of_checked ~factories ?reference ?gpu ?on_profile ?compiled_ids ?sites ?inputs checked
     | None, diagnostics -> Error (match List.find_opt (fun (d : Diagnostic.t) ->
         d.severity = Diagnostic.Error_severity) diagnostics with
       | Some d -> d

@@ -160,7 +160,7 @@ val changes : Port.parameter -> Flow.Eval.value -> ((string * Param.value) list,
 
 val workspace :
   factories:Sop.Edit_graph.factory list -> ?extra:Catalog.descriptor list ->
-  ?reference:bool -> ?gpu:Flow_ir.Gpu.config ->
+  ?reference:bool -> ?gpu:Flow_ir.Gpu.config -> ?on_profile:(Flow_ir.Profile.t -> unit) ->
   ?compiled_ids:int Instance_path.Map.t -> ?sites:Flow.Workspace.path list ->
   ?inputs:(string * (string * Flow.Eval.value) list) list ->
   Flow.Syntax.t list -> (t, Diagnostic.t) result
@@ -173,7 +173,7 @@ val of_checked :
   factories:Sop.Edit_graph.factory list ->
   ?provenance_tags:bool ->
   ?reference:bool ->
-  ?gpu:Flow_ir.Gpu.config ->
+  ?gpu:Flow_ir.Gpu.config -> ?on_profile:(Flow_ir.Profile.t -> unit) ->
   ?compiled_ids:int Instance_path.Map.t -> ?sites:Flow.Workspace.path list ->
   ?inputs:(string * (string * Flow.Eval.value) list) list ->
   Flow.Workspace.t -> (t, Diagnostic.t) result
@@ -193,9 +193,6 @@ val status : t -> seconds:float -> string option
     ◷, which DepartureMono lacks); [None] when nothing is live. *)
 
 module Private : sig
-  val record : bool ref
-  val profiles : Flow_ir.Profile.t list ref
   val cache_hits : int Atomic.t
   val clear_cache : unit -> unit
-  (** Test hook: with [record] set, the profile of every Lisp node body built is appended. *)
 end
