@@ -7,7 +7,7 @@ type t = private {
 }
 (** Binary SPIR-V compute emission from the shared kernel layout. *)
 
-val kernel : ?fast:bool -> ?instanced:bool -> ?motion:bool -> ?curves:bool -> Flow_ir.Packed.t -> (t, Diagnostic.t) result
+val kernel : ?fast:bool -> ?instanced:bool -> ?motion:bool -> ?curves:bool -> ?spheres:bool -> Flow_ir.Packed.t -> (t, Diagnostic.t) result
 (** A moving scene ([motion]) is refused ([E_GPU_FORM]): SPIR-V ray queries have no motion form. [curves]
     strands are the in-loop capsule test of {!Emit.kernel}'s [`Loop]. *)
 

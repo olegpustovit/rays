@@ -299,13 +299,24 @@ let operation ~emit ~as_float ~as_int ~literal ~is_table ~component ~guards
       "instance",{registers=[|emit(Convert(Truncate,(field 8).registers.(0)))|];constant=None;fields=[]}]}
   end
   else if kind=Flow.Op.Stage then begin
-    let operands=Array.concat(List.map2(fun(name,_)e->if name="texture"then[||]else(as_float e).registers)args expressions)in
+    let operands=Array.concat(List.map2(fun(name,(a:W.term))e->if name="texture"then[||]
+      else (if a.ty=Ty.Int then as_int e else as_float e).registers)args expressions)in
     let texture()=match List.assoc_opt "texture" args with
       | Some {W.node=W.Lit(Param.Int_value n);_} -> n
       | _ -> refuse ~at:t "E_PACKED_TYPE" (op ^ " names its texture slot with an integer literal.") in
     let stage s={registers=[|emit(Stage(s,operands))|];constant=None;fields=[]} in
     match op with
     | "gpu/fwidth" -> stage Fwidth
+    | "gpu/trace-any" -> stage Trace_any | "gpu/trace-curves-any" -> stage Trace_curves_any
+    | "gpu/trace-triangles" | "gpu/trace-curves" ->
+        let names=if op="gpu/trace-curves" then ["t";"prim";"u";"hit"] else ["t";"prim";"u";"v";"hit";"instance"] in
+        {registers=[||];constant=None;fields=List.mapi(fun k name->name,
+          stage(if op="gpu/trace-curves" then Trace_curves k else Trace_triangles k))names}
+    | "gpu/scene-vertex" | "gpu/scene-vertex-end" ->
+        {registers=Array.init 3(fun c->emit(Stage(Scene_vertex(op="gpu/scene-vertex-end",c),operands)));constant=None;fields=[]}
+    | "gpu/scene-instance" -> stage Scene_instance
+    | "gpu/scene-sphere" | "gpu/scene-strand" ->
+        {registers=Array.init 4(fun c->emit(Stage((if op="gpu/scene-sphere" then Scene_sphere c else Scene_strand c),operands)));constant=None;fields=[]}
     | "gpu/sample" | "gpu/sample-level" | "gpu/read" -> let t=texture() in
         let s c=match op with "gpu/sample" -> Sample(t,c) | "gpu/read" -> Read(t,c) | _ -> Sample_level(t,c) in
         {registers=Array.init 4(fun c->emit(Stage(s c,operands)));constant=None;fields=[]}

@@ -43,7 +43,7 @@ let width = function Flow.Ty.Array Vec4 -> 4 | Array Vec3 -> 3 | _ -> 1
 type facts = {
   spp : int; bounces : int; round_samples : int; panels : int; lights : int;
   world : bool; background : int; map_w : int; map_h : int; sun : bool; bsdf_only : bool;
-  instanced : bool; classes : bool * bool * bool; motion : bool; curves : [ `Loop | `Native ] option }
+  instanced : bool; classes : bool * bool * bool; motion : bool; curves : [ `Loop | `Native ] option; spheres : bool }
 
 let num x = let s = Printf.sprintf "%.17g" x in
   if String.exists (fun c -> c = '.' || c = 'e' || c = 'n') s then s else s ^ "."
@@ -136,7 +136,7 @@ let check_library () =
 let check_sketch () =
   let f = { spp = 1; bounces = 5; round_samples = 4; panels = 0; lights = 2; world = true; background = 0;
             map_w = 512; map_h = 256; sun = false; bsdf_only = false; instanced = true;
-            classes = (false, false, true); motion = false; curves = None } in
+            classes = (false, false, true); motion = false; curves = None; spheres = false } in
   match Flow.Syntax.parse (text f ~preview:false) with
   | Error d -> Error (Diagnostic.to_string d)
   | Ok syntax -> match Flow.Workspace.check ~ops ~call_sites:true { Flow.Catalog.version = 1; kinds = [] } syntax with
@@ -158,7 +158,7 @@ let kernel t ~lease ~pipelines name =
         | Error d -> Error (name ^ ": " ^ Diagnostic.to_string d) in
       let* template = Option.to_result ~none:("path tracer kernel " ^ name ^ " has no device template")
           (Packed.compile_template residual (E.Residual.residual_view residual).term) in
-      let* msl = Result.map_error (fun d -> name ^ ": " ^ Diagnostic.to_string d) (Flow_gpu.Emit.kernel ~fast:true ~instanced:t.facts.instanced ~motion:t.facts.motion ?curves:t.facts.curves template) in
+      let* msl = Result.map_error (fun d -> name ^ ": " ^ Diagnostic.to_string d) (Flow_gpu.Emit.kernel ~fast:true ~instanced:t.facts.instanced ~motion:t.facts.motion ?curves:t.facts.curves ~spheres:t.facts.spheres template) in
       let* base = Result.map_error (fun d -> name ^ ": " ^ Diagnostic.to_string d) (Flow_ir.Packed.Host.prepare ~fast:true template ~live:(Input.at_time 0.)) in
       let slots = Array.map (function
         | Flow_ir.Packed.Host.Value v ->

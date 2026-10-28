@@ -1,9 +1,16 @@
 (library
  (name flow_gpu)
  (public_name rays.flow_gpu)
- (modules emit spirv pipelines run host image_sink raster image_rgba8_source)
- (private_modules image_rgba8_source)
+ (modules lisp_stage trace trace_source emit spirv pipelines run host image_sink raster image_rgba8_source)
+ (private_modules lisp_stage trace trace_source image_rgba8_source)
  (libraries flow flow_ir ogpu renderer rays_math lru parallel))
+
+; the device side of scene/trace, compiled once a scene variant (Trace)
+(rule
+ (target trace_source.ml)
+ (deps trace.rays)
+ (action (with-stdout-to %{target}
+  (progn (echo "let source = {rays|") (cat trace.rays) (echo "|rays}\n")))))
 
 ; the image sink's stages, generated from ../renderer/shaders/image.rays (test_raster.exe --write)
 (rule

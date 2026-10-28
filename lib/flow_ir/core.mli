@@ -108,8 +108,14 @@ module Region : sig
   type loop = {first:int; last:int; finish:int; initial:int array; limit:int option;
     span:Diagnostic.span}
   type stage = Fwidth | Sample of int * int | Sample_level of int * int | Read of int * int | Texture_size of int * int
+    | Trace_triangles of int | Trace_any | Trace_curves of int | Trace_curves_any
+    | Scene_vertex of bool * int | Scene_instance | Scene_sphere of int | Scene_strand of int
     (** [fwidth x]; component c of texture t sampled at (u, v) (its sampler at t + 1); axis c of
-        texture t's size in texels *)
+        texture t's size in texels. The device side of scene/trace (Flow_gpu.Trace): field k of a
+        triangle query (0 t, 1 prim, 2 u, 3 v, 4 hit, 5 instance) or a curve query (0 t, 1 prim, 2 u,
+        3 hit) over origin, direction, tmin, tmax (and time), an any-hit query, and component c of a
+        scene table row: a triangle corner (of the shutter's end), an instance-table word, a sphere, a
+        strand end. Int-typed operands are integer registers. *)
   type instruction =
     | Const of float | Input of int * int * int  (** source, width, component *)
     | Uniform of int * int | Frame of string | Accumulator of int

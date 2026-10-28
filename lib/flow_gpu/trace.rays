@@ -1,0 +1,131 @@
+; scene/trace on the device. Flow_gpu.Trace inlines trace-hit (or trace-occluded, for a ray whose only
+; read field is its hit) at each scene/trace of a traced kernel, specialised by the scene's static facts:
+; instanced (an instance structure and its table, 16 words an instance or 32 with both keyframes),
+; motion (the query's time: instance transforms, or vertex keyframes in a flat scene), strands (0 none,
+; 1 the in-loop capsule test, 2 native round linear curves) and spheres (whether it has any). The ray queries and the scene tables are the
+; gpu/ intrinsics the printers emit. Vector arithmetic is written in the GPU's rounding of the MSL
+; intrinsics: dot is a fused chain from x, normalize scales by rsqrt and cross is one fma a component.
+(defn tdot :context value [(a : vec3) (b : vec3)] (fma a.z b.z (fma a.y b.y (* a.x b.x))))
+(defn tunit :context value [(v : vec3)] (* v (rsqrt (tdot v v))))
+(defn tcross :context value [(a : vec3) (b : vec3)]
+  [(fma (* -1. a.z) b.y (* a.y b.z)) (fma (* -1. a.x) b.z (* a.z b.x)) (fma (* -1. a.y) b.x (* a.x b.y))])
+(defn tmix :context value [(a : vec3) (b : vec3) (s : float)] (+ a (* (- b a) s)))
+(defn txyz :context value [(v : vec4)] [v.x v.y v.z])
+(defn miss :context value []
+  {:t 0. :prim -1. :u 0. :v 0. :n [0. 0. 0.] :hit false :inst -1.})
+
+; A triangle corner, between the keyframes at the shutter time s in a moving flat scene.
+(defn corner :context value [(k : int) (p : int) (c : int) (moving : bool) (s : float)]
+  (if moving (tmix (gpu/scene-vertex k p c) (gpu/scene-vertex-end k p c) s) (gpu/scene-vertex k p c)))
+; An object normal to world space: the transpose of instance k's world-to-object rows, or with motion
+; the inverse transpose of its interpolated object-to-world keyframes, the cofactor columns signed by
+; the determinant.
+(defn instance-normal :context value [(k : int) (n : vec3) (motion : bool) (s : float)]
+  (if motion
+    (let* [c0 (tmix [(gpu/scene-instance k 1) (gpu/scene-instance k 5) (gpu/scene-instance k 9)]
+                    [(gpu/scene-instance k 13) (gpu/scene-instance k 17) (gpu/scene-instance k 21)] s)
+           c1 (tmix [(gpu/scene-instance k 2) (gpu/scene-instance k 6) (gpu/scene-instance k 10)]
+                    [(gpu/scene-instance k 14) (gpu/scene-instance k 18) (gpu/scene-instance k 22)] s)
+           c2 (tmix [(gpu/scene-instance k 3) (gpu/scene-instance k 7) (gpu/scene-instance k 11)]
+                    [(gpu/scene-instance k 15) (gpu/scene-instance k 19) (gpu/scene-instance k 23)] s)
+           w (+ (+ (* (tcross c1 c2) n.x) (* (tcross c2 c0) n.y)) (* (tcross c0 c1) n.z))]
+      (tunit (if (< (tdot c0 (tcross c1 c2)) 0.) (* w -1.) w)))
+    (tunit [(+ (+ (* (gpu/scene-instance k 1) n.x) (* (gpu/scene-instance k 5) n.y)) (* (gpu/scene-instance k 9) n.z))
+            (+ (+ (* (gpu/scene-instance k 2) n.x) (* (gpu/scene-instance k 6) n.y)) (* (gpu/scene-instance k 10) n.z))
+            (+ (+ (* (gpu/scene-instance k 3) n.x) (* (gpu/scene-instance k 7) n.y)) (* (gpu/scene-instance k 11) n.z))])))
+; The nearest triangle: t, primitive, barycentrics, the face normal and the instance (0 in a flat scene).
+(defn triangles :context value [(o : vec3) (dn : vec3) (tmin : float) (tmax : float) (time : float)
+                                (instanced : bool) (motion : bool)]
+  (let* [q (gpu/trace-triangles o dn tmin tmax time)]
+    (if q.hit
+      (let* [k (if instanced q.instance 0) s (min (max time 0.) 1.) moving (and motion (not instanced))
+             a (corner k q.prim 0 moving s) b (corner k q.prim 1 moving s) c (corner k q.prim 2 moving s)
+             n (tunit (tcross (- b a) (- c a)))]
+        {:t q.t :prim (float q.prim) :u q.u :v q.v :n (if instanced (instance-normal k n motion s) n) :hit true
+         :inst (if instanced (float k) 0.)})
+      (miss))))
+
+; Strand segment k's hit at distance at, curve parameter u: the offset from the axis point at u, less its
+; tangential part, is the normal; the instance is -2.
+(defn strand-hit :context value [(o : vec3) (dn : vec3) (at : float) (k : int) (u : float)]
+  (let* [a (txyz (gpu/scene-strand k 0)) b (txyz (gpu/scene-strand k 1)) tangent (- b a)
+         off (- (+ o (* dn at)) (tmix a b u))
+         axial (- off (* tangent (/ (tdot off tangent) (max (tdot tangent tangent) 1e-8))))]
+    {:t at :prim (float k) :u u :v 0. :n (tunit axial) :hit true :inst -2.}))
+(defn nearer :context value [(best : float) (x : float) (ok : bool) (tmin : float) (tmax : float)]
+  (if (and ok (and (>= x tmin) (and (<= x tmax) (< x best)))) x best))
+; A segment as a capsule: the cylinder's two roots within it and each end sphere's two roots beyond it,
+; the nearest in [tmin, tmax] (Infinity for none) and its clamped curve parameter. The roots are taken
+; from the ray's point nearest the segment's middle, shift along it: float32 keeps them precise.
+(defn strand-t :context value [(o0 : vec3) (dn : vec3) (tmin0 : float) (tmax0 : float) (sa : vec4) (sb : vec4)]
+  (let* [shift (tdot (- (* (+ (txyz sa) (txyz sb)) 0.5) o0) dn)
+         o (+ o0 (* dn shift)) tmin (- tmin0 shift) tmax (- tmax0 shift)
+         ba (- (txyz sb) (txyz sa)) oa (- o (txyz sa)) ob (- o (txyz sb))
+         r sa.w baba (tdot ba ba) bard (tdot ba dn) baoa (tdot ba oa)
+         qa (- baba (* bard bard)) qb (- (* baba (tdot dn oa)) (* baoa bard))
+         qc (- (- (* baba (tdot oa oa)) (* baoa baoa)) (* (* r r) baba))
+         disc (- (* qb qb) (* qa qc)) root (sqrt disc) side (and (> qa 0.) (>= disc 0.))
+         t0 (/ (- (* -1. qb) root) qa) t1 (/ (+ (* -1. qb) root) qa)
+         y0 (+ baoa (* t0 bard)) y1 (+ baoa (* t1 bard))
+         side-best (nearer (nearer Infinity t0 (and side (and (> y0 0.) (< y0 baba))) tmin tmax)
+                      t1 (and side (and (> y1 0.) (< y1 baba))) tmin tmax)
+         ha (tdot oa dn) capa (- (* ha ha) (- (tdot oa oa) (* r r))) roota (sqrt capa)
+         ta0 (- (* -1. ha) roota) ta1 (+ (* -1. ha) roota)
+         a-best (nearer (nearer side-best ta0 (and (>= capa 0.) (<= (+ baoa (* ta0 bard)) 0.)) tmin tmax)
+                      ta1 (and (>= capa 0.) (<= (+ baoa (* ta1 bard)) 0.)) tmin tmax)
+         hb (tdot ob dn) capb (- (* hb hb) (- (tdot ob ob) (* r r))) rootb (sqrt capb)
+         tb0 (- (* -1. hb) rootb) tb1 (+ (* -1. hb) rootb)
+         best (nearer (nearer a-best tb0 (and (>= capb 0.) (>= (+ baoa (* tb0 bard)) baba)) tmin tmax)
+                      tb1 (and (>= capb 0.) (>= (+ baoa (* tb1 bard)) baba)) tmin tmax)]
+    {:t (+ best shift) :u (min (max (/ (+ baoa (* best bard)) baba) 0.) 1.)}))
+(defn strands :context value [(h : {:t float :prim float :u float :v float :n vec3 :hit bool :inst float})
+                              (o : vec3) (dn : vec3) (tmin : float) (tmax : float) (kind : int)]
+  (if (int/eq kind 2)
+    (let* [c (gpu/trace-curves o dn tmin (if h.hit h.t tmax))]
+      (if c.hit (strand-hit o dn c.t c.prim c.u) h))
+    (if (int/eq kind 1)
+      (fold [near h] [k (range (gpu/scene-strands))]
+        (let* [st (strand-t o dn tmin (if near.hit near.t tmax) (gpu/scene-strand k 0) (gpu/scene-strand k 1))]
+          (if (<= st.t tmax) (strand-hit o dn st.t k st.u) near)))
+      h)))
+
+; Sphere k (centre, radius) met in [tmin, tmax], the nearer root first.
+(defn sphere-t :context value [(o : vec3) (dn : vec3) (tmin : float) (k : int)]
+  (let* [s (gpu/scene-sphere k) oc (- o (txyz s)) b (tdot oc dn) q (- oc (* dn b))
+         disc (- (* s.w s.w) (tdot q q)) root (sqrt disc) near (- (* -1. b) root)]
+    {:t (if (>= near tmin) near (+ (* -1. b) root)) :real (>= disc 0.) :oc oc :radius s.w}))
+
+; The nearest of the triangles, the strands and the spheres (none in a scene without them), as
+; scene/trace reports it.
+(defn trace-hit :context value [(o : vec3) (d : vec3) (tmin : float) (tmax : float) (time : float)
+                                (instanced : bool) (motion : bool) (kind : int) (spheres : bool)]
+  (let* [dn (tunit d) h (strands (triangles o dn tmin tmax time instanced motion) o dn tmin tmax kind)]
+    (if spheres
+      (fold [near h] [k (range (gpu/scene-spheres))]
+        (let* [s (sphere-t o dn tmin k)]
+          (if (and s.real (and (>= s.t tmin) (and (<= s.t tmax) (or (not near.hit) (< s.t near.t)))))
+            {:t s.t :prim (- -2. (float k)) :u 0. :v 0. :n (/ (+ s.oc (* dn s.t)) s.radius) :hit true :inst -1.}
+            near)))
+      h)))
+; Whether anything lies in [tmin, tmax]: any triangle, then any strand, then the spheres until one does.
+(defn trace-occluded :context value [(o : vec3) (d : vec3) (tmin : float) (tmax : float) (time : float)
+                                     (kind : int) (spheres : bool)]
+  (let* [dn (tunit d)]
+    (if (gpu/trace-any o dn tmin tmax time)
+      true
+      (if (if (int/eq kind 2) (gpu/trace-curves-any o dn tmin tmax)
+            (if (int/eq kind 1)
+              (let* [found (iterate (gpu/scene-strands) {:k 0 :seen false}
+                             (fn [w] (let* [st (strand-t o dn tmin tmax (gpu/scene-strand w.k 0) (gpu/scene-strand w.k 1))]
+                                       {:k (int/add w.k 1) :seen (<= st.t tmax)}))
+                             :until (fn [prev next] next.seen))]
+                found.seen)
+              false))
+        true
+        (if spheres
+          (let* [found (iterate (gpu/scene-spheres) {:k 0 :seen false}
+                         (fn [w] (let* [s (sphere-t o dn tmin w.k)]
+                                   {:k (int/add w.k 1) :seen (and s.real (and (>= s.t tmin) (<= s.t tmax)))}))
+                         :until (fn [prev next] next.seen))]
+            found.seen)
+          false)))))

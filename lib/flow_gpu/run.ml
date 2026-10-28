@@ -74,7 +74,8 @@ let ensure t slot length =
    holds input [i] / the table of uniform [u], which is then not uploaded. *)
 let msl_scene t = t.msl.Emit.scene
 let dispatch ?(wait=true) ?(reset_status=true) ?commands ?count ?into ?(bound=fun _ -> None) ?(bound_table=fun _ -> None) ?scene ?(extras=no_extras) ?(resident=[]) t (values : P.Host.inputs) =
-  (* the scene's buffers after its spheres, in Kernel_layout's order; the kernel's interface names as many *)
+  (* the scene's buffers after its spheres, in Kernel_layout's order; the kernel's interface names at most
+     as many (the tables its trace helpers read) *)
   let scene_tail = match scene with None -> [] | Some s ->
     List.filter_map (Option.map (fun b -> `Buffer b)) [s.instances; extras.vertices_end; extras.strands]
     @ Option.fold ~none:[] ~some:(fun a -> [`Accel a]) extras.curves in
@@ -83,7 +84,7 @@ let dispatch ?(wait=true) ?(reset_status=true) ?commands ?count ?into ?(bound=fu
   else if values.count<0 || values.count>Int32.to_int Int32.max_int ||
     values.count>Sys.max_string_length/4/Array.fold_left max 1 t.msl.output_widths then error "GPU count exceeds native storage bounds."
   else if (msl_scene t<>None) <> (scene<>None) || (match msl_scene t with None -> false | Some b ->
-      List.length (List.filter (fun (x : Ogpu.Shader.binding) -> x.binding > b+2) t.msl.interface) <> List.length scene_tail)
+      List.length (List.filter (fun (x : Ogpu.Shader.binding) -> x.binding > b+2) t.msl.interface) > List.length scene_tail)
   then error "GPU scene binding changed."
   else if Array.length values.arrays<>Array.length t.inputs then error "GPU input arity changed."
   else if Array.exists (fun index -> Array.length values.arrays.(index)<values.count*t.msl.input_widths.(index))
