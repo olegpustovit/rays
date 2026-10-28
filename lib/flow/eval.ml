@@ -203,8 +203,10 @@ and st = {
   graphs : (string, W.graph) Hashtbl.t;
   defs : (string, W.graph) Hashtbl.t;
   kind_fns : (string * (string * Context.t * Catalog.slot list)) list;
-  node_defs : (string, W.node_definition) Hashtbl.t;
-      (* Lisp nodes whose bodies evaluate inline in the calling program *)
+  node_defs :
+    (string, W.node_definition * ((string * value) list -> (string * value) list) Lazy.t) Hashtbl.t;
+      (* Lisp nodes whose bodies evaluate inline in the calling program, with the host's
+         canonicalization of their call parameters *)
   ops : Op.t list;
   find_op : string -> Context.t -> Op.t option;
       (* [Op.finder ops]: [ops] is a list, the whole SOP catalog in the editor *)
@@ -553,6 +555,18 @@ let resolve_source resolve source =
       Value.validate value;
       value
 
+let rec is_live = function
+  | Residual _ -> true
+  | Source _ | Struct (_, Ty.Array _, _) -> true
+  | List xs -> Array.exists is_live xs
+  | Record fs | Struct (_, _, fs) -> List.exists (fun (_, v) -> is_live v) fs
+  | _ -> false
+
+(* the reserved argument of a card whose inlined body failed: its marshalled diagnostic *)
+let node_error = "$node_error"
+
+exception Refused of Diagnostic.t
+
 let rec concrete c v =
   match v with
   | Residual r -> ( match c.st.time with None -> raise Needs_t | Some _ -> force_res c r)
@@ -764,9 +778,11 @@ and ev_raw c env (x : W.term) : value =
           |> List.filter (fun (_, v) -> match v with No_geo -> false | _ -> true)
         else vals
       in
+      let call vals = catalog_call c ~authored:x.form.id kind ctx vals in
       match Hashtbl.find_opt c.st.node_defs kind with
-      | Some d -> inline_node c d vals
-      | None -> catalog_call c ~authored:x.form.id kind ctx vals)
+      | Some (d, canonical) when not (List.exists (fun (_, v) -> is_live v) vals) ->
+          inline_node c d (Lazy.force canonical) ~call vals
+      | _ -> call vals)
   | W.Op { op = "scene/merge"; args; skip = _ :: _ as skip } ->
       (* register L16: the arguments at skipped tuples are not evaluated *)
       let args = List.filteri (fun p _ -> not (List.mem (c.iter @ [ p ]) skip)) args in
@@ -1053,23 +1069,70 @@ and apply_op c ?(authored = 0) name (vals : (string * value) list) : value =
   in
   o.body ~live ~node:(mk_node c ~authored ~ty) vals
 
-and inline_node c (d : W.node_definition) vals =
+(* A card's body runs in the caller. Its parameters take the host's path (ranges, choices,
+   encoded text) and its validations refuse the program, as a node build would; an error in the
+   body itself is that card's cook error: the body's nodes are dropped and the card lowers as a node
+   that fails with the diagnostic when cooked. Each body has its own step budget, as before. *)
+and inline_node c (d : W.node_definition) canonical ~call vals =
   if c.depth > max_depth then fail "E_DEPTH" "Call depth exceeds 64.";
   let base = [ "node:" ^ d.kind.qualified ] in
   let c' = { c with prefix = site c; base; route = []; depth = c.depth + 1 } in
-  let env =
-    List.fold_left
-      (fun env (pname, ty, default) ->
-        let v =
-          match (List.assoc_opt pname vals, default) with
-          | Some v, _ -> coerce_to ty v
-          | None, Some t -> coerce_to ty (ev (sub c' pname) env t)
-          | None, None -> No_geo
-        in
-        Smap.add pname v env)
-      Smap.empty d.body.inputs
+  let parameters = canonical vals in
+  let rec flat = function
+    | List xs -> List.concat_map flat (Array.to_list xs)
+    | No_geo -> []
+    | v -> [ v ]
   in
-  ev c' env d.body.body
+  let bind env (pname, ty, default) =
+    let v =
+      if List.exists (fun (s : Catalog.slot) -> s.rest && s.name = pname) d.slots then
+        coerce_to ty
+          (List
+             (Array.of_list (List.concat_map (fun (n, v) -> if n = pname then flat v else []) vals)))
+      else
+        match (List.assoc_opt pname parameters, List.assoc_opt pname vals, default) with
+        | Some v, _, _ | None, Some v, _ -> coerce_to ty v
+        | None, None, Some t -> coerce_to ty (ev (sub c' pname) env t)
+        | None, None, None -> No_geo
+    in
+    Smap.add pname v env
+  in
+  let refusal code message =
+    Refused
+      (Diagnostic.error ~code:"E_LOWER"
+         (if code = "E_PARAM" then message else code ^ ": " ^ message))
+  in
+  let st = c.st in
+  let steps = st.steps and nodes = st.nodes and authored = st.authored and nnodes = st.nnodes in
+  st.steps <- 0;
+  match
+    let env = List.fold_left bind Smap.empty d.body.inputs in
+    List.iter
+      (fun (predicate, code, message) ->
+        match concrete c' (ev (sub c' "validate") env predicate) with
+        | Bool true -> ()
+        | Bool false -> raise (refusal code message)
+        | exception Diagnostic.Error e -> raise (refusal e.code e.message)
+        | _ -> invalid_arg "A Lisp node validation must return bool")
+      d.validations;
+    ev c' env d.body.body
+  with
+  | v ->
+      st.steps <- steps;
+      v
+  | exception Refused e ->
+      st.steps <- steps;
+      raise (Diagnostic.Error e)
+  | exception Diagnostic.Error e when e.code <> "cancelled" && e.code <> "E_CANCELLED" ->
+      st.steps <- steps;
+      st.nodes <- nodes;
+      st.authored <- authored;
+      st.nnodes <- nnodes;
+      (* ponytail: the diagnostic rides as marshalled text in a reserved argument *)
+      call (vals @ [ (node_error, Text (Marshal.to_string e [])) ])
+  | exception x ->
+      st.steps <- steps;
+      raise x
 
 and apply_def ?body c name (vals : value list) : value =
   let d =
@@ -1787,10 +1850,10 @@ let reads_context defs (t : W.term) =
   match scan t with () -> false | exception Exit -> true
 
 let inline_nodes = Atomic.make false
+let inline_parameters = Atomic.make (fun _ _ vals -> vals)
 
 let inline_simple defs (d : W.node_definition) =
-  d.validations = [] && d.normalizers = []
-  && (not (reads_context defs d.body.body))
+  (not (reads_context defs d.body.body))
   && List.for_all
        (fun (_, _, df) -> not (Option.fold ~none:false ~some:(reads_context defs) df))
        d.body.inputs
@@ -1830,7 +1893,8 @@ let new_state ?(budget = max_steps) ~record ws =
        if Atomic.get inline_nodes then
          List.iter
            (fun (d : W.node_definition) ->
-             if inline_simple defs d then Hashtbl.replace t d.kind.qualified d)
+             if inline_simple defs d then
+               Hashtbl.replace t d.kind.qualified (d, lazy (Atomic.get inline_parameters ws d)))
            ws.W.nodes;
        t);
     ops = ws.ops;
@@ -1917,13 +1981,6 @@ let static_impl ?budget ?(record = false) ?(inputs = []) ws =
           }))
 
 let static ?record ?inputs ws = Residual_effect.handle (fun () -> static_impl ?record ?inputs ws)
-
-let rec is_live = function
-  | Residual _ -> true
-  | Source _ | Struct (_, Ty.Array _, _) -> true
-  | List xs -> Array.exists is_live xs
-  | Record fs | Struct (_, _, fs) -> List.exists (fun (_, v) -> is_live v) fs
-  | _ -> false
 
 (* Residuals are shared and immutable: each remembers its answer, or a let-bound array read by many later
    bindings is walked once per reader and the walk is exponential in the depth of the sharing, and the

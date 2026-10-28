@@ -31,3 +31,16 @@ val node :
 val with_initial_changes : operation:string -> (string * Param.value) list -> (unit -> 'a) -> 'a
 (** Run an instantiation whose first Lisp node of [operation] starts from these parameter changes
     instead of its defaults, so a node that is about to be edited is built once, not twice. *)
+
+val schema :
+  string ->
+  Param.field_view list ->
+  (string * (string -> (string, Diagnostic.t) result)) list ->
+  (string * Param.value) list Param.schema
+(** The node's parameter schema: fields, hard ranges and encoded text through the normalizers. *)
+
+val arguments :
+  Param.field_view list ->
+  (string * Param.value) list ->
+  ((string * Flow.Eval.value) list, string) result
+(** Body arguments of schema values: vec3 groups and their components. *)

@@ -455,7 +455,14 @@ let run () =
   check (E.level env = None) "u did not leave the World";
   let saved = E.document env and baked = E.world env in
   let env = step env [ char 't'; char 'n'; char 'd' ] in
-  check (E.document env == saved && E.world env = baked) "World keys edited the scene level";
+  (* the lazy products (sh9, specular) are closures until forced; the eager bake decides *)
+  let eager =
+    Option.map (fun (b : Rays.World.baked) ->
+        (b.camera, b.lighting, b.cdf, b.lights, b.sun, b.background, b.exposure))
+  in
+  check
+    (E.document env == saved && eager (E.world env) = eager baked)
+    "World keys edited the scene level";
   (* The scene starts in list; the workspace has a scene graph, so / l t shows its text and
      / l g its graph, which is the pane's own scene graph (the outline names it). *)
   let projection_of env = projection env in

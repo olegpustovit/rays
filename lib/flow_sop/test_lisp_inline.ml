@@ -45,12 +45,7 @@ let run inline body =
   in
   let runs =
     List.fold_left
-      (fun n p ->
-        n
-        + List.length
-            (List.filter
-               (fun (e : Flow_ir.execution) -> e.tier = Cpu_kernel)
-               (Flow_ir.Profile.executions p)))
+      (fun n p -> n + List.length (Flow_ir.Profile.executions p))
       0 (l.profile :: !profiles)
   in
   (bytes, runs, Atomic.get L.Private.nested_lowerings - before)
@@ -60,11 +55,71 @@ let () =
     (fun (name, body) ->
       let nested_bytes, nested_runs, nested = run false body in
       let inline_bytes, inline_runs, inlined = run true body in
-      Printf.printf "inline %s: kernel runs %d -> %d, nested lowerings %d -> %d, bytes equal\n" name
+      Printf.printf "inline %s: region runs %d -> %d, nested lowerings %d -> %d, bytes equal\n" name
         nested_runs inline_runs nested inlined;
-      (* the two chained bodies are one program: one kernel run, no nested lowering (the grid,
-         which has validators, still lowers its own) *)
-      assert (nested_bytes = inline_bytes);
-      assert (nested - inlined = 2 && inline_runs = 1))
+      (* the chained bodies are one program with the grid's (its validations inline too): fewer
+         region runs, no nested lowering *)
+      assert (nested = 3 && inlined = 0 && inline_runs < nested_runs))
     chains;
   Atomic.set Flow.Eval.inline_nodes false
+
+(* Step B: an inlined card keeps the node's boundaries. A body error is that card's cook error, a
+   refused parameter (validation, normalizer) refuses the lowering, as a node build did; canonical
+   parameters (hard ranges, encoded text, rest slots) give the same bytes. *)
+let outcome inline text =
+  Atomic.set Flow.Eval.inline_nodes inline;
+  let result =
+    match L.workspace (Flow.Syntax.parse text |> flow_ok) with
+    | Error d -> Error ("lower", d.code, d.message, d.cause)
+    | Ok l -> (
+        let graph = List.hd l.graphs in
+        let compiled =
+          Edit.compile_node graph.network.geometry ~node_id:(Option.get graph.root) |> get_string_ok
+        in
+        let session =
+          Session.create ~max_entries:8 ~max_payload_bytes:(1 lsl 24) |> get_string_ok
+        in
+        let context = Sop.Context.create ~domains:1 () |> get_string_ok in
+        let output = Session.cook session ~context compiled in
+        Session.close session;
+        match output with
+        | Ok o -> Ok (geometry_bytes (Result.get_ok (Sop.Payload.geometry o.payload)))
+        | Error d -> Error ("cook", d.code, d.message, d.cause))
+  in
+  Atomic.set Flow.Eval.inline_nodes false;
+  result
+
+let () =
+  let normalized =
+    {|(defnode sop/b_norm [(geo : geometry) (rules : text "point" :kind encoded :normalize (fn [(raw : text)] (case (text/lower (text/trim raw)) "points" "point" "point" "point" :else (error "E_RULES" (str "Unknown owner: " raw)))))] (sop/with_attr geo :tag (array/text (sop/count geo :points) rules) :type text))|}
+  and rest =
+    {|(defnode sop/b_rest :validate (> n 0) :code "E_N" :message "n must be positive" [(geos : geometry :rest true :required false) (n : int 1)] (if (> (count geos) 0) (last geos) (sop/line :kind "Points" :points n)))|}
+  and valid =
+    {|(defnode sop/b_valid :validate (> count 0) :code "E_POSITIVE" :message "count must be positive" [(count : int 1 :min -10 :max 10)] (sop/line :kind "Points" :points count))|}
+  in
+  List.iter
+    (fun (expected, defnode, call) ->
+      let text = Printf.sprintf "(workspace b %s (graph g :context sop %s))" defnode call in
+      let nested = outcome false text and inline = outcome true text in
+      (match (expected, nested) with
+      | `Cook, Error ("cook", _, _, _) | `Lower, Error ("lower", _, _, _) | `Ok, Ok _ -> ()
+      | _ -> failwith ("step B baseline changed: " ^ call));
+      if nested <> inline then failwith ("step B: inline differs from nested for " ^ call))
+    [
+      ( `Cook,
+        {|(defnode sop/b_fail [(geo : geometry)] (sop/with_attr geo :w (error "E_POINTS" "selected points" :cause "point cause")))|},
+        "(sop/b_fail (sop/line :points 3))" );
+      (`Lower, valid, "(sop/b_valid :count (- 0 3))");
+      (`Ok, valid, "(sop/b_valid :count (+ 1 3))");
+      ( `Ok,
+        {|(defnode sop/b_range [(count : int 2 :min 1 :max 50 :hard-min 1 :hard-max 5)] (sop/line :kind "Points" :points count))|},
+        "(sop/b_range :count (* 4 4))" );
+      (`Ok, normalized, {|(sop/b_norm (sop/line :points 3) :rules (str " POINTS" ""))|});
+      (`Lower, normalized, {|(sop/b_norm (sop/line :points 3) :rules (str "edges" ""))|});
+      (`Ok, rest, "(sop/b_rest)");
+      (`Ok, rest, "(sop/b_rest (sop/line :points 2) (sop/line :points 3))");
+      (`Ok, rest, "(sop/b_rest :n (+ 2 2))");
+      (`Lower, rest, "(sop/b_rest :n (- 2 2))");
+    ];
+  print_endline
+    "inline cards: body errors cook, refusals lower, ranges/encoded text/rest slots as the node"

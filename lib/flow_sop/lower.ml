@@ -183,6 +183,32 @@ let changes_of (parameter : Port.parameter) value =
 let changes parameter value =
   try Ok (changes_of parameter value) with Diagnostic.Error d -> Error d
 
+(* An inlined Lisp call's parameters take the node path: the call's changes over the schema
+   defaults (ranges, choices, encoded text through the declared normalizers), then the node's
+   arguments. A refusal is the lowering error the node's construction raised. *)
+let () =
+  Atomic.set E.inline_parameters (fun checked (d : Workspace.node_definition) ->
+      let schema =
+        lazy (Lisp_node.schema "parameters" d.fields (Encoded_parameters.for_node checked d))
+      and parameters = lazy (ok (Port.parameters d.fields)) in
+      fun vals ->
+        let changes =
+          List.concat_map
+            (fun (name, value) ->
+              match Port.find_parameter (Lazy.force parameters) name with
+              | Ok parameter -> changes_of parameter value
+              | Error _ -> [])
+            vals
+        in
+        let schema = Lazy.force schema in
+        match
+          Result.bind
+            (Param.apply_all schema (Param.default schema) changes)
+            (fun (values, _) -> Lisp_node.arguments d.fields values)
+        with
+        | Ok arguments -> arguments
+        | Error message -> fail "E_LOWER" message)
+
 let at_zero value = if E.is_live value then ok (E.force value ~live:(Input.at_time 0.)) else value
 let is_zone kind = Operators.lowering kind = Some Operators.Zone
 
@@ -496,6 +522,41 @@ let group_node ~strict_body ~reference ~profile ~approx ~kernel_source ?state ?e
   Sop.Node.Build.with_facts
     { (Sop.Node.facts node) with topology = Preserved; reads = [ "*" ]; writes = [ "*" ] }
     node
+
+(* An evaluated body error belongs to cooking: the node keeps its inputs and declared facts. *)
+let lisp_body_failed ~(checked : Workspace.t) ~(definition : Workspace.node_definition) ~inputs
+    ~parameters diagnostic =
+  let dependencies =
+    List.fold_left
+      (fun dependencies (op, fact) ->
+        if Context_kernel.depends ~op ~inputs:parameters ~defs:checked.defs definition.body then
+          Sop.Context.Dependencies.union dependencies (Sop.Context.Dependencies.one fact)
+        else dependencies)
+      Sop.Context.Dependencies.static
+      [
+        ("sop/context_seed", Sop.Context.Dependencies.Seed);
+        ("sop/context_frame", Frame);
+        ("sop/context_time", Time);
+      ]
+  in
+  let cook_mode = if inputs = [] then Sop.Node.Generator else Generic in
+  let exact =
+    Option.fold ~none:true
+      ~some:(fun (facts : Flow.Catalog.kernel_facts) -> facts.exact)
+      definition.kind.facts
+  in
+  let facts =
+    Sop.Node.
+      {
+        cook_mode;
+        elementwise = None;
+        reads = [ "*" ];
+        writes = [ "*" ];
+        topology = Changed;
+        exact;
+      }
+  in
+  ((fun _ -> Error diagnostic), dependencies, facts)
 
 let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
     ~(definition : Workspace.node_definition) ~provenance ~label ~context ~inputs ~parameters
@@ -917,41 +978,7 @@ let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
                in
                (body, dependencies, facts)
              with Diagnostic.Error diagnostic ->
-               let dependencies =
-                 List.fold_left
-                   (fun dependencies (op, fact) ->
-                     if
-                       Context_kernel.depends ~op ~inputs:parameters ~defs:checked.defs
-                         definition.body
-                     then
-                       Sop.Context.Dependencies.union dependencies
-                         (Sop.Context.Dependencies.one fact)
-                     else dependencies)
-                   Sop.Context.Dependencies.static
-                   [
-                     ("sop/context_seed", Sop.Context.Dependencies.Seed);
-                     ("sop/context_frame", Frame);
-                     ("sop/context_time", Time);
-                   ]
-               in
-               let cook_mode = if inputs = [] then Sop.Node.Generator else Generic in
-               let exact =
-                 Option.fold ~none:true
-                   ~some:(fun (facts : Flow.Catalog.kernel_facts) -> facts.exact)
-                   definition.kind.facts
-               in
-               let facts =
-                 Sop.Node.
-                   {
-                     cook_mode;
-                     elementwise = None;
-                     reads = [ "*" ];
-                     writes = [ "*" ];
-                     topology = Changed;
-                     exact;
-                   }
-               in
-               ((fun _ -> Error diagnostic), dependencies, facts)))
+               lisp_body_failed ~checked ~definition ~inputs ~parameters diagnostic))
 
 module Build_cache = Lru.Make (String)
 
@@ -1806,7 +1833,7 @@ struct
     and lock = Mutex.create () in
     fun () -> Mutex.protect lock (fun () -> Lazy.force use)
 
-  let lisp_factory ?(functions = []) ?provenance (definition : Workspace.node_definition) =
+  let lisp_factory ?error ?(functions = []) ?provenance (definition : Workspace.node_definition) =
     let declaration_source =
       lazy
         (cached_digest checked [ definition ] (fun () ->
@@ -1843,8 +1870,11 @@ struct
         ?on_profile ~factories ~inputs checked
     in
     let build_body bindings ~label ~context inputs parameters =
-      build_lisp_body ~gpu ~lower_nested ~record_profile ~checked ~definition ~provenance ~label
-        ~context ~inputs ~parameters ~bindings ~functions ~factories ~def_context_use
+      match error with
+      | Some diagnostic -> Ok (lisp_body_failed ~checked ~definition ~inputs ~parameters diagnostic)
+      | None ->
+          build_lisp_body ~gpu ~lower_nested ~record_profile ~checked ~definition ~provenance ~label
+            ~context ~inputs ~parameters ~bindings ~functions ~factories ~def_context_use
     in
     (* A top-level body build is a pure function of the key below, so an edit elsewhere reuses it. Key: declaration,
          label, reference flag, approx, provenance, bindings, context seed/frame/time, input ids, parameters; an
@@ -1852,8 +1882,10 @@ struct
          lowerings, kernel bindings, recorded profiles, non-data parameters (key_of raises). *)
     let build bindings ~label ~context inputs parameters =
       let uncached () = build_body bindings ~label ~context inputs parameters in
-      if functions <> [] || strict_body || kernel_bindings <> [] || on_profile <> None then
-        uncached ()
+      if
+        functions <> [] || error <> None || strict_body || kernel_bindings <> []
+        || on_profile <> None
+      then uncached ()
       else
         match
           String.concat "\000"
@@ -2023,7 +2055,10 @@ struct
 
   let rec fused_view (n : E.node) =
     match lisp_definition n.kind with
-    | Some d when (not templ.(n.id)) && Context_kernel.fusable d -> (
+    | Some d
+      when (not templ.(n.id))
+           && (not (List.mem_assoc E.node_error n.args))
+           && Context_kernel.fusable d -> (
         let slot = (List.hd d.slots).name in
         let own = Some (d, n.args) in
         match List.assoc_opt slot n.args with
@@ -2053,6 +2088,12 @@ struct
 
   let lower_default (node : E.node) args cid =
     let kind = node.kind and dynamic = ref [] in
+    let node_error =
+      match List.assoc_opt E.node_error args with
+      | Some (E.Text text) -> Some (Marshal.from_string text 0 : Diagnostic.t)
+      | _ -> None
+    in
+    let args = List.remove_assoc E.node_error args in
     let args =
       if kind = "image/noise" then
         List.map (fun (name, value) -> ((if name = "freq" then "frequency" else name), value)) args
@@ -2108,7 +2149,7 @@ struct
                 Some base
               end
             in
-            lisp_factory ~functions:args ?provenance:tag_base
+            lisp_factory ?error:node_error ~functions:args ?provenance:tag_base
               (Option.value fused_definition ~default:definition)
         | None -> find_factory key
     in
