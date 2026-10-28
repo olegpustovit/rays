@@ -244,7 +244,7 @@ After P1, rdk holds only live kernels. Give it one error model, one parallel and
 
 Exit gates:
 
-- [ ] P6.G1: rdk under about 80k lines including tests
+- [x] P6.G1: rdk under about 80k lines including tests Evidence: lib/rdk is 79,756 lines including tests (product 57.8k, tests 19.4k, support 2.5k), from about 144k at baseline. Attribute_promote, Attribute_relation, the multi-key Ordering sort and Smooth's unused modes are gone with their test-only callers; the path tracer digests, goldens and draw snapshots are unchanged.
 - [x] P6.G2: no `unguard`/`_raw` pairs Evidence: grep for unguard or _raw in lib/rdk finds only local helpers (add_raw, insert_raw, group_of_raw), none of them guarded twins.
 - [x] P6.G3: one parallel helper Evidence: see P6.S2.
 - [x] P6.G4: rdk test alias under 30 s warm Evidence: after touching an rdk test, a relink and run of every rdk test group took 21.9 s wall on the loaded machine.
@@ -763,7 +763,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **RK17** (P7, med, naming, effort M). Location at baseline: 32 .mli with `module Private`; Attribute.Private.storage ×46, Topology.Private.view ×21 used by sop, flow_sop, rays_editor. Production code depends on the borrowed-plane API that lives in `Private`. Action: Rename it `View` and document it as that API. Evidence: rdk's borrowed-plane Private is renamed View across rdk and every caller; the stale allowlist rows are gone.
 
-- [ ] **RK18** (P6, med, vibe-code, effort S). Location at baseline: 13 `owner_count`, 42 local `fail`, 13 `get_ok`, 14 `checked_add`, 5 union-find. Shared definitions already exist in core. Action: `tools/dedupe --qualify Support`, then delete the tool (TT11).
+- [x] **RK18** (P6, med, vibe-code, effort S). Location at baseline: 13 `owner_count`, 42 local `fail`, 13 `get_ok`, 14 `checked_add`, 5 union-find. Shared definitions already exist in core. Action: `tools/dedupe --qualify Support`, then delete the tool (TT11). Evidence: the 13 boolean tests' local fail/check/get copies are gone; they open Rdk_test_support, which gained failf.
 
 - [ ] **RK19** (P6, med, naming, effort M). Location at baseline: Blast_points, Centroid_piece_points, Copy_target_points, Connectivity_points, Group_points …. The owner type is re-encoded with a prefix in each module. Action: Reuse `Attribute.owner` with a validation check.
 
