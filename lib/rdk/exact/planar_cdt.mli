@@ -52,4 +52,3 @@ val build :
     owned. Passing the immediately preceding result by physical identity plus
     a contiguous suffix of inserted points continues its live incidence
     incrementally; every other input takes the full rebuild path. *)
-

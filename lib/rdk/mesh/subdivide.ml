@@ -4342,4 +4342,3 @@ let subdivide ?cancel ?grain ?(scheme = Catmull_clark) ?(iterations = 1)
   if not recompute_point_normals || not had_point_normals then result
   else Result.bind result (fun output ->
     Deform.normals ?cancel ~grain:(Option.value ~default:16_384 grain) output)
-

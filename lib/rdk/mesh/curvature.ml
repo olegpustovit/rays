@@ -11,4 +11,3 @@ type outputs = {
 }
 
 exception Curvature_error of string
-

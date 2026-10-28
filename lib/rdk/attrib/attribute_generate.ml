@@ -144,4 +144,3 @@ type sample_limits =
    ordinary finite-output validation reports an unusable fraction. *)
 
 type noise_coordinates = { nx : float array; ny : float array; nz : float array }
-

@@ -102,4 +102,3 @@ let concat_float sources =
       incr output_row
     done) views;
   Packed.Float_array.Private.create_validated_owned ~offsets ~values
-

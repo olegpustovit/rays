@@ -43,4 +43,3 @@ let join_curves ?cancel ?grain ?primitives ?picked_ends ?orient_closest
     Curve_ops.join ?cancel ?grain ?primitives ?picked_ends ?orient_closest
       ?connect_closest_ends ?only_connected ?group_size ?keep_originals
       ?tolerance ?wrap geometry)
-

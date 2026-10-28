@@ -42,4 +42,3 @@ type profile = {
   radius_ramp : ramp option;
   uniform_scale : float;
 }
-

@@ -22,4 +22,3 @@ type plan = {
   triangle_b : int array;
   triangle_c : int array;
 }
-

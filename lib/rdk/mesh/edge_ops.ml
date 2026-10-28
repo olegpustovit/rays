@@ -4,4 +4,3 @@ type angle_basis = Primitive_dihedral | Incident_edges
 type equalize_method = Equalize_average | Equalize_longest | Equalize_shortest
 
 exception Edge_error of string
-

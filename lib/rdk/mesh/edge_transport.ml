@@ -12,4 +12,3 @@ type merge = Transport_merge_add | Transport_merge_maximum
   | Transport_merge_minimum
 
 exception Transport_error of string
-

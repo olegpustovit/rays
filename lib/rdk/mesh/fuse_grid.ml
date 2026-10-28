@@ -308,4 +308,3 @@ let fuse ?cancel ?(grain = 16_384) ?selection ?target_selection
             end)
             ))
   end)
-

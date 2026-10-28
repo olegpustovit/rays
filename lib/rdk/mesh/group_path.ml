@@ -30,4 +30,3 @@ type scratch = {
   previous : int array;
   queue : int array;
 }
-

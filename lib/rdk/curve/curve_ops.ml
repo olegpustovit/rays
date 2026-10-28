@@ -692,4 +692,3 @@ let join ?cancel ?grain ?primitives ?picked_ends ?(orient_closest = true)
         ~topology:output_topology ~attributes ~groups ~edge_groups ()
     end
   with Curve_error message -> Error message
-

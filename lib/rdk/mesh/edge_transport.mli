@@ -9,4 +9,3 @@ type normalization = Transport_no_normalization
 type direction = Transport_forward | Transport_backward
 type merge = Transport_merge_add | Transport_merge_maximum
   | Transport_merge_minimum
-

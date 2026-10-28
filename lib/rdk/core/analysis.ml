@@ -478,4 +478,3 @@ let classify_connectivity ?cancel ?grain ?primitives ?points ?seams
       ~code:"cancelled" "connectivity classification was cancelled")
   | Invalid_argument message -> Error (Error.make ~operation:"connectivity"
       ~code:"invalid_parameter" message)
-

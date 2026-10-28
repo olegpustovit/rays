@@ -32,4 +32,3 @@ val join :
   ?wrap:bool ->
   Geometry.t ->
   (Geometry.t, string) result
-

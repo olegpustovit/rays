@@ -9,4 +9,3 @@ type velocity_initialization =
   | Set_value of Rays_math.Vec3.t
   | From_attribute of { name : string; scale : float }
 type velocity_unmatched = Velocity_unmatched_error | Velocity_unmatched_zero
-

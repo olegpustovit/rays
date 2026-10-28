@@ -106,4 +106,3 @@ val torus :
   minor_radius:float ->
   unit ->
   (Geometry.t, Error.t) result
-

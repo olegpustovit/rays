@@ -35,4 +35,3 @@ end)
 
 (* Match-plan construction is kept separate from topology projection so every
    copied attribute owner can reuse the same base correspondence. *)
-

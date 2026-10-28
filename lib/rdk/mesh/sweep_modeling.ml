@@ -11,4 +11,3 @@ type sweep_tangent =
   | Sweep_previous_edge
   | Sweep_next_edge
   | Sweep_z_axis
-

@@ -375,4 +375,3 @@ let materialize_instances_raw = materialize_instances
 let materialize_instances ~transforms geometry =
   Error.guard ~operation:"materialize_instances" ~code:"invalid_parameter"
     (fun () -> materialize_instances_raw ~transforms geometry)
-

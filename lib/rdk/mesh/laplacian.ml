@@ -7,4 +7,3 @@ type weighting =
 exception Laplacian_error of string
 
 type source = { width : int; planes : float array array }
-

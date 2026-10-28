@@ -516,4 +516,3 @@ let distance_from_geometry ?cancel ?grain ?affected ?reference_selection
     (fun () -> distance_from_geometry_raw ?cancel ?grain ?affected
       ?reference_selection ?reference_kind ?falloff ?radius
       ?distance_attribute ?mask_attribute ~reference source)
-

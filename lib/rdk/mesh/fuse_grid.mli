@@ -40,4 +40,3 @@ val fuse :
   ?remove_all_unused_points:bool ->
   ?target:Rdk_core.Geometry.t ->
   Rdk_core.Geometry.t -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result
-

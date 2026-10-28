@@ -6,4 +6,3 @@ type mode =
   | Blast_width of { center : float; width : float }
 
 type output = Blast_delete | Blast_group of string
-

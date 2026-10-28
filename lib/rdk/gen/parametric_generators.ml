@@ -571,4 +571,3 @@ let torus ?cancel ?(grain = 16_384) ?(connectivity = Torus_triangles)
              | _ -> assert false);
             Geometry.create ~positions ~topology ~attributes:(List.rev !attributes)
               ())
-

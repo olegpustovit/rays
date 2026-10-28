@@ -51,4 +51,3 @@ val classify_connectivity :
     linear on manifold topology. Auxiliary memory is O(points + primitives)
     plus the shared topology index. IDs are compact and assigned by the first
     included output element in each component. *)
-

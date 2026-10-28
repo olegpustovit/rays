@@ -14,4 +14,3 @@ type connectivity =
   | Triangles
   | Alternating_triangles
   | Reverse_triangles
-

@@ -182,4 +182,3 @@ val transfer :
   ?distance:float ->
   source:Rdk_core.Geometry.t ->
   target:Rdk_core.Geometry.t -> unit -> (Rdk_core.Geometry.t, Rdk_core.Error.t) result
-

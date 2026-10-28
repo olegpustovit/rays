@@ -6,4 +6,3 @@ type run_over =
   | Centroid_pieces of { owner : piece_owner; attribute : string }
 
 type method_ = Centroid_point_mass | Centroid_bounding_box | Centroid_convex_hull
-

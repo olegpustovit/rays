@@ -624,4 +624,3 @@ let transfer ?cancel ?(grain = 16_384) ?(rules = default_transfer_rules)
         Result.bind result (fun () -> transfer_rule rule)) (Ok ()) rules in
       Result.bind result (fun () -> store_commit target_store target)
     with Invalid_argument message -> Error message
-

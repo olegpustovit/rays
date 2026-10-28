@@ -21,4 +21,3 @@ type quasi_data = {
   sequence_v : float array;
   sequence_w : float array;
 }
-

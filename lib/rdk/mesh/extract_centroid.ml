@@ -9,4 +9,3 @@ type run_over =
 type method_ = Centroid_point_mass | Centroid_bounding_box | Centroid_convex_hull
 
 exception Extract_error of string
-
