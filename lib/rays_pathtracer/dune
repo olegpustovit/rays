@@ -8,12 +8,20 @@
  (action (with-stdout-to %{target}
   (run %{exe:embed_metal.exe} %{dep:pathtrace.metal}))))
 
+; The Lisp kernels' declarations, embedded in the order they are read.
+(rule
+ (target pathtrace_lisp.ml)
+ (deps pathtrace_helpers.rays pathtrace.rays resolve_preview.rays)
+ (action (with-stdout-to %{target}
+  (progn (echo "let source = {rays|")
+   (cat pathtrace_helpers.rays) (cat pathtrace.rays) (cat resolve_preview.rays) (echo "|rays}\n")))))
+
 (library
  (name rays_pathtracer)
  (public_name rays.pathtracer)
- (modules rays_pathtracer pathtrace_source mesh_data mesh_build frame_data)
- (private_modules mesh_data mesh_build frame_data)
- (libraries rays ogpu renderer runtime_resources rays_math unix))
+ (modules rays_pathtracer pathtrace_source pathtrace_lisp lisp_kernel mesh_data mesh_build frame_data)
+ (private_modules pathtrace_lisp lisp_kernel mesh_data mesh_build frame_data)
+ (libraries rays ogpu renderer runtime_resources rays_math flow flow_ir flow_gpu input unix))
 
 (executable
  (enabled_if (= %{system} macosx))

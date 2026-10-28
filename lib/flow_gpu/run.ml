@@ -71,7 +71,7 @@ let ensure t slot length =
    chains its regions and waits once.  [bound i] / [bound_table u] name a device buffer that already
    holds input [i] / the table of uniform [u], which is then not uploaded. *)
 let msl_scene t = t.msl.Emit.scene
-let dispatch ?(wait=true) ?(reset_status=true) ?commands ?count ?into ?(bound=fun _ -> None) ?(bound_table=fun _ -> None) ?scene t (values : P.Private.inputs) =
+let dispatch ?(wait=true) ?(reset_status=true) ?commands ?count ?into ?(bound=fun _ -> None) ?(bound_table=fun _ -> None) ?scene ?(resident=[]) t (values : P.Private.inputs) =
   let error message = Error (Diagnostic.error ~code:"E_KERNEL" message) in
   if t.closed || Domain.self ()<>t.domain then error "GPU program owner is closed or called from another domain."
   else if values.count<0 || values.count>Int32.to_int Int32.max_int ||
@@ -194,7 +194,7 @@ let dispatch ?(wait=true) ?(reset_status=true) ?commands ?count ?into ?(bound=fu
           get (B.set_buffer encoder ~index:(index+1) vertices);
           get (B.set_buffer encoder ~index:(index+2) spheres);
           Option.iter (fun table -> get (B.set_buffer encoder ~index:(index+3) table)) instances;
-          get (B.compute_use_accels encoder [accel])) scene;
+          get (B.compute_use_accels encoder (accel :: resident))) scene;
         get (B.dispatch_threads encoder ~threads:(values.count,1,1) ~threadgroup:(256,1,1))) in
     match commands with
     | Some commands -> encode commands;

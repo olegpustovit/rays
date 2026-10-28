@@ -182,10 +182,17 @@ let layout_mesh ?(objects = [||]) ?(placed = [||]) ?(locals = [||]) base parts p
 
 let mesh ~extras ~materials source_meshes =
   let* flat = flat_mesh ~extras ~materials source_meshes in
+  (* Without strands the Lisp kernel traces spheres analytically beside the triangle structure, which then
+     needs a triangle: a degenerate one, never hit, stands in when there is none. *)
+  let analytic = flat.extras.sphere_count > 0 && flat.extras.strand_segments = 0 in
+  let flat =
+    if analytic && flat.triangles = 0 then
+      { flat with mesh_positions = Bytes.make 36 '\000'; mesh_normals = Bytes.make 36 '\000'; mesh_ids = Bytes.make 4 '\000' }
+    else flat in
   let parts =
     List.concat
-      [ (if flat.triangles > 0 then [ Triangle_part (0, 3 * flat.triangles) ] else [])
-      ; (if flat.extras.sphere_count > 0 then [ Sphere_part ] else [])
+      [ (if flat.triangles > 0 || analytic then [ Triangle_part (0, Bytes.length flat.mesh_positions / 12) ] else [])
+      ; (if flat.extras.sphere_count > 0 && not analytic then [ Sphere_part ] else [])
       ; (if flat.extras.strand_segments > 0 then [ Strand_part ] else []) ]
   in
   (* Several geometry kinds need one BLAS each, so the mesh becomes a scene of

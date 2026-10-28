@@ -640,6 +640,7 @@ let emit_program e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers ind
   let rec expression slot instruction = if narrow.(slot) then match instruction with
     | P.Int_const n -> u e (n land 0xffffffff)
     | Int_binary (op, a, b) -> integer_status e op (int_of b); narrow_binary e op (low a) (low b)
+    | Int_select (_, yes, no) when yes = no -> low yes
     | Int_select (condition, yes, no) -> select e e.uint (truth e (float_of condition)) (low yes) (low no)
     | Loop_result (loop, component, _) -> registers.(loop + 1 + component)
     | _ -> assert false
@@ -675,6 +676,7 @@ let emit_program e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers ind
         let table = Option.get (Array.find_index (( = ) seed) layout.table_seeds) * 512 in
         result e float 57
           [ snd (Option.get e.noise); float_of x; float_of y; float_of z; u e table; u e octaves ]
+    | Select (_, yes, no) when yes = no -> float_of yes
     | Select (condition, yes, no) ->
         select e float (truth e (float_of condition)) (float_of yes) (float_of no)
     | Loop_result (loop, component, _) ->
@@ -693,6 +695,7 @@ let emit_program e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers ind
     | Int_abs a ->
         let value = int_of a in
         wrap_integer e (select e (long e) (compare e 177 value (l e 0L)) (result e (long e) 126 [ value ]) value)
+    | Int_select (_, yes, no) when yes = no -> int_of yes
     | Int_select (condition, yes, no) ->
         select e (long e) (truth e (float_of condition)) (int_of yes) (int_of no)
     | Gather (prepared, at, width, component) -> element prepared at width component

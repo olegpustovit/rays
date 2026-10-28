@@ -7,6 +7,13 @@ let put_u32 bytes offset value = Bytes.set_int32_le bytes offset (Int32.of_int v
 
 type shape = { instanced : bool; motion : bool; spheres : bool; curves : bool; scene : bool }
 
+(* The Lisp kernel's views of a mesh (pathtrace.rays): float material ids, four vec3 rows per instance
+   (first triangle, material or -1, then the normal-matrix columns), scene/trace's 16-float instance table
+   (first triangle, world-to-object rows), and the analytic spheres as (centre, radius). *)
+type tables = {
+  ids : B.buffer; inst : B.buffer; trace_instances : B.buffer option; spheres : B.buffer;
+  id_count : int; instance_count : int; sphere_count : int }
+
 type gpu_mesh = {
   positions : B.buffer;
   normals : B.buffer;
@@ -23,6 +30,7 @@ type gpu_mesh = {
   prototype_key : (bytes * bytes * bytes * bytes * bytes) option;
   scene_blas : B.accel list;
   scene_table : B.buffer option;
+  tables : tables option;  (* the Lisp kernel's, owned even when the prototype is borrowed *)
   mutable owns_prototype : bool;
   shape : shape;
 }
@@ -59,8 +67,12 @@ let shared device ~label bytes =
       ignore (B.destroy_buffer value);
       failure
 
+let destroy_tables t =
+  List.iter (fun b -> ignore (B.destroy_buffer b)) (t.ids :: t.inst :: t.spheres :: Option.to_list t.trace_instances)
+
 let destroy_gpu gpu =
   ignore (B.destroy_accel gpu.structure);
+  Option.iter destroy_tables gpu.tables;
   Option.iter (fun transforms -> ignore (B.destroy_buffer transforms)) gpu.transforms;
   Option.iter (fun motion -> ignore (B.destroy_buffer motion)) gpu.motion_buffer;
   Option.iter (fun instances -> ignore (B.destroy_buffer instances)) gpu.instance_buffer;
@@ -125,6 +137,44 @@ let mesh_shape mesh =
   ; curves = mesh.extras.strand_segments > 0
   ; scene = mesh.scene <> None }
 
+(* The Lisp kernel traces every shape but motion and strands. *)
+let lisp_shape shape = not (shape.motion || shape.curves)
+
+let floats values =
+  let bytes = Bytes.create (4 * max 1 (Array.length values)) in
+  Bytes.fill bytes 0 4 '\000';
+  Array.iteri (fun i v -> put_f32 bytes (4 * i) v) values;
+  bytes
+
+let upload_tables device mesh =
+  let f32 bytes offset = Int32.float_of_bits (Bytes.get_int32_le bytes offset) in
+  let records, shader = match mesh.instances with Some i -> i.records, i.shader_bytes | None -> [||], Bytes.empty in
+  let n = Array.length records in
+  let first i = match mesh.scene with Some l -> Int32.to_float (Bytes.get_int32_le l.table (8 * i)) | None -> 0. in
+  let material i = match mesh.scene with
+    | Some l -> Int32.to_float (Bytes.get_int32_le l.table (8 * i + 4))
+    | None -> let user = records.(i).B.user_id in if user = 0 then -1. else float user in
+  let column i k = Array.init 3 (fun r -> f32 shader (84 * i + 4 * (3 * k + r))) in
+  let inst = Array.concat (List.concat (List.init n (fun i -> [ [| first i; material i; 0. |]; column i 4; column i 5; column i 6 ]))) in
+  (* world-to-object row r is normal-matrix column r; its translation is minus that row dotted with t *)
+  let trace = Array.concat (List.init n (fun i ->
+    let t = column i 3 in
+    Array.concat ([| first i |] :: List.init 3 (fun r -> let w = column i (4 + r) in
+      [| w.(0); w.(1); w.(2); -.((w.(0) *. t.(0)) +. (w.(1) *. t.(1)) +. (w.(2) *. t.(2))) |]) @ [ [| 0.; 0.; 0. |] ]))) in
+  let spheres = Array.init (4 * mesh.extras.sphere_count) (fun j -> f32 mesh.extras.sphere_bytes (32 * (j / 4) + 4 * (j mod 4))) in
+  let ids = Array.init (Bytes.length mesh.mesh_ids / 4) (fun i -> Int32.to_float (Bytes.get_int32_le mesh.mesh_ids (4 * i))) in
+  let owned = ref [] in
+  let upload label values = let* b = shared device ~label (floats values) in owned := b :: !owned; Ok b in
+  let made =
+    let* ids_buffer = upload "pathtracer-lisp-ids" ids in
+    let* inst_buffer = upload "pathtracer-lisp-instances" (if n = 0 then Array.make 12 0. else inst) in
+    let* spheres_buffer = upload "pathtracer-lisp-spheres" (if spheres = [||] then Array.make 4 0. else spheres) in
+    let* trace_instances = if n = 0 then Ok None else Result.map Option.some (upload "pathtracer-lisp-trace" trace) in
+    Ok { ids = ids_buffer; inst = inst_buffer; trace_instances; spheres = spheres_buffer; id_count = Array.length ids
+       ; instance_count = max 1 n; sphere_count = mesh.extras.sphere_count } in
+  (match made with Ok _ -> () | Error _ -> List.iter (fun b -> ignore (B.destroy_buffer b)) !owned);
+  made
+
 (* Stage one of a replacement build: upload the geometry, build the primitive
    structure, and write its compacted size, all without waiting. A reused
    prototype skips straight to the instance build. *)
@@ -150,7 +200,7 @@ let upload_mesh_async ?reuse ~material_data device queue mesh =
   let extras = mesh.extras in
   let capabilities = B.capabilities device in
   let* () =
-    if shape.spheres && not (Ogpu.Caps.has capabilities Function_tables) then
+    if shape.spheres && shape.curves && not (Ogpu.Caps.has capabilities Function_tables) then
       Error "path tracer spheres need intersection function tables on this device"
     else if shape.curves && not (Ogpu.Caps.has capabilities Ray_tracing_curves) then
       Error "path tracer strands need curve primitives, which this device does not intersect"
@@ -275,6 +325,13 @@ let upload_mesh_async ?reuse ~material_data device queue mesh =
       | None -> Ok None
       | Some layout -> let* table = owned layout.table ~label:"pathtracer-scene-table" in Ok (Some table)
     in
+    let* tables =
+      if not (lisp_shape shape) then Ok None
+      else
+        let* tables = upload_tables device mesh in
+        buffers := tables.ids :: tables.inst :: tables.spheres :: Option.to_list tables.trace_instances @ !buffers;
+        Ok (Some tables)
+    in
     (* Scene BLASes build side by side, each in its own 256-byte-aligned
        slice of one scratch buffer. *)
     let scratch_offsets =
@@ -303,7 +360,7 @@ let upload_mesh_async ?reuse ~material_data device queue mesh =
                Some (mesh.mesh_positions, mesh.mesh_normals, mesh.mesh_ids, material_data,
                      Bytes.cat extras.sphere_bytes extras.strand_points)
            | _ -> None)
-      ; scene_blas; scene_table
+      ; scene_blas; scene_table; tables
       ; owns_prototype = reused = None; shape }
     in
     let instance_count = match mesh.instances with None -> 0 | Some i -> Array.length i.records in

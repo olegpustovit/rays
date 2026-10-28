@@ -254,6 +254,7 @@ let kernel ?(fast=false) ?(instanced=false) program = try
     let expression = if narrow.(slot) then match instruction with
       | P.Int_const n -> Printf.sprintf "%du" (n land 0xffffffff)
       | Int_binary (op,a,b) -> narrow_integer op (low a) (if (op = Ishl || op = Ishr) && not narrow.(b) then int_of b else low b)
+      | Int_select (_,yes,no) when yes = no -> low yes
       | Int_select (condition,yes,no) -> Printf.sprintf "(%s!=0.0f?%s:%s)" (float_of condition) (low yes) (low no)
       | Loop_result (loop,component,_) -> register (loop+1+component)
       | _ -> assert false
@@ -282,6 +283,7 @@ let kernel ?(fast=false) ?(instanced=false) program = try
       | Int_binary (op,a,b) -> integer op (int_of a) (int_of b)
       | Int_compare (op,a,b) -> comparison op (int_of a) (int_of b)
       | Int_abs a -> wrap_integer("abs(" ^ int_of a ^ ")")
+      | Int_select (_,yes,no) when yes = no -> int_of yes
       | Int_select (condition,yes,no) -> Printf.sprintf "(%s!=0.0f?%s:%s)" (float_of condition) (int_of yes) (int_of no)
       | Convert (To_float,a) -> float_of a
       | Convert ((Truncate|Coerce_int|Integer_result _),a) -> int_of a
@@ -300,6 +302,7 @@ let kernel ?(fast=false) ?(instanced=false) program = try
               (Option.get scene_spheres) (if scene_instances = None then "" else "scene_instances,") (a 1) (a 2) (a 3) (a 4) (a 5) (a 6) (a 7) (a 8);
             Hashtbl.add hits key name; name in
           if occlusion then hit else hit ^ [| ".t"; ".prim"; ".u"; ".v"; ".n.x"; ".n.y"; ".n.z"; ".hit"; ".inst" |].(field)
+      | Select (_,yes,no) when yes = no -> register yes
       | Select (condition,yes,no) -> Printf.sprintf "(%s!=0.0f?%s:%s)" (register condition) (register yes) (register no)
       | Noise3 (x,y,z,seed,octaves,_,_) -> Printf.sprintf "fbm(float3(%s,%s,%s),%d,table+%d)"
           (register x) (register y) (register z) octaves (table seed)

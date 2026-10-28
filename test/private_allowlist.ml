@@ -83,6 +83,8 @@ let entries = [
   "rays_editor", "Rdk.Attribute.Private";
   "rays_editor", "Rdk.Packed.Float4.Private";
   "rays_editor", "Scene.D3.Private";
+  "rays_pathtracer", "Flow.Eval.Private";
+  "rays_pathtracer", "Flow_ir.Packed.Private";
   "rays_pathtracer", "Rays.Image.Private";
   "rays_pathtracer", "Rays.Mesh.Private";
   "rays_pathtracer", "Runtime_resources.Image.Private";
