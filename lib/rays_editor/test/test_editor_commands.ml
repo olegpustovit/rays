@@ -26,8 +26,8 @@ let canvas_preview () =
   let workspace = match Rays_editor.Workspace.load text with
     | Ok workspace -> workspace
     | Error ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds)) in
-  let editor = Result.get_ok (E3.create ~ui_text_size:11 ~workspace ~await:true ~domains:1 ~prepare:(fun _ _ -> Ok ())
-    ~draw:(fun _ () -> Rays.Scene.D3.empty) ()) in
+  let editor = Result.get_ok (E3.create ~ui_text_size:11 ~workspace ~await:true ~domains:1 ~prepare:Editor_prepare.empty
+    ~draw:(fun _ _ -> Rays.Scene.D3.empty) ()) in
   Fun.protect ~finally:(fun () -> E3.close editor) (fun () ->
     let count = ref 0 in
     let step e = incr count; E3.update e (Test_editor_input.frame (450., 300.) [] !count) in
@@ -69,8 +69,8 @@ let canvas_frame_size () =
   let workspace = match Rays_editor.Workspace.load text with
     | Ok workspace -> workspace
     | Error ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds)) in
-  let editor = Result.get_ok (E3.create ~ui_text_size:11 ~workspace ~await:true ~domains:1 ~prepare:(fun _ _ -> Ok ())
-    ~draw:(fun _ () -> Rays.Scene.D3.empty) ()) in
+  let editor = Result.get_ok (E3.create ~ui_text_size:11 ~workspace ~await:true ~domains:1 ~prepare:Editor_prepare.empty
+    ~draw:(fun _ _ -> Rays.Scene.D3.empty) ()) in
   Fun.protect ~finally:(fun () -> E3.close editor) (fun () ->
     let step e count = E3.update e (Test_editor_input.frame (450., 300.) [] count) in
     let e = step (step (step editor 1) 2) 3 in
@@ -104,13 +104,13 @@ let with_editor text f =
   let workspace = match Rays_editor.Workspace.load text with
     | Ok workspace -> workspace
     | Error ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds)) in
-  let editor = Result.get_ok (E3.create ~ui_text_size:11 ~workspace ~await:true ~domains:1 ~prepare:(fun _ _ -> Ok ())
-    ~draw:(fun _ () -> Rays.Scene.D3.empty) ()) in
+  let editor = Result.get_ok (E3.create ~ui_text_size:11 ~workspace ~await:true ~domains:1 ~prepare:Editor_prepare.empty
+    ~draw:(fun _ _ -> Rays.Scene.D3.empty) ()) in
   Fun.protect ~finally:(fun () -> E3.close editor) (fun () -> f editor)
 
 let world_command () =
   let module E3 = Rays_editor.Editor in
-  let module L = Rays_editor.Private.Editor_commands in
+  let module L = Rays_editor__.Editor_commands in
   with_editor {|(workspace world_command
     (graph g :context sop (sop/box))
     (graph scene :context scene (scene/root (scene/merge (scene/geometry (ref g))))))|}
@@ -134,7 +134,7 @@ let world_command () =
    the text, the release seals; the whole drag is one undo step. *)
 let world_drag () =
   let module E3 = Rays_editor.Editor in
-  let module L = Rays_editor.Private.Editor_commands in
+  let module L = Rays_editor__.Editor_commands in
   with_editor {|(workspace world_drag
     (graph g :context sop (sop/box))
     (graph sky :context world (world/sun (world/sky)))
@@ -209,8 +209,8 @@ let new_graphs () =
 (* Every chord the key sheet lists as the text area's own must change the text, selection or caret of a
    real [Ui.text_area_submit] with the editor's Lisp language: the sheet cannot list a key nothing handles. *)
 let text_keys_are_handled () =
-  let module L = Rays_editor.Private.Editor_commands in
-  let language = Rays_editor.Private.Lisp_text.language Pxui.Theme.default in
+  let module L = Rays_editor__.Editor_commands in
+  let language = Rays_editor__.Lisp_text.language Pxui.Theme.default in
   check (L.text_keys <> []) "no text keys";
   List.iter (fun (label, trigger) ->
     let key, mods = match trigger with
@@ -236,7 +236,7 @@ let text_keys_are_handled () =
 let run () =
   text_keys_are_handled ();
   let open Editor_core.Guide_context in
-  let module L = Rays_editor.Private.Editor_commands in
+  let module L = Rays_editor__.Editor_commands in
   List.iter (fun focus ->
     List.iter (fun (events, expected) ->
       let _, actions, _ = Editor_core.Router.step L.keymap ~focus ~text_focus:false
@@ -323,7 +323,7 @@ let run () =
   let module E3 = Rays_editor.Editor in
   let directory = Filename.temp_dir "rays-guide" "" in
   let filename = Filename.concat directory "preferences.rays" in
-  let create () = E3.create ~ui_text_size:11 ~preferences:filename ~workspace ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ _ -> Scene.D3.empty) ()
+  let create () = E3.create ~ui_text_size:11 ~preferences:filename ~workspace ~prepare:Editor_prepare.empty ~draw:(fun _ _ -> Scene.D3.empty) ()
     |> Result.get_ok in
   let current = ref (create ()) in
   Fun.protect ~finally:(fun () ->

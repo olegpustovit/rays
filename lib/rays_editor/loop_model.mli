@@ -3,17 +3,17 @@ open Loop_view
 
 module V = Viewport
 type layout = Pxui_shell.Layout.t
-type 'prepared t = {
-  core : 'prepared Editor_model.t;
+type t = {
+  core : Editor_model.t;
   camera : V.camera;
   cameras : (string * V.camera) list;
   viewing : string option;
   control : V.control;
-  draw : Sop.Node.t -> 'prepared -> V.rendered;
+  draw : Sop.Node.t -> Cook.prepared -> V.rendered;
   rendered : V.rendered option;
   views : (string * V.rendered) list;
   drawn :
-    (Sop.Node.t * 'prepared * V.rendered * Rays.Texture.t option)
+    (Sop.Node.t * Cook.prepared * V.rendered * Rays.Texture.t option)
     Editor_document.Document.Int_map.t;
   composed :
     (Editor_document.Kind_graph.t * Editor_document.Document.level *
@@ -70,63 +70,63 @@ val create :
   workspace:Editor_document.Workspace_doc.t ->
   ?source:Source_file.t ->
   prepare:(Editor_document.Settings.t ->
-           Sop.Session.output -> ('a, string) result) ->
-  draw:(Sop.Node.t -> 'a -> V.rendered) ->
-  unit -> ('a t, string) result
-val document : 'a t -> Editor_document.Kind_graph.t
-val network : 'a t -> Sop.Edit_graph.t option
-val prepared : 'a t -> 'a option
-val camera : 'a t -> V.camera
-val extra : 'a t -> V.extra
-val timeline : 'a t -> Timeline.t
-val selected_node : 'a t -> Editor_model.picked option
-val displayed_node : 'a t -> Sop.Node.t
-val panes : 'a t -> Rays.Frame.t -> Pxui_shell.Layout.panes
-val can_undo : 'a t -> bool
-val can_redo : 'a t -> bool
-val undo_label : 'a t -> string option
-val redo_label : 'a t -> string option
-val workspace : 'a t -> Editor_document.Workspace_doc.t
-val probe : 'a t -> Pxui_graph.Scope.path -> int option
-val set_probe : 'a t -> Pxui_graph.Scope.path -> int -> 'a t
+           Sop.Session.output -> (Cook.prepared, string) result) ->
+  draw:(Sop.Node.t -> Cook.prepared -> V.rendered) ->
+  unit -> (t, string) result
+val document : t -> Editor_document.Kind_graph.t
+val network : t -> Sop.Edit_graph.t option
+val prepared : t -> Rdk.Geometry.t option
+val camera : t -> V.camera
+val extra : t -> V.extra
+val timeline : t -> Timeline.t
+val selected_node : t -> Editor_model.picked option
+val displayed_node : t -> Sop.Node.t
+val panes : t -> Rays.Frame.t -> Pxui_shell.Layout.panes
+val can_undo : t -> bool
+val can_redo : t -> bool
+val undo_label : t -> string option
+val redo_label : t -> string option
+val workspace : t -> Editor_document.Workspace_doc.t
+val probe : t -> Pxui_graph.Scope.path -> int option
+val set_probe : t -> Pxui_graph.Scope.path -> int -> t
 val node_box :
-  'a t -> Pxui_graph.Scope.path -> (int * int * int * int) option
-val edit : 'a t -> Flow_graph.Flow_edit.op -> ('a t, string) result
-val edit_layout : 'a t -> Editor_document.Layout_edit.op -> ('a t, string) result
-val edit_phases : 'a t -> Flow.Phase_timer.t
-val carrying : 'a t -> (string * string) option
-val carry_line : 'a t -> string option
-val level : 'a t -> string option
-val scene_document : 'a t -> Editor_document.Kind_graph.t
+  t -> Pxui_graph.Scope.path -> (int * int * int * int) option
+val edit : t -> Flow_graph.Flow_edit.op -> (t, string) result
+val edit_layout : t -> Editor_document.Layout_edit.op -> (t, string) result
+val edit_phases : t -> Flow.Phase_timer.t
+val carrying : t -> (string * string) option
+val carry_line : t -> string option
+val level : t -> string option
+val scene_document : t -> Editor_document.Kind_graph.t
 val same_context :
   Editor_document.Document.t -> Editor_document.Document.t -> bool
-val lights : 'a t -> Rays.Light.t list
-val world : 'a t -> Rays.World.baked option
-val objects : 'a t -> (Rays_math.Mat4.t * 'a) list
-val settings : 'a t -> Editor_document.Settings.t
-val set_settings : 'a t -> Editor_document.Settings.t -> 'a t
-val focus_key : 'a t -> string
-val look_key : 'a t -> string -> string
-val camera_of : 'a t -> string -> V.view
-val view_camera : 'a t -> V.view
-val follow_focus : 'a t -> Rays.Frame.t -> 'a t
+val lights : t -> Rays.Light.t list
+val world : t -> Rays.World.baked option
+val objects : t -> (Rays_math.Mat4.t * Cook.prepared) list
+val settings : t -> Editor_document.Settings.t
+val set_settings : t -> Editor_document.Settings.t -> t
+val focus_key : t -> string
+val look_key : t -> string -> string
+val camera_of : t -> string -> V.view
+val view_camera : t -> V.view
+val follow_focus : t -> Rays.Frame.t -> t
 val paint_view :
-  'a t ->
+  t ->
   key:string ->
   int * int * int * int -> V.view -> V.rendered -> Rays.Scene.node list
-val viewport_camera : 'a t -> string -> V.view
-val focused_image : 'a t -> V.rendered option
-val film : 'a t -> Rays.Frame.t -> int * int * int * int
-val refresh_hidden : 'a t -> Rays.Frame.t -> 'a t
+val viewport_camera : t -> string -> V.view
+val focused_image : t -> V.rendered option
+val film : t -> Rays.Frame.t -> int * int * int * int
+val refresh_hidden : t -> Rays.Frame.t -> t
 val composition_key :
-  'a Editor_model.t ->
+  Editor_model.t ->
   'b -> 'b * Editor_document.Document.level * (string * int list) list
 val compose :
-  'a t ->
-  ('a, 'b) Editor_model.update ->
+  t ->
+  'b Editor_model.update ->
   baked:Rays.World.baked option ->
   baked_views:(string * (Rays.World.t * Rays.World.baked)) list ->
   scene:Editor_document.Kind_graph.t ->
   V.rendered option * (string * V.rendered) list *
-  (Sop.Node.t * 'a * V.rendered * Rays.Texture.t option)
+  (Sop.Node.t * Cook.prepared * V.rendered * Rays.Texture.t option)
   Editor_document.Document.Int_map.t * string list

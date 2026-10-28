@@ -2,7 +2,7 @@
    span), then the pane driven through the editor: draft, Check & apply,
    Discard, an invalid draft (document unchanged, error at its line) and undo
    labels. *)
-module T = Rays_editor.Private.Text_pane
+module T = Rays_editor__.Text_pane
 
 let fail message = failwith ("test_text_pane: " ^ message)
 (* the pitch of a line of the text area at the tests' 11 points ([Ui.text_line_height]); the tab
@@ -176,7 +176,7 @@ let selection_text () =
     check (T.reference_target rails ~from:["g"; owner; "leaf"] "x" = Some ["g"; owner])
       "a local rail binder jumped to a shadowed graph input") ["loop"; "f"];
   (* Command-click, colour chips and the document-aware completions *)
-  let module L = Rays_editor.Private.Lisp_text in
+  let module L = Rays_editor__.Lisp_text in
   let sample = "(sop/material geo :material (ref cobalt) :tint \"#ff8000\" :note \"#zzzzzz\")" in
   check (L.ref_at sample 30 = Some "cobalt" && L.ref_at sample 40 = Some "cobalt") "ref_at: inside the form";
   check (L.ref_at sample 5 = None) "ref_at: elsewhere";
@@ -265,9 +265,8 @@ let start_env text =
   let workspace = Rays_editor.Workspace_doc.of_text catalog text |> Result.get_ok in
   let presets = Filename.temp_dir "rays-text-presets" "" in
   ref (E.create ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true ~workspace
-      ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
-        |> Result.map_error Rdk.Error.to_string)
-      ~draw:(fun _ mesh -> Scene.D3.create [ Scene.D3.mesh mesh ]) () |> Result.get_ok)
+      ~prepare:Editor_prepare.surface
+      ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface) () |> Result.get_ok)
 
 let dump_line env name =
   let directory = Filename.temp_dir "rays-text-pane" "" in
@@ -286,9 +285,8 @@ let editor_text () =
   let workspace = Rays_editor.Workspace_doc.of_text catalog (small_sunflower ()) |> Result.get_ok in
   let presets = Filename.temp_dir "rays-text-presets" "" in
   let env = ref (E.create ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true ~workspace
-      ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
-        |> Result.map_error Rdk.Error.to_string)
-      ~draw:(fun _ mesh -> Scene.D3.create [ Scene.D3.mesh mesh ]) () |> Result.get_ok) in
+      ~prepare:Editor_prepare.surface
+      ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface) () |> Result.get_ok) in
   let count = ref 0 in
   let step ?keys ?(at = (450., 320.)) events =
     incr count; env := E.update !env (frame ~mouse:at ?keys !count events) in
@@ -383,7 +381,7 @@ let editor_text () =
   let tab_graph = tab_at ~narrow:(gw < 400) ~right:(gx + gw - 159) ~top:gy 1 in
   click tab_graph;
   check (contains (dump ()) "graph tab, draft no") ("Graph tab\n" ^ dump ());
-  let graph_text = (Rays_editor.Private.Text_pane.make_shown original.source "sunflower" None Graph).text in
+  let graph_text = (Rays_editor__.Text_pane.make_shown original.source "sunflower" None Graph).text in
   check (contains graph_text "(graph sunflower") "the Graph tab does not show the graph";
   click area;
   step ~keys:[ Input.Meta ] [ char 'a' ];
@@ -462,7 +460,7 @@ let editor_text () =
   step ~keys:[ Input.Meta ] [ char 's' ]; step [];
   check (contains (Rays_editor.Workspace_doc.to_text (ws ())) ":segments 9" && contains (dump ()) "draft no")
     ("Command-S with a draft in the text pane did not apply it: " ^ dump ());
-  check (List.length (Rays_editor.Private.Preset.list ~directory:presets) = 1)
+  check (List.length (Editor_document.Preset.list ~directory:presets) = 1)
     "Command-S with the caret in the text pane saved nothing";
   E.close !env; Test_workspace_source.remove_tree presets
 
@@ -474,9 +472,8 @@ let editor_binding () =
   let workspace = Rays_editor.Workspace_doc.of_text catalog (small_sunflower ()) |> Result.get_ok in
   let presets = Filename.temp_dir "rays-text-presets" "" in
   let env = ref (E.create ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true ~workspace
-      ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
-        |> Result.map_error Rdk.Error.to_string)
-      ~draw:(fun _ mesh -> Scene.D3.create [ Scene.D3.mesh mesh ]) () |> Result.get_ok) in
+      ~prepare:Editor_prepare.surface
+      ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface) () |> Result.get_ok) in
   let count = ref 0 in
   let step ?keys ?(at = (450., 320.)) events =
     incr count; env := E.update !env (frame ~mouse:at ?keys !count events) in
@@ -583,7 +580,7 @@ let paste () =
     ("a pasted name that is another's new name: " ^ chain)
 
 let lisp_text () =
-  let module L = Rays_editor.Private.Lisp_text in
+  let module L = Rays_editor__.Lisp_text in
   let indent text = String.length (L.indent text (String.length text)) in
   check (indent "(let* [a 1" = 7) "a vector's elements line up under the first";
   check (indent "(graph g :context sop" = 2) "a body form indents two in";
@@ -722,9 +719,8 @@ let editor_w9 () =
   let workspace = Rays_editor.Workspace_doc.of_text catalog (small_rosette ()) |> Result.get_ok in
   let presets = Filename.temp_dir "rays-text-presets" "" in
   let start () = E.create ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true ~workspace
-        ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
-          |> Result.map_error Rdk.Error.to_string)
-        ~draw:(fun _ mesh -> Scene.D3.create [ Scene.D3.mesh mesh ]) () |> Result.get_ok in
+        ~prepare:Editor_prepare.surface
+        ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface) () |> Result.get_ok in
   let mouse = ref (640., 360.) in
   (* Every scenario's first edit is at frame 22 or later and an edit costs a workspace lowering (1.3 s), so the
      frames before it (the zoom, the selection) run once and each scenario continues from their result (the UI handle is
@@ -828,9 +824,8 @@ let editor_active_scrub () =
   let workspace = Rays_editor.Workspace_doc.of_text catalog text |> Result.get_ok in
   let presets = Filename.temp_dir "rays-text-presets" "" in
   let env = ref (E.create ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true ~workspace
-      ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
-        |> Result.map_error Rdk.Error.to_string)
-      ~draw:(fun _ mesh -> Scene.D3.create [ Scene.D3.mesh mesh ]) () |> Result.get_ok) in
+      ~prepare:Editor_prepare.surface
+      ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface) () |> Result.get_ok) in
   let count = ref 0 and mouse = ref (450., 320.) in
   let step ?(buttons = []) ?(keys = []) events =
     incr count;
@@ -880,8 +875,8 @@ let editor_literal_scrub () =
   List.iter (fun (tab_index, tab) ->
     let workspace = Rays_editor.Workspace_doc.of_text catalog text |> Result.get_ok in
     let presets = Filename.temp_dir "rays-token-presets" "" in
-    let env = ref (E.create ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true ~domains:1 ~workspace ~prepare:(fun _ _ -> Ok ())
-      ~draw:(fun _ () -> Scene.D3.empty) () |> Result.get_ok) in
+    let env = ref (E.create ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true ~domains:1 ~workspace ~prepare:Editor_prepare.empty
+      ~draw:(fun _ _ -> Scene.D3.empty) () |> Result.get_ok) in
     Fun.protect ~finally:(fun () -> E.close !env) (fun () ->
       let count = ref 0 and mouse = ref (450.,320.) in
       let step ?(buttons = []) ?(keys = []) events =
@@ -969,9 +964,8 @@ let editor_text_drop () =
   let workspace = Rays_editor.Workspace_doc.of_text catalog text |> Result.get_ok in
   let presets = Filename.temp_dir "rays-text-presets" "" in
   let env = ref (E.create ~ui_text_size:11 ?ui_font:(Sys.getenv_opt "RAYS_UI_FONT") ~presets ~await:true ~carry_budget:Float.infinity ~workspace
-      ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
-        |> Result.map_error Rdk.Error.to_string)
-      ~draw:(fun _ mesh -> Scene.D3.create [ Scene.D3.mesh mesh ]) () |> Result.get_ok) in
+      ~prepare:Editor_prepare.surface
+      ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface) () |> Result.get_ok) in
   let count = ref 0 and mouse = ref (450., 320.) in
   let step ?(buttons = []) ?(keys = []) events =
     incr count;
@@ -999,7 +993,7 @@ let editor_text_drop () =
   check (E.carrying !env <> None) "the carry survives the jump";
   let original = E.workspace !env and history = E.undo_label !env in
   let shown tab =
-    (Rays_editor.Private.Text_pane.make_shown (E.workspace !env).source "b" None tab).text in
+    (Rays_editor__.Text_pane.make_shown (E.workspace !env).source "b" None tab).text in
   let where tab needle =
     let lines = String.split_on_char '\n' (shown tab) in
     let line = Option.get (List.find_index (fun l -> contains l needle) lines) in
@@ -1011,7 +1005,7 @@ let editor_text_drop () =
     let line, col = where tab needle in
     float gx +. 36. +. float (col + after) *. char_w, float top +. 6. +. 2. +. float line *. line_pitch in
   (* hover between the call and its first argument: the text is the edit, the strip says where *)
-  let over = point Rays_editor.Private.Text_pane.Graph "(sop/merge" ~after:10 in
+  let over = point Rays_editor__.Text_pane.Graph "(sop/merge" ~after:10 in
   at over [ Input.Pointer_moved over ]; at over [];
   check (contains (line ()) "(ref a) at line") ("the strip says where it goes: " ^ line ());
   check (contains (source ()) "(sop/merge (ref a) (sop/box)") ("the preview is the edit: " ^ source ());
@@ -1024,7 +1018,7 @@ let editor_text_drop () =
   check (E.workspace !env == original) "one undo gives it back";
   (* inside a keyword the text does not check: refused, nothing written *)
   jump "a"; step [ char 'y' ]; step []; jump "b";
-  let inside = point Rays_editor.Private.Text_pane.Graph "(sop/merge" ~after:5 in
+  let inside = point Rays_editor__.Text_pane.Graph "(sop/merge" ~after:5 in
   at inside [ Input.Pointer_moved inside ]; at inside [];
   check (contains (line ()) "Refused") ("a put that does not check is refused: " ^ line ());
   check (E.workspace !env == original) "and the picture is the original";
@@ -1035,7 +1029,7 @@ let editor_text_drop () =
   click (float (gx + 200), float (top + 24 + 60));
   step [ Input.Text_input "x" ]; step [ key Input.Escape ]; step [];
   jump "a"; step [ char 'y' ]; step []; jump "b";
-  let over = point Rays_editor.Private.Text_pane.Graph "(sop/merge" ~after:10 in
+  let over = point Rays_editor__.Text_pane.Graph "(sop/merge" ~after:10 in
   at over [ Input.Pointer_moved over ]; at over [];
   check (contains (line ()) "unapplied draft") ("a draft refuses: " ^ line ());
   step [ key Input.Escape ]; step [];
@@ -1043,7 +1037,7 @@ let editor_text_drop () =
   click (tab_at ~narrow:(gw < 400) ~right:(gx + gw - 36) ~top 2);
   let original = E.workspace !env in
   jump "a"; step [ char 'y' ]; step [];
-  let over = point Rays_editor.Private.Text_pane.Document "(sop/merge" ~after:10 in
+  let over = point Rays_editor__.Text_pane.Document "(sop/merge" ~after:10 in
   at over [ Input.Pointer_moved over ]; at over [];
   check (contains (line ()) "(ref a) at line") ("the Document text takes it too: " ^ line ());
   at over [ Input.Pointer_pressed (Input.LeftButton, over); Input.Pointer_released (Input.LeftButton, over) ]; step []; step [];

@@ -75,32 +75,32 @@ let test_timeline_and_schedule () =
   let dynamic_graph = Custom.plain ~operation:"timeline_test"
       ~dependencies:(Context.Dependencies.one Context.Dependencies.Time)
       [static_graph] (fun ~context:_ inputs -> Ok inputs.(0)) in
-  let schedule, fire = Rays_editor.Private.Schedule.step
-      Rays_editor.Private.Schedule.initial ~graphs:[static_graph]
+  let schedule, fire = Rays_editor__.Schedule.step
+      Rays_editor__.Schedule.initial ~graphs:[static_graph]
       ~effects:Param.no_effects ~context_changed:false ~force:false
       ~busy:false
       ~frame:(timeline_frame ()) in
   if not fire then fail "cook scheduler skipped the initial graph";
-  let schedule, fire = Rays_editor.Private.Schedule.step schedule
+  let schedule, fire = Rays_editor__.Schedule.step schedule
       ~graphs:[static_graph] ~effects:Param.no_effects ~context_changed:true
       ~force:false ~busy:false ~frame:(timeline_frame ()) in
   if fire then fail "static graph recooked for an unrelated clock change";
-  let schedule, fire = Rays_editor.Private.Schedule.step schedule
+  let schedule, fire = Rays_editor__.Schedule.step schedule
       ~graphs:[dynamic_graph] ~effects:Param.no_effects ~context_changed:true
       ~force:false ~busy:false
       ~frame:(timeline_frame ~buttons:[Input.LeftButton] ()) in
   if fire then fail "dynamic graph cooked while a parameter drag was held";
-  let _, fire = Rays_editor.Private.Schedule.step ~live:true schedule
+  let _, fire = Rays_editor__.Schedule.step ~live:true schedule
       ~graphs:[dynamic_graph] ~effects:Param.no_effects ~context_changed:true
       ~force:false ~busy:false
       ~frame:(timeline_frame ~buttons:[Input.LeftButton] ()) in
   if not fire then fail "live cooking did not cook during a held drag";
-  let _, fire = Rays_editor.Private.Schedule.step ~live:true schedule
+  let _, fire = Rays_editor__.Schedule.step ~live:true schedule
       ~graphs:[dynamic_graph] ~effects:Param.no_effects ~context_changed:true
       ~force:false ~busy:true
       ~frame:(timeline_frame ~buttons:[Input.LeftButton] ()) in
   if fire then fail "live cooking cancelled a running cook during a drag";
-  let _, fire = Rays_editor.Private.Schedule.step schedule
+  let _, fire = Rays_editor__.Schedule.step schedule
       ~graphs:[dynamic_graph] ~effects:Param.no_effects ~context_changed:false
       ~force:false ~busy:false ~frame:(timeline_frame ()) in
   if not fire then fail "cook scheduler lost the latest held dynamic request"

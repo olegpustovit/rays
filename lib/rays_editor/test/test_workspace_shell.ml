@@ -101,9 +101,8 @@ let frame ?(buttons = []) mouse events count = Test_editor_input.frame ~buttons 
    the worker *)
 let editor ?camera ?presets text =
   E3.create ~ui_text_size:11 ?camera ?presets ~await:true ~workspace:(of_text text)
-    ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
-      |> Result.map_error Rdk.Error.to_string)
-    ~draw:(fun _ mesh -> Scene.D3.create [ Scene.D3.mesh mesh ]) ()
+    ~prepare:Editor_prepare.surface
+    ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface) ()
   |> function Ok e -> e | Error m -> fail m
 
 let source e = fst (Flow.Lisp.print (E3.workspace e).Doc.source)
@@ -498,7 +497,7 @@ let run_duplicate_and_view () =
   let step ?(mouse = (450., 300.)) ?(keys = []) events =
     incr count; e := E3.update !e (Test_editor_input.frame ~keys mouse events !count) in
   step []; step [];
-  let centre () = Option.bind (E3.prepared !e) Mesh.centroid
+  let centre () = Option.bind (E3.prepared !e) Editor_prepare.centroid
     |> Option.map (fun p -> p.Rays_math.Vec3.x) in
   check (centre () = Some 20.) "the initial viewport did not show the graph result";
   step ~mouse:(150., 300.) [Input.Pointer_moved (150., 300.)];
@@ -559,7 +558,7 @@ let run_loop_view () =
     let step ?(mouse = (450., 300.)) events =
       incr count; e := E3.update !e (frame mouse events !count) in
     let centre what expected =
-      let actual = Option.map (fun p -> p.Rays_math.Vec3.x) (Option.bind (E3.prepared !e) Mesh.centroid) in
+      let actual = Option.map (fun p -> p.Rays_math.Vec3.x) (Option.bind (E3.prepared !e) Editor_prepare.centroid) in
       check (match actual with Some x -> Float.abs (x -. expected) < 1e-4 | None -> false)
         (Printf.sprintf "%s: expected the geometry at %.1f, got %s" what expected
            (Option.fold ~none:"none" ~some:string_of_float actual)) in
@@ -599,7 +598,7 @@ let run_result_view () =
     let step ?(mouse = (450., 300.)) events =
       incr count; e := E3.update !e (frame mouse events !count) in
     let centre expected =
-      let actual = Option.map (fun p -> p.Rays_math.Vec3.x) (Option.bind (E3.prepared !e) Mesh.centroid) in
+      let actual = Option.map (fun p -> p.Rays_math.Vec3.x) (Option.bind (E3.prepared !e) Editor_prepare.centroid) in
       check (actual = Some expected)
         (Printf.sprintf "VIEW kept stale geometry: expected %.1f, got %s" expected
            (Option.fold ~none:"none" ~some:string_of_float actual)) in
@@ -658,7 +657,7 @@ let run_geometry_view () =
     let click p = step ~mouse:p [Input.Pointer_moved p];
       step ~mouse:p [Input.Pointer_pressed (Input.LeftButton, p); Input.Pointer_released (Input.LeftButton, p)] in
     let centre expected =
-      let x = Option.map (fun p -> p.Rays_math.Vec3.x) (Option.bind (E3.prepared !e) Mesh.centroid) in
+      let x = Option.map (fun p -> p.Rays_math.Vec3.x) (Option.bind (E3.prepared !e) Editor_prepare.centroid) in
       check (x = Some expected) "the geometry template did not preview the selected element" in
     step []; step []; centre 10.;
     let gx, gy, _, _ = (E3.panes !e (frame (0., 0.) [] 0)).graph in
@@ -2100,12 +2099,12 @@ let run_carry_reaches_no_history () =
   let preview = E.Set_arg { node = [ "scene"; "side" ]; key = E.Kw "fov"; sub = []; value = S.make (S.Num "40.0") } in
   let before = source e in
   let stepped = Rays_editor.Reduce.step e ~select:[ side ] ~preview
-      [ Rays_editor.Private.Editor_commands.Enter ] (frame (450., 300.) [] 3) in
+      [ Rays_editor__.Editor_commands.Enter ] (frame (450., 300.) [] 3) in
   check (E3.carrying stepped <> None) "the reducer dropped the carry";
   check (not (E3.can_undo stepped))
     ("entering a camera during a carry reached the history: " ^ Option.value ~default:"-" (E3.undo_label stepped));
   (* without the carry the same keys do make the camera the render camera: the test reaches the path *)
-  let entered = Rays_editor.Reduce.step e ~select:[ side ] [ Rays_editor.Private.Editor_commands.Enter ] (frame (450., 300.) [] 3) in
+  let entered = Rays_editor.Reduce.step e ~select:[ side ] [ Rays_editor__.Editor_commands.Enter ] (frame (450., 300.) [] 3) in
   check (E3.can_undo entered && has (source entered) ":camera side" && source e = before)
     ("Enter on a camera did not make it the render camera: " ^ source entered);
   E3.close e
@@ -2116,7 +2115,7 @@ let run_atomic_frame () =
   let at = 200., 300. in
   let e = ref (E3.create ~ui_text_size:11 ~await:true
       ~workspace:(of_text "(workspace solo (graph g :context sop (sop/box)) (graph editor :context editor (ui/workspace (ui/graph))))")
-      ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ () -> Scene.D3.empty) () |> Result.get_ok) and count = ref 0 in
+      ~prepare:Editor_prepare.empty ~draw:(fun _ _ -> Scene.D3.empty) () |> Result.get_ok) and count = ref 0 in
   let step events = incr count; e := E3.update !e (frame at events !count) in
   for _ = 1 to 4 do step [] done;
   step [ Input.Pointer_moved at ];
@@ -2164,7 +2163,7 @@ let run_undo_under_pane () =
   E3.close !e
 
 let run_spreadsheet () =
-  let module Sheet = Rays_editor.Private.Spreadsheet in
+  let module Sheet = Rays_editor__.Spreadsheet in
   let text = {|(workspace sheet
     (graph g :context sop (sop/grid :counts "Point counts" :rows 2 :columns 3))
     (graph h :context sop (sop/box))
@@ -2468,7 +2467,7 @@ let run_outline_button () =
   let ui = Pxui.Ui.create ~font_size:11 () in
   let from = Pxui_shell.Chrome.tools_start ui ~focused:true ~floating:false ~collapsed:false
     ("Graph\t" ^ dump_line !e "pane graph" ^ " / value") in
-  let x, y = match Rays_editor.Private.Bars.tool_rect ~outline:true ui ~header ~from Outline with
+  let x, y = match Rays_editor__.Bars.tool_rect ~outline:true ui ~header ~from Outline with
     | Some (x, y, w, h) -> x +. w /. 2., y +. h /. 2. | None -> fail "the Outline button is cut off" in
   Pxui.Ui.destroy ui;
   step (x, y) [ Input.Pointer_moved (x, y) ];
@@ -2505,30 +2504,15 @@ let run_view_native () =
     ~init:(fun _ -> E3.create ~ui_text_size:11 ~await:true ~workspace:(of_text text)
       ~presets:(Filename.concat directory "presets") ~seed:7349L ~grain:2
       ~camera:(Easy_camera.create ~target:Rays_math.Vec3.zero ~distance:6.8 ~azimuth:0.72 ~elevation:0.42 ())
-      ~prepare:(fun _ output ->
-        match Rdk.Geometry.find_attribute ~owner:Rdk.Attribute.Primitive "piece" (Result.get_ok (Sop.Payload.geometry output.Session.payload)) with
-        | Some attribute when (match Rdk.Attribute.View.storage attribute with
-            | Rdk.Attribute.Int _ | Text _ -> true | _ -> false) ->
-            Rdk_rays.Packed_pieces.of_geometry ~piece_attribute:"piece" (Result.get_ok (Sop.Payload.geometry output.payload))
-            |> Result.map (fun pieces -> `Pieces pieces)
-        | _ -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.payload))
-            |> Result.map (fun mesh -> `Mesh (mesh, output.instances))
-            |> Result.map_error Rdk.Error.to_string)
-      ~draw:(fun node preview ->
+      ~prepare:Editor_prepare.surface
+      ~draw:(fun node (prepared : Rays_editor__.Cook.prepared) ->
         rendered := Node.operation node;
-        let mesh, transforms = match preview with
-          | `Pieces pieces ->
-              let explosion = Rdk_rays.Packed_pieces.explosion
-                  ~operation:(Node.operation node) ~fields:(Node.parameter_fields node) in
-              Rdk_rays.Packed_pieces.mesh_for_explosion explosion pieces, None
-          | `Mesh (mesh, transforms) -> mesh, transforms in
-        vertices := Mesh.vertices mesh;
-        let shading = if Node.operation node = "box" then Scene.D3.Flat else Smooth in
-        let material = Material.create ~diffuse:(Rays_math.Color.hex_exn "#f2b36d") () in
-        let drawing = match transforms with
-          | Some transforms -> Scene.D3.instances_array ~cull:Scene.D3.Cull_none ~shading ~material mesh transforms
-          | None -> Scene.D3.mesh ~cull:Scene.D3.Cull_none ~shading ~material mesh in
-        Scene.D3.create [drawing]) () |> Result.get_ok)
+        let explosion = Rdk_rays.Packed_pieces.explosion
+            ~operation:(Node.operation node) ~fields:(Node.parameter_fields node) in
+        let scene = Rdk_rays.Surface.scene3 ?explosion prepared.surface in
+        vertices := List.concat_map (fun (d : Scene.D3.Private.drawing) -> Mesh.vertices d.mesh)
+          (Scene.D3.Private.drawings scene);
+        scene) () |> Result.get_ok)
     ~update:(fun e (frame : Frame.t) ->
       let e = if frame.input.frame = 28 then
           E3.edit e (E.Set_arg {node = ["shattered"; "@result"]; key = E.Kw "amount";
@@ -2612,10 +2596,11 @@ let run_renderers_native ?(authored = false) () =
   ignore (Result.get_ok (Sketch.run_state ~max_frames:46
     ~config:{Sketch.default_config with width = 900; height = 640; title = "shared renderer"}
     ~init:(fun _ -> E3.create ~ui_text_size:11 ~await:true ~workspace ~presets:(Filename.concat directory "presets")
-      ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
-        |> Result.map_error Rdk.Error.to_string)
-      ~draw:(fun _ mesh -> Scene.D3.create [Scene.D3.mesh
-        ~material:(Material.unlit (Rays_math.Color.rgb 200 20 200)) mesh]) () |> Result.get_ok)
+      ~prepare:Editor_prepare.surface
+      ~draw:(fun _ (prepared : Rays_editor__.Cook.prepared) ->
+        Scene.D3.create (List.map (fun (d : Scene.D3.Private.drawing) -> Scene.D3.mesh
+          ~material:(Material.unlit (Rays_math.Color.rgb 200 20 200)) d.mesh)
+          (Scene.D3.Private.drawings (Rdk_rays.Surface.scene3 prepared.surface)))) () |> Result.get_ok)
     ~update:(fun e (frame : Frame.t) ->
       let mode = if frame.input.frame < 10 || frame.input.frame >= 40 then Rays_editor.Renderer.Raster
         else if frame.input.frame < 25 then Wireframe else Path_traced in
@@ -2737,7 +2722,7 @@ let eye_of = function
 (* Without a GPU: looking through the camera, each viewport sees through the camera its own root
    names, at its own gate; the renderer's film steps and turns are pure. *)
 let run_roots () =
-  let module B = Rays_editor.Private.Render_budget in
+  let module B = Rays_editor__.Renderer in
   check (B.film ~through:true ~resolution:(1600, 900) ~gate:(1700, 1000) = ((1600, 900), 1)) "a gate over the resolution is step 1";
   check (B.film ~through:true ~resolution:(1600, 900) ~gate:(1600, 900) = ((1600, 900), 1)) "a gate at the resolution is step 1";
   check (B.film ~through:true ~resolution:(1600, 900) ~gate:(1599, 899) = ((800, 450), 2)) "one pixel under is a half";
@@ -2832,9 +2817,8 @@ let run_roots_native () =
     ~config:{ Sketch.default_config with width; height = 640; title = "two roots" }
     ~init:(fun _ -> E3.create ~ui_text_size:11 ~await:true ~workspace:(of_text text)
       ~presets:(Filename.concat directory "presets")
-      ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
-        |> Result.map_error Rdk.Error.to_string)
-      ~draw:(fun _ mesh -> Scene.D3.create [ Scene.D3.mesh mesh ]) () |> Result.get_ok)
+      ~prepare:Editor_prepare.surface
+      ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface) () |> Result.get_ok)
     ~update:(fun e (frame : Frame.t) ->
       let c = frame.input.frame in
       let e = if c = 61 then edit e "max_spp" "4096"      (* the cap rises: the film goes on *)
@@ -2962,9 +2946,8 @@ let run_budget_native () =
     ~config:{ Sketch.default_config with width = 900; height = 640; title = "budget" }
     ~init:(fun _ -> E3.create ~ui_text_size:11 ~await:true ~workspace:(of_text text)
       ~presets:(Filename.concat directory "presets")
-      ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
-        |> Result.map_error Rdk.Error.to_string)
-      ~draw:(fun _ mesh -> Scene.D3.create [ Scene.D3.mesh mesh ]) () |> Result.get_ok)
+      ~prepare:Editor_prepare.surface
+      ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface) () |> Result.get_ok)
     ~update:(fun e (frame : Frame.t) ->
       E3.update e { frame with input = { frame.input with pointer = (450., 20.); buttons = []; keys = []; events = [] };
         mouse_delta = 0., 0. })

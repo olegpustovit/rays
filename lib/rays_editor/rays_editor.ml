@@ -25,7 +25,10 @@ module Editor = struct
   let crash_dump = Editor_loop.crash_dump
   let close = Editor_loop.close
   let run = Editor_loop.run
-  type 'prepared t = 'prepared Loop_model.t
+  type prepared = Cook.prepared
+  let prepare = Cook.prepare
+  let draw = Cook.draw
+  type t = Loop_model.t
   let camera = Loop_model.camera
   let can_redo = Loop_model.can_redo
   let can_undo = Loop_model.can_undo
@@ -129,32 +132,19 @@ module Editor = struct
 end
 
 module Reduce = struct
-  let open_import (editor : _ Editor.t) file =
+  let open_import (editor : Editor.t) file =
     {editor with Loop_model.core = {editor.core with Editor_model.open_import = Some file}}
-  let spreadsheet (editor : _ Editor.t) path =
+  let spreadsheet (editor : Editor.t) path =
     let key = Editor_shell.panel_key editor.core.doc path in
     let pane = Editor_panes.shown_as editor.core (key, path, Pxui_shell.Layout.Spreadsheet) in
     (Editor_panes.local_of editor.core key).sheet_owner, Editor_inspect.spreadsheet_source pane
-  let select_path (editor : _ Editor.t) path = match path with
+  let select_path (editor : Editor.t) path = match path with
     | graph :: _ -> {editor with Loop_model.core = { (Editor_panes.go editor.core graph) with Editor_model.select_later = [path] }}
     | [] -> editor
-  let view (editor : _ Editor.t) path =
+  let view (editor : Editor.t) path =
     {editor with Loop_model.core = Editor_scope.view_node editor.core path}
-  let step (e : _ Editor.t) ?select ?preview actions frame =
+  let step (e : Editor.t) ?select ?preview actions frame =
     { e with Loop_model.core = Editor_reduce.reduce_idle ?select ?preview e.Loop_model.core actions frame }
-end
-
-module Private = struct
-  module Spreadsheet = Spreadsheet
-  module Render_budget = struct let film = Renderer.film let next_turn = Renderer.next_turn end
-  module Editor_commands = Editor_commands module Schedule = Schedule
-  module Document = Document module Preset = Preset
-  module Pick = Pick
-  module Cook = Cook
-  module Text_pane = Text_pane
-  module Lisp_text = Lisp_text
-  module Navigator = Navigator
-  module Bars = Bars
 end
 
 module Workspace = struct
@@ -219,15 +209,6 @@ module Workspace = struct
       Result.bind window (fun window ->
         let config = { Rays.Sketch.default_config with width = window.width; height = window.height;
                        title = window.title; fps = Some window.fps } in
-        let prepare _ (output : Sop.Session.output) =
-          let ( let* ) = Result.bind in
-          let* geometry = Sop.Payload.geometry output.payload
-            |> Result.map_error Diagnostic.error_to_string in
-          Rdk_rays.Surface.of_geometry ?instances:output.instances geometry in
-        let scene3 node surface =
-          let explosion = Rdk_rays.Packed_pieces.explosion
-            ~operation:(Sop.Node.operation node) ~fields:(Sop.Node.parameter_fields node) in
-          Rdk_rays.Surface.scene3 ?explosion surface in
         let lights = [ Rays.Light.directional ~direction:(Rays_math.Vec3.create (-1.) (-1.4) (-0.8))
                          ~diffuse:Rays_math.Color.white () ] in
         let base = Rays.Easy_camera.create ~target:Rays_math.Vec3.zero ~distance:3.6 ~azimuth:0.4 ~elevation:0.6 () in
@@ -238,7 +219,7 @@ module Workspace = struct
         Editor_loop.run ?inputs ~gpu_owner ?max_frames:process.max_frames ?crash_dir:process.crash_dir
           ~profile:process.profile ?preferences:process.preferences ?ui_font:process.ui_font ~config ~lights
           ~camera ?factories ~seed:(Int64.of_int window.seed) ?opened
-          ~workspace:doc ?source ~prepare ~draw:scene3 ()
+          ~workspace:doc ?source ~prepare:Cook.prepare ~draw:Cook.draw ()
           |> Result.map_error (fun error -> Diagnostic.error ~code:"E_RUNTIME"
             (Rays.Sketch.error_to_string error))))
 

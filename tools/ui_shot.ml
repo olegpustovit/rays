@@ -24,15 +24,7 @@ let () =
   let canvas = Rays.Canvas.create_exn ~width:(width * scale) ~height:(height * scale) in
   let editor = E.create ~workspace ~await:true ~presets:(Filename.temp_dir "ui-shot" "")
       (* as rays prepares (Workspace.run): instances, pieces and materials *)
-      ~prepare:(fun _ (output : Sop.Session.output) ->
-        let ( let* ) = Result.bind in
-        let* geometry = Sop.Payload.geometry output.payload
-          |> Result.map_error Diagnostic.error_to_string in
-        Rdk_rays.Surface.of_geometry ?instances:output.instances geometry)
-      ~draw:(fun node surface ->
-        let explosion = Rdk_rays.Packed_pieces.explosion
-            ~operation:(Sop.Node.operation node) ~fields:(Sop.Node.parameter_fields node) in
-        Rdk_rays.Surface.scene3 ?explosion surface) () |> Result.get_ok in
+      ~prepare:E.prepare ~draw:E.draw () |> Result.get_ok in
   let editor = ref editor in
   for count = 0 to frames - 1 do editor := E.update !editor (frame count) done;
   (* UI_SHOT_DO is a script run after the settle frames, one step a frame, in order:

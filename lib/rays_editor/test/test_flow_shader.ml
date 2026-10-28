@@ -8,7 +8,7 @@ let () =
     | Ok doc -> doc
     | Error ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds)) in
   let catalog = Result.get_ok (Editor_document.Kinds.catalog ~version:1 Sop.Nodes.factories) in
-  let module N = Rays_editor.Private.Navigator in
+  let module N = Rays_editor__.Navigator in
   let outline = N.rows N.initial {N.workspace = doc.checked; active = Some "picture"; scope = None;
     records = None; probes = (fun _ -> 0); selected = []; chips = []; objects = [];
     root_detail = ""; layouts = None; notes = []} |> Array.to_list |> List.map N.describe in

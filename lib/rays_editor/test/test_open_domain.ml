@@ -5,7 +5,7 @@ module W = Flow.Workspace
 module D = Editor_document.Workspace_doc
 module P = Flow_graph.Projection
 module M = Pxui_graph.Node_menu
-module L = Rays_editor.Private.Lisp_text
+module L = Rays_editor__.Lisp_text
 
 let checks = ref 0
 let check condition message = incr checks; if not condition then failwith message
@@ -164,7 +164,7 @@ let () =
   let workspace = doc (Rays_editor.Workspace.load ~ops:host_ops host_text) in
   let presets = Filename.temp_dir "rays-domain-test" "" in
   let host = ref (match E.create ~ui_text_size:11 ~workspace ~await:true ~domains:1 ~presets
-    ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ () -> Scene.D3.create []) () with
+    ~prepare:Editor_prepare.empty ~draw:(fun _ _ -> Scene.D3.create []) () with
     | Ok host -> host | Error message -> failwith message) in
   Fun.protect ~finally:(fun () -> E.close !host) (fun () ->
     let step events = host := E.update !host { frame with input = { frame.input with events } } in

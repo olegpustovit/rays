@@ -8,16 +8,16 @@ open Loop_view
 module V = Viewport
 type layout = Pxui_shell.Layout.t
 
-type 'prepared t = {
-  core : 'prepared Editor_model.t;
+type t = {
+  core : Editor_model.t;
   camera : V.camera;  (* the orbit of the focused viewport *)
   cameras : (string * V.camera) list;  (* the orbits of the other viewports, by key *)
   viewing : string option;  (* the viewport [camera] belongs to *)
   control : V.control;
-  draw : Node.t -> 'prepared -> V.rendered;
+  draw : Node.t -> Cook.prepared -> V.rendered;
   rendered : V.rendered option;
   views : (string * V.rendered) list;  (* viewports over another scene instance *)
-  drawn : (Node.t * 'prepared * V.rendered * Texture.t option) Document.Int_map.t;  (* per object *)
+  drawn : (Node.t * Cook.prepared * V.rendered * Texture.t option) Document.Int_map.t;  (* per object *)
   composed : (Kind_graph.t * Document.level * (string * int list) list) option;
   resolved : (Document.t * Input.t * Kind_graph.t) option;
   context_error : string option;
@@ -96,7 +96,7 @@ let create ?inputs ?name ?presets ?factories ?gpu_owner
 
 let document value = Editor_inspect.objects value.core
 let network value = Option.map (fun (n : Document.network) -> n.graph.geometry) (Editor_inspect.network value.core)
-let prepared value = Editor_list.prepared value.core
+let prepared value = Option.map (fun (p : Cook.prepared) -> p.geometry) (Editor_list.prepared value.core)
 let camera value = value.camera
 let extra value = value.extra
 let timeline value = Editor_list.timeline value.core
@@ -119,7 +119,7 @@ let edit value op = Result.map (fun core -> { value with core }) (Editor_host.sy
 let edit_layout value op = Result.map (fun core -> { value with core }) (Editor_host.layout_edit value.core op)
 
 let edit_phases value = value.core.Editor_model.edit_phases
-let carrying value = Option.map (fun (c : _ Editor_model.carry) -> c.payload.Carry.kind, c.payload.value) value.core.Editor_model.carry
+let carrying value = Option.map (fun (c : Editor_model.carry) -> c.payload.Carry.kind, c.payload.value) value.core.Editor_model.carry
 let carry_line value = Option.map Editor_status.carry_line value.core.Editor_model.carry
 let level value = match (Editor_model.pane_level value.core) with
   | Document.Scene -> None
@@ -134,7 +134,7 @@ let resolved_scene value = match value.resolved with
   | _ -> Editor_inspect.scene value.core
 let lights value = Objects.lights ~render:true (resolved_scene value)
 let world value = value.baked
-let objects value = List.map (fun (matrix, (piece : _ Cook.piece)) ->
+let objects value = List.map (fun (matrix, (piece : Cook.piece)) ->
     matrix, piece.prepared) (Editor_host.placed_pieces ~render:true value.core)
 
 let settings value = Editor_list.settings value.core
@@ -212,7 +212,7 @@ let refresh_hidden value frame =
 let composition_key core scene = scene, (Editor_model.pane_level core),
   (match core.Editor_model.doc.Document.shell with Some shell -> shell.views | None -> [])
 
-let compose value (update : (_, _) Editor_model.update) ~baked ~baked_views ~scene =
+let compose value (update : _ Editor_model.update) ~baked ~baked_views ~scene =
   let live={update.core.live_frame with t=Timeline.time(Editor_list.timeline update.core);
     frame=Int64.to_int(Timeline.frame(Editor_list.timeline update.core))}in
   let lowered=update.core.doc.workspace.lowered in
@@ -235,7 +235,7 @@ let compose value (update : (_, _) Editor_model.update) ~baked ~baked_views ~sce
   then value.rendered, value.views, value.drawn,errors
   else
     let placed = Editor_host.placed_pieces ~view:`All update.core in
-    let drawn = List.fold_left (fun drawn (_, (piece : _ Cook.piece)) ->
+    let drawn = List.fold_left (fun drawn (_, (piece : Cook.piece)) ->
         let texture=Document.Int_map.find_opt piece.id textures in
         match Document.Int_map.find_opt piece.id value.drawn with
         | Some (graph, prepared, rendered,previous) when graph == piece.graph && prepared == piece.prepared
@@ -254,7 +254,7 @@ let compose value (update : (_, _) Editor_model.update) ~baked ~baked_views ~sce
       | Scene -> false in
     let compose_pieces ?(world = baked) view pieces = V.compose ~scene:(Editor_host.scene_for_view ~scene ~view update.core)
       ~world
-      (List.map (fun (matrix, (piece : _ Cook.piece)) ->
+      (List.map (fun (matrix, (piece : Cook.piece)) ->
          let _, _, rendered,_ = Document.Int_map.find piece.id drawn in
          matrix, ghost piece.id, rendered) pieces) in
     (* a viewport over another scene instance: its own objects, its own World.  Viewports over

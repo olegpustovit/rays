@@ -67,15 +67,16 @@ let domains_agree () =
                       :roughness 0.5 :recompute_normals true)))|} in
     let env = E.create ~ui_text_size:11 ~await:true ~workspace ~domains ~grain:16 ~max_entries:4
         ~max_payload_bytes:(16 * 1024 * 1024)
-        ~prepare:(fun _ output ->
-          let points = Rdk.Geometry.positions (Result.get_ok (Sop.Payload.geometry output.Session.payload)) in
-          Ok (Digest.string (String.concat "," (List.init (Rdk.Packed.Float3.length points)
-            (fun index -> let x, y, z = Rdk.Packed.Float3.get points index in
-              Printf.sprintf "%h %h %h" x y z)))))
+        ~prepare:Editor_prepare.surface
         ~draw:(fun _ _ -> Scene.D3.create []) () |> Result.get_ok in
     let env = E.update env (frame 0) in
     match E.prepared env with
-    | Some digest -> E.close env; digest
+    | Some geometry ->
+        E.close env;
+        let points = Rdk.Geometry.positions geometry in
+        Digest.string (String.concat "," (List.init (Rdk.Packed.Float3.length points)
+          (fun index -> let x, y, z = Rdk.Packed.Float3.get points index in
+            Printf.sprintf "%h %h %h" x y z)))
     | None -> fail "the domain-count cook did not finish" in
   check (digest 1 = digest 4) "one domain and four domains cooked different geometry"
 
@@ -83,10 +84,8 @@ let run () =
   let cooks = Atomic.make 0 in
   let env = E.create ~ui_text_size:11 ~await:true ~workspace:(Ws_fixture.of_text text)
       ~max_entries:4 ~max_payload_bytes:(16 * 1024 * 1024)
-      ~prepare:(fun _ output -> Atomic.incr cooks;
-        Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
-        |> Result.map_error Rdk.Error.to_string)
-      ~draw:(fun _ mesh -> Scene.D3.create [Scene.D3.mesh mesh]) () |> Result.get_ok in
+      ~prepare:(fun settings output -> Atomic.incr cooks; Editor_prepare.surface settings output)
+      ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface) () |> Result.get_ok in
   let count = ref 0 in
   let step ?mouse ?keys ?buttons env events =
     incr count; E.update env (frame ?mouse ?keys ?buttons ~events !count) in
@@ -353,9 +352,8 @@ let run () =
   check (not (contains (source env) "(scene/geometry")) "deleting geo1 left it in the text";
   (* what was written opens as the same scene *)
   let reopened = E.create ~ui_text_size:11 ~await:true ~workspace:(Ws_fixture.of_text (source env))
-    ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
-      |> Result.map_error Rdk.Error.to_string)
-    ~draw:(fun _ mesh -> Scene.D3.create [Scene.D3.mesh mesh]) () |> Result.get_ok in
+    ~prepare:Editor_prepare.surface
+    ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface) () |> Result.get_ok in
   check (labelled reopened = labelled env) "the saved text does not open as the edited scene";
   E.close reopened;
   (* The list's right-click menu enters the row under the pointer. *)
@@ -380,9 +378,8 @@ let run () =
 let run_host () =
   let open_text text =
     E.create ~ui_text_size:11 ~await:true ~workspace:(Ws_fixture.of_text text)
-      ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
-        |> Result.map_error Rdk.Error.to_string)
-      ~draw:(fun _ mesh -> Scene.D3.create [Scene.D3.mesh mesh]) () |> Result.get_ok in
+      ~prepare:Editor_prepare.surface
+      ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface) () |> Result.get_ok in
   let count = ref 0 in
   let step ?keys env events = incr count; E.update env (frame ?keys ~events !count) in
   let key k = Input.Key_pressed k in

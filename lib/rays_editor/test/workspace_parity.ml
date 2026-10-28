@@ -206,7 +206,7 @@ let check ?directory ?(commands = false) ?(factories = Sop.Nodes.factories) ~nam
       S.set_volatile session (L.is_volatile lowered);
       let owner = if Array.exists (fun (n : E.node) -> n.ty = Flow.Ty.image) evaluated.plan.nodes then
         Some (Rays_editor.Editor.create ~workspace ~factories ~domains ~await:true
-          ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ () -> Rays.Scene.D3.empty) () |> string_ok)
+          ~prepare:Editor_prepare.empty ~draw:(fun _ _ -> Rays.Scene.D3.empty) () |> string_ok)
         else None in
       reference, lowered, state, lanes, session, owner) in
     Fun.protect ~finally:(fun () -> List.iter (fun (_,_,_,_,s,owner) ->

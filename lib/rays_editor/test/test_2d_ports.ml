@@ -41,7 +41,7 @@ let save_roundtrip name workspace =
     let editor=ref(Result.get_ok(Editor.create ~ui_text_size:11 ~workspace ~await:true ~domains:1
       ~presets:(Filename.concat directory "presets")
       ~source:(Rays_editor.Source.at ~file ~digest:(Editor_document.Lowering.sha256 source))
-      ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Scene.D3.empty)()))in
+      ~prepare:Editor_prepare.empty ~draw:(fun _ _ ->Scene.D3.empty)()))in
     Fun.protect ~finally:(fun()->Editor.close !editor)(fun()->
       editor:=Editor.update !editor(frame ~synthetic:false name 0);
       let inode=(Unix.stat file).st_ino in

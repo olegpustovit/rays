@@ -7,7 +7,7 @@ open Loop_model
    draft, the file's new text waits ([held]) and the strip says how to choose.  It loads once the
    edits are undone, or at once by "Reload sketch from its file" (the palette).  Nothing is polled
    while a payload is carried: the document shown is a preview then. *)
-let open_import value (update : (_, _) Editor_model.update) = match update.core.Editor_model.open_import, value.source with
+let open_import value (update : _ Editor_model.update) = match update.core.Editor_model.open_import, value.source with
   | Some path, Some source ->
       let core = {update.core with Editor_model.open_import = None} in
       if Editor_text.unsaved core then
@@ -30,7 +30,7 @@ let open_import value (update : (_, _) Editor_model.update) = match update.core.
 
 (* Command-O: the system dialog over the sketch's folder; its answer, a frame later, is opened
    the way an import is (unsaved work refuses it). *)
-let open_dialog value (update : (_, _) Editor_model.update) events =
+let open_dialog value (update : _ Editor_model.update) events =
   let notice kind text = { update with core = { update.core with Editor_model.notice = Some (kind, text) } } in
   let value, update = match value.source with
     | _ when not (List.mem Editor_commands.Open_source update.actions) -> value, update
@@ -40,7 +40,7 @@ let open_dialog value (update : (_, _) Editor_model.update) events =
                  ~default_location:(Filename.dirname (Source_file.file source)) Sketch.Open_file with
          | Ok id -> { value with open_dialog = Some id }, update
          | Error message -> value, notice Editor_model.Refusal ("Open: " ^ message)) in
-  List.fold_left (fun (value, (update : (_, _) Editor_model.update)) -> function
+  List.fold_left (fun (value, (update : _ Editor_model.update)) -> function
     | Input.File_dialog { id; result } when value.open_dialog = Some id ->
         { value with open_dialog = None },
         (match result with
@@ -49,7 +49,7 @@ let open_dialog value (update : (_, _) Editor_model.update) events =
          | Error message -> notice Editor_model.Refusal ("Open: " ^ message))
     | _ -> value, update) (value, update) events
 
-let reload_source value (update : (_, _) Editor_model.update) ~now = match value.source with
+let reload_source value (update : _ Editor_model.update) ~now = match value.source with
   | Some previous when not (Editor_host.carrying update.core) ->
       let file, read = Source_file.poll ~now previous in
       let name = Filename.basename (Source_file.file file) in

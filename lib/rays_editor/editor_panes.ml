@@ -354,7 +354,7 @@ let pressed_keys value (frame : Frame.t) =
   List.filter (fun k -> not (List.mem k value.held_keys)) frame.input.keys
 
 let draw_other_graph_panes ~ui ~shortcut_frame ~value ~other_panes ~roots =
-  List.filter_map (fun (key, path, (pane : _ t)) ->
+  List.filter_map (fun (key, path, (pane : t)) ->
     match List.find_opt (fun ((leaf : Pxui_shell.Layout.leaf), _) -> leaf.path = path) roots with
     | Some ((leaf : Pxui_shell.Layout.leaf), hosted) when (let _, _, _, h = leaf.body in h > 0) ->
         let x, y, width, height = leaf.body in

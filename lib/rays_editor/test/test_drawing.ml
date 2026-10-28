@@ -157,7 +157,7 @@ let pure workspace =
   assert (Result.is_error (Editor_document.Lowering.of_workspace ~factories:Sop.Nodes.factories bad));
   let module Editor = Rays_editor.Editor in
   let editor = Result.get_ok (Editor.create ~ui_text_size:11 ~workspace ~await:true
-    ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ () -> Rays.Scene.D3.create []) ()) in
+    ~prepare:Editor_prepare.empty ~draw:(fun _ _ -> Rays.Scene.D3.create []) ()) in
   Fun.protect ~finally:(fun () -> Editor.close editor) (fun () ->
     let frame : Rays.Frame.t = { input = { (Input.at_time 0.) with
       size = 800, 600; dt = 0.125; pointer = -100., -100. };
@@ -171,7 +171,7 @@ let pure workspace =
             (draw/points (array/vec3 %d [20 40 0]))) \
             (graph editor :context editor (ui/workspace (ui/canvas (ref g)))))" count) in
           let editor = ref (Result.get_ok (Editor.create ~ui_text_size:11 ~workspace ~await:true
-            ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ () -> Rays.Scene.D3.create []) ())) in
+            ~prepare:Editor_prepare.empty ~draw:(fun _ _ -> Rays.Scene.D3.create []) ())) in
           Fun.protect ~finally:(fun () -> Editor.close !editor) (fun () ->
             let step i = editor := Editor.update !editor { frame with input = { frame.input with
               frame = i; tick = i; t = float i /. 8. } } in
@@ -227,13 +227,13 @@ let native workspace directory =
 let benchmark workspace =
   let module Editor = Rays_editor.Editor in
   let editor = ref (Result.get_ok (Editor.create ~ui_text_size:11 ~workspace ~await:true ~domains:1
-    ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ () -> Rays.Scene.D3.empty) ())) in
+    ~prepare:Editor_prepare.empty ~draw:(fun _ _ -> Rays.Scene.D3.empty) ())) in
   Fun.protect ~finally:(fun () -> Editor.close !editor) (fun () ->
     let frame count : Rays.Frame.t = { input = { (Input.at_time (float count /. 60.)) with
       dt = 1. /. 60.; frame = count; tick = count; size = 800, 600; pointer = -100., -100. };
       pixel_scale = 1., 1.; fps = 60.; mouse_delta = 0., 0. } in
     editor := Editor.update !editor (frame 0);
-    editor := Rays_editor.Reduce.step !editor [Rays_editor.Private.Editor_commands.Play_pause] (frame 0);
+    editor := Rays_editor.Reduce.step !editor [Rays_editor__.Editor_commands.Play_pause] (frame 0);
     let step i = editor := Editor.update !editor (frame i) in
     for i = 1 to 10 do step i done;
     let times = Array.make 200 0. in

@@ -8,7 +8,7 @@
 
 | Module | Owns |
 |---|---|
-| `Rays_editor` (`rays_editor.mli`) | The public API: `Editor`, `Workspace` (a `.rays` file as a program), `Settings`, `Source`, `Renderer`, and the unstable test hooks `Private` and `Reduce` |
+| `Rays_editor` (`rays_editor.mli`) | The public API: `Editor`, `Workspace` (a `.rays` file as a program), `Settings`, `Source`, `Renderer`, and the unstable test hook `Reduce`; tests reach the private modules as `Rays_editor__.X` (dune's alias module), there is no `Private` re-export |
 | `Loop_view` | Scene composition for visible, floating and hidden viewports and canvases, World bakes and hidden-scene cache |
 | `Loop_model` | `Editor_frame` plus viewport state, creation, camera focus and prepared-object composition |
 | `Loop_source` | Source opening, polling and saving; autosave and recovery ownership |

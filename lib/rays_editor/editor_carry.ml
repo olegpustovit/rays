@@ -24,14 +24,14 @@ let carry_place = function
 
 (* the document the panels read: the scratch copy while a target is hot and its picture is on
    screen, else the one that was there *)
-let carry_shown (c : _ carry) = match c.preview with
+let carry_shown (c : carry) = match c.preview with
   | Some (Showing { doc; _ }) -> doc
   | Some (Held_back _ | Refused _) | None -> c.original
 
 (* The put at [place], run on the original: the checker's answer is the preview, the refusal's
    reason and the write.  A put that takes longer than the budget (or onto a cook that does) is
    said and not shown. *)
-let carry_try value (c : _ carry) place =
+let carry_try value (c : carry) place =
   match Lazy.force value.flow_catalog with
   | None -> Refused { place; reason = "The catalog is unavailable" }
   | Some catalog ->
@@ -51,7 +51,7 @@ let carry_try value (c : _ carry) place =
             | _ -> Showing { place; doc; what }))
 
 (* The key route's letters for the graph the pane shows now (they follow navigation). *)
-let carry_targets value (c : _ carry) =
+let carry_targets value (c : carry) =
   let graph = graph_name value in
   match c.targets with
   | Some (for_graph, _) when for_graph = graph -> c
@@ -110,7 +110,7 @@ let carry_payload value =
                       | Some result -> result
                       | None -> Error "Nothing to pick up · open a material, SOP or scene graph, or select a geometry or camera object"))))
 
-let carry_cancel value (c : _ carry) ~notice =
+let carry_cancel value (c : carry) ~notice =
   Pxui.Ui.cancel_carry value.ui;
   let doc = c.original in
   let level = Document.resolve_level doc (pane_level value) in
@@ -118,7 +118,7 @@ let carry_cancel value (c : _ carry) ~notice =
   with_pane { value with carry = None; doc; notice = Some notice;
     workspace = unrestore value.doc doc value.workspace } (fun pane -> { pane with at = level })
 
-let carry_commit value (c : _ carry) doc what =
+let carry_commit value (c : carry) doc what =
   Pxui.Ui.cancel_carry value.ui;
   let value = install { value with carry = None } doc ~label:"Put" ~merge:Editor_core.History.Step in
   { value with notice = Some (Info, Printf.sprintf "Put %s · wrote %s · one undo entry" c.payload.value what) }

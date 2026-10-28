@@ -79,7 +79,7 @@ let face_materials_preserve_explosion () =
 
 (* ---- the editor around materials: outline, follow and back, rename, assign, pick ---- *)
 module E3 = Rays_editor.Editor
-module N = Rays_editor.Private.Navigator
+module N = Rays_editor__.Navigator
 module Edit = Flow_graph.Flow_edit
 
 let fail message = failwith ("test_materials: " ^ message)
@@ -105,9 +105,8 @@ let frame ?(buttons = []) ?(keys = []) mouse events count : Frame.t = {
 
 let editor () =
   E3.create ~ui_text_size:11 ~await:true ~workspace:(workspace follow_source)
-    ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
-      |> Result.map_error Rdk.Error.to_string)
-    ~draw:(fun _ mesh -> Scene.D3.create [ Scene.D3.mesh mesh ]) ()
+    ~prepare:Editor_prepare.surface
+    ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface) ()
   |> function Ok e -> e | Error m -> fail m
 
 let dump_line e key =
@@ -260,8 +259,8 @@ let carry_tests () =
      loaded the machine is (it was once held back under a full parallel suite) *)
   let make ?(source = carry_source) ?(carry_budget = Float.infinity) () =
     E3.create ~ui_text_size:11 ~await:true ~carry_budget ~workspace:(workspace (with_editor source))
-      ~prepare:(fun _ _ -> Ok (Scene.D3.create []))
-      ~draw:(fun _ scene -> scene) ()
+      ~prepare:Editor_prepare.empty
+      ~draw:(fun _ _ -> Scene.D3.create []) ()
     |> function Ok e -> e | Error m -> fail m in
   let e = ref (make ()) and count = ref 0 in
   let step ?(advance = 1) ?(buttons = []) ?(keys = []) ?(mouse = (450., 300.)) events =
@@ -278,9 +277,9 @@ let carry_tests () =
   let ws = ref (E3.workspace !e) in
   step [];
   (* y is a plain key nothing else uses *)
-  check (List.length (List.filter (fun (c : Rays_editor.Private.Editor_commands.command) -> match c.trigger with
+  check (List.length (List.filter (fun (c : Rays_editor__.Editor_commands.command) -> match c.trigger with
     | Some (Editor_core.Keymap.Chord (Input.KeyChar 'y', [])) -> true | _ -> false)
-    Rays_editor.Private.Editor_commands.keymap) = 1) "y picks up and no other command takes it";
+    Rays_editor__.Editor_commands.keymap) = 1) "y picks up and no other command takes it";
   (* the outline row of a graph, in screen points, as the Navigator draws it now *)
   let catalog = get (Rays_editor.workspace_catalog ()) in
   let row_of graph =
@@ -549,9 +548,8 @@ let viewport_source = {|(workspace views
 
 let viewport_carry_tests () =
   let e = ref (E3.create ~ui_text_size:11 ~await:true ~workspace:(workspace viewport_source)
-    ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
-      |> Result.map_error Rdk.Error.to_string)
-    ~draw:(fun _ mesh -> Scene.D3.create [ Scene.D3.mesh mesh ]) ()
+    ~prepare:Editor_prepare.surface
+    ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface) ()
     |> function Ok e -> e | Error m -> fail m) and count = ref 0 in
   let step ?(keys = []) ?(mouse = (450., 300.)) events =
     incr count; e := E3.update !e (frame ~keys mouse events !count) in

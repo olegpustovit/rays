@@ -209,11 +209,11 @@ type carry_preview =
 
 type carry_report = { over : Carry.place; dropped : bool }
 
-type 'prepared carry = {
+type carry = {
   payload : Carry.payload;
   via : [ `Pointer | `Keys ];
   original : Document.t;
-  settled : 'prepared Cook.piece list;
+  settled : Cook.piece list;
       (* the pieces cooked for [original]: a surface is picked on them, not on the preview *)
   report : carry_report option;
   targets : (string option * (string * Carry.place * string) list) option;
@@ -226,7 +226,7 @@ type 'prepared carry = {
   hint : string option;  (* a reminder the strip shows ahead of the prompt until a letter is chosen *)
 }
 
-type 'prepared t = {
+type t = {
   preferences : string;
   text_size : int;  (* the panels' default text size, Command-0 returns to it *)
   guide : bool;
@@ -269,7 +269,7 @@ type 'prepared t = {
   workspace : shell;
   timeline : Timeline.t;
   live_frame : Input.t;
-  cook : 'prepared Cook.t;
+  cook : Cook.t;
   edit_error : string option;
   status_fps : int option;
   status_fps_at : float;
@@ -292,7 +292,7 @@ type 'prepared t = {
   locals : (string list * local) list;  (* the other panels' own, by panel key *)
   started : started;
   framing : int option;  (* the object a framing cook is running for: its bounds come back in its own space *)
-  carry : 'prepared carry option;
+  carry : carry option;
   carry_budget : float;  (* seconds a carry's preview may take to apply or cook before it is only described *)
   clock : unit -> float;  (* wall seconds, for the carry budget, the probe rate and phase timings; injected *)
   traces : (string * trace) list;  (* what each traced viewport's readout says: the film, the samples,
@@ -318,8 +318,8 @@ let pane_selection value = (pane value).picked
 let with_pane value f = { value with panes = Panel_map.update f value.panes }
 let with_selection value picked = with_pane value (fun pane -> { pane with picked })
 
-type ('prepared, 'panel) update = {
-  core : 'prepared t;
+type 'panel update = {
+  core : t;
   effects : Param.effects;
   prepared_changed : bool;
   scene_changed : bool;  (* objects, lights, or the World changed: recompose *)

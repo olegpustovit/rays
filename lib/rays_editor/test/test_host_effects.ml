@@ -10,7 +10,7 @@ let workspace effects=load("(workspace host (graph picture :context draw (draw/b
   "(ui/workspace (ui/canvas (ref picture)) :effects (ref actions))))")
 let with_editor workspace run =
   let editor=ref(Result.get_ok(Editor.create ~ui_text_size:11 ~workspace ~await:true ~domains:1
-    ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene.D3.empty)()))in
+    ~prepare:Editor_prepare.empty ~draw:(fun _ _ ->Rays.Scene.D3.empty)()))in
   Fun.protect ~finally:(fun()->Editor.close !editor)(fun()->run editor)
 let ()=
   let doc=workspace "(list (host/quit (key/down \"q\")))"in

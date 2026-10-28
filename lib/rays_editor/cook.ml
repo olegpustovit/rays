@@ -6,10 +6,12 @@ type bounds = Rays_math.Vec3.t * Rays_math.Vec3.t
 
 (* One geometry object's latest cook: its displayed SOP graph, the sketch's
    prepared value, and bounds in the object's own space. *)
-type 'prepared piece = {
+type prepared = { geometry : Rdk.Geometry.t; surface : Rdk_rays.Surface.t }
+
+type piece = {
   id : int;
   graph : Node.t;
-  prepared : 'prepared;
+  prepared : prepared;
   bounds : bounds option;
   settings : Settings.t;
   context : string;  (* projection of the graph's declared context dependencies *)
@@ -21,19 +23,19 @@ type 'prepared piece = {
 (* What a footer shows of a geometry value: its object and compiled node. *)
 type summary = (int * int) * Flow_graph.Probe.geometry
 
-type 'prepared cooked =
-  | Displayed of 'prepared piece list * summary list * ((int * int) * Rdk_rays.Geometry_view.t) list
+type cooked =
+  | Displayed of piece list * summary list * ((int * int) * Rdk_rays.Geometry_view.t) list
   | Framed of bounds option
 
-type 'prepared t = {
-  worker : 'prepared cooked Async_cook.t;
+type t = {
+  worker : cooked Async_cook.t;
   seed : int64;
   grain : int;
   domains : int;
   await : bool;  (* block on each cook: fixed-step runs, see [create] *)
   schedule : Schedule.t;
-  prepare : Settings.t -> Session.output -> ('prepared, string) result;
-  pieces : 'prepared piece list;
+  prepare : Settings.t -> Session.output -> (prepared, string) result;
+  pieces : piece list;
   settings : Settings.t option;  (* the latest desired submission settings *)
   error : string option;
   failure : (string * int) option ref;
@@ -55,8 +57,8 @@ type 'prepared t = {
   sources : ((int * int) * Rdk_rays.Geometry_view.t) list; (* same bounded optional cook targets as summaries *)
 }
 
-type 'prepared update = {
-  cook : 'prepared t;
+type update = {
+  cook : t;
   edit_error : string option;
   prepared_changed : bool;
   framed : bounds option option;
@@ -394,3 +396,14 @@ let pick piece = pick_by Pick.cast piece
 
 (* the [shop_materialpath] of the nearest primitive under the ray (Alt-click) *)
 let pick_material piece = pick_by Pick.cast_material piece
+
+(* as the app prepares a cooked object (instances, pieces and materials), and draws it *)
+let prepare (_ : Settings.t) (output : Session.output) =
+  let ( let* ) = Result.bind in
+  let* geometry = Payload.geometry output.payload |> Result.map_error Diagnostic.error_to_string in
+  Result.map (fun surface -> { geometry; surface }) (Rdk_rays.Surface.of_geometry ?instances:output.instances geometry)
+
+let draw node ({ surface; _ } : prepared) =
+  let explosion = Rdk_rays.Packed_pieces.explosion
+    ~operation:(Node.operation node) ~fields:(Node.parameter_fields node) in
+  Rdk_rays.Surface.scene3 ?explosion surface

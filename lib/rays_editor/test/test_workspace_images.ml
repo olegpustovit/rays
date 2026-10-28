@@ -4,7 +4,7 @@ let ok=function Ok value->value|Error d->failwith(Diagnostic.to_string d)
 let load text=match Rays_editor.Workspace.load text with Ok doc->doc|Error ds->
   failwith(String.concat "; "(List.map Diagnostic.to_string ds))
 let editor doc=Result.get_ok(Editor.create ~ui_text_size:11 ~workspace:doc ~await:true ~domains:1
-  ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene.D3.empty)())
+  ~prepare:Editor_prepare.empty ~draw:(fun _ _ ->Rays.Scene.D3.empty)())
 let workspace producer=load("(workspace images (graph img :context image "^producer^
   ") (graph picture :context draw (draw/image (ref img) :at [1 2 0] :scale 2.0 :angle 0.1)))")
 let ()=
@@ -28,7 +28,7 @@ let ()=
   let run seed domains=
     let grain=257 in
     let owner=Result.get_ok(Editor.create ~ui_text_size:11 ~workspace:doc ~factories ~seed ~grain ~await:true ~domains
-      ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene.D3.empty)())in
+      ~prepare:Editor_prepare.empty ~draw:(fun _ _ ->Rays.Scene.D3.empty)())in
     Fun.protect ~finally:(fun()->Editor.close owner)(fun()->
       let plan=Editor.Private.image_plan owner in
       let node=Array.find_opt(fun(n:E.node)->n.kind="image/map")plan.nodes |> Option.get in
@@ -57,7 +57,7 @@ let ()=
     (graph other :context sop (ref mesh :offset 0.03125)))|}in
   let run domains=
     let owner=Result.get_ok(Editor.create ~ui_text_size:11 ~workspace:doc ~await:true ~domains
-      ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene.D3.empty)())in
+      ~prepare:Editor_prepare.empty ~draw:(fun _ _ ->Rays.Scene.D3.empty)())in
     Fun.protect ~finally:(fun()->Editor.close owner)(fun()->
       let plan=Editor.Private.image_plan owner in
       let instance=Array.find_index(fun(i:E.instance)->i.graph="mesh" && not i.default)plan.instances |> Option.get in
@@ -104,7 +104,7 @@ let ()=
   let stamp=E.state_stamp state in
   let snapshot ~first domains=
     let owner=Result.get_ok(Editor.create ~ui_text_size:11 ~workspace:doc ~await:true ~domains
-      ~prepare:(fun _ _->Ok()) ~draw:(fun _ ()->Rays.Scene.D3.empty)())in
+      ~prepare:Editor_prepare.empty ~draw:(fun _ _ ->Rays.Scene.D3.empty)())in
     Fun.protect ~finally:(fun()->Editor.close owner)(fun()->
       let node=Array.find_opt(fun(n:E.node)->n.kind="image/map")(Editor.Private.image_plan owner).nodes |> Option.get in
       let image=E.Deferred(Flow.Ty.image,node.id)in

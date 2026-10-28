@@ -192,7 +192,7 @@ let geometry_zone () =
 (* a footer counts a node that is not upstream of the display too: the cook is asked for it, and a
    failure there never fails the display (Async_cook.submit_some) *)
 let off_display () =
-  let module Cook = Rays_editor.Private.Cook in
+  let module Cook = Rays_editor__.Cook in
   let text = "(workspace w (graph g :context sop (let* [a (sop/box) orphan (sop/uv_sphere) r (sop/transform a)] r)))" in
   let forms = match Flow.Syntax.parse text with Ok f -> f | Error d -> fail (Diagnostic.to_string d) in
   let lowered = match Lower.workspace ~extra:Editor_document.Kinds.descriptors
@@ -201,7 +201,7 @@ let off_display () =
     if n.site = site then Network.Int_map.find_opt n.id lowered.compiled else None)
     (Array.to_list lowered.plan.nodes) in
   let orphan = Option.get (compiled [ "g"; "orphan" ]) and shown = Option.get (compiled [ "g"; "r" ]) in
-  let cook = Result.get_ok (Cook.create ~await:true ~prepare:(fun _ output -> Ok (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload)))
+  let cook = Result.get_ok (Cook.create ~await:true ~prepare:Editor_prepare.surface
     ~seed:1L ~grain:97 ~domains:1 ~max_entries:512 ~max_payload_bytes:(256 * 1024 * 1024) ()) in
   let update probes = Cook.update ~live:false ~probes cook ~settings:Rays_editor.Settings.none
     ~objects:(Lower.objects lowered) ~edit_error:None ~effects:Param.no_effects

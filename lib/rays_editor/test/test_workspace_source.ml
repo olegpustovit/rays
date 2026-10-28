@@ -120,9 +120,8 @@ let run_find () =
 
 let editor ?presets ?(imports = []) ~source text =
   E3.create ~ui_text_size:11 ~await:true ~workspace:(Result.get_ok (Doc.of_text ~imports catalog text)) ?presets ~source
-    ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Sop.Session.payload))
-      |> Result.map_error Rdk.Error.to_string)
-    ~draw:(fun _ mesh -> Scene.D3.create [ Scene.D3.mesh mesh ]) ()
+    ~prepare:Editor_prepare.surface
+    ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface) ()
   |> function Ok e -> e | Error m -> fail m
 
 let source_text e = fst (Flow.Lisp.print (E3.workspace e).Doc.source)
@@ -482,7 +481,7 @@ let run_library_navigation () =
     | _, diagnostics -> fail (String.concat "\n" (List.map Diagnostic.to_string diagnostics)) in
   check (List.length workspace.defs=2 && List.length workspace.macros=2)
     "library helper fixture lost checked definitions";
-  let module N = Rays_editor.Private.Navigator in
+  let module N = Rays_editor__.Navigator in
   let params = N.{workspace; active=None; scope=None; records=None; probes=(fun _ -> 0);
     selected=[]; chips=[]; objects=[]; root_detail=""; layouts=None; notes=[]} in
   let descriptions state = N.rows state params |> Array.to_list |> List.map N.describe
@@ -518,9 +517,9 @@ let run_vocabulary_refresh () =
     write file (text (Some "distance")); poll ();
     check (head () && List.mem ":distance" (labels "sop/vocab_card geo :dis"))
       "reload did not add local kind and parameter completions";
-    e := Rays_editor.Reduce.step !e [Rays_editor.Private.Editor_commands.Undo] (frame ());
+    e := Rays_editor.Reduce.step !e [Rays_editor__.Editor_commands.Undo] (frame ());
     check (not (head ())) "undo retained removed declaration completion";
-    e := Rays_editor.Reduce.step !e [Rays_editor.Private.Editor_commands.Redo] (frame ());
+    e := Rays_editor.Reduce.step !e [Rays_editor__.Editor_commands.Redo] (frame ());
     check (head ()) "redo did not restore declaration completion";
     write file (text (Some "amount")); poll ();
     check (List.mem ":amount" (labels "sop/vocab_card geo :am")
@@ -530,7 +529,7 @@ let run_vocabulary_refresh () =
       node=["g";"@result"]; key=Kw "amount"; sub=[]; value=Flow.Syntax.make (Num "0.75")}));
     check (head () && List.mem ":amount" (labels "sop/vocab_card geo :am"))
       "scalar scrub lost declaration vocabulary";
-    e := Rays_editor.Reduce.step !e [Rays_editor.Private.Editor_commands.Undo] (frame ());
+    e := Rays_editor.Reduce.step !e [Rays_editor__.Editor_commands.Undo] (frame ());
     write file (text None); poll ();
     check (not (head ())) "reload retained removed local kind completion")
 

@@ -27,8 +27,8 @@ let run views live =
   let prepares = ref 0 and drawings = ref 0 in
   let e = ref (E.create ~workspace ~domains:1 ~await:true ~seed:42L
     ~presets:(Filename.temp_dir "rays-live-light-bench" "")
-    ~prepare:(fun _ _ -> incr prepares; Ok ())
-    ~draw:(fun _ () -> incr drawings; Scene.D3.empty) () |> Result.get_ok) in
+    ~prepare:(fun s o -> incr prepares; E.prepare s o)
+    ~draw:(fun _ _ -> incr drawings; Scene.D3.empty) () |> Result.get_ok) in
   Fun.protect ~finally:(fun () -> E.close !e) (fun () ->
     for i = 1 to 10 do e := E.update !e (frame i) done;
     let prepared = !prepares and drawn = !drawings in

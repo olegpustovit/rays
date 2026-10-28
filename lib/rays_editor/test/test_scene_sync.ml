@@ -409,9 +409,8 @@ let run () =
     "a World layer could not be deleted by its binding";
   (* through the editor: a workspace with no scene graph gets one when an object is added *)
   let env = Rays_editor.Editor.create ~ui_text_size:11 ~workspace:(Ws_fixture.of_text "(workspace bare (graph g :context sop (sop/box)))")
-      ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
-        |> Result.map_error Rdk.Error.to_string)
-      ~draw:(fun _ mesh -> Scene.D3.create [ Scene.D3.mesh mesh ]) () |> Result.get_ok in
+      ~prepare:Editor_prepare.surface
+      ~draw:(fun _ surface -> Rdk_rays.Surface.scene3 surface.Rays_editor__.Cook.surface) () |> Result.get_ok in
   let env = match Rays_editor.Editor.edit env (Flow_graph.Flow_edit.Add_node { scope = [ "scene" ]; name = "lamp";
     expr = call "scene/light" [] }) with Ok env -> env | Error m -> failwith m in
   let saved = Workspace_doc.to_text (Rays_editor.Editor.workspace env) in
