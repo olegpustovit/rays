@@ -259,6 +259,8 @@ size estimate, not the phase's behavioral or shipping gates.
 
 ## In progress and remaining proof
 
+- P5.S5/UI13: converting the World drag and viewport grab to Ui.box capture was tried and reverted. A press reaches only the topmost hit box, so a drag box under the viewport leaf never receives it, and Ui has no way to capture on behalf of a descendant. That design decision is open. A guard test (test_editor_commands world_drag: Shift-drag rotates the World as one undo step) is in place. rays_editor declares 19 libraries, each used directly.
+
 - P8 (4e2afcf3, 00c54c1a): with bevel on, pathtrace.metal allows 384 threads per threadgroup and the Lisp kernels 448–512, so the generated kernel has the lower register pressure. Host binding is proven in test_lisp: a closure over host placeholders, Packed.compile_template, one compile per scene (55–58 ms at 480x840) and a per-frame index patch. It is still faster at load 68 except one noisy World pair. Next: the rays_pathtracer host module, per-triangle materials, instancing, spheres, preview reprojection, motion and curves, the switch-over and P8.S4.
 
 - Decision 11 scalar gate: met. Core_exec runs float-only scalar programs on an unboxed float register file inside the one Core interpreter (scalar_program/run_scalar), falling back to the general path on any non-finite register so diagnostics stay identical; test_core_lower checks parity with overflow inputs. bench_core core row, interleaved over five rounds at load about 20: 103–120 ns before, 44/53/44/45/70 ns after (baseline 63.7), 304 → 96 B/eval. A coordinator rerun at load 55 gives 52–73 CPU ns.
