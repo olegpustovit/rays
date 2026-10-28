@@ -69,9 +69,20 @@ Packed is its CPU lowering, and MSL, SPIR-V, WGSL and JS print it.
 
 ## Gates
 
+Nothing gets slower, on either target.
+
 - **GPU time:** A/B against the handwritten reference in one process,
   interleaved, at least 5 pairs, with the machine load recorded. The
-  generated kernel must be no slower.
+  generated kernel must be faster, not just level, because static
+  specialization folds what the handwritten kernel branches on at run time.
+- **CPU time:** the structured IR's CPU lowering (Packed if-conversion,
+  blocks, domains) must be no slower than today. That covers `tools/bench_core.exe`
+  (scalar and kernels), the Flow IR and marks benchmarks, and the CPU walker
+  run of the same `.rays` kernels, measured the same interleaved way. The
+  open scalar regression in
+  [benchmarks/scalar-core.md](cleanup/benchmarks/scalar-core.md) is part of
+  this gate, not a separate item. CPU results stay bit-identical at one and
+  multiple domains.
 - **Static shape, checked by tests:** no atomics inside loops and at most one
   per kernel; no `long` or `ulong` in a fast kernel unless the program uses
   64-bit integers; the line count of the emitted kernel within 2x of its
