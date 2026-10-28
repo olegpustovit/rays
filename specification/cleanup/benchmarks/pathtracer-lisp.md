@@ -239,3 +239,43 @@ Instanced kernels: an analytic hit's triangle is now a select (`(if analytic 0 .
 
 Bound materials stay bound: folding material values as literals would recompile the kernels on every
 material edit in the editor; the classes (metallic, emissive, round) already fold.
+
+### The first frame, warm, third pass (2026-10-28)
+
+Tracer creation to the first 4-spp flush (`render_workspace --benchmark sketches/pathtracer.rays OUT 4`,
+`pathtracer_first_frame_ms`), now against pathtrace.metal rebuilt from feb9966b (`git archive`, its tool given
+the same print, `RAYS_PATHTRACER_KERNEL=metal`) in the same loop, M1:
+
+| | old (pathtrace.metal) | Lisp, kernel cache warm | Lisp, kernel cache emptied |
+|---|---|---|---|
+| 6 interleaved triples, load 3.4-4.0 | 199.6 202.4 203.7 204.0 204.2 218.5 | 216.9 219.5 220.6 221.1 227.8 232.5 | 250.7 251.4 253.7 254.7 255.3 256.9 |
+| 6 pairs, load 5.7-7.1 | 196.6 196.8 197.8 199.5 201.2 202.0 | 213.5 214.4 214.4 215.2 216.7 216.8 | - |
+| same 6 pairs, `Gc.full_major` just before the span | 189.5 189.9 190.6 190.7 190.8 192.3 | 191.3 194.4 194.5 195.8 196.4 199.6 | - |
+
+Warm went 256-260 -> 214-222 ms; still about 15 ms over the interleaved old, inside the old 200-218 range
+recorded above. Cold Metal is unchanged by this pass (518-550 against 1,414-1,506): a kernel-cache miss
+runs the same front end plus three small file writes, the "emptied" column.
+
+Where the 40 ms went (per-phase wall ticks and `Gc.minor_words`, temporary):
+- (b) The front end is skipped on a warm launch: each kernel's MSL, prepared inputs and uniform slots
+  are marshalled under `~/Library/Caches/rays/kernels`, named by the digest of the executable's path,
+  size and mtime plus the kernel's text (facts and pathtrace.rays included), with a payload digest; a
+  torn or unreadable entry recompiles, at most 64 entries. Parse+check+static 21-30 ms and template+emission
+  15-17 ms become 0.3-0.4 ms per kernel (7 K words allocated, from 7.3 M).
+- (c) The tracer allocated zero arrays as length stand-ins for every bound table and the pixel input,
+  per kernel: 1.6 M floats for `accum` alone, 2.0-2.5 M per kernel, 2.5-27 ms in the first dispatch.
+  `Flow_gpu.Run.dispatch ~bound_table` now carries the table's length and a bound input's array is not
+  read (Host drops its own stand-in). The film's three index uploads share one staging buffer, and the
+  blank image is no longer copied. Pipelines cost 0.3-1.2 ms with the Metal cache warm.
+- (a) Not done: the scene facts (World map size, background, sun, mesh shape) exist only after
+  `set_world`/`replace_mesh`, so the front end cannot start during tracer creation or the World bake, and
+  with the cache it is under 1.5 ms for the frame, nothing left to overlap.
+
+The remaining gap: with the major GC settled before the span both tools are 1-5 ms apart (the film's
+three index passes against the old one, ~3.5 ms, and the first dispatches, ~1 ms). Unsettled, the major
+cycle the tool's pre-span work started finishes inside the span in both (19 -> 20) and costs head ~10 ms
+more, almost all inside `World.bake` (24-25 ms against 14.6-15.5; 13.3-13.5 both when settled, the World
+description digest equal). The span allocates the same in both (2.6 M minor, 2.5 M major words); the
+pre-span heap and allocation are the editor-document lowering's, not the tracer's. Output unchanged:
+render_workspace digest 54d9d203..., `test_pathtracer_exact_m1` both M1 digests, `test_lisp` films 0 of
+576 channels against the CPU walker (now also rendered from cached kernels).
