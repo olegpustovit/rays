@@ -153,7 +153,7 @@ let material_graph value path =
   let materials = List.filter_map (fun (g : Flow.Workspace.graph) ->
     if g.context = Flow.Context.material then Some g.name else None) ws.checked.graphs in
   if List.mem path materials then Some path
-  else match value.scope_key with
+  else match pane_laid value with
     | Some { evaluated = Some ev; _ } ->
         List.find_map (fun (graph, v) -> match v with
           | Flow.Eval.Struct ("material/standard", _, fields)
@@ -175,7 +175,7 @@ let pick ?view ?(alt = false) value ~origin ~direction =
         | Some (distance, _), Some (nearer, _, _) when distance >= nearer -> best
         | Some (distance, hit), _ -> Some (distance, hit, piece.Cook.id)
         | None, _ -> best) None (placed_pieces ~view value) in
-  match value.doc.Document.workspace, value.scope_key with
+  match value.doc.Document.workspace, (pane_laid value) with
   | _ when alt ->
       (* Alt-click: the material on that primitive *)
       (match nearest_by Cook.pick_material with
@@ -201,10 +201,10 @@ let pick ?view ?(alt = false) value ~origin ~direction =
            (* geometry of another graph (a viewport over another scene instance draws its own
               objects): the pane shows that graph, the node is selected there once it does *)
            let root = List.hd o.site in
-           let value, scope = if root = (match value.scope_key with Some k -> k.graph | None -> root)
+           let value, scope = if root = (match pane_laid value with Some k -> k.graph | None -> root)
              then value, scope
              else match Lazy.force value.flow_catalog with
-               | Some catalog -> { value with pane_graph = Some root },
+               | Some catalog -> with_pane value (fun pane -> { pane with shown = Some root }),
                    Flow_graph.Projection.of_graph catalog ws.checked root
                | None -> value, scope in
            (match Hashtbl.find_opt (Flow_graph.Probe.chains scope) o.site with
@@ -216,13 +216,12 @@ let pick ?view ?(alt = false) value ~origin ~direction =
                   Layout_by_path.Path_map.add zone index probes) value.probes chain
                   (if List.compare_lengths chain o.iter = 0 then o.iter
                    else List.map (fun _ -> 0) chain) in
-                let in_pane = root = (match value.scope_key with Some k -> k.graph | None -> root) in
-                { value with probes;
-                  select_later = (if in_pane then [] else [ shown ]);
-                  scope_view = if in_pane then Pxui_graph.Scope.select [ shown ] value.scope_view
-                    else value.scope_view }
+                let in_pane = root = (match pane_laid value with Some k -> k.graph | None -> root) in
+                with_pane { value with probes;
+                  select_later = (if in_pane then [] else [ shown ]) } (fun pane ->
+                    if in_pane then { pane with view = Pxui_graph.Scope.select [ shown ] pane.view } else pane)
             | None -> value)
-       | None -> { value with scope_view = Pxui_graph.Scope.clear_selection value.scope_view })
+       | None -> with_pane value (fun pane -> { pane with view = Pxui_graph.Scope.clear_selection pane.view }))
   | _ -> value
 
 (* A changed source file: the whole text replaces the document as one

@@ -12,7 +12,7 @@ let prompt_name value = match value.prompt with
   | None -> "-" | Some Keys -> "keys" | Some (Saving _) -> "save preset" | Some (Palette _) -> "commands" | Some (Jumping _) -> "jump" | Some (Symbols _) -> "go to symbol" | Some (Referencing _) -> "references" | Some (Going _) -> "go to line" | Some (Picking _) -> "panel kind" | Some (Splitting _) -> "split"
   | Some (Browsing _) -> "presets" | Some (Making_macro _) -> "make macro"
 
-let level_name value = match value.level with
+let level_name value = match pane_level value with
   | Document.Scene -> "scene"
   | Inside id -> "scene › " ^ Option.fold ~none:"?" ~some:(fun (node : Kind_graph.node) -> node.label)
       (Kind_graph.find (scene value) id)
@@ -63,7 +63,7 @@ let status_text ?(brief = false) value =
   let phases = Flow.Phase_timer.summary value.edit_phases in
   let cook = cook ^ (if phases = "" then "" else " · " ^ phases) in
   (* What the open level's keys do, so the World and the menu are findable. *)
-  let hint = match value.level with
+  let hint = match pane_level value with
     | Document.Scene -> "i/double-click enter · / a add · / e World"
     | Inside id when kind value id = Some "world" ->
         "u up · drag map: move layer/sun · t dome/light · n reseed · d day cycle · [ ] time · / m 3D/map"
@@ -73,7 +73,7 @@ let status_text ?(brief = false) value =
 
 (* "ring · iteration 1 of 12": which iteration the viewport's highlight and the inspector show for the
    node selected in the graph pane (the innermost loop around it, or itself when it is one). *)
-let probe_caption value = match value.scope_key, Pxui_graph.Scope.selected value.scope_view with
+let probe_caption value = match pane_laid value, Pxui_graph.Scope.selected (pane_view value) with
   | Some { scope; records = Some records; graph; _ }, [ path ] when graph_name value = Some graph ->
       let probe p = Option.value ~default:0 (Layout_by_path.Path_map.find_opt p value.probes) in
       let zones = List.filter (fun (n : Flow_graph.Projection.node) ->
@@ -115,7 +115,7 @@ let status_box value ui (frame : Frame.t) ~render_status ~error_status ~context 
   let selection = match value.focus, value.selected_box with
     | Pxui_shell.Layout.View _, Some (_, _, name) -> Some name
     | _ ->
-    match inspector_paths (Pxui_graph.Scope.selected value.scope_view) with
+    match inspector_paths (Pxui_graph.Scope.selected (pane_view value)) with
     | [ path ] -> List.nth_opt (List.rev path) 0
     | [] -> None
     | paths -> Some (Printf.sprintf "%d selected" (List.length paths)) in
@@ -131,13 +131,13 @@ let status_box value ui (frame : Frame.t) ~render_status ~error_status ~context 
   let docked = List.filter (fun (l : Pxui_shell.Layout.leaf) -> not l.floating) g.leaves in
   let alone = floating = 0 && value.focus = Graph && List.length docked = 1 in
   let readout = if not alone then "" else
-    let nodes = (Pxui_graph.Scope.stats value.scope_view).nodes in
-    let selected = List.length (inspector_paths (Pxui_graph.Scope.selected value.scope_view)) in
+    let nodes = (Pxui_graph.Scope.stats (pane_view value)).nodes in
+    let selected = List.length (inspector_paths (Pxui_graph.Scope.selected (pane_view value))) in
     Printf.sprintf "%d node%s%s" nodes (if nodes = 1 then "" else "s")
       (if selected = 0 then "" else Printf.sprintf " \xc2\xb7 %d selected" selected) in
   let notes = if floating > 0 then [ Printf.sprintf "%d floating" floating ]
     else if alone then
-      [ Printf.sprintf "zoom %d%%" (int_of_float (Float.round (100. *. Pxui_graph.Scope.zoom value.scope_view))) ]
+      [ Printf.sprintf "zoom %d%%" (int_of_float (Float.round (100. *. Pxui_graph.Scope.zoom (pane_view value)))) ]
     else match value.focus with
       | Pxui_shell.Layout.Outline -> [ Printf.sprintf "%d graph%s" graphs (if graphs = 1 then "" else "s") ]
       | _ -> [] in

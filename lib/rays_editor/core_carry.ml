@@ -78,7 +78,7 @@ let carry_payload value =
   match opened with
   | Some result -> result
   | None ->
-      let object_graph = Option.bind (Selection.selected value.selection) (fun id ->
+      let object_graph = Option.bind (Selection.selected (pane_selection value)) (fun id ->
         if kind value id = Some "geometry" then graph_of_object value id else None) in
       (match Option.bind object_graph referenced with
        | Some result -> result
@@ -90,10 +90,10 @@ let carry_payload value =
              | Some (Document.Bound_at path) when path <> [] ->
                  Some { Carry.kind = "camera"; value = List.nth path (List.length path - 1) }
              | _ -> None in
-           let camera = match Option.bind (Selection.selected value.selection) camera_named with
+           let camera = match Option.bind (Selection.selected (pane_selection value)) camera_named with
              | Some _ as found -> found
              | None ->
-                 (match Pxui_graph.Scope.selected value.scope_view with
+                 (match Pxui_graph.Scope.selected (pane_view value) with
                   | [ path ] ->
                       Option.bind (List.find_map (fun (id, home) ->
                         if home = Document.Bound_at path then Some id else None)
@@ -113,10 +113,10 @@ let carry_payload value =
 let carry_cancel value (c : _ carry) ~notice =
   Pxui.Ui.cancel_carry value.ui;
   let doc = c.original in
-  let level = Document.resolve_level doc value.level in
+  let level = Document.resolve_level doc (pane_level value) in
   if doc != value.doc then Cook.set_volatile value.cook (Flow_sop.Lower.is_volatile (doc.workspace.lowered));
-  { value with carry = None; doc; level; notice = Some notice;
-    workspace = unrestore value.doc doc value.workspace }
+  with_pane { value with carry = None; doc; notice = Some notice;
+    workspace = unrestore value.doc doc value.workspace } (fun pane -> { pane with at = level })
 
 let carry_commit value (c : _ carry) doc what =
   Pxui.Ui.cancel_carry value.ui;
@@ -203,9 +203,9 @@ let carry_step value ~text_focus (frame : Frame.t) =
           if shown == value.doc then value, taken, false
           else begin
             Cook.set_volatile value.cook (Flow_sop.Lower.is_volatile (shown.workspace.lowered));
-            let level = Document.resolve_level shown value.level in
-            { value with doc = shown; level; lisp_vocab = vocabulary_for value shown;
-              workspace = unrestore value.doc shown value.workspace },
+            let level = Document.resolve_level shown (pane_level value) in
+            with_pane { value with doc = shown; lisp_vocab = vocabulary_for value shown;
+              workspace = unrestore value.doc shown value.workspace } (fun pane -> { pane with at = level }),
             taken, true
           end
         end

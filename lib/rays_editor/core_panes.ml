@@ -6,9 +6,9 @@ open Editor_document
 open Core_inspect
 
 let stored_projection value =
-  match Level_map.find_opt value.level value.projections with
+  match Level_map.find_opt (pane_level value) (pane_views value) with
   | Some projection -> projection
-  | None -> (match value.level with
+  | None -> (match pane_level value with
     | Document.Scene -> List_view
     | Inside id when kind value id = Some "geometry" -> Graph_view
     | Inside _ -> List_view)
@@ -110,12 +110,12 @@ let follow_start value =
     | _ -> value in
   let value = List.fold_left (fun value (key, view) ->
     let view = match view with "list" -> List_view | "text" -> Text_view | _ -> Graph_view in
-    if value.graph_pane = Some key then { value with projections = Level_map.add value.level view value.projections }
+    if Panel_map.key value.panes = Some key then
+      with_pane value (fun pane -> { pane with views = Level_map.add pane.at view pane.views })
     else match path_of key with
       | Some (path, _) ->
-          let pane = stash (as_pane value (key, path)) in
-          { value with graph_panes = (key, { pane with views = Level_map.add pane.at view pane.views })
-                                     :: List.remove_assoc key value.graph_panes }
+          let pane = Panel_map.active (as_pane value (key, path)).panes in
+          { value with panes = Panel_map.set key { pane with views = Level_map.add pane.at view pane.views } value.panes }
       | None -> value) value (changed now.views was.views) in
   let value = List.fold_left (fun value (key, tab) ->
     let tab = match tab with "graph" -> Text_pane.Graph | "document" -> Document | _ -> Selection in
@@ -140,7 +140,7 @@ let graph_name value = match value.doc.Document.workspace.ws with
       (* the graph the pane's own leaf pins *)
       let named = Option.bind value.doc.Document.shell (fun s ->
         Option.bind (graph_path value) (fun path -> List.assoc_opt path s.Document.named)) in
-      (match (if value.pane_graph <> None then value.pane_graph else named), value.level with
+      (match (if (pane_shown value) <> None then (pane_shown value) else named), (pane_level value) with
        | Some name, _ when exists name -> Some name
        | _, Document.Inside id when kind value id = Some "geometry" ->
            (match graph_of_object value id with
@@ -184,10 +184,10 @@ let panels_line value =
 
 (* Follow a reference: the pane shows [graph], and [u] comes back to what it showed. *)
 let remember value =
-  { value with back = List.take 32 ((value.level, value.pane_graph) :: value.back) }
+  with_pane value (fun pane -> { pane with route = List.take 32 ((pane.at, pane.shown) :: pane.route) })
 
 let go value graph =
-  if graph_name value = Some graph then value else { (remember value) with pane_graph = Some graph }
+  if graph_name value = Some graph then value else with_pane (remember value) (fun pane -> { pane with shown = Some graph })
 
 (* What the selected node of the graph pane references: the graph its [(ref name)] names, the
    [:material] of a sop/material first (a material node follows to its surface). *)
@@ -198,7 +198,7 @@ let follow_target ?path value =
   let reference (e : S.t) = match e.node with
     | S.List [ { node = S.Sym "ref"; _ }; { node = S.Sym name; _ } ] when exists name -> Some name
     | _ -> None in
-  match (match path with Some p -> [ p ] | None -> Pxui_graph.Scope.selected value.scope_view) with
+  match (match path with Some p -> [ p ] | None -> Pxui_graph.Scope.selected (pane_view value)) with
   | [ path ] when graph_name value <> None ->
       let arg key = Option.bind (Flow_graph.Flow_edit.arg_text ws.source path key) reference in
       (match arg (Kw "material") with
@@ -215,7 +215,7 @@ let follow_target ?path value =
 let peek_target value =
   match follow_target value with
   | Some _ as found -> found
-  | None -> Option.bind (Selection.selected value.selection) (fun id ->
+  | None -> Option.bind (Selection.selected (pane_selection value)) (fun id ->
       match kind value id with
       | Some "geometry" -> graph_of_object value id
       | _ -> None)
@@ -225,7 +225,7 @@ let peek_target value =
 let viewport_target value =
   let ws = value.doc.Document.workspace.ws in
   match value.focus with
-  | Pxui_shell.Layout.View key when Selection.selected value.selection = None ->
+  | Pxui_shell.Layout.View key when Selection.selected (pane_selection value) = None ->
       let named = Option.bind value.doc.Document.shell (fun shell ->
         match List.assoc_opt key shell.preview_sources with
         | Some { scene_ref = Some { node = Flow.Syntax.List [ { node = Sym "ref"; _ }; { node = Sym name; _ } ]; _ }; _ } ->
@@ -239,7 +239,7 @@ let viewport_target value =
 
 (* The route taken, as the graph header shows it: scene > shards > cobalt (the last three) *)
 let route value =
-  List.rev_map (fun (level, pane_graph) -> graph_name { value with level; pane_graph }) value.back
+  List.rev_map (fun (at, shown) -> graph_name (with_pane value (fun pane -> { pane with at; shown }))) (pane_route value)
   @ [ graph_name value ]
   |> List.filter_map Fun.id
   |> (fun names -> List.drop (max 0 (List.length names - 3)) names)
@@ -249,7 +249,7 @@ let scope_name value = if projection value = Graph_view then graph_name value el
 
 (* The lowered node of the node selected in the graph pane, at the iteration its zones probe. *)
 let scope_node value =
-  match value.scope_key, value.doc.Document.workspace, Pxui_graph.Scope.selected value.scope_view with
+  match pane_laid value, value.doc.Document.workspace, Pxui_graph.Scope.selected (pane_view value) with
   | Some { scope; records = Some records; _ }, _, [ path ] when scope_name value <> None ->
       Option.bind (Flow_graph.Projection.find scope path) (fun (n : Flow_graph.Projection.node) ->
         Option.bind (compiled_at value (Flow_graph.Probe.chains scope) records n.path) (fun node_id ->
@@ -258,8 +258,8 @@ let scope_node value =
 
 
 let lit_tags value =
-  match value.doc.Document.workspace.lowered, value.scope_key,
-        Pxui_graph.Scope.selected value.scope_view with
+  match value.doc.Document.workspace.lowered, (pane_laid value),
+        Pxui_graph.Scope.selected (pane_view value) with
   | lowered, Some { scope; _ }, [ site ] when scope_name value <> None ->
       (match value.lit with
        | Some c when c.site = site && c.at == value.probes && c.lowered == lowered
@@ -273,7 +273,7 @@ let lit_tags value =
 (* The nodes of the pane's graph that the last failed cook names, each with its diagnostic's code
    (the pane draws the sheet's failed state on them). *)
 let failed_nodes value =
-  match Cook.failed_node value.cook, value.scope_key, value.doc.Document.workspace with
+  match Cook.failed_node value.cook, (pane_laid value), value.doc.Document.workspace with
   | Some (code, node_id), Some { scope; records = Some records; _ }, _
     when scope_name value <> None ->
       let rec nodes (s : Flow_graph.Projection.scope) = List.concat_map (fun (n : Flow_graph.Projection.node) ->
@@ -292,7 +292,7 @@ let draw_list_panes ~ui ~shortcut_frame ~value ~hosted ~root_at ~pane_of ~in_use
         let pane = pane_of host in
         let mine = in_use pane in
         let rows, columns = if mine then rows, columns else List.assoc key host_rows in
-        let selected = if mine then selected () else Selection.selected_nodes pane.selection in
+        let selected = if mine then selected () else Selection.selected_nodes (pane_selection pane) in
         let draw state = on_sheet ui leaf.floating (fun () -> Pxui.Ui.within ui root (fun () ->
           Pxui_shell.Tree.update state ui shortcut_frame ~bounds:leaf.body
             ~title:(title_of pane) ~columns rows ~selected)) in
@@ -353,22 +353,22 @@ let draw_spreadsheet_panes ~ui ~value ~panes ~locals =
 let pressed_keys value (frame : Frame.t) =
   List.filter (fun k -> not (List.mem k value.held_keys)) frame.input.keys
 
-let draw_other_graph_panes ~ui ~shortcut_frame ~value ~other_panes ~roots ~stash =
+let draw_other_graph_panes ~ui ~shortcut_frame ~value ~other_panes ~roots =
   List.filter_map (fun (key, path, (pane : _ t)) ->
     match List.find_opt (fun ((leaf : Pxui_shell.Layout.leaf), _) -> leaf.path = path) roots with
     | Some ((leaf : Pxui_shell.Layout.leaf), hosted) when (let _, _, _, h = leaf.body in h > 0) ->
         let x, y, width, height = leaf.body in
         let view = if stored_projection pane = Graph_view && graph_name pane <> None then
             Pxui.Ui.within ui hosted (fun () ->
-              pane.scope_view
+              (pane_view pane)
               |> Pxui_graph.Scope.with_guide false
               |> Pxui_graph.Scope.with_theme (let theme = Pxui.Ui.theme ui in
                    if leaf.floating then sheet_theme theme else theme)
               |> Pxui_graph.Scope.with_bounds ~x ~y ~width:(max 1 width) ~height:(max 1 height)
               |> fun view -> fst (Pxui_graph.Scope.update ~pressed:(pressed_keys value shortcut_frame) view ui shortcut_frame))
-          else pane.scope_view in
-        Some (key, { (stash pane) with view })
-    | _ -> Some (key, stash pane)) other_panes
+          else pane_view pane in
+        Some (key, { (Panel_map.active pane.panes) with view })
+    | _ -> Some (key, Panel_map.active pane.panes)) other_panes
 
 let draw_graph_header ~ui ~value ~geometry:g
     ~graph_host:(graph_host : Pxui_shell.Layout.leaf option) ~header_slots ~tools_from =
@@ -377,7 +377,7 @@ let draw_graph_header ~ui ~value ~geometry:g
         (match Bars.graph_tools ~outline:(not (has_panel value Pxui_shell.Layout.Outline)) ui
             ~header:leaf.header ~from:(tools_from leaf)
             ~enabled:(fun tool -> tool = Bars.Outline || scope_name value <> None
-              && (tool = Bars.Add || Pxui_graph.Scope.selected value.scope_view <> [])) with
+              && (tool = Bars.Add || Pxui_graph.Scope.selected (pane_view value) <> [])) with
          | Some Add -> Some Leader.Add_node
          | Some Repeat -> Some (Leader.Scope_command Pxui_graph.Scope.Wrap_repeat)
          | Some Iterate -> Some (Leader.Scope_command Pxui_graph.Scope.Wrap_iterate)

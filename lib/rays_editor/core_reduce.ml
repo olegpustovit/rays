@@ -33,10 +33,10 @@ let outline_step ~created ~(result : _ frame_result) value' =
   (* a node of the graph already shown is selected now; of another graph, once the pane shows it *)
   let value' = match outlined with
     | Some (graph, Some node) when graph_name value' = Some graph
-        && (match value'.scope_key with Some k -> k.graph = graph | None -> false) ->
-        { value' with select_later = [];
-          scope_view = fst (Pxui_graph.Scope.run_command (Pxui_graph.Scope.select [ node ] value'.scope_view)
-            Pxui_graph.Scope.Frame_selection) }
+        && (match pane_laid value' with Some k -> k.graph = graph | None -> false) ->
+        with_pane { value' with select_later = [] } (fun pane ->
+          { pane with view = fst (Pxui_graph.Scope.run_command (Pxui_graph.Scope.select [ node ] pane.view)
+            Pxui_graph.Scope.Frame_selection) })
     | _ -> value' in
   let value' = match outlined with Some (graph, _) -> go value' graph | None -> value' in
   value', outlined
@@ -54,7 +54,7 @@ let level_target ~(value : _ t) ~value' ~level ~(doc : Document.t) ~selection ~a
   let target = match List.find_opt (function
       | Leader.Enter | Up | Go_world -> true | _ -> false) actions, result.opened with
     | _ when followed <> None -> None
-    | Some Leader.Up, _ when value.back <> [] -> None
+    | Some Leader.Up, _ when (pane_route value) <> [] -> None
     | Some Leader.Up, _ -> (match level with
       | Document.Inside _ -> Some Document.Scene
       | Scene -> None)
@@ -78,7 +78,7 @@ let gesture_key ~(value : _ t) ~(frame : Frame.t) ~loaded ~world_added ~world_la
       || world_added || world_label <> None then None else
     match List.find_map (function
       | Set_parameter { node; path; _ } ->
-          Some (Printf.sprintf "graph.scrub:%s:%d:%s" (level_key value.level) node path)
+          Some (Printf.sprintf "graph.scrub:%s:%d:%s" (level_key (pane_level value)) node path)
       | Syntax_edit op -> Flow_graph.Flow_edit.gesture op
       | Layout_edit op -> Layout_edit.gesture op
       | Panel_state (path, _) -> Some ("panel:" ^ String.concat "/" (panel_key value.doc path))
@@ -92,13 +92,13 @@ let gesture_key ~(value : _ t) ~(frame : Frame.t) ~loaded ~world_added ~world_la
     match graph, result.tree_intents, result.handle_changes,
         result.settings_changes with
     | [], [], Some (id, changes), [] ->
-        Some (parameter_gesture "handle" value.level id changes)
+        Some (parameter_gesture "handle" (pane_level value) id changes)
     | [], [], None, (_ :: _ as changes) ->
-        Some (parameter_gesture "settings" value.level (-1) changes)
+        Some (parameter_gesture "settings" (pane_level value) (-1) changes)
     | [], (Pxui_shell.Tree.Flag { column; _ } :: _ as intents), None, []
       when List.for_all (function Pxui_shell.Tree.Flag _ -> true | _ -> false) intents ->
         (* a stroke down a flag column of the list is one entry *)
-        Some (Printf.sprintf "list.flag:%s:%d" (level_key value.level) column)
+        Some (Printf.sprintf "list.flag:%s:%d" (level_key (pane_level value)) column)
     | _ -> None in
   gesture
 
@@ -161,7 +161,7 @@ let write_gestures ~(value : _ t) ~loaded ~present ~tree_edits ~in_text ~node_ef
   let refused = ref None in
   let gestures = next, result in
   let set_fields ((next : Document.t), (result : _ frame_result)) node values =
-    match Editor_document.Scene_sync.set_fields ~factories:value.factories next value.level ~node values with
+    match Editor_document.Scene_sync.set_fields ~factories:value.factories next (pane_level value) ~node values with
     | Ok (Some (doc, effects, home)) ->
         if !edit_note = None then edit_note := Editor_document.Scene_sync.template_note next home;
         doc, { result with edit_error = None;
@@ -171,7 +171,7 @@ let write_gestures ~(value : _ t) ~loaded ~present ~tree_edits ~in_text ~node_ef
   let next, result = if Option.is_some loaded then next, result else
     List.fold_left (fun ((next : Document.t), (result : _ frame_result)) edit ->
       if !refused <> None then next, result else
-      match Editor_document.Scene_sync.write ~factories:value.factories next value.level edit with
+      match Editor_document.Scene_sync.write ~factories:value.factories next (pane_level value) edit with
       | Ok (Some (doc, note)) ->
           if !edit_note = None then edit_note := note;
           doc, { result with edit_error = None }
@@ -279,7 +279,7 @@ let write_gestures ~(value : _ t) ~loaded ~present ~tree_edits ~in_text ~node_ef
           (* the expression typed in a row is the argument of the call that holds the object (of a
              loop's template: every copy changes) *)
           let ( let* ) = Result.bind in
-          let home = match value.level with
+          let home = match pane_level value with
             | Document.Scene -> List.assoc_opt node next.Document.homes.objects
             | Inside _ -> List.assoc_opt node next.homes.layers in
           (match home with
@@ -409,7 +409,7 @@ let framing_step ~(value : _ t) ~value' ~(doc : Document.t) ~(cooked : _ Cook.up
   let framing = match frame_request with Some (id, _) -> Some id | None -> value.framing in
   let framed = match cooked.framed, framing with
     | Some (Some bounds), Some id -> Some (Some (world_bounds id bounds))
-    | framed, _ when List.mem Leader.Frame_camera actions && value'.level = Document.Scene ->
+    | framed, _ when List.mem Leader.Frame_camera actions && (pane_level value') = Document.Scene ->
         ignore framed;
         let view = match active_view value' (geometry value' result.workspace frame) with
           | Some { panel = View key; _ } when Option.fold ~none:false
@@ -428,17 +428,17 @@ let projections_of ~outlined ~actions (result : _ frame_result) (value' : _ t) =
   (* the graph panel's own projection: list and text views are panels of their own now (/ l
      retypes), so opening a graph is the only thing that changes it *)
   let projections = if result.open_graph <> None || outlined <> None then
-      Level_map.add value'.level Graph_view value'.projections
+      Level_map.add (pane_level value') Graph_view (pane_views value')
     else match result.view_pick with
-    | Some view when view <> Text_view || graph_name value' <> None -> Level_map.add value'.level view value'.projections
-    | Some _ -> value'.projections
+    | Some view when view <> Text_view || graph_name value' <> None -> Level_map.add (pane_level value') view (pane_views value')
+    | Some _ -> (pane_views value')
     | None -> match List.find_map (function
         | Leader.Panel_retype (Pxui_shell.Layout.Graph | List | Lisp as p) when value'.focus = Graph -> Some p
         | _ -> None) actions with
-      | Some Pxui_shell.Layout.Graph -> Level_map.add value'.level Graph_view value'.projections
-      | Some List -> Level_map.add value'.level List_view value'.projections
-      | Some _ when graph_name value' <> None -> Level_map.add value'.level Text_view value'.projections
-      | _ -> value'.projections in
+      | Some Pxui_shell.Layout.Graph -> Level_map.add (pane_level value') Graph_view (pane_views value')
+      | Some List -> Level_map.add (pane_level value') List_view (pane_views value')
+      | Some _ when graph_name value' <> None -> Level_map.add (pane_level value') Text_view (pane_views value')
+      | _ -> (pane_views value') in
   projections
 
 (* Command-Z / Shift-Command-Z: the history step, its notice and the document it leaves *)
@@ -488,8 +488,8 @@ let reduce ?gpu ?(pump=fun()->()) ~carry_changed ~all_ui_visible ~view_state ~ca
     | Some (Edit_source op) -> { result with changes = result.changes @ [ Syntax_edit op ] }
     | _ -> result in
   (* i on a collapsed function or loop opens it in place, as a double click does *)
-  let result, actions = match Pxui_graph.Scope.selected value.scope_view with
-    | [ zone ] when List.mem Leader.Enter actions && Pxui_graph.Scope.collapsed_zone value.scope_view zone ->
+  let result, actions = match Pxui_graph.Scope.selected (pane_view value) with
+    | [ zone ] when List.mem Leader.Enter actions && Pxui_graph.Scope.collapsed_zone (pane_view value) zone ->
         { result with scope_changes = result.scope_changes @ [ Pxui_graph.Scope.Zone_collapsed { zone; collapsed = false } ] },
         List.filter (( <> ) Leader.Enter) actions
     | _ -> result, actions in
@@ -508,7 +508,7 @@ let reduce ?gpu ?(pump=fun()->()) ~carry_changed ~all_ui_visible ~view_state ~ca
   (* The one reduction phase: panes have finished constructing their boxes. *)
   (* the fields of an object the text declares are written to the text (below, with the frame's
      gestures); only an object the host made is edited as a derived node, for reconcile to adopt *)
-  let in_text node = Editor_document.Scene_sync.in_text value.doc value.level node in
+  let in_text node = Editor_document.Scene_sync.in_text value.doc (pane_level value) node in
   let document, edit_error, editor_effects = List.fold_left apply_change
       (objects value, value.edit_error, Param.no_effects)
       (List.filter (function Set_parameter { node; _ } | Rename { node; _ } -> not (in_text node) | _ -> true)
@@ -536,7 +536,7 @@ let reduce ?gpu ?(pump=fun()->()) ~carry_changed ~all_ui_visible ~view_state ~ca
     | changes -> (match Settings.apply value.doc.settings changes with
       | Ok (settings, effects) -> settings, effects, edit_error
       | Error message -> value.doc.settings, Param.no_effects, Some message) in
-  let node_effects effects = match value.level with
+  let node_effects effects = match pane_level value with
     | Document.Inside id when kind value id = Some "geometry" -> effects
     | Inside _ | Scene -> { effects with Param.cook = false } in
   let label = match List.find_map intent_label result.changes, tree_label with
@@ -563,10 +563,10 @@ let reduce ?gpu ?(pump=fun()->()) ~carry_changed ~all_ui_visible ~view_state ~ca
         (* the host's objects or layers as this frame's derived edits leave them *)
         if result.document == objects value || network value <> None then present
         else
-          let doc = Document.with_kinds present value.level result.document in
-          if value.level = Document.Scene then Document.prune doc else doc in
+          let doc = Document.with_kinds present (pane_level value) result.document in
+          if (pane_level value) = Document.Scene then Document.prune doc else doc in
   (* Enter and row activation share camera selection and look-through. *)
-  let entered_camera = if value.level <> Document.Scene || Option.is_some loaded || carrying then None
+  let entered_camera = if (pane_level value) <> Document.Scene || Option.is_some loaded || carrying then None
     else
       let candidate = match result.opened with
         | Some _ as id -> id
@@ -590,7 +590,7 @@ let reduce ?gpu ?(pump=fun()->()) ~carry_changed ~all_ui_visible ~view_state ~ca
     | [ path ], Some _, Some menu ->
         let scope = List.take (max 0 (List.length path - 1)) path in
         let mx, my = Pxui_graph.Node_menu.position menu in
-        (match Pxui_graph.Scope.scope_point value.scope_view ~scope (float mx, float my) with
+        (match Pxui_graph.Scope.scope_point (pane_view value) ~scope (float mx, float my) with
          | Some (x, y) -> Pxui_graph.Scope.Moved [ path, x, y ] :: result.scope_changes
          | None -> result.scope_changes)
     | _ -> result.scope_changes in
@@ -633,12 +633,12 @@ let reduce ?gpu ?(pump=fun()->()) ~carry_changed ~all_ui_visible ~view_state ~ca
     then Param.union_effects result.effects Editor_document.Document_edit.cook_effects else result.effects in
   (* The open level must still exist after undo or a preset load. *)
   let level = Document.resolve_level doc
-      (if Option.is_some loaded then Document.Scene else value.level) in
-  let value' = { value with doc; level; lisp_vocab = vocabulary_for value doc;
-    workspace = unrestore value.doc doc result.workspace } in
+      (if Option.is_some loaded then Document.Scene else (pane_level value)) in
+  let value' = with_pane { value with doc; lisp_vocab = vocabulary_for value doc;
+    workspace = unrestore value.doc doc result.workspace } (fun pane -> { pane with at = level }) in
   (* the selection keeps the nodes that still exist in the open network *)
   let selection =
-    if level <> value.level || Option.is_some loaded then Selection.empty
+    if level <> (pane_level value) || Option.is_some loaded then Selection.empty
     else
       let exists = lists value' in
       match List.filter exists (Selection.selected_nodes result.selection) with
@@ -654,33 +654,34 @@ let reduce ?gpu ?(pump=fun()->()) ~carry_changed ~all_ui_visible ~view_state ~ca
     | Some (Document.Inside id) when List.mem Leader.Go_world actions && level = Document.Scene ->
         Selection.select id
     | _ -> selection in
-  let value' = { value' with selection; menu = result.menu; tree = result.tree; probes;
+  let value' = with_pane { value' with menu = result.menu; tree = result.tree; probes;
     open_import = (match List.find_map (function Pxui_graph.Scope.Open_import file -> Some file | _ -> None) scope_changes with
-      | Some _ as file -> file | None -> value.open_import);
+      | Some _ as file -> file | None -> value.open_import) } (fun pane -> { pane with picked = selection;
     (* a node added from the menu is the selection *)
-    scope_view = (match added with
+    view = (match added with
       | [] ->
           (* a row chosen in the list of a geometry object selects the node that made it in the
              graph pane, whose inspector edits the text *)
           (match List.find_map (function Pxui_shell.Tree.Select [ id ] -> Some id | _ -> None)
                    result.tree_intents with
-           | Some id when (match value.level with
+           | Some id when (match pane_level value with
                | Document.Inside oid -> kind value oid = Some "geometry" | Scene -> false) ->
                (match node_path value id with
                 | Some path -> Pxui_graph.Scope.select [ path ] result.scope_view
                 | None -> result.scope_view)
            | _ -> result.scope_view)
-      | paths -> Pxui_graph.Scope.select paths result.scope_view) } in
+      | paths -> Pxui_graph.Scope.select paths result.scope_view) }) in
   let value' = match target with
-    | Some level when level <> value'.level -> open_level (remember value') level
+    | Some level when level <> (pane_level value') -> open_level (remember value') level
     | Some level -> open_level value' level
     | None -> value' in
   (* u goes back along the route taken *)
   let pops = List.fold_left (fun n -> function Leader.Up -> max n 1 | Back k -> max n k | _ -> n) 0 actions in
-  let value' = match List.drop (max 0 (pops - 1)) value'.back with
+  let value' = match List.drop (max 0 (pops - 1)) (pane_route value') with
     | (back_level, pane_graph) :: rest when pops > 0 && target = None && followed = None ->
         let back_level = Document.resolve_level doc back_level in
-        { (open_level { value' with back = rest } back_level) with pane_graph }
+        with_pane (open_level (with_pane value' (fun pane -> { pane with route = rest })) back_level)
+          (fun pane -> { pane with shown = pane_graph })
     | _ -> value' in
   let value' = match followed with Some graph -> go value' graph | None -> value' in
   (* In the World, / m flips the view pane to the lat-long map. *)
@@ -691,19 +692,19 @@ let reduce ?gpu ?(pump=fun()->()) ~carry_changed ~all_ui_visible ~view_state ~ca
   let value' = match renamed with
     | Some (old, now) ->
         let name = Option.map (fun g -> if g = old then now else g) in
-        { value' with pane_graph = name value'.pane_graph;
-          back = List.map (fun (level, g) -> level, name g) value'.back }
+        with_pane value' (fun pane -> { pane with shown = name pane.shown;
+          route = List.map (fun (level, g) -> level, name g) pane.route })
     | None -> value' in
   let value', outlined = outline_step ~created ~result value' in
   let value' = match result.prompt_intent with Some (Find_node path) -> select_source value' path | _ -> value' in
   let projections = projections_of ~outlined ~actions result value' in
-  let selection_changed = Pxui_graph.Scope.selected result.scope_view <> Pxui_graph.Scope.selected value.scope_view || outlined <> None in
+  let selection_changed = Pxui_graph.Scope.selected result.scope_view <> Pxui_graph.Scope.selected (pane_view value) || outlined <> None in
   let text = if selection_changed then {text with target = None} else text in
   let locals = if selection_changed then List.map (fun (key, (local : local)) ->
       key, {local with code = {local.code with target = None}}) result.locals else result.locals in
-  let value' = { value' with projections; text;
+  let value' = with_pane { value' with text;
     rows = row_sets;
-    live_cook = result.live_cook } in
+    live_cook = result.live_cook } (fun pane -> { pane with views = projections }) in
   let value' = List.fold_left (fun value -> function
     | Follow_source path -> select_source value path
     | _ -> value) {value' with locals} result.changes in
@@ -715,7 +716,7 @@ let reduce ?gpu ?(pump=fun()->()) ~carry_changed ~all_ui_visible ~view_state ~ca
     | Pxui_graph.Scope.Display_set path -> view_node v path
     | _ -> v) value' scope_changes |> sync_scope in
   let doc = value'.doc in
-  let frame_request = match result.frame_request, value'.level with
+  let frame_request = match result.frame_request, (pane_level value') with
     | Some node, Inside id when kind value' id = Some "geometry" -> Some (id, node)
     | _ -> None in
   if doc.workspace != value.doc.workspace || value'.viewed != value.viewed then begin
@@ -724,7 +725,7 @@ let reduce ?gpu ?(pump=fun()->()) ~carry_changed ~all_ui_visible ~view_state ~ca
     Cook.set_volatile value.cook (fun id -> Flow_sop.Lower.is_volatile (doc.workspace.lowered) id
       || Flow_sop.Network.Int_map.mem id roots)
   end;
-  let probes = match value'.scope_key with Some k when scope_name value' <> None -> k.targets | _ -> [] in
+  let probes = match pane_laid value' with Some k when scope_name value' <> None -> k.targets | _ -> [] in
   let lit, lit_cache = lit_tags value' in
   let cooked = Cook.update ~gpu:(Option.value gpu ~default:value.gpu) ~input:value'.live_frame ~live:result.live_cook ~probes ~lit ~pump
       value.cook ~settings:doc.settings
@@ -745,7 +746,7 @@ let reduce ?gpu ?(pump=fun()->()) ~carry_changed ~all_ui_visible ~view_state ~ca
     else notice in
   { core = { value' with timeline; cook = cooked.cook; lit = lit_cache; edit_error = cooked.edit_error;
       status_fps; status_fps_at; last_dt = frame.input.dt; steady; guide; hud; focus = result.focus; focus_path = result.focus_path;
-      pane_keys = result.pane_keys; graph_panes = result.graph_panes; leader; held_keys;
+      pane_keys = result.pane_keys; panes = Panel_map.with_others result.graph_panes value'.panes; leader; held_keys;
       prompt;
       queued = (match result.prompt_intent with Some (Run_action action) -> [action]
         | _ when all_ui_visible && List.mem Leader.Add_node actions && not graph_shown
@@ -783,15 +784,15 @@ let reduce_idle ?select ?preview value actions (frame : Frame.t) =
                  chosen = None; anchor = None; resting = None; hint = None;
                  preview = Some (Showing { place = Carry.Graph ""; doc; what = "" }) } }) in
   let selection = match select with
-    | Some ids -> Selection.select_nodes ids | None -> value.selection in
+    | Some ids -> Selection.select_nodes ids | None -> (pane_selection value) in
   let result = { workspace = value.workspace; focus = value.focus; focus_path = value.focus_path;
-    pane_keys = value.pane_keys; scope_view = value.scope_view; scope_changes = []; selection;
+    pane_keys = value.pane_keys; scope_view = (pane_view value); scope_changes = []; selection;
     menu = value.menu; menu_pick = None; tree = value.tree; outline = value.outline; outline_intents = [];
     document = objects value; edit_error = value.edit_error; effects = Param.no_effects;
     timeline_intents = []; frame_request = None; prompt = value.prompt; prompt_intent = None;
     panel = None; grab = false; settings = value.doc.settings; opened = None; live_cook = value.live_cook;
     label = "Edit"; changes = []; tree_intents = []; text_intents = []; open_graph = None;
-    settings_changes = []; graph_panes = value.graph_panes; locals = value.locals; other_texts = [];
+    settings_changes = []; graph_panes = Panel_map.others value.panes; locals = value.locals; other_texts = [];
     handle_changes = None; bar_action = None; view_pick = None; drops = [] } in
   let update : (_, unit) update = reduce ~carry_changed:false ~all_ui_visible:false
       ~view_state:(fun _ -> Flow.Syntax.make (Flow.Syntax.Map [])) ~carrying:(value.carry <> None)

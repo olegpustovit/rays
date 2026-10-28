@@ -112,14 +112,14 @@ let set_probe value zone index =
   { value with core = { value.core with Core_model.probes = Layout_by_path.Path_map.add zone index value.core.Core_model.probes } }
 let node_box value path =
   Option.map (fun (x, y, w, h) -> int_of_float x, int_of_float y, int_of_float w, int_of_float h)
-    (Pxui_graph.Scope.Private.box_of value.core.Core_model.scope_view path)
+    (Pxui_graph.Scope.Private.box_of (Core_model.pane_view value.core) path)
 let edit value op = Result.map (fun core -> { value with core }) (Core_host.syntax_edit value.core op)
 let edit_layout value op = Result.map (fun core -> { value with core }) (Core_host.layout_edit value.core op)
 
 let edit_phases value = value.core.Core_model.edit_phases
 let carrying value = Option.map (fun (c : _ Core_model.carry) -> c.payload.Carry.kind, c.payload.value) value.core.Core_model.carry
 let carry_line value = Option.map Core_status.carry_line value.core.Core_model.carry
-let level value = match value.core.Core_model.level with
+let level value = match (Core_model.pane_level value.core) with
   | Document.Scene -> None
   | Inside id -> Some (Option.fold ~none:"" ~some:(fun (node : Kind_graph.node) -> node.label)
       (Kind_graph.find (Core_inspect.scene value.core) id))
@@ -207,7 +207,7 @@ let refresh_hidden value frame =
 (* Recompose when a cook, the scene, or the World changed. Each object's
    drawing is reused while its graph and prepared value are physically the same, so
    moving an object only re-places it. *)
-let composition_key core scene = scene, core.Core_model.level,
+let composition_key core scene = scene, (Core_model.pane_level core),
   (match core.Core_model.doc.Document.shell with Some shell -> shell.views | None -> [])
 
 let compose value (update : (_, _) Core_model.update) ~baked ~baked_views ~scene =
@@ -246,7 +246,7 @@ let compose value (update : (_, _) Core_model.update) ~baked ~baked_views ~scene
         Document.Int_map.empty placed in
     let waiting = placed = [] && Core_list.geometry_objects update.core <> []
         && Core_list.pieces update.core = [] in
-    let ghost id = match update.core.Core_model.level with
+    let ghost id = match (Core_model.pane_level update.core) with
       | Document.Inside open_id -> Core_inspect.kind update.core open_id = Some "geometry"
           && id <> open_id
       | Scene -> false in

@@ -87,7 +87,7 @@ let update_with value frame ~inspector =
   let image_errors=ref [] in
   let preview image=match Flow_native.Workspace_images.image ~gpu:image_gpu value.host.images ~state:value.core.cook.state ~live lowered.plan image with
     |Ok _->()|Error diagnostic->image_errors:=Diagnostic.to_string diagnostic:: !image_errors in
-  (match value.core.scope_key with
+  (match (Core_model.pane_laid value.core) with
    |Some{records=Some records;scope;_}->
        List.iter(fun path->let chains=Flow_graph.Probe.chains scope in
          let probes=List.map(fun zone->Option.value ~default:0(Layout_by_path.Path_map.find_opt zone value.core.probes))
@@ -97,7 +97,7 @@ let update_with value frame ~inspector =
              preview image
          |Some(Flow_graph.Probe.Image image)->
              preview(Flow.Eval.Deferred(Flow.Ty.image,image.node))
-         |_->())(Pxui_graph.Scope.selected value.core.scope_view)
+         |_->())(Pxui_graph.Scope.selected (Core_model.pane_view value.core))
    |_->());
   let update = Flow_native.Workspace_gpu.with_backend value.host.gpu (fun gpu -> Flow_sop.Lower.with_images ~gpu
     ~metadata:(fun plan id->Option.map Rays.Image.Private.dimensions(Flow_native.Workspace_images.peek value.host.images plan id))
@@ -152,7 +152,7 @@ let update_with value frame ~inspector =
      the final release position are reduced before sealing its history. *)
   let seal core = { core with Core_model.history = Editor_core.History.seal core.Core_model.history } in
   let world_drag = if update.loaded_view <> None
-      || core.Core_model.level <> value.core.Core_model.level
+      || (Core_model.pane_level core) <> (Core_model.pane_level value.core)
       || core.Core_model.map_view <> value.core.Core_model.map_view
       || List.exists (function Leader.Undo | Redo | Hide_ui -> true | _ -> false) update.actions
     then None else value.world_drag in
@@ -365,11 +365,11 @@ let crash_dump value directory =
       (Core_panes.graph_panels core) (Core_panes.windows core) (Core_panes.panels_line core)
       (Core_panes.route core)
       (Text_pane.summary core.text)
-      core.map_view (Pxui_graph.Scope.Private.grabbed core.scope_view) core.guide (Option.fold ~none:"-" ~some:fst core.hud)
+      core.map_view (Pxui_graph.Scope.Private.grabbed (Core_model.pane_view core)) core.guide (Option.fold ~none:"-" ~some:fst core.hud)
       (Option.fold ~none:"none" ~some:(fun (node : Core_model.picked) ->
         Printf.sprintf "%s (#%d, %s)" node.label node.id node.kind)
         (Core_list.selected_node core))
-      (match Pxui_graph.Scope.selected core.scope_view with
+      (match Pxui_graph.Scope.selected (Core_model.pane_view core) with
        | [] -> "-"
        | paths -> String.concat ", " (List.map (String.concat "/") paths))
       (Leader.pane_name core.focus) (Core_status.prompt_name core)

@@ -2,7 +2,7 @@
  (name rays_editor)
  (public_name rays.rays_editor)
 (private_modules echo carry selection leader schedule pick cook lisp_text text_pane navigator bars source_file
-  spreadsheet core_model core_shell core_inspect core_panes core_scope core_add core_list core_setup core_status core_actions
+  spreadsheet panel_map core_model core_shell core_inspect core_panes core_scope core_add core_list core_setup core_status core_actions
   core_text core_panels core_menu core_carry core_reduce core_host core_inspector_pane core_viewport_pane core world_map
   environment_view environment_model environment_source environment
   viewport renderer)

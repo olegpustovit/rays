@@ -33,7 +33,7 @@ let context_name = Flow.Workspace.context_name
    other graphs follow in the search, in ink-3, saying that they are not placed here.  The title says
    which node the new one goes after. *)
 let open_menu ?scope_view value (x, y) =
-  let scope_view = Option.value scope_view ~default:value.scope_view in
+  let scope_view = Option.value scope_view ~default:(pane_view value) in
   match add_target value with
   | Some (_, context) ->
       let module M = Pxui_graph.Node_menu in

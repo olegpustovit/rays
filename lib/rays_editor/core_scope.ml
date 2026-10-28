@@ -67,7 +67,7 @@ let sync_views value =
         view_key = Some (lowered, value.probes, previews, canvas_preview) }
 
 let view_node value path =
-  match value.scope_key with
+  match pane_laid value with
   | Some key ->
       let chain = Option.value ~default:[] (Hashtbl.find_opt (Flow_graph.Probe.chains key.scope) path) in
       let probes = List.map (fun path -> Option.value ~default:0
@@ -77,7 +77,7 @@ let view_node value path =
       let owner = Option.bind node (fun node ->
         let owns id = Option.bind (Document.Int_map.find_opt id value.doc.networks)
           (fun network -> lowered.preview ~node ~probes network.graph) <> None in
-        match value.level with
+        match pane_level value with
         | Inside id when owns id -> Some id
         | _ -> Document.Int_map.fold (fun id _ found ->
             match found with Some _ -> found | None -> if owns id then Some id else None)
@@ -98,13 +98,13 @@ let view_node value path =
    evaluation is retained by lowering, never repeated by a pane or a frame. *)
 let sync_scope value =
   let value = sync_views value in
-  let value = match value.scope_key with
-    | Some key -> { value with scope_view = Pxui_graph.Scope.with_display (viewed_path value key.scope) value.scope_view }
+  let value = match pane_laid value with
+    | Some key -> with_pane value (fun pane -> { pane with view = Pxui_graph.Scope.with_display (viewed_path value key.scope) pane.view })
     | None -> value in
   match graph_name value, value.doc.Document.workspace, Lazy.force value.flow_catalog with
   | Some name, { Document.ws; lowered; _ }, Some catalog ->
       let module M = Layout_by_path.Path_map in
-      let previous = value.scope_key in
+      let previous = (pane_laid value) in
       let arguments = Option.bind previous (fun k -> if k.graph <> name || k.ws.layout.collapsed != ws.layout.collapsed then None else
         match Workspace_doc.literal_changes ~previous:k.ws ws with
         | Some _ as changes -> changes
@@ -139,10 +139,10 @@ let sync_scope value =
         | None -> true in
       if not moved && not fresh then
         (* the first call after a forced frame learns what that frame cost *)
-        { value with scope_key = Option.map (fun k ->
+        with_pane value (fun pane -> { pane with laid = Option.map (fun k ->
             { k with fresh_last = false;
                      gap = if k.fresh_last then quiet k else k.gap })
-            value.scope_key }
+            pane.laid })
       else begin
         let stamp = match previous with Some k when not fresh -> k.stamp | _ -> now in
         let gap = match previous with
@@ -154,14 +154,14 @@ let sync_scope value =
               if edits = [] then k.scope else Flow_graph.Projection.with_arguments edits k.scope
           | _ -> Flow_graph.Projection.of_graph ~folded:(fun p -> M.find_opt p ws.layout.collapsed <> Some false) catalog ws.checked name in
         let scope_view = if not moved then
-          Pxui_graph.Scope.with_arguments edits value.scope_view else begin
+          Pxui_graph.Scope.with_arguments edits (pane_view value) else begin
           let layout = ws.layout in
           let display = viewed_path value scope in
           let layouts = match value.doc.Document.shell with
             | Some { switch = Some _; _ } when Option.map (fun (g : Flow.Workspace.graph) -> g.name)
                 (Workspace_doc.editor_graph (value.doc.Document.workspace.ws)) = Some name -> List.map fst (layouts value)
             | _ -> [] in
-          Flow.Phase_timer.measure "layout" (fun () -> Pxui_graph.Scope.with_scope ~layouts ~key:name scope value.scope_view
+          Flow.Phase_timer.measure "layout" (fun () -> Pxui_graph.Scope.with_scope ~layouts ~key:name scope (pane_view value)
             ~imported:(Workspace_doc.imported_file ws)
             ~at:(fun path -> M.find_opt path layout.at)
             ~level:(fun path -> match M.find_opt path layout.level, M.find_opt path layout.pinned with
@@ -234,7 +234,8 @@ let sync_scope value =
                 (Flow_graph.Probe.geometry_targets records scope
                    ~probe:(fun path -> Option.value ~default:0 (M.find_opt path value.probes)))
           | None, _ -> [] in
-        { value with scope_view; select_later; scope_key = Some { ws; probe_map = value.probes; graph = name;
-            evaluated; summaries; executions; time; records; force; scope; targets; stamp; gap; fresh_last = fresh } }
+        with_pane { value with select_later } (fun pane -> { pane with view = scope_view;
+          laid = Some { ws; probe_map = value.probes; graph = name;
+            evaluated; summaries; executions; time; records; force; scope; targets; stamp; gap; fresh_last = fresh } })
       end
   | _ -> value

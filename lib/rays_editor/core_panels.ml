@@ -30,16 +30,16 @@ let panel_title value (leaf : Pxui_shell.Layout.leaf) =
         let context = List.find_map (fun (g : Flow.Workspace.graph) ->
           if g.name = graph then Some (Flow.Workspace.context_name g.context) else None)
           (value.doc.Document.workspace.ws).checked.graphs in
-        (if value.back = [] then graph
+        (if (pane_route value) = [] then graph
          else String.concat " / " (List.map String.trim (String.split_on_char '>' (route value))))
         ^ Option.fold ~none:"" ~some:(fun c -> " / " ^ c) context
     | List -> "List", level_name value
     | Lisp -> "Lisp", if (let _, _, w, _ = leaf.frame in w < 400) then ""  (* the narrow sheet has the kind alone *)
         else if graph = "" then value.file else if value.file = "" then graph else value.file ^ " / " ^ graph
-    | Inspector -> "Inspector", (match (if value.scope_key = None then [] else inspector_paths (Pxui_graph.Scope.selected value.scope_view)) with
+    | Inspector -> "Inspector", (match (if (pane_laid value) = None then [] else inspector_paths (Pxui_graph.Scope.selected (pane_view value))) with
         | [ path ] when graph <> "" ->
             (* the node's title (a result is `result`, not `@result`); the narrow column has the node alone *)
-            let title = match Option.bind value.scope_key (fun (k : scope_key) -> Flow_graph.Projection.find k.scope path) with
+            let title = match Option.bind (pane_laid value) (fun (k : scope_key) -> Flow_graph.Projection.find k.scope path) with
               | Some n -> Flow_graph.Projection.title n
               | None -> let last = List.nth path (List.length path - 1) in
                   if String.starts_with ~prefix:":" last then String.sub last 1 (String.length last - 1) else last in
@@ -62,7 +62,7 @@ let panel_title value (leaf : Pxui_shell.Layout.leaf) =
    graph pane's projection, the context is the result's (a geometry is [sop], anything else [value]). *)
 let defn_change value paths =
   let ws = value.doc.Document.workspace.ws in
-  let scope = Option.map (fun (k : scope_key) -> k.scope) value.scope_key in
+  let scope = Option.map (fun (k : scope_key) -> k.scope) (pane_laid value) in
   let rec ty_text : Flow.Ty.t -> string option = function
     | (Flow.Ty.Named "geometry") -> Some "geometry" | Float -> Some "float" | Int -> Some "int" | Bool -> Some "bool"
     | Vec3 -> Some "vec3" | Text -> Some "text" | Fn _ -> Some "fn"
@@ -93,7 +93,7 @@ let defn_change value paths =
    the binding that places it. *)
 let outline_objects value : Navigator.obj list =
   let document = scene value in
-  let selected = if value.level = Document.Scene then Selection.selected_nodes value.selection else [] in
+  let selected = if (pane_level value) = Document.Scene then Selection.selected_nodes (pane_selection value) else [] in
   Array.to_list (scene_rows document) |> List.map (fun (row : Pxui_shell.Tree.row) ->
     let node = Kind_graph.find document row.id in
     let flag name = Option.bind node (fun node ->
@@ -141,17 +141,17 @@ let outline_objects value : Navigator.obj list =
 let navigator_params value : Navigator.params =
   let ws = value.doc.Document.workspace.ws in
   let active = graph_name value in
-  let here = match value.scope_key, active with
+  let here = match pane_laid value, active with
     | Some k, Some name when k.graph = name -> Some k | _ -> None in
   { workspace = ws.checked; active;
     scope = Option.map (fun (k : scope_key) -> k.scope) here;
     records = Option.bind here (fun (k : scope_key) -> k.records);
     probes = (fun p -> Option.value ~default:0 (Layout_by_path.Path_map.find_opt p value.probes));
-    selected = Pxui_graph.Scope.selected value.scope_view;
-    chips = (match value.scope_key with
+    selected = Pxui_graph.Scope.selected (pane_view value);
+    chips = (match pane_laid value with
       | Some { evaluated = Some ev; _ } -> Navigator.chips ev
       | _ -> []);
-    notes = (match value.scope_key with
+    notes = (match pane_laid value with
       | Some { evaluated = Some ev; _ } -> Navigator.notes ev
       | _ -> []);
     objects = outline_objects value;
@@ -384,7 +384,7 @@ let paste_bindings value =
   | Some _, Error message -> [ Declined ("Clipboard: " ^ message) ]
   | Some (graph, _), Ok text ->
       let ws = value.doc.Document.workspace.ws in
-      let scope = match Pxui_graph.Scope.selected value.scope_view with
+      let scope = match Pxui_graph.Scope.selected (pane_view value) with
         | [ path ] when List.length path >= 2 -> List.take (List.length path - 1) path
         | _ -> [ graph ] in
       (* one gesture: every binding lands or none does *)
@@ -395,6 +395,6 @@ let paste_bindings value =
 
 (* The one node the inspector shows for the pane's selection, if exactly one (a test hook) *)
 let inspector_subject value =
-  if value.scope_key = None then None
-  else match inspector_paths (Pxui_graph.Scope.selected value.scope_view) with
+  if (pane_laid value) = None then None
+  else match inspector_paths (Pxui_graph.Scope.selected (pane_view value)) with
     | [ path ] -> Some path | _ -> None
