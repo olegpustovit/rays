@@ -1,13 +1,3 @@
-(executable
- (name embed_metal)
- (modules embed_metal))
-
-(rule
- (target pathtrace_source.ml)
- (deps pathtrace.metal)
- (action (with-stdout-to %{target}
-  (run %{exe:embed_metal.exe} %{dep:pathtrace.metal}))))
-
 ; The Lisp kernels' declarations, embedded in the order they are read.
 (rule
  (target pathtrace_lisp.ml)
@@ -19,7 +9,7 @@
 (library
  (name rays_pathtracer)
  (public_name rays.pathtracer)
- (modules rays_pathtracer pathtrace_source pathtrace_lisp lisp_kernel mesh_data mesh_build frame_data)
+ (modules rays_pathtracer pathtrace_lisp lisp_kernel mesh_data mesh_build frame_data)
  (private_modules pathtrace_lisp lisp_kernel mesh_data mesh_build frame_data)
  (libraries rays ogpu renderer runtime_resources rays_math flow flow_ir flow_gpu input unix))
 
@@ -32,7 +22,6 @@
 (rule
  (enabled_if (= %{system} macosx))
  (alias test_pathtracer)
- (deps pathtrace.metal)
  (action (run %{exe:test_main.exe} test_pathtracer)))
 
 ; Two frames byte for byte on the Apple M1 GPU and driver. It reads no switch:
@@ -42,7 +31,6 @@
  (enabled_if (= %{system} macosx))
  (alias test_pathtracer_exact_m1)
  (locks smoke_window)
- (deps pathtrace.metal)
  (action (run %{exe:test_main.exe} test_pathtracer_exact_m1)))
 
 (rule
@@ -60,7 +48,6 @@
  (enabled_if (= %{system} macosx))
  (alias qualification)
  (locks smoke_window)
- (deps pathtrace.metal)
  (action (run %{exe:test_main.exe} test_parity)))
 
 (rule
@@ -88,10 +75,9 @@
  (enabled_if (= %{system} macosx))
  (name test_lisp)
  (modules test_lisp)
- (libraries rays rays_pathtracer ogpu_metal rays_math))
+ (libraries rays rays_pathtracer flow ogpu_metal rays_math))
 
 (rule
  (enabled_if (= %{system} macosx))
  (alias runtest-native)
- (deps pathtrace.metal)
  (action (run %{exe:test_lisp.exe})))

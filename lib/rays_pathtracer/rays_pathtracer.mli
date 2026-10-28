@@ -1,4 +1,4 @@
-(** Metal ray-tracing path tracer.
+(** Hardware ray-tracing path tracer on its Rays Lisp kernels (pathtrace.rays, emitted by Flow_gpu).
 
     RDK meshes carry metallic-roughness materials and are lit by a procedural
     dome: a sky/ground gradient plus soft rectangular emitter panels, which
@@ -68,13 +68,12 @@ val light_of : Rays.Light.t -> light
     dark sideways, a spot ignores its cone, and attenuation coefficients other
     than the quadratic term are ignored. *)
 
-(** An analytic sphere, traced through a bounding-box intersection function
-    rather than tessellated. *)
+(** An analytic sphere, intersected beside the triangle structure rather than tessellated. *)
 type sphere = { center : Rays_math.Vec3.t; radius : float; sphere_material : material }
 
 (** A round polyline of constant [thickness] (diameter), traced as linear
-    curve segments. Needs [Ogpu.Caps.Ray_tracing_curves]; [create] and
-    [replace_mesh] fail with a typed message otherwise. *)
+    curve segments: native curves where [Ogpu.Caps.Ray_tracing_curves] is present, else one capsule test per
+    segment. *)
 type strand = { points : Rays_math.Vec3.t array; thickness : float; strand_material : material }
 
 (** Scene mesh inputs are already triangle-ready [Rays.Mesh.t] values with
@@ -98,8 +97,7 @@ type mesh
 val mesh :
   ?spheres:sphere list -> ?strands:strand list -> (Rays.Mesh.t * material) list ->
   (mesh, string) result
-(** Triangles, spheres, and strands together become one primitive structure
-    per kind under an instance structure (Metal holds one kind per structure). *)
+(** Triangles become one primitive structure; spheres and strands are traced beside it. *)
 
 val mesh_instanced :
   prototype:mesh -> ?materials:material array ->
@@ -218,10 +216,9 @@ val image : t -> Rays.Image.t
 val destroy : t -> unit
 
 module Private : sig
-  val max_total_threads : t -> (int, string) result
-  (** The current mesh shape's pathtrace pipeline thread limit (the Lisp kernel's register-pressure reference). *)
-  val use_metal : t -> bool -> unit
-  (** Trace with pathtrace.metal even where the Lisp kernels could (the A/B reference); restarts accumulation. *)
+  val cpu_trace : t -> Rays.Camera.t -> accum:float array -> (float array, string) result
+  (** The CPU walker's accumulation frame of the current scene (the device kernel's oracle): [accum] plus this
+      frame's samples, a vec4 per pixel in row order. Scene traces go to the [Flow.Ray_host] of scene 1. *)
   val lisp_kernel : t -> string -> (int * string, string) result
   (** A Lisp kernel of the current scene shape ("trace", "preview", ...): its pipeline's thread limit and its MSL. *)
 end

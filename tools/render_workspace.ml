@@ -88,7 +88,6 @@ let init _ =
     | Some network -> Option.iter (fun world ->
         P.set_world tracer (Some (World.bake ~domains:1 ~width:512 ~height:256 world)) |> get)
         (Layers.to_world node network)) (Objects.ids "world" scene);
-  if Sys.getenv_opt "RAYS_PATHTRACER_KERNEL" = Some "metal" then P.Private.use_metal tracer true;
   P.reset tracer;
   {tracer; canvas = (if benchmark then None else Some (Canvas.create_exn ~width ~height));
    setup_seconds = Unix.gettimeofday () -. started}

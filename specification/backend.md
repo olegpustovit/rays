@@ -388,16 +388,17 @@ what remains on both drivers: capabilities, buffer round trips, padded and
 inset texture uploads read back by the host, the three pixel formats, linear
 mip sampling, library lifetime and function-constant specializations, exact
 compute output, abandoned commands, ray-query hits (primitive id, instance id,
-`t`), bounding boxes through an intersection table, curves or their rejection,
+`t`), bounding boxes through an intersection table (no product caller since the path tracer's spheres
+moved to scene/trace), curves or their rejection,
 motion primitives and motion instances at three shutter times, user-id masks,
 compaction hit parity, the render path, lifetime rejection, and zero leaked
 handles; the mock rejects what it cannot execute with typed `Unsupported` and
 reproduces the record layouts.
-The path tracer's MSL now lives in `lib/rays_pathtracer/pathtrace.metal` and
-is embedded by an OCaml/Dune rule and compiled once into one OGPU library;
-the `INSTANCED` function constant selects the flat or instanced pipeline. The
-M1 fixed-image qualification covers flat and instanced renders after this
-source move and after the OGPU migration.
+The path tracer's kernels are Rays Lisp (`lib/rays_pathtracer/pathtrace.rays`), printed by `Flow_gpu.Emit`
+and dispatched through `Flow_gpu.Run` into the tracer's own buffers; `rays_pathtracer` depends on `flow`,
+`flow_ir`, `flow_gpu` and `input` (the frame facts a kernel is prepared with) for that. `Run.dispatch
+?resident` declares an instance structure's BLASes read, as the path tracer always did. The M1
+fixed-image qualification covers flat and instanced renders across the move from pathtrace.metal.
 The path-tracer camera input is now `Rays.Camera.t`; the current ray kernel
 accepts only an unshifted perspective view. The M1 fixed-image qualification
 also covers this API migration.
