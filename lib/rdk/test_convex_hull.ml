@@ -90,11 +90,11 @@ let check_contains source hull message =
 
 let test_affine_dimensions () =
   let point = point_cloud [|2.,3.,4.; 2.,3.,4.; 2.,3.,4.|]
-      |> Convex_hull.run ~source_point_attribute:"source" |> get_rdk in
+      |> Convex_hull_front.run ~source_point_attribute:"source" |> get_rdk in
   check (Geometry.point_count point = 1 && Geometry.vertex_count point = 0
       && Geometry.primitive_count point = 0) "singleton hull";
   let line = point_cloud [|2.,0.,0.; -1.,0.,0.; 5.,0.,0.; 0.,0.,0.; 5.,0.,0.|]
-      |> Convex_hull.run |> get_rdk in
+      |> Convex_hull_front.run |> get_rdk in
   let line_positions = Packed.Float3.View.view (Geometry.positions line) in
   check (Geometry.point_count line = 2 && Geometry.vertex_count line = 2
       && Geometry.primitive_count line = 1
@@ -103,7 +103,7 @@ let test_affine_dimensions () =
       && line_positions.x = [|-1.;5.|]) "collinear endpoint hull";
   let plane = point_cloud [|0.,0.,0.; 1.,0.,0.; 1.,1.,0.; 0.,1.,0.;
       0.5,0.5,0.; 0.5,0.,0.; 1.,1.,0.|]
-      |> Convex_hull.run |> get_rdk in
+      |> Convex_hull_front.run |> get_rdk in
   check (Geometry.point_count plane = 4 && Geometry.vertex_count plane = 4
       && Geometry.primitive_count plane = 1) "coplanar polygon hull";
   check (Topology.primitive_kind (Geometry.topology plane) 0 = Topology.Polygon)
@@ -133,7 +133,7 @@ let decorated_cube () =
 
 let test_solid_payload_and_selection () =
   let source = decorated_cube () in
-  let hull = Convex_hull.run ~grain:1 ~source_point_attribute:"source_point"
+  let hull = Convex_hull_front.run ~grain:1 ~source_point_attribute:"source_point"
       ~hull_group:"hull" source |> get_rdk in
   check (Geometry.point_count hull = 8 && Geometry.vertex_count hull = 36
       && Geometry.primitive_count hull = 12) "cube hull cardinality";
@@ -160,11 +160,11 @@ let test_solid_payload_and_selection () =
     "ordered point-group ancestry";
   let selected = Group.init ~grain:1 ~owner:Group.Point ~name:"bottom" 11
       (fun point -> point < 4) in
-  let plane = Convex_hull.run ~selection:(Element_selection.Selected_points selected) source
+  let plane = Convex_hull_front.run ~selection:(Element_selection.Selected_points selected) source
       |> get_rdk in
   check (Geometry.point_count plane = 4 && Geometry.primitive_count plane = 1)
     "typed selected hull";
-  let stripped = Convex_hull.run ~preserve_point_payload:false source |> get_rdk in
+  let stripped = Convex_hull_front.run ~preserve_point_payload:false source |> get_rdk in
   check (Geometry.find_attribute ~owner:Attribute.Point "id" stripped = None
       && Geometry.find_attribute ~owner:Attribute.Detail "tag" stripped <> None
       && Geometry.groups stripped = [])
@@ -173,24 +173,24 @@ let test_solid_payload_and_selection () =
 let test_exact_and_errors () =
   let tiny = Int64.float_of_bits 1L in
   let exact = point_cloud [|0.,0.,0.; 1.,0.,0.; 0.,1.,0.; 0.,0.,tiny|]
-      |> Convex_hull.run |> get_rdk in
+      |> Convex_hull_front.run |> get_rdk in
   check (Geometry.point_count exact = 4 && Geometry.primitive_count exact = 4)
     "subnormal full-dimensional hull";
   check_closed exact "subnormal hull incidence";
   let empty = point_cloud [||] in
-  expect_error "invalid_geometry" (Convex_hull.run empty);
-  expect_error "invalid_geometry" (Convex_hull.run ~grain:0 exact);
+  expect_error "invalid_geometry" (Convex_hull_front.run empty);
+  expect_error "invalid_geometry" (Convex_hull_front.run ~grain:0 exact);
   expect_error "invalid_geometry"
-    (Convex_hull.run ~source_point_attribute:"P" exact);
+    (Convex_hull_front.run ~source_point_attribute:"P" exact);
   let bad = point_cloud [|0.,0.,0.; nan,0.,0.|] in
-  expect_error "invalid_geometry" (Convex_hull.run bad);
+  expect_error "invalid_geometry" (Convex_hull_front.run bad);
   let wrong = Group.init ~grain:1 ~owner:Group.Point ~name:"wrong" 3
       (Fun.const true) in
   expect_error "invalid_geometry"
-    (Convex_hull.run ~selection:(Element_selection.Selected_points wrong) exact);
+    (Convex_hull_front.run ~selection:(Element_selection.Selected_points wrong) exact);
   let cancel = Cancel.create () in
   Cancel.cancel cancel;
-  expect_error "cancelled" (Convex_hull.run ~cancel exact)
+  expect_error "cancelled" (Convex_hull_front.run ~cancel exact)
 
 let test_randomized_containment () =
   for case = 0 to 31 do
@@ -201,7 +201,7 @@ let test_randomized_containment () =
         2. *. float_of_int value /. 10_007. -. 1. in
       coordinate 7919 17, coordinate 6841 29, coordinate 5503 43) in
     let source = point_cloud points in
-    let hull = Convex_hull.run ~grain:7 source |> get_rdk in
+    let hull = Convex_hull_front.run ~grain:7 source |> get_rdk in
     check_closed hull (Printf.sprintf "random hull %d incidence" case);
     check_contains source hull (Printf.sprintf "random hull %d containment" case);
     let index = Topology_index.create (Geometry.topology hull) in
@@ -229,7 +229,7 @@ let sphere_cloud rings columns =
 let test_parallel_exact () =
   let source = point_cloud (sphere_cloud 16 32) in
   let run domains = Parallel.run ~domains (fun () ->
-      Convex_hull.run ~grain:127 ~source_point_attribute:"source" source
+      Convex_hull_front.run ~grain:127 ~source_point_attribute:"source" source
       |> get_rdk) in
   let one = run 1 and four = run 4 in
   check (same_geometry one four) "one/four-domain hull mismatch";

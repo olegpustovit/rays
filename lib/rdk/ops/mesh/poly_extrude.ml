@@ -777,11 +777,26 @@ let run_general ?cancel ?(grain = 16_384) ?primitives ?split_edges
   Geometry.create ~positions:output_positions ~topology:output_topology
     ~attributes ~groups ~edge_groups ()
 
-let run ?cancel ?(grain = 1_024) ?primitives ?split_edges
-    ?(divide = Extrude_individual) ?(divisions = 1)
-    ?(output_front = true) ?(output_back = true) ?(output_side = true)
-    ?front_group ?back_group ?side_group ?front_boundary_group
-    ?back_boundary_group ~distance geometry =
+type params = {
+  cancel : Rdk_core.Cancel.t option;
+  grain : int option;
+  primitives : Rdk_core.Group.t option;
+  split_edges : Rdk_core.Edge_group.t option;
+  divide : divide;
+  divisions : int;
+  output_front : bool;
+  output_back : bool;
+  output_side : bool;
+  front_group : string option;
+  back_group : string option;
+  side_group : string option;
+  front_boundary_group : string option;
+  back_boundary_group : string option;
+  distance : float;
+}
+
+let run ({ cancel; grain; primitives; split_edges; divide; divisions; output_front; output_back; output_side; front_group; back_group; side_group; front_boundary_group; back_boundary_group; distance } : params) geometry =
+  let grain = Option.value ~default:1_024 grain in
   Error.guard ~operation:"poly_extrude" ~code:"invalid_geometry" @@ fun () ->
   if primitives = None && split_edges = None && divide = Extrude_individual
       && divisions = 1 && output_front && output_back && output_side

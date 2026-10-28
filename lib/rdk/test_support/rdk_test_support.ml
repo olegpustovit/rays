@@ -510,3 +510,69 @@ module Attribute_ops_front = struct
     Rdk.Attribute_ops.interpolate {
       cancel; grain; selection; driver; compute_weights; point_pattern; vertex_pattern; primitive_pattern; detail_pattern; match_groups; pre_scale; normalize_weights; threshold; blend; unmatched; target_owner; attributes; source; target } ()
 end
+
+module Poly_extrude_front = struct
+  open Rdk.Poly_extrude
+  let run ?cancel ?grain ?primitives ?split_edges ?(divide = Extrude_individual) ?(divisions = 1) ?(output_front = true) ?(output_back = true) ?(output_side = true) ?front_group ?back_group ?side_group ?front_boundary_group ?back_boundary_group ~distance geometry =
+    Rdk.Poly_extrude.run ({ cancel; grain; primitives; split_edges; divide; divisions; output_front; output_back; output_side; front_group; back_group; side_group; front_boundary_group; back_boundary_group; distance } : Rdk.Poly_extrude.params) geometry
+end
+
+module Poly_bevel_front = struct
+  open Rdk.Poly_bevel
+  let run ?cancel ?grain ?edges ?(shape = Bevel_chamfer) ?(divisions = 1) ?point_scale_attribute ?ignore_flat_angle ?(clamp_overlap = true) ?edge_group ?corner_group ?offset_group ?(recompute_point_normals = true) ~distance geometry =
+    Rdk.Poly_bevel.run ({ cancel; grain; edges; shape; divisions; point_scale_attribute; ignore_flat_angle; clamp_overlap; edge_group; corner_group; offset_group; recompute_point_normals; distance } : Rdk.Poly_bevel.params) geometry
+end
+
+module Poly_reduce_front = struct
+  open Rdk.Poly_reduce
+  let run ?cancel ?grain ?(target = Reduce_ratio 0.5) ?primitives ?hard_points ?hard_edges ?(preserve_boundary = true) ?(only_original_positions = false) ?(equalize_lengths = 1e-10) ?max_normal_deviation ?output_group ?(recompute_point_normals = true) geometry =
+    Rdk.Poly_reduce.run ({ cancel; grain; target; primitives; hard_points; hard_edges; preserve_boundary; only_original_positions; equalize_lengths; max_normal_deviation; output_group; recompute_point_normals } : Rdk.Poly_reduce.params) geometry
+end
+
+module Poly_cut_front = struct
+  open Rdk.Poly_cut
+  let cut ?cancel ?grain ?primitives ?cut_points ?cut_edges ?(element = Poly_cut_points) ?(strategy = Poly_cut_remove) ?(detection = Poly_cut_all) ?(keep_closed = true) geometry =
+    Rdk.Poly_cut.cut ({ cancel; grain; primitives; cut_points; cut_edges; element; strategy; detection; keep_closed } : Rdk.Poly_cut.params) geometry
+end
+
+module Poly_fill_front = struct
+  open Rdk.Poly_fill
+  let run ?cancel ?grain ?boundary ?(mode = Fill_triangles) ?(reverse_patches = false) ?(unique_points = false) ?(update_point_normals = false) ?patch_group geometry =
+    Rdk.Poly_fill.run ({ cancel; grain; boundary; mode; reverse_patches; unique_points; update_point_normals; patch_group } : Rdk.Poly_fill.params) geometry
+end
+
+module Dissolve_front = struct
+  open Rdk.Dissolve
+  let run ?cancel ?grain ?edges ?(operation = Dissolve_selected) ?(bridge_policy = Create_bridged_polygons) ?(remove_inline_points = false) ?(collinearity_tolerance = 0.) ?(remove_unused_points = true) ?(create_boundary_curves = false) ?(recompute_normals = true) geometry =
+    Rdk.Dissolve.run ({ cancel; grain; edges; operation; bridge_policy; remove_inline_points; collinearity_tolerance; remove_unused_points; create_boundary_curves; recompute_normals } : Rdk.Dissolve.params) geometry
+end
+
+module Convex_hull_front = struct
+  open Rdk.Convex_hull
+  let run ?cancel ?grain ?selection ?(preserve_point_payload = true) ?source_point_attribute ?hull_group geometry =
+    Rdk.Convex_hull.run ({ cancel; grain; selection; preserve_point_payload; source_point_attribute; hull_group } : Rdk.Convex_hull.params) geometry
+end
+
+module Smooth_front = struct
+  open Rdk.Smooth
+  let run ?cancel ?grain ?constrained_points ?(boundary = Smooth_free) ?(iterations = 1) ?(mode = Attribute_blur.Laplacian 0.5) ?(recompute_normals = true) ~attributes geometry =
+    Rdk.Smooth.run ({ cancel; grain; constrained_points; boundary; iterations; mode; recompute_normals; attributes } : Rdk.Smooth.params) geometry
+end
+
+module Curve_join_front = struct
+  open Rdk.Curve_join
+  let join ?cancel ?grain ?primitives ?picked_ends ?(orient_closest = true) ?(connect_closest_ends = false) ?(only_connected = false) ?group_size ?(keep_originals = false) ?(tolerance = 0.) ?(wrap = false) geometry =
+    Rdk.Curve_join.join ({ cancel; grain; primitives; picked_ends; orient_closest; connect_closest_ends; only_connected; group_size; keep_originals; tolerance; wrap } : Rdk.Curve_join.params) geometry
+end
+
+module Curve_topology_front = struct
+  open Rdk.Curve_topology
+  let join_curves ?cancel ?grain ?primitives ?picked_ends ?orient_closest ?connect_closest_ends ?only_connected ?group_size ?keep_originals ?tolerance ?wrap geometry =
+    Rdk.Curve_topology.join_curves ({ cancel; grain; primitives; picked_ends; orient_closest; connect_closest_ends; only_connected; group_size; keep_originals; tolerance; wrap } : Rdk.Curve_topology.params) geometry
+end
+
+module Attribute_mirror_front = struct
+  open Rdk.Attribute_mirror
+  let run ?cancel ?grain ?group ?(group_use = Mirror_group_as_source) ?(attributes = "Cd") ?(transform = Mirror_copy) ?string_replace ?output_mapping ?source_group ?destination_group ~owner ~method_ geometry =
+    Rdk.Attribute_mirror.run ({ cancel; grain; group; group_use; attributes; transform; string_replace; output_mapping; source_group; destination_group; owner; method_ } : Rdk.Attribute_mirror.params) geometry
+end

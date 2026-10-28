@@ -46,11 +46,19 @@ let remap_error error =
   Error.make ~hints:(Error.hints error) ~operation:"smooth"
     ~code:(Error.code error) (Error.message error)
 
-let run ?cancel ?(grain = 16_384) ?constrained_points
-    ?(boundary = Smooth_free) ?(iterations = 1)
-    ?(mode = Attribute_blur.Laplacian 0.5)
-    ?(recompute_normals = true)
-    ~attributes geometry =
+type params = {
+  cancel : Rdk_core.Cancel.t option;
+  grain : int option;
+  constrained_points : Rdk_core.Group.t option;
+  boundary : boundary;
+  iterations : int;
+  mode : Attribute_blur.mode;
+  recompute_normals : bool;
+  attributes : string;
+}
+
+let run ({ cancel; grain; constrained_points; boundary; iterations; mode; recompute_normals; attributes } : params) geometry =
+  let grain = Option.value ~default:16_384 grain in
   try
     if grain <= 0 then fail "invalid_parameter" "grain must be positive"
     else

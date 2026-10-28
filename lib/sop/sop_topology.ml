@@ -136,11 +136,7 @@ module Dissolve = struct
         match edges with
         | Error error -> Error error
         | Ok edges ->
-            match Rdk.Dissolve.run ~cancel:(Context.cancel_token context)
-                ~grain:(Context.grain context) ?edges ~operation ~bridge_policy
-                ~remove_inline_points ~collinearity_tolerance
-                ~remove_unused_points ~create_boundary_curves ~recompute_normals
-                inputs.(0) with
+            match Rdk.Dissolve.run { cancel = Some (Context.cancel_token context); grain = Some (Context.grain context); edges; operation; bridge_policy; remove_inline_points; collinearity_tolerance; remove_unused_points; create_boundary_curves; recompute_normals } inputs.(0) with
             | Ok geometry -> cooked geometry
             | Error error -> structured_rdk_error error)
   )
@@ -265,11 +261,7 @@ module Poly_extrude = struct
         match primitives, split with
         | Error error, _ | _, Error error -> Error error
         | Ok primitives, Ok split_edges ->
-            match Rdk.Poly_extrude.run ~cancel:(Context.cancel_token context)
-                ~grain:(Context.grain context) ?primitives ?split_edges ~divide
-                ~divisions ~output_front ~output_back ~output_side ?front_group
-                ?back_group ?side_group ?front_boundary_group
-                ?back_boundary_group ~distance geometry with
+            match Rdk.Poly_extrude.run { cancel = Some (Context.cancel_token context); grain = Some (Context.grain context); primitives; split_edges; divide; divisions; output_front; output_back; output_side; front_group; back_group; side_group; front_boundary_group; back_boundary_group; distance } geometry with
             | Ok geometry -> cooked geometry
             | Error error -> structured_rdk_error error)
   )
@@ -324,9 +316,7 @@ module Poly_fill = struct
         match boundary with
         | Error error -> Error error
         | Ok boundary ->
-            match Rdk.Poly_fill.run ~cancel:(Context.cancel_token context)
-                ~grain:(Context.grain context) ?boundary ~mode ~reverse_patches
-                ~unique_points ~update_point_normals ?patch_group geometry with
+            match Rdk.Poly_fill.run { cancel = Some (Context.cancel_token context); grain = Some (Context.grain context); boundary; mode; reverse_patches; unique_points; update_point_normals; patch_group } geometry with
             | Ok geometry -> cooked geometry
             | Error error -> structured_rdk_error error)
   )
@@ -462,9 +452,7 @@ module Convex_hull = struct
         match resolve_element_group ~operation:"convex_hull" selection inputs.(0) with
         | Error error -> Error error
         | Ok selection ->
-            match Rdk.Convex_hull.run ~cancel:(Context.cancel_token context)
-                ~grain:(Context.grain context) ?selection ~preserve_point_payload
-                ?source_point_attribute ?hull_group inputs.(0) with
+            match Rdk.Convex_hull.run { cancel = Some (Context.cancel_token context); grain = Some (Context.grain context); selection; preserve_point_payload; source_point_attribute; hull_group } inputs.(0) with
             | Ok geometry -> cooked geometry
             | Error error -> structured_rdk_error error)
   )
@@ -648,10 +636,7 @@ module Join_curves = struct
         match primitives with
         | Error _ as error -> error
         | Ok primitives ->
-            match Rdk.Curve_topology.join_curves ~cancel:(Context.cancel_token context)
-                ~grain:(Context.grain context) ?primitives ?picked_ends ~orient_closest
-                ~connect_closest_ends ~only_connected ?group_size ~keep_originals
-                ~tolerance ~wrap inputs.(0) with
+            match Rdk.Curve_topology.join_curves { cancel = Some (Context.cancel_token context); grain = Some (Context.grain context); primitives; picked_ends; orient_closest = Some orient_closest; connect_closest_ends = Some connect_closest_ends; only_connected = Some only_connected; group_size; keep_originals = Some keep_originals; tolerance = Some tolerance; wrap = Some wrap } inputs.(0) with
             | Ok geometry -> cooked geometry
             | Error error -> structured_rdk_error error)
   )
@@ -836,15 +821,11 @@ module Poly_cut = struct
             match cut_selection with
             | Error error -> Error error
             | Ok (`Points cut_points) ->
-                (match Rdk.Poly_cut.cut ~cancel:(Context.cancel_token context)
-                    ~grain:(Context.grain context) ?primitives ?cut_points
-                    ~element ~strategy ~detection ~keep_closed geometry with
+                (match Rdk.Poly_cut.cut { cancel = Some (Context.cancel_token context); grain = Some (Context.grain context); primitives; cut_points; cut_edges = None; element; strategy; detection; keep_closed } geometry with
                  | Ok geometry -> cooked geometry
                  | Error error -> structured_rdk_error error)
             | Ok (`Edges cut_edges) ->
-                (match Rdk.Poly_cut.cut ~cancel:(Context.cancel_token context)
-                    ~grain:(Context.grain context) ?primitives ?cut_edges
-                    ~element ~strategy ~detection ~keep_closed geometry with
+                (match Rdk.Poly_cut.cut { cancel = Some (Context.cancel_token context); grain = Some (Context.grain context); primitives; cut_points = None; cut_edges; element; strategy; detection; keep_closed } geometry with
                  | Ok geometry -> cooked geometry
                  | Error error -> structured_rdk_error error))
   )
@@ -951,11 +932,7 @@ module Poly_reduce = struct
         match primitives, hard_points, hard_edges with
         | Error error, _, _ | _, Error error, _ | _, _, Error error -> Error error
         | Ok primitives, Ok hard_points, Ok hard_edges ->
-            match Rdk.Poly_reduce.run ~cancel:(Context.cancel_token context)
-                ~grain:(Context.grain context) ~target ?primitives ?hard_points
-                ?hard_edges ~preserve_boundary ~only_original_positions
-                ~equalize_lengths ?max_normal_deviation ?output_group
-                ~recompute_point_normals geometry with
+            match Rdk.Poly_reduce.run { cancel = Some (Context.cancel_token context); grain = Some (Context.grain context); target; primitives; hard_points; hard_edges; preserve_boundary; only_original_positions; equalize_lengths; max_normal_deviation; output_group; recompute_point_normals } geometry with
             | Ok geometry -> cooked geometry
             | Error error -> structured_rdk_error error)
   )
@@ -1115,11 +1092,7 @@ module Poly_bevel = struct
         match edges with
         | Error error -> Error error
         | Ok edges ->
-            match Rdk.Poly_bevel.run ~cancel:(Context.cancel_token context)
-                ~grain:(Context.grain context) ?edges ~shape ~divisions
-                ?point_scale_attribute ?ignore_flat_angle ~clamp_overlap
-                ?edge_group ?corner_group ?offset_group ~recompute_point_normals
-                ~distance geometry with
+            match Rdk.Poly_bevel.run { cancel = Some (Context.cancel_token context); grain = Some (Context.grain context); edges; shape; divisions; point_scale_attribute; ignore_flat_angle; clamp_overlap; edge_group; corner_group; offset_group; recompute_point_normals; distance } geometry with
             | Ok geometry -> cooked geometry
             | Error error -> structured_rdk_error error)
   )

@@ -84,7 +84,7 @@ let run () =
   let polygon_selection = Group.init ~owner:Group.Primitive ~name:"polygons"
       (Geometry.primitive_count mixed) (fun primitive -> primitive < 2) in
   let mixed = Geometry.with_group polygon_selection mixed |> get in
-  let mixed_output = Poly_extrude.run ~primitives:polygon_selection
+  let mixed_output = Poly_extrude_front.run ~primitives:polygon_selection
       ~divide:Poly_extrude.Extrude_connected_components ~distance:1. mixed |> get_rdk in
   check (Geometry.primitive_count mixed_output = 9
       && Array.exists (fun primitive ->
@@ -94,7 +94,7 @@ let run () =
     "Poly Extrude did not preserve an unselected curve";
   let curve_selection = Group.init ~owner:Group.Primitive ~name:"curve"
       (Geometry.primitive_count mixed) (fun primitive -> primitive = 2) in
-  (match Poly_extrude.run ~primitives:curve_selection
+  (match Poly_extrude_front.run ~primitives:curve_selection
       ~divide:Poly_extrude.Extrude_connected_components ~distance:1. mixed with
    | Error error -> check (Error.code error = "invalid_geometry")
        "selected-curve Poly Extrude diagnostic"
@@ -108,7 +108,7 @@ let run () =
       ~primitive_offsets:[|0;3;6;9|] |> get in
   let non_manifold = Geometry.create ~positions:non_manifold_positions
       ~topology:non_manifold_topology () |> get in
-  (match Poly_extrude.run ~divide:Poly_extrude.Extrude_connected_components
+  (match Poly_extrude_front.run ~divide:Poly_extrude.Extrude_connected_components
       ~distance:1. non_manifold with
    | Error error -> check (Error.code error = "invalid_geometry")
        "non-manifold Poly Extrude diagnostic"
@@ -118,7 +118,7 @@ let run () =
   Cancel.cancel cancelled;
   let dense = Plane_generators.grid ~columns:320 ~rows:240 ~size:20. () |> get_rdk in
   let run domains = Parallel.run ~domains (fun () ->
-      Poly_extrude.run ~grain:257
+      Poly_extrude_front.run ~grain:257
         ~divide:Poly_extrude.Extrude_connected_components ~divisions:4
         ~front_group:"front" ~side_group:"side"
         ~front_boundary_group:"front_boundary"

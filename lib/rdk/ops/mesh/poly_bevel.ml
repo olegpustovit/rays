@@ -166,10 +166,24 @@ let add_empty_outputs ~grain ?edge_group ?corner_group ?offset_group geometry =
     ~topology:(Geometry.topology geometry) ~attributes:(Geometry.attributes geometry)
     ~groups ~edge_groups ()
 
-let run ?cancel ?(grain = 16_384) ?edges ?(shape = Bevel_chamfer)
-    ?(divisions = 1) ?point_scale_attribute ?ignore_flat_angle
-    ?(clamp_overlap = true) ?edge_group ?corner_group ?offset_group
-    ?(recompute_point_normals = true) ~distance geometry =
+type params = {
+  cancel : Rdk_core.Cancel.t option;
+  grain : int option;
+  edges : Rdk_core.Edge_group.t option;
+  shape : shape;
+  divisions : int;
+  point_scale_attribute : string option;
+  ignore_flat_angle : float option;
+  clamp_overlap : bool;
+  edge_group : string option;
+  corner_group : string option;
+  offset_group : string option;
+  recompute_point_normals : bool;
+  distance : float;
+}
+
+let run ({ cancel; grain; edges; shape; divisions; point_scale_attribute; ignore_flat_angle; clamp_overlap; edge_group; corner_group; offset_group; recompute_point_normals; distance } : params) geometry =
+  let grain = Option.value ~default:16_384 grain in
   Error.guard ~operation:"poly_bevel" ~code:"invalid_topology" @@ fun () ->
   if grain <= 0 then invalid_arg "Rdk_mesh.Poly_bevel.poly_bevel: grain must be positive";
   if not (Float.is_finite distance) || distance < 0. then

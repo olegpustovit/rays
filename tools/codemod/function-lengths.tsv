@@ -12,10 +12,10 @@ lib/rdk/geom/exact/delaunay2.ml	build#1	301
 lib/rdk/geom/exact/planar_cdt.ml	build#1	976
 lib/rdk/geom/exact/planar_constraints.ml	build#1	373
 lib/rdk/geom/exact/planar_refinement.ml	build#1	401
-lib/rdk/ops/curve/curve_join.ml	join#1	474
+lib/rdk/ops/curve/curve_join.ml	join#1	471
 lib/rdk/ops/mesh/plane_clip.ml	clip#1	1521
-lib/rdk/ops/mesh/poly_bevel.ml	run#1	869
-lib/rdk/ops/mesh/poly_cut.ml	cut#1	590
+lib/rdk/ops/mesh/poly_bevel.ml	run#1	867
+lib/rdk/ops/mesh/poly_cut.ml	cut#1	589
 lib/rdk/ops/mesh/poly_extrude.ml	run_general#1	463
 lib/rdk/ops/mesh/poly_reduce.ml	plan_round#1	319
 lib/rdk/ops/mesh/ray.ml	run#1	383

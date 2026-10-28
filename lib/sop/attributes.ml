@@ -408,11 +408,7 @@ module Attribute_mirror = struct
             match resolved_method with
             | Error error -> Error error
             | Ok method_ ->
-                match Rdk.Attribute_mirror.run
-                    ~cancel:(Context.cancel_token context)
-                    ~grain:(Context.grain context) ?group:resolved_group ~group_use
-                    ~attributes ~transform ?string_replace ?output_mapping
-                    ?source_group ?destination_group ~owner ~method_ geometry with
+                match Rdk.Attribute_mirror.run { cancel = Some (Context.cancel_token context); grain = Some (Context.grain context); group = resolved_group; group_use; attributes; transform; string_replace; output_mapping; source_group; destination_group; owner; method_ } geometry with
                 | Ok geometry -> cooked geometry
                 | Error error -> structured_rdk_error error)
   )

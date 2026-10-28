@@ -1697,10 +1697,7 @@ let run ({ cancel; grain; iterations; smoothing; project; use_input_points_only;
                let constrained = constraint_group l point_map ~hard ~feature
                    ~name:"__rdk_remesh_constraints"
                    (Geometry.point_count !current) in
-               (match Smooth.run ?cancel ~grain ~constrained_points:constrained
-                   ~boundary:Smooth.Smooth_unshared ~iterations:1
-                   ~mode:(Attribute_blur.Laplacian smoothing)
-                   ~recompute_normals:false ~attributes:"P" !current with
+               (match Smooth.run { cancel; grain = Some grain; constrained_points = Some constrained; boundary = Smooth.Smooth_unshared; iterations = 1; mode = (Attribute_blur.Laplacian smoothing); recompute_normals = false; attributes = "P" } !current with
                 | Error error when Error.code error = "cancelled" ->
                     raise Cancel.Cancelled
                 | Error error -> failure := Some (Error.to_string error)

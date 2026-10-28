@@ -192,10 +192,21 @@ let bridge_loops ?cancel topology index selected_edges loops =
       done;
       !current
 
-let run ?cancel ?(grain = 16_384) ?edges ?(operation = Dissolve_selected)
-    ?(bridge_policy = Create_bridged_polygons) ?(remove_inline_points = false)
-    ?(collinearity_tolerance = 0.) ?(remove_unused_points = true)
-    ?(create_boundary_curves = false) ?(recompute_normals = true) geometry =
+type params = {
+  cancel : Rdk_core.Cancel.t option;
+  grain : int option;
+  edges : Rdk_core.Edge_group.t option;
+  operation : operation;
+  bridge_policy : bridge_policy;
+  remove_inline_points : bool;
+  collinearity_tolerance : float;
+  remove_unused_points : bool;
+  create_boundary_curves : bool;
+  recompute_normals : bool;
+}
+
+let run ({ cancel; grain; edges; operation; bridge_policy; remove_inline_points; collinearity_tolerance; remove_unused_points; create_boundary_curves; recompute_normals } : params) geometry =
+  let grain = Option.value ~default:16_384 grain in
   Error.guard ~operation:"dissolve" ~code:"invalid_topology" @@ fun () ->
   try
     if grain <= 0 then fail "grain must be positive";

@@ -466,10 +466,23 @@ let position_attribute ?cancel ~grain ~transform mapping geometry =
       [|values.x; values.y; values.z|] in
   Packed.Float3.View.of_owned_exn ~x:output.(0) ~y:output.(1) ~z:output.(2)
 
-let run ?cancel ?(grain = 16_384) ?group
-    ?(group_use = Mirror_group_as_source) ?(attributes = "Cd")
-    ?(transform = Mirror_copy) ?string_replace ?output_mapping ?source_group
-    ?destination_group ~owner ~method_ geometry =
+type params = {
+  cancel : Cancel.t option;
+  grain : int option;
+  group : Group.t option;
+  group_use : group_use;
+  attributes : string;
+  transform : transform;
+  string_replace : (string * string) option;
+  output_mapping : string option;
+  source_group : string option;
+  destination_group : string option;
+  owner : Attribute.owner;
+  method_ : method_;
+}
+
+let run ({ cancel; grain; group; group_use; attributes; transform; string_replace; output_mapping; source_group; destination_group; owner; method_ } : params) geometry =
+  let grain = Option.value ~default:16_384 grain in
   Error.guard ~operation:"attribute_mirror" ~code:"invalid_attribute_mirror" @@ fun () ->
   try
     if grain <= 0 then fail "Attribute Mirror grain must be positive";

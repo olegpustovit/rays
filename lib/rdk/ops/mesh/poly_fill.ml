@@ -529,9 +529,19 @@ let remap_edge_groups ?cancel ~mode ~unique_points ~plan ~triangle_local
         Edge_group.View.of_owned_bits ~topology:target_topology ~edge_count
           ~name:(Edge_group.name group) bits) groups)
 
-let run ?cancel ?(grain = 16_384) ?boundary ?(mode = Fill_triangles)
-    ?(reverse_patches = false) ?(unique_points = false)
-    ?(update_point_normals = false) ?patch_group geometry =
+type params = {
+  cancel : Rdk_core.Cancel.t option;
+  grain : int option;
+  boundary : Rdk_core.Edge_group.t option;
+  mode : mode;
+  reverse_patches : bool;
+  unique_points : bool;
+  update_point_normals : bool;
+  patch_group : string option;
+}
+
+let run ({ cancel; grain; boundary; mode; reverse_patches; unique_points; update_point_normals; patch_group } : params) geometry =
+  let grain = Option.value ~default:16_384 grain in
   Error.guard ~operation:"poly_fill" ~code:"invalid_geometry" @@ fun () ->
   if grain <= 0 then invalid_arg (operation ^ ": grain must be positive");
   let* () = match patch_group with
