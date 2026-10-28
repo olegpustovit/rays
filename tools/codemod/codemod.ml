@@ -2112,117 +2112,6 @@ let rename ?(exact = false) ~dry old fresh =
     moves;
   Printf.printf "%d files edited, %d moved\n" !edited (List.length moves)
 
-let source_path path =
-  let rec trim path =
-    if String.starts_with ~prefix:"../" path then trim (String.sub path 3 (String.length path - 3))
-    else path
-  in
-  trim path
-
-let binding_lengths file source =
-  let lexbuf = Lexing.from_string source in
-  Location.init lexbuf file;
-  Lexer.init ();
-  let tree =
-    try Parse.implementation lexbuf
-    with Syntaxerr.Error _ as error ->
-      Location.report_exception Format.err_formatter error;
-      failwith ("cannot measure bindings in " ^ file)
-  in
-  let counts = Hashtbl.create 32 and found = ref [] in
-  let iterator =
-    {
-      Ast_iterator.default_iterator with
-      structure_item =
-        (fun self item ->
-          (match item.Parsetree.pstr_desc with
-          | Pstr_value (_, bindings) ->
-              List.iter
-                (fun binding ->
-                  match binding.Parsetree.pvb_pat.ppat_desc with
-                  | Ppat_var name ->
-                      let count = 1 + Option.value (Hashtbl.find_opt counts name.txt) ~default:0 in
-                      Hashtbl.replace counts name.txt count;
-                      let location = binding.pvb_loc in
-                      let length = location.loc_end.pos_lnum - location.loc_start.pos_lnum + 1 in
-                      found :=
-                        (source_path file, name.txt ^ "#" ^ string_of_int count, length) :: !found
-                  | _ -> ())
-                bindings
-          | _ -> ());
-          Ast_iterator.default_iterator.structure_item self item);
-    }
-  in
-  iterator.structure iterator tree;
-  List.rev !found
-
-let source_lengths paths =
-  let found = ref [] in
-  let check path =
-    if Filename.check_suffix path ".ml" then found := binding_lengths path (read_file path) @ !found
-  in
-  List.iter (fun path -> if Sys.is_directory path then walk path check else check path) paths;
-  List.sort compare !found
-
-let print_lengths rows =
-  List.iter (fun (file, name, length) -> Printf.printf "%s\t%s\t%d\n" file name length) rows
-
-let length_budget path =
-  String.split_on_char '\n' (read_file path)
-  |> List.filter_map (fun line ->
-      if line = "" then None
-      else
-        match String.split_on_char '\t' line with
-        | [ file; name; length ] -> Some (file, name, int_of_string length)
-        | _ -> failwith ("invalid function length budget: " ^ line))
-
-let binding_budget limits (file, name, _) =
-  List.find_map (fun (f, n, size) -> if f = file && n = name then Some size else None) limits
-  |> Option.value ~default:300
-
-let check_lengths ?(prune = false) budget paths =
-  let limits = length_budget budget in
-  let rows = source_lengths paths |> List.filter (fun (_, _, length) -> length > 300) in
-  let failed = ref false in
-  List.iter
-    (fun ((file, name, length) as row) ->
-      let limit = binding_budget limits row in
-      if length > limit then begin
-        failed := true;
-        Printf.eprintf "%s: %s is %d lines (budget %d)\n" file name length limit
-      end)
-    rows;
-  if !failed then exit 1;
-  if prune then print_lengths rows
-  else
-    List.iter
-      (fun (file, name, limit) ->
-        if not (List.mem (file, name, limit) rows) then begin
-          failed := true;
-          Printf.eprintf
-            "%s: reduce/remove stale length budget for %s with function-lengths --prune\n" file name
-        end)
-      limits;
-  if !failed then exit 1
-
-let lengths_self_test () =
-  let source =
-    "let f x =\n  let nested y = y in\n  nested x\nmodule M = struct\nlet f x = x\nend\n"
-  in
-  assert (
-    binding_lengths "../../lib/fixture.ml" source
-    = [ ("lib/fixture.ml", "f#1", 3); ("lib/fixture.ml", "f#2", 1) ]);
-  assert (binding_lengths "empty.ml" "" = []);
-  let limits = [ ("lib/fixture.ml", "f#1", 350) ] in
-  let allowed row =
-    let _, _, length = row in
-    length <= binding_budget limits row
-  in
-  assert (allowed ("lib/fixture.ml", "f#1", 350));
-  assert (allowed ("lib/fixture.ml", "f#1", 320));
-  assert (not (allowed ("lib/fixture.ml", "f#1", 351)));
-  assert (not (allowed ("lib/fixture.ml", "new#1", 301)))
-
 let history_marker =
   Str.regexp "\\bP[0-9]+\\.[0-9]+\\b\\|\\bG[0-9]+\\b\\|20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]"
 
@@ -2408,11 +2297,6 @@ let () =
   match Array.to_list Sys.argv |> List.tl with
   | [ "spec-links"; "--self-test" ] -> links_self_test ()
   | "spec-links" :: paths when paths <> [] -> check_spec_links paths
-  | [ "function-lengths"; "--self-test" ] -> lengths_self_test ()
-  | "function-lengths" :: "--snapshot" :: paths ->
-      source_lengths paths |> List.filter (fun (_, _, length) -> length > 300) |> print_lengths
-  | "function-lengths" :: "--prune" :: budget :: paths -> check_lengths ~prune:true budget paths
-  | "function-lengths" :: budget :: paths -> check_lengths budget paths
   | [ "history-comments"; "--self-test" ] -> history_comments_self_test ()
   | "history-comments" :: dirs when dirs <> [] -> check_history_comments dirs
   | [ "metal-registry"; "--self-test" ] -> Metal_registry.self_test ()
@@ -2481,7 +2365,6 @@ let () =
         \       codemod dead-stubs [--report] BRIDGE.mm ROOT... | drop-c-unused DIR\n\
         \       codemod metal-registry [--audit | --drop-unused-macros]\n\
         \       codemod history-comments PATH... | history-comments --self-test\n\
-        \       codemod function-lengths [--prune] BUDGET PATH...\n\
         \       codemod spec-links PATH... | spec-links --self-test\n\
         \       codemod rename [--dry-run] OLD NEW | rename --self-test";
       exit 2

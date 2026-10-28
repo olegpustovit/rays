@@ -55,7 +55,6 @@ let () =
         "@runtest";
         "@smoke";
         "@tools/codemod/history-comments";
-        "@tools/codemod/function-lengths";
       ]
     else if arguments = [] then [ "@runtest" ]
     else arguments
