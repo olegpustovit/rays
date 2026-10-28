@@ -639,15 +639,16 @@ module Ray = struct
              | Error error -> Error error
              | Ok collision_primitives ->
                  match Rdk.Ray.run ~cancel:(Context.cancel_token context)
-                     ~grain:(Context.grain context) ?selection ?collision_primitives
-                     ~method_ ~direction ~direction_mode ~surface_hit ~samples
-                     ~jitter_scale ~seed ~combine ~min_distance
-                     ?max_distance ~tolerance ~scale ~lift ?distance_attribute
-                     ?primitive_attribute ?source_vertex_numbers_attribute
-                     ?source_vertex_weights_attribute ?hit_group ?normal_attribute
-                     ?point_pattern ?vertex_pattern ?primitive_pattern
-                     ?detail_pattern ~match_groups ~source:inputs.(0)
-                     ~collision:inputs.(1) () with
+                     { grain = Context.grain context; selection;
+                       collision_primitives; method_; direction; direction_mode;
+                       surface_hit; samples; jitter_scale; seed; combine;
+                       min_distance; max_distance; tolerance; scale; lift;
+                       distance_attribute; primitive_attribute;
+                       source_vertex_numbers_attribute;
+                       source_vertex_weights_attribute; hit_group;
+                       normal_attribute; point_pattern; vertex_pattern;
+                       primitive_pattern; detail_pattern; match_groups }
+                     ~source:inputs.(0) ~collision:inputs.(1) () with
                  | Ok geometry -> cooked geometry
                  | Error error -> structured_rdk_error error))
   )

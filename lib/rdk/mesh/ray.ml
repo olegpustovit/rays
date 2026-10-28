@@ -114,16 +114,41 @@ let existing_point_float3 name count geometry =
        | _ -> fail "invalid_output" (Printf.sprintf
            "point output attribute %S must have float3 storage" name))
 
-let run ?cancel ?(grain = 16_384) ?selection ?collision_primitives
-    ?(method_ = Ray_project) ?(direction = Ray_normal)
-    ?(direction_mode = Ray_forward) ?(surface_hit = Ray_first_surface)
-    ?(samples = 1) ?(jitter_scale = 1.) ?(seed = 0)
-    ?(combine = Ray_average)
-    ?(min_distance = 0.) ?max_distance ?(tolerance = 0.) ?(scale = 1.)
-    ?(lift = 0.) ?distance_attribute ?primitive_attribute
-    ?source_vertex_numbers_attribute ?source_vertex_weights_attribute
-    ?hit_group ?normal_attribute ?point_pattern ?vertex_pattern
-    ?primitive_pattern ?detail_pattern ?(match_groups = false)
+type params = {
+  grain : int;
+  selection : Deform.selection option;
+  collision_primitives : Group.t option;
+  method_ : method_;
+  direction : direction;
+  direction_mode : direction_mode;
+  surface_hit : surface_hit;
+  samples : int;
+  jitter_scale : float;
+  seed : int;
+  combine : combine;
+  min_distance : float;
+  max_distance : float option;
+  tolerance : float;
+  scale : float;
+  lift : float;
+  distance_attribute : string option;
+  primitive_attribute : string option;
+  source_vertex_numbers_attribute : string option;
+  source_vertex_weights_attribute : string option;
+  hit_group : string option;
+  normal_attribute : string option;
+  point_pattern : string option;
+  vertex_pattern : string option;
+  primitive_pattern : string option;
+  detail_pattern : string option;
+  match_groups : bool;
+}
+let run ?cancel { grain; selection; collision_primitives; method_; direction;
+    direction_mode; surface_hit; samples; jitter_scale; seed; combine;
+    min_distance; max_distance; tolerance; scale; lift; distance_attribute;
+    primitive_attribute; source_vertex_numbers_attribute;
+    source_vertex_weights_attribute; hit_group; normal_attribute; point_pattern;
+    vertex_pattern; primitive_pattern; detail_pattern; match_groups }
     ~source ~collision () =
   try
     if grain <= 0 then fail "invalid_parameter" "grain must be positive";

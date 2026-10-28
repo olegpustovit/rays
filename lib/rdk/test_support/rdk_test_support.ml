@@ -241,3 +241,22 @@ let triangulate2d ?cancel ?(grain = 16_384) ?selection ?constraint_edges
       split_point_group; refinement_point_group; triangle_group; constraint_group;
       remove_unused_points; recompute_point_normals }
     geometry
+
+(* [Ray.run] with the defaults tests rely on; the SOP declaration owns the real ones. *)
+let ray ?cancel ?(grain = 16_384) ?selection ?collision_primitives
+    ?(method_ = Ray.Ray_project) ?(direction = Ray.Ray_normal)
+    ?(direction_mode = Ray.Ray_forward) ?(surface_hit = Ray.Ray_first_surface)
+    ?(samples = 1) ?(jitter_scale = 1.) ?(seed = 0) ?(combine = Ray.Ray_average)
+    ?(min_distance = 0.) ?max_distance ?(tolerance = 0.) ?(scale = 1.)
+    ?(lift = 0.) ?distance_attribute ?primitive_attribute
+    ?source_vertex_numbers_attribute ?source_vertex_weights_attribute
+    ?hit_group ?normal_attribute ?point_pattern ?vertex_pattern
+    ?primitive_pattern ?detail_pattern ?(match_groups = false) ~source ~collision () =
+  Ray.run ?cancel
+    { grain; selection; collision_primitives; method_; direction; direction_mode;
+      surface_hit; samples; jitter_scale; seed; combine; min_distance;
+      max_distance; tolerance; scale; lift; distance_attribute; primitive_attribute;
+      source_vertex_numbers_attribute; source_vertex_weights_attribute; hit_group;
+      normal_attribute; point_pattern; vertex_pattern; primitive_pattern;
+      detail_pattern; match_groups }
+    ~source ~collision ()
