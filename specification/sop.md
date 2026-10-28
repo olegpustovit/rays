@@ -424,20 +424,33 @@ places every legal region).
 
 Data movement (`Flow_gpu.Run` over mapped buffers, specification/backend.md): sources are packed
 straight into the kernel's mapped input buffers (one float32 rounding, finite check folded in).
-Outputs are resident attributes: once the dispatch has completed and passed its status check,
-`Gpu.kernel.planes` hands each output's buffer to the write (`Run.keep`; the runner takes a fresh
-or recycled buffer for its next dispatch) as a `Gpu.planes` whose `materialise` reads it once as
-owned planes (an invalidate and a parallel-block conversion, from any domain, no queue work). The
+Outputs are resident attributes: `Gpu.kernel.planes` hands each output's buffer to the write while
+the dispatch is still in flight (`Run.keep`; the runner takes a recycled or fresh buffer for its next
+dispatch) as a `Gpu.planes` whose `settle` waits for the dispatch and reads its status (initial
+domain) and whose `materialise` reads it once as owned planes (an invalidate and a parallel-block
+conversion, from any domain once settled, no queue work). Settling is the session's: the write
+registers its `settle` with the cook context (`Sop.Context.defer`), and `Sop.Session` settles before
+it cooks any node (a parallel branch only what its own domain registered, the shared prefix before
+the branches fan out) and at the end of every cook, so no CPU reader sees an unsettled output and
+the wait overlaps whatever the cook does after the dispatch. A status that fails there refuses the
+device to that write (`Sop.Context.device_refused`): what the cook attempt wrote is dropped and the
+graph cooks again, the write on the CPU, which reports its own errors (`test_settle`, a mock device
+whose status fails, cooks the CPU's bytes). The
 write installs it as deferred storage: `Rdk.Packed.Float3.deferred` for canonical P,
 `Rdk.Attribute.create_deferred` for any other numeric attribute. Both types are abstract, so every
 reader (`Float3.get`/`View.view`, `Attribute.storage`/`View.storage`/`get`) materialises on first
 use through `Rdk.Packed.Deferred` (once, any domain, the thunk and its buffer dropped after), while
-length, kind, identity and payload size never do. rdk stays GPU-free: it holds only a thunk. A
-recook whose result is only held (cached, compared by identity, counted) reads nothing back; the
-first CPU reader of P reads P alone. The buffer goes back to its runner when the holder is
-collected (a finaliser names it; the runner recycles at most 4 and destroys the rest on its next
-dispatch, on the initial domain); closing the runner first materialises every holder still alive,
-so a geometry outliving the GPU stays valid. `test_chain_gpu_native` fails if a recook reads back,
+length, kind, identity and payload size never do. rdk stays GPU-free: it holds only a thunk and a
+release (`Deferred.create ?release`, `Geometry.releasers`). A recook whose result is only held
+(cached, compared by identity, counted) reads nothing back; the first CPU reader of P reads P alone.
+Buffers come back deterministically: when the session drops a result (an LRU or payload eviction,
+a volatile slot replaced) the resident components no retained entry shares are released at the end
+of that cook, unless the cook's root output holds them; the runner recycles at most 4 and destroys
+the rest on its next dispatch, on the initial domain. A released output that was never read cannot
+be read afterwards (`Invalid_argument`): a caller reads the session's latest results, as the editor
+does (its display is prepared on the cook worker). A clear or a close leaves results handed out
+valid, their buffers returned when the holder is collected or read (a finaliser names it); closing
+the runner first materialises every holder still alive, so a geometry outliving the GPU stays valid. `test_chain_gpu_native` fails if a recook reads back,
 if reading P materialises more than one output or twice, or if a buffer outlives its geometry.
 A later fused write reads a resident attribute where it is (GPU to GPU): the deferred storage
 carries an rdk holder (`Rdk.Packed.Deferred.holder`, an extensible tag rdk never inspects) naming
@@ -470,23 +483,37 @@ the CPU; about 2 ms of a recook is the kernel itself, waited for its status chec
 about its transfer on the CPU blocks and stays there. Any device failure (a form refusal, a status)
 leaves the record to the CPU, which reports its own errors.
 
+With the settle point and deterministic return (2026-10-28, same machine, load 4-6): one session
+toggling an edit (two lowerings of the chain, translations 1 and 2, `max_entries` 2: the grid hits
+and each cook evicts the other write) recooks 1M points in 1.1-1.3 ms median with no buffer
+created, nothing uploaded or read back and no more buffers held after 16 recooks, with no
+collection (`test_chain_gpu_native` fails otherwise); of the 3.6 ms it took before, 2.3 ms was the
+transform's write of N re-scanning its unchanged planes for finiteness and copying them again (a
+write adopting the same planes now reuses their copies and their check). A session per cook (every
+node recooks) takes 0.004-0.006 s, two consecutive fused writes 0.008-0.015 s. CPU: 0.11-0.13 s.
+`sop_gallery` (interleaved with a dev build, `BENCH_PHASES=1`): cook 0.86-0.89 s against 0.84-0.95
+s, edit to cook 0.47-0.53 s against 0.51-0.61 s, lower 0.38-0.42 s against 0.38-0.45 s.
+
 First cook, measured (M1, 2026-10-28, `test_chain_gpu_native`, 1M points): of 0.043-0.050 s,
 about 26 ms is acquiring the GPU lease lazily on the first prepare (`Workspace_gpu.owner`: a device
 and a queue headless; in the editor the window's device is shared and only a queue is made), 4 ms
 emitting the MSL, 2.4 ms compiling it (warm: the OS Metal shader cache already keys compiled
 sources persistently; a cold, never-seen source takes 60 ms) and 7 ms the first dispatch's fresh
 buffers and uploads. A Metal binary archive would only save part of the 2.4 ms, so none is kept; a
-Vulkan backend will need its own `VkPipelineCache`, which has no OS cache behind it.
+Vulkan backend will need its own `VkPipelineCache`, which has no OS cache behind it. The editor does
+not pay the 26 ms: `Renderer.acquire_gpu` with the window's device makes only a queue (0.1 ms
+measured against 26-29 ms for a headless device and queue), so its first fused cook of 1M points is
+about 18-19 ms. Emitting the MSL is 3-5 ms per prepared program and is repeated only when a
+re-lowering makes a new program (an edit relowers the workspace); a memo would need a key of
+everything emission reads (the region's code, shapes, source types, origin), and a marshalled
+region is 90-110 ms and unstable, so none is kept: 3-5 ms per GPU write per edit beside a 0.4-0.5 s
+relowering.
 
-Not yet, in order of value: (1) the status check deferred and one command buffer per cook: a
-steady 1M recook is about 5 ms of device path (2 ms waiting for the kernel's status at `Run.keep`,
-3 ms making 28 MB of fresh mapped output buffers: `memset` of the posix_memalign pages plus the
-GC slice their custom-block accounting triggers) of 7-10 ms. The wait can move only to a point that
-precedes every CPU reader, and readers run on any domain (Metal stays on the initial domain), so it
-needs a settle hook the session runs before any CPU node cooks and at the cook's end (Sop.Session),
-with a status failure turning into a CPU recook of the failed writes; buffers then come back
-deterministically when the session drops a result rather than at a GC (a ring that materialises
-still-uncollected holders costs more than the allocation); (2) a display binding a resident P as
+Not yet, in order of value: (1) runners shared by equal programs: an edit relowers the workspace, so
+each fused write gets a new program, a new runner (fresh buffers, every input uploaded once) and
+its emission; deterministic return only recycles within a runner, so a host-wide pool of released
+buffers by capacity is the next step, and a frame-driven argument (`(get (frame/input) :t)` in a
+noise offset) leaves the write on the CPU today; (2) a display binding a resident P as
 its vertex buffer (`Workspace_gpu.marks`/`Renderer` already bind device buffers for marks; SOP
 display converts through `rdk_rays` meshes and reads P; the held buffer is packed float3, so the
 vertex layout must read it packed); (3) grid planes and `array/range` generated from the thread

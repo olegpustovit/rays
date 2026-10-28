@@ -359,14 +359,20 @@ discrete backend (Vulkan on a PCIe GPU, a later phase) may give the view staging
 the two calls; the mock already keeps the copies apart, so a caller that skips a call reads stale
 data in tests. Over PCIe a readback costs its transfer, so readback stays explicit and lazy: a value
 is materialised on the CPU only when it is read (`Flow_gpu.Run.readback`/`planes` after the
-dispatch's completion and status check). `Run.keep` hands a completed output's buffer to a lazy
-holder (a SOP write's deferred attribute, specification/sop.md, Device placement): the holder's
-`materialise` is the only read (an `invalidate_mapped` and a conversion, callable from any domain
-because it does no queue work), the runner takes a fresh or recycled buffer for its next dispatch,
-a collected holder's buffer is recycled or destroyed on the initial domain at the runner's next
-dispatch, and `Run.close` materialises live holders before destroying their buffers. `materialise` cannot
-fail: the status read at `keep` already covered completion and every output's finiteness, the range
-is the buffer's own and the buffer is destroyed only under the holder's lock. A held buffer is also
+dispatch's completion and status check). `Run.keep` hands an output's buffer, still in flight, to
+a lazy holder (a SOP write's deferred attribute, specification/sop.md, Device placement) without
+waiting: the holder's `settle` (initial domain, once per dispatch) waits for the epoch and reads the
+status, which is explicit synchronisation a discrete backend needs anyway; its `materialise` is the
+only read (an `invalidate_mapped` and a conversion, callable from any domain once settled because it
+does no queue work; on the initial domain it waits itself); its `release` hands an unread buffer
+back at once when its owner (a `Sop.Session` dropping the result) no longer needs it, and a later
+read raises. The runner takes a recycled or fresh buffer for its next dispatch; a released, read
+or collected holder's buffer is recycled (at most 4) or destroyed on the initial domain at the
+runner's next dispatch, and `Run.close` materialises live holders before destroying their buffers.
+A dispatch that resets the status word first reads an unsettled predecessor's status into a short
+verdict list, so a late `settle` still sees its own failure. `materialise` cannot fail: `settle`
+covered completion and every output's finiteness, the range is the buffer's own and the buffer is
+destroyed only under the holder's lock. A held buffer is also
 a later kernel's input without a readback: `keep` returns a one-element placeholder array, and
 `Run.dispatch` (any runner) binds an input that is physically that array to the held buffer while
 its holder has not read it back (the buffer is then released). On a discrete backend
