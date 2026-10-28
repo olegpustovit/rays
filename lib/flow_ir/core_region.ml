@@ -409,9 +409,6 @@ let lower ?(fusion = true) ?(dynamic = false)
   let refuse ?(at = term) code message =
     raise (Compile_refused (Diagnostic.error ~span:at.form.span ~code message)) in
   try
-    if view.previous then refuse "E_PACKED_STATE" "Previous-state values require reference evaluation.";
-    if E.state_dependent (E.Residual residual) then
-      refuse "E_PACKED_STATE" "State-dependent kernels require reference evaluation.";
     let function_body = function_body residual ~bindings:view.bindings ~result_ty:term.ty in
     let params, accumulator, body, sources, bindings, iteration, result, skip = match term.node with
       | W.Hof (`Map, f :: sources) ->

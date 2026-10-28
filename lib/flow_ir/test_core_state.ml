@@ -48,3 +48,34 @@ let () =
   if !refused<>[] || !failed<>[] then failwith (String.concat "; " (!refused @ !failed));
   assert (!used>0);
   Printf.printf "Core state: slots, pending writes, keys, errors and rollback match the walker (%d executions)\n" !used
+
+(* Kernels that read state: a result map over a state value, a step map over its previous
+   array, and a step map reading a second state. Each runs as a Core region with the state
+   lowered before it, bit-identical to the walker in values and state at one and eight domains. *)
+let () =
+  let kernels = [
+    "result", "", "(let* [s (state [a 0.] (+ a (frame/dt)))] (array/sum (map (fn [x] (+ x s)) (array/range 5000))))";
+    "previous", "", "(array/sum (state [p (exact (array/range 5000))] (map (fn [x] (+ x t)) p)))";
+    "two-states", "", "(let* [a (state [s 0.] (+ s t))] (array/sum (state [p (exact (array/range 5000))] (map (fn [x] (+ x a)) p))))";
+    "sum", "", "(let* [s (state [a 1] (+ a 1))] (array/sum (map (fn [x] (* x s)) (array/range 5000))))"] in
+  List.iter (fun domains -> Parallel.run ~domains (fun () ->
+    List.iter (fun (name, extra, body) ->
+      let evaluation = ok (E.static (check ~extra body)) in
+      let values = List.map snd evaluation.results @ evaluation.states in
+      if not (List.exists (function
+        | E.Residual r -> (match I.Core_lower.lower r with
+            | Ok core -> Array.length core.I.Core.regions > 0 | Error _ -> false)
+        | _ -> false) values) then failwith (name ^ ": state kernel did not lower to a Core region");
+      let reference = E.create_state () and core = E.create_state () in
+      let programs = List.map (fun v -> v, ok (I.Executor.compile v)) values in
+      for frame = 0 to 5 do
+        let live = live frame in
+        List.iter (fun (v, program) ->
+          let expected = E.Host.force_reference ~state:reference v ~live in
+          if not (same (I.Executor.force ~state:core program ~live) expected) then
+            failwith (Printf.sprintf "%s frame %d domains %d" name frame domains);
+          if Marshal.to_string (E.Host.state_values core) [Marshal.No_sharing]
+            <> Marshal.to_string (E.Host.state_values reference) [Marshal.No_sharing] then
+            failwith (Printf.sprintf "%s frame %d domains %d: state values differ" name frame domains)) programs
+      done) kernels)) [1; 8];
+  print_endline "Core state kernels: result, previous, two-state and sum regions match the walker at one and eight domains"

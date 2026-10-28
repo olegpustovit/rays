@@ -9,6 +9,10 @@ let run ?(require_state_kernel = false) checked =
     List.iter (fun fusion -> ignore (Flow_ir.Packed.compile_result ~trace:Region_snapshot.record ~fusion residual term)) [true; false];
     ignore (Flow_ir.Packed.compile_template ~trace:Region_snapshot.record residual term)) checked) in
   (* Frame folds compile their kernels as templates while they run. *)
+  (* every Core program of the workspace is plain data *)
+  List.iter (function
+    | E.Residual residual -> Result.iter Test_program.plain_roundtrip (Flow_ir.Core_lower.lower residual)
+    | _ -> ()) (List.map snd evaluation.results @ evaluation.states);
   List.iter (fun value ->
     (match value with
      | E.Residual residual when require_state_kernel ->

@@ -81,3 +81,10 @@ let two_outputs () =
   | Error ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
 let run ?root ?strict ?force ?resolve program ~live =
   Flow_ir.Core_exec.(execute ?root ?strict ?force ?resolve (prepare program) ~live)
+
+(* A Core program but for its regions is plain data, with no closures or residuals: it marshals
+   without [Closures] and reads back structurally equal. *)
+let plain_roundtrip (p : Flow_ir.Core.program) =
+  let plain = p.constants, p.locals, p.body, p.results, p.state_slots, p.call_slots in
+  if compare (Marshal.from_string (Marshal.to_string plain []) 0) plain <> 0 then
+    failwith "Core program does not round-trip as plain data"

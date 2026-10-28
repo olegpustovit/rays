@@ -93,8 +93,19 @@ let () =
   let stateful = fn "(workspace w (graph img :context image
     (let* [bias (state [n 0.0] (+ n 0.1))]
       (image/map (fn [uv] [uv.x uv.y bias 1])))))" in
-  (match Flow_sop.Image_kernel.prepare ~identity:0 ~width:1 ~height:1 ~fn:stateful ~sources:[] [] with
-   | Error d -> assert (d.code="E_PACKED_STATE") | Ok _ -> assert false);
+  (* the state value is a uniform each force steps with its caller's state, as the walker does *)
+  let stateful = prepare ~width:65 ~height:3 stateful in
+  let program = Flow_sop.Image_kernel.program stateful in
+  let packed = Option.get (Flow_ir.Executor.packed_region program) in
+  List.iter (fun domains -> Parallel.run ~domains (fun () ->
+    let state = E.create_state () and reference = E.create_state () in
+    let blues = List.init 3 (fun frame ->
+      let live = {(Input.at_time 0.) with frame} in
+      let actual = Flow_ir.Packed.force ~state packed ~live |> ok in
+      assert (actual = (Flow_ir.Executor.force ~reference:true ~state:reference program ~live |> ok));
+      assert (Flow.Eval.Host.state_values state = Flow.Eval.Host.state_values reference);
+      match actual with E.Vec4_array xs -> xs.(2) | _ -> assert false) in
+    assert (List.length (List.sort_uniq Float.compare blues) = 3))) [1; 8];
   print_endline "image/map: typed function, graph gestures, UV orientation, reference/packed/domain bytes and live captures pass"
 
 let () =
