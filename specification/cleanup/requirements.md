@@ -68,10 +68,10 @@ Decided 2026-10-27: Rays Lisp is the SOP surface. The 128 OCaml node twins, the 
 
 - [x] P1.S1: Golden capture from Lisp, not OCaml: cook today's `nodes/*.rays` for every port fixture × case and write one bytes digest per output to `flow_sop/goldens/*.sexp`. Parity already holds, so no native code is involved and nothing waits on it. The port gate becomes a plain Lisp-node golden test that runs in minutes, not 30. Evidence: dbcf8551: the complete 58,773-row Lisp capture (all 128 nodes) is lib/flow_sop/goldens/data, gzip, 11 MB. @lib/flow_sop/goldens/runtest replays 819 rows (every node/fixture pair, first case) in 58 s; the full corpus is @qualification-scale. Replay lowers each expression once and needs no native factory.
 - [x] P1.S2: Delete the four parity duplicates: `test_nodes.ml`, `test_lisp_ports.ml`, the per-node flow_sop tests and `test_2d_ports` with its 8 example oracles. Evidence: b58926a8 deletes lib/sop/test_nodes.ml (7.5k lines), test_lisp_ports, the per-node flow_sop parity tests, the port_tests gate, test_2d_ports' 8 example oracles and the parity setters (−21.5k lines). Non-parity checks stay.
-- [ ] P1.S3: Delete the 128 OCaml node modules in `lib/sop/{groups,sop_topology,attributes,shapes}.ml` and their `Support` helpers. Have the PPX emit `Param.*` and drop the `Sop` shim. Replace `sop_catalog` with `Sop.Nodes.factories` (37 entries) and move the manifest rule to flow_sop.
+- [x] P1.S3: Delete the 128 OCaml node modules in `lib/sop/{groups,sop_topology,attributes,shapes}.ml` and their `Support` helpers. Have the PPX emit `Param.*` and drop the `Sop` shim. Replace `sop_catalog` with `Sop.Nodes.factories` (37 entries) and move the manifest rule to flow_sop. Evidence: see SP1, SP11 and SP23. The PPX already emits Param.*; the Sop shim in support.ml stays because lib/sop cannot name itself (SP10).
 - [x] P1.S4: Run `prune-dead-code` to a fixpoint over rdk. This removes the 52 oracle-only modules and the oracle parts of Group_ops, Curve_ops (keep `curve_join`), Instance_copy, Uv_ops and the rest. Also: sweep_circle `run_legacy`, Voronoi2, the adapters, test-only seam cleanup, and `*_reference` twins moved to test support. Evidence: see RK1; no *_reference twins remain in lib/rdk.
 - [x] P1.S5: Delete the tests and benches tied to the deleted code (about 17k lines and 4+ benches). Trim `rdk.md` to the kernels that remain. Rewrite the AGENTS.md line 'the replaced OCaml kernels stay in lib/rdk as test oracles', update `lib/rdk/AGENTS.md` and `lib/sop_catalog/AGENTS.md`, and make the add-sop skill Lisp-first, so no agent rebuilds the parity layer. Evidence: see RK24/RK25; AGENTS.md, lib/rdk/AGENTS.md, lib/sop_catalog/AGENTS.md and the add-sop skill are Lisp-first, with the golden --update promote step.
-- [ ] P1.S6: Prune the dead Metal bridge: make the helpers static and run `dead-stubs` (XPC, Metal 4 state, mesh/tile). Prune the unused sdl3_ttf and mixer exports.
+- [x] P1.S6: Prune the dead Metal bridge: make the helpers static and run `dead-stubs` (XPC, Metal 4 state, mesh/tile). Prune the unused sdl3_ttf and mixer exports. Evidence: four Metal bridge helpers are static and drop-c-unused removed their dead code; dead-stubs reports nothing more, and the remaining Metal 4, mesh and tile surface is still named by metal.mli (PL3). The mixer export is pruned; sdl3_ttf has no dead exports.
 - [x] P1.S7: Untangle the test dependencies: `lisp_sop` no longer links editor_document, and flow_sop tests move out of lib/sop. Evidence: lisp_sop has no document/runtime dependency. Lisp ports and Flow declaration/facts checks live in flow_sop; the remaining SOP facts test drops its direct Flow/catalog dependencies. All 14 port recipes pass through the preserved old-path alias (7.78 s), node facts pass at one/eight domains (1.45 s), and the remaining SOP facts and source checks pass (1.83 s / 0.66 s).
 
 Exit gates:
@@ -132,7 +132,7 @@ Check, then static stage, then lower once to Core, then place, then execute with
 
 Exit gates:
 
-- [ ] P3.G1: executors go from 7 to 3 (walker oracle, Core plus Packed, device)
+- [x] P3.G1: executors go from 7 to 3 (walker oracle, Core plus Packed, device) Evidence: 90d282eb deletes the Fast candidate and Core_exec.fast; the executors are the walker oracle, Core plus Packed, and the device. The root shortcut is Core_exec.direct into the same Core_exec.execute (scalar 106–115 vs 109–111 ns interleaved).
 - [x] P3.G2: the walker runs at most once per residual, checked by a test counter. Evidence: `test_core_errors` counts actual reference-walker entry points, including nested Packed/Core routes; shared refusal reports one walk, compiled failure reports one, and successful compiled state steps report zero.
 - [ ] P3.G3: `test_workspace_ir` back under 5 minutes (from 20–25 min)
 - [x] P3.G4: web parity is green and native fusion is measured on bench_marks_gpu ('moving both', 14.3 ms → target ≤ 6 ms). Evidence: 91 JS goldens and 82 programs / 364 native/web frames pass; real Chrome fused marks and million particles retain max channel difference one with zero CPU invokes. Frozen paired native moving-both runs measure circles 16.018 → 2.533 ms and rectangles 15.386 → 2.212 ms on M1; all 28 cases and background-load limits are recorded in benchmarks/marks-native.md.
@@ -737,7 +737,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [ ] **RK4** (P6, high, duplication, effort M). Location at baseline: attrib/group_ops.ml:4207-4313 (+ Attribute_ops, Curve_topology, Group_mesh, Point_replication, Sweep_modeling). Each operation is re-declared at the end of the file with 10–15 optional arguments, only to wrap it in `Error.guard`. Action: This goes away with RK3.
 
-- [ ] **RK5** (P1, high, duplication, effort S). Location at baseline: group_ops.ml:1344/1363/1397 vs 1497/1527/1540/1591. `flood_bits`, `stepped_bits`, `grow_point_depth_bits` and `enqueue` exist twice (plain and `constrained_*`), about 450 lines. Action: Keep only the constrained versions; most of this goes with RK1.
+- [x] **RK5** (P1, high, duplication, effort S). Location at baseline: group_ops.ml:1344/1363/1397 vs 1497/1527/1540/1591. `flood_bits`, `stepped_bits`, `grow_point_depth_bits` and `enqueue` exist twice (plain and `constrained_*`), about 450 lines. Action: Keep only the constrained versions; most of this goes with RK1. Evidence: no constrained/unconstrained twin pairs remain in group_ops.
 
 - [ ] **RK6** (P6, high, duplication, effort M). Location at baseline: support.ml:158, kernel.ml:8, curve_ops.ml:17, poly_path.ml:7, uv_ops.ml:52, uv_parameterize.ml:32, sweep.ml:44, boolean_(corner_)payload. At least 8 copies of the parallel-for helper, plus 132 inline `~chunk_size:1` range loops. Action: Use one `Support.parallel_for`/`parallel_ranges`.
 
@@ -753,9 +753,9 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **RK12** (P1, med, dead-code, effort S). Location at baseline: mesh/sweep_circle.ml:3 run_legacy (~650) · sweep_modeling.ml · point_replication.ml · group_mesh.ml · exact/voronoi2.ml (3-line comment). Legacy paths and empty or adapter modules, all oracle-only. Action: Delete them, together with the Voronoi2 alias at rdk.ml:10. Evidence: Voronoi2 and the sweep_circle run_legacy path are gone.
 
-- [ ] **RK13** (P1, med, oracle-only, effort S). Location at baseline: boolean_materialization.ml:216,1199. `tiny_seam_edges`/`collapse_tiny_seam_batch` (~115 lines) are called only from test_boolean_solid. Action: Delete them and repoint the tests at the production `collapse_tiny_seams`.
+- [x] **RK13** (P1, med, oracle-only, effort S). Location at baseline: boolean_materialization.ml:216,1199. `tiny_seam_edges`/`collapse_tiny_seam_batch` (~115 lines) are called only from test_boolean_solid. Action: Delete them and repoint the tests at the production `collapse_tiny_seams`. Evidence: tiny_seam_edges is gone; tests use the production seam path.
 
-- [ ] **RK14** (P1, med, oracle-only, effort S). Location at baseline: implicit_point.ml:848-1189,1763,1808 · predicates.ml:42,89,167 (Private). About 200 lines of `*_reference` twins kept only for differential tests. Action: Move them to test support.
+- [x] **RK14** (P1, med, oracle-only, effort S). Location at baseline: implicit_point.ml:848-1189,1763,1808 · predicates.ml:42,89,167 (Private). About 200 lines of `*_reference` twins kept only for differential tests. Action: Move them to test support. Evidence: the exact_*_reference predicate twins live in lib/rdk/test_predicates.ml.
 
 - [ ] **RK15** (P6, med, duplication, effort S). Location at baseline: boolean_payload.ml vs boolean_corner_payload.ml. storage_kind, collect_attributes, collect_groups, parallel_for, selected and source_storage are written twice; `copy` is re-exported. Action: Merge them into one module.
 
@@ -769,7 +769,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [ ] **RK20** (P6, med, god-module, effort M). Location at baseline: mesh/subdivide.ml 4,607. Its own fail, get_ok, checked arithmetic and union-find; eight Float2/3/4 copies; three resolve-defaults blocks. `edge_divide` is oracle-only. Action: After RK3 and RK8 it shrinks by 15–20%. Split out the stitching (3263-3700).
 
-- [ ] **RK21** (P1, med, god-module, effort M). Location at baseline: curve/curve_ops.ml 2,794. Production uses only `join` plus its endpoint kd-tree (~670 lines). Radix sort is copied 3 times. Action: Keep `curve_join.ml`, move radix sort to Support, delete the rest.
+- [x] **RK21** (P1, med, god-module, effort M). Location at baseline: curve/curve_ops.ml 2,794. Production uses only `join` plus its endpoint kd-tree (~670 lines). Radix sort is copied 3 times. Action: Keep `curve_join.ml`, move radix sort to Support, delete the rest. Evidence: Curve_ops is Curve_join and holds only the join and its endpoint tree.
 
 - [ ] **RK22** (P6, med, test-sprawl, effort M). Location at baseline: test_rdk.ml:204-211 → test_rdk_{attributes,modeling,uv,curves,misc}.ml (3,415). Fixture-chained files that cannot run or fail independently. Action: Make each fixture local and delete the files that test only oracles.
 
@@ -813,7 +813,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [ ] **SP10** (P1, med, vibe-code, effort S). Location at baseline: ppx_rays.ml:612,618,623 · support.ml:65-72 (+4 re-imports). The PPX hard-codes `Sop.Parameter`/`Sop.Edit_graph`, which forces a fake `module Sop = struct … end` shim. Action: Have the PPX emit `Param.*` and drop the shim.
 
-- [ ] **SP11** (P1, med, api-bloat, effort M). Location at baseline: lib/sop_catalog (37 lines + PPX transform) · nodes.ml (165 aliases) · nodes.mli (165 sigs). Three hand-maintained lists per native SOP, and `[@@sop.register]` only wraps a list. Action: After SP1, put `Sop.Nodes.factories` (37 entries) in place and delete sop_catalog and the transform. Move the manifest rule to flow_sop.
+- [x] **SP11** (P1, med, api-bloat, effort M). Location at baseline: lib/sop_catalog (37 lines + PPX transform) · nodes.ml (165 aliases) · nodes.mli (165 sigs). Three hand-maintained lists per native SOP, and `[@@sop.register]` only wraps a list. Action: After SP1, put `Sop.Nodes.factories` (37 entries) in place and delete sop_catalog and the transform. Move the manifest rule to flow_sop. Evidence: Sop.Nodes.factories (37 entries) replaces sop_catalog and the [@@sop.register] transform; the manifest, its generator and its diff rule live in lib/flow_sop.
 
 - [x] **SP12** (P1, med, layering, effort S). Location at baseline: test/lisp_sop/dune links editor_document (and so rays, SDL, Metal). Every sop unit test waits on the runtime build because of one `Contexts.descriptors` call. Action: Split SOP-only lowering from scene kinds, or make descriptors optional. Evidence: helper source and its direct/transitive dependencies use the Flow/SOP catalog without editor_document or runtime; focused port/facts/source checks pass.
 
@@ -825,9 +825,9 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [ ] **SP16** (P5, med, layering, effort L). Location at baseline: editor_document/objects.ml:12-13 · layers.ml (11 `deriving sop_params, sop_node`). Scene, world and settings kinds are SOP nodes that cook empty geometry, only to get a schema and a menu entry. Action: Declare them as Param schemas plus descriptors with no Node/Session.
 
-- [ ] **SP17** (P3, med, perf-risk, effort M). Location at baseline: flow_sop/curve.ml:8-20 · value_lane.ml:52 · lower.ml:1030. sop/curve points are stored as `"%h,%h,%h;…"` text, re-encoded every live frame and decoded every cook. Action: Pass them as a typed Vec3 array through Network.drives.
+- [x] **SP17** (P3, med, perf-risk, effort M). Location at baseline: flow_sop/curve.ml:8-20 · value_lane.ml:52 · lower.ml:1030. sop/curve points are stored as `"%h,%h,%h;…"` text, re-encoded every live frame and decoded every cook. Action: Pass them as a typed Vec3 array through Network.drives. Evidence: live drives carry Vec3 arrays (Curve.replace_points); only authored points use text, for parameter views.
 
-- [ ] **SP18** (P3, med, vibe-code, effort S). Location at baseline: flow_sop/lower.ml:152-164 · 126-128. A digest cache keyed on `Obj.repr` physical identity in an 8-entry Atomic list, and global profiling refs. Action: Key on a workspace content id and pass profiling explicitly.
+- [x] **SP18** (P3, med, vibe-code, effort S). Location at baseline: flow_sop/lower.ml:152-164 · 126-128. A digest cache keyed on `Obj.repr` physical identity in an 8-entry Atomic list, and global profiling refs. Action: Key on a workspace content id and pass profiling explicitly. Evidence: 90d282eb replaces the global Private.record/profiles with an explicit ?on_profile on Lower.workspace, of_checked and lower_checked; the digest cache no longer uses Obj.
 
 - [x] **SP19** (P0, med, doc-rot, effort S). Location at baseline: .claude/skills/add-sop/SKILL.md · untracked .agents/skills/add-sop. The skill is OCaml-first, cites a nonexistent test and uses the wrong constructor. An older prismel/pdk copy is also lying around. Action: Rewrite it Lisp-first and delete `.agents/`.
 
@@ -837,7 +837,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **SP22** (P0, low, dead-code, effort S). Location at baseline: rays_editor/dune:10 `(pps rays.ppx)`. No file in the editor uses it. Action: Remove it.
 
-- [ ] **SP23** (P1, low, api-bloat, effort S). Location at baseline: lib/sop/graph.ml (57 lines, `type t = Node.t`). A wrapper module. Action: Fold it into Node.
+- [x] **SP23** (P1, low, api-bloat, effort S). Location at baseline: lib/sop/graph.ml (57 lines, `type t = Node.t`). A wrapper module. Action: Fold it into Node. Evidence: Graph is folded into Node (Node.info, inspect, find, graph_dependencies).
 
 - [x] **SP24** (P1, low, dead-code, effort S). Location at baseline: Edit_graph.of_graph/compile/factory_arity · Async_cook.await · Session.Private.clear_cache_keep_timings · ppx sop.name/sop.ignore/sop.node_keywords. Test-only or unused. Action: prune-dead-code after SP1. Evidence: prune-dead-code ran after SP1 (a4c1eb7e).
 
@@ -1033,13 +1033,13 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **TT17** (P0, med, tool-cruft, effort S). Location at baseline: codemod/open_domains.ml, result_bind migrate mode, split_modules.ml, metal-registry legacy modes. One-off migrations whose self-tests run in every runtest. Action: Delete them; keep prune and dead-*.
 
-- [ ] **TT18** (P1, med, tool-cruft, effort S). Location at baseline: bench_rewire_payload, bench_merge_payload, bench_uniforms, bench_mesh_planes. Nothing references them, and they are written in golfed style. Action: Delete them (move the mesh_planes validation into flow_sop tests).
+- [x] **TT18** (P1, med, tool-cruft, effort S). Location at baseline: bench_rewire_payload, bench_merge_payload, bench_uniforms, bench_mesh_planes. Nothing references them, and they are written in golfed style. Action: Delete them (move the mesh_planes validation into flow_sop tests). Evidence: bench_merge_payload and bench_uniforms are deleted; mesh-plane validation is the lib/flow_sop/test_mesh_planes test.
 
 - [ ] **TT19** (P7, med, tool-cruft, effort M). Location at baseline: 25 tools/bench_*.ml; 13 per-op rdk microbenches untouched since 2026-10-04; 13 median and 16 measure copies. One executable per bench, each with its own timer. Action: One `bench_rdk.exe <op>` with a shared `bench_util`.
 
 - [x] **TT20** (P0, med, process, effort S). Location at baseline: .claude/skills/{focused-test,smoke,write-rays-lisp,extend-rays-editor,add-sop}. Contradict AGENTS: they bypass check.exe, mention `~after_present`, `sketches/dune.rays.inc`, and OCaml factories. Action: Fix each.
 
-- [ ] **TT21** (P1, med, test-sprawl, effort S). Location at baseline: tools/dune:298 (aliases runtest mesh_plane_validation). A 'bench' in default runtest. Action: Make it a flow_sop test.
+- [x] **TT21** (P1, med, test-sprawl, effort S). Location at baseline: tools/dune:298 (aliases runtest mesh_plane_validation). A 'bench' in default runtest. Action: Make it a flow_sop test. Evidence: bench_mesh_planes became a flow_sop test.
 
 - [x] **TT22** (P0, med, duplication, effort S). Location at baseline: test/dependency_gate.ml:84-145,178. Blacklist rows that the `only` allowlist already covers, and an empty `reach_exceptions`. Action: Delete about 40 lines.
 
