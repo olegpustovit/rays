@@ -255,6 +255,7 @@ let () =
                         gpu_seconds = None;
                       });
               readback = (fun _ -> assert false);
+              planes = (fun _ -> assert false);
             });
     }
   in

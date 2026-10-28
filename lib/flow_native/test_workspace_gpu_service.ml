@@ -54,7 +54,7 @@ let () =
         (fun ~fast:_ _ ->
           assert (Domain.is_main_domain ());
           incr prepares;
-          Ok
+          let rec kernel : Flow_ir.Gpu.kernel =
             {
               run =
                 (fun inputs ->
@@ -78,7 +78,10 @@ let () =
                     Array.map (fun x -> Int32.float_of_bits (Int32.bits_of_float x)) flat
                   in
                   Ok (Flow.Eval.Vec3_array rounded));
-            });
+              planes = (fun v -> Flow_ir.Gpu.planes_of kernel.readback v);
+            }
+          in
+          Ok kernel);
     }
   in
   let owner = Flow_native.Workspace_gpu.create () in

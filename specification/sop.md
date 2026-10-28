@@ -419,15 +419,29 @@ geometry they come from (`Attribute_kernel.prepare`'s count source). Placement: 
 precision is fast (the editor lowers with the precision its settings read, `Lowering.of_workspace`;
 exact work stays on the CPU, bit for bit), the backend is present, the region passes the GPU form
 checks, and `Flow_ir.Cost.sop_device`: at least 2^18 elements and noise in its code (Qualification
-places every legal region). Measured (M-series, loaded machine, 2026-10-28,
-`test_chain_gpu_native.exe`): `grid 1000x1000 > attribute_noise > transform` cooks in 0.23-0.25 s
-with the device against 0.29-0.33 s on the CPU in the same process, one dispatch, largest
-difference 3.4e-7 (float32); of the device's 0.13 s, preparing the sources takes 0.03-0.06 s,
-upload and dispatch 0.05-0.07 s and readback 0.02-0.03 s. A light map (transform alone) costs about
-its transfer on the CPU blocks and stays there. Any device failure (a form refusal, a status, a
-readback) leaves the record to the CPU, which reports its own errors. Not yet: device-resident
-geometry between consecutive fused nodes (each node uploads its sources), fills bound as uniforms
-instead of uploaded arrays, and one upload of a source two fields read.
+places every legal region).
+
+Data movement (`Flow_gpu.Run` over mapped buffers, specification/backend.md): sources are packed
+straight into the kernel's mapped input buffers (one float32 rounding, finite check folded in) and
+outputs are read from the mapped output buffers as owned planes (`Gpu.kernel.planes`, parallel
+blocks), which the write installs as its attribute storage with no interleaved copy or second scan.
+An input is resident when it is the same array as the last dispatch's, never by comparing floats:
+sources are immutable, and a recook keeps them the same arrays because the facts they come from are
+remembered by identity (`Flow.Value.remember`, weak): a static grid's point planes, an attribute's
+interleaved or checked read, the copies a write adopts, a large array's finite check; a large float
+fill is remembered by its value (`Flow.Op.constant_array`, 8 slots); and a region that only
+forwards its one source (a branch chosen by constants) is that source
+(`Packed.Host.prepare_values`). `test_chain_gpu_native` fails if a recook uploads an input. Measured (M1, loaded
+machine, load 8-9, 2026-10-28, `test_chain_gpu_native.exe`, medians of 5): `grid 1000x1000 >
+attribute_noise > transform` cooks in 0.009-0.027 s with the device (before: 0.088 s) against
+0.13-0.19 s on the CPU, first cook 0.051-0.072 s (before: 0.19 s), one dispatch, largest difference
+3.4e-7; a recook uploads nothing. A light map
+(transform alone) costs about its transfer on the CPU blocks and stays there. Any device failure (a
+form refusal, a status, a readback) leaves the record to the CPU, which reports its own errors. Not
+yet: device-resident geometry between consecutive fused nodes and a display that binds it without
+readback (an attribute that materialises on the CPU only when read, the rule that matters most over
+PCIe), grid planes generated on the device from the thread index instead of uploaded, fills bound as
+uniforms, and one command buffer per cook across fused nodes.
 
 A body reads its cook context through reserved inputs (`Context_kernel.label_context`): each
 distinct `sop/context_seed`, `context_frame` or `context_time` call, labelled with the card's

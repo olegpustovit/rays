@@ -63,6 +63,27 @@ let () =
                                 else resource.read offset length);
                           })
                         (raw.create_buffer memory descriptor));
+                  (* inputs are mapped: an upload is the flush of the host view *)
+                  create_mapped_buffer =
+                    (fun descriptor ->
+                      Result.map
+                        (fun (mapped : B.driver_mapped) ->
+                          {
+                            mapped with
+                            flush =
+                              (fun length ->
+                                if descriptor.Ogpu.Types.size >= 4096L then begin
+                                  incr input_writes;
+                                  let result = mapped.flush length in
+                                  if !fail_input then
+                                    Error
+                                      (Ogpu.Error.make "test" Invalid_state
+                                         "injected partial input upload")
+                                  else result
+                                end
+                                else mapped.flush length);
+                          })
+                        (raw.create_mapped_buffer descriptor));
                   create_library =
                     (fun shader ->
                       Result.map
@@ -161,7 +182,8 @@ let () =
       ignore (Test_program.ok (R.dispatch run { replacement with count = 512 }));
       ignore (Test_program.ok (R.dispatch run replacement));
       assert (!input_writes = 6 && R.Private.input_uploads run = 5);
-      assert (R.Private.input_uploaded_bytes run = 5 * 4096);
+      (* the bytes each upload covered: four of 1,024 floats and one of 512 *)
+      assert (R.Private.input_uploaded_bytes run = (4 * 4096) + 2048);
       fail := true;
       let larger = List.assoc "arithmetic" (Test_program.fixtures 65536) in
       let values = Test_program.ok (Flow_ir.Packed.Host.prepare larger ~live:(Input.at_time 1.)) in

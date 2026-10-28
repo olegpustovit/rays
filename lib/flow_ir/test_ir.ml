@@ -514,6 +514,7 @@ let () =
                         gpu_seconds = !gpu_seconds;
                       });
               readback = (fun _ -> Ok (E.Float_array [||]));
+              planes = (fun _ -> Ok [||]);
             });
     }
   in

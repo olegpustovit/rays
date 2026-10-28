@@ -109,6 +109,18 @@ module Buffer : sig
     unit ->
     (t, error) result
 
+  val create_mapped :
+    device:Device.t ->
+    length:int64 ->
+    ?label:string ->
+    unit ->
+    (t * (float, Bigarray.float32_elt, Bigarray.c_layout) Bigarray.Array1.t, error) result
+  (** Shared storage whose contents are the returned float32 view ([length / 4] floats, zero copy):
+      memory the view owns (page aligned, zeroed), which the buffer keeps alive, so the view stays
+      valid after [destroy]. [length] is a positive multiple of 4; the buffer's own length is
+      rounded up to whole pages. Host writes race the GPU: wait for work reading or writing the
+      buffer before touching the view. *)
+
   val length : t -> int64
   val write_bytes : t -> dst_offset:int64 -> bytes -> (unit, error) result
   val read_bytes : t -> offset:int64 -> length:int -> (bytes, error) result

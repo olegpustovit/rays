@@ -108,6 +108,7 @@ let pure workspace =
                         gpu_seconds = None;
                       });
               readback = (fun _ -> failwith "Display-only output must remain on the device");
+              planes = (fun _ -> failwith "Display-only output must remain on the device");
             });
     }
   in

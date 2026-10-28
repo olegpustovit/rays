@@ -458,6 +458,7 @@ let device_inputs () =
                       gpu_seconds = None;
                     });
               readback = (fun _ -> assert false);
+              planes = (fun _ -> assert false);
             });
     }
   in

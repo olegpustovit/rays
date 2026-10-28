@@ -151,6 +151,22 @@ let create () =
           let create_buffer memory descriptor =
             register_buffer (Buffer.create device ~memory:(buffer_memory memory) descriptor)
           in
+          let create_mapped_buffer descriptor =
+            match Buffer.create_mapped device descriptor with
+            | Error _ as e -> e
+            | Ok (buffer, floats) ->
+                (* shared storage on unified memory: the view is the buffer's memory, so flush and
+                   invalidate have nothing to copy; completion waits order host and GPU access *)
+                Result.map
+                  (fun resource ->
+                    {
+                      Ogpu_core.Backend.mapped_resource = resource;
+                      view = floats;
+                      flush = (fun _ -> Ok ());
+                      invalidate = (fun _ -> Ok ());
+                    })
+                  (register_buffer (Ok buffer))
+          in
           let texture_memory ~host_read (descriptor : Ogpu_core.Types.texture_descriptor) =
             if descriptor.sample_count = 1 && host_read then Texture.Shared else Device_local
           in
@@ -1005,6 +1021,7 @@ let create () =
               Ogpu_core.Backend.device_handle = Device.Private.handle device;
               capabilities = Device.capabilities device;
               create_buffer;
+              create_mapped_buffer;
               create_texture;
               create_depth_texture;
               create_library;

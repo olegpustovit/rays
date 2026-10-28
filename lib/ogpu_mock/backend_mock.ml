@@ -245,6 +245,33 @@ let create () =
         create_buffer =
           (fun _memory d ->
             resource "buffer" c.buffers (fun n -> c.buffers <- n) (Int64.to_int d.Types.size));
+        create_mapped_buffer =
+          (fun d ->
+            (* a discrete device: the view is a separate host copy, synchronised only by flush and
+               invalidate, so a caller that skips one reads stale data *)
+            let size = Int64.to_int d.Types.size in
+            let view = Bigarray.(Array1.create float32 c_layout (size / 4)) in
+            Bigarray.Array1.fill view 0.;
+            Result.map
+              (fun (r : Backend.driver_resource) ->
+                let device = Hashtbl.find c.memory r.token in
+                {
+                  Backend.mapped_resource = r;
+                  view;
+                  flush =
+                    (fun n ->
+                      for i = 0 to (n / 4) - 1 do
+                        Bytes.set_int32_le device (4 * i) (Int32.bits_of_float view.{i})
+                      done;
+                      Ok ());
+                  invalidate =
+                    (fun n ->
+                      for i = 0 to (n / 4) - 1 do
+                        view.{i} <- Int32.float_of_bits (Bytes.get_int32_le device (4 * i))
+                      done;
+                      Ok ());
+                })
+              (resource "buffer" c.buffers (fun n -> c.buffers <- n) size));
         create_library =
           (fun _shader ->
             let id = token c in

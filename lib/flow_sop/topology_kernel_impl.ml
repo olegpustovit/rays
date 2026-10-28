@@ -131,20 +131,34 @@ let components geometry args =
 
 (* Flow arrays remain reusable immutable inputs: owned native constructors
    receive copies, never the evaluator's retained input buffers. *)
+(* A static point array's planes, remembered by its identity (both are immutable): a recook of the
+   same grid builds the same positions, which downstream reads and a device holding them reuse. *)
+let point_planes : float array -> (unit -> Rdk.Packed.Float3.t) -> Rdk.Packed.Float3.t =
+  Flow.Value.remember ()
+
+(* the same for static planes, keyed by x; y and z must be the ones remembered with it *)
+let plane_copies :
+    float array ->
+    (unit -> float array * float array * Rdk.Packed.Float3.t) ->
+    float array * float array * Rdk.Packed.Float3.t =
+  Flow.Value.remember ()
+
 let mesh_points = function
   | E.Vec3_array points as value ->
       Flow.Value.validate value;
       let count = Array.length points / 3 in
-      Ok
-        ( count,
-          fun () ->
-            let x = Array.make count 0. and y = Array.make count 0. and z = Array.make count 0. in
-            for i = 0 to count - 1 do
-              x.(i) <- points.(3 * i);
-              y.(i) <- points.((3 * i) + 1);
-              z.(i) <- points.((3 * i) + 2)
-            done;
-            Rdk.Packed.Float3.View.of_owned_exn ~x ~y ~z )
+      let planes () =
+        let x = Array.create_float count
+        and y = Array.create_float count
+        and z = Array.create_float count in
+        for i = 0 to count - 1 do
+          x.(i) <- points.(3 * i);
+          y.(i) <- points.((3 * i) + 1);
+          z.(i) <- points.((3 * i) + 2)
+        done;
+        Rdk.Packed.Float3.View.of_owned_exn ~x ~y ~z
+      in
+      Ok (count, fun () -> if count > 4096 then point_planes points planes else planes ())
   | E.Record fields when List.length fields = 3 -> (
       match (List.assoc_opt "x" fields, List.assoc_opt "y" fields, List.assoc_opt "z" fields) with
       | Some (E.Float_array x), Some (E.Float_array y), Some (E.Float_array z) ->
@@ -175,8 +189,15 @@ let mesh_points = function
             Ok
               ( count,
                 fun () ->
-                  Rdk.Packed.Float3.View.of_owned_exn ~x:(Array.copy x) ~y:(Array.copy y)
-                    ~z:(Array.copy z) )
+                  let copy () =
+                    Rdk.Packed.Float3.View.of_owned_exn ~x:(Array.copy x) ~y:(Array.copy y)
+                      ~z:(Array.copy z)
+                  in
+                  if count <= 4096 then copy ()
+                  else
+                    match plane_copies x (fun () -> (y, z, copy ())) with
+                    | y', z', positions when y' == y && z' == z -> positions
+                    | _ -> copy () )
           end
       | _, _, _ -> error "E_TOPOLOGY_TYPE" "Mesh planes require exactly x, y and z float arrays.")
   | E.Record _ -> error "E_TOPOLOGY_TYPE" "Mesh planes require exactly x, y and z float arrays."

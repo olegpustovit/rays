@@ -331,6 +331,8 @@ and buffer = {
   parent : resource_parent;
   allocation : heap_allocation option;
   state : resource_state;
+  mapping : Metal_raw.floats option;
+      (** a mapped buffer's memory: the buffer reads and writes it, so the record keeps it alive *)
 }
 
 and acceleration_structure = {
@@ -1140,7 +1142,7 @@ module Buffer = struct
     else Ok ()
 
   let finish_create operation ~(device : Device.t) ~parent ~length ~storage ~cpu_cache
-      ~hazard_tracking ~heap_offset ~allocation ~label raw =
+      ~hazard_tracking ~heap_offset ~allocation ?mapping ~label raw =
     let actual_length, actual_storage, actual_cache, actual_hazard, actual_offset =
       Metal_raw.buffer_info raw
     in
@@ -1179,6 +1181,7 @@ module Buffer = struct
               parent;
               allocation;
               state = resource_state ();
+              mapping;
             }
           in
           attach parent_lifetime;
@@ -1202,6 +1205,33 @@ module Buffer = struct
         in
         finish_create "Metal.Buffer.create" ~device ~parent:(Device_resource device) ~length
           ~storage ~cpu_cache ~hazard_tracking ~heap_offset:None ~allocation:None ~label raw)
+
+  (* Shared storage over memory a float32 Bigarray owns: the host reads and writes the view the GPU
+     sees, with no copy. The length is rounded up to whole pages; the view has [length / 4] floats. *)
+  let create_mapped ~(device : Device.t) ~length ?label () =
+    let operation = "Metal.Buffer.create_mapped" in
+    let hazard_tracking = Default_hazard_tracking and cpu_cache = Default_cache in
+    on_main operation (fun () ->
+        let* () = ensure_live operation device.lifetime in
+        let* () = validate_create operation device ~length ~label in
+        if Int64.rem length 4L <> 0L then
+          error operation Invalid_argument "mapped buffer length must be a multiple of 4"
+        else
+          let options = resource_options_code ~storage:Shared ~cpu_cache ~hazard_tracking in
+          let* raw, floats =
+            native_result operation
+              (Metal_raw.Registry.buffer_create_mapped device.raw length (Int64.of_int options))
+          in
+          let* actual, _, _, _, _ =
+            try Ok (Metal_raw.buffer_info raw)
+            with Failure message -> native_error operation message
+          in
+          let* value =
+            finish_create operation ~device ~parent:(Device_resource device) ~length:actual
+              ~storage:Shared ~cpu_cache ~hazard_tracking ~heap_offset:None ~allocation:None
+              ~mapping:floats ~label raw
+          in
+          Ok (value, floats))
 
   let length (value : t) = value.length
 

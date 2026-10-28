@@ -1,7 +1,7 @@
 (* On the real device: grid 1000 x 1000 Points (GRID_SIDE; 512 in @runtest-native, the smallest
    grid the cost model places) > attribute_noise > transform, the fused write of noise,
    P and N, cooked on the CPU and with the workspace GPU in fast precision (Executor.record_on_device).
-   The device cook takes at most two dispatches, its noise and P agree with the CPU within float32
+   The device cook takes at most two dispatches, a recook uploads nothing, its noise and P agree with the CPU within float32
    tolerance and N exactly (a translation keeps it); CPU and GPU cook times are printed, median of 5. *)
 let ok = function Ok value -> value | Error d -> failwith (Diagnostic.to_string d)
 let side = try int_of_string (Sys.getenv "GRID_SIDE") with Not_found -> 1000
@@ -89,8 +89,16 @@ let () =
           (* the first cook compiles the kernel and uploads every source *)
           let _, first_seconds = cook placed in
           dispatches := 0;
+          let uploads () =
+            let host, _, _, _, _ = Flow_native.Workspace_gpu.image_stats gpu in
+            host.input_uploads
+          in
+          let before = uploads () in
           let device, _ = cook placed in
           let per_cook = !dispatches in
+          (* a recook over unchanged geometry finds its inputs resident: the same arrays *)
+          if uploads () <> before then
+            failwith (Printf.sprintf "the recook uploaded %d inputs" (uploads () - before));
           let gpu_seconds, _ = median (fun () -> cook placed) in
           if per_cook < 1 || per_cook > 2 then
             failwith (Printf.sprintf "the chain took %d dispatches, not 1 or 2" per_cook);

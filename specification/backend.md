@@ -342,6 +342,26 @@ retains every referenced resource until the native command buffer completes;
 the mock executes uploads exactly and answers compute, render, and ray tracing
 with typed `Unsupported`.
 
+**Mapped buffers and the portability contract.** `Backend.create_mapped_buffer` makes a
+host-visible buffer with a host view, a float32 Bigarray of `size / 4` elements the caller fills and
+reads in place (Flow's kernel inputs and outputs: no byte staging, no f64-to-bytes or bytes-to-f64
+pass, no `write_buffer` copy). Buffers are modelled by intent, never by a storage mode one platform
+has: device-local (`Types.Device_local`, no host access) or host-visible (`Shared`, and mapped
+buffers among them), with a view only on host-visible ones. The view is the *host copy* and the
+buffer the *device copy*; they meet only at two explicit calls, the same on every backend:
+`flush_mapped buffer ~length` after host writes and before encoding work that reads them, and
+`invalidate_mapped buffer ~length` once the work writing the buffer has completed (the caller waits
+for its epoch first) and before the host reads the view. Nothing assumes shared memory is always
+coherent. Metal on Apple silicon aliases the two copies: the view is page-aligned memory the
+Bigarray owns (`CAML_BA_MANAGED`), wrapped with `newBufferWithBytesNoCopy` and kept alive by the
+buffer record, so both calls only check their range and the view stays valid after `destroy`. A
+discrete backend (Vulkan on a PCIe GPU, a later phase) may give the view staging memory and copy on
+the two calls; the mock already keeps the copies apart, so a caller that skips a call reads stale
+data in tests. Over PCIe a readback costs its transfer, so readback stays explicit and lazy: a value
+is materialised on the CPU only when it is read (`Flow_gpu.Run.readback`/`planes` after the
+dispatch's completion and status check); device residency between consecutive kernels is the next
+step (specification/sop.md, Device placement).
+
 Ray tracing: geometry variants are `Triangles`, `Motion_triangles` (one vertex
 buffer per keyframe), `Bounding_boxes`, and `Curves`; descriptors are `Blas`,
 `Motion_blas`, `Tlas_of` with an `instance_kind` (user-id or motion

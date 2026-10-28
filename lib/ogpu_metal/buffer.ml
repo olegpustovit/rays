@@ -21,6 +21,18 @@ let validate_memory (descriptor : Ogpu_core.Types.buffer_descriptor) memory =
           (Ogpu_core.Error.make operation Ogpu_core.Error.Invalid_argument
              "readback buffers require Copy_dst usage")
 
+let wrap device descriptor metal =
+  Device.Private.attach_resource device;
+  {
+    metal;
+    handle = Ogpu_core.Handle.create ~device:(Device.Private.handle device);
+    device;
+    descriptor;
+    submission_uses = 0;
+    destroy_requested = false;
+    retained_by = 0L;
+  }
+
 let create device ~memory descriptor =
   let operation = "Ogpu_metal.Buffer.create" in
   if Device.destroyed device then
@@ -43,20 +55,22 @@ let create device ~memory descriptor =
                 ~storage ~cpu_cache ?label:descriptor.label ()
             with
             | Error metal -> Error (Device.of_metal_error ~operation metal)
-            | Ok metal ->
-                let value =
-                  {
-                    metal;
-                    handle = Ogpu_core.Handle.create ~device:(Device.Private.handle device);
-                    device;
-                    descriptor;
-                    submission_uses = 0;
-                    destroy_requested = false;
-                    retained_by = 0L;
-                  }
-                in
-                Device.Private.attach_resource device;
-                Ok value))
+            | Ok metal -> Ok (wrap device descriptor metal)))
+
+let create_mapped device (descriptor : Ogpu_core.Types.buffer_descriptor) =
+  let operation = "Ogpu_metal.Buffer.create_mapped" in
+  if Device.destroyed device then
+    Error (Ogpu_core.Error.make operation Ogpu_core.Error.Stale_handle "device is destroyed")
+  else
+    match Ogpu_core.Validation.validate_buffer (Device.capabilities device) descriptor with
+    | Error _ as failure -> failure
+    | Ok () -> (
+        match
+          Metal.Buffer.create_mapped ~device:(Device.Private.metal device) ~length:descriptor.size
+            ?label:descriptor.label ()
+        with
+        | Error metal -> Error (Device.of_metal_error ~operation metal)
+        | Ok (metal, floats) -> Ok (wrap device descriptor metal, floats))
 
 (* A buffer placed at [offset] inside a heap; the heap keeps its storage class. *)
 

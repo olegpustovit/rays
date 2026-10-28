@@ -1,4 +1,5 @@
 type handle
+type floats = (float, Bigarray.float32_elt, Bigarray.c_layout) Bigarray.Array1.t
 
 type texture_descriptor = {
   texture_type : int;

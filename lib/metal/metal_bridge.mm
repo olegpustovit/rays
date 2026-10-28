@@ -19,6 +19,7 @@
 #include <unistd.h>
 
 #include <caml/alloc.h>
+#include <caml/bigarray.h>
 #include <caml/callback.h>
 #include <caml/custom.h>
 #include <caml/fail.h>
@@ -1855,6 +1856,46 @@ extern "C" CAMLprim value caml_rays_metal_buffer_write(
                                        static_cast<NSUInteger>(length))];
   }
   CAMLreturn(result_unit());
+}
+
+// The memory belongs to the float32 Bigarray (CAML_BA_MANAGED frees it with free(), which
+// posix_memalign memory allows); the buffer wraps it with no deallocator, and the OCaml record
+// that owns the buffer keeps the Bigarray alive.
+extern "C" CAMLprim value caml_rays_metal_buffer_create_mapped(
+    value raw_device, value raw_length, value raw_options) {
+  CAMLparam3(raw_device, raw_length, raw_options);
+  CAMLlocal3(floats, raw, pair);
+  const std::int64_t length = Int64_val(raw_length);
+  if (length <= 0 || length % 4 != 0) {
+    CAMLreturn(result_error_text("mapped buffer length is invalid"));
+  }
+  const std::size_t page = static_cast<std::size_t>(getpagesize());
+  const std::size_t rounded =
+      (static_cast<std::size_t>(length) + page - 1) / page * page;
+  void *memory = nullptr;
+  if (posix_memalign(&memory, page, rounded) != 0 || memory == nullptr) {
+    CAMLreturn(result_error_text("mapped buffer allocation failed"));
+  }
+  std::memset(memory, 0, rounded);
+  @autoreleasepool {
+    id<MTLDevice> device = object_of_handle(raw_device, Handle_kind::Device);
+    id<MTLBuffer> buffer = [device
+        newBufferWithBytesNoCopy:memory
+                          length:rounded
+                         options:static_cast<MTLResourceOptions>(Int64_val(raw_options))
+                     deallocator:nil];
+    if (buffer == nil) {
+      std::free(memory);
+      CAMLreturn(result_error_text("Metal rejected the mapped buffer"));
+    }
+    floats = caml_ba_alloc_dims(CAML_BA_FLOAT32 | CAML_BA_C_LAYOUT | CAML_BA_MANAGED, 1,
+                                memory, static_cast<intnat>(length / 4));
+    raw = allocate_handle(buffer, Handle_kind::Buffer);
+  }
+  pair = caml_alloc_tuple(2);
+  Store_field(pair, 0, raw);
+  Store_field(pair, 1, floats);
+  CAMLreturn(result_ok(pair));
 }
 
 extern "C" CAMLprim value caml_rays_metal_buffer_read(

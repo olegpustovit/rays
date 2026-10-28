@@ -245,6 +245,9 @@ let proxy t =
                          readback =
                            (fun value ->
                              route_result (fun () -> route t (fun () -> kernel.readback value)));
+                         planes =
+                           (fun value ->
+                             route_result (fun () -> route t (fun () -> kernel.planes value)));
                        }
                         : G.kernel))
                     prepared));
