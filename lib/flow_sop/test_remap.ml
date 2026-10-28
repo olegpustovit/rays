@@ -3,6 +3,10 @@ open Rdk_test_support
 module E = Flow.Eval
 module L = Flow_sop.Lower
 module Edit = Sop.Edit_graph
+(* default: grains 1 and 4096, 1 and 8 domains; RAYS_SLOW=1 adds grain 97 and 4 domains *)
+let slow = Sys.getenv_opt "RAYS_SLOW" = Some "1"
+let grains = if slow then [1;97;4096] else [1;4096]
+let domains = if slow then [1;4;8] else [1;8]
 let flow = function Ok x->x|Error d->failwith(Diagnostic.to_string d)
 let parse s=Flow.Syntax.parse s |>flow
 let words=[|0L;Int64.min_int;1L;0x7ff0000000000000L;0xfff0000000000000L;
@@ -115,7 +119,7 @@ let ()=
             check(geometry_bytes src=before && geometry_bytes dst=target_before)"remap mutated inputs";
             List.iter(fun a->if Attribute.owner a=Detail then
               check((Geometry.find_attribute ~owner:Detail(Attribute.name a)actual |>Option.get)==a)"Detail payload changed")
-              (Geometry.attributes src)) [1;97;4096]) [1;4;8]) [false;true]) ["target";"mapped"])
+              (Geometry.attributes src)) grains) domains) [false;true]) ["target";"mapped"])
       [0;1;2]) [0;3];
   print_endline "C3 all owner/storage raw bytes, ordinary order and edge copies across reference/CPU/domains/grains"
 let ()=
@@ -260,7 +264,7 @@ let ()=
   List.iter(fun reference->let node=compile ~reference src dst(args p v prim offsets ancestors "mapped") in
     List.iter(fun domains->List.iter(fun grain->check
       (geometry_bytes(geometry(run ~domains ~grain node))=geometry_bytes expected)
-      "32769-row all-storage remap differs across CPU/reference/domains/grains") [1;97;4096]) [1;4;8]) [false;true]
+      "32769-row all-storage remap differs across CPU/reference/domains/grains") grains) domains) [false;true]
 let ()=
   let src=source 3 and dst=target 2(source 3) in
   let inputs=args [|0;1;2;0;1;2|][|0;1;2;0;1;2|][|0;0|]
@@ -321,7 +325,7 @@ let ()=
     let node=Edit.compile_node graph.network.geometry ~node_id:(Option.get graph.root)|>get_string_ok in
     List.iter(fun domains->List.iter(fun grain->check
       (geometry_bytes(geometry(run ~domains ~grain node))=geometry_bytes expected)
-      "strict generated maps/raw payload differ from native oracle") [1;97;4096]) [1;4;8]) [false;true]
+      "strict generated maps/raw payload differ from native oracle") grains) domains) [false;true]
 
 let ()=
   (* A real failed child remains the first failure, with its diagnostic envelope
@@ -357,7 +361,7 @@ let ()=
     List.iter(fun reference->let node=compile ~reference src dst(args p v prim offsets ancestors policy) in
       List.iter(fun domains->List.iter(fun grain->check
         (geometry_bytes(geometry(run ~domains ~grain node))=geometry_bytes expected)
-        "explicit authored target topology or raw P policy differs") [1;97;4096]) [1;4;8]) [false;true])
+        "explicit authored target topology or raw P policy differs") grains) domains) [false;true])
     ["target";"mapped"]
 
 let ()=
@@ -429,7 +433,7 @@ let ()=
   List.iter(fun reference->let node=compile ~reference src dst permuted in
     List.iter(fun domains->List.iter(fun grain->check
       (geometry_bytes(geometry(run ~domains ~grain node))=geometry_bytes expected)
-      "primitive permutation differs by domain/grain/reference") [1;97;4096]) [1;4;8]) [false;true]
+      "primitive permutation differs by domain/grain/reference") grains) domains) [false;true]
 
 let ()=
   (* Valid geometry-host values cannot reach these native helper trust guards. *)

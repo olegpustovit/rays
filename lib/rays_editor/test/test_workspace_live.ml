@@ -21,7 +21,14 @@ let lower ?compiled_ids ?sites source =
       | Ok lowered -> lowered
       | Error d -> fail (Diagnostic.to_string d))
 
-let case name = read (Filename.concat cases (name ^ ".lisp"))
+(* the checked-in sketches with fewer copies: the checks are about caching and time, not size *)
+let case name =
+  let text = read (Filename.concat cases (name ^ ".lisp")) in
+  let shrink a b = Str.replace_first (Str.regexp_string a) b text in
+  match name with
+  | "sunflower" -> shrink "(seeds : int 240)" "(seeds : int 8)"
+  | "orrery" -> Str.replace_first (Str.regexp_string "(moons : int 8)") "(moons : int 2)" (shrink "(rings : int 3)" "(rings : int 2)")
+  | _ -> text
 
 (* the symbol [t] replaced by a literal: the static oracle of a live value *)
 let at_time source time =
@@ -104,7 +111,7 @@ let run () =
   check (not s0.time_dependent
     && Result.get_ok (Value_lane.resolve slane ~time:9. sgraph.network) == s0)
     "a static network was resolved again";
-  check (Lower.counts static = (0, 241)) "sunflower has no live nodes";
+  check (Lower.counts static = (0, 9)) "sunflower has no live nodes";
   (* --- the live value equals the static evaluation at that time ---------- *)
   let sunflower_live = {|(workspace sunflower
   (graph sunflower :context sop [(seeds : int 60) (spread : float 0.062)]

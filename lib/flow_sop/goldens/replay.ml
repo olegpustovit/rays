@@ -777,6 +777,12 @@ let () = match Array.to_list Sys.argv with
           (List.length expected_nodes)
           (String.concat "," absent) (String.concat "," extra))
       end;
+      (* runtest replays the first row of each node; REPLAY_ALL=1 (@qualification-scale) replays every row *)
+      let rows = if Sys.getenv_opt "REPLAY_ALL" = Some "1" then rows else
+          let seen = Hashtbl.create 128 in
+          List.filter (fun row -> match children "golden" row with
+            | node :: _ when not (Hashtbl.mem seen (string node)) -> Hashtbl.add seen (string node) (); true
+            | _ -> false) rows in
       (* REPLAY_JOBS=J forks J workers, each owning the nodes that hash to it (so a node's prepared library is built once). *)
       let jobs = match Sys.getenv_opt "REPLAY_JOBS" with Some j -> max 1 (int_of_string j) | None -> 1 in
       let children = List.init (if jobs = 1 then 0 else jobs) (fun job ->

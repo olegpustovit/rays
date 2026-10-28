@@ -14,7 +14,7 @@
 (test
  (name test_units)
  (modules test_units test_node_sources test_math_helpers test_math_kernel test_lisp_node test_node_facts test_encoded_parameters test_lisp_projection test_merge_source test_image_kernel test_keyword_ports test_metadata_kernel test_topology_kernel test_geometry_arrays test_group_kernel test_noise_displace_contract test_remap test_concat test_planes test_iterate test_adjacency test_graph test_lisp_fusion test_trace test_mesh_planes)
- (deps nodes/prelude.rays)
+ (deps nodes/prelude.rays (env_var RAYS_SLOW))
  (libraries test_support flow flow_ir flow_ir_test_support flow_web flow_graph flow_sop sop rdk rdk_test_support lisp_sop rays_math input unix parallel)
  (preprocess (pps rays.ppx)))
 

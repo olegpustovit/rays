@@ -21,6 +21,12 @@ let catalog = Kinds.catalog ~version:1 factories |> Result.get_ok
 let show ds = String.concat "; " (List.map Diagnostic.to_string ds)
 open Test_text
 
+(* a small garden: the shell tests look at panels and edits, not at 40 scattered spheres a cook *)
+let case name =
+  let text = case name in
+  if name <> "variations" then text
+  else Str.replace_first (Str.regexp_string "(count : int 40)") "(count : int 3)" text
+
 let of_text text = match Doc.of_text catalog text with Ok d -> d | Error ds -> fail (show ds)
 let build ?previous ws = Lowering.of_workspace ~factories ?previous ws
 let build_ok ws = match build ws with Ok d -> d | Error d -> fail (Diagnostic.to_string d)
