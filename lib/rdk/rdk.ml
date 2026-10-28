@@ -1,4 +1,3 @@
-module Iso_surface = Rdk_gen.Iso_surface
 module Line_geometry = Rdk_gen.Line_geometry
 module Spiral = Rdk_gen.Spiral
 module Delaunay2 = Rdk_exact.Delaunay2
@@ -52,7 +51,6 @@ module Edge_transport = Rdk_mesh.Edge_transport
 module Edge_ops = Rdk_mesh.Edge_ops
 module Crease = Rdk_mesh.Crease
 module Convex_hull = Rdk_mesh.Convex_hull
-module Bound = Rdk_mesh.Bound
 module Curve_join = Rdk_curve.Curve_join
 module Curve_topology = Rdk_mesh.Curve_topology
 module Poly_reduce = Rdk_mesh.Poly_reduce

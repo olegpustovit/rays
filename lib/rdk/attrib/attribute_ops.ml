@@ -109,10 +109,6 @@ type interpolate_computed = {
   computed_numbers_attribute : string;
   computed_weights_attribute : string;
 }
-type enumeration_storage = Attribute_enumerate.storage =
-  | Integer | Text of { prefix : string }
-type enumeration_mode = Attribute_enumerate.mode =
-  | Enumerate_piece_elements | Enumerate_pieces
 type blur_method = Attribute_blur.method_ = Uniform | Edge_length
 type blur_mode = Attribute_blur.mode =
   | Laplacian of float | Custom_steps of { odd : float; even : float }
@@ -163,7 +159,6 @@ type random_distribution = Attribute_generate.random_distribution =
   | Random_custom_discrete of (numeric_value * float) list
   | Random_custom_discrete_text of (string * float) list
 
-let enumerate = Attribute_enumerate.run
 
 let blur_points = Attribute_blur.run
 

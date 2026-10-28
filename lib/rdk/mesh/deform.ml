@@ -36,10 +36,6 @@ let validate_selection topology = function
           "Rdk.Deform: edge selection belongs to different topology"
       else Ok ()
 
-let selection_needs_index = function
-  | Some (Selected_vertices _ | Selected_primitives _ | Selected_edges _) -> true
-  | None | Some (Selected_points _) -> false
-
 let[@inline] point_selected selection index point = match selection with
   | None -> true
   | Some (Selected_points group) -> Group.mem point group

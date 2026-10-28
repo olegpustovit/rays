@@ -24,7 +24,6 @@ val normalize_plane_axis :
 val grid :
   ?cancel:Rdk_core.Cancel.t -> ?grain:int -> ?counts:grid_counts ->
   ?connectivity:grid_connectivity -> ?orientation:grid_orientation ->
-  ?center:Rays_math.Vec3.t -> ?width:float -> ?height:float ->
-  ?rotation:float -> ?uv_attribute:String.t ->
+  ?uv_attribute:String.t ->
   columns:int -> rows:int -> size:float -> unit ->
   (Rdk_core.Geometry.t, Rdk_core.Error.t) result

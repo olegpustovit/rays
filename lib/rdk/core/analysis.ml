@@ -223,9 +223,6 @@ let total values =
   done;
   !result
 
-let surface_area ?cancel ?grain ?primitives geometry =
-  Result.map total (primitive_measure ?cancel ?grain ?primitives Area geometry)
-
 let signed_volume ?cancel ?grain ?primitives geometry =
   Result.map total
     (primitive_measure ?cancel ?grain ?primitives Signed_volume geometry)

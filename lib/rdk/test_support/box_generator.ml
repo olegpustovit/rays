@@ -21,12 +21,12 @@ let box_rotation_matrix order rotation =
   | Box_zxy -> Rays_math.Mat4.mul y (Rays_math.Mat4.mul x z)
   | Box_zyx -> Rays_math.Mat4.mul x (Rays_math.Mat4.mul y z)
 
-let box ?cancel ?(grain = 16_384) ?(connectivity = Box_triangles)
+let box ?(grain = 16_384) ?(connectivity = Box_triangles)
     ?(consolidate_points = false) ?normals ?(center = Rays_math.Vec3.zero)
-    ?(rotation = Rays_math.Vec3.zero) ?(rotation_order = Box_xyz)
-    ?(uniform_scale = 1.) ?(x_divisions = 1) ?(y_divisions = 1)
+    ?(rotation = Rays_math.Vec3.zero)
+    ?(x_divisions = 1) ?(y_divisions = 1)
     ?(z_divisions = 1) ?uv_attribute ?face_groups ~size () =
-  Error.guard ~operation:"box" ~code:"invalid_parameter" @@ fun () ->
+  let cancel = None in let rotation_order = (Box_xyz) in let uniform_scale = (1.) in Error.guard ~operation:"box" ~code:"invalid_parameter" @@ fun () ->
   let polygon_mode = match connectivity with
     | Box_triangles | Box_quads -> true
     | Box_surface_points | Box_lattice_points -> false in
