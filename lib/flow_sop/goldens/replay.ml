@@ -421,7 +421,7 @@ let compare_check cache source factories with_ =
       and cached = output (lower ~cache source factories ops with_) in
       if normal <> cached then fail ("prepared cook differs for " ^ key)
 
-let check_row ?(prepared = true) ?(times : replay_times option) (cache : replay_cache) directory row =
+let check_row ?capture ?(prepared = true) ?(times : replay_times option) (cache : replay_cache) directory row =
   Fun.protect ~finally:Flow_sop.Lower.Private.clear_cache (fun () ->
   match children "golden" row with
   | [name; fixture; case; source; input_forms; expected] ->
@@ -450,7 +450,8 @@ let check_row ?(prepared = true) ?(times : replay_times option) (cache : replay_
             string code <> ""
             && string code = actual_code && string message = actual_message
         | _ -> false in
-      if not matches then
+      if not matches && capture <> None then Option.iter (fun capture -> capture actual) capture
+      else if not matches then
         let describe = function
           | `Ok digest -> "ok " ^ digest
           | `Error (code, message) -> "error " ^ code ^ " " ^ message in
@@ -573,6 +574,44 @@ let sexp_tag tag values = Flow.Lisp.flat (syntax (Flow.Syntax.List
 let sexp_string value = syntax (Flow.Syntax.Str value)
 let sexp_text value = Flow.Lisp.flat (sexp_string value)
 
+let write_gz path text =
+  let temporary = path ^ ".tmp" in
+  Out_channel.with_open_bin temporary (fun channel -> output_string channel text);
+  let out = Unix.openfile path [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC] 0o644 in
+  let pid = Unix.create_process "gzip" [|"gzip"; "-9"; "-n"; "-c"; temporary|] Unix.stdin out Unix.stderr in
+  let status = snd (Unix.waitpid [] pid) in
+  Unix.close out; Sys.remove temporary;
+  if status <> Unix.WEXITED 0 then fail ("gzip failed: " ^ path)
+
+(* Rewrites the outcome of every row of [nodes] ([] = all) in DIR/ports.sexp.gz from what the Lisp
+   nodes cook now: the promote step after an intentional node change. One row per line; the outcome
+   is the last (ok ...) / (error ...) form. *)
+let update directory nodes =
+  let cache = create_cache () and changed = ref 0 in
+  let rfind sub line =
+    let rec go i = if i < 0 then -1 else if String.sub line i (String.length sub) = sub then i else go (i - 1) in
+    go (String.length line - String.length sub) in
+  let lines = String.split_on_char '\n' (read_file (Filename.concat directory "ports.sexp")) in
+  let lines = List.map (fun line ->
+    if line = "" then line else
+    let row = match Flow.Syntax.parse line with Ok [row] -> row | _ -> fail "malformed golden row" in
+    match children "golden" row with
+    | node :: _ when nodes = [] || List.mem (string node) nodes ->
+        let actual = ref None in
+        check_row ~capture:(fun a -> actual := Some a) cache directory row;
+        (match !actual with
+         | None -> line
+         | Some outcome ->
+             incr changed;
+             let start = max (rfind "(ok \"" line) (rfind "(error \"" line) in
+             if start < 0 then fail "golden row has no outcome";
+             String.sub line 0 start ^ (match outcome with
+               | `Ok digest -> sexp_tag "ok" [sexp_string digest]
+               | `Error (code, message) -> sexp_tag "error" [sexp_string code; sexp_string message]) ^ ")")
+    | _ -> line) lines in
+  write_gz (Filename.concat directory "ports.sexp.gz") (String.concat "\n" lines);
+  Printf.printf "updated %d golden rows in %s\n%!" !changed directory
+
 let expect_rejection label action =
   match try action (); None with Failure message -> Some message with
   | Some _ -> ()
@@ -618,6 +657,16 @@ let self_test () =
     let coverage = Flow.Syntax.parse "(case \"line\" \"none\" \"success\") (case \"line\" \"none\" \"pending\")" |> get_flow in
     check_key cache temporary "line" [line] [List.hd coverage];
     check_fixture cache temporary "line" "none" [line] [List.hd coverage];
+    (* --update restores a changed digest byte for byte. *)
+    let stored = Filename.concat temporary "ports.sexp.gz" in
+    let build outcome = String.concat "" [String.sub line_row 0 (String.length line_row - String.length line_expected - 1);
+      outcome; ")\n"] in
+    write_gz stored (build line_expected);
+    let original = In_channel.with_open_bin stored In_channel.input_all in
+    write_gz stored (build (sexp_tag "ok" [sexp_string (String.make 32 '0')]));
+    update temporary ["line"];
+    if In_channel.with_open_bin stored In_channel.input_all <> original then fail "--update did not restore the stored golden";
+    Sys.remove stored;
     expect_rejection "partial capture checkpoint" (fun () -> check_coverage coverage [line]);
     expect_rejection "partial per-key checkpoint" (fun () -> check_key cache temporary "line" [line] coverage);
     expect_rejection "partial per-fixture checkpoint" (fun () -> check_fixture cache temporary "line" "none" [line] coverage);
@@ -676,6 +725,8 @@ let benchmark_inputs directory rounds =
 
 let () = match Array.to_list Sys.argv with
   | [_; "--self-test"] -> self_test ()
+  | _ :: "--update" :: directory :: nodes when nodes <> [] -> update directory nodes
+  | [_; "--update-all"; directory] -> update directory []
   | [_; "--benchmark-inputs"; directory; rounds] -> benchmark_inputs directory (int_of_string rounds)
   | _ :: "--keys" :: directory :: keys when keys <> [] ->
       let status = verify_provenance directory in

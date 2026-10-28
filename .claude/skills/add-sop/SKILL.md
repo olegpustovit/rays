@@ -25,7 +25,9 @@ description: Add a geometry node in Rays Lisp, including checked metadata, graph
    under `lib/flow_sop/goldens/`. Include refusals and one-domain versus
    multiple-domain exactness. Expected values come from the accepted Lisp
    body, never from a new native twin. Existing migration parity code is
-   removed after its complete golden coverage is captured.
+   removed after its complete golden coverage is captured. After an intentional
+   node change, promote the digests: `dune exec --root . lib/flow_sop/goldens/replay.exe -- --update lib/flow_sop/goldens/data NODE...`
+   (`--update-all DIR`), then review the `ports.sexp.gz` diff.
 6. Build `tools/check.exe` once; time focused checks through
    `_build/default/tools/check.exe`. Include `@lib/flow_sop/runtest`,
    `@lib/sop_catalog/runtest` and affected graph/language aliases.
