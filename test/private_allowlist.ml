@@ -65,7 +65,6 @@ let entries = [
   "rays_pathtracer", "Rays.Mesh.Private";
   "rays_pathtracer", "Runtime_resources.Image.Private";
   "rdk", "Mesh.Private";
-  "rdk", "Rays_math.Noise.Private";
   "renderer", "Ogpu.Backend.Private";
   "renderer", "Runtime.Private";
   "renderer", "Runtime_resources.Canvas.Private";

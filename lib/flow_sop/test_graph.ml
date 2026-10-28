@@ -106,67 +106,9 @@ let shortest_paths () =
   refused geometry "(graph/shortest_paths (sop/adjacency geo) (array/float 4 -1.0) (array/int 1 0))" "E_GRAPH_LENGTH";
   refused geometry "(graph/shortest_paths (sop/adjacency geo) (array/float 4 1.0) (array/int 1 9))" "E_GRAPH_ROOT"
 
-(* Neighbour rows of the three graphs Graph_color colors. *)
-let neighbours_of geometry connectivity =
-  let topology = T.View.view (G.topology geometry) in
-  let view = view_of geometry in
-  let primitives = G.primitive_count geometry and points = G.point_count geometry in
-  let rows count neighbours =
-    let lists = Array.init count neighbours in
-    let offsets = Array.make (count + 1) 0 in
-    Array.iteri (fun i l -> offsets.(i + 1) <- offsets.(i) + List.length l) lists;
-    offsets, Array.of_list (List.concat (Array.to_list lists)) in
-  let range first last = List.init (last - first) (fun i -> first + i) in
-  let primitive_vertices p = range topology.primitive_offsets.(p) topology.primitive_offsets.(p + 1) in
-  let point_vertices q = List.map (fun at -> view.point_vertices.(at))
-    (range view.point_offsets.(q) view.point_offsets.(q + 1)) in
-  let polygon p = Bytes.get topology.primitive_kinds p = '\000' in
-  match connectivity with
-  | Rdk.Graph_color.Graph_primitives_by_point ->
-      primitives, rows primitives (fun p -> List.concat_map (fun v ->
-        List.map (fun w -> view.primitive_of_vertex.(w)) (point_vertices topology.vertex_points.(v)))
-        (primitive_vertices p))
-  | Graph_points_by_primitive ->
-      points, rows points (fun q -> List.concat_map (fun v ->
-        List.map (fun w -> topology.vertex_points.(w)) (primitive_vertices view.primitive_of_vertex.(v)))
-        (point_vertices q))
-  | Graph_primitives_by_edge ->
-      primitives, rows primitives (fun p ->
-        if not (polygon p) then []
-        else List.concat_map (fun v ->
-          let e = view.edge_of_vertex.(v) in
-          if e < 0 then [] else
-            List.filter_map (fun k ->
-              let q = view.primitive_of_vertex.(view.edge_vertices.(k)) in
-              if polygon q then Some q else None)
-              (range view.edge_offsets.(e) view.edge_offsets.(e + 1)))
-          (primitive_vertices p))
-
 let color () =
   let decls = "(rows : {:offsets (array int) :values (array int)} {:offsets (array/int 1) :values (array/int 0)}) \
                (order : (array int) (array/int 0))" in
-  List.iter (fun (_, geometry) ->
-    List.iter (fun connectivity ->
-      let count, (offsets, values) = neighbours_of geometry connectivity in
-      let point_mode = connectivity = Rdk.Graph_color.Graph_points_by_primitive in
-      let owner = if point_mode then Rdk.Group.Point else Rdk.Group.Primitive in
-      List.iter (fun pick ->
-        let selection = Option.map (fun pick ->
-          let group = Rdk.Group.init ~owner ~name:"s" count pick in
-          if point_mode then Rdk.Transform_ops.Selected_points group
-          else Rdk.Transform_ops.Selected_primitives group) pick in
-        let native = Rdk.Graph_color.run ?selection ~connectivity geometry |> ok_error in
-        let colors = match G.find_attribute ~owner:(if point_mode then Rdk.Attribute.Point else Primitive)
-            "color" native |> Option.map Rdk.Attribute.View.storage with
-          | Some (Rdk.Attribute.Int values) -> values | _ -> failwith "no colors" in
-        let order = Array.of_list (List.filter (fun i -> match pick with None -> true | Some f -> f i)
-          (List.init count Fun.id)) in
-        agree ~decls geometry "(graph/color rows order)"
-          ~inputs:["rows", E.Record ["offsets", ints offsets; "values", ints values]; "order", ints order]
-          (E.Record ["color", ints colors; "count", E.Int (1 + Array.fold_left max (-1) colors)]))
-        [None; Some (fun i -> i mod 2 = 0)])
-      [Rdk.Graph_color.Graph_primitives_by_point; Graph_points_by_primitive; Graph_primitives_by_edge])
-    (fixtures ());
   let _, geometry = List.nth (fixtures ()) 1 in
   let bad rows order code = refused ~decls ~inputs:["rows", rows; "order", order] geometry
     "(graph/color rows order)" code in
@@ -176,24 +118,6 @@ let color () =
   bad (E.Record ["offsets", ints [|0;1|]; "values", ints [|5|]]) (ints [|0|]) "E_GRAPH_ADJACENCY"
 
 let chains () =
-  List.iter (fun (_, geometry) ->
-    let edges = Array.length (view_of geometry).edge_a in
-    List.iter (fun pick ->
-      let group = Option.map (fun pick -> Rdk.Edge_group.init ~topology:(G.topology geometry)
-        ~index:(Rdk.Topology_index.create (G.topology geometry)) ~name:"m" pick) pick in
-      let run closed = Rdk.Poly_path.run ?edges:group ~make_isolated_loops_closed:closed geometry |> ok in
-      let open_run = T.View.view (G.topology (run false))
-      and closed_run = T.View.view (G.topology (run true)) in
-      let expected = E.Record ["offsets", ints open_run.primitive_offsets;
-        "values", ints open_run.vertex_points;
-        "closed", ints (Array.init (Bytes.length closed_run.primitive_kinds) (fun i ->
-          if Bytes.get closed_run.primitive_kinds i = '\000' then 1 else 0))] in
-      let mask = match pick with
-        | None -> ""
-        | Some _ -> Printf.sprintf
-            " :mask (exact (map (fn [(i : int)] (if (int/eq (int/mod i 2) 0) 1 0)) (array/range %d :type int)))" edges in
-      agree geometry ("(graph/chains (sop/adjacency geo)" ^ mask ^ ")") expected)
-      [None; Some (fun e -> e mod 2 = 0)]) (fixtures ());
   let _, geometry = List.nth (fixtures ()) 3 in
   refused geometry "(graph/chains (sop/adjacency geo) :mask (array/int 3 1))" "E_GRAPH_MASK";
   refused geometry "(graph/chains (sop/adjacency geo) :mask (array/int 4 2))" "E_GRAPH_MASK"

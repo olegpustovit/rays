@@ -8,8 +8,6 @@
     input it came from.  An input that already has [name] keeps its values, so
     a merge of merges keeps the innermost tag (give every merge its own
     [source_base] range and a tag names one input of one merge). *)
-val merge : ?cancel:Cancel.t -> ?grain:int -> ?source_attribute:string -> ?source_base:int -> Geometry.t list ->
-  (Geometry.t, string) result
 val run : ?cancel:Cancel.t -> ?grain:int -> ?source_attribute:string ->
   ?source_base:int -> Geometry.t list ->
   (Geometry.t, Error.t) result

@@ -57,7 +57,6 @@ let tests = [
   "attrib", "test_attribute_fade", Test_attribute_fade.run;
   "mesh", "test_poly_cut", Test_poly_cut.run;
   "mesh", "test_separate_pieces", Test_separate_pieces.run;
-  "core", "test_deform", Test_deform.run;
   "gen", "test_point_jitter", Test_point_jitter.run;
   "gen", "test_scatter", Test_scatter.run;
   "mesh", "test_smooth", Test_smooth.run;
@@ -88,7 +87,6 @@ let tests = [
   "mesh", "test_edge_cusp", Test_edge_cusp.run;
   "mesh", "test_edge_straighten", Test_edge_straighten.run;
   "curve", "test_circle_from_edges", Test_circle_from_edges.run;
-  "attrib", "test_graph_color", Test_graph_color.run;
   "mesh", "test_edge_equalize", Test_edge_equalize.run;
   "mesh", "test_edge_relax", Test_edge_relax.run;
   "mesh", "test_edge_transport", Test_edge_transport.run;
@@ -116,7 +114,6 @@ let tests = [
   "attrib", "test_attribute_lifecycle", Test_attribute_lifecycle.run;
   "mesh", "test_poly_extrude", Test_poly_extrude.run;
   "mesh", "test_poly_fill", Test_poly_fill.run;
-  "curve", "test_poly_path", Test_poly_path.run;
   "mesh", "test_clean", Test_clean.run;
   "core", "test_instances", Test_instances.run;
   "attrib", "test_attribute_transfer", Test_attribute_transfer.run;

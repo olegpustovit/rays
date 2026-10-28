@@ -1002,8 +1002,8 @@ let check_parallel_exact () =
     "Facet orientation left the inconsistent grid unchanged";
   let displaced = Plane_generators.grid ~columns:240 ~rows:180 ~uv_attribute:"uv" ~size:20.
       () |> get_ok
-      |> Deform.noise_displace ~grain:257 ~amplitude:0.8 ~frequency:0.7
-           ~seed:927 |> get_ok in
+      |> displace_y ~amplitude:0.8 ~frequency:0.7
+           ~seed:927 |> get_string_ok in
   let run domains = Parallel.run ~domains (fun () ->
       Facet.run ~grain:257 ~cusp_angle:0.08 displaced |> get_ok) in
   let one = run 1 and many = run 4 in

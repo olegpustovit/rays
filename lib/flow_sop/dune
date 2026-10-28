@@ -47,12 +47,6 @@
  (action (run %{exe:test_node_facts.exe})))
 
 (test
- (name test_geometry_collections)
- (enabled_if (= %{env:RAYS_SLOW=0} 1))
- (modules test_geometry_collections)
- (libraries flow flow_sop sop rdk rdk_test_support parallel))
-
-(test
  (name test_encoded_parameters)
  (modules test_encoded_parameters)
  (libraries flow flow_sop flow_graph sop rdk parallel))
@@ -109,11 +103,6 @@
  (libraries flow flow_ir flow_graph flow_sop rdk rdk_test_support lisp_sop parallel))
 
 (test
- (name test_noise_kernel)
- (modules test_noise_kernel)
- (libraries flow flow_ir flow_sop rdk rdk_test_support parallel))
-
-(test
  (name test_noise_displace_contract)
  (modules test_noise_displace_contract)
  (libraries flow flow_sop sop rdk rdk_test_support lisp_sop parallel unix))
@@ -161,11 +150,6 @@
  (name runtest)
  (deps (alias test_projection) (alias test_workspace_edit)
   (alias test_workspace_cook) (alias test_workspace_zone)))
-
-(test
- (name test_error_rows)
- (modules test_error_rows)
- (libraries flow_sop flow flow_ir sop rdk rdk_test_support lisp_sop rays_math parallel))
 
 (test
  (name test_remap)

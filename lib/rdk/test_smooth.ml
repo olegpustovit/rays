@@ -203,7 +203,7 @@ let run () =
   expect_code "cancelled" (Smooth.run ~cancel:cancelled ~attributes:"P" grid);
 
   let scale = Plane_generators.grid ~columns:400 ~rows:250 ~size:40. () |> get_ok
-      |> Deform.noise_displace ~amplitude:0.8 ~frequency:0.41 ~seed:73 |> get_ok in
+      |> displace_y ~amplitude:0.8 ~frequency:0.41 ~seed:73 |> get_string_ok in
   let point_count = Geometry.point_count scale in
   let weight = Attribute.create_owned ~name:"weight" ~owner:Attribute.Point
       (Attribute.Float (Array.init point_count (fun point ->

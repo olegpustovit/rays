@@ -260,3 +260,9 @@ let ray ?cancel ?(grain = 16_384) ?selection ?collision_primitives
       normal_attribute; point_pattern; vertex_pattern; primitive_pattern;
       detail_pattern; match_groups }
     ~source ~collision ()
+
+(* A deterministic height field on Y: a rough surface fixture for parallel-exactness tests. *)
+let displace_y ~amplitude ~frequency ~seed geometry =
+  let p = positions geometry in
+  let y = Array.mapi (fun i y -> y +. amplitude *. sin (frequency *. (p.x.(i) *. 12.9898 +. p.z.(i) *. 78.233) +. float seed)) p.y in
+  Geometry.with_positions (Packed.Float3.View.of_owned_exn ~x:(Array.copy p.x) ~y ~z:(Array.copy p.z)) geometry

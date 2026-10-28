@@ -1,6 +1,6 @@
 (* One executable for the rdk microbenches: bench_rdk.exe <op>; tunables are RAYS_* variables. *)
 let benches = [
-  "convex_hull", Bench_convex_hull.run; "graph_color", Bench_graph_color.run;
+  "convex_hull", Bench_convex_hull.run;
   "predicates", Bench_predicates.run ]
 
 let () =
