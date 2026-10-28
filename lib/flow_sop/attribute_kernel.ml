@@ -347,39 +347,60 @@ let read ?component ~owner ~kind name geometry =
           then Ok (interleave_remembered ~count planes)
           else Ok (interleave ~count planes))
 
+(* a checked read, remembered as an interleaved read is *)
+let checked_values :
+    float array ->
+    (unit -> float array array * (E.value, Diagnostic.t) result) ->
+    float array array * (E.value, Diagnostic.t) result =
+  Flow.Value.remember ()
+
+let checked_valid :
+    float array ->
+    (unit -> float array array * (E.value, Diagnostic.t) result) ->
+    float array array * (E.value, Diagnostic.t) result =
+  Flow.Value.remember ()
+
 let read_checked ~component ~owner ~kind name geometry =
   Result.bind (typed_storage ~owner ~name ~kind geometry) (fun storage ->
       match columns storage with
       | None -> error "E_ATTR_TYPE" "Checked attributes require float, vec2, vec3 or vec4 storage."
-      | Some planes ->
+      | Some planes -> (
           let count = owner_count geometry owner and width = Array.length planes in
           if component <> "values" && component <> "valid" then
             error "E_ATTR_TYPE" "Checked attribute component is values or valid."
           else if count > Sys.max_floatarray_length / width then
             error "E_ATTR_COUNT" "Attribute buffer exceeds array limits."
           else
-            let valid = if component = "valid" then Array.make count 0 else [||]
-            and values = if component = "values" then Array.make (count * width) 0. else [||] in
-            ranges ~grain:16_384 count (fun ~first ~last ->
-                for i = first to last - 1 do
-                  let finite = ref true in
-                  for c = 0 to width - 1 do
-                    if not (Float.is_finite planes.(c).(i)) then finite := false
-                  done;
-                  if component = "valid" then valid.(i) <- (if !finite then 1 else 0)
-                  else if !finite then
+            let build () =
+              let valid = if component = "valid" then Array.make count 0 else [||]
+              and values = if component = "values" then Array.make (count * width) 0. else [||] in
+              ranges ~grain:16_384 count (fun ~first ~last ->
+                  for i = first to last - 1 do
+                    let finite = ref true in
                     for c = 0 to width - 1 do
-                      values.((i * width) + c) <- planes.(c).(i)
-                    done
-                done);
-            Ok
-              (if component = "valid" then E.Int_array valid
-               else
-                 match width with
-                 | 1 -> E.Float_array values
-                 | 2 -> E.Vec2_array values
-                 | 3 -> E.Vec3_array values
-                 | _ -> E.Vec4_array values))
+                      if not (Float.is_finite planes.(c).(i)) then finite := false
+                    done;
+                    if component = "valid" then valid.(i) <- (if !finite then 1 else 0)
+                    else if !finite then
+                      for c = 0 to width - 1 do
+                        values.((i * width) + c) <- planes.(c).(i)
+                      done
+                  done);
+              Ok
+                (if component = "valid" then E.Int_array valid
+                 else
+                   match width with
+                   | 1 -> E.Float_array values
+                   | 2 -> E.Vec2_array values
+                   | 3 -> E.Vec3_array values
+                   | _ -> E.Vec4_array values)
+            in
+            if count * width <= 4096 then build ()
+            else
+              let memo = if component = "valid" then checked_valid else checked_values in
+              match memo planes.(0) (fun () -> (planes, build ())) with
+              | seen, value when Array.for_all2 ( == ) seen planes -> value
+              | _ -> build ()))
 
 let read_planes ~component ~owner name geometry =
   match storage ~owner ~name geometry with
@@ -772,6 +793,22 @@ let write_source ~geometry ~owner ~kind name values target =
                   Result.bind (A.create_owned ~name ~owner storage) (fun attribute ->
                       G.with_attribute attribute target))))
 
+(* Flow planes a write adopts are copied (geometry never shares Flow's arrays), once per set of
+   planes: a recook writing the same planes (a fill, a static array) installs the same copies. *)
+let plane_copies :
+    float array ->
+    (unit -> float array array * float array array) ->
+    float array array * float array array =
+  Flow.Value.remember ()
+
+let owned_copies planes =
+  let copy () = Array.map Array.copy planes in
+  if Array.length planes = 0 || Array.length planes.(0) <= 4096 then copy ()
+  else
+    match plane_copies planes.(0) (fun () -> (planes, copy ())) with
+    | seen, copies when Array.for_all2 ( == ) seen planes -> copies
+    | _ -> copy ()
+
 let write_storage ~owned_fields ~grain ~owner ~kind name values geometry =
   let owned storage =
     Result.map_error
@@ -823,7 +860,7 @@ let write_storage ~owned_fields ~grain ~owner ~kind name values geometry =
             in
             if not (Array.for_all finite planes) then
               error "E_NONFINITE" "Attribute values must be finite."
-            else install ~owner ~kind name (Array.map Array.copy planes) geometry)
+            else install ~owner ~kind name (owned_copies planes) geometry)
   | ("float_array" | "int_array"), E.Record fields -> (
       match (List.assoc_opt "offsets" fields, List.assoc_opt "values" fields) with
       | Some (E.Int_array offsets), Some values -> (

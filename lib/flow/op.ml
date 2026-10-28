@@ -1079,7 +1079,27 @@ let reductions =
         };
     ]
 
-let constant_array ty count value =
+(* A large float fill is remembered by its value (arrays are immutable): a recook's fill is the same
+   array, so what is keyed, checked or uploaded by identity downstream is not done again.
+   ponytail: 8 strong slots, at most 8 fills of a size kept alive; weak by count if that matters. *)
+let fills = Array.make 8 None
+and next_fill = ref 0
+and fills_lock = Mutex.create ()
+
+let remembered_fill key make =
+  match
+    Mutex.protect fills_lock (fun () ->
+        Array.find_map (function Some (k, v) when k = key -> Some v | _ -> None) fills)
+  with
+  | Some value -> value
+  | None ->
+      let value = make () in
+      Mutex.protect fills_lock (fun () ->
+          fills.(!next_fill) <- Some (key, value);
+          next_fill := (!next_fill + 1) mod Array.length fills);
+      value
+
+let fill_array ty count value =
   (* Validate one element through the shared packed-storage boundary. Empty
      arrays intentionally do not inspect their unused fill value. *)
   match constant_sample ty count value with
@@ -1100,6 +1120,25 @@ let constant_array ty count value =
       end;
       match width with 2 -> Vec2_array values | 3 -> Vec3_array values | _ -> Vec4_array values)
   | _ -> assert false
+
+let constant_array ty count value =
+  match constant_sample ty count value with
+  | (Float_array sample | Vec2_array sample | Vec3_array sample | Vec4_array sample) as kind
+    when count > 4096 -> (
+      let values =
+        remembered_fill
+          (Ty.to_string ty, count, Array.map Int64.bits_of_float sample)
+          (fun () ->
+            match fill_array ty count value with
+            | Float_array v | Vec2_array v | Vec3_array v | Vec4_array v -> v
+            | _ -> assert false)
+      in
+      match kind with
+      | Float_array _ -> Float_array values
+      | Vec2_array _ -> Vec2_array values
+      | Vec3_array _ -> Vec3_array values
+      | _ -> Vec4_array values)
+  | _ -> fill_array ty count value
 
 let arrays =
   [

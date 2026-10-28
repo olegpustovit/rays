@@ -3177,6 +3177,20 @@ module Host = struct
     count : int;
   }
 
+  let forwards (p : t) =
+    Array.length p.sources = 1
+    && p.count = None && p.iteration = Zip && p.result = Collect && p.skip = [||]
+    && Array.length p.outputs = 1
+    && (snd p.sources.(0)).W.ty = p.term.W.ty
+    && Array.length p.outputs.(0) = p.widths.(0)
+    && Array.for_all Fun.id
+         (Array.mapi
+            (fun c r ->
+              match unguarded p.code.(r) with
+              | Input (0, w, c') -> w = p.widths.(0) && c' = c
+              | _ -> false)
+            p.outputs.(0))
+
   let prepare_values ?state ?resolve ?measure ?(lengths = fun _ -> None) ?(source = fun _ _ -> None)
       (t : t) ~live =
     let state = match state with Some state -> state | None -> E.create_state () in
@@ -3195,6 +3209,11 @@ module Host = struct
               compile_impl ~fusion:t.fusion ~dynamic:t.dynamic ~count_source:t.count_source residual
                 term
             with
+            | Ok program when forwards program ->
+                (* a region that only copies its one source (a branch chosen by constants) is that
+                   source: the same array, which a device holding it does not upload again *)
+                let residual, term = program.sources.(0) in
+                evaluate residual term
             | Ok program -> get (force ~state ?resolve ?measure program ~live)
             | Error _ -> get (E.Residual.eval_term ~state ?resolve residual term ~live)
           in
