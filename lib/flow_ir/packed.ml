@@ -79,14 +79,12 @@ let zipped (t : t) = t.iteration = Zip || Array.length t.sources = 1
 
 let rec unguarded = function Guarded (_,body) -> unguarded body | instruction -> instruction
 
-let output_reachable ?(whole_loops=true) (t : t) =
+let output_reachable (t : t) =
   let used = Array.make (Array.length t.code) false in
   let rec use slot = if not used.(slot) then begin
     used.(slot) <- true;
     List.iter use (operands t.code.(slot));
     (match unguarded t.code.(slot) with
-     | Loop_begin loop when not whole_loops ->
-         for carried=slot+1 to slot+Array.length loop.initial do use carried done; use loop.finish
      | Loop_begin loop -> for body=slot+1 to loop.finish do use body done
      | _ -> ())
   end in

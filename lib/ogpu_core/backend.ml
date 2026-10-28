@@ -5,7 +5,7 @@ type driver_table={table_token:token;
   table_set_function:index:int->string->(unit,Error.t)result;
   table_set_buffer:index:int->token->offset:int64->(unit,Error.t)result;
   destroy_table:unit->(unit,Error.t)result}
-type driver_pipeline={pipeline_token:token;
+type driver_pipeline={pipeline_token:token;max_threads:int;
   create_table:capacity:int->(driver_table,Error.t)result;
   destroy_pipeline:unit->(unit,Error.t)result}
 type driver_frame={frame_token:token}
@@ -272,6 +272,7 @@ let destroy_library (library:library)=
   else match library.library_raw.destroy_library()with Error _ as e->e|Ok()->
     library.library_dead<-true;library.library_device.children<-library.library_device.children-1;Ok()
 let accel_sizes (value:accel)=value.accel_raw.accel_sizes
+let max_total_threads (pipeline:pipeline)=pipeline.pipeline_driver.max_threads
 let instance_stride_of (device:device) kind=(device.raw.instance_layout kind).(0)
 let finite value=Float.is_finite value&&Float.abs value<=3.402823466e38
 let valid_instance (i:instance)=Array.length i.transform=12&&Array.for_all finite i.transform&&i.mask>=0&&i.mask<=0xFFFF_FFFF&&i.structure_index>=0

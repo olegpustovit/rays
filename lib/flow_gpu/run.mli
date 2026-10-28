@@ -36,6 +36,8 @@ val count : output -> int
 val epoch : output -> int64
 val width : output -> int
 val gpu_seconds : output -> float option
+val max_total_threads : t -> (int, Diagnostic.t) result
+(* The kernel pipeline's most threads per threadgroup: Metal lowers it when the kernel needs more registers. *)
 val close : t -> unit
 val compact : Ogpu.Backend.commands -> Pipelines.t -> mask:Ogpu.Backend.buffer -> count:int ->
   count_in:Ogpu.Backend.buffer option -> kept:Ogpu.Backend.buffer -> total:Ogpu.Backend.buffer ->

@@ -82,6 +82,9 @@ let narrow_registers (view : Packed.Private.view) used =
         | (`Max _ | `Bot) as m, _ -> m | `Top, _ -> `Top)
     | Int_binary (Iadd, a, b) -> both (fun a b -> at_most (a + b)) a b
     | Int_binary (Imul, a, b) -> both (fun a b -> if b = 0 || a <= limit / b then at_most (a * b) else `Top) a b
+    | Int_binary (op, a, b) when (op = Idiv || op = Imod) && (match code.(b) with Packed.Int_const k -> k > 0 | _ -> false) ->
+        let k = match code.(b) with Packed.Int_const k -> k | _ -> assert false in
+        (match bound.(a) with `Max m -> `Max (if op = Idiv then m / k else min m (k - 1)) | other -> other)
     | Int_binary ((Idiv | Imod), a, b) -> both (fun a _ -> `Max a) a b
     | Int_select (_, yes, no) -> join bound.(yes) bound.(no)
     | Loop_carry _ ->
@@ -139,8 +142,77 @@ let narrow_registers (view : Packed.Private.view) used =
     | Packed.Loop_result (loop, c, _) -> narrow.(loop + 1 + c)
     | _ -> narrow.(slot)) code
 
+(* Static specialization: a condition whose value is known at emission (a constant, a comparison or
+   boolean of constants, a select on a known condition) decides its guards. Statically false guards
+   drop their instructions, statically true conditions leave the guard lists, and a select on a known
+   condition reads only its chosen value. A dropped instruction would never run, so no result or
+   status changes: an untaken guarded instruction never executes on any target. *)
+let specialize (view : Packed.Private.view) =
+  let size = Array.length view.code in
+  let known = Array.make size None in
+  let bool b = Some (if b then 1. else 0.) in
+  let both a b f = match known.(a), known.(b) with Some x, Some y -> f x y | _ -> None in
+  Array.iteri (fun slot instruction -> known.(slot) <- match guarded instruction with
+    | Packed.Const c -> Some c
+    | Int_const n when abs n < 1 lsl 53 -> Some (float n)
+    | Int_compare (op, a, b) -> both a b (fun x y -> bool (match op with
+        | Ilt -> x < y | Ile -> x <= y | Igt -> x > y | Ige -> x >= y | Ieq -> x = y))
+    | Binary ((Lt | Le | Gt | Ge | Eq) as op, a, b) -> both a b (fun x y -> bool (match op with
+        | Lt -> x < y | Le -> x <= y | Gt -> x > y | Ge -> x >= y | _ -> x = y))
+    | Binary (And, a, b) -> (match known.(a), known.(b) with
+        | Some 0., _ | _, Some 0. -> bool false | Some _, Some _ -> bool true | _ -> None)
+    | Binary (Or, a, b) -> (match known.(a), known.(b) with
+        | Some x, _ when x <> 0. -> bool true | _, Some y when y <> 0. -> bool true
+        | Some _, Some _ -> bool false | _ -> None)
+    | Unary (Not, a) -> Option.map (fun x -> if x = 0. then 1. else 0.) known.(a)
+    | Convert (To_float, a) -> known.(a)
+    | Select (c, yes, no) | Int_select (c, yes, no) ->
+        Option.bind known.(c) (fun x -> known.(if x <> 0. then yes else no))
+    | _ -> None) view.code;
+  let live (c, selected) = match known.(c) with Some x -> (x <> 0.) = selected | None -> true in
+  let dead = Array.make size false and empty = ref [] in
+  (* a loop of no passes keeps only its initial values: its end reads them back *)
+  Array.iteri (fun slot instruction -> match guarded instruction with
+    | Packed.Loop_begin loop -> (match known.(loop.first), known.(loop.last) with
+        | Some first, Some last when first >= last ->
+            for body = slot + 1 + Array.length loop.initial to loop.finish - 1 do dead.(body) <- true done;
+            empty := (loop.finish, Packed.Loop_end (slot, Array.mapi (fun c _ -> slot + 1 + c) loop.initial, None)) :: !empty
+        | _ -> ())
+    | _ -> ()) view.code;
+  let code = Array.mapi (fun slot instruction ->
+    let rec split guards = function Packed.Guarded (more, body) -> split (guards @ more) body | body -> guards, body in
+    let guards, body = split [] instruction in
+    if not (List.for_all live guards) then dead.(slot) <- true;
+    let guards = List.filter (fun (c, _) -> known.(c) = None) guards in
+    let body = match body with
+      | Packed.Select (c, yes, no) when known.(c) <> None ->
+          let pick = if Option.get known.(c) <> 0. then yes else no in Packed.Select (c, pick, pick)
+      | Int_select (c, yes, no) when known.(c) <> None ->
+          let pick = if Option.get known.(c) <> 0. then yes else no in Packed.Int_select (c, pick, pick)
+      | body -> body in
+    if guards = [] then body else Packed.Guarded (guards, body)) view.code in
+  List.iter (fun (finish, ending) -> code.(finish) <- (match code.(finish) with
+    | Packed.Guarded (guards, _) -> Packed.Guarded (guards, ending) | _ -> ending)) !empty;
+  { view with code }, dead
+
+(* Registers an output reads, through the operands of the specialized code; [whole_loops] keeps every
+   instruction of a reached loop body (for per-operation finite checks). *)
+let reachable ~whole_loops (view : Packed.Private.view) dead =
+  let used = Array.make (Array.length view.code) false in
+  let rec use slot = if not used.(slot) && not dead.(slot) then begin
+    used.(slot) <- true;
+    List.iter use (Core.Region.operands view.code.(slot));
+    match guarded view.code.(slot) with
+    | Packed.Loop_begin loop when not whole_loops ->
+        for carried = slot + 1 to slot + Array.length loop.initial do use carried done; use loop.finish
+    | Packed.Loop_begin loop -> for body = slot + 1 to loop.finish do use body done
+    | _ -> ()
+  end in
+  Array.iter (Array.iter use) view.outputs;
+  used
+
 let plan ?(fast = false) ?(image = false) ?(instanced = false) program =
-  let view = Packed.Private.view program in
+  let view, dead = specialize (Packed.Private.view program) in
   let offset = ref 4 and uniform_layout = ref [] in
   let uniform name width =
     let first = !offset in
@@ -175,7 +247,7 @@ let plan ?(fast = false) ?(image = false) ?(instanced = false) program =
   let image_width = if image then Some (uniform "image:width" 1) else None in
   let image_height = if image then Some (uniform "image:height" 1) else None in
   (* fast kernels check only their outputs (specification/gpu-codegen.md): dead loop code is not kept *)
-  let used = Packed.Private.output_reachable ~whole_loops:(not fast) program in
+  let used = reachable ~whole_loops:(not fast) view dead in
   (* fast checks its inputs (a resident producer's buffer is not scanned on the host) and outputs *)
   let finite_checks =
     if fast then Array.map (fun i -> match guarded i with Packed.Input _ -> true | _ -> false) view.code
@@ -248,10 +320,13 @@ let iter plan ~instruction ~loop =
   visit 0 (Array.length code)
 
 module Scope = struct
-  type t = { id : int; decls : Buffer.t; code : Buffer.t; mutable opened : (int * bool) list }
+  type t = { id : int; decls : Buffer.t; code : Buffer.t; mutable opened : (int * bool) list;
+             mutable blocks : int list; outer : int list; next : int ref }
 
-  let create id = { id; decls = Buffer.create 1024; code = Buffer.create 4096; opened = [] }
+  let create ?(outer = []) ?(next = ref 0) id =
+    { id; decls = Buffer.create 1024; code = Buffer.create 4096; opened = []; blocks = []; outer; next }
   let indent scope = String.make (2 * (1 + List.length scope.opened)) ' '
+  let stack scope = scope.outer @ scope.blocks
 
   let enter scope ~opening guards =
     let rec common = function x :: a, y :: b when x = y -> 1 + common (a, b) | _ -> 0 in
@@ -259,10 +334,14 @@ module Scope = struct
     for depth = List.length scope.opened downto kept + 1 do
       Buffer.add_string scope.code (String.make (2 * depth) ' ' ^ "}\n")
     done;
+    scope.blocks <- List.filteri (fun k _ -> k < kept) scope.blocks;
     List.iteri
       (fun depth (condition, selected) ->
-        if depth >= kept then
-          Printf.bprintf scope.code "%s%s\n" (String.make (2 * (depth + 1)) ' ') (opening condition selected))
+        if depth >= kept then begin
+          incr scope.next;
+          scope.blocks <- scope.blocks @ [ !(scope.next) ];
+          Printf.bprintf scope.code "%s%s\n" (String.make (2 * (depth + 1)) ' ') (opening condition selected)
+        end)
       guards;
     scope.opened <- guards
 end

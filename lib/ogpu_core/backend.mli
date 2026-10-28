@@ -14,6 +14,7 @@ type driver_table =
   ; destroy_table:unit -> (unit,Error.t) result }
 type driver_pipeline =
   { pipeline_token:token
+  ; max_threads:int  (** a compute pipeline's threads per threadgroup at most; 0 for render *)
   ; create_table:capacity:int -> (driver_table,Error.t) result
   ; destroy_pipeline:unit -> (unit,Error.t) result }
 type driver_frame = { frame_token:token }
@@ -256,6 +257,9 @@ val create_library : device -> Shader.t -> (library,Error.t) result
 val create_compute_pipeline_from : library -> entry:string ->
   ?constants:(string * Shader.constant_value) list -> interface:Shader.binding list ->
   ?linked:string list -> unit -> (pipeline,Error.t) result
+(** The most threads one threadgroup of this compute pipeline may run (Metal's
+    [maxTotalThreadsPerThreadgroup]): a kernel needing more registers gets fewer. 0 for a render pipeline. *)
+val max_total_threads : pipeline -> int
 val create_intersection_table : pipeline -> capacity:int -> (function_table,Error.t) result
 val table_set_function : function_table -> index:int -> string -> (unit,Error.t) result
 val table_set_buffer : function_table -> index:int -> buffer -> (unit,Error.t) result

@@ -28,7 +28,7 @@ let ()=
         else resource.read offset length)})(raw.create_buffer memory descriptor));
     create_library=(fun shader->Result.map(fun library->{library with
       create_compute_pipeline_in=(fun ~entry:_ ~constants:_ ~interface:_ ~linked:_->
-        incr pipelines;Ok{pipeline_token=1L;
+        incr pipelines;Ok{max_threads=1024;pipeline_token=1L;
           create_table=(fun ~capacity:_->Error(Ogpu.Error.make "test" Unsupported "no tables"));
           destroy_pipeline=(fun()->decr pipelines;Ok())})})(raw.create_library shader));
     create_queue=(fun()->Result.map(fun queue->{queue with

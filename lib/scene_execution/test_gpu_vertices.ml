@@ -35,7 +35,7 @@ let ()=
           {buffer with write=(fun offset bytes->mesh_uploads:= !mesh_uploads+Bytes.length bytes;
             buffer.write offset bytes)}else buffer)(raw.create_buffer memory descriptor));
       create_render_pipeline=(fun _ _->incr pipelines;next:=Int64.succ !next;
-        Ok{Ogpu.Backend.pipeline_token= !next;
+        Ok{Ogpu.Backend.pipeline_token= !next;max_threads=1024;
           create_table=(fun~capacity:_->unavailable());
           destroy_pipeline=(fun()->decr pipelines;Ok())});
       create_queue=(fun()->Result.map(fun(queue:Ogpu.Backend.driver_queue)->{queue with
