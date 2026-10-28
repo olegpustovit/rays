@@ -11,6 +11,9 @@ val render : ?density:int -> t -> Scene.t -> (unit,string) result
 val pixel : t -> x:int -> y:int -> (Rays_math.Color.t option,string) result
 val pixels : t -> (Rays_math.Color.t array,string) result
 val to_image : t -> (Image.t,string) result
+val gpu_seconds : t -> (float,string) result
+(* The device's GPU time so far, summed over completed command buffers: the difference across a
+   [render] is that frame's GPU time (tools/ui_shot.exe's UI_SHOT_BENCH). *)
 module Private : sig
   val invalidate : t -> (unit,string) result
   val gpu_source : t -> ((int * int * (unit -> Ogpu.Backend.texture option)),string) result

@@ -1370,7 +1370,9 @@ module Host = struct
       fail "E_KERNEL_FORM" "Bulk function body differs from its declared result type.";
     let result = match signature.result with
       | Ty.Int | Float | Vec2 | Vec3 | Vec4 | Text as ty -> ty
-      | _ -> fail "E_KERNEL_FORM" "Bulk functions must return int, float, vec2, vec3, vec4 or text data." in
+      (* a record of numeric leaves: one packed output each (a raster stage's varyings) *)
+      | Record _ as ty when Ty.numeric_record ty -> ty
+      | _ -> fail "E_KERNEL_FORM" "Bulk functions must return int, float, vec2, vec3, vec4, text or a record of numbers." in
     let binding name ty = W.{path = None; ty; node = Ref_binding (name, []); form = cl.body.form} in
     let inputs = List.mapi (fun i value -> "$kernel-input:" ^ string_of_int i, value) arrays in
     let function_name = "$kernel-function" in
@@ -1447,6 +1449,8 @@ module Host = struct
           count, at
       | _ -> fail "E_TYPE" "A map probe needs a checked map.")
 end
+let map_kernel = Host.map_function
+let bind_captures = Host.map_function_bindings
 
 module Residual = struct
   include Residual_effect

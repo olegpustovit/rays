@@ -98,16 +98,17 @@ let create_renderer ~backend ?device ?gpu_vertices ~offscreen ~driver ~configura
       | Ui ->
           ( Renderer_shaders.ui,
             [
-              {
-                Ogpu.Shader.group = 0;
-                binding = 1;
-                kind = Sampled_texture;
-                visibility = [ Fragment ];
-              };
-              { group = 0; binding = 2; kind = Sampler; visibility = [ Fragment ] };
+              { Ogpu.Shader.group = 0; binding = 3; kind = Sampled_texture; visibility = [ Fragment ] };
+              { group = 0; binding = 4; kind = Sampler; visibility = [ Fragment ] };
             ] )
       | Marks -> (Renderer_shaders.marks, [])
     in
+    (* generated stages (shaders/*.rays) are named after their Lisp entries *)
+    let vertex_entry, fragment_entry = match family with
+      | Marks -> "marks_vertex", "marks_fragment"
+      | Ui -> "ui_vertex", "ui_fragment"
+      | Scene2 | Scene2_textured -> "scene_vertex", "scene_fragment_argument"
+      | _ -> "scene_vertex", "scene_fragment" in
     let artifact bindings =
       Ogpu.Shader.create
         {
@@ -116,13 +117,8 @@ let create_renderer ~backend ?device ?gpu_vertices ~offscreen ~driver ~configura
           bytes = Bytes.of_string source;
           entry_points =
             [
-              { name = "scene_vertex"; stage = Vertex };
-              {
-                name =
-                  (if family = Scene2 || family = Scene2_textured then "scene_fragment_argument"
-                   else "scene_fragment");
-                stage = Fragment;
-              };
+              { name = vertex_entry; stage = Vertex };
+              { name = fragment_entry; stage = Fragment };
             ];
           bindings;
         }
@@ -131,13 +127,14 @@ let create_renderer ~backend ?device ?gpu_vertices ~offscreen ~driver ~configura
       { Ogpu.Shader.group = 0; binding = 0; kind = Storage_buffer; visibility = [ Vertex ] }
       ::
       (match family with
-      | Scene_execution.Scene2 | Scene2_textured | Ui ->
+      | Scene_execution.Scene2 | Scene2_textured ->
           [ { Ogpu.Shader.group = 0; binding = 6; kind = Storage_buffer; visibility = [ Vertex ] } ]
+      | Ui -> List.map (fun binding -> { Ogpu.Shader.group = 0; binding; kind = Storage_buffer; visibility = [ Vertex ] }) [ 1; 2 ]
       | Marks ->
           List.map
             (fun binding ->
               { Ogpu.Shader.group = 0; binding; kind = Storage_buffer; visibility = [ Vertex ] })
-            [ 1; 2; 3; 4; 5; 6 ]
+            [ 1; 2; 3; 4; 5; 6; 7; 8 ]
       | Scene3 | Scene3_points | Scene3_textured | Scene3_world ->
           [
             {
@@ -158,12 +155,13 @@ let create_renderer ~backend ?device ?gpu_vertices ~offscreen ~driver ~configura
           { Ogpu.Binding.binding = 0; kind = Buffer; visibility = [ Vertex ] }
           ::
           (match family with
-          | Scene_execution.Scene2 | Scene2_textured | Ui ->
+          | Scene_execution.Scene2 | Scene2_textured ->
               [ { Ogpu.Binding.binding = 6; kind = Buffer; visibility = [ Vertex ] } ]
+          | Ui -> List.map (fun binding -> { Ogpu.Binding.binding; kind = Buffer; visibility = [ Vertex ] }) [ 1; 2 ]
           | Marks ->
               List.map
                 (fun binding -> { Ogpu.Binding.binding; kind = Buffer; visibility = [ Vertex ] })
-                [ 1; 2; 3; 4; 5; 6 ]
+                [ 1; 2; 3; 4; 5; 6; 7; 8 ]
           | Scene3 | Scene3_points | Scene3_textured | Scene3_world ->
               [
                 { Ogpu.Binding.binding = 6; kind = Buffer; visibility = [ Vertex; Fragment ] };
@@ -178,8 +176,8 @@ let create_renderer ~backend ?device ?gpu_vertices ~offscreen ~driver ~configura
           | Ui ->
               entries
               @ [
-                  { Ogpu.Binding.binding = 1; kind = Texture; visibility = [ Fragment ] };
-                  { binding = 2; kind = Sampler; visibility = [ Fragment ] };
+                  { Ogpu.Binding.binding = 3; kind = Texture; visibility = [ Fragment ] };
+                  { binding = 4; kind = Sampler; visibility = [ Fragment ] };
                 ]
           | Scene3 | Scene3_points | Marks -> entries
           | Scene3_textured ->
@@ -223,13 +221,9 @@ let create_renderer ~backend ?device ?gpu_vertices ~offscreen ~driver ~configura
                     label = Some "runtime-next";
                     layout;
                     vertex;
-                    vertex_entry = "scene_vertex";
+                    vertex_entry;
                     fragment = Some fragment;
-                    fragment_entry =
-                      Some
-                        (if family = Scene2 || family = Scene2_textured then
-                           "scene_fragment_argument"
-                         else "scene_fragment");
+                    fragment_entry = Some fragment_entry;
                     color_format = Rgba8_unorm;
                     depth_format =
                       (match family with

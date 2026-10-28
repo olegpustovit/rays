@@ -107,6 +107,9 @@ module Region : sig
   type conversion = Flow.Packed_ops.conversion = To_float | Truncate | Floor | Ceil | Round | Coerce_int | Integer_result of string
   type loop = {first:int; last:int; finish:int; initial:int array; limit:int option;
     span:Diagnostic.span}
+  type stage = Fwidth | Sample of int * int | Texture_size of int * int
+    (** [fwidth x]; component c of texture t sampled at (u, v) (its sampler at t + 1); axis c of
+        texture t's size in texels *)
   type instruction =
     | Const of float | Input of int * int * int  (** source, width, component *)
     | Uniform of int * int | Frame of string | Accumulator of int
@@ -114,6 +117,9 @@ module Region : sig
     | Noise3 of int * int * int * int * int * float * float | Fma of int * int * int | Rand_at of int * int | Select of int * int * int
     | Checked_mul of projection * int * int | Checked_fma of projection * int * int * int
     | Trace of int * int array
+    | Stage of stage * int array
+      (** A raster-stage intrinsic over its operand registers: only a fragment placement
+          ({!Flow_gpu.Raster}) prints it; every other target refuses it. *)
       (** One field (0 t, 1 prim, 2 u, 3 v, 4-6 normal, 7 hit, 8 instance) of a host ray query: registers
           scene id, origin, direction, tmin, tmax, time. *)
     | Array_prepare of int * Flow.Ty.t

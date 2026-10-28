@@ -1,0 +1,93 @@
+; The UI pipeline (Scene_command.Ui_batch): one quad of four vertices per 64-byte record, floats f[0..15]
+; with packed RGBA words at 8 and 9 and the kind at 10 (0 rect, 1 glyph, 2 bezier wire, 3 dot grid,
+; 4 circle, 5 line). The record buffer is read as floats and as words, so it is bound twice. The
+; glyph atlas is texture 3 (its sampler 4): the binding after the three buffers. Pixel for pixel guarded by lib/pxui/test_ui_parity.
+(defn unpack :context value [(w : int)]
+  [(/ (float (int/and (int/shr w 24) 255)) 255.) (/ (float (int/and (int/shr w 16) 255)) 255.)
+   (/ (float (int/and (int/shr w 8) 255)) 255.) (/ (float (int/and w 255)) 255.)])
+(defn clip :context value [(affine : (array float)) (p : vec2)]
+  [(+ (+ (* (array/nth affine 0) p.x) (* (array/nth affine 1) p.y)) (array/nth affine 2))
+   (+ (+ (* (array/nth affine 3) p.x) (* (array/nth affine 4) p.y)) (array/nth affine 5)) 0. 1.])
+(defn mix2 :context value [(x : vec2) (y : vec2) (a : vec2)] (+ x (* (- y x) a)))
+(defn len2 :context value [(v : vec2)] (sqrt (+ (* v.x v.x) (* v.y v.y))))
+(defn dot2 :context value [(a : vec2) (b : vec2)] (+ (* a.x b.x) (* a.y b.y)))
+(defn unit :context value [(x : float)] (min (max x 0.) 1.))
+(defn bezier :context value [(p0 : vec2) (p1 : vec2) (p2 : vec2) (p3 : vec2) (u : float)]
+  (let* [s (- 1. u)]
+    (+ (+ (+ (* (* (* s s) s) p0) (* (* (* (* 3. s) s) u) p1)) (* (* (* (* 3. s) u) u) p2)) (* (* (* u u) u) p3))))
+
+(defn fld :context value [(f : (array float)) (at : int) (k : int)] (array/nth f (int/add at k)))
+(defn ui-vertex :context value [(vid : int) (f : (array float)) (u : (array int)) (affine : (array float))]
+  (let* [at (int/mul (int/div vid 4) 16) corner (int/mod vid 4)
+         c [(if (or (int/eq corner 1) (int/eq corner 2)) 1. 0.) (if (int/ge corner 2) 1. 0.)]
+         kind (array/nth u (int/add at 10))
+         color (unpack (array/nth u (int/add at 8))) color2 (unpack (array/nth u (int/add at 9)))
+         params [(fld f at 11) (fld f at 12) (fld f at 13) (float kind)]
+         extra [(fld f at 4) (fld f at 5) (fld f at 6) (fld f at 7)]
+         line (int/eq kind 5)
+         shape (if (or (int/eq kind 2) line)
+           (let* [a [(fld f at 0) (fld f at 1)] b [(fld f at 2) (fld f at 3)] d [(fld f at 4) (fld f at 5)] e [(fld f at 6) (fld f at 7)]
+                  p0 (if line a (bezier a b d e (fld f at 14))) p1 (if line b (bezier a b d e (fld f at 15)))
+                  v (- p1 p0) len (len2 v) dir (if (> len 0.000001) (/ v len) [1. 0.]) n [(- 0. dir.y) dir.x]
+                  h (+ (* (fld f at 12) 0.5) 1.5)
+                  p (+ (mix2 (- p0 (* dir h)) (+ p1 (* dir h)) [c.x c.x]) (* n (* (- (* c.y 2.) 1.) h)))]
+             {:p p :uv [0. 0.] :box [0. 0. 0. 0.] :extra [p0.x p0.y p1.x p1.y]})
+           (let* [grow (if (or (int/eq kind 0) (int/eq kind 4))
+                         (if (> (fld f at 13) 0.) (+ 1. (* (fld f at 12) 0.5)) (if (> (fld f at 12) 0.) (* (fld f at 12) 0.5) 0.)) 0.)
+                  p (mix2 [(- (fld f at 0) grow) (- (fld f at 1) grow)] [(+ (fld f at 2) grow) (+ (fld f at 3) grow)] c)]
+             {:p p :box [(fld f at 0) (fld f at 1) (fld f at 2) (fld f at 3)] :extra extra
+              :uv (if (int/eq kind 1) (mix2 [(fld f at 4) (fld f at 5)] [(fld f at 6) (fld f at 7)] c) [0. 0.])}))]
+    {:position (clip affine shape.p) :color color :color2 color2 :local shape.p :uv shape.uv
+     :flat {:box shape.box :params params :extra shape.extra}}))
+
+(defn round-box :context value [(p : vec2) (half : vec2) (radius : float)]
+  (let* [q [(+ (- (abs p.x) half.x) radius) (+ (- (abs p.y) half.y) radius)]]
+    (- (+ (len2 [(max q.x 0.) (max q.y 0.)]) (min (max q.x q.y) 0.)) radius)))
+; [top] over [bottom], straight alpha
+(defn over :context value [(top : vec4) (bottom : vec4)]
+  (let* [rest (- 1. top.w) a (+ top.w (* bottom.w rest))
+         rgb (/ (+ (* [top.x top.y top.z] top.w) (* (* [bottom.x bottom.y bottom.z] bottom.w) rest)) a)]
+    (if (<= a 0.) [0. 0. 0. 0.] [rgb.x rgb.y rgb.z a])))
+(defn fade :context value [(color : vec4) (coverage : float)] [color.x color.y color.z (* color.w coverage)])
+
+(defn fwidth2 :context value [(p : vec2)] [(gpu/fwidth p.x) (gpu/fwidth p.y)])
+
+; params.w is the kind, a whole float on a flat varying: kinds compare as floats, with no
+; float-to-int conversion a fragment
+(defn ui-fragment :context value
+  [(color : vec4) (color2 : vec4) (local : vec2) (uv : vec2) (box : vec4) (params : vec4) (extra : vec4)]
+  ; each kind computes only what it reads: glyphs, most of the UI, sample and return
+  (let* [kind params.w p local a [extra.x extra.y] radius params.x border params.y]
+    (cond
+      (= kind 1.) {:discard false :color (* color (gpu/sample 3 (/ uv (gpu/texture-size 3))))}
+      (or (= kind 2.) (= kind 5.))
+        (let* [b [extra.z extra.w] ab (- b a) len (len2 ab) fw (fwidth2 p)
+               along (unit (/ (dot2 (- p a) ab) (max (dot2 ab ab) 0.000000000001)))
+               wire (- (len2 (- p (+ a (* ab along)))) (* params.y 0.5))
+               dir (/ ab len) q (- p (* (+ a b) 0.5))
+               d (if (= kind 5.)
+                   (round-box [(dot2 q dir) (dot2 q [(- 0. dir.y) dir.x])] [(* len 0.5) (* params.y 0.5)] 0.) wire)
+               px (max (len2 fw) 0.0001)]
+          {:discard (and (= kind 5.) (<= len 0.000001)) :color (fade color (unit (- 0.5 (/ d px))))})
+      (= kind 3.)
+        (let* [q (- p a) s extra.z size extra.w fw (fwidth2 p)
+               cell (- q (* [(float (floor (/ q.x s))) (float (floor (/ q.y s)))] s))
+               away [(abs (- cell.x (* size 0.5))) (abs (- cell.y (* size 0.5)))]
+               dist [(min away.x (- s away.x)) (min away.y (- s away.y))]
+               aa [(max fw.x 0.0001) (max fw.y 0.0001)]
+               cover [(unit (+ (/ (- (* size 0.5) dist.x) aa.x) 0.5)) (unit (+ (/ (- (* size 0.5) dist.y) aa.y) 0.5))]]
+          {:discard false :color (fade color (* cover.x cover.y))})
+      (<= params.z 0.)
+        (let* [h (* border 0.5) q [(+ p.x 0.001) (+ p.y 0.001)]]
+          (if (> border 0.)
+            {:discard (and (and (>= q.x (+ box.x h)) (< q.x (- box.z h))) (and (>= q.y (+ box.y h)) (< q.y (- box.w h))))
+             :color color2}
+            {:discard false :color color}))
+      :else
+        (let* [lo [box.x box.y] hi [box.z box.w] center (* (+ lo hi) 0.5) half (* (- hi lo) 0.5)
+               d (if (= kind 4.) (- (len2 (- p center)) half.x)
+                   (round-box (- p center) half (min radius (min half.x half.y))))
+               px (max (* (len2 (fwidth2 p)) 0.70710678) 0.0001)
+               fill (fade color (unit (- 0.5 (/ d px))))]
+          {:discard false
+           :color (if (<= border 0.) fill (over (fade color2 (unit (- 0.5 (/ (- (abs d) (* border 0.5)) px)))) fill))}))))

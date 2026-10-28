@@ -164,3 +164,8 @@ let rec join a b =
 let unify a b = match join a b with
   | Some _ as joined -> joined
   | None -> if fits a b && fits b a then Some a else None
+
+let rec numeric_record = function
+  | Record fields -> fields <> [] && List.for_all (fun (_, t) -> match t with
+      | Float | Int | Bool | Vec2 | Vec3 | Vec4 -> true | Record _ -> numeric_record t | _ -> false) fields
+  | _ -> false

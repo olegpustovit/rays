@@ -1,7 +1,7 @@
 (library
  (name flow_gpu)
  (public_name rays.flow_gpu)
- (modules emit spirv pipelines run host image_sink)
+ (modules emit spirv pipelines run host image_sink raster)
  (libraries flow flow_ir ogpu renderer rays_math lru parallel))
 
 (test
@@ -114,3 +114,9 @@
  (alias runtest-native)
  (deps ../rays_pathtracer/pathtrace_helpers.rays)
  (action (chdir ../rays_pathtracer (run %{exe:../flow_gpu/test_sampling.exe}))))
+
+(test
+ (name test_raster)
+ (modules test_raster)
+ (deps (glob_files ../renderer/shaders/*.rays) (glob_files ../renderer/shaders/metal/*.metal) (glob_files ../renderer/shaders/spirv/*.spv))
+ (libraries flow_gpu ogpu_mock))

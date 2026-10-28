@@ -19,3 +19,11 @@ val kernel : ?fast:bool -> ?instanced:bool -> ?motion:bool -> ?curves:[ `Loop | 
    bound tables. The shared status word uses bits 1/2/4 for nonfinite output, integer division by
    zero, and an out-of-range integer shift, respectively. *)
 val image_rgba8_source : string
+type raster = { input : int -> int -> string; int_input : int -> string; buffer : int -> string;
+  output : int -> int -> string -> string }
+(* A raster placement of {!kernel}'s instruction printer: [input source component] and [int_input source]
+   print an element's inputs (a vertex id, an interpolated fragment input), [buffer u] names the bound
+   buffer behind array uniform [u], and [output k component value] is the statement storing an output. *)
+val stage_body : raster:raster -> Flow_ir.Packed.t -> (string, Diagnostic.t) result
+(* The statements of one stage output program (fast tier), with no bounds clamps, status atomics or
+   kernel wrapper; Raster prints the stage function around them. *)

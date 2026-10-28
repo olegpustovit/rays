@@ -1231,7 +1231,11 @@ let finish_prepared_frame value frame ~clear ~prepared_key ~draws ~scratch
         |None->let vertices=match slot.slot_gpu_vertices with
             |None->item.buffer|Some source->source.gpu_buffer in
             let extra=match slot.slot_gpu_vertices with
-              |None->[]|Some source->List.mapi(fun i b->Ogpu.Backend.Vertex,i+1,b,0L)source.gpu_extra in
+              |None->[]|Some source->List.mapi(fun i b->Ogpu.Backend.Vertex,i+1,b,0L)source.gpu_extra
+                (* marks.rays reads the colour columns as words and as floats: bound twice *)
+                @(match family,source.gpu_extra with
+                  |Marks,[_;fill;stroke;_;_]->[Ogpu.Backend.Vertex,7,fill,0L;Ogpu.Backend.Vertex,8,stroke,0L]
+                  |_->[])in
             Ok((Ogpu.Backend.Vertex,0,vertices,0L)::(extra@buffers),textures,samplers)
         |Some(source,buffer,texture)->
             let* sampler=sampler_for value source.texture.sampler in
@@ -1267,6 +1271,14 @@ let finish_prepared_frame value frame ~clear ~prepared_key ~draws ~scratch
               [Ogpu.Backend.Vertex,7,item.buffer,offset])@
             (Ogpu.Backend.Fragment,6,item.buffer,offset)::buffers
         |None,None->buffers in
+      (* ui.rays reads its records as floats (0) and words (1), its affine at 2 and its atlas at 3 (sampler 4) *)
+      let buffers,textures,samplers=if family<>Ui then buffers,textures,samplers else
+        List.concat_map(function
+          |Ogpu.Backend.Vertex,0,b,o->[Ogpu.Backend.Vertex,0,b,o;Ogpu.Backend.Vertex,1,b,o]
+          |Ogpu.Backend.Vertex,6,b,o->[Ogpu.Backend.Vertex,2,b,o]
+          |binding->[binding])buffers,
+        List.map(fun(stage,slot,t)->stage,(if slot=1 then 3 else slot),t)textures,
+        List.map(fun(stage,slot,s)->stage,(if slot=2 then 4 else slot),s)samplers in
       let index=if scene2 then None
         else Some(Ogpu.Render_pass.Uint32,item.buffer,item.index_offset,Int64.of_int item.index_count)in
       let instances=match family,(slot_state slot).transform_uniforms with

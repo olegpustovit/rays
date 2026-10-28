@@ -17,6 +17,7 @@ type instruction = Core.Region.instruction = Const of float | Input of int * int
   | Select of int * int * int
   | Checked_mul of projection * int * int | Checked_fma of projection * int * int * int
   | Trace of int * int array
+  | Stage of Core.Region.stage * int array
   | Array_prepare of int * Ty.t
   | Gather of int * int * int * int | Int_gather of int * int
   | Text_const of string | Text_input of int | Text_uniform of int
@@ -36,6 +37,8 @@ type column = {data:float array;offset:int;stride:int}
 type t = Core.Region.t
 let operands = Core.Region.operands
 
+(* a raster-stage intrinsic (Region.Stage) has no CPU value *)
+let stage_refused () = raise (Diagnostic.Error (Diagnostic.error ~code:"E_GPU_STAGE" "A raster-stage intrinsic runs only in a fragment stage."))
 let rec typed_instruction = function
   | Int_const _ -> false (* compile-time configuration literals may be unused *)
   | Int_input _ | Int_uniform _ | Int_frame _ | Int_accumulator | Int_binary _ | Int_compare _
@@ -627,7 +630,7 @@ let run_typed ?column_source ?plane_outputs ?expected_count ~evaluate ~uniform ~
         | Checked_fma(p,a,b,c)->for j=first to last-1 do
             let a=finite(numeric a j) and b=finite(numeric b j) and c=finite(numeric c j) in
             floats.(at+j)<-checked_projection p (Float.fma a b c) done
-        | Trace(field,r)->for j=first to last-1 do floats.(at+j)<-finite(trace_field field (trace_hit traced j (int_of_float(numeric r.(0) j)) (Array.init 9(fun k->numeric r.(k+1) j)))) done
+        | Trace(field,r)->for j=first to last-1 do floats.(at+j)<-finite(trace_field field (trace_hit traced j (int_of_float(numeric r.(0) j)) (Array.init 9(fun k->numeric r.(k+1) j)))) done | Stage _->stage_refused()
         | Rand_at(seed,index)->let seed=seed*block_size and index=index*block_size in
             for j=first to last-1 do floats.(at+j)<-Flow.Packed_ops.rand_at integer.(seed+j) integer.(index+j) done
         | Unary(op,a)->for j=first to last-1 do floats.(at+j)<-finite(unary_apply op (numeric a j)) done
@@ -1149,7 +1152,7 @@ let rec block_instruction r b slot instruction first last =
                  if not(Float.is_finite x)then nonfinite ();scratch.(at+j)<-x done
              | Not -> for j = first to last - 1 do scratch.(at+j) <- if scratch.(a+j) = 0. then 1. else 0. done)
         | Int_input _ | Int_uniform _ | Int_frame _ | Int_accumulator | Int_binary _ | Int_compare _
-        | Int_abs _ | Convert _ | Int_select _ | Raise _ | Rand_at _ | Trace _ -> raise Unsupported
+        | Int_abs _ | Convert _ | Int_select _ | Raise _ | Rand_at _ | Trace _ | Stage _ -> raise Unsupported
 
 let block_execute r b dependent first last =
   for slot = 0 to Array.length r.t.code - 1 do

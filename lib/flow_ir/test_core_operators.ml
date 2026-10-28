@@ -109,7 +109,7 @@ let () =
   let covered=List.sort_uniq compare (List.map fst cases) in
   List.iter (fun (o : Flow.Op.t) ->
     if o.ctx=Flow.Context.value && o.shape=Flow.Op.Scalar
-      && not (List.mem o.name ["color/hsla"; "text/float"; "scene/trace"])
+      && not (List.mem o.name ["color/hsla"; "text/float"; "scene/trace"; "gpu/fwidth"; "gpu/sample"; "gpu/texture-size"])
       && not (List.mem o.name covered) then
       failwith ("No core operator case for " ^ o.name)) (Flow.Op.of_context Flow.Context.value);
   let n=ref 0 and static=ref [] in

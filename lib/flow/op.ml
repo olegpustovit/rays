@@ -42,7 +42,7 @@ type arithmetic = { apply : 'f 'r. ('f, 'r) Value.t -> ('f, 'r) Value.t -> ('f, 
 type packed_kind = Binary of Packed_ops.binary | Unary of Packed_ops.unary
   | Integer of Packed_ops.integer | Integer_compare of Packed_ops.comparison
   | Convert of Packed_ops.conversion
-  | Noise3 | Fma | Checked_mul | Checked_fma | Rand_at | Trace | Length | Dot | Cross | Normalize | Exact | Gather | Frame | Constant_only
+  | Noise3 | Fma | Checked_mul | Checked_fma | Rand_at | Trace | Stage | Length | Dot | Cross | Normalize | Exact | Gather | Frame | Constant_only
 type t = {
   name : string; ctx : Context.t; signature : signature;
   out : Ty.t list -> Ty.t;
@@ -810,7 +810,14 @@ let scene_trace =
       let h=Ray_host.query(Value.int_of(List.assoc "scene" args)) [|ox;oy;oz;dx;dy;dz;f "tmin";f "tmax";f "time"|] in
       Record ["t",Float h.t;"prim",Int h.prim;"u",Float h.u;"v",Float h.v;"normal",Vec3(h.nx,h.ny,h.nz);"hit",Bool h.hit;"instance",Int h.instance]})
      with live = true }
-let all = scene_trace :: frame @ arrays @ reductions @ draw @ host @ integers @ images @ [
+(* Raster-stage intrinsics: a fragment placement prints them (Flow_gpu.Raster); a fragment's derivative
+   and a bound texture have no meaning on the CPU, so every evaluation refuses them. *)
+let stage_intrinsics =
+  let stage name params out = { (mk ~category:"Raster" name params (fun _ -> out)
+    {run=fun ~name ~node:_ _ -> fail "E_GPU_STAGE" (name ^ " runs only in a fragment stage.")}) with live = true } in
+  [ stage "gpu/fwidth" ["x",fl] fl; stage "gpu/sample" ["texture",Ty.Int;"uv",Ty.Vec2] Ty.Vec4;
+    stage "gpu/texture-size" ["texture",Ty.Int] Ty.Vec2 ]
+let all = scene_trace :: stage_intrinsics @ frame @ arrays @ reductions @ draw @ host @ integers @ images @ [
   float_unary "tan" tan;
   float_unary "asin" asin;
   float_unary "acos" acos;
@@ -1194,6 +1201,7 @@ let packed_kind op =
     | _ when op.name = "float/fma_checked" -> Some Checked_fma
     | _ when op.name = "rand/at" -> Some Rand_at
     | _ when op.name = "scene/trace" -> Some Trace
+    | _ when String.starts_with ~prefix:"gpu/" op.name -> Some Stage
     | _ when op.name = "noise3" -> Some Noise3
     | _ when op.name = "exact" -> Some Exact
     | _ when op.name = "array/nth" -> Some Gather

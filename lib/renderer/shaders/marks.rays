@@ -1,0 +1,75 @@
+; The marks pipeline (Scene_command.Marks): one quad of four vertices per mark, its kind in q[0]
+; (4 circle, 5 line, else a rectangle), q[1..5] the column strides and q[6..7] the colour modes
+; (0 packed RGBA words, else float RGB). A buffer read as both words and floats is bound twice.
+(defn unpack :context value [(w : int)]
+  [(/ (float (int/and (int/shr w 24) 255)) 255.) (/ (float (int/and (int/shr w 16) 255)) 255.)
+   (/ (float (int/and (int/shr w 8) 255)) 255.) (/ (float (int/and w 255)) 255.)])
+(defn channel :context value [(c : float)] (floor (+ (* (min (max c 0.) 1.) 255.) 0.5)))
+(defn colour :context value [(words : (array int)) (floats : (array float)) (at : int) (mode : int)]
+  (if (int/eq mode 0) (array/nth words at)
+    (int/or (int/or (int/shl (channel (array/nth floats at)) 24) (int/shl (channel (array/nth floats (int/add at 1))) 16))
+      (int/or (int/shl (channel (array/nth floats (int/add at 2))) 8) 255))))
+(defn clip :context value [(affine : (array float)) (p : vec2)]
+  [(+ (+ (* (array/nth affine 0) p.x) (* (array/nth affine 1) p.y)) (array/nth affine 2))
+   (+ (+ (* (array/nth affine 3) p.x) (* (array/nth affine 4) p.y)) (array/nth affine 5)) 0. 1.])
+
+(defn marks-vertex :context value
+  [(vid : int) (position : (array float)) (extent : (array float)) (fill : (array int)) (stroke : (array int))
+   (width : (array float)) (q : (array int)) (affine : (array float)) (fill-floats : (array float)) (stroke-floats : (array float))]
+  (let* [i (int/div vid 4) corner (int/mod vid 4)
+         cx (if (or (int/eq corner 1) (int/eq corner 2)) 1. 0.) cy (if (int/ge corner 2) 1. 0.)
+         kind (array/nth q 0)
+         at (int/mul i (array/nth q 1)) wide (int/mul i (array/nth q 2))
+         a [(array/nth position at) (array/nth position (int/add at 1))]
+         sw (array/nth width (int/mul i (array/nth q 5)))
+         stroke-word (colour stroke stroke-floats (int/mul i (array/nth q 4)) (array/nth q 7))]
+    (if (int/eq kind 5)
+      (let* [b [(array/nth extent wide) (array/nth extent (int/add wide 1))]
+             d (- b a) len (sqrt (+ (* d.x d.x) (* d.y d.y)))
+             dir (if (> len 0.000001) (/ d len) [1. 0.]) n [(- 0. dir.y) dir.x] h (+ (* sw 0.5) 1.5)
+             s (- a (* dir h)) e (+ b (* dir h))
+             p (+ (+ s (* (- e s) cx)) (* n (* (- (* cy 2.) 1.) h)))]
+        {:position (clip affine p) :color (unpack stroke-word) :color2 [0. 0. 0. 0.] :local p
+         :flat {:box [0. 0. 0. 0.] :params [0. sw 1. 5.] :extra [a.x a.y b.x b.y]}})
+      (let* [r (if (int/eq kind 4)
+                 (let* [rad (array/nth extent wide)] [(- a.x rad) (- a.y rad) (+ a.x rad) (+ a.y rad)])
+                 [a.x a.y (+ a.x (array/nth extent wide)) (+ a.y (array/nth extent (int/add wide 1)))])
+             border (if (int/eq stroke-word 0) 0. sw)
+             grow (+ 1. (* border 0.5))
+             g [(- r.x grow) (- r.y grow) (+ r.z grow) (+ r.w grow)]
+             p [(+ g.x (* (- g.z g.x) cx)) (+ g.y (* (- g.w g.y) cy))]]
+        {:position (clip affine p) :color (unpack (colour fill fill-floats (int/mul i (array/nth q 3)) (array/nth q 6)))
+         :color2 (unpack stroke-word) :local p :flat {:box r :params [0. border 1. (float kind)] :extra [0. 0. 0. 0.]}}))))
+
+(defn len2 :context value [(v : vec2)] (sqrt (+ (* v.x v.x) (* v.y v.y))))
+(defn unit :context value [(x : float)] (min (max x 0.) 1.))
+(defn round-box :context value [(p : vec2) (half : vec2) (radius : float)]
+  (let* [q [(+ (- (abs p.x) half.x) radius) (+ (- (abs p.y) half.y) radius)]]
+    (- (+ (len2 [(max q.x 0.) (max q.y 0.)]) (min (max q.x q.y) 0.)) radius)))
+; [top] over [bottom], straight alpha
+(defn over :context value [(top : vec4) (bottom : vec4)]
+  (let* [rest (- 1. top.w) a (+ top.w (* bottom.w rest))
+         rgb (/ (+ (* [top.x top.y top.z] top.w) (* (* [bottom.x bottom.y bottom.z] bottom.w) rest)) a)]
+    (if (<= a 0.) [0. 0. 0. 0.] [rgb.x rgb.y rgb.z a])))
+; a pixel's footprint in local units
+(defn footprint :context value [(p : vec2)] (len2 [(gpu/fwidth p.x) (gpu/fwidth p.y)]))
+
+; params.w is the kind, a whole float on a flat varying: kinds compare as floats, with no
+; float-to-int conversion a fragment
+(defn marks-fragment :context value
+  [(color : vec4) (color2 : vec4) (local : vec2) (box : vec4) (params : vec4) (extra : vec4)]
+  (let* [kind params.w p local]
+    (if (= kind 5.)
+      (let* [a [extra.x extra.y] b [extra.z extra.w] ab (- b a) len (len2 ab) dir (/ ab len)
+             q (- p (* (+ a b) 0.5))
+             d (round-box [(+ (* q.x dir.x) (* q.y dir.y)) (+ (* q.x (- 0. dir.y)) (* q.y dir.x))] [(* len 0.5) (* params.y 0.5)] 0.)
+             px (max (footprint p) 0.0001)]
+        {:discard (<= len 0.000001) :color [color.x color.y color.z (* color.w (unit (- 0.5 (/ d px))))]})
+      (let* [lo [box.x box.y] hi [box.z box.w] center (* (+ lo hi) 0.5) half (* (- hi lo) 0.5)
+             d (if (= kind 4.) (- (len2 (- p center)) half.x) (round-box (- p center) half 0.))
+             px (max (* (footprint p) 0.70710678) 0.0001)
+             fill [color.x color.y color.z (* color.w (unit (- 0.5 (/ d px))))]
+             border params.y]
+        {:discard false
+         :color (if (<= border 0.) fill
+                  (over [color2.x color2.y color2.z (* color2.w (unit (- 0.5 (/ (- (abs d) (* border 0.5)) px))))] fill))}))))

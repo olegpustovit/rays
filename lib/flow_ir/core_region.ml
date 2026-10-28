@@ -85,6 +85,14 @@ let carried_loop ~emit ~scope ~finishes ty (control:loop) step =
   shape ty(fun ty->let index= !component in incr component;
     emit(Loop_result(header,index,ty)))
 
+(* A record result (a raster stage's varyings) is one output per numeric leaf, in field order;
+   any other result is the single output [lower] builds. *)
+let rec record_outputs ~as_float e = function
+  | Ty.Record fields -> List.concat_map (fun (name, ty) -> match List.assoc_opt name e.fields with
+      | Some field -> (match ty with Ty.Record _ -> record_outputs ~as_float field ty | _ -> [ (as_float field).registers ])
+      | None -> raise (Compile_refused (Diagnostic.error ~code:"E_PACKED_TYPE" ("Packed record result lacks " ^ name ^ ".")))) fields
+  | _ -> []
+
 let rec integer_work = function
   | Int_const _ -> false
   | Int_input _ | Int_uniform _ | Int_frame _ | Int_accumulator | Int_binary _ | Int_compare _
@@ -289,6 +297,19 @@ let operation ~emit ~as_float ~as_int ~literal ~is_table ~component ~guards
       "u",field 2;"v",field 3;"normal",{registers=[|emit(Trace(4,registers));emit(Trace(5,registers));emit(Trace(6,registers))|];constant=None;fields=[]};
       "hit",field 7;
       "instance",{registers=[|emit(Convert(Truncate,(field 8).registers.(0)))|];constant=None;fields=[]}]}
+  end
+  else if kind=Flow.Op.Stage then begin
+    let operands=Array.concat(List.map2(fun(name,_)e->if name="texture"then[||]else(as_float e).registers)args expressions)in
+    let texture()=match List.assoc_opt "texture" args with
+      | Some {W.node=W.Lit(Param.Int_value n);_} -> n
+      | _ -> refuse ~at:t "E_PACKED_TYPE" (op ^ " names its texture slot with an integer literal.") in
+    let stage s={registers=[|emit(Stage(s,operands))|];constant=None;fields=[]} in
+    match op with
+    | "gpu/fwidth" -> stage Fwidth
+    | "gpu/sample" -> let t=texture() in
+        {registers=Array.init 4(fun c->emit(Stage(Sample(t,c),operands)));constant=None;fields=[]}
+    | _ -> let t=texture() in
+        {registers=Array.init 2(fun c->emit(Stage(Texture_size(t,c),operands)));constant=None;fields=[]}
   end
   else if kind=Flow.Op.Checked_mul || kind=Flow.Op.Checked_fma then begin
     (* ponytail: one destination per instruction computes both projections
@@ -752,13 +773,13 @@ let lower ?(fusion = true) ?(dynamic = false)
       Fun.protect ~finally:(fun()->capture_scope:=previous;decr call_depth)(fun()->expression env body)in
     let result_ty = match term.ty with Ty.Array ty -> ty | ty -> ty in
     let output_expression = expression env body in
-    let output = (if result_ty=Ty.Text then as_text output_expression
-      else if result_ty=Ty.Int && body.ty=Ty.Int then as_int output_expression
-      else if body.ty=Ty.Float && term.ty=Ty.Int then output_expression
+    let outputs = record_outputs ~as_float output_expression result_ty in
+    let output = (if result_ty=Ty.Text then as_text output_expression else if result_ty=Ty.Int && body.ty=Ty.Int then
+      as_int output_expression else if body.ty=Ty.Float && term.ty=Ty.Int || outputs<>[] then output_expression
       else as_float output_expression).registers in
-    if not (List.mem result_ty [Ty.Int;Ty.Text;Ty.Float;Ty.Vec2;Ty.Vec3;Ty.Vec4]) then
+    if outputs=[] && not (List.mem result_ty [Ty.Int;Ty.Text;Ty.Float;Ty.Vec2;Ty.Vec3;Ty.Vec4]) then
       refuse "E_PACKED_TYPE" ("Packed result must be float or vector, got " ^ Ty.to_string result_ty ^ ".");
-    let width = if result_ty=Ty.Text then 1 else width_of result_ty in
+    let width = if result_ty=Ty.Text then 1 else if outputs<>[] then 0 else width_of result_ty in
     (match result with
      | Sum _ | Accumulate _ when not (List.mem body.ty [Ty.Int;Ty.Float;Ty.Vec2;Ty.Vec3;Ty.Vec4]) ->
          refuse ~at:body "E_PACKED_TYPE" ("Packed reduction body has unsupported type " ^ Ty.to_string body.ty ^ ".")
@@ -787,7 +808,7 @@ let lower ?(fusion = true) ?(dynamic = false)
       | instruction -> instruction) code in
     Core.Region.make ~residual ~term ~sources:(Array.map (fun t -> residual, t) sources)
       ~widths ~uniforms:(Array.of_list (List.rev !uniforms)) ~uniform_names:(Array.of_list (List.rev !uniform_names))
-      ~code ~outputs:[|output|] ~count ~origin:None ~iteration ~result ~skip ~stages:[residual, term]
+      ~code ~outputs:(if outputs=[] then [|output|] else Array.of_list outputs) ~count ~origin:None ~iteration ~result ~skip ~stages:[residual, term]
       ~fusion ~dynamic ~count_source ~body ~binding_fn ~sites
   with
   | Compile_refused d -> Error [{d with span=Some(Option.value ~default:term.form.span d.span)}]

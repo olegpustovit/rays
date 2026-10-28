@@ -653,7 +653,13 @@ let element e (layout : Flow_ir.Kernel_layout.t) gathers prepared at width compo
   let at = result e e.uint 113 [ at ] in
   result e e.float 124 [ load_uint e gathers.(k) (offset e at width component) ]
 
-let emit_program e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers index =
+(* A raster placement of the instruction printer (Raster): element inputs, gathers from the bound
+   buffers (uniform, uint index, width, component), raster-stage intrinsics and output stores. *)
+type raster = { input : int -> int -> int; int_input : int -> int; gather : int -> int -> int -> int -> int;
+  int_gather : int -> int -> int; intrinsic : Flow_ir.Core.Region.stage -> int array -> int;
+  output : int -> int -> int -> unit }
+
+let emit_program ?raster e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers index =
   let words = e.words and float = e.float and boolean = e.boolean in
   let registers = Array.make (Array.length layout.view.code) 0 in
   let whole = Array.make (Array.length layout.view.code) None in
@@ -668,16 +674,10 @@ let emit_program e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers ind
     else if integer slot then from_long e registers.(slot) else registers.(slot) in
   let invalid = ref (compare e 171 (u e 0) (u e 0)) in
   let to_int value =
-    let valid =
-      result e boolean 167
-        [
-          compare e 190 value (f e (-9223372036854775808.));
-          compare e 184 value (f e 9223372036854775808.);
-        ]
-    in
+    let valid = result e boolean 167 [ compare e 190 value (f e (-9223372036854775808.)); compare e 184 value (f e 9223372036854775808.) ] in
     mark_invalid e invalid (result e boolean 168 [ valid ]);
-    result e (long e) 110 [ select e float valid value (f e 0.) ]
-  in
+    result e (long e) 110 [ select e float valid value (f e 0.) ] in
+  let table_of prepared = match unguarded layout.view.code.(prepared) with P.Array_prepare (u, _) -> u | _ -> assert false in
   let int_of slot =
     if narrow.(slot) then widen slot
     else if integer slot then registers.(slot)
@@ -713,6 +713,9 @@ let emit_program e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers ind
         if e.long <> None && Float.is_integer value && Float.abs value < 9007199254740992. then
           whole.(slot) <- Some (l e (Int64.of_float value));
         f e value
+    | (Input _ | Int_input _ | Gather _ | Int_gather _ | Stage _) as i when raster <> None -> let r = Option.get raster in (match i with
+      | Input (k, _, c) -> r.input k c | Int_input k -> r.int_input k | Stage (s, a) -> r.intrinsic s (Array.map float_of a)
+      | Gather (p, at, w, c) -> r.gather (table_of p) (low at) w c | Int_gather (p, at) -> r.int_gather (table_of p) (low at) | _ -> assert false)
     | Input (input, width, component) -> load e inputs.(input) (offset e index width component)
     | Uniform (input, component) -> uniform_float e (layout.uniforms.(input) + component)
     | Frame _ | Guarded _ -> assert false
@@ -947,9 +950,8 @@ let emit_program e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers ind
         (fun component register ->
           if layout.output_checks && not (integer register) then
             mark_invalid e invalid (non_finite e (float_of register));
-          store e outputs.(output)
-            (offset e index (Array.length values) component)
-            (float_of register))
+          match raster with Some r -> r.output output component (float_of register) | None ->
+          store e outputs.(output) (offset e index (Array.length values) component) (float_of register))
         values)
     layout.view.outputs;
   !invalid
@@ -1162,4 +1164,110 @@ let kernel ?(fast = false) ?(instanced = false) ?(motion = false) ?(curves = fal
         layout;
         uniform_bytes = Flow_ir.Kernel_layout.uniform_words layout * 16;
       }
+  with Diagnostic.Error diagnostic -> Error diagnostic
+
+type output = Position | Varying of int * bool | Colour | Discard
+type stage = { vertex : bool; inputs : (int * int * bool) array; outputs : output array;
+  buffers : (int * int * bool) list }
+
+(* A raster stage as a Vulkan vertex or fragment module, entry [main] (Raster's placement of
+   [emit_program]): element [k] of a fragment is the interpolated input at location [k]'s
+   (location, width, flat); a vertex's one element is VertexIndex. Buffers are runtime arrays at their
+   bindings (uint words, or floats bit-cast from them), texture [t] and its sampler [t + 1] are
+   separate descriptors, and a discard output ends the invocation with OpKill after the stores. *)
+let stage (s : stage) program =
+  try
+    let layout = Flow_ir.Kernel_layout.plan ~fast:true program in
+    let words = Words.create () in
+    let void = Words.declare words 19 [] and boolean = Words.declare words 20 []
+    and uint = Words.declare words 21 [ 32; 0 ] and sint = Words.declare words 21 [ 32; 1 ]
+    and float = Words.declare words 22 [ 32 ] in
+    let long, ulong = if needs_integer layout || Array.exists (fun i -> Flow_ir.Core.Region.integer_register (unguarded i)) layout.view.code
+      then (Some (Words.declare words 21 [ 64; 1 ]), Some (Words.declare words 21 [ 64; 0 ])) else (None, None) in
+    (* a type is declared once (SPIR-V refuses duplicate non-aggregate types) *)
+    let types = Hashtbl.create 16 in
+    let typ opcode operands = match Hashtbl.find_opt types (opcode :: operands) with Some id -> id | None ->
+      let id = Words.declare words opcode operands in Hashtbl.add types (opcode :: operands) id; id in
+    let vector n = if n = 1 then float else typ 23 [ float; n ] in
+    let vec4 = vector 4 and vec2 = vector 2 in
+    let pointer storage ty = typ 32 [ storage; ty ] in
+    let storage, storage_pointer = storage_type words float and uint_storage, uint_storage_pointer = storage_type words uint in
+    let interface = ref [] in
+    let variable ty storage = let id = Words.id words in
+      Words.instruction words.declarations 59 [ ty; id; storage ]; id in
+    let decorate id decoration operands = Words.instruction words.annotations 71 (id :: decoration :: operands) in
+    let io storage width location flat =
+      let id = variable (pointer storage (vector width)) storage in
+      (match location with Some l -> decorate id 30 [ l ] | None -> decorate id 11 [ 0 ]);
+      if flat then decorate id 14 [];
+      interface := id :: !interface; id in
+    let inputs = Array.map (fun (location, width, flat) -> io 1 width (Some location) flat) s.inputs in
+    let vertex_index = if s.vertex then begin
+        let id = variable (pointer 1 uint) 1 in decorate id 11 [ 42 ]; interface := id :: !interface; Some id end else None in
+    let outputs = Array.mapi (fun k o -> match o with
+      | Position -> io 3 4 None false
+      | Varying (location, flat) -> io 3 (Array.length layout.view.outputs.(k)) (Some location) flat
+      | Colour -> io 3 4 (Some 0) false
+      | Discard -> 0) s.outputs in
+    let bound binding words_buffer =
+      let id = variable (if words_buffer then uint_storage else storage) 12 in
+      decorate id 34 [ 0 ]; decorate id 33 [ binding ]; id in
+    let buffers = List.map (fun (u, binding, w) -> u, (bound binding w, w)) s.buffers in
+    let image = Words.declare words 25 [ float; 1; 0; 0; 0; 1; 0 ] and sampler = Words.declare words 26 [] in
+    let sampled = Words.declare words 27 [ image ] in
+    let textures = Hashtbl.create 2 in
+    let texture t = match Hashtbl.find_opt textures t with Some ids -> ids | None ->
+      let at kind binding = let id = variable (pointer 0 kind) 0 in decorate id 34 [ 0 ]; decorate id 33 [ binding ]; id in
+      let ids = at image t, at sampler (t + 1) in Hashtbl.add textures t ids; ids in
+    let sizes = ref false in
+    let glsl = Words.id words and main = Words.id words in
+    let e = { words; boolean; uint; sint; float; long; ulong; glsl; uniform = 0; uniform_pointer = 0; storage_pointer;
+      uint_storage_pointer; status = 0; uint_function_pointer = pointer 7 uint; status_bits = 0; table = None; noise = None;
+      scene = None; block = 0; trace_cache = []; strands = None; loop_depth = 0 } in
+    let to_long value = result e (Option.get long) 124 [ result e (Option.get ulong) 113 [ value ] ] in
+    let discard = ref None in
+    let raster = {
+      input = (fun k c -> let _, width, _ = s.inputs.(k) in
+        let value = result e (vector width) 61 [ inputs.(k) ] in
+        if width = 1 then value else result e float 81 [ value; c ]);
+      int_input = (fun _ -> to_long (result e uint 61 [ Option.get vertex_index ]));
+      gather = (fun u at width component -> let var, w = List.assoc u buffers in
+        if w then result e float 124 [ load_uint e var (offset e at width component) ] else load e var (offset e at width component));
+      int_gather = (fun u at -> to_long (load_uint e (fst (List.assoc u buffers)) at));
+      intrinsic = (fun stage operands -> match stage with
+        | Flow_ir.Core.Region.Fwidth -> result e float 209 [ operands.(0) ]
+        | Sample (t, c) -> let i, smp = texture t in
+            let combined = result e sampled 86 [ result e image 61 [ i ]; result e sampler 61 [ smp ] ] in
+            let uv = result e vec2 80 [ operands.(0); operands.(1) ] in
+            result e float 81 [ result e vec4 87 [ combined; uv ]; c ]
+        | Texture_size (t, c) -> sizes := true; let i, _ = texture t in
+            let size = result e (typ 23 [ sint; 2 ]) 103 [ result e image 61 [ i ]; Words.constant words sint 0l ] in
+            result e float 111 [ result e sint 81 [ size; c ] ]);
+      output = (fun k c value -> match s.outputs.(k) with
+        | Discard -> discard := Some value
+        | _ -> let width = Array.length layout.view.outputs.(k) in
+            let target = if width = 1 then outputs.(k) else result e (pointer 3 float) 65 [ outputs.(k); u e c ] in
+            Words.instruction words.body 62 [ target; value ]) } in
+    Words.instruction words.body 54 [ void; main; 0; Words.declare words 33 [ void ] ];
+    label e (Words.id words);
+    e.status_bits <- result e e.uint_function_pointer 59 [ 7; u e 0 ];
+    ignore (emit_program ~raster e layout [||] [||] [||] (u e 0));
+    Option.iter (fun flag -> let kill = Words.id words and after = Words.id words and flag = truth e flag in
+      Words.instruction words.body 247 [ after; 0 ];
+      Words.instruction words.body 250 [ flag; kill; after ];
+      label e kill; Words.instruction words.body 252 [];
+      label e after) !discard;
+    Words.instruction words.body 253 [];
+    Words.instruction words.body 56 [];
+    let bytes = Buffer.create (Buffer.length words.body + Buffer.length words.declarations + 512) in
+    List.iter (Buffer.add_int32_le bytes) [ 0x07230203l; 0x00010300l; 0l; Int32.of_int words.next; 0l ];
+    Words.instruction bytes 17 [ 1 ];
+    if long <> None then Words.instruction bytes 17 [ 11 ];
+    if !sizes then Words.instruction bytes 17 [ 50 ];
+    Words.instruction bytes 11 (glsl :: Words.string_words "GLSL.std.450");
+    Words.instruction bytes 14 [ 0; 1 ];
+    Words.instruction bytes 15 (((if s.vertex then 0 else 4) :: main :: Words.string_words "main") @ List.rev !interface);
+    if not s.vertex then Words.instruction bytes 16 [ main; 7 ];
+    List.iter (Buffer.add_buffer bytes) [ words.annotations; words.declarations; words.body ];
+    Ok (Buffer.to_bytes bytes)
   with Diagnostic.Error diagnostic -> Error diagnostic
