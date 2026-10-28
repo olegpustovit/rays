@@ -32,8 +32,7 @@ module Output = struct
     vertices : Int_buffer.t;
     offsets : Int_buffer.t;
     primitives : Int_buffer.t;
-    mutable kinds : Topology.primitive_kind array;
-    mutable primitive_count : int;
+    kinds : Topology.primitive_kind Dynarray.t;
   }
   let create source_vertices source_primitives =
     let offsets = Int_buffer.create (source_primitives + 1) in
@@ -42,35 +41,21 @@ module Output = struct
       vertices = Int_buffer.create source_vertices;
       offsets;
       primitives = Int_buffer.create source_primitives;
-      kinds = Array.make (max 8 source_primitives) Topology.Polygon;
-      primitive_count = 0 }
-  let ensure_primitives value needed =
-    if needed > Array.length value.kinds then begin
-      let capacity = ref (Array.length value.kinds) in
-      while !capacity < needed do
-        if !capacity > Sys.max_array_length / 2 then fail "primitive output exceeds limits";
-        capacity := !capacity * 2
-      done;
-      let next = Array.make !capacity Topology.Polygon in
-      Array.blit value.kinds 0 next 0 value.primitive_count;
-      value.kinds <- next
-    end
+      kinds = Dynarray.create () }
   let add value ~source ~kind corners source_points =
     let minimum = match kind with Topology.Open_polyline -> 2 | _ -> 3 in
     if Array.length corners >= minimum then begin
-      ensure_primitives value (value.primitive_count + 1);
       Array.iter (fun vertex ->
         Int_buffer.add value.points source_points.(vertex);
         Int_buffer.add value.vertices vertex) corners;
-      value.kinds.(value.primitive_count) <- kind;
-      value.primitive_count <- value.primitive_count + 1;
+      Dynarray.add_last value.kinds kind;
       Int_buffer.add value.primitives source;
       Int_buffer.add value.offsets value.points.length
     end
   let freeze value =
     Int_buffer.freeze value.points, Int_buffer.freeze value.vertices,
     Int_buffer.freeze value.offsets, Int_buffer.freeze value.primitives,
-    Array.sub value.kinds 0 value.primitive_count
+    Dynarray.to_array value.kinds
 end
 
 let selected bits edge =

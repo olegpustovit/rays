@@ -15,8 +15,7 @@ module Output :
       vertices : Int_buffer.t;
       offsets : Int_buffer.t;
       primitives : Int_buffer.t;
-      mutable kinds : Rdk_core.Topology.primitive_kind array;
-      mutable primitive_count : int;
+      kinds : Rdk_core.Topology.primitive_kind Dynarray.t;
     }
     val add :
       t ->
