@@ -240,7 +240,7 @@ After P1, rdk holds only live kernels. Give it one error model, one parallel and
 - [x] P6.S3: `Attribute.map_float_planes`/`planes` to collapse the per-storage arms. One generic median BVH and one `Point_grid`. Merge the two boolean payload modules. Evidence: see RK8, RK9, RK10 and RK15.
 - [ ] P6.S4: Kernel parameters become required records with no defaults, so the declaration is the single source of defaults.
 - [ ] P6.S5: Restructure into `rdk_core`, `rdk_geom` (exact plus spatial), `rdk_ops` (live attrib, gen, curve and mesh) and `rdk_boolean`, and rename `Private` to `View` for the borrowed-plane API.
-- [ ] P6.S6: Tests: local fixtures, one support library opened everywhere, and `parallel_exact` shared.
+- [x] P6.S6: Tests: local fixtures, one support library opened everywhere, and `parallel_exact` shared. Evidence: see RK23; rdk tests share one support library.
 
 Exit gates:
 
@@ -735,7 +735,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **RK3** (P6, high, vibe-code, effort L). Location at baseline: core/error.ml:13-21 + 54 local exceptions, 114 string-result + 209 Error.t signatures, ~30 `unguard`. Each error passes through three forms (local exception, string result, Error.t), with 36 `_raw`/guarded twin functions. Action: Use one internal `Rdk_error of Error.t` and convert to `result` once at the rdk boundary. Delete unguard, of_string, the twins and the local exceptions. Evidence: 91cf8472 and c559ac0c: one Error.Rdk of Error.t (operation, code, message) and Error.Fail, converted once by Error.guard/Error.run (with ?invalid_argument and ?cancelled code mapping). unguard 26→0, real _raw twins about 18→0, local exceptions 55→10 (the remaining 10 are control flow and infrastructure); public messages and codes unchanged.
 
-- [ ] **RK4** (P6, high, duplication, effort M). Location at baseline: attrib/group_ops.ml:4207-4313 (+ Attribute_ops, Curve_topology, Group_mesh, Point_replication, Sweep_modeling). Each operation is re-declared at the end of the file with 10–15 optional arguments, only to wrap it in `Error.guard`. Action: This goes away with RK3.
+- [x] **RK4** (P6, high, duplication, effort M). Location at baseline: attrib/group_ops.ml:4207-4313 (+ Attribute_ops, Curve_topology, Group_mesh, Point_replication, Sweep_modeling). Each operation is re-declared at the end of the file with 10–15 optional arguments, only to wrap it in `Error.guard`. Action: This goes away with RK3. Evidence: group_ops.ml is 534 lines, with no re-declared per-operation wrapper block.
 
 - [x] **RK5** (P1, high, duplication, effort S). Location at baseline: group_ops.ml:1344/1363/1397 vs 1497/1527/1540/1591. `flood_bits`, `stepped_bits`, `grow_point_depth_bits` and `enqueue` exist twice (plain and `constrained_*`), about 450 lines. Action: Keep only the constrained versions; most of this goes with RK1. Evidence: no constrained/unconstrained twin pairs remain in group_ops.
 
@@ -773,7 +773,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [ ] **RK22** (P6, med, test-sprawl, effort M). Location at baseline: test_rdk.ml:204-211 → test_rdk_{attributes,modeling,uv,curves,misc}.ml (3,415). Fixture-chained files that cannot run or fail independently. Action: Make each fixture local and delete the files that test only oracles.
 
-- [ ] **RK23** (P6, med, test-sprawl, effort M). Location at baseline: 41 tests don't open Rdk_test_support; 42 local equal_geometry, 27 get_ok, 17 check_parallel_exact, 8 two_quads. rdk/AGENTS.md asks for the opposite. Action: Add parallel_exact and the standard fixtures to support and open it everywhere.
+- [x] **RK23** (P6, med, test-sprawl, effort M). Location at baseline: 41 tests don't open Rdk_test_support; 42 local equal_geometry, 27 get_ok, 17 check_parallel_exact, 8 two_quads. rdk/AGENTS.md asks for the opposite. Action: Add parallel_exact and the standard fixtures to support and open it everywhere. Evidence: every rdk test except test_main opens Rdk_test_support (fail, failf, check, checkf, equal_geometry, get); the local copies are gone.
 
 - [x] **RK24** (P1, med, test-sprawl, effort M). Location at baseline: ~17.3k test lines + 635 bench lines (bench_{laplacian,rewire_payload,material_assign,…}). They exercise only oracle modules. Action: Delete them with RK1. This also cuts runtest time. Evidence: the tests and benches of the deleted kernels are gone (a4c1eb7e; six rdk benches).
 
