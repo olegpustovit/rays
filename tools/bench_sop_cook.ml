@@ -54,6 +54,8 @@ let median values =
   List.nth values (List.length values / 2)
 
 let () =
+  (* BENCH_NESTED=1: Lisp cards as nodes of their own, the former lowering *)
+  if Sys.getenv_opt "BENCH_NESTED" = Some "1" then Atomic.set Flow.Eval.inline_nodes false;
   let path, edit, rounds =
     match List.tl (Array.to_list Sys.argv) with
     | [ path ] -> (path, None, 5)

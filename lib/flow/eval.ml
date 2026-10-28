@@ -207,10 +207,11 @@ and st = {
   kind_fns : (string * (string * Context.t * Catalog.slot list)) list;
   node_defs :
     ( string,
-      (W.node_definition * ((string * value) list -> (string * value) list option)) Lazy.t )
+      (W.node_definition * string Lazy.t * ((string * value) list -> (string * value) list option))
+      Lazy.t )
     Hashtbl.t;
-      (* Lisp nodes whose bodies evaluate inline in the calling program, with the host's
-         canonicalization of their call parameters *)
+      (* Lisp nodes whose bodies evaluate inline in the calling program, with the host's key of
+         their declaration and canonicalization of their call parameters *)
   ops : Op.t list;
   find_op : string -> Context.t -> Op.t option;
       (* [Op.finder ops]: [ops] is a list, the whole SOP catalog in the editor *)
@@ -233,6 +234,29 @@ and cell = {
   mutable cinputs : (string * value) list;
   mutable cresult : value;
 }
+
+(* An inline body's evaluation, kept for a later evaluation of the same card (declaration,
+   canonical parameters, input shapes): its nodes in creation order and value, the kernels it
+   offered, the id ranges it allocated and the site and iteration it ran at. *)
+type inline_entry = {
+  e_nodes : node list;
+  e_authored : int list;
+  e_value : value;
+  e_observed : residual list;
+  e_lo : int;
+  e_count : int;
+  e_inputs : int list;
+  e_rid0 : int;
+  e_nrids : int;
+  e_fid0 : int;
+  e_nfids : int;
+  e_site : W.path;
+  e_iter : int list;
+}
+
+(* ponytail: a whole-table clear at 256 entries; an entry retains its evaluation's state *)
+let inline_memo : (string, inline_entry) Hashtbl.t = Hashtbl.create 64
+let inline_lock = Mutex.create ()
 
 type live = Input.t
 type instance = { graph : string; default : bool; inputs : (string * value) list; result : value }
@@ -573,6 +597,146 @@ let card_kind = "$card"
 (* the argument naming an inlined card's cook label on its context operators *)
 let context_label = "$label"
 
+(* The cooked inputs of an inlined call, in argument order. *)
+let inline_inputs parameters vals =
+  let rec ids = function
+    | Deferred (_, id) -> [ id ]
+    | List xs -> List.concat_map ids (Array.to_list xs)
+    | _ -> []
+  in
+  List.concat_map (fun (name, v) -> if List.mem_assoc name parameters then [] else ids v) vals
+
+(* What an inline body's evaluation is a function of: the declaration (the host's key), the
+   canonical parameters and the shape of the inputs (cooked handles by type, not identity). None
+   for a live or non-data argument, or outside the static evaluation. *)
+let inline_key c ~key parameters vals =
+  if c.st.time <> None || c.data then None
+  else
+    let rec shape = function
+      | Deferred (ty, _) -> "D" ^ Ty.to_string ty
+      | No_geo -> "N"
+      | List xs -> "[" ^ String.concat "," (Array.to_list (Array.map shape xs)) ^ "]"
+      | Source _ | Struct _ | Record _ | Fn _ | Residual _ -> raise Exit
+      | v -> "=" ^ Value.key_of ~residual:(fun _ -> raise Exit) v
+    in
+    match
+      Value.key_of ~residual:(fun _ -> raise Exit) (Record parameters)
+      ^ "\000"
+      ^ String.concat "\001"
+          (List.filter_map
+             (fun (name, v) ->
+               if List.mem_assoc name parameters then None else Some (name ^ ":" ^ shape v))
+             vals)
+    with
+    | k ->
+        Some
+          (Digest.string
+             (Lazy.force key ^ "\000" ^ k ^ string_of_bool c.geometry ^ string_of_bool c.host))
+    | exception _ -> None
+
+(* An inline body's kept evaluation, in this evaluation: its nodes at the next ids over these
+   inputs, its residuals and functions at the next ids, its sites and iterations under this
+   call's, its kernels offered again. The value equals what evaluating the body here gives. *)
+let replay_inline c (e : inline_entry) inputs =
+  let st = c.st in
+  let lo = st.nnodes and rid0 = st.rids and fid0 = st.nfns in
+  let site' = site c and iter' = c.iter in
+  let inputs = List.combine e.e_inputs inputs in
+  let id n =
+    if n >= e.e_lo && n < e.e_lo + e.e_count then n - e.e_lo + lo
+    else Option.value ~default:n (List.assoc_opt n inputs)
+  in
+  (* a kernel's or bulk function's negative id is global: each replay takes fresh ones *)
+  let fresh = Hashtbl.create 8 in
+  let bulk n =
+    match Hashtbl.find_opt fresh n with
+    | Some m -> m
+    | None ->
+        let m = Atomic.fetch_and_add bulk_ids (-1) in
+        Hashtbl.add fresh n m;
+        m
+  in
+  let rid r =
+    if r < 0 then bulk r
+    else if r > e.e_rid0 && r <= e.e_rid0 + e.e_nrids then r - e.e_rid0 + rid0
+    else r
+  in
+  let fid f =
+    if f < 0 then bulk f
+    else if f >= e.e_fid0 && f < e.e_fid0 + e.e_nfids then f - e.e_fid0 + fid0
+    else f
+  in
+  let rec rest prefix l =
+    match (prefix, l) with
+    | [], l -> Some l
+    | x :: prefix, y :: l when x = y -> rest prefix l
+    | _ -> None
+  in
+  let path p = match rest e.e_site p with Some tail -> site' @ tail | None -> p in
+  let iter i = match rest e.e_iter i with Some tail -> iter' @ tail | None -> i in
+  let ctx (x : ctx) = { x with st; inst = c.inst; prefix = path x.prefix; iter = iter x.iter } in
+  let residuals = Hashtbl.create 16 and functions = Hashtbl.create 16 in
+  let rec value = function
+    | Deferred (ty, n) -> Deferred (ty, id n)
+    | List xs -> List (Array.map value xs)
+    | Record fs -> Record (fields fs)
+    | Struct (n, ty, fs) -> Struct (n, ty, fields fs)
+    | Source (n, ty, fs) -> Source (n, ty, fields fs)
+    | Residual r -> Residual (residual r)
+    | Fn f -> Fn (fn f)
+    | v -> v
+  and fields fs = List.map (fun (n, v) -> (n, value v)) fs
+  and residual r =
+    match List.find_opt (fun (o, _) -> o == r) (Hashtbl.find_all residuals r.rid) with
+    | Some (_, m) -> m
+    | None ->
+        let m =
+          { r with rid = rid r.rid; renv = Smap.map value r.renv; rc = ctx r.rc; live = None }
+        in
+        Hashtbl.add residuals r.rid (r, m);
+        m
+  and fn f =
+    let key = match f with Closure cl -> cl.fid | Named n -> n.fid in
+    match List.find_opt (fun (o, _) -> o == f) (Hashtbl.find_all functions key) with
+    | Some (_, m) -> m
+    | None ->
+        let m =
+          match f with
+          | Closure cl ->
+              Closure
+                {
+                  cl with
+                  env = Smap.map value cl.env;
+                  zone = path cl.zone;
+                  calls = ref !(cl.calls);
+                  fid = fid cl.fid;
+                  at = ctx cl.at;
+                }
+          | Named n -> Named { n with ncalls = ref !(n.ncalls); fid = fid n.fid }
+        in
+        Hashtbl.add functions key (f, m);
+        m
+  in
+  List.iter2
+    (fun (n : node) form ->
+      st.nodes <-
+        {
+          n with
+          id = id n.id;
+          inst = c.inst;
+          site = path n.site;
+          iter = iter n.iter;
+          args = fields n.args;
+        }
+        :: st.nodes;
+      st.authored <- form :: st.authored)
+    e.e_nodes e.e_authored;
+  st.nnodes <- st.nnodes + e.e_count;
+  st.rids <- st.rids + e.e_nrids;
+  st.nfns <- st.nfns + e.e_nfids;
+  List.iter (fun r -> Effect.perform (Residual_effect.Observe_kernel (residual r))) e.e_observed;
+  value e.e_value
+
 exception Refused of Diagnostic.t
 
 let rec concrete c v =
@@ -789,9 +953,9 @@ and ev_raw c env (x : W.term) : value =
       let call vals = catalog_call c ~authored:x.form.id kind ctx vals in
       match Hashtbl.find_opt c.st.node_defs kind with
       | Some inlined -> (
-          let d, canonical = Lazy.force inlined in
+          let d, key, canonical = Lazy.force inlined in
           match canonical vals with
-          | Some parameters -> inline_node c ~form:x.form.id d parameters ~call vals
+          | Some parameters -> inline_node c ~form:x.form.id ~key d parameters ~call vals
           | None -> call vals)
       | _ -> call vals)
   | W.Op { op = "scene/merge"; args; skip = _ :: _ as skip } ->
@@ -1091,7 +1255,7 @@ and apply_op c ?(authored = 0) name (vals : (string * value) list) : value =
    body itself is that card's cook error: the body's nodes are dropped and the card lowers as a node
    that fails with the diagnostic when cooked. Each body has its own step budget, as before. A
    call with live arguments, or one the host keeps as its own node, lowers as before. *)
-and inline_node c ~form (d : W.node_definition) parameters ~call vals =
+and inline_node c ~form ~key (d : W.node_definition) parameters ~call vals =
   if c.depth > max_depth then fail "E_DEPTH" "Call depth exceeds 64.";
   let base = [ "node:" ^ d.kind.qualified ] in
   let label =
@@ -1099,7 +1263,19 @@ and inline_node c ~form (d : W.node_definition) parameters ~call vals =
     | Some i -> String.sub d.kind.qualified (i + 1) (String.length d.kind.qualified - i - 1)
     | None -> d.kind.qualified
   in
-  let c' = { c with prefix = site c; base; route = []; depth = c.depth + 1; card = Some label } in
+  (* a body's own probes are not recorded: its card is the authored record, and a replayed body
+     (below) records nothing *)
+  let c' =
+    {
+      c with
+      prefix = site c;
+      base;
+      route = [];
+      depth = c.depth + 1;
+      card = Some label;
+      rec_ = false;
+    }
+  in
   let rec flat = function
     | List xs -> List.concat_map flat (Array.to_list xs)
     | No_geo -> []
@@ -1132,42 +1308,108 @@ and inline_node c ~form (d : W.node_definition) parameters ~call vals =
     st.nnodes <- nnodes
   in
   st.steps <- 0;
-  match
-    let env = List.fold_left bind Smap.empty d.body.inputs in
-    List.iter
-      (fun (predicate, code, message) ->
-        match concrete c' (ev (sub c' "validate") env predicate) with
-        | Bool true -> ()
-        | Bool false -> raise (refusal code message)
-        | exception Diagnostic.Error e -> raise (refusal e.code e.message)
-        | _ -> invalid_arg "A Lisp node validation must return bool")
-      d.validations;
-    ev c' env d.body.body
-  with
-  | Residual _ when List.exists (fun (_, v) -> match v with Residual _ -> true | _ -> false) vals ->
-      (* a structure that follows a per-frame argument: the card is rebuilt per frame, as before *)
+  let key = inline_key c ~key parameters vals in
+  let replay =
+    Option.bind key (fun key ->
+        Mutex.protect inline_lock (fun () -> Hashtbl.find_opt inline_memo key))
+  in
+  match replay with
+  | Some entry ->
       st.steps <- steps;
-      drop ();
-      call vals
-  | v ->
-      st.steps <- steps;
-      card c ~form d parameters v
-  | exception Needs_t ->
-      (* a validation that reads a live argument *)
-      st.steps <- steps;
-      drop ();
-      call vals
-  | exception Refused e ->
-      st.steps <- steps;
-      raise (Diagnostic.Error e)
-  | exception Diagnostic.Error e when e.code <> "cancelled" && e.code <> "E_CANCELLED" ->
-      st.steps <- steps;
-      drop ();
-      (* ponytail: the diagnostic rides as marshalled text in a reserved argument *)
-      call (vals @ [ (node_error, Text (Marshal.to_string e [])) ])
-  | exception x ->
-      st.steps <- steps;
-      raise x
+      card c ~form d parameters (replay_inline c entry (inline_inputs parameters vals))
+  | None -> (
+      let rids = st.rids and fids = st.nfns and states = st.states and cells = st.cells in
+      let observed = ref [] and cacheable = ref (key <> None) in
+      let body () =
+        let env = List.fold_left bind Smap.empty d.body.inputs in
+        List.iter
+          (fun (predicate, code, message) ->
+            match concrete c' (ev (sub c' "validate") env predicate) with
+            | Bool true -> ()
+            | Bool false -> raise (refusal code message)
+            | exception Diagnostic.Error e -> raise (refusal e.code e.message)
+            | _ -> invalid_arg "A Lisp node validation must return bool")
+          d.validations;
+        ev c' env d.body.body
+      in
+      (* the kernels the body offers are offered again on a replay; a device approximation makes the
+     body's value depend on the device, so it is not kept *)
+      let watched () =
+        if key = None then body ()
+        else
+          Effect.Deep.match_with body ()
+            {
+              retc = Fun.id;
+              exnc = raise;
+              effc =
+                (fun (type a) (e : a Effect.t) ->
+                  match e with
+                  | Residual_effect.Observe_kernel r ->
+                      Some
+                        (fun (k : (a, _) Effect.Deep.continuation) ->
+                          observed := r :: !observed;
+                          Effect.Deep.continue k (Effect.perform (Residual_effect.Observe_kernel r)))
+                  | Residual_effect.Bulk_approx r ->
+                      Some
+                        (fun (k : (a, _) Effect.Deep.continuation) ->
+                          let v = Effect.perform (Residual_effect.Bulk_approx r) in
+                          if v <> None then cacheable := false;
+                          Effect.Deep.continue k v)
+                  | _ -> None);
+            }
+      in
+      match watched () with
+      | Residual _
+        when List.exists (fun (_, v) -> match v with Residual _ -> true | _ -> false) vals ->
+          (* a structure that follows a per-frame argument: the card is rebuilt per frame, as before *)
+          st.steps <- steps;
+          drop ();
+          call vals
+      | v ->
+          st.steps <- steps;
+          (match key with
+          | Some key when !cacheable && !observed = [] && st.states == states && st.cells == cells
+            ->
+              let count = st.nnodes - nnodes in
+              let rec take n l = if n = 0 then [] else List.hd l :: take (n - 1) (List.tl l) in
+              let entry =
+                {
+                  e_nodes = List.rev (take count st.nodes);
+                  e_authored = List.rev (take count st.authored);
+                  e_value = v;
+                  e_observed = List.rev !observed;
+                  e_lo = nnodes;
+                  e_count = count;
+                  e_inputs = inline_inputs parameters vals;
+                  e_rid0 = rids;
+                  e_nrids = st.rids - rids;
+                  e_fid0 = fids;
+                  e_nfids = st.nfns - fids;
+                  e_site = site c;
+                  e_iter = c.iter;
+                }
+              in
+              Mutex.protect inline_lock (fun () ->
+                  if Hashtbl.length inline_memo >= 256 then Hashtbl.reset inline_memo;
+                  Hashtbl.replace inline_memo key entry)
+          | _ -> ());
+          card c ~form d parameters v
+      | exception Needs_t ->
+          (* a validation that reads a live argument *)
+          st.steps <- steps;
+          drop ();
+          call vals
+      | exception Refused e ->
+          st.steps <- steps;
+          raise (Diagnostic.Error e)
+      | exception Diagnostic.Error e when e.code <> "cancelled" && e.code <> "E_CANCELLED" ->
+          st.steps <- steps;
+          drop ();
+          (* ponytail: the diagnostic rides as marshalled text in a reserved argument *)
+          call (vals @ [ (node_error, Text (Marshal.to_string e [])) ])
+      | exception x ->
+          st.steps <- steps;
+          raise x)
 
 (* The card marker: a plan node at the call site naming the card (its path, kind, canonical
    parameters), what the host keys per-card ids, display, probes, provenance, facts and caching by;
@@ -1890,7 +2132,10 @@ and graph_value ?(rec_ = true) c name over =
 
 let diagnostic code msg span = Diagnostic.error ?span ~code msg
 let inline_nodes = Atomic.make true
-let inline_parameters = Atomic.make (fun _ d -> (d, fun vals -> Some vals))
+
+let inline_parameters =
+  Atomic.make (fun _ (d : W.node_definition) ->
+      (d, lazy (Digest.string (Marshal.to_string d [])), fun vals -> Some vals))
 
 (* ponytail: a node with callable slots still lowers as its own nested workspace *)
 let inline_simple (d : W.node_definition) =

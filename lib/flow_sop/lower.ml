@@ -214,6 +214,7 @@ let () =
       let key = String.sub d.kind.qualified 4 (String.length d.kind.qualified - 4) in
       let body, context_inputs = Context_kernel.label_context ~label:key d.body in
       ( { d with body },
+        lazy (Digest.string (Context_kernel.declaration_source checked d)),
         fun vals ->
           let vals = material_args d.kind.qualified vals in
           let live, vals = List.partition (fun (_, value) -> E.is_live value) vals in
@@ -1107,6 +1108,12 @@ let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
 
 module Build_cache = Lru.Make (String)
 
+(* 2048 inlined-body kernel nodes, by cook identity (Lowerer.reuse); every access under the lock. *)
+module Built = Lru.Make (String)
+
+let built = Built.create 2048
+let built_lock = Mutex.create ()
+
 (* 512 Lisp node body builds (the 16 lowerings of a 30-node workspace fit); every access under the lock. *)
 let build_cache = Build_cache.create 512
 let build_lock = Mutex.create ()
@@ -1353,8 +1360,44 @@ struct
             | None -> kernel_source))
     | _ -> kernel_source
 
+  (* An inlined body's kernel node, built once for its card: an edit elsewhere relowers the program
+     but takes the node it built (over its new inputs), as the nested card took its body build. The
+     key is the node's cook identity (the card's key, the data, the inputs'). *)
+  let reuse ?node ?state ?elems what data inputs build =
+    let key () =
+      String.concat "\000"
+        ([
+           Lazy.force (kernel_source_of node);
+           what;
+           Flow.Value.key_of ~residual:E.Residual.residual_id data;
+           string_of_bool reference;
+           string_of_bool strict_body;
+           string_of_bool gpu.fast;
+         ]
+        @ List.map
+            (fun input -> string_of_int (Sop.Node.id input) ^ Sop.Node.Build.cache_parameters input)
+            inputs)
+    in
+    let card = match node with Some (n : E.node) -> n.kind = E.card_kind | None -> false in
+    if (not (inlined node || card)) || state <> None || elems <> None || gpu.backend <> None then
+      build ()
+    else
+      match key () with
+      | exception _ -> build ()
+      | key -> (
+          match Mutex.protect built_lock (fun () -> Built.find_opt built key) with
+          | Some node -> Sop.Node.Build.rebuild_with_inputs node (Array.of_list inputs)
+          | None ->
+              let node = build () in
+              Mutex.protect built_lock (fun () -> Built.add built key node);
+              node)
+
   let geometry_arrays_node ?node ?(strict_body = strict_body) ?host ?state ?elems ~operation ~args
       ~sources inputs =
+    reuse ?node ?state ?elems
+      ("arrays " ^ operation ^ Option.fold ~none:"" ~some:string_of_bool host)
+      (E.Record args) inputs
+    @@ fun () ->
     geometry_arrays_node ~check:strict_body ~profile
       ~strict_body:(strict_body || inlined node)
       ~reference ~approx:checked.approx ~kernel_source:(kernel_source_of node) ?host ?state ?elems
@@ -1868,6 +1911,14 @@ struct
 
   let attribute_node ?node ?state ?elems ?selection ?default ?(owner = Rdk.Attribute.Point)
       ?(kind = "vec3") ~name ~values ~sources inputs =
+    reuse ?node ?state ?elems
+      (Printf.sprintf "attribute %d %s %s" (Hashtbl.hash owner) kind name)
+      (E.Record
+         ([ ("values", values) ]
+         @ Option.to_list (Option.map (fun v -> ("selection", v)) selection)
+         @ Option.to_list (Option.map (fun v -> ("default", v)) default)))
+      inputs
+    @@ fun () ->
     attribute_node ~check:strict_body
       ~strict_body:(strict_body || inlined node)
       ~reference ~profile ~approx:checked.approx ~gpu ~kernel_source:(kernel_source_of node) ?state
@@ -1877,6 +1928,7 @@ struct
   and attribute_data = attribute_data
 
   let group_node ?node ?state ?elems ~args ~sources inputs =
+    reuse ?node ?state ?elems "group" (E.Record args) inputs @@ fun () ->
     group_node ~check:strict_body
       ~strict_body:(strict_body || inlined node)
       ~reference ~profile ~approx:checked.approx ~kernel_source:(kernel_source_of node) ?state
@@ -2461,8 +2513,9 @@ struct
     let build inputs =
       match List.assoc "value" args with
       | E.Residual residual ->
-          structural_node ~node residual
-            (List.map2 (fun id input -> (id, plan.nodes.(id).ty, input)) sources inputs)
+          reuse ~node "structural" (E.Residual residual) inputs (fun () ->
+              structural_node ~node residual
+                (List.map2 (fun id input -> (id, plan.nodes.(id).ty, input)) sources inputs))
           |> Sop.Node.relabel key
       | _ ->
           Sop.Node.Build.make ~label:key ~operation:"flow.card" ~version:1 ~parameters:kind

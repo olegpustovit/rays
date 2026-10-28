@@ -226,13 +226,17 @@ val inline_nodes : bool Atomic.t
 val inline_parameters :
   (Workspace.t ->
   Workspace.node_definition ->
-  Workspace.node_definition * ((string * value) list -> (string * value) list option))
+  Workspace.node_definition
+  * string Lazy.t
+  * ((string * value) list -> (string * value) list option))
   Atomic.t
-(** The definition an inlined call evaluates (the host labels its context operators) and the host's
-    canonical parameters of an inlined call (ranges, choices, encoded text), raising the diagnostic
-    a node build would refuse with; [None] keeps the call a node of its own (its body reaches its
-    cook context, say). Applied once per workspace and definition, then per call; the default
-    inlines every call with its arguments. *)
+(** The definition an inlined call evaluates (the host labels its context operators), the host's key
+    of its declaration cone (a body's evaluation is kept under it, with the canonical parameters and
+    input shapes, for a later evaluation of the same call) and the host's canonical parameters of an
+    inlined call (ranges, choices, encoded text), raising the diagnostic a node build would refuse
+    with; [None] keeps the call a node of its own (its body reaches its cook context, say). Applied
+    once per workspace and definition, then per call; the default inlines every call with its
+    arguments. *)
 
 val context_label : string
 (** The argument an inlined card's context operators carry: its cook label (the kind key). *)
