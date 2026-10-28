@@ -35,7 +35,7 @@ type action =
   | Window_new of Pxui_shell.Layout.panel | Float_toggle
       (* / n g/l/t/i/u/m/w: a floating window in the active layout; / o f floats or docks the focused panel *)
   | World_emit | World_reseed | World_time of float | World_play | World_preset of int
-  | Scope_command of Pxui_graph.Scope.command  (* the workspace pane, see [Core_panes.scope_name] *)
+  | Scope_command of Pxui_graph.Scope.command  (* the workspace pane, see [Editor_panes.scope_name] *)
   | List_command of Pxui_shell.Tree.command
   | Guide_toggle | Guide_keys
   | Command_palette

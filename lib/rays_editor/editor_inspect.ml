@@ -1,7 +1,7 @@
-open Core_model
+open Editor_model
 open Sop
 open Editor_document
-open Core_shell
+open Editor_shell
 
 (* ---- levels ---- *)
 

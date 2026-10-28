@@ -46,7 +46,7 @@ module Editor = struct
   let redo_label = Loop_model.redo_label
   let scene_document = Loop_model.scene_document
   let network = Loop_model.network
-  type picked = Core_model.picked = { id : int; label : string; kind : string; fields : Param.field_view list }
+  type picked = Editor_model.picked = { id : int; label : string; kind : string; fields : Param.field_view list }
   let selected_node = Loop_model.selected_node
   let set_probe = Loop_model.set_probe
   let set_settings = Loop_model.set_settings
@@ -67,11 +67,11 @@ module Editor = struct
         ~live:(Option.value ~default:core.live_frame live) image
     let image_stats value = let resources=value.Loop_model.host.resources in
       resources.images_created,resources.images_destroyed
-    let status_text value=Core_status.status_text value.Loop_model.core
+    let status_text value=Editor_status.status_text value.Loop_model.core
     let live_frame value=value.Loop_model.core.live_frame
-    let inspector_subject value=Core_panels.inspector_subject value.Loop_model.core
-    let new_graph value context=snd (Core_inspect.new_graph value.Loop_model.core context)
-    let menu_forms = List.map (fun (_, form, text, _) -> form, text) Core_add.forms
+    let inspector_subject value=Editor_panels.inspector_subject value.Loop_model.core
+    let new_graph value context=snd (Editor_inspect.new_graph value.Loop_model.core context)
+    let menu_forms = List.map (fun (_, form, text, _) -> form, text) Editor_add.forms
     let lisp_completions value text =
       Lisp_text.complete (Lazy.force value.Loop_model.core.lisp_vocab) text (String.length text)
     let image_render_stats value=Flow_native.Workspace_images.render_stats value.Loop_model.host.images
@@ -130,18 +130,18 @@ end
 
 module Reduce = struct
   let open_import (editor : _ Editor.t) file =
-    {editor with Loop_model.core = {editor.core with Core_model.open_import = Some file}}
+    {editor with Loop_model.core = {editor.core with Editor_model.open_import = Some file}}
   let spreadsheet (editor : _ Editor.t) path =
-    let key = Core_shell.panel_key editor.core.doc path in
-    let pane = Core_panes.shown_as editor.core (key, path, Pxui_shell.Layout.Spreadsheet) in
-    (Core_panes.local_of editor.core key).sheet_owner, Core_inspect.spreadsheet_source pane
+    let key = Editor_shell.panel_key editor.core.doc path in
+    let pane = Editor_panes.shown_as editor.core (key, path, Pxui_shell.Layout.Spreadsheet) in
+    (Editor_panes.local_of editor.core key).sheet_owner, Editor_inspect.spreadsheet_source pane
   let select_path (editor : _ Editor.t) path = match path with
-    | graph :: _ -> {editor with Loop_model.core = { (Core_panes.go editor.core graph) with Core_model.select_later = [path] }}
+    | graph :: _ -> {editor with Loop_model.core = { (Editor_panes.go editor.core graph) with Editor_model.select_later = [path] }}
     | [] -> editor
   let view (editor : _ Editor.t) path =
-    {editor with Loop_model.core = Core_scope.view_node editor.core path}
+    {editor with Loop_model.core = Editor_scope.view_node editor.core path}
   let step (e : _ Editor.t) ?select ?preview actions frame =
-    { e with Loop_model.core = Core_reduce.reduce_idle ?select ?preview e.Loop_model.core actions frame }
+    { e with Loop_model.core = Editor_reduce.reduce_idle ?select ?preview e.Loop_model.core actions frame }
 end
 
 module Private = struct

@@ -1,11 +1,11 @@
-open Core_model
+open Editor_model
 open Rays
 open Sop
 open Editor_document
-open Core_inspect
-open Core_panes
-open Core_shell
-open Core_setup
+open Editor_inspect
+open Editor_panes
+open Editor_shell
+open Editor_setup
 
 (* the open dialog, for the crash report *)
 let prompt_name value = match value.prompt with

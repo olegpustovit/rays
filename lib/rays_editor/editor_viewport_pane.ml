@@ -1,10 +1,10 @@
-open Core_model
+open Editor_model
 open Rays
 open Sop
 open Editor_document
-open Core_inspector_pane
-open Core_inspect
-open Core_list
+open Editor_inspector_pane
+open Editor_inspect
+open Editor_list
 
 let draw_viewport_pane ~ui ~value ~caption ~roots ~active ~none_root =
 (* What is painted over a view stays in its pane: the box the marks are drawn in fills a

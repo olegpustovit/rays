@@ -1,4 +1,4 @@
-open Core_model
+open Editor_model
 open Editor_document
 
 (* ---- the shell ---- *)

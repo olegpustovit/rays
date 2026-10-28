@@ -1,23 +1,23 @@
-open Core_model
+open Editor_model
 open Rays
 open Sop
 open Editor_document
-open Core_viewport_pane
-open Core_shell
-open Core_panes
-open Core_actions
-open Core_text
-open Core_carry
-open Core_panels
-open Core_scope
-open Core_menu
-open Core_inspect
-open Core_list
-open Core_status
-open Core_add
-open Core_inspector_pane
-open Core_setup
-open Core_reduce
+open Editor_viewport_pane
+open Editor_shell
+open Editor_panes
+open Editor_actions
+open Editor_text
+open Editor_carry
+open Editor_panels
+open Editor_scope
+open Editor_menu
+open Editor_inspect
+open Editor_list
+open Editor_status
+open Editor_add
+open Editor_inspector_pane
+open Editor_setup
+open Editor_reduce
 
 (* a viewer or a canvas: the panels a sketch's picture is drawn in *)
 let is_picture : Pxui_shell.Layout.panel -> bool = function

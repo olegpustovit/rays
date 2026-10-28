@@ -1,11 +1,11 @@
-open Core_model
+open Editor_model
 open Rays
 open Sop
 open Editor_document
-open Core_inspect
-open Core_scope
-open Core_panes
-open Core_add
+open Editor_inspect
+open Editor_scope
+open Editor_panes
+open Editor_add
 
 let enterable value id = match kind value id with
   | Some "geometry" -> Document.Int_map.mem id value.doc.Document.networks

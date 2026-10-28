@@ -4,7 +4,7 @@ open Loop_view
 module V = Viewport
 type layout = Pxui_shell.Layout.t
 type 'prepared t = {
-  core : 'prepared Core_model.t;
+  core : 'prepared Editor_model.t;
   camera : V.camera;
   cameras : (string * V.camera) list;
   viewing : string option;
@@ -79,7 +79,7 @@ val prepared : 'a t -> 'a option
 val camera : 'a t -> V.camera
 val extra : 'a t -> V.extra
 val timeline : 'a t -> Timeline.t
-val selected_node : 'a t -> Core_model.picked option
+val selected_node : 'a t -> Editor_model.picked option
 val displayed_node : 'a t -> Sop.Node.t
 val panes : 'a t -> Rays.Frame.t -> Pxui_shell.Layout.panes
 val can_undo : 'a t -> bool
@@ -119,11 +119,11 @@ val focused_image : 'a t -> V.rendered option
 val film : 'a t -> Rays.Frame.t -> int * int * int * int
 val refresh_hidden : 'a t -> Rays.Frame.t -> 'a t
 val composition_key :
-  'a Core_model.t ->
+  'a Editor_model.t ->
   'b -> 'b * Editor_document.Document.level * (string * int list) list
 val compose :
   'a t ->
-  ('a, 'b) Core_model.update ->
+  ('a, 'b) Editor_model.update ->
   baked:Rays.World.baked option ->
   baked_views:(string * (Rays.World.t * Rays.World.baked)) list ->
   scene:Editor_document.Kind_graph.t ->

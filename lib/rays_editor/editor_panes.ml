@@ -1,9 +1,9 @@
-open Core_model
-open Core_shell
+open Editor_model
+open Editor_shell
 open Rays
 open Sop
 open Editor_document
-open Core_inspect
+open Editor_inspect
 
 let stored_projection value =
   match Level_map.find_opt (pane_level value) (pane_views value) with

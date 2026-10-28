@@ -1,8 +1,8 @@
-open Core_model
+open Editor_model
 open Editor_document
-open Core_add
-open Core_inspect
-open Core_panels
+open Editor_add
+open Editor_inspect
+open Editor_panels
 
 (* What the add menu of a scene adds beside the object kinds: the World, a merge, and the
    geometry of each SOP graph (a second object over a graph that already exists) *)

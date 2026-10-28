@@ -1,9 +1,9 @@
-open Core_model
+open Editor_model
 open Sop
 open Editor_document
-open Core_panes
-open Core_inspect
-open Core_scope
+open Editor_panes
+open Editor_inspect
+open Editor_scope
 
 (* the binding a selected path ends in, none for a keyword input, a result or a nested call *)
 let binding_name path =

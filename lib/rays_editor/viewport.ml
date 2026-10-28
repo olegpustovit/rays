@@ -173,8 +173,8 @@ let same_view a b =
     | Perspective a, Perspective b -> Float.abs (a.fov_y -. b.fov_y) < 1e-6
     | _ -> false)
 
-let active_node (core : _ Core_model.t) = Option.bind core.doc.active_camera
-    (Kind_graph.find (Core_inspect.scene core))
+let active_node (core : _ Editor_model.t) = Option.bind core.doc.active_camera
+    (Kind_graph.find (Editor_inspect.scene core))
 
 (* A default camera, following the viewport. *)
 let add_default_camera scene easy =
@@ -190,20 +190,20 @@ let seed_scene easy scene =
 (* One ACTIVE camera whenever any exists; a nonempty scene of a workspace with no scene graph
    losing the last camera re-adds the default within the same undo entry. An intentionally
    empty scene stays empty. *)
-let sync_cameras ~mode (core : _ Core_model.t) easy =
-  let core = if camera_ids (Core_inspect.scene core) <> []
-      || Core_inspect.scene core = []
+let sync_cameras ~mode (core : _ Editor_model.t) easy =
+  let core = if camera_ids (Editor_inspect.scene core) <> []
+      || Editor_inspect.scene core = []
       (* a scene graph is authoritative: no camera object is a camera it does not declare *)
       || Lowering.graph_of (core.doc.workspace.ws) Flow.Context.scene <> None then core
-    else match add_default_camera (Core_inspect.scene core) easy with
-      | Some scene -> Core_host.scene_edit core mode scene
+    else match add_default_camera (Editor_inspect.scene core) easy with
+      | Some scene -> Editor_host.scene_edit core mode scene
       | None -> core in
-  let ids = List.filter (Core_inspect.view_wants core `Primary) (camera_ids (Core_inspect.scene core)) in
+  let ids = List.filter (Editor_inspect.view_wants core `Primary) (camera_ids (Editor_inspect.scene core)) in
   let active = match core.doc.active_camera with
     | Some id when List.mem id ids -> Some id
     | Some _ | None -> (match ids with id :: _ -> Some id | [] -> None) in
   if active = core.doc.active_camera then core
-  else Core_host.scene_edit core `Amend ~active_camera:active (Core_inspect.scene core)
+  else Editor_host.scene_edit core `Amend ~active_camera:active (Editor_inspect.scene core)
 
 (* How the viewport [key] renders: through which camera and as which root says.  A viewport over
    its own scene instance reads that instance's root; any other renders as the document. *)
@@ -234,12 +234,12 @@ let of_root = function
 let to_root = function
   | Renderer.Raster -> Objects.Root.Raster | Wireframe -> Wireframe | Path_traced -> Path_traced
 let root_renderer core =
-  if core.Core_model.doc.homes.root = None then None else Some (of_root core.doc.root.renderer)
+  if core.Editor_model.doc.homes.root = None then None else Some (of_root core.doc.root.renderer)
 
 let renderer_setting core = List.find_map (fun (field : Param.field_view) ->
   match field.name, field.current with
   | "renderer", Param.Choice_value label -> Renderer.of_label label
-  | _ -> None) (Settings.fields (Core_list.settings core))
+  | _ -> None) (Settings.fields (Editor_list.settings core))
 
 let looks extra key = List.mem key extra.looking
 let look_through extra = looks extra extra.key
@@ -250,8 +250,8 @@ let init core camera =
   let core = sync_cameras ~mode:`Reset core camera in
   let render_camera = render_camera_of core camera in
   (* the viewports whose [:look_through true] says so; the focus starts in the first viewport *)
-  let looking = Option.fold ~none:[] ~some:(fun (s : Document.shell) -> s.start.looking) core.Core_model.doc.shell in
-  let key = match core.Core_model.focus, Option.map (fun (s : Document.shell) -> Editor_core.Panels.leaves s.tree) core.doc.shell with
+  let looking = Option.fold ~none:[] ~some:(fun (s : Document.shell) -> s.start.looking) core.Editor_model.doc.shell in
+  let key = match core.Editor_model.focus, Option.map (fun (s : Document.shell) -> Editor_core.Panels.leaves s.tree) core.doc.shell with
     | View key, _ -> key
     | _, Some leaves -> Option.value ~default:"main"
         (List.find_map (function _, Editor_core.Panels.View key -> Some key | _ -> None) leaves)
@@ -337,8 +337,8 @@ let apply_action camera extra = function
   | _ -> extra, None
 
 let on_doc ~previous core camera =
-  if Core_inspect.scene core == Core_inspect.scene previous
-      && core.Core_model.doc.active_camera = previous.Core_model.doc.active_camera
+  if Editor_inspect.scene core == Editor_inspect.scene previous
+      && core.Editor_model.doc.active_camera = previous.Editor_model.doc.active_camera
   then core else sync_cameras ~mode:`Amend core camera
 
 let navigate ~area control camera extra core ~(raw_frame : Frame.t) ~(input : Frame.t) =
@@ -376,25 +376,25 @@ let on_view core ~previous ~key camera extra ~stepped =
   let core, extra = match extra.root_request with
     | None -> core, extra
     | Some root when root_renderer core = None
-        && { root with renderer = core.Core_model.doc.root.renderer } = core.doc.root ->
+        && { root with renderer = core.Editor_model.doc.root.renderer } = core.doc.root ->
         core, { extra with root_request = None; renderer_request = Some (of_root root.renderer) }
-    | Some root -> Core_host.set_root core root, { extra with root_request = None } in
+    | Some root -> Editor_host.set_root core root, { extra with root_request = None } in
   let core, mode = match extra.renderer_request, renderer_setting core with
     | _ when root_renderer core <> None -> core, Option.get (root_renderer core)
     | Some mode, Some current when mode = current -> core, mode
     | Some mode, Some _ ->
-        (match Settings.apply (Core_list.settings core) ["renderer", Param.Choice_value (Renderer.label mode)] with
-         | Ok (settings, _) -> Core_host.set_settings core settings, mode
+        (match Settings.apply (Editor_list.settings core) ["renderer", Param.Choice_value (Renderer.label mode)] with
+         | Ok (settings, _) -> Editor_host.set_settings core settings, mode
          | Error _ -> core, extra.renderer.mode)
     | Some mode, None -> core, mode
     | None, Some mode -> core, mode
     | None, None -> core, extra.renderer.mode in
   let extra = {extra with renderer = {extra.renderer with mode;
       custom = root_renderer core = None && renderer_setting core <> None};
-    renderer_request = None; root = { core.Core_model.doc.root with renderer = to_root mode } } in
+    renderer_request = None; root = { core.Editor_model.doc.root with renderer = to_root mode } } in
   let core = match extra.follow_request, active_node core with
     | Some value, Some node ->
-        Core_host.edit_node core Document.Scene node.Kind_graph.id
+        Editor_host.edit_node core Document.Scene node.Kind_graph.id
           ["follow_viewport", Param.Bool_value value] ~label:"Follow viewport"
     | _ -> core in
   let written = ref extra.written in
@@ -406,11 +406,11 @@ let on_view core ~previous ~key camera extra ~stepped =
             (Easy_camera.camera camera)) in
         if moved || not (same_view node_view (Easy_camera.camera camera)) then
           if moved then
-            match Kind_graph.set_fields (Core_inspect.scene core) node.Kind_graph.id
+            match Kind_graph.set_fields (Editor_inspect.scene core) node.Kind_graph.id
                 (view_parameters camera) with
             | Ok (scene, _) ->
                 written := Some (Easy_camera.camera camera);
-                Core_host.scene_edit core `Amend scene, camera
+                Editor_host.scene_edit core `Amend scene, camera
             | Error _ -> core, camera
           else if (match !written with Some w -> same_view w node_view | None -> false) then
             (* the node shows what a viewport last wrote: another viewport took over, and
@@ -434,11 +434,11 @@ let on_view core ~previous ~key camera extra ~stepped =
     else Option.bind current Objects.Camera.of_node in
   let extra = { extra with document_camera = Option.fold
       ~none:(Easy_camera.camera camera) ~some:fst decoded;
-    view_roots = core.Core_model.doc.view_roots } in
+    view_roots = core.Editor_model.doc.view_roots } in
   (* the focused viewport's free view carries the lens of its own camera *)
   let free_camera = (look extra key).through in
   (* a viewport whose [:look_through] changed in the text follows it; the others stay as they are *)
-  let said = Option.fold ~none:[] ~some:(fun (s : Document.shell) -> s.start.looking) core.Core_model.doc.shell in
+  let said = Option.fold ~none:[] ~some:(fun (s : Document.shell) -> s.start.looking) core.Editor_model.doc.shell in
   let extra = if said = extra.started then extra else
     { extra with started = said;
       looking = List.filter (fun k -> List.mem k said || List.mem k extra.started = List.mem k said) extra.looking
@@ -630,7 +630,7 @@ type arrow = { name : string; color : Rays_math.Color.t; tool : tool;
 
 let arrows node view bounds space tool =
   let project point = project bounds view (Rays_math.Mat4.transform_point space point) in
-  let values = node.Core_model.fields in
+  let values = node.Editor_model.fields in
   let find name = List.find_map (fun (field : Param.field_view) ->
     match field.current with
     | Float_value value when field.name = name -> Some value

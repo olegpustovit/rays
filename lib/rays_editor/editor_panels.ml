@@ -1,14 +1,14 @@
-open Core_model
+open Editor_model
 open Rays
 open Sop
 open Editor_document
-open Core_shell
-open Core_panes
-open Core_inspect
-open Core_status
-open Core_text
-open Core_list
-open Core_add
+open Editor_shell
+open Editor_panes
+open Editor_inspect
+open Editor_status
+open Editor_text
+open Editor_list
+open Editor_add
 
 (* A panel header's title: its type, and where a looped panel comes from (register E1). *)
 let panel_title value (leaf : Pxui_shell.Layout.leaf) =

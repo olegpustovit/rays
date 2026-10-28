@@ -500,7 +500,7 @@ module Editor : sig
   val network : 'prepared t -> Sop.Edit_graph.t option
   (** The lowered network of the open geometry object. *)
 
-  type picked = Core_model.picked = { id : int; label : string; kind : string; fields : Param.field_view list }
+  type picked = Editor_model.picked = { id : int; label : string; kind : string; fields : Param.field_view list }
   (** A scene object or World layer of the list, or the SOP node the graph pane has selected. *)
 
   val selected_node : 'prepared t -> picked option

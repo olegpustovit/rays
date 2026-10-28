@@ -1,11 +1,11 @@
-open Core_model
+open Editor_model
 open Rays
 open Editor_document
-open Core_panes
-open Core_inspect
-open Core_shell
-open Core_text
-open Core_menu
+open Editor_panes
+open Editor_inspect
+open Editor_shell
+open Editor_text
+open Editor_menu
 
 (* ---- carry ---- *)
 

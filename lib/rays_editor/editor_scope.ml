@@ -1,8 +1,8 @@
-open Core_model
+open Editor_model
 open Editor_document
-open Core_shell
-open Core_panes
-open Core_inspect
+open Editor_shell
+open Editor_panes
+open Editor_inspect
 
 (* the plan node of a drawing or image at [path], with its type *)
 let picture_node records path ~probes =

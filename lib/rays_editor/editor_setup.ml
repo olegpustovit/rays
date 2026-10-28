@@ -1,8 +1,8 @@
-open Core_model
+open Editor_model
 open Editor_document
-open Core_shell
-open Core_panes
-open Core_list
+open Editor_shell
+open Editor_panes
+open Editor_list
 
 (* ---- creation ---- *)
 

@@ -14,20 +14,20 @@
 | `Loop_source` | Source opening, polling and saving; autosave and recovery ownership |
 | `Editor_loop` | Frame coordination, presentation, crash reports, resource shutdown and `run` |
 | `Viewport`, `Renderer` | Camera objects and follow-viewport, guides and handles, raster / wireframe / traced slots |
-| `Core_model` | Every type: the model `t`, `frame_result`, `change`, `carry` |
-| `Core_shell` … `Core_host` | The model's functions, one module per concern; a module `open`s the ones it uses, nothing is included |
-| `Core_reduce` | `reduce`: the one reduction of a frame (no UI) |
+| `Editor_model` | Every type: the model `t`, `frame_result`, `change`, `carry` |
+| `Editor_shell` … `Editor_host` | The model's functions, one module per concern; a module `open`s the ones it uses, nothing is included |
+| `Editor_reduce` | `reduce`: the one reduction of a frame (no UI) |
 | `Editor_frame` | `update_frame`: routes keys, builds the panes inside `Ui.frame`, calls `reduce` |
 | `Editor_document.Document_edit` | The document reducers: `syntax_edit`, `syntax_batch`, `text_edit`, `layout_edit`, `reconcile` |
-| `Carry`, `Core_carry` | What a payload does at a place (`Carry.put`), and the carry's turn of a frame |
+| `Carry`, `Editor_carry` | What a payload does at a place (`Carry.put`), and the carry's turn of a frame |
 | `Cook`, `Schedule`, `Pick` | The cook worker boundary, when to cook, viewport provenance |
 | `Text_pane`, `Lisp_text` | The text pane and the Lisp as `Pxui.Ui.language` |
 | `Gate` | What the hosted sketch sees of a frame: the pointer only on its picture and only while the window is key (not hovered from another app, not the click that raised it), the keyboard only with a viewer or canvas in focus and no prompt, menu, leader or text field open; a held key stays hidden until released. Pure, table-tested in `gate_test` |
 | `Navigator`, `Bars`, `Editor_commands`, `Echo` | The Outline panel, header tools, the one keymap, a gesture in the words of the text |
 
-The chain order is `Core_model`, `Core_shell`, `Core_inspect`, `Core_panes`, `Core_scope`, `Core_add`,
-`Core_list`, `Core_setup`, `Core_status`, `Core_actions`, `Core_text`, `Core_panels`, `Core_menu`,
-`Core_carry`, `Core_reduce`, `Core_host`, `Editor_frame`. A function goes in the first module that has what
+The chain order is `Editor_model`, `Editor_shell`, `Editor_inspect`, `Editor_panes`, `Editor_scope`, `Editor_add`,
+`Editor_list`, `Editor_setup`, `Editor_status`, `Editor_actions`, `Editor_text`, `Editor_panels`, `Editor_menu`,
+`Editor_carry`, `Editor_reduce`, `Editor_host`, `Editor_frame`. A function goes in the first module that has what
 it needs; a new module joins the chain and `private_modules` in `dune`.
 
 The private environment chain is `Loop_view`, `Loop_model`,
@@ -65,7 +65,7 @@ turns the result and the frame's actions into the next model. Never set a ref or
 - The fields of a scene object or World layer the text declares are written text first
   (`Scene_sync.set_fields`: inspector rows, viewport handles, World drags), and so are the list's
   gestures (flags, rename, reparent, delete, restack), World keys and presets, the render camera,
-  the root and the settings (`Scene_sync.write` with an `edit`; `Core_list.tree_edit` maps a list
+  the root and the settings (`Scene_sync.write` with an `edit`; `Editor_list.tree_edit` maps a list
   intent to one). Only an object the host made is edited as a derived node and adopted by
   `Document_edit.reconcile`, and only a camera following the viewport reconciles an object of the text.
 - Every history entry has a label. One pointer gesture is one entry: a scrub merges by a
@@ -86,7 +86,7 @@ text focus only while the pane is drawn; a pane that is not drawn is `Scope.susp
 writes it. Never store layout anywhere else. Every leaf is an instance with its own PXUI state
 (keys seeded by its pane root) and its own model state in `locals`, by `Editor_frame.panel_key`. The pane
 in use is the key of `Editor_frame.t.panes` (a `Panel_map`, the graph panels' own canvas, level and selection);
-it follows the focus, and `Core_shell.as_pane` points at another, resolving its level again. Never reduce a panel's intents against a pane
+it follows the focus, and `Editor_shell.as_pane` points at another, resolving its level again. Never reduce a panel's intents against a pane
 that is not in use, and never add a "first leaf of a kind" path. Layout gestures are `Layout_edit`
 ops on the editor graph; disclosure and window bounds are `Layout_by_path.panels`.
 

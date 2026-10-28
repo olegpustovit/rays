@@ -1,17 +1,17 @@
-open Core_model
+open Editor_model
 open Rays
 open Sop
 open Editor_document
-open Core_panes
-open Core_setup
-open Core_panels
-open Core_list
-open Core_inspect
-open Core_actions
-open Core_shell
-open Core_scope
-open Core_text
-open Core_carry
+open Editor_panes
+open Editor_setup
+open Editor_panels
+open Editor_list
+open Editor_inspect
+open Editor_actions
+open Editor_shell
+open Editor_scope
+open Editor_text
+open Editor_carry
 
 (* The one reduction phase of a frame: what the panes asked for ([result]) and the keys ([actions])
    become the next model.  Nothing here builds UI: the panes have finished constructing their

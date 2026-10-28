@@ -1,10 +1,10 @@
-open Core_model
+open Editor_model
 open Editor_document
-open Core_inspect
-open Core_shell
-open Core_scope
-open Core_panes
-open Core_actions
+open Editor_inspect
+open Editor_shell
+open Editor_scope
+open Editor_panes
+open Editor_actions
 
 (* Every editor path records the same immutable document. No-op/rejected
    edits leave both the present and the merge state untouched. *)
@@ -150,7 +150,7 @@ let apply_text value intents =
     | Jump_definition path ->
         let next = select_source value path in
         {next with text = {text with target = Some path; nonce = text.nonce + 1}}
-    | References_of _ -> value  (* opens the references prompt, see [Core_reduce] *)
+    | References_of _ -> value  (* opens the references prompt, see [Editor_reduce] *)
     | Carry_over _ -> value  (* read by the carry's report, not an edit *)
     | Find_set (find, reveal) -> with_text { text with find; nonce = text.nonce + (if reveal then 1 else 0) }
     | Request request -> with_text { text with request }

@@ -1,11 +1,11 @@
-open Core_model
+open Editor_model
 open Rays
 open Sop
 open Editor_document
-open Core_panes
-open Core_inspect
-open Core_shell
-open Core_status
+open Editor_panes
+open Editor_inspect
+open Editor_shell
+open Editor_status
 
 (* Leader actions owned by the workspace; the environment handles the rest
    from [update.actions]. *)
