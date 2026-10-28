@@ -172,3 +172,16 @@ let () =
     "(let* [total (fold [a 0.] [i (range (frame/index))] (+ a t))] (+ total t))",2;
   ];
   print_endline "Core frame facts: scoped sharing, changing inputs, branch dominance and empty loops agree"
+
+(* The unboxed scalar path matches the walker bit for bit, and a non-finite register falls back to its diagnostic. *)
+let () =
+  List.iter (fun body ->
+    match List.assoc "g" (ok (E.static (checked body))).results with
+    | E.Residual r ->
+        let program = Result.get_ok (Flow_ir.Core_lower.lower r) in
+        List.iter (fun time ->
+          let live = Input.at_time time in
+          assert (Test_program.run program ~live = E.Private.force_reference (E.Residual r) ~live))
+          [0.; 0.37; 1e154; 1e200]
+    | _ -> assert false)
+    ["(+ (* (sin t) 0.5) (* t t))"; "(- (cos t) (* t (* t 1e10)))"]

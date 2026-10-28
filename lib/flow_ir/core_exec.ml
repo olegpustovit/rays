@@ -21,11 +21,67 @@ type state = {
   device : (Packed.t -> ((int * int * int) array option, Diagnostic.t) result) option;
   resident : resident option; mutable resident_on : bool;
 }
+type scalar = { code : int array; a : int array; b : int array; k : float array; result : int;
+  regs : float array Atomic.t  (* [||] when taken *) }
 type prepared = { program : C.program; body : state -> unit;
   pool : E.value array Atomic.t;  (* [||] when taken *)  (* the locals of a large or all-scalar program, reused across calls: a fresh large one is allocated on the major heap, a small one by a C call *)
   pooled : bool;
-  stateless : bool  (* no state slot and no region: a failure leaves the evaluation state untouched *) }
+  stateless : bool;  (* no state slot and no region: a failure leaves the evaluation state untouched *)
+  scalar : scalar option }
 exception Non_finite
+
+(* A float-only scalar program (arithmetic, sin, cos over the frame clock and literals) runs on an unboxed
+   float register file inside this interpreter. A non-finite register leaves the program to the general
+   path, which owns the diagnostics. [code] holds one opcode per register; operands index earlier registers. *)
+let scalar_program (program : C.program) =
+  let n = Array.length program.locals in
+  if n = 0 || Array.length program.regions > 0 || Array.length program.state_slots > 0 || program.call_slots > 0
+     || Array.length program.results <> 1 || program.locals.(program.results.(0)) <> Flow.Ty.Float then None
+  else begin
+    let code = Array.make n (-1) and a = Array.make n 0 and b = Array.make n 0 and k = Array.make n 0. in
+    let ok = ref true in
+    let assign local op x y = if code.(local) >= 0 || program.locals.(local) <> Flow.Ty.Float then ok := false
+      else (code.(local) <- op; a.(local) <- x; b.(local) <- y) in
+    let operand local = if local < 0 || local >= n || code.(local) < 0 then (ok := false; 0) else local in
+    List.iter (fun (st : C.statement) -> match st.node with
+      | Assign (l, Constant c) ->
+          (match program.constants.(c) with
+           | C.Float f when Float.is_finite f -> assign l 0 0 0; k.(l) <- f
+           | _ -> ok := false)
+      | Assign (l, Frame Time) -> assign l 1 0 0
+      | Assign (l, Frame Dt) -> assign l 2 0 0
+      | Assign (l, Frame Pointer_x) -> assign l 3 0 0
+      | Assign (l, Frame Pointer_y) -> assign l 4 0 0
+      | Assign (l, Local m) -> assign l 5 (operand m) 0
+      | Assign (l, Prim (Numeric (Add | Sub | Mul as op), ["a", x; "b", y])) ->
+          assign l (match op with Add -> 6 | Sub -> 7 | _ -> 8) (operand x) (operand y)
+      | Assign (l, Prim (Math (Sin | Cos as op), [_, x])) -> assign l (if op = Sin then 9 else 10) (operand x) 0
+      | _ -> ok := false) program.body;
+    if !ok && Array.for_all (fun c -> c >= 0) code then
+      Some {code; a; b; k; result = program.results.(0); regs = Atomic.make [||]}
+    else None
+  end
+
+let run_scalar sc (live : Input.t) =
+  let n = Array.length sc.code in
+  let r = match Atomic.exchange sc.regs [||] with [||] -> Array.make n 0. | r -> r in
+  (try
+    for i = 0 to n - 1 do
+      let v = match Array.unsafe_get sc.code i with
+        | 0 -> Array.unsafe_get sc.k i | 1 -> live.t | 2 -> live.dt
+        | 3 -> fst live.pointer | 4 -> snd live.pointer
+        | 5 -> Array.unsafe_get r (Array.unsafe_get sc.a i)
+        | 6 -> Array.unsafe_get r (Array.unsafe_get sc.a i) +. Array.unsafe_get r (Array.unsafe_get sc.b i)
+        | 7 -> Array.unsafe_get r (Array.unsafe_get sc.a i) -. Array.unsafe_get r (Array.unsafe_get sc.b i)
+        | 8 -> Array.unsafe_get r (Array.unsafe_get sc.a i) *. Array.unsafe_get r (Array.unsafe_get sc.b i)
+        | 9 -> sin (Array.unsafe_get r (Array.unsafe_get sc.a i))
+        | _ -> cos (Array.unsafe_get r (Array.unsafe_get sc.a i)) in
+      if not (Float.is_finite v) then raise Non_finite;
+      Array.unsafe_set r i v
+    done
+  with e -> Atomic.set sc.regs r; raise e);
+  let x = r.(sc.result) in
+  Atomic.set sc.regs r; x
 
 let yes = V.Bool true and no = V.Bool false
 let seal st n = if Array.length st.builders>0 then Option.iter (fun writable -> writable:=false) st.builders.(n)
@@ -651,18 +707,26 @@ let prepare ?(remember_loops=false) ?(approx=Flow.Workspace.Paths.empty) ?(fast=
          | Some group -> prepare_group group
              (Array.of_list (List.map (fun region -> Option.get individual.(region)) group.members)))) in
   {program; body=block program.body;
-   pool=Atomic.make [||]; pooled=Array.length program.locals>256 || Array.for_all plain program.locals; stateless=Array.length program.state_slots=0 && Array.length program.regions=0}
+   pool=Atomic.make [||]; pooled=Array.length program.locals>256 || Array.for_all plain program.locals; stateless=Array.length program.state_slots=0 && Array.length program.regions=0;
+   scalar=scalar_program program}
 
 (* Array.make is a C call even for zero slots. *)
 let call_counters (program : C.program) = if program.call_slots=0 then [||] else Array.make program.call_slots 0
 
 let has_regions prepared = Array.length prepared.program.regions>0
 
-let general root force resolve prepared live =
-  let program=prepared.program in
+let rec general root force resolve prepared live =
   match Input.validate live with
     | Error message -> Error (Diagnostic.error ~code:"E_FRAME" message)
-    | Ok () ->
+    | Ok () when prepared.scalar <> None ->
+        (match run_scalar (Option.get prepared.scalar) live with
+         | x -> Ok (E.Float x)
+         | exception Non_finite -> general_values root force resolve prepared live)
+    | Ok () -> general_values root force resolve prepared live
+and general_values root force resolve prepared live =
+  let program=prepared.program in
+  match () with
+    | () ->
         let n=Array.length program.locals in
         let pooled=prepared.pooled in
         let values=if not pooled then Array.make n E.No_geo else
