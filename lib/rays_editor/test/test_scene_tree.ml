@@ -192,7 +192,7 @@ let run () =
     (Option.fold ~none:false
        ~some:(fun network ->
          Edit_graph.inspect network
-         |> List.exists (fun (info : Edit_graph.node_info) -> info.operation = "box"))
+         |> List.exists (fun (info : Edit_graph.node_info) -> info.label = "box"))
        (E.network env))
     "geo1's network is not the sketch's SOP graph";
   let env = step env [ key (Input.KeyChar '/'); char 'l'; char 'l' ] in

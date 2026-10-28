@@ -183,6 +183,23 @@ let changes_of (parameter : Port.parameter) value =
 let changes parameter value =
   try Ok (changes_of parameter value) with Diagnostic.Error d -> Error d
 
+(* sop/material takes a material value as its fields *)
+let material_args kind args =
+  if kind <> "sop/material" then args
+  else
+    List.concat_map
+      (function
+        | "material", E.Struct ("material/standard", _, fields) ->
+            let get name default = Option.value ~default (List.assoc_opt name fields) in
+            [
+              ("material", get "name" (E.Text ""));
+              ("color", get "color" (E.Vec3 (1., 1., 1.)));
+              ("roughness", get "roughness" (E.Float 0.4));
+              ("emission", get "emission" (E.Vec3 (0., 0., 0.)));
+            ]
+        | arg -> [ arg ])
+      args
+
 (* An inlined Lisp call's parameters take the node path: the call's changes over the schema
    defaults (ranges, choices, encoded text through the declared normalizers), then the node's
    arguments. A refusal is the lowering error the node's construction raised. The body's context
@@ -198,6 +215,7 @@ let () =
       let body, context_inputs = Context_kernel.label_context ~label:key d.body in
       ( { d with body },
         fun vals ->
+          let vals = material_args d.kind.qualified vals in
           let live, vals = List.partition (fun (_, value) -> E.is_live value) vals in
           let changes =
             List.concat_map
@@ -1111,6 +1129,28 @@ let geo_of args =
   in
   List.concat_map (fun (_, value) -> sources value) args
 
+(* The cooked handles (geometry and images) a value reads, through captures: what a structural
+   node over it takes as inputs. *)
+let cooked_sources value =
+  let residuals = Hashtbl.create 16 and functions = Hashtbl.create 16 and ids = ref [] in
+  let rec sources = function
+    | E.Deferred (ty, id) when Ty.is_cooked ty -> ids := id :: !ids
+    | E.Residual r
+      when not (List.exists (( == ) r) (Hashtbl.find_all residuals (E.Residual.residual_id r))) ->
+        Hashtbl.add residuals (E.Residual.residual_id r) r;
+        List.iter (fun (_, v) -> sources v) (E.Residual.residual_view r).bindings
+    | E.Fn fn
+      when not (List.exists (( == ) fn) (Hashtbl.find_all functions (E.Residual.function_id fn))) ->
+        Hashtbl.add functions (E.Residual.function_id fn) fn;
+        List.iter (fun (_, v) -> sources v) (E.Residual.function_bindings fn)
+    | E.Record fields | Struct (_, _, fields) | Source (_, _, fields) ->
+        List.iter (fun (_, v) -> sources v) fields
+    | E.List values -> Array.iter sources values
+    | _ -> ()
+  in
+  sources value;
+  List.sort_uniq Int.compare !ids
+
 let is_volatile lowered id = Network.Int_map.mem id lowered.volatile
 
 let same_function a b =
@@ -1251,14 +1291,77 @@ struct
     | Some (n : E.node) -> List.exists (String.starts_with ~prefix:"node:") n.site
     | None -> false
 
+  (* An inlined body's kernels key on its card (declaration cone and canonical parameters), not on
+     the whole authored source, so an edit elsewhere keeps them cached, as the card was. A card
+     whose parameters are not plain data (a live argument) keys on the whole source. *)
+  let card_sources =
+    lazy
+      (let table = Hashtbl.create 16 in
+       Array.iter
+         (fun (n : E.node) ->
+           if n.kind = E.card_kind then
+             match (List.assoc_opt "kind" n.args, List.assoc_opt "parameters" n.args) with
+             | Some (E.Text kind), Some parameters -> (
+                 match
+                   ( List.find_opt
+                       (fun (d : Workspace.node_definition) -> d.kind.qualified = kind)
+                       checked.nodes,
+                     Flow.Value.key_of ~residual:(fun _ -> raise Exit) parameters )
+                 with
+                 | Some definition, key ->
+                     let source =
+                       cached_digest checked [ definition ] (fun () ->
+                           Context_kernel.declaration_source checked definition)
+                     in
+                     Hashtbl.add table
+                       (n.site @ [ "node:" ^ kind ])
+                       (n.iter, lazy (Digest.to_hex (Digest.string (source ^ key))))
+                 | None, _ -> ()
+                 | exception Exit -> ())
+             | _ -> ())
+         evaluated.plan.nodes;
+       table)
+
+  let kernel_source_of = function
+    | Some (n : E.node) when inlined (Some n) || n.kind = E.card_kind -> (
+        (* the innermost card: the site up to its last node: segment *)
+        let rec prefixes acc best = function
+          | [] -> best
+          | segment :: rest ->
+              let acc = acc @ [ segment ] in
+              prefixes acc
+                (if String.starts_with ~prefix:"node:" segment then Some acc else best)
+                rest
+        in
+        let rec is_prefix a b =
+          match (a, b) with [], _ -> true | x :: a, y :: b -> x = y && is_prefix a b | _ -> false
+        in
+        let site =
+          match List.assoc_opt "kind" n.args with
+          | Some (E.Text kind) when n.kind = E.card_kind -> Some (n.site @ [ "node:" ^ kind ])
+          | _ -> prefixes [] None n.site
+        in
+        match site with
+        | None -> kernel_source
+        | Some site -> (
+            match
+              List.find_opt
+                (fun (iter, _) -> is_prefix iter n.iter)
+                (Hashtbl.find_all (Lazy.force card_sources) site)
+            with
+            | Some (_, source) -> source
+            | None -> kernel_source))
+    | _ -> kernel_source
+
   let geometry_arrays_node ?node ?(strict_body = strict_body) ?host ?state ?elems ~operation ~args
       ~sources inputs =
     geometry_arrays_node ~check:strict_body ~profile
       ~strict_body:(strict_body || inlined node)
-      ~reference ~approx:checked.approx ~kernel_source ?host ?state ?elems ~operation ~args ~sources
-      inputs
+      ~reference ~approx:checked.approx ~kernel_source:(kernel_source_of node) ?host ?state ?elems
+      ~operation ~args ~sources inputs
 
-  let structural_node residual captures =
+  let structural_node ?node residual captures =
+    let kernel_source = kernel_source_of node in
     per_context (E.Residual residual) @@ fun specialize ->
     let residual =
       match specialize (E.Residual residual) with E.Residual r -> r | _ -> assert false
@@ -1767,8 +1870,8 @@ struct
       ?(kind = "vec3") ~name ~values ~sources inputs =
     attribute_node ~check:strict_body
       ~strict_body:(strict_body || inlined node)
-      ~reference ~profile ~approx:checked.approx ~gpu ~kernel_source ?state ?elems ?selection
-      ?default ~owner ~kind ~name ~values ~sources inputs
+      ~reference ~profile ~approx:checked.approx ~gpu ~kernel_source:(kernel_source_of node) ?state
+      ?elems ?selection ?default ~owner ~kind ~name ~values ~sources inputs
 
   let group_data = group_data
   and attribute_data = attribute_data
@@ -1776,7 +1879,8 @@ struct
   let group_node ?node ?state ?elems ~args ~sources inputs =
     group_node ~check:strict_body
       ~strict_body:(strict_body || inlined node)
-      ~reference ~profile ~approx:checked.approx ~kernel_source ?state ?elems ~args ~sources inputs
+      ~reference ~profile ~approx:checked.approx ~kernel_source:(kernel_source_of node) ?state
+      ?elems ~args ~sources inputs
 
   let plan = evaluated.plan
 
@@ -1867,7 +1971,7 @@ struct
           (fun id -> Some id <> root)
           (Attribute_kernel.sources
              (if n.kind = "sop/with_group" then group_data n.args else attribute_data n.args))
-    else if n.kind = E.card_kind then Attribute_kernel.sources (List.assoc "value" n.args)
+    else if n.kind = E.card_kind then cooked_sources (List.assoc "value" n.args)
     else
       let direct = geo_of n.args in
       let rec captures = function
@@ -2357,7 +2461,7 @@ struct
     let build inputs =
       match List.assoc "value" args with
       | E.Residual residual ->
-          structural_node residual
+          structural_node ~node residual
             (List.map2 (fun id input -> (id, plan.nodes.(id).ty, input)) sources inputs)
           |> Sop.Node.relabel key
       | _ ->
@@ -2376,6 +2480,44 @@ struct
                    exact = true;
                  }
     in
+    (* the card's fields, for the inspector, handles and display; an edit goes through its text *)
+    let schema node =
+      match
+        ( List.find_opt
+            (fun (d : Workspace.node_definition) -> d.kind.qualified = kind)
+            checked.nodes,
+          List.assoc_opt "parameters" args )
+      with
+      | Some d, Some (E.Record parameters) ->
+          let schema =
+            Lisp_node.schema "parameters" d.fields (Encoded_parameters.for_node checked d)
+          in
+          let values =
+            List.map
+              (fun (name, default) ->
+                ( name,
+                  match (List.assoc_opt name parameters, default) with
+                  | Some (E.Bool b), _ -> Param.Bool_value b
+                  | Some (E.Int n), _ -> Int_value n
+                  | Some (E.Float f), _ -> Float_value f
+                  | Some (E.Text t), Param.Choice_value _ -> Choice_value t
+                  | Some (E.Text t), _ -> Text_value t
+                  | _, value -> value ))
+              (Param.default schema)
+          in
+          let rec attach node =
+            Result.value ~default:node
+              (Sop.Node.Build.parameterize_with_key ~schema ~values
+                 ~rebuild:(fun ~label:_ ~inputs changed ->
+                   (* new inputs keep the card; a new value is an edit of its text *)
+                   if changed = values then Ok (attach (build inputs))
+                   else Error "An inlined card is edited through its text")
+                 node)
+          in
+          attach node
+      | _ -> node
+    in
+    let build inputs = schema (build inputs) in
     let factory =
       Edit.factory ~key:"flow_card" ~label:key ~category:[ "Flow" ] ~arity:(List.length sources)
         (fun inputs -> Ok (build inputs))
@@ -2430,22 +2572,7 @@ struct
             node.args
           else List.map (fun (n, v) -> (n, at_zero v)) node.args
         in
-        let args =
-          if node.kind <> "sop/material" then args
-          else
-            List.concat_map
-              (function
-                | "material", E.Struct ("material/standard", _, fields) ->
-                    let get name default = Option.value ~default (List.assoc_opt name fields) in
-                    [
-                      ("material", get "name" (E.Text ""));
-                      ("color", get "color" (E.Vec3 (1., 1., 1.)));
-                      ("roughness", get "roughness" (E.Float 0.4));
-                      ("emission", get "emission" (E.Vec3 (0., 0., 0.)));
-                    ]
-                | arg -> [ arg ])
-              args
-        in
+        let args = material_args node.kind args in
         let p =
           match native node with
           | Some lower -> lower node args cid
@@ -3125,28 +3252,7 @@ struct
       | E.Deferred (ty, id) when Ty.is_cooked ty -> Some compiled.(id) |> fun root -> (graph, root)
       | No_geo -> (graph, None)
       | E.Residual residual when (E.Residual.residual_view residual).term.ty = Ty.geometry ->
-          let residuals = Hashtbl.create 16 and functions = Hashtbl.create 16 and ids = ref [] in
-          let rec sources = function
-            | E.Deferred (ty, id) when Ty.is_cooked ty -> ids := id :: !ids
-            | E.Residual r
-              when not
-                     (List.exists (( == ) r)
-                        (Hashtbl.find_all residuals (E.Residual.residual_id r))) ->
-                Hashtbl.add residuals (E.Residual.residual_id r) r;
-                List.iter (fun (_, v) -> sources v) (E.Residual.residual_view r).bindings
-            | E.Fn fn
-              when not
-                     (List.exists (( == ) fn)
-                        (Hashtbl.find_all functions (E.Residual.function_id fn))) ->
-                Hashtbl.add functions (E.Residual.function_id fn) fn;
-                List.iter (fun (_, v) -> sources v) (E.Residual.function_bindings fn)
-            | E.Record fields | Struct (_, _, fields) | Source (_, _, fields) ->
-                List.iter (fun (_, v) -> sources v) fields
-            | E.List values -> Array.iter sources values
-            | _ -> ()
-          in
-          sources instance.result;
-          let ids = List.sort_uniq Int.compare !ids in
+          let ids = cooked_sources instance.result in
           let captures =
             List.map
               (fun id ->

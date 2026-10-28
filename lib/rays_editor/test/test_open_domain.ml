@@ -3,6 +3,14 @@ module T = Flow.Ty
 module C = Flow.Context
 module W = Flow.Workspace
 module D = Editor_document.Workspace_doc
+
+(* a plan's authored nodes: an inlined body's own nodes sit under its card's node:kind site *)
+let authored (plan : Flow.Eval.plan) =
+  Array.to_list plan.nodes
+  |> List.filter (fun (n : Flow.Eval.node) ->
+      not (List.exists (String.starts_with ~prefix:"node:") n.site))
+  |> List.length
+
 module P = Flow_graph.Projection
 module M = Pxui_graph.Node_menu
 module L = Rays_editor__.Lisp_text
@@ -370,13 +378,7 @@ let () =
       step [ Input.Text_input "sop/toy_box" ];
       step [ Input.Key_pressed Input.Enter ];
       let after = E.workspace !host in
-      (* authored cards: an inlined body's own nodes sit under its card's node:kind site *)
-      let count =
-        Array.to_list (ok (Flow.Eval.static after.checked)).plan.nodes
-        |> List.filter (fun (n : Flow.Eval.node) ->
-            not (List.exists (String.starts_with ~prefix:"node:") n.site))
-        |> List.length
-      in
+      let count = authored (ok (Flow.Eval.static after.checked)).plan in
       check
         (contains (D.to_text after) "sop/toy_box" && count = 3)
         (Printf.sprintf "host menu did not insert custom operator (%d nodes): %s" count
@@ -389,6 +391,6 @@ let () =
         |> Result.get_ok
       in
       check
-        (Array.length loaded.doc.workspace.lowered.evaluated.plan.nodes = 3)
+        (authored loaded.doc.workspace.lowered.evaluated.plan = 3)
         "preset reload discarded custom operators");
   print_endline (Printf.sprintf "open domain: %d checks passed" !checks)

@@ -341,17 +341,43 @@ invalidates its consumers. Supplied
 function slots retain the whole-source key until their closure identities can
 be narrowed without losing capture or body invalidation.
 
-One public Lisp node owns one ordinary session cache entry and schema-derived
-parameter identity. Its internal graph uses the existing `Session` cooker with
-zero retained entries and bytes: per-cook sharing, payload handling, instance
-materialization, diagnostics and cancellation retain their native semantics.
-Internal nodes do not become independent retained entries in the outer session.
-An unjournaled zero-entry session omits unused persistent cache keys and
-lookups; its per-cook memo and fact checks remain active. Speculative worker
-journals retain semantic keys for ordered parent replay.
-The cook derives read/write/topology facts from the specialized body, so mode
-and parameter changes rebuild the relevant facts. Context dependencies used by
-delegated nodes belong to the public node as well. SOP ownership remains in
+A SOP graph is one program. A call of a Lisp node without callable slots evaluates its body in
+the calling program (`Flow.Eval`, the host's `inline_parameters`), so the region passes see
+across cards; only the native OCaml SOPs are node boundaries. The call keeps the node's
+boundaries: its arguments take the node path (schema changes over the defaults, hard ranges,
+choices, encoded text through the normalizers, `sop/material` values as their fields), its
+validations refuse the lowering as a node build did, an error in its body is that card's cook
+error (the body's nodes are dropped and the card lowers as a node that returns it), and each
+body has its own step budget. Nodes the body makes sit under the card's `node:kind` site and
+compile strictly, as a nested body did; their refusals cook as errors.
+
+Each card is a marker plan node (`Flow.Eval.card_kind`) at the call's site carrying the body's
+value, the kind and the canonical parameters; the call's value is the marker. It lowers to a
+pass-through node (`flow.card`, labelled with the kind key), or, when the body's geometry is
+decided by cooked data, to that body's structural node; either carries the card's schema, so
+the inspector, handles, display, probes, provenance and compiled ids address the card. An edit
+of a card is an edit of its text. The kernels of a body key on the card (its declaration cone
+and canonical parameters), not on the whole authored source, so an edit elsewhere keeps them
+cached; a card with a live argument keys on the source. A network is unchanged for the editor
+only when every node's key is.
+
+A body reads its cook context through reserved inputs (`Context_kernel.label_context`): each
+distinct `sop/context_seed`, `context_frame` or `context_time` call, labelled with the card's
+cook label (its kind key; helpers read it from the evaluation), is a cook-time source that
+residuals capture as a binding. A kernel that captures one declares the Seed, Frame or Time
+dependency and is built per cook context from its specialized data (`Lower.per_context`), so a
+noise seed stays a region constant and seeds equal the specialized node's. `sop/provenance_base`
+is a sentinel the lowering of the body's `sop/concat` replaces by the base it allocates. A
+per-frame argument is passed to the body as it is (a drive inside it, a frame uniform) when its
+field has nothing to canonicalize; a body whose structure follows a per-frame argument, a
+validation that reads one, and a cooked-data argument keep the card a node of its own.
+
+That node (and every factory node, for menus and inspection) owns one ordinary session cache
+entry and schema-derived parameter identity. Its internal graph uses the existing `Session`
+cooker with zero retained entries and bytes: per-cook sharing, payload handling, instance
+materialization, diagnostics and cancellation retain their native semantics. Its cook derives
+read/write/topology facts from the specialized body, so mode and parameter changes rebuild the
+relevant facts, and the context dependencies of delegated nodes belong to it. SOP ownership remains in
 `sop`; the Lisp declaration and lowering stay in `flow_sop`, and `flow` never
 depends on geometry.
 

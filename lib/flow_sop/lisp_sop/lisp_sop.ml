@@ -39,7 +39,16 @@ let restore with_ root =
   in
   go root
 
-let workspace_node_result ?(with_ = []) source =
+(* A Lisp call lowers as its factory node (the node menu's and inspector's), whose parameters,
+   facts and rebuilds these helpers' callers check. *)
+let as_node f =
+  let inline = Atomic.exchange Flow.Eval.inline_nodes false in
+  Fun.protect ~finally:(fun () -> Atomic.set Flow.Eval.inline_nodes inline) f
+
+let rec workspace_node_result ?with_ source =
+  as_node (fun () -> workspace_node_inline ?with_ source)
+
+and workspace_node_inline ?(with_ = []) source =
   let image_name name =
     if String.starts_with ~prefix:"image/" name then
       Some (String.sub name 6 (String.length name - 6))

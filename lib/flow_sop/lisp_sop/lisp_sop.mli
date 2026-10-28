@@ -2,11 +2,11 @@
     lowering the editor uses. *)
 
 val node_result : ?with_:(string * Sop.Node.t) list -> string -> (Sop.Node.t, string) result
-(** [node_result text] lowers the SOP expression [text] (for example
-    ["(-> (sop/grid :columns 8) (sop/dissolve))"]) as the result of a [sop] graph.
-    [~with_:["src", n]] makes [(sop/ext_src)] stand for the existing node [n], for geometry only
-    OCaml can build (see {!snapshot}). A binding ["image/pixels", n] makes [(image/ext_pixels)] an
-    image-typed external. Both kinds retain the original node and its inputs without cooking it
+(** [node_result text] lowers the SOP expression [text], a Lisp call as its factory node (not
+    inlined), (for example ["(-> (sop/grid :columns 8) (sop/dissolve))"]) as the result of a [sop]
+    graph. [~with_:["src", n]] makes [(sop/ext_src)] stand for the existing node [n], for geometry
+    only OCaml can build (see {!snapshot}). A binding ["image/pixels", n] makes [(image/ext_pixels)]
+    an image-typed external. Both kinds retain the original node and its inputs without cooking it
     during checking or lowering. *)
 
 val node : ?with_:(string * Sop.Node.t) list -> string -> Sop.Node.t

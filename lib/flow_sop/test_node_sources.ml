@@ -93,9 +93,10 @@ let () =
     |> Result.get_ok
   in
   let node = lower "false" in
-  assert (Sop.Context.Dependencies.mem Seed (Sop.Node.dependencies node));
+  (* the card cone: its marker over its inlined body *)
+  assert (Sop.Context.Dependencies.mem Seed (Sop.Node.graph_dependencies node));
   let inactive = lower "true" in
-  assert (not (Sop.Context.Dependencies.mem Seed (Sop.Node.dependencies inactive)));
+  assert (not (Sop.Context.Dependencies.mem Seed (Sop.Node.graph_dependencies inactive)));
   let session = Sop.Session.create ~max_entries:16 ~max_payload_bytes:1_000_000 |> Result.get_ok in
   Fun.protect
     ~finally:(fun () -> Sop.Session.close session)

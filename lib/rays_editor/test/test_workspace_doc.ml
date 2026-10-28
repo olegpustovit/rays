@@ -751,16 +751,30 @@ let part_literals () =
         (Doc.to_text next = Doc.to_text { next with source; checked })
         "literal save differs from slow edit";
       let changes = Doc.literal_changes ~previous:old next |> Option.get in
+      (* a literal of a native card patches its node; an inlined Lisp card's literal is part of the
+         one program, which the edit relowers *)
       let patched, phases =
         Flow.Phase_timer.sample ~clock:Unix.gettimeofday (fun () ->
             List.fold_left
               (fun lowered change ->
-                Editor_document.Literal_edit.lower lowered change |> Option.get |> Result.get_ok)
-              !lowered changes)
+                Option.bind lowered (fun lowered ->
+                    Option.map Result.get_ok (Editor_document.Literal_edit.lower lowered change)))
+              (Some !lowered) changes)
       in
-      check
-        (Flow.Phase_timer.calls phases "lower" = 0 && Flow.Phase_timer.calls phases "evaluate" = 0)
-        "literal re-evaluated or re-lowered";
+      let fast = patched <> None in
+      let patched =
+        match patched with
+        | Some patched ->
+            check
+              (Flow.Phase_timer.calls phases "lower" = 0
+              && Flow.Phase_timer.calls phases "evaluate" = 0)
+              "literal re-evaluated or re-lowered";
+            patched
+        | None ->
+            L.of_checked ~factories ~compiled_ids:!lowered.compiled_ids ~sites:!lowered.sites
+              checked
+            |> Result.get_ok
+      in
       let reference =
         L.of_checked ~factories ~compiled_ids:patched.compiled_ids ~sites:patched.sites checked
         |> Result.get_ok
@@ -768,10 +782,11 @@ let part_literals () =
       let same a b =
         Marshal.to_string a [ Marshal.No_sharing ] = Marshal.to_string b [ Marshal.No_sharing ]
       in
-      check
-        (same patched.plan reference.plan
-        && same patched.evaluated.records reference.evaluated.records)
-        "literal plan or probe records differ from full evaluation";
+      if fast then
+        check
+          (same patched.plan reference.plan
+          && same patched.evaluated.records reference.evaluated.records)
+          "literal plan or probe records differ from full evaluation";
       if has (Doc.to_text next) "#0088ff" then
         List.iter2
           (fun (a : L.graph) (b : L.graph) ->
@@ -872,6 +887,9 @@ let part_literals () =
             Editor_document.Literal_edit.lower lowered
               (List.hd (Option.get (Doc.literal_changes ~previous:old next))))
       in
+      (* every card here is a Lisp node: inlined, its literal is part of the one program, so the
+         edit takes the full lowering *)
+      let fallback = fallback || patched = None in
       if fallback then
         check (patched = None)
           "geometry template or retained function did not use the full lowering fallback"
@@ -941,10 +959,17 @@ let part_literals () =
             let e = E3.edit e operation |> Result.get_ok in
             E3.update e (frame [] 1))
       in
+      (* the sphere is an inlined Lisp card: the edit evaluates and lowers the program once *)
       List.iter
         (fun phase ->
           check (Flow.Phase_timer.calls phases phase = 0) ("editor literal repeated " ^ phase))
-        [ "print"; "parse"; "check"; "evaluate"; "lower"; "project"; "layout" ];
+        [ "print"; "parse"; "check"; "project"; "layout" ];
+      List.iter
+        (fun phase ->
+          check
+            (Flow.Phase_timer.calls phases phase <= 1)
+            ("editor literal repeated " ^ phase ^ " twice"))
+        [ "evaluate"; "lower" ];
       let source, checked = full_edit catalog (of_text still) operation |> Result.get_ok in
       let ws = E3.workspace e in
       check (Doc.to_text ws = Doc.to_text { ws with source; checked }) "editor literal save differs");

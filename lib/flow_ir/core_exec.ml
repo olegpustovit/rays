@@ -707,10 +707,17 @@ let prepare ?(remember_loops = false) ?(approx = Flow.Workspace.Paths.empty) ?(f
         let v = constants.(n) in
         fun _ -> v
     | Source value -> (
+        (* a static source read in a loop resolves once per execution, not per element *)
+        let last = Atomic.make None in
         fun st ->
-          match E.Host.force_reference ?resolve:st.resolve value ~live:st.live with
-          | Ok value -> value
-          | Error d -> V.raise_diagnostic d)
+          match Atomic.get last with
+          | Some (owner, resolved) when owner == st -> resolved
+          | _ -> (
+              match E.Host.force_reference ?resolve:st.resolve value ~live:st.live with
+              | Ok resolved ->
+                  Atomic.set last (Some (st, resolved));
+                  resolved
+              | Error d -> V.raise_diagnostic d))
     | Host_source { name; ty; args } -> (
         fun st ->
           let args = List.map (fun (name, index) -> (name, st.values.(index))) args in

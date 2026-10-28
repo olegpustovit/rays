@@ -1151,7 +1151,7 @@ and inline_node c ~form (d : W.node_definition) parameters ~call vals =
       call vals
   | v ->
       st.steps <- steps;
-      card c ~form d v
+      card c ~form d parameters v
   | exception Needs_t ->
       (* a validation that reads a live argument *)
       st.steps <- steps;
@@ -1169,12 +1169,11 @@ and inline_node c ~form (d : W.node_definition) parameters ~call vals =
       st.steps <- steps;
       raise x
 
-(* The card marker: a plan node at the call site naming the card (its path, kind), what the host
-   keys per-card ids, probes, provenance, facts and caching by. A body whose geometry is decided by
-   cooked data (a residual) cooks behind it, one card's structure as before; the call is the marker.
-   Otherwise the marker is a side node and the call is the body's own result, so the program
-   continues through it. *)
-and card c ~form (d : W.node_definition) v =
+(* The card marker: a plan node at the call site naming the card (its path, kind, canonical
+   parameters), what the host keys per-card ids, display, probes, provenance, facts and caching by;
+   the call's value is the marker. A body whose geometry is decided by cooked data (a residual)
+   cooks behind it, one card's structure as before; otherwise it passes the body's result through. *)
+and card c ~form (d : W.node_definition) parameters v =
   let marker () =
     let st = c.st in
     let n =
@@ -1185,7 +1184,7 @@ and card c ~form (d : W.node_definition) v =
         iter = c.iter;
         kind = card_kind;
         ty = Ty.geometry;
-        args = [ ("value", v); ("kind", Text d.kind.qualified) ];
+        args = [ ("value", v); ("kind", Text d.kind.qualified); ("parameters", Record parameters) ];
       }
     in
     st.nodes <- n :: st.nodes;
@@ -1197,9 +1196,7 @@ and card c ~form (d : W.node_definition) v =
   else
     match v with
     | Residual r when r.rterm.W.ty = Ty.geometry -> marker ()
-    | Deferred (ty, _) when ty = Ty.geometry ->
-        ignore (marker ());
-        v
+    | Deferred (ty, _) when ty = Ty.geometry -> marker ()
     | _ -> v
 
 and apply_def ?body c name (vals : value list) : value =
@@ -1892,7 +1889,7 @@ and graph_value ?(rec_ = true) c name over =
 (* ---- entry points ---- *)
 
 let diagnostic code msg span = Diagnostic.error ?span ~code msg
-let inline_nodes = Atomic.make false
+let inline_nodes = Atomic.make true
 let inline_parameters = Atomic.make (fun _ d -> (d, fun vals -> Some vals))
 
 (* ponytail: a node with callable slots still lowers as its own nested workspace *)

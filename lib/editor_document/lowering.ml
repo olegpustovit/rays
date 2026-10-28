@@ -693,7 +693,10 @@ let same_network (a : Document.network) (b : Document.network) =
   let same (a : Edit.node_info) (b : Edit.node_info) =
     a.id = b.id && a.operation = b.operation && a.label = b.label && a.inputs = b.inputs
     && (a.node == b.node
-       || List.map
+       ||
+       (* a kernel node (an inlined card's body) has no fields: its identity is its key *)
+       String.equal a.parameters b.parameters
+       && List.map
             (fun (f : Param.field_view) -> (f.name, f.current))
             (Sop.Node.parameter_fields a.node)
           = List.map

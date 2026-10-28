@@ -1501,23 +1501,25 @@ let editor_literal_scrub () =
                   [ Input.Pointer_moved (nx +. dx, ny) ])
             |> snd
           in
-          let first = drag 10. in
-          List.iter
-            (fun phase ->
-              check (Flow.Phase_timer.calls first phase = 0) ("text token scrub ran " ^ phase))
-            [ "print"; "parse"; "check"; "evaluate"; "lower"; "project"; "layout" ];
-          let next = drag 20. in
-          List.iter
-            (fun phase ->
-              check
-                (Flow.Phase_timer.calls next phase = 0)
-                ("repeated text token scrub ran " ^ phase))
-            [ "print"; "parse"; "check"; "evaluate"; "lower"; "project"; "layout" ];
-          let wider = drag 220. in
-          List.iter
-            (fun phase ->
-              check (Flow.Phase_timer.calls wider phase = 0) ("wider text token scrub ran " ^ phase))
-            [ "print"; "parse"; "check"; "evaluate"; "lower"; "project"; "layout" ];
+          (* a scrub never reprints, reparses, rechecks, reprojects or relays out; an inlined card
+             (its body is part of the one program) evaluates and lowers it once *)
+          let scrubbed sample what =
+            List.iter
+              (fun phase ->
+                check
+                  (Flow.Phase_timer.calls sample phase = 0)
+                  (what ^ " text token scrub ran " ^ phase))
+              [ "print"; "parse"; "check"; "project"; "layout" ];
+            List.iter
+              (fun phase ->
+                check
+                  (Flow.Phase_timer.calls sample phase <= 1)
+                  (what ^ " text token scrub ran " ^ phase ^ " twice"))
+              [ "evaluate"; "lower" ]
+          in
+          scrubbed (drag 10.) "a";
+          scrubbed (drag 20.) "repeated";
+          scrubbed (drag 220.) "wider";
           let valid = E.workspace !env in
           check
             ((Flow_graph.Flow_edit.arg_text valid.source [ "g"; "a" ] (Kw "points") |> Option.get)

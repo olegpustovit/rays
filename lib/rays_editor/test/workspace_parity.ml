@@ -33,13 +33,21 @@ let equal a b =
   | Error a, Error b -> Diagnostic.to_string a = Diagnostic.to_string b
   | _ -> false
 
+(* The authored program's values. An inlined card's body (its marker's value, the nodes and records
+   under its node:kind site) is the Lisp node's own, which the golden replay checks. *)
 let values (e : E.t) =
+  let body path = List.exists (String.starts_with ~prefix:"node:") path in
   List.map snd e.results @ e.states
-  @ Array.fold_right (fun (n : E.node) acc -> List.map snd n.args @ acc) e.plan.nodes []
+  @ Array.fold_right
+      (fun (n : E.node) acc ->
+        if body n.site || n.kind = E.card_kind then acc else List.map snd n.args @ acc)
+      e.plan.nodes []
   @ Array.fold_right
       (fun (i : E.instance) acc -> (i.result :: List.map snd i.inputs) @ acc)
       e.plan.instances []
-  @ List.concat_map (fun (_, records) -> List.map snd records) e.records
+  @ List.concat_map
+      (fun (path, records) -> if body path then [] else List.map snd records)
+      e.records
 
 let signature (e : E.t) =
   ( Array.map
@@ -116,7 +124,8 @@ let qualify ~name (workspace : Editor_document.Workspace_doc.t) =
           match I.Packed.compile_result ~fusion residual view.term with
           | Error _ -> false
           | Ok packed ->
-              let expected = I.Packed.gpu_refusals packed = [] in
+              (* the emitter's own predicate: GPU kernels contract FMAs (fused) *)
+              let expected = I.Packed.gpu_refusals ~fused:true packed = [] in
               let emitted =
                 match Flow_gpu.Emit.kernel packed with Ok _ -> true | Error _ -> false
               in

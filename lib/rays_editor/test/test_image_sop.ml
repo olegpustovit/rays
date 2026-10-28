@@ -118,7 +118,11 @@ let () =
   Fun.protect
     ~finally:(fun () -> Session.close session)
     (fun () ->
-      let output = ok (Session.cook session ~context:(ok (Context.create ())) node) in
+      let output =
+        match Session.cook session ~context:(ok (Context.create ())) node with
+        | Ok output -> output
+        | Error d -> failwith (Diagnostic.error_to_string d)
+      in
       let geometry = ok (Payload.geometry output.payload) in
       let attr =
         Option.get (Rdk.Geometry.find_attribute ~owner:Rdk.Attribute.Point "sample" geometry)

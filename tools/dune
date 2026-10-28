@@ -101,6 +101,21 @@
  (libraries flow flow_ir input rays_math unix parallel))
 
 (executable
+ (enabled_if
+  (= %{system} macosx))
+ (name bench_sop_cook)
+ (modules bench_sop_cook)
+ (libraries
+  sop
+  flow
+  flow_sop
+  editor_document
+  rays_editor
+  ogpu_mock
+  unix
+  parallel))
+
+(executable
  (name bench_marks)
  (modules bench_marks)
  (libraries flow rays_editor flow_native input ogpu_mock unix parallel))
