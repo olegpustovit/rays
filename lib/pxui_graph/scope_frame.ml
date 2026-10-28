@@ -269,7 +269,14 @@ let paint_frame (t : t) ui ~z ~fs ~layer ~canvas ~(canvas_signal : Ui.signal) ~t
      | None -> ()));
   drawn_items, drawn_zones
 
-let context_step (t : t) ui ~emit ~tiles ~(canvas_signal : Ui.signal) =
+(* a gesture step returns the changes it asks for with the state it leaves *)
+let collect f =
+  let acc = ref [] in
+  let t = f (fun c -> acc := c :: !acc) in
+  t, List.rev !acc
+
+let context_step (t : t) ui ~tiles ~(canvas_signal : Ui.signal) =
+  collect @@ fun emit ->
   (* the context menu *)
   let t = match t.context with
     | Some _ -> t
@@ -295,7 +302,9 @@ let context_step (t : t) ui ~emit ~tiles ~(canvas_signal : Ui.signal) =
              { t with context = None }) in
   t
 
-let tile_gestures (t : t) ui ~z ~emit ~lens_next ~finish_wire ~tiles =
+let tile_gestures (t : t) ui ~z ~finish_wire ~tiles =
+  let lens_next = ref t.lens in
+  let t, changes = collect @@ fun emit ->
   let left = left_button in
   (* tile presses select and start a move; sockets start a wire *)
   let t = List.fold_left (fun t ((p : P.placed), _, _, tile, (s : Ui.signal), (sub : _), fields) ->
@@ -386,13 +395,15 @@ let tile_gestures (t : t) ui ~z ~emit ~lens_next ~finish_wire ~tiles =
         else t in
       if bs.released && left bs then begin
         match t.drag with
-         | Some (Wiring w) -> finish_wire t w ~src_path:p.path ~release_point:bs.release_point
+         | Some (Wiring w) -> finish_wire ~emit t w ~src_path:p.path ~release_point:bs.release_point
          | _ -> { t with drag = None }
       end else t) t outs in
     t) t tiles in
-  t
+  t in
+  t, changes, !lens_next
 
 let wire_pull (t : t) ui ~finish_wire ~hits ~wires_in_view =
+  collect @@ fun emit ->
   let left = left_button in
   (* a wire pulled past 6 points is a new wire from its source: the same drag as from the out-port *)
   let t = if Option.is_some t.drag || t.context <> None then t else
@@ -423,7 +434,7 @@ let wire_pull (t : t) ui ~finish_wire ~hits ~wires_in_view =
           let s = Ui.signal ui b in if s.released && left s then Some (t.geo.wires.(i), s.release_point) else None) (hits i)) wires_in_view in
         (match from_wire with
          | Some (wire, release_point) ->
-             finish_wire t w ~src_path:(Option.value ~default:[] wire.from) ~release_point
+             finish_wire ~emit t w ~src_path:(Option.value ~default:[] wire.from) ~release_point
          | None -> t)
     | _ -> t in
   t
@@ -481,7 +492,8 @@ let finish_wire ui ~z ~mouse ~emit ~tiles (t : t) (w : wiring) ~src_path ~releas
      { t with drag = None; selected = if on_canvas then Path_set.singleton src_path else t.selected }
 
 (* the pointer: pan, a press on a wire or the canvas, the rubber band *)
-let pointer_step (t : t) ui (frame : Frame.t) ~emit ~canvas ~(canvas_signal : Ui.signal) ~tiles ~hits ~wires_in_view =
+let pointer_step (t : t) ui (frame : Frame.t) ~canvas ~(canvas_signal : Ui.signal) ~tiles ~hits ~wires_in_view =
+  collect @@ fun emit ->
   (* interactions *)
   let left (s : Ui.signal) = s.button = Some Input.LeftButton in
   let non_left_pressed (s : Ui.signal) = s.pressed && s.button <> Some Input.LeftButton && s.button <> None in
@@ -567,7 +579,8 @@ let hover_step (t : t) ui ~z ~mouse ~tiles ~hits ~wires_in_view =
   let t = { t with hovered_row; highlighted = !highlighted } in
   t, hover
 
-let frames_step (t : t) ui ~z ~emit ~edit_field ~canvas =
+let frames_step (t : t) ui ~z ~edit_field ~canvas =
+  collect @@ fun emit ->
   let local (x, y) = x -. float t.x, y -. float t.y in
   (* frames: a title strip, a delete cross and a resize corner, over the tiles (a zone's tile
      covers its whole body) and clear of the nodes, which keep 12 points inside the frame *)
@@ -1066,24 +1079,25 @@ let update ?(pressed = []) t ui (frame : Frame.t) =
     List.map (build_tile t ui ~z ~fs ~wire_boxes ~edit_field ~finished ~opened) visible) in
   let t = if !finished then { t with editing = None } else t in
   Option.iter emit (drop_change t ui canvas tiles);
-  let t = frames_step t ui ~z ~emit ~edit_field ~canvas in
+  let t, frame_changes = frames_step t ui ~z ~edit_field ~canvas in
+  List.iter emit frame_changes;
   let t = if !finished then { t with editing = None } else t in
   let t = match !opened with Some _ as editing -> { t with editing } | None -> t in
   let t, hover = hover_step t ui ~z ~mouse ~tiles ~hits ~wires_in_view in
-  let t = pointer_step t ui frame ~emit ~canvas ~canvas_signal ~tiles ~hits ~wires_in_view in
-  let lens_next = ref t.lens in
+  let t, pointer_changes = pointer_step t ui frame ~canvas ~canvas_signal ~tiles ~hits ~wires_in_view in
+  List.iter emit pointer_changes;
   (* a wire let go: on an input row it connects; on empty canvas it opens the add menu after its
      source (pulled off an existing wire, the host inserts the new node on the selected wire) *)
-  let finish_wire = finish_wire ui ~z ~mouse ~emit ~tiles in
-
-  let t = wire_pull t ui ~finish_wire ~hits ~wires_in_view in
-  let t = tile_gestures t ui ~z ~emit ~lens_next ~finish_wire ~tiles in
-  let t = context_step t ui ~emit ~tiles ~canvas_signal in
+  let finish_wire = finish_wire ui ~z ~mouse ~tiles in
+  let t, pull_changes = wire_pull t ui ~finish_wire ~hits ~wires_in_view in
+  let t, gesture_changes, lens_next = tile_gestures t ui ~z ~finish_wire ~tiles in
+  let t, context_changes = context_step t ui ~tiles ~canvas_signal in
+  List.iter emit (pull_changes @ gesture_changes @ context_changes);
   let drawn_items, drawn_zones = paint_frame t ui ~z ~fs ~layer ~canvas ~canvas_signal ~tiles ~zones
     ~wires_in_view ~footers ~chain ~mouse ~hover in
   let t = { t with stats = { t.stats with drawn_items; drawn_zones } } in
   (* an opened or stepped expansion panel changes its card's size: lay out again for the next frame *)
-  let t = if !lens_next == t.lens then t else relayout { t with lens = !lens_next } in
+  let t = if lens_next == t.lens then t else relayout { t with lens = lens_next } in
   t, List.rev !changes
 
 (* ------------------------------------------------------------- test hooks *)
