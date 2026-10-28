@@ -1001,3 +1001,8 @@ let destroy t =
     ];
   Array.iter (fun film -> release (fun () -> B.destroy_texture film)) t.outputs;
   Renderer.release_gpu t.lease
+
+module Private = struct
+  let max_total_threads t =
+    Result.map (fun (pipeline, _) -> B.max_total_threads pipeline) (pipeline_for t.library t.pipelines t.gpu.shape)
+end
