@@ -2,10 +2,9 @@ open Rays
 open Rdk
 open Rdk_test_support
 
-let get_ok = get
 
 let attribute owner name storage =
-  Attribute.create_owned ~owner ~name storage |> get_ok
+  Attribute.create_owned ~owner ~name storage |> get
 
 let edge_group_of_pairs topology name pairs =
   let index = Topology_index.create topology in
@@ -23,9 +22,9 @@ let geometry_owned positions vertex_points primitive_offsets =
   and y = Array.map (fun (_, y, _) -> y) positions
   and z = Array.map (fun (_, _, z) -> z) positions in
   let topology = Topology.polygons_owned ~point_count ~vertex_points
-      ~primitive_offsets |> get_ok in
+      ~primitive_offsets |> get in
   Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
-    ~topology () |> get_ok
+    ~topology () |> get
 
 let vertex_points geometry =
   (Topology.View.view (Geometry.topology geometry)).vertex_points
@@ -86,9 +85,9 @@ let decorated_quad () =
   let flip = edge_group_of_pairs topology "flip" [|0,2|]
   and border = edge_group_of_pairs topology "border" [|0,1;1,2|] in
   let corner = Group.ordered ~owner:Group.Vertex ~name:"corner"
-      ~length:6 [|0;2;4|] |> get_ok in
+      ~length:6 [|0;2;4|] |> get in
   let rows = Packed.Int_array.create_owned ~offsets:[|0;1;3;3;4;6;7|]
-      ~values:[|0;1;2;3;4;5;6|] |> get_ok in
+      ~values:[|0;1;2;3;4;5;6|] |> get in
   Geometry.create ~positions:(Geometry.positions base) ~topology
     ~attributes:[
       attribute Attribute.Point "id" (Attribute.Int [|10;11;12;13|]);
@@ -102,7 +101,7 @@ let decorated_quad () =
         [|1.;1.;1.;1.;1.;1.|]);
       attribute Attribute.Primitive "material" (Attribute.Text [|"a";"b"|]);
       attribute Attribute.Detail "meta" (Attribute.Int [|42|]);
-    ] ~groups:[corner] ~edge_groups:[flip;border] () |> get_ok
+    ] ~groups:[corner] ~edge_groups:[flip;border] () |> get
 
 let disconnected_triangle_pairs count =
   let points = count * 4 and vertices = count * 6 in
@@ -120,9 +119,9 @@ let disconnected_triangle_pairs count =
     vertex_points.(v + 4) <- p + 2; vertex_points.(v + 5) <- p + 3
   done;
   let topology = Topology.polygons_owned ~point_count:points ~vertex_points
-      ~primitive_offsets:offsets |> get_ok in
+      ~primitive_offsets:offsets |> get in
   let positions = Packed.Float3.View.of_owned_exn ~x ~y ~z in
-  let geometry = Geometry.create ~positions ~topology () |> get_ok in
+  let geometry = Geometry.create ~positions ~topology () |> get in
   let index = Topology_index.create topology in
   let edges = Edge_group.init ~grain:127 ~topology ~index ~name:"flip"
       (fun edge ->

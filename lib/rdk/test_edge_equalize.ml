@@ -2,7 +2,6 @@ open Rays
 open Rdk
 open Rdk_test_support
 
-let get_ok = get
 
 let geometry_owned ~kinds positions vertex_points primitive_offsets =
   let positions = Array.of_list positions in
@@ -11,9 +10,9 @@ let geometry_owned ~kinds positions vertex_points primitive_offsets =
   and y = Array.map (fun (_, y, _) -> y) positions
   and z = Array.map (fun (_, _, z) -> z) positions in
   let topology = Topology.create_owned ~point_count ~vertex_points
-      ~primitive_offsets ~primitive_kinds:kinds |> get_ok in
+      ~primitive_offsets ~primitive_kinds:kinds |> get in
   Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
-    ~topology () |> get_ok
+    ~topology () |> get
 
 let disjoint () = geometry_owned
     ~kinds:(Array.make 3 Topology.Open_polyline)
@@ -52,8 +51,8 @@ let many_disjoint edge_count =
   let topology = Topology.create_owned ~point_count
       ~vertex_points:(Array.init point_count Fun.id)
       ~primitive_offsets:(Array.init (edge_count + 1) (fun edge -> edge * 2))
-      ~primitive_kinds:(Array.make edge_count Topology.Open_polyline) |> get_ok in
-  Geometry.create ~positions ~topology () |> get_ok
+      ~primitive_kinds:(Array.make edge_count Topology.Open_polyline) |> get in
+  Geometry.create ~positions ~topology () |> get
 
 let many_chains count =
   let point_count = count * 3 in
@@ -69,8 +68,8 @@ let many_chains count =
   let topology = Topology.create_owned ~point_count
       ~vertex_points:(Array.init point_count Fun.id)
       ~primitive_offsets:(Array.init (count + 1) (fun chain -> chain * 3))
-      ~primitive_kinds:(Array.make count Topology.Open_polyline) |> get_ok in
-  Geometry.create ~positions ~topology () |> get_ok
+      ~primitive_kinds:(Array.make count Topology.Open_polyline) |> get in
+  Geometry.create ~positions ~topology () |> get
 
 let all_edge_lengths geometry =
   let p = positions geometry and index = Topology_index.create
