@@ -16,7 +16,6 @@ let wire_color background =
   if lightness >= 128000 then Rays_math.Color.hex_exn "#285f77"
   else Rays_math.Color.hex_exn "#bed7e1"
 
-let wire_mesh = Rdk_rays.Geometry_view.wire_mesh
 
 let label = function Path_traced -> "Path traced" | Raster -> "Raster" | Wireframe -> "Wireframe"
 let of_label = function "Path traced" -> Some Path_traced | "Raster" -> Some Raster

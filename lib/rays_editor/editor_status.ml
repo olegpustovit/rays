@@ -9,7 +9,9 @@ open Editor_setup
 
 (* the open dialog, for the crash report *)
 let prompt_name value = match value.prompt with
-  | None -> "-" | Some Keys -> "keys" | Some (Saving _) -> "save preset" | Some (Palette _) -> "commands" | Some (Jumping _) -> "jump" | Some (Symbols _) -> "go to symbol" | Some (Referencing _) -> "references" | Some (Going _) -> "go to line" | Some (Picking _) -> "panel kind" | Some (Splitting _) -> "split"
+  | None -> "-" | Some Keys -> "keys" | Some (Saving _) -> "save preset" | Some (Palette _) -> "commands" | Some (Jumping _) ->
+    "jump" | Some (Symbols _) -> "go to symbol" | Some (Referencing _) -> "references" | Some (Going _) ->
+    "go to line" | Some (Picking _) -> "panel kind" | Some (Splitting _) -> "split"
   | Some (Browsing _) -> "presets" | Some (Making_macro _) -> "make macro"
 
 let level_name value = match pane_level value with
@@ -95,7 +97,8 @@ let probe_caption value = match pane_laid value, Pxui_graph.Scope.selected (pane
 let status_box value ui (frame : Frame.t) ~render_status ~error_status ~context =
   let g = geometry value value.workspace frame in
   (* the pane really in use: the focus when a leaf of its kind is open, else the first leaf *)
-  let focus = match List.exists (fun (l : Pxui_shell.Layout.leaf) -> Editor_commands.scope l.panel = Editor_commands.scope value.focus) g.leaves, g.leaves with
+  let focus = match List.exists (fun (l : Pxui_shell.Layout.leaf) -> Editor_commands.scope l.panel = Editor_commands.scope
+    value.focus) g.leaves, g.leaves with
     | false, l :: _ -> l.panel | _ -> value.focus in
   let value = { value with focus } in
   let x, y, width, height = g.status_at in

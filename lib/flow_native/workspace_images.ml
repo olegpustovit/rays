@@ -357,7 +357,8 @@ let rec resolve ?gpu ?context t ~display ~state ~live (plan:E.plan) value =
            else Option.fold ~none:false ~some:(fun cpu->valid cpu.stamp)entry.cpu)->Ok entry
         |_->
           let reserved=previous=None in
-          let* ()=if reserved && List.length t.entries+request.pending_images>=64 then Error(error "A workspace owns at most 64 image snapshots.")else Ok()in
+          let* ()=if reserved && List.length t.entries+request.pending_images>=64 then
+            Error(error "A workspace owns at most 64 image snapshots.")else Ok()in
           if reserved then request.pending_images<-request.pending_images+1;
           Fun.protect ~finally:(fun()->if reserved then request.pending_images<-request.pending_images-1)(fun()->
           let entry=match previous with Some entry->entry|None->
@@ -411,7 +412,8 @@ let rec resolve ?gpu ?context t ~display ~state ~live (plan:E.plan) value =
                 publish t key entry ~width ~height ~source)
           end else if node.kind="image/render"then begin
               let width=int "width" (fst live.Input.size)and height=int "height" (snd live.size)in
-              if width<=0||height<=0||width>Sys.max_string_length/4/height then Error(error "Image dimensions exceed native storage bounds.")else
+              if width<=0||height<=0||width>Sys.max_string_length/4/height then Error(error
+                "Image dimensions exceed native storage bounds.")else
               let drawing=List.assoc "drawing" args in
               let* prepared=match t.drawings.(id)with Some p->Ok p|None->
                 Result.map(fun p->t.drawings.(id)<-Some p;p)(Drawing.prepare plan drawing)in
@@ -510,8 +512,10 @@ let image ?gpu ?(display=true) t ~state ~live plan value=
     |None->let key=fst(List.find(fun(_,candidate)->candidate==entry)t.entries)in
         Workspace_resources.image t.resources key(fun()->Image.upload_rgba ~width ~height ~rgba:(bytes_of_image cpu.payload)())in
   entry.image<-Some image;entry.texture<-Some(texture cpu.payload);entry.display<-Some cpu.stamp;Ok image
-let payload t ?gpu ?context plan ~state ~live value=Result.map(fun entry->(Option.get entry.cpu).payload)(resolve ?gpu ?context t ~display:false ~state ~live plan value)
-let texture ?gpu t ~state ~live plan value=Result.bind(resolve ?gpu t ~display:true ~state ~live plan value)(fun entry->message(Lazy.force(Option.get entry.texture)))
+let payload t ?gpu ?context plan ~state ~live value=Result.map(fun entry->(Option.get entry.cpu).payload)(resolve
+  ?gpu ?context t ~display:false ~state ~live plan value)
+let texture ?gpu t ~state ~live plan value=Result.bind(resolve ?gpu t ~display:true ~state ~live plan
+  value)(fun entry->message(Lazy.force(Option.get entry.texture)))
 let close t=
   List.iter(fun(_,entry)->Option.iter(destroy_canvas t)entry.canvas)t.entries;
   t.plan<-None;t.qualification<-None;t.arguments<-[||];t.drawings<-[||];

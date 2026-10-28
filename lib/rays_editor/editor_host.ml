@@ -245,7 +245,8 @@ let reload_failed value ~name text diagnostics =
         | Some line -> Printf.sprintf ": line %d, %s" line d.Diagnostic.message
         | None -> ": " ^ d.Diagnostic.message) in
   { value with notice = Some (Refusal, Printf.sprintf "%s not reloaded%s" name first);
-    text = { value.text with tab = Text_pane.Document; draft = Some text; doc_base = Some (value.doc.workspace.ws); doc_errors = { at = text; found = diagnostics } } }
+    text = { value.text with tab = Text_pane.Document; draft = Some text; doc_base = Some (value.doc.workspace.ws);
+      doc_errors = { at = text; found = diagnostics } } }
 
 (* The carry's hovered viewport has been looked at by the host: the surface under the pointer
    (the object it belongs to and the material graph its primitive reads) is where a material goes,

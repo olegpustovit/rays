@@ -88,7 +88,7 @@ let rec worker_loop value applied =
       let request = Option.get value.pending in
       value.pending <- None;
       value.active <- Some {
-        started = Unix.gettimeofday ();
+        started = Session.now value.session;
         cancel = Context.cancel_token request.context;
       };
       Some request)
@@ -98,9 +98,9 @@ let rec worker_loop value applied =
   | Some request ->
       if request.volatile != applied then
         Session.set_volatile value.session request.volatile;
-      let started = Unix.gettimeofday () in
+      let started = Session.now value.session in
       let result = execute value.session request in
-      let seconds = max 0. (Unix.gettimeofday () -. started) in
+      let seconds = max 0. (Session.now value.session -. started) in
       with_lock value (fun () ->
         value.active <- None;
         if not value.stopping && request.id = value.latest_id then
@@ -113,6 +113,8 @@ let rec worker_loop value applied =
       worker_loop value request.volatile
 
 let none_volatile _ = false
+
+let set_clock value clock = Session.set_clock value.session clock
 
 let create ~max_entries ~max_payload_bytes =
   Result.map (fun session ->
@@ -191,7 +193,7 @@ let status value = with_lock value (fun () ->
   | None, None -> Idle
   | Some active, pending -> Cooking {
       request_id = value.latest_id;
-      seconds = max 0. (Unix.gettimeofday () -. active.started);
+      seconds = max 0. (Session.now value.session -. active.started);
       queued = Option.is_some pending;
     }
   | None, Some pending -> Cooking {

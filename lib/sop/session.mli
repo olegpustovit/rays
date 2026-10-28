@@ -38,6 +38,11 @@ type output = {
 
 val create : max_entries:int -> max_payload_bytes:int -> (t, string) result
 
+val set_clock : t -> (unit -> float) -> unit
+(** Replace the wall clock behind node timings (default [Unix.gettimeofday]). *)
+
+val now : t -> float
+
 val set_volatile : t -> (int -> bool) -> unit
 (** [set_volatile session predicate] (by node id; default none) marks nodes whose cache key changes
     every cook (time-driven nodes and what is downstream of them). A volatile

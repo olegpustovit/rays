@@ -253,7 +253,8 @@ type 'prepared t = {
   probes : int Layout_by_path.Path_map.t;  (* the iteration each zone shows: view state, not history *)
   previews : preview Document.Int_map.t;  (* viewport requests, outside the document and history *)
   viewed : (Flow_sop.Network.t * int) Document.Int_map.t;
-  canvas_preview : preview option;  (* the drawing or image node the canvas panes show instead of their own picture; view state, outside the document and history *)
+  canvas_preview : preview option;  (* the drawing or image node the canvas panes show instead of their own picture; view state,
+    outside the document and history *)
   canvas_viewed : (Flow.Ty.t * int) option;  (* its plan node and type, resolved by [sync_views] *)
   view_key : (Flow_sop.Lower.t * int Layout_by_path.Path_map.t * preview Document.Int_map.t * preview option) option;
   lit : lit_cache option;  (* the highlight of the selected node at the probes, see {!lit_tags} *)
@@ -294,11 +295,13 @@ type 'prepared t = {
   carry : 'prepared carry option;
   carry_budget : float;  (* seconds a carry's preview may take to apply or cook before it is only described *)
   clock : unit -> float;  (* wall seconds, for the carry budget, the probe rate and phase timings; injected *)
-  traces : (string * trace) list;  (* what each traced viewport's readout says: the film, the samples, the bounces and the seconds the accumulation took *)
+  traces : (string * trace) list;  (* what each traced viewport's readout says: the film, the samples,
+    the bounces and the seconds the accumulation took *)
   file : string;  (* what the status strip calls the document: its source file, else its name *)
   gates : (string * (int * int * int * int)) list;  (* the render frame of each viewport that shows less than its pane *)
   selected_box : (string * (int * int * int * int) * string) option;  (* the selected object in the focused view: its screen box and name *)
-  view_tools : (bool * int) option;  (* the active viewport's header: looking through, and its renderer (0 solid, 1 wire, 2 traced); none for a 2D view *)
+  view_tools : (bool * int) option;  (* the active viewport's header: looking through, and its renderer (0 solid, 1 wire, 2 traced);
+    none for a 2D view *)
   (* each traced viewport's header text (resolution, film step, samples), set by the host after
      it renders: view state, not history *)
 }

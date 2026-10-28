@@ -151,8 +151,6 @@ module Private : sig
       settings) plus the environment view. Only workspace documents save. *)
   module Preset : sig
     type loaded = { doc : Document.t; view : Flow.Syntax.t }
-    val sanitize : string -> string
-    val default_name : now:float -> string
     val path : directory:string -> name:string -> string
     val save : directory:string -> name:string -> doc:Document.t ->
       view:Flow.Syntax.t -> (string, string) result
@@ -236,7 +234,6 @@ module Private : sig
     type names = { graphs : string list; materials : string list; cameras : string list; layouts : string list }
     (** What the document knows beyond the text shown: every graph, the material graphs, the
         cameras of the scene, the layout names (the values of [:material], [:camera], [:active]). *)
-    val no_names : names
     val complete : ?names:names -> ?imports:(string * string) list -> vocab -> string -> int -> Pxui.Ui.completion list
     (** The ranked completions for the token ending at the caret. *)
     val ref_at : string -> int -> string option
@@ -307,7 +304,7 @@ module Private : sig
       framed : bounds option option;
     }
     val create : prepare:(Settings.t -> Sop.Session.output -> ('a, string) result) ->
-      seed:int64 -> grain:int -> ?domains:int -> ?await:bool -> max_entries:int ->
+      seed:int64 -> grain:int -> ?domains:int -> ?await:bool -> ?clock:(unit -> float) -> max_entries:int ->
       max_payload_bytes:int -> unit -> ('a t, string) result
     (** [await] (default: false) makes [update] block on
         the cook it submits, so a fixed-step run shows exactly frame n. *)
@@ -345,9 +342,6 @@ module Renderer : sig
     default:t -> get:('record -> t) -> set:(t -> 'record -> 'record) ->
     'record Param.field
   (** The ["renderer"] field labelled "Renderer". *)
-
-  val wire_mesh : Rdk.Geometry.t -> (Rays.Mesh.t, string) result
-  (** Every polygon edge once, as a line mesh for the wireframe renderer. *)
 
   val wire_color : Rays_math.Color.t -> Rays_math.Color.t
   (** A contrasting blue wire color for a light or dark viewport background. *)

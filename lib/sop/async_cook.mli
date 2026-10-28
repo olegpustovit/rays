@@ -30,6 +30,9 @@ type 'a t
 val create :
   max_entries:int -> max_payload_bytes:int -> ('a t, string) result
 
+val set_clock : 'a t -> (unit -> float) -> unit
+(** The wall clock behind cook timings (default [Unix.gettimeofday]). *)
+
 val submit :
   'a t ->
   context:Context.t ->

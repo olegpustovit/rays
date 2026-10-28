@@ -601,6 +601,7 @@ module Lowerer (P : sig
   val strict_body : bool
   val defer_body_errors : bool
   val kernel_bindings : (E.fn * int) list
+  val clock : unit -> float
   val on_profile : (Flow_ir.Profile.t -> unit) option
   val compiled_ids : int Path_map.t
   val sites : Workspace.path list
@@ -609,7 +610,7 @@ module Lowerer (P : sig
   val lower_checked :
     factories:Edit.factory list -> ?provenance_tags:bool -> ?reference:bool -> ?gpu:Flow_ir.Gpu.config ->
     ?strict_body:bool -> ?defer_body_errors:bool -> ?kernel_bindings:(E.fn * int) list ->
-    ?on_profile:(Flow_ir.Profile.t -> unit) -> ?compiled_ids:int Path_map.t -> ?sites:Workspace.path list ->
+    ?clock:(unit -> float) -> ?on_profile:(Flow_ir.Profile.t -> unit) -> ?compiled_ids:int Path_map.t -> ?sites:Workspace.path list ->
     ?inputs:(string * (string * Eval.value) list) list -> Workspace.t -> (t, Diagnostic.t) result
 end) = struct
   open P
@@ -626,7 +627,7 @@ end) = struct
       | Ok evaluated -> evaluated
       | Error diagnostic when defer_body_errors -> raise (Diagnostic.Error diagnostic)
       | Error diagnostic -> raise (Diagnostic.Error diagnostic)
-    let profile = Flow_ir.Profile.create ~clock:Unix.gettimeofday
+    let profile = Flow_ir.Profile.create ~clock
     (* Kernel bodies are cache inputs as well as their captures. The digest is
        lazy so ordinary catalog edits retain their existing pipeline counts.
        ponytail: the whole source invalidates kernels; narrow to body/defn cones
@@ -1605,27 +1606,27 @@ let dynamic = ref [] in
         approx = checked.approx; approx_reasons = checked.approx_reasons; profile; preview}
 end
 
-let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) ?(gpu=Flow_ir.Gpu.default) ?(strict_body = false) ?(defer_body_errors = false) ?(kernel_bindings = []) ?on_profile ?(compiled_ids = Path_map.empty)
+let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) ?(gpu=Flow_ir.Gpu.default) ?(strict_body = false) ?(defer_body_errors = false) ?(kernel_bindings = []) ?(clock = Unix.gettimeofday) ?on_profile ?(compiled_ids = Path_map.empty)
     ?(sites = []) ?inputs checked =
   Phase_timer.measure "lower" (fun () ->
   try
     let module L = Lowerer (struct
       let factories = factories let provenance_tags = provenance_tags let reference = reference let gpu = gpu
-      let strict_body = strict_body let defer_body_errors = defer_body_errors let kernel_bindings = kernel_bindings let on_profile = on_profile
+      let strict_body = strict_body let defer_body_errors = defer_body_errors let kernel_bindings = kernel_bindings let clock = clock let on_profile = on_profile
       let compiled_ids = compiled_ids let sites = sites let inputs = inputs let checked = checked
       let lower_checked = lower_checked
     end) in
     Ok L.result
   with Diagnostic.Error diagnostic -> Error diagnostic)
 
-let of_checked ?(factories = Sop.Nodes.factories) ?provenance_tags ?reference ?gpu ?on_profile ?compiled_ids ?sites ?inputs checked =
+let of_checked ?(factories = Sop.Nodes.factories) ?provenance_tags ?reference ?gpu ?clock ?on_profile ?compiled_ids ?sites ?inputs checked =
   Result.bind (Encoded_parameters.checked checked)
-    (lower_checked ~factories ?provenance_tags ?reference ?gpu ?on_profile ?compiled_ids ?sites ?inputs)
+    (lower_checked ~factories ?provenance_tags ?reference ?gpu ?clock ?on_profile ?compiled_ids ?sites ?inputs)
 
-let workspace ?(factories = Sop.Nodes.factories) ?extra ?reference ?gpu ?on_profile ?compiled_ids ?sites ?inputs source =
+let workspace ?(factories = Sop.Nodes.factories) ?extra ?reference ?gpu ?clock ?on_profile ?compiled_ids ?sites ?inputs source =
   Result.bind (Flow_catalog.of_factories ~version:Manifest.version ?extra factories) (fun catalog ->
     match Flow_catalog.check_workspace ~ops:Operators.all catalog source with
-    | Some checked, _ -> of_checked ~factories ?reference ?gpu ?on_profile ?compiled_ids ?sites ?inputs checked
+    | Some checked, _ -> of_checked ~factories ?reference ?gpu ?clock ?on_profile ?compiled_ids ?sites ?inputs checked
     | None, diagnostics -> Error (match List.find_opt (fun (d : Diagnostic.t) ->
         d.severity = Diagnostic.Error_severity) diagnostics with
       | Some d -> d

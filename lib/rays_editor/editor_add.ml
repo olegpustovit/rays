@@ -69,7 +69,8 @@ let value_entries =
       entry ~output:(match sub with "Loop" | "Data" | "Function" -> Flow.Ty.List Flow.Ty.Float | _ -> Flow.Ty.Float)
         sub ("=" ^ form) form) forms
   @ List.filter_map (fun op -> if List.exists (fun (_, form, _, _) -> form = op) forms then None
-      else Some (entry ?output:(if op="array/max_length" then Some Flow.Ty.Int else None) (categorize op) ("=" ^ op) op)) Flow.Workspace.value_ops
+      else Some (entry ?output:(if op="array/max_length" then Some Flow.Ty.Int else
+        None) (categorize op) ("=" ^ op) op)) Flow.Workspace.value_ops
 
 (* the expression and the name a "Value" entry makes *)
 let value_expression ~ops ?wire context key =
@@ -90,7 +91,8 @@ let value_expression ~ops ?wire context key =
         "(array/scatter_add (array/int 0) (array/float 0) 0)")), "added"
   | "sop/with_attr" ->
       List.hd (Result.get_ok (S.parse
-        "(sop/with_attr (sop/mesh :points (array/vec3 0) :vertex_points (array/int 0) :primitive_offsets (array/int 1) :kinds (array/int 0)) \"attribute\" (array/vec3 0))")), "attribute"
+        "(sop/with_attr (sop/mesh :points (array/vec3 0) \
+         :vertex_points (array/int 0) :primitive_offsets (array/int 1) :kinds (array/int 0)) \"attribute\" (array/vec3 0))")), "attribute"
   | ("sop/mesh" | "sop/remap" | "sop/concat" as op) ->
       let mesh = "(sop/mesh :points (array/vec3 0) :vertex_points (array/int 0) :primitive_offsets (array/int 1) :kinds (array/int 0))" in
       let text, name = if op = "sop/mesh" then mesh, "mesh" else if op = "sop/concat" then
@@ -99,7 +101,8 @@ let value_expression ~ops ?wire context key =
       List.hd (Result.get_ok (S.parse text)), name
   | "sop/mesh_planes" ->
       List.hd (Result.get_ok (S.parse
-        "(sop/mesh_planes :points {:x (array/float 0) :y (array/float 0) :z (array/float 0)} :vertex_points (array/int 0) :primitive_offsets (array/int 1) :kinds (array/int 0))")), "mesh"
+        "(sop/mesh_planes :points {:x (array/float 0) :y (array/float 0) :z (array/float 0)} \
+         :vertex_points (array/int 0) :primitive_offsets (array/int 1) :kinds (array/int 0))")), "mesh"
   | form when List.exists (fun (_, f, _, _) -> f = form) forms ->
       let _, _, text, name = List.find (fun (_, f, _, _) -> f = form) forms in
       List.hd (Result.get_ok (S.parse text)), name

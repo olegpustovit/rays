@@ -1,4 +1,5 @@
-(* The host bars of the workspace: the graph panel's toolbar (Add, Repeat, Iterate, fn, macro, defn: graph.html's list; the narrower workspace.html header drops macro).  Buttons only report a
+(* The host bars of the workspace: the graph panel's toolbar (Add, Repeat, Iterate, fn, macro, defn: graph.html's list;
+  the narrower workspace.html header drops macro).  Buttons only report a
    click: [Editor_frame] maps it to the one command or edit it means. *)
 module Ui = Pxui.Ui
 
@@ -48,7 +49,8 @@ let graph_tools ?outline ui ~header ~from ~enabled =
   let rects = tool_rects ?outline ui ~header ~from in
   if rects <> [] then rule ui ~key:"workspace-tool-rule" ~header ~from;
   List.fold_left (fun clicked (tool, label, hint, (x, y, w, h)) ->
-    if Pxui_shell.Kit.button ui ~key:("workspace-tool-" ^ label) ~at:(x, y) ~w ~h ~enabled:(enabled tool) ?hint:(if hint = "" then None else Some hint) label
+    if Pxui_shell.Kit.button ui ~key:("workspace-tool-" ^ label) ~at:(x, y) ~w ~h ~enabled:(enabled tool) ?hint:(if hint = "" then
+      None else Some hint) label
     then Some tool else clicked) None rects
 
 (* A panel tree as an editor graph: leaves and splits are bindings, so every panel edit finds

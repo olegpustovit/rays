@@ -74,7 +74,8 @@ let create ?gpu ?settings
         | Ok values -> Option.value ~default:true (Editor_core.Store.Settings.bool values "guide")
         | Error _ -> true in
       let state_name = Lowering.sha256 state_key in
-      let value = { preferences; text_size = ui_text_size; guide; hud = None; presets; state_name; name; prompt = None; notice = None; notice_at = 0.;
+      let value = { preferences; text_size = ui_text_size; guide; hud = None; presets; state_name; name; prompt = None; notice = None;
+        notice_at = 0.;
         doc; gpu; filed = doc;
         panes = Panel_map.make { view = Pxui_graph.Scope.create (); laid = None; shown = None; route = [];
                                  views = Level_map.empty; at = level; picked = Selection.empty };
@@ -106,8 +107,9 @@ let create ?gpu ?settings
       let on = match Option.bind doc.Document.shell (fun s -> s.start.focus) with
         | Some path -> Some path | None -> None in
       let value = follow_graph value ~focus:(if on = None then value.focus else Pxui_shell.Layout.Graph) ~focus_path:on in
-      let value = with_pane value (fun pane -> { pane with views = Option.fold ~none:Level_map.empty ~some:(start_views doc level) (graph_path value) }) in
+      let value = with_pane value (fun pane -> { pane with views = Option.fold ~none:Level_map.empty ~some:(start_views
+        doc level) (graph_path value) }) in
       let value = follow_hosts value ~focus_path:on (panel_hosts value) in
       follow_start value)
-    (Cook.create ~prepare ~seed ~grain ?domains ?await ~max_entries
+    (Cook.create ~prepare ~seed ~grain ?domains ?await ~clock ~max_entries
       ~max_payload_bytes ()))

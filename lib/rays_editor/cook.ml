@@ -102,7 +102,7 @@ let output_bounds (output : Session.output) =
    interactive play never blocks (latest request wins). The default is false;
    [Frame.t] does not say the clock is fixed, so
    an export host passes [~await:true]. *)
-let create ~prepare ~seed ~grain ?domains ?await ~max_entries ~max_payload_bytes () =
+let create ~prepare ~seed ~grain ?domains ?await ?clock ~max_entries ~max_payload_bytes () =
   let await = match await with Some flag -> flag
     | None -> false in
   if grain <= 0 then invalid_arg "Rays_editor: grain must be positive";
@@ -110,6 +110,7 @@ let create ~prepare ~seed ~grain ?domains ?await ~max_entries ~max_payload_bytes
       (max 1 (Parallel.recommended_domains () - 1)) domains in
   if domains <= 0 then invalid_arg "Rays_editor: domains must be positive";
   Result.map (fun worker ->
+    Option.iter (Async_cook.set_clock worker) clock;
     { worker; seed; grain; domains; await; prepare; schedule = Schedule.initial;
       pieces = []; settings = None; error = None; failure = ref None; seconds = None;
       framing = None; force = false; compiled = Document.Int_map.empty; graphs = [];

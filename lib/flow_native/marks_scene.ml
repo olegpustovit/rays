@@ -210,7 +210,8 @@ let scene ~buffers ?image ?gpu ?cache ?(device = fun _ -> no_device ()) marks =
           | Mark_set {count; kind} when has_device kind ->
               (match gpu with
                | None -> no_device ()
-               | Some gpu -> add (gpu_set buffers ~device ~gpu ~converted:(Option.map (fun c -> c.converted) cache) ~slot:!slot count kind); incr slot)
+               | Some gpu -> add (gpu_set buffers ~device ~gpu ~converted:(Option.map (fun c ->
+                 c.converted) cache) ~slot:!slot count kind); incr slot)
           | Mark_set {count; kind} as entry -> add (set entry kind (fun () -> shapes buffers count kind))
           | Geometry {vertices; indices; color} -> add (Scene.Private.geometry {vertices; indices; color})
           | Image {resource; x; y; scale; angle} ->
