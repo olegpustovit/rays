@@ -259,6 +259,9 @@ size estimate, not the phase's behavioral or shipping gates.
 
 ## In progress and remaining proof
 
+- P9 last sites (734064ab, 45f53e85, 96c57fa5): the presentation blit (ogpu_metal/shaders/present.rays, embedded as generated MSL), stream compaction (flow_gpu/shaders/compact.rays as a compute stage with gpu/group-scan; MSL, SPIR-V and WGSL; byte-equal outputs; 1K 0.133→0.009 ms, 1M 4.35→4.23, 4M equal) and the scene/trace helpers (trace.rays defns spliced per variant; film byte-identical; instanced 147→124 ms) are Lisp. Remaining handwritten: the Perlin noise3 helpers (Emit.perlin MSL, Spirv.noise_functions) and fmod64, in progress.
+- Test time (68183f85): test_workspace_shell 34→22 s, test_workspace_live 32→8 s, the golden replay 37→7 s (one row per node by default; REPLAY_ALL=1 runs all 819 under qualification-scale), flow_sop CPU 63→36 s.
+
 - Open: P6.S4 (about 313 non-cancel optional parameters across rdk_ops interfaces, 58 in attribute_ops.mli and 49 in attribute_transfer.mli), P3.S8 (state-dependent and previous-reading kernels need a persistent per-element buffer across dispatches, which Region cannot express), FL17 (Core.expr.Source holds an arbitrary Eval value that can contain closures; core.mli no longer claims Serializable), XC2 (allowlist 11 rows: the Sop.Node and Mesh construction and view APIs and a few renderer privates), RK6 (22 of 55 range loops on Support.run_indexed_ranges, 33 bespoke), RK28 (Data_id folded; kernel.ml stays for generate_point_ranges).
 
 - P9.G1/G4: handwritten MSL remains in product code in three places: the presentation blit in ogpu_metal/presentation.ml (below the renderer), Emit.compaction (threadgroup memory and barriers, which raster and compute stages cannot express yet) and the scene/trace intersection helpers spliced into traced kernels. Backend and conformance tests keep MSL fixtures.
