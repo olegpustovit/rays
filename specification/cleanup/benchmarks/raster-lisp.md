@@ -68,3 +68,15 @@ million_marks at 2x (marks pipeline, minimum of 9; PNGs byte-identical in every 
 | load | base (handwritten) | Lisp |
 |---|---|---|
 | 19 | 27.77 27.34 27.35 27.31 27.46 | 21.43 21.84 21.96 24.83 22.82 |
+
+## Open
+
+Scene3 (plain, points, textured), Scene3_world, sun depth, Scene2's argument-buffer pipeline and the
+image sink still run their handwritten MSL. A Scene3 port (scene3.rays: double-word vertex decoding,
+the light loop with area-light samples, `gpu/instance-id` and `gpu/front-facing` built-ins, a
+`:point-size` output, fragment buffers sharing the vertex stage's bindings) printed, validated with
+spirv-val and passed `test_scene3_lighting` (ambient, directional, point, spot, area, ±1) and
+`test_scene3_instances`, but editor scenes rendered dark: with the Scene3 bindings renumbered to the
+Lisp declaration order (0-5, texture 6), `[[front_facing]]` reads false on front faces even with
+the handwritten shaders, so double-sided surfaces flip their normals. The renumbering, not the
+generated code, changes facing; it was not landed. The UI pipeline's last 0.1 ms is open too.
