@@ -84,6 +84,7 @@ module Private=struct
     |Some execution->Renderer.stats execution
       |>Result.map_error(renderer_message"Canvas.Private.native_stats")
 end
+let gpu_seconds value=Result.map(fun (stats:Renderer.stats)->stats.gpu_duration_seconds)(Private.native_stats value)
 let save_png value path=Runtime_resources.write_atomic ~filename:path (fun temporary->
   Result.map_error (message"Canvas.save_png")
     (Runtime_resources.Canvas.save_png value.resource temporary))

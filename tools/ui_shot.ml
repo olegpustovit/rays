@@ -112,4 +112,18 @@ let () =
   (match Rays.Canvas.render ~density:scale canvas scene with
    | Ok () -> () | Error message -> failwith message);
   (match Rays.Canvas.save_png canvas Sys.argv.(2) with Ok () -> () | Error message -> failwith message);
+  (* UI_SHOT_BENCH=N: the same frame rendered N more times, each one's GPU time (the raster
+     shaders' A/B, specification/cleanup/benchmarks/raster-lisp.md) *)
+  Option.iter (fun runs ->
+    let gpu () = match Rays.Canvas.gpu_seconds canvas with Ok s -> s | Error message -> failwith message in
+    let times = Array.init (int_of_string runs) (fun _ ->
+      let before = gpu () in
+      (match Rays.Canvas.render ~density:scale canvas scene with Ok () -> () | Error message -> failwith message);
+      ignore (Rays.Canvas.pixel canvas ~x:0 ~y:0);
+      (gpu () -. before) *. 1000.) in
+    Array.iter (Printf.printf "gpu_ms %.3f\n") times;
+    Array.sort Float.compare times;
+    (* the minimum too: a GPU shared with other work only ever adds time *)
+    Printf.printf "median_gpu_ms %.3f\nmin_gpu_ms %.3f\n%!" times.(Array.length times / 2) times.(0))
+    (Sys.getenv_opt "UI_SHOT_BENCH");
   E.close !editor; ignore(Rays.Canvas.destroy canvas)
