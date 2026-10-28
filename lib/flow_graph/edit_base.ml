@@ -31,22 +31,11 @@ type op =
   | Add_field of { node : path; name : string; value : S.t }
   | Add_node of { scope : path; name : string; expr : S.t }
   | Delete_nodes of { nodes : path list }
-  | Set_layout_size of { node : path; size : [ `Ratio of float | `First of int | `Second of int ] }
-  | Split_panel of { node : path; axis : [ `H | `V ]; ratio : float; panel : S.t }
-  | Close_panel of { node : path }
-  | Dock_panel of { node : path; target : path; side : [ `Left | `Right | `Top | `Bottom ] }
-  | Set_panel_kind of { node : path; panel : S.t }
   | Set_graph of { name : string; form : S.t }
   | Duplicate of { nodes : path list }
   | Remove_graph of { name : string }
   | Rename_graph of { name : string; to_ : string }
   | Group_merge of { nodes : path list; name : string }
-  | Set_layout of { graph : string; index : int }
-  | Layout_new of { graph : string }
-  | Merge_layouts of { graph : string }
-  | Layout_remove of { graph : string }
-  | Layout_window of { graph : string; panel : S.t }
-  | Layout_float of { graph : string; at : int list }
 
 let fail ?(code = "E_EDIT") fmt =
   Printf.ksprintf (fun message -> raise (Diagnostic.Error (Diagnostic.error ~code message))) fmt
@@ -723,3 +712,7 @@ let duplicate_plan src nodes =
   if List.mem "@result" leaves then fail "The result cannot be duplicated.";
   if List.exists nested leaves then fail "Name the node first (rename it), then duplicate it.";
   sp, List.map (fun leaf -> leaf, fresh used leaf) leaves
+
+let has_prefix ~prefix p =
+  let n = List.length prefix in
+  List.length p >= n && List.take n p = prefix

@@ -92,6 +92,7 @@ val set_probe : 'a t -> Pxui_graph.Scope.path -> int -> 'a t
 val node_box :
   'a t -> Pxui_graph.Scope.path -> (int * int * int * int) option
 val edit : 'a t -> Flow_graph.Flow_edit.op -> ('a t, string) result
+val edit_layout : 'a t -> Editor_document.Layout_edit.op -> ('a t, string) result
 val edit_phases : 'a t -> Flow.Phase_timer.t
 val carrying : 'a t -> (string * string) option
 val carry_line : 'a t -> string option

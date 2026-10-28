@@ -317,6 +317,7 @@ let pane_changes ~(value : _ t) ~vw ~command_changes ~scope_changes ~menu_pick ~
   let changes = command_changes
     @ List.concat_map (function
       | Pxui_graph.Scope.Syntax_edit op -> [ Syntax_edit op ]
+      | Layout_active { graph; index } -> [ Layout_edit (Set_layout { graph; index }) ]
       | Notice message -> [ Declined message ]  (* the pane's notices are all refusals *)
       | Defn_requested paths -> [ defn_change vw paths ]
       | Copy_requested paths -> [ copy_bindings value paths ]

@@ -743,38 +743,38 @@ let cheap_variations = lazy (replace (replace (case "variations") "(sop/uv_spher
 let run_ops () =
   let e = editor (Lazy.force cheap_variations) in
   let ok label op =
-    match E3.edit e op with
+    match E3.edit_layout e op with
     | Ok e' -> check (E3.undo_label e' = Some label) ("label " ^ label ^ ": " ^ Option.value ~default:"-" (E3.undo_label e')); e'
     | Error m -> fail (label ^ ": " ^ m) in
   let tree e = (shell_of (build_ok (E3.workspace e))).tree in
   let sh = tree e in
   (* resize *)
-  let r = ok "Resize panel" (E.Set_layout_size { node = [ "editor"; "left" ]; size = `Ratio 0.3 }) in
+  let r = ok "Resize panel" (Editor_document.Layout_edit.Set_layout_size { node = [ "editor"; "left" ]; size = `Ratio 0.3 }) in
   check (has (source r) "(ui/split-at \"vertical\" 0.3 network code)") "Set_layout_ratio";
-  check (match (tree (ok "Resize panel" (E.Set_layout_size { node = [ "editor"; "left" ]; size = `Ratio 5. }))) with
+  check (match (tree (ok "Resize panel" (Editor_document.Layout_edit.Set_layout_size { node = [ "editor"; "left" ]; size = `Ratio 5. }))) with
       | Split { b = Split { a = Split { size; _ }; _ }; _ } -> size = `Ratio 0.9 | _ -> false) "a ratio clamps to 0.9";
   (* a ui/split (no ratio) becomes ui/split-at *)
   let plain = editor (with_editor "    (let* [a (ui/graph) b (ui/lisp) s (ui/split \"horizontal\" a b)] (ui/workspace s))") in
-  (match E3.edit plain (E.Set_layout_size { node = [ "editor"; "s" ]; size = `Ratio 0.25 }) with
+  (match E3.edit_layout plain (Editor_document.Layout_edit.Set_layout_size { node = [ "editor"; "s" ]; size = `Ratio 0.25 }) with
    | Ok p -> check (has (source p) "(ui/split-at \"horizontal\" 0.25 a b)") "ui/split gets a ratio"
    | Error m -> fail m);
   (* split, close, retype *)
   (* the editor's panel table writes the panel forms *)
   let panel kind = Result.get_ok (Editor_document.Panel_kinds.expr (E3.workspace e).source kind) in
-  let s = ok "Split panel" (E.Split_panel { node = [ "editor"; "network" ]; axis = `V; ratio = 0.5; panel = panel "lisp" }) in
+  let s = ok "Split panel" (Editor_document.Layout_edit.Split_panel { node = [ "editor"; "network" ]; axis = `V; ratio = 0.5; panel = panel "lisp" }) in
   check (Panels.to_string (tree s) = "(h outline (h (v (v graph lisp) lisp) (tile view)))") ("split: " ^ Panels.to_string (tree s));
   check (has (source s) "(ui/split-at \"vertical\" 0.5 network_a network_b)") "the new split";
-  let c = ok "Close panel" (E.Close_panel { node = [ "editor"; "network" ] }) in
+  let c = ok "Close panel" (Editor_document.Layout_edit.Close_panel { node = [ "editor"; "network" ] }) in
   check (Panels.to_string (tree c) = "(h outline (h lisp (tile view)))") ("close: " ^ Panels.to_string (tree c));
-  let t = ok "Retype panel" (E.Set_panel_kind { node = [ "editor"; "network" ]; panel = panel "list" }) in
+  let t = ok "Retype panel" (Editor_document.Layout_edit.Set_panel_kind { node = [ "editor"; "network" ]; panel = panel "list" }) in
   check (Panels.to_string (tree t) = "(h outline (h (v list lisp) (tile view)))") ("retype: " ^ Panels.to_string (tree t));
-  let sheet = ok "Retype panel" (E.Set_panel_kind { node = [ "editor"; "network" ]; panel = panel "spreadsheet" }) in
+  let sheet = ok "Retype panel" (Editor_document.Layout_edit.Set_panel_kind { node = [ "editor"; "network" ]; panel = panel "spreadsheet" }) in
   check (Panels.to_string (tree sheet) = "(h outline (h (v spreadsheet lisp) (tile view)))") "retype spreadsheet";
   let saved = Doc.to_text (E3.workspace sheet) in
   check (Doc.to_text (of_text saved) = saved) "retyped spreadsheet did not round trip";
-  let v = ok "Retype panel" (E.Set_panel_kind { node = [ "editor"; "outline" ]; panel = panel "viewport" }) in
+  let v = ok "Retype panel" (Editor_document.Layout_edit.Set_panel_kind { node = [ "editor"; "outline" ]; panel = panel "viewport" }) in
   check (has (source v) "outline (ui/viewport (ref scene))") "a viewport is over the first scene graph";
-  let docked = ok "Dock panel" (E.Dock_panel {node = ["editor"; "network"]; target = ["editor"; "outline"]; side = `Right}) in
+  let docked = ok "Dock panel" (Editor_document.Layout_edit.Dock_panel {node = ["editor"; "network"]; target = ["editor"; "outline"]; side = `Right}) in
   check (Panels.to_string (tree docked) = "(h (h outline graph) (h lisp (tile view)))")
     ("docking duplicated a panel or left a gap: " ^ Panels.to_string (tree docked));
   check (has (source docked) "(ui/split-at \"horizontal\" 0.5 outline network)")
@@ -782,31 +782,31 @@ let run_ops () =
   (* undo restores the tree with the source *)
   check (Panels.to_string (tree e) = Panels.to_string sh) "undo target";
   (* refusals leave everything alone *)
-  let refuse name op needle = match E3.edit e op with
+  let refuse name op needle = match E3.edit_layout e op with
     | Error m -> check (has m needle) (name ^ ": " ^ m)
     | Ok _ -> fail (name ^ " was accepted") in
-  refuse "close the workspace" (E.Close_panel { node = [ "editor"; "shell" ] }) "Keep at least one";
+  refuse "close the workspace" (Editor_document.Layout_edit.Close_panel { node = [ "editor"; "shell" ] }) "Keep at least one";
   check (Editor_document.Panel_kinds.expr (E3.workspace e).source "dashboard" = Error "Unknown panel type dashboard.")
     "an unknown panel type";
-  refuse "resize a panel" (E.Set_layout_size { node = [ "editor"; "network" ]; size = `Ratio 0.4 }) "not a split";
-  refuse "no such binding" (E.Split_panel { node = [ "editor"; "nothing" ]; axis = `H; ratio = 0.5; panel = panel "lisp" }) "no longer exists";
+  refuse "resize a panel" (Editor_document.Layout_edit.Set_layout_size { node = [ "editor"; "network" ]; size = `Ratio 0.4 }) "not a split";
+  refuse "no such binding" (Editor_document.Layout_edit.Split_panel { node = [ "editor"; "nothing" ]; axis = `H; ratio = 0.5; panel = panel "lisp" }) "no longer exists";
   let floating = editor (with_editor
     "(let* [main (ui/graph) outline (ui/outline) window (ui/floating outline) tiles (ui/tile main window)] (ui/workspace tiles))") in
-  (match E3.edit floating (E.Close_panel {node = ["editor"; "outline"]}) with
+  (match E3.edit_layout floating (Editor_document.Layout_edit.Close_panel {node = ["editor"; "outline"]}) with
    | Ok closed ->
        check (Panels.to_string (tree closed) = "(tile graph)") "closing a floating panel left its wrapper";
        check (not (has (source closed) "ui/floating")) "empty floating wrapper remained in Lisp";
-       (match E3.edit closed (E.Close_panel {node = ["editor"; "main"]}) with
+       (match E3.edit_layout closed (Editor_document.Layout_edit.Close_panel {node = ["editor"; "main"]}) with
         | Error message -> check (has message "Keep at least one") "last panel refusal"
         | Ok _ -> fail "closing the last panel was accepted")
    | Error message -> fail message);
   let switched = editor (with_editor
     "(let* [main (ui/graph) outline (ui/outline) window (ui/floating outline)] (ui/workspace (ui/switch (ui/split-at \"horizontal\" 0.5 main window) (ui/lisp) :active 0)))") in
-  (match E3.edit switched (E.Close_panel {node = ["editor"; "outline"]}) with
+  (match E3.edit_layout switched (Editor_document.Layout_edit.Close_panel {node = ["editor"; "outline"]}) with
    | Ok closed ->
        check (not (has (source closed) "ui/floating") && has (source closed) "(ui/switch main (ui/lisp)")
          "closing a floating panel did not clean its switch branch";
-       (match E3.edit closed (E.Close_panel {node = ["editor"; "main"]}) with
+       (match E3.edit_layout closed (Editor_document.Layout_edit.Close_panel {node = ["editor"; "main"]}) with
         | Error message -> check (has message "every layout") "empty switch branch refusal"
         | Ok _ -> fail "closing the last panel in a switch branch was accepted")
    | Error message -> fail message);
@@ -814,10 +814,10 @@ let run_ops () =
      or is closed: :of names the panel, never the split it ends up in *)
   let followed = editor (with_editor
     "(let* [network (ui/graph) inspector (ui/inspector :of network)] (ui/workspace (ui/split-at \"horizontal\" 0.5 network inspector)))") in
-  (match E3.edit followed (E.Layout_window {graph = "editor"; panel = Result.get_ok (Editor_document.Panel_kinds.expr [] "outline")}) with
+  (match E3.edit_layout followed (Editor_document.Layout_edit.Layout_window {graph = "editor"; panel = Result.get_ok (Editor_document.Panel_kinds.expr [] "outline")}) with
    | Error message -> fail ("new window: " ^ message)
    | Ok windowed ->
-       (match E3.edit windowed (E.Dock_panel {node = ["editor"; "inspector"]; target = ["editor"; "network"]; side = `Left}) with
+       (match E3.edit_layout windowed (Editor_document.Layout_edit.Dock_panel {node = ["editor"; "inspector"]; target = ["editor"; "network"]; side = `Left}) with
         | Ok docked -> check (has (source docked) ":of network)") ("docking on a followed panel renamed :of: " ^ source docked)
         | Error message -> fail ("dock on a followed panel: " ^ message)));
   E3.close followed;
@@ -1410,33 +1410,33 @@ let run_layouts () =
   expect_error "an active layout out of range" (replace switch_text ":active 0" ":active 3") "active layout";
   (* edits *)
   let ws = of_text switch_text in
-  let edit ws op = match Doc.edit catalog ws op with Ok ws -> ws | Error d -> fail (Diagnostic.to_string d) in
+  let edit ws op = match Doc.edit_layout catalog ws op with Ok ws -> ws | Error d -> fail (Diagnostic.to_string d) in
   let text ws = fst (Flow.Lisp.print ws.Doc.source) in
-  let switched = edit ws (E.Set_layout { graph = "editor"; index = 2 }) in
+  let switched = edit ws (Editor_document.Layout_edit.Set_layout { graph = "editor"; index = 2 }) in
   check (has (text switched) ":active 2") "Set_layout writes :active";
-  let added = edit switched (E.Layout_new { graph = "editor" }) in
+  let added = edit switched (Editor_document.Layout_edit.Layout_new { graph = "editor" }) in
   check (has (text added) "(ui/switch build write look layout :active 3)" && has (text added) "layout preview")
     ("a new layout copies the active one: " ^ text added);
   let labelled = labels (text added) in
   check (labelled = ([ "View | Graph | Inspector"; "View | Graph / Lisp"; "View"; "View \xc2\xb7 View 100% (1)"; ], 3)
          || fst labelled = [ "View | Graph | Inspector"; "View | Graph / Lisp"; "View \xc2\xb7 View 100%"; "View \xc2\xb7 View 100% (2)" ])
     ("the copy is named like its twin: " ^ String.concat " / " (fst labelled));
-  let removed = edit added (E.Layout_remove { graph = "editor" }) in
+  let removed = edit added (Editor_document.Layout_edit.Layout_remove { graph = "editor" }) in
   check (has (text removed) "(ui/switch build write look :active" && not (has (text removed) "layout preview"))
     ("removing the current layout drops its input and binding: " ^ text removed);
-  let one = edit (edit (edit removed (E.Set_layout { graph = "editor"; index = 0 })) (E.Layout_remove { graph = "editor" }))
-      (E.Layout_remove { graph = "editor" }) in
-  (match Doc.edit catalog one (E.Layout_remove { graph = "editor" }) with
+  let one = edit (edit (edit removed (Editor_document.Layout_edit.Set_layout { graph = "editor"; index = 0 })) (Editor_document.Layout_edit.Layout_remove { graph = "editor" }))
+      (Editor_document.Layout_edit.Layout_remove { graph = "editor" }) in
+  (match Doc.edit_layout catalog one (Editor_document.Layout_edit.Layout_remove { graph = "editor" }) with
    | Error d -> check (has d.Diagnostic.message "last layout") "the last layout stays"
    | Ok _ -> fail "removed the last layout");
   (* a window joins the active layout only; it floats and docks *)
-  let floated = edit ws (E.Layout_float { graph = "editor"; at = [ 1; 0 ] }) in
+  let floated = edit ws (Editor_document.Layout_edit.Layout_float { graph = "editor"; at = [ 1; 0 ] }) in
   check (Panels.label (shell_of (build_ok floated)).tree = "View | Inspector + Graph") ("a panel floats: " ^ text floated);
-  let docked = edit floated (E.Layout_float { graph = "editor"; at = [ 1; 0 ] }) in
+  let docked = edit floated (Editor_document.Layout_edit.Layout_float { graph = "editor"; at = [ 1; 0 ] }) in
   check (Panels.label (shell_of (build_ok docked)).tree = "View | Inspector | Graph") ("a window docks: " ^ text docked);
   (* a switch inside a split edits in place *)
   let nested = of_text (with_editor "    (ui/workspace (ui/split-at \"horizontal\" 0.5 (ui/graph) (ui/switch (ui/lisp) (ui/inspector) :active 1)))") in
-  let n_set = edit nested (E.Set_layout { graph = "editor"; index = 0 }) in
+  let n_set = edit nested (Editor_document.Layout_edit.Set_layout { graph = "editor"; index = 0 }) in
   check (has (text n_set) "(ui/switch (ui/lisp) (ui/inspector) :active 0)" || has (text n_set) ":active 0")
     ("Set_layout reaches a switch inside a split: " ^ text n_set);
   check (Panels.to_string (shell_of (build_ok n_set)).tree = "(h graph lisp)") "and the column swaps";
@@ -1446,18 +1446,18 @@ let run_layouts () =
     String.sub t 0 (String.length t - 2)
     ^ "\n  (graph second :context editor\n    (let* [a (ui/lisp) b (ui/inspector) s (ui/split \"vertical\" a b)] (ui/workspace s))))\n" in
   let old = of_text old_text in
-  let merged = edit old (E.Merge_layouts { graph = "editor" }) in
+  let merged = edit old (Editor_document.Layout_edit.Merge_layouts { graph = "editor" }) in
   check (not (has (text merged) "(graph second") && has (text merged) "second_a" && has (text merged) "(ui/switch")
     ("the other editor graph joins the switch: " ^ text merged);
   (match (shell_of (build_ok merged)).switch with
    | Some sw -> check (List.length sw.layouts = 2 && List.map Panels.label sw.layouts = [ "Graph | Lisp"; "Lisp / Inspector" ])
        ("the merged layouts: " ^ String.concat " / " (List.map Panels.label sw.layouts))
    | None -> fail "no switch after merging");
-  (match Doc.edit catalog merged (E.Merge_layouts { graph = "editor" }) with
+  (match Doc.edit_layout catalog merged (Editor_document.Layout_edit.Merge_layouts { graph = "editor" }) with
    | Error _ -> () | Ok _ -> fail "merged with nothing to merge");
   (* a workspace without a switch gets one on the first new layout *)
   let plain = of_text (replace (replace switch_text "(ui/switch build write look :active 0)" "build") "write (" "write (") in
-  let wrapped = edit plain (E.Layout_new { graph = "editor" }) in
+  let wrapped = edit plain (Editor_document.Layout_edit.Layout_new { graph = "editor" }) in
   check (has (text wrapped) "(ui/workspace switch)" && has (text wrapped) "(ui/switch build layout :active 1)")
     ("a switch is written around the tree: " ^ text wrapped);
   (* one merged undo entry, by keys *)
@@ -1644,16 +1644,16 @@ let run_studio () =
   check (again.tree = shell.tree && again.named = shell.named && again.start = shell.start
          && again.switch = shell.switch)
     "the studio did not round-trip through its printed text";
-  let apply ws op = match Doc.edit catalog ws op with
-    | Ok ws -> ws | Error d -> fail (E.label op ^ ": " ^ Diagnostic.to_string d) in
+  let apply ws op = match Doc.edit_layout catalog ws op with
+    | Ok ws -> ws | Error d -> fail (Editor_document.Layout_edit.label op ^ ": " ^ Diagnostic.to_string d) in
   let text_of ws = fst (Flow.Lisp.print ws.Doc.source) in
   let refused name ws op needle = match Doc.edit catalog ws op with
     | Error d -> check (has (Diagnostic.to_string d) needle) (name ^ ": " ^ Diagnostic.to_string d)
     | Ok _ -> fail (name ^ " was accepted") in
   (* a gutter drag writes what the split is sized by *)
-  let sized = apply ws (E.Set_layout_size { node = [ "editor"; "studio" ]; size = `First 260 }) in
+  let sized = apply ws (Editor_document.Layout_edit.Set_layout_size { node = [ "editor"; "studio" ]; size = `First 260 }) in
   check (has (text_of sized) "(ui/split \"horizontal\" outline work :first_size 260)") "a fixed side is written in points";
-  let ratio = apply ws (E.Set_layout_size { node = [ "editor"; "stage" ]; size = `Ratio 0.61803 }) in
+  let ratio = apply ws (Editor_document.Layout_edit.Set_layout_size { node = [ "editor"; "stage" ]; size = `Ratio 0.61803 }) in
   check (has (text_of ratio) "(ui/split-at \"vertical\" 0.618 preview timeline)") "a ratio keeps four decimals";
   refused "two fixed sides" ws (E.Set_arg { node = [ "editor"; "studio" ]; key = E.Kw "second_size"; sub = [];
                                             value = S.make (S.Num "100") }) "one side";
@@ -1667,9 +1667,9 @@ let run_studio () =
     "the layout keywords are not rows of their cards";
   (* the layout commands take a graph whose result is a binding of the workspace *)
   let laid = List.fold_left apply ws [
-    E.Layout_new { graph = "editor" }; E.Layout_window { graph = "editor"; panel = Result.get_ok (Editor_document.Panel_kinds.expr [] "inspector") };
-    E.Layout_float { graph = "editor"; at = [ 0; 0 ] }; E.Set_layout { graph = "editor"; index = 0 };
-    E.Layout_remove { graph = "editor" } ] in
+    Editor_document.Layout_edit.Layout_new { graph = "editor" }; Editor_document.Layout_edit.Layout_window { graph = "editor"; panel = Result.get_ok (Editor_document.Panel_kinds.expr [] "inspector") };
+    Editor_document.Layout_edit.Layout_float { graph = "editor"; at = [ 0; 0 ] }; Editor_document.Layout_edit.Set_layout { graph = "editor"; index = 0 };
+    Editor_document.Layout_edit.Layout_remove { graph = "editor" } ] in
   check (has (text_of laid) "shell (ui/workspace") "the workspace binding was not kept";
   check (not (has (text_of laid) "(-> ")) "a layout was printed as a thread";
   ignore (build_ok (of_text (Doc.to_text laid)));
@@ -1695,7 +1695,7 @@ let run_studio () =
   check (has (source !e) "(ui/split \"horizontal\" outline work :first_size 180)" && E3.undo_label !e = Some "Resize panel")
     ("the gutter of a fixed split did not write points: " ^ source !e);
   (* the second layout: a floating graph on the material beside the docked graph, each its own pane *)
-  e := (match E3.edit !e (E.Set_layout { graph = "editor"; index = 1 }) with Ok e -> e | Error m -> fail m);
+  e := (match E3.edit_layout !e (Editor_document.Layout_edit.Set_layout { graph = "editor"; index = 1 }) with Ok e -> e | Error m -> fail m);
   step (450., 100.) []; step (450., 100.) [];
   check (dump_line !e "graph panels" = "garden, clay") ("the graph panels: " ^ dump_line !e "graph panels");
   check (dump_line !e "windows" = "graph 560 90 520 360, view 250 470 380 260, inspector 1090 60 320 420, lisp 640 500 420 300")
@@ -1779,7 +1779,7 @@ let run_studio_keywords () =
   step at [ Input.Key_pressed (Input.KeyChar '/'); Input.Key_pressed (Input.KeyChar 'l') ];
   step at [ Input.Key_pressed (Input.KeyChar 'g') ]; rest ();
   check (dump_line !e "projection" = "graph") "/ l g did not show the graph";
-  e := (match E3.edit !e (E.Set_layout_size { node = [ "editor"; "stage" ]; size = `Ratio 0.4 }) with Ok e -> e | Error m -> fail m);
+  e := (match E3.edit_layout !e (Editor_document.Layout_edit.Set_layout_size { node = [ "editor"; "stage" ]; size = `Ratio 0.4 }) with Ok e -> e | Error m -> fail m);
   rest ();
   check (dump_line !e "projection" = "graph") "an edit that left :view alone reset the view the user chose";
   set "network" "view" (S.Str "graph"); set "preview" "look_through" (S.Sym "false");

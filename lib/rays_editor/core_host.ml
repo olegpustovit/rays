@@ -60,14 +60,22 @@ let set_root value root =
 (* A host-driven gesture on a workspace document ([Editor.edit], W11's
    entry): the same reduction as a [Syntax_edit] intent, committed as one
    history entry named by the op ([Gesture] merge for a scrub). *)
-let syntax_edit value op =
+let host_edit value ~label ~gesture edited =
   let result, phases = Flow.Phase_timer.sample ~clock:value.clock (fun () ->
-  Result.map (fun doc -> install value doc ~label:(Flow_graph.Flow_edit.label op)
+  Result.map (fun doc -> install value doc ~label
     ~merge:(Option.fold ~none:Editor_core.History.Step
-      ~some:(fun key -> Editor_core.History.Gesture key) (Flow_graph.Flow_edit.gesture op)))
-    (Editor_document.Document_edit.syntax_edit_result ~factories:value.factories value.doc op)
+      ~some:(fun key -> Editor_core.History.Gesture key) gesture))
+    (edited ~factories:value.factories value.doc)
   |> Result.map_error Diagnostic.to_string) in
   Result.map (fun value -> { value with edit_phases = phases }) result
+
+let syntax_edit value op =
+  host_edit value ~label:(Flow_graph.Flow_edit.label op) ~gesture:(Flow_graph.Flow_edit.gesture op)
+    (fun ~factories doc -> Editor_document.Document_edit.syntax_edit_result ~factories doc op)
+
+let layout_edit value op =
+  host_edit value ~label:(Layout_edit.label op) ~gesture:(Layout_edit.gesture op)
+    (fun ~factories doc -> Editor_document.Document_edit.layout_op_result ~factories doc op)
 
 (* The scene's World at timeline [time] (the day cycle advances with it). *)
 let world ?(view = `Primary) value ~time =

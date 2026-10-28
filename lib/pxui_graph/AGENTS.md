@@ -54,7 +54,7 @@ Rules that hold throughout:
 for workspace documents: zones are painted in the canvas pass under the
 tiles (`Pxui.Theme.zone_*`), each item is a `Ui.box` tile, and the iteration
 selector, socket, field and toggle boxes are its children. The host maps
-`Syntax_edit` to `Doc.syntax_edit`, and layout
+`Syntax_edit` to `Doc.syntax_edit`, `Layout_active` (a click on a switch's layout) to a `Layout_edit`, and layout
 (`Moved`, `Zone_collapsed`) and probes are the host's, passed back through
 `with_scope ~at ~level ~pin ~collapsed ~probe ~frames`. Rules: build only visible
 items (a zone body is drawn once, whatever its iteration count); a row under

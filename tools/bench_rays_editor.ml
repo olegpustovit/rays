@@ -299,7 +299,7 @@ let measure_particles ?(window=false) ?(toggle=false) samples_count =
         ~init:(fun _ -> create ())
         ~update:(fun editor frame ->
           let editor = if toggle && local frame = 0 && phase frame > 0 then
-              E.edit editor (Flow_graph.Flow_edit.Set_layout {graph="editor"; index=phase frame}) |> Result.get_ok
+              E.edit_layout editor (Editor_document.Layout_edit.Set_layout {graph="editor"; index=phase frame}) |> Result.get_ok
             else editor in
           let started = Unix.gettimeofday () and before = Gc.allocated_bytes () in
           let editor = E.update editor frame in

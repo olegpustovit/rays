@@ -80,6 +80,7 @@ let gesture_key ~(value : _ t) ~(frame : Frame.t) ~loaded ~world_added ~world_la
       | Set_parameter { node; path; _ } ->
           Some (Printf.sprintf "graph.scrub:%s:%d:%s" (level_key value.level) node path)
       | Syntax_edit op -> Flow_graph.Flow_edit.gesture op
+      | Layout_edit op -> Layout_edit.gesture op
       | Panel_state (path, _) -> Some ("panel:" ^ String.concat "/" (panel_key value.doc path))
       | Dock_panels (path, _, _) -> Some ("panel:" ^ String.concat "/" (panel_key value.doc path))
       | _ -> None) result.changes with
@@ -131,7 +132,7 @@ let layout_gestures ~(value : _ t) ~loaded ~added next result scope_changes =
             else M.add scope (List.map (fun (title, at, size) -> { Layout_by_path.title; at; size }) frames) l.frames }),
           { result with label = "Frame" }, probes
       | Display_set _ -> next, result, probes
-      | Syntax_edit _ | Selected _ | Notice _ | Macro_requested _ | Defn_requested _
+      | Syntax_edit _ | Layout_active _ | Selected _ | Notice _ | Macro_requested _ | Defn_requested _
       | Copy_requested _ | Paste_requested | Menu_requested _ | Open_import _ | Activated _ | Drop_over _ | Dropped _ ->
           next, result, probes)
       (next, result, value.probes) scope_changes in
@@ -183,6 +184,25 @@ let write_gestures ~(value : _ t) ~loaded ~present ~tree_edits ~in_text ~node_ef
   let next, result = if Option.is_some loaded then next, result else
     List.fold_left (fun ((next : Document.t), result) change ->
       let refuse message = refused := Some message; next, result in
+      (* bind what is written in place (the call holding it, then the expression), then
+         the gesture on its name *)
+      let inline ~home ~key ~make ~apply ~label next (result : _ frame_result) =
+          let ( let* ) = Result.bind in
+          let bound =
+            let* doc, node = Editor_document.Scene_sync.bind_home ~factories:value.factories next home in
+            let* doc = Editor_document.Document_edit.syntax_edit ~factories:value.factories doc
+              (Flow_graph.Flow_edit.Unfold { node; key; sub = [] }) in
+            (match Flow_graph.Flow_edit.arg_text (doc.workspace.ws).source node key with
+             | Some { Flow.Syntax.node = Sym name; _ } ->
+                 let path = List.rev (name :: List.tl (List.rev node)) in
+                 let* doc = apply ~factories:value.factories doc (make path) in
+                 Ok (doc, make path)
+             | _ -> Error "The panel could not be named.") in
+          (match bound with
+           | Ok (doc, op) ->
+               doc, { result with label = label op;
+                 effects = Param.union_effects result.effects Editor_document.Document_edit.cook_effects }
+           | Error message -> refuse message) in
       if !refused <> None then next, result else match change with
       | Set_parameter { node; path; value = field } when in_text node ->
           set_fields (next, result) node [ path, field ]
@@ -228,6 +248,12 @@ let write_gestures ~(value : _ t) ~loaded ~present ~tree_edits ~in_text ~node_ef
                doc, { (result : _ frame_result) with label = Flow_graph.Flow_edit.label op; edit_error = None;
                effects = Param.union_effects result.effects Editor_document.Document_edit.cook_effects }
            | Error message -> refuse message)
+      | Layout_edit op ->
+          (match Editor_document.Document_edit.layout_op ~factories:value.factories next op with
+           | Ok doc ->
+               doc, { (result : _ frame_result) with label = Layout_edit.label op; edit_error = None;
+               effects = Param.union_effects result.effects Editor_document.Document_edit.cook_effects }
+           | Error message -> refuse message)
       | Syntax_batch (label, ops) ->
           (match Editor_document.Document_edit.syntax_batch ~factories:value.factories next ops with
            | Ok doc ->
@@ -268,24 +294,11 @@ let write_gestures ~(value : _ t) ~loaded ~present ~tree_edits ~in_text ~node_ef
                       effects = Param.union_effects result.effects Editor_document.Document_edit.cook_effects }
                 | Error message -> refuse message))
       | Syntax_inline { home; key; make } ->
-          (* bind what is written in place (the call holding it, then the expression), then
-             the gesture on its name *)
-          let ( let* ) = Result.bind in
-          let bound =
-            let* doc, node = Editor_document.Scene_sync.bind_home ~factories:value.factories next home in
-            let* doc = Editor_document.Document_edit.syntax_edit ~factories:value.factories doc
-              (Flow_graph.Flow_edit.Unfold { node; key; sub = [] }) in
-            (match Flow_graph.Flow_edit.arg_text (doc.workspace.ws).source node key with
-             | Some { Flow.Syntax.node = Sym name; _ } ->
-                 let path = List.rev (name :: List.tl (List.rev node)) in
-                 let* doc = Editor_document.Document_edit.syntax_edit ~factories:value.factories doc (make path) in
-                 Ok (doc, make path)
-             | _ -> Error "The panel could not be named.") in
-          (match bound with
-           | Ok (doc, op) ->
-               doc, { (result : _ frame_result) with label = Flow_graph.Flow_edit.label op;
-                 effects = Param.union_effects result.effects Editor_document.Document_edit.cook_effects }
-           | Error message -> refuse message)
+          inline ~home ~key ~make ~apply:Editor_document.Document_edit.syntax_edit
+            ~label:Flow_graph.Flow_edit.label next result
+      | Layout_inline { home; key; make } ->
+          inline ~home ~key ~make ~apply:Editor_document.Document_edit.layout_op
+            ~label:Layout_edit.label next result
       | _ -> next, result) (next, result) result.changes in
   let next, result = match !refused with
     | None -> next, result
@@ -611,7 +624,7 @@ let reduce ?gpu ?(pump=fun()->()) ~carry_changed ~all_ui_visible ~view_state ~ca
           else if world_added then "Add World"
           else if world_label <> None then Option.get world_label
           else result.label)
-        ~merge:(if List.exists (function Syntax_edit (Flow_graph.Flow_edit.Set_layout _) -> true | _ -> false) result.changes
+        ~merge:(if List.exists (function Layout_edit (Layout_edit.Set_layout _) -> true | _ -> false) result.changes
           then Editor_core.History.Burst { key = "layout"; at = frame.input.t; window = 1.5 }  (* keys: no drag seals it *)
           else Option.fold ~none:Editor_core.History.Step
             ~some:(fun key -> Editor_core.History.Gesture key) gesture) next value.history in

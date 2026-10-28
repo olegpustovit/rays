@@ -17,6 +17,8 @@ module Path_set = Set.Make (struct type t = path let compare = compare end)
 
 type change =
   | Syntax_edit of E.op
+  | Layout_active of { graph : string; index : int }
+      (** a click on a layout of an editor graph's switch: the host makes it the active one *)
   | Probe_set of { zone : path; index : int }
   | Zone_collapsed of { zone : path; collapsed : bool }
   | Selected of path list

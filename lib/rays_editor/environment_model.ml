@@ -114,6 +114,7 @@ let node_box value path =
   Option.map (fun (x, y, w, h) -> int_of_float x, int_of_float y, int_of_float w, int_of_float h)
     (Pxui_graph.Scope.Private.box_of value.core.Core_model.scope_view path)
 let edit value op = Result.map (fun core -> { value with core }) (Core_host.syntax_edit value.core op)
+let edit_layout value op = Result.map (fun core -> { value with core }) (Core_host.layout_edit value.core op)
 
 let edit_phases value = value.core.Core_model.edit_phases
 let carrying value = Option.map (fun (c : _ Core_model.carry) -> c.payload.Carry.kind, c.payload.value) value.core.Core_model.carry

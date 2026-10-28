@@ -123,6 +123,8 @@ type change =
   | Panel_state of Pxui_shell.Layout.path * Editor_core.Panels.state
   | Select_layout of string
   | Syntax_edit of Flow_graph.Flow_edit.op
+  | Layout_edit of Layout_edit.op
+      (** a gesture on the editor graph's panels and layouts, applied beside the text ones *)
   | Syntax_batch of string * Flow_graph.Flow_edit.op list
       (** several rewrites that make one gesture (a new SOP graph and its object): all or none,
           one history entry with this label *)
@@ -131,6 +133,9 @@ type change =
       (** the expression at [key] of the call at [home] is written in place: the call is bound to
           a name first, then the expression, and [make] gives the gesture on that name (several
           rewrites, one history entry) *)
+  | Layout_inline of { home : Document.home; key : Flow_graph.Flow_edit.arg_key;
+                       make : Flow.Workspace.path -> Layout_edit.op }
+      (** {!Syntax_inline} for a layout gesture *)
   | Object_arg of { node : int; key : string; sub : int list; expr : Flow.Syntax.t }
       (** an expression typed in a row of a scene object or World layer: written to the argument of
           the call that holds it (for a loop's copy, of the loop's template) *)

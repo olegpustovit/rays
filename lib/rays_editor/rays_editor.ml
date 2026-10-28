@@ -34,6 +34,7 @@ module Editor = struct
   let displayed_node = Environment_model.displayed_node
   let document = Environment_model.document
   let edit = Environment_model.edit
+  let edit_layout = Environment_model.edit_layout
   let edit_phases = Environment_model.edit_phases
   let level = Environment_model.level
   let lights = Environment_model.lights

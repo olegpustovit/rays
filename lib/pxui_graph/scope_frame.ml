@@ -1037,7 +1037,7 @@ let update ?(pressed = []) t ui (frame : Frame.t) =
                 | P.Row (i, ({ key = E.Pos j; kind; _ } : P.row)) when kind <> P.Add && j <> active ->
                     let b = Ui.box ui ~flags:Ui.(clickable + tab_stop) ~w:(Ui.Px ((p.w -. 24.) *. z)) ~h:(Ui.Px (16. *. z))
                         ~at:(12. *. z, (top +. float k *. P.row_height +. 4.) *. z) ("sw" ^ string_of_int i) in
-                    if (Ui.signal ui b).clicked then [ Syntax_edit (E.Set_layout { graph = t.key; index = j }) ] else []
+                    if (Ui.signal ui b).clicked then [ Layout_active { graph = t.key; index = j } ] else []
                 | _ -> []) (Array.to_list p.lines)))
         | _ -> [] in
       p, ax, ay, tile, Ui.signal ui tile, sub, fields @ add_clicks @ editors @ movers @ switchers) visible) in

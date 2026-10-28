@@ -8,6 +8,7 @@ type path = E.path
 module Path_set : Set.S with type elt = path
 type change =
     Syntax_edit of E.op
+  | Layout_active of { graph : string; index : int; }
   | Probe_set of { zone : path; index : int; }
   | Zone_collapsed of { zone : path; collapsed : bool; }
   | Selected of path list

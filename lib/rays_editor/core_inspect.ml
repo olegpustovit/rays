@@ -436,7 +436,7 @@ Flow.Syntax.make (Flow.Syntax.Num (Flow.Lisp.float f)) in
     |> List.filter_map (function
       | Pxui_shell.Inspector.Edited ("@layout", Param.Choice_value chosen) ->
           Option.bind layout_names (fun (names, _) ->
-            Option.map (fun index -> Syntax_edit (Flow_graph.Flow_edit.Set_layout { graph; index }))
+            Option.map (fun index -> Layout_edit (Layout_edit.Set_layout { graph; index }))
               (Array.find_index (( = ) chosen) names))
       | Pxui_shell.Inspector.Edited ("@size", Param.Choice_value chosen) ->
           Option.map (fun index ->
@@ -444,7 +444,7 @@ Flow.Syntax.make (Flow.Syntax.Num (Flow.Lisp.float f)) in
             (* a split that is not on screen has no sizes to keep: half, or 240 points *)
             let size = Option.value (resized n.path how) ~default:(match how with
               | `Ratio -> `Ratio 0.5 | `First -> `First 240 | `Second -> `Second 240) in
-            Syntax_edit (Flow_graph.Flow_edit.Set_layout_size { node = n.path; size }))
+            Layout_edit (Layout_edit.Set_layout_size { node = n.path; size }))
             (Array.find_index (( = ) chosen) size_names)
       | (Pxui_shell.Inspector.Edited (name, _) | Pxui_shell.Inspector.Expression (name, _) | Pxui_shell.Inspector.Follow name) as ev
         when String.starts_with ~prefix:arg_prefix name -> arg_request ~source:(value.doc.workspace.ws).source n ~arg_row ev

@@ -2,13 +2,13 @@ let cook_effects = Param.add_impact Param.Cook Param.no_effects
 
 (* One gesture on a workspace document: rewrite and re-check the source, then
    lower it into the document's objects.  Atomic: an error changes nothing. *)
-let syntax_edit_result ~factories (doc : Document.t) op =
+let edit_result ~apply ~factories (doc : Document.t) op =
   let ( let* ) = Result.bind in
   let missing graph = not (List.exists (fun (g : Flow.Workspace.graph) -> g.name = graph)
     (doc.workspace.ws).checked.graphs) in
   let run (doc : Document.t) =
     let* catalog = Kinds.catalog ~version:Flow_sop.Manifest.version factories in
-    let* workspace = Workspace_doc.edit catalog (doc.workspace.ws) op in
+    let* workspace = apply catalog (doc.workspace.ws) op in
     Contexts.of_workspace ~factories ~previous:doc workspace in
   (* a gesture on the scene the host composes (the text has no such graph yet, so the edit finds
      nothing to change): the host's own objects are written out first, and the gesture is tried
@@ -20,6 +20,13 @@ let syntax_edit_result ~factories (doc : Document.t) op =
   | Error _ as refused ->
       (match (if missing "scene" then Result.to_option (adopted ()) else None) with
        | Some doc -> Ok doc | None -> refused)
+
+let syntax_edit_result ~factories doc op = edit_result ~apply:Workspace_doc.edit ~factories doc op
+
+(* a layout gesture is applied like a text one, and is atomic the same way *)
+let layout_op_result ~factories doc op = edit_result ~apply:Workspace_doc.edit_layout ~factories doc op
+
+let layout_op ~factories doc op = Result.map_error Diagnostic.to_string (layout_op_result ~factories doc op)
 
 let syntax_edit ~factories (doc : Document.t) op =
   Result.map_error Diagnostic.to_string (syntax_edit_result ~factories doc op)

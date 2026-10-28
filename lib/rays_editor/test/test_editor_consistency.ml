@@ -194,6 +194,9 @@ let preview_identity () =
   let edit doc op =
     let ws = D.Workspace_doc.edit catalog (doc.D.Document.workspace.ws) op |> Result.get_ok in
     D.Contexts.of_workspace ~factories ~previous:doc ws |> Result.get_ok in
+  let edit_layout doc op =
+    let ws = D.Workspace_doc.edit_layout catalog (doc.D.Document.workspace.ws) op |> Result.get_ok in
+    D.Contexts.of_workspace ~factories ~previous:doc ws |> Result.get_ok in
   let names = keys doc in
   check (List.length names = 3 && List.length (List.sort_uniq String.compare names) = 3)
     "named viewport keys are not unique";
@@ -214,7 +217,7 @@ let preview_identity () =
     value = parse "(ui/tile blank comparison main)"}) in
   check (keys swapped = List.rev names && List.sort compare (shell swapped).views = List.sort compare (shell doc).views)
     "reordering named panels transferred preview membership";
-  let docked = edit swapped (F.Dock_panel {node = ["editor"; "comparison"];
+  let docked = edit_layout swapped (Editor_document.Layout_edit.Dock_panel {node = ["editor"; "comparison"];
     target = ["editor"; "main"]; side = `Right}) in
   check (List.sort String.compare (keys docked) = List.sort String.compare names)
     ("docking changed named viewport identity: " ^ String.concat "," (keys docked)
@@ -224,7 +227,7 @@ let preview_identity () =
   let renamed = edit docked (F.Rename {node = ["editor"; "comparison"]; to_ = "alternate"}) in
   check (List.mem "v:\"editor\"/\"alternate\"" (keys renamed) && not (List.mem comparison (keys renamed)))
     "renaming retained the old authored viewport key";
-  let closed = edit renamed (F.Close_panel {node = ["editor"; "alternate"]}) in
+  let closed = edit_layout renamed (Editor_document.Layout_edit.Close_panel {node = ["editor"; "alternate"]}) in
   check (not (List.mem_assoc "v:\"editor\"/\"alternate\"" (shell closed).preview_sources)
     && List.for_all (fun (key, _) -> List.mem key (keys closed)) (shell closed).views)
     "closed preview left orphan membership/provenance";
@@ -275,18 +278,19 @@ let preview_orbits () =
     check (not (same initial orbited) && same (position main) initial)
       "viewport orbit fixture did not produce isolated cameras";
     let edit op = e := E.edit !e op |> Result.get_ok; update (0., 0.) [] in
+    let edit_layout op = e := E.edit_layout !e op |> Result.get_ok; update (0., 0.) [] in
     let preserved () = check (same (position main) initial && same (position comparison) orbited)
       "layout change transferred or reset named viewport orbits" in
     edit (F.Set_arg {node = ["editor"; "@result"]; key = Pos 0; sub = [];
       value = parse "(ui/tile blank comparison main)"});
     preserved ();
-    edit (F.Dock_panel {node = ["editor"; "comparison"]; target = ["editor"; "main"]; side = `Right});
+    edit_layout (Editor_document.Layout_edit.Dock_panel {node = ["editor"; "comparison"]; target = ["editor"; "main"]; side = `Right});
     preserved ();
     let editor_form = Rays_editor.Private.Text_pane.make_shown (E.workspace !e).source "editor" None Graph in
     edit (F.Set_graph {name = "editor"; form = parse editor_form.text});
     preserved ();
     focus main;
-    edit (F.Close_panel {node = ["editor"; "comparison"]});
+    edit_layout (Editor_document.Layout_edit.Close_panel {node = ["editor"; "comparison"]});
     let original_form = Rays_editor.Private.Text_pane.make_shown ws.source "editor" None Graph in
     edit (F.Set_graph {name = "editor"; form = parse original_form.text});
     focus comparison;

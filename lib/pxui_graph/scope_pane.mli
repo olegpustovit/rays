@@ -14,6 +14,8 @@ type change =
           [Set_arg], deleting a wired row is [Disconnect], the [+] row is
           [Add_item] / [Add_field] / [Set_arg], the context menu and keys
           are the rest *)
+  | Layout_active of { graph : string; index : int }
+      (** a click on a layout of an editor graph's switch: the host makes it the active one *)
   | Probe_set of { zone : path; index : int }  (** the selector moved *)
   | Zone_collapsed of { zone : path; collapsed : bool }
   | Selected of path list
