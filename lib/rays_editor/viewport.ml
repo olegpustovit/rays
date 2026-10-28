@@ -365,7 +365,7 @@ let navigate ~area control camera extra core ~(raw_frame : Frame.t) ~(input : Fr
         camera, { extra with fly = Some speed }
     | None ->
         let (vx, vy, vw, vh) = area in
-        let inside (x, y) = x >= float vx && x < float (vx + vw) && y >= float vy && y < float (vy + vh) in
+        let inside = Pxui.Ui.contains (float vx, float vy, float vw, float vh) in
         let pressed = List.exists (function
           | Input.Pointer_pressed (_, pt) -> inside pt
           | _ -> false) input.input.events in

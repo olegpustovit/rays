@@ -152,7 +152,6 @@ type t = {
   carry_hot : (path * bool) option;
   failed : (path * string) list;
   hinting : hinting option;
-  held : Input.key list * bool;
   back : (path * P.level) list;
   measure : int -> string -> float;
   tags : bool;
