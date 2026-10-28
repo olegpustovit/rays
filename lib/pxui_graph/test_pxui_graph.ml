@@ -568,26 +568,32 @@ let scope_spine () =
     | [ ((x0, y0) :: _ as pts) ] -> let x1, y1 = List.nth pts (List.length pts - 1) in Float.abs (x1 -. x0) < 0.5 && y1 > y0
     | _ -> false) "a map's stacked function is not wired straight down into its f socket"
 
-let scope_gestures () =
-  let module E = Flow_graph.Flow_edit in
-  let module S = Flow.Syntax in
-  let syntax op = Scope.Syntax_edit op in
+module G = struct
+  module E = Flow_graph.Flow_edit
+  module S = Flow.Syntax
+  let syntax op = Scope.Syntax_edit op
   (* a large window keeps the zoom at 1, where every field is built *)
   let frame ?mouse ?keys ?events () =
     let frame = frame ?mouse ?keys ?events () in
-    { frame with input = { frame.input with size = 3000, 2000 } } in
+    { frame with input = { frame.input with size = 3000, 2000 } }
   let scope_click view point =
-    scope_step view (frame ~mouse:point ~events:(mouse_move point :: click point) ()) in
-  let center_of view path = let x, y, w, h = Option.get (Scope.Private.box_of view path) in x, y, w, h in
-  let settled view = fst (scope_step view (frame ())) in
+    scope_step view (frame ~mouse:point ~events:(mouse_move point :: click point) ())
+  let center_of view path = let x, y, w, h = Option.get (Scope.Private.box_of view path) in x, y, w, h
+  let settled view = fst (scope_step view (frame ()))
   let scope_view ?inputs ?probe ?at ?collapsed workspace graph =
     ignore (inputs, probe, at, collapsed);
     let scope = P.of_graph scope_catalog workspace graph in
     Scope.create ~width:3000 ~height:2000 () |> Scope.with_scope ~key:graph scope
-    |> Scope.with_records (recorded workspace), scope in
-  let double_click view point = scope_click (fst (scope_click view point)) point in
+    |> Scope.with_records (recorded workspace), scope
+  let heart = [ "flower"; "heart" ]
+  let bloom_view () = settled (fst (scope_view (load_workspace "bloom") "flower"))
+  let double_click view point = scope_click (fst (scope_click view point)) point
   let type_text view text =
-    scope_step view (frame ~events:[ Input.Text_input text; Input.Key_pressed Input.Enter ] ()) in
+    scope_step view (frame ~events:[ Input.Text_input text; Input.Key_pressed Input.Enter ] ())
+end
+
+let scope_gestures_1 () =
+  let open G in
   (* rename: a double-click on the title opens a field, Enter commits Rename; F2 does the same *)
   let w = load_workspace "bloom" in
   let heart = [ "flower"; "heart" ] in
@@ -689,7 +695,11 @@ let scope_gestures () =
       ("value card could not replace " ^ text)) ["NaN"; "Infinity"; "-Infinity"];
   let rejected = written (edit (field ["g"; "a"] "radius" ~inset:60.) "NaN") in
   check (rejected = [])
-    ("a ranged radius field accepted NaN: " ^ String.concat "," rejected);
+    ("a ranged radius field accepted NaN: " ^ String.concat "," rejected)
+
+let scope_gestures_2 () =
+  let open G in
+  let w = load_workspace "bloom" in
   (* the selection commands and their requests *)
   let view = settled (Scope.select [ heart ] (fst (scope_view w "flower"))) in
   let only command = snd (Scope.run_command view command) in
@@ -746,7 +756,10 @@ let scope_gestures () =
   List.iter (fun (id, modifiers) ->
     check (List.exists (fun (c : _ Editor_core.Command.t) -> c.id = id && c.trigger = Some (Editor_core.Keymap.Chord (
       Input.KeyChar (if id = "scope.display" then 'v' else 'd'), modifiers))) Scope.bindings) (id ^ " is not bound"))
-    [ "scope.duplicate", [ Input.Meta ]; "scope.duplicate", [ Input.Ctrl ]; "scope.display", [] ];
+    [ "scope.duplicate", [ Input.Meta ]; "scope.duplicate", [ Input.Ctrl ]; "scope.display", [] ]
+
+let scope_gestures_3 () =
+  let open G in
   (* list rows: the + item row, the up arrow and Alt-Up move an item, a record's + field row *)
   let kw = load_workspace "kit" in
   let kit_scope = P.of_graph scope_catalog kw "kit" in
@@ -847,7 +860,11 @@ let scope_gestures () =
   check (List.mem (Scope.Selected [ [ "g"; "b" ]; [ "g"; "b"; ":" ^ label ] ]) changes)
     "a click on an expression chip did not select its row";
   check (Scope.selected eview = [ [ "g"; "b" ]; [ "g"; "b"; ":" ^ label ] ])
-    "the pane did not keep the row selected beside its card";
+    "the pane did not keep the row selected beside its card"
+
+let scope_gestures_4 () =
+  let open G in
+  let w = load_workspace "bloom" in
   (* frames: Shift-G makes one around the selection, the corner resizes it, the cross deletes it *)
   let view = settled (Scope.select [ heart; [ "flower"; "bloom" ] ] (fst (scope_view w "flower"))) in
   let view, changes = Scope.run_command view Scope.Make_frame in
@@ -957,6 +974,14 @@ let scope_gestures () =
     let selected, _ = drag (Scope.select [upstream] view) ~shift:true a b in
     check (List.mem upstream (Scope.selected selected) && List.mem result (Scope.selected selected))
       "Shift crossing did not keep the old selection and add the unnamed result") [P.Card; Chip; Point]
+
+let scope_gestures () =
+  scope_gestures_1 ();
+  scope_gestures_2 ();
+  scope_gestures_3 ();
+  scope_gestures_4 ();
+  ()
+
 
 let run_scope () =
   let module E = Flow_graph.Flow_edit in
