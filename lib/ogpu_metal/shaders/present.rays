@@ -1,0 +1,6 @@
+; The presentation blit (Ogpu_metal.Presentation): one full-screen triangle copying the RGBA8 source
+; texel under each pixel into the BGRA8 drawable.
+(defn present-vertex :context value [(vid : int)]
+  {:position [(if (int/eq vid 1) 3. -1.) (if (int/eq vid 2) 3. -1.) 0. 1.]})
+(defn present-fragment :context value []
+  (gpu/read 0 [(gpu/fragment-x) (gpu/fragment-y)]))

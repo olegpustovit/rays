@@ -125,5 +125,6 @@
 (test
  (name test_raster)
  (modules test_raster)
- (deps (glob_files ../renderer/shaders/*.rays) (glob_files ../renderer/shaders/metal/*.metal) (glob_files ../renderer/shaders/spirv/*.spv))
+ (deps (glob_files ../renderer/shaders/*.rays) (glob_files ../renderer/shaders/metal/*.metal) (glob_files ../renderer/shaders/spirv/*.spv)
+  (glob_files ../ogpu_metal/shaders/*.rays) (glob_files ../ogpu_metal/shaders/metal/*.metal) (glob_files ../ogpu_metal/shaders/spirv/*.spv))
  (libraries flow_gpu ogpu_mock))

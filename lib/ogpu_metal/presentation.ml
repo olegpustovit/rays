@@ -17,29 +17,7 @@ let fail_encode encoder value =
     encoder;
   metal value
 
-let source = {|
-#include <metal_stdlib>
-using namespace metal;
-
-struct RaysPresentVertex {
-  float4 position [[position]];
-};
-
-vertex RaysPresentVertex rays_present_vertex(uint vertex_id [[vertex_id]]) {
-  const float2 positions[3] = {
-    float2(-1.0, -1.0), float2(3.0, -1.0), float2(-1.0, 3.0)
-  };
-  RaysPresentVertex output;
-  output.position = float4(positions[vertex_id], 0.0, 1.0);
-  return output;
-}
-
-fragment float4 rays_present_fragment(
-    RaysPresentVertex input [[stage_in]],
-    texture2d<float, access::read> source_texture [[texture(0)]]) {
-  return source_texture.read(uint2(input.position.xy));
-}
-|}
+let source = Present_source.source
 
 let create device =
   let native = Device.Private.metal device in
@@ -57,10 +35,10 @@ let create device =
              let compiled =
                Metal.Compiler.create_render_pipeline
                  ~label:"Rays presentation"
-                 ~fragment:"rays_present_fragment"
+                 ~fragment:"present_fragment"
                  ~color_formats:[Metal.Texture.Bgra8_unorm]
                  ~primitive_topology:Metal.Render_pipeline.Triangle
-                 compiler ~library ~vertex:"rays_present_vertex"
+                 compiler ~library ~vertex:"present_vertex"
              in
              ignore (Metal.Compiler.destroy compiler);
              match compiled with

@@ -2,9 +2,17 @@
  (enabled_if (= %{system} macosx))
  (name ogpu_metal_native)
  (public_name rays.ogpu_metal_native)
- (modules Device Buffer Texture Sampler Library Pipeline Queue Presentation Surface Acceleration Command_control Compute_encoder Blit_encoder Render_encoder Backend)
- (private_modules Presentation Command_control Compute_encoder Blit_encoder Render_encoder)
+ (modules Device Buffer Texture Sampler Library Pipeline Queue Presentation Present_source Surface Acceleration Command_control Compute_encoder Blit_encoder Render_encoder Backend)
+ (private_modules Presentation Present_source Command_control Compute_encoder Blit_encoder Render_encoder)
  (libraries ogpu_core metal lru))
+
+; the presentation blit, generated from shaders/present.rays (lib/flow_gpu/test_raster.exe --write lib)
+(rule
+ (enabled_if (= %{system} macosx))
+ (target present_source.ml)
+ (deps shaders/metal/present.metal)
+ (action (with-stdout-to %{target}
+  (progn (echo "let source = {msl|") (cat shaders/metal/present.metal) (echo "|msl}\n")))))
 
 (library
  (enabled_if (= %{system} macosx))
