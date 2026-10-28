@@ -503,6 +503,17 @@ let mk_node c ?(authored = 0) ?(ty = Ty.geometry) kind args =
   st.nnodes <- st.nnodes + 1;
   Deferred (ty, n.id)
 
+let static_source : ((int -> node option) -> value -> value option) Atomic.t =
+  Atomic.make (fun _ _ -> None)
+
+let static_facts : ((int -> node option) -> int -> string) Atomic.t = Atomic.make (fun _ _ -> "")
+
+(* plan nodes are numbered in order, newest first in [st.nodes] *)
+let plan_node (st : st) id =
+  match List.nth_opt st.nodes (st.nnodes - 1 - id) with
+  | Some n when n.id = id -> Some n
+  | _ -> List.find_opt (fun (n : node) -> n.id = id) st.nodes
+
 let catalog_call c ?(authored = 0) kind ctx args =
   if (not (Context.supports_values ctx)) || ctx = Context.material then
     Struct (kind, Context.result ctx, args)
@@ -621,7 +632,7 @@ let inline_key c ~key parameters vals =
   if c.st.time <> None || c.data then None
   else
     let rec shape = function
-      | Deferred (ty, _) -> "D" ^ Ty.to_string ty
+      | Deferred (ty, id) -> "D" ^ Ty.to_string ty ^ Atomic.get static_facts (plan_node c.st) id
       | No_geo -> "N"
       | List xs -> "[" ^ String.concat "," (Array.to_list (Array.map shape xs)) ^ "]"
       | Source _ | Struct _ | Record _ | Fn _ | Residual _ -> raise Exit
@@ -1123,8 +1134,15 @@ and ev_raw c env (x : W.term) : value =
               state.epoch <- fresh_state_epoch ();
               v))
   | W.Error_rows { rows; policy; mapper } ->
-      if c.st.time = None then raise Needs_t;
-      let value = concrete_data c (ev (sub c "0") env rows) in
+      (* in a card's body a mask known statically (parameter data, no cooked source) is decided
+         now, so the boundary does not defer the body to a cook; a failure is the card's error *)
+      let value =
+        match (c.st.time, policy) with
+        | None, W.First when c.card <> None -> (
+            match ev (sub c "0") env rows with Int_array _ as v -> v | _ -> raise Needs_t)
+        | None, _ -> raise Needs_t
+        | Some _, _ -> concrete_data c (ev (sub c "0") env rows)
+      in
       Value.diagnose_rows value
         ~select:(fun rows first ->
           match (c.st.resolve, policy) with
@@ -1341,7 +1359,11 @@ and apply_op c ?(authored = 0) name (vals : (string * value) list) : value =
   let ty =
     Op.result_type o (List.map (fun (name, value) -> (name, Value.ty_of value, scalar value)) vals)
   in
-  o.body ~live ~node:(mk_node c ~authored ~ty) vals
+  match o.body ~live ~node:(mk_node c ~authored ~ty) vals with
+  | Source _ as v when c.st.time = None -> (
+      let st = c.st in
+      match Atomic.get static_source (plan_node st) v with Some answer -> answer | None -> v)
+  | v -> v
 
 (* A card's body runs in the caller. Its parameters take the host's path (ranges, choices,
    encoded text) and its validations refuse the program, as a node build would; an error in the

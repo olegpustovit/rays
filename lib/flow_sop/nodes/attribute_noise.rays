@@ -205,35 +205,25 @@
                      [(fma blend (- c0 base.x) base.x) (fma blend (- c1 base.y) base.y)
                       (fma blend (- c2 base.z) base.z) (fma blend (- c3 base.w) base.w)])
                    old))
-                 selection previous generated))
-               bad (if (int/eq count 0) count
-                 (array/min (map (fn [(member : int) (v : vec4) (index : int)]
-                   (if (and (int/eq member 1)
-                            (not (and (noise_finite v.x)
-                                 (and (or (int/lt dim 2) (and (noise_finite v.y) (noise_finite v.z)))
-                                      (or (int/lt dim 4) (noise_finite v.w))))))
-                     index count))
-                   selection blended (array/range count :type int))))]
-          (if (int/lt bad count)
-            (noise_fail (str "non-finite output at element " bad))
-            (let* [result (exact (map (fn [(member : int) (v : vec4)]
-                    (if (and (int/eq member 1) (int/eq dim 4))
-                      (let* [len (sqrt (+ (+ (+ (* v.x v.x) (* v.y v.y)) (* v.z v.z)) (* v.w v.w)))]
-                        (if (and (> len 1e-15) (noise_finite len))
-                          [(/ v.x len) (/ v.y len) (/ v.z len) (/ v.w len)]
-                          [0.0 0.0 0.0 1.0]))
-                      v))
-                    selection blended))]
-              (cond
-                on_position
-                  (let* [moved (map (fn [(v : vec4)] [v.x v.y v.z]) result)
-                         differs (if (int/eq count 0) 0 (array/max (map (fn [(old : vec4) (v : vec4)]
-                           (if (and (= old.x v.x) (and (= old.y v.y) (= old.z v.z))) 0 1)) previous result)))]
-                    (if (int/eq differs 0) in0
-                      (sop/delete_attr (sop/delete_attr (sop/with_attr in0 :P (exact moved)) "N" :owner "point")
-                        "N" :owner "vertex")))
-                (int/eq dim 1) (sop/with_attr in0 name (exact (map (fn [(v : vec4)] v.x) result))
-                                 :owner selected :type float)
-                (int/eq dim 3) (sop/with_attr in0 name (exact (map (fn [(v : vec4)] [v.x v.y v.z]) result))
-                                 :owner selected :type vec3)
-                :else (sop/with_attr in0 name result :owner selected :type vec4))))))))
+                 selection previous generated))]
+          (let* [result (exact (map (fn [(member : int) (v : vec4)]
+                  (if (and (int/eq member 1) (int/eq dim 4))
+                    (let* [len (sqrt (+ (+ (+ (* v.x v.x) (* v.y v.y)) (* v.z v.z)) (* v.w v.w)))]
+                      (if (and (> len 1e-15) (noise_finite len))
+                        [(/ v.x len) (/ v.y len) (/ v.z len) (/ v.w len)]
+                        [0.0 0.0 0.0 1.0]))
+                    v))
+                  selection blended))]
+            (cond
+              on_position
+                (let* [moved (map (fn [(v : vec4)] [v.x v.y v.z]) result)
+                       differs (if (int/eq count 0) 0 (array/max (map (fn [(old : vec4) (v : vec4)]
+                         (if (and (= old.x v.x) (and (= old.y v.y) (= old.z v.z))) 0 1)) previous result)))]
+                  (if (int/eq differs 0) in0
+                    (sop/delete_attr (sop/delete_attr (sop/with_attr in0 :P (exact moved)) "N" :owner "point")
+                      "N" :owner "vertex")))
+              (int/eq dim 1) (sop/with_attr in0 name (exact (map (fn [(v : vec4)] v.x) result))
+                               :owner selected :type float)
+              (int/eq dim 3) (sop/with_attr in0 name (exact (map (fn [(v : vec4)] [v.x v.y v.z]) result))
+                               :owner selected :type vec3)
+              :else (sop/with_attr in0 name result :owner selected :type vec4)))))))

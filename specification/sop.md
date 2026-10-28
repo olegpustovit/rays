@@ -393,6 +393,21 @@ and its other operator calls without a function argument lower without the libra
 no longer requalifies every definition: sop_gallery cooks in 0.92 s inline against 1.40 s nested
 (was 2.30 against 2.18), boolean in 3.1 ms against 11.4 ms.
 
+A `sop/has_attr` its producers decide is answered statically (`Flow.Eval.static_source`,
+`Lower.static_attributes`): walking back through card markers and group writes, a literal write
+of that owner and name answers it (with its type), a literal deletion of it answers false, a mesh
+holds only point P; any other producer, a write with a `:when` still to cook, or a chain of more
+than 64 steps leaves it to the cook. An inlined body's evaluation keys on those facts of its inputs
+(`Flow.Eval.static_facts`), so a replay answers as its producer would. Inside a card's body an
+`error_rows` whose mask is parameter data (policy `first`) is decided when the body evaluates, its
+failure the card's error, so a grid stays a pass-through card. `attribute_noise` over a grid is then
+a pass-through write and `grid > attribute_noise > transform` cooks noise, P and N in one node: 0.20
+s against 0.28 s (1M points, 2026-10-28); sop_gallery cooks in 0.88 s against 1.04 s, lowers in
+0.41 against 0.48 s and recooks an edit in 0.50 against 0.54 s. The grid's planes are then made
+while lowering (0.17 s for 1M points), not while cooking. A write of planes (`{:x .. :y ..}`) does
+not fold: a read of the attribute could not take it as its values. Ext-port goldens are unchanged,
+since a port decides nothing.
+
 A body reads its cook context through reserved inputs (`Context_kernel.label_context`): each
 distinct `sop/context_seed`, `context_frame` or `context_time` call, labelled with the card's
 cook label (its kind key; helpers read it from the evaluation), is a cook-time source that

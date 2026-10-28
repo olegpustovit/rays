@@ -1235,6 +1235,87 @@ let literal_pattern pattern =
        (function '*' | '?' | '[' | '\\' | '^' | ' ' | '\t' | '\n' | '\r' -> true | _ -> false)
        pattern)
 
+(* What a geometry's producers decide statically, newest first: literal writes ([`Write]; one with a
+   [:when] still to cook decides nothing), literal deletions, and a mesh, which holds positions only.
+   Card markers and group writes pass through; any other producer, or a chain over 64 steps, ends
+   in [`Open]. [sop/has_attr] is answered from it, and an inlined body keys on it. *)
+let static_attributes node id =
+  let text (n : E.node) key default =
+    match List.assoc_opt key n.args with
+    | None -> Some default
+    | Some (E.Text t) -> Some t
+    | Some _ -> None
+  in
+  let rec walk depth id acc =
+    match node id with
+    | Some (n : E.node) when depth < 64 -> (
+        let next key =
+          match List.assoc_opt key n.args with
+          | Some (E.Deferred (_, x)) when x < id -> walk (depth + 1) x
+          | _ -> fun acc -> List.rev (`Open :: acc)
+        in
+        match n.kind with
+        | k when k = E.card_kind -> next "value" acc
+        | "sop/with_group" -> next "geometry" acc
+        | "sop/mesh" | "sop/mesh_planes" -> List.rev (`Mesh :: acc)
+        | "sop/with_attr" when not (List.mem_assoc "when" n.args) -> (
+            match (text n "attribute" "", text n "owner" "point", text n "type" "vec3") with
+            | Some name, Some owner, Some kind when name <> "" ->
+                next "geometry" (`Write (owner, name, kind) :: acc)
+            | _ -> List.rev (`Open :: acc))
+        | "sop/delete_attr" -> (
+            match (text n "attribute" "", text n "owner" "point") with
+            | Some pattern, Some owner when pattern <> "" && literal_pattern pattern ->
+                next "geometry" (`Delete (owner, pattern) :: acc)
+            | _ -> List.rev (`Open :: acc))
+        | _ -> List.rev (`Open :: acc))
+    | _ -> List.rev (`Open :: acc)
+  in
+  walk 0 id []
+
+let () =
+  let owners = [ "point"; "vertex"; "primitive"; "detail" ]
+  and kinds = [ "float"; "int"; "vec2"; "vec3"; "vec4"; "text"; "float_array"; "int_array" ] in
+  Atomic.set E.static_facts (fun node id ->
+      String.concat ";"
+        (List.map
+           (function
+             | `Write (o, n, k) -> "w" ^ o ^ ":" ^ k ^ ":" ^ n
+             | `Delete (o, p) -> "d" ^ o ^ ":" ^ p
+             | `Mesh -> "m"
+             | `Open -> "?")
+           (static_attributes node id)));
+  Atomic.set E.static_source (fun node -> function
+    | E.Source ("sop/has_attr", _, args) as source -> (
+        let text key default =
+          match List.assoc_opt key args with
+          | None -> Some default
+          | Some (E.Text t) -> Some t
+          | Some _ -> None
+        in
+        let kind =
+          match List.assoc_opt "type" args with
+          | None -> Some None
+          | Some (E.Text k) when List.mem k kinds -> Some (Some k)
+          | Some _ -> None
+        in
+        match (List.assoc_opt "geometry" args, text "attribute" "", text "owner" "point", kind) with
+        | Some (E.Deferred (ty, id)), Some name, Some owner, Some kind
+          when Flow.Ty.is_geometry ty && name <> "" && List.mem owner owners ->
+            let rec has = function
+              | `Write (o, n, k) :: _ when o = owner && n = name ->
+                  Some (kind = None || kind = Some k)
+              | `Delete (o, p) :: _ when o = owner && p = name -> Some false
+              | (`Write _ | `Delete _) :: rest -> has rest
+              | `Mesh :: _ ->
+                  Some (owner = "point" && name = "P" && (kind = None || kind = Some "vec3"))
+              | `Open :: _ | [] -> None
+            in
+            Some
+              (Option.fold ~none:source ~some:(fun b -> E.Bool b) (has (static_attributes node id)))
+        | _ -> Some source)
+    | _ -> None)
+
 let fused_entry ~name ~kind values =
   E.Record [ ("attribute", E.Text name); ("type", E.Text kind); ("values", values) ]
 
@@ -1345,6 +1426,8 @@ let fold_writes (plan : E.plan) =
          n.args
     && Option.fold ~none:true ~some:(( = ) "point") (text n "owner")
     && text n "attribute" <> None
+    (* a write of planes ({:x .. :y ..}) is not a value a read of the attribute could take *)
+    && match List.assoc_opt "values" n.args with Some (E.Record _) -> false | _ -> true
   in
   let deletes (n : E.node) =
     match List.assoc_opt fused_deletes n.args with Some (E.List ds) -> Array.to_list ds | _ -> []

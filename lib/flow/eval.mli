@@ -220,6 +220,15 @@ type t = {
           inspection beyond the recording cap. *)
 }
 
+val static_source : ((int -> node option) -> value -> value option) Atomic.t
+(** A host's static answer to a cooked source while evaluating statically, from the plan nodes that
+    produce its inputs (by id): [Some v] when the host owns the source, [v] its answer or the source
+    itself when the producers do not decide it. The default owns none. *)
+
+val static_facts : ((int -> node option) -> int -> string) Atomic.t
+(** What the host decides statically about a plan node's output, as text: part of an inlined body's
+    key, so a body replayed for another producer answers {!static_source} as that producer would. *)
+
 val inline_parameters :
   (Workspace.t ->
   Workspace.node_definition ->
