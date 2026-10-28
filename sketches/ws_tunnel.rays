@@ -1,3 +1,4 @@
+; Tunnel: nested torus rings, each turned a little more than the last.
 (workspace rings
 
   (graph rings :context sop [(steps : int 18) (turn : float 0.18)]

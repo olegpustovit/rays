@@ -1,3 +1,4 @@
+; Blend shapes: a flat sheet moves toward two deformed copies of itself.
 (workspace ws_morph
 
   ; Blend Shapes: a flat sheet moves toward two deformed copies of itself.

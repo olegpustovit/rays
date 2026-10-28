@@ -22,7 +22,6 @@ before marking a split complete.
 `lib/rdk/test_*` and `lib/sop/test_*` open `Rdk_test_support`
 (`lib/rdk/test_support`) for `fail`, `check`, `get_ok`, the geometry
 comparisons and the like; a test file defines only helpers that differ.
-`tools/dedupe` removes a local copy the compiler resolves to the shared
 definition (`--open`), and does the same for library helpers in
 `Rdk_core.Support` (`--qualify Support`). Hot `[@inline]` helpers stay local:
 dev builds are opaque, so a cross-module call is not inlined.

@@ -1,3 +1,4 @@
+; Variations: a seeded garden of scattered shapes.
 (workspace variations
 
   (graph garden :context sop [(seed : int 1) (count : int 40)]

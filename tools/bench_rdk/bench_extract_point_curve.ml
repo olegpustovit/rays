@@ -1,8 +1,6 @@
+open Bench_util
 open Rays
 open Rdk
-
-let integer_env name default = match Sys.getenv_opt name with
-  | None -> default | Some value -> max 1 (int_of_string value)
 
 let curves = integer_env "RAYS_EXTRACT_CURVES" 1_000
 let points_per_curve = max 2
@@ -11,14 +9,6 @@ let repeats = integer_env "RAYS_EXTRACT_REPEATS" 5
 let domains = integer_env "RAYS_BENCH_DOMAINS"
     (Parallel.recommended_domains ())
 let grain = integer_env "RAYS_EXTRACT_GRAIN" 16_384
-
-let get = function Ok value -> value | Error error ->
-  failwith (Error.to_string error)
-
-let median values =
-  let values = Array.copy values in
-  Array.sort Float.compare values;
-  values.(Array.length values / 2)
 
 let attribute owner name storage =
   Attribute.create_owned ~owner ~name storage |> Result.get_ok
@@ -113,7 +103,7 @@ let measure name operation input =
     (median times) (median allocated) (median promoted) (median major)
     !output_points !output_hash
 
-let () =
+let run () =
   Printf.printf "case,input_points,curves,domains,grain,repeats,seconds,current_domain_allocated_bytes,promoted_bytes,major_bytes,output_points,hash\n";
   let sparse = fixture ~dense:false and dense = fixture ~dense:true in
   measure "constant_sparse"

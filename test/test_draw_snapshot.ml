@@ -16,9 +16,9 @@ let last_frame = 30
 let recorded = [ 0; 1; 30 ]
 
 let workspaces = [
-  "examples", "audio"; "examples", "basic"; "examples", "drawing";
-  "examples", "file_dialog"; "examples", "generative"; "examples", "noise";
-  "examples", "particles"; "examples", "pxui"; "examples", "recursive_rectangles";
+  "sketches", "audio"; "sketches", "basic"; "sketches", "drawing";
+  "sketches", "file_dialog"; "sketches", "generative"; "sketches", "noise";
+  "sketches", "particles"; "sketches", "pxui"; "sketches", "recursive_rectangles";
   "sketches", "flow_contours"; "sketches", "flow_image"; "sketches", "flow_image_kernel";
   "sketches", "flow_particles_gpu"; "sketches", "flow_shader"; "sketches", "flow_vectors";
 ]
@@ -71,11 +71,20 @@ let lines (_, name) =
       | Error code -> Printf.sprintf "frame %d error %s\n" index code)) frames
   |> String.concat ""
 
-(* Usage: test_draw_snapshot.exe examples_audio  (prints that workspace's snapshot) *)
+(* No argument: run every workspace in its own process and compare with draw_snapshots/.
+   With a name (examples_audio): print that workspace's snapshot. *)
 let () =
-  let args = List.tl (Array.to_list Sys.argv) in
-  match args with
-  | [] -> failwith "usage: test_draw_snapshot.exe <directory>_<name> ..."
+  match List.tl (Array.to_list Sys.argv) with
+  | [] ->
+      let read f = In_channel.with_open_bin f In_channel.input_all in
+      let failed = List.filter (fun workspace ->
+        let name = file_name workspace in
+        let out = Filename.temp_file "snapshot" ".txt" in
+        let status = Sys.command (Filename.quote_command Sys.executable_name
+          [Filename.remove_extension name] ~stdout:out) in
+        status <> 0 || read out <> read ("draw_snapshots/" ^ name)) workspaces in
+      if failed <> [] then
+        failwith ("draw snapshot differs: " ^ String.concat " " (List.map file_name failed))
   | names ->
       List.iter (fun name ->
         match List.find_opt (fun workspace -> file_name workspace = name ^ ".txt") workspaces with

@@ -1,3 +1,4 @@
+; An iso-surface of a pulsing sphere field: sop/iso_surface over a function of position.
 (workspace flow_field
   (graph surface :context sop
     (let* [radius (+ 1 (* 0.15 (sin t)))

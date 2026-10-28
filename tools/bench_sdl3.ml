@@ -168,7 +168,7 @@ let () =
   in
   (* The pixels a decoded image or a rendered text label hand the resource
      layer: the native decode into the caller's buffer. *)
-  let png = "test/sdl3_image_fixtures/sample.png" in
+  let png = "lib/sdl3_image/fixtures/sample.png" in
   let decode =
     measure ~name:"image_decode_png" ~iterations:arguments.decode_iterations
       ~calls_per_iteration:1 (fun _ ->

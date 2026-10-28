@@ -86,13 +86,7 @@ reach an Objective-C update method. Unknown native failures become typed
 `Native_error`; Metal unavailability is an explicit `Unsupported` or startup
 error rather than a no-op. Public `.mli` files hide raw values.
 
-Safe validation chains use the private result operator `let*`. The compiler
-codemod `tools/codemod/codemod.exe result-bind lib/metal/metal.ml` converts
-plain propagation and `Result.bind` callbacks while preserving explicit cleanup
-branches. Its self-check compares compiled success, failure, guard and cleanup
-behavior; `result-bind --verify BEFORE.ml AFTER.ml PPX.exe` compares the whole
-compiler tree after normalizing the migrated syntax. Only changed value
-definitions are formatted. The Metal build runs `ppx/result_bind/result_bind_ppx.exe` before
+Safe validation chains use the private result operator `let*`. The Metal build runs `ppx/result_bind/result_bind_ppx.exe` before
 typing to lower the operator and its native-error adapter to matches. This
 avoids continuation allocations in the installed non-Flambda OCaml compiler;
 public signatures and validation/ownership policy remain handwritten.

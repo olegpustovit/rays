@@ -1,3 +1,4 @@
+; A circle that orbits the window centre on a frame clock: the smallest draw graph.
 (workspace basic
 
   (graph picture :context draw

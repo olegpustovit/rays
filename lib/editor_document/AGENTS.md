@@ -67,5 +67,5 @@ it. Selection, navigation, cooking and history policy belong to the host. Root r
 - **A field of an object or layer**: add it to the schema in `Objects` or `Layers`; accept the
   `flow_manifest.sexp` diff.
 - **A panel kind**: a `Flow.Workspace` op, a case in `Contexts.panel_tree`, a `Panels.panel`.
-- **A derived edit**: a case in `Scene_sync` with a test in `test/test_scene_sync.ml` that the
+- **A derived edit**: a case in `Scene_sync` with a test in `lib/rays_editor/test/test_scene_sync.ml` that the
   saved text reloads to the same document.

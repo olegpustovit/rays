@@ -1,6 +1,5 @@
 (* The assertions the test_main modules share. A test opens this module unless it reports
-   under its own name; tools/dedupe removes a local copy the compiler resolves to the
-   definition here. *)
+   under its own name. *)
 
 let fail message = raise (Failure message)
 let check condition message = if not condition then fail message
@@ -46,7 +45,7 @@ end
 
 module Projection = struct
   module P = Flow_graph.Projection
-  let cases = "../specification/workspace/cases"
+  let cases = "../../../specification/workspace/cases"
   let read path = In_channel.with_open_bin path In_channel.input_all
   let catalog = Editor_document.Contexts.catalog ~version:1 Sop_catalog.Editor.factories |> Result.get_ok
   let workspace_of text = match Flow.Syntax.parse text with
@@ -69,7 +68,7 @@ module Graph_pane = struct
   }
   let catalog = Editor_document.Contexts.catalog ~version:1 Sop_catalog.Editor.factories |> Result.get_ok
   let load_workspace name =
-    let path = Filename.concat "../specification/workspace/cases" (name ^ ".lisp") in
+    let path = Filename.concat "../../../specification/workspace/cases" (name ^ ".lisp") in
     let text = In_channel.with_open_bin path In_channel.input_all in
     match Flow.Syntax.parse text with
     | Error d -> failwith (Diagnostic.to_string d)

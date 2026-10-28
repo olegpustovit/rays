@@ -17,7 +17,7 @@ description: Add a GPU feature to OGPU in rays, capability-gated and implemented
 3. Implement it in `lib/ogpu_metal` (Metal calls via the `metal-workflow`
    skill) and in `lib/ogpu_mock/impl.ml`: real behaviour when the mock can
    model it, otherwise the module's `unsupported` helper.
-4. Add conformance cases in `test/ogpu_conformance/conformance.ml`: exact
+4. Add conformance cases in `lib/ogpu/conformance/conformance.ml`: exact
    behaviour when `Caps.has` the feature, typed `Unsupported` otherwise, and
    no live handle left after destroy. The same file runs on the mock and on
    Metal. Unit cases go in `lib/ogpu/test_ogpu_*.ml` and
@@ -26,4 +26,4 @@ description: Add a GPU feature to OGPU in rays, capability-gated and implemented
    `lib/metal/gen/registry.ml` (the generator rejects a missing entry). Record
    the feature in the OGPU section of `specification/backend.md`.
 6. Run `dune build @lib/ogpu/runtest @lib/ogpu_metal/runtest
-   @test/ogpu_conformance/runtest`, then `@all` and `git diff --check`.
+   @lib/ogpu/conformance/runtest`, then `@all` and `git diff --check`.

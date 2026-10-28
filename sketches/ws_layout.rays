@@ -1,3 +1,4 @@
+; The studio layout: a garden of scattered shapes over a bed, the reference for the design kit.
 (workspace ws_layout
 
   ; The studio layout: fixed columns and strips that keep their points at any window size.

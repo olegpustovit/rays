@@ -612,7 +612,7 @@ let part_files () =
     let path = Filename.concat dir name in
     if Sys.is_directory path then rays path
     else if Filename.check_suffix name ".rays" then [path] else []) in
-  let files = List.sort compare (rays "../sketches") @ ["../specification/pxui-kit/kit.rays"] in
+  let files = List.sort compare (rays "../../../sketches") @ ["../../../specification/pxui-kit/kit.rays"] in
   (* the seven files that cost 6-30 s each (a lowering of each, three per literal) run under RAYS_SLOW=1 only *)
   let heavy = ["flow_particles_gpu/"; "ws_sunflower/"; "ws_tiles/"; "sop_gallery/"; "flow_field/"; "ws_bloom/"; "ws_garland/"] in
   let files = if Sys.getenv_opt "RAYS_SLOW" = Some "1" then files

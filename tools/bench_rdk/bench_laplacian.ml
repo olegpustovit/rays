@@ -1,22 +1,12 @@
+open Bench_util
 open Rays
 open Rdk
-
-let integer_env name default = match Sys.getenv_opt name with
-  | None -> default | Some value -> max 1 (int_of_string value)
 
 let elements = integer_env "RAYS_LAPLACIAN_POINTS" 250_000
 let repeats = integer_env "RAYS_LAPLACIAN_REPEATS" 3
 let domains = integer_env "RAYS_BENCH_DOMAINS"
     (Parallel.recommended_domains ())
 let grain = integer_env "RAYS_LAPLACIAN_GRAIN" 16_384
-
-let get = function Ok value -> value | Error error ->
-  failwith (Error.to_string error)
-
-let median values =
-  let values = Array.copy values in
-  Array.sort Float.compare values;
-  values.(Array.length values / 2)
 
 let input () =
   let side = max 3 (int_of_float (sqrt (float_of_int elements))) in
@@ -69,7 +59,7 @@ let measure name weighting normalize input =
     domains grain repeats (median times) (median allocated)
     (median promoted) (median major) !hash
 
-let () =
+let run () =
   let input = input () in
   Printf.printf "case,points,primitives,domains,grain,repeats,seconds,current_domain_allocated_bytes,promoted_bytes,major_bytes,hash\n";
   measure "cotan_pointwise" Laplacian.Laplacian_cotan true input;

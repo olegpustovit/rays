@@ -619,17 +619,17 @@ the release profile and are repeated with `RAYS_BENCH_DOMAINS=4`.
 
 | Area | Command |
 |---|---|
-| Exact predicates | `RAYS_PREDICATE_BENCH_COUNT=1000000 RAYS_PREDICATE_BENCH_REPEATS=5 dune exec --profile release tools/bench_predicates.exe` |
-| Circle from Edges | `RAYS_CIRCLE_EDGE_POINTS=1000000 RAYS_CIRCLE_EDGE_REPEATS=5 RAYS_BENCH_DOMAINS=1 dune exec --profile release tools/bench_circle_from_edges.exe` |
-| Graph Color | `RAYS_GRAPH_COLOR_ELEMENTS=1000000 RAYS_GRAPH_COLOR_REPEATS=5 RAYS_BENCH_DOMAINS=1 dune exec --profile release tools/bench_graph_color.exe` |
-| Convex Hull | `RAYS_HULL_REPEATS=3 RAYS_BENCH_DOMAINS=1 dune exec --profile release tools/bench_convex_hull.exe` |
-| Extract Centroid | `RAYS_CENTROID_SIZE=1000000 RAYS_CENTROID_REPEATS=3 RAYS_BENCH_DOMAINS=1 dune exec --profile release tools/bench_extract_centroid.exe` |
-| Extract Point from Curve | `RAYS_EXTRACT_REPEATS=5 RAYS_BENCH_DOMAINS=1 dune exec --profile release tools/bench_extract_point_curve.exe` |
+| Exact predicates | `RAYS_PREDICATE_BENCH_COUNT=1000000 RAYS_PREDICATE_BENCH_REPEATS=5 dune exec --profile release tools/bench_rdk/bench_rdk.exe -- predicates` |
+| Circle from Edges | `RAYS_CIRCLE_EDGE_POINTS=1000000 RAYS_CIRCLE_EDGE_REPEATS=5 RAYS_BENCH_DOMAINS=1 dune exec --profile release tools/bench_rdk/bench_rdk.exe -- circle_from_edges` |
+| Graph Color | `RAYS_GRAPH_COLOR_ELEMENTS=1000000 RAYS_GRAPH_COLOR_REPEATS=5 RAYS_BENCH_DOMAINS=1 dune exec --profile release tools/bench_rdk/bench_rdk.exe -- graph_color` |
+| Convex Hull | `RAYS_HULL_REPEATS=3 RAYS_BENCH_DOMAINS=1 dune exec --profile release tools/bench_rdk/bench_rdk.exe -- convex_hull` |
+| Extract Centroid | `RAYS_CENTROID_SIZE=1000000 RAYS_CENTROID_REPEATS=3 RAYS_BENCH_DOMAINS=1 dune exec --profile release tools/bench_rdk/bench_rdk.exe -- extract_centroid` |
+| Extract Point from Curve | `RAYS_EXTRACT_REPEATS=5 RAYS_BENCH_DOMAINS=1 dune exec --profile release tools/bench_rdk/bench_rdk.exe -- extract_point_curve` |
 | Cold Scene3 display packing | `dune exec tools/bench_scene3_packing.exe -- 1000000 7` (mesh construction excluded; cold coordinate planes, median/p95 and allocated bytes) |
 | Scene3 float64/float32 gallery pixels | `_build/default/tools/check.exe @test/test_scene3_float32_gallery` (native device required; records each scene's maximum channel difference and changed-pixel count) |
 | Material assignment | `dune exec tools/bench_material_assign.exe -- 100000 1` |
 | Editor held drag and undo | `dune exec tools/bench_rays_editor.exe -- 200 1000 2000` |
-| SOP graph scale smoke | `dune build test/test_main.exe`, then `_build/default/test/test_main.exe test_pxui_graph_smoke` |
+| SOP graph scale smoke | `dune build lib/rays_editor/test/test_main.exe`, then `_build/default/lib/rays_editor/test/test_main.exe test_pxui_graph_smoke` |
 | Source digest polling | `dune exec tools/bench_source_poll.exe -- sketches/sop_gallery.rays` |
 | Named-pane owner lookup | `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy dune exec tools/bench_named_owner.exe` |
 | Live light contexts | `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy dune exec tools/bench_live_lights.exe` |

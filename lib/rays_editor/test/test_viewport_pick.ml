@@ -1,7 +1,7 @@
 (* W6: viewport provenance.  The triangle to primitive map, the tags of nested
    merges through the editor's cook path, a CPU ray pick on a known seed and a
    known petal, the highlight (a per-corner colour, no recook), and the bench
-   (`dune exec test/test_main.exe -- bench_viewport_pick`). *)
+   (`dune exec lib/rays_editor/test/test_main.exe -- bench_viewport_pick`). *)
 open Flow_sop
 module Session = Sop.Session
 module Cook = Rays_editor.Private.Cook

@@ -1,3 +1,4 @@
+; Bloom studio: a flower whose petals repeat one shared function with for.
 (workspace bloom_studio
 
   ; A petal is one shared function. The flower repeats it with for.

@@ -1,6 +1,6 @@
 (executable
  (name codemod)
- (modules codemod metal_registry result_bind)
+ (modules codemod metal_registry)
  (libraries compiler-libs.common str))
 
 (rule
@@ -28,10 +28,6 @@
 (rule
  (alias runtest)
  (action (run %{exe:codemod.exe} metal-registry --self-test)))
-
-(rule
- (alias runtest)
- (action (run %{exe:codemod.exe} result-bind --self-test)))
 
 (rule
  (alias runtest)

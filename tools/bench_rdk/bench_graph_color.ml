@@ -1,22 +1,12 @@
+open Bench_util
 open Rays
 open Rdk
-
-let integer_env name default = match Sys.getenv_opt name with
-  | None -> default | Some value -> max 1 (int_of_string value)
 
 let elements = integer_env "RAYS_GRAPH_COLOR_ELEMENTS" 1_000_000
 let repeats = integer_env "RAYS_GRAPH_COLOR_REPEATS" 5
 let domains = integer_env "RAYS_BENCH_DOMAINS"
     (Parallel.recommended_domains ())
 let grain = integer_env "RAYS_GRAPH_COLOR_GRAIN" 16_384
-
-let get = function Ok value -> value | Error error ->
-  failwith (Error.to_string error)
-
-let median values =
-  let values = Array.copy values in
-  Array.sort Float.compare values;
-  values.(Array.length values / 2)
 
 let disconnected_triangles point_count =
   let triangles = max 1 (max 3 point_count / 3) in
@@ -76,7 +66,7 @@ let measure name owner connectivity input =
     domains grain repeats (median times) (median allocated)
     (median promoted) (median major) !output_hash
 
-let () =
+let run () =
   Printf.printf "case,points,primitives,domains,grain,repeats,seconds,current_domain_allocated_bytes,promoted_bytes,major_bytes,hash\n";
   measure "disconnected_triangle_points" Attribute.Point
     Graph_color.Graph_points_by_primitive (disconnected_triangles elements);

@@ -1,3 +1,4 @@
+; A building facade: floors and bays of windows set by integer inputs.
 (workspace facade
 
   (graph facade :context sop [(floors : int 6) (bays : int 5) (hide : int 2)]

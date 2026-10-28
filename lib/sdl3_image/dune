@@ -39,14 +39,14 @@
  (name test_sdl3_image)
  (modules test_sdl3_image)
  (libraries sdl3 sdl3_image sdl3_lock)
- (deps (source_tree ../../test/sdl3_image_fixtures) ../../packaging/sdl3.lock)
+ (deps (source_tree fixtures) ../../packaging/sdl3.lock)
  (action
   (setenv SDL_VIDEODRIVER dummy
-   (run %{test} %{workspace_root}/test/sdl3_image_fixtures))))
+   (run %{test} %{workspace_root}/lib/sdl3_image/fixtures))))
 
 (rule
  (alias qualification)
- (deps (source_tree ../../test/sdl3_image_fixtures) ../../packaging/sdl3.lock)
+ (deps (source_tree fixtures) ../../packaging/sdl3.lock)
  (action
   (setenv SDL_VIDEODRIVER dummy
-   (run %{exe:test_sdl3_image.exe} %{workspace_root}/test/sdl3_image_fixtures))))
+   (run %{exe:test_sdl3_image.exe} %{workspace_root}/lib/sdl3_image/fixtures))))

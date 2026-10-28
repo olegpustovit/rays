@@ -1,17 +1,9 @@
+open Bench_util
 open Rdk
-
-let integer_env name default =
-  match Sys.getenv_opt name with
-  | None -> default
-  | Some value -> max 1 (int_of_string value)
 
 let count = integer_env "RAYS_PREDICATE_BENCH_COUNT" 5_000_000
 let repeats = integer_env "RAYS_PREDICATE_BENCH_REPEATS" 5
 let sink = ref 0
-
-let median values =
-  Array.sort Float.compare values;
-  values.(Array.length values / 2)
 
 let sign_code = function
   | Predicates.Negative -> -1
@@ -46,7 +38,7 @@ let measure name iterations operation =
     (median times) (median allocations /. float iterations)
     (median promoted) (median major)
 
-let () =
+let run () =
   Printf.printf
     "benchmark,calls,repeats,median_seconds,allocated_bytes_per_call,promoted_bytes,major_bytes\n%!";
   let fast_x = Array.init 65_536 (fun index -> float_of_int index *. 0.125)

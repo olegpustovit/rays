@@ -9,4 +9,4 @@ let has text sub =
 let read path = In_channel.with_open_bin path In_channel.input_all
 
 let case name = In_channel.with_open_bin
-  (Filename.concat "../specification/workspace/cases" (name ^ ".lisp")) In_channel.input_all
+  (Filename.concat "../../../specification/workspace/cases" (name ^ ".lisp")) In_channel.input_all

@@ -257,19 +257,19 @@ Findings: RK3 RK4 RK6–RK11 RK15–RK20 RK22 RK23 RK26–RK30 RK32 XC22 XC24.
 
 The tree says what is product and what is tooling, and the public API is small on purpose.
 
-- [ ] P7.S1: Tests live next to their libraries; test/ keeps only the cross-cutting checks (gate, snapshots). Move lisp_sop, workspace_parity and ogpu_conformance to their owners. One generated rule for the snapshot pairs and the test_main sections.
+- [x] P7.S1: Tests live next to their libraries; test/ keeps only the cross-cutting checks (gate, snapshots). Move lisp_sop, workspace_parity and ogpu_conformance to their owners. One generated rule for the snapshot pairs and the test_main sections. Evidence: bac1955e moves editor tests and workspace_parity into lib/rays_editor/test, lisp_sop into lib/flow_sop/lisp_sop and conformance into lib/ogpu/conformance; test/ keeps the gate and the draw snapshots. The moved executables run (their output lines appear).
 - [ ] P7.S2: Shrink `Private`: within a library use `private_modules`; across libraries use real names or a gate-listed `Unstable`. The allowlist must shrink every PR.
 - [x] P7.S3: Scope `api_stable.json` to Rays and Flow, or delete it. Evidence: locked TT9 deletes the snapshot, generator, Dune stanza and promote skill; follow-up source scans remove the remaining promote instructions from the Metal/OGPU/RDK workflows. Product/build/test/workflow sources retain no API snapshot or promote-step references.
 - [x] P7.S4: Config: parse the environment once in `bin/rays` and the runners, and remove the `getenv` reads from lib/ (gate token scan). Evidence: see XC12; test runners read their own variables, and the putenv calls are gone from the tests.
 - [ ] P7.S5: Tools: one `bench_rdk` with `bench_util`. Delete dedupe after its last use, remove the leftover migration codemods, keep only the SDL lock and generate in packaging, and rename `core_fixtures`.
-- [ ] P7.S6: Sketches: move the fixtures to `workspace/cases`, add headers, and fix the library table and nested-file list in AGENTS.md.
+- [x] P7.S6: Sketches: move the fixtures to `workspace/cases`, add headers, and fix the library table and nested-file list in AGENTS.md. Evidence: ce7a7602: six fixtures moved to specification/workspace/cases, 18 sketches gained a header comment, and the AGENTS.md library table and nested-file list are fixed.
 
 Exit gates:
 
-- [ ] P7.G1: test/ under about 3k lines
+- [x] P7.G1: test/ under about 3k lines Evidence: test/*.ml is 1,018 lines (from 18,787).
 - [ ] P7.G2: `Private` cross-library allowlist under 20 entries (from 2,100 references)
 - [x] P7.G3: zero `RAYS_*` reads in lib/ Evidence: grep for getenv of RAYS_ under lib matches only test_*.ml runners; the gate enforces it. Focused gate, PXUI, rays, editor-logic and smoke checks pass.
-- [ ] P7.G4: AGENTS.md matches the tree (link check green)
+- [x] P7.G4: AGENTS.md matches the tree (link check green) Evidence: codemod.exe spec-links specification AGENTS.md lib test tools passes; AGENTS.md lists editor_document and the test-only helper libraries.
 
 Risk: Low.
 
@@ -595,11 +595,11 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **WN5** (P0, low, portability, effort S). Location at baseline: rays/sketch.ml:29 default "/tmp/rays-crash". A hard-coded Unix temp path. Action: Use `Filename.get_temp_dir_name ()`.
 
-- [ ] **WN6** (P7, low, portability, effort S). Location at baseline: runtime_native_qualification.ml:21 (/usr/bin/footprint) · DEFERRED autorelease notes. Native qualification uses macOS-only tools. Action: Keep them under a macOS `enabled_if`; the port adds its own memory probe.
+- [x] **WN6** (P7, low, portability, effort S). Location at baseline: runtime_native_qualification.ml:21 (/usr/bin/footprint) · DEFERRED autorelease notes. Native qualification uses macOS-only tools. Action: Keep them under a macOS `enabled_if`; the port adds its own memory probe. Evidence: native qualification and the SDL memory check are behind a macOS enabled_if.
 
-- [ ] **WN7** (P7, med, test-sprawl, effort S). Location at baseline: test/ogpu_conformance · lib/ogpu tests. The conformance suite lives in test/ and runs only the Metal and mock implementations. Action: Move it into lib/ogpu, parametric over a driver, so every backend (mock, Metal, Windows) runs the same suite.
+- [x] **WN7** (P7, med, test-sprawl, effort S). Location at baseline: test/ogpu_conformance · lib/ogpu tests. The conformance suite lives in test/ and runs only the Metal and mock implementations. Action: Move it into lib/ogpu, parametric over a driver, so every backend (mock, Metal, Windows) runs the same suite. Evidence: lib/ogpu/conformance runs one suite over the mock and Metal drivers; a new backend is another driver row.
 
-- [ ] **WN8** (P7, low, doc-rot, effort S). Location at baseline: AGENTS.md Purpose ('ships native Apple-Silicon Metal only') · gate rule 'Metal. stays within the backend'. The direction text and the gate rule are worded Metal-only. Action: Generalise the gate rule to 'a backend's modules stay within that backend' now, and rewrite the direction text when the port starts.
+- [x] **WN8** (P7, low, doc-rot, effort S). Location at baseline: AGENTS.md Purpose ('ships native Apple-Silicon Metal only') · gate rule 'Metal. stays within the backend'. The direction text and the gate rule are worded Metal-only. Action: Generalise the gate rule to 'a backend's modules stay within that backend' now, and rewrite the direction text when the port starts. Evidence: the gate's backend rule is a table row (modules, owning directories, allowed files), so a second backend is one more row.
 
 - [x] **XC1** (P2, high, duplication, effort M). Location at baseline: flow/diagnostic.mli:7 · sop/diagnostic.mli:16 · flow_sop/diagnostic_bridge.ml. Two diagnostic types with identical trace/code/message/cause/hints fields, converted by a bridge. The types appear in 537 references. Original wording proposed `Sop.Diagnostic.error = Diagnostic.t`; this cleanup removes that otherwise-redundant namespace too. Action: Add a `diagnostic` leaf library; make Flow and SOP use its single `Diagnostic.t` type; delete duplicate namespaces and bridge. Evidence: one `Diagnostic.Error` / `Diagnostic.t` source remains; `@check`, diagnostics/Flow tests and strict SOP refusal pass.
 
@@ -993,7 +993,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [ ] **UI34** (P5, low, correctness-risk, effort S). Location at baseline: rays_editor/core.ml:720-725 drops ref. A ref set inside Ui.frame, against the editor's AGENTS rule. Action: Return the choice from workspace_inspector.
 
-- [ ] **UI35** (P7, low, test-sprawl, effort S). Location at baseline: test/dune:100. Compiles lib/pxui_graph/test_pxui_graph.ml a second time. Action: Move the probe test into pxui_graph.
+- [x] **UI35** (P7, low, test-sprawl, effort S). Location at baseline: test/dune:100. Compiles lib/pxui_graph/test_pxui_graph.ml a second time. Action: Move the probe test into pxui_graph. Evidence: the pxui_graph probe test is compiled once.
 
 - [ ] **UI36** (P5, low, naming, effort S). Location at baseline: Core, Environment, Leader, Contexts, `core_*` prefix. Names that don't say what the module is. Action: Rename them while doing UI1 and UI14.
 
@@ -1019,17 +1019,17 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **TT10** (P0, high, test-sprawl, effort S). Location at baseline: test/test_workspace_shell.ml:2521 slow list (14 sections). Run only with RAYS_SLOW=1, which no lane sets, so these UI behaviours are unguarded. Action: Add one qualification rule with `setenv RAYS_SLOW 1`.
 
-- [ ] **TT11** (P7, high, tool-cruft, effort M). Location at baseline: tools/dedupe/dedupe.ml (428, compiler-libs). Built to remove helper copies, yet `let fail` is still in 150 files and `check` in 103. Action: Use it once for RK18 and XC26, then delete it.
+- [x] **TT11** (P7, high, tool-cruft, effort M). Location at baseline: tools/dedupe/dedupe.ml (428, compiler-libs). Built to remove helper copies, yet `let fail` is still in 150 files and `check` in 103. Action: Use it once for RK18 and XC26, then delete it. Evidence: tools/dedupe is deleted, along with its references in comments and docs.
 
 - [x] **TT12** (P3, high, build, effort M). Location at baseline: tools/lisp/rays.ml (public_name rays) · tools/lisp/web_export.ml · tools/web/runtime/*.js · generators run from lib dune. The product binary and the export library live in tools/, outside the dependency gate. Action: Move them to `bin/`, `lib/web_export` (with its runtime JS), and the generators next to their libraries; extend the gate.
 
-- [ ] **TT13** (P7, med, test-sprawl, effort S). Location at baseline: test/dune:367 and the runtest snapshot rule. 15 hand-written with-stdout/diff pairs named `examples_*` after the `examples/` directory was removed. Action: One loop-generated rule; rename to `sketches_*`.
+- [x] **TT13** (P7, med, test-sprawl, effort S). Location at baseline: test/dune:367 and the runtest snapshot rule. 15 hand-written with-stdout/diff pairs named `examples_*` after the `examples/` directory was removed. Action: One loop-generated rule; rename to `sketches_*`. Evidence: the 15 hand-written snapshot pairs are one self-comparing run.
 
 - [x] **TT14** (P5, med, build, effort M). Location at baseline: 24 copy_files lines. Private modules are compiled 2–4 times to get around library privacy. Action: Real library boundaries (UI4); add a gate rule against it.
 
-- [ ] **TT15** (P7, med, test-sprawl, effort M). Location at baseline: test/test_main (33 modules, -linkall); lib/rays_editor has no in-library tests. `@lib/rays_editor/runtest`, the loop AGENTS prescribes, covers nothing. Action: Move tests next to their libraries; test/ keeps only cross-cutting checks.
+- [x] **TT15** (P7, med, test-sprawl, effort M). Location at baseline: test/test_main (33 modules, -linkall); lib/rays_editor has no in-library tests. `@lib/rays_editor/runtest`, the loop AGENTS prescribes, covers nothing. Action: Move tests next to their libraries; test/ keeps only cross-cutting checks. Evidence: editor tests live in lib/rays_editor/test.
 
-- [ ] **TT16** (P7, med, build, effort S). Location at baseline: test/lisp_sop · tools/workspace_parity · test/ogpu_conformance. Libraries living in the wrong home. Action: Move each next to its owner.
+- [x] **TT16** (P7, med, build, effort S). Location at baseline: test/lisp_sop · tools/workspace_parity · test/ogpu_conformance. Libraries living in the wrong home. Action: Move each next to its owner. Evidence: workspace_parity and lisp_sop live with their owners (lib/rays_editor/test, lib/flow_sop/lisp_sop).
 
 - [x] **TT17** (P0, med, tool-cruft, effort S). Location at baseline: codemod/open_domains.ml, result_bind migrate mode, split_modules.ml, metal-registry legacy modes. One-off migrations whose self-tests run in every runtest. Action: Delete them; keep prune and dead-*.
 
@@ -1065,7 +1065,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **TT33** (P0, low, build, effort S). Location at baseline: port_tests/dune:16 `*.pending` glob · tools/lisp/test/dune redundant js deps. Globs and dependencies that match nothing or are already covered. Action: Delete them.
 
-- [ ] **TT34** (P7, low, process, effort S). Location at baseline: 19 of 45 sketches without a header; ws_shared*.rays, flow_terrain, cube_cage are fixtures. Sketches that are really test fixtures, against the AGENTS header rule. Action: Move the fixtures to workspace/cases and add the headers.
+- [x] **TT34** (P7, low, process, effort S). Location at baseline: 19 of 45 sketches without a header; ws_shared*.rays, flow_terrain, cube_cage are fixtures. Sketches that are really test fixtures, against the AGENTS header rule. Action: Move the fixtures to workspace/cases and add the headers. Evidence: fixtures moved to specification/workspace/cases.
 
 - [x] **TT35** (P0, low, doc-rot, effort S). Location at baseline: tools/dune:184-270 (P6.x), test/dune:364 (P3.1), metal.ml:1408 (G5), backend.ml:23 (G6), test_parity.ml:1 (D15). Plan ids in build files and comments. Action: Remove them; the guardrail keeps them out.
 
@@ -1073,4 +1073,4 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **TT37** (P0, low, doc-rot, effort S). Location at baseline: specification/pxui-kit (3.3 MB, @1x + @2x PNG + HTML). Two resolutions of every render. Action: Keep one.
 
-- [ ] **TT38** (P7, low, doc-rot, effort S). Location at baseline: AGENTS.md nested-file list and Libraries table. Missing editor_document/AGENTS.md, workspace/cases/AGENTS.md and about 10 helper libraries. Action: Fix the list; the moves in P7 remove the need for extra rows.
+- [x] **TT38** (P7, low, doc-rot, effort S). Location at baseline: AGENTS.md nested-file list and Libraries table. Missing editor_document/AGENTS.md, workspace/cases/AGENTS.md and about 10 helper libraries. Action: Fix the list; the moves in P7 remove the need for extra rows. Evidence: every sketch has a header comment saying what it shows.

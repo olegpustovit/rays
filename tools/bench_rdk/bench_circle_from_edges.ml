@@ -1,22 +1,12 @@
+open Bench_util
 open Rays
 open Rdk
-
-let integer_env name default = match Sys.getenv_opt name with
-  | None -> default | Some value -> max 1 (int_of_string value)
 
 let points = integer_env "RAYS_CIRCLE_EDGE_POINTS" 1_000_000
 let repeats = integer_env "RAYS_CIRCLE_EDGE_REPEATS" 5
 let domains = integer_env "RAYS_BENCH_DOMAINS"
     (Parallel.recommended_domains ())
 let grain = integer_env "RAYS_CIRCLE_EDGE_GRAIN" 16_384
-
-let get = function Ok value -> value | Error error ->
-  failwith (Error.to_string error)
-
-let median values =
-  let values = Array.copy values in
-  Array.sort Float.compare values;
-  values.(Array.length values / 2)
 
 let loops ~count ~vertices_per_loop =
   let point_count = count * vertices_per_loop in
@@ -79,7 +69,7 @@ let measure name components input =
     (median times) (median allocated) (median promoted) (median major)
     !output_hash
 
-let () =
+let run () =
   Printf.printf "case,input_points,components,domains,grain,repeats,seconds,current_domain_allocated_bytes,promoted_bytes,major_bytes,hash\n";
   let vertices_per_loop = 16 in
   let component_count = max 1 (points / vertices_per_loop) in

@@ -1,3 +1,4 @@
+; Tiles: a grid of cells with seeded variation.
 (workspace tiles
 
   (graph tiles :context sop [(cells : int 8) (seed : int 3)]

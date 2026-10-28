@@ -1,8 +1,5 @@
+open Bench_util
 open Rdk
-
-let integer_env name fallback = match Sys.getenv_opt name with
-  | None -> fallback
-  | Some value -> max 1 (int_of_string value)
 
 let points = integer_env "RAYS_DELAUNAY_POINTS" 100_000
 let repeats = integer_env "RAYS_DELAUNAY_REPEATS" 3
@@ -21,10 +18,6 @@ let coordinate point salt =
 
 let x = Array.init points (fun point -> coordinate point 17)
 and y = Array.init points (fun point -> coordinate point 53)
-
-let median values =
-  Array.sort Float.compare values;
-  values.(Array.length values / 2)
 
 let hash value =
   let result = ref 17 in
@@ -350,6 +343,6 @@ let run_benchmarks () =
     (fun value -> hash_ints
         (Planar_constraints.Private.view value).constraint_points)
 
-let () =
+let run () =
   Printf.eprintf "bench_delaunay2: domains=%d ocaml=%s\n%!" domains Sys.ocaml_version;
   Parallel.run ~domains run_benchmarks

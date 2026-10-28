@@ -1,3 +1,4 @@
+; A garland: a higher-order ring function takes its shape maker as an input.
 (workspace garland
 
   ; ring is a higher-order function: it takes the shape maker as an input.

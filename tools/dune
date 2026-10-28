@@ -1,8 +1,3 @@
-(library
- (name workspace_parity)
- (modules workspace_parity)
- (libraries rays rays_math rays_editor flow_native renderer runtime ogpu flow_ir flow_gpu flow_sop editor_document rdk_rays rdk_test_support unix parallel))
-
 (executable
  (name check)
  (modules check)
@@ -83,46 +78,6 @@
  (libraries renderer scene_execution_fixtures ogpu ogpu_metal unix parallel))
 
 (executable
- (name bench_predicates)
- (modules bench_predicates)
- (libraries rdk rdk_boolean unix parallel))
-
-(executable
- (name bench_convex_hull)
- (modules bench_convex_hull)
- (libraries rays rdk ogpu_mock unix parallel))
-
-(executable
- (name bench_extract_centroid)
- (modules bench_extract_centroid)
- (libraries rays rdk ogpu_mock unix parallel))
-
-(executable
- (name bench_extract_point_curve)
- (modules bench_extract_point_curve)
- (libraries rays rdk ogpu_mock unix parallel))
-
-(executable
- (name bench_circle_from_edges)
- (modules bench_circle_from_edges)
- (libraries rays rdk ogpu_mock unix parallel))
-
-(executable
- (name bench_graph_color)
- (modules bench_graph_color)
- (libraries rays rdk ogpu_mock unix parallel))
-
-(executable
- (name bench_laplacian)
- (modules bench_laplacian)
- (libraries rays rdk ogpu_mock unix parallel))
-
-(executable
- (name bench_delaunay2)
- (modules bench_delaunay2)
- (libraries rays rdk rays_math ogpu_mock unix parallel))
-
-(executable
  (name bench_core)
  (modules bench_core)
  (libraries flow flow_ir input rays_math unix parallel))
@@ -153,19 +108,12 @@
 (alias
  (name bench-build)
  (deps
-  bench_circle_from_edges.exe
-  bench_convex_hull.exe
+  bench_rdk/bench_rdk.exe
   bench_core.exe
   bench_marks.exe
-  bench_delaunay2.exe
-  bench_extract_centroid.exe
-  bench_extract_point_curve.exe
-  bench_graph_color.exe
-  bench_laplacian.exe
   bench_live_lights.exe
   bench_material_assign.exe
   bench_named_owner.exe
-  bench_predicates.exe
   bench_rewire_payload.exe
   bench_merge_payload.exe
   bench_scene3_packing.exe
@@ -271,7 +219,7 @@
   (glob_files ../lib/web_export/runtime/*.js) ../lib/web_export/runtime/marks.wgsl ../bin/rays.exe marks_shot.exe
   ../sketches/flow_contours.rays ../sketches/flow_image_kernel.rays
   ../sketches/flow_shader.rays ../sketches/flow_image.rays
-  (source_tree ../test/sdl3_image_fixtures))
+  (source_tree ../lib/sdl3_image/fixtures))
  (action
   (system "if command -v node >/dev/null 2>&1; then node web/test/gpu_images_e2e.mjs ../bin/rays.exe marks_shot.exe ..; else echo 'gpu_images_e2e: skipped (node not found)'; fi")))
 
@@ -309,3 +257,8 @@
  (name runtest)
  (deps
   (alias mesh_plane_validation)))
+
+(executable
+ (name bench_planar_attribute)
+ (modules bench_planar_attribute)
+ (libraries flow flow_sop rdk rdk_test_support rays_math unix parallel))

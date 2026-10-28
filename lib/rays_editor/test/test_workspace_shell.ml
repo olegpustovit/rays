@@ -1652,7 +1652,7 @@ let run_copy_lisp () =
 (* ---- the studio layout (flow.md 11.11): fixed sizes, strips, start state, several graph panels ---- *)
 
 let sketch name = In_channel.with_open_bin
-    (Filename.concat "../sketches" (name ^ ".rays")) In_channel.input_all
+    (Filename.concat "../../../sketches" (name ^ ".rays")) In_channel.input_all
 
 let run_studio () =
   let text = sketch "ws_layout" in
@@ -2540,7 +2540,7 @@ let run_view_native () =
   let directory = Filename.temp_dir "rays-view" "" in
   let prefix = Option.value ~default:(Filename.concat directory "view")
       (Sys.getenv_opt "RAYS_VIEW_PNG") in
-  let text = In_channel.with_open_bin "../sketches/shattered_cube.rays" In_channel.input_all in
+  let text = In_channel.with_open_bin "../../../sketches/shattered_cube.rays" In_channel.input_all in
   let rendered = ref "" and vertices = ref [] and original = ref [] and edited = ref []
   and returned = ref false in
   ignore (Result.get_ok (Sketch.run_state ~max_frames:37

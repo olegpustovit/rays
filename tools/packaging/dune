@@ -44,6 +44,7 @@
  (libraries sdl3_lock unix))
 
 (executable
+ (enabled_if (= %{system} macosx))
  (name check_sdl3_memory)
  (modules check_sdl3_memory)
  (libraries sdl3_lock unix))
@@ -60,6 +61,7 @@
 
 (alias
  (name sdl3-memory-tests)
+ (enabled_if (= %{system} macosx))
  (deps
   check_sdl3_memory.exe
   sdl3_asan.supp
@@ -95,10 +97,5 @@
   ../../packaging/conf-sdl3/conf-sdl3.opam
   ../../packaging/conf-sdl3-image/conf-sdl3-image.opam
   ../../packaging/conf-sdl3-ttf/conf-sdl3-ttf.opam
-  ../../packaging/conf-sdl3-mixer/conf-sdl3-mixer.opam
-  ../../test/dune
-  ../../lib/sdl3/test_sdl3.ml
-  ../../lib/sdl3_image/test_sdl3_image.ml
-  ../../lib/sdl3_ttf/test_sdl3_ttf.ml
-  ../../lib/sdl3_mixer/test_sdl3_mixer.ml)
+  ../../packaging/conf-sdl3-mixer/conf-sdl3-mixer.opam)
  (action (run %{test} --root ../..)))

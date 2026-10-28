@@ -25,8 +25,8 @@ fixture. Regenerate the oriented JPEG with:
 
 ```sh
 dune exec tools/sdl3/generate_image_fixtures.exe -- \
-  test/sdl3_image_fixtures/sample.jpg \
-  test/sdl3_image_fixtures
+  lib/sdl3_image/fixtures/sample.jpg \
+  lib/sdl3_image/fixtures
 ```
 
 The same OCaml tool writes the Rays-authored minimal ILBM and XV fixtures

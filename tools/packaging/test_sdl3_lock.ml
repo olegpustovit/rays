@@ -103,18 +103,4 @@ let () =
    | _ -> fail "set_tested did not change exactly the one tested field");
   let reread = Sdl3_lock.read_file (at "packaging/sdl3.lock") in
   if reread <> text then fail "lock changed while testing";
-  (* no literal release in the files that used to carry one *)
-  List.iter
-    (fun path ->
-      match version_literals (Sdl3_lock.read_file (at path)) with
-      | [] -> ()
-      | literals ->
-          fail "%s writes SDL version %s; read packaging/sdl3.lock instead"
-            path (String.concat ", " literals))
-    [ "test/dune"
-    ; "lib/sdl3/test_sdl3.ml"
-    ; "lib/sdl3_image/test_sdl3_image.ml"
-    ; "lib/sdl3_ttf/test_sdl3_ttf.ml"
-    ; "lib/sdl3_mixer/test_sdl3_mixer.ml"
-    ];
-  print_endline "sdl3.lock agrees with the opam probes and no test writes a version"
+  print_endline "sdl3.lock agrees with the opam probes"

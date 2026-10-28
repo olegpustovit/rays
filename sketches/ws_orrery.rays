@@ -1,3 +1,4 @@
+; An orrery: rings of moons cooked once and cached while playing.
 (workspace orrery
 
   (graph orrery :context sop [(rings : int 3) (moons : int 8) (seed : int 5)]

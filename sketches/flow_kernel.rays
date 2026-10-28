@@ -1,3 +1,4 @@
+; A grid terrain displaced by a per-point kernel over its positions and normals.
 (workspace flow_kernel
 
   (graph terrain :context sop

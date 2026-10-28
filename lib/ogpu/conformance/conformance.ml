@@ -392,7 +392,7 @@ let run driver =
     require (hit1=1 && prim1=1 && inst1=0 && close t1 2.) "instance 0 primitive 1 hit differs";
     require (hit2=1 && prim2=0 && inst2=1 && close t2 2.) "instance 1 primitive 0 hit differs";
     require (hit3=1 && prim3=1 && inst3=1 && close t3 2.) "instance 1 primitive 1 hit differs";
-    (* G5: bounding boxes resolved by an intersection function table, curves,
+    (* Bounding boxes resolved by an intersection function table, curves,
        motion keyframes, user-id instances with masks, and compaction. *)
     let extra_source=Bytes.of_string (String.concat "\n" [
       "#include <metal_stdlib>";"#include <metal_raytracing>";"using namespace metal;";"using namespace raytracing;";

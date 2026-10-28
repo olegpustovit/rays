@@ -1,3 +1,4 @@
+; A wave: strands of points summed from harmonics.
 (workspace wave
 
   (graph wave :context sop [(harmonics : int 5) (samples : int 90) (rows : int 6)]

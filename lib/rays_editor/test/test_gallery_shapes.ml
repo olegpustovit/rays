@@ -3,7 +3,7 @@ module S = Flow.Syntax
 
 (* Independent OCaml inputs from examples/sop_gallery/main.ml at 923dcecf^.
    The Lisp side is extracted from the current authored gallery. *)
-let text = In_channel.with_open_bin "../sketches/sop_gallery.rays" In_channel.input_all
+let text = In_channel.with_open_bin "../../../sketches/sop_gallery.rays" In_channel.input_all
 let forms = Result.get_ok (S.parse text)
 let graph name =
   let roots = S.children (List.hd forms) in
