@@ -134,7 +134,7 @@ let run prim args =
     body = List.mapi (fun i _ -> st i (C.Assign (i, C.Constant i))) args
       @ [st n (C.Assign (n, C.Prim (prim, List.mapi (fun i _ -> arg_name prim i, i) args)))];
     results = [| n |]; state_slots = [||]; regions = [||]; call_slots = 0 } in
-  match Flow_ir.Core_exec.run program ~live:(Input.at_time 0.) with
+  match (fun p -> Flow_ir.Core_exec.(execute (prepare p))) program ~live:(Input.at_time 0.) with
   | Ok v -> json v
   | Error (d : Diagnostic.t) -> Printf.sprintf {|{"error":{"code":%s,"message":%s%s}}|} (str d.code) (str d.message)
       (Option.fold ~none:"" ~some:(fun cause->",\"cause\":"^str cause)d.cause)
@@ -162,7 +162,7 @@ let integer_sum values =
       st 2 (Iterate{sequence=0;index=2;item=3;limit=max_int;
         body=[st 3 (Assign(1,Prim(Integer P.Iadd,["a",1;"b",3])))]})];
     results=[|1|];state_slots=[||];regions=[||];call_slots=0} in
-  match Flow_ir.Core_exec.run program ~live:(Input.at_time 0.) with
+  match (fun p -> Flow_ir.Core_exec.(execute (prepare p))) program ~live:(Input.at_time 0.) with
   | Ok value -> json value
   | Error d -> failwith (Diagnostic.to_string d)
 

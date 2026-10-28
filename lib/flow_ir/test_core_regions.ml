@@ -45,7 +45,7 @@ let check ?(times=times) ~region (name,body) =
     let verify label actual = if not (same_result actual expected) then
       failwith (Printf.sprintf "%s at %g (%s)" name time label) in
     (* A failing region declines to the packed path, so only successes compare with the walker. *)
-    (match I.Core_exec.run core ~live,expected with
+    (match Test_program.run core ~live,expected with
      | Ok a,Ok b -> if not (same a b) then failwith (Printf.sprintf "%s at %g (direct)" name time)
      | Error _,Error _ when not region -> ()
      | Error _,_ when region -> ()

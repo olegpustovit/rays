@@ -74,7 +74,7 @@ let ()=
     List.iter(fun domains->Parallel.run ~domains(fun()->List.iter(fun time->
       let live={(Input.at_time time)with frame=3}in
       let expected=E.Private.force_reference value ~live in
-      same(I.Core_exec.run core ~live)expected;
+      same(Test_program.run core ~live)expected;
       same(I.Executor.force ~strict:true executor ~live)expected)[-1.;0.;0.25;2.]))[1;4;8])
     ["(array/grade (map (fn [(i : int)] (int/mod (int/add i (frame/index)) 7)) (array/range 32769 :type int)) :descending true)";
      "(array/grade (map (fn [x] (if (> t 0.) x (- 0. x))) (array/range 32769)))";

@@ -58,7 +58,7 @@ let () =
     List.iter(fun time->let live=Input.at_time time in
       let reference=ok(E.Private.force_reference value ~live) in
       List.iter(fun domains->let direct,compiled=Parallel.run ~domains(fun()->
-        ok(I.Core_exec.run ~root:residual core ~live),ok(I.Executor.force ~strict:true executable ~live)) in
+        ok(Test_program.run ~root:residual core ~live),ok(I.Executor.force ~strict:true executable ~live)) in
         assert(same direct reference && same compiled reference)) [1;8]) [-0.;0.;0.25;2.])
     ["(array/min (array/vec3 5001 [t 3 -0.]))";
      "(array/max (array/int 5001 (int/add 9007199254740993 (frame/index))))";

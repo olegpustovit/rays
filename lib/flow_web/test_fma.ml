@@ -138,7 +138,7 @@ let () =
   same(ok(E.Private.force_reference source ~live));
   List.iter(fun domains->Parallel.run ~domains(fun()->
     same(ok(I.Executor.force ~strict:true compiled ~live));
-    same(ok(I.Core_exec.run ~force:(fun p->I.Packed.force ~strict:true p ~live) core ~live));
+    same(ok(Test_program.run ~force:(fun p->I.Packed.force ~strict:true p ~live) core ~live));
     same(ok(I.Packed.force ~strict:true packed ~live)))) [1;8];
   assert(I.Packed.gpu_refusals packed<>[]);
   (match Flow_web.Wgsl.kernel packed with Error d->assert(d.code="E_GPU_FORM")|Ok _->assert false);

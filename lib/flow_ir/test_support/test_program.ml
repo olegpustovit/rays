@@ -79,3 +79,5 @@ let two_outputs () =
   match Flow_ir.Core.Region.rebuild region ~outputs:[|[|o.(1)|]; [|o.(0); o.(1)|]|] () with
   | Ok program -> program
   | Error ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
+let run ?root ?strict ?force ?resolve program ~live =
+  Flow_ir.Core_exec.(execute ?root ?strict ?force ?resolve (prepare program) ~live)

@@ -46,13 +46,13 @@ let map ?(select=Fun.id) transform (graph:W.graph) =
 
 let context_ops=Flow.Workspace.body_context_ops
 
-let depends ?(op="sop/context_seed") ?(inputs=[]) ?(defs=[]) (graph:W.graph) =
+let context_ops_reached ?(inputs=[]) ?(defs=[]) (graph:W.graph) =
   let defaults=List.filter_map (fun (name,_,df)->Option.bind df (fun (t:W.term)->match t.node with
     | W.Lit (Param.Bool_value b)->Some (name,Flow.Eval.Bool b)
     | Lit (Int_value n)->Some (name,Flow.Eval.Int n)
     | Lit (Float_value f)->Some (name,Flow.Eval.Float f)
     | Text text->Some (name,Flow.Eval.Text text)|_->None)) graph.inputs in
-  let found=ref false and fuel=ref 4096 in
+  let found=ref [] and fuel=ref 4096 in
   let rec names = function
     | W.Name name -> [name]
     | Seq patterns -> List.concat_map names patterns
@@ -142,12 +142,15 @@ let depends ?(op="sop/context_seed") ?(inputs=[]) ?(defs=[]) (graph:W.graph) =
           {t with node=Nil}
       |_->t in
     ignore (map ~select (fun t -> (match t.W.node with
-      | W.Op {op=name;_} when name=op -> found:=true | _->()); t)
+      | W.Op {op=name;_} when List.mem name context_ops && not (List.mem name !found) -> found:=name :: !found | _->()); t)
       {graph with body;inputs=[]}) in
   let bindings=inputs@defaults in
   scan bindings graph.body;
   List.iter (fun (_,_,default) -> Option.iter (scan bindings) default) graph.inputs;
   !found
+
+let depends ?(op="sop/context_seed") ?inputs ?defs graph =
+  List.mem op (context_ops_reached ?inputs ?defs graph)
 
 let specialize ?(provenance= -1) ~context ~label graph = map (fun t -> match t.W.node with
   | W.Op {op="sop/provenance_base";_} -> {t with node=W.Lit (Param.Int_value provenance)}

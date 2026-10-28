@@ -150,7 +150,7 @@ let ()=
   let frame=ok(Flow_web.Js.frame program)in
   Printf.bprintf code "{const {frame}=await import('data:text/javascript;base64,'+Buffer.from(%s).toString('base64'));for(const pool of pools){const rt=createRuntime({regions:[]},{pool});\n"(quote frame);
   List.iter(fun index->let live={(Input.at_time 0.25)with frame=index;tick=index}in
-   let native=I.Core_exec.run ~strict:true ~force:(fun p->I.Packed.force ~strict:true p ~live)program ~live in
+   let native=Test_program.run ~strict:true ~force:(fun p->I.Packed.force ~strict:true p ~live)program ~live in
    Printf.bprintf code "{const input={t:.25,dt:0,frame:%d,tick:%d,size:[1,1]};rt.current=input;\n"index index;
    (match native with
     |Ok expected->Printf.bprintf code "const got=await frame(input,rt.slots,rt),expected=%s;if(!bytes(got.data).equals(bytes(expected)))throw Error('unused argument bytes');\n"(data expected)

@@ -100,7 +100,7 @@ let () =
     let check=function
       |Ok actual->assert(expected=Ok actual)
       |Error(d:Diagnostic.t)->(match expected with Error e->assert(d.code=e.code && d.message=e.message && d.cause=e.cause)|_->assert false) in
-    check(I.Core_exec.run core ~live);check(I.Executor.force ~strict:true compiled ~live)) [-1.;1.;2.];
+    check(Test_program.run core ~live);check(I.Executor.force ~strict:true compiled ~live)) [-1.;1.;2.];
   (match E.static(workspace "(error \"E_LITERAL\" \"literal failure\" :cause \"literal cause\")") with
    |Error d->assert(d.code="E_LITERAL" && d.cause=Some "literal cause" && d.span<>None)
    |Ok _->assert false);

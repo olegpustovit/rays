@@ -76,7 +76,7 @@ let ()=
     List.iter(fun domains->Parallel.run ~domains(fun()->
       List.iter(fun time->let live=Input.at_time time in
         let expected=E.Private.force_reference v ~live in
-        same(I.Core_exec.run core ~live) expected;
+        same(Test_program.run core ~live) expected;
         same(I.Executor.force ~strict:true executable ~live) expected)[-1.;0.;0.25;2.]))[1;4;8])
     ["(array/scatter_add (map (fn [(i : int)] (int/mod i 97)) (array/range 32769 :type int)) (map (fn [x] (+ x t)) (array/range 32769)) 97)";
      "(array/scatter_add (array/int 13 0) (array/int 13 (int/add (frame/index) 9007199254740993)) 2)";

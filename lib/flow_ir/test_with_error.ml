@@ -22,7 +22,7 @@ let compare body=
   let r=residual body in
   let program=match I.Core_lower.lower ~strict:true r with Ok program->program|Error form->failwith form in
   let live=Input.at_time 0. in
-  let a=I.Core_exec.run program ~live and b=E.Private.force_reference(E.Residual r)~live in
+  let a=Test_program.run program ~live and b=E.Private.force_reference(E.Residual r)~live in
   (match a,b with
    |Ok a,Ok b->assert(a=b)
    |Error a,Error b->assert(a.code=b.code && a.message=b.message && a.cause=b.cause && a.hints=b.hints && a.trace=b.trace)
@@ -60,7 +60,7 @@ let ()=
   let program:C.program={constants=[||];locals=[|diagnostic_ty;Flow.Ty.Any;diagnostic_ty;Flow.Ty.Any|];
     body=[statement 0(Protect{body=[statement 1(Assign(1,Prim(Fail_diagnostic original,[])))];value=1;failure=0;
       handler=[statement 2(Assign(2,Local 0))];mapped=2;result=3})];results=[|3|];state_slots=[||];regions=[||];call_slots=0}in
-  (match I.Core_exec.run program ~live:(Input.at_time 0.)with Error actual->assert(actual=original)|_->assert false);
+  (match Test_program.run program ~live:(Input.at_time 0.)with Error actual->assert(actual=original)|_->assert false);
   let without_cause={original with cause=None}in
   (try ignore(V.Private.with_error ~protected:(fun()->V.raise_diagnostic without_cause)
     ~map:Fun.id);assert false

@@ -34,7 +34,7 @@ let check (name,body) =
       | _ -> let show=function Ok v -> E.show v | Error d -> Diagnostic.to_string d in
           failwith (Printf.sprintf "%s at %g: %s <> %s" name time (show actual) (show expected)) in
     verify (E.force (E.Residual r) ~live);
-    verify (I.Core_exec.run core ~live);
+    verify (Test_program.run core ~live);
     verify (I.Executor.force program ~live))
     [-3.;-2.5;-0.;0.;0.37;1.;1.9;3.;8.;4096.;4097.]
 let () = List.iter check cases;print_endline "Core lists: direct/reference/executor parity passed"
@@ -51,8 +51,8 @@ let () =
     statement 2 (Assign (2,Constant 1));statement 3 (Assign (3,Constant 2))] in
   let store=statement 4 (Store {sequence=1;index=2;value=3}) in
   let live=Input.at_time 0. in
-  assert (I.Core_exec.run (program (init @ [store])) ~live = Ok (E.List [|Int 7;No_geo|]));
-  List.iter (fun body -> match I.Core_exec.run (program body) ~live with
+  assert (Test_program.run (program (init @ [store])) ~live = Ok (E.List [|Int 7;No_geo|]));
+  List.iter (fun body -> match Test_program.run (program body) ~live with
     | Error d -> assert (d.code="E_CORE_OWNERSHIP")
     | Ok _ -> failwith "A published or constant sequence accepted a store")
     [init @ [statement 5 (Assign (4,Local 1));statement 6 (Assign (5,Fields ["xs",4]));store];
@@ -70,13 +70,13 @@ let () =
       statement 2(Assign(2,Prim(Sequence_build,["count",0;"cooked",1])))];
     results=[|2|];state_slots=[||];regions=[||];call_slots=0} in
   let live=Input.at_time 0. in
-  (match I.Core_exec.run ~strict:true(program 5001 true) ~live with
+  (match Test_program.run ~strict:true(program 5001 true) ~live with
    |Ok(E.List xs)->assert(Array.length xs=5001 && Array.for_all((=)E.No_geo)xs)
    |_->failwith "Typed cooked collection retained an unrelated value-list cap");
-  List.iter(fun(count,cooked)->match I.Core_exec.run ~strict:true(program count cooked) ~live with
+  List.iter(fun(count,cooked)->match Test_program.run ~strict:true(program count cooked) ~live with
     |Error d->assert(d.code="E_ITER_BOUND" && d.message="Core list length exceeds its bound.")
     |_->failwith "Ordinary list or negative cooked builder lost its existing guard") [5001,false;-1,true];
-  assert(match I.Core_exec.run ~strict:true(program 4096 false) ~live with
+  assert(match Test_program.run ~strict:true(program 4096 false) ~live with
     |Ok(E.List xs)->Array.length xs=4096|_->false)
 
 let () =
@@ -126,7 +126,7 @@ let () =
     assert(List.for_all(fun body->builds body=0)loops);
     List.iter(fun time->let live=Input.at_time time in
       let expected=ok(E.Private.force_reference ~resolve(E.Residual r) ~live)in
-      let actual=ok(I.Core_exec.run ~strict:true ~resolve core ~live)in
+      let actual=ok(Test_program.run ~strict:true ~resolve core ~live)in
       assert(same actual expected)) [0.;0.25;0.75;1.])
     ["(map (fn [(geo : geometry)] (nth (list geo) (int/mod (frame/index) 1))) parts)";
      "(filter (fn [(geo : geometry)] (if (< t 0.5) true (equal? geo (first parts)))) parts)"];
@@ -153,7 +153,7 @@ let () =
   assert (counted core.body=1);
   let live=Input.at_time 0. in
   let want=E.Private.force_reference (E.Residual r) ~live in
-  (match I.Core_exec.run core ~live,want with
+  (match Test_program.run core ~live,want with
    | Ok (E.Float_array a),Ok (E.Float_array b) ->
        assert (Array.length a=8 && Array.for_all2 (fun x y -> Int64.bits_of_float x=Int64.bits_of_float y) a b)
    | Ok a,Ok b -> failwith (E.show a ^ " <> " ^ E.show b)

@@ -60,7 +60,7 @@ let ()=
     List.iter(fun domains->Parallel.run ~domains(fun()->
       List.iter(fun time->let live={(Input.at_time time)with frame=3}in
         let reference=E.Private.force_reference value ~live in
-        same(I.Core_exec.run core ~live)reference;
+        same(Test_program.run core ~live)reference;
         same(I.Executor.force ~strict:true executor ~live)reference)[-1.;0.;0.25;2.]))[1;4;8])
     ["(array/compact (map (fn [(i : int)] (if (int/eq (int/mod i 3) 0) 1 0)) (array/range 32769 :type int)))";
      "(array/scan_sum (map (fn [(i : int)] (int/add i (frame/index))) (array/range 32769 :type int)))";

@@ -17,7 +17,7 @@
  (name test_core_records)
  (modules test_core_records)
  (deps core_records.expected)
- (libraries flow_ir flow unix parallel))
+ (libraries flow_ir flow flow_ir_test_support unix parallel))
 
 (tests
  (names test_ir test_noise test_uniforms test_frame_kernel test_static_map)
@@ -30,12 +30,12 @@
 (tests
  (names test_gather test_reductions test_scatter test_compact_scan test_grade_index test_array_max_length)
  (modules test_gather test_reductions test_scatter test_compact_scan test_grade_index test_array_max_length)
- (libraries flow_ir flow rays_math unix parallel))
+ (libraries flow_ir flow flow_ir_test_support rays_math unix parallel))
 
 (tests
  (names test_with_error test_error_rows)
  (modules test_with_error test_error_rows)
- (libraries flow_ir flow flow_graph parallel))
+ (libraries flow_ir flow flow_graph flow_ir_test_support parallel))
 
 (test
  (name test_packed)
