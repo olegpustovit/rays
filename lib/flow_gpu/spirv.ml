@@ -102,6 +102,7 @@ type emitter = {
   scene : (int * int * int * int * int option * int * int * int) option;  (* acceleration structure variable and type, vertices, spheres, ray query, vec3, vec2 *)
   mutable block : int;
   mutable trace_cache : (int list * int * int array) list;
+  strands : int option;  (* the strand segments' storage variable *)
   mutable loop_depth : int;
 }
 
@@ -451,13 +452,12 @@ let int_compare_opcode = function
   | Ieq -> 170
 
 
-(* The procedural spheres of scene/trace: an in-loop analytic test after the ray query. [values] are the eight
-   fields so far; the loop carries them through phis and keeps the nearer hit. No inner branches. *)
-let spheres_loop e (layout : Flow_ir.Kernel_layout.t) float_of r spheres values =
+(* An in-loop analytic test after the ray query, over [count] records: [values] are the nine fields so far;
+   the loop carries them through phis and [body index phis] returns whether record [index] is nearer and its
+   fields. No inner branches. *)
+let analytic_loop e count values body =
   let words = e.words and float = e.float in
-  let argument k = float_of r.(k) in
-  let count = uniform e (Option.get layout.scene_spheres) in
-  let pre = e.block and header = Words.id words and body = Words.id words and continuing = Words.id words
+  let pre = e.block and header = Words.id words and body_label = Words.id words and continuing = Words.id words
   and finished = Words.id words and index_phi = Words.id words in
   let phis = Array.map (fun _ -> Words.id words) values in
   let main = words.body and loop_words = Buffer.create 512 and phi_words = Buffer.create 256 in
@@ -466,30 +466,9 @@ let spheres_loop e (layout : Flow_ir.Kernel_layout.t) float_of r spheres values 
   e.block <- header;
   let more = compare e 176 index_phi count in
   Words.instruction words.body 246 [ finished; continuing; 0 ];
-  Words.instruction words.body 250 [ more; body; finished ];
-  label e body;
-  let add a b = floating e 129 [ a; b ] and sub a b = floating e 131 [ a; b ] and mul a b = floating e 133 [ a; b ] in
-  let at = result e e.uint 132 [ index_phi; u e 4 ] in
-  let sphere k = load e spheres (result e e.uint 128 [ at; u e k ]) in
-  let radius = sphere 3 in
-  let length = ext e 31 [ add (mul (argument 4) (argument 4)) (add (mul (argument 5) (argument 5)) (mul (argument 6) (argument 6))) ] in
-  let direction k = floating e 136 [ argument (4 + k); length ] in
-  let dn = [| direction 0; direction 1; direction 2 |] in
-  let oc = Array.init 3 (fun k -> sub (argument (1 + k)) (sphere k)) in
-  let dot a b = add (mul a.(0) b.(0)) (add (mul a.(1) b.(1)) (mul a.(2) b.(2))) in
-  let b = dot oc dn in
-  let q = Array.init 3 (fun k -> sub oc.(k) (mul b dn.(k))) in
-  let disc = sub (mul radius radius) (dot q q) in
-  let root = ext e 31 [ select e float (compare e 190 disc (f e 0.)) disc (f e 0.) ] in
-  let near = sub (floating e 127 [ b ]) root and far = add (floating e 127 [ b ]) root in
-  let t = select e float (compare e 190 near (argument 7)) near far in
-  let both = result e e.boolean 167 in
-  let nearer = result e e.boolean 166 [ result e e.boolean 168 [ truth e phis.(7) ]; compare e 184 t phis.(0) ] in
-  let take = both [ both [ compare e 190 disc (f e 0.); compare e 190 t (argument 7) ];
-    both [ compare e 188 t (argument 8); nearer ] ] in
-  let radius_inverse k = floating e 136 [ add oc.(k) (mul t dn.(k)); radius ] in
-  let next = [| t; sub (f e (-2.)) (result e float 112 [ index_phi ]); f e 0.; f e 0.;
-    radius_inverse 0; radius_inverse 1; radius_inverse 2; f e 1.; f e (-1.) |] in
+  Words.instruction words.body 250 [ more; body_label; finished ];
+  label e body_label;
+  let take, next = body index_phi phis in
   let chosen = Array.mapi (fun k value -> select e float take value phis.(k)) next in
   jump e continuing;
   label e continuing;
@@ -504,6 +483,89 @@ let spheres_loop e (layout : Flow_ir.Kernel_layout.t) float_of r spheres values 
   Buffer.add_buffer main loop_words;
   label e finished;
   phis
+
+let add e a b = floating e 129 [ a; b ] and sub e a b = floating e 131 [ a; b ] and mul e a b = floating e 133 [ a; b ]
+let dot e a b = add e (mul e a.(0) b.(0)) (add e (mul e a.(1) b.(1)) (mul e a.(2) b.(2)))
+let unit_direction e argument =
+  let length = ext e 31 [ add e (mul e (argument 4) (argument 4)) (add e (mul e (argument 5) (argument 5)) (mul e (argument 6) (argument 6))) ] in
+  let direction k = floating e 136 [ argument (4 + k); length ] in
+  [| direction 0; direction 1; direction 2 |]
+
+(* The procedural spheres of scene/trace. *)
+let spheres_loop e (layout : Flow_ir.Kernel_layout.t) float_of r spheres values =
+  let float = e.float in
+  let argument k = float_of r.(k) in
+  let count = uniform e (Option.get layout.scene_spheres) in
+  analytic_loop e count values (fun index_phi phis ->
+  let add = add e and sub = sub e and mul = mul e in
+  let at = result e e.uint 132 [ index_phi; u e 4 ] in
+  let sphere k = load e spheres (result e e.uint 128 [ at; u e k ]) in
+  let radius = sphere 3 in
+  let dn = unit_direction e argument in
+  let oc = Array.init 3 (fun k -> sub (argument (1 + k)) (sphere k)) in
+  let dot = dot e in
+  let b = dot oc dn in
+  let q = Array.init 3 (fun k -> sub oc.(k) (mul b dn.(k))) in
+  let disc = sub (mul radius radius) (dot q q) in
+  let root = ext e 31 [ select e float (compare e 190 disc (f e 0.)) disc (f e 0.) ] in
+  let near = sub (floating e 127 [ b ]) root and far = add (floating e 127 [ b ]) root in
+  let t = select e float (compare e 190 near (argument 7)) near far in
+  let both = result e e.boolean 167 in
+  let nearer = result e e.boolean 166 [ result e e.boolean 168 [ truth e phis.(7) ]; compare e 184 t phis.(0) ] in
+  let take = both [ both [ compare e 190 disc (f e 0.); compare e 190 t (argument 7) ];
+    both [ compare e 188 t (argument 8); nearer ] ] in
+  let radius_inverse k = floating e 136 [ add oc.(k) (mul t dn.(k)); radius ] in
+  take, [| t; sub (f e (-2.)) (result e float 112 [ index_phi ]); f e 0.; f e 0.;
+    radius_inverse 0; radius_inverse 1; radius_inverse 2; f e 1.; f e (-1.) |])
+
+(* The strands of scene/trace without native curves (Emit's strand_t and strand_hit): each segment a capsule,
+   the cylinder's two roots within it and each end sphere's two roots beyond it; the nearest in
+   [tmin, limit] wins. *)
+let strands_loop e (layout : Flow_ir.Kernel_layout.t) float_of r strands values =
+  let float = e.float in
+  let argument k = float_of r.(k) in
+  let count = uniform e (Option.get layout.scene_strand_count) in
+  analytic_loop e count values (fun index_phi phis ->
+  let add = add e and sub = sub e and mul = mul e and dot = dot e in
+  let both = result e e.boolean 167 and gt a b = compare e 186 a b and ge a b = compare e 190 a b
+  and lt a b = compare e 184 a b and le a b = compare e 188 a b in
+  let at = result e e.uint 132 [ index_phi; u e 8 ] in
+  let field k = load e strands (result e e.uint 128 [ at; u e k ]) in
+  let a = Array.init 3 field and b = Array.init 3 (fun k -> field (4 + k)) and radius = field 3 in
+  let dn = unit_direction e argument and o = Array.init 3 (fun k -> argument (1 + k)) in
+  (* roots from the ray's point nearest the segment's middle, [shift] along it, as Emit's strand_t *)
+  let shift = dot (Array.init 3 (fun k -> sub (mul (f e 0.5) (add a.(k) b.(k))) o.(k))) dn in
+  let o = Array.init 3 (fun k -> add o.(k) (mul shift dn.(k))) in
+  let ba = Array.init 3 (fun k -> sub b.(k) a.(k)) and oa = Array.init 3 (fun k -> sub o.(k) a.(k)) in
+  let baba = dot ba ba and bard = dot ba dn and baoa = dot ba oa and rr = mul radius radius in
+  let limit = sub (select e float (truth e phis.(7)) phis.(0) (argument 8)) shift and tmin = sub (argument 7) shift in
+  let best = ref (f e Float.infinity) in
+  let consider valid t =
+    let y = add baoa (mul t bard) in
+    let ok = both [ both [ valid y; both [ ge t tmin; le t limit ] ]; lt t !best ] in
+    best := select e float ok t !best in
+  let roots disc minus_b scale valid =
+    let root = ext e 31 [ ext e 40 [ disc; f e 0. ] ] and real = ge disc (f e 0.) in
+    List.iter (fun sign -> consider (fun y -> both [ real; valid y ])
+      (floating e 136 [ (if sign then add else sub) minus_b root; scale ])) [ false; true ] in
+  let big_a = sub baba (mul bard bard) in
+  let big_b = sub (mul baba (dot dn oa)) (mul baoa bard) in
+  let big_c = sub (sub (mul baba (dot oa oa)) (mul baoa baoa)) (mul rr baba) in
+  roots (sub (mul big_b big_b) (mul big_a big_c)) (floating e 127 [ big_b ]) big_a
+    (fun y -> both [ gt big_a (f e 0.); both [ gt y (f e 0.); lt y baba ] ]);
+  List.iter (fun (centre, valid) ->
+    let oc = Array.init 3 (fun k -> sub o.(k) centre.(k)) in
+    let half = dot oc dn in
+    roots (sub (mul half half) (sub (dot oc oc) rr)) (floating e 127 [ half ]) (f e 1.) valid)
+    [ (a, fun y -> le y (f e 0.)); (b, fun y -> ge y baba) ];
+  let t = !best in
+  let along = ext e 43 [ floating e 136 [ add baoa (mul t bard); baba ]; f e 0.; f e 1. ] in
+  let off = Array.init 3 (fun k -> sub (add oa.(k) (mul t dn.(k))) (mul along ba.(k))) in
+  let scale = floating e 136 [ dot off ba; ext e 40 [ baba; f e 1e-8 ] ] in
+  let off = Array.init 3 (fun k -> sub off.(k) (mul ba.(k) scale)) in
+  let length = ext e 31 [ dot off off ] in
+  le t limit, [| add t shift; result e float 112 [ index_phi ]; along; f e 0.; floating e 136 [ off.(0); length ];
+    floating e 136 [ off.(1); length ]; floating e 136 [ off.(2); length ]; f e 1.; f e (-2.) |])
 
 let trace_values e (layout : Flow_ir.Kernel_layout.t) float_of r =
   let words = e.words and float = e.float and boolean = e.boolean in
@@ -549,6 +611,7 @@ let trace_values e (layout : Flow_ir.Kernel_layout.t) float_of r =
           pick (world_normal 0) 0.; pick (world_normal 1) 0.; pick (world_normal 2) 0.; pick (f e 1.) 0.;
           pick (match instance with None -> f e 0. | Some i -> result e float 112 [ i ]) (-1.) |] in
         let values = spheres_loop e layout float_of r spheres values in
+        let values = match e.strands with None -> values | Some strands -> strands_loop e layout float_of r strands values in
         e.trace_cache <- (key, e.block, values) :: e.trace_cache;
         values
 
@@ -920,12 +983,12 @@ let resident_count e (layout : Flow_ir.Kernel_layout.t) index buffers =
   | None, None -> n
   | _ -> assert false
 
-let kernel ?(fast = false) ?(instanced = false) ?(motion = false) program =
+let kernel ?(fast = false) ?(instanced = false) ?(motion = false) ?(curves = false) program =
   try
     (match P.gpu_refusals ~fused:true ~fast program with
     | [] -> ()
     | diagnostic :: _ -> raise (Diagnostic.Error diagnostic));
-    let layout = Flow_ir.Kernel_layout.plan ~fast ~instanced ~motion program in
+    let layout = Flow_ir.Kernel_layout.plan ~fast ~instanced ~motion ~curves program in
     (* SPV_NV_ray_tracing_motion_blur moves only trace-rays pipelines, not ray queries *)
     if layout.scene_motion then
       fail "scene/trace motion has no SPIR-V ray-query form; build the scene at the shutter midpoint (Run.build_scene without Ray_tracing_motion).";
@@ -1014,6 +1077,7 @@ let kernel ?(fast = false) ?(instanced = false) ?(motion = false) program =
           (accel, accel_type, vertices, spheres, instances, query, Words.declare words 23 [ float; 3 ], Words.declare words 23 [ float; 2 ]))
         layout.scene_binding
     in
+    let strands = Option.map (fun binding -> bind storage 12 binding Ogpu.Shader.Storage_buffer) layout.scene_strands in
     let noise = Option.map (fun _ -> (Words.id words, Words.id words)) table in
     let invocation = variable invocation_pointer 1 in
     Words.instruction words.annotations 71 [ invocation; 11; 28 ];
@@ -1040,6 +1104,7 @@ let kernel ?(fast = false) ?(instanced = false) ?(motion = false) program =
         scene;
         block = 0;
         trace_cache = [];
+        strands;
         loop_depth = 0;
       }
     in

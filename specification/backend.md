@@ -1079,6 +1079,21 @@ not ray queries, so a Vulkan host builds at the midpoint. The CPU host (`Trace_s
 `lib/flow_gpu/test_trace.ml` checks both kinds against the CPU at several times, and the midpoint fallback against
 the CPU at 0.5. Static kernels print byte-identical source.
 
+Strands (curves) are the fourth static fact, `~curves` (`` `Native `` or `` `Loop `` on `Emit.kernel`, a bool on
+`Spirv.kernel` and `Kernel_layout.plan`). A strand segment is pathtrace.metal's linear round curve with sphere
+caps: two float4s (end a, radius; end b, radius) in a buffer bound after every other scene buffer, with a
+`scene:strands` count uniform. A hit reports `prim` = the segment, `u` = the curve parameter, `v` = 0,
+`instance` = -2 and the reference's normal (the offset from the axis point at `u`, less its tangential part); the
+nearest of triangle, strand and sphere wins. `` `Native `` (where `Run.build_scene` finds `Ray_tracing_curves`,
+Apple GPU family 9 and later) intersects a second, curve-only primitive structure built over the segment records
+themselves (control-point stride 16, radius at `.w`) with `intersector<curve_data>` bound after the strands.
+`` `Loop `` (CPU, SPIR-V, and Metal without the cap) tests each segment as a capsule in-loop, like the spheres:
+the cylinder's roots within the segment and the end spheres' beyond it, solved from the ray's point nearest the
+segment's middle so float32 keeps them within 1e-5 of the CPU. The loop is linear in the segment count (an AABB
+structure with a candidate loop is the upgrade if strand counts grow). `Trace_scene.register ~strands` is the
+CPU host. `test_trace` checks the capsule loop against the CPU on Metal; on a device below family 9 it checks
+only that the native kernel compiles to a pipeline. `test_spirv` validates the loop's SPIR-V (`fast_trace_curves`).
+
 ## Film accumulation (P8.S2)
 
 A read-modify-write float film needs no new sink: a one-output kernel whose input 0 is `~bound` to the film buffer and

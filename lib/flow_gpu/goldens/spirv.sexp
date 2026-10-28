@@ -17,6 +17,7 @@
 (fast_convert 4132 e6a692f29d02d8edacc025f2394d3386)
 (fast_trace 8192 f5eec5dd7e8f0c441b6daf4765c6b70c)
 (fast_trace_instanced 13484 f6ffb564e0d3af4517e4e53268cbfbdf)
+(fast_trace_curves 16460 d11a72f4c7f2dc0364497b707f32f079)
 (fast_gather 3552 0aa18b07e842b50c641cdb59508cbe5f)
 (fast_vec_gather 4592 dcc698b9da10a14072344daabfb2a0d8)
 (fast_int_gather 3704 9ac32e718660b45735b4f72915875c1e)

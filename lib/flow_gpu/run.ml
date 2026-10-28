@@ -10,8 +10,8 @@ type t = {device:B.device; queue:B.queue; pipelines : Pipelines.t; msl : Emit.ms
   mutable generation : int; mutable table_ready:bool; domain : Domain.id;
   mutable last_epoch : int64}
 type scene = {accel:B.accel; vertices:B.buffer; spheres:B.buffer; sphere_count:int; instances:B.buffer option}
-type extras = {vertices_end:B.buffer option}
-let no_extras = {vertices_end=None}
+type extras = {vertices_end:B.buffer option; strands:B.buffer option; strand_count:int; curves:B.accel option}
+let no_extras = {vertices_end=None; strands=None; strand_count=0; curves=None}
 type output = {owner : t; count : int; width : int; index : int; gpu_seconds : float option; generation : int; epoch : int64; check_status:bool}
 let diagnostic error = Diagnostic.error ~code:"E_GPU" (Ogpu.Error.to_string error)
 let get = function Ok value -> value | Error error -> raise (Diagnostic.Error (diagnostic error))
@@ -75,7 +75,9 @@ let ensure t slot length =
 let msl_scene t = t.msl.Emit.scene
 let dispatch ?(wait=true) ?(reset_status=true) ?commands ?count ?into ?(bound=fun _ -> None) ?(bound_table=fun _ -> None) ?scene ?(extras=no_extras) t (values : P.Private.inputs) =
   (* the scene's buffers after its spheres, in Kernel_layout's order; the kernel's interface names as many *)
-  let scene_tail = match scene with None -> [] | Some s -> List.filter_map Fun.id [s.instances; extras.vertices_end] in
+  let scene_tail = match scene with None -> [] | Some s ->
+    List.filter_map (Option.map (fun b -> `Buffer b)) [s.instances; extras.vertices_end; extras.strands]
+    @ Option.fold ~none:[] ~some:(fun a -> [`Accel a]) extras.curves in
   let error message = Error (Diagnostic.error ~code:"E_KERNEL" message) in
   if t.closed || Domain.self ()<>t.domain then error "GPU program owner is closed or called from another domain."
   else if values.count<0 || values.count>Int32.to_int Int32.max_int ||
@@ -111,6 +113,7 @@ let dispatch ?(wait=true) ?(reset_status=true) ?commands ?count ?into ?(bound=fu
             if u>=Array.length values.tables then
               raise (Diagnostic.Error (Diagnostic.error ~code:"E_KERNEL" "GPU gather table changed."));
             Bytes.set_int32_le t.uniforms offset (Int32.of_int (Array.length values.tables.(u)/width))
+        | ["scene";"strands"] -> Bytes.set_int32_le t.uniforms offset (Int32.of_int extras.strand_count)
         | ["scene";"spheres"] ->
             Bytes.set_int32_le t.uniforms offset (Int32.of_int (match scene with Some s -> s.sphere_count | None -> 0))
         | ["frame";index;_] ->
@@ -199,8 +202,9 @@ let dispatch ?(wait=true) ?(reset_status=true) ?commands ?count ?into ?(bound=fu
           get (B.set_accel encoder ~index accel);
           get (B.set_buffer encoder ~index:(index+1) vertices);
           get (B.set_buffer encoder ~index:(index+2) spheres);
-          List.iteri (fun k buffer -> get (B.set_buffer encoder ~index:(index+3+k) buffer)) scene_tail;
-          get (B.compute_use_accels encoder [accel])) scene;
+          List.iteri (fun k -> function `Buffer buffer -> get (B.set_buffer encoder ~index:(index+3+k) buffer)
+            | `Accel a -> get (B.set_accel encoder ~index:(index+3+k) a)) scene_tail;
+          get (B.compute_use_accels encoder (accel :: Option.to_list extras.curves))) scene;
         get (B.dispatch_threads encoder ~threads:(values.count,1,1) ~threadgroup:(256,1,1))) in
     match commands with
     | Some commands -> encode commands;
@@ -335,8 +339,10 @@ let read_floats queue buffer ~epoch ~length =
    facts its kernel is emitted with. Motion builds motion structures where the device has
    [Ray_tracing_motion]; elsewhere the scene is built at the shutter midpoint and its kernel is static. *)
 type instance = {first:int; triangles:int; transform:float array; transform_end:float array option}
-type description = {triangles:bytes; triangles_end:bytes option; instances:instance array; sphere_data:bytes}
-type built = {scene:scene; extras:extras; instanced:bool; motion:bool; release:unit -> unit}
+type description = {triangles:bytes; triangles_end:bytes option; instances:instance array; sphere_data:bytes;
+  strand_data:bytes}
+type built = {scene:scene; extras:extras; instanced:bool; motion:bool; curves:[`Loop | `Native] option;
+  release:unit -> unit}
 let floats_of bytes = Array.init (Bytes.length bytes / 4) (fun k -> Int32.float_of_bits (Bytes.get_int32_le bytes (4*k)))
 let bytes_of floats = let bytes = Bytes.create (4*Array.length floats) in
   Array.iteri (fun k v -> Bytes.set_int32_le bytes (4*k) (Int32.bits_of_float v)) floats; bytes
@@ -381,10 +387,10 @@ let build_scene ?caps gpu d =
           let vertices_end = upload e in
           let accel = accel (B.Motion_blas {geometries=[B.Motion_triangles {keyframes=[{buffer=vertices; offset=0L};
             {buffer=vertices_end; offset=0L}]; vertex_stride=12; vertex_count=3*count}]; motion=shutter}) in
-          {scene={accel; vertices; spheres; sphere_count; instances=None}; extras={vertices_end=Some vertices_end};
-           instanced=false; motion=true; release}
+          {scene={accel; vertices; spheres; sphere_count; instances=None}; extras={no_extras with vertices_end=Some vertices_end};
+           instanced=false; motion=true; curves=None; release}
       | _ -> {scene={accel=accel (B.Blas {geometries=[triangles_at 0 count]}); vertices; spheres; sphere_count;
-               instances=None}; extras=no_extras; instanced=false; motion=false; release}
+               instances=None}; extras=no_extras; instanced=false; motion=false; curves=None; release}
     end else begin
       let prototypes = List.sort_uniq compare (Array.to_list (Array.map (fun i -> i.first, i.triangles) d.instances)) in
       let blas = List.map (fun (first, count) -> accel (B.Blas {geometries=[triangles_at first count]})) prototypes in
@@ -407,7 +413,23 @@ let build_scene ?caps gpu d =
           else Array.append (Flow.Ray_host.world_to_object (start i)) [|0.; 0.; 0.|] in
         Array.append [|float i.first|] row) d.instances)) in
       {scene={accel; vertices; spheres; sphere_count; instances=Some (upload (bytes_of table))}; extras=no_extras;
-       instanced=true; motion; release}
+       instanced=true; motion; curves=None; release}
     end in
-    Ok built
+    (* strands: Metal round linear curves over the segment records themselves (stride 16, radius at .w) where
+       the device has Ray_tracing_curves, else the kernel's in-loop capsule test over the same buffer *)
+    let segments = Bytes.length d.strand_data / 32 in
+    if segments = 0 then Ok built else begin
+      let strands = upload d.strand_data in
+      let native = Ogpu.Caps.has caps Ray_tracing_curves in
+      let curves = if not native then None else
+        let indices = Bytes.create (4*segments) in
+        for k = 0 to segments-1 do Bytes.set_int32_le indices (4*k) (Int32.of_int (2*k)) done;
+        let indices = upload indices in
+        Some (accel (B.Blas {geometries=[B.Curves {control_points=[{buffer=strands; offset=0L}]; control_stride=16;
+          control_point_count=2*segments; radii=[{buffer=strands; offset=12L}]; radius_stride=16; indices;
+          index_offset=0L; segment_count=segments; control_points_per_segment=2; curve_type=Round_curve;
+          basis=Linear_basis; caps=Sphere_caps}]})) in
+      Ok {built with extras={built.extras with strands=Some strands; strand_count=segments; curves};
+        curves=Some (if native then `Native else `Loop)}
+    end
   with Diagnostic.Error error -> release (); Error error

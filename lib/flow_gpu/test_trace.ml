@@ -3,7 +3,8 @@
    world-to-object table) over structures from Run.build_scene match the CPU host: prim, instance and hit
    exactly; t, uv and normal within 1e-5. Procedural spheres ride along. Motion (WN10): vertex keyframes
    (flat, `primitive_motion`) and instance keyframes (`instance_motion`) match the CPU host at several times,
-   and without Ray_tracing_motion the static kernel over the shutter-midpoint scene matches it at time 0.5. *)
+   and without Ray_tracing_motion the static kernel over the shutter-midpoint scene matches it at time 0.5.
+   Strands: Metal curve primitives and, without Ray_tracing_curves, the in-loop capsule test match it too. *)
 open Rdk
 module B = Ogpu.Backend
 module R = Flow_gpu.Run
@@ -37,11 +38,11 @@ let values program time = ok (Flow_ir.Packed.Private.prepare ~fast:true program 
 let cpu program time = match ok (Flow_ir.Packed.force program ~live:(Input.at_time time)) with
   | Flow.Eval.Vec4_array v -> v | _ -> assert false
 (* the GPU run at each [time] against the CPU host at [cpu_time time] *)
-let compare_runs ?caps ?(cpu_time = Fun.id) name lease id description times =
+let compare_runs ?caps ?(cpu_time = Fun.id) ?(tolerance = 1e-5) name lease id description times =
   let built = ok (R.build_scene ?caps lease description) in
   let program = program id in
   let pipelines = Flow_gpu.Pipelines.create ~clock:Unix.gettimeofday (Renderer.gpu_device lease) in
-  let msl = ok (Flow_gpu.Emit.kernel ~fast:true ~instanced:built.instanced ~motion:built.motion program) in
+  let msl = ok (Flow_gpu.Emit.kernel ~fast:true ~instanced:built.instanced ~motion:built.motion ?curves:built.curves program) in
   let runner = R.create lease pipelines msl in
   List.iter (fun time ->
     let expected = cpu program (cpu_time time) in
@@ -56,10 +57,13 @@ let compare_runs ?caps ?(cpu_time = Fun.id) name lease id description times =
         Printf.printf "ray %d: gpu %g %g %g %g cpu %g %g %g %g\n" i actual.(4*i) actual.(4*i+1) actual.(4*i+2) actual.(4*i+3)
           expected.(4*i) expected.(4*i+1) expected.(4*i+2) expected.(4*i+3);
       assert same;
-      for k = 0 to 3 do worst := Float.max !worst (Float.abs (actual.(4 * i + k) -. expected.(4 * i + k))) done
+      for k = 0 to 3 do
+        if Float.abs (actual.(4 * i + k) -. expected.(4 * i + k)) > tolerance then
+          Printf.printf "ray %d field %d: gpu %.7g cpu %.7g\n" i k actual.(4 * i + k) expected.(4 * i + k);
+        worst := Float.max !worst (Float.abs (actual.(4 * i + k) -. expected.(4 * i + k))) done
     done;
     Printf.printf "scene/trace Metal (%s, time %g): %d of %d rays hit, prim exact, max abs difference %.3g\n" name time !hits count !worst;
-    assert (!hits > 0 && !worst <= 1e-5)) times;
+    assert (!hits > 0 && !worst <= tolerance)) times;
   R.close runner; Flow_gpu.Pipelines.close pipelines; built.release ();
   built
 let tilted ~angle ~shift geometry = Transform_ops.transform
@@ -68,14 +72,37 @@ let flat lease =
   let a = grid 2. in
   (match Flow_sop.Trace_scene.register ~spheres 9 a with Ok () -> () | Error e -> failwith e);
   ignore (compare_runs "flat, triangles + spheres" lease 9
-    { R.triangles = vertex_bytes a; triangles_end = None; instances = [||]; sphere_data } [ 1. ]);
+    { R.triangles = vertex_bytes a; triangles_end = None; instances = [||]; sphere_data; strand_data = Bytes.empty } [ 1. ]);
   let ending = tilted ~angle:0.5 ~shift:0.3 a in
   (match Flow_sop.Trace_scene.register ~spheres ~ending 9 a with Ok () -> () | Error e -> failwith e);
-  let moving = { R.triangles = vertex_bytes a; triangles_end = Some (vertex_bytes ending); instances = [||]; sphere_data } in
+  let moving = { R.triangles = vertex_bytes a; triangles_end = Some (vertex_bytes ending); instances = [||]; sphere_data; strand_data = Bytes.empty } in
   assert (compare_runs "flat, vertex motion" lease 9 moving [ 0.; 0.35; 1.; 1.5 ]).motion;
   let caps = { (B.capabilities (Renderer.gpu_device lease)) with ray_tracing_motion = false } in
   assert (not (compare_runs ~caps ~cpu_time:(fun _ -> 0.5) "flat, shutter midpoint without motion" lease 9 moving [ 0.; 1. ]).motion);
   Flow_sop.Trace_scene.unregister 9
+(* strands over the flat grid: a tilted span, a long thin one, and an upright one whose top cap the rays meet *)
+let strands = [| (-1.3, 0.1, 1.0, 1.3, 0.35, 1.2, 0.08); (0.6, -1.0, 0.8, 0.7, 0.9, 0.5, 0.05);
+                 (-0.45, -0.6, 0.2, -0.45, -0.6, 1.5, 0.1) |]
+let stranded lease =
+  let a = grid 2. in
+  (match Flow_sop.Trace_scene.register ~spheres ~strands 13 a with Ok () -> () | Error e -> failwith e);
+  let strand_data = floats (Array.concat (List.map (fun (ax, ay, az, bx, by, bz, r) -> [| ax; ay; az; r; bx; by; bz; r |])
+    (Array.to_list strands))) in
+  let description = { R.triangles = vertex_bytes a; triangles_end = None; instances = [||]; sphere_data; strand_data } in
+  let caps = B.capabilities (Renderer.gpu_device lease) in
+  if Ogpu.Caps.has caps Ray_tracing_curves then
+    assert ((compare_runs ~tolerance:1e-4 "flat + native curve strands" lease 13 description [ 1. ]).curves = Some `Native)
+  else begin
+    (* below Apple GPU family 9 curves do not intersect; their kernel still compiles to a pipeline *)
+    let pipelines = Flow_gpu.Pipelines.create ~clock:Unix.gettimeofday (Renderer.gpu_device lease) in
+    let msl = ok (Flow_gpu.Emit.kernel ~fast:true ~curves:`Native (program 13)) in
+    ignore (ok (Flow_gpu.Pipelines.get pipelines msl));
+    Flow_gpu.Pipelines.close pipelines;
+    print_endline "scene/trace Metal (flat + native curve strands): compiled; the device lacks Ray_tracing_curves"
+  end;
+  assert ((compare_runs ~caps:{ caps with ray_tracing_curves = false } "flat + capsule strands" lease 13 description [ 1. ]).curves
+          = Some `Loop);
+  Flow_sop.Trace_scene.unregister 13
 let instanced lease =
   let a = grid 2. and b = grid 1. in
   let rotation = 0.5 and tilt = 0.4 in
@@ -96,7 +123,7 @@ let instanced lease =
   let instances transform_end = Array.mapi (fun k transform ->
     { R.first = (if prototypes.(k) == b then 2 else 0); triangles = 2; transform; transform_end = transform_end k }) transforms in
   let description transform_end = { R.triangles = Bytes.cat (vertex_bytes a) (vertex_bytes b); triangles_end = None;
-    instances = instances transform_end; sphere_data } in
+    instances = instances transform_end; sphere_data; strand_data = Bytes.empty } in
   let register ?motion () = match Flow_sop.Trace_scene.register_instances ~spheres ?motion 11
       (Array.mapi (fun k t -> (prototypes.(k), t)) transforms) with Ok () -> () | Error e -> failwith e in
   register ();
@@ -114,4 +141,4 @@ let () =
       let caps = B.capabilities (Renderer.gpu_device lease) in
       if not (Ogpu.Caps.has caps Ray_tracing) then print_endline "SKIP: backend lacks Ray_tracing"
       else if not (Ogpu.Caps.has caps Ray_tracing_motion) then print_endline "SKIP: backend lacks Ray_tracing_motion"
-      else begin flat lease; instanced lease end)
+      else begin flat lease; stranded lease; instanced lease end)

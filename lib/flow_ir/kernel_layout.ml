@@ -27,6 +27,8 @@ type t = {
   scene_instances : int option;
   scene_motion : bool;
   scene_vertices_end : int option;
+  scene_strands : int option;
+  scene_strand_count : int option;
 }
 
 let rec guarded = function
@@ -213,7 +215,7 @@ let reachable ~whole_loops (view : Packed.Private.view) dead =
   Array.iter (Array.iter use) view.outputs;
   used
 
-let plan ?(fast = false) ?(image = false) ?(instanced = false) ?(motion = false) program =
+let plan ?(fast = false) ?(image = false) ?(instanced = false) ?(motion = false) ?(curves = false) program =
   let view, dead = specialize (Packed.Private.view program) in
   let offset = ref 4 and uniform_layout = ref [] in
   let uniform name width =
@@ -280,6 +282,7 @@ let plan ?(fast = false) ?(image = false) ?(instanced = false) ?(motion = false)
   in
   let traced = Array.exists (fun i -> match guarded i with Packed.Trace _ -> true | _ -> false) view.code in
   let scene_spheres = if traced then Some (uniform "scene:spheres" 1) else None in
+  let scene_strand_count = if traced && curves then Some (uniform "scene:strands" 1) else None in
   let counts = if fast then (let first = !offset in offset := first + 12; Some first) else None in
   let count = if image then 0 else Array.length view.widths in
   let outputs = Array.length view.outputs in
@@ -305,6 +308,8 @@ let plan ?(fast = false) ?(image = false) ?(instanced = false) ?(motion = false)
     scene_spheres; scene_instances = (if traced && instanced then Some (scene + 3) else None);
     scene_motion = traced && motion;
     scene_vertices_end = (if traced && motion && not instanced then Some (scene + 3) else None);
+    scene_strands = (if traced && curves then Some (scene + 3 + (if instanced || motion then 1 else 0)) else None);
+    scene_strand_count;
     scene_binding = (if traced then Some scene else None) }
 
 let uniform_words plan = (plan.uniform_bytes + 15) / 16

@@ -102,15 +102,51 @@ let with_spheres spheres q nearest =
     end) spheres;
   !nearest
 
+(* Strand segments (a, b, radius): linear round curves, each a capsule (the cylinder within the segment, the
+   end spheres beyond it); a hit reports prim = segment, u = the curve parameter, instance = -2, and
+   pathtrace.metal's normal (the offset from the axis point at u, less its tangential part). *)
+type strand = float * float * float * float * float * float * float
+let with_strands (strands : strand array) q nearest =
+  if strands = [||] then nearest else
+  let nearest = ref nearest in
+  let norm = Float.sqrt ((q.(3) *. q.(3)) +. (q.(4) *. q.(4)) +. (q.(5) *. q.(5))) in
+  let d = [| q.(3) /. norm; q.(4) /. norm; q.(5) /. norm |] and o = [| q.(0); q.(1); q.(2) |] in
+  let dot a b = (a.(0) *. b.(0)) +. (a.(1) *. b.(1)) +. (a.(2) *. b.(2)) in
+  Array.iteri (fun k (ax, ay, az, bx, by, bz, r) ->
+    let a = [| ax; ay; az |] and b = [| bx; by; bz |] in
+    let ba = Array.map2 ( -. ) b a and oa = Array.map2 ( -. ) o a in
+    let baba = dot ba ba and bard = dot ba d and baoa = dot ba oa in
+    let limit = if !nearest.H.hit then !nearest.H.t else q.(7) and best = ref infinity in
+    let consider valid t = let y = baoa +. (t *. bard) in
+      if valid y && t >= q.(6) && t <= limit && t < !best then best := t in
+    let roots disc minus_b scale valid = if disc >= 0. then
+      List.iter (fun s -> consider valid ((minus_b +. (s *. Float.sqrt disc)) /. scale)) [ -1.; 1. ] in
+    let big_a = baba -. (bard *. bard) and big_b = (baba *. dot d oa) -. (baoa *. bard) in
+    let big_c = (baba *. dot oa oa) -. (baoa *. baoa) -. (r *. r *. baba) in
+    if big_a > 0. then roots ((big_b *. big_b) -. (big_a *. big_c)) (-.big_b) big_a (fun y -> y > 0. && y < baba);
+    List.iter (fun (centre, valid) -> let oc = Array.map2 ( -. ) o centre in let half = dot oc d in
+      roots ((half *. half) -. (dot oc oc -. (r *. r))) (-.half) 1. valid) [ (a, fun y -> y <= 0.); (b, fun y -> y >= baba) ];
+    let t = !best in
+    if t <= limit then begin
+      let u = Float.min 1. (Float.max 0. ((baoa +. (t *. bard)) /. baba)) in
+      let off = Array.init 3 (fun i -> o.(i) +. (t *. d.(i)) -. (a.(i) +. (u *. ba.(i)))) in
+      let along = dot off ba /. Float.max baba 1e-8 in
+      let off = Array.mapi (fun i x -> x -. (ba.(i) *. along)) off in
+      let n = Float.sqrt (dot off off) in
+      nearest := { H.t; prim = k; u; v = 0.; nx = off.(0) /. n; ny = off.(1) /. n; nz = off.(2) /. n;
+                   hit = true; instance = -2 }
+    end) strands;
+  !nearest
+
 let ( let* ) = Result.bind
-let register ?(spheres = [||]) ?ending id geometry =
+let register ?(spheres = [||]) ?(strands = [||]) ?ending id geometry =
   let* trace = prototype ?ending geometry in
-  H.register id (fun q -> with_spheres spheres q (trace q));
+  H.register id (fun q -> with_spheres spheres q (with_strands strands q (trace q)));
   Ok ()
 
 (* Instances of prototypes, each with its row-major 3x4 object-to-world transform; [instance] reports the
    index in the array, [prim] the primitive within its prototype. *)
-let register_instances ?(spheres = [||]) ?motion id instances =
+let register_instances ?(spheres = [||]) ?(strands = [||]) ?motion id instances =
   let* traces = Array.fold_left (fun acc (geometry, transform) ->
     let* acc = acc in
     let* trace = prototype geometry in
@@ -126,7 +162,7 @@ let register_instances ?(spheres = [||]) ?motion id instances =
       let w = match motion with None -> w | Some ends -> H.world_to_object (H.lerp transform ends.(k) (H.shutter q.(8))) in
       let h = instance_hit trace w k q in
       if h.H.hit && ((not !nearest.H.hit) || h.t < !nearest.H.t) then nearest := h) traces;
-    with_spheres spheres q !nearest);
+    with_spheres spheres q (with_strands strands q !nearest));
   Ok ()
   end
 let unregister = H.unregister

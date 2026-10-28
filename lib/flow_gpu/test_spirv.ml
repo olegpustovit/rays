@@ -54,6 +54,8 @@ let fast_cases () =
         "(map (fn [i] (let* [h (scene/trace 1 [(float i) 0. 5.] [0. 0. -1.] 0. 100. t)] [h.t (float h.prim) (+ h.u h.normal.z) (if h.hit 1. 0.)])) (array/range 16 :type \"int\"))" );
       ( "fast_trace_instanced",
         "(map (fn [i] (let* [h (scene/trace 1 [(float i) 0. 5.] [0. 0. -1.] 0. 100. t)] [h.t (float h.instance) (+ h.u h.normal.x) (if h.hit 1. 0.)])) (array/range 16 :type \"int\"))" );
+      ( "fast_trace_curves",
+        "(map (fn [i] (let* [h (scene/trace 1 [(float i) 0. 5.] [0. 0. -1.] 0. 100. t)] [h.t (float h.prim) (+ h.u h.normal.y) (if h.hit 1. 0.)])) (array/range 16 :type \"int\"))" );
       ( "fast_gather",
         "(let* [table (array/float 7 0.25)] (map (fn [i] (+ t (array/nth table (int/mod i 7)))) \
          (array/range 16 :type \"int\")))" );
@@ -87,8 +89,9 @@ let () =
   let golden = Buffer.create 512 in
   List.iter
     (fun (name, fast, program) ->
-      let emitted = Flow_gpu.Spirv.kernel ~fast ~instanced:(String.ends_with ~suffix:"instanced" name) program |> Test_program.ok in
-      let again = Flow_gpu.Spirv.kernel ~fast ~instanced:(String.ends_with ~suffix:"instanced" name) program |> Test_program.ok in
+      let instanced = String.ends_with ~suffix:"instanced" name and curves = String.ends_with ~suffix:"curves" name in
+      let emitted = Flow_gpu.Spirv.kernel ~fast ~instanced ~curves program |> Test_program.ok in
+      let again = Flow_gpu.Spirv.kernel ~fast ~instanced ~curves program |> Test_program.ok in
       assert (emitted.bytes = again.bytes);
       assert (Bytes.get_int32_le emitted.bytes 0 = 0x07230203l);
       assert (Bytes.get_int32_le emitted.bytes 4 = (if emitted.layout.scene_binding = None then 0x00010300l else 0x00010400l));
@@ -103,7 +106,7 @@ let () =
       if fast then assert (has_int64 20 = (name <> "fast_float"));
       assert (Ogpu.Shader.validate_bindings emitted.interface = Ok ());
       assert (emitted.uniform_bytes = Flow_ir.Kernel_layout.uniform_words emitted.layout * 16);
-      let metal = Flow_gpu.Emit.kernel ~fast ~instanced:(String.ends_with ~suffix:"instanced" name) program |> Test_program.ok in
+      let metal = Flow_gpu.Emit.kernel ~fast ~instanced ?curves:(if curves then Some `Loop else None) program |> Test_program.ok in
       assert (emitted.interface = metal.interface);
       assert (emitted.layout.uniform_layout = metal.uniform_layout);
       assert (emitted.layout.table_seeds = metal.table_seeds);
