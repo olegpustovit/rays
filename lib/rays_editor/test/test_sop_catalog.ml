@@ -816,7 +816,7 @@ let run ?(exhaustive = false) () =
   let points_factory = List.find (fun factory ->
       Edit_graph.factory_key factory = "points") (Lazy.force registered_factories) in
   let points = Edit_graph.instantiate points_factory [] |> Result.get_ok in
-  check (Node.operation points = "point_generate"
+  check (Node.operation points = "points"
       && Edit_graph.factory_arity points_factory = 0)
     "point-generation editor factory has the wrong node or arity";
   let point_session = Session.create ~max_entries:2

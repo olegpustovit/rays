@@ -533,6 +533,65 @@ let paint_rows ~rows ~state ~p ~label_w ~wide ~muted ~hovered ~rh ~tops ~(theme 
       end) rows);
   ()
 
+(* the wide sheet's bar of its keys and the graph count *)
+let paint_footer ui ~(theme : Pxui.Theme.t) ~muted ~rh ~x ~y ~w ~h ~footer p =
+  if footer > 0. then
+    Ui.draw ui (Ui.box ui ~w:(Ui.Px w) ~h:(Ui.Px footer) ~at:(x, y +. h -. footer) "navigator-footer")
+      (fun paint (fx, fy, fw, _) ->
+        Ui.Paint.fill paint ~x:fx ~y:fy ~w:fw ~h:footer theme.panel;
+        Ui.Paint.fill paint ~x:fx ~y:fy ~w:fw ~h:1. (Pxui.Theme.edge theme);
+        let small = Pxui_shell.Kit.cap_size ui in
+        let tx = ref (fx +. 12.) in
+        (* each key in ink-3 at the label size, what it does in ink-2, 8 apart *)
+        List.iter (fun (key, what) ->
+          Ui.Paint.text paint ~size:small ~at:(!tx, Pxui_shell.Kit.cap_y ui (fy +. 1.) rh) ~color:(Pxui.Theme.ink_3 theme) key;
+          tx := !tx +. Ui.Paint.text_width paint ~size:small key +. 8.;
+          Ui.Paint.text paint ~at:(!tx, Pxui_shell.Kit.text_y ui (fy +. 1.) rh) ~color:muted what;
+          tx := !tx +. Ui.Paint.text_width paint what +. 8.)
+          [ "s", "filter"; "i", "enter"; "/ j", "jump" ];
+        let count = plural (List.length p.workspace.graphs) "graph" in
+        Ui.Paint.cap paint ~at:(fx +. fw -. 12. -. Ui.Paint.cap_width paint count, Pxui_shell.Kit.cap_y ui (fy +. 1.) rh) count)
+
+let paint_thumb ui ~theme ~total ~rh box =
+  (* the scroll thumb: 4 points wide, 2 from the edge, line-3, over a track 6 points in from both ends *)
+  Ui.draw_over ui box (fun paint (bx, by, bw, bh) ->
+    let content = total +. rh in
+    if content > bh then begin
+      let track = Float.max 1. (bh -. 12.) in
+      let thumb = Float.min track (Float.max 20. (track *. bh /. content)) in
+      let scroll = Ui.scroll_position ui box in
+      let y = by +. 6. +. ((track -. thumb) *. Float.min 1. (Float.max 0. (scroll /. Float.max 1. (content -. bh)))) in
+      Ui.Paint.fill paint ~x:(bx +. bw -. 6.) ~y ~w:4. ~h:thumb (Pxui.Theme.border theme)
+    end)
+
+let input_sliders ui ~emit ~rows ~tops ~top ~scroll ~rh ~body ~x ~w ~label_w ~(signal : Ui.signal) ~row_at =
+  (* the sliders of the inputs, over their rows: a drag scrubs and Option-click types, as every
+     numeric field of the kit; a double click on the row's name types too, as an inspector row's
+     label does (the field itself keeps its drag) *)
+  let typed_row = if signal.double_clicked then row_at signal.press_point else None in
+  Array.iteri (fun k row -> match row with
+    | Input_row { graph; name; integer; value } ->
+        let ry = top +. tops.(k) -. scroll in
+        if ry >= top && ry +. rh <= top +. body then begin
+          let show v = if integer then string_of_int (int_of_float (Float.round v)) else Printf.sprintf "%.3g" v in
+          (* a scrub from the value at the press, like a card's field: 1 per 6 points for an
+             integer, a hundredth of the magnitude per point for a float, Shift is finer *)
+          let scrub origin dx shift = match float_of_string_opt origin with
+            | None -> origin
+            | Some o when integer -> show (o +. Float.round (dx /. (if shift then 24. else 6.)))
+            | Some o -> show (o +. dx *. 0.01 *. Float.max 1. (Float.abs o) *. (if shift then 0.1 else 1.)) in
+          let text = show value in
+          let changed, _ = Ui.value_field ui ~at:(x +. 20. +. label_w, ry +. 2.) ~w:(w -. 32. -. label_w) ~h:20.
+              ~scrub ~edit:(typed_row = Some k)
+              ~valid:(fun t -> match float_of_string_opt t with
+                | Some v -> Float.is_finite v && (not integer || Float.is_integer v) | None -> false)
+              ("navigator-input-" ^ graph ^ "-" ^ name) text in
+          if changed <> text then
+            Option.iter (fun v -> emit (Set_default { graph; input = name; value = v; integer }))
+              (float_of_string_opt changed)
+        end
+    | _ -> ()) rows
+
 let view state ui ~bounds:(x, y, w, h) p =
   let theme = Ui.theme ui in
   let rh = float (Ui.row_height ui) in
@@ -670,58 +729,9 @@ let view state ui ~bounds:(x, y, w, h) p =
              | n, _ when n >= 3 -> emit (New_graph (List.nth new_graph_contexts (n - 3)))
              | _ -> ())));
   paint_rows ~content ~box ~x ~top ~w ~body ~theme ~tops ~rh ~hovered ~muted ~wide ~label_w ~p ~state ~rows ui;
-  if footer > 0. then
-    Ui.draw ui (Ui.box ui ~w:(Ui.Px w) ~h:(Ui.Px footer) ~at:(x, y +. h -. footer) "navigator-footer")
-      (fun paint (fx, fy, fw, _) ->
-        Ui.Paint.fill paint ~x:fx ~y:fy ~w:fw ~h:footer theme.panel;
-        Ui.Paint.fill paint ~x:fx ~y:fy ~w:fw ~h:1. (Pxui.Theme.edge theme);
-        let small = Pxui_shell.Kit.cap_size ui in
-        let tx = ref (fx +. 12.) in
-        (* each key in ink-3 at the label size, what it does in ink-2, 8 apart *)
-        List.iter (fun (key, what) ->
-          Ui.Paint.text paint ~size:small ~at:(!tx, Pxui_shell.Kit.cap_y ui (fy +. 1.) rh) ~color:(Pxui.Theme.ink_3 theme) key;
-          tx := !tx +. Ui.Paint.text_width paint ~size:small key +. 8.;
-          Ui.Paint.text paint ~at:(!tx, Pxui_shell.Kit.text_y ui (fy +. 1.) rh) ~color:muted what;
-          tx := !tx +. Ui.Paint.text_width paint what +. 8.)
-          [ "s", "filter"; "i", "enter"; "/ j", "jump" ];
-        let count = plural (List.length p.workspace.graphs) "graph" in
-        Ui.Paint.cap paint ~at:(fx +. fw -. 12. -. Ui.Paint.cap_width paint count, Pxui_shell.Kit.cap_y ui (fy +. 1.) rh) count);
-  (* the scroll thumb: 4 points wide, 2 from the edge, line-3, over a track 6 points in from both ends *)
-  Ui.draw_over ui box (fun paint (bx, by, bw, bh) ->
-    let content = total +. rh in
-    if content > bh then begin
-      let track = Float.max 1. (bh -. 12.) in
-      let thumb = Float.min track (Float.max 20. (track *. bh /. content)) in
-      let scroll = Ui.scroll_position ui box in
-      let y = by +. 6. +. ((track -. thumb) *. Float.min 1. (Float.max 0. (scroll /. Float.max 1. (content -. bh)))) in
-      Ui.Paint.fill paint ~x:(bx +. bw -. 6.) ~y ~w:4. ~h:thumb (Pxui.Theme.border theme)
-    end);
-  (* the sliders of the inputs, over their rows: a drag scrubs and Option-click types, as every
-     numeric field of the kit; a double click on the row's name types too, as an inspector row's
-     label does (the field itself keeps its drag) *)
-  let typed_row = if signal.double_clicked then row_at signal.press_point else None in
-  Array.iteri (fun k row -> match row with
-    | Input_row { graph; name; integer; value } ->
-        let ry = top +. tops.(k) -. scroll in
-        if ry >= top && ry +. rh <= top +. body then begin
-          let show v = if integer then string_of_int (int_of_float (Float.round v)) else Printf.sprintf "%.3g" v in
-          (* a scrub from the value at the press, like a card's field: 1 per 6 points for an
-             integer, a hundredth of the magnitude per point for a float, Shift is finer *)
-          let scrub origin dx shift = match float_of_string_opt origin with
-            | None -> origin
-            | Some o when integer -> show (o +. Float.round (dx /. (if shift then 24. else 6.)))
-            | Some o -> show (o +. dx *. 0.01 *. Float.max 1. (Float.abs o) *. (if shift then 0.1 else 1.)) in
-          let text = show value in
-          let changed, _ = Ui.value_field ui ~at:(x +. 20. +. label_w, ry +. 2.) ~w:(w -. 32. -. label_w) ~h:20.
-              ~scrub ~edit:(typed_row = Some k)
-              ~valid:(fun t -> match float_of_string_opt t with
-                | Some v -> Float.is_finite v && (not integer || Float.is_integer v) | None -> false)
-              ("navigator-input-" ^ graph ^ "-" ^ name) text in
-          if changed <> text then
-            Option.iter (fun v -> emit (Set_default { graph; input = name; value = v; integer }))
-              (float_of_string_opt changed)
-        end
-    | _ -> ()) rows;
+  paint_footer ui ~theme ~muted ~rh ~x ~y ~w ~h ~footer p;
+  paint_thumb ui ~theme ~total ~rh box;
+  input_sliders ui ~emit ~rows ~tops ~top ~scroll ~rh ~body ~x ~w ~label_w ~signal ~row_at;
   let state = match !toggle with
     | Some graph -> { state with opened = (if List.mem graph state.opened
                                            then List.filter (( <> ) graph) state.opened else graph :: state.opened) }
