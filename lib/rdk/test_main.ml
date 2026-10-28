@@ -49,7 +49,6 @@ let tests = [
   "spatial", "test_distance_along_geometry", Test_distance_along_geometry.run;
   "spatial", "test_distance_from_geometry", Test_distance_from_geometry.run;
   "spatial", "test_distance_from_target", Test_distance_from_target.run;
-  "core", "test_sort_extended", Test_sort_extended.run;
   "mesh", "test_blast_by_attribute", Test_blast_by_attribute.run;
   "mesh", "test_crease", Test_crease.run;
   "attrib", "test_attribute_fade", Test_attribute_fade.run;

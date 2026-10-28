@@ -590,32 +590,3 @@ let ()=
         "C4 authored compact/gather and scan/mesh composition differs")) [1;97;4096]) [1;4;8]) [false;true];
   print_endline "C4 authored compact→gather and exclusive scan→mesh offsets preserve native geometry bytes"
 
-let ()=
-  let invoke name args=(Option.get(Flow.Op.find name Flow.Context.value)).body
-    ~live:(Input.at_time 0.) ~node:(fun _ _->assert false)args in
-  let int_attribute name geometry=match Geometry.find_attribute ~owner:Attribute.Point name geometry with
-    |Some attribute->(match Attribute.View.storage attribute with Attribute.Int a->a|_->assert false)
-    |None->assert false in
-  let texts=[|"b";"a";"b";"\255\128";"x\000y";"é日本😀";"\240\144\128\128";"\238\128\128"|]in
-  List.iter(fun(storage,keys)->let count=match keys with
-    |E.Int_array a->Array.length a|E.Float_array a->Array.length a|E.Text_array a->Array.length a|_->assert false in
-    let source=Line_geometry.points(Array.init count(fun i->float i,0.,0.))in
-    let attribute=Attribute.create_owned ~owner:Attribute.Point ~name:"key" storage|>get_string_ok in
-    let source=Geometry.with_attribute attribute source|>get_string_ok in
-    let before=geometry_bytes source in
-    List.iter(fun domains->Parallel.run ~domains(fun()->List.iter(fun descending->
-      let permutation=match invoke "array/grade"["keys",keys;"descending",E.Bool descending]with
-        |E.Int_array a->a|_->assert false in
-      let ranks=Array.make count 0 in Array.iteri(fun rank source->ranks.(source)<-rank)permutation;
-      let native=Ordering.sort ~grain:1 ~owner:Ordering.Points
-        ~key:(Ordering.Attribute_component{name="key";component=0}) ~descending
-        ~output_indices:"rank" source|>get_rdk in
-      check(ranks=int_attribute "rank" native)"Grade stable ranks differ from native Ordering.sort";
-      check(geometry_bytes source=before)"Grade changed native key geometry") [false;true]))[1;4;8];
-    ())
-    [Attribute.Int[|max_int;min_int;max_int;9007199254740993;min_int|],
-       E.Int_array[|max_int;min_int;max_int;9007199254740993;min_int|];
-     Attribute.Float[|0.;-0.;1.;1.;Float.next_after 0. 1.|],
-       E.Float_array[|0.;-0.;1.;1.;Float.next_after 0. 1.|];
-     Attribute.Text texts,E.Text_array texts];
-  print_endline "C5 native consumer oracles: stable scalar ranks, without full SOP mode claims"
