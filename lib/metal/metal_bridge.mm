@@ -2963,7 +2963,7 @@ bool checked_stored_render_function(
 }
 
 API_AVAILABLE(macos(26.0))
-NSUInteger checked_vertex_format_size(intnat format) {
+static NSUInteger checked_vertex_format_size(intnat format) {
   switch (format) {
   case MTLVertexFormatUChar:
   case MTLVertexFormatChar:
@@ -4689,58 +4689,6 @@ bool checked_metal4_store_action(value raw_action,
     return false;
   }
   *store_action = static_cast<MTLStoreAction>(code);
-  return true;
-}
-
-bool checked_ocaml_float32(value raw, float *result) {
-  const double number = Double_val(raw);
-  if (!std::isfinite(number) ||
-      std::abs(number) > std::numeric_limits<float>::max()) {
-    return false;
-  }
-  *result = static_cast<float>(number);
-  return true;
-}
-
-bool checked_metal4_scissor_rect(value raw, MTLScissorRect *result) {
-  NSUInteger x = 0;
-  NSUInteger y = 0;
-  NSUInteger width = 0;
-  NSUInteger height = 0;
-  if (!nsuinteger_from_ocaml_int64(Field(raw, 0), &x) ||
-      !nsuinteger_from_ocaml_int64(Field(raw, 1), &y) ||
-      !nsuinteger_from_ocaml_int64(Field(raw, 2), &width) ||
-      !nsuinteger_from_ocaml_int64(Field(raw, 3), &height) || width == 0 ||
-      height == 0) {
-    return false;
-  }
-  result->x = x;
-  result->y = y;
-  result->width = width;
-  result->height = height;
-  return true;
-}
-
-bool checked_metal4_viewport(value raw, MTLViewport *result) {
-  const double origin_x = Double_val(Field(raw, 0));
-  const double origin_y = Double_val(Field(raw, 1));
-  const double width = Double_val(Field(raw, 2));
-  const double height = Double_val(Field(raw, 3));
-  const double z_near = Double_val(Field(raw, 4));
-  const double z_far = Double_val(Field(raw, 5));
-  if (!std::isfinite(origin_x) || !std::isfinite(origin_y) ||
-      !std::isfinite(width) || !std::isfinite(height) ||
-      !std::isfinite(z_near) || !std::isfinite(z_far) || origin_x < 0.0 ||
-      origin_y < 0.0 || width <= 0.0 || height <= 0.0 || z_near < 0.0 ||
-      z_near > 1.0 || z_far < 0.0 || z_far > 1.0 || z_near > z_far) {
-    return false;
-  }
-  result->originX = origin_x;
-  result->originY = origin_y;
-  result->width = width;
-  result->height = height;
-  result->znear = z_near;
-  result->zfar = z_far;
   return true;
 }
 

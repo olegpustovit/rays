@@ -82,7 +82,7 @@ let ()=
   (* Direct checked-workspace integrations use the same trust boundary. *)
   let raw=match W.check ~ops:Flow_sop.Operators.all catalog forms with Some w,_->w|_->assert false in
   let direct=flow_ok(Flow_sop.Lower.of_checked
-    ~factories:Sop_catalog.Editor.factories raw) |>root in
+    ~factories:((lower forms).Flow_sop.Lower.factories @ Sop_catalog.Editor.factories) raw) |>root in
   assert((field direct).default=Param.Text_value "point");
   let pane=Flow_graph.Projection.of_graph catalog checked "g" in
   let card=Option.get(Flow_graph.Projection.find pane["g";"card"]) in
