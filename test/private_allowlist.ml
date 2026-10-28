@@ -50,7 +50,6 @@ let entries = [
   "flow_sop", "Rdk.Packed.Float4.Private";
   "flow_sop", "Rdk.Packed.Float_array.Private";
   "flow_sop", "Rdk.Packed.Int_array.Private";
-  "flow_sop", "Rdk.Surface_index.Private";
   "flow_sop", "Rdk.Topology.Private";
   "flow_sop", "Rdk.Topology_index.Private";
   "flow_sop", "S.Private";
@@ -83,7 +82,7 @@ let entries = [
   "rays_editor", "Rays.Image.Private";
   "rays_editor", "Rdk.Attribute.Private";
   "rays_editor", "Rdk.Packed.Float4.Private";
-  "rays_editor", "Scene3.Private";
+  "rays_editor", "Scene.D3.Private";
   "rays_pathtracer", "Rays.Image.Private";
   "rays_pathtracer", "Rays.Mesh.Private";
   "rays_pathtracer", "Runtime_resources.Image.Private";
@@ -124,7 +123,7 @@ let entries = [
   "tools", "Rdk.Packed.Float_array.Private";
   "tools", "Rdk.Packed.Int_array.Private";
   "tools", "Rdk.Topology.Private";
-  "tools", "Scene3.Private";
+  "tools", "Scene.D3.Private";
   "tools", "Sop.Image.Private";
   "tools", "Sop.Node.Private";
   "tools", "Topology.Private";
