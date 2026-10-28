@@ -13,7 +13,7 @@ let data=function
  |_->failwith "Expected array result"
 let compiled ?(require_arguments=true) body=
  let text="(workspace bindings (graph g :context host (if (> t -1000.) "^body^" "^body^")))"in
- let checked=match Flow.Workspace.check Flow.Check.{version=1;kinds=[]}(ok(Flow.Syntax.parse text))with
+ let checked=match Flow.Workspace.check Flow.Catalog.{version=1;kinds=[]}(ok(Flow.Syntax.parse text))with
   |Some w,[]->w|_,ds->failwith(String.concat ";"(List.map Diagnostic.to_string ds))in
  let value=List.assoc "g"(ok(E.static checked)).results in
  let residual=match value with E.Residual r->r|_->failwith "Expected live region frame"in
@@ -189,7 +189,7 @@ let ()=
  (* A concrete graph input gives this producer a genuinely packed residual.
     Its Invoke is asynchronous, with no structured-call slots or state plane. *)
  let forms=ok(Flow.Syntax.parse "(workspace capture (graph g :context host [(source : (array float) (array/float 0))] (map (fn [x] (+ x t)) source)))")in
- let checked=match Flow.Workspace.check Flow.Check.{version=1;kinds=[]}forms with
+ let checked=match Flow.Workspace.check Flow.Catalog.{version=1;kinds=[]}forms with
   |Some ws,[]->ws|_,ds->failwith(String.concat ";"(List.map Diagnostic.to_string ds))in
  let value=List.assoc "g"(ok(E.static ~inputs:["g",["source",E.Float_array(Array.init 32769 float_of_int)]]checked)).results in
  let r=match value with E.Residual r->r|_->failwith "Async capture needs a live residual"in

@@ -1122,7 +1122,7 @@ arr1[0.;-0.;0.];arr1[1e16;1.;-1e16];
       (if order=None then "" else " :order (fixture/order)")^")))") in
     Result.bind forms(fun forms->
       match Flow.Workspace.check ~ops:(geometry_op::constant "fixture/mask"(Flow.Value.ty_of mask)mask::order_ops @Flow_sop.Operators.all)
-        {Flow.Check.version=1;kinds=[]} forms with
+        {Flow.Catalog.version=1;kinds=[]} forms with
       | None,diagnostics->Error(List.find(fun(d:Diagnostic.t)->d.severity=Diagnostic.Error_severity)diagnostics)
       | Some checked,_->Result.bind(Flow_sop.Lower.of_checked ~factories:[factory] checked)(fun lowered->
           let graph=List.hd lowered.graphs in

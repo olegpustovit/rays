@@ -50,7 +50,7 @@ val of_text :
   ?ops:Flow.Op.t list ->
   ?imports:(string * string) list ->
   ?inputs:(string * (string * Flow.Eval.value) list) list ->
-  ?settings:Settings.t -> ?layout:Layout_by_path.t -> Flow.Check.catalog -> string -> (t, Diagnostic.t list) result
+  ?settings:Settings.t -> ?layout:Layout_by_path.t -> Flow.Catalog.catalog -> string -> (t, Diagnostic.t list) result
 (** Parse and check. [ops] defaults to [Flow_sop.Operators.all]; an explicit
     list replaces those extensions. Absent settings and layout forms retain the supplied values.
     Bare graph, definition and macro forms load as a library fragment; its
@@ -65,7 +65,7 @@ val check_text :
   ?ops:Flow.Op.t list ->
   ?imports:(string * string) list ->
   ?inputs:(string * (string * Flow.Eval.value) list) list ->
-  ?settings:Settings.t -> ?layout:Layout_by_path.t -> Flow.Check.catalog -> string ->
+  ?settings:Settings.t -> ?layout:Layout_by_path.t -> Flow.Catalog.catalog -> string ->
   (t * Diagnostic.t list, Diagnostic.t list) result
 (** {!of_text} with the checker's warnings. *)
 
@@ -77,7 +77,7 @@ val to_text : t -> string
 val print : t -> string * Flow.Lisp.spans
 (** {!to_text} with the printer's authored form spans, for text gestures. *)
 
-val edit : Flow.Check.catalog -> t -> Flow_graph.Flow_edit.op -> (t, Diagnostic.t) result
+val edit : Flow.Catalog.catalog -> t -> Flow_graph.Flow_edit.op -> (t, Diagnostic.t) result
 (** One gesture, atomically: the source is rewritten and re-checked, layout
     keys follow {!Flow_graph.Flow_edit.remap} and are pruned as in {!of_text}, and on an error
     nothing changes. *)

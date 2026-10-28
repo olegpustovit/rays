@@ -3,7 +3,7 @@ module E = Flow.Eval
 
 let () =
   let module W = Flow.Workspace in
-  let check source = match W.check Flow.Check.{version=1;kinds=[]}
+  let check source = match W.check Flow.Catalog.{version=1;kinds=[]}
       (Flow.Syntax.parse source |> Result.get_ok) with
     | Some workspace, [] -> workspace
     | _, ds -> failwith (String.concat "\n" (List.map Diagnostic.to_string ds)) in
@@ -74,7 +74,7 @@ let () =
 
 let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 
-let check ?(ops = []) ?(catalog = {Flow.Check.version = 1; kinds = []}) text =
+let check ?(ops = []) ?(catalog = {Flow.Catalog.version = 1; kinds = []}) text =
   let forms = ok (Flow.Syntax.parse text) in
   match Flow.Workspace.check ~ops catalog forms with
   | Some w, ds when not (List.exists (fun (d : Diagnostic.t) -> d.severity = Diagnostic.Error_severity) ds) -> w
@@ -273,7 +273,7 @@ let () =
        Array.iteri (fun i x -> assert (Int64.bits_of_float x = Int64.bits_of_float (sin (float i *. 0.25 +. 1.25)))) xs
    | _ -> failwith "CPU map did not return a packed array")
 let () =
-  let catalog, _ = ok (Flow.Check.catalog_of_manifest (read "../flow_sop/flow_manifest.sexp")) in
+  let catalog, _ = ok (Flow.Catalog.catalog_of_manifest (read "../flow_sop/flow_manifest.sexp")) in
   List.iter (fun name ->
     let ws = check ~catalog (read ("../../specification/workspace/cases/" ^ name ^ ".lisp")) in
     let evaluated = ok (E.static ~record:true ws) in
@@ -508,7 +508,7 @@ let () =
         (let* [unused 0] (map (fn [x] (+ x offset)) (array/float 4))))
         (defn invoke :context host [(alias : fn)] (alias 2.0))
         (graph g :context host (invoke :alias f)))"];
-  let checked_forms forms = match W.check {Flow.Check.version = 1; kinds = []} forms with
+  let checked_forms forms = match W.check {Flow.Catalog.version = 1; kinds = []} forms with
     | Some ws,_ -> ws | _,ds -> failwith (String.concat "\n" (List.map Diagnostic.to_string ds)) in
   let graph name = ok (Flow.Syntax.parse ("(graph " ^ name ^ " :context host
     (let* [mapped (map (fn [x] (+ x t)) (array/range 4))] mapped))")) |> List.hd in

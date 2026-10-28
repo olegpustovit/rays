@@ -88,7 +88,7 @@ let () =
   let forms=Result.get_ok (Flow.Syntax.parse "(workspace noise_scaling (graph g :context value
     (let* [tested (map (fn [p] (if (> t 1e308) (noise3 (* p t)) 0.0))
       (array/vec3 2051 [2.0 3.0 4.0]))] 0.0)))") in
-  let workspace=match Flow.Workspace.check ~ops:[] {Flow.Check.version=1;kinds=[]} forms with
+  let workspace=match Flow.Workspace.check ~ops:[] {Flow.Catalog.version=1;kinds=[]} forms with
     |Some w,ds when not (List.exists (fun (d:Diagnostic.t)->d.severity=Diagnostic.Error_severity) ds)->w
     |_,ds->failwith (String.concat "\n" (List.map Diagnostic.to_string ds)) in
   let evaluation=Result.get_ok (Flow.Eval.static ~record:true workspace) in
@@ -132,7 +132,7 @@ let () =
       ^ body ^ ") " ^ source ^ ")] 0.0)))" in
     let forms = Result.get_ok (Flow.Syntax.parse text) in
     let ops = if op.name = "noise3" then [] else [op] in
-    let workspace = match Flow.Workspace.check ~ops {Flow.Check.version=1;kinds=[]} forms with
+    let workspace = match Flow.Workspace.check ~ops {Flow.Catalog.version=1;kinds=[]} forms with
       | Some w, [] -> w
       | _, ds -> failwith (String.concat "\n" (List.map Diagnostic.to_string ds)) in
     let evaluated = Result.get_ok (Flow.Eval.static ~record:true workspace) in

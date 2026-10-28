@@ -104,7 +104,7 @@ type graph = { name : string; context : context;
   inputs : (string * Ty.t * term option) list; body : term; form : S.t }
 
 type node_definition = {
-  kind : Check.kind; slots : Check.slot list; keyword_inputs : string list;
+  kind : Catalog.kind; slots : Catalog.slot list; keyword_inputs : string list;
   fields : Param.field_view list; label : string;
   category : string list; description : string option; operation : string; version : int; body : graph;
   validations : (term * string * string) list;
@@ -150,7 +150,7 @@ type t = { name : string; graphs : graph list; defs : graph list; nodes : node_d
   source : S.t list; live : Paths.t; invariant : Paths.t; approx : Paths.t;
   packed : (path * packed_form) list; packed_roots : (S.t * path) list;
   approx_reasons : (path * Diagnostic.t list) list;
-  kind_fns : (string * (string * Context.t * Check.slot list)) list; ops : Op.t list }
+  kind_fns : (string * (string * Context.t * Catalog.slot list)) list; ops : Op.t list }
 
 let max_iterations = Op.max_iterations
 (* ponytail: a guard against exponential call-site typing, not a language limit. *)
@@ -207,7 +207,7 @@ and callee =
   | Closure of closure
   | Def_fn of string
   | Op_fn of string
-  | Kind_fn of Check.kind
+  | Kind_fn of Catalog.kind
 and closure = { params : (S.t * Ty.t option) list; body : S.t; ccx : cx; cname : string; cid : path }
 and cx = { env : v Smap.t; ctx : context; scope : string; path : path; in_def : bool;
   stack : string list; depth : int; zone : int; zbody : bool }
@@ -295,53 +295,53 @@ let port_ty = function
 let ty_of_port = function
   | Port_type.Float -> Ty.Float | Int -> Ty.Int | Bool -> Ty.Bool | Vec3 -> Ty.Vec3
   | Geometry -> Ty.geometry | Image -> Ty.image | Fn signature -> Ty.Fn (Some signature)
-let is_color (p : Check.parameter) = p.ty = Some Port_type.Vec3 && (match p.fields with
+let is_color (p : Catalog.parameter) = p.ty = Some Port_type.Vec3 && (match p.fields with
   | [ (a, _, _); (b, _, _); (c, _, _) ] ->
       String.ends_with ~suffix:"_r" a && String.ends_with ~suffix:"_g" b
       && String.ends_with ~suffix:"_b" c
   | _ -> false)
-let param_ty (p : Check.parameter) = match p.ty with
+let param_ty (p : Catalog.parameter) = match p.ty with
   | Some Port_type.Vec3 when is_color p -> Ty.Color
   | Some t -> ty_of_port t
   | None -> Ty.Text
-let kind_out (k : Check.kind) =
+let kind_out (k : Catalog.kind) =
   if k.context <> Context.sop && k.context <> Context.value then Context.result k.context
   else match k.outputs with
     | [ (_, t) ] -> ty_of_port t
     | [] -> Ty.Any
     | outs -> Ty.Record (List.map (fun (n, t) -> (n, ty_of_port t)) outs)
 (* the type of a kind's slots: geometry, a World layer's layer below, a scene/world's World, a root's scene *)
-let slot_ty ?slot (k : Check.kind) = match Option.bind slot (fun (s : Check.slot) -> s.ty) with
+let slot_ty ?slot (k : Catalog.kind) = match Option.bind slot (fun (s : Catalog.slot) -> s.ty) with
   | Some ty -> ty
   | None -> match k.qualified with
   | "scene/world" -> Ty.world | "scene/root" -> Ty.scene
   | _ -> if k.context = Context.scene then Ty.geometry else Context.result k.context
 let rec positional_slot slots index = match slots with
   | [] -> None
-  | (slot : Check.slot) :: rest ->
+  | (slot : Catalog.slot) :: rest ->
       if index=0 || slot.rest then Some slot else positional_slot rest (index-1)
 (* ponytail: the catalog has no group markers yet; a `group` parameter reads a group and
    `name` on a `sop/group_*` kind writes one. *)
-let group_reader (p : Check.parameter) = p.name = "group"
-let group_writer (k : Check.kind) (p : Check.parameter) =
+let group_reader (p : Catalog.parameter) = p.name = "group"
+let group_writer (k : Catalog.kind) (p : Catalog.parameter) =
   p.name = "name" && String.starts_with ~prefix:"sop/group_" k.qualified
 
-let rec to_check (t : term) : Check.term =
+let rec to_check (t : term) : Catalog.term =
   let ty = port_ty t.ty in
   match t.node with
-  | Lit v -> { node = Check.Literal v; ty }
-  | Text s -> { node = Check.Literal (Param.Text_value s); ty = None }
-  | Nil -> { node = Check.Nil; ty }
-  | Vec cs -> { node = Check.Vector (List.map (fun (c : term) ->
+  | Lit v -> { node = Catalog.Literal v; ty }
+  | Text s -> { node = Catalog.Literal (Param.Text_value s); ty = None }
+  | Nil -> { node = Catalog.Nil; ty }
+  | Vec cs -> { node = Catalog.Vector (List.map (fun (c : term) ->
       let c = to_check c in if c.ty = None then { c with ty = Some Port_type.Float } else c) cs); ty }
-  | _ -> { node = Check.Reference ("_", "_"); ty }
+  | _ -> { node = Catalog.Reference ("_", "_"); ty }
 
 let hex_colour s =
   let n = String.length s in
   n > 0 && s.[0] = '#' && (n = 4 || n = 7 || n = 9)
   && String.for_all (function '0' .. '9' | 'a' .. 'f' | 'A' .. 'F' -> true | _ -> false)
        (String.sub s 1 (n - 1))
-let validate_parameter ?ty report (p : Check.parameter) (term : term) =
+let validate_parameter ?ty report (p : Catalog.parameter) (term : term) =
   let want = param_ty p and have = Option.value ~default:term.ty ty in
   if have <> Ty.Any then begin
     if not (Ty.fits have want) then
@@ -352,11 +352,11 @@ let validate_parameter ?ty report (p : Check.parameter) (term : term) =
             report Diagnostic.Error_severity "E_TYPE" (Printf.sprintf ":%s is a colour: write \"#rrggbb\" or a vec3, not \"%s\"" p.name s)
       | Ty.Color, _ ->
           if have = Ty.Vec3 then
-            Check.validate_parameter report { p with ty = Some Port_type.Vec3 } (to_check term)
+            Catalog.validate_parameter report { p with ty = Some Port_type.Vec3 } (to_check term)
       | Ty.Vec3, _ when have <> Ty.Vec3 -> ()
-      | Ty.Text, Text _ -> Check.validate_parameter report p (to_check term)
+      | Ty.Text, Text _ -> Catalog.validate_parameter report p (to_check term)
       | Ty.Text, _ -> ()
-      | _ -> Check.validate_parameter report p (to_check term)
+      | _ -> Catalog.validate_parameter report p (to_check term)
   end
 
 let pairs = S.pairs
@@ -392,7 +392,7 @@ let skip_tuples (v : S.t) : int list list option =
 (* The checker proper: the names, types, macro and defnode tables of one workspace check and the
    mutually recursive inference over them (infer .. graph_info), then the form-level [driver]. *)
 module Checker (P : sig
-  val ops : Op.t list val library : bool val catalog : Check.catalog val forms : S.t list
+  val ops : Op.t list val library : bool val catalog : Catalog.catalog val forms : S.t list
 end) = struct
   open P
   let find_op = Op.find ~extra:ops
@@ -495,8 +495,8 @@ end) = struct
     match Hashtbl.find_opt kind_memo key with
     | Some r -> r
     | None ->
-        let kinds = Hashtbl.fold (fun _ (d:Defnode.t) kinds -> d.kind :: kinds) node_sources catalog.Check.kinds in
-        let r = Check.resolve_kind {catalog with kinds} ctx head in
+        let kinds = Hashtbl.fold (fun _ (d:Defnode.t) kinds -> d.kind :: kinds) node_sources catalog.Catalog.kinds in
+        let r = Catalog.resolve_kind {catalog with kinds} ctx head in
         Hashtbl.add kind_memo key r; r
   let resolve_head cx s = match Hashtbl.find_opt sigs s with
     | Some d -> `Def d
@@ -611,7 +611,7 @@ end) = struct
     let recent = List.drop (max 0 (List.length bound - 6)) bound in
     bad x "E_UNBOUND" (Printf.sprintf "%s is not bound in %s.%s%s" s cx.scope
       (if bound = [] then "" else " Bound here: " ^ String.concat ", " recent ^ ".")
-      (Check.suggestion s bound))
+      (Catalog.suggestion s bound))
   let rec infer cx (x : S.t) : term * v =
     incr steps;
     if !steps > max_steps then raise Budget;
@@ -1547,12 +1547,12 @@ end) = struct
                   let fn_slot pos key =
                     let slot = match pos,key with
                       | Some i,_ -> positional_slot k.slots i
-                      | _,Some name -> List.find_opt (fun (s:Check.slot) -> s.name=name) k.slots
+                      | _,Some name -> List.find_opt (fun (s:Catalog.slot) -> s.name=name) k.slots
                       | _ -> None in
-                    Option.fold ~none:false ~some:(fun (s:Check.slot) ->
+                    Option.fold ~none:false ~some:(fun (s:Catalog.slot) ->
                       match s.ty with Some (Ty.Fn _) -> true | _ -> false) slot
                     || Option.fold ~none:false ~some:(fun name ->
-                      List.exists (fun (p : Check.parameter) -> p.name = name &&
+                      List.exists (fun (p : Catalog.parameter) -> p.name = name &&
                         (match p.ty with Some (Port_type.Fn _) -> true | _ -> false)) k.parameters) key in
                   apply_kind cx x k (args_of cx fn_slot args)))
 
@@ -1795,28 +1795,28 @@ end) = struct
         state_dep = a.av.state_dep || rv.state_dep;
         approx_sources = Paths.union a.av.approx_sources rv.approx_sources} }
 
-  and apply_kind cx x (k : Check.kind) (args : arg list) : term * v =
+  and apply_kind cx x (k : Catalog.kind) (args : arg list) : term * v =
     let position = ref 0 in
     let args = List.map (fun a ->
       let slot = match a.key with
-        | Some name -> List.find_opt (fun (s:Check.slot) -> s.name=name) k.slots
+        | Some name -> List.find_opt (fun (s:Catalog.slot) -> s.name=name) k.slots
         | None -> let i= !position in incr position; positional_slot k.slots i in
-      match Option.bind slot (fun (s:Check.slot) -> s.ty) with
+      match Option.bind slot (fun (s:Catalog.slot) -> s.ty) with
       | Some (Ty.Fn (Some signature)) -> instantiate_fn cx a signature
       | _ -> match a.key with
-      | Some name -> (match List.find_opt (fun (p : Check.parameter) -> p.name = name) k.parameters with
+      | Some name -> (match List.find_opt (fun (p : Catalog.parameter) -> p.name = name) k.parameters with
           | Some {ty = Some (Port_type.Fn signature); _} -> instantiate_fn cx a signature
           | _ -> a)
       | None -> a) args in
     if not (Op.is_display_kind k.qualified) then
       List.iter (fun a -> exact_sink cx a.aform k.qualified a.av) args;
-    let rest_index = List.find_index (fun (s : Check.slot) -> s.rest) k.slots in
-    let short = Check.short k.qualified in
+    let rest_index = List.find_index (fun (s : Catalog.slot) -> s.rest) k.slots in
+    let short = Catalog.short k.qualified in
     let nslots = List.length k.slots in
     let seen = Hashtbl.create 8 in
     let out = ref [] and npos = ref 0 and writes = ref [] in
     let groups_in = List.fold_left (fun g a -> union g a.av.groups) [] args in
-    let slot_arg ?(repeated = false) a (slot : Check.slot) =
+    let slot_arg ?(repeated = false) a (slot : Catalog.slot) =
       let ty = slot_ty ~slot k in
       if Ty.fits a.av.ty ty then ()
       else if repeated && (match a.av.ty with Ty.List e -> Ty.fits e ty | _ -> false) then begin
@@ -1849,8 +1849,8 @@ end) = struct
           if Hashtbl.mem seen n then err a.aform "E_DUPLICATE_PARAM" (Printf.sprintf ":%s is given twice" n)
           else begin
             Hashtbl.add seen n ();
-            match List.find_opt (fun (s : Check.slot) -> s.name = n) k.slots,
-                  List.find_opt (fun (p : Check.parameter) -> p.name = n) k.parameters with
+            match List.find_opt (fun (s : Catalog.slot) -> s.name = n) k.slots,
+                  List.find_opt (fun (p : Catalog.parameter) -> p.name = n) k.parameters with
             | Some slot, _ -> slot_arg ~repeated:slot.rest a slot; out := (n, a.aterm) :: !out
             | None, Some p ->
                 if k.qualified = "sop/material" && n = "material" && a.av.ty = Ty.material
@@ -1865,17 +1865,17 @@ end) = struct
                  | _ -> ());
                 out := (n, a.aterm) :: !out
             | None, None ->
-                let names = List.map (fun (s : Check.slot) -> s.name) k.slots
-                  @ List.map (fun (p : Check.parameter) -> p.name) k.parameters in
-                err a.aform "E_UNKNOWN_PARAM" (Printf.sprintf "%s has no parameter :%s.%s" short n (Check.suggestion n names))
+                let names = List.map (fun (s : Catalog.slot) -> s.name) k.slots
+                  @ List.map (fun (p : Catalog.parameter) -> p.name) k.parameters in
+                err a.aform "E_UNKNOWN_PARAM" (Printf.sprintf "%s has no parameter :%s.%s" short n (Catalog.suggestion n names))
           end) args;
-    List.iter (fun (s : Check.slot) ->
+    List.iter (fun (s : Catalog.slot) ->
         if s.required && not s.rest && not (Hashtbl.mem seen s.name) then
           if slot_ty ~slot:s k = Ty.geometry then
             out := (s.name, tm x Ty.geometry Nil) :: !out
           else
             err x "E_MISSING_INPUT" (Printf.sprintf "%s needs its %s input" short s.name)) k.slots;
-    List.iter (fun (p : Check.parameter) ->
+    List.iter (fun (p : Catalog.parameter) ->
       if p.fields = [] && (match p.ty with Some (Port_type.Fn _ | Port_type.Image) -> true | _ -> false)
           && not (Hashtbl.mem seen p.name) then
         err x "E_MISSING_INPUT" (Printf.sprintf "%s needs its :%s input" short p.name)) k.parameters;
@@ -2074,7 +2074,7 @@ end) = struct
       | S.List ({ S.node = S.Sym (("graph" | "defn" | "defnode" | "defmacro") as head); _ } :: { S.node = S.Sym n; _ } :: _) ->
           if (if head="defnode" then not (Defnode.valid_name n) else not (Macro.valid_name n))
              || reserved n || Hashtbl.mem names n
-             || (head="defnode" && List.exists (fun (k:Check.kind) -> k.qualified=n) catalog.kinds)
+             || (head="defnode" && List.exists (fun (k:Catalog.kind) -> k.qualified=n) catalog.kinds)
              || (match find_op n Context.value with Some o -> o.name = n | None -> false) then
             err f "E_NAME" (Printf.sprintf "Invalid, reserved or duplicate name: %s." n)
           else (Hashtbl.add names n (); items := (head, n, f) :: !items)

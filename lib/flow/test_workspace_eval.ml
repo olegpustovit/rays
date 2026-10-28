@@ -1,7 +1,7 @@
 open Flow
 
 let read path = In_channel.with_open_bin path In_channel.input_all
-let catalog = match Check.catalog_of_manifest (read "../flow_sop/flow_manifest.sexp") with
+let catalog = match Catalog.catalog_of_manifest (read "../flow_sop/flow_manifest.sexp") with
   | Ok (catalog, _) -> catalog
   | Error d -> failwith (Diagnostic.to_string d)
 let cases = "../../specification/workspace/cases"

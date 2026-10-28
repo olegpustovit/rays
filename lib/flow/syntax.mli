@@ -2,7 +2,7 @@
     [Lisp.print] prints and what [Macro] and [Workspace] read.  It keeps
     everything a person wrote: comments (notes), [^:flags] (meta), the
     spelling of numbers, and stable form ids.  It also reads the generated
-    catalog manifest ({!Check.catalog_of_manifest}). *)
+    catalog manifest ({!Catalog.catalog_of_manifest}). *)
 
 type id = int
 (** Unique per form within one parse ([parse] numbers forms 0, 1, ... in

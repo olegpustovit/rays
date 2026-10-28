@@ -259,7 +259,7 @@ type 'prepared t = {
   open_import : string option;
   pane_graph : string option;  (* a scene, world or settings graph the pane shows instead of the level's own *)
   back : (Document.level * string option) list;  (* where [u] returns to: level and pane graph, latest first *)
-  flow_catalog : Flow.Check.catalog option Lazy.t;
+  flow_catalog : Flow.Catalog.catalog option Lazy.t;
   lisp_vocab : Lisp_text.vocab Lazy.t;  (* what the text pane completes and describes *)
   tree : Pxui_shell.Tree.t;
   outline : Navigator.state;  (* the Navigator panel: its search (view state) *)

@@ -32,7 +32,7 @@ let query geometry owner name component =
         @Option.fold ~none:[] ~some:(fun component->["component",E.Text component])component)) |>flow_ok
 let checked body =
   let forms=Flow.Syntax.parse("(workspace groups (graph g :context sop [(geo : geometry nil)] (let* [tested "^body^"] geo)))") |>flow_ok in
-  match Flow.Workspace.check ~ops:Flow_sop.Operators.all {Flow.Check.version=1;kinds=[]} forms with
+  match Flow.Workspace.check ~ops:Flow_sop.Operators.all {Flow.Catalog.version=1;kinds=[]} forms with
   | Some checked,[]->checked |_,ds->failwith(String.concat "; " (List.map Diagnostic.to_string ds))
 let evaluated geometry body =
   let evaluated=E.static ~record:true ~inputs:["g",["geo",E.Deferred(Flow.Ty.geometry,7)]](checked body) |>flow_ok in
@@ -247,7 +247,7 @@ let () =
     (E.Text_array(Array.make 5001 "a\\*"));
   exact geometry {|(map (fn [(value : text)] (text/glob_rewrite "a*" "b*" value)) (array/text 5001 "a猫"))|}
     (E.Text_array(Array.make 5001 "b猫"));
-  let catalog=Flow.Check.{version=1;kinds=[]} in
+  let catalog=Flow.Catalog.{version=1;kinds=[]} in
   let checker=Flow.Workspace.check ~ops:Flow_sop.Operators.all in
   let forms=Flow.Syntax.parse {|(workspace glob_cards (graph g :context sop [(geo : geometry nil)]
     (let* [literal (text/glob_literal "a*") rewritten (text/glob_rewrite "a*" "b*" "abc")
@@ -269,7 +269,7 @@ let () =
   print_endline "Glob literal/rewrite and ordered group entries: byte oracles, native snapshot conflicts, strict 5001-text loops and direct graph gestures"
 
 let () =
-  let catalog=Flow.Check.{version=1;kinds=[]} in
+  let catalog=Flow.Catalog.{version=1;kinds=[]} in
   let refuses body =
     let forms=Flow.Syntax.parse body |>flow_ok in
     let _,ds=Flow.Workspace.check ~ops:Flow_sop.Operators.all catalog forms in
@@ -441,7 +441,7 @@ let () =
           assert((Sop.Node.facts node).reads=["P"]);
           match G.find_attribute ~owner:Rdk.Attribute.Point "mark" output |>Option.get |>Rdk.Attribute.storage,expected with
           |Rdk.Attribute.Int actual,E.Int_array expected->assert(actual=expected)|_->assert false) [1;4;8])) [false;true])owners;
-  let catalog=Flow.Check.{version=1;kinds=[]} in
+  let catalog=Flow.Catalog.{version=1;kinds=[]} in
   let checker=Flow.Workspace.check ~ops:Flow_sop.Operators.all in
   let forms=Flow.Syntax.parse {|(workspace promotion_cards (graph g :context sop [(geo : geometry nil)]
     (let* [mask (sop/group geo :name "selected" :owner vertex)] geo)))|}|>flow_ok in
@@ -464,7 +464,7 @@ let () =
 let () =
   let stages program=Option.fold ~none:0 ~some:Flow_ir.Packed.stage_count
     (Flow_ir.Executor.packed_root program)in
-  let geometry=promotion_fixture 7 and catalog=Flow.Check.{version=1;kinds=[]} in
+  let geometry=promotion_fixture 7 and catalog=Flow.Catalog.{version=1;kinds=[]} in
   let forms=Flow.Syntax.parse {|(workspace origins (graph g :context value
     [(p : (array vec3) (array/vec3 0)) (mask : (array int) (array/int 0 0))]
     (let* [a (map (fn [(position : vec3)] (+ position [t 0 0])) p)

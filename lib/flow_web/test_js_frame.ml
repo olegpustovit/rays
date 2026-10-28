@@ -12,7 +12,7 @@ let node = Sys.command "command -v node >/dev/null 2>&1" = 0
 
 let ops = Core_fixtures.offset :: []
 let check source =
-  match Flow.Workspace.check ~ops {Flow.Check.version = 1; kinds = []} (ok (Flow.Syntax.parse source)) with
+  match Flow.Workspace.check ~ops {Flow.Catalog.version = 1; kinds = []} (ok (Flow.Syntax.parse source)) with
   | Some ws, [] -> ws
   | _, ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
 
@@ -88,7 +88,7 @@ let workspace_picture name path =
   String.iteri (fun i c -> if i >= start && !depth >= 0 then begin
     if c = (Char.chr 40) then incr depth else if c = (Char.chr 41) then (decr depth; if !depth = 0 then (stop := i; depth := -1)) end) text;
   let text = "(workspace picture_only " ^ String.sub text start (!stop - start + 1) ^ ")" in
-  match Flow.Workspace.check {Flow.Check.version = 1; kinds = []} (ok (Flow.Syntax.parse text)) with
+  match Flow.Workspace.check {Flow.Catalog.version = 1; kinds = []} (ok (Flow.Syntax.parse text)) with
   | Some ws, [] ->
       let evaluation = ok (E.static ws) in
       let name, program, root = draw_of name evaluation (List.assoc "picture" evaluation.results) in

@@ -19,7 +19,7 @@ val window_schema : window Param.schema
 val descriptors : Flow_sop.Catalog.descriptor list
 (** Every generated kind; the manifest generator writes them. *)
 
-val catalog : version:int -> Sop.Edit_graph.factory list -> (Flow.Check.catalog, Diagnostic.t) result
+val catalog : version:int -> Sop.Edit_graph.factory list -> (Flow.Catalog.catalog, Diagnostic.t) result
 (** {!Flow_sop.Catalog.of_factories} with {!descriptors}: what a workspace text is checked against.
     Not cached: a {!Document.t} keeps its own. *)
 

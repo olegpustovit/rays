@@ -57,7 +57,7 @@ let non_default node =
 
 (* ---- applying ops to the text ---- *)
 
-type state = { catalog : Flow.Check.catalog; mutable workspace : Workspace_doc.t;
+type state = { catalog : Flow.Catalog.catalog; mutable workspace : Workspace_doc.t;
                mutable unfolded : (Document.home * F.path) list;  (* homes already made bindings *)
                mutable adopted : bool  (* the host's objects are already written *) }
 

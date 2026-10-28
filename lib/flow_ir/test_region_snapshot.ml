@@ -1,6 +1,6 @@
 (* The kernel register programs of the shared fixtures and four workspaces. *)
 module E = Flow.Eval
-let catalog = fst (Test_program.ok (Flow.Check.catalog_of_manifest
+let catalog = fst (Test_program.ok (Flow.Catalog.catalog_of_manifest
   (In_channel.with_open_bin "../flow_sop/flow_manifest.sexp" In_channel.input_all)))
 
 let run ?(require_state_kernel = false) checked =
@@ -51,7 +51,7 @@ let state_branch_laziness () =
           (map (fn [x] (error "E_UNTAKEN" "inactive state map")) s)
           (map (fn [x] (+ x 1)) s)))] (+ (array/sum held) 0.))))|} in
   let forms = Test_program.ok (Flow.Syntax.parse source) in
-  let checked = match Flow.Workspace.check ~ops:[] {Flow.Check.version=1;kinds=[]} forms with
+  let checked = match Flow.Workspace.check ~ops:[] {Flow.Catalog.version=1;kinds=[]} forms with
     | Some workspace, [] -> workspace
     | _, diagnostics -> failwith (String.concat "; " (List.map Diagnostic.to_string diagnostics)) in
   let evaluation = Test_program.ok (E.static checked) in

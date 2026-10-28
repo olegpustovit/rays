@@ -2,7 +2,7 @@ open Flow
 open Flow_graph
 
 let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
-let catalog = Check.{version = 1; kinds = []}
+let catalog = Catalog.{version = 1; kinds = []}
 let checked source = match Workspace.check catalog source with
   | Some w, [] -> w
   | _, ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
@@ -14,7 +14,7 @@ let same expected = function
 let () =
   let source = ok (Syntax.parse
     "(workspace literals (graph g :context value (let* [x 0.5 ; keep this note\n] x)))") in
-  let parameter = Check.{name = "size"; label = "Size"; ty = Some Port_type.Float;
+  let parameter = Catalog.{name = "size"; label = "Size"; ty = Some Port_type.Float;
     fields = ["size", Param.Floating_view Param.{soft_min = 0.; soft_max = 2.;
       hard_min = Some 0.; hard_max = Some 4.}, Param.Float_value 1.];
     folder = []; primary = false; unit = None} in
@@ -44,8 +44,8 @@ let () =
       (Set_arg {node = card.path; key = Whole; sub = []; value = Syntax.make (Num "7.5")})) in
     assert (value finite = Eval.Float 7.5);
     let codes = ref [] in
-    Check.validate_parameter (fun severity code _ -> codes := (severity, code) :: !codes)
-      parameter Check.{node = Literal (Param.Float_value expected); ty = Some Port_type.Float};
+    Catalog.validate_parameter (fun severity code _ -> codes := (severity, code) :: !codes)
+      parameter Catalog.{node = Literal (Param.Float_value expected); ty = Some Port_type.Float};
     assert (!codes = [Diagnostic.Error_severity, "E_NONFINITE"]);
     (try Value.validate (Value.Float_array [|expected|]); assert false
      with Diagnostic.Error d -> assert (d.code = "E_NONFINITE"));

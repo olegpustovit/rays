@@ -8,7 +8,7 @@ let reject code f = try ignore(f());failwith("accepted "^code)
   with Diagnostic.Error d -> assert(d.code=code)
 let value ?(declarations="") ?inputs body =
   let source="(workspace w (graph g :context host "^declarations^" (if (> t -1000.) "^body^" "^body^")))" in
-  let workspace=match Flow.Workspace.check {Flow.Check.version=1;kinds=[]} (ok(Flow.Syntax.parse source)) with
+  let workspace=match Flow.Workspace.check {Flow.Catalog.version=1;kinds=[]} (ok(Flow.Syntax.parse source)) with
     |Some workspace,[] -> workspace
     |_,ds -> failwith(String.concat "; "(List.map Diagnostic.to_string ds)) in
   List.assoc "g" (ok(E.static ?inputs workspace)).results

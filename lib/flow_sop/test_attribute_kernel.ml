@@ -199,7 +199,7 @@ let () =
   let evaluate body =
     let forms=Flow.Syntax.parse ("(workspace checked_attribute (graph g :context sop [(geo : geometry nil)] "^
       "(let* [tested "^body^"] geo)))") |>flow_ok in
-    let checked=match Flow.Workspace.check ~ops:Flow_sop.Operators.all Flow.Check.{version=1;kinds=[]} forms with
+    let checked=match Flow.Workspace.check ~ops:Flow_sop.Operators.all Flow.Catalog.{version=1;kinds=[]} forms with
       |Some checked,[]->checked|_,ds->failwith(String.concat "; "(List.map Diagnostic.to_string ds)) in
     E.static ~record:true ~inputs:["g",["geo",E.Deferred(Flow.Ty.geometry,7)]]checked |>flow_ok
       |>fun evaluation->List.assoc["g";"tested"]evaluation.records |>List.hd |>snd in
@@ -301,7 +301,7 @@ let () =
    |Error d->assert(d.code="E_DATA_SOURCE")|Ok _->assert false);
   List.iter(fun kind->
     let source="(workspace bad_checked (graph g :context sop (let* [geo (sop/line) data (sop/attr_checked geo :P :type "^kind^")] geo)))" in
-    let _,ds=Flow.Workspace.check ~ops:Flow_sop.Operators.all Flow.Check.{version=1;kinds=[]}(Flow.Syntax.parse source |>flow_ok) in
+    let _,ds=Flow.Workspace.check ~ops:Flow_sop.Operators.all Flow.Catalog.{version=1;kinds=[]}(Flow.Syntax.parse source |>flow_ok) in
     assert(List.exists(fun(d:Diagnostic.t)->d.code="E_ATTR_TYPE")ds))
     ["int";"text";"float_array";"int_array";"(if true \"float\" \"vec3\")"];
   print_endline "Checked attributes: numeric/all-owner finite classification, raw bytes, strict/reference/domain copies and ordinary nonfinite guards pass"
@@ -404,7 +404,7 @@ let () =
     List.iter(fun(kind,body)->
       let forms=Flow.Syntax.parse(Printf.sprintf
         "(workspace fills (graph g :context sop [(geo : geometry nil)] (let* [data %s mask (array/int (sop/count geo :points) (int (/ 1 (- t 2))))] geo)))" body) |>flow_ok in
-      let checked=match Flow.Workspace.check ~ops:Flow_sop.Operators.all Flow.Check.{version=1;kinds=[]}forms with
+      let checked=match Flow.Workspace.check ~ops:Flow_sop.Operators.all Flow.Catalog.{version=1;kinds=[]}forms with
         |Some checked,[]->checked|_,diagnostics->fail(String.concat "; "(List.map Diagnostic.to_string diagnostics)) in
       let evaluation=E.static ~record:true ~inputs:["g",["geo",E.Deferred(Flow.Ty.geometry,7)]]checked |>flow_ok in
       let values=List.assoc["g";"data"]evaluation.records |>List.hd |>snd in

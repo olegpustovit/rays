@@ -4,7 +4,7 @@ module V=Flow.Value
 module D=Diagnostic
 module I=Flow_ir
 let ok=function Ok value->value|Error d->failwith(D.to_string d)
-let catalog=Flow.Check.{version=1;kinds=[]}
+let catalog=Flow.Catalog.{version=1;kinds=[]}
 let mapper="(fn [index] {:code \"E_ROW\" :message (str \"bad \" index) :cause (list (str \"raw 日本😀 \" index))})"
 let source body="(workspace rows (graph g :context value [(flags : (array int) (array/int 0))] (let* [tested "^body^"] 0.)))"
 let parse text=ok(Flow.Syntax.parse text)

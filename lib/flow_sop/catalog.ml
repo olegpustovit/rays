@@ -23,10 +23,10 @@ let of_defnode (node : Flow.Defnode.t) = {
     | Some i -> String.sub node.kind.qualified (i + 1) (String.length node.kind.qualified - i - 1)
     | None -> node.kind.qualified);
   operation = node.operation; label = node.label; category = node.category;
-  slots = List.map (fun (slot : Flow.Check.slot) -> slot.name, (match slot.required, slot.rest with
+  slots = List.map (fun (slot : Flow.Catalog.slot) -> slot.name, (match slot.required, slot.rest with
     | true, true -> Edit.Rest | false, true -> Optional_rest
     | true, false -> Required | false, false -> Optional)) node.slots;
-  slot_types = List.map (fun (slot : Flow.Check.slot) ->
+  slot_types = List.map (fun (slot : Flow.Catalog.slot) ->
     Option.fold ~none:"geometry" ~some:Flow.Ty.to_string slot.ty) node.slots;
   keyword_inputs = node.keyword_inputs; fields = node.fields }
 
@@ -164,8 +164,8 @@ let check_workspace_raw ?ops ?library ?sources:override catalog forms =
               List.exists (fun form -> definition_name form = Some node.kind.qualified) sources) nodes
         | None ->
             let nodes = List.filter (fun (node : Flow.Defnode.t) ->
-              List.exists (fun (kind : Flow.Check.kind) -> kind.qualified=node.kind.qualified)
-                catalog.Flow.Check.kinds) nodes in
+              List.exists (fun (kind : Flow.Catalog.kind) -> kind.qualified=node.kind.qualified)
+                catalog.Flow.Catalog.kinds) nodes in
             let sources = if nodes=[] then [] else List.filter (fun form ->
               match form.Flow.Syntax.node with
               | List ({node=Sym "defnode";_} :: {node=Sym name;_} :: _) ->
@@ -192,8 +192,8 @@ let check_workspace_raw ?ops ?library ?sources:override catalog forms =
         | Flow.Syntax.List (({node = Flow.Syntax.Sym "workspace"; _} as head) :: name :: children) ->
             {form with node = Flow.Syntax.List (head :: name :: sources @ children)}
         | _ -> form) forms in
-      let catalog = {catalog with Flow.Check.kinds = List.filter (fun (kind : Flow.Check.kind) ->
-        not (List.exists (fun (node : Flow.Defnode.t) -> node.kind.qualified = kind.qualified) nodes)) catalog.Flow.Check.kinds} in
+      let catalog = {catalog with Flow.Catalog.kinds = List.filter (fun (kind : Flow.Catalog.kind) ->
+        not (List.exists (fun (node : Flow.Defnode.t) -> node.kind.qualified = kind.qualified) nodes)) catalog.Flow.Catalog.kinds} in
       let workspace, diagnostics = Flow.Workspace.check ?ops ?library catalog forms in
       Option.map (fun (workspace : Flow.Workspace.t) -> {workspace with source=authored}) workspace, diagnostics
 
@@ -207,23 +207,23 @@ let check_workspace ?ops ?library ?sources catalog forms =
 (* The catalog describes a kind at its default parameters: the [:facts] names that read a parameter
    ([$param], [$param|fallback], [$param~prefix]) resolve against the defaults, as the manifest prints them. *)
 let described_kind (node : Flow.Defnode.t) =
-  let resolve = Flow.Check.resolve_component_names (fun name ->
+  let resolve = Flow.Catalog.resolve_component_names (fun name ->
     List.find_map (fun (field : Param.field_view) -> match field.default with
       | Param.Text_value text when field.name = name -> Some text | _ -> None) node.fields) in
-  {node.kind with facts = Option.map (fun (f : Flow.Check.kernel_facts) ->
+  {node.kind with facts = Option.map (fun (f : Flow.Catalog.kernel_facts) ->
     {f with reads = resolve f.reads; writes = resolve f.writes}) node.kind.facts}
 
 let of_factories ~version ?(extra = []) ?nodes factories =
   let declarations = Hashtbl.create (List.length factories) in
   List.iter (fun factory ->
     let facts = Edit.factory_facts factory in
-    Hashtbl.replace declarations ("sop/" ^ Edit.factory_key factory) Flow.Check.{
+    Hashtbl.replace declarations ("sop/" ^ Edit.factory_key factory) Flow.Catalog.{
       elementwise = (match facts.elementwise with Points -> Points | Primitives -> Primitives | None -> Irregular);
       reads = facts.reads; writes = facts.writes;
       preserves_topology = (facts.topology = Sop.Node.Preserved); exact = facts.exact}) factories;
   let seen = Hashtbl.create 64 in
   let rec build reversed = function
-    | [] -> Ok Flow.Check.{version; kinds = List.rev reversed}
+    | [] -> Ok Flow.Catalog.{version; kinds = List.rev reversed}
     | (entry : descriptor) :: rest ->
         if entry.slot_types <> [] && List.length entry.slot_types <> List.length entry.slots then
           Error (Diagnostic.error ~code:"E_CATALOG" ("Input type count differs in " ^ entry.qualified))
@@ -248,16 +248,16 @@ let of_factories ~version ?(extra = []) ?nodes factories =
           let types = if entry.slot_types = [] then List.map (fun _ -> None) entry.slots else
             List.map (fun name -> if name = "geometry" then None else Flow.Ty.of_string name) entry.slot_types in
           let inputs = List.map2 (fun (name, requirement) ty ->
-            Flow.Check.{name; required = (requirement = Edit.Required || requirement = Edit.Rest);
+            Flow.Catalog.{name; required = (requirement = Edit.Required || requirement = Edit.Rest);
               rest = (requirement = Edit.Rest || requirement = Edit.Optional_rest); ty}) entry.slots types in
-          let keywords, slots = List.partition (fun (s : Flow.Check.slot) ->
+          let keywords, slots = List.partition (fun (s : Flow.Catalog.slot) ->
             List.mem s.name entry.keyword_inputs) inputs in
-          let keywords = List.map (fun (s : Flow.Check.slot) ->
+          let keywords = List.map (fun (s : Flow.Catalog.slot) ->
             let ty = match s.ty with
               | Some (Flow.Ty.Fn (Some signature)) -> Flow.Port_type.Fn signature
               | Some ty when ty = Flow.Ty.image -> Flow.Port_type.Image
               | _ -> invalid_arg ("Typed keyword input must be fn or image: " ^ s.name) in
-            Flow.Check.{name = s.name; label = s.name; ty = Some ty;
+            Flow.Catalog.{name = s.name; label = s.name; ty = Some ty;
               fields = []; folder = []; primary = true; unit = None}) keywords in
           Hashtbl.add seen entry.qualified ();
           Result.bind (Port.parameters entry.fields) (fun ports ->
@@ -268,7 +268,7 @@ let of_factories ~version ?(extra = []) ?nodes factories =
               let label = match port.Port.fields with
                 | (field : Param.field_view) :: _ -> field.label
                 | [] -> port.path in
-              Flow.Check.{name = port.path; label; ty = port.ty;
+              Flow.Catalog.{name = port.path; label; ty = port.ty;
                 fields = List.map (fun (field : Param.field_view) ->
                   field.name, field.kind, field.default) port.fields;
                 folder = (match port.Port.fields with (f : Param.field_view) :: _ -> f.folder | [] -> []);
@@ -277,7 +277,7 @@ let of_factories ~version ?(extra = []) ?nodes factories =
             let context = Option.get (context_of entry.qualified) in
             let outputs = if context = Flow.Context.sop
               then ["geo", Flow.Port_type.Geometry] else [] in
-            build (Flow.Check.{qualified = entry.qualified;
+            build (Flow.Catalog.{qualified = entry.qualified;
               context; slots; parameters = parameters @ keywords; outputs;
               facts = Hashtbl.find_opt declarations entry.qualified} :: reversed) rest)
         end in
@@ -286,12 +286,12 @@ let of_factories ~version ?(extra = []) ?nodes factories =
       let rec append catalog = function
         | [] -> Ok catalog
         | (node : Flow.Defnode.t) :: rest ->
-            if List.exists (fun (kind : Flow.Check.kind) -> kind.qualified = node.kind.qualified)
-                catalog.Flow.Check.kinds then
+            if List.exists (fun (kind : Flow.Catalog.kind) -> kind.qualified = node.kind.qualified)
+                catalog.Flow.Catalog.kinds then
               Error (Diagnostic.error ~code:"E_CATALOG" ("Duplicate kind " ^ node.kind.qualified))
             else append {catalog with kinds = catalog.kinds @ [described_kind node]} rest in
-      Result.map (fun (checked:Flow.Check.catalog) ->
-        let native, extra = List.partition (fun (kind:Flow.Check.kind) ->
+      Result.map (fun (checked:Flow.Catalog.catalog) ->
+        let native, extra = List.partition (fun (kind:Flow.Catalog.kind) ->
           Hashtbl.mem declarations kind.qualified) catalog.kinds in
         {checked with kinds=native @ List.map described_kind nodes @ extra})
         (append catalog nodes)))

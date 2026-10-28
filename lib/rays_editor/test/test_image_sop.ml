@@ -30,12 +30,12 @@ let () =
     ~input_types:["missing_type"] ~arity:1 (fun inputs -> List.hd inputs) in
   assert (Result.is_error (Flow_sop.Catalog.of_factories ~version:1 [bad]));
   let manifest, _ = ok (Flow_sop.Manifest.generate ~extra:Editor_document.Kinds.descriptors factories) in
-  let parsed, _ = ok (Flow.Check.catalog_of_manifest manifest) in
-  let kind catalog = List.find (fun (kind : Flow.Check.kind) -> kind.qualified = "sop/attr_from_image") catalog.Flow.Check.kinds in
+  let parsed, _ = ok (Flow.Catalog.catalog_of_manifest manifest) in
+  let kind catalog = List.find (fun (kind : Flow.Catalog.kind) -> kind.qualified = "sop/attr_from_image") catalog.Flow.Catalog.kinds in
   assert ((kind parsed).slots = (kind catalog).slots);
   assert ((List.nth (kind parsed).slots 1).ty = Some Flow.Ty.image);
-  assert (not (List.exists (fun (slot : Flow.Check.slot) -> slot.ty <> None)
-    (List.find (fun (kind : Flow.Check.kind) -> kind.qualified = "sop/copy_to_points") parsed.kinds).slots));
+  assert (not (List.exists (fun (slot : Flow.Catalog.slot) -> slot.ty <> None)
+    (List.find (fun (kind : Flow.Catalog.kind) -> kind.qualified = "sop/copy_to_points") parsed.kinds).slots));
   let document = load source in
   let scope = P.of_graph catalog document.checked "g" in
   let node = Option.get (P.find scope ["g";"result"]) in

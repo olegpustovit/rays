@@ -12,7 +12,7 @@ let numeric=function
   |_->failwith "Numeric scatter data expected"
 let root body=
   let text="(workspace scatter (graph g :context host (if (> t -1000.) "^body^" "^body^")))" in
-  let ws=match Flow.Workspace.check Flow.Check.{version=1;kinds=[]}(ok(Flow.Syntax.parse text))with
+  let ws=match Flow.Workspace.check Flow.Catalog.{version=1;kinds=[]}(ok(Flow.Syntax.parse text))with
     |Some w,[]->w|_,ds->failwith(String.concat ";"(List.map Diagnostic.to_string ds))in
   let value=List.assoc "g"(ok(E.static ws)).results in
   let r=match value with E.Residual r->r|_->failwith "Live scatter expected"in

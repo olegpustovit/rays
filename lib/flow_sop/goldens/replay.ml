@@ -120,7 +120,7 @@ and prepared = {
   source_forms : Flow.Syntax.t list;
   schema : string;
   ops : Flow.Op.t list;
-  graph_catalog : Flow.Check.catalog;
+  graph_catalog : Flow.Catalog.catalog;
   library : Flow.Workspace.t;
   diagnostics : Diagnostic.t list;
 }
@@ -765,7 +765,7 @@ let () = match Array.to_list Sys.argv with
         |> List.map string |> List.sort_uniq String.compare in
       let expected_nodes = Flow_sop.Catalog.node_definitions () |> get_flow
         |> List.map (fun node ->
-          let qualified = node.Flow.Defnode.kind.Flow.Check.qualified in
+          let qualified = node.Flow.Defnode.kind.Flow.Catalog.qualified in
           match String.index_opt qualified '/' with
           | Some slash -> String.sub qualified (slash + 1) (String.length qualified - slash - 1)
           | None -> fail ("unqualified Lisp node key: " ^ qualified))

@@ -3,7 +3,7 @@ module I=Flow_ir
 let ok=function Ok value->value|Error d->failwith(Diagnostic.to_string d)
 let checked ?(declarations="") body=
   let text="(workspace composition (graph g :context host "^declarations^" "^body^"))" in
-  match Flow.Workspace.check Flow.Check.{version=1;kinds=[]}(ok(Flow.Syntax.parse text))with
+  match Flow.Workspace.check Flow.Catalog.{version=1;kinds=[]}(ok(Flow.Syntax.parse text))with
   |Some w,[]->w|_,ds->failwith(body^": "^String.concat "; "(List.map Diagnostic.to_string ds))
 let live_body body="(if (> t -1000.) "^body^" "^body^")"
 let value body=List.assoc "g"(ok(E.static(checked(live_body body)))).results

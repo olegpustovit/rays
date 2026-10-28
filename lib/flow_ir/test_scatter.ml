@@ -17,7 +17,7 @@ let same a b=match a,b with
       failwith("Scatter reference/compiled disagreement: "^show a^" / "^show b)
 let workspace ?(declarations="") body=
   let text="(workspace scatter (graph g :context host "^declarations^" "^body^"))" in
-  match Flow.Workspace.check Flow.Check.{version=1;kinds=[]}(ok(Flow.Syntax.parse text))with
+  match Flow.Workspace.check Flow.Catalog.{version=1;kinds=[]}(ok(Flow.Syntax.parse text))with
     |Some w,[]->w|_,ds->failwith(String.concat ";"(List.map Diagnostic.to_string ds))
 let value body=List.assoc "g" (ok(E.static(workspace("(if (> t -1000.) "^body^" "^body^")")))).results
 let reference width indices values size =

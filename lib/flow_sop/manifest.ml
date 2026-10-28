@@ -95,18 +95,18 @@ let descriptor ?facts (d : Catalog.descriptor) =
              then ["geo", Flow.Port_type.Geometry] else []) ()
 
 let lisp_node ~calls (node : Flow.Defnode.t) =
-  let key = Flow.Check.short node.kind.qualified in
-  let slots = List.map (fun (slot : Flow.Check.slot) ->
+  let key = Flow.Catalog.short node.kind.qualified in
+  let slots = List.map (fun (slot : Flow.Catalog.slot) ->
     let ty = Flow.Ty.to_string (Flow.Workspace.slot_ty ~slot node.kind) in
     let parts = [quote slot.name; (match slot.required, slot.rest with
       | true, false -> "required" | false, false -> "optional"
       | true, true -> "rest" | false, true -> "optional-rest")] in
     group "slot" (if ty = "geometry" then parts else parts @
       [if Flow.Symbol.valid_name ty then ty else quote ty])) node.slots in
-  let resolve = Flow.Check.resolve_component_names (fun name ->
+  let resolve = Flow.Catalog.resolve_component_names (fun name ->
     List.find_map (fun (field : Param.field_view) -> match field.default with
       | Param.Text_value text when field.name = name -> Some text | _ -> None) node.fields) in
-  let declaration = Option.map (fun (f : Flow.Check.kernel_facts) -> Sop.Node.{
+  let declaration = Option.map (fun (f : Flow.Catalog.kernel_facts) -> Sop.Node.{
     cook_mode = (if node.slots = [] then Generator else Generic);
     elementwise = (match f.elementwise with Points -> Points | Primitives -> Primitives | Irregular -> None);
     reads = resolve f.reads; writes = resolve f.writes;

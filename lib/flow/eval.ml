@@ -147,7 +147,7 @@ and st = {
   recs : (W.path, int * (int list * value) list) Hashtbl.t;
   graphs : (string, W.graph) Hashtbl.t;
   defs : (string, W.graph) Hashtbl.t;
-  kind_fns : (string * (string * Context.t * Check.slot list)) list;
+  kind_fns : (string * (string * Context.t * Catalog.slot list)) list;
   ops : Op.t list;
   find_op : string -> Context.t -> Op.t option;  (* [Op.finder ops]: [ops] is a list, the whole SOP catalog in the editor *)
 }
@@ -777,11 +777,11 @@ and call_fn ?body c f (vals : value list) : value =
               let slots = Array.of_list slots in
               let rest = if Array.length slots = 0 then None else
                 let slot = slots.(Array.length slots - 1) in
-                if slot.Check.rest then Some slot.name else None in
+                if slot.Catalog.rest then Some slot.name else None in
               if List.length vals > Array.length slots && Option.is_none rest then
                 failf "E_ARITY" "%s takes at most %d inputs." kind (Array.length slots);
               let args = List.mapi (fun i v ->
-                ((if i < Array.length slots then slots.(i).Check.name else Option.get rest), v)) vals in
+                ((if i < Array.length slots then slots.(i).Catalog.name else Option.get rest), v)) vals in
               catalog_call c' kind ctx args
       end
 

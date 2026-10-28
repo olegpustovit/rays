@@ -153,7 +153,7 @@ let scenario label (world : W.baked option) =
     (if world = None then 0 else 1) background map_w map_h (vec bg) (vec sun_dir) (num sun_cos) (vec sun_rad) (num sun_pdf) in
   let text = Printf.sprintf "(workspace pt %s (graph g :context value (let* [%s kernel (fn [(pixel : int)] (let* [u %s s (trace-pixel u lights %s pos nrm pan wmap cdf pixel)] [s.sum.x s.sum.y s.sum.z s.cov]))] 0.0)))"
     declarations (String.concat " " (List.map (fun (name, _) -> Printf.sprintf "%s (pt/%s)" name name) host)) facts mat_lit in
-  let kernel = match Flow.Workspace.check ~ops { Flow.Check.version = 1; kinds = [] } (ok (Flow.Syntax.parse text)) with
+  let kernel = match Flow.Workspace.check ~ops { Flow.Catalog.version = 1; kinds = [] } (ok (Flow.Syntax.parse text)) with
     | Some ws, [] -> (match snd (List.hd (List.assoc [ "g"; "kernel" ] (ok (E.static ~record:true ws)).records)) with
         | E.Fn fn -> fn | _ -> failwith "kernel is not a function")
     | _, ds -> failwith (String.concat "\n" (List.map Diagnostic.to_string ds)) in

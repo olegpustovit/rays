@@ -2,7 +2,7 @@ module E = Flow.Eval
 module I = Flow_ir
 let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let checked text =
-  match Flow.Workspace.check {Flow.Check.version = 1; kinds = []} (ok (Flow.Syntax.parse text)) with
+  match Flow.Workspace.check {Flow.Catalog.version = 1; kinds = []} (ok (Flow.Syntax.parse text)) with
   | Some w, [] -> w | _, ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
 let read path = In_channel.with_open_text path In_channel.input_all
 let bytes v = Marshal.to_string v [Marshal.No_sharing]
@@ -42,7 +42,7 @@ let () =
           | List (_ :: {node = Sym "picture"; _} :: _) -> true | _ -> false) graphs in
         [{workspace with node = List [head; name; picture]}]
     | _ -> assert false in
-  let workspace = match Flow.Workspace.check {Flow.Check.version = 1; kinds = []} source with
+  let workspace = match Flow.Workspace.check {Flow.Catalog.version = 1; kinds = []} source with
     | Some w, [] -> w | _, ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds)) in
   let evaluation = ok (E.static workspace) in
   let particles = List.hd evaluation.states in

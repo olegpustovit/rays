@@ -96,8 +96,8 @@ type graph = {
 }
 
 type node_definition = {
-  kind : Check.kind;
-  slots : Check.slot list;  (** complete physical input order *)
+  kind : Catalog.kind;
+  slots : Catalog.slot list;  (** complete physical input order *)
   keyword_inputs : string list;
   fields : Param.field_view list;
   label : string;
@@ -154,7 +154,7 @@ type t = {
           qualifier traversal supplies evaluator ownership without rewriting terms. *)
   approx_reasons : (path * Diagnostic.t list) list;
       (** Pending/structural refusals after check; actual reasons after qualification. *)
-  kind_fns : (string * (string * Context.t * Check.slot list)) list;
+  kind_fns : (string * (string * Context.t * Catalog.slot list)) list;
       (** A catalog kind used as a function value: its qualified name, context and
           complete ordered slot signature, including a repeated final slot. *)
   ops : Op.t list;  (** immutable extra operators retained by this checked workspace *)
@@ -167,7 +167,7 @@ val body_context_ops : string list
 (** Operators a defnode body reads from its cook context ([sop/context_seed], [sop/provenance_base],
     [sop/context_frame], [sop/context_time]); a body elsewhere is [E_NODE_CONTEXT]. *)
 
-val check : ?ops:Op.t list -> ?library:bool -> Check.catalog -> Syntax.t list -> t option * Diagnostic.t list
+val check : ?ops:Op.t list -> ?library:bool -> Catalog.catalog -> Syntax.t list -> t option * Diagnostic.t list
 (** Check one [(workspace name ...)] form.  The workspace is returned only
     without errors; warnings never block it. [library] allows definitions and
     macros without a runnable graph, for editing imported source libraries. *)
@@ -206,15 +206,15 @@ val value_ops : string list
 (** The built-in operators any graph may call ([+], [sin], [value/rand], [range], ...): the value
     part of the add menu. *)
 
-val slot_ty : ?slot:Check.slot -> Check.kind -> Ty.t
+val slot_ty : ?slot:Catalog.slot -> Catalog.kind -> Ty.t
 (** The type a catalog kind's slots take (geometry; a World layer; the World of [scene/world]; the scene of [scene/root]). *)
 
-val group_reader : Check.parameter -> bool
-val group_writer : Check.kind -> Check.parameter -> bool
+val group_reader : Catalog.parameter -> bool
+val group_writer : Catalog.kind -> Catalog.parameter -> bool
 (** Which catalog parameters read or write a primitive group (inferred:
     the manifest has no markers). *)
 
 val validate_parameter :
-  ?ty:Ty.t -> (Diagnostic.severity -> string -> string -> unit) -> Check.parameter -> term -> unit
+  ?ty:Ty.t -> (Diagnostic.severity -> string -> string -> unit) -> Catalog.parameter -> term -> unit
 (** Validate one already typed keyword argument using the workspace's coercion,
     colour, choice and range rules. *)

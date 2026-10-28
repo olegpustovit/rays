@@ -26,7 +26,7 @@ let evaluate geometry decls inputs body =
   let source = "(workspace graph (graph g :context sop [(geo : geometry nil) " ^ decls ^ "] (let* [tested "
     ^ body ^ "] geo)))" in
   let forms = Flow.Syntax.parse source |> flow_ok in
-  let checked = match Flow.Workspace.check ~ops:Flow_sop.Operators.all {Flow.Check.version=1;kinds=[]} forms with
+  let checked = match Flow.Workspace.check ~ops:Flow_sop.Operators.all {Flow.Catalog.version=1;kinds=[]} forms with
     | Some checked, [] -> checked
     | _, ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds)) in
   let value = Flow.Eval.static ~record:true

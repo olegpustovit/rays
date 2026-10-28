@@ -62,7 +62,7 @@ type workspace = {
   ws : Workspace_doc.t;
   lowered : Flow_sop.Lower.t;
   fast : bool lazy_t;
-  catalog : (Flow.Check.catalog, Diagnostic.t) result lazy_t;
+  catalog : (Flow.Catalog.catalog, Diagnostic.t) result lazy_t;
 }
 type t = {
   scene : Kind_graph.t;  (** the objects; an object's input is its parent *)

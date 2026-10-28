@@ -33,12 +33,12 @@ let () =
   assert (Edit.factory_input_types Field.factory = ["fn(vec3,float)->float"; "image"]);
   let catalog = Flow_sop.Catalog.of_factories ~version:Flow_sop.Manifest.version (Field.factory :: Sop.Nodes.factories) |> ok in
   let text, _ = Flow_sop.Manifest.generate (Field.factory :: Sop.Nodes.factories) |> ok in
-  let loaded, _ = Flow.Check.catalog_of_manifest text |> ok in
+  let loaded, _ = Flow.Catalog.catalog_of_manifest text |> ok in
   assert (catalog = loaded);
   let kind = List.hd catalog.kinds in
-  assert (kind.slots = [] && List.map (fun (p : Flow.Check.parameter) -> p.name) kind.parameters = ["field"; "picture"]);
+  assert (kind.slots = [] && List.map (fun (p : Flow.Catalog.parameter) -> p.name) kind.parameters = ["field"; "picture"]);
   let forms = Flow.Syntax.parse "(workspace w (graph g :context sop (let* [arg0 1] nil)))" |> ok in
-  let defaults = List.concat_map (fun (p : Flow.Check.parameter) ->
+  let defaults = List.concat_map (fun (p : Flow.Catalog.parameter) ->
     let ty = match p.ty with
       | Some (Flow.Port_type.Fn signature) -> Flow.Ty.Fn (Some signature)
       | Some Image -> Flow.Ty.image | _ -> assert false in

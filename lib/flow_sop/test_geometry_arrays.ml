@@ -164,7 +164,7 @@ let ()=
   let values={|(workspace topology_cache (graph g :context sop [(geo : geometry nil)]
     (let* [tested (array/int 1 (array/count (get (sop/topology geo) :kinds)))] geo)))|} in
   let checked=match Flow.Workspace.check ~ops:Flow_sop.Operators.all
-      {Flow.Check.version=1;kinds=[]}(parse values)with
+      {Flow.Catalog.version=1;kinds=[]}(parse values)with
     |Some checked,[]->checked|_,diagnostics->fail(String.concat ";"
         (List.map Diagnostic.to_string diagnostics)) in
   let value=E.static ~record:true ~inputs:["g",["geo",E.Deferred(Flow.Ty.geometry,7)]] checked |>flow

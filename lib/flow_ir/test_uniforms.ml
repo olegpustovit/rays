@@ -17,7 +17,7 @@ let source ty : Flow.Op.t={Flow.Op.noise3 with
 let workspace ?(bindings="") ops body=
   let forms=ok(Flow.Syntax.parse("(workspace w (graph g :context value (let* ["^bindings^
     " tested "^body^"] 0.0)))"))in
-  match Flow.Workspace.check ~ops {Flow.Check.version=1;kinds=[]} forms with
+  match Flow.Workspace.check ~ops {Flow.Catalog.version=1;kinds=[]} forms with
   |Some workspace,[]->workspace
   |_,ds->failwith(String.concat "; "(List.map Diagnostic.to_string ds))
 let evaluate workspace=List.assoc ["g";"tested"](ok(E.static ~record:true workspace)).records

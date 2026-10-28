@@ -1,3 +1,4 @@
+module Flow_catalog = Catalog
 open Flow
 module Edit = Sop.Edit_graph
 module Zone = Sop.Zone
@@ -474,7 +475,7 @@ let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
         | None -> List.for_all (fun (node : Sop.Node.info) ->
             node.facts.topology=Sop.Node.Preserved) owned in
       let input_count = List.length inputs in
-      let resolve names = Check.resolve_component_names (fun name ->
+      let resolve names = Flow.Catalog.resolve_component_names (fun name ->
         match List.assoc_opt name parameters with Some (E.Text text) -> Some text | _ -> None) names in
       (* Declared names (parameter-named ones resolved), then what the body's attribute kernels
          name themselves. Behind a wildcard (a selection root) only the declaration speaks;
@@ -496,12 +497,12 @@ let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
           then Duplicate_input 0 else Generic);
         elementwise=(match declared with
           | Some f when preserved -> (match f.elementwise with
-              | Check.Points -> Points | Primitives -> Primitives | Irregular -> None)
+              | Flow.Catalog.Points -> Points | Primitives -> Primitives | Irregular -> None)
           | _ -> if preserved then (Sop.Node.facts compiled).elementwise else None);
-        reads=components (Option.map (fun (f : Check.kernel_facts) -> f.reads) declared) (fun f -> f.reads);
-        writes=components (Option.map (fun (f : Check.kernel_facts) -> f.writes) declared) (fun f -> f.writes);
+        reads=components (Option.map (fun (f : Flow.Catalog.kernel_facts) -> f.reads) declared) (fun f -> f.reads);
+        writes=components (Option.map (fun (f : Flow.Catalog.kernel_facts) -> f.writes) declared) (fun f -> f.writes);
         topology=(if preserved then Preserved else Changed);
-        exact=Option.fold ~none:true ~some:(fun (facts : Check.kernel_facts) -> facts.exact)
+        exact=Option.fold ~none:true ~some:(fun (facts : Flow.Catalog.kernel_facts) -> facts.exact)
           definition.kind.facts && List.for_all (fun (node : Sop.Node.info) -> node.facts.exact) owned} in
       let body context =
         if not driven then Ok compiled else
@@ -520,7 +521,7 @@ let build_lisp_body ~gpu ~lower_nested ~record_profile ~checked
         ["sop/context_seed", Sop.Context.Dependencies.Seed; "sop/context_frame", Frame;
          "sop/context_time", Time] in
       let cook_mode=if inputs=[] then Sop.Node.Generator else Generic in
-      let exact=Option.fold ~none:true ~some:(fun (facts:Check.kernel_facts)->facts.exact)
+      let exact=Option.fold ~none:true ~some:(fun (facts:Flow.Catalog.kernel_facts)->facts.exact)
         definition.kind.facts in
       let facts=Sop.Node.{cook_mode;elementwise=None;reads=["*"];writes=["*"];topology=Changed;exact} in
       (fun _ -> Error diagnostic), dependencies, facts)
@@ -965,7 +966,7 @@ end) = struct
         | E.Fn fn -> [fn]
         | E.List values -> Array.to_list values |> List.concat_map function_elements
         | _ -> [] in
-      let functions = List.filter_map (fun (slot : Check.slot) ->
+      let functions = List.filter_map (fun (slot : Flow.Catalog.slot) ->
         let values = List.filter_map (fun (name,value) -> if name=slot.name then Some value else None) functions
           |> List.concat_map function_elements |> List.map (fun fn -> E.Fn fn) in
         match values with
@@ -1008,7 +1009,7 @@ end) = struct
           let next = ref 0 in
           let connected = List.mapi (fun slot input ->
             slot, Option.map (fun _ -> let index = !next in incr next; index) input) inputs in
-          let bindings = List.mapi (fun slot (s : Check.slot) -> s.name,
+          let bindings = List.mapi (fun slot (s : Flow.Catalog.slot) -> s.name,
             List.filter_map (fun (index, input) ->
               if index=slot || (s.rest && index>=slot) then input else None) connected)
             definition.slots in
@@ -1018,7 +1019,7 @@ end) = struct
               let slot = slots.(min position (Array.length slots - 1)) in
               Workspace.slot_ty ~slot definition.kind = Ty.geometry) input) inputs) in
           Lisp_node.node ~geometry_inputs ~unbound_function:(List.exists
-              (fun (slot : Check.slot) -> match slot.ty with Some (Ty.Fn _) ->
+              (fun (slot : Flow.Catalog.slot) -> match slot.ty with Some (Ty.Fn _) ->
                 not (List.mem_assoc slot.name functions) && (slot.required ||
                   Option.value ~default:[] (List.assoc_opt slot.name bindings) <> []) | _ -> false)
               definition.slots)
@@ -1031,12 +1032,12 @@ end) = struct
         Edit.factory ~key ~operation:definition.operation ~label:definition.label ~category ~fields:definition.fields ~arity:0
           (fun _ -> construct [])
       else Edit.factory_slots ~key ~operation:definition.operation ~label:definition.label ~category
-        ~slots:(List.map (fun (s : Check.slot) -> s.name) definition.slots)
+        ~slots:(List.map (fun (s : Flow.Catalog.slot) -> s.name) definition.slots)
         ~keyword_inputs:definition.keyword_inputs
         ~fields:definition.fields
-        ~input_types:(List.map (fun (s : Check.slot) ->
+        ~input_types:(List.map (fun (s : Flow.Catalog.slot) ->
           Ty.to_string (Workspace.slot_ty ~slot:s definition.kind)) definition.slots)
-        ~inputs:(List.map (fun (s : Check.slot) -> match s.required,s.rest with
+        ~inputs:(List.map (fun (s : Flow.Catalog.slot) -> match s.required,s.rest with
           |true,false->Edit.Required|false,false->Optional|true,true->Rest|false,true->Optional_rest)
           definition.slots)
         construct
@@ -1620,8 +1621,8 @@ let of_checked ~factories ?provenance_tags ?reference ?gpu ?on_profile ?compiled
     (lower_checked ~factories ?provenance_tags ?reference ?gpu ?on_profile ?compiled_ids ?sites ?inputs)
 
 let workspace ~factories ?extra ?reference ?gpu ?on_profile ?compiled_ids ?sites ?inputs source =
-  Result.bind (Catalog.of_factories ~version:Manifest.version ?extra factories) (fun catalog ->
-    match Catalog.check_workspace ~ops:Operators.all catalog source with
+  Result.bind (Flow_catalog.of_factories ~version:Manifest.version ?extra factories) (fun catalog ->
+    match Flow_catalog.check_workspace ~ops:Operators.all catalog source with
     | Some checked, _ -> of_checked ~factories ?reference ?gpu ?on_profile ?compiled_ids ?sites ?inputs checked
     | None, diagnostics -> Error (match List.find_opt (fun (d : Diagnostic.t) ->
         d.severity = Diagnostic.Error_severity) diagnostics with

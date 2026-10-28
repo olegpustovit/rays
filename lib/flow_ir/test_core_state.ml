@@ -3,7 +3,7 @@ module I = Flow_ir
 let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let check ?(extra="") body =
   let forms = ok (Flow.Syntax.parse ("(workspace w " ^ extra ^ " (graph g :context value " ^ body ^ "))")) in
-  match Flow.Workspace.check {Flow.Check.version=1;kinds=[]} forms with
+  match Flow.Workspace.check {Flow.Catalog.version=1;kinds=[]} forms with
   | Some ws,[] -> ws | _,ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
 let bits x y = Int64.bits_of_float x = Int64.bits_of_float y
 let rec same_bits (a : E.value) (b : E.value) = match a,b with

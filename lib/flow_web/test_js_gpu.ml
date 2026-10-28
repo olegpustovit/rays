@@ -15,7 +15,7 @@ let source = {|(workspace w (graph g :context draw
 
 let () =
   let ops = Core_fixtures.offset :: [] in
-  let ws = match Flow.Workspace.check ~ops {Flow.Check.version = 1; kinds = []} (ok (Flow.Syntax.parse source)) with
+  let ws = match Flow.Workspace.check ~ops {Flow.Catalog.version = 1; kinds = []} (ok (Flow.Syntax.parse source)) with
     | Some ws, [] -> ws | _ -> failwith "does not check" in
   let evaluation = ok (E.static ws) in
   let program = match I.Core_draw.lower evaluation.plan (List.assoc "g" evaluation.results) with

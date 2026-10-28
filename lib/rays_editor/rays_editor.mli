@@ -12,7 +12,7 @@ module Workspace_doc = Editor_document.Workspace_doc
 module Timeline = Timeline
 
 val workspace_catalog : ?factories:Sop.Edit_graph.factory list -> unit ->
-  (Flow.Check.catalog, Diagnostic.t) result
+  (Flow.Catalog.catalog, Diagnostic.t) result
 (** The catalog a workspace text is checked against ({!Workspace_doc.of_text}):
     the SOP factories (default [Sop.Nodes.factories]) plus the scene,
     world and settings kinds generated from the editor's schemas. *)

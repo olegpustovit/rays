@@ -217,7 +217,7 @@ let resident_fold gpu ~count:range =
       (map (fn [i] (let* [q (array/nth b (int (array/nth kept (int i))))] [(+ q.x 1) q.y 0])) \
         (array/range " ^ range ^ "))))] (draw/points p))" in
   let forms=ok(Flow.Syntax.parse("(workspace w (graph g :context draw "^body^"))"))in
-  let ws=match Flow.Workspace.check {Flow.Check.version=1;kinds=[]} forms with
+  let ws=match Flow.Workspace.check {Flow.Catalog.version=1;kinds=[]} forms with
     |Some ws,[]->ws|_,ds->failwith(String.concat "; "(List.map Diagnostic.to_string ds))in
   let evaluation=ok(Flow.Eval.static ws)in
   let program,root=Result.get_ok(Flow_ir.Core_draw.lower evaluation.plan(List.assoc "g" evaluation.results))in
@@ -249,7 +249,7 @@ let resident_fold gpu ~count:range =
         (map (fn [i] [(float (int/div (int i) (int/sub (frame/index) (frame/index)))) 0 0]) \
           (array/range (array/count b))))] (draw/points p))"in
       let bad_forms=ok(Flow.Syntax.parse("(workspace w (graph g :context draw "^bad_body^"))"))in
-      let bad_ws=match Flow.Workspace.check {Flow.Check.version=1;kinds=[]} bad_forms with
+      let bad_ws=match Flow.Workspace.check {Flow.Catalog.version=1;kinds=[]} bad_forms with
         |Some ws,[]->ws|_,ds->failwith(String.concat "; "(List.map Diagnostic.to_string ds))in
       let bad_eval=ok(Flow.Eval.static bad_ws)in
       let bad_program,bad_root=Result.get_ok(Flow_ir.Core_draw.lower bad_eval.plan(List.assoc "g" bad_eval.results))in

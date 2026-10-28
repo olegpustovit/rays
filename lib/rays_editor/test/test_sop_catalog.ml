@@ -584,21 +584,21 @@ let run ?(exhaustive = false) () =
     | Error diagnostic -> fail (Diagnostic.to_string diagnostic) in
   let manifest, digest = Flow_sop.Manifest.generate Sop.Nodes.factories
     |> Result.get_ok in
-  let catalog_from_manifest, read_digest = Flow.Check.catalog_of_manifest manifest
+  let catalog_from_manifest, read_digest = Flow.Catalog.catalog_of_manifest manifest
     |> Result.get_ok in
   check (read_digest = digest
     && catalog_from_manifest.kinds = flow_catalog.kinds)
     "Flow manifest checker descriptor differs from the live catalog";
-  let transform = List.find (fun (kind : Flow.Check.kind) -> kind.qualified = "sop/transform")
+  let transform = List.find (fun (kind : Flow.Catalog.kind) -> kind.qualified = "sop/transform")
     catalog_from_manifest.kinds in
-  check (match transform.facts with Some facts -> facts.elementwise = Flow.Check.Points
+  check (match transform.facts with Some facts -> facts.elementwise = Flow.Catalog.Points
       && facts.reads = ["P"; "N"] && facts.writes = ["P"; "N"]
       && facts.preserves_topology && not facts.exact | None -> false)
     "Flow manifest omitted declared transform facts";
   let stale_manifest = Bytes.of_string manifest in
   let version_digit = String.index manifest '2' in
   Bytes.set stale_manifest version_digit '3';
-  (match Flow.Check.catalog_of_manifest (Bytes.to_string stale_manifest) with
+  (match Flow.Catalog.catalog_of_manifest (Bytes.to_string stale_manifest) with
    | Error diagnostic -> check (diagnostic.code = "E_CATALOG"
        && diagnostic.message = "Flow manifest digest does not match its contents")
        "Flow manifest reader reported the wrong digest error"

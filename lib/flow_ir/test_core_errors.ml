@@ -2,7 +2,7 @@ module E = Flow.Eval
 module I = Flow_ir
 let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let workspace body =
-  match Flow.Workspace.check {Flow.Check.version=1;kinds=[]}
+  match Flow.Workspace.check {Flow.Catalog.version=1;kinds=[]}
     (ok (Flow.Syntax.parse ("(workspace w (graph g :context value (let* [tested " ^ body ^ "] 0.)))"))) with
   | Some ws,[] -> ws | _,ds -> failwith (body ^ ": " ^ String.concat "; " (List.map Diagnostic.to_string ds))
 let same_bits a b = Int64.bits_of_float a=Int64.bits_of_float b
@@ -63,7 +63,7 @@ let () =
     body=(fun ~live ~node:_ _ -> Flow.Value.Float (live.t +. 1.))} in
   let forms=match Flow.Syntax.parse "(workspace w (graph g :context value (test/opaque)))" with
     |Ok forms->forms|Error d->failwith(Diagnostic.to_string d) in
-  let ws=match Flow.Workspace.check ~ops:[opaque] {Flow.Check.version=1;kinds=[]} forms with
+  let ws=match Flow.Workspace.check ~ops:[opaque] {Flow.Catalog.version=1;kinds=[]} forms with
     |Some ws,[]->ws|_,ds->failwith(String.concat "; " (List.map Diagnostic.to_string ds)) in
   let residual=match List.assoc "g" (ok(E.static ws)).results with
     |E.Residual r->r|_->failwith "opaque result was not residual" in

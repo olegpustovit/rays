@@ -1,7 +1,7 @@
 open Flow
 let check ?(context = "value") body =
   let forms = Result.get_ok (Syntax.parse ("(workspace w (graph g :context " ^ context ^ " " ^ body ^ "))")) in
-  match Workspace.check {Check.version = 1; kinds = []} forms with
+  match Workspace.check {Catalog.version = 1; kinds = []} forms with
   | Some w, [] -> w
   | _, ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
 let value ?context body = List.assoc "g" (Result.get_ok (Eval.run ~time:0. (check ?context body))).results
@@ -131,7 +131,7 @@ let () =
   assert (live_value "(fold [s 0.0] [x (array/float 100000 2)] (+ s (+ x t)))" = Eval.Float 325000.);
   let forms = Result.get_ok (Syntax.parse
     "(workspace w (graph g :context value (map + (list 1 2) (array/float 2))))") in
-  let _, ds = Workspace.check {Check.version = 1; kinds = []} forms in
+  let _, ds = Workspace.check {Catalog.version = 1; kinds = []} forms in
   assert (List.exists (fun (d : Diagnostic.t) -> d.code = "E_ARRAY_TYPE") ds)
 
 let () =

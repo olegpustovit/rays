@@ -14,7 +14,7 @@ let checked ?seed body =
   let source = ok (Flow.Syntax.parse
     ("(workspace random (graph g :context host (let* [" ^ binding ^ "tested " ^ body ^ "] 0.0)))")) in
   match Flow_sop.Catalog.check_workspace ~ops:Flow_sop.Operators.all ~library:false ~sources
-    Flow.Check.{version=1;kinds=[]} source with
+    Flow.Catalog.{version=1;kinds=[]} source with
   | Some workspace, [] -> workspace
   | _, ds -> failwith (String.concat "\n" (List.map Diagnostic.to_string ds))
 let value ?seed body = snd (List.hd (List.assoc ["g";"tested"]

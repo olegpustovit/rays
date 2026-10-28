@@ -34,9 +34,9 @@ let normalize_defaults workspace =
     Result.bind fields (fun fields ->
       Result.map (fun parameters ->
         {node with fields;kind={node.kind with parameters=parameters @
-          List.filter(fun(p:Flow.Check.parameter)->List.mem p.name node.keyword_inputs)node.kind.parameters}})
+          List.filter(fun(p:Flow.Catalog.parameter)->List.mem p.name node.keyword_inputs)node.kind.parameters}})
         (Result.map_error (Diagnostic.error ~code:"E_VEC3")
-          (Flow.Check.parameters_of_fields fields))) in
+          (Flow.Catalog.parameters_of_fields fields))) in
   Result.map(fun nodes->{workspace with W.nodes})
     (List.fold_left(fun result node->Result.bind result(fun nodes->
       Result.map(fun node->nodes@[node])(normalize_node node))) (Ok[])workspace.W.nodes)

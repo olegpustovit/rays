@@ -49,7 +49,7 @@ let () =
     out = (fun _ -> geometry); out_args = None; any_num = false; choices = []; shape = Scalar; live = false;
     check = (fun _ -> ()); body = (fun ~live:_ ~node args -> node "sop/toy_emit" args);
     category = "Toy"; arithmetic = None; packed_extension = None}] in
-  let catalog = Flow.Check.{version = 1; kinds = []} in
+  let catalog = Flow.Catalog.{version = 1; kinds = []} in
   let kernel = Flow.Op.{name = "sop/toy_kernel"; ctx = context;
     signature = {pos = []; opt = []; rest = None;
       kw = ["field", T.Fn (Some {params = [T.Vec3]; result = T.Float})]};
@@ -137,7 +137,7 @@ let () =
     check (contains context_help desc.name) ("context missing from help: " ^ desc.name)) (C.all ());
   check (Flow.Op.validate (ops @ ops) <> None) "duplicate immutable operators accepted";
   check (Result.is_error (D.of_text catalog text)) "extra operator leaked into default checker";
-  let kind = Flow.Check.{qualified = "sop/item"; context; slots = [];
+  let kind = Flow.Catalog.{qualified = "sop/item"; context; slots = [];
     parameters = []; outputs = []; facts = None} in
   let catalog = {catalog with kinds = [kind]} in
   let declared = doc (D.of_text catalog "(workspace w (graph g :context sop (sop/item)))") in

@@ -10,7 +10,7 @@ let render canvas scene=Result.get_ok(Rays.Canvas.render canvas scene)
 let canvas_stats canvas=Result.get_ok(Rays.Canvas.Private.native_stats canvas)
 let packed ~width ~height body =
   let forms=Flow.Syntax.parse ("(workspace image (graph g :context image (image/map (fn [uv] "^body^"))))") |> get in
-  let w=match Flow.Workspace.check {Flow.Check.version=1;kinds=[]} forms with
+  let w=match Flow.Workspace.check {Flow.Catalog.version=1;kinds=[]} forms with
     |Some w,[]->w|_,ds->failwith(String.concat "; "(List.map Diagnostic.to_string ds))in
   let evaluated=Flow.Eval.static w |> get in
   let fn=match List.assoc "function" evaluated.plan.nodes.(0).args with Flow.Eval.Fn f->f|_->assert false in
@@ -94,7 +94,7 @@ let () =
       (let* [picture (image/map (fn [uv] [(+ uv.x bias) uv.y (* t 0.5) 1]))] picture))
     (defn invoke :context image [(alias : fn)] (alias 0.125))
     (graph g :context image (invoke :alias render)))" |> get in
-  let w=match Flow.Workspace.check Flow.Check.{version=1;kinds=[]} forms with
+  let w=match Flow.Workspace.check Flow.Catalog.{version=1;kinds=[]} forms with
     |Some w,[]->w|_,ds->failwith(String.concat "; "(List.map Diagnostic.to_string ds))in
   let lowered=Flow_sop.Lower.of_checked ~factories:[] w |> get in
   let node=Array.find_opt(fun(n:Flow.Eval.node)->n.kind="image/map")lowered.plan.nodes |> Option.get in

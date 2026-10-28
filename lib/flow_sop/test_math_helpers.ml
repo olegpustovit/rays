@@ -17,7 +17,7 @@ let sources =
 let evaluate body =
   let source = parse ("(workspace math_helpers (graph result :context host " ^ body ^ "))") in
   let workspace = match Flow_sop.Catalog.check_workspace ~ops:Flow_sop.Operators.all ~library:false ~sources
-      Flow.Check.{version=1;kinds=[]} source with
+      Flow.Catalog.{version=1;kinds=[]} source with
     | Some workspace, [] -> workspace
     | _, ds -> failwith (String.concat "\n" (List.map Diagnostic.to_string ds)) in
   List.assoc "result" (ok (E.static workspace)).results

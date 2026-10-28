@@ -4,7 +4,7 @@ module E = Flow.Eval
 module I = Flow_ir
 
 let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
-let catalog = { Flow.Check.version = 0; kinds = [] }
+let catalog = { Flow.Catalog.version = 0; kinds = [] }
 let body = "(+ (* (sin t) 0.5) (* t t))"
 let iterations = 200_000
 let live = Input.at_time 0.37

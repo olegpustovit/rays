@@ -133,9 +133,9 @@ let optional_rest () =
   let factories=factory::factories in
   let catalog=Catalog.of_factories ~version:1 factories |> Result.get_ok in
   let manifest,_=Manifest.generate factories |> Result.get_ok in
-  let manifest_catalog=Flow.Check.catalog_of_manifest manifest |> Result.get_ok |> fst in
-  let fixture=List.find_opt (fun (kind : Flow.Check.kind) -> kind.qualified="sop/rest_fixture") manifest_catalog.kinds in
-  check (match fixture with Some kind -> List.exists (fun (slot : Flow.Check.slot) -> slot.rest && not slot.required) kind.slots | None -> false)
+  let manifest_catalog=Flow.Catalog.catalog_of_manifest manifest |> Result.get_ok |> fst in
+  let fixture=List.find_opt (fun (kind : Flow.Catalog.kind) -> kind.qualified="sop/rest_fixture") manifest_catalog.kinds in
+  check (match fixture with Some kind -> List.exists (fun (slot : Flow.Catalog.slot) -> slot.rest && not slot.required) kind.slots | None -> false)
     "optional rest survives manifest serialization";
   let source result=Printf.sprintf
     "(workspace w (graph g :context sop (let* [a (sop/box) b (sop/box :center [2 0 0]) r %s] r)))" result in

@@ -115,7 +115,7 @@ let () =
   let n=ref 0 and static=ref [] in
   List.iter (fun (name,body) ->
     let source="(workspace w (graph g :context value (let* [tested " ^ body ^ "] 0.)))" in
-    let ws=match Flow.Workspace.check {Flow.Check.version=1;kinds=[]} (ok (Flow.Syntax.parse source)) with
+    let ws=match Flow.Workspace.check {Flow.Catalog.version=1;kinds=[]} (ok (Flow.Syntax.parse source)) with
       | Some ws,[] -> ws | _,ds -> failwith (body ^ ": " ^ String.concat "; " (List.map Diagnostic.to_string ds)) in
     let value=snd (List.hd (List.assoc ["g";"tested"] (ok (E.static ~record:true ws)).records)) in
     match value with E.Residual r -> begin
@@ -135,7 +135,7 @@ let () =
 let () =
   let live_value body =
     let source="(workspace text_arrays (graph g :context host (if (> t -1000.) " ^ body ^ " " ^ body ^ ")))" in
-    let ws=match Flow.Workspace.check {Flow.Check.version=1;kinds=[]} (ok(Flow.Syntax.parse source)) with
+    let ws=match Flow.Workspace.check {Flow.Catalog.version=1;kinds=[]} (ok(Flow.Syntax.parse source)) with
       | Some ws,[]->ws | _,ds->failwith(String.concat "\n"(List.map Diagnostic.to_string ds)) in
     List.assoc "g" (ok(E.static ws)).results in
   List.iter (fun body ->

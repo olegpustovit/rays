@@ -30,7 +30,7 @@ let times = [-3.;-0.;0.;0.37;1.;1.9;3.]
 let check ?(times=times) ~region (name,body) =
   let tested=if region then body else "(if (> t -1000.) " ^ body ^ " " ^ body ^ ")" in
   let source="(workspace w (graph g :context value (let* [tested " ^ tested ^ "] 0.)))" in
-  let ws=match Flow.Workspace.check ~ops:[] {Flow.Check.version=1;kinds=[]} (ok (Flow.Syntax.parse source)) with
+  let ws=match Flow.Workspace.check ~ops:[] {Flow.Catalog.version=1;kinds=[]} (ok (Flow.Syntax.parse source)) with
     | Some ws,[] -> ws | _,ds -> failwith (name ^ ": " ^ String.concat "; " (List.map Diagnostic.to_string ds)) in
   let value=snd (List.hd (List.assoc ["g";"tested"] (ok (E.static ~record:true ws)).records)) in
   let r=match value with E.Residual r -> r | _ -> failwith (name ^ ": expected residual") in
@@ -56,7 +56,7 @@ let check ?(times=times) ~region (name,body) =
 let () =
   let custom={Flow.Op.noise3 with name="toy_noise3";packed_extension=None;body=(fun ~live:_ ~node:_ _ -> E.Float 0.125)} in
   let source="(workspace w (graph g :context value (let* [tested (toy_noise3 [t 0 0])] 0.)))" in
-  let ws=match Flow.Workspace.check ~ops:[custom] {Flow.Check.version=1;kinds=[]} (ok (Flow.Syntax.parse source)) with
+  let ws=match Flow.Workspace.check ~ops:[custom] {Flow.Catalog.version=1;kinds=[]} (ok (Flow.Syntax.parse source)) with
     | Some ws,[] -> ws | _,ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds)) in
   match snd (List.hd (List.assoc ["g";"tested"] (ok (E.static ~record:true ws)).records)) with
   | E.Residual r -> assert (I.Core_lower.lower r = Error "toy_noise3")

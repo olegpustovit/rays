@@ -80,7 +80,7 @@ let ()=
  List.iter(fun ty->let array_ty=Flow.Ty.Array ty in
   let text="(workspace sources (graph g :context host [(data : (array "^Flow.Ty.to_string ty^") "^C.constant ty "0"^")] "^
     "(map (fn [(i : int)] (array/nth (array/slice (array/concat data data) 0 (array/count data)) (int/mod i (array/count data)))) (array/range (frame/index) :type int))))"in
-  let checked=match Flow.Workspace.check Flow.Check.{version=1;kinds=[]}(C.ok(Flow.Syntax.parse text))with
+  let checked=match Flow.Workspace.check Flow.Catalog.{version=1;kinds=[]}(C.ok(Flow.Syntax.parse text))with
    |Some w,[]->w|_,ds->failwith(String.concat ";"(List.map Diagnostic.to_string ds))in
   let value=List.assoc "g"(C.ok(E.static ~inputs:["g",["data",E.Source("fixture/table",array_ty,[])]] checked)).results in
   let residual=match value with E.Residual r->r|_->assert false in

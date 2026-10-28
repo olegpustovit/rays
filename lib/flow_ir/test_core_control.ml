@@ -3,7 +3,7 @@ module I = Flow_ir
 module C = I.Core
 let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let offset = Core_fixtures.offset
-let checked source = match Flow.Workspace.check ~ops:[offset] {Flow.Check.version=1;kinds=[]} (ok (Flow.Syntax.parse source)) with
+let checked source = match Flow.Workspace.check ~ops:[offset] {Flow.Catalog.version=1;kinds=[]} (ok (Flow.Syntax.parse source)) with
   | Some ws,[] -> ws | _,ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
 let workspace = Core_fixtures.workspace
 let residual source = match snd (List.hd (List.assoc ["g";"tested"] (ok (E.static ~record:true (checked source))).records)) with

@@ -19,7 +19,7 @@ let same a b=match a,b with
       failwith("Compaction/scan reference disagreement: "^show a^" / "^show b)
 let workspace ?(declarations="") body=
   let text="(workspace scan (graph g :context host "^declarations^" "^body^"))"in
-  match Flow.Workspace.check Flow.Check.{version=1;kinds=[]}(ok(Flow.Syntax.parse text))with
+  match Flow.Workspace.check Flow.Catalog.{version=1;kinds=[]}(ok(Flow.Syntax.parse text))with
   |Some w,[]->w|_,ds->failwith(String.concat ";"(List.map Diagnostic.to_string ds))
 let live_value body=List.assoc "g"(ok(E.static(workspace("(if (> t -1000.) "^body^" "^body^")")))).results
 let compact mask=Array.to_list(Array.mapi(fun i n->i,n)mask)

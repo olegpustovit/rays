@@ -22,7 +22,7 @@ let fixtures () =
 let checked body =
   let source = "(workspace topology (graph g :context sop [(geo : geometry nil)] (let* [tested " ^ body ^ "] geo)))" in
   let forms = Flow.Syntax.parse source |> flow_ok in
-  match Flow.Workspace.check ~ops:Flow_sop.Operators.all {Flow.Check.version=1;kinds=[]} forms with
+  match Flow.Workspace.check ~ops:Flow_sop.Operators.all {Flow.Catalog.version=1;kinds=[]} forms with
   | Some checked, [] -> checked
   | _, ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
 

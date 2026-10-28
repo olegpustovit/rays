@@ -4,7 +4,7 @@ module Buffers = Flow_ir.Core_exec.Buffers
 let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let checked body =
   let forms = ok (Flow.Syntax.parse ("(workspace w (graph g :context draw " ^ body ^ "))")) in
-  match Flow.Workspace.check {Flow.Check.version=1;kinds=[]} forms with
+  match Flow.Workspace.check {Flow.Catalog.version=1;kinds=[]} forms with
   | Some ws,[] -> ws | _,ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
 let pictures = [
   "(draw/background \"#14161c\")";
@@ -155,7 +155,7 @@ let nested_maps () =
   let live = {(Input.at_time 0.25) with size = (200, 100)} in
   (* the walker's points, summed in order as x + 1000 y: the same sum of the drawn buffer must match it *)
   let expected = match E.Private.force_reference (List.assoc "g" (ok (E.static (match
-      Flow.Workspace.check {Flow.Check.version=1;kinds=[]} (ok (Flow.Syntax.parse
+      Flow.Workspace.check {Flow.Catalog.version=1;kinds=[]} (ok (Flow.Syntax.parse
         ("(workspace w (graph g :context value (array/sum (map (fn [v] (+ v.x (* v.y 1000))) " ^ boxes ^ "))))"))) with
        | Some ws, [] -> ws
        | _, ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))))).results) ~live with

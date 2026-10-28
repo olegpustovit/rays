@@ -12,7 +12,7 @@ let check (name,body) =
   let tested=if String.starts_with ~prefix:"captured-" name then body
     else "(if (> t -1000.) " ^ body ^ " " ^ body ^ ")" in
   let source="(workspace w (graph g :context value (let* [tested " ^ tested ^ "] 0.)))" in
-  let ws=match Flow.Workspace.check {Flow.Check.version=1;kinds=[]} (ok (Flow.Syntax.parse source)) with
+  let ws=match Flow.Workspace.check {Flow.Catalog.version=1;kinds=[]} (ok (Flow.Syntax.parse source)) with
     | Some ws,[] -> ws | _,ds -> failwith (name ^ ": " ^ String.concat "; " (List.map Diagnostic.to_string ds)) in
   let r=match snd (List.hd (List.assoc ["g";"tested"] (ok (E.static ~record:true ws)).records)) with
     | E.Residual r -> r | _ -> failwith (name ^ ": expected residual") in
@@ -85,7 +85,7 @@ let () =
     let default=if ty="geometry" then "(list nil)" else "(list 1)" in
     let source="(workspace captures (graph g :context host [(parts : (list "^ty^") "^default^")] "^
       "(let* [clock t tested "^body^"] 0.)))" in
-    let ws=match Flow.Workspace.check {Flow.Check.version=1;kinds=[]}(ok(Flow.Syntax.parse source))with
+    let ws=match Flow.Workspace.check {Flow.Catalog.version=1;kinds=[]}(ok(Flow.Syntax.parse source))with
       |Some ws,[]->ws|_,ds->failwith(String.concat "; "(List.map Diagnostic.to_string ds))in
     let r=match snd(List.hd(List.assoc["g";"clock"](ok(E.static ~record:true ws)).records))with
       |E.Residual r->r|_->failwith "Capture context needs a live clock"in
@@ -140,7 +140,7 @@ let () =
   let module C=I.Core in
   let source="(workspace w (graph g :context value (let* [tested (iterate (int (+ 5000. (* t 0.))) (array/float 8 1.0)
     (fn [p] (exact (map (fn [(i : int)] (* 0.999 (+ (array/nth p i) (* t 0.)))) (array/range 8 :type int)))))] 0.)))" in
-  let ws=match Flow.Workspace.check {Flow.Check.version=1;kinds=[]} (ok (Flow.Syntax.parse source)) with
+  let ws=match Flow.Workspace.check {Flow.Catalog.version=1;kinds=[]} (ok (Flow.Syntax.parse source)) with
     | Some ws,[] -> ws | _,ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds)) in
   let r=match snd (List.hd (List.assoc ["g";"tested"] (ok (E.static ~record:true ws)).records)) with
     | E.Residual r -> r | _ -> failwith "iterate: expected residual" in

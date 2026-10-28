@@ -6,7 +6,7 @@ let checked = function Some workspace, [] -> workspace
   | _, diagnostics -> failwith (String.concat "\n" (List.map Diagnostic.to_string diagnostics))
 
 let () =
-  let catalog = Flow.Check.{version=1;kinds=[]} in
+  let catalog = Flow.Catalog.{version=1;kinds=[]} in
   let authored = parse "(workspace narrow (graph value :context value 0.0))" in
   let workspace = Flow_sop.Catalog.check_workspace catalog authored |> checked in
   assert (workspace.nodes=[] && workspace.ops=[]);
@@ -120,7 +120,7 @@ let () =
   (* The body delegates to a real native kind; the custom fixture itself is Lisp. *)
   let native = Flow_sop.Catalog.of_factories ~version:Flow_sop.Manifest.version
       ~nodes:(line_nodes ()) [null_factory] |> ok in
-  let catalog = {catalog with Flow.Check.kinds = native.kinds @ catalog.kinds} in
+  let catalog = {catalog with Flow.Catalog.kinds = native.kinds @ catalog.kinds} in
   let workspace = Flow_sop.Catalog.check_workspace ~sources:forms catalog authored |> checked in
   assert (workspace.source == authored);
   assert (List.length workspace.Flow.Workspace.nodes = 1);
@@ -140,7 +140,7 @@ let () =
     |> checked).nodes = 1);
   let manifest, digest = Flow_sop.Manifest.generate ~nodes:(node :: line_nodes ())
       [null_factory] |> ok in
-  let reread, read_digest = Flow.Check.catalog_of_manifest manifest |> ok in
+  let reread, read_digest = Flow.Catalog.catalog_of_manifest manifest |> ok in
   assert (digest = read_digest && List.sort compare reread.kinds = List.sort compare catalog.kinds);
   let tree = parse manifest |> List.hd in
   let rec has name text form =
@@ -154,7 +154,7 @@ let () =
      (field : (fn [vec3] float) :keyword true)] geo)|}
     |> List.hd |> Flow.Defnode.parse |> ok in
   let keyword_manifest, _ = Flow_sop.Manifest.generate ~nodes:[keyword_node] [] |> ok in
-  let keyword_catalog, _ = Flow.Check.catalog_of_manifest keyword_manifest |> ok in
+  let keyword_catalog, _ = Flow.Catalog.catalog_of_manifest keyword_manifest |> ok in
   assert (keyword_catalog.kinds = [keyword_node.kind]);
   let keyword_tree = parse keyword_manifest |> List.hd in
   assert (has "keyword-inputs" "image" keyword_tree);

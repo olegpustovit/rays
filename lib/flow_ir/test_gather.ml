@@ -11,7 +11,7 @@ let source ty : Flow.Op.t={Flow.Op.noise3 with
   body=(fun ~live:_ ~node:_ _->Flow.Value.Source("probe/table",ty,[]))}
 let fn ?(bindings="") ty body =
   let text="(workspace w (graph g :context value (let* [data (probe/table) "^bindings^" tested "^body^"] 0.0)))" in
-  let ws=match Flow.Workspace.check ~ops:[source ty] {Flow.Check.version=1;kinds=[]}
+  let ws=match Flow.Workspace.check ~ops:[source ty] {Flow.Catalog.version=1;kinds=[]}
     (ok(Flow.Syntax.parse text))with
     |Some ws,[]->ws|_,ds->failwith(String.concat "; "(List.map Diagnostic.to_string ds))in
   match snd(List.hd(List.assoc ["g";"tested"](ok(E.static ~record:true ws)).records))with
@@ -36,7 +36,7 @@ let array ty count=match ty with
     (match width with 1->E.Float_array values|2->Vec2_array values|3->Vec3_array values|_->Vec4_array values)
 let recorded ty body=
   let text="(workspace w (graph g :context value (let* [data (probe/table) tested "^body^"] 0.0)))"in
-  let ws=match Flow.Workspace.check ~ops:[source ty] Flow.Check.{version=1;kinds=[]}
+  let ws=match Flow.Workspace.check ~ops:[source ty] Flow.Catalog.{version=1;kinds=[]}
     (ok(Flow.Syntax.parse text))with Some ws,[]->ws|_,ds->
       failwith(String.concat ";"(List.map Diagnostic.to_string ds))in
   snd(List.hd(List.assoc["g";"tested"](ok(E.static ~record:true ws)).records))
@@ -162,7 +162,7 @@ let ()=
   (* Structured Core passes changing array arguments to the same compiled region. *)
   let forms=ok(Flow.Syntax.parse
     "(workspace w (graph g :context host [(table : (array int) (array/int 0))] (let* [nested {:table table}] (map (fn [i] (int/add (array/nth nested.table (int/mod i 3)) (frame/index))) (array/range 5001 :type int)))))")in
-  let ws=match Flow.Workspace.check Flow.Check.{version=1;kinds=[]}forms with Some ws,[]->ws|_->assert false in
+  let ws=match Flow.Workspace.check Flow.Catalog.{version=1;kinds=[]}forms with Some ws,[]->ws|_->assert false in
   let value=List.assoc"g"(ok(E.static ~inputs:["g",["table",table]]ws)).results in
   let core=ok(I.Executor.compile ~strict:true value)in
   assert(bytes(ok(I.Executor.force ~strict:true core ~live))=bytes(ok(E.Private.force_reference value ~live)));

@@ -50,7 +50,7 @@ let () =
 
 let () =
   List.iter (fun source ->
-    let checked=match Flow.Workspace.check Flow.Check.{version=1;kinds=[]}
+    let checked=match Flow.Workspace.check Flow.Catalog.{version=1;kinds=[]}
         (Flow.Syntax.parse source |> Test_program.ok)with
       |Some workspace,[]->workspace
       |_,ds->failwith(String.concat "\n"(List.map Diagnostic.to_string ds))in

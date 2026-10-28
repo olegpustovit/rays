@@ -2,7 +2,7 @@ module E = Flow.Eval
 module I = Flow_ir
 let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let read path = In_channel.with_open_bin path In_channel.input_all
-let catalog = fst (ok (Flow.Check.catalog_of_manifest (read "../flow_sop/flow_manifest.sexp")))
+let catalog = fst (ok (Flow.Catalog.catalog_of_manifest (read "../flow_sop/flow_manifest.sexp")))
 let check source = match Flow.Workspace.check catalog (ok (Flow.Syntax.parse source)) with
   | Some ws,ds when not (List.exists (fun (d : Diagnostic.t) -> d.severity=Diagnostic.Error_severity) ds) -> ws
   | _,ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))

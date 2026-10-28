@@ -97,7 +97,7 @@ let () =
   rejects "ui/tile" [];
   rejects "ui/switch" ["panel",sample "" Ty.panel; "active",Int 1];
   (Option.get (Op.find "ui/graph" Context.editor)).check ["view",Residual ()];
-  let empty = {Check.version = 1; kinds = []} in
+  let empty = {Catalog.version = 1; kinds = []} in
   let forms = Result.get_ok (Syntax.parse "(workspace w (graph g :context material (material/standard)))") in
   let ws, ds = Workspace.check empty forms in
   assert (ws <> None && not (List.exists (fun (d : Diagnostic.t) -> d.severity = Diagnostic.Error_severity) ds));
@@ -108,7 +108,7 @@ let () =
     "(workspace w (graph g :context value (material/standard)))")) in
   assert (known = None && List.exists (fun (d : Diagnostic.t) -> d.code = "E_WRONG_CONTEXT") ds);
   (* Context survives short-name and function-value calls; the prefix has no semantic role. *)
-  let k : Check.kind = {qualified="custom/root"; context=Context.scene;
+  let k : Catalog.kind = {qualified="custom/root"; context=Context.scene;
     slots=[]; parameters=[]; outputs=[]; facts=None} in
   let ws, ds = Workspace.check {empty with kinds=[k]} (Result.get_ok (Syntax.parse
     "(workspace w (graph g :context scene (root)))")) in
@@ -116,7 +116,7 @@ let () =
   let evaluated = Result.get_ok (Eval.run ~time:0. (Option.get ws)) in
   assert (List.assoc "g" evaluated.results = Eval.Struct ("custom/root", Ty.scene, []));
   assert (Array.length evaluated.plan.nodes = 0);
-  let k = {k with slots=[{Check.name="child"; required=true; rest=false; ty=None}]} in
+  let k = {k with slots=[{Catalog.name="child"; required=true; rest=false; ty=None}]} in
   let ws, ds = Workspace.check {empty with kinds=[k]} (Result.get_ok (Syntax.parse
     "(workspace w (graph g :context scene (first (map root (list nil)))))")) in
   assert (ds = []);
@@ -137,7 +137,7 @@ let () =
   assert(apply "equal?" ["a",Text "key-pressed";"b",Text "key-pressed"]=Bool true)
 
 let () =
-  let catalog = {Check.version=1; kinds=[]} in
+  let catalog = {Catalog.version=1; kinds=[]} in
   let forms body = Result.get_ok (Syntax.parse
     ("(workspace w (graph g :context host " ^ body ^ "))")) in
   let checked ?(ops=[]) body = match Workspace.check ~ops catalog (forms body) with
@@ -240,7 +240,7 @@ let () =
      |Error d->assert(d.code="E_FRAME" && !calls=0)|Ok _->assert false))
     [None;Some state]) [marker;legacy];
   let forms=Result.get_ok(Syntax.parse "(workspace nested_source (graph g :context value (+ t 1.)))") in
-  let workspace=match Workspace.check {Check.version=1;kinds=[]} forms with
+  let workspace=match Workspace.check {Catalog.version=1;kinds=[]} forms with
     |Some workspace,[]->workspace|_->assert false in
   let dynamic=List.assoc "g" (Result.get_ok(Eval.static workspace)).results in
   let fields=["value",dynamic] in
@@ -273,7 +273,7 @@ let () =
      |Error d->assert(d.code="E_FRAME" && !calls=0)|Ok _->assert false)) [None;Some state];
   let forms=Result.get_ok(Syntax.parse
     "(workspace source_state (graph g :context value (state [previous 0.0] (+ previous 1.0))))") in
-  let workspace=match Workspace.check {Check.version=1;kinds=[]} forms with
+  let workspace=match Workspace.check {Catalog.version=1;kinds=[]} forms with
     |Some workspace,[]->workspace|_->assert false in
   let fold=List.assoc "g" (Result.get_ok(Eval.static workspace)).results in
   let before=Eval.state_stamp state in

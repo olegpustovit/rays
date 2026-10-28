@@ -122,7 +122,7 @@ and result =
   | Node of path  (** the synthetic [@result] node *)
   | Literal of Flow.Syntax.t
 
-val of_graph : ?folded:(path -> bool) -> Flow.Check.catalog -> Flow.Workspace.t -> string -> scope
+val of_graph : ?folded:(path -> bool) -> Flow.Catalog.catalog -> Flow.Workspace.t -> string -> scope
 (** The root scope of a graph or, for ["def:name"] or a [defn] name, of a
     definition.  Raises [Invalid_argument] when there is none.  An operator call written in an input
     ({!Flow_edit.value_call}) is a card ([expr]) unless [folded] its leaf (default: all are), and

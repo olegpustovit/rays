@@ -1,6 +1,6 @@
 open Flow
 open Flow_graph
-let catalog=Check.{version=1;kinds=[]}
+let catalog=Catalog.{version=1;kinds=[]}
 let ok=function Ok x->x|Error d->failwith(Diagnostic.to_string d)
 let form text=List.hd(ok(Syntax.parse text))
 let check source=match Workspace.check catalog source with Some w,[]->w|_,ds->failwith(String.concat ";"(List.map Diagnostic.to_string ds))

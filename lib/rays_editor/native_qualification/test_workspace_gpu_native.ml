@@ -473,7 +473,7 @@ let ()=
     Flow_native.Workspace_gpu.qualification owner;
     let forms=Flow.Syntax.parse "(workspace test (graph image :context image
       (image/map (fn [uv] [uv.x uv.y 0.5 1]))))" |> ok in
-    let checked=match Flow.Workspace.check Flow.Check.{version=1;kinds=[]} forms with
+    let checked=match Flow.Workspace.check Flow.Catalog.{version=1;kinds=[]} forms with
       |Some w,[]->w|_,ds->failwith(String.concat "; "(List.map Diagnostic.to_string ds))in
     let lowered=Flow_sop.Lower.of_checked ~factories:[] checked |> ok in
     let node=lowered.plan.nodes.(0)in

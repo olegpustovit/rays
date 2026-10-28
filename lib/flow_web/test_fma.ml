@@ -6,7 +6,7 @@ let number x = Param.float_text x
 let array xs = "Float64Array.from([" ^ String.concat "," (Array.to_list (Array.map number xs)) ^ "])"
 let value ?inputs body =
   let source="(workspace w (graph g :context host [(data : (array vec3) (array/vec3 0))] "^body^"))" in
-  let ws=match Flow.Workspace.check {Flow.Check.version=1;kinds=[]} (ok(Flow.Syntax.parse source)) with
+  let ws=match Flow.Workspace.check {Flow.Catalog.version=1;kinds=[]} (ok(Flow.Syntax.parse source)) with
     |Some ws,[] -> ws |_,ds -> failwith(String.concat ";" (List.map Diagnostic.to_string ds)) in
   List.assoc "g" (ok(E.static ?inputs ws)).results
 let live = {(Input.at_time 1.) with frame=3}

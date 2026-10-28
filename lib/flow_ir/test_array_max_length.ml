@@ -1,7 +1,7 @@
 module E=Flow.Eval
 module I=Flow_ir
 let ok=function Ok v->v|Error d->failwith(Diagnostic.to_string d)
-let catalog=Flow.Check.{version=1;kinds=[]}
+let catalog=Flow.Catalog.{version=1;kinds=[]}
 let source body=ok(Flow.Syntax.parse("(workspace capacity (graph g :context host "^body^"))"))
 let checked body=match Flow.Workspace.check catalog(source body)with
   |Some w,[]->w|_,ds->failwith(String.concat ";"(List.map Diagnostic.to_string ds))

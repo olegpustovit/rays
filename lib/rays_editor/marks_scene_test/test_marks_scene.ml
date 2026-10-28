@@ -7,7 +7,7 @@ module Buffers = Flow_ir.Core_exec.Buffers
 let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let checked body =
   let forms = ok (Flow.Syntax.parse ("(workspace w (graph g :context draw " ^ body ^ "))")) in
-  match Flow.Workspace.check {Flow.Check.version=1;kinds=[]} forms with
+  match Flow.Workspace.check {Flow.Catalog.version=1;kinds=[]} forms with
   | Some ws,[] -> ws | _,ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds))
 let serialize scene = Scene_command.Render_ir.serialize (Result.get_ok (Scene.Private.to_ir scene))
 let array3 = "(map (fn [i] [(* i 7.5) (+ 3 (* (* i t) 9)) 0]) (array/range 5))"
@@ -124,7 +124,7 @@ let () =
   let size = (800, 600) in
   let prepare n =
     let source = Printf.sprintf "(workspace w (graph g :context draw (draw/translate [(* 10 (sin t)) 0 0] (draw/rects (map (fn [i] [(* (mod i 800) 1.0) (/ i 1250) 0]) (array/range %d)) [3 3 0] :fill \"#5aaaf0\"))))" n in
-    let evaluation = ok (E.static (match Flow.Workspace.check {Flow.Check.version=0;kinds=[]} (ok (Flow.Syntax.parse source)) with
+    let evaluation = ok (E.static (match Flow.Workspace.check {Flow.Catalog.version=0;kinds=[]} (ok (Flow.Syntax.parse source)) with
       | Some ws,[] -> ws | _,ds -> failwith (String.concat "; " (List.map Diagnostic.to_string ds)))) in
     ok (Flow_native.Drawing.prepare ~states:evaluation.states evaluation.plan (List.assoc "g" evaluation.results)) in
   let frame prepared state i = ok (Flow_native.Drawing.render_prepared ~state prepared

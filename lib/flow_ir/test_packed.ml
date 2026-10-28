@@ -5,7 +5,7 @@ let ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
 let checked ?(ops = []) body =
   let text = "(workspace w (graph g :context value (let* [tested " ^ body ^ "] 0.0)))" in
   let forms = ok (Flow.Syntax.parse text) in
-  match Flow.Workspace.check ~ops {Flow.Check.version = 1; kinds = []} forms with
+  match Flow.Workspace.check ~ops {Flow.Catalog.version = 1; kinds = []} forms with
     | Some w, [] -> w
     | _, ds -> failwith (text ^ "\n" ^ String.concat "; " (List.map Diagnostic.to_string ds))
 let recorded ?ops body =

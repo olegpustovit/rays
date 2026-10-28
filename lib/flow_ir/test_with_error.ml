@@ -5,7 +5,7 @@ module D=Diagnostic
 module I=Flow_ir
 module C=I.Core
 let ok=function Ok value->value|Error d->failwith(D.to_string d)
-let catalog=Flow.Check.{version=1;kinds=[]}
+let catalog=Flow.Catalog.{version=1;kinds=[]}
 let parse text=ok(Flow.Syntax.parse text)
 let source body="(workspace errors (graph g :context value (let* [tested "^body^"] 0.)))"
 let check text=match W.check catalog(parse text)with

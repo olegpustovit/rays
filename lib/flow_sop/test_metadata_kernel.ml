@@ -36,7 +36,7 @@ module M = struct
     let flow_ok=function Ok value->value|Error d->fail(Diagnostic.to_string d) in
     let forms=Printf.sprintf "(workspace metadata (graph g :context sop [(geo : geometry nil)] (let* [tested (%s geo %s :owner %s)] geo)))"
       name(quoted pattern)(quoted owner)|>Flow.Syntax.parse|>flow_ok in
-    let workspace=match Flow.Workspace.check ~ops:Flow_sop.Operators.all Flow.Check.{version=1;kinds=[]}forms with
+    let workspace=match Flow.Workspace.check ~ops:Flow_sop.Operators.all Flow.Catalog.{version=1;kinds=[]}forms with
       |Some workspace,[]->workspace|_,ds->fail(String.concat "; "(List.map Diagnostic.to_string ds)) in
     let evaluation=Flow.Eval.static ~record:true ~inputs:["g",["geo",Flow.Eval.Deferred(Flow.Ty.geometry,7)]]workspace|>flow_ok in
     let value=List.assoc["g";"tested"]evaluation.records|>List.hd|>snd in

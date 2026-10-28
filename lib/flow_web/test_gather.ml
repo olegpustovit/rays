@@ -17,7 +17,7 @@ let fixture ?(identity=false) ty table indices body=
   let text=if identity then
     text |> Str.global_replace(Str.regexp_string "(fn [(i : int)]")"(fn [(i : text)]"
       |> Str.global_replace(Str.regexp_string ") indices)))")") table)))" else text in
-  let ws=match Flow.Workspace.check Flow.Check.{version=1;kinds=[]}(ok(Flow.Syntax.parse text))with
+  let ws=match Flow.Workspace.check Flow.Catalog.{version=1;kinds=[]}(ok(Flow.Syntax.parse text))with
     |Some w,[]->w|_,ds->failwith(String.concat ";"(List.map Diagnostic.to_string ds)) in
   let initial=if indices=[||]then[|0|]else indices in
   let value=List.assoc "g"(ok(E.static ~inputs:["g",["table",table;"indices",E.Int_array initial]]ws)).results in
