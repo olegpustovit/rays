@@ -260,10 +260,10 @@ let () =
     ~name:"selected_edges" (fun i -> i = 0)] in
   let original = ok (Geometry.create ~positions ~topology ~attributes ~groups ~edge_groups ()) in
   let before = Rdk_test_support.geometry_bytes original in
-  let expected = Kernel.edit_point_ranges ~grain:1 (fun ~first ~last ~x ~y ~z ->
-    for i = first to last - 1 do
-      x.(i) <- x.(i) +. 2.; y.(i) <- y.(i) +. 0.; z.(i) <- z.(i) +. 0.
-    done) original |> Rdk_test_support.geometry_bytes in
+  let expected = (let p = Packed.Float3.View.view (Geometry.positions original) in
+    Geometry.with_positions (Packed.Float3.View.of_owned_exn ~x:(Array.map (fun x -> x +. 2.) p.x)
+      ~y:(Array.map (fun y -> y +. 0.) p.y) ~z:(Array.map (fun z -> z +. 0.) p.z)) original |> Result.get_ok)
+    |> Rdk_test_support.geometry_bytes in
   let node = Lisp_sop.workspace_node ~with_:["src", Lisp_sop.snapshot original] source in
   List.iter (fun domains -> List.iter (fun grain -> with_session (fun session ->
     check (Rdk_test_support.geometry_bytes (cook session ~domains ~grain node) = expected)

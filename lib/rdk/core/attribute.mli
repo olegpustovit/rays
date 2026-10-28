@@ -19,7 +19,6 @@ type 'a key
 
 val float : float array kind
 val float2 : Packed.Float2.t kind
-val float3 : Packed.Float3.t kind
 val key : name:string -> owner:owner -> 'a kind -> 'a key
 val create_key_owned : 'a key -> 'a -> (t, string) result
 val get : 'a key -> t -> 'a option

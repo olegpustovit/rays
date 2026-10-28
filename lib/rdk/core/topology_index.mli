@@ -38,8 +38,6 @@ val point_incidence_count : t -> int -> int
 val point_vertex : t -> point:int -> local:int -> int
 val point_edge_count : t -> int -> int
 val point_edge : t -> point:int -> local:int -> int
-val boundary_edge_count : t -> int
-val non_manifold_edge_count : t -> int
 
 module View : sig
   type view = {

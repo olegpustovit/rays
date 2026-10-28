@@ -629,13 +629,13 @@ let transfer ~geometry ~triangle_geometry =
         expected := point; expected_distance := distance
       end) indexed_points;
     List.iter (fun index ->
-      let indices = Array.make 3 (-17)
-      and distances_squared = Array.make 3 (-17.) in
-      let count = Spatial_index.View.nearest_k_into index
-          ~x:qx ~y:qy ~z:qz ~max_distance_squared:Float.infinity
-          ~indices ~distances_squared ~offset:1 ~count:1 in
-      check (count = 1 && indices = [|-17; !expected; -17|]
-          && distances_squared = [|-17.; !expected_distance; -17.|])
+      let indices = [|-17|] and distances_squared = [|-17.|] and counts = [|0|] in
+      Spatial_index.View.nearest_k_many_into ~grain:1 index
+        ~queries:(Packed.Float3.View.of_owned_exn ~x:[|qx|] ~y:[|qy|] ~z:[|qz|])
+        ~max_distance_squared:Float.infinity ~capacity:1
+        ~indices ~distances_squared ~counts;
+      check (counts = [|1|] && indices = [|!expected|]
+          && distances_squared = [|!expected_distance|])
         "spatial index nearest/reference/domain exactness and output slice") indexes
   done;
   let surface_positions = Packed.Float3.View.of_owned_exn

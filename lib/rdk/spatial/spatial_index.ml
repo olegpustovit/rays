@@ -145,19 +145,6 @@ let rec visit context query offset first last depth found =
       else found
     end
 
-let nearest_k_into value ~x ~y ~z ~max_distance_squared ~indices
-    ~distances_squared ~offset ~count =
-  if count < 0 || offset < 0 || offset > Array.length indices - count
-     || offset > Array.length distances_squared - count then
-    invalid_arg "Spatial_index.View.nearest_k_into: invalid output slice";
-  if count = 0 || length value = 0 then 0
-  else
-    let queries : Packed.Float3.View.view =
-      { x = [|x|]; y = [|y|]; z = [|z|] } in
-    let context = { tree = value; queries; maximum_squared = max_distance_squared;
-      indices; distances = distances_squared; capacity = count } in
-    visit context 0 offset 0 (length value - 1) 0 0
-
 let nearest_k_many_into ?cancel ?points ~grain value ~queries ~max_distance_squared
     ~capacity ~indices ~distances_squared ~counts =
   if grain <= 0 then invalid_arg
@@ -247,7 +234,6 @@ let nearest_distances_many_into ?cancel ?points ~grain value ~queries
         end)
 
 module View = struct
-  let nearest_k_into = nearest_k_into
   let nearest_k_many_into = nearest_k_many_into
   let nearest_distances_many_into = nearest_distances_many_into
 end

@@ -18,17 +18,6 @@ val create :
   (t, Error.t) result
 
 module View : sig
-  val nearest_k_into :
-    t ->
-    x:float -> y:float -> z:float ->
-    max_distance_squared:float ->
-    indices:int array -> distances_squared:float array ->
-    offset:int -> count:int -> int
-  (** Fill at most [count] entries starting at [offset], sorted by increasing
-      squared distance and then source index. The supplied slice must be
-      disjoint from concurrent queries. Returns the number written and does
-      not allocate per visited point. *)
-
   val nearest_k_many_into :
     ?cancel:Cancel.t -> ?points:Group.t -> grain:int -> t ->
     queries:Packed.Float3.t ->

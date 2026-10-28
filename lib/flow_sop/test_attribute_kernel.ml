@@ -661,7 +661,7 @@ let () =
             |_->tuple 2(fun _->0.25,0.5,0.75))
           |None->tuple 2(fun _->0.25,0.5,0.75) in
         let actual=Geometry.find_attribute ~owner:Point "Cd" output|>Option.get
-          |>Attribute.get(Attribute.key ~owner:Point ~name:"Cd" Attribute.float3)|>Option.get in
+          |>float3_values|>Option.get in
         for i=0 to 1 do assert(Packed.Float3.get actual i=Packed.Float3.get expected i) done;
         let bytes=geometry_bytes output in
         (match !first with None->first:=Some bytes|Some previous->assert(previous=bytes)))) [1;8])
@@ -761,7 +761,7 @@ let () =
           ~name:"Cd" ~values:(E.Vec3_array values) ~sources:[0] [input] in
         let output = cook session ~domains ~time:0. (node source) |> geometry in
         let packed = Geometry.find_attribute ~owner:Attribute.Point "Cd" output |> Option.get
-          |> Attribute.get (Attribute.key ~name:"Cd" ~owner:Attribute.Point Attribute.float3)
+          |> float3_values
           |> Option.get |> Packed.Float3.View.view in
         for i = 0 to count - 1 do
           assert (Int64.bits_of_float packed.x.(i) = Int64.bits_of_float values.(3*i));
@@ -808,7 +808,7 @@ let () =
         assert (old.x==fresh.x && old.y==fresh.y && old.z==fresh.z);
         let painted=cook session ~domains ~time:0. (make "Cd" "(map (fn [p] p) (sop/attr g :P))") |> geometry in
         let copied=Geometry.find_attribute ~owner:Attribute.Point "Cd" painted |> Option.get
-          |> Attribute.get (Attribute.key ~name:"Cd" ~owner:Attribute.Point Attribute.float3) |> Option.get
+          |> float3_values |> Option.get
           |> Packed.Float3.View.view in
         assert (old.x!=copied.x && old.y!=copied.y && old.z!=copied.z);
         assert (Marshal.to_string [|old.x;old.y;old.z|] [Marshal.No_sharing]

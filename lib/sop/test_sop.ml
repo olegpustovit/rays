@@ -858,7 +858,7 @@ let test_poly_fill_contract () =
     "procedural Poly Fill patch cardinality";
   let topology_index = Rdk.Topology_index.create
       (Rdk.Geometry.topology (Result.get_ok (Sop.Payload.geometry first.payload))) in
-  check (Rdk.Topology_index.boundary_edge_count topology_index = 32)
+  check (Rdk_test_support.Topology_index.boundary_edge_count topology_index = 32)
     "procedural unique Poly Fill did not detach its two patches";
   let before = Session.stats evaluator in
   ignore (cook_ok evaluator current graph);

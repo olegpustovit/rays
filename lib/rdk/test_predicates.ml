@@ -324,7 +324,7 @@ let run () =
     let ax = coordinate 0 and ay = coordinate 1
     and bx = coordinate 2 and by = coordinate 3
     and cx = coordinate 4 and cy = coordinate 5 in
-    let arena = Predicates.View.exact_orient2d_arena
+    let arena = Predicates.orient2d
         ~ax ~ay ~bx ~by ~cx ~cy
     and reference = exact_orient2d_reference
         ~ax ~ay ~bx ~by ~cx ~cy in
@@ -336,7 +336,7 @@ let run () =
     and bx = coordinate 3 and by = coordinate 4 and bz = coordinate 5
     and cx = coordinate 6 and cy = coordinate 7 and cz = coordinate 8
     and dx = coordinate 9 and dy = coordinate 10 and dz = coordinate 11 in
-    let arena = Predicates.View.exact_orient3d_arena
+    let arena = Predicates.orient3d
         ~ax ~ay ~az ~bx ~by ~bz ~cx ~cy ~cz ~dx ~dy ~dz
     and reference = exact_orient3d_reference
         ~ax ~ay ~az ~bx ~by ~bz ~cx ~cy ~cz ~dx ~dy ~dz in
@@ -348,8 +348,7 @@ let run () =
     and bx = coordinate 2 and by = coordinate 3
     and cx = coordinate 4 and cy = coordinate 5
     and dx = coordinate 6 and dy = coordinate 7 in
-    let arena = Predicates.View.exact_incircle_arena
-        ~ax ~ay ~bx ~by ~cx ~cy ~dx ~dy
+    let arena = Predicates.incircle_packed ~x:[|ax; bx; cx; dx|] ~y:[|ay; by; cy; dy|] 0 1 2 3
     and reference = exact_incircle_reference
         ~ax ~ay ~bx ~by ~cx ~cy ~dx ~dy in
     check (arena = reference) "packed exact incircle differs from reference"

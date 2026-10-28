@@ -1,6 +1,7 @@
 open Rdk_test_support
 open Rays
 open Rdk
+open Rdk_test_support
 
 let get = function Ok value -> value | Error message -> fail message
 let get_rdk = function Ok value -> value | Error error -> fail (Error.to_string error)

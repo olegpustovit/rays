@@ -62,17 +62,6 @@ val segment_segment_packed :
     projection. Degenerate zero-length inputs are reported explicitly. *)
 
 module View : sig
-  val exact_orient2d_arena :
-    ax:float -> ay:float -> bx:float -> by:float -> cx:float -> cy:float -> sign
-  val exact_orient3d_arena :
-    ax:float -> ay:float -> az:float ->
-    bx:float -> by:float -> bz:float ->
-    cx:float -> cy:float -> cz:float ->
-    dx:float -> dy:float -> dz:float -> sign
-  val exact_incircle_arena :
-    ax:float -> ay:float -> bx:float -> by:float ->
-    cx:float -> cy:float -> dx:float -> dy:float -> sign
-
   val triangle_feature_vertex_local : int -> int
   val triangle_feature_edge_local : int -> int
   (** Decode the internal triangle-feature transport used by

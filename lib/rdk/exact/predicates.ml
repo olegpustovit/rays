@@ -545,7 +545,4 @@ module View = struct
   let segment_triangle_code_packed = segment_triangle_code_packed
   let triangle_triangle_features_into = triangle_triangle_features_into
   let coplanar_triangles_contact_packed = coplanar_triangles_contact_packed
-  let exact_orient2d_arena = exact_orient2d
-  let exact_orient3d_arena = exact_orient3d
-  let exact_incircle_arena = exact_incircle
 end

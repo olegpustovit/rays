@@ -16,8 +16,6 @@ type t = {
   point_vertices : int array;
   point_edge_offsets : int array;
   point_edges : int array;
-  boundary_edge_count : int;
-  non_manifold_edge_count : int;
 }
 
 let next_power_of_two value =
@@ -97,12 +95,9 @@ let create_from_point_index ?cancel point_index topology =
   let edge_a = Array.sub edge_a_full 0 edge_count
   and edge_b = Array.sub edge_b_full 0 edge_count
   and edge_offsets = Array.make (edge_count + 1) 0 in
-  let boundary_edge_count = ref 0 and non_manifold_edge_count = ref 0 in
   for edge = 0 to edge_count - 1 do
     let count = edge_counts_full.(edge) in
     edge_offsets.(edge + 1) <- edge_offsets.(edge) + count;
-    if count = 1 then incr boundary_edge_count
-    else if count > 2 then incr non_manifold_edge_count
   done;
   let edge_vertices = Array.make !outgoing_count 0
   and edge_cursor = Array.copy edge_offsets in
@@ -151,8 +146,6 @@ let create_from_point_index ?cancel point_index topology =
     edge_slots = table_edges;
     edge_offsets; edge_vertices; point_offsets; point_vertices;
     point_edge_offsets; point_edges;
-    boundary_edge_count = !boundary_edge_count;
-    non_manifold_edge_count = !non_manifold_edge_count;
   }
 
 (* Bounded: at most [cache_capacity] live indices, released with their topology. *)
@@ -216,8 +209,6 @@ let point_edge value ~point ~local =
   let count = point_edge_count value point in
   if local < 0 || local >= count then invalid_arg "Topology_index.point_edge: local index out of bounds";
   value.point_edges.(value.point_edge_offsets.(point) + local)
-let boundary_edge_count value = value.boundary_edge_count
-let non_manifold_edge_count value = value.non_manifold_edge_count
 
 type index = t
 

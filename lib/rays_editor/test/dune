@@ -127,7 +127,7 @@
 (executable
  (name test_shattered_studio)
  (modules test_shattered_studio)
- (libraries rays rays_math sop rdk rdk_rays rays_editor flow ogpu_mock parallel))
+ (libraries rays rays_math sop rdk rdk_test_support rdk_rays rays_editor flow ogpu_mock parallel))
 
 (rule
  (alias test_shattered_studio)

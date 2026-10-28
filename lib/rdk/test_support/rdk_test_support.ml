@@ -297,7 +297,25 @@ module Transform_ops = struct
     Packed.Float3.View.of_owned_exn ~x ~y ~z
 
   let transform ?grain matrix geometry =
-    let transformed = Kernel.transform ?grain matrix geometry in
+    let transformed =
+      let source = Packed.Float3.View.view (Geometry.positions geometry) in
+      let count = Array.length source.x in
+      let x = Array.make count 0. and y = Array.make count 0. and z = Array.make count 0. in
+      let (m00,m01,m02,m03), (m10,m11,m12,m13),
+          (m20,m21,m22,m23), (m30,m31,m32,m33) = Rays_math.Mat4.to_rows matrix in
+      if count > 0 then Parallel.for_ ~chunk_size:(Option.value grain ~default:16_384) ~start:0
+          ~finish:(count - 1) (fun index ->
+        let vx = source.x.(index) and vy = source.y.(index) and vz = source.z.(index) in
+        let ox = m00*.vx +. m01*.vy +. m02*.vz +. m03
+        and oy = m10*.vx +. m11*.vy +. m12*.vz +. m13
+        and oz = m20*.vx +. m21*.vy +. m22*.vz +. m23
+        and ow = m30*.vx +. m31*.vy +. m32*.vz +. m33 in
+        if abs_float ow <= 1e-12 then begin
+          x.(index) <- ox; y.(index) <- oy; z.(index) <- oz
+        end else begin
+          x.(index) <- ox /. ow; y.(index) <- oy /. ow; z.(index) <- oz /. ow
+        end);
+      Geometry.with_positions (Packed.Float3.View.of_owned_exn ~x ~y ~z) geometry |> Result.get_ok in
     match Rays_math.Mat4.inverse matrix with
     | None -> transformed
         |> Geometry.without_attribute ~owner:Attribute.Point "N"
@@ -316,4 +334,19 @@ module Transform_ops = struct
                        (Attribute.normal ~owner) normals |> get_string_ok in
                    Geometry.with_attribute attribute output |> get_string_ok))
           transformed [Attribute.Point; Attribute.Vertex]
+end
+
+let float3_values attribute = match Attribute.View.storage attribute with
+  | Attribute.Float3 values -> Some values | _ -> None
+
+(* The exact-edge counts of a topology index, over the public incidence counts. *)
+module Topology_index = struct
+  include Rdk.Topology_index
+  let count_edges index keep =
+    let count = ref 0 in
+    for edge = 0 to edge_count index - 1 do
+      if keep (edge_incidence_count index edge) then incr count
+    done; !count
+  let boundary_edge_count index = count_edges index (fun n -> n = 1)
+  let non_manifold_edge_count index = count_edges index (fun n -> n > 2)
 end
