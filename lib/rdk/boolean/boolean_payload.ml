@@ -136,11 +136,12 @@ let source_storage pair =
 let interpolate_fixed ?cancel ~grain ancestry view corner_count pair =
   let left, right = source_storage pair in
   match left, right with
-  | (Some (Attribute.Float _) | None), (Some (Attribute.Float _) | None)
-      when pair.kind = 0 ->
-      let storage_view = function Attribute.Float value -> value | _ -> assert false in
-      let left = Option.map storage_view left and right = Option.map storage_view right
-      and output = Array.make corner_count 0. in
+  | _ when pair.kind = 0 || (pair.kind >= 4 && pair.kind <= 6) ->
+      let like = Option.get (if left <> None then left else right) in
+      let planes = Option.map (fun s -> Option.get (Attribute.float_planes s)) in
+      let left = planes left and right = planes right in
+      let output = Array.map (fun _ -> Array.make corner_count 0.)
+          (Option.get (Attribute.float_planes like)) in
       Support.parallel_for ?cancel ~grain corner_count (fun corner ->
         let primitive = corner / 3 in
         match selected view left right primitive with
@@ -152,9 +153,18 @@ let interpolate_fixed ?cancel ~grain ancestry view corner_count pair =
             and wa = view.Boolean_extract.Private.barycentric_a.(corner)
             and wb = view.Boolean_extract.Private.barycentric_b.(corner)
             and wc = view.Boolean_extract.Private.barycentric_c.(corner) in
-            output.(corner) <- (wa *. values.(a)) +. (wb *. values.(b))
-                +. (wc *. values.(c)));
-      Attribute.Float output
+            Array.iteri (fun p plane ->
+              plane.(corner) <- wa *. values.(p).(a) +. wb *. values.(p).(b)
+                +. wc *. values.(p).(c)) output;
+            if pair.name = "N" && Array.length output = 3 then begin
+              let winding = float_of_int
+                  (Boolean_extract.primitive_winding ancestry primitive) in
+              let x, y, z = normalize3 (winding *. output.(0).(corner))
+                  (winding *. output.(1).(corner)) (winding *. output.(2).(corner)) in
+              output.(0).(corner) <- x; output.(1).(corner) <- y;
+              output.(2).(corner) <- z
+            end);
+      Attribute.of_float_planes ~like output
   | (Some (Attribute.Int _) | None), (Some (Attribute.Int _) | None)
       when pair.kind = 1 ->
       let storage_view = function Attribute.Int value -> value | _ -> assert false in
@@ -181,81 +191,6 @@ let interpolate_fixed ?cancel ~grain ancestry view corner_count pair =
             output.(corner) <- values.(source_index view pair.source_owner
               primitive (dominant_corner view corner)));
       Attribute.Text output
-  | (Some (Attribute.Float2 _) | None), (Some (Attribute.Float2 _) | None)
-      when pair.kind = 4 ->
-      let storage_view = function Attribute.Float2 value -> Packed.Float2.Private.view value
-        | _ -> assert false in
-      let left = Option.map storage_view left and right = Option.map storage_view right
-      and x = Array.make corner_count 0. and y = Array.make corner_count 0. in
-      Support.parallel_for ?cancel ~grain corner_count (fun corner ->
-        let primitive = corner / 3 in
-        match selected view left right primitive with
-        | None -> ()
-        | Some values ->
-            let a = source_index view pair.source_owner primitive 0
-            and b = source_index view pair.source_owner primitive 1
-            and c = source_index view pair.source_owner primitive 2
-            and wa = view.Boolean_extract.Private.barycentric_a.(corner)
-            and wb = view.Boolean_extract.Private.barycentric_b.(corner)
-            and wc = view.Boolean_extract.Private.barycentric_c.(corner) in
-            x.(corner) <- wa *. values.x.(a) +. wb *. values.x.(b) +. wc *. values.x.(c);
-            y.(corner) <- wa *. values.y.(a) +. wb *. values.y.(b) +. wc *. values.y.(c));
-      let value = match Packed.Float2.of_owned ~x ~y with
-        | Ok value -> value | Error message -> invalid_arg message in
-      Attribute.Float2 value
-  | (Some (Attribute.Float3 _) | None), (Some (Attribute.Float3 _) | None)
-      when pair.kind = 5 ->
-      let storage_view = function Attribute.Float3 value -> Packed.Float3.Private.view value
-        | _ -> assert false in
-      let left = Option.map storage_view left and right = Option.map storage_view right
-      and x = Array.make corner_count 0. and y = Array.make corner_count 0.
-      and z = Array.make corner_count 0. in
-      Support.parallel_for ?cancel ~grain corner_count (fun corner ->
-        let primitive = corner / 3 in
-        match selected view left right primitive with
-        | None -> ()
-        | Some values ->
-            let a = source_index view pair.source_owner primitive 0
-            and b = source_index view pair.source_owner primitive 1
-            and c = source_index view pair.source_owner primitive 2
-            and wa = view.Boolean_extract.Private.barycentric_a.(corner)
-            and wb = view.Boolean_extract.Private.barycentric_b.(corner)
-            and wc = view.Boolean_extract.Private.barycentric_c.(corner) in
-            let ox = wa *. values.x.(a) +. wb *. values.x.(b) +. wc *. values.x.(c)
-            and oy = wa *. values.y.(a) +. wb *. values.y.(b) +. wc *. values.y.(c)
-            and oz = wa *. values.z.(a) +. wb *. values.z.(b) +. wc *. values.z.(c) in
-            let ox, oy, oz = if pair.name = "N" then
-                let winding = float_of_int
-                    (Boolean_extract.primitive_winding ancestry primitive) in
-                normalize3 (winding *. ox) (winding *. oy) (winding *. oz)
-              else ox, oy, oz in
-            x.(corner) <- ox; y.(corner) <- oy; z.(corner) <- oz);
-      Attribute.Float3 (Packed.Float3.Private.of_owned_exn ~x ~y ~z)
-  | (Some (Attribute.Float4 _) | None), (Some (Attribute.Float4 _) | None)
-      when pair.kind = 6 ->
-      let storage_view = function Attribute.Float4 value -> Packed.Float4.Private.view value
-        | _ -> assert false in
-      let left = Option.map storage_view left and right = Option.map storage_view right
-      and x = Array.make corner_count 0. and y = Array.make corner_count 0.
-      and z = Array.make corner_count 0. and w = Array.make corner_count 0. in
-      Support.parallel_for ?cancel ~grain corner_count (fun corner ->
-        let primitive = corner / 3 in
-        match selected view left right primitive with
-        | None -> ()
-        | Some values ->
-            let a = source_index view pair.source_owner primitive 0
-            and b = source_index view pair.source_owner primitive 1
-            and c = source_index view pair.source_owner primitive 2
-            and wa = view.Boolean_extract.Private.barycentric_a.(corner)
-            and wb = view.Boolean_extract.Private.barycentric_b.(corner)
-            and wc = view.Boolean_extract.Private.barycentric_c.(corner) in
-            x.(corner) <- wa *. values.x.(a) +. wb *. values.x.(b) +. wc *. values.x.(c);
-            y.(corner) <- wa *. values.y.(a) +. wb *. values.y.(b) +. wc *. values.y.(c);
-            z.(corner) <- wa *. values.z.(a) +. wb *. values.z.(b) +. wc *. values.z.(c);
-            w.(corner) <- wa *. values.w.(a) +. wb *. values.w.(b) +. wc *. values.w.(c));
-      let value = match Packed.Float4.of_owned ~x ~y ~z ~w with
-        | Ok value -> value | Error message -> invalid_arg message in
-      Attribute.Float4 value
   | _ -> raise (Payload_error ("unsupported_storage", Printf.sprintf
       "%s attribute %S uses CSR storage not yet handled by the fixed-width interpolator"
       (if pair.source_owner = Attribute.Point then "point" else "vertex") pair.name))
@@ -698,15 +633,17 @@ let make_attribute pair storage =
 let copy_attribute ?cancel ~grain ancestry primitive_count pair =
   let left, right = source_storage pair in
   match left, right with
-  | (Some (Attribute.Float _) | None), (Some (Attribute.Float _) | None)
-      when pair.kind = 0 ->
-      let left = Option.map (function Attribute.Float value -> value | _ -> assert false) left
-      and right = Option.map (function Attribute.Float value -> value | _ -> assert false) right
-      and output = Array.make primitive_count 0. in
+  | _ when pair.kind = 0 || (pair.kind >= 4 && pair.kind <= 6) ->
+      let like = Option.get (if left <> None then left else right) in
+      let planes = Option.map (fun s -> Option.get (Attribute.float_planes s)) in
+      let left = planes left and right = planes right in
+      let output = Array.map (fun _ -> Array.make primitive_count 0.)
+          (Option.get (Attribute.float_planes like)) in
       Support.parallel_for ?cancel ~grain primitive_count (fun primitive ->
         let source, index = selected_primitive ancestry left right primitive in
-        match source with None -> () | Some values -> output.(primitive) <- values.(index));
-      make_attribute pair (Attribute.Float output)
+        match source with None -> () | Some values ->
+          Array.iteri (fun p plane -> plane.(primitive) <- values.(p).(index)) output);
+      make_attribute pair (Attribute.of_float_planes ~like output)
   | (Some (Attribute.Int _) | None), (Some (Attribute.Int _) | None)
       when pair.kind = 1 ->
       let left = Option.map (function Attribute.Int value -> value | _ -> assert false) left
@@ -725,48 +662,6 @@ let copy_attribute ?cancel ~grain ancestry primitive_count pair =
         let source, index = selected_primitive ancestry left right primitive in
         match source with None -> () | Some values -> output.(primitive) <- values.(index));
       make_attribute pair (Attribute.Text output)
-  | (Some (Attribute.Float2 _) | None), (Some (Attribute.Float2 _) | None)
-      when pair.kind = 4 ->
-      let view = function Attribute.Float2 value -> Packed.Float2.Private.view value
-        | _ -> assert false in
-      let left = Option.map view left and right = Option.map view right
-      and x = Array.make primitive_count 0. and y = Array.make primitive_count 0. in
-      Support.parallel_for ?cancel ~grain primitive_count (fun primitive ->
-        let source, index = selected_primitive ancestry left right primitive in
-        match source with None -> () | Some values ->
-          x.(primitive) <- values.x.(index); y.(primitive) <- values.y.(index));
-      let value = match Packed.Float2.of_owned ~x ~y with
-        | Ok value -> value | Error message -> invalid_arg message in
-      make_attribute pair (Attribute.Float2 value)
-  | (Some (Attribute.Float3 _) | None), (Some (Attribute.Float3 _) | None)
-      when pair.kind = 5 ->
-      let view = function Attribute.Float3 value -> Packed.Float3.Private.view value
-        | _ -> assert false in
-      let left = Option.map view left and right = Option.map view right
-      and x = Array.make primitive_count 0. and y = Array.make primitive_count 0.
-      and z = Array.make primitive_count 0. in
-      Support.parallel_for ?cancel ~grain primitive_count (fun primitive ->
-        let source, index = selected_primitive ancestry left right primitive in
-        match source with None -> () | Some values ->
-          x.(primitive) <- values.x.(index); y.(primitive) <- values.y.(index);
-          z.(primitive) <- values.z.(index));
-      make_attribute pair (Attribute.Float3
-        (Packed.Float3.Private.of_owned_exn ~x ~y ~z))
-  | (Some (Attribute.Float4 _) | None), (Some (Attribute.Float4 _) | None)
-      when pair.kind = 6 ->
-      let view = function Attribute.Float4 value -> Packed.Float4.Private.view value
-        | _ -> assert false in
-      let left = Option.map view left and right = Option.map view right
-      and x = Array.make primitive_count 0. and y = Array.make primitive_count 0.
-      and z = Array.make primitive_count 0. and w = Array.make primitive_count 0. in
-      Support.parallel_for ?cancel ~grain primitive_count (fun primitive ->
-        let source, index = selected_primitive ancestry left right primitive in
-        match source with None -> () | Some values ->
-          x.(primitive) <- values.x.(index); y.(primitive) <- values.y.(index);
-          z.(primitive) <- values.z.(index); w.(primitive) <- values.w.(index));
-      let value = match Packed.Float4.of_owned ~x ~y ~z ~w with
-        | Ok value -> value | Error message -> invalid_arg message in
-      make_attribute pair (Attribute.Float4 value)
   | (Some (Attribute.Int_array _) | None), (Some (Attribute.Int_array _) | None)
       when pair.kind = 2 ->
       let view = function Attribute.Int_array value -> Packed.Int_array.Private.view value
