@@ -2,7 +2,6 @@ open Rays
 open Rdk
 open Rdk_test_support
 
-let get_ok = get
 let near ?(epsilon = 1e-12) left right = abs_float (left -. right) <= epsilon
 
 let equal_storage left right =
@@ -33,28 +32,9 @@ let equal_storage left right =
       left.offsets = right.offsets && left.values = right.values
   | _ -> false
 
-let equal_geometry left right =
-  let lp = Packed.Float3.View.view (Geometry.positions left)
-  and rp = Packed.Float3.View.view (Geometry.positions right)
-  and lt = Topology.View.view (Geometry.topology left)
-  and rt = Topology.View.view (Geometry.topology right) in
-  lp.x = rp.x && lp.y = rp.y && lp.z = rp.z
-  && lt.point_count = rt.point_count
-  && lt.vertex_points = rt.vertex_points
-  && lt.primitive_offsets = rt.primitive_offsets
-  && Bytes.equal lt.primitive_kinds rt.primitive_kinds
-  && List.equal (fun left right ->
-       Attribute.owner left = Attribute.owner right
-       && String.equal (Attribute.name left) (Attribute.name right)
-       && equal_storage left right)
-       (Geometry.attributes left) (Geometry.attributes right)
-  && List.equal equal_group (Geometry.groups left) (Geometry.groups right)
-  && List.equal equal_edge_group
-       (Geometry.edge_groups left) (Geometry.edge_groups right)
-
 let add_attribute owner name storage geometry =
-  let attribute = Attribute.create_owned ~owner ~name storage |> get_ok in
-  Geometry.with_attribute attribute geometry |> get_ok
+  let attribute = Attribute.create_owned ~owner ~name storage |> get in
+  Geometry.with_attribute attribute geometry |> get
 
 let open_box ?(offset = 0.) () =
   let positions = Packed.Float3.View.of_owned_exn
@@ -69,8 +49,8 @@ let open_box ?(offset = 0.) () =
         1;2;6;5;
         2;3;7;6;
         3;0;4;7
-      |] ~primitive_offsets:[|0;4;8;12;16;20|] |> get_ok in
-  let geometry = Geometry.create ~positions ~topology () |> get_ok in
+      |] ~primitive_offsets:[|0;4;8;12;16;20|] |> get in
+  let geometry = Geometry.create ~positions ~topology () |> get in
   let geometry = geometry
       |> add_attribute Attribute.Point "weight"
            (Attribute.Float (Array.init 8 float_of_int))
@@ -81,7 +61,7 @@ let open_box ?(offset = 0.) () =
       |> add_attribute Attribute.Point "point_uv"
            (Attribute.Float2 (Packed.Float2.of_owned
              ~x:(Array.init 8 float_of_int)
-             ~y:(Array.init 8 (fun point -> float_of_int (-point))) |> get_ok))
+             ~y:(Array.init 8 (fun point -> float_of_int (-point))) |> get))
       |> add_attribute Attribute.Point "point_vector"
            (Attribute.Float3 (Packed.Float3.View.of_owned_exn
              ~x:(Array.init 8 float_of_int)
@@ -90,15 +70,15 @@ let open_box ?(offset = 0.) () =
       |> add_attribute Attribute.Point "point_quaternion"
            (Attribute.Float4 (Packed.Float4.of_owned
              ~x:(Array.init 8 float_of_int) ~y:(Array.make 8 0.)
-             ~z:(Array.make 8 0.) ~w:(Array.make 8 1.) |> get_ok))
+             ~z:(Array.make 8 0.) ~w:(Array.make 8 1.) |> get))
       |> add_attribute Attribute.Point "point_int_array"
            (Attribute.Int_array (Packed.Int_array.create_owned
              ~offsets:(Array.init 9 (fun index -> index * 2))
-             ~values:(Array.init 16 Fun.id) |> get_ok))
+             ~values:(Array.init 16 Fun.id) |> get))
       |> add_attribute Attribute.Point "point_float_array"
            (Attribute.Float_array (Packed.Float_array.create_owned
              ~offsets:(Array.init 9 (fun index -> index * 2))
-             ~values:(Array.init 16 float_of_int) |> get_ok))
+             ~values:(Array.init 16 float_of_int) |> get))
       |> add_attribute Attribute.Vertex "vertex_weight"
            (Attribute.Float (Array.init 20 float_of_int))
       |> add_attribute Attribute.Primitive "primitive_id"
@@ -109,16 +89,16 @@ let open_box ?(offset = 0.) () =
       (fun vertex -> vertex = 0)
   and bottom = Group.init ~owner:Group.Primitive ~name:"bottom" 5
       (fun primitive -> primitive = 0) in
-  let geometry = geometry |> Geometry.with_group top |> get_ok
-      |> Geometry.with_group first_vertex |> get_ok
-      |> Geometry.with_group bottom |> get_ok in
+  let geometry = geometry |> Geometry.with_group top |> get
+      |> Geometry.with_group first_vertex |> get
+      |> Geometry.with_group bottom |> get in
   let index = Topology_index.create topology in
   let rim = Edge_group.init ~topology ~index ~name:"rim" (fun edge ->
       Topology_index.edge_incidence_count index edge = 1
       && let a, b = Topology_index.edge_points index edge in
          let positions = Packed.Float3.View.view positions in
          positions.z.(a) = 1. && positions.z.(b) = 1.) in
-  Geometry.with_edge_group rim geometry |> get_ok
+  Geometry.with_edge_group rim geometry |> get
 
 let group_cardinality owner name geometry =
   match Geometry.find_group ~owner name geometry with
@@ -280,8 +260,8 @@ let test_unique_reverse_and_normals () =
   let point_normal = Attribute.create_owned ~name:"N" ~owner:Attribute.Point
       (Attribute.Float3 (Packed.Float3.View.of_owned_exn
         ~x:(Array.make 8 1.) ~y:(Array.make 8 0.) ~z:(Array.make 8 0.)))
-      |> get_ok in
-  let with_normal = Geometry.with_attribute point_normal source |> get_ok in
+      |> get in
+  let with_normal = Geometry.with_attribute point_normal source |> get in
   let updated = Poly_fill.run ~mode:Poly_fill.Fill_triangle_fan
       ~update_point_normals:true with_normal |> get_rdk in
   let normal = Geometry.find_attribute ~owner:Attribute.Point "N" updated
@@ -342,9 +322,9 @@ let test_selection_and_failures () =
       ~z:(Array.make 5 0.) in
   let branched_topology = Topology.polygons_owned ~point_count:5
       ~vertex_points:[|0;1;2; 0;3;4|]
-      ~primitive_offsets:[|0;3;6|] |> get_ok in
+      ~primitive_offsets:[|0;3;6|] |> get in
   let branched = Geometry.create ~positions:branched_positions
-      ~topology:branched_topology () |> get_ok in
+      ~topology:branched_topology () |> get in
   (match Poly_fill.run branched with
    | Error error -> check (Error.code error = "invalid_geometry")
        "branched-boundary error code"
@@ -355,7 +335,7 @@ let test_selection_and_failures () =
       ~x:(Array.mapi (fun point value -> if point = 4 then Float.nan else value)
         source_positions.x)
       ~y:(Array.copy source_positions.y) ~z:(Array.copy source_positions.z) in
-  let nonfinite = Geometry.with_positions positions nonfinite |> get_ok in
+  let nonfinite = Geometry.with_positions positions nonfinite |> get in
   (match Poly_fill.run nonfinite with
    | Error error -> check (Error.code error = "invalid_geometry")
        "non-finite error code"
@@ -372,8 +352,8 @@ let test_selection_and_failures () =
         ~z:(Array.map (fun (_, _, z) -> z) points) in
     let topology = Topology.polygons_owned ~point_count:count
         ~vertex_points:(Array.init count Fun.id)
-        ~primitive_offsets:[|0; count|] |> get_ok in
-    Geometry.create ~positions ~topology () |> get_ok in
+        ~primitive_offsets:[|0; count|] |> get in
+    Geometry.create ~positions ~topology () |> get in
   let concave = polygon [|0.,0.,0.; 2.,0.,0.; 2.,2.,0.; 1.,0.8,0.; 0.,2.,0.|] in
   let concave_fill = Poly_fill.run ~mode:Poly_fill.Fill_triangles concave |> get_rdk in
   check (Geometry.primitive_count concave_fill = 4
@@ -391,14 +371,14 @@ let test_selection_and_failures () =
       ~vertex_points:(Array.append diagonal_topology.vertex_points [|4;6|])
       ~primitive_offsets:[|0;4;8;12;16;20;22|]
       ~primitive_kinds:[|Topology.Polygon; Topology.Polygon; Topology.Polygon;
-        Topology.Polygon; Topology.Polygon; Topology.Open_polyline|] |> get_ok in
+        Topology.Polygon; Topology.Polygon; Topology.Open_polyline|] |> get in
   let diagonal_source = Geometry.create
-      ~positions:(Geometry.positions diagonal_source) ~topology () |> get_ok in
+      ~positions:(Geometry.positions diagonal_source) ~topology () |> get in
   let diagonal_index = Topology_index.create topology in
   let all_edges = Edge_group.init ~topology ~index:diagonal_index ~name:"all"
       (fun _ -> true) in
   let diagonal_source = Geometry.with_edge_group all_edges diagonal_source
-      |> get_ok in
+      |> get in
   let diagonal_fill = Poly_fill.run ~mode:Poly_fill.Fill_triangles diagonal_source
       |> get_rdk in
   let mapped = Geometry.find_edge_group "all" diagonal_fill |> Option.get in
@@ -436,8 +416,8 @@ let many_open_boxes count =
   done;
   let positions = Packed.Float3.View.of_owned_exn ~x ~y ~z in
   let topology = Topology.polygons_owned ~point_count ~vertex_points
-      ~primitive_offsets |> get_ok in
-  let geometry = Geometry.create ~positions ~topology () |> get_ok in
+      ~primitive_offsets |> get in
+  let geometry = Geometry.create ~positions ~topology () |> get in
   geometry
   |> add_attribute Attribute.Point "id"
        (Attribute.Int (Array.init point_count Fun.id))

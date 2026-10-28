@@ -6,8 +6,8 @@ let array = function Flow.Eval.Vec4_array v -> v | _ -> assert false
 let n = w * h
 let color_src = Printf.sprintf "(map (fn [(i : int)] [(+ 0.5 (noise3 [(* (float i) 0.07) 1. (* 0. t)] :seed 1)) (+ 0.4 (noise3 [(* (float i) 0.05) 2. 0.] :seed 2)) (+ 0.3 (noise3 [(* (float i) 0.03) 3. 0.] :seed 3)) 1.]) (array/range %d :type int))" n
 let geom_src = Printf.sprintf "(map (fn [(i : int)] [0. 0. 1. (+ (* 0. t) (if (int/lt (int/mod i 11) 2) 0. (+ 1. (* 0.004 (float (int/mod i 7))))))]) (array/range %d :type int))" n
-let film = Printf.sprintf "(let* [color %s geom %s]
-     (map (fn [(i : int)] (resolve-pixel color geom i %d %d (+ 1.3 (* 0. t)) true)) (array/range %d :type int)))" color_src geom_src w h n
+let film = Printf.sprintf "(let* [color %s geom %s order (map (fn [(i : int)] (int/add i (int (* 0. t)))) (array/range %d :type int))]
+     (map (fn [(i : int)] (resolve-pixel color geom order i %d %d (+ 1.3 (* 0. t)) true)) (array/range %d :type int)))" color_src geom_src n w h n
 (* pathtrace.metal's resolve_preview, written out in OCaml (the A side of the A/B) *)
 let msl color geom =
   let aces c = let c = c *. 1.3 in

@@ -5,13 +5,6 @@ lib/flow_ir/packed.ml	run_typed#1	503
 lib/metal/gen/registry.ml	entries#1	428
 lib/ogpu/conformance/conformance.ml	run#1	952
 lib/ogpu_metal/backend.ml	create#1	1018
-lib/pxui/test_ui.ml	run#1	811
-lib/pxui/test_ui.ml	with_scale#1	476
-lib/pxui_graph/test_pxui_graph.ml	scope_gestures#1	389
-lib/rays_editor/test/test_rays_editor.ml	run#1	650
-lib/rays_editor/test/test_scene_sync.ml	run#1	303
-lib/rays_editor/test/test_scene_tree.ml	run#1	321
-lib/rays_editor/test/test_sop_catalog.ml	run#1	482
 lib/rdk/boolean/boolean_complex.ml	build#1	309
 lib/rdk/boolean/boolean_extract.ml	build_internal#1	410
 lib/rdk/boolean/boolean_face_arrangement.ml	build#3	446
@@ -20,7 +13,6 @@ lib/rdk/exact/delaunay2.ml	build#1	301
 lib/rdk/exact/planar_cdt.ml	build#1	976
 lib/rdk/exact/planar_constraints.ml	build#1	373
 lib/rdk/exact/planar_refinement.ml	build#1	401
-lib/rdk/gen/iso_surface.ml	extract_with#1	373
 lib/rdk/mesh/plane_clip.ml	clip#1	1521
 lib/rdk/mesh/poly_bevel.ml	run#1	874
 lib/rdk/mesh/poly_cut.ml	cut#1	590
@@ -31,9 +23,8 @@ lib/rdk/mesh/subdivide.ml	fvar_refinement#1	339
 lib/rdk/mesh/uv_parameterize.ml	solve#1	490
 lib/rdk/spatial/surface_index.ml	create_with#1	311
 lib/rdk/test_attribute_lifecycle.ml	run#1	465
-lib/rdk/test_rdk_attributes.ml	promotion#1	471
 lib/rdk/test_rdk_attributes.ml	transfer#1	348
 lib/rdk/test_support/box_generator.ml	box#1	461
-lib/rdk/test_support/parametric_generators.ml	torus#1	481
+lib/rdk/test_support/parametric_generators.ml	torus#1	477
 lib/rdk/test_support/uv_sphere.ml	run#1	456
 lib/sop/test_parallel_exact.ml	run#1	1860

@@ -8,6 +8,7 @@ module Parametric_generators = Parametric_generators
 open Rdk
 
 let fail message = raise (Failure message)
+let failf format = Printf.ksprintf failwith format
 let check condition message = if not condition then fail message
 let get_ok = function Ok value -> value | Error error -> fail (Error.to_string error)
 let get_rdk = function Ok value -> value | Error error -> fail (Error.to_string error)
@@ -212,12 +213,6 @@ let float_array_values ~owner ~name geometry =
   | None -> fail ("missing float-array attribute " ^ name)
 
 
-
-(* One attribute by exact name: [promote_pattern] with a literal pattern. *)
-let promote ?cancel ?grain ?into ?method_ ?delete_source ?piece_attribute ?index_attribute
-    ~source ~destination ~name geometry =
-  Attribute_ops.promote_pattern ?cancel ?grain ?into_pattern:into ?method_ ?delete_source
-    ?piece_attribute ?index_pattern:index_attribute ~source ~destination ~pattern:name geometry
 
 (* [Triangulate2d.run] with the defaults tests rely on; the SOP declaration owns the real ones. *)
 let triangulate2d ?cancel ?(grain = 16_384) ?selection ?constraint_edges

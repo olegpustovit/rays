@@ -62,14 +62,14 @@ let sphere_frame orientation rotation_order (rotation : Rays_math.Vec3.t) =
       Rays_math.Mat4.transform_direction matrix pole,
       Rays_math.Mat4.transform_direction matrix tangent) oriented
 
-let run ?cancel ?(grain = 16_384)
-    ?(connectivity = Sphere_triangles) ?(unique_points_per_pole = false)
-    ?(triangular_poles = true) ?normals ?(orientation = Sphere_y)
-    ?(center = Rays_math.Vec3.zero) ?(rotation = Rays_math.Vec3.zero)
-    ?(rotation_order = Sphere_xyz) ?(uniform_scale = 1.)
-    ?radius_x ?radius_y ?radius_z ?uv_attribute ?(segments = 48) ?(rings = 24)
+let run
+    ?(connectivity = Sphere_triangles)
+
+    ?(center = Rays_math.Vec3.zero)
+
+    ?(segments = 48) ?(rings = 24)
     ~radius () =
-  Error.guard ~operation:"uv_sphere" ~code:"invalid_parameter" @@ fun () ->
+  let cancel = None in let grain = (16_384) in let normals = None in let orientation = (Sphere_y) in let radius_x = None in let radius_y = None in let radius_z = None in let rotation = (Rays_math.Vec3.zero) in let rotation_order = (Sphere_xyz) in let triangular_poles = (true) in let uniform_scale = (1.) in let unique_points_per_pole = (false) in let uv_attribute = None in Error.guard ~operation:"uv_sphere" ~code:"invalid_parameter" @@ fun () ->
   let point_mode = connectivity = Sphere_points in
   let normal_mode = match normals with
     | Some mode -> mode

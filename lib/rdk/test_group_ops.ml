@@ -112,8 +112,8 @@ let boundary_promotion_rule ?new_name ?keep_original ?(attributes = []) ?(tolera
     promote_boundary_attributes = attributes;
     promote_boundary_tolerance = tolerance;
     promote_include_unshared_edges = include_unshared_edges;
-    promote_include_all_unshared_curve_edges = false;
-    promote_include_all_primitives_sharing_boundary_points = false;
+    promote_all_unshared_edges = false;
+    promote_all_boundary_prims = false;
   };
 }
 

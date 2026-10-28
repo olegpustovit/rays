@@ -190,7 +190,7 @@ let rec to_mesh_raw_impl geometry =
               ~indices:view.vertex_points ?normals ?colors ?tex_coords positions
 
 let protected operation work =
-  Result.map_error (Error.of_string ~operation ~code:"mesh_conversion") (work ())
+  Result.map_error (Error.make ~operation ~code:"mesh_conversion") (work ())
 
 let to_trace_mesh geometry =
   protected "to_trace_mesh" (fun () ->
@@ -268,9 +268,17 @@ let to_mesh geometry =
          || Geometry.find_attribute ~owner:Attribute.Point "Cd" geometry <> None
          || Geometry.find_attribute ~owner:Attribute.Primitive "Cd" geometry = None
       then Ok geometry
-      else Rdk_attrib.Attribute_ops.promote_pattern ~source:Attribute.Primitive
-          ~destination:Attribute.Vertex ~pattern:"Cd" ~delete_source:false geometry
-          |> Result.map_error Error.to_string in
+      else
+        let topology = Topology.View.view (Geometry.topology geometry) in
+        let corner_primitive = Array.make (Array.length topology.vertex_points) 0 in
+        for primitive = 0 to Bytes.length topology.primitive_kinds - 1 do
+          Array.fill corner_primitive topology.primitive_offsets.(primitive)
+            (topology.primitive_offsets.(primitive + 1) - topology.primitive_offsets.(primitive)) primitive
+        done;
+        let cd = Option.get (Geometry.find_attribute ~owner:Attribute.Primitive "Cd" geometry) in
+        let spread = Topology_remap.attribute ~grain:16_384 corner_primitive cd in
+        Result.bind (Attribute.create_owned ~name:"Cd" ~owner:Attribute.Vertex (Attribute.storage spread))
+          (fun corners -> Geometry.with_attribute corners geometry) in
     Result.bind geometry to_mesh_raw_impl)
 
 let of_mesh mesh =

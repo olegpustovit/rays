@@ -114,7 +114,7 @@ let text_first what doc level edit after =
   | Ok None -> failwith (what ^ ": the text did not take the edit")
   | Error message -> failwith (what ^ ": " ^ message)
 
-let run () =
+let qualification_roots () =
   let qualification = Ws_fixture.of_text {|(workspace qualification
     (graph g :context value [(offset : float 2.0)]
       (let* [mapped (map (fn [x] (+ x (+ offset t))) (array/range 4))] 0.0))
@@ -169,7 +169,10 @@ let run () =
     "literal patch replaced a generated ID-zero producer";
   let edited_doc = lower ~previous:generated_doc edited in
   check (Flow.Workspace.Paths.mem path (edited_doc.workspace.ws).checked.approx)
-    "generated empty-span root stopped matching after literal patch";
+    "generated empty-span root stopped matching after literal patch"
+
+let run () =
+  qualification_roots ();
   let doc = open_text text in
   (* Following the viewport writes camera coordinates every frame. Rounding them
      makes the camera diverge far enough to flash its own frustum when zoomed out. *)

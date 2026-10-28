@@ -23,7 +23,7 @@ type instances = {
    keeps, for [move], each object's placement range ([objects.(o)] to
    [objects.(o + 1)]; empty for [mesh]) and each placement's matrix relative
    to its object. *)
-type part = Triangle_part of int * int (* first vertex, vertex count *) | Sphere_part | Strand_part
+type part = Triangle_part of int * int (* first vertex, vertex count *)
 
 type layout = {
   parts : part array;
@@ -34,11 +34,12 @@ type layout = {
   locals : Rays_math.Mat4.t array;
 }
 
-(* Prepared analytic primitives: spheres as bounding boxes resolved by an
-   intersection function, strands as linear round curves. *)
+(* Prepared analytic primitives: spheres as (centre, radius) float4s whose materials start at
+   [sphere_material], strands as linear round curves (control points, radii, each segment's first point and
+   material). *)
 type extras = {
   sphere_bytes : bytes;
-  box_bytes : bytes;
+  sphere_material : int;
   sphere_count : int;
   strand_points : bytes;
   strand_radii : bytes;
@@ -170,7 +171,7 @@ let layout_mesh ?(objects = [||]) ?(placed = [||]) ?(locals = [||]) base parts p
       records.(index) <-
         { B.instance = { transform = fst columns; mask = 0xFFFF_FFFF; structure_index = part }; user_id = 0; table_offset = 0 };
       put_transform_record shader_bytes (index * 84) columns;
-      put_u32 table (index * 8) (match parts.(part) with Triangle_part (first, _) -> first / 3 | _ -> 0);
+      put_u32 table (index * 8) (match parts.(part) with Triangle_part (first, _) -> first / 3);
       put_u32 table ((index * 8) + 4) material;
       pack (index + 1)
   in
@@ -180,18 +181,13 @@ let layout_mesh ?(objects = [||]) ?(placed = [||]) ?(locals = [||]) base parts p
       instances = Some { records; shader_bytes; motion_transforms = None; motion_end = None; matrices = Array.map (fun (m, _, _) -> m) placements }
     ; scene = Some { parts; placements; table; objects; placed; locals } }
 
+(* Spheres and strands are traced beside the triangle structure (scene/trace), which then needs a triangle: a
+   degenerate one, never hit, stands in when there is none. *)
 let mesh ~extras ~materials source_meshes =
   let* flat = flat_mesh ~extras ~materials source_meshes in
-  let parts =
-    List.concat
-      [ (if flat.triangles > 0 then [ Triangle_part (0, 3 * flat.triangles) ] else [])
-      ; (if flat.extras.sphere_count > 0 then [ Sphere_part ] else [])
-      ; (if flat.extras.strand_segments > 0 then [ Strand_part ] else []) ]
-  in
-  (* Several geometry kinds need one BLAS each, so the mesh becomes a scene of
-     identity instances; a single kind keeps the flat fast path. *)
-  if List.length parts < 2 then Ok flat
-  else layout_mesh flat (Array.of_list parts) (Array.of_list (List.mapi (fun i _ -> (Rays_math.Mat4.identity, i, -1)) parts))
+  if flat.triangles = 0 then
+    Ok { flat with mesh_positions = Bytes.make 36 '\000'; mesh_normals = Bytes.make 36 '\000'; mesh_ids = Bytes.make 4 '\000' }
+  else Ok flat
 
 let pack_instances ~materials ~motion transforms =
     let count = Array.length transforms in
@@ -291,9 +287,7 @@ let scene_mesh (objects : (Rays_math.Mat4.t * 'material t) list) =
           Stdlib.Buffer.add_int32_le ids (Int32.add (Bytes.get_int32_le m.mesh_ids (4 * i)) (Int32.of_int !material_base))
         done;
         Array.iter
-          (function
-            | Triangle_part (first, count) -> parts := Triangle_part (first + !vertex_base, count) :: !parts
-            | part -> parts := part :: !parts)
+          (fun (Triangle_part (first, count)) -> parts := Triangle_part (first + !vertex_base, count) :: !parts)
           input_parts;
         Array.iter
           (fun (instance, part, material) ->
@@ -309,7 +303,7 @@ let scene_mesh (objects : (Rays_math.Mat4.t * 'material t) list) =
         material_base := !material_base + List.length m.mesh_materials;
         triangles := !triangles + m.triangles)
       inputs;
-    let extras = { sphere_bytes = Bytes.empty; box_bytes = Bytes.empty; sphere_count = 0;
+    let extras = { sphere_bytes = Bytes.empty; sphere_material = 0; sphere_count = 0;
       strand_points = Bytes.empty; strand_radii = Bytes.empty; strand_indices = Bytes.empty;
       strand_ids = Bytes.empty; strand_point_count = 0; strand_segments = 0 } in
     layout_mesh ~objects:(Array.of_list (List.rev !objects)) ~placed:(Array.of_list placed) ~locals:(Array.of_list (List.rev !locals))

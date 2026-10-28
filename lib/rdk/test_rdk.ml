@@ -88,14 +88,6 @@ let run () =
     fail "packed group difference";
   let geometry = Geometry.create ~positions ~topology ~groups:[selected] () |> get_ok in
   if Group.cardinality selected <> 2 then fail "packed group cardinality";
-  (match Attribute_ops.enumerate ~selection:selected ~owner:Attribute.Vertex
-      ~name:"bad" geometry with
-   | Error error when Error.code error = "invalid_enumeration" -> ()
-   | _ -> fail "enumerate accepted a mismatched group owner");
-  (match Attribute_ops.enumerate ~start:max_int ~step:1 ~owner:Attribute.Point
-      ~name:"overflow" geometry with
-   | Error error when Error.code error = "invalid_enumeration" -> ()
-   | _ -> fail "enumerate accepted an overflowing integer sequence");
   let quad_mesh = Rdk_rays.Rays_mesh.to_mesh geometry |> get_ok in
   if Mesh.index_count quad_mesh <> 6 then fail "quad bridge triangulation";
   let extruded = Poly_extrude.run ~distance:2. geometry |> get_ok in
@@ -120,33 +112,6 @@ let run () =
   Tb.add_triangle triangle_builder 0 2 3;
   let triangle_geometry = Geometry.create ~positions
       ~topology:(Tb.freeze triangle_builder) () |> get_ok in
-  let point_ids = Attribute.create_owned ~name:"point_id" ~owner:Attribute.Point
-      (Attribute.Int [|0; 1; 2; 3|]) |> get_ok in
-  let sortable_points = Geometry.with_attribute point_ids geometry |> get_ok in
-  let sortable_bytes = geometry_bytes sortable_points in
-  let sorted domains = Parallel.run ~domains (fun () ->
-    Ordering.sort ~grain:1 ~selection:selected ~descending:true
-      ~owner:Ordering.Points ~key:Ordering.X sortable_points |> get_ok) in
-  let sorted_points = sorted 1 and sorted_many = sorted 4 in
-  let sorted_positions = Packed.Float3.View.view (Geometry.positions sorted_points)
-  and sorted_topology = Topology.View.view (Geometry.topology sorted_points) in
-  check (geometry_bytes sorted_points = geometry_bytes sorted_many
-      && geometry_bytes sortable_points = sortable_bytes
-      && sorted_positions.x = [|1.;1.;0.;0.|]
-      && sorted_positions.y = [|1.;0.;0.;1.|]
-      && sorted_topology.vertex_points = [|2;1;0;3|]
-      && Attribute.storage (Geometry.find_attribute ~owner:Attribute.Point
-          "point_id" sorted_points |> Option.get) = Attribute.Int [|2;1;0;3|])
-    "selected point sort positions/topology/payload/domain exactness/unchanged input";
-  (match Ordering.sort ~owner:Ordering.Points
-      ~key:(Ordering.Attribute_component { name = "missing"; component = 0 })
-      sortable_points with
-   | Error error when Error.code error = "invalid_sort" -> ()
-   | _ -> fail "sort accepted a missing key attribute");
-  (match Ordering.sort ~selection:selected ~owner:Ordering.Primitives ~key:Ordering.X
-      triangle_geometry with
-   | Error error when Error.code error = "invalid_sort" -> ()
-   | _ -> fail "sort accepted a mismatched selection owner");
   let _vertex_ids = Attribute.create_owned ~name:"vertex_id"
       ~owner:Attribute.Vertex (Attribute.Int [|0; 1; 2; 3; 4; 5|]) |> get_ok
   and _primitive_ids = Attribute.create_owned ~name:"primitive_id"

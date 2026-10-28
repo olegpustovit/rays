@@ -1,14 +1,11 @@
 open Rdk
+open Rdk_test_support
 
 module Constraints = Rdk_boolean.Boolean_constraints
 module Coplanar = Rdk_boolean.Boolean_coplanar
 module Triangulation = Rdk_boolean.Boolean_face_cdt
 module Refinement = Rdk_boolean.Boolean_refinement
 
-let fail format = Printf.ksprintf failwith format
-let check condition message = if not condition then fail "%s" message
-let get = function Ok value -> value | Error error -> fail "%s" (Error.to_string error)
-let get_string = function Ok value -> value | Error message -> fail "%s" message
 
 let geometry pair_count ~right =
   let point_count = pair_count * 3 in
@@ -34,7 +31,7 @@ let geometry pair_count ~right =
 
 let constraints pair_count = Constraints.build ~grain:7
     ~left:(geometry pair_count ~right:false)
-    ~right:(geometry pair_count ~right:true) () |> get
+    ~right:(geometry pair_count ~right:true) () |> get_rdk
 
 let coplanar_geometry pair_count ~right =
   let point_count = pair_count * 3 in
@@ -61,8 +58,8 @@ let coplanar_geometry pair_count ~right =
 let coplanar_input pair_count =
   let constraints = Constraints.build ~grain:7
       ~left:(coplanar_geometry pair_count ~right:false)
-      ~right:(coplanar_geometry pair_count ~right:true) () |> get in
-  constraints, Coplanar.build ~grain:7 constraints |> get
+      ~right:(coplanar_geometry pair_count ~right:true) () |> get_rdk in
+  constraints, Coplanar.build ~grain:7 constraints |> get_rdk
 
 let face_signature = function
   | None -> [||]
@@ -75,13 +72,13 @@ let test_validation () =
   let input = constraints 1 in
   (match Refinement.build ~grain:0 input with
    | Error error when Error.code error = "invalid_parameter" -> ()
-   | Error error -> fail "unexpected grain error: %s" (Error.to_string error)
-   | Ok _ -> fail "zero refinement grain was accepted");
+   | Error error -> failf "unexpected grain error: %s" (Error.to_string error)
+   | Ok _ -> failf "zero refinement grain was accepted");
   let cancel = Cancel.create () in Cancel.cancel cancel;
   match Refinement.build ~cancel ~grain:1 input with
   | Error error when Error.code error = "cancelled" -> ()
-  | Error error -> fail "unexpected cancellation error: %s" (Error.to_string error)
-  | Ok _ -> fail "cancelled refinement completed"
+  | Error error -> failf "unexpected cancellation error: %s" (Error.to_string error)
+  | Ok _ -> failf "cancelled refinement completed"
 
 let run () =
   test_validation ()

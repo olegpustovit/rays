@@ -1,4 +1,5 @@
 open Rdk
+open Rdk_test_support
 
 module Constraints = Rdk_boolean.Boolean_constraints
 module Coplanar = Rdk_boolean.Boolean_coplanar
@@ -6,11 +7,7 @@ module Arrangement = Rdk_boolean.Boolean_face_arrangement
 let approximate_point value point =
   Rdk_exact.Implicit_point.approximate (Arrangement.View.point value point)
 
-let fail format = Printf.ksprintf failwith format
-let check condition message = if not condition then fail "%s" message
 let close left right = abs_float (left -. right) <= 1e-11
-let get = function Ok value -> value | Error error -> fail "%s" (Error.to_string error)
-let get_string = function Ok value -> value | Error message -> fail "%s" message
 
 let geometry points triangles =
   let count = Array.length points in
@@ -31,7 +28,7 @@ let crossing_plan () =
       [|0.,-2.,-1.; 0.,2.,-1.; 0.,0.,1.;
         -2.,0.,-1.; 2.,0.,-1.; 0.,0.,1.|]
       [|0;1;2; 3;4;5|] in
-  Constraints.build ~grain:1 ~left ~right () |> get
+  Constraints.build ~grain:1 ~left ~right () |> get_rdk
 
 let sorted_points arrangement =
   let points = Array.init (Arrangement.point_count arrangement)
@@ -41,7 +38,7 @@ let sorted_points arrangement =
 
 let test_proper_crossing () =
   let arrangement = Arrangement.build (crossing_plan ())
-      ~side:Arrangement.Left ~triangle:0 |> get in
+      ~side:Arrangement.Left ~triangle:0 |> get_rdk in
   check (Arrangement.point_count arrangement = 5)
     "proper crossing did not add one exact TPI";
   check (Arrangement.segment_count arrangement = 4)
@@ -66,16 +63,16 @@ let test_proper_crossing () =
   Array.iteri (fun index (x,y,z) ->
     let ex,ey,ez = expected.(index) in
     if not (close x ex && close y ey && close z ez) then
-      fail "arrangement point %d differs: %.17g %.17g %.17g" index x y z)
+      failf "arrangement point %d differs: %.17g %.17g %.17g" index x y z)
     points
 
 let test_single_segment () =
   let left = geometry [|0.,0.,0.; 2.,0.,0.; 0.,2.,0.|] [|0;1;2|]
   and right = geometry
       [|0.5,-0.5,-1.; 0.5,1.5,1.; 0.5,1.5,-1.|] [|0;1;2|] in
-  let plan = Constraints.build ~grain:1 ~left ~right () |> get in
+  let plan = Constraints.build ~grain:1 ~left ~right () |> get_rdk in
   let arrangement = Arrangement.build plan ~side:Arrangement.Left ~triangle:0
-      |> get in
+      |> get_rdk in
   check (Arrangement.point_count arrangement = 2
       && Arrangement.segment_count arrangement = 1)
     "single constraint changed during face arrangement"
@@ -88,9 +85,9 @@ let test_multiway_crossing () =
         -2.,0.,-1.; 2.,0.,-1.; 0.,0.,1.;
         -1.6,-1.6,-1.; 1.6,1.6,-1.; 0.,0.,1.|]
       [|0;1;2; 3;4;5; 6;7;8|] in
-  let plan = Constraints.build ~grain:1 ~left ~right () |> get in
+  let plan = Constraints.build ~grain:1 ~left ~right () |> get_rdk in
   let arrangement = Arrangement.build plan ~side:Arrangement.Left ~triangle:0
-      |> get in
+      |> get_rdk in
   check (Arrangement.point_count arrangement = 7)
     "three-way crossing did not deduplicate the shared TPI";
   check (Arrangement.segment_count arrangement = 6)
@@ -113,16 +110,16 @@ let test_coplanar_overlay () =
       [|0.,0.,0.; 4.,0.,0.; 2.,4.,0.|] [|0;1;2|]
   and right = geometry
       [|0.,3.,0.; 4.,3.,0.; 2.,-1.,0.|] [|0;1;2|] in
-  let constraints = Constraints.build ~grain:1 ~left ~right () |> get in
-  let coplanar = Coplanar.build ~grain:1 constraints |> get in
+  let constraints = Constraints.build ~grain:1 ~left ~right () |> get_rdk in
+  let coplanar = Coplanar.build ~grain:1 constraints |> get_rdk in
   let arrangement = Arrangement.build ~coplanar constraints
-      ~side:Arrangement.Left ~triangle:0 |> get in
+      ~side:Arrangement.Left ~triangle:0 |> get_rdk in
   check (Arrangement.point_count arrangement = 6)
     "coplanar polygon points did not enter the source-face arrangement";
   check (Arrangement.segment_count arrangement = 6)
     "coplanar polygon boundary did not enter the source-face arrangement";
   let right_arrangement = Arrangement.build ~coplanar constraints
-      ~side:Arrangement.Right ~triangle:0 |> get in
+      ~side:Arrangement.Right ~triangle:0 |> get_rdk in
   check (sorted_points arrangement = sorted_points right_arrangement)
     "two sides of a coplanar pair received different exact boundaries"
 
@@ -133,12 +130,12 @@ let test_mixed_coplanar_noncoplanar_crossing () =
       [|0.,3.,0.; 4.,3.,0.; 2.,-1.,0.;
         2.,-1.,-1.; 2.,5.,-1.; 2.,2.,1.|]
       [|0;1;2; 3;4;5|] in
-  let constraints = Constraints.build ~grain:1 ~left ~right () |> get in
+  let constraints = Constraints.build ~grain:1 ~left ~right () |> get_rdk in
   check (Constraints.coplanar_pair_count constraints = 1)
     "mixed fixture lost its coplanar pair";
-  let coplanar = Coplanar.build ~grain:1 constraints |> get in
+  let coplanar = Coplanar.build ~grain:1 constraints |> get_rdk in
   let arrangement = Arrangement.build ~coplanar constraints
-      ~side:Arrangement.Left ~triangle:0 |> get in
+      ~side:Arrangement.Left ~triangle:0 |> get_rdk in
   check (Arrangement.point_count arrangement = 9)
     "mixed overlap did not construct the exact edge/plane crossing";
   check (Arrangement.segment_count arrangement = 9)
@@ -190,9 +187,9 @@ let test_sparse_sweep_and_point_candidates () =
   let run domains point_contact =
     Parallel.run ~domains (fun () ->
       let left,right = many_parallel_plan ~count ~point_contact in
-      let constraints = Constraints.build ~grain:7 ~left ~right () |> get in
+      let constraints = Constraints.build ~grain:7 ~left ~right () |> get_rdk in
       Arrangement.build constraints
-        ~side:Arrangement.Left ~triangle:0 |> get) in
+        ~side:Arrangement.Left ~triangle:0 |> get_rdk) in
   let plain = run 1 false in
   check (Arrangement.point_count plain = count * 2
       && Arrangement.segment_count plain = count)
@@ -219,14 +216,14 @@ let multiway_plan count =
     points.(point + 1) <- dx,dy,-1.;
     points.(point + 2) <- 0.,0.,1.
   done;
-  Constraints.build ~grain:7 ~left ~right:(geometry points triangles) () |> get
+  Constraints.build ~grain:7 ~left ~right:(geometry points triangles) () |> get_rdk
 
 let test_dense_multiway_sweep () =
   let count = 96 in
   let run domains =
     Parallel.run ~domains (fun () ->
       Arrangement.build (multiway_plan count)
-        ~side:Arrangement.Left ~triangle:0 |> get) in
+        ~side:Arrangement.Left ~triangle:0 |> get_rdk) in
   let arrangement = run 1 in
   check (Arrangement.point_count arrangement = (count * 2) + 1
       && Arrangement.segment_count arrangement = count * 2)
@@ -240,8 +237,8 @@ let test_cancellation () =
   match Arrangement.build ~cancel (crossing_plan ())
       ~side:Arrangement.Left ~triangle:0 with
   | Error error when Error.code error = "cancelled" -> ()
-  | Error error -> fail "unexpected cancellation error: %s" (Error.to_string error)
-  | Ok _ -> fail "cancelled face arrangement completed"
+  | Error error -> failf "unexpected cancellation error: %s" (Error.to_string error)
+  | Ok _ -> failf "cancelled face arrangement completed"
 
 let run () =
   test_proper_crossing ();

@@ -1,9 +1,14 @@
-; trace_pixel of pathtrace.metal (P8.S3) for plain triangles, rect lights and the sky/ground environment or a
-; baked World (camera and lighting maps, CDF, sun, background): camera and lens, the sample loop, NEE with MIS
-; against BSDF sampling, GGX/diffuse BSDF sampling, Russian roulette and the firefly clamp, in the same PCG draw
-; order. Needs pathtrace_helpers.rays. `u` carries the frame uniforms, `lights` five vec3 rows per rect light
-; (corner, u edge, v edge, radiance, [one-sided area 0]), `mat` the one material, `wmap` the camera then the
-; lighting map (map-w x map-h texels each) and `cdf` the marginal (map-h + 1) then the conditional rows.
+; The path tracer's kernels (P8.S3): flat, instanced and scene triangles plus analytic spheres, rect lights and
+; the sky/ground environment or a baked World (camera and lighting maps, CDF, sun, background): camera and lens,
+; the sample loop, NEE with MIS against BSDF sampling, GGX/diffuse BSDF sampling, Russian roulette and the firefly
+; clamp, in pathtrace.metal's PCG draw order; then accumulation, the preview's reprojection and the resolves.
+; Needs pathtrace_helpers.rays and resolve_preview.rays. `u` carries the frame uniforms, `lights` four vec4 rows
+; per rect light (corner and one-sided flag, u edge, v edge, radiance and area), `pan` three vec4 rows per dome
+; panel, `mats` three vec4 rows per material (albedo and roughness, emission and metallic, round), `ids` a
+; material per triangle then per strand segment, `inst` inst-rows vec3 rows per instance ([first triangle,
+; material or -1, 0] and the three normal-matrix columns, then the shutter end's for a moving one), `nrm` three vertex normals per triangle, `wmap` the camera then the lighting map
+; (map-w x map-h texels each) and `cdf` the marginal (map-h + 1) then the conditional rows.
+(defn xyz :context value [(r : vec4)] [r.x r.y r.z])
 (defn draw :context value [(s : int)]
   (let* [a (pcg-next s)] {:v (unit-float a.value) :next a.next}))
 (defn smooth-unit :context value [(e0 : float) (e1 : float) (x : float)]
@@ -11,9 +16,10 @@
 (defn sky-ground :context value [(sky : vec3) (ground : vec3) (d : vec3)]
   (+ ground (* (- sky ground) (smooth-unit -0.25 0.6 d.y))))
 ; Dome panels: each is three vec3s (direction, colour * intensity, angular half-extents x y and softness z).
-(defn environment :context value [(sky : vec3) (ground : vec3) (pan : (array vec3)) (count : int) (d : vec3)]
+(defn environment :context value [(sky : vec3) (ground : vec3) (pan : (array vec4)) (count : int) (d : vec3)]
   (fold [c (sky-ground sky ground d)] [i (range count)]
-    (let* [n (array/nth pan (int/mul i 3)) col (array/nth pan (int/add (int/mul i 3) 1)) e (array/nth pan (int/add (int/mul i 3) 2))
+    (let* [n (xyz (array/nth pan (int/mul i 3))) col (xyz (array/nth pan (int/add (int/mul i 3) 1)))
+           e (array/nth pan (int/add (int/mul i 3) 2))
            z (dot d n)]
       (if (<= z 0.)
         c
@@ -21,27 +27,30 @@
                wx (- 1. (smooth-unit (- e.x e.z) (+ e.x e.z) (abs ax)))
                wy (- 1. (smooth-unit (- e.y e.z) (+ e.y e.z) (abs ay)))]
           (+ c (* col (* wx wy))))))))
-(defn panel-pdf :context value [(pan : (array vec3)) (count : int) (d : vec3)]
+(defn panel-pdf :context value [(pan : (array vec4)) (count : int) (d : vec3)]
   (if (<= count 0)
     0.
     (/ (fold [total 0.] [i (range count)]
-         (let* [n (array/nth pan (int/mul i 3)) e (array/nth pan (int/add (int/mul i 3) 2))
+         (let* [n (xyz (array/nth pan (int/mul i 3))) e (array/nth pan (int/add (int/mul i 3) 2))
                 z (dot d n) bs (basis n) x (dot d bs.tan) y (dot d bs.b)
                 wx (+ e.x e.z) wy (+ e.y e.z)]
            (if (or (<= z 0.) (or (>= (abs (atan2 x z)) wx) (>= (abs (atan2 y z)) wy)))
              total
              (+ total (/ z (* (* (* (+ (* x x) (* z z)) (+ (* y y) (* z z))) 4.) (* wx wy)))))))
        (float count))))
-(defn sample-panel :context value [(pan : (array vec3)) (count : int) (r0 : float) (r1 : float) (r2 : float)]
+(defn sample-panel :context value [(pan : (array vec4)) (count : int) (r0 : float) (r1 : float) (r2 : float)]
   (let* [i (min (int (* r0 (float count))) (int/sub count 1))
-         n (array/nth pan (int/mul i 3)) e (array/nth pan (int/add (int/mul i 3) 2))
+         n (xyz (array/nth pan (int/mul i 3))) e (array/nth pan (int/add (int/mul i 3) 2))
          bs (basis n)
          ax (* (- (* 2. r1) 1.) (+ e.x e.z)) ay (* (- (* 2. r2) 1.) (+ e.y e.z))]
     (normalize (+ (* bs.tan (tan ax)) (+ (* bs.b (tan ay)) n)))))
-(defn light-at :context value [(lights : (array vec3)) (k : int)]
-  (let* [base (int/mul k 5) e (array/nth lights (int/add base 4))]
-    {:lo (array/nth lights base) :lu (array/nth lights (int/add base 1)) :lv (array/nth lights (int/add base 2))
-     :rad (array/nth lights (int/add base 3)) :one-sided e.x :area e.y}))
+(defn light-at :context value [(lights : (array vec4)) (k : int)]
+  (let* [base (int/mul k 4) o (array/nth lights base) r (array/nth lights (int/add base 3))]
+    {:lo (xyz o) :lu (xyz (array/nth lights (int/add base 1))) :lv (xyz (array/nth lights (int/add base 2)))
+     :rad (xyz r) :one-sided o.w :area r.w}))
+(defn material-at :context value [(mats : (array vec4)) (k : int)]
+  (let* [a (array/nth mats (int/mul k 3)) e (array/nth mats (int/add (int/mul k 3) 1)) r (array/nth mats (int/add (int/mul k 3) 2))]
+    {:albedo (xyz a) :rough a.w :emit (xyz e) :metal e.w :round r.x}))
 ; World maps: bilinear lookup (u wraps, v clamps), the CDF search and the texel solid-angle pdf of pathtrace.metal.
 (defn world-lookup :context value [(wmap : (array vec3)) (base : int) (w : int) (h : int) (d : vec3)]
   ; u in [0, 1) and v in [0, 1] put the texel corners in [-1, w - 1] x [-1, h - 1]: pathtrace.metal's wrap and
@@ -86,14 +95,13 @@
     {:d d :pdf (texel-pdf cdf w h i j (sqrt (max 0. (- 1. (* d.y d.y)))))}))
 ; Round corners (pathtrace.metal's bevel): probe rays through a disk of [radius] along N (half the samples) or a
 ; tangent, every surface met within the sphere weighted by the inverse projection pdf; the normalized sum is the
-; area-weighted mean normal there. One probe walks through at most four surfaces.
-(defn probe-step :context value [(w : {:o vec3 :tmax float :sum vec3 :go bool}) (pos : (array vec3)) (axis : vec3) (p : vec3) (n : vec3) (bt : vec3) (bb : vec3) (radius : float)]
-  (let* [hit (scene/trace 1 w.o axis 0. w.tmax 0.)]
+; area-weighted mean normal there. One probe walks through at most four surfaces. ponytail: probes also meet
+; analytic spheres, which pathtrace.metal's triangle-only probes pass through.
+(defn probe-step :context value [(w : {:o vec3 :tmax float :sum vec3 :go bool}) (axis : vec3) (p : vec3) (n : vec3) (bt : vec3) (bb : vec3) (radius : float) (time : float)]
+  (let* [hit (scene/trace 1 w.o axis 0. w.tmax time)]
     (if (not hit.hit)
       {:o w.o :tmax w.tmax :sum w.sum :go false}
-      (let* [base (int/mul hit.prim 3)
-             p0 (array/nth pos base) p1 (array/nth pos (int/add base 1)) p2 (array/nth pos (int/add base 2))
-             hn0 (normalize (cross (- p1 p0) (- p2 p0)))
+      (let* [hn0 hit.normal
              hn (if (< (dot hn0 n) 0.) (- [0. 0. 0.] hn0) hn0)
              hp (+ w.o (* axis hit.t)) off (- hp p)
              pdf (+ (+ (* 0.5 (abs (dot hn n))) (* 0.25 (abs (dot hn bt)))) (* 0.25 (abs (dot hn bb))))
@@ -101,7 +109,7 @@
              advance (+ hit.t (* radius 0.001))
              tmax (- w.tmax advance)]
         {:o (+ w.o (* axis advance)) :tmax tmax :sum total :go (> tmax 0.)}))))
-(defn round-corners :context value [(pos : (array vec3)) (rng : int) (p : vec3) (n : vec3) (radius : float) (samples : int)]
+(defn round-corners :context value [(rng : int) (p : vec3) (n : vec3) (radius : float) (samples : int) (time : float)]
   (let* [bs (basis n)
          acc (fold [a {:rng rng :sum [0. 0. 0.]}] [i (range samples)]
                (let* [d1 (draw a.rng) d2 (draw d1.next) d3 (draw d2.next)
@@ -112,16 +120,20 @@
                       rd (* radius (sqrt d2.v)) phi (* 6.28318530717959 d3.v)
                       o (- (+ (+ p (* eu (* rd (cos phi)))) (* ev (* rd (sin phi)))) (* axis radius))
                       walk (iterate 4 {:o o :tmax (* 2. radius) :sum a.sum :go true}
-                             (fn [w] (if w.go (probe-step w pos axis p n bs.tan bs.b radius) w))
+                             (fn [w] (if w.go (probe-step w axis p n bs.tan bs.b radius time) w))
                              :until (fn [prev next] (not next.go)))]
                  {:rng d3.next :sum walk.sum}))]
     {:rng acc.rng :n (if (< (dot acc.sum acc.sum) 0.000000000001) n (normalize acc.sum))}))
+; column k of an instance's normal matrix, between the shutter's keyframes for a moving instance
+(defn normal-column :context value [(inst : (array vec3)) (row : int) (k : int) (motion : bool) (time : float)]
+  (let* [a (array/nth inst (int/add row k))]
+    (if motion (+ a (* (- (array/nth inst (int/add row (int/add k 3))) a) time)) a)))
 (defn no-hit :context value [] {:t 0. :prim -1 :u 0. :v 0. :normal [0. 0. 0.] :hit false :instance -1})
 ; One bounce. With a World the estimate splits like pathtrace.metal's: [rad] takes camera-visible emitters and the
 ; light reaching the first hit, [ind] the rest, which alone is firefly-clamped.
-(defn bounce-step :context value [(st : {:rng int :o vec3 :d vec3 :thr vec3 :rad vec3 :ind vec3 :cov float :last-pdf float :b int :alive bool}) (u : {:eye vec3 :lens float :fwd vec3 :rgt vec3 :up vec3 :tan-half float :aspect float :focus float :width int :height int :spp int :bounces int :frame int :sky vec3 :ground vec3 :panels int :lights int :world int :background int :map-w int :map-h int :bg vec3 :sun-dir vec3 :sun-cos float :sun-rad vec3 :sun-pdf float :round-samples int}) (lights : (array vec3)) (mat : {:albedo vec3 :rough float :emit vec3 :metal float :round float}) (pos : (array vec3)) (nrm : (array vec3)) (pan : (array vec3)) (wmap : (array vec3)) (cdf : (array float))]
+(defn bounce-step :context value [(st : {:rng int :o vec3 :d vec3 :thr vec3 :rad vec3 :ind vec3 :cov float :last-pdf float :b int :alive bool}) (time : float) (u : {:eye vec3 :lens float :fwd vec3 :rgt vec3 :up vec3 :tan-half float :aspect float :focus float :width int :height int :spp int :bounces int :frame int :sky vec3 :ground vec3 :panels int :lights int :world int :background int :map-w int :map-h int :bg vec3 :sun-dir vec3 :sun-cos float :sun-rad vec3 :sun-pdf float :round-samples int :preview bool :bsdf-only bool :instanced bool :sphere-base int :metallic bool :emissive bool :round bool :motion bool :inst-rows int :strand-base int}) (lights : (array vec4)) (mats : (array vec4)) (ids : (array int)) (inst : (array vec3)) (nrm : (array vec3)) (pan : (array vec4)) (wmap : (array vec3)) (cdf : (array float))]
   (let* [o st.o d st.d use-map (> u.world 0) at-eye (int/eq st.b 0) zero [0. 0. 0.]
-         hit (scene/trace 1 o d 0.0001 1000000000000. 0.)
+         hit (scene/trace 1 o d 0.0001 1000000000000. time)
          tmax (if hit.hit hit.t 1000000000000.)
          ; every rect a ray crosses: the camera ray (World) stops at the nearest, later rays add it MIS-weighted
          crossed (fold [acc {:near tmax :seen zero :e zero}] [k (range u.lights)]
@@ -132,7 +144,7 @@
                          (if (and use-map (< rh.t acc.near)) {:near rh.t :seen l.rad :e acc.e} acc)
                          {:near acc.near :seen acc.seen
                           :e (+ acc.e (* (* st.thr l.rad)
-                                         (power-weight st.last-pdf (/ (* rh.t rh.t) (* (* rh.cos l.area) (float u.lights))))))}))))
+                                         (if u.bsdf-only 1. (power-weight st.last-pdf (/ (* rh.t rh.t) (* (* rh.cos l.area) (float u.lights)))))))}))))
          direct (or (not use-map) (int/eq st.b 1))
          rad0 (if direct (+ st.rad crossed.e) st.rad) ind0 (if direct st.ind (+ st.ind crossed.e))
          next-b (int/add st.b 1)]
@@ -145,34 +157,49 @@
            :rad (if (int/eq u.background 0) (+ rad0 (world-lookup wmap 0 u.map-w u.map-h d))
                   (if (int/eq u.background 1) (+ rad0 u.bg) rad0))}
           (let* [e0 (* (world-lookup wmap (int/mul u.map-w u.map-h) u.map-w u.map-h d)
-                       (power-weight st.last-pdf (world-pdf cdf u.map-w u.map-h d)))
+                       (if u.bsdf-only 1. (power-weight st.last-pdf (world-pdf cdf u.map-w u.map-h d))))
                  sd (- u.sun-dir d)
                  e (if (and (> u.sun-pdf 0.) (<= (dot sd sd) (* 2. u.sun-cos)))
-                     (+ e0 (* u.sun-rad (power-weight st.last-pdf u.sun-pdf))) e0)]
+                     (+ e0 (* u.sun-rad (if u.bsdf-only 1. (power-weight st.last-pdf u.sun-pdf)))) e0)]
             {:rng st.rng :o o :d d :thr st.thr :cov st.cov :last-pdf st.last-pdf :b next-b :alive false
              :rad (if (int/eq st.b 1) (+ rad0 (* st.thr e)) rad0) :ind (if (int/eq st.b 1) ind0 (+ ind0 (* st.thr e)))}))
         {:rng st.rng :o o :d d :thr st.thr :ind ind0 :cov st.cov :last-pdf st.last-pdf :b next-b :alive false
          :rad (+ rad0 (* (* st.thr (environment u.sky u.ground pan u.panels d)) (if (> st.b 0) (/ st.last-pdf (+ st.last-pdf (panel-pdf pan u.panels d))) 1.)))})
       (let* [hitp (+ o (* d hit.t)) v (- zero d)
-             base (int/mul hit.prim 3)
-             p0 (array/nth pos base) p1 (array/nth pos (int/add base 1)) p2 (array/nth pos (int/add base 2))
-             ng0 (normalize (cross (- p1 p0) (- p2 p0)))
+             ; a sphere hit's prim is -2 - k, a strand's instance -2 (its prim the segment, whose material follows
+             ; the triangles' ids); an instance's triangles start at its table row's first triangle
+             sphere (int/lt hit.prim 0) strand (int/eq hit.instance -2) analytic (or sphere strand)
+             row (int/mul (max hit.instance 0) u.inst-rows) ib (array/nth inst row)
+             tri (max (if u.instanced (int/add hit.prim (int ib.x)) hit.prim) 0)
+             mid (if sphere (int/sub (int/sub u.sphere-base 2) hit.prim)
+                   (if strand (array/nth ids (int/add u.strand-base hit.prim))
+                     (if (and u.instanced (>= ib.y 0.)) (int ib.y) (array/nth ids tri))))
+             ; the material loads after the bevel probes, whose loop then keeps fewer values live
+             corner (array/nth mats (int/add (int/mul mid 3) 2))
+             ng0 hit.normal base (int/mul tri 3)
              n0 (array/nth nrm base) n1 (array/nth nrm (int/add base 1)) n2 (array/nth nrm (int/add base 2))
-             ns0 (normalize (+ (* n0 (- (- 1. hit.u) hit.v)) (+ (* n1 hit.u) (* n2 hit.v))))
+             nso (normalize (+ (* n0 (- (- 1. hit.u) hit.v)) (+ (* n1 hit.u) (* n2 hit.v))))
+             ; the normal matrix's columns, between the shutter's keyframes for a moving instance
+             nsw (if u.instanced
+                   (normalize (+ (+ (* (normal-column inst row 1 u.motion time) nso.x) (* (normal-column inst row 2 u.motion time) nso.y))
+                                 (* (normal-column inst row 3 u.motion time) nso.z)))
+                   nso)
+             ns0 (if analytic ng0 nsw)
              flip (< (dot ng0 v) 0.)
              ng (if flip (- zero ng0) ng0)
              ns1 (if flip (- zero ns0) ns0)
-             bevel (if (and (> mat.round 0.) (int/lt st.b 2))
-                     (round-corners pos st.rng hitp ns1 mat.round
-                       (if at-eye u.round-samples (max (int/div u.round-samples 4) 1)))
+             bevel (if (and (and (and u.round (not analytic)) (> corner.x 0.)) (int/lt st.b 2))
+                     (round-corners st.rng hitp ns1 corner.x
+                       (if at-eye u.round-samples (max (int/div u.round-samples 4) 1)) time)
                      {:rng st.rng :n ns1})
              ns (if (<= (dot bevel.n v) 0.) ng bevel.n)
+             mat (material-at mats mid)
              cov (if (and use-map at-eye) (+ st.cov 1.) st.cov)
-             emitted (* st.thr mat.emit)
+             emitted (if u.emissive (* st.thr mat.emit) zero)
              early (or (not use-map) (int/le st.b 1))
              rad1 (if early (+ rad0 emitted) rad0) ind1 (if early ind0 (+ ind0 emitted))
              to-rad (or (not use-map) at-eye)
-             rough (max mat.rough 0.03) metal mat.metal
+             rough (max mat.rough 0.03) metal (if u.metallic mat.metal 0.)
              f0 (+ [0.04 0.04 0.04] (* (- mat.albedo [0.04 0.04 0.04]) metal))
              diffuse (* mat.albedo (- 1. metal))
              nov (max (dot ns v) 0.0001)
@@ -180,13 +207,13 @@
              ps (min 0.95 (max 0.05 (+ metal (* (- 1. metal) (+ 0.04 (* 0.96 (pow (- 1. nov) 5.)))))))
              lift (+ hitp (* ng 0.001))
              ; next-event estimation on one rect light picked uniformly: three draws when there are lights
-             nee (if (> u.lights 0)
+             nee (if (and (> u.lights 0) (not u.bsdf-only))
                    (let* [n1d (draw bevel.rng) n2d (draw n1d.next) n3d (draw n2d.next)
                           l (light-at lights (min (int (* n1d.v (float u.lights))) (int/sub u.lights 1)))
                           ls (light-sample l.lo l.lu l.lv l.one-sided hitp n2d.v n3d.v)
                           cos-s (dot ns ls.wi)
                           ready (and (and (> cos-s 0.) (> (dot ng ls.wi) 0.)) (> ls.cosl 0.0001))
-                          sr (if ready (scene/trace 1 lift ls.wi 0. (- ls.dist 0.002) 0.) (no-hit))
+                          sr (if ready (scene/trace 1 lift ls.wi 0. (- ls.dist 0.002) time) (no-hit))
                           pdf-l (/ ls.dist2 (* (* ls.cosl l.area) (float u.lights)))]
                      {:rng n3d.next
                       :e (if (and ready (not sr.hit))
@@ -195,12 +222,12 @@
                            zero)})
                    {:rng bevel.rng :e zero})
              ; World: the lighting map through its CDF (two draws), then the sun cone (two draws when it shines)
-             wnee (if use-map
+             wnee (if (and use-map (not u.bsdf-only))
                     (let* [x1 (draw nee.rng) x2 (draw x1.next)
                            sw (sample-world cdf u.map-w u.map-h x1.v x2.v)
                            cos-w (dot ns sw.d)
                            ready (and (and (> sw.pdf 0.) (> cos-w 0.)) (> (dot ng sw.d) 0.))
-                           sr (if ready (scene/trace 1 lift sw.d 0. 1000000000000. 0.) (no-hit))]
+                           sr (if ready (scene/trace 1 lift sw.d 0. 1000000000000. time) (no-hit))]
                       {:rng x2.next
                        :e (if (and ready (not sr.hit))
                             (* (* (* (* st.thr (world-lookup wmap (int/mul u.map-w u.map-h) u.map-w u.map-h sw.d))
@@ -208,14 +235,14 @@
                                (/ (power-weight sw.pdf (bsdf-pdf ns v sw.d a2 ps)) sw.pdf))
                             zero)})
                     {:rng nee.rng :e zero})
-             snee (if (and use-map (> u.sun-pdf 0.))
+             snee (if (and (and use-map (not u.bsdf-only)) (> u.sun-pdf 0.))
                     (let* [k1 (draw wnee.rng) k2 (draw k1.next)
                            bs (basis u.sun-dir) k (* k1.v u.sun-cos) sphi (* 6.28318530717959 k2.v)
                            sin-t (sqrt (max 0. (* k (- 2. k))))
                            swi (normalize (+ (+ (* bs.tan (* sin-t (cos sphi))) (* bs.b (* sin-t (sin sphi)))) (* u.sun-dir (- 1. k))))
                            scos (dot ns swi)
                            ready (and (> scos 0.) (> (dot ng swi) 0.))
-                           sr (if ready (scene/trace 1 lift swi 0. 1000000000000. 0.) (no-hit))]
+                           sr (if ready (scene/trace 1 lift swi 0. 1000000000000. time) (no-hit))]
                       {:rng k2.next
                        :e (if (and ready (not sr.hit))
                             (* (* (* (* st.thr u.sun-rad) (eval-brdf ns v swi diffuse f0 a2)) scos)
@@ -230,7 +257,7 @@
                            wp (sample-panel pan u.panels q0.v q1.v q2.v)
                            pl (panel-pdf pan u.panels wp) cos-p (dot ns wp)
                            ready (and (and (> pl 0.) (> cos-p 0.)) (> (dot ng wp) 0.))
-                           sp (if ready (scene/trace 1 lift wp 0. 1000000000000. 0.) (no-hit))]
+                           sp (if ready (scene/trace 1 lift wp 0. 1000000000000. time) (no-hit))]
                       {:rng q2.next
                        :e (if (and ready (not sp.hit))
                             (* (* (* (* st.thr (environment u.sky u.ground pan u.panels wp)) (eval-brdf ns v wp diffuse f0 a2)) cos-p)
@@ -259,23 +286,78 @@
          :b next-b :alive (and ok survive) :rad rad3 :ind ind2 :cov cov})))))
 (defn firefly :context value [(c : vec3)]
   (let* [lum (dot c [0.2126 0.7152 0.0722])] (if (> lum 8.) (* c (/ 8. lum)) c)))
-(defn sample-step :context value [(acc : {:rng int :sum vec3 :cov float}) (u : {:eye vec3 :lens float :fwd vec3 :rgt vec3 :up vec3 :tan-half float :aspect float :focus float :width int :height int :spp int :bounces int :frame int :sky vec3 :ground vec3 :panels int :lights int :world int :background int :map-w int :map-h int :bg vec3 :sun-dir vec3 :sun-cos float :sun-rad vec3 :sun-pdf float :round-samples int}) (lights : (array vec3)) (mat : {:albedo vec3 :rough float :emit vec3 :metal float :round float}) (pos : (array vec3)) (nrm : (array vec3)) (pan : (array vec3)) (wmap : (array vec3)) (cdf : (array float)) (gx : int) (gy : int)]
-  (let* [jx (draw acc.rng) jy (draw jx.next)
+; The camera ray of one sample: jittered in its pixel (a preview aims through the centre), from the lens disk.
+(defn sample-ray :context value [(u : {:eye vec3 :lens float :fwd vec3 :rgt vec3 :up vec3 :tan-half float :aspect float :focus float :width int :height int :spp int :bounces int :frame int :sky vec3 :ground vec3 :panels int :lights int :world int :background int :map-w int :map-h int :bg vec3 :sun-dir vec3 :sun-cos float :sun-rad vec3 :sun-pdf float :round-samples int :preview bool :bsdf-only bool :instanced bool :sphere-base int :metallic bool :emissive bool :round bool :motion bool :inst-rows int :strand-base int}) (rng : int) (gx : int) (gy : int)]
+  (let* [jx (if u.preview {:v 0.5 :next rng} (draw rng)) jy (if u.preview {:v 0.5 :next jx.next} (draw jx.next))
          px (- (* (/ (+ (float gx) jx.v) (float u.width)) 2.) 1.)
          py (- 1. (* (/ (+ (float gy) jy.v) (float u.height)) 2.))
-         lensed (> u.lens 0.)
-         l1 (draw jy.next) l2 (draw l1.next)
-         cam (camera-ray u.eye u.lens u.fwd u.rgt u.up u.tan-half u.aspect u.focus px py l1.v l2.v)
+         ; a moving scene's shutter time, after the jitter (a preview's is the midpoint)
+         tm (if (and u.motion (not u.preview)) (draw jy.next) {:v (if u.motion 0.5 0.) :next jy.next})
+         l1 (draw tm.next) l2 (draw l1.next)
+         cam (camera-ray u.eye u.lens u.fwd u.rgt u.up u.tan-half u.aspect u.focus px py l1.v l2.v)]
+    {:o cam.o :d cam.d :rng (if (> u.lens 0.) l2.next tm.next) :time tm.v}))
+(defn sample-step :context value [(acc : {:rng int :sum vec3 :cov float}) (u : {:eye vec3 :lens float :fwd vec3 :rgt vec3 :up vec3 :tan-half float :aspect float :focus float :width int :height int :spp int :bounces int :frame int :sky vec3 :ground vec3 :panels int :lights int :world int :background int :map-w int :map-h int :bg vec3 :sun-dir vec3 :sun-cos float :sun-rad vec3 :sun-pdf float :round-samples int :preview bool :bsdf-only bool :instanced bool :sphere-base int :metallic bool :emissive bool :round bool :motion bool :inst-rows int :strand-base int}) (lights : (array vec4)) (mats : (array vec4)) (ids : (array int)) (inst : (array vec3)) (nrm : (array vec3)) (pan : (array vec4)) (wmap : (array vec3)) (cdf : (array float)) (gx : int) (gy : int)]
+  (let* [cam (sample-ray u acc.rng gx gy)
          start (iterate u.bounces
-                 {:rng (if lensed l2.next jy.next) :o cam.o :d cam.d :thr [1. 1. 1.] :rad [0. 0. 0.] :ind [0. 0. 0.]
+                 {:rng cam.rng :o cam.o :d cam.d :thr [1. 1. 1.] :rad [0. 0. 0.] :ind [0. 0. 0.]
                   :cov 0. :last-pdf 0. :b 0 :alive true}
-                 (fn [st] (if st.alive (bounce-step st u lights mat pos nrm pan wmap cdf) st))
+                 (fn [st] (if st.alive (bounce-step st cam.time u lights mats ids inst nrm pan wmap cdf) st))
                  :until (fn [prev next] (not next.alive)))
          sample (if (> u.world 0) (+ start.rad (firefly start.ind)) (firefly start.rad))]
     {:rng start.rng :sum (+ acc.sum sample) :cov (+ acc.cov start.cov)}))
 ; The film sample of one pixel for one frame: the sum of spp radiance samples (the caller adds the accumulated
 ; frames and divides by the sample count) and, for a transparent World background, the covered samples.
-(defn trace-pixel :context value [(u : {:eye vec3 :lens float :fwd vec3 :rgt vec3 :up vec3 :tan-half float :aspect float :focus float :width int :height int :spp int :bounces int :frame int :sky vec3 :ground vec3 :panels int :lights int :world int :background int :map-w int :map-h int :bg vec3 :sun-dir vec3 :sun-cos float :sun-rad vec3 :sun-pdf float :round-samples int}) (lights : (array vec3)) (mat : {:albedo vec3 :rough float :emit vec3 :metal float :round float}) (pos : (array vec3)) (nrm : (array vec3)) (pan : (array vec3)) (wmap : (array vec3)) (cdf : (array float)) (pixel : int)]
+(defn trace-pixel :context value [(u : {:eye vec3 :lens float :fwd vec3 :rgt vec3 :up vec3 :tan-half float :aspect float :focus float :width int :height int :spp int :bounces int :frame int :sky vec3 :ground vec3 :panels int :lights int :world int :background int :map-w int :map-h int :bg vec3 :sun-dir vec3 :sun-cos float :sun-rad vec3 :sun-pdf float :round-samples int :preview bool :bsdf-only bool :instanced bool :sphere-base int :metallic bool :emissive bool :round bool :motion bool :inst-rows int :strand-base int}) (lights : (array vec4)) (mats : (array vec4)) (ids : (array int)) (inst : (array vec3)) (nrm : (array vec3)) (pan : (array vec4)) (wmap : (array vec3)) (cdf : (array float)) (pixel : int)]
   (let* [gx (int/mod pixel u.width) gy (int/div pixel u.width)]
     (fold [acc {:rng (pixel-seed pixel u.frame) :sum [0. 0. 0.] :cov 0.}] [s (range u.spp)]
-      (sample-step acc u lights mat pos nrm pan wmap cdf gx gy))))
+      (sample-step acc u lights mats ids inst nrm pan wmap cdf gx gy))))
+; The first sample's camera hit: its geometric normal facing the ray and its distance (zero for a miss), the
+; history the preview reprojects onto and resolves across.
+(defn primary-geo :context value [(u : {:eye vec3 :lens float :fwd vec3 :rgt vec3 :up vec3 :tan-half float :aspect float :focus float :width int :height int :spp int :bounces int :frame int :sky vec3 :ground vec3 :panels int :lights int :world int :background int :map-w int :map-h int :bg vec3 :sun-dir vec3 :sun-cos float :sun-rad vec3 :sun-pdf float :round-samples int :preview bool :bsdf-only bool :instanced bool :sphere-base int :metallic bool :emissive bool :round bool :motion bool :inst-rows int :strand-base int}) (pixel : int)]
+  (let* [r (sample-ray u (pixel-seed pixel u.frame) (int/mod pixel u.width) (int/div pixel u.width))
+         hit (scene/trace 1 r.o r.d 0.0001 1000000000000. r.time)
+         zero [0. 0. 0.]
+         n (if (< (dot hit.normal (- zero r.d)) 0.) (- zero hit.normal) hit.normal)]
+    (if hit.hit [n.x n.y n.z hit.t] [0. 0. 0. 0.])))
+; The films hold pixel p at [order[p]]: a kernel's threads run over the pixels in 16 x 16 tiles, for coherent rays.
+; One accumulation frame of a band of pixels [lo, hi): this frame's samples (w: their count, or the covered ones
+; for a transparent background) plus the film so far, at its [slot]; frame zero starts the film. Other pixels
+; keep theirs.
+(defn accumulate-pixel :context value [(u : {:eye vec3 :lens float :fwd vec3 :rgt vec3 :up vec3 :tan-half float :aspect float :focus float :width int :height int :spp int :bounces int :frame int :sky vec3 :ground vec3 :panels int :lights int :world int :background int :map-w int :map-h int :bg vec3 :sun-dir vec3 :sun-cos float :sun-rad vec3 :sun-pdf float :round-samples int :preview bool :bsdf-only bool :instanced bool :sphere-base int :metallic bool :emissive bool :round bool :motion bool :inst-rows int :strand-base int}) (lo : int) (hi : int) (transparent : bool) (lights : (array vec4)) (mats : (array vec4)) (ids : (array int)) (inst : (array vec3)) (nrm : (array vec3)) (pan : (array vec4)) (wmap : (array vec3)) (cdf : (array float)) (accum : (array vec4)) (slot : int) (pixel : int)]
+  (let* [a (array/nth accum slot)]
+    (if (and (int/ge pixel lo) (int/lt pixel hi))
+      (let* [s (trace-pixel u lights mats ids inst nrm pan wmap cdf pixel)
+             fresh [s.sum.x s.sum.y s.sum.z (if transparent s.cov (float u.spp))]]
+        (if (int/eq u.frame 0) fresh (+ fresh a)))
+      a)))
+; The film's RGBA: the mean sample tone-mapped, alpha the covered fraction of [count] samples when transparent.
+(defn resolve-accum :context value [(p : vec4) (exposure : float) (transparent : bool) (count : float)]
+  (let* [w (max p.w 1.)]
+    [(aces-gamma (* (/ p.x w) exposure)) (aces-gamma (* (/ p.y w) exposure)) (aces-gamma (* (/ p.z w) exposure))
+     (if transparent (min 1. (max 0. (/ p.w count))) 1.)]))
+; A preview frame: one centre sample of direct light, blended with the last frame where this pixel's hit lands
+; on the previous camera's film at a matching depth and normal; w is the history length, capped at twelve.
+; [geo] is this frame's primary-geo, [pgeo] and [pcol] the previous frame's, or the accumulation film (its
+; sum and count) when [pc.from-accum] is 1.
+(defn preview-pixel :context value [(u : {:eye vec3 :lens float :fwd vec3 :rgt vec3 :up vec3 :tan-half float :aspect float :focus float :width int :height int :spp int :bounces int :frame int :sky vec3 :ground vec3 :panels int :lights int :world int :background int :map-w int :map-h int :bg vec3 :sun-dir vec3 :sun-cos float :sun-rad vec3 :sun-pdf float :round-samples int :preview bool :bsdf-only bool :instanced bool :sphere-base int :metallic bool :emissive bool :round bool :motion bool :inst-rows int :strand-base int}) (pc : {:eye vec3 :fwd vec3 :rgt vec3 :up vec3 :tan-half float :aspect float :valid int :from-accum int}) (transparent : bool) (lights : (array vec4)) (mats : (array vec4)) (ids : (array int)) (inst : (array vec3)) (nrm : (array vec3)) (pan : (array vec4)) (wmap : (array vec3)) (cdf : (array float)) (geo : (array vec4)) (pgeo : (array vec4)) (pcol : (array vec4)) (order : (array int)) (pixel : int)]
+  (let* [s (trace-pixel u lights mats ids inst nrm pan wmap cdf pixel)
+         lin (/ s.sum (max (if transparent s.cov 1.) 1.))
+         g (array/nth geo (array/nth order pixel))
+         r (sample-ray u 0 (int/mod pixel u.width) (int/div pixel u.width))
+         seen (- (+ r.o (* r.d g.w)) pc.eye)
+         z (dot seen pc.fwd)
+         px (min 2. (max -2. (/ (dot seen pc.rgt) (* z (* pc.tan-half pc.aspect)))))
+         py (min 2. (max -2. (/ (dot seen pc.up) (* z pc.tan-half))))
+         x (round (- (* (* (+ px 1.) 0.5) (float u.width)) 0.5))
+         y (round (- (* (* (- 1. py) 0.5) (float u.height)) 0.5))
+         inside (and (and (int/ge x 0) (int/ge y 0)) (and (int/lt x u.width) (int/lt y u.height)))
+         q (array/nth order (if inside (int/add (int/mul y u.width) x) 0))
+         h (array/nth pgeo q) c (array/nth pcol q)
+         expected (length seen)
+         count (if (int/eq pc.from-accum 1) 12. c.w)
+         old (if (int/eq pc.from-accum 1) (/ (xyz c) (max c.w 1.)) (xyz c))
+         ok (and (and (and (int/eq pc.valid 1) (> g.w 0.)) (and (> z 0.0001) inside))
+                 (and (and (> h.w 0.) (< (abs (- h.w expected)) (max 0.03 (* expected 0.01))))
+                      (> (dot (xyz h) (xyz g)) 0.95)))
+         out (if ok (+ lin (* (- old lin) (min (/ count (+ count 1.)) 0.92))) lin)]
+    [out.x out.y out.z (if ok (min (+ count 1.) 12.) 1.)]))

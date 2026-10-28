@@ -63,20 +63,6 @@ let equal_attribute left right =
       left.offsets = right.offsets && left.values = right.values
   | _ -> false
 
-let equal_geometry left right =
-  let left_positions = positions left and right_positions = positions right
-  and left_topology = Topology.View.view (Geometry.topology left)
-  and right_topology = Topology.View.view (Geometry.topology right) in
-  left_positions.x = right_positions.x
-  && left_positions.y = right_positions.y
-  && left_positions.z = right_positions.z
-  && left_topology.vertex_points = right_topology.vertex_points
-  && left_topology.primitive_offsets = right_topology.primitive_offsets
-  && Bytes.equal left_topology.primitive_kinds right_topology.primitive_kinds
-  && List.equal equal_attribute (Geometry.attributes left)
-       (Geometry.attributes right)
-  && List.equal equal_group (Geometry.groups left) (Geometry.groups right)
-
 let run () =
   let curves = two_curves () in
   let heat = Attribute.create_owned ~name:"heat" ~owner:Attribute.Point
@@ -89,20 +75,6 @@ let run () =
     "uniform Smooth did not average curve neighbors";
   check (heat = [|6.; 0.; 6.; 8.; 0.; 8.|])
     "Smooth did not process matching point attributes";
-
-  let first = Group.init ~owner:Group.Primitive ~name:"first" 2
-      (fun primitive -> primitive = 0) in
-  let selected = Smooth.run ~primitives:first ~iterations:1
-      ~mode:(Attribute_ops.Laplacian 1.) ~attributes:"P" curves |> get_ok in
-  let selected = positions selected and source = positions curves in
-  check (selected.y.(0) = 3. && selected.y.(1) = 0. && selected.y.(2) = 3.)
-    "primitive-restricted Smooth missed selected points";
-  for point = 3 to 5 do
-    check (selected.x.(point) = source.x.(point)
-        && selected.y.(point) = source.y.(point)
-        && selected.z.(point) = source.z.(point))
-      "primitive-restricted Smooth changed an unselected curve"
-  done;
 
   let constrained = Group.init ~owner:Group.Point ~name:"locked" 6
       (fun point -> point = 1 || point = 4) in
@@ -128,38 +100,6 @@ let run () =
   done;
   check (Array.exists2 (fun left right -> left <> right) free.y source.y)
     "free Smooth was unexpectedly an identity";
-
-  let region = Plane_generators.grid ~columns:4 ~rows:4 ~size:4. () |> get_ok in
-  let region_source = positions region in
-  let region = Geometry.with_positions
-      (Packed.Float3.View.of_owned_exn ~x:(Array.copy region_source.x)
-        ~y:(Array.mapi (fun point y -> if point = 12 then 4. else y)
-          region_source.y)
-        ~z:(Array.copy region_source.z)) region |> get_string_ok in
-  let region_source = positions region in
-  let center_faces = Group.init ~owner:Group.Primitive ~name:"center_faces"
-      (Geometry.primitive_count region) (fun primitive ->
-        let cell = primitive / 2 in
-        let x = cell mod 4 and row = cell / 4 in
-        x >= 1 && x <= 2 && row >= 1 && row <= 2) in
-  let group_locked = Smooth.run ~primitives:center_faces
-      ~boundary:Smooth.Smooth_group_boundary ~iterations:2
-      ~mode:(Attribute_ops.Laplacian 0.5) ~attributes:"P" region |> get_ok in
-  let group_locked = positions group_locked in
-  check (group_locked.y.(12) < region_source.y.(12))
-    "group-boundary Smooth did not update the selected interior";
-  List.iter (fun point ->
-    check (group_locked.x.(point) = region_source.x.(point)
-        && group_locked.y.(point) = region_source.y.(point)
-        && group_locked.z.(point) = region_source.z.(point))
-      "group-boundary Smooth moved a selected boundary point")
-    [6; 7; 8; 11; 13; 16; 17; 18];
-  List.iter (fun point ->
-    check (group_locked.x.(point) = region_source.x.(point)
-        && group_locked.y.(point) = region_source.y.(point)
-        && group_locked.z.(point) = region_source.z.(point))
-      "group-boundary Smooth moved an unselected point")
-    [0; 1; 2; 3; 4; 5; 9; 10; 14; 15; 19; 20; 21; 22; 23; 24];
 
   let with_normals = Normal_ops.run grid |> get_ok in
   let recomputed = Smooth.run ~boundary:Smooth.Smooth_unshared ~iterations:1
@@ -189,10 +129,6 @@ let run () =
         | _ -> fail "smoothed N has unexpected storage")
    | None -> fail "explicitly smoothed N was removed");
 
-  let wrong_owner = Group.init ~owner:Group.Point ~name:"wrong"
-      (Geometry.point_count grid) (fun _ -> true) in
-  expect_code "invalid_selection" (Smooth.run ~primitives:wrong_owner
-      ~attributes:"P" grid);
   let wrong_length = Group.init ~owner:Group.Point ~name:"wrong_length" 1
       (fun _ -> true) in
   expect_code "invalid_selection" (Smooth.run
@@ -210,9 +146,9 @@ let run () =
         0.25 +. (float_of_int (point mod 257) /. 256.)))) |> get_string_ok in
   let scale = add_attribute weight scale in
   let run domains = Parallel.run ~domains (fun () ->
-    Smooth.run ~grain:1024 ~iterations:8 ~method_:Attribute_ops.Edge_length
+    Smooth.run ~grain:1024 ~iterations:8
       ~mode:(Attribute_ops.Custom_steps { odd = 0.43; even = -0.45 })
-      ~weight_attribute:"weight" ~boundary:Smooth.Smooth_unshared
+      ~boundary:Smooth.Smooth_unshared
       ~attributes:"P weight" scale |> get_ok) in
   let one = run 1 and many = run 4 in
   check (equal_geometry one many)

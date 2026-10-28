@@ -105,7 +105,7 @@ module View : sig
       excluding pairs generated from the same source primitive. This removes
       triangulation diagonals before self-intersection narrow-phase testing. *)
 
-  val overlapping_self_triangle_pairs_disjoint_topology :
+  val self_pairs_disjoint_topology :
     ?cancel:Cancel.t -> grain:int -> tolerance:float -> t ->
     int array * int array
   (** Return AABB/K-DOP candidates that do not share a topology point. BVH

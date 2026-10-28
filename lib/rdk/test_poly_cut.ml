@@ -349,34 +349,6 @@ let equal_storage left right = match left, right with
       Packed.Float_array.View.view left = Packed.Float_array.View.view right
   | _ -> false
 
-let equal_geometry left right =
-  Packed.Float3.View.view (Geometry.positions left)
-    = Packed.Float3.View.view (Geometry.positions right)
-  && Topology.View.view (Geometry.topology left)
-    = Topology.View.view (Geometry.topology right)
-  && List.equal (fun left right -> Attribute.owner left = Attribute.owner right
-      && Attribute.name left = Attribute.name right
-      && equal_storage (Attribute.View.storage left)
-           (Attribute.View.storage right))
-      (Geometry.attributes left) (Geometry.attributes right)
-  && List.equal (fun left right ->
-      let values group =
-        let output = ref [] in
-        Group.iter_ordered (fun element -> output := element :: !output) group;
-        !output in
-      Group.owner left = Group.owner right
-      && Group.name left = Group.name right
-      && values left = values right)
-      (Geometry.groups left) (Geometry.groups right)
-  && List.equal (fun left right ->
-      let values group =
-        let output = ref [] in
-        Edge_group.iter (fun edge -> output := edge :: !output) group;
-        !output in
-      Edge_group.name left = Edge_group.name right
-      && values left = values right)
-      (Geometry.edge_groups left) (Geometry.edge_groups right)
-
 let run () =
   test_change_subdivision ();
   test_edge_cut_boundary_semantics ();

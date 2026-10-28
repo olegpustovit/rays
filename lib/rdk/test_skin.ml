@@ -51,31 +51,5 @@ let unequal_open () =
       ~primitive_kinds:[|Topology.Open_polyline;Topology.Open_polyline|] |> get in
   Geometry.create ~positions ~topology () |> get
 
-let equal_geometry left right =
-  let lp = Packed.Float3.View.view (Geometry.positions left)
-  and rp = Packed.Float3.View.view (Geometry.positions right)
-  and lt = Topology.View.view (Geometry.topology left)
-  and rt = Topology.View.view (Geometry.topology right) in
-  lp = rp && lt.vertex_points = rt.vertex_points
-  && lt.primitive_offsets = rt.primitive_offsets
-  && Bytes.equal lt.primitive_kinds rt.primitive_kinds
-  && int_attribute Attribute.Vertex "corner" left
-      = int_attribute Attribute.Vertex "corner" right
-  && int_attribute Attribute.Primitive "section" left
-      = int_attribute Attribute.Primitive "section" right
-  && (Geometry.find_group ~owner:Group.Vertex "corners" left
-      |> Option.get |> Group.View.bits_view)
-     = (Geometry.find_group ~owner:Group.Vertex "corners" right
-        |> Option.get |> Group.View.bits_view)
-  && (Geometry.find_group ~owner:Group.Primitive "skin" left
-      |> Option.get |> Group.View.bits_view)
-     = (Geometry.find_group ~owner:Group.Primitive "skin" right
-        |> Option.get |> Group.View.bits_view)
-  && let left = Geometry.find_edge_group "section_edges" left |> Option.get
-     and right = Geometry.find_edge_group "section_edges" right |> Option.get in
-     Edge_group.length left = Edge_group.length right
-     && Array.init (Edge_group.length left) (fun edge -> Edge_group.mem edge left)
-        = Array.init (Edge_group.length right) (fun edge -> Edge_group.mem edge right)
-
 let run () =
   print_endline "test_skin: ok"

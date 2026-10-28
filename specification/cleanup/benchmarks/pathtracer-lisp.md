@@ -84,3 +84,47 @@ and Metal in both scenes; 480 x 840: RMSE 8.7e-6 (dome), 1.2e-5 (World).
 The World terms of the kernel fold away in the dome scene and the dome panels in the World scene:
 `Kernel_layout.specialize` decides guards on known conditions (here `u.world`, the light, panel and sun counts,
 which the test passes as Lisp constants) and drops loops of no passes. The thread limits are the gate's floor.
+
+## The tracer on its Lisp kernels (P8.S3-S4, 2026-10-28)
+
+`Rays_pathtracer` now traces every mesh shape (flat, instanced, scene, spheres, strands, motion) with
+pathtrace.rays through `Lisp_kernel` (one kernel set per scene shape; facts are literals, scene arrays and the
+camera are bound per dispatch) and pathtrace.metal is deleted. The A/B was taken just before the deletion with a
+binary that kept both kernels (`RAYS_PATHTRACER_KERNEL=metal`), then repeated for HEAD's Lisp kernels against
+that binary's pathtrace.metal. `render_workspace.exe --benchmark SKETCH OUT.csv 16`, `RAYS_PATHTRACER_PROFILE=1`,
+interleaved processes (Lisp then Metal, five pairs); GPU ms is the sum of round 5's band timings (16 spp, four
+frames of 4 spp), wall the median round. M1; load averages are the shared machine's (other agents building).
+
+| sketch (480x840 / 1600x1600) | load | Lisp GPU ms per 16 spp (pairs 1-5) | pathtrace.metal | medians | wall medians (s) |
+|---|---|---|---|---|---|
+| pathtracer.rays, before the tiling below | 4-16 | 563.6 570.6 573.1 573.4 571.2 | 504.9 509.9 502.6 514.9 504.6 | 571.2 vs 504.9 (+13%) | 0.582 vs 0.521 |
+| pathtracer.rays, tiled (e19 binary) | 11-17 | 507.7 502.4 511.0 503.3 501.9 | 518.8 512.0 517.9 513.1 509.1 | 503.3 vs 513.1 (-1.9%) | 0.519 vs 0.521 |
+| pathtracer.rays, HEAD (motion/strand port, old kernel deleted) | 21-26 | 495.4 493.2 490.4 492.1 494.0 | 498.7 497.6 494.5 497.1 493.5 | 493.2 vs 497.1 (-0.8%) | 0.505 vs 0.511 |
+| shattered_studio.rays, tiled (e19 binary) | 6-66 | 34514 33932 35156 29337 30371 | 38657 38843 33580 35294 34577 | 33932 vs 35294 (-3.9%) | 34.4 vs 34.8 |
+
+Film: pathtracer.rays at 64 spp, Lisp (HEAD) against pathtrace.metal, RMSE 6.9e-5 (36 of 1,209,600 channels
+differ). shattered_studio at 8 spp: RMSE 2.75e-3 (2,670 of 7,680,000 channels, about 37 levels each) against
+pathtrace.metal, where two Lisp runs differ by 3.1e-4 (the cooked fracture is not run-to-run identical): above
+the 1e-4 bar, in a few pixels, not yet explained (candidates: geometric normals from scene/trace's instance
+transform instead of transformed vertices, mirrored instances, visible rect lights in the primary-hit pass). The
+two M1 exact digests (`test_pathtracer_exact_m1`) still match byte for byte: no re-baseline.
+`test_lisp` now compares the device film with the CPU walker: byte-identical at 16x12 (dome and World, flat and
+`PT_INSTANCED=1`).
+
+What made the difference: Flow dispatches 1-D (256 threads in a row), pathtrace.metal 16x16 threadgroups. In a
+scene of many objects the rows' rays diverge; the tracing kernels now map a pixel buffer that lists the image
+in 16x16 blocks of 8x4 SIMD tiles (the films hold pixel p at `order[p]`), which took pathtracer.rays from +13%
+to -2%. Bound materials (a table instead of literals) cost about 10% on the one-material test scene (13.2 ms of trace kernel against 11.8 with
+the material as literals, 480x840) and drop its thread limit from 512 to 448; `metallic`, `emissive` and `round` fold
+when no material uses them. Per frame the resolve and Flow's RGBA8 conversion add about 0.6 ms.
+
+Register pressure (`maxTotalThreadsPerThreadgroup` of the trace kernel): 448 flat (dome and World), 384 for an
+instance structure; pathtrace.metal was 384 for every shape. The instanced kernel keeps 64-bit integer index
+math in its loops (the instance's first triangle plus the hit prim), so the 64-bit gate covers flat kernels only.
+
+Not met: first-frame compile time. `render_workspace` to a 4-spp PNG takes 2.5-4.0 s against 1.3-2.0 s with
+pathtrace.metal (three runs each, load 20+). Of the Lisp side, `Flow.Workspace.check` of the generated workspace
+(the three .rays files plus the six kernels) is 0.6-1.2 s, the trace kernel's bind 155 ms, template 52 ms,
+emission 15 ms, then the Metal compile of the geometry and trace pipelines about 0.5 s. A shape change (light
+count, World on/off, material classes) compiles again; four shapes stay cached per tracer. Next: check the
+declarations once per process and reuse them across shapes.

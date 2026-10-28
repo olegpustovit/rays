@@ -77,7 +77,7 @@ task plan are `specification/web-export/plan.md`.
 | `scene_command` | Pure renderer-neutral commands |
 | `rays` | `Sketch`, `Frame`, pure `Scene`, shared `Input`, resources, renderer behavior |
 | `rays_pathtracer` | Hardware ray-traced path tracer |
-| `rdk` | The single packed geometry/topology compute core, built from `rdk_core` → `rdk_exact` → `rdk_spatial` → `rdk_attrib` → `rdk_gen`/`rdk_curve` → `rdk_mesh` → `rdk_boolean`; `rdk_rays` is its glue to `rays` meshes |
+| `rdk` | The single packed geometry/topology compute core, built from `rdk_core` → `rdk_exact` → `rdk_spatial` → `rdk_attrib`/`rdk_curve` → `rdk_mesh` → `rdk_boolean`; `rdk_rays` is its glue to `rays` meshes |
 | `sop` | Immutable SOP graphs over `rdk` operations |
 | `flow` | UI-free workspace language over `diagnostic`, `param`, `input` and pure `rays_math`: reader, printer, macros, checker, evaluator, frame folds, packed arrays and typed deferred nodes |
 | `flow_ir` | Typed dataflow IR over `flow` evaluations with sharing, hoisting, pruning, fusion and precision passes, block-at-a-time CPU kernels, and bounded caches; uses `parallel`, `lru` and the `scene_command` marks contract as pure data; `flow` never depends on it |

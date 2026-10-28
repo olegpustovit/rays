@@ -9,6 +9,7 @@ let pointer (x, y) = float x, float y
 let press point = Input.Pointer_pressed (Input.LeftButton, pointer point)
 let release point = Input.Pointer_released (Input.LeftButton, pointer point)
 let move point = Input.Pointer_moved (pointer point)
+let key k = Input.Key_pressed k
 
 let frame ?(keys = []) ~scale ~time events : Frame.t =
   { input = { (Input.at_time time) with dt = 1. /. 60.; size = 320, 240;
@@ -20,22 +21,23 @@ let frame ?(keys = []) ~scale ~time events : Frame.t =
    toggles occupy x in [197, 237). *)
 let row y = 3 + (y * 24) + 12
 
-let with_scale scale =
-  let time = ref 0. in
-  let step ui events build =
-    time := !time +. 0.5;
-    Ui.frame ui (frame ~scale ~time:!time events) (fun ui ->
-      Ui.panel ui ~x:0. ~y:0. ~width:240. "panel" (fun () -> build ui)) in
-  let modified_step ui modifiers key build =
-    time := !time +. 0.5;
-    Ui.frame ui (frame ~keys:modifiers ~scale ~time:!time [Input.Key_pressed key])
-      (fun ui -> Ui.panel ui ~x:0. ~y:0. ~width:240. "panel"
-        (fun () -> build ui)) in
-  let command_step ui key build =
-    modified_step ui [Input.Meta] (Input.KeyChar key) build in
-  let settle ui build = ignore (step ui [] build) in
-  let label = Printf.sprintf "%gx: %s" scale in
+let time = ref 0.
+let step scale ui events build =
+  time := !time +. 0.5;
+  Ui.frame ui (frame ~scale ~time:!time events) (fun ui ->
+    Ui.panel ui ~x:0. ~y:0. ~width:240. "panel" (fun () -> build ui))
+let modified_step scale ui modifiers key build =
+  time := !time +. 0.5;
+  Ui.frame ui (frame ~keys:modifiers ~scale ~time:!time [Input.Key_pressed key])
+    (fun ui -> Ui.panel ui ~x:0. ~y:0. ~width:240. "panel"
+      (fun () -> build ui))
+let command_step scale ui key build =
+  modified_step scale ui [Input.Meta] (Input.KeyChar key) build
+let settle scale ui build = ignore (step scale ui [] build)
+let label scale = Printf.sprintf "%gx: %s" scale
 
+let scale_1 scale =
+  let label = label scale in
   let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   let roots events = Ui.frame ui (frame ~scale ~time:0.5 events) (fun ui ->
     let root = Ui.box ui ~flags:Ui.clickable ~w:(Ui.Px 100.)
@@ -56,8 +58,12 @@ let with_scale scale =
   if not root.pressed || root.subtree_press <> Some 1
       || child.pressed then
     fail (label "blank root press did not select the root");
-  Ui.destroy ui;
+  Ui.destroy ui
 
+let scale_2 scale =
+  let step = step scale in
+  let settle = settle scale in
+  let label = label scale in
   (* Toggle commits on release inside, never on press alone. *)
   let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   let value = ref false in
@@ -70,8 +76,10 @@ let with_scale scale =
   step ui [press (210, row 0); release (300, row 0)] build;
   if not !value then fail (label "toggle fired after release outside");
   step ui [press (237, row 0); release (236, row 0)] build;
-  if not !value then fail (label "half-open bounds accepted a press on the right edge");
+  if not !value then fail (label "half-open bounds accepted a press on the right edge")
 
+let scale_3 scale =
+  let label = label scale in
   (* Compact inspector sliders use the visible track's position, including
      on a simple click, and Option-click opens the numeric editor. *)
   let compact = ref "0" in
@@ -110,8 +118,12 @@ let with_scale scale =
   tick 3.5 [press (50, 30)];
   let before = !compact in
   tick 4. [Input.Pointer_cancelled Input.LeftButton; move (400, 30)];
-  if !compact <> before then fail (label "pointer cancellation did not stop capture");
+  if !compact <> before then fail (label "pointer cancellation did not stop capture")
 
+let scale_4 scale =
+  let step = step scale in
+  let settle = settle scale in
+  let label = label scale in
   (* Buttons fire on release inside only. *)
   let clicks = ref 0 in
   let build ui = if Ui.button ui "Apply" then incr clicks in
@@ -120,8 +132,12 @@ let with_scale scale =
   step ui [press (20, row 0); move (300, row 0); release (300, row 0)] build;
   if !clicks <> 0 then fail (label "button fired after release outside");
   step ui [press (20, row 0); release (20, row 0)] build;
-  if !clicks <> 1 then fail (label "button did not fire on release inside");
+  if !clicks <> 1 then fail (label "button did not fire on release inside")
 
+let scale_5 scale =
+  let step = step scale in
+  let settle = settle scale in
+  let label = label scale in
   (* A collapsed inspector section builds none of its rows; a click on its header opens it. *)
   let built = ref false and opened = ref None in
   let build ui =
@@ -134,8 +150,10 @@ let with_scale scale =
   if !built || !opened <> Some false then fail (label "a collapsed section built its rows");
   step ui [press (20, row 0); release (20, row 0)] build;
   settle ui build;
-  if not !built || !opened <> Some true then fail (label "a click did not open its section");
+  if not !built || !opened <> Some true then fail (label "a click did not open its section")
 
+let scale_6 scale =
+  let label = label scale in
   (* A numeric field edits as text: Enter commits, invalid text stays open, Escape cancels, a
      pasted line loses its break, the caret takes insertions and an outside press commits. *)
   let count = ref "2" in
@@ -192,8 +210,10 @@ let with_scale scale =
   open_field ();
   fstep ui [Input.Text_input "2.5"] build;
   fstep ui [press (300, 200)] build;
-  if !count <> "2.5" then fail (label "typed number was not committed by an outside press");
+  if !count <> "2.5" then fail (label "typed number was not committed by an outside press")
 
+let scale_7 scale =
+  let label = label scale in
   (* A bounded panel scrolls by whole rows and routes hits to scrolled rows. *)
   let toggles = Array.make 4 false in
   let scrolled ui =
@@ -261,8 +281,10 @@ let with_scale scale =
     fail (label "positive natural scroll did not move the view up");
   let parent = scroll_dir [Input.Scrolled (0., -1.)] in
   if Ui.scroll_offset ui parent <> 80. then
-    fail (label "negative wheel scroll did not move the view down");
+    fail (label "negative wheel scroll did not move the view down")
 
+let scale_8 scale =
+  let label = label scale in
   (* A trackpad (Input.Trackpad_scrolled, each motion with the wheel steps SDL makes of it): the
      fingers move the content point for point, a lift in motion coasts to rest, an edge is
      overshot and returned to, a stretch is held until the lift, and content that fits stays. *)
@@ -341,8 +363,10 @@ let with_scale scale =
   parent := flick lifted; ok := !ok && still ();
   parent := flick [Input.Scrolled (0., -3.)]; ok := !ok && still ();
   for _ = 1 to 30 do parent := flick []; ok := !ok && still () done;
-  if not !ok then fail (label "content that fits moved under a scroll");
+  if not !ok then fail (label "content that fits moved under a scroll")
 
+let scale_9 scale =
+  let label = label scale in
   (* A pinch goes where the wheel goes: to the scrollable box under the pointer,
      its factors multiplied within a frame, and nowhere else. *)
   let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
@@ -361,8 +385,14 @@ let with_scale scale =
   if Float.abs (pinched [move (50, 40); Input.Pinched 1.1; Input.Pinched 0.5] -. 0.55) > 1e-9 then
     fail (label "two pinches in a frame were not multiplied");
   if pinched [move (300, 200); Input.Pinched 1.25] <> 1. then
-    fail (label "a pinch away from the canvas reached it");
+    fail (label "a pinch away from the canvas reached it")
 
+let scale_10 scale =
+  let step = step scale in
+  let modified_step = modified_step scale in
+  let command_step = command_step scale in
+  let settle = settle scale in
+  let label = label scale in
   (* Text fields: UTF-8 entry, Backspace/Delete, focus kept on cancel. *)
   let title = ref "" in
   let build ui = title := Ui.text_field ui "Title" !title in
@@ -438,8 +468,10 @@ let with_scale scale =
   step ui [] build;
   if !short <> "x" || !long <> "long text" then
     fail (label "unfocused short field reused the longer field caret");
-  Ui.destroy ui;
+  Ui.destroy ui
 
+let scale_11 scale =
+  let label = label scale in
   (* a scrub field (a number dragged sideways) opens for typing on a double-click *)
   let number = ref "240" and typing = ref false in
   let build ui =
@@ -497,9 +529,23 @@ let with_scale scale =
   Ui.destroy ui;
   Ui.destroy ui
 
-let run () =
-  (match Sdl3.Init.init [Sdl3.Init.Video] with
-   | Ok () -> () | Error error -> fail (Format.asprintf "%a" Sdl3.pp_error error));
+let with_scale scale =
+  time := 0.;
+  scale_1 scale;
+  scale_2 scale;
+  scale_3 scale;
+  scale_4 scale;
+  scale_5 scale;
+  scale_6 scale;
+  scale_7 scale;
+  scale_8 scale;
+  scale_9 scale;
+  scale_10 scale;
+  scale_11 scale;
+  ()
+
+
+let tooltip_rest () =
   let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   Fun.protect ~finally:(fun () -> Ui.destroy ui) (fun () ->
     let build ?(key = "a") ?(skip = false) ui =
@@ -540,9 +586,9 @@ let run () =
     let ready = Ui.frame ui (frame ~scale:1. ~time:1.5 []) (fun ui ->
       ignore (Ui.modal ui "hover-modal" (fun () -> Ui.label ui "Modal"));
       Ui.hover_delay ui ~key:"a") in
-    if ready then fail "a newly opened popup kept a background tooltip");
-  with_scale 1.;
-  with_scale 2.;
+    if ready then fail "a newly opened popup kept a background tooltip")
+
+let hover_cursor () =
   (* Hover: the topmost control under the pointer, from last frame's rects. *)
   let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   let hovered = ref false in
@@ -570,7 +616,9 @@ let run () =
   if Ui.cursor area_ui <> Some `Text then fail "a text area did not request the I-beam";
   Ui.destroy area_ui;
   Ui.destroy field_ui;
-  Ui.destroy ui;
+  Ui.destroy ui
+
+let retained_keys () =
   (* Keys that come and go (150,000 of them, 500 a frame) leave the retained state the size it was. *)
   let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () and next = ref 0 in
   let churn () = Ui.frame ui (frame ~scale:1. ~time:0. []) (fun ui ->
@@ -582,7 +630,9 @@ let run () =
   let settled = words () in
   for _ = 1 to 300 do churn () done;
   if words () > 2 * settled then fail "churned keys grew the UI's retained tables";
-  Ui.destroy ui;
+  Ui.destroy ui
+
+let fit_box () =
   (* A box with no extent of its own (Fit, its one child placed with ~at) shows the child. *)
   let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   let placed events = Ui.frame ui (frame ~scale:1. ~time:0. events) (fun ui ->
@@ -592,7 +642,9 @@ let run () =
     (Ui.signal ui child).hovered) in
   ignore (placed []);
   if not (placed [move (50, 50)]) then fail "a Fit box of placed children culled them";
-  Ui.destroy ui;
+  Ui.destroy ui
+
+let batches () =
   (* One panel paints in a handful of batches, not one draw per label. *)
   let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   Ui.frame ui (frame ~scale:2. ~time:0. []) (fun ui ->
@@ -610,11 +662,12 @@ let run () =
        if batches = 0 || batches > 4 then
          fail (Printf.sprintf "panel painted in %d batches" batches)
    | Error message -> fail message);
-  Ui.destroy ui;
+  Ui.destroy ui
+
+let picker () =
   (* Picker: typing filters, arrows move the cursor, Enter picks an index of
      the filtered rows, Delete arms then deletes, Backspace on an empty query
      goes back, Escape cancels. *)
-  let key k = Input.Key_pressed k in
   let items = [| "alpha", "1"; "beta", "2"; "gamma", "3"; "delta", "4" |] in
   let rows query = Array.of_list (List.filter
       (fun (label, _) -> Ui.fuzzy_match ~query label) (Array.to_list items)) in
@@ -687,7 +740,9 @@ let run () =
   if !last <> `None then fail "picker row committed on press";
   pick [release (60, 3 + 48 + 12)];
   if !last <> `Pick 1 then fail "picker row did not commit on release inside";
-  Ui.destroy ui;
+  Ui.destroy ui
+
+let context_menu () =
   (* Context menu: rows commit on release inside, disabled rows are inert,
      a press outside dismisses; the host keeps it open on `Open. *)
   let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () and result = ref `Open in
@@ -707,7 +762,9 @@ let run () =
   if !result <> `Open then fail "context menu committed after release outside";
   menu [press (300, 200)];
   if !result <> `Dismiss then fail "press outside did not dismiss the context menu";
-  Ui.destroy ui;
+  Ui.destroy ui
+
+let submenu () =
   (* Text areas: the text_field edit and IME path over lines. *)
   let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   let submenu events = Ui.frame ui (frame ~scale:1. ~time:0. events) (fun ui ->
@@ -721,7 +778,11 @@ let run () =
   if submenu [] <> `Open then fail "submenu lost capture between frames";
   if submenu [release (190, 62)] <> `Pick 3 then fail "submenu did not commit on release";
   if submenu [press (300, 200)] <> `Dismiss then fail "submenu did not dismiss outside";
-  Ui.destroy ui;
+  Ui.destroy ui
+
+type area_step = ?keys:Input.key list -> ?reveal:int -> ?reveal_nonce:int -> ?select:(int * int) -> ?splice:(int * int * string) list -> Input.event list -> unit
+
+let text_area_start () =
   let area = ref "" and errors = ref [] and wrapped = ref false
   and submitted = ref false and language = ref None and context = ref None and scrubs = ref []
   and scrub_edits = ref [] in
@@ -779,7 +840,13 @@ let run () =
     area := "ab\ncd";
     area_step [press (150, 12); release (150, 12)];
     area_step ~keys:[Input.Meta] [Input.Key_pressed (Input.KeyChar 'x')];
-    expect "cut with no selection takes the caret's line" "cd");
+    expect "cut with no selection takes the caret's line" "cd")
+;
+  (ui, area, errors, wrapped, submitted, language, context, scrubs, scrub_edits, selected, time, area_step, region, expect)
+
+let text_area_1 rig =
+  let (ui, area, errors, wrapped, submitted, _, _, _, _, _, _, area_step, region, expect) = rig in
+  let area_step : area_step = area_step in
   (* Tab keeps the focus and inserts two spaces, Shift-Tab takes them off, Command-Enter is the
      host's apply *)
   area := "ab";
@@ -833,7 +900,11 @@ let run () =
   let y, _ = region () in
   if y < 0 || y > 96 then fail (Printf.sprintf "caret line left the area (y %d)" y);
   area_step [Input.Key_pressed Input.Escape];
-  if Ui.text_input_focused ui then fail "Escape did not leave the text area";
+  if Ui.text_input_focused ui then fail "Escape did not leave the text area"
+
+let text_area_2 rig =
+  let (_, area, errors, _, _, language, context, _, _, _, _, area_step, _, expect) = rig in
+  let area_step : area_step = area_step in
   (* a language: brackets in pairs, Enter indents, right-click reports the point *)
   errors := [];
   language := Some { Ui.colorize = (fun _ -> []); brackets = (fun _ -> []);
@@ -860,12 +931,16 @@ let run () =
   area_step [Input.Text_input "("];
   expect "an opener wraps the selection" "(a\n(  ))";
   area_step [Input.Pointer_pressed (Input.RightButton, (100., 20.)); Input.Pointer_released (Input.RightButton, (100., 20.))];
-  if !context = None then fail "a right-click did not reach on_context";
+  if !context = None then fail "a right-click did not reach on_context"
+
+let text_area_3 rig =
+  let (ui, area, _, _, _, language, _, _, _, selected, _, area_step, region, expect) = rig in
+  let area_step : area_step = area_step in
   (* completions: typing opens the popup, Down moves, Tab accepts; Escape closes it before it
      leaves the editor *)
   let digit c = (c >= '0' && c <= '9') || c = '.' in
   language := Some { (Option.get !language) with
-    complete = (fun text caret ->
+    Ui.complete = (fun text caret ->
       let rec back i = if i > 0 && text.[i - 1] <> ' ' && text.[i - 1] <> '(' then back (i - 1) else i in
       let start = back caret in
       let prefix = String.sub text start (caret - start) in
@@ -903,7 +978,7 @@ let run () =
   expect "Enter takes the row an arrow chose" "ze\n zephyr";
   area_step [Input.Key_pressed Input.Escape; Input.Key_pressed Input.Escape];
   (* Tab and Shift-Tab with a selection indent and dedent every line it touches *)
-  language := Some { (Option.get !language) with complete = (fun _ _ -> []) };
+  language := Some { (Option.get !language) with Ui.complete = (fun _ _ -> []) };
   area := "a\n\nb\nc";
   area_step [press (150, 12); release (150, 12)];
   area_step ~keys:[Input.Meta] [Input.Key_pressed (Input.KeyChar 'a')];
@@ -976,7 +1051,7 @@ let run () =
     String.iteri (fun i c -> if c = '(' then stack := i :: !stack
       else if c = ')' then match !stack with o :: r -> out := (o, i) :: !out; stack := r | [] -> ()) text;
     List.rev !out in
-  language := Some { (Option.get saved) with brackets = pairs_of; complete = (fun _ _ -> []) };
+  language := Some { (Option.get saved) with Ui.brackets = pairs_of; complete = (fun _ _ -> []) };
   let alt = [Input.Alt] and alt_shift = [Input.Alt; Input.Shift] in
   area := "a\n\n  b\nc";
   area_step [press (150, 12); release (150, 12)];
@@ -1045,7 +1120,11 @@ let run () =
   area_step [];
   area_step ~keys:[Input.Meta] [Input.Key_pressed (Input.KeyChar 'z')];
   expect "Command-Z after the text returned undoes the typing" "foo";
-  language := saved;
+  language := saved
+
+let text_area_4 rig =
+  let (_, area, _, _, _, language, _, scrubs, scrub_edits, _, _, area_step, region, expect) = rig in
+  let area_step : area_step = area_step in
   (* a number dragged sideways follows the pointer: an integer one per five points, a float a
      tenth of its last place per point; the host hears Live frames and one Done *)
   area := "";
@@ -1085,13 +1164,17 @@ let run () =
   area_step [release (nx + 20, 8)];
   expect "a sideways drag from above the underline selects, it does not scrub" "0.6 y";
   (* the language's rewrite runs after each edited frame and maps the caret *)
-  language := Some { (Option.get !language) with rewrite = Some (fun text caret -> text ^ "!", caret) };
+  language := Some { (Option.get !language) with Ui.rewrite = Some (fun text caret -> text ^ "!", caret) };
   area := "";
   area_step [press (150, 12); release (150, 12); Input.Text_input "a"];
   expect "the rewrite keeps the text as the language wants it" "a!";
   area_step [Input.Text_input "b"];
   expect "the caret stays where the rewrite put it" "ab!!";
-  language := None;
+  language := None
+
+let text_area_5 rig =
+  let (ui, area, _, _, _, _, _, _, _, _, _, area_step, _, expect) = rig in
+  let area_step : area_step = area_step in
   (* macOS editing: a double click selects the word and a triple the line, Option and
      Command keys move and delete by words and lines, Command-Z undoes inside the area *)
   area := "alpha beta\ngamma delta";
@@ -1154,7 +1237,9 @@ let run () =
   let counted s = measured := !measured + String.length s; cp s in
   if Ui.ellipsis ~width:counted ~limit:70. (String.make 4000 'a') <> String.make 9 'a' ^ "…" || !measured > 100 then
     fail "the cut of a long label measured all of it";
-  Ui.destroy ui;
+  Ui.destroy ui
+
+let modal_1 () =
   (* Modal: centered, and Escape or a press outside dismisses it. *)
   let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () and shown = ref None in
   let modal events = Ui.frame ui (frame ~scale:1. ~time:0. events) (fun ui ->
@@ -1169,7 +1254,9 @@ let run () =
   modal [];
   modal [press (5, 5)];
   if !shown <> None then fail "a press outside did not dismiss the modal";
-  Ui.destroy ui;
+  Ui.destroy ui
+
+let modal_2 () =
   let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () and shown = ref None in
   let popup events = Ui.frame ui (frame ~scale:1. ~time:0. events) (fun ui ->
     shown := Ui.popup ui ~at:(20., 20.) ~width:200. ~height:10. "popup"
@@ -1180,7 +1267,9 @@ let run () =
   if !shown <> Some () then fail "popup dismissed a press inside its laid-out rect";
   popup [press (300, 200)];
   if !shown <> None then fail "popup kept a press outside its laid-out rect";
-  Ui.destroy ui;
+  Ui.destroy ui
+
+let modal_3 () =
   let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   let menu events = Ui.frame ui (frame ~scale:1. ~time:0. events) (fun ui ->
     Ui.context_menu ui ~at:(20., 20.) ~width:240. ~selected:1 "choices"
@@ -1189,7 +1278,9 @@ let run () =
   ignore (menu []);
   if menu [press (240, 58); release (240, 58)] <> `Pick 1 then
     fail "dropdown rows did not extend to the requested control width";
-  Ui.destroy ui;
+  Ui.destroy ui
+
+let modal_4 () =
   let ui = Ui.create ~font_size:11 ?font_path:(Sys.getenv_opt "RAYS_UI_FONT") () in
   let front_key = ref 0 in
   let raised events = Ui.frame ui (frame ~scale:1. ~time:0. events) (fun ui ->
@@ -1208,7 +1299,9 @@ let run () =
   (match Scene.Private.stage_native ~width:320 ~height:240 scene with
    | Ok {layers = [Ui_layer _; Scene2_layer _; Ui_layer _]; _} -> ()
    | _ -> fail "native content was not between the background and floating controls");
-  Ui.destroy ui;
+  Ui.destroy ui
+
+let two_widgets () =
   (* Two text widgets share nothing: a double click's word in one and its undo stack do not
      reach the numeric editor opened after it (a drag there stays inside its own text, and
      Command-Z with nothing typed is the host's). *)
@@ -1230,7 +1323,9 @@ let run () =
   if Ui.passed_undo ui <> Some `Undo then fail "a numeric editor undid another widget's edit";
   tick [Input.Key_pressed Input.Escape];
   if !number <> "240" then fail ("a numeric editor took another widget's text: " ^ !number);
-  Ui.destroy ui;
+  Ui.destroy ui
+
+let carry () =
   (* A carry: held once the pointer has left the 4-point dead zone of the press, seen as hover
      by a box that does not own the press, put once on release, and gone after a pointer
      cancellation or a focus loss.  A key starts one with no capture: a press is the put. *)
@@ -1304,7 +1399,34 @@ let run () =
   Ui.cancel_carry ui;
   ignore (carried []);
   if scene_size () <> idle then fail "an idle frame painted a ghost";
-  Ui.destroy ui;
+  Ui.destroy ui
+
+let run () =
+  (match Sdl3.Init.init [Sdl3.Init.Video] with
+   | Ok () -> () | Error error -> fail (Format.asprintf "%a" Sdl3.pp_error error));
+  tooltip_rest ();
+  with_scale 1.;
+  with_scale 2.;
+  hover_cursor ();
+  retained_keys ();
+  fit_box ();
+  batches ();
+  picker ();
+  context_menu ();
+  submenu ();
+  let rig = text_area_start () in
+  text_area_1 rig;
+  text_area_2 rig;
+  text_area_3 rig;
+  text_area_4 rig;
+  text_area_5 rig;
+
+  modal_1 ();
+  modal_2 ();
+  modal_3 ();
+  modal_4 ();
+  two_widgets ();
+  carry ();
   (match Sdl3.Init.quit_subsystems [Sdl3.Init.Video] with
    | Ok () -> () | Error error -> fail (Format.asprintf "%a" Sdl3.pp_error error));
   print_endline "PXUI Ui interaction contract passed at 1x and 2x"

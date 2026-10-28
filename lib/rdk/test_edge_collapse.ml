@@ -2,7 +2,6 @@ open Rays
 open Rdk
 open Rdk_test_support
 
-let get_ok = get
 
 let equal_storage left right =
   match Attribute.View.storage left, Attribute.View.storage right with
@@ -32,28 +31,8 @@ let equal_storage left right =
       left.offsets = right.offsets && left.values = right.values
   | _ -> false
 
-let equal_geometry left right =
-  let left_positions = Packed.Float3.View.view (Geometry.positions left)
-  and right_positions = Packed.Float3.View.view (Geometry.positions right)
-  and left_topology = Topology.View.view (Geometry.topology left)
-  and right_topology = Topology.View.view (Geometry.topology right) in
-  left_positions.x = right_positions.x
-  && left_positions.y = right_positions.y
-  && left_positions.z = right_positions.z
-  && left_topology.point_count = right_topology.point_count
-  && left_topology.vertex_points = right_topology.vertex_points
-  && left_topology.primitive_offsets = right_topology.primitive_offsets
-  && Bytes.equal left_topology.primitive_kinds right_topology.primitive_kinds
-  && List.equal (fun left right -> Attribute.owner left = Attribute.owner right
-       && String.equal (Attribute.name left) (Attribute.name right)
-       && equal_storage left right)
-       (Geometry.attributes left) (Geometry.attributes right)
-  && List.equal equal_group (Geometry.groups left) (Geometry.groups right)
-  && List.equal equal_edge_group
-       (Geometry.edge_groups left) (Geometry.edge_groups right)
-
 let attribute owner name storage =
-  Attribute.create_owned ~owner ~name storage |> get_ok
+  Attribute.create_owned ~owner ~name storage |> get
 
 let edge_group_of_pairs topology name pairs =
   let index = Topology_index.create topology in
@@ -68,15 +47,15 @@ let quad () =
   let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;2.;2.;0.|] ~y:[|0.;0.;2.;2.|] ~z:[|0.;0.;0.;0.|] in
   let topology = Topology.polygons_owned ~point_count:4
-      ~vertex_points:[|0;1;2;3|] ~primitive_offsets:[|0;4|] |> get_ok in
+      ~vertex_points:[|0;1;2;3|] ~primitive_offsets:[|0;4|] |> get in
   let collapse = edge_group_of_pairs topology "collapse" [|0,1|]
   and all = edge_group_of_pairs topology "all" [|0,1;1,2;2,3;3,0|] in
   let ordered = Group.ordered ~owner:Group.Point ~name:"ordered"
-      ~length:4 [|1;0;2|] |> get_ok
+      ~length:4 [|1;0;2|] |> get
   and corners = Group.init ~grain:1 ~owner:Group.Vertex ~name:"corners" 4
       (fun vertex -> vertex < 3) in
   let rows = Packed.Int_array.create_owned ~offsets:[|0;1;2;3;4|]
-      ~values:[|10;11;12;13|] |> get_ok in
+      ~values:[|10;11;12;13|] |> get in
   Geometry.create ~positions ~topology
     ~attributes:[
       attribute Attribute.Point "weight" (Attribute.Float [|0.;2.;4.;6.|]);
@@ -93,7 +72,7 @@ let quad () =
         (Attribute.Float [|10.;20.;30.;40.|]);
       attribute Attribute.Primitive "material" (Attribute.Text [|"panel"|]);
       attribute Attribute.Detail "meta" (Attribute.Int [|42|]);
-    ] ~groups:[ordered; corners] ~edge_groups:[collapse; all] () |> get_ok
+    ] ~groups:[ordered; corners] ~edge_groups:[collapse; all] () |> get
 
 let point_float name geometry =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry
@@ -212,11 +191,11 @@ let run () =
     (Edge_collapse.run ~edges:collapse ~connectivity_attribute:" " source);
   let non_finite_topology = Topology.create_owned ~point_count:2
       ~vertex_points:[|0;1|] ~primitive_offsets:[|0;2|]
-      ~primitive_kinds:[|Topology.Open_polyline|] |> get_ok in
+      ~primitive_kinds:[|Topology.Open_polyline|] |> get in
   let non_finite = Geometry.create
       ~positions:(Packed.Float3.View.of_owned_exn
         ~x:[|nan;1.|] ~y:[|0.;0.|] ~z:[|0.;0.|])
-      ~topology:non_finite_topology () |> get_ok in
+      ~topology:non_finite_topology () |> get in
   expect_code "invalid_topology" (Edge_collapse.run non_finite);
   let cancelled = Cancel.create () in
   Cancel.cancel cancelled;

@@ -585,7 +585,7 @@ module Scratch = struct
     release arena;
     result
 
-  let orient2d_explicit_explicit_homogeneous
+  let orient2d_ee_homogeneous
       ~ax ~ay ~bx ~by ~cx ~cy ~cw =
     let arena = acquire () in
     let ax = of_float arena ax and ay = of_float arena ay
@@ -624,7 +624,7 @@ module Scratch = struct
         (scaled_mantissa arena numerator /. scaled_mantissa arena denominator)
         (scaled_exponent arena numerator - scaled_exponent arena denominator)
 
-  let barycentric_explicit_triangle_homogeneous
+  let barycentric_tri_homogeneous
       ~ax ~ay ~az ~bx ~by ~bz ~cx ~cy ~cz ~px ~py ~pz ~pw =
     let arena = acquire () in
     let ax = of_float arena ax and ay = of_float arena ay and az = of_float arena az
@@ -808,7 +808,7 @@ module Scratch = struct
          else invalid_arg "Rdk exact ray axis is out of bounds") in
     if positive then sign else -sign
 
-  let axis_ray_triangle_explicit_homogeneous
+  let axis_ray_tri_homogeneous
       ~axis ~positive
       ~ax ~ay ~az ~bx ~by ~bz ~cx ~cy ~cz ~qx ~qy ~qz ~qw =
     let arena = acquire () in
@@ -864,7 +864,7 @@ module Scratch = struct
     release arena;
     result
 
-  let symbolic_ray_triangle_explicit_homogeneous
+  let symbolic_ray_tri_homogeneous
       ~ax ~ay ~az ~bx ~by ~bz ~cx ~cy ~cz ~qx ~qy ~qz ~qw =
     let arena = acquire () in
     let ax = of_float arena ax and ay = of_float arena ay

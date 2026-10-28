@@ -280,53 +280,16 @@ let run ?(frame = fun _ _ -> ()) () =
          family (Apple9 and later), so both outcomes are checked. *)
       P.destroy tracer;
       print_endline "pathtracer: spheres, instance materials, motion ok";
-      (* Every kernel specialization compiles and matches its declared
-         interface, including the curve variants a device may never trace. *)
-      let driver = Ogpu.Impl.create_driver () in
-      let device = get (Result.map_error Ogpu.Error.to_string (Ogpu.Backend.create_device driver)) in
-      let source = In_channel.with_open_bin "pathtrace.metal" In_channel.input_all in
-      let shader = get (Result.map_error Ogpu.Error.to_string (Ogpu.Shader.create
-        { backend = "metal"; label = Some "pathtrace-shapes"; bytes = Bytes.of_string source
-        ; entry_points = [ { Ogpu.Shader.name = "pathtrace"; stage = Compute } ]; bindings = [] })) in
-      let library = get (Result.map_error Ogpu.Error.to_string (Ogpu.Backend.create_library device shader)) in
-      let binding index kind = { Ogpu.Shader.group = 0; binding = index; kind; visibility = [ Compute ] } in
-      let shapes = ref 0 in
-      List.iter (fun ((instanced, motion, spheres, curves), scene) ->
-        if not (motion && not instanced) && not (scene && (motion || not instanced)) then begin
-          let interface =
-            [ binding 0 Acceleration_structure; binding 1 Uniform_buffer ]
-            @ List.map (fun index -> binding index Storage_buffer)
-                ([ 2; 3 ] @ (if scene then [ 4 ] else [])
-                 @ (if instanced then [ 5; 6; 7; 8; 9; 10 ] else [ 4; 5; 6; 7; 8; 9 ]) @ [ 11; 12; 13; 14 ]
-                 @ (if spheres then [ 15 ] else []) @ (if curves then [ 17; 18; 19 ] else [])
-                 @ if scene then [ 20 ] else [])
-            @ (if spheres then [ binding 16 Intersection_table ] else [])
-            @ [ binding 0 Storage_texture ] in
-          let linked = if spheres then
-            [ "sphere_hit_" ^ (if instanced then "i" else "f") ^ (if motion then "m" else "") ^ (if curves then "c" else "") ]
-            else [] in
-          let pipeline = get (Result.map_error Ogpu.Error.to_string
-            (Ogpu.Backend.create_compute_pipeline_from library ~entry:"pathtrace"
-               ~constants:[ ("INSTANCED", Bool instanced); ("MOTION", Bool motion); ("SPHERES", Bool spheres); ("CURVES", Bool curves); ("SCENE", Bool scene) ]
-               ~interface ~linked ())) in
-          get (Result.map_error Ogpu.Error.to_string (Ogpu.Backend.destroy_pipeline pipeline));
-          incr shapes
-        end)
-        (List.concat_map (fun i -> List.concat_map (fun m -> List.concat_map (fun s -> List.concat_map (fun c -> [ ((i, m, s, c), false); ((i, m, s, c), true) ]) [ false; true ]) [ false; true ]) [ false; true ]) [ false; true ]);
-      assert (!shapes = 16);
-      let curves = Ogpu.Caps.has (Ogpu.Backend.capabilities device) Ray_tracing_curves in
       let strand_scene = { P.objects = []; spheres = [];
         strands = [{ P.points = [|Rays_math.Vec3.create (-0.6) 0. 0.; Rays_math.Vec3.zero;
           Rays_math.Vec3.create 0.6 0. 0.|]; thickness = 0.2;
           strand_material = P.material ~emission:(rgb 4. 0. 0.) (rgb 0. 0. 0.) }];
         environment = black; lights = [] } in
+      (* native curves where the device has them, else one capsule test per segment *)
       (match P.create ~spp:1 ~width:32 ~height:32 strand_scene with
-       | Error message when not curves ->
-           assert (message = "path tracer strands need curve primitives, which this device does not intersect")
        | Error message -> failwith message
        | Ok strand_tracer ->
            Fun.protect ~finally:(fun () -> P.destroy strand_tracer) (fun () ->
-             assert curves;
              let camera = Rays.Camera.perspective ~fov_y:0.5
                ~at:(Rays_math.Vec3.create 0. 0. 4.) ~target:Rays_math.Vec3.zero () in
              get (P.render strand_tracer camera); get (P.flush strand_tracer);
@@ -334,9 +297,7 @@ let run ?(frame = fun _ _ -> ()) () =
              Bytes.iteri (fun i value -> if i mod 4 = 0 && Char.code value > 200 then incr red)
                (pixels strand_tracer);
              assert (!red > 0)));
-      get (Result.map_error Ogpu.Error.to_string (Ogpu.Backend.destroy_library library));
-      get (Result.map_error Ogpu.Error.to_string (Ogpu.Backend.destroy_device device));
-      Printf.printf "pathtracer: %d kernel specializations compile\n" !shapes;
+      print_endline "pathtracer: strands ok";
       let final_handles = live_handles () in
       Printf.printf "handle baseline %d final %d\n%!" initial_handles final_handles;
       assert (final_handles = initial_handles)

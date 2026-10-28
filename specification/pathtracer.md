@@ -10,11 +10,11 @@ demos; the demo scene is `sketches/pathtracer.rays` (Lisp; the editor's Path tra
 
 - Input: a list of `Rdk.Geometry.t` objects, each with one metallic-roughness
   material (`albedo`, `roughness`, `metallic`, `emission`), plus analytic
-  `sphere`s (bounding-box primitives resolved by an intersection function, so
-  they are exact and never tessellated) and `strand`s (round polylines of
-  constant thickness traced as linear curve segments; they need
-  `Ogpu.Caps.Ray_tracing_curves`, so on the M1 `create`/`replace_mesh` return
-  a typed error rather than a silent miss).
+  `sphere`s (intersected analytically beside the triangle structure, so they
+  are exact and never tessellated) and `strand`s (round polylines of constant
+  thickness traced as linear curve segments: native curves where
+  `Ogpu.Caps.Ray_tracing_curves` is present, a capsule test per segment
+  elsewhere, as on the M1).
 - Instancing extras: `mesh_instanced ?materials` gives each instance its own
   material through the instance user id (the prototype material is index 0),
   and `?motion` gives each instance a second transform at the end of the
@@ -26,8 +26,8 @@ demos; the demo scene is `sketches/pathtracer.rays` (Lisp; the editor's Path tra
   one trace: a TLAS whose instances reference one BLAS per input over one
   shared vertex buffer. A flat input is one instance, an instanced input one
   instance per copy with its transform premultiplied by the object's.
-  Spheres, strands, and motion inputs are rejected (ponytail: the sphere
-  intersection function has no per-instance base).
+  Spheres, strands, and motion inputs are rejected (ponytail: scene/trace's
+  analytic primitives are world-space, without a per-instance base).
 - Moving objects: `move t matrices` re-places the newest `scene_mesh`'s
   objects at new world transforms without re-preparing or re-uploading
   geometry. The layout keeps each object's placement range, world matrix,
@@ -122,40 +122,57 @@ file-backed HDRIs (a baked `Rays.World` is the environment; see World path).
    transforms, and builds a TLAS. Both builds are encoded on the tracer's
    queue and polled, never waited on, unless `flush` or `replace_mesh` asks.
    Exact prototype-byte matches reuse the GPU prototype and BLAS on later
-   edits; only transforms and the TLAS change. A Metal primitive structure
-   holds one geometry kind (a triangles-plus-boxes BLAS fails at sizing with
-   an unrecognized `vertexBuffer` selector), so OGPU rejects mixed-kind BLAS
-   descriptors and a mesh mixing triangles, spheres, and strands becomes a
-   scene: one BLAS per kind under identity TLAS instances. A scene's BLASes
-   build side by side in slices of one scratch buffer and the TLAS builds in
-   the next encoder of the same command buffer, uncompacted (ponytail).
-   The `SCENE` kernel binds a per-instance table (first triangle, material or
-   `~0` for per-triangle ids) at buffer 20. Every build is
+   edits; only transforms and the TLAS change. The triangle structure holds
+   triangles only (a degenerate triangle, never hit, when a mesh has none):
+   spheres and strands are scene/trace's analytic primitives beside it, and
+   native strands build a curve-only primitive structure in the same command
+   buffer. A scene's BLASes build side by side in slices of one scratch buffer
+   and the TLAS builds in the next encoder of the same command buffer,
+   uncompacted (ponytail). Every build also uploads the kernel's tables
+   (`Mesh_build.tables`): float material ids (per triangle, then per strand
+   segment), per-instance rows (first triangle, material or -1, the normal
+   matrix, its shutter end with motion), scene/trace's instance table, the
+   (centre, radius) spheres and the strand segments. Every build is
    staged: the primitive build writes its compacted size, the next poll
    compacts it into a right-sized structure, then the TLAS (user-id or motion
    instance records) builds over the compacted one and the uncompacted
    structure is released; `render` never waits on any stage.
-2. The embedded MSL is compiled once into one OGPU library at `create` time.
-   One `pathtrace` kernel is specialized per mesh shape by the `INSTANCED`,
-   `MOTION`, `SPHERES`, `CURVES`, and `SCENE` function constants (mutually exclusive
-   structure arguments, a body templated on the structure, intersector, and
-   table types) and compiled on first use; a sphere pipeline links the
-   `sphere_hit_*` intersection function whose tags match its intersector and
-   owns a one-entry intersection table. `resolve_preview` comes from the same
-   library.
+2. The kernels are Rays Lisp: `pathtrace.rays` (with `pathtrace_helpers.rays`
+   and `resolve_preview.rays`, embedded by a Dune rule) printed to MSL by
+   `Flow_gpu.Emit` (`Lisp_kernel`). A kernel set is compiled per scene shape:
+   the facts (spp, bounces, round-corner probes, light and panel counts, World,
+   background, map size, sun, `bsdf_only`, instanced, motion, strands native
+   or in-loop, and whether any material is metallic, emissive or round) are
+   literals the static stage folds; everything else is a host placeholder
+   bound per dispatch: scalars and vectors (camera, previous camera, frame,
+   band, sky, sun, exposure, film size) as uniform words, arrays as gather
+   tables read from the tracer's own buffers. Six kernels (trace, preview,
+   their primary-geometry passes and the two resolves) each map the film's
+   pixel indices to one vec4 written into a tracer buffer; the tracing ones
+   run over the pixels in 16 x 16 tiles of 8 x 4 SIMD groups (the films hold
+   pixel p at `order[p]`), which keeps rays coherent like the handwritten
+   kernel's 16 x 16 threadgroups. Four shapes stay compiled (newest first).
+   Flow's RGBA8 converter (`Emit.image_rgba8_source`) packs the resolve into
+   the output texture. `test_lisp` checks the device film against the CPU
+   walker (byte-identical at 16 x 12), the trace kernel's static shape and its
+   thread limit.
 3. `render` polls the previous submission and returns if it remains busy.
    Once complete, it publishes the completed GPU texture behind the borrowed
    image's stable identity without a CPU transfer or Scene re-upload. It then
-   uploads a 288-byte uniform block (camera basis, dome colours, size, frame
-   index, spp, bounce cap, exposure, round-corner probe count, light count,
-   previous camera, World flags and sun)
-   with `set_bytes`, dispatches one thread per pixel directly into the other
-   of two RGBA8 OGPU textures, and commits without waiting. The textures
+   encodes the frame's dispatches into one command buffer per band: an
+   accumulation band adds its rows' samples to the film (the first band of
+   frame zero also records the primary hits), the last band resolves it into
+   the other of three RGBA8 OGPU textures; a preview traces its primary hits,
+   one centre sample reprojected onto the history (the previous preview's
+   colour, or the film after accumulating) and the 3 x 3 resolve. It commits
+   without waiting. The textures
    alternate even during motion, so Scene never samples the texture being
    written. `flush` makes the pending frame synchronous. A
   camera change retains valid completed preview history; an explicit reset
    marks older in-flight frames stale. The accumulation buffer is private device memory holding `float4`
    (RGB sum, sample count) per pixel; frame index zero overwrites it.
+   pathtrace.metal, the handwritten kernel these replaced, is gone (P8.S4):
+   film A/B tables in `cleanup/benchmarks/pathtracer-lisp.md`.
 
 ## Shading
 
@@ -193,7 +210,7 @@ and a sketch that never sets a World renders bit-exactly as before (the M1
 qualification digests are unchanged). The upload happens only when the baked
 value changes (physical equality) and restarts accumulation.
 
-- Data: one float32 storage buffer (binding 8): camera map, lighting map
+- Data: one float32 storage buffer: camera map, lighting map
   (both `w x h` RGB, the World's equirect convention), the CDF marginal
   (`h + 1`) and conditional rows (`h x (w + 1)`). Lookups are manual
   bilinear, u wrapping, v clamped, matching `World.lookup`. The uniform block
@@ -261,12 +278,9 @@ camera and frame sequence reproduces byte-identical output. The library test
 (`lib/rays_pathtracer/test_pathtracer.ml`) renders a lit sphere over a
 floor twice from reset and asserts identical bytes, a non-flat image, and
 opaque alpha; it then checks a white analytic sphere in the furnace (energy
-conservation through the intersection table), red/green per-instance
-materials, motion-blur coverage between an instance's rest and end positions,
-typed rejection of strands on devices without curve intersection, mismatched
-material and motion counts, and that all sixteen kernel specializations
-(including the curve and scene variants) compile against their declared
-interfaces. Under `@qualification`, `test_pathtracer_exact_m1` runs the same
+conservation), red/green per-instance materials, motion-blur coverage between
+an instance's rest and end positions, a lit strand, and mismatched material
+and motion counts. Under `@qualification`, `test_pathtracer_exact_m1` runs the same
 test and compares the MD5 of two of its frames (the lit sphere's first four
 samples and the instanced sphere) with digests recorded on an Apple M1; another
 chip prints that it does not compare. The comment on `exact_m1_digests` says

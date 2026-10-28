@@ -1,4 +1,5 @@
 open Rdk
+open Rdk_test_support
 
 module Point = Rdk_exact.Implicit_point
 module Constraints = Rdk_boolean.Boolean_constraints
@@ -7,11 +8,7 @@ module Refinement = Rdk_boolean.Boolean_refinement
 module Complex = Rdk_boolean.Boolean_complex
 module Radial = Rdk_boolean.Boolean_radial
 
-let fail format = Printf.ksprintf failwith format
-let check condition message = if not condition then fail "%s" message
-let get = function Ok value -> value | Error error -> fail "%s" (Error.to_string error)
-let get_point = function Ok value -> value | Error _ -> fail "exact point construction failed"
-let get_string = function Ok value -> value | Error message -> fail "%s" message
+let get_point = function Ok value -> value | Error _ -> failf "exact point construction failed"
 let close left right = abs_float (left -. right) <= 1e-11
 
 let geometry points triangles =
@@ -29,11 +26,11 @@ let geometry points triangles =
 let triangle points = geometry points [|0;1;2|]
 
 let pipeline left right =
-  let constraints = Constraints.build ~grain:1 ~left ~right () |> get in
-  let coplanar = Coplanar.build ~grain:1 constraints |> get in
-  let refinement = Refinement.build ~coplanar ~grain:1 constraints |> get in
-  let complex = Complex.build constraints refinement |> get in
-  complex, Radial.build complex |> get
+  let constraints = Constraints.build ~grain:1 ~left ~right () |> get_rdk in
+  let coplanar = Coplanar.build ~grain:1 constraints |> get_rdk in
+  let refinement = Refinement.build ~coplanar ~grain:1 constraints |> get_rdk in
+  let complex = Complex.build constraints refinement |> get_rdk in
+  complex, Radial.build complex |> get_rdk
 
 let test_exact_radial_dot () =
   let source = Point.source
@@ -86,8 +83,8 @@ let test_cancellation () =
   let cancel = Cancel.create () in Cancel.cancel cancel;
   match Radial.build ~cancel complex with
   | Error error when Error.code error = "cancelled" -> ()
-  | Error error -> fail "unexpected cancellation error: %s" (Error.to_string error)
-  | Ok _ -> fail "cancelled radial ordering completed"
+  | Error error -> failf "unexpected cancellation error: %s" (Error.to_string error)
+  | Ok _ -> failf "cancelled radial ordering completed"
 
 let run () =
   test_exact_radial_dot ();

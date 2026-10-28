@@ -68,7 +68,325 @@ let report_line dump environment name =
     | Some l -> l
     | None -> fail ("no " ^ name ^ " line in the report"))
 
-let run () =
+  let enter3 environment count = enter_geo1 ~update:Rays_editor.Editor.update
+      ~panes:Rays_editor.Editor.panes environment count
+  let text_of environment = Editor_document.Workspace_doc.to_text
+      (Rays_editor.Editor.workspace environment)
+  let has text piece =
+    let n = String.length piece in
+    let rec at i = i + n <= String.length text && (String.sub text i n = piece || at (i + 1)) in
+    at 0
+
+  let cameras environment = List.filter (fun (info : Editor_document.Kind_graph.node) -> info.kind = "camera")
+      (Rays_editor.Editor.scene_document environment)
+  (* the id of the ACTIVE camera, from the crash report's "camera N" line *)
+  let active environment =
+    match String.split_on_char ' ' (report_line Rays_editor.Editor.crash_dump environment "camera") with
+    | [ _; "-" ] -> []
+    | [ _; id ] -> [ int_of_string id ]
+    | _ -> fail "unreadable camera line"
+  let near a b = Rays_math.Vec3.nearly_equal a b ~eps:1e-6
+  let eye environment = Camera.position (Rays_editor.Editor.render_camera environment)
+  let viewport_eye environment =
+    Camera.position (Easy_camera.camera (Rays_editor.Editor.camera environment))
+
+let wait count environment =
+  let deadline = Unix.gettimeofday () +. 60. in
+  let rec go count environment =
+    let environment = Rays_editor.Editor.update environment (frame count) in
+    match Rays_editor.Editor.prepared environment with
+    | Some _ -> environment
+    | None when Unix.gettimeofday () < deadline ->
+        Unix.sleepf 0.001;
+        go (count + 1) environment
+    | None -> fail "sketch environment did not publish its initial async cook" in
+  go count environment
+
+let camera_nodes () =
+  (* Camera nodes: a default camera following the viewport joins a document
+     without one, exactly one is ACTIVE, deleting the last re-adds it inside
+     the same undo entry, and a viewport drag is one coalesced undo entry. *)
+  let environment = Rays_editor.Editor.create ~ui_text_size:11 ~await:true ~workspace:(fixture ())
+      ~camera:(Easy_camera.create ~distance:6. ~inertia:false ())
+      ~factories:Sop.Nodes.factories
+      ~max_entries:4 ~max_payload_bytes:(16 * 1024 * 1024)
+      ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
+        |> Result.map_error Rdk.Error.to_string)
+      ~draw:(fun _graph mesh -> Scene.D3.create [Scene.D3.mesh mesh]) ()
+    |> Result.get_ok in
+  check (List.length (cameras environment) = 1 && List.length (active environment) = 1)
+    "Editor did not add one ACTIVE default camera";
+  (* Cameras are scene objects: rows of the scene list. *)
+  let environment = List.fold_left (fun environment count ->
+      Rays_editor.Editor.update environment (frame count)) environment [0; 1; 2] in
+  check (not (Rays_editor.Editor.can_undo environment)
+      && near (eye environment) (viewport_eye environment))
+    "an idle following camera wrote undo entries or drifted from the viewport";
+  (* The default camera object is a pinhole; the view camera
+     is the viewport with that lens while nothing looks through. *)
+  let view_lens environment = Camera.lens (Rays_editor.Editor.view_camera environment) in
+  check ((Camera.lens (Rays_editor.Editor.render_camera environment)).aperture = Camera.pinhole.aperture
+      && (view_lens environment).aperture = Camera.pinhole.aperture
+      && near (Camera.position (Rays_editor.Editor.view_camera environment))
+           (viewport_eye environment))
+    "the default camera object did not carry its lens into the view camera";
+  let idle = Rays_editor.Editor.update environment (frame 3) in
+  check (Rays_editor.Editor.view_camera idle == Rays_editor.Editor.view_camera environment)
+    "an idle frame rebuilt the view camera (a sketch tracer would restart each frame)";
+  let start_eye = eye environment in
+  let vx, vy, vw, vh = (Rays_editor.Editor.panes environment (frame 3)).view in
+  let px, py = vx + (vw / 2), vy + (vh / 2) in
+  let environment = List.fold_left (fun environment (count, events) ->
+      let frame = frame ~events count in
+      Rays_editor.Editor.update environment { frame with input = { frame.input with buttons = [Input.LeftButton] } })
+    environment [
+      4, [mouse_press (Input.LeftButton, (px, py))];
+      5, [mouse_move (px + 30, py)];
+      6, [mouse_move (px + 60, py + 10)];
+      7, [mouse_move (px + 90, py + 20)]] in
+  let environment = Rays_editor.Editor.update environment
+      (frame ~events:[mouse_release (Input.LeftButton, (px + 90, py + 20))] 8) in
+  check (not (near (eye environment) start_eye)
+      && near (eye environment) (viewport_eye environment))
+    "the following camera did not track a viewport orbit";
+  let command key count = let frame = frame ~events:[Input.Key_pressed (Input.KeyChar key)] count in
+    { frame with input = { frame.input with keys = [Input.Meta] } } in
+  (* navigation is view state (E12): the orbit leaves no undo entry, and an undo with nothing to
+     undo leaves the view where it is *)
+  check (not (Rays_editor.Editor.can_undo environment)) "a viewport orbit made an undo entry";
+  let orbited = eye environment in
+  let environment = Rays_editor.Editor.update environment (command 'z' 9) in
+  let environment = Rays_editor.Editor.update environment (frame 10) in
+  check (near (eye environment) orbited && near (viewport_eye environment) orbited
+      && not (Rays_editor.Editor.can_undo environment))
+    "an undo with nothing to undo moved the viewport";
+  let environment = Rays_editor.Editor.update environment
+      (frame ~events:[Input.Key_pressed Input.Home] 10) in
+  let environment = Rays_editor.Editor.update environment (frame 10) in
+  let camera_id = List.hd (active environment) in
+  (* the camera is the second row of the scene list (geo1 is the first) *)
+  let gx, gy, _, _ = (Rays_editor.Editor.panes environment (frame 10)).Pxui_shell.Layout.graph in
+  let at = gx + 60, gy + 24 + 24 + 12 in
+  let environment = Rays_editor.Editor.update environment (frame ~mouse:at 11) in
+  let environment = Rays_editor.Editor.update environment (frame ~mouse:at ~events:[
+      mouse_press (Input.LeftButton, at); mouse_release (Input.LeftButton, at)] 12) in
+  let environment = Rays_editor.Editor.update environment
+      (frame ~events:[Input.Key_pressed Input.Delete] 16) in
+  (* the host's camera is an object like any: deleting the last one is written (a scene graph
+     that declares no camera), not re-seeded, and one undo gives it back *)
+  check (cameras environment = [] && active environment = []
+         && has (text_of environment) "graph scene" && not (has (text_of environment) "scene/camera"))
+    "deleting the last camera was not written as no camera";
+  let environment = Rays_editor.Editor.update environment (command 'z' 17) in
+  check (List.map (fun (info : Editor_document.Kind_graph.node) -> info.id) (cameras environment) = [camera_id])
+    "undo after deleting the camera did not restore the original in one step";
+  (* Fly: / w (view focused) flies, held W moves forward, Escape exits;
+     Space exits and arms the leader in the same frame. *)
+  let key k = Input.Key_pressed k in
+  let fly_view environment = let vx, vy, _, _ = (Rays_editor.Editor.panes
+      environment (frame 18)).view in vx + 20, vy + 20 in
+  let environment = Rays_editor.Editor.update environment (frame ~events:[
+      mouse_press (Input.RightButton, fly_view environment);
+      mouse_release (Input.RightButton, fly_view environment)] 18) in
+  let environment = Rays_editor.Editor.update environment
+      (frame ~events:[key (Input.KeyChar '/'); key (Input.KeyChar 'w')] 18) in
+  check (Rays_editor.Editor.flying environment) "/ w did not enter fly mode";
+  let before = viewport_eye environment in
+  let environment = Rays_editor.Editor.update environment
+        (let frame = frame ~events:[key (Input.KeyChar 'w')] 18 in
+          { frame with input = { frame.input with keys = [Input.KeyChar 'w'] } }) in
+  check (not (near (viewport_eye environment) before)
+      && Rays_editor.Editor.selected_node environment = None)
+    "held W did not fly the viewport";
+  let environment = Rays_editor.Editor.update environment
+      (frame ~events:[key Input.Escape] 18) in
+  check (not (Rays_editor.Editor.flying environment)) "Escape did not exit fly mode";
+  let environment = Rays_editor.Editor.update environment
+      (frame ~events:[key (Input.KeyChar '/'); key (Input.KeyChar 'w')] 18) in
+  let environment = Rays_editor.Editor.update environment
+      (frame ~events:[key (Input.KeyChar '/')] 18) in
+  let environment = Rays_editor.Editor.update environment
+      (frame ~events:[key (Input.KeyChar 'g')] 18) in
+  check (not (Rays_editor.Editor.flying environment)
+      && width (Rays_editor.Editor.panes environment (frame 18)).graph = 0)
+    "Space did not exit fly mode into the leader";
+  let environment = Rays_editor.Editor.update environment
+      (frame ~events:[key (Input.KeyChar '/'); key (Input.KeyChar 'g')] 18) in
+  (* F frames the displayed geometry in the viewport even when another node is selected. *)
+  let environment = enter3 environment 400 in
+  let environment = Rays_editor.Editor.update environment (frame 404) in
+  let source_at = match Rays_editor.Editor.node_box environment [ "geo1"; "source" ] with
+    | Some rect -> card_header rect | None -> fail "the source node has no box" in
+  let environment = Rays_editor.Editor.update environment (frame ~mouse:source_at 405) in
+  let environment = Rays_editor.Editor.update environment (frame ~mouse:source_at ~events:[
+      mouse_press (Input.LeftButton, source_at); mouse_release (Input.LeftButton, source_at)] 406) in
+  let target environment = Easy_camera.target (Rays_editor.Editor.camera environment) in
+  let view_at = fly_view environment in
+  let environment = Rays_editor.Editor.update environment (frame ~events:[
+      mouse_press (Input.LeftButton, view_at); mouse_release (Input.LeftButton, view_at)] 407) in
+  let environment = Rays_editor.Editor.update environment
+      (frame ~events:[key (Input.KeyChar 'f')] 408) in
+  (* Framing waits for bounds when the display cook is still running. *)
+  let deadline = Unix.gettimeofday () +. 60. in
+  let rec framed count environment =
+    if near (target environment) (Rays_math.Vec3.create 5. 0. 0.)
+        || Unix.gettimeofday () > deadline then environment
+    else (Unix.sleepf 0.001;
+      framed (count + 1) (Rays_editor.Editor.update environment (frame count))) in
+  let environment = framed 409 environment in
+  check (near (target environment) (Rays_math.Vec3.create 5. 0. 0.))
+    "viewport-focused F did not focus on the displayed node's cached bounds";
+  Rays_editor.Editor.close environment
+
+let sketch_settings () =
+  (* Sketch settings live in the document: [prepare] reads them, a change
+     recooks, and undo restores the previous value (voxel_wall's renderer). *)
+  let mode_schema = Param.(schema ~name:"mode" ~default:0
+    [ field ~name:"mode" ~label:"Mode" ~kind:(integer ~min:0 ~max:3 ())
+        ~default:0 ~get:Fun.id ~set:(fun mode _ -> mode) () ]) in
+  let module Settings = Rays_editor.Settings in
+  let environment = Rays_editor.Editor.create ~ui_text_size:11 ~await:true ~workspace:(fixture ())
+      ~settings:(Settings.make mode_schema 0)
+      ~max_entries:4 ~max_payload_bytes:(16 * 1024 * 1024)
+      ~prepare:(fun settings _ -> Ok (Settings.get mode_schema settings))
+      ~draw:(fun _ _ -> Scene.D3.create []) () |> Result.get_ok in
+  let deadline = Unix.gettimeofday () +. 60. in
+  let rec wait_mode expected count environment =
+    let environment = Rays_editor.Editor.update environment (frame count) in
+    if Rays_editor.Editor.prepared environment = Some expected then environment
+    else if Unix.gettimeofday () < deadline then
+      (Unix.sleepf 0.001; wait_mode expected (count + 1) environment)
+    else fail "a settings change did not re-run prepare" in
+  let environment = wait_mode 0 0 environment in
+  let environment = wait_mode 1 100
+      (Rays_editor.Editor.set_settings environment (Settings.make mode_schema 1)) in
+  let undo count = let frame = frame ~events:[Input.Key_pressed (Input.KeyChar 'z')] count in
+    { frame with input = { frame.input with keys = [Input.Meta] } } in
+  let environment = wait_mode 0 200
+      (Rays_editor.Editor.update environment (undo 199)) in
+  check (Settings.get mode_schema (Rays_editor.Editor.settings environment) = 0)
+    "undo did not restore the sketch settings";
+  Rays_editor.Editor.close environment
+
+let preset_and_look_through () =
+  (* Every document is a workspace, so every document saves: the prompt owns the keyboard
+     while it is open, Enter writes the workspace text, and / b loads it back. *)
+  let module Preset = Rays_editor.Private.Preset in
+  let presets = Filename.temp_dir "sketch-ui-workspace-presets" "" in
+  let mesh_scene mesh = Scene.D3.create [Scene.D3.mesh mesh] in
+  let environment = Rays_editor.Editor.create ~ui_text_size:11 ~await:true ~workspace:(fixture ()) ~presets
+      ~camera:(Easy_camera.create ~distance:6. ~inertia:false ())
+      ~factories:Sop.Nodes.factories
+      ~max_entries:4 ~max_payload_bytes:(16 * 1024 * 1024)
+      ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
+        |> Result.map_error Rdk.Error.to_string)
+      ~draw:(fun _graph mesh -> mesh_scene mesh) () |> Result.get_ok in
+  let environment = wait 0 environment in
+  let key k = Input.Key_pressed k in
+  let environment = Rays_editor.Editor.update environment
+      (frame ~events:[key (Input.KeyChar '/'); key (Input.KeyChar 's')] 50) in
+  let graph_width = width (Rays_editor.Editor.panes environment (frame 50)).graph in
+  let environment = Rays_editor.Editor.update environment
+      (frame ~events:[key (Input.KeyChar '/'); key (Input.KeyChar 'g')] 50) in
+  check (width (Rays_editor.Editor.panes environment (frame 50)).graph
+      = graph_width) "open preset prompt let a workspace shortcut toggle the graph";
+  let environment = Rays_editor.Editor.update environment
+      (frame ~events:[key Input.Enter] 51) in
+  let saved = Preset.list ~directory:presets in
+  check (List.length saved = 1) "/ s did not save a preset of the document";
+  let original = Editor_document.Workspace_doc.to_text (Rays_editor.Editor.workspace environment) in
+  check (has (In_channel.with_open_bin (Preset.path ~directory:presets ~name:(fst (List.hd saved)))
+                In_channel.input_all) original)
+    "the preset file is not the workspace text";
+  let environment = match Rays_editor.Editor.edit environment
+      (Flow_graph.Flow_edit.Rename { node = [ "geo1"; "output" ]; to_ = "moved" }) with
+    | Ok environment -> environment | Error message -> fail message in
+  check (Editor_document.Workspace_doc.to_text (Rays_editor.Editor.workspace environment) <> original)
+    "the rename did not change the document";
+  let phases = Rays_editor.Editor.edit_phases environment in
+  check (Flow.Phase_timer.calls phases "check" = 1
+      && Flow.Phase_timer.calls phases "evaluate" = 1
+      && Flow.Phase_timer.calls phases "lower" = 1
+      && List.for_all (fun (e : Flow.Phase_timer.entry) -> e.seconds >= 0.) phases.entries)
+    "the editor edit did not perform exactly one check/evaluation/lowering";
+  check (has (report_line Rays_editor.Editor.crash_dump environment "phases") "check")
+    "the crash report omitted the last edit's phases";
+  let environment = Rays_editor.Editor.update environment
+      (frame ~events:[key (Input.KeyChar '/'); key (Input.KeyChar 'b')] 52) in
+  let environment = Rays_editor.Editor.update environment
+      (frame ~events:[key Input.Enter] 53) in
+  check (Editor_document.Workspace_doc.to_text (Rays_editor.Editor.workspace environment) = original
+      && Rays_editor.Editor.undo_label environment = Some "Load preset")
+    "/ b did not load the saved preset as one history entry";
+  (* Looking through the camera fits the film to its aspect (the render
+     resolution); otherwise the whole pane. *)
+  let environment = Rays_editor.Editor.update environment
+      (frame ~events:[key (Input.KeyChar '/'); key (Input.KeyChar 'v')] 52) in
+  let environment = Rays_editor.Editor.update environment (frame 53) in
+  check (Rays_editor.Editor.look_through environment
+      && near (Camera.position (Rays_editor.Editor.view_camera environment)) (eye environment))
+    "/ v did not look through the render camera";
+  let settings = Rays_editor.Editor.render_settings environment in
+  let _, _, pane_w, pane_h = (Rays_editor.Editor.panes environment (frame 54)).view in
+  let fx, fy, fw, fh = Rays_editor.Editor.film environment (frame 54) in
+  check (settings.width = 1920 && settings.height = 1080 && settings.max_spp = 256)
+    "the scene root did not carry default render settings";
+  (* the frame keeps clear of the label row above it (40), the readouts' row under it (36) and 12
+     at each side ([Viewport.film]), the film's aspect inside what is left, centred there *)
+  (* a body under 1000 wide follows the workspace sheet: 14.63 percent at each side, 32 above, 93 below *)
+  let narrow = pane_w < 1000 in
+  let side = if narrow then int_of_float (Float.round (0.1463 *. float pane_w)) else 12 in
+  let top = if narrow then 32 else 40 and bottom = if narrow then 93 else 36 in
+  let area_w = pane_w - (2 * side) and area_h = pane_h - top - bottom in
+  check (fw <= area_w && fh <= area_h && (fw = area_w || fh = area_h)
+      && abs (fw * 1080 - fh * 1920) <= 1920 && fx = side + ((area_w - fw) / 2)
+      && fy = (if narrow then top else top + ((area_h - fh) / 2)))
+    "look-through did not letterbox the film to the camera's aspect";
+  (* / v toggles look-through off: the view camera is the free viewport
+     (a following camera keeps it at the viewport). *)
+  let environment = Rays_editor.Editor.update environment
+      (frame ~events:[key (Input.KeyChar '/'); key (Input.KeyChar 'v')] 54) in
+  check (not (Rays_editor.Editor.look_through environment)
+      && near (Camera.position (Rays_editor.Editor.view_camera environment))
+           (viewport_eye environment))
+    "with look-through off the view camera did not follow the free viewport";
+  check (Rays_editor.Editor.film environment (frame 54) = (0, 0, pane_w, pane_h))
+    "without look-through the film did not fill the view pane";
+  let environment = Rays_editor.Editor.update environment
+      (frame ~events:[key (Input.KeyChar '/'); key (Input.KeyChar 'v')] 54) in
+  check (Rays_editor.Editor.look_through environment) "/ v did not restore look-through";
+  Rays_editor.Editor.close environment
+
+let native_smoke () =
+  (* Finite native smoke: the relative-pointer boundary toggles on a live
+     window and is released when the sketch stops. *)
+  if !native then begin
+  let toggled = ref [] in
+  let directory = Filename.temp_dir "sketch-ui-fly" "" in
+  let nested_capture = Filename.concat directory "nested/capture.png" in
+  (* One window: relative pointer, nested capture, and after_present. *)
+  let final = Result.get_ok(Sketch.run_state ~max_frames:2
+      ~config:{ Sketch.default_config with width = 120; height = 80 }
+      ~init:(fun _ -> 0)
+      ~update:(fun value (frame : Frame.t) ->
+        toggled := Sketch.set_relative_mouse (frame.input.frame = 1) :: !toggled;
+        if frame.input.frame = 2 then begin
+          check (value = 11) "after_present model was not used on the next frame";
+          check (Canvas.save_screen_png nested_capture = Ok ())
+            "native capture did not create its output directory"
+        end;
+        value + 1)
+      ~view:(fun _ _ -> [Scene.clear Rays_math.Color.black])
+      ~after_present:(fun value _ -> value + 10) ()) in
+  check (final = 22) "after_present model was not returned";
+  check (!toggled = [Ok (); Ok ()]
+      && Sketch.set_relative_mouse true <> Ok ())
+    "native relative-pointer toggle failed or outlived the sketch";
+  check (Sys.file_exists nested_capture)
+    "native capture did not write its nested PNG"
+  end
+
+let layout_panes () =
   let module Leader = Rays_editor.Private.Leader in
   List.iter (fun (graph : _ Editor_core.Command.t) ->
     check (List.exists (fun (command : Leader.command) ->
@@ -119,7 +437,10 @@ let run () =
   Pxui.Ui.destroy ui;
   let collapsed_panes = panes ~hidden:[Layout.Timeline; Inspector] resized (frame 5) in
   check (width collapsed_panes.inspector = 0)
-    "inspector toggle did not collapse the third column";
+    "inspector toggle did not collapse the third column"
+
+let run () =
+  layout_panes ();
 
   let environment = Rays_editor.Editor.create ~ui_text_size:11 ~await:true ~workspace:(fixture ())
       ~factories:Sop.Nodes.factories
@@ -128,19 +449,7 @@ let run () =
         |> Result.map_error Rdk.Error.to_string)
       ~draw:(fun _graph mesh -> Scene.D3.create [Scene.D3.mesh mesh]) ()
     |> Result.get_ok in
-  let deadline = Unix.gettimeofday () +. 60. in
-  let rec wait count environment =
-    let environment = Rays_editor.Editor.update environment (frame count) in
-    match Rays_editor.Editor.prepared environment with
-    | Some _ -> environment
-    | None when Unix.gettimeofday () < deadline ->
-        Unix.sleepf 0.001;
-        wait (count + 1) environment
-    | None -> fail "sketch environment did not publish its initial async cook"
-  in
   let environment = wait 0 environment in
-  let enter3 environment count = enter_geo1 ~update:Rays_editor.Editor.update
-      ~panes:Rays_editor.Editor.panes environment count in
   let environment = enter3 environment 0 in
   check (Rays_editor.Editor.level environment = Some "geo1")
     "entering geo1 from the scene list did not open its SOP network";
@@ -253,12 +562,6 @@ let run () =
     "/ c did not restore the camera/render inspector";
   let box environment path = match Rays_editor.Editor.node_box environment path with
     | Some rect -> rect | None -> fail "the node has no box in the graph pane" in
-  let text_of environment = Editor_document.Workspace_doc.to_text
-      (Rays_editor.Editor.workspace environment) in
-  let has text piece =
-    let n = String.length piece in
-    let rec at i = i + n <= String.length text && (String.sub text i n = piece || at (i + 1)) in
-    at 0 in
   (* Shared undo stack: an added node is one entry; Command-Z removes it,
      Shift-Command-Z brings it back. *)
   let source_point = card_row (box environment [ "geo1"; "source" ]) in
@@ -424,298 +727,10 @@ let run () =
   let environment = Rays_editor.Editor.update environment
       (frame ~events:[Input.Key_pressed Input.Escape] 245) in
   Rays_editor.Editor.close environment;
-
-  (* Camera nodes: a default camera following the viewport joins a document
-     without one, exactly one is ACTIVE, deleting the last re-adds it inside
-     the same undo entry, and a viewport drag is one coalesced undo entry. *)
-  let cameras environment = List.filter (fun (info : Editor_document.Kind_graph.node) -> info.kind = "camera")
-      (Rays_editor.Editor.scene_document environment) in
-  (* the id of the ACTIVE camera, from the crash report's "camera N" line *)
-  let active environment =
-    match String.split_on_char ' ' (report_line Rays_editor.Editor.crash_dump environment "camera") with
-    | [ _; "-" ] -> []
-    | [ _; id ] -> [ int_of_string id ]
-    | _ -> fail "unreadable camera line" in
-  let environment = Rays_editor.Editor.create ~ui_text_size:11 ~await:true ~workspace:(fixture ())
-      ~camera:(Easy_camera.create ~distance:6. ~inertia:false ())
-      ~factories:Sop.Nodes.factories
-      ~max_entries:4 ~max_payload_bytes:(16 * 1024 * 1024)
-      ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
-        |> Result.map_error Rdk.Error.to_string)
-      ~draw:(fun _graph mesh -> Scene.D3.create [Scene.D3.mesh mesh]) ()
-    |> Result.get_ok in
-  let near a b = Rays_math.Vec3.nearly_equal a b ~eps:1e-6 in
-  let eye environment = Camera.position (Rays_editor.Editor.render_camera environment) in
-  let viewport_eye environment =
-    Camera.position (Easy_camera.camera (Rays_editor.Editor.camera environment)) in
-  check (List.length (cameras environment) = 1 && List.length (active environment) = 1)
-    "Editor did not add one ACTIVE default camera";
-  (* Cameras are scene objects: rows of the scene list. *)
-  let environment = List.fold_left (fun environment count ->
-      Rays_editor.Editor.update environment (frame count)) environment [0; 1; 2] in
-  check (not (Rays_editor.Editor.can_undo environment)
-      && near (eye environment) (viewport_eye environment))
-    "an idle following camera wrote undo entries or drifted from the viewport";
-  (* The default camera object is a pinhole; the view camera
-     is the viewport with that lens while nothing looks through. *)
-  let view_lens environment = Camera.lens (Rays_editor.Editor.view_camera environment) in
-  check ((Camera.lens (Rays_editor.Editor.render_camera environment)).aperture = Camera.pinhole.aperture
-      && (view_lens environment).aperture = Camera.pinhole.aperture
-      && near (Camera.position (Rays_editor.Editor.view_camera environment))
-           (viewport_eye environment))
-    "the default camera object did not carry its lens into the view camera";
-  let idle = Rays_editor.Editor.update environment (frame 3) in
-  check (Rays_editor.Editor.view_camera idle == Rays_editor.Editor.view_camera environment)
-    "an idle frame rebuilt the view camera (a sketch tracer would restart each frame)";
-  let start_eye = eye environment in
-  let vx, vy, vw, vh = (Rays_editor.Editor.panes environment (frame 3)).view in
-  let px, py = vx + (vw / 2), vy + (vh / 2) in
-  let environment = List.fold_left (fun environment (count, events) ->
-      let frame = frame ~events count in
-      Rays_editor.Editor.update environment { frame with input = { frame.input with buttons = [Input.LeftButton] } })
-    environment [
-      4, [mouse_press (Input.LeftButton, (px, py))];
-      5, [mouse_move (px + 30, py)];
-      6, [mouse_move (px + 60, py + 10)];
-      7, [mouse_move (px + 90, py + 20)]] in
-  let environment = Rays_editor.Editor.update environment
-      (frame ~events:[mouse_release (Input.LeftButton, (px + 90, py + 20))] 8) in
-  check (not (near (eye environment) start_eye)
-      && near (eye environment) (viewport_eye environment))
-    "the following camera did not track a viewport orbit";
-  let command key count = let frame = frame ~events:[Input.Key_pressed (Input.KeyChar key)] count in
-    { frame with input = { frame.input with keys = [Input.Meta] } } in
-  (* navigation is view state (E12): the orbit leaves no undo entry, and an undo with nothing to
-     undo leaves the view where it is *)
-  check (not (Rays_editor.Editor.can_undo environment)) "a viewport orbit made an undo entry";
-  let orbited = eye environment in
-  let environment = Rays_editor.Editor.update environment (command 'z' 9) in
-  let environment = Rays_editor.Editor.update environment (frame 10) in
-  check (near (eye environment) orbited && near (viewport_eye environment) orbited
-      && not (Rays_editor.Editor.can_undo environment))
-    "an undo with nothing to undo moved the viewport";
-  let environment = Rays_editor.Editor.update environment
-      (frame ~events:[Input.Key_pressed Input.Home] 10) in
-  let environment = Rays_editor.Editor.update environment (frame 10) in
-  let camera_id = List.hd (active environment) in
-  (* the camera is the second row of the scene list (geo1 is the first) *)
-  let gx, gy, _, _ = (Rays_editor.Editor.panes environment (frame 10)).Pxui_shell.Layout.graph in
-  let at = gx + 60, gy + 24 + 24 + 12 in
-  let environment = Rays_editor.Editor.update environment (frame ~mouse:at 11) in
-  let environment = Rays_editor.Editor.update environment (frame ~mouse:at ~events:[
-      mouse_press (Input.LeftButton, at); mouse_release (Input.LeftButton, at)] 12) in
-  let environment = Rays_editor.Editor.update environment
-      (frame ~events:[Input.Key_pressed Input.Delete] 16) in
-  (* the host's camera is an object like any: deleting the last one is written (a scene graph
-     that declares no camera), not re-seeded, and one undo gives it back *)
-  check (cameras environment = [] && active environment = []
-         && has (text_of environment) "graph scene" && not (has (text_of environment) "scene/camera"))
-    "deleting the last camera was not written as no camera";
-  let environment = Rays_editor.Editor.update environment (command 'z' 17) in
-  check (List.map (fun (info : Editor_document.Kind_graph.node) -> info.id) (cameras environment) = [camera_id])
-    "undo after deleting the camera did not restore the original in one step";
-  (* Fly: / w (view focused) flies, held W moves forward, Escape exits;
-     Space exits and arms the leader in the same frame. *)
-  let key k = Input.Key_pressed k in
-  let fly_view environment = let vx, vy, _, _ = (Rays_editor.Editor.panes
-      environment (frame 18)).view in vx + 20, vy + 20 in
-  let environment = Rays_editor.Editor.update environment (frame ~events:[
-      mouse_press (Input.RightButton, fly_view environment);
-      mouse_release (Input.RightButton, fly_view environment)] 18) in
-  let environment = Rays_editor.Editor.update environment
-      (frame ~events:[key (Input.KeyChar '/'); key (Input.KeyChar 'w')] 18) in
-  check (Rays_editor.Editor.flying environment) "/ w did not enter fly mode";
-  let before = viewport_eye environment in
-  let environment = Rays_editor.Editor.update environment
-        (let frame = frame ~events:[key (Input.KeyChar 'w')] 18 in
-          { frame with input = { frame.input with keys = [Input.KeyChar 'w'] } }) in
-  check (not (near (viewport_eye environment) before)
-      && Rays_editor.Editor.selected_node environment = None)
-    "held W did not fly the viewport";
-  let environment = Rays_editor.Editor.update environment
-      (frame ~events:[key Input.Escape] 18) in
-  check (not (Rays_editor.Editor.flying environment)) "Escape did not exit fly mode";
-  let environment = Rays_editor.Editor.update environment
-      (frame ~events:[key (Input.KeyChar '/'); key (Input.KeyChar 'w')] 18) in
-  let environment = Rays_editor.Editor.update environment
-      (frame ~events:[key (Input.KeyChar '/')] 18) in
-  let environment = Rays_editor.Editor.update environment
-      (frame ~events:[key (Input.KeyChar 'g')] 18) in
-  check (not (Rays_editor.Editor.flying environment)
-      && width (Rays_editor.Editor.panes environment (frame 18)).graph = 0)
-    "Space did not exit fly mode into the leader";
-  let environment = Rays_editor.Editor.update environment
-      (frame ~events:[key (Input.KeyChar '/'); key (Input.KeyChar 'g')] 18) in
-  (* F frames the displayed geometry in the viewport even when another node is selected. *)
-  let environment = enter3 environment 400 in
-  let environment = Rays_editor.Editor.update environment (frame 404) in
-  let source_at = match Rays_editor.Editor.node_box environment [ "geo1"; "source" ] with
-    | Some rect -> card_header rect | None -> fail "the source node has no box" in
-  let environment = Rays_editor.Editor.update environment (frame ~mouse:source_at 405) in
-  let environment = Rays_editor.Editor.update environment (frame ~mouse:source_at ~events:[
-      mouse_press (Input.LeftButton, source_at); mouse_release (Input.LeftButton, source_at)] 406) in
-  let target environment = Easy_camera.target (Rays_editor.Editor.camera environment) in
-  let view_at = fly_view environment in
-  let environment = Rays_editor.Editor.update environment (frame ~events:[
-      mouse_press (Input.LeftButton, view_at); mouse_release (Input.LeftButton, view_at)] 407) in
-  let environment = Rays_editor.Editor.update environment
-      (frame ~events:[key (Input.KeyChar 'f')] 408) in
-  (* Framing waits for bounds when the display cook is still running. *)
-  let deadline = Unix.gettimeofday () +. 60. in
-  let rec framed count environment =
-    if near (target environment) (Rays_math.Vec3.create 5. 0. 0.)
-        || Unix.gettimeofday () > deadline then environment
-    else (Unix.sleepf 0.001;
-      framed (count + 1) (Rays_editor.Editor.update environment (frame count))) in
-  let environment = framed 409 environment in
-  check (near (target environment) (Rays_math.Vec3.create 5. 0. 0.))
-    "viewport-focused F did not focus on the displayed node's cached bounds";
-  Rays_editor.Editor.close environment;
-
-  (* Sketch settings live in the document: [prepare] reads them, a change
-     recooks, and undo restores the previous value (voxel_wall's renderer). *)
-  let mode_schema = Param.(schema ~name:"mode" ~default:0
-    [ field ~name:"mode" ~label:"Mode" ~kind:(integer ~min:0 ~max:3 ())
-        ~default:0 ~get:Fun.id ~set:(fun mode _ -> mode) () ]) in
-  let module Settings = Rays_editor.Settings in
-  let environment = Rays_editor.Editor.create ~ui_text_size:11 ~await:true ~workspace:(fixture ())
-      ~settings:(Settings.make mode_schema 0)
-      ~max_entries:4 ~max_payload_bytes:(16 * 1024 * 1024)
-      ~prepare:(fun settings _ -> Ok (Settings.get mode_schema settings))
-      ~draw:(fun _ _ -> Scene.D3.create []) () |> Result.get_ok in
-  let deadline = Unix.gettimeofday () +. 60. in
-  let rec wait_mode expected count environment =
-    let environment = Rays_editor.Editor.update environment (frame count) in
-    if Rays_editor.Editor.prepared environment = Some expected then environment
-    else if Unix.gettimeofday () < deadline then
-      (Unix.sleepf 0.001; wait_mode expected (count + 1) environment)
-    else fail "a settings change did not re-run prepare" in
-  let environment = wait_mode 0 0 environment in
-  let environment = wait_mode 1 100
-      (Rays_editor.Editor.set_settings environment (Settings.make mode_schema 1)) in
-  let undo count = let frame = frame ~events:[Input.Key_pressed (Input.KeyChar 'z')] count in
-    { frame with input = { frame.input with keys = [Input.Meta] } } in
-  let environment = wait_mode 0 200
-      (Rays_editor.Editor.update environment (undo 199)) in
-  check (Settings.get mode_schema (Rays_editor.Editor.settings environment) = 0)
-    "undo did not restore the sketch settings";
-  Rays_editor.Editor.close environment;
-
-  (* Every document is a workspace, so every document saves: the prompt owns the keyboard
-     while it is open, Enter writes the workspace text, and / b loads it back. *)
-  let module Preset = Rays_editor.Private.Preset in
-  let presets = Filename.temp_dir "sketch-ui-workspace-presets" "" in
-  let mesh_scene mesh = Scene.D3.create [Scene.D3.mesh mesh] in
-  let environment = Rays_editor.Editor.create ~ui_text_size:11 ~await:true ~workspace:(fixture ()) ~presets
-      ~camera:(Easy_camera.create ~distance:6. ~inertia:false ())
-      ~factories:Sop.Nodes.factories
-      ~max_entries:4 ~max_payload_bytes:(16 * 1024 * 1024)
-      ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
-        |> Result.map_error Rdk.Error.to_string)
-      ~draw:(fun _graph mesh -> mesh_scene mesh) () |> Result.get_ok in
-  let environment = wait 0 environment in
-  let key k = Input.Key_pressed k in
-  let environment = Rays_editor.Editor.update environment
-      (frame ~events:[key (Input.KeyChar '/'); key (Input.KeyChar 's')] 50) in
-  let graph_width = width (Rays_editor.Editor.panes environment (frame 50)).graph in
-  let environment = Rays_editor.Editor.update environment
-      (frame ~events:[key (Input.KeyChar '/'); key (Input.KeyChar 'g')] 50) in
-  check (width (Rays_editor.Editor.panes environment (frame 50)).graph
-      = graph_width) "open preset prompt let a workspace shortcut toggle the graph";
-  let environment = Rays_editor.Editor.update environment
-      (frame ~events:[key Input.Enter] 51) in
-  let saved = Preset.list ~directory:presets in
-  check (List.length saved = 1) "/ s did not save a preset of the document";
-  let original = Editor_document.Workspace_doc.to_text (Rays_editor.Editor.workspace environment) in
-  check (has (In_channel.with_open_bin (Preset.path ~directory:presets ~name:(fst (List.hd saved)))
-                In_channel.input_all) original)
-    "the preset file is not the workspace text";
-  let environment = match Rays_editor.Editor.edit environment
-      (Flow_graph.Flow_edit.Rename { node = [ "geo1"; "output" ]; to_ = "moved" }) with
-    | Ok environment -> environment | Error message -> fail message in
-  check (Editor_document.Workspace_doc.to_text (Rays_editor.Editor.workspace environment) <> original)
-    "the rename did not change the document";
-  let phases = Rays_editor.Editor.edit_phases environment in
-  check (Flow.Phase_timer.calls phases "check" = 1
-      && Flow.Phase_timer.calls phases "evaluate" = 1
-      && Flow.Phase_timer.calls phases "lower" = 1
-      && List.for_all (fun (e : Flow.Phase_timer.entry) -> e.seconds >= 0.) phases.entries)
-    "the editor edit did not perform exactly one check/evaluation/lowering";
-  check (has (report_line Rays_editor.Editor.crash_dump environment "phases") "check")
-    "the crash report omitted the last edit's phases";
-  let environment = Rays_editor.Editor.update environment
-      (frame ~events:[key (Input.KeyChar '/'); key (Input.KeyChar 'b')] 52) in
-  let environment = Rays_editor.Editor.update environment
-      (frame ~events:[key Input.Enter] 53) in
-  check (Editor_document.Workspace_doc.to_text (Rays_editor.Editor.workspace environment) = original
-      && Rays_editor.Editor.undo_label environment = Some "Load preset")
-    "/ b did not load the saved preset as one history entry";
-  (* Looking through the camera fits the film to its aspect (the render
-     resolution); otherwise the whole pane. *)
-  let environment = Rays_editor.Editor.update environment
-      (frame ~events:[key (Input.KeyChar '/'); key (Input.KeyChar 'v')] 52) in
-  let environment = Rays_editor.Editor.update environment (frame 53) in
-  check (Rays_editor.Editor.look_through environment
-      && near (Camera.position (Rays_editor.Editor.view_camera environment)) (eye environment))
-    "/ v did not look through the render camera";
-  let settings = Rays_editor.Editor.render_settings environment in
-  let _, _, pane_w, pane_h = (Rays_editor.Editor.panes environment (frame 54)).view in
-  let fx, fy, fw, fh = Rays_editor.Editor.film environment (frame 54) in
-  check (settings.width = 1920 && settings.height = 1080 && settings.max_spp = 256)
-    "the scene root did not carry default render settings";
-  (* the frame keeps clear of the label row above it (40), the readouts' row under it (36) and 12
-     at each side ([Viewport.film]), the film's aspect inside what is left, centred there *)
-  (* a body under 1000 wide follows the workspace sheet: 14.63 percent at each side, 32 above, 93 below *)
-  let narrow = pane_w < 1000 in
-  let side = if narrow then int_of_float (Float.round (0.1463 *. float pane_w)) else 12 in
-  let top = if narrow then 32 else 40 and bottom = if narrow then 93 else 36 in
-  let area_w = pane_w - (2 * side) and area_h = pane_h - top - bottom in
-  check (fw <= area_w && fh <= area_h && (fw = area_w || fh = area_h)
-      && abs (fw * 1080 - fh * 1920) <= 1920 && fx = side + ((area_w - fw) / 2)
-      && fy = (if narrow then top else top + ((area_h - fh) / 2)))
-    "look-through did not letterbox the film to the camera's aspect";
-  (* / v toggles look-through off: the view camera is the free viewport
-     (a following camera keeps it at the viewport). *)
-  let environment = Rays_editor.Editor.update environment
-      (frame ~events:[key (Input.KeyChar '/'); key (Input.KeyChar 'v')] 54) in
-  check (not (Rays_editor.Editor.look_through environment)
-      && near (Camera.position (Rays_editor.Editor.view_camera environment))
-           (viewport_eye environment))
-    "with look-through off the view camera did not follow the free viewport";
-  check (Rays_editor.Editor.film environment (frame 54) = (0, 0, pane_w, pane_h))
-    "without look-through the film did not fill the view pane";
-  let environment = Rays_editor.Editor.update environment
-      (frame ~events:[key (Input.KeyChar '/'); key (Input.KeyChar 'v')] 54) in
-  check (Rays_editor.Editor.look_through environment) "/ v did not restore look-through";
-  Rays_editor.Editor.close environment;
-
-  (* Finite native smoke: the relative-pointer boundary toggles on a live
-     window and is released when the sketch stops. *)
-  if !native then begin
-  let toggled = ref [] in
-  let directory = Filename.temp_dir "sketch-ui-fly" "" in
-  let nested_capture = Filename.concat directory "nested/capture.png" in
-  (* One window: relative pointer, nested capture, and after_present. *)
-  let final = Result.get_ok(Sketch.run_state ~max_frames:2
-      ~config:{ Sketch.default_config with width = 120; height = 80 }
-      ~init:(fun _ -> 0)
-      ~update:(fun value (frame : Frame.t) ->
-        toggled := Sketch.set_relative_mouse (frame.input.frame = 1) :: !toggled;
-        if frame.input.frame = 2 then begin
-          check (value = 11) "after_present model was not used on the next frame";
-          check (Canvas.save_screen_png nested_capture = Ok ())
-            "native capture did not create its output directory"
-        end;
-        value + 1)
-      ~view:(fun _ _ -> [Scene.clear Rays_math.Color.black])
-      ~after_present:(fun value _ -> value + 10) ()) in
-  check (final = 22) "after_present model was not returned";
-  check (!toggled = [Ok (); Ok ()]
-      && Sketch.set_relative_mouse true <> Ok ())
-    "native relative-pointer toggle failed or outlived the sketch";
-  check (Sys.file_exists nested_capture)
-    "native capture did not write its nested PNG"
-  end;
+  camera_nodes ();
+  sketch_settings ();
+  preset_and_look_through ();
+  native_smoke ();
   print_endline (if !native then "sketch ui tests passed"
     else "sketch ui logic tests passed (window-free)")
 

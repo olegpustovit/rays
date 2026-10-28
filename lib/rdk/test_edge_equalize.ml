@@ -2,7 +2,6 @@ open Rays
 open Rdk
 open Rdk_test_support
 
-let get_ok = get
 
 let geometry_owned ~kinds positions vertex_points primitive_offsets =
   let positions = Array.of_list positions in
@@ -11,9 +10,9 @@ let geometry_owned ~kinds positions vertex_points primitive_offsets =
   and y = Array.map (fun (_, y, _) -> y) positions
   and z = Array.map (fun (_, _, z) -> z) positions in
   let topology = Topology.create_owned ~point_count ~vertex_points
-      ~primitive_offsets ~primitive_kinds:kinds |> get_ok in
+      ~primitive_offsets ~primitive_kinds:kinds |> get in
   Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
-    ~topology () |> get_ok
+    ~topology () |> get
 
 let disjoint () = geometry_owned
     ~kinds:(Array.make 3 Topology.Open_polyline)
@@ -39,25 +38,6 @@ let close left right = abs_float (left -. right) <= 4e-6
 let array_close left right = Array.length left = Array.length right
   && Array.for_all2 close left right
 
-let equal_geometry left right =
-  let left_positions = positions left and right_positions = positions right in
-  left_positions.x = right_positions.x
-  && left_positions.y = right_positions.y
-  && left_positions.z = right_positions.z
-  && Topology.point_count (Geometry.topology left)
-     = Topology.point_count (Geometry.topology right)
-  && List.length (Geometry.edge_groups left) = List.length (Geometry.edge_groups right)
-  && List.for_all2 (fun left right ->
-       Edge_group.name left = Edge_group.name right
-       && Edge_group.length left = Edge_group.length right
-       && let same = ref true in
-          for edge = 0 to Edge_group.length left - 1 do
-            if Edge_group.mem edge left <> Edge_group.mem edge right then
-              same := false
-          done;
-          !same)
-       (Geometry.edge_groups left) (Geometry.edge_groups right)
-
 let many_disjoint edge_count =
   let point_count = edge_count * 2 in
   let x = Array.make point_count 0. and y = Array.make point_count 0.
@@ -71,8 +51,8 @@ let many_disjoint edge_count =
   let topology = Topology.create_owned ~point_count
       ~vertex_points:(Array.init point_count Fun.id)
       ~primitive_offsets:(Array.init (edge_count + 1) (fun edge -> edge * 2))
-      ~primitive_kinds:(Array.make edge_count Topology.Open_polyline) |> get_ok in
-  Geometry.create ~positions ~topology () |> get_ok
+      ~primitive_kinds:(Array.make edge_count Topology.Open_polyline) |> get in
+  Geometry.create ~positions ~topology () |> get
 
 let many_chains count =
   let point_count = count * 3 in
@@ -88,8 +68,8 @@ let many_chains count =
   let topology = Topology.create_owned ~point_count
       ~vertex_points:(Array.init point_count Fun.id)
       ~primitive_offsets:(Array.init (count + 1) (fun chain -> chain * 3))
-      ~primitive_kinds:(Array.make count Topology.Open_polyline) |> get_ok in
-  Geometry.create ~positions ~topology () |> get_ok
+      ~primitive_kinds:(Array.make count Topology.Open_polyline) |> get in
+  Geometry.create ~positions ~topology () |> get
 
 let all_edge_lengths geometry =
   let p = positions geometry and index = Topology_index.create

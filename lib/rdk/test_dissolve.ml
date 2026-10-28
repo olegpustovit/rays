@@ -54,52 +54,6 @@ let int_attribute owner name geometry =
   | Attribute.Int values -> values
   | _ -> fail (name ^ " storage")
 
-let equal_geometry left right =
-  let lp = Packed.Float3.View.view (Geometry.positions left)
-  and rp = Packed.Float3.View.view (Geometry.positions right)
-  and lt = Topology.View.view (Geometry.topology left)
-  and rt = Topology.View.view (Geometry.topology right) in
-  lp.x = rp.x && lp.y = rp.y && lp.z = rp.z
-  && lt.vertex_points = rt.vertex_points
-  && lt.primitive_offsets = rt.primitive_offsets
-  && Bytes.equal lt.primitive_kinds rt.primitive_kinds
-  && List.compare_lengths (Geometry.attributes left)
-       (Geometry.attributes right) = 0
-  && List.for_all2 (fun left right ->
-    Attribute.owner left = Attribute.owner right
-    && Attribute.name left = Attribute.name right
-    && match Attribute.View.storage left, Attribute.View.storage right with
-       | Attribute.Float a, Attribute.Float b -> a = b
-       | Attribute.Int a, Attribute.Int b -> a = b
-       | Attribute.Text a, Attribute.Text b -> a = b
-       | Attribute.Float2 a, Attribute.Float2 b ->
-           Packed.Float2.View.view a = Packed.Float2.View.view b
-       | Attribute.Float3 a, Attribute.Float3 b ->
-           Packed.Float3.View.view a = Packed.Float3.View.view b
-       | Attribute.Float4 a, Attribute.Float4 b ->
-           Packed.Float4.View.view a = Packed.Float4.View.view b
-       | Attribute.Int_array a, Attribute.Int_array b ->
-           Packed.Int_array.View.view a = Packed.Int_array.View.view b
-       | Attribute.Float_array a, Attribute.Float_array b ->
-           Packed.Float_array.View.view a = Packed.Float_array.View.view b
-       | _ -> false) (Geometry.attributes left) (Geometry.attributes right)
-  && List.compare_lengths (Geometry.groups left) (Geometry.groups right) = 0
-  && List.for_all2 (fun left right ->
-    Group.owner left = Group.owner right
-    && Group.name left = Group.name right
-    && Group.length left = Group.length right
-    && Group.ordered_elements left = Group.ordered_elements right
-    && Group.View.bits_view left = Group.View.bits_view right)
-      (Geometry.groups left) (Geometry.groups right)
-  && List.compare_lengths (Geometry.edge_groups left)
-       (Geometry.edge_groups right) = 0
-  && List.for_all2 (fun left right ->
-    Edge_group.name left = Edge_group.name right
-    && Edge_group.length left = Edge_group.length right
-    && Array.init (Edge_group.length left) (fun edge -> Edge_group.mem edge left)
-       = Array.init (Edge_group.length right) (fun edge -> Edge_group.mem edge right))
-      (Geometry.edge_groups left) (Geometry.edge_groups right)
-
 let two_quads () =
   Plane_generators.grid ~connectivity:Plane_generators.Grid_quads ~columns:2 ~rows:1 ~size:2. ()
   |> get_rdk |> add_payload

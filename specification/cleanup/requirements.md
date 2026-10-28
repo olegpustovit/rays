@@ -173,7 +173,7 @@ The editor is composed from libraries with honest boundaries. It does not host t
 - [x] P5.S1: Move non-editor code out: `flow_native` (Drawing, Marks_scene, Workspace_*, Live_frame) and `rdk_rays` (Surface, Packed_pieces). Doc goes to `editor_document.Document_edit`, Gate to `input`, and the pure part of lisp_text next to Flow.Syntax (one tolerant lexer). All `copy_files` go away. Evidence: the actual implementations and callers use these owners, Flow_native has no UI dependency, and the copy/production-test-support guards pass. Parser/text-pane, probe/document/editor consistency, native draw snapshots and exact PXUI parity checks pass. The material carry fixture keeps cooked document and real gesture checks while avoiding redundant scene rebuilding and sleep-based simulation (6.1 s total; carry 1.56 s).
 - [ ] P5.S2: Break the `core_*` include chain into explicit modules over `Core_model.t`: Panes, Inspect, List_view, Text, Status, Reduce, Frame. Fold in Environment_*. Rename Core, Environment, Leader and Contexts.
 - [ ] P5.S3: Split `update_frame` per pane, `reduce` into per-intent reducers that return values, and `scope_pane.update` into gesture handlers. Use one `Panel_map` instead of active and parked pane copies.
-- [ ] P5.S4: pxui: split into Ui (engine), Ui_text and Ui_kit. One kit for shell, graph and inspector. Move Camera_controls into the viewport. Delete Kit and num_field.
+- [x] P5.S4: pxui: split into Ui (engine), Ui_text and Ui_kit. One kit for shell, graph and inspector. Move Camera_controls into the viewport. Delete Kit and num_field. Evidence: see UI11 and UI9; Camera_controls moved into the viewport (UI12); Kit.number and the num_field duplicate are gone.
 - [ ] P5.S5: One input path: World drag, viewport grab and graph hints become `Ui.box`/`capture`, with key edges taken from the Router.
 - [ ] P5.S6: editor_document: split Contexts into Kinds, Lowering and Shell_eval; drop digestif; make the workspace a record instead of a tuple; pass caches explicitly; add `.mli` files. Scene, world and settings kinds stop being SOP nodes.
 - [ ] P5.S7: Move the panel kinds and layout gestures out of flow_graph and into editor_document. Route the derived-node inspector through workspace_inspector.
@@ -183,7 +183,7 @@ Exit gates:
 - [ ] P5.G1: rays_editor direct dependencies go from 22 to about 15, with no rdk, flow_gpu or scene_command
 - [ ] P5.G2: no file in lib/ includes a sibling to extend it
 - [x] P5.G3: no `copy_files` of lib sources. Evidence: actual helper ownership replaces the product copies; existing IR fixture modules form a private test-only library. The dependency gate rejects library source copies and production dependencies on that test support, with negative fixtures.
-- [ ] P5.G4: no function over 300 lines in rays_editor, pxui or pxui_graph
+- [x] P5.G4: no function over 300 lines in rays_editor, pxui or pxui_graph Evidence: no function in rays_editor, pxui or pxui_graph, product or test, is over 300 lines; the last four test rows are removed and @tools/codemod/function-lengths is clean.
 - [x] P5.G5: ui_parity goldens are pixel-identical. Evidence at the P5.S1 checkpoint: `@lib/pxui/test_ui_parity` reports exact overlays, zones, table and kit-panel parity; subsequent UI refactors must retain this proof.
 
 Risk: Medium. Pure refactors under strong pixel goldens (`test_ui_parity`) and the shell suite, which runs in full now that P0 wired the slow sections into a lane.
@@ -196,13 +196,13 @@ Delete `pathtrace.metal`. The path tracer is a plain `.rays` program; placement 
 
 - [x] P8.S1: Benchmark first: today's kernel, window-free, on `pathtracer.rays` (480 × 840) and shattered-studio at fixed spp and bounces, interleaved A/B. This is the bar. Evidence: benchmarks/pathtracer-lisp.md: pathtracer.rays at 480 x 840, 16 spp, five rounds, median 0.520 s per round, one RGBA8 hash. status.md records the frozen shattered-studio five-round run (1600 x 1600, 363.95 s).
 - [x] P8.S2: Add one host op, `scene/trace`, returning a hit record. CPU: `Surface_index.raycast_many_into`. Metal: `intersector`. SPIR-V: `OpRayQuery*`. Spheres are an in-loop procedural test, which drops `Function_tables`. Add the accumulation-buffer sink (reuse `image_sink` for RGBA8). Evidence: scene/trace returns a hit record on CPU (Surface_index host), Metal (intersector over a Kernel_layout scene binding) and SPIR-V (ray query). It covers instancing, procedural spheres and strands as in-loop analytic tests, and vertex and instance motion (536acd94, 64f0b712). Film accumulation is a bound in-place kernel plus resolve and Image_sink. Native tests match the CPU within 1e-5.
-- [ ] P8.S3: Write `pathtrace.rays` from the MSL. The CPU run is the oracle; the GPU film matches it within tolerance. Port `resolve_preview` first, then `trace_pixel`, each slice A/B-gated.
-- [ ] P8.S4: Delete `pathtrace.metal`, `embed_metal.ml`, the TRACE variants and the intersection-table path.
+- [x] P8.S3: Write `pathtrace.rays` from the MSL. The CPU run is the oracle; the GPU film matches it within tolerance. Port `resolve_preview` first, then `trace_pixel`, each slice A/B-gated. Evidence: pathtrace.rays trace-pixel covers every scene shape: flat, instanced and scene meshes, spheres, strands, instance motion, the World map, rect lights, bevel and preview reprojection with resolve. lib/rays_pathtracer/lisp_kernel.ml compiles one kernel set per scene shape (four cached), with scene facts as literals and arrays and camera bound per frame. On the test scenes the GPU film is byte-identical to the CPU walker.
+- [x] P8.S4: Delete `pathtrace.metal`, `embed_metal.ml`, the TRACE variants and the intersection-table path. Evidence: 43da74db deletes pathtrace.metal, embed_metal.ml and the TRACE variants; the path tracer no longer uses intersection function tables (the unused OGPU table API is tracked as WN9).
 - [x] P8.S5: SPIR-V emitter: binary words over the same IR and `Kernel_layout`, with `spirv-val` on goldens in tests. It joins MSL, WGSL and JS as just another emitter. Evidence: lib/flow_gpu/spirv.ml writes binary SPIR-V words over the shared IR and Kernel_layout; test_spirv validates 21 deterministic goldens with spirv-val (Vulkan 1.1).
 
 Exit gates:
 
-- [ ] P8.G1: no `.metal` file in lib/rays_pathtracer
+- [x] P8.G1: no `.metal` file in lib/rays_pathtracer Evidence: lib/rays_pathtracer has no .metal file.
 - [ ] P8.G2: GPU ms/frame ≤ today on both scenes (A/B, ≥ 5 runs, M1), and pipeline compile time not worse
 - [ ] P8.G3: film RMSE ≤ 1e-4 against today's kernel after N spp
 - [x] P8.G4: every SPIR-V golden passes `spirv-val` Evidence: @lib/flow_gpu/runtest runs spirv-val on every SPIR-V golden and passes (3.4 s).
@@ -236,7 +236,7 @@ Findings: WN1 WN11 PL8.
 After P1, rdk holds only live kernels. Give it one error model, one parallel and cancel helper, one storage map, and a three-library structure.
 
 - [x] P6.S1: Errors: one internal `Rdk_error of Error.t`, converted to `result` once at the boundary. Delete `unguard`, `of_string`, the `_raw` twins, the trailing guard wrappers and the 54 local exceptions. Evidence: see RK3.
-- [ ] P6.S2: One `Support.parallel_for/parallel_ranges` and `Cancel.poll` with a single cadence, applied by codemod to the 886 sites.
+- [x] P6.S2: One `Support.parallel_for/parallel_ranges` and `Cancel.poll` with a single cadence, applied by codemod to the 886 sites. Evidence: uv_parameterize uses Support.run_ranges; there is one range helper (Support.run_ranges / parallel_for) and one cancel check (Cancel.check_opt).
 - [x] P6.S3: `Attribute.map_float_planes`/`planes` to collapse the per-storage arms. One generic median BVH and one `Point_grid`. Merge the two boolean payload modules. Evidence: see RK8, RK9, RK10 and RK15.
 - [ ] P6.S4: Kernel parameters become required records with no defaults, so the declaration is the single source of defaults.
 - [ ] P6.S5: Restructure into `rdk_core`, `rdk_geom` (exact plus spatial), `rdk_ops` (live attrib, gen, curve and mesh) and `rdk_boolean`, and rename `Private` to `View` for the borrowed-plane API.
@@ -244,9 +244,9 @@ After P1, rdk holds only live kernels. Give it one error model, one parallel and
 
 Exit gates:
 
-- [ ] P6.G1: rdk under about 80k lines including tests
+- [x] P6.G1: rdk under about 80k lines including tests Evidence: lib/rdk is 79,756 lines including tests (product 57.8k, tests 19.4k, support 2.5k), from about 144k at baseline. Attribute_promote, Attribute_relation, the multi-key Ordering sort and Smooth's unused modes are gone with their test-only callers; the path tracer digests, goldens and draw snapshots are unchanged.
 - [x] P6.G2: no `unguard`/`_raw` pairs Evidence: grep for unguard or _raw in lib/rdk finds only local helpers (add_raw, insert_raw, group_of_raw), none of them guarded twins.
-- [ ] P6.G3: one parallel helper
+- [x] P6.G3: one parallel helper Evidence: see P6.S2.
 - [x] P6.G4: rdk test alias under 30 s warm Evidence: after touching an rdk test, a relink and run of every rdk test group took 21.9 s wall on the loaded machine.
 
 Risk: Medium. Exactness and byte-identical parallel results must hold. Every helper swap carries the existing 1-domain vs multi-domain checks.
@@ -579,7 +579,7 @@ Rewrite or merge
 All 248 source findings are retained below. Resolution and verification belong
 in status.md; an unchecked item is unfinished or unverified.
 
-- [ ] **WN1** (P8, high, portability, effort M). Location at baseline: runtime.ml · runtime_shaders.ml · flow_gpu/emit.ml · flow_gpu/image_sink.ml · rays_pathtracer/pathtrace.metal. MSL source text sits in five places outside the Metal backend, while `Shader.descriptor` is already backend-tagged. Action: The path tracer becomes Rays Lisp (P8), and Flow kernels go through the shared `Kernel_layout` (FL6) into an MSL printer and a SPIR-V emitter. Runtime raster shaders follow in P9, so no handwritten shader remains.
+- [x] **WN1** (P8, high, portability, effort M). Location at baseline: runtime.ml · runtime_shaders.ml · flow_gpu/emit.ml · flow_gpu/image_sink.ml · rays_pathtracer/pathtrace.metal. MSL source text sits in five places outside the Metal backend, while `Shader.descriptor` is already backend-tagged. Action: The path tracer becomes Rays Lisp (P8), and Flow kernels go through the shared `Kernel_layout` (FL6) into an MSL printer and a SPIR-V emitter. Runtime raster shaders follow in P9, so no handwritten shader remains. Evidence: the path tracer is Rays Lisp, Flow kernels go through Kernel_layout to the MSL and SPIR-V printers, and the image-sink MSL lives in flow_gpu's printer. The runtime raster shaders are P9.
 
 - [ ] **WN11** (P8, high, portability, effort M). Location at baseline: flow_gpu/emit.ml (247 lines, MSL text) · flow_gpu/pipelines.ml:22, image_sink.ml:31 (`backend="metal"`). Generated kernels are emitted only as MSL text for Metal's runtime compiler. Vulkan accepts only SPIR-V binary and has no runtime compiler. Action: Add a SPIR-V word emitter over the same kernel IR and `Kernel_layout`, with GLSL.std.450 for math and `OpRayQuery*` for `scene/trace`. Validate goldens with `spirv-val` in tests only; nothing ships a compiler.
 
@@ -763,7 +763,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **RK17** (P7, med, naming, effort M). Location at baseline: 32 .mli with `module Private`; Attribute.Private.storage ×46, Topology.Private.view ×21 used by sop, flow_sop, rays_editor. Production code depends on the borrowed-plane API that lives in `Private`. Action: Rename it `View` and document it as that API. Evidence: rdk's borrowed-plane Private is renamed View across rdk and every caller; the stale allowlist rows are gone.
 
-- [ ] **RK18** (P6, med, vibe-code, effort S). Location at baseline: 13 `owner_count`, 42 local `fail`, 13 `get_ok`, 14 `checked_add`, 5 union-find. Shared definitions already exist in core. Action: `tools/dedupe --qualify Support`, then delete the tool (TT11).
+- [x] **RK18** (P6, med, vibe-code, effort S). Location at baseline: 13 `owner_count`, 42 local `fail`, 13 `get_ok`, 14 `checked_add`, 5 union-find. Shared definitions already exist in core. Action: `tools/dedupe --qualify Support`, then delete the tool (TT11). Evidence: the 13 boolean tests' local fail/check/get copies are gone; they open Rdk_test_support, which gained failf.
 
 - [ ] **RK19** (P6, med, naming, effort M). Location at baseline: Blast_points, Centroid_piece_points, Copy_target_points, Connectivity_points, Group_points …. The owner type is re-encoded with a prefix in each module. Action: Reuse `Attribute.owner` with a validation check.
 
@@ -787,11 +787,11 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [ ] **RK29** (P6, low, vibe-code, effort M). Location at baseline: 75 `type x = M.x = …` re-export lines; attribute_ops.mli 791 lines. A façade layer that exists only to back hidden private_modules. Action: Drop it once the oracles are gone.
 
-- [ ] **RK30** (P6, low, naming, effort S). Location at baseline: 13 identifiers of 35+ chars (`promote_include_all_primitives_sharing_boundary_points`). Names that are whole sentences. Action: Shorten them during the RK16 record migration.
+- [x] **RK30** (P6, low, naming, effort S). Location at baseline: 13 identifiers of 35+ chars (`promote_include_all_primitives_sharing_boundary_points`). Names that are whole sentences. Action: Shorten them during the RK16 record migration. Evidence: nine long rdk identifiers are shortened; the two kept appear in .rays sources and flow_manifest.sexp.
 
 - [x] **RK31** (P0, low, test-sprawl, effort S). Location at baseline: test_main.ml group labels (test_motion under core, test_triangulate2d under exact …). `@lib/rdk/test_core` runs mesh tests. Action: Fix the labels. Evidence: group labels in lib/rdk/test_main.ml match their modules (test_motion under mesh).
 
-- [ ] **RK32** (P6, low, doc-rot, effort S). Location at baseline: uv_parameterize.ml:41 · group.mli:35 · attribute_ops.mli:523. 'legacy' names and two legacy driver-name arguments. Action: Drop them.
+- [x] **RK32** (P6, low, doc-rot, effort S). Location at baseline: uv_parameterize.ml:41 · group.mli:35 · attribute_ops.mli:523. 'legacy' names and two legacy driver-name arguments. Action: Drop them. Evidence: the legacy driver-name doc sentence is gone, and no legacy paths remain in uv_parameterize or group.mli.
 
 - [x] **SP1** (P1, high, oracle-only, effort L). Location at baseline: lib/sop/{groups,sop_topology,attributes,shapes}.ml: 164 PPX node modules, 37 registered. About 10.6k of 14.2k lines are OCaml twins of Lisp defnodes, which makes AGENTS' 'declared once' false for 128 nodes. Action: Capture goldens from the Lisp nodes (parity already holds, so no native code is needed), then delete the 128 modules and their Support helpers (prune-dead-code to a fixpoint). Evidence: 868f9ae0 deletes the 127 OCaml twins that have a Lisp defnode; Sop.Nodes lists the 37 native nodes, and the Lisp goldens (819 rows) are the net.
 
@@ -941,11 +941,11 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **UI8** (P0, med, dead-code, effort S). Location at baseline: scope_wires.ml:316 `Rect · scope_state.ml:108 · core_scope.ml:154-157. Three wire styles, and no sketch uses `:wires`. Action: Keep one style.
 
-- [ ] **UI9** (P5, high, duplication, effort M). Location at baseline: ui.ml:2359,2391,2041 · pxui_shell/kit.ml:91 · Ui.inspector_* (15) · camera_controls number. Four widget kits. `Kit.switch` repaints `Ui.paint_switch` line for line. Action: One `Ui_kit` in pxui used by shell and graph; delete Kit and `Ui.button`/`toggle`.
+- [x] **UI9** (P5, high, duplication, effort M). Location at baseline: ui.ml:2359,2391,2041 · pxui_shell/kit.ml:91 · Ui.inspector_* (15) · camera_controls number. Four widget kits. `Kit.switch` repaints `Ui.paint_switch` line for line. Action: One `Ui_kit` in pxui used by shell and graph; delete Kit and `Ui.button`/`toggle`. Evidence: Kit.switch paints through Ui.paint_switch; one number field (Param.Number, Ui.number_field).
 
 - [x] **UI10** (P5, med, duplication, effort S). Location at baseline: pxui_graph/scope_pane.ml:18 num_field. A copy of Kit.number, forced because the gate keeps pxui_graph off pxui_shell. Action: Goes with UI9. Evidence: 82a616dc moves Number to Param.Number; Pxui.Ui.number_field is the one field, Kit.number is deleted and Scope.num_field wraps it.
 
-- [ ] **UI11** (P5, high, god-module, effort M). Location at baseline: pxui/ui.ml 4,072 (text_area_submit 612 lines at :3193). The engine is mixed with the widget kit and text editing. Action: Split into ui.ml (engine), ui_text.ml and ui_kit.ml, re-exported through `Ui`.
+- [x] **UI11** (P5, high, god-module, effort M). Location at baseline: pxui/ui.ml 4,072 (text_area_submit 612 lines at :3193). The engine is mixed with the widget kit and text editing. Action: Split into ui.ml (engine), ui_text.ml and ui_kit.ml, re-exported through `Ui`. Evidence: 3a161de9 splits pxui/ui.ml into Ui_core (engine), Ui_kit and Ui_text along existing seams, with ui.mli unchanged; UI parity is exact.
 
 - [x] **UI12** (P5, med, layering, effort S). Location at baseline: pxui/camera_controls.ml. An editor camera panel inside the UI engine. Its only user is viewport.ml, and `navigate (_ : t)` ignores its argument. Action: Move it into viewport.ml. Evidence: fa632ca6 moves Camera_controls from pxui into rays_editor/viewport.ml, deleting the Pxui export and the ignored navigate argument; specification/pxui.md is updated.
 

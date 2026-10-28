@@ -4341,9 +4341,8 @@ let subdivide ({ cancel; grain; scheme; iterations; primitives; cracks; consiste
          | None -> () | Some free -> parts := free :: !parts);
         let combined = combine_parts ?cancel ?grain ~source:prepared
             (List.rev !parts) in
-        let ordered = Error.get (Ordering.sort ?cancel ?grain ~owner:Ordering.Primitives
-            ~key:(Ordering.Attribute_component
-              { name = source_order_name; component = 0 }) combined) in
+        let ordered = Error.get (Ordering.sort_primitives ?cancel ?grain
+            ~name:source_order_name combined) in
         let output = Geometry.without_attribute ~owner:Attribute.Primitive
             source_order_name ordered in
         Ok (if generate_resulting_creases then output

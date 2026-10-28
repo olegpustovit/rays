@@ -1,19 +1,17 @@
-(executable
- (name embed_metal)
- (modules embed_metal))
-
+; The Lisp kernels' declarations, embedded in the order they are read.
 (rule
- (target pathtrace_source.ml)
- (deps pathtrace.metal)
+ (target pathtrace_lisp.ml)
+ (deps pathtrace_helpers.rays pathtrace.rays resolve_preview.rays)
  (action (with-stdout-to %{target}
-  (run %{exe:embed_metal.exe} %{dep:pathtrace.metal}))))
+  (progn (echo "let source = {rays|")
+   (cat pathtrace_helpers.rays) (cat pathtrace.rays) (cat resolve_preview.rays) (echo "|rays}\n")))))
 
 (library
  (name rays_pathtracer)
  (public_name rays.pathtracer)
- (modules rays_pathtracer pathtrace_source mesh_data mesh_build frame_data)
- (private_modules mesh_data mesh_build frame_data)
- (libraries rays ogpu renderer runtime_resources rays_math unix))
+ (modules rays_pathtracer pathtrace_lisp lisp_kernel mesh_data mesh_build frame_data)
+ (private_modules pathtrace_lisp lisp_kernel mesh_data mesh_build frame_data)
+ (libraries rays ogpu renderer runtime_resources rays_math flow flow_ir flow_gpu input unix))
 
 (executable
  (enabled_if (= %{system} macosx))
@@ -24,7 +22,6 @@
 (rule
  (enabled_if (= %{system} macosx))
  (alias test_pathtracer)
- (deps pathtrace.metal)
  (action (run %{exe:test_main.exe} test_pathtracer)))
 
 ; Two frames byte for byte on the Apple M1 GPU and driver. It reads no switch:
@@ -34,7 +31,6 @@
  (enabled_if (= %{system} macosx))
  (alias test_pathtracer_exact_m1)
  (locks smoke_window)
- (deps pathtrace.metal)
  (action (run %{exe:test_main.exe} test_pathtracer_exact_m1)))
 
 (rule
@@ -52,7 +48,6 @@
  (enabled_if (= %{system} macosx))
  (alias qualification)
  (locks smoke_window)
- (deps pathtrace.metal)
  (action (run %{exe:test_main.exe} test_parity)))
 
 (rule
@@ -80,10 +75,9 @@
  (enabled_if (= %{system} macosx))
  (name test_lisp)
  (modules test_lisp)
- (libraries rays rays_pathtracer renderer ogpu ogpu_metal flow flow_ir flow_gpu flow_ir_test_support rays_diagnostic input rays_math unix parallel))
+ (libraries rays rays_pathtracer flow ogpu_metal rays_math))
 
 (rule
  (enabled_if (= %{system} macosx))
  (alias runtest-native)
- (deps pathtrace_helpers.rays pathtrace.rays pathtrace.metal)
  (action (run %{exe:test_lisp.exe})))

@@ -1,13 +1,10 @@
 open Rdk
+open Rdk_test_support
 
 module Constraints = Rdk_boolean.Boolean_constraints
 let approximate_point plan point =
   Rdk_exact.Implicit_point.approximate (Constraints.View.point plan point)
 
-let fail format = Printf.ksprintf failwith format
-let check condition message = if not condition then fail "%s" message
-let get = function Ok value -> value | Error error -> fail "%s" (Error.to_string error)
-let get_string = function Ok value -> value | Error message -> fail "%s" message
 let close left right = abs_float (left -. right) <= 1e-12
 
 let geometry points triangles =
@@ -36,7 +33,7 @@ let test_right_operand_constraints () =
         0.5,-0.5,-1.; 0.5,1.5,1.; 0.5,1.5,-1.|]
       [|0;1;2; 3;4;5|] in
   let plan = Constraints.build ~resolve_right_self_intersections:true
-      ~grain:1 ~left ~right () |> get in
+      ~grain:1 ~left ~right () |> get_rdk in
   check (Constraints.constraint_count plan = 1
       && Constraints.constraint_first_side plan 0 = Constraints.Right
       && Constraints.constraint_second_side plan 0 = Constraints.Right)
@@ -54,7 +51,7 @@ let test_same_operand_coplanar_pair () =
   and right = geometry
       [|10.,10.,0.; 11.,10.,0.; 10.,11.,0.|] [|0;1;2|] in
   let plan = Constraints.build ~resolve_left_self_intersections:true
-      ~grain:1 ~left ~right () |> get in
+      ~grain:1 ~left ~right () |> get_rdk in
   check (Constraints.coplanar_pair_count plan = 1
       && Constraints.coplanar_first_side plan 0 = Constraints.Left
       && Constraints.coplanar_second_side plan 0 = Constraints.Left)
@@ -68,8 +65,8 @@ let test_invalid_grain () =
   match Constraints.build ~grain:0 ~left:(left_triangle ())
       ~right:(crossing_triangle ()) () with
   | Error error when Error.code error = "invalid_parameter" -> ()
-  | Error error -> fail "unexpected invalid-grain error: %s" (Error.to_string error)
-  | Ok _ -> fail "zero grain was accepted"
+  | Error error -> failf "unexpected invalid-grain error: %s" (Error.to_string error)
+  | Ok _ -> failf "zero grain was accepted"
 
 let test_cancellation () =
   let cancel = Cancel.create () in
@@ -77,8 +74,8 @@ let test_cancellation () =
   match Constraints.build ~cancel ~grain:1 ~left:(left_triangle ())
       ~right:(crossing_triangle ()) () with
   | Error error when Error.code error = "cancelled" -> ()
-  | Error error -> fail "unexpected cancellation error: %s" (Error.to_string error)
-  | Ok _ -> fail "cancelled constraint planning completed"
+  | Error error -> failf "unexpected cancellation error: %s" (Error.to_string error)
+  | Ok _ -> failf "cancelled constraint planning completed"
 
 let run () =
   test_right_operand_constraints ();

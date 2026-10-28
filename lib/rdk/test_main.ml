@@ -29,7 +29,6 @@ let tests = [
   "attrib", "test_attribute_composite", Test_attribute_composite.run;
   "attrib", "test_attribute_mirror", Test_attribute_mirror.run;
   "mesh", "test_rewire_vertices", Test_rewire_vertices.run;
-  "attrib", "test_enumerate", Test_enumerate.run;
   "mesh", "test_motion", Test_motion.run;
   "mesh", "test_dissolve", Test_dissolve.run;
   "curve", "test_poly_loft", Test_poly_loft.run;
@@ -41,7 +40,6 @@ let tests = [
   "spatial", "test_intersection_analysis", Test_intersection_analysis.run;
   "mesh", "test_poly_bevel", Test_poly_bevel.run;
   "mesh", "test_point_split", Test_point_split.run;
-  "gen", "test_iso_surface", Test_iso_surface.run;
   "gen", "test_point_generate", Test_point_generate.run;
   "gen", "test_point_replicate", Test_point_replicate.run;
   "mesh", "test_ends", Test_ends.run;
@@ -51,7 +49,6 @@ let tests = [
   "spatial", "test_distance_along_geometry", Test_distance_along_geometry.run;
   "spatial", "test_distance_from_geometry", Test_distance_from_geometry.run;
   "spatial", "test_distance_from_target", Test_distance_from_target.run;
-  "core", "test_sort_extended", Test_sort_extended.run;
   "mesh", "test_blast_by_attribute", Test_blast_by_attribute.run;
   "mesh", "test_crease", Test_crease.run;
   "attrib", "test_attribute_fade", Test_attribute_fade.run;
@@ -62,15 +59,10 @@ let tests = [
   "mesh", "test_smooth", Test_smooth.run;
   "spatial", "test_ray", Test_ray.run;
   "mesh", "test_fuse", Test_fuse.run;
-  "core", "test_bound", Test_bound.run;
   "mesh", "test_convex_hull", Test_convex_hull.run;
   "core", "test_match_size", Test_match_size.run;
-  "gen", "test_grid", Test_grid.run;
   "gen", "test_circle", Test_circle.run;
   "mesh", "test_clip", Test_clip.run;
-  "gen", "test_box", Test_box.run;
-  "gen", "test_uv_sphere", Test_uv_sphere.run;
-  "gen", "test_torus", Test_torus.run;
   "gen", "test_tube", Test_tube.run;
   "gen", "test_platonic", Test_platonic.run;
   "gen", "test_spiral", Test_spiral.run;

@@ -10,7 +10,7 @@ type t = G.t
 type surface = Rdk_spatial.Surface_index.t
 
 let error_string = Rdk_core.Error.to_string
-let points_of_nothing = Rdk_gen.Line_geometry.points [||]
+let points_of_nothing = Rdk_attrib.Line_geometry.points [||]
 let point_count = G.point_count
 
 let bounds geometry =

@@ -10,14 +10,13 @@ let make ?(hints = []) ~operation ~code message =
   if String.trim code = "" then invalid_arg "Rdk.Error.make: empty code";
   { operation; code; message; hints }
 
-let of_string ~operation ~code message = make ~operation ~code message
 exception Fail of string
 exception Rdk of t
 let fail message = raise (Fail message)
 let fail_with ~operation ~code message = raise (Rdk (make ~operation ~code message))
 let guard ?(cancelled = "geometry operation was cancelled") ?invalid_argument
     ~operation ~code work =
-  try Result.map_error (of_string ~operation ~code) (work ()) with
+  try Result.map_error (make ~operation ~code) (work ()) with
   | Rdk error -> Error error
   | Fail message -> Error (make ~operation ~code message)
   | Cancel.Cancelled -> Error (make ~operation ~code:"cancelled" cancelled)

@@ -94,10 +94,10 @@ let run () =
   let reference_first, reference_second =
     filtered_reference surface raw_first raw_second in
   let one_first, one_second =
-    Surface_index.View.overlapping_self_triangle_pairs_disjoint_topology
+    Surface_index.View.self_pairs_disjoint_topology
       ~grain:1 ~tolerance:0. surface in
   let many_first, many_second =
-    Surface_index.View.overlapping_self_triangle_pairs_disjoint_topology
+    Surface_index.View.self_pairs_disjoint_topology
       ~grain:8 ~tolerance:0. surface in
   let triangles = Surface_index.triangle_count surface in
   let reference = sorted_keys triangles reference_first reference_second

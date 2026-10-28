@@ -47,6 +47,38 @@ let labelled env =
     List.map (fun (f : Param.field_view) -> f.name, f.current) (KG.fields info))
     graph)
 
+let preview_scene env =
+  (match Sys.getenv_opt "RAYS_UI_PREVIEW" with
+   | None -> ()
+   | Some directory ->
+       (* window-free: the editor's scene into an offscreen canvas *)
+       let canvas = Canvas.create_exn ~width:900 ~height:640 in
+       Result.get_ok (Canvas.render canvas (E.scene env (frame 0)));
+       ignore (Canvas.save_png canvas (Filename.concat directory "scene-inspector.png"));
+       ignore(Canvas.destroy canvas))
+
+let domains_agree () =
+  (* Every object cooks the same bytes with one domain and with many. *)
+  let digest domains =
+    let workspace = Ws_fixture.of_text {|(workspace mountain
+      (graph g :context sop
+        (sop/mountain (sop/grid :columns 40 :rows 40 :size 4 :width 4 :height 4)
+                      :seed 3 :height 0.4 :frequency [1 1 1] :octaves 3 :lacunarity 2
+                      :roughness 0.5 :recompute_normals true)))|} in
+    let env = E.create ~ui_text_size:11 ~await:true ~workspace ~domains ~grain:16 ~max_entries:4
+        ~max_payload_bytes:(16 * 1024 * 1024)
+        ~prepare:(fun _ output ->
+          let points = Rdk.Geometry.positions (Result.get_ok (Sop.Payload.geometry output.Session.payload)) in
+          Ok (Digest.string (String.concat "," (List.init (Rdk.Packed.Float3.length points)
+            (fun index -> let x, y, z = Rdk.Packed.Float3.get points index in
+              Printf.sprintf "%h %h %h" x y z)))))
+        ~draw:(fun _ _ -> Scene.D3.create []) () |> Result.get_ok in
+    let env = E.update env (frame 0) in
+    match E.prepared env with
+    | Some digest -> E.close env; digest
+    | None -> fail "the domain-count cook did not finish" in
+  check (digest 1 = digest 4) "one domain and four domains cooked different geometry"
+
 let run () =
   let cooks = Atomic.make 0 in
   let env = E.create ~ui_text_size:11 ~await:true ~workspace:(Ws_fixture.of_text text)
@@ -188,14 +220,7 @@ let run () =
     else select_up name (step env [key Input.ArrowUp]) (tries - 1) in
   let env = select_up "geo1" env 8 in
   let env = step env [] in
-  (match Sys.getenv_opt "RAYS_UI_PREVIEW" with
-   | None -> ()
-   | Some directory ->
-       (* window-free: the editor's scene into an offscreen canvas *)
-       let canvas = Canvas.create_exn ~width:900 ~height:640 in
-       Result.get_ok (Canvas.render canvas (E.scene env (frame 0)));
-       ignore (Canvas.save_png canvas (Filename.concat directory "scene-inspector.png"));
-       ignore(Canvas.destroy canvas));
+  preview_scene env;
   let ix, iy, _, _ = (E.panes env (frame 0)).inspector in
   (* the translate row: the 118-point head, then the Inputs (4 + 24 + the row), Geometry (16 + 24 + two rows)
      and Transform (16 + 24) sections, 12 into its row to the middle of the x field *)
@@ -347,26 +372,7 @@ let run () =
     Input.Pointer_released (Input.LeftButton, (ix, iy))] in
   check (E.level env = Some "world") "the list's right-click Enter did not open the World";
   E.close env;
-  (* Every object cooks the same bytes with one domain and with many. *)
-  let digest domains =
-    let workspace = Ws_fixture.of_text {|(workspace mountain
-      (graph g :context sop
-        (sop/mountain (sop/grid :columns 40 :rows 40 :size 4 :width 4 :height 4)
-                      :seed 3 :height 0.4 :frequency [1 1 1] :octaves 3 :lacunarity 2
-                      :roughness 0.5 :recompute_normals true)))|} in
-    let env = E.create ~ui_text_size:11 ~await:true ~workspace ~domains ~grain:16 ~max_entries:4
-        ~max_payload_bytes:(16 * 1024 * 1024)
-        ~prepare:(fun _ output ->
-          let points = Rdk.Geometry.positions (Result.get_ok (Sop.Payload.geometry output.Session.payload)) in
-          Ok (Digest.string (String.concat "," (List.init (Rdk.Packed.Float3.length points)
-            (fun index -> let x, y, z = Rdk.Packed.Float3.get points index in
-              Printf.sprintf "%h %h %h" x y z)))))
-        ~draw:(fun _ _ -> Scene.D3.create []) () |> Result.get_ok in
-    let env = E.update env (frame 0) in
-    match E.prepared env with
-    | Some digest -> E.close env; digest
-    | None -> fail "the domain-count cook did not finish" in
-  check (digest 1 = digest 4) "one domain and four domains cooked different geometry";
+  domains_agree ();
   print_endline "scene tree: list keys, enter/up, lights, reparent, World, graph, domains ok"
 
 (* The host camera is deleted like any object, and the deletion is in the saved text:

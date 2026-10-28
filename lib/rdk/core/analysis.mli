@@ -10,15 +10,12 @@ type bounds = {
 type measure = Perimeter | Area | Signed_volume
 type connectivity_owner = Connectivity_points | Connectivity_primitives
 
-val surface_area :
-  ?cancel:Cancel.t -> ?grain:int -> ?primitives:Group.t ->
-  Geometry.t -> (float, string) result
 val signed_volume :
   ?cancel:Cancel.t -> ?grain:int -> ?primitives:Group.t ->
   Geometry.t -> (float, string) result
 (** Total measures over the selected primitives, reduced in primitive order.
     [perimeter] sums closed polygon/curve boundary length or open-polyline
-    length. [surface_area] and [signed_volume] require simple polygons and use
+    length. [signed_volume] requires simple polygons and use
     deterministic ear clipping. Signed volume is the stable sum of oriented
     tetrahedral contributions around the geometry bounds center and is
     meaningful for consistently wound closed shells.

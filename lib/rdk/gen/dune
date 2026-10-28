@@ -1,7 +1,0 @@
-(library
- (name rdk_gen)
- (public_name rays.rdk.gen)
- (libraries rdk_core rdk_exact rdk_spatial rdk_attrib rays_math parallel)
- (flags (:standard -open Rdk_core -open Rdk_exact -open Rdk_spatial -open Rdk_attrib))
- (private_modules)
- (modules iso_surface line_geometry point_replicate scatter spiral))

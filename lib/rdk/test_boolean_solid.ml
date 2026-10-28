@@ -1,4 +1,5 @@
 open Rdk
+open Rdk_test_support
 
 module Solid = Rdk_boolean.Boolean_solid
 module Extract = Rdk_boolean.Boolean_extract
@@ -6,10 +7,6 @@ module Seam = Rdk_boolean.Boolean_seam
 module Materialization = Rdk_boolean.Boolean_materialization
 module Complex = Rdk_boolean.Boolean_complex
 
-let fail format = Printf.ksprintf failwith format
-let check condition message = if not condition then fail "%s" message
-let get = function Ok value -> value | Error error -> fail "%s" (Error.to_string error)
-let get_string = function Ok value -> value | Error message -> fail "%s" message
 
 let geometry points triangles =
   let count = Array.length points in
@@ -171,8 +168,8 @@ let test_degenerate_rejection () =
   match Solid.prepare ~grain:1 ~left:degenerate ~right:solid () with
   | Error error when Error.code error = "degenerate_triangle" -> ()
   | Error error when Error.code error = "invalid_surface" -> ()
-  | Error error -> fail "unexpected degenerate error: %s" (Error.to_string error)
-  | Ok _ -> fail "degenerate source triangle entered the solid Boolean pipeline"
+  | Error error -> failf "unexpected degenerate error: %s" (Error.to_string error)
+  | Ok _ -> failf "degenerate source triangle entered the solid Boolean pipeline"
 
 let test_cancellation () =
   let cancel = Cancel.create () in
@@ -181,8 +178,8 @@ let test_cancellation () =
       ~left:(tetra ~origin:(0.,0.,0.) 1.)
       ~right:(tetra ~origin:(0.2,0.2,0.2) 1.) () with
   | Error error when Error.code error = "cancelled" -> ()
-  | Error error -> fail "unexpected cancellation error: %s" (Error.to_string error)
-  | Ok _ -> fail "cancelled Boolean preparation completed"
+  | Error error -> failf "unexpected cancellation error: %s" (Error.to_string error)
+  | Ok _ -> failf "cancelled Boolean preparation completed"
 
 let tiny_edge_signature group =
   Array.init (Edge_group.length group) (fun edge -> Edge_group.mem edge group)

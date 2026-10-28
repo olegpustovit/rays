@@ -343,6 +343,266 @@ let set_color_test () =
       && tinted.w.(1) = 1.) "set_color group did not restrict the write";
   Session.close session
 
+let catalog_membership () =
+  let factory_keys = List.map Edit_graph.factory_key
+      (Lazy.force registered_factories) in
+  (* 162 SOP nodes and the three native carriers of ported ones (image_texels, pack_instances,
+     subdivide_cracks) *)
+  check (List.length factory_keys = 165
+      && List.length (List.sort_uniq String.compare factory_keys) = 165)
+    "combined SOP registry has a missing or duplicate factory key";
+  check (List.mem "material" factory_keys) "SOP editor catalog is missing material";
+  check (not (List.mem "delete_attribute" factory_keys))
+    "duplicate Delete Attribute factory remains registered";
+  check (not (List.mem "bounding_box" factory_keys))
+    "duplicate Bounding Box factory remains registered";
+  check (not (List.mem "rename_group" factory_keys))
+    "duplicate Rename Group factory remains registered";
+  check (not (List.mem "rename_attribute" factory_keys))
+    "duplicate Rename Attribute factory remains registered";
+  check (not (List.mem "group_promote" factory_keys))
+    "duplicate Group Promote factory remains registered";
+  check (not (List.mem "promote_attribute" factory_keys))
+    "duplicate Promote Attribute factory remains registered";
+  List.iter (fun key -> check (List.mem key factory_keys)
+      ("SOP editor catalog is missing " ^ key))
+    ["box"; "grid"; "platonic"; "points"; "switch";
+     "copy_to_points"; "boolean_fracture"; "boolean"; "boolean_seam";
+     "boolean_detect"; "intersection_analysis";
+     "attribute_noise_quaternion";
+     "point_jitter"; "null"; "normals"; "transform"; "triangulate";
+     "mountain"; "line"; "circle"; "spiral"; "uv_sphere"; "torus"; "tube";
+     "match_size"; "mirror"; "clip"; "exploded_view"];
+  List.iter (fun key -> check (List.mem key factory_keys)
+      ("SOP editor topology catalog is missing " ^ key))
+    ["crease"; "subdivide"; "edge_divide"; "edge_collapse"; "dissolve";
+     "poly_bevel"];
+  List.iter (fun key -> check (List.mem key factory_keys)
+      ("SOP editor deformation catalog is missing " ^ key))
+    ["peak"; "bend"; "smooth"; "reverse"; "clean"; "facet"];
+  List.iter (fun key -> check (List.mem key factory_keys)
+      ("SOP editor edge/piece catalog is missing " ^ key))
+    ["separate_pieces"; "edge_flip"; "edge_cusp"; "edge_straighten";
+     "circle_from_edges"; "edge_equalize"];
+  List.iter (fun key -> check (List.mem key factory_keys)
+      ("SOP editor modeling catalog is missing " ^ key))
+    ["snap_to_grid"; "remesh"; "poly_extrude"; "poly_fill";
+     "convert_line"; "resample"; "carve"; "ends"; "join_curves";
+     "poly_path"; "poly_reduce"; "measure_curvature";
+     "attribute_laplacian"; "polyframe"; "duplicate"; "match_axis";
+     "convex_hull"; "extract_centroid"; "bound"];
+  check (List.mem "fuse" factory_keys) "SOP editor catalog is missing fuse";
+  check (List.mem "ray" factory_keys) "SOP editor catalog is missing ray";
+  List.iter (fun key -> check (List.mem key factory_keys)
+      ("SOP editor distance catalog is missing " ^ key))
+    ["distance_along_geometry"; "distance_from_geometry";
+     "distance_from_target"];
+  List.iter (fun key -> check (List.mem key factory_keys)
+      ("SOP editor topology/attribute catalog is missing " ^ key))
+    ["point_split"; "poly_bridge"; "graph_color"; "edge_relax";
+     "poly_loft"; "revolve"; "sweep"; "polywire"];
+  List.iter (fun key -> check (List.mem key factory_keys)
+      ("SOP editor attribute catalog is missing " ^ key))
+    ["measure"; "connectivity"; "set_float"; "set_int"; "set_vector";
+     "set_orient"; "set_transform"; "set_color";
+     "rest_position"; "enumerate"; "attribute_blur"; "attr_from_image"];
+  List.iter (fun key -> check (List.mem key factory_keys)
+      ("SOP editor UV catalog is missing " ^ key))
+    ["uv_project"; "uv_transform"; "uv_auto_seam"; "uv_unitize";
+     "uv_flatten"; "uv_relax"];
+  List.iter (fun key -> check (List.mem key factory_keys)
+      ("SOP editor group catalog is missing " ^ key))
+    ["group_edges"; "group_random"; "group_bounds"; "group_normal";
+     "group_non_planar"; "group_backface"; "group_edge_depth";
+     "group_unshared"; "group_boundary_components";
+     "group_from_attribute_boundary"; "group_promote_boundary";
+     "group_promotions"; "group_invert"; "group_delete"; "group_rename";
+     "group_find_path";
+     "group_copy"; "group_transfer"; "groups_from_name";
+     "group_combine"; "group_expand"; "group_range"; "group_ranges";
+     "name_from_groups"];
+  List.iter (fun key -> check (List.mem key factory_keys)
+      ("SOP editor general catalog is missing " ^ key))
+    ["poly_cut"; "sort"; "noise_displace"; "color_by_height"; "scatter"];
+  List.iter (fun key -> check (List.mem key factory_keys)
+      ("SOP editor attribute generator is missing " ^ key))
+    ["attribute_noise"; "attribute_remap"; "attribute_randomize";
+     "attribute_mirror"];
+  List.iter (fun key -> check (List.mem key factory_keys)
+      ("SOP editor transport catalog is missing " ^ key))
+    ["rewire_vertices"; "edge_transport"; "edge_transport_curves";
+     "edge_transport_parent"];
+  List.iter (fun key -> check (List.mem key factory_keys)
+      ("SOP editor metadata utility is missing " ^ key))
+    ["compact_points"; "bound"; "group_rename";
+     "delete_edge_group"; "rename_edge_group"; "delete_attributes";
+     "rename_attributes"; "swap_attributes";
+     "triangulate_2d"; "extract_point_from_curve"; "soft_transform";
+     "point_generate"; "point_replicate"; "attribute_fade";
+     "blast_by_attribute"; "blast"];
+  check (List.mem "point_velocity" factory_keys)
+    "SOP editor catalog is missing point_velocity";
+  List.iter (fun key -> check (List.mem key factory_keys)
+      ("SOP editor transfer catalog is missing " ^ key))
+    ["attribute_transfer"; "attribute_transfer_all";
+     "attribute_transfer_surface"; "attribute_copy";
+     "attribute_interpolate";
+     "promote_attributes"]
+
+let catalog_manifest ~exhaustive () =
+  let factory_keys = List.map Edit_graph.factory_key (Lazy.force registered_factories) in
+  let vector_groups = ref 0 in
+  let flow_catalog = match Flow_sop.Catalog.of_factories ~version:1
+      Sop.Nodes.factories with
+    | Ok catalog -> catalog
+    | Error diagnostic -> fail (Diagnostic.to_string diagnostic) in
+  let manifest, digest = Flow_sop.Manifest.generate Sop.Nodes.factories
+    |> Result.get_ok in
+  let catalog_from_manifest, read_digest = Flow.Catalog.catalog_of_manifest manifest
+    |> Result.get_ok in
+  check (read_digest = digest
+    && catalog_from_manifest.kinds = flow_catalog.kinds)
+    "Flow manifest checker descriptor differs from the live catalog";
+  let transform = List.find (fun (kind : Flow.Catalog.kind) -> kind.qualified = "sop/transform")
+    catalog_from_manifest.kinds in
+  check (match transform.facts with Some facts -> facts.elementwise = Flow.Catalog.Points
+      && facts.reads = ["P"; "N"] && facts.writes = ["P"; "N"]
+      && facts.preserves_topology && not facts.exact | None -> false)
+    "Flow manifest omitted declared transform facts";
+  let stale_manifest = Bytes.of_string manifest in
+  let version_digit = String.index manifest '2' in
+  Bytes.set stale_manifest version_digit '3';
+  (match Flow.Catalog.catalog_of_manifest (Bytes.to_string stale_manifest) with
+   | Error diagnostic -> check (diagnostic.code = "E_CATALOG"
+       && diagnostic.message = "Flow manifest digest does not match its contents")
+       "Flow manifest reader reported the wrong digest error"
+   | Ok _ -> fail "Flow manifest reader accepted changed contents");
+  check (Flow_sop.Manifest.generate Sop.Nodes.factories
+    = Ok (manifest, digest)) "Flow catalog manifest is not deterministic";
+  let children name (form : Flow.Syntax.t) = match form.node with
+    | List ({node = Sym head; _} :: children) when head = name -> children
+    | _ -> fail ("Malformed Flow manifest " ^ name) in
+  let forms = Flow.Syntax.parse manifest |> Result.get_ok in
+  (match forms with
+   | [root] ->
+       (match children "flow_manifest" root with
+        | [version; hash; kinds] ->
+            (match children "version" version, children "digest" hash with
+             | [{node = Num number; _}],
+               [{node = Str value; _}] ->
+                 check (int_of_string number = Flow_sop.Manifest.version
+                   && value = digest) "Flow manifest header changed"
+             | _ -> fail "Malformed Flow manifest header");
+            let keys = children "kinds" kinds |> List.map (fun kind ->
+              match children "kind" kind with
+              | {node = Str name; _} :: _ -> name
+              | _ -> fail "Malformed Flow manifest kind") in
+            check (List.length keys = List.length (Lazy.force registered_factories))
+              "Flow manifest omitted kinds";
+            List.iter (fun key -> check (List.mem ("sop/" ^ key) keys)
+              ("Flow manifest omitted SOP " ^ key)) factory_keys
+        | _ -> fail "Malformed Flow manifest body")
+   | _ -> fail "Flow manifest needs one top-level form");
+  (* The schema sweep reads the factory's fields; building all 165 default nodes (a body lowering each, about 25 s)
+     is the exhaustive run's, and the default one builds Box. *)
+  List.iter (fun factory ->
+    vector_groups := !vector_groups + check_metadata factory (Edit_graph.factory_fields factory);
+    let slots = List.init (Edit_graph.factory_arity factory) (fun _ -> None) in
+    if exhaustive || Edit_graph.factory_key factory = "box" then
+    match Edit_graph.instantiate_optional factory slots with
+    | Ok node ->
+        check (Edit_graph.factory_facts factory = Node.facts node)
+          ("default factory facts differ from the instantiated node: " ^ Edit_graph.factory_key factory);
+        if Edit_graph.factory_key factory = "box" then
+          check (List.filter_map (fun (field : Param.field_view) ->
+              if field.primary then Some field.name else None) (Node.parameter_fields node)
+              = ["size_x"; "size_y"; "size_z"])
+            "Box primary rows still expose topology instead of size";
+        check
+        (Node.operation node = Edit_graph.factory_operation factory)
+        (Printf.sprintf "registered SOP %s advertises operation %s but builds %s"
+          (Edit_graph.factory_key factory)
+          (Edit_graph.factory_operation factory) (Node.operation node));
+    | Error message -> fail (Printf.sprintf
+        "registered SOP %s could not be constructed: %s"
+        (Edit_graph.factory_key factory) message))
+    (Lazy.force registered_factories);
+  check (!vector_groups = 104) "catalog vector inventory changed"
+
+let catalog_perturbation ~exhaustive () =
+  (* Every cook-impact schema field of every registered SOP participates in
+     the cache identity: perturbing any single field changes the node's
+     parameter key, so a field forgotten by an operator's own key string can
+     never produce a stale cache hit. *)
+  if exhaustive then begin
+  let perturbed (view : Param.field_view) =
+    let within_int (range : Param.int_range) value =
+      Option.fold ~none:true ~some:(fun low -> value >= low) range.hard_min
+      && Option.fold ~none:true ~some:(fun high -> value <= high) range.hard_max
+    and within_float (range : Param.float_range) value =
+      Option.fold ~none:true ~some:(fun low -> value >= low) range.hard_min
+      && Option.fold ~none:true ~some:(fun high -> value <= high) range.hard_max
+    in
+    match view.kind, view.current with
+    | Param.Toggle_view, Param.Bool_value value ->
+        Some (Param.Bool_value (not value))
+    | Param.Integer_view range, Param.Int_value value ->
+        List.find_opt (fun candidate -> candidate <> value
+            && within_int range candidate)
+          [value + 1; value - 1; range.soft_min; range.soft_max]
+        |> Option.map (fun value -> Param.Int_value value)
+    | Param.Floating_view range, Param.Float_value value ->
+        List.find_opt (fun candidate -> candidate <> value
+            && within_float range candidate)
+          [value +. 0.25; value -. 0.25;
+           (range.soft_min +. range.soft_max) /. 2.;
+           range.soft_min; range.soft_max]
+        |> Option.map (fun value -> Param.Float_value value)
+    | Param.Text_view, Param.Text_value value ->
+        Some (Param.Text_value (if value = "" then "p" else value ^ "p"))
+    | Param.Choice_view options, Param.Choice_value value ->
+        Array.to_list options |> List.find_opt (fun option -> option <> value)
+        |> Option.map (fun option -> Param.Choice_value option)
+    | Param.Choice_view options, Param.Int_value value ->
+        (* An index choice (sop/switch :input) names its options by position. *)
+        List.find_opt (fun candidate -> candidate <> value
+            && candidate >= 0 && candidate < Array.length options)
+          [value + 1; value - 1; 0]
+        |> Option.map (fun value -> Param.Int_value value)
+    | _ -> None in
+  let perturbed_fields = ref 0 and rejected_fields = ref 0 in
+  List.iter (fun factory ->
+    let key = Edit_graph.factory_key factory in
+    let slots = List.init (Edit_graph.factory_arity factory) (fun _ -> None) in
+    let node = Edit_graph.instantiate_optional factory slots |> Result.get_ok in
+    check (not (Node.has_parameters node) || Node.parameter_key node <> "")
+      (key ^ " has no schema-derived cache identity");
+    List.iter (fun (view : Param.field_view) ->
+      if view.impact = Param.Cook then
+        match perturbed view with
+        | None -> fail (Printf.sprintf "%s.%s has no perturbable value" key
+            view.name)
+        | Some value ->
+            match Node.apply_parameters node [view.name, value] with
+            | exception (Invalid_argument _ | Failure _) -> incr rejected_fields
+            | Error _ -> incr rejected_fields
+            | Ok (_, effects) when not effects.cook -> incr rejected_fields
+            | Ok (edited, _) ->
+                incr perturbed_fields;
+                check (Node.id edited = Node.id node
+                    && Node.parameter_key edited <> Node.parameter_key node)
+                  (Printf.sprintf
+                    "changing %s.%s did not change its cache key" key
+                    view.name))
+      (Node.parameter_fields node))
+    (Lazy.force registered_factories);
+  Printf.printf "catalog cache-key perturbation: %d fields changed, %d rejected\n"
+    !perturbed_fields !rejected_fields;
+  check (!perturbed_fields > 10 * !rejected_fields)
+    (Printf.sprintf "only %d catalog fields were perturbable (%d rejected)"
+      !perturbed_fields !rejected_fields)
+  end
+
 let run ?(exhaustive = false) () =
   gallery_grid_warning ();
   test_motion ();
@@ -473,259 +733,9 @@ let run ?(exhaustive = false) () =
       && Node.parameter_key switched = Node.parameter_key rebuilt_switch)
     "rewiring Switch labels must retain its integer selection and parameter key";
   Session.close session;
-  let factory_keys = List.map Edit_graph.factory_key
-      (Lazy.force registered_factories) in
-  (* 162 SOP nodes and the three native carriers of ported ones (image_texels, pack_instances,
-     subdivide_cracks) *)
-  check (List.length factory_keys = 165
-      && List.length (List.sort_uniq String.compare factory_keys) = 165)
-    "combined SOP registry has a missing or duplicate factory key";
-  check (List.mem "material" factory_keys) "SOP editor catalog is missing material";
-  check (not (List.mem "delete_attribute" factory_keys))
-    "duplicate Delete Attribute factory remains registered";
-  check (not (List.mem "bounding_box" factory_keys))
-    "duplicate Bounding Box factory remains registered";
-  check (not (List.mem "rename_group" factory_keys))
-    "duplicate Rename Group factory remains registered";
-  check (not (List.mem "rename_attribute" factory_keys))
-    "duplicate Rename Attribute factory remains registered";
-  check (not (List.mem "group_promote" factory_keys))
-    "duplicate Group Promote factory remains registered";
-  check (not (List.mem "promote_attribute" factory_keys))
-    "duplicate Promote Attribute factory remains registered";
-  List.iter (fun key -> check (List.mem key factory_keys)
-      ("SOP editor catalog is missing " ^ key))
-    ["box"; "grid"; "platonic"; "points"; "switch";
-     "copy_to_points"; "boolean_fracture"; "boolean"; "boolean_seam";
-     "boolean_detect"; "intersection_analysis";
-     "attribute_noise_quaternion";
-     "point_jitter"; "null"; "normals"; "transform"; "triangulate";
-     "mountain"; "line"; "circle"; "spiral"; "uv_sphere"; "torus"; "tube";
-     "match_size"; "mirror"; "clip"; "exploded_view"];
-  List.iter (fun key -> check (List.mem key factory_keys)
-      ("SOP editor topology catalog is missing " ^ key))
-    ["crease"; "subdivide"; "edge_divide"; "edge_collapse"; "dissolve";
-     "poly_bevel"];
-  List.iter (fun key -> check (List.mem key factory_keys)
-      ("SOP editor deformation catalog is missing " ^ key))
-    ["peak"; "bend"; "smooth"; "reverse"; "clean"; "facet"];
-  List.iter (fun key -> check (List.mem key factory_keys)
-      ("SOP editor edge/piece catalog is missing " ^ key))
-    ["separate_pieces"; "edge_flip"; "edge_cusp"; "edge_straighten";
-     "circle_from_edges"; "edge_equalize"];
-  List.iter (fun key -> check (List.mem key factory_keys)
-      ("SOP editor modeling catalog is missing " ^ key))
-    ["snap_to_grid"; "remesh"; "poly_extrude"; "poly_fill";
-     "convert_line"; "resample"; "carve"; "ends"; "join_curves";
-     "poly_path"; "poly_reduce"; "measure_curvature";
-     "attribute_laplacian"; "polyframe"; "duplicate"; "match_axis";
-     "convex_hull"; "extract_centroid"; "bound"];
-  check (List.mem "fuse" factory_keys) "SOP editor catalog is missing fuse";
-  check (List.mem "ray" factory_keys) "SOP editor catalog is missing ray";
-  List.iter (fun key -> check (List.mem key factory_keys)
-      ("SOP editor distance catalog is missing " ^ key))
-    ["distance_along_geometry"; "distance_from_geometry";
-     "distance_from_target"];
-  List.iter (fun key -> check (List.mem key factory_keys)
-      ("SOP editor topology/attribute catalog is missing " ^ key))
-    ["point_split"; "poly_bridge"; "graph_color"; "edge_relax";
-     "poly_loft"; "revolve"; "sweep"; "polywire"];
-  List.iter (fun key -> check (List.mem key factory_keys)
-      ("SOP editor attribute catalog is missing " ^ key))
-    ["measure"; "connectivity"; "set_float"; "set_int"; "set_vector";
-     "set_orient"; "set_transform"; "set_color";
-     "rest_position"; "enumerate"; "attribute_blur"; "attr_from_image"];
-  List.iter (fun key -> check (List.mem key factory_keys)
-      ("SOP editor UV catalog is missing " ^ key))
-    ["uv_project"; "uv_transform"; "uv_auto_seam"; "uv_unitize";
-     "uv_flatten"; "uv_relax"];
-  List.iter (fun key -> check (List.mem key factory_keys)
-      ("SOP editor group catalog is missing " ^ key))
-    ["group_edges"; "group_random"; "group_bounds"; "group_normal";
-     "group_non_planar"; "group_backface"; "group_edge_depth";
-     "group_unshared"; "group_boundary_components";
-     "group_from_attribute_boundary"; "group_promote_boundary";
-     "group_promotions"; "group_invert"; "group_delete"; "group_rename";
-     "group_find_path";
-     "group_copy"; "group_transfer"; "groups_from_name";
-     "group_combine"; "group_expand"; "group_range"; "group_ranges";
-     "name_from_groups"];
-  List.iter (fun key -> check (List.mem key factory_keys)
-      ("SOP editor general catalog is missing " ^ key))
-    ["poly_cut"; "sort"; "noise_displace"; "color_by_height"; "scatter"];
-  List.iter (fun key -> check (List.mem key factory_keys)
-      ("SOP editor attribute generator is missing " ^ key))
-    ["attribute_noise"; "attribute_remap"; "attribute_randomize";
-     "attribute_mirror"];
-  List.iter (fun key -> check (List.mem key factory_keys)
-      ("SOP editor transport catalog is missing " ^ key))
-    ["rewire_vertices"; "edge_transport"; "edge_transport_curves";
-     "edge_transport_parent"];
-  List.iter (fun key -> check (List.mem key factory_keys)
-      ("SOP editor metadata utility is missing " ^ key))
-    ["compact_points"; "bound"; "group_rename";
-     "delete_edge_group"; "rename_edge_group"; "delete_attributes";
-     "rename_attributes"; "swap_attributes";
-     "triangulate_2d"; "extract_point_from_curve"; "soft_transform";
-     "point_generate"; "point_replicate"; "attribute_fade";
-     "blast_by_attribute"; "blast"];
-  check (List.mem "point_velocity" factory_keys)
-    "SOP editor catalog is missing point_velocity";
-  List.iter (fun key -> check (List.mem key factory_keys)
-      ("SOP editor transfer catalog is missing " ^ key))
-    ["attribute_transfer"; "attribute_transfer_all";
-     "attribute_transfer_surface"; "attribute_copy";
-     "attribute_interpolate";
-     "promote_attributes"];
-  let vector_groups = ref 0 in
-  let flow_catalog = match Flow_sop.Catalog.of_factories ~version:1
-      Sop.Nodes.factories with
-    | Ok catalog -> catalog
-    | Error diagnostic -> fail (Diagnostic.to_string diagnostic) in
-  let manifest, digest = Flow_sop.Manifest.generate Sop.Nodes.factories
-    |> Result.get_ok in
-  let catalog_from_manifest, read_digest = Flow.Catalog.catalog_of_manifest manifest
-    |> Result.get_ok in
-  check (read_digest = digest
-    && catalog_from_manifest.kinds = flow_catalog.kinds)
-    "Flow manifest checker descriptor differs from the live catalog";
-  let transform = List.find (fun (kind : Flow.Catalog.kind) -> kind.qualified = "sop/transform")
-    catalog_from_manifest.kinds in
-  check (match transform.facts with Some facts -> facts.elementwise = Flow.Catalog.Points
-      && facts.reads = ["P"; "N"] && facts.writes = ["P"; "N"]
-      && facts.preserves_topology && not facts.exact | None -> false)
-    "Flow manifest omitted declared transform facts";
-  let stale_manifest = Bytes.of_string manifest in
-  let version_digit = String.index manifest '2' in
-  Bytes.set stale_manifest version_digit '3';
-  (match Flow.Catalog.catalog_of_manifest (Bytes.to_string stale_manifest) with
-   | Error diagnostic -> check (diagnostic.code = "E_CATALOG"
-       && diagnostic.message = "Flow manifest digest does not match its contents")
-       "Flow manifest reader reported the wrong digest error"
-   | Ok _ -> fail "Flow manifest reader accepted changed contents");
-  check (Flow_sop.Manifest.generate Sop.Nodes.factories
-    = Ok (manifest, digest)) "Flow catalog manifest is not deterministic";
-  let children name (form : Flow.Syntax.t) = match form.node with
-    | List ({node = Sym head; _} :: children) when head = name -> children
-    | _ -> fail ("Malformed Flow manifest " ^ name) in
-  let forms = Flow.Syntax.parse manifest |> Result.get_ok in
-  (match forms with
-   | [root] ->
-       (match children "flow_manifest" root with
-        | [version; hash; kinds] ->
-            (match children "version" version, children "digest" hash with
-             | [{node = Num number; _}],
-               [{node = Str value; _}] ->
-                 check (int_of_string number = Flow_sop.Manifest.version
-                   && value = digest) "Flow manifest header changed"
-             | _ -> fail "Malformed Flow manifest header");
-            let keys = children "kinds" kinds |> List.map (fun kind ->
-              match children "kind" kind with
-              | {node = Str name; _} :: _ -> name
-              | _ -> fail "Malformed Flow manifest kind") in
-            check (List.length keys = List.length (Lazy.force registered_factories))
-              "Flow manifest omitted kinds";
-            List.iter (fun key -> check (List.mem ("sop/" ^ key) keys)
-              ("Flow manifest omitted SOP " ^ key)) factory_keys
-        | _ -> fail "Malformed Flow manifest body")
-   | _ -> fail "Flow manifest needs one top-level form");
-  (* The schema sweep reads the factory's fields; building all 165 default nodes (a body lowering each, about 25 s)
-     is the exhaustive run's, and the default one builds Box. *)
-  List.iter (fun factory ->
-    vector_groups := !vector_groups + check_metadata factory (Edit_graph.factory_fields factory);
-    let slots = List.init (Edit_graph.factory_arity factory) (fun _ -> None) in
-    if exhaustive || Edit_graph.factory_key factory = "box" then
-    match Edit_graph.instantiate_optional factory slots with
-    | Ok node ->
-        check (Edit_graph.factory_facts factory = Node.facts node)
-          ("default factory facts differ from the instantiated node: " ^ Edit_graph.factory_key factory);
-        if Edit_graph.factory_key factory = "box" then
-          check (List.filter_map (fun (field : Param.field_view) ->
-              if field.primary then Some field.name else None) (Node.parameter_fields node)
-              = ["size_x"; "size_y"; "size_z"])
-            "Box primary rows still expose topology instead of size";
-        check
-        (Node.operation node = Edit_graph.factory_operation factory)
-        (Printf.sprintf "registered SOP %s advertises operation %s but builds %s"
-          (Edit_graph.factory_key factory)
-          (Edit_graph.factory_operation factory) (Node.operation node));
-    | Error message -> fail (Printf.sprintf
-        "registered SOP %s could not be constructed: %s"
-        (Edit_graph.factory_key factory) message))
-    (Lazy.force registered_factories);
-  check (!vector_groups = 104) "catalog vector inventory changed";
-  (* Every cook-impact schema field of every registered SOP participates in
-     the cache identity: perturbing any single field changes the node's
-     parameter key, so a field forgotten by an operator's own key string can
-     never produce a stale cache hit. *)
-  if exhaustive then begin
-  let perturbed (view : Param.field_view) =
-    let within_int (range : Param.int_range) value =
-      Option.fold ~none:true ~some:(fun low -> value >= low) range.hard_min
-      && Option.fold ~none:true ~some:(fun high -> value <= high) range.hard_max
-    and within_float (range : Param.float_range) value =
-      Option.fold ~none:true ~some:(fun low -> value >= low) range.hard_min
-      && Option.fold ~none:true ~some:(fun high -> value <= high) range.hard_max
-    in
-    match view.kind, view.current with
-    | Param.Toggle_view, Param.Bool_value value ->
-        Some (Param.Bool_value (not value))
-    | Param.Integer_view range, Param.Int_value value ->
-        List.find_opt (fun candidate -> candidate <> value
-            && within_int range candidate)
-          [value + 1; value - 1; range.soft_min; range.soft_max]
-        |> Option.map (fun value -> Param.Int_value value)
-    | Param.Floating_view range, Param.Float_value value ->
-        List.find_opt (fun candidate -> candidate <> value
-            && within_float range candidate)
-          [value +. 0.25; value -. 0.25;
-           (range.soft_min +. range.soft_max) /. 2.;
-           range.soft_min; range.soft_max]
-        |> Option.map (fun value -> Param.Float_value value)
-    | Param.Text_view, Param.Text_value value ->
-        Some (Param.Text_value (if value = "" then "p" else value ^ "p"))
-    | Param.Choice_view options, Param.Choice_value value ->
-        Array.to_list options |> List.find_opt (fun option -> option <> value)
-        |> Option.map (fun option -> Param.Choice_value option)
-    | Param.Choice_view options, Param.Int_value value ->
-        (* An index choice (sop/switch :input) names its options by position. *)
-        List.find_opt (fun candidate -> candidate <> value
-            && candidate >= 0 && candidate < Array.length options)
-          [value + 1; value - 1; 0]
-        |> Option.map (fun value -> Param.Int_value value)
-    | _ -> None in
-  let perturbed_fields = ref 0 and rejected_fields = ref 0 in
-  List.iter (fun factory ->
-    let key = Edit_graph.factory_key factory in
-    let slots = List.init (Edit_graph.factory_arity factory) (fun _ -> None) in
-    let node = Edit_graph.instantiate_optional factory slots |> Result.get_ok in
-    check (not (Node.has_parameters node) || Node.parameter_key node <> "")
-      (key ^ " has no schema-derived cache identity");
-    List.iter (fun (view : Param.field_view) ->
-      if view.impact = Param.Cook then
-        match perturbed view with
-        | None -> fail (Printf.sprintf "%s.%s has no perturbable value" key
-            view.name)
-        | Some value ->
-            match Node.apply_parameters node [view.name, value] with
-            | exception (Invalid_argument _ | Failure _) -> incr rejected_fields
-            | Error _ -> incr rejected_fields
-            | Ok (_, effects) when not effects.cook -> incr rejected_fields
-            | Ok (edited, _) ->
-                incr perturbed_fields;
-                check (Node.id edited = Node.id node
-                    && Node.parameter_key edited <> Node.parameter_key node)
-                  (Printf.sprintf
-                    "changing %s.%s did not change its cache key" key
-                    view.name))
-      (Node.parameter_fields node))
-    (Lazy.force registered_factories);
-  Printf.printf "catalog cache-key perturbation: %d fields changed, %d rejected\n"
-    !perturbed_fields !rejected_fields;
-  check (!perturbed_fields > 10 * !rejected_fields)
-    (Printf.sprintf "only %d catalog fields were perturbable (%d rejected)"
-      !perturbed_fields !rejected_fields)
-  end;
+  catalog_membership ();
+  catalog_manifest ~exhaustive ();
+  catalog_perturbation ~exhaustive ();
   let key_session = Session.create ~max_entries:8 ~max_payload_bytes:1_000_000
       |> Result.get_ok in
   let exploded = labelled "key-view" ~with_:["key_box", labelled "key-box" {|(sop/box)|}]
