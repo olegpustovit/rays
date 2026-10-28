@@ -57,7 +57,7 @@ let list ~directory =
 let delete ~directory ~name =
   try Sys.remove (path ~directory ~name); Ok () with Sys_error message -> Error message
 
-let load_with_ops ?gpu ~ops ~path ~factories ~settings () =
+let load_with_ops ?gpu ~ops ~path ?(factories = Sop.Nodes.factories) ~settings () =
   let* text = Editor_core.Store.read_text ~filename:path in
   let diagnostics ds = String.concat "\n" (List.map Diagnostic.to_string ds) in
   let* catalog = Result.map_error Diagnostic.to_string (flow_catalog factories) in
@@ -77,4 +77,4 @@ let load_with_ops ?gpu ~ops ~path ~factories ~settings () =
   let* () = Document.validate doc in
   Ok { doc; view }
 
-let load ?gpu ~path ~factories ~settings () = load_with_ops ?gpu ~ops:Flow_sop.Operators.all ~path ~factories ~settings ()
+let load ?gpu ~path ?(factories = Sop.Nodes.factories) ~settings () = load_with_ops ?gpu ~ops:Flow_sop.Operators.all ~path ~factories ~settings ()

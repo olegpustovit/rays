@@ -140,21 +140,21 @@ let pure workspace =
   let panel_source = edited_layout panel_source (Editor_document.Layout_edit.Set_panel_kind {node = ["editor"; "pane"];
     panel = Result.get_ok (Editor_document.Panel_kinds.expr panel_source "canvas")}) in
   let panel_workspace = doc (fst (Flow.Lisp.print panel_source)) in
-  let panel_document = ok (Editor_document.Contexts.of_workspace ~factories:Sop.Nodes.factories panel_workspace) in
+  let panel_document = ok (Editor_document.Contexts.of_workspace panel_workspace) in
   assert (match (Option.get panel_document.shell).tree with Editor_core.Panels.Leaf (Canvas _) -> true | _ -> false);
   let input_text = "(workspace inputs (graph g :context draw [(radius : float 5)] (draw/circle [10 10 0] radius :fill \"#00ffff\")) (graph editor :context editor (ui/workspace (ui/canvas (ref g)))))" in
   let inputs = ["g", ["radius", E.Float 9.]] in
   let workspace = {(doc input_text) with inputs} in
-  let document = ok (Editor_document.Contexts.of_workspace ~factories:Sop.Nodes.factories workspace) in
+  let document = ok (Editor_document.Contexts.of_workspace workspace) in
   let lower = document.workspace.lowered in
   assert (List.assoc "radius" lower.plan.nodes.(0).args = E.Float 9.);
   let source = edited workspace.source (F.Set_arg {node = ["g"; "@result"]; key = F.Pos 0;
     sub = []; value = List.hd (ok (Flow.Syntax.parse "[20 20 0]"))}) in
   let workspace = {workspace with source; checked = checked source} in
-  let after = ok (Editor_document.Contexts.of_workspace ~factories:Sop.Nodes.factories ~previous:document workspace) in
+  let after = ok (Editor_document.Contexts.of_workspace ~previous:document workspace) in
   assert (List.assoc "radius" (after.workspace.lowered).plan.nodes.(0).args = E.Float 9.);
   let bad = {workspace with inputs = ["g", ["radius", E.Text "wrong"]]} in
-  assert (Result.is_error (Editor_document.Contexts.of_workspace ~factories:Sop.Nodes.factories bad));
+  assert (Result.is_error (Editor_document.Contexts.of_workspace bad));
   let module Editor = Rays_editor.Editor in
   let editor = Result.get_ok (Editor.create ~ui_text_size:11 ~workspace ~await:true
     ~prepare:(fun _ _ -> Ok ()) ~draw:(fun _ () -> Rays.Scene.D3.create []) ()) in

@@ -102,7 +102,7 @@ Lisp_sop.node ~with_:["source", (source)] (Printf.sprintf {|(sop/transform (sop/
   let lowered = match Flow.Syntax.parse "(workspace live (graph g :context sop (sop/box :uniform_scale t)))" with
     | Error d -> failwith (Diagnostic.to_string d)
     | Ok forms -> (match Flow_sop.Lower.workspace ~extra:Editor_document.Kinds.descriptors
-          ~factories:Sop.Nodes.factories forms with
+          forms with
         | Ok lowered -> lowered | Error d -> failwith (Diagnostic.to_string d)) in
   let graph = List.hd lowered.graphs in
   let network = graph.network and root = Option.get graph.root in

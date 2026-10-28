@@ -158,7 +158,7 @@ module Private : sig
       view:Flow.Syntax.t -> (string, string) result
     val list : directory:string -> (string * float) list
     val delete : directory:string -> name:string -> (unit, string) result
-    val load : ?gpu:Flow_ir.Gpu.config -> path:string -> factories:Sop.Edit_graph.factory list ->
+    val load : ?gpu:Flow_ir.Gpu.config -> path:string -> ?factories:Sop.Edit_graph.factory list ->
       settings:Settings.t -> unit -> (loaded, string) result
   end
 

@@ -26,7 +26,7 @@ let ()=List.iter(fun stateful->
     (graph other :context sop (ref mesh :offset 0.25))
     (graph backdrop :context draw (draw/background "#102030"))
     (graph fixed :context image (image/render (ref backdrop) :width 65 :height 17)))|}bias)
-    |> ok |> L.workspace ~factories:Sop.Nodes.factories |> ok in
+    |> ok |> L.workspace |> ok in
   let create domains=
     let resources=Flow_native.Workspace_resources.create()and gpu=Flow_native.Workspace_gpu.create()in
     let owner=Flow_native.Workspace_images.create ~domains ~gpu resources in
@@ -164,7 +164,7 @@ let ()=List.iter(fun domains->
              point (array/nth (sop/attr geo :P) 2)
              img (image/map (fn [uv] [(+ uv.x point.x) uv.y 0.5 1]) :width 65 :height 17)
              parent (image/render (ref drawing :image img) :width 65 :height 17)] geo)))|}
-    |> ok |> L.workspace ~factories:Sop.Nodes.factories |> ok in
+    |> ok |> L.workspace |> ok in
   let resources=Flow_native.Workspace_resources.create()and gpu=Flow_native.Workspace_gpu.create()in
   let owner=Flow_native.Workspace_images.create ~domains ~gpu resources in
   Flow_native.Workspace_images.bind owner lowered;Flow_native.Workspace_gpu.qualification gpu;
@@ -222,7 +222,7 @@ let ()=
     (graph picture :context draw [(image : image (image/noise :width 1 :height 1))]
       (draw/image image))
     (graph composed :context draw (ref picture :image (ref frozen))))|}width height)
-    |> ok |> Flow_sop.Lower.workspace ~factories:Sop.Nodes.factories |> ok in
+    |> ok |> Flow_sop.Lower.workspace |> ok in
   let resources=Flow_native.Workspace_resources.create()and gpu=Flow_native.Workspace_gpu.create()in
   let owner=Flow_native.Workspace_images.create ~domains:1 ~gpu resources in
   Flow_native.Workspace_gpu.qualification gpu;
@@ -311,7 +311,7 @@ let ()=List.iter(fun(width,height,expected_reads)->
   Flow_native.Workspace_gpu.qualification gpu;
   let lowered=Flow.Syntax.parse(Printf.sprintf {|(workspace versions (graph img :context image
     (exact (image/map (fn [uv] [(* t 0.0078125) uv.y 0.5 1]) :width %d :height %d))))|}width height)
-    |> ok |> Flow_sop.Lower.workspace ~factories:Sop.Nodes.factories |> ok in
+    |> ok |> Flow_sop.Lower.workspace |> ok in
   Flow_native.Workspace_images.bind owner lowered;
   let n=Array.find_opt(fun(n:E.node)->n.kind="exact")lowered.plan.nodes |> Option.get in
   let child=Array.find_opt(fun(n:E.node)->n.kind="image/map")lowered.plan.nodes |> Option.get in
@@ -389,7 +389,7 @@ let ()=
     (let* [%s total (reduce + [0 0 0] (list %s))
            img (image/map (fn [uv] [(+ (+ uv.x (* t 0.015625)) total.x) uv.y 0.5 1]) :width 65 :height 17)
            last (image/map (fn [uv] [(+ (+ uv.x (* t 0.015625)) p64.x) uv.y 0.5 1]) :width 65 :height 17)] g0)))|}bindings sum in
-  let lowered=Flow.Syntax.parse text |> ok |> Flow_sop.Lower.workspace ~factories:Sop.Nodes.factories |> ok in
+  let lowered=Flow.Syntax.parse text |> ok |> Flow_sop.Lower.workspace |> ok in
   let resources=Flow_native.Workspace_resources.create()and gpu=Flow_native.Workspace_gpu.create()in
   let owner=Flow_native.Workspace_images.create ~domains:1 ~gpu resources in
   Flow_native.Workspace_images.bind owner lowered;Flow_native.Workspace_gpu.qualification gpu;
@@ -421,7 +421,7 @@ let ()=
       (let* [geo (sop/box :consolidate_points true :center [%g 0 0])
              p (reduce + [0 0 0] (sop/attr geo :P))
              img (image/map (fn [uv] [(+ uv.x p.x) uv.y 0.5 1]) :width 7 :height 3)] geo)))|}center)
-    |> ok |> L.workspace ~factories:Sop.Nodes.factories |> ok in
+    |> ok |> L.workspace |> ok in
   let lowered=lower 0.015625 in
   let graph=List.hd lowered.graphs in
   let image_node=Array.find_opt(fun(n:E.node)->n.kind="image/map")lowered.plan.nodes |> Option.get in

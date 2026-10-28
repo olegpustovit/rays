@@ -49,7 +49,7 @@ let lower (doc : Doc.t) =
         Error (D.error ~span:t.form.span ~code:"E_WEB_GRAPH"
           (Printf.sprintf "The web export draws 2D canvas graphs only; this reaches the %s %s." (Flow.Context.name ctx) name))
     | None -> Ok () in
-  let* lowered = Flow_sop.Lower.of_checked ~factories:Sop.Nodes.factories
+  let* lowered = Flow_sop.Lower.of_checked
       ~inputs:doc.inputs doc.checked in
   let evaluated = lowered.evaluated in
   let value = List.assoc draw.name evaluated.results in

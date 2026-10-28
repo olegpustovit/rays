@@ -4,7 +4,7 @@ let check condition message = if not condition then failwith message
 let parse text = match Flow.Syntax.parse text with
   | Ok forms -> forms | Error d -> failwith (Diagnostic.to_string d)
 let lower ?(reference = false) text =
-  match Flow_sop.Lower.workspace ~reference ~factories:Sop.Nodes.factories (parse text) with
+  match Flow_sop.Lower.workspace ~reference (parse text) with
   | Error d -> failwith (Diagnostic.to_string d)
   | Ok lowered ->
       let graph = List.find (fun (graph : Flow_sop.Lower.graph) -> graph.default) lowered.graphs in
@@ -512,7 +512,7 @@ let () =
           (sop/attr geo :P)))))
     (graph g :context sop (sop/unsupported_map (sop/grid :columns 2 :rows 2))))|} in
   (* Projection and graph compilation retain the body; cooking is where strict kernel preparation must refuse it. *)
-  match Flow_sop.Lower.workspace ~factories:Sop.Nodes.factories (parse source) with
+  match Flow_sop.Lower.workspace (parse source) with
   | Error diagnostic ->
       check (diagnostic.code = "E_KERNEL_FORM"
         && diagnostic.message = "Numeric node bodies must compile to packed kernels."
@@ -672,7 +672,7 @@ let ()=
     let compiled_ids,sites=match previous with None->None,None
       |Some(lowered:Flow_sop.Lower.t)->Some lowered.compiled_ids,Some lowered.sites in
     let lowered=match Flow_sop.Lower.workspace ?compiled_ids ?sites
-      ~factories:Sop.Nodes.factories (parse(source ?extra values))with
+      (parse(source ?extra values))with
       |Ok lowered->lowered|Error d->failwith(Diagnostic.to_string d) in
     let graph=List.hd lowered.graphs in
     lowered,ok(Sop.Edit_graph.compile_node graph.network.geometry ~node_id:(Option.get graph.root)) in
@@ -800,7 +800,7 @@ let () =
       (Sop.Node.dependencies (lower ~reference (source "1.0")))))
       "a constant body gained a Frame dependency")
     [false; true];
-  (match Flow_sop.Lower.workspace ~factories:Sop.Nodes.factories
+  (match Flow_sop.Lower.workspace
     (parse "(workspace w (graph g :context sop (sop/line :points (int (sop/context_frame)))))") with
    | Error d -> check (d.code = "E_NODE_CONTEXT") "context frame outside a body has the wrong code"
    | Ok _ -> failwith "context frame outside a defnode body was accepted");
@@ -831,7 +831,7 @@ let () =
       (Sop.Node.dependencies (lower ~reference (source "1.0")))))
       "a constant body gained a Time dependency")
     [false; true];
-  (match Flow_sop.Lower.workspace ~factories:Sop.Nodes.factories
+  (match Flow_sop.Lower.workspace
     (parse "(workspace w (graph g :context sop (sop/line :points (int (sop/context_time)))))") with
    | Error d -> check (d.code = "E_NODE_CONTEXT") "context time outside a body has the wrong code"
    | Ok _ -> failwith "context time outside a defnode body was accepted");

@@ -294,10 +294,10 @@ let write_gestures ~(value : _ t) ~loaded ~present ~tree_edits ~in_text ~node_ef
                       effects = Param.union_effects result.effects Editor_document.Document_edit.cook_effects }
                 | Error message -> refuse message))
       | Syntax_inline { home; key; make } ->
-          inline ~home ~key ~make ~apply:Editor_document.Document_edit.syntax_edit
+          inline ~home ~key ~make ~apply:(fun ~factories -> Editor_document.Document_edit.syntax_edit ~factories)
             ~label:Flow_graph.Flow_edit.label next result
       | Layout_inline { home; key; make } ->
-          inline ~home ~key ~make ~apply:Editor_document.Document_edit.layout_op
+          inline ~home ~key ~make ~apply:(fun ~factories -> Editor_document.Document_edit.layout_op ~factories)
             ~label:Layout_edit.label next result
       | _ -> next, result) (next, result) result.changes in
   let next, result = match !refused with

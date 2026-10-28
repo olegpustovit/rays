@@ -40,7 +40,7 @@ let () =
       let directory = Option.map (fun parent ->
         if not (Sys.file_exists parent) then Unix.mkdir parent 0o755;
         Filename.concat parent (String.map (function '/' -> '-' | c -> c) name)) directory in
-      Workspace_parity.check ?directory ~factories:Sop.Nodes.factories ~name workspace;
+      Workspace_parity.check ?directory ~name workspace;
       incr count
     end) (paths @ fixtures);
   if !count <> List.length paths + List.length fixtures then failwith "incomplete workspace coverage";

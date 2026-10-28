@@ -108,7 +108,7 @@ let camera_nodes () =
      the same undo entry, and a viewport drag is one coalesced undo entry. *)
   let environment = Rays_editor.Editor.create ~ui_text_size:11 ~await:true ~workspace:(fixture ())
       ~camera:(Easy_camera.create ~distance:6. ~inertia:false ())
-      ~factories:Sop.Nodes.factories
+     
       ~max_entries:4 ~max_payload_bytes:(16 * 1024 * 1024)
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
@@ -276,7 +276,7 @@ let preset_and_look_through () =
   let mesh_scene mesh = Scene.D3.create [Scene.D3.mesh mesh] in
   let environment = Rays_editor.Editor.create ~ui_text_size:11 ~await:true ~workspace:(fixture ()) ~presets
       ~camera:(Easy_camera.create ~distance:6. ~inertia:false ())
-      ~factories:Sop.Nodes.factories
+     
       ~max_entries:4 ~max_payload_bytes:(16 * 1024 * 1024)
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
         |> Result.map_error Rdk.Error.to_string)
@@ -443,7 +443,7 @@ let run () =
   layout_panes ();
 
   let environment = Rays_editor.Editor.create ~ui_text_size:11 ~await:true ~workspace:(fixture ())
-      ~factories:Sop.Nodes.factories
+     
       ~max_entries:4 ~max_payload_bytes:(16 * 1024 * 1024)
       ~prepare:(fun _ output -> Rdk_rays.Rays_mesh.to_mesh (Result.get_ok (Sop.Payload.geometry output.Session.payload))
         |> Result.map_error Rdk.Error.to_string)

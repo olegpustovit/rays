@@ -6,7 +6,6 @@ module L = Flow_sop.Lower
 module Edit = Sop.Edit_graph
 module Session = Sop.Session
 let flow_ok = function Ok x -> x | Error d -> failwith (Diagnostic.to_string d)
-let factories = Sop.Nodes.factories
 let columns = 1025
 let grid = Printf.sprintf "(sop/grid :counts \"Point counts\" :connectivity \"Points\" :columns %d :rows 2)" columns
 let chain_text stages = Printf.sprintf
@@ -20,7 +19,7 @@ let lower ?previous text =
   let forms = Flow.Syntax.parse text |> flow_ok in
   let compiled_ids = Option.map (fun (l : L.t) -> l.compiled_ids) previous
   and sites = Option.map (fun (l : L.t) -> l.sites) previous in
-  match L.workspace ~factories ~on_profile:(fun p -> profiles := p :: !profiles) ?compiled_ids ?sites forms with
+  match L.workspace ~on_profile:(fun p -> profiles := p :: !profiles) ?compiled_ids ?sites forms with
   | Ok lowered -> lowered | Error d -> failwith (text ^ "\n" ^ Diagnostic.to_string d)
 let compiled (l : L.t) =
   let graph = List.hd l.graphs in

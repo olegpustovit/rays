@@ -16,7 +16,7 @@ let imports = match Rays_editor.Source.read_imports ~file:path text with
   | Ok imports -> imports | Error ds -> failwith (String.concat "\n" (List.map Diagnostic.to_string ds))
 let workspace = match Rays_editor.Workspace.load ~imports text with
   | Ok w -> w | Error ds -> failwith (String.concat "\n" (List.map Diagnostic.to_string ds))
-let document = Contexts.of_workspace ~factories:Sop.Nodes.factories workspace
+let document = Contexts.of_workspace workspace
   |> Result.map_error Diagnostic.to_string |> get
 let scene = document.scene
 let camera_node = match Objects.ids "camera" scene with
