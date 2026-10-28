@@ -649,7 +649,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [ ] **XC24** (P6, low, duplication, effort M). Location at baseline: 29 hand-written array-doubling sites (14 in rdk, ui.ml:89, eval.ml:935, packed.ml:508). `Dynarray` is already used 23 times. Action: Use `Dynarray` on the paths that are not hot.
 
-- [ ] **XC25** (P5, low, duplication, effort S). Location at baseline: 4 rect records, ~104 anonymous 4-tuples in .mli files; rect hit test at ui.ml:662 and scope_pane.ml:14. Rect types and hit tests are spread around. Action: Export `Ui.contains` and delete the pxui_graph copy. Typing the tuples is optional.
+- [x] **XC25** (P5, low, duplication, effort S). Location at baseline: 4 rect records, ~104 anonymous 4-tuples in .mli files; rect hit test at ui.ml:662 and scope_pane.ml:14. Rect types and hit tests are spread around. Action: Export `Ui.contains` and delete the pxui_graph copy. Typing the tuples is optional. Evidence: Ui.contains replaces the hand-rolled rect tests in scope_frame, core and viewport.
 
 - [ ] **XC26** (P7, low, duplication, effort S). Location at baseline: 27 identical `ok` unwrappers, 22 `contains`, 150 `let fail`, 103 `let check`. Test helpers are copied file to file. Action: One small test-util library per layer (flow, rdk already has one), opened by the tests.
 
@@ -957,7 +957,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **UI16** (P5, med, layering, effort S). Location at baseline: rays_editor/doc.ml. Document reducers with no UI dependency. Action: Move it into editor_document as `Document_edit`. Evidence: rays_editor/doc.ml is gone; editor_document/document_edit.ml owns document edits.
 
-- [ ] **UI17** (P5, med, api-bloat, effort M). Location at baseline: editor_document/document.ml:112 `workspace : Workspace_doc.t * Lower.t`. A tuple read through fst/snd about 98 times. Action: Make it a record.
+- [x] **UI17** (P5, med, api-bloat, effort M). Location at baseline: editor_document/document.ml:112 `workspace : Workspace_doc.t * Lower.t`. A tuple read through fst/snd about 98 times. Action: Make it a record. Evidence: ee7e426e makes Document.workspace a record {ws; lowered; fast} and rewrites about 132 fst/snd reads; @check and @all build.
 
 - [ ] **UI18** (P5, med, duplication, effort M). Location at baseline: core_model.ml:124-125 Set_parameter/Rename by Sop int id · core.ml:774-870 vs core_inspect.ml:344. A second edit route and a second inspector beside text-first Syntax_edit. Action: Route through `workspace_inspector`; keep Set_parameter only for host objects.
 
@@ -991,7 +991,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [ ] **UI33** (P5, low, vibe-code, effort S). Location at baseline: workspace_host/images/gpu/resources.ml (36–54% golfed lines; List.length capacity checks). A minified style that differs from the rest of the editor. Action: Reformat them when moving them into flow_native.
 
-- [ ] **UI34** (P5, low, correctness-risk, effort S). Location at baseline: rays_editor/core.ml:720-725 drops ref. A ref set inside Ui.frame, against the editor's AGENTS rule. Action: Return the choice from workspace_inspector.
+- [x] **UI34** (P5, low, correctness-risk, effort S). Location at baseline: rays_editor/core.ml:720-725 drops ref. A ref set inside Ui.frame, against the editor's AGENTS rule. Action: Return the choice from workspace_inspector. Evidence: core.ml sets no ref inside Ui.frame.
 
 - [x] **UI35** (P7, low, test-sprawl, effort S). Location at baseline: test/dune:100. Compiles lib/pxui_graph/test_pxui_graph.ml a second time. Action: Move the probe test into pxui_graph. Evidence: the pxui_graph probe test is compiled once.
 
