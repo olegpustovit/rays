@@ -1100,4 +1100,4 @@ let resolve_scene ?previous ?state ?live (document : Document.t) ~time =
     document.scene_drives (document.scene.graph.geometry, []) in
   graph, List.rev errors
 
-let digest s = Digest.to_hex (Digest.string s)
+let sha256 s = Digestif.SHA256.(to_hex (digest_string s))

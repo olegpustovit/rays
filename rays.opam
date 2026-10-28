@@ -12,6 +12,7 @@ bug-reports: "https://github.com/olegpustovit/rays/issues"
 depends: [
   "ocaml" {>= "5.3"}
   "dune" {>= "3.21" & >= "3.21"}
+  "digestif"
   "dune-configurator"
   "ppxlib"
   "odoc" {with-doc}

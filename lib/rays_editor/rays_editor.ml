@@ -284,5 +284,5 @@ module Workspace = struct
     let* imports = Source_file.read_imports ~file:path text in
     let* doc = load ~imports text in
     Result.map_error(fun diagnostic->[diagnostic])
-      (run ?process ~source:{ path; digest = Contexts.digest text } doc)
+      (run ?process ~source:{ path; digest = Contexts.sha256 text } doc)
 end

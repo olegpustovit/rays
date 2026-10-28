@@ -3,7 +3,7 @@ let () =
   let file = Sys.argv.(1) in
   let text = In_channel.with_open_bin file In_channel.input_all in
   let source = ref (Rays_editor.Source.at ~file
-    ~digest:(Editor_document.Contexts.digest text)) in
+    ~digest:(Editor_document.Contexts.sha256 text)) in
   let iterations = 2000 in
   let allocated = Gc.allocated_bytes in
   let measure label f =
@@ -22,5 +22,5 @@ let () =
       source := next;
       assert (changed = None));
     (* Start a fresh poll clock for the next sample. *)
-    source := Rays_editor.Source.at ~file ~digest:(Editor_document.Contexts.digest text)
+    source := Rays_editor.Source.at ~file ~digest:(Editor_document.Contexts.sha256 text)
   done

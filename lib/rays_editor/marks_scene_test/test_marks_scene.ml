@@ -92,7 +92,7 @@ let () =
 let () =
   assert (List.length digests = List.length pictures);
   List.iteri (fun i body ->
-    let digest = Editor_document.Contexts.digest (Bytes.to_string (serialize (new_scene body))) in
+    let digest = Editor_document.Contexts.sha256 (Bytes.to_string (serialize (new_scene body))) in
     if digest <> List.nth digests i then failwith (Printf.sprintf "picture %d differs: %s (expected %s, got %s)" i body (List.nth digests i) digest))
     pictures;
   (* Hand-built marks against the Scene API. *)

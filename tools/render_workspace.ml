@@ -102,7 +102,7 @@ let run_benchmark model =
   let report = Buffer.create 1024 in
   Printf.bprintf report "# scene=%s,width=%d,height=%d,spp_per_frame=4,bounces=%d,round_samples=%d,setup_s=%.9f\n"
     path width height document.root.bounces document.root.round_samples model.setup_seconds;
-  Buffer.add_string report "round,samples,wall_s,cpu_s,allocated_bytes,rgba_digest\n";
+  Buffer.add_string report "round,samples,wall_s,cpu_s,allocated_bytes,rgba_sha256\n";
   (* Compile and warm the same scene before five deterministic measured rounds.
      RAYS_PATHTRACER_PROFILE=1 logs each GPU band between these markers. *)
   P.render model.tracer camera |> get;
@@ -118,7 +118,7 @@ let run_benchmark model =
     and allocated_bytes = Gc.allocated_bytes () -. allocated in
     Printf.eprintf "pathtracer_benchmark end %d\n%!" round;
     let rgba = Rays.Image.Private.pixels (P.image model.tracer) |> get in
-    let digest = Contexts.digest (Bytes.to_string rgba) in
+    let digest = Contexts.sha256 (Bytes.to_string rgba) in
     let row = Printf.sprintf "%d,%d,%.9f,%.9f,%.0f,%s\n"
       round (P.samples model.tracer) seconds cpu_seconds allocated_bytes digest in
     Buffer.add_string report row;

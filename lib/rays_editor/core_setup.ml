@@ -74,7 +74,7 @@ let create ?gpu ?settings
       let guide = match read_preferences preferences with
         | Ok values -> Option.value ~default:true (Editor_core.Store.Settings.bool values "guide")
         | Error _ -> true in
-      let state_name = Contexts.digest state_key in
+      let state_name = Contexts.sha256 state_key in
       let value = { preferences; text_size = ui_text_size; guide; hud = None; presets; state_name; name; prompt = None; notice = None; notice_at = 0.;
         doc; gpu; filed = doc; level;
         projections = Level_map.empty; text = Text_pane.initial; map_view = false;

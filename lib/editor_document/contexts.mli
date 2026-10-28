@@ -77,5 +77,5 @@ val graph_of : Workspace_doc.t -> Flow.Workspace.context -> Flow.Workspace.graph
 val world_kinds : (string * Sop.Edit_graph.factory) list
 (** The qualified World kinds ([world/sky], ...) with their factories. *)
 
-val digest : string -> string
-(** Lower-case hex MD5 ({!Digest}): a change fingerprint of a source, not a security hash. *)
+val sha256 : string -> string
+(** Lower-case hex SHA-256: the digest of a sketch source. *)

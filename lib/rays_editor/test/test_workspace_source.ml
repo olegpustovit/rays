@@ -11,7 +11,7 @@ let fail message = failwith ("test_workspace_source: " ^ message)
 let check condition message = if not condition then fail message
 open Test_text
 
-let sha = Editor_document.Contexts.digest
+let sha = Editor_document.Contexts.sha256
 let catalog = Editor_document.Contexts.catalog ~version:1 Sop_catalog.Editor.factories |> Result.get_ok
 
 let sketch radius = Printf.sprintf {|;; the header
