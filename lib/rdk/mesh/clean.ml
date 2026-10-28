@@ -12,7 +12,7 @@ let[@inline] clean_length dx dy dz =
 
 let[@inline] clean_point_distance positions a b =
   let scale = Float.max
-      (Float.max (abs_float positions.Packed.Float3.Private.x.(a))
+      (Float.max (abs_float positions.Packed.Float3.View.x.(a))
          (abs_float positions.x.(b)))
       (Float.max
          (Float.max (abs_float positions.y.(a)) (abs_float positions.y.(b)))
@@ -25,7 +25,7 @@ let[@inline] clean_point_distance positions a b =
       ((positions.z.(b) /. scale) -. (positions.z.(a) /. scale)) *. scale
 
 let[@inline] clean_triangle_is_degenerate ~epsilon positions a b c =
-  let ax = positions.Packed.Float3.Private.x.(a)
+  let ax = positions.Packed.Float3.View.x.(a)
   and ay = positions.y.(a) and az = positions.z.(a)
   and bx = positions.x.(b) and by = positions.y.(b) and bz = positions.z.(b)
   and cx = positions.x.(c) and cy = positions.y.(c) and cz = positions.z.(c) in
@@ -66,10 +66,10 @@ let delete_degenerate ?cancel ~grain ?primitives ~epsilon geometry =
   then Error "Facet selection must be a matching primitive group"
   else if primitive_count = 0 then Ok geometry
   else
-    let positions = Packed.Float3.Private.view (Geometry.positions geometry)
+    let positions = Packed.Float3.View.view (Geometry.positions geometry)
     and topology_value = Geometry.topology geometry
     and flags = Bytes.make primitive_count '\000' in
-    let topology = Topology.Private.view topology_value in
+    let topology = Topology.View.view topology_value in
     if Topology.all_triangles topology_value then
       Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(primitive_count - 1)
         (fun primitive ->
@@ -189,10 +189,10 @@ let delete_degenerate ?cancel ~grain ?primitives ~epsilon geometry =
       let selection = Group.init ~grain ~owner:Group.Primitive
           ~name:"__clean_degenerate" primitive_count
           (fun primitive -> Bytes.get flags primitive <> '\000') in
-      Error.unguard (Deletion.delete ?cancel ~grain selection geometry)
+      Ok (Error.get (Deletion.delete ?cancel ~grain selection geometry))
 
 let delete_nan_points ?cancel ~grain geometry =
-  let positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+  let positions = Packed.Float3.View.view (Geometry.positions geometry) in
   let point_count = Geometry.point_count geometry in
   if point_count = 0 then Ok geometry
   else
@@ -211,11 +211,11 @@ let delete_nan_points ?cancel ~grain geometry =
       let selection = Group.init ~grain ~owner:Group.Point
           ~name:"__clean_nan_points" point_count
           (fun point -> Bytes.get flags point <> '\000') in
-      Error.unguard (Deletion.delete ?cancel ~grain selection geometry)
+      Ok (Error.get (Deletion.delete ?cancel ~grain selection geometry))
 
 let[@inline] clean_cycle_point topology first size start direction offset =
   let local = (start + (direction * offset)) mod size in
-  topology.Topology.Private.vertex_points.
+  topology.Topology.View.vertex_points.
     (first + if local < 0 then local + size else local)
 
 let clean_minimal_rotation_into topology first size direction primitive
@@ -247,7 +247,7 @@ let clean_minimal_rotation_into topology first size direction primitive
   min work_left.(primitive) work_right.(primitive) mod size
 
 let delete_overlaps_general ?cancel ~grain ~delete_pairs geometry =
-  let topology = Topology.Private.view (Geometry.topology geometry) in
+  let topology = Topology.View.view (Geometry.topology geometry) in
   let primitive_count = Geometry.primitive_count geometry in
   let sizes = Array.make primitive_count 0 and starts = Array.make primitive_count 0
   and directions = Array.make primitive_count 1
@@ -349,11 +349,11 @@ let delete_overlaps_general ?cancel ~grain ~delete_pairs geometry =
       let selection = Group.init ~grain ~owner:Group.Primitive
           ~name:"__clean_overlaps" primitive_count
           (fun primitive -> Bytes.get flags primitive <> '\000') in
-      Error.unguard (Deletion.delete ?cancel ~grain selection geometry)
+      Ok (Error.get (Deletion.delete ?cancel ~grain selection geometry))
   end
 
 let delete_triangle_overlaps ?cancel ~grain ~delete_pairs geometry =
-  let topology = Topology.Private.view (Geometry.topology geometry) in
+  let topology = Topology.View.view (Geometry.topology geometry) in
   let primitive_count = Geometry.primitive_count geometry in
   if primitive_count = 0 then Ok geometry
   else if primitive_count > Sys.max_array_length / 4 then
@@ -414,7 +414,7 @@ let delete_triangle_overlaps ?cancel ~grain ~delete_pairs geometry =
       let selection = Group.init ~grain ~owner:Group.Primitive
           ~name:"__clean_overlaps" primitive_count
           (fun primitive -> Bytes.get flags primitive <> '\000') in
-      Error.unguard (Deletion.delete ?cancel ~grain selection geometry)
+      Ok (Error.get (Deletion.delete ?cancel ~grain selection geometry))
   end
 
 let delete_overlaps ?cancel ~grain ~delete_pairs geometry =
@@ -434,8 +434,8 @@ let run ?cancel ?(grain = 16_384) ?(epsilon = 1e-12)
   Error.guard ~operation:"clean" ~code:"invalid_geometry" @@ fun () ->
   let overlaps = Option.map (fun policy -> policy = Delete_overlap_pairs) overlaps in
   let consolidate tolerance geometry =
-    Error.unguard (Fuse_grid.fuse ?cancel ~grain ~tolerance geometry)
-  and compact geometry = Error.unguard (Compact_points.run ?cancel ~grain geometry) in
+    Ok (Error.get (Fuse_grid.fuse ?cancel ~grain ~tolerance geometry))
+  and compact geometry = Ok (Error.get (Compact_points.run ?cancel ~grain geometry)) in
   if grain <= 0 then invalid_arg "Rdk_mesh.Clean.clean: grain must be positive";
   if not (Float.is_finite epsilon) || epsilon < 0. then
     Error "Rdk_mesh.Clean.clean: epsilon must be finite and non-negative"
@@ -465,7 +465,7 @@ let run ?cancel ?(grain = 16_384) ?(epsilon = 1e-12)
         | None -> Ok geometry
         | Some delete_pairs -> delete_overlaps ?cancel ~grain ~delete_pairs geometry) in
       let result = Result.bind result (fun geometry ->
-        if reverse_winding then Error.unguard (Reverse_faces.run ?cancel geometry)
+        if reverse_winding then Ok (Error.get (Reverse_faces.run ?cancel geometry))
         else Ok geometry) in
       let result = Result.bind result (fun geometry ->
         if remove_unused_points then compact geometry
@@ -486,6 +486,5 @@ let run ?cancel ?(grain = 16_384) ?(epsilon = 1e-12)
             |> add Group_ops.Group_primitives primitive_groups
             |> add Group_ops.Group_edges edge_groups |> List.rev in
         if rules = [] && not delete_unused_groups then Ok geometry
-        else Error.unguard
-            (Group_ops.delete ~rules ~delete_unused:delete_unused_groups geometry)))
+        else Ok (Error.get (Group_ops.delete ~rules ~delete_unused:delete_unused_groups geometry))))
   end

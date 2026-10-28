@@ -16,7 +16,7 @@ let fixtures () =
      [|0;3;6;9;12|] [|T.Polygon;Open_polyline;Closed_polyline;Polygon|]]
   |> List.map (fun (name, topology) ->
     let count = T.point_count topology in
-    let positions = Rdk.Packed.Float3.Private.of_owned_exn
+    let positions = Rdk.Packed.Float3.View.of_owned_exn
       ~x:(Array.init count float) ~y:(Array.make count 0.) ~z:(Array.make count 0.) in
     name, (G.create ~positions ~topology () |> ok))
 
@@ -45,7 +45,7 @@ let ints a = E.Int_array (Array.copy a)
 let () =
   List.iter (fun (_, geometry) ->
     let index = Rdk.Topology_index.create (G.topology geometry) in
-    let v = Rdk.Topology_index.Private.view index in
+    let v = Rdk.Topology_index.View.view index in
     agree geometry "(sop/adjacency geo)" (E.Record [
       "primitive_of_vertex", ints v.primitive_of_vertex; "next_vertex", ints v.next_vertex;
       "previous_vertex", ints v.previous_vertex; "edge_of_vertex", ints v.edge_of_vertex;
@@ -127,11 +127,11 @@ let () =
     ~vertex_points:[|0;1;2;3;4;5; 0;1; 6;7;8|] ~primitive_offsets:[|0;6;8;11|]
     ~primitive_kinds:[|T.Polygon;Open_polyline;Polygon|] |> ok in
   (* an L hexagon (concave at point 3), a curve, then a collinear triangle *)
-  let positions = Rdk.Packed.Float3.Private.of_owned_exn
+  let positions = Rdk.Packed.Float3.View.of_owned_exn
     ~x:[|0.;2.;2.;1.;1.;0.;0.;1.;2.|] ~y:[|0.;0.;1.;1.;2.;2.;5.;5.;5.|] ~z:(Array.make 9 0.) in
   let geometry = G.create ~positions ~topology () |> ok in
   let rows = ref [] in
-  let view = Rdk.Packed.Float3.Private.view positions and top = T.Private.view topology in
+  let view = Rdk.Packed.Float3.View.view positions and top = T.View.view topology in
   ignore (Rdk_core.Polygon_triangulation.primitive ~positions:view ~topology:top 0
     ~emit:(fun _ a b c -> rows := (a, b, c) :: !rows));
   (* a three-corner polygon passes through unclipped, even collinear *)

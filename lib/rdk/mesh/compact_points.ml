@@ -4,7 +4,7 @@ let compact_points ?cancel ?(grain = 16_384) geometry =
   Cancel.check_opt cancel;
   let point_count = Geometry.point_count geometry
   and source_topology_value = Geometry.topology geometry in
-  let source_topology = Topology.Private.view source_topology_value in
+  let source_topology = Topology.View.view source_topology_value in
   let used = Array.make point_count false in
   Array.iteri (fun vertex point ->
     if vertex land 16_383 = 0 then Cancel.check_opt cancel;
@@ -23,18 +23,18 @@ let compact_points ?cancel ?(grain = 16_384) geometry =
     for point = 0 to point_count - 1 do
       if used.(point) then begin new_to_old.(!at) <- point; incr at end
     done;
-    let source_positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+    let source_positions = Packed.Float3.View.view (Geometry.positions geometry) in
     let px = Topology_remap.select_float ?cancel ~grain new_to_old source_positions.x
     and py = Topology_remap.select_float ?cancel ~grain new_to_old source_positions.y
     and pz = Topology_remap.select_float ?cancel ~grain new_to_old source_positions.z in
-    let positions = Packed.Float3.Private.of_owned_exn ~x:px ~y:py ~z:pz in
+    let positions = Packed.Float3.View.of_owned_exn ~x:px ~y:py ~z:pz in
     let vertex_points = Array.make (Array.length source_topology.vertex_points) 0 in
     if Array.length vertex_points > 0 then
       Parallel.for_ ~chunk_size:grain ~start:0
         ~finish:(Array.length vertex_points - 1) (fun vertex ->
           if vertex land 16_383 = 0 then Cancel.check_opt cancel;
           vertex_points.(vertex) <- old_to_new.(source_topology.vertex_points.(vertex)));
-    let topology = Topology.Private.create_validated_owned ~point_count:!retained
+    let topology = Topology.View.create_validated_owned ~point_count:!retained
         ~vertex_points ~primitive_offsets:(Array.copy source_topology.primitive_offsets)
         ~primitive_kinds:(Bytes.copy source_topology.primitive_kinds) in
     let remap_point_attribute attribute =

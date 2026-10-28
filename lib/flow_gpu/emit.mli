@@ -11,7 +11,10 @@ val names : string list
 val compaction : msl
 (* The kernel of a resident fold's [array/compact]: buffers mask, kept (float indices), total (uint),
    uniform (n, use) and count_in: the mask's count is n, or its minimum with [count_in[0]] when use is set. *)
-val kernel : ?fast:bool -> ?instanced:bool -> Flow_ir.Packed.t -> (msl, Diagnostic.t) result
+val kernel : ?fast:bool -> ?instanced:bool -> ?motion:bool -> ?curves:[ `Loop | `Native ] -> Flow_ir.Packed.t ->
+  (msl, Diagnostic.t) result
+(* [instanced], [motion] and [curves] are static scene facts of a [scene/trace] kernel ({!Run.build_scene}
+   reports them): [`Native] strands are Metal curve primitives, [`Loop] an in-loop capsule test. *)
 (* [fast] (the workspace's fast precision) also emits signed-63 integer arithmetic and gathers from
    bound tables. The shared status word uses bits 1/2/4 for nonfinite output, integer division by
    zero, and an out-of-range integer shift, respectively. *)

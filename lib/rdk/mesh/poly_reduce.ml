@@ -31,7 +31,6 @@ let create_scratch ~points ~primitives ~edges =
     reserved = Bytes.make points '\000'; neighbor_stamp = Array.make points 0;
     primitive_stamp = Array.make primitives 0; }
 
-exception Invalid of string
 
 type target =
   | Reduce_ratio of float
@@ -40,7 +39,7 @@ type target =
 let validate_group ~owner ~length label = function
   | None -> ()
   | Some group when Group.owner group <> owner || Group.length group <> length ->
-      raise (Invalid (Printf.sprintf "%s must be a matching %s group" label
+      raise (Error.Fail (Printf.sprintf "%s must be a matching %s group" label
         (match owner with Group.Point -> "point" | Group.Vertex -> "vertex"
          | Group.Primitive -> "primitive")))
   | Some _ -> ()
@@ -49,7 +48,7 @@ let validate_edge_group ~topology ~edge_count label = function
   | None -> ()
   | Some group when Edge_group.topology_data_id group <> Topology.data_id topology
       || Edge_group.length group <> edge_count ->
-      raise (Invalid (label ^ " must belong to the input topology"))
+      raise (Error.Fail (label ^ " must belong to the input topology"))
   | Some _ -> ()
 
 let[@inline] quadric_error q00 q01 q02 q03 q11 q12 q13 q22 q23 q33
@@ -76,17 +75,17 @@ let plan_round ?cancel ~scratch ~grain ~primitive_selection ~hard_points ~hard_e
      | None | Some _ -> ());
     Cancel.check_opt cancel;
     let topology = Geometry.topology geometry in
-    if not (Topology.all_triangles topology) then raise (Invalid
+    if not (Topology.all_triangles topology) then raise (Error.Fail
         "Rdk.Poly_reduce: the round planner requires triangle polygons");
-    let topology_view = Topology.Private.view topology in
+    let topology_view = Topology.View.view topology in
     let index_value = Topology_index.create ?cancel topology in
-    let index = Topology_index.Private.view index_value in
+    let index = Topology_index.View.view index_value in
     let point_count = Geometry.point_count geometry
     and primitive_count = Geometry.primitive_count geometry
     and edge_count = Array.length index.edge_a in
     if point_count > Array.length scratch.q00
         || primitive_count > Array.length scratch.face_a
-        || edge_count > Array.length scratch.costs then raise (Invalid
+        || edge_count > Array.length scratch.costs then raise (Error.Fail
         "Rdk.Poly_reduce: scratch capacity is smaller than the working topology");
     validate_group ~owner:Group.Primitive ~length:primitive_count
       "Rdk.Poly_reduce: primitive selection" primitive_selection;
@@ -94,7 +93,7 @@ let plan_round ?cancel ~scratch ~grain ~primitive_selection ~hard_points ~hard_e
       "Rdk.Poly_reduce: hard points" hard_points;
     validate_edge_group ~topology ~edge_count
       "Rdk.Poly_reduce: hard edges" hard_edges;
-    let positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+    let positions = Packed.Float3.View.view (Geometry.positions geometry) in
     let first_non_finite = Atomic.make max_int in
     let record_min target value =
       let rec loop current =
@@ -107,7 +106,7 @@ let plan_round ?cancel ~scratch ~grain ~primitive_selection ~hard_points ~hard_e
         if point land 4095 = 0 then Cancel.check_opt cancel;
         if not (Float.is_finite positions.x.(point) && Float.is_finite positions.y.(point)
             && Float.is_finite positions.z.(point)) then record_min first_non_finite point);
-    if Atomic.get first_non_finite <> max_int then raise (Invalid
+    if Atomic.get first_non_finite <> max_int then raise (Error.Fail
         (Printf.sprintf "Rdk.Poly_reduce: point %d has a non-finite position"
           (Atomic.get first_non_finite)));
     let coordinate_scale = ref 0. in
@@ -374,11 +373,11 @@ let plan_round ?cancel ~scratch ~grain ~primitive_selection ~hard_points ~hard_e
       end;
       incr ordinal
     done;
-    let edges = Edge_group.Private.of_owned_bits ~topology ~edge_count
+    let edges = Edge_group.View.of_owned_bits ~topology ~edge_count
         ~name:"__rdk_poly_reduce_round" selected in
     Ok { edges; removed_primitives = !removed }
   with
-  | Invalid message | Invalid_argument message -> Error message
+  | Error.Fail message | Invalid_argument message -> Error message
 let run ?cancel ?(grain = 16_384) ?(target = Reduce_ratio 0.5)
     ?primitives ?hard_points ?hard_edges ?(preserve_boundary = true)
     ?(only_original_positions = false) ?(equalize_lengths = 1e-10)
@@ -457,7 +456,7 @@ let run ?cancel ?(grain = 16_384) ?(target = Reduce_ratio 0.5)
             let name = unique_edge_name "__rdk_poly_reduce_hard_edges" geometry in
             Geometry.with_edge_group (Edge_group.with_name name group) geometry
               |> Support.get_ok, Some name in
-      Result.bind (Error.unguard (Triangulate.run ?cancel ~grain geometry))
+      Result.bind (Ok (Error.get (Triangulate.run ?cancel ~grain geometry)))
         (fun triangulated ->
         let working_count = Geometry.primitive_count triangulated in
         let working_index = Topology_index.create ?cancel

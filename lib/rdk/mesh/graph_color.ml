@@ -9,8 +9,7 @@ type worksets = {
   length_attribute : string;
 }
 
-exception Graph_color_error of string
-let fail message = raise (Graph_color_error message)
+let fail = Error.fail
 let get = function Ok value -> value | Error message -> fail message
 
 let target_owner = function
@@ -56,9 +55,16 @@ let greedy ~offsets ~neighbors order =
     colors.(element) <- color) order;
   colors
 
-let graph_color_raw?cancel ?(grain = 16_384) ?selection
+let run ?cancel ?(grain = 16_384) ?selection
     ?(connectivity = Graph_primitives_by_point) ?(color_attribute = "color")
     ?(sort_output = false) ?worksets geometry =
+  let selection = Option.map (function
+    | Transform_ops.Selected_points group -> Element_selection.Selected_points group
+    | Transform_ops.Selected_vertices group -> Element_selection.Selected_vertices group
+    | Transform_ops.Selected_primitives group -> Element_selection.Selected_primitives group
+    | Transform_ops.Selected_edges group -> Element_selection.Selected_edges group)
+      selection in
+  Error.guard ~operation:"graph_color" ~code:"invalid_graph" @@ fun () ->
   try
     if grain <= 0 then fail "Graph Color grain must be positive";
     validate_name "color attribute" color_attribute;
@@ -90,7 +96,7 @@ let graph_color_raw?cancel ?(grain = 16_384) ?selection
     (match Geometry.find_attribute ~owner:target_attribute_owner
         color_attribute geometry with
      | Some attribute ->
-         (match Attribute.Private.storage attribute with
+         (match Attribute.View.storage attribute with
           | Attribute.Int _ -> ()
           | _ -> fail "Graph Color output attribute already has non-integer storage")
      | None -> ());
@@ -98,8 +104,8 @@ let graph_color_raw?cancel ?(grain = 16_384) ?selection
     let color_count = ref 0 in
     if selected_count > 0 then begin
       let index = Topology_index.create ?cancel topology in
-      let reverse = Topology_index.Private.view index
-      and forward = Topology.Private.view topology in
+      let reverse = Topology_index.View.view index
+      and forward = Topology.View.view topology in
       let parent = Array.init count Fun.id and rank = Bytes.make count '\000' in
       let root element =
         let representative = ref element in
@@ -325,9 +331,9 @@ let graph_color_raw?cancel ?(grain = 16_384) ?selection
         (Attribute.Int colors) |> get in
     let output = Geometry.with_attribute color_attribute_value geometry |> get in
     let output = if not sort_output then output else
-        Error.unguard (Ordering.sort ?cancel ~grain ~owner:(ordering_owner owner)
+        Error.get (Ordering.sort ?cancel ~grain ~owner:(ordering_owner owner)
           ~key:(Ordering.Attribute_component {
-            name = color_attribute; component = 0 }) output) |> get in
+            name = color_attribute; component = 0 }) output) in
     match worksets with
     | None -> Ok output
     | Some worksets ->
@@ -338,7 +344,7 @@ let graph_color_raw?cancel ?(grain = 16_384) ?selection
         for color = 1 to !color_count - 1 do
           begins.(color) <- begins.(color - 1) + lengths.(color - 1)
         done;
-        let packed values = Packed.Int_array.Private.create_validated_owned
+        let packed values = Packed.Int_array.View.create_validated_owned
             ~offsets:[|0;Array.length values|] ~values in
         let begin_attribute = Attribute.create_owned ~owner:Attribute.Detail
             ~name:worksets.begin_attribute
@@ -348,16 +354,5 @@ let graph_color_raw?cancel ?(grain = 16_384) ?selection
             (Attribute.Int_array (packed lengths)) |> get in
         Geometry.with_attribute begin_attribute output |> get
         |> Geometry.with_attribute length_attribute
-  with Graph_color_error message | Invalid_argument message -> Error message
+  with Error.Fail message | Invalid_argument message -> Error message
 
-let run ?cancel ?grain ?selection ?connectivity ?color_attribute
-    ?sort_output ?worksets geometry =
-  Error.guard ~operation:"graph_color" ~code:"invalid_graph" @@ fun () ->
-  let selection = Option.map (function
-    | Transform_ops.Selected_points group -> Element_selection.Selected_points group
-    | Transform_ops.Selected_vertices group -> Element_selection.Selected_vertices group
-    | Transform_ops.Selected_primitives group -> Element_selection.Selected_primitives group
-    | Transform_ops.Selected_edges group -> Element_selection.Selected_edges group)
-      selection in
-  graph_color_raw ?cancel ?grain ?selection ?connectivity ?color_attribute ?sort_output
-    ?worksets geometry

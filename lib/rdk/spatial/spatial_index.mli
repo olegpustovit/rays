@@ -17,7 +17,7 @@ val create :
   ?cancel:Cancel.t -> ?grain:int -> ?points:Group.t -> Packed.Float3.t ->
   (t, Error.t) result
 
-module Private : sig
+module View : sig
   val nearest_k_into :
     t ->
     x:float -> y:float -> z:float ->

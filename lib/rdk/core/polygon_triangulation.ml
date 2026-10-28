@@ -49,9 +49,9 @@ let find_projected_ear ~u ~v ~base ~orientation ~remaining ~active =
   done;
   !ear
 
-let primitive ?cancel ~(positions : Packed.Float3.Private.view)
-    ~(topology : Topology.Private.view) ?scratch primitive ~emit =
-  let first = topology.Topology.Private.primitive_offsets.(primitive)
+let primitive ?cancel ~(positions : Packed.Float3.View.view)
+    ~(topology : Topology.View.view) ?scratch primitive ~emit =
+  let first = topology.Topology.View.primitive_offsets.(primitive)
   and last = topology.primitive_offsets.(primitive + 1) in
   let size = last - first in
   if Bytes.get topology.primitive_kinds primitive <> '\000' then

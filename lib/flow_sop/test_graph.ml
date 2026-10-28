@@ -19,7 +19,7 @@ let fixtures () =
      [|0;3;6;9;12|] [|T.Polygon;Open_polyline;Closed_polyline;Polygon|]]
   |> List.map (fun (name, topology) ->
     let count = T.point_count topology in
-    let positions = Rdk.Packed.Float3.Private.of_owned_exn
+    let positions = Rdk.Packed.Float3.View.of_owned_exn
       ~x:(Array.init count float) ~y:(Array.make count 0.) ~z:(Array.make count 0.) in
     name, (G.create ~positions ~topology () |> ok))
 
@@ -51,11 +51,11 @@ let refused ?(decls="") ?(inputs=[]) geometry body code =
   | Error d -> assert (d.code = code)
   | Ok _ -> failwith ("expected " ^ code)
 
-let view_of geometry = Rdk.Topology_index.Private.view (Rdk.Topology_index.create (G.topology geometry))
+let view_of geometry = Rdk.Topology_index.View.view (Rdk.Topology_index.create (G.topology geometry))
 
 (* Textbook O(n^2) Dijkstra: settle the unsettled point of least (distance, index),
    relax strictly smaller candidates so the first settled neighbour is the parent. *)
-let oracle_paths ?(radius=infinity) (view : Rdk.Topology_index.Private.view) lengths roots =
+let oracle_paths ?(radius=infinity) (view : Rdk.Topology_index.View.view) lengths roots =
   let n = Array.length view.point_edge_offsets - 1 in
   let dist = Array.make n infinity and parent = Array.make n (-1) and settled = Array.make n false in
   Array.iter (fun r -> dist.(r) <- 0.) roots;
@@ -108,7 +108,7 @@ let shortest_paths () =
 
 (* Neighbour rows of the three graphs Graph_color colors. *)
 let neighbours_of geometry connectivity =
-  let topology = T.Private.view (G.topology geometry) in
+  let topology = T.View.view (G.topology geometry) in
   let view = view_of geometry in
   let primitives = G.primitive_count geometry and points = G.point_count geometry in
   let rows count neighbours =
@@ -157,7 +157,7 @@ let color () =
           else Rdk.Transform_ops.Selected_primitives group) pick in
         let native = Rdk.Graph_color.run ?selection ~connectivity geometry |> ok_error in
         let colors = match G.find_attribute ~owner:(if point_mode then Rdk.Attribute.Point else Primitive)
-            "color" native |> Option.map Rdk.Attribute.Private.storage with
+            "color" native |> Option.map Rdk.Attribute.View.storage with
           | Some (Rdk.Attribute.Int values) -> values | _ -> failwith "no colors" in
         let order = Array.of_list (List.filter (fun i -> match pick with None -> true | Some f -> f i)
           (List.init count Fun.id)) in
@@ -182,8 +182,8 @@ let chains () =
       let group = Option.map (fun pick -> Rdk.Edge_group.init ~topology:(G.topology geometry)
         ~index:(Rdk.Topology_index.create (G.topology geometry)) ~name:"m" pick) pick in
       let run closed = Rdk.Poly_path.run ?edges:group ~make_isolated_loops_closed:closed geometry |> ok in
-      let open_run = T.Private.view (G.topology (run false))
-      and closed_run = T.Private.view (G.topology (run true)) in
+      let open_run = T.View.view (G.topology (run false))
+      and closed_run = T.View.view (G.topology (run true)) in
       let expected = E.Record ["offsets", ints open_run.primitive_offsets;
         "values", ints open_run.vertex_points;
         "closed", ints (Array.init (Bytes.length closed_run.primitive_kinds) (fun i ->
@@ -201,7 +201,7 @@ let chains () =
 (* Layer by layer oracle: the next layer takes, per point, the least
    (accumulated length, predecessor index) over the current layer. *)
 let oracle_hops ?(blocked_point = fun _ -> false) ?(blocked_edge = fun _ -> false) ?(target = -1)
-    (view : Rdk.Topology_index.Private.view) lengths roots =
+    (view : Rdk.Topology_index.View.view) lengths roots =
   let n = Array.length view.point_edge_offsets - 1 in
   let depth = Array.make n (-1) and dist = Array.make n 0. and parent = Array.make n (-1) in
   let layer = ref [] in
@@ -287,7 +287,7 @@ let hops () =
    (distance, root, index); at an equal distance an unsettled neighbour takes the
    smaller root, then the smaller parent. *)
 let oracle_lowest ?(blocked_edge = fun _ -> false) ?(target = -1)
-    (view : Rdk.Topology_index.Private.view) lengths roots =
+    (view : Rdk.Topology_index.View.view) lengths roots =
   let n = Array.length view.point_edge_offsets - 1 in
   let dist = Array.make n infinity and parent = Array.make n (-1) and root = Array.make n (-1)
   and settled = Array.make n false and order = ref [] in

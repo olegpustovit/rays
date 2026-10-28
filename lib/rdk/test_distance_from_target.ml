@@ -10,7 +10,7 @@ let point_group name length predicate =
 let float_attribute name geometry =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Float values -> values
        | _ -> fail (name ^ " has wrong storage"))
   | None -> fail ("missing " ^ name)

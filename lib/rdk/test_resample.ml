@@ -10,25 +10,25 @@ let attribute geometry owner name =
   | None -> fail ("missing attribute " ^ name)
 
 let float_attribute geometry name =
-  match Attribute.Private.storage (attribute geometry Attribute.Point name) with
+  match Attribute.View.storage (attribute geometry Attribute.Point name) with
   | Attribute.Float values -> values
   | _ -> fail (name ^ " has unexpected storage")
 
 let int_attribute geometry name =
-  match Attribute.Private.storage (attribute geometry Attribute.Point name) with
+  match Attribute.View.storage (attribute geometry Attribute.Point name) with
   | Attribute.Int values -> values
   | _ -> fail (name ^ " has unexpected storage")
 
 let float3_attribute geometry name =
-  match Attribute.Private.storage (attribute geometry Attribute.Point name) with
-  | Attribute.Float3 values -> Packed.Float3.Private.view values
+  match Attribute.View.storage (attribute geometry Attribute.Point name) with
+  | Attribute.Float3 values -> Packed.Float3.View.view values
   | _ -> fail (name ^ " has unexpected storage")
 
 let equal_geometry left right =
-  let lp = Packed.Float3.Private.view (Geometry.positions left)
-  and rp = Packed.Float3.Private.view (Geometry.positions right)
-  and lt = Topology.Private.view (Geometry.topology left)
-  and rt = Topology.Private.view (Geometry.topology right) in
+  let lp = Packed.Float3.View.view (Geometry.positions left)
+  and rp = Packed.Float3.View.view (Geometry.positions right)
+  and lt = Topology.View.view (Geometry.topology left)
+  and rt = Topology.View.view (Geometry.topology right) in
   lp.x = rp.x && lp.y = rp.y && lp.z = rp.z
   && lt.point_count = rt.point_count
   && lt.vertex_points = rt.vertex_points
@@ -50,7 +50,7 @@ let expect_invalid = function
   | Ok _ -> fail "expected invalid Resample input"
 
 let x_positions geometry =
-  (Packed.Float3.Private.view (Geometry.positions geometry)).x
+  (Packed.Float3.View.view (Geometry.positions geometry)).x
 
 let with_primitive_attribute name storage geometry =
   let attribute = Attribute.create_owned ~owner:Attribute.Primitive ~name storage

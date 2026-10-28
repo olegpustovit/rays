@@ -5,7 +5,7 @@ open Rdk_test_support
 let close left right = abs_float (left -. right) <= 1e-10
 
 let line_with_free_point () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;1.;0.1;3.;4.|] ~y:(Array.make 5 0.) ~z:(Array.make 5 0.) in
   let topology = Topology.Builder.create ~point_count:5 ~vertex_capacity:4
       ~primitive_capacity:1 () in
@@ -17,13 +17,13 @@ let point_group name length members =
   Group.init ~grain:1 ~owner:Group.Point ~name length members
 
 let y_positions geometry =
-  let values = Packed.Float3.Private.view (Geometry.positions geometry) in
+  let values = Packed.Float3.View.view (Geometry.positions geometry) in
   values.y
 
 let float_attribute name geometry =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Float values -> values
        | _ -> fail (name ^ " has wrong storage"))
   | None -> fail ("missing " ^ name)
@@ -158,8 +158,8 @@ let test_errors_and_parallel () =
         dense |> get_ok) in
   List.iter (fun metric ->
     let one = run metric 1 and four = run metric 4 in
-    let one_p = Packed.Float3.Private.view (Geometry.positions one)
-    and four_p = Packed.Float3.Private.view (Geometry.positions four) in
+    let one_p = Packed.Float3.View.view (Geometry.positions one)
+    and four_p = Packed.Float3.View.view (Geometry.positions four) in
     check (same_float_array one_p.x four_p.x
         && same_float_array one_p.y four_p.y
         && same_float_array one_p.z four_p.z

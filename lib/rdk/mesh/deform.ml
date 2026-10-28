@@ -88,22 +88,22 @@ let point_float_attribute operation name geometry =
   | None -> Error (Printf.sprintf "%s: missing point float attribute %s"
       operation name)
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Float values -> Ok values
        | _ -> Error (Printf.sprintf
            "%s: point attribute %s must have float storage" operation name))
 
 let point_vector_attribute operation name geometry =
   if String.equal name "P" then
-    let values = Packed.Float3.Private.view (Geometry.positions geometry) in
+    let values = Packed.Float3.View.view (Geometry.positions geometry) in
     Ok { x = values.x; y = values.y; z = values.z }
   else match Geometry.find_attribute ~owner:Attribute.Point name geometry with
     | None -> Error (Printf.sprintf "%s: missing point float3 attribute %s"
         operation name)
     | Some attribute ->
-        (match Attribute.Private.storage attribute with
+        (match Attribute.View.storage attribute with
          | Attribute.Float3 values ->
-             let values = Packed.Float3.Private.view values in
+             let values = Packed.Float3.View.view values in
              Ok { x = values.x; y = values.y; z = values.z }
          | _ -> Error (Printf.sprintf
              "%s: point attribute %s must have float3 storage" operation name))
@@ -112,9 +112,9 @@ let vertex_normals geometry =
   match Geometry.find_attribute ~owner:Attribute.Vertex "N" geometry with
   | None -> Ok None
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Float3 values ->
-           let values = Packed.Float3.Private.view values in
+           let values = Packed.Float3.View.view values in
            Ok (Some { x = values.x; y = values.y; z = values.z })
        | _ -> Error "Rdk.Deform: vertex N must have float3 storage")
 
@@ -124,7 +124,7 @@ let face_vectors ?cancel ~grain geometry =
       ~first_failure:true ~operation:"Rdk.Deform" geometry)
 
 let point_vectors_from_vertices ?cancel ~grain topology source =
-  let topology_view = Topology.Private.view topology in
+  let topology_view = Topology.View.view topology in
   let point_count = topology_view.point_count in
   let x = Array.make point_count 0. and y = Array.make point_count 0.
   and z = Array.make point_count 0. and incidence = Array.make point_count 0 in
@@ -151,7 +151,7 @@ let point_vectors_from_vertices ?cancel ~grain topology source =
 let geometric_point_vectors ?cancel ~grain geometry =
   Result.map (fun faces ->
     let topology = Geometry.topology geometry in
-    let topology_view = Topology.Private.view topology in
+    let topology_view = Topology.View.view topology in
     let point_count = topology_view.point_count in
     let x = Array.make point_count 0. and y = Array.make point_count 0.
     and z = Array.make point_count 0. in
@@ -176,9 +176,9 @@ let resolve_directions ?cancel ~grain ?direction_attribute geometry =
   | None ->
       (match Geometry.find_attribute ~owner:Attribute.Point "N" geometry with
        | Some attribute ->
-           (match Attribute.Private.storage attribute with
+           (match Attribute.View.storage attribute with
             | Attribute.Float3 values ->
-                let values = Packed.Float3.Private.view values in
+                let values = Packed.Float3.View.view values in
                 Ok { x = values.x; y = values.y; z = values.z }
             | _ -> Error "Rdk.Deform: point N must have float3 storage")
        | None ->
@@ -189,8 +189,8 @@ let resolve_directions ?cancel ~grain ?direction_attribute geometry =
 
 let with_point_normals ?cancel ~grain ?primitives geometry =
   let selection = Option.map (fun group -> Selected_primitives group) primitives in
-  Error.unguard (Normal_ops.run ?cancel ~grain ?selection ?primitives
-    ~owner:Attribute.Point ~weighting:Normal_ops.Face_area geometry)
+  Ok (Error.get (Normal_ops.run ?cancel ~grain ?selection ?primitives
+    ~owner:Attribute.Point ~weighting:Normal_ops.Face_area geometry))
 
 let normals ?cancel ~grain ?primitives geometry =
   if grain <= 0 then Error "Rdk_mesh.Deform.normals: grain must be positive"
@@ -221,7 +221,7 @@ let validate_noop ?selection ?direction_attribute ?mask_attribute geometry =
       | None ->
           (match Geometry.find_attribute ~owner:Attribute.Point "N" geometry with
            | Some attribute ->
-               (match Attribute.Private.storage attribute with
+               (match Attribute.View.storage attribute with
                 | Attribute.Float3 _ -> Ok ()
                 | _ -> Error "Rdk.Deform: point N must have float3 storage")
            | None -> Result.map ignore (vertex_normals geometry))) (fun () ->
@@ -233,7 +233,7 @@ let validate_noop ?selection ?direction_attribute ?mask_attribute geometry =
           (point_float_attribute "Rdk.Deform" name geometry)))
 
 let finish_positions ?cancel ~grain ~recompute_normals geometry x y z =
-  let positions = Packed.Float3.Private.of_owned_exn ~x ~y ~z in
+  let positions = Packed.Float3.View.of_owned_exn ~x ~y ~z in
   Result.bind (Geometry.with_positions positions geometry) (fun geometry ->
     if recompute_normals then with_point_normals ?cancel ~grain geometry
     else Ok (geometry
@@ -254,7 +254,7 @@ let peak ?cancel ?(grain = 16_384) ?selection ?direction_attribute
       else Ok geometry)
   else Result.bind (prepare ?cancel ~grain ?selection ?direction_attribute
       ?mask_attribute geometry) (fun (index, directions, mask) ->
-    let source = Packed.Float3.Private.view (Geometry.positions geometry) in
+    let source = Packed.Float3.View.view (Geometry.positions geometry) in
     let count = Geometry.point_count geometry in
     let x = Array.copy source.x and y = Array.copy source.y
     and z = Array.copy source.z in
@@ -310,7 +310,7 @@ let initial_height_attribute name count geometry = match name with
       (match Geometry.find_attribute ~owner:Attribute.Point name geometry with
        | None -> Ok (Some (name, Array.make count 0.))
        | Some attribute ->
-           (match Attribute.Private.storage attribute with
+           (match Attribute.View.storage attribute with
             | Attribute.Float values -> Ok (Some (name, Array.copy values))
             | _ -> Error (Printf.sprintf
                 "Rdk_mesh.Deform.mountain: height attribute %s must have float storage"
@@ -335,7 +335,7 @@ let mountain ?cancel ?(grain = 16_384) ?selection ?direction_attribute
       "Rdk_mesh.Deform.mountain: roughness must be in [0, 1]"
   else Result.bind (prepare ?cancel ~grain ?selection ?direction_attribute
       ?mask_attribute geometry) (fun (index, directions, mask) ->
-    let source = Packed.Float3.Private.view (Geometry.positions geometry) in
+    let source = Packed.Float3.View.view (Geometry.positions geometry) in
     let count = Geometry.point_count geometry in
     Result.bind (initial_height_attribute height_attribute count geometry)
       (fun height_output ->
@@ -420,7 +420,7 @@ let noise_displace ?cancel ?(grain = 16_384) ?(mode = Height_2d) ~amplitude ~fre
     Result.bind direction (fun direction ->
     let noise = Rays_math.Noise.create seed in
     let count = Geometry.point_count geometry in
-    let source = Packed.Float3.Private.view (Geometry.positions geometry) in
+    let source = Packed.Float3.View.view (Geometry.positions geometry) in
     let x, y, z = match direction with
       | None -> source.x, Array.copy source.y, source.z
       | Some _ -> Array.copy source.x, Array.copy source.y, Array.copy source.z in
@@ -454,7 +454,7 @@ let noise_displace ?cancel ?(grain = 16_384) ?(mode = Height_2d) ~amplitude ~fre
     match Array.find_opt (fun index -> index >= 0) errors with
     | Some index -> Error (Printf.sprintf "Rdk_mesh.Deform.noise_displace: non-finite noise, normal or output at point %d" index)
     | None ->
-    let positions = Packed.Float3.Private.of_shared_exn ~x ~y ~z in
+    let positions = Packed.Float3.View.of_shared_exn ~x ~y ~z in
     let displaced = Geometry.with_positions positions geometry |> Result.get_ok in
     Ok (displaced
         |> Geometry.without_attribute ~owner:Attribute.Point "N"

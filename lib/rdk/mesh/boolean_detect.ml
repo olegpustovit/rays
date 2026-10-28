@@ -95,9 +95,9 @@ let install_outputs ?cancel ~grain ~intersecting_group ~intersections_attribute
 let detect_pairs ?cancel ~grain ~tolerance ~include_coplanar ~self
     source_surface source_geometry collision_surface collision_geometry =
   let source_triangles, collision_triangles = if self then
-      Surface_index.Private.overlapping_self_triangle_pairs ?cancel ~grain
+      Surface_index.View.overlapping_self_triangle_pairs ?cancel ~grain
         ~tolerance source_surface
-    else Surface_index.Private.overlapping_triangle_pairs ?cancel ~grain
+    else Surface_index.View.overlapping_triangle_pairs ?cancel ~grain
         ~tolerance source_surface collision_surface in
   let candidates = Array.length source_triangles in
   let keep = Bytes.make ((candidates + 7) / 8) '\000' in
@@ -132,11 +132,11 @@ let detect_pairs ?cancel ~grain ~tolerance ~include_coplanar ~self
   for candidate = 0 to candidates - 1 do
     if candidate land 4095 = 0 then Cancel.check_opt cancel;
     if Support.Bits.mem keep candidate then begin
-      let source_primitive = Surface_index.Private.triangle_primitive
+      let source_primitive = Surface_index.View.triangle_primitive
           source_surface source_triangles.(candidate) in
       raw_counts.(source_primitive) <- raw_counts.(source_primitive) + 1;
       if self then begin
-        let collision_primitive = Surface_index.Private.triangle_primitive
+        let collision_primitive = Surface_index.View.triangle_primitive
             collision_surface collision_triangles.(candidate) in
         raw_counts.(collision_primitive) <- raw_counts.(collision_primitive) + 1
       end;
@@ -158,9 +158,9 @@ let detect_pairs ?cancel ~grain ~tolerance ~include_coplanar ~self
   for candidate = 0 to candidates - 1 do
     if candidate land 4095 = 0 then Cancel.check_opt cancel;
     if Support.Bits.mem keep candidate then begin
-      let source_primitive = Surface_index.Private.triangle_primitive
+      let source_primitive = Surface_index.View.triangle_primitive
           source_surface source_triangles.(candidate)
-      and collision_primitive = Surface_index.Private.triangle_primitive
+      and collision_primitive = Surface_index.View.triangle_primitive
           collision_surface collision_triangles.(candidate) in
       raw_values.(cursors.(source_primitive)) <- collision_primitive;
       cursors.(source_primitive) <- cursors.(source_primitive) + 1;

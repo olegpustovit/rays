@@ -2,7 +2,7 @@
 
 type t
 
-module Private : sig
+module View : sig
   type view = {
     triangle_points : int array;
     constraint_points : int array;
@@ -22,7 +22,7 @@ end
 
 val build :
   ?cancel:Cancel.t ->
-  ?workspace:Private.workspace ->
+  ?workspace:View.workspace ->
   point_count:int ->
   orient:(int -> int -> int -> Predicates.sign) ->
   incircle:(int -> int -> int -> int -> Predicates.sign) ->

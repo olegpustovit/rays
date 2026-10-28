@@ -21,12 +21,12 @@ let source count =
       |Vertex->Topology.vertex_count topology|Primitive->Topology.primitive_count topology|Detail->1 in
     let floats k=Array.init n(fun i->raw(i+k)) in
     let offsets=Array.init(n+1)(fun i->i*16) in
-    let kinds=["N",Attribute.Float3(Packed.Float3.Private.of_owned_exn ~x:(Array.init n(fun i->float i-.1.))
+    let kinds=["N",Attribute.Float3(Packed.Float3.View.of_owned_exn ~x:(Array.init n(fun i->float i-.1.))
         ~y:(Array.init n(fun i->0.25*.float(i mod 3))) ~z:(Array.init n(fun i->if i mod 4=0 then 0. else 2.)));
       "float",Attribute.Float(floats 0);"int",Int(Array.init n(fun i->(1 lsl 55)+i));
       "text",Text(Array.init n(fun i->if i mod 2=0 then "猫\255" else "😀\000"));
       "vec2",Float2(Packed.Float2.of_owned ~x:(floats 1) ~y:(floats 2)|>get_string_ok);
-      "vec3",Float3(Packed.Float3.Private.of_owned_exn ~x:(floats 3) ~y:(floats 4) ~z:(floats 5));
+      "vec3",Float3(Packed.Float3.View.of_owned_exn ~x:(floats 3) ~y:(floats 4) ~z:(floats 5));
       "vec4",Float4(Packed.Float4.of_owned ~x:(floats 2) ~y:(floats 3) ~z:(floats 4) ~w:(floats 5)|>get_string_ok);
       "mat16",Float_array(Packed.Float_array.create_owned ~offsets
         ~values:(Array.init(n*16)raw)|>get_string_ok);
@@ -45,11 +45,11 @@ let source count =
     [Group.Point;Vertex;Primitive] in
   let index=Topology_index.create topology in
   let edge_groups=[Edge_group.init ~topology ~index ~name:"edges"(fun i->i mod 2=0)] in
-  Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn
+  Geometry.create ~positions:(Packed.Float3.View.of_owned_exn
     ~x:(Array.init count raw) ~y:(Array.init count(fun i->raw(i+1))) ~z:(Array.init count(fun i->raw(i+2))))
     ~topology ~attributes:attrs ~groups ~edge_groups () |>get_string_ok
 let target copies source =
-  let t=Topology.Private.view(Geometry.topology source) in
+  let t=Topology.View.view(Geometry.topology source) in
   let points=Geometry.point_count source and vertices=Geometry.vertex_count source
   and primitives=Geometry.primitive_count source in
   let topology=Topology.create_owned ~point_count:(copies*points)
@@ -57,7 +57,7 @@ let target copies source =
     ~primitive_offsets:(Array.init(copies*primitives+1)(fun i->if i=copies*primitives then copies*vertices
       else t.primitive_offsets.(i mod primitives)+(i/primitives)*vertices))
     ~primitive_kinds:(Array.init(copies*primitives)(fun _->Topology.Polygon)) |>get_string_ok in
-  Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn ~x:(Array.make(copies*points)3.)
+  Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x:(Array.make(copies*points)3.)
     ~y:(Array.make(copies*points)(-0.)) ~z:(Array.make(copies*points)7.)) ~topology () |>get_string_ok
 let factory key geometry=Edit.factory ~key ~label:key ~category:["Test"] ~arity:0(fun _->Lisp_sop.snapshot geometry)
 let source_text ?(edge=true) body=Printf.sprintf {|(workspace remap_test
@@ -93,8 +93,8 @@ let oracle source target p v prim offsets ancestors mapped=
     (fun edge->let member=ref false in for at=offsets.(edge) to offsets.(edge+1)-1 do
       member:= !member || Edge_group.mem ancestors.(at) group done;!member))(Geometry.edge_groups source) in
   let positions=if not mapped then Geometry.positions target else
-    let view=Packed.Float3.Private.view(Geometry.positions source) in
-    Packed.Float3.Private.of_owned_exn ~x:(Array.map(fun i->view.x.(i))p)
+    let view=Packed.Float3.View.view(Geometry.positions source) in
+    Packed.Float3.View.of_owned_exn ~x:(Array.map(fun i->view.x.(i))p)
       ~y:(Array.map(fun i->view.y.(i))p) ~z:(Array.map(fun i->view.z.(i))p) in
   Geometry.create ~positions ~topology ~attributes:attrs ~groups ~edge_groups:edges () |>get_string_ok
 let ()=
@@ -152,25 +152,25 @@ let ()=
           let map=attribute_map(Attribute.owner a) in
           let n=Option.get(Geometry.find_attribute ~owner:(Attribute.owner a)(Attribute.name a)native) in
           if Attribute.owner a=Detail then () else
-          match Attribute.Private.storage a,Attribute.Private.storage n with
+          match Attribute.View.storage a,Attribute.View.storage n with
           |Float x,Float y->eqf map x y
           |Int x,Int y->Array.iteri(fun i e->check(e=(if row_ok map i then y.(i) else 0))"created int row is not 0")x
           |Text x,Text y->Array.iteri(fun i e->check(e=(if row_ok map i then y.(i) else ""))"created text row is not empty")x
-          |Float2 x,Float2 y->let x=Packed.Float2.Private.view x and y=Packed.Float2.Private.view y in eqf map x.x y.x;eqf map x.y y.y
-          |Float3 x,Float3 y->let x=Packed.Float3.Private.view x and y=Packed.Float3.Private.view y in
+          |Float2 x,Float2 y->let x=Packed.Float2.View.view x and y=Packed.Float2.View.view y in eqf map x.x y.x;eqf map x.y y.y
+          |Float3 x,Float3 y->let x=Packed.Float3.View.view x and y=Packed.Float3.View.view y in
             eqf map x.x y.x;eqf map x.y y.y;eqf map x.z y.z
-          |Float4 x,Float4 y->let x=Packed.Float4.Private.view x and y=Packed.Float4.Private.view y in
+          |Float4 x,Float4 y->let x=Packed.Float4.View.view x and y=Packed.Float4.View.view y in
             eqf map x.x y.x;eqf map x.y y.y;eqf map x.z y.z;eqf map x.w y.w
-          |Int_array x,Int_array y->let x=Packed.Int_array.Private.view x and y=Packed.Int_array.Private.view y in
+          |Int_array x,Int_array y->let x=Packed.Int_array.View.view x and y=Packed.Int_array.View.view y in
             ragged map x.offsets x.values y.offsets y.values (=)
-          |Float_array x,Float_array y->let x=Packed.Float_array.Private.view x and y=Packed.Float_array.Private.view y in
+          |Float_array x,Float_array y->let x=Packed.Float_array.View.view x and y=Packed.Float_array.View.view y in
             ragged map x.offsets x.values y.offsets y.values (fun a b->bits a=bits b)
           |_->fail "remap changed a storage kind")(Geometry.attributes actual);
         List.iter(fun g->let map=group_map(Group.owner g) in
           let n=Option.get(Geometry.find_group ~owner:(Group.owner g)(Group.name g)native) in
           Array.iteri(fun i _->check(Group.mem i g=(row_ok map i && Group.mem i n))"created row is in a group or copied membership differs")map)
           (Geometry.groups actual);
-        let view=Packed.Float3.Private.view(Geometry.positions actual) and expect=Packed.Float3.Private.view(Geometry.positions native) in
+        let view=Packed.Float3.View.view(Geometry.positions actual) and expect=Packed.Float3.View.view(Geometry.positions native) in
         eqf p view.x expect.x;eqf p view.y expect.y;eqf p view.z expect.z) [1;8]) [false;true]) [1;2];
   print_endline "remap -1 rows: defaults for every owner and storage, in no group, 1 and 8 domains"
 let ()=
@@ -252,7 +252,7 @@ let ()=
 let ()=
   (* Crossing the packed cutoff with all native storage kept opaque. *)
   let src=source 32769 in
-  let dst=Geometry.with_positions(Packed.Float3.Private.of_owned_exn
+  let dst=Geometry.with_positions(Packed.Float3.View.of_owned_exn
     ~x:(Array.make 32769 1.) ~y:(Array.make 32769 2.) ~z:(Array.make 32769 3.))src |>get_string_ok in
   let p=Array.init 32769(fun i->(i+1)mod 32769) and v=[|0;1;2|] and prim=[|0|]
   and offsets=[|0;1;2;3|] and ancestors=[|0;1;2|] in
@@ -270,7 +270,7 @@ let ()=
     if Attribute.owner a=Detail then check(copied==a)"Detail storage identity changed"
     else check(Attribute.storage_id copied<>Attribute.storage_id a)"duplicated owner storage is not owned")
     (Geometry.attributes src);
-  (match Geometry.find_attribute ~owner:Attribute.Point "float" actual |>Option.get |>Attribute.Private.storage with
+  (match Geometry.find_attribute ~owner:Attribute.Point "float" actual |>Option.get |>Attribute.View.storage with
    |Float values->values.(0)<-99.|_->assert false);
   check(geometry_bytes src=before)"mutating an owned output changed source bytes";
   let body={|(if false
@@ -348,7 +348,7 @@ let ()=
   let src=source 3 in
   let topology=Topology.create_owned ~point_count:4 ~vertex_points:[|0;1;2;3;3;2|]
     ~primitive_offsets:[|0;4;6|] ~primitive_kinds:[|Topology.Closed_polyline;Open_polyline|]|>get_string_ok in
-  let dst=Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn
+  let dst=Geometry.create ~positions:(Packed.Float3.View.of_owned_exn
     ~x:[|1.;2.;3.;4.|] ~y:[|0.;0.;0.;0.|] ~z:[|-0.;0.;-0.;0.|]) ~topology ()|>get_string_ok in
   let p=[|2;1;0;2|] and v=[|2;1;0;2;1;0|] and prim=[|0;0|] in
   let edges=Topology_index.edge_count(Topology_index.create topology) in
@@ -366,7 +366,7 @@ let ()=
   let src=source 3 and dst=target 1(source 3) in
   let base=args [|0;1;2|][|0;1;2|][|0|][|0;1;2;3|][|0;1;2|]"target" in
   let replace key value=List.map(fun(name,old)->name,if name=key then value else old)base in
-  let target_p=Geometry.with_positions(Packed.Float3.Private.of_owned_exn
+  let target_p=Geometry.with_positions(Packed.Float3.View.of_owned_exn
     ~x:[|9.;8.;7.|] ~y:[|0.;0.;0.|] ~z:[|0.;0.;0.|])dst|>get_string_ok in
   let topology=Topology.create_owned ~point_count:3 ~vertex_points:[|2;1;0|]
     ~primitive_offsets:[|0;3|] ~primitive_kinds:[|Topology.Polygon|]|>get_string_ok in
@@ -396,7 +396,7 @@ let ()=
 
 let ()=
   let src=source 3 in
-  let changed_p=Geometry.with_positions(Packed.Float3.Private.of_owned_exn
+  let changed_p=Geometry.with_positions(Packed.Float3.View.of_owned_exn
     ~x:[|8.;7.;6.|] ~y:[|-0.;0.;-0.|] ~z:[|2.;3.;4.|])src|>get_string_ok in
   let inputs=args [|0;1;2|][|0;1;2|][|0|][|0;1;2;3|][|0;1;2|]"target" in
   List.iter(fun reference->let actual=geometry(run(compile ~reference ~edge:false src changed_p inputs)) in
@@ -474,19 +474,19 @@ let () =
   let reference_attribute carry attribute=
     let (l,r,t)=carry in
     let plane=blend_plane carry in
-    let storage=match Attribute.Private.storage attribute with
+    let storage=match Attribute.View.storage attribute with
       |Attribute.Float v->Attribute.Float(plane v)
-      |Float2 v->let v=Packed.Float2.Private.view v in
+      |Float2 v->let v=Packed.Float2.View.view v in
         Float2(Packed.Float2.of_owned ~x:(plane v.x) ~y:(plane v.y)|>get_string_ok)
-      |Float3 v->let v=Packed.Float3.Private.view v in
+      |Float3 v->let v=Packed.Float3.View.view v in
         let x=plane v.x and y=plane v.y and z=plane v.z in
         if Attribute.name attribute="N" then
           Array.iteri(fun i _->let length=sqrt(x.(i)*.x.(i)+.y.(i)*.y.(i)+.z.(i)*.z.(i)) in
             if length>1e-20 then (x.(i)<-x.(i)/.length;y.(i)<-y.(i)/.length;z.(i)<-z.(i)/.length))x;
-        Float3(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
-      |Float4 v->let v=Packed.Float4.Private.view v in
+        Float3(Packed.Float3.View.of_owned_exn ~x ~y ~z)
+      |Float4 v->let v=Packed.Float4.View.view v in
         Float4(Packed.Float4.of_owned ~x:(plane v.x) ~y:(plane v.y) ~z:(plane v.z) ~w:(plane v.w)|>get_string_ok)
-      |_->Attribute.Private.storage(Rdk_core.Topology_remap.attribute ~grain:97 (nearest(l,r,t)) attribute) in
+      |_->Attribute.View.storage(Rdk_core.Topology_remap.attribute ~grain:97 (nearest(l,r,t)) attribute) in
     ignore (l,r);
     Attribute.create_owned ~name:(Attribute.name attribute) ~owner:(Attribute.owner attribute) storage|>get_string_ok in
   canonical_nan:=true;
@@ -512,20 +512,20 @@ let () =
       let attributes=List.map(fun a->match Attribute.owner a with
         |Detail->a
         |owner->if flag owner then reference_attribute(carry owner true)a
-          else Attribute.create_owned ~name:(Attribute.name a) ~owner(Attribute.Private.storage
+          else Attribute.create_owned ~name:(Attribute.name a) ~owner(Attribute.View.storage
             (Rdk_core.Topology_remap.attribute ~grain:97 (match owner with Point->plain pc|Vertex->plain vc|_->plain rc) a))
             |>get_string_ok)(Geometry.attributes src) in
       let groups=List.map(fun g->let owner=Group.owner g in
         let (l,r,t)=match owner with Group.Point->pc|Vertex->vc|Primitive->rc in
         Rdk_core.Topology_remap.group ~grain:97 (if group_flag owner then nearest(l,r,t) else l) g)(Geometry.groups src) in
       let positions=
-        let v=Packed.Float3.Private.view(Geometry.positions src) in
-        if points then Packed.Float3.Private.of_owned_exn ~x:(blend_plane pc v.x) ~y:(blend_plane pc v.y) ~z:(blend_plane pc v.z)
+        let v=Packed.Float3.View.view(Geometry.positions src) in
+        if points then Packed.Float3.View.of_owned_exn ~x:(blend_plane pc v.x) ~y:(blend_plane pc v.y) ~z:(blend_plane pc v.z)
         else Geometry.positions base in
       let positions=if points then positions else
-        let v=Packed.Float3.Private.view(Geometry.positions src) in
+        let v=Packed.Float3.View.view(Geometry.positions src) in
         let l=plain pc in
-        Packed.Float3.Private.of_owned_exn ~x:(Array.map(fun i->v.x.(i))l) ~y:(Array.map(fun i->v.y.(i))l)
+        Packed.Float3.View.of_owned_exn ~x:(Array.map(fun i->v.x.(i))l) ~y:(Array.map(fun i->v.y.(i))l)
           ~z:(Array.map(fun i->v.z.(i))l) in
       let expected=Geometry.create ~positions ~topology:(Geometry.topology dst) ~attributes ~groups
         ~edge_groups:(Geometry.edge_groups base) ()|>get_string_ok in

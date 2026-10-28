@@ -21,7 +21,7 @@ let disconnected_triangles point_count =
         (fun primitive -> primitive * 3))
       ~primitive_kinds:(Array.make triangles Topology.Polygon)
       |> Result.get_ok in
-  Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+  Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
     ~topology () |> Result.get_ok
 
 let square_grid primitive_target =
@@ -32,7 +32,7 @@ let square_grid primitive_target =
 let color_values owner geometry =
   match Geometry.find_attribute ~owner "color" geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Int values -> values
        | _ -> failwith "Graph Color benchmark output has wrong storage")
   | None -> failwith "Graph Color benchmark output is missing"

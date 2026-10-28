@@ -1,4 +1,4 @@
-(** Private post-rounding Boolean materialization policy. *)
+(** View post-rounding Boolean materialization policy. *)
 
 (* O(Ec + Ic + Es + Is) time and O(Fc) auxiliary storage for complex edges
     [Ec], complex incidence [Ic], extracted surface edges [Es], surface

@@ -185,7 +185,7 @@ let rename_edge_group ~from ~into value =
         with_edge_group (Edge_group.with_name into group)
           (without_edge_group from value)
 
-module Private = struct
+module View = struct
   let attributes value = value.attributes
 
   let merge_owned key existing replacements =

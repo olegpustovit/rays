@@ -28,7 +28,7 @@ let selected_bounds ?cancel ~grain ~operation selection geometry =
       and max_z = Array.make range_count Float.neg_infinity
       and found = Array.make range_count false
       and errors = Array.make range_count (-1) in
-      let positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+      let positions = Packed.Float3.View.view (Geometry.positions geometry) in
       if range_count > 0 then Parallel.for_ ~chunk_size:1 ~start:0
           ~finish:(range_count - 1) (fun range ->
         let first = range * range_grain
@@ -92,6 +92,6 @@ let selected_bounds ?cancel ~grain ~operation selection geometry =
           }
       end
 
-module Private = struct
+module View = struct
   let selected_bounds = selected_bounds
 end

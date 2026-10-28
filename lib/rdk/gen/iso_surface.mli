@@ -25,5 +25,5 @@ val extract_dense : resolution:int * int * int -> min:Rays_math.Vec3.t ->
   max:Rays_math.Vec3.t -> iso:float -> field:Field.t -> unit ->
   (Geometry.t, Error.t) result
 
-module Private : sig
+module View : sig
 end

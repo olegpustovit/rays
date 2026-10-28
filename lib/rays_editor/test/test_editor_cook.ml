@@ -81,7 +81,7 @@ Lisp_sop.node ~with_:["source", (source)] (Printf.sprintf {|(sop/transform (sop/
   let dependencies = Context.Dependencies.(union (one Time) (one Frame)) in
   let dynamic = Sop.Custom.plain ~operation:"editor_cook_clock" ~dependencies [source]
     (fun ~context inputs ->
-      Rdk.Geometry.with_positions (Rdk.Packed.Float3.Private.of_owned_exn
+      Rdk.Geometry.with_positions (Rdk.Packed.Float3.View.of_owned_exn
         ~x:[|Context.time context|] ~y:[|Int64.to_float (Context.frame context)|] ~z:[|0.|]) inputs.(0)) in
   with_cook (fun _ output -> Ok (Rdk.Packed.Float3.get
       (Rdk.Geometry.positions (Result.get_ok (Sop.Payload.geometry output.Session.payload))) 0)) (fun current _ finish ->

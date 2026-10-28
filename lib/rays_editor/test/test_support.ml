@@ -14,18 +14,18 @@ module Workspace_cook = struct
       let payload = match Attribute.storage attribute with
         | Float values -> encode values | Int values -> encode values
         | Text values -> encode values
-        | Int_array values -> encode (Packed.Int_array.Private.view values)
-        | Float_array values -> encode (Packed.Float_array.Private.view values)
-        | Float2 values -> let v = Packed.Float2.Private.view values in encode (v.x, v.y)
-        | Float3 values -> let v = Packed.Float3.Private.view values in encode (v.x, v.y, v.z)
-        | Float4 values -> let v = Packed.Float4.Private.view values in encode (v.x, v.y, v.z, v.w) in
+        | Int_array values -> encode (Packed.Int_array.View.view values)
+        | Float_array values -> encode (Packed.Float_array.View.view values)
+        | Float2 values -> let v = Packed.Float2.View.view values in encode (v.x, v.y)
+        | Float3 values -> let v = Packed.Float3.View.view values in encode (v.x, v.y, v.z)
+        | Float4 values -> let v = Packed.Float4.View.view values in encode (v.x, v.y, v.z, v.w) in
       Attribute.owner attribute, Attribute.name attribute, Attribute.kind_name attribute, payload in
     let groups = List.map (fun group -> Group.owner group, Group.name group,
       Array.init (Group.length group) (fun index -> Group.mem index group),
       Group.ordered_elements group) (Geometry.groups geometry) in
-    let positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+    let positions = Packed.Float3.View.view (Geometry.positions geometry) in
     encode (positions.x, positions.y, positions.z,
-      Topology.Private.view (Geometry.topology geometry),
+      Topology.View.view (Geometry.topology geometry),
       List.map attribute (Geometry.attributes geometry), groups)
 
   let cook ~domains (graph : Flow_sop.Lower.graph) =

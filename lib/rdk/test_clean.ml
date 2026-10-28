@@ -2,33 +2,33 @@ open Rays
 open Rdk
 open Rdk_test_support
 
-let get_ok = function Ok value -> value | Error message -> fail message
+let get_ok = get
 
 let equal_storage left right =
-  match Attribute.Private.storage left, Attribute.Private.storage right with
+  match Attribute.View.storage left, Attribute.View.storage right with
   | Attribute.Float left, Attribute.Float right -> left = right
   | Attribute.Int left, Attribute.Int right -> left = right
   | Attribute.Text left, Attribute.Text right -> left = right
   | Attribute.Float2 left, Attribute.Float2 right ->
-      let left = Packed.Float2.Private.view left
-      and right = Packed.Float2.Private.view right in
+      let left = Packed.Float2.View.view left
+      and right = Packed.Float2.View.view right in
       left.x = right.x && left.y = right.y
   | Attribute.Float3 left, Attribute.Float3 right ->
-      let left = Packed.Float3.Private.view left
-      and right = Packed.Float3.Private.view right in
+      let left = Packed.Float3.View.view left
+      and right = Packed.Float3.View.view right in
       left.x = right.x && left.y = right.y && left.z = right.z
   | Attribute.Float4 left, Attribute.Float4 right ->
-      let left = Packed.Float4.Private.view left
-      and right = Packed.Float4.Private.view right in
+      let left = Packed.Float4.View.view left
+      and right = Packed.Float4.View.view right in
       left.x = right.x && left.y = right.y && left.z = right.z
       && left.w = right.w
   | _ -> false
 
 let geometry_equal left right =
-  let lp = Packed.Float3.Private.view (Geometry.positions left)
-  and rp = Packed.Float3.Private.view (Geometry.positions right)
-  and lt = Topology.Private.view (Geometry.topology left)
-  and rt = Topology.Private.view (Geometry.topology right) in
+  let lp = Packed.Float3.View.view (Geometry.positions left)
+  and rp = Packed.Float3.View.view (Geometry.positions right)
+  and lt = Topology.View.view (Geometry.topology left)
+  and rt = Topology.View.view (Geometry.topology right) in
   lp.x = rp.x && lp.y = rp.y && lp.z = rp.z
   && lt.point_count = rt.point_count
   && lt.vertex_points = rt.vertex_points
@@ -59,7 +59,7 @@ let geometry_equal left right =
          !equal) (Geometry.edge_groups left) (Geometry.edge_groups right)
 
 let make_geometry ~x ~y ~z ~vertex_points ~primitive_offsets ~primitive_kinds =
-  let positions = Packed.Float3.Private.of_owned_exn ~x ~y ~z in
+  let positions = Packed.Float3.View.of_owned_exn ~x ~y ~z in
   let topology = Topology.create_owned ~point_count:(Array.length x)
       ~vertex_points ~primitive_offsets ~primitive_kinds |> get_ok in
   Geometry.create ~positions ~topology () |> get_ok
@@ -104,10 +104,10 @@ let run () =
     check (geometry_bytes one = geometry_bytes many)
       "Clean overlap policy differs across domains";
     let ids = match Geometry.find_attribute ~owner:Attribute.Primitive "primitive_id" one
-        |> Option.get |> Attribute.Private.storage with
+        |> Option.get |> Attribute.View.storage with
       | Attribute.Int values -> values
       | _ -> fail "Clean changed primitive ID storage" in
-    let topology = Topology.Private.view (Geometry.topology one) in
+    let topology = Topology.View.view (Geometry.topology one) in
     check (ids = expected_ids && topology.vertex_points = expected_vertices
         && topology.primitive_offsets = Array.init (Array.length ids + 1) (fun i -> i * 3))
       "Clean overlap policy lost primitive/corner ancestry") [
@@ -175,7 +175,7 @@ let run () =
    | Ok _ -> fail "cancelled Clean published geometry");
 
   let base = Plane_generators.grid ~columns:80 ~rows:60 ~size:10. () |> get_rdk in
-  let base_topology = Topology.Private.view (Geometry.topology base) in
+  let base_topology = Topology.View.view (Geometry.topology base) in
   let copies = 3 and base_primitives = Geometry.primitive_count base
   and base_vertices = Geometry.vertex_count base in
   let vertex_points = Array.make (base_vertices * copies) 0

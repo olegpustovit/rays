@@ -16,7 +16,7 @@ let add_attribute attribute geometry =
 let point_float geometry name =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Float values -> values
        | _ -> fail (name ^ " has unexpected storage"))
   | None -> fail ("missing point float " ^ name)
@@ -24,7 +24,7 @@ let point_float geometry name =
 let point_int geometry name =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Int values -> values
        | _ -> fail (name ^ " has unexpected storage"))
   | None -> fail ("missing point integer " ^ name)
@@ -32,7 +32,7 @@ let point_int geometry name =
 let owned_int geometry owner name =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Int values -> values
        | _ -> fail (name ^ " has unexpected storage"))
   | None -> fail ("missing integer attribute " ^ name)
@@ -61,7 +61,7 @@ let add_point_int_array name ~offsets ~values geometry =
 let point_text geometry name =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Text values -> values
        | _ -> fail (name ^ " has unexpected storage"))
   | None -> fail ("missing point text " ^ name)
@@ -69,8 +69,8 @@ let point_text geometry name =
 let point_int_array geometry name =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Int_array values -> Packed.Int_array.Private.view values
+      (match Attribute.View.storage attribute with
+       | Attribute.Int_array values -> Packed.Int_array.View.view values
        | _ -> fail (name ^ " has unexpected storage"))
   | None -> fail ("missing point integer array " ^ name)
 
@@ -87,8 +87,8 @@ let check_point_group geometry name expected =
 
 let equal_target_output left right =
   let lp = positions left and rp = positions right
-  and lt = Topology.Private.view (Geometry.topology left)
-  and rt = Topology.Private.view (Geometry.topology right) in
+  and lt = Topology.View.view (Geometry.topology left)
+  and rt = Topology.View.view (Geometry.topology right) in
   lp.x = rp.x && lp.y = rp.y && lp.z = rp.z
   && lt.vertex_points = rt.vertex_points
   && lt.primitive_offsets = rt.primitive_offsets
@@ -271,8 +271,8 @@ let check_target_parallel_exact () =
       ~group_rules:[fuse_group_rule ~pattern:"rule_group"
         Fuse_reduce.Group_most_common] linked |> get_ok) in
   let rules_one = rules_run 1 and rules_four = rules_run 4 in
-  let one_topology = Topology.Private.view (Geometry.topology rules_one)
-  and four_topology = Topology.Private.view (Geometry.topology rules_four) in
+  let one_topology = Topology.View.view (Geometry.topology rules_one)
+  and four_topology = Topology.View.view (Geometry.topology rules_four) in
   check ((positions rules_one).x = (positions rules_four).x
       && (positions rules_one).y = (positions rules_four).y
       && (positions rules_one).z = (positions rules_four).z
@@ -284,7 +284,7 @@ let check_target_parallel_exact () =
   (match Geometry.find_group ~owner:Group.Point "rule_group" rules_one,
       Geometry.find_group ~owner:Group.Point "rule_group" rules_four with
    | Some one, Some four ->
-       check (Group.Private.bits_view one = Group.Private.bits_view four)
+       check (Group.View.bits_view one = Group.View.bits_view four)
          "one/four-domain Fuse group-rule output differs"
    | _ -> fail "parallel Fuse rule group missing")
 
@@ -363,7 +363,7 @@ let check_modify_and_keep_target () =
     "Modify Target snap-only average";
   expect_code "invalid_geometry" (Fuse_grid.fuse ~target:(Line_geometry.points [|(2.,0.,0.)|])
       ~modify_target:true source);
-  let positions_value = Packed.Float3.Private.of_owned_exn
+  let positions_value = Packed.Float3.View.of_owned_exn
       ~x:[|0.;0.1;1.|] ~y:[|0.;0.;0.|] ~z:[|0.;0.;0.|] in
   let topology = Topology.create_owned ~point_count:3
       ~vertex_points:[|0;1;2|] ~primitive_offsets:[|0;3|]
@@ -372,7 +372,7 @@ let check_modify_and_keep_target () =
       |> get_string_ok in
   let kept = Fuse_grid.fuse ~tolerance:0.2 ~position:Fuse_reduce.Average_position
       ~keep_fused_points:true geometry |> get_ok in
-  let kept_topology = Topology.Private.view (Geometry.topology kept) in
+  let kept_topology = Topology.View.view (Geometry.topology kept) in
   check (Geometry.point_count kept = 3 && (positions kept).x = [|0.05;0.05;1.|]
       && kept_topology.vertex_points = [|0;0;2|])
     "Keep Fused Points retained snapped unused point";
@@ -380,7 +380,7 @@ let check_modify_and_keep_target () =
       ~fuse_points:false ~keep_fused_points:true geometry)
 
 let cleanup_fixture () =
-  let positions_value = Packed.Float3.Private.of_owned_exn
+  let positions_value = Packed.Float3.View.of_owned_exn
       ~x:[|0.;0.1;1.;2.;5.;5.1;9.|]
       ~y:(Array.make 7 0.) ~z:(Array.make 7 0.) in
   let topology = Topology.create_owned ~point_count:7
@@ -411,13 +411,13 @@ let cleanup_fixture () =
 let check_cleanup () =
   let source = cleanup_fixture () in
   let unclean = Fuse_grid.fuse ~tolerance:0.2 source |> get_ok in
-  let unclean_topology = Topology.Private.view (Geometry.topology unclean) in
+  let unclean_topology = Topology.View.view (Geometry.topology unclean) in
   check (Geometry.primitive_count unclean = 3
       && unclean_topology.vertex_points = [|0;0;1;2; 0;0; 3;3|])
     "Fuse cleanup unexpectedly enabled by default";
   let cleaned = Fuse_grid.fuse ~grain:1 ~tolerance:0.2
       ~remove_degenerate_primitives:true source |> get_ok in
-  let topology = Topology.Private.view (Geometry.topology cleaned) in
+  let topology = Topology.View.view (Geometry.topology cleaned) in
   check (Geometry.point_count cleaned = 5
       && Geometry.vertex_count cleaned = 3
       && Geometry.primitive_count cleaned = 1
@@ -450,8 +450,8 @@ let check_cleanup () =
       Fuse_grid.fuse ~grain:1 ~tolerance:0.2 ~remove_degenerate_primitives:true
         ~remove_all_unused_points:true source |> get_ok) in
   let one = run 1 and four = run 4 in
-  let one_topology = Topology.Private.view (Geometry.topology one)
-  and four_topology = Topology.Private.view (Geometry.topology four) in
+  let one_topology = Topology.View.view (Geometry.topology one)
+  and four_topology = Topology.View.view (Geometry.topology four) in
   check ((positions one).x = (positions four).x
       && one_topology.vertex_points = four_topology.vertex_points
       && owned_int one Attribute.Vertex "vertex_id"

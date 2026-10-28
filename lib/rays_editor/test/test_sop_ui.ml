@@ -80,7 +80,7 @@ let dynamic_schema () =
     let session=Session.create ~max_entries:16 ~max_payload_bytes:10_000_000 |> Result.get_ok in
     Fun.protect ~finally:(fun () -> Session.close session) (fun () ->
       let cook node=match Session.cook session ~context node with
-        | Ok output -> Rdk.Packed.Float3.Private.view (Rdk.Geometry.positions (Result.get_ok (Sop.Payload.geometry output.payload)))
+        | Ok output -> Rdk.Packed.Float3.View.view (Rdk.Geometry.positions (Result.get_ok (Sop.Payload.geometry output.payload)))
         | Error error -> fail (Diagnostic.error_to_string error) in
       assert (cook typed=cook extra);
       assert (cook factory=cook extra);

@@ -13,7 +13,7 @@ let add_group group geometry = Geometry.with_group group geometry |> get_string_
 let point_float geometry name =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Float values -> values
        | _ -> fail (name ^ " has unexpected storage"))
   | None -> fail ("missing point float " ^ name)
@@ -21,7 +21,7 @@ let point_float geometry name =
 let point_int geometry name =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Int values -> values
        | _ -> fail (name ^ " has unexpected storage"))
   | None -> fail ("missing point integer " ^ name)
@@ -29,24 +29,24 @@ let point_int geometry name =
 let point_float3 geometry name =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float3 values -> Packed.Float3.Private.view values
+      (match Attribute.View.storage attribute with
+       | Attribute.Float3 values -> Packed.Float3.View.view values
        | _ -> fail (name ^ " has unexpected storage"))
   | None -> fail ("missing point float3 " ^ name)
 
 let point_int_array geometry name =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Int_array values -> Packed.Int_array.Private.view values
+      (match Attribute.View.storage attribute with
+       | Attribute.Int_array values -> Packed.Int_array.View.view values
        | _ -> fail (name ^ " has unexpected storage"))
   | None -> fail ("missing point int array " ^ name)
 
 let point_float_array geometry name =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float_array values -> Packed.Float_array.Private.view values
+      (match Attribute.View.storage attribute with
+       | Attribute.Float_array values -> Packed.Float_array.View.view values
        | _ -> fail (name ^ " has unexpected storage"))
   | None -> fail ("missing point float array " ^ name)
 
@@ -58,37 +58,37 @@ let source_points values = Line_geometry.points values
 let equal_attribute left right =
   Attribute.owner left = Attribute.owner right
   && String.equal (Attribute.name left) (Attribute.name right)
-  && match Attribute.Private.storage left, Attribute.Private.storage right with
+  && match Attribute.View.storage left, Attribute.View.storage right with
   | Attribute.Float left, Attribute.Float right -> left = right
   | Attribute.Int left, Attribute.Int right -> left = right
   | Attribute.Text left, Attribute.Text right -> left = right
   | Attribute.Float2 left, Attribute.Float2 right ->
-      let left = Packed.Float2.Private.view left
-      and right = Packed.Float2.Private.view right in
+      let left = Packed.Float2.View.view left
+      and right = Packed.Float2.View.view right in
       left.x = right.x && left.y = right.y
   | Attribute.Float3 left, Attribute.Float3 right ->
-      let left = Packed.Float3.Private.view left
-      and right = Packed.Float3.Private.view right in
+      let left = Packed.Float3.View.view left
+      and right = Packed.Float3.View.view right in
       left.x = right.x && left.y = right.y && left.z = right.z
   | Attribute.Float4 left, Attribute.Float4 right ->
-      let left = Packed.Float4.Private.view left
-      and right = Packed.Float4.Private.view right in
+      let left = Packed.Float4.View.view left
+      and right = Packed.Float4.View.view right in
       left.x = right.x && left.y = right.y && left.z = right.z
       && left.w = right.w
   | Attribute.Int_array left, Attribute.Int_array right ->
-      let left = Packed.Int_array.Private.view left
-      and right = Packed.Int_array.Private.view right in
+      let left = Packed.Int_array.View.view left
+      and right = Packed.Int_array.View.view right in
       left.offsets = right.offsets && left.values = right.values
   | Attribute.Float_array left, Attribute.Float_array right ->
-      let left = Packed.Float_array.Private.view left
-      and right = Packed.Float_array.Private.view right in
+      let left = Packed.Float_array.View.view left
+      and right = Packed.Float_array.View.view right in
       left.offsets = right.offsets && left.values = right.values
   | _ -> false
 
 let equal_geometry left right =
   let left_positions = positions left and right_positions = positions right
-  and left_topology = Topology.Private.view (Geometry.topology left)
-  and right_topology = Topology.Private.view (Geometry.topology right) in
+  and left_topology = Topology.View.view (Geometry.topology left)
+  and right_topology = Topology.View.view (Geometry.topology right) in
   left_positions.x = right_positions.x
   && left_positions.y = right_positions.y
   && left_positions.z = right_positions.z
@@ -101,7 +101,7 @@ let equal_geometry left right =
 let check_basic_projection () =
   let source = source_points [|(-1., 2., -1.); (0.5, 3., 0.25); (4., 2., 0.)|]
   and collision = plane 0. in
-  let projected = Ray.run ~direction:(Ray.Ray_vector (Rays_math.Vec3.create 0. (-5.) 0.))
+  let projected = ray ~direction:(Ray.Ray_vector (Rays_math.Vec3.create 0. (-5.) 0.))
       ~distance_attribute:"dist" ~primitive_attribute:"hit_prim"
       ~source_vertex_numbers_attribute:"hit_vertices"
       ~source_vertex_weights_attribute:"hit_weights" ~hit_group:"hits"
@@ -120,7 +120,7 @@ let check_basic_projection () =
   check (Array.length numbers.offsets = 4 && numbers.offsets = weights.offsets
       && numbers.offsets.(3) = 6) "Ray CSR provenance layout";
   let collision_positions = positions collision
-  and collision_topology = Topology.Private.view (Geometry.topology collision) in
+  and collision_topology = Topology.View.view (Geometry.topology collision) in
   for point = 0 to 1 do
     let first = numbers.offsets.(point) in
     let total = weights.values.(first) +. weights.values.(first + 1)
@@ -144,7 +144,7 @@ let check_basic_projection () =
       |> Option.get in
   check (Group.cardinality hits = 2 && Group.mem 0 hits && Group.mem 1 hits
       && not (Group.mem 2 hits)) "Ray hit group";
-  let scaled = Ray.run ~method_:Ray.Ray_minimum_distance ~scale:0.5 ~lift:0.1
+  let scaled = ray ~method_:Ray.Ray_minimum_distance ~scale:0.5 ~lift:0.1
       ~normal_attribute:"Nhit" ~source ~collision () |> get_ok |> positions in
   check (near scaled.y.(0) 1.1 && near scaled.y.(1) 1.6)
     "Ray scale/lift transform"
@@ -153,7 +153,7 @@ let check_direction_policies () =
   let source = source_points [|(0., 0., 0.)|] in
   let collision = Mesh_merge.run [plane 1.; plane 3.; plane (-2.)] |> get_ok in
   let project ?(mode = Ray.Ray_forward) ?(surface = Ray.Ray_first_surface) () =
-    Ray.run ~direction:(Ray.Ray_vector Rays_math.Vec3.unit_y) ~direction_mode:mode
+    ray ~direction:(Ray.Ray_vector Rays_math.Vec3.unit_y) ~direction_mode:mode
       ~surface_hit:surface ~source ~collision () |> get_ok |> positions in
   check (near (project ()).y.(0) 1.) "Ray first forward surface";
   check (near (project ~surface:Ray.Ray_last_surface ()).y.(0) 3.)
@@ -164,20 +164,20 @@ let check_direction_policies () =
     "Ray bidirectional closest";
   check (near (project ~mode:Ray.Ray_bidirectional_farthest ()).y.(0) (-2.))
     "Ray bidirectional farthest";
-  let limited = Ray.run ~direction:(Ray.Ray_vector Rays_math.Vec3.unit_y)
+  let limited = ray ~direction:(Ray.Ray_vector Rays_math.Vec3.unit_y)
       ~min_distance:1.5 ~max_distance:2.5 ~source ~collision () |> get_ok in
   check ((positions limited).y.(0) = 0.) "Ray distance bounds did not reject hits";
   let near_edge = source_points [|(2.0001, 1., 0.)|] in
-  let missed = Ray.run ~direction:(Ray.Ray_vector (Rays_math.Vec3.neg Rays_math.Vec3.unit_y))
+  let missed = ray ~direction:(Ray.Ray_vector (Rays_math.Vec3.neg Rays_math.Vec3.unit_y))
       ~source:near_edge ~collision:(plane 0.) () |> get_ok in
-  let tolerated = Ray.run ~direction:(Ray.Ray_vector (Rays_math.Vec3.neg Rays_math.Vec3.unit_y))
+  let tolerated = ray ~direction:(Ray.Ray_vector (Rays_math.Vec3.neg Rays_math.Vec3.unit_y))
       ~tolerance:0.001 ~source:near_edge ~collision:(plane 0.) () |> get_ok in
   check ((positions missed).y.(0) = 1. && near (positions tolerated).y.(0) 0.)
     "Ray world-space edge tolerance";
   let upper = Group.init ~owner:Group.Primitive ~name:"upper"
       (Geometry.primitive_count collision) (fun primitive -> primitive >= 2
         && primitive < 4) in
-  let restricted = Ray.run ~collision_primitives:upper
+  let restricted = ray ~collision_primitives:upper
       ~direction:(Ray.Ray_vector Rays_math.Vec3.unit_y) ~source ~collision () |> get_ok in
   check (near (positions restricted).y.(0) 3.) "Ray collision restriction";
   let public_surface = Surface_index.create collision |> get_ok in
@@ -190,7 +190,7 @@ let check_direction_policies () =
 let check_multi_samples () =
   let source = source_points [|(0.,2.,0.)|] and collision = plane ~size:20. 0. in
   let project combine jitter_scale seed =
-    Ray.run ~samples:7 ~jitter_scale ~seed ~combine
+    ray ~samples:7 ~jitter_scale ~seed ~combine
       ~direction:(Ray.Ray_vector (Rays_math.Vec3.neg Rays_math.Vec3.unit_y))
       ~distance_attribute:"dist" ~normal_attribute:"hit_N"
       ~source ~collision () |> get_ok in
@@ -217,7 +217,7 @@ let check_multi_samples () =
   let signal = Attribute.create_owned ~name:"signal" ~owner:Attribute.Point
       (Attribute.Float (Array.copy collision_positions.x)) |> get_string_ok in
   let collision_with_signal = add_attribute signal collision in
-  let drivers = Ray.run ~samples:4 ~jitter_scale:0. ~seed:9
+  let drivers = ray ~samples:4 ~jitter_scale:0. ~seed:9
       ~combine:Ray.Ray_average
       ~direction:(Ray.Ray_vector (Rays_math.Vec3.neg Rays_math.Vec3.unit_y))
       ~source_vertex_numbers_attribute:"vertices"
@@ -229,7 +229,7 @@ let check_multi_samples () =
     "Ray average provenance did not retain every successful sample";
   check (near (Array.fold_left ( +. ) 0. weights.values) 1.)
     "Ray average provenance weights do not sum to one";
-  let collision_topology = Topology.Private.view
+  let collision_topology = Topology.View.view
       (Geometry.topology collision_with_signal) in
   let reconstructed = ref 0. in
   for at = numbers.offsets.(0) to numbers.offsets.(1) - 1 do
@@ -239,7 +239,7 @@ let check_multi_samples () =
   done;
   check (near !reconstructed (point_float drivers "signal").(0))
     "Ray average attribute import ignored contributing sample drivers";
-  let selected_driver = Ray.run ~samples:4 ~jitter_scale:0. ~seed:9
+  let selected_driver = ray ~samples:4 ~jitter_scale:0. ~seed:9
       ~combine:Ray.Ray_median
       ~direction:(Ray.Ray_vector (Rays_math.Vec3.neg Rays_math.Vec3.unit_y))
       ~source_vertex_numbers_attribute:"vertices"
@@ -257,21 +257,21 @@ let check_selection_and_directions () =
   let source = source_points [|(-1.,2.,0.); (0.,2.,0.); (1.,2.,0.)|] in
   let selection = Group.init ~owner:Group.Point ~name:"middle" 3
       (fun point -> point = 1) in
-  let selected = Ray.run ~selection:(Transform_ops.Selected_points selection)
+  let selected = ray ~selection:(Transform_ops.Selected_points selection)
       ~direction:(Ray.Ray_vector (Rays_math.Vec3.neg Rays_math.Vec3.unit_y))
       ~source ~collision:(plane 0.) () |> get_ok |> positions in
   check (selected.y = [|2.; 0.; 2.|]) "Ray point restriction";
-  let directions = Packed.Float3.Private.of_owned_exn
+  let directions = Packed.Float3.View.of_owned_exn
       ~x:(Array.make 3 0.) ~y:[|-1.; -2.; -3.|] ~z:(Array.make 3 0.) in
   let direction_attribute = Attribute.create_owned ~name:"ray_dir"
       ~owner:Attribute.Point (Attribute.Float3 directions) |> get_string_ok in
   let attributed = source |> add_attribute direction_attribute
-      |> fun source -> Ray.run ~direction:(Ray.Ray_attribute "ray_dir")
+      |> fun source -> ray ~direction:(Ray.Ray_attribute "ray_dir")
           ~source ~collision:(plane 0.) () |> get_ok in
   check ((positions attributed).y = [|0.;0.;0.|]) "Ray attribute directions";
   let normal_source = Plane_generators.grid ~columns:2 ~rows:2 ~size:1. () |> get_ok
       |> translated 2. in
-  let normal_projected = Ray.run ~direction:Ray.Ray_normal
+  let normal_projected = ray ~direction:Ray.Ray_normal
       ~direction_mode:Ray.Ray_reverse ~source:normal_source
       ~collision:(plane 0.) () |> get_ok in
   check (Array.for_all (fun y -> near y 0.) (positions normal_projected).y)
@@ -299,7 +299,7 @@ let check_imports () =
       |> add_group (Group.init ~owner:Group.Primitive ~name:"marked"
            primitive_count (fun _ -> true)) in
   let source = source_points [|(0.5,2.,0.25); (5.,2.,0.)|] in
-  let output = Ray.run ~direction:(Ray.Ray_vector (Rays_math.Vec3.neg Rays_math.Vec3.unit_y))
+  let output = ray ~direction:(Ray.Ray_vector (Rays_math.Vec3.neg Rays_math.Vec3.unit_y))
       ~point_pattern:"temperature" ~vertex_pattern:"corner"
       ~primitive_pattern:"material marked" ~detail_pattern:"revision"
       ~match_groups:true ~source ~collision () |> get_ok in
@@ -311,7 +311,7 @@ let check_imports () =
     "Ray did not interpolate imported numeric fields at the hit";
   (match Geometry.find_attribute ~owner:Attribute.Point "material" output with
    | Some attribute ->
-       (match Attribute.Private.storage attribute with
+       (match Attribute.View.storage attribute with
         | Attribute.Text values -> check
             (values.(0) = "m1")
             "Ray primitive text import"
@@ -322,13 +322,13 @@ let check_imports () =
   (match Geometry.find_group ~owner:Group.Point "marked" output with
    | Some group -> check (Group.mem 0 group) "Ray group import"
    | None -> fail "Ray imported group missing");
-  let imported_normals = Packed.Float3.Private.of_owned_exn
+  let imported_normals = Packed.Float3.View.of_owned_exn
       ~x:(Array.make point_count 1.) ~y:(Array.make point_count 0.)
       ~z:(Array.make point_count 0.) in
   let imported_normals = Attribute.create_owned ~name:"N" ~owner:Attribute.Point
       (Attribute.Float3 imported_normals) |> get_string_ok in
   let collision = add_attribute imported_normals collision in
-  let imported_normal = Ray.run
+  let imported_normal = ray
       ~direction:(Ray.Ray_vector (Rays_math.Vec3.neg Rays_math.Vec3.unit_y))
       ~normal_attribute:"N" ~point_pattern:"N" ~source ~collision () |> get_ok
       |> fun geometry -> point_float3 geometry "N" in
@@ -337,46 +337,46 @@ let check_imports () =
 
 let check_validation () =
   let source = source_points [|(0.,2.,0.)|] and collision = plane 0. in
-  expect_code "invalid_parameter" (Ray.run ~grain:0 ~source ~collision ());
-  expect_code "invalid_distance" (Ray.run ~max_distance:(-1.) ~source ~collision ());
-  expect_code "invalid_direction" (Ray.run
+  expect_code "invalid_parameter" (ray ~grain:0 ~source ~collision ());
+  expect_code "invalid_distance" (ray ~max_distance:(-1.) ~source ~collision ());
+  expect_code "invalid_direction" (ray
       ~direction:(Ray.Ray_vector Rays_math.Vec3.zero) ~source ~collision ());
-  expect_code "invalid_direction" (Ray.run
+  expect_code "invalid_direction" (ray
       ~direction:(Ray.Ray_attribute "missing") ~source ~collision ());
-  expect_code "invalid_name" (Ray.run ~distance_attribute:"P" ~source ~collision ());
-  expect_code "invalid_name" (Ray.run ~distance_attribute:"same"
+  expect_code "invalid_name" (ray ~distance_attribute:"P" ~source ~collision ());
+  expect_code "invalid_name" (ray ~distance_attribute:"same"
       ~primitive_attribute:"same" ~source ~collision ());
-  expect_code "invalid_name" (Ray.run
+  expect_code "invalid_name" (ray
       ~source_vertex_numbers_attribute:"vertices" ~source ~collision ());
-  expect_code "invalid_pattern" (Ray.run ~match_groups:true ~source ~collision ());
-  expect_code "invalid_parameter" (Ray.run ~samples:0 ~source ~collision ());
-  expect_code "invalid_parameter" (Ray.run ~samples:1025 ~source ~collision ());
-  expect_code "invalid_parameter" (Ray.run ~jitter_scale:(-1.) ~source ~collision ());
-  let extreme_jitter = Ray.run ~samples:2 ~jitter_scale:max_float
+  expect_code "invalid_pattern" (ray ~match_groups:true ~source ~collision ());
+  expect_code "invalid_parameter" (ray ~samples:0 ~source ~collision ());
+  expect_code "invalid_parameter" (ray ~samples:1025 ~source ~collision ());
+  expect_code "invalid_parameter" (ray ~jitter_scale:(-1.) ~source ~collision ());
+  let extreme_jitter = ray ~samples:2 ~jitter_scale:max_float
       ~direction:(Ray.Ray_vector (Rays_math.Vec3.neg Rays_math.Vec3.unit_y)) ~source ~collision ()
       |> get_ok |> positions in
   check (Array.for_all Float.is_finite extreme_jitter.x
       && Array.for_all Float.is_finite extreme_jitter.y
       && Array.for_all Float.is_finite extreme_jitter.z)
     "Ray finite extreme jitter produced non-finite positions";
-  expect_code "invalid_parameter" (Ray.run ~method_:Ray.Ray_minimum_distance
+  expect_code "invalid_parameter" (ray ~method_:Ray.Ray_minimum_distance
       ~samples:2 ~source ~collision ());
   let wrong_collision_group = Group.init ~owner:Group.Point ~name:"wrong"
       (Geometry.point_count collision) (fun _ -> true) in
-  expect_code "invalid_group" (Ray.run ~collision_primitives:wrong_collision_group
+  expect_code "invalid_group" (ray ~collision_primitives:wrong_collision_group
       ~source ~collision ());
   let curve = Line_geometry.polyline [|(-1.,0.,0.); (1.,0.,0.)|] |> get_ok in
-  expect_code "invalid_surface" (Ray.run ~source ~collision:curve ());
-  let bad_direction = Packed.Float3.Private.of_owned_exn ~x:[|0.|]
+  expect_code "invalid_surface" (ray ~source ~collision:curve ());
+  let bad_direction = Packed.Float3.View.of_owned_exn ~x:[|0.|]
       ~y:[|Float.nan|] ~z:[|0.|] in
   let bad_direction = Attribute.create_owned ~name:"bad" ~owner:Attribute.Point
       (Attribute.Float3 bad_direction) |> get_string_ok in
   let bad_source = add_attribute bad_direction source in
-  expect_code "invalid_direction" (Ray.run ~direction:(Ray.Ray_attribute "bad")
+  expect_code "invalid_direction" (ray ~direction:(Ray.Ray_attribute "bad")
       ~source:bad_source ~collision ());
   let cancelled = Cancel.create () in
   Cancel.cancel cancelled;
-  expect_code "cancelled" (Ray.run ~cancel:cancelled ~source ~collision ())
+  expect_code "cancelled" (ray ~cancel:cancelled ~source ~collision ())
 
 let run () =
   check_basic_projection ();

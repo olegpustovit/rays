@@ -60,7 +60,7 @@ let selected_bounds value =
       Option.map (fun node -> Objects.world (scene value) piece.id, bounds, Node.label node)
         (Edit_graph.find (scene value) ~node_id:piece.id)))
 let no_graph = Custom.plain ~operation:"points" ~parameters:"count=0" ~cook_mode:Node.Generator []
-  (fun ~context:_ _ -> Ok (Rdk.Line_geometry.points [||]))
+  (fun ~context:_ _ -> Ok (Rdk_rays.Geometry_view.points_of_nothing))
 let graph value = match Option.bind (focus_object value) (fun id ->
     List.assoc_opt id value.cook.Cook.graphs), piece value with
   | Some graph, _ -> graph

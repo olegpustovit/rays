@@ -533,7 +533,7 @@ let coplanar_triangles_contact_packed ~x ~y ~z ~left_a ~left_b ~left_c
          right_a right_b right_c left_a
   end
 
-module Private = struct
+module View = struct
   let triangle_feature_vertex_local feature =
     if feature >= 0 && feature <= 2
     then feature else -1

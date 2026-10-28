@@ -463,7 +463,7 @@ let run_values () =
       let geo=Payload.geometry output.payload|>Result.get_ok in
       check(Rdk.Geometry.point_count geo=0)"ordinary attribute menu starter did not cook actual empty geometry";
       let attr=Rdk.Geometry.find_attribute ~owner:Rdk.Attribute.Point "attribute"geo|>Option.get in
-      check(Rdk.Attribute.Private.storage attr|>function Rdk.Attribute.Float3 data->Rdk.Packed.Float3.length data=0|_->false)
+      check(Rdk.Attribute.View.storage attr|>function Rdk.Attribute.Float3 data->Rdk.Packed.Float3.length data=0|_->false)
         "ordinary attribute menu starter lost vec3 storage"));
   let e = add "sop/remap" in
   check (E3.undo_label e = Some "Add node" && has (source e) "(sop/remap (sop/mesh"
@@ -2180,7 +2180,7 @@ let run_spreadsheet () =
     step (0.,0.); step (0.,0.);
     let owner, geometry = Rays_editor.Reduce.spreadsheet !e [1;0] in
     let geometry = match geometry with Some g -> g | None -> fail "selected cooked node absent from spreadsheet" in
-    let counts = List.map (fun owner -> Sheet.count owner geometry) [Rdk.Attribute.Point; Vertex; Primitive; Detail] in
+    let counts = List.map (fun owner -> Sheet.count owner geometry) [0; 1; 2; 3] in
     check (owner = 0 && counts = [6;12;4;1]) ("spreadsheet owner row counts: " ^ String.concat "," (List.map string_of_int counts) ^ "; owner=" ^ string_of_int owner);
     check (snd (Rays_editor.Reduce.spreadsheet !e [1;1]) = None) "spreadsheet followed the other graph selection";
     let layouts = Layout.geometry shell.tree (frame (0.,0.) [] !count) in
@@ -2196,13 +2196,13 @@ let run_spreadsheet () =
     step (0.,0.); step (0.,0.);
     let geometry = snd (Rays_editor.Reduce.spreadsheet !e [1;0]) |> Option.get in
     check (Rdk.Geometry.point_count geometry = 8 && fst (Rays_editor.Reduce.spreadsheet !e [1;0]) = 3) "spreadsheet recook kept stale geometry or reset owner";
-    let columns = Sheet.columns Rdk.Attribute.Point geometry in
+    let columns = Sheet.columns 0 geometry in
     check (Array.length columns >= 4 && List.init 4 (fun i -> fst columns.(i)) = ["index";"P.x";"P.y";"P.z"]) "canonical position tuple columns";
     let attr = Rdk.Attribute.create_owned ~name:"label" ~owner:Point (Text (Array.make 8 "sample")) |> Result.get_ok in
     let geometry = Rdk.Geometry.with_attribute attr geometry |> Result.get_ok in
     let group = Rdk.Group.init ~owner:Point ~name:"odd" 8 (fun i -> i mod 2 = 1) in
     let geometry = Rdk.Geometry.with_group group geometry |> Result.get_ok in
-    let columns = Sheet.columns Rdk.Attribute.Point geometry |> Array.to_list in
+    let columns = Sheet.columns 0 geometry |> Array.to_list in
     check ((List.assoc "label" columns) 7 = "sample" && (List.assoc "group:odd" columns) 0 = "0"
       && (List.assoc "group:odd" columns) 7 = "1") "text values/group membership columns";
     print_endline "workspace spreadsheet: owner counts, tied selections, pane-local tabs, recooks and layout roundtrip passed")
@@ -2505,7 +2505,7 @@ let run_view_native () =
       ~camera:(Easy_camera.create ~target:Rays_math.Vec3.zero ~distance:6.8 ~azimuth:0.72 ~elevation:0.42 ())
       ~prepare:(fun _ output ->
         match Rdk.Geometry.find_attribute ~owner:Rdk.Attribute.Primitive "piece" (Result.get_ok (Sop.Payload.geometry output.Session.payload)) with
-        | Some attribute when (match Rdk.Attribute.Private.storage attribute with
+        | Some attribute when (match Rdk.Attribute.View.storage attribute with
             | Rdk.Attribute.Int _ | Text _ -> true | _ -> false) ->
             Rdk_rays.Packed_pieces.of_geometry ~piece_attribute:"piece" (Result.get_ok (Sop.Payload.geometry output.payload))
             |> Result.map (fun pieces -> `Pieces pieces)

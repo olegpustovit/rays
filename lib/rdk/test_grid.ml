@@ -5,16 +5,16 @@ open Rdk_test_support
 let float3_attribute owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float3 values -> Packed.Float3.Private.view values
+      (match Attribute.View.storage attribute with
+       | Attribute.Float3 values -> Packed.Float3.View.view values
        | _ -> fail (name ^ " has unexpected storage"))
   | None -> fail ("missing float3 attribute " ^ name)
 
 let float2_attribute owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float2 values -> Packed.Float2.Private.view values
+      (match Attribute.View.storage attribute with
+       | Attribute.Float2 values -> Packed.Float2.View.view values
        | _ -> fail (name ^ " has unexpected storage"))
   | None -> fail ("missing float2 attribute " ^ name)
 
@@ -22,25 +22,25 @@ let equal_storage left right = match Attribute.storage left, Attribute.storage r
   | Attribute.Float left, Attribute.Float right -> left = right
   | Attribute.Int left, Attribute.Int right -> left = right
   | Attribute.Int_array left, Attribute.Int_array right ->
-      let left = Packed.Int_array.Private.view left
-      and right = Packed.Int_array.Private.view right in
+      let left = Packed.Int_array.View.view left
+      and right = Packed.Int_array.View.view right in
       left.offsets = right.offsets && left.values = right.values
   | Attribute.Float_array left, Attribute.Float_array right ->
-      let left = Packed.Float_array.Private.view left
-      and right = Packed.Float_array.Private.view right in
+      let left = Packed.Float_array.View.view left
+      and right = Packed.Float_array.View.view right in
       left.offsets = right.offsets && left.values = right.values
   | Attribute.Text left, Attribute.Text right -> left = right
   | Attribute.Float2 left, Attribute.Float2 right ->
-      let left = Packed.Float2.Private.view left
-      and right = Packed.Float2.Private.view right in
+      let left = Packed.Float2.View.view left
+      and right = Packed.Float2.View.view right in
       left.x = right.x && left.y = right.y
   | Attribute.Float3 left, Attribute.Float3 right ->
-      let left = Packed.Float3.Private.view left
-      and right = Packed.Float3.Private.view right in
+      let left = Packed.Float3.View.view left
+      and right = Packed.Float3.View.view right in
       left.x = right.x && left.y = right.y && left.z = right.z
   | Attribute.Float4 left, Attribute.Float4 right ->
-      let left = Packed.Float4.Private.view left
-      and right = Packed.Float4.Private.view right in
+      let left = Packed.Float4.View.view left
+      and right = Packed.Float4.View.view right in
       left.x = right.x && left.y = right.y && left.z = right.z
       && left.w = right.w
   | _ -> false
@@ -53,8 +53,8 @@ let equal_attribute left right =
 
 let equal_geometry left right =
   let left_positions = positions left and right_positions = positions right
-  and left_topology = Topology.Private.view (Geometry.topology left)
-  and right_topology = Topology.Private.view (Geometry.topology right) in
+  and left_topology = Topology.View.view (Geometry.topology left)
+  and right_topology = Topology.View.view (Geometry.topology right) in
   left_positions.x = right_positions.x
   && left_positions.y = right_positions.y
   && left_positions.z = right_positions.z
@@ -67,7 +67,7 @@ let equal_geometry left right =
 let check_default_compatibility () =
   let geometry = Plane_generators.grid ~columns:1 ~rows:1 ~size:2. () |> get_ok in
   let point = positions geometry
-  and topology = Topology.Private.view (Geometry.topology geometry)
+  and topology = Topology.View.view (Geometry.topology geometry)
   and normals = float3_attribute Attribute.Point "N" geometry in
   check (point.x = [|-1.; 1.; -1.; 1.|]
       && point.y = [|0.; 0.; 0.; 0.|]
@@ -88,14 +88,14 @@ let check_connectivity () =
   check (Geometry.point_count points = 12 && Geometry.vertex_count points = 0
       && Geometry.primitive_count points = 0) "Grid points cardinality";
   let rows = make Plane_generators.Grid_rows in
-  let row_topology = Topology.Private.view (Geometry.topology rows) in
+  let row_topology = Topology.View.view (Geometry.topology rows) in
   check (Geometry.vertex_count rows = 12 && Geometry.primitive_count rows = 3
       && row_topology.vertex_points = Array.init 12 Fun.id
       && row_topology.primitive_offsets = [|0;4;8;12|]
       && row_topology.primitive_kinds = Bytes.make 3 '\001')
     "Grid row-polyline topology";
   let columns = make Plane_generators.Grid_columns in
-  let column_topology = Topology.Private.view (Geometry.topology columns) in
+  let column_topology = Topology.View.view (Geometry.topology columns) in
   check (Geometry.vertex_count columns = 12 && Geometry.primitive_count columns = 4
       && column_topology.vertex_points = [|0;4;8; 1;5;9; 2;6;10; 3;7;11|]
       && column_topology.primitive_offsets = [|0;3;6;9;12|])
@@ -104,16 +104,16 @@ let check_connectivity () =
   check (Geometry.vertex_count both = 24 && Geometry.primitive_count both = 7)
     "Grid row-and-column cardinality";
   let quads = make Plane_generators.Grid_quads in
-  let quad_topology = Topology.Private.view (Geometry.topology quads) in
+  let quad_topology = Topology.View.view (Geometry.topology quads) in
   check (Geometry.vertex_count quads = 24 && Geometry.primitive_count quads = 6
       && Array.sub quad_topology.vertex_points 0 4 = [|0;4;5;1|])
     "Grid quad topology";
   let triangles = make Plane_generators.Grid_triangles
   and reversed = make Plane_generators.Grid_reverse_triangles
   and alternating = make Plane_generators.Grid_alternating_triangles in
-  let regular = Topology.Private.view (Geometry.topology triangles)
-  and reversed_topology = Topology.Private.view (Geometry.topology reversed)
-  and alternating_topology = Topology.Private.view (Geometry.topology alternating) in
+  let regular = Topology.View.view (Geometry.topology triangles)
+  and reversed_topology = Topology.View.view (Geometry.topology reversed)
+  and alternating_topology = Topology.View.view (Geometry.topology alternating) in
   check (Geometry.vertex_count triangles = 36
       && Geometry.primitive_count triangles = 12
       && Array.sub regular.vertex_points 0 6 = [|0;4;5;0;5;1|])
@@ -125,7 +125,7 @@ let check_connectivity () =
     "Grid alternating-triangle topology";
   List.iter (fun geometry ->
     let point = positions geometry
-    and topology = Topology.Private.view (Geometry.topology geometry)
+    and topology = Topology.View.view (Geometry.topology geometry)
     and normal = float3_attribute Attribute.Point "N" geometry in
     for primitive = 0 to Geometry.primitive_count geometry - 1 do
       let first = topology.primitive_offsets.(primitive) in

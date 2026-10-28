@@ -1,4 +1,4 @@
-(** Private primitive-owned payload transfer for exact Boolean extraction. *)
+(** View primitive-owned payload transfer for exact Boolean extraction. *)
 
 val copy_primitives :
   ?cancel:Cancel.t -> grain:int -> Boolean_extract.ancestry ->
@@ -8,7 +8,7 @@ val copy_primitives :
     primitive; a field missing on that operand receives its storage default.
     Same-name attributes with different storage are rejected. *)
 
-type point_conflict = Boolean_corner_payload.point_conflict =
+type point_conflict =
   | Reject
   | Promote_to_vertex
 

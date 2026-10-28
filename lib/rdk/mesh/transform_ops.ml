@@ -29,7 +29,7 @@ type distance_from_geometry_reference =
   | Distance_reference_primitives
 
 let normalized_direction ?(grain = 16_384) matrix values =
-  let source = Packed.Float3.Private.view values in
+  let source = Packed.Float3.View.view values in
   let count = Array.length source.x in
   let x = Array.make count 0. and y = Array.make count 0. and z = Array.make count 0. in
   let (m00,m01,m02,_), (m10,m11,m12,_), (m20,m21,m22,_), _ =
@@ -47,7 +47,7 @@ let normalized_direction ?(grain = 16_384) matrix values =
           y.(index) <- oy /. length;
           z.(index) <- oz /. length
         end);
-  Packed.Float3.Private.of_owned_exn ~x ~y ~z
+  Packed.Float3.View.of_owned_exn ~x ~y ~z
 
 let transform_rotation_matrix order angles =
   let x = Rays_math.Mat4.rotation_x angles.Rays_math.Vec3.x
@@ -59,11 +59,12 @@ let transform_rotation_matrix order angles =
     | Transform_zxy -> z, x, y | Transform_zyx -> z, y, x in
   Rays_math.Mat4.mul third (Rays_math.Mat4.mul second first)
 
-let compose_transform_raw ?(order = Transform_srt)
+let compose_transform ?(order = Transform_srt)
     ?(rotation_order = Transform_xyz) ?(translate = Rays_math.Vec3.zero)
     ?(rotate = Rays_math.Vec3.zero) ?(scale = Rays_math.Vec3.create 1. 1. 1.) ?(shear = Rays_math.Vec3.zero)
     ?(uniform_scale = 1.) ?(pivot = Rays_math.Vec3.zero)
     ?(pivot_rotation = Rays_math.Vec3.zero) ?(invert = false) () =
+  Error.guard ~operation:"compose_transform" ~code:"invalid_transform" @@ fun () ->
   let vectors = ["translate", translate; "rotate", rotate; "scale", scale;
     "shear", shear; "pivot", pivot; "pivot_rotation", pivot_rotation] in
   match List.find_opt (fun (_, value) -> not (Float.is_finite value.Rays_math.Vec3.x
@@ -121,7 +122,7 @@ let soft_transform_weight falloff distance radius =
         1. -. ((3. *. t2) -. (2. *. t2 *. t))
 
 let validate_finite_positions ?cancel ~grain ~operation geometry =
-  let positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+  let positions = Packed.Float3.View.view (Geometry.positions geometry) in
   let count = Array.length positions.x and first_invalid = Atomic.make max_int in
   if count > 0 then Parallel.for_ ~chunk_size:grain ~start:0 ~finish:(count - 1)
       (fun point ->
@@ -146,7 +147,7 @@ let soft_radius_weights ?cancel ~grain ~radius ~falloff selected geometry =
     let count = Geometry.point_count geometry in
     let indices = Array.make count (-1) and distances = Array.make count infinity
     and counts = Array.make count 0 in
-    Spatial_index.Private.nearest_k_many_into ?cancel ~grain index
+    Spatial_index.View.nearest_k_many_into ?cancel ~grain index
       ~queries:positions ~max_distance_squared:(radius *. radius) ~capacity:1
       ~indices ~distances_squared:distances ~counts;
     let weights = Array.make count 0. in
@@ -168,8 +169,8 @@ let soft_edge_distances ?cancel ~radius selected geometry =
   else
   let topology_value = Geometry.topology geometry in
   let reverse = Topology_index.create ?cancel topology_value
-      |> Topology_index.Private.view in
-  let positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+      |> Topology_index.View.view in
+  let positions = Packed.Float3.View.view (Geometry.positions geometry) in
   let lengths = Array.init (Array.length reverse.edge_a) (fun edge ->
     let a = reverse.edge_a.(edge) and b = reverse.edge_b.(edge) in
     let dx = positions.x.(b) -. positions.x.(a) and dy = positions.y.(b) -. positions.y.(a)
@@ -187,7 +188,7 @@ let soft_edge_distances ?cancel ~radius selected geometry =
 let point_float_output ~operation ~name ~default geometry =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
   | None -> Ok (Array.make (Geometry.point_count geometry) default)
-  | Some attribute -> match Attribute.Private.storage attribute with
+  | Some attribute -> match Attribute.View.storage attribute with
     | Attribute.Float values ->
         if Array.length values <> Geometry.point_count geometry then Error
             (Printf.sprintf "%s: point attribute %S length mismatch"
@@ -202,10 +203,11 @@ let valid_output_attribute_name = function
       let name = String.trim name in
       name <> "" && name <> "P"
 
-let distance_from_geometry_raw ?cancel ?(grain = 16_384) ?affected
+let distance_from_geometry ?cancel ?(grain = 16_384) ?affected
     ?reference_selection ?(reference_kind = Distance_reference_primitives)
     ?(falloff = Soft_linear) ?(radius = Distance_maximum)
     ?(distance_attribute = Some "distance") ?mask_attribute ~reference source =
+  Error.guard ~operation:"distance_from_geometry" ~code:"invalid_distance" @@ fun () ->
   let operation = "Rdk.Transform_ops.distance_from_geometry" in
   if grain <= 0 then Error (operation ^ ": grain must be positive")
   else if not (valid_output_attribute_name distance_attribute) then Error
@@ -258,7 +260,7 @@ let distance_from_geometry_raw ?cancel ?(grain = 16_384) ?affected
             Result.bind (Spatial_index.create ?cancel ~grain
                 ?points:reference_group (Geometry.positions reference)
                 |> Result.map_error Error.to_string) (fun index ->
-              Spatial_index.Private.nearest_distances_many_into ?cancel
+              Spatial_index.View.nearest_distances_many_into ?cancel
                 ?points:affected_points ~grain index
                 ~queries:(Geometry.positions source)
                 ~max_distance_squared:maximum_squared
@@ -268,7 +270,7 @@ let distance_from_geometry_raw ?cancel ?(grain = 16_384) ?affected
             Result.bind (Surface_index.create ?cancel ~grain
                 ?primitives:reference_group reference
                 |> Result.map_error Error.to_string) (fun index ->
-              Surface_index.Private.closest_distances_many_into ?cancel
+              Surface_index.View.closest_distances_many_into ?cancel
                 ?selection:affected_points ~grain index
                 ~queries:(Geometry.positions source)
                 ~max_distance_squared:maximum_squared
@@ -332,7 +334,7 @@ let distance_from_geometry_raw ?cancel ?(grain = 16_384) ?affected
                     (Attribute.Float values))
             | _ -> assert false in
           Result.bind attributes_result (fun attributes ->
-            Geometry.Private.with_merged_attributes_owned attributes source)
+            Geometry.View.with_merged_attributes_owned attributes source)
         ))))))))
 
 let soft_attribute_weights ?cancel ~grain ~radius ~falloff ~apply_rolloff
@@ -342,7 +344,7 @@ let soft_attribute_weights ?cancel ~grain ~radius ~falloff ~apply_rolloff
   else match Geometry.find_attribute ~owner:Attribute.Point name geometry with
     | None -> Error (Printf.sprintf
         "Rdk.Transform_ops.soft_transform: missing point distance attribute %S" name)
-    | Some attribute -> match Attribute.Private.storage attribute with
+    | Some attribute -> match Attribute.View.storage attribute with
       | Attribute.Float values ->
           let count = Array.length values in
           let weights = Array.make count 0.
@@ -372,9 +374,10 @@ let soft_attribute_weights ?cancel ~grain ~radius ~falloff ~apply_rolloff
       | _ -> Error (Printf.sprintf
           "Rdk.Transform_ops.soft_transform: point distance attribute %S must be float" name)
 
-let soft_transform_raw ?cancel ?(grain = 16_384) ?selection
+let soft_transform ?cancel ?(grain = 16_384) ?selection
     ?(metric = Soft_radius) ?(falloff = Soft_cubic) ?(radius = 1.)
     ?falloff_attribute ?(recompute_normals = true) matrix geometry =
+  Error.guard ~operation:"soft_transform" ~code:"invalid_transform" @@ fun () ->
   if grain <= 0 then Error "Rdk.Transform_ops.soft_transform: grain must be positive"
   else if not (Float.is_finite radius) || radius < 0. then
     Error "Rdk.Transform_ops.soft_transform: radius must be finite and non-negative"
@@ -446,7 +449,7 @@ let soft_transform_raw ?cancel ?(grain = 16_384) ?selection
                 end);
           let positioned = if Atomic.get changed then
               Geometry.with_positions
-                (Packed.Float3.Private.of_owned_exn ~x ~y ~z) geometry
+                (Packed.Float3.View.of_owned_exn ~x ~y ~z) geometry
             else Ok geometry in
           Result.bind positioned (fun output ->
             let output = if not (Atomic.get changed) then output
@@ -458,7 +461,7 @@ let soft_transform_raw ?cancel ?(grain = 16_384) ?selection
                 Geometry.find_attribute ~owner "N" geometry <> None)
                 [Attribute.Point; Attribute.Vertex] in
             let output = List.fold_left (fun result owner -> Result.bind result
-                (fun output -> Error.unguard (Normal_ops.run ?cancel ~grain ~owner output)))
+                (fun output -> Ok (Error.get (Normal_ops.run ?cancel ~grain ~owner output))))
                 (Ok output) normal_owners in
             Result.bind output (fun output -> match falloff_attribute with
               | None -> Ok output
@@ -486,24 +489,3 @@ let transform ?grain matrix geometry =
                      (Attribute.normal ~owner) normals |> Support.get_ok in
                  Geometry.with_attribute attribute output |> Support.get_ok))
         transformed [Attribute.Point; Attribute.Vertex]
-
-let compose_transform ?order ?rotation_order ?translate ?rotate ?scale ?shear
-    ?uniform_scale ?pivot ?pivot_rotation ?invert () =
-  Result.map_error (Error.of_string ~operation:"compose_transform"
-      ~code:"invalid_transform")
-    (compose_transform_raw ?order ?rotation_order ?translate ?rotate ?scale
-      ?shear ?uniform_scale ?pivot ?pivot_rotation ?invert ())
-
-let soft_transform ?cancel ?grain ?selection ?metric ?falloff ?radius
-    ?falloff_attribute ?recompute_normals matrix geometry =
-  Error.guard ~operation:"soft_transform" ~code:"invalid_transform"
-    (fun () -> soft_transform_raw ?cancel ?grain ?selection ?metric ?falloff
-      ?radius ?falloff_attribute ?recompute_normals matrix geometry)
-
-let distance_from_geometry ?cancel ?grain ?affected ?reference_selection
-    ?reference_kind ?falloff ?radius ?distance_attribute ?mask_attribute
-    ~reference source =
-  Error.guard ~operation:"distance_from_geometry" ~code:"invalid_distance"
-    (fun () -> distance_from_geometry_raw ?cancel ?grain ?affected
-      ?reference_selection ?reference_kind ?falloff ?radius
-      ?distance_attribute ?mask_attribute ~reference source)

@@ -1,7 +1,7 @@
 
 let operation = "Rdk_mesh.Convex_hull.convex_hull"
 
-type positions = Packed.Float3.Private.view
+type positions = Packed.Float3.View.view
 
 type int_buffer = { mutable values : int array; mutable length : int }
 
@@ -176,7 +176,7 @@ let next_table_size count =
 
 let selected_unique_points ?cancel ~grain selection geometry =
   let point_count = Geometry.point_count geometry
-  and positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+  and positions = Packed.Float3.View.view (Geometry.positions geometry) in
   let selected point = match selection with
     | None -> true
     | Some group -> Group.mem point group in
@@ -538,7 +538,7 @@ let three_dimensional_hull ?cancel ~grain (positions : positions) unique a b c d
 
 let remap_output ?cancel ~grain ~preserve_point_payload ?source_point_attribute
     ?hull_group geometry point_map topology =
-  let source_positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+  let source_positions = Packed.Float3.View.view (Geometry.positions geometry) in
   let select source =
     let output = Array.make (Array.length point_map) 0. in
     if Array.length point_map > 0 then Parallel.for_ ~chunk_size:grain ~start:0
@@ -546,7 +546,7 @@ let remap_output ?cancel ~grain ~preserve_point_payload ?source_point_attribute
           if point land 4095 = 0 then Cancel.check_opt cancel;
           output.(point) <- source.(point_map.(point)));
     output in
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:(select source_positions.x) ~y:(select source_positions.y)
       ~z:(select source_positions.z) in
   let attributes = List.filter_map (fun attribute -> match Attribute.owner attribute with
@@ -657,7 +657,7 @@ let materialize ?cancel ~grain ~preserve_point_payload ?source_point_attribute
           ~finish:(primitive_count - 1) fill
       else for primitive = 0 to primitive_count - 1 do fill primitive done;
       primitive_offsets.(primitive_count) <- primitive_count * 3;
-      let topology = Topology.Private.create_validated_owned
+      let topology = Topology.View.create_validated_owned
           ~point_count:!output_points ~vertex_points ~primitive_offsets
           ~primitive_kinds in
       remap_output ?cancel ~grain ~preserve_point_payload ?source_point_attribute
@@ -687,7 +687,7 @@ let run ?cancel ?(grain = 16_384) ?selection
       Result.bind selected (fun selected ->
         Result.bind (selected_unique_points ?cancel ~grain selected geometry)
           (fun unique ->
-            let positions = Packed.Float3.Private.view
+            let positions = Packed.Float3.View.view
                 (Geometry.positions geometry) in
             let result = if Array.length unique = 1 then `Point unique.(0)
               else begin

@@ -5,7 +5,7 @@ open Rdk_test_support
 let float_values ~owner ~name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Float values -> values
        | _ -> fail ("unexpected storage for " ^ name))
   | None -> fail ("missing attribute " ^ name)
@@ -13,7 +13,7 @@ let float_values ~owner ~name geometry =
 let int_values ~owner ~name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Int values -> values
        | _ -> fail ("unexpected storage for " ^ name))
   | None -> fail ("missing attribute " ^ name)
@@ -21,8 +21,8 @@ let int_values ~owner ~name geometry =
 let float3_values ~owner ~name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float3 values -> Packed.Float3.Private.view values
+      (match Attribute.View.storage attribute with
+       | Attribute.Float3 values -> Packed.Float3.View.view values
        | _ -> fail ("unexpected storage for " ^ name))
   | None -> fail ("missing attribute " ^ name)
 
@@ -37,13 +37,13 @@ let add_int ~owner ~name values geometry =
   Geometry.with_attribute attribute geometry |> Result.get_ok
 
 let add_float3 ~owner ~name ~x ~y ~z geometry =
-  let values = Packed.Float3.Private.of_owned_exn ~x ~y ~z in
+  let values = Packed.Float3.View.of_owned_exn ~x ~y ~z in
   let attribute = Attribute.create_owned ~owner ~name (Attribute.Float3 values)
       |> Result.get_ok in
   Geometry.with_attribute attribute geometry |> Result.get_ok
 
 let triangle z =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.; 2.; 0.|] ~y:[|0.; 0.; 2.|] ~z:(Array.make 3 z) in
   let builder = Rdk_test_support.Tb.create ~point_count:3 () in
   Rdk_test_support.Tb.add_triangle builder 0 1 2;
@@ -65,7 +65,7 @@ let make_target () =
   |> add_int ~owner:Attribute.Detail ~name:"detail_value" [|2|]
 
 let two_triangle_source () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.; 1.; 0.; 10.; 11.; 10.|]
       ~y:[|0.; 0.; 1.; 0.; 0.; 1.|]
       ~z:(Array.make 6 0.) in
@@ -252,9 +252,9 @@ let test_source_vertex_surface_selection () =
       ~name:"second_triangle" 6 (fun vertex -> vertex >= 3) in
   let second = Surface_index.create ~grain:1 ~vertices:second_triangle source
       |> get_ok in
-  if Surface_index.Private.triangle_primitive index 0 <> 0
+  if Surface_index.View.triangle_primitive index 0 <> 0
       || Surface_index.triangle_count second <> 1
-      || Surface_index.Private.triangle_primitive second 0 <> 1 then
+      || Surface_index.View.triangle_primitive second 0 <> 1 then
     fail "restricted surface index lost the original primitive identity";
   let run domains = Parallel.run ~domains (fun () ->
     Attribute_ops.transfer_surface ~grain:1 ~max_distance:0.5
@@ -310,7 +310,7 @@ let test_group_union_many () =
     Group.union_many ~grain:257 ~name:"combined" [a; b; c] |> Result.get_ok) in
   let one = run 1 and four = run 4 in
   if Group.cardinality one <> 73_336
-      || Group.Private.bits_view one <> Group.Private.bits_view four
+      || Group.View.bits_view one <> Group.View.bits_view four
       || Group.is_ordered one then
     fail "packed union-many cardinality/domain exactness";
   let cancelled = Cancel.create () in

@@ -50,25 +50,25 @@ let equal_storage left right =
   | Attribute.Float left, Attribute.Float right -> left = right
   | Attribute.Int left, Attribute.Int right -> left = right
   | Attribute.Int_array left, Attribute.Int_array right ->
-      let left = Packed.Int_array.Private.view left
-      and right = Packed.Int_array.Private.view right in
+      let left = Packed.Int_array.View.view left
+      and right = Packed.Int_array.View.view right in
       left.offsets = right.offsets && left.values = right.values
   | Attribute.Float_array left, Attribute.Float_array right ->
-      let left = Packed.Float_array.Private.view left
-      and right = Packed.Float_array.Private.view right in
+      let left = Packed.Float_array.View.view left
+      and right = Packed.Float_array.View.view right in
       left.offsets = right.offsets && left.values = right.values
   | Attribute.Text left, Attribute.Text right -> left = right
   | Attribute.Float2 left, Attribute.Float2 right ->
-      let left = Packed.Float2.Private.view left
-      and right = Packed.Float2.Private.view right in
+      let left = Packed.Float2.View.view left
+      and right = Packed.Float2.View.view right in
       left.x = right.x && left.y = right.y
   | Attribute.Float3 left, Attribute.Float3 right ->
-      let left = Packed.Float3.Private.view left
-      and right = Packed.Float3.Private.view right in
+      let left = Packed.Float3.View.view left
+      and right = Packed.Float3.View.view right in
       left.x = right.x && left.y = right.y && left.z = right.z
   | Attribute.Float4 left, Attribute.Float4 right ->
-      let left = Packed.Float4.Private.view left
-      and right = Packed.Float4.Private.view right in
+      let left = Packed.Float4.View.view left
+      and right = Packed.Float4.View.view right in
       left.x = right.x && left.y = right.y && left.z = right.z
       && left.w = right.w
   | _ -> false
@@ -93,10 +93,10 @@ let equal_group left right =
   && Group.ordered_elements left = Group.ordered_elements right
 
 let equal_geometry left right =
-  let left_positions = Packed.Float3.Private.view (Geometry.positions left)
-  and right_positions = Packed.Float3.Private.view (Geometry.positions right)
-  and left_topology = Topology.Private.view (Geometry.topology left)
-  and right_topology = Topology.Private.view (Geometry.topology right) in
+  let left_positions = Packed.Float3.View.view (Geometry.positions left)
+  and right_positions = Packed.Float3.View.view (Geometry.positions right)
+  and left_topology = Topology.View.view (Geometry.topology left)
+  and right_topology = Topology.View.view (Geometry.topology right) in
   left_positions.x = right_positions.x
   && left_positions.y = right_positions.y
   && left_positions.z = right_positions.z
@@ -132,7 +132,7 @@ let inline_geometry polygons =
     x.(point + 4) <- base +. 3.; z.(point + 4) <- 1.;
     x.(point + 5) <- base; z.(point + 5) <- 1.
   done;
-  let positions = Packed.Float3.Private.of_owned_exn ~x ~y ~z in
+  let positions = Packed.Float3.View.of_owned_exn ~x ~y ~z in
   let topology = Topology.polygons_owned ~point_count
       ~vertex_points:(Array.init point_count Fun.id)
       ~primitive_offsets:(Array.init (polygons + 1)
@@ -159,7 +159,7 @@ let edge_flip_geometry pairs =
     vertex_points.(vertex + 4) <- point + 2;
     vertex_points.(vertex + 5) <- point + 3
   done;
-  let positions = Packed.Float3.Private.of_owned_exn ~x ~y ~z in
+  let positions = Packed.Float3.View.of_owned_exn ~x ~y ~z in
   let topology = Topology.polygons_owned ~point_count ~vertex_points
       ~primitive_offsets:(Array.init (pairs * 2 + 1) (fun face -> face * 3))
       |> get_ok in
@@ -180,7 +180,7 @@ let edge_equalize_geometry edge_count =
     x.(point) <- base;
     x.(point + 1) <- base +. length
   done;
-  let positions = Packed.Float3.Private.of_owned_exn ~x ~y ~z in
+  let positions = Packed.Float3.View.of_owned_exn ~x ~y ~z in
   let topology = Topology.create_owned ~point_count
       ~vertex_points:(Array.init point_count Fun.id)
       ~primitive_offsets:(Array.init (edge_count + 1) (fun edge -> edge * 2))
@@ -188,19 +188,19 @@ let edge_equalize_geometry edge_count =
   Geometry.create ~positions ~topology () |> get_ok
 
 let edge_relax_reference geometry =
-  let source = Packed.Float3.Private.view (Geometry.positions geometry) in
+  let source = Packed.Float3.View.view (Geometry.positions geometry) in
   let x = Array.copy source.x in
   for edge = 0 to Geometry.point_count geometry / 2 - 1 do
     let point = edge * 2 in
     x.(point + 1) <- x.(point) +. 0.8 +. float_of_int (edge mod 11) *. 0.1
   done;
   Geometry.with_positions
-    (Packed.Float3.Private.of_shared_exn ~x ~y:source.y ~z:source.z)
+    (Packed.Float3.View.of_shared_exn ~x ~y:source.y ~z:source.z)
     geometry |> get_ok
 
 let curve_chain_geometry segments =
   let point_count = segments + 1 in
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:(Array.init point_count (fun point -> float_of_int point *. 0.002))
       ~y:(Array.init point_count (fun point ->
         sin (float_of_int point *. 0.017)))
@@ -715,7 +715,7 @@ fun migration_input ->
         (fun primitive -> if primitive < (3 * constrained_primitive_count / 4)
           then 0 else 1))) |> get_ok in
   let flow_attribute = Attribute.create_owned ~owner:Attribute.Primitive
-      ~name:"flow" (Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+      ~name:"flow" (Attribute.Float3 (Packed.Float3.View.of_owned_exn
         ~x:(Array.make constrained_primitive_count 0.)
         ~y:(Array.make constrained_primitive_count 0.)
         ~z:(Array.make constrained_primitive_count 1.))) |> get_ok in
@@ -871,7 +871,7 @@ fun migration_input ->
       ~columns:120 ~rows:80 ~size:8. () |> get_rdk in
   let all_edge_source_count = Array.length
       ((Topology_index.create (Geometry.topology all_edge_source)
-        |> Topology_index.Private.view).edge_a) in
+        |> Topology_index.View.view).edge_a) in
   let all_edge_subdivision = Lisp_sop.node ~with_:["all_edge_source", (Lisp_sop.snapshot (all_edge_source))] {|(sop/subdivide
    (sop/ext_all_edge_source)
    :face_varying_interpolation "All"
@@ -1000,9 +1000,9 @@ fun migration_input ->
     "parallel None point-boundary subdivision cardinality";
   let fvar_source = Rdk.Plane_generators.grid ~connectivity:Rdk.Plane_generators.Grid_quads
       ~columns:120 ~rows:80 ~size:8. () |> get_rdk in
-  let fvar_topology = Topology.Private.view (Geometry.topology fvar_source) in
+  let fvar_topology = Topology.View.view (Geometry.topology fvar_source) in
   let fvar_index = Topology_index.create (Geometry.topology fvar_source)
-      |> Topology_index.Private.view in
+      |> Topology_index.View.view in
   let fvar_values = Packed.Float2.of_owned
       ~x:(Array.init (Geometry.vertex_count fvar_source) (fun vertex ->
         float_of_int fvar_topology.vertex_points.(vertex)))
@@ -1100,9 +1100,9 @@ fun migration_input ->
   (match Geometry.find_attribute ~owner:Attribute.Primitive
       "primitive_points" one with
    | Some attribute ->
-       (match Attribute.Private.storage attribute with
+       (match Attribute.View.storage attribute with
         | Attribute.Int_array values ->
-            let values = Packed.Int_array.Private.view values in
+            let values = Packed.Int_array.View.view values in
             check (Array.length values.offsets = Geometry.primitive_count one + 1
                 && Array.length values.values = Geometry.vertex_count one)
               "procedural array promotion cardinality"

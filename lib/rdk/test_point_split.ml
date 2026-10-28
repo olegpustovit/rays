@@ -1,15 +1,14 @@
+open Rdk_test_support
 open Rays
 open Rdk
 
-let fail message = prerr_endline message; exit 1
-let check condition message = if not condition then fail message
 let get = function Ok value -> value | Error error -> fail (Error.to_string error)
 
 let attribute owner name storage =
   Attribute.create_owned ~owner ~name storage |> Result.get_ok
 
 let base ?(delta = 1.) () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;1.;1.;0.;2.|] ~y:[|0.;0.;1.;1.;2.|]
       ~z:(Array.make 5 0.) in
   let topology = Topology.polygons_owned ~point_count:5
@@ -53,48 +52,48 @@ let attr owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some value -> value | None -> fail ("missing attribute " ^ name)
 
-let float2 attribute = match Attribute.Private.storage attribute with
-  | Attribute.Float2 values -> Packed.Float2.Private.view values
+let float2 attribute = match Attribute.View.storage attribute with
+  | Attribute.Float2 values -> Packed.Float2.View.view values
   | _ -> fail "expected float2 attribute"
 
-let int_values attribute = match Attribute.Private.storage attribute with
+let int_values attribute = match Attribute.View.storage attribute with
   | Attribute.Int values -> values | _ -> fail "expected integer attribute"
 
-let text_values attribute = match Attribute.Private.storage attribute with
+let text_values attribute = match Attribute.View.storage attribute with
   | Attribute.Text values -> values | _ -> fail "expected text attribute"
 
-let float_rows attribute = match Attribute.Private.storage attribute with
-  | Attribute.Float_array values -> Packed.Float_array.Private.view values
+let float_rows attribute = match Attribute.View.storage attribute with
+  | Attribute.Float_array values -> Packed.Float_array.View.view values
   | _ -> fail "expected float-array attribute"
 
 let row values row =
-  Array.sub values.Packed.Float_array.Private.values values.offsets.(row)
+  Array.sub values.Packed.Float_array.View.values values.offsets.(row)
     (values.offsets.(row + 1) - values.offsets.(row))
 
 let equal_storage left right =
-  match Attribute.Private.storage left, Attribute.Private.storage right with
+  match Attribute.View.storage left, Attribute.View.storage right with
   | Attribute.Float left, Attribute.Float right -> left = right
   | Attribute.Int left, Attribute.Int right -> left = right
   | Attribute.Text left, Attribute.Text right -> left = right
   | Attribute.Float2 left, Attribute.Float2 right ->
-      let left = Packed.Float2.Private.view left
-      and right = Packed.Float2.Private.view right in
+      let left = Packed.Float2.View.view left
+      and right = Packed.Float2.View.view right in
       left.x = right.x && left.y = right.y
   | Attribute.Float3 left, Attribute.Float3 right ->
-      let left = Packed.Float3.Private.view left
-      and right = Packed.Float3.Private.view right in
+      let left = Packed.Float3.View.view left
+      and right = Packed.Float3.View.view right in
       left.x = right.x && left.y = right.y && left.z = right.z
   | Attribute.Float4 left, Attribute.Float4 right ->
-      let left = Packed.Float4.Private.view left
-      and right = Packed.Float4.Private.view right in
+      let left = Packed.Float4.View.view left
+      and right = Packed.Float4.View.view right in
       left.x = right.x && left.y = right.y && left.z = right.z && left.w = right.w
   | Attribute.Int_array left, Attribute.Int_array right ->
-      let left = Packed.Int_array.Private.view left
-      and right = Packed.Int_array.Private.view right in
+      let left = Packed.Int_array.View.view left
+      and right = Packed.Int_array.View.view right in
       left.offsets = right.offsets && left.values = right.values
   | Attribute.Float_array left, Attribute.Float_array right ->
-      let left = Packed.Float_array.Private.view left
-      and right = Packed.Float_array.Private.view right in
+      let left = Packed.Float_array.View.view left
+      and right = Packed.Float_array.View.view right in
       left.offsets = right.offsets && left.values = right.values
   | _ -> false
 
@@ -118,10 +117,10 @@ let equal_edge_group left right =
      !equal
 
 let equal_geometry left right =
-  let lp = Packed.Float3.Private.view (Geometry.positions left)
-  and rp = Packed.Float3.Private.view (Geometry.positions right)
-  and lt = Topology.Private.view (Geometry.topology left)
-  and rt = Topology.Private.view (Geometry.topology right) in
+  let lp = Packed.Float3.View.view (Geometry.positions left)
+  and rp = Packed.Float3.View.view (Geometry.positions right)
+  and lt = Topology.View.view (Geometry.topology left)
+  and rt = Topology.View.view (Geometry.topology right) in
   lp.x = rp.x && lp.y = rp.y && lp.z = rp.z
   && lt.point_count = rt.point_count
   && lt.vertex_points = rt.vertex_points

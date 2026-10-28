@@ -175,7 +175,7 @@ module Builder = struct
       data_id = Data_id.fresh () }
 end
 
-module Private = struct
+module View = struct
   type view = {
     point_count : int;
     vertex_points : int array;

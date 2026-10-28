@@ -87,8 +87,8 @@ let catalog_node key inputs changes =
 let float3 name geometry =
   match Rdk.Geometry.find_attribute ~owner:Rdk.Attribute.Point name geometry with
   | Some attribute ->
-      (match Rdk.Attribute.Private.storage attribute with
-       | Rdk.Attribute.Float3 values -> Rdk.Packed.Float3.Private.view values
+      (match Rdk.Attribute.View.storage attribute with
+       | Rdk.Attribute.Float3 values -> Rdk.Packed.Float3.View.view values
        | _ -> fail (name ^ " has wrong storage"))
   | None -> fail ("missing " ^ name)
 
@@ -120,12 +120,12 @@ let test_morph_sketch () =
     Session.close session;
     geometry in
   let positions geometry =
-    Rdk.Packed.Float3.Private.view (Rdk.Geometry.positions geometry) in
+    Rdk.Packed.Float3.View.view (Rdk.Geometry.positions geometry) in
   let both name =
     let one = cook_graph ~domains:1 name and four = cook_graph ~domains:4 name in
     check (positions one = positions four
-        && Rdk.Topology.Private.view (Rdk.Geometry.topology one)
-           = Rdk.Topology.Private.view (Rdk.Geometry.topology four))
+        && Rdk.Topology.View.view (Rdk.Geometry.topology one)
+           = Rdk.Topology.View.view (Rdk.Geometry.topology four))
       (name ^ " differs between one and four domains");
     one in
   (* sheet: 28x28 quads keep their topology; the blend lifts the flat sheet
@@ -144,8 +144,8 @@ let test_morph_sketch () =
   (* tinted: the mean of #2f6fb5 at weight 1 and #f2a03d at weight 0.35. *)
   let tinted = both "tinted" in
   let cd = match Rdk.Geometry.find_attribute ~owner:Rdk.Attribute.Point "Cd"
-      tinted |> Option.map Rdk.Attribute.Private.storage with
-    | Some (Rdk.Attribute.Float4 values) -> Rdk.Packed.Float4.Private.view values
+      tinted |> Option.map Rdk.Attribute.View.storage with
+    | Some (Rdk.Attribute.Float4 values) -> Rdk.Packed.Float4.View.view values
     | _ -> fail "Attribute Composite dropped or retyped Cd" in
   let cool = Rays_math.Color.hex_exn "#2f6fb5" and warm = Rays_math.Color.hex_exn "#f2a03d" in
   let mean a b = ((float a +. (0.35 *. float b)) /. 255.) /. 1.35 in
@@ -196,7 +196,7 @@ let test_node_inputs () =
   let line xs = Rdk.Line_geometry.points (Array.map (fun x -> x, 0., 0.) xs) in
   let point = Rdk.Attribute.Point in
   let xs geometry =
-    (Rdk.Packed.Float3.Private.view (Rdk.Geometry.positions geometry)).x in
+    (Rdk.Packed.Float3.View.view (Rdk.Geometry.positions geometry)).x in
   let cook_at domains node =
     let session = Session.create ~max_entries:16 ~max_payload_bytes:8_000_000
         |> Result.get_ok in
@@ -209,8 +209,8 @@ let test_node_inputs () =
   let both message node =
     let one = cook_at 1 node and four = cook_at 4 node in
     check (xs one = xs four
-        && Rdk.Topology.Private.view (Rdk.Geometry.topology one)
-           = Rdk.Topology.Private.view (Rdk.Geometry.topology four)
+        && Rdk.Topology.View.view (Rdk.Geometry.topology one)
+           = Rdk.Topology.View.view (Rdk.Geometry.topology four)
         && List.for_all2 (fun left right ->
              Rdk.Attribute.storage left = Rdk.Attribute.storage right)
              (Rdk.Geometry.attributes one) (Rdk.Geometry.attributes four))
@@ -280,14 +280,14 @@ let test_node_inputs () =
         ~vertex_points:(Array.init 8 Fun.id) ~primitive_offsets:[|0; 4; 8|]
         ~primitive_kinds:(Array.make 2 Rdk.Topology.Closed_polyline) |> Result.get_ok in
     Rdk.Geometry.create
-      ~positions:(Rdk.Packed.Float3.Private.of_owned_exn
+      ~positions:(Rdk.Packed.Float3.View.of_owned_exn
         ~x:(Array.map (fun (x, _, _) -> x) points)
         ~y:(Array.map (fun (_, y, _) -> y) points)
         ~z:(Array.map (fun (_, _, z) -> z) points))
       ~topology () |> Result.get_ok in
   let skin inputs = both "Skin" (catalog_node "skin" inputs []) in
   let corners geometry =
-    (Rdk.Topology.Private.view (Rdk.Geometry.topology geometry)).vertex_points in
+    (Rdk.Topology.View.view (Rdk.Geometry.topology geometry)).vertex_points in
   let straight = skin [Some (Lisp_sop.snapshot ((rings 0))); None]
   and turned = skin [Some (Lisp_sop.snapshot ((rings 1))); None]
   and guided = skin [Some (Lisp_sop.snapshot ((rings 1))); Some (Lisp_sop.snapshot ((rings 0)))] in
@@ -328,8 +328,8 @@ let set_color_test () =
   let colors node =
     match Rdk.Geometry.find_attribute ~owner:Rdk.Attribute.Point "Cd"
         (cook session node) with
-    | Some attribute -> (match Rdk.Attribute.Private.storage attribute with
-        | Rdk.Attribute.Float4 values -> Rdk.Packed.Float4.Private.view values
+    | Some attribute -> (match Rdk.Attribute.View.storage attribute with
+        | Rdk.Attribute.Float4 values -> Rdk.Packed.Float4.View.view values
         | _ -> fail "set_color did not write a float4 Cd")
     | None -> fail "set_color wrote no Cd" in
   let plain = colors (catalog_node "set_color" [Some box] []) in

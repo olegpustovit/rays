@@ -54,9 +54,8 @@ type group_rule = Fuse_rules.group_rule = {
   group_method : group_method;
 }
 
-exception Invalid of string
 
-let get_ok = function Ok value -> value | Error message -> raise (Invalid message)
+let get_ok = function Ok value -> value | Error message -> raise (Error.Fail message)
 
 let average_plane ~grain clusters source =
   let output = Array.make clusters.Point_clusters.count 0. in
@@ -173,7 +172,7 @@ let numeric_reduction ~grain clusters source position weights =
                  total := !total +. weights.(point)
                done;
                if position = Weighted_average_position then begin
-                 if !total = 0. then raise (Invalid (Printf.sprintf
+                 if !total = 0. then raise (Error.Fail (Printf.sprintf
                      "Rdk.Fuse_reduce.fuse: position weight sum is zero for cluster %d"
                      cluster));
                  value := !weighted /. !total
@@ -185,17 +184,17 @@ let numeric_reduction ~grain clusters source position weights =
 
 let weight_values name geometry =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
-  | None -> raise (Invalid (Printf.sprintf
+  | None -> raise (Error.Fail (Printf.sprintf
       "Rdk.Fuse_reduce.fuse: position weight point attribute %S is missing" name))
   | Some attribute ->
-      let values = match Attribute.Private.storage attribute with
+      let values = match Attribute.View.storage attribute with
         | Attribute.Float values -> Array.copy values
         | Attribute.Int values -> Array.map float_of_int values
-        | _ -> raise (Invalid (Printf.sprintf
+        | _ -> raise (Error.Fail (Printf.sprintf
             "Rdk.Fuse_reduce.fuse: position weight attribute %S must be scalar float or integer"
             name)) in
       Array.iteri (fun point value -> if not (Float.is_finite value) then
-        raise (Invalid (Printf.sprintf
+        raise (Error.Fail (Printf.sprintf
           "Rdk.Fuse_reduce.fuse: position weight attribute %S is non-finite at point %d"
           name point))) values;
       values
@@ -214,7 +213,7 @@ let selected_by_weight clusters weights minimum =
 let validate_positions x y z =
   for point = 0 to Array.length x - 1 do
     if not (Float.is_finite x.(point) && Float.is_finite y.(point) && Float.is_finite z.(point)) then
-      raise (Invalid (Printf.sprintf
+      raise (Error.Fail (Printf.sprintf
         "Rdk.Fuse_reduce.fuse: position reduction is non-finite at output point %d" point))
   done
 
@@ -227,13 +226,13 @@ let apply ?cancel ~grain ~position ?weight_attribute ~attributes
         | Weighted_sum_position | Minimum_weight_position
         | Maximum_weight_position -> true | _ -> false in
     let weights = match weighted, weight_attribute with
-      | true, None -> raise (Invalid
+      | true, None -> raise (Error.Fail
           "Rdk.Fuse_reduce.fuse: weighted position reduction requires a weight attribute")
-      | true, Some name when String.trim name = "" -> raise (Invalid
+      | true, Some name when String.trim name = "" -> raise (Error.Fail
           "Rdk.Fuse_reduce.fuse: position weight attribute name must not be empty")
       | true, Some name -> Some (weight_values name geometry)
       | false, _ -> None in
-    let positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+    let positions = Packed.Float3.View.view (Geometry.positions geometry) in
     let selected = match position with
       | Minimum_weight_position -> Some (selected_by_weight clusters
           (Option.get weights) true)
@@ -247,13 +246,13 @@ let apply ?cancel ~grain ~position ?weight_attribute ~attributes
     and py = Fuse_rules.expand clusters compact (cluster_plane positions.y)
     and pz = Fuse_rules.expand clusters compact (cluster_plane positions.z) in
     validate_positions px py pz;
-    let output_positions = Packed.Float3.Private.of_owned_exn ~x:px ~y:py ~z:pz in
+    let output_positions = Packed.Float3.View.of_owned_exn ~x:px ~y:py ~z:pz in
     let point_map = if compact then clusters.of_point
       else if rewire then Array.init source_count (fun point ->
         clusters.representatives.(clusters.of_point.(point)))
       else Array.init source_count Fun.id in
     let source_topology_value = Geometry.topology geometry in
-    let source_topology = Topology.Private.view source_topology_value in
+    let source_topology = Topology.View.view source_topology_value in
     let output_topology = if not compact && not rewire then source_topology_value
       else begin
         let vertex_points = Array.make (Geometry.vertex_count geometry) 0 in
@@ -261,7 +260,7 @@ let apply ?cancel ~grain ~position ?weight_attribute ~attributes
             ~start:0 ~finish:(Array.length vertex_points - 1) (fun vertex ->
               if vertex land 16383 = 0 then Cancel.check_opt cancel;
               vertex_points.(vertex) <- point_map.(source_topology.vertex_points.(vertex)));
-        Topology.Private.create_validated_owned
+        Topology.View.create_validated_owned
           ~point_count:(if compact then clusters.count else source_count)
           ~vertex_points ~primitive_offsets:(Array.copy source_topology.primitive_offsets)
           ~primitive_kinds:(Bytes.copy source_topology.primitive_kinds)
@@ -282,5 +281,5 @@ let apply ?cancel ~grain ~position ?weight_attribute ~attributes
     Geometry.create ~positions:output_positions ~topology:output_topology
       ~attributes:output_attributes ~groups:output_groups ~edge_groups ()
   with
-  | Invalid message -> Error message
+  | Error.Fail message -> Error message
   | Invalid_argument message -> Error message

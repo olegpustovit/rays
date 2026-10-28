@@ -31,7 +31,7 @@ module Builder : sig
   val freeze : t -> topology
 end
 
-module Private : sig
+module View : sig
   type view = {
     point_count : int;
     vertex_points : int array;

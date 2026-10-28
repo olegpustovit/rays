@@ -8,7 +8,7 @@ let ( let* ) = Result.bind
 
 type boundary_plan = {
   source_index : Topology_index.t;
-  source_index_view : Topology_index.Private.view;
+  source_index_view : Topology_index.View.view;
   loop_offsets : int array;
   loop_vertices : int array;
   loop_points : int array;
@@ -41,9 +41,9 @@ let union_min parent left right =
 
 let plan_boundaries ?cancel ~grain ?boundary geometry =
   let topology = Geometry.topology geometry in
-  let source = Topology.Private.view topology in
+  let source = Topology.View.view topology in
   let index = Topology_index.create ?cancel topology in
-  let reverse = Topology_index.Private.view index in
+  let reverse = Topology_index.View.view index in
   let edge_count = Topology_index.edge_count index in
   let* () = match boundary with
     | None -> Ok ()
@@ -228,7 +228,7 @@ let analyze_positions ?cancel ~grain plan positions =
         let valid = ref true in
         for at = first to last - 1 do
           let point = plan.loop_points.(at) in
-          if not (Float.is_finite positions.Packed.Float3.Private.x.(point)
+          if not (Float.is_finite positions.Packed.Float3.View.x.(point)
               && Float.is_finite positions.y.(point)
               && Float.is_finite positions.z.(point)) then valid := false
         done;
@@ -264,7 +264,7 @@ let triangulate_loops ?cancel ~grain plan positions =
         for at = first to last - 1 do
           let point = plan.loop_points.(at) in
           coordinate_scale := Float.max !coordinate_scale
-              (abs_float positions.Packed.Float3.Private.x.(point));
+              (abs_float positions.Packed.Float3.View.x.(point));
           coordinate_scale := Float.max !coordinate_scale
               (abs_float positions.y.(point));
           coordinate_scale := Float.max !coordinate_scale
@@ -417,7 +417,7 @@ let remap_attribute ?cancel ~grain ~point_map ~point_centers ~vertex_map
       | Attribute.Detail -> assert false in
     let map_float_component values = map_float ?cancel ~grain ~loop_offsets
         ~loop_sources:center_sources mapping centers values in
-    let storage = match Attribute.Private.storage attribute with
+    let storage = match Attribute.View.storage attribute with
       | Attribute.Float values -> Attribute.Float (map_float_component values)
       | Attribute.Int values -> Attribute.Int
           (map_array ?cancel ~grain mapping values)
@@ -428,18 +428,18 @@ let remap_attribute ?cancel ~grain ~point_map ~point_centers ~vertex_map
       | Attribute.Text values -> Attribute.Text
           (map_array ?cancel ~grain mapping values)
       | Attribute.Float2 values ->
-          let values = Packed.Float2.Private.view values in
+          let values = Packed.Float2.View.view values in
           Attribute.Float2 (Packed.Float2.of_owned
             ~x:(map_float_component values.x)
             ~y:(map_float_component values.y) |> Result.get_ok)
       | Attribute.Float3 values ->
-          let values = Packed.Float3.Private.view values in
-          Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+          let values = Packed.Float3.View.view values in
+          Attribute.Float3 (Packed.Float3.View.of_owned_exn
             ~x:(map_float_component values.x)
             ~y:(map_float_component values.y)
             ~z:(map_float_component values.z))
       | Attribute.Float4 values ->
-          let values = Packed.Float4.Private.view values in
+          let values = Packed.Float4.View.view values in
           Attribute.Float4 (Packed.Float4.of_owned
             ~x:(map_float_component values.x)
             ~y:(map_float_component values.y)
@@ -472,7 +472,7 @@ let remap_group ~grain ~source_points ~source_vertices ~source_primitives
         ~name:(Group.name group) target_count selected in
     let ancestry = if Array.length mapping = 0
       then Array.init target_count Fun.id else mapping in
-    Group.Private.remap_order ~source:group ~source_of_target:ancestry target
+    Group.View.remap_order ~source:group ~source_of_target:ancestry target
   end
 
 let rec merge_patch_group patch = function
@@ -526,7 +526,7 @@ let remap_edge_groups ?cancel ~mode ~unique_points ~plan ~triangle_local
           let byte = edge lsr 3 and mask = 1 lsl (edge land 7) in
           Bytes.set bits byte
             (Char.chr (Char.code (Bytes.get bits byte) lor mask))) group;
-        Edge_group.Private.of_owned_bits ~topology:target_topology ~edge_count
+        Edge_group.View.of_owned_bits ~topology:target_topology ~edge_count
           ~name:(Edge_group.name group) bits) groups)
 
 let run ?cancel ?(grain = 16_384) ?boundary ?(mode = Fill_triangles)
@@ -543,8 +543,8 @@ let run ?cancel ?(grain = 16_384) ?boundary ?(mode = Fill_triangles)
   if loop_count = 0 then Ok geometry
   else begin
     let source_topology = Geometry.topology geometry in
-    let source = Topology.Private.view source_topology in
-    let source_positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+    let source = Topology.View.view source_topology in
+    let source_positions = Packed.Float3.View.view (Geometry.positions geometry) in
     let source_points = source.point_count
     and source_vertices = Array.length source.vertex_points
     and source_primitives = Bytes.length source.primitive_kinds
@@ -610,7 +610,7 @@ let run ?cancel ?(grain = 16_384) ?boundary ?(mode = Fill_triangles)
             y.(output) <- center_y.(loop);
             z.(output) <- center_z.(loop)
           end);
-      Packed.Float3.Private.of_owned_exn ~x ~y ~z
+      Packed.Float3.View.of_owned_exn ~x ~y ~z
     end in
     let patch_primitive_base = Array.make loop_count 0
     and patch_vertex_base = Array.make loop_count 0 in
@@ -707,7 +707,7 @@ let run ?cancel ?(grain = 16_384) ?boundary ?(mode = Fill_triangles)
               end
             done);
     primitive_offsets.(output_primitives) <- output_vertices;
-    let output_topology = Topology.Private.create_validated_owned
+    let output_topology = Topology.View.create_validated_owned
         ~point_count:output_points ~vertex_points ~primitive_offsets
         ~primitive_kinds in
     let point_centers = match point_center_base with

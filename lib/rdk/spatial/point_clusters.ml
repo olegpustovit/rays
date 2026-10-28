@@ -74,26 +74,6 @@ let of_links ?cancel ~operation destinations =
   with Invalid_argument message -> Error message
 
 
-let next_power_of_two value =
-  let result = ref 8 in
-  while !result < value do
-    if !result > Sys.max_array_length / 2 then
-      invalid_arg "point clustering exceeds array limits";
-    result := !result lsl 1
-  done;
-  !result
-
-let[@inline always] integer_hash x y z =
-  let value = (x * 73_856_093) lxor (y * 19_349_663)
-      lxor (z * 83_492_791) in
-  (value lxor (value lsr 16)) land max_int
-
-let[@inline always] float_cell value =
-  if value = 0. then 0
-  else
-    let bits = Int64.bits_of_float value in
-    Int64.to_int (Int64.logxor bits (Int64.shift_right_logical bits 32))
-
 let create ?cancel ?selection ?(metric = Euclidean) ?(inclusive = true)
     ?(transitive = false)
     ~operation ~tolerance ~compatible geometry =
@@ -114,7 +94,7 @@ let create ?cancel ?selection ?(metric = Euclidean) ?(inclusive = true)
       Error (Printf.sprintf "%s point count exceeds spatial-table limits"
         operation)
     else begin
-      let positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+      let positions = Packed.Float3.View.view (Geometry.positions geometry) in
       let min_x = ref infinity and min_y = ref infinity
       and min_z = ref infinity and max_x = ref neg_infinity
       and max_y = ref neg_infinity and max_z = ref neg_infinity
@@ -151,39 +131,9 @@ let create ?cancel ?selection ?(metric = Euclidean) ?(inclusive = true)
           Error (Printf.sprintf
             "%s tolerance is too small for the geometry extent" operation)
         else begin
-          let capacity = next_power_of_two (max 8 (count * 2)) in
-          let cell_x = Array.make count 0 and cell_y = Array.make count 0
-          and cell_z = Array.make count 0 and cell_head = Array.make count (-1)
-          and table = Array.make capacity (-1)
-          and point_next = Array.make count (-1) in
-          let mask = capacity - 1 and cell_count = ref 0 in
-          let find_cell x y z =
-            let slot = ref (integer_hash x y z land mask) in
-            while table.(!slot) >= 0
-                && (let cell = table.(!slot) in
-                    cell_x.(cell) <> x || cell_y.(cell) <> y
-                    || cell_z.(cell) <> z) do
-              slot := (!slot + 1) land mask
-            done;
-            if table.(!slot) < 0 then -1 else table.(!slot) in
-          let find_or_add_cell x y z =
-            let slot = ref (integer_hash x y z land mask) in
-            while table.(!slot) >= 0
-                && (let cell = table.(!slot) in
-                    cell_x.(cell) <> x || cell_y.(cell) <> y
-                    || cell_z.(cell) <> z) do
-              slot := (!slot + 1) land mask
-            done;
-            if table.(!slot) >= 0 then table.(!slot)
-            else begin
-              let cell = !cell_count in
-              incr cell_count;
-              table.(!slot) <- cell;
-              cell_x.(cell) <- x;
-              cell_y.(cell) <- y;
-              cell_z.(cell) <- z;
-              cell
-            end in
+          let grid = Point_grid.create ~cells:count ~points:count in
+          let { Point_grid.cell_x; cell_y; cell_z; cell_head; point_next; _ } = grid in
+          let find_cell = Point_grid.find grid in
           let representative = Array.init count Fun.id in
           let root point =
             let current = ref point in
@@ -205,7 +155,7 @@ let create ?cancel ?selection ?(metric = Euclidean) ?(inclusive = true)
               else representative.(left) <- right in
           let neighbor_delta = if exact then 0 else 1 in
           let[@inline always] cell_coord value minimum =
-            if exact then float_cell value
+            if exact then Point_grid.float_cell value
             else int_of_float (floor (scaled_delta minimum value)) in
           for point = 0 to count - 1 do
             if point land 4095 = 0 then Cancel.check_opt cancel;
@@ -263,9 +213,7 @@ let create ?cancel ?selection ?(metric = Euclidean) ?(inclusive = true)
               if not transitive && !nearest >= 0 then
                 representative.(point) <- !nearest
               else begin
-                let cell = find_or_add_cell cx cy cz in
-                point_next.(point) <- cell_head.(cell);
-                cell_head.(cell) <- point
+                Point_grid.insert grid cx cy cz point
               end
             end
           done;

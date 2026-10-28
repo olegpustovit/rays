@@ -22,10 +22,10 @@ let equal_group left right =
        (Array.init (Group.length left) Fun.id)
 
 let equal_geometry left right =
-  let left_positions = Packed.Float3.Private.view (Geometry.positions left)
-  and right_positions = Packed.Float3.Private.view (Geometry.positions right)
-  and left_topology = Topology.Private.view (Geometry.topology left)
-  and right_topology = Topology.Private.view (Geometry.topology right) in
+  let left_positions = Packed.Float3.View.view (Geometry.positions left)
+  and right_positions = Packed.Float3.View.view (Geometry.positions right)
+  and left_topology = Topology.View.view (Geometry.topology left)
+  and right_topology = Topology.View.view (Geometry.topology right) in
   left_positions.x = right_positions.x
   && left_positions.y = right_positions.y
   && left_positions.z = right_positions.z
@@ -48,7 +48,7 @@ let group owner name geometry =
   Geometry.find_group ~owner name geometry |> Option.get
 
 let test_collapsed_quad_and_deterministic_failure () =
-  let collapsed_positions = Packed.Float3.Private.of_owned_exn
+  let collapsed_positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;1.;1.;0.|] ~y:[|0.;0.;0.;1.|] ~z:(Array.make 4 0.) in
   let collapsed_topology = Topology.polygons_owned ~point_count:4
       ~vertex_points:[|0;1;2;3|] ~primitive_offsets:[|0;4|] |> get_string in
@@ -57,11 +57,11 @@ let test_collapsed_quad_and_deterministic_failure () =
       ~attributes:[attribute Attribute.Vertex "corner"
         (Attribute.Int [|10;11;12;13|])] () |> get_string
       |> Triangulate.run |> get_rdk in
-  let collapsed_view = Topology.Private.view (Geometry.topology collapsed) in
+  let collapsed_view = Topology.View.view (Geometry.topology collapsed) in
   check (collapsed_view.vertex_points = [|0;1;3|]
       && int_values Attribute.Vertex "corner" collapsed = [|10;11;13|])
     "Triangulate collapsed-edge quad policy";
-  let degenerate_positions = Packed.Float3.Private.of_owned_exn
+  let degenerate_positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;1.;2.;3.; 4.;5.;6.;7.|]
       ~y:(Array.make 8 0.) ~z:(Array.make 8 0.) in
   let degenerate_topology = Topology.polygons_owned ~point_count:8

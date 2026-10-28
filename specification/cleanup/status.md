@@ -8,7 +8,7 @@ Completion is **not proved**. No phase is closed. Unlisted requirements and
 finding IDs remain open. Size estimates do not substitute for behavior,
 performance, parity, and shipping evidence.
 
-Finding coverage: **174 / 248 accepted (70.2%)**. This counts individual
+Finding coverage: **182 / 248 accepted (73.4%)**. This counts individual
 findings, not weighted effort or completed phases.
 
 Individual finding checkboxes record implementation/focused evidence;
@@ -258,6 +258,8 @@ size estimate, not the phase's behavioral or shipping gates.
   deleted the superseded study documents and workspace prototype.
 
 ## In progress and remaining proof
+
+- P5.S5/UI13: converting the World drag and viewport grab to Ui.box capture was tried and reverted. A press reaches only the topmost hit box, so a drag box under the viewport leaf never receives it, and Ui has no way to capture on behalf of a descendant. That design decision is open. A guard test (test_editor_commands world_drag: Shift-drag rotates the World as one undo step) is in place. rays_editor declares 19 libraries, each used directly.
 
 - P8 (4e2afcf3, 00c54c1a): with bevel on, pathtrace.metal allows 384 threads per threadgroup and the Lisp kernels 448–512, so the generated kernel has the lower register pressure. Host binding is proven in test_lisp: a closure over host placeholders, Packed.compile_template, one compile per scene (55–58 ms at 480x840) and a per-frame index patch. It is still faster at load 68 except one noisy World pair. Next: the rays_pathtracer host module, per-triangle materials, instancing, spheres, preview reprojection, motion and curves, the switch-over and P8.S4.
 

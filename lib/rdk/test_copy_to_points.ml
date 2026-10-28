@@ -6,16 +6,16 @@ let get_ok = function Ok value -> value | Error _ -> fail "unexpected error"
 
 let run () =
   let _target_n = Attribute.create_owned ~name:"N" ~owner:Attribute.Point
-      (Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+      (Attribute.Float3 (Packed.Float3.View.of_owned_exn
         ~x:[|1.;0.|] ~y:[|0.;1.|] ~z:[|0.;0.|])) |> get_ok
   and _target_up = Attribute.create_owned ~name:"up" ~owner:Attribute.Point
-      (Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+      (Attribute.Float3 (Packed.Float3.View.of_owned_exn
         ~x:[|0.;0.|] ~y:[|0.;0.|] ~z:[|1.;0.|])) |> get_ok in
   let _velocity = Attribute.create_owned ~name:"v" ~owner:Attribute.Point
-      (Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+      (Attribute.Float3 (Packed.Float3.View.of_owned_exn
         ~x:[|0.|] ~y:[|1.|] ~z:[|0.|])) |> get_ok
   and _velocity_up = Attribute.create_owned ~name:"up" ~owner:Attribute.Point
-      (Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+      (Attribute.Float3 (Packed.Float3.View.of_owned_exn
         ~x:[|0.|] ~y:[|0.|] ~z:[|1.|])) |> get_ok in
   let quarter_turn = sqrt 0.5 in
   let _target_rot = Attribute.create_owned ~name:"rot" ~owner:Attribute.Point
@@ -23,10 +23,10 @@ let run () =
         ~x:[|0.|] ~y:[|0.|] ~z:[|quarter_turn|] ~w:[|quarter_turn|]
         |> get_ok)) |> get_ok
   and _target_trans = Attribute.create_owned ~name:"trans" ~owner:Attribute.Point
-      (Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+      (Attribute.Float3 (Packed.Float3.View.of_owned_exn
         ~x:[|3.|] ~y:[|0.|] ~z:[|0.|])) |> get_ok
   and _target_pivot = Attribute.create_owned ~name:"pivot" ~owner:Attribute.Point
-      (Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+      (Attribute.Float3 (Packed.Float3.View.of_owned_exn
         ~x:[|1.|] ~y:[|0.|] ~z:[|0.|])) |> get_ok
   and _target_pscale = Attribute.create_owned ~name:"pscale" ~owner:Attribute.Point
       (Attribute.Float [|2.|]) |> get_ok in

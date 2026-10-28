@@ -361,16 +361,16 @@ let copied_selection ?cancel ~grain owner mapping source_group target =
         | Ordinary source_group ->
             begin match mapping with
             | Explicit source_of_target ->
-                Group.Private.remap_order ~source:source_group ~source_of_target
+                Group.View.remap_order ~source:source_group ~source_of_target
                   target_group
             | Identity source_count ->
                 let source_of_target = Array.init count (fun target ->
                     if target < source_count then target else -1) in
-                Group.Private.remap_order ~source:source_group ~source_of_target
+                Group.View.remap_order ~source:source_group ~source_of_target
                   target_group
             | Proximity { indices; distances_squared } ->
                 let source_order = Option.get
-                    (Group.Private.order_view source_group) in
+                    (Group.View.order_view source_group) in
                 let rank = Array.make (Group.length source_group) (-1) in
                 Array.iteri (fun position element -> rank.(element) <- position)
                   source_order;
@@ -389,7 +389,7 @@ let copied_selection ?cancel ~grain owner mapping source_group target =
                         distances_squared.(right) in
                     if by_distance <> 0 then by_distance
                     else Int.compare left right) order;
-                Group.Private.with_owned_order order target_group
+                Group.View.with_owned_order order target_group
             end in
       Ordinary target_group
   | None ->
@@ -425,7 +425,7 @@ let point_proximity_map ?cancel ~grain ~maximum_squared source target =
     let indices = Array.make count (-1)
     and distances = Array.make count Float.infinity
     and counts = Array.make count 0 in
-    Spatial_index.Private.nearest_k_many_into ?cancel ~grain index
+    Spatial_index.View.nearest_k_many_into ?cancel ~grain index
       ~queries:(Geometry.positions target) ~max_distance_squared:maximum_squared
       ~capacity:1 ~indices ~distances_squared:distances ~counts;
     Ok (Proximity { indices; distances_squared = distances }))

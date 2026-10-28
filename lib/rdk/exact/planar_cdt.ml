@@ -256,7 +256,7 @@ let prepare_workspace_points workspace required =
     workspace.key_stride <- !capacity
   end
 
-module Private = struct
+module View = struct
   type view = {
     triangle_points : int array;
     constraint_points : int array;

@@ -14,16 +14,38 @@ type surface_hit = Rdk_spatial.Surface_index.ray_surface_hit =
   | Ray_first_surface | Ray_last_surface
 type combine = Ray_average | Ray_median | Ray_shortest | Ray_longest
 
+(** Every field is required: the SOP declaration owns the defaults and the
+    tests build values with [Rdk_test_support.ray]. *)
+type params = {
+  grain : int;
+  selection : Deform.selection option;
+  collision_primitives : Group.t option;
+  method_ : method_;
+  direction : direction;
+  direction_mode : direction_mode;
+  surface_hit : surface_hit;
+  samples : int;
+  jitter_scale : float;
+  seed : int;
+  combine : combine;
+  min_distance : float;
+  max_distance : float option;
+  tolerance : float;
+  scale : float;
+  lift : float;
+  distance_attribute : string option;
+  primitive_attribute : string option;
+  source_vertex_numbers_attribute : string option;
+  source_vertex_weights_attribute : string option;
+  hit_group : string option;
+  normal_attribute : string option;
+  point_pattern : string option;
+  vertex_pattern : string option;
+  primitive_pattern : string option;
+  detail_pattern : string option;
+  match_groups : bool;
+}
+
 val run :
-  ?cancel:Cancel.t -> ?grain:int -> ?selection:Deform.selection ->
-  ?collision_primitives:Group.t -> ?method_:method_ -> ?direction:direction ->
-  ?direction_mode:direction_mode -> ?surface_hit:surface_hit ->
-  ?samples:int -> ?jitter_scale:float -> ?seed:int -> ?combine:combine ->
-  ?min_distance:float -> ?max_distance:float -> ?tolerance:float ->
-  ?scale:float -> ?lift:float -> ?distance_attribute:string ->
-  ?primitive_attribute:string -> ?source_vertex_numbers_attribute:string ->
-  ?source_vertex_weights_attribute:string -> ?hit_group:string ->
-  ?normal_attribute:string -> ?point_pattern:string ->
-  ?vertex_pattern:string -> ?primitive_pattern:string ->
-  ?detail_pattern:string -> ?match_groups:bool -> source:Geometry.t ->
-  collision:Geometry.t -> unit -> (Geometry.t, Error.t) result
+  ?cancel:Cancel.t -> params -> source:Geometry.t -> collision:Geometry.t ->
+  unit -> (Geometry.t, Error.t) result

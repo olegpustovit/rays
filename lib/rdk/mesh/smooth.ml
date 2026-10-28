@@ -23,7 +23,7 @@ let validate_point_group label geometry = function
       fail "invalid_selection" (label ^ " length does not match point count")
   | Some _ -> Ok ()
 
-let point_selected (index : Topology_index.Private.view) primitives point =
+let point_selected (index : Topology_index.View.view) primitives point =
   match primitives with
   | None -> true
   | Some primitives ->
@@ -37,7 +37,7 @@ let point_selected (index : Topology_index.Private.view) primitives point =
       done;
       !selected
 
-let point_on_unshared_edge (index : Topology_index.Private.view) point =
+let point_on_unshared_edge (index : Topology_index.View.view) point =
   let first = index.point_edge_offsets.(point)
   and last = index.point_edge_offsets.(point + 1) in
   let boundary = ref false and incidence = ref first in
@@ -48,7 +48,7 @@ let point_on_unshared_edge (index : Topology_index.Private.view) point =
   done;
   !boundary
 
-let point_on_group_boundary (index : Topology_index.Private.view) primitives point =
+let point_on_group_boundary (index : Topology_index.View.view) primitives point =
   let first = index.point_edge_offsets.(point)
   and last = index.point_edge_offsets.(point + 1) in
   let boundary = ref false and local_edge = ref first in
@@ -78,7 +78,7 @@ let make_update_selection ?cancel ~grain ~boundary ~index ~primitives
       && boundary = Smooth_free in
   if unrestricted then None
   else
-    let index = Topology_index.Private.view index in
+    let index = Topology_index.View.view index in
     Some (Group.init ~grain ~owner:Group.Point ~name:"__smooth_update"
     point_count (fun point ->
       if point land 4095 = 0 then Cancel.check_opt cancel;

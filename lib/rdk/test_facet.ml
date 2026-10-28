@@ -11,7 +11,7 @@ let primitive_group ?(name = "selected") geometry predicate =
     predicate
 
 let source () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.; 1.; 0.; 0.; 4.|]
       ~y:[|0.; 0.; 1.; 1.; 5.|]
       ~z:[|0.; 0.; 0.; 1.; 6.|] in
@@ -34,7 +34,7 @@ let source () =
              ~y:(Array.map (fun value -> float_of_int (-value)) indices)
              |> get_string))
       |> add_attribute Attribute.Point "vector"
-           (Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+           (Attribute.Float3 (Packed.Float3.View.of_owned_exn
              ~x:(Array.map float_of_int indices)
              ~y:(Array.map (fun value -> float_of_int (value + 10)) indices)
              ~z:(Array.map (fun value -> float_of_int (value + 20)) indices)))
@@ -61,7 +61,7 @@ let source () =
       |> Geometry.with_group vertex_group |> get_string
       |> Geometry.with_group primitive_group |> get_string in
   let index = Topology_index.create topology in
-  let view = Topology_index.Private.view index in
+  let view = Topology_index.View.view index in
   let shared_edge = ref (-1) in
   for edge = 0 to Array.length view.edge_a - 1 do
     if view.edge_a.(edge) = 0 && view.edge_b.(edge) = 2 then shared_edge := edge
@@ -110,11 +110,11 @@ let check_unique_points () =
   check (Geometry.point_count output = 7 && Geometry.vertex_count output = 6
       && Geometry.primitive_count output = 2)
     "Facet Unique Points cardinality";
-  let topology = Topology.Private.view (Geometry.topology output) in
+  let topology = Topology.View.view (Geometry.topology output) in
   check (topology.vertex_points = [|0; 1; 2; 3; 4; 5|])
     "Facet Unique Points topology";
-  let positions = Packed.Float3.Private.view (Geometry.positions output)
-  and source_positions = Packed.Float3.Private.view (Geometry.positions source) in
+  let positions = Packed.Float3.View.view (Geometry.positions output)
+  and source_positions = Packed.Float3.View.view (Geometry.positions source) in
   Array.iteri (fun output_point source_point ->
     check (positions.x.(output_point) = source_positions.x.(source_point)
         && positions.y.(output_point) = source_positions.y.(source_point)
@@ -147,7 +147,7 @@ let check_primitive_group_unique_points () =
   let selected = primitive_group source (fun primitive -> primitive = 0) in
   let output = Facet.run ~selection:(Transform_ops.Selected_primitives selected) ~unique_points:true source
       |> get_ok in
-  let topology = Topology.Private.view (Geometry.topology output) in
+  let topology = Topology.View.view (Geometry.topology output) in
   check (Geometry.point_count output = 7
       && topology.vertex_points = [|4;5;6; 0;1;2|])
     "grouped Facet Unique Points topology";
@@ -157,7 +157,7 @@ let check_primitive_group_unique_points () =
           = Attribute.Int [|0;2;3;4; 0;1;2|])
          "grouped Facet Unique Points point ancestry"
    | None -> fail "grouped Facet Unique Points lost point id");
-  let source_topology = Topology.Private.view (Geometry.topology source) in
+  let source_topology = Topology.View.view (Geometry.topology source) in
   for local = 0 to 2 do
     let output_point = topology.vertex_points.(3 + local)
     and source_point = source_topology.vertex_points.(3 + local) in
@@ -200,7 +200,7 @@ let check_typed_selections () =
     "Facet vertex selection did not promote to its owning primitive";
   let topology = Geometry.topology source in
   let index = Topology_index.create topology in
-  let view = Topology_index.Private.view index in
+  let view = Topology_index.View.view index in
   let boundary_edge = ref (-1) in
   for edge = 0 to Array.length view.edge_a - 1 do
     if view.edge_a.(edge) = 0 && view.edge_b.(edge) = 1 then
@@ -241,8 +241,8 @@ let check_typed_selections () =
 let normal_attribute geometry =
   match Geometry.find_attribute ~owner:Attribute.Point "N" geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float3 values -> Packed.Float3.Private.view values
+      (match Attribute.View.storage attribute with
+       | Attribute.Float3 values -> Packed.Float3.View.view values
        | _ -> fail "Facet N has wrong storage")
   | None -> fail "Facet lost N"
 
@@ -261,7 +261,7 @@ let check_normals () =
       && near post_n.z.(0) post_n.z.(3)))
     "Facet post-computed normals did not become face-hard";
   let source = source () |> add_attribute Attribute.Point "N"
-      (Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+      (Attribute.Float3 (Packed.Float3.View.of_owned_exn
         ~x:(Array.make 5 2.) ~y:(Array.make 5 0.) ~z:(Array.make 5 0.))) in
   let adjusted = Facet.run ~make_normals_unit_length:true ~reverse_normals:true
       source |> get_ok in
@@ -271,18 +271,18 @@ let check_normals () =
     "Facet normal normalization/reversal"
 
 let check_consolidate_normals () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;0.01; 1.;2.; 0.;2.|] ~y:[|0.;0.;0.;0.;1.;1.|]
       ~z:(Array.make 6 0.) in
   let topology = Topology.polygons_owned ~point_count:6
       ~vertex_points:[|0;2;4; 0;4;5; 1;3;5|]
       ~primitive_offsets:[|0;3;6;9|] |> get_string in
   let point_normal = Attribute.create_owned ~owner:Attribute.Point ~name:"N"
-      (Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+      (Attribute.Float3 (Packed.Float3.View.of_owned_exn
         ~x:[|1.;0.;2.;4.;0.;0.|] ~y:[|0.;1.;0.;0.;0.;0.|]
         ~z:(Array.make 6 0.))) |> get_string
   and vertex_normal = Attribute.create_owned ~owner:Attribute.Vertex ~name:"N"
-      (Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+      (Attribute.Float3 (Packed.Float3.View.of_owned_exn
         ~x:[|1.;2.;3.; 0.;4.;5.; 0.;6.;7.|]
         ~y:[|0.;0.;0.; 1.;0.;0.; 0.;0.;0.|]
         ~z:[|0.;0.;0.; 0.;0.;0.; 1.;0.;0.|])) |> get_string
@@ -302,9 +302,9 @@ let check_consolidate_normals () =
       |> Option.get
   and vertex = Geometry.find_attribute ~owner:Attribute.Vertex "N" output
       |> Option.get in
-  (match Attribute.Private.storage point with
+  (match Attribute.View.storage point with
    | Attribute.Float3 values ->
-       let values = Packed.Float3.Private.view values in
+       let values = Packed.Float3.View.view values in
        check (near values.x.(0) 0.5 && near values.y.(0) 0.5
            && near values.x.(1) 0.5 && near values.y.(1) 0.5)
          "Facet point-normal arithmetic average";
@@ -312,9 +312,9 @@ let check_consolidate_normals () =
            && Int64.bits_of_float values.x.(3) = Int64.bits_of_float 4.)
          "Facet point-normal singleton bit preservation"
    | _ -> fail "Facet consolidated point N has wrong storage");
-  (match Attribute.Private.storage vertex with
+  (match Attribute.View.storage vertex with
    | Attribute.Float3 values ->
-       let values = Packed.Float3.Private.view values in
+       let values = Packed.Float3.View.view values in
        List.iter (fun element ->
          check (near values.x.(element) (1. /. 3.)
              && near values.y.(element) (1. /. 3.)
@@ -335,7 +335,7 @@ let check_consolidate_normals () =
   let extreme = Line_geometry.points [|(0.,0.,0.); (0.,0.,0.)|]
       |> Geometry.with_attribute
         (Attribute.create_owned ~owner:Attribute.Point ~name:"N"
-          (Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+          (Attribute.Float3 (Packed.Float3.View.of_owned_exn
             ~x:[|Float.max_float; Float.max_float|] ~y:[|0.;0.|]
             ~z:[|0.;0.|])) |> get_string)
       |> get_string
@@ -363,13 +363,13 @@ let check_consolidate_normals () =
    | _ -> fail "Facet accepted scalar N for normal consolidation")
 
 let inline_source () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;1.;2.;3.;3.;0.; 9.; 1.;2.; 0.;1.;2.|]
       ~y:[|0.;0.;0.;0.;0.;0.; 9.; 0.;1.; 3.;3.;3.|]
       ~z:[|0.;0.;0.;0.;2.;2.; 9.; 1.;1.; 0.;0.;0.|] in
   let primitive_kinds = Bytes.make 3 '\000' in
   Bytes.set primitive_kinds 2 '\001';
-  let topology = Topology.Private.create_validated_owned ~point_count:12
+  let topology = Topology.View.create_validated_owned ~point_count:12
       ~vertex_points:[|0;1;2;3;4;5; 1;7;8; 9;10;11|]
       ~primitive_offsets:[|0;6;9;12|] ~primitive_kinds in
   let point_id = Attribute.create_owned ~owner:Attribute.Point ~name:"point_id"
@@ -390,7 +390,7 @@ let inline_source () =
       ~attributes:[point_id; corner_id; face_id; detail]
       ~groups:[points; corners; faces] () |> get_string in
   let index = Topology_index.create topology in
-  let view = Topology_index.Private.view index in
+  let view = Topology_index.View.view index in
   let segment = Edge_group.init ~topology ~index ~name:"removed_segment"
       (fun edge -> view.edge_a.(edge) = 1 && view.edge_b.(edge) = 2) in
   Geometry.with_edge_group segment geometry |> get_string
@@ -402,14 +402,14 @@ let check_remove_inline_points () =
       && Geometry.vertex_count output = 10
       && Geometry.primitive_count output = 3)
     "Facet Remove Inline Points cardinality";
-  let topology = Topology.Private.view (Geometry.topology output) in
+  let topology = Topology.View.view (Geometry.topology output) in
   check (topology.vertex_points = [|0;2;3;4; 1;6;7; 8;9;10|]
       && topology.primitive_offsets = [|0;4;7;10|]
       && Bytes.get topology.primitive_kinds 2 = '\001')
     "Facet Remove Inline Points topology or curve pass-through";
   (match Geometry.find_attribute ~owner:Attribute.Point "point_id" output with
    | Some attribute ->
-       (match Attribute.Private.storage attribute with
+       (match Attribute.View.storage attribute with
         | Attribute.Int values ->
             check (values = [|0;1;3;4;5;6;7;8;9;10;11|])
               "Facet Remove Inline Points point ancestry"
@@ -417,7 +417,7 @@ let check_remove_inline_points () =
    | None -> fail "Facet Remove Inline Points lost point_id");
   (match Geometry.find_attribute ~owner:Attribute.Vertex "corner_id" output with
    | Some attribute ->
-       (match Attribute.Private.storage attribute with
+       (match Attribute.View.storage attribute with
         | Attribute.Int values ->
             check (values = [|0;3;4;5;6;7;8;9;10;11|])
               "Facet Remove Inline Points vertex ancestry"
@@ -444,7 +444,7 @@ let check_remove_inline_points () =
     "Facet Remove Inline Points primitive group";
   let healed = Geometry.find_edge_group "removed_segment" output |> Option.get
   and healed_index = Topology_index.create (Geometry.topology output) in
-  let healed_view = Topology_index.Private.view healed_index in
+  let healed_view = Topology_index.View.view healed_index in
   let expected_edge = ref (-1) in
   for edge = 0 to Array.length healed_view.edge_a - 1 do
     if healed_view.edge_a.(edge) = 0 && healed_view.edge_b.(edge) = 2 then
@@ -459,7 +459,7 @@ let check_remove_inline_points () =
     "Facet Remove Inline Points changed non-inline triangles";
   let translated middle_offset =
     let base = 1e12 in
-    let positions = Packed.Float3.Private.of_owned_exn
+    let positions = Packed.Float3.View.of_owned_exn
         ~x:[|base; base +. 1.; base +. 2.; base +. 2.; base|]
         ~y:(Array.make 5 0.)
         ~z:[|base; base +. middle_offset; base; base +. 2.; base +. 2.|] in
@@ -503,7 +503,7 @@ let check_primitive_group_inline_points () =
 
 let check_orient_polygons () =
   let base = source () in
-  let old = Topology.Private.view (Geometry.topology base) in
+  let old = Topology.View.view (Geometry.topology base) in
   let topology = Topology.polygons_owned ~point_count:old.point_count
       ~vertex_points:[|0; 1; 2; 0; 3; 2|]
       ~primitive_offsets:[|0; 3; 6|] |> get_string in
@@ -514,17 +514,17 @@ let check_orient_polygons () =
   let geometry = Geometry.create ~positions:(Geometry.positions base) ~topology
       ~attributes:[corner] ~groups:[corners] () |> get_string in
   let index = Topology_index.create topology in
-  let view = Topology_index.Private.view index in
+  let view = Topology_index.View.view index in
   let crease = Edge_group.init ~topology ~index ~name:"shared"
       (fun edge -> view.edge_a.(edge) = 0 && view.edge_b.(edge) = 2) in
   let geometry = Geometry.with_edge_group crease geometry |> get_string in
   let oriented = Facet.run ~orient_polygons:true geometry |> get_ok in
-  let topology = Topology.Private.view (Geometry.topology oriented) in
+  let topology = Topology.View.view (Geometry.topology oriented) in
   check (Array.sub topology.vertex_points 3 3 = [|2; 3; 0|])
     "Facet Orient Polygons did not reverse the inconsistent face";
   (match Geometry.find_attribute ~owner:Attribute.Vertex "corner_id" oriented with
    | Some attribute ->
-       (match Attribute.Private.storage attribute with
+       (match Attribute.View.storage attribute with
         | Attribute.Int values -> check (values = [|0;1;2;5;4;3|])
             "Facet Orient Polygons vertex-attribute ancestry"
         | _ -> fail "Facet oriented corner_id has wrong storage")
@@ -539,7 +539,7 @@ let check_orient_polygons () =
   let nonmanifold_topology = Topology.polygons_owned ~point_count:5
       ~vertex_points:[|0;1;2; 1;0;3; 0;1;4|]
       ~primitive_offsets:[|0;3;6;9|] |> get_string in
-  let nonmanifold_positions = Packed.Float3.Private.of_owned_exn
+  let nonmanifold_positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;1.;0.;0.;0.|] ~y:[|0.;0.;1.;0.;(-1.)|]
       ~z:[|0.;0.;0.;1.;0.|] in
   let nonmanifold = Geometry.create ~positions:nonmanifold_positions
@@ -549,7 +549,7 @@ let check_orient_polygons () =
    | _ -> fail "Facet Orient Polygons accepted a non-manifold edge")
 
 let check_primitive_group_orient_polygons () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;1.;0.;1.;2.|] ~y:[|0.;0.;1.;1.;1.|]
       ~z:(Array.make 5 0.) in
   let topology = Topology.polygons_owned ~point_count:5
@@ -562,7 +562,7 @@ let check_primitive_group_orient_polygons () =
   let selected = primitive_group source (fun primitive -> primitive < 2) in
   let output = Facet.run ~selection:(Transform_ops.Selected_primitives selected) ~orient_polygons:true source
       |> get_ok in
-  let topology = Topology.Private.view (Geometry.topology output) in
+  let topology = Topology.View.view (Geometry.topology output) in
   check (topology.vertex_points = [|0;1;2; 2;3;0; 2;3;4|])
     "grouped Facet Orient Polygons changed selection boundary behavior";
   (match Geometry.find_attribute ~owner:Attribute.Vertex "corner_id" output with
@@ -611,7 +611,7 @@ let check_cusp_polygons () =
     "Facet Cusp Polygons point-group ancestry";
   (match Geometry.find_attribute ~owner:Attribute.Point "point_id" hard with
    | Some attribute ->
-       (match Attribute.Private.storage attribute with
+       (match Attribute.View.storage attribute with
         | Attribute.Int values ->
             check (Array.fold_left (fun count value ->
                 if value = 0 then count + 1 else count) 0 values = 3)
@@ -646,7 +646,7 @@ let check_primitive_group_cusp_polygons () =
   let output = Facet.run ~selection:(Transform_ops.Selected_primitives selected) ~cusp_angle:1. source |> get_ok in
   check (Geometry.point_count output = 12)
     "grouped Facet Cusp Polygons cardinality";
-  let topology = Topology.Private.view (Geometry.topology output) in
+  let topology = Topology.View.view (Geometry.topology output) in
   for vertex = topology.primitive_offsets.(0)
       to topology.primitive_offsets.(1) - 1 do
     check (topology.vertex_points.(vertex) >= 8)
@@ -661,8 +661,8 @@ let check_primitive_group_cusp_polygons () =
   done
 
 let polygon_planarity_error geometry primitive =
-  let topology = Topology.Private.view (Geometry.topology geometry)
-  and positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+  let topology = Topology.View.view (Geometry.topology geometry)
+  and positions = Packed.Float3.View.view (Geometry.positions geometry) in
   let first = topology.primitive_offsets.(primitive)
   and last = topology.primitive_offsets.(primitive + 1) in
   if last - first <= 3 then 0.
@@ -691,7 +691,7 @@ let polygon_planarity_error geometry primitive =
     !maximum
 
 let warped_quads () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;1.;1.;0.; 0.;(-1.)|]
       ~y:[|0.;0.;1.;1.; 2.;2.|]
       ~z:[|0.;0.;0.6;0.; 0.4;0.|] in
@@ -711,7 +711,7 @@ let check_make_planar () =
     "grouped Facet Make Planar did not flatten the selected polygon";
   check (polygon_planarity_error output 1 = polygon_planarity_error source 1)
     "grouped Facet Make Planar moved an unselected polygon";
-  let topology = Topology.Private.view (Geometry.topology output) in
+  let topology = Topology.View.view (Geometry.topology output) in
   check (topology.vertex_points.(0) >= 6 && topology.vertex_points.(3) >= 6
       && Array.sub topology.vertex_points 4 4 = [|0;3;4;5|])
     "Facet Make Planar did not isolate shared projected corners";
@@ -724,7 +724,7 @@ let check_make_planar () =
               "Facet Make Planar point ancestry"
         | _ -> fail "Facet Make Planar point id has wrong storage")
    | None -> fail "Facet Make Planar lost point id");
-  let planar_positions = Packed.Float3.Private.of_owned_exn
+  let planar_positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;1.;1.;0.|] ~y:[|0.;0.;1.;1.|] ~z:(Array.make 4 0.) in
   let planar_topology = Topology.polygons_owned ~point_count:4
       ~vertex_points:[|0;1;2;3|] ~primitive_offsets:[|0;4|] |> get_string in
@@ -736,14 +736,14 @@ let check_make_planar () =
       [|(0.,0.,0.); (1.,0.,1.); (2.,1.,0.); (3.,0.,1.)|] |> get_ok in
   check (Facet.run ~make_planar:true curve |> get_ok == curve)
     "Facet Make Planar changed a polygon curve";
-  let degenerate_positions = Packed.Float3.Private.of_owned_exn
+  let degenerate_positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;1.;2.;3.|] ~y:(Array.make 4 0.) ~z:(Array.make 4 0.) in
   let degenerate = Geometry.create ~positions:degenerate_positions
       ~topology:planar_topology () |> get_string in
   (match Facet.run ~make_planar:true degenerate with
    | Error error when Error.code error = "invalid_geometry" -> ()
    | _ -> fail "Facet Make Planar accepted a plane-less polygon");
-  let nonfinite_positions = Packed.Float3.Private.of_owned_exn
+  let nonfinite_positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;1.;1.;0.; 2.;3.;3.;2.|]
       ~y:[|0.;0.;1.;1.; 0.;0.;1.;1.|]
       ~z:[|0.;0.;0.;0.; 0.;0.;Float.nan;0.|] in
@@ -764,11 +764,11 @@ let check_make_planar () =
 let check_primitive_group_normals_and_cleanup () =
   let source = source ()
       |> add_attribute Attribute.Point "N"
-        (Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+        (Attribute.Float3 (Packed.Float3.View.of_owned_exn
           ~x:[|1.;2.;3.;4.;Float.nan|] ~y:(Array.make 5 0.)
           ~z:(Array.make 5 0.)))
       |> add_attribute Attribute.Vertex "N"
-        (Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+        (Attribute.Float3 (Packed.Float3.View.of_owned_exn
           ~x:[|1.;2.;3.;4.;5.;6.|] ~y:(Array.make 6 0.)
           ~z:(Array.make 6 0.))) in
   let selected = primitive_group source (fun primitive -> primitive = 0) in
@@ -778,7 +778,7 @@ let check_primitive_group_normals_and_cleanup () =
    | Some attribute ->
        (match Attribute.storage attribute with
         | Attribute.Float3 values ->
-            let values = Packed.Float3.Private.view values in
+            let values = Packed.Float3.View.view values in
             check (values.x.(0) = -1. && values.x.(1) = -2.
                 && values.x.(2) = -3. && values.x.(3) = 4.
                 && Float.is_nan values.x.(4))
@@ -789,12 +789,12 @@ let check_primitive_group_normals_and_cleanup () =
    | Some attribute ->
        (match Attribute.storage attribute with
         | Attribute.Float3 values ->
-            let values = Packed.Float3.Private.view values in
+            let values = Packed.Float3.View.view values in
             check (values.x = [|-1.;-2.;-3.;4.;5.;6.|])
               "grouped Facet vertex-normal ownership"
         | _ -> fail "grouped Facet vertex N has wrong storage")
    | None -> fail "grouped Facet lost vertex N");
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;1.;2.; 0.;1.;2.|] ~y:[|0.;0.;0.; 1.;1.;1.|]
       ~z:(Array.make 6 0.) in
   let topology = Topology.polygons_owned ~point_count:6
@@ -813,7 +813,7 @@ let check_primitive_group_normals_and_cleanup () =
    | Some attribute -> check (Attribute.storage attribute = Attribute.Int [|20|])
        "grouped Facet degenerate cleanup ancestry"
    | None -> fail "grouped Facet cleanup lost primitive payload");
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;0.;1.; 0.;2.;3.|] ~y:[|0.;0.;0.; 0.;0.;0.|]
       ~z:[|0.;0.;1.; 0.;1.;1.|] in
   let topology = Topology.polygons_owned ~point_count:6
@@ -825,7 +825,7 @@ let check_primitive_group_normals_and_cleanup () =
       |> get_ok in
   check (Geometry.point_count fused = 5)
     "grouped Facet point consolidation cardinality";
-  let topology = Topology.Private.view (Geometry.topology fused) in
+  let topology = Topology.View.view (Geometry.topology fused) in
   check (topology.vertex_points.(0) = topology.vertex_points.(1)
       && topology.vertex_points.(3) <> topology.vertex_points.(0))
     "grouped Facet point consolidation crossed its selection boundary"
@@ -895,7 +895,7 @@ let repeated_inline_source polygons =
     x.(point + 4) <- base +. 3.; z.(point + 4) <- 1.;
     x.(point + 5) <- base; z.(point + 5) <- 1.
   done;
-  let positions = Packed.Float3.Private.of_owned_exn ~x ~y ~z in
+  let positions = Packed.Float3.View.of_owned_exn ~x ~y ~z in
   let topology = Topology.polygons_owned ~point_count:points
       ~vertex_points:(Array.init points Fun.id)
       ~primitive_offsets:(Array.init (polygons + 1)
@@ -916,11 +916,11 @@ let repeated_normal_source pairs =
     nx.(point) <- 1.;
     ny.(point + 1) <- 1.
   done;
-  let positions = Packed.Float3.Private.of_owned_exn ~x ~y ~z in
-  let topology = Topology.Private.create_validated_owned ~point_count
+  let positions = Packed.Float3.View.of_owned_exn ~x ~y ~z in
+  let topology = Topology.View.create_validated_owned ~point_count
       ~vertex_points:[||] ~primitive_offsets:[|0|] ~primitive_kinds:Bytes.empty in
   let normal = Attribute.create_owned ~owner:Attribute.Point ~name:"N"
-      (Attribute.Float3 (Packed.Float3.Private.of_owned_exn ~x:nx ~y:ny ~z:nz))
+      (Attribute.Float3 (Packed.Float3.View.of_owned_exn ~x:nx ~y:ny ~z:nz))
       |> get_string in
   Geometry.create ~positions ~topology ~attributes:[normal] () |> get_string
 
@@ -936,7 +936,7 @@ let repeated_warped_quads polygons =
     y.(point + 3) <- 1.;
     z.(point + 2) <- if primitive land 1 = 0 then 0.25 else -0.25
   done;
-  let positions = Packed.Float3.Private.of_owned_exn ~x ~y ~z in
+  let positions = Packed.Float3.View.of_owned_exn ~x ~y ~z in
   let topology = Topology.polygons_owned ~point_count
       ~vertex_points:(Array.init point_count Fun.id)
       ~primitive_offsets:(Array.init (polygons + 1)
@@ -972,7 +972,7 @@ let check_parallel_exact () =
   check (near normal.x.(0) 0.5 && near normal.y.(0) 0.5
       && near normal.x.(399_999) 0.5 && near normal.y.(399_999) 0.5)
     "Facet parallel consolidated-normal values";
-  let source_topology = Topology.Private.view (Geometry.topology source) in
+  let source_topology = Topology.View.view (Geometry.topology source) in
   let vertex_points = Array.copy source_topology.vertex_points in
   for primitive = 1 to Geometry.primitive_count source - 1 do
     if primitive land 1 = 1 then begin
@@ -986,7 +986,7 @@ let check_parallel_exact () =
       done
     end
   done;
-  let topology = Topology.Private.create_validated_owned
+  let topology = Topology.View.create_validated_owned
       ~point_count:source_topology.point_count ~vertex_points
       ~primitive_offsets:(Array.copy source_topology.primitive_offsets)
       ~primitive_kinds:(Bytes.copy source_topology.primitive_kinds) in

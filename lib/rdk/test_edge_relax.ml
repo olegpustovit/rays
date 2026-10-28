@@ -2,7 +2,7 @@ open Rays
 open Rdk
 open Rdk_test_support
 
-let get_ok = function Ok value -> value | Error message -> fail message
+let get_ok = get
 
 let disjoint lengths =
   let edge_count = Array.length lengths and point_count = Array.length lengths * 2 in
@@ -15,7 +15,7 @@ let disjoint lengths =
       ~vertex_points:(Array.init point_count Fun.id)
       ~primitive_offsets:(Array.init (edge_count + 1) (fun edge -> edge * 2))
       ~primitive_kinds:(Array.make edge_count Topology.Open_polyline) |> get_ok in
-  Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+  Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
     ~topology () |> get_ok
 
 let edge_lengths geometry =

@@ -29,7 +29,7 @@ let geometry pair_count ~right =
   let offsets = Array.init (pair_count + 1) (fun pair -> pair * 3) in
   let topology = Topology.polygons_owned ~point_count ~vertex_points:vertices
       ~primitive_offsets:offsets |> get_string in
-  Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+  Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
     ~topology () |> get_string
 
 let constraints pair_count = Constraints.build ~grain:7
@@ -55,7 +55,7 @@ let coplanar_geometry pair_count ~right =
   let topology = Topology.polygons_owned ~point_count ~vertex_points:vertices
       ~primitive_offsets:(Array.init (pair_count + 1) (fun pair -> pair * 3))
       |> get_string in
-  Geometry.create ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+  Geometry.create ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
     ~topology () |> get_string
 
 let coplanar_input pair_count =

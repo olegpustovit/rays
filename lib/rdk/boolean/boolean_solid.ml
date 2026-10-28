@@ -11,7 +11,7 @@ type t = {
   right_treatment : treatment;
 }
 
-module Private = struct
+module View = struct
   let weiler value = value.weiler
 end
 
@@ -105,7 +105,7 @@ let relative_location cells weiler facet side =
 let extract_selection ?cancel ?defer_rounded_slivers ?barycentric_cache
     ?corner_payload
     value side selection =
-  Boolean_extract.Private.build_selected_with_ancestry ?cancel
+  Boolean_extract.View.build_selected_with_ancestry ?cancel
     ?defer_rounded_slivers ?barycentric_cache ?corner_payload ~selection ~side
     value.complex value.weiler value.cells
 
@@ -162,7 +162,7 @@ let extract_mixed_with_ancestry ?cancel ?defer_rounded_slivers
       keep_surface
   and double_selection = source_oriented_selection value.complex surface_side
       double_surface in
-  let barycentric_cache = Boolean_extract.Private.barycentric_cache
+  let barycentric_cache = Boolean_extract.View.barycentric_cache
       ~capacity:(if corner_payload then 3 * (selected_count volume_selection
         + selected_count surface_selection + selected_count double_selection) else 0) in
   bind (extract_selection ?cancel ?defer_rounded_slivers ~barycentric_cache
@@ -176,9 +176,9 @@ let extract_mixed_with_ancestry ?cancel ?defer_rounded_slivers
             ~corner_payload value surface_side
             double_selection)
           (fun wall ->
-            bind (Boolean_extract.Private.reverse_ancestry ?cancel wall)
+            bind (Boolean_extract.View.reverse_ancestry ?cancel wall)
               (fun reverse_wall ->
-                Boolean_extract.Private.concatenate_ancestries ?cancel
+                Boolean_extract.View.concatenate_ancestries ?cancel
                   [|volume; surface; wall; reverse_wall|]))))
 
 let extract_surface_pair_with_ancestry ?cancel ?defer_rounded_slivers
@@ -201,7 +201,7 @@ let extract_surface_pair_with_ancestry ?cancel ?defer_rounded_slivers
     | Shatter -> invalid_arg "Shatter has no single product expression" in
   let left = source_oriented_selection value.complex Boolean_complex.Left choose_left
   and right = source_oriented_selection value.complex Boolean_complex.Right choose_right in
-  let barycentric_cache = Boolean_extract.Private.barycentric_cache
+  let barycentric_cache = Boolean_extract.View.barycentric_cache
       ~capacity:(if corner_payload then
         3 * (selected_count left + selected_count right) else 0) in
   bind (extract_selection ?cancel ?defer_rounded_slivers ~barycentric_cache
@@ -209,7 +209,7 @@ let extract_surface_pair_with_ancestry ?cancel ?defer_rounded_slivers
       Boolean_complex.Left left) (fun left ->
     bind (extract_selection ?cancel ?defer_rounded_slivers ~barycentric_cache
         ~corner_payload value Boolean_complex.Right right) (fun right ->
-      Boolean_extract.Private.concatenate_ancestries ?cancel [|left; right|]))
+      Boolean_extract.View.concatenate_ancestries ?cancel [|left; right|]))
 
 let extract_product_with_ancestry ?cancel ?require_closed ?defer_rounded_slivers
     ?(corner_payload = true) ~operation value =
@@ -232,7 +232,7 @@ let extract_product_with_ancestry ?cancel ?require_closed ?defer_rounded_slivers
   match result, require_closed, value.left_treatment, value.right_treatment with
   | (Ok ancestry, Some true, Surface, _
     | Ok ancestry, Some true, _, Surface) ->
-      (match Boolean_extract.Private.validate_closed_topology
+      (match Boolean_extract.View.validate_closed_topology
           (Geometry.topology (Boolean_extract.geometry ancestry)) with
        | Ok () -> Ok ancestry
        | Error _ as failure -> failure)

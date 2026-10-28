@@ -63,7 +63,7 @@ module Builder : sig
   val freeze : t -> edge_group
 end
 
-module Private : sig
+module View : sig
   val of_owned_bits :
     topology:Topology.t -> edge_count:int -> name:string -> bytes -> t
   (** Trusted ownership-transfer boundary for kernels that prove the target

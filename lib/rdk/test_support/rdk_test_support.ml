@@ -24,7 +24,7 @@ let expect_code code = function
       (Error.to_string error))
   | Ok _ -> fail ("expected error " ^ code)
 
-let positions geometry = Packed.Float3.Private.view (Geometry.positions geometry)
+let positions geometry = Packed.Float3.View.view (Geometry.positions geometry)
 
 (* [Analysis.bounds] was pruned from the library; the tests keep an independent
    bounding box of the points under its old name. *)
@@ -60,25 +60,25 @@ let compare_storage floats left right = match Attribute.storage left, Attribute.
   | Attribute.Int left, Attribute.Int right -> left = right
   | Attribute.Text left, Attribute.Text right -> left = right
   | Attribute.Float2 left, Attribute.Float2 right ->
-      let left = Packed.Float2.Private.view left
-      and right = Packed.Float2.Private.view right in
+      let left = Packed.Float2.View.view left
+      and right = Packed.Float2.View.view right in
       floats left.x right.x && floats left.y right.y
   | Attribute.Float3 left, Attribute.Float3 right ->
-      let left = Packed.Float3.Private.view left
-      and right = Packed.Float3.Private.view right in
+      let left = Packed.Float3.View.view left
+      and right = Packed.Float3.View.view right in
       floats left.x right.x && floats left.y right.y && floats left.z right.z
   | Attribute.Float4 left, Attribute.Float4 right ->
-      let left = Packed.Float4.Private.view left
-      and right = Packed.Float4.Private.view right in
+      let left = Packed.Float4.View.view left
+      and right = Packed.Float4.View.view right in
       floats left.x right.x && floats left.y right.y && floats left.z right.z
       && floats left.w right.w
   | Attribute.Int_array left, Attribute.Int_array right ->
-      let left = Packed.Int_array.Private.view left
-      and right = Packed.Int_array.Private.view right in
+      let left = Packed.Int_array.View.view left
+      and right = Packed.Int_array.View.view right in
       left.offsets = right.offsets && left.values = right.values
   | Attribute.Float_array left, Attribute.Float_array right ->
-      let left = Packed.Float_array.Private.view left
-      and right = Packed.Float_array.Private.view right in
+      let left = Packed.Float_array.View.view left
+      and right = Packed.Float_array.View.view right in
       left.offsets = right.offsets && floats left.values right.values
   | _ -> false
 
@@ -96,18 +96,18 @@ let geometry_bytes geometry =
   let attribute attribute =
     let storage = match Attribute.storage attribute with
       | Float values -> encode values | Int values -> encode values | Text values -> encode values
-      | Int_array values -> encode (Packed.Int_array.Private.view values)
-      | Float_array values -> encode (Packed.Float_array.Private.view values)
-      | Float2 values -> let v = Packed.Float2.Private.view values in encode (v.x, v.y)
-      | Float3 values -> let v = Packed.Float3.Private.view values in encode (v.x, v.y, v.z)
-      | Float4 values -> let v = Packed.Float4.Private.view values in encode (v.x, v.y, v.z, v.w) in
+      | Int_array values -> encode (Packed.Int_array.View.view values)
+      | Float_array values -> encode (Packed.Float_array.View.view values)
+      | Float2 values -> let v = Packed.Float2.View.view values in encode (v.x, v.y)
+      | Float3 values -> let v = Packed.Float3.View.view values in encode (v.x, v.y, v.z)
+      | Float4 values -> let v = Packed.Float4.View.view values in encode (v.x, v.y, v.z, v.w) in
     Attribute.owner attribute, Attribute.name attribute, Attribute.kind_name attribute, storage in
   let group group = Group.owner group, Group.name group,
     Array.init (Group.length group) (fun i -> Group.mem i group), Group.ordered_elements group in
   let edge_group group = Edge_group.name group,
     Array.init (Edge_group.length group) (fun i -> Edge_group.mem i group) in
-  let p = Packed.Float3.Private.view (Geometry.positions geometry) in
-  encode (p.x, p.y, p.z, Topology.Private.view (Geometry.topology geometry),
+  let p = Packed.Float3.View.view (Geometry.positions geometry) in
+  encode (p.x, p.y, p.z, Topology.View.view (Geometry.topology geometry),
     List.map attribute (Geometry.attributes geometry), List.map group (Geometry.groups geometry),
     List.map edge_group (Geometry.edge_groups geometry))
 
@@ -136,10 +136,10 @@ let equal_edge_group left right =
   end
 
 let compare_geometry floats left right =
-  let lp = Packed.Float3.Private.view (Geometry.positions left)
-  and rp = Packed.Float3.Private.view (Geometry.positions right)
-  and lt = Topology.Private.view (Geometry.topology left)
-  and rt = Topology.Private.view (Geometry.topology right) in
+  let lp = Packed.Float3.View.view (Geometry.positions left)
+  and rp = Packed.Float3.View.view (Geometry.positions right)
+  and lt = Topology.View.view (Geometry.topology left)
+  and rt = Topology.View.view (Geometry.topology right) in
   floats lp.x rp.x && floats lp.y rp.y && floats lp.z rp.z
   && lt.point_count = rt.point_count
   && lt.vertex_points = rt.vertex_points
@@ -189,8 +189,8 @@ module Tb = struct
 end
 
 let equal_positions left right =
-  let left = Packed.Float3.Private.view (Geometry.positions left)
-  and right = Packed.Float3.Private.view (Geometry.positions right) in
+  let left = Packed.Float3.View.view (Geometry.positions left)
+  and right = Packed.Float3.View.view (Geometry.positions right) in
   left.x = right.x && left.y = right.y && left.z = right.z
 
 let near_array expected actual =
@@ -201,8 +201,8 @@ let near_array expected actual =
 let float_array_values ~owner ~name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float_array values -> Packed.Float_array.Private.view values
+      (match Attribute.View.storage attribute with
+       | Attribute.Float_array values -> Packed.Float_array.View.view values
        | _ -> fail ("unexpected non-float-array storage for " ^ name))
   | None -> fail ("missing float-array attribute " ^ name)
 
@@ -213,3 +213,50 @@ let promote ?cancel ?grain ?into ?method_ ?delete_source ?piece_attribute ?index
     ~source ~destination ~name geometry =
   Attribute_ops.promote_pattern ?cancel ?grain ?into_pattern:into ?method_ ?delete_source
     ?piece_attribute ?index_pattern:index_attribute ~source ~destination ~pattern:name geometry
+
+(* [Triangulate2d.run] with the defaults tests rely on; the SOP declaration owns the real ones. *)
+let triangulate2d ?cancel ?(grain = 16_384) ?selection ?constraint_edges
+    ?constraint_primitives ?(projection = Triangulate2d.Best_fit) ?(seed = 0L)
+    ?(split_crossing_constraints = false) ?(flood_from_hull_boundary = false)
+    ?(remove_outside_constraint_polygons = false)
+    ?(silhouette_constraints = false) ?(remove_outside_silhouette = false)
+    ?(ignore_non_constraint_points = false) ?(remove_duplicate_points = false)
+    ?(refine = false) ?(allow_constraint_splitting = true)
+    ?(minimum_angle = Float.pi /. 9.) ?maximum_area ?target_edge_length
+    ?(minimum_edge_length = 0.) ?(maximum_new_points = 100_000)
+    ?(regularization_steps = 0) ?(allow_movement_of_interior_input_points = false)
+    ?(preserve_point_payload = true) ?(restore_original_point_positions = true)
+    ?(keep_primitives = false) ?split_point_group ?refinement_point_group
+    ?triangle_group ?constraint_group ?(remove_unused_points = false)
+    ?(recompute_point_normals = false) geometry =
+  Triangulate2d.run ?cancel
+    { grain; selection; constraint_edges; constraint_primitives; projection; seed;
+      split_crossing_constraints; flood_from_hull_boundary;
+      remove_outside_constraint_polygons; silhouette_constraints;
+      remove_outside_silhouette; ignore_non_constraint_points;
+      remove_duplicate_points; refine; allow_constraint_splitting; minimum_angle;
+      maximum_area; target_edge_length; minimum_edge_length; maximum_new_points;
+      regularization_steps; allow_movement_of_interior_input_points;
+      preserve_point_payload; restore_original_point_positions; keep_primitives;
+      split_point_group; refinement_point_group; triangle_group; constraint_group;
+      remove_unused_points; recompute_point_normals }
+    geometry
+
+(* [Ray.run] with the defaults tests rely on; the SOP declaration owns the real ones. *)
+let ray ?cancel ?(grain = 16_384) ?selection ?collision_primitives
+    ?(method_ = Ray.Ray_project) ?(direction = Ray.Ray_normal)
+    ?(direction_mode = Ray.Ray_forward) ?(surface_hit = Ray.Ray_first_surface)
+    ?(samples = 1) ?(jitter_scale = 1.) ?(seed = 0) ?(combine = Ray.Ray_average)
+    ?(min_distance = 0.) ?max_distance ?(tolerance = 0.) ?(scale = 1.)
+    ?(lift = 0.) ?distance_attribute ?primitive_attribute
+    ?source_vertex_numbers_attribute ?source_vertex_weights_attribute
+    ?hit_group ?normal_attribute ?point_pattern ?vertex_pattern
+    ?primitive_pattern ?detail_pattern ?(match_groups = false) ~source ~collision () =
+  Ray.run ?cancel
+    { grain; selection; collision_primitives; method_; direction; direction_mode;
+      surface_hit; samples; jitter_scale; seed; combine; min_distance;
+      max_distance; tolerance; scale; lift; distance_attribute; primitive_attribute;
+      source_vertex_numbers_attribute; source_vertex_weights_attribute; hit_group;
+      normal_attribute; point_pattern; vertex_pattern; primitive_pattern;
+      detail_pattern; match_groups }
+    ~source ~collision ()

@@ -28,49 +28,49 @@ let find_matching_edge_group group geometry =
   Geometry.find_edge_group (Edge_group.name group) geometry
 
 let concat_float2 attributes =
-  let views = Array.map (fun attribute -> match Attribute.Private.storage attribute with
-    | Attribute.Float2 values -> Packed.Float2.Private.view values
+  let views = Array.map (fun attribute -> match Attribute.View.storage attribute with
+    | Attribute.Float2 values -> Packed.Float2.View.view values
     | _ -> assert false) attributes in
-  Packed.Float2.of_owned ~x:(Array.concat (Array.to_list (Array.map (fun v -> v.Packed.Float2.Private.x) views)))
-    ~y:(Array.concat (Array.to_list (Array.map (fun v -> v.Packed.Float2.Private.y) views)))
+  Packed.Float2.of_owned ~x:(Array.concat (Array.to_list (Array.map (fun v -> v.Packed.Float2.View.x) views)))
+    ~y:(Array.concat (Array.to_list (Array.map (fun v -> v.Packed.Float2.View.y) views)))
   |> Support.get_ok
 
 let concat_float3 attributes =
-  let views = Array.map (fun attribute -> match Attribute.Private.storage attribute with
-    | Attribute.Float3 values -> Packed.Float3.Private.view values
+  let views = Array.map (fun attribute -> match Attribute.View.storage attribute with
+    | Attribute.Float3 values -> Packed.Float3.View.view values
     | _ -> assert false) attributes in
-  Packed.Float3.Private.of_owned_exn
-    ~x:(Array.concat (Array.to_list (Array.map (fun v -> v.Packed.Float3.Private.x) views)))
-    ~y:(Array.concat (Array.to_list (Array.map (fun v -> v.Packed.Float3.Private.y) views)))
-    ~z:(Array.concat (Array.to_list (Array.map (fun v -> v.Packed.Float3.Private.z) views)))
+  Packed.Float3.View.of_owned_exn
+    ~x:(Array.concat (Array.to_list (Array.map (fun v -> v.Packed.Float3.View.x) views)))
+    ~y:(Array.concat (Array.to_list (Array.map (fun v -> v.Packed.Float3.View.y) views)))
+    ~z:(Array.concat (Array.to_list (Array.map (fun v -> v.Packed.Float3.View.z) views)))
 
 let concat_float4 attributes =
-  let views = Array.map (fun attribute -> match Attribute.Private.storage attribute with
-    | Attribute.Float4 values -> Packed.Float4.Private.view values
+  let views = Array.map (fun attribute -> match Attribute.View.storage attribute with
+    | Attribute.Float4 values -> Packed.Float4.View.view values
     | _ -> assert false) attributes in
   Packed.Float4.of_owned
-    ~x:(Array.concat (Array.to_list (Array.map (fun v -> v.Packed.Float4.Private.x) views)))
-    ~y:(Array.concat (Array.to_list (Array.map (fun v -> v.Packed.Float4.Private.y) views)))
-    ~z:(Array.concat (Array.to_list (Array.map (fun v -> v.Packed.Float4.Private.z) views)))
-    ~w:(Array.concat (Array.to_list (Array.map (fun v -> v.Packed.Float4.Private.w) views)))
+    ~x:(Array.concat (Array.to_list (Array.map (fun v -> v.Packed.Float4.View.x) views)))
+    ~y:(Array.concat (Array.to_list (Array.map (fun v -> v.Packed.Float4.View.y) views)))
+    ~z:(Array.concat (Array.to_list (Array.map (fun v -> v.Packed.Float4.View.z) views)))
+    ~w:(Array.concat (Array.to_list (Array.map (fun v -> v.Packed.Float4.View.w) views)))
   |> Support.get_ok
 
 let concatenate_attribute template attributes =
-  let storage = match Attribute.Private.storage template with
+  let storage = match Attribute.View.storage template with
     | Attribute.Float _ -> Attribute.Float (Array.concat (Array.to_list
-        (Array.map (fun a -> match Attribute.Private.storage a with Attribute.Float x -> x | _ -> assert false) attributes)))
+        (Array.map (fun a -> match Attribute.View.storage a with Attribute.Float x -> x | _ -> assert false) attributes)))
     | Attribute.Int _ -> Attribute.Int (Array.concat (Array.to_list
-        (Array.map (fun a -> match Attribute.Private.storage a with Attribute.Int x -> x | _ -> assert false) attributes)))
+        (Array.map (fun a -> match Attribute.View.storage a with Attribute.Int x -> x | _ -> assert false) attributes)))
     | Attribute.Text _ -> Attribute.Text (Array.concat (Array.to_list
-        (Array.map (fun a -> match Attribute.Private.storage a with Attribute.Text x -> x | _ -> assert false) attributes)))
+        (Array.map (fun a -> match Attribute.View.storage a with Attribute.Text x -> x | _ -> assert false) attributes)))
     | Attribute.Float2 _ -> Attribute.Float2 (concat_float2 attributes)
     | Attribute.Float3 _ -> Attribute.Float3 (concat_float3 attributes)
     | Attribute.Float4 _ -> Attribute.Float4 (concat_float4 attributes)
     | Attribute.Int_array _ -> Attribute.Int_array (Ragged_ops.concat_int
-        (Array.map (fun attribute -> match Attribute.Private.storage attribute with
+        (Array.map (fun attribute -> match Attribute.View.storage attribute with
           | Attribute.Int_array values -> values | _ -> assert false) attributes))
     | Attribute.Float_array _ -> Attribute.Float_array (Ragged_ops.concat_float
-        (Array.map (fun attribute -> match Attribute.Private.storage attribute with
+        (Array.map (fun attribute -> match Attribute.View.storage attribute with
           | Attribute.Float_array values -> values | _ -> assert false) attributes)) in
   Attribute.create_owned ~name:(Attribute.name template)
     ~owner:(Attribute.owner template) storage
@@ -128,8 +128,8 @@ let merge_plain ?cancel ?(grain = 16_384) ?(pad_groups = true) geometries =
         let point_at = ref 0 and vertex_at = ref 0 and primitive_at = ref 0 in
         List.iter (fun geometry ->
           Cancel.check_opt cancel;
-          let positions = Packed.Float3.Private.view (Geometry.positions geometry)
-          and topology = Topology.Private.view (Geometry.topology geometry) in
+          let positions = Packed.Float3.View.view (Geometry.positions geometry)
+          and topology = Topology.View.view (Geometry.topology geometry) in
           let points_here = Geometry.point_count geometry
           and vertices_here = Geometry.vertex_count geometry
           and primitives_here = Geometry.primitive_count geometry in
@@ -152,8 +152,8 @@ let merge_plain ?cancel ?(grain = 16_384) ?(pad_groups = true) geometries =
           point_at := !point_at + points_here;
           vertex_at := !vertex_at + vertices_here;
           primitive_at := !primitive_at + primitives_here) geometries;
-        let positions = Packed.Float3.Private.of_owned_exn ~x:px ~y:py ~z:pz in
-        let topology = Topology.Private.create_validated_owned ~point_count
+        let positions = Packed.Float3.View.of_owned_exn ~x:px ~y:py ~z:pz in
+        let topology = Topology.View.create_validated_owned ~point_count
             ~vertex_points ~primitive_offsets ~primitive_kinds in
         let topology_result = Ok topology in
         Result.bind topology_result (fun topology ->
@@ -194,7 +194,7 @@ let merge_plain ?cancel ?(grain = 16_384) ?(pad_groups = true) geometries =
                   Group.iter_ordered (fun element ->
                     order.(!output) <- source_offset + element;
                     incr output) group) group) sources;
-                Group.Private.with_owned_order order target
+                Group.View.with_owned_order order target
               end) groups in
             let edge_groups = match edge_groups with
               | [] -> []

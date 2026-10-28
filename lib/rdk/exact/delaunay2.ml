@@ -23,7 +23,7 @@ let source_unique value source =
   check_index "source_unique" value.source_count source;
   value.source_unique.(source)
 
-module Private = struct
+module View = struct
   type view = {
 
     unique_source : int array;

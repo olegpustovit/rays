@@ -2,7 +2,7 @@ open Rays
 open Rdk
 open Rdk_test_support
 
-let get_ok = function Ok value -> value | Error message -> fail message
+let get_ok = get
 
 let add_attribute owner name storage geometry =
   let attribute = Attribute.create_owned ~owner ~name storage |> get_ok in
@@ -11,7 +11,7 @@ let add_attribute owner name storage geometry =
 let int_values owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Int values -> values
        | _ -> fail (name ^ " is not integer"))
   | None -> fail ("missing " ^ name)
@@ -19,16 +19,16 @@ let int_values owner name geometry =
 let text_values owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Text values -> values
        | _ -> fail (name ^ " is not text"))
   | None -> fail ("missing " ^ name)
 
 let equal_output left right owner name =
-  Packed.Float3.Private.view (Geometry.positions left)
-    = Packed.Float3.Private.view (Geometry.positions right)
-  && Topology.Private.view (Geometry.topology left)
-     = Topology.Private.view (Geometry.topology right)
+  Packed.Float3.View.view (Geometry.positions left)
+    = Packed.Float3.View.view (Geometry.positions right)
+  && Topology.View.view (Geometry.topology left)
+     = Topology.View.view (Geometry.topology right)
   && int_values owner name left = int_values owner name right
 
 let fixture () =

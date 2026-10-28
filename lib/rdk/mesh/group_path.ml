@@ -1,6 +1,5 @@
 
 
-exception Invalid of string
 
 type dual = {
   offsets : int array;

@@ -6,24 +6,23 @@ type targeting =
   | Near_points
   | Specified_points of string
 
-exception Invalid of string
 
 let validate_group label owner_count = function
   | None -> ()
   | Some group when Group.owner group = Group.Point
       && Group.length group = owner_count -> ()
-  | Some _ -> raise (Invalid (label ^ " must be a matching point group"))
+  | Some _ -> raise (Error.Fail (label ^ " must be a matching point group"))
 
 let scalar_attribute label name geometry =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
-  | None -> raise (Invalid (Printf.sprintf "%s point attribute %S is missing"
+  | None -> raise (Error.Fail (Printf.sprintf "%s point attribute %S is missing"
       label name))
   | Some attribute ->
-      match Attribute.Private.storage attribute with
+      match Attribute.View.storage attribute with
       | Attribute.Float values -> `Float values
       | Attribute.Int values -> `Int values
       | Attribute.Text values -> `Text values
-      | _ -> raise (Invalid (Printf.sprintf
+      | _ -> raise (Error.Fail (Printf.sprintf
           "%s point attribute %S must be scalar float, integer, or text"
           label name))
 
@@ -31,7 +30,7 @@ let numeric_attribute label name geometry =
   match scalar_attribute label name geometry with
   | `Float values -> `Float values
   | `Int values -> `Int values
-  | `Text _ -> raise (Invalid (Printf.sprintf
+  | `Text _ -> raise (Error.Fail (Printf.sprintf
       "%s point attribute %S must be scalar float or integer" label name))
 
 let radius_view label name geometry =
@@ -42,7 +41,7 @@ let radius_view label name geometry =
     let value = match values with
       | `Float values -> values.(point)
       | `Int values -> float_of_int values.(point) in
-    if not (Float.is_finite value) || value < 0. then raise (Invalid (Printf.sprintf
+    if not (Float.is_finite value) || value < 0. then raise (Error.Fail (Printf.sprintf
         "%s radius attribute %S has a non-finite or negative value at point %d"
         label name point));
     if value > !maximum then maximum := value
@@ -65,7 +64,7 @@ let match_views name source target =
   | `Float query, `Float target -> Match_float (query, target)
   | `Int query, `Int target -> Match_int (query, target)
   | `Text query, `Text target -> Match_text (query, target)
-  | _ -> raise (Invalid (Printf.sprintf
+  | _ -> raise (Error.Fail (Printf.sprintf
       "match attribute %S must have identical scalar storage on query and target geometry"
       name))
 
@@ -81,32 +80,12 @@ let compatible condition tolerance views query target =
   | Equal_attribute_values -> equal
   | Unequal_attribute_values -> not equal
 
-let next_power_of_two value =
-  let result = ref 8 in
-  while !result < value do
-    if !result > Sys.max_array_length / 2 then
-      raise (Invalid "target point count exceeds spatial-table limits");
-    result := !result lsl 1
-  done;
-  !result
-
-let[@inline always] integer_hash x y z =
-  let value = (x * 73_856_093) lxor (y * 19_349_663)
-      lxor (z * 83_492_791) in
-  (value lxor (value lsr 16)) land max_int
-
-let[@inline always] float_cell value =
-  if value = 0. then 0
-  else
-    let bits = Int64.bits_of_float value in
-    Int64.to_int (Int64.logxor bits (Int64.shift_right_logical bits 32))
-
 let validate_positions ?cancel label geometry =
-  let positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+  let positions = Packed.Float3.View.view (Geometry.positions geometry) in
   for point = 0 to Geometry.point_count geometry - 1 do
     if point land 4095 = 0 then Cancel.check_opt cancel;
     if not (Float.is_finite positions.x.(point) && Float.is_finite positions.y.(point)
-        && Float.is_finite positions.z.(point)) then raise (Invalid (Printf.sprintf
+        && Float.is_finite positions.z.(point)) then raise (Error.Fail (Printf.sprintf
         "%s point %d has a non-finite position" label point))
   done;
   positions
@@ -118,12 +97,12 @@ let specified ?cancel ~grain ?queries ?targets attribute_name ~source ~target =
   ignore (validate_positions ?cancel "target" target);
   let values = match Geometry.find_attribute ~owner:Attribute.Point attribute_name source with
     | Some attribute ->
-        (match Attribute.Private.storage attribute with
+        (match Attribute.View.storage attribute with
          | Attribute.Int values -> values
-         | _ -> raise (Invalid (Printf.sprintf
+         | _ -> raise (Error.Fail (Printf.sprintf
              "specified target attribute %S must be a point integer"
              attribute_name)))
-    | None -> raise (Invalid (Printf.sprintf
+    | None -> raise (Error.Fail (Printf.sprintf
         "specified target point attribute %S is missing" attribute_name)) in
   let same = Geometry.data_id source = Geometry.data_id target in
   let output = Array.make source_count (-1) in
@@ -158,7 +137,7 @@ let near ?cancel ~grain ?queries ?targets ~using ~tolerance ~metric ~inclusive
     | Some group -> Group.cardinality group in
   let output = Array.make source_count (-1) in
   if target_slots > Sys.max_array_length / 2 then
-    raise (Invalid "target point count exceeds spatial-table limits")
+    raise (Error.Fail "target point count exceeds spatial-table limits")
   else if target_slots = 0 || source_count = 0 then output
   else begin
     let min_x = ref infinity and min_y = ref infinity and min_z = ref infinity
@@ -178,7 +157,7 @@ let near ?cancel ~grain ?queries ?targets ~using ~tolerance ~metric ~inclusive
     and max_target_radius = match target_radius with None -> 0. | Some (_, v) -> v in
     let cell_size = tolerance +. max_query_radius +. max_target_radius in
     if not (Float.is_finite cell_size) then
-      raise (Invalid "tolerance plus point radii exceeds the finite range");
+      raise (Error.Fail "tolerance plus point radii exceeds the finite range");
     let exact = cell_size = 0. in
     let scaled_delta left right =
       let delta = right -. left in
@@ -190,41 +169,18 @@ let near ?cancel ~grain ?queries ?targets ~using ~tolerance ~metric ~inclusive
     if not exact then begin
       let largest = Float.max span_x (Float.max span_y span_z) in
       if not (Float.is_finite largest) || largest > float_of_int (max_int / 4) then
-        raise (Invalid "snap distance is too small for the target geometry extent")
+        raise (Error.Fail "snap distance is too small for the target geometry extent")
     end;
-    let capacity = next_power_of_two (max 8 (target_slots * 2)) in
-    let cell_x = Array.make target_slots 0 and cell_y = Array.make target_slots 0
-    and cell_z = Array.make target_slots 0 and cell_head = Array.make target_slots (-1)
-    and table = Array.make capacity (-1) and point_next = Array.make target_count (-1) in
-    let mask = capacity - 1 and cell_count = ref 0 in
-    let find_cell x y z =
-      let slot = ref (integer_hash x y z land mask) in
-      while table.(!slot) >= 0
-          && (let cell = table.(!slot) in cell_x.(cell) <> x
-              || cell_y.(cell) <> y || cell_z.(cell) <> z) do
-        slot := (!slot + 1) land mask
-      done;
-      if table.(!slot) < 0 then -1 else table.(!slot) in
-    let find_or_add_cell x y z =
-      let slot = ref (integer_hash x y z land mask) in
-      while table.(!slot) >= 0
-          && (let cell = table.(!slot) in cell_x.(cell) <> x
-              || cell_y.(cell) <> y || cell_z.(cell) <> z) do
-        slot := (!slot + 1) land mask
-      done;
-      if table.(!slot) >= 0 then table.(!slot)
-      else begin
-        let cell = !cell_count in incr cell_count; table.(!slot) <- cell;
-        cell_x.(cell) <- x; cell_y.(cell) <- y; cell_z.(cell) <- z; cell
-      end in
-    let cell_coord value minimum = if exact then float_cell value
+    let grid = Point_grid.create ~cells:target_slots ~points:target_count in
+    let { Point_grid.cell_head; point_next; _ } = grid in
+    let find_cell = Point_grid.find grid in
+    let cell_coord value minimum = if exact then Point_grid.float_cell value
       else int_of_float (floor (scaled_delta minimum value)) in
     let insert_target point =
       let cx = cell_coord target_positions.x.(point) !min_x
       and cy = cell_coord target_positions.y.(point) !min_y
       and cz = cell_coord target_positions.z.(point) !min_z in
-      let cell = find_or_add_cell cx cy cz in
-      point_next.(point) <- cell_head.(cell); cell_head.(cell) <- point in
+      Point_grid.insert grid cx cy cz point in
     (match targets with
      | None -> for point = 0 to target_count - 1 do insert_target point done
      | Some group -> Group.iter insert_target group);
@@ -324,30 +280,30 @@ let plan ?cancel ~grain ?queries ?targets ~targeting ~using ~tolerance ~metric
     validate_group "query selection" (Geometry.point_count source) queries;
     validate_group "target selection" (Geometry.point_count target) targets;
     if not (Float.is_finite tolerance) || tolerance < 0. then
-      raise (Invalid "snap distance must be finite and non-negative");
+      raise (Error.Fail "snap distance must be finite and non-negative");
     if not (Float.is_finite match_tolerance) || match_tolerance < 0. then
-      raise (Invalid "match tolerance must be finite and non-negative");
+      raise (Error.Fail "match tolerance must be finite and non-negative");
     Option.iter (fun name -> if String.trim name = "" then
-      raise (Invalid "radius attribute name must not be empty")) radius_attribute;
+      raise (Error.Fail "radius attribute name must not be empty")) radius_attribute;
     Option.iter (fun name -> if String.trim name = "" then
-      raise (Invalid "match attribute name must not be empty")) match_attribute;
+      raise (Error.Fail "match attribute name must not be empty")) match_attribute;
     (match match_attribute with
      | None when match_condition <> Equal_attribute_values ->
-         raise (Invalid "unequal match condition requires a match attribute")
+         raise (Error.Fail "unequal match condition requires a match attribute")
      | None when match_tolerance <> 0. ->
-         raise (Invalid "match tolerance requires a match attribute")
+         raise (Error.Fail "match tolerance requires a match attribute")
      | None | Some _ -> ());
     Cancel.check_opt cancel;
     Ok (match targeting with
       | Specified_points attribute ->
           if radius_attribute <> None || match_attribute <> None then
-            raise (Invalid
+            raise (Error.Fail
               "specified-point targeting does not accept radius or match attributes");
           if String.trim attribute = "" then
-            raise (Invalid "specified target attribute name must not be empty");
+            raise (Error.Fail "specified target attribute name must not be empty");
           specified ?cancel ~grain ?queries ?targets attribute ~source ~target
       | Near_points -> near ?cancel ~grain ?queries ?targets ~using ~tolerance ~metric
           ~inclusive ?radius_attribute ?match_attribute ~match_condition
           ~match_tolerance ~source ~target ())
   with
-  | Invalid message | Invalid_argument message -> Error ("Rdk_spatial.Point_snap.fuse: " ^ message)
+  | Error.Fail message | Invalid_argument message -> Error ("Rdk_spatial.Point_snap.fuse: " ^ message)

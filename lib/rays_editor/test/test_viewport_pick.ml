@@ -112,9 +112,9 @@ let pick_run () =
   check ((Cook.stats cook).misses = misses) "the highlight does not recook";
   let lit_piece = List.hd (Cook.pieces cook) in
   let colours = Geometry.find_attribute ~owner:Rdk.Attribute.Vertex "Cd" lit_piece.prepared in
-  (match Option.map Rdk.Attribute.Private.storage colours with
+  (match Option.map Rdk.Attribute.View.storage colours with
    | Some (Rdk.Attribute.Float4 c) ->
-       let c = Rdk.Packed.Float4.Private.view c and topology = Geometry.topology lit_piece.prepared in
+       let c = Rdk.Packed.Float4.View.view c and topology = Geometry.topology lit_piece.prepared in
        let corner primitive = fst (Rdk.Topology.primitive_vertex_range topology primitive) in
        let seed = List.hd (primitives_of tags tag83)
        and other = List.hd (primitives_of tags (List.hd (of_iteration sunflower 0))) in

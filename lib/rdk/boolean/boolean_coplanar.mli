@@ -1,4 +1,4 @@
-(** Private exact overlap arrangements for coplanar Boolean face pairs. *)
+(** View exact overlap arrangements for coplanar Boolean face pairs. *)
 
 type overlap_kind = Empty | Point | Segment | Polygon
 type t
@@ -18,7 +18,7 @@ val boundary_count : t -> int -> int
 val boundary_first : t -> int -> int -> int
 val boundary_second : t -> int -> int -> int
 
-module Private : sig
+module View : sig
   val constraints : t -> Boolean_constraints.t
   val point : t -> int -> int -> Implicit_point.t
   val boundary_support_first : t -> int -> int -> int

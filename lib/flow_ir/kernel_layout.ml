@@ -25,6 +25,10 @@ type t = {
   scene_binding : int option;
   scene_spheres : int option;
   scene_instances : int option;
+  scene_motion : bool;
+  scene_vertices_end : int option;
+  scene_strands : int option;
+  scene_strand_count : int option;
 }
 
 let rec guarded = function
@@ -217,7 +221,7 @@ let reachable ~whole_loops (view : Packed.Private.view) dead =
   Array.iter (Array.iter use) view.outputs;
   used
 
-let plan ?(fast = false) ?(image = false) ?(instanced = false) program =
+let plan ?(fast = false) ?(image = false) ?(instanced = false) ?(motion = false) ?(curves = false) program =
   let view, dead = specialize (Packed.Private.view program) in
   let offset = ref 4 and uniform_layout = ref [] in
   let uniform name width =
@@ -284,6 +288,7 @@ let plan ?(fast = false) ?(image = false) ?(instanced = false) program =
   in
   let traced = Array.exists (fun i -> match guarded i with Packed.Trace _ -> true | _ -> false) view.code in
   let scene_spheres = if traced then Some (uniform "scene:spheres" 1) else None in
+  let scene_strand_count = if traced && curves then Some (uniform "scene:strands" 1) else None in
   let counts = if fast then (let first = !offset in offset := first + 12; Some first) else None in
   let count = if image then 0 else Array.length view.widths in
   let outputs = Array.length view.outputs in
@@ -292,6 +297,7 @@ let plan ?(fast = false) ?(image = false) ?(instanced = false) program =
   let table_binding = if table_seeds = [||] then None else Some (status_binding + 1) in
   let gather_base = count + outputs + 2 + (if table_seeds = [||] then 0 else 1) in
   let count_base = gather_base + List.length gathers in
+  let scene = count_base + (if counts = None then 0 else 2) in
   let input_used = Array.make count false in
   Array.iteri
     (fun slot instruction ->
@@ -305,8 +311,12 @@ let plan ?(fast = false) ?(image = false) ?(instanced = false) program =
     input_used; uniform_layout = List.rev !uniform_layout; uniform_bytes = !offset;
     uniform_binding; status_binding; table_binding;
     gather_base; count_base; counts;
-    scene_spheres; scene_instances = (if traced && instanced then Some (count_base + (if counts = None then 0 else 2) + 3) else None);
-    scene_binding = (if traced then Some (count_base + (if counts = None then 0 else 2)) else None) }
+    scene_spheres; scene_instances = (if traced && instanced then Some (scene + 3) else None);
+    scene_motion = traced && motion;
+    scene_vertices_end = (if traced && motion && not instanced then Some (scene + 3) else None);
+    scene_strands = (if traced && curves then Some (scene + 3 + (if instanced || motion then 1 else 0)) else None);
+    scene_strand_count;
+    scene_binding = (if traced then Some scene else None) }
 
 let uniform_words plan = (plan.uniform_bytes + 15) / 16
 

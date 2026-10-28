@@ -16,7 +16,7 @@ let count geometry = function
 let name name = if String.trim name = "" then error "E_GROUP_NAME" "Group name must not be blank." else Ok ()
 let missing name = error "E_GROUP_MISSING" ("Missing group " ^ name ^ ".")
 let mask group =
-  let length=Group.length group and bits=Group.Private.bits_view group in
+  let length=Group.length group and bits=Group.View.bits_view group in
   let values=Array.make length 0 in
   for byte=0 to Bytes.length bits-1 do
     let value=Char.code(Bytes.unsafe_get bits byte) and first=byte lsl 3 in

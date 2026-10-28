@@ -3,7 +3,7 @@ open Rdk
 open Rdk_test_support
 
 let two_quads () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.; 1.; 2.; 0.; 1.; 2.|]
       ~y:[|0.; 0.; 0.; 1.; 1.; 1.|]
       ~z:(Array.make 6 0.) in
@@ -42,11 +42,11 @@ let with_uv name values geometry =
 
 let int_attribute owner name geometry =
   Geometry.find_attribute ~owner name geometry |> Option.get
-  |> Attribute.Private.storage |> (function Attribute.Int values -> values | _ -> fail "wrong int storage")
+  |> Attribute.View.storage |> (function Attribute.Int values -> values | _ -> fail "wrong int storage")
 
 let text_attribute owner name geometry =
   Geometry.find_attribute ~owner name geometry |> Option.get
-  |> Attribute.Private.storage |> (function Attribute.Text values -> values | _ -> fail "wrong text storage")
+  |> Attribute.View.storage |> (function Attribute.Text values -> values | _ -> fail "wrong text storage")
 
 let expect_error code = function
   | Error error -> check (Error.code error = code)

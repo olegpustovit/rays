@@ -13,7 +13,7 @@ let primitive_group name length predicate =
 let float_attribute name geometry =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Float values -> values
        | _ -> fail (name ^ " has wrong storage"))
   | None -> fail ("missing " ^ name)
@@ -90,20 +90,20 @@ let test_surface_and_affected () =
 let test_distance_only_indexes () =
   let queries = Line_geometry.points [|0., 0., 0.; 1., 2., 0.; 4., 0., 0.|]
       |> Geometry.positions in
-  let points = Packed.Float3.Private.of_owned_exn ~x:[|0.; 3.|]
+  let points = Packed.Float3.View.of_owned_exn ~x:[|0.; 3.|]
       ~y:[|1.; 0.|] ~z:[|0.; 0.|] in
   let point_index = Spatial_index.create ~grain:1 points |> get_ok in
   let indices = Array.make 3 (-1) and generic = Array.make 3 Float.infinity
   and counts = Array.make 3 0 and specialized = Array.make 3 Float.infinity in
-  Spatial_index.Private.nearest_k_many_into ~grain:1 point_index ~queries
+  Spatial_index.View.nearest_k_many_into ~grain:1 point_index ~queries
     ~max_distance_squared:Float.infinity ~capacity:1 ~indices
     ~distances_squared:generic ~counts;
-  Spatial_index.Private.nearest_distances_many_into ~grain:1 point_index ~queries
+  Spatial_index.View.nearest_distances_many_into ~grain:1 point_index ~queries
     ~max_distance_squared:Float.infinity ~distances_squared:specialized;
   check (same_float_array generic specialized)
     "distance-only point index matches provenance query";
   let bounded = Array.make 3 0. in
-  Spatial_index.Private.nearest_distances_many_into ~grain:1 point_index ~queries
+  Spatial_index.View.nearest_distances_many_into ~grain:1 point_index ~queries
     ~max_distance_squared:0.01 ~distances_squared:bounded;
   check (Array.for_all (fun value -> value = Float.infinity) bounded)
     "distance-only point index bounded miss sentinel";
@@ -113,17 +113,17 @@ let test_distance_only_indexes () =
   and a = Array.make 3 0. and b = Array.make 3 0. and c = Array.make 3 0.
   and generic = Array.make 3 Float.infinity
   and specialized = Array.make 3 Float.infinity in
-  Surface_index.Private.closest_many_into ~grain:1 surface_index ~queries
+  Surface_index.View.closest_many_into ~grain:1 surface_index ~queries
     ~max_distance_squared:Float.infinity ~primitives ~triangles
     ~barycentric_a:a ~barycentric_b:b ~barycentric_c:c
     ~distances_squared:generic;
-  Surface_index.Private.closest_distances_many_into ~grain:1 surface_index
+  Surface_index.View.closest_distances_many_into ~grain:1 surface_index
     ~queries ~max_distance_squared:Float.infinity
     ~distances_squared:specialized;
   check (same_float_array generic specialized)
     "distance-only surface index matches provenance query";
   let bounded = Array.make 3 0. in
-  Surface_index.Private.closest_distances_many_into ~grain:1 surface_index
+  Surface_index.View.closest_distances_many_into ~grain:1 surface_index
     ~queries ~max_distance_squared:0.01 ~distances_squared:bounded;
   check (bounded.(1) = Float.infinity)
     "distance-only surface index bounded miss sentinel"

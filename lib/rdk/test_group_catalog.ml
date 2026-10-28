@@ -99,7 +99,7 @@ let transfer_rule owner pattern prefix = {
 }
 
 let curve_mesh positions curves =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:(Array.map (fun (x, _, _) -> x) positions)
       ~y:(Array.map (fun (_, y, _) -> y) positions)
       ~z:(Array.map (fun (_, _, z) -> z) positions) in
@@ -177,7 +177,7 @@ let test_transfer () =
     "Group Transfer exact crossing native edges";
   let triangle_source = mesh
       [|[|0; 1; 2|]; [|3; 4; 5|]|] 6 in
-  let triangle_positions = Packed.Float3.Private.of_owned_exn
+  let triangle_positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.; 0.; 0.; -0.2; 0.2; 0.|]
       ~y:[|-1.; 1.; 0.; -0.2; -0.2; 0.2|]
       ~z:[|-1.; -1.; 1.; 0.05; 0.05; 0.05|] in
@@ -186,7 +186,7 @@ let test_transfer () =
   let triangle_source = with_group Group.Primitive "intersecting"
       (fun primitive -> primitive = 0) triangle_source in
   let triangle_target = mesh [|[|0; 1; 2|]|] 3 in
-  let target_positions = Packed.Float3.Private.of_owned_exn
+  let target_positions = Packed.Float3.View.of_owned_exn
       ~x:[|-0.2; 0.2; 0.|] ~y:[|-0.2; -0.2; 0.2|]
       ~z:[|0.; 0.; 0.|] in
   let triangle_target = Geometry.with_positions target_positions triangle_target

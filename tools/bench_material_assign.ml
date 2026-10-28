@@ -8,7 +8,7 @@ let () =
   let count = if Array.length Sys.argv > 1 then int_of_string Sys.argv.(1) else 100_000 in
   let domains = if Array.length Sys.argv > 2 then int_of_string Sys.argv.(2) else 1 in
   if count < 1 then invalid_arg "positive primitive count required";
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;1.;0.|] ~y:[|0.;0.;1.|] ~z:[|0.;0.;0.|] in
   let topology = Topology.polygons_owned ~point_count:3
       ~vertex_points:(Array.init (count * 3) (fun i -> i mod 3))

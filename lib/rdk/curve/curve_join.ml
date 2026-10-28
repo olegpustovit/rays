@@ -7,8 +7,7 @@ type curve_join_pick = {
   end_ : curve_join_end;
 }
 
-exception Curve_error of string
-let fail message = raise (Curve_error message)
+let fail message = raise (Error.Fail message)
 
 let validate_selection operation selection primitive_count =
   match selection with
@@ -227,8 +226,8 @@ let join ?cancel ?grain ?primitives ?picked_ends ?(orient_closest = true)
      | None | Some _ -> ());
     Cancel.check_opt cancel;
     let topology = Geometry.topology geometry in
-    let source = Topology.Private.view topology in
-    let positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+    let source = Topology.View.view topology in
+    let positions = Packed.Float3.View.view (Geometry.positions geometry) in
     let primitive_count = Topology.primitive_count topology in
     validate_selection "Curve Join" primitives primitive_count;
     let selected_count = match picked_ends with
@@ -255,7 +254,7 @@ let join ?cancel ?grain ?primitives ?picked_ends ?(orient_closest = true)
        | None ->
            (match primitives with
             | Some group ->
-                (match Group.Private.order_view group with
+                (match Group.View.order_view group with
                  | Some order -> Array.blit order 0 selected_primitives 0 selected_count
                  | None ->
                      let at = ref 0 in
@@ -583,7 +582,7 @@ let join ?cancel ?grain ?primitives ?picked_ends ?(orient_closest = true)
             let target = Group.init ?grain ~owner:Group.Vertex
                 ~name:(Group.name group) output_vertex_count (fun vertex ->
                   Group.mem vertex_map.(vertex) group) in
-            Group.Private.remap_order ~source:group
+            Group.View.remap_order ~source:group
               ~source_of_target:vertex_map target
         | Group.Primitive ->
             let target = Group.init ?grain ~owner:Group.Primitive
@@ -597,7 +596,7 @@ let join ?cancel ?grain ?primitives ?picked_ends ?(orient_closest = true)
                     done;
                     !member
                   end) in
-            Group.Private.remap_order ~source:group
+            Group.View.remap_order ~source:group
               ~source_of_target:primitive_map target) (Geometry.groups geometry) in
       let edge_groups = match Geometry.edge_groups geometry with
         | [] -> []
@@ -653,13 +652,13 @@ let join ?cancel ?grain ?primitives ?picked_ends ?(orient_closest = true)
                     end
                   done
                 done;
-                Edge_group.Private.of_owned_bits ~topology:output_topology
+                Edge_group.View.of_owned_bits ~topology:output_topology
                   ~edge_count:target_edge_count ~name:(Edge_group.name source_group)
                   bits) source_groups
             end else begin
               let source_index = Topology_index.create ?cancel topology
               and target_index = Topology_index.create ?cancel output_topology in
-              let target_view = Topology_index.Private.view target_index in
+              let target_view = Topology_index.View.view target_index in
               List.map (fun source_group ->
                 let builder = Edge_group.Builder.create ~topology:output_topology
                     ~index:target_index ~name:(Edge_group.name source_group) in
@@ -680,4 +679,4 @@ let join ?cancel ?grain ?primitives ?picked_ends ?(orient_closest = true)
       Geometry.create ~positions:(Geometry.positions geometry)
         ~topology:output_topology ~attributes ~groups ~edge_groups ()
     end
-  with Curve_error message -> Error message
+  with Error.Fail message -> Error message

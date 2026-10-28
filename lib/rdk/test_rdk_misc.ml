@@ -8,7 +8,7 @@ let blur ~grid =
   let float_values name geometry =
     match Geometry.find_attribute ~owner:Attribute.Point name geometry with
     | Some attribute ->
-        (match Attribute.Private.storage attribute with
+        (match Attribute.View.storage attribute with
          | Attribute.Float values -> values
          | _ -> fail ("unexpected storage for " ^ name))
     | None -> fail ("missing point attribute " ^ name) in
@@ -67,11 +67,11 @@ let blur ~grid =
   (match Geometry.find_attribute ~owner:Attribute.Point "f_uv" tuple_blur,
       Geometry.find_attribute ~owner:Attribute.Point "f_color" tuple_blur with
    | Some uv, Some color ->
-       let uv = match Attribute.Private.storage uv with
-         | Attribute.Float2 values -> Packed.Float2.Private.view values
+       let uv = match Attribute.View.storage uv with
+         | Attribute.Float2 values -> Packed.Float2.View.view values
          | _ -> fail "Attribute Blur float2 storage"
-       and color = match Attribute.Private.storage color with
-         | Attribute.Float4 values -> Packed.Float4.Private.view values
+       and color = match Attribute.View.storage color with
+         | Attribute.Float4 values -> Packed.Float4.View.view values
          | _ -> fail "Attribute Blur float4 storage" in
        if uv.x <> [|10.; 0.; 10.|] || uv.y <> [|4.; 2.; 4.|]
            || color.z <> [|3.; 0.; 3.|] || color.w <> [|1.; 1.; 1.|]

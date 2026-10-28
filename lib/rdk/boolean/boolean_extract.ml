@@ -14,7 +14,6 @@ let xor = Xor (Left, Right)
 
 let operation = "boolean_extract"
 let error code message = Error (Error.make ~operation ~code message)
-exception Materialization_error of Error.t
 
 type ancestry = {
   complex : Boolean_complex.t;
@@ -242,7 +241,7 @@ let validate_materialized ?(allow_degenerate = false) ~x ~y ~z ~vertex_points ()
              (Printf.sprintf "exact output triangle %d becomes collinear in binary64" triangle))
 
 let validate_closed_topology topology =
-  let topology = Topology.Private.view topology in
+  let topology = Topology.View.view topology in
   let primitive_count = Bytes.length topology.primitive_kinds in
   let triangle_only = ref true and primitive = ref 0 in
   while !triangle_only && !primitive < primitive_count do
@@ -284,7 +283,7 @@ let validate_closed_topology topology =
         "solid Boolean output edge key %d has invalid incidence %d" key incidence)
   end
 
-let native_edge (view : Topology_index.Private.view) primitive first second =
+let native_edge (view : Topology_index.View.view) primitive first second =
   if view.primitive_of_vertex.(first) = primitive
       && view.next_vertex.(first) = second then view.edge_of_vertex.(first)
   else if view.primitive_of_vertex.(second) = primitive
@@ -364,9 +363,9 @@ let build_internal ?cancel ?(require_closed = true)
     ~with_ancestry ~with_corner_payload ~expression complex weiler cells =
   try
     Cancel.check_opt cancel;
-    if Boolean_weiler.Private.complex weiler != complex then
+    if Boolean_weiler.View.complex weiler != complex then
       invalid_arg "Weiler graph belongs to a different Boolean complex";
-    if Boolean_cells.Private.weiler cells != weiler then
+    if Boolean_cells.View.weiler cells != weiler then
       invalid_arg "cell labels belong to a different Weiler graph";
     if Boolean_cells.shell_count cells <> Boolean_weiler.shell_count weiler then
       invalid_arg "cell labels do not match the Weiler shell cardinality";
@@ -459,18 +458,18 @@ let build_internal ?cancel ?(require_closed = true)
     let _point_complex_vertices = if with_ancestry
       then materialized_complex_vertices else [||]
     and complex_output_points = if with_ancestry then Array.copy point_map else [||] in
-    let constraints = Boolean_complex.Private.constraints complex in
-    let left_geometry = Boolean_constraints.Private.left_geometry constraints
-    and right_geometry = Boolean_constraints.Private.right_geometry constraints in
+    let constraints = Boolean_complex.View.constraints complex in
+    let left_geometry = Boolean_constraints.View.left_geometry constraints
+    and right_geometry = Boolean_constraints.View.right_geometry constraints in
     let left_edge_index =
       if with_corner_payload && Geometry.edge_groups left_geometry <> [] then
         Some (Topology_index.create ?cancel (Geometry.topology left_geometry)
-          |> Topology_index.Private.view)
+          |> Topology_index.View.view)
       else None
     and right_edge_index =
       if with_corner_payload && Geometry.edge_groups right_geometry <> [] then
         Some (Topology_index.create ?cancel (Geometry.topology right_geometry)
-          |> Topology_index.Private.view)
+          |> Topology_index.View.view)
       else None in
     let has_edge_sources = Option.is_some left_edge_index
         || Option.is_some right_edge_index in
@@ -585,17 +584,17 @@ let build_internal ?cancel ?(require_closed = true)
           Bytes.unsafe_set primitive_sides !output '\001';
         let source_triangle = Boolean_complex.member_face complex member in
         let surface = match Boolean_complex.member_side complex member with
-          | Boolean_complex.Left -> Boolean_constraints.Private.left_surface constraints
-          | Boolean_complex.Right -> Boolean_constraints.Private.right_surface constraints in
+          | Boolean_complex.Left -> Boolean_constraints.View.left_surface constraints
+          | Boolean_complex.Right -> Boolean_constraints.View.right_surface constraints in
         primitive_faces.(!output) <-
-          Surface_index.Private.triangle_primitive surface source_triangle;
+          Surface_index.View.triangle_primitive surface source_triangle;
         primitive_triangles.(!output) <- source_triangle;
         primitive_refined_triangles.(!output) <-
           Boolean_complex.member_triangle complex member;
         let triangle_point = match Boolean_complex.member_side complex member with
-          | Boolean_complex.Left -> Boolean_constraints.Private.left_triangle_point
-          | Boolean_complex.Right -> Boolean_constraints.Private.right_triangle_point in
-        let source = Boolean_constraints.Private.source constraints in
+          | Boolean_complex.Left -> Boolean_constraints.View.left_triangle_point
+          | Boolean_complex.Right -> Boolean_constraints.View.right_triangle_point in
+        let source = Boolean_constraints.View.source constraints in
         let source_a = triangle_point constraints source_triangle 0
         and source_b = triangle_point constraints source_triangle 1
         and source_c = triangle_point constraints source_triangle 2 in
@@ -607,14 +606,14 @@ let build_internal ?cancel ?(require_closed = true)
         if with_corner_payload then begin
           for local = 0 to 2 do
             primitive_source_points.((!output * 3) + local) <-
-              Surface_index.Private.triangle_point surface source_triangle local;
+              Surface_index.View.triangle_point surface source_triangle local;
             primitive_source_vertices.((!output * 3) + local) <-
-              Surface_index.Private.triangle_vertex surface source_triangle local
+              Surface_index.View.triangle_vertex surface source_triangle local
           done;
           for local = 0 to 2 do
             let facet_local = if local = 0 || desired > 0 then local else 3 - local in
             let complex_vertex = Boolean_complex.facet_vertex complex facet facet_local in
-            let point = Boolean_complex.Private.vertex complex complex_vertex in
+            let point = Boolean_complex.View.vertex complex complex_vertex in
             let wa, wb, wc = cached_barycentric barycentrics source
                 ~triangle:triangle_key ~point:complex_vertex
                 ~a:source_a ~b:source_b ~c:source_c point in
@@ -627,7 +626,7 @@ let build_internal ?cancel ?(require_closed = true)
         if edge_source_capacity > 0 then begin
           let facet_local value =
             if value = 0 || desired > 0 then value else 3 - value in
-          let output_point local = Boolean_complex.Private.vertex complex
+          let output_point local = Boolean_complex.View.vertex complex
               (Boolean_complex.facet_vertex complex facet (facet_local local)) in
           let output0 = output_point 0 and output1 = output_point 1
           and output2 = output_point 2 in
@@ -650,21 +649,21 @@ let build_internal ?cancel ?(require_closed = true)
                  let triangle = Boolean_complex.member_face complex !candidate in
                  let candidate_surface, candidate_triangle_point = match side with
                    | Boolean_complex.Left ->
-                       Boolean_constraints.Private.left_surface constraints,
-                       Boolean_constraints.Private.left_triangle_point
+                       Boolean_constraints.View.left_surface constraints,
+                       Boolean_constraints.View.left_triangle_point
                    | Boolean_complex.Right ->
-                       Boolean_constraints.Private.right_surface constraints,
-                       Boolean_constraints.Private.right_triangle_point in
-                 let primitive = Surface_index.Private.triangle_primitive
+                       Boolean_constraints.View.right_surface constraints,
+                       Boolean_constraints.View.right_triangle_point in
+                 let primitive = Surface_index.View.triangle_primitive
                      candidate_surface triangle in
                  let a_id = candidate_triangle_point constraints triangle 0
                  and b_id = candidate_triangle_point constraints triangle 1
                  and c_id = candidate_triangle_point constraints triangle 2 in
-                 let va = Surface_index.Private.triangle_vertex
+                 let va = Surface_index.View.triangle_vertex
                      candidate_surface triangle 0
-                 and vb = Surface_index.Private.triangle_vertex
+                 and vb = Surface_index.View.triangle_vertex
                      candidate_surface triangle 1
-                 and vc = Surface_index.Private.triangle_vertex
+                 and vc = Surface_index.View.triangle_vertex
                      candidate_surface triangle 2 in
                  let edge0 = native_edge index primitive vb vc
                  and edge1 = native_edge index primitive vc va
@@ -732,7 +731,7 @@ let build_internal ?cancel ?(require_closed = true)
       edge_source_offsets.(!selected_count * 3) <- !edge_source_count;
     (match validate_materialized ~allow_degenerate:defer_rounded_slivers
         ~x ~y ~z ~vertex_points () with
-     | Error failure -> raise (Materialization_error (Error.make ~operation
+     | Error failure -> raise (Error.Rdk (Error.make ~operation
          ~code:(Error.code failure)
          ("post-coalescing extraction validation failed: "
           ^ Error.to_string failure)))
@@ -745,10 +744,10 @@ let build_internal ?cancel ?(require_closed = true)
      | Error message -> error "invalid_output" message
      | Ok topology ->
          (match if require_closed then validate_closed_topology topology else Ok () with
-          | Error failure -> raise (Materialization_error failure)
+          | Error failure -> raise (Error.Rdk failure)
           | Ok () -> ());
          match Geometry.create
-             ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+             ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
              ~topology () with
          | Ok geometry ->
              Ok {
@@ -766,7 +765,7 @@ let build_internal ?cancel ?(require_closed = true)
          | Error message -> error "invalid_output" message)
   with
   | Cancel.Cancelled -> error "cancelled" "Boolean extraction was cancelled"
-  | Materialization_error failure -> Error failure
+  | Error.Rdk failure -> Error failure
   | Invalid_argument message -> error "invalid_output" message
 
 let build_with_ancestry ?cancel ?require_closed ?defer_rounded_slivers
@@ -790,7 +789,7 @@ let reverse_ancestry ?cancel value =
     Cancel.check_opt cancel;
     let primitives = Geometry.primitive_count value.geometry in
     let corners = primitives * 3 in
-    let source_topology = Topology.Private.view (Geometry.topology value.geometry) in
+    let source_topology = Topology.View.view (Geometry.topology value.geometry) in
     if Array.length source_topology.vertex_points <> corners then
       invalid_arg "Boolean ancestry reversal requires triangular topology";
     let vertex_points = Array.make corners 0
@@ -981,7 +980,7 @@ let concatenate_ancestries ?cancel values =
      | Error message -> error "invalid_output" message
      | Ok topology ->
          match Geometry.create
-             ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+             ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
              ~topology () with
          | Error message -> error "invalid_output" message
          | Ok geometry -> Ok {
@@ -1000,7 +999,7 @@ let concatenate_ancestries ?cancel values =
   | Cancel.Cancelled -> error "cancelled" "Boolean product concatenation was cancelled"
   | Invalid_argument message -> error "invalid_output" message
 
-module Private = struct
+module View = struct
   type nonrec barycentric_cache = barycentric_cache
   type ancestry_view = {
 

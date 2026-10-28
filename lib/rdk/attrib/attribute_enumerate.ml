@@ -84,7 +84,7 @@ let piece_ranks ?cancel ~selection ~mode ~owner ~name count geometry =
   let source = match Geometry.find_attribute ~owner name geometry with
     | None -> Error (Printf.sprintf "piece attribute %s does not exist" name)
     | Some attribute ->
-        (match Attribute.Private.storage attribute with
+        (match Attribute.View.storage attribute with
          | Attribute.Int values -> Ok (`Int values)
          | Attribute.Text values -> Ok (`Text values)
          | Attribute.Float _ | Attribute.Int_array _ | Attribute.Float_array _
@@ -132,9 +132,11 @@ let piece_ranks ?cancel ~selection ~mode ~owner ~name count geometry =
     done;
     ranks, !max_rank) source
 
-let enumerate_raw ?cancel ?(grain = 16_384) ?selection ?(start = 0) ?(step = 1)
+let run ?cancel ?(grain = 16_384) ?selection ?(start = 0) ?(step = 1)
     ?(storage = Integer) ?piece_attribute
     ?(mode = Enumerate_piece_elements) ~owner ~name geometry =
+  Error.guard ~cancelled:"enumeration was cancelled" ~invalid_argument:"invalid_enumeration" ~operation:"enumerate"
+    ~code:"invalid_enumeration" @@ fun () ->
   if grain <= 0 then invalid_arg "Rdk.Attribute_ops.enumerate: grain must be positive";
   if String.trim name = "" then Error "attribute name must not be empty"
   else if (match piece_attribute with
@@ -229,7 +231,7 @@ let enumerate_raw ?cancel ?(grain = 16_384) ?selection ?(start = 0) ?(step = 1)
                  | Integer ->
                      let values = match existing with
                        | Some attribute ->
-                           (match Attribute.Private.storage attribute with
+                           (match Attribute.View.storage attribute with
                             | Attribute.Int values -> Array.copy values
                             | _ -> assert false)
                        | None -> Array.make count 0 in
@@ -238,7 +240,7 @@ let enumerate_raw ?cancel ?(grain = 16_384) ?selection ?(start = 0) ?(step = 1)
                  | Text { prefix } ->
                      let values = match existing with
                        | Some attribute ->
-                           (match Attribute.Private.storage attribute with
+                           (match Attribute.View.storage attribute with
                             | Attribute.Text values -> Array.copy values
                             | _ -> assert false)
                        | None -> Array.make count "" in
@@ -247,15 +249,3 @@ let enumerate_raw ?cancel ?(grain = 16_384) ?selection ?(start = 0) ?(step = 1)
                      Attribute.create_owned ~name ~owner (Attribute.Text values) in
                Result.bind attribute (fun attribute ->
                  Geometry.with_attribute attribute geometry)))
-
-let run ?cancel ?grain ?selection ?start ?step ?storage ?piece_attribute
-    ?mode ~owner ~name geometry =
-  try Result.map_error
-      (Error.of_string ~operation:"enumerate" ~code:"invalid_enumeration")
-      (enumerate_raw ?cancel ?grain ?selection ?start ?step ?storage
-         ?piece_attribute ?mode ~owner ~name geometry)
-  with
-  | Cancel.Cancelled -> Error (Error.make ~operation:"enumerate" ~code:"cancelled"
-      "enumeration was cancelled")
-  | Invalid_argument message -> Error (Error.make ~operation:"enumerate"
-      ~code:"invalid_enumeration" message)

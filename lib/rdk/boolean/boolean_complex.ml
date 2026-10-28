@@ -44,7 +44,7 @@ let edge_incident_range value edge = value.edge_offsets.(edge), value.edge_offse
 let edge_incident_facet value incident = value.edge_facets.(incident)
 let edge_incident_local value incident = Char.code (Bytes.unsafe_get value.edge_locals incident)
 
-module Private = struct
+module View = struct
   let constraints value = value.constraints
   let vertex value vertex = value.vertices.(vertex)
 end
@@ -264,12 +264,12 @@ let stable_counting_sort2 ?cancel ~key_count key_a key_b values =
 let build ?cancel constraints refinement =
   try
     Cancel.check_opt cancel;
-    if Boolean_refinement.Private.constraints refinement != constraints then
+    if Boolean_refinement.View.constraints refinement != constraints then
       invalid_arg "refinement belongs to a different constraint plan";
     let left_faces = Boolean_constraints.left_triangle_count constraints
     and right_faces = Boolean_constraints.right_triangle_count constraints
-    and left_geometry = Boolean_constraints.Private.left_geometry constraints
-    and right_geometry = Boolean_constraints.Private.right_geometry constraints in
+    and left_geometry = Boolean_constraints.View.left_geometry constraints
+    and right_geometry = Boolean_constraints.View.right_geometry constraints in
     let source_point_count =
       Geometry.point_count left_geometry + Geometry.point_count right_geometry in
     let global_point_count = source_point_count
@@ -282,7 +282,7 @@ let build ?cancel constraints refinement =
           | Some value ->
               let extra_points = ref 0 in
               for point = 3 to Boolean_face_cdt.point_count value - 1 do
-                if Boolean_face_cdt.Private.global_point_token value point < 0 then
+                if Boolean_face_cdt.View.global_point_token value point < 0 then
                   incr extra_points
               done;
               if !token_count > Sys.max_array_length - !extra_points then
@@ -299,19 +299,19 @@ let build ?cancel constraints refinement =
       invalid_arg "Boolean complex corner cardinality exceeds array limits";
     let corner_count = !raw_count * 3 in
     let fallback = if left_faces > 0 then
-        Boolean_constraints.Private.source_point constraints
-          (Boolean_constraints.Private.left_triangle_point constraints 0 0)
+        Boolean_constraints.View.source_point constraints
+          (Boolean_constraints.View.left_triangle_point constraints 0 0)
       else if right_faces > 0 then
-        Boolean_constraints.Private.source_point constraints
-          (Boolean_constraints.Private.right_triangle_point constraints 0 0)
+        Boolean_constraints.View.source_point constraints
+          (Boolean_constraints.View.right_triangle_point constraints 0 0)
       else invalid_arg "Boolean complex has no source faces" in
     let token_points = Array.make !token_count fallback in
     for point = 0 to source_point_count - 1 do
-      token_points.(point) <- Boolean_constraints.Private.source_point constraints point
+      token_points.(point) <- Boolean_constraints.View.source_point constraints point
     done;
     for point = 0 to Boolean_constraints.point_count constraints - 1 do
       token_points.(source_point_count + point) <-
-        Boolean_constraints.Private.point constraints point
+        Boolean_constraints.View.point constraints point
     done;
     let raw_point_tokens = Array.make corner_count 0
     and raw_sides = Bytes.make !raw_count '\000'
@@ -382,18 +382,18 @@ let build ?cancel constraints refinement =
             append side face (-1)
               (fun local -> triangle_point constraints face local) 1
         | Some value ->
-            let orientation = Boolean_face_cdt.Private.source_winding value in
+            let orientation = Boolean_face_cdt.View.source_winding value in
             let point_count = Boolean_face_cdt.point_count value in
             let point_tokens = Array.make point_count 0 in
             for local = 0 to min 2 (point_count - 1) do
               point_tokens.(local) <- triangle_point constraints face local
             done;
             for point = 3 to point_count - 1 do
-              let global = Boolean_face_cdt.Private.global_point_token value point in
+              let global = Boolean_face_cdt.View.global_point_token value point in
               if global >= 0 then point_tokens.(point) <- global
               else begin
                 point_tokens.(point) <- intern_local_point
-                    (Boolean_face_cdt.Private.point value point)
+                    (Boolean_face_cdt.View.point value point)
               end
             done;
             for triangle = 0 to Boolean_face_cdt.triangle_count value - 1 do
@@ -404,9 +404,9 @@ let build ?cancel constraints refinement =
             done
       done in
     append_side Left left_faces Boolean_refinement.left_face
-      Boolean_constraints.Private.left_triangle_point;
+      Boolean_constraints.View.left_triangle_point;
     append_side Right right_faces Boolean_refinement.right_face
-      Boolean_constraints.Private.right_triangle_point;
+      Boolean_constraints.View.right_triangle_point;
     token_count := !next_token;
     let merge_orders first second =
       let output = Array.make (Array.length first + Array.length second) 0

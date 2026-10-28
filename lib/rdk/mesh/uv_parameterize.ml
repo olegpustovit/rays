@@ -1,8 +1,7 @@
 
 type boundary_mode = Circle | Preserve
 
-exception Parameterize_error of string
-let fail message = raise (Parameterize_error message)
+let fail message = raise (Error.Fail message)
 let finite value = Float.is_finite value
 
 let rec find_root parent value =
@@ -37,8 +36,8 @@ let run_ranges ~grain count operation =
         operation range first last);
   range_count
 
-let selected_legacy_seam group index_view edge =
-  let first = index_view.Topology_index.Private.edge_offsets.(edge)
+let selected_seam group index_view edge =
+  let first = index_view.Topology_index.View.edge_offsets.(edge)
   and last = index_view.edge_offsets.(edge + 1) in
   let selected = ref false in
   for local = first to last - 1 do
@@ -47,11 +46,11 @@ let selected_legacy_seam group index_view edge =
   !selected
 
 let edge_endpoint_corners topology_view index_view edge local =
-  let corner = index_view.Topology_index.Private.edge_vertices.
+  let corner = index_view.Topology_index.View.edge_vertices.
       (index_view.edge_offsets.(edge) + local) in
   let next = index_view.next_vertex.(corner) in
   if next < 0 then fail "UV parameterization requires polygon edges";
-  let a = topology_view.Topology.Private.vertex_points.(corner)
+  let a = topology_view.Topology.View.vertex_points.(corner)
   and b = topology_view.vertex_points.(next) in
   let edge_a = index_view.edge_a.(edge) in
   if a = edge_a then corner, next
@@ -76,7 +75,7 @@ let solve ?cancel ?(grain = 16_384) ?(name = "uv") ?seams ?edge_seams
     let topology = Geometry.topology geometry in
     if not (Topology.all_triangles topology) then
       fail "UV parameterization currently requires triangle polygons";
-    let topology_view = Topology.Private.view topology in
+    let topology_view = Topology.View.view topology in
     let point_count = Topology.point_count topology
     and vertex_count = Topology.vertex_count topology
     and primitive_count = Topology.primitive_count topology in
@@ -85,13 +84,13 @@ let solve ?cancel ?(grain = 16_384) ?(name = "uv") ?seams ?edge_seams
       if Group.owner group <> Group.Vertex || Group.length group <> vertex_count then
         fail "UV seam group must own one outgoing-edge entry per vertex") seams;
     let index = Topology_index.create ?cancel topology in
-    let index_view = Topology_index.Private.view index in
+    let index_view = Topology_index.View.view index in
     Option.iter (fun group ->
       if Edge_group.topology_data_id group <> Topology.data_id topology
           || Edge_group.length group <> Topology_index.edge_count index then
         fail "native UV seam group belongs to a different topology") edge_seams;
     Cancel.check_opt cancel;
-    let positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+    let positions = Packed.Float3.View.view (Geometry.positions geometry) in
     let invalid_position = Atomic.make false in
     run_ranges ~grain point_count (fun _ first last ->
       for point = first to last - 1 do
@@ -110,7 +109,7 @@ let solve ?cancel ?(grain = 16_384) ?(name = "uv") ?seams ?edge_seams
       let selected = (match edge_seams with
         | Some group -> Edge_group.mem edge group
         | None -> false) || match seams with
-        | Some group -> selected_legacy_seam group index_view edge
+        | Some group -> selected_seam group index_view edge
         | None -> false in
       if selected then Bytes.set edge_is_seam edge '\001'
     done;
@@ -251,8 +250,8 @@ let solve ?cancel ?(grain = 16_384) ?(name = "uv") ?seams ?edge_seams
            | None -> fail (Printf.sprintf
                "UV Relax requires vertex float2 attribute %S" name)
            | Some attribute ->
-               match Attribute.Private.storage attribute with
-               | Attribute.Float2 values -> Some (Packed.Float2.Private.view values)
+               match Attribute.View.storage attribute with
+               | Attribute.Float2 values -> Some (Packed.Float2.View.view values)
                | _ -> fail (Printf.sprintf
                    "UV Relax vertex attribute %S must be float2" name)) in
     let u = Array.make variable_count 0. and v = Array.make variable_count 0. in
@@ -261,7 +260,7 @@ let solve ?cancel ?(grain = 16_384) ?(name = "uv") ?seams ?edge_seams
      | Some source ->
          let assigned = Bytes.make variable_count '\000' in
          for corner = 0 to vertex_count - 1 do
-           let source_u = source.Packed.Float2.Private.x.(corner)
+           let source_u = source.Packed.Float2.View.x.(corner)
            and source_v = source.y.(corner) in
            if not (finite source_u && finite source_v) then
              fail "UV Relax requires finite input coordinates";
@@ -551,4 +550,4 @@ let solve ?cancel ?(grain = 16_384) ?(name = "uv") ?seams ?edge_seams
         (Attribute.key ~name ~owner:Attribute.Vertex Attribute.float2) values
         |> Result.get_ok in
     Geometry.with_attribute attribute geometry
-  with Parameterize_error message -> Error message
+  with Error.Fail message -> Error message

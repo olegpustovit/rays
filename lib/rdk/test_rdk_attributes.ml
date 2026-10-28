@@ -7,8 +7,8 @@ let get_ok = function Ok value -> value | Error _ -> fail "unexpected error"
 let int_array_values ~owner ~name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Int_array values -> Packed.Int_array.Private.view values
+      (match Attribute.View.storage attribute with
+       | Attribute.Int_array values -> Packed.Int_array.View.view values
        | _ -> fail ("unexpected non-integer-array storage for " ^ name))
   | None -> fail ("missing integer-array attribute " ^ name)
 
@@ -353,7 +353,7 @@ let promotion ~geometry ~triangle_geometry =
   let tuple_median = Geometry.find_attribute ~owner:Attribute.Point "tuple_median"
       tuple_median |> Option.get |> Attribute.get (Attribute.key
         ~name:"tuple_median" ~owner:Attribute.Point Attribute.float2) |> Option.get
-      |> Packed.Float2.Private.view in
+      |> Packed.Float2.View.view in
   if tuple_median.x <> [|4.; 4.; 3.; 3.|]
      || tuple_median.y <> [|10.; 10.; 8.; 8.|] then
     fail "piece tuple promotion was not component-wise upper median";
@@ -366,7 +366,7 @@ let promotion ~geometry ~triangle_geometry =
   let tuple_maximum geometry = Geometry.find_attribute ~owner:Attribute.Detail
       "tuple_maximum" geometry |> Option.get |> Attribute.get (Attribute.key
         ~name:"tuple_maximum" ~owner:Attribute.Detail Attribute.float2)
-      |> Option.get |> Packed.Float2.Private.view
+      |> Option.get |> Packed.Float2.View.view
   and tuple_sources geometry = int_array_values ~owner:Attribute.Detail
       ~name:"tuple_sources" geometry in
   let maximum = tuple_maximum tuple_index_one
@@ -542,7 +542,7 @@ let transfer ~geometry ~triangle_geometry =
       |> Transform_ops.transform (Rays_math.Mat4.scaling (Rays_math.Vec3.create 3. 3. 3.))
       |> Geometry.with_attribute primitive_weight |> get_ok
       |> Geometry.with_attribute primitive_id |> get_ok in
-  let primitive_target_positions = Packed.Float3.Private.of_owned_exn
+  let primitive_target_positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.; 3.; 1.5|] ~y:[|0.; 0.; 4.5|] ~z:[|0.; 0.; 0.|] in
   let primitive_target_topology = Tb.create ~point_count:3 () in
   Tb.add_triangle primitive_target_topology 0 1 2;
@@ -631,14 +631,14 @@ let transfer ~geometry ~triangle_geometry =
     List.iter (fun index ->
       let indices = Array.make 3 (-17)
       and distances_squared = Array.make 3 (-17.) in
-      let count = Spatial_index.Private.nearest_k_into index
+      let count = Spatial_index.View.nearest_k_into index
           ~x:qx ~y:qy ~z:qz ~max_distance_squared:Float.infinity
           ~indices ~distances_squared ~offset:1 ~count:1 in
       check (count = 1 && indices = [|-17; !expected; -17|]
           && distances_squared = [|-17.; !expected_distance; -17.|])
         "spatial index nearest/reference/domain exactness and output slice") indexes
   done;
-  let surface_positions = Packed.Float3.Private.of_owned_exn
+  let surface_positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.; 2.; 0.|] ~y:[|0.; 0.; 2.|] ~z:[|0.; 0.; 0.|] in
   let surface_topology = Tb.create ~point_count:3 () in
   Tb.add_triangle surface_topology 0 1 2;
@@ -740,7 +740,7 @@ let transfer ~geometry ~triangle_geometry =
           "surface_distance" restricted_one |> Option.get)
         = Attribute.Float [|77.;77.|])
     "surface transfer source primitive restriction overrides coincident tie";
-  let degenerate_positions = Packed.Float3.Private.of_owned_exn
+  let degenerate_positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.; 1.; 2.|] ~y:[|0.; 0.; 0.|] ~z:[|0.; 0.; 0.|] in
   let degenerate_topology = Tb.create ~point_count:3 () in
   Tb.add_triangle degenerate_topology 0 1 2;
@@ -750,7 +750,7 @@ let transfer ~geometry ~triangle_geometry =
    | Error error when Error.code error = "invalid_surface" -> ()
    | _ -> fail "surface index accepted a degenerate triangle");
   let tiny = 1e-100 in
-  let tiny_positions = Packed.Float3.Private.of_owned_exn
+  let tiny_positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.; tiny; 0.|] ~y:[|0.; 0.; tiny|] ~z:[|0.; 0.; 0.|] in
   let tiny_topology = Tb.create ~point_count:3 () in
   Tb.add_triangle tiny_topology 0 1 2;
@@ -789,7 +789,7 @@ let transfer ~geometry ~triangle_geometry =
   if not (near_array [|2.3; 1.9|] (surface_float "quad_weight" quad_transfer))
      || not (near_array [|33.; 29.|] (surface_float "quad_corner" quad_transfer))
   then fail "general-polygon point/vertex surface interpolation";
-  let concave_positions = Packed.Float3.Private.of_owned_exn
+  let concave_positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.; 2.; 2.; 1.; 0.|] ~y:[|0.; 0.; 2.; 1.; 2.|]
       ~z:(Array.make 5 0.) in
   let concave_topology = Tb.create ~point_count:5 () in
@@ -803,7 +803,7 @@ let transfer ~geometry ~triangle_geometry =
       ~direction:(Rays_math.Vec3.neg Rays_math.Vec3.unit_z) with
    | Ok (Some hit) when hit.primitive = 0 && near hit.distance 0.75 -> ()
    | _ -> fail "surface index missed a concave polygon interior");
-  let bow_tie_positions = Packed.Float3.Private.of_owned_exn
+  let bow_tie_positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.; 2.; 0.; 2.|] ~y:[|0.; 2.; 2.; 0.|]
       ~z:(Array.make 4 0.) in
   let bow_tie_topology = Tb.create ~point_count:4 () in
@@ -813,7 +813,7 @@ let transfer ~geometry ~triangle_geometry =
   (match Surface_index.create bow_tie with
    | Error error when Error.code error = "invalid_surface" -> ()
    | _ -> fail "surface index accepted a self-intersecting polygon");
-  let bad_positions = Packed.Float3.Private.of_owned_exn
+  let bad_positions = Packed.Float3.View.of_owned_exn
       ~x:[|Float.nan|] ~y:[|0.|] ~z:[|0.|] in
   (match Spatial_index.create bad_positions with
    | Error error when Error.code error = "invalid_position" -> ()

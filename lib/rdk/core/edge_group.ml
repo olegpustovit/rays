@@ -110,16 +110,16 @@ module Builder = struct
       bits = value.bits; data_id = Data_id.fresh () }
 end
 
-module Private = struct
+module View = struct
   let of_owned_bits ~topology ~edge_count ~name bits =
     require_name name;
     if edge_count < 0 || Bytes.length bits <> byte_count edge_count then
-      invalid_arg "Edge_group.Private.of_owned_bits: invalid packed length";
+      invalid_arg "Edge_group.View.of_owned_bits: invalid packed length";
     if edge_count land 7 <> 0 && Bytes.length bits > 0 then begin
       let valid_mask = (1 lsl (edge_count land 7)) - 1 in
       let last = Bytes.length bits - 1 in
       if Char.code (Bytes.get bits last) land lnot valid_mask <> 0 then
-        invalid_arg "Edge_group.Private.of_owned_bits: set padding bits"
+        invalid_arg "Edge_group.View.of_owned_bits: set padding bits"
     end;
     { topology_id = Topology.data_id topology; name; length = edge_count; bits;
       data_id = Data_id.fresh () }
@@ -159,8 +159,8 @@ let replicate_exact_copies ?cancel ~source_topology ~source_index
       || value.topology_id <> Topology.data_id source_topology then
     Error "Edge_group.replicate_exact_copies: source topology/index/group mismatch"
   else
-    let source = Topology.Private.view source_topology
-    and target = Topology.Private.view target_topology in
+    let source = Topology.View.view source_topology
+    and target = Topology.View.view target_topology in
     let source_vertices = Array.length source.vertex_points
     and source_primitives = Bytes.length source.primitive_kinds in
     let expected_points = source.point_count * copies

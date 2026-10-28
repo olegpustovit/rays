@@ -3,7 +3,7 @@ module G = Rdk.Geometry
 
 let error code message = Error (Diagnostic.error ~code message)
 let topology geometry component =
-  let view = Rdk.Topology.Private.view (G.topology geometry) in
+  let view = Rdk.Topology.View.view (G.topology geometry) in
   match component with
   | "vertex_points" -> Ok (E.Int_array (Array.copy view.vertex_points))
   | "primitive_offsets" -> Ok (E.Int_array (Array.copy view.primitive_offsets))
@@ -12,7 +12,7 @@ let topology geometry component =
   | _ -> error "E_DATA_SOURCE" "Topology source requires vertex_points, primitive_offsets or kinds."
 
 let adjacency geometry component =
-  let view = Rdk.Topology_index.Private.view (Rdk.Topology_index.create (G.topology geometry)) in
+  let view = Rdk.Topology_index.View.view (Rdk.Topology_index.create (G.topology geometry)) in
   let array a = Ok (E.Int_array (Array.copy a)) in
   match component with
   | "primitive_of_vertex" -> array view.primitive_of_vertex
@@ -35,8 +35,8 @@ let adjacency geometry component =
    corners per triangle, primitive offsets into them, and ok 0 where the clipper refused (curve,
    degenerate or non-simple), which then emits no triangles. *)
 let triangles geometry component =
-  let topology = Rdk.Topology.Private.view (G.topology geometry) in
-  let positions = Rdk.Packed.Float3.Private.view (G.positions geometry) in
+  let topology = Rdk.Topology.View.view (G.topology geometry) in
+  let positions = Rdk.Packed.Float3.View.view (G.positions geometry) in
   let count = Bytes.length topology.primitive_kinds in
   let offsets = Array.make (count + 1) 0 and ok = Array.make count 1 in
   let primitive = ref [] and a = ref [] and b = ref [] and c = ref [] in
@@ -106,7 +106,7 @@ let mesh_points = function
       Ok(count,(fun ()->
         let x=Array.make count 0. and y=Array.make count 0. and z=Array.make count 0. in
         for i=0 to count-1 do x.(i)<-points.(3*i);y.(i)<-points.(3*i+1);z.(i)<-points.(3*i+2)done;
-        Rdk.Packed.Float3.Private.of_owned_exn ~x ~y ~z))
+        Rdk.Packed.Float3.View.of_owned_exn ~x ~y ~z))
   | E.Record fields when List.length fields=3 ->
       (match List.assoc_opt "x" fields,List.assoc_opt "y" fields,List.assoc_opt "z" fields with
        |Some(E.Float_array x),Some(E.Float_array y),Some(E.Float_array z)->
@@ -127,7 +127,7 @@ let mesh_points = function
              error "E_ARRAY_COUNT" "Mesh coordinate planes need the same element count."
            else begin
              let count=Array.length x in
-             Ok(count,(fun ()->Rdk.Packed.Float3.Private.of_owned_exn
+             Ok(count,(fun ()->Rdk.Packed.Float3.View.of_owned_exn
                ~x:(Array.copy x) ~y:(Array.copy y) ~z:(Array.copy z)))
            end
        | _,_,_->error "E_TOPOLOGY_TYPE" "Mesh planes require exactly x, y and z float arrays.")
@@ -186,7 +186,7 @@ let resolve ~geometry = function
                    | Some (E.Text component) -> adjacency geometry component
                    | _ -> error "E_DATA_SOURCE" "Adjacency source requires a component name.")
                 else
-                  let index = Rdk.Topology_index.Private.view
+                  let index = Rdk.Topology_index.View.view
                     (Rdk.Topology_index.create (G.topology geometry)) in
                   (match List.assoc_opt "component" args with
                    | Some (E.Text "a") -> Ok (E.Int_array (Array.copy index.edge_a))
@@ -289,8 +289,8 @@ let remap ?cancel ~grain ~source ~target args =
       else if point_same then G.positions source
       else match point_carry with
       | `Weighted (a, b, t) -> R.blend_positions ?cancel ~grain a b t (G.positions source)
-      | `Plain point_map -> let p = Rdk.Packed.Float3.Private.view (G.positions source) in
-        Rdk.Packed.Float3.Private.of_owned_exn
+      | `Plain point_map -> let p = Rdk.Packed.Float3.View.view (G.positions source) in
+        Rdk.Packed.Float3.View.of_owned_exn
           ~x:(R.select_float ?cancel ~grain ~missing:0. point_map p.x)
           ~y:(R.select_float ?cancel ~grain ~missing:0. point_map p.y)
           ~z:(R.select_float ?cancel ~grain ~missing:0. point_map p.z) in

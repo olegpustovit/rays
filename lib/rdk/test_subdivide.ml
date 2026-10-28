@@ -10,8 +10,8 @@ let contains text needle =
   needle_length = 0 || search 0
 
 let equal_topology left right =
-  let left = Topology.Private.view (Geometry.topology left)
-  and right = Topology.Private.view (Geometry.topology right) in
+  let left = Topology.View.view (Geometry.topology left)
+  and right = Topology.View.view (Geometry.topology right) in
   left.point_count = right.point_count
   && left.vertex_points = right.vertex_points
   && left.primitive_offsets = right.primitive_offsets
@@ -54,12 +54,12 @@ let float3_values owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some attribute ->
       (match Attribute.storage attribute with
-       | Attribute.Float3 values -> Packed.Float3.Private.view values
+       | Attribute.Float3 values -> Packed.Float3.View.view values
        | _ -> fail ("wrong float3 storage for " ^ name))
   | None -> fail ("missing float3 attribute " ^ name)
 
 let quad ?vertex_weights ?primitive_weights ?corner_weights () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.; 2.; 2.; 0.|] ~y:[|0.; 0.; 2.; 2.|] ~z:[|0.; 0.; 0.; 0.|] in
   let topology = Topology.polygons_owned ~point_count:4
       ~vertex_points:[|0;1;2;3|] ~primitive_offsets:[|0;4|] |> get_string in
@@ -74,7 +74,7 @@ let quad ?vertex_weights ?primitive_weights ?corner_weights () =
   Geometry.create ~positions ~topology ~attributes () |> get_string
 
 let crease_paths ?(moved = false) ?vertex_weights ?primitive_weights () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:(if moved then [|91.; -7.; 42.; 13.|] else [|0.; 2.; 2.; 0.|])
       ~y:(if moved then [|-4.; 81.; 17.; -23.|] else [|0.; 0.; 2.; 2.|])
       ~z:(if moved then [|8.; 9.; 10.; 11.|] else [|0.; 0.; 0.; 0.|]) in
@@ -98,7 +98,7 @@ let exact_crease_input ?(moved = false) ?vertex_weights ?primitive_weights () =
   if not moved then geometry
   else
     Geometry.with_positions
-      (Packed.Float3.Private.of_owned_exn
+      (Packed.Float3.View.of_owned_exn
         ~x:[|100.; -20.; 70.; 11.|] ~y:[|2.; 88.; -9.; 31.|]
         ~z:[|14.; 15.; 16.; 17.|]) geometry |> get_string
 
@@ -110,7 +110,7 @@ let edge_weight geometry a b =
         | Attribute.Float values -> values
         | _ -> fail "creaseweight storage changed" in
       let index = Topology_index.create (Geometry.topology geometry) in
-      let view = Topology_index.Private.view index in
+      let view = Topology_index.View.view index in
       let edge = Topology_index.find_edge index ~a ~b |> Option.get in
       let result = ref 0. in
       for at = view.edge_offsets.(edge) to view.edge_offsets.(edge + 1) - 1 do
@@ -125,7 +125,7 @@ let child_edges geometry ~source_point_count ~source_edge a b =
   Topology_index.find_edge index ~a:midpoint ~b |> Option.get
 
 let test_selected_loop_validation_scope () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;1.;0.; 3.;4.;4.;3.|]
       ~y:[|0.;0.;1.; 0.;0.;1.;1.|]
       ~z:(Array.make 7 0.) in
@@ -142,7 +142,7 @@ let test_selected_loop_validation_scope () =
     "local Loop validated or changed an unselected quad"
 
 let test_disconnected_selected_fans () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;1.;2.; 0.;1.;2.; 0.;1.;2.|]
       ~y:[|0.;0.;0.; 1.;1.;1.; 2.;2.;2.|]
       ~z:(Array.make 9 0.) in
@@ -176,7 +176,7 @@ let test_chaikin_creasing () =
     let geometry = Plane_generators.grid ~connectivity ~columns:2 ~rows:2 ~size:2. ()
         |> get_rdk in
     let index = Topology_index.create (Geometry.topology geometry)
-        |> Topology_index.Private.view in
+        |> Topology_index.View.view in
     let creaseweight = Array.init (Geometry.vertex_count geometry) (fun vertex ->
       let edge = index.edge_of_vertex.(vertex) in
       if edge < 0 then 0.
@@ -234,15 +234,15 @@ let test_chaikin_creasing () =
 
   let mask_base = Plane_generators.grid ~connectivity:Plane_generators.Grid_quads
       ~columns:3 ~rows:2 ~size:3. () |> get_rdk in
-  let mask_positions = Packed.Float3.Private.view
+  let mask_positions = Packed.Float3.View.view
       (Geometry.positions mask_base) in
-  let mask_positions = Packed.Float3.Private.of_owned_exn
+  let mask_positions = Packed.Float3.View.of_owned_exn
       ~x:(Array.copy mask_positions.x) ~y:(Array.copy mask_positions.y)
       ~z:(Array.init (Geometry.point_count mask_base) (fun point ->
         float_of_int ((point * point + (3 * point)) mod 11) *. 0.17)) in
   let mask_base = Geometry.with_positions mask_positions mask_base |> get_string in
   let mask_index_value = Topology_index.create (Geometry.topology mask_base) in
-  let mask_index = Topology_index.Private.view mask_index_value in
+  let mask_index = Topology_index.View.view mask_index_value in
   let target_edge = Topology_index.find_edge mask_index_value ~a:5 ~b:6
       |> Option.get
   and high_left = Topology_index.find_edge mask_index_value ~a:1 ~b:5
@@ -257,10 +257,10 @@ let test_chaikin_creasing () =
   let mask_input = Geometry.with_attribute
       (attribute Attribute.Vertex "creaseweight" (Attribute.Float mask_weights))
       mask_base |> get_string in
-  let mask_topology = Topology.Private.view (Geometry.topology mask_input) in
+  let mask_topology = Topology.View.view (Geometry.topology mask_input) in
   let mask_fvar = attribute Attribute.Vertex "fvar"
       (Attribute.Float (Array.map (fun point ->
-        (Packed.Float3.Private.view (Geometry.positions mask_input)).z.(point))
+        (Packed.Float3.View.view (Geometry.positions mask_input)).z.(point))
         mask_topology.vertex_points)) in
   let mask_input = Geometry.with_attribute mask_fvar mask_input |> get_string in
   let mask_uniform = Subdivide.subdivide ~grain:1
@@ -269,10 +269,10 @@ let test_chaikin_creasing () =
   and mask_chaikin = Subdivide.subdivide ~grain:1
       ~creasing_method:Subdivide.Subdivide_creasing_chaikin
       ~face_varying_interpolation:Subdivide.Subdivide_fvar_none mask_input |> get_rdk in
-  let source_positions = Packed.Float3.Private.view (Geometry.positions mask_input)
-  and uniform_positions = Packed.Float3.Private.view
+  let source_positions = Packed.Float3.View.view (Geometry.positions mask_input)
+  and uniform_positions = Packed.Float3.View.view
       (Geometry.positions mask_uniform)
-  and chaikin_positions = Packed.Float3.Private.view
+  and chaikin_positions = Packed.Float3.View.view
       (Geometry.positions mask_chaikin) in
   let target_point = Geometry.point_count mask_input + target_edge in
   let midpoint_z = (source_positions.z.(5) +. source_positions.z.(6)) *. 0.5 in
@@ -280,7 +280,7 @@ let test_chaikin_creasing () =
       && not (close uniform_positions.z.(target_point) midpoint_z))
     "Chaikin did not keep a sub-unit edge fully creased when both children survive";
   let fvar_at geometry point =
-    let topology = Topology.Private.view (Geometry.topology geometry) in
+    let topology = Topology.View.view (Geometry.topology geometry) in
     let values = float_values Attribute.Vertex "fvar" geometry in
     let result = ref None in
     Array.iteri (fun vertex vertex_point ->
@@ -350,9 +350,9 @@ let test_point_boundary_interpolation () =
   and edge_and_corner = Subdivide.subdivide
       ~boundary_interpolation:Subdivide.Subdivide_boundary_edge_and_corner input
       |> get_rdk in
-  let edge_positions = Packed.Float3.Private.view
+  let edge_positions = Packed.Float3.View.view
       (Geometry.positions edge_only)
-  and corner_positions = Packed.Float3.Private.view
+  and corner_positions = Packed.Float3.View.view
       (Geometry.positions edge_and_corner) in
   check (edge_positions.x.(0) = 0.25 && edge_positions.y.(0) = 0.25)
     "Edge Only did not apply the smooth boundary-curve stencil";
@@ -422,16 +422,16 @@ let test_point_boundary_interpolation () =
   and strip_corners = Subdivide.subdivide
       ~boundary_interpolation:Subdivide.Subdivide_boundary_edge_and_corner strip
       |> get_rdk in
-  let edge_positions = Packed.Float3.Private.view
+  let edge_positions = Packed.Float3.View.view
       (Geometry.positions strip_edge)
-  and corner_positions = Packed.Float3.Private.view
+  and corner_positions = Packed.Float3.View.view
       (Geometry.positions strip_corners) in
   check (edge_positions.x.(1) = corner_positions.x.(1)
       && edge_positions.y.(1) = corner_positions.y.(1)
       && edge_positions.z.(1) = corner_positions.z.(1))
     "Edge and Corner pinned a two-face boundary vertex";
 
-  let triangle_positions = Packed.Float3.Private.of_owned_exn
+  let triangle_positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;2.;0.|] ~y:[|0.;0.;2.|] ~z:[|0.;0.;0.|] in
   let triangle_topology = Topology.polygons_owned ~point_count:3
       ~vertex_points:[|0;1;2|] ~primitive_offsets:[|0;3|] |> get_string in
@@ -444,9 +444,9 @@ let test_point_boundary_interpolation () =
       |> get_rdk
   and loop_none = Subdivide.subdivide ~scheme:Subdivide.Loop
       ~boundary_interpolation:Subdivide.Subdivide_boundary_none triangle |> get_rdk in
-  let loop_edge_positions = Packed.Float3.Private.view
+  let loop_edge_positions = Packed.Float3.View.view
       (Geometry.positions loop_edge)
-  and loop_corner_positions = Packed.Float3.Private.view
+  and loop_corner_positions = Packed.Float3.View.view
       (Geometry.positions loop_corners) in
   check (loop_edge_positions.x.(0) = 0.25
       && loop_edge_positions.y.(0) = 0.25
@@ -485,12 +485,12 @@ let test_point_boundary_interpolation () =
 
 let test_triangle_subdivision_policy () =
   let make vertex_points primitive_offsets values =
-    let positions = Packed.Float3.Private.of_owned_exn
+    let positions = Packed.Float3.View.of_owned_exn
         ~x:(Array.copy values) ~y:(Array.make (Array.length values) 0.)
         ~z:(Array.make (Array.length values) 0.) in
     let topology = Topology.polygons_owned ~point_count:(Array.length values)
         ~vertex_points ~primitive_offsets |> get_string in
-    let topology_view = Topology.Private.view topology in
+    let topology_view = Topology.View.view topology in
     let point_value = attribute Attribute.Point "value"
         (Attribute.Float (Array.copy values))
     and fvar = attribute Attribute.Vertex "fvar"
@@ -516,9 +516,9 @@ let test_triangle_subdivision_policy () =
   and face1 = (6. +. 2. +. 14.) /. 3. in
   let expected_standard = 0.25 *. (2. +. 6. +. face0 +. face1)
   and expected_smooth = (0.03 *. (2. +. 6.)) +. (0.470 *. (face0 +. face1)) in
-  let standard_x = (Packed.Float3.Private.view
+  let standard_x = (Packed.Float3.View.view
       (Geometry.positions standard)).x.(shared)
-  and smooth_x = (Packed.Float3.Private.view
+  and smooth_x = (Packed.Float3.View.view
       (Geometry.positions smooth)).x.(shared) in
   check (close standard_x expected_standard && close smooth_x expected_smooth)
     "Smooth Triangles did not apply Pixar's two-triangle edge mask";
@@ -528,7 +528,7 @@ let test_triangle_subdivision_policy () =
         expected_smooth)
     "Smooth Triangles did not reuse the geometry stencil for point attributes";
   let fvar_at_shared geometry =
-    let topology = Topology.Private.view (Geometry.topology geometry) in
+    let topology = Topology.View.view (Geometry.topology geometry) in
     let values = float_values Attribute.Vertex "fvar" geometry in
     let result = ref None in
     Array.iteri (fun vertex point ->
@@ -552,12 +552,12 @@ let test_triangle_subdivision_policy () =
   and quad_face = (6. +. 2. +. 14. +. 18.) /. 4. in
   let expected_mixed = (0.14 *. (2. +. 6.))
       +. (0.36 *. (triangle_face +. quad_face)) in
-  check (close (Packed.Float3.Private.view
+  check (close (Packed.Float3.View.view
       (Geometry.positions mixed_smooth)).x.(mixed_shared) expected_mixed)
     "Smooth Triangles did not interpolate the mixed triangle/quad edge mask";
 
   let source_index = Topology_index.create (Geometry.topology triangles)
-      |> Topology_index.Private.view in
+      |> Topology_index.View.view in
   let source_edge = shared - Geometry.point_count triangles in
   let creaseweights = Array.init (Geometry.vertex_count triangles) (fun vertex ->
     if source_index.edge_of_vertex.(vertex) = source_edge then 1. else 0.) in
@@ -569,7 +569,7 @@ let test_triangle_subdivision_policy () =
   and creased_smooth = Subdivide.subdivide ~grain:1
       ~triangle_policy:Subdivide.Subdivide_triangles_smooth creased |> get_rdk in
   check (equal_geometry creased_standard creased_smooth
-      && close (Packed.Float3.Private.view
+      && close (Packed.Float3.View.view
         (Geometry.positions creased_smooth)).x.(shared) 4.)
     "fully sharp edge did not take precedence over Smooth Triangles";
 
@@ -605,9 +605,9 @@ let test_triangle_subdivision_policy () =
 
 let test_face_varying_interpolation () =
   let with_vertex_values geometry make =
-    let topology = Topology.Private.view (Geometry.topology geometry) in
+    let topology = Topology.View.view (Geometry.topology geometry) in
     let index = Topology_index.create (Geometry.topology geometry)
-        |> Topology_index.Private.view in
+        |> Topology_index.View.view in
     let values = Array.init (Geometry.vertex_count geometry) (fun vertex ->
       make ~topology ~index ~vertex
         ~primitive:index.primitive_of_vertex.(vertex)
@@ -616,7 +616,7 @@ let test_face_varying_interpolation () =
       (attribute Attribute.Vertex "fvar" (Attribute.Float values)) geometry
       |> get_string in
   let source_corner geometry ~primitive ~point =
-    let topology = Topology.Private.view (Geometry.topology geometry) in
+    let topology = Topology.View.view (Geometry.topology geometry) in
     let result = ref (-1) in
     for vertex = topology.primitive_offsets.(primitive)
         to topology.primitive_offsets.(primitive + 1) - 1 do
@@ -667,7 +667,7 @@ let test_face_varying_interpolation () =
           ~y:(Array.map (fun value -> (2. *. value) +. 1.) source_values)
           |> get_string))) |> get_string
       |> Geometry.with_attribute (attribute Attribute.Vertex "fvar3"
-        (Attribute.Float3 (Packed.Float3.Private.of_owned_exn
+        (Attribute.Float3 (Packed.Float3.View.of_owned_exn
           ~x:(Array.copy source_values)
           ~y:(Array.map (fun value -> value +. 3.) source_values)
           ~z:(Array.map (fun value -> (-2.) *. value) source_values))))
@@ -683,15 +683,15 @@ let test_face_varying_interpolation () =
   let scalar = (values tupled).(center_output) in
   let fvar2 = match Geometry.find_attribute ~owner:Attribute.Vertex
       "fvar2" tupled |> Option.get |> Attribute.storage with
-    | Attribute.Float2 values -> Packed.Float2.Private.view values
+    | Attribute.Float2 values -> Packed.Float2.View.view values
     | _ -> fail "fvar2 storage changed" in
   let fvar3 = match Geometry.find_attribute ~owner:Attribute.Vertex
       "fvar3" tupled |> Option.get |> Attribute.storage with
-    | Attribute.Float3 values -> Packed.Float3.Private.view values
+    | Attribute.Float3 values -> Packed.Float3.View.view values
     | _ -> fail "fvar3 storage changed" in
   let fvar4 = match Geometry.find_attribute ~owner:Attribute.Vertex
       "fvar4" tupled |> Option.get |> Attribute.storage with
-    | Attribute.Float4 values -> Packed.Float4.Private.view values
+    | Attribute.Float4 values -> Packed.Float4.View.view values
     | _ -> fail "fvar4 storage changed" in
   check (fvar2.x.(center_output) = scalar
       && fvar2.y.(center_output) = (2. *. scalar) +. 1.
@@ -716,7 +716,7 @@ let test_face_varying_interpolation () =
   check ((values junction_corners).(junction_corner) <> 10.
       && (values junction_plus1).(junction_corner) = 10.)
     "Corners Plus 1 did not pin a junction of three face-varying regions";
-  let junction_topology = Topology.Private.view
+  let junction_topology = Topology.View.view
       (Geometry.topology junction_plus1) in
   let distinct = Hashtbl.create 4 in
   Array.iteri (fun vertex point ->
@@ -733,9 +733,9 @@ let test_face_varying_interpolation () =
       |> get_string |> run Subdivide.Subdivide_fvar_corners_plus1 in
   let tuple_values = match Geometry.find_attribute ~owner:Attribute.Vertex
       "tuple_seam" tuple_junction |> Option.get |> Attribute.storage with
-    | Attribute.Float2 values -> Packed.Float2.Private.view values
+    | Attribute.Float2 values -> Packed.Float2.View.view values
     | _ -> fail "tuple seam storage changed" in
-  let tuple_topology = Topology.Private.view
+  let tuple_topology = Topology.View.view
       (Geometry.topology tuple_junction) in
   let tuple_distinct = Hashtbl.create 4 in
   Array.iteri (fun vertex point ->
@@ -780,7 +780,7 @@ let test_face_varying_interpolation () =
   let source_index = Topology_index.create (Geometry.topology input) in
   let crease_edge = Topology_index.find_edge source_index ~a:5 ~b:6
       |> Option.get in
-  let source_index_view = Topology_index.Private.view source_index in
+  let source_index_view = Topology_index.View.view source_index in
   let crease_weights = Array.init (Geometry.vertex_count input) (fun vertex ->
     if source_index_view.edge_of_vertex.(vertex) = crease_edge then 1. else 0.) in
   let creased_input = Geometry.with_attribute
@@ -861,7 +861,7 @@ let test_face_varying_interpolation () =
    | _ -> fail "cancelled face-varying refinement published geometry")
 
 let curve_network () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.; 1.; 4.|] ~y:[|0.; 2.; 0.|] ~z:[|0.; 0.; 0.|] in
   let topology = Topology.create_owned ~point_count:3
       ~vertex_points:[|0;1; 1;2|] ~primitive_offsets:[|0;2;4|]
@@ -874,7 +874,7 @@ let curve_network () =
       (Packed.Int_array.create_owned ~offsets:[|0;1;3;4|]
         ~values:[|10;11;111;12|] |> get_string));
     attribute Attribute.Point "N" (Attribute.Float3
-      (Packed.Float3.Private.of_owned_exn ~x:[|0.;0.;0.|]
+      (Packed.Float3.View.of_owned_exn ~x:[|0.;0.;0.|]
         ~y:[|0.;0.;0.|] ~z:[|1.;1.;1.|]));
     attribute Attribute.Vertex "u" (Attribute.Float [|0.;2.; 10.;14.|]);
     attribute Attribute.Vertex "label" (Attribute.Text [|"a";"b";"c";"d"|]);
@@ -908,11 +908,11 @@ let test_polygon_curve_subdivision () =
   check (Geometry.point_count shared = 5 && Geometry.vertex_count shared = 6
       && Geometry.primitive_count shared = 2)
     "shared polygon-curve subdivision cardinality";
-  let topology = Topology.Private.view (Geometry.topology shared) in
+  let topology = Topology.View.view (Geometry.topology shared) in
   check (topology.vertex_points = [|0;3;1; 1;4;2|]
       && Bytes.equal topology.primitive_kinds (Bytes.of_string "\001\001"))
     "shared polygon-curve subdivision topology";
-  let positions = Packed.Float3.Private.view (Geometry.positions shared) in
+  let positions = Packed.Float3.View.view (Geometry.positions shared) in
   check (positions.x = [|0.;1.25;4.;0.5;2.5|]
       && positions.y = [|0.;1.5;0.;1.;1.|])
     "shared polygon-curve cubic stencil";
@@ -947,7 +947,7 @@ let test_polygon_curve_subdivision () =
   check (Geometry.point_count independent = 6
       && Geometry.vertex_count independent = 6)
     "independent polygon-curve subdivision did not duplicate shared corners";
-  let independent_positions = Packed.Float3.Private.view
+  let independent_positions = Packed.Float3.View.view
       (Geometry.positions independent) in
   check (independent_positions.x = [|0.;0.5;1.; 1.;2.5;4.|]
       && independent_positions.y = [|0.;1.;2.; 2.;1.;0.|])
@@ -963,7 +963,7 @@ let test_polygon_curve_subdivision () =
       && Geometry.vertex_count recursive_independent = 10)
     "recursive independent polygon-curve refinement";
   let bilinear = run 1 ~scheme:Subdivide.Bilinear () in
-  let bilinear_positions = Packed.Float3.Private.view
+  let bilinear_positions = Packed.Float3.View.view
       (Geometry.positions bilinear) in
   check (bilinear_positions.x.(1) = 1. && bilinear_positions.y.(1) = 2.)
     "bilinear polygon-curve refinement moved an old point";
@@ -983,10 +983,10 @@ let test_polygon_curve_subdivision () =
       && Geometry.primitive_count local_one = 2
       && Geometry.vertex_count local_one = 5)
     "local polygon-curve subdivision exactness/cardinality";
-  let local_topology = Topology.Private.view (Geometry.topology local_one) in
+  let local_topology = Topology.View.view (Geometry.topology local_one) in
   check (local_topology.primitive_offsets = [|0;3;5|])
     "local polygon-curve subdivision did not restore primitive order";
-  let closed_positions = Packed.Float3.Private.of_owned_exn
+  let closed_positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;2.;2.;0.|] ~y:[|0.;0.;2.;2.|] ~z:[|0.;0.;0.;0.|] in
   let closed_topology = Topology.create_owned ~point_count:4
       ~vertex_points:[|0;1;2;3|] ~primitive_offsets:[|0;4|]
@@ -1002,10 +1002,10 @@ let test_polygon_curve_subdivision () =
       && Topology.primitive_kind (Geometry.topology closed_one) 0
          = Topology.Closed_polyline)
     "closed polygon-curve subdivision exactness/topology";
-  let closed_output = Packed.Float3.Private.view (Geometry.positions closed_one) in
+  let closed_output = Packed.Float3.View.view (Geometry.positions closed_one) in
   check (closed_output.x.(0) = 0.25 && closed_output.y.(0) = 0.25)
     "closed polygon-curve cubic stencil";
-  let free_positions = Packed.Float3.Private.of_owned_exn
+  let free_positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;1.;9.|] ~y:[|0.;0.;9.|] ~z:[|0.;0.;9.|] in
   let free_topology = Topology.create_owned ~point_count:3
       ~vertex_points:[|0;1|] ~primitive_offsets:[|0;2|]
@@ -1015,7 +1015,7 @@ let test_polygon_curve_subdivision () =
   List.iter (fun independent ->
     let output = Subdivide.subdivide ~treat_curves_as_independent:independent
         free_source |> get_rdk in
-    let positions = Packed.Float3.Private.view (Geometry.positions output) in
+    let positions = Packed.Float3.View.view (Geometry.positions output) in
     check (Geometry.point_count output = 4
         && Array.exists (( = ) 9.) positions.x
         && Array.exists (( = ) 9.) positions.y
@@ -1026,7 +1026,7 @@ let test_polygon_curve_subdivision () =
       ~vertex_points:[|0;0|] ~primitive_offsets:[|0;2|]
       ~primitive_kinds:[|Topology.Open_polyline|] |> get_string in
   let invalid = Geometry.create
-      ~positions:(Packed.Float3.Private.of_owned_exn
+      ~positions:(Packed.Float3.View.of_owned_exn
         ~x:[|0.;1.|] ~y:[|0.;0.|] ~z:[|0.;0.|])
       ~topology:invalid_topology () |> get_string in
   (match Subdivide.subdivide invalid with
@@ -1046,7 +1046,7 @@ let test_polygon_curve_subdivision () =
          "Subdivide returned the wrong Loop/curve diagnostic")
 
 let mixed_surface_curves () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;1.;4.; 0.;2.;2.;0.|]
       ~y:[|0.;2.;0.; 4.;4.;6.;6.|]
       ~z:[|0.;0.;0.; 0.;0.;0.;0.|] in
@@ -1059,7 +1059,7 @@ let mixed_surface_curves () =
     attribute Attribute.Point "weight"
       (Attribute.Float [|0.;8.;16.; 20.;21.;22.;23.|]);
     attribute Attribute.Point "N" (Attribute.Float3
-      (Packed.Float3.Private.of_owned_exn ~x:(Array.make 7 0.)
+      (Packed.Float3.View.of_owned_exn ~x:(Array.make 7 0.)
         ~y:(Array.make 7 0.) ~z:(Array.make 7 1.)));
     attribute Attribute.Vertex "u"
       (Attribute.Float [|0.;2.; 3.;4.;5.;6.; 10.;14.|]);
@@ -1080,7 +1080,7 @@ let test_mixed_surface_curve_subdivision () =
     "mixed surface/curve subdivision differs across one and four domains";
   check (Geometry.primitive_count one = 6)
     "mixed surface/curve subdivision primitive cardinality";
-  let topology = Topology.Private.view (Geometry.topology one) in
+  let topology = Topology.View.view (Geometry.topology one) in
   check (Bytes.equal topology.primitive_kinds
       (Bytes.of_string "\001\000\000\000\000\001"))
     "mixed subdivision did not restore source primitive order";
@@ -1097,7 +1097,7 @@ let test_mixed_surface_curve_subdivision () =
     "local mixed subdivision differs across domains";
   check (Geometry.primitive_count local_one = 6)
     "local mixed subdivision changed pass-through curve cardinality";
-  let local_topology = Topology.Private.view (Geometry.topology local_one) in
+  let local_topology = Topology.View.view (Geometry.topology local_one) in
   check (Bytes.equal local_topology.primitive_kinds
       (Bytes.of_string "\001\000\000\000\000\001"))
     "local mixed subdivision changed primitive order";
@@ -1108,7 +1108,7 @@ let test_mixed_surface_curve_subdivision () =
   and recomputed_four = run 4 ~recompute:true () in
   check (equal_geometry recomputed recomputed_four)
     "mixed recomputed Subdivide normals differ across domain counts";
-  let topology = Topology.Private.view (Geometry.topology recomputed)
+  let topology = Topology.View.view (Geometry.topology recomputed)
   and n = float3_values Attribute.Point "N" recomputed in
   let surface = Bytes.make topology.point_count '\000'
   and curve = Bytes.make topology.point_count '\000' in

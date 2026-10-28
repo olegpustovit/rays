@@ -9,7 +9,7 @@ let attribute owner name storage geometry =
 let float_attribute owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some value ->
-      (match Attribute.Private.storage value with
+      (match Attribute.View.storage value with
        | Attribute.Float values -> values
        | _ -> fail (name ^ " storage changed"))
   | None -> fail ("missing " ^ name)
@@ -17,8 +17,8 @@ let float_attribute owner name geometry =
 let float4_attribute owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
   | Some value ->
-      (match Attribute.Private.storage value with
-       | Attribute.Float4 values -> Packed.Float4.Private.view values
+      (match Attribute.View.storage value with
+       | Attribute.Float4 values -> Packed.Float4.View.view values
        | _ -> fail (name ^ " storage changed"))
   | None -> fail ("missing " ^ name)
 
@@ -44,7 +44,7 @@ let incident_vertices index edge =
     (fun local -> Topology_index.edge_vertex index ~edge ~local)
 
 let non_manifold () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.; 1.; 0.; 0.; 0.|]
       ~y:[|0.; 0.; 1.; -1.; 0.|]
       ~z:[|0.; 0.; 0.; 0.; 1.|] in
@@ -54,8 +54,8 @@ let non_manifold () =
   Geometry.create ~positions ~topology () |> Result.get_ok
 
 let equal_float4 left right =
-  let left = Packed.Float4.Private.view left
-  and right = Packed.Float4.Private.view right in
+  let left = Packed.Float4.View.view left
+  and right = Packed.Float4.View.view right in
   left.x = right.x && left.y = right.y && left.z = right.z && left.w = right.w
 
 let equal_storage left right = match left, right with
@@ -63,29 +63,29 @@ let equal_storage left right = match left, right with
   | Attribute.Int left, Attribute.Int right -> left = right
   | Attribute.Float4 left, Attribute.Float4 right -> equal_float4 left right
   | Attribute.Float2 left, Attribute.Float2 right ->
-      let left = Packed.Float2.Private.view left
-      and right = Packed.Float2.Private.view right in
+      let left = Packed.Float2.View.view left
+      and right = Packed.Float2.View.view right in
       left.x = right.x && left.y = right.y
   | Attribute.Float3 left, Attribute.Float3 right ->
-      let left = Packed.Float3.Private.view left
-      and right = Packed.Float3.Private.view right in
+      let left = Packed.Float3.View.view left
+      and right = Packed.Float3.View.view right in
       left.x = right.x && left.y = right.y && left.z = right.z
   | Attribute.Text left, Attribute.Text right -> left = right
   | Attribute.Int_array left, Attribute.Int_array right ->
-      let left = Packed.Int_array.Private.view left
-      and right = Packed.Int_array.Private.view right in
+      let left = Packed.Int_array.View.view left
+      and right = Packed.Int_array.View.view right in
       left.offsets = right.offsets && left.values = right.values
   | Attribute.Float_array left, Attribute.Float_array right ->
-      let left = Packed.Float_array.Private.view left
-      and right = Packed.Float_array.Private.view right in
+      let left = Packed.Float_array.View.view left
+      and right = Packed.Float_array.View.view right in
       left.offsets = right.offsets && left.values = right.values
   | _ -> false
 
 let equal_attributes left right =
   List.equal (fun left right -> Attribute.owner left = Attribute.owner right
       && String.equal (Attribute.name left) (Attribute.name right)
-      && equal_storage (Attribute.Private.storage left)
-           (Attribute.Private.storage right))
+      && equal_storage (Attribute.View.storage left)
+           (Attribute.View.storage right))
     (Geometry.attributes left) (Geometry.attributes right)
 
 let expect_invalid work message = match work () with

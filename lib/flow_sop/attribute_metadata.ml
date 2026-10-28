@@ -129,13 +129,13 @@ let storage_kind = function
   | Float4 _ -> "vec4" | Text _ -> "text" | Float_array _ -> "float_array" | Int_array _ -> "int_array"
 let type_of ~owner ~name geometry =
   let storage=if owner=A.Point && name="P" then Some (A.Float3 (G.positions geometry))
-    else Option.map A.Private.storage (G.find_attribute ~owner name geometry) in
+    else Option.map A.View.storage (G.find_attribute ~owner name geometry) in
   match storage with Some storage->Ok (E.Text (storage_kind storage))
   |None->error "E_ATTR_TYPE" (Printf.sprintf "Attribute %S is missing." name)
 let names ~owner ~pattern geometry =
   Result.bind (Result.map_error (Diagnostic.error ~code:"E_ATTR_PATTERN")
     (Rdk.Attribute_pattern.compile pattern)) (fun compiled ->
-    let names=G.Private.attributes geometry |> Array.to_seq |> Seq.filter_map (fun attribute ->
+    let names=G.View.attributes geometry |> Array.to_seq |> Seq.filter_map (fun attribute ->
       if A.owner attribute=owner && Rdk.Attribute_pattern.matches compiled (A.name attribute)
       then Some (A.name attribute) else None) |> Array.of_seq in Ok (E.Text_array names))
 (* Parallel name/type/owner columns of the stored attributes, in native attribute order. *)
@@ -143,10 +143,10 @@ let entries ~owner ~component geometry =
   let owner_text attribute=match A.owner attribute with
     |A.Point->"point"|Vertex->"vertex"|Primitive->"primitive"|Detail->"detail" in
   let column=match component with
-    |"name"->Ok A.name|"type"->Ok(fun attribute->storage_kind(A.Private.storage attribute))
+    |"name"->Ok A.name|"type"->Ok(fun attribute->storage_kind(A.View.storage attribute))
     |"owner"->Ok owner_text
     |_->error "E_ATTR_ENTRIES" "Attribute entry component is name, type or owner." in
-  Result.map(fun column->E.Text_array(G.Private.attributes geometry |> Array.to_seq
+  Result.map(fun column->E.Text_array(G.View.attributes geometry |> Array.to_seq
     |> Seq.filter(fun attribute->owner=None||owner=Some(A.owner attribute))
     |> Seq.map column |> Array.of_seq))column
 let resolve ~geometry = function

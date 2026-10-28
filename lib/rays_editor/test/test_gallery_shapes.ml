@@ -18,7 +18,7 @@ let rec replace head replacement form = match form.S.node with
   | _ -> form
 let polygon points =
   let count = Array.length points in
-  let positions = Rdk.Packed.Float3.Private.of_owned_exn
+  let positions = Rdk.Packed.Float3.View.of_owned_exn
     ~x:(Array.map (fun (x,_,_) -> x) points) ~y:(Array.map (fun (_,y,_) -> y) points)
     ~z:(Array.map (fun (_,_,z) -> z) points) in
   let topology = Rdk.Topology.polygons_owned ~point_count:count
@@ -57,7 +57,7 @@ let cook session node =
   let context = Sop.Context.create ~domains:1 () |> Result.get_ok in
   let output = Sop.Session.cook session ~context node |> Result.get_ok in
   Sop.Payload.geometry output.payload |> Result.get_ok
-let bounds geometry = Rdk.Bound.Private.selected_bounds ~grain:16384
+let bounds geometry = Rdk.Bound.View.selected_bounds ~grain:16384
   ~operation:"gallery comparison" None geometry |> Result.get_ok
 let scene geometry =
   let mesh=Rdk_rays.Rays_mesh.to_mesh geometry |> Result.get_ok in

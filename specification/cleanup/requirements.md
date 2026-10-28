@@ -235,9 +235,9 @@ Findings: WN1 WN11 PL8.
 
 After P1, rdk holds only live kernels. Give it one error model, one parallel and cancel helper, one storage map, and a three-library structure.
 
-- [ ] P6.S1: Errors: one internal `Rdk_error of Error.t`, converted to `result` once at the boundary. Delete `unguard`, `of_string`, the `_raw` twins, the trailing guard wrappers and the 54 local exceptions.
+- [x] P6.S1: Errors: one internal `Rdk_error of Error.t`, converted to `result` once at the boundary. Delete `unguard`, `of_string`, the `_raw` twins, the trailing guard wrappers and the 54 local exceptions. Evidence: see RK3.
 - [ ] P6.S2: One `Support.parallel_for/parallel_ranges` and `Cancel.poll` with a single cadence, applied by codemod to the 886 sites.
-- [ ] P6.S3: `Attribute.map_float_planes`/`planes` to collapse the per-storage arms. One generic median BVH and one `Point_grid`. Merge the two boolean payload modules.
+- [x] P6.S3: `Attribute.map_float_planes`/`planes` to collapse the per-storage arms. One generic median BVH and one `Point_grid`. Merge the two boolean payload modules. Evidence: see RK8, RK9, RK10 and RK15.
 - [ ] P6.S4: Kernel parameters become required records with no defaults, so the declaration is the single source of defaults.
 - [ ] P6.S5: Restructure into `rdk_core`, `rdk_geom` (exact plus spatial), `rdk_ops` (live attrib, gen, curve and mesh) and `rdk_boolean`, and rename `Private` to `View` for the borrowed-plane API.
 - [ ] P6.S6: Tests: local fixtures, one support library opened everywhere, and `parallel_exact` shared.
@@ -245,7 +245,7 @@ After P1, rdk holds only live kernels. Give it one error model, one parallel and
 Exit gates:
 
 - [ ] P6.G1: rdk under about 80k lines including tests
-- [ ] P6.G2: no `unguard`/`_raw` pairs
+- [x] P6.G2: no `unguard`/`_raw` pairs Evidence: grep for unguard or _raw in lib/rdk finds only local helpers (add_raw, insert_raw, group_of_raw), none of them guarded twins.
 - [ ] P6.G3: one parallel helper
 - [ ] P6.G4: rdk test alias under 30 s warm
 
@@ -733,7 +733,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **RK2** (P0, high, correctness-risk, effort S). Location at baseline: lib/rdk/test_main.ml:3-4. `test_rdk_sources` and `test_copy_to_points` are in group 'rdk_parts', which no dune rule selects. 751 lines never run, including a GC-stress regression. Action: Move them into 'core' and 'mesh'. The guardrail (§07) stops this from happening again. Evidence: rdk_parts is gone; test_rdk_sources runs under core and test_copy_to_points under mesh in lib/rdk/test_main.ml.
 
-- [ ] **RK3** (P6, high, vibe-code, effort L). Location at baseline: core/error.ml:13-21 + 54 local exceptions, 114 string-result + 209 Error.t signatures, ~30 `unguard`. Each error passes through three forms (local exception, string result, Error.t), with 36 `_raw`/guarded twin functions. Action: Use one internal `Rdk_error of Error.t` and convert to `result` once at the rdk boundary. Delete unguard, of_string, the twins and the local exceptions.
+- [x] **RK3** (P6, high, vibe-code, effort L). Location at baseline: core/error.ml:13-21 + 54 local exceptions, 114 string-result + 209 Error.t signatures, ~30 `unguard`. Each error passes through three forms (local exception, string result, Error.t), with 36 `_raw`/guarded twin functions. Action: Use one internal `Rdk_error of Error.t` and convert to `result` once at the rdk boundary. Delete unguard, of_string, the twins and the local exceptions. Evidence: 91cf8472 and c559ac0c: one Error.Rdk of Error.t (operation, code, message) and Error.Fail, converted once by Error.guard/Error.run (with ?invalid_argument and ?cancelled code mapping). unguard 26→0, real _raw twins about 18→0, local exceptions 55→10 (the remaining 10 are control flow and infrastructure); public messages and codes unchanged.
 
 - [ ] **RK4** (P6, high, duplication, effort M). Location at baseline: attrib/group_ops.ml:4207-4313 (+ Attribute_ops, Curve_topology, Group_mesh, Point_replication, Sweep_modeling). Each operation is re-declared at the end of the file with 10–15 optional arguments, only to wrap it in `Error.guard`. Action: This goes away with RK3.
 
@@ -743,11 +743,11 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [ ] **RK7** (P6, high, duplication, effort M). Location at baseline: 886 inline `if i land MASK = 0 then Cancel.check_opt` sites with 11 different masks. The cancellation cadence is copied by hand everywhere. Action: Add `Cancel.poll cancel i`, or put the check inside the parallel helper. The change is mechanical.
 
-- [ ] **RK8** (P6, high, duplication, effort M). Location at baseline: 209 `match storage with`; Float4 arms ×85 in 40 files; planes_of_storage at attribute_composite.ml:77 and attribute_generate.ml:504. The same code is copied for each storage type. Action: Add `Attribute.map_float_planes`/`planes` to core.
+- [x] **RK8** (P6, high, duplication, effort M). Location at baseline: 209 `match storage with`; Float4 arms ×85 in 40 files; planes_of_storage at attribute_composite.ml:77 and attribute_generate.ml:504. The same code is copied for each storage type. Action: Add `Attribute.map_float_planes`/`planes` to core. Evidence: Attribute.float_planes and of_float_planes collapse the Float..Float4 arms in Attribute_transfer and both Boolean_payload interpolators.
 
-- [ ] **RK9** (P6, med, duplication, effort M). Location at baseline: surface_index.ml:393 · bounds3_index.ml:35 · bounds2_index.ml:57. Three median-split BVH builders. Action: One generic builder (dimension plus extra planes).
+- [x] **RK9** (P6, med, duplication, effort M). Location at baseline: surface_index.ml:393 · bounds3_index.ml:35 · bounds2_index.ml:57. Three median-split BVH builders. Action: One generic builder (dimension plus extra planes). Evidence: Surface_index builds on Bounds3_index through ?extend; Bounds2_index keeps its own split scheme to preserve tree shape and exactness.
 
-- [ ] **RK10** (P6, med, duplication, effort S). Location at baseline: point_clusters.ml:91 · point_snap.ml:100. Two open-addressing uniform grids. Action: Extract one `Point_grid`.
+- [x] **RK10** (P6, med, duplication, effort S). Location at baseline: point_clusters.ml:91 · point_snap.ml:100. Two open-addressing uniform grids. Action: Extract one `Point_grid`. Evidence: one Point_grid module serves Point_clusters and Point_snap.
 
 - [ ] **RK11** (P6, med, layering, effort S). Location at baseline: surface_index.ml:1219-1232 → mesh/ray.ml:221 via Private. Ray-SOP policy (sample average/median, directions) lives inside the spatial index. Action: Move it into `Ray`; the index keeps only hit queries.
 
@@ -757,11 +757,11 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **RK14** (P1, med, oracle-only, effort S). Location at baseline: implicit_point.ml:848-1189,1763,1808 · predicates.ml:42,89,167 (Private). About 200 lines of `*_reference` twins kept only for differential tests. Action: Move them to test support. Evidence: the exact_*_reference predicate twins live in lib/rdk/test_predicates.ml.
 
-- [ ] **RK15** (P6, med, duplication, effort S). Location at baseline: boolean_payload.ml vs boolean_corner_payload.ml. storage_kind, collect_attributes, collect_groups, parallel_for, selected and source_storage are written twice; `copy` is re-exported. Action: Merge them into one module.
+- [x] **RK15** (P6, med, duplication, effort S). Location at baseline: boolean_payload.ml vs boolean_corner_payload.ml. storage_kind, collect_attributes, collect_groups, parallel_for, selected and source_storage are written twice; `copy` is re-exported. Action: Merge them into one module. Evidence: Boolean_corner_payload is folded into Boolean_payload, with one storage_kind, collect_* and source_storage.
 
 - [ ] **RK16** (P6, med, api-bloat, effort L). Location at baseline: 174 `?(grain = 16_384)`; 15 functions with 15–32 optional arguments (triangulate2d run 32, point_replicate 31, ray 28). SOPs pass every argument explicitly, so rdk's defaults are a second source of defaults that only tests use. Action: Use required parameter records with no defaults; tests build them with one helper.
 
-- [ ] **RK17** (P7, med, naming, effort M). Location at baseline: 32 .mli with `module Private`; Attribute.Private.storage ×46, Topology.Private.view ×21 used by sop, flow_sop, rays_editor. Production code depends on the borrowed-plane API that lives in `Private`. Action: Rename it `View` and document it as that API.
+- [x] **RK17** (P7, med, naming, effort M). Location at baseline: 32 .mli with `module Private`; Attribute.Private.storage ×46, Topology.Private.view ×21 used by sop, flow_sop, rays_editor. Production code depends on the borrowed-plane API that lives in `Private`. Action: Rename it `View` and document it as that API. Evidence: rdk's borrowed-plane Private is renamed View across rdk and every caller; the stale allowlist rows are gone.
 
 - [ ] **RK18** (P6, med, vibe-code, effort S). Location at baseline: 13 `owner_count`, 42 local `fail`, 13 `get_ok`, 14 `checked_add`, 5 union-find. Shared definitions already exist in core. Action: `tools/dedupe --qualify Support`, then delete the tool (TT11).
 
@@ -935,7 +935,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **UI5** (P5, high, test-sprawl, effort S). Location at baseline: marks_scene_test/dune:2 · native_qualification/dune:1-9 · tools/dune:241 · gate_test/dune:2. marks_scene.ml is compiled 4 times and drawing/workspace_* twice, so one binary carries two `Marks_scene` modules. Action: UI4 removes all of the copies. Move `Gate` into `input`.
 
-- [ ] **UI6** (P5, high, layering, effort S). Location at baseline: rays_editor/surface.ml, packed_pieces.ml. SOP-to-Scene3 glue over rdk, with one editor call site. Action: Move them to rdk_rays; the editor drops its direct dependency on rdk.
+- [x] **UI6** (P5, high, layering, effort S). Location at baseline: rays_editor/surface.ml, packed_pieces.ml. SOP-to-Scene3 glue over rdk, with one editor call site. Action: Move them to rdk_rays; the editor drops its direct dependency on rdk. Evidence: the editor reads geometry through Rdk_rays.Geometry_view (probe summary, bounds, sheet columns, wire mesh, pick and cast); rays_editor no longer depends on rdk.
 
 - [x] **UI7** (P0, high, doc-rot, effort S). Location at baseline: pxui_graph/AGENTS.md:42,44 · flow.md:37 vs flow.md:356 · scope_state.ml:145. The normative docs contradict each other: 'No curves' vs curves by default. Action: Settle on one style and delete the losing styles (UI8).
 
@@ -997,7 +997,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [ ] **UI36** (P5, low, naming, effort S). Location at baseline: Core, Environment, Leader, Contexts, `core_*` prefix. Names that don't say what the module is. Action: Rename them while doing UI1 and UI14.
 
-- [ ] **UI37** (P7, low, api-bloat, effort S). Location at baseline: editor_document document/layers/objects/literal_edit (1,302 lines). No `.mli` and not private. Action: Add `.mli` files or mark them private.
+- [x] **UI37** (P7, low, api-bloat, effort S). Location at baseline: editor_document document/layers/objects/literal_edit (1,302 lines). No `.mli` and not private. Action: Add `.mli` files or mark them private. Evidence: document, document_edit, literal_edit, objects and layers have .mli files trimmed to what the repo uses.
 
 - [x] **TT1** (P0, high, process, effort S). Location at baseline: .claude/worktrees/agent-af1aa771a748d6720 (900 MB, locked). A stale agent worktree that doubles grep and skill hits. Action: `git worktree remove --force` and ignore `.claude/worktrees/`.
 

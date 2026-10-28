@@ -15,7 +15,7 @@ let segment_count value = Array.length value.segment_first
 let segment_first value segment = value.segment_first.(segment)
 let segment_second value segment = value.segment_second.(segment)
 
-module Private = struct
+module View = struct
   let point value point = value.points.(point)
   let point_handle value point = value.point_handles.(point)
 end
@@ -29,17 +29,17 @@ let face_constraint constraints side slot = match side with
   | Right -> Boolean_constraints.right_constraint constraints slot
 
 let face_coplanar_range coplanar side triangle = match side with
-  | Left -> Boolean_coplanar.Private.left_pair_range coplanar triangle
-  | Right -> Boolean_coplanar.Private.right_pair_range coplanar triangle
+  | Left -> Boolean_coplanar.View.left_pair_range coplanar triangle
+  | Right -> Boolean_coplanar.View.right_pair_range coplanar triangle
 
 let face_coplanar_pair coplanar side slot = match side with
-  | Left -> Boolean_coplanar.Private.left_pair coplanar slot
-  | Right -> Boolean_coplanar.Private.right_pair coplanar slot
+  | Left -> Boolean_coplanar.View.left_pair coplanar slot
+  | Right -> Boolean_coplanar.View.right_pair coplanar slot
 
 let face_triangle_point constraints side triangle local = match side with
-  | Left -> Boolean_constraints.Private.left_triangle_point
+  | Left -> Boolean_constraints.View.left_triangle_point
       constraints triangle local
-  | Right -> Boolean_constraints.Private.right_triangle_point
+  | Right -> Boolean_constraints.View.right_triangle_point
       constraints triangle local
 
 let opponent constraints side triangle constraint_index =
@@ -54,7 +54,7 @@ let opponent constraints side triangle constraint_index =
     first_triangle
 
 let opponent_triangle_point constraints side triangle local =
-  Boolean_constraints.Private.triangle_point constraints side triangle local
+  Boolean_constraints.View.triangle_point constraints side triangle local
 
 let sign_opposite left right = match left, right with
   | Predicates.Negative, Predicates.Positive
@@ -767,7 +767,7 @@ let build ?cancel ?coplanar constraints ~side ~triangle =
   try
     Cancel.check_opt cancel;
     Option.iter (fun value ->
-      if Boolean_coplanar.Private.constraints value != constraints then
+      if Boolean_coplanar.View.constraints value != constraints then
         invalid_arg "coplanar plan belongs to a different constraint plan") coplanar;
     let first_slot, last_slot = face_constraint_range constraints side triangle in
     let face_constraint_count = last_slot - first_slot in
@@ -796,7 +796,7 @@ let build ?cancel ?coplanar constraints ~side ~triangle =
           raw_segment_capacity := !raw_segment_capacity
               + Boolean_coplanar.boundary_count coplanar pair
         done) coplanar;
-      let source = Boolean_constraints.Private.source constraints in
+      let source = Boolean_constraints.View.source constraints in
       let fallback = Implicit_point.explicit source
           (face_triangle_point constraints side triangle 0) |> Result.get_ok in
       let points = ref (Array.make (max 4 !point_capacity) fallback)
@@ -833,10 +833,10 @@ let build ?cancel ?coplanar constraints ~side ~triangle =
         and second_handle = Boolean_constraints.constraint_second
             constraints constraint_index in
         let first = append_point ~handle:first_handle
-            (Boolean_constraints.Private.point constraints first_handle) in
+            (Boolean_constraints.View.point constraints first_handle) in
         if first_handle <> second_handle then begin
           let second = append_point ~handle:second_handle
-              (Boolean_constraints.Private.point constraints second_handle) in
+              (Boolean_constraints.View.point constraints second_handle) in
           append_segment first second constraint_index (-1) (-1)
         end
       done;
@@ -845,15 +845,15 @@ let build ?cancel ?coplanar constraints ~side ~triangle =
           let pair = face_coplanar_pair coplanar side slot in
           let count = Boolean_coplanar.point_count coplanar pair in
           let point_map = Array.init count (fun point -> append_point
-              (Boolean_coplanar.Private.point coplanar pair point)) in
+              (Boolean_coplanar.View.point coplanar pair point)) in
           for boundary = 0 to Boolean_coplanar.boundary_count coplanar pair - 1 do
             append_segment
               point_map.(Boolean_coplanar.boundary_first coplanar pair boundary)
               point_map.(Boolean_coplanar.boundary_second coplanar pair boundary)
               (-1)
-              (Boolean_coplanar.Private.boundary_support_first
+              (Boolean_coplanar.View.boundary_support_first
                  coplanar pair boundary)
-              (Boolean_coplanar.Private.boundary_support_second
+              (Boolean_coplanar.View.boundary_support_second
                  coplanar pair boundary)
           done
         done) coplanar;

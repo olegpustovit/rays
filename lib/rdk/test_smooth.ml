@@ -8,13 +8,13 @@ let add_attribute attribute geometry =
 let point_float name geometry =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Float values -> values
        | _ -> fail (name ^ " has unexpected storage"))
   | None -> fail ("missing point attribute " ^ name)
 
 let two_curves () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.; 1.; 2.; 10.; 11.; 12.|]
       ~y:[|0.; 3.; 0.; 0.; 4.; 0.|]
       ~z:(Array.make 6 0.) in
@@ -28,7 +28,7 @@ let two_curves () =
 let perturbed_grid () =
   let geometry = Plane_generators.grid ~columns:2 ~rows:2 ~size:2. () |> get_ok in
   let source = positions geometry in
-  let values = Packed.Float3.Private.of_owned_exn ~x:(Array.copy source.x)
+  let values = Packed.Float3.View.of_owned_exn ~x:(Array.copy source.x)
       ~y:(Array.mapi (fun point y -> if point = 4 then 3. else y) source.y)
       ~z:(Array.copy source.z) in
   Geometry.with_positions values geometry |> get_string_ok
@@ -36,37 +36,37 @@ let perturbed_grid () =
 let equal_attribute left right =
   Attribute.owner left = Attribute.owner right
   && String.equal (Attribute.name left) (Attribute.name right)
-  && match Attribute.Private.storage left, Attribute.Private.storage right with
+  && match Attribute.View.storage left, Attribute.View.storage right with
   | Attribute.Float left, Attribute.Float right -> left = right
   | Attribute.Int left, Attribute.Int right -> left = right
   | Attribute.Text left, Attribute.Text right -> left = right
   | Attribute.Float2 left, Attribute.Float2 right ->
-      let left = Packed.Float2.Private.view left
-      and right = Packed.Float2.Private.view right in
+      let left = Packed.Float2.View.view left
+      and right = Packed.Float2.View.view right in
       left.x = right.x && left.y = right.y
   | Attribute.Float3 left, Attribute.Float3 right ->
-      let left = Packed.Float3.Private.view left
-      and right = Packed.Float3.Private.view right in
+      let left = Packed.Float3.View.view left
+      and right = Packed.Float3.View.view right in
       left.x = right.x && left.y = right.y && left.z = right.z
   | Attribute.Float4 left, Attribute.Float4 right ->
-      let left = Packed.Float4.Private.view left
-      and right = Packed.Float4.Private.view right in
+      let left = Packed.Float4.View.view left
+      and right = Packed.Float4.View.view right in
       left.x = right.x && left.y = right.y && left.z = right.z
       && left.w = right.w
   | Attribute.Int_array left, Attribute.Int_array right ->
-      let left = Packed.Int_array.Private.view left
-      and right = Packed.Int_array.Private.view right in
+      let left = Packed.Int_array.View.view left
+      and right = Packed.Int_array.View.view right in
       left.offsets = right.offsets && left.values = right.values
   | Attribute.Float_array left, Attribute.Float_array right ->
-      let left = Packed.Float_array.Private.view left
-      and right = Packed.Float_array.Private.view right in
+      let left = Packed.Float_array.View.view left
+      and right = Packed.Float_array.View.view right in
       left.offsets = right.offsets && left.values = right.values
   | _ -> false
 
 let equal_geometry left right =
   let left_positions = positions left and right_positions = positions right
-  and left_topology = Topology.Private.view (Geometry.topology left)
-  and right_topology = Topology.Private.view (Geometry.topology right) in
+  and left_topology = Topology.View.view (Geometry.topology left)
+  and right_topology = Topology.View.view (Geometry.topology right) in
   left_positions.x = right_positions.x
   && left_positions.y = right_positions.y
   && left_positions.z = right_positions.z
@@ -132,7 +132,7 @@ let run () =
   let region = Plane_generators.grid ~columns:4 ~rows:4 ~size:4. () |> get_ok in
   let region_source = positions region in
   let region = Geometry.with_positions
-      (Packed.Float3.Private.of_owned_exn ~x:(Array.copy region_source.x)
+      (Packed.Float3.View.of_owned_exn ~x:(Array.copy region_source.x)
         ~y:(Array.mapi (fun point y -> if point = 12 then 4. else y)
           region_source.y)
         ~z:(Array.copy region_source.z)) region |> get_string_ok in
@@ -171,7 +171,7 @@ let run () =
   check (Geometry.find_attribute ~owner:Attribute.Point "N" invalidated = None
       && Geometry.find_attribute ~owner:Attribute.Vertex "N" invalidated = None)
     "Smooth retained stale normals";
-  let authored_n = Packed.Float3.Private.of_owned_exn
+  let authored_n = Packed.Float3.View.of_owned_exn
       ~x:[|0.; 1.; 0.; 0.; 1.; 0.|] ~y:(Array.make 6 0.)
       ~z:(Array.make 6 0.) in
   let authored_n = Attribute.create_owned ~name:"N" ~owner:Attribute.Point
@@ -181,9 +181,9 @@ let run () =
            ~attributes:"P N" |> get_ok in
   (match Geometry.find_attribute ~owner:Attribute.Point "N" smoothed_n with
    | Some attribute ->
-       (match Attribute.Private.storage attribute with
+       (match Attribute.View.storage attribute with
         | Attribute.Float3 values ->
-            let values = Packed.Float3.Private.view values in
+            let values = Packed.Float3.View.view values in
             check (values.x = [|1.; 0.; 1.; 1.; 0.; 1.|])
               "explicitly smoothed N was replaced by geometric normals"
         | _ -> fail "smoothed N has unexpected storage")

@@ -3,7 +3,6 @@ type bridge_policy =
     Create_bridged_polygons
   | Create_disjoint_polygons
   | Delete_bridge_polygons
-exception Invalid of string
 module Int_buffer :
   sig
     type t = { mutable values : int array; mutable length : int; }

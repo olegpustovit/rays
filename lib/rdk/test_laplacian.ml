@@ -12,7 +12,7 @@ let with_attribute name storage geometry =
 let scalar name geometry =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Float values -> values
        | _ -> fail (name ^ " is not a scalar float field"))
   | None -> fail (name ^ " is missing")
@@ -20,16 +20,16 @@ let scalar name geometry =
 let float3 name geometry =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float3 values -> Packed.Float3.Private.view values
+      (match Attribute.View.storage attribute with
+       | Attribute.Float3 values -> Packed.Float3.View.view values
        | _ -> fail (name ^ " is not a float3 field"))
   | None -> fail (name ^ " is missing")
 
 let float4_field name geometry =
   match Geometry.find_attribute ~owner:Attribute.Point name geometry with
   | Some attribute ->
-      (match Attribute.Private.storage attribute with
-       | Attribute.Float4 values -> Packed.Float4.Private.view values
+      (match Attribute.View.storage attribute with
+       | Attribute.Float4 values -> Packed.Float4.View.view values
        | _ -> fail (name ^ " is not a float4 field"))
   | None -> fail (name ^ " is missing")
 
@@ -37,7 +37,7 @@ let grid ?(size = 2.) () =
   Plane_generators.grid ~connectivity:Plane_generators.Grid_quads ~columns:2 ~rows:2 ~size () |> get
 
 let degenerate_triangle () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;1.;2.|] ~y:[|0.;0.;0.|] ~z:[|0.;0.;0.|] in
   let topology = Topology.create_owned ~point_count:3 ~vertex_points:[|0;1;2|]
       ~primitive_offsets:[|0;3|] ~primitive_kinds:[|Topology.Polygon|]

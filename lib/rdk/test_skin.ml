@@ -1,7 +1,6 @@
+open Rdk_test_support
 open Rdk
 
-let fail message = prerr_endline ("test_skin: " ^ message); exit 1
-let check condition message = if not condition then fail message
 let get = function Ok value -> value | Error message -> fail message
 let get_rdk = function Ok value -> value | Error error -> fail (Error.to_string error)
 
@@ -30,7 +29,7 @@ let rings ?(sections = 2) ?(points = 4) () =
   and corner_group = Group.init ~grain:1 ~owner:Group.Vertex ~name:"corners"
       count (fun _ -> true) in
   let geometry = Geometry.create
-      ~positions:(Packed.Float3.Private.of_owned_exn ~x ~y ~z)
+      ~positions:(Packed.Float3.View.of_owned_exn ~x ~y ~z)
       ~topology ~attributes:[vertex; primitive] ~groups:[corner_group] () |> get in
   let index = Topology_index.create topology in
   let edges = Edge_group.init ~grain:1 ~topology ~index ~name:"section_edges"
@@ -39,12 +38,12 @@ let rings ?(sections = 2) ?(points = 4) () =
 
 let int_attribute owner name geometry =
   match Geometry.find_attribute ~owner name geometry |> Option.get
-        |> Attribute.Private.storage with
+        |> Attribute.View.storage with
   | Attribute.Int values -> values
   | _ -> fail (name ^ " storage")
 
 let unequal_open () =
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:[|0.;1.;2.; 0.;0.6;1.4;2.|]
       ~y:[|0.;0.;0.; 1.;1.;1.;1.|] ~z:(Array.make 7 0.) in
   let topology = Topology.create_owned ~point_count:7
@@ -53,10 +52,10 @@ let unequal_open () =
   Geometry.create ~positions ~topology () |> get
 
 let equal_geometry left right =
-  let lp = Packed.Float3.Private.view (Geometry.positions left)
-  and rp = Packed.Float3.Private.view (Geometry.positions right)
-  and lt = Topology.Private.view (Geometry.topology left)
-  and rt = Topology.Private.view (Geometry.topology right) in
+  let lp = Packed.Float3.View.view (Geometry.positions left)
+  and rp = Packed.Float3.View.view (Geometry.positions right)
+  and lt = Topology.View.view (Geometry.topology left)
+  and rt = Topology.View.view (Geometry.topology right) in
   lp = rp && lt.vertex_points = rt.vertex_points
   && lt.primitive_offsets = rt.primitive_offsets
   && Bytes.equal lt.primitive_kinds rt.primitive_kinds
@@ -65,13 +64,13 @@ let equal_geometry left right =
   && int_attribute Attribute.Primitive "section" left
       = int_attribute Attribute.Primitive "section" right
   && (Geometry.find_group ~owner:Group.Vertex "corners" left
-      |> Option.get |> Group.Private.bits_view)
+      |> Option.get |> Group.View.bits_view)
      = (Geometry.find_group ~owner:Group.Vertex "corners" right
-        |> Option.get |> Group.Private.bits_view)
+        |> Option.get |> Group.View.bits_view)
   && (Geometry.find_group ~owner:Group.Primitive "skin" left
-      |> Option.get |> Group.Private.bits_view)
+      |> Option.get |> Group.View.bits_view)
      = (Geometry.find_group ~owner:Group.Primitive "skin" right
-        |> Option.get |> Group.Private.bits_view)
+        |> Option.get |> Group.View.bits_view)
   && let left = Geometry.find_edge_group "section_edges" left |> Option.get
      and right = Geometry.find_edge_group "section_edges" right |> Option.get in
      Edge_group.length left = Edge_group.length right

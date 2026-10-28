@@ -14,9 +14,8 @@ type key =
   | Reverse
   | Shift of int
 
-exception Sort_error of string
 
-let fail message = raise (Sort_error message)
+let fail message = raise (Error.Fail message)
 let get_ok = function Ok value -> value | Error message -> fail message
 
 let count geometry = function
@@ -49,21 +48,21 @@ let apply_points ?cancel ?grain permutation geometry =
   let point_count = Geometry.point_count geometry in
   let inverse = Array.make point_count 0 in
   Array.iteri (fun output source -> inverse.(source) <- output) permutation;
-  let positions = Packed.Float3.Private.view (Geometry.positions geometry) in
-  let positions = Packed.Float3.Private.of_owned_exn
+  let positions = Packed.Float3.View.view (Geometry.positions geometry) in
+  let positions = Packed.Float3.View.of_owned_exn
       ~x:(Topology_remap.select_float ?cancel
         ~grain:(Option.value ~default:16_384 grain) permutation positions.x)
       ~y:(Topology_remap.select_float ?cancel
         ~grain:(Option.value ~default:16_384 grain) permutation positions.y)
       ~z:(Topology_remap.select_float ?cancel
         ~grain:(Option.value ~default:16_384 grain) permutation positions.z) in
-  let topology = Topology.Private.view source_topology in
+  let topology = Topology.View.view source_topology in
   let vertex_points = Array.make (Array.length topology.vertex_points) 0 in
   if Array.length vertex_points > 0 then Parallel.for_ ?chunk_size:grain ~start:0
       ~finish:(Array.length vertex_points - 1) (fun vertex ->
         if vertex land 4095 = 0 then Cancel.check_opt cancel;
         vertex_points.(vertex) <- inverse.(topology.vertex_points.(vertex)));
-  let topology = Topology.Private.create_validated_owned ~point_count
+  let topology = Topology.View.create_validated_owned ~point_count
       ~vertex_points ~primitive_offsets:(Array.copy topology.primitive_offsets)
       ~primitive_kinds:(Bytes.copy topology.primitive_kinds) in
   let attributes = List.map (fun attribute ->
@@ -80,7 +79,7 @@ let apply_points ?cancel ?grain permutation geometry =
 
 let apply_primitives ?cancel ?(grain = 16_384) permutation geometry =
   let source_topology = Geometry.topology geometry in
-  let source = Topology.Private.view source_topology in
+  let source = Topology.View.view source_topology in
   let primitive_count = Array.length permutation in
   let offsets = Array.make (primitive_count + 1) 0 in
   for primitive = 0 to primitive_count - 1 do
@@ -106,7 +105,7 @@ let apply_primitives ?cancel ?(grain = 16_384) permutation geometry =
           vertex_points.(output_vertex) <- source.vertex_points.(source_vertex);
           vertex_map.(output_vertex) <- source_vertex
         done);
-  let topology = Topology.Private.create_validated_owned
+  let topology = Topology.View.create_validated_owned
       ~point_count:(Geometry.point_count geometry) ~vertex_points
       ~primitive_offsets:offsets ~primitive_kinds:kinds in
   let attributes = List.map (fun attribute ->
@@ -127,8 +126,8 @@ let apply_primitives ?cancel ?(grain = 16_384) permutation geometry =
     ~attributes ~groups ~edge_groups () |> get_ok
 
 let primitive_centers ?cancel ~grain geometry =
-  let topology = Topology.Private.view (Geometry.topology geometry)
-  and positions = Packed.Float3.Private.view (Geometry.positions geometry) in
+  let topology = Topology.View.view (Geometry.topology geometry)
+  and positions = Packed.Float3.View.view (Geometry.positions geometry) in
   let count = Geometry.primitive_count geometry in
   let x = Array.make count 0. and y = Array.make count 0. and z = Array.make count 0. in
   if count > 0 then Parallel.for_ ~chunk_size:(max 1 (grain / 8)) ~start:0
@@ -151,7 +150,7 @@ let finite_vec3 value = Float.is_finite value.Rays_math.Vec3.x
   && Float.is_finite value.y && Float.is_finite value.z
 
 let point_vertex_order ?cancel geometry =
-  let topology = Topology.Private.view (Geometry.topology geometry) in
+  let topology = Topology.View.view (Geometry.topology geometry) in
   let values = Array.make (Geometry.point_count geometry) (-1)
   and next = ref 0 in
   for vertex = 0 to Array.length topology.vertex_points - 1 do
@@ -165,7 +164,7 @@ let point_vertex_order ?cancel geometry =
   values
 
 let point_primitive_index ?cancel geometry =
-  let topology = Topology.Private.view (Geometry.topology geometry) in
+  let topology = Topology.View.view (Geometry.topology geometry) in
   let values = Array.make (Geometry.point_count geometry) (-1) in
   for primitive = 0 to Bytes.length topology.primitive_kinds - 1 do
     if primitive land 16_383 = 0 then Cancel.check_opt cancel;
@@ -223,7 +222,7 @@ let spatial_locality_values ?cancel ~grain x y z =
 let component_values ?cancel ~grain owner key geometry =
   let coordinates () = match owner with
     | Points ->
-        let view = Packed.Float3.Private.view (Geometry.positions geometry) in
+        let view = Packed.Float3.View.view (Geometry.positions geometry) in
         view.x, view.y, view.z
     | Primitives -> primitive_centers ?cancel ~grain geometry in
   match key with
@@ -251,19 +250,19 @@ let component_values ?cancel ~grain owner key geometry =
         |> Option.to_result ~none:("missing sort attribute " ^ name) |> get_ok in
       let invalid width = if component < 0 || component >= width then
           fail "sort attribute component is out of range" in
-      (match Attribute.Private.storage attribute with
+      (match Attribute.View.storage attribute with
        | Attribute.Float values -> invalid 1; `Float values
        | Attribute.Int values -> invalid 1; `Int values
        | Attribute.Int_array _ | Attribute.Float_array _ -> fail
            "sort key attribute cannot use array storage"
        | Attribute.Text values -> invalid 1; `Text values
        | Attribute.Float2 values -> invalid 2;
-           let v = Packed.Float2.Private.view values in `Float (if component = 0 then v.x else v.y)
+           let v = Packed.Float2.View.view values in `Float (if component = 0 then v.x else v.y)
        | Attribute.Float3 values -> invalid 3;
-           let v = Packed.Float3.Private.view values in
+           let v = Packed.Float3.View.view values in
            `Float (if component = 0 then v.x else if component = 1 then v.y else v.z)
        | Attribute.Float4 values -> invalid 4;
-           let v = Packed.Float4.Private.view values in
+           let v = Packed.Float4.View.view values in
            `Float (if component = 0 then v.x else if component = 1 then v.y
              else if component = 2 then v.z else v.w))
   | By_vertex_order ->
@@ -290,7 +289,7 @@ let integer_attribute owner name geometry =
     | Primitives -> Attribute.Primitive in
   match Geometry.find_attribute ~owner:attribute_owner name geometry with
   | None -> fail ("missing sort index attribute " ^ name)
-  | Some attribute -> match Attribute.Private.storage attribute with
+  | Some attribute -> match Attribute.View.storage attribute with
     | Attribute.Int values -> values
     | _ -> fail ("sort index attribute " ^ name ^ " must be integer")
 
@@ -424,4 +423,4 @@ let sort ?cancel ?(grain = 16_384) ?selection ?(descending = false)
         let attribute = Attribute.create_owned ~name ~owner:attribute_owner
             (Attribute.Int ranks) |> get_ok in
         Geometry.with_attribute attribute geometry
-  with Sort_error message | Invalid_argument message -> Error message
+  with Error.Fail message | Invalid_argument message -> Error message

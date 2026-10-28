@@ -15,7 +15,7 @@ type t = {
 
 let leaf_size = 8
 
-let create ?cancel ~grain ~centroid_x ~centroid_y ~centroid_z
+let create ?cancel ?(extend = fun _ _ _ _ _ -> ()) ~grain ~centroid_x ~centroid_y ~centroid_z
     ~item_min_x ~item_min_y ~item_min_z ~item_max_x ~item_max_y ~item_max_z () =
   let total = Array.length centroid_x in
   let subtree_nodes = Array.make (total + 1) 0 in
@@ -31,6 +31,7 @@ let create ?cancel ~grain ~centroid_x ~centroid_y ~centroid_z
   and left = Array.make capacity (-1) and right = Array.make capacity (-1)
   and first = Array.make capacity 0 and count = Array.make capacity 0
   and order = Array.init total Fun.id in
+  let extend = extend capacity in
   let rec build node range_first range_last =
     Cancel.check_opt cancel;
     min_x.(node) <- Float.infinity; min_y.(node) <- Float.infinity;
@@ -45,6 +46,7 @@ let create ?cancel ~grain ~centroid_x ~centroid_y ~centroid_z
       if item_max_y.(item) > max_y.(node) then max_y.(node) <- item_max_y.(item);
       if item_max_z.(item) > max_z.(node) then max_z.(node) <- item_max_z.(item)
     done;
+    extend node order range_first range_last;
     let range_count = range_last - range_first + 1 in
     if range_count <= leaf_size then begin
       first.(node) <- range_first; count.(node) <- range_count
