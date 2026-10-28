@@ -8,7 +8,7 @@ Completion is **not proved**. No phase is closed. Unlisted requirements and
 finding IDs remain open. Size estimates do not substitute for behavior,
 performance, parity, and shipping evidence.
 
-Finding coverage: **223 / 248 accepted (89.9%)**. This counts individual
+Finding coverage: **226 / 248 accepted (91.1%)**. This counts individual
 findings, not weighted effort or completed phases.
 
 Individual finding checkboxes record implementation/focused evidence;
@@ -258,6 +258,8 @@ size estimate, not the phase's behavioral or shipping gates.
   deleted the superseded study documents and workspace prototype.
 
 ## In progress and remaining proof
+
+- Owner decisions open: UI29 (Navigator paints nine row kinds with its own geometry and carry-drag semantics, so rebuilding it on Pxui_shell.Tree cannot keep ui_parity exact without changing its look) and UI18 (scene-object inspection by Kind_graph id, while workspace_inspector reads a lexical path from the pane projection; this needs a projection of the scene/World graph even when another graph is shown). UI21 uses dune's Rays_editor__ alias for test access, a dune naming detail.
 
 - rdk blocked: RK29 (the remaining type re-exports expose constructors from private modules to their facades; moving them would create module cycles), XC22 (edit_graph and node catches wrap generated build/rebuild closures running 27 [@sop.validate] callbacks and about 111 invalid_arg decoders; validating first changes the PPX factory contract. Carry is fixed via Projection.find_graph).
 

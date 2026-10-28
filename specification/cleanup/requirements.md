@@ -965,7 +965,7 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **UI20** (P0, low, vibe-code, effort S). Location at baseline: leader.ml:215-216 text_keys. Commands with fake actions ('placeholders the sheet never runs'). Action: A plain (label, trigger) list.
 
-- [ ] **UI21** (P5, med, api-bloat, effort M). Location at baseline: rays_editor.mli:66-348 Private (~13 modules, ~69 vals) + Editor.Private (16). Re-exported only so tests in test/ can reach them. Action: Most of it goes away after UI4, UI6, UI16 and UI22; test the rest in the libraries that own it.
+- [x] **UI21** (P5, med, api-bloat, effort M). Location at baseline: rays_editor.mli:66-348 Private (~13 modules, ~69 vals) + Editor.Private (16). Re-exported only so tests in test/ can reach them. Action: Most of it goes away after UI4, UI6, UI16 and UI22; test the rest in the libraries that own it. Evidence: rays_editor.mli's Private re-export (about 70 values) is deleted; tests and tools reach private modules through dune's library alias (Rays_editor__.X), and Editor.Private keeps 16 values.
 
 - [ ] **UI22** (P5, low, layering, effort M). Location at baseline: rays_editor/lisp_text.ml (789). Parinfer, completion and description of Lisp, pure except for one adapter. Action: Move the pure part next to Flow.Lisp (with XC16).
 
@@ -973,11 +973,11 @@ in status.md; an unchecked item is unfinished or unverified.
 
 - [x] **UI24** (P0, med, vibe-code, effort S). Location at baseline: rays_editor.ml:65-96. Identity wrappers, and ~20 optional arguments re-listed only to rename `~scene3` to `~draw`. Action: Use one name and alias directly. Evidence: the scene3/draw rename wrappers are gone; d5acc6a2 removes the view_camera/film identity wrappers. create/run keep their optional lists because they narrow Environment to rays_editor.mli.
 
-- [ ] **UI25** (P5, med, api-bloat, effort L). Location at baseline: `'prepared` type parameter through Core.t, Cook.t, carry, update. The only production instantiation is Surface; everything else passes unit. Action: Make it concrete after UI6.
+- [x] **UI25** (P5, med, api-bloat, effort L). Location at baseline: `'prepared` type parameter through Core.t, Cook.t, carry, update. The only production instantiation is Surface; everything else passes unit. Action: Make it concrete after UI6. Evidence: the prepared type parameter is gone; Cook.prepared = {geometry; surface}, Editor.prepare and Editor.draw are the app's functions, and tests use the editor_prepare test library.
 
 - [x] **UI26** (P5, med, god-module, effort L). Location at baseline: core_model.ml:205 Core.t (~80 fields; active plus parked pane copies). Swapping panes in and out needs `as_pane` rules. Action: A single `Panel_map : panel_key -> pane_state`. Evidence: 7bff17d3: one Panel_map (Core.t.panes) replaces ten active/parked pane fields; Core_shell.stash is deleted.
 
-- [ ] **UI27** (P5, med, god-module, effort M). Location at baseline: pxui_graph/scope_pane.ml:111 update (938). One gesture function for everything. Action: Gesture handlers that return a change list.
+- [x] **UI27** (P5, med, god-module, effort M). Location at baseline: pxui_graph/scope_pane.ml:111 update (938). One gesture function for everything. Action: Gesture handlers that return a change list. Evidence: Scope_frame's context, tile, wire, pointer and frame steps return (state, changes), and tile_gestures returns the next lens, so update has no lens ref.
 
 - [x] **UI28** (P5, low, god-module, effort M). Location at baseline: environment.ml:8 (306) · text_pane view (323) · navigator view (352). Long view functions. Action: Split them after UI1–UI3. Evidence: update_with is 146 lines (was 246), Text_pane.view about 95 (was 275), Navigator.view about 145 (was 195).
 
