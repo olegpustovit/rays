@@ -4274,10 +4274,11 @@ let slow =
     "run_undo_and_input";
   ]
 
-(* The default loop runs in three actions so the alias wall time is the longest part, not the sum:
-   [`A] and [`B] are the heaviest sections, [`Rest] everything else. *)
-let part_a = [ "run_studio"; "run_studio_tail"; "run_restore" ]
-and part_b = [ "run_lowering"; "run_panel_keys"; "run_layouts" ]
+(* The default loop runs in four actions so the alias wall time is the longest part, not the sum:
+   [`A], [`B] and [`C] are the heaviest sections, [`Rest] everything else. *)
+let part_a = [ "run_studio"; "run_studio_tail" ]
+and part_b = [ "run_panel_keys" ]
+and part_c = [ "run_lowering"; "run_layouts"; "run_restore" ]
 
 let run ?part () =
   let all = Sys.getenv_opt "RAYS_SLOW" = Some "1" in
@@ -4287,7 +4288,8 @@ let run ?part () =
     | None -> true
     | Some `A -> List.mem name part_a
     | Some `B -> List.mem name part_b
-    | Some `Rest -> not (List.mem name part_a || List.mem name part_b)
+    | Some `C -> List.mem name part_c
+    | Some `Rest -> not (List.mem name (part_a @ part_b @ part_c))
   in
   List.iter
     (fun (name, section) ->

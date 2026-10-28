@@ -47,6 +47,7 @@ let tests =
         Test_workspace_shell.run_roots () );
     ("test_workspace_shell_a", Test_workspace_shell.run ~part:`A);
     ("test_workspace_shell_b", Test_workspace_shell.run ~part:`B);
+    ("test_workspace_shell_c", Test_workspace_shell.run ~part:`C);
     ( "test_workspace_shell_rest",
       fun () ->
         Test_workspace_shell.run ~part:`Rest ();

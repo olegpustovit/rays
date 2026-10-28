@@ -616,6 +616,17 @@
   (glob_files ../../../specification/workspace/cases/*.lisp)
   (glob_files_rec ../../../sketches/*.rays))
  (action
+  (run %{exe:test_main.exe} test_workspace_shell_c)))
+
+(rule
+ (enabled_if
+  (= %{system} macosx))
+ (alias test_workspace_shell)
+ (deps
+  (env_var RAYS_SLOW)
+  (glob_files ../../../specification/workspace/cases/*.lisp)
+  (glob_files_rec ../../../sketches/*.rays))
+ (action
   (run %{exe:test_main.exe} test_workspace_shell_rest)))
 
 (rule
