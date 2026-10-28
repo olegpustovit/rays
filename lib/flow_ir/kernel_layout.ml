@@ -1,5 +1,5 @@
 type t = {
-  view : Packed.Private.view;
+  view : Packed.Host.view;
   used : bool array;
   finite_checks : bool array;
   output_checks : bool;
@@ -40,7 +40,7 @@ let rec guarded = function
    +, -, *, and, or, xor, the shifted operand of a left shift, a select, a carried next value).
    The low 32 bits of signed-63 wrapping arithmetic are the uint32 results, so CPU bits are kept.
    Both are greatest fixpoints over the loop-carried registers. *)
-let narrow_registers (view : Packed.Private.view) used =
+let narrow_registers (view : Packed.Host.view) used =
   let code = Array.map guarded view.code in
   let size = Array.length code in
   let integer slot = Core.Region.integer_register view.code.(slot) in
@@ -151,7 +151,7 @@ let narrow_registers (view : Packed.Private.view) used =
    drop their instructions, statically true conditions leave the guard lists, and a select on a known
    condition reads only its chosen value. A dropped instruction would never run, so no result or
    status changes: an untaken guarded instruction never executes on any target. *)
-let specialize (view : Packed.Private.view) =
+let specialize (view : Packed.Host.view) =
   let size = Array.length view.code in
   let known = Array.make size None in
   let bool b = Some (if b then 1. else 0.) in
@@ -201,7 +201,7 @@ let specialize (view : Packed.Private.view) =
 
 (* Registers an output reads, through the operands of the specialized code; [whole_loops] keeps every
    instruction of a reached loop body (for per-operation finite checks). *)
-let reachable ~whole_loops (view : Packed.Private.view) dead =
+let reachable ~whole_loops (view : Packed.Host.view) dead =
   let used = Array.make (Array.length view.code) false in
   let rec use slot = if not used.(slot) && not dead.(slot) then begin
     used.(slot) <- true;
@@ -216,7 +216,7 @@ let reachable ~whole_loops (view : Packed.Private.view) dead =
   used
 
 let plan ?(fast = false) ?(image = false) ?(instanced = false) ?(motion = false) ?(curves = false) program =
-  let view, dead = specialize (Packed.Private.view program) in
+  let view, dead = specialize (Packed.Host.view program) in
   let offset = ref 4 and uniform_layout = ref [] in
   let uniform name width =
     let first = !offset in
@@ -255,7 +255,7 @@ let plan ?(fast = false) ?(image = false) ?(instanced = false) ?(motion = false)
   (* fast checks its inputs (a resident producer's buffer is not scanned on the host) and outputs *)
   let finite_checks =
     if fast then Array.map (fun i -> match guarded i with Packed.Input _ -> true | _ -> false) view.code
-    else Packed.Private.finite_checks program in
+    else Packed.Host.finite_checks program in
   let table_seeds =
     Array.to_list (Array.mapi (fun index instruction -> index, guarded instruction) view.code)
     |> List.filter_map (function

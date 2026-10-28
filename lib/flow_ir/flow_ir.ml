@@ -13,7 +13,7 @@ module Ty = Flow.Ty
 
 module Gpu = struct
   type value={identity:int;count:int;width:int;output:int;stamp:int64;gpu_seconds:float option}
-  type kernel={run:Packed.Private.inputs -> (value,Diagnostic.t)result;
+  type kernel={run:Packed.Host.inputs -> (value,Diagnostic.t)result;
     readback:value -> (E.value,Diagnostic.t)result}
   type backend={cost:fast:bool -> Packed.t -> count:int -> float option;
     prepare:fast:bool -> Packed.t -> (kernel,Diagnostic.t)result}
@@ -199,7 +199,7 @@ let qualify_workspace ?record ?inputs ?observe ?(gpu=Gpu.default) (workspace : W
                   && seconds +. Cost.estimate Gpu_readback ~count < Cost.estimate(Cost.packed ~count) ~count)
                   (backend.cost ~fast packed ~count)) in
               if not placed || Packed.gpu_refusals ~fused:true ~fast packed<>[] then None else
-              match Packed.Private.prepare ~fast packed ~live:(Input.at_time 0.) with
+              match Packed.Host.prepare ~fast packed ~live:(Input.at_time 0.) with
               | Error _ -> None
               | Ok inputs ->
                   let placed=inputs.count>=1024 && (gpu.policy=Gpu.Qualification ||
@@ -608,7 +608,7 @@ module Executor = struct
     if Option.fold ~none:false ~some:(fun count->not(cheaper count))(Packed.static_count packed)
       then cpu()else
     let (let*)=Result.bind in
-    let* inputs=Packed.Private.prepare ~fast ?state ?resolve ?source packed ~live in
+    let* inputs=Packed.Host.prepare ~fast ?state ?resolve ?source packed ~live in
     if not(cheaper inputs.count) then cpu()else
     let* ()=if display||readback then Ok()else
       Error(Diagnostic.error ~code:"E_APPROX_SINK"
@@ -655,7 +655,7 @@ module Executor = struct
     fun ?state ?resolve packed ~live->
       match gpu.backend with None->Ok None|Some _ ->
       (* a draw binds a fresh [packed] each frame over its site's code: kernels are kept by the code *)
-      let code p=(Packed.Private.view p).code in
+      let code p=(Packed.Host.view p).code in
       let find()=List.find_map(fun(fast,b,p,kernel)->if fast=gpu.fast && code p==code packed then Some(b,fast,packed,kernel)else None) !kernels in
       let result=display_packed ?state ?resolve ~source ~gpu ~approx ~display:true ~profile
         ~cached:find ~store:(fun(b,_,p,kernel)->
@@ -674,9 +674,9 @@ module Executor = struct
       if not gpu.fast then Ok None else
       match gpu.backend with None->Ok None|Some backend->
       if Packed.gpu_refusals ~fused:true ~fast:gpu.fast packed<>[] then Ok None else
-      let* inputs=Packed.Private.prepare ~fast:gpu.fast packed ~live in
+      let* inputs=Packed.Host.prepare ~fast:gpu.fast packed ~live in
       if inputs.count<4096 then Ok None else
-      let view=Packed.Private.view packed in
+      let view=Packed.Host.view packed in
       let key=view.code,view.widths,view.outputs in
       let* kernel=match List.find_opt(fun(f,k,b,_)->f=gpu.fast && b==backend && k=key) !kernels with
         |Some(_,_,_,kernel)->Ok kernel

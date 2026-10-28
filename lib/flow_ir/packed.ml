@@ -1656,7 +1656,7 @@ let force_all ?dispatch ?state ?elems ?resolve ?measure ?on_walk ?strict t ~live
 let force_into ?state ?elems ?resolve ?measure ?strict ~column_source ~count ~outputs t ~live =
   Result.map (fun _->()) (run_all ~column_source ~plane_outputs:outputs ~expected_count:count ?state ?elems ?resolve ?measure ?strict t ~live)
 
-module Private = struct
+module Host = struct
   let argument_types (t:t) =
     let types=Hashtbl.create 8 and visited=Hashtbl.create 8 in
     let rec value = function

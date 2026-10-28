@@ -1,6 +1,6 @@
 (** Immutable layout data shared by the Metal and WGSL instruction printers. *)
 type t = {
-  view : Packed.Private.view;
+  view : Packed.Host.view;
   used : bool array;
   finite_checks : bool array;
       (** per-instruction finite checks: a fast kernel checks only its inputs, and its outputs *)

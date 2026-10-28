@@ -56,7 +56,7 @@ let render_core (program, root, buffers) ~state ?image ?gpu ?resident prepared ~
         let gpu = Option.map (fun gpu ~slot -> gpu ~slot:(slot lor (prepared.id lsl 20))) gpu in
         let devices = ref [] and ran = ref [] and ndevices = ref 0 in
         let device = Option.map (fun _ packed ->
-          let view=Flow_ir.Packed.Private.view packed in
+          let view=Flow_ir.Packed.Host.view packed in
           if List.memq view.code !ran then Ok None else
           Result.map (Option.map (fun (v : Flow_ir.Gpu.value) ->
             ran := view.code :: !ran;

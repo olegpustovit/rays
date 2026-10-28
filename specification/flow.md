@@ -1488,7 +1488,7 @@ the device from the first region of 256 elements. A region runs into buffers the
 stands in the locals as a placeholder (zeros of its *capacity*, an upper bound); its kernel writes
 its true count to a 4-byte cell. A region whose source is `array/range` of an array's count times
 a constant or `int/div` by one, or the array itself, takes its count from that cell on the
-device (`Packed.Private.source_shapes`; the fast kernel's `count_in`, mul, div and `count_out`),
+device (`Packed.Host.source_shapes`; the fast kernel's `count_in`, mul, div and `count_out`),
 and a range source binds a shared index buffer instead of an upload; compaction reads its count
 from the mask's cell and writes its own. A level is committed when its compaction is encoded,
 without a wait (at most two in flight), so nothing is read until the loop ends; then the writes

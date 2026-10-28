@@ -200,10 +200,10 @@ let scenario label (world : W.baked option) =
   if Sys.getenv_opt "PT_BENCH" <> None then
     Printf.eprintf "maxTotalThreadsPerThreadgroup %d (pathtrace.metal %d)\n%!" threads (get (P.Private.max_total_threads tracer));
   assert (threads >= (if label = "world" then 448 else 512)); (* the recorded limits; a drop is a regression *)
-  let base = ok (Flow_ir.Packed.Private.prepare ~fast:true template ~live) in
-  let shapes = Flow_ir.Packed.Private.uniform_shapes template in
+  let base = ok (Flow_ir.Packed.Host.prepare ~fast:true template ~live) in
+  let shapes = Flow_ir.Packed.Host.uniform_shapes template in
   let inputs frame = { base with uniforms = Array.mapi (fun i words -> match shapes.(i) with
-    | Flow_ir.Packed.Private.Value v when v == frame0 -> [| float frame |] | _ -> words) base.uniforms } in
+    | Flow_ir.Packed.Host.Value v when v == frame0 -> [| float frame |] | _ -> words) base.uniforms } in
   let scene = { Flow_gpu.Run.accel = blas; vertices; spheres; sphere_count = 0; instances = None } in
   let gpu_run frame = vec4 (ok (Flow_gpu.Run.readback (ok (Flow_gpu.Run.dispatch runner ~scene (inputs frame))))) in
   let bench () =

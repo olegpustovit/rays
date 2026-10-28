@@ -25,7 +25,7 @@ let () =
       let sink = get (G.Image_sink.create lease) in
       let run program = G.Run.create lease pipelines (get (G.Emit.kernel ~fast:true program)) in
       let accumulator = run accumulate and resolver = run resolve in
-      let prepare program time = get (Flow_ir.Packed.Private.prepare ~fast:true program ~live:(Input.at_time time)) in
+      let prepare program time = get (Flow_ir.Packed.Host.prepare ~fast:true program ~live:(Input.at_time time)) in
       let bound i = if i = 0 then Some film else None in
       for frame = 1 to 4 do
         ignore (get (G.Run.dispatch accumulator ~bound ~into:(film, cell) (prepare accumulate (float frame))))

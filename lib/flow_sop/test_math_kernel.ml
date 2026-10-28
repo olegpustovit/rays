@@ -125,7 +125,7 @@ let () =
       check(ok(P.force ~strict:true program ~live));
       check(ok(Flow_ir.Executor.force ~strict:true compiled ~live))))[1;4;8];
     assert(P.gpu_refusals program<>[]);
-    let inputs=P.Private.prepare_values program ~live|>ok in
+    let inputs=P.Host.prepare_values program ~live|>ok in
     Buffer.add_string script "{\n";Buffer.add_string script(Flow_web.Js.region program);
     let arrays=Array.map(function E.Vec3_array a|Vec4_array a|Float_array a->array a|_->assert false)inputs.arrays in
     let uniforms=Array.to_list(Array.map(function

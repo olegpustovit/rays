@@ -49,7 +49,7 @@ let pure workspace =
   let gpu_document = doc {|(workspace gpu_error (graph picture :context draw
     (draw/circles (map (fn [i] [(+ i t) 0 0]) (array/range 10000)))))|} in
   let backend : Flow_ir.Gpu.backend = {cost=(fun ~fast:_ _ ~count:_ -> None);
-    prepare=(fun ~fast:_ _ -> Ok {run=(fun (inputs:Flow_ir.Packed.Private.inputs) ->
+    prepare=(fun ~fast:_ _ -> Ok {run=(fun (inputs:Flow_ir.Packed.Host.inputs) ->
       Ok Flow_ir.Gpu.{identity=17;count=inputs.count;width=3;output=0;stamp=0L;gpu_seconds=None});
       readback=(fun _ -> failwith "Display-only output must remain on the device")})} in
   let gpu={Flow_ir.Gpu.default with backend=Some backend;policy=Flow_ir.Gpu.Qualification} in

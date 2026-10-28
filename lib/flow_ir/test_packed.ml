@@ -16,9 +16,9 @@ let same a b = match a, b with
   | Error a, Error b -> Diagnostic.to_string a = Diagnostic.to_string b
   | _ -> false
 let () =
-  let trace = !I.Packed.Private.trace in
-  Fun.protect ~finally:(fun () -> I.Packed.Private.trace := trace) (fun () ->
-    I.Packed.Private.trace := ignore;
+  let trace = !I.Packed.Host.trace in
+  Fun.protect ~finally:(fun () -> I.Packed.Host.trace := trace) (fun () ->
+    I.Packed.Host.trace := ignore;
     let packed = Test_program.compile "(map (fn [index]
       (let* [x (+ (float index) t)]
         (if (< (mod x 2053.0) 1025.0)
@@ -52,8 +52,8 @@ let compile ?fusion residual term =
   (match legacy, I.Packed.compile_result ?fusion residual term with
    | None, Error [_] -> ()
    | Some a, Ok b ->
-       assert (Marshal.to_string (I.Packed.Private.view a) [Marshal.No_sharing]
-         = Marshal.to_string (I.Packed.Private.view b) [Marshal.No_sharing]);
+       assert (Marshal.to_string (I.Packed.Host.view a) [Marshal.No_sharing]
+         = Marshal.to_string (I.Packed.Host.view b) [Marshal.No_sharing]);
        assert (I.Packed.stage_count a = I.Packed.stage_count b
          && I.Packed.provenance a = I.Packed.provenance b
          && I.Packed.static_count a = I.Packed.static_count b)
@@ -61,7 +61,7 @@ let compile ?fusion residual term =
   legacy
 let () =
   if Array.exists (fun arg -> arg="--bench-product" || arg="--bench-product-row" || arg="--bench-float-product" || arg="--bench-int-scale") Sys.argv then begin
-    I.Packed.Private.trace := ignore;
+    I.Packed.Host.trace := ignore;
     let count = 1_000_000 and width = 16 in
     let integer = Array.exists ((=) "--bench-int-scale") Sys.argv in
     let repeated_row = Array.exists ((=) "--bench-product-row") Sys.argv in
@@ -102,13 +102,13 @@ let () =
       let native_seconds, native_bytes = measure native in
       let seconds, allocated = measure (fun () -> ok (I.Packed.force ~strict:true packed ~live)) in
       Printf.printf "%s count=%d width=%d registers=%d domains=%d native_seconds=%.6f packed_seconds=%.6f ratio=%.3f native_allocated_bytes=%.0f packed_allocated_bytes=%.0f\n%!"
-        (if integer then "integer_scale" else if float_product then "product_float_bank" else "product_float") count width (Array.length (I.Packed.Private.view packed).code) domains
+        (if integer then "integer_scale" else if float_product then "product_float_bank" else "product_float") count width (Array.length (I.Packed.Host.view packed).code) domains
         native_seconds seconds (seconds /. native_seconds) native_bytes allocated)) [1;4];
     exit 0
   end
 let () =
   if Array.exists ((=) "--bench-guarded") Sys.argv then begin
-    I.Packed.Private.trace := ignore;
+    I.Packed.Host.trace := ignore;
     let count = 1_000_000 in
     let packed = Test_program.compile (Printf.sprintf
       "(map (fn [x] (if (< (mod x 2.0) 1.0)\n\
@@ -125,13 +125,13 @@ let () =
       Array.sort (fun (a, _) (b, _) -> Float.compare a b) trials;
       let seconds, allocated = trials.(1) in
       Printf.printf "guarded_float count=%d registers=%d domains=%d median_seconds=%.6f allocated_bytes=%.0f\n%!"
-        count (Array.length (I.Packed.Private.view packed).code) domains seconds allocated)) [1;4];
+        count (Array.length (I.Packed.Host.view packed).code) domains seconds allocated)) [1;4];
     exit 0
   end
 
 let () =
-  let trace= !I.Packed.Private.trace in
-  I.Packed.Private.trace:=ignore;
+  let trace= !I.Packed.Host.trace in
+  I.Packed.Host.trace:=ignore;
   let count=32769 in
   let source=Printf.sprintf "(array/range %d :type int)" count in
   let cases=[
@@ -157,12 +157,12 @@ let () =
       List.iter(fun domains->Parallel.run ~domains(fun()->
         if not(same expected (I.Packed.force ~strict:true packed ~live))then
           failwith("Typed block parity: "^body))) [1;4;8]) [0;42]) cases;
-  I.Packed.Private.trace:=trace;
+  I.Packed.Host.trace:=trace;
   print_endline "Typed blocks: exact integers, guards, mixed scalar/vector outputs, skipped products, wrapping ordered folds/scans and selected errors agree at one/four/eight domains"
 
 let () =
-  let trace = !I.Packed.Private.trace in
-  I.Packed.Private.trace := ignore;
+  let trace = !I.Packed.Host.trace in
+  I.Packed.Host.trace := ignore;
   let base=Test_program.compile ~fusion:false
     "(for [index (array/range 32769 :type int) component (map (fn [x] (+ x t)) (array/range 7))] component)" in
   let region=base in
@@ -205,12 +205,12 @@ let () =
   let packed,ordinary=make (E.Float_array [|infinity|]) [|0.|] in
   assert(same(I.Packed.force ~strict:true packed ~live)(I.Packed.force ~strict:true ordinary ~live));
   (match I.Packed.force ~strict:true packed ~live with Error d->assert(d.code="E_ARRAY_TYPE")|_->assert false);
-  I.Packed.Private.trace := trace;
+  I.Packed.Host.trace := trace;
   print_endline "Product row projection: repeated bits, empty sources, selected errors, sinks and one/four/eight domains passed"
 
 let () =
-  let trace = !I.Packed.Private.trace in
-  I.Packed.Private.trace := ignore;
+  let trace = !I.Packed.Host.trace in
+  I.Packed.Host.trace := ignore;
   List.iter(fun body->let packed=Test_program.compile ~fusion:false body in
     List.iter(fun time->let live=Input.at_time time in
       List.iter(fun domains->Parallel.run ~domains(fun()->
@@ -222,12 +222,12 @@ let () =
      "(map (fn [x] (if (< x 2) (int/sub 0 x) (int/add x 7))) (array/range (int t) :type int))";
      "(map (fn [x] (int/add x 1)) (array/range (int/add -1 (int t)) :type int))";
      Printf.sprintf "(map (fn [x] (int/add x 1)) (array/range (int/add %d (int t)) :type int))" (Sys.max_array_length+1)];
-  I.Packed.Private.trace:=trace;
+  I.Packed.Host.trace:=trace;
   print_endline "Integer range views: captured counts, Cartesian/guarded indices, empty/changing frames and range diagnostics match reference at one/four/eight domains"
 
 let () =
-  let trace = !I.Packed.Private.trace in
-  I.Packed.Private.trace := ignore;
+  let trace = !I.Packed.Host.trace in
+  I.Packed.Host.trace := ignore;
   List.iter(fun count->List.iter(fun factor->List.iter(fun reverse->
     let operation=Printf.sprintf (if reverse then "(int/mul %d x)" else "(int/mul x %d)") factor in
     let packed=Test_program.compile(Printf.sprintf
@@ -244,12 +244,12 @@ let () =
       assert(same(I.Packed.force ~strict:true skipped ~live)
         (Ok(E.Int_array(Array.init(count-1)(fun i->(if i<1 then i else i+1)*factor)))))
     end)[false;true])[0;1;-3;max_int;min_int])[0;1;32769];
-  I.Packed.Private.trace:=trace;
+  I.Packed.Host.trace:=trace;
   print_endline "Integer scaling: exact wrapping constants, empty/multi-block/reference/domain bytes and skipped rows pass"
 
 let () =
-  let trace = !I.Packed.Private.trace in
-  I.Packed.Private.trace := ignore;
+  let trace = !I.Packed.Host.trace in
+  I.Packed.Host.trace := ignore;
   let count=32769 in
   let fn=match recorded
     "(fn [(mask : int) (p : vec4)] (if (int/eq mask 1) [t 2 3 4] p))" with E.Fn f->f|_->assert false in
@@ -291,12 +291,12 @@ let () =
   refusal "E_ARRAY_COUNT" [|{columns.(0)with data=[||];offset=0};columns.(1);columns.(2);columns.(3)|];
   let bad=Array.copy data in bad.(0)<-nan;
   refusal "E_NONFINITE" (Array.map(fun(c:I.Packed.column)->{c with data=bad})columns);
-  I.Packed.Private.trace := trace;
+  I.Packed.Host.trace := trace;
   print_endline "Typed borrowed columns: mixed Int/Vec4 inputs, exact planes, no source materialization and selected errors passed"
 
 let () =
-  let trace = !I.Packed.Private.trace in
-  I.Packed.Private.trace := ignore;
+  let trace = !I.Packed.Host.trace in
+  I.Packed.Host.trace := ignore;
   let count = 32769 in
   let bodies =
     ["(if (< (mod x 2.0) 1.0) (if (< (mod x 4.0) 1.0) (+ (sin x) t) (- (cos x) t)) (+ x t))";
@@ -332,12 +332,12 @@ let () =
     ["(if (< x 1.0) t (exp (* x 1000.0)))";
      "(let* [q (* [x x x] 1.7976931348623157e308)] (if (< x -1.0) (noise3 q :seed 31) t))";
      "(if (> x 1.0) (let* [q (* [x x x] 1.7976931348623157e308)] (if (< x -1.0) (noise3 q :seed 31) t)) t)"];
-  I.Packed.Private.trace := trace;
+  I.Packed.Host.trace := trace;
   print_endline "Guarded float blocks: selected spans, nested branches, noise, borrowed columns and skipped sinks match reference at one/eight domains"
 
 let () =
-  let snapshot_trace= !I.Packed.Private.trace in
-  I.Packed.Private.trace:=ignore;
+  let snapshot_trace= !I.Packed.Host.trace in
+  I.Packed.Host.trace:=ignore;
   let fn=match recorded
     "(fn [(p : vec3) (n : vec3)] (+ p (* n t)))" with E.Fn f->f|_->assert false in
   let count=32769 in
@@ -438,7 +438,7 @@ let () =
   let expected=match ok (I.Packed.force ~strict:true identity ~live) with E.Vec3_array a->a|_->assert false in
   Array.iteri (fun component plane->Array.iteri (fun i x->assert
     (Int64.bits_of_float x=Int64.bits_of_float expected.(i*3+component))) plane) planes;
-  I.Packed.Private.trace:=snapshot_trace;
+  I.Packed.Host.trace:=snapshot_trace;
   print_endline "Packed output products: stored rounding, cancellation, signed zero and one/eight domains match reference"
 
 let () =
@@ -653,7 +653,7 @@ let () =
   let kernel n = "(map (fn [x] (+ t " ^ sins n "x" ^ ")) (array/range 3))" in
   let residual, term = prepare (kernel 61) in
   let packed = Option.get (compile residual term) in
-  assert (Array.length (I.Packed.Private.view packed).code = Flow.Packed_ops.register_limit);
+  assert (Array.length (I.Packed.Host.view packed).code = Flow.Packed_ops.register_limit);
   ignore (refused (kernel 62) "E_PACKED_LIMIT");
   let constant = "(map (fn [x] (+ (+ x t) (pow 1e200 2.0))) (array/range 3))" in
   (* Ordinary static evaluation also rejects this constant. Compile its
@@ -686,8 +686,8 @@ let () =
        let child = match term.node with Flow.Workspace.Hof (`Map, [_; child]) -> child | _ -> assert false in
        let child = Option.get (compile ~fusion:false residual child) in
        let packed = Option.get (compile residual term) in
-       assert (Array.length (I.Packed.Private.view packed).code
-         + Array.length (I.Packed.Private.view child).code > Flow.Packed_ops.register_limit);
+       assert (Array.length (I.Packed.Host.view packed).code
+         + Array.length (I.Packed.Host.view child).code > Flow.Packed_ops.register_limit);
        assert (I.Packed.stage_count packed = 1);
        parity value packed
    | _ -> assert false);
@@ -723,7 +723,7 @@ let () =
   List.iter (fun fusion ->
     let packed = Test_program.compile ~fusion
       ("(map (fn [x] " ^ repeated 5 ^ ") (array/range 16385))") in
-    assert (Array.length (I.Packed.Private.view packed).code = 8);
+    assert (Array.length (I.Packed.Host.view packed).code = 8);
     List.iter (fun time ->
       let live = Input.at_time time in
       let reference = I.Packed.reference packed ~live in
@@ -731,7 +731,7 @@ let () =
         assert (same (I.Packed.force packed ~live) reference))) [1;8]) [0.;0.37;2.]) [false;true];
   let signed = Test_program.compile
     "(map (fn [x] [(+ x t) 0.0 -0.0 (+ x t)]) (array/range 4))" in
-  let view = I.Packed.Private.view signed in
+  let view = I.Packed.Host.view signed in
   assert (view.outputs.(0).(0) = view.outputs.(0).(3));
   assert (view.outputs.(0).(1) <> view.outputs.(0).(2));
   List.iter (fun domains -> Parallel.run ~domains (fun () ->
@@ -743,7 +743,7 @@ let () =
       (array/range 4))" in
   assert (I.Packed.gpu_refusals guards = []);
   assert (Array.fold_left (fun n check -> if check then n + 1 else n) 0
-    (I.Packed.Private.finite_checks guards) = 9);
+    (I.Packed.Host.finite_checks guards) = 9);
   print_endline "Packed sharing: repeated expressions fit the register budget, signed zero and domain parity preserved"
 
 let () =
@@ -772,9 +772,9 @@ let () =
   print_endline "Strict numeric bodies: tiny packed execution, early refusal and no error fallback passed"
 
 let () =
-  let trace= !I.Packed.Private.trace in
-  Fun.protect ~finally:(fun()->I.Packed.Private.trace:=trace)(fun()->
-    I.Packed.Private.trace:=ignore;
+  let trace= !I.Packed.Host.trace in
+  Fun.protect ~finally:(fun()->I.Packed.Host.trace:=trace)(fun()->
+    I.Packed.Host.trace:=ignore;
     let producer=Test_program.compile ~fusion:false
       "(for [x (array/float (int/sub (frame/index) 1)) y (array/float (if (> t 0.) -1 2))] (+ x y))" in
     let captured=Test_program.compile ~fusion:false

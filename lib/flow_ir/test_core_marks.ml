@@ -262,7 +262,7 @@ let device_inputs () =
   let module G=Flow_ir.Gpu in
   let seen=ref [] and serial=ref 0 in
   let backend:G.backend={cost=(fun ~fast:_ _ ~count:_->Some 0.);prepare=(fun ~fast:_ packed->
-    let width=Array.length(Flow_ir.Packed.Private.view packed).outputs.(0)in
+    let width=Array.length(Flow_ir.Packed.Host.view packed).outputs.(0)in
     Ok{run=(fun inputs->
       seen:=inputs.arrays:: !seen;incr serial;
       Ok{identity=1;output=0;count=inputs.count;width;stamp=Int64.of_int !serial;gpu_seconds=None});
@@ -279,7 +279,7 @@ let device_inputs () =
     let live=Input.at_time time in
     let device packed=Result.map(Option.map(fun(v:G.value)->
       Array.map(fun output->v.identity,v.count,Array.length output)
-        (Flow_ir.Packed.Private.view packed).outputs))(display packed ~live)in
+        (Flow_ir.Packed.Host.view packed).outputs))(display packed ~live)in
     ignore(ok(Flow_ir.Core_exec.draw ?root ~device program ~live
       ~size:(200,100)~buffers:(Buffers.create())))in
       let fixed=prepared "1024"in

@@ -35,7 +35,7 @@ let program id = Test_program.compile (Printf.sprintf
       h (scene/trace %d [x y 5.] [0. 0. -1.] 0. 100. t)]
     [h.t (float h.prim) (+ (float h.instance) (+ h.u h.v))
      (if h.hit (+ 1. (+ (* h.normal.x 0.3) (+ (* h.normal.y 0.6) (* h.normal.z h.normal.z)))) 0.)])) (array/range %d :type int))" id count)
-let values program time = ok (Flow_ir.Packed.Private.prepare ~fast:true program ~live:(Input.at_time time))
+let values program time = ok (Flow_ir.Packed.Host.prepare ~fast:true program ~live:(Input.at_time time))
 let cpu program time = match ok (Flow_ir.Packed.force program ~live:(Input.at_time time)) with
   | Flow.Eval.Vec4_array v -> v | _ -> assert false
 (* the GPU run at each [time] against the CPU host at [cpu_time time] *)

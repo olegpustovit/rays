@@ -17,14 +17,14 @@ let compiled ?(require_arguments=true) body=
   |Some w,[]->w|_,ds->failwith(String.concat ";"(List.map Diagnostic.to_string ds))in
  let value=List.assoc "g"(ok(E.static checked)).results in
  let residual=match value with E.Residual r->r|_->failwith "Expected live region frame"in
- let refused=ref [] and previous= !(I.Packed.Private.trace) in
- let lowered=Fun.protect ~finally:(fun()->I.Packed.Private.trace:=previous)(fun()->
-  I.Packed.Private.trace:=(function Ok _->()|Error ds->refused:=ds @ !refused);
+ let refused=ref [] and previous= !(I.Packed.Host.trace) in
+ let lowered=Fun.protect ~finally:(fun()->I.Packed.Host.trace:=previous)(fun()->
+  I.Packed.Host.trace:=(function Ok _->()|Error ds->refused:=ds @ !refused);
   I.Core_lower.lower ~strict:true residual)in
  let program=match lowered with Ok p->p|Error reason->
   failwith("Core argument case "^body^": "^reason^"; "^
    String.concat "; "(List.map Diagnostic.to_string(List.rev !refused)))in
- if require_arguments then assert(Array.exists(fun r->I.Packed.Private.argument_types r<>[||])program.regions);
+ if require_arguments then assert(Array.exists(fun r->I.Packed.Host.argument_types r<>[||])program.regions);
  value,program
 let ()=
  let code=Buffer.create 1000000 in
@@ -93,14 +93,14 @@ let ()=
   let local=Array.length program.locals and constant=Array.length program.constants in
   let ty=Flow.Value.ty_of value in
   let regions=Array.map(fun (r:I.Core.Region.t)->
-   let index=Array.length(I.Packed.Private.argument_types r) in
+   let index=Array.length(I.Packed.Host.argument_types r) in
    let marker=E.Source("$core/argument",ty,["index",E.Int index]) in
    (* with_bindings captures only names read by its term, so an unused binding
       cannot declare this argument. Uniforms are canonical region declarations,
       including slots never read by an instruction; bind_arguments scans them. *)
    let r=Result.get_ok(I.Core.Region.rebuild r ~uniforms:(Array.append r.uniforms[|marker|])
      ~uniform_names:(Array.append r.uniform_names[|"",[]|]) ())in
-   let declared=I.Packed.Private.argument_types r in
+   let declared=I.Packed.Host.argument_types r in
    assert(Array.length declared=index+1 && declared.(index)=ty);
    r)program.regions in
   let rec rewrite (s:I.Core.statement)=

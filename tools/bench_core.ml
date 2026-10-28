@@ -125,7 +125,7 @@ let scratch () =
           failwith (label ^ ": packed output differs from reference");
         let seconds, bytes = measure 100 (fun () -> I.Packed.force ~strict:true packed ~live) in
         Printf.printf "%s count=%d registers=%d domains=%d seconds=%.9f allocated_bytes=%.0f\n%!"
-          label count (Array.length (I.Packed.Private.view packed).code) domains seconds bytes)) [1; 8])
+          label count (Array.length (I.Packed.Host.view packed).code) domains seconds bytes)) [1; 8])
       [1; 11; 65; 1024]) ["float", "+", ""; "int", "int/add", " :type int"]
 
 (* Attribute fusion: one two-output region against the two kernels it replaces. *)

@@ -43,10 +43,10 @@ let fixture ?override ?seed ty reducer=
     |_->assert false in
   value,sum,packed
 let observed ?fast counter=Some((fun()->0.),(fun packed ~seconds:_ ~reference->
-  if not reference && not(P.Private.view packed).collecting then begin
-    incr counter;Option.iter(fun expected->if P.Private.ordered_add packed<>expected then
+  if not reference && not(P.Host.view packed).collecting then begin
+    incr counter;Option.iter(fun expected->if P.Host.ordered_add packed<>expected then
       failwith(Printf.sprintf "uniform ordered-add expected=%b actual=%b result=%s body=%s"
-        expected(P.Private.ordered_add packed)
+        expected(P.Host.ordered_add packed)
         (Flow.Ty.to_string packed.term.ty)
         (Flow.Ty.to_string packed.body.ty)))fast
   end))
@@ -154,7 +154,7 @@ let ()=
           failwith(Printf.sprintf "uniform executor %s reducer=%s seed=%s count=%d time=%g domains=%d expected=%s actual=%s"
             (Flow.Ty.to_string ty)reducer(Option.value ~default:"default" seed)count time domains
             (E.show scalar)(match actual with Ok value->E.show value|Error d->Diagnostic.to_string d));
-        let prepared=ok(P.Private.prepare ~resolve:(resolve_source current) ?measure:(observed ~fast gpu) packed ~live)in
+        let prepared=ok(P.Host.prepare ~resolve:(resolve_source current) ?measure:(observed ~fast gpu) packed ~live)in
         assert(Array.exists(fun actual->bytes actual=bytes uniform)prepared.uniforms);
         if (!cpu>0)<>packed_expected || (!gpu>0)<>packed_expected then
           failwith(Printf.sprintf "uniform %s reducer=%s seed=%s count=%d time=%g domains=%d CPU=%d GPU=%d expected=%b"
@@ -175,7 +175,7 @@ let ()=
     let value=evaluate(workspace [] body)in
     let packed=match value with E.Residual r->P.compile r(E.Residual.residual_view r).term
       |> Option.get|_->assert false in
-    assert(not(P.Private.ordered_add packed));
+    assert(not(P.Host.ordered_add packed));
     List.iter(fun domains->Parallel.run ~domains(fun()->
       let live=Input.at_time 0. in
       assert(same(P.force packed ~live)(E.Host.force_reference value ~live))))[1;8])
@@ -186,10 +186,10 @@ let ()=
   let packed=match value with E.Residual r->P.compile r(E.Residual.residual_view r).term
     |> Option.get|_->assert false in
   (* Same instructions as a supported reduction, but the fold is a Product loop. *)
-  assert((P.Private.view packed).code=[|P.Input(0,3,0);Input(0,3,1);Input(0,3,2);
+  assert((P.Host.view packed).code=[|P.Input(0,3,0);Input(0,3,1);Input(0,3,2);
     Accumulator 0;Accumulator 1;Accumulator 2;
     Binary(Add,3,0);Binary(Add,4,1);Binary(Add,5,2)|]);
-  assert(not(P.Private.ordered_add packed));
+  assert(not(P.Host.ordered_add packed));
   List.iter(fun domains->Parallel.run ~domains(fun()->
     let live=Input.at_time 0.25 in
     assert(same(P.force packed ~live)(E.Host.force_reference value ~live))))[1;8];
@@ -212,7 +212,7 @@ let ()=
         resolve_source current value in
       let expected=E.Host.force_reference ~state:reference_state ~resolve:reference_resolve value ~live in
       assert(Result.is_error expected && E.state_stamp reference_state=reference_before);
-      let result=if gpu then Result.map(fun _->E.Int 0)(P.Private.prepare ~state ~resolve packed ~live)
+      let result=if gpu then Result.map(fun _->E.Int 0)(P.Host.prepare ~state ~resolve packed ~live)
         else P.force ~state ~resolve packed ~live in
       assert(same result expected && E.state_stamp state=before);
       assert(bytes !current=original);
@@ -220,7 +220,7 @@ let ()=
         else E.Vec3_array[|1.;2.;3.;4.;5.;6.|]);
       let expected=E.Host.force_reference ~resolve:(resolve_source current) value ~live in
       if gpu then begin
-        let prepared=ok(P.Private.prepare ~state ~resolve packed ~live)in
+        let prepared=ok(P.Host.prepare ~state ~resolve packed ~live)in
         let expected_uniform=ok(E.Host.force_reference ~resolve:(resolve_source current) sum ~live)
           |> components in
         assert(Array.exists(fun actual->bytes actual=bytes expected_uniform)prepared.uniforms)

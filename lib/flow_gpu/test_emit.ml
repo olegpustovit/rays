@@ -72,7 +72,7 @@ let () =
 let () =
   let source="(map (fn [x] (if (> x t) (+ x 1.0) (exp (* x 1000.0)))) (array/range 16))"in
   let program=Test_program.compile source in
-  let view=Flow_ir.Packed.Private.view program in
+  let view=Flow_ir.Packed.Host.view program in
   let msl=Test_program.ok(Flow_gpu.Emit.kernel program)in
   let lines=String.split_on_char '\n' msl.source in
   let guarded=ref false in
@@ -121,7 +121,7 @@ let () =
     let program = Test_program.compile ~fusion:false body in
     let msl = Test_program.ok (Flow_gpu.Emit.kernel program) in
     assert (msl.output_widths = [|width|]);
-    let prepared = Test_program.ok (Flow_ir.Packed.Private.prepare program ~live:(Input.at_time 1.)) in
+    let prepared = Test_program.ok (Flow_ir.Packed.Host.prepare program ~live:(Input.at_time 1.)) in
     assert (prepared.count = 1024);
     assert (Marshal.to_string (Flow_ir.Packed.force program ~live:(Input.at_time 1.)) [Marshal.No_sharing]
       = Marshal.to_string (Flow_ir.Packed.reference program ~live:(Input.at_time 1.)) [Marshal.No_sharing]))
@@ -184,9 +184,9 @@ let () =
     assert (List.length msl.interface=Array.length msl.input_widths+Array.length msl.output_widths+2+
       (if msl.table_seeds=[||] then 0 else 1));
     assert (Ogpu.Shader.validate_bindings msl.interface=Ok ());
-    let inputs=Test_program.ok (Flow_ir.Packed.Private.prepare program ~live:(Input.at_time 1.)) in
+    let inputs=Test_program.ok (Flow_ir.Packed.Host.prepare program ~live:(Input.at_time 1.)) in
     assert (inputs.count=1024);
-    assert (Array.length inputs.frame=Array.length (Flow_ir.Packed.Private.view program).code))
+    assert (Array.length inputs.frame=Array.length (Flow_ir.Packed.Host.view program).code))
     (Test_program.fixtures 1024 @ ["two_outputs",Test_program.two_outputs ()]);
   List.iter (fun source ->
     let program = Test_program.compile source in
@@ -211,12 +211,12 @@ let () =
   let program=Test_program.compile
     "(map (fn [x] (if (> x t) 0.0 (min (* x x) 1.0))) (array/range 1024))" in
   let hidden=Test_program.ok(Flow_gpu.Emit.kernel program)in
-  let checks=Flow_ir.Packed.Private.finite_checks program in
+  let checks=Flow_ir.Packed.Host.finite_checks program in
   let lines=String.split_on_char '\n' hidden.source in
   List.iteri(fun index line->if String.starts_with ~prefix:"  float r" line then
     let slot=Scanf.sscanf line "  float r%d=" Fun.id in
     let guard=Printf.sprintf "  sb|=!isfinite(r%d);" slot in
-    if not (match (Flow_ir.Packed.Private.view program).code.(slot)with Guarded _->true|_->false)then
+    if not (match (Flow_ir.Packed.Host.view program).code.(slot)with Guarded _->true|_->false)then
       assert((List.nth lines(index+1)=guard)=checks.(slot)))lines;
   print_endline "GPU emitter: shared operations, golden arithmetic/select/seeded fBm and typed ordered-loop refusals passed"
 

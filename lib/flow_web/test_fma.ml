@@ -61,7 +61,7 @@ let () =
   let overflow=value "(map (fn [x] (if (> t 0.) (fma 1.7976931348623157e308 2. x) 0.)) (array/range 5001))" in
   (match I.Executor.force ~strict:true (ok(I.Executor.compile ~strict:true overflow)) ~live with
    |Error d->assert(d.code="E_NONFINITE") |Ok _->failwith"Overflow FMA accepted");
-  let prepared=ok(I.Packed.Private.prepare_values packed ~live) in
+  let prepared=ok(I.Packed.Host.prepare_values packed ~live) in
   let js=Buffer.create 2000000 in
   Printf.bprintf js "import {fma} from %S;\n" ("file://"^Filename.concat(Sys.getcwd())"../web_export/runtime/prims.js");
   Buffer.add_string js (Flow_web.Js.region packed);
@@ -80,7 +80,7 @@ let () =
     let r=match v with E.Residual r->r|_->assert false in
     let p=match I.Packed.compile_result r (E.Residual.residual_view r).term with
       |Ok p->p |Error ds->failwith(String.concat ";"(List.map Diagnostic.to_string ds)) in
-    let inputs=ok(I.Packed.Private.prepare_values p ~live) in
+    let inputs=ok(I.Packed.Host.prepare_values p ~live) in
     let input=function E.Int_array xs->"BigInt64Array.from(["^String.concat ","(Array.to_list(Array.map(fun n->string_of_int n^"n")xs))^"])"
       |E.Float_array xs->array xs|_->assert false in
     let frame=function E.Int n->string_of_int n^"n"|Float x->number x|_->assert false in
@@ -158,7 +158,7 @@ let () =
       try ignore(op.body ~live ~node:(fun _ _->assert false)args);failwith "Nonfinite checked input accepted"
       with Diagnostic.Error d -> assert(d.code="E_NONFINITE")) [nan;infinity;neg_infinity])
     ["float/mul_checked";"float/fma_checked"];
-  let prepared=ok(I.Packed.Private.prepare_values packed ~live) in
+  let prepared=ok(I.Packed.Host.prepare_values packed ~live) in
   let flatten=function E.Float x->[|x|]|Int n->[|float n|]|Bool b->[|if b then 1. else 0.|]
     |Vec3(a,b,c)->[|a;b;c|]|_->failwith "Checked uniform" in
   let js=Buffer.create 3_000_000 in

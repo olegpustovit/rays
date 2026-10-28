@@ -90,7 +90,7 @@ val reference : ?state:Flow.Eval.state -> ?elems:(string * Flow.Eval.value) list
   ?resolve:(Flow.Eval.value -> (Flow.Eval.value, Diagnostic.t) result) ->
   t -> live:Flow.Eval.live -> (Flow.Eval.value, Diagnostic.t) result
 
-module Private : sig
+module Host : sig
   val argument_types : t -> Flow.Ty.t array
   (** Declared types of the structured Core arguments captured by this region. *)
 

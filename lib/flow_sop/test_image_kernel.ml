@@ -47,7 +47,7 @@ let () =
   let kernel = prepare (fn text) in
   let packed = match Flow_ir.Executor.packed_region (Flow_sop.Image_kernel.program kernel) with
     | Some p -> p | None -> assert false in
-  let inputs = Flow_ir.Packed.Private.prepare packed ~live:(Input.at_time 0.) |> ok in
+  let inputs = Flow_ir.Packed.Host.prepare packed ~live:(Input.at_time 0.) |> ok in
   let saved = Array.copy inputs.arrays.(0) in
   let one = cook 1 kernel and eight = cook 8 kernel in
   assert (bytes one=bytes eight && P.Image.payload_bytes one=387*91*4);

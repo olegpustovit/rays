@@ -48,7 +48,7 @@ let js_input = function
       String.concat "," (Array.to_list (Array.map (fun n -> string_of_int n ^ "n") values)) ^ "])"
   | _ -> failwith "rand_at requires an exact integer JS input"
 let compare_js program ~live expected =
-  let inputs = ok (P.Private.prepare_values program ~live) in
+  let inputs = ok (P.Host.prepare_values program ~live) in
   let script = Buffer.create (Array.length expected * 48) in
   Buffer.add_string script (Flow_web.Js.region program);
   Printf.bprintf script "const inputs=[%s], uniforms=[%s], outputs=[new Float64Array(%d)];\n"
@@ -137,7 +137,7 @@ let () =
   let indices=Array.init count(fun i->bases.(i mod Array.length bases)+i/Array.length bases) in
   List.iter(fun seed ->
     let mapped,program=map ~seed Flow.Ty.Int(E.Int_array indices) "(rand/at (int/add seed (frame/index)) i)" in
-    let instructions=(P.Private.view program).code in
+    let instructions=(P.Host.view program).code in
     assert(Array.length instructions<=6);
     assert(Array.exists(function P.Rand_at _->true|_->false)instructions);
     assert(P.gpu_refusals program<>[]);
@@ -153,7 +153,7 @@ let () =
       |_->assert false)(Array.to_list bases)) [min_int;0;42;max_int];
   let mapped=value "(map (fn [(i : int)] [(rand/at (int/add 42 (frame/index)) i) (rand/at (int/add 43 (frame/index)) i) (rand/at (int/add 44 (frame/index)) i)]) (array/range 100000 :type int))" in
   let program=compile mapped and live=Input.at_time 0. in
-  assert(Array.length(P.Private.view program).code<16);
+  assert(Array.length(P.Host.view program).code<16);
   let expected=Array.init(count*3)(fun i->Rays_math.Rand.float_at(Rays_math.Rand.seed(42+i mod 3))~index:(i/3)) in
   List.iter(fun domains->Parallel.run ~domains(fun()->
     match ok(P.force ~strict:true program ~live) with

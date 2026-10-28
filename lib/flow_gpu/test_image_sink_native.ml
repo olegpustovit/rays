@@ -32,7 +32,7 @@ let () =
           let previous=ref None in
           List.iter(fun time->
             let live=Input.at_time time in
-            let input=Flow_ir.Packed.Private.prepare p ~live |> get in
+            let input=Flow_ir.Packed.Host.prepare p ~live |> get in
             let output=G.Run.dispatch run input |> get in
             let converted=G.Image_sink.convert sink ~width:65 ~height:3 output |> get in
             Option.iter(fun old->assert(G.Image_sink.texture old=None)) !previous;
@@ -77,7 +77,7 @@ let () =
       let p,_=packed ~width:17 ~height:5 "[uv.x uv.y t 1]"in
       let run=G.Run.create gpu cache (G.Emit.kernel p |> get)in
       Fun.protect ~finally:(fun()->G.Run.close run)(fun()->
-        let inputs=Flow_ir.Packed.Private.prepare p ~live:(Input.at_time 0.25) |> get in
+        let inputs=Flow_ir.Packed.Host.prepare p ~live:(Input.at_time 0.25) |> get in
         let output=G.Run.dispatch run inputs |> get in
         let resized=G.Image_sink.convert sink ~width:17 ~height:5 output |> get in
         let texture=G.Image_sink.texture resized |> Option.get in
@@ -222,7 +222,7 @@ let () =
       let cache=G.Pipelines.create ~clock:Unix.gettimeofday (Renderer.gpu_device gpu)in
       let run=G.Run.create gpu cache (G.Emit.kernel p |> get)in
       Fun.protect ~finally:(fun()->G.Run.close run;G.Pipelines.close cache)(fun()->
-        let output=G.Run.dispatch run (Flow_ir.Packed.Private.prepare p ~live:(Input.at_time 0.25) |> get) |> get in
+        let output=G.Run.dispatch run (Flow_ir.Packed.Host.prepare p ~live:(Input.at_time 0.25) |> get) |> get in
         let converted=G.Image_sink.convert sink ~width:17 ~height:5 output |> get in
         let identity=I.identity current in
         resource(I.Private.replace_gpu_source current ~width:17 ~height:5
@@ -249,7 +249,7 @@ let ()=
         let p,_=packed ~width ~height "[uv.x uv.y t 1]"in
         let run=G.Run.create gpu cache(G.Emit.kernel p |> get)in
         Fun.protect ~finally:(fun()->G.Run.close run)(fun()->
-          let output=G.Run.dispatch run(Flow_ir.Packed.Private.prepare p
+          let output=G.Run.dispatch run(Flow_ir.Packed.Host.prepare p
             ~live:(Input.at_time time) |> get) |> get in
           G.Image_sink.convert sink ~width ~height output |> get)in
       let first=produce 65 17 0.25 in

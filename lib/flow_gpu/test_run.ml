@@ -15,7 +15,7 @@ let () = match Renderer.acquire_gpu () with
             let runner=Flow_gpu.Run.create gpu pipelines msl in
             Fun.protect ~finally:(fun () -> Flow_gpu.Run.close runner) (fun () ->
               let live=Input.at_time 1. in
-              let values=Test_program.ok (Flow_ir.Packed.Private.prepare program ~live) in
+              let values=Test_program.ok (Flow_ir.Packed.Host.prepare program ~live) in
               let output=Test_program.ok (Flow_gpu.Run.dispatch runner values) in
               let actual_value=Test_program.ok (Flow_gpu.Run.readback output)
               and expected_value=Test_program.ok (Flow_ir.Packed.force program ~live) in
@@ -42,7 +42,7 @@ let () = match Renderer.acquire_gpu () with
                 let restored=Test_program.ok(Flow_gpu.Run.dispatch runner values)
                   |> Flow_gpu.Run.readback |> Test_program.ok |> array in
                 assert(restored=expected);
-                let later=Test_program.ok(Flow_ir.Packed.Private.prepare program ~live:(Input.at_time 2.))in
+                let later=Test_program.ok(Flow_ir.Packed.Host.prepare program ~live:(Input.at_time 2.))in
                 let animated=Test_program.ok(Flow_gpu.Run.dispatch runner
                   {values with frame=later.frame;uniforms=later.uniforms})
                   |> Flow_gpu.Run.readback |> Test_program.ok |> array in
@@ -58,7 +58,7 @@ let () = match Renderer.acquire_gpu () with
             let expected=Test_program.ok(Flow_ir.Packed.reference program ~live)|>array in
             let cpu=Test_program.ok(Flow_ir.Packed.force ~strict:true program ~live)|>array in
             assert(cpu=expected);
-            let values=Test_program.ok(Flow_ir.Packed.Private.prepare ~fast:true program ~live)in
+            let values=Test_program.ok(Flow_ir.Packed.Host.prepare ~fast:true program ~live)in
             let actual=Test_program.ok(Flow_gpu.Run.dispatch runner values)
               |>Flow_gpu.Run.readback|>Test_program.ok|>array in
             if actual<>expected then failwith(name^": carried GPU loop differs from reference");
@@ -70,7 +70,7 @@ let () = match Renderer.acquire_gpu () with
             (Test_program.ok(Flow_gpu.Emit.kernel ~fast:true program))in
           Fun.protect ~finally:(fun()->Flow_gpu.Run.close runner)(fun()->
             let live=Input.at_time 1. in
-            let inputs=Test_program.ok(Flow_ir.Packed.Private.prepare ~fast:true program ~live)in
+            let inputs=Test_program.ok(Flow_ir.Packed.Host.prepare ~fast:true program ~live)in
             match Flow_gpu.Run.dispatch ~wait:false runner inputs with
             |Error _->assert false
             |Ok output->
@@ -117,7 +117,7 @@ let () = match Renderer.acquire_gpu () with
         let runner=Flow_gpu.Run.create gpu pipelines(Test_program.ok(Flow_gpu.Emit.kernel ~fast:true fresh))in
         Fun.protect ~finally:(fun()->Flow_gpu.Run.close runner)(fun()->
           let live=Input.at_time 1. in
-          let values=Test_program.ok(Flow_ir.Packed.Private.prepare ~fast:true fresh ~live)in
+          let values=Test_program.ok(Flow_ir.Packed.Host.prepare ~fast:true fresh ~live)in
           let empty=Test_program.ok(Flow_gpu.Run.dispatch ~wait:false runner {values with count=0})in
           assert(array(Test_program.ok(Flow_gpu.Run.readback empty))=[||]
             && Flow_gpu.Run.Private.status_reads runner=0));
@@ -126,7 +126,7 @@ let () = match Renderer.acquire_gpu () with
          Fun.protect ~finally:(fun()->Flow_gpu.Host.close host)(fun()->
            let backend=Flow_gpu.Host.backend host in
            let kernel=Test_program.ok(backend.prepare ~fast:false program)in
-           let values=Test_program.ok(Flow_ir.Packed.Private.prepare program ~live:(Input.at_time 1.))in
+           let values=Test_program.ok(Flow_ir.Packed.Host.prepare program ~live:(Input.at_time 1.))in
            let empty=Test_program.ok(kernel.run{values with count=0})in
            let borrowed=Option.get(Test_program.ok(Flow_gpu.Host.output host empty))in
            assert(array(Test_program.ok(kernel.readback{empty with width=Flow_gpu.Run.width borrowed}))=[||]
@@ -136,7 +136,7 @@ let () = match Renderer.acquire_gpu () with
           let runner=Flow_gpu.Run.create gpu pipelines (Test_program.ok(Flow_gpu.Emit.kernel ~fast:true program))in
           Fun.protect ~finally:(fun()->Flow_gpu.Run.close runner)(fun()->
             let live=Input.at_time 1. in
-            let values=Test_program.ok(Flow_ir.Packed.Private.prepare ~fast:true program ~live)in
+            let values=Test_program.ok(Flow_ir.Packed.Host.prepare ~fast:true program ~live)in
             match Flow_gpu.Run.dispatch runner values with
             |Error diagnostic->assert(refuses && diagnostic.Diagnostic.code="E_KERNEL")
             |Ok output->assert(not refuses);
@@ -149,7 +149,7 @@ let () = match Renderer.acquire_gpu () with
         let runner=Flow_gpu.Run.create gpu pipelines (Test_program.ok(Flow_gpu.Emit.kernel ~fast:true program))in
         Fun.protect ~finally:(fun()->Flow_gpu.Run.close runner)(fun()->
           let live=Input.at_time 1. in
-          let output=Test_program.ok(Flow_gpu.Run.dispatch runner (Test_program.ok(Flow_ir.Packed.Private.prepare ~fast:true program ~live)))in
+          let output=Test_program.ok(Flow_gpu.Run.dispatch runner (Test_program.ok(Flow_ir.Packed.Host.prepare ~fast:true program ~live)))in
           let actual=array(Test_program.ok(Flow_gpu.Run.readback output))
           and expected=array(Test_program.ok(Flow_ir.Packed.force program ~live)) in
           if actual<>expected then failwith "fast int32 and gather kernel differs from the CPU";
@@ -171,11 +171,11 @@ let () = match Renderer.acquire_gpu () with
         let runner=Flow_gpu.Run.create gpu pipelines (Test_program.ok(Flow_gpu.Emit.kernel program))in
         Fun.protect ~finally:(fun()->Flow_gpu.Run.close runner)(fun()->
           let live=Input.at_time 1. in
-          let output=Test_program.ok(Flow_gpu.Run.dispatch runner (Test_program.ok(Flow_ir.Packed.Private.prepare program ~live)))in
+          let output=Test_program.ok(Flow_gpu.Run.dispatch runner (Test_program.ok(Flow_ir.Packed.Host.prepare program ~live)))in
           let expected=Test_program.ok(Flow_ir.Packed.force_all program ~live)in
           List.iteri(fun index expected->
             let selected=Option.get(Flow_gpu.Run.select_output ~index output)in
-            assert(Flow_gpu.Run.width selected=Array.length (Flow_ir.Packed.Private.view program).outputs.(index));
+            assert(Flow_gpu.Run.width selected=Array.length (Flow_ir.Packed.Host.view program).outputs.(index));
             assert(match Flow_gpu.Run.buffer selected,Flow_gpu.Run.buffer ~index output with
               |Some selected,Some original->selected==original|None,None->true|_->false);
             assert(array(Test_program.ok(Flow_gpu.Run.readback selected))=array expected))expected;
@@ -184,12 +184,12 @@ let () = match Renderer.acquire_gpu () with
           let host=Flow_gpu.Host.create ~clock:Unix.gettimeofday gpu in
           Fun.protect ~finally:(fun()->Flow_gpu.Host.close host)(fun()->
             let kernel=Test_program.ok((Flow_gpu.Host.backend host).prepare ~fast:false program)in
-            let value=Test_program.ok(kernel.run(Test_program.ok(Flow_ir.Packed.Private.prepare program ~live)))in
+            let value=Test_program.ok(kernel.run(Test_program.ok(Flow_ir.Packed.Host.prepare program ~live)))in
             List.iteri(fun output expected->
-              let width=Array.length(Flow_ir.Packed.Private.view program).outputs.(output)in
+              let width=Array.length(Flow_ir.Packed.Host.view program).outputs.(output)in
               assert(array(Test_program.ok(kernel.readback {value with output;width}))=array expected))expected;
             assert(Test_program.ok(Flow_gpu.Host.output host {value with output=List.length expected})=None);
-            ignore(Test_program.ok(kernel.run(Test_program.ok(Flow_ir.Packed.Private.prepare program ~live))));
+            ignore(Test_program.ok(kernel.run(Test_program.ok(Flow_ir.Packed.Host.prepare program ~live))));
             assert(Test_program.ok(Flow_gpu.Host.output host value)=None))));
         List.iter (fun (body,refuses) ->
         let hidden=Test_program.compile ("(map (fn [x] " ^ body ^ ") (array/range 1024))")in
@@ -198,7 +198,7 @@ let () = match Renderer.acquire_gpu () with
         Fun.protect ~finally:(fun()->Flow_gpu.Run.close runner)(fun()->
           let live=Input.at_time 1. in
           assert(Array.for_all((=)0.)(array(Test_program.ok(Flow_ir.Packed.force hidden ~live))));
-          let inputs=Test_program.ok(Flow_ir.Packed.Private.prepare hidden ~live)in
+          let inputs=Test_program.ok(Flow_ir.Packed.Host.prepare hidden ~live)in
           match Flow_gpu.Run.dispatch runner inputs with
             |Error diagnostic->assert(refuses && diagnostic.Diagnostic.code="E_KERNEL")
             |Ok output->assert(not refuses);
@@ -263,7 +263,7 @@ let resident_fold gpu ~count:range =
       (* fast display dispatches left in flight (never borrowed) between resident draws share the
          queue's three command buffers with the fold's levels: none is refused *)
       let display=List.assoc "arithmetic"(Test_program.fixtures 4096)in
-      let inputs=ok(Flow_ir.Packed.Private.prepare ~fast:true display ~live:(Input.at_time 1.))in
+      let inputs=ok(Flow_ir.Packed.Host.prepare ~fast:true display ~live:(Input.at_time 1.))in
       let backend=Flow_gpu.Host.backend host in
       let kernels=List.init 2 (fun _->ok(backend.prepare ~fast:true display))in
       for _=1 to 4 do
@@ -288,7 +288,7 @@ let ()=
     let host=H.create ~clock:Unix.gettimeofday gpu in
     Fun.protect ~finally:(fun()->H.close host)(fun()->
       let packed=List.assoc "arithmetic"(Test_program.fixtures 1024)in
-      let inputs=Flow_ir.Packed.Private.prepare packed ~live:(Input.at_time 1.) |> Test_program.ok in
+      let inputs=Flow_ir.Packed.Host.prepare packed ~live:(Input.at_time 1.) |> Test_program.ok in
       let backend=H.backend host in
       let first=backend.prepare ~fast:false packed |> Test_program.ok in
       let value=first.run inputs |> Test_program.ok in

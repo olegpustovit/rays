@@ -111,7 +111,7 @@ let measure t ~fast packed ~count =
   if not t.measurement_ready then None
   else
     (* a site's kernel entry, by its code: emitting it again (and digesting it) is per-draw work *)
-    let code = (Flow_ir.Packed.Private.view packed).code in
+    let code = (Flow_ir.Packed.Host.view packed).code in
     let entry =
       match Entries.peek t.entries (code, fast) with
       | Some entry -> entry
@@ -139,8 +139,8 @@ let measure t ~fast packed ~count =
                   match (H.backend host).prepare ~fast packed with
                   | Error _ -> None
                   | Ok kernel -> (
-                      let view = Flow_ir.Packed.Private.view packed in
-                      let inputs : Flow_ir.Packed.Private.inputs =
+                      let view = Flow_ir.Packed.Host.view packed in
+                      let inputs : Flow_ir.Packed.Host.inputs =
                         {
                           arrays =
                             Array.map (fun width -> Array.make (count * width) 0.) view.widths;

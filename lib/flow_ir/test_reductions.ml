@@ -82,13 +82,13 @@ let () =
   let captured=value "(let* [minimum (array/min (array/float 7 t))] (map (fn [x] (+ x minimum)) (array/range 11)))" in
   let core=match captured with E.Residual r->Result.get_ok(I.Core_lower.lower ~strict:true r)|_->assert false in
   let packed=core.regions.(0) in
-  assert(I.Packed.Private.argument_types packed=[|Flow.Ty.Float|]);
-  List.iter(fun arguments->match I.Packed.Private.bind_arguments packed arguments with
+  assert(I.Packed.Host.argument_types packed=[|Flow.Ty.Float|]);
+  List.iter(fun arguments->match I.Packed.Host.bind_arguments packed arguments with
     |Error d->assert(d.code="E_CORE_ARGUMENT")|Ok _->failwith"invalid argument accepted")
     [[||];[|E.Int 1|];[|E.Float 1.;E.Float 2.|]];
-  (match I.Packed.Private.bind_arguments packed[|E.Float nan|] with
+  (match I.Packed.Host.bind_arguments packed[|E.Float nan|] with
    |Error d->assert(d.code="E_NONFINITE")|Ok _->failwith"nonfinite argument accepted");
-  let bound=ok(I.Packed.Private.bind_arguments packed[|E.Float 3.|]) in
+  let bound=ok(I.Packed.Host.bind_arguments packed[|E.Float 3.|]) in
   assert(ok(I.Packed.force ~strict:true bound ~live:(Input.at_time 1.))
     =E.Float_array(Array.init 11(fun i->float i+.3.)));
   let source=value ~declarations:"[(data : (array float) (array/float 0))]"

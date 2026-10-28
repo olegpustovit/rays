@@ -383,11 +383,11 @@ let remember (reads, writes) run =
         if not (Array.exists Core_marks.is_device values) then
         Lru.Identity_list.add table key values
 
-let bind_arguments st packed args = Packed.Private.bind_arguments packed
+let bind_arguments st packed args = Packed.Host.bind_arguments packed
   (Array.of_list (List.map (Array.get st.values) args))
 
 let prepare_invoke packed ~args ~result ~on_device ~keep =
-  let packed=if args=[] then Packed.Private.bind_arguments packed [||] else Ok packed in
+  let packed=if args=[] then Packed.Host.bind_arguments packed [||] else Ok packed in
   let kept=ref None in
   fun st ->
     if Array.length st.builders>0 then st.builders.(result)<-None;
@@ -396,7 +396,7 @@ let prepare_invoke packed ~args ~result ~on_device ~keep =
     | _ ->
     let fail = V.raise_diagnostic in
     let packed=match packed with Ok p -> p | Error d -> fail d in
-    let bind ?validate packed = if args=[] then packed else match Packed.Private.bind_arguments ?validate packed
+    let bind ?validate packed = if args=[] then packed else match Packed.Host.bind_arguments ?validate packed
       (Array.of_list(List.map(fun n->st.values.(n))args)) with Ok p->p | Error d->fail d in
     let resident=match st.resident with
       | Some r when st.resident_on -> (match r.invoke (bind ~validate:false packed) ~live:st.live with

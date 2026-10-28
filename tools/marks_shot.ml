@@ -96,7 +96,7 @@ let () =
           let run = Flow_gpu.Run.create gpu pipelines (get (Flow_gpu.Emit.kernel packed)) in
           let sink = get (Flow_gpu.Image_sink.create gpu) in
           Fun.protect ~finally:(fun () -> Flow_gpu.Image_sink.close sink; Flow_gpu.Run.close run) (fun () ->
-            let inputs = get (Flow_ir.Packed.Private.prepare ~state packed ~live) in
+            let inputs = get (Flow_ir.Packed.Host.prepare ~state packed ~live) in
             let output = get (Flow_gpu.Run.dispatch run inputs) in
             let image = get (Flow_gpu.Image_sink.convert sink ~width ~height output) in
             match Ogpu.Backend.read_texture (Option.get (Flow_gpu.Image_sink.texture image)) ~bytes_per_row:(width * 4) with

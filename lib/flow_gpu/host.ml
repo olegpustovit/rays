@@ -100,7 +100,7 @@ let backend t : G.backend =
 type placeholder={key:Obj.t;kind:int;buffer:Ogpu.Backend.buffer*int;length:int;cell:(Ogpu.Backend.buffer*int)option}
 let resident ~fast t : Flow_ir.Core_exec.resident =
   let module E=Flow.Eval in
-  let module P=Flow_ir.Packed.Private in
+  let module P=Flow_ir.Packed.Host in
   let queue=Renderer.gpu_queue t.gpu in
   let table=ref [] and epoch=ref 0L and status_runs=ref [] in
   let pending=ref None in

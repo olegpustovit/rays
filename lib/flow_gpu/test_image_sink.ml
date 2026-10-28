@@ -60,7 +60,7 @@ let ()=
   let sink=S.Private.create_owned device queue |> get in
   Fun.protect ~finally:(fun()->S.close sink;Flow_gpu.Run.close run;Flow_gpu.Pipelines.close cache;
     ignore(B.destroy_queue queue);ignore(B.destroy_device device))(fun()->
-    let inputs=Flow_ir.Packed.Private.prepare packed ~live:(Input.at_time 0.5) |> get in
+    let inputs=Flow_ir.Packed.Host.prepare packed ~live:(Input.at_time 0.5) |> get in
     let input=Flow_gpu.Run.dispatch run inputs |> get in
     let convert width height=S.convert sink ~width ~height input in
     order:=[];let first=convert 65 3 |> get in
@@ -94,7 +94,7 @@ let ()=
     let scalar=List.assoc "arithmetic"(Test_program.fixtures 195)in
     let scalar_run=Flow_gpu.Run.Private.create_owned device queue cache (Flow_gpu.Emit.kernel scalar |> get)in
     Fun.protect ~finally:(fun()->Flow_gpu.Run.close scalar_run)(fun()->
-      let values=Flow_ir.Packed.Private.prepare scalar ~live:(Input.at_time 0.5) |> get in
+      let values=Flow_ir.Packed.Host.prepare scalar ~live:(Input.at_time 0.5) |> get in
       let output=Flow_gpu.Run.dispatch scalar_run values |> get in
       assert(Result.is_error(S.convert sink ~width:65 ~height:3 output)));
     assert(S.texture resized<>None);

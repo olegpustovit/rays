@@ -25,7 +25,7 @@ let ()=
  List.iter(fun(name,value)->
   let _,core=C.core value in
   if String.starts_with ~prefix:"closure-"name || name="fixed-count-changing-source" then
-    assert(Array.for_all(fun r->I.Packed.Private.argument_types r=[||])core.regions);
+    assert(Array.for_all(fun r->I.Packed.Host.argument_types r=[||])core.regions);
   let frame=C.ok(Flow_web.Js.frame core)in
   let regions=Array.to_list(Array.map(fun r->let packed=r in
     let rec table=function I.Core.Region.Array_prepare _->true|Guarded(_,inner)->table inner|_->false in
