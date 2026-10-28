@@ -267,6 +267,16 @@ let attribute_data args =
   else E.Record (List.filter (fun (name, _) ->
     List.mem name ["values"; "selection"; "default"]) args)
 
+let kernel_data (n : E.node) = match n.kind with
+  | "sop/with_attr" -> Some (attribute_data n.args)
+  | "sop/with_group" -> Some (group_data n.args)
+  | kind when is_geometry_arrays kind -> Some (geometry_arrays_data n.args)
+  | _ -> None
+let is_resource (n : E.node) = match n.kind with
+  | "image/load" | "image/render" | "image/map" -> true
+  | "exact" -> n.ty = Ty.image
+  | _ -> false
+
 let attribute_node ~strict_body ~reference ~profile ~approx ~gpu ~kernel_source
     ?state ?elems ?selection ?default ?(owner=Rdk.Attribute.Point) ?(kind="vec3")
     ~name ~values ~sources inputs =
@@ -533,7 +543,7 @@ let build_lock = Mutex.create ()
 let same_gpu (a : Flow_ir.Gpu.config) (b : Flow_ir.Gpu.config) =
   a.fast = b.fast && a.policy = b.policy &&
   match a.backend, b.backend with None, None -> true | Some a, Some b -> a == b | _ -> false
-module Private = struct let record = ref false let profiles : Flow_ir.Profile.t list ref = ref []
+module Private = struct
   let cache_hits = Atomic.make 0
   let clear_cache () = Mutex.protect build_lock (fun () -> Build_cache.clear build_cache) end
 let geo_of args =
@@ -600,6 +610,7 @@ module Lowerer (P : sig
   val strict_body : bool
   val defer_body_errors : bool
   val kernel_bindings : (E.fn * int) list
+  val on_profile : (Flow_ir.Profile.t -> unit) option
   val compiled_ids : int Instance_path.Map.t
   val sites : Workspace.path list
   val inputs : (string * (string * Eval.value) list) list option
@@ -607,7 +618,7 @@ module Lowerer (P : sig
   val lower_checked :
     factories:Edit.factory list -> ?provenance_tags:bool -> ?reference:bool -> ?gpu:Flow_ir.Gpu.config ->
     ?strict_body:bool -> ?defer_body_errors:bool -> ?kernel_bindings:(E.fn * int) list ->
-    ?compiled_ids:int Instance_path.Map.t -> ?sites:Workspace.path list ->
+    ?on_profile:(Flow_ir.Profile.t -> unit) -> ?compiled_ids:int Instance_path.Map.t -> ?sites:Workspace.path list ->
     ?inputs:(string * (string * Eval.value) list) list -> Workspace.t -> (t, Diagnostic.t) result
 end) = struct
   open P
@@ -976,9 +987,9 @@ end) = struct
       let key = String.sub definition.kind.qualified 4
         (String.length definition.kind.qualified - 4) in
       let record_profile profile =
-        if !Private.record then Private.profiles := profile :: !Private.profiles in
+        Option.iter (fun record -> record profile) on_profile in
       let lower_nested ~gpu ~kernel_bindings ~factories ~inputs checked =
-        lower_checked ~reference ~gpu ~strict_body:true ~defer_body_errors:true ~kernel_bindings
+        lower_checked ~reference ~gpu ~strict_body:true ~defer_body_errors:true ~kernel_bindings ?on_profile
           ~factories ~inputs checked in
       let build_body bindings ~label ~context inputs parameters =
         build_lisp_body ~gpu ~lower_nested ~record_profile ~checked ~definition ~provenance ~label
@@ -989,7 +1000,7 @@ end) = struct
          lowerings, kernel bindings, recorded profiles, non-data parameters (key_of raises). *)
       let build bindings ~label ~context inputs parameters =
         let uncached () = build_body bindings ~label ~context inputs parameters in
-        if functions<>[] || strict_body || kernel_bindings<>[] || !Private.record then uncached () else
+        if functions<>[] || strict_body || kernel_bindings<>[] || on_profile <> None then uncached () else
         match String.concat "\000" [Lazy.force declaration_source; label; string_of_bool reference;
             Marshal.to_string (Workspace.Paths.elements checked.approx, provenance, bindings, Sop.Context.seed context,
               Sop.Context.frame context, Int64.bits_of_float (Sop.Context.time context),
@@ -1087,112 +1098,8 @@ end) = struct
                 | None -> own)
            | _ -> own)
       | _ -> None
-    let rec prepare (node : E.node) =
-      match Hashtbl.find_opt prepared node.id with
-      | Some p -> p
-      | None ->
-          let template = templ.(node.id) in
-          let cid = compiled.(node.id) in
-          let live = List.filter (fun (_, v) -> E.is_live v) node.args in
-          let resource = node.ty=Ty.image && node.kind="exact"
-            || node.kind="image/load" || node.kind="image/render" || node.kind="image/map" in
-          (* a template node keeps its live arguments: each element forces them *)
-          let args = if template || node.kind = "sop/with_attr" || node.kind="sop/with_group" || is_geometry_arrays node.kind || resource then node.args
-            else List.map (fun (n, v) -> n, at_zero v) node.args in
-          let args = if node.kind <> "sop/material" then args else
-            List.concat_map (function
-              | "material", E.Struct ("material/standard", _, fields) ->
-                  let get name default = Option.value ~default (List.assoc_opt name fields) in
-                  ["material", get "name" (E.Text "");
-                   "color", get "color" (E.Vec3 (1.,1.,1.));
-                   "roughness", get "roughness" (E.Float 0.4);
-                   "emission", get "emission" (E.Vec3 (0.,0.,0.))]
-              | arg -> [arg]) args in
-          let dynamic = ref [] in
-          let p = match node.kind with
-            | operation when is_geometry_arrays operation ->
-                let sources=deps node in
-                let factory=Edit.factory ~key:(geometry_arrays_key operation) ~label:(geometry_arrays_label operation) ~category:["Flow";"Topology"]
-                  ~arity:(List.length sources)(geometry_arrays_node ~operation ~args ~sources)in
-                {cid;factory;arity=List.length sources;changes=[];dynamic=[];zone=None;kernels=[];
-                  slots=List.mapi(fun index source->index,source)sources}
-            | operation when List.mem operation metadata_lowering_operations ->
-                let sources=geo_of args in
-                let factory=metadata_factory ~operation ~args sources in
-                {cid;factory;arity=List.length sources;changes=[];dynamic=[];zone=None;kernels=[];
-                  slots=List.mapi(fun i source->i,source)sources}
-            | "sop/with_group" ->
-                let sources=deps node in
-                let factory=Edit.factory ~key:"flow.with_group" ~label:"Write group"
-                  ~category:["Flow"] ~arity:(List.length sources) (group_node ~args ~sources) in
-                {cid;factory;arity=List.length sources;changes=[];dynamic=[];zone=None;kernels=[];
-                  slots=List.mapi(fun i source->i,source)sources}
-            | "image/load" | "image/render" | "image/map" | "exact" when resource ->
-                let factory=Edit.factory ~key:node.kind ~label:node.kind ~category:["Image"] ~arity:0
-                  (fun _->resource_image node.kind (Error(Diagnostic.error ~code:"E_IMAGE"
-                    "This image needs an initial-domain image resolver.")))in
-                {cid;factory;slots=[];arity=0;changes=[];dynamic=[];zone=None;kernels=[]}
-            | "sop/with_attr" ->
-                let owner,kind=attribute_options args in
-                let name = match List.assoc "attribute" args with
-                  | E.Text name -> name | _ -> fail "E_LOWER" "Attribute name must be static text" in
-                let values = List.assoc "values" args in
-                let sources = match List.assoc "geometry" args with
-                  | E.No_geo -> -1 :: deps node | _ -> deps node in
-                let factory = Edit.factory ~key:"flow.with_attr" ~label:"Write attribute"
-                  ~category:["Flow"] ~arity:(List.length sources)
-                  (attribute_node ?selection:(List.assoc_opt "selection" args) ?default:(List.assoc_opt "default" args)
-                    ~owner ~kind ~name ~values ~sources) in
-                {cid; factory; arity = List.length sources; changes = []; dynamic = []; zone = None; kernels = [];
-                  slots = List.filter_map (fun (i, source) -> if source < 0 then None else Some (i, source))
-                    (List.mapi (fun i source -> i, source) sources)}
-            | "sop/delete_attr" ->
-                let name = match List.assoc "attribute" args with
-                  | E.Text name -> name | _ -> fail "E_ATTR_NAME" "An attribute pattern must be text" in
-                let owner = match List.assoc_opt "owner" args with
-                  | None -> "point" | Some (E.Text owner) -> owner
-                  | Some _ -> fail "E_ATTR_OWNER" "An attribute owner must be text" in
-                let sources = geo_of args in
-                let factory = Edit.factory ~key:"flow.delete_attr" ~label:"Delete attribute"
-                  ~category:["Flow"] ~arity:1
-                  (function [input] -> Attribute_metadata.delete ~owner ~pattern:name input
-                    | _ -> invalid_arg "Attribute deletion needs one geometry") in
-                {cid;factory;arity=1;changes=[];dynamic=[];zone=None;kernels=[];
-                  slots=List.mapi (fun i source -> i,source) sources}
-            | "sop/curve" ->
-                let encode points = [Curve.parameter, Param.Text_value (Curve.encode (curve_points points))] in
-                let closed = match List.assoc_opt "closed" args with
-                  | None -> []
-                  | Some (E.Bool closed) -> [Curve.closed_parameter, Param.Bool_value closed]
-                  | Some _ -> fail "E_LOWER" "sop/curve :closed must be a constant bool" in
-                let filled = match List.assoc_opt "filled" args with
-                  | None -> []
-                  | Some (E.Bool filled) -> [Curve.filled_parameter, Param.Bool_value filled]
-                  | Some _ -> fail "E_LOWER" "sop/curve :filled must be a constant bool" in
-                let changes = closed @ filled @ (match List.assoc_opt "points" args with
-                  | Some points when E.is_live points ->
-                      dynamic := [ points, (fun v -> encode [ "points", v ]) ]; []
-                  | _ -> encode args) in
-                {cid; factory = Curve.factory; arity = 0; slots = []; changes;
-                 dynamic = []; zone = None; kernels = []}
-            | "zone/points" | "zone/pieces" ->
-                let z = { (zinfo node) with base = !tags; count = Atomic.make (-1);
-                                            positions = Atomic.make [||] } in
-                tags := z.base + Zone.max_elements;
-                let sources = (match geo_of (List.filter (fun (k, _) -> k = "geometry") args) with
-                  | [ src ] -> src | _ -> fail "E_LOWER" "Zone without geometry") :: z.captures in
-                List.iter (fun id -> let n = plan.nodes.(id) in
-                  if n.kind <> "zone/element" then ignore (prepare n)) z.order;
-                let base_site = plan.nodes.(z.root).site in
-                zones := {cid; site = node.site; iter = node.iter; body_site = base_site;
-                          base = z.base; count = z.count; ekey = z.ekey;
-                          positions = z.positions} :: !zones;
-                let factory = Edit.factory_slots ~key:"zone" ~label:"Loop over geometry"
-                  ~slots:["input"] ~category:["Copy"] ~inputs:[Edit.Rest]
-                  (fun nodes -> make_zone ~outer:[] z (Array.of_list (List.filter_map Fun.id nodes))) in
-                {cid; factory; arity = List.length sources; changes = []; dynamic = []; kernels = [];
-                 zone = Some z; slots = List.mapi (fun i s -> i, s) sources}
-            | kind ->
+    let lower_default (node : E.node) args cid =
+      let kind = node.kind and dynamic = ref [] in
                 let args = if kind="image/noise" then List.map(fun(name,value)->
                   (if name="freq" then "frequency" else name),value)args else args in
                 let args, fused_definition = match fused_view node with
@@ -1263,10 +1170,35 @@ end) = struct
                         dynamic := (value, changes_of parameter) :: !dynamic
                       else changes := List.rev_append (changes_of parameter value)
                         !changes) args;
-                {cid; factory; arity = !arity; dynamic = []; zone = None;
-                 slots = List.rev !slots; changes = List.rev !changes; kernels = List.rev !kernels} in
-          let p = { p with dynamic = List.rev !dynamic } in
-          if not template && node.kind <> "sop/with_attr" && node.kind<>"sop/with_group" && not(is_geometry_arrays node.kind) && not resource then begin
+                {cid; factory; arity = !arity; dynamic = List.rev !dynamic; zone = None;
+                 slots = List.rev !slots; changes = List.rev !changes; kernels = List.rev !kernels}
+    let natives : (string, E.node -> (string * E.value) list -> int -> prepared) Hashtbl.t = Hashtbl.create 16
+    let native (node : E.node) =
+      if node.kind = "exact" && node.ty <> Ty.image then None else Hashtbl.find_opt natives node.kind
+    let rec prepare (node : E.node) =
+      match Hashtbl.find_opt prepared node.id with
+      | Some p -> p
+      | None ->
+          let template = templ.(node.id) in
+          let cid = compiled.(node.id) in
+          let live = List.filter (fun (_, v) -> E.is_live v) node.args in
+          let resource = is_resource node in
+          (* a template node keeps its live arguments: each element forces them *)
+          let args = if template || kernel_data node <> None || resource then node.args
+            else List.map (fun (n, v) -> n, at_zero v) node.args in
+          let args = if node.kind <> "sop/material" then args else
+            List.concat_map (function
+              | "material", E.Struct ("material/standard", _, fields) ->
+                  let get name default = Option.value ~default (List.assoc_opt name fields) in
+                  ["material", get "name" (E.Text "");
+                   "color", get "color" (E.Vec3 (1.,1.,1.));
+                   "roughness", get "roughness" (E.Float 0.4);
+                   "emission", get "emission" (E.Vec3 (0.,0.,0.))]
+              | arg -> [arg]) args in
+          let p = match native node with
+            | Some lower -> lower node args cid
+            | None -> lower_default node args cid in
+          if not template && kernel_data node = None && not resource then begin
             let parameters = parameters p.factory in
             pending := List.rev_append (List.filter_map (fun (field, value) ->
               let field = if node.kind="image/noise" && field="freq" then "frequency" else field in
@@ -1366,9 +1298,7 @@ end) = struct
       List.iter (fun id ->
         let n = plan.nodes.(id) in
         if n.kind = "zone/element" || is_zone n.kind || (prepare n).dynamic <> []
-           || (n.kind = "sop/with_attr" && E.is_live (attribute_data n.args))
-           || (n.kind="sop/with_group" && E.is_live(group_data n.args))
-           || (is_geometry_arrays n.kind && E.is_live(geometry_arrays_data n.args))
+           || Option.fold ~none:false ~some:E.is_live (kernel_data n)
            (* ponytail: all function inputs vary in a zone; narrow to actual
               element captures if rebuilding constant functions becomes costly. *)
            || (prepare n).kernels <> []
@@ -1386,6 +1316,94 @@ end) = struct
               Hashtbl.replace bound id (Zone.element_node element)
             else build ~outer bound id) z.order;
         Hashtbl.find bound z.root
+    let () =
+  let reg keys lower = List.iter (fun key -> Hashtbl.replace natives key lower) keys in
+  reg geometry_array_operations (fun (node : E.node) args cid ->
+let operation = node.kind in
+                let sources=deps node in
+                let factory=Edit.factory ~key:(geometry_arrays_key operation) ~label:(geometry_arrays_label operation) ~category:["Flow";"Topology"]
+                  ~arity:(List.length sources)(geometry_arrays_node ~operation ~args ~sources)in
+                {cid;factory;arity=List.length sources;changes=[];dynamic=[];zone=None;kernels=[];
+                  slots=List.mapi(fun index source->index,source)sources});
+  reg metadata_lowering_operations (fun (node : E.node) args cid ->
+let operation = node.kind in
+                let sources=geo_of args in
+                let factory=metadata_factory ~operation ~args sources in
+                {cid;factory;arity=List.length sources;changes=[];dynamic=[];zone=None;kernels=[];
+                  slots=List.mapi(fun i source->i,source)sources});
+  reg ["sop/with_group"] (fun (node : E.node) args cid ->
+                let sources=deps node in
+                let factory=Edit.factory ~key:"flow.with_group" ~label:"Write group"
+                  ~category:["Flow"] ~arity:(List.length sources) (group_node ~args ~sources) in
+                {cid;factory;arity=List.length sources;changes=[];dynamic=[];zone=None;kernels=[];
+                  slots=List.mapi(fun i source->i,source)sources});
+  reg ["image/load"; "image/render"; "image/map"; "exact"] (fun (node : E.node) args cid ->
+                let factory=Edit.factory ~key:node.kind ~label:node.kind ~category:["Image"] ~arity:0
+                  (fun _->resource_image node.kind (Error(Diagnostic.error ~code:"E_IMAGE"
+                    "This image needs an initial-domain image resolver.")))in
+                {cid;factory;slots=[];arity=0;changes=[];dynamic=[];zone=None;kernels=[]});
+  reg ["sop/with_attr"] (fun (node : E.node) args cid ->
+                let owner,kind=attribute_options args in
+                let name = match List.assoc "attribute" args with
+                  | E.Text name -> name | _ -> fail "E_LOWER" "Attribute name must be static text" in
+                let values = List.assoc "values" args in
+                let sources = match List.assoc "geometry" args with
+                  | E.No_geo -> -1 :: deps node | _ -> deps node in
+                let factory = Edit.factory ~key:"flow.with_attr" ~label:"Write attribute"
+                  ~category:["Flow"] ~arity:(List.length sources)
+                  (attribute_node ?selection:(List.assoc_opt "selection" args) ?default:(List.assoc_opt "default" args)
+                    ~owner ~kind ~name ~values ~sources) in
+                {cid; factory; arity = List.length sources; changes = []; dynamic = []; zone = None; kernels = [];
+                  slots = List.filter_map (fun (i, source) -> if source < 0 then None else Some (i, source))
+                    (List.mapi (fun i source -> i, source) sources)});
+  reg ["sop/delete_attr"] (fun (node : E.node) args cid ->
+                let name = match List.assoc "attribute" args with
+                  | E.Text name -> name | _ -> fail "E_ATTR_NAME" "An attribute pattern must be text" in
+                let owner = match List.assoc_opt "owner" args with
+                  | None -> "point" | Some (E.Text owner) -> owner
+                  | Some _ -> fail "E_ATTR_OWNER" "An attribute owner must be text" in
+                let sources = geo_of args in
+                let factory = Edit.factory ~key:"flow.delete_attr" ~label:"Delete attribute"
+                  ~category:["Flow"] ~arity:1
+                  (function [input] -> Attribute_metadata.delete ~owner ~pattern:name input
+                    | _ -> invalid_arg "Attribute deletion needs one geometry") in
+                {cid;factory;arity=1;changes=[];dynamic=[];zone=None;kernels=[];
+                  slots=List.mapi (fun i source -> i,source) sources});
+  reg ["sop/curve"] (fun (node : E.node) args cid ->
+let dynamic = ref [] in
+                let encode points = [Curve.parameter, Param.Text_value (Curve.encode (curve_points points))] in
+                let closed = match List.assoc_opt "closed" args with
+                  | None -> []
+                  | Some (E.Bool closed) -> [Curve.closed_parameter, Param.Bool_value closed]
+                  | Some _ -> fail "E_LOWER" "sop/curve :closed must be a constant bool" in
+                let filled = match List.assoc_opt "filled" args with
+                  | None -> []
+                  | Some (E.Bool filled) -> [Curve.filled_parameter, Param.Bool_value filled]
+                  | Some _ -> fail "E_LOWER" "sop/curve :filled must be a constant bool" in
+                let changes = closed @ filled @ (match List.assoc_opt "points" args with
+                  | Some points when E.is_live points ->
+                      dynamic := [ points, (fun v -> encode [ "points", v ]) ]; []
+                  | _ -> encode args) in
+                {cid; factory = Curve.factory; arity = 0; slots = []; changes;
+                 dynamic = List.rev !dynamic; zone = None; kernels = []});
+  reg ["zone/points"; "zone/pieces"] (fun (node : E.node) args cid ->
+                let z = { (zinfo node) with base = !tags; count = Atomic.make (-1);
+                                            positions = Atomic.make [||] } in
+                tags := z.base + Zone.max_elements;
+                let sources = (match geo_of (List.filter (fun (k, _) -> k = "geometry") args) with
+                  | [ src ] -> src | _ -> fail "E_LOWER" "Zone without geometry") :: z.captures in
+                List.iter (fun id -> let n = plan.nodes.(id) in
+                  if n.kind <> "zone/element" then ignore (prepare n)) z.order;
+                let base_site = plan.nodes.(z.root).site in
+                zones := {cid; site = node.site; iter = node.iter; body_site = base_site;
+                          base = z.base; count = z.count; ekey = z.ekey;
+                          positions = z.positions} :: !zones;
+                let factory = Edit.factory_slots ~key:"zone" ~label:"Loop over geometry"
+                  ~slots:["input"] ~category:["Copy"] ~inputs:[Edit.Rest]
+                  (fun nodes -> make_zone ~outer:[] z (Array.of_list (List.filter_map Fun.id nodes))) in
+                {cid; factory; arity = List.length sources; changes = []; dynamic = []; kernels = [];
+                 zone = Some z; slots = List.mapi (fun i s -> i, s) sources});
+    ()
     let contexts = List.map (fun (g : Workspace.graph) -> g.name, g.context)
       checked.graphs
     let sop_instance (i : E.instance) =
@@ -1406,7 +1424,7 @@ end) = struct
          && (List.exists (fun j -> volatile.(j)) (deps node)
               || (is_zone node.kind && (zinfo node).live)
               || (not (is_zone node.kind)
-                  && List.exists (fun (_, v) -> if templ.(node.id) || node.kind = "sop/with_attr" || node.kind="sop/with_group" || is_geometry_arrays node.kind
+                  && List.exists (fun (_, v) -> if templ.(node.id) || kernel_data node <> None
                       then reads_t v || E.state_dependent v else E.is_live v ||
                         (match v with E.Fn _ -> reads_t v || E.state_dependent v | _ -> false)) node.args)) then begin
         volatile.(node.id) <- true;
@@ -1472,8 +1490,7 @@ end) = struct
               ~values ~sources:(deps n) (Sop.Node.inputs node))))) nodes)
         frame_nodes plan.nodes in
       let frame_nodes=Array.fold_left(fun nodes (n:E.node)->
-        if (n.kind<>"image/load" && n.kind<>"image/render" && n.kind<>"image/map"
-            && not(n.kind="exact" && n.ty=Ty.image)) || Edit.find graph ~node_id:compiled.(n.id)=None
+        if not (is_resource n) || Edit.find graph ~node_id:compiled.(n.id)=None
           then nodes else Network.Int_map.add compiled.(n.id)(fun ~network state live node->
             match Domain.DLS.get image_provider with
             |None->Error(Diagnostic.error ~code:"E_IMAGE" "Image resources need an initial-domain resolver.")
@@ -1596,27 +1613,27 @@ end) = struct
         approx = checked.approx; approx_reasons = checked.approx_reasons; profile; preview}
 end
 
-let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) ?(gpu=Flow_ir.Gpu.default) ?(strict_body = false) ?(defer_body_errors = false) ?(kernel_bindings = []) ?(compiled_ids = Instance_path.Map.empty)
+let rec lower_checked ~factories ?(provenance_tags = true) ?(reference = false) ?(gpu=Flow_ir.Gpu.default) ?(strict_body = false) ?(defer_body_errors = false) ?(kernel_bindings = []) ?on_profile ?(compiled_ids = Instance_path.Map.empty)
     ?(sites = []) ?inputs checked =
   Phase_timer.measure "lower" (fun () ->
   try
     let module L = Lowerer (struct
       let factories = factories let provenance_tags = provenance_tags let reference = reference let gpu = gpu
-      let strict_body = strict_body let defer_body_errors = defer_body_errors let kernel_bindings = kernel_bindings
+      let strict_body = strict_body let defer_body_errors = defer_body_errors let kernel_bindings = kernel_bindings let on_profile = on_profile
       let compiled_ids = compiled_ids let sites = sites let inputs = inputs let checked = checked
       let lower_checked = lower_checked
     end) in
     Ok L.result
   with Diagnostic.Error diagnostic -> Error diagnostic)
 
-let of_checked ~factories ?provenance_tags ?reference ?gpu ?compiled_ids ?sites ?inputs checked =
+let of_checked ~factories ?provenance_tags ?reference ?gpu ?on_profile ?compiled_ids ?sites ?inputs checked =
   Result.bind (Encoded_parameters.checked checked)
-    (lower_checked ~factories ?provenance_tags ?reference ?gpu ?compiled_ids ?sites ?inputs)
+    (lower_checked ~factories ?provenance_tags ?reference ?gpu ?on_profile ?compiled_ids ?sites ?inputs)
 
-let workspace ~factories ?extra ?reference ?gpu ?compiled_ids ?sites ?inputs source =
+let workspace ~factories ?extra ?reference ?gpu ?on_profile ?compiled_ids ?sites ?inputs source =
   Result.bind (Catalog.of_factories ~version:Manifest.version ?extra factories) (fun catalog ->
     match Catalog.check_workspace ~ops:Operators.all catalog source with
-    | Some checked, _ -> of_checked ~factories ?reference ?gpu ?compiled_ids ?sites ?inputs checked
+    | Some checked, _ -> of_checked ~factories ?reference ?gpu ?on_profile ?compiled_ids ?sites ?inputs checked
     | None, diagnostics -> Error (match List.find_opt (fun (d : Diagnostic.t) ->
         d.severity = Diagnostic.Error_severity) diagnostics with
       | Some d -> d

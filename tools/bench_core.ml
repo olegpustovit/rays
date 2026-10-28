@@ -39,7 +39,7 @@ let scalar () =
   let core = match I.Core_lower.lower residual with
     | Ok core -> I.Core_exec.prepare core
     | Error reason -> failwith reason in
-  let fast = Option.get (I.Core_exec.fast core) in
+  let direct = I.Core_exec.direct core in assert direct;
   let reference = E.Private.force_reference value ~live in
   let rows = List.map (fun (label, force) ->
     (match force (), reference with
@@ -49,7 +49,7 @@ let scalar () =
     label, wall, cpu, bytes) [
       "tree walker", (fun () -> E.Private.force_reference value ~live);
       "core exec", (fun () -> I.Core_exec.execute core ~live);
-      "core fast", (fun () -> fast live);
+      "core fast", (fun () -> I.Core_exec.execute core ~live);
       "core", (fun () -> I.Executor.force program ~live) ] in
   Printf.printf "Scalar residual %s; %d evaluations per sample; domains 1; median of 3 samples\n"
     body iterations;

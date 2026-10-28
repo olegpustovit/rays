@@ -254,8 +254,7 @@ module Executor = struct
     let equal a b = a == b
     let hash = E.Residual.residual_id
   end)
-  type candidate = Fast of (Input.t -> (E.value, Diagnostic.t) result) * Core_exec.prepared
-    | Core of Core_exec.prepared | Packed of Packed.t | Reference
+  type candidate = Core of Core_exec.prepared | Packed of Packed.t | Reference
   module Candidate_key = Hashtbl.Make (struct
     type t = E.residual * bool
     let equal (a, strict_a) (b, strict_b) = a == b && strict_a = strict_b
@@ -279,7 +278,7 @@ module Executor = struct
     | _ -> None
   type program = { value : E.value;
     candidates : candidate Candidate_key.t; candidates_lock : Mutex.t;
-    root_fast : (bool * (Input.t -> (E.value, Diagnostic.t) result)) option Atomic.t;
+    root_core : (bool * Core_exec.prepared) option Atomic.t;
     packed_region : Packed.t option; packed_root : (Packed.t * bool) option;
     count_source : Packed.count_source; profile : Profile.t option; approx:W.Paths.t;
     sink:sink option;mutable gpu_kernel:(Gpu.backend*bool*Packed.t*Gpu.kernel)option }
@@ -359,7 +358,7 @@ module Executor = struct
         | Some packed -> Some (packed, false)
         | None -> direct_region ~readback:true ~count_source v in
       {value = v; candidates = Candidate_key.create 32; candidates_lock = Mutex.create ();
-       root_fast = Atomic.make None; packed_region; packed_root; count_source; profile; approx;sink;gpu_kernel=None}) checked
+       root_core = Atomic.make None; packed_region; packed_root; count_source; profile; approx;sink;gpu_kernel=None}) checked
   let packed_region p = p.packed_region
   let root_packed p = p.packed_root
   let packed_root p = Option.map fst (root_packed p)
@@ -380,12 +379,12 @@ module Executor = struct
       Profile.record profile {owner = path, iter; sites; seconds; tier = if reference then Interp else Cpu_kernel})) profile
   let force_impl ?lower_counter ?walker_counter ?state ?elems ?resolve ?(reference = false) ?(strict = false) program ~live =
     let fast = if state <> None || elems <> None || resolve <> None || reference || program.profile <> None
-      then None else match Atomic.get program.root_fast with
-      | Some (cached_strict, fast) when cached_strict = strict -> Some fast
+      then None else match Atomic.get program.root_core with
+      | Some (cached_strict, prepared) when cached_strict = strict -> Some prepared
       | _ -> None in
     match fast with
-    | Some fast when E.is_live program.value ->
-        (match fast live with
+    | Some prepared when E.is_live program.value ->
+        (match Core_exec.execute prepared ~live with
          | Ok _ as result -> result
          | Error _ when not strict ->
              let count_walk () = Option.iter incr walker_counter in
@@ -399,7 +398,6 @@ module Executor = struct
       else begin
     let packed_ran = ref false in
     let measure = measure ~ran:(fun () -> packed_ran := true) program.profile in
-    let state_supplied = Option.is_some state in
     let state = match state with Some state -> state | None -> E.create_state () in
     let fell_back = ref reference in
     let count_walk () = Option.iter incr walker_counter in
@@ -455,9 +453,7 @@ module Executor = struct
                             (E.Residual.residual_view r).term with
                          | Some packed -> Packed packed
                          | None -> Reference)
-                      else let prepared = Core_exec.prepare core in
-                        Option.fold ~none:(Core prepared)
-                          ~some:(fun fast -> Fast (fast, prepared)) (Core_exec.fast prepared)
+                      else Core (Core_exec.prepare core)
                   | Error _ ->
                       (match Packed.compile_template ~count_source:program.count_source r
                           (E.Residual.residual_view r).term with
@@ -468,8 +464,8 @@ module Executor = struct
               Candidate_key.replace program.candidates key candidate;
               candidate) in
           (match result, program.value with
-           | Fast (fast, _), E.Residual root when root == r ->
-               Atomic.set program.root_fast (Some (strict, fast))
+           | Core prepared, E.Residual root when root == r && Core_exec.direct prepared ->
+               Atomic.set program.root_core (Some (strict, prepared))
            | _ -> ());
           (match !operation_many, !operation_one with
            | Some table, _ -> Candidate_key.replace table key result
@@ -481,8 +477,6 @@ module Executor = struct
                operation_many := Some table);
           result) in
       let execute r live = match candidate r with
-        | Fast (fast, _) when not state_supplied && elems = None && resolve = None -> Some (fast live)
-        | Fast (_, prepared) -> Some (Core_exec.execute ~root:r ~strict ~rerun_on_error:false ~on_walk:count_walk ?resolve prepared ~live)
         | Core p when not (Core_exec.has_regions p) ->
             Some (Core_exec.execute ~root:r ~strict ~rerun_on_error:false ~on_walk:count_walk ?resolve p ~live)
         | Core p -> Some (Core_exec.execute ~root:r ~strict ~rerun_on_error:false ~on_walk:count_walk ?resolve ~force:(fun packed ->

@@ -679,12 +679,13 @@ let general root force resolve prepared live =
 
 let attempt ?root ?force ?resolve prepared ~live = general root force resolve prepared live
 
-let fast prepared =
+(* A stateless program with no host sources runs with no checkpoint or resolver; errors reenter the dispatcher. *)
+let direct prepared =
   let needs_resolver = ref false in
   C.iter (fun (statement : C.statement) -> match statement.node with
     | Assign (_, (Source _ | Host_source _ | Source_descriptor _)) -> needs_resolver := true
     | _ -> ()) prepared.program.body;
-  if prepared.stateless && not !needs_resolver then Some (fun live -> attempt prepared ~live) else None
+  prepared.stateless && not !needs_resolver
 
 (* State needs its residual even in strict mode; strict failures restore it without
    entering the tree walker. Ordinary failures retain the evaluator's fallback. *)

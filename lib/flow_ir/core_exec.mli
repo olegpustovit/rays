@@ -25,9 +25,8 @@ val prepare : ?remember_loops:bool -> ?approx:Flow.Workspace.Paths.t -> ?fast:bo
    it when they repeat; a loop that reads the frame, state, a host or a random stream, or draws, always
    runs. *)
 val has_regions : prepared -> bool  (* the program invokes a region, so [execute] needs a [force] *)
-val fast : prepared -> (Input.t -> (Flow.Eval.value, Diagnostic.t) result) option
-(* Stateless attempt for the evaluator's owner-checked shortcut. Errors must reenter the
-    normal evaluator to restore the walker's diagnostics. *)
+val direct : prepared -> bool
+(* Stateless and free of host sources: [execute] without [~root] needs no checkpoint or resolver. *)
 val execute : ?root:Flow.Eval.residual -> ?strict:bool ->
   ?rerun_on_error:bool ->
   ?on_walk:(unit -> unit) ->
