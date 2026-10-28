@@ -1,4 +1,5 @@
 open Rdk
+open Rdk_test_support
 
 module Constraints = Rdk_boolean.Boolean_constraints
 module Coplanar = Rdk_boolean.Boolean_coplanar
@@ -8,10 +9,6 @@ module Radial = Rdk_boolean.Boolean_radial
 module Weiler = Rdk_boolean.Boolean_weiler
 module Cells = Rdk_boolean.Boolean_cells
 
-let fail format = Printf.ksprintf failwith format
-let check condition message = if not condition then fail "%s" message
-let get = function Ok value -> value | Error error -> fail "%s" (Error.to_string error)
-let get_string = function Ok value -> value | Error message -> fail "%s" message
 
 let geometry points triangles =
   let count = Array.length points in
@@ -46,14 +43,14 @@ let tetra_batch count shift =
   geometry points triangles
 
 let pipeline left right =
-  let constraints = Constraints.build ~grain:1 ~left ~right () |> get in
-  let coplanar = Coplanar.build ~grain:1 constraints |> get in
-  let refinement = Refinement.build ~coplanar ~grain:1 constraints |> get in
-  let complex = Complex.build constraints refinement |> get in
-  let radial = Radial.build complex |> get in
-  let weiler = Weiler.build complex radial |> get in
+  let constraints = Constraints.build ~grain:1 ~left ~right () |> get_rdk in
+  let coplanar = Coplanar.build ~grain:1 constraints |> get_rdk in
+  let refinement = Refinement.build ~coplanar ~grain:1 constraints |> get_rdk in
+  let complex = Complex.build constraints refinement |> get_rdk in
+  let radial = Radial.build complex |> get_rdk in
+  let weiler = Weiler.build complex radial |> get_rdk in
   complex, weiler,
-  Cells.build complex weiler |> get
+  Cells.build complex weiler |> get_rdk
 
 let shell_values cells =
   let values = Array.init (Cells.shell_count cells) (fun shell ->
@@ -103,7 +100,7 @@ let test_domain_exactness () =
   let run domains = Parallel.run ~domains (fun () ->
       let complex, weiler, cells = pipeline left right in
       signature complex weiler cells) in
-  if run 1 <> run 4 then fail "cell classification differs between domain counts"
+  if run 1 <> run 4 then failf "cell classification differs between domain counts"
 
 let test_component_index_domains () =
   let fixtures = [|
@@ -116,7 +113,7 @@ let test_component_index_domains () =
           let complex, weiler, cells = pipeline left right in
           signature complex weiler cells) in
       if run 1 <> run 4 then
-        fail "component index differs between domain counts for fixture %d" fixture)
+        failf "component index differs between domain counts for fixture %d" fixture)
     fixtures
 
 let test_component_index_scale () =
@@ -134,8 +131,8 @@ let test_cancellation () =
   let cancel = Cancel.create () in Cancel.cancel cancel;
   match Cells.build ~cancel complex weiler with
   | Error error when Error.code error = "cancelled" -> ()
-  | Error error -> fail "unexpected cancellation error: %s" (Error.to_string error)
-  | Ok _ -> fail "cancelled cell classification completed"
+  | Error error -> failf "unexpected cancellation error: %s" (Error.to_string error)
+  | Ok _ -> failf "cancelled cell classification completed"
 
 let run () =
   test_disjoint_solids ();

@@ -1,4 +1,5 @@
 open Rdk
+open Rdk_test_support
 
 module Constraints = Rdk_boolean.Boolean_constraints
 module Coplanar = Rdk_boolean.Boolean_coplanar
@@ -9,10 +10,6 @@ module Weiler = Rdk_boolean.Boolean_weiler
 module Cells = Rdk_boolean.Boolean_cells
 module Extract = Rdk_boolean.Boolean_extract
 
-let fail format = Printf.ksprintf failwith format
-let check condition message = if not condition then fail "%s" message
-let get = function Ok value -> value | Error error -> fail "%s" (Error.to_string error)
-let get_string = function Ok value -> value | Error message -> fail "%s" message
 
 let geometry points triangles =
   let count = Array.length points in
@@ -61,13 +58,13 @@ let cube_quads () = polygon_geometry
 let pipeline ?(resolve_left_self_intersections = false)
     ?(resolve_right_self_intersections = false) left right =
   let constraints = Constraints.build ~resolve_left_self_intersections
-      ~resolve_right_self_intersections ~grain:1 ~left ~right () |> get in
-  let coplanar = Coplanar.build ~grain:1 constraints |> get in
-  let refinement = Refinement.build ~coplanar ~grain:1 constraints |> get in
-  let complex = Complex.build constraints refinement |> get in
-  let radial = Radial.build complex |> get in
-  let weiler = Weiler.build complex radial |> get in
-  let cells = Cells.build complex weiler |> get in
+      ~resolve_right_self_intersections ~grain:1 ~left ~right () |> get_rdk in
+  let coplanar = Coplanar.build ~grain:1 constraints |> get_rdk in
+  let refinement = Refinement.build ~coplanar ~grain:1 constraints |> get_rdk in
+  let complex = Complex.build constraints refinement |> get_rdk in
+  let radial = Radial.build complex |> get_rdk in
+  let weiler = Weiler.build complex radial |> get_rdk in
+  let cells = Cells.build complex weiler |> get_rdk in
   complex, weiler, cells
 
 let signed_volume geometry =
@@ -100,22 +97,22 @@ let test_materialization_validation () =
   (match validate ~x:[|0.;1.;0.|] ~y:[|0.;0.;1.|] ~z:[|0.;0.;0.|]
       ~vertex_points:[|0;1;2|] () with
    | Ok () -> ()
-   | Error error -> fail "valid rounded triangle failed: %s" (Error.to_string error));
+   | Error error -> failf "valid rounded triangle failed: %s" (Error.to_string error));
   (match validate ~x:[|0.;0.|] ~y:[|0.;0.|] ~z:[|0.;0.|]
       ~vertex_points:[||] () with
    | Error error when Error.code error = "rounding_collision" -> ()
-   | Error error -> fail "unexpected rounding collision error: %s" (Error.to_string error)
-   | Ok () -> fail "rounded exact-point collision was accepted");
+   | Error error -> failf "unexpected rounding collision error: %s" (Error.to_string error)
+   | Ok () -> failf "rounded exact-point collision was accepted");
   (match validate ~x:[|0.;1.;2.|] ~y:[|0.;0.;0.|] ~z:[|0.;0.;0.|]
       ~vertex_points:[|0;1;2|] () with
    | Error error when Error.code error = "rounding_degenerate" -> ()
-   | Error error -> fail "unexpected rounding degeneracy error: %s" (Error.to_string error)
-   | Ok () -> fail "rounded collinear output triangle was accepted");
+   | Error error -> failf "unexpected rounding degeneracy error: %s" (Error.to_string error)
+   | Ok () -> failf "rounded collinear output triangle was accepted");
   (match validate ~allow_degenerate:true
       ~x:[|0.;1.;2.|] ~y:[|0.;0.;0.|] ~z:[|0.;0.;0.|]
       ~vertex_points:[|0;1;2|] () with
    | Ok () -> ()
-   | Error error -> fail "explicit deferred rounding repair was rejected: %s"
+   | Error error -> failf "explicit deferred rounding repair was rejected: %s"
        (Error.to_string error));
   let x, y, z, representatives, map = Extract.View.coalesce_positions
       ~complex_vertices:[|10;11;12;13;14|]

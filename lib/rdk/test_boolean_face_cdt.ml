@@ -1,14 +1,11 @@
 open Rdk
+open Rdk_test_support
 
 module Constraints = Rdk_boolean.Boolean_constraints
 module Coplanar = Rdk_boolean.Boolean_coplanar
 module Arrangement = Rdk_boolean.Boolean_face_arrangement
 module Triangulation = Rdk_boolean.Boolean_face_cdt
 
-let fail format = Printf.ksprintf failwith format
-let check condition message = if not condition then fail "%s" message
-let get = function Ok value -> value | Error error -> fail "%s" (Error.to_string error)
-let get_string = function Ok value -> value | Error message -> fail "%s" message
 
 let geometry points triangles =
   let count = Array.length points in
@@ -29,9 +26,9 @@ let crossing_input () =
       [|0.,-2.,-1.; 0.,2.,-1.; 0.,0.,1.;
         -2.,0.,-1.; 2.,0.,-1.; 0.,0.,1.|]
       [|0;1;2; 3;4;5|] in
-  let constraints = Constraints.build ~grain:1 ~left ~right () |> get in
+  let constraints = Constraints.build ~grain:1 ~left ~right () |> get_rdk in
   let arrangement = Arrangement.build constraints
-      ~side:Arrangement.Left ~triangle:0 |> get in
+      ~side:Arrangement.Left ~triangle:0 |> get_rdk in
   constraints, arrangement
 
 let edge_present triangulation first second =
@@ -52,10 +49,10 @@ let coplanar_input () =
       [|0.,0.,0.; 4.,0.,0.; 2.,4.,0.|] [|0;1;2|]
   and right = geometry
       [|0.,3.,0.; 4.,3.,0.; 2.,-1.,0.|] [|0;1;2|] in
-  let constraints = Constraints.build ~grain:1 ~left ~right () |> get in
-  let coplanar = Coplanar.build ~grain:1 constraints |> get in
+  let constraints = Constraints.build ~grain:1 ~left ~right () |> get_rdk in
+  let coplanar = Coplanar.build ~grain:1 constraints |> get_rdk in
   let arrangement = Arrangement.build ~coplanar constraints
-      ~side:Arrangement.Left ~triangle:0 |> get in
+      ~side:Arrangement.Left ~triangle:0 |> get_rdk in
   constraints, arrangement
 
 let many_constraint_input count =
@@ -72,9 +69,9 @@ let many_constraint_input count =
     points.(point + 2) <- x,0.,1.
   done;
   let right = geometry points triangles in
-  let constraints = Constraints.build ~grain:7 ~left ~right () |> get in
+  let constraints = Constraints.build ~grain:7 ~left ~right () |> get_rdk in
   let arrangement = Arrangement.build constraints
-      ~side:Arrangement.Left ~triangle:0 |> get in
+      ~side:Arrangement.Left ~triangle:0 |> get_rdk in
   constraints,arrangement
 
 let test_cancellation () =
@@ -83,8 +80,8 @@ let test_cancellation () =
   match Triangulation.build ~cancel constraints arrangement
       ~side:Arrangement.Left ~triangle:0 with
   | Error error when Error.code error = "cancelled" -> ()
-  | Error error -> fail "unexpected cancellation error: %s" (Error.to_string error)
-  | Ok _ -> fail "cancelled face CDT completed"
+  | Error error -> failf "unexpected cancellation error: %s" (Error.to_string error)
+  | Ok _ -> failf "cancelled face CDT completed"
 
 let run () =
   test_cancellation ()

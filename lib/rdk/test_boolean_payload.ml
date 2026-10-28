@@ -1,13 +1,10 @@
 open Rdk
+open Rdk_test_support
 
 module Solid = Rdk_boolean.Boolean_solid
 module Extract = Rdk_boolean.Boolean_extract
 module Payload = Rdk_boolean.Boolean_payload
 
-let fail format = Printf.ksprintf failwith format
-let check condition message = if not condition then fail "%s" message
-let get = function Ok value -> value | Error error -> fail "%s" (Error.to_string error)
-let get_string = function Ok value -> value | Error message -> fail "%s" message
 
 let attribute name storage =
   Attribute.create_owned ~name ~owner:Attribute.Primitive storage |> get_string
@@ -96,7 +93,7 @@ let duplicated_tetra ~origin:(ox,oy,oz) =
 
 let find_storage owner name geometry =
   match Geometry.find_attribute ~owner name geometry with
-  | None -> fail "missing attribute %s" name
+  | None -> failf "missing attribute %s" name
   | Some attribute -> Attribute.View.storage attribute
 
 let validate left right ancestry output =
@@ -295,9 +292,9 @@ let test_surface_cut_payload () =
       ~groups:[cut_group] () |> get_string in
   let run domains = Parallel.run ~domains (fun () ->
       let ancestry = Solid.prepare ~grain:1 ~left ~right
-          ~right_treatment:Solid.Surface () |> get
-        |> Solid.extract_product_with_ancestry ~operation:Solid.Difference |> get in
-      let output = Payload.copy_primitives ~grain:1 ancestry |> get in
+          ~right_treatment:Solid.Surface () |> get_rdk
+        |> Solid.extract_product_with_ancestry ~operation:Solid.Difference |> get_rdk in
+      let output = Payload.copy_primitives ~grain:1 ancestry |> get_rdk in
       let ids = match find_storage Attribute.Primitive "cut_id" output with
         | Attribute.Int values -> values | _ -> assert false in
       let group = Option.get

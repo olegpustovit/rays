@@ -1,4 +1,5 @@
 open Rdk
+open Rdk_test_support
 
 module Constraints = Rdk_boolean.Boolean_constraints
 module Coplanar = Rdk_boolean.Boolean_coplanar
@@ -6,10 +7,6 @@ module Refinement = Rdk_boolean.Boolean_refinement
 module Complex = Rdk_boolean.Boolean_complex
 module Seam = Rdk_boolean.Boolean_seam
 
-let fail format = Printf.ksprintf failwith format
-let check condition message = if not condition then fail "%s" message
-let get = function Ok value -> value | Error error -> fail "%s" (Error.to_string error)
-let get_string = function Ok value -> value | Error message -> fail "%s" message
 let close left right = abs_float (left -. right) <= 1e-11
 
 let geometry points triangles =
@@ -47,15 +44,15 @@ let curve_geometry points primitives kinds =
 let pipeline ?(resolve_left_self_intersections = false)
     ?(resolve_right_self_intersections = false) left right =
   let constraints = Constraints.build ~resolve_left_self_intersections
-      ~resolve_right_self_intersections ~grain:1 ~left ~right () |> get in
-  let coplanar = Coplanar.build ~grain:1 constraints |> get in
-  let refinement = Refinement.build ~coplanar ~grain:1 constraints |> get in
-  Complex.build constraints refinement |> get
+      ~resolve_right_self_intersections ~grain:1 ~left ~right () |> get_rdk in
+  let coplanar = Coplanar.build ~grain:1 constraints |> get_rdk in
+  let refinement = Refinement.build ~coplanar ~grain:1 constraints |> get_rdk in
+  Complex.build constraints refinement |> get_rdk
 
 let seam ?resolve_left_self_intersections ?resolve_right_self_intersections
     left right =
   pipeline ?resolve_left_self_intersections ?resolve_right_self_intersections
-    left right |> Seam.build |> get
+    left right |> Seam.build |> get_rdk
 
 let test_coincident_products () =
   let identical_left = triangle [|0.,0.,0.; 2.,0.,0.; 0.,2.,0.|]
@@ -140,8 +137,8 @@ let test_cancellation () =
   Cancel.cancel cancel;
   match Seam.build ~cancel complex with
   | Error error when Error.code error = "cancelled" -> ()
-  | Error error -> fail "unexpected cancellation error: %s" (Error.to_string error)
-  | Ok _ -> fail "cancelled Boolean seam extraction completed"
+  | Error error -> failf "unexpected cancellation error: %s" (Error.to_string error)
+  | Ok _ -> failf "cancelled Boolean seam extraction completed"
 
 let test_invalid_grain () =
   let complex = pipeline
@@ -149,18 +146,18 @@ let test_invalid_grain () =
       (triangle [|10.,0.,0.; 12.,0.,0.; 10.,2.,0.|]) in
   (match Seam.build ~grain:0 complex with
    | Error error when Error.code error = "invalid_parameter" -> ()
-   | Error error -> fail "unexpected grain error: %s" (Error.to_string error)
-   | Ok _ -> fail "zero Boolean seam grain was accepted");
+   | Error error -> failf "unexpected grain error: %s" (Error.to_string error)
+   | Ok _ -> failf "zero Boolean seam grain was accepted");
   match Seam.build ~parallel_cutoff:0 complex with
   | Error error when Error.code error = "invalid_parameter" -> ()
-  | Error error -> fail "unexpected cutoff error: %s" (Error.to_string error)
-  | Ok _ -> fail "zero Boolean seam parallel cutoff was accepted"
+  | Error error -> failf "unexpected cutoff error: %s" (Error.to_string error)
+  | Ok _ -> failf "zero Boolean seam parallel cutoff was accepted"
 
 let test_edge_classification_retention () =
   let complex = pipeline
       (triangle [|0.,0.,0.; 2.,0.,0.; 0.,2.,0.|])
       (triangle [|10.,0.,0.; 12.,0.,0.; 10.,2.,0.|]) in
-  let value = Seam.build complex |> get in
+  let value = Seam.build complex |> get_rdk in
   for edge = 0 to Complex.edge_count complex - 1 do
     check (not (Seam.View.is_seam_edge value edge))
       "disjoint source boundary was retained as a Boolean seam edge"
@@ -180,53 +177,53 @@ let test_post_rounding_verification () =
   let crossing_error = match verify crossing with
     | Error error when Error.code error = "seam_self_intersection" ->
         Error.to_string error
-    | Error error -> fail "unexpected seam verification error: %s"
+    | Error error -> failf "unexpected seam verification error: %s"
         (Error.to_string error)
-    | Ok () -> fail "crossing rounded seam curves passed verification" in
+    | Ok () -> failf "crossing rounded seam curves passed verification" in
   check (String.contains crossing_error '0' && String.contains crossing_error '1')
     "seam crossing diagnostic lost stable curve IDs";
   let branch = curve_geometry
       [|0.,0.,0.; 1.,0.,0.; 0.,1.,0.|]
       [|[|0;1|];[|0;2|]|]
       [|Topology.Open_polyline;Topology.Open_polyline|] in
-  ignore (verify branch |> get);
+  ignore (verify branch |> get_rdk);
   let overlap = curve_geometry
       [|0.,0.,0.; 1.,0.,0.; 2.,0.,0.|]
       [|[|0;2|];[|0;1|]|]
       [|Topology.Open_polyline;Topology.Open_polyline|] in
   (match verify overlap with
    | Error error when Error.code error = "seam_self_intersection" -> ()
-   | Error error -> fail "unexpected overlap error: %s" (Error.to_string error)
-   | Ok () -> fail "overlapping rounded seam segments passed verification");
+   | Error error -> failf "unexpected overlap error: %s" (Error.to_string error)
+   | Ok () -> failf "overlapping rounded seam segments passed verification");
   let bow_tie = curve_geometry
       [|-1.,-1.,0.;1.,1.,0.;-1.,1.,0.;1.,-1.,0.|]
       [|[|0;1;2;3|]|] [|Topology.Closed_polyline|] in
   (match verify bow_tie with
    | Error error when Error.code error = "seam_self_intersection" -> ()
-   | Error error -> fail "unexpected closed-curve error: %s"
+   | Error error -> failf "unexpected closed-curve error: %s"
        (Error.to_string error)
-   | Ok () -> fail "self-crossing closed seam passed verification");
+   | Ok () -> failf "self-crossing closed seam passed verification");
   let skew = curve_geometry
       [|-1.,0.,0.; 1.,0.,0.; 0.,-1.,1.; 0.,1.,1.|]
       [|[|0;1|];[|2;3|]|]
       [|Topology.Open_polyline;Topology.Open_polyline|] in
-  ignore (verify skew |> get);
+  ignore (verify skew |> get_rdk);
   let tiny = Int64.float_of_bits 1L in
   let subnormal = curve_geometry [|0.,0.,0.; tiny,0.,0.|]
       [|[|0;1|]|] [|Topology.Open_polyline|] in
-  ignore (verify subnormal |> get);
+  ignore (verify subnormal |> get_rdk);
   (match verify (triangle [|0.,0.,0.;1.,0.,0.;0.,1.,0.|]) with
    | Error error when Error.code error = "invalid_output" -> ()
-   | Error error -> fail "unexpected polygon verification error: %s"
+   | Error error -> failf "unexpected polygon verification error: %s"
        (Error.to_string error)
-   | Ok () -> fail "polygon entered seam curve verification");
+   | Ok () -> failf "polygon entered seam curve verification");
   let cancel = Cancel.create () in
   Cancel.cancel cancel;
   (match verify ~cancel branch with
    | Error error when Error.code error = "cancelled" -> ()
-   | Error error -> fail "unexpected seam verification cancellation: %s"
+   | Error error -> failf "unexpected seam verification cancellation: %s"
        (Error.to_string error)
-   | Ok () -> fail "cancelled seam verification completed");
+   | Ok () -> failf "cancelled seam verification completed");
   let run domains = Parallel.run ~domains (fun () -> verify crossing) in
   check (Result.map_error Error.to_string (run 1)
       = Result.map_error Error.to_string (run 4))

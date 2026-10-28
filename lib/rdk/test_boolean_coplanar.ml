@@ -1,14 +1,11 @@
 open Rdk
+open Rdk_test_support
 
 module Constraints = Rdk_boolean.Boolean_constraints
 module Coplanar = Rdk_boolean.Boolean_coplanar
 let approximate_point value pair point =
   Rdk_exact.Implicit_point.approximate (Coplanar.View.point value pair point)
 
-let fail format = Printf.ksprintf failwith format
-let check condition message = if not condition then fail "%s" message
-let get = function Ok value -> value | Error error -> fail "%s" (Error.to_string error)
-let get_string = function Ok value -> value | Error message -> fail "%s" message
 let close left right = abs_float (left -. right) <= 1e-12
 
 let geometry points triangles =
@@ -26,8 +23,8 @@ let geometry points triangles =
 let triangle points = geometry points [|0; 1; 2|]
 
 let arrange left right =
-  let constraints = Constraints.build ~grain:1 ~left ~right () |> get in
-  let result = Coplanar.build ~grain:1 constraints |> get in
+  let constraints = Constraints.build ~grain:1 ~left ~right () |> get_rdk in
+  let result = Coplanar.build ~grain:1 constraints |> get_rdk in
   check (Coplanar.pair_count result = 1) "expected one coplanar candidate pair";
   result
 
@@ -45,7 +42,7 @@ let expect_points expected actual =
     let actual_x, actual_y, actual_z = actual.(index) in
     if not (close expected_x actual_x && close expected_y actual_y
         && close expected_z actual_z) then
-      fail "point %d: expected (%g,%g,%g), got (%.17g,%.17g,%.17g)"
+      failf "point %d: expected (%g,%g,%g), got (%.17g,%.17g,%.17g)"
         index expected_x expected_y expected_z actual_x actual_y actual_z) expected
 
 let left_triangle () = triangle
@@ -117,17 +114,17 @@ let repeated count points =
 
 let test_invalid_grain_and_cancellation () =
   let constraints = Constraints.build ~grain:1 ~left:(left_triangle ())
-      ~right:(downward_triangle ()) () |> get in
+      ~right:(downward_triangle ()) () |> get_rdk in
   (match Coplanar.build ~grain:0 constraints with
    | Error error when Error.code error = "invalid_parameter" -> ()
-   | Error error -> fail "unexpected invalid-grain error: %s" (Error.to_string error)
-   | Ok _ -> fail "zero coplanar grain was accepted");
+   | Error error -> failf "unexpected invalid-grain error: %s" (Error.to_string error)
+   | Ok _ -> failf "zero coplanar grain was accepted");
   let cancel = Cancel.create () in
   Cancel.cancel cancel;
   match Coplanar.build ~cancel ~grain:1 constraints with
   | Error error when Error.code error = "cancelled" -> ()
-  | Error error -> fail "unexpected cancellation error: %s" (Error.to_string error)
-  | Ok _ -> fail "cancelled coplanar arrangement completed"
+  | Error error -> failf "unexpected cancellation error: %s" (Error.to_string error)
+  | Ok _ -> failf "cancelled coplanar arrangement completed"
 
 let run () =
   test_six_edge_overlap ();
